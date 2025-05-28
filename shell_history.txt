@@ -1,0 +1,13 @@
+-du -dtl
+-du
+h
+-h
+-w 12 -t Hello
+-du
+-du -dtl Hello
+-du -dtl
+-w 13 -t "Hole_In_One"
+-du -dtl 12 13_In_One"
+-du
+-du -dtl 
+exit
