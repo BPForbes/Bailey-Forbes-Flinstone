@@ -108,7 +108,6 @@ flowchart LR
 | **vfs.c / .h** | VFS: host_vfs, memory_vfs backends |
 | **drivers/driver_caps.h** | Block/keyboard/display capability structs |
 | **VM/vm.c, vm_cpu.c, vm_mem.c, vm_decode.c, vm_io.c, vm_loader.c, vm_display.c** | x86 emulator (VM_ENABLE=1): CPU, RAM, GPU/VGA, timer, interrupts, PQ scheduling |
-| **docs/VM_IMPLEMENTATION_PLAN.md** | VM implementation plan |
 | **terminal.c / .h** | Raw mode terminal (interactive) |
 | **Makefile** | Build (C + ASM), test target |
 
