@@ -1,4 +1,4 @@
-# Flintstone Project
+# Flinstone Project
 
 A low-level C-based file system and shell with hardware-level disk operations and systems-forward architecture. Data lives on hardware-backed storage; ASM primitives drive sector buffers and cluster I/O. Designed for educational use, Flintstone provides real design-pattern structure for file management and a composable path toward production-grade persistence.
 
