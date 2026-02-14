@@ -117,7 +117,7 @@ flowchart LR
 
 - GCC compiler
 - POSIX-compliant OS (Linux/macOS)
-- (Optional) CUnit for tests: `sudo apt install libcunit1 libcunit1-dev`
+- (Optional) CUnit for tests: `apt install libcunit1-dev` or `make deps-cunit`
 
 ### Build
 

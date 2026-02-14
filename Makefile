@@ -23,11 +23,13 @@ CFLAGS += -DVM_ENABLE=1 -I. -IVM
 endif
 VM_SDL_SRCS = VM/vm_sdl.c
 DEPS_PREFIX = $(shell [ -d deps/install ] && echo deps/install)
+ifneq ($(DEPS_PREFIX),)
+CFLAGS += -I$(DEPS_PREFIX)/include
+endif
 ifeq ($(VM_SDL),1)
 SRCS += $(VM_SDL_SRCS)
 CFLAGS += -DVM_SDL=1
 ifneq ($(DEPS_PREFIX),)
-CFLAGS += -I$(DEPS_PREFIX)/include
 LDFLAGS += -L$(DEPS_PREFIX)/lib -lSDL2 -Wl,-rpath,'$$ORIGIN/deps/install/lib'
 else
 CFLAGS += $(shell pkg-config --cflags sdl2 2>/dev/null)
@@ -60,11 +62,17 @@ vm:
 vm-sdl:
 	$(MAKE) VM_ENABLE=1 VM_SDL=1 $(TARGET)
 
-# Fetch and build external libs (SDL2) into deps/install. Use when system packages unavailable.
-.PHONY: deps
-deps:
+# Fetch and build external libs (SDL2, CUnit) into deps/install.
+.PHONY: deps deps-sdl2 deps-cunit
+deps: deps-sdl2 deps-cunit
+
+deps-sdl2:
 	@chmod +x deps/fetch-sdl2.sh 2>/dev/null || true
 	@./deps/fetch-sdl2.sh
+
+deps-cunit:
+	@chmod +x deps/fetch-cunit.sh 2>/dev/null || true
+	@./deps/fetch-cunit.sh
 
 $(TARGET): $(OBJS)
 	$(CC) $(CFLAGS) -o $(TARGET) $(OBJS) $(LDFLAGS)
@@ -77,8 +85,11 @@ TEST_OBJS = $(TEST_SRCS:.c=.o)
 TEST_ASMOBJS = mem_asm.o
 TEST_TARGET = BPForbes_Flinstone_Tests
 
+DEPS_RPATH = -Wl,-rpath='$$ORIGIN/deps/install/lib'
+TEST_LDFLAGS = $(if $(DEPS_PREFIX),-L$(DEPS_PREFIX)/lib $(DEPS_RPATH),)
 $(TEST_TARGET): $(TEST_OBJS) $(TEST_ASMOBJS)
-	$(CC) $(CFLAGS) -DUNIT_TEST -o $(TEST_TARGET) $(TEST_OBJS) $(TEST_ASMOBJS) -Wl,-z,noexecstack -lcunit
+	$(CC) $(CFLAGS) -DUNIT_TEST -o $(TEST_TARGET) $(TEST_OBJS) $(TEST_ASMOBJS) -Wl,-z,noexecstack \
+		$(TEST_LDFLAGS) -lcunit
 
 %.o: %.c
 	$(CC) $(CFLAGS) -c $< -o $@
