@@ -4,7 +4,10 @@
 #include "terminal.h"
 #include "disk.h"
 #include "cluster.h"
-#include "fs.h"         /* Provides list_files() and list_directories() */
+#include "fs.h"
+#include "fs_service_glue.h"
+#include "fs_types.h"
+#include "path_log.h"
 #include "threadpool.h"
 #include <stdio.h>
 #include <stdlib.h>
@@ -85,7 +88,7 @@ int execute_command_str(const char *line) {
         free(tokenBuf);
         return 0;
     }
-    if (!strcmp(trimmed, "-?") || !strcmp(trimmed, "-h") || !strcmp(trimmed, "help")) {
+    if (!strcmp(trimmed, "help")) {
         printf("%s\n", HELP_MSG);
         free(tokenBuf);
         return 0;
@@ -116,7 +119,35 @@ int execute_command_str(const char *line) {
         return 0;
     }
     if (!strncmp(trimmed, "make ", 5)) {
-        do_make_file(trimmed + 5);
+        char *filename = trim_whitespace(trimmed + 5);
+        if (*filename) {
+            char rpath[CWD_MAX];
+            resolve_path(filename, rpath, sizeof(rpath));
+            if (g_fm_service) {
+                fm_create_file(g_fm_service, rpath);
+                path_log_record(PATH_OP_CREATE, rpath);
+                printf("Creating file '%s'. Enter lines (end with 'EOF'):\n", rpath);
+                char content[4096] = {0};
+                size_t off = 0;
+                char buf[256];
+                while (1) {
+                    printf("file> ");
+                    fflush(stdout);
+                    if (!fgets(buf, sizeof(buf), stdin)) break;
+                    buf[strcspn(buf, "\n")] = '\0';
+                    if (!strcmp(buf, "EOF")) {
+                        printf("Done writing '%s'.\n", rpath);
+                        break;
+                    }
+                    if (off + strlen(buf) + 2 < sizeof(content)) {
+                        off += (size_t)snprintf(content + off, sizeof(content) - off, "%s\n", buf);
+                    }
+                }
+                fm_save_text(g_fm_service, rpath, content);
+            } else {
+                do_make_file(rpath);
+            }
+        }
         free(tokenBuf);
         return 0;
     }
@@ -136,9 +167,29 @@ int execute_command_str(const char *line) {
     }
 
     /* Command dispatch */
-    if (!strcmp(args[0], "-cd")) {
+    if (!strcmp(args[0], "cd")) {
+        if (argc < 2) {
+            printf("%s\n", g_cwd);
+            free(cmdLine);
+            return 0;
+        }
+        char resolved[CWD_MAX];
+        resolve_path(args[1], resolved, sizeof(resolved));
+        if (chdir(resolved) == 0) {
+            if (getcwd(g_cwd, sizeof(g_cwd)) == NULL)
+                strncpy(g_cwd, resolved, sizeof(g_cwd) - 1);
+            path_log_record(PATH_OP_CD, g_cwd);
+            printf("%s\n", g_cwd);
+        } else {
+            perror("cd");
+            free(cmdLine);
+            return 1;
+        }
+        free(cmdLine);
+        return 0;
+    } else if (!strcmp(args[0], "createdisk")) {
         if (argc < 4) {
-            printf("Usage: -cd <volume> <rowCount> <nibbleCount> [<interactive>]\n");
+            printf("Usage: createdisk <volume> <rowCount> <nibbleCount> [ -y | -n ]\n");
             free(cmdLine);
             return 1;
         }
@@ -154,13 +205,13 @@ int execute_command_str(const char *line) {
         g_cluster_size = nibbleCount / 2;
         g_total_clusters = rowCount;
         print_disk_formatted();
-        if (argc >= 5 && !strcmp(args[4], "-y"))
+        if (argc >= 5 && (!strcmp(args[4], "-y") || !strcmp(args[4], "-Y")))
             interactive_shell();
         free(cmdLine);
         return 0;
-    } else if (!strcmp(args[0], "-F")) {
+    } else if (!strcmp(args[0], "format")) {
         if (argc < 5) {
-            printf("Usage: -F <disk_file> <volume> <rowCount> <nibbleCount>\n");
+            printf("Usage: format <disk_file> <volume> <rowCount> <nibbleCount>\n");
             free(cmdLine);
             return 1;
         }
@@ -178,9 +229,9 @@ int execute_command_str(const char *line) {
         g_total_clusters = rowCount;
         free(cmdLine);
         return 0;
-    } else if (!strcmp(args[0], "-f")) {
+    } else if (!strcmp(args[0], "setdisk")) {
         if (argc < 2) {
-            printf("Usage: -f <disk_file>\n");
+            printf("Usage: setdisk <disk_file>\n");
             free(cmdLine);
             return 1;
         }
@@ -196,7 +247,7 @@ int execute_command_str(const char *line) {
         read_disk_header();
         free(cmdLine);
         return 0;
-    } else if (!strcmp(args[0], "-v") || !strcmp(args[0], "-V")) {
+    } else if (!strcmp(args[0], "version")) {
         if (argc >= 2) {
             if (!strcmp(args[1], "-y") || !strcmp(args[1], "-Y")) {
                 if (unlink(HISTORY_FILE) == 0)
@@ -206,7 +257,7 @@ int execute_command_str(const char *line) {
             } else if (!strcmp(args[1], "-n") || !strcmp(args[1], "-N")) {
                 printf("History file retained.\n");
             } else {
-                printf("Usage: %s [ -y | -n ]\n", args[0]);
+                printf("Usage: version [ -y | -n ]\n");
                 free(cmdLine);
                 return 1;
             }
@@ -236,16 +287,31 @@ int execute_command_str(const char *line) {
             free(cmdLine);
             exit(0);
         }
-    } else if (!strcmp(args[0], "-l")) {
+    } else if (!strcmp(args[0], "listclusters")) {
         list_clusters_contents();
         free(cmdLine);
         return 0;
-    } else if (!strcmp(args[0], "-L")) {
-        /* List local directories */
-        list_directories();
+    } else if (!strcmp(args[0], "listdirs")) {
+        char rpath[CWD_MAX];
+        resolve_path(".", rpath, sizeof(rpath));
+        if (g_fm_service) {
+            fs_node_t *nodes;
+            int count;
+            if (fm_list(g_fm_service, rpath, &nodes, &count) == 0) {
+                path_log_record(PATH_OP_DIR, rpath);
+                printf("Directories in current path:\n");
+                for (int i = 0; i < count; i++)
+                    if (nodes[i].type == NODE_DIR)
+                        printf("  %s\n", nodes[i].name);
+                fs_nodes_free(nodes, count);
+            }
+        } else {
+            path_log_record(PATH_OP_DIR, rpath);
+            list_directories();
+        }
         free(cmdLine);
         return 0;
-    } else if (!strcmp(args[0], "-s")) {
+    } else if (!strcmp(args[0], "search")) {
         int searchMode = 0;
         char *searchStr = NULL;
         if (argc >= 3 && (!strcmp(args[2], "-h") || !strcmp(args[2], "-t"))) {
@@ -254,7 +320,7 @@ int execute_command_str(const char *line) {
         } else if (argc >= 2) {
             searchStr = args[1];
         } else {
-            printf("Usage: -s <searchtext> [ -t|-h ]\n");
+            printf("Usage: search <searchtext> [ -t |-h ]\n");
             free(cmdLine);
             return 1;
         }
@@ -301,9 +367,9 @@ int execute_command_str(const char *line) {
             printf("'%s' not found.\n", searchStr);
         free(cmdLine);
         return 0;
-    } else if (!strcmp(args[0], "-w")) {
+    } else if (!strcmp(args[0], "writecluster")) {
         if (argc < 4) {
-            printf("Usage: -w <cluster_index> <-t|-h> <data>\n");
+            printf("Usage: writecluster <cluster_index> -t|-h <data>\n");
             free(cmdLine);
             return 1;
         }
@@ -313,9 +379,9 @@ int execute_command_str(const char *line) {
         calculate_storage_breakdown_for_cluster(clu);
         free(cmdLine);
         return 0;
-    } else if (!strcmp(args[0], "-d")) {
+    } else if (!strcmp(args[0], "delcluster")) {
         if (argc < 2) {
-            printf("Usage: -d <cluster_index>\n");
+            printf("Usage: delcluster <cluster_index>\n");
             free(cmdLine);
             return 1;
         }
@@ -323,9 +389,9 @@ int execute_command_str(const char *line) {
         delete_cluster(clu);
         free(cmdLine);
         return 0;
-    } else if (!strcmp(args[0], "-up")) {
+    } else if (!strcmp(args[0], "update")) {
         if (argc < 4) {
-            printf("Usage: -up <cluster_index> <-t|-h> <data>\n");
+            printf("Usage: update <cluster_index> -t|-h <data>\n");
             free(cmdLine);
             return 1;
         }
@@ -342,33 +408,39 @@ int execute_command_str(const char *line) {
         calculate_storage_breakdown_for_cluster(clu);
         free(cmdLine);
         return 0;
-    } else if (!strcmp(args[0], "-type")) {
-        /* New command to print file contents (like DOS 'type' or Unix 'cat')
-           Expected usage: -type <filename> -f <disk_file>
-        */
-        if (argc != 4 || strcmp(args[2], "-f") != 0) {
-            printf("Usage: -type <filename> -f <disk_file>\n");
+    } else if (!strcmp(args[0], "type")) {
+        if (argc < 2) {
+            printf("Usage: type <filename>\n");
             free(cmdLine);
             return 1;
         }
-        strncpy(current_disk_file, args[3], sizeof(current_disk_file)-1);
-        current_disk_file[sizeof(current_disk_file)-1] = '\0';
-        read_disk_header();
-        cat_file(args[1]);
+        char rpath[CWD_MAX];
+        resolve_path(args[1], rpath, sizeof(rpath));
+        if (g_fm_service) {
+            char buf[4096];
+            if (fm_read_text(g_fm_service, rpath, buf, sizeof(buf)) >= 0) {
+                path_log_record(PATH_OP_READ, rpath);
+                printf("%s", buf);
+            } else
+                perror("type");
+        } else {
+            path_log_record(PATH_OP_READ, rpath);
+            cat_file(rpath);
+        }
         free(cmdLine);
         return 0;
-    } else if (!strcmp(args[0], "-O")) {
+    } else if (!strcmp(args[0], "redirect")) {
         if (argc < 2) {
-            printf("Usage: -O <filename> or \"-O off\"\n");
+            printf("Usage: redirect <filename> or \"redirect off\"\n");
             free(cmdLine);
             return 1;
         }
         do_redirect_output(args[1]);
         free(cmdLine);
         return 0;
-    } else if (!strcmp(args[0], "-init")) {
+    } else if (!strcmp(args[0], "initdisk")) {
         if (argc < 3) {
-            printf("Usage: -init <cluster_count> <cluster_size>\n");
+            printf("Usage: initdisk <cluster_count> <cluster_size>\n");
             free(cmdLine);
             return 1;
         }
@@ -384,9 +456,9 @@ int execute_command_str(const char *line) {
         printf("Soft init: clusters=%d, size=%d bytes (in memory only).\n", g_total_clusters, g_cluster_size);
         free(cmdLine);
         return 0;
-    } else if (!strcmp(args[0], "-uc")) {
+    } else if (!strcmp(args[0], "rerun")) {
         if (argc < 2) {
-            printf("Usage: -uc <N>\n");
+            printf("Usage: rerun <N>\n");
             free(cmdLine);
             return 1;
         }
@@ -407,7 +479,7 @@ int execute_command_str(const char *line) {
         free(cmd);
         free(cmdLine);
         return 0;
-    } else if (!strcmp(args[0], "-import")) {
+    } else if (!strcmp(args[0], "import")) {
         if (argc == 3) {
             import_text_drive(args[1], args[2], -1, -1);
             free(cmdLine);
@@ -424,16 +496,16 @@ int execute_command_str(const char *line) {
             free(cmdLine);
             return 0;
         } else {
-            printf("Usage: -import <textfile> <txtfile> [clusters clusterSize]\n");
+            printf("Usage: import <textfile> <txtfile> [clusters clusterSize]\n");
             free(cmdLine);
             return 1;
         }
-    } else if (!strcmp(args[0], "-du")) {
+    } else if (!strcmp(args[0], "du")) {
         /* Modified disk usage command.
            Without additional parameter, it prints a short disk usage report.
            With the -dtl parameter it prints detailed information for specified clusters.
         */
-        if (argc >= 2 && !strcmp(args[1], "-dtl")) {
+        if (argc >= 2 && !strcmp(args[1], "dtl")) {
             if (argc > 2) {
                 for (int i = 2; i < argc; i++) {
                     int c = atoi(args[i]);
@@ -507,11 +579,168 @@ int execute_command_str(const char *line) {
             free(cmdLine);
             return 0;
         }
-    } else if (!strcmp(args[0], "-print")) {
+    } else if (!strcmp(args[0], "printdisk")) {
         print_disk_formatted();
         free(cmdLine);
         return 0;
-    } else if (!strcmp(args[0], "sc")) {
+    } else if (!strcmp(args[0], "dir")) {
+        char rpath[CWD_MAX];
+        resolve_path((argc >= 2 && args[1][0] != '-') ? args[1] : ".", rpath, sizeof(rpath));
+        if (g_fm_service) {
+            fs_node_t *nodes;
+            int count;
+            if (fm_list(g_fm_service, rpath, &nodes, &count) == 0) {
+                path_log_record(PATH_OP_DIR, rpath);
+                printf("Files in '%s':\n", rpath);
+                for (int i = 0; i < count; i++)
+                    printf("  %s\n", nodes[i].name);
+                fs_nodes_free(nodes, count);
+            } else {
+                printf("Cannot open '%s'\n", rpath);
+            }
+        } else {
+            list_files(rpath);
+        }
+        free(cmdLine);
+        return 0;
+    } else if (!strcmp(args[0], "mkdir")) {
+        if (argc < 2) {
+            printf("Usage: mkdir <directory>\n");
+            free(cmdLine);
+            return 1;
+        }
+        char rpath[CWD_MAX];
+        resolve_path(args[1], rpath, sizeof(rpath));
+        if (g_fm_service) {
+            if (fm_create_dir(g_fm_service, rpath) == 0) {
+                path_log_record(PATH_OP_CREATE, rpath);
+                printf("Directory '%s' created.\n", rpath);
+            } else
+                perror("mkdir");
+        } else {
+            create_directory(rpath);
+            path_log_record(PATH_OP_CREATE, rpath);
+        }
+        free(cmdLine);
+        return 0;
+    } else if (!strcmp(args[0], "rmdir")) {
+        if (argc < 2) {
+            printf("Usage: rmdir <directory>\n");
+            free(cmdLine);
+            return 1;
+        }
+        char rpath[CWD_MAX];
+        resolve_path(args[1], rpath, sizeof(rpath));
+        if (g_fm_service) {
+            if (fm_delete(g_fm_service, rpath) == 0) {
+                path_log_record(PATH_OP_DELETE, rpath);
+                printf("Directory '%s' removed.\n", rpath);
+            } else
+                perror("rmdir");
+        } else if (rmdir(rpath) == 0) {
+            path_log_record(PATH_OP_DELETE, rpath);
+            printf("Directory '%s' removed.\n", rpath);
+        } else {
+            perror("rmdir");
+        }
+        free(cmdLine);
+        return 0;
+    } else if (!strcmp(args[0], "rmtree")) {
+        if (argc < 2) {
+            printf("Usage: rmtree <directory>\n");
+            free(cmdLine);
+            return 1;
+        }
+        char rpath[CWD_MAX];
+        resolve_path(args[1], rpath, sizeof(rpath));
+        path_log_record(PATH_OP_DELETE, rpath);
+        remove_directory_recursive(rpath);
+        free(cmdLine);
+        return 0;
+    } else if (!strcmp(args[0], "cat")) {
+        if (argc < 2) {
+            printf("Usage: cat <filename>\n");
+            free(cmdLine);
+            return 1;
+        }
+        char rpath[CWD_MAX];
+        resolve_path(args[1], rpath, sizeof(rpath));
+        if (g_fm_service) {
+            char buf[4096];
+            if (fm_read_text(g_fm_service, rpath, buf, sizeof(buf)) >= 0) {
+                path_log_record(PATH_OP_READ, rpath);
+                printf("%s", buf);
+            } else
+                perror("cat");
+        } else {
+            path_log_record(PATH_OP_READ, rpath);
+            cat_file(rpath);
+        }
+        free(cmdLine);
+        return 0;
+    } else if (!strcmp(args[0], "write")) {
+        /* write <file> <content> - write content to file */
+        if (argc < 3) {
+            printf("Usage: write <filename> <content>\n");
+            free(cmdLine);
+            return 1;
+        }
+        char rpath[CWD_MAX];
+        resolve_path(args[1], rpath, sizeof(rpath));
+        char content[4096] = {0};
+        for (int i = 2; i < argc && (size_t)(strlen(content) + strlen(args[i]) + 2) < sizeof(content); i++) {
+            if (i > 2) strcat(content, " ");
+            strcat(content, args[i]);
+        }
+        if (g_fm_service) {
+            if (fm_save_text(g_fm_service, rpath, content) == 0) {
+                path_log_record(PATH_OP_WRITE, rpath);
+                printf("Wrote to '%s'\n", rpath);
+            } else
+                perror("write");
+        } else {
+            FILE *f = fopen(rpath, "w");
+            if (f) {
+                fputs(content, f);
+                fclose(f);
+                path_log_record(PATH_OP_WRITE, rpath);
+                printf("Wrote to '%s'\n", rpath);
+            } else perror("write");
+        }
+        free(cmdLine);
+        return 0;
+    } else if (!strcmp(args[0], "mv")) {
+        if (argc < 3) {
+            printf("Usage: mv <src> <dst>\n");
+            free(cmdLine);
+            return 1;
+        }
+        char srcpath[CWD_MAX], dstpath[CWD_MAX];
+        resolve_path(args[1], srcpath, sizeof(srcpath));
+        resolve_path(args[2], dstpath, sizeof(dstpath));
+        if (g_fm_service) {
+            if (fm_move(g_fm_service, srcpath, dstpath) == 0) {
+                path_log_record(PATH_OP_MOVE, srcpath);
+                path_log_record(PATH_OP_MOVE, dstpath);
+                printf("Moved '%s' to '%s'\n", srcpath, dstpath);
+            } else
+                perror("mv");
+        } else {
+            if (rename(srcpath, dstpath) == 0) {
+                path_log_record(PATH_OP_MOVE, srcpath);
+                path_log_record(PATH_OP_MOVE, dstpath);
+                printf("Moved '%s' to '%s'\n", srcpath, dstpath);
+            } else
+                perror("mv");
+        }
+        free(cmdLine);
+        return 0;
+    } else if (!strcmp(args[0], "where") || !strcmp(args[0], "loc")) {
+        int n = (argc >= 2) ? atoi(args[1]) : 16;
+        path_log_print(n);
+        free(cmdLine);
+        return 0;
+    } else if (!strcmp(args[0], "addcluster")) {
         read_disk_header();
         if (g_total_clusters >= 65535) {
             printf("Max cluster count reached.\n");
