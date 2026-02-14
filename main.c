@@ -50,6 +50,7 @@
 #include "disk.h"
 #include "fs_service_glue.h"
 #include "path_log.h"
+#include "drivers/drivers.h"
 #include <stdio.h>
 #include <stdlib.h>
 #include <signal.h>
@@ -99,9 +100,10 @@ int main(int argc, char *argv[]) {
         exit(0);
     }
 
-    /* Initialize file manager service and path log */
+    /* Initialize file manager service, path log, and drivers */
     fs_service_glue_init();
     path_log_init();
+    drivers_init(NULL);
 
     /* Initialize thread pool and signals */
     signal(SIGINT, SIG_IGN);
@@ -259,6 +261,7 @@ int main(int argc, char *argv[]) {
         pthread_join(g_pool.workers[i], NULL);
     pthread_mutex_destroy(&g_pool.mutex);
     pthread_cond_destroy(&g_pool.cond);
+    drivers_shutdown();
     path_log_shutdown();
     fs_service_glue_shutdown();
     return 0;

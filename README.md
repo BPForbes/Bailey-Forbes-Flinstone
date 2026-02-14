@@ -78,6 +78,13 @@ flowchart LR
 | **cluster.c / .h** | Cluster management, hex conversion |
 | **mem_asm.s** | x86-64 ASM: `asm_mem_copy`, `asm_mem_zero`, `asm_block_fill` |
 | **dir_asm.c / .h** | ASM-backed directory buffer ops |
+| **drivers/port_io.s** | x86-64 ASM: `port_inb`, `port_outb`, `port_inw`, `port_outw` |
+| **drivers/block_driver.c** | Block device (sector I/O) – host: disk_asm, BAREMETAL: IDE |
+| **drivers/keyboard_driver.c** | Keyboard – host: stdin, BAREMETAL: port 0x60 |
+| **drivers/display_driver.c** | Display – host: printf, BAREMETAL: VGA 0xB8000 |
+| **drivers/timer_driver.c** | Timer – host: usleep, BAREMETAL: PIT |
+| **drivers/pic_driver.c** | Interrupt controller – host: no-op, BAREMETAL: 8259 PIC |
+| **drivers/drivers.c** | Driver subsystem init/shutdown |
 | **fs.c / fs.h** | Legacy FS helpers (mkdir, rmtree, cat, redirect) |
 | **fs_types.h** | Domain types: `fs_node_t`, provider/command vtables |
 | **fs_provider.c / .h** | `IFileSystemProvider`: Local, InMemory |
@@ -108,7 +115,13 @@ flowchart LR
 make
 ```
 
-Builds `BPForbes_Flinstone_Shell` with `mem_asm.s` linked.
+Builds `BPForbes_Flinstone_Shell` with `mem_asm.s` and `drivers/port_io.s` linked.
+
+**Bare-metal build** (for bootable kernel, not userspace):
+```bash
+make CFLAGS="-Wall -Wextra -pthread -DDRIVERS_BAREMETAL=1"
+```
+Uses port I/O and VGA directly. Requires bare-metal target.
 
 ### Run
 
