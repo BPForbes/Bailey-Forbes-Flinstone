@@ -77,6 +77,10 @@ flowchart LR
 | **disk_asm.c / .h** | ASM-backed cluster read/write/zero |
 | **cluster.c / .h** | Cluster management, hex conversion |
 | **mem_asm.s** | x86-64 ASM: `asm_mem_copy`, `asm_mem_zero`, `asm_block_fill` |
+| **alloc/alloc_core.s** | Thread-safe allocator core: lock, brk, free-list, malloc_nolock |
+| **alloc/alloc_malloc.s** | malloc, calloc, realloc (GAS/AT&T x86-64) |
+| **alloc/alloc_free.s** | free with forward coalescing |
+| **alloc/alloc.h** | C declarations for ASM allocator |
 | **dir_asm.c / .h** | ASM-backed directory buffer ops |
 | **drivers/port_io.s** | x86-64 ASM: `port_inb`, `port_outb`, `port_inw`, `port_outw` |
 | **drivers/block_driver.c** | Block device (sector I/O) – host: disk_asm, BAREMETAL: IDE |
@@ -116,6 +120,12 @@ make
 ```
 
 Builds `BPForbes_Flinstone_Shell` with `mem_asm.s` and `drivers/port_io.s` linked.
+
+**Optional: ASM heap allocator** (malloc/calloc/realloc/free in GAS x86-64):
+```bash
+make USE_ASM_ALLOC=1
+```
+Replaces the system allocator for the process. Use for testing or bare-metal targets. Disable (`USE_ASM_ALLOC=0` or omit) if batch mode shows instability.
 
 **Bare-metal build** (for bootable kernel, not userspace):
 ```bash

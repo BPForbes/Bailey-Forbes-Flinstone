@@ -4,6 +4,7 @@
 CC = gcc
 AS = as
 CFLAGS = -Wall -Wextra -pthread
+LDFLAGS = -Wl,-z,noexecstack
 ASFLAGS =
 
 # --- Main Shell Build ---
@@ -16,6 +17,10 @@ SRCS = common.c util.c terminal.c disk.c disk_asm.c dir_asm.c path_log.c cluster
        fs_chain.c fs_facade.c fs_service_glue.c interpreter.c main.c
 SRCS += $(DRIVER_SRCS)
 ASMSRCS = mem_asm.s drivers/port_io.s
+# Set USE_ASM_ALLOC=1 to use thread-safe ASM malloc/calloc/free
+ifeq ($(USE_ASM_ALLOC),1)
+ASMSRCS += alloc/alloc_core.s alloc/alloc_malloc.s alloc/alloc_free.s
+endif
 OBJS = $(SRCS:.c=.o) $(ASMSRCS:.s=.o)
 TARGET = BPForbes_Flinstone_Shell
 
@@ -26,7 +31,7 @@ baremetal: CFLAGS += -DDRIVERS_BAREMETAL=1
 baremetal: $(TARGET)
 
 $(TARGET): $(OBJS)
-	$(CC) $(CFLAGS) -o $(TARGET) $(OBJS) -Wl,-z,noexecstack
+	$(CC) $(CFLAGS) -o $(TARGET) $(OBJS) $(LDFLAGS)
 
 # --- Test Build ---
 # For tests, interpreter.c is directly included in BPForbes_Flinstone_Tests.c.
@@ -45,6 +50,9 @@ $(TEST_TARGET): $(TEST_OBJS) $(TEST_ASMOBJS)
 %.o: %.s
 	$(AS) $(ASFLAGS) -o $@ $<
 
+alloc/%.o: alloc/%.s
+	$(AS) $(ASFLAGS) -o $@ $<
+
 drivers/%.o: drivers/%.c
 	$(CC) $(CFLAGS) -I. -c $< -o $@
 
@@ -52,4 +60,4 @@ drivers/port_io.o: drivers/port_io.s
 	$(AS) $(ASFLAGS) -o $@ $<
 
 clean:
-	rm -f $(OBJS) $(TEST_OBJS) $(TEST_ASMOBJS) mem_asm.o drivers/*.o $(TARGET) $(TEST_TARGET)
+	rm -f $(OBJS) $(TEST_OBJS) $(TEST_ASMOBJS) mem_asm.o drivers/*.o alloc/*.o $(TARGET) $(TEST_TARGET)
