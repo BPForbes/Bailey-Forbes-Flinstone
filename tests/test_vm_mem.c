@@ -1,4 +1,4 @@
-#include "vm/vm_mem.h"
+#include "VM/vm_mem.h"
 #include <stdio.h>
 #include <string.h>
 

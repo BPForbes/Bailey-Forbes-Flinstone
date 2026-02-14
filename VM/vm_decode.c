@@ -57,9 +57,19 @@ int vm_decode(uint8_t *mem, uint32_t addr, vm_instr_t *out) {
         out->imm = (int8_t)b1;
         out->size = 2;
         return 0;
-    case 0xC3: /* RET */
-        out->op = VM_OP_UNKNOWN;
-        out->size = 1;
+    case 0xC3: /* RET near */
+        out->op = VM_OP_RET;
+        return 0;
+    case 0xCD: /* INT imm8 */
+        out->op = VM_OP_INT;
+        out->imm = b1;
+        out->size = 2;
+        return 0;
+    case 0xCF: /* IRET */
+        out->op = VM_OP_IRET;
+        return 0;
+    case 0xAA: /* STOSB */
+        out->op = VM_OP_STOSB;
         return 0;
     default:
         break;

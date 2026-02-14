@@ -10,10 +10,10 @@ Emulation-based VM that launches when the C executable runs. ASM used for all me
 
 | File | Purpose |
 |------|---------|
-| `vm/vm.h` | Public API: `vm_boot()`, `vm_run()`, `vm_stop()` |
-| `vm/vm_cpu.h`, `vm/vm_cpu.c` | vCPU state: GPRs, segment regs, EFLAGS, RIP; fetch/execute loop |
-| `vm/vm_mem.h`, `vm/vm_mem.c` | Guest RAM ops — all via `asm_mem_copy`, `asm_mem_zero`, `asm_block_fill` |
-| `vm/vm_decode.h`, `vm/vm_decode.c` | x86 opcode decoder (start with minimal subset) |
+| `VM/vm.h` | Public API: `vm_boot()`, `vm_run()`, `vm_stop()` |
+| `VM/vm_cpu.h`, `VM/vm_cpu.c` | vCPU state: GPRs, segment regs, EFLAGS, RIP; fetch/execute loop |
+| `VM/vm_mem.h`, `VM/vm_mem.c` | Guest RAM ops — all via `asm_mem_copy`, `asm_mem_zero`, `asm_block_fill` |
+| `VM/vm_decode.h`, `VM/vm_decode.c` | x86 opcode decoder (minimal subset + INT, IRET, STOSB) |
 
 ### 1.2 Minimal Opcode Subset (v1)
 
@@ -44,7 +44,8 @@ Emulation-based VM that launches when the C executable runs. ASM used for all me
 
 | File | Purpose |
 |------|---------|
-| `vm/vm_io.h`, `vm/vm_io.c` | Port dispatch table; all data movement via `asm_mem_copy` |
+| `VM/vm_io.h`, `VM/vm_io.c` | Port dispatch: IDE, keyboard, serial, PIT (0x40–0x43), PIC (0x20, 0xA0) |
+| `VM/vm_display.h`, `VM/vm_display.c` | GPU: asm_mem_copy guest 0xb8000 → display_driver.refresh_vga |
 
 ### 2.2 Port Mappings
 
@@ -75,7 +76,7 @@ Emulation-based VM that launches when the C executable runs. ASM used for all me
 
 | File | Purpose |
 |------|---------|
-| `vm/vm_loader.h`, `vm/vm_loader.c` | Load binary from VFS or embedded; use `asm_mem_copy` into guest RAM |
+| `VM/vm_loader.h`, `VM/vm_loader.c` | Load binary from VFS or embedded; use `asm_mem_copy` into guest RAM |
 
 ### 3.2 Bootstrap Options
 
@@ -135,11 +136,12 @@ Emulation-based VM that launches when the C executable runs. ASM used for all me
 ### 6.1 New Sources
 
 ```
-vm/vm_cpu.c
-vm/vm_mem.c
-vm/vm_decode.c
-vm/vm_io.c
-vm/vm_loader.c
+VM/vm_cpu.c
+VM/vm_mem.c
+VM/vm_decode.c
+VM/vm_io.c
+VM/vm_loader.c
+VM/vm_display.c
 ```
 
 ### 6.2 Dependencies
@@ -199,11 +201,12 @@ All of the following MUST use ASM memory primitives (no `memcpy`/`memset` in hot
 
 ---
 
-## File Layout (Proposed)
+## File Layout (Implemented)
 
 ```
-vm/
+VM/
   vm.h
+  vm.c
   vm_cpu.c
   vm_cpu.h
   vm_mem.c
@@ -214,6 +217,8 @@ vm/
   vm_io.h
   vm_loader.c
   vm_loader.h
+  vm_display.c
+  vm_display.h
 docs/
   VM_IMPLEMENTATION_PLAN.md
 ```

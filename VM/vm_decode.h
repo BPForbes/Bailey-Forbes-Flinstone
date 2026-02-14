@@ -18,6 +18,7 @@ typedef enum {
     VM_OP_JNZ,
     VM_OP_INT,
     VM_OP_IRET,
+    VM_OP_RET,
     VM_OP_STOSB,
     VM_OP_UNKNOWN,
 } vm_opcode_t;

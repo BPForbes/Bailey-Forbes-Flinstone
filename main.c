@@ -51,7 +51,7 @@
 #include "fs_service_glue.h"
 #include "path_log.h"
 #include "drivers/drivers.h"
-#include "vm/vm.h"
+#include "VM/vm.h"
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>

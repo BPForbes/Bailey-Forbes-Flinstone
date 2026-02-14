@@ -107,7 +107,7 @@ flowchart LR
 | **vrt.c / .h** | Virtual Resource Table (handles → resources) |
 | **vfs.c / .h** | VFS: host_vfs, memory_vfs backends |
 | **drivers/driver_caps.h** | Block/keyboard/display capability structs |
-| **vm/vm.c, vm_cpu.c, vm_mem.c, vm_decode.c, vm_io.c, vm_loader.c** | x86 emulator (VM_ENABLE=1) |
+| **VM/vm.c, vm_cpu.c, vm_mem.c, vm_decode.c, vm_io.c, vm_loader.c, vm_display.c** | x86 emulator (VM_ENABLE=1): CPU, RAM, GPU/VGA, timer, interrupts, PQ scheduling |
 | **docs/VM_IMPLEMENTATION_PLAN.md** | VM implementation plan |
 | **terminal.c / .h** | Raw mode terminal (interactive) |
 | **Makefile** | Build (C + ASM), test target |
@@ -140,12 +140,16 @@ make baremetal
 ```
 Uses port I/O and VGA directly. Requires bare-metal target.
 
-**Embedded x86 VM** (emulation-based, launches when executable runs):
+**Embedded x86 VM** (emulation-based hypervisor with CPU, RAM, GPU, timer, interrupts):
 ```bash
 make vm
 ./BPForbes_Flinstone_Shell -Virtualization -y -vm
 ```
-Runs minimal x86 guest; outputs "Flinstone VM" to serial (port 0xF8). All memory ops use ASM (asm_mem_copy, asm_mem_zero).
+- **CPU**: vCPU state, real-mode, minimal opcode subset (MOV, IN, OUT, INT, IRET, STOSB, etc.)
+- **RAM**: 16MB guest RAM via mem_domain + asm_mem_copy/asm_mem_zero
+- **GPU/VGA**: Guest 0xb8000 rendered via display_driver.refresh_vga (ASM copy)
+- **Timer**: PIT ports 0x40–0x43; **PIC**: 0x20, 0x21, 0xA0, 0xA1
+- **Scheduling**: Priority queue (PQ) for vCPU quanta, display refresh, timer ticks
 
 ### Run
 
