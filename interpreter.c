@@ -7,6 +7,7 @@
 #include "fs.h"
 #include "fs_service_glue.h"
 #include "fs_types.h"
+#include "path_log.h"
 #include "threadpool.h"
 #include <stdio.h>
 #include <stdlib.h>
@@ -124,6 +125,7 @@ int execute_command_str(const char *line) {
             resolve_path(filename, rpath, sizeof(rpath));
             if (g_fm_service) {
                 fm_create_file(g_fm_service, rpath);
+                path_log_record(PATH_OP_CREATE, rpath);
                 printf("Creating file '%s'. Enter lines (end with 'EOF'):\n", rpath);
                 char content[4096] = {0};
                 size_t off = 0;
@@ -176,6 +178,7 @@ int execute_command_str(const char *line) {
         if (chdir(resolved) == 0) {
             if (getcwd(g_cwd, sizeof(g_cwd)) == NULL)
                 strncpy(g_cwd, resolved, sizeof(g_cwd) - 1);
+            path_log_record(PATH_OP_CD, g_cwd);
             printf("%s\n", g_cwd);
         } else {
             perror("cd");
@@ -289,12 +292,13 @@ int execute_command_str(const char *line) {
         free(cmdLine);
         return 0;
     } else if (!strcmp(args[0], "listdirs")) {
+        char rpath[CWD_MAX];
+        resolve_path(".", rpath, sizeof(rpath));
         if (g_fm_service) {
             fs_node_t *nodes;
             int count;
-            char rpath[CWD_MAX];
-            resolve_path(".", rpath, sizeof(rpath));
             if (fm_list(g_fm_service, rpath, &nodes, &count) == 0) {
+                path_log_record(PATH_OP_DIR, rpath);
                 printf("Directories in current path:\n");
                 for (int i = 0; i < count; i++)
                     if (nodes[i].type == NODE_DIR)
@@ -302,6 +306,7 @@ int execute_command_str(const char *line) {
                 fs_nodes_free(nodes, count);
             }
         } else {
+            path_log_record(PATH_OP_DIR, rpath);
             list_directories();
         }
         free(cmdLine);
@@ -413,11 +418,13 @@ int execute_command_str(const char *line) {
         resolve_path(args[1], rpath, sizeof(rpath));
         if (g_fm_service) {
             char buf[4096];
-            if (fm_read_text(g_fm_service, rpath, buf, sizeof(buf)) >= 0)
+            if (fm_read_text(g_fm_service, rpath, buf, sizeof(buf)) >= 0) {
+                path_log_record(PATH_OP_READ, rpath);
                 printf("%s", buf);
-            else
+            } else
                 perror("type");
         } else {
+            path_log_record(PATH_OP_READ, rpath);
             cat_file(rpath);
         }
         free(cmdLine);
@@ -583,6 +590,7 @@ int execute_command_str(const char *line) {
             fs_node_t *nodes;
             int count;
             if (fm_list(g_fm_service, rpath, &nodes, &count) == 0) {
+                path_log_record(PATH_OP_DIR, rpath);
                 printf("Files in '%s':\n", rpath);
                 for (int i = 0; i < count; i++)
                     printf("  %s\n", nodes[i].name);
@@ -604,12 +612,14 @@ int execute_command_str(const char *line) {
         char rpath[CWD_MAX];
         resolve_path(args[1], rpath, sizeof(rpath));
         if (g_fm_service) {
-            if (fm_create_dir(g_fm_service, rpath) == 0)
+            if (fm_create_dir(g_fm_service, rpath) == 0) {
+                path_log_record(PATH_OP_CREATE, rpath);
                 printf("Directory '%s' created.\n", rpath);
-            else
+            } else
                 perror("mkdir");
         } else {
             create_directory(rpath);
+            path_log_record(PATH_OP_CREATE, rpath);
         }
         free(cmdLine);
         return 0;
@@ -622,11 +632,13 @@ int execute_command_str(const char *line) {
         char rpath[CWD_MAX];
         resolve_path(args[1], rpath, sizeof(rpath));
         if (g_fm_service) {
-            if (fm_delete(g_fm_service, rpath) == 0)
+            if (fm_delete(g_fm_service, rpath) == 0) {
+                path_log_record(PATH_OP_DELETE, rpath);
                 printf("Directory '%s' removed.\n", rpath);
-            else
+            } else
                 perror("rmdir");
         } else if (rmdir(rpath) == 0) {
+            path_log_record(PATH_OP_DELETE, rpath);
             printf("Directory '%s' removed.\n", rpath);
         } else {
             perror("rmdir");
@@ -641,6 +653,7 @@ int execute_command_str(const char *line) {
         }
         char rpath[CWD_MAX];
         resolve_path(args[1], rpath, sizeof(rpath));
+        path_log_record(PATH_OP_DELETE, rpath);
         remove_directory_recursive(rpath);
         free(cmdLine);
         return 0;
@@ -654,11 +667,13 @@ int execute_command_str(const char *line) {
         resolve_path(args[1], rpath, sizeof(rpath));
         if (g_fm_service) {
             char buf[4096];
-            if (fm_read_text(g_fm_service, rpath, buf, sizeof(buf)) >= 0)
+            if (fm_read_text(g_fm_service, rpath, buf, sizeof(buf)) >= 0) {
+                path_log_record(PATH_OP_READ, rpath);
                 printf("%s", buf);
-            else
+            } else
                 perror("cat");
         } else {
+            path_log_record(PATH_OP_READ, rpath);
             cat_file(rpath);
         }
         free(cmdLine);
@@ -678,15 +693,17 @@ int execute_command_str(const char *line) {
             strcat(content, args[i]);
         }
         if (g_fm_service) {
-            if (fm_save_text(g_fm_service, rpath, content) == 0)
+            if (fm_save_text(g_fm_service, rpath, content) == 0) {
+                path_log_record(PATH_OP_WRITE, rpath);
                 printf("Wrote to '%s'\n", rpath);
-            else
+            } else
                 perror("write");
         } else {
             FILE *f = fopen(rpath, "w");
             if (f) {
                 fputs(content, f);
                 fclose(f);
+                path_log_record(PATH_OP_WRITE, rpath);
                 printf("Wrote to '%s'\n", rpath);
             } else perror("write");
         }
@@ -702,16 +719,25 @@ int execute_command_str(const char *line) {
         resolve_path(args[1], srcpath, sizeof(srcpath));
         resolve_path(args[2], dstpath, sizeof(dstpath));
         if (g_fm_service) {
-            if (fm_move(g_fm_service, srcpath, dstpath) == 0)
+            if (fm_move(g_fm_service, srcpath, dstpath) == 0) {
+                path_log_record(PATH_OP_MOVE, srcpath);
+                path_log_record(PATH_OP_MOVE, dstpath);
                 printf("Moved '%s' to '%s'\n", srcpath, dstpath);
-            else
+            } else
                 perror("mv");
         } else {
-            if (rename(srcpath, dstpath) == 0)
+            if (rename(srcpath, dstpath) == 0) {
+                path_log_record(PATH_OP_MOVE, srcpath);
+                path_log_record(PATH_OP_MOVE, dstpath);
                 printf("Moved '%s' to '%s'\n", srcpath, dstpath);
-            else
+            } else
                 perror("mv");
         }
+        free(cmdLine);
+        return 0;
+    } else if (!strcmp(args[0], "where") || !strcmp(args[0], "loc")) {
+        int n = (argc >= 2) ? atoi(args[1]) : 16;
+        path_log_print(n);
         free(cmdLine);
         return 0;
     } else if (!strcmp(args[0], "addcluster")) {

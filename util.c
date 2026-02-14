@@ -3,22 +3,55 @@
 #include <ctype.h>
 #include <string.h>
 
+/* Resolve path with support for ., .., ./
+ * Normalizes: . = current, .. = parent, ./foo = current/foo, a/b/../c = a/c
+ */
 void resolve_path(const char *path, char *out, size_t outsize) {
     if (!path || !out || outsize == 0) return;
+    char full[CWD_MAX + 256];
     if (path[0] == '/') {
-        strncpy(out, path, outsize - 1);
-        out[outsize - 1] = '\0';
-        return;
-    }
-    char tmp[CWD_MAX + 256];
-    if (path[0] == '\0' || (path[0] == '.' && (path[1] == '\0' || path[1] == '/'))) {
+        strncpy(full, path, sizeof(full) - 1);
+        full[sizeof(full) - 1] = '\0';
+    } else if (path[0] == '\0' || (path[0] == '.' && (path[1] == '\0' || path[1] == '/'))) {
         strncpy(out, g_cwd, outsize - 1);
         out[outsize - 1] = '\0';
         return;
+    } else {
+        snprintf(full, sizeof(full), "%s/%s", g_cwd, path);
     }
-    snprintf(tmp, sizeof(tmp), "%s/%s", g_cwd, path);
-    strncpy(out, tmp, outsize - 1);
-    out[outsize - 1] = '\0';
+    /* Normalize: split into segments, collapse . and .. */
+    char segs[64][256];
+    int n = 0;
+    char *p = full;
+    while (*p && n < 64) {
+        while (*p == '/') p++;
+        if (!*p) break;
+        char *seg = p;
+        while (*p && *p != '/') p++;
+        char c = *p;
+        *p = '\0';
+        if (!strcmp(seg, "..")) {
+            if (n > 0) n--;
+        } else if (strcmp(seg, ".")) {
+            strncpy(segs[n], seg, 255);
+            segs[n][255] = '\0';
+            n++;
+        }
+        *p = c;
+        if (*p) p++;
+    }
+    size_t len = 0;
+    if (full[0] == '/' && len < outsize - 1) { out[len++] = '/'; }
+    for (int i = 0; i < n && len < outsize - 1; i++) {
+        if (i > 0 || len == 0) { if (len > 0) out[len++] = '/'; }
+        size_t slen = strlen(segs[i]);
+        if (len + slen < outsize) {
+            memcpy(out + len, segs[i], slen + 1);
+            len += slen;
+        }
+    }
+    if (len == 0) { out[0] = '.'; out[1] = '\0'; }
+    else out[len] = '\0';
 }
 
 char *trim_whitespace(char *str) {

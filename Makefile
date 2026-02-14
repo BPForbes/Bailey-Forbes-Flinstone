@@ -7,7 +7,7 @@ CFLAGS = -Wall -Wextra -pthread
 ASFLAGS =
 
 # --- Main Shell Build ---
-SRCS = common.c util.c terminal.c disk.c disk_asm.c dir_asm.c cluster.c fs.c threadpool.c \
+SRCS = common.c util.c terminal.c disk.c disk_asm.c dir_asm.c path_log.c cluster.c fs.c threadpool.c \
        priority_queue.c fs_provider.c fs_command.c fs_events.c fs_policy.c \
        fs_chain.c fs_facade.c fs_service_glue.c interpreter.c main.c
 ASMSRCS = mem_asm.s
@@ -21,7 +21,7 @@ $(TARGET): $(OBJS)
 
 # --- Test Build ---
 # For tests, interpreter.c is directly included in BPForbes_Flinstone_Tests.c.
-TEST_SRCS = BPForbes_Flinstone_Tests.c common.c util.c terminal.c disk.c disk_asm.c dir_asm.c cluster.c fs.c threadpool.c \
+TEST_SRCS = BPForbes_Flinstone_Tests.c common.c util.c terminal.c disk.c disk_asm.c dir_asm.c path_log.c cluster.c fs.c threadpool.c \
             priority_queue.c fs_provider.c fs_command.c fs_events.c fs_policy.c fs_chain.c fs_facade.c fs_service_glue.c
 TEST_OBJS = $(TEST_SRCS:.c=.o)
 TEST_ASMOBJS = mem_asm.o

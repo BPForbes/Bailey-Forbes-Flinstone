@@ -49,6 +49,7 @@
 #include "terminal.h"
 #include "disk.h"
 #include "fs_service_glue.h"
+#include "path_log.h"
 #include <stdio.h>
 #include <stdlib.h>
 #include <signal.h>
@@ -98,8 +99,9 @@ int main(int argc, char *argv[]) {
         exit(0);
     }
 
-    /* Initialize file manager service (facade + providers) */
+    /* Initialize file manager service and path log */
     fs_service_glue_init();
+    path_log_init();
 
     /* Initialize thread pool and signals */
     signal(SIGINT, SIG_IGN);
@@ -167,6 +169,8 @@ int main(int argc, char *argv[]) {
                 tokensCount = (argc > i + 2) ? (argc - i) : 0;
             else if (!strcmp(cmd, "type") || !strcmp(cmd, "cat"))
                 tokensCount = 2;
+            else if (!strcmp(cmd, "where") || !strcmp(cmd, "loc"))
+                tokensCount = (i + 1 < argc && argv[i+1][0] != '-') ? 2 : 1;
             else if (!strcmp(cmd, "search") || !strcmp(cmd, "delcluster") || !strcmp(cmd, "rerun") ||
                      !strcmp(cmd, "redirect"))
                 tokensCount = 2;
@@ -255,6 +259,7 @@ int main(int argc, char *argv[]) {
         pthread_join(g_pool.workers[i], NULL);
     pthread_mutex_destroy(&g_pool.mutex);
     pthread_cond_destroy(&g_pool.cond);
+    path_log_shutdown();
     fs_service_glue_shutdown();
     return 0;
 }
