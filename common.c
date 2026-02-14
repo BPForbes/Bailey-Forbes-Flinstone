@@ -67,6 +67,7 @@ const char *HELP_MSG =
 "  where [N], loc [N]    Show path log (last N file/dir operations, default 16)\n"
 "\n"
 "Path support: . = current dir, .. = parent, ./foo = current/foo\n"
+"Undoable: create, move, write. Non-undoable: delete, rmtree.\n"
 "\n"
 "Batch shortcut: ./shell <volume> <rowCount> <nibbleCount> [ -y ]\n"
 "  Equivalent to createdisk with same parameters.\n"

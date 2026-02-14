@@ -1,45 +1,68 @@
 # Flintstone Project
 
-A low-level C-based simulation of a file system and shell environment with systems-forward architecture. Designed for educational use, Flintstone provides real design-pattern structure for file management, ASM-backed memory primitives for disk operations, and a path toward hardware-backed persistence.
+A low-level C-based file system and shell with hardware-level disk operations and systems-forward architecture. Data lives on hardware-backed storage; ASM primitives drive sector buffers and cluster I/O. Designed for educational use, Flintstone provides real design-pattern structure for file management and a composable path toward production-grade persistence.
 
 ## 📚 Overview
 
-The Flintstone Project is a modular operating systems educational project written in C. It simulates key file system components, includes an interactive shell interface, and uses design patterns (Facade, Strategy, Command, Observer, Chain of Responsibility) to keep the codebase composable and testable. An x86-64 assembly layer provides performance-critical memory primitives for sector buffers and cluster operations—a stepping stone toward real FAT-style persistence.
+The Flintstone Project is a modular operating systems educational project written in C. It provides hardware-level disk operations (cluster read/write/zero via ASM-backed buffers), an interactive shell interface, and design patterns (Facade, Strategy, Command, Observer, Chain of Responsibility) to keep the codebase composable and testable. An x86-64 assembly layer supplies performance-critical memory primitives for sector buffers, cluster clears, and directory entry writes.
 
 ## ✨ Features
 
-- **Simulated disk & file system** — Cluster-based disk with hex text format; optional ASM-backed buffer I/O
+- **Hardware-level disk & file system** — Cluster-based storage with ASM-backed buffer I/O; sector/cluster ops at the metal
 - **Design-pattern file management** — Facade (FileManagerService), Provider/Strategy (Local, InMemory), Command (undoable ops), Events, Chain of Responsibility (access checks)
-- **ASM memory primitives** — `asm_mem_copy`, `asm_mem_zero`, `asm_block_fill` for hot-path operations
-- **Priority queue** — Multi-priority task scheduling for deferred FS work
+- **ASM memory primitives** — `asm_mem_copy`, `asm_mem_zero`, `asm_block_fill` for hot-path operations (memcpy-only; no overlap)
+- **Priority queue** — Multi-priority task scheduling with FIFO tie-breaking for deferred FS work
 - **Path support** — `.` (current), `..` (parent), `./foo`, normalized path resolution
 - **Path log** — In-memory log of file/dir operations (`where`, `loc`)
+- **Session identity** — Policy checks receive caller-provided user/session context (no hard-coded identity)
+- **Undo semantics** — Create, move, write are undoable; delete is non-undoable (documented)
 - **Interactive & batch shell** — Thread-pooled command execution
 - **Unit testing** — CUnit-based test suite
 
 ## 🏗️ Architecture
 
+```mermaid
+flowchart TB
+    subgraph UI["UI / Shell (interpreter)"]
+        A["Thin adapters; never touches filesystem directly"]
+    end
+
+    subgraph Facade["FileManagerService (Facade)"]
+        B["fm_list, fm_read_text, fm_save_text"]
+        C["fm_create_*, fm_delete, fm_move"]
+        D["Undo stack (create/move/write only)"]
+        E["Event publishing, validation chain"]
+    end
+
+    subgraph Domain["Domain Layer"]
+        F["Commands (Execute/Undo)"]
+        G["Providers (Strategy)"]
+        H["Policies (session identity)"]
+    end
+
+    subgraph Infra["Infrastructure"]
+        I["disk.c, disk_asm.c"]
+        J["dir_asm (buffer ops)"]
+        K["mem_asm.s — ASM primitives"]
+    end
+
+    UI --> Facade
+    Facade --> Domain
+    Domain --> Infra
 ```
-┌─────────────────────────────────────────────────────────────┐
-│  UI / Shell (interpreter)                                    │
-│  Thin adapters; never touches filesystem directly           │
-└─────────────────────────────┬───────────────────────────────┘
-                              │
-┌─────────────────────────────▼───────────────────────────────┐
-│  FileManagerService (Facade)                                │
-│  fm_list, fm_read_text, fm_save_text, fm_create_*, fm_*     │
-│  Undo stack, event publishing, validation chain              │
-└─────────────────────────────┬───────────────────────────────┘
-                              │
-┌─────────────────────────────▼───────────────────────────────┐
-│  Commands (Execute/Undo) │ Providers (Strategy) │ Policies   │
-│  fs_cmd_*, fs_provider_*, fs_chain_*, fs_events_*           │
-└─────────────────────────────┬───────────────────────────────┘
-                              │
-┌─────────────────────────────▼───────────────────────────────┐
-│  Disk layer (disk.c, disk_asm.c) │ dir_asm (buffer ops)     │
-│  mem_asm.s — ASM primitives for cluster/dir buffers         │
-└─────────────────────────────────────────────────────────────┘
+
+```mermaid
+flowchart LR
+    subgraph Data["Hardware-Level Data Flow"]
+        A["Cluster buffers"] --> B["asm_mem_copy / asm_mem_zero"]
+        B --> C["Sector writes"]
+        C --> D["Disk I/O"]
+    end
+
+    subgraph Policy["Access Control"]
+        E["Session/User context"] --> F["Policy chain"]
+        F --> G["can_read / can_write / can_delete"]
+    end
 ```
 
 ## 📁 File Structure
@@ -50,7 +73,7 @@ The Flintstone Project is a modular operating systems educational project writte
 | **interpreter.c / .h** | Command dispatch, thin adapter to service layer |
 | **common.c / .h** | Globals, help text, `g_cwd` |
 | **util.c / .h** | `resolve_path`, history, `trim_whitespace` |
-| **disk.c / disk.h** | Disk I/O simulation (text hex format) |
+| **disk.c / disk.h** | Disk I/O (text hex format, hardware-backed) |
 | **disk_asm.c / .h** | ASM-backed cluster read/write/zero |
 | **cluster.c / .h** | Cluster management, hex conversion |
 | **mem_asm.s** | x86-64 ASM: `asm_mem_copy`, `asm_mem_zero`, `asm_block_fill` |
@@ -173,6 +196,11 @@ make BPForbes_Flinstone_Tests
 - `..` — parent directory
 - `./foo` — foo in current directory
 - Paths are normalized (e.g. `a/b/../c` → `a/c`)
+
+### Undo Semantics
+
+- **Undoable:** create file, create dir, move, write (save)
+- **Non-undoable:** delete, rmtree — excluded from undo stack
 
 ### Batch Shortcut
 

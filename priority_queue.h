@@ -12,6 +12,7 @@ typedef struct pq_task {
     task_fn fn;
     void *arg;
     int priority;            /* 0..PQ_NUM_PRIORITIES-1 */
+    unsigned int seq;        /* FIFO tie-break: lower = pushed first */
 } pq_task_t;
 
 typedef struct priority_queue {
