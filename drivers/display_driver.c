@@ -1,8 +1,10 @@
 /* Display driver - console output.
  * Host: printf. BAREMETAL: VGA text buffer at 0xB8000. */
 #include "display_driver.h"
+#include "driver_types.h"
 #include <stdio.h>
 #include <stdlib.h>
+#include <stdint.h>
 
 #ifdef DRIVERS_BAREMETAL
 #include <stddef.h>
@@ -31,6 +33,22 @@ static void host_clear(display_driver_t *drv) {
 static void host_set_cursor(display_driver_t *drv, int row, int col) {
     (void)drv;
     printf("\033[%d;%dH", row + 1, col + 1);
+}
+
+static void host_refresh_vga(display_driver_t *drv, const void *vga_buf) {
+    (void)drv;
+    const uint16_t *cells = (const uint16_t *)vga_buf;
+    printf("\033[2J\033[H");
+    for (int r = 0; r < VGA_ROWS; r++) {
+        for (int c = 0; c < VGA_COLS; c++) {
+            uint16_t word = cells[r * VGA_COLS + c];
+            char ch = (char)(word & 0xFF);
+            if (ch < 32 && ch != '\n') ch = ' ';
+            putchar(ch);
+        }
+        if (r < VGA_ROWS - 1) putchar('\n');
+    }
+    fflush(stdout);
 }
 
 #ifdef DRIVERS_BAREMETAL
@@ -75,6 +93,13 @@ static void hw_set_cursor(display_driver_t *drv, int row, int col) {
     impl->row = row;
     impl->col = col;
 }
+
+static void hw_refresh_vga(display_driver_t *drv, const void *vga_buf) {
+    display_impl_t *impl = (display_impl_t *)drv->impl;
+    const uint16_t *cells = (const uint16_t *)vga_buf;
+    for (int i = 0; i < VGA_ROWS * VGA_COLS; i++)
+        VGA_MEM[i] = cells[i];
+}
 #endif
 
 display_driver_t *display_driver_create(void) {
@@ -85,11 +110,13 @@ display_driver_t *display_driver_create(void) {
     impl->base.putchar = hw_putchar;
     impl->base.clear = hw_clear;
     impl->base.set_cursor = hw_set_cursor;
+    impl->base.refresh_vga = hw_refresh_vga;
     impl->vga = VGA_MEM;
 #else
     impl->base.putchar = host_putchar;
     impl->base.clear = host_clear;
     impl->base.set_cursor = host_set_cursor;
+    impl->base.refresh_vga = host_refresh_vga;
 #endif
     impl->base.impl = impl;
     return &impl->base;

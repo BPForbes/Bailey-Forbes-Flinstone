@@ -16,6 +16,11 @@ SRCS = common.c util.c terminal.c disk.c disk_asm.c dir_asm.c path_log.c cluster
        priority_queue.c fs_provider.c fs_command.c fs_events.c fs_policy.c \
        fs_chain.c fs_facade.c fs_service_glue.c mem_domain.c vrt.c vfs.c interpreter.c main.c
 SRCS += $(DRIVER_SRCS)
+VM_SRCS = VM/vm.c VM/vm_cpu.c VM/vm_mem.c VM/vm_decode.c VM/vm_io.c VM/vm_loader.c VM/vm_display.c
+ifeq ($(VM_ENABLE),1)
+SRCS += $(VM_SRCS)
+CFLAGS += -DVM_ENABLE=1 -I. -IVM
+endif
 ASMSRCS = mem_asm.s drivers/port_io.s
 # Set USE_ASM_ALLOC=1 to use thread-safe ASM malloc/calloc/free
 # When enabled, batch mode runs single-threaded to avoid allocator/pthread issues
@@ -31,6 +36,11 @@ all: $(TARGET)
 # Bare-metal: use port I/O and VGA (for kernel build, not userspace)
 baremetal: CFLAGS += -DDRIVERS_BAREMETAL=1
 baremetal: $(TARGET)
+
+# With embedded x86 VM: make vm && ./shell -Virtualization -y -vm
+.PHONY: vm
+vm:
+	$(MAKE) VM_ENABLE=1 $(TARGET)
 
 $(TARGET): $(OBJS)
 	$(CC) $(CFLAGS) -o $(TARGET) $(OBJS) $(LDFLAGS)
@@ -58,6 +68,9 @@ alloc/%.o: alloc/%.s
 drivers/%.o: drivers/%.c
 	$(CC) $(CFLAGS) -I. -c $< -o $@
 
+VM/%.o: VM/%.c
+	$(CC) $(CFLAGS) -I. -IVM -c $< -o $@
+
 drivers/port_io.o: drivers/port_io.s
 	$(AS) $(ASFLAGS) -o $@ $<
 
@@ -84,10 +97,14 @@ test_priority_queue: priority_queue.o
 test_core: test_mem_asm test_priority_queue
 	@echo "Core tests done. Run 'make test_alloc_libc' or 'make test_alloc_asm' for allocator."
 
+test_vm_mem: mem_domain.o mem_asm.o VM/vm_mem.o
+	$(CC) $(CFLAGS) $(TEST_SANITIZE) -I. -IVM -o tests/test_vm_mem tests/test_vm_mem.c mem_domain.o mem_asm.o VM/vm_mem.o
+	./tests/test_vm_mem
+
 # Debug build: ASM contract asserts enabled
 debug: CFLAGS += -DMEM_ASM_DEBUG -g
 debug: $(TARGET)
 
 clean:
-	rm -f $(OBJS) $(TEST_OBJS) $(TEST_ASMOBJS) mem_asm.o drivers/*.o alloc/*.o $(TARGET) $(TEST_TARGET)
-	rm -f tests/test_mem_asm tests/test_alloc tests/test_priority_queue
+	rm -f $(OBJS) $(TEST_OBJS) $(TEST_ASMOBJS) mem_asm.o drivers/*.o alloc/*.o VM/*.o $(TARGET) $(TEST_TARGET)
+	rm -f tests/test_mem_asm tests/test_alloc tests/test_priority_queue tests/test_vm_mem

@@ -40,6 +40,8 @@ struct display_driver {
     void (*putchar)(display_driver_t *drv, char c);
     void (*clear)(display_driver_t *drv);
     void (*set_cursor)(display_driver_t *drv, int row, int col);
+    /* VM: refresh from raw VGA buffer (80*25*2 bytes, char+attr per cell) */
+    void (*refresh_vga)(display_driver_t *drv, const void *vga_buf);
     void *impl;
 };
 
