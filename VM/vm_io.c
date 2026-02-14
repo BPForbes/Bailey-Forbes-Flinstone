@@ -1,6 +1,7 @@
 #include "vm_io.h"
 #include "vm_mem.h"
 #include "vm_cpu.h"
+#include "vm_host.h"
 #include "mem_asm.h"
 #include "mem_domain.h"
 #include "drivers/drivers.h"
@@ -17,8 +18,10 @@ static uint8_t s_sector_buf[SECTOR_SIZE];
 static uint32_t s_ide_lba;
 static int s_ide_byte_idx;
 static uint8_t s_pit_mode;
+static vm_host_t *s_host;
 
 void vm_io_init(void) {
+    s_host = NULL;
     asm_mem_zero(s_sector_buf, SECTOR_SIZE);
     s_ide_lba = 0;
     s_ide_byte_idx = SECTOR_SIZE;
@@ -26,6 +29,11 @@ void vm_io_init(void) {
 }
 
 void vm_io_shutdown(void) {
+    s_host = NULL;
+}
+
+void vm_io_set_host(vm_host_t *host) {
+    s_host = host;
 }
 
 static uint8_t vm_io_in_ide(uint32_t port) {
@@ -49,10 +57,17 @@ static uint8_t vm_io_in_ide(uint32_t port) {
 }
 
 static uint8_t vm_io_in_keyboard(uint32_t port) {
-    if (port == 0x60 && g_keyboard_driver && g_keyboard_driver->poll_scancode) {
-        uint8_t sc;
-        if (g_keyboard_driver->poll_scancode(g_keyboard_driver, &sc) == 0)
-            return sc;
+    if (port == 0x60) {
+        if (s_host) {
+            uint8_t sc;
+            if (vm_host_kbd_pop(s_host, &sc) == 0)
+                return sc;
+        }
+        if (g_keyboard_driver && g_keyboard_driver->poll_scancode) {
+            uint8_t sc;
+            if (g_keyboard_driver->poll_scancode(g_keyboard_driver, &sc) == 0)
+                return sc;
+        }
     }
     return 0;
 }

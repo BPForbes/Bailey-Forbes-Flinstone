@@ -16,10 +16,16 @@ SRCS = common.c util.c terminal.c disk.c disk_asm.c dir_asm.c path_log.c cluster
        priority_queue.c fs_provider.c fs_command.c fs_events.c fs_policy.c \
        fs_chain.c fs_facade.c fs_service_glue.c mem_domain.c vrt.c vfs.c interpreter.c main.c
 SRCS += $(DRIVER_SRCS)
-VM_SRCS = VM/vm.c VM/vm_cpu.c VM/vm_mem.c VM/vm_decode.c VM/vm_io.c VM/vm_loader.c VM/vm_display.c
+VM_SRCS = VM/vm.c VM/vm_cpu.c VM/vm_mem.c VM/vm_decode.c VM/vm_io.c VM/vm_loader.c VM/vm_display.c VM/vm_host.c VM/vm_font.c
 ifeq ($(VM_ENABLE),1)
 SRCS += $(VM_SRCS)
 CFLAGS += -DVM_ENABLE=1 -I. -IVM
+endif
+VM_SDL_SRCS = VM/vm_sdl.c
+ifeq ($(VM_SDL),1)
+SRCS += $(VM_SDL_SRCS)
+CFLAGS += -DVM_SDL=1 $(shell pkg-config --cflags sdl2 2>/dev/null)
+LDFLAGS += $(shell pkg-config --libs sdl2 2>/dev/null)
 endif
 ASMSRCS = mem_asm.s drivers/port_io.s
 # Set USE_ASM_ALLOC=1 to use thread-safe ASM malloc/calloc/free
@@ -41,6 +47,11 @@ baremetal: $(TARGET)
 .PHONY: vm
 vm:
 	$(MAKE) VM_ENABLE=1 $(TARGET)
+
+# VM with SDL2 window (WSLg-friendly popup): make vm-sdl
+.PHONY: vm-sdl
+vm-sdl:
+	$(MAKE) VM_ENABLE=1 VM_SDL=1 $(TARGET)
 
 $(TARGET): $(OBJS)
 	$(CC) $(CFLAGS) -o $(TARGET) $(OBJS) $(LDFLAGS)
