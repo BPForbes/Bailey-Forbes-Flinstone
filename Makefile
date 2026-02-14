@@ -22,10 +22,17 @@ SRCS += $(VM_SRCS)
 CFLAGS += -DVM_ENABLE=1 -I. -IVM
 endif
 VM_SDL_SRCS = VM/vm_sdl.c
+DEPS_PREFIX = $(shell [ -d deps/install ] && echo deps/install)
 ifeq ($(VM_SDL),1)
 SRCS += $(VM_SDL_SRCS)
-CFLAGS += -DVM_SDL=1 $(shell pkg-config --cflags sdl2 2>/dev/null)
+CFLAGS += -DVM_SDL=1
+ifneq ($(DEPS_PREFIX),)
+CFLAGS += -I$(DEPS_PREFIX)/include
+LDFLAGS += -L$(DEPS_PREFIX)/lib -lSDL2 -Wl,-rpath,'$$ORIGIN/deps/install/lib'
+else
+CFLAGS += $(shell pkg-config --cflags sdl2 2>/dev/null)
 LDFLAGS += $(shell pkg-config --libs sdl2 2>/dev/null)
+endif
 endif
 ASMSRCS = mem_asm.s drivers/port_io.s
 # Set USE_ASM_ALLOC=1 to use thread-safe ASM malloc/calloc/free
@@ -52,6 +59,12 @@ vm:
 .PHONY: vm-sdl
 vm-sdl:
 	$(MAKE) VM_ENABLE=1 VM_SDL=1 $(TARGET)
+
+# Fetch and build external libs (SDL2) into deps/install. Use when system packages unavailable.
+.PHONY: deps
+deps:
+	@chmod +x deps/fetch-sdl2.sh 2>/dev/null || true
+	@./deps/fetch-sdl2.sh
 
 $(TARGET): $(OBJS)
 	$(CC) $(CFLAGS) -o $(TARGET) $(OBJS) $(LDFLAGS)

@@ -156,7 +156,11 @@ make vm
 make vm-sdl
 ./BPForbes_Flinstone_Shell -Virtualization -y -vm
 ```
-Requires `libsdl2-dev`. Opens a window with the guest VGA buffer. Keyboard events feed the host's input queue.
+SDL2: use system package (`apt install libsdl2-dev`) or fetch locally:
+```bash
+make deps        # Fetches and builds SDL2 into deps/install
+make vm-sdl      # Uses deps/install if present, else pkg-config
+```
 
 ### Run
 
