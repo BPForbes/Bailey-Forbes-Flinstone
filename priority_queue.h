@@ -6,6 +6,17 @@
 #define PQ_NUM_PRIORITIES 4   /* 0=highest, 3=lowest */
 #define PQ_MAX_ITEMS       128
 
+/**
+ * Priority queue for deferred FS/scheduling work.
+ *
+ * INVARIANTS (tested in tests/test_priority_queue.c):
+ * - FIFO tie-break: equal priority => lower seq (pushed first) pops first
+ * - Stable ordering: repeated push/pop preserves insertion order per priority
+ * - Priority: 0 = highest, PQ_NUM_PRIORITIES-1 = lowest
+ *
+ * No aging/priority-boosting; starvation possible if high-priority tasks
+ * constantly arrive. Policy: keep PQ simple; add aging later if needed.
+ */
 typedef void (*task_fn)(void *arg);
 
 typedef struct pq_task {

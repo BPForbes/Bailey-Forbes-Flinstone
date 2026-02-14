@@ -100,9 +100,13 @@ flowchart LR
 | **fs_policy.c / .h** | Access policies (e.g. protected paths) |
 | **fs_service_glue.c / .h** | Service init, `g_fm_service` |
 | **path_log.c / .h** | In-memory path operation log |
-| **priority_queue.c / .h** | Multi-priority task queue |
-| **task_manager.c / .h** | Task manager wrapper |
-| **threadpool.c / .h** | Thread pool for command execution |
+| **priority_queue.c / .h** | Multi-priority task queue (FIFO tie-break) |
+| **task_manager.c / .h** | Task manager — routes to thread pool PQ |
+| **threadpool.c / .h** | PQ-driven thread pool (priority scheduling) |
+| **mem_domain.c / .h** | Memory domains + ASM buffer ops (copy/zero/fill) |
+| **vrt.c / .h** | Virtual Resource Table (handles → resources) |
+| **vfs.c / .h** | VFS: host_vfs, memory_vfs backends |
+| **drivers/driver_caps.h** | Block/keyboard/display capability structs |
 | **terminal.c / .h** | Raw mode terminal (interactive) |
 | **Makefile** | Build (C + ASM), test target |
 
@@ -152,6 +156,20 @@ Interactive mode. For batch:
 ```bash
 make BPForbes_Flinstone_Tests
 ./BPForbes_Flinstone_Tests
+```
+
+**Core ASM + PQ tests** (no CUnit):
+```bash
+make test_mem_asm      # mem_asm vs memcpy/memset
+make test_priority_queue   # PQ invariants (FIFO tie-break, ordering)
+make test_alloc_libc   # allocator with libc
+make test_alloc_asm   # allocator with ASM heap (USE_ASM_ALLOC)
+make test_core        # mem_asm + PQ
+```
+
+**Debug build** (ASM contract asserts):
+```bash
+make debug   # -DMEM_ASM_DEBUG -g
 ```
 
 ## 💬 Command Reference

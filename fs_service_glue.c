@@ -1,11 +1,13 @@
 #include "fs_service_glue.h"
 #include "fs_provider.h"
 #include "fs_events.h"
+#include "vrt.h"
 #include <stdlib.h>
 
 file_manager_service_t *g_fm_service = NULL;
 
 void fs_service_glue_init(void) {
+    vrt_init();
     fs_events_init();
     fs_provider_t *provider = fs_local_provider_create();
     if (provider)
@@ -18,4 +20,5 @@ void fs_service_glue_shutdown(void) {
         g_fm_service = NULL;
     }
     fs_events_shutdown();
+    vrt_shutdown();
 }
