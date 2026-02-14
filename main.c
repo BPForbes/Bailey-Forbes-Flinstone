@@ -268,8 +268,7 @@ int main(int argc, char *argv[]) {
 
     /* Initialize thread pool and signals */
     signal(SIGINT, SIG_IGN);
-    g_pool.head = 0;
-    g_pool.tail = 0;
+    pq_init(&g_pool.pq);
     g_pool.shutting_down = 0;
     pthread_mutex_init(&g_pool.mutex, NULL);
     pthread_cond_init(&g_pool.cond, NULL);

@@ -1,6 +1,7 @@
 /* Block driver - sector-level I/O.
  * Host: uses file I/O. BAREMETAL: would use port_io for IDE. */
 #include "block_driver.h"
+#include "driver_caps.h"
 #include "common.h"
 #include "disk.h"
 #include "disk_asm.h"
@@ -32,6 +33,16 @@ static int host_write_sector(block_driver_t *drv, uint32_t lba, const void *buf)
     return 0;
 }
 
+static int host_get_caps(block_driver_t *drv, block_caps_t *out) {
+    block_host_impl_t *impl = (block_host_impl_t *)drv->impl;
+    if (!out) return -1;
+    out->max_sector = impl->sectors > 0 ? impl->sectors - 1 : 0;
+    out->sector_size = (uint32_t)impl->cluster_size;
+    out->max_transfer = 1;
+    out->flags = CAP_READ | CAP_WRITE;
+    return 0;
+}
+
 block_driver_t *block_driver_create_host(const char *disk_file) {
     const char *path = disk_file ? disk_file : current_disk_file;
     strncpy(current_disk_file, path, sizeof(current_disk_file) - 1);
@@ -41,6 +52,7 @@ block_driver_t *block_driver_create_host(const char *disk_file) {
     if (!impl) return NULL;
     impl->base.read_sector = host_read_sector;
     impl->base.write_sector = host_write_sector;
+    impl->base.get_caps = host_get_caps;
     impl->base.impl = impl;
     impl->fp = fopen(path, "r+b");
     if (!impl->fp) impl->fp = fopen(path, "rb");

@@ -1,5 +1,5 @@
 /* ASM memory primitives for disk buffer operations (x86-64) */
-
+.section .note.GNU-stack,"",@progbits
 .text
 .globl asm_mem_copy
 .globl asm_mem_zero
@@ -62,18 +62,20 @@ asm_mem_zero:
 
 /* void asm_block_fill(void *ptr, unsigned char byte, size_t n) */
 asm_block_fill:
-    movzbl %sil, %esi        /* byte */
+    movzbl %sil, %esi       /* byte in low 8 bits */
     movq %rdx, %r8
     shrq $3, %r8
     testq %r8, %r8
     jz .L_fill_bytes
-    movq %rsi, %r10
+    movq %rsi, %r10         /* r10 = B */
     shlq $8, %r10
-    orq %rsi, %r10
+    orq %rsi, %r10          /* r10 = BB */
+    movq %r10, %r11
     shlq $16, %r10
-    orq %rsi, %r10
+    orq %r11, %r10          /* r10 = BBBB */
+    movq %r10, %r11
     shlq $32, %r10
-    orq %rsi, %r10          /* replicate byte to 64-bit */
+    orq %r11, %r10          /* r10 = BBBBBBBB */
 .L_fill_qwords:
     movq %r10, (%rdi)
     addq $8, %rdi

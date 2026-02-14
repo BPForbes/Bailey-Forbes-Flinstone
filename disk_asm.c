@@ -1,6 +1,7 @@
 #include "disk_asm.h"
 #include "disk.h"
 #include "mem_asm.h"
+#include "mem_domain.h"
 #include "util.h"
 #include <stdio.h>
 #include <stdlib.h>
@@ -42,13 +43,13 @@ int disk_asm_read_cluster(int clu_index, unsigned char *buf) {
 int disk_asm_write_cluster(int clu_index, const unsigned char *buf) {
     if (clu_index < 0 || clu_index >= g_total_clusters)
         return -1;
-    char *hex_str = malloc((size_t)g_cluster_size * 2 + 1);
+    char *hex_str = mem_domain_alloc(MEM_DOMAIN_FS, (size_t)g_cluster_size * 2 + 1);
     if (!hex_str) return -1;
     for (int i = 0; i < g_cluster_size; i++)
         sprintf(hex_str + i * 2, "%02X", buf[i]);
     hex_str[g_cluster_size * 2] = '\0';
     update_cluster_line(clu_index, hex_str);
-    free(hex_str);
+    mem_domain_free(MEM_DOMAIN_FS, hex_str);
     return 0;
 }
 
@@ -56,10 +57,10 @@ int disk_asm_write_cluster(int clu_index, const unsigned char *buf) {
 int disk_asm_zero_cluster(int clu_index) {
     if (clu_index < 0 || clu_index >= g_total_clusters)
         return -1;
-    unsigned char *buf = malloc((size_t)g_cluster_size);
+    unsigned char *buf = mem_domain_alloc(MEM_DOMAIN_FS, (size_t)g_cluster_size);
     if (!buf) return -1;
     asm_mem_zero(buf, (size_t)g_cluster_size);
     int r = disk_asm_write_cluster(clu_index, buf);
-    free(buf);
+    mem_domain_free(MEM_DOMAIN_FS, buf);
     return r;
 }

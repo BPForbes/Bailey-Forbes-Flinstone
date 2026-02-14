@@ -14,7 +14,7 @@ DRIVER_SRCS = drivers/block_driver.c drivers/keyboard_driver.c drivers/display_d
               drivers/timer_driver.c drivers/pic_driver.c drivers/drivers.c
 SRCS = common.c util.c terminal.c disk.c disk_asm.c dir_asm.c path_log.c cluster.c fs.c threadpool.c \
        priority_queue.c fs_provider.c fs_command.c fs_events.c fs_policy.c \
-       fs_chain.c fs_facade.c fs_service_glue.c interpreter.c main.c
+       fs_chain.c fs_facade.c fs_service_glue.c mem_domain.c vrt.c vfs.c interpreter.c main.c
 SRCS += $(DRIVER_SRCS)
 ASMSRCS = mem_asm.s drivers/port_io.s
 # Set USE_ASM_ALLOC=1 to use thread-safe ASM malloc/calloc/free
@@ -38,7 +38,7 @@ $(TARGET): $(OBJS)
 # --- Test Build ---
 # For tests, interpreter.c is directly included in BPForbes_Flinstone_Tests.c.
 TEST_SRCS = BPForbes_Flinstone_Tests.c common.c util.c terminal.c disk.c disk_asm.c dir_asm.c path_log.c cluster.c fs.c threadpool.c \
-            priority_queue.c fs_provider.c fs_command.c fs_events.c fs_policy.c fs_chain.c fs_facade.c fs_service_glue.c
+            priority_queue.c fs_provider.c fs_command.c fs_events.c fs_policy.c fs_chain.c fs_facade.c fs_service_glue.c mem_domain.c vrt.c
 TEST_OBJS = $(TEST_SRCS:.c=.o)
 TEST_ASMOBJS = mem_asm.o
 TEST_TARGET = BPForbes_Flinstone_Tests
@@ -61,5 +61,33 @@ drivers/%.o: drivers/%.c
 drivers/port_io.o: drivers/port_io.s
 	$(AS) $(ASFLAGS) -o $@ $<
 
+# --- ASM + Alloc + PQ unit tests (no CUnit) ---
+# Use -fsanitize when NOT using ASM allocator (libc tests only)
+TEST_SANITIZE = -fsanitize=address,undefined -fno-omit-frame-pointer
+.PHONY: test_mem_asm test_alloc test_priority_queue test_core
+test_mem_asm: mem_asm.o
+	$(CC) $(CFLAGS) $(TEST_SANITIZE) -I. -o tests/test_mem_asm tests/test_mem_asm.c mem_asm.o
+	./tests/test_mem_asm
+
+test_alloc_libc: tests/test_alloc.c
+	$(CC) $(CFLAGS) $(TEST_SANITIZE) -o tests/test_alloc tests/test_alloc.c
+	./tests/test_alloc
+
+test_alloc_asm: alloc/alloc_core.o alloc/alloc_malloc.o alloc/alloc_free.o
+	$(CC) $(CFLAGS) -I. -o tests/test_alloc tests/test_alloc.c alloc/alloc_core.o alloc/alloc_malloc.o alloc/alloc_free.o
+	./tests/test_alloc
+
+test_priority_queue: priority_queue.o
+	$(CC) $(CFLAGS) $(TEST_SANITIZE) -I. -o tests/test_priority_queue tests/test_priority_queue.c priority_queue.o
+	./tests/test_priority_queue
+
+test_core: test_mem_asm test_priority_queue
+	@echo "Core tests done. Run 'make test_alloc_libc' or 'make test_alloc_asm' for allocator."
+
+# Debug build: ASM contract asserts enabled
+debug: CFLAGS += -DMEM_ASM_DEBUG -g
+debug: $(TARGET)
+
 clean:
 	rm -f $(OBJS) $(TEST_OBJS) $(TEST_ASMOBJS) mem_asm.o drivers/*.o alloc/*.o $(TARGET) $(TEST_TARGET)
+	rm -f tests/test_mem_asm tests/test_alloc tests/test_priority_queue

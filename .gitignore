@@ -9,3 +9,6 @@ shell_history.txt
 # Test/generated files
 *_disk.txt
 testfile.txt
+tests/test_alloc
+tests/test_mem_asm
+tests/test_priority_queue

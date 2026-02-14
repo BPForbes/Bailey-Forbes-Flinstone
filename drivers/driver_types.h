@@ -9,11 +9,19 @@
 #define VGA_ROWS     25
 #define VGA_BASE     0xB8000
 
+/**
+ * Driver interfaces: minimal, capability-based.
+ * Each driver exposes only: init/shutdown + minimal read/write/irq hooks.
+ * No driver-specific knowledge leaks into FS/shell layers.
+ */
+
 /* Block device - sector read/write */
+struct block_caps;  /* see driver_caps.h */
 typedef struct block_driver block_driver_t;
 struct block_driver {
     int (*read_sector)(block_driver_t *drv, uint32_t lba, void *buf);
     int (*write_sector)(block_driver_t *drv, uint32_t lba, const void *buf);
+    int (*get_caps)(block_driver_t *drv, struct block_caps *out);
     uint32_t sector_count;
     void *impl;
 };
