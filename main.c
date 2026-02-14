@@ -51,6 +51,7 @@
 #include "fs_service_glue.h"
 #include "path_log.h"
 #include "drivers/drivers.h"
+#include "vm/vm.h"
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -116,6 +117,10 @@ static int parse_vm_args(int argc, char *argv[]) {
         if (eq_ci(argv[i], "-n") && g_vm_mode) {
             continue;
         }
+        if (eq_ci(argv[i], "-vm") && g_vm_mode) {
+            g_vm_run_embedded = 1;
+            continue;
+        }
         argv[out++] = argv[i];
     }
     argv[out] = NULL;
@@ -131,7 +136,7 @@ static int vm_spawn_popup(const char *exe_path) {
     pid_t pid = fork();
     if (pid < 0) return -1;
     if (pid == 0) {
-        char *xterm_argv[] = { "xterm", "-title", "Flintstone VM", "-e", "sh", "-c", cmd, NULL };
+        char *xterm_argv[] = { "xterm", "-title", "Flinstone VM", "-e", "sh", "-c", cmd, NULL };
         execvp("xterm", xterm_argv);
         char *gnome_argv[] = { "gnome-terminal", "--", "sh", "-c", cmd, NULL };
         execvp("gnome-terminal", gnome_argv);
@@ -167,6 +172,23 @@ int main(int argc, char *argv[]) {
             printf("\033c");
             exit(0);
         }
+    }
+
+    /* Embedded VM: -Virtualization -y -vm -> run x86 emulator */
+    if (g_vm_mode && g_vm_run_embedded && argc == 1) {
+        fs_service_glue_init();
+        path_log_init();
+        drivers_init(NULL);
+        printf("[VM] Booting embedded VM...\n");
+        if (vm_boot() == 0) {
+            vm_run();
+            vm_stop();
+            printf("[VM] Halted.\n");
+        } else {
+            fprintf(stderr, "[VM] Boot failed.\n");
+        }
+        fs_service_glue_shutdown();
+        exit(0);
     }
 
     /* VM popup: -Virtualization -y with no other args -> spawn popup once */

@@ -107,6 +107,8 @@ flowchart LR
 | **vrt.c / .h** | Virtual Resource Table (handles → resources) |
 | **vfs.c / .h** | VFS: host_vfs, memory_vfs backends |
 | **drivers/driver_caps.h** | Block/keyboard/display capability structs |
+| **vm/vm.c, vm_cpu.c, vm_mem.c, vm_decode.c, vm_io.c, vm_loader.c** | x86 emulator (VM_ENABLE=1) |
+| **docs/VM_IMPLEMENTATION_PLAN.md** | VM implementation plan |
 | **terminal.c / .h** | Raw mode terminal (interactive) |
 | **Makefile** | Build (C + ASM), test target |
 
@@ -134,9 +136,16 @@ Replaces the system allocator for the process. Use for testing or bare-metal tar
 
 **Bare-metal build** (for bootable kernel, not userspace):
 ```bash
-make CFLAGS="-Wall -Wextra -pthread -DDRIVERS_BAREMETAL=1"
+make baremetal
 ```
 Uses port I/O and VGA directly. Requires bare-metal target.
+
+**Embedded x86 VM** (emulation-based, launches when executable runs):
+```bash
+make vm
+./BPForbes_Flinstone_Shell -Virtualization -y -vm
+```
+Runs minimal x86 guest; outputs "Flinstone VM" to serial (port 0xF8). All memory ops use ASM (asm_mem_copy, asm_mem_zero).
 
 ### Run
 

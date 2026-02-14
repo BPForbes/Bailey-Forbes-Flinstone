@@ -1,0 +1,14 @@
+#ifndef VM_IO_H
+#define VM_IO_H
+
+#include <stdint.h>
+
+struct vm_mem;
+struct vm_cpu;
+
+void vm_io_init(void);
+void vm_io_shutdown(void);
+uint32_t vm_io_in(struct vm_mem *mem, uint32_t port, int size);
+void vm_io_out(struct vm_mem *mem, uint32_t port, uint32_t value, int size);
+
+#endif /* VM_IO_H */

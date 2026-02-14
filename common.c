@@ -8,6 +8,7 @@ char g_cwd[CWD_MAX] = ".";
 
 int g_vm_mode = 0;
 int g_vm_cleanup = 0;
+int g_vm_run_embedded = 0;
 char g_vm_root[CWD_MAX] = "";
 
 int shell_running = 1;
@@ -76,8 +77,8 @@ const char *HELP_MSG =
 "Batch shortcut: ./shell <volume> <rowCount> <nibbleCount> [ -y ]\n"
 "  Equivalent to createdisk with same parameters.\n"
 "\n"
-"Virtualization: ./shell -Virtualization -y [commands...]\n"
-"  -y alone: popup VM window to run commands (once). With commands: run in sandbox.\n"
+"Virtualization: ./shell -Virtualization -y [-vm] [commands...]\n"
+"  -y alone: popup VM window. -vm: run embedded x86 VM. With commands: run in sandbox.\n"
 "\n"
 "Author: Bailey Forbes\n"
 "Date:   03/07/25\n";
