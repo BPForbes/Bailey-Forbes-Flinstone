@@ -27,7 +27,8 @@ flowchart TB
         A["Thin adapters; never touches filesystem directly"]
     end
 
-    subgraph Facade["FileManagerService (Facade)"]
+    subgraph Facade["Facade"]
+        FM["FileManagerService (Facade)"]
         B["fm_list, fm_read_text, fm_save_text"]
         C["fm_create_*, fm_delete, fm_move"]
         D["Undo stack (create/move/write only)"]
