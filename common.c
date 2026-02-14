@@ -6,6 +6,10 @@ int g_total_clusters = 32;
 char current_disk_file[64] = "drive.txt";
 char g_cwd[CWD_MAX] = ".";
 
+int g_vm_mode = 0;
+int g_vm_cleanup = 0;
+char g_vm_root[CWD_MAX] = "";
+
 int shell_running = 1;
 
 int original_stdout_fd = -1;
@@ -67,9 +71,13 @@ const char *HELP_MSG =
 "  where [N], loc [N]    Show path log (last N file/dir operations, default 16)\n"
 "\n"
 "Path support: . = current dir, .. = parent, ./foo = current/foo\n"
+"Undoable: create, move, write. Non-undoable: delete, rmtree.\n"
 "\n"
 "Batch shortcut: ./shell <volume> <rowCount> <nibbleCount> [ -y ]\n"
 "  Equivalent to createdisk with same parameters.\n"
+"\n"
+"Virtualization: ./shell -Virtualization -y [commands...]\n"
+"  -y alone: popup VM window to run commands (once). With commands: run in sandbox.\n"
 "\n"
 "Author: Bailey Forbes\n"
 "Date:   03/07/25\n";

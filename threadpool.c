@@ -37,6 +37,10 @@ void queue_job(job_node *job) {
 }
 
 void submit_single_command(const char *line) {
+#ifdef BATCH_SINGLE_THREAD
+    /* Direct execution: avoids allocator/pthread issues with ASM allocator */
+    (void)execute_command_str(line);
+#else
     job_node *job = create_job(line);
     queue_job(job);
     pthread_mutex_lock(&job->mutex);
@@ -44,6 +48,7 @@ void submit_single_command(const char *line) {
         pthread_cond_wait(&job->cond, &job->mutex);
     pthread_mutex_unlock(&job->mutex);
     free_job(job);
+#endif
 }
 
 void *worker_thread(void *arg) {

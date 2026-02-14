@@ -1,6 +1,8 @@
 #include "priority_queue.h"
 #include <string.h>
 
+static unsigned int pq_global_seq = 0;
+
 void pq_init(priority_queue_t *pq) {
     memset(pq, 0, sizeof(*pq));
 }
@@ -19,16 +21,20 @@ int pq_push(priority_queue_t *pq, int priority, task_fn fn, void *arg) {
     pq->items[i].fn = fn;
     pq->items[i].arg = arg;
     pq->items[i].priority = priority;
+    pq->items[i].seq = pq_global_seq++;
     return 0;
 }
 
-/* Pop highest-priority (lowest number) available task */
+/* Pop highest-priority (lowest number) task; FIFO tie-break for equal priority */
 int pq_pop(priority_queue_t *pq, pq_task_t *out) {
     int best = -1;
     for (int i = 0; i < PQ_MAX_ITEMS; i++) {
         if (pq->items[i].fn == NULL)
             continue;
-        if (best < 0 || pq->items[i].priority < pq->items[best].priority)
+        if (best < 0 ||
+            pq->items[i].priority < pq->items[best].priority ||
+            (pq->items[i].priority == pq->items[best].priority &&
+             pq->items[i].seq < pq->items[best].seq))
             best = i;
     }
     if (best < 0)

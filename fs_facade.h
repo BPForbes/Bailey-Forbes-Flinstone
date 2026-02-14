@@ -9,11 +9,13 @@
 #include "fs_chain.h"
 
 #define FS_UNDO_STACK_MAX 32
+#define FS_SESSION_USER_MAX 32
 
 /* FileManagerService - Facade for UI; never touches filesystem directly */
 typedef struct file_manager_service {
     fs_provider_t *provider;
     fs_access_policy_t *policy;
+    char current_user[FS_SESSION_USER_MAX];  /* Session identity for policy checks */
     fs_validation_chain_t delete_chain;
     fs_validation_chain_t write_chain;
     fs_command_t *undo_stack[FS_UNDO_STACK_MAX];
@@ -24,6 +26,7 @@ typedef struct file_manager_service {
 file_manager_service_t *fm_service_create(fs_provider_t *provider);
 void fm_service_destroy(file_manager_service_t *svc);
 void fm_service_set_policy(file_manager_service_t *svc, fs_access_policy_t *policy);
+void fm_service_set_user(file_manager_service_t *svc, const char *user);
 
 int fm_list(file_manager_service_t *svc, const char *path, fs_node_t **out, int *count);
 int fm_read_text(file_manager_service_t *svc, const char *path, char *buf, size_t bufsiz);

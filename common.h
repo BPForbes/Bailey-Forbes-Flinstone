@@ -27,6 +27,11 @@ extern int g_cluster_size;
 extern int g_total_clusters;
 extern char current_disk_file[64];
 
+/* VM mode: 1 = running in sandboxed temp dir (no writes to host) */
+extern int g_vm_mode;
+extern int g_vm_cleanup;   /* 1 = delete temp dir on exit (-y) */
+extern char g_vm_root[CWD_MAX];
+
 /* Current working directory */
 extern char g_cwd[CWD_MAX];
 

@@ -10,11 +10,19 @@ file_manager_service_t *fm_service_create(fs_provider_t *provider) {
     file_manager_service_t *svc = calloc(1, sizeof(*svc));
     if (!svc) return NULL;
     svc->provider = provider;
+    strncpy(svc->current_user, "user", FS_SESSION_USER_MAX - 1);
+    svc->current_user[FS_SESSION_USER_MAX - 1] = '\0';
     fs_chain_init(&svc->delete_chain);
     fs_chain_init(&svc->write_chain);
     fs_chain_add(&svc->delete_chain, check_policy_delete);
     fs_chain_add(&svc->write_chain, check_policy_write);
     return svc;
+}
+
+void fm_service_set_user(file_manager_service_t *svc, const char *user) {
+    if (!svc || !user) return;
+    strncpy(svc->current_user, user, FS_SESSION_USER_MAX - 1);
+    svc->current_user[FS_SESSION_USER_MAX - 1] = '\0';
 }
 
 void fm_service_destroy(file_manager_service_t *svc) {
@@ -33,7 +41,7 @@ static int check_policy_delete(const char *path, const char *arg2, void *ctx) {
     (void)arg2;
     file_manager_service_t *svc = (file_manager_service_t *)ctx;
     if (!svc->policy || !svc->policy->vtable) return 0;
-    if (!svc->policy->vtable->can_delete(svc->policy, "user", path))
+    if (!svc->policy->vtable->can_delete(svc->policy, svc->current_user, path))
         return -1;  /* denied */
     return 0;
 }
@@ -42,7 +50,7 @@ static int check_policy_write(const char *path, const char *arg2, void *ctx) {
     (void)arg2;
     file_manager_service_t *svc = (file_manager_service_t *)ctx;
     if (!svc->policy || !svc->policy->vtable) return 0;
-    if (!svc->policy->vtable->can_write(svc->policy, "user", path))
+    if (!svc->policy->vtable->can_write(svc->policy, svc->current_user, path))
         return -1;
     return 0;
 }
@@ -114,13 +122,14 @@ int fm_create_dir(file_manager_service_t *svc, const char *path) {
     return r;
 }
 
+/* Delete is non-undoable: we do not push to undo stack */
 int fm_delete(file_manager_service_t *svc, const char *path) {
     if (fs_chain_run(&svc->delete_chain, path, NULL, svc) != 0)
         return -1;
     fs_command_t *cmd = fs_cmd_delete(svc->provider, path);
     if (!cmd) return -1;
     int r = fs_cmd_execute(cmd);
-    fs_cmd_destroy(cmd);
+    fs_cmd_destroy(cmd);  /* Delete: no undo */
     if (r == 0) {
         fs_event_t ev;
         ev.type = FS_EV_FILE_DELETED;
