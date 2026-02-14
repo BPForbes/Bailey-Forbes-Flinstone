@@ -1,10 +1,10 @@
 # Flinstone Project
 
-A low-level C-based file system and shell with hardware-level disk operations and systems-forward architecture. Data lives on hardware-backed storage; ASM primitives drive sector buffers and cluster I/O. Designed for educational use, Flintstone provides real design-pattern structure for file management and a composable path toward production-grade persistence.
+A low-level C-based file system and shell with hardware-level disk operations and systems-forward architecture. Data lives on hardware-backed storage; ASM primitives drive sector buffers and cluster I/O. Designed for educational use, Flinstone provides real design-pattern structure for file management and a composable path toward production-grade persistence.
 
 ## 📚 Overview
 
-The Flintstone Project is a modular operating systems educational project written in C. It provides hardware-level disk operations (cluster read/write/zero via ASM-backed buffers), an interactive shell interface, and design patterns (Facade, Strategy, Command, Observer, Chain of Responsibility) to keep the codebase composable and testable. An x86-64 assembly layer supplies performance-critical memory primitives for sector buffers, cluster clears, and directory entry writes.
+The Flinstone Project is a modular operating systems educational project written in C. It provides hardware-level disk operations (cluster read/write/zero via ASM-backed buffers), an interactive shell interface, and design patterns (Facade, Strategy, Command, Observer, Chain of Responsibility) to keep the codebase composable and testable. An x86-64 assembly layer supplies performance-critical memory primitives for sector buffers, cluster clears, and directory entry writes.
 
 ## ✨ Features
 
@@ -240,7 +240,7 @@ Equivalent to `createdisk` with the same parameters.
 cd /workspace
 mkdir projects/sub
 cd projects
-write sub/readme.txt "Hello Flintstone!"
+write sub/readme.txt "Hello Flinstone!"
 cat sub/readme.txt
 dir .
 mv sub/readme.txt readme.txt
