@@ -25,6 +25,7 @@
 #include "disk.h"
 #include "cluster.h"
 #include "fs.h"
+#include "fs_service_glue.h"
 #include "threadpool.h"
 #include "interpreter.h"
 
@@ -120,10 +121,12 @@ int suite_setup(void) {
     srand(12345);  /* Fixed seed for reproducibility */
     flintstone_format_disk("test_drive", 8, 16);  /* Creates "test_drive_disk.txt" */
     strncpy(current_disk_file, "test_drive_disk.txt", sizeof(current_disk_file)-1);
+    fs_service_glue_init();
     return 0;
 }
 
 int suite_cleanup(void) {
+    fs_service_glue_shutdown();
     /* List of known temporary files */
     const char *files[] = {
          "test_drive_disk.txt",

@@ -1,5 +1,6 @@
 #include "cluster.h"
 #include "disk.h"
+#include "disk_asm.h"
 #include "common.h"
 #include "util.h"
 #include <stdio.h>
@@ -109,15 +110,10 @@ void delete_cluster(int clu) {
         printf("Cluster out of range.\n");
         return;
     }
-    char *hexData = malloc(g_cluster_size * 2 + 1);
-    if (!hexData)
-        return;
-    for (int i = 0; i < g_cluster_size * 2; i++)
-        hexData[i] = '0';
-    hexData[g_cluster_size * 2] = '\0';
-    update_cluster_line(clu, hexData);
-    free(hexData);
-    printf("Cluster %d deleted (zeroed).\n", clu);
+    if (disk_asm_zero_cluster(clu) == 0)
+        printf("Cluster %d deleted (zeroed).\n", clu);
+    else
+        printf("Failed to delete cluster %d.\n", clu);
 }
 
 void show_disk_detail_for_cluster(int clu) {

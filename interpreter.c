@@ -5,6 +5,7 @@
 #include "disk.h"
 #include "cluster.h"
 #include "fs.h"         /* Provides list_files() and list_directories() */
+#include "fs_service_glue.h"
 #include "threadpool.h"
 #include <stdio.h>
 #include <stdlib.h>
@@ -116,7 +117,32 @@ int execute_command_str(const char *line) {
         return 0;
     }
     if (!strncmp(trimmed, "make ", 5)) {
-        do_make_file(trimmed + 5);
+        if (g_fm_service) {
+            char *filename = trim_whitespace(trimmed + 5);
+            if (*filename) {
+                fm_create_file(g_fm_service, filename);
+                printf("Creating file '%s'. Enter lines (end with 'EOF'):\n", filename);
+                char content[4096] = {0};
+                size_t off = 0;
+                char buf[256];
+                while (1) {
+                    printf("file> ");
+                    fflush(stdout);
+                    if (!fgets(buf, sizeof(buf), stdin)) break;
+                    buf[strcspn(buf, "\n")] = '\0';
+                    if (!strcmp(buf, "EOF")) {
+                        printf("Done writing '%s'.\n", filename);
+                        break;
+                    }
+                    if (off + strlen(buf) + 2 < sizeof(content)) {
+                        off += (size_t)snprintf(content + off, sizeof(content) - off, "%s\n", buf);
+                    }
+                }
+                fm_save_text(g_fm_service, filename, content);
+            }
+        } else {
+            do_make_file(trimmed + 5);
+        }
         free(tokenBuf);
         return 0;
     }
@@ -241,8 +267,20 @@ int execute_command_str(const char *line) {
         free(cmdLine);
         return 0;
     } else if (!strcmp(args[0], "-L")) {
-        /* List local directories */
-        list_directories();
+        /* List local directories - use FileManagerService when available */
+        if (g_fm_service) {
+            fs_node_t *nodes;
+            int count;
+            if (fm_list(g_fm_service, ".", &nodes, &count) == 0) {
+                printf("Directories in current path:\n");
+                for (int i = 0; i < count; i++)
+                    if (nodes[i].type == NODE_DIR)
+                        printf("  %s\n", nodes[i].name);
+                fs_nodes_free(nodes, count);
+            }
+        } else {
+            list_directories();
+        }
         free(cmdLine);
         return 0;
     } else if (!strcmp(args[0], "-s")) {
@@ -509,6 +547,68 @@ int execute_command_str(const char *line) {
         }
     } else if (!strcmp(args[0], "-print")) {
         print_disk_formatted();
+        free(cmdLine);
+        return 0;
+    } else if (!strcmp(args[0], "dir")) {
+        const char *path = (argc >= 2 && args[1][0] != '-') ? args[1] : ".";
+        if (g_fm_service) {
+            fs_node_t *nodes;
+            int count;
+            if (fm_list(g_fm_service, path, &nodes, &count) == 0) {
+                printf("Files in '%s':\n", path);
+                for (int i = 0; i < count; i++)
+                    printf("  %s\n", nodes[i].name);
+                fs_nodes_free(nodes, count);
+            } else {
+                printf("Cannot open '%s'\n", path);
+            }
+        } else {
+            list_files(path);
+        }
+        free(cmdLine);
+        return 0;
+    } else if (!strcmp(args[0], "-D")) {
+        if (argc < 2) {
+            printf("Usage: -D <directory>\n");
+            free(cmdLine);
+            return 1;
+        }
+        if (g_fm_service) {
+            if (fm_create_dir(g_fm_service, args[1]) == 0)
+                printf("Directory '%s' created.\n", args[1]);
+            else
+                perror("mkdir");
+        } else {
+            create_directory(args[1]);
+        }
+        free(cmdLine);
+        return 0;
+    } else if (!strcmp(args[0], "-R")) {
+        if (argc < 2) {
+            printf("Usage: -R <directory>\n");
+            free(cmdLine);
+            return 1;
+        }
+        if (remove_directory_recursive(args[1]) == 0) {
+            printf("Directory '%s' removed.\n", args[1]);
+        }
+        free(cmdLine);
+        return 0;
+    } else if (!strcmp(args[0], "cat")) {
+        if (argc < 2) {
+            printf("Usage: cat <filename>\n");
+            free(cmdLine);
+            return 1;
+        }
+        if (g_fm_service) {
+            char buf[4096];
+            if (fm_read_text(g_fm_service, args[1], buf, sizeof(buf)) >= 0)
+                printf("%s", buf);
+            else
+                perror("cat");
+        } else {
+            cat_file(args[1]);
+        }
         free(cmdLine);
         return 0;
     } else if (!strcmp(args[0], "sc")) {
