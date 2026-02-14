@@ -20,11 +20,15 @@
 #define HISTORY_FILE           "shell_history.txt"
 #define NUM_WORKERS            4
 #define MAX_JOBS               64
+#define CWD_MAX                256
 
 /* Global disk parameters */
 extern int g_cluster_size;
 extern int g_total_clusters;
 extern char current_disk_file[64];
+
+/* Current working directory */
+extern char g_cwd[CWD_MAX];
 
 /* Shell state */
 extern int shell_running;

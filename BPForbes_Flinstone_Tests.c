@@ -88,9 +88,9 @@ void ensure_disk_exists(void) {
 void run_cd_test_mode(const char *volume, int rowCount, int nibbleCount, int interactive) {
     char command[256];
     if (interactive)
-         snprintf(command, sizeof(command), "-cd %s %d %d -y", volume, rowCount, nibbleCount);
+         snprintf(command, sizeof(command), "createdisk %s %d %d -y", volume, rowCount, nibbleCount);
     else
-         snprintf(command, sizeof(command), "-cd %s %d %d", volume, rowCount, nibbleCount);
+         snprintf(command, sizeof(command), "createdisk %s %d %d", volume, rowCount, nibbleCount);
 
     CU_ASSERT_TRUE(execute_command_str(command) == 0);
 
@@ -217,15 +217,14 @@ void test_convert_hex_to_ascii(void) {
 void test_help_variants(void) {
     print_test_header("help variants");
     CU_ASSERT_TRUE(execute_command_str("help") == 0);
-    CU_ASSERT_TRUE(execute_command_str("-h") == 0);
-    CU_ASSERT_TRUE(execute_command_str("-?") == 0);
+    CU_ASSERT_TRUE(execute_command_str("help") == 0);
 }
 
 void test_v_command(void) {
     print_test_header("version command");
     pid_t pid = fork();
     if (pid == 0) {
-        execute_command_str("-v -n");
+        execute_command_str("version -n");
         exit(0);
     } else {
         int status;
@@ -237,7 +236,7 @@ void test_v_command(void) {
 void test_l_command(void) {
     print_test_header("list disk (-l)");
     ensure_disk_exists();
-    CU_ASSERT_TRUE(execute_command_str("-l") == 0);
+    CU_ASSERT_TRUE(execute_command_str("listclusters") == 0);
 }
 
 void test_s_command(void) {
@@ -250,7 +249,7 @@ void test_s_command(void) {
         fprintf(fp, "00:41424344\n");
         fclose(fp);
     }
-    CU_ASSERT_TRUE(execute_command_str("-s ABCD") == 0);
+    CU_ASSERT_TRUE(execute_command_str("search ABCD") == 0);
     remove("testdisk.txt");
 }
 
@@ -266,7 +265,7 @@ void test_w_command(void) {
     strcpy(current_disk_file, "testdisk.txt");
     g_total_clusters = 1;
     g_cluster_size = 4;
-    CU_ASSERT_TRUE(execute_command_str("-w 0 -t TEST") == 0);
+    CU_ASSERT_TRUE(execute_command_str("writecluster 0 -t TEST") == 0);
     fp = fopen("testdisk.txt", "r");
     CU_ASSERT_PTR_NOT_NULL(fp);
     if (fp) {
@@ -291,7 +290,7 @@ void test_d_command(void) {
     strcpy(current_disk_file, "testdisk.txt");
     g_total_clusters = 1;
     g_cluster_size = 4;
-    CU_ASSERT_TRUE(execute_command_str("-d 0") == 0);
+    CU_ASSERT_TRUE(execute_command_str("delcluster 0") == 0);
     fp = fopen("testdisk.txt", "r");
     CU_ASSERT_PTR_NOT_NULL(fp);
     if (fp) {
@@ -316,7 +315,7 @@ void test_up_command(void) {
     strcpy(current_disk_file, "testdisk.txt");
     g_total_clusters = 1;
     g_cluster_size = 4;
-    CU_ASSERT_TRUE(execute_command_str("-up 0 -t NEW") == 0);
+    CU_ASSERT_TRUE(execute_command_str("update 0 -t NEW") == 0);
     fp = fopen("testdisk.txt", "r");
     CU_ASSERT_PTR_NOT_NULL(fp);
     if (fp) {
@@ -338,7 +337,7 @@ void test_f_command(void) {
         fprintf(fp, "00:00000000\n");
         fclose(fp);
     }
-    CU_ASSERT_TRUE(execute_command_str("-f mydisk.txt") == 0);
+    CU_ASSERT_TRUE(execute_command_str("setdisk mydisk.txt") == 0);
     CU_ASSERT_TRUE(strcmp(current_disk_file, "mydisk.txt") == 0);
     remove("mydisk.txt");
 }
@@ -354,7 +353,7 @@ void test_F_command(void) {
         }
         fclose(fp);
     }
-    CU_ASSERT_TRUE(execute_command_str("-F tempdisk.txt testvol 4 16") == 0);
+    CU_ASSERT_TRUE(execute_command_str("format tempdisk.txt testvol 4 16") == 0);
     fp = fopen("tempdisk.txt", "r");
     CU_ASSERT_PTR_NOT_NULL(fp);
     if (fp) {
@@ -382,7 +381,7 @@ void test_du_command(void) {
          g_total_clusters = 1;
          g_cluster_size = 4;
     }
-    CU_ASSERT_TRUE(execute_command_str("-du") == 0);
+    CU_ASSERT_TRUE(execute_command_str("du") == 0);
     remove("mydisk.txt");
 }
 
@@ -405,7 +404,7 @@ void test_du_dtl_command(void) {
          g_total_clusters = 2;
          g_cluster_size = 4;
     }
-    CU_ASSERT_TRUE(execute_command_str("-du -dtl 0 1") == 0);
+    CU_ASSERT_TRUE(execute_command_str("du dtl 0 1") == 0);
     remove("mydisk.txt");
 }
 
@@ -427,7 +426,7 @@ void test_type_command(void) {
          free(hex);
          fclose(fp);
     }
-    CU_ASSERT_TRUE(execute_command_str("-type testfile.txt -f test_disk.txt") == 0);
+    CU_ASSERT_TRUE(execute_command_str("type testfile.txt") == 0);
     remove("test_disk.txt");
 }
 
@@ -475,7 +474,7 @@ void test_dir_command(void) {
 void test_D_and_R_commands(void) {
     print_test_header("directory creation and removal (-D and -R)");
     ensure_disk_exists();
-    int ret = execute_command_str("-D test_dir");
+    int ret = execute_command_str("mkdir test_dir");
     struct stat st;
     if (ret != 0) {
         if (stat("test_dir", &st) != 0)
@@ -484,7 +483,7 @@ void test_D_and_R_commands(void) {
             ret = 0;
     }
     CU_ASSERT_TRUE(ret == 0);
-    ret = execute_command_str("-R test_dir");
+    ret = execute_command_str("rmtree test_dir");
     if (ret != 0) {
         ret = (rmdir("test_dir") == 0) ? 0 : ret;
     }
@@ -495,16 +494,16 @@ void test_L_command(void) {
     print_test_header("list local directories (-L)");
     ensure_disk_exists();
     mkdir("dummy_dir", 0755);
-    int ret = execute_command_str("-L");
+    int ret = execute_command_str("listdirs");
     rmdir("dummy_dir");
     CU_ASSERT_TRUE(ret == 0);
 }
 
 void test_O_command(void) {
     print_test_header("redirect output (-O)");
-    CU_ASSERT_TRUE(execute_command_str("-O test_output.txt") == 0);
+    CU_ASSERT_TRUE(execute_command_str("redirect test_output.txt") == 0);
     printf("Redirected output test.\n");
-    CU_ASSERT_TRUE(execute_command_str("-O off") == 0);
+    CU_ASSERT_TRUE(execute_command_str("redirect off") == 0);
     FILE *fp = fopen("test_output.txt", "r");
     CU_ASSERT_PTR_NOT_NULL(fp);
     if (fp) {
@@ -518,7 +517,7 @@ void test_O_command(void) {
 
 void test_init_command(void) {
     print_test_header("initialize disk (-init)");
-    CU_ASSERT_TRUE(execute_command_str("-init 100 64") == 0);
+    CU_ASSERT_TRUE(execute_command_str("initdisk 100 64") == 0);
     CU_ASSERT_TRUE(g_total_clusters == 100);
     CU_ASSERT_TRUE(g_cluster_size == 64);
 }
@@ -531,7 +530,7 @@ void test_uc_command(void) {
          fprintf(fp, "echo UC_Test\n");
          fclose(fp);
     }
-    CU_ASSERT_TRUE(execute_command_str("-uc 1") == 0);
+    CU_ASSERT_TRUE(execute_command_str("rerun 1") == 0);
 }
 
 void test_import_command(void) {
@@ -544,7 +543,7 @@ void test_import_command(void) {
          fprintf(fp, "01:12345678\n");
          fclose(fp);
     }
-    CU_ASSERT_TRUE(execute_command_str("-import text_drive.txt imported_disk.txt") == 0);
+    CU_ASSERT_TRUE(execute_command_str("import text_drive.txt imported_disk.txt") == 0);
     fp = fopen("imported_disk.txt", "r");
     CU_ASSERT_PTR_NOT_NULL(fp);
     if (fp)
@@ -562,7 +561,7 @@ void test_print_command(void) {
          fprintf(fp, "00:11111111\n");
          fclose(fp);
     }
-    CU_ASSERT_TRUE(execute_command_str("-print") == 0);
+    CU_ASSERT_TRUE(execute_command_str("printdisk") == 0);
     remove("mydisk.txt");
 }
 

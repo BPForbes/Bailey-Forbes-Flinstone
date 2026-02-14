@@ -1,6 +1,25 @@
 #include "util.h"
 #include "common.h"
 #include <ctype.h>
+#include <string.h>
+
+void resolve_path(const char *path, char *out, size_t outsize) {
+    if (!path || !out || outsize == 0) return;
+    if (path[0] == '/') {
+        strncpy(out, path, outsize - 1);
+        out[outsize - 1] = '\0';
+        return;
+    }
+    char tmp[CWD_MAX + 256];
+    if (path[0] == '\0' || (path[0] == '.' && (path[1] == '\0' || path[1] == '/'))) {
+        strncpy(out, g_cwd, outsize - 1);
+        out[outsize - 1] = '\0';
+        return;
+    }
+    snprintf(tmp, sizeof(tmp), "%s/%s", g_cwd, path);
+    strncpy(out, tmp, outsize - 1);
+    out[outsize - 1] = '\0';
+}
 
 char *trim_whitespace(char *str) {
     if (!str)

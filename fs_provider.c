@@ -1,5 +1,6 @@
 #include "fs_provider.h"
 #include "common.h"
+#include "dir_asm.h"
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -7,6 +8,20 @@
 #include <sys/stat.h>
 #include <dirent.h>
 #include <unistd.h>
+
+/* Create parent directories for path (mkdir -p style) */
+static int mkdir_parents(const char *path) {
+    char tmp[FS_PATH_MAX];
+    strncpy(tmp, path, sizeof(tmp) - 1);
+    tmp[sizeof(tmp) - 1] = '\0';
+    char *p = strrchr(tmp, '/');
+    if (!p || p == tmp) return 0;
+    *p = '\0';
+    struct stat st;
+    if (stat(tmp, &st) == 0 && S_ISDIR(st.st_mode)) return 0;
+    if (mkdir_parents(tmp) != 0) return -1;
+    return (mkdir(tmp, 0755) == 0) ? 0 : -1;
+}
 
 /* ---------------------------------------------------------------------------
  * LocalFileSystemProvider - uses host filesystem (opendir, fopen, etc.)
@@ -38,7 +53,7 @@ static int local_list(fs_provider_t *p, const char *path, fs_node_t **out, int *
     while ((e = readdir(dp)) && n < 256) {
         if (!strcmp(e->d_name, ".") || !strcmp(e->d_name, ".."))
             continue;
-        memset(&nodes[n], 0, sizeof(nodes[n]));
+        dir_asm_zero(&nodes[n], sizeof(nodes[n]));
         strncpy(nodes[n].name, e->d_name, FS_NAME_MAX - 1);
         nodes[n].type = (e->d_type == DT_DIR) ? NODE_DIR : NODE_FILE;
         if (path && path[0])
@@ -75,6 +90,7 @@ static int local_write_text(fs_provider_t *p, const char *path, const char *cont
 
 static int local_create_file(fs_provider_t *p, const char *path) {
     (void)p;
+    mkdir_parents(path);
     FILE *f = fopen(path, "w");
     if (!f) return -1;
     fclose(f);
@@ -83,6 +99,7 @@ static int local_create_file(fs_provider_t *p, const char *path) {
 
 static int local_create_dir(fs_provider_t *p, const char *path) {
     (void)p;
+    mkdir_parents(path);
     return (mkdir(path, 0755) == 0) ? 0 : -1;
 }
 

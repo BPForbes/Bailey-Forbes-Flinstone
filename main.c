@@ -59,10 +59,22 @@ int main(int argc, char *argv[]) {
     /* Seed the random number generator */
     srand((unsigned) time(NULL));
 
-    /* Batch shortcut: if exactly 3 or 4 parameters and the first parameter does not
-       begin with a dash, treat it as a batch shortcut equivalent to the -cd command.
+    /* Initialize current working directory */
+    if (getcwd(g_cwd, sizeof(g_cwd)) == NULL)
+        g_cwd[0] = '.', g_cwd[1] = '\0';
+
+    /* Batch shortcut: if exactly 4 or 5 parameters and argv[1] is not a known command,
+       treat as createdisk shortcut.
     */
     if ((argc == 4 || argc == 5) && argv[1][0] != '-') {
+        static const char *skip[] = {"help","cd","dir","make","write","cat","type","mkdir","rmdir",
+            "rmtree","mv","version","exit","clear","history","his","cc","listclusters","listdirs",
+            "setdisk","createdisk","format","search","writecluster","delcluster","update","redirect",
+            "initdisk","rerun","import","du","printdisk","addcluster",NULL};
+        int is_cmd = 0;
+        for (int k = 0; skip[k]; k++)
+            if (!strcmp(argv[1], skip[k])) { is_cmd = 1; break; }
+        if (!is_cmd) {
         int rowCount = atoi(argv[2]);
         int nibbleCount = atoi(argv[3]);
         if (rowCount <= 0 || nibbleCount <= 0 || (nibbleCount % 2 != 0)) {
@@ -77,6 +89,7 @@ int main(int argc, char *argv[]) {
         if (argc == 5 && !strcmp(argv[4], "-y"))
             interactive_shell();
         exit(0);
+        }
     }
 
     /* If no command-line arguments are provided, print the help message and exit */
@@ -109,13 +122,12 @@ int main(int argc, char *argv[]) {
         while (i < argc) {
             int tokensCount = 1;
             char *cmd = argv[i];
-            if (!strcmp(cmd, "-?") || !strcmp(cmd, "-h") || !strcmp(cmd, "help") ||
-                !strcmp(cmd, "-l") || !strcmp(cmd, "-M") || !strcmp(cmd, "clear") ||
+            if (!strcmp(cmd, "help") || !strcmp(cmd, "listclusters") || !strcmp(cmd, "clear") ||
                 !strcmp(cmd, "history") || !strcmp(cmd, "his") || !strcmp(cmd, "cc"))
             {
                 tokensCount = 1;
             }
-            else if (!strcmp(cmd, "-v") || !strcmp(cmd, "-V")) {
+            else if (!strcmp(cmd, "version")) {
                 if (i + 1 < argc &&
                     (!strcmp(argv[i + 1], "-y") || !strcmp(argv[i + 1], "-n") ||
                      !strcmp(argv[i + 1], "-Y") || !strcmp(argv[i + 1], "-N"))) {
@@ -135,9 +147,9 @@ int main(int argc, char *argv[]) {
                     continue;
                 }
             }
-            else if (!strcmp(cmd, "-f") || !strcmp(cmd, "-cd"))
+            else if (!strcmp(cmd, "setdisk") || !strcmp(cmd, "createdisk"))
                 tokensCount = ((argc > i+3) ? ((argc > i+4) ? 5 : 4) : 0);
-            else if (!strcmp(cmd, "-F"))
+            else if (!strcmp(cmd, "format"))
                 tokensCount = 5;
             else if (!strcmp(cmd, "dir")) {
                 if (i + 1 < argc && argv[i+1][0] != '-')
@@ -147,22 +159,32 @@ int main(int argc, char *argv[]) {
             }
             else if (!strcmp(cmd, "make"))
                 tokensCount = 2;
-            else if (!strcmp(cmd, "-s") || !strcmp(cmd, "-C") ||
-                     !strcmp(cmd, "-d") || !strcmp(cmd, "-uc") || !strcmp(cmd, "-O"))
+            else if (!strcmp(cmd, "mkdir") || !strcmp(cmd, "rmtree") || !strcmp(cmd, "rmdir"))
                 tokensCount = 2;
-            else if (!strcmp(cmd, "-w"))
-                tokensCount = 4;
-            else if (!strcmp(cmd, "-init"))
+            else if (!strcmp(cmd, "mv"))
                 tokensCount = 3;
-            else if (!strcmp(cmd, "-import")) {
+            else if (!strcmp(cmd, "write"))
+                tokensCount = (argc > i + 2) ? (argc - i) : 0;
+            else if (!strcmp(cmd, "type") || !strcmp(cmd, "cat"))
+                tokensCount = 2;
+            else if (!strcmp(cmd, "search") || !strcmp(cmd, "delcluster") || !strcmp(cmd, "rerun") ||
+                     !strcmp(cmd, "redirect"))
+                tokensCount = 2;
+            else if (!strcmp(cmd, "cd"))
+                tokensCount = (i + 1 < argc && argv[i+1][0] != '-') ? 2 : 1;
+            else if (!strcmp(cmd, "writecluster"))
+                tokensCount = 4;
+            else if (!strcmp(cmd, "initdisk"))
+                tokensCount = 3;
+            else if (!strcmp(cmd, "import")) {
                 if (i + 4 < argc)
                     tokensCount = 5;
                 else
                     tokensCount = 3;
             }
-            else if (!strcmp(cmd, "-up"))
+            else if (!strcmp(cmd, "update"))
                 tokensCount = 4;
-            else if (!strcmp(cmd, "sc")) {
+            else if (!strcmp(cmd, "addcluster")) {
                 if (i + 2 < argc && (!strcmp(argv[i+1], "-t") || !strcmp(argv[i+1], "-h")))
                     tokensCount = 3;
                 else
@@ -170,7 +192,7 @@ int main(int argc, char *argv[]) {
             }
             else {
                 int j = i + 1;
-                while (j < argc && argv[j][0] != '-' && strcmp(argv[j], "make") != 0)
+                while (j < argc && argv[j][0] != '-' && strcmp(argv[j], "make") != 0 && strcmp(argv[j], "write") != 0)
                     j++;
                 tokensCount = j - i;
             }
