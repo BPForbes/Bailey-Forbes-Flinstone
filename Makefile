@@ -18,8 +18,10 @@ SRCS = common.c util.c terminal.c disk.c disk_asm.c dir_asm.c path_log.c cluster
 SRCS += $(DRIVER_SRCS)
 ASMSRCS = mem_asm.s drivers/port_io.s
 # Set USE_ASM_ALLOC=1 to use thread-safe ASM malloc/calloc/free
+# When enabled, batch mode runs single-threaded to avoid allocator/pthread issues
 ifeq ($(USE_ASM_ALLOC),1)
 ASMSRCS += alloc/alloc_core.s alloc/alloc_malloc.s alloc/alloc_free.s
+CFLAGS += -DUSE_ASM_ALLOC=1 -DBATCH_SINGLE_THREAD=1
 endif
 OBJS = $(SRCS:.c=.o) $(ASMSRCS:.s=.o)
 TARGET = BPForbes_Flinstone_Shell
