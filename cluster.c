@@ -3,6 +3,7 @@
 #include "disk_asm.h"
 #include "common.h"
 #include "util.h"
+#include "mem_asm.h"
 #include <stdio.h>
 #include <stdlib.h>
 #include <ctype.h>
@@ -22,7 +23,7 @@ char *convert_data_to_hex(const char *data, int inputIsText, int clusterSize) {
         }
     } else {
         int provided = dataLen < hexLen ? dataLen : hexLen;
-        memcpy(result, data, provided);
+        asm_mem_copy(result, data, (size_t)provided);
         for (int i = provided; i < hexLen; i++)
             result[i] = '0';
         result[hexLen] = '\0';

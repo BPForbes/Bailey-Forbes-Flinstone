@@ -125,8 +125,8 @@ test_alloc_asm: alloc/alloc_core.o alloc/alloc_malloc.o alloc/alloc_free.o
 	$(CC) $(CFLAGS) -I. -o tests/test_alloc tests/test_alloc.c alloc/alloc_core.o alloc/alloc_malloc.o alloc/alloc_free.o
 	./tests/test_alloc
 
-test_priority_queue: priority_queue.o
-	$(CC) $(CFLAGS) $(TEST_SANITIZE) -I. -o tests/test_priority_queue tests/test_priority_queue.c priority_queue.o
+test_priority_queue: priority_queue.o mem_asm.o
+	$(CC) $(CFLAGS) $(TEST_SANITIZE) -I. -o tests/test_priority_queue tests/test_priority_queue.c priority_queue.o mem_asm.o
 	./tests/test_priority_queue
 
 test_core: test_mem_asm test_priority_queue

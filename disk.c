@@ -1,6 +1,7 @@
 #include "disk.h"
 #include "common.h"
 #include "util.h"
+#include "mem_asm.h"
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -177,7 +178,7 @@ void flintstone_format_disk(const char *volumeName, int rowCount, int nibbleCoun
     clusterData[0] = (rowCount > 1) ? 1 : 0;
     int volNameLen = (int)strlen(volumeName);
     int copyLen = (volNameLen < (clusterSize - 1)) ? volNameLen : (clusterSize - 1);
-    memcpy(clusterData + 1, volumeName, copyLen);
+    asm_mem_copy(clusterData + 1, volumeName, (size_t)copyLen);
     char *hexStr = malloc(clusterSize * 2 + 1);
     if (!hexStr) { perror("malloc failed"); exit(1); }
     for (int i = 0; i < clusterSize; i++)
@@ -229,7 +230,7 @@ void format_disk_file(const char *diskFileName, const char *volumeName, int rowC
     clusterData[0] = (rowCount > 1) ? 1 : 0;
     int volNameLen = (int)strlen(volumeName);
     int copyLen = (volNameLen < (clusterSize - 1)) ? volNameLen : (clusterSize - 1);
-    memcpy(clusterData + 1, volumeName, copyLen);
+    asm_mem_copy(clusterData + 1, volumeName, (size_t)copyLen);
     char *hexStr = malloc(clusterSize * 2 + 1);
     if (!hexStr) { perror("malloc failed"); exit(1); }
     for (int i = 0; i < clusterSize; i++)

@@ -6,7 +6,6 @@
 #include "mem_asm.h"
 #include "drivers/driver_types.h"
 #include <stdlib.h>
-#include <string.h>
 
 static const uint8_t s_minimal_guest[] = {
     0xB0, 'F', 0xE6, 0xF8, 0xB0, 'l', 0xE6, 0xF8, 0xB0, 'i', 0xE6, 0xF8,
@@ -24,7 +23,7 @@ static const uint16_t s_vga_msg[] = {
 
 int vm_host_create(vm_host_t *host) {
     if (!host) return -1;
-    memset(host, 0, sizeof(*host));
+    asm_mem_zero(host, sizeof(*host));
     if (vm_mem_init(&host->mem) != 0) return -1;
     vm_cpu_init(&host->cpu);
     host->running = 1;
@@ -42,7 +41,7 @@ int vm_host_create(vm_host_t *host) {
 void vm_host_destroy(vm_host_t *host) {
     if (!host) return;
     vm_mem_destroy(&host->mem);
-    memset(host, 0, sizeof(*host));
+    asm_mem_zero(host, sizeof(*host));
 }
 
 vm_mem_t *vm_host_mem(vm_host_t *host) {

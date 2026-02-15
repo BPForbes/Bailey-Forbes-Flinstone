@@ -211,13 +211,30 @@ All hot-path memory in these modules uses ASM primitives (`asm_mem_copy`, `asm_m
 | `vm_loader` | Binary load into guest RAM |
 | `vm_display` | VGA buffer copy to display |
 | `vm_io` | IDE sector buffer clear/copy |
-| `vm_host` | VGA pre-fill at 0xb8000 |
+| `vm_host` | Host struct zero, VGA pre-fill at 0xb8000 |
+| `vm_disk` | Zero buffer for disk extend |
+| `disk` | Cluster data copy (volume name, format) |
 | `disk_asm` | Cluster buffer zero/fill |
+| `cluster` | Hex conversion copy |
+| `fs` | Cluster hex copy (disk import) |
 | `dir_asm` | Directory buffer copy/zero |
 | `mem_domain` | copy, zero, fill wrappers |
 | `vrt` | Table init/shutdown zero |
+| `priority_queue` | Queue struct init (asm_mem_zero) |
 
 See `mem_asm.h` for overlap rules, alignment, clobbered registers.
+
+### Scheduling (Priority Queue)
+
+All scheduling uses the multi-priority queue:
+
+| Component | PQ usage |
+|-----------|----------|
+| Thread pool (`threadpool.c`) | Shell commands via `pq_push`/`pq_pop`; workers pull by priority |
+| VM (`vm.c`) | vCPU, display refresh, timer ticks via `s_vm_pq` |
+| Task manager | Routes to thread pool PQ via `submit_single_command_priority` |
+
+*Note: With `BATCH_SINGLE_THREAD` (ASM allocator mode), shell runs inline; VM still uses PQ.*
 
 ## 💬 Command Reference
 
