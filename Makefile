@@ -136,10 +136,21 @@ test_vm_mem: mem_domain.o mem_asm.o VM/vm_mem.o
 	$(CC) $(CFLAGS) $(TEST_SANITIZE) -I. -IVM -o tests/test_vm_mem tests/test_vm_mem.c mem_domain.o mem_asm.o VM/vm_mem.o
 	./tests/test_vm_mem
 
+.PHONY: test_replay
+test_replay:
+	$(MAKE) VM_ENABLE=1 BPForbes_Flinstone_Shell
+	$(CC) $(CFLAGS) -DVM_ENABLE=1 -I. -IVM -o tests/test_replay tests/test_replay.c \
+	  common.o util.o terminal.o disk.o disk_asm.o dir_asm.o path_log.o cluster.o fs.o priority_queue.o \
+	  fs_provider.o fs_command.o fs_events.o fs_policy.o fs_chain.o fs_facade.o fs_service_glue.o mem_domain.o vrt.o vfs.o \
+	  drivers/block_driver.o drivers/keyboard_driver.o drivers/display_driver.o drivers/timer_driver.o drivers/pic_driver.o drivers/drivers.o \
+	  VM/vm.o VM/vm_cpu.o VM/vm_mem.o VM/vm_decode.o VM/vm_io.o VM/vm_loader.o VM/vm_display.o VM/vm_host.o VM/vm_font.o VM/vm_disk.o VM/vm_snapshot.o \
+	  mem_asm.o drivers/port_io.o -Wl,-z,noexecstack
+	./tests/test_replay
+
 # Debug build: ASM contract asserts enabled
 debug: CFLAGS += -DMEM_ASM_DEBUG -g
 debug: $(TARGET)
 
 clean:
 	rm -f $(OBJS) $(TEST_OBJS) $(TEST_ASMOBJS) mem_asm.o drivers/*.o alloc/*.o VM/*.o $(TARGET) $(TEST_TARGET)
-	rm -f tests/test_mem_asm tests/test_alloc tests/test_priority_queue tests/test_vm_mem
+	rm -f tests/test_mem_asm tests/test_alloc tests/test_priority_queue tests/test_vm_mem tests/test_replay
