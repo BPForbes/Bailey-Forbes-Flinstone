@@ -81,6 +81,31 @@ static int decode_mov_r32_imm32(uint8_t *mem, uint32_t addr, vm_instr_t *out) {
 
 int vm_decode(uint8_t *mem, uint32_t addr, size_t mem_size, vm_instr_t *out) {
     if (!mem || !out || mem_size < 2) return -1;
+    if (mem[addr] == 0x0F) {
+        /* Two-byte opcode */
+        uint8_t b1 = addr + 1 < mem_size ? mem[addr + 1] : 0;
+        if (b1 == 0x20) { /* MOV r32, CRn */
+            int n = decode_modrm(mem, addr + 2, mem_size, &out->modrm, &out->sib);
+            if (n < 0 || out->modrm.mod != 3) return -1;
+            out->op = VM_OP_MOV_CR;
+            out->dst_reg = out->modrm.reg;
+            out->src_reg = out->modrm.rm;
+            out->imm = 0;  /* 0 = read CR into reg */
+            out->size = 2 + n;
+            return 0;
+        }
+        if (b1 == 0x22) { /* MOV CRn, r32 */
+            int n = decode_modrm(mem, addr + 2, mem_size, &out->modrm, &out->sib);
+            if (n < 0 || out->modrm.mod != 3) return -1;
+            out->op = VM_OP_MOV_CR;
+            out->dst_reg = out->modrm.reg;
+            out->src_reg = out->modrm.rm;
+            out->imm = 1;  /* 1 = write reg to CR */
+            out->size = 2 + n;
+            return 0;
+        }
+        return -1;
+    }
     out->op = VM_OP_UNKNOWN;
     out->dst_reg = out->src_reg = -1;
     out->imm = 0;
@@ -131,6 +156,12 @@ int vm_decode(uint8_t *mem, uint32_t addr, size_t mem_size, vm_instr_t *out) {
         return 0;
     case 0x3C: /* CMP al, imm8 */
         out->op = VM_OP_CMP;
+        out->dst_reg = 0;
+        out->imm = b1;
+        out->size = 2;
+        return 0;
+    case 0xA8: /* TEST al, imm8 */
+        out->op = VM_OP_TEST;
         out->dst_reg = 0;
         out->imm = b1;
         out->size = 2;

@@ -174,6 +174,15 @@ static int execute(vm_cpu_t *cpu, vm_mem_t *mem, vm_instr_t *in) {
             cpu->eflags &= ~0x40;
         return 0;
     }
+    case VM_OP_TEST: {
+        uint8_t al = get_reg8_lo(cpu, 0);
+        uint8_t imm = (uint8_t)(in->imm & 0xFF);
+        if ((al & imm) == 0)
+            cpu->eflags |= 0x40;
+        else
+            cpu->eflags &= ~0x40;
+        return 0;
+    }
     case VM_OP_JZ:
         if (cpu->eflags & 0x40)
             cpu->eip += (int32_t)(int8_t)in->imm + in->size;
