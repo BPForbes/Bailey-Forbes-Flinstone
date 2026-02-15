@@ -109,5 +109,5 @@ void vm_host_dump_registers(const vm_host_t *host, FILE *out) {
     fprintf(out, "EAX=%08X ECX=%08X EDX=%08X EBX=%08X\n", c->eax, c->ecx, c->edx, c->ebx);
     fprintf(out, "ESP=%08X EBP=%08X ESI=%08X EDI=%08X\n", c->esp, c->ebp, c->esi, c->edi);
     fprintf(out, "EIP=%08X CS=%04X DS=%04X SS=%04X ES=%04X\n", c->eip, c->cs & 0xFFFF, c->ds & 0xFFFF, c->ss & 0xFFFF, c->es & 0xFFFF);
-    fprintf(out, "EFLAGS=%08X %s\n", c->eflags, c->halted ? "[HALTED]" : "");
+    fprintf(out, "CR0=%08X CR3=%08X EFLAGS=%08X %s\n", c->cr0, c->cr3, c->eflags, c->halted ? "[HALTED]" : "");
 }

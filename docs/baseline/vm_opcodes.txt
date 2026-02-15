@@ -40,6 +40,20 @@ Implemented opcodes as of baseline. Real-mode, minimal subset.
 | JZ rel8 | JZ / JE | 0x74 cb | Jump if ZF |
 | JNZ rel8 | JNZ / JNE | 0x75 cb | Jump if !ZF |
 
-## Not implemented
+## ModRM group (0x01, 0x03, 0x29, 0x2B, 0x83)
 
-VM_OP_ADD, VM_OP_SUB (enum exists). ModRM-based opcodes, CALL, TEST, AND, OR, XOR, SHL, SHR.
+| Opcode | Mnemonic | Encoding | Notes |
+|--------|----------|---------|-------|
+| ADD r/m32, r32 | ADD | 01 /r | mod=11 only |
+| ADD r32, r/m32 | ADD | 03 /r | mod=11 only |
+| SUB r/m32, r32 | SUB | 29 /r | mod=11 only |
+| SUB r32, r/m32 | SUB | 2B /r | mod=11 only |
+| ADD r/m32, imm8 | ADD | 83 /0 ib | mod=11 only |
+| SUB r/m32, imm8 | SUB | 83 /5 ib | mod=11 only |
+
+## Control registers (0F 20, 0F 22)
+
+| Opcode | Mnemonic | Encoding |
+|--------|----------|---------|
+| MOV r32, CR0/CR3 | MOV | 0F 20 /r |
+| MOV CR0/CR3, r32 | MOV | 0F 22 /r |

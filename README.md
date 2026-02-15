@@ -145,7 +145,7 @@ make vm
 ./BPForbes_Flinstone_Shell -Virtualization -y -vm
 ```
 - **Host layer** (`vm_host`): Parent system maintains VM data (guest RAM, vCPU, keyboard queue)
-- **CPU**: vCPU state, real-mode, minimal opcode subset (MOV, IN, OUT, INT, IRET, STOSB, etc.)
+- **CPU**: vCPU state, real-mode + CR0/CR3; opcodes: MOV, IN, OUT, INT, IRET, STOSB, ADD/SUB (ModRM), INC/DEC, CMP, JZ/JNZ, MOV CR0/CR3
 - **RAM**: 16MB guest RAM via mem_domain + asm_mem_copy/asm_mem_zero
 - **GPU/VGA**: Guest 0xb8000 rendered via display_driver.refresh_vga (ASM copy)
 - **Timer**: PIT ports 0x40–0x43; **PIC**: 0x20, 0x21, 0xA0, 0xA1
@@ -153,6 +153,7 @@ make vm
 - **Timing**: Deterministic virtual tick (vm_host.vm_ticks); PIT reads VM time, not host
 - **Monitor** (SDL): P=pause/resume, S=step, R=reset, C=checkpoint, U=restore checkpoint
 - **Logging**: VM_LOG_LEVEL=0 quiet, 1=info (default), 2=trace
+- **Paging**: CR0.PG, CR3; 32-bit 2-level page tables; asm_mem_copy for PDE/PTE read
 
 **VM with SDL2 window** (WSLg-friendly popup, framebuffer blit):
 ```bash

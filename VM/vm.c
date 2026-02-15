@@ -56,6 +56,10 @@ static uint32_t guest_eip_linear(vm_cpu_t *cpu) {
     return vm_cpu_linear_addr(cpu->cs, cpu->eip);
 }
 
+static uint32_t translate_addr(vm_cpu_t *cpu, vm_mem_t *mem, uint32_t linear) {
+    return vm_cpu_translate(mem->ram, mem->size, cpu->cr0, cpu->cr3, linear);
+}
+
 static int execute(vm_cpu_t *cpu, vm_mem_t *mem, vm_instr_t *in) {
     switch (in->op) {
     case VM_OP_NOP:
@@ -76,12 +80,16 @@ static int execute(vm_cpu_t *cpu, vm_mem_t *mem, vm_instr_t *in) {
     case VM_OP_PUSH: {
         cpu->esp -= 4;
         uint32_t v = get_reg32(cpu, in->dst_reg);
-        vm_mem_write(mem, vm_cpu_linear_addr(cpu->ss, cpu->esp), &v, 4);
+        uint32_t lin = vm_cpu_linear_addr(cpu->ss, cpu->esp);
+        uint32_t phys = translate_addr(cpu, mem, lin);
+        vm_mem_write(mem, phys, &v, 4);
         return 0;
     }
     case VM_OP_POP: {
+        uint32_t lin = vm_cpu_linear_addr(cpu->ss, cpu->esp);
+        uint32_t phys = translate_addr(cpu, mem, lin);
         uint32_t v;
-        vm_mem_read(mem, vm_cpu_linear_addr(cpu->ss, cpu->esp), &v, 4);
+        vm_mem_read(mem, phys, &v, 4);
         cpu->esp += 4;
         set_reg32(cpu, in->dst_reg, v);
         return 0;
@@ -90,39 +98,45 @@ static int execute(vm_cpu_t *cpu, vm_mem_t *mem, vm_instr_t *in) {
         cpu->eip += (int32_t)(int8_t)in->imm + in->size;
         return 0;
     case VM_OP_RET: {
+        uint32_t lin = vm_cpu_linear_addr(cpu->ss, cpu->esp);
+        uint32_t phys = translate_addr(cpu, mem, lin);
         uint16_t ip;
-        vm_mem_read(mem, vm_cpu_linear_addr(cpu->ss, cpu->esp), &ip, 2);
+        vm_mem_read(mem, phys, &ip, 2);
         cpu->esp += 2;
         cpu->eip = ip;
         return 0;
     }
     case VM_OP_INT: {
-        /* Real mode: push FLAGS, CS, IP; load CS:IP from IVT at vector*4 */
         uint16_t flags = (uint16_t)(cpu->eflags & 0xFFFF);
         uint16_t cs = (uint16_t)cpu->cs;
         uint16_t ip = (uint16_t)cpu->eip;
         cpu->esp -= 2;
-        vm_mem_write(mem, vm_cpu_linear_addr(cpu->ss, cpu->esp), &flags, 2);
+        vm_mem_write(mem, translate_addr(cpu, mem, vm_cpu_linear_addr(cpu->ss, cpu->esp)), &flags, 2);
         cpu->esp -= 2;
-        vm_mem_write(mem, vm_cpu_linear_addr(cpu->ss, cpu->esp), &cs, 2);
+        vm_mem_write(mem, translate_addr(cpu, mem, vm_cpu_linear_addr(cpu->ss, cpu->esp)), &cs, 2);
         cpu->esp -= 2;
-        vm_mem_write(mem, vm_cpu_linear_addr(cpu->ss, cpu->esp), &ip, 2);
+        vm_mem_write(mem, translate_addr(cpu, mem, vm_cpu_linear_addr(cpu->ss, cpu->esp)), &ip, 2);
         uint32_t ivt = (uint32_t)(in->imm & 0xFF) * 4;
-        if (ivt + 4 <= mem->size) {
-            vm_mem_read(mem, ivt, &ip, 2);
-            vm_mem_read(mem, ivt + 2, &cs, 2);
+        uint32_t ivt_phys = translate_addr(cpu, mem, ivt);
+        if (ivt_phys + 4 <= mem->size) {
+            vm_mem_read(mem, ivt_phys, &ip, 2);
+            vm_mem_read(mem, ivt_phys + 2, &cs, 2);
             cpu->eip = ip;
             cpu->cs = cs;
         }
         return 0;
     }
     case VM_OP_IRET: {
+        uint32_t lin = vm_cpu_linear_addr(cpu->ss, cpu->esp);
+        uint32_t phys = translate_addr(cpu, mem, lin);
         uint16_t ip, cs, flags;
-        vm_mem_read(mem, vm_cpu_linear_addr(cpu->ss, cpu->esp), &ip, 2);
+        vm_mem_read(mem, phys, &ip, 2);
         cpu->esp += 2;
-        vm_mem_read(mem, vm_cpu_linear_addr(cpu->ss, cpu->esp), &cs, 2);
+        phys = translate_addr(cpu, mem, vm_cpu_linear_addr(cpu->ss, cpu->esp));
+        vm_mem_read(mem, phys, &cs, 2);
         cpu->esp += 2;
-        vm_mem_read(mem, vm_cpu_linear_addr(cpu->ss, cpu->esp), &flags, 2);
+        phys = translate_addr(cpu, mem, vm_cpu_linear_addr(cpu->ss, cpu->esp));
+        vm_mem_read(mem, phys, &flags, 2);
         cpu->esp += 2;
         cpu->eip = ip;
         cpu->cs = cs;
@@ -130,9 +144,10 @@ static int execute(vm_cpu_t *cpu, vm_mem_t *mem, vm_instr_t *in) {
         return 0;
     }
     case VM_OP_STOSB: {
-        uint32_t addr = vm_cpu_linear_addr(cpu->es, (uint32_t)(cpu->edi & 0xFFFF));
+        uint32_t lin = vm_cpu_linear_addr(cpu->es, (uint32_t)(cpu->edi & 0xFFFF));
+        uint32_t phys = translate_addr(cpu, mem, lin);
         uint8_t v = get_reg8_lo(cpu, 0);
-        vm_mem_write8(mem, addr, v);
+        vm_mem_write8(mem, phys, v);
         cpu->edi = (cpu->edi & 0xFFFF0000) | ((cpu->edi + 1) & 0xFFFF);
         return 0;
     }
@@ -185,9 +200,19 @@ static int execute(vm_cpu_t *cpu, vm_mem_t *mem, vm_instr_t *in) {
             cpu->eflags = (cpu->eflags & ~0x40) | ((r == 0) ? 0x40 : 0);
         }
         return 0;
+    case VM_OP_MOV_CR:
+        if (in->imm == 0) {
+            uint32_t crval = (in->dst_reg == 0) ? cpu->cr0 : (in->dst_reg == 3) ? cpu->cr3 : 0;
+            if (in->src_reg >= 0 && in->src_reg < 8) set_reg32(cpu, in->src_reg, crval);
+        } else {
+            uint32_t val = (in->src_reg >= 0 && in->src_reg < 8) ? get_reg32(cpu, in->src_reg) : 0;
+            if (in->dst_reg == 0) cpu->cr0 = val;
+            else if (in->dst_reg == 3) cpu->cr3 = val;
+        }
+        return 0;
     default:
         return -1;
-    }
+}
 }
 
 int vm_boot(void) {
@@ -214,8 +239,9 @@ static int vm_run_step(vm_cpu_t *cpu, vm_mem_t *mem, int max_instructions) {
     int count = 0;
     while (count < max_instructions && !cpu->halted) {
         uint32_t linear = guest_eip_linear(cpu);
-        if (linear + 16 > mem->size) break;
-        if (vm_decode(mem->ram, linear, mem->size, &instr) != 0) break;
+        uint32_t phys = translate_addr(cpu, mem, linear);
+        if (phys + 16 > mem->size) break;
+        if (vm_decode(mem->ram, phys, mem->size, &instr) != 0) break;
         if (execute(cpu, mem, &instr) != 0) break;
         if (instr.op != VM_OP_JMP)
             cpu->eip += instr.size;
