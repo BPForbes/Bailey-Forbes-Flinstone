@@ -15,6 +15,7 @@ typedef enum {
     VM_OP_INC,
     VM_OP_DEC,
     VM_OP_CMP,
+    VM_OP_TEST,
     VM_OP_PUSH,
     VM_OP_POP,
     VM_OP_JMP,
@@ -24,6 +25,7 @@ typedef enum {
     VM_OP_IRET,
     VM_OP_RET,
     VM_OP_STOSB,
+    VM_OP_MOV_CR,
     VM_OP_UNKNOWN,
 } vm_opcode_t;
 

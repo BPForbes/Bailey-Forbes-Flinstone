@@ -37,6 +37,7 @@ Implemented opcodes as of baseline. Real-mode, minimal subset.
 | Opcode | Mnemonic | Encoding | Notes |
 |--------|----------|---------|-------|
 | CMP al, imm8 | CMP | 0x3C ib | Sets ZF |
+| TEST al, imm8 | TEST | 0xA8 ib | Sets ZF (al & imm == 0) |
 | JZ rel8 | JZ / JE | 0x74 cb | Jump if ZF |
 | JNZ rel8 | JNZ / JNE | 0x75 cb | Jump if !ZF |
 

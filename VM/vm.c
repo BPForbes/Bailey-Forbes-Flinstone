@@ -174,6 +174,15 @@ static int execute(vm_cpu_t *cpu, vm_mem_t *mem, vm_instr_t *in) {
             cpu->eflags &= ~0x40;
         return 0;
     }
+    case VM_OP_TEST: {
+        uint8_t al = get_reg8_lo(cpu, 0);
+        uint8_t imm = (uint8_t)(in->imm & 0xFF);
+        if ((al & imm) == 0)
+            cpu->eflags |= 0x40;
+        else
+            cpu->eflags &= ~0x40;
+        return 0;
+    }
     case VM_OP_JZ:
         if (cpu->eflags & 0x40)
             cpu->eip += (int32_t)(int8_t)in->imm + in->size;
@@ -311,6 +320,32 @@ void vm_run(void) {
     vm_io_set_host(NULL);
 }
 
+void vm_run_cycles(unsigned int max_cycles) {
+    vm_cpu_t *cpu = vm_host_cpu(&s_host);
+    vm_io_set_host(&s_host);
+
+    pq_task_t task;
+    s_run_cycles = 0;
+    pq_init(&s_vm_pq);
+    pq_push(&s_vm_pq, PQ_PRIO_CPU, vm_cpu_task_fn, NULL);
+    while (!cpu->halted && s_run_cycles < max_cycles) {
+        if (pq_pop(&s_vm_pq, &task) != 0)
+            break;
+        if (task.fn)
+            task.fn(task.arg);
+        if (task.fn == vm_cpu_task_fn && !cpu->halted) {
+            s_run_cycles++;
+            pq_push(&s_vm_pq, PQ_PRIO_DISPLAY, vm_display_task_fn, NULL);
+            pq_push(&s_vm_pq, PQ_PRIO_CPU, vm_cpu_task_fn, NULL);
+            pq_push(&s_vm_pq, PQ_PRIO_TIMER, vm_timer_task_fn, NULL);
+            if (s_run_cycles % VM_CHECKPOINT_INTERVAL == 0)
+                pq_push(&s_vm_pq, PQ_PRIO_CHECKPOINT, vm_checkpoint_task_fn, NULL);
+        }
+    }
+
+    vm_io_set_host(NULL);
+}
+
 void vm_stop(void) {
     vm_io_set_host(NULL);
     vm_disk_shutdown();
@@ -332,6 +367,26 @@ int vm_save_checkpoint(void) {
 
 int vm_restore_checkpoint(void) {
     return vm_snapshot_restore(&s_host);
+}
+
+int vm_load_disk(const char *path) {
+    if (!path) return -1;
+    vm_disk_shutdown();
+    return vm_disk_init(path, VM_DISK_DEFAULT_SIZE_MB);
+}
+
+uint32_t vm_state_checksum(void) {
+    vm_mem_t *mem = vm_host_mem(&s_host);
+    if (!mem || !mem->ram) return 0;
+    uint32_t sum = 0;
+    const vm_cpu_t *c = &s_host.cpu;
+    sum ^= c->eax ^ c->ecx ^ c->edx ^ c->ebx;
+    sum ^= c->esp ^ c->ebp ^ c->esi ^ c->edi;
+    sum ^= c->eip ^ c->cs ^ c->eflags;
+    sum ^= (uint32_t)s_host.vm_ticks;
+    for (size_t i = 0; i < mem->size && i < 65536; i += 256)
+        sum ^= mem->ram[i];
+    return sum;
 }
 
 #endif

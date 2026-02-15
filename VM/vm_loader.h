@@ -5,6 +5,8 @@
 #include <stddef.h>
 
 #define GUEST_LOAD_ADDR  0x7c00
+#define VM_BOOT_ENTRY_CS 0x07c0
+#define VM_BOOT_ENTRY_IP 0
 
 int vm_load_binary(vm_mem_t *mem, uint32_t addr, const void *data, size_t len);
 int vm_load_file(vm_mem_t *mem, uint32_t addr, const char *path);

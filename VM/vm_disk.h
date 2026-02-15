@@ -12,5 +12,7 @@ void vm_disk_shutdown(void);
 int vm_disk_read_sector(uint32_t lba, void *buf);
 int vm_disk_write_sector(uint32_t lba, const void *buf);
 int vm_disk_is_active(void);
+int vm_disk_snapshot_save(const char *dest_path);
+int vm_disk_snapshot_restore(const char *src_path);
 
 #endif /* VM_DISK_H */

@@ -33,8 +33,8 @@ int vm_host_create(vm_host_t *host) {
     }
     if (GUEST_VGA_BASE + sizeof(s_vga_msg) <= host->mem.size)
         asm_mem_copy(host->mem.ram + GUEST_VGA_BASE, s_vga_msg, sizeof(s_vga_msg));
-    host->cpu.eip = 0;
-    host->cpu.cs = 0x07c0;
+    host->cpu.eip = VM_BOOT_ENTRY_IP;
+    host->cpu.cs = VM_BOOT_ENTRY_CS;
     return 0;
 }
 
@@ -97,8 +97,8 @@ void vm_host_reset(vm_host_t *host) {
     if (GUEST_VGA_BASE + sizeof(s_vga_msg) <= host->mem.size)
         asm_mem_copy(host->mem.ram + GUEST_VGA_BASE, s_vga_msg, sizeof(s_vga_msg));
     vm_cpu_init(&host->cpu);
-    host->cpu.eip = 0;
-    host->cpu.cs = 0x07c0;
+    host->cpu.eip = VM_BOOT_ENTRY_IP;
+    host->cpu.cs = VM_BOOT_ENTRY_CS;
     host->cpu.halted = 0;
     host->paused = 0;
 }

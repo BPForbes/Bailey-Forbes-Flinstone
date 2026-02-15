@@ -7,13 +7,17 @@
 #include <string.h>
 
 #define SECTOR_SIZE 512
+#define VM_DISK_PATH_MAX 256
 
 static FILE *s_vm_disk_fp;
 static uint32_t s_vm_disk_sectors;
+static char s_vm_disk_path[VM_DISK_PATH_MAX];
 
 int vm_disk_init(const char *path, unsigned int size_mb) {
     if (!path || size_mb == 0) return -1;
     vm_disk_shutdown();
+    strncpy(s_vm_disk_path, path, VM_DISK_PATH_MAX - 1);
+    s_vm_disk_path[VM_DISK_PATH_MAX - 1] = '\0';
     s_vm_disk_fp = fopen(path, "r+b");
     if (!s_vm_disk_fp)
         s_vm_disk_fp = fopen(path, "w+b");
@@ -67,4 +71,50 @@ int vm_disk_write_sector(uint32_t lba, const void *buf) {
 
 int vm_disk_is_active(void) {
     return s_vm_disk_fp != NULL;
+}
+
+int vm_disk_snapshot_save(const char *dest_path) {
+    if (!s_vm_disk_fp || !dest_path) return -1;
+    FILE *src = fopen(s_vm_disk_path, "rb");
+    if (!src) return -1;
+    FILE *dst = fopen(dest_path, "wb");
+    if (!dst) { fclose(src); return -1; }
+    size_t size = (size_t)s_vm_disk_sectors * SECTOR_SIZE;
+    void *buf = mem_domain_alloc(MEM_DOMAIN_FS, 65536);
+    if (!buf) { fclose(src); fclose(dst); return -1; }
+    int err = 0;
+    for (size_t n = 0; n < size; n += 65536) {
+        size_t chunk = (size - n) < 65536 ? (size - n) : 65536;
+        if (fread(buf, 1, chunk, src) != chunk) { err = -1; break; }
+        if (fwrite(buf, 1, chunk, dst) != chunk) { err = -1; break; }
+    }
+    mem_domain_free(MEM_DOMAIN_FS, buf);
+    fclose(src);
+    fclose(dst);
+    return err;
+}
+
+int vm_disk_snapshot_restore(const char *src_path) {
+    if (!s_vm_disk_fp || !src_path) return -1;
+    fflush(s_vm_disk_fp);
+    fclose(s_vm_disk_fp);
+    s_vm_disk_fp = NULL;
+    FILE *src = fopen(src_path, "rb");
+    if (!src) return -1;
+    FILE *dst = fopen(s_vm_disk_path, "wb");
+    if (!dst) { fclose(src); return -1; }
+    size_t size = (size_t)s_vm_disk_sectors * SECTOR_SIZE;
+    void *buf = mem_domain_alloc(MEM_DOMAIN_FS, 65536);
+    if (!buf) { fclose(src); fclose(dst); return -1; }
+    int err = 0;
+    for (size_t n = 0; n < size; n += 65536) {
+        size_t chunk = (size - n) < 65536 ? (size - n) : 65536;
+        if (fread(buf, 1, chunk, src) != chunk) { err = -1; break; }
+        if (fwrite(buf, 1, chunk, dst) != chunk) { err = -1; break; }
+    }
+    mem_domain_free(MEM_DOMAIN_FS, buf);
+    fclose(src);
+    fclose(dst);
+    s_vm_disk_fp = fopen(s_vm_disk_path, "r+b");
+    return (s_vm_disk_fp && err == 0) ? 0 : -1;
 }

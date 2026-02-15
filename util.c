@@ -12,7 +12,7 @@ void resolve_path(const char *path, char *out, size_t outsize) {
     if (path[0] == '/') {
         strncpy(full, path, sizeof(full) - 1);
         full[sizeof(full) - 1] = '\0';
-    } else if (path[0] == '\0' || (path[0] == '.' && (path[1] == '\0' || path[1] == '/'))) {
+    } else if (path[0] == '\0' || (path[0] == '.' && path[1] == '\0')) {
         strncpy(out, g_cwd, outsize - 1);
         out[outsize - 1] = '\0';
         return;
