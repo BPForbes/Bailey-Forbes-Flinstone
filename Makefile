@@ -16,7 +16,7 @@ SRCS = common.c util.c terminal.c disk.c disk_asm.c dir_asm.c path_log.c cluster
        priority_queue.c fs_provider.c fs_command.c fs_events.c fs_policy.c \
        fs_chain.c fs_facade.c fs_service_glue.c mem_domain.c vrt.c vfs.c interpreter.c main.c
 SRCS += $(DRIVER_SRCS)
-VM_SRCS = VM/vm.c VM/vm_cpu.c VM/vm_mem.c VM/vm_decode.c VM/vm_io.c VM/vm_loader.c VM/vm_display.c VM/vm_host.c VM/vm_font.c
+VM_SRCS = VM/vm.c VM/vm_cpu.c VM/vm_mem.c VM/vm_decode.c VM/vm_io.c VM/vm_loader.c VM/vm_display.c VM/vm_host.c VM/vm_font.c VM/vm_disk.c
 ifeq ($(VM_ENABLE),1)
 SRCS += $(VM_SRCS)
 CFLAGS += -DVM_ENABLE=1 -I. -IVM

@@ -6,6 +6,7 @@
 #include "vm_io.h"
 #include "vm_loader.h"
 #include "vm_display.h"
+#include "vm_disk.h"
 #include "mem_asm.h"
 #include "priority_queue.h"
 #include "drivers/drivers.h"
@@ -142,6 +143,11 @@ int vm_boot(void) {
         vm_io_shutdown();
         return -1;
     }
+    {
+        const char *path = getenv("VM_DISK_IMAGE");
+        if (!path) path = "vm_disk.img";
+        vm_disk_init(path, VM_DISK_DEFAULT_SIZE_MB);
+    }
 #ifdef VM_SDL
     if (vm_sdl_init() != 0 || vm_sdl_create_window(2) != 0)
         vm_sdl_shutdown();
@@ -217,6 +223,7 @@ void vm_run(void) {
 
 void vm_stop(void) {
     vm_io_set_host(NULL);
+    vm_disk_shutdown();
 #ifdef VM_SDL
     vm_sdl_shutdown();
 #endif

@@ -2,6 +2,7 @@
 #include "vm_mem.h"
 #include "vm_cpu.h"
 #include "vm_host.h"
+#include "vm_disk.h"
 #include "mem_asm.h"
 #include "mem_domain.h"
 #include "drivers/drivers.h"
@@ -38,9 +39,14 @@ void vm_io_set_host(vm_host_t *host) {
 
 static uint8_t vm_io_in_ide(uint32_t port) {
     if (port == 0x1f0) {
-        if (s_ide_byte_idx >= SECTOR_SIZE && g_block_driver && g_block_driver->read_sector) {
-            if (g_block_driver->read_sector(g_block_driver, s_ide_lba, s_sector_buf) != 0)
-                asm_mem_zero(s_sector_buf, SECTOR_SIZE);
+        if (s_ide_byte_idx >= SECTOR_SIZE) {
+            if (vm_disk_is_active()) {
+                if (vm_disk_read_sector(s_ide_lba, s_sector_buf) != 0)
+                    asm_mem_zero(s_sector_buf, SECTOR_SIZE);
+            } else if (g_block_driver && g_block_driver->read_sector) {
+                if (g_block_driver->read_sector(g_block_driver, s_ide_lba, s_sector_buf) != 0)
+                    asm_mem_zero(s_sector_buf, SECTOR_SIZE);
+            }
             s_ide_byte_idx = 0;
         }
         uint8_t v = (s_ide_byte_idx < SECTOR_SIZE) ? s_sector_buf[s_ide_byte_idx] : 0;
@@ -112,7 +118,9 @@ void vm_io_out(vm_mem_t *mem, uint32_t port, uint32_t value, int size) {
                 s_ide_byte_idx = 0;
             s_sector_buf[s_ide_byte_idx++] = (uint8_t)(value & 0xFF);
             if (s_ide_byte_idx >= SECTOR_SIZE) {
-                if (g_block_driver && g_block_driver->write_sector)
+                if (vm_disk_is_active())
+                    vm_disk_write_sector(s_ide_lba, s_sector_buf);
+                else if (g_block_driver && g_block_driver->write_sector)
                     g_block_driver->write_sector(g_block_driver, s_ide_lba, s_sector_buf);
                 asm_mem_zero(s_sector_buf, SECTOR_SIZE);
             }
