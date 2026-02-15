@@ -1,8 +1,12 @@
 /* VM snapshot/checkpoint. ASM for all buffer copy. */
 #include "vm_snapshot.h"
 #include "vm_mem.h"
+#include "vm_disk.h"
 #include "mem_asm.h"
 #include "mem_domain.h"
+#include <string.h>
+
+#define VM_SNAPSHOT_DISK_PATH "vm_checkpoint_disk.img"
 
 static uint8_t *s_ram_copy;
 static size_t s_ram_size;
@@ -32,6 +36,8 @@ int vm_snapshot_save(vm_host_t *host) {
     s_kbd_head = host->kbd_head;
     s_kbd_tail = host->kbd_tail;
     s_ticks_copy = host->vm_ticks;
+    if (vm_disk_is_active())
+        vm_disk_snapshot_save(VM_SNAPSHOT_DISK_PATH);
     s_has_checkpoint = 1;
     return 0;
 }
@@ -47,6 +53,8 @@ int vm_snapshot_restore(vm_host_t *host) {
     host->kbd_head = s_kbd_head;
     host->kbd_tail = s_kbd_tail;
     host->vm_ticks = s_ticks_copy;
+    if (vm_disk_is_active())
+        vm_disk_snapshot_restore(VM_SNAPSHOT_DISK_PATH);
     return 0;
 }
 
@@ -61,4 +69,5 @@ void vm_snapshot_shutdown(void) {
     }
     s_ram_size = 0;
     s_has_checkpoint = 0;
+    /* vm_checkpoint_disk.img left on disk; could remove(VM_SNAPSHOT_DISK_PATH) */
 }

@@ -21,3 +21,6 @@ deps/download
 
 # Local planning (not pushed)
 plan/
+
+# VM checkpoint disk copy
+vm_checkpoint_disk.img
