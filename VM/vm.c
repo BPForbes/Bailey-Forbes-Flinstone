@@ -7,6 +7,7 @@
 #include "vm_loader.h"
 #include "vm_display.h"
 #include "vm_disk.h"
+#include "vm_snapshot.h"
 #include "mem_asm.h"
 #include "priority_queue.h"
 #include "drivers/drivers.h"
@@ -20,12 +21,15 @@
 #ifdef VM_ENABLE
 
 #define VM_QUANTUM 64
+#define VM_CHECKPOINT_INTERVAL 500
 #define PQ_PRIO_CPU 0
 #define PQ_PRIO_DISPLAY 1
 #define PQ_PRIO_TIMER 2
+#define PQ_PRIO_CHECKPOINT 3
 
 static vm_host_t s_host;
 static priority_queue_t s_vm_pq;
+static unsigned s_run_cycles;
 
 static uint32_t get_reg32(vm_cpu_t *cpu, int r) {
     uint32_t *regs[] = { &cpu->eax, &cpu->ecx, &cpu->edx, &cpu->ebx,
@@ -236,6 +240,11 @@ static void vm_timer_task_fn(void *arg) {
     vm_host_tick_advance(&s_host, VM_TICK_STEP);
 }
 
+static void vm_checkpoint_task_fn(void *arg) {
+    (void)arg;
+    vm_snapshot_save(&s_host);
+}
+
 void vm_run(void) {
     vm_cpu_t *cpu = vm_host_cpu(&s_host);
     vm_io_set_host(&s_host);
@@ -254,6 +263,7 @@ void vm_run(void) {
 #endif
     {
         pq_task_t task;
+        s_run_cycles = 0;
         pq_init(&s_vm_pq);
         pq_push(&s_vm_pq, PQ_PRIO_CPU, vm_cpu_task_fn, NULL);
         while (!cpu->halted) {
@@ -262,9 +272,12 @@ void vm_run(void) {
             if (task.fn)
                 task.fn(task.arg);
             if (task.fn == vm_cpu_task_fn && !cpu->halted) {
+                s_run_cycles++;
                 pq_push(&s_vm_pq, PQ_PRIO_DISPLAY, vm_display_task_fn, NULL);
                 pq_push(&s_vm_pq, PQ_PRIO_CPU, vm_cpu_task_fn, NULL);
                 pq_push(&s_vm_pq, PQ_PRIO_TIMER, vm_timer_task_fn, NULL);
+                if (s_run_cycles % VM_CHECKPOINT_INTERVAL == 0)
+                    pq_push(&s_vm_pq, PQ_PRIO_CHECKPOINT, vm_checkpoint_task_fn, NULL);
             }
         }
     }
@@ -275,6 +288,7 @@ void vm_run(void) {
 void vm_stop(void) {
     vm_io_set_host(NULL);
     vm_disk_shutdown();
+    vm_snapshot_shutdown();
 #ifdef VM_SDL
     vm_sdl_shutdown();
 #endif
@@ -284,6 +298,14 @@ void vm_stop(void) {
 
 void vm_step_one(void) {
     vm_run_step(vm_host_cpu(&s_host), vm_host_mem(&s_host), 1);
+}
+
+int vm_save_checkpoint(void) {
+    return vm_snapshot_save(&s_host);
+}
+
+int vm_restore_checkpoint(void) {
+    return vm_snapshot_restore(&s_host);
 }
 
 #endif

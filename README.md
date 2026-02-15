@@ -151,7 +151,7 @@ make vm
 - **Timer**: PIT ports 0x40–0x43; **PIC**: 0x20, 0x21, 0xA0, 0xA1
 - **Scheduling**: Priority queue (PQ) for vCPU quanta, display refresh, timer ticks
 - **Timing**: Deterministic virtual tick (vm_host.vm_ticks); PIT reads VM time, not host
-- **Monitor** (SDL): P=pause/resume, S=step (when paused), R=reset; registers printed on step
+- **Monitor** (SDL): P=pause/resume, S=step, R=reset, C=checkpoint, U=restore checkpoint
 - **Logging**: VM_LOG_LEVEL=0 quiet, 1=info (default), 2=trace
 
 **VM with SDL2 window** (WSLg-friendly popup, framebuffer blit):

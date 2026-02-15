@@ -7,6 +7,8 @@ int vm_boot(void);
 void vm_run(void);
 void vm_stop(void);
 void vm_step_one(void);
+int vm_save_checkpoint(void);
+int vm_restore_checkpoint(void);
 
 #else
 
@@ -14,6 +16,8 @@ static inline int vm_boot(void) { (void)0; return -1; }
 static inline void vm_run(void) { (void)0; }
 static inline void vm_stop(void) { (void)0; }
 static inline void vm_step_one(void) { (void)0; }
+static inline int vm_save_checkpoint(void) { (void)0; return -1; }
+static inline int vm_restore_checkpoint(void) { (void)0; return -1; }
 
 #endif
 

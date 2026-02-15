@@ -4,6 +4,7 @@
 #include "vm_sdl.h"
 #include "vm_host.h"
 #include "vm.h"
+#include "vm_snapshot.h"
 #include "vm_mem.h"
 #include "vm_font.h"
 #include "mem_asm.h"
@@ -152,6 +153,14 @@ int vm_sdl_poll_events(vm_host_t *host) {
             }
             if (sc == SDL_SCANCODE_R) {
                 vm_host_reset(host);
+                continue;
+            }
+            if (sc == SDL_SCANCODE_C && vm_host_is_paused(host)) {
+                vm_save_checkpoint();
+                continue;
+            }
+            if (sc == SDL_SCANCODE_U && vm_host_is_paused(host) && vm_snapshot_has_checkpoint()) {
+                vm_restore_checkpoint();
                 continue;
             }
             if (sc == SDL_SCANCODE_S && vm_host_is_paused(host)) {
