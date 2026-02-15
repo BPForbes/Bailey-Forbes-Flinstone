@@ -112,7 +112,7 @@ drivers/port_io.o: drivers/port_io.s
 # --- ASM + Alloc + PQ unit tests (no CUnit) ---
 # Use -fsanitize when NOT using ASM allocator (libc tests only)
 TEST_SANITIZE = -fsanitize=address,undefined -fno-omit-frame-pointer
-.PHONY: test_mem_asm test_alloc test_priority_queue test_core test_invariants
+.PHONY: test_mem_asm test_alloc test_priority_queue test_core test_invariants check-layers
 test_mem_asm: mem_asm.o
 	$(CC) $(CFLAGS) $(TEST_SANITIZE) -I. -o tests/test_mem_asm tests/test_mem_asm.c mem_asm.o
 	./tests/test_mem_asm
@@ -135,6 +135,9 @@ test_core: test_mem_asm test_priority_queue
 test_invariants: common.o util.o
 	$(CC) $(CFLAGS) $(TEST_SANITIZE) -I. -o tests/test_invariants tests/test_invariants.c common.o util.o
 	./tests/test_invariants
+
+check-layers:
+	@./scripts/check_layers.sh
 
 test_vm_mem: mem_domain.o mem_asm.o VM/vm_mem.o
 	$(CC) $(CFLAGS) $(TEST_SANITIZE) -I. -IVM -o tests/test_vm_mem tests/test_vm_mem.c mem_domain.o mem_asm.o VM/vm_mem.o
