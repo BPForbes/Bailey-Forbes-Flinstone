@@ -196,6 +196,29 @@ make test_core        # mem_asm + PQ
 make debug   # -DMEM_ASM_DEBUG -g
 ```
 
+**Baseline tests**:
+```bash
+./scripts/baseline_tests.sh
+```
+
+### ASM Usage Checklist
+
+All hot-path memory in these modules uses ASM primitives (`asm_mem_copy`, `asm_mem_zero`, `asm_block_fill`):
+
+| Module | Usage |
+|--------|-------|
+| `vm_mem` | Guest RAM init, load, read, write |
+| `vm_loader` | Binary load into guest RAM |
+| `vm_display` | VGA buffer copy to display |
+| `vm_io` | IDE sector buffer clear/copy |
+| `vm_host` | VGA pre-fill at 0xb8000 |
+| `disk_asm` | Cluster buffer zero/fill |
+| `dir_asm` | Directory buffer copy/zero |
+| `mem_domain` | copy, zero, fill wrappers |
+| `vrt` | Table init/shutdown zero |
+
+See `mem_asm.h` for overlap rules, alignment, clobbered registers.
+
 ## 💬 Command Reference
 
 ### Navigation

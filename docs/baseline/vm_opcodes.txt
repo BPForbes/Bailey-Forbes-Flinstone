@@ -1,0 +1,36 @@
+# VM Opcodes (Current Baseline)
+
+Implemented opcodes as of baseline. Real-mode, minimal subset.
+
+## Single-byte
+
+| Opcode | Mnemonic | Encoding | Notes |
+|--------|----------|---------|-------|
+| NOP | NOP | 0x90 | |
+| HLT | HLT | 0xF4 | Stops VM |
+| RET | RET near | 0xC3 | Pop IP from stack |
+| IRET | IRET | 0xCF | Pop IP, CS, FLAGS |
+| STOSB | STOSB | 0xAA | [ES:DI] = AL; DI++ |
+
+## Two-byte
+
+| Opcode | Mnemonic | Encoding | Notes |
+|--------|----------|---------|-------|
+| IN al, imm8 | IN | 0xE4 ib | |
+| OUT imm8, al | OUT | 0xE6 ib | |
+| JMP rel8 | JMP short | 0xEB cb | |
+| INT imm8 | INT | 0xCD ib | |
+
+## Reg+Imm
+
+| Opcode | Mnemonic | Encoding | Notes |
+|--------|----------|---------|-------|
+| MOV r8, imm8 | MOV | 0xB0+r ib | r = 0..7 (AL..BH) |
+| MOV r32, imm32 | MOV | 0xB8+r id | r = 0..7 (EAX..EDI) |
+| PUSH r32 | PUSH | 0x50+r | r = 0..7 |
+| POP r32 | POP | 0x58+r | r = 0..7 |
+
+## Not implemented
+
+VM_OP_ADD, VM_OP_SUB, VM_OP_JZ, VM_OP_JNZ, VM_OP_STOSB (enum exists, STOSB implemented).
+ModRM-based opcodes (MOV mem↔reg), CMP, TEST, conditional jumps, CALL, INC, DEC, AND, OR, XOR, SHL, SHR.
