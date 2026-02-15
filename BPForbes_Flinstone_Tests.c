@@ -26,6 +26,7 @@
 #include "cluster.h"
 #include "fs.h"
 #include "fs_service_glue.h"
+#include "fs_facade.h"
 #include "threadpool.h"
 #include "interpreter.h"
 
@@ -148,7 +149,8 @@ int suite_cleanup(void) {
          "cdinter3_disk.txt",
          "cdinter_extra1_disk.txt",
          "cdinter_extra2_disk.txt",
-         "test_disk.txt"
+         "test_disk.txt",
+         "int_undo_test.txt"
     };
     int num_files = sizeof(files) / sizeof(files[0]);
     for (int i = 0; i < num_files; i++) {
@@ -594,6 +596,31 @@ void test_external_command(void) {
     CU_ASSERT_TRUE(execute_command_str("echo ExternalCommandTest") == 0);
 }
 
+/* ---------------------------------------------------------------------------
+ * Integration tests: storage + scheduler + command undo + error modes
+ * -------------------------------------------------------------------------*/
+void test_integration_undo(void) {
+    print_test_header("integration: create/save/undo");
+    if (!g_fm_service) { CU_ASSERT_TRUE(0); return; }
+    const char *path = "int_undo_test.txt";
+    CU_ASSERT_TRUE(fm_create_file(g_fm_service, path) == 0);
+    CU_ASSERT_TRUE(fm_save_text(g_fm_service, path, "hello") == 0);
+    char buf[64];
+    buf[0] = '\0';
+    fm_read_text(g_fm_service, path, buf, sizeof(buf));
+    CU_ASSERT_TRUE(strstr(buf, "hello") != NULL);
+    CU_ASSERT_TRUE(fm_undo_available(g_fm_service) >= 2);
+    CU_ASSERT_TRUE(fm_undo(g_fm_service) == 0);
+    CU_ASSERT_TRUE(fm_undo(g_fm_service) == 0);
+}
+
+void test_integration_storage(void) {
+    print_test_header("integration: disk storage pipeline");
+    ensure_disk_exists();
+    CU_ASSERT_TRUE(execute_command_str("writecluster 0 -t DATA") == 0);
+    CU_ASSERT_TRUE(execute_command_str("search DATA") == 0);
+}
+
 void test_exit_command(void) {
     print_test_header("exit command");
     pid_t pid = fork();
@@ -659,6 +686,8 @@ int main(void)
     CU_ADD_TEST(suite, test_cc_command);
     CU_ADD_TEST(suite, test_external_command);
     CU_ADD_TEST(suite, test_exit_command);
+    CU_ADD_TEST(suite, test_integration_undo);
+    CU_ADD_TEST(suite, test_integration_storage);
 
     CU_basic_set_mode(CU_BRM_VERBOSE);
     CU_basic_run_tests();

@@ -6,6 +6,8 @@
 #include "vm_io.h"
 #include "vm_loader.h"
 #include "vm_display.h"
+#include "vm_disk.h"
+#include "vm_snapshot.h"
 #include "mem_asm.h"
 #include "priority_queue.h"
 #include "drivers/drivers.h"
@@ -19,12 +21,15 @@
 #ifdef VM_ENABLE
 
 #define VM_QUANTUM 64
+#define VM_CHECKPOINT_INTERVAL 500
 #define PQ_PRIO_CPU 0
 #define PQ_PRIO_DISPLAY 1
 #define PQ_PRIO_TIMER 2
+#define PQ_PRIO_CHECKPOINT 3
 
 static vm_host_t s_host;
 static priority_queue_t s_vm_pq;
+static unsigned s_run_cycles;
 
 static uint32_t get_reg32(vm_cpu_t *cpu, int r) {
     uint32_t *regs[] = { &cpu->eax, &cpu->ecx, &cpu->edx, &cpu->ebx,
@@ -51,6 +56,10 @@ static uint32_t guest_eip_linear(vm_cpu_t *cpu) {
     return vm_cpu_linear_addr(cpu->cs, cpu->eip);
 }
 
+static uint32_t translate_addr(vm_cpu_t *cpu, vm_mem_t *mem, uint32_t linear) {
+    return vm_cpu_translate(mem->ram, mem->size, cpu->cr0, cpu->cr3, linear);
+}
+
 static int execute(vm_cpu_t *cpu, vm_mem_t *mem, vm_instr_t *in) {
     switch (in->op) {
     case VM_OP_NOP:
@@ -71,12 +80,16 @@ static int execute(vm_cpu_t *cpu, vm_mem_t *mem, vm_instr_t *in) {
     case VM_OP_PUSH: {
         cpu->esp -= 4;
         uint32_t v = get_reg32(cpu, in->dst_reg);
-        vm_mem_write(mem, vm_cpu_linear_addr(cpu->ss, cpu->esp), &v, 4);
+        uint32_t lin = vm_cpu_linear_addr(cpu->ss, cpu->esp);
+        uint32_t phys = translate_addr(cpu, mem, lin);
+        vm_mem_write(mem, phys, &v, 4);
         return 0;
     }
     case VM_OP_POP: {
+        uint32_t lin = vm_cpu_linear_addr(cpu->ss, cpu->esp);
+        uint32_t phys = translate_addr(cpu, mem, lin);
         uint32_t v;
-        vm_mem_read(mem, vm_cpu_linear_addr(cpu->ss, cpu->esp), &v, 4);
+        vm_mem_read(mem, phys, &v, 4);
         cpu->esp += 4;
         set_reg32(cpu, in->dst_reg, v);
         return 0;
@@ -85,39 +98,45 @@ static int execute(vm_cpu_t *cpu, vm_mem_t *mem, vm_instr_t *in) {
         cpu->eip += (int32_t)(int8_t)in->imm + in->size;
         return 0;
     case VM_OP_RET: {
+        uint32_t lin = vm_cpu_linear_addr(cpu->ss, cpu->esp);
+        uint32_t phys = translate_addr(cpu, mem, lin);
         uint16_t ip;
-        vm_mem_read(mem, vm_cpu_linear_addr(cpu->ss, cpu->esp), &ip, 2);
+        vm_mem_read(mem, phys, &ip, 2);
         cpu->esp += 2;
         cpu->eip = ip;
         return 0;
     }
     case VM_OP_INT: {
-        /* Real mode: push FLAGS, CS, IP; load CS:IP from IVT at vector*4 */
         uint16_t flags = (uint16_t)(cpu->eflags & 0xFFFF);
         uint16_t cs = (uint16_t)cpu->cs;
         uint16_t ip = (uint16_t)cpu->eip;
         cpu->esp -= 2;
-        vm_mem_write(mem, vm_cpu_linear_addr(cpu->ss, cpu->esp), &flags, 2);
+        vm_mem_write(mem, translate_addr(cpu, mem, vm_cpu_linear_addr(cpu->ss, cpu->esp)), &flags, 2);
         cpu->esp -= 2;
-        vm_mem_write(mem, vm_cpu_linear_addr(cpu->ss, cpu->esp), &cs, 2);
+        vm_mem_write(mem, translate_addr(cpu, mem, vm_cpu_linear_addr(cpu->ss, cpu->esp)), &cs, 2);
         cpu->esp -= 2;
-        vm_mem_write(mem, vm_cpu_linear_addr(cpu->ss, cpu->esp), &ip, 2);
+        vm_mem_write(mem, translate_addr(cpu, mem, vm_cpu_linear_addr(cpu->ss, cpu->esp)), &ip, 2);
         uint32_t ivt = (uint32_t)(in->imm & 0xFF) * 4;
-        if (ivt + 4 <= mem->size) {
-            vm_mem_read(mem, ivt, &ip, 2);
-            vm_mem_read(mem, ivt + 2, &cs, 2);
+        uint32_t ivt_phys = translate_addr(cpu, mem, ivt);
+        if (ivt_phys + 4 <= mem->size) {
+            vm_mem_read(mem, ivt_phys, &ip, 2);
+            vm_mem_read(mem, ivt_phys + 2, &cs, 2);
             cpu->eip = ip;
             cpu->cs = cs;
         }
         return 0;
     }
     case VM_OP_IRET: {
+        uint32_t lin = vm_cpu_linear_addr(cpu->ss, cpu->esp);
+        uint32_t phys = translate_addr(cpu, mem, lin);
         uint16_t ip, cs, flags;
-        vm_mem_read(mem, vm_cpu_linear_addr(cpu->ss, cpu->esp), &ip, 2);
+        vm_mem_read(mem, phys, &ip, 2);
         cpu->esp += 2;
-        vm_mem_read(mem, vm_cpu_linear_addr(cpu->ss, cpu->esp), &cs, 2);
+        phys = translate_addr(cpu, mem, vm_cpu_linear_addr(cpu->ss, cpu->esp));
+        vm_mem_read(mem, phys, &cs, 2);
         cpu->esp += 2;
-        vm_mem_read(mem, vm_cpu_linear_addr(cpu->ss, cpu->esp), &flags, 2);
+        phys = translate_addr(cpu, mem, vm_cpu_linear_addr(cpu->ss, cpu->esp));
+        vm_mem_read(mem, phys, &flags, 2);
         cpu->esp += 2;
         cpu->eip = ip;
         cpu->cs = cs;
@@ -125,15 +144,75 @@ static int execute(vm_cpu_t *cpu, vm_mem_t *mem, vm_instr_t *in) {
         return 0;
     }
     case VM_OP_STOSB: {
-        uint32_t addr = vm_cpu_linear_addr(cpu->es, (uint32_t)(cpu->edi & 0xFFFF));
+        uint32_t lin = vm_cpu_linear_addr(cpu->es, (uint32_t)(cpu->edi & 0xFFFF));
+        uint32_t phys = translate_addr(cpu, mem, lin);
         uint8_t v = get_reg8_lo(cpu, 0);
-        vm_mem_write8(mem, addr, v);
+        vm_mem_write8(mem, phys, v);
         cpu->edi = (cpu->edi & 0xFFFF0000) | ((cpu->edi + 1) & 0xFFFF);
         return 0;
     }
+    case VM_OP_INC: {
+        if (in->dst_reg >= 0 && in->dst_reg < 8) {
+            uint32_t v = get_reg32(cpu, in->dst_reg) + 1;
+            set_reg32(cpu, in->dst_reg, v);
+        }
+        return 0;
+    }
+    case VM_OP_DEC: {
+        if (in->dst_reg >= 0 && in->dst_reg < 8) {
+            uint32_t v = get_reg32(cpu, in->dst_reg) - 1;
+            set_reg32(cpu, in->dst_reg, v);
+        }
+        return 0;
+    }
+    case VM_OP_CMP: {
+        uint8_t al = get_reg8_lo(cpu, 0);
+        uint8_t imm = (uint8_t)(in->imm & 0xFF);
+        if (al == imm)
+            cpu->eflags |= 0x40;
+        else
+            cpu->eflags &= ~0x40;
+        return 0;
+    }
+    case VM_OP_JZ:
+        if (cpu->eflags & 0x40)
+            cpu->eip += (int32_t)(int8_t)in->imm + in->size;
+        return 0;
+    case VM_OP_JNZ:
+        if (!(cpu->eflags & 0x40))
+            cpu->eip += (int32_t)(int8_t)in->imm + in->size;
+        return 0;
+    case VM_OP_ADD:
+        if (in->dst_reg >= 0 && in->dst_reg < 8) {
+            uint32_t a = get_reg32(cpu, in->dst_reg);
+            uint32_t b = (in->src_reg >= 0 && in->src_reg < 8) ? get_reg32(cpu, in->src_reg) : (uint32_t)(int32_t)(int8_t)in->imm;
+            uint32_t r = a + b;
+            set_reg32(cpu, in->dst_reg, r);
+            cpu->eflags = (cpu->eflags & ~0x40) | ((r == 0) ? 0x40 : 0);
+        }
+        return 0;
+    case VM_OP_SUB:
+        if (in->dst_reg >= 0 && in->dst_reg < 8) {
+            uint32_t a = get_reg32(cpu, in->dst_reg);
+            uint32_t b = (in->src_reg >= 0 && in->src_reg < 8) ? get_reg32(cpu, in->src_reg) : (uint32_t)(int32_t)(int8_t)in->imm;
+            uint32_t r = a - b;
+            set_reg32(cpu, in->dst_reg, r);
+            cpu->eflags = (cpu->eflags & ~0x40) | ((r == 0) ? 0x40 : 0);
+        }
+        return 0;
+    case VM_OP_MOV_CR:
+        if (in->imm == 0) {
+            uint32_t crval = (in->dst_reg == 0) ? cpu->cr0 : (in->dst_reg == 3) ? cpu->cr3 : 0;
+            if (in->src_reg >= 0 && in->src_reg < 8) set_reg32(cpu, in->src_reg, crval);
+        } else {
+            uint32_t val = (in->src_reg >= 0 && in->src_reg < 8) ? get_reg32(cpu, in->src_reg) : 0;
+            if (in->dst_reg == 0) cpu->cr0 = val;
+            else if (in->dst_reg == 3) cpu->cr3 = val;
+        }
+        return 0;
     default:
         return -1;
-    }
+}
 }
 
 int vm_boot(void) {
@@ -141,6 +220,11 @@ int vm_boot(void) {
     if (vm_host_create(&s_host) != 0) {
         vm_io_shutdown();
         return -1;
+    }
+    {
+        const char *path = getenv("VM_DISK_IMAGE");
+        if (!path) path = "vm_disk.img";
+        vm_disk_init(path, VM_DISK_DEFAULT_SIZE_MB);
     }
 #ifdef VM_SDL
     if (vm_sdl_init() != 0 || vm_sdl_create_window(2) != 0)
@@ -155,8 +239,9 @@ static int vm_run_step(vm_cpu_t *cpu, vm_mem_t *mem, int max_instructions) {
     int count = 0;
     while (count < max_instructions && !cpu->halted) {
         uint32_t linear = guest_eip_linear(cpu);
-        if (linear + 16 > mem->size) break;
-        if (vm_decode(mem->ram, linear, &instr) != 0) break;
+        uint32_t phys = translate_addr(cpu, mem, linear);
+        if (phys + 16 > mem->size) break;
+        if (vm_decode(mem->ram, phys, mem->size, &instr) != 0) break;
         if (execute(cpu, mem, &instr) != 0) break;
         if (instr.op != VM_OP_JMP)
             cpu->eip += instr.size;
@@ -175,10 +260,15 @@ static void vm_display_task_fn(void *arg) {
     vm_display_refresh(vm_host_mem(&s_host));
 }
 
+#define VM_TICK_STEP 1
 static void vm_timer_task_fn(void *arg) {
     (void)arg;
-    if (g_timer_driver)
-        (void)g_timer_driver->tick_count(g_timer_driver);
+    vm_host_tick_advance(&s_host, VM_TICK_STEP);
+}
+
+static void vm_checkpoint_task_fn(void *arg) {
+    (void)arg;
+    vm_snapshot_save(&s_host);
 }
 
 void vm_run(void) {
@@ -189,7 +279,9 @@ void vm_run(void) {
     if (vm_sdl_is_active()) {
         while (!cpu->halted && !vm_sdl_is_quit()) {
             vm_sdl_poll_events(&s_host);
-            vm_cpu_task_fn(NULL);
+            if (!vm_host_is_paused(&s_host))
+                vm_cpu_task_fn(NULL);
+            vm_host_tick_advance(&s_host, VM_TICK_STEP);
             if (!cpu->halted)
                 vm_sdl_present(&s_host);
         }
@@ -197,6 +289,7 @@ void vm_run(void) {
 #endif
     {
         pq_task_t task;
+        s_run_cycles = 0;
         pq_init(&s_vm_pq);
         pq_push(&s_vm_pq, PQ_PRIO_CPU, vm_cpu_task_fn, NULL);
         while (!cpu->halted) {
@@ -205,9 +298,12 @@ void vm_run(void) {
             if (task.fn)
                 task.fn(task.arg);
             if (task.fn == vm_cpu_task_fn && !cpu->halted) {
+                s_run_cycles++;
                 pq_push(&s_vm_pq, PQ_PRIO_DISPLAY, vm_display_task_fn, NULL);
                 pq_push(&s_vm_pq, PQ_PRIO_CPU, vm_cpu_task_fn, NULL);
                 pq_push(&s_vm_pq, PQ_PRIO_TIMER, vm_timer_task_fn, NULL);
+                if (s_run_cycles % VM_CHECKPOINT_INTERVAL == 0)
+                    pq_push(&s_vm_pq, PQ_PRIO_CHECKPOINT, vm_checkpoint_task_fn, NULL);
             }
         }
     }
@@ -217,11 +313,25 @@ void vm_run(void) {
 
 void vm_stop(void) {
     vm_io_set_host(NULL);
+    vm_disk_shutdown();
+    vm_snapshot_shutdown();
 #ifdef VM_SDL
     vm_sdl_shutdown();
 #endif
     vm_host_destroy(&s_host);
     vm_io_shutdown();
+}
+
+void vm_step_one(void) {
+    vm_run_step(vm_host_cpu(&s_host), vm_host_mem(&s_host), 1);
+}
+
+int vm_save_checkpoint(void) {
+    return vm_snapshot_save(&s_host);
+}
+
+int vm_restore_checkpoint(void) {
+    return vm_snapshot_restore(&s_host);
 }
 
 #endif

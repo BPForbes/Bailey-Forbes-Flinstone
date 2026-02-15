@@ -1,10 +1,11 @@
 #include "priority_queue.h"
-#include <string.h>
+#include "mem_asm.h"
 
 static unsigned int pq_global_seq = 0;
 
 void pq_init(priority_queue_t *pq) {
-    memset(pq, 0, sizeof(*pq));
+    if (pq)
+        asm_mem_zero(pq, sizeof(*pq));
 }
 
 int pq_push(priority_queue_t *pq, int priority, task_fn fn, void *arg) {

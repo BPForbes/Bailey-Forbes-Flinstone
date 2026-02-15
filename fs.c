@@ -1,6 +1,7 @@
 #include "fs.h"
 #include "common.h"
 #include "util.h"
+#include "mem_asm.h"
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -203,7 +204,7 @@ void import_text_drive(const char *textFile, const char *destTxt, int overrideCl
         char *buf = malloc(lenHex + 1);
         if (!buf)
             continue;
-        memcpy(buf, hexData, lenHex);
+        asm_mem_copy(buf, hexData, (size_t)lenHex);
         buf[lenHex] = '\0';
         if (linesStorage[clusterIndex])
             free(linesStorage[clusterIndex]);

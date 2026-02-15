@@ -1,0 +1,59 @@
+# VM Opcodes (Current Baseline)
+
+Implemented opcodes as of baseline. Real-mode, minimal subset.
+
+## Single-byte
+
+| Opcode | Mnemonic | Encoding | Notes |
+|--------|----------|---------|-------|
+| NOP | NOP | 0x90 | |
+| HLT | HLT | 0xF4 | Stops VM |
+| RET | RET near | 0xC3 | Pop IP from stack |
+| IRET | IRET | 0xCF | Pop IP, CS, FLAGS |
+| STOSB | STOSB | 0xAA | [ES:DI] = AL; DI++ |
+
+## Two-byte
+
+| Opcode | Mnemonic | Encoding | Notes |
+|--------|----------|---------|-------|
+| IN al, imm8 | IN | 0xE4 ib | |
+| OUT imm8, al | OUT | 0xE6 ib | |
+| JMP rel8 | JMP short | 0xEB cb | |
+| INT imm8 | INT | 0xCD ib | |
+
+## Reg+Imm
+
+| Opcode | Mnemonic | Encoding | Notes |
+|--------|----------|---------|-------|
+| MOV r8, imm8 | MOV | 0xB0+r ib | r = 0..7 (AL..BH) |
+| MOV r32, imm32 | MOV | 0xB8+r id | r = 0..7 (EAX..EDI) |
+| PUSH r32 | PUSH | 0x50+r | r = 0..7 |
+| POP r32 | POP | 0x58+r | r = 0..7 |
+| INC r32 | INC | 0x40+r | r = 0..7 |
+| DEC r32 | DEC | 0x48+r | r = 0..7 |
+
+## Conditional / Flags
+
+| Opcode | Mnemonic | Encoding | Notes |
+|--------|----------|---------|-------|
+| CMP al, imm8 | CMP | 0x3C ib | Sets ZF |
+| JZ rel8 | JZ / JE | 0x74 cb | Jump if ZF |
+| JNZ rel8 | JNZ / JNE | 0x75 cb | Jump if !ZF |
+
+## ModRM group (0x01, 0x03, 0x29, 0x2B, 0x83)
+
+| Opcode | Mnemonic | Encoding | Notes |
+|--------|----------|---------|-------|
+| ADD r/m32, r32 | ADD | 01 /r | mod=11 only |
+| ADD r32, r/m32 | ADD | 03 /r | mod=11 only |
+| SUB r/m32, r32 | SUB | 29 /r | mod=11 only |
+| SUB r32, r/m32 | SUB | 2B /r | mod=11 only |
+| ADD r/m32, imm8 | ADD | 83 /0 ib | mod=11 only |
+| SUB r/m32, imm8 | SUB | 83 /5 ib | mod=11 only |
+
+## Control registers (0F 20, 0F 22)
+
+| Opcode | Mnemonic | Encoding |
+|--------|----------|---------|
+| MOV r32, CR0/CR3 | MOV | 0F 20 /r |
+| MOV CR0/CR3, r32 | MOV | 0F 22 /r |

@@ -179,11 +179,13 @@ int main(int argc, char *argv[]) {
         fs_service_glue_init();
         path_log_init();
         drivers_init(NULL);
-        printf("[VM] Booting embedded VM...\n");
+        { const char *v = getenv("VM_LOG_LEVEL"); int lvl = v ? atoi(v) : 1;
+          if (lvl >= 1) printf("[VM] Booting embedded VM...\n"); }
         if (vm_boot() == 0) {
             vm_run();
             vm_stop();
-            printf("[VM] Halted.\n");
+            { const char *v = getenv("VM_LOG_LEVEL"); int lvl = v ? atoi(v) : 1;
+              if (lvl >= 1) printf("[VM] Halted.\n"); }
         } else {
             fprintf(stderr, "[VM] Boot failed.\n");
         }

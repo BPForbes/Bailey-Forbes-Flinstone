@@ -16,7 +16,7 @@ SRCS = common.c util.c terminal.c disk.c disk_asm.c dir_asm.c path_log.c cluster
        priority_queue.c fs_provider.c fs_command.c fs_events.c fs_policy.c \
        fs_chain.c fs_facade.c fs_service_glue.c mem_domain.c vrt.c vfs.c interpreter.c main.c
 SRCS += $(DRIVER_SRCS)
-VM_SRCS = VM/vm.c VM/vm_cpu.c VM/vm_mem.c VM/vm_decode.c VM/vm_io.c VM/vm_loader.c VM/vm_display.c VM/vm_host.c VM/vm_font.c
+VM_SRCS = VM/vm.c VM/vm_cpu.c VM/vm_mem.c VM/vm_decode.c VM/vm_io.c VM/vm_loader.c VM/vm_display.c VM/vm_host.c VM/vm_font.c VM/vm_disk.c VM/vm_snapshot.c
 ifeq ($(VM_ENABLE),1)
 SRCS += $(VM_SRCS)
 CFLAGS += -DVM_ENABLE=1 -I. -IVM
@@ -125,8 +125,8 @@ test_alloc_asm: alloc/alloc_core.o alloc/alloc_malloc.o alloc/alloc_free.o
 	$(CC) $(CFLAGS) -I. -o tests/test_alloc tests/test_alloc.c alloc/alloc_core.o alloc/alloc_malloc.o alloc/alloc_free.o
 	./tests/test_alloc
 
-test_priority_queue: priority_queue.o
-	$(CC) $(CFLAGS) $(TEST_SANITIZE) -I. -o tests/test_priority_queue tests/test_priority_queue.c priority_queue.o
+test_priority_queue: priority_queue.o mem_asm.o
+	$(CC) $(CFLAGS) $(TEST_SANITIZE) -I. -o tests/test_priority_queue tests/test_priority_queue.c priority_queue.o mem_asm.o
 	./tests/test_priority_queue
 
 test_core: test_mem_asm test_priority_queue

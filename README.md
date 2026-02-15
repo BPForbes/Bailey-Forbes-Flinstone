@@ -145,11 +145,15 @@ make vm
 ./BPForbes_Flinstone_Shell -Virtualization -y -vm
 ```
 - **Host layer** (`vm_host`): Parent system maintains VM data (guest RAM, vCPU, keyboard queue)
-- **CPU**: vCPU state, real-mode, minimal opcode subset (MOV, IN, OUT, INT, IRET, STOSB, etc.)
+- **CPU**: vCPU state, real-mode + CR0/CR3; opcodes: MOV, IN, OUT, INT, IRET, STOSB, ADD/SUB (ModRM), INC/DEC, CMP, JZ/JNZ, MOV CR0/CR3
 - **RAM**: 16MB guest RAM via mem_domain + asm_mem_copy/asm_mem_zero
 - **GPU/VGA**: Guest 0xb8000 rendered via display_driver.refresh_vga (ASM copy)
 - **Timer**: PIT ports 0x40–0x43; **PIC**: 0x20, 0x21, 0xA0, 0xA1
 - **Scheduling**: Priority queue (PQ) for vCPU quanta, display refresh, timer ticks
+- **Timing**: Deterministic virtual tick (vm_host.vm_ticks); PIT reads VM time, not host
+- **Monitor** (SDL): P=pause/resume, S=step, R=reset, C=checkpoint, U=restore checkpoint
+- **Logging**: VM_LOG_LEVEL=0 quiet, 1=info (default), 2=trace
+- **Paging**: CR0.PG, CR3; 32-bit 2-level page tables; asm_mem_copy for PDE/PTE read
 
 **VM with SDL2 window** (WSLg-friendly popup, framebuffer blit):
 ```bash
@@ -160,6 +164,12 @@ SDL2: use system package (`apt install libsdl2-dev`) or fetch locally:
 ```bash
 make deps        # Fetches and builds SDL2 into deps/install
 make vm-sdl      # Uses deps/install if present, else pkg-config
+```
+
+**WSL one-shot build/run** (install deps + build + run):
+```bash
+./scripts/build_wsl.sh    # apt libsdl2-dev, make vm-sdl
+./scripts/run_vm_wsl.sh   # Launch VM SDL window (WSLg popup)
 ```
 
 ### Run
@@ -195,6 +205,46 @@ make test_core        # mem_asm + PQ
 ```bash
 make debug   # -DMEM_ASM_DEBUG -g
 ```
+
+**Baseline tests**:
+```bash
+./scripts/baseline_tests.sh
+```
+
+### ASM Usage Checklist
+
+All hot-path memory in these modules uses ASM primitives (`asm_mem_copy`, `asm_mem_zero`, `asm_block_fill`):
+
+| Module | Usage |
+|--------|-------|
+| `vm_mem` | Guest RAM init, load, read, write |
+| `vm_loader` | Binary load into guest RAM |
+| `vm_display` | VGA buffer copy to display |
+| `vm_io` | IDE sector buffer clear/copy |
+| `vm_host` | Host struct zero, VGA pre-fill at 0xb8000 |
+| `vm_disk` | Zero buffer for disk extend |
+| `disk` | Cluster data copy (volume name, format) |
+| `disk_asm` | Cluster buffer zero/fill |
+| `cluster` | Hex conversion copy |
+| `fs` | Cluster hex copy (disk import) |
+| `dir_asm` | Directory buffer copy/zero |
+| `mem_domain` | copy, zero, fill wrappers |
+| `vrt` | Table init/shutdown zero |
+| `priority_queue` | Queue struct init (asm_mem_zero) |
+
+See `mem_asm.h` for overlap rules, alignment, clobbered registers.
+
+### Scheduling (Priority Queue)
+
+All scheduling uses the multi-priority queue:
+
+| Component | PQ usage |
+|-----------|----------|
+| Thread pool (`threadpool.c`) | Shell commands via `pq_push`/`pq_pop`; workers pull by priority |
+| VM (`vm.c`) | vCPU, display refresh, timer ticks via `s_vm_pq` |
+| Task manager | Routes to thread pool PQ via `submit_single_command_priority` |
+
+*Note: With `BATCH_SINGLE_THREAD` (ASM allocator mode), shell runs inline; VM still uses PQ.*
 
 ## 💬 Command Reference
 
