@@ -16,10 +16,25 @@ SRCS = common.c util.c terminal.c disk.c disk_asm.c dir_asm.c path_log.c cluster
        priority_queue.c fs_provider.c fs_command.c fs_events.c fs_policy.c \
        fs_chain.c fs_facade.c fs_service_glue.c mem_domain.c vrt.c vfs.c interpreter.c main.c
 SRCS += $(DRIVER_SRCS)
-VM_SRCS = VM/vm.c VM/vm_cpu.c VM/vm_mem.c VM/vm_decode.c VM/vm_io.c VM/vm_loader.c VM/vm_display.c
+VM_SRCS = VM/vm.c VM/vm_cpu.c VM/vm_mem.c VM/vm_decode.c VM/vm_io.c VM/vm_loader.c VM/vm_display.c VM/vm_host.c VM/vm_font.c
 ifeq ($(VM_ENABLE),1)
 SRCS += $(VM_SRCS)
 CFLAGS += -DVM_ENABLE=1 -I. -IVM
+endif
+VM_SDL_SRCS = VM/vm_sdl.c
+DEPS_PREFIX = $(shell [ -d deps/install ] && echo deps/install)
+ifneq ($(DEPS_PREFIX),)
+CFLAGS += -I$(DEPS_PREFIX)/include
+endif
+ifeq ($(VM_SDL),1)
+SRCS += $(VM_SDL_SRCS)
+CFLAGS += -DVM_SDL=1
+ifneq ($(DEPS_PREFIX),)
+LDFLAGS += -L$(DEPS_PREFIX)/lib -lSDL2 -Wl,-rpath,'$$ORIGIN/deps/install/lib'
+else
+CFLAGS += $(shell pkg-config --cflags sdl2 2>/dev/null)
+LDFLAGS += $(shell pkg-config --libs sdl2 2>/dev/null)
+endif
 endif
 ASMSRCS = mem_asm.s drivers/port_io.s
 # Set USE_ASM_ALLOC=1 to use thread-safe ASM malloc/calloc/free
@@ -42,6 +57,23 @@ baremetal: $(TARGET)
 vm:
 	$(MAKE) VM_ENABLE=1 $(TARGET)
 
+# VM with SDL2 window (WSLg-friendly popup): make vm-sdl
+.PHONY: vm-sdl
+vm-sdl:
+	$(MAKE) VM_ENABLE=1 VM_SDL=1 $(TARGET)
+
+# Fetch and build external libs (SDL2, CUnit) into deps/install.
+.PHONY: deps deps-sdl2 deps-cunit
+deps: deps-sdl2 deps-cunit
+
+deps-sdl2:
+	@chmod +x deps/fetch-sdl2.sh 2>/dev/null || true
+	@./deps/fetch-sdl2.sh
+
+deps-cunit:
+	@chmod +x deps/fetch-cunit.sh 2>/dev/null || true
+	@./deps/fetch-cunit.sh
+
 $(TARGET): $(OBJS)
 	$(CC) $(CFLAGS) -o $(TARGET) $(OBJS) $(LDFLAGS)
 
@@ -53,8 +85,11 @@ TEST_OBJS = $(TEST_SRCS:.c=.o)
 TEST_ASMOBJS = mem_asm.o
 TEST_TARGET = BPForbes_Flinstone_Tests
 
+DEPS_RPATH = -Wl,-rpath='$$ORIGIN/deps/install/lib'
+TEST_LDFLAGS = $(if $(DEPS_PREFIX),-L$(DEPS_PREFIX)/lib $(DEPS_RPATH),)
 $(TEST_TARGET): $(TEST_OBJS) $(TEST_ASMOBJS)
-	$(CC) $(CFLAGS) -DUNIT_TEST -o $(TEST_TARGET) $(TEST_OBJS) $(TEST_ASMOBJS) -Wl,-z,noexecstack -lcunit
+	$(CC) $(CFLAGS) -DUNIT_TEST -o $(TEST_TARGET) $(TEST_OBJS) $(TEST_ASMOBJS) -Wl,-z,noexecstack \
+		$(TEST_LDFLAGS) -lcunit
 
 %.o: %.c
 	$(CC) $(CFLAGS) -c $< -o $@

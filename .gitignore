@@ -12,3 +12,9 @@ testfile.txt
 tests/test_alloc
 tests/test_mem_asm
 tests/test_priority_queue
+tests/test_vm_mem
+
+# Fetched/built deps
+deps/install
+deps/build
+deps/download

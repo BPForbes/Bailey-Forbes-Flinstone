@@ -1,6 +1,7 @@
 #include "vm.h"
 #include "vm_mem.h"
 #include "vm_cpu.h"
+#include "vm_host.h"
 #include "vm_decode.h"
 #include "vm_io.h"
 #include "vm_loader.h"
@@ -11,6 +12,10 @@
 #include <stdio.h>
 #include <stdlib.h>
 
+#ifdef VM_SDL
+#include "vm_sdl.h"
+#endif
+
 #ifdef VM_ENABLE
 
 #define VM_QUANTUM 64
@@ -18,8 +23,7 @@
 #define PQ_PRIO_DISPLAY 1
 #define PQ_PRIO_TIMER 2
 
-static vm_mem_t s_mem;
-static vm_cpu_t s_cpu;
+static vm_host_t s_host;
 static priority_queue_t s_vm_pq;
 
 static uint32_t get_reg32(vm_cpu_t *cpu, int r) {
@@ -133,34 +137,15 @@ static int execute(vm_cpu_t *cpu, vm_mem_t *mem, vm_instr_t *in) {
 }
 
 int vm_boot(void) {
-    if (vm_mem_init(&s_mem) != 0) return -1;
-    vm_cpu_init(&s_cpu);
     vm_io_init();
-
-    /* Guest: write "Flinstone VM" to serial, then HLT. VGA pre-filled below. */
-    static const uint8_t minimal_guest[] = {
-        0xB0, 'F', 0xE6, 0xF8, 0xB0, 'l', 0xE6, 0xF8, 0xB0, 'i', 0xE6, 0xF8,
-        0xB0, 'n', 0xE6, 0xF8, 0xB0, 's', 0xE6, 0xF8, 0xB0, 't', 0xE6, 0xF8,
-        0xB0, 'o', 0xE6, 0xF8, 0xB0, 'n', 0xE6, 0xF8, 0xB0, 'e', 0xE6, 0xF8,
-        0xB0, ' ', 0xE6, 0xF8, 0xB0, 'V', 0xE6, 0xF8, 0xB0, 'M', 0xE6, 0xF8,
-        0xB0, '\n', 0xE6, 0xF8,
-        0xF4
-    };
-    if (vm_load_binary(&s_mem, GUEST_LOAD_ADDR, minimal_guest, sizeof(minimal_guest)) != 0) {
-        vm_mem_destroy(&s_mem);
+    if (vm_host_create(&s_host) != 0) {
+        vm_io_shutdown();
         return -1;
     }
-    /* Pre-fill VGA buffer at 0xb8000: "Flinstone VM" (char+attr per cell, ASM) */
-    {
-        static const uint16_t vga_msg[] = {
-            0x0746, 0x076c, 0x0769, 0x076e, 0x0773, 0x0774, 0x076f, 0x076e,
-            0x0765, 0x0720, 0x0756, 0x074d
-        };
-        if (GUEST_VGA_BASE + sizeof(vga_msg) <= s_mem.size)
-            asm_mem_copy(s_mem.ram + GUEST_VGA_BASE, vga_msg, sizeof(vga_msg));
-    }
-    s_cpu.eip = 0;
-    s_cpu.cs = 0x07c0;
+#ifdef VM_SDL
+    if (vm_sdl_init() != 0 || vm_sdl_create_window(2) != 0)
+        vm_sdl_shutdown();
+#endif
     return 0;
 }
 
@@ -182,12 +167,12 @@ static int vm_run_step(vm_cpu_t *cpu, vm_mem_t *mem, int max_instructions) {
 
 static void vm_cpu_task_fn(void *arg) {
     (void)arg;
-    vm_run_step(&s_cpu, &s_mem, VM_QUANTUM);
+    vm_run_step(vm_host_cpu(&s_host), vm_host_mem(&s_host), VM_QUANTUM);
 }
 
 static void vm_display_task_fn(void *arg) {
     (void)arg;
-    vm_display_refresh(&s_mem);
+    vm_display_refresh(vm_host_mem(&s_host));
 }
 
 static void vm_timer_task_fn(void *arg) {
@@ -197,30 +182,46 @@ static void vm_timer_task_fn(void *arg) {
 }
 
 void vm_run(void) {
-    vm_cpu_t *cpu = &s_cpu;
-    pq_task_t task;
+    vm_cpu_t *cpu = vm_host_cpu(&s_host);
+    vm_io_set_host(&s_host);
 
-    pq_init(&s_vm_pq);
-    pq_push(&s_vm_pq, PQ_PRIO_CPU, vm_cpu_task_fn, NULL);
-
-    while (!cpu->halted) {
-        if (pq_pop(&s_vm_pq, &task) != 0)
-            break;
-        if (task.fn)
-            task.fn(task.arg);
-
-        /* Re-schedule after CPU quantum: next display + CPU + timer */
-        if (task.fn == vm_cpu_task_fn && !cpu->halted) {
-            pq_push(&s_vm_pq, PQ_PRIO_DISPLAY, vm_display_task_fn, NULL);
-            pq_push(&s_vm_pq, PQ_PRIO_CPU, vm_cpu_task_fn, NULL);
-            pq_push(&s_vm_pq, PQ_PRIO_TIMER, vm_timer_task_fn, NULL);
+#ifdef VM_SDL
+    if (vm_sdl_is_active()) {
+        while (!cpu->halted && !vm_sdl_is_quit()) {
+            vm_sdl_poll_events(&s_host);
+            vm_cpu_task_fn(NULL);
+            if (!cpu->halted)
+                vm_sdl_present(&s_host);
+        }
+    } else
+#endif
+    {
+        pq_task_t task;
+        pq_init(&s_vm_pq);
+        pq_push(&s_vm_pq, PQ_PRIO_CPU, vm_cpu_task_fn, NULL);
+        while (!cpu->halted) {
+            if (pq_pop(&s_vm_pq, &task) != 0)
+                break;
+            if (task.fn)
+                task.fn(task.arg);
+            if (task.fn == vm_cpu_task_fn && !cpu->halted) {
+                pq_push(&s_vm_pq, PQ_PRIO_DISPLAY, vm_display_task_fn, NULL);
+                pq_push(&s_vm_pq, PQ_PRIO_CPU, vm_cpu_task_fn, NULL);
+                pq_push(&s_vm_pq, PQ_PRIO_TIMER, vm_timer_task_fn, NULL);
+            }
         }
     }
+
+    vm_io_set_host(NULL);
 }
 
 void vm_stop(void) {
+    vm_io_set_host(NULL);
+#ifdef VM_SDL
+    vm_sdl_shutdown();
+#endif
+    vm_host_destroy(&s_host);
     vm_io_shutdown();
-    vm_mem_destroy(&s_mem);
 }
 
 #endif

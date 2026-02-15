@@ -107,7 +107,7 @@ flowchart LR
 | **vrt.c / .h** | Virtual Resource Table (handles → resources) |
 | **vfs.c / .h** | VFS: host_vfs, memory_vfs backends |
 | **drivers/driver_caps.h** | Block/keyboard/display capability structs |
-| **VM/vm.c, vm_cpu.c, vm_mem.c, vm_decode.c, vm_io.c, vm_loader.c, vm_display.c** | x86 emulator (VM_ENABLE=1): CPU, RAM, GPU/VGA, timer, interrupts, PQ scheduling |
+| **VM/vm.c, vm_host.c, vm_sdl.c, vm_font.c, ...** | x86 emulator (VM_ENABLE=1): host owns VM data, SDL2 window (VM_SDL=1), PQ scheduling |
 | **terminal.c / .h** | Raw mode terminal (interactive) |
 | **Makefile** | Build (C + ASM), test target |
 
@@ -117,7 +117,7 @@ flowchart LR
 
 - GCC compiler
 - POSIX-compliant OS (Linux/macOS)
-- (Optional) CUnit for tests: `sudo apt install libcunit1 libcunit1-dev`
+- (Optional) CUnit for tests: `apt install libcunit1-dev` or `make deps-cunit`
 
 ### Build
 
@@ -144,11 +144,23 @@ Uses port I/O and VGA directly. Requires bare-metal target.
 make vm
 ./BPForbes_Flinstone_Shell -Virtualization -y -vm
 ```
+- **Host layer** (`vm_host`): Parent system maintains VM data (guest RAM, vCPU, keyboard queue)
 - **CPU**: vCPU state, real-mode, minimal opcode subset (MOV, IN, OUT, INT, IRET, STOSB, etc.)
 - **RAM**: 16MB guest RAM via mem_domain + asm_mem_copy/asm_mem_zero
 - **GPU/VGA**: Guest 0xb8000 rendered via display_driver.refresh_vga (ASM copy)
 - **Timer**: PIT ports 0x40–0x43; **PIC**: 0x20, 0x21, 0xA0, 0xA1
 - **Scheduling**: Priority queue (PQ) for vCPU quanta, display refresh, timer ticks
+
+**VM with SDL2 window** (WSLg-friendly popup, framebuffer blit):
+```bash
+make vm-sdl
+./BPForbes_Flinstone_Shell -Virtualization -y -vm
+```
+SDL2: use system package (`apt install libsdl2-dev`) or fetch locally:
+```bash
+make deps        # Fetches and builds SDL2 into deps/install
+make vm-sdl      # Uses deps/install if present, else pkg-config
+```
 
 ### Run
 
