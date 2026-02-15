@@ -1,5 +1,9 @@
 #include "vm_decode.h"
 
+/* Decode structure: primary opcode switch + range handlers for reg+imm forms.
+ * To add opcodes: extend switch for fixed byte(s), or add range check (0x40+r etc).
+ * Future: ModRM/SIB decode table for group opcodes. */
+
 static int decode_mov_r8_imm8(uint8_t *mem, uint32_t addr, vm_instr_t *out) {
     uint8_t op = mem[addr];
     int reg = op - 0xB0;
@@ -71,10 +75,38 @@ int vm_decode(uint8_t *mem, uint32_t addr, vm_instr_t *out) {
     case 0xAA: /* STOSB */
         out->op = VM_OP_STOSB;
         return 0;
+    case 0x3C: /* CMP al, imm8 */
+        out->op = VM_OP_CMP;
+        out->dst_reg = 0;
+        out->imm = b1;
+        out->size = 2;
+        return 0;
+    case 0x74: /* JZ rel8 */
+        out->op = VM_OP_JZ;
+        out->imm = (int8_t)b1;
+        out->size = 2;
+        return 0;
+    case 0x75: /* JNZ rel8 */
+        out->op = VM_OP_JNZ;
+        out->imm = (int8_t)b1;
+        out->size = 2;
+        return 0;
     default:
         break;
     }
 
+    if (b0 >= 0x40 && b0 <= 0x47) { /* INC r32 */
+        out->op = VM_OP_INC;
+        out->dst_reg = b0 - 0x40;
+        out->size = 1;
+        return 0;
+    }
+    if (b0 >= 0x48 && b0 <= 0x4F) { /* DEC r32 */
+        out->op = VM_OP_DEC;
+        out->dst_reg = b0 - 0x48;
+        out->size = 1;
+        return 0;
+    }
     if (b0 >= 0xB0 && b0 <= 0xB7) {
         return decode_mov_r8_imm8(mem, addr, out);
     }

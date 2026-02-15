@@ -132,6 +132,37 @@ static int execute(vm_cpu_t *cpu, vm_mem_t *mem, vm_instr_t *in) {
         cpu->edi = (cpu->edi & 0xFFFF0000) | ((cpu->edi + 1) & 0xFFFF);
         return 0;
     }
+    case VM_OP_INC: {
+        if (in->dst_reg >= 0 && in->dst_reg < 8) {
+            uint32_t v = get_reg32(cpu, in->dst_reg) + 1;
+            set_reg32(cpu, in->dst_reg, v);
+        }
+        return 0;
+    }
+    case VM_OP_DEC: {
+        if (in->dst_reg >= 0 && in->dst_reg < 8) {
+            uint32_t v = get_reg32(cpu, in->dst_reg) - 1;
+            set_reg32(cpu, in->dst_reg, v);
+        }
+        return 0;
+    }
+    case VM_OP_CMP: {
+        uint8_t al = get_reg8_lo(cpu, 0);
+        uint8_t imm = (uint8_t)(in->imm & 0xFF);
+        if (al == imm)
+            cpu->eflags |= 0x40;
+        else
+            cpu->eflags &= ~0x40;
+        return 0;
+    }
+    case VM_OP_JZ:
+        if (cpu->eflags & 0x40)
+            cpu->eip += (int32_t)(int8_t)in->imm + in->size;
+        return 0;
+    case VM_OP_JNZ:
+        if (!(cpu->eflags & 0x40))
+            cpu->eip += (int32_t)(int8_t)in->imm + in->size;
+        return 0;
     default:
         return -1;
     }

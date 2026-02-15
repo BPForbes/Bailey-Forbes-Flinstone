@@ -29,8 +29,17 @@ Implemented opcodes as of baseline. Real-mode, minimal subset.
 | MOV r32, imm32 | MOV | 0xB8+r id | r = 0..7 (EAX..EDI) |
 | PUSH r32 | PUSH | 0x50+r | r = 0..7 |
 | POP r32 | POP | 0x58+r | r = 0..7 |
+| INC r32 | INC | 0x40+r | r = 0..7 |
+| DEC r32 | DEC | 0x48+r | r = 0..7 |
+
+## Conditional / Flags
+
+| Opcode | Mnemonic | Encoding | Notes |
+|--------|----------|---------|-------|
+| CMP al, imm8 | CMP | 0x3C ib | Sets ZF |
+| JZ rel8 | JZ / JE | 0x74 cb | Jump if ZF |
+| JNZ rel8 | JNZ / JNE | 0x75 cb | Jump if !ZF |
 
 ## Not implemented
 
-VM_OP_ADD, VM_OP_SUB, VM_OP_JZ, VM_OP_JNZ, VM_OP_STOSB (enum exists, STOSB implemented).
-ModRM-based opcodes (MOV mem↔reg), CMP, TEST, conditional jumps, CALL, INC, DEC, AND, OR, XOR, SHL, SHR.
+VM_OP_ADD, VM_OP_SUB (enum exists). ModRM-based opcodes, CALL, TEST, AND, OR, XOR, SHL, SHR.
