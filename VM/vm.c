@@ -163,6 +163,24 @@ static int execute(vm_cpu_t *cpu, vm_mem_t *mem, vm_instr_t *in) {
         if (!(cpu->eflags & 0x40))
             cpu->eip += (int32_t)(int8_t)in->imm + in->size;
         return 0;
+    case VM_OP_ADD:
+        if (in->dst_reg >= 0 && in->dst_reg < 8) {
+            uint32_t a = get_reg32(cpu, in->dst_reg);
+            uint32_t b = (in->src_reg >= 0 && in->src_reg < 8) ? get_reg32(cpu, in->src_reg) : (uint32_t)(int32_t)(int8_t)in->imm;
+            uint32_t r = a + b;
+            set_reg32(cpu, in->dst_reg, r);
+            cpu->eflags = (cpu->eflags & ~0x40) | ((r == 0) ? 0x40 : 0);
+        }
+        return 0;
+    case VM_OP_SUB:
+        if (in->dst_reg >= 0 && in->dst_reg < 8) {
+            uint32_t a = get_reg32(cpu, in->dst_reg);
+            uint32_t b = (in->src_reg >= 0 && in->src_reg < 8) ? get_reg32(cpu, in->src_reg) : (uint32_t)(int32_t)(int8_t)in->imm;
+            uint32_t r = a - b;
+            set_reg32(cpu, in->dst_reg, r);
+            cpu->eflags = (cpu->eflags & ~0x40) | ((r == 0) ? 0x40 : 0);
+        }
+        return 0;
     default:
         return -1;
     }
@@ -193,7 +211,7 @@ static int vm_run_step(vm_cpu_t *cpu, vm_mem_t *mem, int max_instructions) {
     while (count < max_instructions && !cpu->halted) {
         uint32_t linear = guest_eip_linear(cpu);
         if (linear + 16 > mem->size) break;
-        if (vm_decode(mem->ram, linear, &instr) != 0) break;
+        if (vm_decode(mem->ram, linear, mem->size, &instr) != 0) break;
         if (execute(cpu, mem, &instr) != 0) break;
         if (instr.op != VM_OP_JMP)
             cpu->eip += instr.size;

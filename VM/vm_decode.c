@@ -1,8 +1,60 @@
 #include "vm_decode.h"
+#include "mem_asm.h"
 
-/* Decode structure: primary opcode switch + range handlers for reg+imm forms.
- * To add opcodes: extend switch for fixed byte(s), or add range check (0x40+r etc).
- * Future: ModRM/SIB decode table for group opcodes. */
+/* Decode structure: primary opcode switch + range handlers + ModRM/SIB.
+ * ModRM: mod=11 reg only; mod=00/01/10 memory with optional disp.
+ * SIB: when r/m=4; index*scale + base + disp. */
+
+static void modrm_clear(vm_modrm_t *m) {
+    if (m) asm_mem_zero(m, sizeof(*m));
+}
+
+static void sib_clear(vm_sib_t *s) {
+    if (s) asm_mem_zero(s, sizeof(*s));
+}
+
+#define VM_DECODE_SAFE 16
+/* Parse ModRM at addr; returns total bytes consumed (1 + disp). Supports mod=11 (reg) and disp8/32. */
+static int decode_modrm(uint8_t *mem, uint32_t addr, size_t mem_size, vm_modrm_t *out, vm_sib_t *sib_out) {
+    if (mem_size < 6 || addr + 6 > mem_size) return -1;
+    uint8_t b = mem[addr];
+    out->valid = 1;
+    out->mod = (b >> 6) & 3;
+    out->reg = (b >> 3) & 7;
+    out->rm = b & 7;
+    out->disp = 0;
+    out->disp_bytes = 0;
+    sib_clear(sib_out);
+
+    int n = 1;
+    if (out->mod == 1) {
+        out->disp = (int32_t)(int8_t)mem[addr + 1];
+        out->disp_bytes = 1;
+        n = 2;
+    } else if (out->mod == 2) {
+        out->disp = (uint32_t)mem[addr+1] | ((uint32_t)mem[addr+2]<<8) | ((uint32_t)mem[addr+3]<<16) | ((uint32_t)mem[addr+4]<<24);
+        out->disp_bytes = 4;
+        n = 5;
+    } else if (out->mod == 0 && out->rm == 5) {
+        out->disp = (uint32_t)mem[addr+1] | ((uint32_t)mem[addr+2]<<8) | ((uint32_t)mem[addr+3]<<16) | ((uint32_t)mem[addr+4]<<24);
+        out->disp_bytes = 4;
+        n = 5;
+    }
+    if (out->mod != 3 && out->rm == 4) {
+        uint8_t s = mem[addr + n];
+        sib_out->valid = 1;
+        sib_out->scale = 1 << ((s >> 6) & 3);
+        sib_out->index = (s >> 3) & 7;
+        sib_out->base = s & 7;
+        n++;
+        if (out->mod == 0 && sib_out->base == 5) {
+            out->disp = (uint32_t)mem[addr+n] | ((uint32_t)mem[addr+n+1]<<8) | ((uint32_t)mem[addr+n+2]<<16) | ((uint32_t)mem[addr+n+3]<<24);
+            out->disp_bytes = 4;
+            n += 4;
+        }
+    }
+    return n;
+}
 
 static int decode_mov_r8_imm8(uint8_t *mem, uint32_t addr, vm_instr_t *out) {
     uint8_t op = mem[addr];
@@ -27,17 +79,19 @@ static int decode_mov_r32_imm32(uint8_t *mem, uint32_t addr, vm_instr_t *out) {
     return 0;
 }
 
-int vm_decode(uint8_t *mem, uint32_t addr, vm_instr_t *out) {
-    if (!mem || !out) return -1;
+int vm_decode(uint8_t *mem, uint32_t addr, size_t mem_size, vm_instr_t *out) {
+    if (!mem || !out || mem_size < 2) return -1;
     out->op = VM_OP_UNKNOWN;
     out->dst_reg = out->src_reg = -1;
     out->imm = 0;
     out->mem_addr = 0;
     out->mem_size = 0;
     out->size = 1;
+    modrm_clear(&out->modrm);
+    sib_clear(&out->sib);
 
     uint8_t b0 = mem[addr];
-    uint8_t b1 = addr + 1 < 0x1000000 ? mem[addr + 1] : 0;
+    uint8_t b1 = addr + 1 < mem_size ? mem[addr + 1] : 0;
 
     switch (b0) {
     case 0x90: /* NOP */
@@ -91,6 +145,56 @@ int vm_decode(uint8_t *mem, uint32_t addr, vm_instr_t *out) {
         out->imm = (int8_t)b1;
         out->size = 2;
         return 0;
+    case 0x01: { /* ADD r/m32, r32 */
+        int n = decode_modrm(mem, addr + 1, mem_size, &out->modrm, &out->sib);
+        if (n < 0 || out->modrm.mod != 3) return -1;
+        out->op = VM_OP_ADD;
+        out->dst_reg = out->modrm.rm;
+        out->src_reg = out->modrm.reg;
+        out->size = 1 + n;
+        return 0;
+    }
+    case 0x03: { /* ADD r32, r/m32 */
+        int n = decode_modrm(mem, addr + 1, mem_size, &out->modrm, &out->sib);
+        if (n < 0 || out->modrm.mod != 3) return -1;
+        out->op = VM_OP_ADD;
+        out->dst_reg = out->modrm.reg;
+        out->src_reg = out->modrm.rm;
+        out->size = 1 + n;
+        return 0;
+    }
+    case 0x29: { /* SUB r/m32, r32 */
+        int n = decode_modrm(mem, addr + 1, mem_size, &out->modrm, &out->sib);
+        if (n < 0 || out->modrm.mod != 3) return -1;
+        out->op = VM_OP_SUB;
+        out->dst_reg = out->modrm.rm;
+        out->src_reg = out->modrm.reg;
+        out->size = 1 + n;
+        return 0;
+    }
+    case 0x2B: { /* SUB r32, r/m32 */
+        int n = decode_modrm(mem, addr + 1, mem_size, &out->modrm, &out->sib);
+        if (n < 0 || out->modrm.mod != 3) return -1;
+        out->op = VM_OP_SUB;
+        out->dst_reg = out->modrm.reg;
+        out->src_reg = out->modrm.rm;
+        out->size = 1 + n;
+        return 0;
+    }
+    case 0x83: { /* ADD/SUB r/m32, imm8 - /r is opcode ext */
+        int n = decode_modrm(mem, addr + 1, mem_size, &out->modrm, &out->sib);
+        if (n < 0 || out->modrm.mod != 3) return -1;
+        if (addr + 1 + n + 1 > mem_size) return -1;
+        uint8_t ext = out->modrm.reg;
+        if (ext == 0) out->op = VM_OP_ADD;
+        else if (ext == 5) out->op = VM_OP_SUB;
+        else return -1;
+        out->dst_reg = out->modrm.rm;
+        out->src_reg = -1;
+        out->imm = (int32_t)(int8_t)mem[addr + 1 + n];
+        out->size = 1 + n + 1;
+        return 0;
+    }
     default:
         break;
     }
