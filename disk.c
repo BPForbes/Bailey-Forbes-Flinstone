@@ -5,6 +5,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <unistd.h>
 
 void read_disk_header(void) {
     FILE *fp = fopen(current_disk_file, "r");
@@ -126,8 +127,11 @@ void update_cluster_line(int clu, const char *hexData) {
     snprintf(newLine, sizeof(newLine), "%02X:%s", clu, hexData);
     free(clusters[clu]);
     clusters[clu] = strdup(newLine);
-    
-    fp = fopen(current_disk_file, "w");
+
+    /* Journaling-lite: write to .tmp then rename (atomic); avoids mid-write corruption */
+    char tmp_path[80];
+    snprintf(tmp_path, sizeof(tmp_path), "%s.tmp", current_disk_file);
+    fp = fopen(tmp_path, "w");
     if (!fp) {
          printf("Unable to open disk file for writing.\n");
          for (int k = 0; k < g_total_clusters; k++)
@@ -148,7 +152,13 @@ void update_cluster_line(int clu, const char *hexData) {
          free(clusters[k]);
     }
     free(clusters);
+    fflush(fp);
+    fsync(fileno(fp));
     fclose(fp);
+    if (rename(tmp_path, current_disk_file) != 0) {
+        remove(tmp_path);
+        return;
+    }
     read_disk_header();
 }
 
