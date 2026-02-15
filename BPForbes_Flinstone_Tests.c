@@ -25,6 +25,7 @@
 #include "disk.h"
 #include "cluster.h"
 #include "fs.h"
+#include "mem_domain.h"
 #include "fs_service_glue.h"
 #include "fs_facade.h"
 #include "threadpool.h"
@@ -213,7 +214,7 @@ void test_convert_hex_to_ascii(void) {
     print_test_header("convert_hex_to_ascii");
     char *ascii = convert_hex_to_ascii("414243", 3);
     CU_ASSERT_TRUE(strcmp(ascii, "ABC") == 0);
-    free(ascii);
+    mem_domain_free(MEM_DOMAIN_FS, ascii);
 }
 
 void test_help_variants(void) {

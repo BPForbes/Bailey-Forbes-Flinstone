@@ -5,6 +5,7 @@
 #include "disk.h"
 #include "cluster.h"
 #include "fs.h"
+#include "mem_domain.h"
 #include "fs_service_glue.h"
 #include "fs_types.h"
 #include "path_log.h"
@@ -359,7 +360,7 @@ int execute_command_str(const char *line) {
                     printf("Found '%s' in sector %s: %s\n", searchStr, trim, ascii);
                     found = 1;
                 }
-                free(ascii);
+                mem_domain_free(MEM_DOMAIN_FS, ascii);
             }
         }
         fclose(fp);

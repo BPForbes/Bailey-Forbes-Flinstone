@@ -1,5 +1,6 @@
 #include "util.h"
 #include "common.h"
+#include "mem_asm.h"
 #include <ctype.h>
 #include <string.h>
 
@@ -46,7 +47,7 @@ void resolve_path(const char *path, char *out, size_t outsize) {
         if (i > 0 || len == 0) { if (len > 0) out[len++] = '/'; }
         size_t slen = strlen(segs[i]);
         if (len + slen < outsize) {
-            memcpy(out + len, segs[i], slen + 1);
+            asm_mem_copy(out + len, segs[i], slen + 1);
             len += slen;
         }
     }
