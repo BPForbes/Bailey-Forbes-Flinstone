@@ -23,12 +23,20 @@ Defines how the VM loads and runs guest code.
 - **Layout**: Custom instruction encoding.
 - **Contract**: TBD; would require separate decode path.
 
+## Deterministic Boot Sequence
+
+1. **Reset**: Zero RAM and CPU (asm_mem_zero, vm_cpu_init).
+2. **Load**: Copy guest binary to GUEST_LOAD_ADDR (0x7C00).
+3. **Entry**: Set CS=VM_BOOT_ENTRY_CS (0x07C0), EIP=VM_BOOT_ENTRY_IP (0).
+4. **Run**: Execute from entry; no randomness in boot path.
+
 ## Current Implementation
 
 - `vm_loader`: Loads raw binary at `GUEST_LOAD_ADDR` (0x7C00).
 - `vm_host`: Embeds minimal guest (MOV/OUT/HLT) or loads from file.
 - **Effective contract**: Flat kernel. Guest is position-dependent at 0x7C00.
 - No boot sector detection; no partition table parsing.
+- Boot uses VM_BOOT_ENTRY_CS, VM_BOOT_ENTRY_IP for deterministic entry.
 
 ## Recommendations
 
