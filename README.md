@@ -2,6 +2,8 @@
 
 A low-level C-based file system and shell with hardware-level disk operations and systems-forward architecture. Data lives on hardware-backed storage; ASM primitives drive sector buffers and cluster I/O. Designed for educational use, Flinstone provides real design-pattern structure for file management and a composable path toward production-grade persistence.
 
+**MVP goal**: `make` → run binary in WSL → popup window → self-contained VM (no VMware). Two parallel builds share the same runtime contract: **bare metal** (USB/micro hardware) and **VM** (emulated popup). The VM behaves like the actual hardware BIOS version.
+
 ## 📚 Overview
 
 The Flinstone Project is a modular operating systems educational project written in C. It provides hardware-level disk operations (cluster read/write/zero via ASM-backed buffers), an interactive shell interface, and design patterns (Facade, Strategy, Command, Observer, Chain of Responsibility) to keep the codebase composable and testable. An x86-64 assembly layer supplies performance-critical memory primitives for sector buffers, cluster clears, and directory entry writes.
@@ -171,6 +173,13 @@ make vm-sdl      # Uses deps/install if present, else pkg-config
 ./scripts/build_wsl.sh    # apt libsdl2-dev, make vm-sdl
 ./scripts/run_vm_wsl.sh   # Launch VM SDL window (WSLg popup)
 ```
+
+**MVP builds** (same runtime contract; VM emulates bare-metal structure):
+
+| Build | Target | Use |
+|-------|--------|-----|
+| `make baremetal` | USB / micro hardware | Burn onto media; real port I/O, VGA, block driver |
+| `make vm-sdl` | Popup (WSLg) | Emulated devices mirror bare-metal; PQ + ASM throughout |
 
 ### Run
 
