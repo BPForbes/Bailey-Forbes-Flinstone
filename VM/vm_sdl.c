@@ -11,6 +11,7 @@
 #include <SDL.h>
 #include <stdio.h>
 #include <stdlib.h>
+#include <stdlib.h>
 #include <string.h>
 
 #define CELL_W  VM_FONT_W
@@ -161,6 +162,13 @@ int vm_sdl_poll_events(vm_host_t *host) {
             }
             if (sc == SDL_SCANCODE_U && vm_host_is_paused(host) && vm_snapshot_has_checkpoint()) {
                 vm_restore_checkpoint();
+                continue;
+            }
+            if (sc == SDL_SCANCODE_L && vm_host_is_paused(host)) {
+                const char *path = getenv("VM_DISK_LOAD");
+                if (!path) path = "vm_disk_alt.img";
+                if (vm_load_disk(path) == 0)
+                    fprintf(stderr, "[VM] Loaded disk: %s\n", path);
                 continue;
             }
             if (sc == SDL_SCANCODE_S && vm_host_is_paused(host)) {

@@ -151,7 +151,7 @@ make vm
 - **Timer**: PIT ports 0x40–0x43; **PIC**: 0x20, 0x21, 0xA0, 0xA1
 - **Scheduling**: Priority queue (PQ) for vCPU quanta, display refresh, timer ticks
 - **Timing**: Deterministic virtual tick (vm_host.vm_ticks); PIT reads VM time, not host
-- **Monitor** (SDL): P=pause/resume, S=step, R=reset, C=checkpoint, U=restore checkpoint
+- **Monitor** (SDL): P=pause, S=step, R=reset, C=checkpoint, U=restore, L=load disk (VM_DISK_LOAD or vm_disk_alt.img)
 - **Logging**: VM_LOG_LEVEL=0 quiet, 1=info (default), 2=trace
 - **Paging**: CR0.PG, CR3; 32-bit 2-level page tables; asm_mem_copy for PDE/PTE read
 
@@ -168,8 +168,9 @@ make vm-sdl      # Uses deps/install if present, else pkg-config
 
 **WSL one-shot build/run** (install deps + build + run):
 ```bash
-./scripts/build_wsl.sh    # apt libsdl2-dev, make vm-sdl
-./scripts/run_vm_wsl.sh   # Launch VM SDL window (WSLg popup)
+./scripts/wsl_vm.sh       # Build + run VM popup (single script)
+./scripts/build_wsl.sh   # Build only
+./scripts/run_vm_wsl.sh  # Run only (requires prior build)
 ```
 
 ### Run

@@ -360,6 +360,12 @@ int vm_restore_checkpoint(void) {
     return vm_snapshot_restore(&s_host);
 }
 
+int vm_load_disk(const char *path) {
+    if (!path) return -1;
+    vm_disk_shutdown();
+    return vm_disk_init(path, VM_DISK_DEFAULT_SIZE_MB);
+}
+
 uint32_t vm_state_checksum(void) {
     vm_mem_t *mem = vm_host_mem(&s_host);
     if (!mem || !mem->ram) return 0;
