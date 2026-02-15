@@ -152,6 +152,7 @@ make vm
 - **Scheduling**: Priority queue (PQ) for vCPU quanta, display refresh, timer ticks
 - **Timing**: Deterministic virtual tick (vm_host.vm_ticks); PIT reads VM time, not host
 - **Monitor** (SDL): P=pause/resume, S=step (when paused), R=reset; registers printed on step
+- **Logging**: VM_LOG_LEVEL=0 quiet, 1=info (default), 2=trace
 
 **VM with SDL2 window** (WSLg-friendly popup, framebuffer blit):
 ```bash
