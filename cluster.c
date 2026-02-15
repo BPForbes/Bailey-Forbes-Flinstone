@@ -4,13 +4,14 @@
 #include "common.h"
 #include "util.h"
 #include "mem_asm.h"
+#include "mem_domain.h"
 #include <stdio.h>
 #include <stdlib.h>
 #include <ctype.h>
 
 char *convert_data_to_hex(const char *data, int inputIsText, int clusterSize) {
     int hexLen = clusterSize * 2;
-    char *result = malloc(hexLen + 1);
+    char *result = mem_domain_alloc(MEM_DOMAIN_FS, (size_t)hexLen + 1);
     if (!result)
         return NULL;
     int dataLen = (int)strlen(data);
@@ -37,7 +38,7 @@ void process_write_cluster(int clu, const char *data, int inputIsText) {
     if (!hexData)
         return;
     update_cluster_line(clu, hexData);
-    free(hexData);
+    mem_domain_free(MEM_DOMAIN_FS, hexData);
     printf("Wrote data to cluster %d.\n", clu);
 }
 
@@ -75,7 +76,7 @@ void calculate_storage_breakdown_for_cluster(int clu) {
     if (hexLen < expectedLen) {
         printf("Warning: Cluster data length (%d) is shorter than expected (%d).\n", hexLen, expectedLen);
     }
-    unsigned char *bytes = malloc(g_cluster_size);
+    unsigned char *bytes = mem_domain_alloc(MEM_DOMAIN_FS, (size_t)g_cluster_size);
     if (!bytes)
         return;
     for (int i = 0; i < g_cluster_size; i++) {
@@ -103,7 +104,7 @@ void calculate_storage_breakdown_for_cluster(int clu) {
     for (int bit = 0; bit < 8; bit++) {
         printf("Bit position %d: ones = %d, zeros = %d\n", bit + 1, onesCount[bit], zerosCount[bit]);
     }
-    free(bytes);
+    mem_domain_free(MEM_DOMAIN_FS, bytes);
 }
 
 void delete_cluster(int clu) {
@@ -151,7 +152,7 @@ void show_disk_detail_for_cluster(int clu) {
     if (hexLen < expectedLen) {
         printf("Warning: Cluster data length (%d) is shorter than expected (%d).\n", hexLen, expectedLen);
     }
-    unsigned char *bytes = malloc(g_cluster_size);
+    unsigned char *bytes = mem_domain_alloc(MEM_DOMAIN_FS, (size_t)g_cluster_size);
     if (!bytes)
         return;
     for (int i = 0; i < g_cluster_size; i++) {
@@ -170,9 +171,9 @@ void show_disk_detail_for_cluster(int clu) {
             used++;
     }
     double pct = ((double)used / g_cluster_size) * 100.0;
-    char *asciiStr = malloc(g_cluster_size + 1);
+    char *asciiStr = mem_domain_alloc(MEM_DOMAIN_FS, (size_t)g_cluster_size + 1);
     if (!asciiStr) {
-        free(bytes);
+        mem_domain_free(MEM_DOMAIN_FS, bytes);
         return;
     }
     for (int i = 0; i < g_cluster_size; i++) {
@@ -182,12 +183,12 @@ void show_disk_detail_for_cluster(int clu) {
     printf("Cluster %02X details: %s\n", clu, hexDataFound);
     printf("ASCII: %s\n", asciiStr);
     printf("Used bytes: %d/%d (%.2f%%)\n", used, g_cluster_size, pct);
-    free(bytes);
-    free(asciiStr);
+    mem_domain_free(MEM_DOMAIN_FS, bytes);
+    mem_domain_free(MEM_DOMAIN_FS, asciiStr);
 }
 
 char *convert_hex_to_ascii(const char *hexData, int clusterSize) {
-    char *ascii = malloc(clusterSize + 1);
+    char *ascii = mem_domain_alloc(MEM_DOMAIN_FS, (size_t)clusterSize + 1);
     if (!ascii)
         return NULL;
     for (int i = 0; i < clusterSize; i++) {

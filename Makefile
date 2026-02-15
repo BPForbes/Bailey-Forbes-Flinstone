@@ -132,8 +132,8 @@ test_priority_queue: priority_queue.o mem_asm.o
 test_core: test_mem_asm test_priority_queue
 	@echo "Core tests done. Run 'make test_alloc_libc' or 'make test_alloc_asm' for allocator."
 
-test_invariants: common.o util.o
-	$(CC) $(CFLAGS) $(TEST_SANITIZE) -I. -o tests/test_invariants tests/test_invariants.c common.o util.o
+test_invariants: common.o util.o mem_asm.o
+	$(CC) $(CFLAGS) $(TEST_SANITIZE) -I. -o tests/test_invariants tests/test_invariants.c common.o util.o mem_asm.o
 	./tests/test_invariants
 
 check-layers:
