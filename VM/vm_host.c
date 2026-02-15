@@ -52,6 +52,15 @@ vm_cpu_t *vm_host_cpu(vm_host_t *host) {
     return host ? &host->cpu : NULL;
 }
 
+uint64_t vm_host_ticks(vm_host_t *host) {
+    return host ? host->vm_ticks : 0;
+}
+
+void vm_host_tick_advance(vm_host_t *host, unsigned int step) {
+    if (host)
+        host->vm_ticks += step;
+}
+
 int vm_host_kbd_push(vm_host_t *host, uint8_t scancode) {
     if (!host) return -1;
     size_t next = (host->kbd_tail + 1) % VM_KBD_QUEUE_SIZE;

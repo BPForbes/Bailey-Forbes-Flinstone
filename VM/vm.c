@@ -181,10 +181,10 @@ static void vm_display_task_fn(void *arg) {
     vm_display_refresh(vm_host_mem(&s_host));
 }
 
+#define VM_TICK_STEP 1
 static void vm_timer_task_fn(void *arg) {
     (void)arg;
-    if (g_timer_driver)
-        (void)g_timer_driver->tick_count(g_timer_driver);
+    vm_host_tick_advance(&s_host, VM_TICK_STEP);
 }
 
 void vm_run(void) {
@@ -196,6 +196,7 @@ void vm_run(void) {
         while (!cpu->halted && !vm_sdl_is_quit()) {
             vm_sdl_poll_events(&s_host);
             vm_cpu_task_fn(NULL);
+            vm_host_tick_advance(&s_host, VM_TICK_STEP);
             if (!cpu->halted)
                 vm_sdl_present(&s_host);
         }

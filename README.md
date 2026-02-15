@@ -150,6 +150,7 @@ make vm
 - **GPU/VGA**: Guest 0xb8000 rendered via display_driver.refresh_vga (ASM copy)
 - **Timer**: PIT ports 0x40–0x43; **PIC**: 0x20, 0x21, 0xA0, 0xA1
 - **Scheduling**: Priority queue (PQ) for vCPU quanta, display refresh, timer ticks
+- **Timing**: Deterministic virtual tick (vm_host.vm_ticks); PIT reads VM time, not host
 
 **VM with SDL2 window** (WSLg-friendly popup, framebuffer blit):
 ```bash

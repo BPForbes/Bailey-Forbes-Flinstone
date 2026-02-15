@@ -79,8 +79,12 @@ static uint8_t vm_io_in_keyboard(uint32_t port) {
 }
 
 static uint8_t vm_io_in_pit(uint32_t port) {
-    if (port == 0x40 && g_timer_driver)
-        return (uint8_t)(g_timer_driver->tick_count(g_timer_driver) & 0xFF);
+    if (port == 0x40) {
+        if (s_host)
+            return (uint8_t)(vm_host_ticks(s_host) & 0xFF);
+        if (g_timer_driver)
+            return (uint8_t)(g_timer_driver->tick_count(g_timer_driver) & 0xFF);
+    }
     if (port == 0x43) return s_pit_mode;
     return 0;
 }
