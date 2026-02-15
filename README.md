@@ -164,6 +164,12 @@ make deps        # Fetches and builds SDL2 into deps/install
 make vm-sdl      # Uses deps/install if present, else pkg-config
 ```
 
+**WSL one-shot build/run** (install deps + build + run):
+```bash
+./scripts/build_wsl.sh    # apt libsdl2-dev, make vm-sdl
+./scripts/run_vm_wsl.sh   # Launch VM SDL window (WSLg popup)
+```
+
 ### Run
 
 ```bash
