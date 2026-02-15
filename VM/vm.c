@@ -195,7 +195,8 @@ void vm_run(void) {
     if (vm_sdl_is_active()) {
         while (!cpu->halted && !vm_sdl_is_quit()) {
             vm_sdl_poll_events(&s_host);
-            vm_cpu_task_fn(NULL);
+            if (!vm_host_is_paused(&s_host))
+                vm_cpu_task_fn(NULL);
             vm_host_tick_advance(&s_host, VM_TICK_STEP);
             if (!cpu->halted)
                 vm_sdl_present(&s_host);
@@ -230,6 +231,10 @@ void vm_stop(void) {
 #endif
     vm_host_destroy(&s_host);
     vm_io_shutdown();
+}
+
+void vm_step_one(void) {
+    vm_run_step(vm_host_cpu(&s_host), vm_host_mem(&s_host), 1);
 }
 
 #endif

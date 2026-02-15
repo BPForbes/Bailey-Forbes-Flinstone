@@ -3,10 +3,12 @@
 
 #include "vm_sdl.h"
 #include "vm_host.h"
+#include "vm.h"
 #include "vm_mem.h"
 #include "vm_font.h"
 #include "mem_asm.h"
 #include <SDL.h>
+#include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 
@@ -140,8 +142,25 @@ int vm_sdl_poll_events(vm_host_t *host) {
         if (e.type == SDL_QUIT)
             s_quit = 1;
         if (e.type == SDL_KEYDOWN && host) {
-            uint8_t sc = (uint8_t)(e.key.keysym.scancode & 0xFF);
-            vm_host_kbd_push(host, sc);
+            SDL_Scancode sc = e.key.keysym.scancode;
+            if (sc == SDL_SCANCODE_P) {
+                if (vm_host_is_paused(host))
+                    vm_host_resume(host);
+                else
+                    vm_host_pause(host);
+                continue;
+            }
+            if (sc == SDL_SCANCODE_R) {
+                vm_host_reset(host);
+                continue;
+            }
+            if (sc == SDL_SCANCODE_S && vm_host_is_paused(host)) {
+                vm_step_one();
+                vm_host_dump_registers(host, stderr);
+                continue;
+            }
+            uint8_t sc8 = (uint8_t)(sc & 0xFF);
+            vm_host_kbd_push(host, sc8);
         }
     }
     return 0;
