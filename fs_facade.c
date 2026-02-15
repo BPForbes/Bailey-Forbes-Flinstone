@@ -9,6 +9,7 @@ static int check_policy_write(const char *path, const char *arg2, void *ctx);
 file_manager_service_t *fm_service_create(fs_provider_t *provider) {
     file_manager_service_t *svc = calloc(1, sizeof(*svc));
     if (!svc) return NULL;
+    pthread_mutex_init(&svc->undo_mutex, NULL);
     svc->provider = provider;
     strncpy(svc->current_user, "user", FS_SESSION_USER_MAX - 1);
     svc->current_user[FS_SESSION_USER_MAX - 1] = '\0';
@@ -28,8 +29,12 @@ void fm_service_set_user(file_manager_service_t *svc, const char *user) {
 void fm_service_destroy(file_manager_service_t *svc) {
     fs_chain_clear(&svc->delete_chain);
     fs_chain_clear(&svc->write_chain);
+    pthread_mutex_lock(&svc->undo_mutex);
     for (int i = 0; i < svc->undo_top; i++)
         fs_cmd_destroy(svc->undo_stack[i]);
+    svc->undo_top = 0;
+    pthread_mutex_unlock(&svc->undo_mutex);
+    pthread_mutex_destroy(&svc->undo_mutex);
     free(svc);
 }
 
@@ -56,11 +61,13 @@ static int check_policy_write(const char *path, const char *arg2, void *ctx) {
 }
 
 static void push_undo(file_manager_service_t *svc, fs_command_t *cmd) {
+    pthread_mutex_lock(&svc->undo_mutex);
     if (svc->undo_top < FS_UNDO_STACK_MAX && cmd) {
         svc->undo_stack[svc->undo_top++] = cmd;
     } else if (cmd) {
         fs_cmd_destroy(cmd);
     }
+    pthread_mutex_unlock(&svc->undo_mutex);
 }
 
 int fm_list(file_manager_service_t *svc, const char *path, fs_node_t **out, int *count) {
@@ -152,13 +159,21 @@ int fm_move(file_manager_service_t *svc, const char *src, const char *dst) {
 }
 
 int fm_undo(file_manager_service_t *svc) {
-    if (svc->undo_top == 0) return -1;
+    pthread_mutex_lock(&svc->undo_mutex);
+    if (svc->undo_top == 0) {
+        pthread_mutex_unlock(&svc->undo_mutex);
+        return -1;
+    }
     fs_command_t *cmd = svc->undo_stack[--svc->undo_top];
+    pthread_mutex_unlock(&svc->undo_mutex);
     int r = fs_cmd_undo(cmd);
     fs_cmd_destroy(cmd);
     return r;
 }
 
 int fm_undo_available(file_manager_service_t *svc) {
-    return svc->undo_top;
+    pthread_mutex_lock(&svc->undo_mutex);
+    int n = svc->undo_top;
+    pthread_mutex_unlock(&svc->undo_mutex);
+    return n;
 }

@@ -7,6 +7,7 @@
 #include "fs_events.h"
 #include "fs_policy.h"
 #include "fs_chain.h"
+#include <pthread.h>
 
 #define FS_UNDO_STACK_MAX 32
 #define FS_SESSION_USER_MAX 32
@@ -21,6 +22,7 @@ typedef struct file_manager_service {
     fs_command_t *undo_stack[FS_UNDO_STACK_MAX];
     int undo_top;
     int ui_refresh_pending;
+    pthread_mutex_t undo_mutex;
 } file_manager_service_t;
 
 file_manager_service_t *fm_service_create(fs_provider_t *provider);
