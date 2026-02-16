@@ -2,6 +2,7 @@
  * Host: printf. BAREMETAL: VGA text buffer at 0xB8000. */
 #include "display_driver.h"
 #include "driver_types.h"
+#include "io.h"
 #include <stdio.h>
 #include <stdlib.h>
 #include <stdint.h>

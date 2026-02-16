@@ -1,7 +1,7 @@
 /* PIC driver - interrupt controller (8259).
  * Host: no-op. BAREMETAL: init, mask, EOI. */
 #include "pic_driver.h"
-#include "port_io.h"
+#include "io.h"
 #include <stdlib.h>
 
 #ifdef DRIVERS_BAREMETAL

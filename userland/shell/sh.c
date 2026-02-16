@@ -255,7 +255,7 @@ int main(int argc, char *argv[]) {
     */
     if ((argc == 4 || argc == 5) && argv[1] && argv[1][0] != '-') {
         static const char *skip[] = {"help","cd","dir","make","write","cat","type","mkdir","rmdir",
-            "rmtree","mv","version","exit","clear","history","his","cc","listclusters","listdirs",
+            "rmtree","mv","version","exit","bios","clear","history","his","cc","listclusters","listdirs",
             "setdisk","createdisk","format","search","writecluster","delcluster","update","redirect",
             "initdisk","rerun","import","du","printdisk","addcluster",NULL};
         int is_cmd = 0;
@@ -337,6 +337,12 @@ int main(int argc, char *argv[]) {
                     i++;
                     continue;
                 }
+            }
+            else if (!strcmp(cmd, "bios")) {
+                if (i + 1 < argc && (!strcmp(argv[i+1], "-y") || !strcmp(argv[i+1], "-Y")))
+                    tokensCount = 2;
+                else
+                    tokensCount = 1;
             }
             else if (!strcmp(cmd, "setdisk") || !strcmp(cmd, "createdisk"))
                 tokensCount = ((argc > i+3) ? ((argc > i+4) ? 5 : 4) : 0);

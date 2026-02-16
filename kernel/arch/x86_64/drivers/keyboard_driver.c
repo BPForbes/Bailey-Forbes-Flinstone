@@ -1,7 +1,7 @@
 /* Keyboard driver - input from user.
  * Host: read() from stdin. BAREMETAL: port_inb(0x60). */
 #include "keyboard_driver.h"
-#include "port_io.h"
+#include "io.h"
 #include <stdio.h>
 #include <stdlib.h>
 #include <unistd.h>

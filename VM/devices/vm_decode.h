@@ -9,6 +9,8 @@ typedef enum {
     VM_OP_HLT,
     VM_OP_IN,
     VM_OP_OUT,
+    VM_OP_IN_DX,   /* IN EAX, DX (32-bit) */
+    VM_OP_OUT_DX,  /* OUT DX, EAX (32-bit) */
     VM_OP_MOV,
     VM_OP_ADD,
     VM_OP_SUB,

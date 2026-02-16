@@ -2,6 +2,7 @@
  * Host: uses file I/O. BAREMETAL: would use port_io for IDE. */
 #include "block_driver.h"
 #include "driver_caps.h"
+#include "io.h"
 #include "common.h"
 #include "disk.h"
 #include "disk_asm.h"
