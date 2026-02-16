@@ -1,0 +1,17 @@
+# DetectWSL.cmake - Detect if running in WSL (Windows Subsystem for Linux)
+
+function(detect_wsl)
+    if(EXISTS "/proc/version")
+        file(READ "/proc/version" PROC_VERSION)
+        if(PROC_VERSION MATCHES "Microsoft|WSL")
+            set(IS_WSL TRUE PARENT_SCOPE)
+            message(STATUS "Detected WSL environment")
+        else()
+            set(IS_WSL FALSE PARENT_SCOPE)
+        endif()
+    else()
+        set(IS_WSL FALSE PARENT_SCOPE)
+    endif()
+endfunction()
+
+detect_wsl()
