@@ -1,7 +1,7 @@
 /* Timer driver - ticks and sleep.
  * Host: usleep. BAREMETAL: PIT setup, tick counter. */
 #include "timer_driver.h"
-#include "port_io.h"
+#include "io.h"
 #include <stdlib.h>
 #include <unistd.h>
 

@@ -73,6 +73,17 @@ static int execute(vm_cpu_t *cpu, vm_mem_t *mem, vm_instr_t *in) {
     case VM_OP_OUT:
         vm_io_out(mem, (uint32_t)in->imm, get_reg8_lo(cpu, 0), 1);
         return 0;
+    case VM_OP_IN_DX: {
+        uint32_t port = get_reg32(cpu, 2) & 0xFFFF;
+        uint32_t v = vm_io_in(mem, port, 4);
+        set_reg32(cpu, 0, v);
+        return 0;
+    }
+    case VM_OP_OUT_DX: {
+        uint32_t port = get_reg32(cpu, 2) & 0xFFFF;
+        vm_io_out(mem, port, get_reg32(cpu, 0), 4);
+        return 0;
+    }
     case VM_OP_MOV:
         if (in->dst_reg >= 0 && in->src_reg < 0)
             set_reg32(cpu, in->dst_reg, in->imm);
@@ -287,6 +298,10 @@ void vm_run(void) {
 #ifdef VM_SDL
     if (vm_sdl_is_active()) {
         while (!cpu->halted && !vm_sdl_is_quit()) {
+            if (vm_io_reset_requested()) {
+                vm_io_clear_reset();
+                vm_host_reset(&s_host);
+            }
             vm_sdl_poll_events(&s_host);
             if (!vm_host_is_paused(&s_host))
                 vm_cpu_task_fn(NULL);
@@ -302,6 +317,13 @@ void vm_run(void) {
         pq_init(&s_vm_pq);
         pq_push(&s_vm_pq, PQ_PRIO_CPU, vm_cpu_task_fn, NULL);
         while (!cpu->halted) {
+            if (vm_io_reset_requested()) {
+                vm_io_clear_reset();
+                vm_host_reset(&s_host);
+                pq_init(&s_vm_pq);
+                pq_push(&s_vm_pq, PQ_PRIO_CPU, vm_cpu_task_fn, NULL);
+                continue;
+            }
             if (pq_pop(&s_vm_pq, &task) != 0)
                 break;
             if (task.fn)
@@ -329,6 +351,13 @@ void vm_run_cycles(unsigned int max_cycles) {
     pq_init(&s_vm_pq);
     pq_push(&s_vm_pq, PQ_PRIO_CPU, vm_cpu_task_fn, NULL);
     while (!cpu->halted && s_run_cycles < max_cycles) {
+        if (vm_io_reset_requested()) {
+            vm_io_clear_reset();
+            vm_host_reset(&s_host);
+            pq_init(&s_vm_pq);
+            pq_push(&s_vm_pq, PQ_PRIO_CPU, vm_cpu_task_fn, NULL);
+            continue;
+        }
         if (pq_pop(&s_vm_pq, &task) != 0)
             break;
         if (task.fn)

@@ -18,6 +18,8 @@ Implemented opcodes as of baseline. Real-mode, minimal subset.
 |--------|----------|---------|-------|
 | IN al, imm8 | IN | 0xE4 ib | |
 | OUT imm8, al | OUT | 0xE6 ib | |
+| IN EAX, DX | IN (32-bit) | 0xED | Port in DX; for PCI 0xCFC |
+| OUT DX, EAX | OUT (32-bit) | 0xEF | Port in DX; for PCI 0xCF8/0xCFC/0xCF9 |
 | JMP rel8 | JMP short | 0xEB cb | |
 | INT imm8 | INT | 0xCD ib | |
 

@@ -14,23 +14,71 @@
 static FILE *s_serial_out;
 
 #define SECTOR_SIZE 512
+#define PCI_CFG_ADDR  0xCF8
+#define PCI_CFG_DATA  0xCFC
+#define PCI_CFG_RESET 0xCF9
+#define VM_PCI_DEV_MAX 4
+#define PCI_CFG_SIZE  256
 
 static uint8_t s_sector_buf[SECTOR_SIZE];
 static uint32_t s_ide_lba;
 static int s_ide_byte_idx;
 static uint8_t s_pit_mode;
 static vm_host_t *s_host;
+static uint32_t s_pci_addr;
+static int s_reset_requested;
+/* Virtual PCI config: bus 0, dev 0..3. ASM-backed via mem_domain. */
+static uint8_t *s_pci_cfg;
+
+static void vm_pci_init_cfg(void) {
+    if (s_pci_cfg)
+        mem_domain_free(MEM_DOMAIN_DRIVER, s_pci_cfg);
+    s_pci_cfg = mem_domain_alloc(MEM_DOMAIN_DRIVER, VM_PCI_DEV_MAX * PCI_CFG_SIZE);
+    if (!s_pci_cfg) return;
+    asm_mem_zero(s_pci_cfg, VM_PCI_DEV_MAX * PCI_CFG_SIZE);
+    if (!s_pci_cfg) return;
+    /* Dev 0: Host bridge - 0x1234:0x0001, class 0600 */
+    s_pci_cfg[0*PCI_CFG_SIZE + 0] = 0x34; s_pci_cfg[0*PCI_CFG_SIZE + 1] = 0x12;
+    s_pci_cfg[0*PCI_CFG_SIZE + 2] = 0x01; s_pci_cfg[0*PCI_CFG_SIZE + 3] = 0x00;
+    s_pci_cfg[0*PCI_CFG_SIZE + 9] = 0x00; s_pci_cfg[0*PCI_CFG_SIZE + 10] = 0x06; s_pci_cfg[0*PCI_CFG_SIZE + 11] = 0x00;
+    /* Dev 1: IDE - 0x1234:0x1111, class 0101 */
+    s_pci_cfg[1*PCI_CFG_SIZE + 0] = 0x34; s_pci_cfg[1*PCI_CFG_SIZE + 1] = 0x12;
+    s_pci_cfg[1*PCI_CFG_SIZE + 2] = 0x11; s_pci_cfg[1*PCI_CFG_SIZE + 3] = 0x11;
+    s_pci_cfg[1*PCI_CFG_SIZE + 9] = 0x01; s_pci_cfg[1*PCI_CFG_SIZE + 10] = 0x01; s_pci_cfg[1*PCI_CFG_SIZE + 11] = 0x00;
+    /* Dev 2: VGA - 0x1234:0x2222, class 0300 */
+    s_pci_cfg[2*PCI_CFG_SIZE + 0] = 0x34; s_pci_cfg[2*PCI_CFG_SIZE + 1] = 0x12;
+    s_pci_cfg[2*PCI_CFG_SIZE + 2] = 0x22; s_pci_cfg[2*PCI_CFG_SIZE + 3] = 0x22;
+    s_pci_cfg[2*PCI_CFG_SIZE + 9] = 0x00; s_pci_cfg[2*PCI_CFG_SIZE + 10] = 0x03; s_pci_cfg[2*PCI_CFG_SIZE + 11] = 0x00;
+    /* Dev 3: KBD - 0x1234:0x3333, class 0C03 */
+    s_pci_cfg[3*PCI_CFG_SIZE + 0] = 0x34; s_pci_cfg[3*PCI_CFG_SIZE + 1] = 0x12;
+    s_pci_cfg[3*PCI_CFG_SIZE + 2] = 0x33; s_pci_cfg[3*PCI_CFG_SIZE + 3] = 0x33;
+    s_pci_cfg[3*PCI_CFG_SIZE + 9] = 0x03; s_pci_cfg[3*PCI_CFG_SIZE + 10] = 0x0C; s_pci_cfg[3*PCI_CFG_SIZE + 11] = 0x00;
+}
 
 void vm_io_init(void) {
     s_host = NULL;
+    s_reset_requested = 0;
+    s_pci_addr = 0;
     asm_mem_zero(s_sector_buf, SECTOR_SIZE);
+    vm_pci_init_cfg();
     s_ide_lba = 0;
     s_ide_byte_idx = SECTOR_SIZE;
     s_serial_out = stdout;
 }
 
+int vm_io_reset_requested(void) {
+    return s_reset_requested;
+}
+void vm_io_clear_reset(void) {
+    s_reset_requested = 0;
+}
+
 void vm_io_shutdown(void) {
     s_host = NULL;
+    if (s_pci_cfg) {
+        mem_domain_free(MEM_DOMAIN_DRIVER, s_pci_cfg);
+        s_pci_cfg = NULL;
+    }
 }
 
 void vm_io_set_host(vm_host_t *host) {
@@ -95,6 +143,22 @@ static uint8_t vm_io_in_pic(uint32_t port) {
     return 0xFF;
 }
 
+static uint32_t vm_io_in_pci(uint32_t port) {
+    if (port != PCI_CFG_DATA) return 0xFFFFFFFFu;
+    if (!(s_pci_addr & 0x80000000u)) return 0xFFFFFFFFu;
+    uint8_t bus = (s_pci_addr >> 16) & 0xFF;
+    uint8_t dev = (s_pci_addr >> 11) & 0x1F;
+    uint8_t reg = (s_pci_addr >>  2) & 0x3F;
+    if (bus != 0 || dev >= VM_PCI_DEV_MAX || !s_pci_cfg) return 0xFFFFFFFFu;
+    uint32_t v = 0;
+    if (reg * 4 + 4 <= PCI_CFG_SIZE) {
+        const uint8_t *cfg = s_pci_cfg + dev * PCI_CFG_SIZE;
+        v = (uint32_t)cfg[reg*4] | ((uint32_t)cfg[reg*4+1]<<8)
+          | ((uint32_t)cfg[reg*4+2]<<16) | ((uint32_t)cfg[reg*4+3]<<24);
+    }
+    return v;
+}
+
 uint32_t vm_io_in(vm_mem_t *mem, uint32_t port, int size) {
     (void)mem;
     uint32_t v = 0xFF;
@@ -106,13 +170,38 @@ uint32_t vm_io_in(vm_mem_t *mem, uint32_t port, int size) {
         v = vm_io_in_pit(port);
     else if (port == 0x20 || port == 0x21 || port == 0xA0 || port == 0xA1)
         v = vm_io_in_pic(port);
+    else if (port == PCI_CFG_DATA && size == 4)
+        return vm_io_in_pci(port);
     if (size == 1) return v & 0xFF;
-    return v & 0xFFFF;
+    if (size == 2) return v & 0xFFFF;
+    return v & 0xFFFFFFFFu;
 }
 
 void vm_io_out(vm_mem_t *mem, uint32_t port, uint32_t value, int size) {
     (void)mem;
     (void)size;
+    if (port == PCI_CFG_ADDR) {
+        s_pci_addr = value;
+        return;
+    }
+    if (port == PCI_CFG_DATA && (s_pci_addr & 0x80000000u)) {
+        uint8_t bus = (s_pci_addr >> 16) & 0xFF;
+        uint8_t dev = (s_pci_addr >> 11) & 0x1F;
+        uint8_t reg = (s_pci_addr >>  2) & 0x3F;
+        if (bus == 0 && dev < VM_PCI_DEV_MAX && reg * 4 + 4 <= PCI_CFG_SIZE && s_pci_cfg) {
+            uint8_t *cfg = s_pci_cfg + dev * PCI_CFG_SIZE;
+            cfg[reg*4]   = (uint8_t)(value);
+            cfg[reg*4+1] = (uint8_t)(value >> 8);
+            cfg[reg*4+2] = (uint8_t)(value >> 16);
+            cfg[reg*4+3] = (uint8_t)(value >> 24);
+        }
+        return;
+    }
+    if (port == PCI_CFG_RESET) {
+        if ((value & 0x0E) == 0x06 || (value & 0x0E) == 0x0E)
+            s_reset_requested = 1;
+        return;
+    }
     if (port >= 0x1f0 && port <= 0x1f7) {
         if (port == 0x1f3) s_ide_lba = (s_ide_lba & 0xFFFFFF00) | (value & 0xFF);
         else if (port == 0x1f4) s_ide_lba = (s_ide_lba & 0xFFFF00FF) | ((value & 0xFF) << 8);

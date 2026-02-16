@@ -17,6 +17,11 @@ Port I/O is handled by **vm_io** only. vm_io maps ports to emulated devices:
 | 0x40–0x43 | PIT | vm_host vm_ticks |
 | 0x20, 0x21, 0xA0, 0xA1 | PIC | vm_io (ack only) |
 | 0x3f8, 0xf8 | Serial | stdout (host) |
+| 0xCF8 | PCI config address | vm_io (virtual PCI) |
+| 0xCFC | PCI config data | vm_io (virtual devices: host bridge, IDE, VGA, KBD) |
+| 0xCF9 | Reset | vm_io (triggers vm_host_reset) |
+
+32-bit port I/O (INL/OUTL via IN EAX,DX / OUT DX,EAX) supported for PCI and reset.
 
 ## Boundary
 

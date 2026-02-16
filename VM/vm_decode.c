@@ -135,6 +135,14 @@ int vm_decode(uint8_t *mem, uint32_t addr, size_t mem_size, vm_instr_t *out) {
         out->imm = b1;
         out->size = 2;
         return 0;
+    case 0xED: /* IN EAX, DX (32-bit) */
+        out->op = VM_OP_IN_DX;
+        out->size = 1;
+        return 0;
+    case 0xEF: /* OUT DX, EAX (32-bit) */
+        out->op = VM_OP_OUT_DX;
+        out->size = 1;
+        return 0;
     case 0xEB: /* JMP rel8 */
         out->op = VM_OP_JMP;
         out->imm = (int8_t)b1;
