@@ -5,7 +5,7 @@ ARCH ?= x86_64_gas
 # Compiler and flags
 CC = gcc
 AS = as
-CFLAGS = -Wall -Wextra -pthread -I. -Ikernel/core/vfs -Ikernel/core/mm -Ikernel/core/sched -Ikernel/core/sys -Iuserland/shell -Ikernel/arch/x86_64 -Ikernel/arch/aarch64
+CFLAGS = -Wall -Wextra -pthread -I. -Ikernel/include -Ikernel/core/vfs -Ikernel/core/mm -Ikernel/core/sched -Ikernel/core/sys -Iuserland/shell -Ikernel/arch/x86_64 -Ikernel/arch/aarch64
 LDFLAGS = -Wl,-z,noexecstack
 ASFLAGS =
 
@@ -215,9 +215,21 @@ clean:
 	rm -f tests/test_mem_asm tests/test_alloc tests/test_priority_queue tests/test_vm_mem tests/test_replay tests/test_invariants
 
 # Architecture-specific build targets
-.PHONY: arm x86-64-nasm x86_64_nasm
+.PHONY: arm x86-64-nasm x86_64_nasm parity
 arm:
 	$(MAKE) ARCH=arm
 
 x86-64-nasm x86_64_nasm:
 	$(MAKE) ARCH=x86_64_nasm
+
+# Prove parity: all platforms must build the same driver set
+parity:
+	@echo "=== Building x86_64_gas ==="
+	$(MAKE) clean && $(MAKE) ARCH=x86_64_gas
+	@echo "=== Building x86_64_nasm ==="
+	$(MAKE) clean && $(MAKE) ARCH=x86_64_nasm
+	@echo "=== Building arm ==="
+	$(MAKE) clean && $(MAKE) ARCH=arm
+	@echo "=== Building VM (x86_64_gas) ==="
+	$(MAKE) clean && $(MAKE) ARCH=x86_64_gas VM_ENABLE=1
+	@echo "Parity: all platforms built successfully."
