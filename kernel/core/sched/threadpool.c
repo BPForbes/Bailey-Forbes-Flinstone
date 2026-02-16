@@ -43,13 +43,19 @@ void queue_job(job_node *job) {
 void queue_job_priority(job_node *job, int priority) {
     job->priority = priority;
     job->enqueue_time = time(NULL);
+    job->pq_handle = -1;
     pthread_mutex_lock(&g_pool.mutex);
     if (pq_count(&g_pool.pq) >= PQ_MAX_ITEMS) {
         fprintf(stderr, "Job queue overflow!\n");
         pthread_mutex_unlock(&g_pool.mutex);
         return;
     }
-    pq_push(&g_pool.pq, priority, run_job_task, job);
+    pq_handle_t h = pq_push(&g_pool.pq, priority, run_job_task, job);
+    if (h >= 0) {
+        job->pq_handle = h;
+        if (priority == PRIORITY_BACKGROUND)
+            pq_set_quantum(&g_pool.pq, h, 100);  /* optional demotion on quantum expiry */
+    }
     pthread_cond_signal(&g_pool.cond);
     pthread_mutex_unlock(&g_pool.mutex);
 }

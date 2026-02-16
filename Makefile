@@ -170,7 +170,7 @@ VM/devices/%.o: VM/devices/%.c
 # --- ASM + Alloc + PQ unit tests (no CUnit) ---
 # Use -fsanitize when NOT using ASM allocator (libc tests only)
 TEST_SANITIZE = -fsanitize=address,undefined -fno-omit-frame-pointer
-.PHONY: test_mem_asm test_alloc test_priority_queue test_core test_invariants check-layers
+.PHONY: test_mem_asm test_alloc test_priority_queue test_drivers test_core test_invariants check-layers
 test_mem_asm: $(MEM_ASM_OBJ)
 	$(CC) $(CFLAGS) $(TEST_SANITIZE) -I. -o tests/test_mem_asm tests/test_mem_asm.c $(MEM_ASM_OBJ)
 	./tests/test_mem_asm
@@ -187,6 +187,17 @@ test_alloc_asm: $(ALLOC_OBJS)
 test_priority_queue: priority_queue.o $(MEM_ASM_OBJ)
 	$(CC) $(CFLAGS) $(TEST_SANITIZE) -I. -o tests/test_priority_queue tests/test_priority_queue.c priority_queue.o $(MEM_ASM_OBJ)
 	./tests/test_priority_queue
+
+test_drivers: userland/shell/common.o userland/shell/util.o kernel/core/vfs/disk.o disk_asm.o kernel/core/mm/mem_domain.o $(MEM_ASM_OBJ) $(PORT_IO_OBJ) \
+	  kernel/drivers/block/block_driver.o kernel/drivers/block/block_transport_host.o \
+	  kernel/drivers/keyboard_driver.o kernel/drivers/display_driver.o kernel/drivers/timer_driver.o kernel/drivers/pic_driver.o kernel/drivers/drivers.o \
+	  $(KERNEL_DRIVERS)/pci.o $(KERNEL_DRIVERS)/../hal/ioport.o
+	$(CC) $(CFLAGS) $(TEST_SANITIZE) -I. -Ikernel -Ikernel/include -Ikernel/drivers -Iuserland/shell -I$(ASM_SRC_DIR) -I$(KERNEL_DRIVERS) -o tests/test_drivers tests/test_drivers.c \
+	  userland/shell/common.o userland/shell/util.o kernel/core/vfs/disk.o disk_asm.o kernel/core/mm/mem_domain.o $(MEM_ASM_OBJ) $(PORT_IO_OBJ) \
+	  kernel/drivers/block/block_driver.o kernel/drivers/block/block_transport_host.o \
+	  kernel/drivers/keyboard_driver.o kernel/drivers/display_driver.o kernel/drivers/timer_driver.o kernel/drivers/pic_driver.o kernel/drivers/drivers.o \
+	  $(KERNEL_DRIVERS)/pci.o $(KERNEL_DRIVERS)/../hal/ioport.o -Wl,-z,noexecstack
+	./tests/test_drivers
 
 test_core: test_mem_asm test_priority_queue
 	@echo "Core tests done. Run 'make test_alloc_libc' or 'make test_alloc_asm' for allocator."
@@ -227,7 +238,7 @@ clean:
 	rm -f $(OBJS) $(TEST_OBJS) $(TEST_ASMOBJS) $(TARGET) $(TEST_TARGET)
 	rm -f kernel/arch/*/drivers/*.o kernel/arch/*/hal/*.o kernel/drivers/*.o kernel/drivers/block/*.o VM/devices/*.o
 	rm -f arch/*/*/*.o arch/*/*/alloc/*.o
-	rm -f tests/test_mem_asm tests/test_alloc tests/test_priority_queue tests/test_vm_mem tests/test_replay tests/test_invariants
+	rm -f tests/test_mem_asm tests/test_alloc tests/test_priority_queue tests/test_drivers tests/test_vm_mem tests/test_replay tests/test_invariants
 
 # Architecture-specific build targets
 .PHONY: arm x86-64-nasm x86_64_nasm parity

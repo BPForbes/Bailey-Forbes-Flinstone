@@ -12,6 +12,7 @@ testfile.txt
 tests/test_alloc
 tests/test_mem_asm
 tests/test_priority_queue
+tests/test_drivers
 tests/test_vm_mem
 
 # Fetched/built deps
@@ -24,3 +25,6 @@ plan/
 
 # VM checkpoint disk copy
 vm_checkpoint_disk.img
+
+# Disk journal temp (crash consistency)
+*.tmp

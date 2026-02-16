@@ -17,6 +17,7 @@ typedef struct job_node {
     int done;
     int priority;           /* for PQ */
     time_t enqueue_time;   /* for aging (future) */
+    pq_handle_t pq_handle; /* for pq_remove (cancel) / pq_update (aging) */
 } job_node;
 
 typedef struct thread_pool {

@@ -23,6 +23,7 @@ fi
 echo "[baseline] Core tests"
 make test_mem_asm 2>/dev/null || true
 make test_priority_queue 2>/dev/null || true
+make test_drivers 2>/dev/null || true
 
 echo "[baseline] CUnit tests (optional)"
 make BPForbes_Flinstone_Tests 2>/dev/null && (timeout 20 ./BPForbes_Flinstone_Tests 2>&1 | tail -5) || echo "(CUnit skipped - need deps or libcunit1-dev)"
