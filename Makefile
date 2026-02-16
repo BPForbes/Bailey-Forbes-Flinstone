@@ -5,7 +5,7 @@ ARCH ?= x86_64_gas
 # Compiler and flags
 CC = gcc
 AS = as
-CFLAGS = -Wall -Wextra -pthread -I. -Ikernel/core/vfs -Ikernel/core/mm -Ikernel/core/sched -Ikernel/core/sys -Iuserland/shell -Ikernel/arch/x86_64 -Ikernel/arch/aarch64
+CFLAGS = -Wall -Wextra -pthread -I. -Ikernel/include -Ikernel/core/vfs -Ikernel/core/mm -Ikernel/core/sched -Ikernel/core/sys -Iuserland/shell -Ikernel/arch/x86_64 -Ikernel/arch/aarch64
 LDFLAGS = -Wl,-z,noexecstack
 ASFLAGS =
 
@@ -35,20 +35,22 @@ endif
 # --- Main Shell Build ---
 # DRIVERS_BAREMETAL=1 for bare-metal (port I/O, VGA). Omit for host (stdin/printf).
 DRIVER_CFLAGS = $(CFLAGS)
-DRIVER_SRCS = $(KERNEL_DRIVERS)/block_driver.c $(KERNEL_DRIVERS)/keyboard_driver.c $(KERNEL_DRIVERS)/display_driver.c \
-              $(KERNEL_DRIVERS)/timer_driver.c $(KERNEL_DRIVERS)/pic_driver.c $(KERNEL_DRIVERS)/drivers.c
-# PCI only in x86_64 (aarch64 has no pci.c)
-ifneq ($(ARCH),arm)
+UNIFIED_DRIVER_SRCS = kernel/drivers/block/block_driver.c kernel/drivers/block/block_transport_host.c \
+                     kernel/drivers/keyboard_driver.c kernel/drivers/display_driver.c \
+                     kernel/drivers/timer_driver.c kernel/drivers/pic_driver.c kernel/drivers/drivers.c
+DRIVER_SRCS = $(UNIFIED_DRIVER_SRCS)
+# PCI: x86_64 real impl, aarch64 stub (wired for both)
 DRIVER_SRCS += $(KERNEL_DRIVERS)/pci.c
-endif
+# HAL: ioport (x86 real, arm stubs)
+HAL_SRCS = $(KERNEL_DRIVERS)/../hal/ioport.c
 CORE_SRCS = kernel/core/vfs/disk.c kernel/core/vfs/path_log.c kernel/core/vfs/cluster.c kernel/core/vfs/fs.c \
             kernel/core/sched/threadpool.c priority_queue.c kernel/core/vfs/fs_provider.c kernel/core/vfs/fs_command.c \
             kernel/core/vfs/fs_events.c kernel/core/vfs/fs_policy.c kernel/core/vfs/fs_chain.c kernel/core/vfs/fs_facade.c \
             kernel/core/vfs/fs_service_glue.c kernel/core/mm/mem_domain.c kernel/core/sys/vrt.c kernel/core/vfs/vfs.c
 SHELL_SRCS = userland/shell/common.c userland/shell/util.c userland/shell/terminal.c userland/shell/interpreter.c userland/shell/sh.c
 SRCS = $(SHELL_SRCS) $(CORE_SRCS) disk_asm.c dir_asm.c
-SRCS += $(DRIVER_SRCS)
-CFLAGS += -I$(ASM_SRC_DIR) -I$(KERNEL_DRIVERS)
+SRCS += $(DRIVER_SRCS) $(HAL_SRCS)
+CFLAGS += -I$(ASM_SRC_DIR) -I$(KERNEL_DRIVERS) -Ikernel -Ikernel/drivers
 VM_SRCS = VM/devices/vm.c VM/devices/vm_cpu.c VM/devices/vm_mem.c VM/devices/vm_decode.c VM/devices/vm_io.c VM/devices/vm_loader.c \
           VM/devices/vm_display.c VM/devices/vm_host.c VM/devices/vm_font.c VM/devices/vm_disk.c VM/devices/vm_snapshot.c
 ifeq ($(VM_ENABLE),1)
@@ -150,6 +152,18 @@ $(TEST_TARGET): $(TEST_OBJS) $(TEST_ASMOBJS)
 $(KERNEL_DRIVERS)/%.o: $(KERNEL_DRIVERS)/%.c
 	$(CC) $(CFLAGS) -I$(KERNEL_DRIVERS) -c $< -o $@
 
+kernel/drivers/%.o: kernel/drivers/%.c
+	$(CC) $(CFLAGS) -c $< -o $@
+
+kernel/drivers/block/%.o: kernel/drivers/block/%.c
+	$(CC) $(CFLAGS) -c $< -o $@
+
+kernel/arch/x86_64/hal/%.o: kernel/arch/x86_64/hal/%.c
+	$(CC) $(CFLAGS) -Ikernel/arch/x86_64 -c $< -o $@
+
+kernel/arch/aarch64/hal/%.o: kernel/arch/aarch64/hal/%.c
+	$(CC) $(CFLAGS) -Ikernel/arch/aarch64 -c $< -o $@
+
 VM/devices/%.o: VM/devices/%.c
 	$(CC) $(CFLAGS) -IVM -IVM/devices -c $< -o $@
 
@@ -191,14 +205,15 @@ test_vm_mem: kernel/core/mm/mem_domain.o $(MEM_ASM_OBJ) VM/devices/vm_mem.o
 .PHONY: test_replay
 test_replay:
 	$(MAKE) VM_ENABLE=1 ARCH=$(ARCH) BPForbes_Flinstone_Shell
-	$(CC) $(CFLAGS) -DVM_ENABLE=1 -I$(ASM_SRC_DIR) -I$(KERNEL_DRIVERS) -IVM -IVM/devices -o tests/test_replay tests/test_replay.c \
+	$(CC) $(CFLAGS) -DVM_ENABLE=1 -I$(ASM_SRC_DIR) -I$(KERNEL_DRIVERS) -Ikernel -Ikernel/drivers -IVM -IVM/devices -o tests/test_replay tests/test_replay.c \
 	  userland/shell/common.o userland/shell/util.o userland/shell/terminal.o kernel/core/vfs/disk.o disk_asm.o dir_asm.o \
 	  kernel/core/vfs/path_log.o kernel/core/vfs/cluster.o kernel/core/vfs/fs.o priority_queue.o \
 	  kernel/core/vfs/fs_provider.o kernel/core/vfs/fs_command.o kernel/core/vfs/fs_events.o kernel/core/vfs/fs_policy.o \
 	  kernel/core/vfs/fs_chain.o kernel/core/vfs/fs_facade.o kernel/core/vfs/fs_service_glue.o kernel/core/mm/mem_domain.o kernel/core/sys/vrt.o kernel/core/vfs/vfs.o \
-	  $(KERNEL_DRIVERS)/block_driver.o $(KERNEL_DRIVERS)/keyboard_driver.o $(KERNEL_DRIVERS)/display_driver.o \
-	  $(KERNEL_DRIVERS)/timer_driver.o $(KERNEL_DRIVERS)/pic_driver.o $(KERNEL_DRIVERS)/drivers.o \
-	  $(if $(filter-out arm,$(ARCH)),$(KERNEL_DRIVERS)/pci.o,) \
+	  kernel/drivers/block/block_driver.o kernel/drivers/block/block_transport_host.o kernel/drivers/keyboard_driver.o kernel/drivers/display_driver.o \
+	  kernel/drivers/timer_driver.o kernel/drivers/pic_driver.o kernel/drivers/drivers.o \
+	  $(KERNEL_DRIVERS)/../hal/ioport.o \
+	  $(KERNEL_DRIVERS)/pci.o \
 	  VM/devices/vm.o VM/devices/vm_cpu.o VM/devices/vm_mem.o VM/devices/vm_decode.o VM/devices/vm_io.o VM/devices/vm_loader.o \
 	  VM/devices/vm_display.o VM/devices/vm_host.o VM/devices/vm_font.o VM/devices/vm_disk.o VM/devices/vm_snapshot.o \
 	  $(MEM_ASM_OBJ) $(PORT_IO_OBJ) -Wl,-z,noexecstack
@@ -210,14 +225,26 @@ debug: $(TARGET)
 
 clean:
 	rm -f $(OBJS) $(TEST_OBJS) $(TEST_ASMOBJS) $(TARGET) $(TEST_TARGET)
-	rm -f kernel/arch/*/drivers/*.o VM/devices/*.o
+	rm -f kernel/arch/*/drivers/*.o kernel/arch/*/hal/*.o kernel/drivers/*.o kernel/drivers/block/*.o VM/devices/*.o
 	rm -f arch/*/*/*.o arch/*/*/alloc/*.o
 	rm -f tests/test_mem_asm tests/test_alloc tests/test_priority_queue tests/test_vm_mem tests/test_replay tests/test_invariants
 
 # Architecture-specific build targets
-.PHONY: arm x86-64-nasm x86_64_nasm
+.PHONY: arm x86-64-nasm x86_64_nasm parity
 arm:
 	$(MAKE) ARCH=arm
 
 x86-64-nasm x86_64_nasm:
 	$(MAKE) ARCH=x86_64_nasm
+
+# Prove parity: all platforms must build the same driver set
+parity:
+	@echo "=== Building x86_64_gas ==="
+	$(MAKE) clean && $(MAKE) ARCH=x86_64_gas
+	@echo "=== Building x86_64_nasm ==="
+	$(MAKE) clean && $(MAKE) ARCH=x86_64_nasm
+	@echo "=== Building arm ==="
+	$(MAKE) clean && $(MAKE) ARCH=arm
+	@echo "=== Building VM (x86_64_gas) ==="
+	$(MAKE) clean && $(MAKE) ARCH=x86_64_gas VM_ENABLE=1
+	@echo "Parity: all platforms built successfully."

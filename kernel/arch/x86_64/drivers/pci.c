@@ -3,7 +3,7 @@
  * x86: legacy port 0xCF8/0xCFC or ECAM if base set.
  * ARM: ECAM only.
  */
-#include "pci.h"
+#include "fl/driver/pci.h"
 #include "port_io.h"
 #include "mmio.h"
 #include <stddef.h>

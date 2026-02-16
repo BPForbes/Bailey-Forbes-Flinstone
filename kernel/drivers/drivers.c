@@ -1,6 +1,6 @@
-/* Driver subsystem - init all drivers.
- * Host mode: block/keyboard/display/timer use host backends.
- * BAREMETAL: use port_io + hardware. */
+/**
+ * Driver subsystem - unified init for all platforms.
+ */
 #include "drivers.h"
 #include "common.h"
 #include <stdlib.h>

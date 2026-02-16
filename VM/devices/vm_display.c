@@ -3,8 +3,7 @@
 #include "vm_mem.h"
 #include "mem_asm.h"
 #include "mem_domain.h"
-#include "../drivers/drivers.h"
-#include "../drivers/driver_types.h"
+#include "drivers/drivers.h"
 #include <stdlib.h>
 
 void vm_display_refresh(vm_mem_t *mem) {

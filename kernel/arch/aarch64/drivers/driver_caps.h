@@ -1,5 +1,5 @@
 /**
- * x86-64: thin wrapper - include canonical driver caps.
+ * AArch64: thin wrapper - include canonical driver caps.
  */
 #ifndef DRIVER_CAPS_H
 #define DRIVER_CAPS_H

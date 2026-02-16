@@ -11,6 +11,6 @@
 
 #include "port_io.h"
 #include "mmio.h"
-#include "pci.h"
+#include "fl/driver/pci.h"
 
 #endif /* IO_H */

@@ -84,11 +84,17 @@ void *worker_thread(void *arg) {
             pthread_mutex_unlock(&g_pool.mutex);
             break;
         }
+        /* Layer-scan: run one from each non-empty layer per round (secondary tie-breaker) */
         pq_task_t task;
-        int r = pq_pop(&g_pool.pq, &task);
+        for (int layer = 0; layer < PQ_NUM_PRIORITIES; layer++) {
+            if (pq_pop_from_layer(&g_pool.pq, layer, &task) != 0)
+                continue;
+            pthread_mutex_unlock(&g_pool.mutex);
+            if (task.fn && task.arg)
+                task.fn(task.arg);
+            pthread_mutex_lock(&g_pool.mutex);
+        }
         pthread_mutex_unlock(&g_pool.mutex);
-        if (r == 0 && task.fn && task.arg)
-            task.fn(task.arg);
     }
     return NULL;
 }
