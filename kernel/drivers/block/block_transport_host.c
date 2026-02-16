@@ -1,6 +1,6 @@
 /**
- * x86-64 / Host HAL: Block transport via disk file (disk_asm).
- * Implements fl_hal_block_transport for host mode.
+ * Host HAL: Block transport via disk file (disk_asm).
+ * Platform-neutral - same for x86-64 and ARM.
  */
 #include "fl/driver/block.h"
 #include "disk.h"

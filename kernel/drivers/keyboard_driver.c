@@ -1,15 +1,15 @@
-/* Keyboard driver - input from user.
- * Host: read() from stdin. BAREMETAL: port_inb(0x60). */
-#include "keyboard_driver.h"
-#include "io.h"
-#include <stdio.h>
+/**
+ * Unified keyboard driver - uses fl_ioport for baremetal.
+ * Host: stdin. BAREMETAL: PS/2 port I/O via HAL.
+ */
+#include "fl/driver/console.h"
+#include "fl/driver/ioport.h"
+#include "fl/driver/driver_types.h"
 #include <stdlib.h>
 #include <unistd.h>
 
-#ifdef DRIVERS_BAREMETAL
 #define KB_DATA   0x60
 #define KB_STATUS 0x64
-#endif
 
 typedef struct {
     keyboard_driver_t base;
@@ -38,9 +38,9 @@ static int host_get_char(keyboard_driver_t *drv, char *out) {
 #ifdef DRIVERS_BAREMETAL
 static int hw_poll_scancode(keyboard_driver_t *drv, uint8_t *out) {
     (void)drv;
-    if ((port_inb(KB_STATUS) & 0x01) == 0)
+    if ((fl_ioport_in8(KB_STATUS) & 0x01) == 0)
         return -1;
-    *out = (uint8_t)port_inb(KB_DATA);
+    *out = (uint8_t)fl_ioport_in8(KB_DATA);
     return 0;
 }
 
@@ -48,14 +48,13 @@ static int hw_get_char(keyboard_driver_t *drv, char *out) {
     uint8_t sc;
     if (hw_poll_scancode(drv, &sc) != 0)
         return -1;
-    /* Simplified: scancode set 1, no modifier. Full impl needs translation table. */
     *out = (sc < 128) ? (char)sc : '\0';
     return 0;
 }
 #endif
 
 keyboard_driver_t *keyboard_driver_create(void) {
-    keyboard_impl_t *impl = calloc(1, sizeof(*impl));
+    keyboard_impl_t *impl = (keyboard_impl_t *)calloc(1, sizeof(*impl));
     if (!impl) return NULL;
 #ifdef DRIVERS_BAREMETAL
     impl->host_mode = 0;

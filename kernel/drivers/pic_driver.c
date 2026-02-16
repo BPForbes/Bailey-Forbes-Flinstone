@@ -1,7 +1,10 @@
-/* PIC driver - interrupt controller (8259).
- * Host: no-op. BAREMETAL: init, mask, EOI. */
-#include "pic_driver.h"
-#include "io.h"
+/**
+ * Unified PIC driver - uses fl_ioport for baremetal 8259.
+ * Host: no-op. BAREMETAL: PIC port I/O via HAL.
+ */
+#include "fl/driver/console.h"
+#include "fl/driver/ioport.h"
+#include "fl/driver/driver_types.h"
 #include <stdlib.h>
 
 #ifdef DRIVERS_BAREMETAL
@@ -30,28 +33,28 @@ static void host_eoi(pic_driver_t *drv, int irq) {
 #ifdef DRIVERS_BAREMETAL
 static void hw_init(pic_driver_t *drv) {
     (void)drv;
-    port_outb(PIC1_CMD, ICW1_INIT);
-    port_outb(PIC2_CMD, ICW1_INIT);
-    port_outb(PIC1_DATA, 0x20);  /* IRQ 0-7 -> int 0x20-0x27 */
-    port_outb(PIC2_DATA, 0x28);  /* IRQ 8-15 -> int 0x28-0x2F */
-    port_outb(PIC1_DATA, 0x04);  /* slave on IRQ2 */
-    port_outb(PIC2_DATA, 0x02);
-    port_outb(PIC1_DATA, ICW4_8086);
-    port_outb(PIC2_DATA, ICW4_8086);
-    port_outb(PIC1_DATA, 0xFF);  /* mask all initially */
-    port_outb(PIC2_DATA, 0xFF);
+    fl_ioport_out8(PIC1_CMD, ICW1_INIT);
+    fl_ioport_out8(PIC2_CMD, ICW1_INIT);
+    fl_ioport_out8(PIC1_DATA, 0x20);
+    fl_ioport_out8(PIC2_DATA, 0x28);
+    fl_ioport_out8(PIC1_DATA, 0x04);
+    fl_ioport_out8(PIC2_DATA, 0x02);
+    fl_ioport_out8(PIC1_DATA, ICW4_8086);
+    fl_ioport_out8(PIC2_DATA, ICW4_8086);
+    fl_ioport_out8(PIC1_DATA, 0xFF);
+    fl_ioport_out8(PIC2_DATA, 0xFF);
 }
 
 static void hw_eoi(pic_driver_t *drv, int irq) {
     (void)drv;
-    port_outb(PIC1_CMD, PIC_EOI);
+    fl_ioport_out8(PIC1_CMD, PIC_EOI);
     if (irq >= 8)
-        port_outb(PIC2_CMD, PIC_EOI);
+        fl_ioport_out8(PIC2_CMD, PIC_EOI);
 }
 #endif
 
 pic_driver_t *pic_driver_create(void) {
-    pic_impl_t *impl = calloc(1, sizeof(*impl));
+    pic_impl_t *impl = (pic_impl_t *)calloc(1, sizeof(*impl));
     if (!impl) return NULL;
 #ifdef DRIVERS_BAREMETAL
     impl->base.init = hw_init;

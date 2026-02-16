@@ -10,7 +10,7 @@
 #include "vm_snapshot.h"
 #include "mem_asm.h"
 #include "priority_queue.h"
-#include "drivers/drivers.h"
+#include "../drivers/drivers.h"
 #include <stdio.h>
 #include <stdlib.h>
 

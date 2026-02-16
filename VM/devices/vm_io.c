@@ -5,15 +5,14 @@
 #include "vm_disk.h"
 #include "mem_asm.h"
 #include "mem_domain.h"
-#include "../drivers/drivers.h"
-#include "../drivers/driver_types.h"
+#include "drivers/drivers.h"
 #include <stdio.h>
 #include <stdlib.h>
 #include <stdint.h>
 
 static FILE *s_serial_out;
 
-#define SECTOR_SIZE 512
+/* SECTOR_SIZE from driver_types.h */
 #define PCI_CFG_ADDR  0xCF8
 #define PCI_CFG_DATA  0xCFC
 #define PCI_CFG_RESET 0xCF9

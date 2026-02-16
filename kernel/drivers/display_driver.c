@@ -1,14 +1,15 @@
-/* Display driver - console output.
- * Host: printf. BAREMETAL: VGA text buffer at 0xB8000. */
-#include "display_driver.h"
-#include "driver_types.h"
-#include "io.h"
+/**
+ * Unified display driver - uses fl_mmio for baremetal VGA.
+ * Host: printf. BAREMETAL: VGA at 0xB8000 via MMIO.
+ */
+#include "fl/driver/console.h"
+#include "fl/driver/mmio.h"
+#include "fl/driver/driver_types.h"
 #include <stdio.h>
 #include <stdlib.h>
 #include <stdint.h>
 
 #ifdef DRIVERS_BAREMETAL
-#include <stddef.h>
 #define VGA_MEM ((volatile uint16_t *)VGA_BASE)
 #endif
 
@@ -59,33 +60,32 @@ static void hw_putchar(display_driver_t *drv, char c) {
         impl->col = 0;
         if (++impl->row >= VGA_ROWS) {
             impl->row = VGA_ROWS - 1;
-            /* Scroll - shift rows up */
             for (int i = 0; i < (VGA_ROWS - 1) * VGA_COLS; i++)
-                VGA_MEM[i] = VGA_MEM[i + VGA_COLS];
+                fl_mmio_write16((void *)(VGA_MEM + i), fl_mmio_read16((void *)(VGA_MEM + i + VGA_COLS)));
             for (int i = (VGA_ROWS - 1) * VGA_COLS; i < VGA_ROWS * VGA_COLS; i++)
-                VGA_MEM[i] = ' ' | (impl->color << 8);
+                fl_mmio_write16((void *)(VGA_MEM + i), (uint16_t)(' ' | (impl->color << 8)));
         }
         return;
     }
     int idx = impl->row * VGA_COLS + impl->col;
-    VGA_MEM[idx] = (uint16_t)(uint8_t)c | (impl->color << 8);
+    fl_mmio_write16((void *)(VGA_MEM + idx), (uint16_t)(uint8_t)c | (impl->color << 8));
     if (++impl->col >= VGA_COLS) {
         impl->col = 0;
         if (++impl->row >= VGA_ROWS) {
             impl->row = VGA_ROWS - 1;
             for (int i = 0; i < (VGA_ROWS - 1) * VGA_COLS; i++)
-                VGA_MEM[i] = VGA_MEM[i + VGA_COLS];
+                fl_mmio_write16((void *)(VGA_MEM + i), fl_mmio_read16((void *)(VGA_MEM + i + VGA_COLS)));
             for (int i = (VGA_ROWS - 1) * VGA_COLS; i < VGA_ROWS * VGA_COLS; i++)
-                VGA_MEM[i] = ' ' | (impl->color << 8);
+                fl_mmio_write16((void *)(VGA_MEM + i), (uint16_t)(' ' | (impl->color << 8)));
         }
     }
 }
 
 static void hw_clear(display_driver_t *drv) {
     display_impl_t *impl = (display_impl_t *)drv->impl;
-    uint16_t blank = ' ' | (impl->color << 8);
+    uint16_t blank = (uint16_t)(' ' | (impl->color << 8));
     for (int i = 0; i < VGA_ROWS * VGA_COLS; i++)
-        VGA_MEM[i] = blank;
+        fl_mmio_write16((void *)(VGA_MEM + i), blank);
     impl->row = impl->col = 0;
 }
 
@@ -96,17 +96,17 @@ static void hw_set_cursor(display_driver_t *drv, int row, int col) {
 }
 
 static void hw_refresh_vga(display_driver_t *drv, const void *vga_buf) {
-    display_impl_t *impl = (display_impl_t *)drv->impl;
+    (void)drv;
     const uint16_t *cells = (const uint16_t *)vga_buf;
     for (int i = 0; i < VGA_ROWS * VGA_COLS; i++)
-        VGA_MEM[i] = cells[i];
+        fl_mmio_write16((void *)(VGA_MEM + i), cells[i]);
 }
 #endif
 
 display_driver_t *display_driver_create(void) {
-    display_impl_t *impl = calloc(1, sizeof(*impl));
+    display_impl_t *impl = (display_impl_t *)calloc(1, sizeof(*impl));
     if (!impl) return NULL;
-    impl->color = 0x07;  /* light gray on black */
+    impl->color = 0x07;
 #ifdef DRIVERS_BAREMETAL
     impl->base.putchar = hw_putchar;
     impl->base.clear = hw_clear;
