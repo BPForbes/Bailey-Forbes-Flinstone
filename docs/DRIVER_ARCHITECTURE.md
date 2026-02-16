@@ -31,13 +31,13 @@ One driver API, many backends. Drivers are consistent across x86-64, ARM64, and 
 
 ## Platform HALs and Arch-Specific Drivers
 
-| Platform | HAL Path | PCI | IOPort |
-|----------|----------|-----|--------|
-| x86-64 | `kernel/arch/x86_64/hal/` | `kernel/arch/x86_64/drivers/pci.c` (real) | real port I/O |
-| AArch64 | `kernel/arch/aarch64/hal/` | `kernel/arch/aarch64/drivers/pci.c` (stub) | stubs |
-| VM | `VM/hal/` | (future) | - |
+| Platform | HAL Path | PCI | IOPort | ARM MMIO HAL |
+|----------|----------|-----|--------|--------------|
+| x86-64 | `kernel/arch/x86_64/hal/` | real (CF8/CFC) | real port I/O | - |
+| AArch64 | `kernel/arch/aarch64/hal/` | real (ECAM) | stubs | PL011 UART, GIC, ARM timer |
+| VM | `VM/hal/` | (future) | - | - |
 
-Both architectures are wired for the same driver set; ARM uses stubs where hardware differs (no port I/O, PCI via ECAM when implemented).
+Both architectures have real implementations. ARM uses MMIO (PL011 UART, GIC, ARM generic timer, PCI ECAM) instead of port I/O.
 
 ## Capability Reporting (Real vs Stub)
 
@@ -46,20 +46,22 @@ Drivers report whether they have real hardware paths or are stubs:
 - **FL_CAP_REAL** – driver has real implementation; hardware access works
 - **FL_CAP_STUB** – driver is placeholder; may return 0xFF, no-ops
 
-| Driver | Host (x86) | Baremetal x86 | Baremetal ARM |
-|--------|------------|---------------|---------------|
+| Driver | Host | Baremetal x86 | Baremetal ARM |
+|--------|------|---------------|---------------|
 | Block | REAL (disk file) | REAL | REAL |
-| Keyboard | REAL (stdin) | REAL | stub |
-| Display | REAL (printf) | REAL | stub |
-| Timer | REAL (usleep) | REAL | stub |
-| PIC | REAL (no-op) | REAL | stub |
-| PCI | stub | REAL | stub |
+| Keyboard | REAL (stdin) | REAL (PS/2) | REAL (PL011 UART) |
+| Display | REAL (printf) | REAL (VGA) | REAL (UART) |
+| Timer | REAL (usleep) | REAL (PIT) | REAL (CNTVCT) |
+| PIC | REAL (no-op) | REAL (8259) | REAL (GIC) |
+| PCI | stub | REAL (CF8/CFC) | REAL (ECAM) |
 
 **API**: `keyboard_driver_caps()`, `display_driver_caps()`, `timer_driver_caps()`, `pic_driver_caps()`, `pci_get_caps()`. Block uses `get_caps()` → `flags` includes FL_CAP_REAL.
 
 **Refuse stub**: Call `drivers_require_real_block()` or `drivers_require_real_pci()` before relying on hardware; returns -1 if stub.
 
-**Report**: `drivers_report_caps()` logs real/stub status at init.
+**Report**: `drivers_report_caps()` logs real/stub status at init. In baremetal mode, FATAL if any driver is stub.
+
+**Probe/Selftest**: `driver_probe_*()` returns 0 if real. `drivers_run_selftest()` runs block read, timer tick, display putchar; exits if any fail. Build gate: `make check-stubs` fails if forbidden stub markers exist.
 
 ## Bus Types
 

@@ -33,6 +33,7 @@ static void host_eoi(pic_driver_t *drv, int irq) {
 }
 
 #ifdef DRIVERS_BAREMETAL
+#if defined(__x86_64__) || defined(__i386__)
 static void hw_init(pic_driver_t *drv) {
     (void)drv;
     fl_ioport_out8(PIC1_CMD, ICW1_INIT);
@@ -53,6 +54,18 @@ static void hw_eoi(pic_driver_t *drv, int irq) {
     if (irq >= 8)
         fl_ioport_out8(PIC2_CMD, PIC_EOI);
 }
+#elif defined(__aarch64__)
+#include "hal/arm_gic.h"
+static void hw_init(pic_driver_t *drv) {
+    (void)drv;
+    arm_gic_init();
+}
+
+static void hw_eoi(pic_driver_t *drv, int irq) {
+    (void)drv;
+    arm_gic_eoi(irq);
+}
+#endif
 #endif
 
 pic_driver_t *pic_driver_create(void) {
@@ -77,7 +90,7 @@ uint32_t pic_driver_caps(void) {
     if (!g_pic_driver) return 0;
 #ifndef DRIVERS_BAREMETAL
     return FL_CAP_REAL;
-#elif defined(__x86_64__) || defined(__i386__)
+#elif defined(__x86_64__) || defined(__i386__) || defined(__aarch64__)
     return FL_CAP_REAL;
 #else
     return FL_CAP_STUB;

@@ -27,6 +27,7 @@ static void host_msleep(timer_driver_t *drv, unsigned int ms) {
 }
 
 #ifdef DRIVERS_BAREMETAL
+#if defined(__x86_64__) || defined(__i386__)
 static uint64_t hw_tick_count(timer_driver_t *drv) {
     timer_impl_t *impl = (timer_impl_t *)drv->impl;
     return impl->ticks;
@@ -38,6 +39,21 @@ static void hw_msleep(timer_driver_t *drv, unsigned int ms) {
     for (volatile uint64_t i = 0; i < end; i++)
         (void)i;
 }
+#elif defined(__aarch64__)
+#include "hal/arm_timer.h"
+static uint64_t hw_tick_count(timer_driver_t *drv) {
+    (void)drv;
+    return arm_timer_tick_count();
+}
+
+static void hw_msleep(timer_driver_t *drv, unsigned int ms) {
+    (void)drv;
+    uint64_t start = arm_timer_tick_count();
+    volatile uint64_t end = ((uint64_t)ms * 24000) / 1000;  /* ~24MHz typical */
+    while (arm_timer_tick_count() - start < end)
+        ;
+}
+#endif
 #endif
 
 timer_driver_t *timer_driver_create(void) {
@@ -62,7 +78,7 @@ uint32_t timer_driver_caps(void) {
     if (!g_timer_driver) return 0;
 #ifndef DRIVERS_BAREMETAL
     return FL_CAP_REAL;
-#elif defined(__x86_64__) || defined(__i386__)
+#elif defined(__x86_64__) || defined(__i386__) || defined(__aarch64__)
     return FL_CAP_REAL;
 #else
     return FL_CAP_STUB;

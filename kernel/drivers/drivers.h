@@ -37,4 +37,20 @@ void drivers_report_caps(void);
 int drivers_require_real_block(void);
 int drivers_require_real_pci(void);
 
+/** Probe: return 0 if driver has real implementation. Refuse to use if -1. */
+int driver_probe_block(void);
+int driver_probe_keyboard(void);
+int driver_probe_display(void);
+int driver_probe_timer(void);
+int driver_probe_pic(void);
+int driver_probe_pci(void);
+
+/** Selftest: minimal proof driver works. Return 0 on pass, -1 on fail. */
+int driver_selftest_block(void);
+int driver_selftest_timer(void);
+int driver_selftest_display(void);
+
+/** Run all selftests at boot. Return 0 if all pass; -1 and log FATAL if any fail. */
+int drivers_run_selftest(void);
+
 #endif

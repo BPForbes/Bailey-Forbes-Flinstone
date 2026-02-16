@@ -20,6 +20,9 @@ else
   echo "  VM: boot or output check failed (optional)"
 fi
 
+echo "[baseline] Stub gate"
+make check-stubs 2>/dev/null || true
+
 echo "[baseline] Core tests"
 make test_mem_asm 2>/dev/null || true
 make test_priority_queue 2>/dev/null || true

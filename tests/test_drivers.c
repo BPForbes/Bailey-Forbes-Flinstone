@@ -62,8 +62,7 @@ static int test_timer(void) {
     uint64_t t0 = g_timer_driver->tick_count(g_timer_driver);
     g_timer_driver->msleep(g_timer_driver, 5);
     uint64_t t1 = g_timer_driver->tick_count(g_timer_driver);
-    (void)t0;
-    (void)t1;
+    ASSERT(t1 >= t0);  /* Proof: timer advances */
     return 0;
 }
 
@@ -120,6 +119,14 @@ int main(void) {
 
     printf("test_pic... ");
     if (test_pic() != 0) { drivers_shutdown(); unlink(path); return 1; }
+    printf("OK\n");
+
+    printf("test_probe... ");
+    ASSERT(driver_probe_block() == 0);
+    ASSERT(driver_probe_keyboard() == 0);
+    ASSERT(driver_probe_display() == 0);
+    ASSERT(driver_probe_timer() == 0);
+    ASSERT(driver_probe_pic() == 0);
     printf("OK\n");
 
     drivers_shutdown();

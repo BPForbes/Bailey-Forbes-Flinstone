@@ -39,10 +39,14 @@ UNIFIED_DRIVER_SRCS = kernel/drivers/block/block_driver.c kernel/drivers/block/b
                      kernel/drivers/keyboard_driver.c kernel/drivers/display_driver.c \
                      kernel/drivers/timer_driver.c kernel/drivers/pic_driver.c kernel/drivers/drivers.c
 DRIVER_SRCS = $(UNIFIED_DRIVER_SRCS)
-# PCI: x86_64 real impl, aarch64 stub (wired for both)
+# PCI: x86_64 real impl, aarch64 ECAM real
 DRIVER_SRCS += $(KERNEL_DRIVERS)/pci.c
-# HAL: ioport (x86 real, arm stubs)
+# HAL: ioport (x86 real, arm stubs) + ARM MMIO HAL (arm only)
 HAL_SRCS = $(KERNEL_DRIVERS)/../hal/ioport.c
+ifeq ($(ARCH),arm)
+HAL_SRCS += kernel/arch/aarch64/hal/arm_plat.c kernel/arch/aarch64/hal/arm_uart.c \
+            kernel/arch/aarch64/hal/arm_timer.c kernel/arch/aarch64/hal/arm_gic.c
+endif
 CORE_SRCS = kernel/core/vfs/disk.c kernel/core/vfs/path_log.c kernel/core/vfs/cluster.c kernel/core/vfs/fs.c \
             kernel/core/sched/threadpool.c priority_queue.c kernel/core/vfs/fs_provider.c kernel/core/vfs/fs_command.c \
             kernel/core/vfs/fs_events.c kernel/core/vfs/fs_policy.c kernel/core/vfs/fs_chain.c kernel/core/vfs/fs_facade.c \
@@ -51,6 +55,9 @@ SHELL_SRCS = userland/shell/common.c userland/shell/util.c userland/shell/termin
 SRCS = $(SHELL_SRCS) $(CORE_SRCS) disk_asm.c dir_asm.c
 SRCS += $(DRIVER_SRCS) $(HAL_SRCS)
 CFLAGS += -I$(ASM_SRC_DIR) -I$(KERNEL_DRIVERS) -Ikernel -Ikernel/drivers
+ifeq ($(ARCH),arm)
+CFLAGS += -Ikernel/arch/aarch64
+endif
 VM_SRCS = VM/devices/vm.c VM/devices/vm_cpu.c VM/devices/vm_mem.c VM/devices/vm_decode.c VM/devices/vm_io.c VM/devices/vm_loader.c \
           VM/devices/vm_display.c VM/devices/vm_host.c VM/devices/vm_font.c VM/devices/vm_disk.c VM/devices/vm_snapshot.c
 ifeq ($(VM_ENABLE),1)
@@ -188,15 +195,20 @@ test_priority_queue: priority_queue.o $(MEM_ASM_OBJ)
 	$(CC) $(CFLAGS) $(TEST_SANITIZE) -I. -o tests/test_priority_queue tests/test_priority_queue.c priority_queue.o $(MEM_ASM_OBJ)
 	./tests/test_priority_queue
 
+TEST_DRIVER_HAL_OBJS = $(KERNEL_DRIVERS)/../hal/ioport.o
+ifeq ($(ARCH),arm)
+TEST_DRIVER_HAL_OBJS += kernel/arch/aarch64/hal/arm_plat.o kernel/arch/aarch64/hal/arm_uart.o \
+	kernel/arch/aarch64/hal/arm_timer.o kernel/arch/aarch64/hal/arm_gic.o
+endif
 test_drivers: userland/shell/common.o userland/shell/util.o kernel/core/vfs/disk.o disk_asm.o kernel/core/mm/mem_domain.o $(MEM_ASM_OBJ) $(PORT_IO_OBJ) \
 	  kernel/drivers/block/block_driver.o kernel/drivers/block/block_transport_host.o \
 	  kernel/drivers/keyboard_driver.o kernel/drivers/display_driver.o kernel/drivers/timer_driver.o kernel/drivers/pic_driver.o kernel/drivers/drivers.o \
-	  $(KERNEL_DRIVERS)/pci.o $(KERNEL_DRIVERS)/../hal/ioport.o
-	$(CC) $(CFLAGS) $(TEST_SANITIZE) -I. -Ikernel -Ikernel/include -Ikernel/drivers -Iuserland/shell -I$(ASM_SRC_DIR) -I$(KERNEL_DRIVERS) -o tests/test_drivers tests/test_drivers.c \
+	  $(KERNEL_DRIVERS)/pci.o $(TEST_DRIVER_HAL_OBJS)
+	$(CC) $(CFLAGS) $(TEST_SANITIZE) -I. -Ikernel -Ikernel/include -Ikernel/drivers -Iuserland/shell -I$(ASM_SRC_DIR) -I$(KERNEL_DRIVERS) -Ikernel/arch/aarch64 -o tests/test_drivers tests/test_drivers.c \
 	  userland/shell/common.o userland/shell/util.o kernel/core/vfs/disk.o disk_asm.o kernel/core/mm/mem_domain.o $(MEM_ASM_OBJ) $(PORT_IO_OBJ) \
 	  kernel/drivers/block/block_driver.o kernel/drivers/block/block_transport_host.o \
 	  kernel/drivers/keyboard_driver.o kernel/drivers/display_driver.o kernel/drivers/timer_driver.o kernel/drivers/pic_driver.o kernel/drivers/drivers.o \
-	  $(KERNEL_DRIVERS)/pci.o $(KERNEL_DRIVERS)/../hal/ioport.o -Wl,-z,noexecstack
+	  $(KERNEL_DRIVERS)/pci.o $(TEST_DRIVER_HAL_OBJS) -Wl,-z,noexecstack
 	./tests/test_drivers
 
 test_core: test_mem_asm test_priority_queue
@@ -208,6 +220,10 @@ test_invariants: userland/shell/common.o userland/shell/util.o $(MEM_ASM_OBJ)
 
 check-layers:
 	@./scripts/check_layers.sh
+
+.PHONY: check-stubs
+check-stubs:
+	@bash scripts/check_no_stubs.sh
 
 test_vm_mem: kernel/core/mm/mem_domain.o $(MEM_ASM_OBJ) VM/devices/vm_mem.o
 	$(CC) $(CFLAGS) $(TEST_SANITIZE) -IVM -IVM/devices -o tests/test_vm_mem tests/test_vm_mem.c kernel/core/mm/mem_domain.o $(MEM_ASM_OBJ) VM/devices/vm_mem.o

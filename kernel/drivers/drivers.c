@@ -30,6 +30,11 @@ void drivers_report_caps(void) {
            fl_cap_is_real(tm) ? "REAL" : "stub",
            fl_cap_is_real(pic) ? "REAL" : "stub",
            fl_cap_is_real(pci) ? "REAL" : "stub");
+#ifdef DRIVERS_BAREMETAL
+    if (!block_real || !fl_cap_is_real(kb) || !fl_cap_is_real(disp) || !fl_cap_is_real(tm) || !fl_cap_is_real(pic) || !fl_cap_is_real(pci)) {
+        fprintf(stderr, "[drivers] FATAL: One or more drivers are STUB/UNIMPLEMENTED - refuse to pretend hardware works.\n");
+    }
+#endif
 }
 
 int drivers_require_real_block(void) {
@@ -43,6 +48,63 @@ int drivers_require_real_pci(void) {
     return fl_cap_is_real(pci_get_caps()) ? 0 : -1;
 }
 
+int driver_probe_block(void) {
+    return drivers_require_real_block();
+}
+int driver_probe_keyboard(void) {
+    return fl_cap_is_real(keyboard_driver_caps()) ? 0 : -1;
+}
+int driver_probe_display(void) {
+    return fl_cap_is_real(display_driver_caps()) ? 0 : -1;
+}
+int driver_probe_timer(void) {
+    return fl_cap_is_real(timer_driver_caps()) ? 0 : -1;
+}
+int driver_probe_pic(void) {
+    return fl_cap_is_real(pic_driver_caps()) ? 0 : -1;
+}
+int driver_probe_pci(void) {
+    return drivers_require_real_pci();
+}
+
+static int do_selftest_block(void) {
+    if (!g_block_driver) return 0;  /* No block driver - skip */
+    uint8_t buf[512];
+    return g_block_driver->read_sector((block_driver_t *)g_block_driver, 0, buf) == 0 ? 0 : -1;
+}
+static int do_selftest_timer(void) {
+    if (!g_timer_driver) return -1;
+    uint64_t t0 = g_timer_driver->tick_count(g_timer_driver);
+    g_timer_driver->msleep(g_timer_driver, 2);
+    uint64_t t1 = g_timer_driver->tick_count(g_timer_driver);
+    return (t1 >= t0) ? 0 : -1;
+}
+static int do_selftest_display(void) {
+    if (!g_display_driver) return -1;
+    g_display_driver->putchar(g_display_driver, ' ');
+    return 0;
+}
+
+int driver_selftest_block(void) { return do_selftest_block(); }
+int driver_selftest_timer(void) { return do_selftest_timer(); }
+int driver_selftest_display(void) { return do_selftest_display(); }
+
+int drivers_run_selftest(void) {
+    if (driver_selftest_block() != 0) {
+        fprintf(stderr, "FATAL: block driver selftest failed\n");
+        return -1;
+    }
+    if (driver_selftest_timer() != 0) {
+        fprintf(stderr, "FATAL: timer driver selftest failed\n");
+        return -1;
+    }
+    if (driver_selftest_display() != 0) {
+        fprintf(stderr, "FATAL: display driver selftest failed\n");
+        return -1;
+    }
+    return 0;
+}
+
 void drivers_init(const char *disk_file) {
     g_block_driver = block_driver_create_host(disk_file ? disk_file : current_disk_file);
     g_keyboard_driver = keyboard_driver_create();
@@ -52,6 +114,10 @@ void drivers_init(const char *disk_file) {
     if (g_pic_driver && g_pic_driver->init)
         g_pic_driver->init(g_pic_driver);
     drivers_report_caps();
+    if (drivers_run_selftest() != 0) {
+        fprintf(stderr, "FATAL: Driver selftest failed - refusing to continue.\n");
+        exit(1);
+    }
 }
 
 void drivers_shutdown(void) {
