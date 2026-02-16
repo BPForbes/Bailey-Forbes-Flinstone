@@ -3,8 +3,8 @@
  * One implementation for all platforms.
  */
 #include "fl/driver/block.h"
+#include "fl/driver/caps.h"
 #include "fl/driver/driver_types.h"
-#include "fl/driver/driver_caps.h"
 #include "block_driver.h"
 #include <stdlib.h>
 #include <string.h>
@@ -36,7 +36,7 @@ static int block_get_caps(fl_block_driver_t *drv, fl_block_caps_t *out) {
     out->max_sector = sc > 0 ? (uint32_t)(sc - 1) : 0;
     out->sector_size = FL_SECTOR_SIZE;
     out->max_transfer = 1;
-    out->flags = FL_BLOCK_CAP_READ | FL_BLOCK_CAP_WRITE;
+    out->flags = FL_BLOCK_CAP_READ | FL_BLOCK_CAP_WRITE | FL_CAP_REAL;
     return 0;
 }
 
