@@ -4,8 +4,12 @@
 #include <stddef.h>
 #include <stdint.h>
 
-#define PQ_NUM_PRIORITIES 4   /* 0=highest, 3=lowest */
+#define PQ_NUM_PRIORITIES 4   /* 0=highest, 3=lowest; ctzll selects lowest set bit */
 #define PQ_MAX_ITEMS       128
+
+/* Compile-time invariants: bitmap and handle slot packing */
+_Static_assert(PQ_NUM_PRIORITIES <= 64, "PQ_NUM_PRIORITIES must be <= 64 (nonempty_mask is uint64_t)");
+_Static_assert(PQ_MAX_ITEMS <= 255, "PQ_MAX_ITEMS must be <= 255 (handle packs slot in 8 bits via & 0xFF)");
 
 /**
  * Scheduler-grade MLQ: O(1) push/pop/update, safe handles, remove-by-handle.
