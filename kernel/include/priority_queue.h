@@ -9,7 +9,7 @@
 /**
  * MLQ-style priority queue: binary heap with O(log N) push/pop/update.
  *
- * INVARIANTS (tested in tests/test_priority_queue.c):
+ * INVARIANTS:
  * - FIFO tie-break: equal priority => lower seq (pushed first) pops first
  * - pq_update(handle, new_priority): O(log N) change-priority for aging/boost
  *

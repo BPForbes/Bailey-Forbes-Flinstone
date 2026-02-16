@@ -67,6 +67,24 @@ static int test_stable_repeated(void) {
     return 0;
 }
 
+static int test_update_priority(void) {
+    priority_queue_t pq;
+    pq_init(&pq);
+    int a = 1, b = 2, c = 3;
+    pq_push(&pq, 2, recorder, &a);  /* a at priority 2 */
+    pq_handle_t hb = pq_push(&pq, 2, recorder, &b);
+    pq_push(&pq, 2, recorder, &c);
+    ASSERT(hb >= 0);
+    /* Boost b from 2 to 0 (highest) - should pop before a,c */
+    ASSERT(pq_update(&pq, hb, 0) == 0);
+    pq_task_t t;
+    ASSERT(pq_pop(&pq, &t) == 0 && t.arg == &b);  /* b boosted to top */
+    ASSERT(pq_pop(&pq, &t) == 0 && t.arg == &a);
+    ASSERT(pq_pop(&pq, &t) == 0 && t.arg == &c);
+    ASSERT(pq_is_empty(&pq));
+    return 0;
+}
+
 int main(void) {
     printf("test_fifo_tiebreak... ");
     if (test_fifo_tiebreak() != 0) return 1;
@@ -76,6 +94,9 @@ int main(void) {
     printf("OK\n");
     printf("test_stable_repeated... ");
     if (test_stable_repeated() != 0) return 1;
+    printf("OK\n");
+    printf("test_update_priority... ");
+    if (test_update_priority() != 0) return 1;
     printf("OK\n");
     printf("All PQ tests passed.\n");
     return 0;

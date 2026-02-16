@@ -1,80 +1,123 @@
+/**
+ * MLQ-style priority queue: binary heap, O(log N) push/pop/update.
+ */
 #include "fl/sched.h"
 #include "fl/arch.h"
+#include "priority_queue.h"
 #include <string.h>
 
-#define PQ_NUM_PRIORITIES 4   /* 0=highest, 3=lowest */
-#define PQ_MAX_ITEMS       128
+/* Compare two slots: lower priority wins; if equal, lower seq (FIFO) wins */
+static int pq_less(const priority_queue_t *pq, int slot_a, int slot_b) {
+    const pq_task_t *a = &pq->slots[slot_a];
+    const pq_task_t *b = &pq->slots[slot_b];
+    if (a->priority != b->priority)
+        return a->priority < b->priority;
+    return a->seq < b->seq;
+}
 
-typedef void (*task_fn)(void *arg);
+static void pq_swap(priority_queue_t *pq, int i, int j) {
+    int si = pq->heap[i];
+    int sj = pq->heap[j];
+    pq->heap[i] = sj;
+    pq->heap[j] = si;
+    pq->slot_to_heap[si] = j;
+    pq->slot_to_heap[sj] = i;
+}
 
-typedef struct pq_task {
-    task_fn fn;
-    void *arg;
-    int priority;            /* 0..PQ_NUM_PRIORITIES-1 */
-    unsigned int seq;        /* FIFO tie-break: lower = pushed first */
-} pq_task_t;
+static void pq_sift_up(priority_queue_t *pq, int idx) {
+    while (idx > 0) {
+        int parent = (idx - 1) / 2;
+        if (!pq_less(pq, pq->heap[idx], pq->heap[parent]))
+            break;
+        pq_swap(pq, idx, parent);
+        idx = parent;
+    }
+}
 
-typedef struct priority_queue {
-    pq_task_t items[PQ_MAX_ITEMS];
-} priority_queue_t;
-
-static unsigned int pq_global_seq = 0;
+static void pq_sift_down(priority_queue_t *pq, int idx) {
+    int n = pq->size;
+    while (1) {
+        int best = idx;
+        int left = 2 * idx + 1;
+        int right = 2 * idx + 2;
+        if (left < n && pq_less(pq, pq->heap[left], pq->heap[best]))
+            best = left;
+        if (right < n && pq_less(pq, pq->heap[right], pq->heap[best]))
+            best = right;
+        if (best == idx)
+            break;
+        pq_swap(pq, idx, best);
+        idx = best;
+    }
+}
 
 void pq_init(priority_queue_t *pq) {
     if (pq)
         arch_memzero(pq, sizeof(*pq));
+    if (pq) {
+        for (int i = 0; i < PQ_MAX_ITEMS; i++)
+            pq->slot_to_heap[i] = -1;
+    }
 }
 
-int pq_push(priority_queue_t *pq, int priority, task_fn fn, void *arg) {
-    if (priority < 0 || priority >= PQ_NUM_PRIORITIES)
+pq_handle_t pq_push(priority_queue_t *pq, int priority, task_fn fn, void *arg) {
+    if (!pq || priority < 0 || priority >= PQ_NUM_PRIORITIES || pq->size >= PQ_MAX_ITEMS)
         return -1;
-    int count = pq_count(pq);
-    if (count >= PQ_MAX_ITEMS)
+    int slot = -1;
+    for (int i = 0; i < PQ_MAX_ITEMS; i++) {
+        if (pq->slot_to_heap[i] == -1 && pq->slots[i].fn == NULL) {
+            slot = i;
+            break;
+        }
+    }
+    if (slot < 0)
         return -1;
-    int i = 0;
-    while (i < PQ_MAX_ITEMS && pq->items[i].fn != NULL)
-        i++;
-    if (i >= PQ_MAX_ITEMS)
+    pq->slots[slot].fn = fn;
+    pq->slots[slot].arg = arg;
+    pq->slots[slot].priority = priority;
+    pq->slots[slot].seq = pq->next_seq++;
+    pq->heap[pq->size] = slot;
+    pq->slot_to_heap[slot] = pq->size;
+    pq->size++;
+    pq_sift_up(pq, pq->size - 1);
+    return (pq_handle_t)slot;
+}
+
+int pq_pop(priority_queue_t *pq, pq_task_t *out) {
+    if (!pq || pq->size == 0 || !out)
         return -1;
-    pq->items[i].fn = fn;
-    pq->items[i].arg = arg;
-    pq->items[i].priority = priority;
-    pq->items[i].seq = pq_global_seq++;
+    int slot = pq->heap[0];
+    *out = pq->slots[slot];
+    pq->slots[slot].fn = NULL;
+    pq->slot_to_heap[slot] = -1;
+    pq->size--;
+    if (pq->size > 0) {
+        pq->heap[0] = pq->heap[pq->size];
+        pq->slot_to_heap[pq->heap[0]] = 0;
+        pq_sift_down(pq, 0);
+    }
     return 0;
 }
 
-/* Pop highest-priority (lowest number) task; FIFO tie-break for equal priority */
-int pq_pop(priority_queue_t *pq, pq_task_t *out) {
-    int best = -1;
-    for (int i = 0; i < PQ_MAX_ITEMS; i++) {
-        if (pq->items[i].fn == NULL)
-            continue;
-        if (best < 0 ||
-            pq->items[i].priority < pq->items[best].priority ||
-            (pq->items[i].priority == pq->items[best].priority &&
-             pq->items[i].seq < pq->items[best].seq))
-            best = i;
-    }
-    if (best < 0)
+int pq_update(priority_queue_t *pq, pq_handle_t h, int new_priority) {
+    if (!pq || h < 0 || h >= PQ_MAX_ITEMS || new_priority < 0 || new_priority >= PQ_NUM_PRIORITIES)
         return -1;
-    *out = pq->items[best];
-    pq->items[best].fn = NULL;
+    int idx = pq->slot_to_heap[h];
+    if (idx < 0)
+        return -1;
+    int old_p = pq->slots[h].priority;
+    pq->slots[h].priority = new_priority;
+    if (new_priority < old_p)
+        pq_sift_up(pq, idx);
+    else if (new_priority > old_p)
+        pq_sift_down(pq, idx);
     return 0;
 }
 
 int pq_is_empty(const priority_queue_t *pq) {
-    for (int i = 0; i < PQ_MAX_ITEMS; i++) {
-        if (pq->items[i].fn != NULL)
-            return 0;
-    }
-    return 1;
+    return !pq || pq->size == 0;
 }
 
 int pq_count(const priority_queue_t *pq) {
-    int n = 0;
-    for (int i = 0; i < PQ_MAX_ITEMS; i++) {
-        if (pq->items[i].fn != NULL)
-            n++;
-    }
-    return n;
+    return pq ? pq->size : 0;
 }
