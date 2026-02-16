@@ -29,13 +29,15 @@ One driver API, many backends. Drivers are consistent across x86-64, ARM64, and 
 | `driver_types.h` | Canonical types; legacy aliases |
 | `driver_caps.h` | Capability structs |
 
-## Platform HALs
+## Platform HALs and Arch-Specific Drivers
 
-| Platform | HAL Path | Implements |
-|----------|----------|------------|
-| x86-64 | `kernel/arch/x86_64/hal/` | ioport (wraps port_io) |
-| AArch64 | `kernel/arch/aarch64/hal/` | ioport stubs |
-| VM | `VM/hal/` | (future) virtual devices |
+| Platform | HAL Path | PCI | IOPort |
+|----------|----------|-----|--------|
+| x86-64 | `kernel/arch/x86_64/hal/` | `kernel/arch/x86_64/drivers/pci.c` (real) | real port I/O |
+| AArch64 | `kernel/arch/aarch64/hal/` | `kernel/arch/aarch64/drivers/pci.c` (stub) | stubs |
+| VM | `VM/hal/` | (future) | - |
+
+Both architectures are wired for the same driver set; ARM uses stubs where hardware differs (no port I/O, PCI via ECAM when implemented).
 
 ## Bus Types
 

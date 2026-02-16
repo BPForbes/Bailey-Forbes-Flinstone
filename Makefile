@@ -39,10 +39,8 @@ UNIFIED_DRIVER_SRCS = kernel/drivers/block/block_driver.c kernel/drivers/block/b
                      kernel/drivers/keyboard_driver.c kernel/drivers/display_driver.c \
                      kernel/drivers/timer_driver.c kernel/drivers/pic_driver.c kernel/drivers/drivers.c
 DRIVER_SRCS = $(UNIFIED_DRIVER_SRCS)
-# PCI only in x86_64 (aarch64 has no pci.c)
-ifneq ($(ARCH),arm)
+# PCI: x86_64 real impl, aarch64 stub (wired for both)
 DRIVER_SRCS += $(KERNEL_DRIVERS)/pci.c
-endif
 # HAL: ioport (x86 real, arm stubs)
 HAL_SRCS = $(KERNEL_DRIVERS)/../hal/ioport.c
 CORE_SRCS = kernel/core/vfs/disk.c kernel/core/vfs/path_log.c kernel/core/vfs/cluster.c kernel/core/vfs/fs.c \
@@ -215,7 +213,7 @@ test_replay:
 	  kernel/drivers/block/block_driver.o kernel/drivers/block/block_transport_host.o kernel/drivers/keyboard_driver.o kernel/drivers/display_driver.o \
 	  kernel/drivers/timer_driver.o kernel/drivers/pic_driver.o kernel/drivers/drivers.o \
 	  $(KERNEL_DRIVERS)/../hal/ioport.o \
-	  $(if $(filter-out arm,$(ARCH)),$(KERNEL_DRIVERS)/pci.o,) \
+	  $(KERNEL_DRIVERS)/pci.o \
 	  VM/devices/vm.o VM/devices/vm_cpu.o VM/devices/vm_mem.o VM/devices/vm_decode.o VM/devices/vm_io.o VM/devices/vm_loader.o \
 	  VM/devices/vm_display.o VM/devices/vm_host.o VM/devices/vm_font.o VM/devices/vm_disk.o VM/devices/vm_snapshot.o \
 	  $(MEM_ASM_OBJ) $(PORT_IO_OBJ) -Wl,-z,noexecstack

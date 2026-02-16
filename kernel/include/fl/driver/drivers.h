@@ -10,6 +10,7 @@
 #include "irq.h"
 #include "ioport.h"
 #include "mmio.h"
+#include "pci.h"
 #include "block.h"
 #include "console.h"
 #include "net.h"
