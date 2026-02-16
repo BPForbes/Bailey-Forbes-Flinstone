@@ -6,6 +6,10 @@
 #include "fl/driver/pci.h"
 #include <stddef.h>
 
+uint32_t pci_get_caps(void) {
+    return FL_CAP_STUB;
+}
+
 void pci_set_ecam_base(uintptr_t phys_base) {
     (void)phys_base;
 }

@@ -7,6 +7,7 @@
 #define FL_DRIVER_PCI_H
 
 #include <stdint.h>
+#include "caps.h"
 
 #define PCI_MAX_BUS  256
 #define PCI_MAX_DEV  32
@@ -51,5 +52,8 @@ void     pci_write_config32(uint8_t bus, uint8_t dev, uint8_t fn, uint8_t offset
 
 /* Optional: set ECAM base (MMIO). If 0, x86 uses legacy port; ARM uses stub. */
 void pci_set_ecam_base(uintptr_t phys_base);
+
+/** Capability: FL_CAP_REAL if PCI works; FL_CAP_STUB if placeholder. Call before relying on enumeration. */
+uint32_t pci_get_caps(void);
 
 #endif /* FL_DRIVER_PCI_H */

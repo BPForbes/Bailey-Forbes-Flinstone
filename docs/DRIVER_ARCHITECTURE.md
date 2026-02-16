@@ -39,6 +39,28 @@ One driver API, many backends. Drivers are consistent across x86-64, ARM64, and 
 
 Both architectures are wired for the same driver set; ARM uses stubs where hardware differs (no port I/O, PCI via ECAM when implemented).
 
+## Capability Reporting (Real vs Stub)
+
+Drivers report whether they have real hardware paths or are stubs:
+
+- **FL_CAP_REAL** – driver has real implementation; hardware access works
+- **FL_CAP_STUB** – driver is placeholder; may return 0xFF, no-ops
+
+| Driver | Host (x86) | Baremetal x86 | Baremetal ARM |
+|--------|------------|---------------|---------------|
+| Block | REAL (disk file) | REAL | REAL |
+| Keyboard | REAL (stdin) | REAL | stub |
+| Display | REAL (printf) | REAL | stub |
+| Timer | REAL (usleep) | REAL | stub |
+| PIC | REAL (no-op) | REAL | stub |
+| PCI | stub | REAL | stub |
+
+**API**: `keyboard_driver_caps()`, `display_driver_caps()`, `timer_driver_caps()`, `pic_driver_caps()`, `pci_get_caps()`. Block uses `get_caps()` → `flags` includes FL_CAP_REAL.
+
+**Refuse stub**: Call `drivers_require_real_block()` or `drivers_require_real_pci()` before relying on hardware; returns -1 if stub.
+
+**Report**: `drivers_report_caps()` logs real/stub status at init.
+
 ## Bus Types
 
 - **FL_BUS_PCI** – PCI config space (x86/ARM ECAM)

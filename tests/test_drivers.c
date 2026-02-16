@@ -95,6 +95,13 @@ int main(void) {
     printf("=== Driver Test Suite ===\n");
     drivers_init(path);
 
+    if (drivers_require_real_block() != 0) {
+        fprintf(stderr, "Block driver is stub; cannot run block tests.\n");
+        drivers_shutdown();
+        unlink(path);
+        return 1;
+    }
+
     printf("test_block... ");
     if (test_block() != 0) { drivers_shutdown(); unlink(path); return 1; }
     printf("OK\n");

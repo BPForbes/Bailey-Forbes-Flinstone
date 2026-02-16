@@ -136,3 +136,15 @@ void pci_write_config32(uint8_t bus, uint8_t dev, uint8_t fn, uint8_t offset, ui
     pci_write_config_raw(bus, dev, fn, offset, v);
 #endif
 }
+
+uint32_t pci_get_caps(void) {
+#ifdef DRIVERS_BAREMETAL
+#if defined(__x86_64__) || defined(__i386__)
+    return FL_CAP_REAL;
+#else
+    return FL_CAP_STUB;
+#endif
+#else
+    return FL_CAP_STUB;
+#endif
+}

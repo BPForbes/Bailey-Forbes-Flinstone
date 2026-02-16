@@ -2,8 +2,10 @@
  * Unified PIC driver - uses fl_ioport for baremetal 8259.
  * Host: no-op. BAREMETAL: PIC port I/O via HAL.
  */
+#include "drivers.h"
 #include "fl/driver/console.h"
 #include "fl/driver/ioport.h"
+#include "fl/driver/caps.h"
 #include "fl/driver/driver_types.h"
 #include <stdlib.h>
 
@@ -69,4 +71,15 @@ pic_driver_t *pic_driver_create(void) {
 
 void pic_driver_destroy(pic_driver_t *drv) {
     free(drv);
+}
+
+uint32_t pic_driver_caps(void) {
+    if (!g_pic_driver) return 0;
+#ifndef DRIVERS_BAREMETAL
+    return FL_CAP_REAL;
+#elif defined(__x86_64__) || defined(__i386__)
+    return FL_CAP_REAL;
+#else
+    return FL_CAP_STUB;
+#endif
 }

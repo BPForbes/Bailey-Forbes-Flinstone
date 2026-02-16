@@ -3,8 +3,10 @@
  * Host: printf. BAREMETAL: VGA at 0xB8000 via MMIO.
  * ASM: asm_mem_copy for bulk framebuffer, asm_block_fill for clear.
  */
+#include "drivers.h"
 #include "fl/driver/console.h"
 #include "fl/driver/mmio.h"
+#include "fl/driver/caps.h"
 #include "fl/driver/driver_types.h"
 #include "mem_asm.h"
 #include <stdio.h>
@@ -128,4 +130,15 @@ display_driver_t *display_driver_create(void) {
 
 void display_driver_destroy(display_driver_t *drv) {
     free(drv);
+}
+
+uint32_t display_driver_caps(void) {
+    if (!g_display_driver) return 0;
+#ifndef DRIVERS_BAREMETAL
+    return FL_CAP_REAL;
+#elif defined(__x86_64__) || defined(__i386__)
+    return FL_CAP_REAL;
+#else
+    return FL_CAP_STUB;
+#endif
 }

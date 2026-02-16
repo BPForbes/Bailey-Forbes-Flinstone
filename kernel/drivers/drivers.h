@@ -2,6 +2,7 @@
 #define FL_DRIVERS_H
 
 #include "fl/driver/driver_types.h"
+#include "fl/driver/caps.h"
 #include "block/block_driver.h"
 
 /* Keyboard, display, timer, pic - create/destroy */
@@ -22,5 +23,18 @@ extern pic_driver_t      *g_pic_driver;
 
 void drivers_init(const char *disk_file);
 void drivers_shutdown(void);
+
+/** Capability reporting: FL_CAP_REAL if hardware works, FL_CAP_STUB if placeholder. */
+uint32_t keyboard_driver_caps(void);
+uint32_t display_driver_caps(void);
+uint32_t timer_driver_caps(void);
+uint32_t pic_driver_caps(void);
+
+/** Log real vs stub status. Call after drivers_init. */
+void drivers_report_caps(void);
+
+/** Return 0 if driver is real; -1 if stub. Call before relying on hardware. */
+int drivers_require_real_block(void);
+int drivers_require_real_pci(void);
 
 #endif

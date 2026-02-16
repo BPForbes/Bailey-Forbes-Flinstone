@@ -2,8 +2,10 @@
  * Unified timer driver - uses fl_ioport for baremetal PIT.
  * Host: usleep. BAREMETAL: PIT port I/O via HAL.
  */
+#include "drivers.h"
 #include "fl/driver/console.h"
 #include "fl/driver/ioport.h"
+#include "fl/driver/caps.h"
 #include "fl/driver/driver_types.h"
 #include <stdlib.h>
 #include <unistd.h>
@@ -54,4 +56,15 @@ timer_driver_t *timer_driver_create(void) {
 
 void timer_driver_destroy(timer_driver_t *drv) {
     free(drv);
+}
+
+uint32_t timer_driver_caps(void) {
+    if (!g_timer_driver) return 0;
+#ifndef DRIVERS_BAREMETAL
+    return FL_CAP_REAL;
+#elif defined(__x86_64__) || defined(__i386__)
+    return FL_CAP_REAL;
+#else
+    return FL_CAP_STUB;
+#endif
 }
