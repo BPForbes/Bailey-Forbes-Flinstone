@@ -1,9 +1,10 @@
 /**
  * Scheduler-grade MLQ: O(1) push/pop/update/remove, safe handles, nonempty bitmap.
+ * ASM-backed: mem_asm for copy/zero (x86-64 and ARM).
  */
 #include "fl/sched.h"
-#include "fl/arch.h"
 #include "priority_queue.h"
+#include "mem_asm.h"
 #include <string.h>
 
 #define PQ_HANDLE_SLOT(h)  ((int)((unsigned)(h) & 0xFF))
@@ -55,13 +56,13 @@ static void append_to_layer(priority_queue_t *pq, int slot, int layer) {
 }
 
 static void free_slot(priority_queue_t *pq, int slot) {
-    pq->slots[slot].fn = NULL;
+    asm_mem_zero(&pq->slots[slot], sizeof(pq_task_t));
     pq->free_stack[pq->free_top++] = slot;
 }
 
 void pq_init(priority_queue_t *pq) {
     if (pq)
-        arch_memzero(pq, sizeof(*pq));
+        asm_mem_zero(pq, sizeof(*pq));
     if (pq) {
         pq->free_top = PQ_MAX_ITEMS;
         for (int i = 0; i < PQ_MAX_ITEMS; i++)
@@ -94,7 +95,7 @@ static int pop_layer_head(priority_queue_t *pq, int layer, pq_task_t *out) {
     int slot = pq->layer_head[layer];
     if (slot < 0 || !out)
         return -1;
-    *out = pq->slots[slot];
+    asm_mem_copy(out, &pq->slots[slot], sizeof(pq_task_t));
     unlink_slot(pq, slot);
     free_slot(pq, slot);
     pq->size--;

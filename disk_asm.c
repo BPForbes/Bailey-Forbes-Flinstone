@@ -30,10 +30,15 @@ int disk_asm_read_cluster(int clu_index, unsigned char *buf) {
     if (!hex_data) return -1;
     size_t hex_len = strlen(hex_data);
     size_t expected = (size_t)g_cluster_size * 2;
-    for (size_t i = 0; i < (expected < hex_len ? expected : hex_len) / 2; i++) {
+    size_t n_bytes = (expected < hex_len ? expected : hex_len) / 2;
+    unsigned char tmp[512];  /* max cluster size for hex parse */
+    if (g_cluster_size > 512) return -1;
+    for (size_t i = 0; i < n_bytes; i++) {
         char byte_str[3] = { hex_data[i*2], hex_data[i*2+1], 0 };
-        buf[i] = (unsigned char)strtol(byte_str, NULL, 16);
+        tmp[i] = (unsigned char)strtol(byte_str, NULL, 16);
     }
+    if (n_bytes > 0)
+        asm_mem_copy(buf, tmp, n_bytes);
     if (g_cluster_size > (int)(hex_len / 2))
         asm_mem_zero(buf + hex_len/2, (size_t)g_cluster_size - hex_len/2);
     return 0;

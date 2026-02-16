@@ -54,7 +54,7 @@ static void append_to_layer(priority_queue_t *pq, int slot, int layer) {
 }
 
 static void free_slot(priority_queue_t *pq, int slot) {
-    pq->slots[slot].fn = NULL;
+    asm_mem_zero(&pq->slots[slot], sizeof(pq_task_t));
     pq->free_stack[pq->free_top++] = slot;
 }
 
@@ -93,7 +93,7 @@ static int pop_layer_head(priority_queue_t *pq, int layer, pq_task_t *out) {
     int slot = pq->layer_head[layer];
     if (slot < 0 || !out)
         return -1;
-    *out = pq->slots[slot];
+    asm_mem_copy(out, &pq->slots[slot], sizeof(pq_task_t));
     unlink_slot(pq, slot);
     free_slot(pq, slot);
     pq->size--;

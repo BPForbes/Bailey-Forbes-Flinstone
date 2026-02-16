@@ -1,10 +1,12 @@
 /**
  * Unified display driver - uses fl_mmio for baremetal VGA.
  * Host: printf. BAREMETAL: VGA at 0xB8000 via MMIO.
+ * ASM: asm_mem_copy for bulk framebuffer, asm_block_fill for clear.
  */
 #include "fl/driver/console.h"
 #include "fl/driver/mmio.h"
 #include "fl/driver/driver_types.h"
+#include "mem_asm.h"
 #include <stdio.h>
 #include <stdlib.h>
 #include <stdint.h>
@@ -84,8 +86,11 @@ static void hw_putchar(display_driver_t *drv, char c) {
 static void hw_clear(display_driver_t *drv) {
     display_impl_t *impl = (display_impl_t *)drv->impl;
     uint16_t blank = (uint16_t)(' ' | (impl->color << 8));
-    for (int i = 0; i < VGA_ROWS * VGA_COLS; i++)
-        fl_mmio_write16((void *)(VGA_MEM + i), blank);
+    uint16_t row_buf[VGA_COLS];
+    for (int c = 0; c < VGA_COLS; c++)
+        row_buf[c] = blank;
+    for (int r = 0; r < VGA_ROWS; r++)
+        asm_mem_copy((void *)(VGA_MEM + r * VGA_COLS), row_buf, VGA_COLS * 2);
     impl->row = impl->col = 0;
 }
 
@@ -97,9 +102,7 @@ static void hw_set_cursor(display_driver_t *drv, int row, int col) {
 
 static void hw_refresh_vga(display_driver_t *drv, const void *vga_buf) {
     (void)drv;
-    const uint16_t *cells = (const uint16_t *)vga_buf;
-    for (int i = 0; i < VGA_ROWS * VGA_COLS; i++)
-        fl_mmio_write16((void *)(VGA_MEM + i), cells[i]);
+    asm_mem_copy((void *)VGA_MEM, vga_buf, (size_t)VGA_ROWS * VGA_COLS * 2);
 }
 #endif
 
