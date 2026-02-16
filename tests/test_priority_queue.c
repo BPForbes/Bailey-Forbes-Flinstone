@@ -122,6 +122,38 @@ static int test_pop_from_layer(void) {
     return 0;
 }
 
+static int test_remove(void) {
+    priority_queue_t pq;
+    pq_init(&pq);
+    int a = 1, b = 2, c = 3;
+    pq_handle_t ha = pq_push(&pq, 1, recorder, &a);
+    pq_handle_t hb = pq_push(&pq, 1, recorder, &b);
+    pq_push(&pq, 1, recorder, &c);
+    ASSERT(ha >= 0 && hb >= 0);
+    ASSERT(pq_remove(&pq, hb) == 0);
+    pq_task_t t;
+    ASSERT(pq_pop(&pq, &t) == 0 && t.arg == &a);
+    ASSERT(pq_pop(&pq, &t) == 0 && t.arg == &c);
+    ASSERT(pq_is_empty(&pq));
+    /* Stale handle: remove already-removed returns -1 */
+    ASSERT(pq_remove(&pq, hb) == -1);
+    return 0;
+}
+
+static int test_stale_handle(void) {
+    priority_queue_t pq;
+    pq_init(&pq);
+    int a = 1;
+    pq_handle_t h = pq_push(&pq, 0, recorder, &a);
+    ASSERT(h >= 0);
+    pq_task_t t;
+    pq_pop(&pq, &t);
+    /* Handle is now stale (slot reused or not yet); update/remove should fail */
+    ASSERT(pq_update(&pq, h, 1) == -1);
+    ASSERT(pq_remove(&pq, h) == -1);
+    return 0;
+}
+
 int main(void) {
     printf("test_fifo_tiebreak... ");
     if (test_fifo_tiebreak() != 0) return 1;
@@ -140,6 +172,12 @@ int main(void) {
     printf("OK\n");
     printf("test_pop_from_layer... ");
     if (test_pop_from_layer() != 0) return 1;
+    printf("OK\n");
+    printf("test_remove... ");
+    if (test_remove() != 0) return 1;
+    printf("OK\n");
+    printf("test_stale_handle... ");
+    if (test_stale_handle() != 0) return 1;
     printf("OK\n");
     printf("All PQ tests passed.\n");
     return 0;
