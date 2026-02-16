@@ -316,6 +316,7 @@ void vm_run(void) {
         s_run_cycles = 0;
         pq_init(&s_vm_pq);
         pq_push(&s_vm_pq, PQ_PRIO_CPU, vm_cpu_task_fn, NULL);
+        /* Layer-scan scheduling: pq_pop scans layers 0..3, FIFO tie-break within layer */
         while (!cpu->halted) {
             if (vm_io_reset_requested()) {
                 vm_io_clear_reset();

@@ -85,6 +85,43 @@ static int test_update_priority(void) {
     return 0;
 }
 
+static int test_layer_scan(void) {
+    priority_queue_t pq;
+    pq_init(&pq);
+    int a = 1, b = 2, c = 3, d = 4;
+    pq_push(&pq, 1, recorder, &a);
+    pq_push(&pq, 0, recorder, &b);
+    pq_push(&pq, 1, recorder, &c);
+    pq_push(&pq, 0, recorder, &d);
+    ASSERT(pq_has_layer(&pq, 0) && pq_has_layer(&pq, 1));
+    ASSERT(pq_count_layer(&pq, 0) == 2);
+    ASSERT(pq_count_layer(&pq, 1) == 2);
+    /* pq_pop scans layers 0..3: gets b (layer 0, FIFO) */
+    pq_task_t t;
+    ASSERT(pq_pop(&pq, &t) == 0 && t.arg == &b);
+    ASSERT(pq_pop(&pq, &t) == 0 && t.arg == &d);
+    ASSERT(pq_pop(&pq, &t) == 0 && t.arg == &a);
+    ASSERT(pq_pop(&pq, &t) == 0 && t.arg == &c);
+    ASSERT(pq_is_empty(&pq));
+    return 0;
+}
+
+static int test_pop_from_layer(void) {
+    priority_queue_t pq;
+    pq_init(&pq);
+    int a = 1, b = 2, c = 3;
+    pq_push(&pq, 0, recorder, &a);
+    pq_push(&pq, 1, recorder, &b);
+    pq_push(&pq, 0, recorder, &c);
+    pq_task_t t;
+    ASSERT(pq_pop_from_layer(&pq, 1, &t) == 0 && t.arg == &b);
+    ASSERT(pq_pop_from_layer(&pq, 1, &t) == -1);
+    ASSERT(pq_pop_from_layer(&pq, 0, &t) == 0 && t.arg == &a);
+    ASSERT(pq_pop_from_layer(&pq, 0, &t) == 0 && t.arg == &c);
+    ASSERT(pq_is_empty(&pq));
+    return 0;
+}
+
 int main(void) {
     printf("test_fifo_tiebreak... ");
     if (test_fifo_tiebreak() != 0) return 1;
@@ -97,6 +134,12 @@ int main(void) {
     printf("OK\n");
     printf("test_update_priority... ");
     if (test_update_priority() != 0) return 1;
+    printf("OK\n");
+    printf("test_layer_scan... ");
+    if (test_layer_scan() != 0) return 1;
+    printf("OK\n");
+    printf("test_pop_from_layer... ");
+    if (test_pop_from_layer() != 0) return 1;
     printf("OK\n");
     printf("All PQ tests passed.\n");
     return 0;

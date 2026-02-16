@@ -85,6 +85,7 @@ void *worker_thread(void *arg) {
             break;
         }
         pq_task_t task;
+        /* Layer-scan: pq_pop scans layers 0..3, FIFO tie-break within layer */
         int r = pq_pop(&g_pool.pq, &task);
         pthread_mutex_unlock(&g_pool.mutex);
         if (r == 0 && task.fn && task.arg)

@@ -7,14 +7,14 @@
 #define PQ_MAX_ITEMS       128
 
 /**
- * MLQ-style priority queue: binary heap with O(log N) push/pop/update.
+ * MLQ: per-layer FIFO queues, layer-scan scheduling, secondary tie-breaker.
  *
- * INVARIANTS:
- * - FIFO tie-break: equal priority => lower seq (pushed first) pops first
- * - pq_update(handle, new_priority): O(log N) change-priority for aging/boost
+ * Scheduling: scan layers 0..3 in order; within each layer, FIFO (seq) tie-break.
+ * - pq_pop: scans layers, returns first task from lowest non-empty layer
+ * - pq_pop_from_layer: returns first (FIFO) from a specific layer - for drain-by-layer
+ * - pq_has_layer: check if layer has work
  *
- * Handles: pq_push returns a handle (>=0) or -1 on error.
- * Use pq_update(pq, handle, new_priority) for aging, I/O boost, etc.
+ * pq_update(handle, new_priority): O(1) move task between layers for aging/boost.
  */
 typedef void (*task_fn)(void *arg);
 
@@ -24,13 +24,15 @@ typedef struct pq_task {
     task_fn fn;
     void *arg;
     int priority;            /* 0..PQ_NUM_PRIORITIES-1 */
-    unsigned int seq;        /* FIFO tie-break: lower = pushed first */
+    unsigned int seq;        /* FIFO tie-break within layer */
 } pq_task_t;
 
 typedef struct priority_queue {
     pq_task_t slots[PQ_MAX_ITEMS];
-    int       heap[PQ_MAX_ITEMS];      /* heap of slot indices */
-    int       slot_to_heap[PQ_MAX_ITEMS]; /* heap pos per slot, -1 if free */
+    int       layer_head[PQ_NUM_PRIORITIES];  /* -1 if empty */
+    int       layer_tail[PQ_NUM_PRIORITIES];
+    int       slot_next[PQ_MAX_ITEMS];        /* next in same layer, -1 if last */
+    int       slot_prev[PQ_MAX_ITEMS];        /* prev in same layer, -1 if first */
     int       size;
     unsigned int next_seq;
 } priority_queue_t;
@@ -40,13 +42,27 @@ void pq_init(priority_queue_t *pq);
 /** Push task; returns handle (>=0) or -1. Use handle for pq_update. */
 pq_handle_t pq_push(priority_queue_t *pq, int priority, task_fn fn, void *arg);
 
-/** Pop highest-priority (lowest number) task; FIFO tie-break for equal priority. */
+/**
+ * Pop highest-priority task. Scans layers 0..3, returns first from lowest
+ * non-empty layer. FIFO tie-break within layer.
+ */
 int pq_pop(priority_queue_t *pq, pq_task_t *out);
 
-/** O(log N) update priority of item (for aging, I/O boost, etc.). */
+/**
+ * Pop first (FIFO) task from a specific layer. For layer-by-layer scheduling:
+ *   for (layer = 0; layer < PQ_NUM_PRIORITIES; layer++)
+ *     while (pq_pop_from_layer(pq, layer, &t) == 0) run(t);
+ */
+int pq_pop_from_layer(priority_queue_t *pq, int layer, pq_task_t *out);
+
+/** True if layer has at least one task. */
+int pq_has_layer(const priority_queue_t *pq, int layer);
+
+/** O(1) update priority; moves task between layers for aging/boost. */
 int pq_update(priority_queue_t *pq, pq_handle_t h, int new_priority);
 
 int pq_is_empty(const priority_queue_t *pq);
 int pq_count(const priority_queue_t *pq);
+int pq_count_layer(const priority_queue_t *pq, int layer);
 
 #endif /* PRIORITY_QUEUE_H */
