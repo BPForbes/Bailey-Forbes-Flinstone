@@ -5,7 +5,7 @@ ARCH ?= x86_64_gas
 # Compiler and flags
 CC = gcc
 AS = as
-CFLAGS = -Wall -Wextra -pthread
+CFLAGS = -Wall -Wextra -pthread -I. -Ikernel/core/vfs -Ikernel/core/mm -Ikernel/core/sched -Ikernel/core/sys -Iuserland/shell -Ikernel/arch/x86_64 -Ikernel/arch/aarch64
 LDFLAGS = -Wl,-z,noexecstack
 ASFLAGS =
 
@@ -15,32 +15,47 @@ AS = nasm
 ASFLAGS = -f elf64
 ASMSRCS_BASE = arch/x86_64/nasm/mem_asm.asm arch/x86_64/nasm/port_io.asm
 ASMSRCS_ALLOC = arch/x86_64/nasm/alloc_core.asm arch/x86_64/nasm/alloc_malloc.asm arch/x86_64/nasm/alloc_free.asm
+ASM_SRC_DIR = arch/x86_64/nasm
+KERNEL_DRIVERS = kernel/arch/x86_64/drivers
 else ifeq ($(ARCH),arm)
 CC = aarch64-linux-gnu-gcc
 AS = aarch64-linux-gnu-as
 ASMSRCS_BASE = arch/arm/gas/mem_asm.s arch/arm/gas/port_io.s
 ASMSRCS_ALLOC = arch/arm/gas/alloc_core.s arch/arm/gas/alloc_malloc.s arch/arm/gas/alloc_free.s
+ASM_SRC_DIR = arch/arm/gas
+KERNEL_DRIVERS = kernel/arch/aarch64/drivers
 else
-# x86_64_gas (default) - use arch layout for consistency
+# x86_64_gas (default)
 ASMSRCS_BASE = arch/x86_64/gas/mem_asm.s arch/x86_64/gas/port_io.s
 ASMSRCS_ALLOC = arch/x86_64/gas/alloc/alloc_core.s arch/x86_64/gas/alloc/alloc_malloc.s arch/x86_64/gas/alloc/alloc_free.s
+ASM_SRC_DIR = arch/x86_64/gas
+KERNEL_DRIVERS = kernel/arch/x86_64/drivers
 endif
 
 # --- Main Shell Build ---
 # DRIVERS_BAREMETAL=1 for bare-metal (port I/O, VGA). Omit for host (stdin/printf).
 DRIVER_CFLAGS = $(CFLAGS)
-DRIVER_SRCS = drivers/block_driver.c drivers/keyboard_driver.c drivers/display_driver.c \
-              drivers/timer_driver.c drivers/pic_driver.c drivers/pci.c drivers/drivers.c
-SRCS = common.c util.c terminal.c disk.c disk_asm.c dir_asm.c path_log.c cluster.c fs.c threadpool.c \
-       priority_queue.c fs_provider.c fs_command.c fs_events.c fs_policy.c \
-       fs_chain.c fs_facade.c fs_service_glue.c mem_domain.c vrt.c vfs.c interpreter.c main.c
+DRIVER_SRCS = $(KERNEL_DRIVERS)/block_driver.c $(KERNEL_DRIVERS)/keyboard_driver.c $(KERNEL_DRIVERS)/display_driver.c \
+              $(KERNEL_DRIVERS)/timer_driver.c $(KERNEL_DRIVERS)/pic_driver.c $(KERNEL_DRIVERS)/drivers.c
+# PCI only in x86_64 (aarch64 has no pci.c)
+ifneq ($(ARCH),arm)
+DRIVER_SRCS += $(KERNEL_DRIVERS)/pci.c
+endif
+CORE_SRCS = kernel/core/vfs/disk.c kernel/core/vfs/path_log.c kernel/core/vfs/cluster.c kernel/core/vfs/fs.c \
+            kernel/core/sched/threadpool.c priority_queue.c kernel/core/vfs/fs_provider.c kernel/core/vfs/fs_command.c \
+            kernel/core/vfs/fs_events.c kernel/core/vfs/fs_policy.c kernel/core/vfs/fs_chain.c kernel/core/vfs/fs_facade.c \
+            kernel/core/vfs/fs_service_glue.c kernel/core/mm/mem_domain.c kernel/core/sys/vrt.c kernel/core/vfs/vfs.c
+SHELL_SRCS = userland/shell/common.c userland/shell/util.c userland/shell/terminal.c userland/shell/interpreter.c userland/shell/sh.c
+SRCS = $(SHELL_SRCS) $(CORE_SRCS) disk_asm.c dir_asm.c
 SRCS += $(DRIVER_SRCS)
-VM_SRCS = VM/vm.c VM/vm_cpu.c VM/vm_mem.c VM/vm_decode.c VM/vm_io.c VM/vm_loader.c VM/vm_display.c VM/vm_host.c VM/vm_font.c VM/vm_disk.c VM/vm_snapshot.c
+CFLAGS += -I$(ASM_SRC_DIR) -I$(KERNEL_DRIVERS)
+VM_SRCS = VM/devices/vm.c VM/devices/vm_cpu.c VM/devices/vm_mem.c VM/devices/vm_decode.c VM/devices/vm_io.c VM/devices/vm_loader.c \
+          VM/devices/vm_display.c VM/devices/vm_host.c VM/devices/vm_font.c VM/devices/vm_disk.c VM/devices/vm_snapshot.c
 ifeq ($(VM_ENABLE),1)
 SRCS += $(VM_SRCS)
-CFLAGS += -DVM_ENABLE=1 -I. -IVM
+CFLAGS += -DVM_ENABLE=1 -IVM -IVM/devices
 endif
-VM_SDL_SRCS = VM/vm_sdl.c
+VM_SDL_SRCS = VM/devices/vm_sdl.c
 DEPS_PREFIX = $(shell [ -d deps/install ] && echo deps/install)
 ifneq ($(DEPS_PREFIX),)
 CFLAGS += -I$(DEPS_PREFIX)/include
@@ -100,8 +115,12 @@ $(TARGET): $(OBJS)
 
 # --- Test Build ---
 # For tests, interpreter.c is directly included in BPForbes_Flinstone_Tests.c.
-TEST_SRCS = BPForbes_Flinstone_Tests.c common.c util.c terminal.c disk.c disk_asm.c dir_asm.c path_log.c cluster.c fs.c threadpool.c \
-            priority_queue.c fs_provider.c fs_command.c fs_events.c fs_policy.c fs_chain.c fs_facade.c fs_service_glue.c mem_domain.c vrt.c
+TEST_SRCS = BPForbes_Flinstone_Tests.c userland/shell/common.c userland/shell/util.c userland/shell/terminal.c \
+            kernel/core/vfs/disk.c kernel/core/vfs/path_log.c kernel/core/vfs/cluster.c kernel/core/vfs/fs.c \
+            kernel/core/sched/threadpool.c priority_queue.c kernel/core/vfs/fs_provider.c kernel/core/vfs/fs_command.c \
+            kernel/core/vfs/fs_events.c kernel/core/vfs/fs_policy.c kernel/core/vfs/fs_chain.c kernel/core/vfs/fs_facade.c \
+            kernel/core/vfs/fs_service_glue.c kernel/core/mm/mem_domain.c kernel/core/sys/vrt.c
+TEST_SRCS += disk_asm.c dir_asm.c
 TEST_OBJS = $(TEST_SRCS:.c=.o)
 MEM_ASM_OBJ = $(patsubst %.s,%.o,$(patsubst %.asm,%.o,$(firstword $(ASMSRCS_BASE))))
 PORT_IO_OBJ = $(patsubst %.s,%.o,$(patsubst %.asm,%.o,$(word 2,$(ASMSRCS_BASE))))
@@ -117,6 +136,7 @@ $(TEST_TARGET): $(TEST_OBJS) $(TEST_ASMOBJS)
 %.o: %.c
 	$(CC) $(CFLAGS) -c $< -o $@
 
+# Assembly file compilation
 %.o: %.s
 	$(AS) $(ASFLAGS) -o $@ $<
 
@@ -127,11 +147,11 @@ $(TEST_TARGET): $(TEST_OBJS) $(TEST_ASMOBJS)
 %.o: %.asm
 	$(AS) $(ASFLAGS) -o $@ $<
 
-drivers/%.o: drivers/%.c
-	$(CC) $(CFLAGS) -I. -c $< -o $@
+$(KERNEL_DRIVERS)/%.o: $(KERNEL_DRIVERS)/%.c
+	$(CC) $(CFLAGS) -I$(KERNEL_DRIVERS) -c $< -o $@
 
-VM/%.o: VM/%.c
-	$(CC) $(CFLAGS) -I. -IVM -c $< -o $@
+VM/devices/%.o: VM/devices/%.c
+	$(CC) $(CFLAGS) -IVM -IVM/devices -c $< -o $@
 
 # --- ASM + Alloc + PQ unit tests (no CUnit) ---
 # Use -fsanitize when NOT using ASM allocator (libc tests only)
@@ -157,25 +177,30 @@ test_priority_queue: priority_queue.o $(MEM_ASM_OBJ)
 test_core: test_mem_asm test_priority_queue
 	@echo "Core tests done. Run 'make test_alloc_libc' or 'make test_alloc_asm' for allocator."
 
-test_invariants: common.o util.o $(MEM_ASM_OBJ)
-	$(CC) $(CFLAGS) $(TEST_SANITIZE) -I. -o tests/test_invariants tests/test_invariants.c common.o util.o $(MEM_ASM_OBJ)
+test_invariants: userland/shell/common.o userland/shell/util.o $(MEM_ASM_OBJ)
+	$(CC) $(CFLAGS) $(TEST_SANITIZE) -o tests/test_invariants tests/test_invariants.c userland/shell/common.o userland/shell/util.o $(MEM_ASM_OBJ)
 	./tests/test_invariants
 
 check-layers:
 	@./scripts/check_layers.sh
 
-test_vm_mem: mem_domain.o $(MEM_ASM_OBJ) VM/vm_mem.o
-	$(CC) $(CFLAGS) $(TEST_SANITIZE) -I. -IVM -o tests/test_vm_mem tests/test_vm_mem.c mem_domain.o $(MEM_ASM_OBJ) VM/vm_mem.o
+test_vm_mem: kernel/core/mm/mem_domain.o $(MEM_ASM_OBJ) VM/devices/vm_mem.o
+	$(CC) $(CFLAGS) $(TEST_SANITIZE) -IVM -IVM/devices -o tests/test_vm_mem tests/test_vm_mem.c kernel/core/mm/mem_domain.o $(MEM_ASM_OBJ) VM/devices/vm_mem.o
 	./tests/test_vm_mem
 
 .PHONY: test_replay
 test_replay:
-	$(MAKE) VM_ENABLE=1 BPForbes_Flinstone_Shell
-	$(CC) $(CFLAGS) -DVM_ENABLE=1 -I. -IVM -o tests/test_replay tests/test_replay.c \
-	  common.o util.o terminal.o disk.o disk_asm.o dir_asm.o path_log.o cluster.o fs.o priority_queue.o \
-	  fs_provider.o fs_command.o fs_events.o fs_policy.o fs_chain.o fs_facade.o fs_service_glue.o mem_domain.o vrt.o vfs.o \
-	  drivers/block_driver.o drivers/keyboard_driver.o drivers/display_driver.o drivers/timer_driver.o drivers/pic_driver.o drivers/drivers.o \
-	  VM/vm.o VM/vm_cpu.o VM/vm_mem.o VM/vm_decode.o VM/vm_io.o VM/vm_loader.o VM/vm_display.o VM/vm_host.o VM/vm_font.o VM/vm_disk.o VM/vm_snapshot.o \
+	$(MAKE) VM_ENABLE=1 ARCH=$(ARCH) BPForbes_Flinstone_Shell
+	$(CC) $(CFLAGS) -DVM_ENABLE=1 -I$(ASM_SRC_DIR) -I$(KERNEL_DRIVERS) -IVM -IVM/devices -o tests/test_replay tests/test_replay.c \
+	  userland/shell/common.o userland/shell/util.o userland/shell/terminal.o kernel/core/vfs/disk.o disk_asm.o dir_asm.o \
+	  kernel/core/vfs/path_log.o kernel/core/vfs/cluster.o kernel/core/vfs/fs.o priority_queue.o \
+	  kernel/core/vfs/fs_provider.o kernel/core/vfs/fs_command.o kernel/core/vfs/fs_events.o kernel/core/vfs/fs_policy.o \
+	  kernel/core/vfs/fs_chain.o kernel/core/vfs/fs_facade.o kernel/core/vfs/fs_service_glue.o kernel/core/mm/mem_domain.o kernel/core/sys/vrt.o kernel/core/vfs/vfs.o \
+	  $(KERNEL_DRIVERS)/block_driver.o $(KERNEL_DRIVERS)/keyboard_driver.o $(KERNEL_DRIVERS)/display_driver.o \
+	  $(KERNEL_DRIVERS)/timer_driver.o $(KERNEL_DRIVERS)/pic_driver.o $(KERNEL_DRIVERS)/drivers.o \
+	  $(if $(filter-out arm,$(ARCH)),$(KERNEL_DRIVERS)/pci.o,) \
+	  VM/devices/vm.o VM/devices/vm_cpu.o VM/devices/vm_mem.o VM/devices/vm_decode.o VM/devices/vm_io.o VM/devices/vm_loader.o \
+	  VM/devices/vm_display.o VM/devices/vm_host.o VM/devices/vm_font.o VM/devices/vm_disk.o VM/devices/vm_snapshot.o \
 	  $(MEM_ASM_OBJ) $(PORT_IO_OBJ) -Wl,-z,noexecstack
 	./tests/test_replay
 
@@ -184,6 +209,15 @@ debug: CFLAGS += -DMEM_ASM_DEBUG -g
 debug: $(TARGET)
 
 clean:
-	rm -f $(OBJS) $(TEST_OBJS) $(TEST_ASMOBJS) drivers/*.o VM/*.o $(TARGET) $(TEST_TARGET)
+	rm -f $(OBJS) $(TEST_OBJS) $(TEST_ASMOBJS) $(TARGET) $(TEST_TARGET)
+	rm -f kernel/arch/*/drivers/*.o VM/devices/*.o
 	rm -f arch/*/*/*.o arch/*/*/alloc/*.o
 	rm -f tests/test_mem_asm tests/test_alloc tests/test_priority_queue tests/test_vm_mem tests/test_replay tests/test_invariants
+
+# Architecture-specific build targets
+.PHONY: arm x86-64-nasm x86_64_nasm
+arm:
+	$(MAKE) ARCH=arm
+
+x86-64-nasm x86_64_nasm:
+	$(MAKE) ARCH=x86_64_nasm
