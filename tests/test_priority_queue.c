@@ -38,6 +38,7 @@ static int test_fifo_tiebreak(void) {
     return 0;
 }
 
+/* Priority 0 is highest (ctzll selects lowest set bit). FIFO within same layer. */
 static int test_priority_ordering(void) {
     priority_queue_t pq;
     pq_init(&pq);
@@ -46,7 +47,7 @@ static int test_priority_ordering(void) {
     pq_push(&pq, 0, recorder, &v0);
     pq_push(&pq, 1, recorder, &v1);
     pq_task_t t;
-    ASSERT(pq_pop(&pq, &t) == 0 && t.arg == &v0);
+    ASSERT(pq_pop(&pq, &t) == 0 && t.arg == &v0);  /* 0 highest */
     ASSERT(pq_pop(&pq, &t) == 0 && t.arg == &v1);
     ASSERT(pq_pop(&pq, &t) == 0 && t.arg == &v2);
     return 0;
