@@ -66,6 +66,7 @@ const char *HELP_MSG =
 "  redirect <file>      Redirect output (use \"redirect off\" to restore)\n"
 "  rerun <N>            Re-run Nth history command\n"
 "  exit [ -y | -n ]    Exit shell\n"
+"  bios [ -y ]         Reboot into BIOS/UEFI (systemctl reboot --firmware-setup)\n"
 "  clear                Clear screen\n"
 "  history, his         Show command history\n"
 "  cc                   Clear history\n"
