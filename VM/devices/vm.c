@@ -316,7 +316,7 @@ void vm_run(void) {
         s_run_cycles = 0;
         pq_init(&s_vm_pq);
         pq_push(&s_vm_pq, PQ_PRIO_CPU, vm_cpu_task_fn, NULL);
-        /* Layer-scan scheduling: pq_pop scans layers 0..3, FIFO tie-break within layer */
+        /* Layer-scan: run one task from each non-empty layer per round (secondary tie-breaker) */
         while (!cpu->halted) {
             if (vm_io_reset_requested()) {
                 vm_io_clear_reset();
@@ -325,17 +325,21 @@ void vm_run(void) {
                 pq_push(&s_vm_pq, PQ_PRIO_CPU, vm_cpu_task_fn, NULL);
                 continue;
             }
-            if (pq_pop(&s_vm_pq, &task) != 0)
+            if (pq_is_empty(&s_vm_pq))
                 break;
-            if (task.fn)
-                task.fn(task.arg);
-            if (task.fn == vm_cpu_task_fn && !cpu->halted) {
-                s_run_cycles++;
-                pq_push(&s_vm_pq, PQ_PRIO_DISPLAY, vm_display_task_fn, NULL);
-                pq_push(&s_vm_pq, PQ_PRIO_CPU, vm_cpu_task_fn, NULL);
-                pq_push(&s_vm_pq, PQ_PRIO_TIMER, vm_timer_task_fn, NULL);
-                if (s_run_cycles % VM_CHECKPOINT_INTERVAL == 0)
-                    pq_push(&s_vm_pq, PQ_PRIO_CHECKPOINT, vm_checkpoint_task_fn, NULL);
+            for (int layer = 0; layer < PQ_NUM_PRIORITIES; layer++) {
+                if (pq_pop_from_layer(&s_vm_pq, layer, &task) != 0)
+                    continue;
+                if (task.fn)
+                    task.fn(task.arg);
+                if (task.fn == vm_cpu_task_fn && !cpu->halted) {
+                    s_run_cycles++;
+                    pq_push(&s_vm_pq, PQ_PRIO_DISPLAY, vm_display_task_fn, NULL);
+                    pq_push(&s_vm_pq, PQ_PRIO_CPU, vm_cpu_task_fn, NULL);
+                    pq_push(&s_vm_pq, PQ_PRIO_TIMER, vm_timer_task_fn, NULL);
+                    if (s_run_cycles % VM_CHECKPOINT_INTERVAL == 0)
+                        pq_push(&s_vm_pq, PQ_PRIO_CHECKPOINT, vm_checkpoint_task_fn, NULL);
+                }
             }
         }
     }
@@ -359,17 +363,21 @@ void vm_run_cycles(unsigned int max_cycles) {
             pq_push(&s_vm_pq, PQ_PRIO_CPU, vm_cpu_task_fn, NULL);
             continue;
         }
-        if (pq_pop(&s_vm_pq, &task) != 0)
+        if (pq_is_empty(&s_vm_pq))
             break;
-        if (task.fn)
-            task.fn(task.arg);
-        if (task.fn == vm_cpu_task_fn && !cpu->halted) {
-            s_run_cycles++;
-            pq_push(&s_vm_pq, PQ_PRIO_DISPLAY, vm_display_task_fn, NULL);
-            pq_push(&s_vm_pq, PQ_PRIO_CPU, vm_cpu_task_fn, NULL);
-            pq_push(&s_vm_pq, PQ_PRIO_TIMER, vm_timer_task_fn, NULL);
-            if (s_run_cycles % VM_CHECKPOINT_INTERVAL == 0)
-                pq_push(&s_vm_pq, PQ_PRIO_CHECKPOINT, vm_checkpoint_task_fn, NULL);
+        for (int layer = 0; layer < PQ_NUM_PRIORITIES; layer++) {
+            if (pq_pop_from_layer(&s_vm_pq, layer, &task) != 0)
+                continue;
+            if (task.fn)
+                task.fn(task.arg);
+            if (task.fn == vm_cpu_task_fn && !cpu->halted) {
+                s_run_cycles++;
+                pq_push(&s_vm_pq, PQ_PRIO_DISPLAY, vm_display_task_fn, NULL);
+                pq_push(&s_vm_pq, PQ_PRIO_CPU, vm_cpu_task_fn, NULL);
+                pq_push(&s_vm_pq, PQ_PRIO_TIMER, vm_timer_task_fn, NULL);
+                if (s_run_cycles % VM_CHECKPOINT_INTERVAL == 0)
+                    pq_push(&s_vm_pq, PQ_PRIO_CHECKPOINT, vm_checkpoint_task_fn, NULL);
+            }
         }
     }
 
