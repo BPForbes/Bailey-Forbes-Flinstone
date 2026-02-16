@@ -5,8 +5,8 @@
 #include "vm_disk.h"
 #include "mem_asm.h"
 #include "mem_domain.h"
-#include "drivers/drivers.h"
-#include "drivers/driver_types.h"
+#include "../drivers/drivers.h"
+#include "../drivers/driver_types.h"
 #include <stdio.h>
 #include <stdlib.h>
 #include <stdint.h>
