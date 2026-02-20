@@ -48,8 +48,7 @@
 #include "interpreter.h"
 #include "terminal.h"
 #include "disk.h"
-#include "fs_service_glue.h"
-#include "path_log.h"
+#include "boot_init.h"
 #include "drivers/drivers.h"
 #include "VM/vm.h"
 #include <stdio.h>
@@ -176,19 +175,16 @@ int main(int argc, char *argv[]) {
 
     /* Embedded VM: -Virtualization -y -vm -> run x86 emulator */
     if (g_vm_mode && g_vm_run_embedded && argc == 1) {
-        fs_service_glue_init();
-        path_log_init();
-        drivers_init(NULL);
-        { const char *v = getenv("VM_LOG_LEVEL"); int lvl = v ? atoi(v) : 1;
-          if (lvl >= 1) printf("[VM] Booting embedded VM...\n"); }
-        if (vm_boot() == 0) {
-            vm_run();
-            vm_stop();
-            { const char *v = getenv("VM_LOG_LEVEL"); int lvl = v ? atoi(v) : 1;
-              if (lvl >= 1) printf("[VM] Halted.\n"); }
-        } else {
-            fprintf(stderr, "[VM] Boot failed.\n");
+        if (boot_run(NULL, 1) != 0) {
+            fprintf(stderr, "Boot failed. Cannot start VM.\n");
+            exit(1);
         }
+        { const char *v = getenv("VM_LOG_LEVEL"); int lvl = v ? atoi(v) : 1;
+          if (lvl >= 1) printf("[VM] Running...\n"); }
+        vm_run();
+        vm_stop();
+        { const char *v = getenv("VM_LOG_LEVEL"); int lvl = v ? atoi(v) : 1;
+          if (lvl >= 1) printf("[VM] Halted.\n"); }
         fs_service_glue_shutdown();
         exit(0);
     }
@@ -285,22 +281,11 @@ int main(int argc, char *argv[]) {
         exit(0);
     }
 
-    /* Initialize file manager service, path log, and drivers */
-    fs_service_glue_init();
-    path_log_init();
-    drivers_init(NULL);
-
-    /* Initialize thread pool and signals */
-    signal(SIGINT, SIG_IGN);
-    pq_init(&g_pool.pq);
-    g_pool.shutting_down = 0;
-    pthread_mutex_init(&g_pool.mutex, NULL);
-    pthread_cond_init(&g_pool.cond, NULL);
-#ifndef BATCH_SINGLE_THREAD
-    for (int i = 0; i < NUM_WORKERS; i++) {
-        pthread_create(&g_pool.workers[i], NULL, worker_thread, NULL);
+    /* Boot init: fs, path_log, drivers, scheduler */
+    if (boot_run(NULL, 0) != 0) {
+        fprintf(stderr, "Boot failed. Cannot start shell.\n");
+        exit(1);
     }
-#endif
     if (original_stdout_fd < 0) {
         original_stdout_fd = dup(fileno(stdout));
         original_stdout_file = fdopen(original_stdout_fd, "w");
