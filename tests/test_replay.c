@@ -8,14 +8,33 @@
 #include "drivers/drivers.h"
 #include <stdio.h>
 #include <stdlib.h>
+#include <string.h>
+#include <unistd.h>
 
 int main(void) {
+    char path[] = "/tmp/fl_replay_test_XXXXXX";
+    int fd = mkstemp(path);
+    if (fd >= 0) {
+        close(fd);
+        FILE *fp = fopen(path, "w");
+        if (fp) {
+            fprintf(fp, "XX:00000000000000000000000000000000\n");
+            fprintf(fp, "00:00000000000000000000000000000000\n");
+            fclose(fp);
+        }
+        strncpy(current_disk_file, path, sizeof(current_disk_file) - 1);
+        current_disk_file[sizeof(current_disk_file) - 1] = '\0';
+    }
+    g_total_clusters = 8;
+    g_cluster_size = 32;
     fs_service_glue_init();
     path_log_init();
-    /* Skip drivers_init: VM uses vm_disk directly; display/timer have fallbacks */
+    drivers_init(path[0] ? path : NULL);
 
     if (vm_boot() != 0) {
         fprintf(stderr, "vm_boot failed\n");
+        drivers_shutdown();
+        if (path[0]) unlink(path);
         fs_service_glue_shutdown();
         return 1;
     }
@@ -33,6 +52,8 @@ int main(void) {
     uint32_t after_15_replay = vm_state_checksum();
 
     vm_stop();
+    drivers_shutdown();
+    if (path[0]) unlink(path);
     fs_service_glue_shutdown();
 
     if (after_15 != after_15_replay) {

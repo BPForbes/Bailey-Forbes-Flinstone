@@ -48,6 +48,28 @@ int drivers_require_real_pci(void) {
     return fl_cap_is_real(pci_get_caps()) ? 0 : -1;
 }
 
+int drivers_require_real_keyboard(void) {
+    return fl_cap_is_real(keyboard_driver_caps()) ? 0 : -1;
+}
+int drivers_require_real_display(void) {
+    return fl_cap_is_real(display_driver_caps()) ? 0 : -1;
+}
+int drivers_require_real_timer(void) {
+    return fl_cap_is_real(timer_driver_caps()) ? 0 : -1;
+}
+int drivers_require_real_pic(void) {
+    return fl_cap_is_real(pic_driver_caps()) ? 0 : -1;
+}
+
+int drivers_all_real_for_vm(void) {
+    if (drivers_require_real_keyboard() != 0) return -1;
+    if (drivers_require_real_display() != 0) return -1;
+    if (drivers_require_real_timer() != 0) return -1;
+    if (drivers_require_real_pic() != 0) return -1;
+    /* Block: optional (VM can use vm_disk); PIC: no-op on host but must exist */
+    return 0;
+}
+
 int driver_probe_block(void) {
     return drivers_require_real_block();
 }

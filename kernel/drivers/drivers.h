@@ -35,7 +35,14 @@ void drivers_report_caps(void);
 
 /** Return 0 if driver is real; -1 if stub. Call before relying on hardware. */
 int drivers_require_real_block(void);
+int drivers_require_real_keyboard(void);
+int drivers_require_real_display(void);
+int drivers_require_real_timer(void);
+int drivers_require_real_pic(void);
 int drivers_require_real_pci(void);
+
+/** Return 0 if all drivers used by VM are real (host kbd/display/timer/block/pic). */
+int drivers_all_real_for_vm(void);
 
 /** Probe: return 0 if driver has real implementation. Refuse to use if -1. */
 int driver_probe_block(void);

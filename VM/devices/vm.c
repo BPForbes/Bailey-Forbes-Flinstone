@@ -236,6 +236,10 @@ static int execute(vm_cpu_t *cpu, vm_mem_t *mem, vm_instr_t *in) {
 }
 
 int vm_boot(void) {
+    if (drivers_all_real_for_vm() != 0) {
+        fprintf(stderr, "[VM] FATAL: Required drivers (kbd/display/timer/pic) are stub - refuse to run.\n");
+        return -1;
+    }
     vm_io_init();
     if (vm_host_create(&s_host) != 0) {
         vm_io_shutdown();

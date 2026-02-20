@@ -46,20 +46,22 @@ Drivers report whether they have real hardware paths or are stubs:
 - **FL_CAP_REAL** – driver has real implementation; hardware access works
 - **FL_CAP_STUB** – driver is placeholder; may return 0xFF, no-ops
 
-| Driver | Host | Baremetal x86 | Baremetal ARM |
-|--------|------|---------------|---------------|
-| Block | REAL (disk file) | REAL | REAL |
-| Keyboard | REAL (stdin) | REAL (PS/2) | REAL (PL011 UART) |
-| Display | REAL (printf) | REAL (VGA) | REAL (UART) |
-| Timer | REAL (usleep) | REAL (PIT) | REAL (CNTVCT) |
+| Driver | Host / VM | Baremetal x86 (i386/x64) | Baremetal ARM |
+|--------|-----------|---------------------------|---------------|
+| Block | REAL (disk file / vm_disk) | REAL | REAL |
+| Keyboard | REAL (stdin) | REAL (PS/2 port 0x60) | REAL (PL011 UART) |
+| Display | REAL (printf) | REAL (VGA 0xB8000) | REAL (UART) |
+| Timer | REAL (usleep) | REAL (PIT port 0x40) | REAL (CNTVCT) |
 | PIC | REAL (no-op) | REAL (8259) | REAL (GIC) |
-| PCI | stub | REAL (CF8/CFC) | REAL (ECAM) |
+| PCI | stub (host); VM emulates | REAL (CF8/CFC) | REAL (ECAM) |
 
 **API**: `keyboard_driver_caps()`, `display_driver_caps()`, `timer_driver_caps()`, `pic_driver_caps()`, `pci_get_caps()`. Block uses `get_caps()` → `flags` includes FL_CAP_REAL.
 
 **Refuse stub**: Call `drivers_require_real_block()` or `drivers_require_real_pci()` before relying on hardware; returns -1 if stub.
 
 **Report**: `drivers_report_caps()` logs real/stub status at init. In baremetal mode, FATAL if any driver is stub.
+
+**Require real**: `drivers_require_real_block()`, `drivers_require_real_keyboard()`, `drivers_require_real_display()`, `drivers_require_real_timer()`, `drivers_require_real_pic()`, `drivers_require_real_pci()` return 0 if real, -1 if stub. `drivers_all_real_for_vm()` checks kbd/display/timer/pic; VM boot fails if any are stub.
 
 **Probe/Selftest**: `driver_probe_*()` returns 0 if real. `drivers_run_selftest()` runs block read, timer tick, display putchar; exits if any fail. Build gate: `make check-stubs` fails if forbidden stub markers exist.
 
