@@ -2,6 +2,7 @@
 #include "common.h"
 #include "mem_asm.h"
 #include <ctype.h>
+#include <limits.h>
 #include <string.h>
 
 /* Resolve path with support for ., .., ./
