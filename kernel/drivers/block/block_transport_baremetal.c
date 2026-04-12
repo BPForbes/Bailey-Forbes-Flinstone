@@ -22,7 +22,7 @@
 #include "fl/driver/driver_types.h"
 
 #if defined(__x86_64__)
-#include "ata_pio.h"
+#include "drivers/ata_pio.h"
 
 static uint32_t s_bm_x86_sectors;
 
@@ -54,29 +54,41 @@ static int bm_sector_count(void *hal_ctx) {
     (void)hal_ctx;
     return RAMDISK_SECTORS;
 }
-#else
-/* Unsupported bare-metal arch — no-op transport */
-static int bm_read(void *h, uint32_t l, void *b)       { (void)h;(void)l;(void)b; return -1; }
-static int bm_write(void *h, uint32_t l, const void *b){ (void)h;(void)l;(void)b; return -1; }
-static int bm_sector_count(void *h)                    { (void)h; return 0; }
 #endif
 
 /* Forward declaration — fl_block_driver_create is in block_driver.c */
 fl_block_driver_t *fl_block_driver_create(const fl_hal_block_transport_t *transport);
 
-block_driver_t *block_driver_create_baremetal(void) {
 #if defined(__x86_64__)
+block_driver_t *block_driver_create_baremetal(void) {
     uint32_t n = 0;
     if (ata_pio_probe_disk(&n) != 0 || n == 0u)
         return NULL;
     s_bm_x86_sectors = n;
-#endif
-    fl_hal_block_transport_t t;
-    t.read             = bm_read;
-    t.write            = bm_write;
-    t.get_sector_count = bm_sector_count;
-    t.hal_ctx          = NULL;
+    fl_hal_block_transport_t t = {
+        .read             = bm_read,
+        .write            = bm_write,
+        .get_sector_count = bm_sector_count,
+        .hal_ctx          = NULL,
+    };
     return (block_driver_t *)fl_block_driver_create(&t);
 }
+
+#elif defined(__aarch64__)
+block_driver_t *block_driver_create_baremetal(void) {
+    fl_hal_block_transport_t t = {
+        .read             = bm_read,
+        .write            = bm_write,
+        .get_sector_count = bm_sector_count,
+        .hal_ctx          = NULL,
+    };
+    return (block_driver_t *)fl_block_driver_create(&t);
+}
+
+#else
+block_driver_t *block_driver_create_baremetal(void) {
+    return NULL;
+}
+#endif
 
 #endif /* DRIVERS_BAREMETAL */
