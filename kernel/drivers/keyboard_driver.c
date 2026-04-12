@@ -7,8 +7,10 @@
 #include "fl/driver/ioport.h"
 #include "fl/driver/caps.h"
 #include "fl/driver/driver_types.h"
-#include <stdlib.h>
+#include "fl/mm.h"
+#ifndef DRIVERS_BAREMETAL
 #include <unistd.h>
+#endif
 
 #define KB_DATA   0x60
 #define KB_STATUS 0x64
@@ -69,7 +71,8 @@ static int hw_get_char(keyboard_driver_t *drv, char *out) {
 #endif
 
 keyboard_driver_t *keyboard_driver_create(void) {
-    keyboard_impl_t *impl = (keyboard_impl_t *)calloc(1, sizeof(*impl));
+    keyboard_impl_t *impl = (keyboard_impl_t *)kmalloc(sizeof(*impl));
+    if (impl) asm_mem_zero(impl, sizeof(*impl));
     if (!impl) return NULL;
 #ifdef DRIVERS_BAREMETAL
 #if defined(__x86_64__) || defined(__i386__) || defined(__aarch64__)
@@ -91,7 +94,7 @@ keyboard_driver_t *keyboard_driver_create(void) {
 }
 
 void keyboard_driver_destroy(keyboard_driver_t *drv) {
-    free(drv);
+    kfree(drv);
 }
 
 uint32_t keyboard_driver_caps(void) {

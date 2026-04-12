@@ -20,8 +20,10 @@
 #include "fl/driver/ioport.h"
 #include "fl/driver/caps.h"
 #include "fl/driver/driver_types.h"
-#include <stdlib.h>
+#include "fl/mm.h"
+#ifndef DRIVERS_BAREMETAL
 #include <unistd.h>
+#endif
 
 /* PIT (8253/8254) register addresses and programming constants */
 #define PIT_CH0_DATA 0x40u   /* channel 0 data port            */
@@ -133,8 +135,9 @@ static void hw_msleep(timer_driver_t *drv, unsigned int ms) {
 /* ------------------------------------------------------------------ */
 
 timer_driver_t *timer_driver_create(void) {
-    timer_impl_t *impl = (timer_impl_t *)calloc(1, sizeof(*impl));
+    timer_impl_t *impl = (timer_impl_t *)kmalloc(sizeof(*impl));
     if (!impl) return NULL;
+    asm_mem_zero(impl, sizeof(*impl));
 #ifdef DRIVERS_BAREMETAL
     impl->base.tick_count = hw_tick_count;
     impl->base.msleep     = hw_msleep;
@@ -150,7 +153,7 @@ timer_driver_t *timer_driver_create(void) {
 }
 
 void timer_driver_destroy(timer_driver_t *drv) {
-    free(drv);
+    kfree(drv);
 }
 
 uint32_t timer_driver_caps(void) {

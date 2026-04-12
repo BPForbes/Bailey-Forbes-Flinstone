@@ -7,7 +7,8 @@
 #include "fl/driver/ioport.h"
 #include "fl/driver/caps.h"
 #include "fl/driver/driver_types.h"
-#include <stdlib.h>
+#include "fl/mm.h"
+#include "mem_asm.h"
 
 #ifdef DRIVERS_BAREMETAL
 #define PIC1_CMD  0x20
@@ -69,8 +70,9 @@ static void hw_eoi(pic_driver_t *drv, int irq) {
 #endif
 
 pic_driver_t *pic_driver_create(void) {
-    pic_impl_t *impl = (pic_impl_t *)calloc(1, sizeof(*impl));
+    pic_impl_t *impl = (pic_impl_t *)kmalloc(sizeof(*impl));
     if (!impl) return NULL;
+    asm_mem_zero(impl, sizeof(*impl));
 #ifdef DRIVERS_BAREMETAL
     impl->base.init = hw_init;
     impl->base.eoi = hw_eoi;
@@ -83,7 +85,7 @@ pic_driver_t *pic_driver_create(void) {
 }
 
 void pic_driver_destroy(pic_driver_t *drv) {
-    free(drv);
+    kfree(drv);
 }
 
 uint32_t pic_driver_caps(void) {

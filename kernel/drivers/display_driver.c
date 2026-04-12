@@ -9,9 +9,11 @@
 #include "fl/driver/caps.h"
 #include "fl/driver/driver_types.h"
 #include "mem_asm.h"
-#include <stdio.h>
-#include <stdlib.h>
+#include "fl/mm.h"
 #include <stdint.h>
+#ifndef DRIVERS_BAREMETAL
+#include <stdio.h>
+#endif
 
 #ifdef DRIVERS_BAREMETAL
 #define VGA_MEM ((volatile uint16_t *)VGA_BASE)
@@ -148,8 +150,9 @@ static void hw_refresh_vga(display_driver_t *drv, const void *vga_buf) {
 #endif
 
 display_driver_t *display_driver_create(void) {
-    display_impl_t *impl = (display_impl_t *)calloc(1, sizeof(*impl));
+    display_impl_t *impl = (display_impl_t *)kmalloc(sizeof(*impl));
     if (!impl) return NULL;
+    asm_mem_zero(impl, sizeof(*impl));
     impl->color = 0x07;
 #ifdef DRIVERS_BAREMETAL
     impl->base.putchar = hw_putchar;
@@ -170,7 +173,7 @@ display_driver_t *display_driver_create(void) {
 }
 
 void display_driver_destroy(display_driver_t *drv) {
-    free(drv);
+    kfree(drv);
 }
 
 uint32_t display_driver_caps(void) {
