@@ -106,16 +106,16 @@ void update_cluster_line(int clu, const char *hexData) {
         fclose(fp);
     }
     for (; i < g_total_clusters; i++) {
-        /* Dynamically size: 3 bytes for "XX:" prefix + cluster data + null */
-        int entryLen = 3 + g_cluster_size * 2 + 1;
+        int prefixLen = snprintf(NULL, 0, "%02X:", i);
+        int entryLen = prefixLen + g_cluster_size * 2 + 1;
         char *entry = malloc(entryLen);
         if (!entry) {
             for (int k = 0; k < i; k++) free(clusters[k]);
             free(clusters);
             return;
         }
-        snprintf(entry, 4, "%02X:", i);
-        memset(entry + 3, '0', g_cluster_size * 2);
+        snprintf(entry, entryLen, "%02X:", i);
+        memset(entry + prefixLen, '0', g_cluster_size * 2);
         entry[entryLen - 1] = '\0';
         clusters[i] = entry;
     }

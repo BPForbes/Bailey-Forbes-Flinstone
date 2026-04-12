@@ -395,6 +395,7 @@ int main(int argc, char *argv[]) {
                     j++;
                 tokensCount = j - i;
             }
+            if (tokensCount == 0) { i++; continue; }
             size_t totalLen = 0;
             for (int k = i; k < i + tokensCount; k++)
                 totalLen += strlen(argv[k]) + 1;

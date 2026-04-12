@@ -926,9 +926,14 @@ void interactive_shell(void) {
             submit_single_command(line);
             char **tmp_hist = realloc(g_interactive_history, sizeof(char*) * (g_interactive_history_count + 2));
             if (tmp_hist) {
-                g_interactive_history = tmp_hist;
-                g_interactive_history[g_interactive_history_count] = strdup(line);
-                g_interactive_history_count++;
+                char *new_entry = strdup(line);
+                if (new_entry) {
+                    g_interactive_history = tmp_hist;
+                    g_interactive_history[g_interactive_history_count] = new_entry;
+                    g_interactive_history_count++;
+                } else {
+                    free(tmp_hist);
+                }
             }
             enable_raw_mode();
         }
