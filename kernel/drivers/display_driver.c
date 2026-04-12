@@ -28,6 +28,7 @@ typedef struct {
 #endif
 } display_impl_t;
 
+#ifndef DRIVERS_BAREMETAL
 static void host_putchar(display_driver_t *drv, char c) {
     (void)drv;
     putchar(c);
@@ -58,6 +59,7 @@ static void host_refresh_vga(display_driver_t *drv, const void *vga_buf) {
     }
     fflush(stdout);
 }
+#endif
 
 #ifdef DRIVERS_BAREMETAL
 #if defined(__x86_64__) || defined(__i386__)

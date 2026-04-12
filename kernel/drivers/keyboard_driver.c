@@ -8,6 +8,7 @@
 #include "fl/driver/caps.h"
 #include "fl/driver/driver_types.h"
 #include "fl/mm.h"
+#include "mem_asm.h"
 #ifndef DRIVERS_BAREMETAL
 #include <unistd.h>
 #endif
@@ -20,6 +21,7 @@ typedef struct {
     int host_mode;
 } keyboard_impl_t;
 
+#ifndef DRIVERS_BAREMETAL
 static int host_poll_scancode(keyboard_driver_t *drv, uint8_t *out) {
     (void)drv;
     unsigned char c;
@@ -38,6 +40,7 @@ static int host_get_char(keyboard_driver_t *drv, char *out) {
     }
     return -1;
 }
+#endif
 
 #ifdef DRIVERS_BAREMETAL
 #if defined(__x86_64__) || defined(__i386__)
@@ -80,9 +83,12 @@ keyboard_driver_t *keyboard_driver_create(void) {
     impl->base.poll_scancode = hw_poll_scancode;
     impl->base.get_char = hw_get_char;
 #else
-    impl->host_mode = 1;
-    impl->base.poll_scancode = host_poll_scancode;
-    impl->base.get_char = host_get_char;
+    /* Bare-metal build on unsupported architecture: no keyboard support.
+     * host_poll_scancode/host_get_char are not available in DRIVERS_BAREMETAL.
+     * Set to NULL to avoid undefined references; caller must check caps. */
+    impl->host_mode = 0;
+    impl->base.poll_scancode = NULL;
+    impl->base.get_char = NULL;
 #endif
 #else
     impl->host_mode = 1;

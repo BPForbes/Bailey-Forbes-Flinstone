@@ -15,20 +15,34 @@
 #include <stdlib.h>
 
 void *kmalloc(size_t size) {
-    return malloc(size);
+    return mem_domain_alloc(MEM_DOMAIN_KERNEL, size);
 }
 
 void kfree(void *ptr) {
-    free(ptr);
+    mem_domain_free(MEM_DOMAIN_KERNEL, ptr);
 }
 
 void *krealloc(void *ptr, size_t size) {
+    /* NOTE: krealloc intentionally uses raw realloc without domain tracking.
+     * The mem_domain layer currently lacks a realloc primitive; adding one
+     * would require either (a) a mem_domain_realloc API that internally calls
+     * realloc, or (b) manual alloc+copy+free which loses realloc's efficiency.
+     * For now, we bypass domain accounting here to preserve realloc semantics;
+     * future work should add mem_domain_realloc(domain, ptr, size) to match
+     * the alloc/free pattern and restore consistent MEM_DOMAIN_KERNEL tracking.
+     */
     return realloc(ptr, size);
 }
 
 /* Page helpers - thin wrappers; a real MM would manage page frames */
 void *alloc_page(void) {
-    return kmalloc(get_page_size());
+    /* Allocate a page-aligned buffer (4,096 bytes) using aligned_alloc.
+     * This ensures 4 KiB alignment required for page-frame semantics,
+     * which kmalloc(get_page_size()) via libc malloc cannot guarantee.
+     */
+    size_t page_size = get_page_size();
+    void *page = aligned_alloc(page_size, page_size);
+    return page;  /* returns NULL on failure */
 }
 
 void free_page(void *page) {

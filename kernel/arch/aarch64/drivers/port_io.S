@@ -7,6 +7,7 @@
  *   port_out* -> no-op
  * On bare-metal ARM, actual peripheral I/O uses MMIO via fl_mmio_*.
  */
+.section .note.GNU-stack,"",%progbits
 .text
 .globl port_inb
 .globl port_outb
