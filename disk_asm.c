@@ -2,6 +2,7 @@
 #include "disk.h"
 #include "mem_asm.h"
 #include "mem_domain.h"
+#include "common.h"
 
 #ifdef DRIVERS_BAREMETAL
 /* ------------------------------------------------------------------ */
@@ -12,18 +13,30 @@
 #if defined(__x86_64__)
 #include "ata_pio.h"
 
+/* ATA PIO path transfers exactly 512 bytes per sector; cluster I/O must match. */
+static int bm_ata_cluster_ok(const void *buf) {
+    if (!buf)
+        return 0;
+    if (g_cluster_size != 512)
+        return 0;
+    return 1;
+}
+
 int disk_asm_read_cluster(int clu_index, unsigned char *buf) {
     if (clu_index < 0 || clu_index > 0x0FFFFFFF) return -1;
+    if (!bm_ata_cluster_ok(buf)) return -1;
     return ata_pio_read_sector((uint32_t)clu_index, buf) == 0 ? 0 : -1;
 }
 
 int disk_asm_write_cluster(int clu_index, const unsigned char *buf) {
     if (clu_index < 0 || clu_index > 0x0FFFFFFF) return -1;
+    if (!bm_ata_cluster_ok(buf)) return -1;
     return ata_pio_write_sector((uint32_t)clu_index, buf) == 0 ? 0 : -1;
 }
 
 int disk_asm_zero_cluster(int clu_index) {
     if (clu_index < 0 || clu_index > 0x0FFFFFFF) return -1;
+    if (g_cluster_size != 512) return -1;
     unsigned char zero_buf[512];
     asm_mem_zero(zero_buf, sizeof(zero_buf));
     return ata_pio_write_sector((uint32_t)clu_index, zero_buf) == 0 ? 0 : -1;

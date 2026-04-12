@@ -29,6 +29,8 @@
 static int ata_wait_not_bsy(uint32_t max_iter) {
     for (uint32_t i = 0; i < max_iter; i++) {
         uint8_t st = fl_ioport_in8(ATA_STATCMD);
+        if (st == 0u)
+            return -1;
         if (st & (ATA_SR_ERR | ATA_SR_DF))
             return -1;
         if ((st & ATA_SR_BSY) == 0)
@@ -55,6 +57,8 @@ int ata_pio_probe_disk(uint32_t *sector_count_out) {
     /* Poll for DRQ: wait until BSY is cleared and DRQ is set */
     for (uint32_t i = 0; i < ATA_ID_TIMEOUT; i++) {
         uint8_t st = fl_ioport_in8(ATA_STATCMD);
+        if (st == 0u)
+            return -1;
         if (st & (ATA_SR_ERR | ATA_SR_DF))
             return -1;
         if ((st & ATA_SR_BSY) == 0 && (st & ATA_SR_DRQ) != 0)
