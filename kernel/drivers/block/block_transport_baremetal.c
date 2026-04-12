@@ -40,7 +40,7 @@ static int bm_sector_count(void *hal_ctx) {
 }
 
 #elif defined(__aarch64__)
-#include "ramdisk.h"
+#include "drivers/ramdisk.h"
 
 static int bm_read(void *hal_ctx, uint32_t lba, void *buf) {
     (void)hal_ctx;
