@@ -41,6 +41,12 @@ UNIFIED_DRIVER_SRCS = kernel/drivers/block/block_driver.c kernel/drivers/block/b
 DRIVER_SRCS = $(UNIFIED_DRIVER_SRCS)
 # PCI: x86_64 real impl, aarch64 ECAM real
 DRIVER_SRCS += $(KERNEL_DRIVERS)/pci.c
+# x86: ATA IDENTIFY + helpers (bare-metal sector geometry)
+ifneq ($(ARCH),arm)
+ifneq ($(ARCH),x86_64_nasm)
+DRIVER_SRCS += $(KERNEL_DRIVERS)/ata_pio_baremetal.c
+endif
+endif
 # HAL: ioport (x86 real, arm stubs) + ARM MMIO HAL (arm only)
 HAL_SRCS = $(KERNEL_DRIVERS)/../hal/ioport.c
 ifeq ($(ARCH),arm)

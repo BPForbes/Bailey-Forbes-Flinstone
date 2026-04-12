@@ -6,31 +6,34 @@
 #ifdef DRIVERS_BAREMETAL
 /* ------------------------------------------------------------------ */
 /* Bare-metal paths: real hardware I/O backed by ASM                  */
-/*   x86_64 / i386 — ATA PIO via ata_pio.s (rep insw / rep outsw)    */
+/*   x86_64 — ATA PIO via ata_pio.s (rep insw / rep outsw)            */
 /*   AArch64       — RAM disk via ramdisk.s (asm_mem_copy to .bss)    */
 /* ------------------------------------------------------------------ */
-#if defined(__x86_64__) || defined(__i386__)
+#if defined(__x86_64__)
 #include "ata_pio.h"
 
 int disk_asm_read_cluster(int clu_index, unsigned char *buf) {
     if (clu_index < 0) return -1;
-    ata_pio_read_sector((uint32_t)clu_index, buf);
-    return 0;
+    return ata_pio_read_sector((uint32_t)clu_index, buf) == 0 ? 0 : -1;
 }
 
 int disk_asm_write_cluster(int clu_index, const unsigned char *buf) {
     if (clu_index < 0) return -1;
-    ata_pio_write_sector((uint32_t)clu_index, buf);
-    return 0;
+    return ata_pio_write_sector((uint32_t)clu_index, buf) == 0 ? 0 : -1;
 }
 
 int disk_asm_zero_cluster(int clu_index) {
     if (clu_index < 0) return -1;
     unsigned char zero_buf[512];
     asm_mem_zero(zero_buf, sizeof(zero_buf));
-    ata_pio_write_sector((uint32_t)clu_index, zero_buf);
-    return 0;
+    return ata_pio_write_sector((uint32_t)clu_index, zero_buf) == 0 ? 0 : -1;
 }
+
+#elif defined(__i386__)
+/* ATA PIO backend is AMD64-only (SysV AMD64 ABI in ata_pio.s). */
+int disk_asm_read_cluster(int c, unsigned char *b)        { (void)c;(void)b; return -1; }
+int disk_asm_write_cluster(int c, const unsigned char *b) { (void)c;(void)b; return -1; }
+int disk_asm_zero_cluster(int c)                          { (void)c; return -1; }
 
 #elif defined(__aarch64__)
 #include "ramdisk.h"

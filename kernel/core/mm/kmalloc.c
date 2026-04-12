@@ -38,7 +38,8 @@ void *alloc_page(void) {
 }
 
 void free_page(void *page) {
-    kfree(page);
+    if (page)
+        free(page);
 }
 
 size_t get_page_size(void) {

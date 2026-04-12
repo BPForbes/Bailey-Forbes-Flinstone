@@ -6,7 +6,7 @@
 #ifndef MEM_DOMAIN_H
 #define MEM_DOMAIN_H
 
-#include "mem_asm.h"
+#include "fl/mem_asm.h"
 #include <stddef.h>
 
 typedef enum {

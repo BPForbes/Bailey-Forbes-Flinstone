@@ -73,17 +73,38 @@ static uint64_t hw_tick_count(timer_driver_t *drv) {
     return ((uint64_t)hi << 32) | (uint64_t)lo;
 }
 
+static uint64_t hw_tsc_hz_from_cpuid(void) {
+    uint32_t eax, ebx, ecx, edx;
+    __asm__ volatile("cpuid"
+                     : "=a"(eax), "=b"(ebx), "=c"(ecx), "=d"(edx)
+                     : "a"(0x15u), "c"(0u)
+                     : "memory");
+    if (eax != 0u && ebx != 0u) {
+        if (ecx != 0u)
+            return ((uint64_t)ecx * (uint64_t)ebx) / (uint64_t)eax;
+        /* ECX not enumerated: assume 24 MHz nominal crystal (Intel convention). */
+        return (24000000ULL * (uint64_t)ebx) / (uint64_t)eax;
+    }
+    /* Unknown CPU: assume 2 GHz so we sleep at least as long as requested. */
+    return 2000000000ULL;
+}
+
+static uint64_t hw_tsc_hz(void) {
+    static uint64_t hz;
+    if (hz == 0u)
+        hz = hw_tsc_hz_from_cpuid();
+    return hz;
+}
+
 static void hw_msleep(timer_driver_t *drv, unsigned int ms) {
     (void)drv;
-    /* RDTSC-based busy-wait.
-     * 1 GHz is a conservative lower bound for TSC frequency on any
-     * x86_64 CPU made after ~2005, so 1 ms = 1,000,000 cycles is safe
-     * (may sleep slightly longer on slower or variable-frequency TSCs;
-     * add a calibration step later if precision matters). */
     uint32_t lo, hi;
     __asm__ volatile("rdtsc" : "=a"(lo), "=d"(hi) :: "memory");
     uint64_t start = ((uint64_t)hi << 32) | (uint64_t)lo;
-    uint64_t wait  = (uint64_t)ms * 1000000ULL;
+    uint64_t hz    = hw_tsc_hz();
+    uint64_t wait  = ((uint64_t)ms * hz) / 1000ULL;
+    if (wait == 0u && ms != 0u)
+        wait = 1u;
     uint64_t cur;
     do {
         __asm__ volatile("rdtsc" : "=a"(lo), "=d"(hi) :: "memory");

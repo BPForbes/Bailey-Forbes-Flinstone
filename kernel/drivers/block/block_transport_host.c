@@ -37,8 +37,8 @@ int fl_hal_block_create_host(const char *disk_file, fl_hal_block_transport_t *ou
     current_disk_file[sizeof(current_disk_file) - 1] = '\0';
     read_disk_header();
     host_blk_ctx_t *ctx = (host_blk_ctx_t *)kmalloc(sizeof(*ctx));
-    if (ctx) asm_mem_zero(ctx, sizeof(*ctx));
     if (!ctx) return -1;
+    asm_mem_zero(ctx, sizeof(*ctx));
     ctx->sector_count = (uint32_t)g_total_clusters;
     ctx->cluster_size = g_cluster_size;
     out->read = host_block_read;

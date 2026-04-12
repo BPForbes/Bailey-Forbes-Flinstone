@@ -159,6 +159,10 @@ void drivers_init(const char *disk_file) {
 #ifdef DRIVERS_BAREMETAL
     (void)disk_file;
     g_block_driver = block_driver_create_baremetal();
+    if (!g_block_driver) {
+        kprint("FATAL: bare-metal block driver init failed\n");
+        kpanic();
+    }
 #else
     g_block_driver = block_driver_create_host(disk_file ? disk_file : current_disk_file);
 #endif
