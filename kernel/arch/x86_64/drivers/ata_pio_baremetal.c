@@ -52,14 +52,16 @@ int ata_pio_probe_disk(uint32_t *sector_count_out) {
     fl_ioport_out8(ATA_LBA_HI, 0);
     fl_ioport_out8(ATA_STATCMD, ATA_CMD_IDENTIFY);
 
-    if (ata_wait_not_bsy(ATA_ID_TIMEOUT) != 0)
-        return -1;
-
-    uint8_t st = fl_ioport_in8(ATA_STATCMD);
-    if (st & (ATA_SR_ERR | ATA_SR_DF))
-        return -1;
-    if ((st & ATA_SR_DRQ) == 0)
-        return -1;
+    /* Poll for DRQ: wait until BSY is cleared and DRQ is set */
+    for (uint32_t i = 0; i < ATA_ID_TIMEOUT; i++) {
+        uint8_t st = fl_ioport_in8(ATA_STATCMD);
+        if (st & (ATA_SR_ERR | ATA_SR_DF))
+            return -1;
+        if ((st & ATA_SR_BSY) == 0 && (st & ATA_SR_DRQ) != 0)
+            break;
+        if (i == ATA_ID_TIMEOUT - 1)
+            return -1;
+    }
 
     uint16_t id[256];
     for (int w = 0; w < 256; w++) {
@@ -87,4 +89,3 @@ int ata_pio_probe_disk(uint32_t *sector_count_out) {
 }
 
 #endif
-

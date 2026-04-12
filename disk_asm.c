@@ -13,17 +13,17 @@
 #include "ata_pio.h"
 
 int disk_asm_read_cluster(int clu_index, unsigned char *buf) {
-    if (clu_index < 0) return -1;
+    if (clu_index < 0 || clu_index > 0x0FFFFFFF) return -1;
     return ata_pio_read_sector((uint32_t)clu_index, buf) == 0 ? 0 : -1;
 }
 
 int disk_asm_write_cluster(int clu_index, const unsigned char *buf) {
-    if (clu_index < 0) return -1;
+    if (clu_index < 0 || clu_index > 0x0FFFFFFF) return -1;
     return ata_pio_write_sector((uint32_t)clu_index, buf) == 0 ? 0 : -1;
 }
 
 int disk_asm_zero_cluster(int clu_index) {
-    if (clu_index < 0) return -1;
+    if (clu_index < 0 || clu_index > 0x0FFFFFFF) return -1;
     unsigned char zero_buf[512];
     asm_mem_zero(zero_buf, sizeof(zero_buf));
     return ata_pio_write_sector((uint32_t)clu_index, zero_buf) == 0 ? 0 : -1;
