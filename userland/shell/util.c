@@ -116,8 +116,20 @@ char **load_history(int *count) {
     while (fgets(line, sizeof(line), fp)) {
         line[strcspn(line, "\n")] = '\0';
         if (cnt >= capacity) {
-            capacity *= 2;
-            hist = realloc(hist, sizeof(char*) * capacity);
+            if (capacity > INT_MAX / 2) {
+                fclose(fp);
+                *count = cnt;
+                return hist;
+            }
+            int new_capacity = capacity * 2;
+            char **tmp = realloc(hist, sizeof(char*) * (size_t)new_capacity);
+            if (!tmp) {
+                fclose(fp);
+                *count = cnt;
+                return hist;
+            }
+            capacity = new_capacity;
+            hist = tmp;
         }
         hist[cnt++] = strdup(line);
     }

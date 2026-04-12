@@ -395,10 +395,12 @@ int main(int argc, char *argv[]) {
                     j++;
                 tokensCount = j - i;
             }
-            int totalLen = 0;
+            if (tokensCount == 0) { i++; continue; }
+            size_t totalLen = 0;
             for (int k = i; k < i + tokensCount; k++)
-                totalLen += (int)strlen(argv[k]) + 1;
+                totalLen += strlen(argv[k]) + 1;
             char *commandStr = malloc(totalLen + 1);
+            if (!commandStr) { i += tokensCount; continue; }
             commandStr[0] = '\0';
             for (int k = i; k < i + tokensCount; k++) {
                 strcat(commandStr, argv[k]);
