@@ -1,13 +1,15 @@
 /**
  * Host HAL: Block transport via disk file (disk_asm).
- * Platform-neutral - same for x86-64 and ARM.
+ * Compiled in host (non-DRIVERS_BAREMETAL) builds only.
+ * Bare-metal builds use block_transport_baremetal.c instead.
  */
+#ifndef DRIVERS_BAREMETAL
 #include "fl/driver/block.h"
+#include "fl/mm.h"
+#include "fl/mem_asm.h"
 #include "disk.h"
 #include "disk_asm.h"
 #include "common.h"
-#include <stdlib.h>
-#include <string.h>
 
 typedef struct {
     uint32_t sector_count;
@@ -31,11 +33,12 @@ static int host_block_get_sector_count(void *hal_ctx) {
 
 int fl_hal_block_create_host(const char *disk_file, fl_hal_block_transport_t *out) {
     if (!out || !disk_file) return -1;
-    read_disk_header();
-    host_blk_ctx_t *ctx = (host_blk_ctx_t *)calloc(1, sizeof(*ctx));
-    if (!ctx) return -1;
     strncpy(current_disk_file, disk_file, sizeof(current_disk_file) - 1);
     current_disk_file[sizeof(current_disk_file) - 1] = '\0';
+    read_disk_header();
+    host_blk_ctx_t *ctx = (host_blk_ctx_t *)kmalloc(sizeof(*ctx));
+    if (!ctx) return -1;
+    asm_mem_zero(ctx, sizeof(*ctx));
     ctx->sector_count = (uint32_t)g_total_clusters;
     ctx->cluster_size = g_cluster_size;
     out->read = host_block_read;
@@ -47,7 +50,9 @@ int fl_hal_block_create_host(const char *disk_file, fl_hal_block_transport_t *ou
 
 void fl_hal_block_destroy_host(fl_hal_block_transport_t *transport) {
     if (transport && transport->hal_ctx) {
-        free(transport->hal_ctx);
+        kfree(transport->hal_ctx);
         transport->hal_ctx = NULL;
     }
 }
+
+#endif /* !DRIVERS_BAREMETAL */
