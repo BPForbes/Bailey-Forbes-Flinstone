@@ -6,7 +6,7 @@
 #ifndef DRIVERS_BAREMETAL
 #include "fl/driver/block.h"
 #include "fl/mm.h"
-#include "mem_asm.h"
+#include "fl/mem_asm.h"
 #include "disk.h"
 #include "disk_asm.h"
 #include "common.h"
@@ -33,12 +33,12 @@ static int host_block_get_sector_count(void *hal_ctx) {
 
 int fl_hal_block_create_host(const char *disk_file, fl_hal_block_transport_t *out) {
     if (!out || !disk_file) return -1;
+    strncpy(current_disk_file, disk_file, sizeof(current_disk_file) - 1);
+    current_disk_file[sizeof(current_disk_file) - 1] = '\0';
     read_disk_header();
     host_blk_ctx_t *ctx = (host_blk_ctx_t *)kmalloc(sizeof(*ctx));
     if (ctx) asm_mem_zero(ctx, sizeof(*ctx));
     if (!ctx) return -1;
-    strncpy(current_disk_file, disk_file, sizeof(current_disk_file) - 1);
-    current_disk_file[sizeof(current_disk_file) - 1] = '\0';
     ctx->sector_count = (uint32_t)g_total_clusters;
     ctx->cluster_size = g_cluster_size;
     out->read = host_block_read;

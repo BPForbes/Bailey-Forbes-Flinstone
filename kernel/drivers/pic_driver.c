@@ -8,7 +8,7 @@
 #include "fl/driver/caps.h"
 #include "fl/driver/driver_types.h"
 #include "fl/mm.h"
-#include "mem_asm.h"
+#include "fl/mem_asm.h"
 
 #ifdef DRIVERS_BAREMETAL
 #define PIC1_CMD  0x20

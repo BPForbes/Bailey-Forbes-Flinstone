@@ -19,6 +19,7 @@ typedef enum {
 /* Allocate in domain (uses malloc/calloc; domain is metadata for future) */
 void *mem_domain_alloc(mem_domain_t domain, size_t size);
 void *mem_domain_calloc(mem_domain_t domain, size_t nmemb, size_t size);
+void *mem_domain_realloc(mem_domain_t domain, void *ptr, size_t size);
 void mem_domain_free(mem_domain_t domain, void *ptr);
 
 /* Buffer ops - always use ASM for hot path */

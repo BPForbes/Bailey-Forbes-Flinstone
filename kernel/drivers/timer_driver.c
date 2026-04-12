@@ -21,6 +21,7 @@
 #include "fl/driver/caps.h"
 #include "fl/driver/driver_types.h"
 #include "fl/mm.h"
+#include "fl/mem_asm.h"
 #ifndef DRIVERS_BAREMETAL
 #include <unistd.h>
 #endif

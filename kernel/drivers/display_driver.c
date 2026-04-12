@@ -8,7 +8,7 @@
 #include "fl/driver/mmio.h"
 #include "fl/driver/caps.h"
 #include "fl/driver/driver_types.h"
-#include "mem_asm.h"
+#include "fl/mem_asm.h"
 #include "fl/mm.h"
 #include <stdint.h>
 #ifndef DRIVERS_BAREMETAL

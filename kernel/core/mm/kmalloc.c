@@ -23,15 +23,7 @@ void kfree(void *ptr) {
 }
 
 void *krealloc(void *ptr, size_t size) {
-    /* NOTE: krealloc intentionally uses raw realloc without domain tracking.
-     * The mem_domain layer currently lacks a realloc primitive; adding one
-     * would require either (a) a mem_domain_realloc API that internally calls
-     * realloc, or (b) manual alloc+copy+free which loses realloc's efficiency.
-     * For now, we bypass domain accounting here to preserve realloc semantics;
-     * future work should add mem_domain_realloc(domain, ptr, size) to match
-     * the alloc/free pattern and restore consistent MEM_DOMAIN_KERNEL tracking.
-     */
-    return realloc(ptr, size);
+    return mem_domain_realloc(MEM_DOMAIN_KERNEL, ptr, size);
 }
 
 /* Page helpers - thin wrappers; a real MM would manage page frames */
