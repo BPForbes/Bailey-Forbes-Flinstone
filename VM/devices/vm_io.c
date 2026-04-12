@@ -35,7 +35,6 @@ static void vm_pci_init_cfg(void) {
     s_pci_cfg = mem_domain_alloc(MEM_DOMAIN_DRIVER, VM_PCI_DEV_MAX * PCI_CFG_SIZE);
     if (!s_pci_cfg) return;
     asm_mem_zero(s_pci_cfg, VM_PCI_DEV_MAX * PCI_CFG_SIZE);
-    if (!s_pci_cfg) return;
     /* Dev 0: Host bridge - 0x1234:0x0001, class 0600 */
     s_pci_cfg[0*PCI_CFG_SIZE + 0] = 0x34; s_pci_cfg[0*PCI_CFG_SIZE + 1] = 0x12;
     s_pci_cfg[0*PCI_CFG_SIZE + 2] = 0x01; s_pci_cfg[0*PCI_CFG_SIZE + 3] = 0x00;
