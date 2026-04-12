@@ -892,7 +892,8 @@ void interactive_shell(void) {
                                 currHistIndex--;
                                 printf("\r\33[2Kshell> %s", g_interactive_history[currHistIndex]);
                                 fflush(stdout);
-                                strcpy(line, g_interactive_history[currHistIndex]);
+                                strncpy(line, g_interactive_history[currHistIndex], sizeof(line) - 1);
+                                line[sizeof(line) - 1] = '\0';
                                 len = strlen(line);
                             }
                         } else if (seq[1] == 'B') {
@@ -900,7 +901,8 @@ void interactive_shell(void) {
                                 currHistIndex++;
                                 printf("\r\33[2Kshell> %s", g_interactive_history[currHistIndex]);
                                 fflush(stdout);
-                                strcpy(line, g_interactive_history[currHistIndex]);
+                                strncpy(line, g_interactive_history[currHistIndex], sizeof(line) - 1);
+                                line[sizeof(line) - 1] = '\0';
                                 len = strlen(line);
                             } else {
                                 currHistIndex = g_interactive_history_count;
@@ -913,16 +915,21 @@ void interactive_shell(void) {
                     }
                 }
             } else {
-                line[len++] = c;
-                write(STDOUT_FILENO, &c, 1);
+                if (len < (int)sizeof(line) - 1) {
+                    line[len++] = c;
+                    write(STDOUT_FILENO, &c, 1);
+                }
             }
         }
         disable_raw_mode();
         if (len > 0) {
             submit_single_command(line);
-            g_interactive_history = realloc(g_interactive_history, sizeof(char*) * (g_interactive_history_count + 2));
-            g_interactive_history[g_interactive_history_count] = strdup(line);
-            g_interactive_history_count++;
+            char **tmp_hist = realloc(g_interactive_history, sizeof(char*) * (g_interactive_history_count + 2));
+            if (tmp_hist) {
+                g_interactive_history = tmp_hist;
+                g_interactive_history[g_interactive_history_count] = strdup(line);
+                g_interactive_history_count++;
+            }
             enable_raw_mode();
         }
     }

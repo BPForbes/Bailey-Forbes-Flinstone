@@ -117,7 +117,13 @@ char **load_history(int *count) {
         line[strcspn(line, "\n")] = '\0';
         if (cnt >= capacity) {
             capacity *= 2;
-            hist = realloc(hist, sizeof(char*) * capacity);
+            char **tmp = realloc(hist, sizeof(char*) * capacity);
+            if (!tmp) {
+                fclose(fp);
+                *count = cnt;
+                return hist;
+            }
+            hist = tmp;
         }
         hist[cnt++] = strdup(line);
     }
