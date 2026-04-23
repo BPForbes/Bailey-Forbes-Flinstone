@@ -11,18 +11,18 @@
 .globl port_inl
 .globl port_outl
 
-/* uint8_t port_inb(uint16_t port) - return 0 */
+/* uint8_t port_inb(uint16_t port) - return 0xFF (no-device sentinel) */
 port_inb:
-    mov     w0, #0
+    mov     w0, #0xFF
     ret
 
 /* void port_outb(uint16_t port, uint8_t value) - no-op */
 port_outb:
     ret
 
-/* uint16_t port_inw(uint16_t port) - return 0 */
+/* uint16_t port_inw(uint16_t port) - return 0xFFFF (no-device sentinel) */
 port_inw:
-    mov     w0, #0
+    movz    w0, #0xffff
     ret
 
 /* void port_outw(uint16_t port, uint16_t value) - no-op */

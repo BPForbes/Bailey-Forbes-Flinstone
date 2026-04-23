@@ -2,6 +2,80 @@
 #include "disk.h"
 #include "mem_asm.h"
 #include "mem_domain.h"
+#include "common.h"
+
+#ifdef DRIVERS_BAREMETAL
+/* ------------------------------------------------------------------ */
+/* Bare-metal paths: real hardware I/O backed by ASM                  */
+/*   x86_64 — ATA PIO via ata_pio.s (rep insw / rep outsw)            */
+/*   AArch64       — RAM disk via ramdisk.s (asm_mem_copy to .bss)    */
+/* ------------------------------------------------------------------ */
+#if defined(__x86_64__)
+#include "ata_pio.h"
+
+/* ATA PIO path transfers exactly 512 bytes per sector; cluster I/O must match. */
+static int bm_ata_cluster_ok(const void *buf) {
+    if (!buf)
+        return 0;
+    if (g_cluster_size != 512)
+        return 0;
+    return 1;
+}
+
+int disk_asm_read_cluster(int clu_index, unsigned char *buf) {
+    if (clu_index < 0 || clu_index > 0x0FFFFFFF) return -1;
+    if (!bm_ata_cluster_ok(buf)) return -1;
+    return ata_pio_read_sector((uint32_t)clu_index, buf) == 0 ? 0 : -1;
+}
+
+int disk_asm_write_cluster(int clu_index, const unsigned char *buf) {
+    if (clu_index < 0 || clu_index > 0x0FFFFFFF) return -1;
+    if (!bm_ata_cluster_ok(buf)) return -1;
+    return ata_pio_write_sector((uint32_t)clu_index, buf) == 0 ? 0 : -1;
+}
+
+int disk_asm_zero_cluster(int clu_index) {
+    if (clu_index < 0 || clu_index > 0x0FFFFFFF) return -1;
+    if (g_cluster_size != 512) return -1;
+    unsigned char zero_buf[512];
+    asm_mem_zero(zero_buf, sizeof(zero_buf));
+    return ata_pio_write_sector((uint32_t)clu_index, zero_buf) == 0 ? 0 : -1;
+}
+
+#elif defined(__i386__)
+/* ATA PIO backend is AMD64-only (SysV AMD64 ABI in ata_pio.s). */
+int disk_asm_read_cluster(int c, unsigned char *b)        { (void)c;(void)b; return -1; }
+int disk_asm_write_cluster(int c, const unsigned char *b) { (void)c;(void)b; return -1; }
+int disk_asm_zero_cluster(int c)                          { (void)c; return -1; }
+
+#elif defined(__aarch64__)
+#include "ramdisk.h"
+
+int disk_asm_read_cluster(int clu_index, unsigned char *buf) {
+    return ramdisk_read(clu_index, buf);
+}
+
+int disk_asm_write_cluster(int clu_index, const unsigned char *buf) {
+    return ramdisk_write(clu_index, buf);
+}
+
+int disk_asm_zero_cluster(int clu_index) {
+    unsigned char zero_buf[RAMDISK_SECTOR_SIZE];
+    asm_mem_zero(zero_buf, sizeof(zero_buf));
+    return ramdisk_write(clu_index, zero_buf);
+}
+
+#else
+/* Unknown bare-metal arch — no-ops */
+int disk_asm_read_cluster(int c, unsigned char *b)        { (void)c;(void)b; return -1; }
+int disk_asm_write_cluster(int c, const unsigned char *b) { (void)c;(void)b; return -1; }
+int disk_asm_zero_cluster(int c)                          { (void)c; return -1; }
+#endif
+
+#else /* HOST mode */
+/* ------------------------------------------------------------------ */
+/* Host path: text-format hex disk file (development / testing)       */
+/* ------------------------------------------------------------------ */
 #include "util.h"
 #include <stdio.h>
 #include <stdlib.h>
@@ -31,7 +105,7 @@ int disk_asm_read_cluster(int clu_index, unsigned char *buf) {
     size_t hex_len = strlen(hex_data);
     size_t expected = (size_t)g_cluster_size * 2;
     size_t n_bytes = (expected < hex_len ? expected : hex_len) / 2;
-    unsigned char tmp[512];  /* max cluster size for hex parse */
+    unsigned char tmp[512];
     if (g_cluster_size > 512) return -1;
     for (size_t i = 0; i < n_bytes; i++) {
         char byte_str[3] = { hex_data[i*2], hex_data[i*2+1], 0 };
@@ -69,3 +143,5 @@ int disk_asm_zero_cluster(int clu_index) {
     mem_domain_free(MEM_DOMAIN_FS, buf);
     return r;
 }
+
+#endif /* DRIVERS_BAREMETAL */

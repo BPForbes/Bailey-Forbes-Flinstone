@@ -13,6 +13,11 @@ void *mem_domain_calloc(mem_domain_t domain, size_t nmemb, size_t size) {
     return calloc(nmemb, size);
 }
 
+void *mem_domain_realloc(mem_domain_t domain, void *ptr, size_t size) {
+    (void)domain;
+    return realloc(ptr, size);
+}
+
 void mem_domain_free(mem_domain_t domain, void *ptr) {
     (void)domain;
     free(ptr);

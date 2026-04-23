@@ -20,13 +20,13 @@ KERNEL_DRIVERS = kernel/arch/x86_64/drivers
 else ifeq ($(ARCH),arm)
 CC = aarch64-linux-gnu-gcc
 AS = aarch64-linux-gnu-as
-ASMSRCS_BASE = arch/arm/gas/mem_asm.s arch/arm/gas/port_io.s
+ASMSRCS_BASE = arch/arm/gas/mem_asm.s arch/arm/gas/port_io.s kernel/arch/aarch64/drivers/ramdisk.s
 ASMSRCS_ALLOC = arch/arm/gas/alloc_core.s arch/arm/gas/alloc_malloc.s arch/arm/gas/alloc_free.s
 ASM_SRC_DIR = arch/arm/gas
 KERNEL_DRIVERS = kernel/arch/aarch64/drivers
 else
 # x86_64_gas (default)
-ASMSRCS_BASE = arch/x86_64/gas/mem_asm.s arch/x86_64/gas/port_io.s
+ASMSRCS_BASE = arch/x86_64/gas/mem_asm.s arch/x86_64/gas/port_io.s kernel/arch/x86_64/drivers/ata_pio.s
 ASMSRCS_ALLOC = arch/x86_64/gas/alloc/alloc_core.s arch/x86_64/gas/alloc/alloc_malloc.s arch/x86_64/gas/alloc/alloc_free.s
 ASM_SRC_DIR = arch/x86_64/gas
 KERNEL_DRIVERS = kernel/arch/x86_64/drivers
@@ -35,12 +35,18 @@ endif
 # --- Main Shell Build ---
 # DRIVERS_BAREMETAL=1 for bare-metal (port I/O, VGA). Omit for host (stdin/printf).
 DRIVER_CFLAGS = $(CFLAGS)
-UNIFIED_DRIVER_SRCS = kernel/drivers/block/block_driver.c kernel/drivers/block/block_transport_host.c \
+UNIFIED_DRIVER_SRCS = kernel/drivers/block/block_driver.c kernel/drivers/block/block_transport_host.c kernel/drivers/block/block_transport_baremetal.c \
                      kernel/drivers/keyboard_driver.c kernel/drivers/display_driver.c \
                      kernel/drivers/timer_driver.c kernel/drivers/pic_driver.c kernel/drivers/drivers.c
 DRIVER_SRCS = $(UNIFIED_DRIVER_SRCS)
 # PCI: x86_64 real impl, aarch64 ECAM real
 DRIVER_SRCS += $(KERNEL_DRIVERS)/pci.c
+# x86: ATA IDENTIFY + helpers (bare-metal sector geometry)
+ifneq ($(ARCH),arm)
+ifneq ($(ARCH),x86_64_nasm)
+DRIVER_SRCS += $(KERNEL_DRIVERS)/ata_pio_baremetal.c
+endif
+endif
 # HAL: ioport (x86 real, arm stubs) + ARM MMIO HAL (arm only)
 HAL_SRCS = $(KERNEL_DRIVERS)/../hal/ioport.c
 ifeq ($(ARCH),arm)
@@ -50,7 +56,8 @@ endif
 CORE_SRCS = kernel/core/vfs/disk.c kernel/core/vfs/path_log.c kernel/core/vfs/cluster.c kernel/core/vfs/fs.c \
             kernel/core/sched/threadpool.c priority_queue.c kernel/core/vfs/fs_provider.c kernel/core/vfs/fs_command.c \
             kernel/core/vfs/fs_events.c kernel/core/vfs/fs_policy.c kernel/core/vfs/fs_chain.c kernel/core/vfs/fs_facade.c \
-            kernel/core/vfs/fs_service_glue.c kernel/core/mm/mem_domain.c kernel/core/sys/vrt.c kernel/core/vfs/vfs.c
+            kernel/core/vfs/fs_service_glue.c kernel/core/mm/mem_domain.c kernel/core/mm/kmalloc.c \
+            kernel/core/sys/vrt.c kernel/core/vfs/vfs.c
 SHELL_SRCS = userland/shell/common.c userland/shell/util.c userland/shell/terminal.c userland/shell/interpreter.c userland/shell/sh.c
 SRCS = $(SHELL_SRCS) $(CORE_SRCS) disk_asm.c dir_asm.c
 SRCS += $(DRIVER_SRCS) $(HAL_SRCS)
@@ -128,7 +135,8 @@ TEST_SRCS = BPForbes_Flinstone_Tests.c userland/shell/common.c userland/shell/ut
             kernel/core/vfs/disk.c kernel/core/vfs/path_log.c kernel/core/vfs/cluster.c kernel/core/vfs/fs.c \
             kernel/core/sched/threadpool.c priority_queue.c kernel/core/vfs/fs_provider.c kernel/core/vfs/fs_command.c \
             kernel/core/vfs/fs_events.c kernel/core/vfs/fs_policy.c kernel/core/vfs/fs_chain.c kernel/core/vfs/fs_facade.c \
-            kernel/core/vfs/fs_service_glue.c kernel/core/mm/mem_domain.c kernel/core/sys/vrt.c
+            kernel/core/vfs/fs_service_glue.c kernel/core/mm/mem_domain.c kernel/core/mm/kmalloc.c \
+            kernel/core/sys/vrt.c
 TEST_SRCS += disk_asm.c dir_asm.c
 TEST_OBJS = $(TEST_SRCS:.c=.o)
 MEM_ASM_OBJ = $(patsubst %.s,%.o,$(patsubst %.asm,%.o,$(firstword $(ASMSRCS_BASE))))
