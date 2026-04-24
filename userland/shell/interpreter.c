@@ -9,6 +9,8 @@
 #include "fs_service_glue.h"
 #include "fs_types.h"
 #include "path_log.h"
+#include "fs_jail.h"
+#include "mem_domain.h"
 #include "threadpool.h"
 #include <stdio.h>
 #include <stdlib.h>
@@ -206,7 +208,13 @@ int execute_command_str(const char *line) {
             return 0;
         }
         char resolved[CWD_MAX];
+        mem_domain_zero(resolved, sizeof(resolved));
         resolve_path(args[1], resolved, sizeof(resolved));
+        if (fs_jail_is_active() && fs_jail_check_path(resolved) != 0) {
+            printf("VM: cd blocked (outside project sandbox): %s\n", args[1]);
+            free(cmdLine);
+            return 1;
+        }
         if (chdir(resolved) == 0) {
             if (getcwd(g_cwd, sizeof(g_cwd)) == NULL)
                 strncpy(g_cwd, resolved, sizeof(g_cwd) - 1);
@@ -254,8 +262,16 @@ int execute_command_str(const char *line) {
             free(cmdLine);
             return 1;
         }
-        format_disk_file(args[1], args[2], rowCount, nibbleCount);
-        strncpy(current_disk_file, args[1], sizeof(current_disk_file)-1);
+        char fpath[CWD_MAX];
+        mem_domain_zero(fpath, sizeof(fpath));
+        resolve_path(args[1], fpath, sizeof fpath);
+        if (fs_jail_is_active() && fs_jail_check_path(fpath) != 0) {
+            printf("VM: format blocked (outside project sandbox): %s\n", args[1]);
+            free(cmdLine);
+            return 1;
+        }
+        format_disk_file(fpath, args[2], rowCount, nibbleCount);
+        strncpy(current_disk_file, fpath, sizeof(current_disk_file)-1);
         current_disk_file[sizeof(current_disk_file)-1] = '\0';
         g_cluster_size = nibbleCount / 2;
         g_total_clusters = rowCount;
@@ -267,15 +283,24 @@ int execute_command_str(const char *line) {
             free(cmdLine);
             return 1;
         }
-        FILE *fp = fopen(args[1], "r");
+        { char spath[CWD_MAX];
+        mem_domain_zero(spath, sizeof(spath));
+        resolve_path(args[1], spath, sizeof spath);
+        if (fs_jail_is_active() && fs_jail_check_path(spath) != 0) {
+            printf("VM: setdisk blocked (outside project sandbox): %s\n", args[1]);
+            free(cmdLine);
+            return 1;
+        }
+        FILE *fp = fopen(spath, "r");
         if (!fp) {
             perror("Error opening disk file");
             free(cmdLine);
             return 1;
         }
         fclose(fp);
-        strncpy(current_disk_file, args[1], sizeof(current_disk_file)-1);
+        strncpy(current_disk_file, spath, sizeof(current_disk_file)-1);
         current_disk_file[sizeof(current_disk_file)-1] = '\0';
+        }
         read_disk_header();
         free(cmdLine);
         return 0;

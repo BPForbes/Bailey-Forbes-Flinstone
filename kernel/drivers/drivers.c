@@ -82,8 +82,9 @@ void drivers_report_caps(void) {
            fl_cap_is_real(tm)   ? "REAL" : "stub",
            fl_cap_is_real(pic)  ? "REAL" : "stub",
            fl_cap_is_real(pci)  ? "REAL" : "stub");
+    /* Host: pci.c is stub (no direct PCI from userspace); do not count as FATAL. */
     if (!block_real || !fl_cap_is_real(kb) || !fl_cap_is_real(disp) ||
-        !fl_cap_is_real(tm) || !fl_cap_is_real(pic) || !fl_cap_is_real(pci)) {
+        !fl_cap_is_real(tm) || !fl_cap_is_real(pic)) {
         fprintf(stderr, "[drivers] FATAL: one or more drivers are STUB/UNIMPLEMENTED\n");
     }
 #endif

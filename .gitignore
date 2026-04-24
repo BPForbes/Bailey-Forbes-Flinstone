@@ -1,3 +1,6 @@
+# Visual Studio
+.vs/
+
 # Build artifacts
 *.o
 BPForbes_Flinstone_Shell
@@ -22,9 +25,14 @@ deps/download
 
 # Local planning (not pushed)
 plan/
+.git-ops.sh
+git-push-log.txt
+
 
 # VM checkpoint disk copy
 vm_checkpoint_disk.img
+# Default embedded-VM virtual disk (created at run time)
+vm_disk.img
 
 # Disk journal temp (crash consistency)
 *.tmp

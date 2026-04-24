@@ -54,7 +54,7 @@ HAL_SRCS += kernel/arch/aarch64/hal/arm_plat.c kernel/arch/aarch64/hal/arm_uart.
             kernel/arch/aarch64/hal/arm_timer.c kernel/arch/aarch64/hal/arm_gic.c
 endif
 CORE_SRCS = kernel/core/vfs/disk.c kernel/core/vfs/path_log.c kernel/core/vfs/cluster.c kernel/core/vfs/fs.c \
-            kernel/core/sched/threadpool.c priority_queue.c kernel/core/vfs/fs_provider.c kernel/core/vfs/fs_command.c \
+            kernel/core/sched/threadpool.c priority_queue.c kernel/core/vfs/fs_jail.c kernel/core/vfs/fs_provider.c kernel/core/vfs/fs_command.c \
             kernel/core/vfs/fs_events.c kernel/core/vfs/fs_policy.c kernel/core/vfs/fs_chain.c kernel/core/vfs/fs_facade.c \
             kernel/core/vfs/fs_service_glue.c kernel/core/mm/mem_domain.c kernel/core/mm/kmalloc.c \
             kernel/core/sys/vrt.c kernel/core/vfs/vfs.c
@@ -133,7 +133,7 @@ $(TARGET): $(OBJS)
 # For tests, interpreter.c is directly included in BPForbes_Flinstone_Tests.c.
 TEST_SRCS = BPForbes_Flinstone_Tests.c userland/shell/common.c userland/shell/util.c userland/shell/terminal.c \
             kernel/core/vfs/disk.c kernel/core/vfs/path_log.c kernel/core/vfs/cluster.c kernel/core/vfs/fs.c \
-            kernel/core/sched/threadpool.c priority_queue.c kernel/core/vfs/fs_provider.c kernel/core/vfs/fs_command.c \
+            kernel/core/sched/threadpool.c priority_queue.c kernel/core/vfs/fs_jail.c kernel/core/vfs/fs_provider.c kernel/core/vfs/fs_command.c \
             kernel/core/vfs/fs_events.c kernel/core/vfs/fs_policy.c kernel/core/vfs/fs_chain.c kernel/core/vfs/fs_facade.c \
             kernel/core/vfs/fs_service_glue.c kernel/core/mm/mem_domain.c kernel/core/mm/kmalloc.c \
             kernel/core/sys/vrt.c
