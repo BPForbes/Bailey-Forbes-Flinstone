@@ -40,6 +40,16 @@ Run builds from the repository root.
 - VM replay test: `make test_replay`
 - Full architecture parity check: `make parity`
 
+## Development testing policy
+
+- Before changing code, run the most relevant existing tests for the affected area to establish a baseline.
+- During development, test the changed item directly as soon as it is runnable; do not wait until the end to discover failures.
+- After every code change, rerun the relevant tests and keep fixing until they pass. Treat the work as incomplete unless tests are passing with 100% confidence for the affected behavior.
+- Add or update unit tests for new code, new behavior, bug fixes, and regressions whenever the repository has a suitable test target.
+- For driver, architecture, VM, or allocator changes, include the closest focused target from the list above plus a build target that compiles the affected architecture or feature flags.
+- If a required toolchain or library is missing, install the packages listed in the Cursor Cloud section, then rerun the tests instead of skipping them.
+- Document any true environment blocker in the final response, including the exact command that failed and the missing prerequisite.
+
 ## Running executables
 
 Build before running:
