@@ -178,9 +178,12 @@ void drivers_init(const char *disk_file) {
         kprint("FATAL: driver selftest failed - halting\n");
         kpanic();
     }
+    fl_driver_registry_register_all();
+    fl_drivers_init();
 }
 
 void drivers_shutdown(void) {
+    fl_drivers_shutdown();
     if (g_block_driver)    { block_driver_destroy(g_block_driver);       g_block_driver    = NULL; }
     if (g_keyboard_driver) { keyboard_driver_destroy(g_keyboard_driver); g_keyboard_driver = NULL; }
     if (g_display_driver)  { display_driver_destroy(g_display_driver);   g_display_driver  = NULL; }

@@ -11,6 +11,7 @@
 
 void fs_jail_init(void);
 int  fs_jail_is_active(void);
+int  fs_jail_root_configured(void);
 /** Return 0 if the path (absolute or relative to g_cwd) may be accessed, -1 if outside jail. */
 int  fs_jail_check_path(const char *path);
 /** Atomically open a file within the jail, preventing TOCTOU symlink races. */

@@ -6,6 +6,7 @@
 extern file_manager_service_t *g_fm_service;
 
 void fs_service_glue_init(void);
+int fs_service_glue_is_ready(void);
 void fs_service_glue_shutdown(void);
 
 #endif /* FS_SERVICE_GLUE_H */

@@ -3,6 +3,10 @@
  */
 #include "drivers/drivers.h"
 #include "drivers/block/block_driver.h"
+#include "fl/driver/device.h"
+#include "fl/driver/devfs.h"
+#include "fl/driver/irq.h"
+#include "fl/mm.h"
 #include "common.h"
 #include <stdio.h>
 #include <stdlib.h>
@@ -47,6 +51,132 @@ static int test_block_write_read(void) {
     ASSERT(g_block_driver->write_sector((block_driver_t *)g_block_driver, 0, wbuf) == 0);
     ASSERT(g_block_driver->read_sector((block_driver_t *)g_block_driver, 0, rbuf) == 0);
     ASSERT(memcmp(wbuf, rbuf, cs) == 0);
+    return 0;
+}
+
+static int test_device_model(void) {
+    fl_device_desc_t descs[4];
+    const fl_driver_desc_t *matched = NULL;
+    fl_device_t *dev = NULL;
+    const fl_device_desc_t *desc = NULL;
+    fl_device_info_t info;
+    fl_resource_t res;
+
+    memset(descs, 0, sizeof(descs));
+    memset(&info, 0, sizeof(info));
+    memset(&res, 0, sizeof(res));
+    ASSERT(fl_bus_enumerate(descs, 4) == 1);
+    ASSERT(fl_driver_registry_match(&descs[0], &matched) == 0);
+    ASSERT(matched != NULL);
+    ASSERT(strcmp(matched->name, "host-block") == 0);
+    ASSERT(fl_device_count() == 1);
+    ASSERT(fl_device_get_info(0, &info) == 0);
+    ASSERT(info.dev != NULL);
+    ASSERT(info.desc != NULL);
+    ASSERT(strcmp(info.driver_name, "host-block") == 0);
+    ASSERT(info.driver_class == FL_DRV_CLASS_BLOCK);
+    ASSERT(info.state == FL_DRV_STATE_STARTED);
+    dev = fl_device_find_synth("host_blk");
+    ASSERT(dev != NULL);
+    desc = fl_device_get_desc(dev);
+    ASSERT(desc != NULL);
+    ASSERT(desc->bus_type == FL_BUS_SYNTH);
+    ASSERT(strcmp(desc->synth_id, "host_blk") == 0);
+    ASSERT(fl_resource_count(dev) == 4);
+    ASSERT(fl_resource_get(dev, 0, &res) == 0);
+    ASSERT(res.type == FL_RESOURCE_SYNTH);
+    ASSERT(res.start == (uintptr_t)current_disk_file);
+    ASSERT(res.size == strlen(current_disk_file) + 1);
+    fl_drivers_init();
+    ASSERT(fl_device_count() == 1);
+    ASSERT(fl_resource_claim(dev, FL_RESOURCE_SYNTH, 0) != 0);
+    ASSERT(fl_resource_claim(dev, FL_RESOURCE_SYNTH, 99) != 0);
+    return 0;
+}
+
+static int test_devfs_block(void) {
+    fl_devfs_file_t file;
+    fl_block_caps_t caps;
+    uint8_t wbuf[512], rbuf[512];
+    size_t n = 0;
+
+    memset(&file, 0, sizeof(file));
+    memset(&caps, 0, sizeof(caps));
+    memset(wbuf, 0, sizeof(wbuf));
+    memset(rbuf, 0, sizeof(rbuf));
+    for (int i = 0; i < g_cluster_size && i < (int)sizeof(wbuf); i++)
+        wbuf[i] = (uint8_t)(0x41 + (i % 26));
+
+    ASSERT(fl_devfs_open("/dev/blk0", FL_DEVFS_O_READ | FL_DEVFS_O_WRITE, &file) == 0);
+    ASSERT(fl_devfs_ioctl(&file, FL_DEVFS_IOCTL_BLOCK_CAPS, &caps) == 0);
+    ASSERT(caps.sector_size == FL_SECTOR_SIZE);
+    ASSERT(fl_devfs_write(&file, wbuf, sizeof(wbuf), &n) == 0);
+    ASSERT(n == FL_SECTOR_SIZE);
+    file.pos = 0;
+    ASSERT(fl_devfs_read(&file, rbuf, sizeof(rbuf), &n) == 0);
+    ASSERT(n == FL_SECTOR_SIZE);
+    ASSERT(memcmp(wbuf, rbuf, (size_t)g_cluster_size) == 0);
+    ASSERT(fl_devfs_close(&file) == 0);
+    ASSERT(fl_devfs_register("/dev/this/path/is/too/long/for/devfs", FL_DRV_CLASS_BLOCK, fl_device_find_synth("host_blk"), &(fl_devfs_ops_t){0}) != 0);
+    return 0;
+}
+
+static void test_irq_handler(int irq, void *ctx) {
+    int *hits = (int *)ctx;
+    if (irq == 3)
+        (*hits)++;
+}
+
+static int test_irq_and_dma(void) {
+    int hits = 0;
+    fl_device_t *dev = fl_device_find_synth("host_blk");
+    uint8_t src[128], dst[128];
+    fl_dma_info_t info;
+    fl_irq_info_t irq_info;
+    void *buf = NULL;
+    ASSERT(dev != NULL);
+    buf = fl_dma_alloc_device(dev, sizeof(dst));
+    for (size_t i = 0; i < sizeof(src); i++)
+        src[i] = (uint8_t)(i + 1);
+    ASSERT(buf != NULL);
+    ASSERT(fl_dma_allocation_count() == 1);
+    ASSERT(fl_dma_get_info(buf, &info) == 0);
+    ASSERT(info.ptr == buf);
+    ASSERT(info.size == sizeof(dst));
+    ASSERT(info.owner == dev);
+    fl_dma_copy(buf, src, sizeof(src));
+    memset(dst, 0, sizeof(dst));
+    fl_dma_copy(dst, buf, sizeof(dst));
+    ASSERT(memcmp(src, dst, sizeof(src)) == 0);
+    fl_dma_zero(buf, sizeof(dst));
+    memset(dst, 0xFF, sizeof(dst));
+    fl_dma_copy(dst, buf, sizeof(dst));
+    ASSERT(dst[0] == 0 && dst[sizeof(dst) - 1] == 0);
+    fl_dma_free(buf);
+    ASSERT(fl_dma_allocation_count() == 0);
+    ASSERT(fl_irq_register_device(dev, 0, test_irq_handler, &hits) == 0);
+    fl_irq_enable(3);
+    ASSERT(fl_irq_dispatch(3) == 0);
+    ASSERT(hits == 1);
+    ASSERT(fl_irq_dispatch_count(3) == 1);
+    ASSERT(fl_irq_get_info(3, &irq_info) == 0);
+    ASSERT(irq_info.irq == 3);
+    ASSERT(irq_info.enabled == 1);
+    ASSERT(irq_info.dispatch_count == 1);
+    ASSERT(irq_info.eoi_count == 1);
+    ASSERT(irq_info.owner == dev);
+    fl_irq_disable(3);
+    ASSERT(fl_irq_dispatch(3) != 0);
+    fl_irq_unregister_device(dev);
+    ASSERT(fl_irq_get_info(3, &irq_info) == 0);
+    ASSERT(irq_info.owner == NULL);
+    ASSERT(fl_irq_register(3, test_irq_handler, &hits) == 0);
+    fl_irq_unregister(3);
+    ASSERT(fl_irq_get_info(3, &irq_info) == 0);
+    ASSERT(irq_info.owner == NULL);
+    ASSERT(fl_irq_register_device(dev, 99, test_irq_handler, &hits) != 0);
+    ASSERT(fl_irq_register(31, test_irq_handler, &hits) != 0);
+    ASSERT(fl_irq_get_info(99, &irq_info) != 0);
     return 0;
 }
 
@@ -107,6 +237,18 @@ int main(void) {
 
     printf("test_block_write_read... ");
     if (test_block_write_read() != 0) { drivers_shutdown(); unlink(path); return 1; }
+    printf("OK\n");
+
+    printf("test_device_model... ");
+    if (test_device_model() != 0) { drivers_shutdown(); unlink(path); return 1; }
+    printf("OK\n");
+
+    printf("test_devfs_block... ");
+    if (test_devfs_block() != 0) { drivers_shutdown(); unlink(path); return 1; }
+    printf("OK\n");
+
+    printf("test_irq_and_dma... ");
+    if (test_irq_and_dma() != 0) { drivers_shutdown(); unlink(path); return 1; }
     printf("OK\n");
 
     printf("test_display... ");

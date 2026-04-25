@@ -26,7 +26,8 @@ void fs_jail_init(void) {
     if (!getcwd(wd, sizeof(wd)))
         return;
     if (!g_vm_root[0]) {
-        fprintf(stderr, "VM: sandbox root not configured\n");
+        fprintf(stderr, "[VM] 5-layer driver config warning: layer 4 shell/VM root is not configured\n");
+        fprintf(stderr, "[VM] 5-layer driver config warning: layer 2 filesystem sandbox root is not configured\n");
         return;
     }
     const char *root = g_vm_root;
@@ -49,6 +50,10 @@ void fs_jail_init(void) {
 
 int fs_jail_is_active(void) {
     return (g_vm_mode && g_fs_jail_len > 0) ? 1 : 0;
+}
+
+int fs_jail_root_configured(void) {
+    return (g_vm_root[0] && g_fs_jail_len > 0 && g_jail_dirfd >= 0) ? 1 : 0;
 }
 
 static int under_jail(const char *canon) {

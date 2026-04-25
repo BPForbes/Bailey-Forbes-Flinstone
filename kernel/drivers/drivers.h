@@ -3,6 +3,7 @@
 
 #include "fl/driver/driver_types.h"
 #include "fl/driver/caps.h"
+#include "fl/driver/driver.h"
 #include "block/block_driver.h"
 
 /* Keyboard, display, timer, pic - create/destroy */

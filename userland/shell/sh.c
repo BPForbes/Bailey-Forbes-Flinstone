@@ -153,6 +153,44 @@ static int vm_spawn_popup(const char *exe_path) {
     return 0;
 }
 
+static int vm_configure_root_from_cwd(void) {
+    if (!g_vm_mode || g_vm_root[0])
+        return 0;
+    char root[PATH_MAX];
+    if (!getcwd(root, sizeof(root)))
+        return -1;
+    strncpy(g_vm_root, root, CWD_MAX - 1);
+    g_vm_root[CWD_MAX - 1] = '\0';
+    return 0;
+}
+
+static void vm_warn_layer_config(void) {
+    if (!g_vm_mode)
+        return;
+    int warned = 0;
+    if (!g_cwd[0] || !current_disk_file[0]) {
+        fprintf(stderr, "[VM] 5-layer driver config warning: layer 0 core/common is not configured\n");
+        warned = 1;
+    }
+    if (!g_block_driver || !g_keyboard_driver || !g_display_driver || !g_timer_driver || !g_pic_driver) {
+        fprintf(stderr, "[VM] 5-layer driver config warning: layer 1 disk/drivers is not configured\n");
+        warned = 1;
+    }
+    if (!fs_jail_root_configured()) {
+        fprintf(stderr, "[VM] 5-layer driver config warning: layer 2 filesystem sandbox root is not configured\n");
+        warned = 1;
+    }
+    if (!fs_service_glue_is_ready() || !path_log_is_initialized()) {
+        fprintf(stderr, "[VM] 5-layer driver config warning: layer 3 services/path logging is not configured\n");
+        warned = 1;
+    }
+    if (!g_vm_root[0]) {
+        fprintf(stderr, "[VM] 5-layer driver config warning: layer 4 shell/VM root is not configured\n");
+        warned = 1;
+    }
+    (void)warned;
+}
+
 int main(int argc, char *argv[]) {
     /* Seed the random number generator */
     srand((unsigned) time(NULL));
@@ -211,8 +249,8 @@ int main(int argc, char *argv[]) {
     if (getcwd(g_cwd, sizeof(g_cwd)) == NULL)
         g_cwd[0] = '.', g_cwd[1] = '\0';
 
-    /* VM mode (with commands): create sandbox, chdir into it */
-    if (g_vm_mode && argc > 1) {
+    /* VM command mode uses a temp sandbox; embedded VM runs from the launch root. */
+    if (g_vm_mode && argc > 1 && !g_vm_run_embedded) {
         char tmpl[] = "/tmp/flintstone_vm_XXXXXX";
         char *root = mkdtemp(tmpl);
         if (!root) {
@@ -269,12 +307,15 @@ int main(int argc, char *argv[]) {
     }
 
     /* VM mode: confine all host file I/O to the launch directory (or temp VM sandbox) */
+    if (vm_configure_root_from_cwd() != 0)
+        fprintf(stderr, "[VM] 5-layer driver config warning: layer 4 shell/VM root is not configured\n");
     fs_jail_init();
 
     /* Initialize file manager service, path log, and drivers */
     fs_service_glue_init();
     path_log_init();
     drivers_init(NULL);
+    vm_warn_layer_config();
 
     /* Initialize thread pool and signals */
     signal(SIGINT, SIG_IGN);

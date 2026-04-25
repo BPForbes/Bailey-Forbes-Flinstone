@@ -34,6 +34,10 @@ void path_log_init(void) {
     s_inited = 1;
 }
 
+int path_log_is_initialized(void) {
+    return s_inited;
+}
+
 void path_log_record(path_op_t op, const char *path) {
     if (!s_inited || !path) return;
     s_log[s_head].op = op;

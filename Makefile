@@ -35,7 +35,8 @@ endif
 # --- Main Shell Build ---
 # DRIVERS_BAREMETAL=1 for bare-metal (port I/O, VGA). Omit for host (stdin/printf).
 DRIVER_CFLAGS = $(CFLAGS)
-UNIFIED_DRIVER_SRCS = kernel/drivers/block/block_driver.c kernel/drivers/block/block_transport_host.c kernel/drivers/block/block_transport_baremetal.c \
+UNIFIED_DRIVER_SRCS = kernel/drivers/bus.c kernel/drivers/driver_model.c \
+                     kernel/drivers/block/block_driver.c kernel/drivers/block/block_transport_host.c kernel/drivers/block/block_transport_baremetal.c \
                      kernel/drivers/keyboard_driver.c kernel/drivers/display_driver.c \
                      kernel/drivers/timer_driver.c kernel/drivers/pic_driver.c kernel/drivers/drivers.c
 DRIVER_SRCS = $(UNIFIED_DRIVER_SRCS)
@@ -185,7 +186,7 @@ VM/devices/%.o: VM/devices/%.c
 # --- ASM + Alloc + PQ unit tests (no CUnit) ---
 # Use -fsanitize when NOT using ASM allocator (libc tests only)
 TEST_SANITIZE = -fsanitize=address,undefined -fno-omit-frame-pointer
-.PHONY: test_mem_asm test_alloc test_priority_queue test_drivers test_core test_invariants check-layers
+.PHONY: test_mem_asm test_alloc test_priority_queue test_drivers test_core test_invariants test_vm_layer_warning check-layers
 test_mem_asm: $(MEM_ASM_OBJ)
 	$(CC) $(CFLAGS) $(TEST_SANITIZE) -I. -o tests/test_mem_asm tests/test_mem_asm.c $(MEM_ASM_OBJ)
 	./tests/test_mem_asm
@@ -210,12 +211,14 @@ ifeq ($(ARCH),arm)
 TEST_DRIVER_HAL_OBJS += kernel/arch/aarch64/hal/arm_plat.o kernel/arch/aarch64/hal/arm_uart.o \
 	kernel/arch/aarch64/hal/arm_timer.o kernel/arch/aarch64/hal/arm_gic.o
 endif
-test_drivers: userland/shell/common.o userland/shell/util.o kernel/core/vfs/disk.o disk_asm.o kernel/core/mm/mem_domain.o $(MEM_ASM_OBJ) $(PORT_IO_OBJ) \
+test_drivers: userland/shell/common.o userland/shell/util.o kernel/core/vfs/disk.o disk_asm.o kernel/core/mm/mem_domain.o kernel/core/mm/kmalloc.o $(MEM_ASM_OBJ) $(PORT_IO_OBJ) \
+	  kernel/drivers/bus.o kernel/drivers/driver_model.o \
 	  kernel/drivers/block/block_driver.o kernel/drivers/block/block_transport_host.o \
 	  kernel/drivers/keyboard_driver.o kernel/drivers/display_driver.o kernel/drivers/timer_driver.o kernel/drivers/pic_driver.o kernel/drivers/drivers.o \
 	  $(KERNEL_DRIVERS)/pci.o $(TEST_DRIVER_HAL_OBJS)
 	$(CC) $(CFLAGS) $(TEST_SANITIZE) -I. -Ikernel -Ikernel/include -Ikernel/drivers -Iuserland/shell -I$(ASM_SRC_DIR) -I$(KERNEL_DRIVERS) -Ikernel/arch/aarch64 -o tests/test_drivers tests/test_drivers.c \
-	  userland/shell/common.o userland/shell/util.o kernel/core/vfs/disk.o disk_asm.o kernel/core/mm/mem_domain.o $(MEM_ASM_OBJ) $(PORT_IO_OBJ) \
+	  userland/shell/common.o userland/shell/util.o kernel/core/vfs/disk.o disk_asm.o kernel/core/mm/mem_domain.o kernel/core/mm/kmalloc.o $(MEM_ASM_OBJ) $(PORT_IO_OBJ) \
+	  kernel/drivers/bus.o kernel/drivers/driver_model.o \
 	  kernel/drivers/block/block_driver.o kernel/drivers/block/block_transport_host.o \
 	  kernel/drivers/keyboard_driver.o kernel/drivers/display_driver.o kernel/drivers/timer_driver.o kernel/drivers/pic_driver.o kernel/drivers/drivers.o \
 	  $(KERNEL_DRIVERS)/pci.o $(TEST_DRIVER_HAL_OBJS) -Wl,-z,noexecstack
@@ -247,6 +250,11 @@ test_vm_mem: kernel/core/mm/mem_domain.o $(MEM_ASM_OBJ) VM/devices/vm_mem.o
 	$(CC) $(CFLAGS) $(TEST_SANITIZE) -IVM -IVM/devices -o tests/test_vm_mem tests/test_vm_mem.c kernel/core/mm/mem_domain.o $(MEM_ASM_OBJ) VM/devices/vm_mem.o
 	./tests/test_vm_mem
 
+test_vm_layer_warning: userland/shell/common.o kernel/core/vfs/fs_jail.o kernel/core/mm/mem_domain.o $(MEM_ASM_OBJ)
+	$(CC) $(CFLAGS) $(TEST_SANITIZE) -I. -Ikernel/core/vfs -Ikernel/core/mm -Iuserland/shell -o tests/test_vm_layer_warning tests/test_vm_layer_warning.c \
+	  userland/shell/common.o kernel/core/vfs/fs_jail.o kernel/core/mm/mem_domain.o $(MEM_ASM_OBJ) -Wl,-z,noexecstack
+	./tests/test_vm_layer_warning
+
 .PHONY: test_replay
 test_replay:
 	$(MAKE) clean
@@ -256,6 +264,7 @@ test_replay:
 	  kernel/core/vfs/path_log.o kernel/core/vfs/cluster.o kernel/core/vfs/fs.o priority_queue.o \
 	  kernel/core/vfs/fs_provider.o kernel/core/vfs/fs_command.o kernel/core/vfs/fs_events.o kernel/core/vfs/fs_policy.o \
 	  kernel/core/vfs/fs_chain.o kernel/core/vfs/fs_facade.o kernel/core/vfs/fs_service_glue.o kernel/core/vfs/fs_jail.o kernel/core/mm/mem_domain.o kernel/core/mm/kmalloc.o kernel/core/sys/vrt.o kernel/core/vfs/vfs.o \
+	  kernel/drivers/bus.o kernel/drivers/driver_model.o \
 	  kernel/drivers/block/block_driver.o kernel/drivers/block/block_transport_host.o kernel/drivers/keyboard_driver.o kernel/drivers/display_driver.o \
 	  kernel/drivers/timer_driver.o kernel/drivers/pic_driver.o kernel/drivers/drivers.o \
 	  $(KERNEL_DRIVERS)/../hal/ioport.o \

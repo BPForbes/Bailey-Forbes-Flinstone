@@ -5,6 +5,7 @@
 #define FL_DRIVER_DEVICE_H
 
 #include "bus.h"
+#include "driver.h"
 
 #ifdef __cplusplus
 extern "C" {
@@ -15,6 +16,22 @@ struct fl_device {
     void *driver_data;   /* driver-private data set during attach */
     void *hal_data;      /* HAL-private transport handle */
 };
+
+typedef struct fl_device_info {
+    const fl_device_t *dev;
+    const fl_device_desc_t *desc;
+    const char *driver_name;
+    fl_driver_class_t driver_class;
+    fl_driver_state_t state;
+} fl_device_info_t;
+
+int fl_device_count(void);
+int fl_device_get_info(int index, fl_device_info_t *out);
+fl_device_t *fl_device_find_synth(const char *synth_id);
+int fl_resource_count(const fl_device_t *dev);
+int fl_resource_get(const fl_device_t *dev, int index, fl_resource_t *out);
+int fl_resource_claim(fl_device_t *dev, fl_resource_type_t type, int index);
+void fl_resource_release_all(fl_device_t *dev);
 
 #ifdef __cplusplus
 }

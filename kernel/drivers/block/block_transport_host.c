@@ -7,6 +7,7 @@
 #include "fl/driver/block.h"
 #include "fl/mm.h"
 #include "fl/mem_asm.h"
+#include "fl_cstr.h"
 #include "disk.h"
 #include "disk_asm.h"
 #include "common.h"
@@ -33,8 +34,7 @@ static int host_block_get_sector_count(void *hal_ctx) {
 
 int fl_hal_block_create_host(const char *disk_file, fl_hal_block_transport_t *out) {
     if (!out || !disk_file) return -1;
-    strncpy(current_disk_file, disk_file, sizeof(current_disk_file) - 1);
-    current_disk_file[sizeof(current_disk_file) - 1] = '\0';
+    fl_cstr_copy(current_disk_file, sizeof(current_disk_file), disk_file);
     read_disk_header();
     host_blk_ctx_t *ctx = (host_blk_ctx_t *)kmalloc(sizeof(*ctx));
     if (!ctx) return -1;
