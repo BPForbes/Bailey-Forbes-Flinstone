@@ -1,7 +1,9 @@
 /* Virtual disk: raw sector file. ASM for buffer ops. */
 #include "vm_disk.h"
-#include "mem_asm.h"
+#include "common.h"
+#include "fs_jail.h"
 #include "mem_domain.h"
+#include "mem_asm.h"
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -15,7 +17,12 @@ static char s_vm_disk_path[VM_DISK_PATH_MAX];
 
 int vm_disk_init(const char *path, unsigned int size_mb) {
     if (!path || size_mb == 0) return -1;
+    if (g_vm_mode && fs_jail_is_active() && fs_jail_check_path(path) != 0) {
+        fprintf(stderr, "[VM] virtual disk path outside project sandbox: %s\n", path);
+        return -1;
+    }
     vm_disk_shutdown();
+    mem_domain_zero(s_vm_disk_path, sizeof(s_vm_disk_path));
     strncpy(s_vm_disk_path, path, VM_DISK_PATH_MAX - 1);
     s_vm_disk_path[VM_DISK_PATH_MAX - 1] = '\0';
     s_vm_disk_fp = fopen(path, "r+b");

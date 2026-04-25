@@ -15,7 +15,7 @@ int fl_bus_enumerate(fl_device_desc_t *descs, int max_descs) {
     return 0;
 #else
     /* Host: one synthetic block device */
-    extern char current_disk_file[64];
+    extern char current_disk_file[];
     memset(&descs[0], 0, sizeof(fl_device_desc_t));
     descs[0].bus_type = FL_BUS_SYNTH;
     strncpy(descs[0].synth_id, "host_blk", sizeof(descs[0].synth_id) - 1);
