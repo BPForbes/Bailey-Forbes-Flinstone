@@ -51,6 +51,10 @@ int fs_jail_is_active(void) {
     return (g_vm_mode && g_fs_jail_len > 0) ? 1 : 0;
 }
 
+int fs_jail_root_configured(void) {
+    return (g_vm_root[0] && g_fs_jail_len > 0 && g_jail_dirfd >= 0) ? 1 : 0;
+}
+
 static int under_jail(const char *canon) {
     if (strncmp(canon, g_fs_jail_root, g_fs_jail_len) != 0) return 0;
     return (canon[g_fs_jail_len] == '\0' || canon[g_fs_jail_len] == '/');
