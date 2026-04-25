@@ -22,6 +22,7 @@ struct fl_display_driver {
     void (*putchar)(fl_display_driver_t *drv, char c);
     void (*clear)(fl_display_driver_t *drv);
     void (*set_cursor)(fl_display_driver_t *drv, int row, int col);
+    void (*flush_cursor)(fl_display_driver_t *drv);
     void (*refresh_vga)(fl_display_driver_t *drv, const void *vga_buf);  /* VM: copy to window */
     void *impl;
 };

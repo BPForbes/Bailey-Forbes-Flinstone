@@ -3,13 +3,75 @@
 #include "fl_cstr.h"
 #include "fl/mm.h"
 #include "fl/mem_asm.h"
+#include "core/sys/spinlock.h"
+#ifdef DRIVERS_BAREMETAL
+#include "drivers.h"
+#include "fl/driver/ioport.h"
+#endif
+#ifndef DRIVERS_BAREMETAL
+#include <stdio.h>
+#endif
 
-#define FL_MODEL_MAX_DEVICES 16
-#define FL_MODEL_MAX_DRIVERS 16
-#define FL_MODEL_MAX_DEVFS   16
-#define FL_MODEL_MAX_IRQ     32
+#define FL_MODEL_MAX_DEVICES   32
+#define FL_MODEL_MAX_DRIVERS   32
+#define FL_MODEL_MAX_DEVFS     32
+#define FL_MODEL_MAX_IRQ       64
 #define FL_MODEL_MAX_RESOURCES 64
-#define FL_MODEL_MAX_DMA     32
+#define FL_MODEL_MAX_DMA       32
+
+/* Halt-style panic used when a hard limit is exceeded at registration time. */
+static void model_overflow_panic(const char *msg) {
+#ifdef DRIVERS_BAREMETAL
+    const char *prefix = "*** PANIC ***: ";
+    if (g_display_driver && g_display_driver->putchar) {
+        for (; *prefix; prefix++)
+            g_display_driver->putchar(g_display_driver, *prefix);
+        if (msg) {
+            for (; *msg; msg++)
+                g_display_driver->putchar(g_display_driver, *msg);
+        }
+        g_display_driver->putchar(g_display_driver, '\n');
+        if (g_display_driver->flush_cursor)
+            g_display_driver->flush_cursor(g_display_driver);
+    } else {
+        /* Fallback: emit to platform serial when display is unavailable. */
+#if defined(__x86_64__) || defined(__i386__)
+        /* x86: write to COM1 (0x3F8) */
+        for (const char *p = prefix; *p; p++) {
+            while (!(fl_ioport_in8(0x3FD) & 0x20)) {}
+            fl_ioport_out8(0x3F8, (uint8_t)*p);
+        }
+        if (msg) {
+            for (const char *p = msg; *p; p++) {
+                while (!(fl_ioport_in8(0x3FD) & 0x20)) {}
+                fl_ioport_out8(0x3F8, (uint8_t)*p);
+            }
+        }
+        while (!(fl_ioport_in8(0x3FD) & 0x20)) {}
+        fl_ioport_out8(0x3F8, '\n');
+#elif defined(__aarch64__)
+        /* AArch64: use arm_uart_putchar */
+        #include "hal/arm_uart.h"
+        for (; *prefix; prefix++)
+            arm_uart_putchar(*prefix);
+        if (msg) {
+            for (; *msg; msg++)
+                arm_uart_putchar(*msg);
+        }
+        arm_uart_putchar('\n');
+#endif
+    }
+#if defined(__x86_64__) || defined(__i386__)
+    __asm__ volatile("cli");
+    for (;;) __asm__ volatile("hlt");
+#else
+    for (;;) {}
+#endif
+#else
+    fprintf(stderr, "[driver_model] PANIC: %s\n", msg);
+    for (;;) {}
+#endif
+}
 
 typedef struct {
     fl_device_t *dev;
@@ -44,6 +106,8 @@ typedef struct {
     fl_device_t *owner;
 } fl_dma_record_t;
 
+static volatile int s_model_lock = SPINLOCK_INIT;
+
 static const fl_driver_desc_t *s_drivers[FL_MODEL_MAX_DRIVERS];
 static int s_driver_count;
 static fl_bound_device_t s_devices[FL_MODEL_MAX_DEVICES];
@@ -75,9 +139,15 @@ static int driver_matches(const fl_driver_desc_t *driver, const fl_device_desc_t
 }
 
 int fl_driver_registry_register(const fl_driver_desc_t *desc) {
-    if (!desc || !desc->name || !desc->ops || s_driver_count >= FL_MODEL_MAX_DRIVERS)
+    if (!desc || !desc->name || !desc->ops)
         return -1;
+    spinlock_acquire(&s_model_lock);
+    if (s_driver_count >= FL_MODEL_MAX_DRIVERS) {
+        spinlock_release(&s_model_lock);
+        model_overflow_panic("driver table full (FL_MODEL_MAX_DRIVERS)");
+    }
     s_drivers[s_driver_count++] = desc;
+    spinlock_release(&s_model_lock);
     return 0;
 }
 
@@ -266,7 +336,7 @@ static int block_probe(fl_device_t *dev) {
 }
 
 static int block_attach(fl_device_t *dev) {
-    const fl_devfs_ops_t ops = { block_devfs_read, block_devfs_write, block_devfs_ioctl };
+    const fl_devfs_ops_t ops = { .read = block_devfs_read, .write = block_devfs_write, .ioctl = block_devfs_ioctl };
     dev->driver_data = g_block_driver;
     return fl_devfs_register("/dev/blk0", FL_DRV_CLASS_BLOCK, dev, &ops);
 }
@@ -306,6 +376,8 @@ void fl_drivers_init(void) {
         return;
     fl_device_desc_t descs[FL_MODEL_MAX_DEVICES];
     int count = fl_bus_enumerate(descs, FL_MODEL_MAX_DEVICES);
+    if (count > FL_MODEL_MAX_DEVICES)
+        model_overflow_panic("device table full (FL_MODEL_MAX_DEVICES)");
     for (int i = 0; i < count && s_device_count < FL_MODEL_MAX_DEVICES; i++) {
         fl_device_t *dev = fl_device_create(&descs[i]);
         if (!dev)
@@ -370,31 +442,45 @@ void fl_drivers_shutdown(void) {
 }
 
 int fl_devfs_register(const char *path, int class_id, void *dev, const fl_devfs_ops_t *ops) {
-    if (!path || !dev || !ops || s_devfs_count >= FL_MODEL_MAX_DEVFS)
+    if (!path || !dev || !ops)
         return -1;
-    if (fl_cstr_len(path, sizeof(s_devfs[0].path)) >= sizeof(s_devfs[0].path))
+    spinlock_acquire(&s_model_lock);
+    if (s_devfs_count >= FL_MODEL_MAX_DEVFS) {
+        spinlock_release(&s_model_lock);
+        model_overflow_panic("devfs table full (FL_MODEL_MAX_DEVFS)");
+    }
+    if (fl_cstr_len(path, sizeof(s_devfs[0].path)) >= sizeof(s_devfs[0].path)) {
+        spinlock_release(&s_model_lock);
         return -1;
-    for (int i = 0; i < s_devfs_count; i++)
-        if (fl_cstr_eq(s_devfs[i].path, path))
+    }
+    for (int i = 0; i < s_devfs_count; i++) {
+        if (fl_cstr_eq(s_devfs[i].path, path)) {
+            spinlock_release(&s_model_lock);
             return -1;
+        }
+    }
     fl_devfs_node_t *node = &s_devfs[s_devfs_count++];
     fl_cstr_copy(node->path, sizeof(node->path), path);
     node->class = (fl_driver_class_t)class_id;
     node->dev = (fl_device_t *)dev;
     node->ops = *ops;
+    spinlock_release(&s_model_lock);
     return 0;
 }
 
 void fl_devfs_unregister(const char *path) {
     if (!path)
         return;
+    spinlock_acquire(&s_model_lock);
     for (int i = 0; i < s_devfs_count; i++) {
         if (fl_cstr_eq(s_devfs[i].path, path)) {
             s_devfs[i] = s_devfs[s_devfs_count - 1];
             s_devfs_count--;
+            spinlock_release(&s_model_lock);
             return;
         }
     }
+    spinlock_release(&s_model_lock);
 }
 
 int fl_devfs_open(const char *path, int flags, fl_devfs_file_t *out) {
@@ -415,10 +501,16 @@ int fl_devfs_read(fl_devfs_file_t *file, void *buf, size_t size, size_t *read_ou
     if (!file || !file->node || !(file->flags & FL_DEVFS_O_READ))
         return -1;
     fl_devfs_node_t *node = (fl_devfs_node_t *)file->node;
-    if (!node->ops.read)
+    int rc;
+    /* Character device: byte_read preferred over unit-based read */
+    if (node->ops.byte_read) {
+        rc = node->ops.byte_read(node->dev, buf, size, read_out);
+    } else if (node->ops.read) {
+        uint32_t unit = (uint32_t)(file->pos / FL_SECTOR_SIZE);
+        rc = node->ops.read(node->dev, unit, buf, size, read_out);
+    } else {
         return -1;
-    uint32_t unit = (uint32_t)(file->pos / FL_SECTOR_SIZE);
-    int rc = node->ops.read(node->dev, unit, buf, size, read_out);
+    }
     if (rc == 0)
         file->pos += read_out ? *read_out : 0;
     return rc;
@@ -428,10 +520,16 @@ int fl_devfs_write(fl_devfs_file_t *file, const void *buf, size_t size, size_t *
     if (!file || !file->node || !(file->flags & FL_DEVFS_O_WRITE))
         return -1;
     fl_devfs_node_t *node = (fl_devfs_node_t *)file->node;
-    if (!node->ops.write)
+    int rc;
+    /* Character device: byte_write preferred over unit-based write */
+    if (node->ops.byte_write) {
+        rc = node->ops.byte_write(node->dev, buf, size, written_out);
+    } else if (node->ops.write) {
+        uint32_t unit = (uint32_t)(file->pos / FL_SECTOR_SIZE);
+        rc = node->ops.write(node->dev, unit, buf, size, written_out);
+    } else {
         return -1;
-    uint32_t unit = (uint32_t)(file->pos / FL_SECTOR_SIZE);
-    int rc = node->ops.write(node->dev, unit, buf, size, written_out);
+    }
     if (rc == 0)
         file->pos += written_out ? *written_out : 0;
     return rc;
@@ -574,16 +672,23 @@ int fl_irq_dispatch(int irq) {
 }
 
 void *fl_dma_alloc_device(fl_device_t *dev, size_t size) {
-    if (size == 0 || s_dma_count >= FL_MODEL_MAX_DMA)
+    if (size == 0)
         return NULL;
     void *ptr = mem_domain_alloc(MEM_DOMAIN_DRIVER, size);
     if (!ptr)
         return NULL;
     asm_mem_zero(ptr, size);
+    spinlock_acquire(&s_model_lock);
+    if (s_dma_count >= FL_MODEL_MAX_DMA) {
+        spinlock_release(&s_model_lock);
+        mem_domain_free(MEM_DOMAIN_DRIVER, ptr);
+        return NULL;
+    }
     s_dma[s_dma_count].ptr = ptr;
     s_dma[s_dma_count].size = size;
     s_dma[s_dma_count].owner = dev;
     s_dma_count++;
+    spinlock_release(&s_model_lock);
     return ptr;
 }
 
@@ -594,15 +699,19 @@ void *fl_dma_alloc(size_t size) {
 void fl_dma_free(void *ptr) {
     if (!ptr)
         return;
+    spinlock_acquire(&s_model_lock);
     for (int i = 0; i < s_dma_count; i++) {
         if (s_dma[i].ptr == ptr) {
-            mem_domain_zero(ptr, s_dma[i].size);
-            mem_domain_free(MEM_DOMAIN_DRIVER, ptr);
+            size_t size = s_dma[i].size;
             s_dma[i] = s_dma[s_dma_count - 1];
             s_dma_count--;
+            spinlock_release(&s_model_lock);
+            mem_domain_zero(ptr, size);
+            mem_domain_free(MEM_DOMAIN_DRIVER, ptr);
             return;
         }
     }
+    spinlock_release(&s_model_lock);
 }
 
 int fl_dma_get_info(void *ptr, fl_dma_info_t *out) {

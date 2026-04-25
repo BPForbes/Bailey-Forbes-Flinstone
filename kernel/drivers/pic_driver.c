@@ -64,7 +64,8 @@ static void hw_init(pic_driver_t *drv) {
 
 static void hw_eoi(pic_driver_t *drv, int irq) {
     (void)drv;
-    arm_gic_eoi(irq);
+    if (irq >= 0)
+        arm_gic_eoi((uint32_t)irq);
 }
 #endif
 #endif
