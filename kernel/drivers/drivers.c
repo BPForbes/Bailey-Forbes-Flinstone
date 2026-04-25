@@ -12,6 +12,13 @@
 #include <stdio.h>
 #include <stdlib.h>
 #endif
+#ifdef DRIVERS_BAREMETAL
+#if defined(__x86_64__) || defined(__i386__)
+#include "boot/gdt.h"
+#include "boot/idt.h"
+#include "fl/driver/ioport.h"
+#endif
+#endif
 
 block_driver_t    *g_block_driver    = NULL;
 keyboard_driver_t *g_keyboard_driver = NULL;
@@ -158,6 +165,10 @@ int drivers_run_selftest(void) {
 
 void drivers_init(const char *disk_file) {
 #ifdef DRIVERS_BAREMETAL
+#if defined(__x86_64__) || defined(__i386__)
+    gdt_install();
+    idt_install();
+#endif
     (void)disk_file;
     g_block_driver = block_driver_create_baremetal();
     if (!g_block_driver) {
@@ -173,6 +184,14 @@ void drivers_init(const char *disk_file) {
     g_pic_driver      = pic_driver_create();
     if (g_pic_driver && g_pic_driver->init)
         g_pic_driver->init(g_pic_driver);
+#ifdef DRIVERS_BAREMETAL
+#if defined(__x86_64__) || defined(__i386__)
+    /* Unmask IRQ0 (PIT) in PIC1 IMR so the timer handler fires.
+     * PIC init sets IMR=0xFF; clear bit 0 to allow IRQ0 through. */
+    fl_ioport_out8(0x21u, fl_ioport_in8(0x21u) & ~0x01u);
+    __asm__ volatile("sti");
+#endif
+#endif
     drivers_report_caps();
     if (drivers_run_selftest() != 0) {
         kprint("FATAL: driver selftest failed - halting\n");

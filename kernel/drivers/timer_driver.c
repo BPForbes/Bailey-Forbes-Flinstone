@@ -62,6 +62,14 @@ static void host_msleep(timer_driver_t *drv, unsigned int ms) {
 
 #ifdef DRIVERS_BAREMETAL
 #if defined(__x86_64__) || defined(__i386__)
+#include "boot/idt.h"
+
+static timer_impl_t *s_irq0_impl;
+
+static void x86_irq0_handler(void) {
+    if (s_irq0_impl)
+        s_irq0_impl->ticks++;
+}
 
 static uint64_t hw_tick_count(timer_driver_t *drv) {
     (void)drv;
@@ -125,6 +133,11 @@ static void hw_pit_init(void) {
     fl_ioport_out8(PIT_CH0_DATA, (uint8_t)((PIT_100HZ_DIV >> 8) & 0xFFu));
 }
 
+static void hw_register_irq0(timer_impl_t *impl) {
+    s_irq0_impl = impl;
+    x86_idt_register_handler(0x20, x86_irq0_handler);
+}
+
 /* ------------------------------------------------------------------ */
 /* AArch64 bare-metal                                                   */
 /* ------------------------------------------------------------------ */
@@ -165,6 +178,7 @@ timer_driver_t *timer_driver_create(void) {
     impl->base.msleep     = hw_msleep;
 #if defined(__x86_64__) || defined(__i386__)
     hw_pit_init();
+    hw_register_irq0(impl);
 #endif
 #else
     impl->base.tick_count = host_tick_count;

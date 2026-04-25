@@ -6,7 +6,7 @@ ARCH ?= x86_64_gas
 CC = gcc
 AS = as
 CFLAGS = -Wall -Wextra -pthread -I. -Ikernel/include -Ikernel/core/vfs -Ikernel/core/mm -Ikernel/core/sched -Ikernel/core/sys -Iuserland/shell -Ikernel/arch/x86_64 -Ikernel/arch/aarch64
-LDFLAGS = -Wl,-z,noexecstack
+LDFLAGS = -Wl,-z,noexecstack -no-pie
 ASFLAGS =
 
 # --- Arch-specific assembly ---
@@ -26,7 +26,8 @@ ASM_SRC_DIR = arch/arm/gas
 KERNEL_DRIVERS = kernel/arch/aarch64/drivers
 else
 # x86_64_gas (default)
-ASMSRCS_BASE = arch/x86_64/gas/mem_asm.s arch/x86_64/gas/port_io.s arch/x86_64/gas/spinlock.s kernel/arch/x86_64/drivers/ata_pio.s
+ASMSRCS_BASE = arch/x86_64/gas/mem_asm.s arch/x86_64/gas/port_io.s arch/x86_64/gas/spinlock.s kernel/arch/x86_64/drivers/ata_pio.s \
+               kernel/arch/x86_64/boot/gdt.s kernel/arch/x86_64/boot/idt.s
 ASMSRCS_ALLOC = arch/x86_64/gas/alloc/alloc_core.s arch/x86_64/gas/alloc/alloc_malloc.s arch/x86_64/gas/alloc/alloc_free.s
 ASM_SRC_DIR = arch/x86_64/gas
 KERNEL_DRIVERS = kernel/arch/x86_64/drivers
@@ -42,10 +43,11 @@ UNIFIED_DRIVER_SRCS = kernel/drivers/bus.c kernel/drivers/driver_model.c \
 DRIVER_SRCS = $(UNIFIED_DRIVER_SRCS)
 # PCI: x86_64 real impl, aarch64 ECAM real
 DRIVER_SRCS += $(KERNEL_DRIVERS)/pci.c
-# x86: ATA IDENTIFY + helpers (bare-metal sector geometry)
+# x86: ATA IDENTIFY + helpers, IDT dispatcher
 ifneq ($(ARCH),arm)
 ifneq ($(ARCH),x86_64_nasm)
 DRIVER_SRCS += $(KERNEL_DRIVERS)/ata_pio_baremetal.c
+DRIVER_SRCS += kernel/arch/x86_64/boot/idt_dispatch.c
 endif
 endif
 # HAL: ioport (x86 real, arm stubs) + ARM MMIO HAL (arm only)

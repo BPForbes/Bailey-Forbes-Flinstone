@@ -294,7 +294,7 @@ static int block_probe(fl_device_t *dev) {
 }
 
 static int block_attach(fl_device_t *dev) {
-    const fl_devfs_ops_t ops = { block_devfs_read, block_devfs_write, block_devfs_ioctl };
+    const fl_devfs_ops_t ops = { .read = block_devfs_read, .write = block_devfs_write, .ioctl = block_devfs_ioctl };
     dev->driver_data = g_block_driver;
     return fl_devfs_register("/dev/blk0", FL_DRV_CLASS_BLOCK, dev, &ops);
 }
