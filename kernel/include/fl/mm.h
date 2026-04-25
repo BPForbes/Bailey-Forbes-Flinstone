@@ -14,6 +14,8 @@ extern "C" {
 void *kmalloc(size_t size);
 void kfree(void *ptr);
 void *krealloc(void *ptr, size_t size);
+void *fl_dma_alloc(size_t size);
+void fl_dma_free(void *ptr);
 
 /* Page management */
 void *alloc_page(void);

@@ -7,6 +7,7 @@
 #include "driver.h"
 #include "bus.h"
 #include "device.h"
+#include "devfs.h"
 #include "irq.h"
 #include "ioport.h"
 #include "mmio.h"

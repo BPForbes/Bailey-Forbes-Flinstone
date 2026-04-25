@@ -3,6 +3,9 @@
  */
 #include "drivers/drivers.h"
 #include "drivers/block/block_driver.h"
+#include "fl/driver/devfs.h"
+#include "fl/driver/irq.h"
+#include "fl/mm.h"
 #include "common.h"
 #include <stdio.h>
 #include <stdlib.h>
@@ -47,6 +50,53 @@ static int test_block_write_read(void) {
     ASSERT(g_block_driver->write_sector((block_driver_t *)g_block_driver, 0, wbuf) == 0);
     ASSERT(g_block_driver->read_sector((block_driver_t *)g_block_driver, 0, rbuf) == 0);
     ASSERT(memcmp(wbuf, rbuf, cs) == 0);
+    return 0;
+}
+
+static int test_devfs_block(void) {
+    fl_devfs_file_t file;
+    fl_block_caps_t caps;
+    uint8_t wbuf[512], rbuf[512];
+    size_t n = 0;
+
+    memset(&file, 0, sizeof(file));
+    memset(&caps, 0, sizeof(caps));
+    memset(wbuf, 0, sizeof(wbuf));
+    memset(rbuf, 0, sizeof(rbuf));
+    for (int i = 0; i < g_cluster_size && i < (int)sizeof(wbuf); i++)
+        wbuf[i] = (uint8_t)(0x41 + (i % 26));
+
+    ASSERT(fl_devfs_open("/dev/blk0", FL_DEVFS_O_READ | FL_DEVFS_O_WRITE, &file) == 0);
+    ASSERT(fl_devfs_ioctl(&file, FL_DEVFS_IOCTL_BLOCK_CAPS, &caps) == 0);
+    ASSERT(caps.sector_size == FL_SECTOR_SIZE);
+    ASSERT(fl_devfs_write(&file, wbuf, sizeof(wbuf), &n) == 0);
+    ASSERT(n == FL_SECTOR_SIZE);
+    file.pos = 0;
+    ASSERT(fl_devfs_read(&file, rbuf, sizeof(rbuf), &n) == 0);
+    ASSERT(n == FL_SECTOR_SIZE);
+    ASSERT(memcmp(wbuf, rbuf, (size_t)g_cluster_size) == 0);
+    ASSERT(fl_devfs_close(&file) == 0);
+    return 0;
+}
+
+static void test_irq_handler(int irq, void *ctx) {
+    int *hits = (int *)ctx;
+    if (irq == 3)
+        (*hits)++;
+}
+
+static int test_irq_and_dma(void) {
+    int hits = 0;
+    void *buf = fl_dma_alloc(128);
+    ASSERT(buf != NULL);
+    fl_dma_free(buf);
+    ASSERT(fl_irq_register(3, test_irq_handler, &hits) == 0);
+    fl_irq_enable(3);
+    ASSERT(fl_irq_dispatch(3) == 0);
+    ASSERT(hits == 1);
+    fl_irq_disable(3);
+    ASSERT(fl_irq_dispatch(3) != 0);
+    fl_irq_unregister(3);
     return 0;
 }
 
@@ -107,6 +157,14 @@ int main(void) {
 
     printf("test_block_write_read... ");
     if (test_block_write_read() != 0) { drivers_shutdown(); unlink(path); return 1; }
+    printf("OK\n");
+
+    printf("test_devfs_block... ");
+    if (test_devfs_block() != 0) { drivers_shutdown(); unlink(path); return 1; }
+    printf("OK\n");
+
+    printf("test_irq_and_dma... ");
+    if (test_irq_and_dma() != 0) { drivers_shutdown(); unlink(path); return 1; }
     printf("OK\n");
 
     printf("test_display... ");

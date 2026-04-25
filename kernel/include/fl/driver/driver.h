@@ -58,6 +58,7 @@ typedef struct fl_driver_desc {
 /* Registration */
 void fl_driver_registry_register_all(void);
 int  fl_driver_registry_register(const fl_driver_desc_t *desc);
+int  fl_driver_registry_match(const fl_device_desc_t *dev, const fl_driver_desc_t **out);
 
 /* Init flow: register -> enumerate -> probe -> attach -> start */
 void fl_drivers_init(void);

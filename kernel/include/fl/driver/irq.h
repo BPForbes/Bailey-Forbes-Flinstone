@@ -17,6 +17,7 @@ int  fl_irq_register(int irq, fl_irq_handler_t handler, void *ctx);
 void fl_irq_unregister(int irq);
 void fl_irq_enable(int irq);
 void fl_irq_disable(int irq);
+int  fl_irq_dispatch(int irq);
 
 #ifdef __cplusplus
 }
