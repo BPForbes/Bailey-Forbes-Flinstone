@@ -228,6 +228,14 @@ test_invariants: userland/shell/common.o userland/shell/util.o $(MEM_ASM_OBJ)
 	$(CC) $(CFLAGS) $(TEST_SANITIZE) -o tests/test_invariants tests/test_invariants.c userland/shell/common.o userland/shell/util.o $(MEM_ASM_OBJ)
 	./tests/test_invariants
 
+# fs_jail unit tests (standalone, no CUnit required)
+.PHONY: test_fs_jail
+test_fs_jail: userland/shell/common.o userland/shell/util.o kernel/core/vfs/fs_jail.o kernel/core/mm/mem_domain.o $(MEM_ASM_OBJ)
+	$(CC) $(CFLAGS) $(TEST_SANITIZE) -o tests/test_fs_jail tests/test_fs_jail.c \
+	  userland/shell/common.o userland/shell/util.o kernel/core/vfs/fs_jail.o \
+	  kernel/core/mm/mem_domain.o $(MEM_ASM_OBJ) -Wl,-z,noexecstack
+	./tests/test_fs_jail
+
 check-layers:
 	@./scripts/check_layers.sh
 
