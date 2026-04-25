@@ -58,17 +58,22 @@ static arena_t *arena_for(mem_domain_t domain) {
     return &s_arenas[(int)domain];
 }
 
+/* Check if ptr belongs to the arena. */
+static int arena_owns(const arena_t *a, const void *ptr) {
+    uintptr_t addr = (uintptr_t)ptr;
+    uintptr_t base = (uintptr_t)a->base;
+    return addr >= base && addr < base + a->capacity;
+}
+
 static size_t align_up(size_t n) {
     return (n + ARENA_ALIGN - 1u) & ~(ARENA_ALIGN - 1u);
 }
 
-void *mem_domain_alloc(mem_domain_t domain, size_t size) {
+/* Internal allocation without locking (caller must hold s_mem_domain_lock). */
+static void *mem_domain_alloc_nolock(mem_domain_t domain, size_t size) {
     if (!size) return (void*)0;
     arena_t *a = arena_for(domain);
     size_t need = align_up(HDR_SIZE + size);
-    void *result = (void*)0;
-
-    spinlock_acquire(&s_mem_domain_lock);
 
     /* Search free list (first-fit) */
     free_node_t **pp = &a->freelist;
@@ -78,9 +83,7 @@ void *mem_domain_alloc(mem_domain_t domain, size_t size) {
             *pp = node->next;           /* unlink */
             size_t *hdr = (size_t *)(void *)node;
             *hdr = size;                /* current owner's valid payload size */
-            result = (uint8_t *)(void *)hdr + HDR_SIZE;
-            spinlock_release(&s_mem_domain_lock);
-            return result;
+            return (uint8_t *)(void *)hdr + HDR_SIZE;
         }
         pp = &(*pp)->next;
     }
@@ -90,8 +93,15 @@ void *mem_domain_alloc(mem_domain_t domain, size_t size) {
         size_t *hdr = (size_t *)(void *)(a->base + a->bump);
         *hdr = size;
         a->bump += need;
-        result = (uint8_t *)(void *)hdr + HDR_SIZE;
+        return (uint8_t *)(void *)hdr + HDR_SIZE;
     }
+    return (void*)0;
+}
+
+void *mem_domain_alloc(mem_domain_t domain, size_t size) {
+    if (!size) return (void*)0;
+    spinlock_acquire(&s_mem_domain_lock);
+    void *result = mem_domain_alloc_nolock(domain, size);
     spinlock_release(&s_mem_domain_lock);
     return result;
 }
@@ -105,31 +115,51 @@ void *mem_domain_calloc(mem_domain_t domain, size_t nmemb, size_t size) {
     return p;
 }
 
-void *mem_domain_realloc(mem_domain_t domain, void *ptr, size_t size) {
-    if (!ptr) return mem_domain_alloc(domain, size);
-    if (!size) { mem_domain_free(domain, ptr); return (void*)0; }
-    spinlock_acquire(&s_mem_domain_lock);
-    size_t old_size = *((size_t *)((uint8_t *)ptr - HDR_SIZE));
-    spinlock_release(&s_mem_domain_lock);
-    void *np = mem_domain_alloc(domain, size);
-    if (!np) return (void*)0;
-    size_t copy_n = old_size < size ? old_size : size;
-    asm_mem_copy(np, ptr, copy_n);
-    mem_domain_free(domain, ptr);
-    return np;
-}
-
-void mem_domain_free(mem_domain_t domain, void *ptr) {
+/* Internal free without locking (caller must hold s_mem_domain_lock). */
+static void mem_domain_free_nolock(mem_domain_t domain, void *ptr) {
     if (!ptr) return;
     arena_t *a = arena_for(domain);
     size_t *hdr = (size_t *)((uint8_t *)ptr - HDR_SIZE);
-    spinlock_acquire(&s_mem_domain_lock);
+
+    /* Ownership validation: ensure the block belongs to this arena before
+     * linking it into the freelist, preventing heap corruption. */
+    if (!arena_owns(a, hdr)) {
+        /* Panic: attempted to free a block not owned by this domain.
+         * Halt to prevent freelist corruption. */
+        for (;;) {}
+    }
+
     size_t data_size = *hdr;
     /* Re-use the block header region as a free_node_t */
     free_node_t *node = (free_node_t *)(void *)hdr;
     node->data_size = data_size;
     node->next = a->freelist;
     a->freelist = node;
+}
+
+void *mem_domain_realloc(mem_domain_t domain, void *ptr, size_t size) {
+    if (!ptr) return mem_domain_alloc(domain, size);
+    if (!size) { mem_domain_free(domain, ptr); return (void*)0; }
+
+    /* Hold lock across entire realloc to prevent use-after-free races. */
+    spinlock_acquire(&s_mem_domain_lock);
+    size_t old_size = *((size_t *)((uint8_t *)ptr - HDR_SIZE));
+    void *np = mem_domain_alloc_nolock(domain, size);
+    if (!np) {
+        spinlock_release(&s_mem_domain_lock);
+        return (void*)0;
+    }
+    size_t copy_n = old_size < size ? old_size : size;
+    asm_mem_copy(np, ptr, copy_n);
+    mem_domain_free_nolock(domain, ptr);
+    spinlock_release(&s_mem_domain_lock);
+    return np;
+}
+
+void mem_domain_free(mem_domain_t domain, void *ptr) {
+    if (!ptr) return;
+    spinlock_acquire(&s_mem_domain_lock);
+    mem_domain_free_nolock(domain, ptr);
     spinlock_release(&s_mem_domain_lock);
 }
 

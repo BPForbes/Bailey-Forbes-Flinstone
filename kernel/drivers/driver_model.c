@@ -6,6 +6,7 @@
 #include "core/sys/spinlock.h"
 #ifdef DRIVERS_BAREMETAL
 #include "drivers.h"
+#include "fl/driver/ioport.h"
 #endif
 #ifndef DRIVERS_BAREMETAL
 #include <stdio.h>
@@ -21,8 +22,8 @@
 /* Halt-style panic used when a hard limit is exceeded at registration time. */
 static void model_overflow_panic(const char *msg) {
 #ifdef DRIVERS_BAREMETAL
+    const char *prefix = "*** PANIC ***: ";
     if (g_display_driver && g_display_driver->putchar) {
-        const char *prefix = "*** PANIC ***: ";
         for (; *prefix; prefix++)
             g_display_driver->putchar(g_display_driver, *prefix);
         if (msg) {
@@ -32,6 +33,33 @@ static void model_overflow_panic(const char *msg) {
         g_display_driver->putchar(g_display_driver, '\n');
         if (g_display_driver->flush_cursor)
             g_display_driver->flush_cursor(g_display_driver);
+    } else {
+        /* Fallback: emit to platform serial when display is unavailable. */
+#if defined(__x86_64__) || defined(__i386__)
+        /* x86: write to COM1 (0x3F8) */
+        for (const char *p = prefix; *p; p++) {
+            while (!(fl_ioport_in8(0x3FD) & 0x20)) {}
+            fl_ioport_out8(0x3F8, (uint8_t)*p);
+        }
+        if (msg) {
+            for (const char *p = msg; *p; p++) {
+                while (!(fl_ioport_in8(0x3FD) & 0x20)) {}
+                fl_ioport_out8(0x3F8, (uint8_t)*p);
+            }
+        }
+        while (!(fl_ioport_in8(0x3FD) & 0x20)) {}
+        fl_ioport_out8(0x3F8, '\n');
+#elif defined(__aarch64__)
+        /* AArch64: use arm_uart_putchar */
+        #include "hal/arm_uart.h"
+        for (; *prefix; prefix++)
+            arm_uart_putchar(*prefix);
+        if (msg) {
+            for (; *msg; msg++)
+                arm_uart_putchar(*msg);
+        }
+        arm_uart_putchar('\n');
+#endif
     }
 #if defined(__x86_64__) || defined(__i386__)
     __asm__ volatile("cli");

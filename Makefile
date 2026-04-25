@@ -111,7 +111,7 @@ baremetal: LDFLAGS += -no-pie
 baremetal: $(TARGET)
 
 # With embedded x86 VM: make vm && ./shell -Virtualization -y -vm
-.PHONY: vm
+.PHONY: vm baremetal
 vm:
 	$(MAKE) VM_ENABLE=1 $(TARGET)
 

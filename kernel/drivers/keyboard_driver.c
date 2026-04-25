@@ -80,13 +80,17 @@ static const char s_sc_shifted[89] = {
 };
 
 /* Modifier scan codes (Set 1) */
-#define SC_LSHIFT  0x2A
-#define SC_RSHIFT  0x36
+#define SC_LSHIFT   0x2A
+#define SC_RSHIFT   0x36
 #define SC_CAPSLOCK 0x3A
-#define SC_BREAK   0x80   /* bit 7 set = key release */
+#define SC_BREAK    0x80   /* bit 7 set = key release */
 
-static int s_shift    = 0;
-static int s_capslock = 0;
+/* Shift state as a bitmask to handle L/R shift independently */
+#define SHIFT_L     0x1
+#define SHIFT_R     0x2
+
+static uint8_t s_shift = 0;
+static int s_capslock  = 0;
 
 static int hw_poll_scancode(keyboard_driver_t *drv, uint8_t *out) {
     (void)drv;
@@ -104,13 +108,16 @@ static int hw_get_char(keyboard_driver_t *drv, char *out) {
     /* Break code: bit 7 set — update modifier state, emit nothing */
     if (sc & SC_BREAK) {
         uint8_t make = sc & ~SC_BREAK;
-        if (make == SC_LSHIFT || make == SC_RSHIFT)
-            s_shift = 0;
+        if (make == SC_LSHIFT)
+            s_shift &= ~SHIFT_L;
+        else if (make == SC_RSHIFT)
+            s_shift &= ~SHIFT_R;
         return -1;
     }
 
     /* Make codes for modifiers */
-    if (sc == SC_LSHIFT || sc == SC_RSHIFT) { s_shift = 1; return -1; }
+    if (sc == SC_LSHIFT) { s_shift |= SHIFT_L; return -1; }
+    if (sc == SC_RSHIFT) { s_shift |= SHIFT_R; return -1; }
     if (sc == SC_CAPSLOCK) { s_capslock ^= 1; return -1; }
 
     /* Translate printable make codes */
@@ -118,7 +125,7 @@ static int hw_get_char(keyboard_driver_t *drv, char *out) {
         return -1;
     char base = s_sc_unshifted[sc];
     int is_letter = (base >= 'a' && base <= 'z');
-    int use_shifted = s_shift ^ (s_capslock && is_letter);
+    int use_shifted = (s_shift != 0) ^ (s_capslock && is_letter);
     char c = use_shifted ? s_sc_shifted[sc] : base;
     if (!c)
         return -1;

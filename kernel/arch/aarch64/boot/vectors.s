@@ -23,6 +23,19 @@
 
 /* ------------------------------------------------------------------ */
 /* Exception vector slot macro                                         */
+/*
+ * IMPORTANT: The trampoline does NOT save ELR_EL1, SPSR_EL1, or SP_EL0.
+ * The current design relies on eret to restore PSTATE and PC from these
+ * system registers.  This is only safe if:
+ *   - DAIF bits remain masked (no explicit DAIFCLR in exception context)
+ *   - The C dispatcher (aarch64_exc_dispatch) and all registered handlers
+ *     cannot take nested exceptions or cause synchronous faults.
+ *
+ * If nested exceptions are to be supported in future, the trampoline
+ * (aarch64_exc_trampoline) MUST push ELR_EL1, SPSR_EL1 (and SP_EL0 when
+ * resuming lower ELs) onto the exception frame before calling the dispatcher,
+ * and restore them before eret.
+ */
 /* ------------------------------------------------------------------ */
 .macro EXC_SLOT num
     .balign 128
@@ -66,6 +79,19 @@ arm_exc_vectors:
 
 /* ------------------------------------------------------------------ */
 /* Shared exception trampoline                                         */
+/*
+ * FP/SIMD register preservation:
+ * This trampoline saves only general-purpose registers (x0-x30).
+ * FP/SIMD registers (q0-q31 / v0-v31) are NOT saved or restored.
+ *
+ * REQUIREMENT: The C dispatcher (aarch64_exc_dispatch) and all exception
+ * handlers MUST be compiled with -mgeneral-regs-only to prevent the compiler
+ * from emitting SIMD instructions that would clobber q0-q31.
+ *
+ * If FP/SIMD preservation is needed in future, modify this trampoline to
+ * push/pop the full SIMD state (512 bytes for q0-q31) around the dispatcher
+ * call, ensuring 16-byte stack alignment.
+ */
 /* ------------------------------------------------------------------ */
 .balign 16
 aarch64_exc_trampoline:

@@ -31,8 +31,9 @@ gdt_table:
     /* Encoding: limit[15:0]=0xFFFF, base[23:0]=0, type/S/DPL/P=0x9A, limit[19:16]/flags=0xAF, base[31:24]=0 */
     .quad 0x00AF9A000000FFFF
 
-    /* [0x10] kernel 64-bit data: base=0, limit=0xFFFFF, G=1, P=1, DPL=0, type=0x2 */
-    .quad 0x00AF92000000FFFF
+    /* [0x10] kernel 64-bit data: base=0, limit=0xFFFFF, G=1, D/B=1, P=1, DPL=0, type=0x2 */
+    /* Flags: 0xCF = G=1, D/B=1, L=0 (reserved bit cleared for data segment) */
+    .quad 0x00CF92000000FFFF
 
 gdt_end:
 

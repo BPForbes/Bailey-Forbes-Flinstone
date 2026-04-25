@@ -13,6 +13,10 @@
 #define PMM_PHYS_MEM    (4u * 1024u * 1024u)
 #define PMM_NUM_FRAMES  (PMM_PHYS_MEM / PMM_FRAME_SIZE)  /* 1024 */
 
+/* Reserve a physical address range by marking all covered frames as allocated.
+ * Call during early boot (before any allocations) to protect kernel/reserved regions. */
+void pmm_reserve_range(uintptr_t base, size_t bytes);
+
 /* Allocate one 4 KiB physical frame.
  * Returns the physical address of the frame, or 0 on exhaustion. */
 uintptr_t pmm_alloc_frame(void);

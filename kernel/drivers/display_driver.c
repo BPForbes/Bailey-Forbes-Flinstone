@@ -22,10 +22,10 @@
 
 typedef struct {
     display_driver_t base;
-    int row, col;
+    volatile int row, col;
     uint8_t color;
 #ifdef DRIVERS_BAREMETAL
-    int cursor_dirty;
+    volatile int cursor_dirty;
     volatile uint16_t *vga;
 #endif
 } display_impl_t;

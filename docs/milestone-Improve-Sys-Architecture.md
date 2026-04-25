@@ -131,11 +131,15 @@ All device registration, probe, and IRQ dispatch operate on global static
 arrays with no locking.  On a multi-core or interrupt-driven system any
 concurrent access produces races.
 
-Fix: add a single `volatile int g_drv_lock` spinlock (test-and-set via GAS
-`lock bts` on x86, `ldxr`/`stxr` on ARM) that guards the three static
-arrays.  IRQ dispatch acquires then releases.  Registration saves/restores
-interrupt state around the critical section.  Keep the spinlock assembly with
-the architecture boot code under `kernel/arch/{x86_64,aarch64}/boot/`.
+Fix: add file-static spinlocks (`s_model_lock` in driver_model.c and
+`s_mem_domain_lock` in mem_domain.c) that guard the static arrays.  IRQ
+dispatch acquires then releases.  Registration saves/restores interrupt
+state around the critical section.  The spinlock assembly primitives
+(spinlock_acquire/spinlock_release) are provided by architecture-specific
+boot code under `kernel/arch/{x86_64,aarch64}/boot/`: on x86_64
+`kernel/arch/x86_64/boot/spinlock.s` uses `lock cmpxchgl` with a `pause`
+loop (via `rep nop`), and on aarch64 `kernel/arch/aarch64/boot/spinlock.s`
+uses `ldaxr`/`stxr` with `WFE`/`SEV` for efficient contention handling.
 
 ---
 
@@ -201,10 +205,13 @@ from the libc heap, not a tracked physical frame.  A real kernel needs to
 know which physical pages are in use.
 
 Fix: add a minimal physical frame allocator (`kernel/core/mm/pmm.c`):
-a static bitfield over a declared `PHYS_MEM_SIZE` (4 MB for now, matching the
-ramdisk size), with `pmm_alloc_frame()` / `pmm_free_frame()` returning
-physical addresses.  `alloc_page()` routes through `pmm_alloc_frame()` in
-`DRIVERS_BAREMETAL` builds; host builds keep `aligned_alloc`.
+a static bitfield over the region defined by `PMM_PHYS_MEM` (4 MB for now,
+matching the ramdisk size), with physical addressing starting at
+`PMM_PHYS_BASE` (1 MB), tracking `PMM_NUM_FRAMES` frames of
+`PMM_FRAME_SIZE` bytes each.  The API provides `pmm_alloc_frame()` /
+`pmm_free_frame()` returning physical addresses.  `alloc_page()` routes
+through `pmm_alloc_frame()` in `DRIVERS_BAREMETAL` builds; host builds
+keep `aligned_alloc`.
 
 ---
 
