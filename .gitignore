@@ -36,4 +36,3 @@ vm_disk.img
 
 # Disk journal temp (crash consistency)
 *.tmp
-/.vs

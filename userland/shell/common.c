@@ -3,7 +3,7 @@
 
 int g_cluster_size = 32;
 int g_total_clusters = 32;
-char current_disk_file[64] = "drive.txt";
+char current_disk_file[CWD_MAX] = "drive.txt";
 char g_cwd[CWD_MAX] = ".";
 
 int g_vm_mode = 0;

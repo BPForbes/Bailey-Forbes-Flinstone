@@ -19,6 +19,15 @@
 #include <sys/wait.h>
 #include <signal.h>
 
+static int jail_blocked_path(const char *op, const char *input, const char *resolved) {
+    if (!fs_jail_is_active())
+        return 0;
+    if (fs_jail_check_path(resolved) == 0)
+        return 0;
+    printf("VM: %s blocked (outside project sandbox): %s\n", op, input);
+    return 1;
+}
+
 /* 
  * execute_command_str:
  *   Parses and executes the command provided in 'line'.
@@ -156,6 +165,10 @@ int execute_command_str(const char *line) {
         if (*filename) {
             char rpath[CWD_MAX];
             resolve_path(filename, rpath, sizeof(rpath));
+            if (jail_blocked_path("make", filename, rpath)) {
+                free(tokenBuf);
+                return 1;
+            }
             if (g_fm_service) {
                 fm_create_file(g_fm_service, rpath);
                 path_log_record(PATH_OP_CREATE, rpath);
@@ -209,14 +222,22 @@ int execute_command_str(const char *line) {
         char resolved[CWD_MAX];
         mem_domain_zero(resolved, sizeof(resolved));
         resolve_path(args[1], resolved, sizeof(resolved));
-        if (fs_jail_is_active() && fs_jail_check_path(resolved) != 0) {
-            printf("VM: cd blocked (outside project sandbox): %s\n", args[1]);
+        if (jail_blocked_path("cd", args[1], resolved)) {
             free(cmdLine);
             return 1;
         }
+        char oldcwd[CWD_MAX];
+        mem_domain_zero(oldcwd, sizeof(oldcwd));
+        getcwd(oldcwd, sizeof(oldcwd));
         if (chdir(resolved) == 0) {
             if (getcwd(g_cwd, sizeof(g_cwd)) == NULL)
                 strncpy(g_cwd, resolved, sizeof(g_cwd) - 1);
+            if (jail_blocked_path("cd", args[1], g_cwd)) {
+                if (oldcwd[0] && chdir(oldcwd) == 0)
+                    strncpy(g_cwd, oldcwd, sizeof(g_cwd) - 1);
+                free(cmdLine);
+                return 1;
+            }
             path_log_record(PATH_OP_CD, g_cwd);
             printf("%s\n", g_cwd);
         } else {
@@ -264,8 +285,7 @@ int execute_command_str(const char *line) {
         char fpath[CWD_MAX];
         mem_domain_zero(fpath, sizeof(fpath));
         resolve_path(args[1], fpath, sizeof fpath);
-        if (fs_jail_is_active() && fs_jail_check_path(fpath) != 0) {
-            printf("VM: format blocked (outside project sandbox): %s\n", args[1]);
+        if (jail_blocked_path("format", args[1], fpath)) {
             free(cmdLine);
             return 1;
         }
@@ -285,8 +305,7 @@ int execute_command_str(const char *line) {
         { char spath[CWD_MAX];
         mem_domain_zero(spath, sizeof(spath));
         resolve_path(args[1], spath, sizeof spath);
-        if (fs_jail_is_active() && fs_jail_check_path(spath) != 0) {
-            printf("VM: setdisk blocked (outside project sandbox): %s\n", args[1]);
+        if (jail_blocked_path("setdisk", args[1], spath)) {
             free(cmdLine);
             return 1;
         }
@@ -350,6 +369,10 @@ int execute_command_str(const char *line) {
     } else if (!strcmp(args[0], "listdirs")) {
         char rpath[CWD_MAX];
         resolve_path(".", rpath, sizeof(rpath));
+        if (jail_blocked_path("listdirs", ".", rpath)) {
+            free(cmdLine);
+            return 1;
+        }
         if (g_fm_service) {
             fs_node_t *nodes;
             int count;
@@ -472,6 +495,10 @@ int execute_command_str(const char *line) {
         }
         char rpath[CWD_MAX];
         resolve_path(args[1], rpath, sizeof(rpath));
+        if (jail_blocked_path("type", args[1], rpath)) {
+            free(cmdLine);
+            return 1;
+        }
         if (g_fm_service) {
             char buf[4096];
             if (fm_read_text(g_fm_service, rpath, buf, sizeof(buf)) >= 0) {
@@ -491,7 +518,17 @@ int execute_command_str(const char *line) {
             free(cmdLine);
             return 1;
         }
-        do_redirect_output(args[1]);
+        if (!strcmp(args[1], "off")) {
+            do_redirect_output(args[1]);
+        } else {
+            char rpath[CWD_MAX];
+            resolve_path(args[1], rpath, sizeof(rpath));
+            if (jail_blocked_path("redirect", args[1], rpath)) {
+                free(cmdLine);
+                return 1;
+            }
+            do_redirect_output(rpath);
+        }
         free(cmdLine);
         return 0;
     } else if (!strcmp(args[0], "initdisk")) {
@@ -537,7 +574,15 @@ int execute_command_str(const char *line) {
         return 0;
     } else if (!strcmp(args[0], "import")) {
         if (argc == 3) {
-            import_text_drive(args[1], args[2], -1, -1);
+            char srcpath[CWD_MAX], dstpath[CWD_MAX];
+            resolve_path(args[1], srcpath, sizeof(srcpath));
+            resolve_path(args[2], dstpath, sizeof(dstpath));
+            if (jail_blocked_path("import", args[1], srcpath) ||
+                jail_blocked_path("import", args[2], dstpath)) {
+                free(cmdLine);
+                return 1;
+            }
+            import_text_drive(srcpath, dstpath, -1, -1);
             free(cmdLine);
             return 0;
         } else if (argc == 5) {
@@ -548,7 +593,15 @@ int execute_command_str(const char *line) {
                 free(cmdLine);
                 return 1;
             }
-            import_text_drive(args[1], args[2], count, size);
+            char srcpath[CWD_MAX], dstpath[CWD_MAX];
+            resolve_path(args[1], srcpath, sizeof(srcpath));
+            resolve_path(args[2], dstpath, sizeof(dstpath));
+            if (jail_blocked_path("import", args[1], srcpath) ||
+                jail_blocked_path("import", args[2], dstpath)) {
+                free(cmdLine);
+                return 1;
+            }
+            import_text_drive(srcpath, dstpath, count, size);
             free(cmdLine);
             return 0;
         } else {
@@ -642,6 +695,10 @@ int execute_command_str(const char *line) {
     } else if (!strcmp(args[0], "dir")) {
         char rpath[CWD_MAX];
         resolve_path((argc >= 2 && args[1][0] != '-') ? args[1] : ".", rpath, sizeof(rpath));
+        if (jail_blocked_path("dir", (argc >= 2 && args[1][0] != '-') ? args[1] : ".", rpath)) {
+            free(cmdLine);
+            return 1;
+        }
         if (g_fm_service) {
             fs_node_t *nodes;
             int count;
@@ -667,6 +724,10 @@ int execute_command_str(const char *line) {
         }
         char rpath[CWD_MAX];
         resolve_path(args[1], rpath, sizeof(rpath));
+        if (jail_blocked_path("mkdir", args[1], rpath)) {
+            free(cmdLine);
+            return 1;
+        }
         if (g_fm_service) {
             if (fm_create_dir(g_fm_service, rpath) == 0) {
                 path_log_record(PATH_OP_CREATE, rpath);
@@ -687,6 +748,10 @@ int execute_command_str(const char *line) {
         }
         char rpath[CWD_MAX];
         resolve_path(args[1], rpath, sizeof(rpath));
+        if (jail_blocked_path("rmdir", args[1], rpath)) {
+            free(cmdLine);
+            return 1;
+        }
         if (g_fm_service) {
             if (fm_delete(g_fm_service, rpath) == 0) {
                 path_log_record(PATH_OP_DELETE, rpath);
@@ -709,6 +774,10 @@ int execute_command_str(const char *line) {
         }
         char rpath[CWD_MAX];
         resolve_path(args[1], rpath, sizeof(rpath));
+        if (jail_blocked_path("rmtree", args[1], rpath)) {
+            free(cmdLine);
+            return 1;
+        }
         path_log_record(PATH_OP_DELETE, rpath);
         remove_directory_recursive(rpath);
         free(cmdLine);
@@ -721,6 +790,10 @@ int execute_command_str(const char *line) {
         }
         char rpath[CWD_MAX];
         resolve_path(args[1], rpath, sizeof(rpath));
+        if (jail_blocked_path("cat", args[1], rpath)) {
+            free(cmdLine);
+            return 1;
+        }
         if (g_fm_service) {
             char buf[4096];
             if (fm_read_text(g_fm_service, rpath, buf, sizeof(buf)) >= 0) {
@@ -743,6 +816,10 @@ int execute_command_str(const char *line) {
         }
         char rpath[CWD_MAX];
         resolve_path(args[1], rpath, sizeof(rpath));
+        if (jail_blocked_path("write", args[1], rpath)) {
+            free(cmdLine);
+            return 1;
+        }
         char content[4096] = {0};
         for (int i = 2; i < argc && (size_t)(strlen(content) + strlen(args[i]) + 2) < sizeof(content); i++) {
             if (i > 2) strcat(content, " ");
@@ -774,6 +851,11 @@ int execute_command_str(const char *line) {
         char srcpath[CWD_MAX], dstpath[CWD_MAX];
         resolve_path(args[1], srcpath, sizeof(srcpath));
         resolve_path(args[2], dstpath, sizeof(dstpath));
+        if (jail_blocked_path("mv", args[1], srcpath) ||
+            jail_blocked_path("mv", args[2], dstpath)) {
+            free(cmdLine);
+            return 1;
+        }
         if (g_fm_service) {
             if (fm_move(g_fm_service, srcpath, dstpath) == 0) {
                 path_log_record(PATH_OP_MOVE, srcpath);

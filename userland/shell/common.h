@@ -25,7 +25,7 @@
 /* Global disk parameters */
 extern int g_cluster_size;
 extern int g_total_clusters;
-extern char current_disk_file[64];
+extern char current_disk_file[CWD_MAX];
 
 /* VM mode: 1 = -Virtualization; file access is jailed (see fs_jail.c) to launch dir or temp sandbox */
 extern int g_vm_mode;

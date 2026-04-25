@@ -75,13 +75,18 @@ static int local_list(fs_provider_t *p, const char *path, fs_node_t **out, int *
         strncpy(nodes[n].name, e->d_name, FS_NAME_MAX - 1);
         nodes[n].type = (e->d_type == DT_DIR) ? NODE_DIR : NODE_FILE;
         if (path && path[0]) {
-            char full[PATH_MAX];
-            mem_domain_zero(full, sizeof(full));
-            snprintf(full, sizeof full, "%s/%s", path, e->d_name);
-            strncpy(nodes[n].path, full, FS_PATH_MAX - 1);
+            size_t base_len = strnlen(path, FS_PATH_MAX);
+            size_t name_len = strnlen(e->d_name, FS_NAME_MAX);
+            if (base_len + 1 + name_len >= FS_PATH_MAX)
+                continue;
+            mem_domain_copy(nodes[n].path, path, base_len);
+            nodes[n].path[base_len] = '/';
+            mem_domain_copy(nodes[n].path + base_len + 1, e->d_name, name_len);
+            nodes[n].path[base_len + 1 + name_len] = '\0';
+        } else {
+            strncpy(nodes[n].path, e->d_name, FS_PATH_MAX - 1);
             nodes[n].path[FS_PATH_MAX - 1] = '\0';
-        } else
-            snprintf(nodes[n].path, FS_PATH_MAX, "%s", e->d_name);
+        }
         n++;
     }
     closedir(dp);

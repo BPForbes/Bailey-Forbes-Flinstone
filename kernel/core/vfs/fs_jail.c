@@ -10,7 +10,7 @@
 #include <unistd.h>
 
 #define JAIL_ROOT_MAX 4096
-char   g_fs_jail_root[JAIL_ROOT_MAX];
+static char   g_fs_jail_root[JAIL_ROOT_MAX];
 static size_t g_fs_jail_len;
 
 void fs_jail_init(void) {
@@ -22,20 +22,11 @@ void fs_jail_init(void) {
     mem_domain_zero(wd, sizeof(wd));
     if (!getcwd(wd, sizeof(wd)))
         return;
-    if (g_vm_root[0]) {
-        if (realpath(g_vm_root, g_fs_jail_root) == NULL) {
-            if (realpath(wd, g_fs_jail_root) == NULL) {
-                size_t L = strnlen(g_vm_root, JAIL_ROOT_MAX - 1);
-                mem_domain_copy(g_fs_jail_root, g_vm_root, L);
-                g_fs_jail_root[L] = '\0';
-            }
-        }
-    } else {
-        if (realpath(wd, g_fs_jail_root) == NULL) {
-            size_t L = strnlen(wd, JAIL_ROOT_MAX - 1);
-            mem_domain_copy(g_fs_jail_root, wd, L);
-            g_fs_jail_root[L] = '\0';
-        }
+    const char *root = g_vm_root[0] ? g_vm_root : wd;
+    if (realpath(root, g_fs_jail_root) == NULL) {
+        fprintf(stderr, "VM: sandbox root unavailable: %s\n", root);
+        mem_domain_zero(g_fs_jail_root, sizeof(g_fs_jail_root));
+        return;
     }
     g_fs_jail_root[JAIL_ROOT_MAX - 1] = '\0';
     g_fs_jail_len = strlen(g_fs_jail_root);
