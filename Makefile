@@ -186,7 +186,7 @@ VM/devices/%.o: VM/devices/%.c
 # --- ASM + Alloc + PQ unit tests (no CUnit) ---
 # Use -fsanitize when NOT using ASM allocator (libc tests only)
 TEST_SANITIZE = -fsanitize=address,undefined -fno-omit-frame-pointer
-.PHONY: test_mem_asm test_alloc test_priority_queue test_drivers test_core test_invariants check-layers
+.PHONY: test_mem_asm test_alloc test_priority_queue test_drivers test_core test_invariants test_vm_layer_warning check-layers
 test_mem_asm: $(MEM_ASM_OBJ)
 	$(CC) $(CFLAGS) $(TEST_SANITIZE) -I. -o tests/test_mem_asm tests/test_mem_asm.c $(MEM_ASM_OBJ)
 	./tests/test_mem_asm
@@ -241,6 +241,11 @@ check-stubs:
 test_vm_mem: kernel/core/mm/mem_domain.o $(MEM_ASM_OBJ) VM/devices/vm_mem.o
 	$(CC) $(CFLAGS) $(TEST_SANITIZE) -IVM -IVM/devices -o tests/test_vm_mem tests/test_vm_mem.c kernel/core/mm/mem_domain.o $(MEM_ASM_OBJ) VM/devices/vm_mem.o
 	./tests/test_vm_mem
+
+test_vm_layer_warning: userland/shell/common.o kernel/core/vfs/fs_jail.o kernel/core/mm/mem_domain.o $(MEM_ASM_OBJ)
+	$(CC) $(CFLAGS) $(TEST_SANITIZE) -I. -Ikernel/core/vfs -Ikernel/core/mm -Iuserland/shell -o tests/test_vm_layer_warning tests/test_vm_layer_warning.c \
+	  userland/shell/common.o kernel/core/vfs/fs_jail.o kernel/core/mm/mem_domain.o $(MEM_ASM_OBJ) -Wl,-z,noexecstack
+	./tests/test_vm_layer_warning
 
 .PHONY: test_replay
 test_replay:
