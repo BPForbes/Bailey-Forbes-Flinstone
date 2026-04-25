@@ -17,6 +17,8 @@
 #include "boot/gdt.h"
 #include "boot/idt.h"
 #include "fl/driver/ioport.h"
+#elif defined(__aarch64__)
+#include "boot/vectors.h"
 #endif
 #endif
 
@@ -190,6 +192,8 @@ void drivers_init(const char *disk_file) {
      * PIC init sets IMR=0xFF; clear bit 0 to allow IRQ0 through. */
     fl_ioport_out8(0x21u, fl_ioport_in8(0x21u) & ~0x01u);
     __asm__ volatile("sti");
+#elif defined(__aarch64__)
+    arm_vbar_install();
 #endif
 #endif
     drivers_report_caps();

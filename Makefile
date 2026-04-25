@@ -20,7 +20,8 @@ KERNEL_DRIVERS = kernel/arch/x86_64/drivers
 else ifeq ($(ARCH),arm)
 CC = aarch64-linux-gnu-gcc
 AS = aarch64-linux-gnu-as
-ASMSRCS_BASE = arch/arm/gas/mem_asm.s arch/arm/gas/port_io.s arch/arm/gas/spinlock.s kernel/arch/aarch64/drivers/ramdisk.s
+ASMSRCS_BASE = arch/arm/gas/mem_asm.s arch/arm/gas/port_io.s arch/arm/gas/spinlock.s kernel/arch/aarch64/drivers/ramdisk.s \
+               kernel/arch/aarch64/boot/vectors.s
 ASMSRCS_ALLOC = arch/arm/gas/alloc_core.s arch/arm/gas/alloc_malloc.s arch/arm/gas/alloc_free.s
 ASM_SRC_DIR = arch/arm/gas
 KERNEL_DRIVERS = kernel/arch/aarch64/drivers
@@ -54,7 +55,8 @@ endif
 HAL_SRCS = $(KERNEL_DRIVERS)/../hal/ioport.c
 ifeq ($(ARCH),arm)
 HAL_SRCS += kernel/arch/aarch64/hal/arm_plat.c kernel/arch/aarch64/hal/arm_uart.c \
-            kernel/arch/aarch64/hal/arm_timer.c kernel/arch/aarch64/hal/arm_gic.c
+            kernel/arch/aarch64/hal/arm_timer.c kernel/arch/aarch64/hal/arm_gic.c \
+            kernel/arch/aarch64/boot/exc_dispatch.c
 endif
 CORE_SRCS = kernel/core/vfs/disk.c kernel/core/vfs/path_log.c kernel/core/vfs/cluster.c kernel/core/vfs/fs.c \
             kernel/core/sched/threadpool.c priority_queue.c kernel/core/vfs/fs_jail.c kernel/core/vfs/fs_provider.c kernel/core/vfs/fs_command.c \
