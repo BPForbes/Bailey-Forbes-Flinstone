@@ -440,10 +440,16 @@ int fl_devfs_read(fl_devfs_file_t *file, void *buf, size_t size, size_t *read_ou
     if (!file || !file->node || !(file->flags & FL_DEVFS_O_READ))
         return -1;
     fl_devfs_node_t *node = (fl_devfs_node_t *)file->node;
-    if (!node->ops.read)
+    int rc;
+    /* Character device: byte_read preferred over unit-based read */
+    if (node->ops.byte_read) {
+        rc = node->ops.byte_read(node->dev, buf, size, read_out);
+    } else if (node->ops.read) {
+        uint32_t unit = (uint32_t)(file->pos / FL_SECTOR_SIZE);
+        rc = node->ops.read(node->dev, unit, buf, size, read_out);
+    } else {
         return -1;
-    uint32_t unit = (uint32_t)(file->pos / FL_SECTOR_SIZE);
-    int rc = node->ops.read(node->dev, unit, buf, size, read_out);
+    }
     if (rc == 0)
         file->pos += read_out ? *read_out : 0;
     return rc;
@@ -453,10 +459,16 @@ int fl_devfs_write(fl_devfs_file_t *file, const void *buf, size_t size, size_t *
     if (!file || !file->node || !(file->flags & FL_DEVFS_O_WRITE))
         return -1;
     fl_devfs_node_t *node = (fl_devfs_node_t *)file->node;
-    if (!node->ops.write)
+    int rc;
+    /* Character device: byte_write preferred over unit-based write */
+    if (node->ops.byte_write) {
+        rc = node->ops.byte_write(node->dev, buf, size, written_out);
+    } else if (node->ops.write) {
+        uint32_t unit = (uint32_t)(file->pos / FL_SECTOR_SIZE);
+        rc = node->ops.write(node->dev, unit, buf, size, written_out);
+    } else {
         return -1;
-    uint32_t unit = (uint32_t)(file->pos / FL_SECTOR_SIZE);
-    int rc = node->ops.write(node->dev, unit, buf, size, written_out);
+    }
     if (rc == 0)
         file->pos += written_out ? *written_out : 0;
     return rc;
