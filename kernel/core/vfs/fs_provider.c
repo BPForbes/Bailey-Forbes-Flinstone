@@ -1,6 +1,8 @@
 #include "fs_provider.h"
 #include "common.h"
 #include "dir_asm.h"
+#include "fs_jail.h"
+#include "mem_domain.h"
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -8,6 +10,10 @@
 #include <sys/stat.h>
 #include <dirent.h>
 #include <unistd.h>
+#include <limits.h>
+#ifndef PATH_MAX
+#define PATH_MAX 4096
+#endif
 
 /* Create parent directories for path (mkdir -p style) */
 static int mkdir_parents(const char *path) {
@@ -42,8 +48,20 @@ static const fs_provider_vtable_t local_vtable = {
     local_get_metadata, local_destroy
 };
 
+static int local_path_ok(const char *path_for_jail) {
+    if (!fs_jail_is_active())
+        return 0;
+    if (fs_jail_check_path(path_for_jail) != 0) {
+        errno = EPERM;
+        return -1;
+    }
+    return 0;
+}
+
 static int local_list(fs_provider_t *p, const char *path, fs_node_t **out, int *count) {
     (void)p;
+    const char *eff = (path && path[0]) ? path : g_cwd;
+    if (local_path_ok(eff) != 0) return -1;
     DIR *dp = opendir(path ? path : ".");
     if (!dp) return -1;
     fs_node_t *nodes = malloc(sizeof(fs_node_t) * 256);
@@ -56,10 +74,22 @@ static int local_list(fs_provider_t *p, const char *path, fs_node_t **out, int *
         dir_asm_zero(&nodes[n], sizeof(nodes[n]));
         strncpy(nodes[n].name, e->d_name, FS_NAME_MAX - 1);
         nodes[n].type = (e->d_type == DT_DIR) ? NODE_DIR : NODE_FILE;
-        if (path && path[0])
-            snprintf(nodes[n].path, FS_PATH_MAX, "%s/%s", path, e->d_name);
-        else
-            snprintf(nodes[n].path, FS_PATH_MAX, "%s", e->d_name);
+        if (path && path[0]) {
+            size_t base_len = strnlen(path, FS_PATH_MAX);
+            size_t name_len = strnlen(e->d_name, FS_NAME_MAX);
+            if (base_len + 1 + name_len >= FS_PATH_MAX) {
+                fprintf(stderr, "fs_provider: path overflow: base='%s', entry='%s', limit=%d\n",
+                        path, e->d_name, FS_PATH_MAX);
+                continue;
+            }
+            mem_domain_copy(nodes[n].path, path, base_len);
+            nodes[n].path[base_len] = '/';
+            mem_domain_copy(nodes[n].path + base_len + 1, e->d_name, name_len);
+            nodes[n].path[base_len + 1 + name_len] = '\0';
+        } else {
+            strncpy(nodes[n].path, e->d_name, FS_PATH_MAX - 1);
+            nodes[n].path[FS_PATH_MAX - 1] = '\0';
+        }
         n++;
     }
     closedir(dp);
@@ -70,6 +100,7 @@ static int local_list(fs_provider_t *p, const char *path, fs_node_t **out, int *
 
 static int local_read_text(fs_provider_t *p, const char *path, char *buf, size_t bufsiz) {
     (void)p;
+    if (local_path_ok(path) != 0) return -1;
     FILE *f = fopen(path, "r");
     if (!f) return -1;
     size_t n = fread(buf, 1, bufsiz - 1, f);
@@ -80,6 +111,7 @@ static int local_read_text(fs_provider_t *p, const char *path, char *buf, size_t
 
 static int local_write_text(fs_provider_t *p, const char *path, const char *content) {
     (void)p;
+    if (local_path_ok(path) != 0) return -1;
     FILE *f = fopen(path, "w");
     if (!f) return -1;
     size_t len = strlen(content);
@@ -90,6 +122,7 @@ static int local_write_text(fs_provider_t *p, const char *path, const char *cont
 
 static int local_create_file(fs_provider_t *p, const char *path) {
     (void)p;
+    if (local_path_ok(path) != 0) return -1;
     mkdir_parents(path);
     FILE *f = fopen(path, "w");
     if (!f) return -1;
@@ -99,12 +132,14 @@ static int local_create_file(fs_provider_t *p, const char *path) {
 
 static int local_create_dir(fs_provider_t *p, const char *path) {
     (void)p;
+    if (local_path_ok(path) != 0) return -1;
     mkdir_parents(path);
     return (mkdir(path, 0755) == 0) ? 0 : -1;
 }
 
 static int local_delete(fs_provider_t *p, const char *path) {
     (void)p;
+    if (local_path_ok(path) != 0) return -1;
     struct stat st;
     if (stat(path, &st) != 0) return -1;
     if (S_ISDIR(st.st_mode))
@@ -114,11 +149,14 @@ static int local_delete(fs_provider_t *p, const char *path) {
 
 static int local_move(fs_provider_t *p, const char *src, const char *dst) {
     (void)p;
+    if (local_path_ok(src) != 0) return -1;
+    if (local_path_ok(dst) != 0) return -1;
     return (rename(src, dst) == 0) ? 0 : -1;
 }
 
 static int local_get_metadata(fs_provider_t *p, const char *path, fs_node_t *out) {
     (void)p;
+    if (local_path_ok(path) != 0) return -1;
     struct stat st;
     if (stat(path, &st) != 0) return -1;
     memset(out, 0, sizeof(*out));

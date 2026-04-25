@@ -244,7 +244,11 @@ int vm_boot(void) {
     {
         const char *path = getenv("VM_DISK_IMAGE");
         if (!path) path = "vm_disk.img";
-        vm_disk_init(path, VM_DISK_DEFAULT_SIZE_MB);
+        if (vm_disk_init(path, VM_DISK_DEFAULT_SIZE_MB) != 0) {
+            vm_host_destroy(&s_host);
+            vm_io_shutdown();
+            return -1;
+        }
     }
 #ifdef VM_SDL
     if (vm_sdl_init() != 0 || vm_sdl_create_window(2) != 0)

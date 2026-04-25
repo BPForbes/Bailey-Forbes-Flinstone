@@ -1,6 +1,7 @@
 #include "util.h"
 #include "common.h"
 #include "mem_asm.h"
+#include <limits.h>
 #include <ctype.h>
 #include <string.h>
 
