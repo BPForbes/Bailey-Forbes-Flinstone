@@ -26,7 +26,9 @@ typedef struct fl_devfs_node {
 typedef struct {
     fl_irq_handler_t handler;
     void *ctx;
+    fl_device_t *owner;
     int enabled;
+    unsigned long dispatch_count;
 } fl_irq_slot_t;
 
 typedef struct {
@@ -338,6 +340,7 @@ void fl_drivers_shutdown(void) {
     s_driver_count = 0;
     s_devfs_count = 0;
     s_resource_count = 0;
+    fl_irq_init();
 }
 
 int fl_devfs_register(const char *path, int class_id, void *dev, const fl_devfs_ops_t *ops) {
@@ -429,11 +432,51 @@ void fl_irq_init(void) {
     asm_mem_zero(s_irq, sizeof(s_irq));
 }
 
+static int device_irq_at(const fl_device_t *dev, int irq_resource_index, int *irq_out) {
+    fl_resource_t res;
+    int seen = 0;
+    if (!dev || irq_resource_index < 0 || !irq_out)
+        return -1;
+    for (int i = 0; fl_resource_get(dev, i, &res) == 0; i++) {
+        if (res.type != FL_RESOURCE_IRQ)
+            continue;
+        if (seen++ == irq_resource_index) {
+            *irq_out = (int)res.start;
+            return 0;
+        }
+    }
+    return -1;
+}
+
+static fl_device_t *irq_owner_from_resources(int irq) {
+    for (int i = 0; i < s_resource_count; i++) {
+        if (s_resources[i].resource.type == FL_RESOURCE_IRQ &&
+            s_resources[i].resource.start == (uintptr_t)irq)
+            return s_resources[i].owner;
+    }
+    return NULL;
+}
+
 int fl_irq_register(int irq, fl_irq_handler_t handler, void *ctx) {
     if (irq < 0 || irq >= FL_MODEL_MAX_IRQ || !handler)
         return -1;
+    fl_device_t *owner = irq_owner_from_resources(irq);
+    if (!owner)
+        return -1;
+    if (s_irq[irq].handler)
+        return -1;
     s_irq[irq].handler = handler;
     s_irq[irq].ctx = ctx;
+    s_irq[irq].owner = owner;
+    return 0;
+}
+
+int fl_irq_register_device(fl_device_t *dev, int irq_resource_index, fl_irq_handler_t handler, void *ctx) {
+    int irq = -1;
+    if (device_irq_at(dev, irq_resource_index, &irq) != 0)
+        return -1;
+    if (fl_irq_register(irq, handler, ctx) != 0)
+        return -1;
     return 0;
 }
 
@@ -458,12 +501,25 @@ void fl_irq_eoi(int irq) {
         g_pic_driver->eoi(g_pic_driver, irq);
 }
 
+const fl_device_t *fl_irq_owner(int irq) {
+    if (irq < 0 || irq >= FL_MODEL_MAX_IRQ)
+        return NULL;
+    return s_irq[irq].owner;
+}
+
+unsigned long fl_irq_dispatch_count(int irq) {
+    if (irq < 0 || irq >= FL_MODEL_MAX_IRQ)
+        return 0;
+    return s_irq[irq].dispatch_count;
+}
+
 int fl_irq_dispatch(int irq) {
     if (irq < 0 || irq >= FL_MODEL_MAX_IRQ)
         return -1;
     if (!s_irq[irq].enabled || !s_irq[irq].handler)
         return -1;
     s_irq[irq].handler(irq, s_irq[irq].ctx);
+    s_irq[irq].dispatch_count++;
     fl_irq_eoi(irq);
     return 0;
 }

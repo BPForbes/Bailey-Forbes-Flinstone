@@ -126,16 +126,21 @@ static void test_irq_handler(int irq, void *ctx) {
 
 static int test_irq_and_dma(void) {
     int hits = 0;
+    fl_device_t *dev = fl_device_find_synth("host_blk");
     void *buf = fl_dma_alloc(128);
     ASSERT(buf != NULL);
     fl_dma_free(buf);
-    ASSERT(fl_irq_register(3, test_irq_handler, &hits) == 0);
+    ASSERT(dev != NULL);
+    ASSERT(fl_irq_register_device(dev, 0, test_irq_handler, &hits) == 0);
     fl_irq_enable(3);
     ASSERT(fl_irq_dispatch(3) == 0);
     ASSERT(hits == 1);
+    ASSERT(fl_irq_dispatch_count(3) == 1);
     fl_irq_disable(3);
     ASSERT(fl_irq_dispatch(3) != 0);
     fl_irq_unregister(3);
+    ASSERT(fl_irq_register_device(dev, 99, test_irq_handler, &hits) != 0);
+    ASSERT(fl_irq_register(31, test_irq_handler, &hits) != 0);
     return 0;
 }
 
