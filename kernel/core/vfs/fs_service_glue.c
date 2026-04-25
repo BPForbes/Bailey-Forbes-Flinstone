@@ -14,6 +14,10 @@ void fs_service_glue_init(void) {
         g_fm_service = fm_service_create(provider);
 }
 
+int fs_service_glue_is_ready(void) {
+    return g_fm_service != NULL;
+}
+
 void fs_service_glue_shutdown(void) {
     if (g_fm_service) {
         fm_service_destroy(g_fm_service);
