@@ -10,7 +10,6 @@
 #include "fs_types.h"
 #include "path_log.h"
 #include "fs_jail.h"
-#include "mem_domain.h"
 #include "threadpool.h"
 #include <stdio.h>
 #include <stdlib.h>
