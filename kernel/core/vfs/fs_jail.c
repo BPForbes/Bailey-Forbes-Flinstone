@@ -7,14 +7,18 @@
 #include <stdlib.h>
 #include <string.h>
 #include <unistd.h>
+#include <fcntl.h>
+#include <sys/stat.h>
 
 #define JAIL_ROOT_MAX 4096
 static char   g_fs_jail_root[JAIL_ROOT_MAX];
 static size_t g_fs_jail_len;
+static int    g_jail_dirfd = -1;
 
 void fs_jail_init(void) {
     mem_domain_zero(g_fs_jail_root, sizeof(g_fs_jail_root));
     g_fs_jail_len = 0;
+    g_jail_dirfd = -1;
     if (!g_vm_mode)
         return;
     char wd[JAIL_ROOT_MAX];
@@ -35,6 +39,11 @@ void fs_jail_init(void) {
     g_fs_jail_len = strlen(g_fs_jail_root);
     while (g_fs_jail_len > 1 && g_fs_jail_root[g_fs_jail_len - 1] == '/') {
         g_fs_jail_root[--g_fs_jail_len] = '\0';
+    }
+    /* Open jail root directory for atomic openat operations */
+    g_jail_dirfd = open(g_fs_jail_root, O_RDONLY | O_DIRECTORY);
+    if (g_jail_dirfd < 0) {
+        fprintf(stderr, "VM: failed to open jail root directory: %s\n", g_fs_jail_root);
     }
 }
 
@@ -89,4 +98,94 @@ int fs_jail_check_path(const char *path) {
             return ok;
         }
     }
+}
+
+int fs_jail_openat(const char *path, int flags, mode_t mode) {
+    if (!path) {
+        errno = EINVAL;
+        return -1;
+    }
+
+    /* If jail not active, fall back to regular open */
+    if (!fs_jail_is_active() || g_jail_dirfd < 0) {
+        return open(path, flags, mode);
+    }
+
+    /* Construct absolute path for jail check */
+    char ab[JAIL_ROOT_MAX * 2];
+    mem_domain_zero(ab, sizeof(ab));
+    if (path[0] == '/') {
+        if (strlen(path) >= sizeof(ab)) {
+            errno = ENAMETOOLONG;
+            return -1;
+        }
+        strncpy(ab, path, sizeof(ab) - 1);
+    } else {
+        int n = snprintf(ab, sizeof(ab), "%s/%s", g_cwd, path);
+        if (n < 0 || (size_t)n >= sizeof(ab)) {
+            errno = ENAMETOOLONG;
+            return -1;
+        }
+    }
+    ab[sizeof(ab) - 1] = '\0';
+
+    /* Check if path is under jail - this is a best-effort check */
+    if (fs_jail_check_path(path) != 0) {
+        errno = EPERM;
+        return -1;
+    }
+
+    /* Compute relative path from jail root */
+    const char *relpath = ab;
+    if (strncmp(ab, g_fs_jail_root, g_fs_jail_len) == 0) {
+        relpath = ab + g_fs_jail_len;
+        while (*relpath == '/')
+            relpath++;
+        if (*relpath == '\0')
+            relpath = ".";
+    }
+
+    /* Open with O_NOFOLLOW to prevent symlink attacks */
+    int fd = openat(g_jail_dirfd, relpath, flags | O_NOFOLLOW, mode);
+    if (fd < 0)
+        return -1;
+
+    /* Verify the opened file is within jail by checking device/inode */
+    struct stat jail_st, file_st;
+    if (fstat(g_jail_dirfd, &jail_st) != 0) {
+        int saved_errno = errno;
+        close(fd);
+        errno = saved_errno;
+        return -1;
+    }
+
+    if (fstat(fd, &file_st) != 0) {
+        int saved_errno = errno;
+        close(fd);
+        errno = saved_errno;
+        return -1;
+    }
+
+    /* Verify file is on same device as jail root */
+    if (file_st.st_dev != jail_st.st_dev) {
+        close(fd);
+        errno = EPERM;
+        return -1;
+    }
+
+    /* Additional check: get canonical path of opened fd and verify it's under jail */
+    char fd_path[JAIL_ROOT_MAX];
+    char link_path[64];
+    snprintf(link_path, sizeof(link_path), "/proc/self/fd/%d", fd);
+    ssize_t len = readlink(link_path, fd_path, sizeof(fd_path) - 1);
+    if (len > 0) {
+        fd_path[len] = '\0';
+        if (!under_jail(fd_path)) {
+            close(fd);
+            errno = EPERM;
+            return -1;
+        }
+    }
+
+    return fd;
 }

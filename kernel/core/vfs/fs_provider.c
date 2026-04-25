@@ -77,8 +77,11 @@ static int local_list(fs_provider_t *p, const char *path, fs_node_t **out, int *
         if (path && path[0]) {
             size_t base_len = strnlen(path, FS_PATH_MAX);
             size_t name_len = strnlen(e->d_name, FS_NAME_MAX);
-            if (base_len + 1 + name_len >= FS_PATH_MAX)
+            if (base_len + 1 + name_len >= FS_PATH_MAX) {
+                fprintf(stderr, "fs_provider: path overflow: base='%s', entry='%s', limit=%d\n",
+                        path, e->d_name, FS_PATH_MAX);
                 continue;
+            }
             mem_domain_copy(nodes[n].path, path, base_len);
             nodes[n].path[base_len] = '/';
             mem_domain_copy(nodes[n].path + base_len + 1, e->d_name, name_len);
