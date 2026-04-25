@@ -3,6 +3,7 @@
 #include "fl_cstr.h"
 #include "fl/mm.h"
 #include "fl/mem_asm.h"
+#include "core/sys/spinlock.h"
 #ifndef DRIVERS_BAREMETAL
 #include <stdio.h>
 #endif
@@ -63,6 +64,8 @@ typedef struct {
     fl_device_t *owner;
 } fl_dma_record_t;
 
+static volatile int s_model_lock = SPINLOCK_INIT;
+
 static const fl_driver_desc_t *s_drivers[FL_MODEL_MAX_DRIVERS];
 static int s_driver_count;
 static fl_bound_device_t s_devices[FL_MODEL_MAX_DEVICES];
@@ -96,9 +99,13 @@ static int driver_matches(const fl_driver_desc_t *driver, const fl_device_desc_t
 int fl_driver_registry_register(const fl_driver_desc_t *desc) {
     if (!desc || !desc->name || !desc->ops)
         return -1;
-    if (s_driver_count >= FL_MODEL_MAX_DRIVERS)
+    spinlock_acquire(&s_model_lock);
+    if (s_driver_count >= FL_MODEL_MAX_DRIVERS) {
+        spinlock_release(&s_model_lock);
         model_overflow_panic("driver table full (FL_MODEL_MAX_DRIVERS)");
+    }
     s_drivers[s_driver_count++] = desc;
+    spinlock_release(&s_model_lock);
     return 0;
 }
 
@@ -395,8 +402,11 @@ void fl_drivers_shutdown(void) {
 int fl_devfs_register(const char *path, int class_id, void *dev, const fl_devfs_ops_t *ops) {
     if (!path || !dev || !ops)
         return -1;
-    if (s_devfs_count >= FL_MODEL_MAX_DEVFS)
+    spinlock_acquire(&s_model_lock);
+    if (s_devfs_count >= FL_MODEL_MAX_DEVFS) {
+        spinlock_release(&s_model_lock);
         model_overflow_panic("devfs table full (FL_MODEL_MAX_DEVFS)");
+    }
     if (fl_cstr_len(path, sizeof(s_devfs[0].path)) >= sizeof(s_devfs[0].path))
         return -1;
     for (int i = 0; i < s_devfs_count; i++)
@@ -407,19 +417,23 @@ int fl_devfs_register(const char *path, int class_id, void *dev, const fl_devfs_
     node->class = (fl_driver_class_t)class_id;
     node->dev = (fl_device_t *)dev;
     node->ops = *ops;
+    spinlock_release(&s_model_lock);
     return 0;
 }
 
 void fl_devfs_unregister(const char *path) {
     if (!path)
         return;
+    spinlock_acquire(&s_model_lock);
     for (int i = 0; i < s_devfs_count; i++) {
         if (fl_cstr_eq(s_devfs[i].path, path)) {
             s_devfs[i] = s_devfs[s_devfs_count - 1];
             s_devfs_count--;
+            spinlock_release(&s_model_lock);
             return;
         }
     }
+    spinlock_release(&s_model_lock);
 }
 
 int fl_devfs_open(const char *path, int flags, fl_devfs_file_t *out) {
