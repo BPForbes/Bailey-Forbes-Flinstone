@@ -2,14 +2,9 @@
 #include "drivers.h"
 #include <stdint.h>
 
-/* Handler signature: void handler(uint64_t vector, uint64_t error_code)
- * For exceptions that don't push an error code, the stub pushes 0.
- * Handlers may ignore error_code if not applicable to their vector. */
-typedef void (*idt_handler_t)(uint64_t vector, uint64_t error_code);
+static x86_idt_handler_t s_handlers[256];
 
-static idt_handler_t s_handlers[256];
-
-int x86_idt_register_handler(int vector, idt_handler_t handler) {
+int x86_idt_register_handler(int vector, x86_idt_handler_t handler) {
     if (vector < 0 || vector >= 256 || !handler)
         return -1;
     s_handlers[vector] = handler;
