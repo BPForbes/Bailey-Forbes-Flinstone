@@ -3,8 +3,8 @@
 
 /*
  * Spinlock primitive backed by architecture-specific ASM:
- *   x86_64: LOCK CMPXCHG acquire, XCHG release (spinlock.s)
- *   AArch64: LDAXR/STXR acquire, DMB+STLR release (spinlock.s)
+ *   x86_64: LOCK CMPXCHG acquire, XCHG release (kernel/arch/x86_64/boot/spinlock.s)
+ *   AArch64: LDAXR/STXR acquire, STLR+SEV release (kernel/arch/aarch64/boot/spinlock.s)
  *   Host builds: no-op (single-threaded driver init path)
  *
  * Usage:

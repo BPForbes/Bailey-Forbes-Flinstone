@@ -134,8 +134,8 @@ concurrent access produces races.
 Fix: add a single `volatile int g_drv_lock` spinlock (test-and-set via GAS
 `lock bts` on x86, `ldxr`/`stxr` on ARM) that guards the three static
 arrays.  IRQ dispatch acquires then releases.  Registration saves/restores
-interrupt state around the critical section.  Keep the spinlock in a separate
-`kernel/core/sys/spinlock.s` per the project's ASM-for-primitives rule.
+interrupt state around the critical section.  Keep the spinlock assembly with
+the architecture boot code under `kernel/arch/{x86_64,aarch64}/boot/`.
 
 ---
 
