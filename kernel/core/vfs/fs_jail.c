@@ -3,7 +3,6 @@
 #include "mem_domain.h"
 #include <errno.h>
 #include <limits.h>
-#include <libgen.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -22,7 +21,11 @@ void fs_jail_init(void) {
     mem_domain_zero(wd, sizeof(wd));
     if (!getcwd(wd, sizeof(wd)))
         return;
-    const char *root = g_vm_root[0] ? g_vm_root : wd;
+    if (!g_vm_root[0]) {
+        fprintf(stderr, "VM: sandbox root not configured\n");
+        return;
+    }
+    const char *root = g_vm_root;
     if (realpath(root, g_fs_jail_root) == NULL) {
         fprintf(stderr, "VM: sandbox root unavailable: %s\n", root);
         mem_domain_zero(g_fs_jail_root, sizeof(g_fs_jail_root));
@@ -40,7 +43,6 @@ int fs_jail_is_active(void) {
 }
 
 static int under_jail(const char *canon) {
-    if (g_fs_jail_len == 0) return 1;
     if (strncmp(canon, g_fs_jail_root, g_fs_jail_len) != 0) return 0;
     return (canon[g_fs_jail_len] == '\0' || canon[g_fs_jail_len] == '/');
 }
@@ -56,9 +58,13 @@ int fs_jail_check_path(const char *path) {
     char ab[JAIL_ROOT_MAX * 2];
     mem_domain_zero(ab, sizeof(ab));
     if (path[0] == '/') {
+        if (strlen(path) >= sizeof(ab))
+            return -1;
         strncpy(ab, path, sizeof(ab) - 1);
     } else {
-        snprintf(ab, sizeof(ab), "%s/%s", g_cwd, path);
+        int n = snprintf(ab, sizeof(ab), "%s/%s", g_cwd, path);
+        if (n < 0 || (size_t)n >= sizeof(ab))
+            return -1;
     }
     ab[sizeof(ab) - 1] = '\0';
 
@@ -71,11 +77,16 @@ int fs_jail_check_path(const char *path) {
     mem_domain_zero(pcopy, sizeof(pcopy));
     strncpy(pcopy, ab, sizeof(pcopy) - 1);
     pcopy[sizeof(pcopy) - 1] = '\0';
-    char *dname = dirname(pcopy);
-    char *dcan = realpath(dname, NULL);
-    if (!dcan)
-        return -1;
-    int ok = under_jail(dcan) ? 0 : -1;
-    free(dcan);
-    return ok;
+    for (;;) {
+        char *slash = strrchr(pcopy, '/');
+        if (!slash || slash == pcopy)
+            return -1;
+        *slash = '\0';
+        char *dcan = realpath(pcopy, NULL);
+        if (dcan) {
+            int ok = under_jail(dcan) ? 0 : -1;
+            free(dcan);
+            return ok;
+        }
+    }
 }

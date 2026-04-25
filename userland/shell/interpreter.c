@@ -228,13 +228,19 @@ int execute_command_str(const char *line) {
         }
         char oldcwd[CWD_MAX];
         mem_domain_zero(oldcwd, sizeof(oldcwd));
-        getcwd(oldcwd, sizeof(oldcwd));
+        if (getcwd(oldcwd, sizeof(oldcwd)) == NULL) {
+            perror("cd: getcwd");
+            free(cmdLine);
+            return 1;
+        }
         if (chdir(resolved) == 0) {
             if (getcwd(g_cwd, sizeof(g_cwd)) == NULL)
                 strncpy(g_cwd, resolved, sizeof(g_cwd) - 1);
             if (jail_blocked_path("cd", args[1], g_cwd)) {
-                if (oldcwd[0] && chdir(oldcwd) == 0)
+                if (chdir(oldcwd) == 0) {
                     strncpy(g_cwd, oldcwd, sizeof(g_cwd) - 1);
+                    g_cwd[sizeof(g_cwd) - 1] = '\0';
+                }
                 free(cmdLine);
                 return 1;
             }
