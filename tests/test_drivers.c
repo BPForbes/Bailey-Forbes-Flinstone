@@ -3,6 +3,7 @@
  */
 #include "drivers/drivers.h"
 #include "drivers/block/block_driver.h"
+#include "fl/driver/device.h"
 #include "fl/driver/devfs.h"
 #include "fl/driver/irq.h"
 #include "fl/mm.h"
@@ -50,6 +51,35 @@ static int test_block_write_read(void) {
     ASSERT(g_block_driver->write_sector((block_driver_t *)g_block_driver, 0, wbuf) == 0);
     ASSERT(g_block_driver->read_sector((block_driver_t *)g_block_driver, 0, rbuf) == 0);
     ASSERT(memcmp(wbuf, rbuf, cs) == 0);
+    return 0;
+}
+
+static int test_device_model(void) {
+    fl_device_desc_t descs[4];
+    const fl_driver_desc_t *matched = NULL;
+    fl_device_t *dev = NULL;
+    const fl_device_desc_t *desc = NULL;
+    fl_device_info_t info;
+
+    memset(descs, 0, sizeof(descs));
+    memset(&info, 0, sizeof(info));
+    ASSERT(fl_bus_enumerate(descs, 4) == 1);
+    ASSERT(fl_driver_registry_match(&descs[0], &matched) == 0);
+    ASSERT(matched != NULL);
+    ASSERT(strcmp(matched->name, "host-block") == 0);
+    ASSERT(fl_device_count() == 1);
+    ASSERT(fl_device_get_info(0, &info) == 0);
+    ASSERT(info.dev != NULL);
+    ASSERT(info.desc != NULL);
+    ASSERT(strcmp(info.driver_name, "host-block") == 0);
+    ASSERT(info.driver_class == FL_DRV_CLASS_BLOCK);
+    ASSERT(info.state == FL_DRV_STATE_STARTED);
+    dev = fl_device_find_synth("host_blk");
+    ASSERT(dev != NULL);
+    desc = fl_device_get_desc(dev);
+    ASSERT(desc != NULL);
+    ASSERT(desc->bus_type == FL_BUS_SYNTH);
+    ASSERT(strcmp(desc->synth_id, "host_blk") == 0);
     return 0;
 }
 
@@ -157,6 +187,10 @@ int main(void) {
 
     printf("test_block_write_read... ");
     if (test_block_write_read() != 0) { drivers_shutdown(); unlink(path); return 1; }
+    printf("OK\n");
+
+    printf("test_device_model... ");
+    if (test_device_model() != 0) { drivers_shutdown(); unlink(path); return 1; }
     printf("OK\n");
 
     printf("test_devfs_block... ");

@@ -72,6 +72,57 @@ int fl_driver_registry_match(const fl_device_desc_t *dev, const fl_driver_desc_t
     return -1;
 }
 
+int fl_device_count(void) {
+    return s_device_count;
+}
+
+int fl_device_get_info(int index, fl_device_info_t *out) {
+    if (!out || index < 0 || index >= s_device_count)
+        return -1;
+    fl_bound_device_t *bound = &s_devices[index];
+    out->dev = bound->dev;
+    out->desc = fl_device_get_desc(bound->dev);
+    out->driver_name = bound->driver ? bound->driver->name : NULL;
+    out->driver_class = bound->driver ? (int)bound->driver->class : -1;
+    out->state = bound->state;
+    return 0;
+}
+
+fl_device_t *fl_device_at(int index) {
+    if (index < 0 || index >= s_device_count)
+        return NULL;
+    return s_devices[index].dev;
+}
+
+fl_device_t *fl_device_find_synth(const char *synth_id) {
+    if (!synth_id)
+        return NULL;
+    for (int i = 0; i < s_device_count; i++) {
+        const fl_device_desc_t *desc = fl_device_get_desc(s_devices[i].dev);
+        if (desc && desc->bus_type == FL_BUS_SYNTH && strcmp(desc->synth_id, synth_id) == 0)
+            return s_devices[i].dev;
+    }
+    return NULL;
+}
+
+const fl_driver_desc_t *fl_device_get_driver(fl_device_t *dev) {
+    if (!dev)
+        return NULL;
+    for (int i = 0; i < s_device_count; i++)
+        if (s_devices[i].dev == dev)
+            return s_devices[i].driver;
+    return NULL;
+}
+
+fl_driver_state_t fl_device_get_state(fl_device_t *dev) {
+    if (!dev)
+        return FL_DRV_STATE_NONE;
+    for (int i = 0; i < s_device_count; i++)
+        if (s_devices[i].dev == dev)
+            return s_devices[i].state;
+    return FL_DRV_STATE_NONE;
+}
+
 static int block_devfs_read(void *dev, uint32_t unit, void *buf, size_t len, size_t *read_out) {
     (void)dev;
     if (!g_block_driver || !buf || len < FL_SECTOR_SIZE)

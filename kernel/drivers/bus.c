@@ -24,7 +24,7 @@ int fl_bus_enumerate(fl_device_desc_t *descs, int max_descs) {
 #endif
 }
 
-const fl_device_desc_t *fl_device_get_desc(fl_device_t *dev) {
+const fl_device_desc_t *fl_device_get_desc(const fl_device_t *dev) {
     return dev ? &dev->desc : NULL;
 }
 

@@ -69,7 +69,7 @@ typedef struct fl_device fl_device_t;
 int fl_bus_enumerate(fl_device_desc_t *descs, int max_descs);
 
 /* Get device descriptor for a fl_device handle */
-const fl_device_desc_t *fl_device_get_desc(fl_device_t *dev);
+const fl_device_desc_t *fl_device_get_desc(const fl_device_t *dev);
 
 /* Create/destroy device handle (used by registry during probe) */
 fl_device_t *fl_device_create(const fl_device_desc_t *desc);
