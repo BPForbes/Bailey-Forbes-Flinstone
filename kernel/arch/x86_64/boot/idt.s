@@ -11,8 +11,8 @@
  *   dispatcher path used by named stubs.
  *
  * isr_common_stub:
- *   Saves caller-save regs, calls x86_idt_dispatch(vector) (C function in
- *   timer_driver.c / pic_driver.c), restores regs, iretqs.
+ *   Saves caller-save regs, calls x86_idt_dispatch(vector, error_code)
+ *   (C function in idt_dispatch.c), restores regs, iretqs.
  *
  * idt_install():
  *   Iterates all 256 vectors: 0-47 get their specific stub via a static

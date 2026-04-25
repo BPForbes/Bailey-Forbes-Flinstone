@@ -46,6 +46,7 @@ typedef struct {
 /* Host / VM mode                                                       */
 /* ------------------------------------------------------------------ */
 
+#ifndef DRIVERS_BAREMETAL
 static uint64_t host_tick_count(timer_driver_t *drv) {
     (void)drv;
     static uint64_t t;
@@ -56,6 +57,7 @@ static void host_msleep(timer_driver_t *drv, unsigned int ms) {
     (void)drv;
     usleep(ms * 1000);
 }
+#endif
 
 /* ------------------------------------------------------------------ */
 /* x86-64 / i386 bare-metal                                            */
@@ -67,7 +69,9 @@ static void host_msleep(timer_driver_t *drv, unsigned int ms) {
 
 static timer_impl_t *s_irq0_impl;
 
-static void x86_irq0_handler(void) {
+static void x86_irq0_handler(uint64_t vector, uint64_t error_code) {
+    (void)vector;
+    (void)error_code;
     if (s_irq0_impl)
         s_irq0_impl->ticks++;
 }
