@@ -127,10 +127,28 @@ static void test_irq_handler(int irq, void *ctx) {
 static int test_irq_and_dma(void) {
     int hits = 0;
     fl_device_t *dev = fl_device_find_synth("host_blk");
-    void *buf = fl_dma_alloc(128);
+    uint8_t src[128], dst[128];
+    fl_dma_info_t info;
+    void *buf = fl_dma_alloc_device(dev, sizeof(dst));
+    for (size_t i = 0; i < sizeof(src); i++)
+        src[i] = (uint8_t)(i + 1);
     ASSERT(buf != NULL);
-    fl_dma_free(buf);
     ASSERT(dev != NULL);
+    ASSERT(fl_dma_allocation_count() == 1);
+    ASSERT(fl_dma_get_info(buf, &info) == 0);
+    ASSERT(info.ptr == buf);
+    ASSERT(info.size == sizeof(dst));
+    ASSERT(info.owner == dev);
+    fl_dma_copy(buf, src, sizeof(src));
+    memset(dst, 0, sizeof(dst));
+    fl_dma_copy(dst, buf, sizeof(dst));
+    ASSERT(memcmp(src, dst, sizeof(src)) == 0);
+    fl_dma_zero(buf, sizeof(dst));
+    memset(dst, 0xFF, sizeof(dst));
+    fl_dma_copy(dst, buf, sizeof(dst));
+    ASSERT(dst[0] == 0 && dst[sizeof(dst) - 1] == 0);
+    fl_dma_free(buf);
+    ASSERT(fl_dma_allocation_count() == 0);
     ASSERT(fl_irq_register_device(dev, 0, test_irq_handler, &hits) == 0);
     fl_irq_enable(3);
     ASSERT(fl_irq_dispatch(3) == 0);

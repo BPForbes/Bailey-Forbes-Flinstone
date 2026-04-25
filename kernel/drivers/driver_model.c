@@ -9,6 +9,7 @@
 #define FL_MODEL_MAX_DEVFS   16
 #define FL_MODEL_MAX_IRQ     32
 #define FL_MODEL_MAX_RESOURCES 64
+#define FL_MODEL_MAX_DMA     32
 
 typedef struct {
     fl_device_t *dev;
@@ -36,6 +37,12 @@ typedef struct {
     fl_device_t *owner;
 } fl_resource_claim_t;
 
+typedef struct {
+    void *ptr;
+    size_t size;
+    fl_device_t *owner;
+} fl_dma_record_t;
+
 static const fl_driver_desc_t *s_drivers[FL_MODEL_MAX_DRIVERS];
 static int s_driver_count;
 static fl_bound_device_t s_devices[FL_MODEL_MAX_DEVICES];
@@ -45,6 +52,8 @@ static int s_devfs_count;
 static fl_irq_slot_t s_irq[FL_MODEL_MAX_IRQ];
 static fl_resource_claim_t s_resources[FL_MODEL_MAX_RESOURCES];
 static int s_resource_count;
+static fl_dma_record_t s_dma[FL_MODEL_MAX_DMA];
+static int s_dma_count;
 
 static int driver_matches(const fl_driver_desc_t *driver, const fl_device_desc_t *dev) {
     if (!driver || !dev)
@@ -524,10 +533,62 @@ int fl_irq_dispatch(int irq) {
     return 0;
 }
 
+void *fl_dma_alloc_device(fl_device_t *dev, size_t size) {
+    if (size == 0 || s_dma_count >= FL_MODEL_MAX_DMA)
+        return NULL;
+    void *ptr = mem_domain_alloc(MEM_DOMAIN_DRIVER, size);
+    if (!ptr)
+        return NULL;
+    asm_mem_zero(ptr, size);
+    s_dma[s_dma_count].ptr = ptr;
+    s_dma[s_dma_count].size = size;
+    s_dma[s_dma_count].owner = dev;
+    s_dma_count++;
+    return ptr;
+}
+
 void *fl_dma_alloc(size_t size) {
-    return kmalloc(size);
+    return fl_dma_alloc_device(NULL, size);
 }
 
 void fl_dma_free(void *ptr) {
-    kfree(ptr);
+    if (!ptr)
+        return;
+    for (int i = 0; i < s_dma_count; i++) {
+        if (s_dma[i].ptr == ptr) {
+            mem_domain_zero(ptr, s_dma[i].size);
+            mem_domain_free(MEM_DOMAIN_DRIVER, ptr);
+            s_dma[i] = s_dma[s_dma_count - 1];
+            s_dma_count--;
+            return;
+        }
+    }
+}
+
+int fl_dma_get_info(void *ptr, fl_dma_info_t *out) {
+    if (!ptr || !out)
+        return -1;
+    for (int i = 0; i < s_dma_count; i++) {
+        if (s_dma[i].ptr == ptr) {
+            out->ptr = s_dma[i].ptr;
+            out->size = s_dma[i].size;
+            out->owner = s_dma[i].owner;
+            return 0;
+        }
+    }
+    return -1;
+}
+
+int fl_dma_allocation_count(void) {
+    return s_dma_count;
+}
+
+void fl_dma_zero(void *ptr, size_t size) {
+    if (ptr && size)
+        asm_mem_zero(ptr, size);
+}
+
+void fl_dma_copy(void *dst, const void *src, size_t size) {
+    if (dst && src && size)
+        asm_mem_copy(dst, src, size);
 }
