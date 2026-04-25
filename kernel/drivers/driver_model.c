@@ -4,6 +4,9 @@
 #include "fl/mm.h"
 #include "fl/mem_asm.h"
 #include "core/sys/spinlock.h"
+#ifdef DRIVERS_BAREMETAL
+#include "drivers.h"
+#endif
 #ifndef DRIVERS_BAREMETAL
 #include <stdio.h>
 #endif
@@ -18,7 +21,18 @@
 /* Halt-style panic used when a hard limit is exceeded at registration time. */
 static void model_overflow_panic(const char *msg) {
 #ifdef DRIVERS_BAREMETAL
-    (void)msg;
+    if (g_display_driver && g_display_driver->putchar) {
+        const char *prefix = "*** PANIC ***: ";
+        for (; *prefix; prefix++)
+            g_display_driver->putchar(g_display_driver, *prefix);
+        if (msg) {
+            for (; *msg; msg++)
+                g_display_driver->putchar(g_display_driver, *msg);
+        }
+        g_display_driver->putchar(g_display_driver, '\n');
+        if (g_display_driver->flush_cursor)
+            g_display_driver->flush_cursor(g_display_driver);
+    }
 #if defined(__x86_64__) || defined(__i386__)
     __asm__ volatile("cli");
     for (;;) __asm__ volatile("hlt");
@@ -407,11 +421,16 @@ int fl_devfs_register(const char *path, int class_id, void *dev, const fl_devfs_
         spinlock_release(&s_model_lock);
         model_overflow_panic("devfs table full (FL_MODEL_MAX_DEVFS)");
     }
-    if (fl_cstr_len(path, sizeof(s_devfs[0].path)) >= sizeof(s_devfs[0].path))
+    if (fl_cstr_len(path, sizeof(s_devfs[0].path)) >= sizeof(s_devfs[0].path)) {
+        spinlock_release(&s_model_lock);
         return -1;
-    for (int i = 0; i < s_devfs_count; i++)
-        if (fl_cstr_eq(s_devfs[i].path, path))
+    }
+    for (int i = 0; i < s_devfs_count; i++) {
+        if (fl_cstr_eq(s_devfs[i].path, path)) {
+            spinlock_release(&s_model_lock);
             return -1;
+        }
+    }
     fl_devfs_node_t *node = &s_devfs[s_devfs_count++];
     fl_cstr_copy(node->path, sizeof(node->path), path);
     node->class = (fl_driver_class_t)class_id;
@@ -625,16 +644,23 @@ int fl_irq_dispatch(int irq) {
 }
 
 void *fl_dma_alloc_device(fl_device_t *dev, size_t size) {
-    if (size == 0 || s_dma_count >= FL_MODEL_MAX_DMA)
+    if (size == 0)
         return NULL;
     void *ptr = mem_domain_alloc(MEM_DOMAIN_DRIVER, size);
     if (!ptr)
         return NULL;
     asm_mem_zero(ptr, size);
+    spinlock_acquire(&s_model_lock);
+    if (s_dma_count >= FL_MODEL_MAX_DMA) {
+        spinlock_release(&s_model_lock);
+        mem_domain_free(MEM_DOMAIN_DRIVER, ptr);
+        return NULL;
+    }
     s_dma[s_dma_count].ptr = ptr;
     s_dma[s_dma_count].size = size;
     s_dma[s_dma_count].owner = dev;
     s_dma_count++;
+    spinlock_release(&s_model_lock);
     return ptr;
 }
 
@@ -645,15 +671,19 @@ void *fl_dma_alloc(size_t size) {
 void fl_dma_free(void *ptr) {
     if (!ptr)
         return;
+    spinlock_acquire(&s_model_lock);
     for (int i = 0; i < s_dma_count; i++) {
         if (s_dma[i].ptr == ptr) {
-            mem_domain_zero(ptr, s_dma[i].size);
-            mem_domain_free(MEM_DOMAIN_DRIVER, ptr);
+            size_t size = s_dma[i].size;
             s_dma[i] = s_dma[s_dma_count - 1];
             s_dma_count--;
+            spinlock_release(&s_model_lock);
+            mem_domain_zero(ptr, size);
+            mem_domain_free(MEM_DOMAIN_DRIVER, ptr);
             return;
         }
     }
+    spinlock_release(&s_model_lock);
 }
 
 int fl_dma_get_info(void *ptr, fl_dma_info_t *out) {

@@ -57,15 +57,16 @@ returning.
 *out = (sc < 128) ? (char)sc : '\0';
 ```
 
-Port 0x60 delivers PS/2 Set-1 make/break codes, not ASCII.  Most printable
-keys map correctly by accident (Set-1 make codes for a–z happen to match
-ASCII) but Shift, Ctrl, function keys, arrow keys and all break codes are
-completely wrong.
+Port 0x60 delivers PS/2 Set-1 make/break scancode values, not ASCII.  For
+example, the `a` make code is `0x1E`, while ASCII `a` is `0x61`, so direct
+casting with `(sc < 128) ? (char)sc : '\0'` produced largely incorrect
+characters for most keys, including modifiers, function keys, arrows, and
+break codes.
 
-Fix: add a US-QWERTY Set-1 scancode-to-ASCII translation table (unshifted +
-shifted), track modifier state (Shift, Caps Lock), and only emit a character
-on make codes for printable keys.  Ignore break codes (bit 7 set) and
-non-printable make codes.
+Fix: add a US-QWERTY Set-1 scancode-to-keymap lookup (unshifted + shifted),
+track make/break and modifier state (Shift, Caps Lock), and only emit a
+character on printable make codes.  Ignore break codes (bit 7 set) and
+non-printable make codes instead of direct-casting raw scancodes.
 
 ---
 

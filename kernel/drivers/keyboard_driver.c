@@ -60,7 +60,8 @@ static const char s_sc_unshifted[89] = {
 /*38*/  0,   ' ',  0,   0,   0,   0,   0,    0,
 /*40*/  0,    0,   0,   0,   0,   0,   0,   '7',
 /*48*/ '8',  '9', '-', '4', '5', '6', '+',  '1',
-/*50*/ '2',  '3', '0', '.'
+/*50*/ '2',  '3', '0', '.', 0,   0,   0,    0,
+/*58*/  0
 };
 
 static const char s_sc_shifted[89] = {
@@ -74,7 +75,8 @@ static const char s_sc_shifted[89] = {
 /*38*/  0,   ' ',  0,   0,   0,   0,   0,    0,
 /*40*/  0,    0,   0,   0,   0,   0,   0,   '7',
 /*48*/ '8',  '9', '-', '4', '5', '6', '+',  '1',
-/*50*/ '2',  '3', '0', '.'
+/*50*/ '2',  '3', '0', '.', 0,   0,   0,    0,
+/*58*/  0
 };
 
 /* Modifier scan codes (Set 1) */
@@ -114,8 +116,10 @@ static int hw_get_char(keyboard_driver_t *drv, char *out) {
     /* Translate printable make codes */
     if (sc >= (uint8_t)(sizeof(s_sc_unshifted) / sizeof(s_sc_unshifted[0])))
         return -1;
-    int use_upper = s_shift ^ s_capslock;
-    char c = use_upper ? s_sc_shifted[sc] : s_sc_unshifted[sc];
+    char base = s_sc_unshifted[sc];
+    int is_letter = (base >= 'a' && base <= 'z');
+    int use_shifted = s_shift ^ (s_capslock && is_letter);
+    char c = use_shifted ? s_sc_shifted[sc] : base;
     if (!c)
         return -1;
     *out = c;

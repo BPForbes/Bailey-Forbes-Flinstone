@@ -3,13 +3,14 @@
  *
  * Host mode:      usleep / static counter (safe for VM and test runs)
  * x86_64 bare-metal:
- *   tick_count  - RDTSC (always-available monotonic CPU counter)
+ *   tick_count  - IRQ0/PIT-driven coarse tick counter, with RDTSC fallback
+ *                 before the IRQ0 handler is registered
  *   msleep      - RDTSC-based busy-wait (1 GHz conservative lower bound;
  *                 accurate enough for drivers; a TSC calibration pass can
  *                 refine this later)
  *   PIT init    - programs channel 0 at ~100 Hz (mode 2 / rate-generator)
- *                 so IRQ0 hardware is ready; impl->ticks is reserved for
- *                 a future IRQ0 handler to increment
+ *                 and x86_irq0_handler increments impl->ticks for legacy
+ *                 software tick semantics
  * AArch64 bare-metal:
  *   tick_count  - CNTVCT_EL0 (generic timer virtual count; real hardware)
  *   msleep      - CNTVCT_EL0 + CNTFRQ_EL0 (actual system timer frequency,
@@ -38,7 +39,7 @@
 
 typedef struct {
     timer_driver_t base;
-    volatile uint64_t ticks; /* incremented by IRQ0 handler when wired up */
+    volatile uint64_t ticks; /* incremented by IRQ0 handler */
 } timer_impl_t;
 
 /* ------------------------------------------------------------------ */
@@ -73,6 +74,9 @@ static void x86_irq0_handler(void) {
 
 static uint64_t hw_tick_count(timer_driver_t *drv) {
     (void)drv;
+    if (s_irq0_impl)
+        return s_irq0_impl->ticks;
+
     uint32_t lo, hi;
     /* RDTSC: reads the time-stamp counter into EDX:EAX.
      * "volatile" prevents the compiler from reordering or eliminating
@@ -124,10 +128,8 @@ static void hw_pit_init(void) {
     /* Program PIT channel 0:
      *   - Command 0x34: channel 0, lobyte/hibyte access, mode 2
      *     (rate generator), binary counting
-     *   - Divisor 11931 → IRQ0 fires at ~100 Hz
-     * IRQ0 is not yet handled (no IDT wired), but the hardware is now
-     * configured and ready; a future IRQ0 handler can increment
-     * impl->ticks to drive scheduler-grade timing. */
+     *   - Divisor 11931 → IRQ0 fires at ~100 Hz.
+     * x86_irq0_handler consumes the IRQ0 stream and increments impl->ticks. */
     fl_ioport_out8(PIT_CMD,      PIT_CMD_CH0_RATE);
     fl_ioport_out8(PIT_CH0_DATA, (uint8_t)(PIT_100HZ_DIV & 0xFFu));
     fl_ioport_out8(PIT_CH0_DATA, (uint8_t)((PIT_100HZ_DIV >> 8) & 0xFFu));
@@ -135,7 +137,9 @@ static void hw_pit_init(void) {
 
 static void hw_register_irq0(timer_impl_t *impl) {
     s_irq0_impl = impl;
-    x86_idt_register_handler(0x20, x86_irq0_handler);
+    /* idt_install must run before hw_register_irq0 installs x86_irq0_handler. */
+    if (x86_idt_register_handler(0x20, x86_irq0_handler) != 0)
+        s_irq0_impl = (void*)0;
 }
 
 /* ------------------------------------------------------------------ */

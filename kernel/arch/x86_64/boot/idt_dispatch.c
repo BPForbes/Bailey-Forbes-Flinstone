@@ -4,9 +4,11 @@
 
 static void (*s_handlers[256])(void);
 
-void x86_idt_register_handler(int vector, void (*handler)(void)) {
-    if (vector >= 0 && vector < 256)
-        s_handlers[vector] = handler;
+int x86_idt_register_handler(int vector, void (*handler)(void)) {
+    if (vector < 0 || vector >= 256 || !handler)
+        return -1;
+    s_handlers[vector] = handler;
+    return 0;
 }
 
 /* Called from isr_common_stub with the vector number in %rdi (SysV AMD64 ABI).

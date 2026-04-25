@@ -25,6 +25,7 @@ typedef struct {
     int row, col;
     uint8_t color;
 #ifdef DRIVERS_BAREMETAL
+    int cursor_dirty;
     volatile uint16_t *vga;
 #endif
 } display_impl_t;
@@ -60,6 +61,11 @@ static void host_refresh_vga(display_driver_t *drv, const void *vga_buf) {
     }
     fflush(stdout);
 }
+
+static void host_flush_cursor(display_driver_t *drv) {
+    (void)drv;
+    fflush(stdout);
+}
 #endif
 
 #ifdef DRIVERS_BAREMETAL
@@ -72,6 +78,10 @@ static void host_refresh_vga(display_driver_t *drv, const void *vga_buf) {
 #define VGA_CRT_CURSOR_LO 0x0F
 
 static void vga_set_hw_cursor(int row, int col) {
+    if (row < 0) row = 0;
+    if (row >= VGA_ROWS) row = VGA_ROWS - 1;
+    if (col < 0) col = 0;
+    if (col >= VGA_COLS) col = VGA_COLS - 1;
     uint16_t pos = (uint16_t)(row * VGA_COLS + col);
     fl_ioport_out8(VGA_CRT_IDX,  VGA_CRT_CURSOR_HI);
     fl_ioport_out8(VGA_CRT_DATA, (uint8_t)(pos >> 8));
@@ -89,8 +99,11 @@ static void hw_putchar(display_driver_t *drv, char c) {
                 fl_mmio_write16((void *)(VGA_MEM + i), fl_mmio_read16((void *)(VGA_MEM + i + VGA_COLS)));
             for (int i = (VGA_ROWS - 1) * VGA_COLS; i < VGA_ROWS * VGA_COLS; i++)
                 fl_mmio_write16((void *)(VGA_MEM + i), (uint16_t)(' ' | (impl->color << 8)));
+            vga_set_hw_cursor(impl->row, impl->col);
+            impl->cursor_dirty = 0;
+        } else {
+            impl->cursor_dirty = 1;
         }
-        vga_set_hw_cursor(impl->row, impl->col);
         return;
     }
     int idx = impl->row * VGA_COLS + impl->col;
@@ -103,9 +116,12 @@ static void hw_putchar(display_driver_t *drv, char c) {
                 fl_mmio_write16((void *)(VGA_MEM + i), fl_mmio_read16((void *)(VGA_MEM + i + VGA_COLS)));
             for (int i = (VGA_ROWS - 1) * VGA_COLS; i < VGA_ROWS * VGA_COLS; i++)
                 fl_mmio_write16((void *)(VGA_MEM + i), (uint16_t)(' ' | (impl->color << 8)));
+            vga_set_hw_cursor(impl->row, impl->col);
+            impl->cursor_dirty = 0;
+            return;
         }
     }
-    vga_set_hw_cursor(impl->row, impl->col);
+    impl->cursor_dirty = 1;
 }
 
 static void hw_clear(display_driver_t *drv) {
@@ -118,18 +134,34 @@ static void hw_clear(display_driver_t *drv) {
         asm_mem_copy((void *)(VGA_MEM + r * VGA_COLS), row_buf, VGA_COLS * 2);
     impl->row = impl->col = 0;
     vga_set_hw_cursor(0, 0);
+    impl->cursor_dirty = 0;
 }
 
 static void hw_set_cursor(display_driver_t *drv, int row, int col) {
     display_impl_t *impl = (display_impl_t *)drv->impl;
+    if (row < 0) row = 0;
+    if (row >= VGA_ROWS) row = VGA_ROWS - 1;
+    if (col < 0) col = 0;
+    if (col >= VGA_COLS) col = VGA_COLS - 1;
     impl->row = row;
     impl->col = col;
     vga_set_hw_cursor(row, col);
+    impl->cursor_dirty = 0;
 }
 
 static void hw_refresh_vga(display_driver_t *drv, const void *vga_buf) {
-    (void)drv;
+    display_impl_t *impl = (display_impl_t *)drv->impl;
     asm_mem_copy((void *)VGA_MEM, vga_buf, (size_t)VGA_ROWS * VGA_COLS * 2);
+    vga_set_hw_cursor(impl->row, impl->col);
+    impl->cursor_dirty = 0;
+}
+
+static void hw_flush_cursor(display_driver_t *drv) {
+    display_impl_t *impl = (display_impl_t *)drv->impl;
+    if (impl->cursor_dirty) {
+        vga_set_hw_cursor(impl->row, impl->col);
+        impl->cursor_dirty = 0;
+    }
 }
 #elif defined(__aarch64__)
 #include "hal/arm_uart.h"
@@ -153,6 +185,10 @@ static void hw_clear(display_driver_t *drv) {
 
 static void hw_set_cursor(display_driver_t *drv, int row, int col) {
     display_impl_t *impl = (display_impl_t *)drv->impl;
+    if (row < 0) row = 0;
+    if (row >= VGA_ROWS) row = VGA_ROWS - 1;
+    if (col < 0) col = 0;
+    if (col >= VGA_COLS) col = VGA_COLS - 1;
     impl->row = row;
     impl->col = col;
 }
@@ -168,6 +204,10 @@ static void hw_refresh_vga(display_driver_t *drv, const void *vga_buf) {
         arm_uart_putchar('\n');
     }
 }
+
+static void hw_flush_cursor(display_driver_t *drv) {
+    (void)drv;
+}
 #endif
 #endif
 
@@ -181,6 +221,7 @@ display_driver_t *display_driver_create(void) {
     impl->base.clear = hw_clear;
     impl->base.set_cursor = hw_set_cursor;
     impl->base.refresh_vga = hw_refresh_vga;
+    impl->base.flush_cursor = hw_flush_cursor;
 #if defined(__x86_64__) || defined(__i386__)
     impl->vga = VGA_MEM;
 #endif
@@ -189,6 +230,7 @@ display_driver_t *display_driver_create(void) {
     impl->base.clear = host_clear;
     impl->base.set_cursor = host_set_cursor;
     impl->base.refresh_vga = host_refresh_vga;
+    impl->base.flush_cursor = host_flush_cursor;
 #endif
     impl->base.impl = impl;
     return &impl->base;

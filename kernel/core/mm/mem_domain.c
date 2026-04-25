@@ -12,7 +12,9 @@
  * Alignment: all allocations are rounded to ARENA_ALIGN (8) bytes.
  */
 #include "mem_domain.h"
+#include "core/sys/spinlock.h"
 #include "fl/mem_asm.h"
+#include <stdint.h>
 
 #ifdef DRIVERS_BAREMETAL
 
@@ -25,10 +27,10 @@
 #define ARENA_SZ_FS     (128u * 1024u)
 #define ARENA_SZ_USER   (32u  * 1024u)
 
-static uint8_t s_arena_kernel[ARENA_SZ_KERNEL];
-static uint8_t s_arena_driver[ARENA_SZ_DRIVER];
-static uint8_t s_arena_fs    [ARENA_SZ_FS];
-static uint8_t s_arena_user  [ARENA_SZ_USER];
+static uint8_t s_arena_kernel[ARENA_SZ_KERNEL] __attribute__((aligned(16)));
+static uint8_t s_arena_driver[ARENA_SZ_DRIVER] __attribute__((aligned(16)));
+static uint8_t s_arena_fs    [ARENA_SZ_FS]     __attribute__((aligned(16)));
+static uint8_t s_arena_user  [ARENA_SZ_USER]   __attribute__((aligned(16)));
 
 typedef struct free_node {
     struct free_node *next;
@@ -49,6 +51,8 @@ static arena_t s_arenas[4] = {
     { s_arena_user,   ARENA_SZ_USER,   0, (void*)0 },
 };
 
+static volatile int s_mem_domain_lock = SPINLOCK_INIT;
+
 static arena_t *arena_for(mem_domain_t domain) {
     if ((unsigned)domain >= 4u) domain = MEM_DOMAIN_KERNEL;
     return &s_arenas[(int)domain];
@@ -62,6 +66,9 @@ void *mem_domain_alloc(mem_domain_t domain, size_t size) {
     if (!size) return (void*)0;
     arena_t *a = arena_for(domain);
     size_t need = align_up(HDR_SIZE + size);
+    void *result = (void*)0;
+
+    spinlock_acquire(&s_mem_domain_lock);
 
     /* Search free list (first-fit) */
     free_node_t **pp = &a->freelist;
@@ -70,21 +77,28 @@ void *mem_domain_alloc(mem_domain_t domain, size_t size) {
         if (node->data_size >= size) {
             *pp = node->next;           /* unlink */
             size_t *hdr = (size_t *)(void *)node;
-            *hdr = node->data_size;     /* restore payload size in header */
-            return (uint8_t *)(void *)hdr + HDR_SIZE;
+            *hdr = size;                /* current owner's valid payload size */
+            result = (uint8_t *)(void *)hdr + HDR_SIZE;
+            spinlock_release(&s_mem_domain_lock);
+            return result;
         }
         pp = &(*pp)->next;
     }
 
     /* Bump allocate */
-    if (a->bump + need > a->capacity) return (void*)0;
-    size_t *hdr = (size_t *)(void *)(a->base + a->bump);
-    *hdr = size;
-    a->bump += need;
-    return (uint8_t *)(void *)hdr + HDR_SIZE;
+    if (a->bump + need <= a->capacity) {
+        size_t *hdr = (size_t *)(void *)(a->base + a->bump);
+        *hdr = size;
+        a->bump += need;
+        result = (uint8_t *)(void *)hdr + HDR_SIZE;
+    }
+    spinlock_release(&s_mem_domain_lock);
+    return result;
 }
 
 void *mem_domain_calloc(mem_domain_t domain, size_t nmemb, size_t size) {
+    if (size != 0u && nmemb > SIZE_MAX / size)
+        return (void*)0;
     size_t total = nmemb * size;
     void *p = mem_domain_alloc(domain, total);
     if (p) asm_mem_zero(p, total);
@@ -94,7 +108,9 @@ void *mem_domain_calloc(mem_domain_t domain, size_t nmemb, size_t size) {
 void *mem_domain_realloc(mem_domain_t domain, void *ptr, size_t size) {
     if (!ptr) return mem_domain_alloc(domain, size);
     if (!size) { mem_domain_free(domain, ptr); return (void*)0; }
+    spinlock_acquire(&s_mem_domain_lock);
     size_t old_size = *((size_t *)((uint8_t *)ptr - HDR_SIZE));
+    spinlock_release(&s_mem_domain_lock);
     void *np = mem_domain_alloc(domain, size);
     if (!np) return (void*)0;
     size_t copy_n = old_size < size ? old_size : size;
@@ -107,12 +123,14 @@ void mem_domain_free(mem_domain_t domain, void *ptr) {
     if (!ptr) return;
     arena_t *a = arena_for(domain);
     size_t *hdr = (size_t *)((uint8_t *)ptr - HDR_SIZE);
+    spinlock_acquire(&s_mem_domain_lock);
     size_t data_size = *hdr;
     /* Re-use the block header region as a free_node_t */
     free_node_t *node = (free_node_t *)(void *)hdr;
     node->data_size = data_size;
     node->next = a->freelist;
     a->freelist = node;
+    spinlock_release(&s_mem_domain_lock);
 }
 
 #else /* HOST mode — keep libc behaviour */

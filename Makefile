@@ -6,7 +6,7 @@ ARCH ?= x86_64_gas
 CC = gcc
 AS = as
 CFLAGS = -Wall -Wextra -pthread -I. -Ikernel/include -Ikernel/core/vfs -Ikernel/core/mm -Ikernel/core/sched -Ikernel/core/sys -Iuserland/shell -Ikernel/arch/x86_64 -Ikernel/arch/aarch64
-LDFLAGS = -Wl,-z,noexecstack -no-pie
+LDFLAGS = -Wl,-z,noexecstack
 ASFLAGS =
 
 # --- Arch-specific assembly ---
@@ -107,6 +107,7 @@ all: $(TARGET)
 
 # Bare-metal: use port I/O and VGA (for kernel build, not userspace)
 baremetal: CFLAGS += -DDRIVERS_BAREMETAL=1
+baremetal: LDFLAGS += -no-pie
 baremetal: $(TARGET)
 
 # With embedded x86 VM: make vm && ./shell -Virtualization -y -vm

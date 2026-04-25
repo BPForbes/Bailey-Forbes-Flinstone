@@ -37,6 +37,8 @@ static void kprint(const char *s) {
     if (g_display_driver) {
         for (; *s; s++)
             g_display_driver->putchar(g_display_driver, *s);
+        if (g_display_driver->flush_cursor)
+            g_display_driver->flush_cursor(g_display_driver);
     }
 #else
     fputs(s, stdout);
@@ -138,6 +140,8 @@ static int do_selftest_timer(void) {
 static int do_selftest_display(void) {
     if (!g_display_driver) return -1;
     g_display_driver->putchar(g_display_driver, ' ');
+    if (g_display_driver->flush_cursor)
+        g_display_driver->flush_cursor(g_display_driver);
     return 0;
 }
 
@@ -194,6 +198,7 @@ void drivers_init(const char *disk_file) {
     __asm__ volatile("sti");
 #elif defined(__aarch64__)
     arm_vbar_install();
+    __asm__ volatile("msr daifclr, #2" ::: "memory");
 #endif
 #endif
     drivers_report_caps();
