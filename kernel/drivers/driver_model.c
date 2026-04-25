@@ -2,7 +2,6 @@
 #include "drivers.h"
 #include "fl/mm.h"
 #include "fl/mem_asm.h"
-#include <string.h>
 
 #define FL_MODEL_MAX_DEVICES 16
 #define FL_MODEL_MAX_DRIVERS 16
@@ -55,13 +54,43 @@ static int s_resource_count;
 static fl_dma_record_t s_dma[FL_MODEL_MAX_DMA];
 static int s_dma_count;
 
+static size_t fl_cstr_len(const char *s, size_t max_len) {
+    size_t n = 0;
+    if (!s)
+        return 0;
+    while (n < max_len && s[n])
+        n++;
+    return n;
+}
+
+static int fl_cstr_eq(const char *a, const char *b) {
+    size_t i = 0;
+    if (!a || !b)
+        return 0;
+    while (a[i] && b[i]) {
+        if (a[i] != b[i])
+            return 0;
+        i++;
+    }
+    return a[i] == b[i];
+}
+
+static void fl_cstr_copy(char *dst, size_t dst_len, const char *src) {
+    if (!dst || dst_len == 0)
+        return;
+    size_t n = fl_cstr_len(src, dst_len - 1);
+    if (n)
+        asm_mem_copy(dst, src, n);
+    dst[n] = '\0';
+}
+
 static int driver_matches(const fl_driver_desc_t *driver, const fl_device_desc_t *dev) {
     if (!driver || !dev)
         return 0;
     if (driver->synth_id && dev->bus_type == FL_BUS_SYNTH)
-        return strcmp(driver->synth_id, dev->synth_id) == 0;
+        return fl_cstr_eq(driver->synth_id, dev->synth_id);
     if (driver->dt_compatible && dev->bus_type == FL_BUS_DT)
-        return strcmp(driver->dt_compatible, dev->dt_compatible) == 0;
+        return fl_cstr_eq(driver->dt_compatible, dev->dt_compatible);
     if (dev->bus_type == FL_BUS_PCI) {
         if (driver->pci_class && driver->pci_class != dev->class_code)
             return 0;
@@ -118,7 +147,7 @@ fl_device_t *fl_device_find_synth(const char *synth_id) {
         return NULL;
     for (int i = 0; i < s_device_count; i++) {
         const fl_device_desc_t *desc = fl_device_get_desc(s_devices[i].dev);
-        if (desc && desc->bus_type == FL_BUS_SYNTH && strcmp(desc->synth_id, synth_id) == 0)
+        if (desc && desc->bus_type == FL_BUS_SYNTH && fl_cstr_eq(desc->synth_id, synth_id))
             return s_devices[i].dev;
     }
     return NULL;
@@ -260,7 +289,7 @@ static int block_devfs_ioctl(void *dev, unsigned long request, void *arg) {
 
 static int block_probe(fl_device_t *dev) {
     const fl_device_desc_t *desc = fl_device_get_desc(dev);
-    return (desc && desc->bus_type == FL_BUS_SYNTH && strcmp(desc->synth_id, "host_blk") == 0) ? 0 : -1;
+    return (desc && desc->bus_type == FL_BUS_SYNTH && fl_cstr_eq(desc->synth_id, "host_blk")) ? 0 : -1;
 }
 
 static int block_attach(fl_device_t *dev) {
@@ -356,11 +385,10 @@ int fl_devfs_register(const char *path, int class_id, void *dev, const fl_devfs_
     if (!path || !dev || !ops || s_devfs_count >= FL_MODEL_MAX_DEVFS)
         return -1;
     for (int i = 0; i < s_devfs_count; i++)
-        if (strcmp(s_devfs[i].path, path) == 0)
+        if (fl_cstr_eq(s_devfs[i].path, path))
             return -1;
     fl_devfs_node_t *node = &s_devfs[s_devfs_count++];
-    strncpy(node->path, path, sizeof(node->path) - 1);
-    node->path[sizeof(node->path) - 1] = '\0';
+    fl_cstr_copy(node->path, sizeof(node->path), path);
     node->class = (fl_driver_class_t)class_id;
     node->dev = (fl_device_t *)dev;
     node->ops = *ops;
@@ -371,7 +399,7 @@ void fl_devfs_unregister(const char *path) {
     if (!path)
         return;
     for (int i = 0; i < s_devfs_count; i++) {
-        if (strcmp(s_devfs[i].path, path) == 0) {
+        if (fl_cstr_eq(s_devfs[i].path, path)) {
             s_devfs[i] = s_devfs[s_devfs_count - 1];
             s_devfs_count--;
             return;
@@ -383,7 +411,7 @@ int fl_devfs_open(const char *path, int flags, fl_devfs_file_t *out) {
     if (!path || !out)
         return -1;
     for (int i = 0; i < s_devfs_count; i++) {
-        if (strcmp(s_devfs[i].path, path) == 0) {
+        if (fl_cstr_eq(s_devfs[i].path, path)) {
             out->node = &s_devfs[i];
             out->pos = 0;
             out->flags = flags;

@@ -16,6 +16,24 @@ typedef struct {
     int      cluster_size;
 } host_blk_ctx_t;
 
+static size_t host_cstr_len(const char *s, size_t max_len) {
+    size_t n = 0;
+    if (!s)
+        return 0;
+    while (n < max_len && s[n])
+        n++;
+    return n;
+}
+
+static void host_cstr_copy(char *dst, size_t dst_len, const char *src) {
+    if (!dst || dst_len == 0)
+        return;
+    size_t n = host_cstr_len(src, dst_len - 1);
+    if (n)
+        asm_mem_copy(dst, src, n);
+    dst[n] = '\0';
+}
+
 static int host_block_read(void *hal_ctx, uint32_t lba, void *buf) {
     (void)hal_ctx;
     return disk_asm_read_cluster((int)lba, (unsigned char *)buf) == 0 ? 0 : -1;
@@ -33,8 +51,7 @@ static int host_block_get_sector_count(void *hal_ctx) {
 
 int fl_hal_block_create_host(const char *disk_file, fl_hal_block_transport_t *out) {
     if (!out || !disk_file) return -1;
-    strncpy(current_disk_file, disk_file, sizeof(current_disk_file) - 1);
-    current_disk_file[sizeof(current_disk_file) - 1] = '\0';
+    host_cstr_copy(current_disk_file, sizeof(current_disk_file), disk_file);
     read_disk_header();
     host_blk_ctx_t *ctx = (host_blk_ctx_t *)kmalloc(sizeof(*ctx));
     if (!ctx) return -1;
