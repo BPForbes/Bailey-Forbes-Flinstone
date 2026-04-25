@@ -26,7 +26,8 @@ void fs_jail_init(void) {
     if (!getcwd(wd, sizeof(wd)))
         return;
     if (!g_vm_root[0]) {
-        fprintf(stderr, "VM: sandbox root not configured\n");
+        fprintf(stderr, "[VM] 5-layer driver config warning: layer 4 shell/VM root is not configured\n");
+        fprintf(stderr, "[VM] 5-layer driver config warning: layer 2 filesystem sandbox root is not configured\n");
         return;
     }
     const char *root = g_vm_root;
