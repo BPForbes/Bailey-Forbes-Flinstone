@@ -8,6 +8,7 @@
 #define FL_MODEL_MAX_DRIVERS 16
 #define FL_MODEL_MAX_DEVFS   16
 #define FL_MODEL_MAX_IRQ     32
+#define FL_MODEL_MAX_RESOURCES 64
 
 typedef struct {
     fl_device_t *dev;
@@ -28,6 +29,11 @@ typedef struct {
     int enabled;
 } fl_irq_slot_t;
 
+typedef struct {
+    fl_resource_t resource;
+    fl_device_t *owner;
+} fl_resource_claim_t;
+
 static const fl_driver_desc_t *s_drivers[FL_MODEL_MAX_DRIVERS];
 static int s_driver_count;
 static fl_bound_device_t s_devices[FL_MODEL_MAX_DEVICES];
@@ -35,6 +41,8 @@ static int s_device_count;
 static fl_devfs_node_t s_devfs[FL_MODEL_MAX_DEVFS];
 static int s_devfs_count;
 static fl_irq_slot_t s_irq[FL_MODEL_MAX_IRQ];
+static fl_resource_claim_t s_resources[FL_MODEL_MAX_RESOURCES];
+static int s_resource_count;
 
 static int driver_matches(const fl_driver_desc_t *driver, const fl_device_desc_t *dev) {
     if (!driver || !dev)
@@ -123,6 +131,91 @@ fl_driver_state_t fl_device_get_state(fl_device_t *dev) {
     return FL_DRV_STATE_NONE;
 }
 
+static int resource_overlaps(const fl_resource_t *a, const fl_resource_t *b) {
+    if (!a || !b || a->type != b->type)
+        return 0;
+    if (a->type == FL_RESOURCE_IRQ)
+        return a->start == b->start;
+    if (a->size == 0 || b->size == 0)
+        return 0;
+    uintptr_t a_end = a->start + a->size - 1;
+    uintptr_t b_end = b->start + b->size - 1;
+    return a->start <= b_end && b->start <= a_end;
+}
+
+static int claim_resource_desc(fl_device_t *dev, const fl_resource_t *resource) {
+    if (!dev || !resource || s_resource_count >= FL_MODEL_MAX_RESOURCES)
+        return -1;
+    for (int i = 0; i < s_resource_count; i++)
+        if (resource_overlaps(&s_resources[i].resource, resource))
+            return -1;
+    s_resources[s_resource_count].resource = *resource;
+    s_resources[s_resource_count].owner = dev;
+    s_resource_count++;
+    return 0;
+}
+
+int fl_resource_claim(fl_device_t *dev, fl_resource_type_t type, int index) {
+    const fl_device_desc_t *desc = fl_device_get_desc(dev);
+    if (!desc || index < 0)
+        return -1;
+    int seen = 0;
+    for (int i = 0; i < desc->resource_count; i++) {
+        if (desc->resources[i].type != type)
+            continue;
+        if (seen++ == index)
+            return claim_resource_desc(dev, &desc->resources[i]);
+    }
+    return -1;
+}
+
+void fl_resource_release_all(fl_device_t *dev) {
+    if (!dev)
+        return;
+    for (int i = 0; i < s_resource_count; ) {
+        if (s_resources[i].owner == dev) {
+            s_resources[i] = s_resources[s_resource_count - 1];
+            s_resource_count--;
+        } else {
+            i++;
+        }
+    }
+}
+
+int fl_resource_count(const fl_device_t *dev) {
+    int count = 0;
+    for (int i = 0; i < s_resource_count; i++)
+        if (!dev || s_resources[i].owner == dev)
+            count++;
+    return count;
+}
+
+int fl_resource_get(const fl_device_t *dev, int index, fl_resource_t *out) {
+    if (!out || index < 0)
+        return -1;
+    int seen = 0;
+    for (int i = 0; i < s_resource_count; i++) {
+        if (dev && s_resources[i].owner != dev)
+            continue;
+        if (seen++ == index) {
+            *out = s_resources[i].resource;
+            return 0;
+        }
+    }
+    return -1;
+}
+
+static int claim_device_resources(fl_device_t *dev) {
+    const fl_device_desc_t *desc = fl_device_get_desc(dev);
+    if (!desc)
+        return -1;
+    for (int i = 0; i < desc->resource_count; i++) {
+        if (claim_resource_desc(dev, &desc->resources[i]) != 0)
+            return -1;
+    }
+    return 0;
+}
+
 static int block_devfs_read(void *dev, uint32_t unit, void *buf, size_t len, size_t *read_out) {
     (void)dev;
     if (!g_block_driver || !buf || len < FL_SECTOR_SIZE)
@@ -207,7 +300,13 @@ void fl_drivers_init(void) {
             bound->dev = dev;
             bound->driver = driver;
             bound->state = FL_DRV_STATE_PROBED;
+            if (claim_device_resources(dev) != 0) {
+                fl_resource_release_all(dev);
+                s_device_count--;
+                continue;
+            }
             if (driver->ops->attach && driver->ops->attach(dev) != 0) {
+                fl_resource_release_all(dev);
                 s_device_count--;
                 continue;
             }
@@ -232,11 +331,13 @@ void fl_drivers_shutdown(void) {
             if (bound->driver->ops->detach)
                 bound->driver->ops->detach(bound->dev);
         }
+        fl_resource_release_all(bound->dev);
         fl_device_destroy(bound->dev);
     }
     s_device_count = 0;
     s_driver_count = 0;
     s_devfs_count = 0;
+    s_resource_count = 0;
 }
 
 int fl_devfs_register(const char *path, int class_id, void *dev, const fl_devfs_ops_t *ops) {

@@ -60,9 +60,11 @@ static int test_device_model(void) {
     fl_device_t *dev = NULL;
     const fl_device_desc_t *desc = NULL;
     fl_device_info_t info;
+    fl_resource_t res;
 
     memset(descs, 0, sizeof(descs));
     memset(&info, 0, sizeof(info));
+    memset(&res, 0, sizeof(res));
     ASSERT(fl_bus_enumerate(descs, 4) == 1);
     ASSERT(fl_driver_registry_match(&descs[0], &matched) == 0);
     ASSERT(matched != NULL);
@@ -80,6 +82,13 @@ static int test_device_model(void) {
     ASSERT(desc != NULL);
     ASSERT(desc->bus_type == FL_BUS_SYNTH);
     ASSERT(strcmp(desc->synth_id, "host_blk") == 0);
+    ASSERT(fl_resource_count(dev) == 4);
+    ASSERT(fl_resource_get(dev, 0, &res) == 0);
+    ASSERT(res.type == FL_RESOURCE_SYNTH);
+    ASSERT(res.start == (uintptr_t)current_disk_file);
+    ASSERT(res.size == strlen(current_disk_file) + 1);
+    ASSERT(fl_resource_claim(dev, FL_RESOURCE_SYNTH, 0) != 0);
+    ASSERT(fl_resource_claim(dev, FL_RESOURCE_SYNTH, 99) != 0);
     return 0;
 }
 

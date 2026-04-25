@@ -28,7 +28,23 @@ typedef struct fl_mmio_region {
 
 #define FL_MMIO_MAX_BARS  6
 #define FL_IRQ_MAX        4
+#define FL_RESOURCE_MAX   8
 #define FL_COMPAT_MAX_LEN  64
+
+typedef enum {
+    FL_RESOURCE_IOPORT,
+    FL_RESOURCE_MMIO,
+    FL_RESOURCE_IRQ,
+    FL_RESOURCE_DMA,
+    FL_RESOURCE_SYNTH
+} fl_resource_type_t;
+
+typedef struct fl_resource {
+    fl_resource_type_t type;
+    uintptr_t start;
+    size_t size;
+    char name[32];
+} fl_resource_t;
 
 /* Device descriptor - unified across all bus types */
 typedef struct fl_device_desc {
@@ -57,6 +73,8 @@ typedef struct fl_device_desc {
     uint16_t         ioport_count;
     int              irq[FL_IRQ_MAX];
     int              irq_count;
+    fl_resource_t    resources[FL_RESOURCE_MAX];
+    int              resource_count;
 
     /* Opaque platform data */
     void    *platform_data;

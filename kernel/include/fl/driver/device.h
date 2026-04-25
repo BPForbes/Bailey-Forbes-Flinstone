@@ -27,6 +27,10 @@ typedef struct fl_device_info {
 int fl_device_count(void);
 int fl_device_get_info(int index, fl_device_info_t *out);
 fl_device_t *fl_device_find_synth(const char *synth_id);
+int fl_resource_count(const fl_device_t *dev);
+int fl_resource_get(const fl_device_t *dev, int index, fl_resource_t *out);
+int fl_resource_claim(fl_device_t *dev, fl_resource_type_t type, int index);
+void fl_resource_release_all(fl_device_t *dev);
 
 #ifdef __cplusplus
 }
