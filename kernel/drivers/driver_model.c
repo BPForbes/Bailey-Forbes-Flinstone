@@ -1,5 +1,6 @@
 #include "fl/driver/drivers.h"
 #include "drivers.h"
+#include "fl_cstr.h"
 #include "fl/mm.h"
 #include "fl/mem_asm.h"
 
@@ -28,7 +29,8 @@ typedef struct {
     void *ctx;
     fl_device_t *owner;
     int enabled;
-    unsigned long dispatch_count;
+    uint64_t dispatch_count;
+    uint64_t eoi_count;
 } fl_irq_slot_t;
 
 typedef struct {
@@ -53,36 +55,7 @@ static fl_resource_claim_t s_resources[FL_MODEL_MAX_RESOURCES];
 static int s_resource_count;
 static fl_dma_record_t s_dma[FL_MODEL_MAX_DMA];
 static int s_dma_count;
-
-static size_t fl_cstr_len(const char *s, size_t max_len) {
-    size_t n = 0;
-    if (!s)
-        return 0;
-    while (n < max_len && s[n])
-        n++;
-    return n;
-}
-
-static int fl_cstr_eq(const char *a, const char *b) {
-    size_t i = 0;
-    if (!a || !b)
-        return 0;
-    while (a[i] && b[i]) {
-        if (a[i] != b[i])
-            return 0;
-        i++;
-    }
-    return a[i] == b[i];
-}
-
-static void fl_cstr_copy(char *dst, size_t dst_len, const char *src) {
-    if (!dst || dst_len == 0)
-        return;
-    size_t n = fl_cstr_len(src, dst_len - 1);
-    if (n)
-        asm_mem_copy(dst, src, n);
-    dst[n] = '\0';
-}
+static int s_model_initialized;
 
 static int driver_matches(const fl_driver_desc_t *driver, const fl_device_desc_t *dev) {
     if (!driver || !dev)
@@ -131,7 +104,7 @@ int fl_device_get_info(int index, fl_device_info_t *out) {
     out->dev = bound->dev;
     out->desc = fl_device_get_desc(bound->dev);
     out->driver_name = bound->driver ? bound->driver->name : NULL;
-    out->driver_class = bound->driver ? (int)bound->driver->class : -1;
+    out->driver_class = bound->driver ? bound->driver->class : FL_DRV_CLASS_NONE;
     out->state = bound->state;
     return 0;
 }
@@ -323,7 +296,14 @@ void fl_driver_registry_register_all(void) {
     fl_driver_registry_register(&block_model_driver);
 }
 
+static void fl_dma_release_all(void) {
+    while (s_dma_count > 0)
+        fl_dma_free(s_dma[s_dma_count - 1].ptr);
+}
+
 void fl_drivers_init(void) {
+    if (s_model_initialized)
+        return;
     fl_device_desc_t descs[FL_MODEL_MAX_DEVICES];
     int count = fl_bus_enumerate(descs, FL_MODEL_MAX_DEVICES);
     for (int i = 0; i < count && s_device_count < FL_MODEL_MAX_DEVICES; i++) {
@@ -360,9 +340,11 @@ void fl_drivers_init(void) {
         if (dev)
             fl_device_destroy(dev);
     }
+    s_model_initialized = 1;
 }
 
 void fl_drivers_shutdown(void) {
+    fl_dma_release_all();
     for (int i = s_device_count - 1; i >= 0; i--) {
         fl_bound_device_t *bound = &s_devices[i];
         if (bound->driver && bound->driver->ops) {
@@ -378,11 +360,19 @@ void fl_drivers_shutdown(void) {
     s_driver_count = 0;
     s_devfs_count = 0;
     s_resource_count = 0;
+    s_dma_count = 0;
+    asm_mem_zero(s_devices, sizeof(s_devices));
+    asm_mem_zero(s_resources, sizeof(s_resources));
+    asm_mem_zero(s_devfs, sizeof(s_devfs));
+    asm_mem_zero(s_dma, sizeof(s_dma));
     fl_irq_init();
+    s_model_initialized = 0;
 }
 
 int fl_devfs_register(const char *path, int class_id, void *dev, const fl_devfs_ops_t *ops) {
     if (!path || !dev || !ops || s_devfs_count >= FL_MODEL_MAX_DEVFS)
+        return -1;
+    if (fl_cstr_len(path, sizeof(s_devfs[0].path)) >= sizeof(s_devfs[0].path))
         return -1;
     for (int i = 0; i < s_devfs_count; i++)
         if (fl_cstr_eq(s_devfs[i].path, path))
@@ -523,6 +513,15 @@ void fl_irq_unregister(int irq) {
     asm_mem_zero(&s_irq[irq], sizeof(s_irq[irq]));
 }
 
+void fl_irq_unregister_device(fl_device_t *dev) {
+    if (!dev)
+        return;
+    for (int irq = 0; irq < FL_MODEL_MAX_IRQ; irq++) {
+        if (s_irq[irq].owner == dev)
+            asm_mem_zero(&s_irq[irq], sizeof(s_irq[irq]));
+    }
+}
+
 void fl_irq_enable(int irq) {
     if (irq >= 0 && irq < FL_MODEL_MAX_IRQ)
         s_irq[irq].enabled = 1;
@@ -534,6 +533,8 @@ void fl_irq_disable(int irq) {
 }
 
 void fl_irq_eoi(int irq) {
+    if (irq >= 0 && irq < FL_MODEL_MAX_IRQ)
+        s_irq[irq].eoi_count++;
     if (g_pic_driver && g_pic_driver->eoi)
         g_pic_driver->eoi(g_pic_driver, irq);
 }
@@ -544,10 +545,21 @@ const fl_device_t *fl_irq_owner(int irq) {
     return s_irq[irq].owner;
 }
 
-unsigned long fl_irq_dispatch_count(int irq) {
+uint64_t fl_irq_dispatch_count(int irq) {
     if (irq < 0 || irq >= FL_MODEL_MAX_IRQ)
         return 0;
     return s_irq[irq].dispatch_count;
+}
+
+int fl_irq_get_info(int irq, fl_irq_info_t *out) {
+    if (!out || irq < 0 || irq >= FL_MODEL_MAX_IRQ)
+        return -1;
+    out->irq = irq;
+    out->enabled = s_irq[irq].enabled;
+    out->dispatch_count = s_irq[irq].dispatch_count;
+    out->eoi_count = s_irq[irq].eoi_count;
+    out->owner = s_irq[irq].owner;
+    return 0;
 }
 
 int fl_irq_dispatch(int irq) {

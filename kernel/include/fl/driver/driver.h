@@ -24,6 +24,7 @@ typedef enum {
 
 /* Driver class - matches against bus device class/subclass or compatible strings */
 typedef enum {
+    FL_DRV_CLASS_NONE = -1,
     FL_DRV_CLASS_BLOCK,
     FL_DRV_CLASS_CONSOLE,   /* display + keyboard */
     FL_DRV_CLASS_TIMER,

@@ -32,7 +32,7 @@ void fl_irq_enable(int irq);
 void fl_irq_disable(int irq);
 int  fl_irq_dispatch(int irq);
 int  fl_irq_get_info(int irq, fl_irq_info_t *out);
-unsigned long fl_irq_dispatch_count(int irq);
+uint64_t fl_irq_dispatch_count(int irq);
 
 #ifdef __cplusplus
 }
