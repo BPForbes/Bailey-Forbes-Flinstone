@@ -6,6 +6,7 @@
 void arm_vbar_install(void);
 
 /* Register a C handler for exception slot n (0-15).
+ * Register handlers before unmasking CPU interrupts with DAIFCLR.
  * Slots 5 and 9 are IRQ from EL1/EL0 respectively. */
 void aarch64_exc_register_handler(int slot, void (*handler)(void));
 

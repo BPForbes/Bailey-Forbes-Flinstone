@@ -10,26 +10,31 @@
  */
 #include "pmm.h"
 
-/* Bitfield: 1024 frames / 64 bits per unsigned long = 16 words */
-#define PMM_WORDS  (PMM_NUM_FRAMES / (sizeof(unsigned long) * 8u))
+/* Bitfield: one bit per frame, rounded up to cover any partial word. */
+#define PMM_BITS_PER_WORD  (sizeof(s_bitmap[0]) * 8u)
+#define PMM_WORDS          ((PMM_NUM_FRAMES + (sizeof(unsigned long) * 8u) - 1u) / (sizeof(unsigned long) * 8u))
 
 static unsigned long s_bitmap[PMM_WORDS]; /* zero-initialised by BSS */
 
 static void bm_set(size_t frame) {
-    s_bitmap[frame >> 6u] |= (1UL << (frame & 63u));
+    size_t word = frame / PMM_BITS_PER_WORD;
+    size_t bit = frame % PMM_BITS_PER_WORD;
+    s_bitmap[word] |= ((unsigned long)1 << bit);
 }
 
 static void bm_clear(size_t frame) {
-    s_bitmap[frame >> 6u] &= ~(1UL << (frame & 63u));
+    size_t word = frame / PMM_BITS_PER_WORD;
+    size_t bit = frame % PMM_BITS_PER_WORD;
+    s_bitmap[word] &= ~((unsigned long)1 << bit);
 }
 
 uintptr_t pmm_alloc_frame(void) {
     for (size_t w = 0; w < PMM_WORDS; w++) {
         if (s_bitmap[w] == ~0UL)
             continue;
-        /* __builtin_ctzl: count trailing zeros → index of first free bit */
+        /* __builtin_ctzl: count trailing zeros -> index of first free bit */
         size_t bit   = (size_t)__builtin_ctzl(~s_bitmap[w]);
-        size_t frame = (w << 6u) | bit;
+        size_t frame = w * PMM_BITS_PER_WORD + bit;
         if (frame >= PMM_NUM_FRAMES)
             return 0;
         bm_set(frame);
@@ -51,10 +56,12 @@ size_t pmm_free_count(void) {
     size_t free = 0;
     for (size_t w = 0; w < PMM_WORDS; w++) {
         unsigned long bits = ~s_bitmap[w];
-        while (bits) {
-            free++;
-            bits &= bits - 1u;
+        if (w == PMM_WORDS - 1u) {
+            size_t rem = PMM_NUM_FRAMES % PMM_BITS_PER_WORD;
+            if (rem != 0u)
+                bits &= (((unsigned long)1 << rem) - 1u);
         }
+        free += (size_t)__builtin_popcountl(bits);
     }
     return free;
 }

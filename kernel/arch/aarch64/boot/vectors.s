@@ -8,12 +8,10 @@
  *   Group 2 (slots  8-11): Lower EL, AArch64
  *   Group 3 (slots 12-15): Lower EL, AArch32
  *
- * Each slot stub:
- *   1. Saves x29 (frame pointer) and x30 (link register) — required so
- *      the bl to aarch64_exc_dispatch does not corrupt the interrupted LR.
- *   2. Passes the slot index (0-15) in x0 and calls aarch64_exc_dispatch.
- *   3. Restores x29/x30 and issues eret to resume the interrupted context.
- *      ELR_EL1 and SPSR_EL1 are not touched, so eret resumes correctly.
+ * Each slot stub branches to a shared trampoline that saves caller-saved GPRs,
+ * passes the slot index (0-15) in x0, calls aarch64_exc_dispatch, restores the
+ * interrupted context, and issues eret.  ELR_EL1 and SPSR_EL1 are not touched,
+ * so eret resumes correctly.
  *
  * arm_vbar_install():
  *   Computes the PC-relative address of arm_exc_vectors, writes it to
@@ -28,11 +26,9 @@
 /* ------------------------------------------------------------------ */
 .macro EXC_SLOT num
     .balign 128
-    stp  x29, x30, [sp, #-16]!
+    stp  x0, x1, [sp, #-16]!
     mov  x0, #\num
-    bl   aarch64_exc_dispatch
-    ldp  x29, x30, [sp], #16
-    eret
+    b    aarch64_exc_trampoline
 .endm
 
 /* ------------------------------------------------------------------ */
@@ -44,28 +40,60 @@
 arm_exc_vectors:
 
     /* --- Group 0: Current EL, SP_EL0 --- */
-    EXC_SLOT  0   /* Synchronous  */
-    EXC_SLOT  1   /* IRQ          */
-    EXC_SLOT  2   /* FIQ          */
-    EXC_SLOT  3   /* SError       */
+    EXC_SLOT  0
+    EXC_SLOT  1
+    EXC_SLOT  2
+    EXC_SLOT  3
 
     /* --- Group 1: Current EL, SP_EL1 (kernel exceptions) --- */
-    EXC_SLOT  4   /* Synchronous  */
-    EXC_SLOT  5   /* IRQ          */
-    EXC_SLOT  6   /* FIQ          */
-    EXC_SLOT  7   /* SError       */
+    EXC_SLOT  4
+    EXC_SLOT  5
+    EXC_SLOT  6
+    EXC_SLOT  7
 
     /* --- Group 2: Lower EL, AArch64 --- */
-    EXC_SLOT  8   /* Synchronous  */
-    EXC_SLOT  9   /* IRQ          */
-    EXC_SLOT 10   /* FIQ          */
-    EXC_SLOT 11   /* SError       */
+    EXC_SLOT  8
+    EXC_SLOT  9
+    EXC_SLOT 10
+    EXC_SLOT 11
 
     /* --- Group 3: Lower EL, AArch32 --- */
-    EXC_SLOT 12   /* Synchronous  */
-    EXC_SLOT 13   /* IRQ          */
-    EXC_SLOT 14   /* FIQ          */
-    EXC_SLOT 15   /* SError       */
+    EXC_SLOT 12
+    EXC_SLOT 13
+    EXC_SLOT 14
+    EXC_SLOT 15
+    .balign 128
+
+/* ------------------------------------------------------------------ */
+/* Shared exception trampoline                                         */
+/* ------------------------------------------------------------------ */
+.balign 16
+aarch64_exc_trampoline:
+    stp  x2,  x3,  [sp, #-16]!
+    stp  x4,  x5,  [sp, #-16]!
+    stp  x6,  x7,  [sp, #-16]!
+    stp  x8,  x9,  [sp, #-16]!
+    stp  x10, x11, [sp, #-16]!
+    stp  x12, x13, [sp, #-16]!
+    stp  x14, x15, [sp, #-16]!
+    stp  x16, x17, [sp, #-16]!
+    stp  x18, x19, [sp, #-16]!
+    stp  x29, x30, [sp, #-16]!
+
+    bl   aarch64_exc_dispatch
+
+    ldp  x29, x30, [sp], #16
+    ldp  x18, x19, [sp], #16
+    ldp  x16, x17, [sp], #16
+    ldp  x14, x15, [sp], #16
+    ldp  x12, x13, [sp], #16
+    ldp  x10, x11, [sp], #16
+    ldp  x8,  x9,  [sp], #16
+    ldp  x6,  x7,  [sp], #16
+    ldp  x4,  x5,  [sp], #16
+    ldp  x2,  x3,  [sp], #16
+    ldp  x0,  x1,  [sp], #16
+    eret
 
 /* ------------------------------------------------------------------ */
 /* arm_vbar_install                                                    */

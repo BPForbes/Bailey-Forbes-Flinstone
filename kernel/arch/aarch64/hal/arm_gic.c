@@ -12,6 +12,7 @@
 #define GICD_IGROUPR0  0x080
 #define GICC_CTLR      0x000
 #define GICC_PMR       0x004
+#define GICC_IAR       0x00C
 #define GICC_EOIR      0x010
 
 static volatile void *gicd(void) { return (volatile void *)GICD_BASE; }
@@ -26,7 +27,12 @@ void arm_gic_init(void) {
     fl_mmio_write32((void *)((char *)c + GICC_CTLR), 1);
 }
 
-void arm_gic_eoi(int irq) {
+uint32_t arm_gic_iar(void) {
     volatile void *c = gicc();
-    fl_mmio_write32((void *)((char *)c + GICC_EOIR), (uint32_t)irq);
+    return fl_mmio_read32((void *)((char *)c + GICC_IAR));
+}
+
+void arm_gic_eoi(uint32_t irq) {
+    volatile void *c = gicc();
+    fl_mmio_write32((void *)((char *)c + GICC_EOIR), irq);
 }

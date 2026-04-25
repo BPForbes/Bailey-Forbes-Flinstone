@@ -7,7 +7,8 @@
  *   Exceptions with error code (8,10-14,17,29,30): push vector, jmp common.
  *   IRQ lines (32-47): push 0, push vector, jmp common.
  *
- * Vectors 48-255: filled with default_stub which just iretqs immediately.
+ * Vectors 48-255: filled with default_stub which routes through the same
+ *   dispatcher path used by named stubs.
  *
  * isr_common_stub:
  *   Saves caller-save regs, calls x86_idt_dispatch(vector) (C function in
@@ -70,10 +71,12 @@ ISR_NOERR 36; ISR_NOERR 37; ISR_NOERR 38; ISR_NOERR 39
 ISR_NOERR 40; ISR_NOERR 41; ISR_NOERR 42; ISR_NOERR 43
 ISR_NOERR 44; ISR_NOERR 45; ISR_NOERR 46; ISR_NOERR 47
 
-/* Default stub for vectors 48-255: just return from interrupt */
+/* Default stub for vectors 48-255: dispatch with a sentinel vector. */
 .globl default_stub
 default_stub:
-    iretq
+    pushq $0
+    pushq $255
+    jmp   isr_common_stub
 
 /* ------------------------------------------------------------------ */
 /* Address table for vectors 0-47                                      */
@@ -116,7 +119,9 @@ isr_common_stub:
 
     /* vector is 10 quads (80 bytes) above current rsp */
     movq  80(%rsp), %rdi
+    subq  $8, %rsp
     call  x86_idt_dispatch
+    addq  $8, %rsp
 
     popq %r11
     popq %r10

@@ -21,7 +21,10 @@ spinlock_acquire:
     xorl    %eax, %eax          /* expected = 0 */
     movl    $1,   %ecx          /* desired  = 1 */
     lock cmpxchgl %ecx, (%rdi)  /* if *lock==0: *lock=1, ZF=1; else ZF=0 */
-    jnz     .Lspin_try          /* spin until we won the exchange */
+    jz      .Lspin_acquired
+    rep nop                     /* PAUSE hint while waiting for the lock */
+    jmp     .Lspin_try
+.Lspin_acquired:
     ret
 
 spinlock_release:
