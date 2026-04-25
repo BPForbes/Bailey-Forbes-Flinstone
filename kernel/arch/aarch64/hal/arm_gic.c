@@ -27,7 +27,6 @@ void arm_gic_init(void) {
 }
 
 void arm_gic_eoi(int irq) {
-    (void)irq;
     volatile void *c = gicc();
-    fl_mmio_write32((void *)((char *)c + GICC_EOIR), 1023);
+    fl_mmio_write32((void *)((char *)c + GICC_EOIR), (uint32_t)irq);
 }

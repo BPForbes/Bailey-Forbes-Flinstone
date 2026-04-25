@@ -6,6 +6,7 @@
 #include "drivers.h"
 #include "fl/driver/console.h"
 #include "fl/driver/mmio.h"
+#include "fl/driver/ioport.h"
 #include "fl/driver/caps.h"
 #include "fl/driver/driver_types.h"
 #include "fl/mem_asm.h"
@@ -63,6 +64,21 @@ static void host_refresh_vga(display_driver_t *drv, const void *vga_buf) {
 
 #ifdef DRIVERS_BAREMETAL
 #if defined(__x86_64__) || defined(__i386__)
+
+/* CRT controller ports: index on 0x3D4, data on 0x3D5 */
+#define VGA_CRT_IDX  0x3D4
+#define VGA_CRT_DATA 0x3D5
+#define VGA_CRT_CURSOR_HI 0x0E
+#define VGA_CRT_CURSOR_LO 0x0F
+
+static void vga_set_hw_cursor(int row, int col) {
+    uint16_t pos = (uint16_t)(row * VGA_COLS + col);
+    fl_ioport_out8(VGA_CRT_IDX,  VGA_CRT_CURSOR_HI);
+    fl_ioport_out8(VGA_CRT_DATA, (uint8_t)(pos >> 8));
+    fl_ioport_out8(VGA_CRT_IDX,  VGA_CRT_CURSOR_LO);
+    fl_ioport_out8(VGA_CRT_DATA, (uint8_t)(pos & 0xFF));
+}
+
 static void hw_putchar(display_driver_t *drv, char c) {
     display_impl_t *impl = (display_impl_t *)drv->impl;
     if (c == '\n') {
@@ -74,6 +90,7 @@ static void hw_putchar(display_driver_t *drv, char c) {
             for (int i = (VGA_ROWS - 1) * VGA_COLS; i < VGA_ROWS * VGA_COLS; i++)
                 fl_mmio_write16((void *)(VGA_MEM + i), (uint16_t)(' ' | (impl->color << 8)));
         }
+        vga_set_hw_cursor(impl->row, impl->col);
         return;
     }
     int idx = impl->row * VGA_COLS + impl->col;
@@ -88,6 +105,7 @@ static void hw_putchar(display_driver_t *drv, char c) {
                 fl_mmio_write16((void *)(VGA_MEM + i), (uint16_t)(' ' | (impl->color << 8)));
         }
     }
+    vga_set_hw_cursor(impl->row, impl->col);
 }
 
 static void hw_clear(display_driver_t *drv) {
@@ -99,12 +117,14 @@ static void hw_clear(display_driver_t *drv) {
     for (int r = 0; r < VGA_ROWS; r++)
         asm_mem_copy((void *)(VGA_MEM + r * VGA_COLS), row_buf, VGA_COLS * 2);
     impl->row = impl->col = 0;
+    vga_set_hw_cursor(0, 0);
 }
 
 static void hw_set_cursor(display_driver_t *drv, int row, int col) {
     display_impl_t *impl = (display_impl_t *)drv->impl;
     impl->row = row;
     impl->col = col;
+    vga_set_hw_cursor(row, col);
 }
 
 static void hw_refresh_vga(display_driver_t *drv, const void *vga_buf) {

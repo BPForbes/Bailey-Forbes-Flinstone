@@ -3,13 +3,32 @@
 #include "fl_cstr.h"
 #include "fl/mm.h"
 #include "fl/mem_asm.h"
+#ifndef DRIVERS_BAREMETAL
+#include <stdio.h>
+#endif
 
-#define FL_MODEL_MAX_DEVICES 16
-#define FL_MODEL_MAX_DRIVERS 16
-#define FL_MODEL_MAX_DEVFS   16
-#define FL_MODEL_MAX_IRQ     32
+#define FL_MODEL_MAX_DEVICES   32
+#define FL_MODEL_MAX_DRIVERS   32
+#define FL_MODEL_MAX_DEVFS     32
+#define FL_MODEL_MAX_IRQ       64
 #define FL_MODEL_MAX_RESOURCES 64
-#define FL_MODEL_MAX_DMA     32
+#define FL_MODEL_MAX_DMA       32
+
+/* Halt-style panic used when a hard limit is exceeded at registration time. */
+static void model_overflow_panic(const char *msg) {
+#ifdef DRIVERS_BAREMETAL
+    (void)msg;
+#if defined(__x86_64__) || defined(__i386__)
+    __asm__ volatile("cli");
+    for (;;) __asm__ volatile("hlt");
+#else
+    for (;;) {}
+#endif
+#else
+    fprintf(stderr, "[driver_model] PANIC: %s\n", msg);
+    for (;;) {}
+#endif
+}
 
 typedef struct {
     fl_device_t *dev;
@@ -75,8 +94,10 @@ static int driver_matches(const fl_driver_desc_t *driver, const fl_device_desc_t
 }
 
 int fl_driver_registry_register(const fl_driver_desc_t *desc) {
-    if (!desc || !desc->name || !desc->ops || s_driver_count >= FL_MODEL_MAX_DRIVERS)
+    if (!desc || !desc->name || !desc->ops)
         return -1;
+    if (s_driver_count >= FL_MODEL_MAX_DRIVERS)
+        model_overflow_panic("driver table full (FL_MODEL_MAX_DRIVERS)");
     s_drivers[s_driver_count++] = desc;
     return 0;
 }
@@ -306,6 +327,8 @@ void fl_drivers_init(void) {
         return;
     fl_device_desc_t descs[FL_MODEL_MAX_DEVICES];
     int count = fl_bus_enumerate(descs, FL_MODEL_MAX_DEVICES);
+    if (count > FL_MODEL_MAX_DEVICES)
+        model_overflow_panic("device table full (FL_MODEL_MAX_DEVICES)");
     for (int i = 0; i < count && s_device_count < FL_MODEL_MAX_DEVICES; i++) {
         fl_device_t *dev = fl_device_create(&descs[i]);
         if (!dev)
@@ -370,8 +393,10 @@ void fl_drivers_shutdown(void) {
 }
 
 int fl_devfs_register(const char *path, int class_id, void *dev, const fl_devfs_ops_t *ops) {
-    if (!path || !dev || !ops || s_devfs_count >= FL_MODEL_MAX_DEVFS)
+    if (!path || !dev || !ops)
         return -1;
+    if (s_devfs_count >= FL_MODEL_MAX_DEVFS)
+        model_overflow_panic("devfs table full (FL_MODEL_MAX_DEVFS)");
     if (fl_cstr_len(path, sizeof(s_devfs[0].path)) >= sizeof(s_devfs[0].path))
         return -1;
     for (int i = 0; i < s_devfs_count; i++)
