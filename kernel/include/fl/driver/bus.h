@@ -66,13 +66,7 @@ typedef struct fl_device_desc {
     /* Synthetic identity (when bus_type == FL_BUS_SYNTH) */
     char     synth_id[32];
 
-    /* Common: resource locations */
-    fl_mmio_region_t mmio[FL_MMIO_MAX_BARS];
-    int              mmio_count;
-    uint16_t         ioport_base;   /* 0 = none */
-    uint16_t         ioport_count;
-    int              irq[FL_IRQ_MAX];
-    int              irq_count;
+    /* Common: authoritative resource locations */
     fl_resource_t    resources[FL_RESOURCE_MAX];
     int              resource_count;
 
@@ -85,6 +79,11 @@ typedef struct fl_device fl_device_t;
 
 /* Enumerate all devices on all buses. Returns count, fills descs[]. */
 int fl_bus_enumerate(fl_device_desc_t *descs, int max_descs);
+
+/* Derive legacy views from resources[] without duplicating descriptor state. */
+int fl_device_desc_mmio_list(const fl_device_desc_t *desc, fl_mmio_region_t *out, int max_out);
+int fl_device_desc_ioport_range(const fl_device_desc_t *desc, uint16_t *base_out, uint16_t *count_out);
+int fl_device_desc_irq_list(const fl_device_desc_t *desc, int *out, int max_out);
 
 /* Get device descriptor for a fl_device handle */
 const fl_device_desc_t *fl_device_get_desc(const fl_device_t *dev);

@@ -87,6 +87,8 @@ static int test_device_model(void) {
     ASSERT(res.type == FL_RESOURCE_SYNTH);
     ASSERT(res.start == (uintptr_t)current_disk_file);
     ASSERT(res.size == strlen(current_disk_file) + 1);
+    fl_drivers_init();
+    ASSERT(fl_device_count() == 1);
     ASSERT(fl_resource_claim(dev, FL_RESOURCE_SYNTH, 0) != 0);
     ASSERT(fl_resource_claim(dev, FL_RESOURCE_SYNTH, 99) != 0);
     return 0;
@@ -115,6 +117,7 @@ static int test_devfs_block(void) {
     ASSERT(n == FL_SECTOR_SIZE);
     ASSERT(memcmp(wbuf, rbuf, (size_t)g_cluster_size) == 0);
     ASSERT(fl_devfs_close(&file) == 0);
+    ASSERT(fl_devfs_register("/dev/this/path/is/too/long/for/devfs", FL_DRV_CLASS_BLOCK, fl_device_find_synth("host_blk"), &(fl_devfs_ops_t){0}) != 0);
     return 0;
 }
 
@@ -129,11 +132,13 @@ static int test_irq_and_dma(void) {
     fl_device_t *dev = fl_device_find_synth("host_blk");
     uint8_t src[128], dst[128];
     fl_dma_info_t info;
-    void *buf = fl_dma_alloc_device(dev, sizeof(dst));
+    fl_irq_info_t irq_info;
+    void *buf = NULL;
+    ASSERT(dev != NULL);
+    buf = fl_dma_alloc_device(dev, sizeof(dst));
     for (size_t i = 0; i < sizeof(src); i++)
         src[i] = (uint8_t)(i + 1);
     ASSERT(buf != NULL);
-    ASSERT(dev != NULL);
     ASSERT(fl_dma_allocation_count() == 1);
     ASSERT(fl_dma_get_info(buf, &info) == 0);
     ASSERT(info.ptr == buf);
@@ -154,11 +159,24 @@ static int test_irq_and_dma(void) {
     ASSERT(fl_irq_dispatch(3) == 0);
     ASSERT(hits == 1);
     ASSERT(fl_irq_dispatch_count(3) == 1);
+    ASSERT(fl_irq_get_info(3, &irq_info) == 0);
+    ASSERT(irq_info.irq == 3);
+    ASSERT(irq_info.enabled == 1);
+    ASSERT(irq_info.dispatch_count == 1);
+    ASSERT(irq_info.eoi_count == 1);
+    ASSERT(irq_info.owner == dev);
     fl_irq_disable(3);
     ASSERT(fl_irq_dispatch(3) != 0);
+    fl_irq_unregister_device(dev);
+    ASSERT(fl_irq_get_info(3, &irq_info) == 0);
+    ASSERT(irq_info.owner == NULL);
+    ASSERT(fl_irq_register(3, test_irq_handler, &hits) == 0);
     fl_irq_unregister(3);
+    ASSERT(fl_irq_get_info(3, &irq_info) == 0);
+    ASSERT(irq_info.owner == NULL);
     ASSERT(fl_irq_register_device(dev, 99, test_irq_handler, &hits) != 0);
     ASSERT(fl_irq_register(31, test_irq_handler, &hits) != 0);
+    ASSERT(fl_irq_get_info(99, &irq_info) != 0);
     return 0;
 }
 

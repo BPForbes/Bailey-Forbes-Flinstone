@@ -5,6 +5,7 @@
 #define FL_DRIVER_DEVICE_H
 
 #include "bus.h"
+#include "driver.h"
 
 #ifdef __cplusplus
 extern "C" {
@@ -20,8 +21,8 @@ typedef struct fl_device_info {
     const fl_device_t *dev;
     const fl_device_desc_t *desc;
     const char *driver_name;
-    int driver_class;
-    int state;
+    fl_driver_class_t driver_class;
+    fl_driver_state_t state;
 } fl_device_info_t;
 
 int fl_device_count(void);
