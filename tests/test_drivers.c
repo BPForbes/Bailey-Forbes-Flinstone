@@ -3,6 +3,7 @@
  */
 #include "drivers/drivers.h"
 #include "drivers/block/block_driver.h"
+#include "drivers/fl_cstr.h"
 #include "fl/driver/device.h"
 #include "fl/driver/devfs.h"
 #include "fl/driver/irq.h"
@@ -180,6 +181,373 @@ static int test_irq_and_dma(void) {
     return 0;
 }
 
+/* ------------------------------------------------------------------ */
+/* fl_cstr: new header-only string utilities                           */
+/* ------------------------------------------------------------------ */
+static int test_fl_cstr(void) {
+    /* --- fl_cstr_len --- */
+    ASSERT(fl_cstr_len(NULL, 10) == 0);
+    ASSERT(fl_cstr_len("", 10) == 0);
+    ASSERT(fl_cstr_len("hello", 10) == 5);
+    /* max_len truncates: only 3 of 5 chars counted */
+    ASSERT(fl_cstr_len("hello", 3) == 3);
+    /* max_len of 0: always returns 0 */
+    ASSERT(fl_cstr_len("hello", 0) == 0);
+    /* exactly at boundary */
+    ASSERT(fl_cstr_len("abc", 3) == 3);
+    ASSERT(fl_cstr_len("abc", 4) == 3);
+
+    /* --- fl_cstr_eq --- */
+    ASSERT(fl_cstr_eq(NULL, "foo") == 0);
+    ASSERT(fl_cstr_eq("foo", NULL) == 0);
+    ASSERT(fl_cstr_eq(NULL, NULL) == 0);
+    ASSERT(fl_cstr_eq("", "") == 1);
+    ASSERT(fl_cstr_eq("foo", "foo") == 1);
+    ASSERT(fl_cstr_eq("foo", "bar") == 0);
+    /* prefix mismatch: "foo" vs "foo2" */
+    ASSERT(fl_cstr_eq("foo", "foo2") == 0);
+    ASSERT(fl_cstr_eq("foo2", "foo") == 0);
+    /* single char */
+    ASSERT(fl_cstr_eq("a", "a") == 1);
+    ASSERT(fl_cstr_eq("a", "b") == 0);
+    /* host_blk is the real synth ID used by the driver */
+    ASSERT(fl_cstr_eq("host_blk", "host_blk") == 1);
+    ASSERT(fl_cstr_eq("host_blk", "host_blk2") == 0);
+
+    /* --- fl_cstr_copy --- */
+    char buf[16];
+
+    /* NULL dst: no-op, no crash */
+    fl_cstr_copy(NULL, 5, "hello");
+
+    /* dst_len 0: no-op, no crash */
+    fl_cstr_copy(buf, 0, "hello");
+
+    /* NULL src: dst gets empty string */
+    memset(buf, 0xFF, sizeof(buf));
+    fl_cstr_copy(buf, sizeof(buf), NULL);
+    ASSERT(buf[0] == '\0');
+
+    /* Normal copy */
+    fl_cstr_copy(buf, sizeof(buf), "hello");
+    ASSERT(strcmp(buf, "hello") == 0);
+
+    /* Truncation: dst_len=5 allows only 4 chars + NUL */
+    fl_cstr_copy(buf, 5, "hello world");
+    ASSERT(buf[4] == '\0');
+    ASSERT(strncmp(buf, "hell", 4) == 0);
+
+    /* Empty string copy */
+    fl_cstr_copy(buf, sizeof(buf), "");
+    ASSERT(buf[0] == '\0');
+
+    /* dst_len=1: only the NUL terminator fits */
+    fl_cstr_copy(buf, 1, "hello");
+    ASSERT(buf[0] == '\0');
+
+    /* Overlap: src and dst overlap (backward move case: dst > src) */
+    static char overlap[16];
+    memset(overlap, 0, sizeof(overlap));
+    strcpy(overlap, "abcde");
+    /* Shift two bytes forward inside the same buffer */
+    fl_cstr_copy(overlap + 2, sizeof(overlap) - 2, overlap);
+    ASSERT(overlap[2] == 'a');
+    ASSERT(overlap[3] == 'b');
+    ASSERT(overlap[4] == 'c');
+    ASSERT(overlap[5] == 'd');
+    ASSERT(overlap[6] == 'e');
+    ASSERT(overlap[7] == '\0');
+
+    return 0;
+}
+
+/* ------------------------------------------------------------------ */
+/* bus resource extraction: new functions in bus.c                    */
+/* ------------------------------------------------------------------ */
+static int test_bus_resource_extraction(void) {
+    fl_device_desc_t descs[2];
+    int irq_list[8];
+    fl_mmio_region_t mmio_list[8];
+    uint16_t ioport_base, ioport_count;
+
+    memset(descs, 0, sizeof(descs));
+
+    /* Get the real descriptor from bus enumeration */
+    int n = fl_bus_enumerate(descs, 2);
+    ASSERT(n == 1);
+
+    const fl_device_desc_t *d = &descs[0];
+    ASSERT(d->resource_count == 4);
+
+    /* ---- fl_device_desc_irq_list ---- */
+    /* NULL desc */
+    ASSERT(fl_device_desc_irq_list(NULL, irq_list, 8) == 0);
+    /* NULL irq buffer */
+    ASSERT(fl_device_desc_irq_list(d, NULL, 8) == 0);
+    /* max_irq <= 0 */
+    ASSERT(fl_device_desc_irq_list(d, irq_list, 0) == 0);
+    /* host descriptor has exactly 1 IRQ resource at line 3 */
+    memset(irq_list, 0, sizeof(irq_list));
+    ASSERT(fl_device_desc_irq_list(d, irq_list, 8) == 1);
+    ASSERT(irq_list[0] == 3);
+    /* max_irq=1 still gets one result */
+    memset(irq_list, 0, sizeof(irq_list));
+    ASSERT(fl_device_desc_irq_list(d, irq_list, 1) == 1);
+    ASSERT(irq_list[0] == 3);
+
+    /* ---- fl_device_desc_mmio_list ---- */
+    /* NULL desc */
+    ASSERT(fl_device_desc_mmio_list(NULL, mmio_list, 8) == 0);
+    /* NULL mmio buffer */
+    ASSERT(fl_device_desc_mmio_list(d, NULL, 8) == 0);
+    /* max_mmio <= 0 */
+    ASSERT(fl_device_desc_mmio_list(d, mmio_list, 0) == 0);
+    /* host descriptor has no MMIO resources */
+    memset(mmio_list, 0, sizeof(mmio_list));
+    ASSERT(fl_device_desc_mmio_list(d, mmio_list, 8) == 0);
+
+    /* ---- fl_device_desc_ioport_range ---- */
+    /* NULL desc */
+    ASSERT(fl_device_desc_ioport_range(NULL, &ioport_base, &ioport_count) == -1);
+    /* NULL base */
+    ASSERT(fl_device_desc_ioport_range(d, NULL, &ioport_count) == -1);
+    /* NULL count */
+    ASSERT(fl_device_desc_ioport_range(d, &ioport_base, NULL) == -1);
+    /* host descriptor has 1 IOPORT resource at 0xF100, size 8 */
+    ioport_base = 0; ioport_count = 0;
+    ASSERT(fl_device_desc_ioport_range(d, &ioport_base, &ioport_count) == 0);
+    ASSERT(ioport_base == 0xF100u);
+    ASSERT(ioport_count == 8);
+
+    /* ---- descriptor with no resources (empty) ---- */
+    fl_device_desc_t empty;
+    memset(&empty, 0, sizeof(empty));
+    empty.resource_count = 0;
+    ASSERT(fl_device_desc_irq_list(&empty, irq_list, 8) == 0);
+    ASSERT(fl_device_desc_mmio_list(&empty, mmio_list, 8) == 0);
+    ASSERT(fl_device_desc_ioport_range(&empty, &ioport_base, &ioport_count) == -1);
+
+    return 0;
+}
+
+/* ------------------------------------------------------------------ */
+/* devfs: error paths and flags enforcement                            */
+/* ------------------------------------------------------------------ */
+static int test_devfs_flags_and_errors(void) {
+    fl_devfs_file_t file;
+    uint8_t buf[512];
+    size_t n = 0;
+
+    memset(&file, 0, sizeof(file));
+    memset(buf, 0, sizeof(buf));
+
+    /* Open non-existent path */
+    ASSERT(fl_devfs_open("/dev/does_not_exist", FL_DEVFS_O_READ, &file) != 0);
+
+    /* NULL path */
+    ASSERT(fl_devfs_open(NULL, FL_DEVFS_O_READ, &file) != 0);
+
+    /* NULL out-file */
+    ASSERT(fl_devfs_open("/dev/blk0", FL_DEVFS_O_READ, NULL) != 0);
+
+    /* Open read-only and attempt write */
+    memset(&file, 0, sizeof(file));
+    ASSERT(fl_devfs_open("/dev/blk0", FL_DEVFS_O_READ, &file) == 0);
+    /* write should fail: FL_DEVFS_O_WRITE flag not set */
+    ASSERT(fl_devfs_write(&file, buf, sizeof(buf), &n) != 0);
+    ASSERT(fl_devfs_close(&file) == 0);
+
+    /* Open write-only and attempt read */
+    memset(&file, 0, sizeof(file));
+    ASSERT(fl_devfs_open("/dev/blk0", FL_DEVFS_O_WRITE, &file) == 0);
+    ASSERT(fl_devfs_read(&file, buf, sizeof(buf), &n) != 0);
+    ASSERT(fl_devfs_close(&file) == 0);
+
+    /* Operations on NULL file */
+    ASSERT(fl_devfs_read(NULL, buf, sizeof(buf), &n) != 0);
+    ASSERT(fl_devfs_write(NULL, buf, sizeof(buf), &n) != 0);
+    ASSERT(fl_devfs_ioctl(NULL, FL_DEVFS_IOCTL_BLOCK_CAPS, buf) != 0);
+    ASSERT(fl_devfs_close(NULL) != 0);
+
+    /* Close clears node pointer */
+    memset(&file, 0, sizeof(file));
+    ASSERT(fl_devfs_open("/dev/blk0", FL_DEVFS_O_READ | FL_DEVFS_O_WRITE, &file) == 0);
+    ASSERT(file.node != NULL);
+    ASSERT(fl_devfs_close(&file) == 0);
+    ASSERT(file.node == NULL);
+    ASSERT(file.pos == 0);
+
+    /* Register duplicate path must fail */
+    fl_devfs_ops_t dummy_ops = {0};
+    fl_device_t *blk = fl_device_find_synth("host_blk");
+    ASSERT(blk != NULL);
+    ASSERT(fl_devfs_register("/dev/blk0", FL_DRV_CLASS_BLOCK, blk, &dummy_ops) != 0);
+
+    /* Unregister existing */
+    ASSERT(fl_devfs_register("/dev/test_tmp", FL_DRV_CLASS_BLOCK, blk, &dummy_ops) == 0);
+    fl_devfs_unregister("/dev/test_tmp");
+    /* After unregister, open should fail */
+    ASSERT(fl_devfs_open("/dev/test_tmp", FL_DEVFS_O_READ, &file) != 0);
+
+    return 0;
+}
+
+/* ------------------------------------------------------------------ */
+/* DMA: null / edge case handling                                      */
+/* ------------------------------------------------------------------ */
+static int test_dma_edge_cases(void) {
+    fl_dma_info_t info;
+
+    /* Allocate zero size */
+    void *p = fl_dma_alloc(0);
+    ASSERT(p == NULL);
+
+    /* get_info on NULL */
+    ASSERT(fl_dma_get_info(NULL, NULL) != 0);
+    ASSERT(fl_dma_get_info(NULL, &info) != 0);
+
+    /* get_info on unknown pointer */
+    int dummy = 42;
+    ASSERT(fl_dma_get_info(&dummy, &info) != 0);
+
+    /* allocation count starts clean after shutdown/reinit */
+    ASSERT(fl_dma_allocation_count() == 0);
+
+    /* Normal alloc then free */
+    p = fl_dma_alloc(64);
+    ASSERT(p != NULL);
+    ASSERT(fl_dma_allocation_count() == 1);
+    fl_dma_free(p);
+    ASSERT(fl_dma_allocation_count() == 0);
+
+    /* Double-free of same pointer: must not crash (second free is ignored) */
+    p = fl_dma_alloc(32);
+    ASSERT(p != NULL);
+    fl_dma_free(p);
+    fl_dma_free(p); /* second free: pointer no longer tracked, should be no-op */
+    ASSERT(fl_dma_allocation_count() == 0);
+
+    /* fl_dma_free(NULL) is a no-op */
+    fl_dma_free(NULL);
+
+    /* fl_dma_zero/copy with NULL or zero size: no crash */
+    fl_dma_zero(NULL, 8);
+    fl_dma_zero(NULL, 0);
+    p = fl_dma_alloc(16);
+    ASSERT(p != NULL);
+    fl_dma_zero(p, 0);
+    fl_dma_copy(NULL, p, 8);
+    fl_dma_copy(p, NULL, 8);
+    fl_dma_free(p);
+
+    return 0;
+}
+
+/* ------------------------------------------------------------------ */
+/* IRQ: boundary / error cases                                         */
+/* ------------------------------------------------------------------ */
+static int test_irq_edge_cases(void) {
+    fl_irq_info_t irq_info;
+    /* Past end of s_irq[]; keep in sync with FL_MODEL_MAX_IRQ in driver_model.c */
+    const int irq_past_max = 64;
+
+    /* fl_irq_get_info with out-of-range IRQ */
+    ASSERT(fl_irq_get_info(-1, &irq_info) != 0);
+    ASSERT(fl_irq_get_info(irq_past_max, &irq_info) != 0);
+
+    /* fl_irq_get_info with NULL out param */
+    ASSERT(fl_irq_get_info(0, NULL) != 0);
+
+    /* fl_irq_register: out-of-range IRQ */
+    void *ctx = NULL;
+    ASSERT(fl_irq_register(-1, test_irq_handler, ctx) != 0);
+    ASSERT(fl_irq_register(irq_past_max, test_irq_handler, ctx) != 0);
+
+    /* fl_irq_register: NULL handler */
+    ASSERT(fl_irq_register(0, NULL, ctx) != 0);
+
+    /* fl_irq_dispatch on out-of-range */
+    ASSERT(fl_irq_dispatch(-1) != 0);
+    ASSERT(fl_irq_dispatch(irq_past_max) != 0);
+
+    /* fl_irq_dispatch_count on invalid IRQ returns 0 */
+    ASSERT(fl_irq_dispatch_count(-1) == 0);
+    ASSERT(fl_irq_dispatch_count(irq_past_max) == 0);
+
+    /* fl_irq_enable/disable on out-of-range: no crash */
+    fl_irq_enable(-1);
+    fl_irq_enable(irq_past_max);
+    fl_irq_disable(-1);
+    fl_irq_disable(irq_past_max);
+
+    /* fl_irq_unregister on out-of-range: no crash */
+    fl_irq_unregister(-1);
+    fl_irq_unregister(irq_past_max);
+
+    /* fl_irq_unregister_device(NULL): no crash */
+    fl_irq_unregister_device(NULL);
+
+    /* fl_irq_eoi on out-of-range: no crash */
+    fl_irq_eoi(-1);
+    fl_irq_eoi(irq_past_max);
+
+    return 0;
+}
+
+/* ------------------------------------------------------------------ */
+/* Device model: null / boundary parameter handling                   */
+/* ------------------------------------------------------------------ */
+static int test_device_model_null_params(void) {
+    fl_device_info_t info;
+    fl_resource_t res;
+
+    /* fl_device_get_info: out-of-range index */
+    ASSERT(fl_device_get_info(-1, &info) != 0);
+    ASSERT(fl_device_get_info(9999, &info) != 0);
+
+    /* fl_device_get_info: NULL out param */
+    ASSERT(fl_device_get_info(0, NULL) != 0);
+
+    /* fl_device_find_synth: NULL id */
+    ASSERT(fl_device_find_synth(NULL) == NULL);
+
+    /* fl_device_find_synth: non-existent id */
+    ASSERT(fl_device_find_synth("no_such_device_id") == NULL);
+
+    /* fl_device_get_desc: NULL device */
+    ASSERT(fl_device_get_desc(NULL) == NULL);
+
+    /* fl_resource_count: NULL device (returns global count) */
+    int total = fl_resource_count(NULL);
+    ASSERT(total >= 0);
+
+    /* fl_resource_get: NULL out param */
+    ASSERT(fl_resource_get(NULL, 0, NULL) != 0);
+
+    /* fl_resource_get: negative index */
+    fl_device_t *dev = fl_device_find_synth("host_blk");
+    ASSERT(dev != NULL);
+    ASSERT(fl_resource_get(dev, -1, &res) != 0);
+
+    /* fl_resource_get: beyond last resource */
+    ASSERT(fl_resource_get(dev, 9999, &res) != 0);
+
+    /* fl_resource_claim: NULL device */
+    ASSERT(fl_resource_claim(NULL, FL_RESOURCE_IRQ, 0) != 0);
+
+    /* fl_resource_release_all: NULL device is no-op */
+    fl_resource_release_all(NULL);
+
+    /* fl_driver_registry_match: NULL params */
+    const fl_driver_desc_t *matched = NULL;
+    ASSERT(fl_driver_registry_match(NULL, &matched) != 0);
+    fl_device_desc_t desc;
+    memset(&desc, 0, sizeof(desc));
+    ASSERT(fl_driver_registry_match(&desc, NULL) != 0);
+
+    return 0;
+}
+
 static int test_display(void) {
     ASSERT(g_display_driver != NULL);
     g_display_driver->putchar(g_display_driver, 'X');
@@ -249,6 +617,30 @@ int main(void) {
 
     printf("test_irq_and_dma... ");
     if (test_irq_and_dma() != 0) { drivers_shutdown(); unlink(path); return 1; }
+    printf("OK\n");
+
+    printf("test_fl_cstr... ");
+    if (test_fl_cstr() != 0) { drivers_shutdown(); unlink(path); return 1; }
+    printf("OK\n");
+
+    printf("test_bus_resource_extraction... ");
+    if (test_bus_resource_extraction() != 0) { drivers_shutdown(); unlink(path); return 1; }
+    printf("OK\n");
+
+    printf("test_devfs_flags_and_errors... ");
+    if (test_devfs_flags_and_errors() != 0) { drivers_shutdown(); unlink(path); return 1; }
+    printf("OK\n");
+
+    printf("test_dma_edge_cases... ");
+    if (test_dma_edge_cases() != 0) { drivers_shutdown(); unlink(path); return 1; }
+    printf("OK\n");
+
+    printf("test_irq_edge_cases... ");
+    if (test_irq_edge_cases() != 0) { drivers_shutdown(); unlink(path); return 1; }
+    printf("OK\n");
+
+    printf("test_device_model_null_params... ");
+    if (test_device_model_null_params() != 0) { drivers_shutdown(); unlink(path); return 1; }
     printf("OK\n");
 
     printf("test_display... ");
