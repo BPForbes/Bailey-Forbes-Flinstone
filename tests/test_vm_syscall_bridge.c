@@ -72,6 +72,41 @@ int main(void) {
     assert(read_sys_ret() == (long)strlen(msg));
     assert(memcmp(ram + 64, msg, strlen(msg)) == 0);
 
+    /* Codex P1: OOB guest buffer must fail (-1), not translate to arbitrary host VA. */
+    vm_io_out(&mem, VM_SYS_PORT_NO, FL_SYS_PIPE_WRITE, 4);
+    write_sys_arg64(0, (uintptr_t)h);
+    write_sys_arg64(1, 250);
+    write_sys_arg64(2, 20); /* 250 + 20 > sizeof(ram) */
+    vm_io_out(&mem, VM_SYS_PORT_CALL, 0, 4);
+    assert(read_sys_ret() == -1);
+
+    vm_io_out(&mem, VM_SYS_PORT_NO, FL_SYS_PIPE_WRITE, 4);
+    write_sys_arg64(0, (uintptr_t)h);
+    write_sys_arg64(1, 300);
+    write_sys_arg64(2, 1); /* offset past guest RAM */
+    vm_io_out(&mem, VM_SYS_PORT_CALL, 0, 4);
+    assert(read_sys_ret() == -1);
+
+    /* Codex P2: wrong resource type on syscall must return -1. */
+    vm_io_out(NULL, VM_SYS_PORT_NO, FL_SYS_MSGQ_CREATE, 4);
+    write_sys_arg64(0, 2);
+    write_sys_arg64(1, 16);
+    vm_io_out(NULL, VM_SYS_PORT_CALL, 0, 4);
+    long mq = read_sys_ret();
+    assert(mq >= 0);
+
+    vm_io_out(&mem, VM_SYS_PORT_NO, FL_SYS_PIPE_READ, 4);
+    write_sys_arg64(0, (uintptr_t)mq);
+    write_sys_arg64(1, 64);
+    write_sys_arg64(2, 8);
+    vm_io_out(&mem, VM_SYS_PORT_CALL, 0, 4);
+    assert(read_sys_ret() == -1);
+
+    vm_io_out(NULL, VM_SYS_PORT_NO, FL_SYS_CLOSE, 4);
+    write_sys_arg64(0, (uintptr_t)mq);
+    vm_io_out(NULL, VM_SYS_PORT_CALL, 0, 4);
+    assert(read_sys_ret() == 0);
+
     vm_io_out(NULL, VM_SYS_PORT_NO, FL_SYS_CLOSE, 4);
     write_sys_arg64(0, (uintptr_t)h);
     vm_io_out(NULL, VM_SYS_PORT_CALL, 0, 4);
