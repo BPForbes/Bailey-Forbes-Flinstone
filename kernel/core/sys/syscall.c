@@ -40,12 +40,18 @@ long fl_syscall_dispatch(fl_syscall_no_t no, uintptr_t a0, uintptr_t a1, uintptr
             return (long)h;
         }
         case FL_SYS_PIPE_READ: {
-            pipe_t *p = (pipe_t *)vrt_resource((vrt_handle_t)a0);
-            return p ? (long)pipe_read(p, (void *)a1, (size_t)a2) : -1;
+            vrt_entry_t entry;
+            vrt_handle_t h = (vrt_handle_t)a0;
+            if (vrt_get(h, &entry) != 0 || entry.type != VRT_TYPE_PIPE || !entry.resource)
+                return -1;
+            return (long)pipe_read((pipe_t *)entry.resource, (void *)a1, (size_t)a2);
         }
         case FL_SYS_PIPE_WRITE: {
-            pipe_t *p = (pipe_t *)vrt_resource((vrt_handle_t)a0);
-            return p ? (long)pipe_write(p, (const void *)a1, (size_t)a2) : -1;
+            vrt_entry_t entry;
+            vrt_handle_t h = (vrt_handle_t)a0;
+            if (vrt_get(h, &entry) != 0 || entry.type != VRT_TYPE_PIPE || !entry.resource)
+                return -1;
+            return (long)pipe_write((pipe_t *)entry.resource, (const void *)a1, (size_t)a2);
         }
         case FL_SYS_MSGQ_CREATE: {
             size_t max_msgs = (size_t)a0;
@@ -60,12 +66,18 @@ long fl_syscall_dispatch(fl_syscall_no_t no, uintptr_t a0, uintptr_t a1, uintptr
             return (long)h;
         }
         case FL_SYS_MSGQ_SEND: {
-            msgq_t *q = (msgq_t *)vrt_resource((vrt_handle_t)a0);
-            return q ? (long)msgq_send(q, (const void *)a1, (size_t)a2) : -1;
+            vrt_entry_t entry;
+            vrt_handle_t h = (vrt_handle_t)a0;
+            if (vrt_get(h, &entry) != 0 || entry.type != VRT_TYPE_MSGQ || !entry.resource)
+                return -1;
+            return (long)msgq_send((msgq_t *)entry.resource, (const void *)a1, (size_t)a2);
         }
         case FL_SYS_MSGQ_RECV: {
-            msgq_t *q = (msgq_t *)vrt_resource((vrt_handle_t)a0);
-            return q ? (long)msgq_receive(q, (void *)a1, (size_t)a2, (uint64_t)a3) : -1;
+            vrt_entry_t entry;
+            vrt_handle_t h = (vrt_handle_t)a0;
+            if (vrt_get(h, &entry) != 0 || entry.type != VRT_TYPE_MSGQ || !entry.resource)
+                return -1;
+            return (long)msgq_receive((msgq_t *)entry.resource, (void *)a1, (size_t)a2, (uint64_t)a3);
         }
         case FL_SYS_CLOSE: {
             vrt_entry_t entry;

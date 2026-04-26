@@ -68,6 +68,22 @@ static void test_msgq_syscalls(void) {
     fl_sys_shutdown();
 }
 
+static void test_syscall_rejects_wrong_handle_type(void) {
+    fl_sys_bootstrap();
+    long pipe_h = fl_syscall_dispatch(FL_SYS_PIPE_CREATE, 64, 0, 0, 0);
+    assert(pipe_h >= 0);
+    char buf[8] = {0};
+    assert(fl_syscall_dispatch(FL_SYS_MSGQ_SEND, (uintptr_t)pipe_h, (uintptr_t)buf, 1, 0) == -1);
+
+    long msgq_h = fl_syscall_dispatch(FL_SYS_MSGQ_CREATE, 2, 16, 0, 0);
+    assert(msgq_h >= 0);
+    assert(fl_syscall_dispatch(FL_SYS_PIPE_READ, (uintptr_t)msgq_h, (uintptr_t)buf, sizeof(buf), 0) == -1);
+
+    assert(fl_syscall_dispatch(FL_SYS_CLOSE, (uintptr_t)msgq_h, 0, 0, 0) == 0);
+    assert(fl_syscall_dispatch(FL_SYS_CLOSE, (uintptr_t)pipe_h, 0, 0, 0) == 0);
+    fl_sys_shutdown();
+}
+
 static void test_msgq_empty_receive_times_out(void) {
     msgq_t *q = msgq_create(1, 8);
     char out[8] = {0};
@@ -96,6 +112,7 @@ static void test_msgq_empty_receive_times_out(void) {
 int main(void) {
     test_pipe_syscalls();
     test_msgq_syscalls();
+    test_syscall_rejects_wrong_handle_type();
     test_msgq_empty_receive_times_out();
     puts("userspace connection tests: OK");
     return 0;
