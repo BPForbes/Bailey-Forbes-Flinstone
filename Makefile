@@ -272,9 +272,9 @@ test_vm_arch_readiness: kernel/core/mm/mem_domain.o kernel/core/sys/vrt.o kernel
 	  kernel/core/mm/mem_domain.o kernel/core/sys/vrt.o kernel/core/sys/ipc.o kernel/core/sys/syscall.o VM/devices/vm_io.o VM/devices/vm_arch.o $(MEM_ASM_OBJ) -Wl,-z,noexecstack
 	./tests/test_vm_arch_readiness
 
-test_vm_layer_warning: userland/shell/common.o kernel/core/vfs/fs_jail.o kernel/core/mm/mem_domain.o $(MEM_ASM_OBJ)
+test_vm_layer_warning: userland/shell/common.o kernel/core/vfs/fs_jail.o kernel/core/vfs/path_log.o kernel/core/mm/mem_domain.o $(MEM_ASM_OBJ)
 	$(CC) $(CFLAGS) $(TEST_SANITIZE) -I. -Ikernel/core/vfs -Ikernel/core/mm -Iuserland/shell -o tests/test_vm_layer_warning tests/test_vm_layer_warning.c \
-	  userland/shell/common.o kernel/core/vfs/fs_jail.o kernel/core/mm/mem_domain.o $(MEM_ASM_OBJ) -Wl,-z,noexecstack
+	  userland/shell/common.o kernel/core/vfs/fs_jail.o kernel/core/vfs/path_log.o kernel/core/mm/mem_domain.o $(MEM_ASM_OBJ) -Wl,-z,noexecstack
 	./tests/test_vm_layer_warning
 
 .PHONY: test_replay
