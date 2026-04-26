@@ -132,7 +132,7 @@ void update_cluster_line(int clu, const char *hexData) {
     clusters[clu] = strdup(newLine);
 
     /* Journaling-lite: write to .tmp then rename (atomic); avoids mid-write corruption */
-    char tmp_path[80];
+    char tmp_path[CWD_MAX + 4];
     snprintf(tmp_path, sizeof(tmp_path), "%s.tmp", current_disk_file);
     fp = fopen(tmp_path, "w");
     if (!fp) {

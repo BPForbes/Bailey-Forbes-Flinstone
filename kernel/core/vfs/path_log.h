@@ -10,6 +10,7 @@ typedef enum {
 } path_op_t;
 
 void path_log_init(void);
+int path_log_is_initialized(void);
 void path_log_record(path_op_t op, const char *path);
 void path_log_print(int last_n);
 void path_log_shutdown(void);

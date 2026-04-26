@@ -448,10 +448,12 @@ static int test_dma_edge_cases(void) {
 /* ------------------------------------------------------------------ */
 static int test_irq_edge_cases(void) {
     fl_irq_info_t irq_info;
+    /* Past end of s_irq[]; keep in sync with FL_MODEL_MAX_IRQ in driver_model.c */
+    const int irq_past_max = 64;
 
     /* fl_irq_get_info with out-of-range IRQ */
     ASSERT(fl_irq_get_info(-1, &irq_info) != 0);
-    ASSERT(fl_irq_get_info(32, &irq_info) != 0); /* FL_MODEL_MAX_IRQ=32 */
+    ASSERT(fl_irq_get_info(irq_past_max, &irq_info) != 0);
 
     /* fl_irq_get_info with NULL out param */
     ASSERT(fl_irq_get_info(0, NULL) != 0);
@@ -459,35 +461,35 @@ static int test_irq_edge_cases(void) {
     /* fl_irq_register: out-of-range IRQ */
     void *ctx = NULL;
     ASSERT(fl_irq_register(-1, test_irq_handler, ctx) != 0);
-    ASSERT(fl_irq_register(32, test_irq_handler, ctx) != 0);
+    ASSERT(fl_irq_register(irq_past_max, test_irq_handler, ctx) != 0);
 
     /* fl_irq_register: NULL handler */
     ASSERT(fl_irq_register(0, NULL, ctx) != 0);
 
     /* fl_irq_dispatch on out-of-range */
     ASSERT(fl_irq_dispatch(-1) != 0);
-    ASSERT(fl_irq_dispatch(32) != 0);
+    ASSERT(fl_irq_dispatch(irq_past_max) != 0);
 
     /* fl_irq_dispatch_count on invalid IRQ returns 0 */
     ASSERT(fl_irq_dispatch_count(-1) == 0);
-    ASSERT(fl_irq_dispatch_count(32) == 0);
+    ASSERT(fl_irq_dispatch_count(irq_past_max) == 0);
 
     /* fl_irq_enable/disable on out-of-range: no crash */
     fl_irq_enable(-1);
-    fl_irq_enable(32);
+    fl_irq_enable(irq_past_max);
     fl_irq_disable(-1);
-    fl_irq_disable(32);
+    fl_irq_disable(irq_past_max);
 
     /* fl_irq_unregister on out-of-range: no crash */
     fl_irq_unregister(-1);
-    fl_irq_unregister(32);
+    fl_irq_unregister(irq_past_max);
 
     /* fl_irq_unregister_device(NULL): no crash */
     fl_irq_unregister_device(NULL);
 
     /* fl_irq_eoi on out-of-range: no crash */
     fl_irq_eoi(-1);
-    fl_irq_eoi(32);
+    fl_irq_eoi(irq_past_max);
 
     return 0;
 }
