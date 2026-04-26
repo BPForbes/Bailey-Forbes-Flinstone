@@ -1,6 +1,5 @@
 #include "fl/ipc.h"
 #include "mem_asm.h"
-#include <assert.h>
 #include <errno.h>
 #include <stdlib.h>
 
@@ -27,6 +26,9 @@ struct pipe {
     pthread_mutex_t mu;
     pthread_cond_t can_read;
     pthread_cond_t can_write;
+    pthread_cond_t drain;
+    int closing;
+    int waiters;
 #endif
 };
 
@@ -43,6 +45,9 @@ struct msgq {
     pthread_mutex_t mu;
     pthread_cond_t can_read;
     pthread_cond_t can_write;
+    pthread_cond_t drain;
+    int closing;
+    int waiters;
 #endif
 };
 
@@ -77,27 +82,45 @@ pipe_t *pipe_create(size_t size) {
     pthread_mutex_init(&p->mu, NULL);
     pthread_cond_init(&p->can_read, NULL);
     pthread_cond_init(&p->can_write, NULL);
+    pthread_cond_init(&p->drain, NULL);
 #endif
     return p;
 }
 
 void pipe_destroy(pipe_t *p) {
-    if (!p) return;
+    if (!p) {
+        return;
+    }
 #ifndef __KERNEL__
+    pthread_mutex_lock(&p->mu);
+    p->closing = 1;
+    pthread_cond_broadcast(&p->can_read);
+    pthread_cond_broadcast(&p->can_write);
+    while (p->waiters > 0) {
+        pthread_cond_wait(&p->drain, &p->mu);
+    }
+    pthread_mutex_unlock(&p->mu);
     pthread_mutex_destroy(&p->mu);
     pthread_cond_destroy(&p->can_read);
     pthread_cond_destroy(&p->can_write);
+    pthread_cond_destroy(&p->drain);
 #endif
     free(p->buf);
     free(p);
 }
 
 ssize_t pipe_write(pipe_t *p, const void *buf, size_t count) {
-    if (!p || !buf || count == 0) return -1;
+    if (!p || !buf || count == 0) {
+        return -1;
+    }
 #ifdef __KERNEL__
     fl_ipc_lock(&p->lock);
 #else
     pthread_mutex_lock(&p->mu);
+    if (p->closing) {
+        pthread_mutex_unlock(&p->mu);
+        return -1;
+    }
 #endif
     size_t written = 0;
     const uint8_t *src = (const uint8_t *)buf;
@@ -116,13 +139,27 @@ ssize_t pipe_write(pipe_t *p, const void *buf, size_t count) {
 }
 
 ssize_t pipe_read(pipe_t *p, void *buf, size_t count) {
-    if (!p || !buf || count == 0) return -1;
+    if (!p || !buf || count == 0) {
+        return -1;
+    }
 #ifdef __KERNEL__
     fl_ipc_lock(&p->lock);
+    if (p->len == 0) {
+        fl_ipc_unlock(&p->lock);
+        return -1;
+    }
 #else
     pthread_mutex_lock(&p->mu);
-    while (p->len == 0)
+    while (p->len == 0 && !p->closing) {
+        p->waiters++;
         pthread_cond_wait(&p->can_read, &p->mu);
+        p->waiters--;
+        pthread_cond_signal(&p->drain);
+    }
+    if (p->closing && p->len == 0) {
+        pthread_mutex_unlock(&p->mu);
+        return -1;
+    }
 #endif
     size_t readn = 0;
     uint8_t *dst = (uint8_t *)buf;
@@ -158,29 +195,48 @@ msgq_t *msgq_create(size_t max_messages, size_t message_size) {
     pthread_mutex_init(&q->mu, NULL);
     pthread_cond_init(&q->can_read, NULL);
     pthread_cond_init(&q->can_write, NULL);
+    pthread_cond_init(&q->drain, NULL);
 #endif
     return q;
 }
 
 void msgq_destroy(msgq_t *q) {
-    if (!q) return;
+    if (!q) {
+        return;
+    }
 #ifndef __KERNEL__
+    pthread_mutex_lock(&q->mu);
+    q->closing = 1;
+    pthread_cond_broadcast(&q->can_read);
+    pthread_cond_broadcast(&q->can_write);
+    while (q->waiters > 0) {
+        pthread_cond_wait(&q->drain, &q->mu);
+    }
+    pthread_mutex_unlock(&q->mu);
     pthread_mutex_destroy(&q->mu);
     pthread_cond_destroy(&q->can_read);
     pthread_cond_destroy(&q->can_write);
+    pthread_cond_destroy(&q->drain);
 #endif
     free(q->buf);
     free(q);
 }
 
 int msgq_send(msgq_t *q, const void *msg, size_t size) {
-    if (!q || !msg || size == 0) return -1;
-    if (size > q->message_size) return -1;
-    assert(size <= q->message_size);
+    if (!q || !msg || size == 0) {
+        return -1;
+    }
+    if (size > q->message_size) {
+        return -1;
+    }
 #ifdef __KERNEL__
     fl_ipc_lock(&q->lock);
 #else
     pthread_mutex_lock(&q->mu);
+    if (q->closing) {
+        pthread_mutex_unlock(&q->mu);
+        return -1;
+    }
 #endif
     if (q->len >= q->max_messages) {
 #ifdef __KERNEL__
@@ -206,12 +262,18 @@ int msgq_send(msgq_t *q, const void *msg, size_t size) {
 }
 
 int msgq_receive(msgq_t *q, void *msg, size_t size, uint64_t timeout_ms) {
-    if (!q || !msg || size == 0) return -1;
+    if (!q || !msg || size == 0) {
+        return -1;
+    }
 #ifdef __KERNEL__
     (void)timeout_ms;
     fl_ipc_lock(&q->lock);
 #else
     pthread_mutex_lock(&q->mu);
+    if (q->closing) {
+        pthread_mutex_unlock(&q->mu);
+        return -1;
+    }
     if (q->len == 0) {
         if (timeout_ms == 0) {
             pthread_mutex_unlock(&q->mu);
@@ -219,8 +281,11 @@ int msgq_receive(msgq_t *q, void *msg, size_t size, uint64_t timeout_ms) {
         }
         struct timespec deadline;
         make_abs_timeout(timeout_ms, &deadline);
-        while (q->len == 0) {
+        while (q->len == 0 && !q->closing) {
+            q->waiters++;
             int rc = pthread_cond_timedwait(&q->can_read, &q->mu, &deadline);
+            q->waiters--;
+            pthread_cond_signal(&q->drain);
             if (rc == ETIMEDOUT) {
                 pthread_mutex_unlock(&q->mu);
                 return -1;
@@ -230,6 +295,10 @@ int msgq_receive(msgq_t *q, void *msg, size_t size, uint64_t timeout_ms) {
                 return -1;
             }
         }
+    }
+    if (q->closing && q->len == 0) {
+        pthread_mutex_unlock(&q->mu);
+        return -1;
     }
 #endif
     if (q->len == 0) {

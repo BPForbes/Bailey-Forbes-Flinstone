@@ -79,9 +79,17 @@ static void write_port_high_width(uintptr_t *slot, uint32_t value, int size) {
     *slot = low | ((uintptr_t)hi << 32);
 }
 
-static uintptr_t vm_sys_arg_to_host_ptr(vm_mem_t *mem, uintptr_t arg) {
-    if (!mem || !mem->ram || arg >= mem->size)
-        return arg;
+/* Translate guest offset to host pointer; returns 0 if invalid or out of range. */
+static uintptr_t vm_sys_arg_to_host_ptr(vm_mem_t *mem, uintptr_t arg, size_t len) {
+    if (!mem || !mem->ram || len == 0) {
+        return 0;
+    }
+    if (arg >= mem->size) {
+        return 0;
+    }
+    if (len > mem->size - (size_t)arg) {
+        return 0;
+    }
     return (uintptr_t)(mem->ram + (size_t)arg);
 }
 
@@ -89,13 +97,13 @@ static void vm_translate_sys_args(vm_mem_t *mem, uintptr_t args[4]) {
     switch ((fl_syscall_no_t)s_sys_no) {
         case FL_SYS_WRITE:
         case FL_SYS_READ:
-            args[0] = vm_sys_arg_to_host_ptr(mem, args[0]);
+            args[0] = vm_sys_arg_to_host_ptr(mem, args[0], (size_t)args[1]);
             break;
         case FL_SYS_PIPE_READ:
         case FL_SYS_PIPE_WRITE:
         case FL_SYS_MSGQ_SEND:
         case FL_SYS_MSGQ_RECV:
-            args[1] = vm_sys_arg_to_host_ptr(mem, args[1]);
+            args[1] = vm_sys_arg_to_host_ptr(mem, args[1], (size_t)args[2]);
             break;
         default:
             break;

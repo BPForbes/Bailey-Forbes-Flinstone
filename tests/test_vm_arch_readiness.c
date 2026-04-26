@@ -29,7 +29,7 @@ int __attribute__((weak)) vm_disk_write_sector(uint32_t lba, const void *in512) 
 
 int main(void) {
     uint8_t ram[4096] = {0};
-    vm_host_t host;
+    vm_host_t host = {0};
     vm_arch_state_t state = {0};
 
     host.mem.ram = ram;

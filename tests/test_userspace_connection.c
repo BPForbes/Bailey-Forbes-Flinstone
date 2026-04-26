@@ -4,6 +4,10 @@
 #include <string.h>
 #include <time.h>
 
+#ifndef UINT64_C
+#define UINT64_C(x) (x##ULL)
+#endif
+
 #include "fl/ipc.h"
 #include "fl/syscall.h"
 
@@ -42,6 +46,24 @@ static void test_msgq_syscalls(void) {
     long rc = fl_syscall_dispatch(FL_SYS_MSGQ_RECV, (uintptr_t)h, (uintptr_t)out, sizeof(out), 0);
     assert(rc == 0);
     assert(strcmp(out, msg) == 0);
+
+    struct timespec t0;
+    struct timespec t1;
+    clock_gettime(CLOCK_MONOTONIC, &t0);
+    assert(fl_syscall_dispatch(FL_SYS_MSGQ_RECV, (uintptr_t)h, (uintptr_t)out, sizeof(out), 5) == -1);
+    clock_gettime(CLOCK_MONOTONIC, &t1);
+    {
+        long long sec = (long long)(t1.tv_sec - t0.tv_sec);
+        long long nsec = (long long)(t1.tv_nsec - t0.tv_nsec);
+        if (nsec < 0) {
+            sec--;
+            nsec += 1000000000LL;
+        }
+        uint64_t elapsed_ns = (uint64_t)(sec * 1000000000LL + nsec);
+        assert(elapsed_ns >= UINT64_C(5) * UINT64_C(1000000));
+        assert(elapsed_ns <= UINT64_C(200) * UINT64_C(1000000));
+    }
+
     assert(fl_syscall_dispatch(FL_SYS_CLOSE, (uintptr_t)h, 0, 0, 0) == 0);
     fl_sys_shutdown();
 }
@@ -51,12 +73,23 @@ static void test_msgq_empty_receive_times_out(void) {
     char out[8] = {0};
     struct timespec start;
     struct timespec end;
+    const uint64_t timeout_ms = 5;
 
     assert(q);
     clock_gettime(CLOCK_MONOTONIC, &start);
-    assert(msgq_receive(q, out, sizeof(out), 1) == -1);
+    assert(msgq_receive(q, out, sizeof(out), timeout_ms) == -1);
     clock_gettime(CLOCK_MONOTONIC, &end);
-    assert((end.tv_sec - start.tv_sec) >= 0);
+    {
+        long long sec = (long long)(end.tv_sec - start.tv_sec);
+        long long nsec = (long long)(end.tv_nsec - start.tv_nsec);
+        if (nsec < 0) {
+            sec--;
+            nsec += 1000000000LL;
+        }
+        uint64_t elapsed_ns = (uint64_t)(sec * 1000000000LL + nsec);
+        assert(elapsed_ns >= timeout_ms * UINT64_C(1000000));
+        assert(elapsed_ns <= UINT64_C(200) * UINT64_C(1000000));
+    }
     msgq_destroy(q);
 }
 

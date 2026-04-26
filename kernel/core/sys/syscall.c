@@ -13,7 +13,6 @@ void fl_sys_shutdown(void) {
 }
 
 long fl_syscall_dispatch(fl_syscall_no_t no, uintptr_t a0, uintptr_t a1, uintptr_t a2, uintptr_t a3) {
-    (void)a3;
     switch (no) {
         case FL_SYS_WRITE: {
             const char *buf = (const char *)a0;
@@ -66,7 +65,7 @@ long fl_syscall_dispatch(fl_syscall_no_t no, uintptr_t a0, uintptr_t a1, uintptr
         }
         case FL_SYS_MSGQ_RECV: {
             msgq_t *q = (msgq_t *)vrt_resource((vrt_handle_t)a0);
-            return q ? (long)msgq_receive(q, (void *)a1, (size_t)a2, 0) : -1;
+            return q ? (long)msgq_receive(q, (void *)a1, (size_t)a2, (uint64_t)a3) : -1;
         }
         case FL_SYS_CLOSE: {
             vrt_entry_t entry;

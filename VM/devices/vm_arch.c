@@ -2,7 +2,6 @@
 #include "vm_host.h"
 #include "vm_disk.h"
 #include "vm_io.h"
-#include "vm_loader.h"
 #include "drivers.h"
 
 #include <string.h>

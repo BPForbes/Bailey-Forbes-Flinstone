@@ -14,7 +14,9 @@ typedef struct pipe pipe_t;
 
 pipe_t *pipe_create(size_t size);
 void pipe_destroy(pipe_t *pipe);
+/* buf must be non-NULL; NULL is rejected with return value -1. */
 ssize_t pipe_read(pipe_t *pipe, void *buf, size_t count);
+/* buf must be non-NULL; NULL is rejected with return value -1. */
 ssize_t pipe_write(pipe_t *pipe, const void *buf, size_t count);
 
 /* Message queue */
