@@ -2,9 +2,6 @@
 #include "fl/ipc.h"
 #include "vrt.h"
 
-#define VRT_TYPE_PIPE ((vrt_type_t)100)
-#define VRT_TYPE_MSGQ ((vrt_type_t)101)
-
 #include <unistd.h>
 
 void fl_sys_bootstrap(void) {
