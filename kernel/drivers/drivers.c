@@ -12,6 +12,15 @@
 #include <stdio.h>
 #include <stdlib.h>
 #endif
+#ifdef DRIVERS_BAREMETAL
+#if defined(__x86_64__) || defined(__i386__)
+#include "boot/gdt.h"
+#include "boot/idt.h"
+#include "fl/driver/ioport.h"
+#elif defined(__aarch64__)
+#include "boot/vectors.h"
+#endif
+#endif
 
 block_driver_t    *g_block_driver    = NULL;
 keyboard_driver_t *g_keyboard_driver = NULL;
@@ -28,6 +37,8 @@ static void kprint(const char *s) {
     if (g_display_driver) {
         for (; *s; s++)
             g_display_driver->putchar(g_display_driver, *s);
+        if (g_display_driver->flush_cursor)
+            g_display_driver->flush_cursor(g_display_driver);
     }
 #else
     fputs(s, stdout);
@@ -82,8 +93,9 @@ void drivers_report_caps(void) {
            fl_cap_is_real(tm)   ? "REAL" : "stub",
            fl_cap_is_real(pic)  ? "REAL" : "stub",
            fl_cap_is_real(pci)  ? "REAL" : "stub");
+    /* Host: pci.c is stub (no direct PCI from userspace); do not count as FATAL. */
     if (!block_real || !fl_cap_is_real(kb) || !fl_cap_is_real(disp) ||
-        !fl_cap_is_real(tm) || !fl_cap_is_real(pic) || !fl_cap_is_real(pci)) {
+        !fl_cap_is_real(tm) || !fl_cap_is_real(pic)) {
         fprintf(stderr, "[drivers] FATAL: one or more drivers are STUB/UNIMPLEMENTED\n");
     }
 #endif
@@ -128,6 +140,8 @@ static int do_selftest_timer(void) {
 static int do_selftest_display(void) {
     if (!g_display_driver) return -1;
     g_display_driver->putchar(g_display_driver, ' ');
+    if (g_display_driver->flush_cursor)
+        g_display_driver->flush_cursor(g_display_driver);
     return 0;
 }
 
@@ -157,6 +171,10 @@ int drivers_run_selftest(void) {
 
 void drivers_init(const char *disk_file) {
 #ifdef DRIVERS_BAREMETAL
+#if defined(__x86_64__) || defined(__i386__)
+    gdt_install();
+    idt_install();
+#endif
     (void)disk_file;
     g_block_driver = block_driver_create_baremetal();
     if (!g_block_driver) {
@@ -172,14 +190,28 @@ void drivers_init(const char *disk_file) {
     g_pic_driver      = pic_driver_create();
     if (g_pic_driver && g_pic_driver->init)
         g_pic_driver->init(g_pic_driver);
+#ifdef DRIVERS_BAREMETAL
+#if defined(__x86_64__) || defined(__i386__)
+    /* Unmask IRQ0 (PIT) in PIC1 IMR so the timer handler fires.
+     * PIC init sets IMR=0xFF; clear bit 0 to allow IRQ0 through. */
+    fl_ioport_out8(0x21u, fl_ioport_in8(0x21u) & ~0x01u);
+    __asm__ volatile("sti");
+#elif defined(__aarch64__)
+    arm_vbar_install();
+    __asm__ volatile("msr daifclr, #2" ::: "memory");
+#endif
+#endif
     drivers_report_caps();
     if (drivers_run_selftest() != 0) {
         kprint("FATAL: driver selftest failed - halting\n");
         kpanic();
     }
+    fl_driver_registry_register_all();
+    fl_drivers_init();
 }
 
 void drivers_shutdown(void) {
+    fl_drivers_shutdown();
     if (g_block_driver)    { block_driver_destroy(g_block_driver);       g_block_driver    = NULL; }
     if (g_keyboard_driver) { keyboard_driver_destroy(g_keyboard_driver); g_keyboard_driver = NULL; }
     if (g_display_driver)  { display_driver_destroy(g_display_driver);   g_display_driver  = NULL; }

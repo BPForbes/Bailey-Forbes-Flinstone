@@ -9,6 +9,8 @@
 #include <ctype.h>
 #include <signal.h>
 #include <dirent.h>
+#include <limits.h>
+#include <errno.h>
 
 /* Include CUnit header (assumes CUnit is installed) */
 #include <CUnit/Basic.h>
@@ -30,6 +32,11 @@
 #include "fs_facade.h"
 #include "threadpool.h"
 #include "interpreter.h"
+#include "fs_jail.h"
+#include "fs_provider.h"
+
+/* g_fs_jail_root is a non-static global exported by fs_jail.c */
+extern char g_fs_jail_root[];
 
 /* Directly include interpreter.c so that its definitions are compiled into this test.
    (Ensure that interpreter.c checks UNIT_TEST so that interactive_shell() is a stub.)
@@ -636,6 +643,381 @@ void test_exit_command(void) {
 }
 
 /* ---------------------------------------------------------------------------
+ * VM Jail Suite helpers
+ * -------------------------------------------------------------------------*/
+
+/* Temp directory used by the jail suite; set during jail_suite_setup */
+static char s_jail_tmpdir[PATH_MAX];
+
+/* Saved original g_vm_mode, g_vm_root, g_cwd so we can restore them */
+static int  s_saved_vm_mode;
+static char s_saved_vm_root[CWD_MAX];
+static char s_saved_cwd[CWD_MAX];
+
+static int jail_suite_setup(void) {
+    /* Save original globals */
+    s_saved_vm_mode = g_vm_mode;
+    strncpy(s_saved_vm_root, g_vm_root, sizeof(s_saved_vm_root) - 1);
+    strncpy(s_saved_cwd, g_cwd, sizeof(s_saved_cwd) - 1);
+
+    /* Create a private temp directory to act as the jail root */
+    strncpy(s_jail_tmpdir, "/tmp/flinstone_jail_test_XXXXXX", sizeof(s_jail_tmpdir) - 1);
+    if (!mkdtemp(s_jail_tmpdir))
+        return -1;
+
+    /* Activate VM mode with the temp dir as jail root */
+    g_vm_mode = 1;
+    strncpy(g_vm_root, s_jail_tmpdir, sizeof(g_vm_root) - 1);
+    strncpy(g_cwd,    s_jail_tmpdir, sizeof(g_cwd)    - 1);
+
+    fs_jail_init();
+    fs_service_glue_init();
+    return 0;
+}
+
+static int jail_suite_cleanup(void) {
+    fs_service_glue_shutdown();
+
+    /* Restore globals */
+    g_vm_mode = s_saved_vm_mode;
+    strncpy(g_vm_root, s_saved_vm_root, sizeof(g_vm_root) - 1);
+    strncpy(g_cwd,     s_saved_cwd,     sizeof(g_cwd)     - 1);
+
+    /* Re-init jail to inactive state */
+    fs_jail_init();
+
+    /* Remove temp dir (non-recursive: should be empty after tests) */
+    rmdir(s_jail_tmpdir);
+    s_jail_tmpdir[0] = '\0';
+    return 0;
+}
+
+/* ---------------------------------------------------------------------------
+ * fs_jail_is_active tests
+ * -------------------------------------------------------------------------*/
+void test_jail_is_active_in_vm_mode(void) {
+    print_test_header("fs_jail_is_active returns 1 in VM mode");
+    /* jail_suite_setup already called fs_jail_init with g_vm_mode=1 */
+    CU_ASSERT_TRUE(fs_jail_is_active() == 1);
+    CU_ASSERT_TRUE(g_fs_jail_root[0] != '\0');
+}
+
+void test_jail_is_inactive_without_vm_mode(void) {
+    print_test_header("fs_jail_is_active returns 0 when g_vm_mode=0");
+    int saved = g_vm_mode;
+    g_vm_mode = 0;
+    fs_jail_init();
+    CU_ASSERT_TRUE(fs_jail_is_active() == 0);
+    /* Restore */
+    g_vm_mode = saved;
+    fs_jail_init();
+}
+
+/* ---------------------------------------------------------------------------
+ * fs_jail_check_path: NULL / empty
+ * -------------------------------------------------------------------------*/
+void test_jail_check_null_returns_error(void) {
+    print_test_header("fs_jail_check_path(NULL) == -1");
+    CU_ASSERT_TRUE(fs_jail_is_active() == 1);
+    CU_ASSERT_TRUE(fs_jail_check_path(NULL) == -1);
+}
+
+void test_jail_check_empty_returns_error(void) {
+    print_test_header("fs_jail_check_path(\"\") == -1 when jail active");
+    CU_ASSERT_TRUE(fs_jail_is_active() == 1);
+    CU_ASSERT_TRUE(fs_jail_check_path("") == -1);
+}
+
+/* ---------------------------------------------------------------------------
+ * fs_jail_check_path: inside and outside
+ * -------------------------------------------------------------------------*/
+void test_jail_check_inside_allowed(void) {
+    print_test_header("fs_jail_check_path: path inside jail is allowed");
+    CU_ASSERT_TRUE(fs_jail_is_active() == 1);
+    /* The jail root itself must be allowed */
+    CU_ASSERT_TRUE(fs_jail_check_path(s_jail_tmpdir) == 0);
+
+    /* Create a real subdir inside the jail and check it */
+    char subdir[PATH_MAX];
+    snprintf(subdir, sizeof(subdir), "%s/inner", s_jail_tmpdir);
+    mkdir(subdir, 0755);
+    CU_ASSERT_TRUE(fs_jail_check_path(subdir) == 0);
+    rmdir(subdir);
+}
+
+void test_jail_check_outside_blocked(void) {
+    print_test_header("fs_jail_check_path: path outside jail is blocked");
+    CU_ASSERT_TRUE(fs_jail_is_active() == 1);
+    CU_ASSERT_TRUE(fs_jail_check_path("/etc") == -1);
+    CU_ASSERT_TRUE(fs_jail_check_path("/usr") == -1);
+}
+
+void test_jail_check_prefix_attack_blocked(void) {
+    print_test_header("fs_jail_check_path: prefix-match sibling path is blocked");
+    CU_ASSERT_TRUE(fs_jail_is_active() == 1);
+    /* Build a sibling: s_jail_tmpdir + "_evil" - same prefix but not a child */
+    char sibling[PATH_MAX];
+    snprintf(sibling, sizeof(sibling), "%s_evil", s_jail_tmpdir);
+    mkdir(sibling, 0755);
+    int ret = fs_jail_check_path(sibling);
+    CU_ASSERT_TRUE(ret == -1);
+    rmdir(sibling);
+}
+
+void test_jail_check_nonexistent_inside_allowed(void) {
+    print_test_header("fs_jail_check_path: nonexistent file inside jail is allowed");
+    CU_ASSERT_TRUE(fs_jail_is_active() == 1);
+    char newfile[PATH_MAX];
+    snprintf(newfile, sizeof(newfile), "%s/ghost_file.txt", s_jail_tmpdir);
+    /* Confirm it doesn't exist */
+    CU_ASSERT_TRUE(access(newfile, F_OK) != 0);
+    CU_ASSERT_TRUE(fs_jail_check_path(newfile) == 0);
+}
+
+void test_jail_check_nonexistent_outside_blocked(void) {
+    print_test_header("fs_jail_check_path: nonexistent file with parent outside jail is blocked");
+    CU_ASSERT_TRUE(fs_jail_is_active() == 1);
+    CU_ASSERT_TRUE(fs_jail_check_path("/etc/no_such_file_xyzzy") == -1);
+}
+
+/* ---------------------------------------------------------------------------
+ * fs_provider local provider: jail enforcement
+ * -------------------------------------------------------------------------*/
+void test_fs_provider_read_inside_allowed(void) {
+    print_test_header("fs_provider read_text: file inside jail is allowed");
+    CU_ASSERT_TRUE(fs_jail_is_active() == 1);
+
+    /* Create a file inside the jail */
+    char fpath[PATH_MAX];
+    snprintf(fpath, sizeof(fpath), "%s/prov_read_test.txt", s_jail_tmpdir);
+    FILE *f = fopen(fpath, "w");
+    CU_ASSERT_PTR_NOT_NULL(f);
+    if (f) { fprintf(f, "hello jail"); fclose(f); }
+
+    fs_provider_t *p = fs_local_provider_create();
+    CU_ASSERT_PTR_NOT_NULL(p);
+    if (p) {
+        char buf[64] = {0};
+        int n = fs_provider_read_text(p, fpath, buf, sizeof(buf));
+        CU_ASSERT_TRUE(n > 0);
+        CU_ASSERT_TRUE(strstr(buf, "hello jail") != NULL);
+        fs_provider_destroy(p);
+    }
+    remove(fpath);
+}
+
+void test_fs_provider_read_outside_blocked(void) {
+    print_test_header("fs_provider read_text: file outside jail is blocked");
+    CU_ASSERT_TRUE(fs_jail_is_active() == 1);
+
+    fs_provider_t *p = fs_local_provider_create();
+    CU_ASSERT_PTR_NOT_NULL(p);
+    if (p) {
+        char buf[64] = {0};
+        int ret = fs_provider_read_text(p, "/etc/hostname", buf, sizeof(buf));
+        CU_ASSERT_TRUE(ret == -1);
+        fs_provider_destroy(p);
+    }
+}
+
+void test_fs_provider_write_inside_allowed(void) {
+    print_test_header("fs_provider write_text: file inside jail is allowed");
+    CU_ASSERT_TRUE(fs_jail_is_active() == 1);
+
+    char fpath[PATH_MAX];
+    snprintf(fpath, sizeof(fpath), "%s/prov_write_test.txt", s_jail_tmpdir);
+
+    fs_provider_t *p = fs_local_provider_create();
+    CU_ASSERT_PTR_NOT_NULL(p);
+    if (p) {
+        int ret = fs_provider_write_text(p, fpath, "written inside jail");
+        CU_ASSERT_TRUE(ret == 0);
+        fs_provider_destroy(p);
+    }
+    remove(fpath);
+}
+
+void test_fs_provider_write_outside_blocked(void) {
+    print_test_header("fs_provider write_text: file outside jail is blocked (errno=EPERM)");
+    CU_ASSERT_TRUE(fs_jail_is_active() == 1);
+
+    fs_provider_t *p = fs_local_provider_create();
+    CU_ASSERT_PTR_NOT_NULL(p);
+    if (p) {
+        errno = 0;
+        int ret = fs_provider_write_text(p, "/tmp/jail_escape_attempt.txt", "evil");
+        CU_ASSERT_TRUE(ret == -1);
+        CU_ASSERT_TRUE(errno == EPERM);
+        fs_provider_destroy(p);
+    }
+}
+
+void test_fs_provider_create_file_outside_blocked(void) {
+    print_test_header("fs_provider create_file: file outside jail is blocked");
+    CU_ASSERT_TRUE(fs_jail_is_active() == 1);
+
+    fs_provider_t *p = fs_local_provider_create();
+    CU_ASSERT_PTR_NOT_NULL(p);
+    if (p) {
+        int ret = fs_provider_create_file(p, "/tmp/jail_test_create.txt");
+        CU_ASSERT_TRUE(ret == -1);
+        /* Ensure no file was created outside the jail */
+        CU_ASSERT_TRUE(access("/tmp/jail_test_create.txt", F_OK) != 0);
+        fs_provider_destroy(p);
+    }
+}
+
+void test_fs_provider_delete_outside_blocked(void) {
+    print_test_header("fs_provider delete: path outside jail is blocked");
+    CU_ASSERT_TRUE(fs_jail_is_active() == 1);
+
+    /* Create a file outside the jail to try to delete */
+    const char *victim = "/tmp/jail_delete_victim.txt";
+    FILE *f = fopen(victim, "w");
+    if (f) { fprintf(f, "x"); fclose(f); }
+
+    fs_provider_t *p = fs_local_provider_create();
+    CU_ASSERT_PTR_NOT_NULL(p);
+    if (p) {
+        int ret = fs_provider_delete(p, victim);
+        CU_ASSERT_TRUE(ret == -1);
+        /* Victim must still exist - was not deleted */
+        CU_ASSERT_TRUE(access(victim, F_OK) == 0);
+        fs_provider_destroy(p);
+    }
+    remove(victim);
+}
+
+void test_fs_provider_move_dst_outside_blocked(void) {
+    print_test_header("fs_provider move: destination outside jail is blocked");
+    CU_ASSERT_TRUE(fs_jail_is_active() == 1);
+
+    /* src inside jail */
+    char src[PATH_MAX];
+    snprintf(src, sizeof(src), "%s/move_src.txt", s_jail_tmpdir);
+    FILE *f = fopen(src, "w");
+    if (f) { fprintf(f, "src"); fclose(f); }
+
+    fs_provider_t *p = fs_local_provider_create();
+    CU_ASSERT_PTR_NOT_NULL(p);
+    if (p) {
+        int ret = fs_provider_move(p, src, "/tmp/move_dst_outside.txt");
+        CU_ASSERT_TRUE(ret == -1);
+        /* src must still exist */
+        CU_ASSERT_TRUE(access(src, F_OK) == 0);
+        fs_provider_destroy(p);
+    }
+    remove(src);
+}
+
+/* ---------------------------------------------------------------------------
+ * interpreter.c jail enforcement: cd, format, setdisk
+ * -------------------------------------------------------------------------*/
+void test_interpreter_cd_blocked_outside_jail(void) {
+    print_test_header("interpreter cd: cd outside jail is blocked");
+    CU_ASSERT_TRUE(fs_jail_is_active() == 1);
+
+    char saved_cwd[CWD_MAX];
+    strncpy(saved_cwd, g_cwd, sizeof(saved_cwd) - 1);
+
+    /* Attempt to cd to /tmp which is outside the jail */
+    int ret = execute_command_str("cd /tmp");
+    /* Command returns 1 (blocked) and g_cwd must remain unchanged */
+    CU_ASSERT_TRUE(ret == 1);
+    CU_ASSERT_TRUE(strcmp(g_cwd, saved_cwd) == 0);
+}
+
+void test_interpreter_cd_allowed_inside_jail(void) {
+    print_test_header("interpreter cd: cd inside jail is allowed");
+    CU_ASSERT_TRUE(fs_jail_is_active() == 1);
+
+    /* Create a subdirectory inside the jail */
+    char subdir[PATH_MAX];
+    snprintf(subdir, sizeof(subdir), "%s/cd_target", s_jail_tmpdir);
+    mkdir(subdir, 0755);
+
+    int ret = execute_command_str("cd cd_target");
+    /* Should succeed (return 0) */
+    CU_ASSERT_TRUE(ret == 0);
+
+    /* Return to jail root for next tests */
+    chdir(s_jail_tmpdir);
+    strncpy(g_cwd, s_jail_tmpdir, sizeof(g_cwd) - 1);
+
+    rmdir(subdir);
+}
+
+void test_interpreter_format_blocked_outside_jail(void) {
+    print_test_header("interpreter format: format outside jail is blocked");
+    CU_ASSERT_TRUE(fs_jail_is_active() == 1);
+
+    /* Attempt to format a disk outside the jail */
+    int ret = execute_command_str("format /tmp/outside_disk.txt testvol 4 16");
+    CU_ASSERT_TRUE(ret == 1);
+    /* Confirm no file was created */
+    CU_ASSERT_TRUE(access("/tmp/outside_disk.txt", F_OK) != 0);
+}
+
+void test_interpreter_format_allowed_inside_jail(void) {
+    print_test_header("interpreter format: format inside jail is allowed");
+    CU_ASSERT_TRUE(fs_jail_is_active() == 1);
+
+    char diskfile[PATH_MAX];
+    snprintf(diskfile, sizeof(diskfile), "%s/jail_disk.txt", s_jail_tmpdir);
+
+    /* format <path> <vol> <rows> <nibbles> */
+    char cmd[512];
+    snprintf(cmd, sizeof(cmd), "format %s jailtest 4 16", diskfile);
+    int ret = execute_command_str(cmd);
+    CU_ASSERT_TRUE(ret == 0);
+    CU_ASSERT_TRUE(access(diskfile, F_OK) == 0);
+    remove(diskfile);
+}
+
+void test_interpreter_setdisk_blocked_outside_jail(void) {
+    print_test_header("interpreter setdisk: setdisk outside jail is blocked");
+    CU_ASSERT_TRUE(fs_jail_is_active() == 1);
+
+    /* Create a disk file outside the jail */
+    const char *outside = "/tmp/outside_setdisk.txt";
+    FILE *f = fopen(outside, "w");
+    if (f) { fprintf(f, "XX:00000000\n00:00000000\n"); fclose(f); }
+
+    char saved_disk[sizeof(current_disk_file)];
+    strncpy(saved_disk, current_disk_file, sizeof(saved_disk) - 1);
+
+    int ret = execute_command_str("setdisk /tmp/outside_setdisk.txt");
+    CU_ASSERT_TRUE(ret == 1);
+    /* current_disk_file must remain unchanged */
+    CU_ASSERT_TRUE(strcmp(current_disk_file, saved_disk) == 0);
+
+    remove(outside);
+}
+
+void test_interpreter_setdisk_allowed_inside_jail(void) {
+    print_test_header("interpreter setdisk: setdisk inside jail is allowed");
+    CU_ASSERT_TRUE(fs_jail_is_active() == 1);
+
+    /* Create a valid disk file inside the jail */
+    char diskfile[PATH_MAX];
+    snprintf(diskfile, sizeof(diskfile), "%s/setdisk_inside.txt", s_jail_tmpdir);
+    FILE *f = fopen(diskfile, "w");
+    CU_ASSERT_PTR_NOT_NULL(f);
+    if (f) {
+        fprintf(f, "XX:00000000\n00:00000000\n");
+        fclose(f);
+    }
+
+    char cmd[512];
+    snprintf(cmd, sizeof(cmd), "setdisk %s", diskfile);
+    int ret = execute_command_str(cmd);
+    CU_ASSERT_TRUE(ret == 0);
+    CU_ASSERT_TRUE(strcmp(current_disk_file, diskfile) == 0);
+
+    remove(diskfile);
+}
+
+/* ---------------------------------------------------------------------------
  * Main: Set up and run the CUnit tests.
  * -------------------------------------------------------------------------*/
 int main(void)
@@ -689,6 +1071,45 @@ int main(void)
     CU_ADD_TEST(suite, test_exit_command);
     CU_ADD_TEST(suite, test_integration_undo);
     CU_ADD_TEST(suite, test_integration_storage);
+
+    /* --- VM Jail Suite --- */
+    CU_pSuite jail_suite = CU_add_suite("VM Jail Suite", jail_suite_setup, jail_suite_cleanup);
+    if (NULL == jail_suite) {
+         CU_cleanup_registry();
+         return CU_get_error();
+    }
+
+    /* fs_jail_init / fs_jail_is_active */
+    CU_ADD_TEST(jail_suite, test_jail_is_active_in_vm_mode);
+    CU_ADD_TEST(jail_suite, test_jail_is_inactive_without_vm_mode);
+
+    /* fs_jail_check_path: null / empty */
+    CU_ADD_TEST(jail_suite, test_jail_check_null_returns_error);
+    CU_ADD_TEST(jail_suite, test_jail_check_empty_returns_error);
+
+    /* fs_jail_check_path: inside / outside / prefix-attack / nonexistent */
+    CU_ADD_TEST(jail_suite, test_jail_check_inside_allowed);
+    CU_ADD_TEST(jail_suite, test_jail_check_outside_blocked);
+    CU_ADD_TEST(jail_suite, test_jail_check_prefix_attack_blocked);
+    CU_ADD_TEST(jail_suite, test_jail_check_nonexistent_inside_allowed);
+    CU_ADD_TEST(jail_suite, test_jail_check_nonexistent_outside_blocked);
+
+    /* fs_provider local provider jail enforcement */
+    CU_ADD_TEST(jail_suite, test_fs_provider_read_inside_allowed);
+    CU_ADD_TEST(jail_suite, test_fs_provider_read_outside_blocked);
+    CU_ADD_TEST(jail_suite, test_fs_provider_write_inside_allowed);
+    CU_ADD_TEST(jail_suite, test_fs_provider_write_outside_blocked);
+    CU_ADD_TEST(jail_suite, test_fs_provider_create_file_outside_blocked);
+    CU_ADD_TEST(jail_suite, test_fs_provider_delete_outside_blocked);
+    CU_ADD_TEST(jail_suite, test_fs_provider_move_dst_outside_blocked);
+
+    /* interpreter.c jail checks: cd, format, setdisk */
+    CU_ADD_TEST(jail_suite, test_interpreter_cd_blocked_outside_jail);
+    CU_ADD_TEST(jail_suite, test_interpreter_cd_allowed_inside_jail);
+    CU_ADD_TEST(jail_suite, test_interpreter_format_blocked_outside_jail);
+    CU_ADD_TEST(jail_suite, test_interpreter_format_allowed_inside_jail);
+    CU_ADD_TEST(jail_suite, test_interpreter_setdisk_blocked_outside_jail);
+    CU_ADD_TEST(jail_suite, test_interpreter_setdisk_allowed_inside_jail);
 
     CU_basic_set_mode(CU_BRM_VERBOSE);
     CU_basic_run_tests();

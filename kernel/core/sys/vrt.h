@@ -18,6 +18,8 @@ typedef enum {
     VRT_TYPE_DIR,
     VRT_TYPE_BLOCK,
     VRT_TYPE_BUFFER,
+    VRT_TYPE_PIPE,
+    VRT_TYPE_MSGQ,
 } vrt_type_t;
 
 typedef struct vrt_entry {

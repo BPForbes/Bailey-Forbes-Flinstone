@@ -51,6 +51,7 @@
 #include "fs_service_glue.h"
 #include "path_log.h"
 #include "drivers/drivers.h"
+#include "fs_jail.h"
 #include "VM/vm.h"
 #include <stdio.h>
 #include <stdlib.h>
@@ -61,6 +62,7 @@
 #include <sys/stat.h>
 #include <sys/wait.h>
 #include <dirent.h>
+#include <limits.h>
 
 #ifndef PATH_MAX
 #define PATH_MAX 4096
@@ -74,7 +76,7 @@ static void rmrf(const char *path) {
     while ((e = readdir(d)) != NULL) {
         if (e->d_name[0] == '.' && (e->d_name[1] == '\0' || (e->d_name[1] == '.' && e->d_name[2] == '\0')))
             continue;
-        char sub[CWD_MAX];
+        char sub[PATH_MAX];
         snprintf(sub, sizeof(sub), "%s/%s", path, e->d_name);
         struct stat st;
         if (stat(sub, &st) == 0 && S_ISDIR(st.st_mode))
@@ -151,6 +153,44 @@ static int vm_spawn_popup(const char *exe_path) {
     return 0;
 }
 
+static int vm_configure_root_from_cwd(void) {
+    if (!g_vm_mode || g_vm_root[0])
+        return 0;
+    char root[PATH_MAX];
+    if (!getcwd(root, sizeof(root)))
+        return -1;
+    strncpy(g_vm_root, root, CWD_MAX - 1);
+    g_vm_root[CWD_MAX - 1] = '\0';
+    return 0;
+}
+
+static void vm_warn_layer_config(void) {
+    if (!g_vm_mode)
+        return;
+    int warned = 0;
+    if (!g_cwd[0] || !current_disk_file[0]) {
+        fprintf(stderr, "[VM] 5-layer driver config warning: layer 0 core/common is not configured\n");
+        warned = 1;
+    }
+    if (!g_block_driver || !g_keyboard_driver || !g_display_driver || !g_timer_driver || !g_pic_driver) {
+        fprintf(stderr, "[VM] 5-layer driver config warning: layer 1 disk/drivers is not configured\n");
+        warned = 1;
+    }
+    if (!fs_jail_root_configured()) {
+        fprintf(stderr, "[VM] 5-layer driver config warning: layer 2 filesystem sandbox root is not configured\n");
+        warned = 1;
+    }
+    if (!fs_service_glue_is_ready() || !path_log_is_initialized()) {
+        fprintf(stderr, "[VM] 5-layer driver config warning: layer 3 services/path logging is not configured\n");
+        warned = 1;
+    }
+    if (!g_vm_root[0]) {
+        fprintf(stderr, "[VM] 5-layer driver config warning: layer 4 shell/VM root is not configured\n");
+        warned = 1;
+    }
+    (void)warned;
+}
+
 int main(int argc, char *argv[]) {
     /* Seed the random number generator */
     srand((unsigned) time(NULL));
@@ -174,27 +214,8 @@ int main(int argc, char *argv[]) {
         }
     }
 
-    /* Embedded VM: -Virtualization -y -vm -> run x86 emulator */
-    if (g_vm_mode && g_vm_run_embedded && argc == 1) {
-        fs_service_glue_init();
-        path_log_init();
-        drivers_init(NULL);
-        { const char *v = getenv("VM_LOG_LEVEL"); int lvl = v ? atoi(v) : 1;
-          if (lvl >= 1) printf("[VM] Booting embedded VM...\n"); }
-        if (vm_boot() == 0) {
-            vm_run();
-            vm_stop();
-            { const char *v = getenv("VM_LOG_LEVEL"); int lvl = v ? atoi(v) : 1;
-              if (lvl >= 1) printf("[VM] Halted.\n"); }
-        } else {
-            fprintf(stderr, "[VM] Boot failed.\n");
-        }
-        fs_service_glue_shutdown();
-        exit(0);
-    }
-
-    /* VM popup: -Virtualization -y with no other args -> spawn popup once */
-    if (g_vm_mode && g_vm_cleanup && argc == 1) {
+    /* VM popup: -Virtualization -y with no other args (no -vm) -> spawn popup once */
+    if (g_vm_mode && g_vm_cleanup && argc == 1 && !g_vm_run_embedded) {
         char tmpl[] = "/tmp/flintstone_vm_XXXXXX";
         char *root = mkdtemp(tmpl);
         if (!root) {
@@ -228,8 +249,8 @@ int main(int argc, char *argv[]) {
     if (getcwd(g_cwd, sizeof(g_cwd)) == NULL)
         g_cwd[0] = '.', g_cwd[1] = '\0';
 
-    /* VM mode (with commands): create sandbox, chdir into it */
-    if (g_vm_mode && argc > 1) {
+    /* VM command mode uses a temp sandbox; embedded VM runs from the launch root. */
+    if (g_vm_mode && argc > 1 && !g_vm_run_embedded) {
         char tmpl[] = "/tmp/flintstone_vm_XXXXXX";
         char *root = mkdtemp(tmpl);
         if (!root) {
@@ -279,16 +300,22 @@ int main(int argc, char *argv[]) {
         }
     }
 
-    /* If no command-line arguments are provided, print the help message and exit */
-    if (argc < 2) {
+    /* No args: help and exit, unless -Virtualization -y -vm (then run shell after guest VM) */
+    if (argc < 2 && !(g_vm_mode && g_vm_run_embedded)) {
         printf("%s\n", HELP_MSG);
         exit(0);
     }
+
+    /* VM mode: confine all host file I/O to the launch directory (or temp VM sandbox) */
+    if (vm_configure_root_from_cwd() != 0)
+        fprintf(stderr, "[VM] 5-layer driver config warning: layer 4 shell/VM root is not configured\n");
+    fs_jail_init();
 
     /* Initialize file manager service, path log, and drivers */
     fs_service_glue_init();
     path_log_init();
     drivers_init(NULL);
+    vm_warn_layer_config();
 
     /* Initialize thread pool and signals */
     signal(SIGINT, SIG_IGN);
@@ -304,6 +331,23 @@ int main(int argc, char *argv[]) {
     if (original_stdout_fd < 0) {
         original_stdout_fd = dup(fileno(stdout));
         original_stdout_file = fdopen(original_stdout_fd, "w");
+    }
+
+    /* Embedded x86 guest first, then same session continues to interactive shell */
+    if (g_vm_mode && g_vm_run_embedded && argc == 1) {
+        const char *vlog = getenv("VM_LOG_LEVEL");
+        int lvl = vlog ? atoi(vlog) : 1;
+        if (lvl >= 1) printf("[VM] Booting embedded VM...\n");
+        if (vm_boot() == 0) {
+            vm_run();
+            vm_stop();
+            if (lvl >= 1) printf("[VM] Halted.\n");
+        } else {
+            fprintf(stderr, "[VM] Boot failed.\n");
+#ifndef VM_ENABLE
+            fprintf(stderr, "[VM] This binary was not built with the embedded VM. Run: make vm   (then use this executable)\n");
+#endif
+        }
     }
 
     /* Process batch-mode arguments first */

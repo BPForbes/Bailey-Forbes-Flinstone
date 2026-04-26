@@ -24,6 +24,7 @@ typedef enum {
 
 /* Driver class - matches against bus device class/subclass or compatible strings */
 typedef enum {
+    FL_DRV_CLASS_NONE = -1,
     FL_DRV_CLASS_BLOCK,
     FL_DRV_CLASS_CONSOLE,   /* display + keyboard */
     FL_DRV_CLASS_TIMER,
@@ -58,6 +59,7 @@ typedef struct fl_driver_desc {
 /* Registration */
 void fl_driver_registry_register_all(void);
 int  fl_driver_registry_register(const fl_driver_desc_t *desc);
+int  fl_driver_registry_match(const fl_device_desc_t *dev, const fl_driver_desc_t **out);
 
 /* Init flow: register -> enumerate -> probe -> attach -> start */
 void fl_drivers_init(void);
