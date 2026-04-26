@@ -21,7 +21,7 @@ enum {
     VM_LAYER_RUNTIME = 4
 };
 
-void vm_arch_collect(struct vm_host *host, vm_arch_state_t *out);
+void vm_arch_collect(const struct vm_host *host, vm_arch_state_t *out);
 int vm_arch_layers_ready(const vm_arch_state_t *state);
 int vm_arch_checkpoints_ready(const vm_arch_state_t *state);
 void vm_arch_report(FILE *out, const vm_arch_state_t *state);

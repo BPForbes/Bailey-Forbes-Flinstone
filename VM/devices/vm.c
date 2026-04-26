@@ -14,6 +14,7 @@
 #include "../drivers/drivers.h"
 #include <stdio.h>
 #include <stdlib.h>
+#include <string.h>
 
 #ifdef VM_SDL
 #include "vm_sdl.h"
@@ -237,7 +238,7 @@ static int execute(vm_cpu_t *cpu, vm_mem_t *mem, vm_instr_t *in) {
 }
 
 int vm_boot(void) {
-    vm_arch_state_t arch_state;
+    vm_arch_state_t arch_state = {0};
     vm_io_init();
     if (vm_host_create(&s_host) != 0) {
         vm_io_shutdown();
@@ -257,7 +258,8 @@ int vm_boot(void) {
         vm_sdl_shutdown();
 #endif
     vm_arch_collect(&s_host, &arch_state);
-    vm_arch_report(stdout, &arch_state);
+    if (getenv("VM_VERBOSE_ARCH"))
+        vm_arch_report(stdout, &arch_state);
     return 0;
 }
 

@@ -1,8 +1,16 @@
 #include "fl/ipc.h"
 #include "mem_asm.h"
+#include <assert.h>
+#include <errno.h>
 #include <stdlib.h>
 
-#ifndef __KERNEL__
+#ifdef __KERNEL__
+#include "core/sys/spinlock.h"
+typedef volatile int fl_ipc_lock_t;
+#define FL_IPC_LOCK_INIT SPINLOCK_INIT
+static inline void fl_ipc_lock(fl_ipc_lock_t *lock) { spinlock_acquire(lock); }
+static inline void fl_ipc_unlock(fl_ipc_lock_t *lock) { spinlock_release(lock); }
+#else
 #include <pthread.h>
 #include <time.h>
 #endif
@@ -13,7 +21,9 @@ struct pipe {
     size_t head;
     size_t tail;
     size_t len;
-#ifndef __KERNEL__
+#ifdef __KERNEL__
+    fl_ipc_lock_t lock;
+#else
     pthread_mutex_t mu;
     pthread_cond_t can_read;
     pthread_cond_t can_write;
@@ -27,7 +37,9 @@ struct msgq {
     size_t head;
     size_t tail;
     size_t len;
-#ifndef __KERNEL__
+#ifdef __KERNEL__
+    fl_ipc_lock_t lock;
+#else
     pthread_mutex_t mu;
     pthread_cond_t can_read;
     pthread_cond_t can_write;
@@ -35,6 +47,18 @@ struct msgq {
 };
 
 static size_t min_size(size_t a, size_t b) { return (a < b) ? a : b; }
+
+#ifndef __KERNEL__
+static void make_abs_timeout(uint64_t timeout_ms, struct timespec *ts) {
+    clock_gettime(CLOCK_REALTIME, ts);
+    ts->tv_sec += (time_t)(timeout_ms / 1000);
+    ts->tv_nsec += (long)((timeout_ms % 1000) * 1000000ULL);
+    if (ts->tv_nsec >= 1000000000L) {
+        ts->tv_sec++;
+        ts->tv_nsec -= 1000000000L;
+    }
+}
+#endif
 
 pipe_t *pipe_create(size_t size) {
     if (size == 0) return NULL;
@@ -47,7 +71,9 @@ pipe_t *pipe_create(size_t size) {
         return NULL;
     }
     p->cap = size;
-#ifndef __KERNEL__
+#ifdef __KERNEL__
+    p->lock = FL_IPC_LOCK_INIT;
+#else
     pthread_mutex_init(&p->mu, NULL);
     pthread_cond_init(&p->can_read, NULL);
     pthread_cond_init(&p->can_write, NULL);
@@ -67,8 +93,10 @@ void pipe_destroy(pipe_t *p) {
 }
 
 ssize_t pipe_write(pipe_t *p, const void *buf, size_t count) {
-    if (!p || !buf || count == 0) return 0;
-#ifndef __KERNEL__
+    if (!p || !buf || count == 0) return -1;
+#ifdef __KERNEL__
+    fl_ipc_lock(&p->lock);
+#else
     pthread_mutex_lock(&p->mu);
 #endif
     size_t written = 0;
@@ -78,17 +106,23 @@ ssize_t pipe_write(pipe_t *p, const void *buf, size_t count) {
         p->tail = (p->tail + 1) % p->cap;
         p->len++;
     }
-#ifndef __KERNEL__
-    if (written > 0) pthread_cond_signal(&p->can_read);
+#ifdef __KERNEL__
+    fl_ipc_unlock(&p->lock);
+#else
+    if (written > 0) pthread_cond_broadcast(&p->can_read);
     pthread_mutex_unlock(&p->mu);
 #endif
     return (ssize_t)written;
 }
 
 ssize_t pipe_read(pipe_t *p, void *buf, size_t count) {
-    if (!p || !buf || count == 0) return 0;
-#ifndef __KERNEL__
+    if (!p || !buf || count == 0) return -1;
+#ifdef __KERNEL__
+    fl_ipc_lock(&p->lock);
+#else
     pthread_mutex_lock(&p->mu);
+    while (p->len == 0)
+        pthread_cond_wait(&p->can_read, &p->mu);
 #endif
     size_t readn = 0;
     uint8_t *dst = (uint8_t *)buf;
@@ -97,8 +131,10 @@ ssize_t pipe_read(pipe_t *p, void *buf, size_t count) {
         p->head = (p->head + 1) % p->cap;
         p->len--;
     }
-#ifndef __KERNEL__
-    if (readn > 0) pthread_cond_signal(&p->can_write);
+#ifdef __KERNEL__
+    fl_ipc_unlock(&p->lock);
+#else
+    if (readn > 0) pthread_cond_broadcast(&p->can_write);
     pthread_mutex_unlock(&p->mu);
 #endif
     return (ssize_t)readn;
@@ -116,7 +152,9 @@ msgq_t *msgq_create(size_t max_messages, size_t message_size) {
     }
     q->max_messages = max_messages;
     q->message_size = message_size;
-#ifndef __KERNEL__
+#ifdef __KERNEL__
+    q->lock = FL_IPC_LOCK_INIT;
+#else
     pthread_mutex_init(&q->mu, NULL);
     pthread_cond_init(&q->can_read, NULL);
     pthread_cond_init(&q->can_write, NULL);
@@ -137,11 +175,17 @@ void msgq_destroy(msgq_t *q) {
 
 int msgq_send(msgq_t *q, const void *msg, size_t size) {
     if (!q || !msg || size == 0) return -1;
-#ifndef __KERNEL__
+    if (size > q->message_size) return -1;
+    assert(size <= q->message_size);
+#ifdef __KERNEL__
+    fl_ipc_lock(&q->lock);
+#else
     pthread_mutex_lock(&q->mu);
 #endif
     if (q->len >= q->max_messages) {
-#ifndef __KERNEL__
+#ifdef __KERNEL__
+        fl_ipc_unlock(&q->lock);
+#else
         pthread_mutex_unlock(&q->mu);
 #endif
         return -1;
@@ -152,21 +196,46 @@ int msgq_send(msgq_t *q, const void *msg, size_t size) {
     asm_mem_copy(slot, msg, n);
     q->tail = (q->tail + 1) % q->max_messages;
     q->len++;
-#ifndef __KERNEL__
-    pthread_cond_signal(&q->can_read);
+#ifdef __KERNEL__
+    fl_ipc_unlock(&q->lock);
+#else
+    pthread_cond_broadcast(&q->can_read);
     pthread_mutex_unlock(&q->mu);
 #endif
     return 0;
 }
 
 int msgq_receive(msgq_t *q, void *msg, size_t size, uint64_t timeout_ms) {
-    (void)timeout_ms;
     if (!q || !msg || size == 0) return -1;
-#ifndef __KERNEL__
+#ifdef __KERNEL__
+    (void)timeout_ms;
+    fl_ipc_lock(&q->lock);
+#else
     pthread_mutex_lock(&q->mu);
+    if (q->len == 0) {
+        if (timeout_ms == 0) {
+            pthread_mutex_unlock(&q->mu);
+            return -1;
+        }
+        struct timespec deadline;
+        make_abs_timeout(timeout_ms, &deadline);
+        while (q->len == 0) {
+            int rc = pthread_cond_timedwait(&q->can_read, &q->mu, &deadline);
+            if (rc == ETIMEDOUT) {
+                pthread_mutex_unlock(&q->mu);
+                return -1;
+            }
+            if (rc != 0) {
+                pthread_mutex_unlock(&q->mu);
+                return -1;
+            }
+        }
+    }
 #endif
     if (q->len == 0) {
-#ifndef __KERNEL__
+#ifdef __KERNEL__
+        fl_ipc_unlock(&q->lock);
+#else
         pthread_mutex_unlock(&q->mu);
 #endif
         return -1;
@@ -176,8 +245,10 @@ int msgq_receive(msgq_t *q, void *msg, size_t size, uint64_t timeout_ms) {
     asm_mem_copy(msg, slot, n);
     q->head = (q->head + 1) % q->max_messages;
     q->len--;
-#ifndef __KERNEL__
-    pthread_cond_signal(&q->can_write);
+#ifdef __KERNEL__
+    fl_ipc_unlock(&q->lock);
+#else
+    pthread_cond_broadcast(&q->can_write);
     pthread_mutex_unlock(&q->mu);
 #endif
     return 0;

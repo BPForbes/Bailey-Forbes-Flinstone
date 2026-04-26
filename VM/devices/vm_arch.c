@@ -3,12 +3,11 @@
 #include "vm_disk.h"
 #include "vm_io.h"
 #include "vm_loader.h"
-#include "vm_snapshot.h"
 #include "drivers.h"
 
 #include <string.h>
 
-void vm_arch_collect(vm_host_t *host, vm_arch_state_t *out) {
+void vm_arch_collect(const vm_host_t *host, vm_arch_state_t *out) {
     if (!out) return;
     memset(out, 0, sizeof(*out));
 
@@ -27,7 +26,8 @@ void vm_arch_collect(vm_host_t *host, vm_arch_state_t *out) {
     out->checkpoints_ready[7]  = vm_io_pci_ready();                               /* virtual PCI config allocated */
     out->checkpoints_ready[8]  = vm_io_reset_line_ready();                        /* reset path initialized */
     out->checkpoints_ready[9]  = vm_io_syscall_bridge_ready() && vm_io_serial_ready(); /* userspace bridge + serial */
-    out->checkpoints_ready[10] = (VM_BOOT_ENTRY_CS == 0x07c0 && VM_BOOT_ENTRY_IP == 0); /* deterministic entry */
+    out->checkpoints_ready[10] =
+        (host && host->cpu.cs == 0x07c0 && host->cpu.eip == 0);                  /* runtime entry state */
 
     out->layer_ready[VM_LAYER_CORE] = out->checkpoints_ready[0];
     out->layer_ready[VM_LAYER_DRIVER_MODEL] =
