@@ -25,7 +25,7 @@ struct pipe {
 #else
     pthread_mutex_t mu;
     pthread_cond_t can_read;
-    pthread_cond_t can_write;
+    pthread_cond_t can_write;  /* TODO: add wait in pipe_write for blocking writes */
     pthread_cond_t drain;
     int closing;
     int waiters;
@@ -44,7 +44,7 @@ struct msgq {
 #else
     pthread_mutex_t mu;
     pthread_cond_t can_read;
-    pthread_cond_t can_write;
+    pthread_cond_t can_write;  /* TODO: add wait in msgq_send for blocking sends */
     pthread_cond_t drain;
     int closing;
     int waiters;
@@ -55,7 +55,7 @@ static size_t min_size(size_t a, size_t b) { return (a < b) ? a : b; }
 
 #ifndef __KERNEL__
 static void make_abs_timeout(uint64_t timeout_ms, struct timespec *ts) {
-    clock_gettime(CLOCK_REALTIME, ts);
+    clock_gettime(CLOCK_MONOTONIC, ts);
     ts->tv_sec += (time_t)(timeout_ms / 1000);
     ts->tv_nsec += (long)((timeout_ms % 1000) * 1000000ULL);
     if (ts->tv_nsec >= 1000000000L) {
@@ -81,7 +81,7 @@ pipe_t *pipe_create(size_t size) {
 #else
     pthread_mutex_init(&p->mu, NULL);
     pthread_cond_init(&p->can_read, NULL);
-    pthread_cond_init(&p->can_write, NULL);
+    pthread_cond_init(&p->can_write, NULL);  /* TODO: used in pipe_write when blocking */
     pthread_cond_init(&p->drain, NULL);
 #endif
     return p;
@@ -102,7 +102,7 @@ void pipe_destroy(pipe_t *p) {
     pthread_mutex_unlock(&p->mu);
     pthread_mutex_destroy(&p->mu);
     pthread_cond_destroy(&p->can_read);
-    pthread_cond_destroy(&p->can_write);
+    pthread_cond_destroy(&p->can_write);  /* TODO: used in pipe_write when blocking */
     pthread_cond_destroy(&p->drain);
 #endif
     free(p->buf);
@@ -193,8 +193,26 @@ msgq_t *msgq_create(size_t max_messages, size_t message_size) {
     q->lock = FL_IPC_LOCK_INIT;
 #else
     pthread_mutex_init(&q->mu, NULL);
-    pthread_cond_init(&q->can_read, NULL);
-    pthread_cond_init(&q->can_write, NULL);
+    pthread_condattr_t attr;
+    if (pthread_condattr_init(&attr) != 0) {
+        free(q->buf);
+        free(q);
+        return NULL;
+    }
+    if (pthread_condattr_setclock(&attr, CLOCK_MONOTONIC) != 0) {
+        pthread_condattr_destroy(&attr);
+        free(q->buf);
+        free(q);
+        return NULL;
+    }
+    if (pthread_cond_init(&q->can_read, &attr) != 0) {
+        pthread_condattr_destroy(&attr);
+        free(q->buf);
+        free(q);
+        return NULL;
+    }
+    pthread_condattr_destroy(&attr);
+    pthread_cond_init(&q->can_write, NULL);  /* TODO: used in msgq_send when blocking */
     pthread_cond_init(&q->drain, NULL);
 #endif
     return q;
@@ -215,7 +233,7 @@ void msgq_destroy(msgq_t *q) {
     pthread_mutex_unlock(&q->mu);
     pthread_mutex_destroy(&q->mu);
     pthread_cond_destroy(&q->can_read);
-    pthread_cond_destroy(&q->can_write);
+    pthread_cond_destroy(&q->can_write);  /* TODO: used in msgq_send when blocking */
     pthread_cond_destroy(&q->drain);
 #endif
     free(q->buf);

@@ -12,6 +12,9 @@
 #include <stdint.h>
 #include <stddef.h>
 
+/* vm_io.c requires 64-bit uintptr_t for syscall bridge (write_port_width shifts by 32) */
+_Static_assert(sizeof(uintptr_t) >= 8, "vm_io.c requires 64-bit uintptr_t");
+
 static FILE *s_serial_out;
 
 /* SECTOR_SIZE from driver_types.h */
