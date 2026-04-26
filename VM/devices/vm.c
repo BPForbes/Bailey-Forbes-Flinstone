@@ -8,11 +8,13 @@
 #include "vm_display.h"
 #include "vm_disk.h"
 #include "vm_snapshot.h"
+#include "vm_arch.h"
 #include "mem_asm.h"
 #include "priority_queue.h"
 #include "../drivers/drivers.h"
 #include <stdio.h>
 #include <stdlib.h>
+#include <string.h>
 
 #ifdef VM_SDL
 #include "vm_sdl.h"
@@ -236,6 +238,7 @@ static int execute(vm_cpu_t *cpu, vm_mem_t *mem, vm_instr_t *in) {
 }
 
 int vm_boot(void) {
+    vm_arch_state_t arch_state = {0};
     vm_io_init();
     if (vm_host_create(&s_host) != 0) {
         vm_io_shutdown();
@@ -254,6 +257,9 @@ int vm_boot(void) {
     if (vm_sdl_init() != 0 || vm_sdl_create_window(2) != 0)
         vm_sdl_shutdown();
 #endif
+    vm_arch_collect(&s_host, &arch_state);
+    if (getenv("VM_VERBOSE_ARCH"))
+        vm_arch_report(stdout, &arch_state);
     return 0;
 }
 
