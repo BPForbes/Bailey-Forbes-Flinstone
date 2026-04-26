@@ -9,7 +9,7 @@ layer() {
         disk|disk_asm|cluster|dir_asm|util|terminal|path_log|mem_domain|block_driver|mmio|pci) echo 1 ;;
         fs|fs_types|fs_provider|fs_command|fs_events|fs_policy|fs_chain|fs_facade) echo 2 ;;
         fs_service_glue|priority_queue|vrt|vfs) echo 3 ;;
-        interpreter|main|threadpool|vm|vm_decode|vm_cpu|vm_mem|vm_io|vm_loader|vm_display|vm_host|vm_font|vm_disk|vm_snapshot|vm_sdl|task_manager) echo 4 ;;
+        interpreter|main|threadpool|vm|vm_decode|vm_cpu|vm_mem|vm_io|vm_loader|vm_display|vm_host|vm_font|vm_disk|vm_snapshot|vm_sdl|vm_arch|task_manager) echo 4 ;;
         *) echo 0 ;;
     esac
 }

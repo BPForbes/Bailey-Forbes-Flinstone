@@ -3,6 +3,7 @@
 #include "vm_cpu.h"
 #include "vm_host.h"
 #include "vm_disk.h"
+#include "fl/syscall.h"
 #include "mem_asm.h"
 #include "mem_domain.h"
 #include "drivers/drivers.h"
@@ -28,6 +29,18 @@ static uint32_t s_pci_addr;
 static int s_reset_requested;
 /* Virtual PCI config: bus 0, dev 0..3. ASM-backed via mem_domain. */
 static uint8_t *s_pci_cfg;
+static uint32_t s_sys_no;
+static uint32_t s_sys_args[4];
+static uint32_t s_sys_ret;
+static int s_io_inited;
+
+#define VM_SYS_PORT_NO      0xE0
+#define VM_SYS_PORT_ARG0    0xE1
+#define VM_SYS_PORT_ARG1    0xE2
+#define VM_SYS_PORT_ARG2    0xE3
+#define VM_SYS_PORT_ARG3    0xE4
+#define VM_SYS_PORT_CALL    0xE5
+#define VM_SYS_PORT_RET     0xE6
 
 static void vm_pci_init_cfg(void) {
     if (s_pci_cfg)
@@ -62,6 +75,11 @@ void vm_io_init(void) {
     s_ide_lba = 0;
     s_ide_byte_idx = SECTOR_SIZE;
     s_serial_out = stdout;
+    s_sys_no = 0;
+    asm_mem_zero(s_sys_args, sizeof(s_sys_args));
+    s_sys_ret = 0;
+    fl_sys_bootstrap();
+    s_io_inited = 1;
 }
 
 int vm_io_reset_requested(void) {
@@ -77,10 +95,32 @@ void vm_io_shutdown(void) {
         mem_domain_free(MEM_DOMAIN_DRIVER, s_pci_cfg);
         s_pci_cfg = NULL;
     }
+    fl_sys_shutdown();
+    s_io_inited = 0;
 }
 
 void vm_io_set_host(vm_host_t *host) {
     s_host = host;
+}
+
+int vm_io_pci_ready(void) {
+    return s_pci_cfg != NULL;
+}
+
+int vm_io_serial_ready(void) {
+    return s_serial_out != NULL;
+}
+
+int vm_io_syscall_bridge_ready(void) {
+    return s_io_inited;
+}
+
+int vm_io_host_bound(void) {
+    return s_host != NULL;
+}
+
+int vm_io_reset_line_ready(void) {
+    return s_io_inited;
 }
 
 static uint8_t vm_io_in_ide(uint32_t port) {
@@ -170,6 +210,8 @@ uint32_t vm_io_in(vm_mem_t *mem, uint32_t port, int size) {
         v = vm_io_in_pic(port);
     else if (port == PCI_CFG_DATA && size == 4)
         return vm_io_in_pci(port);
+    else if (port == VM_SYS_PORT_RET && size == 4)
+        return s_sys_ret;
     if (size == 1) return v & 0xFF;
     if (size == 2) return v & 0xFFFF;
     return v & 0xFFFFFFFFu;
@@ -180,6 +222,21 @@ void vm_io_out(vm_mem_t *mem, uint32_t port, uint32_t value, int size) {
     (void)size;
     if (port == PCI_CFG_ADDR) {
         s_pci_addr = value;
+        return;
+    }
+    if (port >= VM_SYS_PORT_NO && port <= VM_SYS_PORT_ARG3) {
+        uint32_t v = value;
+        if (port == VM_SYS_PORT_NO) s_sys_no = v;
+        else s_sys_args[port - VM_SYS_PORT_ARG0] = v;
+        return;
+    }
+    if (port == VM_SYS_PORT_CALL) {
+        long ret = fl_syscall_dispatch((fl_syscall_no_t)s_sys_no,
+                                       (uintptr_t)s_sys_args[0],
+                                       (uintptr_t)s_sys_args[1],
+                                       (uintptr_t)s_sys_args[2],
+                                       (uintptr_t)s_sys_args[3]);
+        s_sys_ret = (uint32_t)ret;
         return;
     }
     if (port == PCI_CFG_DATA && (s_pci_addr & 0x80000000u)) {
