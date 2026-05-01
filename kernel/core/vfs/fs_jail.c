@@ -11,7 +11,7 @@
 #include <sys/stat.h>
 
 #define JAIL_ROOT_MAX 4096
-static char   g_fs_jail_root[JAIL_ROOT_MAX];
+char   g_fs_jail_root[JAIL_ROOT_MAX];
 static size_t g_fs_jail_len;
 static int    g_jail_dirfd = -1;
 
@@ -25,12 +25,7 @@ void fs_jail_init(void) {
     mem_domain_zero(wd, sizeof(wd));
     if (!getcwd(wd, sizeof(wd)))
         return;
-    if (!g_vm_root[0]) {
-        fprintf(stderr, "[VM] 5-layer driver config warning: layer 4 shell/VM root is not configured\n");
-        fprintf(stderr, "[VM] 5-layer driver config warning: layer 2 filesystem sandbox root is not configured\n");
-        return;
-    }
-    const char *root = g_vm_root;
+    const char *root = g_vm_root[0] ? g_vm_root : wd;
     if (realpath(root, g_fs_jail_root) == NULL) {
         fprintf(stderr, "VM: sandbox root unavailable: %s\n", root);
         mem_domain_zero(g_fs_jail_root, sizeof(g_fs_jail_root));
