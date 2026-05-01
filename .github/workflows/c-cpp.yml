@@ -7,14 +7,14 @@ on:
     branches: [ "main", "develop" ]
 
 jobs:
-  build-x86_64:
+  build-and-test-x86_64:
     name: Build & test (x86_64 GAS)
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
 
       - name: Install dependencies
-        run: sudo apt-get install -y gcc binutils nasm
+        run: sudo apt-get install -y gcc binutils nasm libcunit-dev
 
       - name: Build (x86_64 GAS)
         run: make ARCH=x86_64_gas
@@ -22,17 +22,26 @@ jobs:
       - name: Smoke test
         run: ./BPForbes_Flinstone_Shell -v
 
-      - name: Unit tests — memory ASM
+      - name: Test — memory ASM
         run: make test_mem_asm
 
-      - name: Unit tests — invariants
-        run: make test_invariants
-
-      - name: Unit tests — priority queue
+      - name: Test — priority queue
         run: make test_priority_queue
 
-      - name: Unit tests — fs_jail
+      - name: Test — invariants
+        run: make test_invariants
+
+      - name: Test — fs_jail
         run: make test_fs_jail
+
+      - name: Test — drivers
+        run: make test_drivers
+
+      - name: Test — userspace connection
+        run: make test_userspace_connection
+
+      - name: Compile CUnit suite
+        run: make BPForbes_Flinstone_Tests
 
       - name: Build (x86_64 NASM)
         run: make clean && make ARCH=x86_64_nasm
@@ -50,7 +59,7 @@ jobs:
         run: make ARCH=arm
 
   build-vm:
-    name: Build (VM enabled)
+    name: Build & test (VM enabled)
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -60,3 +69,6 @@ jobs:
 
       - name: Build (VM)
         run: make VM_ENABLE=1
+
+      - name: Test — vm_layer_warning
+        run: make test_vm_layer_warning

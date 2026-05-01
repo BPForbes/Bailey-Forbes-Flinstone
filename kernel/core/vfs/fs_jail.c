@@ -11,7 +11,7 @@
 #include <sys/stat.h>
 
 #define JAIL_ROOT_MAX 4096
-static char   g_fs_jail_root[JAIL_ROOT_MAX];
+char   g_fs_jail_root[JAIL_ROOT_MAX];
 static size_t g_fs_jail_len;
 static int    g_jail_dirfd = -1;
 
