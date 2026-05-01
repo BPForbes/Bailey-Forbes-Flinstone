@@ -15,8 +15,8 @@
  * Both functions return 0 on success, -1 if lba is out of range.
  */
 
-#define RAMDISK_SECTOR_SIZE 512
-#define RAMDISK_SECTORS     8192   /* 4 MB total */
+.equ RAMDISK_SECTOR_SIZE, 512
+.equ RAMDISK_SECTORS, 8192        /* 4 MB total */
 
 .section .note.GNU-stack,"",@progbits
 
