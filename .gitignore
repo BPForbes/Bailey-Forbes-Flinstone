@@ -17,6 +17,9 @@ tests/test_mem_asm
 tests/test_priority_queue
 tests/test_drivers
 tests/test_vm_mem
+tests/test_invariants
+tests/test_fs_jail
+tests/test_replay
 
 # Fetched/built deps
 deps/install
