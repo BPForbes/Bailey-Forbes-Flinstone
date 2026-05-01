@@ -1,0 +1,74 @@
+name: CI
+
+on:
+  push:
+    branches: [ "main", "develop", "milestone/**", "claude/**", "feature/**", "cursor/**", "codex/**", "bug/**" ]
+  pull_request:
+    branches: [ "main", "develop" ]
+
+jobs:
+  build-and-test-x86_64:
+    name: Build & test (x86_64 GAS)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install dependencies
+        run: sudo apt-get update -y && sudo apt-get install -y gcc binutils nasm libcunit1-dev
+
+      - name: Build (x86_64 GAS)
+        run: make ARCH=x86_64_gas
+
+      - name: Smoke test
+        run: ./BPForbes_Flinstone_Shell -v
+
+      - name: Test — memory ASM
+        run: make test_mem_asm
+
+      - name: Test — priority queue
+        run: make test_priority_queue
+
+      - name: Test — invariants
+        run: make test_invariants
+
+      - name: Test — fs_jail
+        run: make test_fs_jail
+
+      - name: Test — drivers
+        run: make test_drivers
+
+      - name: Test — userspace connection
+        run: make test_userspace_connection
+
+      - name: Compile CUnit suite
+        run: make BPForbes_Flinstone_Tests
+
+      - name: Build (x86_64 NASM)
+        run: make clean && make ARCH=x86_64_nasm
+
+  build-arm:
+    name: Build (AArch64 cross)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install cross-compiler
+        run: sudo apt-get update -y && sudo apt-get install -y gcc-aarch64-linux-gnu binutils-aarch64-linux-gnu
+
+      - name: Build (ARM / AArch64)
+        run: make ARCH=arm
+
+  build-vm:
+    name: Build & test (VM enabled)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install dependencies
+        run: sudo apt-get install -y gcc binutils nasm
+
+      - name: Build (VM)
+        run: make VM_ENABLE=1
+
+      - name: Test — vm_layer_warning
+        run: make test_vm_layer_warning

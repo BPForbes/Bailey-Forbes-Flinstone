@@ -17,6 +17,13 @@ tests/test_mem_asm
 tests/test_priority_queue
 tests/test_drivers
 tests/test_vm_mem
+tests/test_invariants
+tests/test_fs_jail
+tests/test_replay
+tests/test_userspace_connection
+tests/test_vm_layer_warning
+tests/test_vm_syscall_bridge
+tests/test_vm_arch_readiness
 
 # Fetched/built deps
 deps/install

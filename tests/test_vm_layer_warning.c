@@ -44,13 +44,13 @@ static int test_jail_inactive_when_vm_off(void) {
 }
 
 /* ------------------------------------------------------------------ */
-/* fs_jail: VM mode on but root not configured                         */
+/* fs_jail: VM mode on falls back to cwd when root is not configured    */
 /* ------------------------------------------------------------------ */
 static int test_jail_active_no_root(void) {
     g_vm_mode    = 1;
     g_vm_root[0] = '\0';
-    fs_jail_init(); /* should print warnings but not set jail active */
-    ASSERT(fs_jail_is_active() == 0);
+    fs_jail_init();
+    ASSERT(fs_jail_is_active() == 1);
     ASSERT(fs_jail_root_configured() == 0);
     reset_jail_state();
     return 0;
