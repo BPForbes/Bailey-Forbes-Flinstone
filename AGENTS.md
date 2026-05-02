@@ -29,7 +29,7 @@ Run builds from the repository root.
 - VM with SDL2 window: `make vm-sdl`
 - Build local third-party dependencies into `deps/install`: `make deps`
 - WebAssembly (Emscripten, embedded VM in-browser): `make wasm`  
-  Requires `emcc` on `PATH` (e.g. `sudo apt-get install -y emscripten`). Outputs `wasm/BPForbes_Flinstone_Shell.{html,js,wasm}`. Pthreads need cross-origin isolation: serve `wasm/` with `Cross-Origin-Opener-Policy: same-origin` and `Cross-Origin-Embedder-Policy: require-corp` (see `wasm/serve_coi.py` and `wasm/index.html`).
+  Requires `emcc` on `PATH` (e.g. `sudo apt-get install -y emscripten`). Outputs `wasm/BPForbes_Flinstone_Shell.{html,js,wasm}`. Pthreads need cross-origin isolation: serve `wasm/` with `Cross-Origin-Opener-Policy: same-origin` and `Cross-Origin-Embedder-Policy: require-corp` (local dev: `make wasm-serve` builds a small C++ static server from `wasm/serve_coi.cpp` using `WASM_SERVE_CXX` defaulting to `g++`; override `WASM_SERVE_PORT` for the listen port; see `wasm/index.html`).
 
 ## Test targets
 

@@ -45,6 +45,8 @@ vm_disk.img
 wasm/BPForbes_Flinstone_Shell.js
 wasm/BPForbes_Flinstone_Shell.wasm
 wasm/BPForbes_Flinstone_Shell.html
+wasm/BPForbes_Flinstone_Shell.worker.js
+wasm/serve_coi
 
 # Disk journal temp (crash consistency)
 *.tmp

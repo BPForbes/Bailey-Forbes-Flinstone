@@ -337,11 +337,24 @@ clean:
 	rm -f tests/test_mem_asm tests/test_alloc tests/test_priority_queue tests/test_drivers tests/test_vm_mem tests/test_replay tests/test_invariants tests/test_userspace_connection tests/test_vm_syscall_bridge tests/test_vm_arch_readiness
 
 # WebAssembly (requires Emscripten on PATH: emcc). Embedded VM enabled; serve wasm/ over HTTP for pthreads.
-.PHONY: wasm
+WASM_SERVE_CXX ?= g++
+WASM_SERVE_PORT ?= 8080
+WASM_SERVE = wasm/serve_coi
+
+$(WASM_SERVE): wasm/serve_coi.cpp
+	$(WASM_SERVE_CXX) -std=c++17 -O2 -Wall -Wextra -o $@ $<
+
+.PHONY: wasm wasm-serve-tool wasm-serve
+wasm-serve-tool: $(WASM_SERVE)
+
 wasm:
 	@command -v $(EMCC) >/dev/null 2>&1 || (echo "wasm: emcc not found. Install Emscripten and ensure emcc is on PATH (or set EMCC=...)." && exit 1)
 	$(MAKE) clean
 	$(MAKE) ARCH=wasm
+
+wasm-serve: wasm wasm-serve-tool
+	@echo "Serving wasm/ with COOP+COEP at http://127.0.0.1:$(WASM_SERVE_PORT)/index.html"
+	./$(WASM_SERVE) $(WASM_SERVE_PORT)
 
 # Architecture-specific build targets
 .PHONY: arm x86-64-nasm x86_64_nasm parity
