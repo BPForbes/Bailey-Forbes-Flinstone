@@ -28,6 +28,8 @@ Run builds from the repository root.
 - VM-enabled host build: `make vm`
 - VM with SDL2 window: `make vm-sdl`
 - Build local third-party dependencies into `deps/install`: `make deps`
+- WebAssembly (Emscripten, embedded VM in-browser): `make wasm`  
+  Requires `emcc` on `PATH` (e.g. `sudo apt-get install -y emscripten`). Outputs `wasm/BPForbes_Flinstone_Shell.{html,js,wasm}`. Default `wasm` uses **pthreads** and needs **COOP+COEP** response headers (or use `make wasm-serve`, which builds `wasm/serve_coi.cpp` and serves `wasm/` with those headers). For **GitHub Pages** (no custom headers), use **`make wasm-pages`**: single-threaded build, no `SharedArrayBuffer` / no pthread workers. See `wasm/github-pages/README.md` and `.github/workflows/pages-wasm.yml` (run **Actions → Deploy WASM to GitHub Pages** after enabling Pages with the **GitHub Actions** source).
 
 ## Test targets
 

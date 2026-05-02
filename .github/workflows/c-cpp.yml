@@ -72,3 +72,15 @@ jobs:
 
       - name: Test — vm_layer_warning
         run: make test_vm_layer_warning
+
+  build-wasm-pages:
+    name: Build WASM (GitHub Pages profile)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Emscripten
+        run: sudo apt-get update -y && sudo apt-get install -y emscripten
+
+      - name: make wasm-pages
+        run: make wasm-pages

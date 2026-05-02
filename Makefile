@@ -1,5 +1,5 @@
 # Makefile
-# ARCH: x86_64_gas (default), x86_64_nasm, arm
+# ARCH: x86_64_gas (default), x86_64_nasm, arm, wasm (Emscripten; see target `wasm`)
 ARCH ?= x86_64_gas
 
 # Compiler and flags
@@ -25,6 +25,26 @@ ASMSRCS_BASE = arch/arm/gas/mem_asm.s arch/arm/gas/port_io.s kernel/arch/aarch64
 ASMSRCS_ALLOC = arch/arm/gas/alloc_core.s arch/arm/gas/alloc_malloc.s arch/arm/gas/alloc_free.s
 ASM_SRC_DIR = arch/arm/gas
 KERNEL_DRIVERS = kernel/arch/aarch64/drivers
+else ifeq ($(ARCH),wasm)
+EMCC ?= emcc
+CC = $(EMCC)
+AS =
+ASMSRCS_BASE =
+ASM_SRC_DIR = arch/wasm
+KERNEL_DRIVERS = kernel/arch/x86_64/drivers
+# WASM_PAGES=1: single-threaded build for GitHub Pages (no SharedArrayBuffer / no COOP+COEP).
+# Default wasm: pthreads (needs COOP+COEP or `make wasm-serve` local server).
+ifeq ($(WASM_PAGES),1)
+LDFLAGS = -sENVIRONMENT=web \
+	-sALLOW_MEMORY_GROWTH -sINITIAL_MEMORY=67108864 \
+	-sEXPORT_ES6=1 \
+	--pre-js wasm/pre.js
+else
+LDFLAGS = -pthread -sUSE_PTHREADS=1 -sPTHREAD_POOL_SIZE=4 -sENVIRONMENT=web,worker \
+	-sALLOW_MEMORY_GROWTH -sINITIAL_MEMORY=67108864 \
+	-sEXPORT_ES6=1 \
+	--pre-js wasm/pre.js
+endif
 else
 # x86_64_gas (default)
 ASMSRCS_BASE = arch/x86_64/gas/mem_asm.s arch/x86_64/gas/port_io.s kernel/arch/x86_64/boot/spinlock.s kernel/arch/x86_64/drivers/ata_pio.s \
@@ -44,12 +64,17 @@ UNIFIED_DRIVER_SRCS = kernel/drivers/bus.c kernel/drivers/driver_model.c \
 DRIVER_SRCS = $(UNIFIED_DRIVER_SRCS)
 # PCI: x86_64 real impl, aarch64 ECAM real
 DRIVER_SRCS += $(KERNEL_DRIVERS)/pci.c
-# x86: ATA IDENTIFY + helpers, IDT dispatcher
+# x86: ATA IDENTIFY + helpers, IDT dispatcher (wasm uses C idt_host stub instead of idt.s + idt_dispatch)
 ifneq ($(ARCH),arm)
 ifneq ($(ARCH),x86_64_nasm)
 DRIVER_SRCS += $(KERNEL_DRIVERS)/ata_pio_baremetal.c
+ifneq ($(ARCH),wasm)
 DRIVER_SRCS += kernel/arch/x86_64/boot/idt_dispatch.c
 endif
+endif
+endif
+ifeq ($(ARCH),wasm)
+DRIVER_SRCS += kernel/arch/x86_64/boot/idt_host.c
 endif
 # HAL: ioport (x86 real, arm stubs) + ARM MMIO HAL (arm only)
 HAL_SRCS = $(KERNEL_DRIVERS)/../hal/ioport.c
@@ -69,6 +94,17 @@ SRCS += $(DRIVER_SRCS) $(HAL_SRCS)
 CFLAGS += -I$(ASM_SRC_DIR) -I$(KERNEL_DRIVERS) -Ikernel -Ikernel/drivers
 ifeq ($(ARCH),arm)
 CFLAGS += -Ikernel/arch/aarch64
+endif
+ifeq ($(ARCH),wasm)
+SRCS += arch/wasm/host_stubs.c
+CFLAGS += -Ikernel/arch/wasm/include
+ifeq ($(WASM_PAGES),1)
+override CFLAGS := $(subst -pthread,,$(CFLAGS))
+CFLAGS += -DBATCH_SINGLE_THREAD=1 -DEMSCRIPTEN_SINGLE_THREAD=1
+else
+CFLAGS += -pthread
+endif
+VM_ENABLE = 1
 endif
 VM_SRCS = VM/devices/vm.c VM/devices/vm_cpu.c VM/devices/vm_mem.c VM/devices/vm_decode.c VM/devices/vm_io.c VM/devices/vm_loader.c \
           VM/devices/vm_display.c VM/devices/vm_host.c VM/devices/vm_font.c VM/devices/vm_disk.c VM/devices/vm_snapshot.c VM/devices/vm_arch.c
@@ -101,7 +137,11 @@ endif
 # Object names: .s/.asm -> .o (strip arch path for .o in obj list)
 ASMOBJS = $(patsubst %.s,%.o,$(patsubst %.asm,%.o,$(ASMSRCS)))
 OBJS = $(SRCS:.c=.o) $(ASMOBJS)
+ifneq ($(ARCH),wasm)
 TARGET = BPForbes_Flinstone_Shell
+else
+TARGET = wasm/BPForbes_Flinstone_Shell.html
+endif
 
 all: $(TARGET)
 
@@ -133,6 +173,7 @@ deps-cunit:
 	@./deps/fetch-cunit.sh
 
 $(TARGET): $(OBJS)
+	@mkdir -p $(dir $(TARGET))
 	$(CC) $(CFLAGS) -o $(TARGET) $(OBJS) $(LDFLAGS)
 
 # --- Test Build ---
@@ -304,9 +345,36 @@ debug: $(TARGET)
 
 clean:
 	rm -f $(OBJS) $(TEST_OBJS) $(TEST_ASMOBJS) $(TARGET) $(TEST_TARGET)
+	rm -f wasm/BPForbes_Flinstone_Shell.js wasm/BPForbes_Flinstone_Shell.wasm
 	rm -f kernel/arch/*/drivers/*.o kernel/arch/*/hal/*.o kernel/drivers/*.o kernel/drivers/block/*.o VM/devices/*.o
 	rm -f arch/*/*/*.o arch/*/*/alloc/*.o
 	rm -f tests/test_mem_asm tests/test_alloc tests/test_priority_queue tests/test_drivers tests/test_vm_mem tests/test_replay tests/test_invariants tests/test_userspace_connection tests/test_vm_syscall_bridge tests/test_vm_arch_readiness
+
+# WebAssembly (requires Emscripten on PATH: emcc). Embedded VM enabled; serve wasm/ over HTTP for pthreads.
+WASM_SERVE_CXX ?= g++
+WASM_SERVE_PORT ?= 8080
+WASM_SERVE = wasm/serve_coi
+
+$(WASM_SERVE): wasm/serve_coi.cpp
+	$(WASM_SERVE_CXX) -std=c++17 -O2 -Wall -Wextra -o $@ $<
+
+.PHONY: wasm wasm-pages wasm-serve-tool wasm-serve
+wasm-serve-tool: $(WASM_SERVE)
+
+wasm:
+	@command -v $(EMCC) >/dev/null 2>&1 || (echo "wasm: emcc not found. Install Emscripten and ensure emcc is on PATH (or set EMCC=...)." && exit 1)
+	$(MAKE) clean
+	$(MAKE) ARCH=wasm
+
+# Single-threaded WASM for static hosts (e.g. GitHub Pages) without COOP/COEP headers.
+wasm-pages:
+	@command -v $(EMCC) >/dev/null 2>&1 || (echo "wasm-pages: emcc not found. Install Emscripten and ensure emcc is on PATH (or set EMCC=...)." && exit 1)
+	$(MAKE) clean
+	$(MAKE) ARCH=wasm WASM_PAGES=1
+
+wasm-serve: wasm wasm-serve-tool
+	@echo "Serving wasm/ with COOP+COEP at http://127.0.0.1:$(WASM_SERVE_PORT)/index.html"
+	./$(WASM_SERVE) $(WASM_SERVE_PORT)
 
 # Architecture-specific build targets
 .PHONY: arm x86-64-nasm x86_64_nasm parity

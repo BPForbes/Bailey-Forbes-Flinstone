@@ -3,13 +3,25 @@
 #include <string.h>
 #include <stdio.h>
 
+#ifdef EMSCRIPTEN_SINGLE_THREAD
+#define FM_LOCK(s)   ((void)0)
+#define FM_UNLOCK(s) ((void)0)
+#define FM_MUTEX_INIT(s) ((void)((s)->_undo_sync_placeholder = 0))
+#define FM_MUTEX_DESTROY(s) ((void)0)
+#else
+#define FM_LOCK(s)   pthread_mutex_lock(&(s)->undo_mutex)
+#define FM_UNLOCK(s) pthread_mutex_unlock(&(s)->undo_mutex)
+#define FM_MUTEX_INIT(s) pthread_mutex_init(&(s)->undo_mutex, NULL)
+#define FM_MUTEX_DESTROY(s) pthread_mutex_destroy(&(s)->undo_mutex)
+#endif
+
 static int check_policy_delete(const char *path, const char *arg2, void *ctx);
 static int check_policy_write(const char *path, const char *arg2, void *ctx);
 
 file_manager_service_t *fm_service_create(fs_provider_t *provider) {
     file_manager_service_t *svc = calloc(1, sizeof(*svc));
     if (!svc) return NULL;
-    pthread_mutex_init(&svc->undo_mutex, NULL);
+    FM_MUTEX_INIT(svc);
     svc->provider = provider;
     strncpy(svc->current_user, "user", FS_SESSION_USER_MAX - 1);
     svc->current_user[FS_SESSION_USER_MAX - 1] = '\0';
@@ -29,12 +41,12 @@ void fm_service_set_user(file_manager_service_t *svc, const char *user) {
 void fm_service_destroy(file_manager_service_t *svc) {
     fs_chain_clear(&svc->delete_chain);
     fs_chain_clear(&svc->write_chain);
-    pthread_mutex_lock(&svc->undo_mutex);
+    FM_LOCK(svc);
     for (int i = 0; i < svc->undo_top; i++)
         fs_cmd_destroy(svc->undo_stack[i]);
     svc->undo_top = 0;
-    pthread_mutex_unlock(&svc->undo_mutex);
-    pthread_mutex_destroy(&svc->undo_mutex);
+    FM_UNLOCK(svc);
+    FM_MUTEX_DESTROY(svc);
     free(svc);
 }
 
@@ -61,13 +73,13 @@ static int check_policy_write(const char *path, const char *arg2, void *ctx) {
 }
 
 static void push_undo(file_manager_service_t *svc, fs_command_t *cmd) {
-    pthread_mutex_lock(&svc->undo_mutex);
+    FM_LOCK(svc);
     if (svc->undo_top < FS_UNDO_STACK_MAX && cmd) {
         svc->undo_stack[svc->undo_top++] = cmd;
     } else if (cmd) {
         fs_cmd_destroy(cmd);
     }
-    pthread_mutex_unlock(&svc->undo_mutex);
+    FM_UNLOCK(svc);
 }
 
 int fm_list(file_manager_service_t *svc, const char *path, fs_node_t **out, int *count) {
@@ -159,21 +171,21 @@ int fm_move(file_manager_service_t *svc, const char *src, const char *dst) {
 }
 
 int fm_undo(file_manager_service_t *svc) {
-    pthread_mutex_lock(&svc->undo_mutex);
+    FM_LOCK(svc);
     if (svc->undo_top == 0) {
-        pthread_mutex_unlock(&svc->undo_mutex);
+        FM_UNLOCK(svc);
         return -1;
     }
     fs_command_t *cmd = svc->undo_stack[--svc->undo_top];
-    pthread_mutex_unlock(&svc->undo_mutex);
+    FM_UNLOCK(svc);
     int r = fs_cmd_undo(cmd);
     fs_cmd_destroy(cmd);
     return r;
 }
 
 int fm_undo_available(file_manager_service_t *svc) {
-    pthread_mutex_lock(&svc->undo_mutex);
+    FM_LOCK(svc);
     int n = svc->undo_top;
-    pthread_mutex_unlock(&svc->undo_mutex);
+    FM_UNLOCK(svc);
     return n;
 }

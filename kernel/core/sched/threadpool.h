@@ -3,30 +3,52 @@
 
 #include "common.h"
 #include "priority_queue.h"
-#include <pthread.h>
 #include <time.h>
+
+#ifndef BATCH_SINGLE_THREAD
+#include <pthread.h>
+#endif
 
 #define PRIORITY_IMMEDIATE  0   /* user commands */
 #define PRIORITY_DEFERRED   1   /* batch writes */
 #define PRIORITY_BACKGROUND 2  /* maintenance */
+
+#ifdef BATCH_SINGLE_THREAD
+
+typedef struct job_node {
+    char *command_str;
+    int done;
+    int priority;
+    time_t enqueue_time;
+    pq_handle_t pq_handle;
+} job_node;
+
+typedef struct thread_pool {
+    priority_queue_t pq;
+    int shutting_down;
+} thread_pool_t;
+
+#else
 
 typedef struct job_node {
     char *command_str;
     pthread_mutex_t mutex;
     pthread_cond_t cond;
     int done;
-    int priority;           /* for PQ */
-    time_t enqueue_time;   /* for aging (future) */
-    pq_handle_t pq_handle; /* for pq_remove (cancel) / pq_update (aging) */
+    int priority;
+    time_t enqueue_time;
+    pq_handle_t pq_handle;
 } job_node;
 
 typedef struct thread_pool {
     pthread_t workers[NUM_WORKERS];
-    priority_queue_t pq;    /* PQ replaces FIFO queue */
+    priority_queue_t pq;
     int shutting_down;
     pthread_mutex_t mutex;
     pthread_cond_t cond;
 } thread_pool_t;
+
+#endif
 
 extern thread_pool_t g_pool;
 

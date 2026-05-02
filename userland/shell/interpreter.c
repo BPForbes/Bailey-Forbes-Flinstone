@@ -105,10 +105,10 @@ int execute_command_str(const char *line) {
         return 0;
     }
     if (!strcmp(trimmed, "history") || !strcmp(trimmed, "his")) {
-        pthread_mutex_lock(&history_mutex);
+        FL_HISTORY_LOCK(history_mutex);
         FILE *hf = fopen(HISTORY_FILE, "r");
         if (!hf) {
-            pthread_mutex_unlock(&history_mutex);
+            FL_HISTORY_UNLOCK(history_mutex);
             printf("No history.\n");
             free(tokenBuf);
             return 0;
@@ -118,7 +118,7 @@ int execute_command_str(const char *line) {
         while (fgets(l2, sizeof(l2), hf))
             printf("[%d] %s", idx++, l2);
         fclose(hf);
-        pthread_mutex_unlock(&history_mutex);
+        FL_HISTORY_UNLOCK(history_mutex);
         free(tokenBuf);
         return 0;
     }

@@ -22,7 +22,11 @@ typedef struct file_manager_service {
     fs_command_t *undo_stack[FS_UNDO_STACK_MAX];
     int undo_top;
     int ui_refresh_pending;
+#ifdef EMSCRIPTEN_SINGLE_THREAD
+    int _undo_sync_placeholder;
+#else
     pthread_mutex_t undo_mutex;
+#endif
 } file_manager_service_t;
 
 file_manager_service_t *fm_service_create(fs_provider_t *provider);
