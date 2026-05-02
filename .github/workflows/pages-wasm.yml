@@ -1,0 +1,54 @@
+# Build single-threaded WASM (no SharedArrayBuffer) and publish to GitHub Pages.
+# Enable: Settings → Pages → Source: GitHub Actions.
+# Site URL: https://<owner>.github.io/<repo>/index.html
+name: Deploy WASM to GitHub Pages
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+concurrency:
+  group: pages-wasm
+  cancel-in-progress: true
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install toolchain
+        run: sudo apt-get update -y && sudo apt-get install -y build-essential emscripten
+
+      - name: Build WASM (GitHub Pages profile)
+        run: make wasm-pages
+
+      - name: Assemble site
+        run: |
+          set -e
+          mkdir -p _site
+          cp wasm/index.html wasm/BPForbes_Flinstone_Shell.js wasm/BPForbes_Flinstone_Shell.wasm _site/
+          touch _site/.nojekyll
+          if [ -f wasm/BPForbes_Flinstone_Shell.worker.js ]; then
+            cp wasm/BPForbes_Flinstone_Shell.worker.js _site/
+          fi
+
+      - name: Upload Pages artifact
+        uses: actions/upload-pages-artifact@v3
+        with:
+          path: _site
+
+  deploy:
+    needs: build
+    runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - name: Deploy to GitHub Pages
+        id: deployment
+        uses: actions/deploy-pages@v4

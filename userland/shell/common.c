@@ -21,7 +21,11 @@ struct termios orig_termios;
 int g_history_cleared = 0;
 char **g_interactive_history = NULL;
 int g_interactive_history_count = 0;
+#ifdef FL_HISTORY_MUTEX_DUMMY
+fl_history_mutex_t history_mutex = 0;
+#else
 pthread_mutex_t history_mutex = PTHREAD_MUTEX_INITIALIZER;
+#endif
 
 const char *HELP_MSG =
 "Usage: BPForbes_Flinstone_Shell [COMMANDS...]\n"

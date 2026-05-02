@@ -32,11 +32,19 @@ AS =
 ASMSRCS_BASE =
 ASM_SRC_DIR = arch/wasm
 KERNEL_DRIVERS = kernel/arch/x86_64/drivers
-# Browser + pthread worker pool (SharedArrayBuffer requires COOP/COEP on the host).
+# WASM_PAGES=1: single-threaded build for GitHub Pages (no SharedArrayBuffer / no COOP+COEP).
+# Default wasm: pthreads (needs COOP+COEP or `make wasm-serve` local server).
+ifeq ($(WASM_PAGES),1)
+LDFLAGS = -sENVIRONMENT=web \
+	-sALLOW_MEMORY_GROWTH -sINITIAL_MEMORY=67108864 \
+	-sEXPORT_ES6=1 \
+	--pre-js wasm/pre.js
+else
 LDFLAGS = -pthread -sUSE_PTHREADS=1 -sPTHREAD_POOL_SIZE=4 -sENVIRONMENT=web,worker \
 	-sALLOW_MEMORY_GROWTH -sINITIAL_MEMORY=67108864 \
 	-sEXPORT_ES6=1 \
 	--pre-js wasm/pre.js
+endif
 else
 # x86_64_gas (default)
 ASMSRCS_BASE = arch/x86_64/gas/mem_asm.s arch/x86_64/gas/port_io.s kernel/arch/x86_64/boot/spinlock.s kernel/arch/x86_64/drivers/ata_pio.s \
@@ -89,7 +97,13 @@ CFLAGS += -Ikernel/arch/aarch64
 endif
 ifeq ($(ARCH),wasm)
 SRCS += arch/wasm/host_stubs.c
-CFLAGS += -Ikernel/arch/wasm/include -pthread
+CFLAGS += -Ikernel/arch/wasm/include
+ifeq ($(WASM_PAGES),1)
+override CFLAGS := $(subst -pthread,,$(CFLAGS))
+CFLAGS += -DBATCH_SINGLE_THREAD=1 -DEMSCRIPTEN_SINGLE_THREAD=1
+else
+CFLAGS += -pthread
+endif
 VM_ENABLE = 1
 endif
 VM_SRCS = VM/devices/vm.c VM/devices/vm_cpu.c VM/devices/vm_mem.c VM/devices/vm_decode.c VM/devices/vm_io.c VM/devices/vm_loader.c \
@@ -344,13 +358,19 @@ WASM_SERVE = wasm/serve_coi
 $(WASM_SERVE): wasm/serve_coi.cpp
 	$(WASM_SERVE_CXX) -std=c++17 -O2 -Wall -Wextra -o $@ $<
 
-.PHONY: wasm wasm-serve-tool wasm-serve
+.PHONY: wasm wasm-pages wasm-serve-tool wasm-serve
 wasm-serve-tool: $(WASM_SERVE)
 
 wasm:
 	@command -v $(EMCC) >/dev/null 2>&1 || (echo "wasm: emcc not found. Install Emscripten and ensure emcc is on PATH (or set EMCC=...)." && exit 1)
 	$(MAKE) clean
 	$(MAKE) ARCH=wasm
+
+# Single-threaded WASM for static hosts (e.g. GitHub Pages) without COOP/COEP headers.
+wasm-pages:
+	@command -v $(EMCC) >/dev/null 2>&1 || (echo "wasm-pages: emcc not found. Install Emscripten and ensure emcc is on PATH (or set EMCC=...)." && exit 1)
+	$(MAKE) clean
+	$(MAKE) ARCH=wasm WASM_PAGES=1
 
 wasm-serve: wasm wasm-serve-tool
 	@echo "Serving wasm/ with COOP+COEP at http://127.0.0.1:$(WASM_SERVE_PORT)/index.html"

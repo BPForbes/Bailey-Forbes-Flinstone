@@ -3,12 +3,13 @@
 #include <errno.h>
 #include <stdlib.h>
 
-#ifdef __KERNEL__
+#if defined(__KERNEL__) || defined(EMSCRIPTEN_SINGLE_THREAD)
 #include "core/sys/spinlock.h"
 typedef volatile int fl_ipc_lock_t;
 #define FL_IPC_LOCK_INIT SPINLOCK_INIT
 static inline void fl_ipc_lock(fl_ipc_lock_t *lock) { spinlock_acquire(lock); }
 static inline void fl_ipc_unlock(fl_ipc_lock_t *lock) { spinlock_release(lock); }
+#define IPC_KERNELLIKE_SYNC 1
 #else
 #include <pthread.h>
 #include <time.h>
@@ -20,7 +21,7 @@ struct pipe {
     size_t head;
     size_t tail;
     size_t len;
-#ifdef __KERNEL__
+#ifdef IPC_KERNELLIKE_SYNC
     fl_ipc_lock_t lock;
 #else
     pthread_mutex_t mu;
@@ -39,7 +40,7 @@ struct msgq {
     size_t head;
     size_t tail;
     size_t len;
-#ifdef __KERNEL__
+#ifdef IPC_KERNELLIKE_SYNC
     fl_ipc_lock_t lock;
 #else
     pthread_mutex_t mu;
@@ -53,7 +54,7 @@ struct msgq {
 
 static size_t min_size(size_t a, size_t b) { return (a < b) ? a : b; }
 
-#ifndef __KERNEL__
+#if !defined(IPC_KERNELLIKE_SYNC)
 static void make_abs_timeout(uint64_t timeout_ms, struct timespec *ts) {
     clock_gettime(CLOCK_MONOTONIC, ts);
     ts->tv_sec += (time_t)(timeout_ms / 1000);
@@ -76,7 +77,7 @@ pipe_t *pipe_create(size_t size) {
         return NULL;
     }
     p->cap = size;
-#ifdef __KERNEL__
+#ifdef IPC_KERNELLIKE_SYNC
     p->lock = FL_IPC_LOCK_INIT;
 #else
     pthread_mutex_init(&p->mu, NULL);
@@ -91,7 +92,7 @@ void pipe_destroy(pipe_t *p) {
     if (!p) {
         return;
     }
-#ifndef __KERNEL__
+#ifndef IPC_KERNELLIKE_SYNC
     pthread_mutex_lock(&p->mu);
     p->closing = 1;
     pthread_cond_broadcast(&p->can_read);
@@ -113,7 +114,7 @@ ssize_t pipe_write(pipe_t *p, const void *buf, size_t count) {
     if (!p || !buf || count == 0) {
         return -1;
     }
-#ifdef __KERNEL__
+#ifdef IPC_KERNELLIKE_SYNC
     fl_ipc_lock(&p->lock);
 #else
     pthread_mutex_lock(&p->mu);
@@ -129,7 +130,7 @@ ssize_t pipe_write(pipe_t *p, const void *buf, size_t count) {
         p->tail = (p->tail + 1) % p->cap;
         p->len++;
     }
-#ifdef __KERNEL__
+#ifdef IPC_KERNELLIKE_SYNC
     fl_ipc_unlock(&p->lock);
 #else
     if (written > 0) pthread_cond_broadcast(&p->can_read);
@@ -142,7 +143,7 @@ ssize_t pipe_read(pipe_t *p, void *buf, size_t count) {
     if (!p || !buf || count == 0) {
         return -1;
     }
-#ifdef __KERNEL__
+#ifdef IPC_KERNELLIKE_SYNC
     fl_ipc_lock(&p->lock);
     if (p->len == 0) {
         fl_ipc_unlock(&p->lock);
@@ -168,7 +169,7 @@ ssize_t pipe_read(pipe_t *p, void *buf, size_t count) {
         p->head = (p->head + 1) % p->cap;
         p->len--;
     }
-#ifdef __KERNEL__
+#ifdef IPC_KERNELLIKE_SYNC
     fl_ipc_unlock(&p->lock);
 #else
     if (readn > 0) pthread_cond_broadcast(&p->can_write);
@@ -189,7 +190,7 @@ msgq_t *msgq_create(size_t max_messages, size_t message_size) {
     }
     q->max_messages = max_messages;
     q->message_size = message_size;
-#ifdef __KERNEL__
+#ifdef IPC_KERNELLIKE_SYNC
     q->lock = FL_IPC_LOCK_INIT;
 #else
     pthread_mutex_init(&q->mu, NULL);
@@ -222,7 +223,7 @@ void msgq_destroy(msgq_t *q) {
     if (!q) {
         return;
     }
-#ifndef __KERNEL__
+#ifndef IPC_KERNELLIKE_SYNC
     pthread_mutex_lock(&q->mu);
     q->closing = 1;
     pthread_cond_broadcast(&q->can_read);
@@ -247,7 +248,7 @@ int msgq_send(msgq_t *q, const void *msg, size_t size) {
     if (size > q->message_size) {
         return -1;
     }
-#ifdef __KERNEL__
+#ifdef IPC_KERNELLIKE_SYNC
     fl_ipc_lock(&q->lock);
 #else
     pthread_mutex_lock(&q->mu);
@@ -257,7 +258,7 @@ int msgq_send(msgq_t *q, const void *msg, size_t size) {
     }
 #endif
     if (q->len >= q->max_messages) {
-#ifdef __KERNEL__
+#ifdef IPC_KERNELLIKE_SYNC
         fl_ipc_unlock(&q->lock);
 #else
         pthread_mutex_unlock(&q->mu);
@@ -270,7 +271,7 @@ int msgq_send(msgq_t *q, const void *msg, size_t size) {
     asm_mem_copy(slot, msg, n);
     q->tail = (q->tail + 1) % q->max_messages;
     q->len++;
-#ifdef __KERNEL__
+#ifdef IPC_KERNELLIKE_SYNC
     fl_ipc_unlock(&q->lock);
 #else
     pthread_cond_broadcast(&q->can_read);
@@ -283,7 +284,7 @@ int msgq_receive(msgq_t *q, void *msg, size_t size, uint64_t timeout_ms) {
     if (!q || !msg || size == 0) {
         return -1;
     }
-#ifdef __KERNEL__
+#ifdef IPC_KERNELLIKE_SYNC
     (void)timeout_ms;
     fl_ipc_lock(&q->lock);
 #else
@@ -320,7 +321,7 @@ int msgq_receive(msgq_t *q, void *msg, size_t size, uint64_t timeout_ms) {
     }
 #endif
     if (q->len == 0) {
-#ifdef __KERNEL__
+#ifdef IPC_KERNELLIKE_SYNC
         fl_ipc_unlock(&q->lock);
 #else
         pthread_mutex_unlock(&q->mu);
@@ -332,7 +333,7 @@ int msgq_receive(msgq_t *q, void *msg, size_t size, uint64_t timeout_ms) {
     asm_mem_copy(msg, slot, n);
     q->head = (q->head + 1) % q->max_messages;
     q->len--;
-#ifdef __KERNEL__
+#ifdef IPC_KERNELLIKE_SYNC
     fl_ipc_unlock(&q->lock);
 #else
     pthread_cond_broadcast(&q->can_write);

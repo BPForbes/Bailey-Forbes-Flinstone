@@ -5,11 +5,10 @@
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>Flinstone Shell (WASM)</title>
   <!--
-    pthreads + SharedArrayBuffer require cross-origin isolation. For static hosts
-    (e.g. GitHub Pages), set response headers:
-      Cross-Origin-Opener-Policy: same-origin
-      Cross-Origin-Embedder-Policy: require-corp
-    Example (local): make wasm-serve
+    Default `make wasm` uses pthreads + SharedArrayBuffer → needs COOP+COEP headers
+    (e.g. `make wasm-serve` with the C++ helper, or another reverse proxy).
+
+    GitHub Pages: use `make wasm-pages` (no pthreads; no extra headers required).
   -->
   <style>
     body { font-family: system-ui, sans-serif; margin: 16px; background: #111; color: #ddd; }

@@ -330,9 +330,9 @@ int main(int argc, char *argv[]) {
     signal(SIGINT, SIG_IGN);
     pq_init(&g_pool.pq);
     g_pool.shutting_down = 0;
+#ifndef BATCH_SINGLE_THREAD
     pthread_mutex_init(&g_pool.mutex, NULL);
     pthread_cond_init(&g_pool.cond, NULL);
-#ifndef BATCH_SINGLE_THREAD
     for (int i = 0; i < NUM_WORKERS; i++) {
         pthread_create(&g_pool.workers[i], NULL, worker_thread, NULL);
     }
@@ -508,9 +508,11 @@ int main(int argc, char *argv[]) {
     pthread_mutex_unlock(&g_pool.mutex);
     for (int i = 0; i < NUM_WORKERS; i++)
         pthread_join(g_pool.workers[i], NULL);
-#endif
     pthread_mutex_destroy(&g_pool.mutex);
     pthread_cond_destroy(&g_pool.cond);
+#else
+    g_pool.shutting_down = 1;
+#endif
     drivers_shutdown();
     path_log_shutdown();
     fs_service_glue_shutdown();

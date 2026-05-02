@@ -7,6 +7,80 @@
 
 thread_pool_t g_pool;
 
+#ifdef BATCH_SINGLE_THREAD
+
+static void run_job_task(void *arg) {
+    job_node *job = (job_node *)arg;
+    (void)execute_command_str(job->command_str);
+    job->done = 1;
+}
+
+static void drain_pool_once(void) {
+    pq_task_t task;
+    for (int layer = 0; layer < PQ_NUM_PRIORITIES; layer++) {
+        if (pq_pop_from_layer(&g_pool.pq, layer, &task) != 0)
+            continue;
+        if (task.fn && task.arg)
+            task.fn(task.arg);
+    }
+}
+
+job_node *create_job(const char *line) {
+    job_node *job = calloc(1, sizeof(*job));
+    if (!job) return NULL;
+    job->command_str = strdup(line);
+    job->done = 0;
+    job->priority = PRIORITY_IMMEDIATE;
+    job->enqueue_time = time(NULL);
+    job->pq_handle = -1;
+    return job;
+}
+
+void free_job(job_node *job) {
+    if (!job) return;
+    free(job->command_str);
+    free(job);
+}
+
+void queue_job(job_node *job) {
+    queue_job_priority(job, PRIORITY_IMMEDIATE);
+}
+
+void queue_job_priority(job_node *job, int priority) {
+    job->priority = priority;
+    job->enqueue_time = time(NULL);
+    job->pq_handle = -1;
+    if (pq_count(&g_pool.pq) >= PQ_MAX_ITEMS) {
+        fprintf(stderr, "Job queue overflow!\n");
+        return;
+    }
+    pq_handle_t h = pq_push(&g_pool.pq, priority, run_job_task, job);
+    if (h >= 0) {
+        job->pq_handle = h;
+        if (priority == PRIORITY_BACKGROUND)
+            pq_set_quantum(&g_pool.pq, h, 100);
+    }
+    /* Single-threaded: run queued work immediately. */
+    while (!pq_is_empty(&g_pool.pq) && !g_pool.shutting_down)
+        drain_pool_once();
+}
+
+void submit_single_command(const char *line) {
+    submit_single_command_priority(line, PRIORITY_IMMEDIATE);
+}
+
+void submit_single_command_priority(const char *line, int priority) {
+    (void)priority;
+    (void)execute_command_str(line);
+}
+
+void *worker_thread(void *arg) {
+    (void)arg;
+    return NULL;
+}
+
+#else /* !BATCH_SINGLE_THREAD */
+
 static void run_job_task(void *arg) {
     job_node *job = (job_node *)arg;
     (void)execute_command_str(job->command_str);
@@ -54,7 +128,7 @@ void queue_job_priority(job_node *job, int priority) {
     if (h >= 0) {
         job->pq_handle = h;
         if (priority == PRIORITY_BACKGROUND)
-            pq_set_quantum(&g_pool.pq, h, 100);  /* optional demotion on quantum expiry */
+            pq_set_quantum(&g_pool.pq, h, 100);
     }
     pthread_cond_signal(&g_pool.cond);
     pthread_mutex_unlock(&g_pool.mutex);
@@ -65,10 +139,6 @@ void submit_single_command(const char *line) {
 }
 
 void submit_single_command_priority(const char *line, int priority) {
-#ifdef BATCH_SINGLE_THREAD
-    (void)priority;
-    (void)execute_command_str(line);
-#else
     job_node *job = create_job(line);
     if (!job) return;
     queue_job_priority(job, priority);
@@ -77,7 +147,6 @@ void submit_single_command_priority(const char *line, int priority) {
         pthread_cond_wait(&job->cond, &job->mutex);
     pthread_mutex_unlock(&job->mutex);
     free_job(job);
-#endif
 }
 
 void *worker_thread(void *arg) {
@@ -90,7 +159,6 @@ void *worker_thread(void *arg) {
             pthread_mutex_unlock(&g_pool.mutex);
             break;
         }
-        /* Layer-scan: run one from each non-empty layer per round (secondary tie-breaker) */
         pq_task_t task;
         for (int layer = 0; layer < PQ_NUM_PRIORITIES; layer++) {
             if (pq_pop_from_layer(&g_pool.pq, layer, &task) != 0)
@@ -104,3 +172,5 @@ void *worker_thread(void *arg) {
     }
     return NULL;
 }
+
+#endif /* BATCH_SINGLE_THREAD */
