@@ -41,5 +41,10 @@ vm_checkpoint_disk.img
 # Default embedded-VM virtual disk (created at run time)
 vm_disk.img
 
+# Emscripten output (build with `make wasm`)
+wasm/BPForbes_Flinstone_Shell.js
+wasm/BPForbes_Flinstone_Shell.wasm
+wasm/BPForbes_Flinstone_Shell.html
+
 # Disk journal temp (crash consistency)
 *.tmp

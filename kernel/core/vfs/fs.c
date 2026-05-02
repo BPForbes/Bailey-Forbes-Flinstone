@@ -10,6 +10,56 @@
 #include <dirent.h>
 #include <unistd.h>
 
+struct fs_rmtree_entry {
+    char path[1024];
+    int depth;
+    int isDir;
+};
+
+static int fs_rmtree_entry_cmp(const void *a, const void *b) {
+    const struct fs_rmtree_entry *ea = (const struct fs_rmtree_entry *)a;
+    const struct fs_rmtree_entry *eb = (const struct fs_rmtree_entry *)b;
+    return eb->depth - ea->depth;
+}
+
+static void fs_rmtree_scan(const char *dir, int depth,
+                           struct fs_rmtree_entry **entries,
+                           int *entryCount, int *entryCapacity) {
+    DIR *dp = opendir(dir);
+    if (!dp)
+        return;
+    struct dirent *entry;
+    while ((entry = readdir(dp))) {
+        if (!strcmp(entry->d_name, ".") || !strcmp(entry->d_name, ".."))
+            continue;
+        char fullPath[1024];
+        snprintf(fullPath, sizeof(fullPath), "%s/%s", dir, entry->d_name);
+        if (*entryCount >= *entryCapacity) {
+            *entryCapacity *= 2;
+            struct fs_rmtree_entry *n = realloc(*entries, sizeof(struct fs_rmtree_entry) * (size_t)*entryCapacity);
+            if (!n) {
+                perror("realloc");
+                closedir(dp);
+                return;
+            }
+            *entries = n;
+        }
+        strncpy((*entries)[*entryCount].path, fullPath, sizeof((*entries)[*entryCount].path) - 1);
+        (*entries)[*entryCount].path[sizeof((*entries)[*entryCount].path) - 1] = '\0';
+        (*entries)[*entryCount].depth = depth;
+        struct stat st;
+        if (stat(fullPath, &st) == 0 && S_ISDIR(st.st_mode)) {
+            (*entries)[*entryCount].isDir = 1;
+            (*entryCount)++;
+            fs_rmtree_scan(fullPath, depth + 1, entries, entryCount, entryCapacity);
+        } else {
+            (*entries)[*entryCount].isDir = 0;
+            (*entryCount)++;
+        }
+    }
+    closedir(dp);
+}
+
 void list_files(const char *dir) {
     DIR *dp = opendir(dir);
     if (!dp) {
@@ -49,58 +99,15 @@ void list_directories(void) {
 }
 
 int remove_directory_recursive(const char *d) {
-    struct Entry {
-        char path[1024];
-        int depth;
-        int isDir;
-    };
-    struct Entry *entries = NULL;
+    struct fs_rmtree_entry *entries = NULL;
     int entryCount = 0, entryCapacity = 100;
-    entries = malloc(sizeof(struct Entry) * entryCapacity);
+    entries = malloc(sizeof(struct fs_rmtree_entry) * (size_t)entryCapacity);
     if (!entries) {
         perror("malloc");
         return -1;
     }
-    void scan_dir(const char *dir, int depth) {
-        DIR *dp = opendir(dir);
-        if (!dp)
-            return;
-        struct dirent *entry;
-        while ((entry = readdir(dp))) {
-            if (!strcmp(entry->d_name, ".") || !strcmp(entry->d_name, ".."))
-                continue;
-            char fullPath[1024];
-            snprintf(fullPath, sizeof(fullPath), "%s/%s", dir, entry->d_name);
-            if (entryCount >= entryCapacity) {
-                entryCapacity *= 2;
-                entries = realloc(entries, sizeof(struct Entry) * entryCapacity);
-                if (!entries) {
-                    perror("realloc");
-                    closedir(dp);
-                    return;
-                }
-            }
-            strncpy(entries[entryCount].path, fullPath, sizeof(entries[entryCount].path)-1);
-            entries[entryCount].path[sizeof(entries[entryCount].path)-1] = '\0';
-            entries[entryCount].depth = depth;
-            struct stat st;
-            if (stat(fullPath, &st) == 0 && S_ISDIR(st.st_mode)) {
-                entries[entryCount].isDir = 1;
-                entryCount++;
-                scan_dir(fullPath, depth + 1);
-            } else {
-                entries[entryCount].isDir = 0;
-                entryCount++;
-            }
-        }
-        closedir(dp);
-    }
-    scan_dir(d, 0);
-    int compare_entries(const void *a, const void *b) {
-        struct Entry *ea = (struct Entry *)a, *eb = (struct Entry *)b;
-        return eb->depth - ea->depth;
-    }
-    qsort(entries, entryCount, sizeof(struct Entry), compare_entries);
+    fs_rmtree_scan(d, 0, &entries, &entryCount, &entryCapacity);
+    qsort(entries, (size_t)entryCount, sizeof(struct fs_rmtree_entry), fs_rmtree_entry_cmp);
     for (int i = 0; i < entryCount; i++) {
         if (!entries[i].isDir) {
             if (remove(entries[i].path) != 0)

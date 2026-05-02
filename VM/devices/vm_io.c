@@ -12,11 +12,6 @@
 #include <stdint.h>
 #include <stddef.h>
 
-/* vm_io.c requires 64-bit uintptr_t for syscall bridge (write_port_width shifts by 32) */
-_Static_assert(sizeof(uintptr_t) >= 8, "vm_io.c requires 64-bit uintptr_t");
-
-static FILE *s_serial_out;
-
 /* SECTOR_SIZE from driver_types.h */
 #define PCI_CFG_ADDR  0xCF8
 #define PCI_CFG_DATA  0xCFC
@@ -25,6 +20,7 @@ static FILE *s_serial_out;
 #define PCI_CFG_SIZE  256
 
 static uint8_t s_sector_buf[SECTOR_SIZE];
+static FILE *s_serial_out;
 static uint32_t s_ide_lba;
 static int s_ide_byte_idx;
 static uint8_t s_pit_mode;
@@ -33,9 +29,9 @@ static uint32_t s_pci_addr;
 static int s_reset_requested;
 /* Virtual PCI config: bus 0, dev 0..3. ASM-backed via mem_domain. */
 static uint8_t *s_pci_cfg;
-static uintptr_t s_sys_no;
-static uintptr_t s_sys_args[4];
-static long s_sys_ret;
+static uint64_t s_sys_no;
+static uint64_t s_sys_args[4];
+static int64_t s_sys_ret;
 static int s_io_inited;
 
 #define VM_SYS_PORT_NO      0xE0
@@ -70,16 +66,17 @@ static uint32_t merge_port_width(uint32_t old_value, uint32_t value, int size) {
     return (old_value & ~mask) | (value & mask);
 }
 
-static void write_port_width(uintptr_t *slot, uint32_t value, int size) {
-    uint32_t low = merge_port_width(low32((uint64_t)*slot), value, size);
-    *slot = ((uintptr_t)high32((uint64_t)*slot) << 32) | low;
+/* Syscall bridge uses explicit 64-bit slots (guest may expose args as low/high port pairs). */
+static void write_port_width(uint64_t *slot, uint32_t value, int size) {
+    uint32_t low = merge_port_width(low32(*slot), value, size);
+    *slot = ((uint64_t)high32(*slot) << 32) | (uint64_t)low;
 }
 
-static void write_port_high_width(uintptr_t *slot, uint32_t value, int size) {
-    uint64_t full = (uint64_t)*slot;
+static void write_port_high_width(uint64_t *slot, uint32_t value, int size) {
+    uint64_t full = *slot;
     uint32_t hi = merge_port_width(high32(full), value, size);
-    uintptr_t low = (uintptr_t)low32(full);
-    *slot = low | ((uintptr_t)hi << 32);
+    uint64_t low = (uint64_t)low32(full);
+    *slot = low | ((uint64_t)hi << 32);
 }
 
 /* Translate guest offset to host pointer; returns 0 if invalid or out of range. */

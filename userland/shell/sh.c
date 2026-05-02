@@ -133,6 +133,10 @@ static int parse_vm_args(int argc, char *argv[]) {
 
 /* Spawn popup terminal running shell in VM sandbox. Returns 0 on success, -1 if no terminal. */
 static int vm_spawn_popup(const char *exe_path) {
+#ifdef __EMSCRIPTEN__
+    (void)exe_path;
+    return -1;
+#else
     char cmd[PATH_MAX + 128];
     snprintf(cmd, sizeof(cmd), "cd '%s' && exec '%s'", g_vm_root, exe_path);
     pid_t pid = fork();
@@ -151,6 +155,7 @@ static int vm_spawn_popup(const char *exe_path) {
     if (WEXITSTATUS(status) == 127)
         return -1;
     return 0;
+#endif
 }
 
 static int vm_configure_root_from_cwd(void) {
@@ -216,6 +221,10 @@ int main(int argc, char *argv[]) {
 
     /* VM popup: -Virtualization -y with no other args (no -vm) -> spawn popup once */
     if (g_vm_mode && g_vm_cleanup && argc == 1 && !g_vm_run_embedded) {
+#ifdef __EMSCRIPTEN__
+        fprintf(stderr, "[VM] In the browser, add -vm to run the embedded guest in-page (popup terminals are unavailable).\n");
+        exit(0);
+#endif
         char tmpl[] = "/tmp/flintstone_vm_XXXXXX";
         char *root = mkdtemp(tmpl);
         if (!root) {

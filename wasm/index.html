@@ -1,0 +1,28 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Flinstone Shell (WASM)</title>
+  <!--
+    pthreads + SharedArrayBuffer require cross-origin isolation. For static hosts
+    (e.g. GitHub Pages), set response headers:
+      Cross-Origin-Opener-Policy: same-origin
+      Cross-Origin-Embedder-Policy: require-corp
+    Example (local): python3 wasm/serve_coi.py
+  -->
+  <style>
+    body { font-family: system-ui, sans-serif; margin: 16px; background: #111; color: #ddd; }
+    h1 { font-size: 1.15rem; }
+    p { max-width: 52rem; line-height: 1.45; opacity: 0.9; }
+  </style>
+</head>
+<body>
+  <h1>Flinstone Shell · WebAssembly</h1>
+  <p>Loads the embedded x86 VM in the browser (same as <code>-Virtualization -y -vm</code>). Build with <code>make wasm</code>, then serve this directory with COOP/COEP headers so pthreads work.</p>
+  <script type="module">
+    import init from './BPForbes_Flinstone_Shell.js';
+    await init();
+  </script>
+</body>
+</html>

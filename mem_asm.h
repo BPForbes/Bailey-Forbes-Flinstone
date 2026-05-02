@@ -11,7 +11,9 @@
 #include <stddef.h>
 
 /* Include architecture-specific header based on architecture defines */
-#if defined(TARGET_ARCH_aarch64) || defined(__aarch64__) || defined(_M_ARM64)
+#if defined(__EMSCRIPTEN__)
+    #include "kernel/arch/wasm/include/mem_asm.h"
+#elif defined(TARGET_ARCH_aarch64) || defined(__aarch64__) || defined(_M_ARM64)
     #include "kernel/arch/aarch64/include/mem_asm.h"
 #else
     /* x86_64 (default) */
