@@ -360,12 +360,12 @@ int msgq_receive(msgq_t *q, void *msg, size_t size, uint64_t timeout_ms) {
             q->waiters--;
             pthread_cond_signal(&q->drain);
             if (rc == ETIMEDOUT) {
-                /* Re-check len/closing: a producer may have raced after the wait. */
-                if (q->len == 0 && !q->closing) {
-                    pthread_mutex_unlock(&q->mu);
-                    return -1;
-                }
-                continue;
+                if (q->len > 0)
+                    break; /* timed out after a producer filled the queue */
+                if (q->closing)
+                    break;
+                pthread_mutex_unlock(&q->mu);
+                return -1;
             }
             if (rc != 0) {
                 pthread_mutex_unlock(&q->mu);
