@@ -1,0 +1,131 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>BPForbes Flinstone Shell</title>
+  <link
+    rel="stylesheet"
+    href="https://cdn.jsdelivr.net/npm/xterm@5.3.0/css/xterm.css"
+  />
+  <style>
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    body {
+      background: #0a0a0a;
+      display: flex;
+      flex-direction: column;
+      height: 100vh;
+      font-family: monospace;
+    }
+    header {
+      background: #1a1a2e;
+      color: #00ff88;
+      padding: 8px 16px;
+      font-size: 14px;
+      border-bottom: 1px solid #00ff8840;
+      display: flex;
+      align-items: center;
+      gap: 12px;
+    }
+    header span { color: #888; font-size: 12px; }
+    #status {
+      margin-left: auto;
+      font-size: 12px;
+      color: #888;
+    }
+    #status.ready  { color: #00ff88; }
+    #status.loading { color: #ffaa00; }
+    #terminal-container {
+      flex: 1;
+      padding: 4px;
+      overflow: hidden;
+    }
+    #terminal { width: 100%; height: 100%; }
+  </style>
+</head>
+<body>
+  <header>
+    <strong>BPForbes Flinstone Shell</strong>
+    <span>— WASM interactive terminal</span>
+    <span id="status" class="loading">Loading…</span>
+  </header>
+  <div id="terminal-container">
+    <div id="terminal"></div>
+  </div>
+
+  <script src="https://cdn.jsdelivr.net/npm/xterm@5.3.0/lib/xterm.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/xterm-addon-fit@0.8.0/lib/xterm-addon-fit.js"></script>
+  <script>
+    var term = new Terminal({
+      cursorBlink: true,
+      scrollback: 5000,
+      theme: {
+        background: '#0a0a0a',
+        foreground: '#cccccc',
+        cursor:     '#00ff88',
+        green:      '#00ff88',
+      },
+    });
+    var fitAddon = new FitAddon.FitAddon();
+    term.loadAddon(fitAddon);
+    term.open(document.getElementById('terminal'));
+    fitAddon.fit();
+    window.addEventListener('resize', function () { fitAddon.fit(); });
+
+    /* ---- Emscripten Module configuration -------------------------------- */
+    var Module = {
+      /* Input buffer and waiter — fed by term.onData, consumed by _wasm_getchar */
+      _ibuf: [],
+      _iwaiter: null,
+
+      /* Character-level stdout/stderr — driven by FS.init hooks in preRun */
+      _term_write: function (s) { term.write(s); },
+
+      preRun: [function () {
+        FS.init(
+          null,                             /* stdin: handled by _wasm_getchar */
+          function (c) {                    /* stdout: one char at a time */
+            if (c !== null && c !== undefined)
+              term.write(String.fromCharCode(c));
+          },
+          function (c) {                    /* stderr: yellow tint */
+            if (c !== null && c !== undefined)
+              term.write('\x1b[33m' + String.fromCharCode(c) + '\x1b[0m');
+          }
+        );
+      }],
+
+      onRuntimeInitialized: function () {
+        document.getElementById('status').textContent = 'Ready';
+        document.getElementById('status').className = 'ready';
+        term.focus();
+      },
+
+      quit: function (code) {
+        document.getElementById('status').textContent =
+          code === 0 ? 'Exited' : 'Exited (code ' + code + ')';
+        document.getElementById('status').className = '';
+        term.writeln('\r\n\x1b[33m[Shell exited — reload to restart]\x1b[0m');
+      },
+    };
+
+    /* Feed keystrokes from xterm into Module._ibuf */
+    term.onData(function (data) {
+      for (var i = 0; i < data.length; i++) {
+        var code = data.charCodeAt(i);
+        /* Map CR (Enter) to LF so the shell's '\n' check triggers */
+        if (code === 13) code = 10;
+        Module._ibuf.push(code);
+      }
+      /* Wake any suspended _wasm_getchar ASYNCIFY call */
+      if (Module._iwaiter) {
+        var r = Module._iwaiter;
+        Module._iwaiter = null;
+        r();
+      }
+    });
+  </script>
+  <!-- Emscripten-generated WASM glue; must load after Module is defined -->
+  <script src="shell.js"></script>
+</body>
+</html>

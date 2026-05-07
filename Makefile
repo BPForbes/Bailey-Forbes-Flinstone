@@ -25,6 +25,14 @@ ASMSRCS_BASE = arch/arm/gas/mem_asm.s arch/arm/gas/port_io.s kernel/arch/aarch64
 ASMSRCS_ALLOC = arch/arm/gas/alloc_core.s arch/arm/gas/alloc_malloc.s arch/arm/gas/alloc_free.s
 ASM_SRC_DIR = arch/arm/gas
 KERNEL_DRIVERS = kernel/arch/aarch64/drivers
+else ifeq ($(ARCH),wasm)
+CC = emcc
+AS = true
+ASMSRCS_BASE =
+ASMSRCS_ALLOC =
+ASM_SRC_DIR = arch/wasm
+KERNEL_DRIVERS = kernel/arch/x86_64/drivers
+TARGET = web/shell.js
 else
 # x86_64_gas (default)
 ASMSRCS_BASE = arch/x86_64/gas/mem_asm.s arch/x86_64/gas/port_io.s kernel/arch/x86_64/boot/spinlock.s kernel/arch/x86_64/drivers/ata_pio.s \
@@ -47,8 +55,10 @@ DRIVER_SRCS += $(KERNEL_DRIVERS)/pci.c
 # x86: ATA IDENTIFY + helpers, IDT dispatcher
 ifneq ($(ARCH),arm)
 ifneq ($(ARCH),x86_64_nasm)
+ifneq ($(ARCH),wasm)
 DRIVER_SRCS += $(KERNEL_DRIVERS)/ata_pio_baremetal.c
 DRIVER_SRCS += kernel/arch/x86_64/boot/idt_dispatch.c
+endif
 endif
 endif
 # HAL: ioport (x86 real, arm stubs) + ARM MMIO HAL (arm only)
@@ -98,10 +108,27 @@ ifeq ($(USE_ASM_ALLOC),1)
 ASMSRCS += $(ASMSRCS_ALLOC)
 CFLAGS += -DUSE_ASM_ALLOC=1 -DBATCH_SINGLE_THREAD=1
 endif
+# WASM: C stubs replace assembly; remove -pthread; add Emscripten link flags
+ifeq ($(ARCH),wasm)
+SRCS += arch/wasm/mem_asm_stub.c arch/wasm/port_io_stub.c
+CFLAGS := $(filter-out -pthread,$(CFLAGS)) -DBATCH_SINGLE_THREAD=1
+WASM_FLAGS = \
+    -sASYNCIFY=1 \
+    -sFORCE_FILESYSTEM=1 \
+    -sALLOW_MEMORY_GROWTH=1 \
+    -sINITIAL_MEMORY=33554432 \
+    -sEXPORTED_RUNTIME_METHODS='["callMain","FS"]' \
+    -sEXPORTED_FUNCTIONS='["_main"]' \
+    -sENVIRONMENT=web
+LDFLAGS = $(WASM_FLAGS)
+endif
 # Object names: .s/.asm -> .o (strip arch path for .o in obj list)
 ASMOBJS = $(patsubst %.s,%.o,$(patsubst %.asm,%.o,$(ASMSRCS)))
 OBJS = $(SRCS:.c=.o) $(ASMOBJS)
 TARGET = BPForbes_Flinstone_Shell
+ifeq ($(ARCH),wasm)
+TARGET = web/shell.js
+endif
 
 all: $(TARGET)
 
@@ -133,6 +160,7 @@ deps-cunit:
 	@./deps/fetch-cunit.sh
 
 $(TARGET): $(OBJS)
+	@mkdir -p $(dir $(TARGET))
 	$(CC) $(CFLAGS) -o $(TARGET) $(OBJS) $(LDFLAGS)
 
 # --- Test Build ---

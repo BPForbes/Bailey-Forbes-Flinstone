@@ -125,6 +125,10 @@ int driver_probe_pci(void)      { return drivers_require_real_pci(); }
 
 static int do_selftest_block(void) {
     if (!g_block_driver) return 0;
+#ifndef DRIVERS_BAREMETAL
+    /* Host/WASM: disk file may not exist yet — skip selftest when no sectors loaded. */
+    if (g_block_driver->sector_count == 0) return 0;
+#endif
     uint8_t buf[512];
     return g_block_driver->read_sector((block_driver_t *)g_block_driver, 0, buf) == 0 ? 0 : -1;
 }
