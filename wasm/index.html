@@ -7,6 +7,10 @@
   <!--
     Local: make wasm-pages, then open this file from wasm/ (or make wasm-serve for pthreads + COOP/COEP).
     GitHub Pages: Settings → Pages → Source = GitHub Actions, then run workflow "Deploy WASM to GitHub Pages".
+    Default `make wasm` uses pthreads + SharedArrayBuffer → needs COOP+COEP headers
+    (e.g. `make wasm-serve` with the small C helper, or another reverse proxy).
+
+    GitHub Pages: use `make wasm-pages` (no pthreads; no extra headers required).
   -->
   <style>
     body { font-family: system-ui, sans-serif; margin: 16px; background: #111; color: #ddd; }
@@ -16,6 +20,7 @@
     code { background: #21262d; padding: 0.1rem 0.35rem; border-radius: 4px; }
     #pages-help { display: none; border: 1px solid #444; border-radius: 8px; padding: 12px 16px; margin-top: 12px; background: #161b22; }
     #pages-help ol { padding-left: 1.25rem; }
+    p { max-width: 52rem; line-height: 1.45; opacity: 0.9; }
   </style>
 </head>
 <body>
@@ -54,6 +59,9 @@
       console.error(impErr);
       throw impErr;
     }
+  <p>Loads the embedded x86 VM in the browser (same as <code>-Virtualization -y -vm</code>). For pthreads, build with <code>make wasm</code> and serve with COOP/COEP headers (e.g. <code>make wasm-serve</code>). For GitHub Pages, use <code>make wasm-pages</code> (single-threaded; no extra headers).</p>
+  <script type="module">
+    import createModule from './BPForbes_Flinstone_Shell.js';
     try {
       await createModule(globalThis.Module || {});
     } catch (err) {
