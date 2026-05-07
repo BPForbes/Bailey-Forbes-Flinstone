@@ -71,20 +71,20 @@ char *trim_whitespace(char *str) {
 }
 
 void append_history(const char *cmd) {
-    pthread_mutex_lock(&history_mutex);
+    FL_HISTORY_LOCK(history_mutex);
     FILE *fp = fopen(HISTORY_FILE, "a");
     if (fp) {
         fprintf(fp, "%s\n", cmd);
         fclose(fp);
     }
-    pthread_mutex_unlock(&history_mutex);
+    FL_HISTORY_UNLOCK(history_mutex);
 }
 
 char *read_history_line(int index) {
-    pthread_mutex_lock(&history_mutex);
+    FL_HISTORY_LOCK(history_mutex);
     FILE *fp = fopen(HISTORY_FILE, "r");
     if (!fp) {
-        pthread_mutex_unlock(&history_mutex);
+        FL_HISTORY_UNLOCK(history_mutex);
         return NULL;
     }
     char line[512];
@@ -99,7 +99,7 @@ char *read_history_line(int index) {
         }
     }
     fclose(fp);
-    pthread_mutex_unlock(&history_mutex);
+    FL_HISTORY_UNLOCK(history_mutex);
     return selected;
 }
 

@@ -12,11 +12,6 @@
 #include <stdint.h>
 #include <stddef.h>
 
-/* vm_io.c requires 64-bit uintptr_t for syscall bridge (write_port_width shifts by 32) */
-_Static_assert(sizeof(uintptr_t) >= 8, "vm_io.c requires 64-bit uintptr_t");
-
-static FILE *s_serial_out;
-
 /* SECTOR_SIZE from driver_types.h */
 #define PCI_CFG_ADDR  0xCF8
 #define PCI_CFG_DATA  0xCFC
@@ -25,6 +20,7 @@ static FILE *s_serial_out;
 #define PCI_CFG_SIZE  256
 
 static uint8_t s_sector_buf[SECTOR_SIZE];
+static FILE *s_serial_out;
 static uint32_t s_ide_lba;
 static int s_ide_byte_idx;
 static uint8_t s_pit_mode;
@@ -33,9 +29,9 @@ static uint32_t s_pci_addr;
 static int s_reset_requested;
 /* Virtual PCI config: bus 0, dev 0..3. ASM-backed via mem_domain. */
 static uint8_t *s_pci_cfg;
-static uintptr_t s_sys_no;
-static uintptr_t s_sys_args[4];
-static long s_sys_ret;
+static uint64_t s_sys_no;
+static uint64_t s_sys_args[4];
+static int64_t s_sys_ret;
 static int s_io_inited;
 
 #define VM_SYS_PORT_NO      0xE0
@@ -59,54 +55,63 @@ static uint32_t high32(uint64_t value) {
     return (uint32_t)(value >> 32);
 }
 
+/* Return value masked to 8/16/32 bits according to emulated port width. */
 static uint32_t read_port_width(uint32_t value, int size) {
     if (size == 1) return value & 0xFFu;
     if (size == 2) return value & 0xFFFFu;
     return value;
 }
 
+/* Merge masked write into old_value (used for partial port writes). */
 static uint32_t merge_port_width(uint32_t old_value, uint32_t value, int size) {
     uint32_t mask = (size == 1) ? 0xFFu : (size == 2) ? 0xFFFFu : 0xFFFFFFFFu;
     return (old_value & ~mask) | (value & mask);
 }
 
-static void write_port_width(uintptr_t *slot, uint32_t value, int size) {
-    uint32_t low = merge_port_width(low32((uint64_t)*slot), value, size);
-    *slot = ((uintptr_t)high32((uint64_t)*slot) << 32) | low;
+/* Write low 32 bits of a 64-bit syscall-bridge slot (guest may split across lo/hi ports). */
+static void write_port_width(uint64_t *slot, uint32_t value, int size) {
+    uint32_t low = merge_port_width(low32(*slot), value, size);
+    *slot = ((uint64_t)high32(*slot) << 32) | (uint64_t)low;
 }
 
-static void write_port_high_width(uintptr_t *slot, uint32_t value, int size) {
-    uint64_t full = (uint64_t)*slot;
-    uint32_t hi = merge_port_width(high32(full), value, size);
-    uintptr_t low = (uintptr_t)low32(full);
-    *slot = low | ((uintptr_t)hi << 32);
+/* Write high 32 bits of a 64-bit syscall-bridge slot. */
+static void write_port_high_width(uint64_t *slot, uint32_t value, int size) {
+    uint64_t full = *slot;
+    uint32_t hi32 = merge_port_width(high32(full), value, size);
+    uint64_t low32part = (uint64_t)low32(full);
+    *slot = low32part | ((uint64_t)hi32 << 32);
 }
 
-/* Translate guest offset to host pointer; returns 0 if invalid or out of range. */
-static uintptr_t vm_sys_arg_to_host_ptr(vm_mem_t *mem, uintptr_t arg, size_t len) {
+/**
+ * Map guest physical offset into host RAM pointer, or 0 if out of range.
+ * Used before host syscalls so the guest passes offsets, not host addresses.
+ */
+static uintptr_t vm_sys_arg_to_host_ptr(vm_mem_t *mem, uint64_t guest_off, size_t len) {
     if (!mem || !mem->ram || len == 0) {
         return 0;
     }
-    if (arg >= mem->size) {
+    if (guest_off > (uint64_t)mem->size) {
         return 0;
     }
-    if (len > mem->size - (size_t)arg) {
+    size_t arg = (size_t)guest_off;
+    if (len > mem->size - arg) {
         return 0;
     }
-    return (uintptr_t)(mem->ram + (size_t)arg);
+    return (uintptr_t)(mem->ram + arg);
 }
 
-static void vm_translate_sys_args(vm_mem_t *mem, uintptr_t args[4]) {
+/* Replace guest offsets in args[] with host pointers for syscalls that pass buffers. */
+static void vm_translate_sys_args(vm_mem_t *mem, uint64_t args[4]) {
     switch ((fl_syscall_no_t)s_sys_no) {
         case FL_SYS_WRITE:
         case FL_SYS_READ:
-            args[0] = vm_sys_arg_to_host_ptr(mem, args[0], (size_t)args[1]);
+            args[0] = (uint64_t)vm_sys_arg_to_host_ptr(mem, args[0], (size_t)args[1]);
             break;
         case FL_SYS_PIPE_READ:
         case FL_SYS_PIPE_WRITE:
         case FL_SYS_MSGQ_SEND:
         case FL_SYS_MSGQ_RECV:
-            args[1] = vm_sys_arg_to_host_ptr(mem, args[1], (size_t)args[2]);
+            args[1] = (uint64_t)vm_sys_arg_to_host_ptr(mem, args[1], (size_t)args[2]);
             break;
         default:
             break;
@@ -305,11 +310,11 @@ void vm_io_out(vm_mem_t *mem, uint32_t port, uint32_t value, int size) {
         return;
     }
     if (port == VM_SYS_PORT_CALL) {
-        uintptr_t args[4] = {
+        uint64_t args[4] = {
             s_sys_args[0], s_sys_args[1], s_sys_args[2], s_sys_args[3]
         };
         vm_translate_sys_args(mem, args);
-        long ret = fl_syscall_dispatch((fl_syscall_no_t)s_sys_no,
+        long ret = fl_syscall_dispatch(fl_syscall_invoke((fl_syscall_no_t)s_sys_no),
                                        args[0], args[1], args[2], args[3]);
         s_sys_ret = ret;
         return;

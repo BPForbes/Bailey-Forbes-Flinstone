@@ -12,7 +12,11 @@
 #include <sys/wait.h>
 #include <fcntl.h>
 #include <signal.h>
+#ifdef EMSCRIPTEN_SINGLE_THREAD
+#define FL_HISTORY_MUTEX_DUMMY 1
+#else
 #include <pthread.h>
+#endif
 #include <termios.h>
 #include <time.h>
 
@@ -50,7 +54,16 @@ extern struct termios orig_termios;
 extern int g_history_cleared;
 extern char **g_interactive_history;
 extern int g_interactive_history_count;
+#ifdef FL_HISTORY_MUTEX_DUMMY
+typedef int fl_history_mutex_t;
+extern fl_history_mutex_t history_mutex;
+#define FL_HISTORY_LOCK(m)   ((void)(m))
+#define FL_HISTORY_UNLOCK(m) ((void)(m))
+#else
 extern pthread_mutex_t history_mutex;
+#define FL_HISTORY_LOCK(m)   pthread_mutex_lock(&(m))
+#define FL_HISTORY_UNLOCK(m) pthread_mutex_unlock(&(m))
+#endif
 
 /* Help message */
 extern const char *HELP_MSG;

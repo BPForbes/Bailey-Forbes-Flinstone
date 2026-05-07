@@ -28,6 +28,8 @@ Run builds from the repository root.
 - VM-enabled host build: `make vm`
 - VM with SDL2 window: `make vm-sdl`
 - Build local third-party dependencies into `deps/install`: `make deps`
+- WebAssembly (Emscripten, embedded VM in-browser): `make wasm`  
+  Requires `emcc` on `PATH`. Ubuntu’s `sudo apt-get install -y emscripten` is convenient but often ships **3.1.x**, while CI pins **emsdk 4.0.1** (`mymindstorm/setup-emsdk` in `.github/workflows/c-cpp.yml`); older `emcc` may fail link or mismatch flags used here. Prefer the [Emscripten SDK](https://emscripten.org/docs/getting_started/downloads.html) for a version aligned with CI. Outputs `wasm/BPForbes_Flinstone_Shell.{html,js,wasm}`. Default `wasm` uses **pthreads** and needs **COOP+COEP** response headers (or use `make wasm-serve`, which builds `wasm/serve_coi.c` and serves `wasm/` with those headers; listens on **loopback** by default, set **`WASM_SERVE_BIND_ALL=1`** to bind all interfaces). For **GitHub Pages** (no custom headers), use **`make wasm-pages`**: single-threaded build, no `SharedArrayBuffer` / no pthread workers. See `wasm/github-pages/README.md` and `.github/workflows/pages-wasm.yml` (run **Actions → Deploy WASM to GitHub Pages** after enabling Pages with the **GitHub Actions** source).
 
 ## Test targets
 
