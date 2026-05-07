@@ -13,6 +13,10 @@ void fl_sys_shutdown(void) {
     vrt_shutdown();
 }
 
+/**
+ * Host syscall multiplexer: stdin/stdout, pipes, message queues, and VRT handles.
+ * Arguments are 64-bit so the VM I/O bridge can pass full guest register pairs on wasm32.
+ */
 long fl_syscall_dispatch(fl_syscall_no_t no, uint64_t a0, uint64_t a1, uint64_t a2, uint64_t a3) {
     switch (no) {
         case FL_SYS_WRITE: {

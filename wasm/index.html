@@ -18,10 +18,18 @@
 </head>
 <body>
   <h1>Flinstone Shell · WebAssembly</h1>
-  <p>Loads the embedded x86 VM in the browser (same as <code>-Virtualization -y -vm</code>). Build with <code>make wasm</code>, then serve this directory with COOP/COEP headers so pthreads work.</p>
+  <p>Loads the embedded x86 VM in the browser (same as <code>-Virtualization -y -vm</code>). For pthreads, build with <code>make wasm</code> and serve with COOP/COEP headers (e.g. <code>make wasm-serve</code>). For GitHub Pages, use <code>make wasm-pages</code> (single-threaded; no extra headers).</p>
   <script type="module">
     import createModule from './BPForbes_Flinstone_Shell.js';
-    await createModule(globalThis.Module || {});
+    try {
+      await createModule(globalThis.Module || {});
+    } catch (err) {
+      const pre = document.createElement('pre');
+      pre.style.color = '#f85149';
+      pre.textContent = 'WASM init failed: ' + (err && err.stack ? err.stack : String(err));
+      document.body.appendChild(pre);
+      throw err;
+    }
   </script>
 </body>
 </html>

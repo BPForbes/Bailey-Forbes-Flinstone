@@ -17,18 +17,25 @@ struct fs_rmtree_entry {
     int isDir;
 };
 
+/* qsort: deeper paths first so children are deleted before parents. */
 static int fs_rmtree_entry_cmp(const void *a, const void *b) {
     const struct fs_rmtree_entry *ea = (const struct fs_rmtree_entry *)a;
     const struct fs_rmtree_entry *eb = (const struct fs_rmtree_entry *)b;
     return eb->depth - ea->depth;
 }
 
-static void fs_rmtree_scan(const char *dir, int depth,
-                           struct fs_rmtree_entry **entries,
-                           int *entryCount, int *entryCapacity) {
+/**
+ * Walk `dir`, append files/dirs to `entries` (growing `entryCapacity`).
+ * Returns 0 on success; -1 if the directory cannot be read, allocation fails, or a subtree scan fails.
+ */
+static int fs_rmtree_scan(const char *dir, int depth,
+                          struct fs_rmtree_entry **entries,
+                          int *entryCount, int *entryCapacity) {
     DIR *dp = opendir(dir);
-    if (!dp)
-        return;
+    if (!dp) {
+        perror("opendir");
+        return -1;
+    }
     struct dirent *entry;
     while ((entry = readdir(dp))) {
         if (!strcmp(entry->d_name, ".") || !strcmp(entry->d_name, ".."))
@@ -36,8 +43,9 @@ static void fs_rmtree_scan(const char *dir, int depth,
         char fullPath[PATH_MAX];
         int plen = snprintf(fullPath, sizeof(fullPath), "%s/%s", dir, entry->d_name);
         if (plen < 0 || (size_t)plen >= sizeof(fullPath)) {
-            fprintf(stderr, "remove_directory_recursive: path too long, skipping entry\n");
-            continue;
+            fprintf(stderr, "remove_directory_recursive: path too long\n");
+            closedir(dp);
+            return -1;
         }
         if (*entryCount >= *entryCapacity) {
             int newCap = *entryCapacity * 2;
@@ -46,7 +54,7 @@ static void fs_rmtree_scan(const char *dir, int depth,
             if (!new_entries) {
                 perror("realloc");
                 closedir(dp);
-                return;
+                return -1;
             }
             *entries = new_entries;
             *entryCapacity = newCap;
@@ -58,13 +66,17 @@ static void fs_rmtree_scan(const char *dir, int depth,
         if (stat(fullPath, &st) == 0 && S_ISDIR(st.st_mode)) {
             (*entries)[*entryCount].isDir = 1;
             (*entryCount)++;
-            fs_rmtree_scan(fullPath, depth + 1, entries, entryCount, entryCapacity);
+            if (fs_rmtree_scan(fullPath, depth + 1, entries, entryCount, entryCapacity) != 0) {
+                closedir(dp);
+                return -1;
+            }
         } else {
             (*entries)[*entryCount].isDir = 0;
             (*entryCount)++;
         }
     }
     closedir(dp);
+    return 0;
 }
 
 void list_files(const char *dir) {
@@ -113,7 +125,10 @@ int remove_directory_recursive(const char *d) {
         perror("malloc");
         return -1;
     }
-    fs_rmtree_scan(d, 0, &entries, &entryCount, &entryCapacity);
+    if (fs_rmtree_scan(d, 0, &entries, &entryCount, &entryCapacity) != 0) {
+        free(entries);
+        return -1;
+    }
     qsort(entries, (size_t)entryCount, sizeof(struct fs_rmtree_entry), fs_rmtree_entry_cmp);
     for (int i = 0; i < entryCount; i++) {
         if (!entries[i].isDir) {

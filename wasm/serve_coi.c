@@ -51,6 +51,7 @@ static const struct mime_entry kMime[] = {
     {".woff2", "font/woff2"},
 };
 
+/* Map file extension (lowercased) to Content-Type, default octet-stream. */
 static const char *mime_type_for_path(const char *path) {
     const char *dot = strrchr(path, '.');
     if (!dot)
@@ -73,7 +74,10 @@ static const char *mime_type_for_path(const char *path) {
 #define MAX_SEG 128
 #define SEG_LEN 256
 
-/* Normalize relative path (no leading slash): drop ".", collapse ".." vs prior segment. */
+/**
+ * Normalize a relative URL path: strip leading slashes, drop ".", collapse ".." safely.
+ * Returns 0 on success, -1 if a segment is too long or depth underflows.
+ */
 static int lexical_normalize_rel(const char *in, char *out, size_t outsz) {
     char segs[MAX_SEG][SEG_LEN];
     int n = 0;
@@ -237,13 +241,9 @@ int main(int argc, char *argv[]) {
     memset(&addr, 0, sizeof addr);
     addr.sin_family = AF_INET;
     addr.sin_port = htons(port);
-    {
-        const char *bind_all = getenv("WASM_SERVE_BIND_ALL");
-        if (bind_all && bind_all[0] && strcmp(bind_all, "0") != 0)
-            addr.sin_addr.s_addr = htonl(INADDR_ANY);
-        else
-            addr.sin_addr.s_addr = htonl(INADDR_LOOPBACK);
-    }
+    const char *bind_all_env = getenv("WASM_SERVE_BIND_ALL");
+    bool bind_all = bind_all_env && bind_all_env[0] && strcmp(bind_all_env, "0") != 0;
+    addr.sin_addr.s_addr = htonl(bind_all ? INADDR_ANY : INADDR_LOOPBACK);
     if (bind(srv, (struct sockaddr *)&addr, sizeof(addr)) != 0) {
         perror("bind");
         close(srv);
@@ -255,15 +255,12 @@ int main(int argc, char *argv[]) {
         return 1;
     }
 
-    {
-        const char *bind_all = getenv("WASM_SERVE_BIND_ALL");
-        if (bind_all && bind_all[0] && strcmp(bind_all, "0") != 0)
-            printf("Serving %s at http://127.0.0.1:%u/ (all interfaces; set WASM_SERVE_BIND_ALL=0 for loopback only; COOP+COEP for WASM pthreads)\n",
-                   doc_root, (unsigned)port);
-        else
-            printf("Serving %s at http://127.0.0.1:%u/ (loopback; set WASM_SERVE_BIND_ALL=1 for all interfaces; COOP+COEP for WASM pthreads)\n",
-                   doc_root, (unsigned)port);
-    }
+    if (bind_all)
+        printf("Serving %s at http://127.0.0.1:%u/ (all interfaces; set WASM_SERVE_BIND_ALL=0 for loopback only; COOP+COEP for WASM pthreads)\n",
+               doc_root, (unsigned)port);
+    else
+        printf("Serving %s at http://127.0.0.1:%u/ (loopback; set WASM_SERVE_BIND_ALL=1 for all interfaces; COOP+COEP for WASM pthreads)\n",
+               doc_root, (unsigned)port);
 
     for (;;) {
         struct sockaddr_in cli;
@@ -279,10 +276,12 @@ int main(int argc, char *argv[]) {
         (void)setsockopt(fd, SOL_SOCKET, SO_SNDTIMEO, &sock_to, sizeof(sock_to));
 
         char req[65536];
+        req[0] = '\0';
         size_t reqlen = 0;
         for (;;) {
             if (reqlen >= sizeof(req) - 1) {
                 reqlen = 0;
+                req[0] = '\0';
                 break;
             }
             ssize_t n = recv(fd, req + reqlen, sizeof(req) - 1 - reqlen, 0);
@@ -295,6 +294,13 @@ int main(int argc, char *argv[]) {
             req[reqlen] = '\0';
             if (strstr(req, "\r\n\r\n"))
                 break;
+        }
+        req[reqlen] = '\0';
+
+        if (reqlen == 0) {
+            shutdown(fd, SHUT_RDWR);
+            close(fd);
+            continue;
         }
 
         char method[16], raw_path[SERVE_PATH_CAP], ver[32];

@@ -1,10 +1,16 @@
-/* Emscripten --pre-js: shared Module for MODULARIZE factory; default argv; tee to DOM. */
-var Module = (typeof globalThis.Module !== 'undefined' && globalThis.Module) ? globalThis.Module : {};
+/* Emscripten --pre-js: augment the factory `Module`; avoid replacing a caller-supplied moduleArg. */
+if (typeof Module === 'undefined') {
+  var Module = {};
+}
 globalThis.Module = Module;
 if (!Module.arguments || Module.arguments.length === 0) {
   Module.arguments = ['-Virtualization', '-y', '-vm'];
 }
 
+/**
+ * Ensure the output `<pre>` is attached to `document.body` once the DOM is ready.
+ * @param {HTMLElement} el - The element created by {@link flinstoneWasmEnsureOut}.
+ */
 function flinstoneWasmAttachOut(el) {
   function tryAppend() {
     if (typeof document === 'undefined' || !document.body) return;
@@ -12,22 +18,20 @@ function flinstoneWasmAttachOut(el) {
     document.body.appendChild(el);
   }
   if (typeof document === 'undefined') return;
-  if (document.readyState === 'complete' || document.readyState === 'interactive') {
-    tryAppend();
-    if (!el.parentNode) {
-      document.addEventListener('DOMContentLoaded', function flinstoneOutOnce() {
-        document.removeEventListener('DOMContentLoaded', flinstoneOutOnce);
-        tryAppend();
-      });
-    }
-  } else {
+  if (document.readyState === 'loading') {
     document.addEventListener('DOMContentLoaded', function flinstoneOutOnce() {
       document.removeEventListener('DOMContentLoaded', flinstoneOutOnce);
       tryAppend();
     });
+  } else {
+    tryAppend();
   }
 }
 
+/**
+ * Return existing `#flinstone-wasm-out` or create it with shell styling and attach it.
+ * @returns {HTMLElement|null}
+ */
 function flinstoneWasmEnsureOut() {
   if (typeof document === 'undefined') return null;
   var el = document.getElementById('flinstone-wasm-out');

@@ -6,7 +6,7 @@
 #ifdef EMSCRIPTEN_SINGLE_THREAD
 #define FM_LOCK(s)   ((void)0)
 #define FM_UNLOCK(s) ((void)0)
-#define FM_MUTEX_INIT(s) ((void)((s)->_undo_sync_placeholder = 0))
+#define FM_MUTEX_INIT(s) ((void)((s)->undo_sync_placeholder = 0))
 #define FM_MUTEX_DESTROY(s) ((void)0)
 #else
 #define FM_LOCK(s)   pthread_mutex_lock(&(s)->undo_mutex)

@@ -55,23 +55,26 @@ static uint32_t high32(uint64_t value) {
     return (uint32_t)(value >> 32);
 }
 
+/* Return value masked to 8/16/32 bits according to emulated port width. */
 static uint32_t read_port_width(uint32_t value, int size) {
     if (size == 1) return value & 0xFFu;
     if (size == 2) return value & 0xFFFFu;
     return value;
 }
 
+/* Merge masked write into old_value (used for partial port writes). */
 static uint32_t merge_port_width(uint32_t old_value, uint32_t value, int size) {
     uint32_t mask = (size == 1) ? 0xFFu : (size == 2) ? 0xFFFFu : 0xFFFFFFFFu;
     return (old_value & ~mask) | (value & mask);
 }
 
-/* Syscall bridge uses explicit 64-bit slots (guest may expose args as low/high port pairs). */
+/* Write low 32 bits of a 64-bit syscall-bridge slot (guest may split across lo/hi ports). */
 static void write_port_width(uint64_t *slot, uint32_t value, int size) {
     uint32_t low = merge_port_width(low32(*slot), value, size);
     *slot = ((uint64_t)high32(*slot) << 32) | (uint64_t)low;
 }
 
+/* Write high 32 bits of a 64-bit syscall-bridge slot. */
 static void write_port_high_width(uint64_t *slot, uint32_t value, int size) {
     uint64_t full = *slot;
     uint32_t hi32 = merge_port_width(high32(full), value, size);
@@ -79,7 +82,10 @@ static void write_port_high_width(uint64_t *slot, uint32_t value, int size) {
     *slot = low32part | ((uint64_t)hi32 << 32);
 }
 
-/* Translate guest offset to host pointer; returns 0 if invalid or out of range. */
+/**
+ * Map guest physical offset into host RAM pointer, or 0 if out of range.
+ * Used before host syscalls so the guest passes offsets, not host addresses.
+ */
 static uintptr_t vm_sys_arg_to_host_ptr(vm_mem_t *mem, uint64_t guest_off, size_t len) {
     if (!mem || !mem->ram || len == 0) {
         return 0;
@@ -94,6 +100,7 @@ static uintptr_t vm_sys_arg_to_host_ptr(vm_mem_t *mem, uint64_t guest_off, size_
     return (uintptr_t)(mem->ram + arg);
 }
 
+/* Replace guest offsets in args[] with host pointers for syscalls that pass buffers. */
 static void vm_translate_sys_args(vm_mem_t *mem, uint64_t args[4]) {
     switch ((fl_syscall_no_t)s_sys_no) {
         case FL_SYS_WRITE:

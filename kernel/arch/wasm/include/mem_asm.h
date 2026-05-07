@@ -13,26 +13,32 @@ void asm_mem_zero(void *ptr, size_t n);
 void asm_block_fill(void *ptr, unsigned char byte, size_t n);
 
 #ifndef MEM_ASM_DEBUG
+/** Non-debug: delegate to asm_mem_copy (overlap checks only in MEM_ASM_DEBUG). */
 static inline void mem_asm_checked_copy(void *dst, const void *src, size_t n) {
     asm_mem_copy(dst, src, n);
 }
+/** Non-debug: delegate to asm_mem_zero. */
 static inline void mem_asm_checked_zero(void *ptr, size_t n) {
     asm_mem_zero(ptr, n);
 }
+/** Non-debug: delegate to asm_block_fill. */
 static inline void mem_asm_checked_fill(void *ptr, unsigned char byte, size_t n) {
     asm_block_fill(ptr, byte, n);
 }
 #else
 #include <assert.h>
+/** Debug build: assert non-NULL, non-overlapping, then copy. */
 static inline void mem_asm_checked_copy(void *dst, const void *src, size_t n) {
     assert(dst != NULL && src != NULL);
     assert((const char *)dst >= (const char *)src + n || (const char *)src >= (const char *)dst + n);
     asm_mem_copy(dst, src, n);
 }
+/** Debug build: assert non-NULL, then zero. */
 static inline void mem_asm_checked_zero(void *ptr, size_t n) {
     assert(ptr != NULL);
     asm_mem_zero(ptr, n);
 }
+/** Debug build: assert non-NULL, then fill. */
 static inline void mem_asm_checked_fill(void *ptr, unsigned char byte, size_t n) {
     assert(ptr != NULL);
     asm_block_fill(ptr, byte, n);

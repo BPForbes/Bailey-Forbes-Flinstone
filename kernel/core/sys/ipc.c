@@ -66,6 +66,10 @@ static void make_abs_timeout(uint64_t timeout_ms, struct timespec *ts) {
 }
 #endif
 
+/**
+ * Allocate a byte ring buffer pipe of `size` bytes.
+ * On pthread builds, all sync init failures release partial state and return NULL.
+ */
 pipe_t *pipe_create(size_t size) {
     if (size == 0) return NULL;
     pipe_t *p = (pipe_t *)malloc(sizeof(*p));
@@ -110,6 +114,7 @@ pipe_t *pipe_create(size_t size) {
     return p;
 }
 
+/* Tear down pipe sync primitives (pthreads) then free buffer and struct. */
 void pipe_destroy(pipe_t *p) {
     if (!p) {
         return;
@@ -132,6 +137,7 @@ void pipe_destroy(pipe_t *p) {
     free(p);
 }
 
+/* Non-blocking ring write: returns bytes accepted (may be < count if ring full). */
 ssize_t pipe_write(pipe_t *p, const void *buf, size_t count) {
     if (!p || !buf || count == 0) {
         return -1;
@@ -161,6 +167,7 @@ ssize_t pipe_write(pipe_t *p, const void *buf, size_t count) {
     return (ssize_t)written;
 }
 
+/* Read up to `count` bytes; pthread build may block until data or close. */
 ssize_t pipe_read(pipe_t *p, void *buf, size_t count) {
     if (!p || !buf || count == 0) {
         return -1;
@@ -200,6 +207,10 @@ ssize_t pipe_read(pipe_t *p, void *buf, size_t count) {
     return (ssize_t)readn;
 }
 
+/**
+ * Fixed-size message queue: `max_messages` slots of `message_size` bytes each.
+ * Returns NULL on allocation or pthread init failure (with cleanup).
+ */
 msgq_t *msgq_create(size_t max_messages, size_t message_size) {
     if (max_messages == 0 || message_size == 0) return NULL;
     msgq_t *q = (msgq_t *)malloc(sizeof(*q));

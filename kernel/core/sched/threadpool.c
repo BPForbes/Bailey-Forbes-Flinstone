@@ -9,12 +9,14 @@ thread_pool_t g_pool;
 
 #ifdef BATCH_SINGLE_THREAD
 
+/* Run one queued job synchronously (single-thread build). */
 static void run_job_task(void *arg) {
     job_node *job = (job_node *)arg;
     (void)execute_command_str(job->command_str);
     job->done = 1;
 }
 
+/* Drain one task from each non-empty PQ layer (single-thread round-robin). */
 static void drain_pool_once(void) {
     pq_task_t task;
     for (int layer = 0; layer < PQ_NUM_PRIORITIES; layer++) {
@@ -25,6 +27,7 @@ static void drain_pool_once(void) {
     }
 }
 
+/* Allocate a shell job node (no pthread sync in single-thread mode). */
 job_node *create_job(const char *line) {
     job_node *job = calloc(1, sizeof(*job));
     if (!job) return NULL;
@@ -46,6 +49,7 @@ void queue_job(job_node *job) {
     queue_job_priority(job, PRIORITY_IMMEDIATE);
 }
 
+/* Push job onto PQ and drain synchronously until the queue is empty. */
 void queue_job_priority(job_node *job, int priority) {
     job->priority = priority;
     job->enqueue_time = time(NULL);
@@ -81,6 +85,7 @@ void *worker_thread(void *arg) {
 
 #else /* !BATCH_SINGLE_THREAD */
 
+/* Worker callback: run command, then signal waiters under job mutex. */
 static void run_job_task(void *arg) {
     job_node *job = (job_node *)arg;
     (void)execute_command_str(job->command_str);
@@ -90,6 +95,7 @@ static void run_job_task(void *arg) {
     pthread_mutex_unlock(&job->mutex);
 }
 
+/* Allocate job with per-job mutex/cond for done signaling. */
 job_node *create_job(const char *line) {
     job_node *job = calloc(1, sizeof(*job));
     if (!job) return NULL;
@@ -114,6 +120,7 @@ void queue_job(job_node *job) {
     queue_job_priority(job, PRIORITY_IMMEDIATE);
 }
 
+/* Enqueue under pool mutex and wake a worker thread. */
 void queue_job_priority(job_node *job, int priority) {
     job->priority = priority;
     job->enqueue_time = time(NULL);

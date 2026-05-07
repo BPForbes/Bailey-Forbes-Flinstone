@@ -25,7 +25,7 @@ typedef struct file_manager_service {
     int undo_top;
     int ui_refresh_pending;
 #ifdef EMSCRIPTEN_SINGLE_THREAD
-    int _undo_sync_placeholder;
+    int undo_sync_placeholder;
 #else
     pthread_mutex_t undo_mutex;
 #endif

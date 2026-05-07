@@ -345,7 +345,7 @@ debug: $(TARGET)
 
 clean:
 	rm -f $(OBJS) $(TEST_OBJS) $(TEST_ASMOBJS) $(TARGET) $(TEST_TARGET)
-	rm -f wasm/BPForbes_Flinstone_Shell.js wasm/BPForbes_Flinstone_Shell.wasm
+	rm -f wasm/BPForbes_Flinstone_Shell.js wasm/BPForbes_Flinstone_Shell.wasm wasm/BPForbes_Flinstone_Shell.html
 	rm -f kernel/arch/*/drivers/*.o kernel/arch/*/hal/*.o kernel/drivers/*.o kernel/drivers/block/*.o VM/devices/*.o
 	rm -f arch/*/*/*.o arch/*/*/alloc/*.o
 	rm -f tests/test_mem_asm tests/test_alloc tests/test_priority_queue tests/test_drivers tests/test_vm_mem tests/test_replay tests/test_invariants tests/test_userspace_connection tests/test_vm_syscall_bridge tests/test_vm_arch_readiness
