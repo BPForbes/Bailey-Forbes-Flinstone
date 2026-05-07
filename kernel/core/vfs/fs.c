@@ -63,7 +63,12 @@ static int fs_rmtree_scan(const char *dir, int depth,
         (*entries)[*entryCount].path[sizeof((*entries)[*entryCount].path) - 1] = '\0';
         (*entries)[*entryCount].depth = depth;
         struct stat st;
-        if (stat(fullPath, &st) == 0 && S_ISDIR(st.st_mode)) {
+        if (lstat(fullPath, &st) != 0) {
+            (*entries)[*entryCount].isDir = 0;
+            (*entryCount)++;
+            continue;
+        }
+        if (S_ISDIR(st.st_mode)) {
             (*entries)[*entryCount].isDir = 1;
             (*entryCount)++;
             if (fs_rmtree_scan(fullPath, depth + 1, entries, entryCount, entryCapacity) != 0) {

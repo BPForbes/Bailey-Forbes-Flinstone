@@ -2,6 +2,7 @@
 #define MEM_ASM_H
 
 #include <stddef.h>
+#include <stdint.h>
 #include <string.h>
 
 /**
@@ -27,10 +28,11 @@ static inline void mem_asm_checked_fill(void *ptr, unsigned char byte, size_t n)
 }
 #else
 #include <assert.h>
-/** Debug build: assert non-NULL, non-overlapping, then copy. */
+/** Debug build: assert non-NULL, non-overlapping (via uintptr_t; only if n > 0), then copy. */
 static inline void mem_asm_checked_copy(void *dst, const void *src, size_t n) {
     assert(dst != NULL && src != NULL);
-    assert((const char *)dst >= (const char *)src + n || (const char *)src >= (const char *)dst + n);
+    if (n > 0)
+        assert((uintptr_t)dst >= (uintptr_t)src + n || (uintptr_t)src >= (uintptr_t)dst + n);
     asm_mem_copy(dst, src, n);
 }
 /** Debug build: assert non-NULL, then zero. */

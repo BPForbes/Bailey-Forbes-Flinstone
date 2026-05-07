@@ -8,6 +8,7 @@
  * (typically .../wasm/ after `make wasm-serve`).
  */
 
+#define _DEFAULT_SOURCE
 #define _POSIX_C_SOURCE 200809L
 
 #include <arpa/inet.h>
@@ -16,6 +17,7 @@
 #include <limits.h>
 #include <libgen.h>
 #include <netinet/in.h>
+#include <signal.h>
 #include <stdbool.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -150,8 +152,13 @@ static bool path_has_prefix(const char *path, const char *prefix) {
 
 static int send_all(int fd, const char *buf, size_t len) {
     size_t off = 0;
+#ifdef MSG_NOSIGNAL
+    const int send_flags = MSG_NOSIGNAL;
+#else
+    const int send_flags = 0;
+#endif
     while (off < len) {
-        ssize_t nw = send(fd, buf + off, len - off, 0);
+        ssize_t nw = send(fd, buf + off, len - off, send_flags);
         if (nw <= 0)
             return -1;
         off += (size_t)nw;
@@ -200,6 +207,7 @@ static void strip_path_query(char *path) {
 }
 
 int main(int argc, char *argv[]) {
+    (void)signal(SIGPIPE, SIG_IGN);
     unsigned short port = 8080;
     if (argc >= 2) {
         char *end = NULL;
@@ -297,7 +305,7 @@ int main(int argc, char *argv[]) {
         }
         req[reqlen] = '\0';
 
-        if (reqlen == 0) {
+        if (reqlen == 0 || strstr(req, "\r\n\r\n") == NULL) {
             shutdown(fd, SHUT_RDWR);
             close(fd);
             continue;

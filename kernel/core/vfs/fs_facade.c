@@ -1,7 +1,8 @@
 #include "fs_facade.h"
+#include <errno.h>
+#include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
-#include <stdio.h>
 
 #ifdef EMSCRIPTEN_SINGLE_THREAD
 #define FM_LOCK(s)   ((void)0)
@@ -21,7 +22,15 @@ static int check_policy_write(const char *path, const char *arg2, void *ctx);
 file_manager_service_t *fm_service_create(fs_provider_t *provider) {
     file_manager_service_t *svc = calloc(1, sizeof(*svc));
     if (!svc) return NULL;
+#ifdef EMSCRIPTEN_SINGLE_THREAD
     FM_MUTEX_INIT(svc);
+#else
+    if (pthread_mutex_init(&svc->undo_mutex, NULL) != 0) {
+        perror("fm_service_create: pthread_mutex_init");
+        free(svc);
+        return NULL;
+    }
+#endif
     svc->provider = provider;
     strncpy(svc->current_user, "user", FS_SESSION_USER_MAX - 1);
     svc->current_user[FS_SESSION_USER_MAX - 1] = '\0';

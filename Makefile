@@ -351,7 +351,9 @@ clean:
 	rm -f tests/test_mem_asm tests/test_alloc tests/test_priority_queue tests/test_drivers tests/test_vm_mem tests/test_replay tests/test_invariants tests/test_userspace_connection tests/test_vm_syscall_bridge tests/test_vm_arch_readiness
 
 # WebAssembly (requires Emscripten on PATH: emcc). Embedded VM enabled; serve wasm/ over HTTP for pthreads.
-WASM_SERVE_CC ?= $(CC)
+# serve_coi runs on the build host; do not use $(CC) when cross-compiling (e.g. ARCH=arm).
+HOSTCC ?= cc
+WASM_SERVE_CC ?= $(HOSTCC)
 WASM_SERVE_PORT ?= 8080
 WASM_SERVE = wasm/serve_coi
 
