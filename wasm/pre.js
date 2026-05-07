@@ -1,7 +1,31 @@
-/* Emscripten --pre-js: default argv for in-page embedded VM; tee stdout/stderr to a DOM node when present. */
-var Module = typeof Module !== 'undefined' ? Module : {};
+/* Emscripten --pre-js: shared Module for MODULARIZE factory; default argv; tee to DOM. */
+var Module = (typeof globalThis.Module !== 'undefined' && globalThis.Module) ? globalThis.Module : {};
+globalThis.Module = Module;
 if (!Module.arguments || Module.arguments.length === 0) {
   Module.arguments = ['-Virtualization', '-y', '-vm'];
+}
+
+function flinstoneWasmAttachOut(el) {
+  function tryAppend() {
+    if (typeof document === 'undefined' || !document.body) return;
+    if (el.parentNode) return;
+    document.body.appendChild(el);
+  }
+  if (typeof document === 'undefined') return;
+  if (document.readyState === 'complete' || document.readyState === 'interactive') {
+    tryAppend();
+    if (!el.parentNode) {
+      document.addEventListener('DOMContentLoaded', function flinstoneOutOnce() {
+        document.removeEventListener('DOMContentLoaded', flinstoneOutOnce);
+        tryAppend();
+      });
+    }
+  } else {
+    document.addEventListener('DOMContentLoaded', function flinstoneOutOnce() {
+      document.removeEventListener('DOMContentLoaded', flinstoneOutOnce);
+      tryAppend();
+    });
+  }
 }
 
 function flinstoneWasmEnsureOut() {
@@ -19,7 +43,7 @@ function flinstoneWasmEnsureOut() {
   el.style.color = '#3fb950';
   el.style.borderRadius = '6px';
   el.style.minHeight = '200px';
-  if (document.body) document.body.appendChild(el);
+  flinstoneWasmAttachOut(el);
   return el;
 }
 

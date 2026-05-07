@@ -7,7 +7,9 @@
 #include "fs_events.h"
 #include "fs_policy.h"
 #include "fs_chain.h"
+#ifndef EMSCRIPTEN_SINGLE_THREAD
 #include <pthread.h>
+#endif
 
 #define FS_UNDO_STACK_MAX 32
 #define FS_SESSION_USER_MAX 32

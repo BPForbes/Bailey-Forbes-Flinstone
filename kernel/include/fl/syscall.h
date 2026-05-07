@@ -43,7 +43,7 @@ typedef enum {
 
 void fl_sys_bootstrap(void);
 void fl_sys_shutdown(void);
-long fl_syscall_dispatch(fl_syscall_no_t no, uintptr_t a0, uintptr_t a1, uintptr_t a2, uintptr_t a3);
+long fl_syscall_dispatch(fl_syscall_no_t no, uint64_t a0, uint64_t a1, uint64_t a2, uint64_t a3);
 
 #ifdef __cplusplus
 }

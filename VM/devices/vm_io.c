@@ -74,36 +74,37 @@ static void write_port_width(uint64_t *slot, uint32_t value, int size) {
 
 static void write_port_high_width(uint64_t *slot, uint32_t value, int size) {
     uint64_t full = *slot;
-    uint32_t hi = merge_port_width(high32(full), value, size);
-    uint64_t low = (uint64_t)low32(full);
-    *slot = low | ((uint64_t)hi << 32);
+    uint32_t hi32 = merge_port_width(high32(full), value, size);
+    uint64_t low32part = (uint64_t)low32(full);
+    *slot = low32part | ((uint64_t)hi32 << 32);
 }
 
 /* Translate guest offset to host pointer; returns 0 if invalid or out of range. */
-static uintptr_t vm_sys_arg_to_host_ptr(vm_mem_t *mem, uintptr_t arg, size_t len) {
+static uintptr_t vm_sys_arg_to_host_ptr(vm_mem_t *mem, uint64_t guest_off, size_t len) {
     if (!mem || !mem->ram || len == 0) {
         return 0;
     }
-    if (arg >= mem->size) {
+    if (guest_off > (uint64_t)mem->size) {
         return 0;
     }
-    if (len > mem->size - (size_t)arg) {
+    size_t arg = (size_t)guest_off;
+    if (len > mem->size - arg) {
         return 0;
     }
-    return (uintptr_t)(mem->ram + (size_t)arg);
+    return (uintptr_t)(mem->ram + arg);
 }
 
-static void vm_translate_sys_args(vm_mem_t *mem, uintptr_t args[4]) {
+static void vm_translate_sys_args(vm_mem_t *mem, uint64_t args[4]) {
     switch ((fl_syscall_no_t)s_sys_no) {
         case FL_SYS_WRITE:
         case FL_SYS_READ:
-            args[0] = vm_sys_arg_to_host_ptr(mem, args[0], (size_t)args[1]);
+            args[0] = (uint64_t)vm_sys_arg_to_host_ptr(mem, args[0], (size_t)args[1]);
             break;
         case FL_SYS_PIPE_READ:
         case FL_SYS_PIPE_WRITE:
         case FL_SYS_MSGQ_SEND:
         case FL_SYS_MSGQ_RECV:
-            args[1] = vm_sys_arg_to_host_ptr(mem, args[1], (size_t)args[2]);
+            args[1] = (uint64_t)vm_sys_arg_to_host_ptr(mem, args[1], (size_t)args[2]);
             break;
         default:
             break;
@@ -302,7 +303,7 @@ void vm_io_out(vm_mem_t *mem, uint32_t port, uint32_t value, int size) {
         return;
     }
     if (port == VM_SYS_PORT_CALL) {
-        uintptr_t args[4] = {
+        uint64_t args[4] = {
             s_sys_args[0], s_sys_args[1], s_sys_args[2], s_sys_args[3]
         };
         vm_translate_sys_args(mem, args);

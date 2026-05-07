@@ -80,10 +80,32 @@ pipe_t *pipe_create(size_t size) {
 #ifdef IPC_KERNELLIKE_SYNC
     p->lock = FL_IPC_LOCK_INIT;
 #else
-    pthread_mutex_init(&p->mu, NULL);
-    pthread_cond_init(&p->can_read, NULL);
-    pthread_cond_init(&p->can_write, NULL);  /* TODO: used in pipe_write when blocking */
-    pthread_cond_init(&p->drain, NULL);
+    if (pthread_mutex_init(&p->mu, NULL) != 0) {
+        free(p->buf);
+        free(p);
+        return NULL;
+    }
+    if (pthread_cond_init(&p->can_read, NULL) != 0) {
+        pthread_mutex_destroy(&p->mu);
+        free(p->buf);
+        free(p);
+        return NULL;
+    }
+    if (pthread_cond_init(&p->can_write, NULL) != 0) {
+        pthread_cond_destroy(&p->can_read);
+        pthread_mutex_destroy(&p->mu);
+        free(p->buf);
+        free(p);
+        return NULL;
+    }
+    if (pthread_cond_init(&p->drain, NULL) != 0) {
+        pthread_cond_destroy(&p->can_write);
+        pthread_cond_destroy(&p->can_read);
+        pthread_mutex_destroy(&p->mu);
+        free(p->buf);
+        free(p);
+        return NULL;
+    }
 #endif
     return p;
 }
@@ -193,28 +215,48 @@ msgq_t *msgq_create(size_t max_messages, size_t message_size) {
 #ifdef IPC_KERNELLIKE_SYNC
     q->lock = FL_IPC_LOCK_INIT;
 #else
-    pthread_mutex_init(&q->mu, NULL);
+    if (pthread_mutex_init(&q->mu, NULL) != 0) {
+        free(q->buf);
+        free(q);
+        return NULL;
+    }
     pthread_condattr_t attr;
     if (pthread_condattr_init(&attr) != 0) {
+        pthread_mutex_destroy(&q->mu);
         free(q->buf);
         free(q);
         return NULL;
     }
     if (pthread_condattr_setclock(&attr, CLOCK_MONOTONIC) != 0) {
         pthread_condattr_destroy(&attr);
+        pthread_mutex_destroy(&q->mu);
         free(q->buf);
         free(q);
         return NULL;
     }
     if (pthread_cond_init(&q->can_read, &attr) != 0) {
         pthread_condattr_destroy(&attr);
+        pthread_mutex_destroy(&q->mu);
         free(q->buf);
         free(q);
         return NULL;
     }
     pthread_condattr_destroy(&attr);
-    pthread_cond_init(&q->can_write, NULL);  /* TODO: used in msgq_send when blocking */
-    pthread_cond_init(&q->drain, NULL);
+    if (pthread_cond_init(&q->can_write, NULL) != 0) {
+        pthread_cond_destroy(&q->can_read);
+        pthread_mutex_destroy(&q->mu);
+        free(q->buf);
+        free(q);
+        return NULL;
+    }
+    if (pthread_cond_init(&q->drain, NULL) != 0) {
+        pthread_cond_destroy(&q->can_write);
+        pthread_cond_destroy(&q->can_read);
+        pthread_mutex_destroy(&q->mu);
+        free(q->buf);
+        free(q);
+        return NULL;
+    }
 #endif
     return q;
 }

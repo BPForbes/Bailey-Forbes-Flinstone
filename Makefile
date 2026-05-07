@@ -4,6 +4,7 @@ ARCH ?= x86_64_gas
 
 # Compiler and flags
 CC = gcc
+EMCC ?= emcc
 AS = as
 CFLAGS = -Wall -Wextra -pthread -I. -Ikernel/include -Ikernel/core/vfs -Ikernel/core/mm -Ikernel/core/sched -Ikernel/core/sys -Iuserland/shell -Ikernel/arch/x86_64 -Ikernel/arch/aarch64
 LDFLAGS = -Wl,-z,noexecstack
@@ -26,7 +27,6 @@ ASMSRCS_ALLOC = arch/arm/gas/alloc_core.s arch/arm/gas/alloc_malloc.s arch/arm/g
 ASM_SRC_DIR = arch/arm/gas
 KERNEL_DRIVERS = kernel/arch/aarch64/drivers
 else ifeq ($(ARCH),wasm)
-EMCC ?= emcc
 CC = $(EMCC)
 AS =
 ASMSRCS_BASE =
@@ -37,12 +37,12 @@ KERNEL_DRIVERS = kernel/arch/x86_64/drivers
 ifeq ($(WASM_PAGES),1)
 LDFLAGS = -sENVIRONMENT=web \
 	-sALLOW_MEMORY_GROWTH -sINITIAL_MEMORY=67108864 \
-	-sEXPORT_ES6=1 \
+	-sEXPORT_ES6=1 -sMODULARIZE=1 \
 	--pre-js wasm/pre.js
 else
 LDFLAGS = -pthread -sUSE_PTHREADS=1 -sPTHREAD_POOL_SIZE=4 -sENVIRONMENT=web,worker \
 	-sALLOW_MEMORY_GROWTH -sINITIAL_MEMORY=67108864 \
-	-sEXPORT_ES6=1 \
+	-sEXPORT_ES6=1 -sMODULARIZE=1 \
 	--pre-js wasm/pre.js
 endif
 else

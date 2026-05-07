@@ -22,6 +22,7 @@
 #include <string.h>
 #include <sys/socket.h>
 #include <sys/stat.h>
+#include <sys/time.h>
 #include <unistd.h>
 
 static const char kCoop[] = "Cross-Origin-Opener-Policy: same-origin\r\n";
@@ -221,12 +222,6 @@ int main(int argc, char *argv[]) {
         }
     }
 
-    char doc_root_canon[PATH_MAX];
-    if (!realpath(doc_root, doc_root_canon)) {
-        perror("realpath doc_root");
-        return 1;
-    }
-
     int srv = socket(AF_INET, SOCK_STREAM, 0);
     if (srv < 0) {
         perror("socket");
@@ -242,7 +237,13 @@ int main(int argc, char *argv[]) {
     memset(&addr, 0, sizeof addr);
     addr.sin_family = AF_INET;
     addr.sin_port = htons(port);
-    addr.sin_addr.s_addr = htonl(INADDR_ANY);
+    {
+        const char *bind_all = getenv("WASM_SERVE_BIND_ALL");
+        if (bind_all && bind_all[0] && strcmp(bind_all, "0") != 0)
+            addr.sin_addr.s_addr = htonl(INADDR_ANY);
+        else
+            addr.sin_addr.s_addr = htonl(INADDR_LOOPBACK);
+    }
     if (bind(srv, (struct sockaddr *)&addr, sizeof(addr)) != 0) {
         perror("bind");
         close(srv);
@@ -254,9 +255,15 @@ int main(int argc, char *argv[]) {
         return 1;
     }
 
-    printf("Serving %s at http://127.0.0.1:%u/ (and on all interfaces; COOP+COEP for "
-           "WASM pthreads)\n",
-           doc_root_canon, (unsigned)port);
+    {
+        const char *bind_all = getenv("WASM_SERVE_BIND_ALL");
+        if (bind_all && bind_all[0] && strcmp(bind_all, "0") != 0)
+            printf("Serving %s at http://127.0.0.1:%u/ (all interfaces; set WASM_SERVE_BIND_ALL=0 for loopback only; COOP+COEP for WASM pthreads)\n",
+                   doc_root, (unsigned)port);
+        else
+            printf("Serving %s at http://127.0.0.1:%u/ (loopback; set WASM_SERVE_BIND_ALL=1 for all interfaces; COOP+COEP for WASM pthreads)\n",
+                   doc_root, (unsigned)port);
+    }
 
     for (;;) {
         struct sockaddr_in cli;
@@ -267,6 +274,10 @@ int main(int argc, char *argv[]) {
             continue;
         }
 
+        struct timeval sock_to = { .tv_sec = 5, .tv_usec = 0 };
+        (void)setsockopt(fd, SOL_SOCKET, SO_RCVTIMEO, &sock_to, sizeof(sock_to));
+        (void)setsockopt(fd, SOL_SOCKET, SO_SNDTIMEO, &sock_to, sizeof(sock_to));
+
         char req[65536];
         size_t reqlen = 0;
         for (;;) {
@@ -275,8 +286,11 @@ int main(int argc, char *argv[]) {
                 break;
             }
             ssize_t n = recv(fd, req + reqlen, sizeof(req) - 1 - reqlen, 0);
-            if (n <= 0)
+            if (n <= 0) {
+                if (n < 0 && errno == EINTR)
+                    continue;
                 break;
+            }
             reqlen += (size_t)n;
             req[reqlen] = '\0';
             if (strstr(req, "\r\n\r\n"))
@@ -350,7 +364,7 @@ int main(int argc, char *argv[]) {
         }
 
         char target[PATH_MAX * 2];
-        int tl = snprintf(target, sizeof target, "%s/%s", doc_root_canon, rel_norm);
+        int tl = snprintf(target, sizeof target, "%s/%s", doc_root, rel_norm);
         if (tl < 0 || (size_t)tl >= sizeof target) {
             static const char bad[] = "HTTP/1.1 403 Forbidden\r\n"
                                       "Content-Length: 0\r\n"
@@ -366,7 +380,7 @@ int main(int argc, char *argv[]) {
 
         struct stat st;
         if (stat(target, &st) == 0 && S_ISDIR(st.st_mode)) {
-            tl = snprintf(target, sizeof target, "%s/%s/index.html", doc_root_canon, rel_norm);
+            tl = snprintf(target, sizeof target, "%s/%s/index.html", doc_root, rel_norm);
             if (tl < 0 || (size_t)tl >= sizeof target) {
                 static const char nf[] = "HTTP/1.1 404 Not Found\r\n"
                                          "Content-Type: text/plain; charset=utf-8\r\n"
@@ -385,7 +399,7 @@ int main(int argc, char *argv[]) {
         }
 
         char resolved[PATH_MAX];
-        if (!realpath(target, resolved) || !path_has_prefix(resolved, doc_root_canon) ||
+        if (!realpath(target, resolved) || !path_has_prefix(resolved, doc_root) ||
             stat(resolved, &st) != 0 || !S_ISREG(st.st_mode)) {
             static const char nf[] = "HTTP/1.1 404 Not Found\r\n"
                                      "Content-Type: text/plain; charset=utf-8\r\n"

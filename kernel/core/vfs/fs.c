@@ -9,9 +9,10 @@
 #include <sys/stat.h>
 #include <dirent.h>
 #include <unistd.h>
+#include <limits.h>
 
 struct fs_rmtree_entry {
-    char path[1024];
+    char path[PATH_MAX];
     int depth;
     int isDir;
 };
@@ -32,17 +33,23 @@ static void fs_rmtree_scan(const char *dir, int depth,
     while ((entry = readdir(dp))) {
         if (!strcmp(entry->d_name, ".") || !strcmp(entry->d_name, ".."))
             continue;
-        char fullPath[1024];
-        snprintf(fullPath, sizeof(fullPath), "%s/%s", dir, entry->d_name);
+        char fullPath[PATH_MAX];
+        int plen = snprintf(fullPath, sizeof(fullPath), "%s/%s", dir, entry->d_name);
+        if (plen < 0 || (size_t)plen >= sizeof(fullPath)) {
+            fprintf(stderr, "remove_directory_recursive: path too long, skipping entry\n");
+            continue;
+        }
         if (*entryCount >= *entryCapacity) {
-            *entryCapacity *= 2;
-            struct fs_rmtree_entry *n = realloc(*entries, sizeof(struct fs_rmtree_entry) * (size_t)*entryCapacity);
-            if (!n) {
+            int newCap = *entryCapacity * 2;
+            struct fs_rmtree_entry *new_entries =
+                realloc(*entries, sizeof(struct fs_rmtree_entry) * (size_t)newCap);
+            if (!new_entries) {
                 perror("realloc");
                 closedir(dp);
                 return;
             }
-            *entries = n;
+            *entries = new_entries;
+            *entryCapacity = newCap;
         }
         strncpy((*entries)[*entryCount].path, fullPath, sizeof((*entries)[*entryCount].path) - 1);
         (*entries)[*entryCount].path[sizeof((*entries)[*entryCount].path) - 1] = '\0';

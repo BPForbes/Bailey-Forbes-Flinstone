@@ -10,7 +10,7 @@ make wasm-pages
 
 Then publish the contents of `wasm/` that are needed for the page:
 
-- `index.html` (loads the module)
+- `index.html` (loads the ES module factory from `BPForbes_Flinstone_Shell.js` and passes `globalThis.Module` from `wasm/pre.js` for argv / print hooks)
 - `BPForbes_Flinstone_Shell.js`
 - `BPForbes_Flinstone_Shell.wasm`
 

@@ -20,8 +20,8 @@
   <h1>Flinstone Shell · WebAssembly</h1>
   <p>Loads the embedded x86 VM in the browser (same as <code>-Virtualization -y -vm</code>). Build with <code>make wasm</code>, then serve this directory with COOP/COEP headers so pthreads work.</p>
   <script type="module">
-    import init from './BPForbes_Flinstone_Shell.js';
-    await init();
+    import createModule from './BPForbes_Flinstone_Shell.js';
+    await createModule(globalThis.Module || {});
   </script>
 </body>
 </html>
