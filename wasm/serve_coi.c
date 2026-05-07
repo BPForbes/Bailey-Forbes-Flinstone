@@ -320,7 +320,7 @@ int main(int argc, char *argv[]) {
 
         char rel_norm[PATH_MAX];
         if (lexical_normalize_rel(raw_path + 1, rel_norm, sizeof rel_norm) != 0 ||
-            rel_norm[0] == '\0' || rel_norm[0] == '/') {
+            rel_norm[0] == '/') {
             static const char bad[] = "HTTP/1.1 403 Forbidden\r\n"
                                       "Content-Length: 0\r\n"
                                       "Connection: close\r\n";
@@ -331,6 +331,22 @@ int main(int argc, char *argv[]) {
             shutdown(fd, SHUT_RDWR);
             close(fd);
             continue;
+        }
+
+        if (rel_norm[0] == '\0') {
+            int rn = snprintf(rel_norm, sizeof rel_norm, "index.html");
+            if (rn < 0 || (size_t)rn >= sizeof rel_norm) {
+                static const char bad[] = "HTTP/1.1 403 Forbidden\r\n"
+                                          "Content-Length: 0\r\n"
+                                          "Connection: close\r\n";
+                char hdr[512];
+                int hlen = snprintf(hdr, sizeof hdr, "%s%s%s\r\n", bad, kCoop, kCoep);
+                if (hlen > 0 && (size_t)hlen < sizeof hdr)
+                    (void)send_all(fd, hdr, (size_t)hlen);
+                shutdown(fd, SHUT_RDWR);
+                close(fd);
+                continue;
+            }
         }
 
         char target[PATH_MAX * 2];
