@@ -17,3 +17,5 @@ Then publish the contents of `wasm/` that are needed for the page:
 No `.worker.js` is produced for this profile.
 
 CI: the workflow `.github/workflows/pages-wasm.yml` runs `make wasm-pages` and deploys via **Actions → Deploy to GitHub Pages** (configure **Settings → Pages → Build and deployment: GitHub Actions**).
+
+If `https://<user>.github.io/<repo>/` shows only the README, Pages is still **Deploy from a branch** (the `.js`/`.wasm` outputs are gitignored). Switch to **GitHub Actions** and run the workflow above. When serving from a branch, open **`wasm/index.html`** (or rely on the repo root **`index.html`** redirect).

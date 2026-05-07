@@ -1,6 +1,6 @@
 # Build single-threaded WASM (no SharedArrayBuffer) and publish to GitHub Pages.
 # Enable: Settings → Pages → Source: GitHub Actions.
-# Site URL: https://<owner>.github.io/<repo>/index.html
+# Site URL after deploy: https://<owner>.github.io/<repo>/ (index.html at artifact root).
 name: Deploy WASM to GitHub Pages
 
 on:
