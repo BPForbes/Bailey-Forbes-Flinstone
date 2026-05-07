@@ -231,13 +231,7 @@ msgq_t *msgq_create(size_t max_messages, size_t message_size) {
         free(q);
         return NULL;
     }
-    /*
-     * can_read uses CLOCK_MONOTONIC (pthread_condattr_setclock) because msgq_receive
-     * uses pthread_cond_timedwait with deadlines from make_abs_timeout (MONOTONIC).
-     * can_write and drain use the default clock (typically REALTIME) with untimed waits only;
-     * only can_read may use timedwait — if you add timed msgq_send, use the same clock attr
-     * or adjust deadlines so cond clocks are not mixed.
-     */
+    /* can_read uses MONOTONIC for msgq_receive timedwait; can_write/drain stay default (untimed). */
     pthread_condattr_t attr;
     if (pthread_condattr_init(&attr) != 0) {
         pthread_mutex_destroy(&q->mu);
