@@ -351,12 +351,12 @@ clean:
 	rm -f tests/test_mem_asm tests/test_alloc tests/test_priority_queue tests/test_drivers tests/test_vm_mem tests/test_replay tests/test_invariants tests/test_userspace_connection tests/test_vm_syscall_bridge tests/test_vm_arch_readiness
 
 # WebAssembly (requires Emscripten on PATH: emcc). Embedded VM enabled; serve wasm/ over HTTP for pthreads.
-WASM_SERVE_CXX ?= g++
+WASM_SERVE_CC ?= $(CC)
 WASM_SERVE_PORT ?= 8080
 WASM_SERVE = wasm/serve_coi
 
-$(WASM_SERVE): wasm/serve_coi.cpp
-	$(WASM_SERVE_CXX) -std=c++17 -O2 -Wall -Wextra -o $@ $<
+$(WASM_SERVE): wasm/serve_coi.c
+	$(WASM_SERVE_CC) -std=c11 -O2 -Wall -Wextra -o $@ $<
 
 .PHONY: wasm wasm-pages wasm-serve-tool wasm-serve
 wasm-serve-tool: $(WASM_SERVE)
