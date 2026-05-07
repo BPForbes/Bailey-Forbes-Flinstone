@@ -17,12 +17,35 @@ struct fs_rmtree_entry {
     int isDir;
 };
 
+/**
+ * Compare two fs_rmtree_entry records by recursion depth for descending order.
+ *
+ * @param a Pointer to the first `struct fs_rmtree_entry`.
+ * @param b Pointer to the second `struct fs_rmtree_entry`.
+ * @returns A value greater than `0` if `b` has a greater depth than `a` (so `b` should sort before `a`),
+ *          `0` if both depths are equal,
+ *          a value less than `0` if `a` has a greater depth than `b`.
+ */
 static int fs_rmtree_entry_cmp(const void *a, const void *b) {
     const struct fs_rmtree_entry *ea = (const struct fs_rmtree_entry *)a;
     const struct fs_rmtree_entry *eb = (const struct fs_rmtree_entry *)b;
     return eb->depth - ea->depth;
 }
 
+/**
+ * Recursively scans a directory tree and appends discovered entries to a dynamic array.
+ *
+ * This function walks `dir`, records each entry's full path, recursion depth, and whether it
+ * is a directory into the provided `entries` array. The array may be grown via `realloc`
+ * when capacity is reached. If `opendir` fails the scan for `dir` is skipped; on `realloc`
+ * failure the scan is aborted and an error is reported.
+ *
+ * @param dir Path of the directory to scan.
+ * @param depth Current recursion depth for entries added from this invocation (use 0 for root).
+ * @param entries Pointer to the array of `fs_rmtree_entry` records; may be reallocated and updated.
+ * @param entryCount Pointer to the number of entries currently stored; incremented as entries are appended.
+ * @param entryCapacity Pointer to the current capacity of the `entries` array; updated if the array grows.
+ */
 static void fs_rmtree_scan(const char *dir, int depth,
                            struct fs_rmtree_entry **entries,
                            int *entryCount, int *entryCapacity) {
@@ -67,6 +90,14 @@ static void fs_rmtree_scan(const char *dir, int depth,
     closedir(dp);
 }
 
+/**
+ * Prints the names of regular files contained in the specified directory to stdout.
+ *
+ * On failure to open the directory, prints an error message describing the failure
+ * (using strerror(errno)) and returns without printing entries.
+ *
+ * @param dir Path to the directory to list (null-terminated string).
+ */
 void list_files(const char *dir) {
     DIR *dp = opendir(dir);
     if (!dp) {
@@ -89,6 +120,13 @@ void create_directory(const char *d) {
         perror("mkdir");
 }
 
+/**
+ * Print the names of subdirectories in the current working directory to stdout.
+ *
+ * The listing excludes the entries "." and "..". If the current directory cannot
+ * be opened the function prints an error message to stderr via perror and
+ * returns without producing a listing.
+ */
 void list_directories(void) {
     DIR *dp = opendir(".");
     if (!dp) {
@@ -105,6 +143,17 @@ void list_directories(void) {
     closedir(dp);
 }
 
+/**
+ * Remove a directory tree at the given path, deleting files first and directories afterwards.
+ *
+ * Scans the directory tree, sorts entries by depth (deepest first), removes regular files, then
+ * removes directories, and finally removes the top-level directory. Partial deletion may occur
+ * if memory allocation or scanning fails; individual remove/rmdir failures are reported via
+ * perror but do not halt the cleanup loop.
+ *
+ * @param d Path to the directory to remove.
+ * @returns 0 on successful removal of the directory and its contents, -1 on error.
+ */
 int remove_directory_recursive(const char *d) {
     struct fs_rmtree_entry *entries = NULL;
     int entryCount = 0, entryCapacity = 100;

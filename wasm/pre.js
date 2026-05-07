@@ -5,6 +5,16 @@ if (!Module.arguments || Module.arguments.length === 0) {
   Module.arguments = ['-Virtualization', '-y', '-vm'];
 }
 
+/**
+ * Ensures the given element is appended to document.body once the document is available.
+ *
+ * If document is undefined this function does nothing. If the element is already in the DOM it is not re-appended.
+ * If the document is already interactive or complete it attempts to append immediately and, if that fails, registers
+ * a one-time DOMContentLoaded listener to retry. If the document is not yet ready it registers a one-time
+ * DOMContentLoaded listener to append when ready.
+ *
+ * @param {HTMLElement} el - The element to append to document.body.
+ */
 function flinstoneWasmAttachOut(el) {
   function tryAppend() {
     if (typeof document === 'undefined' || !document.body) return;
@@ -28,6 +38,12 @@ function flinstoneWasmAttachOut(el) {
   }
 }
 
+/**
+ * Ensure a single `<pre id="flinstone-wasm-out">` element exists for capturing WASM stdout/stderr and returns it.
+ *
+ * Creates and schedules insertion of a styled, accessible `<pre>` element when `document` is available; if an element with the same id already exists, returns it unchanged.
+ * @returns {HTMLElement|null} The existing or newly created `<pre id="flinstone-wasm-out">` element, or `null` when `document` is not available.
+ */
 function flinstoneWasmEnsureOut() {
   if (typeof document === 'undefined') return null;
   var el = document.getElementById('flinstone-wasm-out');

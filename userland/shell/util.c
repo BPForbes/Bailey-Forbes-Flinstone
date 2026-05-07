@@ -56,6 +56,17 @@ void resolve_path(const char *path, char *out, size_t outsize) {
     else out[len] = '\0';
 }
 
+/**
+ * Trim leading and trailing ASCII whitespace from a NUL-terminated string in-place.
+ *
+ * Modifies the input buffer by advancing past leading whitespace and replacing the
+ * first trailing-whitespace character with NUL to remove trailing whitespace.
+ *
+ * @param str Pointer to the NUL-terminated string to trim; may be modified.
+ * @returns Pointer to the first non-whitespace character within `str`, or `NULL`
+ *          if `str` is `NULL`. If the trimmed string becomes empty, returns a
+ *          pointer to the NUL terminator within the original buffer.
+ */
 char *trim_whitespace(char *str) {
     if (!str)
         return NULL;
@@ -70,6 +81,15 @@ char *trim_whitespace(char *str) {
     return str;
 }
 
+/**
+ * Append a command string to the history file.
+ *
+ * Writes `cmd` followed by a newline to HISTORY_FILE while holding
+ * the `history_mutex` to serialize concurrent appends. If the file
+ * cannot be opened, no data is written.
+ *
+ * @param cmd Null-terminated command string to append; must not be NULL.
+ */
 void append_history(const char *cmd) {
     FL_HISTORY_LOCK(history_mutex);
     FILE *fp = fopen(HISTORY_FILE, "a");
@@ -80,6 +100,18 @@ void append_history(const char *cmd) {
     FL_HISTORY_UNLOCK(history_mutex);
 }
 
+/**
+ * Retrieve a specific line from the history file by its 1-based index.
+ *
+ * Reads HISTORY_FILE while holding the history mutex and returns a heap-allocated
+ * copy of the requested line with any trailing newline removed.
+ *
+ * @param index 1-based line number to retrieve (1 = first line).
+ * @returns Pointer to a newly allocated NUL-terminated string containing the
+ *          requested history line, or `NULL` if the file cannot be opened or
+ *          if no line exists at that index. The caller is responsible for
+ *          freeing the returned pointer with `free()`.
+ */
 char *read_history_line(int index) {
     FL_HISTORY_LOCK(history_mutex);
     FILE *fp = fopen(HISTORY_FILE, "r");

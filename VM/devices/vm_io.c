@@ -61,17 +61,50 @@ static uint32_t read_port_width(uint32_t value, int size) {
     return value;
 }
 
+/**
+ * Merge a value into the low-width portion of a 32-bit word while preserving the remaining bits.
+ *
+ * Overwrites the low 8/16/32 bits of `old_value` with the corresponding low bits from `value`
+ * according to `size`: `size == 1` writes the low 8 bits, `size == 2` writes the low 16 bits,
+ * any other `size` writes all 32 bits.
+ *
+ * @param old_value The original 32-bit word whose high bits should be preserved.
+ * @param value The value supplying low-order bytes to merge into `old_value`.
+ * @param size Number of bytes to write: 1 for 8-bit, 2 for 16-bit, any other value for 32-bit.
+ * @returns The merged 32-bit result.
+ */
 static uint32_t merge_port_width(uint32_t old_value, uint32_t value, int size) {
     uint32_t mask = (size == 1) ? 0xFFu : (size == 2) ? 0xFFFFu : 0xFFFFFFFFu;
     return (old_value & ~mask) | (value & mask);
 }
 
-/* Syscall bridge uses explicit 64-bit slots (guest may expose args as low/high port pairs). */
+/**
+ * Write a low-width value into the low 32-bit half of a 64-bit syscall slot while preserving the high 32-bit half.
+ *
+ * Merges `value` into the slot's low 32 bits using `size` to determine the merge width:
+ * - `size == 1`: merge low 8 bits
+ * - `size == 2`: merge low 16 bits
+ * - otherwise: merge full 32 bits
+ *
+ * @param slot Pointer to the 64-bit slot to update.
+ * @param value Source value whose low bits will be merged into the slot's low half.
+ * @param size Number of bytes to write into the low half (1, 2, or 4).
+ */
 static void write_port_width(uint64_t *slot, uint32_t value, int size) {
     uint32_t low = merge_port_width(low32(*slot), value, size);
     *slot = ((uint64_t)high32(*slot) << 32) | (uint64_t)low;
 }
 
+/**
+ * Write a low-width piece into the high 32-bit half of a 64-bit slot while preserving the low 32-bit half.
+ *
+ * The specified `value` is merged into the high 32-bit half according to `size` (1 = 8-bit, 2 = 16-bit, otherwise 32-bit),
+ * leaving the existing low 32 bits of `*slot` unchanged.
+ *
+ * @param slot Pointer to the 64-bit slot to update.
+ * @param value Source value whose low-width portion will be written into the high half.
+ * @param size Number of bytes to write (1, 2, or 4); values other than 1 or 2 are treated as 4.
+ */
 static void write_port_high_width(uint64_t *slot, uint32_t value, int size) {
     uint64_t full = *slot;
     uint32_t hi32 = merge_port_width(high32(full), value, size);
@@ -79,7 +112,16 @@ static void write_port_high_width(uint64_t *slot, uint32_t value, int size) {
     *slot = low32part | ((uint64_t)hi32 << 32);
 }
 
-/* Translate guest offset to host pointer; returns 0 if invalid or out of range. */
+/**
+ * Translate a guest memory offset into a host pointer if the range is valid.
+ *
+ * @param mem VM memory descriptor containing `ram` and `size`.
+ * @param guest_off Guest-space byte offset to translate.
+ * @param len Number of bytes required starting at `guest_off`.
+ * @returns A host pointer (as `uintptr_t`) to `mem->ram + guest_off` when the range is valid;
+ *          returns `0` if `mem` or `mem->ram` is NULL, `len` is zero, `guest_off` is beyond
+ *          `mem->size`, or `guest_off + len` would overflow or exceed `mem->size`.
+ */
 static uintptr_t vm_sys_arg_to_host_ptr(vm_mem_t *mem, uint64_t guest_off, size_t len) {
     if (!mem || !mem->ram || len == 0) {
         return 0;
@@ -94,6 +136,25 @@ static uintptr_t vm_sys_arg_to_host_ptr(vm_mem_t *mem, uint64_t guest_off, size_
     return (uintptr_t)(mem->ram + arg);
 }
 
+/**
+ * Translate syscall argument slots that refer to guest memory into host pointers.
+ *
+ * For certain syscalls this converts a guest offset/length pair into a host
+ * pointer by validating and resolving the guest memory location; the resolved
+ * host pointer is written back into the corresponding entry of `args`.
+ *
+ * Translations performed:
+ * - FL_SYS_WRITE, FL_SYS_READ: replace args[0] with a host pointer for the
+ *   guest buffer at offset args[0] with length (size_t)args[1].
+ * - FL_SYS_PIPE_READ, FL_SYS_PIPE_WRITE, FL_SYS_MSGQ_SEND, FL_SYS_MSGQ_RECV:
+ *   replace args[1] with a host pointer for the guest buffer at offset args[1]
+ *   with length (size_t)args[2].
+ *
+ * Other syscall numbers leave `args` unchanged. Modifies `args` in-place.
+ *
+ * @param mem Guest memory context used to validate and resolve guest offsets.
+ * @param args Array of four syscall argument slots to be potentially translated.
+ */
 static void vm_translate_sys_args(vm_mem_t *mem, uint64_t args[4]) {
     switch ((fl_syscall_no_t)s_sys_no) {
         case FL_SYS_WRITE:
@@ -288,6 +349,19 @@ uint32_t vm_io_in(vm_mem_t *mem, uint32_t port, int size) {
     return v & 0xFFFFFFFFu;
 }
 
+/**
+ * Handle a guest I/O port write and route it to the appropriate emulated device or control.
+ *
+ * Processes writes to PCI configuration (address/data/reset), the syscall bridge (number,
+ * argument low/high halves, and dispatch), IDE controller registers (LBA bytes and sector data),
+ * serial ports, PIT mode, and PIC commands; ignored or masked writes are safely dropped.
+ *
+ * @param mem Memory context used to translate guest pointers before dispatching syscalls.
+ * @param port The I/O port number being written.
+ * @param value The value written to the port; low bytes are used according to `size`.
+ * @param size Width of the write in bytes (1, 2, or 4); controls how the value is merged into
+ *             32/64-bit syscall slots and device registers.
+ */
 void vm_io_out(vm_mem_t *mem, uint32_t port, uint32_t value, int size) {
     if (port == PCI_CFG_ADDR) {
         s_pci_addr = value;

@@ -131,7 +131,12 @@ static int parse_vm_args(int argc, char *argv[]) {
     return out;
 }
 
-/* Spawn popup terminal running shell in VM sandbox. Returns 0 on success, -1 if no terminal. */
+/**
+ * Spawns a graphical terminal that runs the specified executable with the working directory set to the VM sandbox.
+ *
+ * @param exe_path Path to the executable to run inside the VM sandbox.
+ * @returns `0` on success, `-1` if no suitable terminal could be launched or when unsupported (e.g., WebAssembly). 
+ */
 static int vm_spawn_popup(const char *exe_path) {
 #ifdef __EMSCRIPTEN__
     (void)exe_path;
@@ -158,6 +163,14 @@ static int vm_spawn_popup(const char *exe_path) {
 #endif
 }
 
+/**
+ * Ensure the VM root path is set from the process current working directory when VM mode requires it.
+ *
+ * If VM mode is disabled or `g_vm_root` is already populated, the function returns immediately.
+ * Otherwise it initializes `g_vm_root` with the current working directory.
+ *
+ * @return 0 on success or when no initialization is needed, -1 if obtaining the current working directory fails.
+ */
 static int vm_configure_root_from_cwd(void) {
     if (!g_vm_mode || g_vm_root[0])
         return 0;
@@ -196,6 +209,19 @@ static void vm_warn_layer_config(void) {
     (void)warned;
 }
 
+/**
+ * Program entry point that initializes runtime, configures VM sandboxing, processes batch commands,
+ * optionally boots an embedded VM, and runs the interactive shell.
+ *
+ * Initializes subsystems (file/service/path drivers), sets up the worker thread pool (unless built
+ * for single-threaded batch), confines host I/O when VM mode is enabled, handles special fast-path
+ * commands and createdisk shortcuts, submits batch-mode commands, creates a default disk file if
+ * necessary, and performs orderly shutdown of threads and subsystems.
+ *
+ * @param argc Number of command-line arguments.
+ * @param argv Command-line argument vector.
+ * @returns 0 on normal termination; non-zero if the process exits due to an error during initialization or VM setup.
+ */
 int main(int argc, char *argv[]) {
     /* Seed the random number generator */
     srand((unsigned) time(NULL));

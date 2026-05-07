@@ -51,6 +51,17 @@ static const struct mime_entry kMime[] = {
     {".woff2", "font/woff2"},
 };
 
+/**
+ * Map a filename or URL path to the corresponding MIME type based on its file extension.
+ *
+ * Examines the final `.`-extension of `path` case-insensitively and returns the matching
+ * MIME type string from the server's internal table. If `path` has no extension or the
+ * extension is not recognized, returns "application/octet-stream".
+ *
+ * @param path Path or filename whose extension will be inspected.
+ * @returns The MIME type string for the detected extension, or "application/octet-stream"
+ *          if no known extension is found.
+ */
 static const char *mime_type_for_path(const char *path) {
     const char *dot = strrchr(path, '.');
     if (!dot)
@@ -73,7 +84,22 @@ static const char *mime_type_for_path(const char *path) {
 #define MAX_SEG 128
 #define SEG_LEN 256
 
-/* Normalize relative path (no leading slash): drop ".", collapse ".." vs prior segment. */
+/**
+ * Normalize a relative URL path by collapsing `.` and `..` segments into a safe, canonical form.
+ *
+ * Produces a normalized, relative path (no leading slash) written into `out`. The function:
+ * - removes empty segments and `.` segments,
+ * - resolves `..` by removing the preceding non-`..` segment when possible,
+ * - preserves leading `..` segments when there is no preceding segment to remove,
+ * - collapses repeated `/` separators.
+ *
+ * If the normalized result is empty, an empty string is written to `out`.
+ *
+ * @param in Input relative path (must not begin with `/`).
+ * @param out Buffer where the normalized path is written.
+ * @param outsz Size of `out` in bytes; must be large enough to hold the result plus a NUL.
+ * @return `0` on success; `-1` on failure (segment count or length limits exceeded, or `out` is too small).
+ */
 static int lexical_normalize_rel(const char *in, char *out, size_t outsz) {
     char segs[MAX_SEG][SEG_LEN];
     int n = 0;
@@ -137,6 +163,13 @@ static int lexical_normalize_rel(const char *in, char *out, size_t outsz) {
     return 0;
 }
 
+/**
+ * Check whether `path` begins with `prefix` and is either equal to it or has a '/' immediately after.
+ *
+ * @param path Null-terminated filesystem path to test.
+ * @param prefix Null-terminated prefix to check against.
+ * @returns `true` if `path` starts with `prefix` and either ends there or has a '/' following the prefix, `false` otherwise.
+ */
 static bool path_has_prefix(const char *path, const char *prefix) {
     size_t lp = strlen(prefix);
     if (strncmp(path, prefix, lp) != 0)
@@ -144,6 +177,14 @@ static bool path_has_prefix(const char *path, const char *prefix) {
     return path[lp] == '\0' || path[lp] == '/';
 }
 
+/**
+ * Send the entire buffer to a socket file descriptor, retrying until all bytes are written.
+ *
+ * @param fd Socket file descriptor to write to.
+ * @param buf Pointer to the buffer containing data to send.
+ * @param len Number of bytes to send from `buf`.
+ * @returns 0 on success, -1 if a send error occurs or the connection is closed. 
+ */
 static int send_all(int fd, const char *buf, size_t len) {
     size_t off = 0;
     while (off < len) {
@@ -155,6 +196,22 @@ static int send_all(int fd, const char *buf, size_t len) {
     return 0;
 }
 
+/**
+ * Read an entire file into a heap-allocated buffer.
+ *
+ * On success allocates a buffer large enough to hold the file contents plus a
+ * terminating NUL, reads the full file into that buffer, sets `*out_buf` to
+ * the allocation and `*out_len` to the file size.
+ *
+ * @param path Path to the file to read.
+ * @param out_buf Pointer that will be set to the newly allocated buffer on
+ *                success; caller is responsible for freeing it. The buffer is
+ *                NUL-terminated but may contain NUL bytes within for binary
+ *                files.
+ * @param out_len Pointer that will be set to the number of bytes read (file
+ *                size) on success.
+ * @returns 0 on success, -1 on any failure (open/seek/alloc/read). On failure
+ *          `*out_buf` and `*out_len` are not modified. */
 static int read_file_binary(const char *path, char **out_buf, size_t *out_len) {
     FILE *fp = fopen(path, "rb");
     if (!fp)
@@ -189,12 +246,36 @@ static int read_file_binary(const char *path, char **out_buf, size_t *out_len) {
     return 0;
 }
 
+/**
+ * Truncate a URL path in-place at the first query or fragment delimiter.
+ *
+ * Finds the first occurrence of '?' or '#' in `path` and replaces it with `\0`,
+ * leaving `path` unchanged if no such delimiter is present.
+ * @param path Null-terminated string containing the path; modified in-place.
+ */
 static void strip_path_query(char *path) {
     char *q = strpbrk(path, "?#");
     if (q)
         *q = '\0';
 }
 
+/**
+ * Start a minimal single-process HTTP/1.1 server that serves static files from the
+ * directory containing the running binary and includes COOP/COEP headers to
+ * enable SharedArrayBuffer usage for local WASM pthread builds.
+ *
+ * The server accepts an optional command-line port (argv[1]); if omitted the
+ * default port 8080 is used. When the environment variable WASM_SERVE_BIND_ALL
+ * is set to a non-"0" value the server binds all interfaces, otherwise it
+ * binds only loopback. Only `GET` and `HEAD` requests are served; requests
+ * are normalized and sandboxed to the document root. Responses include
+ * Cross-Origin-Opener-Policy and Cross-Origin-Embedder-Policy headers.
+ *
+ * @param argc Number of command-line arguments.
+ * @param argv Command-line arguments; argv[1] may contain the TCP port to listen on.
+ * @returns `1` on startup or configuration errors (invalid port, path or socket setup failures);
+ *          on successful startup the function runs the server loop and does not return under normal operation.
+ */
 int main(int argc, char *argv[]) {
     unsigned short port = 8080;
     if (argc >= 2) {

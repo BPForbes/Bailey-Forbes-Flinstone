@@ -28,10 +28,15 @@ static int jail_blocked_path(const char *op, const char *input, const char *reso
     return 1;
 }
 
-/* 
- * execute_command_str:
- *   Parses and executes the command provided in 'line'.
- *   Returns 0 on success; otherwise a nonzero value.
+/**
+ * Parse and execute a single shell command line.
+ *
+ * Processes built-in commands (e.g., cd, exit, history, file and disk operations)
+ * and falls back to executing external programs when the command is not recognized.
+ *
+ * @param line Command line to execute; may be NULL or empty (no-op).
+ * @returns `0` on success, or a nonzero status indicating an error or the exit
+ *          status of an executed external command.
  */
 int execute_command_str(const char *line) {
     if (!line || !*line)
