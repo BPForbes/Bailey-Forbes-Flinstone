@@ -314,7 +314,7 @@ void vm_io_out(vm_mem_t *mem, uint32_t port, uint32_t value, int size) {
             s_sys_args[0], s_sys_args[1], s_sys_args[2], s_sys_args[3]
         };
         vm_translate_sys_args(mem, args);
-        long ret = fl_syscall_dispatch((fl_syscall_no_t)s_sys_no,
+        long ret = fl_syscall_dispatch(fl_syscall_invoke((fl_syscall_no_t)s_sys_no),
                                        args[0], args[1], args[2], args[3]);
         s_sys_ret = ret;
         return;
