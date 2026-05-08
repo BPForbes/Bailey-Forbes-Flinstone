@@ -466,7 +466,11 @@ int main(int argc, char *argv[]) {
         }
     }
     
-    if (isatty(STDIN_FILENO) && strcmp(current_disk_file, "drive.txt") == 0) {
+    if (
+#ifndef __EMSCRIPTEN__
+        isatty(STDIN_FILENO) &&
+#endif
+        strcmp(current_disk_file, "drive.txt") == 0) {
         FILE *testfp = fopen(current_disk_file, "r");
         if (!testfp) {
             printf("No default disk file '%s'. Creating fresh with 32 clusters of %d bytes each.\n",
@@ -496,10 +500,14 @@ int main(int argc, char *argv[]) {
         }
     }
     
+#ifdef __EMSCRIPTEN__
+    interactive_shell();
+#else
     if (!isatty(STDIN_FILENO))
         exit(0);
     else
         interactive_shell();
+#endif
     
 #ifndef BATCH_SINGLE_THREAD
     pthread_mutex_lock(&g_pool.mutex);
