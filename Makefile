@@ -13,6 +13,7 @@ ASFLAGS =
 ifeq ($(ARCH),x86_64_nasm)
 AS = nasm
 ASFLAGS = -f elf64
+CFLAGS += -DDISK_HOST_USE_LIBC_PREADV=1
 ASMSRCS_BASE = arch/x86_64/nasm/mem_asm.asm arch/x86_64/nasm/port_io.asm
 ASMSRCS_ALLOC = arch/x86_64/nasm/alloc_core.asm arch/x86_64/nasm/alloc_malloc.asm arch/x86_64/nasm/alloc_free.asm
 ASM_SRC_DIR = arch/x86_64/nasm
@@ -20,14 +21,14 @@ KERNEL_DRIVERS = kernel/arch/x86_64/drivers
 else ifeq ($(ARCH),arm)
 CC = aarch64-linux-gnu-gcc
 AS = aarch64-linux-gnu-as
-ASMSRCS_BASE = arch/arm/gas/mem_asm.s arch/arm/gas/port_io.s kernel/arch/aarch64/boot/spinlock.s kernel/arch/aarch64/drivers/ramdisk.s \
+ASMSRCS_BASE = arch/arm/gas/mem_asm.s arch/arm/gas/port_io.s arch/arm/gas/disk_host_io.s kernel/arch/aarch64/boot/spinlock.s kernel/arch/aarch64/drivers/ramdisk.s \
                kernel/arch/aarch64/boot/vectors.s
 ASMSRCS_ALLOC = arch/arm/gas/alloc_core.s arch/arm/gas/alloc_malloc.s arch/arm/gas/alloc_free.s
 ASM_SRC_DIR = arch/arm/gas
 KERNEL_DRIVERS = kernel/arch/aarch64/drivers
 else
 # x86_64_gas (default)
-ASMSRCS_BASE = arch/x86_64/gas/mem_asm.s arch/x86_64/gas/port_io.s kernel/arch/x86_64/boot/spinlock.s kernel/arch/x86_64/drivers/ata_pio.s \
+ASMSRCS_BASE = arch/x86_64/gas/mem_asm.s arch/x86_64/gas/port_io.s arch/x86_64/gas/disk_host_io.s kernel/arch/x86_64/boot/spinlock.s kernel/arch/x86_64/drivers/ata_pio.s \
                kernel/arch/x86_64/boot/gdt.s kernel/arch/x86_64/boot/idt.s
 ASMSRCS_ALLOC = arch/x86_64/gas/alloc/alloc_core.s arch/x86_64/gas/alloc/alloc_malloc.s arch/x86_64/gas/alloc/alloc_free.s
 ASM_SRC_DIR = arch/x86_64/gas
@@ -59,6 +60,7 @@ HAL_SRCS += kernel/arch/aarch64/hal/arm_plat.c kernel/arch/aarch64/hal/arm_uart.
             kernel/arch/aarch64/boot/exc_dispatch.c
 endif
 CORE_SRCS = kernel/core/vfs/disk.c kernel/core/vfs/fat32_host.c kernel/core/vfs/path_log.c kernel/core/vfs/cluster.c kernel/core/vfs/fs.c \
+            disk_host_io.c \
             kernel/core/sched/threadpool.c priority_queue.c kernel/core/vfs/fs_jail.c kernel/core/vfs/fs_provider.c kernel/core/vfs/fs_command.c \
             kernel/core/vfs/fs_events.c kernel/core/vfs/fs_policy.c kernel/core/vfs/fs_chain.c kernel/core/vfs/fs_facade.c \
             kernel/core/vfs/fs_service_glue.c kernel/core/mm/mem_domain.c kernel/core/mm/kmalloc.c kernel/core/mm/pmm.c \
@@ -168,6 +170,7 @@ $(filter userland/shell/%.o userland/command/%.o,$(OBJS)): $(VERSION_DEF)
 TEST_SRCS = BPForbes_Flinstone_Tests.c userland/shell/common.c userland/shell/util.c userland/shell/terminal.c \
             $(COMMAND_SRCS) \
             kernel/core/vfs/disk.c kernel/core/vfs/fat32_host.c kernel/core/vfs/path_log.c kernel/core/vfs/cluster.c kernel/core/vfs/fs.c \
+            disk_host_io.c \
             kernel/core/sched/threadpool.c priority_queue.c kernel/core/vfs/fs_jail.c kernel/core/vfs/fs_provider.c kernel/core/vfs/fs_command.c \
             kernel/core/vfs/fs_events.c kernel/core/vfs/fs_policy.c kernel/core/vfs/fs_chain.c kernel/core/vfs/fs_facade.c \
             kernel/core/vfs/fs_service_glue.c kernel/core/mm/mem_domain.c kernel/core/mm/kmalloc.c kernel/core/mm/pmm.c \
@@ -183,7 +186,8 @@ userland/shell/interpreter_unit.o: userland/shell/interpreter.c
 	$(CC) $(CFLAGS) -DUNIT_TEST -c $< -o $@
 MEM_ASM_OBJ = $(patsubst %.s,%.o,$(patsubst %.asm,%.o,$(firstword $(ASMSRCS_BASE))))
 PORT_IO_OBJ = $(patsubst %.s,%.o,$(patsubst %.asm,%.o,$(word 2,$(ASMSRCS_BASE))))
-TEST_ASMOBJS = $(MEM_ASM_OBJ)
+DISK_HOST_ASM_OBJ = $(patsubst %.s,%.o,$(filter %/disk_host_io.s,$(ASMSRCS_BASE)))
+TEST_ASMOBJS = $(MEM_ASM_OBJ) $(PORT_IO_OBJ) $(DISK_HOST_ASM_OBJ)
 TEST_TARGET = BPForbes_Flinstone_Tests
 
 DEPS_RPATH = -Wl,-rpath='$$ORIGIN/deps/install/lib'
@@ -256,13 +260,13 @@ ifeq ($(ARCH),arm)
 TEST_DRIVER_HAL_OBJS += kernel/arch/aarch64/hal/arm_plat.o kernel/arch/aarch64/hal/arm_uart.o \
 	kernel/arch/aarch64/hal/arm_timer.o kernel/arch/aarch64/hal/arm_gic.o
 endif
-test_drivers: userland/shell/common.o userland/shell/util.o kernel/core/vfs/disk.o kernel/core/vfs/fat32_host.o disk_asm.o kernel/core/mm/mem_domain.o kernel/core/mm/kmalloc.o $(MEM_ASM_OBJ) $(PORT_IO_OBJ) \
+test_drivers: userland/shell/common.o userland/shell/util.o kernel/core/vfs/disk.o kernel/core/vfs/fat32_host.o disk_host_io.o disk_asm.o kernel/core/mm/mem_domain.o kernel/core/mm/kmalloc.o $(MEM_ASM_OBJ) $(PORT_IO_OBJ) $(DISK_HOST_ASM_OBJ) \
 	  kernel/drivers/bus.o kernel/drivers/driver_model.o \
 	  kernel/drivers/block/block_driver.o kernel/drivers/block/block_transport_host.o \
 	  kernel/drivers/keyboard_driver.o kernel/drivers/display_driver.o kernel/drivers/timer_driver.o kernel/drivers/pic_driver.o kernel/drivers/drivers.o \
 	  $(KERNEL_DRIVERS)/pci.o $(TEST_DRIVER_HAL_OBJS)
 	$(CC) $(CFLAGS) $(TEST_SANITIZE) -I. -Ikernel -Ikernel/include -Ikernel/drivers -Iuserland/shell -I$(ASM_SRC_DIR) -I$(KERNEL_DRIVERS) -Ikernel/arch/aarch64 -o tests/test_drivers tests/test_drivers.c \
-	  userland/shell/common.o userland/shell/util.o kernel/core/vfs/disk.o kernel/core/vfs/fat32_host.o disk_asm.o kernel/core/mm/mem_domain.o kernel/core/mm/kmalloc.o $(MEM_ASM_OBJ) $(PORT_IO_OBJ) \
+	  userland/shell/common.o userland/shell/util.o kernel/core/vfs/disk.o kernel/core/vfs/fat32_host.o disk_host_io.o disk_asm.o kernel/core/mm/mem_domain.o kernel/core/mm/kmalloc.o $(MEM_ASM_OBJ) $(PORT_IO_OBJ) $(DISK_HOST_ASM_OBJ) \
 	  kernel/drivers/bus.o kernel/drivers/driver_model.o \
 	  kernel/drivers/block/block_driver.o kernel/drivers/block/block_transport_host.o \
 	  kernel/drivers/keyboard_driver.o kernel/drivers/display_driver.o kernel/drivers/timer_driver.o kernel/drivers/pic_driver.o kernel/drivers/drivers.o \

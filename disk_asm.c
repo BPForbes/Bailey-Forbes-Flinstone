@@ -74,10 +74,11 @@ int disk_asm_zero_cluster(int c)                          { (void)c; return -1; 
 
 #else /* HOST mode */
 /* ------------------------------------------------------------------ */
-/* Host path: FAT32 .img (FLINT.DAT) or legacy hex .txt               */
+/* Host path: FAT32 image (FLINT.DAT) or legacy hex lines (any filename)       */
 /* ------------------------------------------------------------------ */
 #include "fat32_host.h"
 #include "util.h"
+#include "disk_host_asm.h"
 #include <fcntl.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -95,7 +96,7 @@ int disk_asm_read_cluster(int clu_index, unsigned char *buf) {
         int fd = open(current_disk_file, O_RDONLY);
         if (fd < 0)
             return -1;
-        ssize_t n = pread(fd, buf, (size_t)g_cluster_size, (off_t)off);
+        ssize_t n = disk_host_pread_vol(fd, buf, (size_t)g_cluster_size, (off_t)off);
         close(fd);
         return (n == (ssize_t)g_cluster_size) ? 0 : -1;
     }
@@ -155,7 +156,7 @@ int disk_asm_write_cluster(int clu_index, const unsigned char *buf) {
         int fd = open(current_disk_file, O_RDWR);
         if (fd < 0)
             return -1;
-        ssize_t w = pwrite(fd, buf, (size_t)g_cluster_size, (off_t)off);
+        ssize_t w = disk_host_pwrite_vol(fd, buf, (size_t)g_cluster_size, (off_t)off);
         fsync(fd);
         close(fd);
         return (w == (ssize_t)g_cluster_size) ? 0 : -1;

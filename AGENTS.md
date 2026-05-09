@@ -14,6 +14,7 @@ Notes:
 - `libsdl2-dev` and `pkg-config` are required for `make vm-sdl` when not using `deps/install`.
 - `libcunit1-dev` is required for the CUnit test binary.
 - `curl`, `cmake`, `autoconf`, `automake`, `libtool`, `bzip2`, and `tar` are required by `make deps`, `make deps-sdl2`, and `make deps-cunit`.
+- Optional (not required to compile or run the shell): `dosfstools` (`dosfsck`, `mkfs.fat`) helps validate FAT32 disk images the project creates; it is not linked into the binary. See `docs/dependencies.md` for a consolidated list of system packages versus `make deps`.
 
 ## Build targets
 

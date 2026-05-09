@@ -23,6 +23,9 @@ extern Fat32HostVol g_fat32_host_vol;
 
 void fat32_host_invalidate(void);
 
+/* Return 1 if sec512 is a plausible FAT32 boot sector (FLINT volumes). */
+int fat32_host_probe_sector(const uint8_t *sec);
+
 /* Return 1 if first sector looks like our FAT32 super-floppy volume. */
 int fat32_host_probe_fd(int fd);
 

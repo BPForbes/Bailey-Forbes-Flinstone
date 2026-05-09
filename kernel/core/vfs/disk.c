@@ -3,6 +3,7 @@
 #include "fat32_host.h"
 #include "util.h"
 #include "mem_asm.h"
+#include "disk_host_asm.h"
 #include <errno.h>
 #include <fcntl.h>
 #include <stdio.h>
@@ -10,15 +11,41 @@
 #include <string.h>
 #include <unistd.h>
 
-int disk_path_is_legacy_txt(const char *path) {
-    if (!path)
-        return 0;
-    size_t n = strlen(path);
-    return (n >= 4 && strcmp(path + n - 4, ".txt") == 0);
-}
-
 static int disk_use_fat32_cluster_bytes(int cluster_bytes) {
     return (cluster_bytes >= 512 && (cluster_bytes % 512) == 0);
+}
+
+/* Scan legacy hex-line volume (XX: ruler + NN:hexdata lines). Any filename. */
+static int disk_try_load_legacy_hex_path(const char *path) {
+    FILE *fp = fopen(path, "r");
+    if (!fp)
+        return 0;
+    char line[256];
+    int count = 0, detectedSize = 0;
+    while (fgets(line, sizeof(line), fp)) {
+        char *trim = trim_whitespace(line);
+        if (!*trim)
+            continue;
+        if (!strncmp(trim, "XX:", 3))
+            continue;
+        char *colon = strchr(trim, ':');
+        if (!colon)
+            continue;
+        char *hexData = trim_whitespace(colon + 1);
+        int len = (int)strlen(hexData);
+        if (len % 2 != 0)
+            continue;
+        detectedSize = len / 2;
+        count++;
+    }
+    fclose(fp);
+    if (count <= 0)
+        return 0;
+    g_total_clusters = count;
+    g_cluster_size = detectedSize;
+    g_disk_host_fat32 = 0;
+    fat32_host_invalidate();
+    return 1;
 }
 
 static void disk_decode_hex_pairs(const char *hexData, unsigned char *out, int nbytes) {
@@ -43,54 +70,33 @@ void read_disk_header(void) {
     g_disk_host_fat32 = 0;
     fat32_host_invalidate();
 
-    if (disk_path_is_legacy_txt(current_disk_file)) {
-        FILE *fp = fopen(current_disk_file, "r");
-        if (!fp) {
-            printf("No disk file found: %s\n", current_disk_file);
-            return;
-        }
-        char line[256];
-        int count = 0, detectedSize = 0;
-        while (fgets(line, sizeof(line), fp)) {
-            char *trim = trim_whitespace(line);
-            if (!*trim)
-                continue;
-            if (!strncmp(trim, "XX:", 3))
-                continue;
-            char *colon = strchr(trim, ':');
-            if (!colon)
-                continue;
-            char *hexData = trim_whitespace(colon + 1);
-            int len = (int)strlen(hexData);
-            if (len % 2 != 0)
-                continue;
-            detectedSize = len / 2;
-            count++;
-        }
-        fclose(fp);
-        if (count > 0) {
-            g_total_clusters = count;
-            g_cluster_size = detectedSize;
-        }
-        printf("Loaded disk (legacy hex .txt): %s | Clusters: %d | Cluster Size: %d bytes\n",
-               current_disk_file, g_total_clusters, g_cluster_size);
-        return;
-    }
-
     int fd = open(current_disk_file, O_RDONLY);
     if (fd < 0) {
         printf("No disk file found: %s\n", current_disk_file);
         return;
     }
-    if (fat32_host_probe_fd(fd) && fat32_host_load_from_fd(fd) == 0) {
-        g_disk_host_fat32 = 1;
-        close(fd);
-        printf("Loaded disk (FAT32 image FLINT.DAT): %s | Clusters: %d | Cluster Size: %d bytes\n",
+
+    unsigned char boot[512];
+    ssize_t br = disk_host_pread_vol(fd, boot, sizeof(boot), 0);
+    if (br == (ssize_t)sizeof(boot) && fat32_host_probe_sector(boot)) {
+        if (fat32_host_load_from_fd(fd) == 0) {
+            g_disk_host_fat32 = 1;
+            close(fd);
+            printf("Loaded disk (FAT32 image FLINT.DAT): %s | Clusters: %d | Cluster Size: %d bytes\n",
+                   current_disk_file, g_total_clusters, g_cluster_size);
+            return;
+        }
+    }
+    close(fd);
+
+    if (disk_try_load_legacy_hex_path(current_disk_file)) {
+        printf("Loaded disk (legacy hex text): %s | Clusters: %d | Cluster Size: %d bytes\n",
                current_disk_file, g_total_clusters, g_cluster_size);
         return;
     }
-    close(fd);
-    printf("Unrecognized disk format (use .txt legacy hex or a FAT32 .img from createdisk/format): %s\n",
+
+    printf("Unrecognized disk format (legacy hex lines with XX: ruler, or a FAT32 super-floppy "
+           "image from createdisk/format): %s\n",
            current_disk_file);
 }
 
@@ -122,7 +128,7 @@ void list_clusters_contents(void) {
             uint64_t off = 0;
             if (fat32_host_shell_cluster_byte_offset(c, &off) != 0)
                 continue;
-            if (pread(fd, buf, (size_t)g_cluster_size, (off_t)off) != (ssize_t)g_cluster_size)
+            if (disk_host_pread_vol(fd, buf, (size_t)g_cluster_size, (off_t)off) != (ssize_t)g_cluster_size)
                 printf("(read error cluster %02X)\n", c);
             else
                 disk_print_hex_line(c, buf, g_cluster_size);
@@ -208,7 +214,7 @@ void update_cluster_line(int clu, const char *hexData) {
             free(bytes);
             return;
         }
-        ssize_t w = pwrite(fd, bytes, (size_t)g_cluster_size, (off_t)off);
+        ssize_t w = disk_host_pwrite_vol(fd, bytes, (size_t)g_cluster_size, (off_t)off);
         fsync(fd);
         close(fd);
         free(bytes);
@@ -382,7 +388,7 @@ void flintstone_format_disk(const char *volumeName, int rowCount, int nibbleCoun
         g_disk_host_fat32 = 1;
         printf("Formatted FAT32 disk created: %s\n", diskFileName);
     } else {
-        snprintf(diskFileName, sizeof(diskFileName), "%s_disk.txt", volumeName);
+        snprintf(diskFileName, sizeof(diskFileName), "%s_disk", volumeName);
         flintstone_format_txt(diskFileName, volumeName, rowCount, clusterSize);
     }
 }
@@ -393,15 +399,9 @@ void format_disk_file(const char *diskFileName, const char *volumeName, int rowC
         exit(1);
     }
     int clusterSize = nibbleCount / 2;
-    if (disk_path_is_legacy_txt(diskFileName)) {
+    if (!disk_use_fat32_cluster_bytes(clusterSize)) {
         flintstone_format_txt(diskFileName, volumeName, rowCount, clusterSize);
         return;
-    }
-    if (!disk_use_fat32_cluster_bytes(clusterSize)) {
-        fprintf(stderr,
-                "Error: FAT32 .img volumes require cluster size >= 512 bytes and a multiple of 512 "
-                "(nibbleCount >= 1024 and divisible by 1024). Use a .txt path for smaller clusters.\n");
-        exit(1);
     }
     if (fat32_host_format_image(diskFileName, volumeName, rowCount, clusterSize, volumeName) != 0) {
         fprintf(stderr, "Error: could not create FAT32 image %s\n", diskFileName);

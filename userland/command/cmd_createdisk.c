@@ -23,7 +23,7 @@ int cmd_createdisk_run(int argc, char **argv) {
     if (cb >= 512 && (cb % 512) == 0)
         snprintf(current_disk_file, sizeof(current_disk_file), "%s_disk.img", args[1]);
     else
-        snprintf(current_disk_file, sizeof(current_disk_file), "%s_disk.txt", args[1]);
+        snprintf(current_disk_file, sizeof(current_disk_file), "%s_disk", args[1]);
     read_disk_header();
     print_disk_formatted();
     if (argc >= 5 && (!strcmp(args[4], "-y") || !strcmp(args[4], "-Y")))

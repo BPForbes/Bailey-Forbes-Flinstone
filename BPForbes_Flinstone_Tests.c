@@ -34,6 +34,8 @@
 #include "interpreter.h"
 #include "fs_jail.h"
 #include "fs_provider.h"
+#include "fat32_host.h"
+#include <fcntl.h>
 
 /* g_fs_jail_root is a non-static global exported by fs_jail.c */
 extern char g_fs_jail_root[];
@@ -82,7 +84,7 @@ void ensure_disk_exists(void) {
  * Helper: run a "-cd" test.
  *
  * Parameters:
- *    volume      - Volume name (the disk file will be named "<volume>_disk.txt")
+ *    volume      - Volume name (disk file: "<volume>_disk" or "<volume>_disk.img" by cluster size)
  *    rowCount    - Number of clusters
  *    nibbleCount - Total number of nibbles (cluster size = nibbleCount/2)
  *    interactive - If nonzero, the "-y" flag is appended (simulated interactive mode)
@@ -101,14 +103,25 @@ void run_cd_test_mode(const char *volume, int rowCount, int nibbleCount, int int
     CU_ASSERT_TRUE(execute_command_str(command) == 0);
 
     char diskFileName[256];
-    snprintf(diskFileName, sizeof(diskFileName), "%s_disk.txt", volume);
-    FILE *fp = fopen(diskFileName, "r");
-    CU_ASSERT_TRUE(fp != NULL);
-    if (fp) {
-         char header[1024];
-         fgets(header, sizeof(header), fp);
-         CU_ASSERT_TRUE(strncmp(header, "XX:", 3) == 0);
-         fclose(fp);
+    int cb = nibbleCount / 2;
+    if (cb >= 512 && (cb % 512) == 0) {
+        snprintf(diskFileName, sizeof(diskFileName), "%s_disk.img", volume);
+        int f = open(diskFileName, O_RDONLY);
+        CU_ASSERT_TRUE(f >= 0);
+        if (f >= 0) {
+            CU_ASSERT_TRUE(fat32_host_probe_fd(f) != 0);
+            close(f);
+        }
+    } else {
+        snprintf(diskFileName, sizeof(diskFileName), "%s_disk", volume);
+        FILE *fp = fopen(diskFileName, "r");
+        CU_ASSERT_TRUE(fp != NULL);
+        if (fp) {
+            char header[1024];
+            fgets(header, sizeof(header), fp);
+            CU_ASSERT_TRUE(strncmp(header, "XX:", 3) == 0);
+            fclose(fp);
+        }
     }
     printf("Disk '%s' created with %d clusters and cluster size %d bytes (nibbleCount = %d) in %s mode.\n\n",
            diskFileName, rowCount, nibbleCount / 2, nibbleCount, interactive ? "interactive" : "batch");
@@ -119,14 +132,14 @@ void run_cd_test_mode(const char *volume, int rowCount, int nibbleCount, int int
  * Suite setup and cleanup functions
  *
  * suite_setup: Use a fixed seed and create a reproducible drive file.
- * This creates "test_drive_disk.txt" and updates current_disk_file.
+ * This creates "test_drive_disk" and updates current_disk_file.
  *
  * suite_cleanup: Remove all temporary files and directories created during testing.
  * -------------------------------------------------------------------------*/
 int suite_setup(void) {
     srand(12345);  /* Fixed seed for reproducibility */
-    flintstone_format_disk("test_drive", 8, 16);  /* Creates "test_drive_disk.txt" */
-    strncpy(current_disk_file, "test_drive_disk.txt", sizeof(current_disk_file)-1);
+    flintstone_format_disk("test_drive", 8, 16);  /* Creates "test_drive_disk" */
+    strncpy(current_disk_file, "test_drive_disk", sizeof(current_disk_file)-1);
     fs_service_glue_init();
     return 0;
 }
@@ -135,7 +148,7 @@ int suite_cleanup(void) {
     fs_service_glue_shutdown();
     /* List of known temporary files */
     const char *files[] = {
-         "test_drive_disk.txt",
+         "test_drive_disk",
          "testdisk.txt",
          "mydisk.txt",
          "tempdisk.txt",
@@ -144,16 +157,16 @@ int suite_cleanup(void) {
          "testfile.txt",
          "test_output.txt",
          HISTORY_FILE,  /* e.g., "shell_history.txt" */
-         "cdbatch1_disk.txt",
-         "cdbatch2_disk.txt",
-         "cdbatch3_disk.txt",
-         "cdbatch_extra1_disk.txt",
-         "cdbatch_extra2_disk.txt",
-         "cdinter1_disk.txt",
-         "cdinter2_disk.txt",
-         "cdinter3_disk.txt",
-         "cdinter_extra1_disk.txt",
-         "cdinter_extra2_disk.txt",
+         "cdbatch1_disk",
+         "cdbatch2_disk",
+         "cdbatch3_disk",
+         "cdbatch_extra1_disk",
+         "cdbatch_extra2_disk",
+         "cdinter1_disk",
+         "cdinter2_disk",
+         "cdinter3_disk",
+         "cdinter_extra1_disk",
+         "cdinter_extra2_disk",
          "test_disk.txt",
          "int_undo_test.txt"
     };
@@ -165,8 +178,25 @@ int suite_cleanup(void) {
               }
          }
     }
-    /* Additionally, scan for any .txt file generated during testing and remove it */
+    /* Additionally, scan for volume disk images and remove them */
     DIR *dir = opendir(".");
+    if (dir) {
+        struct dirent *entry;
+        while ((entry = readdir(dir)) != NULL) {
+            size_t L = strlen(entry->d_name);
+            if (L >= 9 && strcmp(entry->d_name + L - 9, "_disk.img") == 0) {
+                if (remove(entry->d_name) != 0)
+                    perror(entry->d_name);
+            } else if (L >= 5 && strcmp(entry->d_name + L - 5, "_disk") == 0 &&
+                       strchr(entry->d_name, '.') == NULL) {
+                if (remove(entry->d_name) != 0)
+                    perror(entry->d_name);
+            }
+        }
+        closedir(dir);
+    }
+    /* Additionally, scan for any .txt file generated during testing and remove it */
+    dir = opendir(".");
     if (dir) {
          struct dirent *entry;
          while ((entry = readdir(dir)) != NULL) {

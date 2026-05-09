@@ -10,6 +10,7 @@
 #include "fat32_host.h"
 #include "mem_asm.h"
 #include "common.h"
+#include "disk_host_asm.h"
 #include <errno.h>
 #include <string.h>
 #include <fcntl.h>
@@ -65,10 +66,7 @@ static int fat32_iterate_layout(uint32_t total_sectors, uint16_t bps, uint8_t sp
     return -1;
 }
 
-int fat32_host_probe_fd(int fd) {
-    uint8_t sec[512];
-    if (pread(fd, sec, sizeof(sec), 0) != (ssize_t)sizeof(sec))
-        return 0;
+int fat32_host_probe_sector(const uint8_t *sec) {
     if (sec[0] != 0xEB && sec[0] != 0xE9)
         return 0;
     if (memcmp(sec + 0x52, "FAT32   ", 8) != 0)
@@ -79,11 +77,18 @@ int fat32_host_probe_fd(int fd) {
     return 1;
 }
 
+int fat32_host_probe_fd(int fd) {
+    uint8_t sec[512];
+    if (disk_host_pread_vol(fd, sec, sizeof(sec), 0) != (ssize_t)sizeof(sec))
+        return 0;
+    return fat32_host_probe_sector(sec);
+}
+
 int fat32_host_load_from_fd(int fd) {
     uint8_t sec[512];
-    if (pread(fd, sec, sizeof(sec), 0) != (ssize_t)sizeof(sec))
+    if (disk_host_pread_vol(fd, sec, sizeof(sec), 0) != (ssize_t)sizeof(sec))
         return -1;
-    if (!fat32_host_probe_fd(fd))
+    if (!fat32_host_probe_sector(sec))
         return -1;
 
     uint16_t bps = ld_le16(sec + 0x0B);
@@ -105,7 +110,7 @@ int fat32_host_load_from_fd(int fd) {
         return -1;
     uint64_t root_off = (uint64_t)first_data_sec * (uint64_t)bps +
                         (uint64_t)(rootclus - 2u) * (uint64_t)spc * (uint64_t)bps;
-    if (pread(fd, root, bpc, (off_t)root_off) != (ssize_t)bpc) {
+    if (disk_host_pread_vol(fd, root, bpc, (off_t)root_off) != (ssize_t)bpc) {
         free(root);
         return -1;
     }
@@ -223,7 +228,7 @@ int fat32_host_format_image(const char *path, const char *volume_label, int shel
         return -1;
     }
     for (uint32_t s = 0; s < tot_sec; s++) {
-        if (pwrite(fd, z, bps, (off_t)((uint64_t)s * (uint64_t)bps)) != (ssize_t)bps) {
+        if (disk_host_pwrite_vol(fd, z, bps, (off_t)((uint64_t)s * (uint64_t)bps)) != (ssize_t)bps) {
             free(z);
             close(fd);
             return -1;
@@ -257,12 +262,12 @@ int fat32_host_format_image(const char *path, const char *volume_label, int shel
     memcpy(bs + 0x52, "FAT32   ", 8);
     st_le16(bs + 0x1FE, 0xAA55);
 
-    if (pwrite(fd, bs, sizeof(bs), 0) != (ssize_t)sizeof(bs)) {
+    if (disk_host_pwrite_vol(fd, bs, sizeof(bs), 0) != (ssize_t)sizeof(bs)) {
         close(fd);
         return -1;
     }
     /* Backup boot at sector 6 */
-    if (pwrite(fd, bs, sizeof(bs), (off_t)(6u * (uint64_t)bps)) != (ssize_t)sizeof(bs)) {
+    if (disk_host_pwrite_vol(fd, bs, sizeof(bs), (off_t)(6u * (uint64_t)bps)) != (ssize_t)sizeof(bs)) {
         close(fd);
         return -1;
     }
@@ -275,7 +280,7 @@ int fat32_host_format_image(const char *path, const char *volume_label, int shel
     st_le32(fsinfo + 0x1E8, 0xFFFFFFFFu); /* free count unknown */
     st_le32(fsinfo + 0x1EC, 0xFFFFFFFFu); /* next free unknown */
     st_le16(fsinfo + 0x1FE, 0xAA55u);
-    if (pwrite(fd, fsinfo, sizeof(fsinfo), (off_t)bps) != (ssize_t)sizeof(fsinfo)) {
+    if (disk_host_pwrite_vol(fd, fsinfo, sizeof(fsinfo), (off_t)bps) != (ssize_t)sizeof(fsinfo)) {
         close(fd);
         return -1;
     }
@@ -298,13 +303,13 @@ int fat32_host_format_image(const char *path, const char *volume_label, int shel
             st_le32(fat + off, c + 1u);
     }
     uint64_t fat0_off = (uint64_t)rsv * (uint64_t)bps;
-    if (pwrite(fd, fat, fat_bytes, (off_t)fat0_off) != (ssize_t)fat_bytes) {
+    if (disk_host_pwrite_vol(fd, fat, fat_bytes, (off_t)fat0_off) != (ssize_t)fat_bytes) {
         free(fat);
         close(fd);
         return -1;
     }
     uint64_t fat1_off = fat0_off + (uint64_t)fat_sec * (uint64_t)bps;
-    if (pwrite(fd, fat, fat_bytes, (off_t)fat1_off) != (ssize_t)fat_bytes) {
+    if (disk_host_pwrite_vol(fd, fat, fat_bytes, (off_t)fat1_off) != (ssize_t)fat_bytes) {
         free(fat);
         close(fd);
         return -1;
@@ -330,7 +335,7 @@ int fat32_host_format_image(const char *path, const char *volume_label, int shel
     st_le16(de + 0x1A, 3);  /* cluster low start at 3 */
     st_le32(de + 0x1C, (uint32_t)shell_clusters * (uint32_t)bytes_per_cluster);
 
-    if (pwrite(fd, rootbuf, (size_t)spc * (size_t)bps, (off_t)root_off) != (ssize_t)((size_t)spc * (size_t)bps)) {
+    if (disk_host_pwrite_vol(fd, rootbuf, (size_t)spc * (size_t)bps, (off_t)root_off) != (ssize_t)((size_t)spc * (size_t)bps)) {
         free(rootbuf);
         close(fd);
         return -1;
@@ -360,7 +365,7 @@ int fat32_host_format_image(const char *path, const char *volume_label, int shel
         uint32_t cl = 3u + (uint32_t)i;
         uint64_t byte_off = (uint64_t)first_data_sec * (uint64_t)bps +
                             (uint64_t)(cl - 2u) * (uint64_t)spc * (uint64_t)bps;
-        if (pwrite(fd, buf, bpc, (off_t)byte_off) != (ssize_t)bpc) {
+        if (disk_host_pwrite_vol(fd, buf, bpc, (off_t)byte_off) != (ssize_t)bpc) {
             free(buf);
             close(fd);
             return -1;
