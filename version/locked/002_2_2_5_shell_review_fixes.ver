@@ -1,4 +1,0 @@
-MAJOR_VERSION=2
-STANDARD_VERSION=2
-RELEASE_VERSION=5
-DESCRIPTION=Address shell review feedback: interactive history realloc safety, command error propagation, stricter parsing, and version mirror script guards.
