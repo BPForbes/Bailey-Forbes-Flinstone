@@ -12,10 +12,19 @@ int cmd_search_run(int argc, char **argv) {
     char **args = argv;
     int searchMode = 0;
     char *searchStr = NULL;
-    if (argc >= 3 && (!strcmp(args[2], "-h") || !strcmp(args[2], "-t"))) {
-        searchStr = args[1];
-        searchMode = (!strcmp(args[2], "-h")) ? 1 : 0;
-    } else if (argc >= 2) {
+    if (argc > 3) {
+        printf("Usage: search <searchtext> [ -t |-h ]\n");
+        return 1;
+    }
+    if (argc == 3) {
+        if (!strcmp(args[2], "-h") || !strcmp(args[2], "-t")) {
+            searchStr = args[1];
+            searchMode = (!strcmp(args[2], "-h")) ? 1 : 0;
+        } else {
+            printf("Usage: search <searchtext> [ -t |-h ]\n");
+            return 1;
+        }
+    } else if (argc == 2) {
         searchStr = args[1];
     } else {
         printf("Usage: search <searchtext> [ -t |-h ]\n");

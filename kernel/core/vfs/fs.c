@@ -25,11 +25,13 @@ void list_files(const char *dir) {
     closedir(dp);
 }
 
-void create_directory(const char *d) {
-    if (mkdir(d, 0755) == 0)
+int create_directory(const char *d) {
+    if (mkdir(d, 0755) == 0) {
         printf("Directory '%s' created.\n", d);
-    else
-        perror("mkdir");
+        return 0;
+    }
+    perror("mkdir");
+    return -1;
 }
 
 void list_directories(void) {

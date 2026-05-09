@@ -33,20 +33,21 @@ char *convert_data_to_hex(const char *data, int inputIsText, int clusterSize) {
     return result;
 }
 
-void process_write_cluster(int clu, const char *data, int inputIsText) {
+int process_write_cluster(int clu, const char *data, int inputIsText) {
     char *hexData = convert_data_to_hex(data, inputIsText, g_cluster_size);
     if (!hexData)
-        return;
+        return -1;
     update_cluster_line(clu, hexData);
     mem_domain_free(MEM_DOMAIN_FS, hexData);
     printf("Wrote data to cluster %d.\n", clu);
+    return 0;
 }
 
-void calculate_storage_breakdown_for_cluster(int clu) {
+int calculate_storage_breakdown_for_cluster(int clu) {
     FILE *fp = fopen(current_disk_file, "r");
     if (!fp) {
         printf("No disk file found.\n");
-        return;
+        return -1;
     }
     char line[256];
     int currentClu = -1;
@@ -68,7 +69,7 @@ void calculate_storage_breakdown_for_cluster(int clu) {
     fclose(fp);
     if (!hexDataFound) {
         printf("Cluster %02X not found.\n", clu);
-        return;
+        return -1;
     }
     hexDataFound = trim_whitespace(hexDataFound);
     int expectedLen = g_cluster_size * 2;
@@ -78,7 +79,7 @@ void calculate_storage_breakdown_for_cluster(int clu) {
     }
     unsigned char *bytes = mem_domain_alloc(MEM_DOMAIN_FS, (size_t)g_cluster_size);
     if (!bytes)
-        return;
+        return -1;
     for (int i = 0; i < g_cluster_size; i++) {
         char byteStr[3] = {0};
         if (2 * i + 1 < hexLen) {
@@ -105,6 +106,7 @@ void calculate_storage_breakdown_for_cluster(int clu) {
         printf("Bit position %d: ones = %d, zeros = %d\n", bit + 1, onesCount[bit], zerosCount[bit]);
     }
     mem_domain_free(MEM_DOMAIN_FS, bytes);
+    return 0;
 }
 
 void delete_cluster(int clu) {

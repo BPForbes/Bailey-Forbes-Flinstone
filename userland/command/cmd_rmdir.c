@@ -21,13 +21,16 @@ int cmd_rmdir_run(int argc, char **argv) {
         if (fm_delete(g_fm_service, rpath) == 0) {
             path_log_record(PATH_OP_DELETE, rpath);
             printf("Directory '%s' removed.\n", rpath);
-        } else
+        } else {
             perror("rmdir");
+            return 1;
+        }
     } else if (rmdir(rpath) == 0) {
         path_log_record(PATH_OP_DELETE, rpath);
         printf("Directory '%s' removed.\n", rpath);
     } else {
         perror("rmdir");
+        return 1;
     }
     return 0;
 }

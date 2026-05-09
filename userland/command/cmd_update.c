@@ -19,8 +19,14 @@ int cmd_update_run(int argc, char **argv) {
     }
     delete_cluster(clu);
     int inputIsText = (!strcmp(args[2], "-t")) ? 1 : 0;
-    process_write_cluster(clu, args[3], inputIsText);
+    if (process_write_cluster(clu, args[3], inputIsText) != 0) {
+        printf("Failed to write cluster %d.\n", clu);
+        return 1;
+    }
     printf("Cluster %d updated.\n", clu);
-    calculate_storage_breakdown_for_cluster(clu);
+    if (calculate_storage_breakdown_for_cluster(clu) != 0) {
+        printf("Failed to compute storage breakdown for cluster %d.\n", clu);
+        return 1;
+    }
     return 0;
 }

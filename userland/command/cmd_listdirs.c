@@ -25,6 +25,9 @@ int cmd_listdirs_run(int argc, char **argv) {
                 if (nodes[i].type == NODE_DIR)
                     printf("  %s\n", nodes[i].name);
             fs_nodes_free(nodes, count);
+        } else {
+            printf("Cannot open '%s'\n", rpath);
+            return 1;
         }
     } else {
         path_log_record(PATH_OP_DIR, rpath);

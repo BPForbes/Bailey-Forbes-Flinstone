@@ -6,7 +6,8 @@
 #include <unistd.h>
 
 int cmd_exit_maybe(char *trimmed) {
-    if (strncmp(trimmed, "exit", 4) != 0)
+    if (strncmp(trimmed, "exit", 4) != 0 ||
+        (trimmed[4] != '\0' && trimmed[4] != ' ' && trimmed[4] != '\t'))
         return 0;
     char *tokens[3] = { NULL, NULL, NULL };
     int tcount = 0;
