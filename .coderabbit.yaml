@@ -8,20 +8,20 @@ reviews:
   instructions: |
     ## Version & releases
 
-    **Canonical version** comes from **`version/entries/*.ver`**: the highest **A.B.C** there is emitted into **`userland/shell/version_def.h`** by **`scripts/gen_version_def.sh`** (also via **`make`**). Release prose lives in the same **`.ver`** files (mirrored under **`version/locked/`**); **`scripts/gen_version_changelog.c`** reads those entries to emit **`userland/shell/version_changelog.c`**, then CI builds with **`CHANGELOG_CI=1`**.
+    **Shipped version** comes from **`version/locked/*.ver`**: the highest **A.B.C** there is emitted into **`userland/shell/version_def.h`** by **`scripts/gen_version_def.sh`** (also via **`make`**). Author work-in-progress under **`version/entries/`**, then **`scripts/finalize_version_locked.sh`** (or **`make finalize-version-locked`**) copies **entries → locked** to publish. **`scripts/gen_version_changelog.c`** reads **`version/locked`**, then CI builds with **`CHANGELOG_CI=1`**.
 
-    ### Lock system — never edit historical version files
+    ### Lock system — never edit historical published files
 
-    - **Do not** approve or suggest edits to **existing** **`version/entries/*.ver`** files that already exist on the **merge base / target branch**. Those files are **immutable** after merge; correcting wording or metadata requires a **new** `.ver` file for a **new** semver bump—not an in-place rewrite.
-    - **`version/locked/`** must remain an **exact mirror** of **`version/entries/`** (refresh only via **`scripts/sync_version_locked_mirror.sh`**). **Reject** hand-edited **`version/locked/**`** that would diverge from **`version/entries/`**.
-    - AI-assisted refactors must **exclude** historical **`version/entries/*.ver`** and unsynchronized **`version/locked/**`** from automated bulk edits.
+    - **Do not** approve edits to paths under **`version/locked/`** that already exist on the **merge base / target branch** (published record). New release prose: add **`version/entries/*.ver`**, finalize, regenerate header.
+    - **`version/entries/`** may contain **extra** drafts not yet in **`version/locked/`** until finalize. CI requires every **`version/locked/`** file to **byte-match** the same relative path under **`version/entries/`** (`check_version_locked_subset_of_entries.sh`).
+    - AI-assisted refactors must **exclude** historical **`version/locked/**`** from bulk edits.
 
     When reviewing a PR that merges **incoming → base** (e.g. `bug/*` → `develop`, `develop` → `main`):
 
     1. Compare the **incoming branch** version string to the **merge base / target branch** version (same `VERSION` macro on each side).
     2. The **incoming branch version must be strictly greater** than the target branch version for that merge (typically exactly one semver bump on the appropriate component).
     3. If both branches report the **same** version (e.g. both `2.0.0`), request an update: bump the incoming branch so it is **one step ahead** of the target for the change type (example: `bug/*` → `develop` with both at `2.0.0` → bump incoming to `2.0.1`).
-    4. Ensure new bumps add a **new** **`version/entries/*.ver`** file (do not rewrite merged entries) and refresh **`version/locked/`** via **`scripts/sync_version_locked_mirror.sh`**.
+    4. Ensure new bumps add **`version/entries/*.ver`**, run **`make finalize-version-locked`**, then **`make`** / **`gen_version_def.sh`** so **`version_def.h`** matches **`version/locked/`**.
 
     **Schema `A.B.C`:**
 
@@ -33,7 +33,7 @@ reviews:
 
     **Single bump rule:** If a change mixes milestone/architecture work, features, and bug fixes, **only increment the most significant applicable component** once (e.g. milestone + architecture → bump **A** only → **`3.0.0`** after **`2.x.y`**; do not also bump B/C for the same release).
 
-    Remind authors to add **`version/entries/<A>_<B>_<C>_<slug>.ver`**, run **`./scripts/gen_version_def.sh`** (or **`make`**) so **`version_def.h`** matches entries when the merge would otherwise equal or lag the target, and keep **`version/locked/`** mirrored. Changelog prose is CI/deployment-time, not default `make`.
+    Remind authors: **`version/entries/`** (WIP) → **`finalize_version_locked`** → **`make`** so **`version_def.h`** matches **`version/locked/`**. Changelog prose is CI/deployment-time, not default `make`.
 
     ## Comments vs code
 
@@ -42,15 +42,15 @@ reviews:
   path_instructions:
     - path: "version/entries/*.ver"
       instructions: |
-        **Never modify an existing `.ver` file that is already on the target branch** — entries are locked after merge; request a **new** `.ver` for later releases. Each file needs MAJOR_VERSION, STANDARD_VERSION, RELEASE_VERSION (or MINOR_VERSION / VERSION_PATCH), and DESCRIPTION (<= 1023 chars).
+        **Work in progress** — new `.ver` files and drafts live here. For each file: MAJOR_VERSION, STANDARD_VERSION, RELEASE_VERSION (or MINOR_VERSION / VERSION_PATCH), and DESCRIPTION (<= 1023 chars). After merge, any path that also exists under **`version/locked/`** must stay byte-identical to locked until you intentionally change both via finalize.
 
     - path: "version/locked/**"
       instructions: |
-        **Mirror only.** Must match `version/entries/` exactly (`scripts/sync_version_locked_mirror.sh`). Do not approve hand edits here; never diverge from `version/entries/`.
+        **Published snapshot** — copied from **`version/entries/`** via **`finalize_version_locked.sh`**. Do not approve hand edits that bypass **`version/entries/`**; never rewrite paths that already shipped on the target branch.
 
     - path: "userland/shell/version_def.h"
       instructions: |
-        This file is **generated** from **`version/entries/*.ver`** (`scripts/gen_version_def.sh` / `make`); do not hand-edit **`VERSION_*`**. Bumps follow **semver `A.B.C`** with precedence **`A` > `B` > `C`**: increment only the highest applicable component for the release, keep more-significant (left) components unchanged, set less-significant (right) components to **0** (e.g. **`2.2.4` → `2.3.0`**). Incoming branch version must exceed the target before merge; see AGENTS.md / CLAUDE.md.
+        This file is **generated** from **`version/locked/*.ver`** (`scripts/gen_version_def.sh` / `make`); do not hand-edit **`VERSION_*`**. Bumps follow **semver `A.B.C`** with precedence **`A` > `B` > `C`**: increment only the highest applicable component for the release, keep more-significant (left) components unchanged, set less-significant (right) components to **0** (e.g. **`2.2.4` → `2.3.0`**). Incoming branch version must exceed the target before merge; see AGENTS.md / CLAUDE.md.
 
     - path: "AGENTS.md"
       instructions: |

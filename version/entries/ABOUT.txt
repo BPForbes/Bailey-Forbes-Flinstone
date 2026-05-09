@@ -1,19 +1,17 @@
-Version entries (*.ver) describe one shipped release each: MAJOR_VERSION,
-STANDARD_VERSION, RELEASE_VERSION (third component; aliases MINOR_VERSION or
-VERSION_PATCH), and DESCRIPTION (<= 1023 characters, one line).
+Version release notes use *.ver files (MAJOR_VERSION, STANDARD_VERSION,
+RELEASE_VERSION or MINOR_VERSION / VERSION_PATCH, and DESCRIPTION).
 
-Name new files with the semantic version in the basename, for example:
-  version/entries/2_3_0_raw_block_disk.ver
-Older merged entries may keep a historical prefix (e.g. 001_2_2_4_baseline.ver); do not
-rename those — they are immutable after merge. Ordering uses the MAJOR/STANDARD/RELEASE
-integers inside each file, not the filename prefix.
+version/entries/  — work in progress: add and edit .ver files here.
+version/locked/   — published snapshot: replaced by copying entries → locked.
 
-After a branch merges, existing *.ver files under version/entries are immutable:
-do not edit them; add a new file for the next release.
+Finalize (copy all of entries over locked), then regenerate the shell header:
 
-userland/shell/version_def.h is generated from the highest A.B.C among these
-files (scripts/gen_version_def.sh; invoked by make). Do not edit the header by hand.
+  ./scripts/finalize_version_locked.sh   # or: make finalize-version-locked
+  make                                   # or: ./scripts/gen_version_def.sh
 
-The version/locked directory is an exact mirror of version/entries for
-read-only browsing. Update it only by running:
-  ./scripts/sync_version_locked_mirror.sh
+userland/shell/version_def.h is generated from the highest A.B.C among
+version/locked/*.ver only. Do not edit the header by hand.
+
+Name new .ver files with the semantic version in the basename, e.g.
+  version/entries/2_3_0_feature_name.ver
+Ordering uses MAJOR/STANDARD/RELEASE inside the file, not a filename prefix.

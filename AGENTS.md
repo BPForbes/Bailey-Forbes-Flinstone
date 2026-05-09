@@ -53,31 +53,29 @@ Run builds from the repository root.
 
 ## Versioning
 
-The shipped shell version is **A.B.C** in **`userland/shell/version_def.h`**, which is **generated** from **`version/entries/*.ver`**: the header always reflects the **highest** semver among those files. Run **`./scripts/gen_version_def.sh`** or **`make`** after adding or changing entries, then commit the updated header. **CMake** reads **`project(VERSION)`** from that same header at configure time—do not hardcode a separate semver triple in **`CMakeLists.txt`**.
+The shipped shell version **A.B.C** is in **`userland/shell/version_def.h`**, **generated** from **`version/locked/*.ver`**: the header reflects the **highest** semver among **finalized** `.ver` files there. **Work in progress** lives under **`version/entries/`**; when you are ready to publish, run **`./scripts/finalize_version_locked.sh`** or **`make finalize-version-locked`** (copies **`version/entries/`** → **`version/locked/`**), then **`./scripts/gen_version_def.sh`** or **`make`**, and commit the updated header. **CMake** reads **`project(VERSION)`** from that same header at configure time—do not hardcode a separate semver triple in **`CMakeLists.txt`**.
 
 ### Release notes (`version/`)
 
-Each release adds **one new text file** under **`version/entries/`** ending in **`.ver`** (see **`version/entries/ABOUT.txt`**). Use a basename that includes the version triple, e.g. **`2_3_0_feature_name.ver`** (ordering is by the numeric **MAJOR/STANDARD/RELEASE** fields inside the file, not by a `001_`-style prefix). Supported keys (optional leading `int ` before the name):
+Author each release as **`.ver`** files under **`version/entries/`** (see **`version/entries/ABOUT.txt`**). Use a basename that includes the version triple, e.g. **`2_3_0_feature_name.ver`** (ordering uses the numeric **MAJOR/STANDARD/RELEASE** fields inside the file, not a `001_`-style prefix). Supported keys (optional leading `int ` before the name):
 
 - **`MAJOR_VERSION`** (alias **`VERSION_MAJOR`**)
 - **`STANDARD_VERSION`** (alias **`VERSION_STANDARD`**)
 - **`RELEASE_VERSION`** — third component **C** (aliases **`MINOR_VERSION`**, **`VERSION_PATCH`**)
 - **`DESCRIPTION`** — single line, max **1023** characters (quotes optional)
 
-After a change is **merged**, existing **`version/entries/*.ver`** files are **immutable**: do not edit them; add another **`.ver`** file for the next bump. CI enforces this on pull requests against the merge base.
-
-On a **feature branch before merge**, new `.ver` files that do **not** yet exist on the merge base are ordinary drafts: you may revise or remove them as the PR evolves without treating each push as “locking” them. Only entries already present on the **target** (detected via merge base) are protected.
+On a **feature branch before merge**, you may freely add, edit, or remove **`.ver`** files under **`version/entries/`** that are **not** yet reflected in **`version/locked/`**.
 
 ### Lock system (agents, reviewers, and automation)
 
-- **Never edit older version files.** Any **`.ver`** file that already exists on the **merge base / target branch** is **locked**: it is part of the permanent release record. Do **not** rewrite description text, fix typos in place, or refactor filenames for entries that have already shipped—add a **new** **`version/entries/*.ver`** for the next semver instead.
-- **`version/locked/`** is a **read-only mirror** for humans and tools: it must stay a **byte-identical copy** of **`version/entries/`**. Update it **only** by running **`./scripts/sync_version_locked_mirror.sh`** or **`make sync-version-locked`** after legitimate changes under **`version/entries/`**. Never hand-edit **`version/locked/`** to diverge from **`version/entries/`**.
-- **AI assistants** (Cursor, CodeRabbit, CLAUDE context, etc.) must **not** propose changes that modify historical **`.ver`** files or unsynchronized **`version/locked/`** copies. If a PR touches those paths incorrectly, **request a new entry file** instead.
-- **CI** rejects PRs that modify merged entries (`scripts/check_version_entries_immutable.sh`) and rejects **`version/locked`** drift (`scripts/check_version_locked_mirror.sh`).
+- **Never edit finalized release files.** Any path under **`version/locked/`** that already exists on the **merge base / target branch** is **immutable**: it is the published record. Do **not** rewrite it in place—add or adjust prose under **`version/entries/`**, then **finalize** again when appropriate. CI enforces immutability on **`version/locked/`** for PRs (`scripts/check_version_locked_immutable.sh`).
+- **`version/locked/`** is the **published snapshot** copied from **`version/entries/`** via **`./scripts/finalize_version_locked.sh`** (alias: **`make finalize-version-locked`** / **`make sync-version-locked`**). Until you finalize, **`version/entries/`** may contain extra drafts not present in **`version/locked/`**.
+- **CI** requires every file under **`version/locked/`** to exist under **`version/entries/`** with **identical content** (`scripts/check_version_locked_subset_of_entries.sh`)—so you cannot “advance” locked without aligning entries, and you cannot silently diverge a finalized file from its WIP source.
+- **AI assistants** must **not** propose edits to historical paths under **`version/locked/`** that shipped on the target branch, or to **`version/entries/`** files that must byte-match **`version/locked/`** for the same relative path, unless the change is part of an intentional finalize-and-regenerate workflow.
 
-CI verifies the mirror, and that the committed **`version_def.h`** matches **`scripts/gen_version_def.sh`** output (same rule as the highest entry).
+CI verifies that the committed **`version_def.h`** matches **`scripts/gen_version_def.sh`** output (highest triple in **`version/locked/*.ver`**).
 
-**Changelog binary:** **GitHub Actions** compiles **`scripts/gen_version_changelog.c`**, which reads **`version/entries`** (headline version = highest entry), then emits **`userland/shell/version_changelog.c`** (ignored by git). **`make … CHANGELOG_CI=1`** links **`VERSION_CHANGELOG[]`** in CI only. Plain **`make`** omits changelog unless you generate that file and pass **`CHANGELOG_CI=1`**. See **`scripts/templates/version_changelog.example.c`** for shape.
+**Changelog binary:** **GitHub Actions** compiles **`scripts/gen_version_changelog.c`**, which reads **`version/locked`** (headline version = highest finalized entry), then emits **`userland/shell/version_changelog.c`** (ignored by git). **`make … CHANGELOG_CI=1`** links **`VERSION_CHANGELOG[]`** in CI only. Plain **`make`** omits changelog unless you generate that file and pass **`CHANGELOG_CI=1`**. See **`scripts/templates/version_changelog.example.c`** for shape.
 
 Use **semantic versioning**:
 
@@ -95,10 +93,10 @@ If a single release mixes milestone/architecture work, features, and fixes: **in
 
 Before merging **incoming → base** (e.g. `bug/*` → `develop`, `develop` → `main`):
 
-1. Compare **`VERSION_*` / `VERSION` on the incoming branch** to **`VERSION_*` / `VERSION` on the target branch** (see `userland/shell/version_def.h`, generated from **`version/entries/*.ver`**).
+1. Compare **`VERSION_*` / `VERSION` on the incoming branch** to **`VERSION_*` / `VERSION` on the target branch** (see `userland/shell/version_def.h`, generated from **`version/locked/*.ver`**).
 2. **Incoming must be strictly newer** than the target for that merge.
 3. If both show the **same** version (e.g. both `2.0.0`), **update the incoming branch** so its version is **one appropriate semver step ahead** of the target.
-4. Add a **new** **`version/entries/<A>_<B>_<C>_<slug>.ver`** file describing the release (never rewrite an entry file that already merged), run **`./scripts/gen_version_def.sh`** (or **`make`**) so **`version_def.h`** updates, and run **`make sync-version-locked`** so **`version/locked/`** mirrors **`version/entries/`**.
+4. Add a **new** **`version/entries/<A>_<B>_<C>_<slug>.ver`**, run **`make finalize-version-locked`**, then **`./scripts/gen_version_def.sh`** (or **`make`**) so **`version_def.h`** updates from **`version/locked/`**.
 
 Example: **`bug/…` → `develop`**, both at **`2.0.0`** → bump incoming to **`2.0.1`** (patch for a bugfix).
 

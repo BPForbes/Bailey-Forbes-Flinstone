@@ -4,15 +4,14 @@
 /*
  * GENERATED FILE — do not edit by hand.
  *
- * Built from version entry files (.ver) under version/entries/ by scripts/gen_version_def.sh (also run from the Makefile).
- * The shipped version is the highest A.B.C among those entry files.
+ * Built from finalized .ver files under version/locked/ by scripts/gen_version_def.sh (also run from the Makefile).
+ * The shipped version is the highest A.B.C among those files (WIP lives under version/entries/ until finalized).
  *
  *   A (VERSION_MAJOR)     — milestones / architecture-scale changes
  *   B (VERSION_STANDARD)  — new features (semver "minor")
  *   C (VERSION_PATCH)     — fixes and small corrections (semver "patch")
  *
- * To bump: add a new version/entries/<A>_<B>_<C>_<slug>.ver file (see version/entries/ABOUT.txt),
- * then run `make` or `./scripts/gen_version_def.sh` and commit the regenerated header.
+ * To bump: add version/entries/<A>_<B>_<C>_<slug>.ver, run ./scripts/finalize_version_locked.sh, then `make` or `./scripts/gen_version_def.sh`.
  */
 #define VERSION_MAJOR    2
 #define VERSION_STANDARD 2

@@ -15,15 +15,15 @@ jobs:
         with:
           fetch-depth: 0
 
-      - name: Validate version entry immutability (PR only)
+      - name: Validate version locked immutability (PR only)
         if: github.event_name == 'pull_request'
-        run: ./scripts/check_version_entries_immutable.sh "${{ github.event.pull_request.base.sha }}"
+        run: ./scripts/check_version_locked_immutable.sh "${{ github.event.pull_request.base.sha }}"
 
-      - name: Verify version/locked mirrors version/entries
-        run: ./scripts/check_version_locked_mirror.sh
+      - name: Verify version/locked matches subset of entries (WIP may exceed locked)
+        run: ./scripts/check_version_locked_subset_of_entries.sh
 
-      - name: Verify version_def.h matches generator (version/entries)
-        run: ./scripts/check_version_header_matches_entries.sh
+      - name: Verify version_def.h matches generator (version/locked)
+        run: ./scripts/check_version_header_matches_locked.sh
 
   build-and-test-x86_64:
     name: Build & test (x86_64 GAS)

@@ -1,13 +1,13 @@
 #!/usr/bin/env bash
-# Emit userland/shell/version_def.h from the highest A.B.C among version/entries/*.ver.
-# Single source of truth: the .ver files (not hand-edited integers in the header).
+# Emit userland/shell/version_def.h from the highest A.B.C among version/locked/*.ver.
+# Finalized releases live under version/locked (copied from version/entries via finalize_version_locked.sh).
 #
 # Usage:
 #   ./scripts/gen_version_def.sh           — write userland/shell/version_def.h
 #   ./scripts/gen_version_def.sh --stdout  — print header to stdout (for CI diff)
 set -euo pipefail
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
-ENT="$ROOT/version/entries"
+LCK="$ROOT/version/locked"
 DEF="$ROOT/userland/shell/version_def.h"
 
 stdout=0
@@ -16,9 +16,10 @@ if [[ "${1:-}" == "--stdout" ]]; then
 fi
 
 shopt -s nullglob
-files=("$ENT"/*.ver)
+files=("$LCK"/*.ver)
 if (( ${#files[@]} == 0 )); then
-  echo "gen_version_def: no version/entries/*.ver files" >&2
+  echo "gen_version_def: no version/locked/*.ver files" >&2
+  echo "Add work under version/entries/, run ./scripts/finalize_version_locked.sh, then retry." >&2
   exit 1
 fi
 
@@ -47,15 +48,14 @@ emit() {
 /*
  * GENERATED FILE — do not edit by hand.
  *
- * Built from version entry files (.ver) under version/entries/ by scripts/gen_version_def.sh (also run from the Makefile).
- * The shipped version is the highest A.B.C among those entry files.
+ * Built from finalized .ver files under version/locked/ by scripts/gen_version_def.sh (also run from the Makefile).
+ * The shipped version is the highest A.B.C among those files (WIP lives under version/entries/ until finalized).
  *
  *   A (VERSION_MAJOR)     — milestones / architecture-scale changes
  *   B (VERSION_STANDARD)  — new features (semver "minor")
  *   C (VERSION_PATCH)     — fixes and small corrections (semver "patch")
  *
- * To bump: add a new version/entries/<A>_<B>_<C>_<slug>.ver file (see version/entries/ABOUT.txt),
- * then run \`make\` or \`./scripts/gen_version_def.sh\` and commit the regenerated header.
+ * To bump: add version/entries/<A>_<B>_<C>_<slug>.ver, run ./scripts/finalize_version_locked.sh, then \`make\` or \`./scripts/gen_version_def.sh\`.
  */
 #define VERSION_MAJOR    ${bm}
 #define VERSION_STANDARD ${bs}

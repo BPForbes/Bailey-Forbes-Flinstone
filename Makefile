@@ -111,10 +111,10 @@ OBJS = $(SRCS:.c=.o) $(ASMOBJS)
 TARGET = BPForbes_Flinstone_Shell
 .DEFAULT_GOAL := all
 
-# version_def.h is generated from version/entries/*.ver (highest A.B.C).
+# version_def.h is generated from version/locked/*.ver (highest A.B.C; finalize from version/entries first).
 VERSION_DEF := userland/shell/version_def.h
-VER_ENTRY_FILES := $(wildcard version/entries/*.ver)
-$(VERSION_DEF): $(VER_ENTRY_FILES) scripts/gen_version_def.sh
+VER_LOCKED_FILES := $(wildcard version/locked/*.ver)
+$(VERSION_DEF): $(VER_LOCKED_FILES) scripts/gen_version_def.sh
 	@./scripts/gen_version_def.sh
 
 all: $(TARGET)
@@ -132,10 +132,10 @@ version-record:
 gen-version-def:
 	@./scripts/gen_version_def.sh
 
-# After editing version/entries/, run `make` (refreshes version_def.h) then mirror to version/locked/
-.PHONY: sync-version-locked
-sync-version-locked:
-	@./scripts/sync_version_locked_mirror.sh
+# WIP: edit version/entries/*.ver. To publish: make finalize-version-locked (copies entries → locked), then make (refreshes version_def.h).
+.PHONY: finalize-version-locked sync-version-locked
+finalize-version-locked sync-version-locked:
+	@./scripts/finalize_version_locked.sh
 
 .PHONY: vm baremetal
 vm:

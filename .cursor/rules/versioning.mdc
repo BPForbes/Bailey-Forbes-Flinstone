@@ -7,20 +7,20 @@ alwaysApply: true
 
 # Versioning rules
 
-## Lock system — never rewrite shipped version files
+## Lock system — never rewrite shipped published files
 
-- **Do not** modify **existing** **`version/entries/*.ver`** files that are already present on the **target / merge-base** branch. After merge, those files are **immutable**; new prose or fixes belong in a **new** `.ver` file for a **new** release.
-- **Before merge:** `.ver` files that appear **only** on your feature branch (not on the merge base) are normal drafts—you may edit or delete them until the PR lands. Immutability applies to entries **already on the integration target**, as CI compares the PR to the merge base—not to “immutable on every push.”
-- **`version/locked/`** is a **byte-identical mirror** of **`version/entries/`** for read-only browsing. Update only via **`scripts/sync_version_locked_mirror.sh`**. Never hand-edit **`version/locked/`** to change history.
-- **AI edits** (refactors, formatting, “cleanup”) must **skip** historical **`version/entries/*.ver`** and unsynchronized **`version/locked/**`**.
-- **CI** enforces immutability (`check_version_entries_immutable.sh`) and mirror equality (`check_version_locked_mirror.sh`) on pull requests.
+- **Do not** modify paths under **`version/locked/`** that are already present on the **target / merge-base** branch. After merge, those files are the **published** record; new prose belongs in **`version/entries/`**, then **`finalize_version_locked.sh`** (or **`make finalize-version-locked`**).
+- **Before merge:** **`version/entries/*.ver`** drafts that exist **only** on your feature branch may be edited or removed freely until you finalize.
+- **`version/entries/`** is **work in progress**; **`version/locked/`** is the **published snapshot** (full copy of **`version/entries/`** at finalize time). Until the next finalize, **`version/entries/`** may contain **additional** files not yet in **`version/locked/`**.
+- **CI** enforces **`version/locked`** immutability on PRs (`check_version_locked_immutable.sh`) and requires every **`version/locked`** file to **byte-match** the same path under **`version/entries/`** (`check_version_locked_subset_of_entries.sh`).
+- **AI edits** must **skip** historical **`version/locked/**`** from bulk refactors.
 
 ## Canonical version & changelog
 
-- **`userland/shell/version_def.h`** — **Generated** by **`scripts/gen_version_def.sh`** (also from **`make`**). It defines **`VERSION_MAJOR`**, **`VERSION_STANDARD`**, **`VERSION_PATCH`**, and **`VERSION`** = **A.B.C** from the **highest** triple in **`version/entries/*.ver`**. CI ensures the committed header matches the generator output.
-- **`version/entries/`** — one **`.ver`** file per release (keys: MAJOR/STANDARD/RELEASE or MINOR/PATCH + DESCRIPTION). After merge, existing entry files are **immutable**; add new files for later bumps.
-- **`version/locked/`** — exact mirror of **`version/entries/`** for read-only visibility; refresh with **`scripts/sync_version_locked_mirror.sh`**.
-- **GitHub Actions:** **`scripts/gen_version_changelog.c`** + **`make CHANGELOG_CI=1`** (see `.github/workflows/c-cpp.yml`).
+- **`userland/shell/version_def.h`** — **Generated** by **`scripts/gen_version_def.sh`** (also from **`make`**). **`VERSION`** = **A.B.C** from the **highest** triple in **`version/locked/*.ver`**. CI ensures the committed header matches the generator output.
+- **`version/entries/`** — author **`.ver`** release notes here (WIP).
+- **`version/locked/`** — **finalize** from entries; this tree drives **`version_def.h`** and changelog generation.
+- **GitHub Actions:** **`scripts/gen_version_changelog.c`** reads **`version/locked`**, then **`make CHANGELOG_CI=1`** (see `.github/workflows/c-cpp.yml`).
 - **`scripts/export_version_record.sh`** — prints keys / JSON from `version_def.h` for deployment pipelines.
 - Use **semantic versioning**: **`A.B.C`**.
 
@@ -34,7 +34,7 @@ alwaysApply: true
 
 ### Bump precedence (`A` > `B` > `C`)
 
-**Precedence (importance):** **`A` > `B` > `C`**. When you record a new release in **`version/entries/*.ver`**, choose **one** bump level: the **highest** precedence that applies to that release as a whole.
+**Precedence (importance):** **`A` > `B` > `C`**. When you record a new release, choose **one** bump level: the **highest** precedence that applies to that release as a whole.
 
 - **Increment** only that component (the most significant level that changed for this release).
 - **Leave unchanged** every component **more significant** than the one you bumped (to the **left** in `A.B.C`).
@@ -48,10 +48,10 @@ If a single release mixes major, minor, and patch-style work, still apply **only
 
 Before merging **incoming → base** (examples: `bug/*` → `develop`, `develop` → `main`):
 
-1. Read **`VERSION` / `VERSION_*` on the incoming branch** and on the **merge target branch** (`userland/shell/version_def.h`, generated from **`version/entries/*.ver`**).
+1. Read **`VERSION` / `VERSION_*` on the incoming branch** and on the **merge target branch** (`userland/shell/version_def.h`, generated from **`version/locked/*.ver`**).
 2. **Incoming must be strictly newer** than the target for that integration.
 3. If both show the **same** version (e.g. both `2.0.0`), **update the incoming branch** so its version is **one appropriate step ahead** of the target.
 
 Example: `bug/…` → `develop`, both at **`2.0.0`** → bump incoming to **`2.0.1`** (patch for a bugfix branch).
 
-When bumping, add a **new** **`version/entries/*.ver`**, run **`./scripts/gen_version_def.sh`** or **`make`** so **`version_def.h`** refreshes, and run **`scripts/sync_version_locked_mirror.sh`**—**never** rewrite **existing** `.ver` files already on the target branch (they are locked). Do not merge with identical versions across branches when the change warrants a bump. Changelog assembly is **deployment-time**, not **`make`**.
+When bumping, add **`version/entries/*.ver`**, run **`make finalize-version-locked`**, then **`./scripts/gen_version_def.sh`** or **`make`** so **`version_def.h`** refreshes from **`version/locked/`**. Do not merge with identical versions across branches when the change warrants a bump. Changelog assembly is **deployment-time**, not **`make`**.

@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # Emit a unified version record from userland/shell/version_def.h.
 # Optional: excerpt generated userland/shell/version_changelog.c when present.
-# Release notes are authored under version/entries/*.ver (mirrored under version/locked/).
+# Release notes are authored under version/entries/*.ver (published under version/locked/).
 # Usage: scripts/export_version_record.sh [--json]
 # For multi-branch deployment: run once per checkout and concatenate or merge outputs.
 
