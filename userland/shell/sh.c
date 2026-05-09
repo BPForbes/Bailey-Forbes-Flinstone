@@ -133,10 +133,6 @@ static int parse_vm_args(int argc, char *argv[]) {
 
 /* Spawn popup terminal running shell in VM sandbox. Returns 0 on success, -1 if no terminal. */
 static int vm_spawn_popup(const char *exe_path) {
-#ifdef __EMSCRIPTEN__
-    (void)exe_path;
-    return -1;
-#else
     char cmd[PATH_MAX + 128];
     snprintf(cmd, sizeof(cmd), "cd '%s' && exec '%s'", g_vm_root, exe_path);
     pid_t pid = fork();
@@ -155,7 +151,6 @@ static int vm_spawn_popup(const char *exe_path) {
     if (WEXITSTATUS(status) == 127)
         return -1;
     return 0;
-#endif
 }
 
 static int vm_configure_root_from_cwd(void) {
@@ -221,10 +216,6 @@ int main(int argc, char *argv[]) {
 
     /* VM popup: -Virtualization -y with no other args (no -vm) -> spawn popup once */
     if (g_vm_mode && g_vm_cleanup && argc == 1 && !g_vm_run_embedded) {
-#ifdef __EMSCRIPTEN__
-        fprintf(stderr, "[VM] In the browser, add -vm to run the embedded guest in-page (popup terminals are unavailable).\n");
-        exit(0);
-#endif
         char tmpl[] = "/tmp/flintstone_vm_XXXXXX";
         char *root = mkdtemp(tmpl);
         if (!root) {
@@ -330,9 +321,9 @@ int main(int argc, char *argv[]) {
     signal(SIGINT, SIG_IGN);
     pq_init(&g_pool.pq);
     g_pool.shutting_down = 0;
-#ifndef BATCH_SINGLE_THREAD
     pthread_mutex_init(&g_pool.mutex, NULL);
     pthread_cond_init(&g_pool.cond, NULL);
+#ifndef BATCH_SINGLE_THREAD
     for (int i = 0; i < NUM_WORKERS; i++) {
         pthread_create(&g_pool.workers[i], NULL, worker_thread, NULL);
     }
@@ -466,11 +457,7 @@ int main(int argc, char *argv[]) {
         }
     }
     
-    if (
-#ifndef __EMSCRIPTEN__
-        isatty(STDIN_FILENO) &&
-#endif
-        strcmp(current_disk_file, "drive.txt") == 0) {
+    if (isatty(STDIN_FILENO) && strcmp(current_disk_file, "drive.txt") == 0) {
         FILE *testfp = fopen(current_disk_file, "r");
         if (!testfp) {
             printf("No default disk file '%s'. Creating fresh with 32 clusters of %d bytes each.\n",
@@ -500,14 +487,10 @@ int main(int argc, char *argv[]) {
         }
     }
     
-#ifdef __EMSCRIPTEN__
-    interactive_shell();
-#else
     if (!isatty(STDIN_FILENO))
         exit(0);
     else
         interactive_shell();
-#endif
     
 #ifndef BATCH_SINGLE_THREAD
     pthread_mutex_lock(&g_pool.mutex);
@@ -516,11 +499,9 @@ int main(int argc, char *argv[]) {
     pthread_mutex_unlock(&g_pool.mutex);
     for (int i = 0; i < NUM_WORKERS; i++)
         pthread_join(g_pool.workers[i], NULL);
+#endif
     pthread_mutex_destroy(&g_pool.mutex);
     pthread_cond_destroy(&g_pool.cond);
-#else
-    g_pool.shutting_down = 1;
-#endif
     drivers_shutdown();
     path_log_shutdown();
     fs_service_glue_shutdown();

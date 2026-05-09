@@ -41,24 +41,9 @@ typedef enum {
     FL_SYS_CLOSE = 9,
 } fl_syscall_no_t;
 
-/**
- * Opcode bundled for fl_syscall_dispatch: distinct from uint64_t bridge args so
- * syscall number and a0 cannot be accidentally transposed at call sites.
- */
-typedef struct fl_syscall_invocation {
-    fl_syscall_no_t number;
-} fl_syscall_invocation_t;
-
-static inline fl_syscall_invocation_t fl_syscall_invoke(fl_syscall_no_t number) {
-    fl_syscall_invocation_t inv;
-    inv.number = number;
-    return inv;
-}
-
 void fl_sys_bootstrap(void);
 void fl_sys_shutdown(void);
-long fl_syscall_dispatch(fl_syscall_invocation_t invocation,
-                         uint64_t a0, uint64_t a1, uint64_t a2, uint64_t a3);
+long fl_syscall_dispatch(fl_syscall_no_t no, uintptr_t a0, uintptr_t a1, uintptr_t a2, uintptr_t a3);
 
 #ifdef __cplusplus
 }

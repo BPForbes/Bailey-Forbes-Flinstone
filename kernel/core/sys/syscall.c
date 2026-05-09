@@ -2,7 +2,6 @@
 #include "fl/ipc.h"
 #include "vrt.h"
 
-#include <stdint.h>
 #include <unistd.h>
 
 void fl_sys_bootstrap(void) {
@@ -13,22 +12,17 @@ void fl_sys_shutdown(void) {
     vrt_shutdown();
 }
 
-/**
- * Host syscall multiplexer: stdin/stdout, pipes, message queues, and VRT handles.
- * Arguments are 64-bit so the VM I/O bridge can pass full guest register pairs on wasm32.
- */
-long fl_syscall_dispatch(fl_syscall_invocation_t invocation,
-                           uint64_t a0, uint64_t a1, uint64_t a2, uint64_t a3) {
-    switch (invocation.number) {
+long fl_syscall_dispatch(fl_syscall_no_t no, uintptr_t a0, uintptr_t a1, uintptr_t a2, uintptr_t a3) {
+    switch (no) {
         case FL_SYS_WRITE: {
-            const char *buf = (const char *)(uintptr_t)a0;
+            const char *buf = (const char *)a0;
             size_t n = (size_t)a1;
             if (!buf) return -1;
             ssize_t wr = write(STDOUT_FILENO, buf, n);
             return (wr < 0) ? -1 : (long)wr;
         }
         case FL_SYS_READ: {
-            char *buf = (char *)(uintptr_t)a0;
+            char *buf = (char *)a0;
             size_t n = (size_t)a1;
             if (!buf) return -1;
             ssize_t rd = read(STDIN_FILENO, buf, n);
@@ -47,17 +41,17 @@ long fl_syscall_dispatch(fl_syscall_invocation_t invocation,
         }
         case FL_SYS_PIPE_READ: {
             vrt_entry_t entry;
-            vrt_handle_t h = (vrt_handle_t)(uintptr_t)a0;
+            vrt_handle_t h = (vrt_handle_t)a0;
             if (vrt_get(h, &entry) != 0 || entry.type != VRT_TYPE_PIPE || !entry.resource)
                 return -1;
-            return (long)pipe_read((pipe_t *)entry.resource, (void *)(uintptr_t)a1, (size_t)a2);
+            return (long)pipe_read((pipe_t *)entry.resource, (void *)a1, (size_t)a2);
         }
         case FL_SYS_PIPE_WRITE: {
             vrt_entry_t entry;
-            vrt_handle_t h = (vrt_handle_t)(uintptr_t)a0;
+            vrt_handle_t h = (vrt_handle_t)a0;
             if (vrt_get(h, &entry) != 0 || entry.type != VRT_TYPE_PIPE || !entry.resource)
                 return -1;
-            return (long)pipe_write((pipe_t *)entry.resource, (const void *)(uintptr_t)a1, (size_t)a2);
+            return (long)pipe_write((pipe_t *)entry.resource, (const void *)a1, (size_t)a2);
         }
         case FL_SYS_MSGQ_CREATE: {
             size_t max_msgs = (size_t)a0;
@@ -73,21 +67,21 @@ long fl_syscall_dispatch(fl_syscall_invocation_t invocation,
         }
         case FL_SYS_MSGQ_SEND: {
             vrt_entry_t entry;
-            vrt_handle_t h = (vrt_handle_t)(uintptr_t)a0;
+            vrt_handle_t h = (vrt_handle_t)a0;
             if (vrt_get(h, &entry) != 0 || entry.type != VRT_TYPE_MSGQ || !entry.resource)
                 return -1;
-            return (long)msgq_send((msgq_t *)entry.resource, (const void *)(uintptr_t)a1, (size_t)a2);
+            return (long)msgq_send((msgq_t *)entry.resource, (const void *)a1, (size_t)a2);
         }
         case FL_SYS_MSGQ_RECV: {
             vrt_entry_t entry;
-            vrt_handle_t h = (vrt_handle_t)(uintptr_t)a0;
+            vrt_handle_t h = (vrt_handle_t)a0;
             if (vrt_get(h, &entry) != 0 || entry.type != VRT_TYPE_MSGQ || !entry.resource)
                 return -1;
-            return (long)msgq_receive((msgq_t *)entry.resource, (void *)(uintptr_t)a1, (size_t)a2, a3);
+            return (long)msgq_receive((msgq_t *)entry.resource, (void *)a1, (size_t)a2, (uint64_t)a3);
         }
         case FL_SYS_CLOSE: {
             vrt_entry_t entry;
-            vrt_handle_t h = (vrt_handle_t)(uintptr_t)a0;
+            vrt_handle_t h = (vrt_handle_t)a0;
             if (vrt_get(h, &entry) != 0) return -1;
             if (entry.type == VRT_TYPE_PIPE) {
                 pipe_destroy((pipe_t *)entry.resource);

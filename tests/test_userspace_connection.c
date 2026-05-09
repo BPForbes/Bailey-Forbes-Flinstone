@@ -9,44 +9,44 @@
 
 static void test_pipe_syscalls(void) {
     fl_sys_bootstrap();
-    long h = fl_syscall_dispatch(fl_syscall_invoke(FL_SYS_PIPE_CREATE), 64, 0, 0, 0);
+    long h = fl_syscall_dispatch(FL_SYS_PIPE_CREATE, 64, 0, 0, 0);
     assert(h >= 0);
-    assert(fl_syscall_dispatch(fl_syscall_invoke(FL_SYS_PIPE_WRITE), (uintptr_t)h, 0, 1, 0) == -1);
-    assert(fl_syscall_dispatch(fl_syscall_invoke(FL_SYS_PIPE_READ), (uintptr_t)h, 0, 1, 0) == -1);
+    assert(fl_syscall_dispatch(FL_SYS_PIPE_WRITE, (uintptr_t)h, 0, 1, 0) == -1);
+    assert(fl_syscall_dispatch(FL_SYS_PIPE_READ, (uintptr_t)h, 0, 1, 0) == -1);
 
     const char *msg = "hello-userspace";
-    long w = fl_syscall_dispatch(fl_syscall_invoke(FL_SYS_PIPE_WRITE), (uintptr_t)h, (uintptr_t)msg, strlen(msg), 0);
+    long w = fl_syscall_dispatch(FL_SYS_PIPE_WRITE, (uintptr_t)h, (uintptr_t)msg, strlen(msg), 0);
     assert(w == (long)strlen(msg));
 
     char out[64] = {0};
-    long r = fl_syscall_dispatch(fl_syscall_invoke(FL_SYS_PIPE_READ), (uintptr_t)h, (uintptr_t)out, sizeof(out), 0);
+    long r = fl_syscall_dispatch(FL_SYS_PIPE_READ, (uintptr_t)h, (uintptr_t)out, sizeof(out), 0);
     assert(r == (long)strlen(msg));
     assert(memcmp(out, msg, strlen(msg)) == 0);
-    assert(fl_syscall_dispatch(fl_syscall_invoke(FL_SYS_CLOSE), (uintptr_t)h, 0, 0, 0) == 0);
+    assert(fl_syscall_dispatch(FL_SYS_CLOSE, (uintptr_t)h, 0, 0, 0) == 0);
     fl_sys_shutdown();
 }
 
 static void test_msgq_syscalls(void) {
     fl_sys_bootstrap();
-    long h = fl_syscall_dispatch(fl_syscall_invoke(FL_SYS_MSGQ_CREATE), 4, 32, 0, 0);
+    long h = fl_syscall_dispatch(FL_SYS_MSGQ_CREATE, 4, 32, 0, 0);
     assert(h >= 0);
 
     const char *msg = "kernel->userspace";
     char oversized[33] = {0};
-    assert(fl_syscall_dispatch(fl_syscall_invoke(FL_SYS_MSGQ_SEND), (uintptr_t)h, (uintptr_t)oversized, sizeof(oversized), 0) == -1);
+    assert(fl_syscall_dispatch(FL_SYS_MSGQ_SEND, (uintptr_t)h, (uintptr_t)oversized, sizeof(oversized), 0) == -1);
 
-    long s = fl_syscall_dispatch(fl_syscall_invoke(FL_SYS_MSGQ_SEND), (uintptr_t)h, (uintptr_t)msg, strlen(msg) + 1, 0);
+    long s = fl_syscall_dispatch(FL_SYS_MSGQ_SEND, (uintptr_t)h, (uintptr_t)msg, strlen(msg) + 1, 0);
     assert(s == 0);
 
     char out[32] = {0};
-    long rc = fl_syscall_dispatch(fl_syscall_invoke(FL_SYS_MSGQ_RECV), (uintptr_t)h, (uintptr_t)out, sizeof(out), 0);
+    long rc = fl_syscall_dispatch(FL_SYS_MSGQ_RECV, (uintptr_t)h, (uintptr_t)out, sizeof(out), 0);
     assert(rc == 0);
     assert(strcmp(out, msg) == 0);
 
     struct timespec t0;
     struct timespec t1;
     clock_gettime(CLOCK_MONOTONIC, &t0);
-    assert(fl_syscall_dispatch(fl_syscall_invoke(FL_SYS_MSGQ_RECV), (uintptr_t)h, (uintptr_t)out, sizeof(out), 5) == -1);
+    assert(fl_syscall_dispatch(FL_SYS_MSGQ_RECV, (uintptr_t)h, (uintptr_t)out, sizeof(out), 5) == -1);
     clock_gettime(CLOCK_MONOTONIC, &t1);
     {
         long long sec = (long long)(t1.tv_sec - t0.tv_sec);
@@ -63,23 +63,23 @@ static void test_msgq_syscalls(void) {
         }
     }
 
-    assert(fl_syscall_dispatch(fl_syscall_invoke(FL_SYS_CLOSE), (uintptr_t)h, 0, 0, 0) == 0);
+    assert(fl_syscall_dispatch(FL_SYS_CLOSE, (uintptr_t)h, 0, 0, 0) == 0);
     fl_sys_shutdown();
 }
 
 static void test_syscall_rejects_wrong_handle_type(void) {
     fl_sys_bootstrap();
-    long pipe_h = fl_syscall_dispatch(fl_syscall_invoke(FL_SYS_PIPE_CREATE), 64, 0, 0, 0);
+    long pipe_h = fl_syscall_dispatch(FL_SYS_PIPE_CREATE, 64, 0, 0, 0);
     assert(pipe_h >= 0);
     char buf[8] = {0};
-    assert(fl_syscall_dispatch(fl_syscall_invoke(FL_SYS_MSGQ_SEND), (uintptr_t)pipe_h, (uintptr_t)buf, 1, 0) == -1);
+    assert(fl_syscall_dispatch(FL_SYS_MSGQ_SEND, (uintptr_t)pipe_h, (uintptr_t)buf, 1, 0) == -1);
 
-    long msgq_h = fl_syscall_dispatch(fl_syscall_invoke(FL_SYS_MSGQ_CREATE), 2, 16, 0, 0);
+    long msgq_h = fl_syscall_dispatch(FL_SYS_MSGQ_CREATE, 2, 16, 0, 0);
     assert(msgq_h >= 0);
-    assert(fl_syscall_dispatch(fl_syscall_invoke(FL_SYS_PIPE_READ), (uintptr_t)msgq_h, (uintptr_t)buf, sizeof(buf), 0) == -1);
+    assert(fl_syscall_dispatch(FL_SYS_PIPE_READ, (uintptr_t)msgq_h, (uintptr_t)buf, sizeof(buf), 0) == -1);
 
-    assert(fl_syscall_dispatch(fl_syscall_invoke(FL_SYS_CLOSE), (uintptr_t)msgq_h, 0, 0, 0) == 0);
-    assert(fl_syscall_dispatch(fl_syscall_invoke(FL_SYS_CLOSE), (uintptr_t)pipe_h, 0, 0, 0) == 0);
+    assert(fl_syscall_dispatch(FL_SYS_CLOSE, (uintptr_t)msgq_h, 0, 0, 0) == 0);
+    assert(fl_syscall_dispatch(FL_SYS_CLOSE, (uintptr_t)pipe_h, 0, 0, 0) == 0);
     fl_sys_shutdown();
 }
 
