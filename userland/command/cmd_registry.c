@@ -15,6 +15,7 @@ static const cmd_name_ent_t cmd_registry[] = {
     {"diskdel", FL_SCMD_DISKDEL},
     {"diskfiles", FL_SCMD_DISKFILES},
     {"diskget", FL_SCMD_DISKGET},
+    {"diskmkdir", FL_SCMD_DISKMKDIR},
     {"diskput", FL_SCMD_DISKPUT},
     {"dir", FL_SCMD_DIR},
     {"du", FL_SCMD_DU},

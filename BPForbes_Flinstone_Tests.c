@@ -1063,8 +1063,9 @@ void test_diskput_fat32_roundtrip(void) {
     CU_ASSERT_TRUE(fwrite(b, 1, sizeof(b), fp) == sizeof(b));
     fclose(fp);
     CU_ASSERT_TRUE(execute_command_str("format fat_stor.img z 4 1024") == 0);
-    CU_ASSERT_TRUE(execute_command_str("diskput bin_src.dat BINRES.DAT") == 0);
-    CU_ASSERT_TRUE(execute_command_str("diskget BINRES.DAT bin_out.dat") == 0);
+    CU_ASSERT_TRUE(execute_command_str("diskmkdir TSTSUB") == 0);
+    CU_ASSERT_TRUE(execute_command_str("diskput bin_src.dat TSTSUB/BINRES.DAT") == 0);
+    CU_ASSERT_TRUE(execute_command_str("diskget TSTSUB/BINRES.DAT bin_out.dat") == 0);
     fp = fopen("bin_out.dat", "rb");
     CU_ASSERT_PTR_NOT_NULL(fp);
     unsigned char out[32];

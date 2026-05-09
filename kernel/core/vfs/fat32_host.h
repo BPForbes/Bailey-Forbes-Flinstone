@@ -47,13 +47,15 @@ int fat32_host_format_image(const char *path, const char *volume_label,
 int fat32_host_shell_cluster_byte_offset(int shell_clu, uint64_t *out_off);
 
 /*
- * Store arbitrary binary files in the FAT32 root directory (alongside FLINT.DAT).
- * Names are FAT 8.3 (long names are mangled to NAME~N.EXT). Requires loaded volume.
- * Paths are host files; disk image is current_disk_file (see common.h).
+ * Store arbitrary binary files on FAT32 volumes (root or subdirectories).
+ * Paths use '/' (or '\\'); parent dirs are created on diskput when missing.
+ * Names are FAT 8.3 (long names mangled to NAME~N.EXT). Requires loaded volume.
  */
-int fat32_host_file_put(const char *host_src_path, const char *name_on_disk_or_null);
-int fat32_host_file_get(const char *name_on_disk_83, const char *host_dst_path);
-int fat32_host_file_del(const char *name_on_disk_83);
-void fat32_host_file_list(void);
+int fat32_host_file_put(const char *host_src_path, const char *path_on_disk_or_null);
+int fat32_host_file_get(const char *path_on_disk, const char *host_dst_path);
+int fat32_host_file_del(const char *path_on_disk);
+void fat32_host_file_list(const char *subdir_or_null);
+/* Create nested directories (mkdir -p semantics). Path is relative to volume root. */
+int fat32_host_dir_mk(const char *path_on_disk);
 
 #endif /* FAT32_HOST_H */

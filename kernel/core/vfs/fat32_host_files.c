@@ -1,5 +1,5 @@
 /*
- * FAT32 host image: store arbitrary binary files in the root directory (8.3 / mangled names).
+ * FAT32 host image: arbitrary binary files and subdirectories (8.3 / mangled names).
  */
 
 #include "fat32_host.h"
@@ -81,8 +81,114 @@ static int fat_write_entry(int fd, const Fat32HostVol *v, uint32_t cl, uint32_t 
     return 0;
 }
 
-static int root_dir_byte_off(const Fat32HostVol *v, uint64_t *out) {
-    return cluster_data_byte_off(v, v->root_cluster, out);
+static int dirent_matches_83(const uint8_t *e, const char name11[11]) {
+    return memcmp(e, name11, 11) == 0;
+}
+
+static int write_dirent_in_dir(int fd, const Fat32HostVol *v, uint32_t dir_clu, int slot, const uint8_t ent[32]) {
+    uint64_t base;
+    if (cluster_data_byte_off(v, dir_clu, &base) != 0)
+        return -1;
+    uint64_t ent_off = base + (uint64_t)slot * 32u;
+    return disk_host_pwrite_vol(fd, ent, 32, (off_t)ent_off) == 32 ? 0 : -1;
+}
+
+/* want_dir: 1 = directory entries only, 0 = non-directory files only */
+static int find_dirent_in_dir(int fd, const Fat32HostVol *v, uint32_t dir_clu, const char name11[11], int want_dir,
+                              int *slot_out, uint8_t *ent_copy32) {
+    uint64_t root_off;
+    if (cluster_data_byte_off(v, dir_clu, &root_off) != 0)
+        return -1;
+    uint32_t bpc = (uint32_t)v->bytes_per_cluster * (uint32_t)v->sectors_per_cluster;
+    uint8_t *root = malloc(bpc);
+    if (!root)
+        return -1;
+    if (disk_host_pread_vol(fd, root, bpc, (off_t)root_off) != (ssize_t)bpc) {
+        free(root);
+        return -1;
+    }
+    int nent = (int)(bpc / 32u);
+    int match = -1;
+    int empty = -1;
+    for (int i = 0; i < nent; i++) {
+        uint8_t *e = root + (uint32_t)i * 32u;
+        if (e[0] == 0) {
+            if (empty < 0)
+                empty = i;
+            continue;
+        }
+        if (e[0] == 0xE5) {
+            if (empty < 0)
+                empty = i;
+            continue;
+        }
+        if ((e[0x0B] & 0x08) != 0)
+            continue;
+        if ((e[0x0B] & 0x0F) == 0x0F)
+            continue; /* VFAT LFN — skip */
+        if (!dirent_matches_83(e, name11))
+            continue;
+        if (want_dir == 1 && (e[0x0B] & 0x10) == 0)
+            continue;
+        if (want_dir == 0 && (e[0x0B] & 0x10) != 0)
+            continue;
+        match = i;
+        if (ent_copy32)
+            memcpy(ent_copy32, e, 32);
+        break;
+    }
+    free(root);
+    if (match >= 0) {
+        *slot_out = match;
+        return 1;
+    }
+    if (empty >= 0) {
+        *slot_out = empty;
+        return 0;
+    }
+    return -2;
+}
+
+static int normalize_on_disk_path(char *out, size_t outsz, const char *in) {
+    if (!in || !in[0] || outsz < 4)
+        return -1;
+    size_t o = 0;
+    for (const unsigned char *p = (const unsigned char *)in; *p && o + 1 < outsz; p++) {
+        if (*p == '\\')
+            out[o++] = '/';
+        else if (*p < 32 || *p > 126)
+            return -1;
+        else
+            out[o++] = (char)*p;
+    }
+    out[o] = '\0';
+    /* trim leading slashes */
+    char *s = out;
+    while (*s == '/')
+        s++;
+    if (s != out)
+        memmove(out, s, strlen(s) + 1);
+    /* collapse "//" */
+    char tmp[CWD_MAX];
+    size_t L = strlen(out);
+    if (L >= sizeof(tmp))
+        return -1;
+    size_t w = 0;
+    int prev_sl = 0;
+    for (size_t i = 0; i < L; i++) {
+        if (out[i] == '/') {
+            if (!prev_sl) {
+                tmp[w++] = '/';
+                prev_sl = 1;
+            }
+        } else {
+            tmp[w++] = out[i];
+            prev_sl = 0;
+        }
+    }
+    tmp[w] = '\0';
+    memcpy(out, tmp, w + 1);
+    return 0;
 }
 
 static int is_dos_char(unsigned char c) {
@@ -185,70 +291,6 @@ static int build_long_mangle(const char *base, const char *ext, int tilde_idx, c
         el = 3u;
     memcpy(out11 + 8, e3, el);
     return 0;
-}
-
-static int dirent_matches_83(const uint8_t *e, const char name11[11]) {
-    return memcmp(e, name11, 11) == 0;
-}
-
-/* Returns: 1 = found name (slot set), 0 = not found but slot is first free (slot set), -2 = root full, -1 = I/O */
-static int find_dirent_root(int fd, const Fat32HostVol *v, const char name11[11], int *slot_out,
-                            uint8_t *ent_copy32) {
-    uint64_t root_off;
-    if (root_dir_byte_off(v, &root_off) != 0)
-        return -1;
-    uint32_t bpc = (uint32_t)v->bytes_per_cluster * (uint32_t)v->sectors_per_cluster;
-    uint8_t *root = malloc(bpc);
-    if (!root)
-        return -1;
-    if (disk_host_pread_vol(fd, root, bpc, (off_t)root_off) != (ssize_t)bpc) {
-        free(root);
-        return -1;
-    }
-    int nent = (int)(bpc / 32u);
-    int match = -1;
-    int empty = -1;
-    for (int i = 0; i < nent; i++) {
-        uint8_t *e = root + (uint32_t)i * 32u;
-        if (e[0] == 0) {
-            if (empty < 0)
-                empty = i;
-            continue;
-        }
-        if (e[0] == 0xE5) {
-            if (empty < 0)
-                empty = i;
-            continue;
-        }
-        if ((e[0x0B] & 0x08) != 0)
-            continue;
-        if (dirent_matches_83(e, name11)) {
-            match = i;
-            if (ent_copy32)
-                memcpy(ent_copy32, e, 32);
-            break;
-        }
-    }
-    if (match >= 0) {
-        *slot_out = match;
-        free(root);
-        return 1;
-    }
-    if (empty >= 0) {
-        *slot_out = empty;
-        free(root);
-        return 0;
-    }
-    free(root);
-    return -2;
-}
-
-static int write_dirent_slot(int fd, const Fat32HostVol *v, int slot, const uint8_t ent[32]) {
-    uint64_t root_off;
-    if (root_dir_byte_off(v, &root_off) != 0)
-        return -1;
-    uint64_t ent_off = root_off + (uint64_t)slot * 32u;
-    return disk_host_pwrite_vol(fd, ent, 32, (off_t)ent_off) == 32 ? 0 : -1;
 }
 
 static void free_cluster_chain(int fd, const Fat32HostVol *v, uint32_t first) {
@@ -443,13 +485,239 @@ static void format_83_display(const char n11[11], char *dst, size_t dstsz) {
         snprintf(dst, dstsz, "%s", base);
 }
 
-static int pick_mangled_name(int fd, const Fat32HostVol *v, const char *base, const char *ext,
+static int find_name_any(int fd, const Fat32HostVol *v, uint32_t dir_clu, const char name11[11], int *slot_out,
+                         uint8_t *ent_copy32) {
+    uint64_t base_off;
+    if (cluster_data_byte_off(v, dir_clu, &base_off) != 0)
+        return -1;
+    uint32_t bpc = (uint32_t)v->bytes_per_cluster * (uint32_t)v->sectors_per_cluster;
+    uint8_t *buf = malloc(bpc);
+    if (!buf)
+        return -1;
+    if (disk_host_pread_vol(fd, buf, bpc, (off_t)base_off) != (ssize_t)bpc) {
+        free(buf);
+        return -1;
+    }
+    int nent = (int)(bpc / 32u);
+    int match = -1;
+    int empty = -1;
+    for (int i = 0; i < nent; i++) {
+        uint8_t *e = buf + (uint32_t)i * 32u;
+        if (e[0] == 0) {
+            if (empty < 0)
+                empty = i;
+            continue;
+        }
+        if (e[0] == 0xE5) {
+            if (empty < 0)
+                empty = i;
+            continue;
+        }
+        if ((e[0x0B] & 0x08) != 0)
+            continue;
+        if ((e[0x0B] & 0x0F) == 0x0F)
+            continue;
+        if (!dirent_matches_83(e, name11))
+            continue;
+        match = i;
+        if (ent_copy32)
+            memcpy(ent_copy32, e, 32);
+        break;
+    }
+    free(buf);
+    if (match >= 0) {
+        *slot_out = match;
+        return 1;
+    }
+    if (empty >= 0) {
+        *slot_out = empty;
+        return 0;
+    }
+    return -2;
+}
+
+static int alloc_one_cluster_cleared(int fd, const Fat32HostVol *v, uint32_t *out_clu) {
+    uint32_t ch[1];
+    if (collect_free_clusters(fd, v, 1, ch) != 0)
+        return -1;
+    if (fat_write_entry(fd, v, ch[0], 0x0FFFFFF8u) != 0)
+        return -1;
+    uint32_t bpc = (uint32_t)v->bytes_per_cluster * (uint32_t)v->sectors_per_cluster;
+    unsigned char *z = (unsigned char *)calloc(1, bpc);
+    if (!z) {
+        fat_write_entry(fd, v, ch[0], 0u);
+        return -1;
+    }
+    uint64_t d_off;
+    if (cluster_data_byte_off(v, ch[0], &d_off) != 0) {
+        free(z);
+        fat_write_entry(fd, v, ch[0], 0u);
+        return -1;
+    }
+    if (disk_host_pwrite_vol(fd, z, bpc, (off_t)d_off) != (ssize_t)bpc) {
+        free(z);
+        fat_write_entry(fd, v, ch[0], 0u);
+        return -1;
+    }
+    free(z);
+    *out_clu = ch[0];
+    return 0;
+}
+
+static void fat_make_dot_entry(uint8_t de[32], int is_dotdot, uint32_t self_or_child_clu, uint32_t parent_clu) {
+    memset(de, 0, 32);
+    if (!is_dotdot) {
+        de[0] = '.';
+        memset(de + 1, ' ', 10);
+    } else {
+        de[0] = de[1] = '.';
+        memset(de + 2, ' ', 9);
+    }
+    de[0x0B] = 0x10;
+    uint32_t cl = is_dotdot ? parent_clu : self_or_child_clu;
+    st_le16(de + 0x14, (uint16_t)((cl >> 16) & 0xFFFFu));
+    st_le16(de + 0x1A, (uint16_t)(cl & 0xFFFFu));
+}
+
+static int dir_component_to_name11(const char *comp, char out11[11]) {
+    memset(out11, ' ', 11);
+    if (human_name_to_11(comp, out11) == 0)
+        return 0;
+    char b[64], e[16];
+    split_base_ext(comp, b, sizeof(b), e, sizeof(e));
+    ascii_upcase_inplace(b);
+    ascii_upcase_inplace(e);
+    if (!name_fits_short(b, e))
+        return -1;
+    return pack_83(b, e, out11);
+}
+
+static int resolve_or_mkdir_component(int fd, Fat32HostVol *v, uint32_t parent_clu, const char *comp,
+                                      uint32_t *child_clu_out, int create) {
+    char name11[11];
+    if (dir_component_to_name11(comp, name11) != 0)
+        return -1;
+    int slot;
+    uint8_t ent[32];
+    int fany = find_name_any(fd, v, parent_clu, name11, &slot, ent);
+    if (fany == 1) {
+        if ((ent[0x0B] & 0x10) != 0) {
+            *child_clu_out = ld_le16(ent + 0x1A) | ((uint32_t)ld_le16(ent + 0x14) << 16);
+            return 0;
+        }
+        return -1;
+    }
+    if (!create)
+        return -1;
+    if (fany != 0)
+        return -1;
+    uint32_t newc = 0;
+    if (alloc_one_cluster_cleared(fd, v, &newc) != 0)
+        return -1;
+    uint32_t bpc = (uint32_t)v->bytes_per_cluster * (uint32_t)v->sectors_per_cluster;
+    uint8_t *clusterbuf = (uint8_t *)calloc(1, bpc);
+    if (!clusterbuf) {
+        fat_write_entry(fd, v, newc, 0u);
+        return -1;
+    }
+    uint8_t dot[32], dotdot[32];
+    fat_make_dot_entry(dot, 0, newc, parent_clu);
+    fat_make_dot_entry(dotdot, 1, newc, parent_clu);
+    memcpy(clusterbuf, dot, 32);
+    memcpy(clusterbuf + 32, dotdot, 32);
+    uint64_t d_off;
+    if (cluster_data_byte_off(v, newc, &d_off) != 0) {
+        free(clusterbuf);
+        fat_write_entry(fd, v, newc, 0u);
+        return -1;
+    }
+    if (disk_host_pwrite_vol(fd, clusterbuf, bpc, (off_t)d_off) != (ssize_t)bpc) {
+        free(clusterbuf);
+        fat_write_entry(fd, v, newc, 0u);
+        return -1;
+    }
+    free(clusterbuf);
+    uint8_t de[32];
+    memset(de, 0, sizeof(de));
+    memcpy(de, name11, 11);
+    de[0x0B] = 0x10;
+    st_le16(de + 0x14, (uint16_t)((newc >> 16) & 0xFFFFu));
+    st_le16(de + 0x1A, (uint16_t)(newc & 0xFFFFu));
+    st_le32(de + 0x1C, 0u);
+    if (write_dirent_in_dir(fd, v, parent_clu, slot, de) != 0) {
+        fat_write_entry(fd, v, newc, 0u);
+        return -1;
+    }
+    *child_clu_out = newc;
+    return 0;
+}
+
+static int walk_dir_path(int fd, Fat32HostVol *v, const char *dir_path_norm, uint32_t *out_clu, int create_missing) {
+    if (!dir_path_norm || !dir_path_norm[0]) {
+        *out_clu = v->root_cluster;
+        return 0;
+    }
+    uint32_t cur = v->root_cluster;
+    char buf[CWD_MAX];
+    strncpy(buf, dir_path_norm, sizeof(buf) - 1);
+    buf[sizeof(buf) - 1] = '\0';
+    char *p = buf;
+    while (*p) {
+        while (*p == '/')
+            p++;
+        if (!*p)
+            break;
+        char *q = p;
+        while (*q && *q != '/')
+            q++;
+        char saved = *q;
+        *q = '\0';
+        if (!strcmp(p, ".") || !strcmp(p, "..")) {
+            *q = saved;
+            return -1;
+        }
+        uint32_t nxt = 0;
+        if (resolve_or_mkdir_component(fd, v, cur, p, &nxt, create_missing) != 0) {
+            *q = saved;
+            return -1;
+        }
+        cur = nxt;
+        *q = saved;
+        p = q;
+        if (saved)
+            p++;
+    }
+    *out_clu = cur;
+    return 0;
+}
+
+static void split_parent_and_file(char *norm_full, char *dir_out, size_t dir_sz, char *file_out, size_t file_sz) {
+    dir_out[0] = '\0';
+    file_out[0] = '\0';
+    const char *last = strrchr(norm_full, '/');
+    if (!last) {
+        strncpy(file_out, norm_full, file_sz - 1);
+        file_out[file_sz - 1] = '\0';
+        return;
+    }
+    size_t dl = (size_t)(last - norm_full);
+    if (dl >= dir_sz)
+        dl = dir_sz - 1;
+    if (dl > 0) {
+        memcpy(dir_out, norm_full, dl);
+        dir_out[dl] = '\0';
+    }
+    strncpy(file_out, last + 1, file_sz - 1);
+    file_out[file_sz - 1] = '\0';
+}
+
+static int pick_mangled_name(int fd, const Fat32HostVol *v, uint32_t parent_clu, const char *base, const char *ext,
                               char out11[11]) {
     if (name_fits_short(base, ext)) {
         if (pack_83(base, ext, out11) != 0)
             return -1;
         int slot;
-        int r = find_dirent_root(fd, v, out11, &slot, NULL);
+        int r = find_name_any(fd, v, parent_clu, out11, &slot, NULL);
         if (r == 0)
             return 0;
         if (r < 0)
@@ -459,7 +727,7 @@ static int pick_mangled_name(int fd, const Fat32HostVol *v, const char *base, co
         if (build_long_mangle(base, ext, t, out11) != 0)
             continue;
         int slot;
-        int r = find_dirent_root(fd, v, out11, &slot, NULL);
+        int r = find_name_any(fd, v, parent_clu, out11, &slot, NULL);
         if (r == 1)
             continue;
         if (r == -2)
@@ -472,7 +740,7 @@ static int pick_mangled_name(int fd, const Fat32HostVol *v, const char *base, co
     return -1;
 }
 
-int fat32_host_file_put(const char *host_src_path, const char *name_on_disk_or_null) {
+int fat32_host_file_put(const char *host_src_path, const char *path_on_disk_or_null) {
     if (!g_disk_host_fat32 || !g_fat32_host_vol.valid || !host_src_path)
         return -1;
     struct stat st;
@@ -489,26 +757,46 @@ int fat32_host_file_put(const char *host_src_path, const char *name_on_disk_or_n
         return -1;
     }
 
-    char name11[11];
-    memset(name11, ' ', sizeof(name11));
-    if (name_on_disk_or_null && name_on_disk_or_null[0]) {
-        if (human_name_to_11(name_on_disk_or_null, name11) != 0) {
-            char base[64], ext[16];
-            split_base_ext(name_on_disk_or_null, base, sizeof(base), ext, sizeof(ext));
-            ascii_upcase_inplace(base);
-            ascii_upcase_inplace(ext);
-            if (pick_mangled_name(img, &g_fat32_host_vol, base, ext, name11) != 0) {
-                close(src);
-                close(img);
-                return -1;
-            }
+    char norm[CWD_MAX];
+    if (path_on_disk_or_null && path_on_disk_or_null[0]) {
+        if (normalize_on_disk_path(norm, sizeof(norm), path_on_disk_or_null) != 0) {
+            close(src);
+            close(img);
+            return -1;
         }
     } else {
+        char base_only[CWD_MAX];
+        split_base_ext(host_src_path, base_only, sizeof(base_only), NULL, 0);
+        if (normalize_on_disk_path(norm, sizeof(norm), base_only) != 0) {
+            close(src);
+            close(img);
+            return -1;
+        }
+    }
+
+    char dirpart[CWD_MAX], filepart[256];
+    split_parent_and_file(norm, dirpart, sizeof(dirpart), filepart, sizeof(filepart));
+    if (!filepart[0]) {
+        close(src);
+        close(img);
+        return -1;
+    }
+
+    uint32_t parent_clu = 0;
+    if (walk_dir_path(img, &g_fat32_host_vol, dirpart, &parent_clu, 1) != 0) {
+        close(src);
+        close(img);
+        return -1;
+    }
+
+    char name11[11];
+    memset(name11, ' ', sizeof(name11));
+    if (human_name_to_11(filepart, name11) != 0) {
         char base[64], ext[16];
-        split_base_ext(host_src_path, base, sizeof(base), ext, sizeof(ext));
+        split_base_ext(filepart, base, sizeof(base), ext, sizeof(ext));
         ascii_upcase_inplace(base);
         ascii_upcase_inplace(ext);
-        if (pick_mangled_name(img, &g_fat32_host_vol, base, ext, name11) != 0) {
+        if (pick_mangled_name(img, &g_fat32_host_vol, parent_clu, base, ext, name11) != 0) {
             close(src);
             close(img);
             return -1;
@@ -523,14 +811,14 @@ int fat32_host_file_put(const char *host_src_path, const char *name_on_disk_or_n
 
     int slot;
     uint8_t oldent[32];
-    int fr = find_dirent_root(img, &g_fat32_host_vol, name11, &slot, oldent);
+    int fr = find_dirent_in_dir(img, &g_fat32_host_vol, parent_clu, name11, 0, &slot, oldent);
     if (fr < 0) {
         close(src);
         close(img);
         return -1;
     }
     if (fr == 1) {
-        if (memcmp(oldent, "FLINT   DAT", 11) == 0) {
+        if (memcmp(oldent, "FLINT   DAT", 11) == 0 || (oldent[0x0B] & 0x10) != 0) {
             close(src);
             close(img);
             return -1;
@@ -559,7 +847,7 @@ int fat32_host_file_put(const char *host_src_path, const char *name_on_disk_or_n
     st_le16(de + 0x1A, (uint16_t)(first_clu & 0xFFFFu));
     st_le32(de + 0x1C, (uint32_t)file_sz);
 
-    if (write_dirent_slot(img, &g_fat32_host_vol, slot, de) != 0) {
+    if (write_dirent_in_dir(img, &g_fat32_host_vol, parent_clu, slot, de) != 0) {
         free_cluster_chain(img, &g_fat32_host_vol, first_clu);
         close(img);
         return -1;
@@ -569,25 +857,47 @@ int fat32_host_file_put(const char *host_src_path, const char *name_on_disk_or_n
     return 0;
 }
 
-int fat32_host_file_get(const char *name_on_disk_83, const char *host_dst_path) {
-    if (!g_disk_host_fat32 || !g_fat32_host_vol.valid || !name_on_disk_83 || !host_dst_path)
+static int path_to_parent_and_name11(int fd, Fat32HostVol *v, const char *path_on_disk, uint32_t *parent_clu_out,
+                                     char name11[11]) {
+    char norm[CWD_MAX];
+    if (normalize_on_disk_path(norm, sizeof(norm), path_on_disk) != 0)
         return -1;
-    char name11[11];
-    if (human_name_to_11(name_on_disk_83, name11) != 0)
+    char dirpart[CWD_MAX], filepart[256];
+    split_parent_and_file(norm, dirpart, sizeof(dirpart), filepart, sizeof(filepart));
+    if (!filepart[0])
         return -1;
-    if (memcmp(name11, "FLINT   DAT", 11) == 0)
+    if (walk_dir_path(fd, v, dirpart, parent_clu_out, 0) != 0)
+        return -1;
+    memset(name11, ' ', 11);
+    if (human_name_to_11(filepart, name11) != 0)
+        return -1;
+    return 0;
+}
+
+int fat32_host_file_get(const char *path_on_disk, const char *host_dst_path) {
+    if (!g_disk_host_fat32 || !g_fat32_host_vol.valid || !path_on_disk || !host_dst_path)
         return -1;
     int img = open(current_disk_file, O_RDONLY);
     if (img < 0)
         return -1;
+    uint32_t parent_clu = 0;
+    char name11[11];
+    if (path_to_parent_and_name11(img, &g_fat32_host_vol, path_on_disk, &parent_clu, name11) != 0) {
+        close(img);
+        return -1;
+    }
+    if (memcmp(name11, "FLINT   DAT", 11) == 0) {
+        close(img);
+        return -1;
+    }
     int slot;
     uint8_t ent[32];
-    int fr = find_dirent_root(img, &g_fat32_host_vol, name11, &slot, ent);
+    int fr = find_dirent_in_dir(img, &g_fat32_host_vol, parent_clu, name11, 0, &slot, ent);
     if (fr != 1) {
         close(img);
         return -1;
     }
-    if (memcmp(ent, "FLINT   DAT", 11) == 0) {
+    if (memcmp(ent, "FLINT   DAT", 11) == 0 || (ent[0x0B] & 0x10) != 0) {
         close(img);
         return -1;
     }
@@ -606,28 +916,37 @@ int fat32_host_file_get(const char *name_on_disk_83, const char *host_dst_path) 
     return rr;
 }
 
-int fat32_host_file_del(const char *name_on_disk_83) {
-    if (!g_disk_host_fat32 || !g_fat32_host_vol.valid || !name_on_disk_83)
-        return -1;
-    char name11[11];
-    if (human_name_to_11(name_on_disk_83, name11) != 0)
-        return -1;
-    if (memcmp(name11, "FLINT   DAT", 11) == 0)
+int fat32_host_file_del(const char *path_on_disk) {
+    if (!g_disk_host_fat32 || !g_fat32_host_vol.valid || !path_on_disk)
         return -1;
     int img = open(current_disk_file, O_RDWR);
     if (img < 0)
         return -1;
+    uint32_t parent_clu = 0;
+    char name11[11];
+    if (path_to_parent_and_name11(img, &g_fat32_host_vol, path_on_disk, &parent_clu, name11) != 0) {
+        close(img);
+        return -1;
+    }
+    if (memcmp(name11, "FLINT   DAT", 11) == 0) {
+        close(img);
+        return -1;
+    }
     int slot;
     uint8_t ent[32];
-    int fr = find_dirent_root(img, &g_fat32_host_vol, name11, &slot, ent);
+    int fr = find_dirent_in_dir(img, &g_fat32_host_vol, parent_clu, name11, 0, &slot, ent);
     if (fr != 1) {
+        close(img);
+        return -1;
+    }
+    if ((ent[0x0B] & 0x10) != 0) {
         close(img);
         return -1;
     }
     uint32_t first = ld_le16(ent + 0x1A) | ((uint32_t)ld_le16(ent + 0x14) << 16);
     free_cluster_chain(img, &g_fat32_host_vol, first);
     ent[0] = 0xE5;
-    if (write_dirent_slot(img, &g_fat32_host_vol, slot, ent) != 0) {
+    if (write_dirent_in_dir(img, &g_fat32_host_vol, parent_clu, slot, ent) != 0) {
         close(img);
         return -1;
     }
@@ -636,7 +955,7 @@ int fat32_host_file_del(const char *name_on_disk_83) {
     return 0;
 }
 
-void fat32_host_file_list(void) {
+void fat32_host_file_list(const char *subdir_or_null) {
     if (!g_disk_host_fat32 || !g_fat32_host_vol.valid) {
         printf("diskfiles: requires a loaded FAT32 disk image (setdisk / drive.img).\n");
         return;
@@ -646,8 +965,22 @@ void fat32_host_file_list(void) {
         perror("open disk");
         return;
     }
-    uint64_t root_off;
-    if (root_dir_byte_off(&g_fat32_host_vol, &root_off) != 0) {
+    char dirnorm[CWD_MAX] = "";
+    if (subdir_or_null && subdir_or_null[0]) {
+        if (normalize_on_disk_path(dirnorm, sizeof(dirnorm), subdir_or_null) != 0) {
+            close(fd);
+            printf("diskfiles: invalid path.\n");
+            return;
+        }
+    }
+    uint32_t list_clu = g_fat32_host_vol.root_cluster;
+    if (dirnorm[0] && walk_dir_path(fd, &g_fat32_host_vol, dirnorm, &list_clu, 0) != 0) {
+        close(fd);
+        printf("diskfiles: directory not found.\n");
+        return;
+    }
+    uint64_t base_off;
+    if (cluster_data_byte_off(&g_fat32_host_vol, list_clu, &base_off) != 0) {
         close(fd);
         return;
     }
@@ -658,26 +991,49 @@ void fat32_host_file_list(void) {
         close(fd);
         return;
     }
-    if (disk_host_pread_vol(fd, root, bpc, (off_t)root_off) != (ssize_t)bpc) {
+    if (disk_host_pread_vol(fd, root, bpc, (off_t)base_off) != (ssize_t)bpc) {
         free(root);
         close(fd);
         return;
     }
     int nent = (int)(bpc / 32u);
-    printf("Root files on %s:\n", current_disk_file);
+    if (dirnorm[0])
+        printf("Directory \"%s\" on %s:\n", dirnorm, current_disk_file);
+    else
+        printf("Root of %s:\n", current_disk_file);
     for (int i = 0; i < nent; i++) {
         uint8_t *e = root + (uint32_t)i * 32u;
         if (e[0] == 0 || e[0] == 0xE5)
             continue;
         if ((e[0x0B] & 0x08) != 0)
             continue;
-        if ((e[0x0B] & 0x10) != 0)
-            continue; /* skip directories */
+        if ((e[0x0B] & 0x0F) == 0x0F)
+            continue;
         char disp[32];
         format_83_display((const char *)e, disp, sizeof(disp));
-        uint32_t sz = ld_le32(e + 0x1C);
-        printf("  %-20s  %10u bytes\n", disp, (unsigned)sz);
+        if ((e[0x0B] & 0x10) != 0)
+            printf("  %-20s  <DIR>\n", disp);
+        else {
+            uint32_t sz = ld_le32(e + 0x1C);
+            printf("  %-20s  %10u bytes\n", disp, (unsigned)sz);
+        }
     }
     free(root);
     close(fd);
+}
+
+int fat32_host_dir_mk(const char *path_on_disk) {
+    if (!g_disk_host_fat32 || !g_fat32_host_vol.valid || !path_on_disk || !path_on_disk[0])
+        return -1;
+    char norm[CWD_MAX];
+    if (normalize_on_disk_path(norm, sizeof(norm), path_on_disk) != 0)
+        return -1;
+    int fd = open(current_disk_file, O_RDWR);
+    if (fd < 0)
+        return -1;
+    uint32_t clu = 0;
+    int rc = walk_dir_path(fd, &g_fat32_host_vol, norm, &clu, 1);
+    fsync(fd);
+    close(fd);
+    return rc;
 }

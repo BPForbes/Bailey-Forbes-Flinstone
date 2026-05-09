@@ -280,7 +280,7 @@ int main(int argc, char *argv[]) {
             "rmtree","mv","version","exit","bios","clear","history","his","cc","listclusters","listdirs",
             "setdisk","createdisk","format","search","writecluster","delcluster","update","redirect",
             "initdisk","rerun","import","du","printdisk","addcluster","where","loc",
-            "diskput","diskget","diskfiles","diskdel",NULL};
+            "diskput","diskget","diskfiles","diskdel","diskmkdir",NULL};
         int is_cmd = 0;
         for (int k = 0; skip[k]; k++)
             if (!strcmp(argv[1], skip[k])) { is_cmd = 1; break; }
@@ -443,9 +443,14 @@ int main(int argc, char *argv[]) {
                     tokensCount = 2;
             } else if (!strcmp(cmd, "diskget"))
                 tokensCount = 3;
-            else if (!strcmp(cmd, "diskfiles"))
-                tokensCount = 1;
-            else if (!strcmp(cmd, "diskdel"))
+            else if (!strcmp(cmd, "diskfiles")) {
+                if (i + 1 < argc && argv[i + 1] && argv[i + 1][0] != '-')
+                    tokensCount = 2;
+                else
+                    tokensCount = 1;
+            } else if (!strcmp(cmd, "diskdel"))
+                tokensCount = 2;
+            else if (!strcmp(cmd, "diskmkdir"))
                 tokensCount = 2;
             else if (!strcmp(cmd, "update"))
                 tokensCount = 4;
