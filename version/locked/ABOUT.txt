@@ -12,6 +12,7 @@ Finalize (copy all of entries over locked), then regenerate the shell header:
 userland/shell/version_def.h is generated from the highest A.B.C among
 version/locked/*.ver only. Do not edit the header by hand.
 
-Name new .ver files with the semantic version in the basename, e.g.
-  version/entries/2_3_0_feature_name.ver
-Ordering uses MAJOR/STANDARD/RELEASE inside the file, not a filename prefix.
+The repository currently ships e.g. 001_2_2_4_baseline.ver. Add new releases as
+additional *.ver files here; include the semver in the basename (often with a
+serial prefix). Ordering uses MAJOR/STANDARD/RELEASE inside the file, not the
+filename prefix.
