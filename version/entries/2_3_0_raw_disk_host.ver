@@ -1,4 +1,5 @@
-# Minor release: host disk and VM sandbox.
+# Unreleased (WIP): not copied to version/locked/ until this release is finalized.
+# Minor bump when published: host disk + VM jail work on this branch.
 MAJOR_VERSION=2
 STANDARD_VERSION=3
 RELEASE_VERSION=0
