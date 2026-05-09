@@ -7,9 +7,11 @@ alwaysApply: true
 
 # Versioning rules
 
-## Canonical version
+## Canonical version & changelog
 
-- Project version is **`VERSION`** in `userland/shell/common.h` (`#define VERSION "A.B.C"`).
+- **`userland/shell/version_def.h`** — `VERSION_MAJOR` (A), `VERSION_STANDARD` (B / features), `VERSION_PATCH` (C / fixes); **`VERSION`** macro = dotted **A.B.C**.
+- **`userland/shell/version_changelog.c`** — `VERSION_CHANGELOG[256]` running text per release.
+- **`scripts/export_version_record.sh`** — prints keys / JSON from `version_def.h` for deployment pipelines.
 - Use **semantic versioning**: **`A.B.C`**.
 
 ## Semver meanings
@@ -26,10 +28,10 @@ If a single change mixes milestone/architecture work, features, and fixes: **bum
 
 Before merging **incoming → base** (examples: `bug/*` → `develop`, `develop` → `main`):
 
-1. Read **`VERSION` on the incoming branch** and **`VERSION` on the merge target branch** (same file: `userland/shell/common.h`).
+1. Read **`VERSION` / `VERSION_*` on the incoming branch** and on the **merge target branch** (`userland/shell/version_def.h`).
 2. **Incoming must be strictly newer** than the target for that integration.
 3. If both show the **same** version (e.g. both `2.0.0`), **update the incoming branch** so its version is **one appropriate step ahead** of the target.
 
 Example: `bug/…` → `develop`, both at **`2.0.0`** → bump incoming to **`2.0.1`** (patch for a bugfix branch).
 
-Agents and humans should update `VERSION` on the **incoming** branch as part of the PR when needed—do not merge with identical versions across branches when the change warrants a bump.
+Agents and humans should update **`version_def.h`** (and **`version_changelog.c`** when appropriate) on the **incoming** branch as part of the PR when needed—do not merge with identical versions across branches when the change warrants a bump.

@@ -52,7 +52,7 @@ Run builds from the repository root.
 
 ## Versioning
 
-The shipped shell version string is **`VERSION`** in `userland/shell/common.h` (`#define VERSION "A.B.C"`). Use **semantic versioning**:
+The shipped shell version uses integer components in **`userland/shell/version_def.h`** (`VERSION_MAJOR`, `VERSION_STANDARD`, `VERSION_PATCH`) and builds the **`VERSION`** string macro as **A.B.C**. Human-readable history is appended in **`userland/shell/version_changelog.c`** (`VERSION_CHANGELOG[]`). Use **semantic versioning**:
 
 | Component | When to bump |
 |-----------|----------------|
@@ -66,13 +66,13 @@ If a single release mixes milestone/architecture work, features, and fixes: **in
 
 Before merging **incoming → base** (e.g. `bug/*` → `develop`, `develop` → `main`):
 
-1. Compare **`VERSION` on the incoming branch** to **`VERSION` on the target branch**.
+1. Compare **`VERSION_*` / `VERSION` on the incoming branch** to **`VERSION_*` / `VERSION` on the target branch** (see `userland/shell/version_def.h`).
 2. **Incoming must be strictly newer** than the target for that merge.
 3. If both show the **same** version (e.g. both `2.0.0`), **update the incoming branch** so its version is **one appropriate semver step ahead** of the target.
 
 Example: **`bug/…` → `develop`**, both at **`2.0.0`** → bump incoming to **`2.0.1`** (patch for a bugfix).
 
-Detailed wording also appears in **CLAUDE.md**, **`.coderabbit.yaml`**, and **`.cursor/rules/versioning.mdc`** — keep them aligned when policy changes.
+Detailed wording also appears in **CLAUDE.md**, **`.coderabbit.yaml`**, and **`.cursor/rules/versioning.mdc`** — keep them aligned when policy changes. To print a machine-readable record from the current tree: `./scripts/export_version_record.sh`, `./scripts/export_version_record.sh --json`, or **`make version-record`**.
 
 ## Implementation boundaries
 

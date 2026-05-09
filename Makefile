@@ -64,7 +64,7 @@ CORE_SRCS = kernel/core/vfs/disk.c kernel/core/vfs/path_log.c kernel/core/vfs/cl
             kernel/core/vfs/fs_service_glue.c kernel/core/mm/mem_domain.c kernel/core/mm/kmalloc.c kernel/core/mm/pmm.c \
             kernel/core/sys/vrt.c kernel/core/sys/ipc.c kernel/core/sys/syscall.c kernel/core/vfs/vfs.c
 COMMAND_SRCS := $(wildcard userland/command/cmd_*.c)
-SHELL_SRCS = userland/shell/common.c userland/shell/util.c userland/shell/terminal.c userland/shell/interpreter.c userland/shell/sh.c $(COMMAND_SRCS)
+SHELL_SRCS = userland/shell/common.c userland/shell/version_changelog.c userland/shell/util.c userland/shell/terminal.c userland/shell/interpreter.c userland/shell/sh.c $(COMMAND_SRCS)
 SRCS = $(SHELL_SRCS) $(CORE_SRCS) disk_asm.c dir_asm.c
 SRCS += $(DRIVER_SRCS) $(HAL_SRCS)
 CFLAGS += -I$(ASM_SRC_DIR) -I$(KERNEL_DRIVERS) -Ikernel -Ikernel/drivers
@@ -112,6 +112,10 @@ baremetal: LDFLAGS += -no-pie
 baremetal: $(TARGET)
 
 # With embedded x86 VM: make vm && ./shell -Virtualization -y -vm
+.PHONY: version-record
+version-record:
+	@./scripts/export_version_record.sh
+
 .PHONY: vm baremetal
 vm:
 	$(MAKE) VM_ENABLE=1 $(TARGET)
@@ -139,7 +143,7 @@ $(TARGET): $(OBJS)
 # --- Test Build ---
 # interpreter.c is built as interpreter_unit.o with -DUNIT_TEST (stub interactive_shell).
 # Shell builtins live in userland/command/*.c (same as main shell link).
-TEST_SRCS = BPForbes_Flinstone_Tests.c userland/shell/common.c userland/shell/util.c userland/shell/terminal.c \
+TEST_SRCS = BPForbes_Flinstone_Tests.c userland/shell/common.c userland/shell/version_changelog.c userland/shell/util.c userland/shell/terminal.c \
             $(COMMAND_SRCS) \
             kernel/core/vfs/disk.c kernel/core/vfs/path_log.c kernel/core/vfs/cluster.c kernel/core/vfs/fs.c \
             kernel/core/sched/threadpool.c priority_queue.c kernel/core/vfs/fs_jail.c kernel/core/vfs/fs_provider.c kernel/core/vfs/fs_command.c \
