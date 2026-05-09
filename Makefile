@@ -5,7 +5,7 @@ ARCH ?= x86_64_gas
 # Compiler and flags
 CC = gcc
 AS = as
-CFLAGS = -Wall -Wextra -pthread -I. -Ikernel/include -Ikernel/core/vfs -Ikernel/core/mm -Ikernel/core/sched -Ikernel/core/sys -Iuserland/shell -Ikernel/arch/x86_64 -Ikernel/arch/aarch64
+CFLAGS = -Wall -Wextra -pthread -I. -Ikernel/include -Ikernel/core/vfs -Ikernel/core/mm -Ikernel/core/sched -Ikernel/core/sys -Iuserland/shell -Iuserland/command -Ikernel/arch/x86_64 -Ikernel/arch/aarch64
 LDFLAGS = -Wl,-z,noexecstack
 ASFLAGS =
 
@@ -63,7 +63,8 @@ CORE_SRCS = kernel/core/vfs/disk.c kernel/core/vfs/path_log.c kernel/core/vfs/cl
             kernel/core/vfs/fs_events.c kernel/core/vfs/fs_policy.c kernel/core/vfs/fs_chain.c kernel/core/vfs/fs_facade.c \
             kernel/core/vfs/fs_service_glue.c kernel/core/mm/mem_domain.c kernel/core/mm/kmalloc.c kernel/core/mm/pmm.c \
             kernel/core/sys/vrt.c kernel/core/sys/ipc.c kernel/core/sys/syscall.c kernel/core/vfs/vfs.c
-SHELL_SRCS = userland/shell/common.c userland/shell/util.c userland/shell/terminal.c userland/shell/interpreter.c userland/shell/sh.c
+COMMAND_SRCS := $(wildcard userland/command/cmd_*.c)
+SHELL_SRCS = userland/shell/common.c userland/shell/util.c userland/shell/terminal.c userland/shell/interpreter.c userland/shell/sh.c $(COMMAND_SRCS)
 SRCS = $(SHELL_SRCS) $(CORE_SRCS) disk_asm.c dir_asm.c
 SRCS += $(DRIVER_SRCS) $(HAL_SRCS)
 CFLAGS += -I$(ASM_SRC_DIR) -I$(KERNEL_DRIVERS) -Ikernel -Ikernel/drivers

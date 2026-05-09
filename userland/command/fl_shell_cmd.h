@@ -1,0 +1,40 @@
+#ifndef FL_SHELL_CMD_H
+#define FL_SHELL_CMD_H
+
+/*
+ * Shell command numbers — same idea as fl_syscall_no_t: small integers map to
+ * handlers in fl_shell_cmd_dispatch() (see cmd_dispatch.c).
+ */
+typedef enum {
+    FL_SCMD_UNKNOWN = 0,
+    FL_SCMD_CD,
+    FL_SCMD_CREATEDISK,
+    FL_SCMD_FORMAT,
+    FL_SCMD_SETDISK,
+    FL_SCMD_VERSION,
+    FL_SCMD_LISTCLUSTERS,
+    FL_SCMD_LISTDIRS,
+    FL_SCMD_SEARCH,
+    FL_SCMD_WRITECLUSTER,
+    FL_SCMD_DELCLUSTER,
+    FL_SCMD_UPDATE,
+    FL_SCMD_TYPE,
+    FL_SCMD_CAT,
+    FL_SCMD_REDIRECT,
+    FL_SCMD_INITDISK,
+    FL_SCMD_RERUN,
+    FL_SCMD_IMPORT,
+    FL_SCMD_DU,
+    FL_SCMD_PRINTDISK,
+    FL_SCMD_DIR,
+    FL_SCMD_MKDIR,
+    FL_SCMD_RMDIR,
+    FL_SCMD_RMTREE,
+    FL_SCMD_WRITE,
+    FL_SCMD_MV,
+    FL_SCMD_WHERE,
+    FL_SCMD_LOC,
+    FL_SCMD_ADDCLUSTER,
+} fl_shell_cmd_no_t;
+
+#endif /* FL_SHELL_CMD_H */
