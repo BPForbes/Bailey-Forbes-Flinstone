@@ -1,6 +1,15 @@
 /*
- * Generate userland/shell/version_changelog.c from version_def.h + git log.
- * Used by GitHub Actions before make CHANGELOG_CI=1.
+ * Generate userland/shell/version_changelog.c from version_def.h and
+ * version/entries files ending in .ver (release notes). Used by GitHub Actions before
+ * make CHANGELOG_CI=1.
+ *
+ * Each .ver file (UTF-8 text) contains lines such as:
+ *   MAJOR_VERSION=2
+ *   STANDARD_VERSION=2
+ *   RELEASE_VERSION=4        (aliases: MINOR_VERSION, VERSION_PATCH)
+ *   DESCRIPTION=A short release note (<= 1023 chars, single line)
+ * Lines may optionally start with "int " before the key. Lines starting with #
+ * are comments. Empty lines are ignored.
  *
  * Build: gcc -std=c11 -Wall -Wextra -O2 -o gen_version_changelog scripts/gen_version_changelog.c
  * Run:   ./gen_version_changelog [repo_root]
@@ -9,6 +18,7 @@
 #define _POSIX_C_SOURCE 200809L
 
 #include <ctype.h>
+#include <dirent.h>
 #include <errno.h>
 #include <limits.h>
 #include <stdarg.h>
@@ -125,14 +135,6 @@ static void trim_cpy(const char *src, char *dst, size_t dstsz) {
     dst[n] = '\0';
 }
 
-static int only_whitespace(const char *s) {
-    for (; *s; s++) {
-        if (!isspace((unsigned char)*s))
-            return 0;
-    }
-    return 1;
-}
-
 static int parse_triplet(const char *text, int *ma, int *st, int *pa) {
     *ma = *st = *pa = -1;
     char *copy = strdup(text);
@@ -160,6 +162,141 @@ static int parse_triplet(const char *text, int *ma, int *st, int *pa) {
     return *ma >= 0 && *st >= 0 && *pa >= 0;
 }
 
+typedef struct {
+    int ma, st, rel;
+    char desc[1024];
+    char relpath[PATH_MAX];
+    int valid;
+} VerEntry;
+
+static const char *skip_int_kw(const char *s) {
+    const char *p = s;
+    while (*p && isspace((unsigned char)*p))
+        p++;
+    if (strncmp(p, "int", 3) == 0 && isspace((unsigned char)p[3]))
+        return p + 4;
+    return s;
+}
+
+static int match_key(const char *line, const char *key, const char **val_out) {
+    const char *p = skip_int_kw(line);
+    size_t len = strlen(key);
+    if (strncmp(p, key, len) != 0)
+        return 0;
+    if (p[len] != '=')
+        return 0;
+    *val_out = p + len + 1;
+    return 1;
+}
+
+static void trim_value(char *s, size_t sz) {
+    char tmp[4096];
+    trim_cpy(s, tmp, sizeof tmp);
+    size_t L = strlen(tmp);
+    if (L >= 2 && tmp[0] == '"' && tmp[L - 1] == '"') {
+        tmp[L - 1] = '\0';
+        memmove(tmp, tmp + 1, strlen(tmp) + 1);
+    }
+    snprintf(s, sz, "%s", tmp);
+}
+
+static int parse_positive_int(const char *s, int *out) {
+    char *end = NULL;
+    long v = strtol(s, &end, 10);
+    if (end == s || *end != '\0' || v < 0 || v > 999999)
+        return -1;
+    *out = (int)v;
+    return 0;
+}
+
+static int parse_ver_file(const char *fullpath, const char *relpath, VerEntry *e) {
+    memset(e, 0, sizeof *e);
+    snprintf(e->relpath, sizeof e->relpath, "%s", relpath);
+
+    char *raw = read_entire_file(fullpath);
+    if (!raw)
+        return -1;
+
+    int ma = -1, st = -1, rel = -1;
+    char desc[1024];
+    desc[0] = '\0';
+
+    char *save = NULL;
+    for (char *line = strtok_r(raw, "\n", &save); line;
+         line = strtok_r(NULL, "\n", &save)) {
+        char trim[4096];
+        trim_cpy(line, trim, sizeof trim);
+        if (!trim[0] || trim[0] == '#')
+            continue;
+
+        const char *val = NULL;
+        char work[4096];
+
+        if (match_key(trim, "MAJOR_VERSION", &val) ||
+            match_key(trim, "VERSION_MAJOR", &val)) {
+            strncpy(work, val, sizeof work - 1);
+            work[sizeof work - 1] = '\0';
+            trim_value(work, sizeof work);
+            if (parse_positive_int(work, &ma) != 0)
+                goto bad;
+            continue;
+        }
+        if (match_key(trim, "STANDARD_VERSION", &val) ||
+            match_key(trim, "VERSION_STANDARD", &val)) {
+            strncpy(work, val, sizeof work - 1);
+            work[sizeof work - 1] = '\0';
+            trim_value(work, sizeof work);
+            if (parse_positive_int(work, &st) != 0)
+                goto bad;
+            continue;
+        }
+        if (match_key(trim, "RELEASE_VERSION", &val) ||
+            match_key(trim, "MINOR_VERSION", &val) ||
+            match_key(trim, "VERSION_PATCH", &val)) {
+            strncpy(work, val, sizeof work - 1);
+            work[sizeof work - 1] = '\0';
+            trim_value(work, sizeof work);
+            if (parse_positive_int(work, &rel) != 0)
+                goto bad;
+            continue;
+        }
+        if (match_key(trim, "DESCRIPTION", &val)) {
+            strncpy(work, val, sizeof work - 1);
+            work[sizeof work - 1] = '\0';
+            trim_value(work, sizeof work);
+            if (strlen(work) > 1023) {
+                fprintf(stderr, "gen_version_changelog: DESCRIPTION too long in %s\n",
+                        fullpath);
+                goto bad;
+            }
+            snprintf(desc, sizeof desc, "%s", work);
+            continue;
+        }
+    }
+
+    free(raw);
+
+    if (ma < 0 || st < 0 || rel < 0 || !desc[0]) {
+        fprintf(stderr,
+                "gen_version_changelog: incomplete entry %s (need MAJOR/STANDARD/"
+                "RELEASE or MINOR/PATCH + DESCRIPTION)\n",
+                fullpath);
+        return -1;
+    }
+
+    e->ma = ma;
+    e->st = st;
+    e->rel = rel;
+    memcpy(e->desc, desc, sizeof e->desc);
+    e->desc[sizeof e->desc - 1] = '\0';
+    e->valid = 1;
+    return 0;
+
+bad:
+    free(raw);
+    return -1;
+}
+
 static void append_escaped(Buf *out, const char *s) {
     for (const unsigned char *p = (const unsigned char *)s; *p; p++) {
         unsigned char c = *p;
@@ -178,22 +315,16 @@ static void append_escaped(Buf *out, const char *s) {
     }
 }
 
-static int run_git_log(const char *root, Buf *acc) {
-    char cmd[PATH_MAX + 128];
-    if (snprintf(cmd, sizeof cmd,
-                 "git -C \"%s\" log --no-merges -48 "
-                 "--pretty=format:'%%h %%s'",
-                 root) >= (int)sizeof cmd)
-        return -1;
-    FILE *p = popen(cmd, "r");
-    if (!p)
-        return -1;
-    char linebuf[8192];
-    while (fgets(linebuf, sizeof linebuf, p)) {
-        buf_append_cstr(acc, linebuf);
-    }
-    int st = pclose(p);
-    return st == 0 ? 0 : -1;
+static int cmp_entry_desc(const void *a, const void *b) {
+    const VerEntry *ea = a;
+    const VerEntry *eb = b;
+    if (ea->ma != eb->ma)
+        return eb->ma - ea->ma;
+    if (ea->st != eb->st)
+        return eb->st - ea->st;
+    if (ea->rel != eb->rel)
+        return eb->rel - ea->rel;
+    return strcmp(ea->relpath, eb->relpath);
 }
 
 int main(int argc, char **argv) {
@@ -207,6 +338,7 @@ int main(int argc, char **argv) {
     char vdef[PATH_MAX];
     char outpath[PATH_MAX];
     char shelldir[PATH_MAX];
+
     if (snprintf(vdef, sizeof vdef, "%s/userland/shell/version_def.h", root) >=
         (int)sizeof vdef) {
         fprintf(stderr, "gen_version_changelog: path too long\n");
@@ -219,6 +351,12 @@ int main(int argc, char **argv) {
     }
     if (snprintf(shelldir, sizeof shelldir, "%s/userland/shell", root) >=
         (int)sizeof shelldir) {
+        fprintf(stderr, "gen_version_changelog: path too long\n");
+        return 1;
+    }
+    char entries_dir[PATH_MAX];
+    if (snprintf(entries_dir, sizeof entries_dir, "%s/version/entries", root) >=
+        (int)sizeof entries_dir) {
         fprintf(stderr, "gen_version_changelog: path too long\n");
         return 1;
     }
@@ -238,15 +376,51 @@ int main(int argc, char **argv) {
     }
     free(vtxt);
 
-    Buf git_acc = {0};
-    if (run_git_log(root, &git_acc) != 0) {
-        buf_free(&git_acc);
-        buf_append_cstr(&git_acc, "(no git history available)\n");
-    }
+    VerEntry *list = NULL;
+    size_t nent = 0;
 
-    if (only_whitespace(git_acc.p ? git_acc.p : "")) {
-        buf_free(&git_acc);
-        buf_append_cstr(&git_acc, "(empty git log)\n");
+    DIR *ed = opendir(entries_dir);
+    if (!ed) {
+        if (errno != ENOENT) {
+            fprintf(stderr, "gen_version_changelog: cannot open %s: %s\n",
+                    entries_dir, strerror(errno));
+            return 1;
+        }
+    } else {
+        struct dirent *de;
+        while ((de = readdir(ed)) != NULL) {
+            const char *name = de->d_name;
+            size_t nl = strlen(name);
+            if (nl < 5 || strcmp(name + nl - 4, ".ver") != 0)
+                continue;
+            char full[PATH_MAX];
+            char rel[PATH_MAX];
+            if (snprintf(full, sizeof full, "%s/%s", entries_dir, name) >=
+                    (int)sizeof full ||
+                snprintf(rel, sizeof rel, "version/entries/%s", name) >=
+                    (int)sizeof rel) {
+                fprintf(stderr, "gen_version_changelog: path too long\n");
+                closedir(ed);
+                free(list);
+                return 1;
+            }
+            VerEntry ent;
+            if (parse_ver_file(full, rel, &ent) != 0) {
+                closedir(ed);
+                free(list);
+                return 1;
+            }
+            VerEntry *np = realloc(list, (nent + 1) * sizeof *np);
+            if (!np) {
+                closedir(ed);
+                free(list);
+                fprintf(stderr, "gen_version_changelog: out of memory\n");
+                return 1;
+            }
+            list = np;
+            list[nent++] = ent;
+        }
+        closedir(ed);
     }
 
     char ver_buf[64];
@@ -254,7 +428,9 @@ int main(int argc, char **argv) {
 
     Buf header_line = {0};
     buf_append_cstr(&header_line, ver_buf);
-    buf_append_cstr(&header_line, " — CI-assembled changelog (recent commits)\n");
+    buf_append_cstr(&header_line,
+                    " — changelog from version/entries (*.ver); see "
+                    "AGENTS.md\n");
 
     Buf body = {0};
     buf_append_cstr(&body,
@@ -267,26 +443,25 @@ int main(int argc, char **argv) {
     buf_append_cstr(&body, "\"\n");
     buf_free(&header_line);
 
-    char *gcopy = strdup(git_acc.p ? git_acc.p : "");
-    buf_free(&git_acc);
-    if (!gcopy) {
-        buf_free(&body);
-        fprintf(stderr, "gen_version_changelog: out of memory\n");
-        return 1;
+    if (nent > 0) {
+        qsort(list, nent, sizeof *list, cmp_entry_desc);
+        for (size_t i = 0; i < nent; i++) {
+            VerEntry *e = &list[i];
+            char lineout[2048];
+            snprintf(lineout, sizeof lineout, "%d.%d.%d: %s (%s)\n", e->ma, e->st,
+                     e->rel, e->desc, e->relpath);
+            buf_append_cstr(&body, "    \"");
+            append_escaped(&body, lineout);
+            buf_append_cstr(&body, "\"\n");
+        }
+    } else {
+        buf_append_cstr(&body, "    \"");
+        append_escaped(&body,
+                       "(no version/entries/*.ver files — add release notes there)\n");
+        buf_append_cstr(&body, "\"\n");
     }
 
-    char *save = NULL;
-    for (char *line = strtok_r(gcopy, "\n", &save); line;
-         line = strtok_r(NULL, "\n", &save)) {
-        char trimmed[4096];
-        trim_cpy(line, trimmed, sizeof trimmed);
-        if (!trimmed[0])
-            continue;
-        buf_append_cstr(&body, "    \"");
-        append_escaped(&body, trimmed);
-        buf_append_cstr(&body, "\\n\"\n");
-    }
-    free(gcopy);
+    free(list);
 
     buf_append_cstr(&body, ";\n");
 

@@ -1,0 +1,10 @@
+Version entries (*.ver) describe one shipped release each: MAJOR_VERSION,
+STANDARD_VERSION, RELEASE_VERSION (third component; aliases MINOR_VERSION or
+VERSION_PATCH), and DESCRIPTION (<= 1023 characters, one line).
+
+After a branch merges, existing *.ver files under version/entries are immutable:
+do not edit them; add a new file for the next release.
+
+The version/locked directory is an exact mirror of version/entries for
+read-only browsing. Update it only by running:
+  ./scripts/sync_version_locked_mirror.sh

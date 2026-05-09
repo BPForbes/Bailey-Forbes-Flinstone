@@ -18,6 +18,16 @@ jobs:
       - name: Install dependencies
         run: sudo apt-get update -y && sudo apt-get install -y gcc binutils nasm libcunit1-dev
 
+      - name: Validate version entry immutability (PR only)
+        if: github.event_name == 'pull_request'
+        run: ./scripts/check_version_entries_immutable.sh "${{ github.event.pull_request.base.sha }}"
+
+      - name: Verify version/locked mirrors version/entries
+        run: ./scripts/check_version_locked_mirror.sh
+
+      - name: Verify version_def.h matches highest version entry
+        run: ./scripts/check_version_header_matches_entries.sh
+
       - name: Assemble changelog (CI-only source)
         run: |
           gcc -std=c11 -Wall -Wextra -O2 -o gen_version_changelog scripts/gen_version_changelog.c
@@ -68,6 +78,16 @@ jobs:
       - name: Install cross-compiler
         run: sudo apt-get update -y && sudo apt-get install -y gcc gcc-aarch64-linux-gnu binutils-aarch64-linux-gnu
 
+      - name: Validate version entry immutability (PR only)
+        if: github.event_name == 'pull_request'
+        run: ./scripts/check_version_entries_immutable.sh "${{ github.event.pull_request.base.sha }}"
+
+      - name: Verify version/locked mirrors version/entries
+        run: ./scripts/check_version_locked_mirror.sh
+
+      - name: Verify version_def.h matches highest version entry
+        run: ./scripts/check_version_header_matches_entries.sh
+
       - name: Assemble changelog (CI-only source)
         run: |
           gcc -std=c11 -Wall -Wextra -O2 -o gen_version_changelog scripts/gen_version_changelog.c
@@ -86,6 +106,16 @@ jobs:
 
       - name: Install dependencies
         run: sudo apt-get install -y gcc binutils nasm
+
+      - name: Validate version entry immutability (PR only)
+        if: github.event_name == 'pull_request'
+        run: ./scripts/check_version_entries_immutable.sh "${{ github.event.pull_request.base.sha }}"
+
+      - name: Verify version/locked mirrors version/entries
+        run: ./scripts/check_version_locked_mirror.sh
+
+      - name: Verify version_def.h matches highest version entry
+        run: ./scripts/check_version_header_matches_entries.sh
 
       - name: Assemble changelog (CI-only source)
         run: |

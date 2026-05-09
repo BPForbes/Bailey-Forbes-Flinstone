@@ -120,6 +120,11 @@ baremetal: $(TARGET)
 version-record:
 	@./scripts/export_version_record.sh
 
+# After editing version/entries/, refresh the read-only mirror version/locked/
+.PHONY: sync-version-locked
+sync-version-locked:
+	@./scripts/sync_version_locked_mirror.sh
+
 .PHONY: vm baremetal
 vm:
 	$(MAKE) VM_ENABLE=1 $(TARGET)

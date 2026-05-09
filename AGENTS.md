@@ -54,7 +54,22 @@ Run builds from the repository root.
 
 The shipped shell version uses integer components in **`userland/shell/version_def.h`** (`VERSION_MAJOR`, `VERSION_STANDARD`, `VERSION_PATCH`) and builds the **`VERSION`** string macro as **A.B.C**.
 
-**Changelog binary:** **GitHub Actions** (`.github/workflows/c-cpp.yml`) compiles **`scripts/gen_version_changelog.c`** with **`gcc -std=c11`**, runs the binary to emit **`userland/shell/version_changelog.c`** from **`git log`** (ignored by git), then **`make … CHANGELOG_CI=1`** links **`VERSION_CHANGELOG[]`** into the shell/tests in CI only. A plain local **`make`** does **not** compile changelog unless you generate that file and pass **`CHANGELOG_CI=1`**. See **`scripts/templates/version_changelog.example.c`** for shape.
+### Release notes (`version/`)
+
+Each release adds **one new text file** under **`version/entries/`** ending in **`.ver`** (see **`version/entries/ABOUT.txt`**). Supported keys (optional leading `int ` before the name):
+
+- **`MAJOR_VERSION`** (alias **`VERSION_MAJOR`**)
+- **`STANDARD_VERSION`** (alias **`VERSION_STANDARD`**)
+- **`RELEASE_VERSION`** — third component **C** (aliases **`MINOR_VERSION`**, **`VERSION_PATCH`**)
+- **`DESCRIPTION`** — single line, max **1023** characters (quotes optional)
+
+After a change is **merged**, existing **`version/entries/*.ver`** files are **immutable**: do not edit them; add another **`.ver`** file for the next bump. CI enforces this on pull requests against the merge base.
+
+**`version/locked/`** mirrors **`version/entries/`** exactly so everyone can browse read-only copies. After editing entries, run **`./scripts/sync_version_locked_mirror.sh`** (**`make sync-version-locked`**).
+
+CI verifies the mirror, and that **`version_def.h`** matches the **highest** **A.B.C** among **`version/entries/*.ver`**.
+
+**Changelog binary:** **GitHub Actions** compiles **`scripts/gen_version_changelog.c`**, which reads **`version/entries`** and **`version_def.h`**, then emits **`userland/shell/version_changelog.c`** (ignored by git). **`make … CHANGELOG_CI=1`** links **`VERSION_CHANGELOG[]`** in CI only. Plain **`make`** omits changelog unless you generate that file and pass **`CHANGELOG_CI=1`**. See **`scripts/templates/version_changelog.example.c`** for shape.
 
 Use **semantic versioning**:
 
@@ -73,6 +88,7 @@ Before merging **incoming → base** (e.g. `bug/*` → `develop`, `develop` → 
 1. Compare **`VERSION_*` / `VERSION` on the incoming branch** to **`VERSION_*` / `VERSION` on the target branch** (see `userland/shell/version_def.h`).
 2. **Incoming must be strictly newer** than the target for that merge.
 3. If both show the **same** version (e.g. both `2.0.0`), **update the incoming branch** so its version is **one appropriate semver step ahead** of the target.
+4. Add a **new** **`version/entries/*.ver`** file describing the release (never rewrite an entry file that already merged) and run **`make sync-version-locked`** so **`version/locked/`** mirrors **`version/entries/`**.
 
 Example: **`bug/…` → `develop`**, both at **`2.0.0`** → bump incoming to **`2.0.1`** (patch for a bugfix).
 
