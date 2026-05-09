@@ -8,7 +8,7 @@ This repository implements **Bailey-Forbes-Flinstone**: a educational OS/shell-s
 
 ### Canonical string
 
-- **`VERSION`** is built from integer macros in `userland/shell/version_def.h` (`VERSION_MAJOR`, `VERSION_STANDARD`, `VERSION_PATCH` → **A.B.C**). Release notes accumulate in **`userland/shell/version_changelog.c`** as **`VERSION_CHANGELOG[]`**.
+- **`VERSION`** is built from integer macros in `userland/shell/version_def.h` (`VERSION_MAJOR`, `VERSION_STANDARD`, `VERSION_PATCH` → **A.B.C**). **Changelog text is not part of a normal local `make`**; produce it at **deployment** if needed (see **`scripts/templates/version_changelog.example.c`**, **`scripts/export_version_record.sh`**).
 - Format is **semantic versioning**: **`A.B.C`** (not date-based).
 
 ### Component meanings
@@ -27,9 +27,9 @@ When preparing or reviewing a merge **incoming → base** (e.g. `bug/…` → `d
 2. **Incoming must be strictly greater** than the target for that merge.
 3. If both branches report the **same** version (e.g. both `2.0.0`), **bump the incoming branch** so it is **one semver step ahead** of the target for the kind of change (example: same `2.0.0` on `bug/…` and `develop` → set incoming to **`2.0.1`** for a bugfix).
 
-Implement the bump by editing **`VERSION_*` in `version_def.h`** (and appending a line to **`VERSION_CHANGELOG`** in `version_changelog.c` when appropriate) on the **incoming** branch before merge.
+Implement the bump by editing **`VERSION_*` in `version_def.h`** on the **incoming** branch before merge. Add deployment changelog artifacts in CI/deploy pipelines—not required for **`git clone` + `make`**.
 
-Export current numbers without compiling: **`./scripts/export_version_record.sh`** or **`make version-record`** (`--json` for one-line JSON).
+Export current numbers without compiling: **`./scripts/export_version_record.sh`**, **`./scripts/export_version_record.sh --json`**, or **`make version-record`** (`--json` for one-line JSON).
 
 ---
 

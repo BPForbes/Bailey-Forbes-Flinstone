@@ -52,7 +52,7 @@ Run builds from the repository root.
 
 ## Versioning
 
-The shipped shell version uses integer components in **`userland/shell/version_def.h`** (`VERSION_MAJOR`, `VERSION_STANDARD`, `VERSION_PATCH`) and builds the **`VERSION`** string macro as **A.B.C**. Human-readable history is appended in **`userland/shell/version_changelog.c`** (`VERSION_CHANGELOG[]`). Use **semantic versioning**:
+The shipped shell version uses integer components in **`userland/shell/version_def.h`** (`VERSION_MAJOR`, `VERSION_STANDARD`, `VERSION_PATCH`) and builds the **`VERSION`** string macro as **A.B.C**. **Changelog prose is not compiled by default `make`**; assemble or generate it **at deployment** (optional generated `version_changelog.c`, or artifacts from **`scripts/export_version_record.sh`**). See **`scripts/templates/version_changelog.example.c`**. Use **semantic versioning**:
 
 | Component | When to bump |
 |-----------|----------------|

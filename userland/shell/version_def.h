@@ -8,7 +8,9 @@
  *   B (VERSION_STANDARD)  — new features (maps to semver "minor")
  *   C (VERSION_PATCH)     — bug fixes and small corrections (maps to semver "patch")
  *
- * Running narrative lives in version_changelog.c as VERSION_CHANGELOG[].
+ * Release changelog text is not compiled into normal local builds. Generate or
+ * assemble it at deployment only (see scripts/templates/version_changelog.example.c,
+ * scripts/export_version_record.sh).
  */
 #define VERSION_MAJOR    2
 #define VERSION_STANDARD 2
@@ -20,7 +22,5 @@
 /* Dotted release label "A.B.C" — keep using the VERSION macro in printf/help. */
 #define VERSION \
     VERSION_STR(VERSION_MAJOR) "." VERSION_STR(VERSION_STANDARD) "." VERSION_STR(VERSION_PATCH)
-
-extern const char VERSION_CHANGELOG[256];
 
 #endif /* VERSION_DEF_H */

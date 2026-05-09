@@ -1,5 +1,6 @@
 #!/usr/bin/env bash
-# Emit a unified version record from userland/shell/version_def.h and the changelog source.
+# Emit a unified version record from userland/shell/version_def.h.
+# Optional: if deployment generates userland/shell/version_changelog.c, excerpt it — not used by default `make`.
 # Usage: scripts/export_version_record.sh [--json]
 # For multi-branch deployment: run once per checkout and concatenate or merge outputs.
 
@@ -30,14 +31,24 @@ if [[ -f "$LOGSRC" ]]; then
 fi
 
 if [[ "${1:-}" == "--json" ]]; then
-    printf '{"major":%s,"standard":%s,"patch":%s,"version":"%s","changelog_source":"userland/shell/version_changelog.c"}\n' \
-        "$MAJOR" "$STD" "$PATCH" "$VER"
+    if [[ -f "$LOGSRC" ]]; then
+        printf '{"major":%s,"standard":%s,"patch":%s,"version":"%s","changelog_source":"userland/shell/version_changelog.c"}\n' \
+            "$MAJOR" "$STD" "$PATCH" "$VER"
+    else
+        printf '{"major":%s,"standard":%s,"patch":%s,"version":"%s","changelog_source":null}\n' \
+            "$MAJOR" "$STD" "$PATCH" "$VER"
+    fi
 else
     echo "version=${VER}"
     echo "VERSION_MAJOR=${MAJOR}"
     echo "VERSION_STANDARD=${STD}"
     echo "VERSION_PATCH=${PATCH}"
     echo ""
-    echo "--- VERSION_CHANGELOG (source excerpt) ---"
-    echo "$CHANGELOG_NOTE"
+    if [[ -f "$LOGSRC" ]]; then
+        echo "--- VERSION_CHANGELOG (optional deployment file present) ---"
+        echo "$CHANGELOG_NOTE"
+    else
+        echo "--- VERSION_CHANGELOG ---"
+        echo "(none — local/dev build does not compile changelog; add at deployment if needed)"
+    fi
 fi
