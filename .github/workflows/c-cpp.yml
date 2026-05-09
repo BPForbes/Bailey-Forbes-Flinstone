@@ -16,11 +16,11 @@ jobs:
           fetch-depth: 0
 
       - name: Install dependencies
-        run: sudo apt-get update -y && sudo apt-get install -y gcc g++ binutils nasm libcunit1-dev
+        run: sudo apt-get update -y && sudo apt-get install -y gcc binutils nasm libcunit1-dev
 
       - name: Assemble changelog (CI-only source)
         run: |
-          g++ -std=c++17 -Wall -Wextra -O2 -o gen_version_changelog scripts/gen_version_changelog.cpp
+          gcc -std=c11 -Wall -Wextra -O2 -o gen_version_changelog scripts/gen_version_changelog.c
           ./gen_version_changelog
 
       - name: Build (x86_64 GAS)
@@ -53,7 +53,7 @@ jobs:
       - name: Build (x86_64 NASM)
         run: |
           make clean
-          g++ -std=c++17 -Wall -Wextra -O2 -o gen_version_changelog scripts/gen_version_changelog.cpp
+          gcc -std=c11 -Wall -Wextra -O2 -o gen_version_changelog scripts/gen_version_changelog.c
           ./gen_version_changelog
           make ARCH=x86_64_nasm CHANGELOG_CI=1
 
@@ -66,11 +66,11 @@ jobs:
           fetch-depth: 0
 
       - name: Install cross-compiler
-        run: sudo apt-get update -y && sudo apt-get install -y gcc-aarch64-linux-gnu binutils-aarch64-linux-gnu g++
+        run: sudo apt-get update -y && sudo apt-get install -y gcc gcc-aarch64-linux-gnu binutils-aarch64-linux-gnu
 
       - name: Assemble changelog (CI-only source)
         run: |
-          g++ -std=c++17 -Wall -Wextra -O2 -o gen_version_changelog scripts/gen_version_changelog.cpp
+          gcc -std=c11 -Wall -Wextra -O2 -o gen_version_changelog scripts/gen_version_changelog.c
           ./gen_version_changelog
 
       - name: Build (ARM / AArch64)
@@ -85,11 +85,11 @@ jobs:
           fetch-depth: 0
 
       - name: Install dependencies
-        run: sudo apt-get install -y gcc g++ binutils nasm
+        run: sudo apt-get install -y gcc binutils nasm
 
       - name: Assemble changelog (CI-only source)
         run: |
-          g++ -std=c++17 -Wall -Wextra -O2 -o gen_version_changelog scripts/gen_version_changelog.cpp
+          gcc -std=c11 -Wall -Wextra -O2 -o gen_version_changelog scripts/gen_version_changelog.c
           ./gen_version_changelog
 
       - name: Build (VM)

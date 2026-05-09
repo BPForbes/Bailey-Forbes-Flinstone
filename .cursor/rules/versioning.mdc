@@ -10,7 +10,7 @@ alwaysApply: true
 ## Canonical version & changelog
 
 - **`userland/shell/version_def.h`** — `VERSION_MAJOR` (A), `VERSION_STANDARD` (B / features), `VERSION_PATCH` (C / fixes); **`VERSION`** macro = dotted **A.B.C**.
-- **GitHub Actions:** **`scripts/gen_version_changelog.cpp`** (compiled and run) + **`make CHANGELOG_CI=1`** (see `.github/workflows/c-cpp.yml`).
+- **GitHub Actions:** **`scripts/gen_version_changelog.c`** (compiled with **`gcc -std=c11`**) + **`make CHANGELOG_CI=1`** (see `.github/workflows/c-cpp.yml`).
 - **`scripts/export_version_record.sh`** — prints keys / JSON from `version_def.h` for deployment pipelines.
 - Use **semantic versioning**: **`A.B.C`**.
 
