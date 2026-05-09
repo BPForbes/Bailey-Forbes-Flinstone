@@ -1,8 +1,16 @@
 #include "cmd_decl.h"
 #include <stddef.h>
 
-/*
- * Numeric dispatch — same structure as fl_syscall_dispatch(): switch on command id.
+/**
+ * Dispatch a shell command identifier to its corresponding command handler.
+ *
+ * Routes the numeric command `no` to the appropriate `cmd_*_run(argc, argv)` function
+ * and returns that handler's result. If `no` is not recognized, returns -1.
+ *
+ * @param no Command identifier to dispatch.
+ * @param argc Argument count forwarded to the selected command handler.
+ * @param argv Argument vector forwarded to the selected command handler.
+ * @returns The integer result returned by the matched command handler, or `-1` if the command id is unrecognized.
  */
 int fl_shell_cmd_dispatch(fl_shell_cmd_no_t no, int argc, char **argv) {
     (void)argc;

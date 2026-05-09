@@ -8,6 +8,17 @@
 #include "util.h"
 #include <stdio.h>
 
+/**
+ * List directory entries (directories only) for the current working path and print them to stdout.
+ *
+ * Resolves "." to an absolute path and aborts if the path is blocked by the jail check. Records the
+ * directory operation in the path log, then either queries the file-manager service for node entries
+ * (printing those with type NODE_DIR) or falls back to a local directory listing.
+ *
+ * @param argc Ignored.
+ * @param argv Ignored.
+ * @returns `1` if the jail/block check denies the operation, `0` otherwise.
+ */
 int cmd_listdirs_run(int argc, char **argv) {
     (void)argc;
     (void)argv;

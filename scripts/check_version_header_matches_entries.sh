@@ -4,6 +4,7 @@ set -euo pipefail
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 DEF="$ROOT/userland/shell/version_def.h"
 
+# pick_int extracts the first numeric value from a `#define <name> <value>` line in "$DEF"; the macro name is passed as the sole argument.
 pick_int() {
   local name="$1"
   grep -E "^#define ${name}[[:space:]]+" "$DEF" | awk '{print $3}' | head -1

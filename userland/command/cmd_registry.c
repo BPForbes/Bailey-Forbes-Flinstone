@@ -37,6 +37,13 @@ static const cmd_name_ent_t cmd_registry[] = {
     {"writecluster", FL_SCMD_WRITECLUSTER},
 };
 
+/**
+ * Resolve a shell command name to its corresponding command identifier.
+ *
+ * @param name Command name string to resolve; may be NULL or an empty string.
+ * @returns The `fl_shell_cmd_no_t` value corresponding to `name`. Returns
+ *          `FL_SCMD_UNKNOWN` if `name` is NULL, empty, or not found in the registry.
+ */
 fl_shell_cmd_no_t fl_shell_cmd_lookup(const char *name) {
     if (!name || !name[0])
         return FL_SCMD_UNKNOWN;

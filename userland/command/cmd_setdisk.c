@@ -7,6 +7,18 @@
 #include <stdio.h>
 #include <string.h>
 
+/**
+ * Selects and loads a disk file to be used as the current disk.
+ *
+ * Validates argument count, resolves and verifies the provided path against
+ * the process jail, ensures the target file is accessible for reading,
+ * updates the global `current_disk_file` with the resolved path, and loads
+ * the disk header into memory.
+ *
+ * @param argc Number of command-line arguments.
+ * @param argv Argument vector; argv[1] should be the disk file path to set.
+ * @returns 0 on success; 1 on error (invalid usage, path blocked, or file access failure).
+ */
 int cmd_setdisk_run(int argc, char **argv) {
     char **args = argv;
     if (argc < 2) {

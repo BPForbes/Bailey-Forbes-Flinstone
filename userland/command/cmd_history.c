@@ -3,6 +3,13 @@
 #include <stdio.h>
 #include <string.h>
 
+/**
+ * Handle a history command by printing saved command history when requested.
+ *
+ * @param trimmed Command string to check; handled when equal to "history" or "his".
+ * @returns `0` if `trimmed` is not "history" or "his"; `1` if the command was handled
+ *          (history was printed or a missing-history message was reported).
+ */
 int cmd_history_maybe(const char *trimmed) {
     if (strcmp(trimmed, "history") != 0 && strcmp(trimmed, "his") != 0)
         return 0;

@@ -6,6 +6,15 @@
 #include <stdlib.h>
 #include <string.h>
 
+/**
+ * Update an existing cluster by replacing its contents and recomputing its storage breakdown.
+ *
+ * Expects arguments: argv[1] = cluster_index, argv[2] = "-t" for text or "-h" for hex, argv[3] = data to write.
+ *
+ * @param argc Number of command-line arguments.
+ * @param argv Argument vector (see expected layout above).
+ * @returns `0` on success, `1` on invalid usage or when the specified cluster index is out of range.
+ */
 int cmd_update_run(int argc, char **argv) {
     char **args = argv;
     if (argc < 4) {

@@ -6,6 +6,13 @@
 #include "util.h"
 #include <stdio.h>
 
+/**
+ * Execute the `rmtree` command to recursively delete a specified directory.
+ *
+ * @param argc Number of command-line arguments; must be >= 2.
+ * @param argv Argument vector where `argv[1]` is the path to the directory to remove.
+ * @returns `0` on success (removal initiated), `1` on failure (insufficient arguments or path blocked by jail policy).
+ */
 int cmd_rmtree_run(int argc, char **argv) {
     char **args = argv;
     if (argc < 2) {

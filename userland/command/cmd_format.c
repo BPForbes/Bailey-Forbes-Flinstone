@@ -8,6 +8,23 @@
 #include <stdlib.h>
 #include <string.h>
 
+/**
+ * Handle the `format` command: validate arguments, resolve and authorize the target
+ * disk file path, perform disk formatting, and update global disk state.
+ *
+ * @param argc Number of command-line arguments; function expects at least 5.
+ * @param argv Argument vector where:
+ *             - argv[1] is the disk file path,
+ *             - argv[2] is the volume name,
+ *             - argv[3] is the rowCount (positive integer),
+ *             - argv[4] is the nibbleCount (positive even integer).
+ *
+ * @note On successful format, this function updates the globals `current_disk_file`,
+ *       `g_cluster_size` (set to nibbleCount / 2), and `g_total_clusters` (set to rowCount).
+ *
+ * @returns `0` on success, `1` on failure (insufficient/invalid arguments, jail/access denial,
+ *          or other validation errors).
+ */
 int cmd_format_run(int argc, char **argv) {
     char **args = argv;
     if (argc < 5) {

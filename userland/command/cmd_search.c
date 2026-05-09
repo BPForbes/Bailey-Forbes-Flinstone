@@ -8,6 +8,16 @@
 #include <stdlib.h>
 #include <string.h>
 
+/**
+ * Searches the configured disk file for a given text and prints matching sectors.
+ *
+ * Performs either a raw-hex substring search or an ASCII search after converting
+ * hex data to ASCII. Mode is selected with the second argument flag: "-h" to
+ * search the raw hex data, "-t" (or omitted) to convert hex to ASCII and search
+ * that text. Lines beginning with "XX:" or without a ':' separator are ignored.
+ *
+ * @returns 1 if the command usage was invalid (usage message printed); 0 otherwise.
+ */
 int cmd_search_run(int argc, char **argv) {
     char **args = argv;
     int searchMode = 0;

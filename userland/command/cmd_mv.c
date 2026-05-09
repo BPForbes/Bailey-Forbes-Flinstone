@@ -6,6 +6,21 @@
 #include "util.h"
 #include <stdio.h>
 
+/**
+ * Move or rename a source path to a destination path.
+ *
+ * Resolves the provided source and destination arguments to absolute paths,
+ * enforces jail/path restrictions, then performs the move operation. If a
+ * filesystem manager service is available the service is used; otherwise the
+ * operation falls back to the standard rename syscall. Successful moves are
+ * recorded in the path log and a confirmation message is printed; failures
+ * emit an error via perror.
+ *
+ * @param argc Number of command-line arguments (must be >= 3).
+ * @param argv Argument vector where argv[1] is the source path and argv[2] is
+ *             the destination path.
+ * @returns `0` after attempting the move operation; `1` if argument validation
+ *          fails or either path is blocked by jail restrictions.
 int cmd_mv_run(int argc, char **argv) {
     char **args = argv;
     if (argc < 3) {

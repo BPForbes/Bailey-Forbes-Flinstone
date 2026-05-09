@@ -6,6 +6,22 @@
 #include <stdlib.h>
 #include <string.h>
 
+/**
+ * Create and format a disk image based on command-line arguments.
+ *
+ * Parses and validates arguments, formats the specified volume, updates
+ * global cluster parameters and the current disk filename, prints the
+ * formatted disk state, and optionally enters the interactive shell.
+ *
+ * @param argc Number of command-line arguments; expected >= 4:
+ *             createdisk <volume> <rowCount> <nibbleCount> [ -y | -n ].
+ * @param argv Argument vector containing the command and parameters.
+ *             argv[1] is the volume name, argv[2] is rowCount,
+ *             argv[3] is nibbleCount, argv[4] may be '-y' or '-Y' to
+ *             start the interactive shell after formatting.
+ * @returns `0` on success; `1` if usage or validation fails (insufficient
+ *          arguments, non-positive rowCount/nibbleCount, or odd nibbleCount).
+ */
 int cmd_createdisk_run(int argc, char **argv) {
     char **args = argv;
     if (argc < 4) {

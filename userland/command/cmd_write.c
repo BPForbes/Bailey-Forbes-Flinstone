@@ -8,6 +8,18 @@
 #include <stdio.h>
 #include <string.h>
 
+/**
+ * Write provided text arguments to a resolved file path.
+ *
+ * Concatenates argv[2]..argv[argc-1] into a single space-separated string (truncated to 4096 bytes),
+ * resolves and checks the target path against the jail, then writes the content to that path
+ * (using the filesystem manager service if available, otherwise stdio). On successful write records
+ * a PATH_OP_WRITE log entry and prints a confirmation message; on write failure prints an error via perror.
+ *
+ * @param argc Number of arguments; must be at least 3 (command, filename, content).
+ * @param argv Argument vector where argv[1] is the target filename and argv[2..] form the content.
+ * @returns 0 on completion after attempting the write, 1 if usage is invalid or the path is blocked by the jail.
+ */
 int cmd_write_run(int argc, char **argv) {
     char **args = argv;
     if (argc < 3) {

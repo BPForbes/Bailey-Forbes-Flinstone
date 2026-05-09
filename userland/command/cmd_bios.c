@@ -4,6 +4,18 @@
 #include <string.h>
 #include <unistd.h>
 
+/**
+ * Handle a `bios` command: optionally confirm and attempt to reboot to firmware setup.
+ *
+ * Parses `trimmed` for the `bios` command (must be exactly "bios" or "bios " followed by args),
+ * accepts an optional `-y`/`-Y` flag to skip confirmation, prompts the user when appropriate,
+ * and invokes systemctl to request a reboot into firmware/UEFI setup.
+ *
+ * @param trimmed Command string starting with "bios" (may include trailing arguments).
+ * @returns `0` if `trimmed` does not start with "bios" followed by end-of-string or a space;
+ *          `1` if the command was handled (including when cancelled, when non-interactive without `-y`,
+ *          or after attempting the reboot). On successful reboot the function may not return.
+ */
 int cmd_bios_maybe(char *trimmed) {
     if (strncmp(trimmed, "bios", 4) != 0 || (trimmed[4] != '\0' && trimmed[4] != ' '))
         return 0;

@@ -10,10 +10,12 @@ ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 DEF="$ROOT/userland/shell/version_def.h"
 LOGSRC="$ROOT/userland/shell/version_changelog.c"
 
+# die prints an error message to stderr and exits with status 1.
 die() { echo "$*" >&2; exit 1; }
 
 [[ -f "$DEF" ]] || die "missing $DEF"
 
+# pick_int extracts the numeric value from the first `#define <name> <value>` line in the file pointed to by `$DEF`.
 pick_int() {
     local name="$1"
     grep -E "^#define ${name}[[:space:]]+" "$DEF" | awk '{print $3}' | head -1

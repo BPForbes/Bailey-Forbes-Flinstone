@@ -28,8 +28,15 @@
 #include <sys/stat.h>
 #include <sys/types.h>
 
-/*
- * Create leading components (mkdir -p semantics). Path must be mutable.
+/**
+ * Create all leading directories for a mutable path using "mkdir -p" semantics.
+ *
+ * Attempts to create each directory component of `path` (up to the full path)
+ * with permission mode 0755. `path` must be writable by the caller because it
+ * may be modified temporarily during operation.
+ *
+ * @param path Mutable NUL-terminated path whose leading components will be created.
+ * @returns `0` on success, `-1` on failure (errno is set by the failing syscall).  
  */
 static int mkdir_p(char *path) {
     size_t len = strlen(path);
@@ -54,6 +61,16 @@ typedef struct {
     size_t cap;
 } Buf;
 
+/**
+ * Ensure the buffer has capacity for `extra` additional bytes plus a terminating NUL.
+ *
+ * On success the buffer's capacity will be at least `b->len + extra + 1`. The function
+ * may realloc `b->p` and update `b->cap` (initial growth starts at 512 and then doubles).
+ *
+ * @param b Pointer to the buffer to grow.
+ * @param extra Number of additional bytes required.
+ * @returns `0` on success, `-1` if memory allocation fails (buffer state is unchanged on failure).
+ */
 static int buf_reserve(Buf *b, size_t extra) {
     if (b->len + extra + 1 > b->cap) {
         size_t ncap = b->cap ? b->cap * 2 : 512;
@@ -68,6 +85,17 @@ static int buf_reserve(Buf *b, size_t extra) {
     return 0;
 }
 
+/**
+ * Append `n` bytes from `s` to the growable buffer `b`, ensuring a NUL terminator.
+ *
+ * Appends exactly `n` bytes from `s` to `b`. If reserving space fails, the buffer
+ * is left unchanged. On success `b->len` is increased by `n` and `b->p[b->len]`
+ * is set to `'\0'`.
+ *
+ * @param b Destination growable buffer.
+ * @param s Source bytes to append.
+ * @param n Number of bytes to append from `s`.
+ */
 static void buf_append_bytes(Buf *b, const char *s, size_t n) {
     if (buf_reserve(b, n) != 0)
         return;
@@ -76,10 +104,30 @@ static void buf_append_bytes(Buf *b, const char *s, size_t n) {
     b->p[b->len] = '\0';
 }
 
+/**
+ * Append a NUL-terminated string to a growable buffer.
+ *
+ * Appends the characters of `s` up to but not including the terminating NUL to `b`.
+ * The buffer remains NUL-terminated after the operation.
+ *
+ * @param b Buffer to append into; must be initialized.
+ * @param s NUL-terminated string whose contents will be appended.
+ */
 static void buf_append_cstr(Buf *b, const char *s) {
     buf_append_bytes(b, s, strlen(s));
 }
 
+/**
+ * Format a string with the given `fmt` and arguments and append it to `b`
+ * when the formatted result fits entirely within an internal 4096-byte buffer.
+ *
+ * If formatting produces a non-empty string and its length is less than 4096
+ * bytes, the resulting bytes are appended to `b`. If the formatted output is
+ * empty or would be truncated, nothing is appended.
+ *
+ * @param b Buffer to append formatted text to.
+ * @param fmt printf-style format string followed by corresponding arguments.
+ */
 static void buf_append_fmt(Buf *b, const char *fmt, ...) {
     char tmp[4096];
     va_list ap;
@@ -90,12 +138,31 @@ static void buf_append_fmt(Buf *b, const char *fmt, ...) {
         buf_append_bytes(b, tmp, (size_t)n);
 }
 
+/**
+ * Free the buffer's internal storage and reset its fields to an empty state.
+ *
+ * This releases the heap memory held in `b->p` but does not free the `Buf`
+ * structure itself.
+ *
+ * @param b Buffer whose internal storage will be freed and fields reset.
+ */
 static void buf_free(Buf *b) {
     free(b->p);
     b->p = NULL;
     b->len = b->cap = 0;
 }
 
+/**
+ * Read an entire file into a newly allocated NUL-terminated buffer.
+ *
+ * Opens the file at `path`, reads its full contents into a heap buffer, NUL-terminates
+ * the buffer, and returns the pointer to that buffer.
+ *
+ * @param path Path to the file to read.
+ * @returns Pointer to a heap-allocated, NUL-terminated buffer containing the file contents,
+ *          or `NULL` on any error (e.g., open/read/allocation failure).
+ * @note The caller is responsible for freeing the returned buffer with `free()` when no longer needed.
+ */
 static char *read_entire_file(const char *path) {
     FILE *f = fopen(path, "rb");
     if (!f)
@@ -121,6 +188,17 @@ static char *read_entire_file(const char *path) {
     return buf;
 }
 
+/**
+ * Copy src into dst, removing leading and trailing whitespace and NUL-terminating the result.
+ *
+ * Copies the trimmed substring of `src` into `dst`. If the trimmed content length is
+ * greater than or equal to `dstsz`, the result is truncated to `dstsz - 1` bytes.
+ * The destination buffer is always NUL-terminated.
+ *
+ * @param src Source NUL-terminated string.
+ * @param dst Destination buffer to receive the trimmed string.
+ * @param dstsz Size of the destination buffer in bytes; must be at least 1.
+ */
 static void trim_cpy(const char *src, char *dst, size_t dstsz) {
     const char *a = src;
     while (*a && isspace((unsigned char)*a))
@@ -135,6 +213,17 @@ static void trim_cpy(const char *src, char *dst, size_t dstsz) {
     dst[n] = '\0';
 }
 
+/**
+ * Parse a C header text blob for VERSION_MAJOR, VERSION_STANDARD, and VERSION_PATCH and write their integer values to the provided outputs.
+ *
+ * Each output (`ma`, `st`, `pa`) is initialized to -1 before parsing; on success all three are set to the parsed integers.
+ *
+ * @param text Pointer to the NUL-terminated input text to scan (treated as immutable).
+ * @param ma Output pointer that receives the parsed `VERSION_MAJOR` or remains -1 if not found.
+ * @param st Output pointer that receives the parsed `VERSION_STANDARD` or remains -1 if not found.
+ * @param pa Output pointer that receives the parsed `VERSION_PATCH` or remains -1 if not found.
+ * @returns `1` if all three version values were found and written to the output pointers, `0` otherwise.
+ */
 static int parse_triplet(const char *text, int *ma, int *st, int *pa) {
     *ma = *st = *pa = -1;
     char *copy = strdup(text);
@@ -169,6 +258,12 @@ typedef struct {
     int valid;
 } VerEntry;
 
+/**
+ * Skip leading whitespace and an optional "int" keyword followed by whitespace.
+ *
+ * @param s Input C string that may begin with whitespace and an optional `int` token.
+ * @returns Pointer to the first character after leading whitespace and the optional `int` plus one following whitespace; returns the original `s` if the optional `int` token is not present.
+ */
 static const char *skip_int_kw(const char *s) {
     const char *p = s;
     while (*p && isspace((unsigned char)*p))
@@ -178,6 +273,15 @@ static const char *skip_int_kw(const char *s) {
     return s;
 }
 
+/**
+ * Determine whether a line (optionally prefixed with the token `int`) begins with `key=`
+ * and, if so, provide a pointer to the value portion after the '='.
+ *
+ * @param line Input line to inspect; may start with whitespace and an optional `int` token.
+ * @param key Key to match at the start of the (possibly adjusted) line.
+ * @param val_out Receives a pointer into `line` at the first character after '=' when a match is found.
+ * @returns `1` if `key=` is found (and `*val_out` is set), `0` otherwise.
+ */
 static int match_key(const char *line, const char *key, const char **val_out) {
     const char *p = skip_int_kw(line);
     size_t len = strlen(key);
@@ -189,6 +293,16 @@ static int match_key(const char *line, const char *key, const char **val_out) {
     return 1;
 }
 
+/**
+ * Normalize a value string by trimming leading/trailing whitespace and removing
+ * surrounding double quotes if both the first and last characters are '"'.
+ *
+ * The resulting string is written back into `s`, always NUL-terminated and
+ * truncated to fit `sz` bytes if necessary.
+ *
+ * @param s Buffer containing the input string; receives the normalized result.
+ * @param sz Size of the buffer `s` in bytes.
+ */
 static void trim_value(char *s, size_t sz) {
     char tmp[4096];
     trim_cpy(s, tmp, sizeof tmp);
@@ -200,6 +314,13 @@ static void trim_value(char *s, size_t sz) {
     snprintf(s, sz, "%s", tmp);
 }
 
+/**
+ * Parse a decimal non-negative integer in the range 0 through 999999 from `s`.
+ *
+ * @param s NUL-terminated string containing the integer text to parse.
+ * @param out Pointer to an int where the parsed value will be stored on success.
+ * @returns 0 on successful parse and range validation, -1 if the string is not a valid decimal integer or the value is outside the allowed range.
+ */
 static int parse_positive_int(const char *s, int *out) {
     char *end = NULL;
     long v = strtol(s, &end, 10);
@@ -209,6 +330,21 @@ static int parse_positive_int(const char *s, int *out) {
     return 0;
 }
 
+/**
+ * Parse a .ver release-entry file and populate a VerEntry record.
+ *
+ * Reads and parses the file at `fullpath`, recording `relpath` into the
+ * entry. Extracts numeric version fields (MAJOR/STANDARD/RELEASE or
+ * MINOR/PATCH) and a single-line DESCRIPTION; on success fills `*e`,
+ * null-terminates strings, sets `e->valid = 1`, and returns 0.
+ *
+ * @param fullpath Filesystem path to the .ver file to parse.
+ * @param relpath  Relative path used for the entry's relpath metadata.
+ * @param e        Output pointer to a VerEntry to initialize on success.
+ * @returns 0 on successful parse and population of `*e`; -1 on failure.
+ *          On failure `*e` is zeroed. DESCRIPTION longer than 1023
+ *          characters or missing required fields will cause failure.
+ */
 static int parse_ver_file(const char *fullpath, const char *relpath, VerEntry *e) {
     memset(e, 0, sizeof *e);
     snprintf(e->relpath, sizeof e->relpath, "%s", relpath);
@@ -297,6 +433,20 @@ bad:
     return -1;
 }
 
+/**
+ * Append a C-string-safe, escaped representation of `s` to the buffer `out` for embedding inside a C string literal.
+ *
+ * Characters are translated as follows:
+ * - '\\' → "\\\\"
+ * - '"'  → "\\\""
+ * - '\r' → removed
+ * - '\n' → "\\n"
+ * - ASCII bytes 32..126 → copied as-is
+ * - all other bytes → "\\x%02x" hex escape
+ *
+ * @param out Destination buffer to append the escaped text to.
+ * @param s   NUL-terminated input string to escape.
+ */
 static void append_escaped(Buf *out, const char *s) {
     for (const unsigned char *p = (const unsigned char *)s; *p; p++) {
         unsigned char c = *p;
@@ -315,6 +465,14 @@ static void append_escaped(Buf *out, const char *s) {
     }
 }
 
+/**
+ * Compare two VerEntry records for ordering release entries.
+ *
+ * @param a Pointer to the first VerEntry (passed as a `const void *` from qsort).
+ * @param b Pointer to the second VerEntry (passed as a `const void *` from qsort).
+ * @returns Negative if `a` should sort before `b`, positive if `a` should sort after `b`, `0` if they are equivalent.
+ *          Ordering is by descending `ma`, then descending `st`, then descending `rel`, then ascending `relpath`.
+ */
 static int cmp_entry_desc(const void *a, const void *b) {
     const VerEntry *ea = a;
     const VerEntry *eb = b;
@@ -327,6 +485,23 @@ static int cmp_entry_desc(const void *a, const void *b) {
     return strcmp(ea->relpath, eb->relpath);
 }
 
+/**
+ * Generate userland/shell/version_changelog.c from version_def.h and the
+ * release-note files in version/entries under the specified repository root.
+ *
+ * Parses VERSION_MAJOR / VERSION_STANDARD / VERSION_PATCH from
+ * userland/shell/version_def.h, scans version/entries for *.ver files,
+ * extracts and sorts release entries, then emits a generated C source file
+ * containing a single C-string initializer `const char VERSION_CHANGELOG[]`
+ * with an escaped header line and one quoted line per entry.
+ *
+ * @param argc Number of command-line arguments; an optional repository root
+ *             path may be provided as argv[1].
+ * @param argv Argument vector; argv[1], if present, is treated as the
+ *             repository root directory (defaults to ".").
+ * @returns `0` on success, `1` on any error (path or IO errors, parse failures,
+ *          allocation failures, or inability to create the target directory).
+ */
 int main(int argc, char **argv) {
     char root[PATH_MAX];
     const char *arg = (argc > 1) ? argv[1] : ".";

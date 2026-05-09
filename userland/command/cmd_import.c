@@ -6,6 +6,19 @@
 #include <stdio.h>
 #include <stdlib.h>
 
+/**
+ * Handle the `import` command: parse arguments, enforce jail restrictions, and dispatch an import.
+ *
+ * Accepts either `import <textfile> <txtfile>` or
+ * `import <textfile> <txtfile> <clusters> <clusterSize>`. Resolves and normalizes source and
+ * destination paths, checks them with the jail blocker, and calls `import_text_drive` with either
+ * inferred geometry (-1, -1) or the provided cluster geometry.
+ *
+ * @param argc Number of command-line arguments.
+ * @param argv Argument vector where argv[1] is the source text file and argv[2] is the destination.
+ * @returns `0` on successful dispatch of the import operation, `1` on invalid usage, invalid geometry,
+ *          or when a path is blocked by the jail checks.
+ */
 int cmd_import_run(int argc, char **argv) {
     char **args = argv;
     if (argc == 3) {

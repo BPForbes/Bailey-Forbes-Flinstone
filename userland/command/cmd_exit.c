@@ -5,6 +5,17 @@
 #include <string.h>
 #include <unistd.h>
 
+/**
+ * Handle an `exit` command if `trimmed` begins with "exit", optionally remove history, and terminate the shell.
+ *
+ * If `trimmed` does not begin with "exit" the function returns without side effects. When handling an exit
+ * command, the function may prompt the user (interactive TTY) or accept `-y`/`-n` options to delete or retain
+ * the history file; it reports the outcome, sets `shell_running` to 0 and calls `exit(0)` to terminate the process.
+ *
+ * Note: this function tokenizes `trimmed` in-place (using `strtok`) and thus modifies the input buffer.
+ *
+ * @param trimmed Null-terminated command string to inspect and tokenize; modified in-place when parsed.
+ */
 void cmd_exit_maybe(char *trimmed) {
     if (strncmp(trimmed, "exit", 4) != 0)
         return;

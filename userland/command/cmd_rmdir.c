@@ -7,6 +7,19 @@
 #include <stdio.h>
 #include <unistd.h>
 
+/**
+ * Remove a directory specified by the command arguments.
+ *
+ * Resolves the target path and enforces jail/path-block restrictions. Attempts
+ * removal through the global file-manager service when available, otherwise
+ * falls back to the system rmdir call. On successful removal the operation is
+ * recorded and a confirmation is printed; on failure an error is reported via
+ * perror().
+ *
+ * @param argc Number of command-line arguments.
+ * @param argv Command-line arguments; argv[1] is the directory to remove.
+ * @returns `0` after attempting the removal, `1` if the argument is missing or the path is blocked by the jail.
+ */
 int cmd_rmdir_run(int argc, char **argv) {
     char **args = argv;
     if (argc < 2) {

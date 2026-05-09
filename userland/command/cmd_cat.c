@@ -9,6 +9,17 @@
 #include <stdio.h>
 #include <string.h>
 
+/**
+ * Print the contents of a file to standard output as the `cat` command.
+ *
+ * Attempts to resolve and validate the provided filename, records the read
+ * operation, and writes the file's text contents to stdout using the
+ * configured file-access backend or a local fallback.
+ *
+ * @param argc Number of command-line arguments; must be at least 2.
+ * @param argv Argument vector where argv[1] is the target filename to display.
+ * @returns 0 on success, 1 on usage error or if the resolved path is blocked. 
+ */
 int cmd_cat_run(int argc, char **argv) {
     char **args = argv;
     if (argc < 2) {

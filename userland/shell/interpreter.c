@@ -11,13 +11,18 @@
 #include <sys/wait.h>
 #include <signal.h>
 
-/*
- * execute_command_str:
- *   Parses and executes the command provided in 'line'.
- *   Returns 0 on success; otherwise a nonzero value.
+/**
+ * Parse and execute a shell-style command string.
  *
- * Builtins are dispatched by numeric command id (see userland/command/fl_shell_cmd.h),
- * analogous to fl_syscall_dispatch() for kernel syscalls.
+ * Parses `line`, appends it to interactive history, and executes the resulting
+ * command either as an internal builtin or as an external program. Builtin
+ * handlers are consulted first; if none match the command name an external
+ * process is forked and exec'd.
+ *
+ * @param line Command line to parse and execute; may be NULL or empty.
+ * @returns `0` when there is nothing to do or a builtin handled the command
+ *          successfully; otherwise a nonzero status (typically the exit status
+ *          of the spawned child process or a failure indicator).
  */
 int execute_command_str(const char *line) {
     if (!line || !*line)
@@ -107,6 +112,19 @@ void interactive_shell(void) {
     return;
 }
 #else
+/**
+ * Run the interactive command-line shell loop.
+ *
+ * Reads keystrokes from the terminal with simple line-editing and up/down
+ * history navigation, submits completed lines to the command executor, and
+ * maintains an in-memory command history. The function manages terminal raw
+ * mode while editing, responds to a global history-cleared flag, prints the
+ * prompt and command output to stdout, and returns when the global
+ * `shell_running` flag becomes false.
+ *
+ * The function may allocate or reallocate the global interactive history and
+ * updates `g_interactive_history` and `g_interactive_history_count`.
+ */
 void interactive_shell(void) {
     printf("[INTERACTIVE MODE] Type 'exit' to leave interactive mode.\n");
     char line[1024] = {0};

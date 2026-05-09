@@ -6,6 +6,17 @@
 #include <stdlib.h>
 #include <string.h>
 
+/**
+ * Handle the `writecluster` command by parsing arguments, writing data to the specified cluster,
+ * and updating the cluster's storage breakdown.
+ *
+ * Expects argv to contain: argv[1] = cluster index, argv[2] = "-t" for text input or "-h" for hex,
+ * and argv[3] = data to write.
+ *
+ * @param argc Number of command-line arguments.
+ * @param argv Argument vector containing the command and its parameters.
+ * @returns `0` on success, `1` if insufficient arguments (prints usage message).
+ */
 int cmd_writecluster_run(int argc, char **argv) {
     char **args = argv;
     if (argc < 4) {

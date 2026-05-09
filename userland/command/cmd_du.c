@@ -6,6 +6,20 @@
 #include <stdlib.h>
 #include <string.h>
 
+/**
+ * Run the disk-usage command: either display per-cluster details or compute and print aggregate cluster usage statistics.
+ *
+ * When invoked with the first argument "dtl", the command prints per-cluster details by calling
+ * show_disk_detail_for_cluster for each specified cluster ID (additional arguments) or for all clusters if none
+ * are provided. Otherwise, it reads the disk data file referenced by current_disk_file, parses each line as
+ * "<id>:<hexdata>", validates entry length against g_cluster_size, classifies clusters as used, available (all
+ * zeros), or bad (malformed), and prints counts and percentages to stdout.
+ *
+ * @param argc Number of command-line arguments.
+ * @param argv Argument vector; argv[1] may be "dtl" to trigger detailed per-cluster output, and subsequent argv
+ *             entries are treated as cluster IDs when "dtl" is used.
+ * @returns 0 on success; 1 if the disk data file is missing or empty. 
+ */
 int cmd_du_run(int argc, char **argv) {
     char **args = argv;
     if (argc >= 2 && !strcmp(args[1], "dtl")) {

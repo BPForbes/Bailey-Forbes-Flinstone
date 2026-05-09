@@ -9,6 +9,18 @@
 #include <stdio.h>
 #include <string.h>
 
+/**
+ * Execute the `mkdir` command using argv[1] as the target directory.
+ *
+ * Resolves the provided path, enforces jail restrictions, attempts to create the
+ * directory (via file-manager service if available or local helper otherwise),
+ * and records the operation in the path log. Prints usage or result messages
+ * and may call `perror("mkdir")` on service creation failure.
+ *
+ * @param argc Number of command-line arguments; must be >= 2 (program name + target).
+ * @param argv Argument vector where argv[1] is the directory path to create.
+ * @returns 0 on completion after attempting creation; 1 if usage is incorrect or the path is blocked.
+ */
 int cmd_mkdir_run(int argc, char **argv) {
     char **args = argv;
     if (argc < 2) {

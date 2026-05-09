@@ -191,6 +191,16 @@ static void vm_warn_layer_config(void) {
     (void)warned;
 }
 
+/**
+ * Program entry point that processes command-line arguments, configures VM and sandbox modes,
+ * handles single-command fast paths and batch-mode command submission, initializes services,
+ * optionally boots an embedded VM, launches the interactive shell, and performs orderly shutdown.
+ *
+ * The function may exit early with nonzero status for fatal initialization or VM errors,
+ * or with zero after handling single-command fast paths or VM popup behavior.
+ *
+ * @returns 0 on normal successful termination.
+ */
 int main(int argc, char *argv[]) {
     /* Seed the random number generator */
     srand((unsigned) time(NULL));
