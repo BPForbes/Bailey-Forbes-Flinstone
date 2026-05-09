@@ -1,5 +1,5 @@
 cmake_minimum_required(VERSION 3.15)
-project(Bailey-Forbes-Flinstone VERSION 1.0.0 LANGUAGES C ASM)
+project(Bailey-Forbes-Flinstone VERSION 2.2.4 LANGUAGES C ASM)
 
 # Set default build type
 if(NOT CMAKE_BUILD_TYPE)
