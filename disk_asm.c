@@ -74,23 +74,41 @@ int disk_asm_zero_cluster(int c)                          { (void)c; return -1; 
 
 #else /* HOST mode */
 /* ------------------------------------------------------------------ */
-/* Host path: text-format hex disk file (development / testing)       */
+/* Host path: FAT32 .img (FLINT.DAT) or legacy hex .txt               */
 /* ------------------------------------------------------------------ */
+#include "fat32_host.h"
 #include "util.h"
+#include <fcntl.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <unistd.h>
 
 /* Read cluster as raw bytes into buf (uses ASM for copy) */
 int disk_asm_read_cluster(int clu_index, unsigned char *buf) {
     if (clu_index < 0 || clu_index >= g_total_clusters)
         return -1;
+    if (g_disk_host_fat32) {
+        uint64_t off = 0;
+        if (fat32_host_shell_cluster_byte_offset(clu_index, &off) != 0)
+            return -1;
+        int fd = open(current_disk_file, O_RDONLY);
+        if (fd < 0)
+            return -1;
+        ssize_t n = pread(fd, buf, (size_t)g_cluster_size, (off_t)off);
+        close(fd);
+        return (n == (ssize_t)g_cluster_size) ? 0 : -1;
+    }
     FILE *fp = fopen(current_disk_file, "r");
     if (!fp) return -1;
-    char line[512];
+    char *line = malloc((size_t)g_cluster_size * 2 + 32);
+    if (!line) {
+        fclose(fp);
+        return -1;
+    }
     int current = -1;
     char *hex_data = NULL;
-    while (fgets(line, sizeof(line), fp)) {
+    while (fgets(line, (size_t)g_cluster_size * 2 + 32, fp)) {
         char *trim = trim_whitespace(line);
         if (!*trim || !strncmp(trim, "XX:", 3)) continue;
         current++;
@@ -101,20 +119,28 @@ int disk_asm_read_cluster(int clu_index, unsigned char *buf) {
         }
     }
     fclose(fp);
-    if (!hex_data) return -1;
+    if (!hex_data) {
+        free(line);
+        return -1;
+    }
     size_t hex_len = strlen(hex_data);
     size_t expected = (size_t)g_cluster_size * 2;
     size_t n_bytes = (expected < hex_len ? expected : hex_len) / 2;
-    unsigned char tmp[512];
-    if (g_cluster_size > 512) return -1;
+    unsigned char *tmp = mem_domain_alloc(MEM_DOMAIN_FS, (size_t)g_cluster_size);
+    if (!tmp) {
+        free(line);
+        return -1;
+    }
     for (size_t i = 0; i < n_bytes; i++) {
         char byte_str[3] = { hex_data[i*2], hex_data[i*2+1], 0 };
         tmp[i] = (unsigned char)strtol(byte_str, NULL, 16);
     }
     if (n_bytes > 0)
         asm_mem_copy(buf, tmp, n_bytes);
-    if (g_cluster_size > (int)(hex_len / 2))
-        asm_mem_zero(buf + hex_len/2, (size_t)g_cluster_size - hex_len/2);
+    if (g_cluster_size > (int)n_bytes)
+        asm_mem_zero(buf + n_bytes, (size_t)g_cluster_size - n_bytes);
+    mem_domain_free(MEM_DOMAIN_FS, tmp);
+    free(line);
     return 0;
 }
 
@@ -122,6 +148,18 @@ int disk_asm_read_cluster(int clu_index, unsigned char *buf) {
 int disk_asm_write_cluster(int clu_index, const unsigned char *buf) {
     if (clu_index < 0 || clu_index >= g_total_clusters)
         return -1;
+    if (g_disk_host_fat32) {
+        uint64_t off = 0;
+        if (fat32_host_shell_cluster_byte_offset(clu_index, &off) != 0)
+            return -1;
+        int fd = open(current_disk_file, O_RDWR);
+        if (fd < 0)
+            return -1;
+        ssize_t w = pwrite(fd, buf, (size_t)g_cluster_size, (off_t)off);
+        fsync(fd);
+        close(fd);
+        return (w == (ssize_t)g_cluster_size) ? 0 : -1;
+    }
     char *hex_str = mem_domain_alloc(MEM_DOMAIN_FS, (size_t)g_cluster_size * 2 + 1);
     if (!hex_str) return -1;
     for (int i = 0; i < g_cluster_size; i++)

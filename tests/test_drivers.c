@@ -572,13 +572,20 @@ static int test_pic(void) {
 }
 
 int main(void) {
-    char path[] = "/tmp/fl_driver_test_XXXXXX";
-    int fd = mkstemp(path);
+    char tmpl[] = "/tmp/fl_drv_XXXXXX";
+    int fd = mkstemp(tmpl);
     if (fd < 0) {
         fprintf(stderr, "Cannot create temp file\n");
         return 1;
     }
     close(fd);
+    char path[160];
+    snprintf(path, sizeof path, "%s.txt", tmpl);
+    if (rename(tmpl, path) != 0) {
+        unlink(tmpl);
+        fprintf(stderr, "Cannot rename temp disk to .txt\n");
+        return 1;
+    }
     g_total_clusters = 8;
     g_cluster_size = 32;
     strncpy(current_disk_file, path, sizeof(current_disk_file) - 1);

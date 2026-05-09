@@ -3,7 +3,9 @@
 
 int g_cluster_size = 32;
 int g_total_clusters = 32;
-char current_disk_file[CWD_MAX] = "drive.txt";
+int g_disk_host_fat32 = 0;
+
+char current_disk_file[CWD_MAX] = "drive.img";
 char g_cwd[CWD_MAX] = ".";
 
 int g_vm_mode = 0;
@@ -31,10 +33,10 @@ const char *HELP_MSG =
 "\n"
 "Disk operations:\n"
 "  createdisk <volume> <rowCount> <nibbleCount> [ -y | -n ]\n"
-"       Create new disk file (<volume>_disk.txt)\n"
+"       Create FAT32 .img (cluster size >= 512 B, multiple of 512) or legacy .txt for smaller clusters.\n"
 "  format <disk_file> <volume> <rowCount> <nibbleCount>\n"
-"       Format existing disk file\n"
-"  setdisk <disk_file> Set disk file to use\n"
+"       .img writes a FAT32-aligned volume; .txt keeps legacy hex lines.\n"
+"  setdisk <disk_file> Set disk image (.img FAT32 or .txt legacy)\n"
 "  listclusters        List disk cluster contents\n"
 "  printdisk           Print disk with header\n"
 "  writecluster <idx> -t|-h <data>  Write to cluster\n"

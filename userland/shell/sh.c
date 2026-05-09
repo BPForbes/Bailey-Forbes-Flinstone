@@ -291,9 +291,12 @@ int main(int argc, char *argv[]) {
             exit(1);
         }
         flintstone_format_disk(argv[1], rowCount, nibbleCount);
-        snprintf(current_disk_file, sizeof(current_disk_file), "%s_disk.txt", argv[1]);
-        g_cluster_size = nibbleCount / 2;
-        g_total_clusters = rowCount;
+        int cb = nibbleCount / 2;
+        if (cb >= 512 && (cb % 512) == 0)
+            snprintf(current_disk_file, sizeof(current_disk_file), "%s_disk.img", argv[1]);
+        else
+            snprintf(current_disk_file, sizeof(current_disk_file), "%s_disk.txt", argv[1]);
+        read_disk_header();
         print_disk_formatted();
         if (argc == 5 && !strcmp(argv[4], "-y"))
             interactive_shell();
@@ -311,6 +314,12 @@ int main(int argc, char *argv[]) {
     if (vm_configure_root_from_cwd() != 0)
         fprintf(stderr, "[VM] 5-layer driver config warning: layer 4 shell/VM root is not configured\n");
     fs_jail_init();
+
+    /* Default host volume: ensure drive.img exists before block driver probes it. */
+    if (strcmp(current_disk_file, "drive.img") == 0 && access(current_disk_file, F_OK) != 0) {
+        disk_ensure_default_fat32(current_disk_file, 32, 512);
+        read_disk_header();
+    }
 
     /* Initialize file manager service, path log, and drivers */
     fs_service_glue_init();
@@ -458,34 +467,8 @@ int main(int argc, char *argv[]) {
         }
     }
     
-    if (isatty(STDIN_FILENO) && strcmp(current_disk_file, "drive.txt") == 0) {
-        FILE *testfp = fopen(current_disk_file, "r");
-        if (!testfp) {
-            printf("No default disk file '%s'. Creating fresh with 32 clusters of %d bytes each.\n",
-                   current_disk_file, g_cluster_size);
-            FILE *fp = fopen(current_disk_file, "w");
-            if (fp) {
-                char *ruler = malloc(g_cluster_size * 2 + 1);
-                if (ruler) {
-                    const char *digits = "0123456789ABCDEF";
-                    for (int j = 0; j < g_cluster_size * 2; j++)
-                        ruler[j] = digits[j % 16];
-                    ruler[g_cluster_size * 2] = '\0';
-                    fprintf(fp, "XX:%s\n", ruler);
-                    free(ruler);
-                }
-                for (int i = 0; i < 32; i++) {
-                    fprintf(fp, "%02X:", i);
-                    for (int j = 0; j < g_cluster_size * 2; j++)
-                        fputc('0', fp);
-                    fputc('\n', fp);
-                }
-                fclose(fp);
-            }
-        } else {
-            fclose(testfp);
-            read_disk_header();
-        }
+    if (isatty(STDIN_FILENO) && strcmp(current_disk_file, "drive.img") == 0) {
+        read_disk_header();
     }
     
     if (!isatty(STDIN_FILENO))

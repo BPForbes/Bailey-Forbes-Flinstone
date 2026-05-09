@@ -11,6 +11,8 @@ shell_history.txt
 
 # Test/generated files
 *_disk.txt
+*_disk.img
+drive.img
 testfile.txt
 tests/test_alloc
 tests/test_mem_asm

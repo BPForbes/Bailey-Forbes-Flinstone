@@ -27,6 +27,8 @@
 extern int g_cluster_size;
 extern int g_total_clusters;
 extern char current_disk_file[CWD_MAX];
+/* 1 = FAT32 super-floppy .img (FLINT.DAT payload); 0 = legacy hex .txt */
+extern int g_disk_host_fat32;
 
 /* VM mode: 1 = -Virtualization; file access is jailed (see fs_jail.c) to launch dir or temp sandbox */
 extern int g_vm_mode;

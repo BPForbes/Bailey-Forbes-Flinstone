@@ -47,7 +47,7 @@ emit() {
 /*
  * GENERATED FILE — do not edit by hand.
  *
- * Built from version/entries/*.ver by scripts/gen_version_def.sh (also run from the Makefile).
+ * Built from version entry files (.ver) under version/entries/ by scripts/gen_version_def.sh (also run from the Makefile).
  * The shipped version is the highest A.B.C among those entry files.
  *
  *   A (VERSION_MAJOR)     — milestones / architecture-scale changes
