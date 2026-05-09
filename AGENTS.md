@@ -50,6 +50,30 @@ Run builds from the repository root.
 - If a required toolchain or library is missing, install the packages listed in the Cursor Cloud section, then rerun the tests instead of skipping them.
 - Document any true environment blocker in the final response, including the exact command that failed and the missing prerequisite.
 
+## Versioning
+
+The shipped shell version string is **`VERSION`** in `userland/shell/common.h` (`#define VERSION "A.B.C"`). Use **semantic versioning**:
+
+| Component | When to bump |
+|-----------|----------------|
+| **A** | Major milestones, architecture changes, large foundational overhauls |
+| **B** | New features (additive behavior) |
+| **C** | Bug fixes and small corrections |
+
+If a single release mixes milestone/architecture work, features, and fixes: **increment only the most significant applicable component** (e.g. milestone + architecture → bump **A** only).
+
+### Merge / PR expectation
+
+Before merging **incoming → base** (e.g. `bug/*` → `develop`, `develop` → `main`):
+
+1. Compare **`VERSION` on the incoming branch** to **`VERSION` on the target branch**.
+2. **Incoming must be strictly newer** than the target for that merge.
+3. If both show the **same** version (e.g. both `2.0.0`), **update the incoming branch** so its version is **one appropriate semver step ahead** of the target.
+
+Example: **`bug/…` → `develop`**, both at **`2.0.0`** → bump incoming to **`2.0.1`** (patch for a bugfix).
+
+Detailed wording also appears in **CLAUDE.md**, **`.coderabbit.yaml`**, and **`.cursor/rules/versioning.mdc`** — keep them aligned when policy changes.
+
 ## Implementation boundaries
 
 - Memory primitives, allocator internals, low-level synchronization, port I/O, and core hardware-facing routines should be backed by the architecture-specific ASM layer.

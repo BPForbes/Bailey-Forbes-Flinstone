@@ -1,0 +1,35 @@
+---
+description: Semantic versioning (A.B.C) and branch-merge version checks
+globs:
+  - "**/*"
+alwaysApply: true
+---
+
+# Versioning rules
+
+## Canonical version
+
+- Project version is **`VERSION`** in `userland/shell/common.h` (`#define VERSION "A.B.C"`).
+- Use **semantic versioning**: **`A.B.C`**.
+
+## Semver meanings
+
+| Component | Meaning |
+|-----------|---------|
+| **A** | Major — architecture or milestone-level overhauls, incompatible or foundational changes |
+| **B** | Minor — new features (additive behavior) |
+| **C** | Patch — bug fixes and small, localized corrections |
+
+If a single change mixes milestone/architecture work, features, and fixes: **bump only the single most significant applicable component** (e.g. milestone + architecture → increment **A** only; do not stack B/C bumps for the same release).
+
+## Merge / PR checks
+
+Before merging **incoming → base** (examples: `bug/*` → `develop`, `develop` → `main`):
+
+1. Read **`VERSION` on the incoming branch** and **`VERSION` on the merge target branch** (same file: `userland/shell/common.h`).
+2. **Incoming must be strictly newer** than the target for that integration.
+3. If both show the **same** version (e.g. both `2.0.0`), **update the incoming branch** so its version is **one appropriate step ahead** of the target.
+
+Example: `bug/…` → `develop`, both at **`2.0.0`** → bump incoming to **`2.0.1`** (patch for a bugfix branch).
+
+Agents and humans should update `VERSION` on the **incoming** branch as part of the PR when needed—do not merge with identical versions across branches when the change warrants a bump.
