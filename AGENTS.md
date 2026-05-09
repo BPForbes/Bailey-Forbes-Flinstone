@@ -53,7 +53,7 @@ Run builds from the repository root.
 
 ## Versioning
 
-The shipped shell version **A.B.C** is in **`userland/shell/version_def.h`**, **generated** from **`version/locked/*.ver`**: the header reflects the **highest** semver among **finalized** `.ver` files there. Author new and revised **`.ver`** files under **`version/entries/`**; when you are ready to publish, run **`./scripts/finalize_version_locked.sh`** or **`make finalize-version-locked`** (copies **`version/entries/`** → **`version/locked/`**), then **`./scripts/gen_version_def.sh`** or **`make`**, and commit the updated header. **CMake** reads **`project(VERSION)`** from that same header at configure time—do not hardcode a separate semver triple in **`CMakeLists.txt`**.
+The shipped shell version **A.B.C** is in **`userland/shell/version_def.h`**, **generated** from **`version/locked/*.ver`**: the header reflects the **highest** semver among **finalized** `.ver` files there. Author new and revised **`.ver`** files under **`version/entries/`**; when those changes land on **`main`** or **`develop`**, **Version lock on merge** in GitHub Actions copies **`version/entries/`** → **`version/locked/`** and regenerates the header (committing if needed). Until then you can run **`./scripts/finalize_version_locked.sh`** or **`make finalize-version-locked`** locally. **CMake** reads **`project(VERSION)`** from that same header at configure time—do not hardcode a separate semver triple in **`CMakeLists.txt`**.
 
 ### Release notes (`version/`)
 
@@ -77,11 +77,13 @@ CI verifies that the committed **`version_def.h`** matches **`scripts/gen_versio
 
 **Changelog binary:** **GitHub Actions** compiles **`scripts/gen_version_changelog.c`**, which reads **`version/locked`** (headline version = highest finalized entry), then emits **`userland/shell/version_changelog.c`** (ignored by git). **`make … CHANGELOG_CI=1`** links **`VERSION_CHANGELOG[]`** in CI only. Plain **`make`** omits changelog unless you generate that file and pass **`CHANGELOG_CI=1`**. See **`scripts/templates/version_changelog.example.c`** for shape.
 
-### Deployment
+### Version lock on merge (GitHub Actions)
 
-**GitHub Actions:** workflow **Deploy** (`.github/workflows/deploy.yml`, **workflow_dispatch**) runs **`finalize_version_locked.sh`** first (full copy **`version/entries/`** → **`version/locked/`**), then **`gen_version_def.sh`**, changelog generation, and **`make CHANGELOG_CI=1`**. The workflow does **not** commit; push **`version/locked/`**, **`userland/shell/version_def.h`**, and any tracked changelog sources yourself if the repository should record what shipped.
+On every **`push`** to **`main`** or **`develop`**, workflow **`version-lock-on-merge.yml`** runs **`finalize_version_locked.sh`** (full copy **`version/entries/`** → **`version/locked/`**), then **`gen_version_def.sh`**. If **`version/locked/`** or **`userland/shell/version_def.h`** changed, the workflow **commits and pushes** with message **`chore(version): sync version/locked from entries after merge`**. The repository needs **`GITHUB_TOKEN`** **contents: write** and branch protection rules that allow GitHub Actions to push (or use a PAT).
 
-**Local:** **`make deploy`** runs the same ordered steps, then **`make CHANGELOG_CI=1 all`**.
+### Optional deploy build (GitHub Actions / local)
+
+Workflow **Deploy** (`.github/workflows/deploy.yml`, **workflow_dispatch**) assumes **`version/locked/`** is already up to date: it builds the changelog and runs **`make CHANGELOG_CI=1`**. **`make deploy`** does the same locally (changelog + **`make CHANGELOG_CI=1 all`**). Use **`make finalize-version-locked`** locally if you need **`version/locked/`** refreshed before merge without waiting for the merge workflow.
 
 Use **semantic versioning**:
 
@@ -102,7 +104,7 @@ Before merging **incoming → base** (e.g. `bug/*` → `develop`, `develop` → 
 1. Compare **`VERSION_*` / `VERSION` on the incoming branch** to **`VERSION_*` / `VERSION` on the target branch** (see `userland/shell/version_def.h`, generated from **`version/locked/*.ver`**).
 2. **Incoming must be strictly newer** than the target for that merge.
 3. If both show the **same** version (e.g. both `2.0.0`), **update the incoming branch** so its version is **one appropriate semver step ahead** of the target.
-4. Add a **new** **`version/entries/<A>_<B>_<C>_<slug>.ver`**, run **`make finalize-version-locked`**, then **`./scripts/gen_version_def.sh`** (or **`make`**) so **`version_def.h`** updates from **`version/locked/`**.
+4. Add a **new** **`version/entries/<A>_<B>_<C>_<slug>.ver`**. Merging into **`main`** or **`develop`** runs **Version lock on merge** in GitHub Actions (copies **`version/entries/`** → **`version/locked/`** and regenerates **`version_def.h`**, committing if needed). Until then you may run **`make finalize-version-locked`** locally if you want **`version/locked/`** updated on your branch before merge.
 
 Example: **`bug/…` → `develop`**, both at **`2.0.0`** → bump incoming to **`2.0.1`** (patch for a bugfix).
 

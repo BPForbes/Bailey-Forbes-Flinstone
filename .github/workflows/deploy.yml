@@ -1,6 +1,5 @@
-# Deployment / release build: copies version/entries → version/locked before building
-# so the published snapshot matches what you ship. Does not commit; commit locally
-# if you want the repository to record the updated locked tree and header.
+# Optional manual release build: assumes version/locked is already synced (see
+# version-lock-on-merge.yml on push to main/develop). Builds with changelog.
 
 name: Deploy
 
@@ -18,12 +17,6 @@ jobs:
 
       - name: Install dependencies
         run: sudo apt-get update -y && sudo apt-get install -y gcc binutils nasm make libcunit1-dev
-
-      - name: Finalize version (copy version/entries to version/locked)
-        run: ./scripts/finalize_version_locked.sh
-
-      - name: Regenerate version header
-        run: ./scripts/gen_version_def.sh
 
       - name: Assemble changelog
         run: |

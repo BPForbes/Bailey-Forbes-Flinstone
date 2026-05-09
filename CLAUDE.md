@@ -36,7 +36,7 @@ When preparing or reviewing a merge **incoming → base** (e.g. `bug/…` → `d
 2. **Incoming must be strictly greater** than the target for that merge.
 3. If both branches report the **same** version (e.g. both `2.0.0`), **bump the incoming branch** so it is **one semver step ahead** of the target for the kind of change (example: same `2.0.0` on `bug/…` and `develop` → set incoming to **`2.0.1`** for a bugfix).
 
-Implement the bump by adding **`version/entries/<A>_<B>_<C>_<slug>.ver`**, run **`make finalize-version-locked`**, then **`./scripts/gen_version_def.sh`** (or **`make`**) so **`version_def.h`** updates, and relying on CI for changelog assembly—not required for **`git clone` + `make`**. For a packaged release build (entries → locked automatically), use **`make deploy`** or the **Deploy** GitHub Actions workflow.
+Implement the bump by adding **`version/entries/<A>_<B>_<C>_<slug>.ver`**. Merging to **`main`** or **`develop`** triggers **Version lock on merge** (entries → **`version/locked/`**, regenerate **`version_def.h`**, commit if needed). For a local release build after that, use **`make deploy`** or the **Deploy** workflow.
 
 Export current numbers without compiling: **`./scripts/export_version_record.sh`**, **`./scripts/export_version_record.sh --json`**, or **`make version-record`** (`--json` for one-line JSON).
 
