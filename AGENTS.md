@@ -50,6 +50,57 @@ Run builds from the repository root.
 - If a required toolchain or library is missing, install the packages listed in the Cursor Cloud section, then rerun the tests instead of skipping them.
 - Document any true environment blocker in the final response, including the exact command that failed and the missing prerequisite.
 
+## Versioning
+
+The shipped shell version uses integer components in **`userland/shell/version_def.h`** (`VERSION_MAJOR`, `VERSION_STANDARD`, `VERSION_PATCH`) and builds the **`VERSION`** string macro as **A.B.C**.
+
+### Release notes (`version/`)
+
+Each release adds **one new text file** under **`version/entries/`** ending in **`.ver`** (see **`version/entries/ABOUT.txt`**). Supported keys (optional leading `int ` before the name):
+
+- **`MAJOR_VERSION`** (alias **`VERSION_MAJOR`**)
+- **`STANDARD_VERSION`** (alias **`VERSION_STANDARD`**)
+- **`RELEASE_VERSION`** — third component **C** (aliases **`MINOR_VERSION`**, **`VERSION_PATCH`**)
+- **`DESCRIPTION`** — single line, max **1023** characters (quotes optional)
+
+After a change is **merged**, existing **`version/entries/*.ver`** files are **immutable**: do not edit them; add another **`.ver`** file for the next bump. CI enforces this on pull requests against the merge base.
+
+On a **feature branch before merge**, new `.ver` files that do **not** yet exist on the merge base are ordinary drafts: you may revise or remove them as the PR evolves without treating each push as “locking” them. Only entries already present on the **target** (detected via merge base) are protected.
+
+### Lock system (agents, reviewers, and automation)
+
+- **Never edit older version files.** Any **`.ver`** file that already exists on the **merge base / target branch** is **locked**: it is part of the permanent release record. Do **not** rewrite description text, fix typos in place, or refactor filenames for entries that have already shipped—add a **new** **`version/entries/*.ver`** for the next semver instead.
+- **`version/locked/`** is a **read-only mirror** for humans and tools: it must stay a **byte-identical copy** of **`version/entries/`**. Update it **only** by running **`./scripts/sync_version_locked_mirror.sh`** or **`make sync-version-locked`** after legitimate changes under **`version/entries/`**. Never hand-edit **`version/locked/`** to diverge from **`version/entries/`**.
+- **AI assistants** (Cursor, CodeRabbit, CLAUDE context, etc.) must **not** propose changes that modify historical **`.ver`** files or unsynchronized **`version/locked/`** copies. If a PR touches those paths incorrectly, **request a new entry file** instead.
+- **CI** rejects PRs that modify merged entries (`scripts/check_version_entries_immutable.sh`) and rejects **`version/locked`** drift (`scripts/check_version_locked_mirror.sh`).
+
+CI verifies the mirror, and that **`version_def.h`** matches the **highest** **A.B.C** among **`version/entries/*.ver`**.
+
+**Changelog binary:** **GitHub Actions** compiles **`scripts/gen_version_changelog.c`**, which reads **`version/entries`** and **`version_def.h`**, then emits **`userland/shell/version_changelog.c`** (ignored by git). **`make … CHANGELOG_CI=1`** links **`VERSION_CHANGELOG[]`** in CI only. Plain **`make`** omits changelog unless you generate that file and pass **`CHANGELOG_CI=1`**. See **`scripts/templates/version_changelog.example.c`** for shape.
+
+Use **semantic versioning**:
+
+| Component | When to bump |
+|-----------|----------------|
+| **A** | Major milestones, architecture changes, large foundational overhauls |
+| **B** | New features (additive behavior) |
+| **C** | Bug fixes and small corrections |
+
+If a single release mixes milestone/architecture work, features, and fixes: **increment only the most significant applicable component** (e.g. milestone + architecture → bump **A** only).
+
+### Merge / PR expectation
+
+Before merging **incoming → base** (e.g. `bug/*` → `develop`, `develop` → `main`):
+
+1. Compare **`VERSION_*` / `VERSION` on the incoming branch** to **`VERSION_*` / `VERSION` on the target branch** (see `userland/shell/version_def.h`).
+2. **Incoming must be strictly newer** than the target for that merge.
+3. If both show the **same** version (e.g. both `2.0.0`), **update the incoming branch** so its version is **one appropriate semver step ahead** of the target.
+4. Add a **new** **`version/entries/*.ver`** file describing the release (never rewrite an entry file that already merged) and run **`make sync-version-locked`** so **`version/locked/`** mirrors **`version/entries/`**.
+
+Example: **`bug/…` → `develop`**, both at **`2.0.0`** → bump incoming to **`2.0.1`** (patch for a bugfix).
+
+Detailed wording also appears in **CLAUDE.md**, **`.coderabbit.yaml`**, and **`.cursor/rules/versioning.mdc`** — keep them aligned when policy changes. To print a machine-readable record from the current tree: `./scripts/export_version_record.sh`, `./scripts/export_version_record.sh --json`, or **`make version-record`**.
+
 ## Implementation boundaries
 
 - Memory primitives, allocator internals, low-level synchronization, port I/O, and core hardware-facing routines should be backed by the architecture-specific ASM layer.

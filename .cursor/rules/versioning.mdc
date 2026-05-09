@@ -1,0 +1,47 @@
+---
+description: Semantic versioning (A.B.C) and branch-merge version checks
+globs:
+  - "**/*"
+alwaysApply: true
+---
+
+# Versioning rules
+
+## Lock system — never rewrite shipped version files
+
+- **Do not** modify **existing** **`version/entries/*.ver`** files that are already present on the **target / merge-base** branch. After merge, those files are **immutable**; new prose or fixes belong in a **new** `.ver` file for a **new** release.
+- **Before merge:** `.ver` files that appear **only** on your feature branch (not on the merge base) are normal drafts—you may edit or delete them until the PR lands. Immutability applies to entries **already on the integration target**, as CI compares the PR to the merge base—not to “immutable on every push.”
+- **`version/locked/`** is a **byte-identical mirror** of **`version/entries/`** for read-only browsing. Update only via **`scripts/sync_version_locked_mirror.sh`**. Never hand-edit **`version/locked/`** to change history.
+- **AI edits** (refactors, formatting, “cleanup”) must **skip** historical **`version/entries/*.ver`** and unsynchronized **`version/locked/**`**.
+- **CI** enforces immutability (`check_version_entries_immutable.sh`) and mirror equality (`check_version_locked_mirror.sh`) on pull requests.
+
+## Canonical version & changelog
+
+- **`userland/shell/version_def.h`** — `VERSION_MAJOR` (A), `VERSION_STANDARD` (B / features), `VERSION_PATCH` (C / fixes); **`VERSION`** macro = dotted **A.B.C**. **`version_def.h` must match** the highest **A.B.C** declared in **`version/entries/*.ver`** (CI checks).
+- **`version/entries/`** — one **`.ver`** file per release (keys: MAJOR/STANDARD/RELEASE or MINOR/PATCH + DESCRIPTION). After merge, existing entry files are **immutable**; add new files for later bumps.
+- **`version/locked/`** — exact mirror of **`version/entries/`** for read-only visibility; refresh with **`scripts/sync_version_locked_mirror.sh`**.
+- **GitHub Actions:** **`scripts/gen_version_changelog.c`** + **`make CHANGELOG_CI=1`** (see `.github/workflows/c-cpp.yml`).
+- **`scripts/export_version_record.sh`** — prints keys / JSON from `version_def.h` for deployment pipelines.
+- Use **semantic versioning**: **`A.B.C`**.
+
+## Semver meanings
+
+| Component | Meaning |
+|-----------|---------|
+| **A** | Major — architecture or milestone-level overhauls, incompatible or foundational changes |
+| **B** | Minor — new features (additive behavior) |
+| **C** | Patch — bug fixes and small, localized corrections |
+
+If a single change mixes milestone/architecture work, features, and fixes: **bump only the single most significant applicable component** (e.g. milestone + architecture → increment **A** only; do not stack B/C bumps for the same release).
+
+## Merge / PR checks
+
+Before merging **incoming → base** (examples: `bug/*` → `develop`, `develop` → `main`):
+
+1. Read **`VERSION` / `VERSION_*` on the incoming branch** and on the **merge target branch** (`userland/shell/version_def.h`).
+2. **Incoming must be strictly newer** than the target for that integration.
+3. If both show the **same** version (e.g. both `2.0.0`), **update the incoming branch** so its version is **one appropriate step ahead** of the target.
+
+Example: `bug/…` → `develop`, both at **`2.0.0`** → bump incoming to **`2.0.1`** (patch for a bugfix branch).
+
+Agents and humans should update **`version_def.h`** and add a **new** **`version/entries/*.ver`** on the **incoming** branch when bumping—**never** rewrite **existing** `.ver` files already on the target branch (they are locked). Do not merge with identical versions across branches when the change warrants a bump. Changelog assembly is **deployment-time**, not **`make`**.

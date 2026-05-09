@@ -275,10 +275,11 @@ int main(int argc, char *argv[]) {
        treat as createdisk shortcut.
     */
     if ((argc == 4 || argc == 5) && argv[1] && argv[1][0] != '-') {
+        /* Must include every builtin name so batch mode does not treat them as createdisk shortcut */
         static const char *skip[] = {"help","cd","dir","make","write","cat","type","mkdir","rmdir",
             "rmtree","mv","version","exit","bios","clear","history","his","cc","listclusters","listdirs",
             "setdisk","createdisk","format","search","writecluster","delcluster","update","redirect",
-            "initdisk","rerun","import","du","printdisk","addcluster",NULL};
+            "initdisk","rerun","import","du","printdisk","addcluster","where","loc",NULL};
         int is_cmd = 0;
         for (int k = 0; skip[k]; k++)
             if (!strcmp(argv[1], skip[k])) { is_cmd = 1; break; }

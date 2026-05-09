@@ -38,10 +38,7 @@
 /* g_fs_jail_root is a non-static global exported by fs_jail.c */
 extern char g_fs_jail_root[];
 
-/* Directly include interpreter.c so that its definitions are compiled into this test.
-   (Ensure that interpreter.c checks UNIT_TEST so that interactive_shell() is a stub.)
-*/
-#include "interpreter.c"
+/* interpreter.c is compiled and linked separately (see Makefile: interpreter_unit.o with -DUNIT_TEST). */
 
 /* ---------------------------------------------------------------------------
  * Forward declarations for cd command tests.
@@ -642,6 +639,11 @@ void test_exit_command(void) {
     }
 }
 
+void test_exit_invalid_flag_returns_error(void) {
+    print_test_header("exit invalid flag returns error (no external exec)");
+    CU_ASSERT_TRUE(execute_command_str("exit -q") == 1);
+}
+
 /* ---------------------------------------------------------------------------
  * VM Jail Suite helpers
  * -------------------------------------------------------------------------*/
@@ -1069,6 +1071,7 @@ int main(void)
     CU_ADD_TEST(suite, test_cc_command);
     CU_ADD_TEST(suite, test_external_command);
     CU_ADD_TEST(suite, test_exit_command);
+    CU_ADD_TEST(suite, test_exit_invalid_flag_returns_error);
     CU_ADD_TEST(suite, test_integration_undo);
     CU_ADD_TEST(suite, test_integration_storage);
 

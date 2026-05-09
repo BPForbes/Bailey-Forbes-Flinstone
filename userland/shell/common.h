@@ -1,6 +1,8 @@
 #ifndef COMMON_H
 #define COMMON_H
 
+#include "version_def.h"
+
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -16,7 +18,6 @@
 #include <termios.h>
 #include <time.h>
 
-#define VERSION                "0.02"
 #define HISTORY_FILE           "shell_history.txt"
 #define NUM_WORKERS            4
 #define MAX_JOBS               64

@@ -3,7 +3,7 @@
 
 int remove_directory_recursive(const char *d);
 void list_files(const char *dir);
-void create_directory(const char *d);
+int create_directory(const char *d);
 void list_directories(void);
 void cat_file(const char *f);
 void do_make_file(const char *filename);
