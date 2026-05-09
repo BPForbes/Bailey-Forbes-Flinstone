@@ -16,10 +16,12 @@ jobs:
           fetch-depth: 0
 
       - name: Install dependencies
-        run: sudo apt-get update -y && sudo apt-get install -y gcc binutils nasm libcunit1-dev
+        run: sudo apt-get update -y && sudo apt-get install -y gcc g++ binutils nasm libcunit1-dev
 
       - name: Assemble changelog (CI-only source)
-        run: python3 scripts/generate_version_changelog_ci.py
+        run: |
+          g++ -std=c++17 -Wall -Wextra -O2 -o gen_version_changelog scripts/gen_version_changelog.cpp
+          ./gen_version_changelog
 
       - name: Build (x86_64 GAS)
         run: make ARCH=x86_64_gas CHANGELOG_CI=1
@@ -51,7 +53,8 @@ jobs:
       - name: Build (x86_64 NASM)
         run: |
           make clean
-          python3 scripts/generate_version_changelog_ci.py
+          g++ -std=c++17 -Wall -Wextra -O2 -o gen_version_changelog scripts/gen_version_changelog.cpp
+          ./gen_version_changelog
           make ARCH=x86_64_nasm CHANGELOG_CI=1
 
   build-arm:
@@ -63,10 +66,12 @@ jobs:
           fetch-depth: 0
 
       - name: Install cross-compiler
-        run: sudo apt-get update -y && sudo apt-get install -y gcc-aarch64-linux-gnu binutils-aarch64-linux-gnu
+        run: sudo apt-get update -y && sudo apt-get install -y gcc-aarch64-linux-gnu binutils-aarch64-linux-gnu g++
 
       - name: Assemble changelog (CI-only source)
-        run: python3 scripts/generate_version_changelog_ci.py
+        run: |
+          g++ -std=c++17 -Wall -Wextra -O2 -o gen_version_changelog scripts/gen_version_changelog.cpp
+          ./gen_version_changelog
 
       - name: Build (ARM / AArch64)
         run: make ARCH=arm CHANGELOG_CI=1
@@ -80,10 +85,12 @@ jobs:
           fetch-depth: 0
 
       - name: Install dependencies
-        run: sudo apt-get install -y gcc binutils nasm
+        run: sudo apt-get install -y gcc g++ binutils nasm
 
       - name: Assemble changelog (CI-only source)
-        run: python3 scripts/generate_version_changelog_ci.py
+        run: |
+          g++ -std=c++17 -Wall -Wextra -O2 -o gen_version_changelog scripts/gen_version_changelog.cpp
+          ./gen_version_changelog
 
       - name: Build (VM)
         run: make VM_ENABLE=1 CHANGELOG_CI=1

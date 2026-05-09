@@ -54,7 +54,7 @@ Run builds from the repository root.
 
 The shipped shell version uses integer components in **`userland/shell/version_def.h`** (`VERSION_MAJOR`, `VERSION_STANDARD`, `VERSION_PATCH`) and builds the **`VERSION`** string macro as **A.B.C**.
 
-**Changelog binary:** **GitHub Actions** (`.github/workflows/c-cpp.yml`) runs **`python3 scripts/generate_version_changelog_ci.py`** then **`make … CHANGELOG_CI=1`**, which generates **`userland/shell/version_changelog.c`** from **`git log`** (ignored by git) and links **`VERSION_CHANGELOG[]`** into the shell/tests in CI only. A plain local **`make`** does **not** compile changelog unless you generate that file and pass **`CHANGELOG_CI=1`**. See **`scripts/templates/version_changelog.example.c`** for shape.
+**Changelog binary:** **GitHub Actions** (`.github/workflows/c-cpp.yml`) compiles **`scripts/gen_version_changelog.cpp`**, runs the resulting binary to emit **`userland/shell/version_changelog.c`** from **`git log`** (ignored by git), then **`make … CHANGELOG_CI=1`** links **`VERSION_CHANGELOG[]`** into the shell/tests in CI only. A plain local **`make`** does **not** compile changelog unless you generate that file and pass **`CHANGELOG_CI=1`**. See **`scripts/templates/version_changelog.example.c`** for shape.
 
 Use **semantic versioning**:
 
