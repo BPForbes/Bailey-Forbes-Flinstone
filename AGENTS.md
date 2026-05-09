@@ -65,7 +65,12 @@ Each release adds **one new text file** under **`version/entries/`** ending in *
 
 After a change is **merged**, existing **`version/entries/*.ver`** files are **immutable**: do not edit them; add another **`.ver`** file for the next bump. CI enforces this on pull requests against the merge base.
 
-**`version/locked/`** mirrors **`version/entries/`** exactly so everyone can browse read-only copies. After editing entries, run **`./scripts/sync_version_locked_mirror.sh`** (**`make sync-version-locked`**).
+### Lock system (agents, reviewers, and automation)
+
+- **Never edit older version files.** Any **`.ver`** file that already exists on the **merge base / target branch** is **locked**: it is part of the permanent release record. Do **not** rewrite description text, fix typos in place, or refactor filenames for entries that have already shipped—add a **new** **`version/entries/*.ver`** for the next semver instead.
+- **`version/locked/`** is a **read-only mirror** for humans and tools: it must stay a **byte-identical copy** of **`version/entries/`**. Update it **only** by running **`./scripts/sync_version_locked_mirror.sh`** or **`make sync-version-locked`** after legitimate changes under **`version/entries/`**. Never hand-edit **`version/locked/`** to diverge from **`version/entries/`**.
+- **AI assistants** (Cursor, CodeRabbit, CLAUDE context, etc.) must **not** propose changes that modify historical **`.ver`** files or unsynchronized **`version/locked/`** copies. If a PR touches those paths incorrectly, **request a new entry file** instead.
+- **CI** rejects PRs that modify merged entries (`scripts/check_version_entries_immutable.sh`) and rejects **`version/locked`** drift (`scripts/check_version_locked_mirror.sh`).
 
 CI verifies the mirror, and that **`version_def.h`** matches the **highest** **A.B.C** among **`version/entries/*.ver`**.
 

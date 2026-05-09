@@ -6,6 +6,12 @@ This repository implements **Bailey-Forbes-Flinstone**: a educational OS/shell-s
 
 ## Versioning (mandatory for merge-ready PRs)
 
+### Lock system (AI assistants — mandatory)
+
+- **Never edit older version files.** Do **not** change **`version/entries/*.ver`** files that already exist on the branch you are merging **into** (the merge base). They are the frozen release record; use a **new** `.ver` file + semver bump + **`version_def.h`** update instead.
+- **`version/locked/`** mirrors **`version/entries/`** for visibility only. Refresh with **`./scripts/sync_version_locked_mirror.sh`**; do **not** edit **`version/locked/`** to “fix” content without syncing from **`version/entries/`**.
+- **Do not** include historical **`.ver`** or **`version/locked/`** paths in automated refactors, formatting-only sweeps, or bulk renames.
+
 ### Canonical string
 
 - **`VERSION`** is built from integer macros in `userland/shell/version_def.h` (`VERSION_MAJOR`, `VERSION_STANDARD`, `VERSION_PATCH` → **A.B.C**). Each bump should add a **new** file under **`version/entries/`** (`.ver` format; see **AGENTS.md**) and run **`./scripts/sync_version_locked_mirror.sh`** so **`version/locked/`** stays in sync. **GitHub Actions** assembles **`userland/shell/version_changelog.c`** by compiling **`scripts/gen_version_changelog.c`** and running it against **`version/entries`**, then builds with **`CHANGELOG_CI=1`** (see `.github/workflows/c-cpp.yml`). Plain **`git clone` + `make`** does not compile changelog unless you generate that file and opt in with **`CHANGELOG_CI=1`**.

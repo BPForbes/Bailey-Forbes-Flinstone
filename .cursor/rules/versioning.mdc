@@ -7,6 +7,13 @@ alwaysApply: true
 
 # Versioning rules
 
+## Lock system — never rewrite shipped version files
+
+- **Do not** modify **existing** **`version/entries/*.ver`** files that are already present on the **target / merge-base** branch. After merge, those files are **immutable**; new prose or fixes belong in a **new** `.ver` file for a **new** release.
+- **`version/locked/`** is a **byte-identical mirror** of **`version/entries/`** for read-only browsing. Update only via **`scripts/sync_version_locked_mirror.sh`**. Never hand-edit **`version/locked/`** to change history.
+- **AI edits** (refactors, formatting, “cleanup”) must **skip** historical **`version/entries/*.ver`** and unsynchronized **`version/locked/**`**.
+- **CI** enforces immutability (`check_version_entries_immutable.sh`) and mirror equality (`check_version_locked_mirror.sh`) on pull requests.
+
 ## Canonical version & changelog
 
 - **`userland/shell/version_def.h`** — `VERSION_MAJOR` (A), `VERSION_STANDARD` (B / features), `VERSION_PATCH` (C / fixes); **`VERSION`** macro = dotted **A.B.C**. **`version_def.h` must match** the highest **A.B.C** declared in **`version/entries/*.ver`** (CI checks).
@@ -36,4 +43,4 @@ Before merging **incoming → base** (examples: `bug/*` → `develop`, `develop`
 
 Example: `bug/…` → `develop`, both at **`2.0.0`** → bump incoming to **`2.0.1`** (patch for a bugfix branch).
 
-Agents and humans should update **`version_def.h`** and add **`version/entries/*.ver`** on the **incoming** branch as part of the PR when needed—do not merge with identical versions across branches when the change warrants a bump. Changelog assembly is **deployment-time**, not **`make`**.
+Agents and humans should update **`version_def.h`** and add a **new** **`version/entries/*.ver`** on the **incoming** branch when bumping—**never** rewrite **existing** `.ver` files already on the target branch (they are locked). Do not merge with identical versions across branches when the change warrants a bump. Changelog assembly is **deployment-time**, not **`make`**.

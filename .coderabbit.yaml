@@ -10,6 +10,12 @@ reviews:
 
     **Canonical version** is defined by integers in `userland/shell/version_def.h` (`VERSION_MAJOR`, `VERSION_STANDARD`, `VERSION_PATCH`); the **`VERSION`** macro expands to **A.B.C**. Release prose lives in **`version/entries/*.ver`** files (mirrored under **`version/locked/`**); **`scripts/gen_version_changelog.c`** reads those entries and **`version_def.h`** to emit **`userland/shell/version_changelog.c`**, then CI builds with **`CHANGELOG_CI=1`**.
 
+    ### Lock system — never edit historical version files
+
+    - **Do not** approve or suggest edits to **existing** **`version/entries/*.ver`** files that already exist on the **merge base / target branch**. Those files are **immutable** after merge; correcting wording or metadata requires a **new** `.ver` file for a **new** semver bump—not an in-place rewrite.
+    - **`version/locked/`** must remain an **exact mirror** of **`version/entries/`** (refresh only via **`scripts/sync_version_locked_mirror.sh`**). **Reject** hand-edited **`version/locked/**`** that would diverge from **`version/entries/`**.
+    - AI-assisted refactors must **exclude** historical **`version/entries/*.ver`** and unsynchronized **`version/locked/**`** from automated bulk edits.
+
     When reviewing a PR that merges **incoming → base** (e.g. `bug/*` → `develop`, `develop` → `main`):
 
     1. Compare the **incoming branch** version string to the **merge base / target branch** version (same `VERSION` macro on each side).
@@ -34,11 +40,11 @@ reviews:
   path_instructions:
     - path: "version/entries/*.ver"
       instructions: |
-        Each merged `.ver` file is immutable on later PRs; authors must add a new file for additional bumps. Include MAJOR_VERSION, STANDARD_VERSION, RELEASE_VERSION (or MINOR_VERSION / VERSION_PATCH), and DESCRIPTION (<= 1023 chars).
+        **Never modify an existing `.ver` file that is already on the target branch** — entries are locked after merge; request a **new** `.ver` for later releases. Each file needs MAJOR_VERSION, STANDARD_VERSION, RELEASE_VERSION (or MINOR_VERSION / VERSION_PATCH), and DESCRIPTION (<= 1023 chars).
 
     - path: "version/locked/**"
       instructions: |
-        Mirror only — must match `version/entries/` exactly (`scripts/sync_version_locked_mirror.sh`). Do not hand-edit without syncing entries.
+        **Mirror only.** Must match `version/entries/` exactly (`scripts/sync_version_locked_mirror.sh`). Do not approve hand edits here; never diverge from `version/entries/`.
 
     - path: "userland/shell/version_def.h"
       instructions: |
