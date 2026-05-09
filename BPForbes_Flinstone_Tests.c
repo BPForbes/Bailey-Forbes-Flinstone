@@ -49,6 +49,7 @@ void test_cd_batch(void);
 void test_cd_interactive(void);
 void test_cd_batch_extra(void);
 void test_cd_interactive_extra(void);
+void test_diskput_fat32_roundtrip(void);
 
 /* ---------------------------------------------------------------------------
  * Helper for numbering tests with clear separation
@@ -168,7 +169,10 @@ int suite_cleanup(void) {
          "cdinter_extra1_disk",
          "cdinter_extra2_disk",
          "test_disk.txt",
-         "int_undo_test.txt"
+         "int_undo_test.txt",
+         "fat_stor.img",
+         "bin_src.dat",
+         "bin_out.dat"
     };
     int num_files = sizeof(files) / sizeof(files[0]);
     for (int i = 0; i < num_files; i++) {
@@ -1049,6 +1053,33 @@ void test_interpreter_setdisk_allowed_inside_jail(void) {
     remove(diskfile);
 }
 
+void test_diskput_fat32_roundtrip(void) {
+    char prev[CWD_MAX];
+    strncpy(prev, current_disk_file, sizeof(prev));
+    prev[sizeof(prev) - 1] = '\0';
+    FILE *fp = fopen("bin_src.dat", "wb");
+    CU_ASSERT_PTR_NOT_NULL(fp);
+    unsigned char b[] = {0, 1, 2, 255, 10, 20};
+    CU_ASSERT_TRUE(fwrite(b, 1, sizeof(b), fp) == sizeof(b));
+    fclose(fp);
+    CU_ASSERT_TRUE(execute_command_str("format fat_stor.img z 4 1024") == 0);
+    CU_ASSERT_TRUE(execute_command_str("diskput bin_src.dat BINRES.DAT") == 0);
+    CU_ASSERT_TRUE(execute_command_str("diskget BINRES.DAT bin_out.dat") == 0);
+    fp = fopen("bin_out.dat", "rb");
+    CU_ASSERT_PTR_NOT_NULL(fp);
+    unsigned char out[32];
+    size_t n = fread(out, 1, sizeof(out), fp);
+    fclose(fp);
+    CU_ASSERT_TRUE(n == sizeof(b));
+    CU_ASSERT_TRUE(memcmp(out, b, n) == 0);
+    strncpy(current_disk_file, prev, sizeof(current_disk_file) - 1);
+    current_disk_file[sizeof(current_disk_file) - 1] = '\0';
+    read_disk_header();
+    remove("fat_stor.img");
+    remove("bin_src.dat");
+    remove("bin_out.dat");
+}
+
 /* ---------------------------------------------------------------------------
  * Main: Set up and run the CUnit tests.
  * -------------------------------------------------------------------------*/
@@ -1095,6 +1126,7 @@ int main(void)
     CU_ADD_TEST(suite, test_init_command);
     CU_ADD_TEST(suite, test_uc_command);
     CU_ADD_TEST(suite, test_import_command);
+    CU_ADD_TEST(suite, test_diskput_fat32_roundtrip);
     CU_ADD_TEST(suite, test_print_command);
     CU_ADD_TEST(suite, test_clear_command);
     CU_ADD_TEST(suite, test_history_commands);

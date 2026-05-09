@@ -279,7 +279,8 @@ int main(int argc, char *argv[]) {
         static const char *skip[] = {"help","cd","dir","make","write","cat","type","mkdir","rmdir",
             "rmtree","mv","version","exit","bios","clear","history","his","cc","listclusters","listdirs",
             "setdisk","createdisk","format","search","writecluster","delcluster","update","redirect",
-            "initdisk","rerun","import","du","printdisk","addcluster","where","loc",NULL};
+            "initdisk","rerun","import","du","printdisk","addcluster","where","loc",
+            "diskput","diskget","diskfiles","diskdel",NULL};
         int is_cmd = 0;
         for (int k = 0; skip[k]; k++)
             if (!strcmp(argv[1], skip[k])) { is_cmd = 1; break; }
@@ -435,6 +436,17 @@ int main(int argc, char *argv[]) {
                 else
                     tokensCount = 3;
             }
+            else if (!strcmp(cmd, "diskput")) {
+                if (i + 2 < argc && argv[i + 2] && argv[i + 2][0] != '-')
+                    tokensCount = 3;
+                else
+                    tokensCount = 2;
+            } else if (!strcmp(cmd, "diskget"))
+                tokensCount = 3;
+            else if (!strcmp(cmd, "diskfiles"))
+                tokensCount = 1;
+            else if (!strcmp(cmd, "diskdel"))
+                tokensCount = 2;
             else if (!strcmp(cmd, "update"))
                 tokensCount = 4;
             else if (!strcmp(cmd, "addcluster")) {

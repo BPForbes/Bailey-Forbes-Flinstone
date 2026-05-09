@@ -102,6 +102,8 @@ int fat32_host_load_from_fd(int fd) {
         return -1;
 
     uint32_t first_data_sec = (uint32_t)rsv + (uint32_t)nf * fat32sz;
+    uint32_t data_sec = tot - first_data_sec;
+    uint32_t dcc = data_sec / (uint32_t)spc;
 
     /* Read root directory (one cluster) */
     uint32_t bpc = (uint32_t)bps * (uint32_t)spc;
@@ -154,6 +156,7 @@ int fat32_host_load_from_fd(int fd) {
     g_fat32_host_vol.flint_first_cluster = first;
     g_fat32_host_vol.shell_clusters = shell_clusters;
     g_fat32_host_vol.bytes_per_cluster = (int)bpc;
+    g_fat32_host_vol.data_cluster_count = dcc;
 
     g_cluster_size = (int)bpc;
     g_total_clusters = shell_clusters;

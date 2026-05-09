@@ -17,6 +17,7 @@ typedef struct {
     uint32_t flint_first_cluster; /* first cluster of FLINT.DAT (shell data) */
     int shell_clusters;           /* logical clusters in FLINT.DAT */
     int bytes_per_cluster;        /* BPS * SPC */
+    uint32_t data_cluster_count;  /* clusters in data region (cluster numbers 2 .. count+1) */
 } Fat32HostVol;
 
 extern Fat32HostVol g_fat32_host_vol;
@@ -44,5 +45,15 @@ int fat32_host_format_image(const char *path, const char *volume_label,
 
 /* Byte offset within the image file for shell cluster index (0 .. shell_clusters-1). */
 int fat32_host_shell_cluster_byte_offset(int shell_clu, uint64_t *out_off);
+
+/*
+ * Store arbitrary binary files in the FAT32 root directory (alongside FLINT.DAT).
+ * Names are FAT 8.3 (long names are mangled to NAME~N.EXT). Requires loaded volume.
+ * Paths are host files; disk image is current_disk_file (see common.h).
+ */
+int fat32_host_file_put(const char *host_src_path, const char *name_on_disk_or_null);
+int fat32_host_file_get(const char *name_on_disk_83, const char *host_dst_path);
+int fat32_host_file_del(const char *name_on_disk_83);
+void fat32_host_file_list(void);
 
 #endif /* FAT32_HOST_H */
