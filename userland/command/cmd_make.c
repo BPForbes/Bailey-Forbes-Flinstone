@@ -16,7 +16,7 @@ int cmd_make_maybe(char *trimmed) {
     while (*filename == ' ' || *filename == '\t')
         filename++;
     if (!*filename)
-        return 1;
+        return 0;
     char rpath[CWD_MAX];
     resolve_path(filename, rpath, sizeof(rpath));
     if (cmd_jail_blocked_path("make", filename, rpath))
