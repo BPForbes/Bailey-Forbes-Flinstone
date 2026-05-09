@@ -88,8 +88,8 @@ const char *HELP_MSG =
 "  Equivalent to createdisk with same parameters.\n"
 "\n"
 "Virtualization: ./shell -Virtualization -y [-vm] [commands...]\n"
-"  -y: popup (no -vm) or confirm cleanup. -vm: run guest, then this shell. Host files stay under the directory you\n"
-"  started from (or a temp dir when you pass additional commands). No writes outside that jail.\n"
+"  -y: popup (no -vm) or confirm cleanup. -vm: run guest, then this shell. Host files are confined to vm_hostfs/\n"
+"  under the directory you started from (or under a temp dir when you pass additional commands). No writes outside that jail.\n"
 "\n"
 "Author: Bailey Forbes\n"
 "Date:   03/07/25\n";

@@ -43,6 +43,8 @@ git-push-log.txt
 vm_checkpoint_disk.img
 # Default embedded-VM virtual disk (created at run time)
 vm_disk.img
+# VM filesystem jail (created under launch cwd or g_vm_root)
+vm_hostfs/
 
 # Disk journal temp (crash consistency)
 *.tmp

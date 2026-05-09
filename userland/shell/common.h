@@ -30,7 +30,7 @@ extern char current_disk_file[CWD_MAX];
 /* 1 = FAT32 super-floppy .img (FLINT.DAT payload); 0 = legacy hex .txt */
 extern int g_disk_host_fat32;
 
-/* VM mode: 1 = -Virtualization; file access is jailed (see fs_jail.c) to launch dir or temp sandbox */
+/* VM mode: 1 = -Virtualization; file access is jailed under launch dir or sandbox in vm_hostfs/ (see fs_jail.c) */
 extern int g_vm_mode;
 extern int g_vm_cleanup;   /* 1 = delete temp dir on exit (-y) */
 extern int g_vm_run_embedded;  /* 1 = run embedded x86 VM instead of shell */

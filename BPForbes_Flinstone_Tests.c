@@ -685,6 +685,29 @@ void test_exit_invalid_flag_returns_error(void) {
 /* Temp directory used by the jail suite; set during jail_suite_setup */
 static char s_jail_tmpdir[PATH_MAX];
 
+static void rmrf_jail_sandbox(const char *path) {
+    DIR *d = opendir(path);
+    if (!d) {
+        unlink(path);
+        return;
+    }
+    struct dirent *e;
+    while ((e = readdir(d)) != NULL) {
+        if (e->d_name[0] == '.' && (e->d_name[1] == '\0' ||
+                                    (e->d_name[1] == '.' && e->d_name[2] == '\0')))
+            continue;
+        char sub[PATH_MAX];
+        snprintf(sub, sizeof(sub), "%s/%s", path, e->d_name);
+        struct stat st;
+        if (stat(sub, &st) == 0 && S_ISDIR(st.st_mode))
+            rmrf_jail_sandbox(sub);
+        else
+            unlink(sub);
+    }
+    closedir(d);
+    rmdir(path);
+}
+
 /* Saved original g_vm_mode, g_vm_root, g_cwd so we can restore them */
 static int  s_saved_vm_mode;
 static char s_saved_vm_root[CWD_MAX];
@@ -722,9 +745,11 @@ static int jail_suite_cleanup(void) {
     /* Re-init jail to inactive state */
     fs_jail_init();
 
-    /* Remove temp dir (non-recursive: should be empty after tests) */
-    rmdir(s_jail_tmpdir);
-    s_jail_tmpdir[0] = '\0';
+    chdir("/tmp");
+    if (s_jail_tmpdir[0]) {
+        rmrf_jail_sandbox(s_jail_tmpdir);
+        s_jail_tmpdir[0] = '\0';
+    }
     return 0;
 }
 
@@ -770,12 +795,13 @@ void test_jail_check_empty_returns_error(void) {
 void test_jail_check_inside_allowed(void) {
     print_test_header("fs_jail_check_path: path inside jail is allowed");
     CU_ASSERT_TRUE(fs_jail_is_active() == 1);
-    /* The jail root itself must be allowed */
-    CU_ASSERT_TRUE(fs_jail_check_path(s_jail_tmpdir) == 0);
+    /* Outer sandbox directory is above the jail root and must be blocked */
+    CU_ASSERT_TRUE(fs_jail_check_path(s_jail_tmpdir) == -1);
+    CU_ASSERT_TRUE(fs_jail_check_path(g_fs_jail_root) == 0);
 
     /* Create a real subdir inside the jail and check it */
     char subdir[PATH_MAX];
-    snprintf(subdir, sizeof(subdir), "%s/inner", s_jail_tmpdir);
+    snprintf(subdir, sizeof(subdir), "%s/inner", g_fs_jail_root);
     mkdir(subdir, 0755);
     CU_ASSERT_TRUE(fs_jail_check_path(subdir) == 0);
     rmdir(subdir);
@@ -804,7 +830,7 @@ void test_jail_check_nonexistent_inside_allowed(void) {
     print_test_header("fs_jail_check_path: nonexistent file inside jail is allowed");
     CU_ASSERT_TRUE(fs_jail_is_active() == 1);
     char newfile[PATH_MAX];
-    snprintf(newfile, sizeof(newfile), "%s/ghost_file.txt", s_jail_tmpdir);
+    snprintf(newfile, sizeof(newfile), "%s/ghost_file.txt", g_fs_jail_root);
     /* Confirm it doesn't exist */
     CU_ASSERT_TRUE(access(newfile, F_OK) != 0);
     CU_ASSERT_TRUE(fs_jail_check_path(newfile) == 0);
@@ -825,7 +851,7 @@ void test_fs_provider_read_inside_allowed(void) {
 
     /* Create a file inside the jail */
     char fpath[PATH_MAX];
-    snprintf(fpath, sizeof(fpath), "%s/prov_read_test.txt", s_jail_tmpdir);
+    snprintf(fpath, sizeof(fpath), "%s/prov_read_test.txt", g_fs_jail_root);
     FILE *f = fopen(fpath, "w");
     CU_ASSERT_PTR_NOT_NULL(f);
     if (f) { fprintf(f, "hello jail"); fclose(f); }
@@ -861,7 +887,7 @@ void test_fs_provider_write_inside_allowed(void) {
     CU_ASSERT_TRUE(fs_jail_is_active() == 1);
 
     char fpath[PATH_MAX];
-    snprintf(fpath, sizeof(fpath), "%s/prov_write_test.txt", s_jail_tmpdir);
+    snprintf(fpath, sizeof(fpath), "%s/prov_write_test.txt", g_fs_jail_root);
 
     fs_provider_t *p = fs_local_provider_create();
     CU_ASSERT_PTR_NOT_NULL(p);
@@ -930,7 +956,7 @@ void test_fs_provider_move_dst_outside_blocked(void) {
 
     /* src inside jail */
     char src[PATH_MAX];
-    snprintf(src, sizeof(src), "%s/move_src.txt", s_jail_tmpdir);
+    snprintf(src, sizeof(src), "%s/move_src.txt", g_fs_jail_root);
     FILE *f = fopen(src, "w");
     if (f) { fprintf(f, "src"); fclose(f); }
 
@@ -969,7 +995,7 @@ void test_interpreter_cd_allowed_inside_jail(void) {
 
     /* Create a subdirectory inside the jail */
     char subdir[PATH_MAX];
-    snprintf(subdir, sizeof(subdir), "%s/cd_target", s_jail_tmpdir);
+    snprintf(subdir, sizeof(subdir), "%s/cd_target", g_fs_jail_root);
     mkdir(subdir, 0755);
 
     int ret = execute_command_str("cd cd_target");
@@ -977,8 +1003,8 @@ void test_interpreter_cd_allowed_inside_jail(void) {
     CU_ASSERT_TRUE(ret == 0);
 
     /* Return to jail root for next tests */
-    chdir(s_jail_tmpdir);
-    strncpy(g_cwd, s_jail_tmpdir, sizeof(g_cwd) - 1);
+    chdir(g_fs_jail_root);
+    strncpy(g_cwd, g_fs_jail_root, sizeof(g_cwd) - 1);
 
     rmdir(subdir);
 }
@@ -999,7 +1025,7 @@ void test_interpreter_format_allowed_inside_jail(void) {
     CU_ASSERT_TRUE(fs_jail_is_active() == 1);
 
     char diskfile[PATH_MAX];
-    snprintf(diskfile, sizeof(diskfile), "%s/jail_disk.txt", s_jail_tmpdir);
+    snprintf(diskfile, sizeof(diskfile), "%s/jail_disk.txt", g_fs_jail_root);
 
     /* format <path> <vol> <rows> <nibbles> */
     char cmd[512];
@@ -1036,7 +1062,7 @@ void test_interpreter_setdisk_allowed_inside_jail(void) {
 
     /* Create a valid disk file inside the jail */
     char diskfile[PATH_MAX];
-    snprintf(diskfile, sizeof(diskfile), "%s/setdisk_inside.txt", s_jail_tmpdir);
+    snprintf(diskfile, sizeof(diskfile), "%s/setdisk_inside.txt", g_fs_jail_root);
     FILE *f = fopen(diskfile, "w");
     CU_ASSERT_PTR_NOT_NULL(f);
     if (f) {

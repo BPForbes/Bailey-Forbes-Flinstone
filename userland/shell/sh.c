@@ -311,7 +311,7 @@ int main(int argc, char *argv[]) {
         exit(0);
     }
 
-    /* VM mode: confine all host file I/O to the launch directory (or temp VM sandbox) */
+    /* VM mode: confine host file I/O to vm_hostfs/ under the launch directory (or temp VM sandbox). */
     if (vm_configure_root_from_cwd() != 0)
         fprintf(stderr, "[VM] 5-layer driver config warning: layer 4 shell/VM root is not configured\n");
     fs_jail_init();
