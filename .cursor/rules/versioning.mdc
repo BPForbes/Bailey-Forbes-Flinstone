@@ -10,15 +10,15 @@ alwaysApply: true
 ## Lock system — never rewrite shipped published files
 
 - **Do not** modify paths under **`version/locked/`** that are already present on the **target / merge-base** branch. After merge, those files are the **published** record; new prose belongs in **`version/entries/`**, then **`finalize_version_locked.sh`** (or **`make finalize-version-locked`**).
-- **Before merge:** **`version/entries/*.ver`** drafts that exist **only** on your feature branch may be edited or removed freely until you finalize.
-- **`version/entries/`** is **work in progress**; **`version/locked/`** is the **published snapshot** (full copy of **`version/entries/`** at finalize time). Until the next finalize, **`version/entries/`** may contain **additional** files not yet in **`version/locked/`**.
+- **Before merge:** **`version/entries/*.ver`** files that exist **only** on your feature branch may be edited or removed freely until you finalize.
+- **`version/entries/`** is where **`.ver`** files are authored and revised; **`version/locked/`** is the **published snapshot** (full copy of **`version/entries/`** at finalize time). Until the next finalize, **`version/entries/`** may contain **additional** files not yet in **`version/locked/`**.
 - **CI** enforces **`version/locked`** immutability on PRs (`check_version_locked_immutable.sh`) and requires every **`version/locked`** file to **byte-match** the same path under **`version/entries/`** (`check_version_locked_subset_of_entries.sh`).
 - **AI edits** must **skip** historical **`version/locked/**`** from bulk refactors.
 
 ## Canonical version & changelog
 
 - **`userland/shell/version_def.h`** — **Generated** by **`scripts/gen_version_def.sh`** (also from **`make`**). **`VERSION`** = **A.B.C** from the **highest** triple in **`version/locked/*.ver`**. CI ensures the committed header matches the generator output.
-- **`version/entries/`** — author **`.ver`** release notes here (WIP).
+- **`version/entries/`** — author **`.ver`** release notes here before finalize.
 - **`version/locked/`** — **finalize** from entries; this tree drives **`version_def.h`** and changelog generation.
 - **GitHub Actions:** **`scripts/gen_version_changelog.c`** reads **`version/locked`**, then **`make CHANGELOG_CI=1`** (see `.github/workflows/c-cpp.yml`).
 - **`scripts/export_version_record.sh`** — prints keys / JSON from `version_def.h` for deployment pipelines.

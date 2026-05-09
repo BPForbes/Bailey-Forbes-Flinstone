@@ -19,7 +19,7 @@ jobs:
         if: github.event_name == 'pull_request'
         run: ./scripts/check_version_locked_immutable.sh "${{ github.event.pull_request.base.sha }}"
 
-      - name: Verify version/locked matches subset of entries (WIP may exceed locked)
+      - name: Verify version/locked matches subset of entries (entries may exceed locked)
         run: ./scripts/check_version_locked_subset_of_entries.sh
 
       - name: Verify version_def.h matches generator (version/locked)

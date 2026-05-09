@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # Every file under version/locked must exist under version/entries with identical content.
-# version/entries may contain extra files (WIP not yet finalized to locked).
+# version/entries may contain extra files not yet copied to version/locked.
 set -euo pipefail
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 ENT="$ROOT/version/entries"
@@ -29,7 +29,7 @@ while IFS= read -r -d '' lf; do
     continue
   fi
   if ! cmp -s "$lf" "$ef"; then
-    echo "error: locked and entries differ for $rel (run finalize_version_locked.sh to copy WIP → locked, or align entries)" >&2
+    echo "error: locked and entries differ for $rel (run finalize_version_locked.sh to copy entries → locked, or align entries)" >&2
     rc=1
   fi
 done < <(find "$LCK" -type f -print0)

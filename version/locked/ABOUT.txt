@@ -1,7 +1,7 @@
 Version release notes use *.ver files (MAJOR_VERSION, STANDARD_VERSION,
 RELEASE_VERSION or MINOR_VERSION / VERSION_PATCH, and DESCRIPTION).
 
-version/entries/  — work in progress: add and edit .ver files here.
+version/entries/  — author and edit .ver release notes here before finalize.
 version/locked/   — published snapshot: replaced by copying entries → locked.
 
 Finalize (copy all of entries over locked), then regenerate the shell header:

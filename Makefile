@@ -132,7 +132,7 @@ version-record:
 gen-version-def:
 	@./scripts/gen_version_def.sh
 
-# WIP: edit version/entries/*.ver. To publish: make finalize-version-locked (copies entries → locked), then make (refreshes version_def.h).
+# Edit version/entries/*.ver. To publish: make finalize-version-locked (copies entries → locked), then make (refreshes version_def.h).
 .PHONY: finalize-version-locked sync-version-locked
 finalize-version-locked sync-version-locked:
 	@./scripts/finalize_version_locked.sh

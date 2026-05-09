@@ -9,7 +9,7 @@ This repository implements **Bailey-Forbes-Flinstone**: a educational OS/shell-s
 ### Lock system (AI assistants — mandatory)
 
 - **Never edit finalized paths under `version/locked/`** that already exist on the branch you are merging **into** (merge base). That tree is the **published** record; add or edit prose under **`version/entries/`**, then run **`./scripts/finalize_version_locked.sh`** (or **`make finalize-version-locked`**) and **`./scripts/gen_version_def.sh`** (or **`make`**) so **`userland/shell/version_def.h`** reflects **`version/locked/*.ver`**. Do not hand-edit **`VERSION_*`** macros in the header.
-- **Draft work:** **`version/entries/*.ver`** may be added, edited, or removed on your branch until you **finalize** (copy entries → locked). CI guards **locked** paths that already shipped on the target.
+- **`version/entries/*.ver`** may be added, edited, or removed on your branch until you **finalize** (copy entries → locked). CI guards **locked** paths that already shipped on the target.
 - **`version/locked/`** is the **published snapshot** copied from **`version/entries/`** by **`finalize_version_locked.sh`**. Do not hand-tweak **`version/locked/`** to diverge from the last finalize without going through **`version/entries/`** first.
 - **Do not** include historical **`version/locked/**`** or bulk-edit **`version/entries/**`** in automated refactors without an explicit release workflow.
 

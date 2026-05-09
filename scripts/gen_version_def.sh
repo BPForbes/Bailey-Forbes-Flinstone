@@ -49,7 +49,7 @@ emit() {
  * GENERATED FILE — do not edit by hand.
  *
  * Built from finalized .ver files under version/locked/ by scripts/gen_version_def.sh (also run from the Makefile).
- * The shipped version is the highest A.B.C among those files (WIP lives under version/entries/ until finalized).
+ * The shipped version is the highest A.B.C among those files (additional release note files may exist only under version/entries/ until finalize).
  *
  *   A (VERSION_MAJOR)     — milestones / architecture-scale changes
  *   B (VERSION_STANDARD)  — new features (semver "minor")

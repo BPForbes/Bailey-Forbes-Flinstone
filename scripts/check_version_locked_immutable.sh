@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # Reject PRs that modify or delete existing version/locked/* files present on the merge base.
-# Published release record lives under version/locked; version/entries is WIP until finalized.
+# Published release record lives under version/locked; version/entries is updated until finalize copies it forward.
 #
 # Usage: scripts/check_version_locked_immutable.sh <base-commit-ish>
 set -euo pipefail

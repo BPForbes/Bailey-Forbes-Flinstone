@@ -53,7 +53,7 @@ Run builds from the repository root.
 
 ## Versioning
 
-The shipped shell version **A.B.C** is in **`userland/shell/version_def.h`**, **generated** from **`version/locked/*.ver`**: the header reflects the **highest** semver among **finalized** `.ver` files there. **Work in progress** lives under **`version/entries/`**; when you are ready to publish, run **`./scripts/finalize_version_locked.sh`** or **`make finalize-version-locked`** (copies **`version/entries/`** → **`version/locked/`**), then **`./scripts/gen_version_def.sh`** or **`make`**, and commit the updated header. **CMake** reads **`project(VERSION)`** from that same header at configure time—do not hardcode a separate semver triple in **`CMakeLists.txt`**.
+The shipped shell version **A.B.C** is in **`userland/shell/version_def.h`**, **generated** from **`version/locked/*.ver`**: the header reflects the **highest** semver among **finalized** `.ver` files there. Author new and revised **`.ver`** files under **`version/entries/`**; when you are ready to publish, run **`./scripts/finalize_version_locked.sh`** or **`make finalize-version-locked`** (copies **`version/entries/`** → **`version/locked/`**), then **`./scripts/gen_version_def.sh`** or **`make`**, and commit the updated header. **CMake** reads **`project(VERSION)`** from that same header at configure time—do not hardcode a separate semver triple in **`CMakeLists.txt`**.
 
 ### Release notes (`version/`)
 
@@ -70,7 +70,7 @@ On a **feature branch before merge**, you may freely add, edit, or remove **`.ve
 
 - **Never edit finalized release files.** Any path under **`version/locked/`** that already exists on the **merge base / target branch** is **immutable**: it is the published record. Do **not** rewrite it in place—add or adjust prose under **`version/entries/`**, then **finalize** again when appropriate. CI enforces immutability on **`version/locked/`** for PRs (`scripts/check_version_locked_immutable.sh`).
 - **`version/locked/`** is the **published snapshot** copied from **`version/entries/`** via **`./scripts/finalize_version_locked.sh`** (alias: **`make finalize-version-locked`** / **`make sync-version-locked`**). Until you finalize, **`version/entries/`** may contain extra drafts not present in **`version/locked/`**.
-- **CI** requires every file under **`version/locked/`** to exist under **`version/entries/`** with **identical content** (`scripts/check_version_locked_subset_of_entries.sh`)—so you cannot “advance” locked without aligning entries, and you cannot silently diverge a finalized file from its WIP source.
+- **CI** requires every file under **`version/locked/`** to exist under **`version/entries/`** with **identical content** (`scripts/check_version_locked_subset_of_entries.sh`)—so you cannot “advance” locked without aligning entries, and you cannot silently diverge a finalized file from the matching path under **`version/entries/`**.
 - **AI assistants** must **not** propose edits to historical paths under **`version/locked/`** that shipped on the target branch, or to **`version/entries/`** files that must byte-match **`version/locked/`** for the same relative path, unless the change is part of an intentional finalize-and-regenerate workflow.
 
 CI verifies that the committed **`version_def.h`** matches **`scripts/gen_version_def.sh`** output (highest triple in **`version/locked/*.ver`**).
