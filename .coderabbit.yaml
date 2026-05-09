@@ -26,12 +26,16 @@ reviews:
 
     Remind authors to update `VERSION` in `common.h` when the merge would otherwise equal or lag the target.
 
-path_instructions:
-  - path: "userland/shell/common.h"
-    instructions: |
-      Changes to `#define VERSION` must follow semantic versioning (A.B.C) and merge rules in AGENTS.md / CLAUDE.md:
-      incoming branch version must exceed target branch version before merge.
+    ## Comments vs code
 
-  - path: "AGENTS.md"
-    instructions: |
-      Keep versioning rules in sync with `.coderabbit.yaml`, `.cursor/rules/versioning.mdc`, and CLAUDE.md.
+    Prefer a rough balance of **about 15% comments to 85% code** in new or heavily touched areas: enough comments to explain non-obvious intent, invariants, and public contracts—avoid redundant narration of what the code already states line-by-line.
+
+  path_instructions:
+    - path: "userland/shell/common.h"
+      instructions: |
+        Changes to `#define VERSION` must follow semantic versioning (A.B.C) and merge rules in AGENTS.md / CLAUDE.md:
+        incoming branch version must exceed target branch version before merge.
+
+    - path: "AGENTS.md"
+      instructions: |
+        Keep versioning rules in sync with `.coderabbit.yaml`, `.cursor/rules/versioning.mdc`, and CLAUDE.md.

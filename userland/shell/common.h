@@ -16,7 +16,7 @@
 #include <termios.h>
 #include <time.h>
 
-#define VERSION                "0.02"
+#define VERSION                "2.2.4"
 #define HISTORY_FILE           "shell_history.txt"
 #define NUM_WORKERS            4
 #define MAX_JOBS               64
