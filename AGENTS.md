@@ -52,11 +52,11 @@ Run builds from the repository root.
 
 ## Versioning
 
-The shipped shell version uses integer components in **`userland/shell/version_def.h`** (`VERSION_MAJOR`, `VERSION_STANDARD`, `VERSION_PATCH`) and builds the **`VERSION`** string macro as **A.B.C**.
+The shipped shell version is **A.B.C** in **`userland/shell/version_def.h`**, which is **generated** from **`version/entries/*.ver`**: the header always reflects the **highest** semver among those files. Run **`./scripts/gen_version_def.sh`** or **`make`** after adding or changing entries, then commit the updated header.
 
 ### Release notes (`version/`)
 
-Each release adds **one new text file** under **`version/entries/`** ending in **`.ver`** (see **`version/entries/ABOUT.txt`**). Supported keys (optional leading `int ` before the name):
+Each release adds **one new text file** under **`version/entries/`** ending in **`.ver`** (see **`version/entries/ABOUT.txt`**). Use a basename that includes the version triple, e.g. **`2_3_0_feature_name.ver`** (ordering is by the numeric **MAJOR/STANDARD/RELEASE** fields inside the file, not by a `001_`-style prefix). Supported keys (optional leading `int ` before the name):
 
 - **`MAJOR_VERSION`** (alias **`VERSION_MAJOR`**)
 - **`STANDARD_VERSION`** (alias **`VERSION_STANDARD`**)
@@ -74,9 +74,9 @@ On a **feature branch before merge**, new `.ver` files that do **not** yet exist
 - **AI assistants** (Cursor, CodeRabbit, CLAUDE context, etc.) must **not** propose changes that modify historical **`.ver`** files or unsynchronized **`version/locked/`** copies. If a PR touches those paths incorrectly, **request a new entry file** instead.
 - **CI** rejects PRs that modify merged entries (`scripts/check_version_entries_immutable.sh`) and rejects **`version/locked`** drift (`scripts/check_version_locked_mirror.sh`).
 
-CI verifies the mirror, and that **`version_def.h`** matches the **highest** **A.B.C** among **`version/entries/*.ver`**.
+CI verifies the mirror, and that the committed **`version_def.h`** matches **`scripts/gen_version_def.sh`** output (same rule as the highest entry).
 
-**Changelog binary:** **GitHub Actions** compiles **`scripts/gen_version_changelog.c`**, which reads **`version/entries`** and **`version_def.h`**, then emits **`userland/shell/version_changelog.c`** (ignored by git). **`make … CHANGELOG_CI=1`** links **`VERSION_CHANGELOG[]`** in CI only. Plain **`make`** omits changelog unless you generate that file and pass **`CHANGELOG_CI=1`**. See **`scripts/templates/version_changelog.example.c`** for shape.
+**Changelog binary:** **GitHub Actions** compiles **`scripts/gen_version_changelog.c`**, which reads **`version/entries`** (headline version = highest entry), then emits **`userland/shell/version_changelog.c`** (ignored by git). **`make … CHANGELOG_CI=1`** links **`VERSION_CHANGELOG[]`** in CI only. Plain **`make`** omits changelog unless you generate that file and pass **`CHANGELOG_CI=1`**. See **`scripts/templates/version_changelog.example.c`** for shape.
 
 Use **semantic versioning**:
 
@@ -86,16 +86,18 @@ Use **semantic versioning**:
 | **B** | New features (additive behavior) |
 | **C** | Bug fixes and small corrections |
 
-If a single release mixes milestone/architecture work, features, and fixes: **increment only the most significant applicable component** (e.g. milestone + architecture → bump **A** only).
+**Precedence (importance):** **`A` > `B` > `C`**. For each new release, bump **only** the **highest** precedence that applies to the whole release: **increment** that component, **leave unchanged** every more-significant component to its **left**, and **set to `0`** every less-significant component to its **right**. Example: **`2.2.4` → `2.3.0`** for a minor release (not `2.3.4`). **`2.3.7` → `3.0.0`** for a major release. **`2.3.0` → `2.3.1`** for a patch.
+
+If a single release mixes milestone/architecture work, features, and fixes: **increment only the most significant applicable component** once (e.g. milestone + architecture → bump **A** only → **`3.0.0`** after **`2.x.y`**).
 
 ### Merge / PR expectation
 
 Before merging **incoming → base** (e.g. `bug/*` → `develop`, `develop` → `main`):
 
-1. Compare **`VERSION_*` / `VERSION` on the incoming branch** to **`VERSION_*` / `VERSION` on the target branch** (see `userland/shell/version_def.h`).
+1. Compare **`VERSION_*` / `VERSION` on the incoming branch** to **`VERSION_*` / `VERSION` on the target branch** (see `userland/shell/version_def.h`, generated from **`version/entries/*.ver`**).
 2. **Incoming must be strictly newer** than the target for that merge.
 3. If both show the **same** version (e.g. both `2.0.0`), **update the incoming branch** so its version is **one appropriate semver step ahead** of the target.
-4. Add a **new** **`version/entries/*.ver`** file describing the release (never rewrite an entry file that already merged) and run **`make sync-version-locked`** so **`version/locked/`** mirrors **`version/entries/`**.
+4. Add a **new** **`version/entries/<A>_<B>_<C>_<slug>.ver`** file describing the release (never rewrite an entry file that already merged), run **`./scripts/gen_version_def.sh`** (or **`make`**) so **`version_def.h`** updates, and run **`make sync-version-locked`** so **`version/locked/`** mirrors **`version/entries/`**.
 
 Example: **`bug/…` → `develop`**, both at **`2.0.0`** → bump incoming to **`2.0.1`** (patch for a bugfix).
 

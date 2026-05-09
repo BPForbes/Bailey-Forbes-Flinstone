@@ -8,7 +8,7 @@ reviews:
   instructions: |
     ## Version & releases
 
-    **Canonical version** is defined by integers in `userland/shell/version_def.h` (`VERSION_MAJOR`, `VERSION_STANDARD`, `VERSION_PATCH`); the **`VERSION`** macro expands to **A.B.C**. Release prose lives in **`version/entries/*.ver`** files (mirrored under **`version/locked/`**); **`scripts/gen_version_changelog.c`** reads those entries and **`version_def.h`** to emit **`userland/shell/version_changelog.c`**, then CI builds with **`CHANGELOG_CI=1`**.
+    **Canonical version** comes from **`version/entries/*.ver`**: the highest **A.B.C** there is emitted into **`userland/shell/version_def.h`** by **`scripts/gen_version_def.sh`** (also via **`make`**). Release prose lives in the same **`.ver`** files (mirrored under **`version/locked/`**); **`scripts/gen_version_changelog.c`** reads those entries to emit **`userland/shell/version_changelog.c`**, then CI builds with **`CHANGELOG_CI=1`**.
 
     ### Lock system — never edit historical version files
 
@@ -29,9 +29,11 @@ reviews:
     - **B** — Minor: new features (backward compatible within the product).
     - **C** — Patch: bug fixes and small corrections.
 
-    **Single bump rule:** If a change mixes milestone/architecture work, features, and bug fixes, **only increment the most significant applicable component** (e.g. milestone + architecture → bump **A** only; do not also bump B and C for the same release).
+    **Precedence (importance):** **`A` > `B` > `C`**. For each new release entry, bump **only** the **highest** precedence that applies to the release as a whole. **More significant** components (to the **left** of the bump) **stay the same**; **less significant** components (to the **right**) are **set to `0`**. Example: **`2.2.4` → `2.3.0`** for a minor release (`A` unchanged, `B` +1, `C` reset). **`2.3.7` → `3.0.0`** for a major release. **`2.3.0` → `2.3.1`** for a patch (only `C` increments).
 
-    Remind authors to update `VERSION_*` in `version_def.h` when the merge would otherwise equal or lag the target, add **`version/entries/*.ver`** for the release note, and keep **`version/locked/`** mirrored. Changelog prose is CI/deployment-time, not default `make`.
+    **Single bump rule:** If a change mixes milestone/architecture work, features, and bug fixes, **only increment the most significant applicable component** once (e.g. milestone + architecture → bump **A** only → **`3.0.0`** after **`2.x.y`**; do not also bump B/C for the same release).
+
+    Remind authors to add **`version/entries/<A>_<B>_<C>_<slug>.ver`**, run **`./scripts/gen_version_def.sh`** (or **`make`**) so **`version_def.h`** matches entries when the merge would otherwise equal or lag the target, and keep **`version/locked/`** mirrored. Changelog prose is CI/deployment-time, not default `make`.
 
     ## Comments vs code
 
@@ -48,8 +50,7 @@ reviews:
 
     - path: "userland/shell/version_def.h"
       instructions: |
-        Changes to VERSION_MAJOR / VERSION_STANDARD / VERSION_PATCH must follow semantic versioning (A.B.C) and merge rules in AGENTS.md / CLAUDE.md:
-        incoming branch version must exceed target branch version before merge.
+        This file is **generated** from **`version/entries/*.ver`** (`scripts/gen_version_def.sh` / `make`); do not hand-edit **`VERSION_*`**. Bumps follow **semver `A.B.C`** with precedence **`A` > `B` > `C`**: increment only the highest applicable component for the release, keep more-significant (left) components unchanged, set less-significant (right) components to **0** (e.g. **`2.2.4` → `2.3.0`**). Incoming branch version must exceed the target before merge; see AGENTS.md / CLAUDE.md.
 
     - path: "AGENTS.md"
       instructions: |

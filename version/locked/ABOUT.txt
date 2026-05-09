@@ -2,8 +2,17 @@ Version entries (*.ver) describe one shipped release each: MAJOR_VERSION,
 STANDARD_VERSION, RELEASE_VERSION (third component; aliases MINOR_VERSION or
 VERSION_PATCH), and DESCRIPTION (<= 1023 characters, one line).
 
+Name new files with the semantic version in the basename, for example:
+  version/entries/2_3_0_raw_block_disk.ver
+Older merged entries may keep a historical prefix (e.g. 001_2_2_4_baseline.ver); do not
+rename those — they are immutable after merge. Ordering uses the MAJOR/STANDARD/RELEASE
+integers inside each file, not the filename prefix.
+
 After a branch merges, existing *.ver files under version/entries are immutable:
 do not edit them; add a new file for the next release.
+
+userland/shell/version_def.h is generated from the highest A.B.C among these
+files (scripts/gen_version_def.sh; invoked by make). Do not edit the header by hand.
 
 The version/locked directory is an exact mirror of version/entries for
 read-only browsing. Update it only by running:

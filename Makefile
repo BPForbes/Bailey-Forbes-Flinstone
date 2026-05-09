@@ -107,6 +107,13 @@ endif
 ASMOBJS = $(patsubst %.s,%.o,$(patsubst %.asm,%.o,$(ASMSRCS)))
 OBJS = $(SRCS:.c=.o) $(ASMOBJS)
 TARGET = BPForbes_Flinstone_Shell
+.DEFAULT_GOAL := all
+
+# version_def.h is generated from version/entries/*.ver (highest A.B.C).
+VERSION_DEF := userland/shell/version_def.h
+VER_ENTRY_FILES := $(wildcard version/entries/*.ver)
+$(VERSION_DEF): $(VER_ENTRY_FILES) scripts/gen_version_def.sh
+	@./scripts/gen_version_def.sh
 
 all: $(TARGET)
 
@@ -116,11 +123,14 @@ baremetal: LDFLAGS += -no-pie
 baremetal: $(TARGET)
 
 # With embedded x86 VM: make vm && ./shell -Virtualization -y -vm
-.PHONY: version-record
+.PHONY: version-record gen-version-def
 version-record:
 	@./scripts/export_version_record.sh
 
-# After editing version/entries/, refresh the read-only mirror version/locked/
+gen-version-def:
+	@./scripts/gen_version_def.sh
+
+# After editing version/entries/, run `make` (refreshes version_def.h) then mirror to version/locked/
 .PHONY: sync-version-locked
 sync-version-locked:
 	@./scripts/sync_version_locked_mirror.sh
@@ -146,8 +156,11 @@ deps-cunit:
 	@chmod +x deps/fetch-cunit.sh 2>/dev/null || true
 	@./deps/fetch-cunit.sh
 
-$(TARGET): $(OBJS)
+$(TARGET): $(VERSION_DEF) $(OBJS)
 	$(CC) $(CFLAGS) -o $(TARGET) $(OBJS) $(LDFLAGS)
+
+# Rebuild objects that embed VERSION when the generated header changes.
+$(filter userland/shell/%.o userland/command/%.o,$(OBJS)): $(VERSION_DEF)
 
 # --- Test Build ---
 # interpreter.c is built as interpreter_unit.o with -DUNIT_TEST (stub interactive_shell).
@@ -175,9 +188,13 @@ TEST_TARGET = BPForbes_Flinstone_Tests
 
 DEPS_RPATH = -Wl,-rpath='$$ORIGIN/deps/install/lib'
 TEST_LDFLAGS = $(if $(DEPS_PREFIX),-L$(DEPS_PREFIX)/lib $(DEPS_RPATH),)
-$(TEST_TARGET): $(TEST_OBJS) $(TEST_ASMOBJS)
+$(TEST_TARGET): $(VERSION_DEF) $(TEST_OBJS) $(TEST_ASMOBJS)
 	$(CC) $(CFLAGS) -DUNIT_TEST -o $(TEST_TARGET) $(TEST_OBJS) $(TEST_ASMOBJS) -Wl,-z,noexecstack \
 		$(TEST_LDFLAGS) -lcunit
+
+$(filter userland/shell/%.o userland/command/%.o,$(TEST_OBJS)): $(VERSION_DEF)
+BPForbes_Flinstone_Tests.o: $(VERSION_DEF)
+userland/shell/interpreter_unit.o: $(VERSION_DEF)
 
 %.o: %.c
 	$(CC) $(CFLAGS) -c $< -o $@

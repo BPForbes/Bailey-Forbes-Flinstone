@@ -17,7 +17,7 @@ alwaysApply: true
 
 ## Canonical version & changelog
 
-- **`userland/shell/version_def.h`** — `VERSION_MAJOR` (A), `VERSION_STANDARD` (B / features), `VERSION_PATCH` (C / fixes); **`VERSION`** macro = dotted **A.B.C**. **`version_def.h` must match** the highest **A.B.C** declared in **`version/entries/*.ver`** (CI checks).
+- **`userland/shell/version_def.h`** — **Generated** by **`scripts/gen_version_def.sh`** (also from **`make`**). It defines **`VERSION_MAJOR`**, **`VERSION_STANDARD`**, **`VERSION_PATCH`**, and **`VERSION`** = **A.B.C** from the **highest** triple in **`version/entries/*.ver`**. CI ensures the committed header matches the generator output.
 - **`version/entries/`** — one **`.ver`** file per release (keys: MAJOR/STANDARD/RELEASE or MINOR/PATCH + DESCRIPTION). After merge, existing entry files are **immutable**; add new files for later bumps.
 - **`version/locked/`** — exact mirror of **`version/entries/`** for read-only visibility; refresh with **`scripts/sync_version_locked_mirror.sh`**.
 - **GitHub Actions:** **`scripts/gen_version_changelog.c`** + **`make CHANGELOG_CI=1`** (see `.github/workflows/c-cpp.yml`).
@@ -32,16 +32,26 @@ alwaysApply: true
 | **B** | Minor — new features (additive behavior) |
 | **C** | Patch — bug fixes and small, localized corrections |
 
-If a single change mixes milestone/architecture work, features, and fixes: **bump only the single most significant applicable component** (e.g. milestone + architecture → increment **A** only; do not stack B/C bumps for the same release).
+### Bump precedence (`A` > `B` > `C`)
+
+**Precedence (importance):** **`A` > `B` > `C`**. When you record a new release in **`version/entries/*.ver`**, choose **one** bump level: the **highest** precedence that applies to that release as a whole.
+
+- **Increment** only that component (the most significant level that changed for this release).
+- **Leave unchanged** every component **more significant** than the one you bumped (to the **left** in `A.B.C`).
+- **Set to `0`** every component **less significant** than the one you bumped (to the **right** in `A.B.C`).
+
+So a **minor** bump from **`2.2.4`** is **`2.3.0`**: **`A`** stays `2`, **`B`** becomes `3`, **`C`** resets to **`0`** (not `2.3.4`). A **major** bump from **`2.3.7`** is **`3.0.0`**. A **patch** bump from **`2.3.0`** is **`2.3.1`** (only **`C`** moves; there is no component to the right of **`C`** to zero).
+
+If a single release mixes major, minor, and patch-style work, still apply **only** the **highest** applicable bump once (e.g. milestone + architecture → **`A`** only → **`3.0.0`** after **`2.x.y`**); do not stack multiple component bumps for the same release.
 
 ## Merge / PR checks
 
 Before merging **incoming → base** (examples: `bug/*` → `develop`, `develop` → `main`):
 
-1. Read **`VERSION` / `VERSION_*` on the incoming branch** and on the **merge target branch** (`userland/shell/version_def.h`).
+1. Read **`VERSION` / `VERSION_*` on the incoming branch** and on the **merge target branch** (`userland/shell/version_def.h`, generated from **`version/entries/*.ver`**).
 2. **Incoming must be strictly newer** than the target for that integration.
 3. If both show the **same** version (e.g. both `2.0.0`), **update the incoming branch** so its version is **one appropriate step ahead** of the target.
 
 Example: `bug/…` → `develop`, both at **`2.0.0`** → bump incoming to **`2.0.1`** (patch for a bugfix branch).
 
-Agents and humans should update **`version_def.h`** and add a **new** **`version/entries/*.ver`** on the **incoming** branch when bumping—**never** rewrite **existing** `.ver` files already on the target branch (they are locked). Do not merge with identical versions across branches when the change warrants a bump. Changelog assembly is **deployment-time**, not **`make`**.
+When bumping, add a **new** **`version/entries/*.ver`**, run **`./scripts/gen_version_def.sh`** or **`make`** so **`version_def.h`** refreshes, and run **`scripts/sync_version_locked_mirror.sh`**—**never** rewrite **existing** `.ver` files already on the target branch (they are locked). Do not merge with identical versions across branches when the change warrants a bump. Changelog assembly is **deployment-time**, not **`make`**.

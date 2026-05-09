@@ -25,7 +25,7 @@ jobs:
       - name: Verify version/locked mirrors version/entries
         run: ./scripts/check_version_locked_mirror.sh
 
-      - name: Verify version_def.h matches highest version entry
+      - name: Verify version_def.h matches generator (version/entries)
         run: ./scripts/check_version_header_matches_entries.sh
 
       - name: Assemble changelog (CI-only source)
@@ -85,7 +85,7 @@ jobs:
       - name: Verify version/locked mirrors version/entries
         run: ./scripts/check_version_locked_mirror.sh
 
-      - name: Verify version_def.h matches highest version entry
+      - name: Verify version_def.h matches generator (version/entries)
         run: ./scripts/check_version_header_matches_entries.sh
 
       - name: Assemble changelog (CI-only source)
@@ -114,7 +114,7 @@ jobs:
       - name: Verify version/locked mirrors version/entries
         run: ./scripts/check_version_locked_mirror.sh
 
-      - name: Verify version_def.h matches highest version entry
+      - name: Verify version_def.h matches generator (version/entries)
         run: ./scripts/check_version_header_matches_entries.sh
 
       - name: Assemble changelog (CI-only source)
