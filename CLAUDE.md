@@ -8,7 +8,7 @@ This repository implements **Bailey-Forbes-Flinstone**: a educational OS/shell-s
 
 ### Canonical string
 
-- **`VERSION`** is built from integer macros in `userland/shell/version_def.h` (`VERSION_MAJOR`, `VERSION_STANDARD`, `VERSION_PATCH` → **A.B.C**). **Changelog text is not part of a normal local `make`**; produce it at **deployment** if needed (see **`scripts/templates/version_changelog.example.c`**, **`scripts/export_version_record.sh`**).
+- **`VERSION`** is built from integer macros in `userland/shell/version_def.h` (`VERSION_MAJOR`, `VERSION_STANDARD`, `VERSION_PATCH` → **A.B.C**). **GitHub Actions** assembles **`userland/shell/version_changelog.c`** via **`scripts/generate_version_changelog_ci.py`** and builds with **`CHANGELOG_CI=1`** (see `.github/workflows/c-cpp.yml`). Plain **`git clone` + `make`** does not compile changelog unless you generate that file and opt in with **`CHANGELOG_CI=1`**.
 - Format is **semantic versioning**: **`A.B.C`** (not date-based).
 
 ### Component meanings

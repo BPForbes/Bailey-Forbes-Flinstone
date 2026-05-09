@@ -12,12 +12,17 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
 
       - name: Install dependencies
         run: sudo apt-get update -y && sudo apt-get install -y gcc binutils nasm libcunit1-dev
 
+      - name: Assemble changelog (CI-only source)
+        run: python3 scripts/generate_version_changelog_ci.py
+
       - name: Build (x86_64 GAS)
-        run: make ARCH=x86_64_gas
+        run: make ARCH=x86_64_gas CHANGELOG_CI=1
 
       - name: Smoke test
         run: ./BPForbes_Flinstone_Shell -v
@@ -41,34 +46,47 @@ jobs:
         run: make test_userspace_connection
 
       - name: Compile CUnit suite
-        run: make BPForbes_Flinstone_Tests
+        run: make BPForbes_Flinstone_Tests CHANGELOG_CI=1
 
       - name: Build (x86_64 NASM)
-        run: make clean && make ARCH=x86_64_nasm
+        run: |
+          make clean
+          python3 scripts/generate_version_changelog_ci.py
+          make ARCH=x86_64_nasm CHANGELOG_CI=1
 
   build-arm:
     name: Build (AArch64 cross)
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
 
       - name: Install cross-compiler
         run: sudo apt-get update -y && sudo apt-get install -y gcc-aarch64-linux-gnu binutils-aarch64-linux-gnu
 
+      - name: Assemble changelog (CI-only source)
+        run: python3 scripts/generate_version_changelog_ci.py
+
       - name: Build (ARM / AArch64)
-        run: make ARCH=arm
+        run: make ARCH=arm CHANGELOG_CI=1
 
   build-vm:
     name: Build & test (VM enabled)
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
 
       - name: Install dependencies
         run: sudo apt-get install -y gcc binutils nasm
 
+      - name: Assemble changelog (CI-only source)
+        run: python3 scripts/generate_version_changelog_ci.py
+
       - name: Build (VM)
-        run: make VM_ENABLE=1
+        run: make VM_ENABLE=1 CHANGELOG_CI=1
 
       - name: Test — vm_layer_warning
         run: make test_vm_layer_warning

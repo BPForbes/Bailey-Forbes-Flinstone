@@ -65,6 +65,10 @@ CORE_SRCS = kernel/core/vfs/disk.c kernel/core/vfs/path_log.c kernel/core/vfs/cl
             kernel/core/sys/vrt.c kernel/core/sys/ipc.c kernel/core/sys/syscall.c kernel/core/vfs/vfs.c
 COMMAND_SRCS := $(wildcard userland/command/cmd_*.c)
 SHELL_SRCS = userland/shell/common.c userland/shell/util.c userland/shell/terminal.c userland/shell/interpreter.c userland/shell/sh.c $(COMMAND_SRCS)
+# GitHub Actions (or explicit opt-in) may generate userland/shell/version_changelog.c; see scripts/generate_version_changelog_ci.py
+ifeq ($(CHANGELOG_CI),1)
+SHELL_SRCS += userland/shell/version_changelog.c
+endif
 SRCS = $(SHELL_SRCS) $(CORE_SRCS) disk_asm.c dir_asm.c
 SRCS += $(DRIVER_SRCS) $(HAL_SRCS)
 CFLAGS += -I$(ASM_SRC_DIR) -I$(KERNEL_DRIVERS) -Ikernel -Ikernel/drivers
@@ -151,6 +155,9 @@ TEST_SRCS = BPForbes_Flinstone_Tests.c userland/shell/common.c userland/shell/ut
             kernel/core/vfs/fs_service_glue.c kernel/core/mm/mem_domain.c kernel/core/mm/kmalloc.c kernel/core/mm/pmm.c \
             kernel/core/sys/vrt.c kernel/core/sys/ipc.c kernel/core/sys/syscall.c
 TEST_SRCS += disk_asm.c dir_asm.c
+ifeq ($(CHANGELOG_CI),1)
+TEST_SRCS += userland/shell/version_changelog.c
+endif
 TEST_UNIT_INTERPRETER_OBJ = userland/shell/interpreter_unit.o
 TEST_OBJS = $(TEST_SRCS:.c=.o) $(TEST_UNIT_INTERPRETER_OBJ)
 

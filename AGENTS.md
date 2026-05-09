@@ -52,7 +52,11 @@ Run builds from the repository root.
 
 ## Versioning
 
-The shipped shell version uses integer components in **`userland/shell/version_def.h`** (`VERSION_MAJOR`, `VERSION_STANDARD`, `VERSION_PATCH`) and builds the **`VERSION`** string macro as **A.B.C**. **Changelog prose is not compiled by default `make`**; assemble or generate it **at deployment** (optional generated `version_changelog.c`, or artifacts from **`scripts/export_version_record.sh`**). See **`scripts/templates/version_changelog.example.c`**. Use **semantic versioning**:
+The shipped shell version uses integer components in **`userland/shell/version_def.h`** (`VERSION_MAJOR`, `VERSION_STANDARD`, `VERSION_PATCH`) and builds the **`VERSION`** string macro as **A.B.C**.
+
+**Changelog binary:** **GitHub Actions** (`.github/workflows/c-cpp.yml`) runs **`python3 scripts/generate_version_changelog_ci.py`** then **`make … CHANGELOG_CI=1`**, which generates **`userland/shell/version_changelog.c`** from **`git log`** (ignored by git) and links **`VERSION_CHANGELOG[]`** into the shell/tests in CI only. A plain local **`make`** does **not** compile changelog unless you generate that file and pass **`CHANGELOG_CI=1`**. See **`scripts/templates/version_changelog.example.c`** for shape.
+
+Use **semantic versioning**:
 
 | Component | When to bump |
 |-----------|----------------|
