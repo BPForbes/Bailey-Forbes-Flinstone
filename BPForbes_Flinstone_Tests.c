@@ -38,10 +38,7 @@
 /* g_fs_jail_root is a non-static global exported by fs_jail.c */
 extern char g_fs_jail_root[];
 
-/* Directly include interpreter.c so that its definitions are compiled into this test.
-   (Ensure that interpreter.c checks UNIT_TEST so that interactive_shell() is a stub.)
-*/
-#include "interpreter.c"
+/* interpreter.c is compiled and linked separately (see Makefile: interpreter_unit.o with -DUNIT_TEST). */
 
 /* ---------------------------------------------------------------------------
  * Forward declarations for cd command tests.

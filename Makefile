@@ -137,15 +137,21 @@ $(TARGET): $(OBJS)
 	$(CC) $(CFLAGS) -o $(TARGET) $(OBJS) $(LDFLAGS)
 
 # --- Test Build ---
-# For tests, interpreter.c is directly included in BPForbes_Flinstone_Tests.c.
+# interpreter.c is built as interpreter_unit.o with -DUNIT_TEST (stub interactive_shell).
+# Shell builtins live in userland/command/*.c (same as main shell link).
 TEST_SRCS = BPForbes_Flinstone_Tests.c userland/shell/common.c userland/shell/util.c userland/shell/terminal.c \
+            $(COMMAND_SRCS) \
             kernel/core/vfs/disk.c kernel/core/vfs/path_log.c kernel/core/vfs/cluster.c kernel/core/vfs/fs.c \
             kernel/core/sched/threadpool.c priority_queue.c kernel/core/vfs/fs_jail.c kernel/core/vfs/fs_provider.c kernel/core/vfs/fs_command.c \
             kernel/core/vfs/fs_events.c kernel/core/vfs/fs_policy.c kernel/core/vfs/fs_chain.c kernel/core/vfs/fs_facade.c \
             kernel/core/vfs/fs_service_glue.c kernel/core/mm/mem_domain.c kernel/core/mm/kmalloc.c kernel/core/mm/pmm.c \
             kernel/core/sys/vrt.c kernel/core/sys/ipc.c kernel/core/sys/syscall.c
 TEST_SRCS += disk_asm.c dir_asm.c
-TEST_OBJS = $(TEST_SRCS:.c=.o)
+TEST_UNIT_INTERPRETER_OBJ = userland/shell/interpreter_unit.o
+TEST_OBJS = $(TEST_SRCS:.c=.o) $(TEST_UNIT_INTERPRETER_OBJ)
+
+userland/shell/interpreter_unit.o: userland/shell/interpreter.c
+	$(CC) $(CFLAGS) -DUNIT_TEST -c $< -o $@
 MEM_ASM_OBJ = $(patsubst %.s,%.o,$(patsubst %.asm,%.o,$(firstword $(ASMSRCS_BASE))))
 PORT_IO_OBJ = $(patsubst %.s,%.o,$(patsubst %.asm,%.o,$(word 2,$(ASMSRCS_BASE))))
 TEST_ASMOBJS = $(MEM_ASM_OBJ)
