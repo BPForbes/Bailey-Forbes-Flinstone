@@ -137,6 +137,15 @@ gen-version-def:
 finalize-version-locked sync-version-locked:
 	@./scripts/finalize_version_locked.sh
 
+# Deployment / release: copy version/entries → version/locked, regenerate version_def.h and changelog, then build with CHANGELOG_CI=1.
+# Commit updated version/locked/ and userland/shell/version_def.h (and userland/shell/version_changelog.c if tracked) after a local deploy when you want the repo to match what shipped.
+.PHONY: deploy
+deploy:
+	@./scripts/finalize_version_locked.sh
+	@./scripts/gen_version_def.sh
+	@gcc -std=c11 -Wall -Wextra -O2 -o gen_version_changelog scripts/gen_version_changelog.c && ./gen_version_changelog
+	@$(MAKE) CHANGELOG_CI=1 all
+
 .PHONY: vm baremetal
 vm:
 	$(MAKE) VM_ENABLE=1 $(TARGET)

@@ -1,0 +1,37 @@
+# Deployment / release build: copies version/entries → version/locked before building
+# so the published snapshot matches what you ship. Does not commit; commit locally
+# if you want the repository to record the updated locked tree and header.
+
+name: Deploy
+
+on:
+  workflow_dispatch:
+
+jobs:
+  deploy:
+    name: Deploy build
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Install dependencies
+        run: sudo apt-get update -y && sudo apt-get install -y gcc binutils nasm make libcunit1-dev
+
+      - name: Finalize version (copy version/entries to version/locked)
+        run: ./scripts/finalize_version_locked.sh
+
+      - name: Regenerate version header
+        run: ./scripts/gen_version_def.sh
+
+      - name: Assemble changelog
+        run: |
+          gcc -std=c11 -Wall -Wextra -O2 -o gen_version_changelog scripts/gen_version_changelog.c
+          ./gen_version_changelog
+
+      - name: Build (x86_64 GAS, changelog linked)
+        run: make ARCH=x86_64_gas CHANGELOG_CI=1
+
+      - name: Smoke test (version string)
+        run: ./BPForbes_Flinstone_Shell -v

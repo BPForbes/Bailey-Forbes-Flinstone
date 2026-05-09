@@ -77,6 +77,12 @@ CI verifies that the committed **`version_def.h`** matches **`scripts/gen_versio
 
 **Changelog binary:** **GitHub Actions** compiles **`scripts/gen_version_changelog.c`**, which reads **`version/locked`** (headline version = highest finalized entry), then emits **`userland/shell/version_changelog.c`** (ignored by git). **`make … CHANGELOG_CI=1`** links **`VERSION_CHANGELOG[]`** in CI only. Plain **`make`** omits changelog unless you generate that file and pass **`CHANGELOG_CI=1`**. See **`scripts/templates/version_changelog.example.c`** for shape.
 
+### Deployment
+
+**GitHub Actions:** workflow **Deploy** (`.github/workflows/deploy.yml`, **workflow_dispatch**) runs **`finalize_version_locked.sh`** first (full copy **`version/entries/`** → **`version/locked/`**), then **`gen_version_def.sh`**, changelog generation, and **`make CHANGELOG_CI=1`**. The workflow does **not** commit; push **`version/locked/`**, **`userland/shell/version_def.h`**, and any tracked changelog sources yourself if the repository should record what shipped.
+
+**Local:** **`make deploy`** runs the same ordered steps, then **`make CHANGELOG_CI=1 all`**.
+
 Use **semantic versioning**:
 
 | Component | When to bump |
