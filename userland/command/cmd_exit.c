@@ -5,9 +5,9 @@
 #include <string.h>
 #include <unistd.h>
 
-void cmd_exit_maybe(char *trimmed) {
+int cmd_exit_maybe(char *trimmed) {
     if (strncmp(trimmed, "exit", 4) != 0)
-        return;
+        return 0;
     char *tokens[3] = { NULL, NULL, NULL };
     int tcount = 0;
     char *tok = strtok(trimmed, " \t");
@@ -25,7 +25,7 @@ void cmd_exit_maybe(char *trimmed) {
             printf("History file retained.\n");
         } else {
             printf("Usage: exit [ -y | -n ]\n");
-            return;
+            return 1;
         }
         printf("Exiting shell...\n");
         shell_running = 0;

@@ -639,6 +639,11 @@ void test_exit_command(void) {
     }
 }
 
+void test_exit_invalid_flag_returns_error(void) {
+    print_test_header("exit invalid flag returns error (no external exec)");
+    CU_ASSERT_TRUE(execute_command_str("exit -q") == 1);
+}
+
 /* ---------------------------------------------------------------------------
  * VM Jail Suite helpers
  * -------------------------------------------------------------------------*/
@@ -1066,6 +1071,7 @@ int main(void)
     CU_ADD_TEST(suite, test_cc_command);
     CU_ADD_TEST(suite, test_external_command);
     CU_ADD_TEST(suite, test_exit_command);
+    CU_ADD_TEST(suite, test_exit_invalid_flag_returns_error);
     CU_ADD_TEST(suite, test_integration_undo);
     CU_ADD_TEST(suite, test_integration_storage);
 

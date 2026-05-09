@@ -9,6 +9,7 @@ This repository implements **Bailey-Forbes-Flinstone**: a educational OS/shell-s
 ### Lock system (AI assistants — mandatory)
 
 - **Never edit older version files.** Do **not** change **`version/entries/*.ver`** files that already exist on the branch you are merging **into** (the merge base). They are the frozen release record; use a **new** `.ver` file + semver bump + **`version_def.h`** update instead.
+- **Draft entries:** `.ver` files that exist only on your branch (not on the merge base) are **not** immutable until merge—you can edit or drop them while iterating; CI only guards entries already on the target.
 - **`version/locked/`** mirrors **`version/entries/`** for visibility only. Refresh with **`./scripts/sync_version_locked_mirror.sh`**; do **not** edit **`version/locked/`** to “fix” content without syncing from **`version/entries/`**.
 - **Do not** include historical **`.ver`** or **`version/locked/`** paths in automated refactors, formatting-only sweeps, or bulk renames.
 

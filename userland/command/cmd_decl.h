@@ -4,7 +4,8 @@
 #include "fl_shell_cmd.h"
 
 /* Line-mode builtins (parsed before argv split). */
-void cmd_exit_maybe(char *trimmed);
+/* Returns 1 if "exit" was recognized (including usage errors); 0 if unrelated line. */
+int cmd_exit_maybe(char *trimmed);
 int cmd_clear_maybe(const char *trimmed);
 int cmd_help_maybe(const char *trimmed);
 int cmd_history_maybe(const char *trimmed);

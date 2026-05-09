@@ -29,7 +29,10 @@ int execute_command_str(const char *line) {
     char *tokenBuf = strdup(buffer);
     char *trimmed = trim_whitespace(tokenBuf);
 
-    cmd_exit_maybe(trimmed);
+    if (cmd_exit_maybe(trimmed)) {
+        free(tokenBuf);
+        return 1;
+    }
     if (cmd_clear_maybe(trimmed)) {
         free(tokenBuf);
         return 0;

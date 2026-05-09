@@ -65,6 +65,8 @@ Each release adds **one new text file** under **`version/entries/`** ending in *
 
 After a change is **merged**, existing **`version/entries/*.ver`** files are **immutable**: do not edit them; add another **`.ver`** file for the next bump. CI enforces this on pull requests against the merge base.
 
+On a **feature branch before merge**, new `.ver` files that do **not** yet exist on the merge base are ordinary drafts: you may revise or remove them as the PR evolves without treating each push as “locking” them. Only entries already present on the **target** (detected via merge base) are protected.
+
 ### Lock system (agents, reviewers, and automation)
 
 - **Never edit older version files.** Any **`.ver`** file that already exists on the **merge base / target branch** is **locked**: it is part of the permanent release record. Do **not** rewrite description text, fix typos in place, or refactor filenames for entries that have already shipped—add a **new** **`version/entries/*.ver`** for the next semver instead.

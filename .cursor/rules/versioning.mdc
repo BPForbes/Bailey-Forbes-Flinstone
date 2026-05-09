@@ -10,6 +10,7 @@ alwaysApply: true
 ## Lock system — never rewrite shipped version files
 
 - **Do not** modify **existing** **`version/entries/*.ver`** files that are already present on the **target / merge-base** branch. After merge, those files are **immutable**; new prose or fixes belong in a **new** `.ver` file for a **new** release.
+- **Before merge:** `.ver` files that appear **only** on your feature branch (not on the merge base) are normal drafts—you may edit or delete them until the PR lands. Immutability applies to entries **already on the integration target**, as CI compares the PR to the merge base—not to “immutable on every push.”
 - **`version/locked/`** is a **byte-identical mirror** of **`version/entries/`** for read-only browsing. Update only via **`scripts/sync_version_locked_mirror.sh`**. Never hand-edit **`version/locked/`** to change history.
 - **AI edits** (refactors, formatting, “cleanup”) must **skip** historical **`version/entries/*.ver`** and unsynchronized **`version/locked/**`**.
 - **CI** enforces immutability (`check_version_entries_immutable.sh`) and mirror equality (`check_version_locked_mirror.sh`) on pull requests.
