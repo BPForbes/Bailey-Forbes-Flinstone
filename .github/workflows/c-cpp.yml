@@ -25,9 +25,6 @@ jobs:
       - name: Verify version_def.h matches generator (version/entries)
         run: ./scripts/check_version_header_matches_entries.sh
 
-      - name: Verify CMake project VERSION matches version_def.h
-        run: ./scripts/check_cmake_version_matches_version_def.sh
-
   build-and-test-x86_64:
     name: Build & test (x86_64 GAS)
     needs: version-requirements

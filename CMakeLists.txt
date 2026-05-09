@@ -1,5 +1,29 @@
 cmake_minimum_required(VERSION 3.15)
-project(Bailey-Forbes-Flinstone VERSION 2.2.4 LANGUAGES C ASM)
+
+# Shipped semver: read from the same generated header as the shell (version/entries → gen_version_def.sh).
+# Do not hardcode A.B.C here — it would drift on every release bump.
+set(_FLINT_VERSION_DEF "${CMAKE_SOURCE_DIR}/userland/shell/version_def.h")
+if(NOT EXISTS "${_FLINT_VERSION_DEF}")
+  message(FATAL_ERROR "Missing ${_FLINT_VERSION_DEF}. Run ./scripts/gen_version_def.sh or `make` after updating version/entries.")
+endif()
+file(READ "${_FLINT_VERSION_DEF}" _flint_version_def_h)
+string(REGEX MATCH "#define[ \t]+VERSION_MAJOR[ \t]+([0-9]+)" _ "${_flint_version_def_h}")
+if(NOT CMAKE_MATCH_1)
+  message(FATAL_ERROR "Could not parse VERSION_MAJOR from ${_FLINT_VERSION_DEF}")
+endif()
+set(_FLINT_VMAJ "${CMAKE_MATCH_1}")
+string(REGEX MATCH "#define[ \t]+VERSION_STANDARD[ \t]+([0-9]+)" _ "${_flint_version_def_h}")
+if(NOT CMAKE_MATCH_1)
+  message(FATAL_ERROR "Could not parse VERSION_STANDARD from ${_FLINT_VERSION_DEF}")
+endif()
+set(_FLINT_VSTD "${CMAKE_MATCH_1}")
+string(REGEX MATCH "#define[ \t]+VERSION_PATCH[ \t]+([0-9]+)" _ "${_flint_version_def_h}")
+if(NOT CMAKE_MATCH_1)
+  message(FATAL_ERROR "Could not parse VERSION_PATCH from ${_FLINT_VERSION_DEF}")
+endif()
+set(_FLINT_VPT "${CMAKE_MATCH_1}")
+
+project(Bailey-Forbes-Flinstone VERSION ${_FLINT_VMAJ}.${_FLINT_VSTD}.${_FLINT_VPT} LANGUAGES C ASM)
 
 # Set default build type
 if(NOT CMAKE_BUILD_TYPE)

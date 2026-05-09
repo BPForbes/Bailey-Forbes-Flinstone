@@ -53,7 +53,7 @@ Run builds from the repository root.
 
 ## Versioning
 
-The shipped shell version is **A.B.C** in **`userland/shell/version_def.h`**, which is **generated** from **`version/entries/*.ver`**: the header always reflects the **highest** semver among those files. Run **`./scripts/gen_version_def.sh`** or **`make`** after adding or changing entries, then commit the updated header.
+The shipped shell version is **A.B.C** in **`userland/shell/version_def.h`**, which is **generated** from **`version/entries/*.ver`**: the header always reflects the **highest** semver among those files. Run **`./scripts/gen_version_def.sh`** or **`make`** after adding or changing entries, then commit the updated header. **CMake** reads **`project(VERSION)`** from that same header at configure time—do not hardcode a separate semver triple in **`CMakeLists.txt`**.
 
 ### Release notes (`version/`)
 
