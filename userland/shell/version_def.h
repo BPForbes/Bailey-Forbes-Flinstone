@@ -8,9 +8,11 @@
  *   B (VERSION_STANDARD)  — new features (maps to semver "minor")
  *   C (VERSION_PATCH)     — bug fixes and small corrections (maps to semver "patch")
  *
- * Release changelog text is not compiled into normal local builds. Generate or
- * assemble it at deployment only (see scripts/templates/version_changelog.example.c,
- * scripts/export_version_record.sh).
+ * Must match the highest A.B.C declared under version/entries/*.ver (CI checks).
+ * Release changelog text is not compiled into normal local builds. CI runs
+ * scripts/gen_version_changelog.c against version/entries and emits
+ * userland/shell/version_changelog.c; see scripts/templates/version_changelog.example.c
+ * and scripts/export_version_record.sh.
  */
 #define VERSION_MAJOR    2
 #define VERSION_STANDARD 2

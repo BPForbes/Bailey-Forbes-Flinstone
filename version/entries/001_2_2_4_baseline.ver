@@ -1,0 +1,6 @@
+# Baseline entry for current VERSION in userland/shell/version_def.h.
+# After this file is merged, treat it as locked — add new .ver files for later releases.
+MAJOR_VERSION=2
+STANDARD_VERSION=2
+RELEASE_VERSION=4
+DESCRIPTION=Shell syscall-style dispatch, structured semver, and CI changelog from version entry files.

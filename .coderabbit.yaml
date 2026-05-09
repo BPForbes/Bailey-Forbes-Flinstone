@@ -8,13 +8,20 @@ reviews:
   instructions: |
     ## Version & releases
 
-    **Canonical version** is defined by integers in `userland/shell/version_def.h` (`VERSION_MAJOR`, `VERSION_STANDARD`, `VERSION_PATCH`); the **`VERSION`** macro expands to **A.B.C**. GitHub Actions generates `userland/shell/version_changelog.c` from git history (`scripts/generate_version_changelog_ci.py`) and builds with **`CHANGELOG_CI=1`**.
+    **Canonical version** is defined by integers in `userland/shell/version_def.h` (`VERSION_MAJOR`, `VERSION_STANDARD`, `VERSION_PATCH`); the **`VERSION`** macro expands to **A.B.C**. Release prose lives in **`version/entries/*.ver`** files (mirrored under **`version/locked/`**); **`scripts/gen_version_changelog.c`** reads those entries and **`version_def.h`** to emit **`userland/shell/version_changelog.c`**, then CI builds with **`CHANGELOG_CI=1`**.
+
+    ### Lock system — never edit historical version files
+
+    - **Do not** approve or suggest edits to **existing** **`version/entries/*.ver`** files that already exist on the **merge base / target branch**. Those files are **immutable** after merge; correcting wording or metadata requires a **new** `.ver` file for a **new** semver bump—not an in-place rewrite.
+    - **`version/locked/`** must remain an **exact mirror** of **`version/entries/`** (refresh only via **`scripts/sync_version_locked_mirror.sh`**). **Reject** hand-edited **`version/locked/**`** that would diverge from **`version/entries/`**.
+    - AI-assisted refactors must **exclude** historical **`version/entries/*.ver`** and unsynchronized **`version/locked/**`** from automated bulk edits.
 
     When reviewing a PR that merges **incoming → base** (e.g. `bug/*` → `develop`, `develop` → `main`):
 
     1. Compare the **incoming branch** version string to the **merge base / target branch** version (same `VERSION` macro on each side).
     2. The **incoming branch version must be strictly greater** than the target branch version for that merge (typically exactly one semver bump on the appropriate component).
     3. If both branches report the **same** version (e.g. both `2.0.0`), request an update: bump the incoming branch so it is **one step ahead** of the target for the change type (example: `bug/*` → `develop` with both at `2.0.0` → bump incoming to `2.0.1`).
+    4. Ensure new bumps add a **new** **`version/entries/*.ver`** file (do not rewrite merged entries) and refresh **`version/locked/`** via **`scripts/sync_version_locked_mirror.sh`**.
 
     **Schema `A.B.C`:**
 
@@ -24,13 +31,21 @@ reviews:
 
     **Single bump rule:** If a change mixes milestone/architecture work, features, and bug fixes, **only increment the most significant applicable component** (e.g. milestone + architecture → bump **A** only; do not also bump B and C for the same release).
 
-    Remind authors to update `VERSION_*` in `version_def.h` when the merge would otherwise equal or lag the target. Changelog prose is deployment-time, not default `make`.
+    Remind authors to update `VERSION_*` in `version_def.h` when the merge would otherwise equal or lag the target, add **`version/entries/*.ver`** for the release note, and keep **`version/locked/`** mirrored. Changelog prose is CI/deployment-time, not default `make`.
 
     ## Comments vs code
 
     Prefer a rough balance of **about 15% comments to 85% code** in new or heavily touched areas: enough comments to explain non-obvious intent, invariants, and public contracts—avoid redundant narration of what the code already states line-by-line.
 
   path_instructions:
+    - path: "version/entries/*.ver"
+      instructions: |
+        **Never modify an existing `.ver` file that is already on the target branch** — entries are locked after merge; request a **new** `.ver` for later releases. Each file needs MAJOR_VERSION, STANDARD_VERSION, RELEASE_VERSION (or MINOR_VERSION / VERSION_PATCH), and DESCRIPTION (<= 1023 chars).
+
+    - path: "version/locked/**"
+      instructions: |
+        **Mirror only.** Must match `version/entries/` exactly (`scripts/sync_version_locked_mirror.sh`). Do not approve hand edits here; never diverge from `version/entries/`.
+
     - path: "userland/shell/version_def.h"
       instructions: |
         Changes to VERSION_MAJOR / VERSION_STANDARD / VERSION_PATCH must follow semantic versioning (A.B.C) and merge rules in AGENTS.md / CLAUDE.md:
