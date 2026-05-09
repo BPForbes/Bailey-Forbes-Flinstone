@@ -14,7 +14,13 @@ int cmd_writecluster_run(int argc, char **argv) {
     }
     int clu = atoi(args[1]);
     int inputIsText = (!strcmp(args[2], "-t")) ? 1 : 0;
-    process_write_cluster(clu, args[3], inputIsText);
-    calculate_storage_breakdown_for_cluster(clu);
+    if (process_write_cluster(clu, args[3], inputIsText) != 0) {
+        printf("Failed to write cluster %d.\n", clu);
+        return 1;
+    }
+    if (calculate_storage_breakdown_for_cluster(clu) != 0) {
+        printf("Failed to compute storage breakdown for cluster %d.\n", clu);
+        return 1;
+    }
     return 0;
 }

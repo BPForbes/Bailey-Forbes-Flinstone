@@ -23,15 +23,19 @@ int cmd_mv_run(int argc, char **argv) {
             path_log_record(PATH_OP_MOVE, srcpath);
             path_log_record(PATH_OP_MOVE, dstpath);
             printf("Moved '%s' to '%s'\n", srcpath, dstpath);
-        } else
+        } else {
             perror("mv");
+            return 1;
+        }
     } else {
         if (rename(srcpath, dstpath) == 0) {
             path_log_record(PATH_OP_MOVE, srcpath);
             path_log_record(PATH_OP_MOVE, dstpath);
             printf("Moved '%s' to '%s'\n", srcpath, dstpath);
-        } else
+        } else {
             perror("mv");
+            return 1;
+        }
     }
     return 0;
 }

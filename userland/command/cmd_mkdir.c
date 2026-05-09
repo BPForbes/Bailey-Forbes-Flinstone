@@ -23,11 +23,15 @@ int cmd_mkdir_run(int argc, char **argv) {
         if (fm_create_dir(g_fm_service, rpath) == 0) {
             path_log_record(PATH_OP_CREATE, rpath);
             printf("Directory '%s' created.\n", rpath);
-        } else
+        } else {
             perror("mkdir");
+            return 1;
+        }
     } else {
-        create_directory(rpath);
-        path_log_record(PATH_OP_CREATE, rpath);
+        if (create_directory(rpath) == 0)
+            path_log_record(PATH_OP_CREATE, rpath);
+        else
+            return 1;
     }
     return 0;
 }

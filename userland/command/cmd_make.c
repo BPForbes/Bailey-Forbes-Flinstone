@@ -38,8 +38,12 @@ int cmd_make_maybe(char *trimmed) {
                 printf("Done writing '%s'.\n", rpath);
                 break;
             }
-            if (off + strlen(buf) + 2 < sizeof(content))
+            if (off + strlen(buf) + 2 < sizeof(content)) {
                 off += (size_t)snprintf(content + off, sizeof(content) - off, "%s\n", buf);
+            } else {
+                printf("Content buffer full (%zu bytes); remaining input discarded. Type 'EOF' to save.\n",
+                       sizeof(content));
+            }
         }
         fm_save_text(g_fm_service, rpath, content);
     } else {

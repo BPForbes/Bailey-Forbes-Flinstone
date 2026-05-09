@@ -11,9 +11,10 @@
 
 int cmd_dir_run(int argc, char **argv) {
     char **args = argv;
+    const char *target = (argc >= 2 && args[1][0] != '-') ? args[1] : ".";
     char rpath[CWD_MAX];
-    resolve_path((argc >= 2 && args[1][0] != '-') ? args[1] : ".", rpath, sizeof(rpath));
-    if (cmd_jail_blocked_path("dir", (argc >= 2 && args[1][0] != '-') ? args[1] : ".", rpath))
+    resolve_path(target, rpath, sizeof(rpath));
+    if (cmd_jail_blocked_path("dir", target, rpath))
         return 1;
     if (g_fm_service) {
         fs_node_t *nodes;

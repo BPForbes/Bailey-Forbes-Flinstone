@@ -1,7 +1,6 @@
 #include "cmd_decl.h"
 #include "interpreter.h"
 #include "util.h"
-#include "threadpool.h"
 #include <stdio.h>
 #include <stdlib.h>
 
@@ -22,7 +21,7 @@ int cmd_rerun_run(int argc, char **argv) {
         return 1;
     }
     printf("Re-executing command #%d: %s\n", idx, cmd);
-    submit_single_command(cmd);
+    int rc = execute_command_str(cmd);
     free(cmd);
-    return 0;
+    return rc;
 }

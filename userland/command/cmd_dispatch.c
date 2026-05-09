@@ -5,8 +5,6 @@
  * Numeric dispatch — same structure as fl_syscall_dispatch(): switch on command id.
  */
 int fl_shell_cmd_dispatch(fl_shell_cmd_no_t no, int argc, char **argv) {
-    (void)argc;
-    (void)argv;
     switch (no) {
     case FL_SCMD_CD:
         return cmd_cd_run(argc, argv);

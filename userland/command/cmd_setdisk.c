@@ -8,15 +8,14 @@
 #include <string.h>
 
 int cmd_setdisk_run(int argc, char **argv) {
-    char **args = argv;
     if (argc < 2) {
         printf("Usage: setdisk <disk_file>\n");
         return 1;
     }
     char spath[CWD_MAX];
     mem_domain_zero(spath, sizeof(spath));
-    resolve_path(args[1], spath, sizeof spath);
-    if (cmd_jail_blocked_path("setdisk", args[1], spath))
+    resolve_path(argv[1], spath, sizeof(spath));
+    if (cmd_jail_blocked_path("setdisk", argv[1], spath))
         return 1;
     FILE *fp = fopen(spath, "r");
     if (!fp) {
