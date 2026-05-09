@@ -19,48 +19,6 @@
 #include <sys/wait.h>
 #include <signal.h>
 
-#ifdef __EMSCRIPTEN__
-#include <emscripten.h>
-
-/* Async blocking getchar — ASYNCIFY suspends the WASM module until input arrives. */
-EM_ASYNC_JS(int, _wasm_getchar, (), {
-    if (!Module._ibuf) Module._ibuf = [];
-    while (Module._ibuf.length === 0) {
-        await new Promise(function(resolve) { Module._iwaiter = resolve; });
-    }
-    return Module._ibuf.shift();
-});
-
-static char *_wasm_fgets(char *s, int n, FILE *fp) {
-    if (fp != stdin) return fgets(s, n, fp);
-    if (!s || n <= 0) return NULL;
-    int i = 0;
-    while (i < n - 1) {
-        int c = _wasm_getchar();
-        if (c < 0) { if (!i) return NULL; break; }
-        s[i++] = (char)c;
-        if ((char)c == '\n') break;
-    }
-    s[i] = '\0';
-    return s;
-}
-
-static ssize_t _wasm_read(int fd, void *buf, size_t count) {
-    if (fd != STDIN_FILENO) return read(fd, buf, count);
-    for (size_t i = 0; i < count; i++) {
-        int c = _wasm_getchar();
-        if (c < 0) return i == 0 ? -1 : (ssize_t)i;
-        ((char *)buf)[i] = (char)c;
-    }
-    return (ssize_t)count;
-}
-
-#undef fgets
-#define fgets(s, n, fp) _wasm_fgets(s, n, fp)
-#undef read
-#define read(fd, buf, n) _wasm_read(fd, buf, n)
-#endif /* __EMSCRIPTEN__ */
-
 static int jail_blocked_path(const char *op, const char *input, const char *resolved) {
     if (!fs_jail_is_active())
         return 0;
@@ -147,10 +105,10 @@ int execute_command_str(const char *line) {
         return 0;
     }
     if (!strcmp(trimmed, "history") || !strcmp(trimmed, "his")) {
-        FL_HISTORY_LOCK(history_mutex);
+        pthread_mutex_lock(&history_mutex);
         FILE *hf = fopen(HISTORY_FILE, "r");
         if (!hf) {
-            FL_HISTORY_UNLOCK(history_mutex);
+            pthread_mutex_unlock(&history_mutex);
             printf("No history.\n");
             free(tokenBuf);
             return 0;
@@ -160,7 +118,7 @@ int execute_command_str(const char *line) {
         while (fgets(l2, sizeof(l2), hf))
             printf("[%d] %s", idx++, l2);
         fclose(hf);
-        FL_HISTORY_UNLOCK(history_mutex);
+        pthread_mutex_unlock(&history_mutex);
         free(tokenBuf);
         return 0;
     }
