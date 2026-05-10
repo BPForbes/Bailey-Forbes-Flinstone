@@ -1,7 +1,7 @@
 /*
- * Generate userland/shell/version_changelog.c from version_def.h and
- * version/entries files ending in .ver (release notes). Used by GitHub Actions before
- * make CHANGELOG_CI=1.
+ * Generate userland/shell/version_changelog.c from version/locked files ending in .ver
+ * (finalized release notes) and the highest A.B.C among them for the headline string.
+ * Used by GitHub Actions before make CHANGELOG_CI=1.
  *
  * Each .ver file (UTF-8 text) contains lines such as:
  *   MAJOR_VERSION=2
@@ -13,6 +13,8 @@
  *
  * Build: gcc -std=c11 -Wall -Wextra -O2 -o gen_version_changelog scripts/gen_version_changelog.c
  * Run:   ./gen_version_changelog [repo_root]
+ *
+ * If there are no .ver files, falls back to parsing VERSION_* from userland/shell/version_def.h.
  */
 
 #define _POSIX_C_SOURCE 200809L
@@ -354,36 +356,24 @@ int main(int argc, char **argv) {
         fprintf(stderr, "gen_version_changelog: path too long\n");
         return 1;
     }
-    char entries_dir[PATH_MAX];
-    if (snprintf(entries_dir, sizeof entries_dir, "%s/version/entries", root) >=
-        (int)sizeof entries_dir) {
+    char locked_dir[PATH_MAX];
+    if (snprintf(locked_dir, sizeof locked_dir, "%s/version/locked", root) >=
+        (int)sizeof locked_dir) {
         fprintf(stderr, "gen_version_changelog: path too long\n");
         return 1;
     }
 
-    char *vtxt = read_entire_file(vdef);
-    if (!vtxt || !*vtxt) {
-        fprintf(stderr, "gen_version_changelog: cannot read %s\n", vdef);
-        free(vtxt);
-        return 1;
-    }
-
+    char *vtxt = NULL;
     int ma = 0, st = 0, pa = 0;
-    if (!parse_triplet(vtxt, &ma, &st, &pa)) {
-        fprintf(stderr, "gen_version_changelog: parse VERSION_* failed\n");
-        free(vtxt);
-        return 1;
-    }
-    free(vtxt);
 
     VerEntry *list = NULL;
     size_t nent = 0;
 
-    DIR *ed = opendir(entries_dir);
+    DIR *ed = opendir(locked_dir);
     if (!ed) {
         if (errno != ENOENT) {
             fprintf(stderr, "gen_version_changelog: cannot open %s: %s\n",
-                    entries_dir, strerror(errno));
+                    locked_dir, strerror(errno));
             return 1;
         }
     } else {
@@ -395,9 +385,9 @@ int main(int argc, char **argv) {
                 continue;
             char full[PATH_MAX];
             char rel[PATH_MAX];
-            if (snprintf(full, sizeof full, "%s/%s", entries_dir, name) >=
+            if (snprintf(full, sizeof full, "%s/%s", locked_dir, name) >=
                     (int)sizeof full ||
-                snprintf(rel, sizeof rel, "version/entries/%s", name) >=
+                snprintf(rel, sizeof rel, "version/locked/%s", name) >=
                     (int)sizeof rel) {
                 fprintf(stderr, "gen_version_changelog: path too long\n");
                 closedir(ed);
@@ -423,13 +413,38 @@ int main(int argc, char **argv) {
         closedir(ed);
     }
 
+    if (nent > 0) {
+        qsort(list, nent, sizeof *list, cmp_entry_desc);
+        ma = list[0].ma;
+        st = list[0].st;
+        pa = list[0].rel;
+    } else {
+        vtxt = read_entire_file(vdef);
+        if (!vtxt || !*vtxt) {
+            fprintf(stderr,
+                    "gen_version_changelog: no version/locked/*.ver and cannot read %s\n",
+                    vdef);
+            free(vtxt);
+            free(list);
+            return 1;
+        }
+        if (!parse_triplet(vtxt, &ma, &st, &pa)) {
+            fprintf(stderr, "gen_version_changelog: parse VERSION_* failed for %s\n", vdef);
+            free(vtxt);
+            free(list);
+            return 1;
+        }
+        free(vtxt);
+        vtxt = NULL;
+    }
+
     char ver_buf[64];
     snprintf(ver_buf, sizeof ver_buf, "%d.%d.%d", ma, st, pa);
 
     Buf header_line = {0};
     buf_append_cstr(&header_line, ver_buf);
     buf_append_cstr(&header_line,
-                    " — changelog from version/entries (*.ver); see "
+                    " — changelog from version/locked (*.ver); see "
                     "AGENTS.md\n");
 
     Buf body = {0};
@@ -444,7 +459,6 @@ int main(int argc, char **argv) {
     buf_free(&header_line);
 
     if (nent > 0) {
-        qsort(list, nent, sizeof *list, cmp_entry_desc);
         for (size_t i = 0; i < nent; i++) {
             VerEntry *e = &list[i];
             char lineout[2048];
@@ -457,7 +471,7 @@ int main(int argc, char **argv) {
     } else {
         buf_append_cstr(&body, "    \"");
         append_escaped(&body,
-                       "(no version/entries/*.ver files — add release notes there)\n");
+                       "(no version/locked/*.ver files — finalize from version/entries first)\n");
         buf_append_cstr(&body, "\"\n");
     }
 

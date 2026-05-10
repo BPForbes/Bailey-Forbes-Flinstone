@@ -35,6 +35,11 @@ typedef enum {
     FL_SCMD_WHERE,
     FL_SCMD_LOC,
     FL_SCMD_ADDCLUSTER,
+    FL_SCMD_DISKPUT,
+    FL_SCMD_DISKGET,
+    FL_SCMD_DISKFILES,
+    FL_SCMD_DISKDEL,
+    FL_SCMD_DISKMKDIR,
 } fl_shell_cmd_no_t;
 
 #endif /* FL_SHELL_CMD_H */

@@ -3,7 +3,9 @@
 
 int g_cluster_size = 32;
 int g_total_clusters = 32;
-char current_disk_file[CWD_MAX] = "drive.txt";
+int g_disk_host_fat32 = 0;
+
+char current_disk_file[CWD_MAX] = "drive.img";
 char g_cwd[CWD_MAX] = ".";
 
 int g_vm_mode = 0;
@@ -31,10 +33,11 @@ const char *HELP_MSG =
 "\n"
 "Disk operations:\n"
 "  createdisk <volume> <rowCount> <nibbleCount> [ -y | -n ]\n"
-"       Create new disk file (<volume>_disk.txt)\n"
+"       Creates <volume>_disk.img (FAT32) when cluster size is >= 512 B and a multiple of 512;\n"
+"       otherwise <volume>_disk (legacy hex lines). Format is detected by content, not extension.\n"
 "  format <disk_file> <volume> <rowCount> <nibbleCount>\n"
-"       Format existing disk file\n"
-"  setdisk <disk_file> Set disk file to use\n"
+"       Same geometry rules: large clusters -> FAT32 image at disk_file; small -> legacy hex at disk_file.\n"
+"  setdisk <disk_file> Set backing volume (FAT32 image or legacy hex file; any path)\n"
 "  listclusters        List disk cluster contents\n"
 "  printdisk           Print disk with header\n"
 "  writecluster <idx> -t|-h <data>  Write to cluster\n"
@@ -45,6 +48,12 @@ const char *HELP_MSG =
 "  search <text> [ -t |-h ]  Search disk\n"
 "  du [ dtl [clusters...] ]  Disk usage\n"
 "  import <textfile> <txtfile> [clusters clusterSize]\n"
+"  diskput <host_file> [path/on/volume]  Store file under FAT32 root or subdir (parents created)\n"
+"  diskget <path/on/volume> <host_file>  Extract file (use diskfiles to see exact names)\n"
+"  diskfiles [subdir]   List files (and <DIR> entries) in root or subdir on FAT32 volume\n"
+"  diskmkdir <path>     Create nested directories (mkdir -p) on FAT32 volume\n"
+"       Path segments must fit FAT 8.3 (short names); use slash or backslash as separators.\n"
+"  diskdel <path/on/volume>  Remove file from FAT32 volume (not directories or FLINT.DAT)\n"
 "\n"
 "Directory operations:\n"
 "  dir [path]          List directory contents\n"
@@ -79,8 +88,8 @@ const char *HELP_MSG =
 "  Equivalent to createdisk with same parameters.\n"
 "\n"
 "Virtualization: ./shell -Virtualization -y [-vm] [commands...]\n"
-"  -y: popup (no -vm) or confirm cleanup. -vm: run guest, then this shell. Host files stay under the directory you\n"
-"  started from (or a temp dir when you pass additional commands). No writes outside that jail.\n"
+"  -y: popup (no -vm) or confirm cleanup. -vm: run guest, then this shell. Host files are confined to vm_hostfs/\n"
+"  under the directory you started from (or under a temp dir when you pass additional commands). No writes outside that jail.\n"
 "\n"
 "Author: Bailey Forbes\n"
 "Date:   03/07/25\n";

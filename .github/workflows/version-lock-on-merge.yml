@@ -1,0 +1,47 @@
+# After a merge to develop, copy version/entries → version/locked and
+# regenerate userland/shell/version_def.h, then commit if anything changed.
+# Requires default GITHUB_TOKEN contents: write (and branch protection must allow
+# GitHub Actions to push, or use a PAT secret).
+
+name: Version lock on merge
+
+on:
+  push:
+    branches: [develop]
+
+permissions:
+  contents: write
+
+concurrency:
+  group: version-lock-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  sync-locked-from-entries:
+    name: Sync version/locked from entries
+    runs-on: ubuntu-latest
+    # Avoid a push loop if this workflow’s own commit is the only new commit.
+    if: "${{ github.event.head_commit == null || !startsWith(github.event.head_commit.message, 'chore(version): sync') }}"
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Finalize version (copy version/entries to version/locked)
+        run: ./scripts/finalize_version_locked.sh
+
+      - name: Regenerate version header
+        run: ./scripts/gen_version_def.sh
+
+      - name: Commit and push if changed
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add version/locked userland/shell/version_def.h
+          if git diff --staged --quiet; then
+            echo "No version/locked or version_def.h changes after finalize."
+            exit 0
+          fi
+          git commit -m "chore(version): sync version/locked from entries after merge"
+          git push

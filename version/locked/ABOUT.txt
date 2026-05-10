@@ -1,10 +1,21 @@
-Version entries (*.ver) describe one shipped release each: MAJOR_VERSION,
-STANDARD_VERSION, RELEASE_VERSION (third component; aliases MINOR_VERSION or
-VERSION_PATCH), and DESCRIPTION (<= 1023 characters, one line).
+Version release notes use *.ver files (MAJOR_VERSION, STANDARD_VERSION,
+RELEASE_VERSION or MINOR_VERSION / VERSION_PATCH, and DESCRIPTION).
 
-After a branch merges, existing *.ver files under version/entries are immutable:
-do not edit them; add a new file for the next release.
+version/entries/  — author and edit .ver release notes here before finalize.
+version/locked/   — published snapshot: replaced by copying entries → locked.
 
-The version/locked directory is an exact mirror of version/entries for
-read-only browsing. Update it only by running:
-  ./scripts/sync_version_locked_mirror.sh
+Finalize (copy all of entries over locked), then regenerate the shell header:
+
+  ./scripts/finalize_version_locked.sh   # or: make finalize-version-locked
+  make                                   # or: ./scripts/gen_version_def.sh
+
+userland/shell/version_def.h is generated from the highest A.B.C among
+version/locked/*.ver only. Do not edit the header by hand.
+
+The repository currently ships e.g. 001_2_2_4_baseline.ver. Author new releases as
+additional *.ver files under version/entries/ (include the semver in the basename,
+often with a serial prefix). Ordering uses MAJOR/STANDARD/RELEASE inside the file,
+not the filename prefix.
+
+version/locked/* is a mirror only: it must byte-match version/entries/ for each
+locked file. Do not hand-edit locked copies; never let locked diverge from entries.

@@ -2,13 +2,32 @@ name: CI
 
 on:
   push:
-    branches: [ "main", "develop", "milestone/**", "claude/**", "feature/**", "cursor/**", "codex/**", "bug/**" ]
+    branches: [ "develop", "main", "milestone/**", "claude/**", "feature/**", "cursor/**", "codex/**", "bug/**" ]
   pull_request:
-    branches: [ "main", "develop" ]
+    branches: [ "develop", "main" ]
 
 jobs:
+  version-requirements:
+    name: Versioning requirements
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Validate version locked immutability (PR only)
+        if: github.event_name == 'pull_request'
+        run: ./scripts/check_version_locked_immutable.sh "${{ github.event.pull_request.base.sha }}"
+
+      - name: Verify version/locked matches subset of entries (entries may exceed locked)
+        run: ./scripts/check_version_locked_subset_of_entries.sh
+
+      - name: Verify version_def.h matches generator (version/locked)
+        run: ./scripts/check_version_header_matches_locked.sh
+
   build-and-test-x86_64:
     name: Build & test (x86_64 GAS)
+    needs: version-requirements
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -17,16 +36,6 @@ jobs:
 
       - name: Install dependencies
         run: sudo apt-get update -y && sudo apt-get install -y gcc binutils nasm libcunit1-dev
-
-      - name: Validate version entry immutability (PR only)
-        if: github.event_name == 'pull_request'
-        run: ./scripts/check_version_entries_immutable.sh "${{ github.event.pull_request.base.sha }}"
-
-      - name: Verify version/locked mirrors version/entries
-        run: ./scripts/check_version_locked_mirror.sh
-
-      - name: Verify version_def.h matches highest version entry
-        run: ./scripts/check_version_header_matches_entries.sh
 
       - name: Assemble changelog (CI-only source)
         run: |
@@ -57,8 +66,11 @@ jobs:
       - name: Test — userspace connection
         run: make test_userspace_connection
 
-      - name: Compile CUnit suite
+      - name: Build CUnit suite
         run: make BPForbes_Flinstone_Tests CHANGELOG_CI=1
+
+      - name: Test — CUnit suite
+        run: ./BPForbes_Flinstone_Tests
 
       - name: Build (x86_64 NASM)
         run: |
@@ -69,6 +81,7 @@ jobs:
 
   build-arm:
     name: Build (AArch64 cross)
+    needs: version-requirements
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -77,16 +90,6 @@ jobs:
 
       - name: Install cross-compiler
         run: sudo apt-get update -y && sudo apt-get install -y gcc gcc-aarch64-linux-gnu binutils-aarch64-linux-gnu
-
-      - name: Validate version entry immutability (PR only)
-        if: github.event_name == 'pull_request'
-        run: ./scripts/check_version_entries_immutable.sh "${{ github.event.pull_request.base.sha }}"
-
-      - name: Verify version/locked mirrors version/entries
-        run: ./scripts/check_version_locked_mirror.sh
-
-      - name: Verify version_def.h matches highest version entry
-        run: ./scripts/check_version_header_matches_entries.sh
 
       - name: Assemble changelog (CI-only source)
         run: |
@@ -98,6 +101,7 @@ jobs:
 
   build-vm:
     name: Build & test (VM enabled)
+    needs: version-requirements
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -106,16 +110,6 @@ jobs:
 
       - name: Install dependencies
         run: sudo apt-get install -y gcc binutils nasm
-
-      - name: Validate version entry immutability (PR only)
-        if: github.event_name == 'pull_request'
-        run: ./scripts/check_version_entries_immutable.sh "${{ github.event.pull_request.base.sha }}"
-
-      - name: Verify version/locked mirrors version/entries
-        run: ./scripts/check_version_locked_mirror.sh
-
-      - name: Verify version_def.h matches highest version entry
-        run: ./scripts/check_version_header_matches_entries.sh
 
       - name: Assemble changelog (CI-only source)
         run: |

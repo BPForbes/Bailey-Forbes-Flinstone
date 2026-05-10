@@ -10,7 +10,7 @@
  *   This shell supports both interactive and batch modes. Disk operations are
  *   performed on text files and managed in clusters. Clusters are displayed in
  *   hexadecimal. The new –cd command (or its batch shortcut) creates a new disk
- *   file (<volume>_disk.txt) filled with random data, then prints its contents.
+ *   file (<volume>_disk or <volume>_disk.img) filled with random data, then prints its contents.
  *
  *   The –cd command syntax is:
  *       -cd <volume> <rowCount> <nibbleCount> [<interactive>]
@@ -279,7 +279,8 @@ int main(int argc, char *argv[]) {
         static const char *skip[] = {"help","cd","dir","make","write","cat","type","mkdir","rmdir",
             "rmtree","mv","version","exit","bios","clear","history","his","cc","listclusters","listdirs",
             "setdisk","createdisk","format","search","writecluster","delcluster","update","redirect",
-            "initdisk","rerun","import","du","printdisk","addcluster","where","loc",NULL};
+            "initdisk","rerun","import","du","printdisk","addcluster","where","loc",
+            "diskput","diskget","diskfiles","diskdel","diskmkdir",NULL};
         int is_cmd = 0;
         for (int k = 0; skip[k]; k++)
             if (!strcmp(argv[1], skip[k])) { is_cmd = 1; break; }
@@ -291,9 +292,12 @@ int main(int argc, char *argv[]) {
             exit(1);
         }
         flintstone_format_disk(argv[1], rowCount, nibbleCount);
-        snprintf(current_disk_file, sizeof(current_disk_file), "%s_disk.txt", argv[1]);
-        g_cluster_size = nibbleCount / 2;
-        g_total_clusters = rowCount;
+        int cb = nibbleCount / 2;
+        if (cb >= 512 && (cb % 512) == 0)
+            snprintf(current_disk_file, sizeof(current_disk_file), "%s_disk.img", argv[1]);
+        else
+            snprintf(current_disk_file, sizeof(current_disk_file), "%s_disk", argv[1]);
+        read_disk_header();
         print_disk_formatted();
         if (argc == 5 && !strcmp(argv[4], "-y"))
             interactive_shell();
@@ -307,10 +311,18 @@ int main(int argc, char *argv[]) {
         exit(0);
     }
 
-    /* VM mode: confine all host file I/O to the launch directory (or temp VM sandbox) */
+    /* VM mode: confine host file I/O to vm_hostfs/ under the launch directory (or temp VM sandbox). */
     if (vm_configure_root_from_cwd() != 0)
         fprintf(stderr, "[VM] 5-layer driver config warning: layer 4 shell/VM root is not configured\n");
     fs_jail_init();
+
+    /* Default host volume: ensure drive.img exists before block driver probes it. */
+    if (strcmp(current_disk_file, "drive.img") == 0) {
+        if (access(current_disk_file, F_OK) != 0) {
+            disk_ensure_default_fat32(current_disk_file, 32, 512);
+        }
+        read_disk_header();
+    }
 
     /* Initialize file manager service, path log, and drivers */
     fs_service_glue_init();
@@ -426,6 +438,22 @@ int main(int argc, char *argv[]) {
                 else
                     tokensCount = 3;
             }
+            else if (!strcmp(cmd, "diskput")) {
+                if (i + 2 < argc && argv[i + 2] && argv[i + 2][0] != '-')
+                    tokensCount = 3;
+                else
+                    tokensCount = 2;
+            } else if (!strcmp(cmd, "diskget"))
+                tokensCount = 3;
+            else if (!strcmp(cmd, "diskfiles")) {
+                if (i + 1 < argc && argv[i + 1] && argv[i + 1][0] != '-')
+                    tokensCount = 2;
+                else
+                    tokensCount = 1;
+            } else if (!strcmp(cmd, "diskdel"))
+                tokensCount = 2;
+            else if (!strcmp(cmd, "diskmkdir"))
+                tokensCount = 2;
             else if (!strcmp(cmd, "update"))
                 tokensCount = 4;
             else if (!strcmp(cmd, "addcluster")) {
@@ -457,37 +485,6 @@ int main(int argc, char *argv[]) {
             i += tokensCount;
         }
     }
-    
-    if (isatty(STDIN_FILENO) && strcmp(current_disk_file, "drive.txt") == 0) {
-        FILE *testfp = fopen(current_disk_file, "r");
-        if (!testfp) {
-            printf("No default disk file '%s'. Creating fresh with 32 clusters of %d bytes each.\n",
-                   current_disk_file, g_cluster_size);
-            FILE *fp = fopen(current_disk_file, "w");
-            if (fp) {
-                char *ruler = malloc(g_cluster_size * 2 + 1);
-                if (ruler) {
-                    const char *digits = "0123456789ABCDEF";
-                    for (int j = 0; j < g_cluster_size * 2; j++)
-                        ruler[j] = digits[j % 16];
-                    ruler[g_cluster_size * 2] = '\0';
-                    fprintf(fp, "XX:%s\n", ruler);
-                    free(ruler);
-                }
-                for (int i = 0; i < 32; i++) {
-                    fprintf(fp, "%02X:", i);
-                    for (int j = 0; j < g_cluster_size * 2; j++)
-                        fputc('0', fp);
-                    fputc('\n', fp);
-                }
-                fclose(fp);
-            }
-        } else {
-            fclose(testfp);
-            read_disk_header();
-        }
-    }
-    
     if (!isatty(STDIN_FILENO))
         exit(0);
     else

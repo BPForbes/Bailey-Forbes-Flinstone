@@ -60,6 +60,16 @@ int fl_shell_cmd_dispatch(fl_shell_cmd_no_t no, int argc, char **argv) {
         return cmd_where_run(argc, argv);
     case FL_SCMD_ADDCLUSTER:
         return cmd_addcluster_run(argc, argv);
+    case FL_SCMD_DISKPUT:
+        return cmd_diskput_run(argc, argv);
+    case FL_SCMD_DISKGET:
+        return cmd_diskget_run(argc, argv);
+    case FL_SCMD_DISKFILES:
+        return cmd_diskfiles_run(argc, argv);
+    case FL_SCMD_DISKDEL:
+        return cmd_diskdel_run(argc, argv);
+    case FL_SCMD_DISKMKDIR:
+        return cmd_diskmkdir_run(argc, argv);
     default:
         return -1;
     }

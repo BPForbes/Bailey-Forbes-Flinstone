@@ -14,6 +14,9 @@
 #include <string.h>
 #include <sys/stat.h>
 #include <unistd.h>
+#include <limits.h>
+
+extern char g_fs_jail_root[];
 
 #define ASSERT(c) do { if (!(c)) { fprintf(stderr, "FAIL (%s:%d): %s\n", __FILE__, __LINE__, #c); return 1; } } while(0)
 
@@ -22,6 +25,7 @@
 /* ------------------------------------------------------------------ */
 
 static void reset_jail_state(void) {
+    chdir("/tmp");
     g_vm_mode    = 0;
     g_vm_root[0] = '\0';
     g_cwd[0]     = '.';
@@ -112,10 +116,10 @@ static int test_jail_check_path_inside_outside(void) {
     fs_jail_init();
     ASSERT(fs_jail_is_active() == 1);
 
-    /* /tmp itself - inside */
-    ASSERT(fs_jail_check_path("/tmp") == 0);
-    /* /tmp/something - inside */
-    ASSERT(fs_jail_check_path("/tmp/some_file_that_may_not_exist") == 0);
+    /* Jail is /tmp/vm_hostfs; plain /tmp is outside the jail */
+    ASSERT(fs_jail_check_path("/tmp/vm_hostfs") == 0);
+    ASSERT(fs_jail_check_path("/tmp/vm_hostfs/some_file_that_may_not_exist") == 0);
+    ASSERT(fs_jail_check_path("/tmp") == -1);
 
     /* /etc - outside */
     ASSERT(fs_jail_check_path("/etc") == -1);
@@ -143,10 +147,10 @@ static int test_jail_check_path_relative(void) {
     fs_jail_init();
     ASSERT(fs_jail_is_active() == 1);
 
-    /* Relative "foo" → resolves to /tmp/foo → inside jail */
+    /* Relative "foo" → resolves under jail cwd */
     ASSERT(fs_jail_check_path("foo") == 0);
-    /* Relative "../etc/passwd" → resolves to /etc/passwd → outside */
-    ASSERT(fs_jail_check_path("../etc/passwd") == -1);
+    /* Parent of jail (..) must not escape */
+    ASSERT(fs_jail_check_path("..") == -1);
 
     reset_jail_state();
     return 0;
@@ -202,16 +206,7 @@ static int test_jail_openat_outside_jail(void) {
 /* fs_jail_openat: allows open of a real file inside the jail         */
 /* ------------------------------------------------------------------ */
 static int test_jail_openat_inside_jail(void) {
-    /* Create a temp file inside /tmp */
-    char tmp_path[] = "/tmp/fl_jail_test_XXXXXX";
-    int tmp_fd = mkstemp(tmp_path);
-    if (tmp_fd < 0) {
-        fprintf(stderr, "SKIP: cannot create temp file in /tmp\n");
-        return 0;
-    }
-    close(tmp_fd);
-
-    /* Jail root = /tmp */
+    /* Jail root = /tmp → actual jail directory is /tmp/vm_hostfs */
     g_vm_mode = 1;
     strncpy(g_vm_root, "/tmp", CWD_MAX - 1);
     g_vm_root[CWD_MAX - 1] = '\0';
@@ -220,16 +215,32 @@ static int test_jail_openat_inside_jail(void) {
     fs_jail_init();
     ASSERT(fs_jail_is_active() == 1);
 
-    int fd = fs_jail_openat(tmp_path, O_RDONLY, 0);
-    if (fd < 0) {
-        /* On systems without /proc/self/fd readlink support or O_NOFOLLOW issues,
-         * this may fail; treat as informational */
-        fprintf(stderr, "  (Note: fs_jail_openat returned -1, errno=%d - may be platform limitation)\n", errno);
-    } else {
-        close(fd);
+    char tmpl[] = "fl_jail_test_XXXXXX";
+    int tmp_fd = mkstemp(tmpl);
+    if (tmp_fd < 0) {
+        fprintf(stderr, "SKIP: mkstemp in jail cwd failed\n");
+        reset_jail_state();
+        return 0;
     }
+    close(tmp_fd);
 
-    unlink(tmp_path);
+    char openpath[PATH_MAX];
+    if (snprintf(openpath, sizeof(openpath), "%s/%s", g_fs_jail_root, tmpl) >= (int)sizeof(openpath)) {
+        unlink(tmpl);
+        reset_jail_state();
+        fprintf(stderr, "FAIL: jail open path overflow\n");
+        return 1;
+    }
+    int fd = fs_jail_openat(openpath, O_RDONLY, 0);
+    if (fd < 0) {
+        fprintf(stderr, "FAIL (%s:%d): fs_jail_openat inside jail (errno=%d)\n", __FILE__, __LINE__, errno);
+        unlink(tmpl);
+        reset_jail_state();
+        return 1;
+    }
+    close(fd);
+
+    unlink(tmpl);
     reset_jail_state();
     return 0;
 }
@@ -339,8 +350,8 @@ static int test_jail_root_trailing_slash(void) {
     fs_jail_init();
     ASSERT(fs_jail_is_active() == 1);
 
-    /* Inside path still allowed */
-    ASSERT(fs_jail_check_path("/tmp") == 0);
+    /* Inside path still allowed (jail is /tmp/vm_hostfs) */
+    ASSERT(fs_jail_check_path("/tmp/vm_hostfs") == 0);
     /* Outside path still rejected */
     ASSERT(fs_jail_check_path("/etc") == -1);
 

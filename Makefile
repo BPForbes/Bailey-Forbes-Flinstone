@@ -13,6 +13,7 @@ ASFLAGS =
 ifeq ($(ARCH),x86_64_nasm)
 AS = nasm
 ASFLAGS = -f elf64
+CFLAGS += -DDISK_HOST_USE_LIBC_PREADV=1
 ASMSRCS_BASE = arch/x86_64/nasm/mem_asm.asm arch/x86_64/nasm/port_io.asm
 ASMSRCS_ALLOC = arch/x86_64/nasm/alloc_core.asm arch/x86_64/nasm/alloc_malloc.asm arch/x86_64/nasm/alloc_free.asm
 ASM_SRC_DIR = arch/x86_64/nasm
@@ -20,14 +21,14 @@ KERNEL_DRIVERS = kernel/arch/x86_64/drivers
 else ifeq ($(ARCH),arm)
 CC = aarch64-linux-gnu-gcc
 AS = aarch64-linux-gnu-as
-ASMSRCS_BASE = arch/arm/gas/mem_asm.s arch/arm/gas/port_io.s kernel/arch/aarch64/boot/spinlock.s kernel/arch/aarch64/drivers/ramdisk.s \
+ASMSRCS_BASE = arch/arm/gas/mem_asm.s arch/arm/gas/port_io.s arch/arm/gas/disk_host_io.s kernel/arch/aarch64/boot/spinlock.s kernel/arch/aarch64/drivers/ramdisk.s \
                kernel/arch/aarch64/boot/vectors.s
 ASMSRCS_ALLOC = arch/arm/gas/alloc_core.s arch/arm/gas/alloc_malloc.s arch/arm/gas/alloc_free.s
 ASM_SRC_DIR = arch/arm/gas
 KERNEL_DRIVERS = kernel/arch/aarch64/drivers
 else
 # x86_64_gas (default)
-ASMSRCS_BASE = arch/x86_64/gas/mem_asm.s arch/x86_64/gas/port_io.s kernel/arch/x86_64/boot/spinlock.s kernel/arch/x86_64/drivers/ata_pio.s \
+ASMSRCS_BASE = arch/x86_64/gas/mem_asm.s arch/x86_64/gas/port_io.s arch/x86_64/gas/disk_host_io.s kernel/arch/x86_64/boot/spinlock.s kernel/arch/x86_64/drivers/ata_pio.s \
                kernel/arch/x86_64/boot/gdt.s kernel/arch/x86_64/boot/idt.s
 ASMSRCS_ALLOC = arch/x86_64/gas/alloc/alloc_core.s arch/x86_64/gas/alloc/alloc_malloc.s arch/x86_64/gas/alloc/alloc_free.s
 ASM_SRC_DIR = arch/x86_64/gas
@@ -58,7 +59,8 @@ HAL_SRCS += kernel/arch/aarch64/hal/arm_plat.c kernel/arch/aarch64/hal/arm_uart.
             kernel/arch/aarch64/hal/arm_timer.c kernel/arch/aarch64/hal/arm_gic.c \
             kernel/arch/aarch64/boot/exc_dispatch.c
 endif
-CORE_SRCS = kernel/core/vfs/disk.c kernel/core/vfs/path_log.c kernel/core/vfs/cluster.c kernel/core/vfs/fs.c \
+CORE_SRCS = kernel/core/vfs/disk.c kernel/core/vfs/fat32_host.c kernel/core/vfs/fat32_host_files.c kernel/core/vfs/path_log.c kernel/core/vfs/cluster.c kernel/core/vfs/fs.c \
+            disk_host_io.c \
             kernel/core/sched/threadpool.c priority_queue.c kernel/core/vfs/fs_jail.c kernel/core/vfs/fs_provider.c kernel/core/vfs/fs_command.c \
             kernel/core/vfs/fs_events.c kernel/core/vfs/fs_policy.c kernel/core/vfs/fs_chain.c kernel/core/vfs/fs_facade.c \
             kernel/core/vfs/fs_service_glue.c kernel/core/mm/mem_domain.c kernel/core/mm/kmalloc.c kernel/core/mm/pmm.c \
@@ -107,6 +109,13 @@ endif
 ASMOBJS = $(patsubst %.s,%.o,$(patsubst %.asm,%.o,$(ASMSRCS)))
 OBJS = $(SRCS:.c=.o) $(ASMOBJS)
 TARGET = BPForbes_Flinstone_Shell
+.DEFAULT_GOAL := all
+
+# version_def.h is generated from version/locked/*.ver (highest A.B.C; finalize from version/entries first).
+VERSION_DEF := userland/shell/version_def.h
+VER_LOCKED_FILES := $(wildcard version/locked/*.ver)
+$(VERSION_DEF): $(VER_LOCKED_FILES) scripts/gen_version_def.sh
+	@./scripts/gen_version_def.sh
 
 all: $(TARGET)
 
@@ -116,14 +125,23 @@ baremetal: LDFLAGS += -no-pie
 baremetal: $(TARGET)
 
 # With embedded x86 VM: make vm && ./shell -Virtualization -y -vm
-.PHONY: version-record
-version-record:
+.PHONY: version-record gen-version-def
+version-record: $(VERSION_DEF)
 	@./scripts/export_version_record.sh
 
-# After editing version/entries/, refresh the read-only mirror version/locked/
-.PHONY: sync-version-locked
-sync-version-locked:
-	@./scripts/sync_version_locked_mirror.sh
+gen-version-def:
+	@./scripts/gen_version_def.sh
+
+# Edit version/entries/*.ver. To publish: make finalize-version-locked (copies entries → locked), then make (refreshes version_def.h).
+.PHONY: finalize-version-locked sync-version-locked
+finalize-version-locked sync-version-locked:
+	@./scripts/finalize_version_locked.sh
+
+# Optional release build: changelog + CHANGELOG_CI=1 (version/locked is synced on merge to main/develop in CI; use finalize-version-locked locally if needed).
+.PHONY: deploy
+deploy:
+	@gcc -std=c11 -Wall -Wextra -O2 -o gen_version_changelog scripts/gen_version_changelog.c && ./gen_version_changelog
+	@$(MAKE) CHANGELOG_CI=1 all
 
 .PHONY: vm baremetal
 vm:
@@ -146,15 +164,19 @@ deps-cunit:
 	@chmod +x deps/fetch-cunit.sh 2>/dev/null || true
 	@./deps/fetch-cunit.sh
 
-$(TARGET): $(OBJS)
+$(TARGET): $(VERSION_DEF) $(OBJS)
 	$(CC) $(CFLAGS) -o $(TARGET) $(OBJS) $(LDFLAGS)
+
+# Rebuild objects that embed VERSION when the generated header changes.
+$(filter userland/shell/%.o userland/command/%.o,$(OBJS)): $(VERSION_DEF)
 
 # --- Test Build ---
 # interpreter.c is built as interpreter_unit.o with -DUNIT_TEST (stub interactive_shell).
 # Shell builtins live in userland/command/*.c (same as main shell link).
 TEST_SRCS = BPForbes_Flinstone_Tests.c userland/shell/common.c userland/shell/util.c userland/shell/terminal.c \
             $(COMMAND_SRCS) \
-            kernel/core/vfs/disk.c kernel/core/vfs/path_log.c kernel/core/vfs/cluster.c kernel/core/vfs/fs.c \
+            kernel/core/vfs/disk.c kernel/core/vfs/fat32_host.c kernel/core/vfs/fat32_host_files.c kernel/core/vfs/path_log.c kernel/core/vfs/cluster.c kernel/core/vfs/fs.c \
+            disk_host_io.c \
             kernel/core/sched/threadpool.c priority_queue.c kernel/core/vfs/fs_jail.c kernel/core/vfs/fs_provider.c kernel/core/vfs/fs_command.c \
             kernel/core/vfs/fs_events.c kernel/core/vfs/fs_policy.c kernel/core/vfs/fs_chain.c kernel/core/vfs/fs_facade.c \
             kernel/core/vfs/fs_service_glue.c kernel/core/mm/mem_domain.c kernel/core/mm/kmalloc.c kernel/core/mm/pmm.c \
@@ -170,14 +192,19 @@ userland/shell/interpreter_unit.o: userland/shell/interpreter.c
 	$(CC) $(CFLAGS) -DUNIT_TEST -c $< -o $@
 MEM_ASM_OBJ = $(patsubst %.s,%.o,$(patsubst %.asm,%.o,$(firstword $(ASMSRCS_BASE))))
 PORT_IO_OBJ = $(patsubst %.s,%.o,$(patsubst %.asm,%.o,$(word 2,$(ASMSRCS_BASE))))
-TEST_ASMOBJS = $(MEM_ASM_OBJ)
+DISK_HOST_ASM_OBJ = $(patsubst %.s,%.o,$(filter %/disk_host_io.s,$(ASMSRCS_BASE)))
+TEST_ASMOBJS = $(MEM_ASM_OBJ) $(PORT_IO_OBJ) $(DISK_HOST_ASM_OBJ)
 TEST_TARGET = BPForbes_Flinstone_Tests
 
 DEPS_RPATH = -Wl,-rpath='$$ORIGIN/deps/install/lib'
 TEST_LDFLAGS = $(if $(DEPS_PREFIX),-L$(DEPS_PREFIX)/lib $(DEPS_RPATH),)
-$(TEST_TARGET): $(TEST_OBJS) $(TEST_ASMOBJS)
+$(TEST_TARGET): $(VERSION_DEF) $(TEST_OBJS) $(TEST_ASMOBJS)
 	$(CC) $(CFLAGS) -DUNIT_TEST -o $(TEST_TARGET) $(TEST_OBJS) $(TEST_ASMOBJS) -Wl,-z,noexecstack \
 		$(TEST_LDFLAGS) -lcunit
+
+$(filter userland/shell/%.o userland/command/%.o,$(TEST_OBJS)): $(VERSION_DEF)
+BPForbes_Flinstone_Tests.o: $(VERSION_DEF)
+userland/shell/interpreter_unit.o: $(VERSION_DEF)
 
 %.o: %.c
 	$(CC) $(CFLAGS) -c $< -o $@
@@ -239,13 +266,13 @@ ifeq ($(ARCH),arm)
 TEST_DRIVER_HAL_OBJS += kernel/arch/aarch64/hal/arm_plat.o kernel/arch/aarch64/hal/arm_uart.o \
 	kernel/arch/aarch64/hal/arm_timer.o kernel/arch/aarch64/hal/arm_gic.o
 endif
-test_drivers: userland/shell/common.o userland/shell/util.o kernel/core/vfs/disk.o disk_asm.o kernel/core/mm/mem_domain.o kernel/core/mm/kmalloc.o $(MEM_ASM_OBJ) $(PORT_IO_OBJ) \
+test_drivers: userland/shell/common.o userland/shell/util.o kernel/core/vfs/disk.o kernel/core/vfs/fat32_host.o kernel/core/vfs/fat32_host_files.o disk_host_io.o disk_asm.o kernel/core/mm/mem_domain.o kernel/core/mm/kmalloc.o $(MEM_ASM_OBJ) $(PORT_IO_OBJ) $(DISK_HOST_ASM_OBJ) \
 	  kernel/drivers/bus.o kernel/drivers/driver_model.o \
 	  kernel/drivers/block/block_driver.o kernel/drivers/block/block_transport_host.o \
 	  kernel/drivers/keyboard_driver.o kernel/drivers/display_driver.o kernel/drivers/timer_driver.o kernel/drivers/pic_driver.o kernel/drivers/drivers.o \
 	  $(KERNEL_DRIVERS)/pci.o $(TEST_DRIVER_HAL_OBJS)
 	$(CC) $(CFLAGS) $(TEST_SANITIZE) -I. -Ikernel -Ikernel/include -Ikernel/drivers -Iuserland/shell -I$(ASM_SRC_DIR) -I$(KERNEL_DRIVERS) -Ikernel/arch/aarch64 -o tests/test_drivers tests/test_drivers.c \
-	  userland/shell/common.o userland/shell/util.o kernel/core/vfs/disk.o disk_asm.o kernel/core/mm/mem_domain.o kernel/core/mm/kmalloc.o $(MEM_ASM_OBJ) $(PORT_IO_OBJ) \
+	  userland/shell/common.o userland/shell/util.o kernel/core/vfs/disk.o kernel/core/vfs/fat32_host.o kernel/core/vfs/fat32_host_files.o disk_host_io.o disk_asm.o kernel/core/mm/mem_domain.o kernel/core/mm/kmalloc.o $(MEM_ASM_OBJ) $(PORT_IO_OBJ) $(DISK_HOST_ASM_OBJ) \
 	  kernel/drivers/bus.o kernel/drivers/driver_model.o \
 	  kernel/drivers/block/block_driver.o kernel/drivers/block/block_transport_host.o \
 	  kernel/drivers/keyboard_driver.o kernel/drivers/display_driver.o kernel/drivers/timer_driver.o kernel/drivers/pic_driver.o kernel/drivers/drivers.o \
@@ -305,7 +332,7 @@ test_replay:
 	$(MAKE) clean
 	$(MAKE) VM_ENABLE=1 ARCH=$(ARCH) BPForbes_Flinstone_Shell
 	$(CC) $(CFLAGS) -DVM_ENABLE=1 -I$(ASM_SRC_DIR) -I$(KERNEL_DRIVERS) -Ikernel -Ikernel/drivers -IVM -IVM/devices -o tests/test_replay tests/test_replay.c \
-	  userland/shell/common.o userland/shell/util.o userland/shell/terminal.o kernel/core/vfs/disk.o disk_asm.o dir_asm.o \
+	  userland/shell/common.o userland/shell/util.o userland/shell/terminal.o kernel/core/vfs/disk.o kernel/core/vfs/fat32_host.o kernel/core/vfs/fat32_host_files.o disk_host_io.o disk_asm.o dir_asm.o \
 	  kernel/core/vfs/path_log.o kernel/core/vfs/cluster.o kernel/core/vfs/fs.o priority_queue.o \
 	  kernel/core/vfs/fs_provider.o kernel/core/vfs/fs_command.o kernel/core/vfs/fs_events.o kernel/core/vfs/fs_policy.o \
 	  kernel/core/vfs/fs_chain.o kernel/core/vfs/fs_facade.o kernel/core/vfs/fs_service_glue.o kernel/core/vfs/fs_jail.o kernel/core/mm/mem_domain.o kernel/core/mm/kmalloc.o \

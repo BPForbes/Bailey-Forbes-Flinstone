@@ -19,9 +19,12 @@ int cmd_createdisk_run(int argc, char **argv) {
         return 1;
     }
     flintstone_format_disk(args[1], rowCount, nibbleCount);
-    snprintf(current_disk_file, sizeof(current_disk_file), "%s_disk.txt", args[1]);
-    g_cluster_size = nibbleCount / 2;
-    g_total_clusters = rowCount;
+    int cb = nibbleCount / 2;
+    if (cb >= 512 && (cb % 512) == 0)
+        snprintf(current_disk_file, sizeof(current_disk_file), "%s_disk.img", args[1]);
+    else
+        snprintf(current_disk_file, sizeof(current_disk_file), "%s_disk", args[1]);
+    read_disk_header();
     print_disk_formatted();
     if (argc >= 5 && (!strcmp(args[4], "-y") || !strcmp(args[4], "-Y")))
         interactive_shell();
