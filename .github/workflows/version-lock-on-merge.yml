@@ -1,4 +1,4 @@
-# After a merge to main or develop, copy version/entries → version/locked and
+# After a merge to develop, copy version/entries → version/locked and
 # regenerate userland/shell/version_def.h, then commit if anything changed.
 # Requires default GITHUB_TOKEN contents: write (and branch protection must allow
 # GitHub Actions to push, or use a PAT secret).
@@ -7,7 +7,7 @@ name: Version lock on merge
 
 on:
   push:
-    branches: [main, develop]
+    branches: [develop]
 
 permissions:
   contents: write

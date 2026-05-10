@@ -2,9 +2,9 @@ name: CI
 
 on:
   push:
-    branches: [ "main", "develop", "milestone/**", "claude/**", "feature/**", "cursor/**", "codex/**", "bug/**" ]
+    branches: [ "develop", "main", "milestone/**", "claude/**", "feature/**", "cursor/**", "codex/**", "bug/**" ]
   pull_request:
-    branches: [ "main", "develop" ]
+    branches: [ "develop", "main" ]
 
 jobs:
   version-requirements:

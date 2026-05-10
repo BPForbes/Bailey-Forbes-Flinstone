@@ -1,5 +1,5 @@
 # Optional manual release build: assumes version/locked is already synced (see
-# version-lock-on-merge.yml on push to main/develop). Builds with changelog.
+# version-lock-on-merge.yml on push to develop). Builds with changelog.
 
 name: Deploy
 
