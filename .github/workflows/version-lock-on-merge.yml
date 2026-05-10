@@ -1,15 +1,17 @@
 # After a push to develop, copy version/entries → version/locked and regenerate
 # userland/shell/version_def.h. If anything changed, opens a PR into develop (do not
 # push that commit directly to develop — branch rules usually require a PR, checks,
-# and often verified signatures).
+# and often verified signatures), then enables GitHub auto-merge on that PR so it
+# completes when required checks pass.
 #
 # Requires **Settings → Actions → General**: workflow **Read and write** and
 # **Allow GitHub Actions to create and approve pull requests** (for `GITHUB_TOKEN`),
-# unless you use a PAT below.
+# unless you use a PAT below. The repository must also **Allow auto-merge** under
+# **Settings → General → Pull requests** (and a compatible merge method, e.g. squash).
 #
-# Optional: repository secret **VERSION_LOCK_PAT** (classic or fine-grained PAT with
-# **contents: write** and **pull-requests: write** on this repo). Checkout and
-# create-pull-request use `VERSION_LOCK_PAT || GITHUB_TOKEN`.
+# Recommended: repository secret **BPFORBES_PAT** (automation PAT). Fallback:
+# **VERSION_LOCK_PAT**. Checkout, create-pull-request, and `gh` use
+# `BPFORBES_PAT || VERSION_LOCK_PAT || GITHUB_TOKEN`.
 #
 # Needs: permissions contents: write, pull-requests: write.
 
@@ -37,7 +39,7 @@ jobs:
       - uses: actions/checkout@v4
         with:
           fetch-depth: 0
-          token: ${{ secrets.VERSION_LOCK_PAT || secrets.GITHUB_TOKEN }}
+          token: ${{ secrets.BPFORBES_PAT || secrets.VERSION_LOCK_PAT || secrets.GITHUB_TOKEN }}
 
       - name: Finalize version (copy version/entries to version/locked)
         run: ./scripts/finalize_version_locked.sh
@@ -61,10 +63,11 @@ jobs:
           fi
 
       - name: Open pull request with synced locked + header
+        id: cpr
         if: steps.prep.outputs.has_changes == 'true'
         uses: peter-evans/create-pull-request@v7
         with:
-          token: ${{ secrets.VERSION_LOCK_PAT || secrets.GITHUB_TOKEN }}
+          token: ${{ secrets.BPFORBES_PAT || secrets.VERSION_LOCK_PAT || secrets.GITHUB_TOKEN }}
           commit-message: "chore(version): sync version/locked from entries after merge"
           branch: cursor/version-lock-from-entries-${{ github.run_id }}
           title: "chore(version): sync version/locked from entries after merge to develop"
@@ -73,4 +76,23 @@ jobs:
 
             **Branch protection** on `develop` (PR-only, required checks, verified signatures) means the sync cannot land as a direct push. Merge this PR to publish `version/locked/` and `userland/shell/version_def.h`.
 
-            Uses repository secret **`VERSION_LOCK_PAT`** when set; otherwise **`GITHUB_TOKEN`** (enable **Allow GitHub Actions to create and approve pull requests** in repo Actions settings). If PR branches require signed commits, use a PAT or add a bypass for `github-actions[bot]`, or run `make finalize-version-locked` locally and open a normal PR.
+            Uses **`BPFORBES_PAT`** or **`VERSION_LOCK_PAT`** when set; otherwise **`GITHUB_TOKEN`**. Auto-merge is enabled by the workflow when the PR is opened (waits for all required checks, including CodeRabbit if configured).
+
+      - name: Enable auto-merge for version sync PR
+        if: ${{ steps.prep.outputs.has_changes == 'true' && steps.cpr.outputs.pull-request-number != '' }}
+        env:
+          GH_TOKEN: ${{ secrets.BPFORBES_PAT || secrets.VERSION_LOCK_PAT || secrets.GITHUB_TOKEN }}
+        run: |
+          set -euo pipefail
+          num="${{ steps.cpr.outputs.pull-request-number }}"
+          op="${{ steps.cpr.outputs.pull-request-operation }}"
+          if [[ "$op" != "created" && "$op" != "updated" ]]; then
+            echo "Skipping auto-merge (pull-request-operation=$op)."
+            exit 0
+          fi
+          # Queue merge when branch protections + required checks succeed (GitHub "auto-merge").
+          if gh pr merge "$num" --repo "${{ github.repository }}" --auto --squash; then
+            echo "Enabled auto-merge (squash) on PR #$num"
+          else
+            echo "::warning::Could not enable auto-merge on PR #$num (allow auto-merge + squash merge in repo settings, or merge manually)."
+          fi
