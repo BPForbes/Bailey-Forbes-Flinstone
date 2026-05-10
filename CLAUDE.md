@@ -12,6 +12,8 @@ This repository implements **Bailey-Forbes-Flinstone**: a educational OS/shell-s
 - **`version/entries/*.ver`** may be added, edited, or removed on your branch until you **finalize** (copy entries → locked). CI guards **locked** paths that already shipped on the target.
 - **`version/locked/`** is the **published snapshot** copied from **`version/entries/`** by **`finalize_version_locked.sh`**. Do not hand-tweak **`version/locked/`** to diverge from the last finalize without going through **`version/entries/`** first.
 - **Do not** include historical **`version/locked/**`** or bulk-edit **`version/entries/**`** in automated refactors without an explicit release workflow.
+- **`.ver` on first change:** When you start substantive code edits for a PR, **create** **`version/entries/… .ver`** immediately if the branch does not already have an entry for **this** PR’s work.
+- **One entry per PR:** For a single pull request, **one** **`version/entries/*.ver`** file is enough—**update** that file as the branch evolves (description and semver only if scope truly changes), instead of adding multiple new **`.ver`** files for the same PR.
 
 ### Canonical string
 
@@ -36,7 +38,7 @@ When preparing or reviewing a merge **incoming → base** (e.g. `bug/…` → `d
 2. **Incoming must be strictly greater** than the target for that merge.
 3. If both branches report the **same** version (e.g. both `2.0.0`), **bump the incoming branch** so it is **one semver step ahead** of the target for the kind of change (example: same `2.0.0` on `bug/…` and `develop` → set incoming to **`2.0.1`** for a bugfix).
 
-Implement the bump by adding **`version/entries/<A>_<B>_<C>_<slug>.ver`**. Pushing to **`develop`** triggers **Version lock on merge** (entries → **`version/locked/`**, regenerate **`version_def.h`**, opens a PR if updates are needed). For a local release build after that, use **`make deploy`** or the **Deploy** workflow.
+Implement the bump with **`version/entries/<A>_<B>_<C>_<slug>.ver`** (usually **one** file per feature PR—create it on first substantive change if missing, then **edit** it as the PR evolves). Pushing to **`develop`** triggers **Version lock on merge** (entries → **`version/locked/`**, regenerate **`version_def.h`**, opens a PR if updates are needed). For a local release build after that, use **`make deploy`** or the **Deploy** workflow.
 
 **Automation version PRs:** PRs opened **only** by **Version lock on merge** (same **`chore(version): sync`** convention) need **no** automatic or proactive AI review. If a **human** requests a review, treat it like any other PR.
 

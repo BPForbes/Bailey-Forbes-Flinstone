@@ -66,6 +66,8 @@ Author each release as **`.ver`** files under **`version/entries/`** (see **`ver
 
 On a **feature branch before merge**, you may freely add, edit, or remove **`.ver`** files under **`version/entries/`** that are **not** yet reflected in **`version/locked/`**.
 
+**AI assistants:** When you begin the **first** substantive code change for a pull request, **add** a **`version/entries/*.ver`** entry **then** if the branch does not already have one that covers **that** PR’s work. For the **whole** lifetime of **one** PR, **one** **`.ver`** file is enough—**revise** that same file (e.g. **`DESCRIPTION`**, and semver fields only if the release scope truly changes) as commits accumulate, instead of adding multiple new entry files for the same branch.
+
 ### Lock system (agents, reviewers, and automation)
 
 - **Never edit finalized release files.** Any path under **`version/locked/`** that already exists on the **merge base / target branch** is **immutable**: it is the published record. Do **not** rewrite it in place—add or adjust prose under **`version/entries/`**, then **finalize** again when appropriate. CI enforces immutability on **`version/locked/`** for PRs (`scripts/check_version_locked_immutable.sh`), except **`version/locked/ABOUT.txt`**, which is companion documentation and may change with **`version/entries/ABOUT.txt`** in the same PR.
@@ -106,7 +108,7 @@ Before merging **incoming → base** (e.g. `bug/*` → `develop`, `develop` → 
 1. Compare **`VERSION_*` / `VERSION` on the incoming branch** to **`VERSION_*` / `VERSION` on the target branch** (see `userland/shell/version_def.h`, generated from **`version/locked/*.ver`**).
 2. **Incoming must be strictly newer** than the target for that merge.
 3. If both show the **same** version (e.g. both `2.0.0`), **update the incoming branch** so its version is **one appropriate semver step ahead** of the target.
-4. Add a **new** **`version/entries/<A>_<B>_<C>_<slug>.ver`**. Pushing to **`develop`** runs **Version lock on merge** in GitHub Actions (copies **`version/entries/`** → **`version/locked/`** and regenerates **`version_def.h`**, then opens a PR to merge those updates when needed). Until then you may run **`make finalize-version-locked`** locally if you want **`version/locked/`** updated on your branch before merge.
+4. Add **`version/entries/<A>_<B>_<C>_<slug>.ver`** as needed for the bump (typically **one** new file per feature PR; **edit** that file as the PR evolves rather than stacking several). Pushing to **`develop`** runs **Version lock on merge** in GitHub Actions (copies **`version/entries/`** → **`version/locked/`** and regenerates **`version_def.h`**, then opens a PR to merge those updates when needed). Until then you may run **`make finalize-version-locked`** locally if you want **`version/locked/`** updated on your branch before merge.
 
 Example: **`bug/…` → `develop`**, both at **`2.0.0`** → bump incoming to **`2.0.1`** (patch for a bugfix).
 

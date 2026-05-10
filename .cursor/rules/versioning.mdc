@@ -15,6 +15,11 @@ alwaysApply: true
 - **CI** enforces **`version/locked`** immutability on PRs (`check_version_locked_immutable.sh`; **`version/locked/ABOUT.txt`** is excluded as non-release prose) and requires every **`version/locked`** file to **byte-match** the same path under **`version/entries/`** (`check_version_locked_subset_of_entries.sh`).
 - **AI edits** must **skip** historical **`version/locked/**`** from bulk refactors.
 
+## Agent workflow — `.ver` timing and one file per PR
+
+- On the **first** substantive code change for a pull request, **add** **`version/entries/*.ver`** if the branch does not already have an entry that covers **that** PR.
+- For **one** pull request, **one** **`version/entries/*.ver`** file is enough: **edit** that file (e.g. **`DESCRIPTION`**, semver fields only if release scope truly changes) across the whole PR, instead of adding multiple new entry files for the same branch.
+
 ## Canonical version & changelog
 
 - **`userland/shell/version_def.h`** — **Generated** by **`scripts/gen_version_def.sh`** (also from **`make`**). **`VERSION`** = **A.B.C** from the **highest** triple in **`version/locked/*.ver`**. CI ensures the committed header matches the generator output.
@@ -54,4 +59,4 @@ Before merging **incoming → base** (examples: `bug/*` → `develop`, `develop`
 
 Example: `bug/…` → `develop`, both at **`2.0.0`** → bump incoming to **`2.0.1`** (patch for a bugfix branch).
 
-When bumping, add **`version/entries/*.ver`**. Pushing to **`develop`** runs **Version lock on merge** (entries → **`version/locked/`**, refresh **`version_def.h`**, opens a PR to merge when there are changes). You may run **`make finalize-version-locked`** locally before merge for an early **`version/locked/`** update on the branch. Do not merge with identical versions across branches when the change warrants a bump. Changelog assembly is **deployment-time**, not **`make`**.
+When bumping, add or extend **`version/entries/*.ver`** (typically **one** new file per feature PR, revised in place). Pushing to **`develop`** runs **Version lock on merge** (entries → **`version/locked/`**, refresh **`version_def.h`**, opens a PR to merge when there are changes). You may run **`make finalize-version-locked`** locally before merge for an early **`version/locked/`** update on the branch. Do not merge with identical versions across branches when the change warrants a bump. Changelog assembly is **deployment-time**, not **`make`**.
