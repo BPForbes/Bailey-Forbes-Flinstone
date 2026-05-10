@@ -1,9 +1,11 @@
 # After a push to develop, copy version/entries → version/locked and regenerate
-# userland/shell/version_def.h. If anything changed, open a PR to develop (do not
-# push directly: branch rules often require PRs, status checks, and signed commits).
+# userland/shell/version_def.h. If anything changed, push a branch (not develop):
+# branch protection usually blocks direct pushes and GITHUB_TOKEN often cannot
+# create PRs unless the repo enables "Allow GitHub Actions to create and approve
+# pull requests" (Settings → Actions → General). The job summary prints a compare
+# URL to open the PR manually.
 #
-# Needs permissions: contents: write, pull-requests: write. Merge the opened PR
-# to publish locked files (or add a ruleset bypass for github-actions[bot] on develop).
+# Needs: permissions contents: write only.
 
 name: Version lock on merge
 
@@ -13,7 +15,6 @@ on:
 
 permissions:
   contents: write
-  pull-requests: write
 
 concurrency:
   group: version-lock-${{ github.ref }}
@@ -48,16 +49,27 @@ jobs:
             echo "has_changes=true" >> "$GITHUB_OUTPUT"
           fi
 
-      - name: Open pull request with synced locked + header
+      - name: Push sync branch (open PR via compare link in summary)
         if: steps.prep.outputs.has_changes == 'true'
-        uses: peter-evans/create-pull-request@v7
-        with:
-          commit-message: "chore(version): sync version/locked from entries after merge"
-          branch: cursor/version-lock-from-entries-${{ github.run_id }}
-          title: "chore(version): sync version/locked from entries after merge to develop"
-          body: |
-            Automated sync after a push to `develop`: ran `finalize_version_locked.sh` and `gen_version_def.sh`.
-
-            **Branch protection** on `develop` (PR-only, required checks, verified signatures) prevents pushing the sync commit directly. Merge this PR to publish `version/locked/` and `userland/shell/version_def.h`.
-
-            If your org also requires signed commits on PR branches, add a bypass for `github-actions[bot]` or use a PAT with signing, or run `make finalize-version-locked` locally and open a normal PR.
+        env:
+          BRANCH: cursor/version-lock-from-entries-${{ github.run_id }}
+        run: |
+          set -euo pipefail
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git checkout -b "$BRANCH"
+          git add version/locked userland/shell/version_def.h
+          git commit -m "chore(version): sync version/locked from entries after merge"
+          git push origin "HEAD:refs/heads/${BRANCH}"
+          {
+            echo "## Version lock: branch pushed"
+            echo ""
+            echo "Branch \`${BRANCH}\` has updated \`version/locked/\` and \`userland/shell/version_def.h\`."
+            echo ""
+            echo "**Open a PR into \`develop\`** (merge after CodeRabbit / checks as usual):"
+            echo ""
+            echo "https://github.com/${{ github.repository }}/compare/develop...${BRANCH}?expand=1"
+            echo ""
+            echo "To let Actions open PRs automatically in the future, enable **Settings → Actions → General → Workflow permissions → Read and write** and check **Allow GitHub Actions to create and approve pull requests** (org policy may still forbid it)."
+          } >> "$GITHUB_STEP_SUMMARY"
+          echo "Pushed ${BRANCH}; see job summary for compare URL."

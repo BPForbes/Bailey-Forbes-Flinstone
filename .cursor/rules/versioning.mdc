@@ -54,4 +54,4 @@ Before merging **incoming → base** (examples: `bug/*` → `develop`, `develop`
 
 Example: `bug/…` → `develop`, both at **`2.0.0`** → bump incoming to **`2.0.1`** (patch for a bugfix branch).
 
-When bumping, add **`version/entries/*.ver`**. Pushing to **`develop`** runs **Version lock on merge** (entries → **`version/locked/`**, refresh **`version_def.h`**, opens a PR to merge when there are changes). You may run **`make finalize-version-locked`** locally before merge for an early **`version/locked/`** update on the branch. Do not merge with identical versions across branches when the change warrants a bump. Changelog assembly is **deployment-time**, not **`make`**.
+When bumping, add **`version/entries/*.ver`**. Pushing to **`develop`** runs **Version lock on merge** (entries → **`version/locked/`**, refresh **`version_def.h`**, pushes a **sync branch**—merge via PR from the Actions run summary). You may run **`make finalize-version-locked`** locally before merge for an early **`version/locked/`** update on the branch. Do not merge with identical versions across branches when the change warrants a bump. Changelog assembly is **deployment-time**, not **`make`**.

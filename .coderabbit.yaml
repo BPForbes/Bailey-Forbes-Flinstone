@@ -8,11 +8,11 @@ reviews:
   instructions: |
     ## Version & releases
 
-    **Shipped version** comes from **`version/locked/*.ver`**: the highest **A.B.C** there is emitted into **`userland/shell/version_def.h`** by **`scripts/gen_version_def.sh`** (also via **`make`**). Author **`version/entries/*.ver`** files; pushing to **`develop`** runs **Version lock on merge** in GitHub Actions (copies **entries → locked**, regenerates the header, opens a PR to **`develop`** if there are changes). **`scripts/gen_version_changelog.c`** reads **`version/locked`**, then CI builds with **`CHANGELOG_CI=1`**. **`make finalize-version-locked`** is still available locally before merge.
+    **Shipped version** comes from **`version/locked/*.ver`**: the highest **A.B.C** there is emitted into **`userland/shell/version_def.h`** by **`scripts/gen_version_def.sh`** (also via **`make`**). Author **`version/entries/*.ver`** files; pushing to **`develop`** runs **Version lock on merge** in GitHub Actions (copies **entries → locked**, regenerates the header, pushes a **sync branch**; use the Actions run summary compare link to open a PR if needed). **`scripts/gen_version_changelog.c`** reads **`version/locked`**, then CI builds with **`CHANGELOG_CI=1`**. **`make finalize-version-locked`** is still available locally before merge.
 
     ### Lock system — never edit historical published files
 
-    - **Do not** approve edits to paths under **`version/locked/`** that already exist on the **merge base / target branch** (published record). New release prose: add **`version/entries/*.ver`**; **`version/locked/`** updates when the **Version lock** automation PR merges to **`develop`** (or via **`finalize_version_locked.sh`** locally).
+    - **Do not** approve edits to paths under **`version/locked/`** that already exist on the **merge base / target branch** (published record). New release prose: add **`version/entries/*.ver`**; **`version/locked/`** updates when someone **merges the automation sync branch** into **`develop`** (or via **`finalize_version_locked.sh`** locally).
     - **`version/entries/`** may contain **extra** `.ver` files not yet in **`version/locked/`** until that merge (or a local finalize). CI requires every **`version/locked/`** file to **byte-match** the same relative path under **`version/entries/`** (`check_version_locked_subset_of_entries.sh`).
     - AI-assisted refactors must **exclude** historical **`version/locked/**`** from bulk edits.
 
@@ -21,7 +21,7 @@ reviews:
     1. Compare the **incoming branch** version string to the **merge base / target branch** version (same `VERSION` macro on each side).
     2. The **incoming branch version must be strictly greater** than the target branch version for that merge (typically exactly one semver bump on the appropriate component).
     3. If both branches report the **same** version (e.g. both `2.0.0`), request an update: bump the incoming branch so it is **one step ahead** of the target for the change type (example: `bug/*` → `develop` with both at `2.0.0` → bump incoming to `2.0.1`).
-    4. Ensure new bumps add **`version/entries/*.ver`**; after push to **`develop`**, **Version lock on merge** syncs **`version/locked/`** and **`version_def.h`** via an automated PR (or authors run **`make finalize-version-locked`** locally before merge if they need an early **`version/locked/`** update on the branch).
+    4. Ensure new bumps add **`version/entries/*.ver`**; after push to **`develop`**, **Version lock on merge** syncs **`version/locked/`** and **`version_def.h`** via a **pushed sync branch** (merge via compare link in the Actions run summary, or run **`make finalize-version-locked`** locally before merge if you need an early **`version/locked/`** update on the branch).
 
     **Schema `A.B.C`:**
 
@@ -33,7 +33,7 @@ reviews:
 
     **Single bump rule:** If a change mixes milestone/architecture work, features, and bug fixes, **only increment the most significant applicable component** once (e.g. milestone + architecture → bump **A** only → **`3.0.0`** after **`2.x.y`**; do not also bump B/C for the same release).
 
-    Remind authors: author under **`version/entries/`**; **`version/locked/`** syncs when the **Version lock** PR merges to **`develop`** (or run **`finalize_version_locked`** locally). Then **`make`** / **`gen_version_def.sh`** on checkout reflects **`version/locked/`**. Changelog prose is CI/deployment-time, not default `make`.
+    Remind authors: author under **`version/entries/`**; **`version/locked/`** updates after the **Version lock** sync branch is **merged to `develop`** (or run **`finalize_version_locked`** locally). Then **`make`** / **`gen_version_def.sh`** on checkout reflects **`version/locked/`**. Changelog prose is CI/deployment-time, not default `make`.
 
     ## Comments vs code
 
