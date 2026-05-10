@@ -81,6 +81,8 @@ CI verifies that the committed **`version_def.h`** matches **`scripts/gen_versio
 
 On every **`push`** to **`develop`**, workflow **`version-lock-on-merge.yml`** runs **`finalize_version_locked.sh`** (full copy **`version/entries/`** → **`version/locked/`**), then **`gen_version_def.sh`**. If anything changed, it **opens a PR** into **`develop`** (via **`peter-evans/create-pull-request`**) instead of pushing directly, so branch protection and checks apply when someone merges that PR. Use **`GITHUB_TOKEN`** with the **Actions** settings above, **or** secret **`VERSION_LOCK_PAT`** (PAT with **contents** + **pull-requests** write). Workflow permissions: **`contents: write`** and **`pull-requests: write`**.
 
+**Automation version PRs (review policy):** PRs opened **only** by that workflow (title/message like **`chore(version): sync version/locked from entries after merge`**, branch `cursor/version-lock-from-entries-*`) are **routine housekeeping**. **Do not** spend automatic or proactive AI/CodeRabbit review on them unless a **human** explicitly requests reviewers or asks for a review—then review normally.
+
 ### Optional deploy build (GitHub Actions / local)
 
 Workflow **Deploy** (`.github/workflows/deploy.yml`, **workflow_dispatch**) assumes **`version/locked/`** is already up to date: it builds the changelog and runs **`make CHANGELOG_CI=1`**. **`make deploy`** does the same locally (changelog + **`make CHANGELOG_CI=1 all`**). Use **`make finalize-version-locked`** locally if you need **`version/locked/`** refreshed before merge without waiting for the merge workflow.

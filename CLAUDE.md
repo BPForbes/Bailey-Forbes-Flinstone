@@ -38,6 +38,8 @@ When preparing or reviewing a merge **incoming → base** (e.g. `bug/…` → `d
 
 Implement the bump by adding **`version/entries/<A>_<B>_<C>_<slug>.ver`**. Pushing to **`develop`** triggers **Version lock on merge** (entries → **`version/locked/`**, regenerate **`version_def.h`**, opens a PR if updates are needed). For a local release build after that, use **`make deploy`** or the **Deploy** workflow.
 
+**Automation version PRs:** PRs opened **only** by **Version lock on merge** (same **`chore(version): sync`** convention) need **no** automatic or proactive AI review. If a **human** requests a review, treat it like any other PR.
+
 Export current numbers without compiling: **`./scripts/export_version_record.sh`**, **`./scripts/export_version_record.sh --json`**, or **`make version-record`** (`--json` for one-line JSON).
 
 ---

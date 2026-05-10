@@ -23,6 +23,8 @@ reviews:
     3. If both branches report the **same** version (e.g. both `2.0.0`), request an update: bump the incoming branch so it is **one step ahead** of the target for the change type (example: `bug/*` → `develop` with both at `2.0.0` → bump incoming to `2.0.1`).
     4. Ensure new bumps add **`version/entries/*.ver`**; after push to **`develop`**, **Version lock on merge** syncs **`version/locked/`** and **`version_def.h`** via an **automation PR** (or authors run **`make finalize-version-locked`** locally before merge if they need an early **`version/locked/`** update on the branch).
 
+    **Automation version PRs:** PRs created **only** by **Version lock on merge** (`chore(version): sync…`, `cursor/version-lock-from-entries-*`) are housekeeping—**do not** auto-review or proactively queue deep review. **If a human requests a review**, review like any other PR.
+
     **Schema `A.B.C`:**
 
     - **A** — Major: architecture changes, large milestones, incompatible overhauls.
