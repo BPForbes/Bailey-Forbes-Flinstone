@@ -1,9 +1,17 @@
 # After a push to develop, copy version/entries → version/locked and regenerate
-# userland/shell/version_def.h. If anything changed, open a PR to develop (do not
-# push directly: branch rules often require PRs, status checks, and signed commits).
+# userland/shell/version_def.h. If anything changed, opens a PR into develop (do not
+# push that commit directly to develop — branch rules usually require a PR, checks,
+# and often verified signatures).
 #
-# Needs permissions: contents: write, pull-requests: write. Merge the opened PR
-# to publish locked files (or add a ruleset bypass for github-actions[bot] on develop).
+# Requires **Settings → Actions → General**: workflow **Read and write** and
+# **Allow GitHub Actions to create and approve pull requests** (for `GITHUB_TOKEN`),
+# unless you use a PAT below.
+#
+# Optional: repository secret **VERSION_LOCK_PAT** (classic or fine-grained PAT with
+# **contents: write** and **pull-requests: write** on this repo). Checkout and
+# create-pull-request use `VERSION_LOCK_PAT || GITHUB_TOKEN`.
+#
+# Needs: permissions contents: write, pull-requests: write.
 
 name: Version lock on merge
 
@@ -29,7 +37,7 @@ jobs:
       - uses: actions/checkout@v4
         with:
           fetch-depth: 0
-          token: ${{ secrets.GITHUB_TOKEN }}
+          token: ${{ secrets.VERSION_LOCK_PAT || secrets.GITHUB_TOKEN }}
 
       - name: Finalize version (copy version/entries to version/locked)
         run: ./scripts/finalize_version_locked.sh
@@ -41,7 +49,11 @@ jobs:
         id: prep
         run: |
           set -euo pipefail
-          if git diff --quiet HEAD -- version/locked userland/shell/version_def.h; then
+          # Do not use `git diff --quiet HEAD -- …` alone: it ignores untracked files.
+          # finalize_version_locked.sh can add new version/locked/*.ver while gen_version_def.sh
+          # leaves version_def.h unchanged — still must open a PR. `git status --porcelain`
+          # includes untracked paths under version/locked/.
+          if [[ -z "$(git status --porcelain -- version/locked userland/shell/version_def.h)" ]]; then
             echo "has_changes=false" >> "$GITHUB_OUTPUT"
             echo "No version/locked or version_def.h changes after finalize."
           else
@@ -52,12 +64,13 @@ jobs:
         if: steps.prep.outputs.has_changes == 'true'
         uses: peter-evans/create-pull-request@v7
         with:
+          token: ${{ secrets.VERSION_LOCK_PAT || secrets.GITHUB_TOKEN }}
           commit-message: "chore(version): sync version/locked from entries after merge"
           branch: cursor/version-lock-from-entries-${{ github.run_id }}
           title: "chore(version): sync version/locked from entries after merge to develop"
           body: |
             Automated sync after a push to `develop`: ran `finalize_version_locked.sh` and `gen_version_def.sh`.
 
-            **Branch protection** on `develop` (PR-only, required checks, verified signatures) prevents pushing the sync commit directly. Merge this PR to publish `version/locked/` and `userland/shell/version_def.h`.
+            **Branch protection** on `develop` (PR-only, required checks, verified signatures) means the sync cannot land as a direct push. Merge this PR to publish `version/locked/` and `userland/shell/version_def.h`.
 
-            If your org also requires signed commits on PR branches, add a bypass for `github-actions[bot]` or use a PAT with signing, or run `make finalize-version-locked` locally and open a normal PR.
+            Uses repository secret **`VERSION_LOCK_PAT`** when set; otherwise **`GITHUB_TOKEN`** (enable **Allow GitHub Actions to create and approve pull requests** in repo Actions settings). If PR branches require signed commits, use a PAT or add a bypass for `github-actions[bot]`, or run `make finalize-version-locked` locally and open a normal PR.
