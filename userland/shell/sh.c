@@ -317,8 +317,10 @@ int main(int argc, char *argv[]) {
     fs_jail_init();
 
     /* Default host volume: ensure drive.img exists before block driver probes it. */
-    if (strcmp(current_disk_file, "drive.img") == 0 && access(current_disk_file, F_OK) != 0) {
-        disk_ensure_default_fat32(current_disk_file, 32, 512);
+    if (strcmp(current_disk_file, "drive.img") == 0) {
+        if (access(current_disk_file, F_OK) != 0) {
+            disk_ensure_default_fat32(current_disk_file, 32, 512);
+        }
         read_disk_header();
     }
 
@@ -483,11 +485,6 @@ int main(int argc, char *argv[]) {
             i += tokensCount;
         }
     }
-    
-    if (isatty(STDIN_FILENO) && strcmp(current_disk_file, "drive.img") == 0) {
-        read_disk_header();
-    }
-    
     if (!isatty(STDIN_FILENO))
         exit(0);
     else

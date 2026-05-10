@@ -6,6 +6,8 @@
 /*
  * Host volume positioning I/O (Linux syscalls in arch/.../gas/disk_host_io.s).
  * Falls back to libc pread/pwrite in disk_host_io.c when not using ASM syscalls.
+ *
+ * Return value: full count on success; -1 on error with errno set (libc pread/pwrite semantics).
  */
 ssize_t disk_host_pread_vol(int fd, void *buf, size_t count, off_t offset);
 ssize_t disk_host_pwrite_vol(int fd, const void *buf, size_t count, off_t offset);

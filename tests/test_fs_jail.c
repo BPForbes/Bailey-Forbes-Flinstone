@@ -37,7 +37,7 @@ static void rmrf_dirpath(const char *path) {
         char sub[PATH_MAX];
         snprintf(sub, sizeof(sub), "%s/%s", path, e->d_name);
         struct stat st;
-        if (stat(sub, &st) == 0 && S_ISDIR(st.st_mode))
+        if (lstat(sub, &st) == 0 && S_ISDIR(st.st_mode))
             rmrf_dirpath(sub);
         else
             unlink(sub);

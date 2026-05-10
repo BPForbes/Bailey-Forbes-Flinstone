@@ -14,6 +14,9 @@
 #include <string.h>
 #include <sys/stat.h>
 #include <unistd.h>
+#include <limits.h>
+
+extern char g_fs_jail_root[];
 
 #define ASSERT(c) do { if (!(c)) { fprintf(stderr, "FAIL (%s:%d): %s\n", __FILE__, __LINE__, #c); return 1; } } while(0)
 
@@ -221,12 +224,21 @@ static int test_jail_openat_inside_jail(void) {
     }
     close(tmp_fd);
 
-    int fd = fs_jail_openat(tmpl, O_RDONLY, 0);
-    if (fd < 0) {
-        fprintf(stderr, "  (Note: fs_jail_openat returned -1, errno=%d - may be platform limitation)\n", errno);
-    } else {
-        close(fd);
+    char openpath[PATH_MAX];
+    if (snprintf(openpath, sizeof(openpath), "%s/%s", g_fs_jail_root, tmpl) >= (int)sizeof(openpath)) {
+        unlink(tmpl);
+        reset_jail_state();
+        fprintf(stderr, "FAIL: jail open path overflow\n");
+        return 1;
     }
+    int fd = fs_jail_openat(openpath, O_RDONLY, 0);
+    if (fd < 0) {
+        fprintf(stderr, "FAIL (%s:%d): fs_jail_openat inside jail (errno=%d)\n", __FILE__, __LINE__, errno);
+        unlink(tmpl);
+        reset_jail_state();
+        return 1;
+    }
+    close(fd);
 
     unlink(tmpl);
     reset_jail_state();

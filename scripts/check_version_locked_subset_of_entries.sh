@@ -14,7 +14,7 @@ if [[ ! -d "$LCK" ]]; then
   echo "Run: ./scripts/finalize_version_locked.sh" >&2
   exit 1
 fi
-if ! find "$LCK" -type f | head -n1 | grep -q .; then
+if ! find "$LCK" -type f -print -quit | grep -q .; then
   echo "error: version/locked has no files" >&2
   exit 1
 fi

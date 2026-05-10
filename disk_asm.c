@@ -157,9 +157,21 @@ int disk_asm_write_cluster(int clu_index, const unsigned char *buf) {
         if (fd < 0)
             return -1;
         ssize_t w = disk_host_pwrite_vol(fd, buf, (size_t)g_cluster_size, (off_t)off);
-        fsync(fd);
-        close(fd);
-        return (w == (ssize_t)g_cluster_size) ? 0 : -1;
+        if (w != (ssize_t)g_cluster_size) {
+            int e = errno;
+            close(fd);
+            errno = e;
+            return -1;
+        }
+        if (fsync(fd) != 0) {
+            int e = errno;
+            close(fd);
+            errno = e;
+            return -1;
+        }
+        if (close(fd) != 0)
+            return -1;
+        return 0;
     }
     char *hex_str = mem_domain_alloc(MEM_DOMAIN_FS, (size_t)g_cluster_size * 2 + 1);
     if (!hex_str) return -1;

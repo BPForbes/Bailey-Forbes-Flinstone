@@ -699,7 +699,7 @@ static void rmrf_jail_sandbox(const char *path) {
         char sub[PATH_MAX];
         snprintf(sub, sizeof(sub), "%s/%s", path, e->d_name);
         struct stat st;
-        if (stat(sub, &st) == 0 && S_ISDIR(st.st_mode))
+        if (lstat(sub, &st) == 0 && S_ISDIR(st.st_mode))
             rmrf_jail_sandbox(sub);
         else
             unlink(sub);
@@ -1085,6 +1085,8 @@ void test_diskput_fat32_roundtrip(void) {
     prev[sizeof(prev) - 1] = '\0';
     FILE *fp = fopen("bin_src.dat", "wb");
     CU_ASSERT_PTR_NOT_NULL(fp);
+    if (!fp)
+        return;
     unsigned char b[] = {0, 1, 2, 255, 10, 20};
     CU_ASSERT_TRUE(fwrite(b, 1, sizeof(b), fp) == sizeof(b));
     fclose(fp);
@@ -1094,6 +1096,10 @@ void test_diskput_fat32_roundtrip(void) {
     CU_ASSERT_TRUE(execute_command_str("diskget TSTSUB/BINRES.DAT bin_out.dat") == 0);
     fp = fopen("bin_out.dat", "rb");
     CU_ASSERT_PTR_NOT_NULL(fp);
+    if (!fp) {
+        remove("bin_src.dat");
+        return;
+    }
     unsigned char out[32];
     size_t n = fread(out, 1, sizeof(out), fp);
     fclose(fp);

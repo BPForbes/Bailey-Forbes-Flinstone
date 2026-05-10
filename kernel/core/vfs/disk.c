@@ -381,10 +381,15 @@ void flintstone_format_disk(const char *volumeName, int rowCount, int nibbleCoun
             exit(1);
         }
         int fd = open(diskFileName, O_RDONLY);
-        if (fd >= 0) {
-            fat32_host_load_from_fd(fd);
-            close(fd);
+        g_disk_host_fat32 = 0;
+        fat32_host_invalidate();
+        if (fd < 0 || fat32_host_load_from_fd(fd) != 0) {
+            if (fd >= 0)
+                close(fd);
+            fprintf(stderr, "Error: FAT32 image created but volume could not be loaded: %s\n", diskFileName);
+            exit(1);
         }
+        close(fd);
         g_disk_host_fat32 = 1;
         printf("Formatted FAT32 disk created: %s\n", diskFileName);
     } else {
@@ -408,10 +413,15 @@ void format_disk_file(const char *diskFileName, const char *volumeName, int rowC
         exit(1);
     }
     int fd = open(diskFileName, O_RDONLY);
-    if (fd >= 0) {
-        fat32_host_load_from_fd(fd);
-        close(fd);
+    g_disk_host_fat32 = 0;
+    fat32_host_invalidate();
+    if (fd < 0 || fat32_host_load_from_fd(fd) != 0) {
+        if (fd >= 0)
+            close(fd);
+        fprintf(stderr, "Error: FAT32 image created but volume could not be loaded: %s\n", diskFileName);
+        exit(1);
     }
+    close(fd);
     g_disk_host_fat32 = 1;
     printf("Formatted FAT32 disk created: %s\n", diskFileName);
 }
@@ -424,9 +434,17 @@ void disk_ensure_default_fat32(const char *path, int clusters, int bytes_per_clu
     if (fat32_host_format_image(path, "NO NAME", clusters, bytes_per_cluster, "DFLT") != 0)
         return;
     int fd = open(path, O_RDONLY);
-    if (fd >= 0) {
-        fat32_host_load_from_fd(fd);
-        close(fd);
+    if (fd < 0) {
+        g_disk_host_fat32 = 0;
+        fat32_host_invalidate();
+        return;
     }
+    if (fat32_host_load_from_fd(fd) != 0) {
+        close(fd);
+        g_disk_host_fat32 = 0;
+        fat32_host_invalidate();
+        return;
+    }
+    close(fd);
     g_disk_host_fat32 = 1;
 }

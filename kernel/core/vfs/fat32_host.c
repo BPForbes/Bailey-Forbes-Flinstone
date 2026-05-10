@@ -196,6 +196,13 @@ int fat32_host_format_image(const char *path, const char *volume_label, int shel
     uint8_t spc = (uint8_t)((unsigned)bytes_per_cluster / (unsigned)bps);
     if ((int)spc * (int)bps != bytes_per_cluster)
         return -1;
+    if (spc == 0u)
+        return -1;
+    {
+        unsigned sp = (unsigned)spc;
+        if (sp > 128u || (sp & (sp - 1u)) != 0u)
+            return -1;
+    }
 
     uint32_t min_cc = (uint32_t)shell_clusters + 1u; /* root cluster + FLINT.DAT */
     if (min_cc < FAT32_MIN_USABLE_CLUSTERS)

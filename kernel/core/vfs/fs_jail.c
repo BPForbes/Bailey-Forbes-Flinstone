@@ -77,8 +77,16 @@ void fs_jail_init(void) {
         g_fs_jail_len = 0;
         return;
     }
-    strncpy(g_cwd, g_fs_jail_root, sizeof(g_cwd) - 1);
-    g_cwd[sizeof(g_cwd) - 1] = '\0';
+    if (g_fs_jail_len >= sizeof(g_cwd)) {
+        fprintf(stderr, "VM: sandbox path too long for g_cwd (%zu >= %zu)\n",
+                (size_t)g_fs_jail_len, sizeof(g_cwd));
+        close(g_jail_dirfd);
+        g_jail_dirfd = -1;
+        mem_domain_zero(g_fs_jail_root, sizeof(g_fs_jail_root));
+        g_fs_jail_len = 0;
+        return;
+    }
+    memcpy(g_cwd, g_fs_jail_root, g_fs_jail_len + 1);
 }
 
 int fs_jail_is_active(void) {
@@ -187,29 +195,6 @@ int fs_jail_openat(const char *path, int flags, mode_t mode) {
     int fd = openat(g_jail_dirfd, relpath, flags | O_NOFOLLOW, mode);
     if (fd < 0)
         return -1;
-
-    /* Verify the opened file is within jail by checking device/inode */
-    struct stat jail_st, file_st;
-    if (fstat(g_jail_dirfd, &jail_st) != 0) {
-        int saved_errno = errno;
-        close(fd);
-        errno = saved_errno;
-        return -1;
-    }
-
-    if (fstat(fd, &file_st) != 0) {
-        int saved_errno = errno;
-        close(fd);
-        errno = saved_errno;
-        return -1;
-    }
-
-    /* Verify file is on same device as jail root */
-    if (file_st.st_dev != jail_st.st_dev) {
-        close(fd);
-        errno = EPERM;
-        return -1;
-    }
 
     /* Additional check: get canonical path of opened fd and verify it's under jail */
     char fd_path[JAIL_ROOT_MAX];

@@ -85,65 +85,103 @@ static int dirent_matches_83(const uint8_t *e, const char name11[11]) {
     return memcmp(e, name11, 11) == 0;
 }
 
-static int write_dirent_in_dir(int fd, const Fat32HostVol *v, uint32_t dir_clu, int slot, const uint8_t ent[32]) {
-    uint64_t base;
-    if (cluster_data_byte_off(v, dir_clu, &base) != 0)
+static int write_dirent_in_dir(int fd, const Fat32HostVol *v, uint32_t dir_clu, int linear_slot, const uint8_t ent[32]) {
+    uint32_t bpc = (uint32_t)v->bytes_per_cluster;
+    int nent = (int)(bpc / 32u);
+    if (nent <= 0)
         return -1;
-    uint64_t ent_off = base + (uint64_t)slot * 32u;
-    return disk_host_pwrite_vol(fd, ent, 32, (off_t)ent_off) == 32 ? 0 : -1;
+    uint32_t cur = dir_clu;
+    int s = linear_slot;
+    unsigned guard = 0;
+    while (cur >= 2u && cur <= max_cluster_number(v)) {
+        if (++guard > v->data_cluster_count + 4u)
+            return -1;
+        if (s < nent) {
+            uint64_t base;
+            if (cluster_data_byte_off(v, cur, &base) != 0)
+                return -1;
+            uint64_t ent_off = base + (uint64_t)s * 32u;
+            return disk_host_pwrite_vol(fd, ent, 32, (off_t)ent_off) == 32 ? 0 : -1;
+        }
+        s -= nent;
+        uint32_t nxt = fat_read_entry(fd, v, cur);
+        if (nxt >= 0x0FFFFFF8u)
+            return -1;
+        if (nxt < 2u || nxt > max_cluster_number(v))
+            return -1;
+        cur = nxt;
+    }
+    return -1;
 }
 
 /* want_dir: 1 = directory entries only, 0 = non-directory files only */
 static int find_dirent_in_dir(int fd, const Fat32HostVol *v, uint32_t dir_clu, const char name11[11], int want_dir,
                               int *slot_out, uint8_t *ent_copy32) {
-    uint64_t root_off;
-    if (cluster_data_byte_off(v, dir_clu, &root_off) != 0)
-        return -1;
-    uint32_t bpc = (uint32_t)v->bytes_per_cluster * (uint32_t)v->sectors_per_cluster;
-    uint8_t *root = malloc(bpc);
-    if (!root)
-        return -1;
-    if (disk_host_pread_vol(fd, root, bpc, (off_t)root_off) != (ssize_t)bpc) {
-        free(root);
-        return -1;
-    }
+    uint32_t bpc = (uint32_t)v->bytes_per_cluster;
     int nent = (int)(bpc / 32u);
-    int match = -1;
-    int empty = -1;
-    for (int i = 0; i < nent; i++) {
-        uint8_t *e = root + (uint32_t)i * 32u;
-        if (e[0] == 0) {
-            if (empty < 0)
-                empty = i;
-            continue;
+    if (nent <= 0)
+        return -1;
+    int linear_base = 0;
+    int first_empty = -1;
+    uint32_t cur = dir_clu;
+    unsigned guard = 0;
+
+    while (cur >= 2u && cur <= max_cluster_number(v)) {
+        if (++guard > v->data_cluster_count + 4u)
+            return -1;
+        uint64_t root_off;
+        if (cluster_data_byte_off(v, cur, &root_off) != 0)
+            return -1;
+        uint8_t *root = malloc(bpc);
+        if (!root)
+            return -1;
+        if (disk_host_pread_vol(fd, root, bpc, (off_t)root_off) != (ssize_t)bpc) {
+            free(root);
+            return -1;
         }
-        if (e[0] == 0xE5) {
-            if (empty < 0)
-                empty = i;
-            continue;
+        int match = -1;
+        for (int i = 0; i < nent; i++) {
+            uint8_t *e = root + (uint32_t)i * 32u;
+            if (e[0] == 0) {
+                if (first_empty < 0)
+                    first_empty = linear_base + i;
+                continue;
+            }
+            if (e[0] == 0xE5) {
+                if (first_empty < 0)
+                    first_empty = linear_base + i;
+                continue;
+            }
+            if ((e[0x0B] & 0x08) != 0)
+                continue;
+            if ((e[0x0B] & 0x0F) == 0x0F)
+                continue; /* VFAT LFN — skip */
+            if (!dirent_matches_83(e, name11))
+                continue;
+            if (want_dir == 1 && (e[0x0B] & 0x10) == 0)
+                continue;
+            if (want_dir == 0 && (e[0x0B] & 0x10) != 0)
+                continue;
+            match = i;
+            if (ent_copy32)
+                memcpy(ent_copy32, e, 32);
+            break;
         }
-        if ((e[0x0B] & 0x08) != 0)
-            continue;
-        if ((e[0x0B] & 0x0F) == 0x0F)
-            continue; /* VFAT LFN — skip */
-        if (!dirent_matches_83(e, name11))
-            continue;
-        if (want_dir == 1 && (e[0x0B] & 0x10) == 0)
-            continue;
-        if (want_dir == 0 && (e[0x0B] & 0x10) != 0)
-            continue;
-        match = i;
-        if (ent_copy32)
-            memcpy(ent_copy32, e, 32);
-        break;
+        free(root);
+        if (match >= 0) {
+            *slot_out = linear_base + match;
+            return 1;
+        }
+        uint32_t nxt = fat_read_entry(fd, v, cur);
+        if (nxt >= 0x0FFFFFF8u)
+            break;
+        if (nxt < 2u || nxt > max_cluster_number(v))
+            return -1;
+        cur = nxt;
+        linear_base += nent;
     }
-    free(root);
-    if (match >= 0) {
-        *slot_out = match;
-        return 1;
-    }
-    if (empty >= 0) {
-        *slot_out = empty;
+    if (first_empty >= 0) {
+        *slot_out = first_empty;
         return 0;
     }
     return -2;
@@ -323,7 +361,7 @@ static int collect_free_clusters(int fd, const Fat32HostVol *v, uint32_t need, u
 
 static int allocate_and_write_chain(int fd, const Fat32HostVol *v, int src_fd, size_t file_sz,
                                     uint32_t *first_clu_out) {
-    uint32_t bpc = (uint32_t)v->bytes_per_cluster * (uint32_t)v->sectors_per_cluster;
+    uint32_t bpc = (uint32_t)v->bytes_per_cluster;
     if (file_sz == 0u) {
         *first_clu_out = 0u;
         return 0;
@@ -403,7 +441,7 @@ static int allocate_and_write_chain(int fd, const Fat32HostVol *v, int src_fd, s
 static int read_chain_to_host(int img_fd, const Fat32HostVol *v, uint32_t first, size_t fsz, int out_fd) {
     if (fsz == 0u)
         return 0;
-    uint32_t bpc = (uint32_t)v->bytes_per_cluster * (uint32_t)v->sectors_per_cluster;
+    uint32_t bpc = (uint32_t)v->bytes_per_cluster;
     uint32_t c = first;
     size_t left = fsz;
     off_t dst_off = 0;
@@ -487,50 +525,67 @@ static void format_83_display(const char n11[11], char *dst, size_t dstsz) {
 
 static int find_name_any(int fd, const Fat32HostVol *v, uint32_t dir_clu, const char name11[11], int *slot_out,
                          uint8_t *ent_copy32) {
-    uint64_t base_off;
-    if (cluster_data_byte_off(v, dir_clu, &base_off) != 0)
-        return -1;
-    uint32_t bpc = (uint32_t)v->bytes_per_cluster * (uint32_t)v->sectors_per_cluster;
-    uint8_t *buf = malloc(bpc);
-    if (!buf)
-        return -1;
-    if (disk_host_pread_vol(fd, buf, bpc, (off_t)base_off) != (ssize_t)bpc) {
-        free(buf);
-        return -1;
-    }
+    uint32_t bpc = (uint32_t)v->bytes_per_cluster;
     int nent = (int)(bpc / 32u);
-    int match = -1;
-    int empty = -1;
-    for (int i = 0; i < nent; i++) {
-        uint8_t *e = buf + (uint32_t)i * 32u;
-        if (e[0] == 0) {
-            if (empty < 0)
-                empty = i;
-            continue;
+    if (nent <= 0)
+        return -1;
+    int linear_base = 0;
+    int first_empty = -1;
+    uint32_t cur = dir_clu;
+    unsigned guard = 0;
+
+    while (cur >= 2u && cur <= max_cluster_number(v)) {
+        if (++guard > v->data_cluster_count + 4u)
+            return -1;
+        uint64_t base_off;
+        if (cluster_data_byte_off(v, cur, &base_off) != 0)
+            return -1;
+        uint8_t *buf = malloc(bpc);
+        if (!buf)
+            return -1;
+        if (disk_host_pread_vol(fd, buf, bpc, (off_t)base_off) != (ssize_t)bpc) {
+            free(buf);
+            return -1;
         }
-        if (e[0] == 0xE5) {
-            if (empty < 0)
-                empty = i;
-            continue;
+        int match = -1;
+        for (int i = 0; i < nent; i++) {
+            uint8_t *e = buf + (uint32_t)i * 32u;
+            if (e[0] == 0) {
+                if (first_empty < 0)
+                    first_empty = linear_base + i;
+                continue;
+            }
+            if (e[0] == 0xE5) {
+                if (first_empty < 0)
+                    first_empty = linear_base + i;
+                continue;
+            }
+            if ((e[0x0B] & 0x08) != 0)
+                continue;
+            if ((e[0x0B] & 0x0F) == 0x0F)
+                continue;
+            if (!dirent_matches_83(e, name11))
+                continue;
+            match = i;
+            if (ent_copy32)
+                memcpy(ent_copy32, e, 32);
+            break;
         }
-        if ((e[0x0B] & 0x08) != 0)
-            continue;
-        if ((e[0x0B] & 0x0F) == 0x0F)
-            continue;
-        if (!dirent_matches_83(e, name11))
-            continue;
-        match = i;
-        if (ent_copy32)
-            memcpy(ent_copy32, e, 32);
-        break;
+        free(buf);
+        if (match >= 0) {
+            *slot_out = linear_base + match;
+            return 1;
+        }
+        uint32_t nxt = fat_read_entry(fd, v, cur);
+        if (nxt >= 0x0FFFFFF8u)
+            break;
+        if (nxt < 2u || nxt > max_cluster_number(v))
+            return -1;
+        cur = nxt;
+        linear_base += nent;
     }
-    free(buf);
-    if (match >= 0) {
-        *slot_out = match;
-        return 1;
-    }
-    if (empty >= 0) {
-        *slot_out = empty;
+    if (first_empty >= 0) {
+        *slot_out = first_empty;
         return 0;
     }
     return -2;
@@ -542,7 +597,7 @@ static int alloc_one_cluster_cleared(int fd, const Fat32HostVol *v, uint32_t *ou
         return -1;
     if (fat_write_entry(fd, v, ch[0], 0x0FFFFFF8u) != 0)
         return -1;
-    uint32_t bpc = (uint32_t)v->bytes_per_cluster * (uint32_t)v->sectors_per_cluster;
+    uint32_t bpc = (uint32_t)v->bytes_per_cluster;
     unsigned char *z = (unsigned char *)calloc(1, bpc);
     if (!z) {
         fat_write_entry(fd, v, ch[0], 0u);
@@ -614,7 +669,7 @@ static int resolve_or_mkdir_component(int fd, Fat32HostVol *v, uint32_t parent_c
     uint32_t newc = 0;
     if (alloc_one_cluster_cleared(fd, v, &newc) != 0)
         return -1;
-    uint32_t bpc = (uint32_t)v->bytes_per_cluster * (uint32_t)v->sectors_per_cluster;
+    uint32_t bpc = (uint32_t)v->bytes_per_cluster;
     uint8_t *clusterbuf = (uint8_t *)calloc(1, bpc);
     if (!clusterbuf) {
         fat_write_entry(fd, v, newc, 0u);
@@ -766,7 +821,8 @@ int fat32_host_file_put(const char *host_src_path, const char *path_on_disk_or_n
         }
     } else {
         char base_only[CWD_MAX];
-        split_base_ext(host_src_path, base_only, sizeof(base_only), NULL, 0);
+        char ext_dummy[16];
+        split_base_ext(host_src_path, base_only, sizeof(base_only), ext_dummy, sizeof(ext_dummy));
         if (normalize_on_disk_path(norm, sizeof(norm), base_only) != 0) {
             close(src);
             close(img);
@@ -811,6 +867,7 @@ int fat32_host_file_put(const char *host_src_path, const char *path_on_disk_or_n
 
     int slot;
     uint8_t oldent[32];
+    uint32_t oldc = 0;
     int fr = find_dirent_in_dir(img, &g_fat32_host_vol, parent_clu, name11, 0, &slot, oldent);
     if (fr < 0) {
         close(src);
@@ -823,8 +880,7 @@ int fat32_host_file_put(const char *host_src_path, const char *path_on_disk_or_n
             close(img);
             return -1;
         }
-        uint32_t oldc = ld_le16(oldent + 0x1A) | ((uint32_t)ld_le16(oldent + 0x14) << 16);
-        free_cluster_chain(img, &g_fat32_host_vol, oldc);
+        oldc = ld_le16(oldent + 0x1A) | ((uint32_t)ld_le16(oldent + 0x14) << 16);
     } else if (fr == -2) {
         close(src);
         close(img);
@@ -852,6 +908,8 @@ int fat32_host_file_put(const char *host_src_path, const char *path_on_disk_or_n
         close(img);
         return -1;
     }
+    if (oldc >= 2u)
+        free_cluster_chain(img, &g_fat32_host_vol, oldc);
     fsync(img);
     close(img);
     return 0;
@@ -979,46 +1037,59 @@ void fat32_host_file_list(const char *subdir_or_null) {
         printf("diskfiles: directory not found.\n");
         return;
     }
-    uint64_t base_off;
-    if (cluster_data_byte_off(&g_fat32_host_vol, list_clu, &base_off) != 0) {
-        close(fd);
-        return;
-    }
-    uint32_t bpc = (uint32_t)g_fat32_host_vol.bytes_per_cluster *
-                   (uint32_t)g_fat32_host_vol.sectors_per_cluster;
-    uint8_t *root = malloc(bpc);
-    if (!root) {
-        close(fd);
-        return;
-    }
-    if (disk_host_pread_vol(fd, root, bpc, (off_t)base_off) != (ssize_t)bpc) {
-        free(root);
-        close(fd);
-        return;
-    }
+    uint32_t bpc = (uint32_t)g_fat32_host_vol.bytes_per_cluster;
     int nent = (int)(bpc / 32u);
+    if (nent <= 0) {
+        close(fd);
+        return;
+    }
     if (dirnorm[0])
         printf("Directory \"%s\" on %s:\n", dirnorm, current_disk_file);
     else
         printf("Root of %s:\n", current_disk_file);
-    for (int i = 0; i < nent; i++) {
-        uint8_t *e = root + (uint32_t)i * 32u;
-        if (e[0] == 0 || e[0] == 0xE5)
-            continue;
-        if ((e[0x0B] & 0x08) != 0)
-            continue;
-        if ((e[0x0B] & 0x0F) == 0x0F)
-            continue;
-        char disp[32];
-        format_83_display((const char *)e, disp, sizeof(disp));
-        if ((e[0x0B] & 0x10) != 0)
-            printf("  %-20s  <DIR>\n", disp);
-        else {
-            uint32_t sz = ld_le32(e + 0x1C);
-            printf("  %-20s  %10u bytes\n", disp, (unsigned)sz);
+    uint32_t cur = list_clu;
+    unsigned guard = 0;
+    while (cur >= 2u && cur <= max_cluster_number(&g_fat32_host_vol)) {
+        if (++guard > g_fat32_host_vol.data_cluster_count + 4u)
+            break;
+        uint64_t base_off;
+        if (cluster_data_byte_off(&g_fat32_host_vol, cur, &base_off) != 0)
+            break;
+        uint8_t *root = malloc(bpc);
+        if (!root) {
+            close(fd);
+            return;
         }
+        if (disk_host_pread_vol(fd, root, bpc, (off_t)base_off) != (ssize_t)bpc) {
+            free(root);
+            close(fd);
+            return;
+        }
+        for (int i = 0; i < nent; i++) {
+            uint8_t *e = root + (uint32_t)i * 32u;
+            if (e[0] == 0 || e[0] == 0xE5)
+                continue;
+            if ((e[0x0B] & 0x08) != 0)
+                continue;
+            if ((e[0x0B] & 0x0F) == 0x0F)
+                continue;
+            char disp[32];
+            format_83_display((const char *)e, disp, sizeof(disp));
+            if ((e[0x0B] & 0x10) != 0)
+                printf("  %-20s  <DIR>\n", disp);
+            else {
+                uint32_t sz = ld_le32(e + 0x1C);
+                printf("  %-20s  %10u bytes\n", disp, (unsigned)sz);
+            }
+        }
+        free(root);
+        uint32_t nxt = fat_read_entry(fd, &g_fat32_host_vol, cur);
+        if (nxt >= 0x0FFFFFF8u)
+            break;
+        if (nxt < 2u || nxt > max_cluster_number(&g_fat32_host_vol))
+            break;
+        cur = nxt;
     }
-    free(root);
     close(fd);
 }
 
