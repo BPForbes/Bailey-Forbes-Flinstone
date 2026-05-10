@@ -1,7 +1,9 @@
-# After a merge to develop, copy version/entries → version/locked and
-# regenerate userland/shell/version_def.h, then commit if anything changed.
-# Requires default GITHUB_TOKEN contents: write (and branch protection must allow
-# GitHub Actions to push, or use a PAT secret).
+# After a push to develop, copy version/entries → version/locked and regenerate
+# userland/shell/version_def.h. If anything changed, open a PR to develop (do not
+# push directly: branch rules often require PRs, status checks, and signed commits).
+#
+# Needs permissions: contents: write, pull-requests: write. Merge the opened PR
+# to publish locked files (or add a ruleset bypass for github-actions[bot] on develop).
 
 name: Version lock on merge
 
@@ -11,6 +13,7 @@ on:
 
 permissions:
   contents: write
+  pull-requests: write
 
 concurrency:
   group: version-lock-${{ github.ref }}
@@ -20,7 +23,7 @@ jobs:
   sync-locked-from-entries:
     name: Sync version/locked from entries
     runs-on: ubuntu-latest
-    # Avoid a push loop if this workflow’s own commit is the only new commit.
+    # Avoid a loop when the tip commit is already our sync squash (optional guard).
     if: "${{ github.event.head_commit == null || !startsWith(github.event.head_commit.message, 'chore(version): sync') }}"
     steps:
       - uses: actions/checkout@v4
@@ -34,14 +37,27 @@ jobs:
       - name: Regenerate version header
         run: ./scripts/gen_version_def.sh
 
-      - name: Commit and push if changed
+      - name: Detect changes
+        id: prep
         run: |
-          git config user.name "github-actions[bot]"
-          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git add version/locked userland/shell/version_def.h
-          if git diff --staged --quiet; then
+          set -euo pipefail
+          if git diff --quiet HEAD -- version/locked userland/shell/version_def.h; then
+            echo "has_changes=false" >> "$GITHUB_OUTPUT"
             echo "No version/locked or version_def.h changes after finalize."
-            exit 0
+          else
+            echo "has_changes=true" >> "$GITHUB_OUTPUT"
           fi
-          git commit -m "chore(version): sync version/locked from entries after merge"
-          git push
+
+      - name: Open pull request with synced locked + header
+        if: steps.prep.outputs.has_changes == 'true'
+        uses: peter-evans/create-pull-request@v7
+        with:
+          commit-message: "chore(version): sync version/locked from entries after merge"
+          branch: cursor/version-lock-from-entries-${{ github.run_id }}
+          title: "chore(version): sync version/locked from entries after merge to develop"
+          body: |
+            Automated sync after a push to `develop`: ran `finalize_version_locked.sh` and `gen_version_def.sh`.
+
+            **Branch protection** on `develop` (PR-only, required checks, verified signatures) prevents pushing the sync commit directly. Merge this PR to publish `version/locked/` and `userland/shell/version_def.h`.
+
+            If your org also requires signed commits on PR branches, add a bypass for `github-actions[bot]` or use a PAT with signing, or run `make finalize-version-locked` locally and open a normal PR.
