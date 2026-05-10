@@ -8,7 +8,7 @@ reviews:
   instructions: |
     ## Version & releases
 
-    **Shipped version** comes from **`version/locked/*.ver`**: the highest **A.B.C** there is emitted into **`userland/shell/version_def.h`** by **`scripts/gen_version_def.sh`** (also via **`make`**). Author **`version/entries/*.ver`** files; pushing to **`develop`** runs **Version lock on merge** in GitHub Actions (copies **entries → locked**, regenerates the header, opens a PR into **`develop`** when needed). **`scripts/gen_version_changelog.c`** reads **`version/locked`**, then CI builds with **`CHANGELOG_CI=1`**. **`make finalize-version-locked`** is still available locally before merge.
+    **Shipped version** comes from **`version/locked/*.ver`**: the highest **A.B.C** there is emitted into **`userland/shell/version_def.h`** by **`scripts/gen_version_def.sh`** (also via **`make`**). Author **`version/entries/*.ver`** files; pushing to **`develop`** runs **Version lock on merge** in GitHub Actions (copies **entries → locked**, regenerates the header, opens a PR into **`develop`** when there are changes). **`scripts/gen_version_changelog.c`** reads **`version/locked`**, then CI builds with **`CHANGELOG_CI=1`**. **`make finalize-version-locked`** is still available locally before merge.
 
     ### Lock system — never edit historical published files
 
@@ -21,7 +21,7 @@ reviews:
     1. Compare the **incoming branch** version string to the **merge base / target branch** version (same `VERSION` macro on each side).
     2. The **incoming branch version must be strictly greater** than the target branch version for that merge (typically exactly one semver bump on the appropriate component).
     3. If both branches report the **same** version (e.g. both `2.0.0`), request an update: bump the incoming branch so it is **one step ahead** of the target for the change type (example: `bug/*` → `develop` with both at `2.0.0` → bump incoming to `2.0.1`).
-    4. Ensure new bumps add **`version/entries/*.ver`**; after push to **`develop`**, **Version lock on merge** syncs **`version/locked/`** and **`version_def.h`** via an **automation PR** (or run **`make finalize-version-locked`** locally before merge if you need an early **`version/locked/`** update on the branch).
+    4. Ensure new bumps add **`version/entries/*.ver`**; after push to **`develop`**, **Version lock on merge** syncs **`version/locked/`** and **`version_def.h`** via an **automation PR** (or authors run **`make finalize-version-locked`** locally before merge if they need an early **`version/locked/`** update on the branch).
 
     **Schema `A.B.C`:**
 

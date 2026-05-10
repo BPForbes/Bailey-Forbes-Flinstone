@@ -1,13 +1,15 @@
 # After a push to develop, copy version/entries → version/locked and regenerate
-# userland/shell/version_def.h. If anything changed, opens a PR into develop.
+# userland/shell/version_def.h. If anything changed, opens a PR into develop (do not
+# push that commit directly to develop — branch rules usually require a PR, checks,
+# and often verified signatures).
 #
-# Requires repository **Settings → Actions → General**: workflow **Read and write**
-# permission and **Allow GitHub Actions to create and approve pull requests**
-# (unless you use a PAT below).
+# Requires **Settings → Actions → General**: workflow **Read and write** and
+# **Allow GitHub Actions to create and approve pull requests** (for `GITHUB_TOKEN`),
+# unless you use a PAT below.
 #
-# Optional: set repository secret **VERSION_LOCK_PAT** (fine-grained classic PAT with
-# **contents: write** and **pull-requests: write** on this repo). If unset,
-# **GITHUB_TOKEN** is used after the settings above are enabled.
+# Optional: repository secret **VERSION_LOCK_PAT** (classic or fine-grained PAT with
+# **contents: write** and **pull-requests: write** on this repo). Checkout and
+# create-pull-request use `VERSION_LOCK_PAT || GITHUB_TOKEN`.
 #
 # Needs: permissions contents: write, pull-requests: write.
 
@@ -65,6 +67,6 @@ jobs:
           body: |
             Automated sync after a push to `develop`: ran `finalize_version_locked.sh` and `gen_version_def.sh`.
 
-            Merge this PR to publish `version/locked/` and `userland/shell/version_def.h`.
+            **Branch protection** on `develop` (PR-only, required checks, verified signatures) means the sync cannot land as a direct push. Merge this PR to publish `version/locked/` and `userland/shell/version_def.h`.
 
-            Uses repository secret `VERSION_LOCK_PAT` when set; otherwise `GITHUB_TOKEN` (requires **Allow GitHub Actions to create and approve pull requests**).
+            Uses repository secret **`VERSION_LOCK_PAT`** when set; otherwise **`GITHUB_TOKEN`** (enable **Allow GitHub Actions to create and approve pull requests** in repo Actions settings). If PR branches require signed commits, use a PAT or add a bypass for `github-actions[bot]`, or run `make finalize-version-locked` locally and open a normal PR.
