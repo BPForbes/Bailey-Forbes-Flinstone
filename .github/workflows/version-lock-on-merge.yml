@@ -49,7 +49,11 @@ jobs:
         id: prep
         run: |
           set -euo pipefail
-          if git diff --quiet HEAD -- version/locked userland/shell/version_def.h; then
+          # Do not use `git diff --quiet HEAD -- …` alone: it ignores untracked files.
+          # finalize_version_locked.sh can add new version/locked/*.ver while gen_version_def.sh
+          # leaves version_def.h unchanged — still must open a PR. `git status --porcelain`
+          # includes untracked paths under version/locked/.
+          if [[ -z "$(git status --porcelain -- version/locked userland/shell/version_def.h)" ]]; then
             echo "has_changes=false" >> "$GITHUB_OUTPUT"
             echo "No version/locked or version_def.h changes after finalize."
           else
