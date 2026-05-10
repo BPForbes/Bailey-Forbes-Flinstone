@@ -12,7 +12,7 @@ alwaysApply: true
 - **Do not** modify paths under **`version/locked/`** that are already present on the **target / merge-base** branch. After merge, those files are the **published** record; new prose belongs in **`version/entries/`**, then **`finalize_version_locked.sh`** (or **`make finalize-version-locked`**).
 - **Before merge:** **`version/entries/*.ver`** files that exist **only** on your feature branch may be edited or removed freely until you finalize.
 - **`version/entries/`** is where **`.ver`** files are authored and revised; **`version/locked/`** is the **published snapshot** (full copy of **`version/entries/`** at finalize time). Until the next finalize, **`version/entries/`** may contain **additional** files not yet in **`version/locked/`**.
-- **CI** enforces **`version/locked`** immutability on PRs (`check_version_locked_immutable.sh`) and requires every **`version/locked`** file to **byte-match** the same path under **`version/entries/`** (`check_version_locked_subset_of_entries.sh`).
+- **CI** enforces **`version/locked`** immutability on PRs (`check_version_locked_immutable.sh`; **`version/locked/ABOUT.txt`** is excluded as non-release prose) and requires every **`version/locked`** file to **byte-match** the same path under **`version/entries/`** (`check_version_locked_subset_of_entries.sh`).
 - **AI edits** must **skip** historical **`version/locked/**`** from bulk refactors.
 
 ## Canonical version & changelog
