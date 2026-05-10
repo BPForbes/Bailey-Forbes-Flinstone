@@ -1,0 +1,5 @@
+# Minor bump when published: host disk + VM jail work on this branch.
+MAJOR_VERSION=2
+STANDARD_VERSION=3
+RELEASE_VERSION=0
+DESCRIPTION=FAT32 binary host volumes (not text clusters), vm_hostfs/ VM jail, assembly-backed host pread/pwrite, separate entries/ and locked/ publish flow, and CI version checks.
