@@ -14,8 +14,8 @@
  * To bump: add version/entries/<A>_<B>_<C>_<slug>.ver, run ./scripts/finalize_version_locked.sh, then `make` or `./scripts/gen_version_def.sh`.
  */
 #define VERSION_MAJOR    2
-#define VERSION_STANDARD 2
-#define VERSION_PATCH    4
+#define VERSION_STANDARD 3
+#define VERSION_PATCH    0
 
 #define VERSION_STR_(x) #x
 #define VERSION_STR(x) VERSION_STR_(x)
