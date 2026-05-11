@@ -25,15 +25,15 @@ release_date_key_present() {
     }
     {
       t = normalize_record($0)
+      if (in_h) {
+        if (t == delim) in_h = 0
+        next
+      }
       if (length(t) == 0 || substr(t, 1, 1) == "#") next
       sk = t
       if (sk ~ /^int[[:space:]]+/) {
         sub(/^int[[:space:]]+/, "", sk)
         sk = normalize_record(sk)
-      }
-      if (in_h) {
-        if (t == delim) in_h = 0
-        next
       }
       if (index(sk, "DESCRIPTION<<") == 1) {
         rest = substr(sk, 14)
