@@ -41,6 +41,6 @@ int cmd_import_run(int argc, char **argv) {
         import_text_drive(srcpath, dstpath, count, size);
         return 0;
     }
-    printf("Usage: import <textfile> <txtfile> [clusters clusterSize]\n");
+    printf("Usage: import <listfile> <diskfile> [clusters clusterSize]\n");
     return 1;
 }

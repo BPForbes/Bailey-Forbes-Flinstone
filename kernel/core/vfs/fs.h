@@ -8,6 +8,6 @@ void list_directories(void);
 void cat_file(const char *f);
 void do_make_file(const char *filename);
 void do_redirect_output(const char *filename);
-void import_text_drive(const char *textFile, const char *destTxt, int overrideClusters, int overrideSize);
+void import_text_drive(const char *textFile, const char *dest_disk, int overrideClusters, int overrideSize);
 
 #endif /* FS_H */

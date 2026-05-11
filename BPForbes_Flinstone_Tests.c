@@ -85,7 +85,7 @@ void ensure_disk_exists(void) {
  * Helper: run a "-cd" test.
  *
  * Parameters:
- *    volume      - Volume name (disk file: "<volume>_disk" or "<volume>_disk.img" by cluster size)
+ *    volume      - Volume name (disk file: "<volume>_disk.dat" or "<volume>_disk.img" by cluster size)
  *    rowCount    - Number of clusters
  *    nibbleCount - Total number of nibbles (cluster size = nibbleCount/2)
  *    interactive - If nonzero, the "-y" flag is appended (simulated interactive mode)
@@ -114,7 +114,7 @@ void run_cd_test_mode(const char *volume, int rowCount, int nibbleCount, int int
             close(f);
         }
     } else {
-        snprintf(diskFileName, sizeof(diskFileName), "%s_disk", volume);
+        snprintf(diskFileName, sizeof(diskFileName), "%s_disk.dat", volume);
         FILE *fp = fopen(diskFileName, "r");
         CU_ASSERT_TRUE(fp != NULL);
         if (fp) {
@@ -133,14 +133,14 @@ void run_cd_test_mode(const char *volume, int rowCount, int nibbleCount, int int
  * Suite setup and cleanup functions
  *
  * suite_setup: Use a fixed seed and create a reproducible drive file.
- * This creates "test_drive_disk" and updates current_disk_file.
+ * This creates "test_drive_disk.dat" and updates current_disk_file.
  *
  * suite_cleanup: Remove all temporary files and directories created during testing.
  * -------------------------------------------------------------------------*/
 int suite_setup(void) {
     srand(12345);  /* Fixed seed for reproducibility */
-    flintstone_format_disk("test_drive", 8, 16);  /* Creates "test_drive_disk" */
-    strncpy(current_disk_file, "test_drive_disk", sizeof(current_disk_file)-1);
+    flintstone_format_disk("test_drive", 8, 16);  /* Creates "test_drive_disk.dat" */
+    strncpy(current_disk_file, "test_drive_disk.dat", sizeof(current_disk_file)-1);
     fs_service_glue_init();
     return 0;
 }
@@ -149,26 +149,16 @@ int suite_cleanup(void) {
     fs_service_glue_shutdown();
     /* List of known temporary files */
     const char *files[] = {
-         "test_drive_disk",
-         "testdisk.txt",
-         "mydisk.txt",
-         "tempdisk.txt",
-         "text_drive.txt",
-         "imported_disk.txt",
+         "test_drive_disk.dat",
+         "testdisk.dat",
+         "mydisk.dat",
+         "tempdisk.dat",
+         "import_src_list.dat",
+         "imported_disk.dat",
          "testfile.txt",
          "test_output.txt",
-         HISTORY_FILE,  /* e.g., "shell_history.txt" */
-         "cdbatch1_disk",
-         "cdbatch2_disk",
-         "cdbatch3_disk",
-         "cdbatch_extra1_disk",
-         "cdbatch_extra2_disk",
-         "cdinter1_disk",
-         "cdinter2_disk",
-         "cdinter3_disk",
-         "cdinter_extra1_disk",
-         "cdinter_extra2_disk",
-         "test_disk.txt",
+         HISTORY_FILE,
+         "type_cat_sample.dat",
          "int_undo_test.txt",
          "fat_stor.img",
          "bin_src.dat",
@@ -191,6 +181,9 @@ int suite_cleanup(void) {
             if (L >= 9 && strcmp(entry->d_name + L - 9, "_disk.img") == 0) {
                 if (remove(entry->d_name) != 0)
                     perror(entry->d_name);
+            } else if (L >= 9 && strcmp(entry->d_name + L - 9, "_disk.dat") == 0) {
+                if (remove(entry->d_name) != 0)
+                    perror(entry->d_name);
             } else if (L >= 5 && strcmp(entry->d_name + L - 5, "_disk") == 0 &&
                        strchr(entry->d_name, '.') == NULL) {
                 if (remove(entry->d_name) != 0)
@@ -198,20 +191,6 @@ int suite_cleanup(void) {
             }
         }
         closedir(dir);
-    }
-    /* Additionally, scan for any .txt file generated during testing and remove it */
-    dir = opendir(".");
-    if (dir) {
-         struct dirent *entry;
-         while ((entry = readdir(dir)) != NULL) {
-              char *dot = strrchr(entry->d_name, '.');
-              if (dot && strcmp(dot, ".txt") == 0) {
-                  if (remove(entry->d_name) != 0) {
-                      perror(entry->d_name);
-                  }
-              }
-         }
-         closedir(dir);
     }
     /* Remove any directories created by tests */
     rmdir("test_dir");
@@ -282,7 +261,7 @@ void test_l_command(void) {
 
 void test_s_command(void) {
     print_test_header("search (-s)");
-    FILE *fp = fopen("testdisk.txt", "w");
+    FILE *fp = fopen("testdisk.dat", "w");
     CU_ASSERT_PTR_NOT_NULL(fp);
     if (fp) {
         fprintf(fp, "XX:12345678\n");
@@ -291,23 +270,23 @@ void test_s_command(void) {
         fclose(fp);
     }
     CU_ASSERT_TRUE(execute_command_str("search ABCD") == 0);
-    remove("testdisk.txt");
+    remove("testdisk.dat");
 }
 
 void test_w_command(void) {
     print_test_header("write (-w)");
-    FILE *fp = fopen("testdisk.txt", "w");
+    FILE *fp = fopen("testdisk.dat", "w");
     CU_ASSERT_PTR_NOT_NULL(fp);
     if (fp) {
         fprintf(fp, "XX:12345678\n");
         fprintf(fp, "00:00000000\n");
         fclose(fp);
     }
-    strcpy(current_disk_file, "testdisk.txt");
+    strcpy(current_disk_file, "testdisk.dat");
     g_total_clusters = 1;
     g_cluster_size = 4;
     CU_ASSERT_TRUE(execute_command_str("writecluster 0 -t TEST") == 0);
-    fp = fopen("testdisk.txt", "r");
+    fp = fopen("testdisk.dat", "r");
     CU_ASSERT_PTR_NOT_NULL(fp);
     if (fp) {
         char buf[256];
@@ -316,23 +295,23 @@ void test_w_command(void) {
         CU_ASSERT_TRUE(strstr(buf, "54455354") != NULL);
         fclose(fp);
     }
-    remove("testdisk.txt");
+    remove("testdisk.dat");
 }
 
 void test_d_command(void) {
     print_test_header("delete (-d)");
-    FILE *fp = fopen("testdisk.txt", "w");
+    FILE *fp = fopen("testdisk.dat", "w");
     CU_ASSERT_PTR_NOT_NULL(fp);
     if (fp) {
         fprintf(fp, "XX:12345678\n");
         fprintf(fp, "00:11111111\n");
         fclose(fp);
     }
-    strcpy(current_disk_file, "testdisk.txt");
+    strcpy(current_disk_file, "testdisk.dat");
     g_total_clusters = 1;
     g_cluster_size = 4;
     CU_ASSERT_TRUE(execute_command_str("delcluster 0") == 0);
-    fp = fopen("testdisk.txt", "r");
+    fp = fopen("testdisk.dat", "r");
     CU_ASSERT_PTR_NOT_NULL(fp);
     if (fp) {
         char buf[256];
@@ -341,23 +320,23 @@ void test_d_command(void) {
         CU_ASSERT_TRUE(strstr(buf, "00000000") != NULL);
         fclose(fp);
     }
-    remove("testdisk.txt");
+    remove("testdisk.dat");
 }
 
 void test_up_command(void) {
     print_test_header("update (-up)");
-    FILE *fp = fopen("testdisk.txt", "w");
+    FILE *fp = fopen("testdisk.dat", "w");
     CU_ASSERT_PTR_NOT_NULL(fp);
     if (fp) {
         fprintf(fp, "XX:12345678\n");
         fprintf(fp, "00:11111111\n");
         fclose(fp);
     }
-    strcpy(current_disk_file, "testdisk.txt");
+    strcpy(current_disk_file, "testdisk.dat");
     g_total_clusters = 1;
     g_cluster_size = 4;
     CU_ASSERT_TRUE(execute_command_str("update 0 -t NEW") == 0);
-    fp = fopen("testdisk.txt", "r");
+    fp = fopen("testdisk.dat", "r");
     CU_ASSERT_PTR_NOT_NULL(fp);
     if (fp) {
         char buf[256];
@@ -366,26 +345,26 @@ void test_up_command(void) {
         CU_ASSERT_TRUE(strstr(buf, "11111111") == NULL);
         fclose(fp);
     }
-    remove("testdisk.txt");
+    remove("testdisk.dat");
 }
 
 void test_f_command(void) {
     print_test_header("set disk file (-f)");
-    FILE *fp = fopen("mydisk.txt", "w");
+    FILE *fp = fopen("mydisk.dat", "w");
     CU_ASSERT_PTR_NOT_NULL(fp);
     if (fp) {
         fprintf(fp, "XX:12345678\n");
         fprintf(fp, "00:00000000\n");
         fclose(fp);
     }
-    CU_ASSERT_TRUE(execute_command_str("setdisk mydisk.txt") == 0);
-    CU_ASSERT_TRUE(strcmp(current_disk_file, "mydisk.txt") == 0);
-    remove("mydisk.txt");
+    CU_ASSERT_TRUE(execute_command_str("setdisk mydisk.dat") == 0);
+    CU_ASSERT_TRUE(strcmp(current_disk_file, "mydisk.dat") == 0);
+    remove("mydisk.dat");
 }
 
 void test_F_command(void) {
     print_test_header("format disk (-F)");
-    FILE *fp = fopen("tempdisk.txt", "w");
+    FILE *fp = fopen("tempdisk.dat", "w");
     CU_ASSERT_PTR_NOT_NULL(fp);
     if (fp) {
         fprintf(fp, "XX:12345678\n");
@@ -394,8 +373,8 @@ void test_F_command(void) {
         }
         fclose(fp);
     }
-    CU_ASSERT_TRUE(execute_command_str("format tempdisk.txt testvol 4 16") == 0);
-    fp = fopen("tempdisk.txt", "r");
+    CU_ASSERT_TRUE(execute_command_str("format tempdisk.dat testvol 4 16") == 0);
+    fp = fopen("tempdisk.dat", "r");
     CU_ASSERT_PTR_NOT_NULL(fp);
     if (fp) {
          char header[256];
@@ -403,7 +382,7 @@ void test_F_command(void) {
          CU_ASSERT_TRUE(strncmp(header, "XX:", 3) == 0);
          fclose(fp);
     }
-    remove("tempdisk.txt");
+    remove("tempdisk.dat");
 }
 
 /* ---------------------------------------------------------------------------
@@ -412,7 +391,7 @@ void test_F_command(void) {
 /* Test the short disk usage report (-du) */
 void test_du_command(void) {
     print_test_header("disk usage (-du)");
-    FILE *fp = fopen("mydisk.txt", "w");
+    FILE *fp = fopen("mydisk.dat", "w");
     CU_ASSERT_PTR_NOT_NULL(fp);
     if (fp) {
          /* Write header and one cluster with nonzero data */
@@ -423,7 +402,7 @@ void test_du_command(void) {
          g_cluster_size = 4;
     }
     CU_ASSERT_TRUE(execute_command_str("du") == 0);
-    remove("mydisk.txt");
+    remove("mydisk.dat");
 }
 
 /* Test the detailed disk usage report (-du -dtl)
@@ -433,7 +412,7 @@ void test_du_command(void) {
 */
 void test_du_dtl_command(void) {
     print_test_header("disk usage detail (-du -dtl)");
-    FILE *fp = fopen("mydisk.txt", "w");
+    FILE *fp = fopen("mydisk.dat", "w");
     CU_ASSERT_PTR_NOT_NULL(fp);
     if (fp) {
          fprintf(fp, "XX:01234567\n");
@@ -446,7 +425,7 @@ void test_du_dtl_command(void) {
          g_cluster_size = 4;
     }
     CU_ASSERT_TRUE(execute_command_str("du dtl 0 1") == 0);
-    remove("mydisk.txt");
+    remove("mydisk.dat");
 }
 
 /* ---------------------------------------------------------------------------
@@ -456,19 +435,14 @@ void test_du_dtl_command(void) {
  * -------------------------------------------------------------------------*/
 void test_type_command(void) {
     print_test_header("file display (-type)");
-    FILE *fp = fopen("test_disk.txt", "w");
+    FILE *fp = fopen("type_cat_sample.dat", "w");
     CU_ASSERT_PTR_NOT_NULL(fp);
     if (fp) {
-         fprintf(fp, "XX:01234567\n");
-         /* Set cluster size to 16 bytes for this test */
-         g_cluster_size = 16;
-         char *hex = convert_data_to_hex("Hello, CUnit Test!\n", 1, g_cluster_size);
-         fprintf(fp, "00:%s\n", hex);
-         free(hex);
+         fprintf(fp, "Hello, CUnit Test!\n");
          fclose(fp);
     }
-    CU_ASSERT_TRUE(execute_command_str("type testfile.txt") == 0);
-    remove("test_disk.txt");
+    CU_ASSERT_TRUE(execute_command_str("type type_cat_sample.dat") == 0);
+    remove("type_cat_sample.dat");
 }
 
 /* ---------------------------------------------------------------------------
@@ -576,7 +550,7 @@ void test_uc_command(void) {
 
 void test_import_command(void) {
     print_test_header("import text drive (-import)");
-    FILE *fp = fopen("text_drive.txt", "w");
+    FILE *fp = fopen("import_src_list.dat", "w");
     CU_ASSERT_PTR_NOT_NULL(fp);
     if (fp) {
          fprintf(fp, "XX:01234567\n");
@@ -584,18 +558,18 @@ void test_import_command(void) {
          fprintf(fp, "01:12345678\n");
          fclose(fp);
     }
-    CU_ASSERT_TRUE(execute_command_str("import text_drive.txt imported_disk.txt") == 0);
-    fp = fopen("imported_disk.txt", "r");
+    CU_ASSERT_TRUE(execute_command_str("import import_src_list.dat imported_disk.dat") == 0);
+    fp = fopen("imported_disk.dat", "r");
     CU_ASSERT_PTR_NOT_NULL(fp);
     if (fp)
          fclose(fp);
-    remove("text_drive.txt");
-    remove("imported_disk.txt");
+    remove("import_src_list.dat");
+    remove("imported_disk.dat");
 }
 
 void test_print_command(void) {
     print_test_header("print disk (-print)");
-    FILE *fp = fopen("mydisk.txt", "w");
+    FILE *fp = fopen("mydisk.dat", "w");
     CU_ASSERT_PTR_NOT_NULL(fp);
     if (fp) {
          fprintf(fp, "XX:01234567\n");
@@ -603,7 +577,7 @@ void test_print_command(void) {
          fclose(fp);
     }
     CU_ASSERT_TRUE(execute_command_str("printdisk") == 0);
-    remove("mydisk.txt");
+    remove("mydisk.dat");
 }
 
 void test_clear_command(void) {
@@ -1014,10 +988,10 @@ void test_interpreter_format_blocked_outside_jail(void) {
     CU_ASSERT_TRUE(fs_jail_is_active() == 1);
 
     /* Attempt to format a disk outside the jail */
-    int ret = execute_command_str("format /tmp/outside_disk.txt testvol 4 16");
+    int ret = execute_command_str("format /tmp/outside_disk.dat testvol 4 16");
     CU_ASSERT_TRUE(ret == 1);
     /* Confirm no file was created */
-    CU_ASSERT_TRUE(access("/tmp/outside_disk.txt", F_OK) != 0);
+    CU_ASSERT_TRUE(access("/tmp/outside_disk.dat", F_OK) != 0);
 }
 
 void test_interpreter_format_allowed_inside_jail(void) {
@@ -1025,7 +999,7 @@ void test_interpreter_format_allowed_inside_jail(void) {
     CU_ASSERT_TRUE(fs_jail_is_active() == 1);
 
     char diskfile[PATH_MAX];
-    snprintf(diskfile, sizeof(diskfile), "%s/jail_disk.txt", g_fs_jail_root);
+    snprintf(diskfile, sizeof(diskfile), "%s/jail_disk.dat", g_fs_jail_root);
 
     /* format <path> <vol> <rows> <nibbles> */
     char cmd[512];
@@ -1041,14 +1015,14 @@ void test_interpreter_setdisk_blocked_outside_jail(void) {
     CU_ASSERT_TRUE(fs_jail_is_active() == 1);
 
     /* Create a disk file outside the jail */
-    const char *outside = "/tmp/outside_setdisk.txt";
+    const char *outside = "/tmp/outside_setdisk.dat";
     FILE *f = fopen(outside, "w");
     if (f) { fprintf(f, "XX:00000000\n00:00000000\n"); fclose(f); }
 
     char saved_disk[sizeof(current_disk_file)];
     strncpy(saved_disk, current_disk_file, sizeof(saved_disk) - 1);
 
-    int ret = execute_command_str("setdisk /tmp/outside_setdisk.txt");
+    int ret = execute_command_str("setdisk /tmp/outside_setdisk.dat");
     CU_ASSERT_TRUE(ret == 1);
     /* current_disk_file must remain unchanged */
     CU_ASSERT_TRUE(strcmp(current_disk_file, saved_disk) == 0);
@@ -1062,7 +1036,7 @@ void test_interpreter_setdisk_allowed_inside_jail(void) {
 
     /* Create a valid disk file inside the jail */
     char diskfile[PATH_MAX];
-    snprintf(diskfile, sizeof(diskfile), "%s/setdisk_inside.txt", g_fs_jail_root);
+    snprintf(diskfile, sizeof(diskfile), "%s/setdisk_inside.dat", g_fs_jail_root);
     FILE *f = fopen(diskfile, "w");
     CU_ASSERT_PTR_NOT_NULL(f);
     if (f) {
