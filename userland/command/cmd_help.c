@@ -6,6 +6,6 @@
 int cmd_help_maybe(const char *trimmed) {
     if (strcmp(trimmed, "help") != 0)
         return 0;
-    printf("%s\n", HELP_MSG);
+    fl_print_help_message();
     return 1;
 }

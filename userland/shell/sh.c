@@ -2,7 +2,6 @@
  * BPForbes_Flinstone_Shell – Single-Session Thread-Pool Shell (Interactive &
  *                              Batch Modes)
  * ----------------------------------------------------------------------------
- * Date: 03/07/25
  * Author: Bailey Forbes
  * CSCI P436 Projects: P03, P05, P07, P08, & P09
  *
@@ -201,7 +200,7 @@ int main(int argc, char *argv[]) {
     /* Fast path: single commands that need no init (no allocation) */
     if (argc == 2 && argv[1]) {
         if (strcmp(argv[1], "help") == 0) {
-            printf("%s\n", HELP_MSG);
+            fl_print_help_message();
             exit(0);
         }
         if (strcmp(argv[1], "version") == 0 || strcmp(argv[1], "-v") == 0) {
@@ -307,7 +306,7 @@ int main(int argc, char *argv[]) {
 
     /* No args: help and exit, unless -Virtualization -y -vm (then run shell after guest VM) */
     if (argc < 2 && !(g_vm_mode && g_vm_run_embedded)) {
-        printf("%s\n", HELP_MSG);
+        fl_print_help_message();
         exit(0);
     }
 

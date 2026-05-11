@@ -1,5 +1,19 @@
 Version release notes use *.ver files (MAJOR_VERSION, STANDARD_VERSION,
-RELEASE_VERSION or MINOR_VERSION / VERSION_PATCH, and DESCRIPTION).
+RELEASE_VERSION or MINOR_VERSION / VERSION_PATCH, DESCRIPTION, and optional
+RELEASE_DATE).
+
+DESCRIPTION may be:
+  - One line:   DESCRIPTION=...
+  - Multiline:  DESCRIPTION<<DELIM
+                ...any amount of text, multiple lines...
+                DELIM
+                (closing line is DELIM alone after trim; newlines are kept.)
+
+Optional RELEASE_DATE=YYYY-MM-DD records the release calendar day. If omitted,
+scripts/gen_version_changelog.c uses the local calendar date at generation time
+(time.h). After a push to develop, version-lock GitHub Actions runs
+stamp_version_release_date.sh (after finalize) to append RELEASE_DATE to any *.ver
+that does not already have one, in both version/locked and version/entries.
 
 version/entries/  — author and edit .ver release notes here before finalize.
 version/locked/   — published snapshot: replaced by copying entries → locked.

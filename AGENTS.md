@@ -62,7 +62,8 @@ Author each release as **`.ver`** files under **`version/entries/`** (see **`ver
 - **`MAJOR_VERSION`** (alias **`VERSION_MAJOR`**)
 - **`STANDARD_VERSION`** (alias **`VERSION_STANDARD`**)
 - **`RELEASE_VERSION`** — third component **C** (aliases **`MINOR_VERSION`**, **`VERSION_PATCH`**)
-- **`DESCRIPTION`** — single line, max **1023** characters (quotes optional)
+- **`DESCRIPTION`** — single line (`DESCRIPTION=...`) or multiline heredoc (`DESCRIPTION<<TAG` … `TAG`); see `version/entries/ABOUT.txt`
+- **`RELEASE_DATE`** — optional `YYYY-MM-DD`; if omitted, `scripts/gen_version_changelog.c` uses the generator’s local calendar date (`time.h`), and **Version lock on merge** runs `stamp_version_release_date.sh` after finalize to append the merge date to `.ver` files missing this key
 
 On a **feature branch before merge**, you may freely add, edit, or remove **`.ver`** files under **`version/entries/`** that are **not** yet reflected in **`version/locked/`**.
 

@@ -44,6 +44,9 @@ jobs:
       - name: Finalize version (copy version/entries to version/locked)
         run: ./scripts/finalize_version_locked.sh
 
+      - name: Stamp RELEASE_DATE on .ver files (merge calendar date)
+        run: ./scripts/stamp_version_release_date.sh
+
       - name: Regenerate version header
         run: ./scripts/gen_version_def.sh
 
@@ -72,9 +75,11 @@ jobs:
           branch: cursor/version-lock-from-entries-${{ github.run_id }}
           title: "chore(version): sync version/locked from entries after merge to develop"
           body: |
-            Automated sync after a push to `develop`: ran `finalize_version_locked.sh` and `gen_version_def.sh`.
+            Automated sync after a push to `develop`: ran `finalize_version_locked.sh`, `stamp_version_release_date.sh`, and `gen_version_def.sh`.
 
             **Branch protection** on `develop` (PR-only, required checks, verified signatures) means the sync cannot land as a direct push. Merge this PR to publish `version/locked/` and `userland/shell/version_def.h`.
+
+            `stamp_version_release_date.sh` appends `RELEASE_DATE=YYYY-MM-DD` (merge day) to any `*.ver` under `version/locked` and `version/entries` that does not already declare `RELEASE_DATE`, keeping the trees identical before changelog generation in CI.
 
             Uses **`BPFORBES_PAT`** or **`VERSION_LOCK_PAT`** when set; otherwise **`GITHUB_TOKEN`**. Auto-merge is enabled by the workflow when the PR is opened (waits for all required checks, including CodeRabbit if configured).
 
