@@ -1,5 +1,0 @@
-# Patch: interactive shell line editing and version builtin behavior.
-MAJOR_VERSION=3
-STANDARD_VERSION=0
-RELEASE_VERSION=1
-DESCRIPTION=Interactive shell: treat ASCII BS (8) like DEL (127) for backspace; version builtin returns instead of exit(0) so the session is not terminated after printing version or history prompt.
