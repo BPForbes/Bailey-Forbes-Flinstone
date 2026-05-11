@@ -1,6 +1,11 @@
 # Makefile
-# ARCH: x86_64_gas (default), x86_64_nasm, arm
-ARCH ?= x86_64_gas
+# ARCH: x86_64_gas (default on typical desktops), x86_64_nasm, arm (AArch64).
+# On Linux arm64 (e.g. Raspberry Pi OS 64-bit), default ARCH is arm so plain `make`
+# does not feed x86-64 assembly to the AArch64 assembler (errors like unknown mnemonic `cli`).
+UNAME_S := $(shell uname -s 2>/dev/null)
+UNAME_M := $(shell uname -m 2>/dev/null)
+ARCH ?= $(if $(and $(filter Linux,$(UNAME_S)),$(filter aarch64 arm64,$(UNAME_M))),arm,x86_64_gas)
+ARM64_LINUX_HOST := $(and $(filter Linux,$(UNAME_S)),$(filter aarch64 arm64,$(UNAME_M)))
 
 # Compiler and flags
 CC = gcc
@@ -19,8 +24,14 @@ ASMSRCS_ALLOC = arch/x86_64/nasm/alloc_core.asm arch/x86_64/nasm/alloc_malloc.as
 ASM_SRC_DIR = arch/x86_64/nasm
 KERNEL_DRIVERS = kernel/arch/x86_64/drivers
 else ifeq ($(ARCH),arm)
+ifeq ($(ARM64_LINUX_HOST),)
 CC = aarch64-linux-gnu-gcc
 AS = aarch64-linux-gnu-as
+else
+# Same triplet as aarch64-linux-gnu-*; avoids requiring the cross package on the device.
+CC = gcc
+AS = as
+endif
 ASMSRCS_BASE = arch/arm/gas/mem_asm.s arch/arm/gas/port_io.s arch/arm/gas/disk_host_io.s kernel/arch/aarch64/boot/spinlock.s kernel/arch/aarch64/drivers/ramdisk.s \
                kernel/arch/aarch64/boot/vectors.s
 ASMSRCS_ALLOC = arch/arm/gas/alloc_core.s arch/arm/gas/alloc_malloc.s arch/arm/gas/alloc_free.s
