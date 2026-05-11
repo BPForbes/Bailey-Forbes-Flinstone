@@ -1,15 +1,17 @@
 #include "common.h"
 #include "cmd_decl.h"
+#include "util.h"
 #include <stdio.h>
 #include <string.h>
+#include <unistd.h>
+#include <unistd.h>
 
 int cmd_history_maybe(const char *trimmed) {
     if (strcmp(trimmed, "history") != 0 && strcmp(trimmed, "his") != 0)
         return 0;
-    pthread_mutex_lock(&history_mutex);
-    FILE *hf = fopen(HISTORY_FILE, "r");
+    char tmp[HISTORY_STAGING_PATH_SZ];
+    FILE *hf = history_fopen_read(tmp);
     if (!hf) {
-        pthread_mutex_unlock(&history_mutex);
         printf("No history.\n");
         return 1;
     }
@@ -18,6 +20,7 @@ int cmd_history_maybe(const char *trimmed) {
     while (fgets(l2, sizeof(l2), hf))
         printf("[%d] %s", idx++, l2);
     fclose(hf);
-    pthread_mutex_unlock(&history_mutex);
+    if (tmp[0])
+        unlink(tmp);
     return 1;
 }
