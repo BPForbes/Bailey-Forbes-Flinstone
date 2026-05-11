@@ -1,0 +1,11 @@
+# Multiline DESCRIPTION, RELEASE_DATE, and changelog stamping
+MAJOR_VERSION=3
+STANDARD_VERSION=1
+RELEASE_VERSION=0
+DESCRIPTION<<END
+Unlimited release prose: DESCRIPTION may use a heredoc (DESCRIPTION<<TAG … TAG).
+Optional RELEASE_DATE=YYYY-MM-DD; if omitted, scripts/gen_version_changelog.c fills
+the calendar date from time(3) at generation time. Version lock on merge runs
+stamp_version_release_date.sh after finalize to append RELEASE_DATE to .ver files
+that do not already have one (entries and locked stay aligned).
+END
