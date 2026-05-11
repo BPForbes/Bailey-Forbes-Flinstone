@@ -76,26 +76,32 @@ static int buf_reserve(Buf *b, size_t extra) {
     return 0;
 }
 
-static void buf_append_bytes(Buf *b, const char *s, size_t n) {
+static int buf_append_bytes(Buf *b, const char *s, size_t n) {
     if (buf_reserve(b, n) != 0)
-        return;
+        return -1;
     memcpy(b->p + b->len, s, n);
     b->len += n;
     b->p[b->len] = '\0';
+    return 0;
 }
 
-static void buf_append_cstr(Buf *b, const char *s) {
-    buf_append_bytes(b, s, strlen(s));
+static int buf_append_cstr(Buf *b, const char *s) {
+    return buf_append_bytes(b, s, strlen(s));
 }
 
-static void buf_append_fmt(Buf *b, const char *fmt, ...) {
+static int buf_append_fmt(Buf *b, const char *fmt, ...) {
     char tmp[4096];
     va_list ap;
     va_start(ap, fmt);
     int n = vsnprintf(tmp, sizeof tmp, fmt, ap);
     va_end(ap);
-    if (n > 0 && n < (int)sizeof tmp)
-        buf_append_bytes(b, tmp, (size_t)n);
+    if (n < 0)
+        return -1;
+    if (n >= (int)sizeof tmp)
+        return -1;
+    if (n == 0)
+        return 0;
+    return buf_append_bytes(b, tmp, (size_t)n);
 }
 
 static void buf_free(Buf *b) {
@@ -372,9 +378,24 @@ static int parse_ver_file(const char *fullpath, const char *relpath, VerEntry *e
                     found = 1;
                     break;
                 }
-                if (acc.len)
-                    buf_append_cstr(&acc, "\n");
-                buf_append_cstr(&acc, lines[i]);
+                if (acc.len) {
+                    if (buf_append_cstr(&acc, "\n") != 0) {
+                        fprintf(stderr,
+                                "gen_version_changelog: out of memory accumulating "
+                                "DESCRIPTION in %s\n",
+                                fullpath);
+                        buf_free(&acc);
+                        goto bad;
+                    }
+                }
+                if (buf_append_cstr(&acc, lines[i]) != 0) {
+                    fprintf(stderr,
+                            "gen_version_changelog: out of memory accumulating "
+                            "DESCRIPTION in %s\n",
+                            fullpath);
+                    buf_free(&acc);
+                    goto bad;
+                }
                 i++;
             }
             if (!found) {
@@ -384,8 +405,16 @@ static int parse_ver_file(const char *fullpath, const char *relpath, VerEntry *e
                 goto bad;
             }
             free(desc);
-            desc = acc.p ? acc.p : strdup("");
-            acc.p = NULL;
+            if (acc.p) {
+                desc = acc.p;
+                acc.p = NULL;
+            } else {
+                desc = strdup("");
+                if (!desc) {
+                    buf_free(&acc);
+                    goto bad;
+                }
+            }
             buf_free(&acc);
             continue;
         }
@@ -485,22 +514,29 @@ bad:
     return -1;
 }
 
-static void append_escaped(Buf *out, const char *s) {
+static int append_escaped(Buf *out, const char *s) {
     for (const unsigned char *p = (const unsigned char *)s; *p; p++) {
         unsigned char c = *p;
-        if (c == '\\')
-            buf_append_cstr(out, "\\\\");
-        else if (c == '"')
-            buf_append_cstr(out, "\\\"");
-        else if (c == '\r')
+        if (c == '\\') {
+            if (buf_append_cstr(out, "\\\\") != 0)
+                return -1;
+        } else if (c == '"') {
+            if (buf_append_cstr(out, "\\\"") != 0)
+                return -1;
+        } else if (c == '\r')
             continue;
-        else if (c == '\n')
-            buf_append_cstr(out, "\\n");
-        else if (c >= 32 && c < 127)
-            buf_append_fmt(out, "%c", c);
-        else
-            buf_append_fmt(out, "\\x%02x", c);
+        else if (c == '\n') {
+            if (buf_append_cstr(out, "\\n") != 0)
+                return -1;
+        } else if (c >= 32 && c < 127) {
+            if (buf_append_fmt(out, "%c", c) != 0)
+                return -1;
+        } else {
+            if (buf_append_fmt(out, "\\x%02x", c) != 0)
+                return -1;
+        }
     }
+    return 0;
 }
 
 static int cmp_entry_desc(const void *a, const void *b) {
@@ -513,6 +549,16 @@ static int cmp_entry_desc(const void *a, const void *b) {
     if (ea->rel != eb->rel)
         return eb->rel - ea->rel;
     return strcmp(ea->relpath, eb->relpath);
+}
+
+static int gen_oom_cleanup(Buf *hdr, Buf *bd, Buf *ent, VerEntry *lst, size_t n) {
+    if (ent)
+        buf_free(ent);
+    buf_free(hdr);
+    buf_free(bd);
+    ver_list_free(lst, n);
+    fprintf(stderr, "gen_version_changelog: out of memory\n");
+    return 1;
 }
 
 int main(int argc, char **argv) {
@@ -637,19 +683,22 @@ int main(int argc, char **argv) {
     }
 
     Buf header_line = {0};
-    buf_append_fmt(&header_line,
-                   "%s (%s) - changelog from version/locked (*.ver); see AGENTS.md\n",
-                   ver_buf, headline_date);
-
     Buf body = {0};
-    buf_append_cstr(&body,
-                    "/* Generated by scripts/gen_version_changelog.c — do not edit "
-                    "by hand */\n\n");
-    buf_append_cstr(&body, "#include \"version_def.h\"\n\n");
-    buf_append_cstr(&body, "const char VERSION_CHANGELOG[] =\n");
-    buf_append_cstr(&body, "    \"");
-    append_escaped(&body, header_line.p ? header_line.p : "");
-    buf_append_cstr(&body, "\"\n");
+
+    if (buf_append_fmt(&header_line,
+                       "%s (%s) - changelog from version/locked (*.ver); see AGENTS.md\n",
+                       ver_buf, headline_date) != 0)
+        return gen_oom_cleanup(&header_line, &body, NULL, list, nent);
+
+    if (buf_append_cstr(&body,
+                        "/* Generated by scripts/gen_version_changelog.c — do not edit "
+                        "by hand */\n\n") != 0 ||
+        buf_append_cstr(&body, "#include \"version_def.h\"\n\n") != 0 ||
+        buf_append_cstr(&body, "const char VERSION_CHANGELOG[] =\n") != 0 ||
+        buf_append_cstr(&body, "    \"") != 0 ||
+        append_escaped(&body, header_line.p ? header_line.p : "") != 0 ||
+        buf_append_cstr(&body, "\"\n") != 0)
+        return gen_oom_cleanup(&header_line, &body, NULL, list, nent);
     buf_free(&header_line);
 
     if (nent > 0) {
@@ -658,26 +707,35 @@ int main(int argc, char **argv) {
             char dbuf[16];
             resolve_entry_date_iso(e, dbuf, sizeof dbuf);
             Buf entrybuf = {0};
-            buf_append_fmt(&entrybuf, "%d.%d.%d (%s)\n", e->ma, e->st, e->rel, dbuf);
-            buf_append_cstr(&entrybuf, e->desc);
-            buf_append_cstr(&entrybuf, "\n(");
-            buf_append_cstr(&entrybuf, e->relpath);
-            buf_append_cstr(&entrybuf, ")\n");
-            buf_append_cstr(&body, "    \"");
-            append_escaped(&body, entrybuf.p ? entrybuf.p : "");
-            buf_append_cstr(&body, "\"\n");
+            if (buf_append_fmt(&entrybuf, "%d.%d.%d (%s)\n", e->ma, e->st, e->rel, dbuf) != 0 ||
+                buf_append_cstr(&entrybuf, e->desc) != 0 ||
+                buf_append_cstr(&entrybuf, "\n(") != 0 ||
+                buf_append_cstr(&entrybuf, e->relpath) != 0 ||
+                buf_append_cstr(&entrybuf, ")\n") != 0 ||
+                buf_append_cstr(&body, "    \"") != 0 ||
+                append_escaped(&body, entrybuf.p ? entrybuf.p : "") != 0 ||
+                buf_append_cstr(&body, "\"\n") != 0)
+                return gen_oom_cleanup(&header_line, &body, &entrybuf, list, nent);
             buf_free(&entrybuf);
         }
     } else {
-        buf_append_cstr(&body, "    \"");
-        append_escaped(&body,
-                       "(no version/locked/*.ver files — finalize from version/entries first)\n");
-        buf_append_cstr(&body, "\"\n");
+        if (buf_append_cstr(&body, "    \"") != 0 ||
+            append_escaped(&body,
+                           "(no version/locked/*.ver files — finalize from version/entries first)\n") !=
+                0 ||
+            buf_append_cstr(&body, "\"\n") != 0)
+            return gen_oom_cleanup(&header_line, &body, NULL, list, nent);
     }
 
     ver_list_free(list, nent);
+    list = NULL;
+    nent = 0;
 
-    buf_append_cstr(&body, ";\n");
+    if (buf_append_cstr(&body, ";\n") != 0) {
+        buf_free(&body);
+        fprintf(stderr, "gen_version_changelog: out of memory\n");
+        return 1;
+    }
 
     {
         char dir_copy[PATH_MAX];

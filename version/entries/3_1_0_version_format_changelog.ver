@@ -10,4 +10,5 @@ stamp_version_release_date.sh after finalize to append RELEASE_DATE to .ver file
 that do not already have one (entries and locked stay aligned).
 gen_version_changelog rejects malformed RELEASE_DATE values (strict YYYY-MM-DD).
 The stamp script ignores lines inside DESCRIPTION heredocs when deciding whether to append.
+gen_version_changelog Buf helpers return errors on realloc failure so DESCRIPTION/changelog assembly cannot truncate silently.
 END
