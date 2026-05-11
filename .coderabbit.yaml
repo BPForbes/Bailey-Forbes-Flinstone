@@ -8,22 +8,22 @@ reviews:
   instructions: |
     ## Version & releases
 
-    **Shipped version** comes from **`version/locked/*.ver`**: the highest **A.B.C** there is emitted into **`userland/shell/version_def.h`** by **`scripts/gen_version_def.sh`** (also via **`make`**). Author **`version/entries/*.ver`** files; pushing to **`develop`** runs **Version lock on merge** in GitHub Actions (copies **entries → locked**, regenerates the header, opens a PR into **`develop`** when there are changes). **`scripts/gen_version_changelog.c`** reads **`version/locked`**, then CI builds with **`CHANGELOG_CI=1`**. **`make finalize-version-locked`** is still available locally before merge.
+    **Shipped version** comes from **`version/locked/*.ver`**: the highest **A.B.C** there is emitted into **`userland/shell/version_def.h`** by **`scripts/gen_version_def.sh`** (also via **`make`**). Author **`version/entries/*.ver`** files; pushing to **`develop`** runs **Version lock on merge** in GitHub Actions (copies **entries → locked**, regenerates the header, opens a PR into **`develop`** when there are changes). **`scripts/gen_version_changelog.c`** reads **`version/locked`**, then CI builds with **`CHANGELOG_CI=1`**. **Maintainers** may run **`make finalize-version-locked`** locally before merge.
 
-    **AI-authored feature PRs:** On the **first** substantive code change, **add** **`version/entries/*.ver`** if none exists yet for that PR. Prefer **one** **`.ver`** file for the **entire** PR—revise that same file as work progresses instead of adding several entry files per branch.
+    **AI-authored feature PRs:** On the **first** substantive code change, **add** **`version/entries/*.ver`** if none exists yet for that PR. Prefer **one** **`.ver`** file for the **entire** PR—revise that same file as work progresses instead of adding several entry files per branch. **Do not** commit **`version/locked/**`** or **`userland/shell/version_def.h`** in those PRs (automation publishes them after merge to **`develop`**). Keep **`version/entries/ABOUT.txt`** byte-identical to the merge target’s **`version/locked/ABOUT.txt`** while **`version/locked/`** matches the target.
 
     ### Lock system — never edit historical published files
 
-    - **Do not** approve edits to paths under **`version/locked/`** that already exist on the **merge base / target branch** (published record). New release prose: add **`version/entries/*.ver`**; **`version/locked/`** updates when the **Version lock** automation PR merges to **`develop`** (or via **`finalize_version_locked.sh`** locally).
+    - **Do not** approve edits to paths under **`version/locked/`** that already exist on the **merge base / target branch** (published record). New release prose: add **`version/entries/*.ver`**; **`version/locked/`** updates when the **Version lock** automation PR merges to **`develop`** (or via **`finalize_version_locked.sh`** run by **maintainers** locally).
     - **`version/entries/`** may contain **extra** `.ver` files not yet in **`version/locked/`** until that merge (or a local finalize). CI requires every **`version/locked/`** file to **byte-match** the same relative path under **`version/entries/`** (`check_version_locked_subset_of_entries.sh`).
     - AI-assisted refactors must **exclude** historical **`version/locked/**`** from bulk edits.
 
     When reviewing a PR that merges **incoming → base** (e.g. `bug/*` → `develop`, `develop` → `main`):
 
-    1. Compare the **incoming branch** version string to the **merge base / target branch** version (same `VERSION` macro on each side).
-    2. The **incoming branch version must be strictly greater** than the target branch version for that merge (typically exactly one semver bump on the appropriate component).
-    3. If both branches report the **same** version (e.g. both `2.0.0`), request an update: bump the incoming branch so it is **one step ahead** of the target for the change type (example: `bug/*` → `develop` with both at `2.0.0` → bump incoming to `2.0.1`).
-    4. Ensure new bumps add or extend **`version/entries/*.ver`** (usually **one** file per feature PR, edited in place as the PR evolves); after push to **`develop`**, **Version lock on merge** syncs **`version/locked/`** and **`version_def.h`** via an **automation PR** (or authors run **`make finalize-version-locked`** locally before merge if they need an early **`version/locked/`** update on the branch).
+    1. Compare the **target branch** published **`VERSION`** (`userland/shell/version_def.h`) to the **incoming** release recorded in **`version/entries/*.ver`** (must be strictly greater when the PR does not already update **`version/locked/`**), or to incoming **`VERSION`** if the PR includes a maintainer finalize of **`version/locked/`**.
+    2. The **incoming** version must be **strictly greater** than the target for that merge (typically exactly one semver bump on the appropriate component).
+    3. If both report the **same** version (e.g. both `2.0.0`), request an update: bump the incoming **entries** so it is **one step ahead** of the target for the change type (example: `bug/*` → `develop` with both at `2.0.0` → bump incoming to `2.0.1`).
+    4. Ensure new bumps add or extend **`version/entries/*.ver`** (usually **one** file per feature PR, edited in place as the PR evolves); after push to **`develop`**, **Version lock on merge** syncs **`version/locked/`** and **`version_def.h`** via an **automation PR** (or **maintainers** run **`make finalize-version-locked`** locally before merge if they need an early **`version/locked/`** update on the branch).
 
     **Automation version PRs:** PRs created **only** by **Version lock on merge** (`chore(version): sync…`, `cursor/version-lock-from-entries-*`) are housekeeping—**do not** auto-review or proactively queue deep review. **If a human requests a review**, review like any other PR.
 
@@ -37,7 +37,7 @@ reviews:
 
     **Single bump rule:** If a change mixes milestone/architecture work, features, and bug fixes, **only increment the most significant applicable component** once (e.g. milestone + architecture → bump **A** only → **`3.0.0`** after **`2.x.y`**; do not also bump B/C for the same release).
 
-    Remind authors: author under **`version/entries/`** (add **`.ver`** on first substantive change if none yet; **one** entry file per feature PR is typical); **`version/locked/`** syncs when the **Version lock** PR merges to **`develop`** (or run **`finalize_version_locked`** locally). Then **`make`** / **`gen_version_def.sh`** on checkout reflects **`version/locked/`**. Changelog prose is CI/deployment-time, not default `make`.
+    Remind authors: author under **`version/entries/`** (add **`.ver`** on first substantive change if none yet; **one** entry file per feature PR is typical). **AI PRs:** do **not** commit **`version/locked/**`** or **`userland/shell/version_def.h`**. **`version/locked/`** syncs when the **Version lock** PR merges to **`develop`** (or **maintainers** run **`finalize_version_locked`** locally). Then **`make`** / **`gen_version_def.sh`** on checkout reflects **`version/locked/`**. Changelog prose is CI/deployment-time, not default `make`.
 
     ## Comments vs code
 
@@ -46,7 +46,7 @@ reviews:
   path_instructions:
     - path: "version/entries/*.ver"
       instructions: |
-        **Authoring area** — new `.ver` files live here. Prefer basenames **`A_B_C_short_slug.ver`** (semver triple then slug); avoid optional numeric serial prefixes like **`006_`** unless matching legacy files—ordering is by fields inside the file, not the filename. For each file: MAJOR_VERSION, STANDARD_VERSION, RELEASE_VERSION (or MINOR_VERSION / VERSION_PATCH), DESCRIPTION (single line or `DESCRIPTION<<DELIM` heredoc), and optional **RELEASE_DATE** (`YYYY-MM-DD`). After merge, any path that also exists under **`version/locked/`** must stay byte-identical to locked until you intentionally change both via finalize. Agents: create a **`.ver`** on first substantive change if missing; **one** entry file per feature PR is enough—update it as the PR grows.
+        **Authoring area** — new `.ver` files live here. Prefer basenames **`A_B_C_short_slug.ver`** (semver triple then slug); avoid optional numeric serial prefixes like **`006_`** unless matching legacy files—ordering is by fields inside the file, not the filename. For each file: MAJOR_VERSION, STANDARD_VERSION, RELEASE_VERSION (or MINOR_VERSION / VERSION_PATCH), DESCRIPTION (single line or `DESCRIPTION<<DELIM` heredoc), and optional **RELEASE_DATE** (`YYYY-MM-DD`). After merge, any path that also exists under **`version/locked/`** must stay byte-identical to locked until you intentionally change both via finalize. Agents: create a **`.ver`** on first substantive change if missing; **one** entry file per feature PR is enough—update it as the PR grows. **Do not** commit **`version/locked/**`** or **`userland/shell/version_def.h`** in AI-authored feature PRs (automation updates those after merge to **`develop`**).
 
     - path: "version/locked/**"
       instructions: |

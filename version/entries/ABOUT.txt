@@ -26,11 +26,10 @@ Finalize (copy all of entries over locked), then regenerate the shell header:
 userland/shell/version_def.h is generated from the highest A.B.C among
 version/locked/*.ver only. Do not edit the header by hand.
 
-The repository currently ships e.g. 001_2_2_4_baseline.ver (legacy serial prefix).
-For new releases, prefer a basename of the form **`A_B_C_short_slug.ver`** (semver
-components then a short slug). Optional numeric prefixes like **`001_`** are
-historical only; ordering is always by **MAJOR/STANDARD/RELEASE** inside the file,
-not the filename.
+The repository currently ships e.g. 001_2_2_4_baseline.ver. Author new releases as
+additional *.ver files under version/entries/ (include the semver in the basename,
+often with a serial prefix). Ordering uses MAJOR/STANDARD/RELEASE inside the file,
+not the filename prefix.
 
 version/locked/* is a mirror only: it must byte-match version/entries/ for each
 locked file. Do not hand-edit locked copies; never let locked diverge from entries.
