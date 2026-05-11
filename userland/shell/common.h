@@ -55,7 +55,7 @@ extern char **g_interactive_history;
 extern int g_interactive_history_count;
 extern pthread_mutex_t history_mutex;
 
-/* Help message */
-extern const char *HELP_MSG;
+/* Help text (body + runtime date footer via fl_print_help_message) */
+void fl_print_help_message(void);
 
 #endif /* COMMON_H */

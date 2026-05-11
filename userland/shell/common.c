@@ -25,7 +25,7 @@ char **g_interactive_history = NULL;
 int g_interactive_history_count = 0;
 pthread_mutex_t history_mutex = PTHREAD_MUTEX_INITIALIZER;
 
-const char *HELP_MSG =
+static const char HELP_BODY[] =
 "Usage: BPForbes_Flinstone_Shell [COMMANDS...]\n"
 "\n"
 "Navigation:\n"
@@ -90,6 +90,17 @@ const char *HELP_MSG =
 "Virtualization: ./shell -Virtualization -y [-vm] [commands...]\n"
 "  -y: popup (no -vm) or confirm cleanup. -vm: run guest, then this shell. Host files are confined to vm_hostfs/\n"
 "  under the directory you started from (or under a temp dir when you pass additional commands). No writes outside that jail.\n"
-"\n"
-"Author: Bailey Forbes\n"
-"Date:   03/07/25\n";
+"\n";
+
+void fl_print_help_message(void) {
+    fputs(HELP_BODY, stdout);
+    fputs("Author: Bailey Forbes\n", stdout);
+    time_t now = time(NULL);
+    struct tm *tm = localtime(&now);
+    char dbuf[32];
+    if (tm && strftime(dbuf, sizeof(dbuf), "%Y-%m-%d", tm) > 0)
+        printf("Date:   %s\n", dbuf);
+    else
+        fputs("Date:   (unknown)\n", stdout);
+    putchar('\n');
+}
