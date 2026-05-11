@@ -226,6 +226,38 @@ static int parse_positive_int(const char *s, int *out) {
     return 0;
 }
 
+/* Strict calendar YYYY-MM-DD (same shape as merge-time stamp). */
+static int release_date_iso_valid(const char *s) {
+    if (!s)
+        return 0;
+    if (strlen(s) != 10)
+        return 0;
+    for (size_t i = 0; i < 10; i++) {
+        if (i == 4 || i == 7) {
+            if (s[i] != '-')
+                return 0;
+        } else if (!isdigit((unsigned char)s[i]))
+            return 0;
+    }
+    int y = (s[0] - '0') * 1000 + (s[1] - '0') * 100 + (s[2] - '0') * 10 +
+            (s[3] - '0');
+    int m = (s[5] - '0') * 10 + (s[6] - '0');
+    int d = (s[8] - '0') * 10 + (s[9] - '0');
+    if (y < 1970 || y > 9999)
+        return 0;
+    if (m < 1 || m > 12)
+        return 0;
+    static const int mdays[] = {31, 28, 31, 30, 31, 30, 31, 31, 30, 31, 30, 31};
+    int maxd = mdays[m - 1];
+    if (m == 2) {
+        int leap = (y % 4 == 0 && y % 100 != 0) || (y % 400 == 0);
+        maxd = leap ? 29 : 28;
+    }
+    if (d < 1 || d > maxd)
+        return 0;
+    return 1;
+}
+
 static void free_line_array(char **lines, size_t n) {
     if (!lines)
         return;
@@ -398,6 +430,12 @@ static int parse_ver_file(const char *fullpath, const char *relpath, VerEntry *e
             trim_value(work, sizeof work);
             if (strlen(work) >= sizeof date_iso) {
                 fprintf(stderr, "gen_version_changelog: RELEASE_DATE too long in %s\n",
+                        fullpath);
+                goto bad;
+            }
+            if (!release_date_iso_valid(work)) {
+                fprintf(stderr,
+                        "gen_version_changelog: RELEASE_DATE must be YYYY-MM-DD in %s\n",
                         fullpath);
                 goto bad;
             }
