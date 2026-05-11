@@ -282,7 +282,8 @@ void test_w_command(void) {
         fprintf(fp, "00:00000000\n");
         fclose(fp);
     }
-    strcpy(current_disk_file, "testdisk.dat");
+    strncpy(current_disk_file, "testdisk.dat", sizeof(current_disk_file) - 1);
+    current_disk_file[sizeof(current_disk_file) - 1] = '\0';
     g_total_clusters = 1;
     g_cluster_size = 4;
     CU_ASSERT_TRUE(execute_command_str("writecluster 0 -t TEST") == 0);
@@ -307,7 +308,8 @@ void test_d_command(void) {
         fprintf(fp, "00:11111111\n");
         fclose(fp);
     }
-    strcpy(current_disk_file, "testdisk.dat");
+    strncpy(current_disk_file, "testdisk.dat", sizeof(current_disk_file) - 1);
+    current_disk_file[sizeof(current_disk_file) - 1] = '\0';
     g_total_clusters = 1;
     g_cluster_size = 4;
     CU_ASSERT_TRUE(execute_command_str("delcluster 0") == 0);
@@ -332,7 +334,8 @@ void test_up_command(void) {
         fprintf(fp, "00:11111111\n");
         fclose(fp);
     }
-    strcpy(current_disk_file, "testdisk.dat");
+    strncpy(current_disk_file, "testdisk.dat", sizeof(current_disk_file) - 1);
+    current_disk_file[sizeof(current_disk_file) - 1] = '\0';
     g_total_clusters = 1;
     g_cluster_size = 4;
     CU_ASSERT_TRUE(execute_command_str("update 0 -t NEW") == 0);
