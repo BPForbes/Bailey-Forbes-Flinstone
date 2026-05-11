@@ -1,0 +1,5 @@
+# Patch: interactive shell backspace erases on BS (8) as well as DEL (127).
+MAJOR_VERSION=3
+STANDARD_VERSION=0
+RELEASE_VERSION=1
+DESCRIPTION=Interactive shell: treat ASCII BS (8) like DEL (127) for backspace so typed characters erase correctly; avoids bare BS moving the cursor into the prompt without updating the line buffer.
