@@ -57,7 +57,7 @@ The shipped shell version **A.B.C** is in **`userland/shell/version_def.h`**, **
 
 ### Release notes (`version/`)
 
-Author each release as **`.ver`** files under **`version/entries/`** (see **`version/entries/ABOUT.txt`**). The tree currently ships **`001_2_2_4_baseline.ver`**; for a new release add another **`.ver`** whose basename encodes the semver (often with a serial prefix such as **`002_…`**). Ordering uses the numeric **MAJOR/STANDARD/RELEASE** fields inside the file, not the filename prefix. Supported keys (optional leading `int ` before the name):
+Author each release as **`.ver`** files under **`version/entries/`** (see **`version/entries/ABOUT.txt`**). The tree ships a legacy example **`001_2_2_4_baseline.ver`**; for new work prefer **`A_B_C_short_slug.ver`** (semver in the first three underscore-separated components, not a numeric serial prefix like **`006_`**). Ordering uses the numeric **MAJOR/STANDARD/RELEASE** fields inside the file, not the filename. Supported keys (optional leading `int ` before the name):
 
 - **`MAJOR_VERSION`** (alias **`VERSION_MAJOR`**)
 - **`STANDARD_VERSION`** (alias **`VERSION_STANDARD`**)

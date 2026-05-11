@@ -2,6 +2,11 @@
 #include "common.h"
 #include "mem_asm.h"
 #include "fat32_host.h"
+#ifdef DISK_HOST_USE_LIBC_PREADV
+#include <string.h>
+#else
+#include "shell_history_asm.h"
+#endif
 #include <limits.h>
 #include <ctype.h>
 #include <string.h>
@@ -78,6 +83,31 @@ static int history_on_fat32(void) {
     return g_disk_host_fat32 != 0 && g_fat32_host_vol.valid != 0;
 }
 
+#ifdef DISK_HOST_USE_LIBC_PREADV
+static size_t history_append_record_c(char *buf, size_t cap, size_t used, const char *cmd, size_t cmd_len) {
+    if (used > cap || cmd_len > cap - used || cmd_len + 1 > cap - used)
+        return (size_t)-1;
+    memcpy(buf + used, cmd, cmd_len);
+    buf[used + cmd_len] = '\n';
+    return used + cmd_len + 1;
+}
+#endif
+
+/* Append one command line to an open FILE (ASM-backed record layout on GAS builds). */
+static int history_append_line_to_stream(FILE *fp, const char *cmd) {
+    size_t clen = strlen(cmd);
+    char rec[4096];
+    size_t n;
+#ifdef DISK_HOST_USE_LIBC_PREADV
+    n = history_append_record_c(rec, sizeof(rec), 0, cmd, clen);
+#else
+    n = history_asm_append_record(rec, sizeof(rec), 0, cmd, clen);
+#endif
+    if (n == (size_t)-1)
+        return fprintf(fp, "%s\n", cmd) < 0 ? -1 : 0;
+    return fwrite(rec, 1, n, fp) != n ? -1 : 0;
+}
+
 /* Pre: history_mutex held. tmp_staging[0]=='\0' for host HISTORY_FILE; else staging path to unlink after fclose. */
 static FILE *history_open_snapshot_locked(char tmp_staging[HISTORY_STAGING_PATH_SZ]) {
     if (tmp_staging)
@@ -135,7 +165,7 @@ void append_history(const char *cmd) {
             }
             FILE *fp = fopen(tmpl, "a");
             if (fp) {
-                fprintf(fp, "%s\n", cmd);
+                (void)history_append_line_to_stream(fp, cmd);
                 fclose(fp);
                 (void)fat32_host_file_put(tmpl, HISTORY_DISK_PATH);
             }
@@ -144,7 +174,7 @@ void append_history(const char *cmd) {
     } else {
         FILE *fp = fopen(HISTORY_FILE, "a");
         if (fp) {
-            fprintf(fp, "%s\n", cmd);
+            (void)history_append_line_to_stream(fp, cmd);
             fclose(fp);
         }
     }

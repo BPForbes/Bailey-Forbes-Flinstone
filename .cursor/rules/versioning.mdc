@@ -20,6 +20,11 @@ alwaysApply: true
 - On the **first** substantive code change for a pull request, **add** **`version/entries/*.ver`** if the branch does not already have an entry that covers **that** PR.
 - For **one** pull request, **one** **`version/entries/*.ver`** file is enough: **edit** that file (e.g. **`DESCRIPTION`**, semver fields only if release scope truly changes) across the whole PR, instead of adding multiple new entry files for the same branch.
 
+## `.ver` filename convention (AI / authors)
+
+- Prefer **`A_B_C_short_slug.ver`** (three semver components, underscore-separated, then a short slug). Example: **`3_2_0_shell_history_disk_cursor.ver`**.
+- Avoid optional **`NNN_`** numeric serial prefixes unless you are matching an existing legacy pattern (e.g. **`001_2_2_4_baseline.ver`**). **Ordering is defined only by the `MAJOR_VERSION` / `STANDARD_VERSION` / `RELEASE_VERSION` fields inside the file**, not by the filename prefix.
+
 ## Canonical version & changelog
 
 - **`userland/shell/version_def.h`** — **Generated** by **`scripts/gen_version_def.sh`** (also from **`make`**). **`VERSION`** = **A.B.C** from the **highest** triple in **`version/locked/*.ver`**. CI ensures the committed header matches the generator output.

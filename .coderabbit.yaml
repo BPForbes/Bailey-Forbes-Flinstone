@@ -46,7 +46,7 @@ reviews:
   path_instructions:
     - path: "version/entries/*.ver"
       instructions: |
-        **Authoring area** — new `.ver` files live here. For each file: MAJOR_VERSION, STANDARD_VERSION, RELEASE_VERSION (or MINOR_VERSION / VERSION_PATCH), DESCRIPTION (single line or `DESCRIPTION<<DELIM` heredoc), and optional **RELEASE_DATE** (`YYYY-MM-DD`). After merge, any path that also exists under **`version/locked/`** must stay byte-identical to locked until you intentionally change both via finalize. Agents: create a **`.ver`** on first substantive change if missing; **one** entry file per feature PR is enough—update it as the PR grows.
+        **Authoring area** — new `.ver` files live here. Prefer basenames **`A_B_C_short_slug.ver`** (semver triple then slug); avoid optional numeric serial prefixes like **`006_`** unless matching legacy files—ordering is by fields inside the file, not the filename. For each file: MAJOR_VERSION, STANDARD_VERSION, RELEASE_VERSION (or MINOR_VERSION / VERSION_PATCH), DESCRIPTION (single line or `DESCRIPTION<<DELIM` heredoc), and optional **RELEASE_DATE** (`YYYY-MM-DD`). After merge, any path that also exists under **`version/locked/`** must stay byte-identical to locked until you intentionally change both via finalize. Agents: create a **`.ver`** on first substantive change if missing; **one** entry file per feature PR is enough—update it as the PR grows.
 
     - path: "version/locked/**"
       instructions: |
