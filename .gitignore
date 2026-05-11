@@ -6,9 +6,6 @@
 BPForbes_Flinstone_Shell
 BPForbes_Flinstone_Tests
 
-# Shell history (user-specific)
-shell_history.txt
-
 # Test/generated files
 *_disk
 *_disk.txt

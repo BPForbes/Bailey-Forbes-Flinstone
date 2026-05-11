@@ -157,7 +157,6 @@ int suite_cleanup(void) {
          "imported_disk.txt",
          "testfile.txt",
          "test_output.txt",
-         HISTORY_FILE,  /* e.g., "shell_history.txt" */
          "cdbatch1_disk",
          "cdbatch2_disk",
          "cdbatch3_disk",
@@ -565,12 +564,9 @@ void test_init_command(void) {
 
 void test_uc_command(void) {
     print_test_header("history re-run (-uc)");
-    FILE *fp = fopen(HISTORY_FILE, "a");
-    CU_ASSERT_PTR_NOT_NULL(fp);
-    if (fp) {
-         fprintf(fp, "echo UC_Test\n");
-         fclose(fp);
-    }
+    read_disk_header();
+    CU_ASSERT_TRUE(execute_command_str("cc") == 0);
+    CU_ASSERT_TRUE(execute_command_str("echo UC_Test") == 0);
     CU_ASSERT_TRUE(execute_command_str("rerun 1") == 0);
 }
 
@@ -619,15 +615,16 @@ void test_history_commands(void) {
 
 void test_cc_command(void) {
     print_test_header("clear history (cc)");
-    FILE *fp = fopen(HISTORY_FILE, "w");
-    CU_ASSERT_PTR_NOT_NULL(fp);
-    if (fp) {
-         fprintf(fp, "dummy\n");
-         fclose(fp);
-    }
+    read_disk_header();
     CU_ASSERT_TRUE(execute_command_str("cc") == 0);
-    fp = fopen(HISTORY_FILE, "r");
-    CU_ASSERT_TRUE(fp == NULL);
+    CU_ASSERT_PTR_NULL(read_history_line(1));
+    CU_ASSERT_TRUE(execute_command_str("echo dummy_hist") == 0);
+    CU_ASSERT_PTR_NOT_NULL(read_history_line(1));
+    char *ln = read_history_line(1);
+    CU_ASSERT_PTR_NOT_NULL(ln);
+    free(ln);
+    CU_ASSERT_TRUE(execute_command_str("cc") == 0);
+    CU_ASSERT_PTR_NULL(read_history_line(1));
 }
 
 void test_external_command(void) {

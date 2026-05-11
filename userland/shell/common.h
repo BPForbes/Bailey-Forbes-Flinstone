@@ -18,9 +18,6 @@
 #include <termios.h>
 #include <time.h>
 
-/* Legacy hex-disk volumes: host-side history file. FAT32 images use HISTORY_DISK_PATH on the volume. */
-#define HISTORY_FILE           "shell_history.txt"
-#define HISTORY_DISK_PATH      "SH_HIST.TXT"
 #define NUM_WORKERS            4
 #define MAX_JOBS               64
 #define CWD_MAX                256

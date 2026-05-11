@@ -1,0 +1,4 @@
+MAJOR_VERSION=3
+STANDARD_VERSION=2
+RELEASE_VERSION=1
+DESCRIPTION=Shell command history is stored only on the active volume: FAT32 uses a tail region of FLINT.DAT (magic header + newline-delimited lines, ASM-backed record packing on GAS builds); legacy hex disks append lines "#SHELL:<cmd>" after cluster rows. No separate shell_history.txt or SH_HIST.TXT host files.

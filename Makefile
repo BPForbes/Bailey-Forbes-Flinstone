@@ -205,8 +205,8 @@ MEM_ASM_OBJ = $(patsubst %.s,%.o,$(patsubst %.asm,%.o,$(firstword $(ASMSRCS_BASE
 PORT_IO_OBJ = $(patsubst %.s,%.o,$(patsubst %.asm,%.o,$(word 2,$(ASMSRCS_BASE))))
 DISK_HOST_ASM_OBJ = $(patsubst %.s,%.o,$(filter %/disk_host_io.s,$(ASMSRCS_BASE)))
 HISTORY_ASM_OBJ = $(patsubst %.s,%.o,$(filter %/shell_history_host_asm.s,$(ASMSRCS_BASE)))
-# util.c references host FAT32 helpers; any link of util.o outside the full shell must include these.
-UTIL_HISTORY_HOST_OBJS = kernel/core/vfs/fat32_host.o kernel/core/vfs/fat32_host_files.o disk_host_io.o $(DISK_HOST_ASM_OBJ)
+# util.c calls disk_embedded_shell_history_*; standalone links need disk.o + FAT32 host + shell_history_asm.
+UTIL_HISTORY_HOST_OBJS = kernel/core/vfs/disk.o kernel/core/vfs/fat32_host.o kernel/core/vfs/fat32_host_files.o disk_host_io.o $(DISK_HOST_ASM_OBJ) $(HISTORY_ASM_OBJ)
 TEST_ASMOBJS = $(MEM_ASM_OBJ) $(PORT_IO_OBJ) $(DISK_HOST_ASM_OBJ) $(HISTORY_ASM_OBJ)
 TEST_TARGET = BPForbes_Flinstone_Tests
 
@@ -303,16 +303,16 @@ test_userspace_connection: kernel/core/sys/vrt.o kernel/core/sys/ipc.o kernel/co
 	  kernel/core/sys/vrt.o kernel/core/sys/ipc.o kernel/core/sys/syscall.o $(MEM_ASM_OBJ) -Wl,-z,noexecstack
 	./tests/test_userspace_connection
 
-test_invariants: userland/shell/common.o userland/shell/util.o $(MEM_ASM_OBJ) $(HISTORY_ASM_OBJ) $(UTIL_HISTORY_HOST_OBJS)
-	$(CC) $(CFLAGS) $(TEST_SANITIZE) -o tests/test_invariants tests/test_invariants.c userland/shell/common.o userland/shell/util.o $(MEM_ASM_OBJ) $(HISTORY_ASM_OBJ) $(UTIL_HISTORY_HOST_OBJS)
+test_invariants: userland/shell/common.o userland/shell/util.o $(MEM_ASM_OBJ) $(UTIL_HISTORY_HOST_OBJS)
+	$(CC) $(CFLAGS) $(TEST_SANITIZE) -o tests/test_invariants tests/test_invariants.c userland/shell/common.o userland/shell/util.o $(MEM_ASM_OBJ) $(UTIL_HISTORY_HOST_OBJS)
 	./tests/test_invariants
 
 # fs_jail unit tests (standalone, no CUnit required)
 .PHONY: test_fs_jail
-test_fs_jail: userland/shell/common.o userland/shell/util.o kernel/core/vfs/fs_jail.o kernel/core/mm/mem_domain.o $(MEM_ASM_OBJ) $(HISTORY_ASM_OBJ) $(UTIL_HISTORY_HOST_OBJS)
+test_fs_jail: userland/shell/common.o userland/shell/util.o kernel/core/vfs/fs_jail.o kernel/core/mm/mem_domain.o $(MEM_ASM_OBJ) $(UTIL_HISTORY_HOST_OBJS)
 	$(CC) $(CFLAGS) $(TEST_SANITIZE) -o tests/test_fs_jail tests/test_fs_jail.c \
 	  userland/shell/common.o userland/shell/util.o kernel/core/vfs/fs_jail.o \
-	  kernel/core/mm/mem_domain.o $(MEM_ASM_OBJ) $(HISTORY_ASM_OBJ) $(UTIL_HISTORY_HOST_OBJS) -Wl,-z,noexecstack
+	  kernel/core/mm/mem_domain.o $(MEM_ASM_OBJ) $(UTIL_HISTORY_HOST_OBJS) -Wl,-z,noexecstack
 	./tests/test_fs_jail
 
 check-layers:
