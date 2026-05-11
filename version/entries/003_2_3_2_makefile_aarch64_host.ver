@@ -1,0 +1,5 @@
+# Patch: Makefile defaults to ARCH=arm on Linux AArch64 (e.g. Raspberry Pi 4) and uses native gcc/as there.
+MAJOR_VERSION=2
+STANDARD_VERSION=3
+RELEASE_VERSION=2
+DESCRIPTION=Makefile: on Linux arm64 hosts default ARCH=arm (was x86_64_gas); use host gcc/as for ARCH=arm on that host so Raspberry Pi builds work without gcc-aarch64-linux-gnu; avoids AArch64 as failing on x86-64-only .s (e.g. unknown mnemonic cli).
