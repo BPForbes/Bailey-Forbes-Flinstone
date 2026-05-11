@@ -18,7 +18,10 @@ static int    g_jail_dirfd = -1;
 void fs_jail_init(void) {
     mem_domain_zero(g_fs_jail_root, sizeof(g_fs_jail_root));
     g_fs_jail_len = 0;
-    g_jail_dirfd = -1;
+    if (g_jail_dirfd >= 0) {
+        close(g_jail_dirfd);
+        g_jail_dirfd = -1;
+    }
     if (!g_vm_mode)
         return;
     char wd[JAIL_ROOT_MAX];
@@ -26,8 +29,29 @@ void fs_jail_init(void) {
     if (!getcwd(wd, sizeof(wd)))
         return;
     const char *root = g_vm_root[0] ? g_vm_root : wd;
-    if (realpath(root, g_fs_jail_root) == NULL) {
+    char base[JAIL_ROOT_MAX];
+    mem_domain_zero(base, sizeof(base));
+    if (realpath(root, base) == NULL) {
         fprintf(stderr, "VM: sandbox root unavailable: %s\n", root);
+        return;
+    }
+    size_t blen = strlen(base);
+    while (blen > 1 && base[blen - 1] == '/')
+        base[--blen] = '\0';
+
+    char inner[JAIL_ROOT_MAX + 32];
+    int n = snprintf(inner, sizeof(inner), "%s/%s", base, FS_JAIL_HOST_SUBDIR);
+    if (n < 0 || (size_t)n >= sizeof(inner)) {
+        fprintf(stderr, "VM: sandbox path too long (under %s)\n", base);
+        return;
+    }
+    if (mkdir(inner, 0700) != 0 && errno != EEXIST) {
+        fprintf(stderr, "VM: cannot create host filesystem sandbox %s: %s\n", inner,
+                strerror(errno));
+        return;
+    }
+    if (realpath(inner, g_fs_jail_root) == NULL) {
+        fprintf(stderr, "VM: cannot resolve host filesystem sandbox %s\n", inner);
         mem_domain_zero(g_fs_jail_root, sizeof(g_fs_jail_root));
         return;
     }
@@ -40,7 +64,29 @@ void fs_jail_init(void) {
     g_jail_dirfd = open(g_fs_jail_root, O_RDONLY | O_DIRECTORY);
     if (g_jail_dirfd < 0) {
         fprintf(stderr, "VM: failed to open jail root directory: %s\n", g_fs_jail_root);
+        mem_domain_zero(g_fs_jail_root, sizeof(g_fs_jail_root));
+        g_fs_jail_len = 0;
+        return;
     }
+    /* Host cwd and logical g_cwd match the jail so relative paths cannot reach repo files. */
+    if (chdir(g_fs_jail_root) != 0) {
+        fprintf(stderr, "VM: cannot chdir into sandbox %s: %s\n", g_fs_jail_root, strerror(errno));
+        close(g_jail_dirfd);
+        g_jail_dirfd = -1;
+        mem_domain_zero(g_fs_jail_root, sizeof(g_fs_jail_root));
+        g_fs_jail_len = 0;
+        return;
+    }
+    if (g_fs_jail_len >= sizeof(g_cwd)) {
+        fprintf(stderr, "VM: sandbox path too long for g_cwd (%zu >= %zu)\n",
+                (size_t)g_fs_jail_len, sizeof(g_cwd));
+        close(g_jail_dirfd);
+        g_jail_dirfd = -1;
+        mem_domain_zero(g_fs_jail_root, sizeof(g_fs_jail_root));
+        g_fs_jail_len = 0;
+        return;
+    }
+    memcpy(g_cwd, g_fs_jail_root, g_fs_jail_len + 1);
 }
 
 int fs_jail_is_active(void) {
@@ -149,29 +195,6 @@ int fs_jail_openat(const char *path, int flags, mode_t mode) {
     int fd = openat(g_jail_dirfd, relpath, flags | O_NOFOLLOW, mode);
     if (fd < 0)
         return -1;
-
-    /* Verify the opened file is within jail by checking device/inode */
-    struct stat jail_st, file_st;
-    if (fstat(g_jail_dirfd, &jail_st) != 0) {
-        int saved_errno = errno;
-        close(fd);
-        errno = saved_errno;
-        return -1;
-    }
-
-    if (fstat(fd, &file_st) != 0) {
-        int saved_errno = errno;
-        close(fd);
-        errno = saved_errno;
-        return -1;
-    }
-
-    /* Verify file is on same device as jail root */
-    if (file_st.st_dev != jail_st.st_dev) {
-        close(fd);
-        errno = EPERM;
-        return -1;
-    }
 
     /* Additional check: get canonical path of opened fd and verify it's under jail */
     char fd_path[JAIL_ROOT_MAX];

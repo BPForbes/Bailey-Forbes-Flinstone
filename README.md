@@ -74,10 +74,11 @@ flowchart LR
 | **interpreter.c / .h** | Command dispatch, thin adapter to service layer |
 | **common.c / .h** | Globals, help text, `g_cwd` |
 | **util.c / .h** | `resolve_path`, history, `trim_whitespace` |
-| **disk.c / disk.h** | Disk I/O (text hex format, hardware-backed) |
-| **disk_asm.c / .h** | ASM-backed cluster read/write/zero |
+| **disk.c / disk.h** | Disk I/O: FAT32 host images (any path) or legacy hex-line volumes (content-detected) |
+| **disk_asm.c / .h** | ASM-backed cluster read/write/zero; host uses `disk_host_io.s` + `mem_asm.s` |
 | **cluster.c / .h** | Cluster management, hex conversion |
 | **mem_asm.s** | x86-64 ASM: `asm_mem_copy`, `asm_mem_zero`, `asm_block_fill` |
+| **disk_host_io.s** | Linux host: `pread64` / `pwrite64` syscalls for positioned volume I/O (GAS x86-64 / AArch64) |
 | **alloc/alloc_core.s** | Thread-safe allocator core: lock, brk, free-list, malloc_nolock |
 | **alloc/alloc_malloc.s** | malloc, calloc, realloc (GAS/AT&T x86-64) |
 | **alloc/alloc_free.s** | free with forward coalescing |
@@ -118,6 +119,7 @@ flowchart LR
 - GCC compiler
 - POSIX-compliant OS (Linux/macOS)
 - (Optional) CUnit for tests: `apt install libcunit1-dev` or `make deps-cunit`
+- Full package list (including `cmake`, SDL2, cross tools): see [docs/dependencies.md](docs/dependencies.md) and [AGENTS.md](AGENTS.md).
 
 ### Build
 

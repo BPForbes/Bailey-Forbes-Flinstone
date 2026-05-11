@@ -14,6 +14,7 @@ Notes:
 - `libsdl2-dev` and `pkg-config` are required for `make vm-sdl` when not using `deps/install`.
 - `libcunit1-dev` is required for the CUnit test binary.
 - `curl`, `cmake`, `autoconf`, `automake`, `libtool`, `bzip2`, and `tar` are required by `make deps`, `make deps-sdl2`, and `make deps-cunit`.
+- Optional (not required to compile or run the shell): `dosfstools` (`dosfsck`, `mkfs.fat`) helps validate FAT32 disk images the project creates; it is not linked into the binary. See `docs/dependencies.md` for a consolidated list of system packages versus `make deps`.
 
 ## Build targets
 
@@ -49,6 +50,69 @@ Run builds from the repository root.
 - For driver, architecture, VM, or allocator changes, include the closest focused target from the list above plus a build target that compiles the affected architecture or feature flags.
 - If a required toolchain or library is missing, install the packages listed in the Cursor Cloud section, then rerun the tests instead of skipping them.
 - Document any true environment blocker in the final response, including the exact command that failed and the missing prerequisite.
+
+## Versioning
+
+The shipped shell version **A.B.C** is in **`userland/shell/version_def.h`**, **generated** from **`version/locked/*.ver`**: the header reflects the **highest** semver among **finalized** `.ver` files there. Author new and revised **`.ver`** files under **`version/entries/`**; when those changes land on **`develop`** (push), **Version lock on merge** in GitHub Actions runs finalize + header generation and **opens a pull request** into **`develop`** with the updated **`version/locked/`** and **`version_def.h`** (direct pushes to **`develop`** are usually blocked; use **Settings → Actions → General** workflow **read/write** plus **Allow GitHub Actions to create and approve pull requests**, or optional repo secret **`VERSION_LOCK_PAT`**). Until then you can run **`./scripts/finalize_version_locked.sh`** or **`make finalize-version-locked`** locally. **CMake** reads **`project(VERSION)`** from that same header at configure time—do not hardcode a separate semver triple in **`CMakeLists.txt`**.
+
+### Release notes (`version/`)
+
+Author each release as **`.ver`** files under **`version/entries/`** (see **`version/entries/ABOUT.txt`**). The tree currently ships **`001_2_2_4_baseline.ver`**; for a new release add another **`.ver`** whose basename encodes the semver (often with a serial prefix such as **`002_…`**). Ordering uses the numeric **MAJOR/STANDARD/RELEASE** fields inside the file, not the filename prefix. Supported keys (optional leading `int ` before the name):
+
+- **`MAJOR_VERSION`** (alias **`VERSION_MAJOR`**)
+- **`STANDARD_VERSION`** (alias **`VERSION_STANDARD`**)
+- **`RELEASE_VERSION`** — third component **C** (aliases **`MINOR_VERSION`**, **`VERSION_PATCH`**)
+- **`DESCRIPTION`** — single line, max **1023** characters (quotes optional)
+
+On a **feature branch before merge**, you may freely add, edit, or remove **`.ver`** files under **`version/entries/`** that are **not** yet reflected in **`version/locked/`**.
+
+**AI assistants:** When you begin the **first** substantive code change for a pull request, **add** a **`version/entries/*.ver`** entry **then** if the branch does not already have one that covers **that** PR’s work. For the **whole** lifetime of **one** PR, **one** **`.ver`** file is enough—**revise** that same file (e.g. **`DESCRIPTION`**, and semver fields only if the release scope truly changes) as commits accumulate, instead of adding multiple new entry files for the same branch.
+
+### Lock system (agents, reviewers, and automation)
+
+- **Never edit finalized release files.** Any path under **`version/locked/`** that already exists on the **merge base / target branch** is **immutable**: it is the published record. Do **not** rewrite it in place—add or adjust prose under **`version/entries/`**, then **finalize** again when appropriate. CI enforces immutability on **`version/locked/`** for PRs (`scripts/check_version_locked_immutable.sh`), except **`version/locked/ABOUT.txt`**, which is companion documentation and may change with **`version/entries/ABOUT.txt`** in the same PR.
+- **`version/locked/`** is the **published snapshot** copied from **`version/entries/`** via **`./scripts/finalize_version_locked.sh`** (alias: **`make finalize-version-locked`** / **`make sync-version-locked`**). Until you finalize, **`version/entries/`** may contain extra drafts not present in **`version/locked/`**.
+- **CI** requires every file under **`version/locked/`** to exist under **`version/entries/`** with **identical content** (`scripts/check_version_locked_subset_of_entries.sh`)—so you cannot “advance” locked without aligning entries, and you cannot silently diverge a finalized file from the matching path under **`version/entries/`**.
+- **AI assistants** must **not** propose edits to historical paths under **`version/locked/`** that shipped on the target branch, or to **`version/entries/`** files that must byte-match **`version/locked/`** for the same relative path, unless the change is part of an intentional finalize-and-regenerate workflow.
+
+CI verifies that the committed **`version_def.h`** matches **`scripts/gen_version_def.sh`** output (highest triple in **`version/locked/*.ver`**).
+
+**Changelog binary:** **GitHub Actions** compiles **`scripts/gen_version_changelog.c`**, which reads **`version/locked`** (headline version = highest finalized entry), then emits **`userland/shell/version_changelog.c`** (ignored by git). **`make … CHANGELOG_CI=1`** links **`VERSION_CHANGELOG[]`** in CI only. Plain **`make`** omits changelog unless you generate that file and pass **`CHANGELOG_CI=1`**. See **`scripts/templates/version_changelog.example.c`** for shape.
+
+### Version lock on merge (GitHub Actions)
+
+On every **`push`** to **`develop`**, workflow **`version-lock-on-merge.yml`** runs **`finalize_version_locked.sh`** (full copy **`version/entries/`** → **`version/locked/`**), then **`gen_version_def.sh`**. If anything changed, it **opens a PR** into **`develop`** (via **`peter-evans/create-pull-request`**) instead of pushing directly, so branch protection and checks apply when someone merges that PR. Use **`GITHUB_TOKEN`** with the **Actions** settings above, **or** secret **`VERSION_LOCK_PAT`** (PAT with **contents** + **pull-requests** write). Workflow permissions: **`contents: write`** and **`pull-requests: write`**.
+
+**Automation version PRs (review policy):** PRs opened **only** by that workflow (title/message like **`chore(version): sync version/locked from entries after merge`**, branch `cursor/version-lock-from-entries-*`) are **routine housekeeping**. **Do not** spend automatic or proactive AI/CodeRabbit review on them unless a **human** explicitly requests reviewers or asks for a review—then review normally.
+
+### Optional deploy build (GitHub Actions / local)
+
+Workflow **Deploy** (`.github/workflows/deploy.yml`, **workflow_dispatch**) assumes **`version/locked/`** is already up to date: it builds the changelog and runs **`make CHANGELOG_CI=1`**. **`make deploy`** does the same locally (changelog + **`make CHANGELOG_CI=1 all`**). Use **`make finalize-version-locked`** locally if you need **`version/locked/`** refreshed before merge without waiting for the merge workflow.
+
+Use **semantic versioning**:
+
+| Component | When to bump |
+|-----------|----------------|
+| **A** | Major milestones, architecture changes, large foundational overhauls |
+| **B** | New features (additive behavior) |
+| **C** | Bug fixes and small corrections |
+
+**Precedence (importance):** **`A` > `B` > `C`**. For each new release, bump **only** the **highest** precedence that applies to the whole release: **increment** that component, **leave unchanged** every more-significant component to its **left**, and **set to `0`** every less-significant component to its **right**. Example: **`2.2.4` → `2.3.0`** for a minor release (not `2.3.4`). **`2.3.7` → `3.0.0`** for a major release. **`2.3.0` → `2.3.1`** for a patch.
+
+If a single release mixes milestone/architecture work, features, and fixes: **increment only the most significant applicable component** once (e.g. milestone + architecture → bump **A** only → **`3.0.0`** after **`2.x.y`**).
+
+### Merge / PR expectation
+
+Before merging **incoming → base** (e.g. `bug/*` → `develop`, `develop` → `main`):
+
+1. Compare **`VERSION_*` / `VERSION` on the incoming branch** to **`VERSION_*` / `VERSION` on the target branch** (see `userland/shell/version_def.h`, generated from **`version/locked/*.ver`**).
+2. **Incoming must be strictly newer** than the target for that merge.
+3. If both show the **same** version (e.g. both `2.0.0`), **update the incoming branch** so its version is **one appropriate semver step ahead** of the target.
+4. Add **`version/entries/<A>_<B>_<C>_<slug>.ver`** as needed for the bump (typically **one** new file per feature PR; **edit** that file as the PR evolves rather than stacking several). Pushing to **`develop`** runs **Version lock on merge** in GitHub Actions (copies **`version/entries/`** → **`version/locked/`** and regenerates **`version_def.h`**, then opens a PR to merge those updates when needed). Until then you may run **`make finalize-version-locked`** locally if you want **`version/locked/`** updated on your branch before merge.
+
+Example: **`bug/…` → `develop`**, both at **`2.0.0`** → bump incoming to **`2.0.1`** (patch for a bugfix).
+
+Detailed wording also appears in **CLAUDE.md**, **`.coderabbit.yaml`**, and **`.cursor/rules/versioning.mdc`** — keep them aligned when policy changes. To print a machine-readable record from the current tree: `./scripts/export_version_record.sh`, `./scripts/export_version_record.sh --json`, or **`make version-record`**.
 
 ## Implementation boundaries
 

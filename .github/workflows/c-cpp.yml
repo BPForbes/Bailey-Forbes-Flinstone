@@ -2,22 +2,48 @@ name: CI
 
 on:
   push:
-    branches: [ "main", "develop", "milestone/**", "claude/**", "feature/**", "cursor/**", "codex/**", "bug/**" ]
+    branches: [ "develop", "main", "milestone/**", "claude/**", "feature/**", "cursor/**", "codex/**", "bug/**" ]
   pull_request:
-    branches: [ "main", "develop" ]
+    branches: [ "develop", "main" ]
 
 jobs:
-  build-and-test-x86_64:
-    name: Build & test (x86_64 GAS)
+  version-requirements:
+    name: Versioning requirements
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Validate version locked immutability (PR only)
+        if: github.event_name == 'pull_request'
+        run: ./scripts/check_version_locked_immutable.sh "${{ github.event.pull_request.base.sha }}"
+
+      - name: Verify version/locked matches subset of entries (entries may exceed locked)
+        run: ./scripts/check_version_locked_subset_of_entries.sh
+
+      - name: Verify version_def.h matches generator (version/locked)
+        run: ./scripts/check_version_header_matches_locked.sh
+
+  build-and-test-x86_64:
+    name: Build & test (x86_64 GAS)
+    needs: version-requirements
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
 
       - name: Install dependencies
         run: sudo apt-get update -y && sudo apt-get install -y gcc binutils nasm libcunit1-dev
 
+      - name: Assemble changelog (CI-only source)
+        run: |
+          gcc -std=c11 -Wall -Wextra -O2 -o gen_version_changelog scripts/gen_version_changelog.c
+          ./gen_version_changelog
+
       - name: Build (x86_64 GAS)
-        run: make ARCH=x86_64_gas
+        run: make ARCH=x86_64_gas CHANGELOG_CI=1
 
       - name: Smoke test
         run: ./BPForbes_Flinstone_Shell -v
@@ -40,35 +66,58 @@ jobs:
       - name: Test — userspace connection
         run: make test_userspace_connection
 
-      - name: Compile CUnit suite
-        run: make BPForbes_Flinstone_Tests
+      - name: Build CUnit suite
+        run: make BPForbes_Flinstone_Tests CHANGELOG_CI=1
+
+      - name: Test — CUnit suite
+        run: ./BPForbes_Flinstone_Tests
 
       - name: Build (x86_64 NASM)
-        run: make clean && make ARCH=x86_64_nasm
+        run: |
+          make clean
+          gcc -std=c11 -Wall -Wextra -O2 -o gen_version_changelog scripts/gen_version_changelog.c
+          ./gen_version_changelog
+          make ARCH=x86_64_nasm CHANGELOG_CI=1
 
   build-arm:
     name: Build (AArch64 cross)
+    needs: version-requirements
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
 
       - name: Install cross-compiler
-        run: sudo apt-get update -y && sudo apt-get install -y gcc-aarch64-linux-gnu binutils-aarch64-linux-gnu
+        run: sudo apt-get update -y && sudo apt-get install -y gcc gcc-aarch64-linux-gnu binutils-aarch64-linux-gnu
+
+      - name: Assemble changelog (CI-only source)
+        run: |
+          gcc -std=c11 -Wall -Wextra -O2 -o gen_version_changelog scripts/gen_version_changelog.c
+          ./gen_version_changelog
 
       - name: Build (ARM / AArch64)
-        run: make ARCH=arm
+        run: make ARCH=arm CHANGELOG_CI=1
 
   build-vm:
     name: Build & test (VM enabled)
+    needs: version-requirements
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
 
       - name: Install dependencies
         run: sudo apt-get install -y gcc binutils nasm
 
+      - name: Assemble changelog (CI-only source)
+        run: |
+          gcc -std=c11 -Wall -Wextra -O2 -o gen_version_changelog scripts/gen_version_changelog.c
+          ./gen_version_changelog
+
       - name: Build (VM)
-        run: make VM_ENABLE=1
+        run: make VM_ENABLE=1 CHANGELOG_CI=1
 
       - name: Test — vm_layer_warning
         run: make test_vm_layer_warning

@@ -33,61 +33,24 @@ char *convert_data_to_hex(const char *data, int inputIsText, int clusterSize) {
     return result;
 }
 
-void process_write_cluster(int clu, const char *data, int inputIsText) {
+int process_write_cluster(int clu, const char *data, int inputIsText) {
     char *hexData = convert_data_to_hex(data, inputIsText, g_cluster_size);
     if (!hexData)
-        return;
+        return -1;
     update_cluster_line(clu, hexData);
     mem_domain_free(MEM_DOMAIN_FS, hexData);
     printf("Wrote data to cluster %d.\n", clu);
+    return 0;
 }
 
-void calculate_storage_breakdown_for_cluster(int clu) {
-    FILE *fp = fopen(current_disk_file, "r");
-    if (!fp) {
-        printf("No disk file found.\n");
-        return;
-    }
-    char line[256];
-    int currentClu = -1;
-    char *hexDataFound = NULL;
-    while (fgets(line, sizeof(line), fp)) {
-        char *trim = trim_whitespace(line);
-        if (!*trim)
-            continue;
-        if (!strncmp(trim, "XX:", 3))
-            continue;
-        currentClu++;
-        if (currentClu == clu) {
-            char *colon = strchr(trim, ':');
-            if (colon)
-                hexDataFound = colon + 1;
-            break;
-        }
-    }
-    fclose(fp);
-    if (!hexDataFound) {
-        printf("Cluster %02X not found.\n", clu);
-        return;
-    }
-    hexDataFound = trim_whitespace(hexDataFound);
-    int expectedLen = g_cluster_size * 2;
-    int hexLen = (int)strlen(hexDataFound);
-    if (hexLen < expectedLen) {
-        printf("Warning: Cluster data length (%d) is shorter than expected (%d).\n", hexLen, expectedLen);
-    }
+int calculate_storage_breakdown_for_cluster(int clu) {
     unsigned char *bytes = mem_domain_alloc(MEM_DOMAIN_FS, (size_t)g_cluster_size);
     if (!bytes)
-        return;
-    for (int i = 0; i < g_cluster_size; i++) {
-        char byteStr[3] = {0};
-        if (2 * i + 1 < hexLen) {
-            byteStr[0] = hexDataFound[2 * i];
-            byteStr[1] = hexDataFound[2 * i + 1];
-        } else {
-            strcpy(byteStr, "00");
-        }
-        bytes[i] = (unsigned char)strtol(byteStr, NULL, 16);
+        return -1;
+    if (disk_asm_read_cluster(clu, bytes) != 0) {
+        printf("Cluster %02X not found.\n", clu);
+        mem_domain_free(MEM_DOMAIN_FS, bytes);
+        return -1;
     }
     int onesCount[8] = {0}, zerosCount[8] = {0};
     for (int i = 0; i < g_cluster_size; i++) {
@@ -105,6 +68,7 @@ void calculate_storage_breakdown_for_cluster(int clu) {
         printf("Bit position %d: ones = %d, zeros = %d\n", bit + 1, onesCount[bit], zerosCount[bit]);
     }
     mem_domain_free(MEM_DOMAIN_FS, bytes);
+    return 0;
 }
 
 void delete_cluster(int clu) {
@@ -119,52 +83,22 @@ void delete_cluster(int clu) {
 }
 
 void show_disk_detail_for_cluster(int clu) {
-    FILE *fp = fopen(current_disk_file, "r");
-    if (!fp) {
-        printf("No disk file.\n");
-        return;
-    }
-    char line[256];
-    int currentClu = -1;
-    char *hexDataFound = NULL;
-    while (fgets(line, sizeof(line), fp)) {
-        char *trim = trim_whitespace(line);
-        if (!*trim)
-            continue;
-        if (!strncmp(trim, "XX:", 3))
-            continue;
-        currentClu++;
-        if (currentClu == clu) {
-            char *colon = strchr(trim, ':');
-            if (colon)
-                hexDataFound = colon + 1;
-            break;
-        }
-    }
-    fclose(fp);
-    if (!hexDataFound) {
-        printf("Cluster %02X not found.\n", clu);
-        return;
-    }
-    hexDataFound = trim_whitespace(hexDataFound);
-    int expectedLen = g_cluster_size * 2;
-    int hexLen = (int)strlen(hexDataFound);
-    if (hexLen < expectedLen) {
-        printf("Warning: Cluster data length (%d) is shorter than expected (%d).\n", hexLen, expectedLen);
-    }
     unsigned char *bytes = mem_domain_alloc(MEM_DOMAIN_FS, (size_t)g_cluster_size);
     if (!bytes)
         return;
-    for (int i = 0; i < g_cluster_size; i++) {
-        char byteStr[3] = {0};
-        if (2 * i + 1 < hexLen) {
-            byteStr[0] = hexDataFound[2 * i];
-            byteStr[1] = hexDataFound[2 * i + 1];
-        } else {
-            strcpy(byteStr, "00");
-        }
-        bytes[i] = (unsigned char)strtol(byteStr, NULL, 16);
+    if (disk_asm_read_cluster(clu, bytes) != 0) {
+        printf("Cluster %02X not found.\n", clu);
+        mem_domain_free(MEM_DOMAIN_FS, bytes);
+        return;
     }
+    char *hexLine = mem_domain_alloc(MEM_DOMAIN_FS, (size_t)g_cluster_size * 2 + 1);
+    if (!hexLine) {
+        mem_domain_free(MEM_DOMAIN_FS, bytes);
+        return;
+    }
+    for (int i = 0; i < g_cluster_size; i++)
+        sprintf(hexLine + i * 2, "%02X", bytes[i]);
+    hexLine[g_cluster_size * 2] = '\0';
     int used = 0;
     for (int i = 0; i < g_cluster_size; i++) {
         if (bytes[i] != 0)
@@ -174,16 +108,18 @@ void show_disk_detail_for_cluster(int clu) {
     char *asciiStr = mem_domain_alloc(MEM_DOMAIN_FS, (size_t)g_cluster_size + 1);
     if (!asciiStr) {
         mem_domain_free(MEM_DOMAIN_FS, bytes);
+        mem_domain_free(MEM_DOMAIN_FS, hexLine);
         return;
     }
     for (int i = 0; i < g_cluster_size; i++) {
         asciiStr[i] = isprint(bytes[i]) ? bytes[i] : '.';
     }
     asciiStr[g_cluster_size] = '\0';
-    printf("Cluster %02X details: %s\n", clu, hexDataFound);
+    printf("Cluster %02X details: %s\n", clu, hexLine);
     printf("ASCII: %s\n", asciiStr);
     printf("Used bytes: %d/%d (%.2f%%)\n", used, g_cluster_size, pct);
     mem_domain_free(MEM_DOMAIN_FS, bytes);
+    mem_domain_free(MEM_DOMAIN_FS, hexLine);
     mem_domain_free(MEM_DOMAIN_FS, asciiStr);
 }
 

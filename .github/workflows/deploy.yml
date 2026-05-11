@@ -1,0 +1,36 @@
+# Optional manual release build: assumes version/locked is already synced (see
+# version-lock-on-merge.yml on push to develop). Builds with changelog.
+
+name: Deploy
+
+on:
+  workflow_dispatch:
+
+jobs:
+  deploy:
+    name: Deploy build
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Install dependencies
+        run: sudo apt-get update -y && sudo apt-get install -y gcc binutils nasm make libcunit1-dev
+
+      - name: Assemble changelog
+        run: |
+          gcc -std=c11 -Wall -Wextra -O2 -o gen_version_changelog scripts/gen_version_changelog.c
+          ./gen_version_changelog
+
+      - name: Build (x86_64 GAS, changelog linked)
+        run: make ARCH=x86_64_gas CHANGELOG_CI=1
+
+      - name: Smoke test (version string)
+        run: |
+          v="$(./BPForbes_Flinstone_Shell -v 2>/dev/null | head -n1)"
+          echo "version output: $v"
+          if ! printf '%s\n' "$v" | grep -Eq '^v?[0-9]+\.[0-9]+\.[0-9]+'; then
+            echo "version output does not match semver-like pattern" >&2
+            exit 1
+          fi

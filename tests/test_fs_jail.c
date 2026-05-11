@@ -18,9 +18,41 @@
 #include <libgen.h>
 #include <limits.h>
 #include <errno.h>
+#include <dirent.h>
 
 /* g_fs_jail_root is a non-static global defined in fs_jail.c */
 extern char g_fs_jail_root[];
+
+static void rmrf_dirpath(const char *path) {
+    DIR *d = opendir(path);
+    if (!d) {
+        unlink(path);
+        return;
+    }
+    struct dirent *e;
+    while ((e = readdir(d)) != NULL) {
+        if (e->d_name[0] == '.' && (e->d_name[1] == '\0' ||
+                                    (e->d_name[1] == '.' && e->d_name[2] == '\0')))
+            continue;
+        char sub[PATH_MAX];
+        snprintf(sub, sizeof(sub), "%s/%s", path, e->d_name);
+        struct stat st;
+        if (lstat(sub, &st) == 0 && S_ISDIR(st.st_mode))
+            rmrf_dirpath(sub);
+        else
+            unlink(sub);
+    }
+    closedir(d);
+    rmdir(path);
+}
+
+static void jail_cleanup_outer_tree(const char *outer) {
+    char inner[PATH_MAX];
+    snprintf(inner, sizeof(inner), "%s/%s", outer, FS_JAIL_HOST_SUBDIR);
+    chdir("/tmp");
+    rmrf_dirpath(inner);
+    rmdir(outer);
+}
 
 #define ASSERT(c) do { \
     if (!(c)) { \
@@ -65,15 +97,25 @@ static int test_jail_inactive_without_vm_mode(void) {
  * Test: jail is NOT active when g_vm_mode == 1 but init was not called
  * --------------------------------------------------------------------------- */
 static int test_jail_inactive_before_init(void) {
+    char tmpl[] = "/tmp/fs_jail_ibf_XXXXXX";
+    char *canon = make_tempdir(tmpl);
+    if (!canon) {
+        fprintf(stderr, "SKIP: mkdtemp failed\n");
+        return 0;
+    }
     reset_jail_globals();
+    if (chdir(canon) != 0) {
+        free(canon);
+        return 1;
+    }
     g_vm_mode = 1;
-    /* Manually zero jail state (simulate fresh binary) */
     g_fs_jail_root[0] = '\0';
-    /* is_active() depends on the internal g_fs_jail_len which is 0 by default */
-    /* We can only verify this via is_active after init */
-    fs_jail_init();                /* must be called with a real cwd */
+    fs_jail_init();
     ASSERT(fs_jail_is_active() == 1);
+    chdir("/tmp");
     reset_jail_globals();
+    jail_cleanup_outer_tree(canon);
+    free(canon);
     return 0;
 }
 
@@ -81,27 +123,32 @@ static int test_jail_inactive_before_init(void) {
  * Test: fs_jail_init with g_vm_mode=1 and no g_vm_root -> uses cwd
  * --------------------------------------------------------------------------- */
 static int test_jail_init_uses_cwd_when_no_vm_root(void) {
+    char tmpl[] = "/tmp/fs_jail_cwd_XXXXXX";
+    char *canon = make_tempdir(tmpl);
+    if (!canon) {
+        fprintf(stderr, "SKIP: mkdtemp failed\n");
+        return 0;
+    }
     reset_jail_globals();
+    if (chdir(canon) != 0) {
+        free(canon);
+        return 1;
+    }
     g_vm_mode = 1;
     g_vm_root[0] = '\0';
 
-    char expected[PATH_MAX];
-    if (getcwd(expected, sizeof(expected)) == NULL) {
-        fprintf(stderr, "SKIP: getcwd failed\n");
-        return 0;
-    }
-    /* Canonicalize (in case cwd itself has symlinks) */
-    char *canon = realpath(expected, NULL);
-    if (!canon) {
-        fprintf(stderr, "SKIP: realpath(cwd) failed\n");
-        return 0;
-    }
-
     fs_jail_init();
     ASSERT(fs_jail_is_active() == 1);
-    ASSERT(strcmp(g_fs_jail_root, canon) == 0);
-    free(canon);
+    char inner_expect[PATH_MAX];
+    snprintf(inner_expect, sizeof(inner_expect), "%s/%s", canon, FS_JAIL_HOST_SUBDIR);
+    char *inner_rp = realpath(inner_expect, NULL);
+    ASSERT(inner_rp != NULL);
+    ASSERT(strcmp(g_fs_jail_root, inner_rp) == 0);
+    chdir("/tmp");
+    free(inner_rp);
     reset_jail_globals();
+    jail_cleanup_outer_tree(canon);
+    free(canon);
     return 0;
 }
 
@@ -122,11 +169,17 @@ static int test_jail_init_uses_vm_root(void) {
 
     fs_jail_init();
     ASSERT(fs_jail_is_active() == 1);
-    ASSERT(strcmp(g_fs_jail_root, canon) == 0);
+    char inner_expect[PATH_MAX];
+    snprintf(inner_expect, sizeof(inner_expect), "%s/%s", canon, FS_JAIL_HOST_SUBDIR);
+    char *inner_rp = realpath(inner_expect, NULL);
+    ASSERT(inner_rp != NULL);
+    ASSERT(strcmp(g_fs_jail_root, inner_rp) == 0);
 
-    rmdir(canon);
-    free(canon);
+    chdir("/tmp");
+    free(inner_rp);
     reset_jail_globals();
+    jail_cleanup_outer_tree(canon);
+    free(canon);
     return 0;
 }
 
@@ -152,9 +205,10 @@ static int test_jail_init_strips_trailing_slash(void) {
     ASSERT(len > 0);
     ASSERT(g_fs_jail_root[len - 1] != '/');
 
-    rmdir(canon);
-    free(canon);
+    chdir("/tmp");
     reset_jail_globals();
+    jail_cleanup_outer_tree(canon);
+    free(canon);
     return 0;
 }
 
@@ -169,10 +223,25 @@ static int test_jail_check_null_path(void) {
     ASSERT(fs_jail_check_path(NULL) == -1);
 
     /* Test 2: jail active */
+    char tmpl[] = "/tmp/fs_jail_null2_XXXXXX";
+    char *canon = make_tempdir(tmpl);
+    if (!canon) {
+        fprintf(stderr, "SKIP: mkdtemp failed\n");
+        reset_jail_globals();
+        return 0;
+    }
     reset_jail_globals();
+    if (chdir(canon) != 0) {
+        free(canon);
+        return 1;
+    }
     g_vm_mode = 1;
     fs_jail_init();
     ASSERT(fs_jail_check_path(NULL) == -1);
+    chdir("/tmp");
+    reset_jail_globals();
+    jail_cleanup_outer_tree(canon);
+    free(canon);
 
     reset_jail_globals();
     return 0;
@@ -194,9 +263,10 @@ static int test_jail_check_empty_path(void) {
     ASSERT(fs_jail_is_active() == 1);
     ASSERT(fs_jail_check_path("") == -1);
 
-    rmdir(canon);
-    free(canon);
+    chdir("/tmp");
     reset_jail_globals();
+    jail_cleanup_outer_tree(canon);
+    free(canon);
     return 0;
 }
 
@@ -215,19 +285,21 @@ static int test_jail_check_path_inside(void) {
     fs_jail_init();
     ASSERT(fs_jail_is_active() == 1);
 
-    /* The jail root itself must be allowed */
-    ASSERT(fs_jail_check_path(canon) == 0);
+    /* Outer VM root is one level above the jail — must be blocked */
+    ASSERT(fs_jail_check_path(canon) == -1);
+    ASSERT(fs_jail_check_path(g_fs_jail_root) == 0);
 
     /* A subdirectory inside the jail */
     char subdir[PATH_MAX];
-    snprintf(subdir, sizeof(subdir), "%s/subdir", canon);
+    snprintf(subdir, sizeof(subdir), "%s/subdir", g_fs_jail_root);
     mkdir(subdir, 0755);
     ASSERT(fs_jail_check_path(subdir) == 0);
     rmdir(subdir);
 
-    rmdir(canon);
-    free(canon);
+    chdir("/tmp");
     reset_jail_globals();
+    jail_cleanup_outer_tree(canon);
+    free(canon);
     return 0;
 }
 
@@ -252,9 +324,10 @@ static int test_jail_check_path_outside(void) {
     /* /tmp itself is the parent — also outside unless jail IS /tmp */
     ASSERT(fs_jail_check_path("/tmp") == -1);
 
-    rmdir(canon);
-    free(canon);
+    chdir("/tmp");
     reset_jail_globals();
+    jail_cleanup_outer_tree(canon);
+    free(canon);
     return 0;
 }
 
@@ -274,15 +347,18 @@ static int test_jail_check_nonexistent_inside(void) {
     fs_jail_init();
     ASSERT(fs_jail_is_active() == 1);
 
-    /* File does not exist yet, but parent (canon) is inside the jail */
+    ASSERT(fs_jail_check_path(canon) == -1);
+
+    /* File does not exist yet, but parent directory is the jail root */
     char newfile[PATH_MAX];
-    snprintf(newfile, sizeof(newfile), "%s/newfile_that_does_not_exist.txt", canon);
+    snprintf(newfile, sizeof(newfile), "%s/newfile_that_does_not_exist.txt", g_fs_jail_root);
     ASSERT(access(newfile, F_OK) != 0); /* confirm it doesn't exist */
     ASSERT(fs_jail_check_path(newfile) == 0);
 
-    rmdir(canon);
-    free(canon);
+    chdir("/tmp");
     reset_jail_globals();
+    jail_cleanup_outer_tree(canon);
+    free(canon);
     return 0;
 }
 
@@ -304,9 +380,10 @@ static int test_jail_check_nonexistent_outside(void) {
     /* Parent /etc exists but is outside the jail */
     ASSERT(fs_jail_check_path("/etc/no_such_file_xyzzy") == -1);
 
-    rmdir(canon);
-    free(canon);
+    chdir("/tmp");
     reset_jail_globals();
+    jail_cleanup_outer_tree(canon);
+    free(canon);
     return 0;
 }
 
@@ -328,16 +405,17 @@ static int test_jail_check_relative_path_inside(void) {
 
     /* Create a real subdir so realpath succeeds */
     char subdir[PATH_MAX];
-    snprintf(subdir, sizeof(subdir), "%s/reltest", canon);
+    snprintf(subdir, sizeof(subdir), "%s/reltest", g_fs_jail_root);
     mkdir(subdir, 0755);
 
-    /* Relative path "reltest" with g_cwd=canon should be allowed */
+    /* Relative path "reltest" with g_cwd=jail root should be allowed */
     ASSERT(fs_jail_check_path("reltest") == 0);
 
     rmdir(subdir);
-    rmdir(canon);
-    free(canon);
+    chdir("/tmp");
     reset_jail_globals();
+    jail_cleanup_outer_tree(canon);
+    free(canon);
     return 0;
 }
 
@@ -368,9 +446,10 @@ static int test_jail_check_prefix_attack(void) {
     ASSERT(result == -1);
 
     rmdir(sibling);
-    rmdir(canon);
-    free(canon);
+    chdir("/tmp");
     reset_jail_globals();
+    jail_cleanup_outer_tree(canon);
+    free(canon);
     return 0;
 }
 
@@ -407,17 +486,18 @@ static int test_jail_check_exact_root_match(void) {
     fs_jail_init();
     ASSERT(fs_jail_is_active() == 1);
 
-    /* Exact root must be allowed */
-    ASSERT(fs_jail_check_path(canon) == 0);
+    ASSERT(fs_jail_check_path(canon) == -1);
+    ASSERT(fs_jail_check_path(g_fs_jail_root) == 0);
 
     /* Root with trailing slash: realpath resolves it to same canonical path */
     char root_slash[PATH_MAX];
-    snprintf(root_slash, sizeof(root_slash), "%s/", canon);
+    snprintf(root_slash, sizeof(root_slash), "%s/", g_fs_jail_root);
     ASSERT(fs_jail_check_path(root_slash) == 0);
 
-    rmdir(canon);
-    free(canon);
+    chdir("/tmp");
     reset_jail_globals();
+    jail_cleanup_outer_tree(canon);
+    free(canon);
     return 0;
 }
 
@@ -440,9 +520,10 @@ static int test_jail_init_idempotent(void) {
     ASSERT(strcmp(g_fs_jail_root, first_root) == 0);
     ASSERT(fs_jail_is_active() == 1);
 
-    rmdir(canon);
-    free(canon);
+    chdir("/tmp");
     reset_jail_globals();
+    jail_cleanup_outer_tree(canon);
+    free(canon);
     return 0;
 }
 
@@ -472,9 +553,10 @@ static int test_jail_check_regression_prefix_not_subdir(void) {
     ASSERT(ret == -1);
 
     rmdir(notchild);
-    rmdir(canon);
-    free(canon);
+    chdir("/tmp");
     reset_jail_globals();
+    jail_cleanup_outer_tree(canon);
+    free(canon);
     return 0;
 }
 

@@ -34,14 +34,13 @@
 #include "interpreter.h"
 #include "fs_jail.h"
 #include "fs_provider.h"
+#include "fat32_host.h"
+#include <fcntl.h>
 
 /* g_fs_jail_root is a non-static global exported by fs_jail.c */
 extern char g_fs_jail_root[];
 
-/* Directly include interpreter.c so that its definitions are compiled into this test.
-   (Ensure that interpreter.c checks UNIT_TEST so that interactive_shell() is a stub.)
-*/
-#include "interpreter.c"
+/* interpreter.c is compiled and linked separately (see Makefile: interpreter_unit.o with -DUNIT_TEST). */
 
 /* ---------------------------------------------------------------------------
  * Forward declarations for cd command tests.
@@ -50,6 +49,7 @@ void test_cd_batch(void);
 void test_cd_interactive(void);
 void test_cd_batch_extra(void);
 void test_cd_interactive_extra(void);
+void test_diskput_fat32_roundtrip(void);
 
 /* ---------------------------------------------------------------------------
  * Helper for numbering tests with clear separation
@@ -85,7 +85,7 @@ void ensure_disk_exists(void) {
  * Helper: run a "-cd" test.
  *
  * Parameters:
- *    volume      - Volume name (the disk file will be named "<volume>_disk.txt")
+ *    volume      - Volume name (disk file: "<volume>_disk" or "<volume>_disk.img" by cluster size)
  *    rowCount    - Number of clusters
  *    nibbleCount - Total number of nibbles (cluster size = nibbleCount/2)
  *    interactive - If nonzero, the "-y" flag is appended (simulated interactive mode)
@@ -104,14 +104,25 @@ void run_cd_test_mode(const char *volume, int rowCount, int nibbleCount, int int
     CU_ASSERT_TRUE(execute_command_str(command) == 0);
 
     char diskFileName[256];
-    snprintf(diskFileName, sizeof(diskFileName), "%s_disk.txt", volume);
-    FILE *fp = fopen(diskFileName, "r");
-    CU_ASSERT_TRUE(fp != NULL);
-    if (fp) {
-         char header[1024];
-         fgets(header, sizeof(header), fp);
-         CU_ASSERT_TRUE(strncmp(header, "XX:", 3) == 0);
-         fclose(fp);
+    int cb = nibbleCount / 2;
+    if (cb >= 512 && (cb % 512) == 0) {
+        snprintf(diskFileName, sizeof(diskFileName), "%s_disk.img", volume);
+        int f = open(diskFileName, O_RDONLY);
+        CU_ASSERT_TRUE(f >= 0);
+        if (f >= 0) {
+            CU_ASSERT_TRUE(fat32_host_probe_fd(f) != 0);
+            close(f);
+        }
+    } else {
+        snprintf(diskFileName, sizeof(diskFileName), "%s_disk", volume);
+        FILE *fp = fopen(diskFileName, "r");
+        CU_ASSERT_TRUE(fp != NULL);
+        if (fp) {
+            char header[1024];
+            fgets(header, sizeof(header), fp);
+            CU_ASSERT_TRUE(strncmp(header, "XX:", 3) == 0);
+            fclose(fp);
+        }
     }
     printf("Disk '%s' created with %d clusters and cluster size %d bytes (nibbleCount = %d) in %s mode.\n\n",
            diskFileName, rowCount, nibbleCount / 2, nibbleCount, interactive ? "interactive" : "batch");
@@ -122,14 +133,14 @@ void run_cd_test_mode(const char *volume, int rowCount, int nibbleCount, int int
  * Suite setup and cleanup functions
  *
  * suite_setup: Use a fixed seed and create a reproducible drive file.
- * This creates "test_drive_disk.txt" and updates current_disk_file.
+ * This creates "test_drive_disk" and updates current_disk_file.
  *
  * suite_cleanup: Remove all temporary files and directories created during testing.
  * -------------------------------------------------------------------------*/
 int suite_setup(void) {
     srand(12345);  /* Fixed seed for reproducibility */
-    flintstone_format_disk("test_drive", 8, 16);  /* Creates "test_drive_disk.txt" */
-    strncpy(current_disk_file, "test_drive_disk.txt", sizeof(current_disk_file)-1);
+    flintstone_format_disk("test_drive", 8, 16);  /* Creates "test_drive_disk" */
+    strncpy(current_disk_file, "test_drive_disk", sizeof(current_disk_file)-1);
     fs_service_glue_init();
     return 0;
 }
@@ -138,7 +149,7 @@ int suite_cleanup(void) {
     fs_service_glue_shutdown();
     /* List of known temporary files */
     const char *files[] = {
-         "test_drive_disk.txt",
+         "test_drive_disk",
          "testdisk.txt",
          "mydisk.txt",
          "tempdisk.txt",
@@ -147,18 +158,21 @@ int suite_cleanup(void) {
          "testfile.txt",
          "test_output.txt",
          HISTORY_FILE,  /* e.g., "shell_history.txt" */
-         "cdbatch1_disk.txt",
-         "cdbatch2_disk.txt",
-         "cdbatch3_disk.txt",
-         "cdbatch_extra1_disk.txt",
-         "cdbatch_extra2_disk.txt",
-         "cdinter1_disk.txt",
-         "cdinter2_disk.txt",
-         "cdinter3_disk.txt",
-         "cdinter_extra1_disk.txt",
-         "cdinter_extra2_disk.txt",
+         "cdbatch1_disk",
+         "cdbatch2_disk",
+         "cdbatch3_disk",
+         "cdbatch_extra1_disk",
+         "cdbatch_extra2_disk",
+         "cdinter1_disk",
+         "cdinter2_disk",
+         "cdinter3_disk",
+         "cdinter_extra1_disk",
+         "cdinter_extra2_disk",
          "test_disk.txt",
-         "int_undo_test.txt"
+         "int_undo_test.txt",
+         "fat_stor.img",
+         "bin_src.dat",
+         "bin_out.dat"
     };
     int num_files = sizeof(files) / sizeof(files[0]);
     for (int i = 0; i < num_files; i++) {
@@ -168,8 +182,25 @@ int suite_cleanup(void) {
               }
          }
     }
-    /* Additionally, scan for any .txt file generated during testing and remove it */
+    /* Additionally, scan for volume disk images and remove them */
     DIR *dir = opendir(".");
+    if (dir) {
+        struct dirent *entry;
+        while ((entry = readdir(dir)) != NULL) {
+            size_t L = strlen(entry->d_name);
+            if (L >= 9 && strcmp(entry->d_name + L - 9, "_disk.img") == 0) {
+                if (remove(entry->d_name) != 0)
+                    perror(entry->d_name);
+            } else if (L >= 5 && strcmp(entry->d_name + L - 5, "_disk") == 0 &&
+                       strchr(entry->d_name, '.') == NULL) {
+                if (remove(entry->d_name) != 0)
+                    perror(entry->d_name);
+            }
+        }
+        closedir(dir);
+    }
+    /* Additionally, scan for any .txt file generated during testing and remove it */
+    dir = opendir(".");
     if (dir) {
          struct dirent *entry;
          while ((entry = readdir(dir)) != NULL) {
@@ -642,12 +673,40 @@ void test_exit_command(void) {
     }
 }
 
+void test_exit_invalid_flag_returns_error(void) {
+    print_test_header("exit invalid flag returns error (no external exec)");
+    CU_ASSERT_TRUE(execute_command_str("exit -q") == 1);
+}
+
 /* ---------------------------------------------------------------------------
  * VM Jail Suite helpers
  * -------------------------------------------------------------------------*/
 
 /* Temp directory used by the jail suite; set during jail_suite_setup */
 static char s_jail_tmpdir[PATH_MAX];
+
+static void rmrf_jail_sandbox(const char *path) {
+    DIR *d = opendir(path);
+    if (!d) {
+        unlink(path);
+        return;
+    }
+    struct dirent *e;
+    while ((e = readdir(d)) != NULL) {
+        if (e->d_name[0] == '.' && (e->d_name[1] == '\0' ||
+                                    (e->d_name[1] == '.' && e->d_name[2] == '\0')))
+            continue;
+        char sub[PATH_MAX];
+        snprintf(sub, sizeof(sub), "%s/%s", path, e->d_name);
+        struct stat st;
+        if (lstat(sub, &st) == 0 && S_ISDIR(st.st_mode))
+            rmrf_jail_sandbox(sub);
+        else
+            unlink(sub);
+    }
+    closedir(d);
+    rmdir(path);
+}
 
 /* Saved original g_vm_mode, g_vm_root, g_cwd so we can restore them */
 static int  s_saved_vm_mode;
@@ -686,9 +745,11 @@ static int jail_suite_cleanup(void) {
     /* Re-init jail to inactive state */
     fs_jail_init();
 
-    /* Remove temp dir (non-recursive: should be empty after tests) */
-    rmdir(s_jail_tmpdir);
-    s_jail_tmpdir[0] = '\0';
+    chdir("/tmp");
+    if (s_jail_tmpdir[0]) {
+        rmrf_jail_sandbox(s_jail_tmpdir);
+        s_jail_tmpdir[0] = '\0';
+    }
     return 0;
 }
 
@@ -734,12 +795,13 @@ void test_jail_check_empty_returns_error(void) {
 void test_jail_check_inside_allowed(void) {
     print_test_header("fs_jail_check_path: path inside jail is allowed");
     CU_ASSERT_TRUE(fs_jail_is_active() == 1);
-    /* The jail root itself must be allowed */
-    CU_ASSERT_TRUE(fs_jail_check_path(s_jail_tmpdir) == 0);
+    /* Outer sandbox directory is above the jail root and must be blocked */
+    CU_ASSERT_TRUE(fs_jail_check_path(s_jail_tmpdir) == -1);
+    CU_ASSERT_TRUE(fs_jail_check_path(g_fs_jail_root) == 0);
 
     /* Create a real subdir inside the jail and check it */
     char subdir[PATH_MAX];
-    snprintf(subdir, sizeof(subdir), "%s/inner", s_jail_tmpdir);
+    snprintf(subdir, sizeof(subdir), "%s/inner", g_fs_jail_root);
     mkdir(subdir, 0755);
     CU_ASSERT_TRUE(fs_jail_check_path(subdir) == 0);
     rmdir(subdir);
@@ -768,7 +830,7 @@ void test_jail_check_nonexistent_inside_allowed(void) {
     print_test_header("fs_jail_check_path: nonexistent file inside jail is allowed");
     CU_ASSERT_TRUE(fs_jail_is_active() == 1);
     char newfile[PATH_MAX];
-    snprintf(newfile, sizeof(newfile), "%s/ghost_file.txt", s_jail_tmpdir);
+    snprintf(newfile, sizeof(newfile), "%s/ghost_file.txt", g_fs_jail_root);
     /* Confirm it doesn't exist */
     CU_ASSERT_TRUE(access(newfile, F_OK) != 0);
     CU_ASSERT_TRUE(fs_jail_check_path(newfile) == 0);
@@ -789,7 +851,7 @@ void test_fs_provider_read_inside_allowed(void) {
 
     /* Create a file inside the jail */
     char fpath[PATH_MAX];
-    snprintf(fpath, sizeof(fpath), "%s/prov_read_test.txt", s_jail_tmpdir);
+    snprintf(fpath, sizeof(fpath), "%s/prov_read_test.txt", g_fs_jail_root);
     FILE *f = fopen(fpath, "w");
     CU_ASSERT_PTR_NOT_NULL(f);
     if (f) { fprintf(f, "hello jail"); fclose(f); }
@@ -825,7 +887,7 @@ void test_fs_provider_write_inside_allowed(void) {
     CU_ASSERT_TRUE(fs_jail_is_active() == 1);
 
     char fpath[PATH_MAX];
-    snprintf(fpath, sizeof(fpath), "%s/prov_write_test.txt", s_jail_tmpdir);
+    snprintf(fpath, sizeof(fpath), "%s/prov_write_test.txt", g_fs_jail_root);
 
     fs_provider_t *p = fs_local_provider_create();
     CU_ASSERT_PTR_NOT_NULL(p);
@@ -894,7 +956,7 @@ void test_fs_provider_move_dst_outside_blocked(void) {
 
     /* src inside jail */
     char src[PATH_MAX];
-    snprintf(src, sizeof(src), "%s/move_src.txt", s_jail_tmpdir);
+    snprintf(src, sizeof(src), "%s/move_src.txt", g_fs_jail_root);
     FILE *f = fopen(src, "w");
     if (f) { fprintf(f, "src"); fclose(f); }
 
@@ -933,7 +995,7 @@ void test_interpreter_cd_allowed_inside_jail(void) {
 
     /* Create a subdirectory inside the jail */
     char subdir[PATH_MAX];
-    snprintf(subdir, sizeof(subdir), "%s/cd_target", s_jail_tmpdir);
+    snprintf(subdir, sizeof(subdir), "%s/cd_target", g_fs_jail_root);
     mkdir(subdir, 0755);
 
     int ret = execute_command_str("cd cd_target");
@@ -941,8 +1003,8 @@ void test_interpreter_cd_allowed_inside_jail(void) {
     CU_ASSERT_TRUE(ret == 0);
 
     /* Return to jail root for next tests */
-    chdir(s_jail_tmpdir);
-    strncpy(g_cwd, s_jail_tmpdir, sizeof(g_cwd) - 1);
+    chdir(g_fs_jail_root);
+    strncpy(g_cwd, g_fs_jail_root, sizeof(g_cwd) - 1);
 
     rmdir(subdir);
 }
@@ -963,7 +1025,7 @@ void test_interpreter_format_allowed_inside_jail(void) {
     CU_ASSERT_TRUE(fs_jail_is_active() == 1);
 
     char diskfile[PATH_MAX];
-    snprintf(diskfile, sizeof(diskfile), "%s/jail_disk.txt", s_jail_tmpdir);
+    snprintf(diskfile, sizeof(diskfile), "%s/jail_disk.txt", g_fs_jail_root);
 
     /* format <path> <vol> <rows> <nibbles> */
     char cmd[512];
@@ -1000,7 +1062,7 @@ void test_interpreter_setdisk_allowed_inside_jail(void) {
 
     /* Create a valid disk file inside the jail */
     char diskfile[PATH_MAX];
-    snprintf(diskfile, sizeof(diskfile), "%s/setdisk_inside.txt", s_jail_tmpdir);
+    snprintf(diskfile, sizeof(diskfile), "%s/setdisk_inside.txt", g_fs_jail_root);
     FILE *f = fopen(diskfile, "w");
     CU_ASSERT_PTR_NOT_NULL(f);
     if (f) {
@@ -1015,6 +1077,40 @@ void test_interpreter_setdisk_allowed_inside_jail(void) {
     CU_ASSERT_TRUE(strcmp(current_disk_file, diskfile) == 0);
 
     remove(diskfile);
+}
+
+void test_diskput_fat32_roundtrip(void) {
+    char prev[CWD_MAX];
+    strncpy(prev, current_disk_file, sizeof(prev));
+    prev[sizeof(prev) - 1] = '\0';
+    FILE *fp = fopen("bin_src.dat", "wb");
+    CU_ASSERT_PTR_NOT_NULL(fp);
+    if (!fp)
+        return;
+    unsigned char b[] = {0, 1, 2, 255, 10, 20};
+    CU_ASSERT_TRUE(fwrite(b, 1, sizeof(b), fp) == sizeof(b));
+    fclose(fp);
+    CU_ASSERT_TRUE(execute_command_str("format fat_stor.img z 4 1024") == 0);
+    CU_ASSERT_TRUE(execute_command_str("diskmkdir TSTSUB") == 0);
+    CU_ASSERT_TRUE(execute_command_str("diskput bin_src.dat TSTSUB/BINRES.DAT") == 0);
+    CU_ASSERT_TRUE(execute_command_str("diskget TSTSUB/BINRES.DAT bin_out.dat") == 0);
+    fp = fopen("bin_out.dat", "rb");
+    CU_ASSERT_PTR_NOT_NULL(fp);
+    if (!fp) {
+        remove("bin_src.dat");
+        return;
+    }
+    unsigned char out[32];
+    size_t n = fread(out, 1, sizeof(out), fp);
+    fclose(fp);
+    CU_ASSERT_TRUE(n == sizeof(b));
+    CU_ASSERT_TRUE(memcmp(out, b, n) == 0);
+    strncpy(current_disk_file, prev, sizeof(current_disk_file) - 1);
+    current_disk_file[sizeof(current_disk_file) - 1] = '\0';
+    read_disk_header();
+    remove("fat_stor.img");
+    remove("bin_src.dat");
+    remove("bin_out.dat");
 }
 
 /* ---------------------------------------------------------------------------
@@ -1063,12 +1159,14 @@ int main(void)
     CU_ADD_TEST(suite, test_init_command);
     CU_ADD_TEST(suite, test_uc_command);
     CU_ADD_TEST(suite, test_import_command);
+    CU_ADD_TEST(suite, test_diskput_fat32_roundtrip);
     CU_ADD_TEST(suite, test_print_command);
     CU_ADD_TEST(suite, test_clear_command);
     CU_ADD_TEST(suite, test_history_commands);
     CU_ADD_TEST(suite, test_cc_command);
     CU_ADD_TEST(suite, test_external_command);
     CU_ADD_TEST(suite, test_exit_command);
+    CU_ADD_TEST(suite, test_exit_invalid_flag_returns_error);
     CU_ADD_TEST(suite, test_integration_undo);
     CU_ADD_TEST(suite, test_integration_storage);
 

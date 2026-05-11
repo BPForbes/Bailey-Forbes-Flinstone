@@ -1,0 +1,62 @@
+---
+description: Semantic versioning (A.B.C) and branch-merge version checks
+globs:
+  - "**/*"
+alwaysApply: true
+---
+
+# Versioning rules
+
+## Lock system — never rewrite shipped published files
+
+- **Do not** modify paths under **`version/locked/`** that are already present on the **target / merge-base** branch. After merge, those files are the **published** record; new prose belongs in **`version/entries/`**, then **`finalize_version_locked.sh`** (or **`make finalize-version-locked`**).
+- **Before merge:** **`version/entries/*.ver`** files that exist **only** on your feature branch may be edited or removed freely until you finalize.
+- **`version/entries/`** is where **`.ver`** files are authored and revised; **`version/locked/`** is the **published snapshot** (full copy of **`version/entries/`** at finalize time). Until the next finalize, **`version/entries/`** may contain **additional** files not yet in **`version/locked/`**.
+- **CI** enforces **`version/locked`** immutability on PRs (`check_version_locked_immutable.sh`; **`version/locked/ABOUT.txt`** is excluded as non-release prose) and requires every **`version/locked`** file to **byte-match** the same path under **`version/entries/`** (`check_version_locked_subset_of_entries.sh`).
+- **AI edits** must **skip** historical **`version/locked/**`** from bulk refactors.
+
+## Agent workflow — `.ver` timing and one file per PR
+
+- On the **first** substantive code change for a pull request, **add** **`version/entries/*.ver`** if the branch does not already have an entry that covers **that** PR.
+- For **one** pull request, **one** **`version/entries/*.ver`** file is enough: **edit** that file (e.g. **`DESCRIPTION`**, semver fields only if release scope truly changes) across the whole PR, instead of adding multiple new entry files for the same branch.
+
+## Canonical version & changelog
+
+- **`userland/shell/version_def.h`** — **Generated** by **`scripts/gen_version_def.sh`** (also from **`make`**). **`VERSION`** = **A.B.C** from the **highest** triple in **`version/locked/*.ver`**. CI ensures the committed header matches the generator output.
+- **`version/entries/`** — author **`.ver`** release notes here before finalize.
+- **`version/locked/`** — **finalize** from entries; this tree drives **`version_def.h`** and changelog generation.
+- **GitHub Actions:** **`scripts/gen_version_changelog.c`** reads **`version/locked`**, then **`make CHANGELOG_CI=1`** (see `.github/workflows/c-cpp.yml`).
+- **`scripts/export_version_record.sh`** — prints keys / JSON from `version_def.h` for deployment pipelines.
+- Use **semantic versioning**: **`A.B.C`**.
+
+## Semver meanings
+
+| Component | Meaning |
+|-----------|---------|
+| **A** | Major — architecture or milestone-level overhauls, incompatible or foundational changes |
+| **B** | Minor — new features (additive behavior) |
+| **C** | Patch — bug fixes and small, localized corrections |
+
+### Bump precedence (`A` > `B` > `C`)
+
+**Precedence (importance):** **`A` > `B` > `C`**. When you record a new release, choose **one** bump level: the **highest** precedence that applies to that release as a whole.
+
+- **Increment** only that component (the most significant level that changed for this release).
+- **Leave unchanged** every component **more significant** than the one you bumped (to the **left** in `A.B.C`).
+- **Set to `0`** every component **less significant** than the one you bumped (to the **right** in `A.B.C`).
+
+So a **minor** bump from **`2.2.4`** is **`2.3.0`**: **`A`** stays `2`, **`B`** becomes `3`, **`C`** resets to **`0`** (not `2.3.4`). A **major** bump from **`2.3.7`** is **`3.0.0`**. A **patch** bump from **`2.3.0`** is **`2.3.1`** (only **`C`** moves; there is no component to the right of **`C`** to zero).
+
+If a single release mixes major, minor, and patch-style work, still apply **only** the **highest** applicable bump once (e.g. milestone + architecture → **`A`** only → **`3.0.0`** after **`2.x.y`**); do not stack multiple component bumps for the same release.
+
+## Merge / PR checks
+
+Before merging **incoming → base** (examples: `bug/*` → `develop`, `develop` → `main`):
+
+1. Read **`VERSION` / `VERSION_*` on the incoming branch** and on the **merge target branch** (`userland/shell/version_def.h`, generated from **`version/locked/*.ver`**).
+2. **Incoming must be strictly newer** than the target for that integration.
+3. If both show the **same** version (e.g. both `2.0.0`), **update the incoming branch** so its version is **one appropriate step ahead** of the target.
+
+Example: `bug/…` → `develop`, both at **`2.0.0`** → bump incoming to **`2.0.1`** (patch for a bugfix branch).
+
+When bumping, add or extend **`version/entries/*.ver`** (typically **one** new file per feature PR, revised in place). Pushing to **`develop`** runs **Version lock on merge** (entries → **`version/locked/`**, refresh **`version_def.h`**, opens a PR to merge when there are changes). You may run **`make finalize-version-locked`** locally before merge for an early **`version/locked/`** update on the branch. Do not merge with identical versions across branches when the change warrants a bump. Changelog assembly is **deployment-time**, not **`make`**.
