@@ -1,0 +1,4 @@
+MAJOR_VERSION=3
+STANDARD_VERSION=2
+RELEASE_VERSION=0
+DESCRIPTION=Persist shell command history on the FAT32 disk image (SH_HIST.TXT) when using a FAT32 volume; legacy hex disks keep host shell_history.txt. Interactive line editing supports left/right arrow keys to move the cursor for corrections.
