@@ -143,7 +143,9 @@ void interactive_shell(void) {
             if (c == '\r' || c == '\n') {
                 write(STDOUT_FILENO, "\n", 1);
                 break;
-            } else if (c == 127) {
+            } else if ((unsigned char)c == 127 || (unsigned char)c == '\b') {
+                /* DEL (127) or BS (8): terminals differ; BS alone moves the cursor
+                 * without erasing, which used to corrupt the buffer and overwrite "shell>". */
                 if (len > 0) {
                     len--;
                     line[len] = '\0';

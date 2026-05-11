@@ -1,7 +1,6 @@
 #include "common.h"
 #include "cmd_decl.h"
 #include <stdio.h>
-#include <stdlib.h>
 #include <string.h>
 #include <unistd.h>
 
@@ -20,7 +19,7 @@ int cmd_version_run(int argc, char **argv) {
             return 1;
         }
         printf("Shell version: %s\n", VERSION);
-        exit(0);
+        return 0;
     }
     if (!isatty(STDIN_FILENO))
         printf("History file retained.\n");
@@ -41,5 +40,5 @@ int cmd_version_run(int argc, char **argv) {
             }
         }
     }
-    exit(0);
+    return 0;
 }
