@@ -3,3 +3,5 @@ MAJOR_VERSION=2
 STANDARD_VERSION=3
 RELEASE_VERSION=1
 DESCRIPTION=AGENTS/CLAUDE/CodeRabbit guidance for automation-only version-lock PRs; version-lock-on-merge enables gh auto-merge (squash) after create-pull-request; token chain BPFORBES_PAT or VERSION_LOCK_PAT or GITHUB_TOKEN.
+
+RELEASE_DATE=2026-05-11
