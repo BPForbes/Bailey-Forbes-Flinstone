@@ -1,4 +1,7 @@
 #include "fl/history_record.h"
+#ifndef DISK_HOST_USE_LIBC_PREADV
+#include "shell_history_asm.h"
+#endif
 #include <stdio.h>
 #include <string.h>
 
@@ -32,10 +35,22 @@ size_t fl_history_record_pack(char *out, size_t out_cap, uint8_t bundle_rev,
     memcpy(w, json, (size_t)jn);
     w += (size_t)jn;
     *w++ = (unsigned char)FL_HISTORY_RECORD_SEP;
+    size_t used = (size_t)(w - (unsigned char *)out);
+#ifndef DISK_HOST_USE_LIBC_PREADV
+    {
+        size_t tail = history_asm_append_record(out, out_cap, used, cmd, clen);
+        if (tail == (size_t)-1)
+            return (size_t)-1;
+        return tail;
+    }
+#else
+    if (used + clen + 1u > out_cap)
+        return (size_t)-1;
     memcpy(w, cmd, clen);
     w += clen;
     *w++ = (unsigned char)'\n';
     return (size_t)(w - (unsigned char *)out);
+#endif
 }
 
 int fl_history_record_unpack_cmd(const char *stored_line, char *cmd_out,

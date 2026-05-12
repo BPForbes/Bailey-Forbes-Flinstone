@@ -12,7 +12,11 @@
  *
  * Commands containing RS or LF are stored without a payload (legacy line).
  *
- * **Audit trail** (post-exit, optional `FL_AUDIT`) is separate; see **fl/audit_log.h**.
+ * On GAS host builds (when DISK_HOST_USE_LIBC_PREADV is not defined), the
+ * trailing command bytes plus LF are appended with history_asm_append_record
+ * (see shell_history_asm.h and shell_history_host_asm.s under arch).
+ *
+ * Audit trail (post-exit, optional FL_AUDIT) is separate; see fl/audit_log.h.
  */
 #ifndef FL_HISTORY_RECORD_H
 #define FL_HISTORY_RECORD_H
