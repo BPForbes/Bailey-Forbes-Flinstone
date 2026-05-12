@@ -1,0 +1,4 @@
+MAJOR_VERSION=3
+STANDARD_VERSION=2
+RELEASE_VERSION=4
+DESCRIPTION=Introduce roadmap P0-1/P0-2 contract headers: fl/contract.h bundle (driver+net+log+auth surfaces, FL_CONTRACT_ROADMAP_REV), fl/contract_result.h (fl_result_t), fl/contract_log.h (syslog-level sink ops), fl/contract_auth.h (fl_authz_check_fn). test_drivers includes fl/contract.h for compile coverage.
