@@ -1,0 +1,4 @@
+MAJOR_VERSION=3
+STANDARD_VERSION=2
+RELEASE_VERSION=3
+DESCRIPTION=Add docs/ROADMAP.md: phased OS-platform roadmap (identity, networking, drivers, storage, logging, VM, hardening) with per-feature goals, acceptance criteria, and normative references (POSIX, RFCs, virtio). Link from docs/build.md.
