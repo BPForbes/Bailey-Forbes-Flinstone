@@ -157,9 +157,11 @@ void append_history_ex(fl_contract_surface_t surface, fl_result_t last_rc,
             }
             FILE *fp = fopen(tmpl, "a");
             if (fp) {
-                (void)history_fwrite_blob(fp, rec, n);
-                fclose(fp);
-                (void)fat32_host_file_put(tmpl, HISTORY_DISK_PATH);
+                int write_ok = (history_fwrite_blob(fp, rec, n) == 0);
+                int close_ok = (fclose(fp) == 0);
+                if (write_ok && close_ok) {
+                    (void)fat32_host_file_put(tmpl, HISTORY_DISK_PATH);
+                }
             }
             unlink(tmpl);
         }
