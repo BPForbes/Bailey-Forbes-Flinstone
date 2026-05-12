@@ -7,24 +7,39 @@ alwaysApply: true
 
 # Versioning rules
 
+Human-readable guide: **`docs/versioning.md`**. Pre-merge **CodeRabbit** + **Codex CLI**: **`AGENTS.md`** and **`.cursor/rules/review_tools.mdc`** (install CLIs if missing, triage must-fix vs nits, **no `git push`** until both satisfied).
+
 ## Lock system — never rewrite shipped published files
 
-- **Do not** modify paths under **`version/locked/`** that are already present on the **target / merge-base** branch. After merge, those files are the **published** record; new prose belongs in **`version/entries/`**, then **`finalize_version_locked.sh`** (or **`make finalize-version-locked`**).
-- **Before merge:** **`version/entries/*.ver`** files that exist **only** on your feature branch may be edited or removed freely until you finalize.
-- **`version/entries/`** is where **`.ver`** files are authored and revised; **`version/locked/`** is the **published snapshot** (full copy of **`version/entries/`** at finalize time). Until the next finalize, **`version/entries/`** may contain **additional** files not yet in **`version/locked/`**.
+- **Do not** modify paths under **`version/locked/`** that are already present on the **target / merge-base** branch. After merge, those files are the **published** record. New release prose belongs in **`version/entries/`** only on normal feature work; **`version/locked/`** is refreshed by **Version lock on merge** (GitHub Actions) after changes land on **`develop`** (see **AI / Cursor agent PRs** below).
+- **Before merge:** **`version/entries/*.ver`** files that exist **only** on your feature branch may be edited or removed freely.
+- **`version/entries/`** is where **`.ver`** files are authored and revised. **`version/locked/`** is the **published snapshot** (full copy of **`version/entries/`** when finalize / automation runs). Until then, **`version/entries/`** may contain **additional** files not yet in **`version/locked/`**.
+- **`userland/shell/version_def.h`** is **generated** from the highest triple in **`version/locked/*.ver`** (`scripts/gen_version_def.sh`). Treat the committed header on **`develop`** as **published**; do not hand-edit **`VERSION_*`**.
 - **CI** enforces **`version/locked`** immutability on PRs (`check_version_locked_immutable.sh`; **`version/locked/ABOUT.txt`** is excluded as non-release prose) and requires every **`version/locked`** file to **byte-match** the same path under **`version/entries/`** (`check_version_locked_subset_of_entries.sh`).
 - **AI edits** must **skip** historical **`version/locked/**`** from bulk refactors.
+
+## AI / Cursor agent PRs — `version/entries` only
+
+- On **Cursor- and AI-authored pull requests**, add or revise **`version/entries/*.ver`** for the release you are shipping in that PR.
+- **Do not** commit changes under **`version/locked/**` or **`userland/shell/version_def.h`**. Those paths are the **published** record on **`develop`**; **Version lock on merge** (GitHub Actions on push to **`develop`**) runs **`finalize_version_locked.sh`**, **`stamp_version_release_date.sh`** when applicable, and **`gen_version_def.sh`**, then opens a PR to publish updates when needed.
+- **`version/entries/ABOUT.txt`** must **byte-match** **`version/locked/ABOUT.txt`** while **`version/locked/`** is unchanged from the merge target (`check_version_locked_subset_of_entries.sh`). If you are not updating locked in the PR, reset **`version/entries/ABOUT.txt`** to match the target’s **`version/locked/ABOUT.txt`** (or leave it unchanged from the target).
+- **Maintainers** may run **`./scripts/finalize_version_locked.sh`** / **`make finalize-version-locked`** locally before merge for an early snapshot on the branch; that is **not** the default agent workflow.
 
 ## Agent workflow — `.ver` timing and one file per PR
 
 - On the **first** substantive code change for a pull request, **add** **`version/entries/*.ver`** if the branch does not already have an entry that covers **that** PR.
 - For **one** pull request, **one** **`version/entries/*.ver`** file is enough: **edit** that file (e.g. **`DESCRIPTION`**, semver fields only if release scope truly changes) across the whole PR, instead of adding multiple new entry files for the same branch.
 
+## `.ver` filename convention (AI / authors)
+
+- Prefer **`A_B_C_short_slug.ver`** (three semver components, underscore-separated, then a short slug). Example: **`3_2_0_shell_history_disk_cursor.ver`**.
+- Avoid optional **`NNN_`** numeric serial prefixes unless you are matching an existing legacy pattern (e.g. **`001_2_2_4_baseline.ver`**). **Ordering is defined only by the `MAJOR_VERSION` / `STANDARD_VERSION` / `RELEASE_VERSION` fields inside the file**, not by the filename prefix.
+
 ## Canonical version & changelog
 
-- **`userland/shell/version_def.h`** — **Generated** by **`scripts/gen_version_def.sh`** (also from **`make`**). **`VERSION`** = **A.B.C** from the **highest** triple in **`version/locked/*.ver`**. CI ensures the committed header matches the generator output.
-- **`version/entries/`** — author **`.ver`** release notes here before finalize.
-- **`version/locked/`** — **finalize** from entries; this tree drives **`version_def.h`** and changelog generation.
+- **`userland/shell/version_def.h`** — **Generated** by **`scripts/gen_version_def.sh`** (also from **`make`**). **`VERSION`** = **A.B.C** from the **highest** triple in **`version/locked/*.ver`**. CI ensures the committed header matches the generator output for the branch’s **`version/locked/`** tree.
+- **`version/entries/`** — author **`.ver`** release notes here (agents: **commit entries only**; see above).
+- **`version/locked/`** — **published** snapshot; updated by automation (and optionally by maintainers running finalize), not by default agent commits.
 - **GitHub Actions:** **`scripts/gen_version_changelog.c`** reads **`version/locked`**, then **`make CHANGELOG_CI=1`** (see `.github/workflows/c-cpp.yml`).
 - **`scripts/export_version_record.sh`** — prints keys / JSON from `version_def.h` for deployment pipelines.
 - Use **semantic versioning**: **`A.B.C`**.
@@ -53,10 +68,10 @@ If a single release mixes major, minor, and patch-style work, still apply **only
 
 Before merging **incoming → base** (examples: `bug/*` → `develop`, `develop` → `main`):
 
-1. Read **`VERSION` / `VERSION_*` on the incoming branch** and on the **merge target branch** (`userland/shell/version_def.h`, generated from **`version/locked/*.ver`**).
-2. **Incoming must be strictly newer** than the target for that integration.
-3. If both show the **same** version (e.g. both `2.0.0`), **update the incoming branch** so its version is **one appropriate step ahead** of the target.
+1. Compare versions: use the **merge target** **`userland/shell/version_def.h`** (published from **`version/locked/`**) as the baseline **VERSION**.
+2. On the **incoming** branch, ensure the new work is covered by **`version/entries/*.ver`** whose internal **MAJOR/STANDARD/RELEASE** (or the **highest** such triple among incoming entries) is **strictly greater** than the target **VERSION** when the PR introduces a new release. (If the PR also updates **`version/locked/`** through a maintainer finalize, you may compare incoming **`version_def.h`** to the target instead.)
+3. If both show the **same** version (e.g. both `2.0.0`), **update the incoming branch** so its **entries** record a semver **one appropriate step ahead** of the target.
 
-Example: `bug/…` → `develop`, both at **`2.0.0`** → bump incoming to **`2.0.1`** (patch for a bugfix branch).
+Example: `bug/…` → `develop`, both at **`2.0.0`** → bump incoming **entries** to **`2.0.1`** (patch for a bugfix branch).
 
-When bumping, add or extend **`version/entries/*.ver`** (typically **one** new file per feature PR, revised in place). Pushing to **`develop`** runs **Version lock on merge** (entries → **`version/locked/`**, refresh **`version_def.h`**, opens a PR to merge when there are changes). You may run **`make finalize-version-locked`** locally before merge for an early **`version/locked/`** update on the branch. Do not merge with identical versions across branches when the change warrants a bump. Changelog assembly is **deployment-time**, not **`make`**.
+When bumping, add or extend **`version/entries/*.ver`** (typically **one** new file per feature PR, revised in place). Pushing to **`develop`** runs **Version lock on merge** (entries → **`version/locked/`**, refresh **`version_def.h`**, opens a PR when there are changes). **Maintainers** may run **`make finalize-version-locked`** locally before merge for an early **`version/locked/`** update on the branch. Do not merge with identical versions across branches when the change warrants a bump. Changelog assembly is **deployment-time**, not **`make`**.

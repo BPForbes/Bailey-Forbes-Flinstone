@@ -175,7 +175,7 @@ void do_redirect_output(const char *filename) {
         printf("Redirecting output to '%s'.\n", filename);
 }
 
-void import_text_drive(const char *textFile, const char *destTxt, int overrideClusters, int overrideSize) {
+void import_text_drive(const char *textFile, const char *dest_disk, int overrideClusters, int overrideSize) {
     FILE *fin = fopen(textFile, "r");
     if (!fin) {
         fprintf(stderr, "Cannot open text drive listing: %s\n", textFile);
@@ -228,9 +228,9 @@ void import_text_drive(const char *textFile, const char *destTxt, int overrideCl
         if (count > 0)
             maxClusters = count;
     }
-    FILE *out = fopen(destTxt, "w");
+    FILE *out = fopen(dest_disk, "w");
     if (!out) {
-        fprintf(stderr, "Cannot open output text file: %s\n", destTxt);
+        fprintf(stderr, "Cannot open output disk file: %s\n", dest_disk);
         for (int i = 0; i < 65536; i++)
             if (linesStorage[i])
                 free(linesStorage[i]);
@@ -260,7 +260,7 @@ void import_text_drive(const char *textFile, const char *destTxt, int overrideCl
         }
     }
     fclose(out);
-    printf("Imported text drive listing => %s\n", destTxt);
+    printf("Imported text drive listing => %s\n", dest_disk);
     for (int i = 0; i < 65536; i++)
         if (linesStorage[i])
             free(linesStorage[i]);

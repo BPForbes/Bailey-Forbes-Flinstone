@@ -1,0 +1,7 @@
+# ARM bug patch discoveries
+MAJOR_VERSION=3
+STANDARD_VERSION=0
+RELEASE_VERSION=1
+DESCRIPTION=ARM bug patch discoveries: (1) Shell prompt text could be overwritten by command text when backspace sent ASCII BS (8) instead of DEL (127)—cursor moved without erasing glyphs or trimming the buffer. (2) The version builtin called exit(0) and aborted the shell; it now returns so the session continues.
+
+RELEASE_DATE=2026-05-11

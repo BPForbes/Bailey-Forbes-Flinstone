@@ -18,7 +18,9 @@
 #include <termios.h>
 #include <time.h>
 
+/* Legacy hex-disk volumes: host-side history file. FAT32 images use HISTORY_DISK_PATH on the volume. */
 #define HISTORY_FILE           "shell_history.txt"
+#define HISTORY_DISK_PATH      "SH_HIST.TXT"
 #define NUM_WORKERS            4
 #define MAX_JOBS               64
 #define CWD_MAX                256
@@ -27,7 +29,7 @@
 extern int g_cluster_size;
 extern int g_total_clusters;
 extern char current_disk_file[CWD_MAX];
-/* 1 = FAT32 super-floppy .img (FLINT.DAT payload); 0 = legacy hex .txt */
+/* 1 = FAT32 super-floppy .img (FLINT.DAT payload); 0 = legacy hex lines (.dat or any path) */
 extern int g_disk_host_fat32;
 
 /* VM mode: 1 = -Virtualization; file access is jailed under launch dir or sandbox in vm_hostfs/ (see fs_jail.c) */
@@ -55,7 +57,7 @@ extern char **g_interactive_history;
 extern int g_interactive_history_count;
 extern pthread_mutex_t history_mutex;
 
-/* Help message */
-extern const char *HELP_MSG;
+/* Help text (body + runtime date footer via fl_print_help_message) */
+void fl_print_help_message(void);
 
 #endif /* COMMON_H */

@@ -114,6 +114,7 @@ void interactive_shell(void) {
     printf("[INTERACTIVE MODE] Type 'exit' to leave interactive mode.\n");
     char line[1024] = {0};
     int len = 0;
+    int pos = 0; /* cursor: index in [0, len] */
     g_interactive_history = load_history(&g_interactive_history_count);
     if (!g_interactive_history) {
         g_interactive_history = malloc(sizeof(char *));
@@ -133,6 +134,7 @@ void interactive_shell(void) {
         printf("shell> ");
         fflush(stdout);
         len = 0;
+        pos = 0;
         memset(line, 0, sizeof(line));
         currHistIndex = g_interactive_history_count;
         while (1) {
@@ -143,11 +145,22 @@ void interactive_shell(void) {
             if (c == '\r' || c == '\n') {
                 write(STDOUT_FILENO, "\n", 1);
                 break;
-            } else if (c == 127) {
-                if (len > 0) {
+            } else if ((unsigned char)c == 127 || (unsigned char)c == '\b') {
+                /* DEL (127) or BS (8): delete before cursor; redraw so the prompt stays consistent. */
+                if (pos > 0) {
+                    memmove(line + pos - 1, line + pos, (size_t)(len - pos) + 1u);
+                    pos--;
                     len--;
-                    line[len] = '\0';
-                    write(STDOUT_FILENO, "\b \b", 3);
+                    printf("\r\33[2Kshell> ");
+                    if (len > 0)
+                        fwrite(line, 1, (size_t)len, stdout);
+                    fflush(stdout);
+                    if (pos < len) {
+                        int back = len - pos;
+                        if (back > 0 && back < 10000)
+                            printf("\033[%dD", back);
+                        fflush(stdout);
+                    }
                 }
             } else if (c == 27) {
                 char seq[2];
@@ -160,7 +173,8 @@ void interactive_shell(void) {
                                 fflush(stdout);
                                 strncpy(line, g_interactive_history[currHistIndex], sizeof(line) - 1);
                                 line[sizeof(line) - 1] = '\0';
-                                len = strlen(line);
+                                len = (int)strlen(line);
+                                pos = len;
                             }
                         } else if (seq[1] == 'B') {
                             if (currHistIndex < g_interactive_history_count - 1) {
@@ -169,21 +183,51 @@ void interactive_shell(void) {
                                 fflush(stdout);
                                 strncpy(line, g_interactive_history[currHistIndex], sizeof(line) - 1);
                                 line[sizeof(line) - 1] = '\0';
-                                len = strlen(line);
+                                len = (int)strlen(line);
+                                pos = len;
                             } else {
                                 currHistIndex = g_interactive_history_count;
                                 printf("\r\33[2Kshell> ");
                                 fflush(stdout);
                                 len = 0;
+                                pos = 0;
                                 line[0] = '\0';
+                            }
+                        } else if (seq[1] == 'C') {
+                            /* right arrow */
+                            if (pos < len) {
+                                pos++;
+                                write(STDOUT_FILENO, "\033[C", 3);
+                                fflush(stdout);
+                            }
+                        } else if (seq[1] == 'D') {
+                            /* left arrow */
+                            if (pos > 0) {
+                                pos--;
+                                write(STDOUT_FILENO, "\033[D", 3);
+                                fflush(stdout);
                             }
                         }
                     }
                 }
             } else {
-                if (len < (int)sizeof(line) - 1) {
-                    line[len++] = c;
-                    write(STDOUT_FILENO, &c, 1);
+                if (c == '\t' || ((unsigned char)c >= 32 && (unsigned char)c != 127)) {
+                    if (len < (int)sizeof(line) - 1) {
+                        memmove(line + pos + 1, line + pos, (size_t)(len - pos) + 1u);
+                        line[pos] = c;
+                        pos++;
+                        len++;
+                        printf("\r\33[2Kshell> ");
+                        if (len > 0)
+                            fwrite(line, 1, (size_t)len, stdout);
+                        fflush(stdout);
+                        if (pos < len) {
+                            int back = len - pos;
+                            if (back > 0 && back < 10000)
+                                printf("\033[%dD", back);
+                            fflush(stdout);
+                        }
+                    }
                 }
             }
         }

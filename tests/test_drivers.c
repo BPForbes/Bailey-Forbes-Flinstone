@@ -580,10 +580,10 @@ int main(void) {
     }
     close(fd);
     char path[160];
-    snprintf(path, sizeof path, "%s.txt", tmpl);
+    snprintf(path, sizeof path, "%s.dat", tmpl);
     if (rename(tmpl, path) != 0) {
         unlink(tmpl);
-        fprintf(stderr, "Cannot rename temp disk to .txt\n");
+        fprintf(stderr, "Cannot rename temp disk to .dat\n");
         return 1;
     }
     g_total_clusters = 8;

@@ -393,7 +393,7 @@ void flintstone_format_disk(const char *volumeName, int rowCount, int nibbleCoun
         g_disk_host_fat32 = 1;
         printf("Formatted FAT32 disk created: %s\n", diskFileName);
     } else {
-        snprintf(diskFileName, sizeof(diskFileName), "%s_disk", volumeName);
+        snprintf(diskFileName, sizeof(diskFileName), "%s_disk.dat", volumeName);
         flintstone_format_txt(diskFileName, volumeName, rowCount, clusterSize);
     }
 }

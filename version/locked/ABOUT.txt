@@ -1,10 +1,32 @@
 Version release notes use *.ver files (MAJOR_VERSION, STANDARD_VERSION,
-RELEASE_VERSION or MINOR_VERSION / VERSION_PATCH, and DESCRIPTION).
+RELEASE_VERSION or MINOR_VERSION / VERSION_PATCH, DESCRIPTION, and optional
+RELEASE_DATE).
 
-version/entries/  — author and edit .ver release notes here before finalize.
-version/locked/   — published snapshot: replaced by copying entries → locked.
+DESCRIPTION may be:
+  - One line:   DESCRIPTION=...
+  - Multiline:  DESCRIPTION<<DELIM
+                ...any amount of text, multiple lines...
+                DELIM
+                (closing line is DELIM alone after trim; newlines are kept.)
 
-Finalize (copy all of entries over locked), then regenerate the shell header:
+RELEASE_DATE (optional in entries):
+  Authors usually omit RELEASE_DATE when editing version/entries/*.ver. After
+  changes land on the develop branch, the "Version lock on merge" GitHub Actions
+  workflow runs finalize_version_locked.sh, then stamp_version_release_date.sh,
+  which appends RELEASE_DATE=YYYY-MM-DD to any *.ver under version/locked and
+  version/entries that does not already declare RELEASE_DATE, using the merge
+  calendar day. For merge date metadata, rely on that automation—do not hand-date
+  every new entry unless there is a deliberate reason to freeze an earlier date.
+
+  If RELEASE_DATE is omitted entirely, scripts/gen_version_changelog.c may use
+  the generator's local calendar date at generation time (see that script).
+
+version/entries/  — author and edit .ver release notes here before automation publishes.
+version/locked/   — published snapshot: full copy of version/entries/ when finalize
+                   or Version lock on merge runs on develop.
+
+Finalize (copy all of entries over locked), then regenerate the shell header
+(maintainers or local release prep — automation does this after push to develop):
 
   ./scripts/finalize_version_locked.sh   # or: make finalize-version-locked
   make                                   # or: ./scripts/gen_version_def.sh
@@ -12,10 +34,20 @@ Finalize (copy all of entries over locked), then regenerate the shell header:
 userland/shell/version_def.h is generated from the highest A.B.C among
 version/locked/*.ver only. Do not edit the header by hand.
 
-The repository currently ships e.g. 001_2_2_4_baseline.ver. Author new releases as
+For routine feature work: edit only version/entries/*.ver for semver and release prose.
+Do not commit hand-edited version/locked/*.ver or userland/shell/version_def.h on
+typical agent-authored PRs; GitHub Actions copies entries → locked and regenerates
+the header after merge to develop. Exception: this ABOUT.txt file (companion
+documentation) may change together with the copy under version/entries/ or
+version/locked/ so both stay byte-identical when CI requires it.
+
+The repository ships e.g. 001_2_2_4_baseline.ver. Author new releases as
 additional *.ver files under version/entries/ (include the semver in the basename,
-often with a serial prefix). Ordering uses MAJOR/STANDARD/RELEASE inside the file,
+often A_B_C_short_slug.ver). Ordering uses MAJOR/STANDARD/RELEASE inside the file,
 not the filename prefix.
 
-version/locked/* is a mirror only: it must byte-match version/entries/ for each
-locked file. Do not hand-edit locked copies; never let locked diverge from entries.
+version/locked/*.ver mirrors version/entries/*.ver: each locked file must byte-match
+the same path under version/entries/ for CI. Do not hand-edit locked .ver copies;
+never let locked release prose diverge from entries.
+
+Full contributor-facing notes: docs/versioning.md

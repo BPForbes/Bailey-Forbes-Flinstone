@@ -1,0 +1,16 @@
+# Multiline DESCRIPTION, RELEASE_DATE, and changelog stamping
+MAJOR_VERSION=3
+STANDARD_VERSION=1
+RELEASE_VERSION=0
+DESCRIPTION<<END
+Unlimited release prose: DESCRIPTION may use a heredoc (DESCRIPTION<<TAG … TAG).
+Optional RELEASE_DATE=YYYY-MM-DD; if omitted, scripts/gen_version_changelog.c fills
+the calendar date from time(3) at generation time. Version lock on merge runs
+stamp_version_release_date.sh after finalize to append RELEASE_DATE to .ver files
+that do not already have one (entries and locked stay aligned).
+gen_version_changelog rejects malformed RELEASE_DATE values (strict YYYY-MM-DD).
+The stamp script ignores lines inside DESCRIPTION heredocs when deciding whether to append.
+gen_version_changelog Buf helpers return errors on realloc failure so DESCRIPTION/changelog assembly cannot truncate silently.
+END
+
+RELEASE_DATE=2026-05-11

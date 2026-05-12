@@ -1,0 +1,7 @@
+MAJOR_VERSION=3
+STANDARD_VERSION=2
+RELEASE_VERSION=1
+DESCRIPTION=Remove committed legacy drive fixtures (*.txt). Legacy createdisk volumes now write "<volume>_disk.dat" (hex lines) instead of extensionless "<volume>_disk"; FAT32 remains "<volume>_disk.img". Tests and driver temp disks use .dat/.img paths instead of .txt for backing volumes. CUnit disk shortcut tests set current_disk_file with strncpy plus explicit NUL for static-analysis parity with other sites.
+
+
+RELEASE_DATE=2026-05-12

@@ -11,7 +11,7 @@ shell_history.txt
 
 # Test/generated files
 *_disk
-*_disk.txt
+*_disk.dat
 *_disk.img
 drive.img
 testfile.txt

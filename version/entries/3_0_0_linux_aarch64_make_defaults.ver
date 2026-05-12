@@ -3,3 +3,5 @@ MAJOR_VERSION=3
 STANDARD_VERSION=0
 RELEASE_VERSION=0
 DESCRIPTION=Makefile: on Linux arm64 default ARCH=arm (not x86_64_gas); native gcc/as for ARCH=arm on that host so Pi builds work without cross packages; fixes AArch64 assembler errors on x86-only .s (e.g. unknown mnemonic cli).
+
+RELEASE_DATE=2026-05-11
