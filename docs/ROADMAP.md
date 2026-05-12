@@ -61,14 +61,16 @@ These items unblock almost everything else.
 
 ## Phase 3 — Networking (H → K; incremental RFC alignment)
 
-Implement **bottom-up**: L2 → IPv4/UDP → TCP → sockets façade.
+Implement **bottom-up**: **L2 (link layer)** → IPv4/UDP → TCP → sockets façade.
+
+**L2 in this roadmap** means **IEEE 802.3 Ethernet**: MAC addressing, on-the-wire **Ethernet frame** format (length/type field, FCS where applicable), and the usual **DIX / Ethernet II** encapsulation of IPv4 (**RFC 894**). Linux **TUN/TAP** exposes **Ethernet** devices as **802.3-style** frames to user space; the stack should treat **raw L2** as **802.3 Ethernet**, not as an abstract “byte pipe,” so **ARP** and IPv4 placement align with real NICs and lab TAP bridges.
 
 | ID | Feature | Goal | Standards & acceptance |
 |----|---------|------|---------------------------|
-| **P3-1** | **Device abstraction (`netdev`)** | TX/RX frame ops, MAC get/set, promisc flag, stats counters. | API mirrors **Linux `net_device`** minimal subset conceptually; **zero-copy optional**, **copy-based default** for simplicity. |
+| **P3-1** | **Device abstraction (`netdev`)** | TX/RX **IEEE 802.3 Ethernet** frames, MAC get/set, promisc flag, stats counters. | **IEEE 802.3** frame handling (addressing, MTU vs frame size); API mirrors **Linux `net_device`** minimal subset conceptually; **zero-copy optional**, **copy-based default** for simplicity. |
 | **P3-2** | **Loopback (software)** | IPv4 `127.0.0.0/8` minimal: ping self, UDP echo. | **RFC 1122** host requirements subset; tests run **without** `/dev/net/tun`. |
-| **P3-3** | **TAP backend (hosted only)** | Read/write Ethernet frames via Linux TUN/TAP. | Root or `CAP_NET_ADMIN` documented; CI uses **virt** runner or skips with explicit `SKIP_TAP=1` + reason in log. |
-| **P3-4** | **ARP** | IPv4 neighbor resolution over Ethernet. | **RFC 826**; cache with eviction bounds; **flood protection** hooks (stub OK initially). |
+| **P3-3** | **TAP backend (hosted only)** | Read/write **IEEE 802.3 Ethernet** frames via Linux TUN/TAP. | **802.3 Ethernet** on the TAP device; root or `CAP_NET_ADMIN` documented; CI uses **virt** runner or skips with explicit `SKIP_TAP=1` + reason in log. |
+| **P3-4** | **ARP** | IPv4 neighbor resolution over **IEEE 802.3 Ethernet**. | **RFC 826** over **802.3 MAC**; **RFC 894** type/ethertype expectations; cache with eviction bounds; **flood protection** hooks (stub OK initially). |
 | **P3-5** | **IPv4** | Addresses, netmask, routing table (default route), ICMP echo (ping). | **RFC 791** + **RFC 792**; **checksum offload** optional; **path MTU** stub documented. |
 | **P3-6** | **UDP** | Demux by port; checksum; basic socket buffer caps. | **RFC 768**; **bounded queues**; drop policy under pressure documented. |
 | **P3-7** | **TCP (large)** | Reliable stream for one client/server pair first. | **RFC 793** + selective **RFC 5681** congestion basics later; **interop test** against Linux `nc` or `socat`. |
@@ -151,7 +153,7 @@ Implement **bottom-up**: L2 → IPv4/UDP → TCP → sockets façade.
 | Domain | Normative / de-facto references |
 |--------|----------------------------------|
 | C ABI / hosted behavior | ISO C11; POSIX.1-2008 where hosted. |
-| Networking | RFC 791, 792, 768, 793, 826, 1035; later TLS 1.2+ **RFC 5246** / 8446 via library. |
+| Networking | **IEEE 802.3** (Ethernet L2/MAC & framing); **RFC 894** (IPv4 over Ethernet); **RFC 826** (ARP); **RFC 791**, **792**, **768**, **793**, **1035**; later TLS 1.2+ **RFC 5246** / **8446** via library. |
 | Filesystem | POSIX file semantics; ext4 on-disk layout (kernel docs); virtio-blk 1.x. |
 | Logging | RFC 5424 (transport); syslog severity names. |
 | Virtio | VIRTIO 1.1+ specifications. |
@@ -193,7 +195,7 @@ Rollout:
 ## Appendix C — Suggested first vertical slice (90-day style, technical only)
 
 1. **P3-1 + P3-2 + P6-1 + P6-2** — `netdev` + loopback IPv4/UDP + structured logging to ring buffer.  
-2. **P3-3 + P3-4 + P3-5 + P3-6** — TAP + ARP + IPv4 + UDP with shell builtins (`ping`, `udpsend`, `udplisten`).  
+2. **P3-3 + P3-4 + P3-5 + P3-6** — **802.3** TAP + ARP + IPv4 + UDP with shell builtins (`ping`, `udpsend`, `udplisten`).  
 3. **P2-3 + P6-4** — authz middleware + audit for those builtins.  
 
 Adjust ordering if **bare metal** becomes the primary track (move **P4*** earlier, defer **P3-3** TAP).
