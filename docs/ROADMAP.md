@@ -11,6 +11,7 @@ This document is the **single platform roadmap** for Flinstone: phased goals (**
 | [Phase advancement gates](#phase-advancement-gates) | When it is reasonable to start the next phase block |
 | [H → K → B graduation](#track-graduation-criteria-h-to-k-to-b) | What “proven” means before lifting a subsystem |
 | [Phase dependency sketch](#phase-dependency-sketch-p0-to-p4) | Why **P0** and **Appendix D** front-load bare-metal correctness |
+| [How work interlinks](#how-work-interlinks-examples-across-phases-and-a-releases) | Boot ↔ net ↔ firmware ↔ time ↔ SMP coupling |
 | **Phase 0–9** | Feature IDs, goals, acceptance |
 | [Platform credibility (extended)](#platform-credibility--extended-sections-11-and-12) | **§11–§12** + staffing note only |
 | [Appendix A–D](#appendix-a--standards-map-non-exhaustive) | Standards index, DoD template, first vertical slice, bare-metal checklist |
@@ -44,7 +45,7 @@ Use this table when asking what “**the next A release**” means in terms of p
 | **A1** | **P0** + **Appendix D** execution rows **1–7** (through spinlocks / driver reentrancy) | Default CI green; **P0-1** subsystem headers stable; bare-metal IRQ + table races not blocking K/B bring-up |
 | **A2** | **P1** + **P2** + **P3** through **P3-6** (UDP) with loopback + TAP path | **P1-4**/**P1-5** PMM/arenas validated on **B** where applicable; **P2-3** authz tests deny guest on privileged ops; UDP/loopback interop tests in CI or documented skip |
 | **A3** | **P4** (virtio **P4-4** + IRQ model) + **P6-1**/**P6-2** logging | Virtio ring / golden vectors; **no sleep in hardirq** asserts in debug builds; structured log + ring buffer under test |
-| **A4** | **P5**–**P9** as needed (VFS, VM fidelity, hardening) | **P9-1** fuzz triage workflow; **P9-3** SMP bring-up documented with arch memory-model refs |
+| **A4** | **P5**–**P9** as needed (VFS, VM fidelity, hardening) | **P9-1** fuzz triage workflow; **P9-3** SMP bring-up documented with arch memory-model refs + **PSCI** (**P4-7**) where AArch64 applies |
 
 ---
 
@@ -52,7 +53,7 @@ Use this table when asking what “**the next A release**” means in terms of p
 
 | Transition | Gate (examples — adjust in `docs/` as tooling evolves) |
 |------------|--------------------------------------------------------|
-| **P0 → P1** | CI green on default matrix; **P0-2** result type merged; **P0-4** GIC EOI fixed on aarch64 bare-metal **or** issue-linked waiver; **P0-5**/**P0-6** on critical x86_64 paths per **Appendix D** |
+| **P0 → P1** | CI green on default matrix; **P0-2** result type merged; **P0-4** GIC EOI fixed on aarch64 bare-metal **or** issue-linked waiver; **P0-5**/**P0-6** on critical x86_64 paths per **Appendix D**; for **B**/**AArch64** beyond fixed QEMU hacks: **P0-7** DTB handoff **or** documented waiver |
 | **P1 → P2** | **P1-3** lock-ordering graph committed; **P1-4** PMM **P1-5** arenas behave in **DRIVERS_BAREMETAL** builds; **P1-6** `s_model_lock` guards driver tables |
 | **P2 → P3** | **P2-3** unit tests deny guest for **≥3** privileged operations; audit hook stub or **P6** path records denies |
 | **P3 → P4** | **P3-2** loopback + **P3-6** UDP stable; TAP (**P3-3**) policy documented for CI |
@@ -85,7 +86,27 @@ flowchart TD
   P1_6 --> P4_1[P4-1 driver model v2]
   P1_1 --> P2_3[P2-3 authz middleware]
   P3_2[P3-2 loopback] --> P3_6[P3-6 UDP]
+  P0_7[P0-7 DTB metadata] --> P4_6[P4-6 FDT discovery]
+  P4_7[P4-7 PSCI client] --> P9_3[P9-3 SMP]
+  P1_7[P1-7 arch time] --> P3_7[P3-7 TCP]
 ```
+
+---
+
+## How work interlinks (examples across phases and A releases)
+
+Phases and **A** milestones are **dependency-ordered**, but real releases often bundle **boot**, **net**, **drivers**, and **time** in one train. Use the patterns below when slicing work or writing **`version/entries/*.ver`**.
+
+| Pattern | Depends on | Unlocks / feeds |
+|--------|------------|-----------------|
+| **Netboot / PXE / TFTP** (**§12**, **PX-12**) | **P3** DHCP (**RFC 2131**), UDP; optional TCP/TLS for richer loaders | Fetch kernel/initrd **before** a local **P5** root FS is required |
+| **HTTP(S) boot** (**§12**) | **P3-7** TCP, **P3-9** TLS on **H** (or a minimal in-loader TLS policy) | Same **PX-12** track; cannot be an afterthought if the org wants “network install only” |
+| **UEFI `.efi` chain** (**§12**) | PE/COFF, UEFI memory map; stable view of RAM for **P1-4** PMM later | Runs **before** the in-repo **P3** stack; handoff can pass **DTB** pointer (**P0-7**) into the kernel |
+| **Bootloader ↔ networking** | Firmware or second-stage loader configures NIC (UEFI driver, **PXE** stack, or **P4** virtio); then **P3** ARP/IPv4/UDP | One **P3** stack serves **TAP** labs **and** netbooted images once `netdev` and PHY/virtual L2 agree (**IEEE 802.3**) |
+| **FDT / `compatible` ↔ drivers** | **P0-7** + **P4-6** parse path | Replaces ad-hoc “QEMU virt only” tables; **PCIe** (**P4-3**) and **virtio** (**P4-4**) nodes still need spec-accurate BAR/queue setup |
+| **PSCI ↔ SMP** | **P4-7** (`CPU_ON`, **DEN0022**) + **`cpus` / `psci` nodes** in DT | **P9-3** secondary cores on AArch64; coordinates with **P1-3**/**P1-6** locking |
+| **Time** (**P1-7**) | Arch **Generic Timer** (AArch64) or **P0-5** tick path (x86) | **P3-7** TCP RTOs; **P3-9** cert validity windows; **P6** **RFC 5424** timestamps; optional **RFC 5905** NTP on **H** |
+| **IPv6** (**P3-11** when promoted) | **P3-1** L2 + neighbor discovery | Dual-stack next to **P3-5**; **P3-8** **AAAA** already anticipates records |
 
 ---
 
@@ -97,12 +118,14 @@ These items unblock almost everything else.
 |----|---------|------|---------------------------|
 | **P0-1** | **Subsystem boundaries** | Freeze public C APIs for “driver ops”, “netdev”, “log sink”, “auth check”. | Headers document lifetime/threads; **no circular deps** across `kernel/` ↔ `userland/` beyond existing glue; `make` parity for default arch. |
 | **P0-2** | **Error taxonomy** | Shared `errno`-style or project-specific result type for drivers, VFS, net. | Every new API documents **who frees memory**; no unchecked `void` returns for fallible ops. |
-| **P0-3** | **CI realism** | CI runs unit tests without special hardware; optional nightly for TAP/loopback. | **GitHub Actions** green on default matrix; flaky tests quarantined with issue link. |
+| **P0-3** | **CI realism** | CI runs unit tests without special hardware; optional nightly for TAP/loopback. | **GitHub Actions** green on default matrix; flaky tests quarantined with issue link. Optional **`dtc`** / **FDT** checks for any **`.dts`**/**`.dtb`** committed (see **P0-7**). |
 | **P0-4** | **ARM GIC EOI correctness** | EOI writes the **acked IRQ**, not a hardcoded sentinel. | **ARM GIC** architecture spec; fix pattern in **Appendix D** §1.1; aarch64 bare-metal test or QEMU trace shows de-assert. |
 | **P0-5** | **x86_64 IDT + IRQ0 timer tick** | Minimal **IDT**, vector **0x20** IRQ0 path increments `hw_tick_count()`. | **Intel SDM** Vol. 3A; **Appendix D** §1.2 / §3.1 / execution order rows **8–9**; `tick_count()` advances between calls in **B** builds. |
 | **P0-6** | **x86_64 GDT (minimal flat)** | Install a known-good **GDT** before relying on IDT/IRQ. | **Appendix D** §3.2 / execution row **8**; `lgdt` + CS reload documented in `docs/` or arch README. |
+| **P0-7** | **Device tree (FDT / DTB) metadata** | On **B**/**K** **AArch64**, consume firmware-passed **DTB** (QEMU **`-dtb`**) for memory, CPUs, and **`compatible`**—avoid hard-coded “one board only” tables. | [Devicetree specification](https://devicetree-specification.readthedocs.io/) (devicetree.org); **`dtc`** documented for devs/optional CI (**P0-3**); tests on checked-in **DTB** blobs or QEMU-generated stubs. |
+| **P0-8** | **Early serial console (UART)** | **Bring-up output** before full display (**Appendix D** VGA) and often alongside minimal IRQ bring-up: **NS16550**-compatible (PC-style / QEMU `isa-serial`); **PL011** (common AArch64 models). | NS16550 register map (de facto); **ARM PL011** TRM; document **early log** policy vs **P6** full logger. |
 
-**K/B note:** **P0-4–P0-6** are **hard prerequisites** for trustworthy IRQ and timing on bare metal; details and file pointers stay in **Appendix D**.
+**K/B note:** **P0-4–P0-6** are **hard prerequisites** for trustworthy IRQ and timing on bare metal; **P0-7**/**P0-8** are **strongly recommended** before treating arbitrary AArch64 QEMU or real boards as supported—details and file pointers for legacy bugs stay in **Appendix D**.
 
 ---
 
@@ -116,6 +139,7 @@ These items unblock almost everything else.
 | **P1-4** | **Physical frame allocator (PMM)** | Track **physical** frames for **B** builds; no silent libc `aligned_alloc` as “page” where inappropriate. | **Appendix D** §3.3 / execution row **11**; `pmm_alloc_frame` / `pmm_free_frame` unit tests on **B** config. |
 | **P1-5** | **Memory domain arenas** | Domains backed by **fixed arenas** (libc-free on **DRIVERS_BAREMETAL**), not discarded `malloc` wrappers. | **Appendix D** §2.1 / execution row **6**; exhaustion visible; sizes documented per domain. |
 | **P1-6** | **Driver model reentrancy** | `s_model_lock` (and related) guard static registration / IRQ dispatch tables. | **Appendix D** §2.4 / execution row **7**; concurrent probe/remove stress test or static review checklist until HW CI exists. |
+| **P1-7** | **Timekeeping (arch timers + POSIX view on H)** | **AArch64:** **ARM Generic Timer** (`CNTPCT_EL0` / `CNTVCT_EL0`, control regs per **ARM ARM** §D11). **x86_64:** align **P0-5** PIT/APIC/HPET story in one doc. **H:** **POSIX.1** `clock_gettime(CLOCK_MONOTONIC)` as reference clock. | Single doc names **which counter** backs **TCP** timeouts (**P3-7**), **TLS** time checks (**P3-9**), and **RFC 5424** timestamps (**P6**). Optional **RFC 5905** (NTP) on **H** for wall-clock labs—not an **A2** gate. |
 
 **References:** POSIX.1 threads; Linux *Understanding the Linux Kernel* (scheduler/MM chapters) as conceptual guide only.
 
@@ -152,6 +176,7 @@ Implement **bottom-up**: **L2 (link layer)** → IPv4/UDP → TCP → sockets fa
 | **P3-8** | **DNS client** | Resolver for A/AAAA records (AAAA optional). | **RFC 1035** semantics subset; **timeouts** and **retry caps**. |
 | **P3-9** | **TLS (hosted)** | Prefer **userland** TLS (e.g. mbedTLS/OpenSSL) behind shell command or libc. | **No TLS in “kernel” layer** until stable memory and time APIs exist on K/B. |
 | **P3-10** | **Wi‑Fi station path** `[DEFERRED]` | Do **not** silently drop the gap: either promote to active work or keep this row as the **explicit deferral**. | **IEEE 802.11** / **802.11i** / **802.1X** / **EAP** (informative stack); **RFC 2131** after L2; **not** an A1–A2 gate. When un-deferred, expect **P4**-class firmware/driver work plus reuse of **P3** IPv4/UDP/TCP. |
+| **P3-11** | **IPv6 + ICMPv6** `[DEFERRED]` | Keep dual-stack as an **explicit** later step, not an accidental omission. | **RFC 8200** (IPv6); **RFC 4291** (addressing); **RFC 4443** (ICMPv6); **RFC 4861** (ND); ties to **P3-1** L2 and **P3-8** **AAAA** when promoted. |
 
 **Security standards:** default **no promisc**; **no raw TX** from shell without principal + audit; rate-limit outgoing ARP/ICMP in lab builds.
 
@@ -159,7 +184,7 @@ Implement **bottom-up**: **L2 (link layer)** → IPv4/UDP → TCP → sockets fa
 
 ## Phase 4 — Drivers & hardware (K/B; staged complexity)
 
-**Dependencies:** **P1-3** (lock/IRQ contract), **P1-6** (table spinlocks), and **Appendix D** execution rows **1–7** for any path that runs **real concurrent IRQ + registration** on **B**. **P5** virtio-backed VFS on the VM track expects **P4-4** block.
+**Dependencies:** **P1-3** (lock/IRQ contract), **P1-6** (table spinlocks), **P0-7** (DTB on AArch64 **B**/**K** lab targets), and **Appendix D** execution rows **1–7** for any path that runs **real concurrent IRQ + registration** on **B**. **P5** virtio-backed VFS on the VM track expects **P4-4** block.
 
 | ID | Feature | Goal | Standards & acceptance |
 |----|---------|------|---------------------------|
@@ -168,6 +193,8 @@ Implement **bottom-up**: **L2 (link layer)** → IPv4/UDP → TCP → sockets fa
 | **P4-3** | **PCIe config space access (lab)** | MMIO config for one QEMU NIC class. | **PCIe spec** excerpts in docs; **IOMMU later** milestone flagged. |
 | **P4-4** | **Virtio net/block** | Paravirtual devices for VM path. | **Virtio 1.x** spec; ring format tests with **golden vectors**. |
 | **P4-5** | **USB stack** | Deferred—document as **Phase 4+** (complex state machines). | If started: **xHCI subset** only; compliance tests out-of-tree. |
+| **P4-6** | **FDT-driven machine discovery (lab)** | Walk **DTB** from **P0-7** to enumerate **memory**, **`cpus`**, and **`compatible`** for driver match—QEMU **`-dtb`** / virt DTS in docs. | Devicetree.org **FDT** spec; clarify how much parsing lives in loader vs kernel. |
+| **P4-7** | **PSCI client (AArch64)** | **SMC**-based **ARM PSCI** so **P9-3** can bring up secondaries via **`CPU_ON`**; document `CPU_OFF`/`CPU_SUSPEND` as later. | **ARM DEN0022** (PSCI); DT **`psci`** node (`arm,psci-1.0` bindings); **TF-A** as firmware provider on QEMU (informative). |
 
 **Hardware policy:** each driver ships with **QEMU command line** + **known-good hardware ID** table.
 
@@ -224,7 +251,7 @@ Implement **bottom-up**: **L2 (link layer)** → IPv4/UDP → TCP → sockets fa
 |----|---------|------|---------------------------|
 | **P9-1** | **Fuzzing** | syscall / netdev / FS parsers under AFL++ or libFuzzer (hosted shims). | **Crash = bug**; corpus checked in CI cache optional. |
 | **P9-2** | **Coverity / static analysis** | Clean critical triage. | **Zero** new high-severity defects per release gate. |
-| **P9-3** | **SMP bring-up (B)** | IPIs, per-CPU variables, barrier rules. | **Memory model** doc for aarch64/x86 per **ARM ARM** / Intel SDM. Builds on **P1-3** / **P1-6** locking posture; expect follow-on driver audits, not a greenfield lock story. |
+| **P9-3** | **SMP bring-up (B)** | IPIs, per-CPU variables, barrier rules. | **Memory model** doc for AArch64/x86 per **ARM ARM** / Intel SDM. **AArch64:** secondary CPUs via **PSCI `CPU_ON`** (**ARM DEN0022**) per **P4-7** + DT **`cpus`**; **x86_64:** AP entry per **Intel SDM**. Builds on **P1-3** / **P1-6**; expect driver audits, not a greenfield lock story. |
 
 ---
 
@@ -264,7 +291,7 @@ Mostly **above** the kernel once the stack exists.
 
 | Track | Standards / references | Rough implementation |
 |-------|------------------------|----------------------|
-| **UEFI boot** | **UEFI Specification**; **ACPI** (informative) | `.efi` PE/COFF; Boot Services; handoff to kernel/VM. |
+| **UEFI boot** | **UEFI Specification**; **ACPI** (informative) | `.efi` PE/COFF; Boot Services; handoff to kernel/VM. May pass **DTB** pointer per **P0-7** / **P4-6**. |
 | **Partitioning** | **UEFI** GPT; classic **MBR** (informative) | Parse GPT; find **ESP** (FAT). |
 | **ESP filesystem** | **FAT32** (Microsoft spec / UEFI profile) | RO FAT path or reuse project FAT on ESP. |
 | **PXE / netboot** | **RFC 2131**, **RFC 2132**, **RFC 1350** (TFTP) | DHCP → TFTP loader/kernel. |
@@ -276,7 +303,7 @@ Mostly **above** the kernel once the stack exists.
 | ID | Scope | Notes |
 |----|-------|-------|
 | **PX-11** | **§11** — `curl`/`apt` class userland | Multi-release program: HTTP stack, signatures, archives, dependency resolution—not implied by finishing **P3**. |
-| **PX-12** | **§12** — install / boot / attestation | UEFI, PXE, Secure Boot; depends on **P4**/**P5** maturity and a signing story. |
+| **PX-12** | **§12** — install / boot / attestation | UEFI, PXE, Secure Boot; depends on **P4**/**P5** maturity and a signing story. **PXE/HTTP boot** reuses **P3** DHCP/UDP/TCP and often **P3-9** TLS; schedule together (see [How work interlinks](#how-work-interlinks-examples-across-phases-and-a-releases)). |
 
 Promote a **PX-** row into numbered phases when it becomes a **merge-sized** commitment; until then it documents **scope** without duplicating **P0–P9** tables.
 
@@ -288,9 +315,14 @@ Promote a **PX-** row into numbered phases when it becomes a **merge-sized** com
 |--------|----------------------------------|
 | C ABI / hosted behavior | ISO C11; POSIX.1-2008 where hosted. |
 | Networking | **IEEE 802.3** (Ethernet L2/MAC & framing); **RFC 894** (IPv4 over Ethernet); **RFC 826** (ARP); **RFC 791**, **792**, **768**, **793**, **1035**; later TLS **RFC 5246** / **8446** via library. |
+| IPv6 (defer) | **RFC 8200**, **4291**, **4443**, **4861** (ND). See **P3-11** `[DEFERRED]`. |
 | Wi‑Fi | **IEEE 802.11**, **802.11i**; **802.1X** / **EAP**; **RFC 2131** (DHCP after link). See **P3-10** `[DEFERRED]`. |
 | HTTP / packages | **RFC 9110**, **9112**; **RFC 8446**, **5280**; **RFC 4880** (OpenPGP); Debian archive conventions (informative). |
 | Boot / firmware | **UEFI**; **RFC 2131**, **2132**, **1350** (PXE path); **PKCS #7** (Secure Boot). |
+| Device tree (FDT) | [Devicetree specification](https://devicetree-specification.readthedocs.io/); **`dtc`**. See **P0-7**, **P4-6**. |
+| PSCI (AArch64 SMP) | **ARM DEN0022** (PSCI); DT `psci` bindings. See **P4-7**, **P9-3**. |
+| UART console | NS16550 (de facto); **ARM PL011** TRM. See **P0-8**. |
+| Time / timers | **ARM ARM** §D11 Generic Timer; **Intel SDM** timer/APIC chapters; **POSIX.1** `clock_gettime`; optional **RFC 5905** (NTP on **H**). See **P0-5**, **P1-7**. |
 | Filesystem | POSIX file semantics; ext4 on-disk layout (kernel docs); virtio-blk 1.x. |
 | Logging | RFC 5424 (transport); syslog severity names. |
 | Virtio | VIRTIO 1.1+ specifications. |
@@ -341,7 +373,7 @@ Adjust ordering if **bare metal** becomes the primary track (move **P4*** earlie
 
 ## Appendix D — Bare-metal correctness (Improve-Sys-Architecture)
 
-The following material was merged from the retired **`docs/milestone-Improve-Sys-Architecture.md`**. **File paths and symptoms** below are a **checklist**—re-verify against current `develop` when picking up an item. **P0-4**/**P0-5**/**P0-6** and **P1-4**/**P1-5**/**P1-6** in the phase tables reference the same work; **Appendix D** keeps the deep implementation notes.
+The following material was merged from the retired **`docs/milestone-Improve-Sys-Architecture.md`**. **File paths and symptoms** below are a **checklist**—re-verify against current `develop` when picking up an item. **P0-4**/**P0-5**/**P0-6**/**P0-7**/**P0-8** and **P1-4**/**P1-5**/**P1-6**/**P1-7** in the phase tables reference the same work; **Appendix D** keeps the deep implementation notes.
 
 ### Goal
 
@@ -405,6 +437,14 @@ Fix: add a US-QWERTY Set-1 scancode-to-keymap lookup (unshifted + shifted),
 track make/break and modifier state (Shift, Caps Lock), and only emit a
 character on printable make codes.  Ignore break codes (bit 7 set) and
 non-printable make codes instead of direct-casting raw scancodes.
+
+---
+
+#### 1.4  AArch64: no architected Generic Timer bring-up (roadmap gap)
+
+**Roadmap / phase:** **P1-7** (timekeeping). **§1.2** above covers **x86_64** PIT/IRQ0; **AArch64** bring-up in QEMU typically expects the **ARM Generic Timer** (**ARM ARM** §D11: e.g. `CNTPCT_EL0`, `CNTFRQ_EL0`, `CNTP_CTL_EL0`). Without a documented counter source, **TCP** timeouts (**P3-7**), **TLS** time checks (**P3-9**), and **RFC 5424** timestamps (**P6**) are undefined on **B**.
+
+**Fix direction:** in **one** `docs/` note, map **EL1 physical** or **virtual** counter choice, frequency, and interrupt (if tick-based) for the supported QEMU virt model; add a minimal read path + test before claiming **A2**-class networking on AArch64 **B**.
 
 ---
 
