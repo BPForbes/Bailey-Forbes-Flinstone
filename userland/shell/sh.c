@@ -102,6 +102,21 @@ static int eq_ci(const char *a, const char *b) {
     return *a == *b;
 }
 
+/* Helper: count audit command tokens */
+static int audit_tokens_count(int argc, char **argv, int i) {
+    if (i + 1 < argc && !strcmp(argv[i + 1], "show")) {
+        if (i + 2 < argc && argv[i + 2][0] != '-')
+            return 3;
+        else
+            return 2;
+    } else if (i + 1 < argc &&
+               (!strcmp(argv[i + 1], "path") || !strcmp(argv[i + 1], "--help") ||
+                !strcmp(argv[i + 1], "-h")))
+        return 2;
+    else
+        return 1;
+}
+
 /* Strip -Virtualization and -y/-n from argv; set g_vm_mode. Returns new argc. */
 static int parse_vm_args(int argc, char *argv[]) {
     int out = 1;  /* argv[0] always kept */
@@ -387,17 +402,7 @@ int main(int argc, char *argv[]) {
                 tokensCount = (i + 1 < argc) ? 2 : 1;
             }
             else if (!strcmp(cmd, "audit")) {
-                if (i + 1 < argc && !strcmp(argv[i + 1], "show")) {
-                    if (i + 2 < argc && argv[i + 2][0] != '-')
-                        tokensCount = 3;
-                    else
-                        tokensCount = 2;
-                } else if (i + 1 < argc &&
-                           (!strcmp(argv[i + 1], "path") || !strcmp(argv[i + 1], "--help") ||
-                            !strcmp(argv[i + 1], "-h")))
-                    tokensCount = 2;
-                else
-                    tokensCount = 1;
+                tokensCount = audit_tokens_count(argc, argv, i);
             }
             else if (!strcmp(cmd, "exit")) {
                 if (i + 1 < argc &&

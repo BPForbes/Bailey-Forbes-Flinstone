@@ -128,7 +128,7 @@ int delete_history_storage(void) {
 
 void append_history_ex(fl_contract_surface_t surface, fl_result_t last_rc,
                        const char *cmd) {
-    if (!cmd)
+    if (!cmd || cmd[0] == '\0')
         return;
 
     unsigned char rec[4096];

@@ -60,11 +60,15 @@ void fl_audit_shell_completed(const char *cmd_line, int host_exit_code) {
         (host_exit_code == 0) ? FL_RESULT_OK : FL_RESULT_ERR;
 
     char line[768];
-    (void)snprintf(line, sizeof line,
-                   "type=shell jail=%d bundle=%u host_rc=%d fl_rc=%d surface=%d cmd=%s",
-                   fs_jail_is_active(), (unsigned)FL_CONTRACT_BUNDLE_REV,
-                   host_exit_code, (int)mapped,
-                   (int)FL_CONTRACT_SURFACE_FS_JAIL, safe);
+    int n = snprintf(line, sizeof line,
+                     "type=shell jail=%d bundle=%u host_rc=%d fl_rc=%d surface=%d cmd=%s",
+                     fs_jail_is_active(), (unsigned)FL_CONTRACT_BUNDLE_REV,
+                     host_exit_code, (int)mapped,
+                     (int)FL_CONTRACT_SURFACE_FS_JAIL, safe);
+    if (n < 0 || n >= (int)sizeof line) {
+        snprintf(line, sizeof line, "type=shell [TRUNCATED] jail=%d bundle=%u",
+                 fs_jail_is_active(), (unsigned)FL_CONTRACT_BUNDLE_REV);
+    }
 
     char rec[1024];
     size_t rn = audit_stage_line_record(rec, sizeof rec, line);
@@ -76,9 +80,7 @@ void fl_audit_shell_completed(const char *cmd_line, int host_exit_code) {
             (void)fclose(fp);
         }
         pthread_mutex_unlock(&g_audit_mutex);
-        if (g_audit_sink && g_audit_sink->ops && g_audit_sink->ops->emit)
-            g_audit_sink->ops->emit(g_audit_sink, (int)FL_LOG_INFO, 9, line);
-        return;
+        goto out_emit;
     }
 
     pthread_mutex_lock(&g_audit_mutex);
@@ -89,6 +91,7 @@ void fl_audit_shell_completed(const char *cmd_line, int host_exit_code) {
     }
     pthread_mutex_unlock(&g_audit_mutex);
 
+out_emit:
     if (g_audit_sink && g_audit_sink->ops && g_audit_sink->ops->emit)
         g_audit_sink->ops->emit(g_audit_sink, (int)FL_LOG_INFO, 9, line);
 }

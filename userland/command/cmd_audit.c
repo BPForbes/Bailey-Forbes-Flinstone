@@ -38,8 +38,19 @@ int cmd_audit_run(int argc, char **argv) {
 
     if (argc >= 2 && !strcmp(argv[1], "show")) {
         int n = 32;
-        if (argc >= 3)
-            n = atoi(argv[2]);
+        if (argc >= 3) {
+            char *endptr;
+            long val = strtol(argv[2], &endptr, 10);
+            if (*endptr != '\0' || endptr == argv[2]) {
+                fprintf(stderr, "audit: invalid number '%s'\n", argv[2]);
+                return 1;
+            }
+            if (val < 0 || val > 10000) {
+                fprintf(stderr, "audit: N must be in range 0..10000\n");
+                return 1;
+            }
+            n = (int)val;
+        }
         return fl_audit_show_last_lines(n);
     }
 

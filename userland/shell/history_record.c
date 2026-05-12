@@ -94,9 +94,10 @@ int fl_history_record_unpack_cmd(const char *stored_line, char *cmd_out,
     int rc_i = 0;
     if (sscanf(jsonbuf, "{\"br\":%u,\"sf\":%u,\"rc\":%d}", &br_u, &sf_u,
                &rc_i) != 3) {
-        br_u = 0;
-        sf_u = 0;
-        rc_i = 0;
+        return -1;
+    }
+    if (br_u > 255 || sf_u > 4) {
+        return -1;
     }
 
     const char *cmd = sep2 + 1u;

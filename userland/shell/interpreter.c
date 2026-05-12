@@ -23,7 +23,7 @@
 int execute_command_str(const char *line) {
     int out_rc = 0;
     if (!line || !*line)
-        return 0;
+        goto finish;
 
     append_history(line);
 

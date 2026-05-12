@@ -1,4 +1,8 @@
-/* P0-1/P0-2 contract bundle (driver, net, log sink, authz, fl_result_t). Related: fl/history_record.h, fl/audit_log.h, fl/jail_contract.h; VFS: fl/vfs.h. */
+/*
+ * P0-1/P0-2 contract bundle (driver, net, log sink, authz, fl_result_t).
+ * Related: fl/history_record.h, fl/audit_log.h, fl/jail_contract.h;
+ * VFS: fl/vfs.h.
+ */
 #ifndef FL_CONTRACT_H
 #define FL_CONTRACT_H
 

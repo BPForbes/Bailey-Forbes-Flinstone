@@ -22,12 +22,4 @@ typedef int fl_result_t;
 /** Operation not supported in this build or configuration. */
 #define FL_RESULT_NOSYS (-38)
 
-#ifdef __cplusplus
-extern "C" {
-#endif
-
-#ifdef __cplusplus
-}
-#endif
-
 #endif /* FL_CONTRACT_RESULT_H */
