@@ -230,6 +230,19 @@ Implement **bottom-up**: **L2 (link layer)** → IPv4/UDP → TCP → sockets fa
 
 **References:** syslog protocol **RFC 5424** for wire format if exporting off-box later.
 
+#### Deferred follow-ups (PR #82 close-out — CodeRabbit / Codex)
+
+The **3.3.0 contracts** workstream landed FL1 history, hosted **`.fl_audit.log`**, and `audit` / `contracts` builtins. Items below are **still open** for future PRs; several review notes from the same train are **already implemented** in-tree (batch `contracts` only binds `summary`/`json`/`--help`/`-h`; `fl_audit_show_last_lines` saves `errno` on `fopen` failure and **releases the audit mutex** before the backward read loop; `fgets` buffers use **4097** bytes where FL1 lines are read; FAT32 history publish is gated on **write + `fclose`** success).
+
+| TODO tag | Recommendation (review / tool source) |
+|----------|---------------------------------------|
+| **TODO: P2-3** | **Authorization middleware** is still mostly **contract + hooks**, not full enforcement: wire central **`can_*`** checks before FileManager, netdev, and mount; add **≥3** unit tests that deny a guest principal on privileged ops; ensure **audit log entries on deny and allow** (not only post-command `fl_audit_shell_completed`). |
+| **TODO: P0-2** | Optional: define **`FL_RESULT_MIN` / `FL_RESULT_MAX`** (or an allow-list) and reject out-of-range **`rc`** in **`fl_history_record_unpack_cmd`** JSON metadata if policy wants strict codes only (CodeRabbit discussion). |
+| **TODO: P6-4** | **`audit show N` contract:** document any **residual limits** (memory growth for very large **N** on huge logs) or add hard caps / streaming so operator expectations stay aligned with implementation. |
+| **TODO: P7 (shell batch)** | Add an **automated regression** that batch argv **`contracts audit show 5`** runs **`contracts`** (default), then **`audit`**, not a merged `contracts audit` token (Codex). |
+| **TODO: P6-2** | In-memory **ring-buffer** log sink (`dmesg`-style, drop counters) per phase table (CodeRabbit roadmap gap). |
+| **TODO: P6-4** | **Signed / tamper-evident** log segments (optional later per phase table). |
+
 ---
 
 ## Phase 7 — Shell UX, ops, and packaging

@@ -1,0 +1,4 @@
+MAJOR_VERSION=3
+STANDARD_VERSION=3
+RELEASE_VERSION=0
+DESCRIPTION=Bump release to 3.3.0: contract bundle rev 2 adds FL_CONTRACT_SURFACE_FS_JAIL and FL_CONTRACT_SURFACE_COUNT; fl/jail_contract.h documents fs_jail discipline; fl/audit_log.h separates post-exec audit (FL_AUDIT, .fl_audit.log) from FL1 command history; audit and FL1 history tails use history_asm_append_record on GAS hosts; new audit builtin; interpreter emits audit after exit status. Hardening: FL1 unpack rejects missing second RS and bad metadata; audit sink pointer under audit mutex; audit show N rejects 0; batch tokenization accepts negative N; history load/read handle unpack errors; batch contracts whitelist second argv token; audit show snapshots size then reads without mutex; fgets 4097 for FL1; FAT32 history publish gated on write+close.

@@ -3,13 +3,17 @@
 
 #include <stddef.h>
 #include <stdio.h>
+#include "fl/history_record.h"
 
 #define RESOLVE_PATH_BUF 256
 #define HISTORY_STAGING_PATH_SZ 512
 
 char *trim_whitespace(char *str);
 void resolve_path(const char *path, char *out, size_t outsize);
-void append_history(const char *cmd);
+void append_history_ex(fl_contract_surface_t surface, fl_result_t last_rc,
+                       const char *cmd);
+#define append_history(cmd)                                                    \
+    append_history_ex(FL_CONTRACT_SURFACE_DRIVER_OPS, FL_RESULT_OK, (cmd))
 char *read_history_line(int index);
 char **load_history(int *count);
 void free_history(char **history, int count);

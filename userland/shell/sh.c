@@ -102,6 +102,41 @@ static int eq_ci(const char *a, const char *b) {
     return *a == *b;
 }
 
+/* Helper: count audit command tokens */
+static int audit_show_has_count_token(const char *tok) {
+    if (!tok || !tok[0])
+        return 0;
+    if (isdigit((unsigned char)tok[0]))
+        return 1;
+    if ((tok[0] == '-' || tok[0] == '+') && tok[1] != '\0' &&
+        isdigit((unsigned char)tok[1]))
+        return 1;
+    return 0;
+}
+
+static int audit_tokens_count(int argc, char **argv, int i) {
+    if (i + 1 < argc && !strcmp(argv[i + 1], "show")) {
+        if (i + 2 < argc && audit_show_has_count_token(argv[i + 2]))
+            return 3;
+        else
+            return 2;
+    } else if (i + 1 < argc &&
+               (!strcmp(argv[i + 1], "path") || !strcmp(argv[i + 1], "--help") ||
+                !strcmp(argv[i + 1], "-h")))
+        return 2;
+    else
+        return 1;
+}
+
+/* Batch: only bind a second argv token for known `contracts` sub-args (Codex). */
+static int contracts_tokens_count(int argc, char **argv, int i) {
+    if (i + 1 < argc &&
+        (!strcmp(argv[i + 1], "summary") || !strcmp(argv[i + 1], "json") ||
+         !strcmp(argv[i + 1], "--help") || !strcmp(argv[i + 1], "-h")))
+        return 2;
+    return 1;
+}
+
 /* Strip -Virtualization and -y/-n from argv; set g_vm_mode. Returns new argc. */
 static int parse_vm_args(int argc, char *argv[]) {
     int out = 1;  /* argv[0] always kept */
@@ -276,7 +311,7 @@ int main(int argc, char *argv[]) {
     if ((argc == 4 || argc == 5) && argv[1] && argv[1][0] != '-') {
         /* Must include every builtin name so batch mode does not treat them as createdisk shortcut */
         static const char *skip[] = {"help","cd","dir","make","write","cat","type","mkdir","rmdir",
-            "rmtree","mv","version","exit","bios","clear","history","his","cc","listclusters","listdirs",
+            "rmtree","mv","version","contracts","audit","exit","bios","clear","history","his","cc","listclusters","listdirs",
             "setdisk","createdisk","format","search","writecluster","delcluster","update","redirect",
             "initdisk","rerun","import","du","printdisk","addcluster","where","loc",
             "diskput","diskget","diskfiles","diskdel","diskmkdir",NULL};
@@ -382,6 +417,12 @@ int main(int argc, char *argv[]) {
                 } else {
                     tokensCount = 1;
                 }
+            }
+            else if (!strcmp(cmd, "contracts")) {
+                tokensCount = contracts_tokens_count(argc, argv, i);
+            }
+            else if (!strcmp(cmd, "audit")) {
+                tokensCount = audit_tokens_count(argc, argv, i);
             }
             else if (!strcmp(cmd, "exit")) {
                 if (i + 1 < argc &&

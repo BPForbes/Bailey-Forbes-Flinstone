@@ -4,6 +4,7 @@
 #include "terminal.h"
 #include "cmd_decl.h"
 #include "threadpool.h"
+#include "fl/audit_log.h"
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -20,45 +21,61 @@
  * analogous to fl_syscall_dispatch() for kernel syscalls.
  */
 int execute_command_str(const char *line) {
+    int out_rc = 0;
     if (!line || !*line)
-        return 0;
+        goto finish;
+
     append_history(line);
+
     char buffer[512];
     strncpy(buffer, line, sizeof(buffer) - 1);
     buffer[sizeof(buffer) - 1] = '\0';
     char *tokenBuf = strdup(buffer);
+    if (!tokenBuf)
+        goto finish;
     char *trimmed = trim_whitespace(tokenBuf);
 
     if (cmd_exit_maybe(trimmed)) {
         free(tokenBuf);
-        return 1;
+        out_rc = 1;
+        goto finish;
     }
     if (cmd_clear_maybe(trimmed)) {
         free(tokenBuf);
-        return 0;
+        out_rc = 0;
+        goto finish;
     }
     if (cmd_help_maybe(trimmed)) {
         free(tokenBuf);
-        return 0;
+        out_rc = 0;
+        goto finish;
     }
     if (cmd_history_maybe(trimmed)) {
         free(tokenBuf);
-        return 0;
+        out_rc = 0;
+        goto finish;
     }
     if (cmd_cc_maybe(trimmed)) {
         free(tokenBuf);
-        return 0;
+        out_rc = 0;
+        goto finish;
     }
     if (cmd_bios_maybe(trimmed)) {
         free(tokenBuf);
-        return 0;
+        out_rc = 0;
+        goto finish;
     }
     if (cmd_make_maybe(trimmed)) {
         free(tokenBuf);
-        return 0;
+        out_rc = 0;
+        goto finish;
     }
 
     char *cmdLine = strdup(buffer);
+    if (!cmdLine) {
+        free(tokenBuf);
+        goto finish;
+    }
     char *args[64];
     int argc = 0;
     char *t = strtok(cmdLine, " \t");
@@ -68,9 +85,10 @@ int execute_command_str(const char *line) {
     }
     args[argc] = NULL;
     free(tokenBuf);
+
     if (argc == 0) {
         free(cmdLine);
-        return 0;
+        goto finish;
     }
 
     fl_shell_cmd_no_t id = fl_shell_cmd_lookup(args[0]);
@@ -79,7 +97,8 @@ int execute_command_str(const char *line) {
         if (pid < 0) {
             perror("fork");
             free(cmdLine);
-            return 1;
+            out_rc = 1;
+            goto finish;
         }
         if (pid == 0) {
             signal(SIGINT, SIG_DFL);
@@ -90,13 +109,17 @@ int execute_command_str(const char *line) {
             int status = 0;
             waitpid(pid, &status, 0);
             free(cmdLine);
-            return WEXITSTATUS(status);
+            out_rc = WEXITSTATUS(status);
+            goto finish;
         }
     }
 
-    int rc = fl_shell_cmd_dispatch(id, argc, args);
+    out_rc = fl_shell_cmd_dispatch(id, argc, args);
     free(cmdLine);
-    return rc;
+
+finish:
+    fl_audit_shell_completed(line, out_rc);
+    return out_rc;
 }
 
 /* ---------------------------------------------------------------------------

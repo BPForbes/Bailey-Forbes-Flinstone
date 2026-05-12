@@ -1,9 +1,9 @@
 #include "common.h"
 #include "cmd_decl.h"
 #include "util.h"
+#include "fl/history_record.h"
 #include <stdio.h>
 #include <string.h>
-#include <unistd.h>
 #include <unistd.h>
 
 int cmd_history_maybe(const char *trimmed) {
@@ -15,10 +15,19 @@ int cmd_history_maybe(const char *trimmed) {
         printf("No history.\n");
         return 1;
     }
-    char l2[256];
+    char raw[4097];
+    char disp[4097];
     int idx = 1;
-    while (fgets(l2, sizeof(l2), hf))
-        printf("[%d] %s", idx++, l2);
+    while (fgets(raw, sizeof(raw), hf)) {
+        raw[strcspn(raw, "\n")] = '\0';
+        int rc = fl_history_record_unpack_cmd(raw, disp, sizeof disp, NULL, NULL,
+                                               NULL);
+        if (rc < 0) {
+            printf("[%d] [unpack error]\n", idx++);
+            continue;
+        }
+        printf("[%d] %s\n", idx++, disp);
+    }
     fclose(hf);
     if (tmp[0])
         unlink(tmp);
