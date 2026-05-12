@@ -33,6 +33,9 @@ Unless stated otherwise, **start at H**, prove APIs and tests, then **lift** the
 3. **Tests:** each feature lands with a **focused automated test** (existing `make` test target or new one); hardware-only paths need **QEMU/tap/offline** shims for CI.
 4. **Documentation:** public contract (headers + short `docs/` section) before wide refactors; **no silent behavior change** for shell builtins.
 5. **Security default:** **deny-by-default** for new powers (raw I/O, promiscuous NIC, arbitrary mount); explicit capability or build flag to enable lab modes.
+6. **Atomics & memory order:** prefer **ISO C11** `<stdatomic.h>` (**§7.17**) for new **lock-free** data structures in portable C. **Architecture barriers** (`DMB`/`DSB`/`ISB`, x86 fence intrinsics) live only under **`kernel/arch/**`** (or arch ASM), each with a **short comment** tying the barrier to the spec (e.g. ARM ARM / Intel SDM).
+7. **Public API lifecycle:** once a **P0-1** subsystem header set is marked **frozen**, exported contracts are **append-only**. **Breaking** changes require a **new feature ID**, user-visible deprecation, and a **`version/entries/*.ver`** note before removal.
+8. **Compiler hardening (CI / lab):** document optional flags alongside **P0-3** (matrix may vary): e.g. **`-fstack-protector-strong`**, **`-fsanitize=address,undefined`** on debug jobs where cost is acceptable, **`-fcf-protection=full`** (**Intel CET**, x86_64), **`-mbranch-protection=standard`** (**AArch64** PAC/BTI). Do not change default **B**/**release** presets silently—record in **`version/entries`**.
 
 ---
 
@@ -99,7 +102,7 @@ Phases and **A** milestones are **dependency-ordered**, but real releases often 
 
 | Pattern | Depends on | Unlocks / feeds |
 |--------|------------|-----------------|
-| **Netboot / PXE / TFTP** (**§12**, **PX-12**) | **P3** DHCP (**RFC 2131**), UDP; optional TCP/TLS for richer loaders | Fetch kernel/initrd **before** a local **P5** root FS is required |
+| **Netboot / PXE / TFTP** (**§12**, **PX-12**) | **P3-12** DHCP, **P3-6** UDP, **P3-7**/**P3-9** for HTTP(S) loaders; optional TCP/TLS for richer loaders | Fetch kernel/initrd **before** a local **P5** root FS is required |
 | **HTTP(S) boot** (**§12**) | **P3-7** TCP, **P3-9** TLS on **H** (or a minimal in-loader TLS policy) | Same **PX-12** track; cannot be an afterthought if the org wants “network install only” |
 | **UEFI `.efi` chain** (**§12**) | PE/COFF, UEFI memory map; stable view of RAM for **P1-4** PMM later | Runs **before** the in-repo **P3** stack; handoff can pass **DTB** pointer (**P0-7**) into the kernel |
 | **Bootloader ↔ networking** | Firmware or second-stage loader configures NIC (UEFI driver, **PXE** stack, or **P4** virtio); then **P3** ARP/IPv4/UDP | One **P3** stack serves **TAP** labs **and** netbooted images once `netdev` and PHY/virtual L2 agree (**IEEE 802.3**) |
@@ -118,7 +121,7 @@ These items unblock almost everything else.
 |----|---------|------|---------------------------|
 | **P0-1** | **Subsystem boundaries** | Freeze public C APIs for “driver ops”, “netdev”, “log sink”, “auth check”. | Headers document lifetime/threads; **no circular deps** across `kernel/` ↔ `userland/` beyond existing glue; `make` parity for default arch. |
 | **P0-2** | **Error taxonomy** | Shared `errno`-style or project-specific result type for drivers, VFS, net. | Every new API documents **who frees memory**; no unchecked `void` returns for fallible ops. |
-| **P0-3** | **CI realism** | CI runs unit tests without special hardware; optional nightly for TAP/loopback. | **GitHub Actions** green on default matrix; flaky tests quarantined with issue link. Optional **`dtc`** / **FDT** checks for any **`.dts`**/**`.dtb`** committed (see **P0-7**). |
+| **P0-3** | **CI realism** | CI runs unit tests without special hardware; optional nightly for TAP/loopback. | **GitHub Actions** green on default matrix; flaky tests quarantined with issue link. Optional **`dtc`** / **FDT** checks for any **`.dts`**/**`.dtb`** committed (see **P0-7**). Document optional **compiler hardening** jobs per global standard **#8** (stack protector, sanitizers, CET/PAC-BTI where supported). |
 | **P0-4** | **ARM GIC EOI correctness** | EOI writes the **acked IRQ**, not a hardcoded sentinel. | **ARM GIC** architecture spec; fix pattern in **Appendix D** §1.1; aarch64 bare-metal test or QEMU trace shows de-assert. |
 | **P0-5** | **x86_64 IDT + IRQ0 timer tick** | Minimal **IDT**, vector **0x20** IRQ0 path increments `hw_tick_count()`. | **Intel SDM** Vol. 3A; **Appendix D** §1.2 / §3.1 / execution order rows **8–9**; `tick_count()` advances between calls in **B** builds. |
 | **P0-6** | **x86_64 GDT (minimal flat)** | Install a known-good **GDT** before relying on IDT/IRQ. | **Appendix D** §3.2 / execution row **8**; `lgdt` + CS reload documented in `docs/` or arch README. |
@@ -135,7 +138,7 @@ These items unblock almost everything else.
 |----|---------|------|---------------------------|
 | **P1-1** | **Execution context** | Define what a “task” is (thread in hosted mode; kernel thread later). | **POSIX threads** acceptable on H; document **signal-safety** rules for driver callbacks. |
 | **P1-2** | **Address space story** | Document flat vs paged memory for hosted vs future kernel. | For H: **W^X policy** where applicable (`mmap` advice); for K/B: reference **MMU programming** for target arch (ARMv8A / x86-64 manuals). |
-| **P1-3** | **Preemption contract** | Identify which locks may be held across which subsystems. | **Lock ordering graph** in `docs/`; no unbounded work under spinlocks; **irq-safe** rules documented even if hosted IRQ is simulated. **SMP posture:** choose ordering and IRQ boundaries so **P9-3** can add IPIs without redesigning every driver — real SMP stays in **P9-3**. |
+| **P1-3** | **Preemption contract** | Identify which locks may be held across which subsystems. | **Lock ordering graph** in `docs/`; no unbounded work under spinlocks; **irq-safe** rules documented even if hosted IRQ is simulated. **SMP posture:** choose ordering and IRQ boundaries so **P9-3** can add IPIs without redesigning every driver — real SMP stays in **P9-3**. Any **lock-free** fastpath follows global standard **#6** (`<stdatomic.h>` vs arch fences). |
 | **P1-4** | **Physical frame allocator (PMM)** | Track **physical** frames for **B** builds; no silent libc `aligned_alloc` as “page” where inappropriate. | **Appendix D** §3.3 / execution row **11**; `pmm_alloc_frame` / `pmm_free_frame` unit tests on **B** config. |
 | **P1-5** | **Memory domain arenas** | Domains backed by **fixed arenas** (libc-free on **DRIVERS_BAREMETAL**), not discarded `malloc` wrappers. | **Appendix D** §2.1 / execution row **6**; exhaustion visible; sizes documented per domain. |
 | **P1-6** | **Driver model reentrancy** | `s_model_lock` (and related) guard static registration / IRQ dispatch tables. | **Appendix D** §2.4 / execution row **7**; concurrent probe/remove stress test or static review checklist until HW CI exists. |
@@ -164,6 +167,8 @@ Implement **bottom-up**: **L2 (link layer)** → IPv4/UDP → TCP → sockets fa
 
 **L2 in this roadmap** means **IEEE 802.3 Ethernet**: MAC addressing, on-the-wire **Ethernet frame** format (length/type field, FCS where applicable), and the usual **DIX / Ethernet II** encapsulation of IPv4 (**RFC 894**). Linux **TUN/TAP** exposes **Ethernet** devices as **802.3-style** frames to user space; the stack should treat **raw L2** as **802.3 Ethernet**, not as an abstract “byte pipe,” so **ARP** and IPv4 placement align with real NICs and lab TAP bridges.
 
+**Performance budgets:** closing a networking **P**-row should include measurable targets in **Appendix B** (e.g. **P3-6** loopback UDP echo ceiling, **P3-12** DHCP transaction timeout bounds)—numeric budgets are **product** choices maintained in `docs/` or test metadata, not fixed globally here.
+
 | ID | Feature | Goal | Standards & acceptance |
 |----|---------|------|---------------------------|
 | **P3-1** | **Device abstraction (`netdev`)** | TX/RX **IEEE 802.3 Ethernet** frames, MAC get/set, promisc flag, stats counters. | **IEEE 802.3** frame handling (addressing, MTU vs frame size); API mirrors **Linux `net_device`** minimal subset conceptually; **zero-copy optional**, **copy-based default** for simplicity. |
@@ -172,10 +177,11 @@ Implement **bottom-up**: **L2 (link layer)** → IPv4/UDP → TCP → sockets fa
 | **P3-4** | **ARP** | IPv4 neighbor resolution over **IEEE 802.3 Ethernet**. | **RFC 826** over **802.3 MAC**; **RFC 894** type/ethertype expectations; cache with eviction bounds; **flood protection** hooks (stub OK initially). |
 | **P3-5** | **IPv4** | Addresses, netmask, routing table (default route), ICMP echo (ping). | **RFC 791** + **RFC 792**; **checksum offload** optional; **path MTU** stub documented. |
 | **P3-6** | **UDP** | Demux by port; checksum; basic socket buffer caps. | **RFC 768**; **bounded queues**; drop policy under pressure documented. |
+| **P3-12** | **DHCP client (IPv4)** | Minimal **DISCOVER → OFFER → REQUEST → ACK** client for lab addressing and **PX-12** netboot paths. | **RFC 2131**; **RFC 2132** (options subset); finite state machine with **timeouts**; builds on **P3-6**; document interaction with **P3-5** static routes. |
 | **P3-7** | **TCP (large)** | Reliable stream for one client/server pair first. | **RFC 793** + selective **RFC 5681** congestion basics later; **interop test** against Linux `nc` or `socat`. |
 | **P3-8** | **DNS client** | Resolver for A/AAAA records (AAAA optional). | **RFC 1035** semantics subset; **timeouts** and **retry caps**. |
 | **P3-9** | **TLS (hosted)** | Prefer **userland** TLS (e.g. mbedTLS/OpenSSL) behind shell command or libc. | **No TLS in “kernel” layer** until stable memory and time APIs exist on K/B. |
-| **P3-10** | **Wi‑Fi station path** `[DEFERRED]` | Do **not** silently drop the gap: either promote to active work or keep this row as the **explicit deferral**. | **IEEE 802.11** / **802.11i** / **802.1X** / **EAP** (informative stack); **RFC 2131** after L2; **not** an A1–A2 gate. When un-deferred, expect **P4**-class firmware/driver work plus reuse of **P3** IPv4/UDP/TCP. |
+| **P3-10** | **Wi‑Fi station path** `[DEFERRED]` | Do **not** silently drop the gap: either promote to active work or keep this row as the **explicit deferral**. | **IEEE 802.11** / **802.11i** / **802.1X** / **EAP** (informative stack); **P3-12** DHCP after L2; **not** an A1–A2 gate. When un-deferred, expect **P4**-class firmware/driver work plus reuse of **P3** IPv4/UDP/TCP. |
 | **P3-11** | **IPv6 + ICMPv6** `[DEFERRED]` | Keep dual-stack as an **explicit** later step, not an accidental omission. | **RFC 8200** (IPv6); **RFC 4291** (addressing); **RFC 4443** (ICMPv6); **RFC 4861** (ND); ties to **P3-1** L2 and **P3-8** **AAAA** when promoted. |
 
 **Security standards:** default **no promisc**; **no raw TX** from shell without principal + audit; rate-limit outgoing ARP/ICMP in lab builds.
@@ -231,8 +237,8 @@ Implement **bottom-up**: **L2 (link layer)** → IPv4/UDP → TCP → sockets fa
 | ID | Feature | Goal | Standards & acceptance |
 |----|---------|------|---------------------------|
 | **P7-1** | **Service supervision** | Start/stop/restart long-running net or log daemons (hosted). | **PID files** + stale detection; **graceful shutdown** timeouts. |
-| **P7-2** | **Packaging** | Reproducible tarball/OSTree image (later). | **SBOM** manifest optional; **version** from existing `version/locked` pipeline. |
-| **P7-3** | **Remote admin path** | SSH is heavy; minimum viable: **reverse shell** lab command behind compile flag. | **Never default-on**; documented abuse risks. |
+| **P7-2** | **Packaging** | Reproducible tarball/OSTree image (later). | **SBOM** manifest optional; **version** from existing `version/locked` pipeline. Follow [reproducible-builds.org](https://reproducible-builds.org/docs/) practices where feasible; document **artifact signing** (e.g. **minisign**, **OpenBSD signify**, or **PKCS #7** where **PX-12** overlaps). Public C API **semver** discipline per [semver.org](https://semver.org/) alongside shipped **`VERSION`** from `version/locked`. |
+| **P7-3** | **Remote admin path** | SSH is heavy; minimum viable: **reverse shell** lab command behind compile flag. | **Never default-on**; gate with an explicit compile-time symbol (e.g. **`CONFIG_LAB_REVERSE_SHELL`**, **off** in all default / release-style presets). Document abuse risks; log enablement via **P6-4** audit when used. |
 
 ---
 
@@ -250,7 +256,7 @@ Implement **bottom-up**: **L2 (link layer)** → IPv4/UDP → TCP → sockets fa
 | ID | Feature | Goal | Standards & acceptance |
 |----|---------|------|---------------------------|
 | **P9-1** | **Fuzzing** | syscall / netdev / FS parsers under AFL++ or libFuzzer (hosted shims). | **Crash = bug**; corpus checked in CI cache optional. |
-| **P9-2** | **Coverity / static analysis** | Clean critical triage. | **Zero** new high-severity defects per release gate. |
+| **P9-2** | **Coverity / static analysis** | Clean critical triage. | **Zero** new high-severity defects per release gate. Use **SEI CERT C Coding Standard** (https://www.sei.cmu.edu/downloads/sei-cert-c-coding-standard.pdf) as the primary **human-readable** ruleset for new C; **MISRA C** optional for driver subsets where maintainers adopt a profile. |
 | **P9-3** | **SMP bring-up (B)** | IPIs, per-CPU variables, barrier rules. | **Memory model** doc for AArch64/x86 per **ARM ARM** / Intel SDM. **AArch64:** secondary CPUs via **PSCI `CPU_ON`** (**ARM DEN0022**) per **P4-7** + DT **`cpus`**; **x86_64:** AP entry per **Intel SDM**. Builds on **P1-3** / **P1-6**; expect driver audits, not a greenfield lock story. |
 
 ---
@@ -292,6 +298,7 @@ Mostly **above** the kernel once the stack exists.
 | Track | Standards / references | Rough implementation |
 |-------|------------------------|----------------------|
 | **UEFI boot** | **UEFI Specification**; **ACPI** (informative) | `.efi` PE/COFF; Boot Services; handoff to kernel/VM. May pass **DTB** pointer per **P0-7** / **P4-6**. |
+| **Multiboot2 / QEMU `-kernel` (x86_64)** | [GNU Multiboot2 specification](https://www.gnu.org/software/grub/manual/multiboot2/multiboot2.html) | Boot protocol alternative to UEFI for **GRUB** / QEMU **`-kernel`**: tag layout, memory map, module list—document handoff to **P1-4** PMM view and **P3** net modules if netbooted. |
 | **Partitioning** | **UEFI** GPT; classic **MBR** (informative) | Parse GPT; find **ESP** (FAT). |
 | **ESP filesystem** | **FAT32** (Microsoft spec / UEFI profile) | RO FAT path or reuse project FAT on ESP. |
 | **PXE / netboot** | **RFC 2131**, **RFC 2132**, **RFC 1350** (TFTP) | DHCP → TFTP loader/kernel. |
@@ -303,7 +310,7 @@ Mostly **above** the kernel once the stack exists.
 | ID | Scope | Notes |
 |----|-------|-------|
 | **PX-11** | **§11** — `curl`/`apt` class userland | Multi-release program: HTTP stack, signatures, archives, dependency resolution—not implied by finishing **P3**. |
-| **PX-12** | **§12** — install / boot / attestation | UEFI, PXE, Secure Boot; depends on **P4**/**P5** maturity and a signing story. **PXE/HTTP boot** reuses **P3** DHCP/UDP/TCP and often **P3-9** TLS; schedule together (see [How work interlinks](#how-work-interlinks-examples-across-phases-and-a-releases)). |
+| **PX-12** | **§12** — install / boot / attestation | UEFI, **Multiboot2**, PXE, Secure Boot; depends on **P4**/**P5** maturity and a signing story. **PXE/HTTP boot** reuses **P3-12**/**P3-6**/**P3-7**/**P3-9** as needed; schedule together (see [How work interlinks](#how-work-interlinks-examples-across-phases-and-a-releases)). |
 
 Promote a **PX-** row into numbered phases when it becomes a **merge-sized** commitment; until then it documents **scope** without duplicating **P0–P9** tables.
 
@@ -314,11 +321,13 @@ Promote a **PX-** row into numbered phases when it becomes a **merge-sized** com
 | Domain | Normative / de-facto references |
 |--------|----------------------------------|
 | C ABI / hosted behavior | ISO C11; POSIX.1-2008 where hosted. |
-| Networking | **IEEE 802.3** (Ethernet L2/MAC & framing); **RFC 894** (IPv4 over Ethernet); **RFC 826** (ARP); **RFC 791**, **792**, **768**, **793**, **1035**; later TLS **RFC 5246** / **8446** via library. |
+| Networking | **IEEE 802.3** (Ethernet L2/MAC & framing); **RFC 894** (IPv4 over Ethernet); **RFC 826** (ARP); **RFC 791**, **792**, **768**, **793**, **1035**; **RFC 2131**, **2132** (DHCP, **P3-12**); later TLS **RFC 5246** / **8446** via library. |
 | IPv6 (defer) | **RFC 8200**, **4291**, **4443**, **4861** (ND). See **P3-11** `[DEFERRED]`. |
 | Wi‑Fi | **IEEE 802.11**, **802.11i**; **802.1X** / **EAP**; **RFC 2131** (DHCP after link). See **P3-10** `[DEFERRED]`. |
 | HTTP / packages | **RFC 9110**, **9112**; **RFC 8446**, **5280**; **RFC 4880** (OpenPGP); Debian archive conventions (informative). |
-| Boot / firmware | **UEFI**; **RFC 2131**, **2132**, **1350** (PXE path); **PKCS #7** (Secure Boot). |
+| Boot / firmware | **UEFI**; **GNU Multiboot2** (QEMU **`-kernel`** / GRUB); **RFC 2131**, **2132**, **1350** (PXE path); **PKCS #7** (Secure Boot). See **§12**. |
+| Reproducible builds / semver | [reproducible-builds.org](https://reproducible-builds.org/docs/); [semver.org](https://semver.org/). See **P7-2**. |
+| Secure coding (analysis) | **SEI CERT C**; **MISRA C** (optional profile). See **P9-2**. |
 | Device tree (FDT) | [Devicetree specification](https://devicetree-specification.readthedocs.io/); **`dtc`**. See **P0-7**, **P4-6**. |
 | PSCI (AArch64 SMP) | **ARM DEN0022** (PSCI); DT `psci` bindings. See **P4-7**, **P9-3**. |
 | UART console | NS16550 (de facto); **ARM PL011** TRM. See **P0-8**. |
@@ -334,6 +343,7 @@ Promote a **PX-** row into numbered phases when it becomes a **merge-sized** com
 
 ```text
 Feature ID:
+version/entries: on merge, record shipped behavior under version/entries/<semver_slug>.ver (repo policy)
 Owner:
 Track (H/K/B):
 
