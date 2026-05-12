@@ -15,7 +15,7 @@
  */
 #define VERSION_MAJOR    3
 #define VERSION_STANDARD 2
-#define VERSION_PATCH    1
+#define VERSION_PATCH    2
 
 #define VERSION_STR_(x) #x
 #define VERSION_STR(x) VERSION_STR_(x)
