@@ -9,7 +9,7 @@
  *   This shell supports both interactive and batch modes. Disk operations are
  *   performed on text files and managed in clusters. Clusters are displayed in
  *   hexadecimal. The new –cd command (or its batch shortcut) creates a new disk
- *   file (<volume>_disk or <volume>_disk.img) filled with random data, then prints its contents.
+ *   file (<volume>_disk.dat legacy hex, or <volume>_disk.img for FAT32) filled with random data, then prints its contents.
  *
  *   The –cd command syntax is:
  *       -cd <volume> <rowCount> <nibbleCount> [<interactive>]
@@ -295,7 +295,7 @@ int main(int argc, char *argv[]) {
         if (cb >= 512 && (cb % 512) == 0)
             snprintf(current_disk_file, sizeof(current_disk_file), "%s_disk.img", argv[1]);
         else
-            snprintf(current_disk_file, sizeof(current_disk_file), "%s_disk", argv[1]);
+            snprintf(current_disk_file, sizeof(current_disk_file), "%s_disk.dat", argv[1]);
         read_disk_header();
         print_disk_formatted();
         if (argc == 5 && !strcmp(argv[4], "-y"))
