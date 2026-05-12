@@ -1,0 +1,4 @@
+MAJOR_VERSION=3
+STANDARD_VERSION=3
+RELEASE_VERSION=0
+DESCRIPTION=Bump release to 3.3.0: contract bundle rev 2 adds FL_CONTRACT_SURFACE_FS_JAIL; fl/jail_contract.h documents fs_jail discipline; fl/audit_log.h separates post-exec audit (FL_AUDIT, .fl_audit.log) from FL1 command history; new `audit` builtin; interpreter emits audit after exit status.

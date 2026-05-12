@@ -6,6 +6,8 @@
 #include "drivers/fl_cstr.h"
 #include "fl/contract.h"
 #include "fl/history_record.h"
+#include "fl/audit_log.h"
+#include "fl/jail_contract.h"
 #include "fl/driver/device.h"
 #include "fl/driver/devfs.h"
 #include "fl/driver/irq.h"

@@ -131,9 +131,6 @@ void append_history_ex(fl_contract_surface_t surface, fl_result_t last_rc,
     if (!cmd)
         return;
 
-    fl_history_audit_append((uint8_t)FL_CONTRACT_BUNDLE_REV, surface, last_rc,
-                            cmd);
-
     unsigned char rec[4096];
     size_t n = fl_history_record_pack((char *)rec, sizeof(rec),
                                        (uint8_t)FL_CONTRACT_BUNDLE_REV, surface,

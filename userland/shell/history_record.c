@@ -1,47 +1,6 @@
 #include "fl/history_record.h"
 #include <stdio.h>
-#include <stdlib.h>
 #include <string.h>
-
-#define FL_HISTORY_AUDIT_ENV "FL_HISTORY_AUDIT"
-
-static fl_log_sink_t *g_hist_audit_sink;
-
-void fl_history_set_audit_sink(fl_log_sink_t *sink) { g_hist_audit_sink = sink; }
-
-static void stderr_hist_emit(struct fl_log_sink *sink, int level, int facility,
-                              const char *msg) {
-    (void)sink;
-    (void)level;
-    (void)facility;
-    fputs(msg, stderr);
-    fputc('\n', stderr);
-}
-
-static const fl_log_sink_ops_t fl_history_stderr_ops = {stderr_hist_emit};
-static fl_log_sink_t fl_history_stderr_sink = {&fl_history_stderr_ops, NULL};
-
-static int fl_history_audit_enabled(void) {
-    const char *ev = getenv(FL_HISTORY_AUDIT_ENV);
-    return ev && ev[0] != '\0' && strcmp(ev, "0") != 0;
-}
-
-void fl_history_audit_append(uint8_t bundle_rev, fl_contract_surface_t surface,
-                             fl_result_t last_rc, const char *cmd) {
-    if (!fl_history_audit_enabled() || !cmd)
-        return;
-    if (!g_hist_audit_sink)
-        g_hist_audit_sink = &fl_history_stderr_sink;
-
-    char buf[640];
-    (void)snprintf(buf, sizeof buf,
-                   "[history] bundle_rev=%u surface=%u rc=%d cmd=\"%.400s\"",
-                   (unsigned)bundle_rev, (unsigned)surface, (int)last_rc, cmd);
-
-    if (g_hist_audit_sink->ops && g_hist_audit_sink->ops->emit)
-        g_hist_audit_sink->ops->emit(g_hist_audit_sink, (int)FL_LOG_INFO, 24,
-                                     buf);
-}
 
 size_t fl_history_record_pack(char *out, size_t out_cap, uint8_t bundle_rev,
                               fl_contract_surface_t surface, fl_result_t last_rc,
@@ -120,7 +79,6 @@ int fl_history_record_unpack_cmd(const char *stored_line, char *cmd_out,
     int rc_i = 0;
     if (sscanf(jsonbuf, "{\"br\":%u,\"sf\":%u,\"rc\":%d}", &br_u, &sf_u,
                &rc_i) != 3) {
-        /* Still strip command tail after second separator. */
         br_u = 0;
         sf_u = 0;
         rc_i = 0;

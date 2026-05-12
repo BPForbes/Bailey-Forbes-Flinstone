@@ -276,7 +276,7 @@ int main(int argc, char *argv[]) {
     if ((argc == 4 || argc == 5) && argv[1] && argv[1][0] != '-') {
         /* Must include every builtin name so batch mode does not treat them as createdisk shortcut */
         static const char *skip[] = {"help","cd","dir","make","write","cat","type","mkdir","rmdir",
-            "rmtree","mv","version","contracts","exit","bios","clear","history","his","cc","listclusters","listdirs",
+            "rmtree","mv","version","contracts","audit","exit","bios","clear","history","his","cc","listclusters","listdirs",
             "setdisk","createdisk","format","search","writecluster","delcluster","update","redirect",
             "initdisk","rerun","import","du","printdisk","addcluster","where","loc",
             "diskput","diskget","diskfiles","diskdel","diskmkdir",NULL};
@@ -385,6 +385,19 @@ int main(int argc, char *argv[]) {
             }
             else if (!strcmp(cmd, "contracts")) {
                 tokensCount = (i + 1 < argc) ? 2 : 1;
+            }
+            else if (!strcmp(cmd, "audit")) {
+                if (i + 1 < argc && !strcmp(argv[i + 1], "show")) {
+                    if (i + 2 < argc && argv[i + 2][0] != '-')
+                        tokensCount = 3;
+                    else
+                        tokensCount = 2;
+                } else if (i + 1 < argc &&
+                           (!strcmp(argv[i + 1], "path") || !strcmp(argv[i + 1], "--help") ||
+                            !strcmp(argv[i + 1], "-h")))
+                    tokensCount = 2;
+                else
+                    tokensCount = 1;
             }
             else if (!strcmp(cmd, "exit")) {
                 if (i + 1 < argc &&

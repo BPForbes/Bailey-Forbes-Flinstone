@@ -19,6 +19,9 @@
  *   - `fl/contract_log.h` — log sink ops (**log sink**)
  *   - `fl/contract_auth.h` — authz predicate type (**auth check**)
  *   - `fl/contract_result.h` — `fl_result_t` / shared error codes (**P0-2**)
+ *   - `fl/history_record.h` — optional FL1 history payload (separate from audit)
+ *   - `fl/audit_log.h` — post-exec audit file + optional log sink mirror
+ *   - `fl/jail_contract.h` — fs jail notes for host sandbox paths
  *
  * VFS and other storage contracts live under `fl/vfs.h` (include separately to
  * avoid pulling the VFS API into minimal driver-only translation units).
@@ -27,7 +30,7 @@
 #define FL_CONTRACT_H
 
 /** Increment when this bundle’s shape or semantics change (doc + review). */
-#define FL_CONTRACT_BUNDLE_REV 1
+#define FL_CONTRACT_BUNDLE_REV 2
 
 #include "fl/contract_result.h"
 #include "fl/driver/driver.h"
@@ -39,7 +42,9 @@ typedef enum {
     FL_CONTRACT_SURFACE_DRIVER_OPS = 0,
     FL_CONTRACT_SURFACE_NETDEV,
     FL_CONTRACT_SURFACE_LOG_SINK,
-    FL_CONTRACT_SURFACE_AUTHZ
+    FL_CONTRACT_SURFACE_AUTHZ,
+    /** Host sandbox path discipline (`fs_jail_*`); see `fl/jail_contract.h`. */
+    FL_CONTRACT_SURFACE_FS_JAIL
 } fl_contract_surface_t;
 
 #endif /* FL_CONTRACT_H */

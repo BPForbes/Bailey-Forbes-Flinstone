@@ -1,5 +1,6 @@
 #include "cmd_decl.h"
 #include "fl/contract.h"
+#include "fl/audit_log.h"
 #include "fl/history_record.h"
 #include <stdio.h>
 #include <string.h>
@@ -30,7 +31,7 @@ static fl_authz_decision_t demo_authz_always_allow(unsigned op, void *ctx) {
 
 static int print_summary(void) {
     static const char *surface_names[] = {
-        "DRIVER_OPS", "NETDEV", "LOG_SINK", "AUTHZ",
+        "DRIVER_OPS", "NETDEV", "LOG_SINK", "AUTHZ", "FS_JAIL",
     };
 
     printf("contracts: bundle rev %d\n", FL_CONTRACT_BUNDLE_REV);
@@ -39,7 +40,9 @@ static int print_summary(void) {
     printf("  surfaces (%zu):\n", sizeof(surface_names) / sizeof(surface_names[0]));
     for (unsigned i = 0; i < sizeof(surface_names) / sizeof(surface_names[0]); i++)
         printf("    %u %s\n", i, surface_names[i]);
-    printf("  headers: fl/contract.h (+ driver.h, net.h, contract_*)\n");
+    printf("  audit: separate from history; env %s file %s (see `audit` command)\n",
+           FL_AUDIT_ENV, FL_AUDIT_REL_DEFAULT);
+    printf("  jail: fl/jail_contract.h + fs_jail_* when the VM host sandbox is active\n");
     printf("  demo fl_authz_check_fn: returns ALLOW (no policy wired)\n");
 
     fl_authz_check_fn check = demo_authz_always_allow;
@@ -49,11 +52,12 @@ static int print_summary(void) {
 
 static int print_json(void) {
     printf("{\"bundle_rev\":%d,\"fl_result_ok\":%d,\"fl_result_err\":%d,"
-           "\"surfaces\":[\"DRIVER_OPS\",\"NETDEV\",\"LOG_SINK\",\"AUTHZ\"],"
+           "\"surfaces\":[\"DRIVER_OPS\",\"NETDEV\",\"LOG_SINK\",\"AUTHZ\",\"FS_JAIL\"],"
            "\"history_record_tag\":\"%s\","
+           "\"audit_env\":\"%s\",\"audit_log_relative\":\"%s\","
            "\"vfs_include\":\"fl/vfs.h (separate)\"}\n",
            FL_CONTRACT_BUNDLE_REV, (int)FL_RESULT_OK, (int)FL_RESULT_ERR,
-           FL_HISTORY_RECORD_TAG);
+           FL_HISTORY_RECORD_TAG, FL_AUDIT_ENV, FL_AUDIT_REL_DEFAULT);
     return 0;
 }
 

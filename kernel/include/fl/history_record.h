@@ -12,8 +12,7 @@
  *
  * Commands containing RS or LF are stored without a payload (legacy line).
  *
- * Optional audit logging uses `fl_log_sink_t` (**fl/contract_log.h**); enable
- * with environment variable `FL_HISTORY_AUDIT` (non-empty, not `0`).
+ * **Audit trail** (post-exit, optional `FL_AUDIT`) is separate; see **fl/audit_log.h**.
  */
 #ifndef FL_HISTORY_RECORD_H
 #define FL_HISTORY_RECORD_H
@@ -41,12 +40,6 @@ int fl_history_record_unpack_cmd(const char *stored_line, char *cmd_out,
                                  size_t cmd_out_cap, uint8_t *bundle_rev_out,
                                  fl_contract_surface_t *surface_out,
                                  fl_result_t *rc_out);
-
-void fl_history_set_audit_sink(fl_log_sink_t *sink);
-
-/** If `FL_HISTORY_AUDIT` is set, emit one structured line about the append. */
-void fl_history_audit_append(uint8_t bundle_rev, fl_contract_surface_t surface,
-                             fl_result_t last_rc, const char *cmd);
 
 #ifdef __cplusplus
 }
