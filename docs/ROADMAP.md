@@ -9,7 +9,7 @@ This document is the **single platform roadmap** for Flinstone: phased goals (**
 | [Scope tiers](#scope-tiers-pick-one-primary-track-per-initiative) | **H / K / B** meaning |
 | [Major (A) milestones](#major-a-release-milestones-illustrative) | How phases roll up to **major** releases (illustrative) |
 | [Phase advancement gates](#phase-advancement-gates) | When it is reasonable to start the next phase block |
-| [H → K → B graduation](#h--k--b-track-graduation-criteria) | What “proven” means before lifting a subsystem |
+| [H → K → B graduation](#track-graduation-criteria-h-to-k-to-b) | What “proven” means before lifting a subsystem |
 | [Phase dependency sketch](#phase-dependency-sketch-p0-to-p4) | Why **P0** and **Appendix D** front-load bare-metal correctness |
 | **Phase 0–9** | Feature IDs, goals, acceptance |
 | [Platform credibility (extended)](#platform-credibility--extended-sections-11-and-12) | **§11–§12** + staffing note only |
@@ -61,7 +61,7 @@ Use this table when asking what “**the next A release**” means in terms of p
 
 ---
 
-## H → K → B track graduation criteria
+## Track graduation criteria (H to K to B)
 
 | Step | “Done enough to graduate” |
 |------|---------------------------|
