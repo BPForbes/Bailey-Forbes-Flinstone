@@ -7,6 +7,8 @@ alwaysApply: true
 
 # Versioning rules
 
+Human-readable guide: **`docs/versioning.md`**. Pre-merge **CodeRabbit** + **Codex CLI**: **`AGENTS.md`** and **`.cursor/rules/review_tools.mdc`** (install CLIs if missing, triage must-fix vs nits, **no `git push`** until both satisfied).
+
 ## Lock system — never rewrite shipped published files
 
 - **Do not** modify paths under **`version/locked/`** that are already present on the **target / merge-base** branch. After merge, those files are the **published** record. New release prose belongs in **`version/entries/`** only on normal feature work; **`version/locked/`** is refreshed by **Version lock on merge** (GitHub Actions) after changes land on **`develop`** (see **AI / Cursor agent PRs** below).

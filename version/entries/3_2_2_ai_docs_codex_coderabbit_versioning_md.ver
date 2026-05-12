@@ -1,0 +1,4 @@
+MAJOR_VERSION=3
+STANDARD_VERSION=2
+RELEASE_VERSION=2
+DESCRIPTION=Document versioning in docs/versioning.md (A/B/C, entries vs locked, RELEASE_DATE via Version lock automation). Sync version/entries and version/locked ABOUT.txt. AI docs: install CodeRabbit/Codex CLIs when missing, triage review feedback (must-fix vs low-value nits), no git push until both tools satisfied; review_tools.mdc and AGENTS/CLAUDE cross-links (.coderabbit.yaml unchanged).
