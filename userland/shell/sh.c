@@ -410,7 +410,7 @@ int main(int argc, char *argv[]) {
                 }
             }
             else if (!strcmp(cmd, "contracts")) {
-                tokensCount = (i + 1 < argc) ? 2 : 1;
+                tokensCount = 1;
             }
             else if (!strcmp(cmd, "audit")) {
                 tokensCount = audit_tokens_count(argc, argv, i);

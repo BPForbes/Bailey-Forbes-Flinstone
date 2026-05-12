@@ -79,9 +79,27 @@ void fl_audit_shell_completed(const char *cmd_line, int host_exit_code) {
     if (rn == (size_t)-1) {
         pthread_mutex_lock(&g_audit_mutex);
         FILE *fp = fopen(FL_AUDIT_REL_DEFAULT, "a");
-        if (fp) {
-            (void)(fprintf(fp, "%s\n", line) < 0 ? -1 : 0);
-            (void)fclose(fp);
+        if (!fp) {
+            pthread_mutex_unlock(&g_audit_mutex);
+            snprintf(line, sizeof line,
+                     "type=audit_error path=%s rn=%zu context=fprintf audit_failed=fopen_null",
+                     FL_AUDIT_REL_DEFAULT, rn);
+            goto out_emit;
+        }
+        if (fprintf(fp, "%s\n", line) < 0) {
+            fclose(fp);
+            pthread_mutex_unlock(&g_audit_mutex);
+            snprintf(line, sizeof line,
+                     "type=audit_error path=%s rn=%zu context=fprintf audit_failed=fprintf",
+                     FL_AUDIT_REL_DEFAULT, rn);
+            goto out_emit;
+        }
+        if (fclose(fp) != 0) {
+            pthread_mutex_unlock(&g_audit_mutex);
+            snprintf(line, sizeof line,
+                     "type=audit_error path=%s rn=%zu context=fprintf audit_failed=fclose",
+                     FL_AUDIT_REL_DEFAULT, rn);
+            goto out_emit;
         }
         pthread_mutex_unlock(&g_audit_mutex);
         goto out_emit;
@@ -89,9 +107,27 @@ void fl_audit_shell_completed(const char *cmd_line, int host_exit_code) {
 
     pthread_mutex_lock(&g_audit_mutex);
     FILE *fp = fopen(FL_AUDIT_REL_DEFAULT, "a");
-    if (fp) {
-        (void)(fwrite(rec, 1, rn, fp) == rn ? 0 : -1);
-        (void)fclose(fp);
+    if (!fp) {
+        pthread_mutex_unlock(&g_audit_mutex);
+        snprintf(line, sizeof line,
+                 "type=audit_error path=%s rn=%zu context=fwrite audit_failed=fopen_null",
+                 FL_AUDIT_REL_DEFAULT, rn);
+        goto out_emit;
+    }
+    if (fwrite(rec, 1, rn, fp) != rn) {
+        fclose(fp);
+        pthread_mutex_unlock(&g_audit_mutex);
+        snprintf(line, sizeof line,
+                 "type=audit_error path=%s rn=%zu context=fwrite audit_failed=fwrite",
+                 FL_AUDIT_REL_DEFAULT, rn);
+        goto out_emit;
+    }
+    if (fclose(fp) != 0) {
+        pthread_mutex_unlock(&g_audit_mutex);
+        snprintf(line, sizeof line,
+                 "type=audit_error path=%s rn=%zu context=fwrite audit_failed=fclose",
+                 FL_AUDIT_REL_DEFAULT, rn);
+        goto out_emit;
     }
     pthread_mutex_unlock(&g_audit_mutex);
 
@@ -135,36 +171,64 @@ int fl_audit_show_last_lines(int n) {
     }
     enum { AUDIT_READ_MAX = 256 * 1024 };
     long off = 0;
-    if (sz > (long)AUDIT_READ_MAX)
-        off = sz - (long)AUDIT_READ_MAX;
-    if (fseek(fp, off, SEEK_SET) != 0) {
-        fclose(fp);
-        pthread_mutex_unlock(&g_audit_mutex);
-        return -1;
+    size_t to_read = 0;
+    char *buf = NULL;
+
+    /* Seek backwards in chunks to find at least n newlines */
+    long chunk_size = (sz < (long)AUDIT_READ_MAX) ? sz : (long)AUDIT_READ_MAX;
+    long start_pos = sz - chunk_size;
+    int found_newlines = 0;
+
+    while (start_pos >= 0 && found_newlines < n) {
+        if (fseek(fp, start_pos, SEEK_SET) != 0) {
+            if (buf) free(buf);
+            fclose(fp);
+            pthread_mutex_unlock(&g_audit_mutex);
+            return -1;
+        }
+
+        size_t read_len = (size_t)(sz - start_pos);
+        char *new_buf = (char *)realloc(buf, read_len + 1u);
+        if (!new_buf) {
+            if (buf) free(buf);
+            fclose(fp);
+            pthread_mutex_unlock(&g_audit_mutex);
+            return -1;
+        }
+        buf = new_buf;
+
+        if (fread(buf, 1, read_len, fp) != read_len) {
+            free(buf);
+            fclose(fp);
+            pthread_mutex_unlock(&g_audit_mutex);
+            return -1;
+        }
+        buf[read_len] = '\0';
+        to_read = read_len;
+
+        /* Count newlines in buffer */
+        found_newlines = 0;
+        for (size_t i = 0; i < to_read; i++) {
+            if (buf[i] == '\n')
+                found_newlines++;
+        }
+
+        /* If we found enough newlines or reached start of file, break */
+        if (found_newlines >= n || start_pos == 0)
+            break;
+
+        /* Move back another chunk */
+        start_pos -= chunk_size;
+        if (start_pos < 0)
+            start_pos = 0;
     }
-    size_t to_read = (size_t)(sz - off);
-    char *buf = (char *)malloc(to_read + 1u);
-    if (!buf) {
-        fclose(fp);
-        pthread_mutex_unlock(&g_audit_mutex);
-        return -1;
-    }
-    if (fread(buf, 1, to_read, fp) != to_read) {
-        free(buf);
-        fclose(fp);
-        pthread_mutex_unlock(&g_audit_mutex);
-        return -1;
-    }
-    buf[to_read] = '\0';
+
+    off = start_pos;
     fclose(fp);
     pthread_mutex_unlock(&g_audit_mutex);
 
-    int nl = 0;
-    for (size_t i = 0; i < to_read; i++) {
-        if (buf[i] == '\n')
-            nl++;
-    }
-    int skip = nl - n;
+    /* Find the position after the (found_newlines - n)th newline to start output at a line boundary */
+    int skip = found_newlines - n;
     if (skip < 0)
         skip = 0;
     size_t p = 0;

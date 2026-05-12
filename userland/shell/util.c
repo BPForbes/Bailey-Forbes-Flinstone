@@ -181,10 +181,10 @@ char *read_history_line(int index) {
     pthread_mutex_unlock(&history_mutex);
     if (!fp)
         return NULL;
-    char line[4096];
+    char line[4097];
     int count = 0;
     char *selected = NULL;
-    char decoded[4096];
+    char decoded[4097];
     while (fgets(line, sizeof(line), fp)) {
         count++;
         if (count == index) {
@@ -223,10 +223,10 @@ char **load_history(int *count) {
         *count = 0;
         return NULL;
     }
-    char line[4096];
+    char line[4097];
     while (fgets(line, sizeof(line), fp)) {
         line[strcspn(line, "\n")] = '\0';
-        char decoded[4096];
+        char decoded[4097];
         const char *to_store = decoded;
         if (fl_history_record_unpack_cmd(line, decoded, sizeof decoded, NULL,
                                           NULL, NULL) < 0)
