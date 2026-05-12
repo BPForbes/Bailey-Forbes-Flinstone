@@ -1,4 +1,4 @@
 MAJOR_VERSION=3
 STANDARD_VERSION=2
 RELEASE_VERSION=3
-DESCRIPTION=docs/ROADMAP.md is the sole platform doc: phased roadmap (P0–P9), platform credibility gaps with normative references and rough implementation (H→K→B), Appendix standards map, and Appendix D (merged bare-metal Improve-Sys-Architecture checklist: GIC, IDT/vectors, PMM, PS/2, devfs, spinlocks, execution order). Phase 3: IEEE 802.3 / RFC 894/826. Link from docs/build.md.
+DESCRIPTION=docs/ROADMAP.md is the sole platform doc: phased roadmap (P0–P9) with A-series milestone table, phase gates, H→K→B graduation criteria, P0–P4 dependency sketch, promoted bare-metal items (P0-4–P0-6, P1-4–P1-6), P3-10 Wi-Fi deferred, P4/P5 dependency notes, collapsed duplicate credibility tables (§11–§12 + PX placeholders), Appendix D without stale branch pins, Appendix C complexity-ordered slice. Normative refs (802.3, RFCs, virtio). Link from docs/build.md.

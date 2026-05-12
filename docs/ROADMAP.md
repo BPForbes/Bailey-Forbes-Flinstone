@@ -1,6 +1,19 @@
 # Flinstone OS-Platform Roadmap
 
-This document is the **single platform roadmap** for Flinstone: phased goals (**P0–P9**), **outsider-facing gap** tables (what is still missing for a credible OS read), **normative references** (IEEE, RFC, UEFI, POSIX, Virtio, and so on), **rough implementation** sketches (typically **H → K → B**), and **Appendix D** (bare-metal correctness checklist: GIC EOI, IDT/vectors, PMM, PS/2, devfs, spinlocks, execution order). It does **not** commit to calendar dates; phases are **dependency-ordered**.
+This document is the **single platform roadmap** for Flinstone: phased goals (**P0–P9**), **normative references**, **rough implementation** sketches (typically **H → K → B**), and **Appendix D** (bare-metal correctness checklist). It does **not** commit to calendar dates; phases are **dependency-ordered**. **Canonical work items** live in the **phase tables**; extended “credibility” notes (**§11–§12**) cover gaps not yet folded into a **P**-ID.
+
+### Document map
+
+| Section | Purpose |
+|---------|---------|
+| [Scope tiers](#scope-tiers-pick-one-primary-track-per-initiative) | **H / K / B** meaning |
+| [Major (A) milestones](#major-a-release-milestones-illustrative) | How phases roll up to **major** releases (illustrative) |
+| [Phase advancement gates](#phase-advancement-gates) | When it is reasonable to start the next phase block |
+| [H → K → B graduation](#h--k--b-track-graduation-criteria) | What “proven” means before lifting a subsystem |
+| [Phase dependency sketch](#phase-dependency-sketch-p0-to-p4) | Why **P0** and **Appendix D** front-load bare-metal correctness |
+| **Phase 0–9** | Feature IDs, goals, acceptance |
+| [Platform credibility (extended)](#platform-credibility--extended-sections-11-and-12) | **§11–§12** + staffing note only |
+| [Appendix A–D](#appendix-a--standards-map-non-exhaustive) | Standards index, DoD template, first vertical slice, bare-metal checklist |
 
 **Scope tiers (pick one primary track per initiative):**
 
@@ -22,6 +35,60 @@ Unless stated otherwise, **start at H**, prove APIs and tests, then **lift** the
 
 ---
 
+## Major (A) release milestones (illustrative)
+
+Use this table when asking what “**the next A release**” means in terms of phases. **Revised by maintainers** as scope shifts; it is **normative for planning**, not a promise of ship order.
+
+| Release | Phases / artifacts targeted (summary) | Example gate criteria |
+|---------|----------------------------------------|------------------------|
+| **A1** | **P0** + **Appendix D** execution rows **1–7** (through spinlocks / driver reentrancy) | Default CI green; **P0-1** subsystem headers stable; bare-metal IRQ + table races not blocking K/B bring-up |
+| **A2** | **P1** + **P2** + **P3** through **P3-6** (UDP) with loopback + TAP path | **P1-4**/**P1-5** PMM/arenas validated on **B** where applicable; **P2-3** authz tests deny guest on privileged ops; UDP/loopback interop tests in CI or documented skip |
+| **A3** | **P4** (virtio **P4-4** + IRQ model) + **P6-1**/**P6-2** logging | Virtio ring / golden vectors; **no sleep in hardirq** asserts in debug builds; structured log + ring buffer under test |
+| **A4** | **P5**–**P9** as needed (VFS, VM fidelity, hardening) | **P9-1** fuzz triage workflow; **P9-3** SMP bring-up documented with arch memory-model refs |
+
+---
+
+## Phase advancement gates
+
+| Transition | Gate (examples — adjust in `docs/` as tooling evolves) |
+|------------|--------------------------------------------------------|
+| **P0 → P1** | CI green on default matrix; **P0-2** result type merged; **P0-4** GIC EOI fixed on aarch64 bare-metal **or** issue-linked waiver; **P0-5**/**P0-6** on critical x86_64 paths per **Appendix D** |
+| **P1 → P2** | **P1-3** lock-ordering graph committed; **P1-4** PMM **P1-5** arenas behave in **DRIVERS_BAREMETAL** builds; **P1-6** `s_model_lock` guards driver tables |
+| **P2 → P3** | **P2-3** unit tests deny guest for **≥3** privileged operations; audit hook stub or **P6** path records denies |
+| **P3 → P4** | **P3-2** loopback + **P3-6** UDP stable; TAP (**P3-3**) policy documented for CI |
+| **P4 → P5** | **P4-2** IRQ lifecycle + **P4-4** virtio-blk proof on VM track **if** native block-backed VFS is in scope |
+| **P5 → P6** | VFS mount semantics + one RO FS story documented alongside `version/entries` |
+
+---
+
+## H → K → B track graduation criteria
+
+| Step | “Done enough to graduate” |
+|------|---------------------------|
+| **H → K** | Focused **automated tests** pass; **public C API** for the subsystem is frozen (or versioned with explicit compat notes); **one integration test** exercises the subsystem end-to-end on the hosted path (e.g. loopback, TAP, or file bridge). |
+| **K → B** | Same contracts where applicable on **B** builds; **Appendix D** items required for the devices under test are closed **or** waived in writing; IRQ / EOI / spinlock rules exercised under QEMU or hardware. |
+
+---
+
+## Phase dependency sketch (P0 to P4)
+
+```mermaid
+flowchart TD
+  P0_1[P0-1 subsystem APIs] --> P1_1[P1-1 execution context]
+  P0_2[P0-2 error taxonomy] --> P1_2[P1-2 address space story]
+  P0_4[P0-4 GIC EOI] --> P0_6[P0-6 x86 GDT]
+  P0_6 --> P0_5[P0-5 IDT + IRQ0]
+  P0_5 --> P1_6[P1-6 driver spinlocks]
+  P1_4[P1-4 PMM] --> P1_5[P1-5 domain arenas]
+  P1_4 --> P1_2
+  P1_3[P1-3 preemption contract] --> P4_2[P4-2 IRQ lifecycle]
+  P1_6 --> P4_1[P4-1 driver model v2]
+  P1_1 --> P2_3[P2-3 authz middleware]
+  P3_2[P3-2 loopback] --> P3_6[P3-6 UDP]
+```
+
+---
+
 ## Phase 0 — Foundations (cross-cutting)
 
 These items unblock almost everything else.
@@ -31,6 +98,11 @@ These items unblock almost everything else.
 | **P0-1** | **Subsystem boundaries** | Freeze public C APIs for “driver ops”, “netdev”, “log sink”, “auth check”. | Headers document lifetime/threads; **no circular deps** across `kernel/` ↔ `userland/` beyond existing glue; `make` parity for default arch. |
 | **P0-2** | **Error taxonomy** | Shared `errno`-style or project-specific result type for drivers, VFS, net. | Every new API documents **who frees memory**; no unchecked `void` returns for fallible ops. |
 | **P0-3** | **CI realism** | CI runs unit tests without special hardware; optional nightly for TAP/loopback. | **GitHub Actions** green on default matrix; flaky tests quarantined with issue link. |
+| **P0-4** | **ARM GIC EOI correctness** | EOI writes the **acked IRQ**, not a hardcoded sentinel. | **ARM GIC** architecture spec; fix pattern in **Appendix D** §1.1; aarch64 bare-metal test or QEMU trace shows de-assert. |
+| **P0-5** | **x86_64 IDT + IRQ0 timer tick** | Minimal **IDT**, vector **0x20** IRQ0 path increments `hw_tick_count()`. | **Intel SDM** Vol. 3A; **Appendix D** §1.2 / §3.1 / execution order rows **8–9**; `tick_count()` advances between calls in **B** builds. |
+| **P0-6** | **x86_64 GDT (minimal flat)** | Install a known-good **GDT** before relying on IDT/IRQ. | **Appendix D** §3.2 / execution row **8**; `lgdt` + CS reload documented in `docs/` or arch README. |
+
+**K/B note:** **P0-4–P0-6** are **hard prerequisites** for trustworthy IRQ and timing on bare metal; details and file pointers stay in **Appendix D**.
 
 ---
 
@@ -40,7 +112,10 @@ These items unblock almost everything else.
 |----|---------|------|---------------------------|
 | **P1-1** | **Execution context** | Define what a “task” is (thread in hosted mode; kernel thread later). | **POSIX threads** acceptable on H; document **signal-safety** rules for driver callbacks. |
 | **P1-2** | **Address space story** | Document flat vs paged memory for hosted vs future kernel. | For H: **W^X policy** where applicable (`mmap` advice); for K/B: reference **MMU programming** for target arch (ARMv8A / x86-64 manuals). |
-| **P1-3** | **Preemption contract** | Identify which locks may be held across which subsystems. | **Lock ordering graph** in `docs/`; no unbounded work under spinlocks; **irq-safe** rules documented even if hosted IRQ is simulated. |
+| **P1-3** | **Preemption contract** | Identify which locks may be held across which subsystems. | **Lock ordering graph** in `docs/`; no unbounded work under spinlocks; **irq-safe** rules documented even if hosted IRQ is simulated. **SMP posture:** choose ordering and IRQ boundaries so **P9-3** can add IPIs without redesigning every driver — real SMP stays in **P9-3**. |
+| **P1-4** | **Physical frame allocator (PMM)** | Track **physical** frames for **B** builds; no silent libc `aligned_alloc` as “page” where inappropriate. | **Appendix D** §3.3 / execution row **11**; `pmm_alloc_frame` / `pmm_free_frame` unit tests on **B** config. |
+| **P1-5** | **Memory domain arenas** | Domains backed by **fixed arenas** (libc-free on **DRIVERS_BAREMETAL**), not discarded `malloc` wrappers. | **Appendix D** §2.1 / execution row **6**; exhaustion visible; sizes documented per domain. |
+| **P1-6** | **Driver model reentrancy** | `s_model_lock` (and related) guard static registration / IRQ dispatch tables. | **Appendix D** §2.4 / execution row **7**; concurrent probe/remove stress test or static review checklist until HW CI exists. |
 
 **References:** POSIX.1 threads; Linux *Understanding the Linux Kernel* (scheduler/MM chapters) as conceptual guide only.
 
@@ -76,6 +151,7 @@ Implement **bottom-up**: **L2 (link layer)** → IPv4/UDP → TCP → sockets fa
 | **P3-7** | **TCP (large)** | Reliable stream for one client/server pair first. | **RFC 793** + selective **RFC 5681** congestion basics later; **interop test** against Linux `nc` or `socat`. |
 | **P3-8** | **DNS client** | Resolver for A/AAAA records (AAAA optional). | **RFC 1035** semantics subset; **timeouts** and **retry caps**. |
 | **P3-9** | **TLS (hosted)** | Prefer **userland** TLS (e.g. mbedTLS/OpenSSL) behind shell command or libc. | **No TLS in “kernel” layer** until stable memory and time APIs exist on K/B. |
+| **P3-10** | **Wi‑Fi station path** `[DEFERRED]` | Do **not** silently drop the gap: either promote to active work or keep this row as the **explicit deferral**. | **IEEE 802.11** / **802.11i** / **802.1X** / **EAP** (informative stack); **RFC 2131** after L2; **not** an A1–A2 gate. When un-deferred, expect **P4**-class firmware/driver work plus reuse of **P3** IPv4/UDP/TCP. |
 
 **Security standards:** default **no promisc**; **no raw TX** from shell without principal + audit; rate-limit outgoing ARP/ICMP in lab builds.
 
@@ -83,9 +159,11 @@ Implement **bottom-up**: **L2 (link layer)** → IPv4/UDP → TCP → sockets fa
 
 ## Phase 4 — Drivers & hardware (K/B; staged complexity)
 
+**Dependencies:** **P1-3** (lock/IRQ contract), **P1-6** (table spinlocks), and **Appendix D** execution rows **1–7** for any path that runs **real concurrent IRQ + registration** on **B**. **P5** virtio-backed VFS on the VM track expects **P4-4** block.
+
 | ID | Feature | Goal | Standards & acceptance |
 |----|---------|------|---------------------------|
-| **P4-1** | **Driver model v2** | Registration, probe/remove, power hooks, DMA mask. | **Linux driver model** as *conceptual* reference; document differences explicitly. |
+| **P4-1** | **Driver model v2** | Registration, probe/remove, power hooks, DMA mask. | **Linux driver model** as *conceptual* reference; document differences explicitly. **Phase-complete gate:** `s_model_lock` (**Appendix D** §2.4) guards static tables before declaring **P4** done for IRQ-capable builds. |
 | **P4-2** | **IRQ lifecycle** | Hardirq vs threaded bottom half (or workqueue analogue). | **No sleep in true hardirq path**; lockdep-style assertions in debug builds where feasible. |
 | **P4-3** | **PCIe config space access (lab)** | MMIO config for one QEMU NIC class. | **PCIe spec** excerpts in docs; **IOMMU later** milestone flagged. |
 | **P4-4** | **Virtio net/block** | Paravirtual devices for VM path. | **Virtio 1.x** spec; ring format tests with **golden vectors**. |
@@ -96,6 +174,8 @@ Implement **bottom-up**: **L2 (link layer)** → IPv4/UDP → TCP → sockets fa
 ---
 
 ## Phase 5 — Storage, VFS, and durability
+
+**Dependencies:** **P5-2** on a **B** or VM guest root disk assumes **P4-4** virtio-block (or another committed block transport). Hosted-only VFS bridges may ship earlier on **H**.
 
 | ID | Feature | Goal | Standards & acceptance |
 |----|---------|------|---------------------------|
@@ -144,101 +224,19 @@ Implement **bottom-up**: **L2 (link layer)** → IPv4/UDP → TCP → sockets fa
 |----|---------|------|---------------------------|
 | **P9-1** | **Fuzzing** | syscall / netdev / FS parsers under AFL++ or libFuzzer (hosted shims). | **Crash = bug**; corpus checked in CI cache optional. |
 | **P9-2** | **Coverity / static analysis** | Clean critical triage. | **Zero** new high-severity defects per release gate. |
-| **P9-3** | **SMP bring-up (B)** | IPIs, per-CPU variables, barrier rules. | **Memory model** doc for aarch64/x86 per **ARM ARM** / Intel SDM. |
+| **P9-3** | **SMP bring-up (B)** | IPIs, per-CPU variables, barrier rules. | **Memory model** doc for aarch64/x86 per **ARM ARM** / Intel SDM. Builds on **P1-3** / **P1-6** locking posture; expect follow-on driver audits, not a greenfield lock story. |
 
 ---
 
-## Platform credibility — gaps, standards, and rough implementation
+## Platform credibility — extended (sections 11 and 12)
 
-The phase tables above define **goals and acceptance**. This section lists **what is still missing or immature** if the project should read as a **legitimate OS-style platform** to outsiders, with **standards to cite** and a **rough implementation path**. **Ordering** follows **P0 → P9**; use the phase IDs when scheduling work.
+The **P0–P9** phase tables are the **single maintenance surface** for scheduled work. Older “credibility” **§1–§10** tables duplicated those phases and were removed so future contributors update **one place**. **Wi‑Fi** is explicitly **[P3-10] `[DEFERRED]`** in Phase 3.
 
-**Bare-metal tactical bugs** (EOI, IDT, PMM, PS/2, etc.) are tracked in **Appendix D** below. When work ships, record it under **`version/entries/*.ver`** per repository policy and keep phase rows honest.
+**Bare-metal tactical bugs** stay detailed in **Appendix D**. When work ships, record it in **`version/entries/*.ver`** and update the phase row + **Appendix A** as needed.
 
-### 1 — Foundations and rigor
+### Staffing and scope risk (mostly **P4–P9**)
 
-| Gap | Standards / references | Rough implementation |
-|-----|------------------------|----------------------|
-| Stable **subsystem boundaries** (driver ops, netdev, VFS, log, authz) | Project headers as contract; **POSIX.1** for hosted behavior where applicable | Freeze small C APIs in `kernel/include/` / `userland/`; document thread + lifetime rules; optional CI compile guard on forbidden includes across layers. |
-| Shared **error / result taxonomy** | **errno** conventions (POSIX); optional project `fl_result_t` pattern | One typedef + macros; migrate new call sites first; tests assert stable error codes for user-visible failures. |
-| **CI realism** for optional I/O (TAP, loopback) | **GitHub Actions** matrix docs; skip flags documented (**`SKIP_TAP`** style) | Default CI: unit tests; optional job on self-hosted or `virt` runner; skip prints reason to log. |
-
-### 2 — Core runtime: processes, memory, scheduling
-
-| Gap | Standards / references | Rough implementation |
-|-----|------------------------|----------------------|
-| Clear **task / thread** model | **POSIX threads** on hosted **H**; **Linux scheduler** docs as conceptual only | Map shell + driver callbacks to pthreads on H; on K/B introduce `struct kthread` + run queue stub before real preempt. |
-| **Address spaces** / MMU story | **ARM Architecture Reference Manual** (EL1 paging); **Intel SDM** Vol. 3A (paging) | After PMM (see **Appendix D**): page tables, `map_kernel`, user mappings optional; identity map + guard pages first. |
-| **Preemption, locks, IRQ** contract | **ARM GIC** architecture spec; **Intel 8259 PIC / APIC** overview | Lock ordering in `docs/`; spinlocks in driver model; “no sleep in hardirq” checks in debug builds. |
-
-### 3 — Identity, privilege, trust
-
-| Gap | Standards / references | Rough implementation |
-|-----|------------------------|----------------------|
-| **Principals** (`uid`/`gid` or capabilities) | **POSIX.1-2008** (uids, supplemental groups); **Linux capabilities(7)** as model | Hosted: map to real uids or synthetic table; shell builtins check principal before disk/net/raw ops. |
-| **Credential store** | **crypt(3)** / **PHC**-style KDF on H; avoid home-grown crypto | Small `passwd`-like file or host integration; document lab-only threat model. |
-| **Authorization middleware** | **Saltzer–Kaashoek** principles; **NIST** lightweight threat framing (informative) | Central `fl_authz_can_*()` from VFS and netdev glue; unit tests deny guest. |
-| **Elevation** (sudo-like) | **sudo** UX patterns (informative); audit severities may align with **RFC 5424** | Time-bounded token or `runas` builtin; TTY confirm; log to Phase 6 logging + audit. |
-
-### 4 — Networking (beyond Phase 3 checklist)
-
-| Gap | Standards / references | Rough implementation |
-|-----|------------------------|----------------------|
-| **L2 Ethernet** | **IEEE 802.3**; **RFC 894**; **RFC 826** | Same as **P3-1–P3-4**; `netdev` + TAP + ARP. |
-| **IPv4 / ICMP / UDP / TCP** | **RFC 791**, **792**, **768**, **793**; **RFC 5681** (congestion, later) | Bottom-up C stack; golden pcap or `nc` interop; bounded buffers. |
-| **DNS** | **RFC 1035**; **RFC 2181** (clarifications) | Resolver in userland or kernel-shaped module; timeouts + capped retries. |
-| **TLS** | **RFC 8446** (TLS 1.3); **RFC 5280** (PKIX) | mbedTLS/OpenSSL on **H** first; no in-kernel TLS until K/B memory + time APIs are safe. |
-| **Wi‑Fi** | **IEEE 802.11** (MAC/PHY, management); **IEEE 802.11i** (WPA2/WPA3); **IEEE 802.1X** / **EAP** (enterprise); L3 often bridged to **802.3**-style APIs | Driver + firmware (or virtio-wlan in QEMU); station state machine (scan → auth → assoc → 4-way PSK); **DHCP** (**RFC 2131**); reuse Phase 3 IPv4/TCP/UDP. |
-
-### 5 — Drivers and hardware
-
-| Gap | Standards / references | Rough implementation |
-|-----|------------------------|----------------------|
-| **Driver model v2** | **PCI Firmware** / **Linux device model** (conceptual) | Tables + refcount; QEMU device IDs first. |
-| **IRQ lifecycle** | **GIC** / **APIC** vendor specs | Top/bottom half; EOI correctness (**Appendix D**). |
-| **PCIe + MMIO** | **PCI Express Base Specification** | ECAM or legacy config; one NIC BAR; DMA + **IOMMU** later. |
-| **Virtio net/block** | **Virtio 1.1+** | Rings in guest RAM; golden vectors; **Phase 8** replay for NIC. |
-| **USB** | **USB 3.x / xHCI** subset | Defer; one controller class + MSD or HID if started. |
-
-### 6 — Storage, VFS, durability
-
-| Gap | Standards / references | Rough implementation |
-|-----|------------------------|----------------------|
-| **VFS** | **POSIX** file semantics; path resolution rules | Layer above disk/FAT glue; mount returns typed FS pointers. |
-| **Second FS** (e.g. ext4 RO) | **ext4** on-disk layout (kernel.org docs); **FUSE** on H optional | RO inode walk + block cache stub; or FUSE bridge on H. |
-| **Page / buffer cache** | **POSIX fadvise** (informative); BSD UBC-style reading | Unify block path with net buffers where safe; document OOM eviction. |
-
-### 7 — Observability and operations
-
-| Gap | Standards / references | Rough implementation |
-|-----|------------------------|----------------------|
-| **Structured logging** | **syslog(3)** names; **RFC 5424** if exporting | Same as **P6-1**; IRQ-safe variant. |
-| **Ring buffer** | (project convention) | **P6-2**; overflow tests. |
-| **Persistent log** | **RFC 5424** transport optional | **P6-3**; rotation; redact secrets. |
-| **Audit trail** | **Common Criteria** audit concepts (informative) | **P6-4**; authz + mount + netdev. |
-| **Tracepoints** | **DTrace** naming (informative) | **P6-5**; NOP when off. |
-
-### 8 — Shell UX, packaging, “distro-shaped” behavior
-
-| Gap | Standards / references | Rough implementation |
-|-----|------------------------|----------------------|
-| **Service supervision** | **systemd** concepts (informative); PID files | **P7-1**; stale PID handling. |
-| **Images / SBOM** | **SPDX** (optional) | **P7-2**; tarball/OCI-style; `version/locked` for version string. |
-| **Remote admin** | **RFC 4251** (SSH architecture, if ever building SSH); lab tunnel patterns | **P7-3**; compile-flagged; never default-on. |
-
-### 9 — Virtualization fidelity
-
-| Gap | Standards / references | Rough implementation |
-|-----|------------------------|----------------------|
-| **Device timing / NIC replay** | **Virtio**; internal **`make test_replay`** format | **P8-1**; netdev events in log. |
-| **Inter-VM / TAP** | **IEEE 802.3** on **TUN/TAP** | **P8-2**; QEMU cmdlines; same ARP/IPv4 tests as wired path. |
-
-### 10 — Hardening and scale
-
-| Gap | Standards / references | Rough implementation |
-|-----|------------------------|----------------------|
-| **Fuzzing** | **AFL++** / **libFuzzer** | **P9-1**; hosted harnesses. |
-| **Static analysis** | **MISRA C** (optional); **Coverity** / **clang-tidy** | **P9-2**; CI gate on new criticals. |
-| **SMP** | **ARM ARM**; **Intel SDM** | **P9-3**; IPIs; BKL → finer locks. |
+Later phases assume **hardware-facing skills** (PCIe ECAM, virtio rings, xHCI, exception models, fuzz harness design). **H**-track work (**P0–P3**, parts of **P7**) uses a different expertise mix—treat **§11**, **[P3-10]**, and **P4-5** USB as **multi-track** efforts, not automatic follow-ons from a working UDP stack.
 
 ### 11 — Userland: `curl`-class and `apt`-class tools
 
@@ -273,6 +271,15 @@ Mostly **above** the kernel once the stack exists.
 | **HTTP(S) boot** | **UEFI** HTTP Boot | Larger than TFTP; PKIX trust as TLS. |
 | **Secure Boot** | **UEFI Secure Boot**; **PKCS #7** signed PE | Chain verify; key enrollment; policy-heavy. |
 
+### After **P9** (placeholders — not A-series gates until promoted)
+
+| ID | Scope | Notes |
+|----|-------|-------|
+| **PX-11** | **§11** — `curl`/`apt` class userland | Multi-release program: HTTP stack, signatures, archives, dependency resolution—not implied by finishing **P3**. |
+| **PX-12** | **§12** — install / boot / attestation | UEFI, PXE, Secure Boot; depends on **P4**/**P5** maturity and a signing story. |
+
+Promote a **PX-** row into numbered phases when it becomes a **merge-sized** commitment; until then it documents **scope** without duplicating **P0–P9** tables.
+
 ---
 
 ## Appendix A — Standards map (non-exhaustive)
@@ -281,7 +288,7 @@ Mostly **above** the kernel once the stack exists.
 |--------|----------------------------------|
 | C ABI / hosted behavior | ISO C11; POSIX.1-2008 where hosted. |
 | Networking | **IEEE 802.3** (Ethernet L2/MAC & framing); **RFC 894** (IPv4 over Ethernet); **RFC 826** (ARP); **RFC 791**, **792**, **768**, **793**, **1035**; later TLS **RFC 5246** / **8446** via library. |
-| Wi‑Fi | **IEEE 802.11**, **802.11i**; **802.1X** / **EAP**; **RFC 2131** (DHCP after link). |
+| Wi‑Fi | **IEEE 802.11**, **802.11i**; **802.1X** / **EAP**; **RFC 2131** (DHCP after link). See **P3-10** `[DEFERRED]`. |
 | HTTP / packages | **RFC 9110**, **9112**; **RFC 8446**, **5280**; **RFC 4880** (OpenPGP); Debian archive conventions (informative). |
 | Boot / firmware | **UEFI**; **RFC 2131**, **2132**, **1350** (PXE path); **PKCS #7** (Secure Boot). |
 | Filesystem | POSIX file semantics; ext4 on-disk layout (kernel docs); virtio-blk 1.x. |
@@ -322,7 +329,7 @@ Rollout:
 
 ---
 
-## Appendix C — Suggested first vertical slice (90-day style, technical only)
+## Appendix C — Suggested first vertical slice (complexity-ordered, technical only)
 
 1. **P3-1 + P3-2 + P6-1 + P6-2** — `netdev` + loopback IPv4/UDP + structured logging to ring buffer.  
 2. **P3-3 + P3-4 + P3-5 + P3-6** — **802.3** TAP + ARP + IPv4 + UDP with shell builtins (`ping`, `udpsend`, `udplisten`).  
@@ -334,13 +341,7 @@ Adjust ordering if **bare metal** becomes the primary track (move **P4*** earlie
 
 ## Appendix D — Bare-metal correctness (Improve-Sys-Architecture)
 
-The following material was merged from the deleted **`docs/milestone-Improve-Sys-Architecture.md`**. **Branch / base** metadata at the top of that content is **historical**; verify against current `develop` before relying on commit hashes.
-
-
-Branch: `milestone/Improve-Sys-Architecture`
-Base:    `develop` @ 849e547
-
----
+The following material was merged from the retired **`docs/milestone-Improve-Sys-Architecture.md`**. **File paths and symptoms** below are a **checklist**—re-verify against current `develop` when picking up an item. **P0-4**/**P0-5**/**P0-6** and **P1-4**/**P1-5**/**P1-6** in the phase tables reference the same work; **Appendix D** keeps the deep implementation notes.
 
 ### Goal
 
@@ -582,4 +583,4 @@ Items are ordered so that each depends only on things before it.
 
 ---
 
-*Maintainers: when a roadmap item becomes committed work, record the **shipped** behavior under `version/entries/*.ver` per repository versioning policy; keep this document’s **phases**, **Platform credibility** gap tables, and **Appendix D** bare-metal checklist aligned with actual merges.*
+*Maintainers: when a roadmap item becomes committed work, record the **shipped** behavior under `version/entries/*.ver` per repository versioning policy; keep this document’s **phase tables**, **Appendix D** bare-metal checklist, **Appendix A** standards map, and **Platform credibility** §11–§12 / **PX-** placeholders aligned with actual merges.*
