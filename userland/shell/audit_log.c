@@ -1,5 +1,8 @@
 #include "fl/audit_log.h"
 #include "fs_jail.h"
+#ifndef DISK_HOST_USE_LIBC_PREADV
+#include "shell_history_asm.h"
+#endif
 #include <errno.h>
 #include <pthread.h>
 #include <stdio.h>
@@ -33,6 +36,19 @@ static void sanitize_cmd_fragment(const char *cmd_line, char *out, size_t out_ca
     out[j] = '\0';
 }
 
+static size_t audit_stage_line_record(char *rec, size_t rec_cap, const char *text) {
+    size_t tlen = strlen(text);
+#ifdef DISK_HOST_USE_LIBC_PREADV
+    if (tlen + 1u > rec_cap)
+        return (size_t)-1;
+    memcpy(rec, text, tlen);
+    rec[tlen] = '\n';
+    return tlen + 1u;
+#else
+    return history_asm_append_record(rec, rec_cap, 0, text, tlen);
+#endif
+}
+
 void fl_audit_shell_completed(const char *cmd_line, int host_exit_code) {
     if (!fl_audit_env_enabled() || !cmd_line)
         return;
@@ -50,11 +66,25 @@ void fl_audit_shell_completed(const char *cmd_line, int host_exit_code) {
                    host_exit_code, (int)mapped,
                    (int)FL_CONTRACT_SURFACE_FS_JAIL, safe);
 
+    char rec[1024];
+    size_t rn = audit_stage_line_record(rec, sizeof rec, line);
+    if (rn == (size_t)-1) {
+        pthread_mutex_lock(&g_audit_mutex);
+        FILE *fp = fopen(FL_AUDIT_REL_DEFAULT, "a");
+        if (fp) {
+            (void)(fprintf(fp, "%s\n", line) < 0 ? -1 : 0);
+            (void)fclose(fp);
+        }
+        pthread_mutex_unlock(&g_audit_mutex);
+        if (g_audit_sink && g_audit_sink->ops && g_audit_sink->ops->emit)
+            g_audit_sink->ops->emit(g_audit_sink, (int)FL_LOG_INFO, 9, line);
+        return;
+    }
+
     pthread_mutex_lock(&g_audit_mutex);
     FILE *fp = fopen(FL_AUDIT_REL_DEFAULT, "a");
     if (fp) {
-        fputs(line, fp);
-        fputc('\n', fp);
+        (void)(fwrite(rec, 1, rn, fp) == rn ? 0 : -1);
         (void)fclose(fp);
     }
     pthread_mutex_unlock(&g_audit_mutex);
