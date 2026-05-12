@@ -1,0 +1,17 @@
+---
+description: Run CodeRabbit and Codex CLI before commit and push
+globs:
+  - "**/*"
+alwaysApply: true
+---
+
+# Pre-merge review (CodeRabbit and Codex CLI)
+
+Before **`git commit`** and **`git push`** on a substantive feature branch:
+
+1. **CodeRabbit** — Open or update the GitHub pull request so CodeRabbit runs; read and resolve actionable review comments (configuration: **`.coderabbit.yaml`**; do not relax versioning rules there without aligning **AGENTS.md**, **CLAUDE.md**, **`.cursor/rules/versioning.mdc`**, and **`docs/versioning.md`**).
+2. **Codex CLI** — Run OpenAI **Codex** against the working tree or diff as the team configures it; resolve its recommendations.
+
+Treat **all** actionable feedback from **both** tools as blocking for the change: address findings before committing and pushing. If a tool is unavailable in an environment, run it where it is available and note the limitation in the PR until both have run.
+
+See **AGENTS.md** and **CLAUDE.md** for the same policy.

@@ -51,7 +51,20 @@ Run builds from the repository root.
 - If a required toolchain or library is missing, install the packages listed in the Cursor Cloud section, then rerun the tests instead of skipping them.
 - Document any true environment blocker in the final response, including the exact command that failed and the missing prerequisite.
 
+## Pre-merge review (CodeRabbit and Codex CLI)
+
+Before **`git commit`** and **`git push`** on a substantive feature branch:
+
+1. **CodeRabbit** — Open or update the GitHub pull request so CodeRabbit runs; read and resolve actionable review comments.
+2. **Codex CLI** — Run OpenAI **Codex** against the working tree or proposed diff as the team configures it; resolve its recommendations.
+
+Address **all** actionable feedback from **both** tools before committing and pushing. If a tool is unavailable in an environment, run it where it is available and note the gap in the PR until both have run.
+
+**`.coderabbit.yaml`** configures CodeRabbit; keep it aligned when review or versioning policy text there must change (also update **AGENTS.md**, **CLAUDE.md**, **`.cursor/rules/versioning.mdc`**, **`docs/versioning.md`**, and **`.cursor/rules/review_tools.mdc`** as needed).
+
 ## Versioning
+
+Long-form guide: **`docs/versioning.md`** (authoring **`.ver`** files, **`RELEASE_DATE`** automation after merge to **`develop`**, **A / B / C** semantics, and what GitHub Actions updates).
 
 The shipped shell version **A.B.C** is in **`userland/shell/version_def.h`**, **generated** from **`version/locked/*.ver`**: the header reflects the **highest** semver among **finalized** `.ver` files there. Author new and revised **`.ver`** files under **`version/entries/`**; when those changes land on **`develop`** (push), **Version lock on merge** in GitHub Actions runs finalize + header generation and **opens a pull request** into **`develop`** with the updated **`version/locked/`** and **`version_def.h`** (direct pushes to **`develop`** are usually blocked; use **Settings → Actions → General** workflow **read/write** plus **Allow GitHub Actions to create and approve pull requests**, or optional repo secret **`VERSION_LOCK_PAT`**).
 
@@ -65,7 +78,7 @@ Author each release as **`.ver`** files under **`version/entries/`** (see **`ver
 - **`STANDARD_VERSION`** (alias **`VERSION_STANDARD`**)
 - **`RELEASE_VERSION`** — third component **C** (aliases **`MINOR_VERSION`**, **`VERSION_PATCH`**)
 - **`DESCRIPTION`** — single line (`DESCRIPTION=...`) or multiline heredoc (`DESCRIPTION<<TAG` … `TAG`); see `version/entries/ABOUT.txt`
-- **`RELEASE_DATE`** — optional `YYYY-MM-DD`; if omitted, `scripts/gen_version_changelog.c` uses the generator’s local calendar date (`time.h`), and **Version lock on merge** runs `stamp_version_release_date.sh` after finalize to append the merge date to `.ver` files missing this key
+- **`RELEASE_DATE`** — optional `YYYY-MM-DD`; authors usually **omit** it in **`version/entries/`** and let **Version lock on merge** append the merge calendar date via `stamp_version_release_date.sh` after finalize. If still absent, `scripts/gen_version_changelog.c` may use the generator’s local calendar date (`time.h`) at generation time
 
 On a **feature branch before merge**, you may freely add, edit, or remove **`.ver`** files under **`version/entries/`** that are **not** yet reflected in **`version/locked/`**.
 
@@ -115,7 +128,7 @@ Before merging **incoming → base** (e.g. `bug/*` → `develop`, `develop` → 
 
 Example: **`bug/…` → `develop`**, both at **`2.0.0`** → bump incoming to **`2.0.1`** (patch for a bugfix).
 
-Detailed wording also appears in **CLAUDE.md**, **`.coderabbit.yaml`**, and **`.cursor/rules/versioning.mdc`** — keep them aligned when policy changes. To print a machine-readable record from the current tree: `./scripts/export_version_record.sh`, `./scripts/export_version_record.sh --json`, or **`make version-record`**.
+Detailed wording also appears in **CLAUDE.md**, **`docs/versioning.md`**, **`.coderabbit.yaml`**, **`.cursor/rules/versioning.mdc`**, and **`.cursor/rules/review_tools.mdc`** — keep them aligned when policy changes. To print a machine-readable record from the current tree: `./scripts/export_version_record.sh`, `./scripts/export_version_record.sh --json`, or **`make version-record`**.
 
 ## Implementation boundaries
 

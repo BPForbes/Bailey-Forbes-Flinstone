@@ -2,6 +2,10 @@
 
 This repository implements **Bailey-Forbes-Flinstone**: a educational OS/shell-style codebase with a host shell (`BPForbes_Flinstone_Shell`), kernel-layer modules, drivers, and optional VM builds. Build with `make` from the repo root; see **AGENTS.md** for toolchain install and targets.
 
+## Pre-merge review (CodeRabbit and Codex CLI)
+
+Before **`git commit`** and **`git push`** on substantive work: run the change through **CodeRabbit** (GitHub PR review) and **Codex CLI** (OpenAI Codex on the tree or diff as configured). Resolve **all** actionable feedback from **both** before committing and pushing. If a tool cannot run in an environment, run it where available and note the gap in the PR. **`.coderabbit.yaml`** configures CodeRabbit; keep it aligned when policy text there changes (also update **AGENTS.md**, **`docs/versioning.md`**, **`.cursor/rules/versioning.mdc`**, and **`.cursor/rules/review_tools.mdc`**).
+
 ---
 
 ## Versioning (mandatory for merge-ready PRs)
@@ -22,6 +26,8 @@ This repository implements **Bailey-Forbes-Flinstone**: a educational OS/shell-s
 - Format is **semantic versioning**: **`A.B.C`** (not date-based).
 
 ### Component meanings
+
+See **`docs/versioning.md`** for the full table mapping **`MAJOR_VERSION` / `STANDARD_VERSION` / `RELEASE_VERSION`** to **A / B / C**.
 
 - **A (major)** — Milestones, architecture changes, large incompatible or foundational overhauls.
 - **B (minor)** — New features (additive).
@@ -49,8 +55,10 @@ Export current numbers without compiling: **`./scripts/export_version_record.sh`
 
 ## Where else this is documented
 
-- **AGENTS.md** — Cursor Cloud agents + versioning summary  
+- **AGENTS.md** — Cursor Cloud agents + versioning summary + CodeRabbit / Codex pre-merge policy  
+- **`docs/versioning.md`** — `.ver` authoring, `RELEASE_DATE` automation, **A / B / C** semantics  
 - **`.coderabbit.yaml`** — CodeRabbit review hints  
-- **`.cursor/rules/versioning.mdc`** — Cursor IDE rules  
+- **`.cursor/rules/versioning.mdc`** — Cursor IDE versioning rules  
+- **`.cursor/rules/review_tools.mdc`** — Cursor IDE pre-merge review rules  
 
 Keep these documents aligned when changing policy.
