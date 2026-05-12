@@ -1,4 +1,4 @@
 MAJOR_VERSION=3
 STANDARD_VERSION=2
 RELEASE_VERSION=3
-DESCRIPTION=Add docs/ROADMAP.md: phased OS-platform roadmap (identity, networking, drivers, storage, logging, VM, hardening) with per-feature goals, acceptance criteria, and normative references (POSIX, RFCs, virtio). Phase 3 spells out L2 as IEEE 802.3 Ethernet (RFC 894/826). Link from docs/build.md.
+DESCRIPTION=docs/ROADMAP.md is the sole platform doc: phased roadmap (P0–P9), platform credibility gaps with normative references and rough implementation (H→K→B), Appendix standards map, and Appendix D (merged bare-metal Improve-Sys-Architecture checklist: GIC, IDT/vectors, PMM, PS/2, devfs, spinlocks, execution order). Phase 3: IEEE 802.3 / RFC 894/826. Link from docs/build.md.

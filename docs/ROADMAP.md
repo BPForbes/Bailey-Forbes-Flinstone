@@ -1,6 +1,6 @@
 # Flinstone OS-Platform Roadmap
 
-This document is a **long-horizon engineering roadmap**: it lists major capability areas, **feature-by-feature** goals, and **implementation standards** (norms, acceptance criteria, and ordering constraints). It does **not** commit to calendar dates; phases are **dependency-ordered**.
+This document is the **single platform roadmap** for Flinstone: phased goals (**P0–P9**), **outsider-facing gap** tables (what is still missing for a credible OS read), **normative references** (IEEE, RFC, UEFI, POSIX, Virtio, and so on), **rough implementation** sketches (typically **H → K → B**), and **Appendix D** (bare-metal correctness checklist: GIC EOI, IDT/vectors, PMM, PS/2, devfs, spinlocks, execution order). It does **not** commit to calendar dates; phases are **dependency-ordered**.
 
 **Scope tiers (pick one primary track per initiative):**
 
@@ -148,12 +148,142 @@ Implement **bottom-up**: **L2 (link layer)** → IPv4/UDP → TCP → sockets fa
 
 ---
 
+## Platform credibility — gaps, standards, and rough implementation
+
+The phase tables above define **goals and acceptance**. This section lists **what is still missing or immature** if the project should read as a **legitimate OS-style platform** to outsiders, with **standards to cite** and a **rough implementation path**. **Ordering** follows **P0 → P9**; use the phase IDs when scheduling work.
+
+**Bare-metal tactical bugs** (EOI, IDT, PMM, PS/2, etc.) are tracked in **Appendix D** below. When work ships, record it under **`version/entries/*.ver`** per repository policy and keep phase rows honest.
+
+### 1 — Foundations and rigor
+
+| Gap | Standards / references | Rough implementation |
+|-----|------------------------|----------------------|
+| Stable **subsystem boundaries** (driver ops, netdev, VFS, log, authz) | Project headers as contract; **POSIX.1** for hosted behavior where applicable | Freeze small C APIs in `kernel/include/` / `userland/`; document thread + lifetime rules; optional CI compile guard on forbidden includes across layers. |
+| Shared **error / result taxonomy** | **errno** conventions (POSIX); optional project `fl_result_t` pattern | One typedef + macros; migrate new call sites first; tests assert stable error codes for user-visible failures. |
+| **CI realism** for optional I/O (TAP, loopback) | **GitHub Actions** matrix docs; skip flags documented (**`SKIP_TAP`** style) | Default CI: unit tests; optional job on self-hosted or `virt` runner; skip prints reason to log. |
+
+### 2 — Core runtime: processes, memory, scheduling
+
+| Gap | Standards / references | Rough implementation |
+|-----|------------------------|----------------------|
+| Clear **task / thread** model | **POSIX threads** on hosted **H**; **Linux scheduler** docs as conceptual only | Map shell + driver callbacks to pthreads on H; on K/B introduce `struct kthread` + run queue stub before real preempt. |
+| **Address spaces** / MMU story | **ARM Architecture Reference Manual** (EL1 paging); **Intel SDM** Vol. 3A (paging) | After PMM (see **Appendix D**): page tables, `map_kernel`, user mappings optional; identity map + guard pages first. |
+| **Preemption, locks, IRQ** contract | **ARM GIC** architecture spec; **Intel 8259 PIC / APIC** overview | Lock ordering in `docs/`; spinlocks in driver model; “no sleep in hardirq” checks in debug builds. |
+
+### 3 — Identity, privilege, trust
+
+| Gap | Standards / references | Rough implementation |
+|-----|------------------------|----------------------|
+| **Principals** (`uid`/`gid` or capabilities) | **POSIX.1-2008** (uids, supplemental groups); **Linux capabilities(7)** as model | Hosted: map to real uids or synthetic table; shell builtins check principal before disk/net/raw ops. |
+| **Credential store** | **crypt(3)** / **PHC**-style KDF on H; avoid home-grown crypto | Small `passwd`-like file or host integration; document lab-only threat model. |
+| **Authorization middleware** | **Saltzer–Kaashoek** principles; **NIST** lightweight threat framing (informative) | Central `fl_authz_can_*()` from VFS and netdev glue; unit tests deny guest. |
+| **Elevation** (sudo-like) | **sudo** UX patterns (informative); audit severities may align with **RFC 5424** | Time-bounded token or `runas` builtin; TTY confirm; log to Phase 6 logging + audit. |
+
+### 4 — Networking (beyond Phase 3 checklist)
+
+| Gap | Standards / references | Rough implementation |
+|-----|------------------------|----------------------|
+| **L2 Ethernet** | **IEEE 802.3**; **RFC 894**; **RFC 826** | Same as **P3-1–P3-4**; `netdev` + TAP + ARP. |
+| **IPv4 / ICMP / UDP / TCP** | **RFC 791**, **792**, **768**, **793**; **RFC 5681** (congestion, later) | Bottom-up C stack; golden pcap or `nc` interop; bounded buffers. |
+| **DNS** | **RFC 1035**; **RFC 2181** (clarifications) | Resolver in userland or kernel-shaped module; timeouts + capped retries. |
+| **TLS** | **RFC 8446** (TLS 1.3); **RFC 5280** (PKIX) | mbedTLS/OpenSSL on **H** first; no in-kernel TLS until K/B memory + time APIs are safe. |
+| **Wi‑Fi** | **IEEE 802.11** (MAC/PHY, management); **IEEE 802.11i** (WPA2/WPA3); **IEEE 802.1X** / **EAP** (enterprise); L3 often bridged to **802.3**-style APIs | Driver + firmware (or virtio-wlan in QEMU); station state machine (scan → auth → assoc → 4-way PSK); **DHCP** (**RFC 2131**); reuse Phase 3 IPv4/TCP/UDP. |
+
+### 5 — Drivers and hardware
+
+| Gap | Standards / references | Rough implementation |
+|-----|------------------------|----------------------|
+| **Driver model v2** | **PCI Firmware** / **Linux device model** (conceptual) | Tables + refcount; QEMU device IDs first. |
+| **IRQ lifecycle** | **GIC** / **APIC** vendor specs | Top/bottom half; EOI correctness (**Appendix D**). |
+| **PCIe + MMIO** | **PCI Express Base Specification** | ECAM or legacy config; one NIC BAR; DMA + **IOMMU** later. |
+| **Virtio net/block** | **Virtio 1.1+** | Rings in guest RAM; golden vectors; **Phase 8** replay for NIC. |
+| **USB** | **USB 3.x / xHCI** subset | Defer; one controller class + MSD or HID if started. |
+
+### 6 — Storage, VFS, durability
+
+| Gap | Standards / references | Rough implementation |
+|-----|------------------------|----------------------|
+| **VFS** | **POSIX** file semantics; path resolution rules | Layer above disk/FAT glue; mount returns typed FS pointers. |
+| **Second FS** (e.g. ext4 RO) | **ext4** on-disk layout (kernel.org docs); **FUSE** on H optional | RO inode walk + block cache stub; or FUSE bridge on H. |
+| **Page / buffer cache** | **POSIX fadvise** (informative); BSD UBC-style reading | Unify block path with net buffers where safe; document OOM eviction. |
+
+### 7 — Observability and operations
+
+| Gap | Standards / references | Rough implementation |
+|-----|------------------------|----------------------|
+| **Structured logging** | **syslog(3)** names; **RFC 5424** if exporting | Same as **P6-1**; IRQ-safe variant. |
+| **Ring buffer** | (project convention) | **P6-2**; overflow tests. |
+| **Persistent log** | **RFC 5424** transport optional | **P6-3**; rotation; redact secrets. |
+| **Audit trail** | **Common Criteria** audit concepts (informative) | **P6-4**; authz + mount + netdev. |
+| **Tracepoints** | **DTrace** naming (informative) | **P6-5**; NOP when off. |
+
+### 8 — Shell UX, packaging, “distro-shaped” behavior
+
+| Gap | Standards / references | Rough implementation |
+|-----|------------------------|----------------------|
+| **Service supervision** | **systemd** concepts (informative); PID files | **P7-1**; stale PID handling. |
+| **Images / SBOM** | **SPDX** (optional) | **P7-2**; tarball/OCI-style; `version/locked` for version string. |
+| **Remote admin** | **RFC 4251** (SSH architecture, if ever building SSH); lab tunnel patterns | **P7-3**; compile-flagged; never default-on. |
+
+### 9 — Virtualization fidelity
+
+| Gap | Standards / references | Rough implementation |
+|-----|------------------------|----------------------|
+| **Device timing / NIC replay** | **Virtio**; internal **`make test_replay`** format | **P8-1**; netdev events in log. |
+| **Inter-VM / TAP** | **IEEE 802.3** on **TUN/TAP** | **P8-2**; QEMU cmdlines; same ARP/IPv4 tests as wired path. |
+
+### 10 — Hardening and scale
+
+| Gap | Standards / references | Rough implementation |
+|-----|------------------------|----------------------|
+| **Fuzzing** | **AFL++** / **libFuzzer** | **P9-1**; hosted harnesses. |
+| **Static analysis** | **MISRA C** (optional); **Coverity** / **clang-tidy** | **P9-2**; CI gate on new criticals. |
+| **SMP** | **ARM ARM**; **Intel SDM** | **P9-3**; IPIs; BKL → finer locks. |
+
+### 11 — Userland: `curl`-class and `apt`-class tools
+
+Mostly **above** the kernel once the stack exists.
+
+#### 11.1 HTTP client (`curl`-like)
+
+| Need | Standards / references | Rough implementation |
+|------|------------------------|----------------------|
+| Name resolution | **RFC 1035**; **RFC 8484** (DoH optional, later) | Blocking resolver → async later. |
+| Reliable stream | **RFC 793**; **RFC 9293** (TCP maintenance) | Connect/send/recv + timeouts. |
+| TLS | **RFC 8446**; **RFC 5280** | mbedTLS/OpenSSL on H. |
+| HTTP | **RFC 9110**; **RFC 9112** | Status, headers, chunked body, redirects; **HTTP/2** (**RFC 9113**, **RFC 7541**) much later. |
+
+#### 11.2 Package manager (`apt`-like)
+
+| Need | Standards / references | Rough implementation |
+|------|------------------------|----------------------|
+| Transport | Same as §11.1 | HTTPS `Release` / `Packages`. |
+| Signatures | **OpenPGP** **RFC 4880**; Debian **InRelease** / **Release.gpg** (de facto) | Verify before trusting index. |
+| Archives | **ar**; **tar** (**POSIX ustar**); **gzip** / **xz** | `.deb`-style unpack pipeline. |
+| Dependencies | **Debian Policy** (informative) | SAT or greedy MVP; `dpkg`-like state machine later. |
+
+### 12 — Boot and install (protocols and formats)
+
+| Track | Standards / references | Rough implementation |
+|-------|------------------------|----------------------|
+| **UEFI boot** | **UEFI Specification**; **ACPI** (informative) | `.efi` PE/COFF; Boot Services; handoff to kernel/VM. |
+| **Partitioning** | **UEFI** GPT; classic **MBR** (informative) | Parse GPT; find **ESP** (FAT). |
+| **ESP filesystem** | **FAT32** (Microsoft spec / UEFI profile) | RO FAT path or reuse project FAT on ESP. |
+| **PXE / netboot** | **RFC 2131**, **RFC 2132**, **RFC 1350** (TFTP) | DHCP → TFTP loader/kernel. |
+| **HTTP(S) boot** | **UEFI** HTTP Boot | Larger than TFTP; PKIX trust as TLS. |
+| **Secure Boot** | **UEFI Secure Boot**; **PKCS #7** signed PE | Chain verify; key enrollment; policy-heavy. |
+
+---
+
 ## Appendix A — Standards map (non-exhaustive)
 
 | Domain | Normative / de-facto references |
 |--------|----------------------------------|
 | C ABI / hosted behavior | ISO C11; POSIX.1-2008 where hosted. |
-| Networking | **IEEE 802.3** (Ethernet L2/MAC & framing); **RFC 894** (IPv4 over Ethernet); **RFC 826** (ARP); **RFC 791**, **792**, **768**, **793**, **1035**; later TLS 1.2+ **RFC 5246** / **8446** via library. |
+| Networking | **IEEE 802.3** (Ethernet L2/MAC & framing); **RFC 894** (IPv4 over Ethernet); **RFC 826** (ARP); **RFC 791**, **792**, **768**, **793**, **1035**; later TLS **RFC 5246** / **8446** via library. |
+| Wi‑Fi | **IEEE 802.11**, **802.11i**; **802.1X** / **EAP**; **RFC 2131** (DHCP after link). |
+| HTTP / packages | **RFC 9110**, **9112**; **RFC 8446**, **5280**; **RFC 4880** (OpenPGP); Debian archive conventions (informative). |
+| Boot / firmware | **UEFI**; **RFC 2131**, **2132**, **1350** (PXE path); **PKCS #7** (Secure Boot). |
 | Filesystem | POSIX file semantics; ext4 on-disk layout (kernel docs); virtio-blk 1.x. |
 | Logging | RFC 5424 (transport); syslog severity names. |
 | Virtio | VIRTIO 1.1+ specifications. |
@@ -202,4 +332,254 @@ Adjust ordering if **bare metal** becomes the primary track (move **P4*** earlie
 
 ---
 
-*Maintainers: when a roadmap item becomes committed work, record the **shipped** behavior under `version/entries/*.ver` per repository versioning policy; keep this document’s phases aligned with actual merges.*
+## Appendix D — Bare-metal correctness (Improve-Sys-Architecture)
+
+The following material was merged from the deleted **`docs/milestone-Improve-Sys-Architecture.md`**. **Branch / base** metadata at the top of that content is **historical**; verify against current `develop` before relying on commit hashes.
+
+
+Branch: `milestone/Improve-Sys-Architecture`
+Base:    `develop` @ 849e547
+
+---
+
+### Goal
+
+Move the kernel from a functional simulator to a system that would survive
+contact with real hardware.  Three layers of work:
+
+1. **Bug fixes** — things that are outright wrong and would crash or
+   misbehave on real hardware today.
+2. **Realism gaps** — subsystems that exist but are stubbed out in ways that
+   prevent real operation.
+3. **Architecture improvements** — structural issues that make the system
+   fragile, non-reentrant, or unable to grow.
+
+---
+
+### Section 1 — Critical Bug Fixes
+
+#### 1.1  ARM GIC EOI ignores the IRQ number
+**File:** `kernel/arch/aarch64/hal/arm_gic.c:32`
+
+```c
+/* BUG: hardcoded 1023 — should be the actual irq parameter */
+fl_mmio_write32((void *)((char *)c + GICC_EOIR), 1023);
+```
+
+Fix: pass `irq` to the EOI register.  Without this every interrupt
+acknowledgment goes to the wrong vector and the GIC will never de-assert any
+real interrupt line.
+
+---
+
+#### 1.2  x86_64 timer tick counter never increments
+**File:** `kernel/drivers/timer_driver.c`
+
+`hw_tick_count()` returns `impl->ticks` which nothing ever writes.  The PIT
+is programmed at init time (good) but there is no IRQ0 handler to increment
+the counter.  Any code that calls `tick_count()` twice and expects the values
+to differ will spin forever.
+
+Fix: add a minimal IRQ0 C handler (`timer_irq0_handler`) that increments
+`impl->ticks`, register it through the IRQ subsystem, and set up the IDT
+entry for vector 0x20 on x86_64.  The ISR must send EOI to the PIC before
+returning.
+
+---
+
+#### 1.3  PS/2 keyboard treats raw scan codes as ASCII
+**File:** `kernel/drivers/keyboard_driver.c:59`
+
+```c
+*out = (sc < 128) ? (char)sc : '\0';
+```
+
+Port 0x60 delivers PS/2 Set-1 make/break scancode values, not ASCII.  For
+example, the `a` make code is `0x1E`, while ASCII `a` is `0x61`, so direct
+casting with `(sc < 128) ? (char)sc : '\0'` produced largely incorrect
+characters for most keys, including modifiers, function keys, arrows, and
+break codes.
+
+Fix: add a US-QWERTY Set-1 scancode-to-keymap lookup (unshifted + shifted),
+track make/break and modifier state (Shift, Caps Lock), and only emit a
+character on printable make codes.  Ignore break codes (bit 7 set) and
+non-printable make codes instead of direct-casting raw scancodes.
+
+---
+
+### Section 2 — Realism Gaps
+
+#### 2.1  Memory domains provide no isolation
+**File:** `kernel/core/mm/mem_domain.c`
+
+All eight domains call straight through to `malloc`/`free` — the domain
+parameter is discarded.  The API exists but protects nothing.
+
+Fix: back each domain with a fixed-size arena (static `uint8_t` arrays in a
+BSS section, sizes tuned per domain).  The arena uses a bump pointer for
+allocation and a free-list for reclaim.  This makes per-domain exhaustion
+visible and prevents one subsystem from silently consuming another's memory.
+Implementation must remain libc-free in `DRIVERS_BAREMETAL` builds.
+
+Proposed domain sizes:
+| Domain        | Arena size |
+|---------------|-----------|
+| MEM_DOMAIN_FS | 128 KB    |
+| MEM_DOMAIN_MM | 64 KB     |
+| MEM_DOMAIN_DRV| 32 KB     |
+| MEM_DOMAIN_NET| 32 KB     |
+| others        | 16 KB each|
+
+---
+
+#### 2.2  VGA hardware cursor not positioned
+**File:** `kernel/drivers/display_driver.c`
+
+Text is written to the VGA framebuffer correctly but the blinking hardware
+cursor (driven by the CRT controller at ports 0x3D4/0x3D5) is never updated.
+On real hardware the cursor stays at row 0, col 0 while text appears at
+whatever position the software writes to.
+
+Fix: after every `putchar` call, write the new cursor position to CRT
+registers 0x0E (high byte) and 0x0F (low byte) via `fl_ioport_out8`.  Must
+be conditional on `DRIVERS_BAREMETAL` and `__x86_64__`/`__i386__`.
+
+---
+
+#### 2.3  devfs only supports sector-aligned reads/writes
+**File:** `kernel/drivers/driver_model.c:232–251`
+**Header:** `kernel/include/fl/driver/devfs.h`
+
+The devfs read/write interface takes a `unit` (sector index) and transfers
+exactly one sector.  Block devices are correctly unit-based, but character
+devices (UART, keyboard) need arbitrary-length byte transfers.
+
+Fix: extend `fl_devfs_ops_t` with a second read/write pair that takes a byte
+`offset` and `length`.  Block devices implement the sector pair; character
+devices implement the byte pair.  Neither pair is required — a device that
+only fills in one is still valid.
+
+---
+
+#### 2.4  Driver model is non-reentrant
+**File:** `kernel/drivers/driver_model.c` (throughout)
+
+All device registration, probe, and IRQ dispatch operate on global static
+arrays with no locking.  On a multi-core or interrupt-driven system any
+concurrent access produces races.
+
+Fix: add file-static spinlocks (`s_model_lock` in driver_model.c and
+`s_mem_domain_lock` in mem_domain.c) that guard the static arrays.  IRQ
+dispatch acquires then releases.  Registration saves/restores interrupt
+state around the critical section.  The spinlock assembly primitives
+(spinlock_acquire/spinlock_release) are provided by architecture-specific
+boot code under `kernel/arch/{x86_64,aarch64}/boot/`: on x86_64
+`kernel/arch/x86_64/boot/spinlock.s` uses `lock cmpxchgl` with a `pause`
+loop (via `rep nop`), and on aarch64 `kernel/arch/aarch64/boot/spinlock.s`
+uses `ldaxr`/`stxr` with `WFE`/`SEV` for efficient contention handling.
+
+---
+
+#### 2.5  Static device/driver/IRQ array limits
+**File:** `kernel/drivers/driver_model.c:7–12`
+
+```c
+#define FL_MAX_DEVICES  16
+#define FL_MAX_DRIVERS  16
+#define FL_MAX_IRQS     32
+```
+
+16 devices is tight once keyboard + display + block + timer + PIC + PCI bus
+are registered.  The limit is not enforced with a visible error — the code
+silently does nothing when the table is full.
+
+Fix: raise limits to 32/32/64 and add a `kpanic`-style assertion when
+registration exceeds the limit so overflows are immediately visible.
+
+---
+
+### Section 3 — Architecture Improvements
+
+#### 3.1  No IDT / exception vector table
+**Both architectures**
+
+There is no interrupt descriptor table on x86_64 and no exception vector
+table on AArch64.  Without these, hardware exceptions (page fault, divide by
+zero, undefined instruction) and IRQs deliver to unknown addresses and the
+CPU resets or triple-faults.
+
+Fix (x86_64): add `kernel/arch/x86_64/boot/idt.s` — 256-entry IDT in `.data`,
+a generic stub that pushes a vector number and calls a C dispatcher, and a
+`idt_install` function that loads the IDT with `lidt`.  Wire the PIC IRQ
+lines (vectors 0x20–0x2F) to the dispatcher.  Call `idt_install()` from the
+driver init path.
+
+Fix (AArch64): add `kernel/arch/aarch64/boot/vectors.s` — the 2 KB-aligned
+exception vector table required by AArch64 (four levels × four kinds = 16
+entries, each 32 instructions).  Stub handlers branch to a C dispatcher.
+Install with `msr vbar_el1, x0`.
+
+---
+
+#### 3.2  No GDT / privilege separation on x86_64
+**File:** `kernel/arch/x86_64/` (missing)
+
+Without a GDT, the CPU runs with whatever segment descriptors the bootloader
+left.  Port I/O and MMIO work only because most bootloaders leave flat
+segments, but this is not guaranteed.
+
+Fix: add `kernel/arch/x86_64/boot/gdt.s` with a minimal flat GDT (null,
+kernel code CS=0x08, kernel data DS=0x10) and a `gdt_install` function using
+`lgdt` + far return to reload CS.  Call before `idt_install`.
+
+---
+
+#### 3.3  kmalloc has no physical page frame awareness
+**File:** `kernel/core/mm/kmalloc.c`
+
+`alloc_page()` uses `aligned_alloc(4096, 4096)` which gives virtual memory
+from the libc heap, not a tracked physical frame.  A real kernel needs to
+know which physical pages are in use.
+
+Fix: add a minimal physical frame allocator (`kernel/core/mm/pmm.c`):
+a static bitfield over the region defined by `PMM_PHYS_MEM` (4 MB for now,
+matching the ramdisk size), with physical addressing starting at
+`PMM_PHYS_BASE` (1 MB), tracking `PMM_NUM_FRAMES` frames of
+`PMM_FRAME_SIZE` bytes each.  The API provides `pmm_alloc_frame()` /
+`pmm_free_frame()` returning physical addresses.  `alloc_page()` routes
+through `pmm_alloc_frame()` in `DRIVERS_BAREMETAL` builds; host builds
+keep `aligned_alloc`.
+
+---
+
+### Execution Order
+
+Items are ordered so that each depends only on things before it.
+
+| # | Item | File(s) touched | Effort |
+|---|------|-----------------|--------|
+| 1 | Fix ARM GIC EOI | arm_gic.c | Trivial |
+| 2 | Fix VGA cursor | display_driver.c | Small |
+| 3 | Fix device/IRQ array limits + panic on overflow | driver_model.c | Small |
+| 4 | PS/2 scancode table + modifier tracking | keyboard_driver.c | Medium |
+| 5 | devfs byte I/O interface | driver_model.c, devfs.h | Medium |
+| 6 | Memory domain arenas (libc-free) | mem_domain.c | Medium |
+| 7 | Spinlock primitive (ASM) + driver model locking | spinlock.s, driver_model.c | Medium |
+| 8 | x86_64 GDT | gdt.s | Medium |
+| 9 | x86_64 IDT + IRQ0 timer handler | idt.s, timer_driver.c | Large |
+| 10 | AArch64 exception vector table | vectors.s | Large |
+| 11 | Physical frame allocator (PMM) | pmm.c | Large |
+
+---
+
+### Out of Scope for This Milestone
+
+- DMA / AHCI / NVMe block drivers
+- Virtual memory / paging (depends on PMM being solid first)
+- Multi-core SMP
+- Network stack
+- UEFI framebuffer (GOP) support
+
+---
+
+*Maintainers: when a roadmap item becomes committed work, record the **shipped** behavior under `version/entries/*.ver` per repository versioning policy; keep this document’s **phases**, **Platform credibility** gap tables, and **Appendix D** bare-metal checklist aligned with actual merges.*
