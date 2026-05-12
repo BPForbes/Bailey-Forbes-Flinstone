@@ -1,5 +1,5 @@
 ---
-description: Run CodeRabbit and Codex CLI before commit and push
+description: CodeRabbit + Codex CLI install, triage, and no-push gate
 globs:
   - "**/*"
 alwaysApply: true
@@ -7,11 +7,29 @@ alwaysApply: true
 
 # Pre-merge review (CodeRabbit and Codex CLI)
 
-Before **`git commit`** and **`git push`** on a substantive feature branch:
+## No push until both tools are satisfied
 
-1. **CodeRabbit** — Open or update the GitHub pull request so CodeRabbit runs; read and resolve actionable review comments (configuration: **`.coderabbit.yaml`**; do not relax versioning rules there without aligning **AGENTS.md**, **CLAUDE.md**, **`.cursor/rules/versioning.mdc`**, and **`docs/versioning.md`**).
-2. **Codex CLI** — Run OpenAI **Codex** against the working tree or diff as the team configures it; resolve its recommendations.
+**Do not `git push`** until **CodeRabbit** and **Codex CLI** are satisfied for the current diff. Local **`git commit`** during iteration is allowed. “Satisfied” = triage done, all **must-fix** items the author accepts are resolved, and optional or rejected items are explained on the PR where useful.
 
-Treat **all** actionable feedback from **both** tools as blocking for the change: address findings before committing and pushing. If a tool is unavailable in an environment, run it where it is available and note the limitation in the PR until both have run.
+## Install when binaries are missing
 
-See **AGENTS.md** and **CLAUDE.md** for the same policy.
+If **`coderabbit`** or **`codex`** is not on `PATH`, **try installing** (use what the environment supports):
+
+- **CodeRabbit CLI:** `curl -fsSL https://cli.coderabbit.ai/install.sh | sh` or `brew install coderabbit`; then `coderabbit auth login`. Docs: https://docs.coderabbit.ai/cli
+- **Codex CLI:** `npm install -g @openai/codex` or `brew install --cask codex`; complete auth per `codex` prompts.
+
+If install fails after a reasonable attempt, document commands + errors on the PR and **do not push** until both tools can run elsewhere.
+
+## Triage feedback (not every comment needs a code change)
+
+- **Implement** when it fixes correctness, security, API/spec mismatch, bugs, missing tests, or clear project-convention violations.
+- **Decline or defer** low-value style-only or redundant-comment suggestions; add a short PR reply with rationale.
+
+## Workflow
+
+1. **CodeRabbit** — Ensure the PR gets CodeRabbit review; use the CLI per docs if applicable.
+2. **Codex** — Run `codex` on the tree or diff per team practice.
+
+Keep **`.coderabbit.yaml`** aligned when changing review behavior there (also update **AGENTS.md**, **CLAUDE.md**, **`docs/versioning.md`**, **`.cursor/rules/versioning.mdc`**, and this file).
+
+See **AGENTS.md** for the canonical wording.

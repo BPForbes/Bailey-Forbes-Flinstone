@@ -53,12 +53,30 @@ Run builds from the repository root.
 
 ## Pre-merge review (CodeRabbit and Codex CLI)
 
-Before **`git commit`** and **`git push`** on a substantive feature branch:
+On substantive feature work, **do not `git push`** until **CodeRabbit** and **Codex CLI** are both **satisfied** for the current diff (local **`git commit`** during iteration is fine). “Satisfied” means: triage is complete, every item the author agrees is a **must-fix** is addressed, and remaining optional or rejected feedback is documented on the PR with rationale where needed.
 
-1. **CodeRabbit** — Open or update the GitHub pull request so CodeRabbit runs; read and resolve actionable review comments.
-2. **Codex CLI** — Run OpenAI **Codex** against the working tree or proposed diff as the team configures it; resolve its recommendations.
+### Install the CLIs when missing
 
-Address **all** actionable feedback from **both** tools before committing and pushing. If a tool is unavailable in an environment, run it where it is available and note the gap in the PR until both have run.
+If **`coderabbit`** or **`codex`** is not on `PATH`, **try to install** them (use what the environment allows):
+
+- **CodeRabbit CLI:** `curl -fsSL https://cli.coderabbit.ai/install.sh | sh` (Linux/macOS) or **`brew install coderabbit`**; then **`coderabbit auth login`**. See **https://docs.coderabbit.ai/cli** .
+- **Codex CLI:** **`npm install -g @openai/codex`** or **`brew install --cask codex`**; complete sign-in per **`codex`** first-run prompts. See OpenAI’s Codex quickstart / package **`@openai/codex`**.
+
+If installation still fails (no network, policy, missing `curl`/`brew`/`npm`), record the exact commands and errors in the PR and **do not push** until a human or another environment can run both tools.
+
+### How to use them
+
+1. **CodeRabbit** — Open or update the GitHub pull request so CodeRabbit runs (CLI can augment or mirror PR review per **https://docs.coderabbit.ai/cli**).
+2. **Codex CLI** — Run **`codex`** against the working tree or diff as the team configures it (e.g. review or apply pass).
+
+### Triage: not every comment needs a code change
+
+- **Fix** findings that address correctness, security, spec/API mismatches, real bugs, missing tests, or clear violations of project conventions.
+- **Skip or defer** pure style nits, redundant comments, or subjective preferences that do not improve the code meaningfully; reply on the PR with a one-line rationale (and open a follow-up issue only if tracking is useful).
+
+### Push gate
+
+**`git push`** only after **CodeRabbit** review is in a good state (no unresolved blocking threads you accept as required) **and** the latest **`codex`** pass has **no accepted must-fix items** left.
 
 **`.coderabbit.yaml`** configures CodeRabbit; keep it aligned when review or versioning policy text there must change (also update **AGENTS.md**, **CLAUDE.md**, **`.cursor/rules/versioning.mdc`**, **`docs/versioning.md`**, and **`.cursor/rules/review_tools.mdc`** as needed).
 

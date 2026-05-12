@@ -4,7 +4,7 @@ This repository implements **Bailey-Forbes-Flinstone**: a educational OS/shell-s
 
 ## Pre-merge review (CodeRabbit and Codex CLI)
 
-Before **`git commit`** and **`git push`** on substantive work: run the change through **CodeRabbit** (GitHub PR review) and **Codex CLI** (OpenAI Codex on the tree or diff as configured). Resolve **all** actionable feedback from **both** before committing and pushing. If a tool cannot run in an environment, run it where available and note the gap in the PR. **`.coderabbit.yaml`** configures CodeRabbit; keep it aligned when policy text there changes (also update **AGENTS.md**, **`docs/versioning.md`**, **`.cursor/rules/versioning.mdc`**, and **`.cursor/rules/review_tools.mdc`**).
+**Do not `git push`** until **CodeRabbit** and **Codex CLI** are **satisfied** for the current change (local commits during iteration are fine). Full policy—including **install attempts** when `coderabbit` / `codex` are missing (`curl`/`brew`/`npm`), **triage** (fix real issues; document intentional won’t-fix for low-value nits), and the **push gate**—is in **AGENTS.md** and **`.cursor/rules/review_tools.mdc`**. **`.coderabbit.yaml`** configures CodeRabbit; keep it aligned when policy text there changes (also update **AGENTS.md**, **`docs/versioning.md`**, **`.cursor/rules/versioning.mdc`**, and **`.cursor/rules/review_tools.mdc`**).
 
 ---
 
