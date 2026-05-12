@@ -29,17 +29,22 @@ static fl_authz_decision_t demo_authz_always_allow(unsigned op, void *ctx) {
     return FL_AUTHZ_ALLOW;
 }
 
-static int print_summary(void) {
-    static const char *surface_names[] = {
-        "DRIVER_OPS", "NETDEV", "LOG_SINK", "AUTHZ", "FS_JAIL",
-    };
+static const char *const CONTRACT_SURFACE_NAMES[] = {
+    "DRIVER_OPS", "NETDEV", "LOG_SINK", "AUTHZ", "FS_JAIL",
+};
 
+_Static_assert(sizeof(CONTRACT_SURFACE_NAMES) / sizeof(CONTRACT_SURFACE_NAMES[0]) ==
+                   (size_t)FL_CONTRACT_SURFACE_COUNT,
+               "CONTRACT_SURFACE_NAMES must match fl_contract_surface_t");
+
+static int print_summary(void) {
     printf("contracts: bundle rev %d\n", FL_CONTRACT_BUNDLE_REV);
     printf("  fl_result_t: OK=%d ERR=%d INVAL=%d NOSYS=%d\n",
            (int)FL_RESULT_OK, (int)FL_RESULT_ERR, (int)FL_RESULT_INVAL, (int)FL_RESULT_NOSYS);
-    printf("  surfaces (%zu):\n", sizeof(surface_names) / sizeof(surface_names[0]));
-    for (unsigned i = 0; i < sizeof(surface_names) / sizeof(surface_names[0]); i++)
-        printf("    %u %s\n", i, surface_names[i]);
+    printf("  surfaces (%zu):\n",
+           sizeof(CONTRACT_SURFACE_NAMES) / sizeof(CONTRACT_SURFACE_NAMES[0]));
+    for (unsigned i = 0; i < (unsigned)FL_CONTRACT_SURFACE_COUNT; i++)
+        printf("    %u %s\n", i, CONTRACT_SURFACE_NAMES[i]);
     printf("  audit: separate from history; env %s file %s (see `audit` command)\n",
            FL_AUDIT_ENV, FL_AUDIT_REL_DEFAULT);
     printf("  jail: fl/jail_contract.h + fs_jail_* when the VM host sandbox is active\n");

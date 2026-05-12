@@ -150,14 +150,16 @@ static int test_history_unpack_plain_passthrough(void) {
 }
 
 static int test_history_unpack_malformed_no_sep2(void) {
-    /* Starts with "FL1\x1e" but has no second RS → falls back to plain copy */
+    /* Starts with "FL1\x1e" but has no second RS → error, not legacy */
     char input[32];
     char out[64];
+    memset(out, 'X', sizeof out);
+    out[sizeof out - 1u] = '\0';
     int n = snprintf(input, sizeof input, "FL1\x1eJSON_NO_SEP2");
     ASSERT(n > 0);
     ASSERT(fl_history_record_unpack_cmd(input, out, sizeof out,
-                                        NULL, NULL, NULL) == 0);
-    ASSERT(strcmp(out, input) == 0);
+                                        NULL, NULL, NULL) == -1);
+    ASSERT(out[0] == '\0');
     return 0;
 }
 
@@ -245,6 +247,7 @@ static int test_contract_constants(void) {
     ASSERT((int)FL_CONTRACT_SURFACE_LOG_SINK == 2);
     ASSERT((int)FL_CONTRACT_SURFACE_AUTHZ == 3);
     ASSERT((int)FL_CONTRACT_SURFACE_FS_JAIL == 4);
+    ASSERT((int)FL_CONTRACT_SURFACE_COUNT == 5);
 
     /* Authz decisions */
     ASSERT((int)FL_AUTHZ_DENY == 0);

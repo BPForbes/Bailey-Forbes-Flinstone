@@ -5,6 +5,11 @@
 #include <stdio.h>
 #include <string.h>
 
+static void clear_cmd_out(char *cmd_out, size_t cmd_out_cap) {
+    if (cmd_out && cmd_out_cap > 0u)
+        cmd_out[0] = '\0';
+}
+
 size_t fl_history_record_pack(char *out, size_t out_cap, uint8_t bundle_rev,
                               fl_contract_surface_t surface, fl_result_t last_rc,
                               const char *cmd) {
@@ -74,13 +79,8 @@ int fl_history_record_unpack_cmd(const char *stored_line, char *cmd_out,
     const char *json_start = stored_line + 4u;
     const char *sep2 = strchr(json_start, FL_HISTORY_RECORD_SEP);
     if (!sep2) {
-        size_t cap = cmd_out_cap - 1u;
-        size_t n = strlen(stored_line);
-        if (n > cap)
-            n = cap;
-        memcpy(cmd_out, stored_line, n);
-        cmd_out[n] = '\0';
-        return 0;
+        clear_cmd_out(cmd_out, cmd_out_cap);
+        return -1;
     }
 
     char jsonbuf[128];
@@ -94,9 +94,11 @@ int fl_history_record_unpack_cmd(const char *stored_line, char *cmd_out,
     int rc_i = 0;
     if (sscanf(jsonbuf, "{\"br\":%u,\"sf\":%u,\"rc\":%d}", &br_u, &sf_u,
                &rc_i) != 3) {
+        clear_cmd_out(cmd_out, cmd_out_cap);
         return -1;
     }
-    if (br_u > 255 || sf_u > 4) {
+    if (br_u > 255u || sf_u >= (unsigned)FL_CONTRACT_SURFACE_COUNT) {
+        clear_cmd_out(cmd_out, cmd_out_cap);
         return -1;
     }
 

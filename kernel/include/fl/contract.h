@@ -19,7 +19,9 @@ typedef enum {
     FL_CONTRACT_SURFACE_NETDEV,
     FL_CONTRACT_SURFACE_LOG_SINK,
     FL_CONTRACT_SURFACE_AUTHZ,
-    FL_CONTRACT_SURFACE_FS_JAIL
+    FL_CONTRACT_SURFACE_FS_JAIL,
+    /** One past the last real surface; use for bounds checks / table sizes. */
+    FL_CONTRACT_SURFACE_COUNT
 } fl_contract_surface_t;
 
 #endif /* FL_CONTRACT_H */

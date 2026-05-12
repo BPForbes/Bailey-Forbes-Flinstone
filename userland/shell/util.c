@@ -189,9 +189,12 @@ char *read_history_line(int index) {
         count++;
         if (count == index) {
             line[strcspn(line, "\n")] = '\0';
-            (void)fl_history_record_unpack_cmd(line, decoded, sizeof decoded,
-                                               NULL, NULL, NULL);
-            selected = strdup(decoded);
+            if (fl_history_record_unpack_cmd(line, decoded, sizeof decoded,
+                                             NULL, NULL, NULL) < 0) {
+                selected = strdup("[unpack error]");
+            } else {
+                selected = strdup(decoded);
+            }
             break;
         }
     }
@@ -224,8 +227,10 @@ char **load_history(int *count) {
     while (fgets(line, sizeof(line), fp)) {
         line[strcspn(line, "\n")] = '\0';
         char decoded[4096];
-        (void)fl_history_record_unpack_cmd(line, decoded, sizeof decoded, NULL,
-                                            NULL, NULL);
+        const char *to_store = decoded;
+        if (fl_history_record_unpack_cmd(line, decoded, sizeof decoded, NULL,
+                                          NULL, NULL) < 0)
+            to_store = "[unpack error]";
         if (cnt >= capacity) {
             if (capacity > INT_MAX / 2) {
                 fclose(fp);
@@ -246,7 +251,7 @@ char **load_history(int *count) {
             capacity = new_capacity;
             hist = tmpa;
         }
-        hist[cnt++] = strdup(decoded);
+        hist[cnt++] = strdup(to_store);
     }
     fclose(fp);
     if (tmp[0])

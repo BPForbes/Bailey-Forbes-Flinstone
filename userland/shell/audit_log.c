@@ -12,7 +12,11 @@
 static pthread_mutex_t g_audit_mutex = PTHREAD_MUTEX_INITIALIZER;
 static fl_log_sink_t *g_audit_sink;
 
-void fl_audit_set_sink(fl_log_sink_t *sink) { g_audit_sink = sink; }
+void fl_audit_set_sink(fl_log_sink_t *sink) {
+    pthread_mutex_lock(&g_audit_mutex);
+    g_audit_sink = sink;
+    pthread_mutex_unlock(&g_audit_mutex);
+}
 
 static int fl_audit_env_enabled(void) {
     const char *ev = getenv(FL_AUDIT_ENV);
@@ -91,9 +95,14 @@ void fl_audit_shell_completed(const char *cmd_line, int host_exit_code) {
     }
     pthread_mutex_unlock(&g_audit_mutex);
 
-out_emit:
-    if (g_audit_sink && g_audit_sink->ops && g_audit_sink->ops->emit)
-        g_audit_sink->ops->emit(g_audit_sink, (int)FL_LOG_INFO, 9, line);
+out_emit: {
+    fl_log_sink_t *sink = NULL;
+    pthread_mutex_lock(&g_audit_mutex);
+    sink = g_audit_sink;
+    pthread_mutex_unlock(&g_audit_mutex);
+    if (sink && sink->ops && sink->ops->emit)
+        sink->ops->emit(sink, (int)FL_LOG_INFO, 9, line);
+}
 }
 
 int fl_audit_show_last_lines(int n) {

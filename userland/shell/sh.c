@@ -103,9 +103,20 @@ static int eq_ci(const char *a, const char *b) {
 }
 
 /* Helper: count audit command tokens */
+static int audit_show_has_count_token(const char *tok) {
+    if (!tok || !tok[0])
+        return 0;
+    if (isdigit((unsigned char)tok[0]))
+        return 1;
+    if ((tok[0] == '-' || tok[0] == '+') && tok[1] != '\0' &&
+        isdigit((unsigned char)tok[1]))
+        return 1;
+    return 0;
+}
+
 static int audit_tokens_count(int argc, char **argv, int i) {
     if (i + 1 < argc && !strcmp(argv[i + 1], "show")) {
-        if (i + 2 < argc && argv[i + 2][0] != '-')
+        if (i + 2 < argc && audit_show_has_count_token(argv[i + 2]))
             return 3;
         else
             return 2;
