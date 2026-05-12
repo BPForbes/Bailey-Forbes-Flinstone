@@ -16,6 +16,10 @@ int fl_shell_cmd_dispatch(fl_shell_cmd_no_t no, int argc, char **argv) {
         return cmd_setdisk_run(argc, argv);
     case FL_SCMD_VERSION:
         return cmd_version_run(argc, argv);
+    case FL_SCMD_CONTRACTS:
+        return cmd_contracts_run(argc, argv);
+    case FL_SCMD_AUDIT:
+        return cmd_audit_run(argc, argv);
     case FL_SCMD_LISTCLUSTERS:
         return cmd_listclusters_run(argc, argv);
     case FL_SCMD_LISTDIRS:

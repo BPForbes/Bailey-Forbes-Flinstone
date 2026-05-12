@@ -272,6 +272,7 @@ static int test_history_record_tag_in_packed(void) {
     return 0;
 }
 
+
 int main(void) {
     printf("test_path_dot... ");
     if (test_path_dot() != 0) return 1;

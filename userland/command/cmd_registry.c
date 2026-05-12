@@ -8,8 +8,10 @@ typedef struct {
 
 static const cmd_name_ent_t cmd_registry[] = {
     {"addcluster", FL_SCMD_ADDCLUSTER},
+    {"audit", FL_SCMD_AUDIT},
     {"cat", FL_SCMD_CAT},
     {"cd", FL_SCMD_CD},
+    {"contracts", FL_SCMD_CONTRACTS},
     {"createdisk", FL_SCMD_CREATEDISK},
     {"delcluster", FL_SCMD_DELCLUSTER},
     {"diskdel", FL_SCMD_DISKDEL},
