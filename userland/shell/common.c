@@ -71,6 +71,7 @@ static const char HELP_BODY[] =
 "\n"
 "Other:\n"
 "  version [ -y | -n ]  Print version\n"
+"  contracts [summary|json] [--help]  Roadmap P0-1/P0-2 contract bundle (agents: use `json`)\n"
 "  help                 Display this help\n"
 "  redirect <file>      Redirect output (use \"redirect off\" to restore)\n"
 "  rerun <N>            Re-run Nth history command\n"

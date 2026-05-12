@@ -21,6 +21,7 @@ int cmd_createdisk_run(int argc, char **argv);
 int cmd_format_run(int argc, char **argv);
 int cmd_setdisk_run(int argc, char **argv);
 int cmd_version_run(int argc, char **argv);
+int cmd_contracts_run(int argc, char **argv);
 int cmd_listclusters_run(int argc, char **argv);
 int cmd_listdirs_run(int argc, char **argv);
 int cmd_search_run(int argc, char **argv);
