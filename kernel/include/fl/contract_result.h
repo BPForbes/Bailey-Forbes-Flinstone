@@ -1,5 +1,5 @@
 /**
- * Shared fallible-result vocabulary (**docs/ROADMAP.md** — **P0-2**).
+ * Shared fallible-result vocabulary (**P0-2**).
  *
  * New driver, VFS, and net entry points should prefer `fl_result_t` over raw
  * `int` magic where the call can fail for reasons callers must handle.

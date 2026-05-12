@@ -1,5 +1,5 @@
 /**
- * Structured log **sink** contract (**docs/ROADMAP.md** — **P0-1**, **P6-1**).
+ * Structured log **sink** contract (**P0-1**, **P6-1**).
  *
  * Severity names follow **syslog(3)** conventions for familiarity. Implementations
  * must document whether `emit` is IRQ-safe and whether allocations are allowed.

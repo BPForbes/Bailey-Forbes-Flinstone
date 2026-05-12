@@ -1,5 +1,6 @@
 #include "cmd_decl.h"
 #include "fl/contract.h"
+#include "fl/history_record.h"
 #include <stdio.h>
 #include <string.h>
 
@@ -7,12 +8,12 @@ static void print_contract_help(void) {
     printf(
         "Usage: contracts [summary|json] [--help]\n"
         "\n"
-        "Print the OS-platform contract bundle (docs/ROADMAP.md P0-1 / P0-2).\n"
+        "Print the public subsystem contract bundle (headers under fl/contract*.h).\n"
         "Designed for automation: no prompts; use `json` for one-line parsing.\n"
         "\n"
         "Options:\n"
         "  summary   Human-readable listing (default)\n"
-        "  json      Single-line JSON: rev, result codes, surface ids\n"
+        "  json      Single-line JSON: bundle rev, result codes, surface ids\n"
         "  --help    Show this message\n"
         "\n"
         "Examples:\n"
@@ -32,7 +33,7 @@ static int print_summary(void) {
         "DRIVER_OPS", "NETDEV", "LOG_SINK", "AUTHZ",
     };
 
-    printf("contracts: roadmap bundle rev %d\n", FL_CONTRACT_ROADMAP_REV);
+    printf("contracts: bundle rev %d\n", FL_CONTRACT_BUNDLE_REV);
     printf("  fl_result_t: OK=%d ERR=%d INVAL=%d NOSYS=%d\n",
            (int)FL_RESULT_OK, (int)FL_RESULT_ERR, (int)FL_RESULT_INVAL, (int)FL_RESULT_NOSYS);
     printf("  surfaces (%zu):\n", sizeof(surface_names) / sizeof(surface_names[0]));
@@ -47,10 +48,12 @@ static int print_summary(void) {
 }
 
 static int print_json(void) {
-    printf("{\"contract_rev\":%d,\"fl_result_ok\":%d,\"fl_result_err\":%d,"
+    printf("{\"bundle_rev\":%d,\"fl_result_ok\":%d,\"fl_result_err\":%d,"
            "\"surfaces\":[\"DRIVER_OPS\",\"NETDEV\",\"LOG_SINK\",\"AUTHZ\"],"
+           "\"history_record_tag\":\"%s\","
            "\"vfs_include\":\"fl/vfs.h (separate)\"}\n",
-           FL_CONTRACT_ROADMAP_REV, (int)FL_RESULT_OK, (int)FL_RESULT_ERR);
+           FL_CONTRACT_BUNDLE_REV, (int)FL_RESULT_OK, (int)FL_RESULT_ERR,
+           FL_HISTORY_RECORD_TAG);
     return 0;
 }
 

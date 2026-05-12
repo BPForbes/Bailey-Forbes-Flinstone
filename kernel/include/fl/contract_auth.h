@@ -1,5 +1,5 @@
 /**
- * Authorization **check** contract (**docs/ROADMAP.md** — **P0-1**, **P2-3**).
+ * Authorization **check** contract (**P0-1**, **P2-3**).
  *
  * `op` is a subsystem-defined unsigned code (netdev mount, raw I/O, etc.).
  * `ctx` is opaque to this header (principal, path, device handle, …).

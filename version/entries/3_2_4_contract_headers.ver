@@ -1,4 +1,4 @@
 MAJOR_VERSION=3
 STANDARD_VERSION=2
 RELEASE_VERSION=4
-DESCRIPTION=Introduce roadmap P0-1/P0-2 contract headers (fl/contract.h bundle) and agent-friendly `contracts` shell command (summary|json, --help, no prompts). test_drivers + dispatch/registry. version bump 3.2.4.
+DESCRIPTION=Contract headers (fl/contract*.h, FL_CONTRACT_BUNDLE_REV), history persistence payload (fl/history_record.h FL1+JSON+RS), optional FL_HISTORY_AUDIT logging via fl_log_sink_t, agent-friendly `contracts` CLI (summary|json). test_drivers + dispatch/registry. version bump 3.2.4.
