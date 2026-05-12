@@ -1,5 +1,7 @@
 # Build Documentation
 
+Long-horizon platform roadmap (networking, identity, drivers, logging, etc.): **`docs/ROADMAP.md`**.
+
 ## Prerequisites
 
 - CMake 3.15 or later
