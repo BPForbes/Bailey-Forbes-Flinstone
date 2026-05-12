@@ -256,7 +256,7 @@ VM/devices/%.o: VM/devices/%.c
 # --- ASM + Alloc + PQ unit tests (no CUnit) ---
 # Use -fsanitize when NOT using ASM allocator (libc tests only)
 TEST_SANITIZE = -fsanitize=address,undefined -fno-omit-frame-pointer
-.PHONY: test_mem_asm test_alloc test_priority_queue test_drivers test_core test_invariants test_vm_layer_warning check-layers
+.PHONY: test_mem_asm test_alloc test_priority_queue test_drivers test_core test_invariants test_audit_log test_vm_layer_warning check-layers
 test_mem_asm: $(MEM_ASM_OBJ)
 	$(CC) $(CFLAGS) $(TEST_SANITIZE) -I. -o tests/test_mem_asm tests/test_mem_asm.c $(MEM_ASM_OBJ)
 	./tests/test_mem_asm
@@ -307,6 +307,14 @@ test_userspace_connection: kernel/core/sys/vrt.o kernel/core/sys/ipc.o kernel/co
 test_invariants: userland/shell/common.o $(UTIL_SHELL_LINK_OBJS) $(MEM_ASM_OBJ) $(HISTORY_ASM_OBJ) $(UTIL_HISTORY_HOST_OBJS)
 	$(CC) $(CFLAGS) $(TEST_SANITIZE) -o tests/test_invariants tests/test_invariants.c userland/shell/common.o $(UTIL_SHELL_LINK_OBJS) $(MEM_ASM_OBJ) $(HISTORY_ASM_OBJ) $(UTIL_HISTORY_HOST_OBJS)
 	./tests/test_invariants
+
+# audit_log unit tests (standalone, no CUnit required)
+.PHONY: test_audit_log
+test_audit_log: userland/shell/common.o userland/shell/audit_log.o $(UTIL_SHELL_LINK_OBJS) kernel/core/vfs/fs_jail.o kernel/core/mm/mem_domain.o $(MEM_ASM_OBJ) $(HISTORY_ASM_OBJ) $(UTIL_HISTORY_HOST_OBJS)
+	$(CC) $(CFLAGS) $(TEST_SANITIZE) -o tests/test_audit_log tests/test_audit_log.c \
+	  userland/shell/common.o userland/shell/audit_log.o $(UTIL_SHELL_LINK_OBJS) kernel/core/vfs/fs_jail.o \
+	  kernel/core/mm/mem_domain.o $(MEM_ASM_OBJ) $(HISTORY_ASM_OBJ) $(UTIL_HISTORY_HOST_OBJS) -Wl,-z,noexecstack
+	./tests/test_audit_log
 
 # fs_jail unit tests (standalone, no CUnit required)
 .PHONY: test_fs_jail
