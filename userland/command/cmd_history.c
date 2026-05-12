@@ -15,8 +15,8 @@ int cmd_history_maybe(const char *trimmed) {
         printf("No history.\n");
         return 1;
     }
-    char raw[4096];
-    char disp[4096];
+    char raw[4097];
+    char disp[4097];
     int idx = 1;
     while (fgets(raw, sizeof(raw), hf)) {
         raw[strcspn(raw, "\n")] = '\0';

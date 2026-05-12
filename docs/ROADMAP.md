@@ -232,18 +232,16 @@ Implement **bottom-up**: **L2 (link layer)** → IPv4/UDP → TCP → sockets fa
 
 #### Deferred follow-ups (PR #82 close-out — CodeRabbit / Codex)
 
-The **3.3.0 contracts** workstream landed FL1 history, hosted **`.fl_audit.log`**, and `audit` / `contracts` builtins. Review threads that are **explicitly deferred** to future PRs are captured here so nothing is dropped when the PR concludes.
+The **3.3.0 contracts** workstream landed FL1 history, hosted **`.fl_audit.log`**, and `audit` / `contracts` builtins. Items below are **still open** for future PRs; several review notes from the same train are **already implemented** in-tree (batch `contracts` only binds `summary`/`json`/`--help`/`-h`; `fl_audit_show_last_lines` saves `errno` on `fopen` failure and **releases the audit mutex** before the backward read loop; `fgets` buffers use **4097** bytes where FL1 lines are read; FAT32 history publish is gated on **write + `fclose`** success).
 
 | TODO tag | Recommendation (review / tool source) |
 |----------|---------------------------------------|
 | **TODO: P2-3** | **Authorization middleware** is still mostly **contract + hooks**, not full enforcement: wire central **`can_*`** checks before FileManager, netdev, and mount; add **≥3** unit tests that deny a guest principal on privileged ops; ensure **audit log entries on deny and allow** (not only post-command `fl_audit_shell_completed`). |
-| **TODO: P6-4** | **Append durability:** if `fopen` / `fprintf` / `fwrite` / `fclose` on the audit file fails, **surface failure** (stderr, counter, sink, or return channel)—do not behave as if the security-relevant event was persisted (CodeRabbit). |
-| **TODO: P6-4** | **`audit show` vs mutex:** avoid holding the audit **mutex** across long backward reads of large logs; snapshot size or shorten the locked section, then **release the lock** before `realloc`/`fread` loops so concurrent audit writers are not blocked for the duration of `audit show` with large **N** (CodeRabbit). |
-| **TODO: P6-4** | **`errno` after `fopen` failure:** save **`errno` immediately** after a failed `fopen`, then unlock/format **`strerror`**—do not rely on `errno` surviving **`pthread_mutex_unlock`** (CodeRabbit). |
-| **TODO: P6-4** | **`audit show N` semantics:** either **scan backward** until **N** complete lines (or BOF) without silently dropping older lines, or **tighten/document** the supported **N** and any **tail window cap** so the CLI contract matches what the implementation reads (CodeRabbit). |
-| **TODO: P7 (shell batch)** | **Batch `contracts` argv grouping:** only bind a second token when it is **`summary`**, **`json`**, **`--help`**, or **`-h`**—never consume an arbitrary following token (Codex: e.g. `contracts audit show 5` must not parse as `contracts audit`). Add a **regression test** under an existing `make` test target. |
-| **TODO: P5-2 / P6-3** | **FAT32 history staging:** call **`fat32_host_file_put`** only after **`history_fwrite_blob`** and **`fclose`** both succeed; on failure, **do not publish** the temp file to **`HISTORY_DISK_PATH`** (CodeRabbit). |
-| **TODO: P6-3** | **FL1 / `fgets` sizing:** reader buffers must be **max persisted record bytes + 1** for the **`fgets` NUL** so a full-width packed line is not split across reads (CodeRabbit). |
+| **TODO: P0-2** | Optional: define **`FL_RESULT_MIN` / `FL_RESULT_MAX`** (or an allow-list) and reject out-of-range **`rc`** in **`fl_history_record_unpack_cmd`** JSON metadata if policy wants strict codes only (CodeRabbit discussion). |
+| **TODO: P6-4** | **`audit show N` contract:** document any **residual limits** (memory growth for very large **N** on huge logs) or add hard caps / streaming so operator expectations stay aligned with implementation. |
+| **TODO: P7 (shell batch)** | Add an **automated regression** that batch argv **`contracts audit show 5`** runs **`contracts`** (default), then **`audit`**, not a merged `contracts audit` token (Codex). |
+| **TODO: P6-2** | In-memory **ring-buffer** log sink (`dmesg`-style, drop counters) per phase table (CodeRabbit roadmap gap). |
+| **TODO: P6-4** | **Signed / tamper-evident** log segments (optional later per phase table). |
 
 ---
 

@@ -128,6 +128,15 @@ static int audit_tokens_count(int argc, char **argv, int i) {
         return 1;
 }
 
+/* Batch: only bind a second argv token for known `contracts` sub-args (Codex). */
+static int contracts_tokens_count(int argc, char **argv, int i) {
+    if (i + 1 < argc &&
+        (!strcmp(argv[i + 1], "summary") || !strcmp(argv[i + 1], "json") ||
+         !strcmp(argv[i + 1], "--help") || !strcmp(argv[i + 1], "-h")))
+        return 2;
+    return 1;
+}
+
 /* Strip -Virtualization and -y/-n from argv; set g_vm_mode. Returns new argc. */
 static int parse_vm_args(int argc, char *argv[]) {
     int out = 1;  /* argv[0] always kept */
@@ -410,7 +419,7 @@ int main(int argc, char *argv[]) {
                 }
             }
             else if (!strcmp(cmd, "contracts")) {
-                tokensCount = 1;
+                tokensCount = contracts_tokens_count(argc, argv, i);
             }
             else if (!strcmp(cmd, "audit")) {
                 tokensCount = audit_tokens_count(argc, argv, i);

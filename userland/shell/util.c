@@ -168,8 +168,10 @@ void append_history_ex(fl_contract_surface_t surface, fl_result_t last_rc,
     } else {
         FILE *fp = fopen(HISTORY_FILE, "a");
         if (fp) {
-            (void)history_fwrite_blob(fp, rec, n);
-            fclose(fp);
+            int write_ok = (history_fwrite_blob(fp, rec, n) == 0);
+            if (fclose(fp) != 0)
+                write_ok = 0;
+            (void)write_ok;
         }
     }
     pthread_mutex_unlock(&history_mutex);

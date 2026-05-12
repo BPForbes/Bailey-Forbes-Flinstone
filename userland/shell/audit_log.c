@@ -145,11 +145,18 @@ int fl_audit_show_last_lines(int n) {
     if (n <= 0 || n > 10000)
         n = 32;
 
+    /*
+     * Snapshot size under the audit mutex (coordinates with set_sink), then
+     * read without holding the lock so concurrent append paths are not stalled.
+     */
+    long sz = -1;
     pthread_mutex_lock(&g_audit_mutex);
     FILE *fp = fopen(FL_AUDIT_REL_DEFAULT, "rb");
     if (!fp) {
+        int saved_errno = errno;
         pthread_mutex_unlock(&g_audit_mutex);
-        printf("No audit log at %s (%s).\n", FL_AUDIT_REL_DEFAULT, strerror(errno));
+        printf("No audit log at %s (%s).\n", FL_AUDIT_REL_DEFAULT,
+               strerror(saved_errno));
         return 0;
     }
     if (fseek(fp, 0, SEEK_END) != 0) {
@@ -157,7 +164,7 @@ int fl_audit_show_last_lines(int n) {
         pthread_mutex_unlock(&g_audit_mutex);
         return -1;
     }
-    long sz = ftell(fp);
+    sz = ftell(fp);
     if (sz < 0) {
         fclose(fp);
         pthread_mutex_unlock(&g_audit_mutex);
@@ -169,8 +176,26 @@ int fl_audit_show_last_lines(int n) {
         printf("(audit log empty)\n");
         return 0;
     }
+    fclose(fp);
+    pthread_mutex_unlock(&g_audit_mutex);
+
+    fp = fopen(FL_AUDIT_REL_DEFAULT, "rb");
+    if (!fp)
+        return -1;
+    if (fseek(fp, 0, SEEK_END) != 0) {
+        fclose(fp);
+        return -1;
+    }
+    {
+        long sz_now = ftell(fp);
+        if (sz_now < 0) {
+            fclose(fp);
+            return -1;
+        }
+        sz = sz_now;
+    }
+
     enum { AUDIT_READ_MAX = 256 * 1024 };
-    long off = 0;
     size_t to_read = 0;
     char *buf = NULL;
 
@@ -181,18 +206,18 @@ int fl_audit_show_last_lines(int n) {
 
     while (start_pos >= 0 && found_newlines < n) {
         if (fseek(fp, start_pos, SEEK_SET) != 0) {
-            if (buf) free(buf);
+            if (buf)
+                free(buf);
             fclose(fp);
-            pthread_mutex_unlock(&g_audit_mutex);
             return -1;
         }
 
         size_t read_len = (size_t)(sz - start_pos);
         char *new_buf = (char *)realloc(buf, read_len + 1u);
         if (!new_buf) {
-            if (buf) free(buf);
+            if (buf)
+                free(buf);
             fclose(fp);
-            pthread_mutex_unlock(&g_audit_mutex);
             return -1;
         }
         buf = new_buf;
@@ -200,7 +225,6 @@ int fl_audit_show_last_lines(int n) {
         if (fread(buf, 1, read_len, fp) != read_len) {
             free(buf);
             fclose(fp);
-            pthread_mutex_unlock(&g_audit_mutex);
             return -1;
         }
         buf[read_len] = '\0';
@@ -208,8 +232,8 @@ int fl_audit_show_last_lines(int n) {
 
         /* Count newlines in buffer */
         found_newlines = 0;
-        for (size_t i = 0; i < to_read; i++) {
-            if (buf[i] == '\n')
+        for (size_t j = 0; j < to_read; j++) {
+            if (buf[j] == '\n')
                 found_newlines++;
         }
 
@@ -223,9 +247,7 @@ int fl_audit_show_last_lines(int n) {
             start_pos = 0;
     }
 
-    off = start_pos;
     fclose(fp);
-    pthread_mutex_unlock(&g_audit_mutex);
 
     /* Find the position after the (found_newlines - n)th newline to start output at a line boundary */
     int skip = found_newlines - n;
