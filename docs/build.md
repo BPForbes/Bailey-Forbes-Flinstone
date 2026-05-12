@@ -7,6 +7,10 @@
 - NASM (for x86_64 builds)
 - aarch64-linux-gnu toolchain (for cross-compiling to ARM64)
 
+## Native AArch64 Linux (e.g. Raspberry Pi)
+
+Building with **`make vm`** or **`make vm-sdl`** compiles many large sources. On devices with **1–2 GiB RAM**, parallel `gcc` processes can trigger the **OOM killer** (`fatal error: Killed signal terminated program cc1`). The root **Makefile** defaults to a **serial** sub-make on native AArch64 Linux for those targets. If a build is still killed, add **swap** (`dphys-swapfile`, `zram`, or a swap partition) or run `make -j1` at the top level. Override when you have headroom: `make vm VM_SUBMAKE_JOBS=-j4`.
+
 ## Quick Start
 
 ### x86_64 Build

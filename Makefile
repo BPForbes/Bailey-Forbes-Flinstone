@@ -6,6 +6,11 @@ UNAME_S := $(shell uname -s 2>/dev/null)
 UNAME_M := $(shell uname -m 2>/dev/null)
 ARCH ?= $(if $(and $(filter Linux,$(UNAME_S)),$(filter aarch64 arm64,$(UNAME_M))),arm,x86_64_gas)
 ARM64_LINUX_HOST := $(and $(filter Linux,$(UNAME_S)),$(filter aarch64 arm64,$(UNAME_M)))
+# VM-enabled builds pull in large translation units (interpreter.c, VM/*.c). On native
+# AArch64 Linux (e.g. Raspberry Pi), parallel gcc often exhausts RAM and the OOM killer
+# stops cc1 ("Killed signal terminated program cc1"). Default to a serial sub-make for
+# `vm` / `vm-sdl` on those hosts. Override on big machines: make vm VM_SUBMAKE_JOBS=-j8
+VM_SUBMAKE_JOBS ?= $(if $(ARM64_LINUX_HOST),-j1,)
 
 # Compiler and flags
 CC = gcc
@@ -156,12 +161,12 @@ deploy:
 
 .PHONY: vm baremetal
 vm:
-	$(MAKE) VM_ENABLE=1 $(TARGET)
+	$(MAKE) $(VM_SUBMAKE_JOBS) VM_ENABLE=1 $(TARGET)
 
 # VM with SDL2 window (WSLg-friendly popup): make vm-sdl
 .PHONY: vm-sdl
 vm-sdl:
-	$(MAKE) VM_ENABLE=1 VM_SDL=1 $(TARGET)
+	$(MAKE) $(VM_SUBMAKE_JOBS) VM_ENABLE=1 VM_SDL=1 $(TARGET)
 
 # Fetch and build external libs (SDL2, CUnit) into deps/install.
 .PHONY: deps deps-sdl2 deps-cunit

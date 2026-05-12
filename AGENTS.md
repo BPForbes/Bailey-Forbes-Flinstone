@@ -21,6 +21,7 @@ Notes:
 Run builds from the repository root.
 
 - Default host build: `make`
+- **Raspberry Pi / low-RAM AArch64 Linux:** plain `make` already defaults `ARCH=arm`. For **`make vm`** or **`make vm-sdl`**, the Makefile uses a **serial** sub-make on native AArch64 Linux to avoid the OOM killer stopping `cc1` (`Killed signal terminated program cc1`). Override parallelism with e.g. `make vm VM_SUBMAKE_JOBS=-j4` if the machine has enough RAM; add **swap** if builds still die.
 - Clean build artifacts: `make clean`
 - x86_64 GAS build: `make ARCH=x86_64_gas`
 - x86_64 NASM build: `make ARCH=x86_64_nasm`

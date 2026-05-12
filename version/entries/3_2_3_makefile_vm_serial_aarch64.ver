@@ -1,0 +1,4 @@
+MAJOR_VERSION=3
+STANDARD_VERSION=2
+RELEASE_VERSION=3
+DESCRIPTION=Makefile: default serial sub-make for make vm and make vm-sdl on native AArch64 Linux (e.g. Raspberry Pi) to avoid OOM killer stopping cc1. Document VM_SUBMAKE_JOBS override, swap hint in AGENTS.md and docs/build.md.
