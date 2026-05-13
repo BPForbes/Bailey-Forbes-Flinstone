@@ -27,7 +27,7 @@ jobs:
 
       - name: Block fork PR when root PRERELEASE=1 needs automated relocate
         if: github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name != github.repository
-        run: ./scripts/relocate_root_prerelease_ver_to_preproduction.sh --dry-run-exit-if-needed
+        run: bash scripts/relocate_root_prerelease_ver_to_preproduction.sh --dry-run-exit-if-needed
 
       - name: Prepare version/entries (relocate root PRERELEASE=1 .ver)
         uses: ./.github/actions/prepare-version-entries

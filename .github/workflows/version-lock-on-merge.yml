@@ -44,7 +44,7 @@ jobs:
           token: ${{ secrets.BPFORBES_PAT || secrets.VERSION_LOCK_PAT || secrets.GITHUB_TOKEN }}
 
       - name: Relocate root PRERELEASE=1 entries into preproduction (stamp then move)
-        run: ./scripts/relocate_root_prerelease_ver_to_preproduction.sh
+        run: bash scripts/relocate_root_prerelease_ver_to_preproduction.sh
 
       - name: Finalize version (copy entries → locked, skip preproduction */)
         run: ./scripts/finalize_version_locked.sh
