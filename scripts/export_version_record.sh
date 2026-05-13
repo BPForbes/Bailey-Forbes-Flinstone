@@ -26,6 +26,14 @@ PATCH="$(pick_int VERSION_PATCH)"
 
 VER="${MAJOR}.${STD}.${PATCH}"
 
+LINE="$(grep -E '^#define VERSION_LINE ' "$DEF" | sed -E 's/^#define VERSION_LINE "(.*)"$/\1/' | head -1)"
+[[ -n "$LINE" ]] || LINE="$VER"
+
+json_escape() {
+  printf '%s' "$1" | sed 's/\\/\\\\/g;s/"/\\"/g'
+}
+JL="$(json_escape "$LINE")"
+
 CHANGELOG_NOTE=""
 if [[ -f "$LOGSRC" ]]; then
     CHANGELOG_NOTE="$(sed -n '/const char VERSION_CHANGELOG/,/;/p' "$LOGSRC" | tr -d '\r' || true)"
@@ -33,14 +41,15 @@ fi
 
 if [[ "${1:-}" == "--json" ]]; then
     if [[ -f "$LOGSRC" ]]; then
-        printf '{"major":%s,"standard":%s,"patch":%s,"version":"%s","changelog_source":"userland/shell/version_changelog.c"}\n' \
-            "$MAJOR" "$STD" "$PATCH" "$VER"
+        printf '{"major":%s,"standard":%s,"patch":%s,"version":"%s","version_line":"%s","changelog_source":"userland/shell/version_changelog.c"}\n' \
+            "$MAJOR" "$STD" "$PATCH" "$VER" "$JL"
     else
-        printf '{"major":%s,"standard":%s,"patch":%s,"version":"%s","changelog_source":null}\n' \
-            "$MAJOR" "$STD" "$PATCH" "$VER"
+        printf '{"major":%s,"standard":%s,"patch":%s,"version":"%s","version_line":"%s","changelog_source":null}\n' \
+            "$MAJOR" "$STD" "$PATCH" "$VER" "$JL"
     fi
 else
     echo "version=${VER}"
+    echo "version_line=${LINE}"
     echo "VERSION_MAJOR=${MAJOR}"
     echo "VERSION_STANDARD=${STD}"
     echo "VERSION_PATCH=${PATCH}"

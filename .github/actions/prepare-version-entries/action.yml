@@ -7,4 +7,5 @@ runs:
   steps:
     - name: Relocate root PRERELEASE=1 .ver into preproduction
       shell: bash
-      run: ./scripts/relocate_root_prerelease_ver_to_preproduction.sh
+      working-directory: ${{ github.workspace }}
+      run: bash scripts/relocate_root_prerelease_ver_to_preproduction.sh

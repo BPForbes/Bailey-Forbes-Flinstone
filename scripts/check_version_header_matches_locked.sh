@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # Ensure userland/shell/version_def.h matches scripts/gen_version_def.sh output
-# (highest A.B.C among version/locked/**/*.ver — finalized releases).
+# (shipped semver from version/locked/**/*.ver plus VERSION_LINE from version/entries/**/*.ver).
 set -euo pipefail
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 DEF="$ROOT/userland/shell/version_def.h"
@@ -20,7 +20,7 @@ tmp="$(mktemp)"
 trap 'rm -f "$tmp"' EXIT
 "$GEN" --stdout >"$tmp"
 if ! cmp -s "$tmp" "$DEF"; then
-  echo "error: $DEF is out of date relative to version/locked/**/*.ver" >&2
+  echo "error: $DEF is out of date relative to gen_version_def.sh (locked + entries)" >&2
   echo "Run: ./scripts/gen_version_def.sh (after finalize_version_locked.sh if needed)" >&2
   echo "Then commit the updated userland/shell/version_def.h" >&2
   exit 1

@@ -122,10 +122,16 @@ OBJS = $(SRCS:.c=.o) $(ASMOBJS)
 TARGET = BPForbes_Flinstone_Shell
 .DEFAULT_GOAL := all
 
-# version_def.h is generated from version/locked/**/*.ver (highest A.B.C; finalize from version/entries first).
+# version_def.h is generated from version/locked/**/*.ver (shipped A.B.C) plus
+# a checksum of version/entries/**/*.ver for prerelease VERSION_LINE (paths may contain spaces).
 VERSION_DEF := userland/shell/version_def.h
 VER_LOCKED_FILES := $(shell find version/locked -name '*.ver' -print 2>/dev/null)
-$(VERSION_DEF): scripts/gen_version_def.sh $(VER_LOCKED_FILES)
+VERSION_ENTRIES_VER_SUM := .version_entries_ver.sum
+$(VERSION_ENTRIES_VER_SUM): FORCE
+	@find version/entries -name '*.ver' -print0 2>/dev/null | sort -z | xargs -0 md5sum 2>/dev/null | md5sum | awk '{print $$1}' >$(VERSION_ENTRIES_VER_SUM).tmp
+	@if ! cmp -s $(VERSION_ENTRIES_VER_SUM).tmp $(VERSION_ENTRIES_VER_SUM) 2>/dev/null; then mv $(VERSION_ENTRIES_VER_SUM).tmp $(VERSION_ENTRIES_VER_SUM); else rm -f $(VERSION_ENTRIES_VER_SUM).tmp; fi
+
+$(VERSION_DEF): scripts/gen_version_def.sh $(VER_LOCKED_FILES) $(VERSION_ENTRIES_VER_SUM)
 	@./scripts/gen_version_def.sh
 
 all: $(TARGET)
@@ -136,7 +142,7 @@ baremetal: LDFLAGS += -no-pie
 baremetal: $(TARGET)
 
 # With embedded x86 VM: make vm && ./shell -Virtualization -y -vm
-.PHONY: version-record gen-version-def
+.PHONY: version-record gen-version-def FORCE
 version-record: $(VERSION_DEF)
 	@./scripts/export_version_record.sh
 
@@ -391,6 +397,7 @@ debug: $(TARGET)
 
 clean:
 	rm -f $(OBJS) $(TEST_OBJS) $(TEST_ASMOBJS) $(TARGET) $(TEST_TARGET)
+	rm -f $(VERSION_ENTRIES_VER_SUM)
 	rm -f kernel/arch/*/drivers/*.o kernel/arch/*/hal/*.o kernel/drivers/*.o kernel/drivers/block/*.o VM/devices/*.o
 	rm -f arch/*/*/*.o arch/*/*/alloc/*.o
 	rm -f tests/test_mem_asm tests/test_alloc tests/test_priority_queue tests/test_drivers tests/test_vm_mem tests/test_replay tests/test_invariants tests/test_userspace_connection tests/test_vm_syscall_bridge tests/test_vm_arch_readiness
@@ -414,3 +421,6 @@ parity:
 	@echo "=== Building VM (x86_64_gas) ==="
 	$(MAKE) clean && $(MAKE) ARCH=x86_64_gas VM_ENABLE=1
 	@echo "Parity: all platforms built successfully."
+
+# Recompute version/entries checksum (paths may contain spaces; not used as make prerequisites).
+FORCE:
