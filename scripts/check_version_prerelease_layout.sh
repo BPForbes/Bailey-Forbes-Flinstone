@@ -2,8 +2,8 @@
 # Validate .ver layout under version/entries:
 #   Root .ver: PRERELEASE must be 0 or absent; GM must be 0 or absent (never GM=1 at root).
 #   Optional DEV_VERSION at root (develop iteration before preproduction).
-#   Under preproduction <A>.<B>.<C>/: every .ver must have PRERELEASE=1, PRERELEASE_ITER>=1,
-#   DEV_VERSION>=1, and at most one file in that directory may set GM=1.
+#   Under preproduction <A>.<B>.<C>/: every .ver must have PRERELEASE=1, DEV_VERSION>=1,
+#   and at most one file in that directory may set GM=1.
 set -euo pipefail
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 ENT="$ROOT/version/entries"
@@ -63,16 +63,6 @@ while IFS= read -r -d '' f; do
     if [[ "$pr" -ne 1 ]]; then
       echo "check_version_prerelease_layout: under ${parent}/ PRERELEASE must be 1 — $f" >&2
       err=1
-    fi
-    if [[ "$pr" -eq 1 ]]; then
-      iter=$(get_field PRERELEASE_ITER "$f")
-      if [[ -z "$iter" ]]; then
-        echo "check_version_prerelease_layout: PRERELEASE=1 requires PRERELEASE_ITER — $f" >&2
-        err=1
-      elif (( iter < 1 )); then
-        echo "check_version_prerelease_layout: PRERELEASE_ITER must be >= 1 when PRERELEASE=1 — $f" >&2
-        err=1
-      fi
     fi
     if [[ -z "$dv" ]] || ! [[ "$dv" =~ ^[0-9]+$ ]] || (( dv < 1 )); then
       echo "check_version_prerelease_layout: under ${parent}/ each .ver needs DEV_VERSION>=1 — $f" >&2
