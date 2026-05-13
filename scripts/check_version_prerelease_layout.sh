@@ -1,7 +1,10 @@
 #!/usr/bin/env bash
 # Validate .ver layout under version/entries:
-#   Root .ver: PRERELEASE must be 0 or absent; GM must be 0 or absent (never GM=1 at root).
-#   Optional DEV_VERSION at root (develop iteration before preproduction).
+#   Root .ver: GM must be 0 or absent (never GM=1 at root). PRERELEASE may be 0/absent
+#   (GA-oriented) or 1 (prerelease rows authored at the root for CI relocate — same-repo
+#   workflow: do not hand-add new PRERELEASE=1 *.ver under preproduction */; fork PRs run
+#   relocate locally, then commit the resulting tree per docs).
+#   Root PRERELEASE=1: require DEV_VERSION>=1 (same iteration rules as under preproduction).
 #   Under preproduction <A>.<B>.<C>/: every .ver must have PRERELEASE=1, DEV_VERSION>=1,
 #   and at most one file in that directory may set GM=1.
 set -euo pipefail
@@ -48,8 +51,10 @@ while IFS= read -r -d '' f; do
   exp_dir="preproduction ${m}.${s}.${r}"
   if [[ "$parent" == "." ]]; then
     if [[ "$pr" -eq 1 ]]; then
-      echo "check_version_prerelease_layout: PRERELEASE=1 must live under ${ENT}/${exp_dir}/ — $f" >&2
-      err=1
+      if [[ -z "$dv" ]] || ! [[ "$dv" =~ ^[0-9]+$ ]] || (( dv < 1 )); then
+        echo "check_version_prerelease_layout: root PRERELEASE=1 requires DEV_VERSION>=1 — $f" >&2
+        err=1
+      fi
     fi
     if [[ "$gm" -eq 1 ]]; then
       echo "check_version_prerelease_layout: GM=1 is not allowed on root .ver files — $f" >&2
