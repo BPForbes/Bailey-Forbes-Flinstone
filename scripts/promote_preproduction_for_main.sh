@@ -14,8 +14,7 @@
 #       the basename of the GM=1 file, with no PRERELEASE, GM, or DEV_VERSION lines.
 #     - Remove the entire preproduction directory from that tree.
 #
-# Run before merging version trees into main. With REPO_ROOT set, operates on that tree
-# (used by scripts/test_finalize_preproduction_gm.sh).
+# Run before merging version trees into main. With REPO_ROOT set, operates on that tree.
 set -euo pipefail
 ROOT="${REPO_ROOT:-$(cd "$(dirname "$0")/.." && pwd)}"
 

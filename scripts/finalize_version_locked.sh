@@ -10,7 +10,7 @@
 # After this, run `make` or ./scripts/gen_version_def.sh so userland/shell/version_def.h
 # reflects the highest A.B.C among version/locked/**/*.ver.
 #
-# Optional: REPO_ROOT=/path/to/repo to operate on a different tree (used by CI tests).
+# Optional: REPO_ROOT=/path/to/repo to operate on a different tree.
 set -euo pipefail
 ROOT="${REPO_ROOT:-$(cd "$(dirname "$0")/.." && pwd)}"
 ENT="$ROOT/version/entries"

@@ -56,7 +56,7 @@ where **`<A>.<B>.<C>`** matches **`MAJOR`**, **`STANDARD`**, and **`RELEASE`** i
 
 **`main`** must have **no** **`preproduction *`** directories and **no** **`PRERELEASE=1`**, **`GM=1`**, or **`DEV_VERSION=`** lines — CI runs **`scripts/check_version_main_prerelease_policy.sh`**.
 
-**Layout CI:** **`scripts/check_version_prerelease_layout.sh`** validates **`version/entries`** on every run. **`scripts/test_finalize_preproduction_gm.sh`** exercises the promotion helper in CI.
+**Layout CI:** **`scripts/check_version_prerelease_layout.sh`** validates **`version/entries`** on every run.
 
 ## `RELEASE_DATE` — usually omit in entries
 

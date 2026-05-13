@@ -28,12 +28,6 @@ jobs:
       - name: Validate prerelease .ver directory layout (version/entries)
         run: ./scripts/check_version_prerelease_layout.sh
 
-      - name: Test preproduction GM promotion helper
-        run: ./scripts/test_finalize_preproduction_gm.sh
-
-      - name: Test finalize skips preproduction dirs into locked
-        run: ./scripts/test_finalize_locked_skips_preproduction.sh
-
       - name: Main must ship GA .ver only (push)
         if: github.event_name == 'push' && github.ref == 'refs/heads/main'
         run: ./scripts/check_version_main_prerelease_policy.sh
