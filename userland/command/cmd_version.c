@@ -19,14 +19,14 @@ int cmd_version_run(int argc, char **argv) {
             printf("Usage: version [ -y | -n ]\n");
             return 1;
         }
-        printf("Shell version: %s\n", VERSION);
+        printf("Shell version: %s\n", VERSION_LINE);
         return 0;
     }
     if (!isatty(STDIN_FILENO))
         printf("History file retained.\n");
     else {
         char response[10];
-        printf("Shell version: %s\n", VERSION);
+        printf("Shell version: %s\n", VERSION_LINE);
         printf("Do you want to delete your shell history? [y/n]: ");
         fflush(stdout);
         if (fgets(response, sizeof(response), stdin)) {

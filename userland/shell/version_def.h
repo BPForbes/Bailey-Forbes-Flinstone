@@ -4,14 +4,17 @@
 /*
  * GENERATED FILE — do not edit by hand.
  *
- * Built from finalized .ver files under version/locked/ by scripts/gen_version_def.sh (also run from the Makefile).
- * The shipped version is the highest A.B.C among those files (recursive tree; PRERELEASE / GM / DEV_VERSION are ignored for VERSION; see docs/versioning.md).
+ * Shipped numeric semver (VERSION_MAJOR/STANDARD/PATCH and VERSION) comes from the
+ * highest A.B.C among all .ver files under version/locked/ (recursive). PRERELEASE,
+ * GM, and DEV_VERSION there are ignored for those macros (see docs/versioning.md).
  *
- *   A (VERSION_MAJOR)     — milestones / architecture-scale changes
- *   B (VERSION_STANDARD)  — new features (semver "minor")
- *   C (VERSION_PATCH)     — fixes and small corrections (semver "patch")
+ * VERSION_LINE is the shell-facing display string: when any .ver under version/entries/
+ * has PRERELEASE=1, it shows PRERELEASE_TAG (default PRE), that row semver A.B.C, and
+ * optional BUILD-n (n from DEV_VERSION) when DEV_VERSION>=1; otherwise VERSION_LINE
+ * matches VERSION.
  *
- * To bump: add version/entries/<A>_<B>_<C>_<slug>.ver (or under preproduction A.B.C/ while prerelease), run ./scripts/finalize_version_locked.sh, then run make or ./scripts/gen_version_def.sh.
+ * To bump shipped semver: add new .ver files under version/entries/, finalize to
+ * version/locked/, then run make or ./scripts/gen_version_def.sh.
  */
 #define VERSION_MAJOR    3
 #define VERSION_STANDARD 3
@@ -22,5 +25,7 @@
 
 #define VERSION \
     VERSION_STR(VERSION_MAJOR) "." VERSION_STR(VERSION_STANDARD) "." VERSION_STR(VERSION_PATCH)
+
+#define VERSION_LINE "PRE 4.0.0 BUILD-2"
 
 #endif /* VERSION_DEF_H */

@@ -239,7 +239,7 @@ int main(int argc, char *argv[]) {
             exit(0);
         }
         if (strcmp(argv[1], "version") == 0 || strcmp(argv[1], "-v") == 0) {
-            printf("BPForbes_Flinstone_Shell v%s\n", VERSION);
+            printf("BPForbes_Flinstone_Shell v%s\n", VERSION_LINE);
             exit(0);
         }
         if (strcmp(argv[1], "clear") == 0) {

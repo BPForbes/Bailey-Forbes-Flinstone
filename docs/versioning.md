@@ -20,7 +20,7 @@ The shell reports **`VERSION`** as **`A.B.C`**. The numeric fields in `.ver` fil
 |------|------|
 | **`version/entries/*.ver`** | **Author here.** Add or revise release notes and semver fields for work on a feature branch. |
 | **`version/locked/*.ver`** | **Published mirror.** Filled by **`finalize_version_locked.sh`** (copies **`version/entries/`** → **`version/locked/`**, **excluding** top-level **`preproduction A.B.C/`** directories so prerelease folders stay **entries-only** until **`promote_preproduction_for_main.sh`** emits a root GA **`.ver`**) run locally by maintainers or by **Version lock on merge** GitHub Actions after changes land on **`develop`**. **Do not hand-edit** locked `.ver` files for routine version bumps—edit **`version/entries/`** instead. |
-| **`userland/shell/version_def.h`** | **Generated.** Produced by **`scripts/gen_version_def.sh`** (also via **`make`**) from the **highest** `A.B.C` among **`version/locked/**/*.ver`**. **Never hand-edit** `VERSION_*` in this header. |
+| **`userland/shell/version_def.h`** | **Generated.** **`scripts/gen_version_def.sh`** (also **`make`**) sets **`VERSION_*`** / **`VERSION`** from the highest **`A.B.C`** among **`version/locked/**/*.ver`**, and **`VERSION_LINE`** for shell display from **`version/entries/**/*.ver`** when any row has **`PRERELEASE=1`** (otherwise **`VERSION_LINE`** matches **`VERSION`**). **Never hand-edit** `VERSION_*` in this header. |
 
 **Companion prose only:** **`version/entries/ABOUT.txt`** and **`version/locked/ABOUT.txt`** describe the `.ver` format. When CI requires them to match, update **both** in the same pull request with **identical** bytes. They are not release semver files; they are documentation.
 
@@ -34,11 +34,12 @@ Ordering of multiple `.ver` files is by the **numeric fields inside** each file,
 
 ## Preproduction directories, **`PRERELEASE`**, **`GM`**, and **`DEV_VERSION`**
 
-Preproduction metadata uses **`PRERELEASE`**, **`GM`** (go-to-main), and **`DEV_VERSION`** (develop iteration “D” in an **`A.B.C.D`** sense — **`D`** is **not** part of the basename or **`version_def.h`**):
+Preproduction metadata uses **`PRERELEASE`**, optional **`PRERELEASE_TAG`**, **`GM`** (go-to-main), and **`DEV_VERSION`** (develop iteration “D” in an **`A.B.C.D`** sense — **`D`** is **not** part of the basename; **`DEV_VERSION`** feeds **`VERSION_LINE`** / **`BUILD-*`**, not **`VERSION_*`** / **`VERSION`** from **`version/locked/`**).
 
 | Key | Meaning |
 |-----|--------|
 | **`PRERELEASE`** | **`0`** or omitted = GA-oriented row at the **`version/entries/`** root. **`1`** = prerelease: **author at the `version/entries/` root** on same-repo branches; **`relocate_root_prerelease_ver_to_preproduction.sh`** moves the file under **`preproduction <A>.<B>.<C>/`** (do **not** hand-add new **`PRERELEASE=1`** **`.ver`** paths under that directory on same-repo PRs). Fork PRs must relocate locally, then commit. |
+| **`PRERELEASE_TAG`** | Optional short token (letters/digits/`._+-` only) shown before the prerelease semver in **`VERSION_LINE`** (default **`PRE`** when **`PRERELEASE=1`** and the key is absent). |
 | **`GM`** | **`0`** or omitted by default. **`1`** = this prerelease directory is ready to be merged to a single GA **`.ver`** at the tree root (**allowed only inside** **`preproduction <A>.<B>.<C>/`**; at most **one** file per directory may set **`GM=1`**). |
 | **`DEV_VERSION`** | Non-negative integer. With **`PRERELEASE=1`**, use **`>= 1`** and bump per iteration using **`./scripts/bump_dev_version.sh`**. You may keep **`DEV_VERSION`** on a **root** row while **`PRERELEASE`** is still **`0`** to record develop-side iteration **before** moving the line under **`preproduction/`**. **`main`** must ship **`.ver`** files **without** any **`DEV_VERSION=`** line (CI). |
 

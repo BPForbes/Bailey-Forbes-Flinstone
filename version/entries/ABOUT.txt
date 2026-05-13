@@ -33,11 +33,13 @@ RELEASE_DATE (merge finalize):
   If RELEASE_DATE is still absent where tooling expects it, scripts/gen_version_changelog.c
   may use the generator's local calendar date at generation time (see that script).
 
-PRERELEASE / GM / DEV_VERSION / preproduction directories (not in version_def.h):
+PRERELEASE / GM / DEV_VERSION / preproduction directories (VERSION uses locked; VERSION_LINE uses entries PRERELEASE=1):
   At the root of version/entries/ (and version/locked/), GA-oriented rows omit PRERELEASE
   or set PRERELEASE=0. Optional DEV_VERSION on those rows counts develop-side iterations
   before preproduction. PRERELEASE=1 rows are authored at the version/entries/ root for
   same-repo automation (see below); never set GM=1 on a root *.ver file.
+  Optional PRERELEASE_TAG=token (letters/digits._+- only) sets the prerelease label in
+  userland/shell/version_def.h VERSION_LINE (default PRE when PRERELEASE=1 and the key is absent).
 
   PRERELEASE=1 marks an in-flight prerelease line. Author new *.ver rows at the
   version/entries/ repository root with PRERELEASE=1 (same MAJOR/STANDARD/RELEASE as
