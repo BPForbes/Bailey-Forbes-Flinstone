@@ -51,35 +51,6 @@ Run builds from the repository root.
 - If a required toolchain or library is missing, install the packages listed in the Cursor Cloud section, then rerun the tests instead of skipping them.
 - Document any true environment blocker in the final response, including the exact command that failed and the missing prerequisite.
 
-## Pre-merge review (CodeRabbit and Codex CLI)
-
-On substantive feature work, **do not `git push`** until **CodeRabbit** and **Codex CLI** are both **satisfied** for the current diff (local **`git commit`** during iteration is fine). “Satisfied” means: triage is complete, every item the author agrees is a **must-fix** is addressed, and remaining optional or rejected feedback is documented on the PR with rationale where needed.
-
-### Install the CLIs when missing
-
-If **`coderabbit`** or **`codex`** is not on `PATH`, **try to install** them (use what the environment allows):
-
-- **CodeRabbit CLI:** `curl -fsSL https://cli.coderabbit.ai/install.sh | sh` (Linux/macOS) or **`brew install coderabbit`**; then **`coderabbit auth login`**. See **https://docs.coderabbit.ai/cli** .
-- **Codex CLI:** **`npm install -g @openai/codex`** or **`brew install --cask codex`**; complete sign-in per **`codex`** first-run prompts. See OpenAI’s Codex quickstart / package **`@openai/codex`**.
-
-If installation still fails (no network, policy, missing `curl`/`brew`/`npm`), record the exact commands and errors in the PR and **do not push** until a human or another environment can run both tools.
-
-### How to use them
-
-1. **CodeRabbit** — Open or update the GitHub pull request so CodeRabbit runs (CLI can augment or mirror PR review per **https://docs.coderabbit.ai/cli**).
-2. **Codex CLI** — Run **`codex`** against the working tree or diff as the team configures it (e.g. review or apply pass).
-
-### Triage: not every comment needs a code change
-
-- **Fix** findings that address correctness, security, spec/API mismatches, real bugs, missing tests, or clear violations of project conventions.
-- **Skip or defer** pure style nits, redundant comments, or subjective preferences that do not improve the code meaningfully; reply on the PR with a one-line rationale (and open a follow-up issue only if tracking is useful).
-
-### Push gate
-
-**`git push`** only after **CodeRabbit** review is in a good state (no unresolved blocking threads you accept as required) **and** the latest **`codex`** pass has **no accepted must-fix items** left.
-
-**`.coderabbit.yaml`** configures CodeRabbit; keep it aligned when review or versioning policy text there must change (also update **AGENTS.md**, **CLAUDE.md**, **`.cursor/rules/versioning.mdc`**, **`docs/versioning.md`**, and **`.cursor/rules/review_tools.mdc`** as needed).
-
 ## Versioning
 
 Long-form guide: **`docs/versioning.md`** (authoring **`.ver`** files, **`RELEASE_DATE`** automation after merge to **`develop`**, **A / B / C** semantics, and what GitHub Actions updates).
@@ -117,7 +88,7 @@ CI verifies that the committed **`version_def.h`** matches **`scripts/gen_versio
 
 On every **`push`** to **`develop`**, workflow **`version-lock-on-merge.yml`** runs **`finalize_version_locked.sh`** (full copy **`version/entries/`** → **`version/locked/`**), then **`gen_version_def.sh`**. If anything changed, it **opens a PR** into **`develop`** (via **`peter-evans/create-pull-request`**) instead of pushing directly, so branch protection and checks apply when someone merges that PR. Use **`GITHUB_TOKEN`** with the **Actions** settings above, **or** secret **`VERSION_LOCK_PAT`** (PAT with **contents** + **pull-requests** write). Workflow permissions: **`contents: write`** and **`pull-requests: write`**.
 
-**Automation version PRs (review policy):** PRs opened **only** by that workflow (title/message like **`chore(version): sync version/locked from entries after merge`**, branch `cursor/version-lock-from-entries-*`) are **routine housekeeping**. **Do not** spend automatic or proactive AI/CodeRabbit review on them unless a **human** explicitly requests reviewers or asks for a review—then review normally.
+**Automation version PRs (review policy):** PRs opened **only** by that workflow (title/message like **`chore(version): sync version/locked from entries after merge`**, branch `cursor/version-lock-from-entries-*`) are **routine housekeeping**. **Do not** spend automatic or proactive bot review on them unless a **human** explicitly requests reviewers or asks for a review—then review normally.
 
 ### Optional deploy build (GitHub Actions / local)
 
@@ -146,7 +117,7 @@ Before merging **incoming → base** (e.g. `bug/*` → `develop`, `develop` → 
 
 Example: **`bug/…` → `develop`**, both at **`2.0.0`** → bump incoming to **`2.0.1`** (patch for a bugfix).
 
-Detailed wording also appears in **CLAUDE.md**, **`docs/versioning.md`**, **`.coderabbit.yaml`**, **`.cursor/rules/versioning.mdc`**, and **`.cursor/rules/review_tools.mdc`** — keep them aligned when policy changes. To print a machine-readable record from the current tree: `./scripts/export_version_record.sh`, `./scripts/export_version_record.sh --json`, or **`make version-record`**.
+Detailed wording also appears in **CLAUDE.md**, **`docs/versioning.md`**, **`.coderabbit.yaml`**, **`.cursor/rules/versioning.mdc`**, and **`.cursor/rules/review_tools.mdc`** — keep them aligned when versioning or optional review-hint text changes. To print a machine-readable record from the current tree: `./scripts/export_version_record.sh`, `./scripts/export_version_record.sh --json`, or **`make version-record`**.
 
 ## Implementation boundaries
 

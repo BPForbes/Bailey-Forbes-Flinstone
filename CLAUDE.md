@@ -2,12 +2,6 @@
 
 This repository implements **Bailey-Forbes-Flinstone**: a educational OS/shell-style codebase with a host shell (`BPForbes_Flinstone_Shell`), kernel-layer modules, drivers, and optional VM builds. Build with `make` from the repo root; see **AGENTS.md** for toolchain install and targets.
 
-## Pre-merge review (CodeRabbit and Codex CLI)
-
-**Do not `git push`** until **CodeRabbit** and **Codex CLI** are **satisfied** for the current change (local commits during iteration are fine). Full policy—including **install attempts** when `coderabbit` / `codex` are missing (`curl`/`brew`/`npm`), **triage** (fix real issues; document intentional won’t-fix for low-value nits), and the **push gate**—is in **AGENTS.md** and **`.cursor/rules/review_tools.mdc`**. **`.coderabbit.yaml`** configures CodeRabbit; keep it aligned when policy text there changes (also update **AGENTS.md**, **`docs/versioning.md`**, **`.cursor/rules/versioning.mdc`**, and **`.cursor/rules/review_tools.mdc`**).
-
----
-
 ## Versioning (mandatory for merge-ready PRs)
 
 ### Lock system (AI assistants — mandatory)
@@ -55,10 +49,10 @@ Export current numbers without compiling: **`./scripts/export_version_record.sh`
 
 ## Where else this is documented
 
-- **AGENTS.md** — Cursor Cloud agents + versioning summary + CodeRabbit / Codex pre-merge policy  
+- **AGENTS.md** — Cursor Cloud agents and versioning summary  
 - **`docs/versioning.md`** — `.ver` authoring, `RELEASE_DATE` automation, **A / B / C** semantics  
-- **`.coderabbit.yaml`** — CodeRabbit review hints  
+- **`.coderabbit.yaml`** — optional CodeRabbit integration when enabled on the repo  
 - **`.cursor/rules/versioning.mdc`** — Cursor IDE versioning rules  
-- **`.cursor/rules/review_tools.mdc`** — Cursor IDE pre-merge review rules  
+- **`.cursor/rules/review_tools.mdc`** — optional tooling notes (no CLI push gate)
 
 Keep these documents aligned when changing policy.

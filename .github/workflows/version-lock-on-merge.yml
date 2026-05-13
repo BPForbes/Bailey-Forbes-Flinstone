@@ -81,7 +81,7 @@ jobs:
 
             `stamp_version_release_date.sh` appends `RELEASE_DATE=YYYY-MM-DD` (merge day) to any `*.ver` under `version/locked` and `version/entries` that does not already declare `RELEASE_DATE`, keeping the trees identical before changelog generation in CI.
 
-            Uses **`BPFORBES_PAT`** or **`VERSION_LOCK_PAT`** when set; otherwise **`GITHUB_TOKEN`**. Auto-merge is enabled by the workflow when the PR is opened (waits for all required checks, including CodeRabbit if configured).
+            Uses **`BPFORBES_PAT`** or **`VERSION_LOCK_PAT`** when set; otherwise **`GITHUB_TOKEN`**. Auto-merge is enabled by the workflow when the PR is opened (waits for all required checks configured as required on the branch).
 
       - name: Enable auto-merge for version sync PR
         if: ${{ steps.prep.outputs.has_changes == 'true' && steps.cpr.outputs.pull-request-number != '' }}

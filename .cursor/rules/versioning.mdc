@@ -7,7 +7,7 @@ alwaysApply: true
 
 # Versioning rules
 
-Human-readable guide: **`docs/versioning.md`**. Pre-merge **CodeRabbit** + **Codex CLI**: **`AGENTS.md`** and **`.cursor/rules/review_tools.mdc`** (install CLIs if missing, triage must-fix vs nits, **no `git push`** until both satisfied).
+Human-readable guide: **`docs/versioning.md`**.
 
 ## Lock system — never rewrite shipped published files
 

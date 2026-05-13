@@ -51,14 +51,10 @@ For local or offline changelog experiments, **`scripts/gen_version_changelog.c`*
 - **Feature branch:** commit **`version/entries/*.ver`** (and matching **`ABOUT.txt`** updates when required). Avoid committing **`version/locked/*.ver`** (except coordinated **`ABOUT.txt`** per CI) and **`userland/shell/version_def.h`**.
 - **After merge to `develop`:** **Version lock on merge** syncs **`version/locked/`**, stamps missing **`RELEASE_DATE`**, regenerates **`version_def.h`**, and may open a PR for maintainers to merge when branch protection blocks direct pushes.
 
-## Pre-merge tooling (CodeRabbit & Codex)
-
-Before **`git push`**, follow **AGENTS.md** / **`.cursor/rules/review_tools.mdc`**: install **CodeRabbit CLI** and **Codex CLI** when absent (`curl` / `brew` / `npm` as applicable), **triage** review output (fix real issues; document intentional won’t-fix for trivial nits), and only push once **both** tools are **satisfied** for the current change.
-
 ## Further reading
 
-- **`AGENTS.md`** — Cursor Cloud, tests, versioning summary, and full **CodeRabbit** + **Codex CLI** install / triage / no-push policy.
+- **`AGENTS.md`** — Cursor Cloud, tests, and versioning summary.
 - **`CLAUDE.md`** — AI assistant context and versioning rules.
-- **`.cursor/rules/versioning.mdc`** and **`.cursor/rules/review_tools.mdc`** — Cursor IDE rules.
+- **`.cursor/rules/versioning.mdc`** and **`.cursor/rules/review_tools.mdc`** — Cursor IDE rules (versioning and optional review notes; no mandatory third-party CLI before push).
 - **`.github/workflows/version-lock-on-merge.yml`** — exact automation steps.
 - **`./scripts/export_version_record.sh`** — print current version from the tree (`--json` supported).
