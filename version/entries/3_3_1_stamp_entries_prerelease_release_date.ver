@@ -1,0 +1,6 @@
+MAJOR_VERSION=3
+STANDARD_VERSION=3
+RELEASE_VERSION=1
+DESCRIPTION=Patch: stamp_version_release_date.sh now walks every version/entries/**/*.ver after the locked + mirrored-entries pass (including preproduction A.B.C/ trees that finalize does not copy into version/locked) and appends merge-day RELEASE_DATE= when the key is still missing, so Version lock on merge applies dates to preproduction-only rows.
+
+RELEASE_DATE=2026-05-13
