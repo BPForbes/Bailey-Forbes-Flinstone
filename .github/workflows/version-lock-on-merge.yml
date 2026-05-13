@@ -1,5 +1,7 @@
-# After a push to develop, copy version/entries → version/locked and regenerate
-# userland/shell/version_def.h. If anything changed, opens a PR into develop (do not
+# After a push to develop, relocate root PRERELEASE=1 rows into preproduction */,
+# copy version/entries → version/locked (excluding top-level preproduction */ trees),
+# regenerate userland/shell/version_def.h. If anything changed,
+# opens a PR into develop (do not
 # push that commit directly to develop — branch rules usually require a PR, checks,
 # and often verified signatures), then enables GitHub auto-merge on that PR so it
 # completes when required checks pass.
@@ -41,7 +43,10 @@ jobs:
           fetch-depth: 0
           token: ${{ secrets.BPFORBES_PAT || secrets.VERSION_LOCK_PAT || secrets.GITHUB_TOKEN }}
 
-      - name: Finalize version (copy version/entries to version/locked)
+      - name: Relocate root PRERELEASE=1 entries into preproduction (stamp then move)
+        run: ./scripts/relocate_root_prerelease_ver_to_preproduction.sh
+
+      - name: Finalize version (copy entries → locked, skip preproduction */)
         run: ./scripts/finalize_version_locked.sh
 
       - name: Stamp RELEASE_DATE on .ver files (merge calendar date)
@@ -54,13 +59,12 @@ jobs:
         id: prep
         run: |
           set -euo pipefail
-          # Do not use `git diff --quiet HEAD -- …` alone: it ignores untracked files.
-          # finalize_version_locked.sh can add new version/locked/*.ver while gen_version_def.sh
-          # leaves version_def.h unchanged — still must open a PR. `git status --porcelain`
-          # includes untracked paths under version/locked/.
-          if [[ -z "$(git status --porcelain -- version/locked userland/shell/version_def.h)" ]]; then
+          # finalize_version_locked.sh refreshes version/locked/ from entries (skipping
+          # top-level preproduction */ dirs); gen_version_def.sh may update version_def.h.
+          # relocate_root_prerelease_ver_to_preproduction.sh may move version/entries/*.ver.
+          if [[ -z "$(git status --porcelain -- version/entries version/locked userland/shell/version_def.h)" ]]; then
             echo "has_changes=false" >> "$GITHUB_OUTPUT"
-            echo "No version/locked or version_def.h changes after finalize."
+            echo "No version/entries, version/locked, or version_def.h changes after relocate + finalize."
           else
             echo "has_changes=true" >> "$GITHUB_OUTPUT"
           fi
@@ -74,12 +78,16 @@ jobs:
           commit-message: "chore(version): sync version/locked from entries after merge"
           branch: cursor/version-lock-from-entries-${{ github.run_id }}
           title: "chore(version): sync version/locked from entries after merge to develop"
+          add-paths: |
+            version/entries/**
+            version/locked/**
+            userland/shell/version_def.h
           body: |
-            Automated sync after a push to `develop`: ran `finalize_version_locked.sh`, `stamp_version_release_date.sh`, and `gen_version_def.sh`.
+            Automated sync after a push to `develop`: ran `relocate_root_prerelease_ver_to_preproduction.sh`, `finalize_version_locked.sh`, `stamp_version_release_date.sh`, and `gen_version_def.sh`.
 
-            **Branch protection** on `develop` (PR-only, required checks, verified signatures) means the sync cannot land as a direct push. Merge this PR to publish `version/locked/` and `userland/shell/version_def.h`.
+            **Branch protection** on `develop` (PR-only, required checks, verified signatures) means the sync cannot land as a direct push. Merge this PR to publish `version/entries` moves (when relocate applied), `version/locked/`, and `userland/shell/version_def.h`.
 
-            `stamp_version_release_date.sh` appends `RELEASE_DATE=YYYY-MM-DD` (merge day) to any `*.ver` under `version/locked` and `version/entries` that does not already declare `RELEASE_DATE`, keeping the trees identical before changelog generation in CI.
+            Root `PRERELEASE=1` rows are stamped with `RELEASE_DATE=YYYY-MM-DD` on the relocate run (calendar day) if missing, then moved under `preproduction A.B.C/` before finalize. `stamp_version_release_date.sh` still appends merge-day `RELEASE_DATE` to any remaining `*.ver` paths that lack the key.
 
             Uses **`BPFORBES_PAT`** or **`VERSION_LOCK_PAT`** when set; otherwise **`GITHUB_TOKEN`**. Auto-merge is enabled by the workflow when the PR is opened (waits for all required checks configured as required on the branch).
 
