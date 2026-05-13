@@ -422,7 +422,5 @@ parity:
 	$(MAKE) clean && $(MAKE) ARCH=x86_64_gas VM_ENABLE=1
 	@echo "Parity: all platforms built successfully."
 
-# The checksum file $(VERSION_ENTRIES_VER_SUM) is a make prerequisite for $(VERSION_DEF).
-# FORCE ensures the checksum is recomputed every run (paths may contain spaces).
-# The checksum file is only overwritten when its contents actually change.
+# Recompute version/entries checksum (paths may contain spaces; not used as make prerequisites).
 FORCE:

@@ -138,7 +138,7 @@ else
     best_tag=$(get_prerelease_tag_token "$best_file")
   fi
   display_line="${best_tag} ${pm}.${ps}.${epr}"
-  if (( best_dv >= 1 )); then
+  if [[ -n "$best_dv" ]] && (( best_dv >= 1 )); then
     display_line+=", BUILD ${best_dv}"
   fi
 fi
