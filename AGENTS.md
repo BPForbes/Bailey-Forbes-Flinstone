@@ -51,40 +51,11 @@ Run builds from the repository root.
 - If a required toolchain or library is missing, install the packages listed in the Cursor Cloud section, then rerun the tests instead of skipping them.
 - Document any true environment blocker in the final response, including the exact command that failed and the missing prerequisite.
 
-## Pre-merge review (CodeRabbit and Codex CLI)
-
-On substantive feature work, **do not `git push`** until **CodeRabbit** and **Codex CLI** are both **satisfied** for the current diff (local **`git commit`** during iteration is fine). “Satisfied” means: triage is complete, every item the author agrees is a **must-fix** is addressed, and remaining optional or rejected feedback is documented on the PR with rationale where needed.
-
-### Install the CLIs when missing
-
-If **`coderabbit`** or **`codex`** is not on `PATH`, **try to install** them (use what the environment allows):
-
-- **CodeRabbit CLI:** `curl -fsSL https://cli.coderabbit.ai/install.sh | sh` (Linux/macOS) or **`brew install coderabbit`**; then **`coderabbit auth login`**. See **https://docs.coderabbit.ai/cli** .
-- **Codex CLI:** **`npm install -g @openai/codex`** or **`brew install --cask codex`**; complete sign-in per **`codex`** first-run prompts. See OpenAI’s Codex quickstart / package **`@openai/codex`**.
-
-If installation still fails (no network, policy, missing `curl`/`brew`/`npm`), record the exact commands and errors in the PR and **do not push** until a human or another environment can run both tools.
-
-### How to use them
-
-1. **CodeRabbit** — Open or update the GitHub pull request so CodeRabbit runs (CLI can augment or mirror PR review per **https://docs.coderabbit.ai/cli**).
-2. **Codex CLI** — Run **`codex`** against the working tree or diff as the team configures it (e.g. review or apply pass).
-
-### Triage: not every comment needs a code change
-
-- **Fix** findings that address correctness, security, spec/API mismatches, real bugs, missing tests, or clear violations of project conventions.
-- **Skip or defer** pure style nits, redundant comments, or subjective preferences that do not improve the code meaningfully; reply on the PR with a one-line rationale (and open a follow-up issue only if tracking is useful).
-
-### Push gate
-
-**`git push`** only after **CodeRabbit** review is in a good state (no unresolved blocking threads you accept as required) **and** the latest **`codex`** pass has **no accepted must-fix items** left.
-
-**`.coderabbit.yaml`** configures CodeRabbit; keep it aligned when review or versioning policy text there must change (also update **AGENTS.md**, **CLAUDE.md**, **`.cursor/rules/versioning.mdc`**, **`docs/versioning.md`**, and **`.cursor/rules/review_tools.mdc`** as needed).
-
 ## Versioning
 
-Long-form guide: **`docs/versioning.md`** (authoring **`.ver`** files, **`RELEASE_DATE`** automation after merge to **`develop`**, **A / B / C** semantics, and what GitHub Actions updates).
+Long-form guide: **`docs/versioning.md`** (authoring **`.ver`** files, **`RELEASE_DATE`** at relocate and after merge to **`develop`**, **A / B / C** semantics, and what GitHub Actions updates).
 
-The shipped shell version **A.B.C** is in **`userland/shell/version_def.h`**, **generated** from **`version/locked/*.ver`**: the header reflects the **highest** semver among **finalized** `.ver` files there. Author new and revised **`.ver`** files under **`version/entries/`**; when those changes land on **`develop`** (push), **Version lock on merge** in GitHub Actions runs finalize + header generation and **opens a pull request** into **`develop`** with the updated **`version/locked/`** and **`version_def.h`** (direct pushes to **`develop`** are usually blocked; use **Settings → Actions → General** workflow **read/write** plus **Allow GitHub Actions to create and approve pull requests**, or optional repo secret **`VERSION_LOCK_PAT`**).
+The shipped shell version **A.B.C** is in **`userland/shell/version_def.h`**, **generated** from all **`version/locked/**/*.ver`** files: the header reflects the **highest** semver among them (**`PRERELEASE`**, **`GM`**, **`DEV_VERSION`**, and **`preproduction A.B.C/`** paths are metadata only—see **`docs/versioning.md`** and **`make promote-preproduction-for-main`** before **`main`**). Author new and revised **`.ver`** files under **`version/entries/`**; when those changes land on **`develop`** (push), **Version lock on merge** in GitHub Actions runs finalize + header generation and **opens a pull request** into **`develop`** with the updated **`version/locked/`** and **`version_def.h`** (direct pushes to **`develop`** are usually blocked; use **Settings → Actions → General** workflow **read/write** plus **Allow GitHub Actions to create and approve pull requests**, or optional repo secret **`VERSION_LOCK_PAT`**).
 
 **Cursor / AI agents:** on feature PRs, **commit `version/entries/` only** (typically new or revised **`version/entries/*.ver`**). **Do not** commit **`version/locked/**`** or **`userland/shell/version_def.h`**—automation publishes those after merge to **`develop`**. Keep **`version/entries/ABOUT.txt`** byte-identical to the merge target’s **`version/locked/ABOUT.txt`** while **`version/locked/`** matches the target. **Maintainers** may run **`./scripts/finalize_version_locked.sh`** or **`make finalize-version-locked`** locally before merge when they want an early snapshot on the branch. **CMake** reads **`project(VERSION)`** from that same header at configure time—do not hardcode a separate semver triple in **`CMakeLists.txt`**.
 
@@ -96,7 +67,10 @@ Author each release as **`.ver`** files under **`version/entries/`** (see **`ver
 - **`STANDARD_VERSION`** (alias **`VERSION_STANDARD`**)
 - **`RELEASE_VERSION`** — third component **C** (aliases **`MINOR_VERSION`**, **`VERSION_PATCH`**)
 - **`DESCRIPTION`** — single line (`DESCRIPTION=...`) or multiline heredoc (`DESCRIPTION<<TAG` … `TAG`); see `version/entries/ABOUT.txt`
-- **`RELEASE_DATE`** — optional `YYYY-MM-DD`; authors usually **omit** it in **`version/entries/`** and let **Version lock on merge** append the merge calendar date via `stamp_version_release_date.sh` after finalize. If still absent, `scripts/gen_version_changelog.c` may use the generator’s local calendar date (`time.h`) at generation time
+- **`RELEASE_DATE`** — optional `YYYY-MM-DD`. Root **`PRERELEASE=1`** rows get **`RELEASE_DATE`** on the **relocate** run (calendar day) if missing, then move under **`preproduction A.B.C/`** (`./scripts/relocate_root_prerelease_ver_to_preproduction.sh`, CI). Other rows usually omit **`RELEASE_DATE`** in **`version/entries/`** and let **Version lock on merge** append the merge calendar date via **`stamp_version_release_date.sh`** after finalize. If still absent, `scripts/gen_version_changelog.c` may use the generator’s local calendar date (`time.h`) at generation time
+- **`PRERELEASE`** — **`0`** or **`1`**; **`1`** = prerelease row that must end under **`version/entries/preproduction A.B.C/`** (same-repo PR CI may commit the move from the entries root; fork PRs must run relocate locally — see **`docs/versioning.md`**).
+- **`DEV_VERSION`** — optional non-negative int on **root** rows while still **`PRERELEASE=0`** (tracks develop-side iteration). With **`PRERELEASE=1`**, use **`>= 1`** and bump with **`./scripts/bump_dev_version.sh`**.
+- **`GM`** — **`0`** or **`1`** (go-to-main). **`GM=1`** is allowed **only** under **`preproduction A.B.C/`** and at most once per directory. Before **`main`**, run **`./scripts/promote_preproduction_for_main.sh`**, which merges **all** prerelease **`.ver`** rows in that folder (sorted by **`DEV_VERSION`**) into one root GA file under **`version/entries/`**, **drops** **`PRERELEASE`**, **`GM`**, and **`DEV_VERSION`**, and **removes** the **`preproduction *`** directory from **`version/entries`** (and from **`version/locked`** only if a legacy copy exists). **`finalize_version_locked.sh`** does **not** copy **`preproduction */`** into **`locked`**; the merged root **`.ver`** is what publish sees on the next finalize. **`main`** must have no **`preproduction *`** dirs and no **`PRERELEASE=1`**, **`GM=1`**, or **`DEV_VERSION=`** lines — CI **`check_version_main_prerelease_policy.sh`**.
 
 On a **feature branch before merge**, you may freely add, edit, or remove **`.ver`** files under **`version/entries/`** that are **not** yet reflected in **`version/locked/`**.
 
@@ -105,19 +79,19 @@ On a **feature branch before merge**, you may freely add, edit, or remove **`.ve
 ### Lock system (agents, reviewers, and automation)
 
 - **Never edit finalized release files.** Any path under **`version/locked/`** that already exists on the **merge base / target branch** is **immutable**: it is the published record. Do **not** rewrite it in place—add or adjust prose under **`version/entries/`**; publishing **`version/locked/`** is done by **Version lock on merge** (or by **maintainers** running finalize locally). CI enforces immutability on **`version/locked/`** for PRs (`scripts/check_version_locked_immutable.sh`), except **`version/locked/ABOUT.txt`**, which is companion documentation and may change with **`version/entries/ABOUT.txt`** in the same PR.
-- **`version/locked/`** is the **published snapshot** copied from **`version/entries/`** via **`./scripts/finalize_version_locked.sh`** (alias: **`make finalize-version-locked`** / **`make sync-version-locked`**). Until automation (or a maintainer) finalizes, **`version/entries/`** may contain extra drafts not present in **`version/locked/`**.
+- **`version/locked/`** is the **published snapshot** produced from **`version/entries/`** by **`./scripts/finalize_version_locked.sh`** (alias: **`make finalize-version-locked`** / **`make sync-version-locked`**): same as entries **except** top-level **`preproduction */`** directories are **not** copied into **`locked`**. Until automation (or a maintainer) finalizes, **`version/entries/`** may contain extra drafts (including under **`preproduction */`**) not present in **`version/locked/`**.
 - **CI** requires every file under **`version/locked/`** to exist under **`version/entries/`** with **identical content** (`scripts/check_version_locked_subset_of_entries.sh`)—so you cannot “advance” locked without aligning entries, and you cannot silently diverge a finalized file from the matching path under **`version/entries/`**.
 - **AI assistants** must **not** propose edits to historical paths under **`version/locked/`** that shipped on the target branch, or to **`version/entries/`** files that must byte-match **`version/locked/`** for the same relative path, except when intentionally updating **`version/entries/ABOUT.txt`** to stay identical to the target’s **`version/locked/ABOUT.txt`** while **`version/locked/`** is unchanged.
 
-CI verifies that the committed **`version_def.h`** matches **`scripts/gen_version_def.sh`** output (highest triple in **`version/locked/*.ver`**).
+CI verifies that the committed **`version_def.h`** matches **`scripts/gen_version_def.sh`** output (highest triple in **`version/locked/**/*.ver`**).
 
-**Changelog binary:** **GitHub Actions** compiles **`scripts/gen_version_changelog.c`**, which reads **`version/locked`** (headline version = highest finalized entry), then emits **`userland/shell/version_changelog.c`** (ignored by git). **`make … CHANGELOG_CI=1`** links **`VERSION_CHANGELOG[]`** in CI only. Plain **`make`** omits changelog unless you generate that file and pass **`CHANGELOG_CI=1`**. See **`scripts/templates/version_changelog.example.c`** for shape.
+**Changelog binary:** **GitHub Actions** compiles **`scripts/gen_version_changelog.c`**, which reads **`version/locked` recursively** (headline version = highest finalized entry), then emits **`userland/shell/version_changelog.c`** (ignored by git). **`make … CHANGELOG_CI=1`** links **`VERSION_CHANGELOG[]`** in CI only. Plain **`make`** omits changelog unless you generate that file and pass **`CHANGELOG_CI=1`**. See **`scripts/templates/version_changelog.example.c`** for shape.
 
 ### Version lock on merge (GitHub Actions)
 
-On every **`push`** to **`develop`**, workflow **`version-lock-on-merge.yml`** runs **`finalize_version_locked.sh`** (full copy **`version/entries/`** → **`version/locked/`**), then **`gen_version_def.sh`**. If anything changed, it **opens a PR** into **`develop`** (via **`peter-evans/create-pull-request`**) instead of pushing directly, so branch protection and checks apply when someone merges that PR. Use **`GITHUB_TOKEN`** with the **Actions** settings above, **or** secret **`VERSION_LOCK_PAT`** (PAT with **contents** + **pull-requests** write). Workflow permissions: **`contents: write`** and **`pull-requests: write`**.
+On every **`push`** to **`develop`**, workflow **`version-lock-on-merge.yml`** runs **`relocate_root_prerelease_ver_to_preproduction.sh`**, then **`finalize_version_locked.sh`** (copies **`version/entries/`** → **`version/locked/`**, **excluding** top-level **`preproduction */`** trees), **`stamp_version_release_date.sh`**, then **`gen_version_def.sh`**. If anything changed, it **opens a PR** into **`develop`** (via **`peter-evans/create-pull-request`**) instead of pushing directly, so branch protection and checks apply when someone merges that PR. Use **`GITHUB_TOKEN`** with the **Actions** settings above, **or** secret **`VERSION_LOCK_PAT`** (PAT with **contents** + **pull-requests** write). Workflow permissions: **`contents: write`** and **`pull-requests: write`**.
 
-**Automation version PRs (review policy):** PRs opened **only** by that workflow (title/message like **`chore(version): sync version/locked from entries after merge`**, branch `cursor/version-lock-from-entries-*`) are **routine housekeeping**. **Do not** spend automatic or proactive AI/CodeRabbit review on them unless a **human** explicitly requests reviewers or asks for a review—then review normally.
+**Automation version PRs (review policy):** PRs opened **only** by that workflow (title/message like **`chore(version): sync version/locked from entries after merge`**, branch `cursor/version-lock-from-entries-*`) are **routine housekeeping**. **Do not** spend automatic or proactive bot review on them unless a **human** explicitly requests reviewers or asks for a review—then review normally.
 
 ### Optional deploy build (GitHub Actions / local)
 
@@ -142,11 +116,11 @@ Before merging **incoming → base** (e.g. `bug/*` → `develop`, `develop` → 
 1. Compare **published** **`VERSION_*` / `VERSION` on the target branch** (`userland/shell/version_def.h`, from **`version/locked/*.ver`** on the target) to the **incoming** release: either the semver in **`version/entries/*.ver`** on the incoming branch (must exceed the target) or incoming **`version_def.h`** if the PR already updated **`version/locked/`** via a maintainer finalize.
 2. **Incoming must be strictly newer** than the target for that merge.
 3. If both show the **same** version (e.g. both `2.0.0`), **update the incoming branch** so its **entries** record a version **one appropriate semver step ahead** of the target.
-4. Add **`version/entries/<A>_<B>_<C>_<slug>.ver`** as needed for the bump (typically **one** new file per feature PR; **edit** that file as the PR evolves rather than stacking several). Pushing to **`develop`** runs **Version lock on merge** in GitHub Actions (copies **`version/entries/`** → **`version/locked/`** and regenerates **`version_def.h`**, then opens a PR to merge those updates when needed). **Maintainers** may run **`make finalize-version-locked`** locally if they want **`version/locked/`** updated on the branch before merge.
+4. Add **`version/entries/<A>_<B>_<C>_<slug>.ver`** as needed for the bump (typically **one** new file per feature PR; **edit** that file as the PR evolves rather than stacking several). Pushing to **`develop`** runs **Version lock on merge** in GitHub Actions (**relocate**, copies **`version/entries/`** → **`version/locked/`** without **`preproduction */`**, regenerates **`version_def.h`**, then opens a PR to merge those updates when needed). **Maintainers** may run **`make finalize-version-locked`** locally if they want **`version/locked/`** updated on the branch before merge.
 
 Example: **`bug/…` → `develop`**, both at **`2.0.0`** → bump incoming to **`2.0.1`** (patch for a bugfix).
 
-Detailed wording also appears in **CLAUDE.md**, **`docs/versioning.md`**, **`.coderabbit.yaml`**, **`.cursor/rules/versioning.mdc`**, and **`.cursor/rules/review_tools.mdc`** — keep them aligned when policy changes. To print a machine-readable record from the current tree: `./scripts/export_version_record.sh`, `./scripts/export_version_record.sh --json`, or **`make version-record`**.
+Detailed wording also appears in **CLAUDE.md**, **`docs/versioning.md`**, **`.coderabbit.yaml`**, **`.cursor/rules/versioning.mdc`**, and **`.cursor/rules/review_tools.mdc`** — keep them aligned when versioning or optional review-hint text changes. To print a machine-readable record from the current tree: `./scripts/export_version_record.sh`, `./scripts/export_version_record.sh --json`, or **`make version-record`**.
 
 ## Implementation boundaries
 

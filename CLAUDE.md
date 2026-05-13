@@ -2,20 +2,15 @@
 
 This repository implements **Bailey-Forbes-Flinstone**: a educational OS/shell-style codebase with a host shell (`BPForbes_Flinstone_Shell`), kernel-layer modules, drivers, and optional VM builds. Build with `make` from the repo root; see **AGENTS.md** for toolchain install and targets.
 
-## Pre-merge review (CodeRabbit and Codex CLI)
-
-**Do not `git push`** until **CodeRabbit** and **Codex CLI** are **satisfied** for the current change (local commits during iteration are fine). Full policy—including **install attempts** when `coderabbit` / `codex` are missing (`curl`/`brew`/`npm`), **triage** (fix real issues; document intentional won’t-fix for low-value nits), and the **push gate**—is in **AGENTS.md** and **`.cursor/rules/review_tools.mdc`**. **`.coderabbit.yaml`** configures CodeRabbit; keep it aligned when policy text there changes (also update **AGENTS.md**, **`docs/versioning.md`**, **`.cursor/rules/versioning.mdc`**, and **`.cursor/rules/review_tools.mdc`**).
-
----
-
 ## Versioning (mandatory for merge-ready PRs)
 
 ### Lock system (AI assistants — mandatory)
 
 - **Never edit finalized paths under `version/locked/`** that already exist on the branch you are merging **into** (merge base). That tree is the **published** record on **`develop`**.
-- **Cursor / AI-authored feature PRs:** commit **`version/entries/*.ver`** (and keep **`version/entries/ABOUT.txt`** byte-identical to the merge target’s **`version/locked/ABOUT.txt`** while **`version/locked/`** is unchanged—CI `check_version_locked_subset_of_entries.sh`). **Do not** commit **`version/locked/**`** or **`userland/shell/version_def.h`** in those PRs: **Version lock on merge** (GitHub Actions after push to **`develop`**) runs **`finalize_version_locked.sh`**, stamps dates when applicable, **`gen_version_def.sh`**, and opens a PR to publish **`version/locked/`** and the header when needed. **Maintainers** may run finalize locally before merge if they want an early snapshot on the branch.
+- **Cursor / AI-authored feature PRs:** commit **`version/entries/*.ver`** (and keep **`version/entries/ABOUT.txt`** byte-identical to the merge target’s **`version/locked/ABOUT.txt`** while **`version/locked/`** is unchanged—CI `check_version_locked_subset_of_entries.sh`). **Do not** commit **`version/locked/**`** or **`userland/shell/version_def.h`** in those PRs: **Version lock on merge** (GitHub Actions after push to **`develop`**) runs **`relocate_root_prerelease_ver_to_preproduction.sh`**, **`finalize_version_locked.sh`**, stamps dates when applicable, **`gen_version_def.sh`**, and opens a PR to publish **`version/locked/`** and the header when needed. **Maintainers** may run finalize locally before merge if they want an early snapshot on the branch.
 - **`version/entries/*.ver`** may be added, edited, or removed on your branch; CI allows **`version/entries/`** to contain drafts not yet copied to **`version/locked/`**.
-- **`version/locked/`** is the **published snapshot** (automation copies **`version/entries/`** → **`version/locked/`**). Do not hand-tweak **`version/locked/`** on feature branches in agent workflows.
+- **Optional prerelease layout:** **`PRERELEASE=1`** rows belong under **`version/entries/preproduction A.B.C/`** (that tree is **not** copied into **`version/locked/`** by **`finalize_version_locked.sh`**). You may commit them at the **`version/entries/`** root on same-repo PRs; CI runs **`relocate_root_prerelease_ver_to_preproduction.sh`** (stamps missing **`RELEASE_DATE`**, then moves into **`preproduction */`**) before layout checks. Bump **`DEV_VERSION`** with **`./scripts/bump_dev_version.sh`**. Set **`GM=1`** on exactly one file when the line is ready, then run **`./scripts/promote_preproduction_for_main.sh`** (or **`make promote-preproduction-for-main`**) so every **`*.ver`** in that folder is merged into one root GA row under **`version/entries/`** and the **`preproduction *`** directory is removed from **`version/entries`** (and from **`version/locked`** only if a legacy copy existed). Before any merge that lands **`version/**`** on **`main`**, ensure that promotion has already run — **`main`** must not ship **`preproduction *`**, **`PRERELEASE=1`**, **`GM=1`**, or **`DEV_VERSION=`** — CI fails otherwise.
+- **`version/locked/`** is the **published snapshot** (automation copies **`version/entries/`** → **`version/locked/`**, **excluding** top-level **`preproduction */`**). Do not hand-tweak **`version/locked/`** on feature branches in agent workflows.
 - **Do not** include historical **`version/locked/**`** or bulk-edit **`version/entries/**`** in automated refactors without an explicit release workflow.
 - **`.ver` on first change:** When you start substantive code edits for a PR, **create** **`version/entries/… .ver`** immediately if the branch does not already have an entry for **this** PR’s work.
 - **One entry per PR:** For a single pull request, **one** **`version/entries/*.ver`** file is enough—**update** that file as the branch evolves (description and semver only if scope truly changes), instead of adding multiple new **`.ver`** files for the same PR.
@@ -55,10 +50,10 @@ Export current numbers without compiling: **`./scripts/export_version_record.sh`
 
 ## Where else this is documented
 
-- **AGENTS.md** — Cursor Cloud agents + versioning summary + CodeRabbit / Codex pre-merge policy  
+- **AGENTS.md** — Cursor Cloud agents and versioning summary  
 - **`docs/versioning.md`** — `.ver` authoring, `RELEASE_DATE` automation, **A / B / C** semantics  
-- **`.coderabbit.yaml`** — CodeRabbit review hints  
+- **`.coderabbit.yaml`** — optional CodeRabbit integration when enabled on the repo  
 - **`.cursor/rules/versioning.mdc`** — Cursor IDE versioning rules  
-- **`.cursor/rules/review_tools.mdc`** — Cursor IDE pre-merge review rules  
+- **`.cursor/rules/review_tools.mdc`** — optional tooling notes (no CLI push gate)
 
 Keep these documents aligned when changing policy.

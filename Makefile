@@ -122,10 +122,10 @@ OBJS = $(SRCS:.c=.o) $(ASMOBJS)
 TARGET = BPForbes_Flinstone_Shell
 .DEFAULT_GOAL := all
 
-# version_def.h is generated from version/locked/*.ver (highest A.B.C; finalize from version/entries first).
+# version_def.h is generated from version/locked/**/*.ver (highest A.B.C; finalize from version/entries first).
 VERSION_DEF := userland/shell/version_def.h
-VER_LOCKED_FILES := $(wildcard version/locked/*.ver)
-$(VERSION_DEF): $(VER_LOCKED_FILES) scripts/gen_version_def.sh
+VER_LOCKED_FILES := $(shell find version/locked -name '*.ver' -print 2>/dev/null)
+$(VERSION_DEF): scripts/gen_version_def.sh $(VER_LOCKED_FILES)
 	@./scripts/gen_version_def.sh
 
 all: $(TARGET)
@@ -147,6 +147,20 @@ gen-version-def:
 .PHONY: finalize-version-locked sync-version-locked
 finalize-version-locked sync-version-locked:
 	@./scripts/finalize_version_locked.sh
+
+# Merge GM=1 preproduction */ trees into one root GA .ver and delete those dirs from entries + locked.
+.PHONY: promote-preproduction-for-main bump-dev-version relocate-root-prerelease-ver
+promote-preproduction-for-main:
+	@./scripts/promote_preproduction_for_main.sh
+
+# Usage: make bump-dev-version VER=version/entries/preproduction\ 4.0.0/foo.ver
+bump-dev-version:
+	@test -n "$(VER)" || (echo "usage: make bump-dev-version VER=path/to/file.ver" >&2; exit 1)
+	@./scripts/bump_dev_version.sh "$(VER)"
+
+# Stamp missing RELEASE_DATE on root PRERELEASE=1 *.ver, then move into preproduction A.B.C/ (see docs/versioning.md).
+relocate-root-prerelease-ver:
+	@./scripts/relocate_root_prerelease_ver_to_preproduction.sh
 
 # Optional release build: changelog + CHANGELOG_CI=1 (version/locked is synced on merge to main/develop in CI; use finalize-version-locked locally if needed).
 .PHONY: deploy
