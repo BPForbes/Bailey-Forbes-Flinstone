@@ -122,10 +122,10 @@ OBJS = $(SRCS:.c=.o) $(ASMOBJS)
 TARGET = BPForbes_Flinstone_Shell
 .DEFAULT_GOAL := all
 
-# version_def.h is generated from version/locked/*.ver (highest A.B.C; finalize from version/entries first).
+# version_def.h is generated from version/locked/**/*.ver (highest A.B.C; finalize from version/entries first).
 VERSION_DEF := userland/shell/version_def.h
-VER_LOCKED_FILES := $(wildcard version/locked/*.ver)
-$(VERSION_DEF): $(VER_LOCKED_FILES) scripts/gen_version_def.sh
+VER_LOCKED_FILES := $(shell find version/locked -name '*.ver' -print 2>/dev/null)
+$(VERSION_DEF): scripts/gen_version_def.sh $(VER_LOCKED_FILES)
 	@./scripts/gen_version_def.sh
 
 all: $(TARGET)
@@ -148,15 +148,15 @@ gen-version-def:
 finalize-version-locked sync-version-locked:
 	@./scripts/finalize_version_locked.sh
 
-# Remove optional DEV_PHASE from all version/*.ver (run before merging version trees into main).
-.PHONY: strip-dev-phase-from-ver bump-dev-phase-in-ver
-strip-dev-phase-from-ver:
-	@./scripts/strip_dev_phase_from_ver_trees.sh
+# Remove preproduction */ trees and PRERELEASE=1 before merging version files into main.
+.PHONY: promote-preproduction-for-main bump-prerelease-iter
+promote-preproduction-for-main:
+	@./scripts/promote_preproduction_for_main.sh
 
-# Usage: make bump-dev-phase-in-ver VER=version/entries/4_0_0_foo.ver
-bump-dev-phase-in-ver:
-	@test -n "$(VER)" || (echo "usage: make bump-dev-phase-in-ver VER=path/to/file.ver" >&2; exit 1)
-	@./scripts/bump_dev_phase_in_ver.sh "$(VER)"
+# Usage: make bump-prerelease-iter VER=version/entries/preproduction\ 4.0.0/foo.ver
+bump-prerelease-iter:
+	@test -n "$(VER)" || (echo "usage: make bump-prerelease-iter VER=path/to/file.ver" >&2; exit 1)
+	@./scripts/bump_prerelease_iter.sh "$(VER)"
 
 # Optional release build: changelog + CHANGELOG_CI=1 (version/locked is synced on merge to main/develop in CI; use finalize-version-locked locally if needed).
 .PHONY: deploy

@@ -3,6 +3,7 @@
 # version/entries when that key is absent. Intended to run after
 # finalize_version_locked.sh (entries and locked are mirrors) so merge-time
 # dates are recorded before gen_version_def.sh and changelog generation.
+# Recurses into subdirectories (e.g. preproduction A.B.C/).
 set -euo pipefail
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 LCK="$ROOT/version/locked"
@@ -59,11 +60,11 @@ stamp_if_missing() {
   printf '\nRELEASE_DATE=%s\n' "$d" >>"$f"
 }
 
-shopt -s nullglob
-for f in "$LCK"/*.ver; do
+while IFS= read -r -d '' f; do
   stamp_if_missing "$f"
-  bf="$ENT/$(basename "$f")"
+  rel="${f#"$LCK"/}"
+  bf="$ENT/$rel"
   stamp_if_missing "$bf"
-done
+done < <(find "$LCK" -type f -name '*.ver' -print0 2>/dev/null)
 
-echo "stamp_version_release_date: stamped missing RELEASE_DATE (as $d) under $LCK and $ENT"
+echo "stamp_version_release_date: stamped missing RELEASE_DATE (as $d) under $LCK and $ENT (recursive)"

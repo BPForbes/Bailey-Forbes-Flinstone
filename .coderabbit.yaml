@@ -44,17 +44,13 @@ reviews:
     Prefer a rough balance of **about 15% comments to 85% code** in new or heavily touched areas: enough comments to explain non-obvious intent, invariants, and public contracts—avoid redundant narration of what the code already states line-by-line.
 
   path_instructions:
-    - path: "version/entries/*.ver"
+    - path: "version/**/*.ver"
       instructions: |
-        **Authoring area** — new `.ver` files live here. Prefer basenames **`A_B_C_short_slug.ver`** (semver triple then slug); avoid optional numeric serial prefixes like **`006_`** unless matching legacy files—ordering is by fields inside the file, not the filename. For each file: MAJOR_VERSION, STANDARD_VERSION, RELEASE_VERSION (or MINOR_VERSION / VERSION_PATCH), DESCRIPTION (single line or `DESCRIPTION<<DELIM` heredoc), optional **RELEASE_DATE** (`YYYY-MM-DD`), and optional **DEV_PHASE** (positive int: develop-only phase **D** for the same **A.B.C**; not part of **`VERSION`** in **`version_def.h`**; bump via **`scripts/bump_dev_phase_in_ver.sh`**). After merge, any path that also exists under **`version/locked/`** must stay byte-identical to locked until you intentionally change both via finalize. Agents: create a **`.ver`** on first substantive change if missing; **one** entry file per feature PR is enough—update it as the PR grows. **Do not** commit **`version/locked/**`** or **`userland/shell/version_def.h`** in AI-authored feature PRs (automation updates those after merge to **`develop`**). If the **pull request targets `main`**: **reject** any **`.ver`** that still contains **`DEV_PHASE=`**—run **`scripts/strip_dev_phase_from_ver_trees.sh`** before merge (CI **`check_version_dev_phase_absent_on_main.sh`**).
-
-    - path: "version/locked/**"
-      instructions: |
-        **Published snapshot** — copied from **`version/entries/`** via **`finalize_version_locked.sh`**. Do not approve hand edits that bypass **`version/entries/`**; never rewrite paths that already shipped on the target branch. For PRs into **`main`**, **`*.ver`** here must not contain **`DEV_PHASE=`** (strip on **`develop`** before the merge that publishes **`main`**).
+        **Authoring / locked** — `.ver` files: MAJOR/STANDARD/RELEASE, DESCRIPTION, optional RELEASE_DATE, optional **PRERELEASE** (**0**/**1**) and **PRERELEASE_ITER**. **`PRERELEASE=1`** rows must live under **`version/entries/preproduction A.B.C/`** (directory name matches semver; see **`docs/versioning.md`**). Bump iter with **`scripts/bump_prerelease_iter.sh`**. **`VERSION`** in **`version_def.h`** is **A.B.C** only (recursive **`version/locked/**/*.ver`**). Agents: do **not** commit **`version/locked/**`** or **`version_def.h`** on typical feature PRs. If the **PR targets `main`**: require **`promote_preproduction_for_main.sh`** already run — no **`preproduction *`** dirs and no **`PRERELEASE=1`** (CI **`check_version_main_prerelease_policy.sh`**).
 
     - path: "userland/shell/version_def.h"
       instructions: |
-        This file is **generated** from **`version/locked/*.ver`** (`scripts/gen_version_def.sh` / `make`); do not hand-edit **`VERSION_*`**. Bumps follow **semver `A.B.C`** with precedence **`A` > `B` > `C`**: increment only the highest applicable component for the release, keep more-significant (left) components unchanged, set less-significant (right) components to **0** (e.g. **`2.2.4` → `2.3.0`**). Incoming branch version must exceed the target before merge; see AGENTS.md / CLAUDE.md.
+        This file is **generated** from **`version/locked/**/*.ver`** (`scripts/gen_version_def.sh` / `make`); do not hand-edit **`VERSION_*`**. Bumps follow **semver `A.B.C`** with precedence **`A` > `B` > `C`**: increment only the highest applicable component for the release, keep more-significant (left) components unchanged, set less-significant (right) components to **0** (e.g. **`2.2.4` → `2.3.0`**). Incoming branch version must exceed the target before merge; see AGENTS.md / CLAUDE.md.
 
     - path: "AGENTS.md"
       instructions: |

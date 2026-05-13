@@ -1,6 +1,8 @@
+#define _GNU_SOURCE 1
+
 /*
- * Generate userland/shell/version_changelog.c from version/locked files ending in .ver
- * (finalized release notes) and the highest A.B.C among them for the headline string.
+ * Generate userland/shell/version_changelog.c from all .ver files under version/locked/ (recursive;
+ * finalized release notes) and the highest A.B.C among them for the headline string.
  * Used by GitHub Actions before make CHANGELOG_CI=1.
  *
  * Each .ver file (UTF-8 text) contains lines such as:
@@ -9,10 +11,9 @@
  *   RELEASE_VERSION=4        (aliases: MINOR_VERSION, VERSION_PATCH)
  *   RELEASE_DATE=2026-05-11  (optional; YYYY-MM-DD. If omitted, changelog uses
  *                             the generator's local calendar date via time(3).)
- *   DEV_PHASE=2              (optional develop-phase D for same A.B.C; omitted
- *                             means logical phase 1 for ordering only. Never
- *                             appears in userland/shell/version_def.h. Must be
- *                             absent on main — see scripts/strip_dev_phase_from_ver_trees.sh.)
+ *   PRERELEASE=0|1           (optional; 1 = prerelease row. With PRERELEASE=1, keep
+ *                             the .ver under version/.../preproduction A.B.C/ - see docs/versioning.md.)
+ *   PRERELEASE_ITER=n        (optional non-negative int; with PRERELEASE=1 use n>=1 and bump per iteration.)
  *   DESCRIPTION=One-line release notes (value may be quoted)
  *   DESCRIPTION<<DELIM      (heredoc: following lines until a line equal to
  *   ... arbitrary text ...   DELIM after trim, become the description; newlines kept)
@@ -26,10 +27,7 @@
  * If there are no .ver files, falls back to parsing VERSION_* from userland/shell/version_def.h.
  */
 
-#define _POSIX_C_SOURCE 200809L
-
 #include <ctype.h>
-#include <dirent.h>
 #include <errno.h>
 #include <limits.h>
 #include <stdarg.h>
@@ -39,6 +37,7 @@
 #include <sys/stat.h>
 #include <sys/types.h>
 #include <time.h>
+#include <ftw.h>
 
 /*
  * Create leading components (mkdir -p semantics). Path must be mutable.
@@ -182,7 +181,8 @@ static int parse_triplet(const char *text, int *ma, int *st, int *pa) {
 
 typedef struct {
     int ma, st, rel;
-    int dev_phase; /* develop-only phase D (>=1); default 1 if key omitted */
+    int prerelease; /* 0 = GA, 1 = prerelease */
+    int prerelease_iter;
     char *desc; /* malloc; multiline allowed */
     char date_iso[16]; /* YYYY-MM-DD from file, or empty → use generator date */
     char relpath[PATH_MAX];
@@ -346,7 +346,7 @@ static int parse_ver_file(const char *fullpath, const char *relpath, VerEntry *e
     free(raw);
 
     int ma = -1, st = -1, rel = -1;
-    int dev_phase = -1; /* -1: default to 1 after parse */
+    int pr = -1, pr_iter = -1; /* -1: default after parse */
     char date_iso[16] = "";
     char *desc = NULL;
 
@@ -459,19 +459,34 @@ static int parse_ver_file(const char *fullpath, const char *relpath, VerEntry *e
             i++;
             continue;
         }
-        if (match_key(trim, "DEV_PHASE", &val)) {
+        if (match_key(trim, "PRERELEASE", &val)) {
             strncpy(work, val, sizeof work - 1);
             work[sizeof work - 1] = '\0';
             trim_value(work, sizeof work);
-            int dp;
-            if (parse_positive_int(work, &dp) != 0 || dp < 1) {
+            int pv;
+            if (parse_positive_int(work, &pv) != 0 || (pv != 0 && pv != 1)) {
                 fprintf(stderr,
-                        "gen_version_changelog: DEV_PHASE must be a positive "
-                        "integer in %s\n",
+                        "gen_version_changelog: PRERELEASE must be 0 or 1 in %s\n",
                         fullpath);
                 goto bad;
             }
-            dev_phase = dp;
+            pr = pv;
+            i++;
+            continue;
+        }
+        if (match_key(trim, "PRERELEASE_ITER", &val)) {
+            strncpy(work, val, sizeof work - 1);
+            work[sizeof work - 1] = '\0';
+            trim_value(work, sizeof work);
+            int pi;
+            if (parse_positive_int(work, &pi) != 0) {
+                fprintf(stderr,
+                        "gen_version_changelog: PRERELEASE_ITER must be a "
+                        "non-negative integer in %s\n",
+                        fullpath);
+                goto bad;
+            }
+            pr_iter = pi;
             i++;
             continue;
         }
@@ -521,13 +536,24 @@ static int parse_ver_file(const char *fullpath, const char *relpath, VerEntry *e
         return -1;
     }
 
-    if (dev_phase < 0)
-        dev_phase = 1;
+    if (pr < 0)
+        pr = 0;
+    if (pr_iter < 0)
+        pr_iter = 0;
+    if (pr == 1 && pr_iter < 1) {
+        fprintf(stderr,
+                "gen_version_changelog: PRERELEASE=1 requires PRERELEASE_ITER>=1 "
+                "in %s\n",
+                fullpath);
+        free(desc);
+        return -1;
+    }
 
     e->ma = ma;
     e->st = st;
     e->rel = rel;
-    e->dev_phase = dev_phase;
+    e->prerelease = pr;
+    e->prerelease_iter = pr_iter;
     e->desc = desc;
     snprintf(e->date_iso, sizeof e->date_iso, "%s", date_iso);
     e->valid = 1;
@@ -574,9 +600,46 @@ static int cmp_entry_desc(const void *a, const void *b) {
         return eb->st - ea->st;
     if (ea->rel != eb->rel)
         return eb->rel - ea->rel;
-    if (ea->dev_phase != eb->dev_phase)
-        return eb->dev_phase - ea->dev_phase;
+    if (ea->prerelease != eb->prerelease)
+        return ea->prerelease - eb->prerelease; /* GA (0) before prerelease (1) */
+    if (ea->prerelease_iter != eb->prerelease_iter)
+        return eb->prerelease_iter - ea->prerelease_iter;
     return strcmp(ea->relpath, eb->relpath);
+}
+
+static char **g_ver_paths;
+static size_t g_ver_n;
+
+static int ver_paths_add(const char *fullpath) {
+    char **na = realloc(g_ver_paths, (g_ver_n + 1u) * sizeof *na);
+    if (!na)
+        return -1;
+    g_ver_paths = na;
+    char *copy = strdup(fullpath);
+    if (!copy)
+        return -1;
+    g_ver_paths[g_ver_n++] = copy;
+    return 0;
+}
+
+static int ver_paths_nftw(const char *fpath, const struct stat *sb, int tflag,
+                          struct FTW *ftwbuf) {
+    (void)sb;
+    (void)ftwbuf;
+    if (tflag != FTW_F)
+        return 0;
+    size_t n = strlen(fpath);
+    if (n < 4 || strcmp(fpath + n - 4, ".ver") != 0)
+        return 0;
+    return ver_paths_add(fpath);
+}
+
+static void ver_paths_free(void) {
+    for (size_t i = 0; i < g_ver_n; i++)
+        free(g_ver_paths[i]);
+    free(g_ver_paths);
+    g_ver_paths = NULL;
+    g_ver_n = 0;
 }
 
 static int gen_oom_cleanup(Buf *hdr, Buf *bd, Buf *ent, VerEntry *lst, size_t n) {
@@ -629,50 +692,60 @@ int main(int argc, char **argv) {
     VerEntry *list = NULL;
     size_t nent = 0;
 
-    DIR *ed = opendir(locked_dir);
-    if (!ed) {
-        if (errno != ENOENT) {
-            fprintf(stderr, "gen_version_changelog: cannot open %s: %s\n",
-                    locked_dir, strerror(errno));
+    g_ver_paths = NULL;
+    g_ver_n = 0;
+    struct stat stbuf;
+    if (stat(locked_dir, &stbuf) == 0) {
+        if (!S_ISDIR(stbuf.st_mode)) {
+            fprintf(stderr, "gen_version_changelog: not a directory: %s\n", locked_dir);
             return 1;
         }
-    } else {
-        struct dirent *de;
-        while ((de = readdir(ed)) != NULL) {
-            const char *name = de->d_name;
-            size_t nl = strlen(name);
-            if (nl < 5 || strcmp(name + nl - 4, ".ver") != 0)
-                continue;
-            char full[PATH_MAX];
-            char rel[PATH_MAX];
-            if (snprintf(full, sizeof full, "%s/%s", locked_dir, name) >=
-                    (int)sizeof full ||
-                snprintf(rel, sizeof rel, "version/locked/%s", name) >=
-                    (int)sizeof rel) {
-                fprintf(stderr, "gen_version_changelog: path too long\n");
-                closedir(ed);
-                ver_list_free(list, nent);
-                return 1;
-            }
-            VerEntry ent;
-            if (parse_ver_file(full, rel, &ent) != 0) {
-                closedir(ed);
-                ver_list_free(list, nent);
-                return 1;
-            }
-            VerEntry *np = realloc(list, (nent + 1) * sizeof *np);
-            if (!np) {
-                closedir(ed);
-                free(ent.desc);
-                ver_list_free(list, nent);
-                fprintf(stderr, "gen_version_changelog: out of memory\n");
-                return 1;
-            }
-            list = np;
-            list[nent++] = ent;
+        if (nftw(locked_dir, ver_paths_nftw, 40, 0) != 0) {
+            fprintf(stderr, "gen_version_changelog: walk %s failed\n", locked_dir);
+            ver_paths_free();
+            return 1;
         }
-        closedir(ed);
+    } else if (errno != ENOENT) {
+        fprintf(stderr, "gen_version_changelog: cannot stat %s: %s\n", locked_dir,
+                strerror(errno));
+        return 1;
     }
+
+    for (size_t vi = 0; vi < g_ver_n; vi++) {
+        const char *full = g_ver_paths[vi];
+        char rel[PATH_MAX];
+        size_t ld = strlen(locked_dir);
+        if (strncmp(full, locked_dir, ld) != 0 || full[ld] != '/') {
+            fprintf(stderr, "gen_version_changelog: internal path error\n");
+            ver_paths_free();
+            ver_list_free(list, nent);
+            return 1;
+        }
+        const char *tail = full + ld + 1;
+        if (snprintf(rel, sizeof rel, "version/locked/%s", tail) >= (int)sizeof rel) {
+            fprintf(stderr, "gen_version_changelog: path too long\n");
+            ver_paths_free();
+            ver_list_free(list, nent);
+            return 1;
+        }
+        VerEntry ent;
+        if (parse_ver_file(full, rel, &ent) != 0) {
+            ver_paths_free();
+            ver_list_free(list, nent);
+            return 1;
+        }
+        VerEntry *np = realloc(list, (nent + 1) * sizeof *np);
+        if (!np) {
+            ver_paths_free();
+            free(ent.desc);
+            ver_list_free(list, nent);
+            fprintf(stderr, "gen_version_changelog: out of memory\n");
+            return 1;
+        }
+        list = np;
+        list[nent++] = ent;
+    }
+    ver_paths_free();
 
     if (nent > 0) {
         qsort(list, nent, sizeof *list, cmp_entry_desc);
@@ -683,7 +756,7 @@ int main(int argc, char **argv) {
         vtxt = read_entire_file(vdef);
         if (!vtxt || !*vtxt) {
             fprintf(stderr,
-                    "gen_version_changelog: no version/locked/*.ver and cannot read %s\n",
+                    "gen_version_changelog: no version/locked/**/*.ver and cannot read %s\n",
                     vdef);
             free(vtxt);
             ver_list_free(list, nent);
@@ -714,7 +787,7 @@ int main(int argc, char **argv) {
     Buf body = {0};
 
     if (buf_append_fmt(&header_line,
-                       "%s (%s) - changelog from version/locked (*.ver); see AGENTS.md\n",
+                       "%s (%s) - changelog from version/locked/**/*.ver; see AGENTS.md\n",
                        ver_buf, headline_date) != 0)
         return gen_oom_cleanup(&header_line, &body, NULL, list, nent);
 
@@ -749,7 +822,7 @@ int main(int argc, char **argv) {
     } else {
         if (buf_append_cstr(&body, "    \"") != 0 ||
             append_escaped(&body,
-                           "(no version/locked/*.ver files — finalize from version/entries first)\n") !=
+                           "(no version/locked/**/*.ver files — finalize from version/entries first)\n") !=
                 0 ||
             buf_append_cstr(&body, "\"\n") != 0)
             return gen_oom_cleanup(&header_line, &body, NULL, list, nent);
