@@ -23,9 +23,12 @@ Date stamp policy (DEV / preproduction intake):
 
 RELEASE_DATE (merge finalize):
   After pushes to develop, Version lock on merge runs finalize_version_locked.sh,
-  then stamp_version_release_date.sh, which still appends RELEASE_DATE (merge calendar
-  day) to any *.ver under version/locked and mirrored paths under version/entries that
-  lack the key. GA-oriented root rows usually rely on this pass.
+  then stamp_version_release_date.sh, which appends RELEASE_DATE (merge calendar
+  day) to any *.ver under version/locked and the same relative paths under
+  version/entries, then stamps every *.ver under version/entries recursively (including
+  preproduction */ trees that finalize does not copy into locked) if the key is still
+  missing. GA-oriented root rows usually rely on this pass; preproduction-only rows
+  rely on the entries-wide pass.
 
   If RELEASE_DATE is still absent where tooling expects it, scripts/gen_version_changelog.c
   may use the generator's local calendar date at generation time (see that script).

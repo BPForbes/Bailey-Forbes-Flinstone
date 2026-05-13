@@ -72,7 +72,7 @@ After a push to **`develop`**, the **Version lock on merge** workflow (`.github/
 
 1. **`relocate_root_prerelease_ver_to_preproduction.sh`** — same root → **`preproduction */`** rule as CI (stamps missing **`RELEASE_DATE`** on those root rows first).
 2. **`finalize_version_locked.sh`** — copies **`version/entries/`** → **`version/locked/`**, **omitting** top-level **`preproduction A.B.C/`** directories.
-3. **`stamp_version_release_date.sh`** — appends **`RELEASE_DATE=`** (merge calendar day) to any **`*.ver`** under **`version/locked`** and the mirrored paths under **`version/entries`** that **still** lack **`RELEASE_DATE`**, keeping the two trees aligned.
+3. **`stamp_version_release_date.sh`** — appends **`RELEASE_DATE=`** (merge calendar day) to any **`*.ver`** under **`version/locked`** and the same relative paths under **`version/entries`**, then to **every** **`*.ver`** under **`version/entries`** recursively (including top-level **`preproduction */`** trees that **finalize** does not copy into **`locked`**) that **still** lack **`RELEASE_DATE`**.
 4. **`gen_version_def.sh`** — regenerates **`userland/shell/version_def.h`**.
 
 If automation opens a follow-up PR (e.g. `chore(version): sync version/locked from entries after merge`), merging that PR completes publication of locked files, any **entries** path moves from relocate, and the header on **`develop`**.

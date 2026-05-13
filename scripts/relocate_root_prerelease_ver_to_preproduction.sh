@@ -5,8 +5,9 @@
 #
 # For each such file, if RELEASE_DATE= is not yet set, appends RELEASE_DATE=YYYY-MM-DD
 # (calendar day of this run) while the file is still at the root — before the move —
-# so preproduction rows carry the relocation-day stamp. Merge-time
-# stamp_version_release_date.sh still fills missing dates on other *.ver paths.
+# so preproduction rows carry the relocation-day stamp. On develop, merge-time
+# stamp_version_release_date.sh also walks all version/entries/**/*.ver (including
+# under preproduction */) for any RELEASE_DATE still missing after finalize.
 #
 # Usage:
 #   ./scripts/relocate_root_prerelease_ver_to_preproduction.sh
