@@ -4,7 +4,7 @@
 #     version/locked/**/*.ver (recursive). PRERELEASE / GM / DEV_VERSION are ignored there.
 #   - Display string VERSION_LINE: if any version/entries/**/*.ver has PRERELEASE=1,
 #     the "newest" such row (highest semver, then highest DEV_VERSION) becomes
-#     `PRERELEASE_TAG A.B.C` with optional ` BUILD-n` when DEV_VERSION>=1 (default tag PRE).
+#     `PRERELEASE_TAG A.B.C` with optional `, BUILD n` when DEV_VERSION>=1 (default tag PRE).
 #     Otherwise VERSION_LINE matches VERSION (locked-only / no active prerelease in entries).
 #
 # Usage:
@@ -139,7 +139,7 @@ else
   fi
   display_line="${best_tag} ${pm}.${ps}.${epr}"
   if [[ -n "$best_dv" ]] && (( best_dv >= 1 )); then
-    display_line+=" BUILD-${best_dv}"
+    display_line+=", BUILD ${best_dv}"
   fi
 fi
 
@@ -159,7 +159,7 @@ emit() {
  *
  * VERSION_LINE is the shell-facing display string: when any .ver under version/entries/
  * has PRERELEASE=1, it shows PRERELEASE_TAG (default PRE), that row semver A.B.C, and
- * optional BUILD-n (n from DEV_VERSION) when DEV_VERSION>=1; otherwise VERSION_LINE
+ * optional ", BUILD n" (n from DEV_VERSION) when DEV_VERSION>=1; otherwise VERSION_LINE
  * matches VERSION.
  *
  * To bump shipped semver: add new .ver files under version/entries/, finalize to

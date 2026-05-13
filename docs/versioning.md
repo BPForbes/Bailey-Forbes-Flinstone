@@ -34,7 +34,7 @@ Ordering of multiple `.ver` files is by the **numeric fields inside** each file,
 
 ## Preproduction directories, **`PRERELEASE`**, **`GM`**, and **`DEV_VERSION`**
 
-Preproduction metadata uses **`PRERELEASE`**, optional **`PRERELEASE_TAG`**, **`GM`** (go-to-main), and **`DEV_VERSION`** (develop iteration “D” in an **`A.B.C.D`** sense — **`D`** is **not** part of the basename; **`DEV_VERSION`** feeds **`VERSION_LINE`** / **`BUILD-*`**, not **`VERSION_*`** / **`VERSION`** from **`version/locked/`**).
+Preproduction metadata uses **`PRERELEASE`**, optional **`PRERELEASE_TAG`**, **`GM`** (go-to-main), and **`DEV_VERSION`** (develop iteration “D” in an **`A.B.C.D`** sense — **`D`** is **not** part of the basename; **`DEV_VERSION`** feeds the **`, BUILD n`** suffix in **`VERSION_LINE`**, not **`VERSION_*`** / **`VERSION`** from **`version/locked/`**).
 
 | Key | Meaning |
 |-----|--------|

@@ -10,7 +10,7 @@
  *
  * VERSION_LINE is the shell-facing display string: when any .ver under version/entries/
  * has PRERELEASE=1, it shows PRERELEASE_TAG (default PRE), that row semver A.B.C, and
- * optional BUILD-n (n from DEV_VERSION) when DEV_VERSION>=1; otherwise VERSION_LINE
+ * optional ", BUILD n" (n from DEV_VERSION) when DEV_VERSION>=1; otherwise VERSION_LINE
  * matches VERSION.
  *
  * To bump shipped semver: add new .ver files under version/entries/, finalize to
@@ -26,6 +26,6 @@
 #define VERSION \
     VERSION_STR(VERSION_MAJOR) "." VERSION_STR(VERSION_STANDARD) "." VERSION_STR(VERSION_PATCH)
 
-#define VERSION_LINE "PRE 4.0.0 BUILD-2"
+#define VERSION_LINE "PRE 4.0.0, BUILD 2"
 
 #endif /* VERSION_DEF_H */
