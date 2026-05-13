@@ -5,5 +5,3 @@ PRERELEASE=1
 DEV_VERSION=2
 GM=0
 DESCRIPTION=stamp_version_release_date.sh: after the locked plus mirrored-entries pass, walk every version/entries/**/*.ver (including preproduction */ trees that finalize does not copy into version/locked) and append merge-day RELEASE_DATE= when the key is still missing, so Version lock on merge applies dates to preproduction-only rows.
-
-RELEASE_DATE=2026-05-13
