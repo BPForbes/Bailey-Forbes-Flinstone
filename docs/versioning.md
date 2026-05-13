@@ -26,7 +26,7 @@ The shell reports **`VERSION`** as **`A.B.C`**. The numeric fields in `.ver` fil
 
 ## Creating and handling `.ver` files
 
-1. On the **first** substantive code or docs change for a pull request, add **`version/entries/<A>_<B>_<C>_<short_slug>.ver`** if no entry yet covers that PR (prefer one `.ver` per PR; revise it as the branch evolves).
+1. On the **first** substantive code or docs change for a pull request, add **`version/entries/<A>_<B>_<C>_<short_slug>.ver`** at the **`version/entries/`** root if nothing yet covers that PR. For **`PRERELEASE=1`**, **do not** hand-add new **`.ver`** paths under **`preproduction <A>.<B>.<C>/`** on same-repo branches—author at the root; CI **`relocate_root_prerelease_ver_to_preproduction.sh`** moves them into that directory. **AI/automation:** the **preproduction version** is **A.B.C** read from **`version/entries/preproduction <A>.<B>.<C>/`** directory names (**`PRERELEASE=1`** rows land there **after** relocate)—do **not** add a **new root** **`.ver`** at **`version/entries/`** whose **A.B.C** is **numerically below** that **A.B.C** unless a **maintainer explicitly** requests that separate GA release. Track ongoing work with **`DEV_VERSION`** or **additional root `*.ver` files** with the same semver and **`PRERELEASE=1`**. For a **single GA feature** at the entries root without **`preproduction */`**, prefer **one** **`.ver`** revised in place.
 2. Set **`MAJOR_VERSION`**, **`STANDARD_VERSION`**, **`RELEASE_VERSION`**, and **`DESCRIPTION`** (single line or `DESCRIPTION<<DELIM` … `DELIM` heredoc). Optionally set **`PRERELEASE`** (**`0`** or **`1`**), **`GM`** (**`0`** or **`1`**, never **`1`** at the entries root), and **`DEV_VERSION`** (see **Preproduction directories** below). See **`version/entries/ABOUT.txt`** for syntax.
 3. **Do not** commit **`version/locked/*.ver`** or **`userland/shell/version_def.h`** on typical **AI-authored feature PRs**—automation publishes those after merge to **`develop`** (see below).
 
@@ -38,7 +38,7 @@ Preproduction metadata uses **`PRERELEASE`**, **`GM`** (go-to-main), and **`DEV_
 
 | Key | Meaning |
 |-----|--------|
-| **`PRERELEASE`** | **`0`** or omitted = GA-oriented row at the **`version/entries/`** root. **`1`** = prerelease row that must end under **`preproduction <A>.<B>.<C>/`** (you may commit it at the entries root on same-repo PRs; CI runs **`relocate_root_prerelease_ver_to_preproduction.sh`** before layout checks; fork PRs must relocate locally). |
+| **`PRERELEASE`** | **`0`** or omitted = GA-oriented row at the **`version/entries/`** root. **`1`** = prerelease: **author at the `version/entries/` root** on same-repo branches; **`relocate_root_prerelease_ver_to_preproduction.sh`** moves the file under **`preproduction <A>.<B>.<C>/`** (do **not** hand-add new **`PRERELEASE=1`** **`.ver`** paths under that directory on same-repo PRs). Fork PRs must relocate locally, then commit. |
 | **`GM`** | **`0`** or omitted by default. **`1`** = this prerelease directory is ready to be merged to a single GA **`.ver`** at the tree root (**allowed only inside** **`preproduction <A>.<B>.<C>/`**; at most **one** file per directory may set **`GM=1`**). |
 | **`DEV_VERSION`** | Non-negative integer. With **`PRERELEASE=1`**, use **`>= 1`** and bump per iteration using **`./scripts/bump_dev_version.sh`**. You may keep **`DEV_VERSION`** on a **root** row while **`PRERELEASE`** is still **`0`** to record develop-side iteration **before** moving the line under **`preproduction/`**. **`main`** must ship **`.ver`** files **without** any **`DEV_VERSION=`** line (CI). |
 
@@ -46,7 +46,7 @@ Preproduction metadata uses **`PRERELEASE`**, **`GM`** (go-to-main), and **`DEV_
 
 `version/entries/preproduction <A>.<B>.<C>/`
 
-where **`<A>.<B>.<C>`** matches **`MAJOR`**, **`STANDARD`**, and **`RELEASE`** in that file (example directory name: **`preproduction 4.0.0`** — note the space after `preproduction`). **Filenames** stay **`A_B_C_short_slug.ver`**; the directory carries the logical “D” slot, not the basename.
+where **`<A>.<B>.<C>`** matches **`MAJOR`**, **`STANDARD`**, and **`RELEASE`** in that file (example directory name: **`preproduction 2.3.0`** — note the space after `preproduction`). **Filenames** stay **`A_B_C_short_slug.ver`**; the directory carries the logical “D” slot, not the basename.
 
 On **same-repo** pull requests into **`develop`** and on **feature-branch pushes** (not **`develop`** / **`main`** themselves), GitHub Actions may commit the move for you: it runs **`./scripts/relocate_root_prerelease_ver_to_preproduction.sh`** (see **`.github/actions/prepare-version-entries`**) before **`check_version_prerelease_layout.sh`**. **Fork** pull requests cannot receive that push—run the relocate script locally, commit, and push. **`develop`** uses **Version lock on merge** to run the same relocate step before **`finalize_version_locked.sh`** and includes **`version/entries/**`** in the sync PR when paths change.
 
@@ -72,7 +72,7 @@ After a push to **`develop`**, the **Version lock on merge** workflow (`.github/
 
 1. **`relocate_root_prerelease_ver_to_preproduction.sh`** — same root → **`preproduction */`** rule as CI (stamps missing **`RELEASE_DATE`** on those root rows first).
 2. **`finalize_version_locked.sh`** — copies **`version/entries/`** → **`version/locked/`**, **omitting** top-level **`preproduction A.B.C/`** directories.
-3. **`stamp_version_release_date.sh`** — appends **`RELEASE_DATE=`** (merge calendar day) to any **`*.ver`** under **`version/locked`** and the mirrored paths under **`version/entries`** that **still** lack **`RELEASE_DATE`**, keeping the two trees aligned.
+3. **`stamp_version_release_date.sh`** — appends **`RELEASE_DATE=`** (merge calendar day) to any **`*.ver`** under **`version/locked`** and the same relative paths under **`version/entries`**, then to **every** **`*.ver`** under **`version/entries`** recursively (including top-level **`preproduction */`** trees that **finalize** does not copy into **`locked`**) that **still** lack **`RELEASE_DATE`**.
 4. **`gen_version_def.sh`** — regenerates **`userland/shell/version_def.h`**.
 
 If automation opens a follow-up PR (e.g. `chore(version): sync version/locked from entries after merge`), merging that PR completes publication of locked files, any **entries** path moves from relocate, and the header on **`develop`**.

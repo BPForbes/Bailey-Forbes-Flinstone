@@ -87,7 +87,7 @@ jobs:
 
             **Branch protection** on `develop` (PR-only, required checks, verified signatures) means the sync cannot land as a direct push. Merge this PR to publish `version/entries` moves (when relocate applied), `version/locked/`, and `userland/shell/version_def.h`.
 
-            Root `PRERELEASE=1` rows are stamped with `RELEASE_DATE=YYYY-MM-DD` on the relocate run (calendar day) if missing, then moved under `preproduction A.B.C/` before finalize. `stamp_version_release_date.sh` still appends merge-day `RELEASE_DATE` to any remaining `*.ver` paths that lack the key.
+            Root `PRERELEASE=1` rows are stamped with `RELEASE_DATE=YYYY-MM-DD` on the relocate run (calendar day) if missing, then moved under `preproduction A.B.C/` before finalize. `stamp_version_release_date.sh` appends merge-day `RELEASE_DATE` to locked `*.ver` and matching paths under `version/entries`, then walks **all** `version/entries/**/*.ver` (including `preproduction */`) so rows not mirrored into `locked` still get a merge stamp when the key is missing.
 
             Uses **`BPFORBES_PAT`** or **`VERSION_LOCK_PAT`** when set; otherwise **`GITHUB_TOKEN`**. Auto-merge is enabled by the workflow when the PR is opened (waits for all required checks configured as required on the branch).
 
