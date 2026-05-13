@@ -137,8 +137,7 @@ promote_root() {
       echo "PROMOTED_GA_DESCRIPTION"
     } >"$dest"
 
-    rm -f "$dir"/*.ver
-    rmdir "$dir"
+    rm -rf "$dir"
     echo "promote_preproduction_for_main: merged $dir → $(basename "$dest") (no PRERELEASE/GM/DEV_VERSION) under $BASE"
   done < <(find "$BASE" -mindepth 1 -maxdepth 1 -type d -name 'preproduction *' -print0)
 }
