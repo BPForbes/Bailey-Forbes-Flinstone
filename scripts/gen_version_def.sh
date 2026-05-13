@@ -1,7 +1,8 @@
 #!/usr/bin/env bash
 # Emit userland/shell/version_def.h from the highest A.B.C among version/locked/**/*.ver
-# (recursive: includes preproduction A.B.C/ dirs). PRERELEASE / PRERELEASE_ITER are ignored for VERSION.
-# Finalized releases live under version/locked (copied from version/entries via finalize_version_locked.sh).
+# (recursive). PRERELEASE / GM / DEV_VERSION are ignored for VERSION.
+# Finalized releases live under version/locked (copied from version/entries via finalize_version_locked.sh,
+# which omits top-level preproduction */ under version/entries).
 #
 # Usage:
 #   ./scripts/gen_version_def.sh           — write userland/shell/version_def.h
@@ -42,6 +43,9 @@ if (( found == 0 )); then
 fi
 
 emit() {
+  # Split the tail so we never put a lone `...` sequence in an unquoted heredoc (bash
+  # would treat backticks as command substitution; CI runners then diverge from trees
+  # committed with a hand-frozen header). VERSION uses explicit echoes for a stable \ continuation.
   cat <<EOF
 #ifndef VERSION_DEF_H
 #define VERSION_DEF_H
@@ -50,13 +54,13 @@ emit() {
  * GENERATED FILE — do not edit by hand.
  *
  * Built from finalized .ver files under version/locked/ by scripts/gen_version_def.sh (also run from the Makefile).
- * The shipped version is the highest A.B.C among those files (recursive tree; PRERELEASE fields are ignored for VERSION; see docs/versioning.md).
+ * The shipped version is the highest A.B.C among those files (recursive tree; PRERELEASE / GM / DEV_VERSION are ignored for VERSION; see docs/versioning.md).
  *
  *   A (VERSION_MAJOR)     — milestones / architecture-scale changes
  *   B (VERSION_STANDARD)  — new features (semver "minor")
  *   C (VERSION_PATCH)     — fixes and small corrections (semver "patch")
  *
- * To bump: add version/entries/<A>_<B>_<C>_<slug>.ver (or under preproduction A.B.C/ while prerelease), run ./scripts/finalize_version_locked.sh, then \`make\` or \`./scripts/gen_version_def.sh\`.
+ * To bump: add version/entries/<A>_<B>_<C>_<slug>.ver (or under preproduction A.B.C/ while prerelease), run ./scripts/finalize_version_locked.sh, then run make or ./scripts/gen_version_def.sh.
  */
 #define VERSION_MAJOR    ${bm}
 #define VERSION_STANDARD ${bs}
@@ -65,11 +69,11 @@ emit() {
 #define VERSION_STR_(x) #x
 #define VERSION_STR(x) VERSION_STR_(x)
 
-#define VERSION \\
-    VERSION_STR(VERSION_MAJOR) "." VERSION_STR(VERSION_STANDARD) "." VERSION_STR(VERSION_PATCH)
-
-#endif /* VERSION_DEF_H */
 EOF
+  printf '%s\n' '#define VERSION \'
+  printf '%s\n' '    VERSION_STR(VERSION_MAJOR) "." VERSION_STR(VERSION_STANDARD) "." VERSION_STR(VERSION_PATCH)'
+  printf '%s\n' ''
+  printf '%s\n' '#endif /* VERSION_DEF_H */'
 }
 
 if [[ "$stdout" == 1 ]]; then
