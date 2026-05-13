@@ -20,11 +20,11 @@ The shell reports **`VERSION`** as **`A.B.C`**. The numeric fields in `.ver` fil
 |------|------|
 | **`version/entries/*.ver`** | **Author here.** Add or revise release notes and semver fields for work on a feature branch. |
 | **`version/locked/*.ver`** | **Published mirror.** Filled by **`finalize_version_locked.sh`** (full copy **`version/entries/`** → **`version/locked/`**) run locally by maintainers or by **Version lock on merge** GitHub Actions after changes land on **`develop`**. **Do not hand-edit** locked `.ver` files for routine version bumps—edit **`version/entries/`** instead. |
-| **`userland/shell/version_def.h`** | **Generated.** Produced by **`scripts/gen_version_def.sh`** (also via **`make`**) from the **highest** `A.B.C` among **`version/locked/*.ver`**. **Never hand-edit** `VERSION_*` in this header. |
+| **`userland/shell/version_def.h`** | **Generated.** Produced by **`scripts/gen_version_def.sh`** (also via **`make`**) from the **highest** `A.B.C` among all **`version/locked/**/*.ver`** (recursive). **Never hand-edit** `VERSION_*` in this header. |
 
 **Companion prose only:** **`version/entries/ABOUT.txt`** and **`version/locked/ABOUT.txt`** describe the `.ver` format. When CI requires them to match, update **both** in the same pull request with **identical** bytes. They are not release semver files; they are documentation.
 
-## Creating and handling `.ver` files
+
 
 1. On the **first** substantive code or docs change for a pull request, add **`version/entries/<A>_<B>_<C>_<short_slug>.ver`** if no entry yet covers that PR (prefer one `.ver` per PR; revise it as the branch evolves).
 2. Set **`MAJOR_VERSION`**, **`STANDARD_VERSION`**, **`RELEASE_VERSION`**, and **`DESCRIPTION`** (single line or `DESCRIPTION<<DELIM` … `DELIM` heredoc). Optionally set **`PRERELEASE`** (**`0`** or **`1`**) and **`PRERELEASE_ITER`** (see **Preproduction directories** below). See **`version/entries/ABOUT.txt`** for syntax.

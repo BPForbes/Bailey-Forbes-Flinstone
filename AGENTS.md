@@ -112,7 +112,7 @@ If a single release mixes milestone/architecture work, features, and fixes: **in
 
 Before merging **incoming → base** (e.g. `bug/*` → `develop`, `develop` → `main`):
 
-1. Compare **published** **`VERSION_*` / `VERSION` on the target branch** (`userland/shell/version_def.h`, from **`version/locked/*.ver`** on the target) to the **incoming** release: either the semver in **`version/entries/*.ver`** on the incoming branch (must exceed the target) or incoming **`version_def.h`** if the PR already updated **`version/locked/`** via a maintainer finalize.
+1. Compare **published** **`VERSION_*` / `VERSION` on the target branch** (`userland/shell/version_def.h`, from **`version/locked/**/*.ver`** on the target) to the **incoming** release: either the semver in **`version/entries/*.ver`** on the incoming branch (must exceed the target) or incoming **`version_def.h`** if the PR already updated **`version/locked/`** via a maintainer finalize.
 2. **Incoming must be strictly newer** than the target for that merge.
 3. If both show the **same** version (e.g. both `2.0.0`), **update the incoming branch** so its **entries** record a version **one appropriate semver step ahead** of the target.
 4. Add **`version/entries/<A>_<B>_<C>_<slug>.ver`** as needed for the bump (typically **one** new file per feature PR; **edit** that file as the PR evolves rather than stacking several). Pushing to **`develop`** runs **Version lock on merge** in GitHub Actions (copies **`version/entries/`** → **`version/locked/`** and regenerates **`version_def.h`**, then opens a PR to merge those updates when needed). **Maintainers** may run **`make finalize-version-locked`** locally if they want **`version/locked/`** updated on the branch before merge.

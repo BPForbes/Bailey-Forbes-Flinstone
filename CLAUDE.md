@@ -17,7 +17,7 @@ This repository implements **Bailey-Forbes-Flinstone**: a educational OS/shell-s
 
 ### Canonical string
 
-- **`VERSION`** on **`develop`** comes from **`userland/shell/version_def.h`**, generated from **`version/locked/*.ver`** (highest **A.B.C**). Author **`version/entries/A_B_C_slug.ver`** (preferred; avoid optional **`NNN_`** serial filename prefixes unless matching legacy files). **GitHub Actions** runs **`gen_version_changelog.c`** against **`version/locked`**, then **`make CHANGELOG_CI=1`**. Plain **`git clone` + `make`** skips changelog unless you opt in with **`CHANGELOG_CI=1`**.
+- **`VERSION`** on **`develop`** comes from **`userland/shell/version_def.h`**, generated from all **`version/locked/**/*.ver`** (highest **A.B.C**, recursive). Author **`version/entries/A_B_C_slug.ver`** (preferred; avoid optional **`NNN_`** serial filename prefixes unless matching legacy files). **GitHub Actions** runs **`gen_version_changelog.c`** against **`version/locked`**, then **`make CHANGELOG_CI=1`**. Plain **`git clone` + `make`** skips changelog unless you opt in with **`CHANGELOG_CI=1`**.
 - Format is **semantic versioning**: **`A.B.C`** (not date-based).
 
 ### Component meanings
