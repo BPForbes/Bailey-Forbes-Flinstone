@@ -47,12 +47,13 @@ PRERELEASE / GM / DEV_VERSION / preproduction directories (not in version_def.h)
   DEV_VERSION (e.g. DEV_VERSION=1 then DEV_VERSION=2) so promotion still rolls up every
   row in DEV_VERSION order.
 
-  AI / automation (no semver backtracking): do not invent a new root GA *.ver whose
-  MAJOR.STANDARD.RELEASE is below the active in-flight milestone the humans chose (for
-  example do not add 3_3_1_*.ver at version/entries/ root while 4.0.0 prerelease work
-  lives under preproduction 4.0.0/) unless a human maintainer explicitly asks for that
-  separate shipped release. Track ongoing work through DEV_VERSION and additional rows
-  under the same preproduction directory instead.
+  AI / automation (no semver backtracking): the preproduction version is the A.B.C
+  in directory names
+      preproduction <A>.<B>.<C>/
+  (PRERELEASE=1 rows are found there). Do not add a new root *.ver at version/entries/
+  whose MAJOR.STANDARD.RELEASE is numerically below that A.B.C unless a human maintainer
+  explicitly asks for that separate shipped release. Track ongoing work through
+  DEV_VERSION and additional *.ver files in the same preproduction directory instead.
 
   When you are ready to cut main: set GM=1 on exactly one .ver in that folder, then run
   ./scripts/promote_preproduction_for_main.sh (or make promote-preproduction-for-main).
