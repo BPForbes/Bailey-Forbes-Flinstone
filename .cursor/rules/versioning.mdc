@@ -25,10 +25,11 @@ Human-readable guide: **`docs/versioning.md`**.
 - **`version/entries/ABOUT.txt`** must **byte-match** **`version/locked/ABOUT.txt`** while **`version/locked/`** is unchanged from the merge target (`check_version_locked_subset_of_entries.sh`). If you are not updating locked in the PR, reset **`version/entries/ABOUT.txt`** to match the target’s **`version/locked/ABOUT.txt`** (or leave it unchanged from the target).
 - **Maintainers** may run **`./scripts/finalize_version_locked.sh`** / **`make finalize-version-locked`** locally before merge for an early snapshot on the branch; that is **not** the default agent workflow.
 
-## Agent workflow — `.ver` timing and one file per PR
+## Agent workflow — `.ver` timing, preproduction iteration, and no semver backtracking
 
-- On the **first** substantive code change for a pull request, **add** **`version/entries/*.ver`** if the branch does not already have an entry that covers **that** PR.
-- For **one** pull request, **one** **`version/entries/*.ver`** file is enough: **edit** that file (e.g. **`DESCRIPTION`**, semver fields only if release scope truly changes) across the whole PR, instead of adding multiple new entry files for the same branch.
+- On the **first** substantive code change for a pull request, **add** **`version/entries/*.ver`** (or rows under **`preproduction A.B.C/`**) if the branch does not already have an entry that covers **that** PR.
+- **Do not backtrack shipped semver for AI-authored work:** if the active line is a milestone such as **`4.0.0`** under **`preproduction 4.0.0/`**, do **not** add a **new root** **`version/entries/3_3_1_*.ver`** (or any **A.B.C** **below** that in-flight milestone) unless a **human maintainer** explicitly requests that separate GA release. Prefer **`DEV_VERSION`** on an existing preproduction **`.ver`**, or **add another `*.ver` in the same `preproduction A.B.C/` directory** with the next **`DEV_VERSION`**, so **`promote_preproduction_for_main.sh`** still aggregates in **`DEV_VERSION`** order.
+- For **one** conventional GA feature at **`version/entries/`** root (no **`preproduction */`**), **one** **`.ver`** revised in place is often enough across the whole PR.
 
 ## `.ver` filename convention (AI / authors)
 

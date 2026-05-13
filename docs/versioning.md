@@ -26,7 +26,7 @@ The shell reports **`VERSION`** as **`A.B.C`**. The numeric fields in `.ver` fil
 
 ## Creating and handling `.ver` files
 
-1. On the **first** substantive code or docs change for a pull request, add **`version/entries/<A>_<B>_<C>_<short_slug>.ver`** if no entry yet covers that PR (prefer one `.ver` per PR; revise it as the branch evolves).
+1. On the **first** substantive code or docs change for a pull request, add **`version/entries/<A>_<B>_<C>_<short_slug>.ver`** (or additional rows under **`preproduction <A>.<B>.<C>/`**) if nothing yet covers that PR. **AI/automation:** do **not** add a **new root** **`.ver`** whose **A.B.C** is **below** the active in-flight milestone humans chose (for example do **not** add **`3_3_1_*.ver`** while **`4.0.0`** prerelease work lives under **`preproduction 4.0.0/`**) unless a **maintainer explicitly** requests that separate GA release—track ongoing work with **`DEV_VERSION`** or a **second `*.ver` in the same preproduction folder** (e.g. **`DEV_VERSION=1`** and **`DEV_VERSION=2`**). For a **single GA feature** at the entries root without **`preproduction */`**, prefer **one** **`.ver`** revised in place.
 2. Set **`MAJOR_VERSION`**, **`STANDARD_VERSION`**, **`RELEASE_VERSION`**, and **`DESCRIPTION`** (single line or `DESCRIPTION<<DELIM` … `DELIM` heredoc). Optionally set **`PRERELEASE`** (**`0`** or **`1`**), **`GM`** (**`0`** or **`1`**, never **`1`** at the entries root), and **`DEV_VERSION`** (see **Preproduction directories** below). See **`version/entries/ABOUT.txt`** for syntax.
 3. **Do not** commit **`version/locked/*.ver`** or **`userland/shell/version_def.h`** on typical **AI-authored feature PRs**—automation publishes those after merge to **`develop`** (see below).
 
