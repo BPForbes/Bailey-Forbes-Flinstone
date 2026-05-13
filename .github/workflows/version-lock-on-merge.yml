@@ -1,5 +1,6 @@
-# After a push to develop, copy version/entries → version/locked and regenerate
-# userland/shell/version_def.h. If anything changed, opens a PR into develop (do not
+# After a push to develop, copy version/entries → version/locked (excluding top-level
+# preproduction */ trees), regenerate userland/shell/version_def.h. If anything changed,
+# opens a PR into develop (do not
 # push that commit directly to develop — branch rules usually require a PR, checks,
 # and often verified signatures), then enables GitHub auto-merge on that PR so it
 # completes when required checks pass.
@@ -41,7 +42,7 @@ jobs:
           fetch-depth: 0
           token: ${{ secrets.BPFORBES_PAT || secrets.VERSION_LOCK_PAT || secrets.GITHUB_TOKEN }}
 
-      - name: Finalize version (copy version/entries to version/locked)
+      - name: Finalize version (copy entries → locked, skip preproduction */)
         run: ./scripts/finalize_version_locked.sh
 
       - name: Stamp RELEASE_DATE on .ver files (merge calendar date)
@@ -54,10 +55,9 @@ jobs:
         id: prep
         run: |
           set -euo pipefail
-          # Do not use `git diff --quiet HEAD -- …` alone: it ignores untracked files.
-          # finalize_version_locked.sh can add new version/locked/*.ver while gen_version_def.sh
-          # leaves version_def.h unchanged — still must open a PR. `git status --porcelain`
-          # includes untracked paths under version/locked/.
+          # finalize_version_locked.sh refreshes version/locked/ from entries (skipping
+          # top-level preproduction */ dirs); gen_version_def.sh may update version_def.h.
+          # Do not rely on `git diff --quiet HEAD` alone: it ignores untracked files.
           if [[ -z "$(git status --porcelain -- version/locked userland/shell/version_def.h)" ]]; then
             echo "has_changes=false" >> "$GITHUB_OUTPUT"
             echo "No version/locked or version_def.h changes after finalize."

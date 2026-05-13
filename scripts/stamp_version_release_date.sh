@@ -1,9 +1,10 @@
 #!/usr/bin/env bash
 # Append RELEASE_DATE=YYYY-MM-DD to each *.ver under version/locked and
 # version/entries when that key is absent. Intended to run after
-# finalize_version_locked.sh (entries and locked are mirrors) so merge-time
+# finalize_version_locked.sh (locked matches entries except develop-only
+# top-level preproduction */ directories, which are not copied). Merge-time
 # dates are recorded before gen_version_def.sh and changelog generation.
-# Recurses into subdirectories (e.g. preproduction A.B.C/).
+# Recurses into subdirectories under version/locked (finalize does not copy preproduction */ there).
 set -euo pipefail
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 LCK="$ROOT/version/locked"

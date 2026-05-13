@@ -38,8 +38,10 @@ PRERELEASE / GM / DEV_VERSION / preproduction directories (not in version_def.h)
   That script sorts every *.ver in the folder by DEV_VERSION ascending, builds one new
   root *.ver (basename taken from the GM=1 file) whose DESCRIPTION itemizes each
   source row, omits PRERELEASE/GM/DEV_VERSION entirely, and deletes the entire
-  preproduction directory from both version/entries and version/locked so locked
-  no longer carries the nested tree.
+  preproduction directory from version/entries (and from version/locked only if a
+  legacy copy existed there). finalize_version_locked.sh does not copy preproduction */
+  into locked, so the published tree normally only gains the merged root .ver after
+  promotion, then the next finalize copies that file into version/locked/.
 
   userland/shell/version_def.h still reports only A.B.C (metadata keys above are ignored
   for VERSION). CI runs check_version_prerelease_layout.sh on all branches and
@@ -47,10 +49,12 @@ PRERELEASE / GM / DEV_VERSION / preproduction directories (not in version_def.h)
   preproduction */ dirs, no PRERELEASE=1, no GM=1, no DEV_VERSION= lines).
 
 version/entries/  — author and edit .ver release notes here before automation publishes.
-version/locked/   — published snapshot: full copy of version/entries/ when finalize
-                   or Version lock on merge runs on develop.
+version/locked/   — published snapshot from version/entries/ when finalize or
+                   Version lock on merge runs on develop, except that top-level
+                   directories named preproduction <A>.<B>.<C>/ are not copied into
+                   locked (develop-only). Root *.ver files and ABOUT.txt are copied.
 
-Finalize (copy all of entries over locked), then regenerate the shell header
+Finalize (copy entries → locked, skipping preproduction */), then regenerate the shell header
 (maintainers or local release prep — automation does this after push to develop):
 
   ./scripts/finalize_version_locked.sh   # or: make finalize-version-locked
@@ -62,7 +66,8 @@ version/locked/**/*.ver files (recursive). Do not edit the header by hand.
 For routine feature work: edit under version/entries/ (root *.ver and optional
 preproduction A.B.C/ subtrees) for semver and release prose.
 Do not commit hand-edited version/locked/*.ver or userland/shell/version_def.h on
-typical agent-authored PRs; GitHub Actions copies entries → locked and regenerates
+typical agent-authored PRs; GitHub Actions copies entries → locked (excluding
+preproduction */ at the entries root) and regenerates
 the header after merge to develop. Exception: this ABOUT.txt file (companion
 documentation) may change together with the copy under version/entries/ or
 version/locked/ so both stay byte-identical when CI requires it.
@@ -72,8 +77,11 @@ additional *.ver files under version/entries/ (include the semver in the basenam
 often A_B_C_short_slug.ver). Ordering uses MAJOR/STANDARD/RELEASE inside the file,
 not the filename prefix.
 
-version/locked/**/*.ver mirrors version/entries/: each locked file must byte-match
-the same relative path under version/entries/ for CI. Do not hand-edit locked .ver copies;
-never let locked release prose diverge from entries.
+version/locked/**/*.ver mirrors the same paths under version/entries/ for every
+file that exists in locked: each locked file must byte-match the counterpart under
+version/entries/. Paths that exist only under version/entries/preproduction */ are
+not present in locked until promotion merges them to a root .ver. Do not hand-edit
+locked .ver copies; never let locked release prose diverge from entries for paths
+that appear in both trees.
 
 Full contributor-facing notes: docs/versioning.md

@@ -2,6 +2,9 @@
 # Finalize preproduction A.B.C/ when one .ver in that directory sets GM=1 (go-to-main).
 #
 # For each version/entries and version/locked tree:
+#   (finalize_version_locked.sh does not copy preproduction */ into locked, so
+#    version/locked usually has nothing to merge here; the locked pass still removes
+#    legacy preproduction */ trees if they exist.)
 #   - For each top-level directory named "preproduction <A>.<B>.<C>/":
 #     - If no *.ver contains GM=1, skip (still in active prerelease).
 #     - Require exactly one GM=1 among *.ver (else error).

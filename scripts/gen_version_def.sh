@@ -56,7 +56,7 @@ emit() {
  *   B (VERSION_STANDARD)  — new features (semver "minor")
  *   C (VERSION_PATCH)     — fixes and small corrections (semver "patch")
  *
- * To bump: add version/entries/<A>_<B>_<C>_<slug>.ver (or under preproduction A.B.C/ while prerelease), run ./scripts/finalize_version_locked.sh, then \`make\` or \`./scripts/gen_version_def.sh\`.
+ * To bump: add version/entries/<A>_<B>_<C>_<slug>.ver (or under version/entries/preproduction A.B.C/ while prerelease — that tree is not copied to locked until promotion merges it to a root .ver), run ./scripts/finalize_version_locked.sh, then \`make\` or \`./scripts/gen_version_def.sh\`.
  */
 #define VERSION_MAJOR    ${bm}
 #define VERSION_STANDARD ${bs}

@@ -19,7 +19,7 @@ The shell reports **`VERSION`** as **`A.B.C`**. The numeric fields in `.ver` fil
 | Path | Role |
 |------|------|
 | **`version/entries/*.ver`** | **Author here.** Add or revise release notes and semver fields for work on a feature branch. |
-| **`version/locked/*.ver`** | **Published mirror.** Filled by **`finalize_version_locked.sh`** (full copy **`version/entries/`** → **`version/locked/`**) run locally by maintainers or by **Version lock on merge** GitHub Actions after changes land on **`develop`**. **Do not hand-edit** locked `.ver` files for routine version bumps—edit **`version/entries/`** instead. |
+| **`version/locked/*.ver`** | **Published mirror.** Filled by **`finalize_version_locked.sh`** (copies **`version/entries/`** → **`version/locked/`**, **excluding** top-level **`preproduction A.B.C/`** directories so prerelease folders stay **entries-only** until **`promote_preproduction_for_main.sh`** emits a root GA **`.ver`**) run locally by maintainers or by **Version lock on merge** GitHub Actions after changes land on **`develop`**. **Do not hand-edit** locked `.ver` files for routine version bumps—edit **`version/entries/`** instead. |
 | **`userland/shell/version_def.h`** | **Generated.** Produced by **`scripts/gen_version_def.sh`** (also via **`make`**) from the **highest** `A.B.C` among **`version/locked/*.ver`**. **Never hand-edit** `VERSION_*` in this header. |
 
 **Companion prose only:** **`version/entries/ABOUT.txt`** and **`version/locked/ABOUT.txt`** describe the `.ver` format. When CI requires them to match, update **both** in the same pull request with **identical** bytes. They are not release semver files; they are documentation.
@@ -52,7 +52,7 @@ where **`<A>.<B>.<C>`** matches **`MAJOR`**, **`STANDARD`**, and **`RELEASE`** i
 
 **Bump develop iteration:** **`./scripts/bump_dev_version.sh path/to/file.ver`** (or **`make bump-dev-version VER=…`**).
 
-**Finalize before `main`:** **`./scripts/promote_preproduction_for_main.sh`** (or **`make promote-preproduction-for-main`**) — for each **`preproduction A.B.C/`** directory under **`version/entries`** and **`version/locked`** that contains **exactly one** **`GM=1`** row among its **`*.ver`** files, collects **every** **`*.ver`** in that folder (each must have **`PRERELEASE=1`** and **`DEV_VERSION>=1`**), sorts them by **`DEV_VERSION`** ascending, and writes **one** new root **`.ver`** named like the **`GM=1`** file. The merged file’s **`DESCRIPTION`** itemizes each source description in **`DEV_VERSION`** order and **omits** **`PRERELEASE`**, **`GM`**, and **`DEV_VERSION`** keys entirely. The script then **deletes** the **`preproduction A.B.C/`** directory from **both** trees so **`version/locked`** no longer carries that nested path. Directories with **`PRERELEASE=1`** but **no** **`GM=1`** yet are left untouched.
+**Finalize before `main`:** **`./scripts/promote_preproduction_for_main.sh`** (or **`make promote-preproduction-for-main`**) — for each **`preproduction A.B.C/`** directory under **`version/entries`** and **`version/locked`** that contains **exactly one** **`GM=1`** row among its **`*.ver`** files, collects **every** **`*.ver`** in that folder (each must have **`PRERELEASE=1`** and **`DEV_VERSION>=1`**), sorts them by **`DEV_VERSION`** ascending, and writes **one** new root **`.ver`** under **`version/entries/`** named like the **`GM=1`** file. The merged file’s **`DESCRIPTION`** itemizes each source description in **`DEV_VERSION`** order and **omits** **`PRERELEASE`**, **`GM`**, and **`DEV_VERSION`** keys entirely. The script then **deletes** the **`preproduction A.B.C/`** directory from **`version/entries`** (and from **`version/locked`** only if a legacy copy exists there). **`finalize_version_locked.sh`** never copies **`preproduction */`** into **`locked`**, so after promotion the next finalize publishes **only** the new root **`.ver`** into **`version/locked/`**. Directories with **`PRERELEASE=1`** but **no** **`GM=1`** yet are left untouched.
 
 **`main`** must have **no** **`preproduction *`** directories and **no** **`PRERELEASE=1`**, **`GM=1`**, or **`DEV_VERSION=`** lines — CI runs **`scripts/check_version_main_prerelease_policy.sh`**.
 
@@ -64,7 +64,7 @@ where **`<A>.<B>.<C>`** matches **`MAJOR`**, **`STANDARD`**, and **`RELEASE`** i
 
 After a push to **`develop`**, the **Version lock on merge** workflow (`.github/workflows/version-lock-on-merge.yml`) runs, in order:
 
-1. **`finalize_version_locked.sh`** — copies **`version/entries/`** → **`version/locked/`** (published snapshot).
+1. **`finalize_version_locked.sh`** — copies **`version/entries/`** → **`version/locked/`** for the published snapshot, **omitting** top-level **`preproduction A.B.C/`** directories (those exist only under **`version/entries/`** until promotion merges them to a single root **`.ver`**).
 2. **`stamp_version_release_date.sh`** — appends **`RELEASE_DATE=`** (merge calendar day) to any **`*.ver`** under **`version/locked`** and **`version/entries`** that **do not** already declare **`RELEASE_DATE`**, keeping the two trees aligned.
 3. **`gen_version_def.sh`** — regenerates **`userland/shell/version_def.h`**.
 

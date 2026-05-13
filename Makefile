@@ -149,7 +149,7 @@ finalize-version-locked sync-version-locked:
 	@./scripts/finalize_version_locked.sh
 
 # Merge GM=1 preproduction */ trees into one root GA .ver and delete those dirs from entries + locked.
-.PHONY: promote-preproduction-for-main bump-dev-version test-finalize-preproduction-gm
+.PHONY: promote-preproduction-for-main bump-dev-version test-finalize-preproduction-gm test-finalize-locked-skips-preproduction
 promote-preproduction-for-main:
 	@./scripts/promote_preproduction_for_main.sh
 
@@ -160,6 +160,9 @@ bump-dev-version:
 
 test-finalize-preproduction-gm:
 	@./scripts/test_finalize_preproduction_gm.sh
+
+test-finalize-locked-skips-preproduction:
+	@./scripts/test_finalize_locked_skips_preproduction.sh
 
 # Optional release build: changelog + CHANGELOG_CI=1 (version/locked is synced on merge to main/develop in CI; use finalize-version-locked locally if needed).
 .PHONY: deploy
