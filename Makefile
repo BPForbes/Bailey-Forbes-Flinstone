@@ -148,6 +148,16 @@ gen-version-def:
 finalize-version-locked sync-version-locked:
 	@./scripts/finalize_version_locked.sh
 
+# Remove optional DEV_PHASE from all version/*.ver (run before merging version trees into main).
+.PHONY: strip-dev-phase-from-ver bump-dev-phase-in-ver
+strip-dev-phase-from-ver:
+	@./scripts/strip_dev_phase_from_ver_trees.sh
+
+# Usage: make bump-dev-phase-in-ver VER=version/entries/4_0_0_foo.ver
+bump-dev-phase-in-ver:
+	@test -n "$(VER)" || (echo "usage: make bump-dev-phase-in-ver VER=path/to/file.ver" >&2; exit 1)
+	@./scripts/bump_dev_phase_in_ver.sh "$(VER)"
+
 # Optional release build: changelog + CHANGELOG_CI=1 (version/locked is synced on merge to main/develop in CI; use finalize-version-locked locally if needed).
 .PHONY: deploy
 deploy:

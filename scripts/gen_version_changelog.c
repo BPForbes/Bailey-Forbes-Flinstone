@@ -9,6 +9,10 @@
  *   RELEASE_VERSION=4        (aliases: MINOR_VERSION, VERSION_PATCH)
  *   RELEASE_DATE=2026-05-11  (optional; YYYY-MM-DD. If omitted, changelog uses
  *                             the generator's local calendar date via time(3).)
+ *   DEV_PHASE=2              (optional develop-phase D for same A.B.C; omitted
+ *                             means logical phase 1 for ordering only. Never
+ *                             appears in userland/shell/version_def.h. Must be
+ *                             absent on main — see scripts/strip_dev_phase_from_ver_trees.sh.)
  *   DESCRIPTION=One-line release notes (value may be quoted)
  *   DESCRIPTION<<DELIM      (heredoc: following lines until a line equal to
  *   ... arbitrary text ...   DELIM after trim, become the description; newlines kept)
@@ -178,6 +182,7 @@ static int parse_triplet(const char *text, int *ma, int *st, int *pa) {
 
 typedef struct {
     int ma, st, rel;
+    int dev_phase; /* develop-only phase D (>=1); default 1 if key omitted */
     char *desc; /* malloc; multiline allowed */
     char date_iso[16]; /* YYYY-MM-DD from file, or empty → use generator date */
     char relpath[PATH_MAX];
@@ -341,6 +346,7 @@ static int parse_ver_file(const char *fullpath, const char *relpath, VerEntry *e
     free(raw);
 
     int ma = -1, st = -1, rel = -1;
+    int dev_phase = -1; /* -1: default to 1 after parse */
     char date_iso[16] = "";
     char *desc = NULL;
 
@@ -453,6 +459,22 @@ static int parse_ver_file(const char *fullpath, const char *relpath, VerEntry *e
             i++;
             continue;
         }
+        if (match_key(trim, "DEV_PHASE", &val)) {
+            strncpy(work, val, sizeof work - 1);
+            work[sizeof work - 1] = '\0';
+            trim_value(work, sizeof work);
+            int dp;
+            if (parse_positive_int(work, &dp) != 0 || dp < 1) {
+                fprintf(stderr,
+                        "gen_version_changelog: DEV_PHASE must be a positive "
+                        "integer in %s\n",
+                        fullpath);
+                goto bad;
+            }
+            dev_phase = dp;
+            i++;
+            continue;
+        }
         if (match_key(trim, "RELEASE_DATE", &val)) {
             strncpy(work, val, sizeof work - 1);
             work[sizeof work - 1] = '\0';
@@ -499,9 +521,13 @@ static int parse_ver_file(const char *fullpath, const char *relpath, VerEntry *e
         return -1;
     }
 
+    if (dev_phase < 0)
+        dev_phase = 1;
+
     e->ma = ma;
     e->st = st;
     e->rel = rel;
+    e->dev_phase = dev_phase;
     e->desc = desc;
     snprintf(e->date_iso, sizeof e->date_iso, "%s", date_iso);
     e->valid = 1;
@@ -548,6 +574,8 @@ static int cmp_entry_desc(const void *a, const void *b) {
         return eb->st - ea->st;
     if (ea->rel != eb->rel)
         return eb->rel - ea->rel;
+    if (ea->dev_phase != eb->dev_phase)
+        return eb->dev_phase - ea->dev_phase;
     return strcmp(ea->relpath, eb->relpath);
 }
 

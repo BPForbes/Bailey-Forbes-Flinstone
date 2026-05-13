@@ -1,6 +1,6 @@
 Version release notes use *.ver files (MAJOR_VERSION, STANDARD_VERSION,
-RELEASE_VERSION or MINOR_VERSION / VERSION_PATCH, DESCRIPTION, and optional
-RELEASE_DATE).
+RELEASE_VERSION or MINOR_VERSION / VERSION_PATCH, optional DEV_PHASE, DESCRIPTION,
+and optional RELEASE_DATE).
 
 DESCRIPTION may be:
   - One line:   DESCRIPTION=...
@@ -20,6 +20,17 @@ RELEASE_DATE (optional in entries):
 
   If RELEASE_DATE is omitted entirely, scripts/gen_version_changelog.c may use
   the generator's local calendar date at generation time (see that script).
+
+DEV_PHASE (optional develop-phase D; never in version_def.h):
+  Optional line DEV_PHASE=<positive integer> records a develop-only iteration for
+  the same A.B.C (logical A.B.C.D with D omitted from filenames and from
+  userland/shell/version_def.h). If omitted, tools treat the phase as 1 for
+  ordering. Bump with ./scripts/bump_dev_phase_in_ver.sh or by hand; finalize
+  copies entries to locked so both trees stay aligned. On main, DEV_PHASE must
+  not appear in any *.ver under version/entries or version/locked—run
+  ./scripts/strip_dev_phase_from_ver_trees.sh before merging version files into
+  main; CI runs check_version_dev_phase_absent_on_main.sh on main and on PRs
+  whose base branch is main.
 
 version/entries/  — author and edit .ver release notes here before automation publishes.
 version/locked/   — published snapshot: full copy of version/entries/ when finalize
