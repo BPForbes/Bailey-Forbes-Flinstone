@@ -137,7 +137,11 @@ promote_root() {
       echo "PROMOTED_GA_DESCRIPTION"
     } >"$dest"
 
-    rm -rf "$dir"
+    rm -f "$dir"/*.ver
+    if ! rmdir "$dir" 2>/dev/null; then
+      echo "promote_preproduction_for_main: could not remove $dir (non-.ver files present?)" >&2
+      exit 1
+    fi
     echo "promote_preproduction_for_main: merged $dir → $(basename "$dest") (no PRERELEASE/GM/DEV_VERSION) under $BASE"
   done < <(find "$BASE" -mindepth 1 -maxdepth 1 -type d -name 'preproduction *' -print0)
 }
