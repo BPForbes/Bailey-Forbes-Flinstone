@@ -148,15 +148,18 @@ gen-version-def:
 finalize-version-locked sync-version-locked:
 	@./scripts/finalize_version_locked.sh
 
-# Remove preproduction */ trees and PRERELEASE=1 before merging version files into main.
-.PHONY: promote-preproduction-for-main bump-prerelease-iter
+# Merge GM=1 preproduction */ trees into one root GA .ver and delete those dirs from entries + locked.
+.PHONY: promote-preproduction-for-main bump-dev-version test-finalize-preproduction-gm
 promote-preproduction-for-main:
 	@./scripts/promote_preproduction_for_main.sh
 
-# Usage: make bump-prerelease-iter VER=version/entries/preproduction\ 4.0.0/foo.ver
-bump-prerelease-iter:
-	@test -n "$(VER)" || (echo "usage: make bump-prerelease-iter VER=path/to/file.ver" >&2; exit 1)
-	@./scripts/bump_prerelease_iter.sh "$(VER)"
+# Usage: make bump-dev-version VER=version/entries/preproduction\ 4.0.0/foo.ver
+bump-dev-version:
+	@test -n "$(VER)" || (echo "usage: make bump-dev-version VER=path/to/file.ver" >&2; exit 1)
+	@./scripts/bump_dev_version.sh "$(VER)"
+
+test-finalize-preproduction-gm:
+	@./scripts/test_finalize_preproduction_gm.sh
 
 # Optional release build: changelog + CHANGELOG_CI=1 (version/locked is synced on merge to main/develop in CI; use finalize-version-locked locally if needed).
 .PHONY: deploy

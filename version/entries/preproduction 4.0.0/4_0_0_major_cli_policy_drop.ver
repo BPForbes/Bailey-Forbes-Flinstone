@@ -1,6 +1,0 @@
-MAJOR_VERSION=4
-STANDARD_VERSION=0
-RELEASE_VERSION=0
-PRERELEASE=1
-PRERELEASE_ITER=1
-DESCRIPTION=Major release 4.0.0 after 3.3.0: treat the prior 3.3 line as superseded by this milestone semver. Repository policy no longer requires CodeRabbit or Codex CLIs, install attempts, triage gates, or a no-push rule tied to those tools; use normal GitHub review and optional integrations the maintainers enable. Prerelease: this file lives under version/entries/preproduction 4.0.0/ while PRERELEASE=1; bump PRERELEASE_ITER with scripts/bump_prerelease_iter.sh; before merging version trees into main run scripts/promote_preproduction_for_main.sh (sets PRERELEASE=0, keeps last PRERELEASE_ITER, moves to top-level A_B_C_*.ver, removes preproduction dir).

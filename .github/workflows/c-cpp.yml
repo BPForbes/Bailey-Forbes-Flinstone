@@ -28,11 +28,14 @@ jobs:
       - name: Validate prerelease .ver directory layout (version/entries)
         run: ./scripts/check_version_prerelease_layout.sh
 
-      - name: Main must not ship prerelease dirs or PRERELEASE=1 (push)
+      - name: Test preproduction GM promotion helper
+        run: ./scripts/test_finalize_preproduction_gm.sh
+
+      - name: Main must ship GA .ver only (push)
         if: github.event_name == 'push' && github.ref == 'refs/heads/main'
         run: ./scripts/check_version_main_prerelease_policy.sh
 
-      - name: Main must not ship prerelease dirs or PRERELEASE=1 (PR to main)
+      - name: Main must ship GA .ver only (PR to main)
         if: github.event_name == 'pull_request' && github.base_ref == 'main'
         run: ./scripts/check_version_main_prerelease_policy.sh
 

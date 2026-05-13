@@ -27,19 +27,20 @@ The shell reports **`VERSION`** as **`A.B.C`**. The numeric fields in `.ver` fil
 ## Creating and handling `.ver` files
 
 1. On the **first** substantive code or docs change for a pull request, add **`version/entries/<A>_<B>_<C>_<short_slug>.ver`** if no entry yet covers that PR (prefer one `.ver` per PR; revise it as the branch evolves).
-2. Set **`MAJOR_VERSION`**, **`STANDARD_VERSION`**, **`RELEASE_VERSION`**, and **`DESCRIPTION`** (single line or `DESCRIPTION<<DELIM` … `DELIM` heredoc). Optionally set **`PRERELEASE`** (**`0`** or **`1`**) and **`PRERELEASE_ITER`** (see **Preproduction directories** below). See **`version/entries/ABOUT.txt`** for syntax.
+2. Set **`MAJOR_VERSION`**, **`STANDARD_VERSION`**, **`RELEASE_VERSION`**, and **`DESCRIPTION`** (single line or `DESCRIPTION<<DELIM` … `DELIM` heredoc). Optionally set **`PRERELEASE`** (**`0`** or **`1`**), **`GM`** (**`0`** or **`1`**, never **`1`** at the entries root), and **`DEV_VERSION`** (see **Preproduction directories** below). See **`version/entries/ABOUT.txt`** for syntax.
 3. **Do not** commit **`version/locked/*.ver`** or **`userland/shell/version_def.h`** on typical **AI-authored feature PRs**—automation publishes those after merge to **`develop`** (see below).
 
 Ordering of multiple `.ver` files is by the **numeric fields inside** each file, not by filename prefix.
 
-## Preproduction directories and **`PRERELEASE`** (tuple)
+## Preproduction directories, **`PRERELEASE`**, **`GM`**, and **`DEV_VERSION`**
 
-Prerelease metadata is a **(**`bool` **PRERELEASE`,** `int` **`PRERELEASE_ITER`** **)** tuple in the **`.ver`** file:
+Preproduction metadata uses **`PRERELEASE`**, **`GM`** (go-to-main), and **`DEV_VERSION`** (develop iteration “D” in an **`A.B.C.D`** sense — **`D`** is **not** part of the basename or **`version_def.h`**):
 
 | Key | Meaning |
 |-----|--------|
-| **`PRERELEASE`** | **`0`** or omitted = GA row. **`1`** = prerelease / preproduction iteration (not a separate semver component). |
-| **`PRERELEASE_ITER`** | Non-negative integer; with **`PRERELEASE=1`**, use **`>= 1`** and bump per iteration. When promoting to GA, keep this value as the **final** prerelease iteration that shipped. |
+| **`PRERELEASE`** | **`0`** or omitted = GA-oriented row at the **`version/entries/`** root. **`1`** = prerelease row that must live under **`preproduction <A>.<B>.<C>/`**. |
+| **`GM`** | **`0`** or omitted by default. **`1`** = this prerelease directory is ready to be merged to a single GA **`.ver`** at the tree root (**allowed only inside** **`preproduction <A>.<B>.<C>/`**; at most **one** file per directory may set **`GM=1`**). |
+| **`DEV_VERSION`** | Non-negative integer. With **`PRERELEASE=1`**, use **`>= 1`** and bump per iteration using **`./scripts/bump_dev_version.sh`**. You may keep **`DEV_VERSION`** on a **root** row while **`PRERELEASE`** is still **`0`** to record develop-side iteration **before** moving the line under **`preproduction/`**. **`main`** must ship **`.ver`** files **without** any **`DEV_VERSION=`** line (CI). |
 
 **Layout rule:** if **`PRERELEASE=1`**, the **`.ver`** file must live under:
 
@@ -47,13 +48,15 @@ Prerelease metadata is a **(**`bool` **PRERELEASE`,** `int` **`PRERELEASE_ITER`*
 
 where **`<A>.<B>.<C>`** matches **`MAJOR`**, **`STANDARD`**, and **`RELEASE`** in that file (example directory name: **`preproduction 4.0.0`** — note the space after `preproduction`). **Filenames** stay **`A_B_C_short_slug.ver`**; the directory carries the logical “D” slot, not the basename.
 
-**`VERSION` / `version_def.h`:** still **`A.B.C` only** — **`scripts/gen_version_def.sh`** walks **`version/locked/**/*.ver`** (recursive) and ignores **`PRERELEASE*`** for the numeric triple.
+**`VERSION` / `version_def.h`:** still **`A.B.C` only** — **`scripts/gen_version_def.sh`** walks **`version/locked/**/*.ver`** (recursive) and ignores **`PRERELEASE`**, **`GM`**, and **`DEV_VERSION`** for the numeric triple.
 
-**Bump iteration:** **`./scripts/bump_prerelease_iter.sh path/to/prerelease.ver`** (or **`make bump-prerelease-iter VER=…`**).
+**Bump develop iteration:** **`./scripts/bump_dev_version.sh path/to/file.ver`** (or **`make bump-dev-version VER=…`**).
 
-**Promote before `main`:** **`./scripts/promote_preproduction_for_main.sh`** (or **`make promote-preproduction-for-main`**) — for each **`preproduction A.B.C/`** directory under **`version/entries`** and **`version/locked`**, picks the **`.ver`** with **`PRERELEASE=1`** and the highest **`PRERELEASE_ITER`**, writes **`PRERELEASE=0`** (keeping **`PRERELEASE_ITER`**), copies to the tree root with the **same basename** (GA “final” name), and removes the preproduction directory. **`main`** must have **no** **`preproduction *`** directories and **no** **`PRERELEASE=1`** lines — CI runs **`scripts/check_version_main_prerelease_policy.sh`**.
+**Finalize before `main`:** **`./scripts/promote_preproduction_for_main.sh`** (or **`make promote-preproduction-for-main`**) — for each **`preproduction A.B.C/`** directory under **`version/entries`** and **`version/locked`** that contains **exactly one** **`GM=1`** row among its **`*.ver`** files, collects **every** **`*.ver`** in that folder (each must have **`PRERELEASE=1`** and **`DEV_VERSION>=1`**), sorts them by **`DEV_VERSION`** ascending, and writes **one** new root **`.ver`** named like the **`GM=1`** file. The merged file’s **`DESCRIPTION`** itemizes each source description in **`DEV_VERSION`** order and **omits** **`PRERELEASE`**, **`GM`**, and **`DEV_VERSION`** keys entirely. The script then **deletes** the **`preproduction A.B.C/`** directory from **both** trees so **`version/locked`** no longer carries that nested path. Directories with **`PRERELEASE=1`** but **no** **`GM=1`** yet are left untouched.
 
-**Layout CI:** **`scripts/check_version_prerelease_layout.sh`** validates **`version/entries`** on every run.
+**`main`** must have **no** **`preproduction *`** directories and **no** **`PRERELEASE=1`**, **`GM=1`**, or **`DEV_VERSION=`** lines — CI runs **`scripts/check_version_main_prerelease_policy.sh`**.
+
+**Layout CI:** **`scripts/check_version_prerelease_layout.sh`** validates **`version/entries`** on every run. **`scripts/test_finalize_preproduction_gm.sh`** exercises the promotion helper in CI.
 
 ## `RELEASE_DATE` — usually omit in entries
 

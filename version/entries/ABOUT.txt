@@ -1,6 +1,6 @@
 Version release notes use *.ver files (MAJOR_VERSION, STANDARD_VERSION,
-RELEASE_VERSION or MINOR_VERSION / VERSION_PATCH, optional PRERELEASE and
-PRERELEASE_ITER, DESCRIPTION, and optional RELEASE_DATE).
+RELEASE_VERSION or MINOR_VERSION / VERSION_PATCH, optional PRERELEASE, optional GM,
+optional DEV_VERSION, DESCRIPTION, and optional RELEASE_DATE).
 
 DESCRIPTION may be:
   - One line:   DESCRIPTION=...
@@ -21,22 +21,30 @@ RELEASE_DATE (optional in entries):
   If RELEASE_DATE is omitted entirely, scripts/gen_version_changelog.c may use
   the generator's local calendar date at generation time (see that script).
 
-PRERELEASE / preproduction directories (not in version_def.h VERSION string):
-  PRERELEASE=0 or omit for GA rows kept at the root of version/entries/ (and
-  version/locked/) as *.ver. PRERELEASE=1 marks a prerelease: the .ver file must
-  live in a subdirectory named exactly:
+PRERELEASE / GM / DEV_VERSION / preproduction directories (not in version_def.h):
+  At the root of version/entries/ (and version/locked/), rows are GA-oriented:
+  omit PRERELEASE or set PRERELEASE=0. Optional DEV_VERSION counts develop-side
+  iterations (A.B.C.D with D not in the basename) before moving work under
+  preproduction <A>.<B>.<C>/. Never set GM=1 on a root *.ver file.
+
+  PRERELEASE=1 marks an in-flight prerelease line: every .ver under
       preproduction <A>.<B>.<C>/
-  where <A>.<B>.<C> matches MAJOR.STANDARD.RELEASE in that file (example:
-  version/entries/preproduction 4.0.0/my_release.ver). Filenames stay A_B_C_slug.ver
-  (no extra component in the basename). Use PRERELEASE_ITER=<positive int> and bump
-  with ./scripts/bump_prerelease_iter.sh between iterations. userland/shell/version_def.h
-  still reports only A.B.C (PRERELEASE fields are metadata). Before merging version
-  trees into main, run ./scripts/promote_preproduction_for_main.sh: picks the
-  highest PRERELEASE_ITER among PRERELEASE=1 files in each preproduction folder,
-  writes a GA copy at the tree root with PRERELEASE=0 (keeping PRERELEASE_ITER as the
-  final iteration number), removes the preproduction directory. CI runs
-  check_version_prerelease_layout.sh on all branches and check_version_main_prerelease_policy.sh
-  on main and on PRs targeting main.
+  must match that semver in the directory name, must include DEV_VERSION>=1,
+  and may set GM=0 or GM=1. At most one file per preproduction directory may use
+  GM=1 (go-to-main). Bump DEV_VERSION between iterations with ./scripts/bump_dev_version.sh.
+
+  When you are ready to cut main: set GM=1 on exactly one .ver in that folder, then run
+  ./scripts/promote_preproduction_for_main.sh (or make promote-preproduction-for-main).
+  That script sorts every *.ver in the folder by DEV_VERSION ascending, builds one new
+  root *.ver (basename taken from the GM=1 file) whose DESCRIPTION itemizes each
+  source row, omits PRERELEASE/GM/DEV_VERSION entirely, and deletes the entire
+  preproduction directory from both version/entries and version/locked so locked
+  no longer carries the nested tree.
+
+  userland/shell/version_def.h still reports only A.B.C (metadata keys above are ignored
+  for VERSION). CI runs check_version_prerelease_layout.sh on all branches and
+  check_version_main_prerelease_policy.sh on main and on PRs targeting main (no
+  preproduction */ dirs, no PRERELEASE=1, no GM=1, no DEV_VERSION= lines).
 
 version/entries/  — author and edit .ver release notes here before automation publishes.
 version/locked/   — published snapshot: full copy of version/entries/ when finalize

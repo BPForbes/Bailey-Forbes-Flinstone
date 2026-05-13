@@ -1,7 +1,9 @@
 #!/usr/bin/env bash
-# Validate prerelease .ver layout under version/entries:
-#   PRERELEASE=1  →  file must live in version/entries/preproduction <A>.<B>.<C>/
-#   Top-level .ver  →  PRERELEASE must be 0 or absent (treated as 0).
+# Validate .ver layout under version/entries:
+#   Root .ver: PRERELEASE must be 0 or absent; GM must be 0 or absent (never GM=1 at root).
+#   Optional DEV_VERSION at root (develop iteration before preproduction).
+#   Under preproduction <A>.<B>.<C>/: every .ver must have PRERELEASE=1, DEV_VERSION>=1,
+#   and at most one file in that directory may set GM=1.
 set -euo pipefail
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 ENT="$ROOT/version/entries"
@@ -18,8 +20,16 @@ while IFS= read -r -d '' f; do
   parent=$(dirname "$rel")
   pr=$(get_field PRERELEASE "$f")
   [[ -n "$pr" ]] || pr=0
+  gm=$(get_field GM "$f")
+  [[ -n "$gm" ]] || gm=0
+  dv=$(get_field DEV_VERSION "$f")
   if ! [[ "$pr" =~ ^[0-9]+$ ]]; then
     echo "check_version_prerelease_layout: invalid PRERELEASE in $f" >&2
+    err=1
+    continue
+  fi
+  if ! [[ "$gm" =~ ^[0-9]+$ ]]; then
+    echo "check_version_prerelease_layout: invalid GM in $f" >&2
     err=1
     continue
   fi
@@ -41,6 +51,10 @@ while IFS= read -r -d '' f; do
       echo "check_version_prerelease_layout: PRERELEASE=1 must live under ${ENT}/${exp_dir}/ — $f" >&2
       err=1
     fi
+    if [[ "$gm" -eq 1 ]]; then
+      echo "check_version_prerelease_layout: GM=1 is not allowed on root .ver files — $f" >&2
+      err=1
+    fi
   else
     if [[ "$parent" != "$exp_dir" ]]; then
       echo "check_version_prerelease_layout: directory '$parent' must be exactly '${exp_dir}' for semver ${m}.${s}.${r} — $f" >&2
@@ -50,8 +64,26 @@ while IFS= read -r -d '' f; do
       echo "check_version_prerelease_layout: under ${parent}/ PRERELEASE must be 1 — $f" >&2
       err=1
     fi
+    if [[ -z "$dv" ]] || ! [[ "$dv" =~ ^[0-9]+$ ]] || (( dv < 1 )); then
+      echo "check_version_prerelease_layout: under ${parent}/ each .ver needs DEV_VERSION>=1 — $f" >&2
+      err=1
+    fi
   fi
 done < <(find "$ENT" -type f -name '*.ver' -print0)
+
+while IFS= read -r -d '' dir; do
+  gm_n=0
+  while IFS= read -r -d '' vf; do
+    [[ -f "$vf" ]] || continue
+    if grep -qE '^[[:space:]]*(int[[:space:]]+)?GM=1([[:space:]]|$)' "$vf"; then
+      gm_n=$((gm_n + 1))
+    fi
+  done < <(find "$dir" -maxdepth 1 -type f -name '*.ver' -print0 2>/dev/null)
+  if (( gm_n > 1 )); then
+    echo "check_version_prerelease_layout: at most one GM=1 allowed in $dir (found $gm_n)" >&2
+    err=1
+  fi
+done < <(find "$ENT" -mindepth 1 -maxdepth 1 -type d -name 'preproduction *' -print0 2>/dev/null)
 
 if (( err )); then
   exit 1

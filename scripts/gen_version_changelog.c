@@ -13,7 +13,8 @@
  *                             the generator's local calendar date via time(3).)
  *   PRERELEASE=0|1           (optional; 1 = prerelease row. With PRERELEASE=1, keep
  *                             the .ver under version/.../preproduction A.B.C/ - see docs/versioning.md.)
- *   PRERELEASE_ITER=n        (optional non-negative int; with PRERELEASE=1 use n>=1 and bump per iteration.)
+ *   GM=0|1                   (optional; 1 = go-to-main candidate inside preproduction A.B.C/ only.)
+ *   DEV_VERSION=n            (optional non-negative int; with PRERELEASE=1 use n>=1 and bump per iteration.)
  *   DESCRIPTION=One-line release notes (value may be quoted)
  *   DESCRIPTION<<DELIM      (heredoc: following lines until a line equal to
  *   ... arbitrary text ...   DELIM after trim, become the description; newlines kept)
@@ -182,7 +183,8 @@ static int parse_triplet(const char *text, int *ma, int *st, int *pa) {
 typedef struct {
     int ma, st, rel;
     int prerelease; /* 0 = GA, 1 = prerelease */
-    int prerelease_iter;
+    int gm; /* 0/1 go-to-main flag (metadata for sorting; optional in files) */
+    int dev_version; /* develop iteration D in A.B.C.D sense; not in version_def.h */
     char *desc; /* malloc; multiline allowed */
     char date_iso[16]; /* YYYY-MM-DD from file, or empty → use generator date */
     char relpath[PATH_MAX];
@@ -346,7 +348,7 @@ static int parse_ver_file(const char *fullpath, const char *relpath, VerEntry *e
     free(raw);
 
     int ma = -1, st = -1, rel = -1;
-    int pr = -1, pr_iter = -1; /* -1: default after parse */
+    int pr = -1, gm = -1, dev = -1; /* -1: default after parse */
     char date_iso[16] = "";
     char *desc = NULL;
 
@@ -474,19 +476,33 @@ static int parse_ver_file(const char *fullpath, const char *relpath, VerEntry *e
             i++;
             continue;
         }
-        if (match_key(trim, "PRERELEASE_ITER", &val)) {
+        if (match_key(trim, "GM", &val)) {
             strncpy(work, val, sizeof work - 1);
             work[sizeof work - 1] = '\0';
             trim_value(work, sizeof work);
-            int pi;
-            if (parse_positive_int(work, &pi) != 0) {
+            int gv;
+            if (parse_positive_int(work, &gv) != 0 || (gv != 0 && gv != 1)) {
+                fprintf(stderr, "gen_version_changelog: GM must be 0 or 1 in %s\n",
+                        fullpath);
+                goto bad;
+            }
+            gm = gv;
+            i++;
+            continue;
+        }
+        if (match_key(trim, "DEV_VERSION", &val)) {
+            strncpy(work, val, sizeof work - 1);
+            work[sizeof work - 1] = '\0';
+            trim_value(work, sizeof work);
+            int dv;
+            if (parse_positive_int(work, &dv) != 0) {
                 fprintf(stderr,
-                        "gen_version_changelog: PRERELEASE_ITER must be a "
+                        "gen_version_changelog: DEV_VERSION must be a "
                         "non-negative integer in %s\n",
                         fullpath);
                 goto bad;
             }
-            pr_iter = pi;
+            dev = dv;
             i++;
             continue;
         }
@@ -538,11 +554,20 @@ static int parse_ver_file(const char *fullpath, const char *relpath, VerEntry *e
 
     if (pr < 0)
         pr = 0;
-    if (pr_iter < 0)
-        pr_iter = 0;
-    if (pr == 1 && pr_iter < 1) {
+    if (gm < 0)
+        gm = 0;
+    if (dev < 0)
+        dev = 0;
+    if (gm == 1 && pr != 1) {
         fprintf(stderr,
-                "gen_version_changelog: PRERELEASE=1 requires PRERELEASE_ITER>=1 "
+                "gen_version_changelog: GM=1 requires PRERELEASE=1 in %s\n",
+                fullpath);
+        free(desc);
+        return -1;
+    }
+    if (pr == 1 && dev < 1) {
+        fprintf(stderr,
+                "gen_version_changelog: PRERELEASE=1 requires DEV_VERSION>=1 "
                 "in %s\n",
                 fullpath);
         free(desc);
@@ -553,7 +578,8 @@ static int parse_ver_file(const char *fullpath, const char *relpath, VerEntry *e
     e->st = st;
     e->rel = rel;
     e->prerelease = pr;
-    e->prerelease_iter = pr_iter;
+    e->gm = gm;
+    e->dev_version = dev;
     e->desc = desc;
     snprintf(e->date_iso, sizeof e->date_iso, "%s", date_iso);
     e->valid = 1;
@@ -602,8 +628,8 @@ static int cmp_entry_desc(const void *a, const void *b) {
         return eb->rel - ea->rel;
     if (ea->prerelease != eb->prerelease)
         return ea->prerelease - eb->prerelease; /* GA (0) before prerelease (1) */
-    if (ea->prerelease_iter != eb->prerelease_iter)
-        return eb->prerelease_iter - ea->prerelease_iter;
+    if (ea->dev_version != eb->dev_version)
+        return eb->dev_version - ea->dev_version;
     return strcmp(ea->relpath, eb->relpath);
 }
 

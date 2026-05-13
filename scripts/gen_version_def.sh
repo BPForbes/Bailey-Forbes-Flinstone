@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # Emit userland/shell/version_def.h from the highest A.B.C among version/locked/**/*.ver
-# (recursive: includes preproduction A.B.C/ dirs). PRERELEASE / PRERELEASE_ITER are ignored for VERSION.
+# (recursive: includes preproduction A.B.C/ dirs). PRERELEASE / GM / DEV_VERSION are ignored for VERSION.
 # Finalized releases live under version/locked (copied from version/entries via finalize_version_locked.sh).
 #
 # Usage:
@@ -50,7 +50,7 @@ emit() {
  * GENERATED FILE — do not edit by hand.
  *
  * Built from finalized .ver files under version/locked/ by scripts/gen_version_def.sh (also run from the Makefile).
- * The shipped version is the highest A.B.C among those files (recursive tree; PRERELEASE fields are ignored for VERSION; see docs/versioning.md).
+ * The shipped version is the highest A.B.C among those files (recursive tree; PRERELEASE / GM / DEV_VERSION are ignored for VERSION; see docs/versioning.md).
  *
  *   A (VERSION_MAJOR)     — milestones / architecture-scale changes
  *   B (VERSION_STANDARD)  — new features (semver "minor")
