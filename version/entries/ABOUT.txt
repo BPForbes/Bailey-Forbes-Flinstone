@@ -1,6 +1,10 @@
 Version release notes use *.ver files (MAJOR_VERSION, STANDARD_VERSION,
 RELEASE_VERSION or MINOR_VERSION / VERSION_PATCH, optional PRERELEASE, optional GM,
-optional DEV_VERSION, DESCRIPTION, and optional RELEASE_DATE).
+optional DEV_VERSION, DESCRIPTION). Do not add RELEASE_DATE= when authoring under
+version/entries/: relocate (root PRERELEASE=1), Version lock, and stamp_version_release_date.sh
+append it when missing. For paths that already exist under version/locked/, keep
+version/entries/<same path> byte-identical to locked (including any RELEASE_DATE already
+stamped there) until maintainers realign via finalize / Version lock.
 
 DESCRIPTION may be:
   - One line:   DESCRIPTION=...
