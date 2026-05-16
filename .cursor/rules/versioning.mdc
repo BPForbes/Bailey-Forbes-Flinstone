@@ -9,6 +9,12 @@ alwaysApply: true
 
 Human-readable guide: **`docs/versioning.md`**.
 
+## Hard rule — PR `.ver` files live at `version/entries/` root, never under `preproduction */` by hand
+
+- **Author new or revised release rows for a feature PR only as** **`version/entries/*.ver`** (the file’s parent directory must be **`version/entries/`** itself, **not** **`version/entries/preproduction <A>.<B>.<C>/`**).
+- **`version/entries/preproduction <A>.<B>.<C>/`** is **not** where Cursor/AI or same-repo humans add PR prose: **`./scripts/relocate_root_prerelease_ver_to_preproduction.sh`** and the **GitHub Actions** versioning / **Version lock** steps **move** root **`PRERELEASE=1`** **`.ver`** files **into** that directory after optional **`RELEASE_DATE`** stamping. **Do not** commit new `.ver` paths there to “save a step”—commit at the **entries root** and let automation relocate.
+- **Omit `RELEASE_DATE=`** on new root rows unless a maintainer workflow says otherwise; relocate / merge automation stamps dates per **`docs/versioning.md`**.
+
 ## Lock system — never rewrite shipped published files
 
 - **Do not** modify paths under **`version/locked/`** that are already present on the **target / merge-base** branch. After merge, those files are the **published** record. New release prose belongs in **`version/entries/`** only on normal feature work; **`version/locked/`** is refreshed by **Version lock on merge** (GitHub Actions) after changes land on **`develop`** (see **AI / Cursor agent PRs** below).
