@@ -32,53 +32,28 @@ jobs:
       - name: Prepare version/entries (relocate root PRERELEASE=1 .ver)
         uses: ./.github/actions/prepare-version-entries
 
-      - name: Publish relocated version/entries to branch (same-repo only)
-        if: github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository
-        env:
-          BOT_NAME: github-actions[bot]
-          BOT_EMAIL: 41898282+github-actions[bot]@users.noreply.github.com
-        run: |
-          set -euo pipefail
-          if git diff --quiet -- version/entries; then
-            echo "No version/entries changes from relocate."
-            exit 0
-          fi
-          if [[ "${GITHUB_REF}" == "refs/heads/develop" || "${GITHUB_REF}" == "refs/heads/main" ]]; then
-            echo "Skipping push on develop/main (relocate runs in this job for checks; version-lock sync PR publishes entry moves when needed)."
-            exit 0
-          fi
-          git config user.name "$BOT_NAME"
-          git config user.email "$BOT_EMAIL"
-          git add -A -- version/entries
-          git commit -m "chore(version): relocate PRERELEASE=1 root .ver into preproduction (automated)"
-          if [[ "${GITHUB_EVENT_NAME}" == "pull_request" ]]; then
-            git push origin "HEAD:${{ github.head_ref }}"
-          else
-            git push origin "HEAD:${GITHUB_REF_NAME}"
-          fi
-
       - name: Regenerate userland/shell/version_def.h from .ver trees
         run: ./scripts/gen_version_def.sh
 
-      - name: Publish regenerated version_def.h to branch (same-repo only)
+      - name: Publish version/entries and version_def.h (same-repo only)
         if: github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository
         env:
           BOT_NAME: github-actions[bot]
           BOT_EMAIL: 41898282+github-actions[bot]@users.noreply.github.com
         run: |
           set -euo pipefail
-          if git diff --quiet -- userland/shell/version_def.h; then
-            echo "No userland/shell/version_def.h changes from gen_version_def.sh."
+          if git diff --quiet -- version/entries userland/shell/version_def.h; then
+            echo "No version/entries or version_def.h changes after relocate + gen_version_def.sh."
             exit 0
           fi
           if [[ "${GITHUB_REF}" == "refs/heads/develop" || "${GITHUB_REF}" == "refs/heads/main" ]]; then
-            echo "Skipping push on develop/main (Version lock on merge publishes header with locked sync when needed)."
+            echo "Skipping push on develop/main (relocate + header checks run here; version-lock sync PR publishes when needed)."
             exit 0
           fi
           git config user.name "$BOT_NAME"
           git config user.email "$BOT_EMAIL"
-          git add -- userland/shell/version_def.h
-          git commit -m "chore(version): regenerate userland/shell/version_def.h from .ver (automated)"
+          git add -A -- version/entries userland/shell/version_def.h
+          git commit -m "chore(version): sync entries relocate and version_def.h from .ver (automated)"
           if [[ "${GITHUB_EVENT_NAME}" == "pull_request" ]]; then
             git push origin "HEAD:${{ github.head_ref }}"
           else
@@ -115,8 +90,8 @@ jobs:
         with:
           fetch-depth: 0
 
-      - name: Prepare version/entries (relocate root PRERELEASE=1 .ver)
-        uses: ./.github/actions/prepare-version-entries
+      - name: Sync version checkout for build
+        uses: ./.github/actions/sync-version-checkout
 
       - name: Install dependencies
         run: sudo apt-get update -y && sudo apt-get install -y gcc binutils nasm libcunit1-dev
@@ -172,8 +147,8 @@ jobs:
         with:
           fetch-depth: 0
 
-      - name: Prepare version/entries (relocate root PRERELEASE=1 .ver)
-        uses: ./.github/actions/prepare-version-entries
+      - name: Sync version checkout for build
+        uses: ./.github/actions/sync-version-checkout
 
       - name: Install cross-compiler
         run: sudo apt-get update -y && sudo apt-get install -y gcc gcc-aarch64-linux-gnu binutils-aarch64-linux-gnu
@@ -195,8 +170,8 @@ jobs:
         with:
           fetch-depth: 0
 
-      - name: Prepare version/entries (relocate root PRERELEASE=1 .ver)
-        uses: ./.github/actions/prepare-version-entries
+      - name: Sync version checkout for build
+        uses: ./.github/actions/sync-version-checkout
 
       - name: Install dependencies
         run: sudo apt-get install -y gcc binutils nasm
