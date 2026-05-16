@@ -1,0 +1,6 @@
+MAJOR_VERSION=4
+STANDARD_VERSION=0
+RELEASE_VERSION=0
+PRERELEASE=1
+DEV_VERSION=4
+DESCRIPTION=CI: versioning job runs gen_version_def.sh after relocate and pushes userland/shell/version_def.h when it differs from the branch (same-repo pushes only; develop/main skip push like entry relocate — Version lock on merge still publishes). Contributors need not hand-commit the header for VERSION_LINE-only .ver edits on feature branches.

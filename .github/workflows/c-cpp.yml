@@ -56,6 +56,33 @@ jobs:
             git push origin "HEAD:${GITHUB_REF_NAME}"
           fi
 
+      - name: Regenerate userland/shell/version_def.h from .ver trees
+        run: ./scripts/gen_version_def.sh
+
+      - name: Publish regenerated version_def.h to branch (same-repo only)
+        env:
+          BOT_NAME: github-actions[bot]
+          BOT_EMAIL: 41898282+github-actions[bot]@users.noreply.github.com
+        run: |
+          set -euo pipefail
+          if git diff --quiet -- userland/shell/version_def.h; then
+            echo "No userland/shell/version_def.h changes from gen_version_def.sh."
+            exit 0
+          fi
+          if [[ "${GITHUB_REF}" == "refs/heads/develop" || "${GITHUB_REF}" == "refs/heads/main" ]]; then
+            echo "Skipping push on develop/main (Version lock on merge publishes header with locked sync when needed)."
+            exit 0
+          fi
+          git config user.name "$BOT_NAME"
+          git config user.email "$BOT_EMAIL"
+          git add -- userland/shell/version_def.h
+          git commit -m "chore(version): regenerate userland/shell/version_def.h from .ver (automated)"
+          if [[ "${GITHUB_EVENT_NAME}" == "pull_request" ]]; then
+            git push origin "HEAD:${{ github.head_ref }}"
+          else
+            git push origin "HEAD:${GITHUB_REF_NAME}"
+          fi
+
       - name: Validate version locked immutability (PR only)
         if: github.event_name == 'pull_request'
         run: ./scripts/check_version_locked_immutable.sh "${{ github.event.pull_request.base.sha }}"
