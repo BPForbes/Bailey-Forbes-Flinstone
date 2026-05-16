@@ -4,3 +4,5 @@ RELEASE_VERSION=0
 PRERELEASE=1
 DEV_VERSION=4
 DESCRIPTION=PRE 4.0.0: P0-2 + driver ops + log sink dispatch — fl_driver_ops probe/attach return fl_result_t; fl_devfs_register and fl_driver_registry_* return fl_result_t; FL_RESULT_PROBE_SKIP for probe decline; contract bundle rev 4. Hosted fl_log_sink_emit_line / fl_log_sink_vprintf use asm_mem_zero and asm_mem_copy on the stack buffer (same mem_asm object file for x86_64 GAS, x86_64 NASM, AArch64 GAS per ARCH) plus monotonic-second rate limit FL_LOG_RL_MAX_PER_SEC; audit paths call fl_log_sink_emit_line. Tests: test_drivers + test_audit_log + test_invariants bundle rev.
+
+RELEASE_DATE=2026-05-16
