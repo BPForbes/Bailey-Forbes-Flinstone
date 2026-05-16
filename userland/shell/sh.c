@@ -62,6 +62,7 @@
 #include <sys/wait.h>
 #include <dirent.h>
 #include <limits.h>
+#include "fl/batch_argv.h"
 
 #ifndef PATH_MAX
 #define PATH_MAX 4096
@@ -100,41 +101,6 @@ static int eq_ci(const char *a, const char *b) {
         a++; b++;
     }
     return *a == *b;
-}
-
-/* Helper: count audit command tokens */
-static int audit_show_has_count_token(const char *tok) {
-    if (!tok || !tok[0])
-        return 0;
-    if (isdigit((unsigned char)tok[0]))
-        return 1;
-    if ((tok[0] == '-' || tok[0] == '+') && tok[1] != '\0' &&
-        isdigit((unsigned char)tok[1]))
-        return 1;
-    return 0;
-}
-
-static int audit_tokens_count(int argc, char **argv, int i) {
-    if (i + 1 < argc && !strcmp(argv[i + 1], "show")) {
-        if (i + 2 < argc && audit_show_has_count_token(argv[i + 2]))
-            return 3;
-        else
-            return 2;
-    } else if (i + 1 < argc &&
-               (!strcmp(argv[i + 1], "path") || !strcmp(argv[i + 1], "--help") ||
-                !strcmp(argv[i + 1], "-h")))
-        return 2;
-    else
-        return 1;
-}
-
-/* Batch: only bind a second argv token for known `contracts` sub-args (Codex). */
-static int contracts_tokens_count(int argc, char **argv, int i) {
-    if (i + 1 < argc &&
-        (!strcmp(argv[i + 1], "summary") || !strcmp(argv[i + 1], "json") ||
-         !strcmp(argv[i + 1], "--help") || !strcmp(argv[i + 1], "-h")))
-        return 2;
-    return 1;
 }
 
 /* Strip -Virtualization and -y/-n from argv; set g_vm_mode. Returns new argc. */
@@ -419,10 +385,10 @@ int main(int argc, char *argv[]) {
                 }
             }
             else if (!strcmp(cmd, "contracts")) {
-                tokensCount = contracts_tokens_count(argc, argv, i);
+                tokensCount = fl_batch_contracts_tokens_count(argc, argv, i);
             }
             else if (!strcmp(cmd, "audit")) {
-                tokensCount = audit_tokens_count(argc, argv, i);
+                tokensCount = fl_batch_audit_tokens_count(argc, argv, i);
             }
             else if (!strcmp(cmd, "exit")) {
                 if (i + 1 < argc &&

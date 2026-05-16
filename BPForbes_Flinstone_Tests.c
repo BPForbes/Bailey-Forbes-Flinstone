@@ -50,6 +50,10 @@ void test_cd_interactive(void);
 void test_cd_batch_extra(void);
 void test_cd_interactive_extra(void);
 void test_diskput_fat32_roundtrip(void);
+void test_guest_authz_denies_format(void);
+void test_guest_authz_denies_setdisk(void);
+void test_guest_authz_denies_foreign_exec(void);
+void test_guest_authz_allows_version(void);
 
 /* ---------------------------------------------------------------------------
  * Helper for numbering tests with clear separation
@@ -1091,6 +1095,39 @@ void test_diskput_fat32_roundtrip(void) {
 }
 
 /* ---------------------------------------------------------------------------
+ * Guest principal (**P2-3**): **FL_PRINCIPAL=guest** denies privileged builtins.
+ * -------------------------------------------------------------------------*/
+void test_guest_authz_denies_format(void) {
+    (void)remove("guest_den.dat");
+    unsetenv("FL_PRINCIPAL");
+    setenv("FL_PRINCIPAL", "guest", 1);
+    CU_ASSERT_TRUE(execute_command_str("format guest_den.dat volx 4 16") != 0);
+    unsetenv("FL_PRINCIPAL");
+    (void)remove("guest_den.dat");
+}
+
+void test_guest_authz_denies_setdisk(void) {
+    unsetenv("FL_PRINCIPAL");
+    setenv("FL_PRINCIPAL", "guest", 1);
+    CU_ASSERT_TRUE(execute_command_str("setdisk foo.dat") != 0);
+    unsetenv("FL_PRINCIPAL");
+}
+
+void test_guest_authz_denies_foreign_exec(void) {
+    unsetenv("FL_PRINCIPAL");
+    setenv("FL_PRINCIPAL", "guest", 1);
+    CU_ASSERT_TRUE(execute_command_str("echo guest-exec-blocked") != 0);
+    unsetenv("FL_PRINCIPAL");
+}
+
+void test_guest_authz_allows_version(void) {
+    unsetenv("FL_PRINCIPAL");
+    setenv("FL_PRINCIPAL", "guest", 1);
+    CU_ASSERT_TRUE(execute_command_str("version") == 0);
+    unsetenv("FL_PRINCIPAL");
+}
+
+/* ---------------------------------------------------------------------------
  * Main: Set up and run the CUnit tests.
  * -------------------------------------------------------------------------*/
 int main(void)
@@ -1146,6 +1183,16 @@ int main(void)
     CU_ADD_TEST(suite, test_exit_invalid_flag_returns_error);
     CU_ADD_TEST(suite, test_integration_undo);
     CU_ADD_TEST(suite, test_integration_storage);
+
+    CU_pSuite guest_authz_suite = CU_add_suite("Guest principal authz", NULL, NULL);
+    if (NULL == guest_authz_suite) {
+        CU_cleanup_registry();
+        return CU_get_error();
+    }
+    CU_ADD_TEST(guest_authz_suite, test_guest_authz_denies_format);
+    CU_ADD_TEST(guest_authz_suite, test_guest_authz_denies_setdisk);
+    CU_ADD_TEST(guest_authz_suite, test_guest_authz_denies_foreign_exec);
+    CU_ADD_TEST(guest_authz_suite, test_guest_authz_allows_version);
 
     /* --- VM Jail Suite --- */
     CU_pSuite jail_suite = CU_add_suite("VM Jail Suite", jail_suite_setup, jail_suite_cleanup);

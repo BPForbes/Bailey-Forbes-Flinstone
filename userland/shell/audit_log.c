@@ -1,4 +1,5 @@
 #include "fl/audit_log.h"
+#include "fl/ring_log.h"
 #include "fs_jail.h"
 #ifndef DISK_HOST_USE_LIBC_PREADV
 #include "shell_history_asm.h"
@@ -132,6 +133,7 @@ void fl_audit_shell_completed(const char *cmd_line, int host_exit_code) {
     pthread_mutex_unlock(&g_audit_mutex);
 
 out_emit: {
+    fl_ring_log_append_line(line);
     fl_log_sink_t *sink = NULL;
     pthread_mutex_lock(&g_audit_mutex);
     sink = g_audit_sink;
@@ -196,15 +198,23 @@ int fl_audit_show_last_lines(int n) {
     }
 
     enum { AUDIT_READ_MAX = 256 * 1024 };
+    enum { AUDIT_TAIL_BYTES_MAX = 2 * 1024 * 1024 };
+    const long read_floor = (sz > (long)AUDIT_TAIL_BYTES_MAX) ? (sz - (long)AUDIT_TAIL_BYTES_MAX) : 0L;
+    if (read_floor > 0)
+        printf("(audit show: scanning last %d MiB of log for tail; file is larger)\n",
+               (int)(AUDIT_TAIL_BYTES_MAX / (1024 * 1024)));
+
     size_t to_read = 0;
     char *buf = NULL;
 
     /* Seek backwards in chunks to find at least n newlines */
     long chunk_size = (sz < (long)AUDIT_READ_MAX) ? sz : (long)AUDIT_READ_MAX;
     long start_pos = sz - chunk_size;
+    if (start_pos < read_floor)
+        start_pos = read_floor;
     int found_newlines = 0;
 
-    while (start_pos >= 0 && found_newlines < n) {
+    while (start_pos >= read_floor && found_newlines < n) {
         if (fseek(fp, start_pos, SEEK_SET) != 0) {
             if (buf)
                 free(buf);
@@ -237,14 +247,14 @@ int fl_audit_show_last_lines(int n) {
                 found_newlines++;
         }
 
-        /* If we found enough newlines or reached start of file, break */
-        if (found_newlines >= n || start_pos == 0)
+        /* If we found enough newlines or reached scan floor, break */
+        if (found_newlines >= n || start_pos == read_floor)
             break;
 
         /* Move back another chunk */
         start_pos -= chunk_size;
-        if (start_pos < 0)
-            start_pos = 0;
+        if (start_pos < read_floor)
+            start_pos = read_floor;
     }
 
     fclose(fp);
@@ -265,4 +275,45 @@ int fl_audit_show_last_lines(int n) {
         fputc('\n', stdout);
     free(buf);
     return 0;
+}
+
+void fl_audit_authz_event(const char *cmd_line, unsigned cmd_no, int denied) {
+    if (!fl_audit_env_enabled() || !cmd_line)
+        return;
+
+    char safe[512];
+    sanitize_cmd_fragment(cmd_line, safe, sizeof safe);
+
+    char line[768];
+    int n = snprintf(line, sizeof line,
+                     "type=authz jail=%d bundle=%u cmd_no=%u denied=%d cmd=%s",
+                     fs_jail_is_active(), (unsigned)FL_CONTRACT_BUNDLE_REV, cmd_no,
+                     denied ? 1 : 0, safe);
+    if (n < 0 || n >= (int)sizeof line)
+        snprintf(line, sizeof line, "type=authz denied=%d cmd_no=%u [TRUNCATED]",
+                 denied ? 1 : 0, cmd_no);
+
+    pthread_mutex_lock(&g_audit_mutex);
+    FILE *fp = fopen(FL_AUDIT_REL_DEFAULT, "a");
+    if (fp) {
+        if (fprintf(fp, "%s\n", line) < 0) {
+            fclose(fp);
+            pthread_mutex_unlock(&g_audit_mutex);
+            return;
+        }
+        if (fclose(fp) != 0) {
+            pthread_mutex_unlock(&g_audit_mutex);
+            return;
+        }
+    }
+    pthread_mutex_unlock(&g_audit_mutex);
+
+    fl_ring_log_append_line(line);
+
+    fl_log_sink_t *sink = NULL;
+    pthread_mutex_lock(&g_audit_mutex);
+    sink = g_audit_sink;
+    pthread_mutex_unlock(&g_audit_mutex);
+    if (sink && sink->ops && sink->ops->emit)
+        sink->ops->emit(sink, (int)FL_LOG_INFO, 9, line);
 }

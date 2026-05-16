@@ -5,6 +5,7 @@
 #include "cmd_decl.h"
 #include "threadpool.h"
 #include "fl/audit_log.h"
+#include "fl/shell_authz.h"
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -93,6 +94,12 @@ int execute_command_str(const char *line) {
 
     fl_shell_cmd_no_t id = fl_shell_cmd_lookup(args[0]);
     if (id == FL_SCMD_UNKNOWN) {
+        if (fl_shell_authz_foreign_exec() == FL_AUTHZ_DENY) {
+            fl_audit_authz_event(line, 0u, 1);
+            free(cmdLine);
+            out_rc = 1;
+            goto finish;
+        }
         pid_t pid = fork();
         if (pid < 0) {
             perror("fork");
@@ -112,6 +119,13 @@ int execute_command_str(const char *line) {
             out_rc = WEXITSTATUS(status);
             goto finish;
         }
+    }
+
+    if (fl_shell_authz_builtin(id, argc, args) == FL_AUTHZ_DENY) {
+        fl_audit_authz_event(line, (unsigned)id, 1);
+        free(cmdLine);
+        out_rc = 1;
+        goto finish;
     }
 
     out_rc = fl_shell_cmd_dispatch(id, argc, args);
