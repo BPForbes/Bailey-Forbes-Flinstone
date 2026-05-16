@@ -48,6 +48,8 @@ static int print_summary(void) {
     printf("  audit: separate from history; env %s file %s (see `audit` command)\n",
            FL_AUDIT_ENV, FL_AUDIT_REL_DEFAULT);
     printf("  jail: fl/jail_contract.h + fs_jail_* when the VM host sandbox is active\n");
+    printf("  shell authz: **FL_PRINCIPAL=guest** denies destructive builtins and\n"
+           "    foreign **execvp** before dispatch; optional hook via fl_shell_authz_set_hook\n");
     printf("  demo fl_authz_check_fn: returns ALLOW (no policy wired)\n");
 
     fl_authz_check_fn check = demo_authz_always_allow;
@@ -57,11 +59,13 @@ static int print_summary(void) {
 
 static int print_json(void) {
     printf("{\"bundle_rev\":%d,\"fl_result_ok\":%d,\"fl_result_err\":%d,"
+           "\"fl_result_json_rc_min\":%d,\"fl_result_json_rc_max\":%d,"
            "\"surfaces\":[\"DRIVER_OPS\",\"NETDEV\",\"LOG_SINK\",\"AUTHZ\",\"FS_JAIL\"],"
            "\"history_record_tag\":\"%s\","
            "\"audit_env\":\"%s\",\"audit_log_relative\":\"%s\","
            "\"vfs_include\":\"fl/vfs.h (separate)\"}\n",
            FL_CONTRACT_BUNDLE_REV, (int)FL_RESULT_OK, (int)FL_RESULT_ERR,
+           FL_RESULT_JSON_RC_MIN, FL_RESULT_JSON_RC_MAX,
            FL_HISTORY_RECORD_TAG, FL_AUDIT_ENV, FL_AUDIT_REL_DEFAULT);
     return 0;
 }

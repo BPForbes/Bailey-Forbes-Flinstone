@@ -1,4 +1,5 @@
 #include "fl/history_record.h"
+#include "fl/contract_result.h"
 #ifndef DISK_HOST_USE_LIBC_PREADV
 #include "shell_history_asm.h"
 #endif
@@ -94,6 +95,10 @@ int fl_history_record_unpack_cmd(const char *stored_line, char *cmd_out,
     int rc_i = 0;
     if (sscanf(jsonbuf, "{\"br\":%u,\"sf\":%u,\"rc\":%d}", &br_u, &sf_u,
                &rc_i) != 3) {
+        clear_cmd_out(cmd_out, cmd_out_cap);
+        return -1;
+    }
+    if (rc_i < FL_RESULT_JSON_RC_MIN || rc_i > FL_RESULT_JSON_RC_MAX) {
         clear_cmd_out(cmd_out, cmd_out_cap);
         return -1;
     }

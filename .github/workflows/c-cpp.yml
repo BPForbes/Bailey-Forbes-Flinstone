@@ -33,6 +33,7 @@ jobs:
         uses: ./.github/actions/prepare-version-entries
 
       - name: Publish relocated version/entries to branch (same-repo only)
+        if: github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository
         env:
           BOT_NAME: github-actions[bot]
           BOT_EMAIL: 41898282+github-actions[bot]@users.noreply.github.com
@@ -60,6 +61,7 @@ jobs:
         run: ./scripts/gen_version_def.sh
 
       - name: Publish regenerated version_def.h to branch (same-repo only)
+        if: github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository
         env:
           BOT_NAME: github-actions[bot]
           BOT_EMAIL: 41898282+github-actions[bot]@users.noreply.github.com

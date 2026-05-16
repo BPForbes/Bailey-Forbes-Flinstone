@@ -4,6 +4,8 @@
 #include "util.h"
 #include "common.h"
 #include "fl/history_record.h"
+#include "fl/contract_result.h"
+#include "util.h"
 #include <stdio.h>
 #include <string.h>
 
@@ -193,6 +195,39 @@ static int test_history_unpack_all_surfaces(void) {
     return 0;
 }
 
+static int test_history_unpack_rc_json_out_of_bounds(void) {
+    char input[160];
+    char out[64];
+    memset(out, 'X', sizeof out);
+    out[sizeof out - 1u] = '\0';
+    snprintf(input, sizeof input, "FL1%c{\"br\":1,\"sf\":0,\"rc\":200000}%cecho hi",
+             FL_HISTORY_RECORD_SEP, FL_HISTORY_RECORD_SEP);
+    ASSERT(fl_history_record_unpack_cmd(input, out, sizeof out, NULL, NULL, NULL) == -1);
+    ASSERT(out[0] == '\0');
+    snprintf(input, sizeof input, "FL1%c{\"br\":1,\"sf\":0,\"rc\":-200000}%cecho hi",
+             FL_HISTORY_RECORD_SEP, FL_HISTORY_RECORD_SEP);
+    ASSERT(fl_history_record_unpack_cmd(input, out, sizeof out, NULL, NULL, NULL) == -1);
+    ASSERT(out[0] == '\0');
+    /* Boundary: within FL_RESULT_JSON_RC_* must succeed */
+    snprintf(input, sizeof input, "FL1%c{\"br\":1,\"sf\":0,\"rc\":%d}%cecho ok",
+             FL_HISTORY_RECORD_SEP, FL_RESULT_JSON_RC_MAX, FL_HISTORY_RECORD_SEP);
+    ASSERT(fl_history_record_unpack_cmd(input, out, sizeof out, NULL, NULL, NULL) == 1);
+    ASSERT(strcmp(out, "echo ok") == 0);
+    return 0;
+}
+
+static int test_batch_argv_contracts_audit(void) {
+    char *av[] = {"prog", "contracts", "audit", "show", "5"};
+    ASSERT(fl_batch_contracts_tokens_count(5, av, 1) == 1);
+    ASSERT(fl_batch_audit_tokens_count(5, av, 2) == 3);
+    ASSERT(fl_batch_contracts_tokens_count(5, av, 2) == 1);
+    char *av2[] = {"prog", "contracts", "summary"};
+    ASSERT(fl_batch_contracts_tokens_count(3, av2, 1) == 2);
+    char *av3[] = {"prog", "audit", "ring"};
+    ASSERT(fl_batch_audit_tokens_count(3, av3, 1) == 2);
+    return 0;
+}
+
 static int test_history_unpack_negative_rc(void) {
     char packed[512];
     char cmd_out[512];
@@ -239,7 +274,7 @@ static int test_contract_constants(void) {
     ASSERT(FL_RESULT_NOSYS == -38);
 
     /* Bundle revision */
-    ASSERT(FL_CONTRACT_BUNDLE_REV == 2);
+    ASSERT(FL_CONTRACT_BUNDLE_REV == 3);
 
     /* Surface enum ordering */
     ASSERT((int)FL_CONTRACT_SURFACE_DRIVER_OPS == 0);
@@ -327,6 +362,14 @@ int main(void) {
 
     printf("test_history_unpack_negative_rc... ");
     if (test_history_unpack_negative_rc() != 0) return 1;
+    printf("OK\n");
+
+    printf("test_history_unpack_rc_json_out_of_bounds... ");
+    if (test_history_unpack_rc_json_out_of_bounds() != 0) return 1;
+    printf("OK\n");
+
+    printf("test_batch_argv_contracts_audit... ");
+    if (test_batch_argv_contracts_audit() != 0) return 1;
     printf("OK\n");
 
     printf("test_history_unpack_strips_trailing_newline... ");

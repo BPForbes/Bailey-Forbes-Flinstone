@@ -5,6 +5,7 @@
 #include "cmd_decl.h"
 #include "threadpool.h"
 #include "fl/audit_log.h"
+#include "fl/shell_authz.h"
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -93,6 +94,12 @@ int execute_command_str(const char *line) {
 
     fl_shell_cmd_no_t id = fl_shell_cmd_lookup(args[0]);
     if (id == FL_SCMD_UNKNOWN) {
+        if (fl_shell_authz_foreign_exec() == FL_AUTHZ_DENY) {
+            fl_audit_authz_event(line, 0u, 1);
+            free(cmdLine);
+            out_rc = 1;
+            goto finish;
+        }
         pid_t pid = fork();
         if (pid < 0) {
             perror("fork");
@@ -114,12 +121,76 @@ int execute_command_str(const char *line) {
         }
     }
 
+    if (fl_shell_authz_builtin(id, argc, args) == FL_AUTHZ_DENY) {
+        fl_audit_authz_event(line, (unsigned)id, 1);
+        free(cmdLine);
+        out_rc = 1;
+        goto finish;
+    }
+
     out_rc = fl_shell_cmd_dispatch(id, argc, args);
     free(cmdLine);
 
 finish:
     fl_audit_shell_completed(line, out_rc);
     return out_rc;
+}
+
+/* ---------------------------------------------------------------------------
+ * Shell authorization (**P2-3**) — same TU as the interpreter to avoid a
+ * separate userland object file; policy is hosted-only (getenv / hook).
+ * -------------------------------------------------------------------------*/
+static fl_shell_authz_hook_fn s_shell_authz_hook;
+static void *s_shell_authz_hook_ctx;
+
+void fl_shell_authz_set_hook(fl_shell_authz_hook_fn fn, void *ctx) {
+    s_shell_authz_hook = fn;
+    s_shell_authz_hook_ctx = ctx;
+}
+
+static int principal_is_guest(void) {
+    const char *p = getenv("FL_PRINCIPAL");
+    return p && strcmp(p, "guest") == 0;
+}
+
+static fl_authz_decision_t guest_builtin_policy(fl_shell_cmd_no_t no) {
+    switch (no) {
+    case FL_SCMD_FORMAT:
+    case FL_SCMD_SETDISK:
+    case FL_SCMD_INITDISK:
+    case FL_SCMD_CREATEDISK:
+    case FL_SCMD_RMTREE:
+    case FL_SCMD_DISKPUT:
+    case FL_SCMD_DISKGET:
+    case FL_SCMD_DISKDEL:
+    case FL_SCMD_DISKMKDIR:
+    case FL_SCMD_REDIRECT:
+    case FL_SCMD_IMPORT:
+    case FL_SCMD_WRITE:
+    case FL_SCMD_WRITECLUSTER:
+    case FL_SCMD_DELCLUSTER:
+    case FL_SCMD_UPDATE:
+    case FL_SCMD_ADDCLUSTER:
+        return FL_AUTHZ_DENY;
+    default:
+        return FL_AUTHZ_ALLOW;
+    }
+}
+
+fl_authz_decision_t fl_shell_authz_builtin(fl_shell_cmd_no_t no, int argc, char **argv) {
+    if (s_shell_authz_hook)
+        return s_shell_authz_hook(no, argc, argv, s_shell_authz_hook_ctx);
+    if (!principal_is_guest())
+        return FL_AUTHZ_ALLOW;
+    return guest_builtin_policy(no);
+}
+
+fl_authz_decision_t fl_shell_authz_foreign_exec(void) {
+    if (s_shell_authz_hook)
+        return s_shell_authz_hook(FL_SCMD_UNKNOWN, 0, NULL, s_shell_authz_hook_ctx);
+    if (!principal_is_guest())
+        return FL_AUTHZ_ALLOW;
+    return FL_AUTHZ_DENY;
 }
 
 /* ---------------------------------------------------------------------------

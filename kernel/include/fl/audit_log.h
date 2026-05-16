@@ -12,9 +12,19 @@ extern "C" {
 #define FL_AUDIT_REL_DEFAULT ".fl_audit.log"
 #define FL_AUDIT_ENV "FL_AUDIT"
 
+/** Byte capacity of the in-memory audit ring (**P6-2**); matches internal buffer. */
+#define FL_RING_LOG_CAPACITY 8192u
+
 void fl_audit_set_sink(fl_log_sink_t *sink);
 void fl_audit_shell_completed(const char *cmd_line, int host_exit_code);
+/** Emit an **authz** line (deny/allow) when **FL_AUDIT** is enabled; **cmd_no** is 0 for foreign exec. */
+void fl_audit_authz_event(const char *cmd_line, unsigned cmd_no, int denied);
 int fl_audit_show_last_lines(int n);
+
+void fl_ring_log_append_line(const char *line);
+unsigned fl_ring_log_drop_count(void);
+void fl_ring_log_reset(void);
+size_t fl_ring_log_copy_out(char *buf, size_t cap);
 
 #ifdef __cplusplus
 }

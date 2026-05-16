@@ -22,4 +22,12 @@ typedef int fl_result_t;
 /** Operation not supported in this build or configuration. */
 #define FL_RESULT_NOSYS (-38)
 
+/**
+ * Inclusive bounds for the JSON **`rc`** field in FL1 packed history rows (**P0-2**).
+ * Values outside this range are rejected by **fl_history_record_unpack_cmd** so random
+ * JSON integers cannot be mistaken for vetted **fl_result_t** codes.
+ */
+#define FL_RESULT_JSON_RC_MIN (-99999)
+#define FL_RESULT_JSON_RC_MAX (99999)
+
 #endif /* FL_CONTRACT_RESULT_H */
