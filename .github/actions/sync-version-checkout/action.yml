@@ -1,0 +1,32 @@
+name: Sync version checkout for CI build
+description: >-
+  After the versioning job, pull the branch tip (bot may have pushed relocate +
+  version_def.h). Then relocate idempotently and regenerate version_def.h so
+  compile steps match .ver without hand-committed header updates.
+runs:
+  using: composite
+  steps:
+    - name: Pull branch tip after versioning bot commits
+      if: >-
+        (github.event_name == 'pull_request' &&
+         github.event.pull_request.head.repo.full_name == github.repository) ||
+        (github.event_name == 'push' &&
+         github.ref != 'refs/heads/develop' &&
+         github.ref != 'refs/heads/main')
+      shell: bash
+      working-directory: ${{ github.workspace }}
+      run: |
+        set -euo pipefail
+        if [[ "${GITHUB_EVENT_NAME}" == "pull_request" ]]; then
+          git pull --ff-only origin "${{ github.head_ref }}"
+        else
+          git pull --ff-only origin "${GITHUB_REF_NAME}"
+        fi
+
+    - name: Prepare version/entries (relocate root PRERELEASE=1 .ver)
+      uses: ./.github/actions/prepare-version-entries
+
+    - name: Regenerate userland/shell/version_def.h from .ver trees
+      shell: bash
+      working-directory: ${{ github.workspace }}
+      run: ./scripts/gen_version_def.sh
