@@ -6,7 +6,7 @@
 #ifndef FL_CONTRACT_H
 #define FL_CONTRACT_H
 
-#define FL_CONTRACT_BUNDLE_REV 3
+#define FL_CONTRACT_BUNDLE_REV 4
 
 #include "fl/contract_result.h"
 #include "fl/driver/driver.h"

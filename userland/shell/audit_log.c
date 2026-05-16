@@ -1,4 +1,5 @@
 #include "fl/audit_log.h"
+#include "fl/contract_log_dispatch.h"
 #include "fs_jail.h"
 #include "mem_asm.h"
 #ifndef DISK_HOST_USE_LIBC_PREADV
@@ -224,8 +225,7 @@ out_emit: {
     pthread_mutex_lock(&g_audit_mutex);
     sink = g_audit_sink;
     pthread_mutex_unlock(&g_audit_mutex);
-    if (sink && sink->ops && sink->ops->emit)
-        sink->ops->emit(sink, (int)FL_LOG_INFO, 9, line);
+    (void)fl_log_sink_emit_line(sink, (int)FL_LOG_INFO, FL_LOG_FACILITY_AUDIT, line);
 }
 }
 
@@ -399,6 +399,5 @@ void fl_audit_authz_event(const char *cmd_line, unsigned cmd_no, int denied) {
     pthread_mutex_lock(&g_audit_mutex);
     sink = g_audit_sink;
     pthread_mutex_unlock(&g_audit_mutex);
-    if (sink && sink->ops && sink->ops->emit)
-        sink->ops->emit(sink, (int)FL_LOG_INFO, 9, line);
+    (void)fl_log_sink_emit_line(sink, (int)FL_LOG_INFO, FL_LOG_FACILITY_AUDIT, line);
 }

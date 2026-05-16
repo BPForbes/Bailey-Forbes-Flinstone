@@ -8,6 +8,7 @@
 
 #include <stddef.h>
 #include <stdint.h>
+#include "fl/contract_result.h"
 
 #ifdef __cplusplus
 extern "C" {
@@ -43,7 +44,8 @@ typedef struct fl_devfs_ops {
     fl_devfs_ioctl_fn      ioctl;
 } fl_devfs_ops_t;
 
-int fl_devfs_register(const char *path, int class_id, void *dev, const fl_devfs_ops_t *ops);
+fl_result_t fl_devfs_register(const char *path, int class_id, void *dev,
+                              const fl_devfs_ops_t *ops);
 void fl_devfs_unregister(const char *path);
 int fl_devfs_open(const char *path, int flags, fl_devfs_file_t *out);
 int fl_devfs_read(fl_devfs_file_t *file, void *buf, size_t size, size_t *read_out);

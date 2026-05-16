@@ -1,5 +1,6 @@
 #include "cmd_decl.h"
 #include "fl/contract.h"
+#include "fl/contract_log_dispatch.h"
 #include "fl/audit_log.h"
 #include "fl/history_record.h"
 #include <stdio.h>
@@ -50,7 +51,9 @@ static int print_summary(void) {
     printf("  jail: fl/jail_contract.h + fs_jail_* when the VM host sandbox is active\n");
     printf("  shell authz: **FL_PRINCIPAL=guest** denies destructive builtins and\n"
            "    foreign **execvp** before dispatch; optional hook via fl_shell_authz_set_hook\n");
-    printf("  demo fl_authz_check_fn: returns ALLOW (no policy wired)\n");
+    printf("  driver ops: probe/attach return fl_result_t; FL_RESULT_PROBE_SKIP when declining\n");
+    printf("  log dispatch: fl_log_sink_emit_line (asm_mem_* buffer) + %d msgs/sec rate limit\n",
+           FL_LOG_RL_MAX_PER_SEC);
 
     fl_authz_check_fn check = demo_authz_always_allow;
     printf("  demo authz(0,NULL) => %d\n", (int)check(0, NULL));
@@ -60,12 +63,13 @@ static int print_summary(void) {
 static int print_json(void) {
     printf("{\"bundle_rev\":%d,\"fl_result_ok\":%d,\"fl_result_err\":%d,"
            "\"fl_result_json_rc_min\":%d,\"fl_result_json_rc_max\":%d,"
+           "\"log_rl_max_per_sec\":%d,"
            "\"surfaces\":[\"DRIVER_OPS\",\"NETDEV\",\"LOG_SINK\",\"AUTHZ\",\"FS_JAIL\"],"
            "\"history_record_tag\":\"%s\","
            "\"audit_env\":\"%s\",\"audit_log_relative\":\"%s\","
            "\"vfs_include\":\"fl/vfs.h (separate)\"}\n",
            FL_CONTRACT_BUNDLE_REV, (int)FL_RESULT_OK, (int)FL_RESULT_ERR,
-           FL_RESULT_JSON_RC_MIN, FL_RESULT_JSON_RC_MAX,
+           FL_RESULT_JSON_RC_MIN, FL_RESULT_JSON_RC_MAX, FL_LOG_RL_MAX_PER_SEC,
            FL_HISTORY_RECORD_TAG, FL_AUDIT_ENV, FL_AUDIT_REL_DEFAULT);
     return 0;
 }

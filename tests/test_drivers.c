@@ -8,6 +8,7 @@
 #include "fl/history_record.h"
 #include "fl/audit_log.h"
 #include "fl/jail_contract.h"
+#include "fl/contract_result.h"
 #include "fl/driver/device.h"
 #include "fl/driver/devfs.h"
 #include "fl/driver/irq.h"
@@ -71,7 +72,7 @@ static int test_device_model(void) {
     memset(&info, 0, sizeof(info));
     memset(&res, 0, sizeof(res));
     ASSERT(fl_bus_enumerate(descs, 4) == 1);
-    ASSERT(fl_driver_registry_match(&descs[0], &matched) == 0);
+    ASSERT(fl_driver_registry_match(&descs[0], &matched) == FL_RESULT_OK);
     ASSERT(matched != NULL);
     ASSERT(strcmp(matched->name, "host-block") == 0);
     ASSERT(fl_device_count() == 1);
@@ -122,7 +123,9 @@ static int test_devfs_block(void) {
     ASSERT(n == FL_SECTOR_SIZE);
     ASSERT(memcmp(wbuf, rbuf, (size_t)g_cluster_size) == 0);
     ASSERT(fl_devfs_close(&file) == 0);
-    ASSERT(fl_devfs_register("/dev/this/path/is/too/long/for/devfs", FL_DRV_CLASS_BLOCK, fl_device_find_synth("host_blk"), &(fl_devfs_ops_t){0}) != 0);
+    ASSERT(fl_devfs_register("/dev/this/path/is/too/long/for/devfs", FL_DRV_CLASS_BLOCK,
+                             fl_device_find_synth("host_blk"), &(fl_devfs_ops_t){0}) !=
+           FL_RESULT_OK);
     return 0;
 }
 
@@ -385,10 +388,10 @@ static int test_devfs_flags_and_errors(void) {
     fl_devfs_ops_t dummy_ops = {0};
     fl_device_t *blk = fl_device_find_synth("host_blk");
     ASSERT(blk != NULL);
-    ASSERT(fl_devfs_register("/dev/blk0", FL_DRV_CLASS_BLOCK, blk, &dummy_ops) != 0);
+    ASSERT(fl_devfs_register("/dev/blk0", FL_DRV_CLASS_BLOCK, blk, &dummy_ops) != FL_RESULT_OK);
 
     /* Unregister existing */
-    ASSERT(fl_devfs_register("/dev/test_tmp", FL_DRV_CLASS_BLOCK, blk, &dummy_ops) == 0);
+    ASSERT(fl_devfs_register("/dev/test_tmp", FL_DRV_CLASS_BLOCK, blk, &dummy_ops) == FL_RESULT_OK);
     fl_devfs_unregister("/dev/test_tmp");
     /* After unregister, open should fail */
     ASSERT(fl_devfs_open("/dev/test_tmp", FL_DEVFS_O_READ, &file) != 0);
@@ -544,10 +547,10 @@ static int test_device_model_null_params(void) {
 
     /* fl_driver_registry_match: NULL params */
     const fl_driver_desc_t *matched = NULL;
-    ASSERT(fl_driver_registry_match(NULL, &matched) != 0);
+    ASSERT(fl_driver_registry_match(NULL, &matched) == FL_RESULT_INVAL);
     fl_device_desc_t desc;
     memset(&desc, 0, sizeof(desc));
-    ASSERT(fl_driver_registry_match(&desc, NULL) != 0);
+    ASSERT(fl_driver_registry_match(&desc, NULL) == FL_RESULT_INVAL);
 
     return 0;
 }
