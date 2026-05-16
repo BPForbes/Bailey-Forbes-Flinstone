@@ -12,6 +12,7 @@
 #include <unistd.h>
 #include <sys/wait.h>
 #include <signal.h>
+#include <pthread.h>
 
 /*
  * execute_command_str:
@@ -94,7 +95,7 @@ int execute_command_str(const char *line) {
 
     fl_shell_cmd_no_t id = fl_shell_cmd_lookup(args[0]);
     if (id == FL_SCMD_UNKNOWN) {
-        if (fl_shell_authz_foreign_exec() == FL_AUTHZ_DENY) {
+        if (fl_shell_authz_foreign_exec(argc, args) == FL_AUTHZ_DENY) {
             fl_audit_authz_event(line, 0u, 1);
             free(cmdLine);
             out_rc = 1;
@@ -142,10 +143,13 @@ finish:
  * -------------------------------------------------------------------------*/
 static fl_shell_authz_hook_fn s_shell_authz_hook;
 static void *s_shell_authz_hook_ctx;
+static pthread_mutex_t s_shell_authz_mu = PTHREAD_MUTEX_INITIALIZER;
 
-void fl_shell_authz_set_hook(fl_shell_authz_hook_fn fn, void *ctx) {
-    s_shell_authz_hook = fn;
+void fl_shell_authz_set_hook(fl_shell_authz_hook_fn hook_fn, void *ctx) {
+    pthread_mutex_lock(&s_shell_authz_mu);
+    s_shell_authz_hook = hook_fn;
     s_shell_authz_hook_ctx = ctx;
+    pthread_mutex_unlock(&s_shell_authz_mu);
 }
 
 static int principal_is_guest(void) {
@@ -178,16 +182,30 @@ static fl_authz_decision_t guest_builtin_policy(fl_shell_cmd_no_t no) {
 }
 
 fl_authz_decision_t fl_shell_authz_builtin(fl_shell_cmd_no_t no, int argc, char **argv) {
-    if (s_shell_authz_hook)
-        return s_shell_authz_hook(no, argc, argv, s_shell_authz_hook_ctx);
+    fl_shell_authz_hook_fn hook = NULL;
+    void *hook_ctx = NULL;
+    pthread_mutex_lock(&s_shell_authz_mu);
+    hook = s_shell_authz_hook;
+    hook_ctx = s_shell_authz_hook_ctx;
+    pthread_mutex_unlock(&s_shell_authz_mu);
+    if (hook) {
+        return hook(no, argc, argv, hook_ctx);
+    }
     if (!principal_is_guest())
         return FL_AUTHZ_ALLOW;
     return guest_builtin_policy(no);
 }
 
-fl_authz_decision_t fl_shell_authz_foreign_exec(void) {
-    if (s_shell_authz_hook)
-        return s_shell_authz_hook(FL_SCMD_UNKNOWN, 0, NULL, s_shell_authz_hook_ctx);
+fl_authz_decision_t fl_shell_authz_foreign_exec(int argc, char **argv) {
+    fl_shell_authz_hook_fn hook = NULL;
+    void *hook_ctx = NULL;
+    pthread_mutex_lock(&s_shell_authz_mu);
+    hook = s_shell_authz_hook;
+    hook_ctx = s_shell_authz_hook_ctx;
+    pthread_mutex_unlock(&s_shell_authz_mu);
+    if (hook) {
+        return hook(FL_SCMD_UNKNOWN, argc, argv, hook_ctx);
+    }
     if (!principal_is_guest())
         return FL_AUTHZ_ALLOW;
     return FL_AUTHZ_DENY;

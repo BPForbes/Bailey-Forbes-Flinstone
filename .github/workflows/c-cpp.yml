@@ -40,6 +40,7 @@ jobs:
         env:
           BOT_NAME: github-actions[bot]
           BOT_EMAIL: 41898282+github-actions[bot]@users.noreply.github.com
+          GIT_HEAD_REF: ${{ github.head_ref }}
         run: |
           set -euo pipefail
           if git diff --quiet -- version/entries userland/shell/version_def.h; then
@@ -55,7 +56,7 @@ jobs:
           git add -A -- version/entries userland/shell/version_def.h
           git commit -m "chore(version): sync entries relocate and version_def.h from .ver (automated)"
           if [[ "${GITHUB_EVENT_NAME}" == "pull_request" ]]; then
-            git push origin "HEAD:${{ github.head_ref }}"
+            git push origin "HEAD:${GIT_HEAD_REF}"
           else
             git push origin "HEAD:${GITHUB_REF_NAME}"
           fi

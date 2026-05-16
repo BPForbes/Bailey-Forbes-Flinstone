@@ -19,11 +19,11 @@ extern "C" {
 typedef fl_authz_decision_t (*fl_shell_authz_hook_fn)(fl_shell_cmd_no_t no, int argc,
                                                       char **argv, void *ctx);
 
-void fl_shell_authz_set_hook(fl_shell_authz_hook_fn fn, void *ctx);
+void fl_shell_authz_set_hook(fl_shell_authz_hook_fn hook_fn, void *ctx);
 
 fl_authz_decision_t fl_shell_authz_builtin(fl_shell_cmd_no_t no, int argc, char **argv);
 
-fl_authz_decision_t fl_shell_authz_foreign_exec(void);
+fl_authz_decision_t fl_shell_authz_foreign_exec(int argc, char **argv);
 
 #ifdef __cplusplus
 }

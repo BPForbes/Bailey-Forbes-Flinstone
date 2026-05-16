@@ -1098,33 +1098,65 @@ void test_diskput_fat32_roundtrip(void) {
  * Guest principal (**P2-3**): **FL_PRINCIPAL=guest** denies privileged builtins.
  * -------------------------------------------------------------------------*/
 void test_guest_authz_denies_format(void) {
+    char prev[256];
+    const char *old = getenv("FL_PRINCIPAL");
+    if (old) {
+        strncpy(prev, old, sizeof prev - 1);
+        prev[sizeof prev - 1] = '\0';
+    }
     (void)remove("guest_den.dat");
-    unsetenv("FL_PRINCIPAL");
-    setenv("FL_PRINCIPAL", "guest", 1);
+    (void)setenv("FL_PRINCIPAL", "guest", 1);
     CU_ASSERT_TRUE(execute_command_str("format guest_den.dat volx 4 16") != 0);
-    unsetenv("FL_PRINCIPAL");
+    if (old)
+        (void)setenv("FL_PRINCIPAL", prev, 1);
+    else
+        (void)unsetenv("FL_PRINCIPAL");
     (void)remove("guest_den.dat");
 }
 
 void test_guest_authz_denies_setdisk(void) {
-    unsetenv("FL_PRINCIPAL");
-    setenv("FL_PRINCIPAL", "guest", 1);
+    char prev[256];
+    const char *old = getenv("FL_PRINCIPAL");
+    if (old) {
+        strncpy(prev, old, sizeof prev - 1);
+        prev[sizeof prev - 1] = '\0';
+    }
+    (void)setenv("FL_PRINCIPAL", "guest", 1);
     CU_ASSERT_TRUE(execute_command_str("setdisk foo.dat") != 0);
-    unsetenv("FL_PRINCIPAL");
+    if (old)
+        (void)setenv("FL_PRINCIPAL", prev, 1);
+    else
+        (void)unsetenv("FL_PRINCIPAL");
 }
 
 void test_guest_authz_denies_foreign_exec(void) {
-    unsetenv("FL_PRINCIPAL");
-    setenv("FL_PRINCIPAL", "guest", 1);
+    char prev[256];
+    const char *old = getenv("FL_PRINCIPAL");
+    if (old) {
+        strncpy(prev, old, sizeof prev - 1);
+        prev[sizeof prev - 1] = '\0';
+    }
+    (void)setenv("FL_PRINCIPAL", "guest", 1);
     CU_ASSERT_TRUE(execute_command_str("echo guest-exec-blocked") != 0);
-    unsetenv("FL_PRINCIPAL");
+    if (old)
+        (void)setenv("FL_PRINCIPAL", prev, 1);
+    else
+        (void)unsetenv("FL_PRINCIPAL");
 }
 
 void test_guest_authz_allows_version(void) {
-    unsetenv("FL_PRINCIPAL");
-    setenv("FL_PRINCIPAL", "guest", 1);
+    char prev[256];
+    const char *old = getenv("FL_PRINCIPAL");
+    if (old) {
+        strncpy(prev, old, sizeof prev - 1);
+        prev[sizeof prev - 1] = '\0';
+    }
+    (void)setenv("FL_PRINCIPAL", "guest", 1);
     CU_ASSERT_TRUE(execute_command_str("version") == 0);
-    unsetenv("FL_PRINCIPAL");
+    if (old)
+        (void)setenv("FL_PRINCIPAL", prev, 1);
+    else
+        (void)unsetenv("FL_PRINCIPAL");
 }
 
 /* ---------------------------------------------------------------------------

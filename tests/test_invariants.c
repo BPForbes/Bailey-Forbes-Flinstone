@@ -5,7 +5,6 @@
 #include "common.h"
 #include "fl/history_record.h"
 #include "fl/contract_result.h"
-#include "util.h"
 #include <stdio.h>
 #include <string.h>
 

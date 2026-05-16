@@ -79,8 +79,12 @@ void fl_ring_log_append_line(const char *line) {
 }
 
 size_t fl_ring_log_copy_out(char *buf, size_t cap) {
-    if (!buf || cap < 2u)
+    if (!buf || cap == 0u)
         return 0u;
+    if (cap < 2u) {
+        buf[0] = '\0';
+        return 0u;
+    }
     pthread_mutex_lock(&s_ring_mu);
     size_t n = s_ring_len;
     if (n >= cap)
@@ -376,13 +380,9 @@ void fl_audit_authz_event(const char *cmd_line, unsigned cmd_no, int denied) {
     FILE *fp = fopen(FL_AUDIT_REL_DEFAULT, "a");
     if (fp) {
         if (fprintf(fp, "%s\n", line) < 0) {
-            fclose(fp);
-            pthread_mutex_unlock(&g_audit_mutex);
-            return;
-        }
-        if (fclose(fp) != 0) {
-            pthread_mutex_unlock(&g_audit_mutex);
-            return;
+            (void)fclose(fp);
+        } else {
+            (void)fclose(fp);
         }
     }
     pthread_mutex_unlock(&g_audit_mutex);
