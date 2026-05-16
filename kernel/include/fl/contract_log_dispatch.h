@@ -7,7 +7,8 @@
  * **ARCH=x86_64_nasm**, and **ARCH=arm** (AArch64 GAS).
  *
  * **Rate limit:** at most **FL_LOG_RL_MAX_PER_SEC** sink deliveries per monotonic
- * second (drops return **FL_RESULT_ERR**). Not IRQ-safe: do not call from a true
+ * second (drops return **FL_RESULT_ERR**). A **pthread** mutex serializes the
+ * counter against second rollovers. Not IRQ-safe: do not call from a true
  * hardirq; use a deferred path or an IRQ-safe sink implementation instead.
  */
 #ifndef FL_CONTRACT_LOG_DISPATCH_H

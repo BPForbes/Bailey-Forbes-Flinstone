@@ -154,6 +154,7 @@ fl_result_t fl_driver_registry_register(const fl_driver_desc_t *desc) {
 fl_result_t fl_driver_registry_match(const fl_device_desc_t *dev, const fl_driver_desc_t **out) {
     if (!dev || !out)
         return FL_RESULT_INVAL;
+    *out = NULL;
     for (int i = 0; i < s_driver_count; i++) {
         if (driver_matches(s_drivers[i], dev)) {
             *out = s_drivers[i];
@@ -388,8 +389,20 @@ void fl_drivers_init(void) {
             const fl_driver_desc_t *driver = s_drivers[d];
             if (!driver_matches(driver, &descs[i]))
                 continue;
-            if (driver->ops->probe && driver->ops->probe(dev) != FL_RESULT_OK)
-                continue;
+            if (driver->ops->probe) {
+                fl_result_t pr = driver->ops->probe(dev);
+                if (pr == FL_RESULT_PROBE_SKIP)
+                    continue;
+                if (pr != FL_RESULT_OK) {
+#ifndef DRIVERS_BAREMETAL
+                    fprintf(stderr, "[driver_model] probe failed for driver \"%s\" "
+                                    "(driver->ops->probe returned %d, expected FL_RESULT_OK or "
+                                    "FL_RESULT_PROBE_SKIP)\n",
+                            driver->name ? driver->name : "(null)", (int)pr);
+#endif
+                    break;
+                }
+            }
             fl_bound_device_t *bound = &s_devices[s_device_count++];
             bound->dev = dev;
             bound->driver = driver;

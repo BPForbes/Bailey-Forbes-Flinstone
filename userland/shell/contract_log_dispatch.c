@@ -1,33 +1,36 @@
 #include "fl/contract_log_dispatch.h"
 #include "mem_asm.h"
-#include <stdatomic.h>
+#include <pthread.h>
 #include <stdio.h>
 #include <string.h>
 #include <time.h>
 
-static _Atomic time_t s_rate_sec;
-static _Atomic unsigned s_rate_count;
+static pthread_mutex_t s_rate_mu = PTHREAD_MUTEX_INITIALIZER;
+static time_t s_rate_sec;
+static unsigned s_rate_count;
 
 static int fl_log_rate_allow(void) {
     struct timespec ts;
-    if (clock_gettime(CLOCK_MONOTONIC, &ts) != 0)
+    pthread_mutex_lock(&s_rate_mu);
+    if (clock_gettime(CLOCK_MONOTONIC, &ts) != 0) {
+        pthread_mutex_unlock(&s_rate_mu);
         return 1;
-
-    time_t sec = ts.tv_sec;
-    time_t prev = atomic_load_explicit(&s_rate_sec, memory_order_relaxed);
-    if (sec != prev) {
-        if (atomic_compare_exchange_strong(&s_rate_sec, &prev, sec)) {
-            atomic_store_explicit(&s_rate_count, 0u, memory_order_relaxed);
-        }
     }
-
-    unsigned n = atomic_fetch_add_explicit(&s_rate_count, 1u, memory_order_relaxed);
+    time_t sec = ts.tv_sec;
+    if (sec != s_rate_sec) {
+        s_rate_sec = sec;
+        s_rate_count = 0u;
+    }
+    unsigned n = s_rate_count++;
+    pthread_mutex_unlock(&s_rate_mu);
     return n < (unsigned)FL_LOG_RL_MAX_PER_SEC;
 }
 
 void fl_log_rate_limit_reset_for_tests(void) {
-    atomic_store_explicit(&s_rate_sec, 0, memory_order_relaxed);
-    atomic_store_explicit(&s_rate_count, 0u, memory_order_relaxed);
+    pthread_mutex_lock(&s_rate_mu);
+    s_rate_sec = 0;
+    s_rate_count = 0u;
+    pthread_mutex_unlock(&s_rate_mu);
 }
 
 fl_result_t fl_log_sink_emit_line(fl_log_sink_t *sink, int level, int facility,
