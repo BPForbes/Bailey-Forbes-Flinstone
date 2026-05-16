@@ -1,6 +1,10 @@
 Version release notes use *.ver files (MAJOR_VERSION, STANDARD_VERSION,
 RELEASE_VERSION or MINOR_VERSION / VERSION_PATCH, optional PRERELEASE, optional GM,
-optional DEV_VERSION, DESCRIPTION, and optional RELEASE_DATE).
+optional DEV_VERSION, DESCRIPTION). Do not add RELEASE_DATE= when authoring under
+version/entries/: relocate (root PRERELEASE=1), Version lock, and stamp_version_release_date.sh
+append it when missing. For paths that already exist under version/locked/, keep
+version/entries/<same path> byte-identical to locked (including any RELEASE_DATE already
+stamped there) until maintainers realign via finalize / Version lock.
 
 DESCRIPTION may be:
   - One line:   DESCRIPTION=...
@@ -101,10 +105,20 @@ Finalize (copy entries → locked, skipping preproduction */), then regenerate t
 userland/shell/version_def.h is generated from the highest A.B.C among all
 version/locked/**/*.ver files (recursive). Do not edit the header by hand.
 
+AI authoring (new .ver rows):
+  New .ver files belong under version/entries/ at the repository root, not in a
+  preproduction <A>.<B>.<C>/ subdirectory one level lower (even when that directory
+  already exists). Do not add new release files under version/locked/. GitHub Actions
+  runs relocate_root_prerelease_ver_to_preproduction.sh to move root PRERELEASE=1 rows
+  into version/entries/preproduction <A>.<B>.<C>/ and stamps RELEASE_DATE when missing.
+  Do not set RELEASE_DATE= on new rows — automation handles dating on relocate and
+  Version lock.
+
 For routine feature work: author new PRERELEASE=1 rows at the version/entries/ root;
 preproduction <A>.<B>.<C>/ is filled by relocate (CI or local), not by hand-adding new
 *.ver paths there on same-repo branches. Edit GA-oriented root *.ver and any existing
-preproduction subtrees for semver and release prose.
+preproduction subtrees for semver and release prose (do not strip RELEASE_DATE from
+rows already stamped in preproduction).
 Do not commit hand-edited version/locked/*.ver or userland/shell/version_def.h on
 typical agent-authored PRs; GitHub Actions copies entries → locked (excluding
 preproduction */ at the entries root) and regenerates

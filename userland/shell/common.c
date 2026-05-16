@@ -72,7 +72,7 @@ static const char HELP_BODY[] =
 "Other:\n"
 "  version [ -y | -n ]  Print version\n"
 "  contracts [summary|json] [--help]  Subsystem contract bundle (agents: use `json`)\n"
-"  audit [show [N]] | path | --help   Audit log (separate from history; needs FL_AUDIT=1)\n"
+"  audit [show [N]] | path | ring | --help   Audit log (separate from history; needs FL_AUDIT=1)\n"
 "  help                 Display this help\n"
 "  redirect <file>      Redirect output (use \"redirect off\" to restore)\n"
 "  rerun <N>            Re-run Nth history command\n"

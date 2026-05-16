@@ -5,12 +5,14 @@
 #include "cmd_decl.h"
 #include "threadpool.h"
 #include "fl/audit_log.h"
+#include "fl/shell_authz.h"
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 #include <unistd.h>
 #include <sys/wait.h>
 #include <signal.h>
+#include <pthread.h>
 
 /*
  * execute_command_str:
@@ -93,6 +95,12 @@ int execute_command_str(const char *line) {
 
     fl_shell_cmd_no_t id = fl_shell_cmd_lookup(args[0]);
     if (id == FL_SCMD_UNKNOWN) {
+        if (fl_shell_authz_foreign_exec(argc, args) == FL_AUTHZ_DENY) {
+            fl_audit_authz_event(line, 0u, 1);
+            free(cmdLine);
+            out_rc = 1;
+            goto finish;
+        }
         pid_t pid = fork();
         if (pid < 0) {
             perror("fork");
@@ -114,12 +122,95 @@ int execute_command_str(const char *line) {
         }
     }
 
+    if (fl_shell_authz_builtin(id, argc, args) == FL_AUTHZ_DENY) {
+        fl_audit_authz_event(line, (unsigned)id, 1);
+        free(cmdLine);
+        out_rc = 1;
+        goto finish;
+    }
+
     out_rc = fl_shell_cmd_dispatch(id, argc, args);
     free(cmdLine);
 
 finish:
     fl_audit_shell_completed(line, out_rc);
     return out_rc;
+}
+
+/* ---------------------------------------------------------------------------
+ * Shell authorization (**P2-3**) — same TU as the interpreter to avoid a
+ * separate userland object file; policy is hosted-only (getenv / hook).
+ * -------------------------------------------------------------------------*/
+static fl_shell_authz_hook_fn s_shell_authz_hook;
+static void *s_shell_authz_hook_ctx;
+static pthread_mutex_t s_shell_authz_mu = PTHREAD_MUTEX_INITIALIZER;
+
+void fl_shell_authz_set_hook(fl_shell_authz_hook_fn hook_fn, void *ctx) {
+    pthread_mutex_lock(&s_shell_authz_mu);
+    s_shell_authz_hook = hook_fn;
+    s_shell_authz_hook_ctx = ctx;
+    pthread_mutex_unlock(&s_shell_authz_mu);
+}
+
+static int principal_is_guest(void) {
+    /* getenv is not async-signal-safe; concurrent setenv is not expected for FL_PRINCIPAL
+     * in normal shell or CUnit runs (single-threaded tests). */
+    const char *p = getenv("FL_PRINCIPAL");
+    return p && strcmp(p, "guest") == 0;
+}
+
+static fl_authz_decision_t guest_builtin_policy(fl_shell_cmd_no_t no) {
+    switch (no) {
+    case FL_SCMD_FORMAT:
+    case FL_SCMD_SETDISK:
+    case FL_SCMD_INITDISK:
+    case FL_SCMD_CREATEDISK:
+    case FL_SCMD_RMTREE:
+    case FL_SCMD_DISKPUT:
+    case FL_SCMD_DISKGET:
+    case FL_SCMD_DISKDEL:
+    case FL_SCMD_DISKMKDIR:
+    case FL_SCMD_REDIRECT:
+    case FL_SCMD_IMPORT:
+    case FL_SCMD_WRITE:
+    case FL_SCMD_WRITECLUSTER:
+    case FL_SCMD_DELCLUSTER:
+    case FL_SCMD_UPDATE:
+    case FL_SCMD_ADDCLUSTER:
+        return FL_AUTHZ_DENY;
+    default:
+        return FL_AUTHZ_ALLOW;
+    }
+}
+
+fl_authz_decision_t fl_shell_authz_builtin(fl_shell_cmd_no_t no, int argc, char **argv) {
+    fl_shell_authz_hook_fn hook = NULL;
+    void *hook_ctx = NULL;
+    pthread_mutex_lock(&s_shell_authz_mu);
+    hook = s_shell_authz_hook;
+    hook_ctx = s_shell_authz_hook_ctx;
+    pthread_mutex_unlock(&s_shell_authz_mu);
+    if (hook) {
+        return hook(no, argc, argv, hook_ctx);
+    }
+    if (!principal_is_guest())
+        return FL_AUTHZ_ALLOW;
+    return guest_builtin_policy(no);
+}
+
+fl_authz_decision_t fl_shell_authz_foreign_exec(int argc, char **argv) {
+    fl_shell_authz_hook_fn hook = NULL;
+    void *hook_ctx = NULL;
+    pthread_mutex_lock(&s_shell_authz_mu);
+    hook = s_shell_authz_hook;
+    hook_ctx = s_shell_authz_hook_ctx;
+    pthread_mutex_unlock(&s_shell_authz_mu);
+    if (hook) {
+        return hook(FL_SCMD_UNKNOWN, argc, argv, hook_ctx);
+    }
+    if (!principal_is_guest())
+        return FL_AUTHZ_ALLOW;
+    return FL_AUTHZ_DENY;
 }
 
 /* ---------------------------------------------------------------------------

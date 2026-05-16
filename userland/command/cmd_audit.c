@@ -16,7 +16,10 @@ static void print_audit_help(void) {
         "host sandbox when jail mode is active; see fl/jail_contract.h).\n"
         "\n"
         "Commands:\n"
-        "  show [N]   Print the last N lines (default 32, N in 1..10000)\n"
+        "  show [N]   Print the last N lines (default 32, N in 1..10000). For very\n"
+        "             large logs, only the last 2 MiB is scanned for the tail, so\n"
+        "             fewer than N lines may appear if newlines are sparse.\n"
+        "  ring       Print the in-memory ring buffer (drops counter); see **P6-2**.\n"
         "  path       Show relative log path and whether the fs jail is active\n"
         "  --help     Show this message\n",
         FL_AUDIT_ENV, FL_AUDIT_REL_DEFAULT);
@@ -33,6 +36,18 @@ int cmd_audit_run(int argc, char **argv) {
     if (argc >= 2 && !strcmp(argv[1], "path")) {
         printf("audit_log_relative=%s\n", FL_AUDIT_REL_DEFAULT);
         printf("jail_active=%d\n", fs_jail_is_active());
+        return 0;
+    }
+
+    if (argc >= 2 && !strcmp(argv[1], "ring")) {
+        unsigned d = fl_ring_log_drop_count();
+        char buf[FL_RING_LOG_CAPACITY + 2u];
+        size_t n = fl_ring_log_copy_out(buf, sizeof buf);
+        printf("ring_drops=%u\n", d);
+        if (n == 0u)
+            printf("(ring empty)\n");
+        else
+            fputs(buf, stdout);
         return 0;
     }
 
