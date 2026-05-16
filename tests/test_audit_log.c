@@ -14,6 +14,7 @@
 
 #include "fl/audit_log.h"
 #include "fl/contract.h"
+#include "fl/contract_log_dispatch.h"
 #include <errno.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -432,6 +433,57 @@ static int test_log_sink_ops_struct(void) {
 }
 
 /* -------------------------------------------------------------------------
+ * Tests: fl_log_sink_emit_line dispatch + rate limit (ASM-backed buffer)
+ * ---------------------------------------------------------------------- */
+
+static int test_log_dispatch_rate_limit(void) {
+    static const fl_log_sink_ops_t ops = { .emit = test_emit_fn };
+    fl_log_sink_t sink = { .ops = &ops, .impl = NULL };
+
+    fl_log_rate_limit_reset_for_tests();
+    for (int i = 0; i < FL_LOG_RL_MAX_PER_SEC; i++) {
+        g_emit_called = 0;
+        ASSERT(fl_log_sink_emit_line(&sink, (int)FL_LOG_INFO, FL_LOG_FACILITY_AUDIT, "x") ==
+               FL_RESULT_OK);
+        ASSERT(g_emit_called == 1);
+    }
+
+    /*
+     * The (FL_LOG_RL_MAX_PER_SEC + 1)th fl_log_sink_emit_line may land in a new monotonic
+     * second; poll fl_log_sink_emit_line in a tight bounded loop (referencing
+     * FL_RESULT_OK / FL_RESULT_ERR / g_emit_called / &sink) until FL_RESULT_ERR (expected
+     * rate limit) — at most two full per-second windows need ~2 * FL_LOG_RL_MAX_PER_SEC + 1
+     * OK emits before the next line must be rejected.
+     */
+    int saw_rate_limit = 0;
+    const int max_tight = 2 * FL_LOG_RL_MAX_PER_SEC + 32;
+    for (int k = 0; k < max_tight; k++) {
+        g_emit_called = 0;
+        fl_result_t rc =
+            fl_log_sink_emit_line(&sink, (int)FL_LOG_INFO, FL_LOG_FACILITY_AUDIT, "overflow");
+        if (rc == FL_RESULT_ERR) {
+            ASSERT(g_emit_called == 0);
+            saw_rate_limit = 1;
+            break;
+        }
+        if (rc != FL_RESULT_OK) {
+            fprintf(stderr, "FAIL [%s:%d]: unexpected fl_log_sink_emit_line return %d\n",
+                    __FILE__, __LINE__, (int)rc);
+            return 1;
+        }
+        ASSERT(g_emit_called == 1);
+    }
+    ASSERT(saw_rate_limit);
+    return 0;
+}
+
+static int test_log_dispatch_null_sink(void) {
+    ASSERT(fl_log_sink_emit_line(NULL, (int)FL_LOG_INFO, FL_LOG_FACILITY_AUDIT, "nope") ==
+           FL_RESULT_INVAL);
+    return 0;
+}
+
+/* -------------------------------------------------------------------------
  * Tests: audit constants (FL_AUDIT_REL_DEFAULT, FL_AUDIT_ENV)
  * ---------------------------------------------------------------------- */
 
@@ -509,6 +561,14 @@ int main(void) {
 
     printf("test_log_sink_ops_struct... ");
     if (test_log_sink_ops_struct() != 0) return 1;
+    printf("OK\n");
+
+    printf("test_log_dispatch_rate_limit... ");
+    if (test_log_dispatch_rate_limit() != 0) return 1;
+    printf("OK\n");
+
+    printf("test_log_dispatch_null_sink... ");
+    if (test_log_dispatch_null_sink() != 0) return 1;
     printf("OK\n");
 
     printf("test_audit_constants... ");

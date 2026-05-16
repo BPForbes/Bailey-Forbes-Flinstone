@@ -84,5 +84,5 @@ Requires `aarch64-linux-gnu-gcc` for ARM. Install: `apt install gcc-aarch64-linu
 1. **Done**: Canonical headers; arch `driver_types.h` → thin wrappers
 2. **Done**: Unified drivers in `kernel/drivers/`; block uses HAL transport; keyboard/display/timer/pic use fl_ioport/fl_mmio
 3. **Done**: Deleted duplicate arch-specific drivers (x86_64, aarch64)
-4. **Next**: `fl_driver_registry_register_all` → `fl_bus_enumerate` → probe → attach
+4. **Next**: `fl_driver_registry_register_all` → `fl_bus_enumerate` → probe → attach (**`fl_result_t`**: **`FL_RESULT_OK`** to claim, **`FL_RESULT_PROBE_SKIP`** to try the next driver; **`attach`** non-OK rolls back without **start**)
 5. **Future**: Virtio as common device model for all platforms

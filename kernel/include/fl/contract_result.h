@@ -23,6 +23,14 @@ typedef int fl_result_t;
 #define FL_RESULT_NOSYS (-38)
 
 /**
+ * **Driver probe** (`fl_driver_ops_t::probe`): return **`FL_RESULT_OK`** when this
+ * driver claims the device and **`attach`** may run. Return **`FL_RESULT_NOSYS`**
+ * when the device is not handled (the registry tries other drivers). Other
+ * negative **`fl_result_t`** values mean a definitive probe failure.
+ */
+#define FL_RESULT_PROBE_SKIP FL_RESULT_NOSYS
+
+/**
  * Inclusive bounds for the JSON **`rc`** field in FL1 packed history rows (**P0-2**).
  * Values outside this range are rejected by **fl_history_record_unpack_cmd** so random
  * JSON integers cannot be mistaken for vetted **fl_result_t** codes.

@@ -138,9 +138,9 @@ static int driver_matches(const fl_driver_desc_t *driver, const fl_device_desc_t
     return 0;
 }
 
-int fl_driver_registry_register(const fl_driver_desc_t *desc) {
+fl_result_t fl_driver_registry_register(const fl_driver_desc_t *desc) {
     if (!desc || !desc->name || !desc->ops)
-        return -1;
+        return FL_RESULT_INVAL;
     spinlock_acquire(&s_model_lock);
     if (s_driver_count >= FL_MODEL_MAX_DRIVERS) {
         spinlock_release(&s_model_lock);
@@ -148,19 +148,20 @@ int fl_driver_registry_register(const fl_driver_desc_t *desc) {
     }
     s_drivers[s_driver_count++] = desc;
     spinlock_release(&s_model_lock);
-    return 0;
+    return FL_RESULT_OK;
 }
 
-int fl_driver_registry_match(const fl_device_desc_t *dev, const fl_driver_desc_t **out) {
+fl_result_t fl_driver_registry_match(const fl_device_desc_t *dev, const fl_driver_desc_t **out) {
     if (!dev || !out)
-        return -1;
+        return FL_RESULT_INVAL;
+    *out = NULL;
     for (int i = 0; i < s_driver_count; i++) {
         if (driver_matches(s_drivers[i], dev)) {
             *out = s_drivers[i];
-            return 0;
+            return FL_RESULT_OK;
         }
     }
-    return -1;
+    return FL_RESULT_PROBE_SKIP;
 }
 
 int fl_device_count(void) {
@@ -330,12 +331,14 @@ static int block_devfs_ioctl(void *dev, unsigned long request, void *arg) {
     return -1;
 }
 
-static int block_probe(fl_device_t *dev) {
+static fl_result_t block_probe(fl_device_t *dev) {
     const fl_device_desc_t *desc = fl_device_get_desc(dev);
-    return (desc && desc->bus_type == FL_BUS_SYNTH && fl_cstr_eq(desc->synth_id, "host_blk")) ? 0 : -1;
+    return (desc && desc->bus_type == FL_BUS_SYNTH && fl_cstr_eq(desc->synth_id, "host_blk"))
+               ? FL_RESULT_OK
+               : FL_RESULT_PROBE_SKIP;
 }
 
-static int block_attach(fl_device_t *dev) {
+static fl_result_t block_attach(fl_device_t *dev) {
     const fl_devfs_ops_t ops = { .read = block_devfs_read, .write = block_devfs_write, .ioctl = block_devfs_ioctl };
     dev->driver_data = g_block_driver;
     return fl_devfs_register("/dev/blk0", FL_DRV_CLASS_BLOCK, dev, &ops);
@@ -386,8 +389,20 @@ void fl_drivers_init(void) {
             const fl_driver_desc_t *driver = s_drivers[d];
             if (!driver_matches(driver, &descs[i]))
                 continue;
-            if (driver->ops->probe && driver->ops->probe(dev) != 0)
-                continue;
+            if (driver->ops->probe) {
+                fl_result_t pr = driver->ops->probe(dev);
+                if (pr == FL_RESULT_PROBE_SKIP)
+                    continue;
+                if (pr != FL_RESULT_OK) {
+#ifndef DRIVERS_BAREMETAL
+                    fprintf(stderr, "[driver_model] probe failed for driver \"%s\" "
+                                    "(driver->ops->probe returned %d, expected FL_RESULT_OK or "
+                                    "FL_RESULT_PROBE_SKIP)\n",
+                            driver->name ? driver->name : "(null)", (int)pr);
+#endif
+                    break;
+                }
+            }
             fl_bound_device_t *bound = &s_devices[s_device_count++];
             bound->dev = dev;
             bound->driver = driver;
@@ -397,7 +412,7 @@ void fl_drivers_init(void) {
                 s_device_count--;
                 continue;
             }
-            if (driver->ops->attach && driver->ops->attach(dev) != 0) {
+            if (driver->ops->attach && driver->ops->attach(dev) != FL_RESULT_OK) {
                 fl_resource_release_all(dev);
                 s_device_count--;
                 continue;
@@ -441,9 +456,9 @@ void fl_drivers_shutdown(void) {
     s_model_initialized = 0;
 }
 
-int fl_devfs_register(const char *path, int class_id, void *dev, const fl_devfs_ops_t *ops) {
+fl_result_t fl_devfs_register(const char *path, int class_id, void *dev, const fl_devfs_ops_t *ops) {
     if (!path || !dev || !ops)
-        return -1;
+        return FL_RESULT_INVAL;
     spinlock_acquire(&s_model_lock);
     if (s_devfs_count >= FL_MODEL_MAX_DEVFS) {
         spinlock_release(&s_model_lock);
@@ -451,12 +466,12 @@ int fl_devfs_register(const char *path, int class_id, void *dev, const fl_devfs_
     }
     if (fl_cstr_len(path, sizeof(s_devfs[0].path)) >= sizeof(s_devfs[0].path)) {
         spinlock_release(&s_model_lock);
-        return -1;
+        return FL_RESULT_INVAL;
     }
     for (int i = 0; i < s_devfs_count; i++) {
         if (fl_cstr_eq(s_devfs[i].path, path)) {
             spinlock_release(&s_model_lock);
-            return -1;
+            return FL_RESULT_ERR;
         }
     }
     fl_devfs_node_t *node = &s_devfs[s_devfs_count++];
@@ -465,7 +480,7 @@ int fl_devfs_register(const char *path, int class_id, void *dev, const fl_devfs_
     node->dev = (fl_device_t *)dev;
     node->ops = *ops;
     spinlock_release(&s_model_lock);
-    return 0;
+    return FL_RESULT_OK;
 }
 
 void fl_devfs_unregister(const char *path) {
