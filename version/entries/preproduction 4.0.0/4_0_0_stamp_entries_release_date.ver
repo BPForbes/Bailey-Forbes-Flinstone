@@ -5,3 +5,5 @@ PRERELEASE=1
 DEV_VERSION=2
 GM=0
 DESCRIPTION=stamp_version_release_date.sh: after the locked plus mirrored-entries pass, walk every version/entries/**/*.ver (including preproduction */ trees that finalize does not copy into version/locked) and append merge-day RELEASE_DATE= when the key is still missing, so Version lock on merge applies dates to preproduction-only rows. docs/versioning.md: Automation summary and creating-handling step 3 now match AGENTS (commit regenerated userland/shell/version_def.h when VERSION_LINE changes or header check fails). CLAUDE.md, .cursor/rules/versioning.mdc, .coderabbit.yaml: same conditional version_def.h policy (VERSION_LINE signals + check_version_header_matches_locked).
+
+RELEASE_DATE=2026-05-13
