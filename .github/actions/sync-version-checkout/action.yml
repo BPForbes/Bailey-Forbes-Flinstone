@@ -1,13 +1,13 @@
 name: Sync version checkout for CI build
 description: >-
-  After the versioning job, align the working tree with the branch tip (bot may
-  have pushed relocate + version_def.h). Then relocate idempotently and
-  regenerate version_def.h so compile steps match .ver without hand-committed
-  header updates.
+  After the versioning job, pick up bot-pushed version files without abandoning
+  the PR merge checkout: on pull_request, overlay userland/shell/version_def.h
+  and version/entries from origin/<head>; on push, fast-forward to origin/<ref>.
+  Then relocate idempotently and regenerate version_def.h.
 runs:
   using: composite
   steps:
-    - name: Fetch and checkout branch tip after versioning bot commits
+    - name: Sync version paths from branch tip (keep PR merge checkout on pull_request)
       if: >-
         (github.event_name == 'pull_request' &&
          github.event.pull_request.head.repo.full_name == github.repository) ||
@@ -23,7 +23,11 @@ runs:
         set -euo pipefail
         git fetch origin
         if [[ "${GITHUB_EVENT_NAME}" == "pull_request" ]]; then
-          git checkout -B "${GIT_HEAD_REF}" "origin/${GIT_HEAD_REF}"
+          git fetch origin "${GIT_HEAD_REF}"
+          if git rev-parse --verify --quiet "origin/${GIT_HEAD_REF}" >/dev/null; then
+            git checkout "origin/${GIT_HEAD_REF}" -- userland/shell/version_def.h 2>/dev/null || true
+            git checkout "origin/${GIT_HEAD_REF}" -- version/entries 2>/dev/null || true
+          fi
         else
           git checkout -B "${GIT_REF_NAME}" "origin/${GIT_REF_NAME}"
         fi

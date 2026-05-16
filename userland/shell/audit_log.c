@@ -13,10 +13,13 @@
 static pthread_mutex_t g_audit_mutex = PTHREAD_MUTEX_INITIALIZER;
 static fl_log_sink_t *g_audit_sink;
 
-/* --- In-memory ring (P6-2): bulk moves use asm_mem_copy (x86-64 GAS/NASM + AArch64 GAS). --- */
+/* --- In-memory ring (P6-2): bulk moves use asm_mem_copy (x86-64 GAS/NASM + AArch64 GAS).
+ * Storage is FL_RING_LOG_CAPACITY+1 bytes: up to FL_RING_LOG_CAPACITY bytes of line
+ * text (including embedded newlines) plus a trailing NUL without indexing past the end.
+ * --- */
 static pthread_mutex_t s_ring_mu = PTHREAD_MUTEX_INITIALIZER;
-static char s_ring_buf[FL_RING_LOG_CAPACITY];
-static char s_ring_scratch[FL_RING_LOG_CAPACITY];
+static char s_ring_buf[FL_RING_LOG_CAPACITY + 1u];
+static char s_ring_scratch[FL_RING_LOG_CAPACITY + 1u];
 static size_t s_ring_len;
 static unsigned s_ring_drops;
 
@@ -361,6 +364,7 @@ int fl_audit_show_last_lines(int n) {
 }
 
 void fl_audit_authz_event(const char *cmd_line, unsigned cmd_no, int denied) {
+    /* Ring + sink only when audit is enabled (matches PR spec: no silent ring growth). */
     if (!fl_audit_env_enabled() || !cmd_line)
         return;
 
@@ -376,6 +380,7 @@ void fl_audit_authz_event(const char *cmd_line, unsigned cmd_no, int denied) {
         snprintf(line, sizeof line, "type=authz denied=%d cmd_no=%u [TRUNCATED]",
                  denied ? 1 : 0, cmd_no);
 
+    /* Intentional split lock: do not hold g_audit_mutex across fopen/fprintf/fclose. */
     pthread_mutex_lock(&g_audit_mutex);
     FILE *fp = fopen(FL_AUDIT_REL_DEFAULT, "a");
     if (fp) {
@@ -389,6 +394,7 @@ void fl_audit_authz_event(const char *cmd_line, unsigned cmd_no, int denied) {
 
     fl_ring_log_append_line(line);
 
+    /* Brief second lock: read sink pointer without blocking other writers on the file path. */
     fl_log_sink_t *sink = NULL;
     pthread_mutex_lock(&g_audit_mutex);
     sink = g_audit_sink;

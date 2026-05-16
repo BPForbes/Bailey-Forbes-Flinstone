@@ -153,6 +153,8 @@ void fl_shell_authz_set_hook(fl_shell_authz_hook_fn hook_fn, void *ctx) {
 }
 
 static int principal_is_guest(void) {
+    /* getenv is not async-signal-safe; concurrent setenv is not expected for FL_PRINCIPAL
+     * in normal shell or CUnit runs (single-threaded tests). */
     const char *p = getenv("FL_PRINCIPAL");
     return p && strcmp(p, "guest") == 0;
 }
