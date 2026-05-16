@@ -1,7 +1,6 @@
 #include "cmd_decl.h"
 #include "common.h"
 #include "fl/audit_log.h"
-#include "fl/ring_log.h"
 #include "fs_jail.h"
 #include <stdio.h>
 #include <stdlib.h>

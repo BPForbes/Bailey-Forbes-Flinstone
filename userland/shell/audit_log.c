@@ -1,6 +1,6 @@
 #include "fl/audit_log.h"
-#include "fl/ring_log.h"
 #include "fs_jail.h"
+#include "mem_asm.h"
 #ifndef DISK_HOST_USE_LIBC_PREADV
 #include "shell_history_asm.h"
 #endif
@@ -12,6 +12,85 @@
 
 static pthread_mutex_t g_audit_mutex = PTHREAD_MUTEX_INITIALIZER;
 static fl_log_sink_t *g_audit_sink;
+
+/* --- In-memory ring (P6-2): bulk moves use asm_mem_copy (x86-64 GAS/NASM + AArch64 GAS). --- */
+static pthread_mutex_t s_ring_mu = PTHREAD_MUTEX_INITIALIZER;
+static char s_ring_buf[FL_RING_LOG_CAPACITY];
+static char s_ring_scratch[FL_RING_LOG_CAPACITY];
+static size_t s_ring_len;
+static unsigned s_ring_drops;
+
+void fl_ring_log_reset(void) {
+    pthread_mutex_lock(&s_ring_mu);
+    s_ring_len = 0;
+    s_ring_drops = 0;
+    asm_mem_zero(s_ring_buf, sizeof s_ring_buf);
+    asm_mem_zero(s_ring_scratch, sizeof s_ring_scratch);
+    pthread_mutex_unlock(&s_ring_mu);
+}
+
+unsigned fl_ring_log_drop_count(void) {
+    pthread_mutex_lock(&s_ring_mu);
+    unsigned d = s_ring_drops;
+    pthread_mutex_unlock(&s_ring_mu);
+    return d;
+}
+
+void fl_ring_log_append_line(const char *line) {
+    if (!line)
+        return;
+    size_t ln = strlen(line);
+    if (ln == 0u)
+        return;
+    size_t add = ln + 1u;
+    if (add > FL_RING_LOG_CAPACITY) {
+        pthread_mutex_lock(&s_ring_mu);
+        s_ring_drops++;
+        pthread_mutex_unlock(&s_ring_mu);
+        return;
+    }
+
+    pthread_mutex_lock(&s_ring_mu);
+    while (s_ring_len + add > FL_RING_LOG_CAPACITY && s_ring_len > 0u) {
+        const char *nl = memchr(s_ring_buf, '\n', s_ring_len);
+        if (!nl) {
+            s_ring_len = 0;
+            asm_mem_zero(s_ring_buf, sizeof s_ring_buf);
+            break;
+        }
+        size_t skip = (size_t)(nl - s_ring_buf) + 1u;
+        size_t rest = s_ring_len - skip;
+        asm_mem_copy(s_ring_scratch, s_ring_buf + skip, rest);
+        asm_mem_copy(s_ring_buf, s_ring_scratch, rest);
+        s_ring_len = rest;
+        s_ring_buf[s_ring_len] = '\0';
+        s_ring_drops++;
+    }
+    if (s_ring_len + add > FL_RING_LOG_CAPACITY) {
+        s_ring_drops++;
+        pthread_mutex_unlock(&s_ring_mu);
+        return;
+    }
+    asm_mem_copy(s_ring_buf + s_ring_len, line, ln);
+    s_ring_len += ln;
+    s_ring_buf[s_ring_len++] = '\n';
+    s_ring_buf[s_ring_len] = '\0';
+    pthread_mutex_unlock(&s_ring_mu);
+}
+
+size_t fl_ring_log_copy_out(char *buf, size_t cap) {
+    if (!buf || cap < 2u)
+        return 0u;
+    pthread_mutex_lock(&s_ring_mu);
+    size_t n = s_ring_len;
+    if (n >= cap)
+        n = cap - 1u;
+    if (n > 0u)
+        asm_mem_copy(buf, s_ring_buf, n);
+    buf[n] = '\0';
+    pthread_mutex_unlock(&s_ring_mu);
+    return n;
+}
 
 void fl_audit_set_sink(fl_log_sink_t *sink) {
     pthread_mutex_lock(&g_audit_mutex);
