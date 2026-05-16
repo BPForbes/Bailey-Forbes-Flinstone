@@ -4,3 +4,5 @@ RELEASE_VERSION=0
 PRERELEASE=1
 DEV_VERSION=3
 DESCRIPTION=PRE 4.0.0 build 3: roadmap Phase 6 deferred TODOs — P2-3 FL_PRINCIPAL=guest shell authz (destructive builtins + foreign exec) with fl_audit_authz_event, implemented in interpreter.c; P0-2 FL_RESULT_JSON_RC_MIN/MAX strict FL1 unpack; P6-4 audit show tail scan capped to last 2 MiB on huge logs; P7 batch argv helpers in util.c + tests; P6-2 audit ring in audit_log.c using asm_mem_copy/asm_mem_zero (same mem_asm object file as GAS x86-64, NASM x86-64, AArch64 GAS per ARCH); contract bundle rev 3 (JSON rc bounds in contracts json). CI: versioning job runs gen_version_def.sh after relocate and pushes userland/shell/version_def.h when it differs (same-repo only; develop/main skip push — Version lock on merge still publishes). Contributors need not hand-commit the header for VERSION_LINE-only .ver edits on feature branches.
+
+RELEASE_DATE=2026-05-16
