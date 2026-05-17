@@ -12,6 +12,7 @@
 #include "fl/driver/device.h"
 #include "fl/driver/devfs.h"
 #include "fl/driver/irq.h"
+#include "fl/driver/usb_xhci_mmio_glue.h"
 #include "fl/mm.h"
 #include "common.h"
 #include <stdio.h>
@@ -33,6 +34,16 @@ static int create_temp_disk(const char *path, int clusters, int cluster_size) {
         fputc('\n', fp);
     }
     fclose(fp);
+    return 0;
+}
+
+static int test_usb_xhci_mmio_glue(void) {
+    uint32_t word = 0xDEADBEEFu;
+    uint32_t r = fl_usb_xhci_mmio_read32_volatile(&word);
+    ASSERT(r == 0xDEADBEEFu);
+    fl_usb_xhci_mmio_write32_volatile(&word, 0x12345678u);
+    ASSERT(word == 0x12345678u);
+    fl_usb_xhci_mmio_rw_fence();
     return 0;
 }
 
@@ -667,6 +678,10 @@ int main(void) {
 
     printf("test_pic... ");
     if (test_pic() != 0) { drivers_shutdown(); unlink(path); return 1; }
+    printf("OK\n");
+
+    printf("test_usb_xhci_mmio_glue... ");
+    if (test_usb_xhci_mmio_glue() != 0) { drivers_shutdown(); unlink(path); return 1; }
     printf("OK\n");
 
     printf("test_probe... ");
