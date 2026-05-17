@@ -44,6 +44,8 @@ Unless stated otherwise, **start at H**, prove APIs and tests, then **lift** the
 
 This section is **normative for terminology** in this repo: what we mean by a **module contract**, how it differs from **functionality**, and a **snapshot** of how far **`develop`** has explicit **data-distribution** models for each **`P*-*` roadmap row**. For **P0-1** and **P0-2**, the snapshot also tracks the **normative C bundle** under **`contracts/foundations/`**; for **P1-1** … **P1-7**, it tracks the **P1 runtime bundle** under **`contracts/runtime/`**; for **P2-1** … **P2-4**, it tracks the **P2 identity bundle** under **`contracts/identity/`** (see the table notes below).
 
+**P2 is not a second copy of P0.** **P0** freezes **cross-cutting outcomes and surfaces** (`fl_result_t`, logging and auth wiring, arch CI slices). **P2** freezes **who may act and under what proof** (principal, credentials, authorization, elevation). P2 headers **inherit** P0 and P1 so identity policy uses the same **error and authz vocabulary**; that is **reuse**, not the same roadmap phase. Phase **2** product goals (service-layer principals, hosted credential layout, enforcement depth, elevation UX) remain in the **Phase 2** table and in **TODO** callouts (notably **TODO: P2-3** later in this file).
+
 ### Abstraction (high level)
 
 A **module contract** (also called a **distribution contract** here) is a **frozen blueprint for how data and outcomes may cross a boundary** between parts of the system: which handles or buffers move where, who allocates or frees them, which error channels apply, and which **surfaces** exist for interchange. It is **declarative**—it **models** allowed I/O and responsibility; it does **not** by itself add product features. **Implementation** (drivers, rate limits, caches, IRQ handlers) may **enforce** the model, but enforcement code is **not** the same artifact as the **contract definition** (headers, tables, and short normative prose).
@@ -68,7 +70,7 @@ Close analogs elsewhere in computing: **interface / API contract**, **protocol s
 
 **P1 row criterion (aligned with `contracts/runtime/`):** **P1-1** through **P1-7** are **✅** when the normative **C contract bundle** under **`contracts/runtime/`** defines that row via **`contract_runtime.h`** (umbrella) and the **`contract_p1_*.h`** shards (**`FL_CONTRACT_P1_*_CONTRACT_DEFINED`** markers). **Kernel / scheduler / MM implementation** still follows phase gates (e.g. **P1 → P2**); this snapshot tracks **contract definition**, not full **B**-path validation of PMM or arenas.
 
-**P2 row criterion (aligned with `contracts/identity/`):** **P2-1** through **P2-4** are **✅** when the normative **C contract bundle** under **`contracts/identity/`** defines that row via **`contract_identity.h`** (umbrella; includes **`contract_runtime.h`** so P2 inherits P1 and P0) and the **`contract_p2_*.h`** shards (**`FL_CONTRACT_P2_*_CONTRACT_DEFINED`** markers). **Hosted authz and elevation behavior** still follows phase gates (e.g. **P2 → P3**); this snapshot tracks **contract definition**, not full product enforcement of every privileged op.
+**P2 row criterion (aligned with `contracts/identity/`):** A **P2-* row** earns **✅** when the normative **`contracts/identity/`** shard for that row (**`contract_identity.h`** umbrella plus the matching **`contract_p2_*.h`** with **`FL_CONTRACT_P2_*_CONTRACT_DEFINED`**) is **stable** and this document carries **no** open **TODO** that still describes that row as **hooks-only or missing enforcement**. **Today:** the bundle is **landed**, but **TODO: P2-3** (middleware) and unfinished Phase **2** acceptance for principals, credentials, and elevation mean **P2-1**–**P2-4** are all **⚠️** here—**not** “Phase **2** shipped,” and **not** “P2 equals P0.”
 
 | ID | Topic | Status |
 |----|--------|--------|
@@ -87,10 +89,10 @@ Close analogs elsewhere in computing: **interface / API contract**, **protocol s
 | **P1-5** | Memory domain arenas | ✅ |
 | **P1-6** | Driver model reentrancy | ✅ |
 | **P1-7** | Timekeeping | ✅ |
-| **P2-1** | Principal model | ✅ |
-| **P2-2** | Credential store (hosted) | ✅ |
-| **P2-3** | Authorization middleware | ✅ |
-| **P2-4** | Sudo-like elevation (hosted) | ✅ |
+| **P2-1** | Principal model | ⚠️ |
+| **P2-2** | Credential store (hosted) | ⚠️ |
+| **P2-3** | Authorization middleware | ⚠️ |
+| **P2-4** | Sudo-like elevation (hosted) | ⚠️ |
 | **P3-1** | Device abstraction (`netdev`) | ⚠️ |
 | **P3-2** | Loopback (software) | ❌ |
 | **P3-3** | TAP backend (hosted only) | ❌ |
@@ -127,7 +129,7 @@ Close analogs elsewhere in computing: **interface / API contract**, **protocol s
 | **P9-2** | Coverity / static analysis | ❌ |
 | **P9-3** | SMP bring-up (B) | ❌ |
 
-**Summary:** **P0-1**–**P0-8** are **✅** under the **`contracts/foundations/`** criterion above (full P0 header bundle including **`contract_p0_*.h`**). **P1-1**–**P1-7** are **✅** under the **`contracts/runtime/`** criterion (**`contract_runtime.h`** + **`contract_p1_*.h`**). **P2-1**–**P2-4** are **✅** under the **`contracts/identity/`** criterion (**`contract_identity.h`** + **`contract_p2_*.h`**, inheriting **`contract_runtime.h`**). Downstream phases still show **⚠️** / **❌** as before until their rows meet the general legend or gain dedicated contract artifacts.
+**Summary:** **P0-1**–**P0-8** are **✅** under the **`contracts/foundations/`** criterion above (full P0 header bundle including **`contract_p0_*.h`**). **P1-1**–**P1-7** are **✅** under the **`contracts/runtime/`** criterion (**`contract_runtime.h`** + **`contract_p1_*.h`**). **P2-1**–**P2-4** show **⚠️**: the **`contracts/identity/`** bundle (**`contract_identity.h`** + **`contract_p2_*.h`**, inheriting **`contract_runtime.h`**) is present, but **TODO: P2-3** and broader Phase **2** acceptance mean the **module-contract snapshot** is not yet a clean **✅** for those rows under the stricter **P2** criterion above. Downstream phases still show **⚠️** / **❌** as before until their rows meet the general legend or gain dedicated contract artifacts.
 
 ---
 
