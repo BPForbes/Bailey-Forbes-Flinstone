@@ -4,7 +4,7 @@
 #include <stddef.h>
 #include <stdint.h>
 
-#if defined(__aarch64__) || defined(__x86_64__) || defined(_M_X64)
+#if defined(__aarch64__) || defined(__x86_64__)
 #define FL_USB_XHCI_MMIO_HAS_ARCH_ASM 1
 #else
 #define FL_USB_XHCI_MMIO_HAS_ARCH_ASM 0
