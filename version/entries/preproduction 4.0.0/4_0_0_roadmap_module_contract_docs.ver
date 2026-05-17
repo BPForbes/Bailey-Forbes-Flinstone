@@ -5,3 +5,5 @@ PRERELEASE=1
 DEV_VERSION=6
 DESCRIPTION=PRE 4.0.0: Roadmap and AI docs — module contract abstraction (data-distribution blueprint vs functionality); docs/ROADMAP.md P0-P9 snapshot (✅/⚠️/❌); AGENTS.md + CLAUDE.md module-contract definitions for contributors and AI.
 
+
+RELEASE_DATE=2026-05-17
