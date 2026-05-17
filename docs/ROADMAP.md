@@ -42,7 +42,7 @@ Unless stated otherwise, **start at H**, prove APIs and tests, then **lift** the
 
 ## Module contracts (abstraction and P0-P9 coverage)
 
-This section is **normative for terminology** in this repo: what we mean by a **module contract**, how it differs from **functionality**, and a **snapshot** of how far **`develop`** has explicit **data-distribution** models for each **`P*-*` roadmap row**.
+This section is **normative for terminology** in this repo: what we mean by a **module contract**, how it differs from **functionality**, and a **snapshot** of how far **`develop`** has explicit **data-distribution** models for each **`P*-*` roadmap row**. For **P0-1** and **P0-2**, the snapshot also tracks the **normative C bundle** under **`contracts/foundations/`** (see the table note below).
 
 ### Abstraction (high level)
 
@@ -54,26 +54,28 @@ Close analogs elsewhere in computing: **interface / API contract**, **protocol s
 
 | Symbol | Meaning (module-contract / data-distribution lens) |
 |--------|-----------------------------------------------------|
-| **✅** | The **distribution and responsibility model** for that roadmap row is **explicit**, **stable**, and **complete enough** that other subsystems can rely on it **without inferring rules only from implementation**. Boundary artifacts (e.g. **`kernel/include/fl/contract*.h`**, adjacent **`fl/*`** headers, or a **normative appendix** tied to the row) spell out the I/O story; there is **no major open roadmap TODO** for that same concern. |
+| **✅** | The **distribution and responsibility model** for that roadmap row is **explicit**, **stable**, and **complete enough** that other subsystems can rely on it **without inferring rules only from implementation**. Boundary artifacts (e.g. **`contracts/foundations/*.h`** (P0), adjacent **`fl/*`** headers, or a **normative appendix** tied to the row) spell out the I/O story; there is **no major open roadmap TODO** for that same concern. |
 | **⚠️** | A **real model exists** (types, surfaces, partial prose, or a thin boundary) but coverage is **incomplete**, still a **placeholder**, or a **deferred TODO** references that row. |
 | **❌** | **No** dedicated **data-distribution contract** for that row. **Code may still exist** on **`develop`**; absence here means the **contract model** is missing or not separated from implementation. |
 
-**Process-only rows** (CI, fuzz jobs, static-analysis gates) remain **❌** in this table: they are **important**, but they are **not** module interchange contracts in the sense above.
+**Process-only rows (clarified):** **P9-1** / **P9-2**-style fuzz and static-analysis **gates** remain **❌** in this table as *interchange* contracts until promoted. **P0-3** is **✅** here because **`contract_p0_ci.h`** records the **CI realism** contract alongside **GitHub Actions** enforcement.
 
 ### P0–P9 module-contract snapshot (`develop`)
 
 **Note:** Re-verify this table when preparing a release; it reflects the **contract-packaging** story, not full feature completion.
 
+**P0 row criterion (aligned with `contracts/foundations/`):** **P0-1** through **P0-8** are **✅** when the normative **C contract bundle** under **`contracts/foundations/`** defines that row: **P0-1**/**P0-2** via **`contract_foundations.h`**, **`contract_result.h`**, log/auth/driver wiring, **`contract_extend.h`**, and **`contract_compile_ext.h`**; **P0-3**–**P0-8** via **`contract_p0_ci.h`**, **`contract_p0_arm_gic.h`**, **`contract_p0_x86_idt.h`**, **`contract_p0_x86_gdt.h`**, **`contract_p0_fdt.h`**, and **`contract_p0_uart.h`** (obligations as comments + **`FL_CONTRACT_P0_*_CONTRACT_DEFINED`** markers). **Implementation completion** for IRQ/DTB/UART/CI still follows phase gates and **Appendix D**; this snapshot tracks **contract definition**, not “all silicon paths verified.”
+
 | ID | Topic | Status |
 |----|--------|--------|
-| **P0-1** | Subsystem boundaries | ⚠️ |
-| **P0-2** | Error taxonomy (`fl_result_t` as outcome channel) | ⚠️ |
-| **P0-3** | CI realism | ❌ |
-| **P0-4** | ARM GIC EOI correctness | ❌ |
-| **P0-5** | x86_64 IDT + IRQ0 timer tick | ❌ |
-| **P0-6** | x86_64 GDT (minimal flat) | ❌ |
-| **P0-7** | Device tree (FDT / DTB) metadata | ❌ |
-| **P0-8** | Early serial console (UART) | ❌ |
+| **P0-1** | Subsystem boundaries | ✅ |
+| **P0-2** | Error taxonomy (`fl_result_t` as outcome channel) | ✅ |
+| **P0-3** | CI realism | ✅ |
+| **P0-4** | ARM GIC EOI correctness | ✅ |
+| **P0-5** | x86_64 IDT + IRQ0 timer tick | ✅ |
+| **P0-6** | x86_64 GDT (minimal flat) | ✅ |
+| **P0-7** | Device tree (FDT / DTB) metadata | ✅ |
+| **P0-8** | Early serial console (UART) | ✅ |
 | **P1-1** | Execution context | ❌ |
 | **P1-2** | Address space story | ❌ |
 | **P1-3** | Preemption contract | ❌ |
@@ -121,7 +123,7 @@ Close analogs elsewhere in computing: **interface / API contract**, **protocol s
 | **P9-2** | Coverity / static analysis | ❌ |
 | **P9-3** | SMP bring-up (B) | ❌ |
 
-**Summary:** no **`P*-*` row is ✅** yet under this definition; the **⚠️** set is the early **boundary bundle** (**`fl/contract*.h`**, driver/authz/log/jail surfaces, partial arenas/reentrancy, minimal `netdev`).
+**Summary:** **P0-1**–**P0-8** are **✅** under the **`contracts/foundations/`** criterion above (full P0 header bundle including **`contract_p0_*.h`**). Downstream phases still show **⚠️** / **❌** as before until their rows meet the general legend or gain dedicated contract artifacts.
 
 ---
 

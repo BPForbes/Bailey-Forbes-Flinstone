@@ -1,0 +1,8 @@
+MAJOR_VERSION=4
+STANDARD_VERSION=0
+RELEASE_VERSION=0
+PRERELEASE=1
+DEV_VERSION=7
+DESCRIPTION=PRE 4.0.0: P0 foundations **FL_CONTRACT_P0_FOUNDATIONS_REV** 3 — interchange blueprints on **contract_p0_ci.h** through **contract_p0_uart.h** (surface/lifetime/error + waiver macros on FDT/UART); **P0-1** per-surface lifetime/concurrency in **contract_foundations.h**; **P0-2** adds **FL_RESULT_NOMEM/ACCES/NOENT/BUSY/TIMEDOUT**. **contract_extend.h**, **FL_CONTRACT_BUNDLE_REV** 6. **docs/ROADMAP.md**: **P0-1**–**P0-8** **✅**. **version_def.h**: CI **gen_version_def.sh** only.
+
+RELEASE_DATE=2026-05-17

@@ -1,5 +1,5 @@
-#include "fl/contract_log_dispatch.h"
-#include "mem_asm.h"
+#include "contract_asm.h"
+#include "contract_log_dispatch.h"
 #include <pthread.h>
 #include <stdio.h>
 #include <string.h>
@@ -35,36 +35,36 @@ void fl_log_rate_limit_reset_for_tests(void) {
 
 fl_result_t fl_log_sink_emit_line(fl_log_sink_t *sink, int level, int facility,
                                   const char *line) {
-    char buf[768];
+    fl_contract_log_line_buf_t buf;
 
     if (!sink || !sink->ops || !sink->ops->emit || !line)
         return FL_RESULT_INVAL;
 
-    asm_mem_zero(buf, sizeof buf);
+    fl_contract_mem_zero(buf.data, sizeof buf.data);
     size_t n = strlen(line);
-    if (n >= sizeof buf)
-        n = sizeof buf - 1u;
-    asm_mem_copy(buf, line, n);
-    buf[n] = '\0';
+    if (n >= sizeof buf.data)
+        n = sizeof buf.data - 1u;
+    fl_contract_mem_copy(buf.data, line, n);
+    buf.data[n] = '\0';
 
     if (!fl_log_rate_allow())
         return FL_RESULT_ERR;
 
-    sink->ops->emit(sink, level, facility, buf);
+    sink->ops->emit(sink, level, facility, buf.data);
     return FL_RESULT_OK;
 }
 
 fl_result_t fl_log_sink_vprintf(fl_log_sink_t *sink, int level, int facility,
                                 const char *fmt, va_list ap) {
-    char buf[768];
+    fl_contract_log_line_buf_t buf;
     va_list ap2;
 
     if (!sink || !sink->ops || !sink->ops->emit || !fmt)
         return FL_RESULT_INVAL;
 
-    asm_mem_zero(buf, sizeof buf);
+    fl_contract_mem_zero(buf.data, sizeof buf.data);
     va_copy(ap2, ap);
-    int nw = vsnprintf(buf, sizeof buf, fmt, ap2);
+    int nw = vsnprintf(buf.data, sizeof buf.data, fmt, ap2);
     va_end(ap2);
     if (nw < 0)
         return FL_RESULT_ERR;
@@ -72,7 +72,7 @@ fl_result_t fl_log_sink_vprintf(fl_log_sink_t *sink, int level, int facility,
     if (!fl_log_rate_allow())
         return FL_RESULT_ERR;
 
-    sink->ops->emit(sink, level, facility, buf);
+    sink->ops->emit(sink, level, facility, buf.data);
     return FL_RESULT_OK;
 }
 

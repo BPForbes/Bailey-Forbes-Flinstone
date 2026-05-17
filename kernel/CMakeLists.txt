@@ -38,6 +38,7 @@ add_library(kernel STATIC
 target_include_directories(kernel PUBLIC
     ${CMAKE_CURRENT_SOURCE_DIR}/include
     ${CMAKE_CURRENT_SOURCE_DIR}/arch/${TARGET_ARCH}/include
+    ${CMAKE_SOURCE_DIR}/contracts/foundations
 )
 
 # Link libraries

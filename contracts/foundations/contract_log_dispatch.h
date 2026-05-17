@@ -1,9 +1,10 @@
 /**
  * Hosted-shell helpers for **fl_log_sink_t** (**P0-1**, **P6-1**).
  *
- * Formatted lines are built in a fixed stack buffer cleared with **asm_mem_zero**
- * and filled with **vsnprintf**; optional payload truncation uses **asm_mem_copy**
- * so the hot path stays on the same **mem_asm** objects as **ARCH=x86_64_gas**,
+ * Formatted lines use **fl_contract_log_line_buf_t** (**contract_imm.h**),
+ * cleared with **fl_contract_mem_zero** and copied with **fl_contract_mem_copy**
+ * (**contract_asm.h**) before **vsnprintf** / delivery so the path stays on the
+ * same **mem_asm** objects as **ARCH=x86_64_gas**,
  * **ARCH=x86_64_nasm**, and **ARCH=arm** (AArch64 GAS).
  *
  * **Rate limit:** at most **FL_LOG_RL_MAX_PER_SEC** sink deliveries per monotonic
@@ -14,8 +15,9 @@
 #ifndef FL_CONTRACT_LOG_DISPATCH_H
 #define FL_CONTRACT_LOG_DISPATCH_H
 
-#include "fl/contract_log.h"
-#include "fl/contract_result.h"
+#include "contract_imm.h"
+#include "contract_log.h"
+#include "contract_result.h"
 #include <stdarg.h>
 
 #ifdef __cplusplus
