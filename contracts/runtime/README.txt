@@ -22,3 +22,6 @@ Each shard starts with **#include "contract_extend.h"** (see *../foundations/*).
 **Build:** add **-Icontracts/runtime** next to **-Icontracts/foundations** in the
 root **Makefile** **CFLAGS** and in **CMakeLists.txt** targets that already carry
 the foundations include path.
+
+**Related:** P2 identity contracts live under *../identity/* (**contract_identity.h**
+includes this umbrella so P2 inherits P0 and P1).

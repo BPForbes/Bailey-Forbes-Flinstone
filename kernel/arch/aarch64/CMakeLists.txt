@@ -31,6 +31,7 @@ target_include_directories(kernel_arch_aarch64 PUBLIC
     ${CMAKE_SOURCE_DIR}/kernel/include
     ${CMAKE_SOURCE_DIR}/contracts/foundations
     ${CMAKE_SOURCE_DIR}/contracts/runtime
+    ${CMAKE_SOURCE_DIR}/contracts/identity
 )
 
 # Compiler flags

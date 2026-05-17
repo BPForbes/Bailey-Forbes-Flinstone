@@ -15,6 +15,7 @@ foreach(util ${COREUTILS_SOURCES})
         ${CMAKE_SOURCE_DIR}/kernel/include
         ${CMAKE_SOURCE_DIR}/contracts/foundations
         ${CMAKE_SOURCE_DIR}/contracts/runtime
+        ${CMAKE_SOURCE_DIR}/contracts/identity
     )
     target_link_libraries(${util_name} PRIVATE kernel)
 endforeach()

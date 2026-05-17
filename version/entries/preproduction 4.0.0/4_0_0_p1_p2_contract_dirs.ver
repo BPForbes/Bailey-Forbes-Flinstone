@@ -3,6 +3,6 @@ STANDARD_VERSION=0
 RELEASE_VERSION=0
 PRERELEASE=1
 DEV_VERSION=8
-DESCRIPTION=PRE 4.0.0: Branch **cursor/p1-p2-contract-runtime-identity-5dbc** — **contracts/runtime/** P1 normative shard headers (**contract_runtime.h**, **contract_p1_*.h**), **-Icontracts/runtime** in Makefile and CMake, **test_invariants** bundle rev checks, **docs/ROADMAP.md** P1 snapshot; **contracts/identity/** (P2) README placeholder remains. **contract_extend.h** and **contract_runtime.h** block comments reworded to avoid gcc **-Wcomment** (slash-asterisk inside markdown-style bold).
+DESCRIPTION=PRE 4.0.0: Branch **cursor/p1-p2-contract-runtime-identity-5dbc** — **contracts/runtime/** P1 shards and **contracts/identity/** P2 shards (**contract_identity.h**, **contract_p2_*.h**; umbrella includes **contract_runtime.h** for P0 plus P1 inheritance), **-Icontracts/runtime** and **-Icontracts/identity** in Makefile and CMake, **test_invariants** P1 and P2 bundle checks, **docs/ROADMAP.md** P1 and P2 snapshots. **contract_extend.h** and **contract_runtime.h** block comments reworded for gcc **-Wcomment**.
 
 RELEASE_DATE=2026-05-17
