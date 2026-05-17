@@ -11,6 +11,7 @@ add_executable(shell ${SHELL_SOURCES})
 target_include_directories(shell PRIVATE
     ${CMAKE_SOURCE_DIR}/kernel/include
     ${CMAKE_SOURCE_DIR}/contracts/foundations
+    ${CMAKE_SOURCE_DIR}/contracts/runtime
 )
 
 target_link_libraries(shell PRIVATE
