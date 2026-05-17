@@ -17,4 +17,19 @@
 
 #define FL_CONTRACT_P3_6_UDP_CONTRACT_DEFINED 1
 
+/**
+ * Default per-socket RX queue depth for bounded **P3-6** implementations (datagram count,
+ * not bytes). Override in translation units only with a **.ver** note.
+ */
+#ifndef FL_NET_UDP_DEFAULT_RX_QUEUE_DATAGRAMS
+#define FL_NET_UDP_DEFAULT_RX_QUEUE_DATAGRAMS 64u
+#endif
+
+/** **IANA** ephemeral **UDP** port range (**RFC 6335** dynamic range lower bound). */
+#define FL_NET_UDP_EPHEMERAL_PORT_MIN 49152u
+#define FL_NET_UDP_EPHEMERAL_PORT_MAX 65535u
+
+_Static_assert(FL_NET_UDP_DEFAULT_RX_QUEUE_DATAGRAMS >= 1u,
+               "UDP RX queue contract must allow at least one datagram");
+
 #endif /* FL_CONTRACT_P3_UDP_H */

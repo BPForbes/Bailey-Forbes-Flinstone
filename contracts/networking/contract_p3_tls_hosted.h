@@ -18,4 +18,11 @@
 
 #define FL_CONTRACT_P3_9_TLS_HOSTED_CONTRACT_DEFINED 1
 
+/**
+ * Maximum **TLS** plaintext application data per record for hosted stacks (**RFC 5246**
+ * legacy **2^14** octets). Libraries may negotiate smaller records; this is the contract cap
+ * for buffer sizing discussions on **H**.
+ */
+#define FL_NET_TLS_MAX_PLAINTEXT_RECORD 16384u
+
 #endif /* FL_CONTRACT_P3_TLS_HOSTED_H */

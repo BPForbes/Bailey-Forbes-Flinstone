@@ -15,7 +15,7 @@ static void print_contract_help(void) {
         "\n"
         "Options:\n"
         "  summary   Human-readable listing (default)\n"
-        "  json      Single-line JSON: bundle rev, result codes, surface ids\n"
+        "  json      Single-line JSON: bundle rev, P0 rev, p3_networking_rev, p3_wire_rev, result codes, surfaces\n"
         "  --help    Show this message\n"
         "\n"
         "Examples:\n"

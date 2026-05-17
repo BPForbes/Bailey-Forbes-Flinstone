@@ -27,4 +27,9 @@
 
 _Static_assert((int)FL_CONTRACT_SURFACE_NETDEV == 1, "P3-1 maps to NETDEV surface ordinal");
 
+_Static_assert((int)FL_AUTHZ_OP_NETDEV_REGISTER == 2,
+               "P3-1 requires FL_AUTHZ_OP_NETDEV_REGISTER from contract_p2_authz.h");
+_Static_assert((int)FL_AUTHZ_OP_NETDEV_IO == 3,
+               "P3-1 requires FL_AUTHZ_OP_NETDEV_IO from contract_p2_authz.h");
+
 #endif /* FL_CONTRACT_P3_NETDEV_H */

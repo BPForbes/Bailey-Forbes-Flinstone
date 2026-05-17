@@ -15,4 +15,16 @@
 
 #define FL_CONTRACT_P3_5_IPV4_CONTRACT_DEFINED 1
 
+/** **IPv4** protocol field (**RFC 790** names used on the wire). */
+#define FL_NET_IP_PROTO_ICMP 1u
+#define FL_NET_IP_PROTO_TCP 6u
+#define FL_NET_IP_PROTO_UDP 17u
+
+/** **ICMP** message types used by **P3-5** echo path (**RFC 792**). */
+#define FL_NET_ICMPV4_TYPE_ECHO_REPLY 0u
+#define FL_NET_ICMPV4_TYPE_ECHO 8u
+
+/** Longest IPv4 prefix length for interchange docs (CIDR **slash** notation). */
+#define FL_NET_IPV4_MAX_PREFIX_LEN 32u
+
 #endif /* FL_CONTRACT_P3_IPV4_H */

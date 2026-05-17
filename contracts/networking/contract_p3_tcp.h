@@ -40,4 +40,12 @@ typedef enum {
 
 _Static_assert(FL_NET_TCP_HDR_LEN_MIN >= 20u, "TCP header min matches wire vocabulary");
 
+/**
+ * Initial congestion window in **MSS** units for lab stacks before **RFC 5681** tuning
+ * is wired (**P3-7** contract placeholder).
+ */
+#ifndef FL_NET_TCP_DEFAULT_IW_MSS
+#define FL_NET_TCP_DEFAULT_IW_MSS 10u
+#endif
+
 #endif /* FL_CONTRACT_P3_TCP_H */
