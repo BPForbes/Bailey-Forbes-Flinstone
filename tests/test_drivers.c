@@ -4,6 +4,11 @@
 #include "drivers/drivers.h"
 #include "drivers/block/block_driver.h"
 #include "drivers/fl_cstr.h"
+#include "fl/contract.h"
+#include "fl/history_record.h"
+#include "fl/audit_log.h"
+#include "fl/jail_contract.h"
+#include "fl/contract_result.h"
 #include "fl/driver/device.h"
 #include "fl/driver/devfs.h"
 #include "fl/driver/irq.h"
@@ -67,7 +72,7 @@ static int test_device_model(void) {
     memset(&info, 0, sizeof(info));
     memset(&res, 0, sizeof(res));
     ASSERT(fl_bus_enumerate(descs, 4) == 1);
-    ASSERT(fl_driver_registry_match(&descs[0], &matched) == 0);
+    ASSERT(fl_driver_registry_match(&descs[0], &matched) == FL_RESULT_OK);
     ASSERT(matched != NULL);
     ASSERT(strcmp(matched->name, "host-block") == 0);
     ASSERT(fl_device_count() == 1);
@@ -118,7 +123,9 @@ static int test_devfs_block(void) {
     ASSERT(n == FL_SECTOR_SIZE);
     ASSERT(memcmp(wbuf, rbuf, (size_t)g_cluster_size) == 0);
     ASSERT(fl_devfs_close(&file) == 0);
-    ASSERT(fl_devfs_register("/dev/this/path/is/too/long/for/devfs", FL_DRV_CLASS_BLOCK, fl_device_find_synth("host_blk"), &(fl_devfs_ops_t){0}) != 0);
+    ASSERT(fl_devfs_register("/dev/this/path/is/too/long/for/devfs", FL_DRV_CLASS_BLOCK,
+                             fl_device_find_synth("host_blk"), &(fl_devfs_ops_t){0}) !=
+           FL_RESULT_OK);
     return 0;
 }
 
@@ -381,10 +388,10 @@ static int test_devfs_flags_and_errors(void) {
     fl_devfs_ops_t dummy_ops = {0};
     fl_device_t *blk = fl_device_find_synth("host_blk");
     ASSERT(blk != NULL);
-    ASSERT(fl_devfs_register("/dev/blk0", FL_DRV_CLASS_BLOCK, blk, &dummy_ops) != 0);
+    ASSERT(fl_devfs_register("/dev/blk0", FL_DRV_CLASS_BLOCK, blk, &dummy_ops) != FL_RESULT_OK);
 
     /* Unregister existing */
-    ASSERT(fl_devfs_register("/dev/test_tmp", FL_DRV_CLASS_BLOCK, blk, &dummy_ops) == 0);
+    ASSERT(fl_devfs_register("/dev/test_tmp", FL_DRV_CLASS_BLOCK, blk, &dummy_ops) == FL_RESULT_OK);
     fl_devfs_unregister("/dev/test_tmp");
     /* After unregister, open should fail */
     ASSERT(fl_devfs_open("/dev/test_tmp", FL_DEVFS_O_READ, &file) != 0);
@@ -540,10 +547,10 @@ static int test_device_model_null_params(void) {
 
     /* fl_driver_registry_match: NULL params */
     const fl_driver_desc_t *matched = NULL;
-    ASSERT(fl_driver_registry_match(NULL, &matched) != 0);
+    ASSERT(fl_driver_registry_match(NULL, &matched) == FL_RESULT_INVAL);
     fl_device_desc_t desc;
     memset(&desc, 0, sizeof(desc));
-    ASSERT(fl_driver_registry_match(&desc, NULL) != 0);
+    ASSERT(fl_driver_registry_match(&desc, NULL) == FL_RESULT_INVAL);
 
     return 0;
 }
@@ -568,6 +575,75 @@ static int test_pic(void) {
     ASSERT(g_pic_driver != NULL);
     if (g_pic_driver->init)
         g_pic_driver->init(g_pic_driver);
+    return 0;
+}
+
+/* ------------------------------------------------------------------ */
+/* fl_driver_registry_match: FL_RESULT_PROBE_SKIP for unmatched device */
+/* ------------------------------------------------------------------ */
+static int test_registry_match_probe_skip(void) {
+    /* A device descriptor that no registered driver handles (unknown synth_id). */
+    fl_device_desc_t unmatched;
+    const fl_driver_desc_t *out = NULL;
+    memset(&unmatched, 0, sizeof(unmatched));
+    unmatched.bus_type = FL_BUS_SYNTH;
+    unmatched.synth_id = "no_such_synth_dev";
+
+    fl_result_t rc = fl_driver_registry_match(&unmatched, &out);
+    ASSERT(rc == FL_RESULT_PROBE_SKIP);
+    ASSERT(out == NULL);
+
+    /* FL_RESULT_PROBE_SKIP must equal FL_RESULT_NOSYS per contract_result.h */
+    ASSERT(FL_RESULT_PROBE_SKIP == FL_RESULT_NOSYS);
+    ASSERT(FL_RESULT_PROBE_SKIP == -38);
+
+    return 0;
+}
+
+/* ------------------------------------------------------------------ */
+/* fl_devfs_register: NULL ops argument returns FL_RESULT_INVAL        */
+/* ------------------------------------------------------------------ */
+static int test_devfs_register_null_ops(void) {
+    fl_device_t *blk = fl_device_find_synth("host_blk");
+    ASSERT(blk != NULL);
+
+    /* NULL ops must be rejected */
+    fl_result_t rc = fl_devfs_register("/dev/null_ops_test", FL_DRV_CLASS_BLOCK, blk, NULL);
+    ASSERT(rc == FL_RESULT_INVAL);
+
+    /* Confirm the path was not registered (open should fail) */
+    fl_devfs_file_t f;
+    memset(&f, 0, sizeof f);
+    ASSERT(fl_devfs_open("/dev/null_ops_test", FL_DEVFS_O_READ, &f) != 0);
+
+    return 0;
+}
+
+/* ------------------------------------------------------------------ */
+/* fl_devfs_ioctl constants: GET_CAPS == BLOCK_CAPS (alias check)     */
+/* ------------------------------------------------------------------ */
+static int test_devfs_ioctl_get_caps_alias(void) {
+    /* Per devfs.h: FL_DEVFS_IOCTL_GET_CAPS == FL_DEVFS_IOCTL_BLOCK_CAPS */
+    ASSERT(FL_DEVFS_IOCTL_GET_CAPS == FL_DEVFS_IOCTL_BLOCK_CAPS);
+    ASSERT(FL_DEVFS_IOCTL_GET_CAPS == 1);
+
+    /* Confirm using the alias produces the same result as the original constant */
+    fl_devfs_file_t file;
+    fl_block_caps_t caps_via_get, caps_via_block;
+    memset(&file, 0, sizeof file);
+    memset(&caps_via_get, 0, sizeof caps_via_get);
+    memset(&caps_via_block, 0, sizeof caps_via_block);
+
+    ASSERT(fl_devfs_open("/dev/blk0", FL_DEVFS_O_READ, &file) == 0);
+    ASSERT(fl_devfs_ioctl(&file, FL_DEVFS_IOCTL_GET_CAPS, &caps_via_get) == 0);
+    ASSERT(fl_devfs_close(&file) == 0);
+
+    memset(&file, 0, sizeof file);
+    ASSERT(fl_devfs_open("/dev/blk0", FL_DEVFS_O_READ, &file) == 0);
+    ASSERT(fl_devfs_ioctl(&file, FL_DEVFS_IOCTL_BLOCK_CAPS, &caps_via_block) == 0);
+    ASSERT(fl_devfs_close(&file) == 0);
+
+    ASSERT(caps_via_get.sector_size == caps_via_block.sector_size);
     return 0;
 }
 
@@ -668,6 +744,18 @@ int main(void) {
     ASSERT(driver_probe_display() == 0);
     ASSERT(driver_probe_timer() == 0);
     ASSERT(driver_probe_pic() == 0);
+    printf("OK\n");
+
+    printf("test_registry_match_probe_skip... ");
+    if (test_registry_match_probe_skip() != 0) { drivers_shutdown(); unlink(path); return 1; }
+    printf("OK\n");
+
+    printf("test_devfs_register_null_ops... ");
+    if (test_devfs_register_null_ops() != 0) { drivers_shutdown(); unlink(path); return 1; }
+    printf("OK\n");
+
+    printf("test_devfs_ioctl_get_caps_alias... ");
+    if (test_devfs_ioctl_get_caps_alias() != 0) { drivers_shutdown(); unlink(path); return 1; }
     printf("OK\n");
 
     drivers_shutdown();
