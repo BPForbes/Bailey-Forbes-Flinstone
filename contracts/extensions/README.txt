@@ -1,7 +1,7 @@
 Phase-specific contract trees (preferred layout):
   P1 → ../runtime/     (see README there)
   P2 → ../identity/
-  P3+ → add sibling dirs under contracts/ as needed (e.g. networking/).
+  P3 → ../networking/  (umbrella: contract_networking.h; see README there)
 
 This *extensions* directory is for cross-cutting optional helpers or small shared
 pieces that do not belong to a single phase tree. Each header here should still
