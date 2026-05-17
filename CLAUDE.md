@@ -2,6 +2,12 @@
 
 This repository implements **Bailey-Forbes-Flinstone**: a educational OS/shell-style codebase with a host shell (`BPForbes_Flinstone_Shell`), kernel-layer modules, drivers, and optional VM builds. Build with `make` from the repo root; see **AGENTS.md** for toolchain install and targets.
 
+## Module contracts (AI)
+
+A **module contract** here means a **data-distribution contract**: a **frozen blueprint** for how data and outcomes **may** move across a boundary (ownership, lifetimes, error channels, and named **surfaces**). It **models** I/O between parts of the system; it does **not inherently add features**. **`kernel/include/fl/contract*.h`** and related **`fl/*`** headers carry the C-side contract bundle; **implementation** enforces contracts but is **not** the definition of the contract.
+
+For a **P0–P9** row-by-row snapshot (**❌ / ⚠️ / ✅**) against **`develop`**, see **`docs/ROADMAP.md` → [Module contracts (abstraction and P0-P9 coverage)](#module-contracts-abstraction-and-p0-p9-coverage)**. Keep that table updated when contract coverage materially changes.
+
 ## Versioning (mandatory for merge-ready PRs)
 
 ### Lock system (AI assistants — mandatory)
@@ -12,7 +18,7 @@ This repository implements **Bailey-Forbes-Flinstone**: a educational OS/shell-s
 - **Optional prerelease layout:** **`PRERELEASE=1`** rows are **authored at the `version/entries/` root** on same-repo branches (**do not** hand-add new **`*.ver`** under **`preproduction A.B.C/`**—CI runs **`relocate_root_prerelease_ver_to_preproduction.sh`** (stamps missing **`RELEASE_DATE`**, then moves into **`preproduction */`**) before layout checks). That tree is **not** copied into **`version/locked/`** by **`finalize_version_locked.sh`**. Bump **`DEV_VERSION`** with **`./scripts/bump_dev_version.sh`**, or add **another root `*.ver`** with the same semver and **`PRERELEASE=1`**. Set **`GM=1`** on exactly one file when the line is ready, then run **`./scripts/promote_preproduction_for_main.sh`** (or **`make promote-preproduction-for-main`**) so every **`*.ver`** in that folder is merged into one root GA row under **`version/entries/`** and the **`preproduction *`** directory is removed from **`version/entries`** (and from **`version/locked`** only if a legacy copy existed). Before any merge that lands **`version/**`** on **`main`**, ensure that promotion has already run — **`main`** must not ship **`preproduction *`**, **`PRERELEASE=1`**, **`GM=1`**, or **`DEV_VERSION=`** — CI fails otherwise.
 - **`version/locked/`** is the **published snapshot** (automation copies **`version/entries/`** → **`version/locked/`**, **excluding** top-level **`preproduction */`**). Do not hand-tweak **`version/locked/`** on feature branches in agent workflows.
 - **Do not** include historical **`version/locked/**`** or bulk-edit **`version/entries/**`** in automated refactors without an explicit release workflow.
-- **`.ver` on first change:** When you start substantive code edits for a PR, **create** **`version/entries/… .ver`** at the **`version/entries/`** root immediately if the branch does not already have an entry for **this** PR’s work (**do not** hand-add new files under **`version/entries/preproduction */`**—Actions relocates root **`PRERELEASE=1`** rows there).
+- **`.ver` on first change:** When you start substantive code edits for a PR, **create** a **new** **`version/entries/A_B_C_slug.ver`** at the **`version/entries/`** root for **that** PR (one new file per PR is the default—**do not** revise **`DEV_VERSION` / `DESCRIPTION`** on **`.ver`** already under **`version/entries/preproduction */`** from another train). If the branch does not yet have an entry for **this** PR’s work, add the new root row immediately (**do not** hand-add new files under **`version/entries/preproduction */`**—Actions relocates root **`PRERELEASE=1`** rows there).
 - **No semver backtracking (AI):** The **preproduction version** is **A.B.C** from **`version/entries/preproduction <A>.<B>.<C>/`** directory names (**`PRERELEASE=1`** rows land there **after** relocate). Do **not** add a **new root** **`version/entries/*.ver`** whose **A.B.C** is **numerically below** that **A.B.C** unless a **human maintainer** explicitly asks. Use **`DEV_VERSION`** or **another root `*.ver` file** with the same semver and **`PRERELEASE=1`** to record iterations. For routine **GA** work at **`version/entries/`** root, **one** **`.ver`** updated in place is often enough.
 
 ### Canonical string
@@ -51,6 +57,7 @@ Export current numbers without compiling: **`./scripts/export_version_record.sh`
 ## Where else this is documented
 
 - **AGENTS.md** — Cursor Cloud agents and versioning summary  
+- **`docs/ROADMAP.md`** — phased **P0–P9** work; **module contracts** abstraction + **❌/⚠️/✅** snapshot: [Module contracts (abstraction and P0-P9 coverage)](./docs/ROADMAP.md#module-contracts-abstraction-and-p0-p9-coverage)  
 - **`docs/versioning.md`** — `.ver` authoring, `RELEASE_DATE` automation, **A / B / C** semantics  
 - **`.coderabbit.yaml`** — optional CodeRabbit integration when enabled on the repo  
 - **`.cursor/rules/versioning.mdc`** — Cursor IDE versioning rules  
