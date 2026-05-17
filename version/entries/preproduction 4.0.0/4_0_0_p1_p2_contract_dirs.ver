@@ -2,7 +2,7 @@ MAJOR_VERSION=4
 STANDARD_VERSION=0
 RELEASE_VERSION=0
 PRERELEASE=1
-DEV_VERSION=9
+DEV_VERSION=8
 DESCRIPTION=PRE 4.0.0: **contracts/identity/** P2 normative vocabulary — **contract_p2_principal_names.h** (**FL_PRINCIPAL_ENV_NAME**, **FL_PRINCIPAL_GUEST_LITERAL**), **fl_principal_id_t** / **fl_principal_kind_t**, **FL_AUTHZ_OP_*** (**fl_authz_operation_t**), lab credential path macros, **fl_elevation_token_t**; **FL_CONTRACT_P2_IDENTITY_REV** 2; shell + **fl/shell_authz.h** + CUnit use shared literals; **test_invariants** extended. Still **⚠️** in ROADMAP for full Phase **2** enforcement vs **TODO: P2-3**. Branch **cursor/p1-p2-contract-runtime-identity-5dbc**; P1 runtime dirs unchanged.
 
 RELEASE_DATE=2026-05-17
