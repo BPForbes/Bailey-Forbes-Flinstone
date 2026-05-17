@@ -4,3 +4,5 @@ RELEASE_VERSION=0
 PRERELEASE=1
 DEV_VERSION=8
 DESCRIPTION=PRE 4.0.0: Branch **cursor/p1-p2-contract-runtime-identity-5dbc** — add **contracts/runtime/** (P1) and **contracts/identity/** (P2) with README placeholders for upcoming Px contract headers; no new C APIs yet.
+
+RELEASE_DATE=2026-05-17
