@@ -21,7 +21,12 @@
 #include "contract_p3_wire.h"
 #include "contract_p3_trust.h"
 
-#define FL_CONTRACT_P3_NETWORKING_REV 2
+#define FL_CONTRACT_P3_NETWORKING_REV 3
+
+#ifndef FL_CONTRACT_P3_WIRE_REV
+#error "FL_CONTRACT_P3_WIRE_REV must be defined by contract_p3_wire.h"
+#endif
+_Static_assert(FL_CONTRACT_P3_WIRE_REV >= 1, "Unexpected P3 wire revision");
 
 #include "contract_p3_netdev.h"
 #include "contract_p3_loopback.h"

@@ -16,6 +16,11 @@
 #include "contract_p3_trust.h"
 #include "contract_p3_wire.h"
 
+_Static_assert((int)FL_AUTHZ_OP_NETDEV_REGISTER == 2,
+               "P3-3 requires FL_AUTHZ_OP_NETDEV_REGISTER from contract_p2_authz.h");
+_Static_assert((int)FL_AUTHZ_OP_NETDEV_IO == 3,
+               "P3-3 requires FL_AUTHZ_OP_NETDEV_IO from contract_p2_authz.h");
+
 #define FL_CONTRACT_P3_3_TAP_CONTRACT_DEFINED 1
 
 #endif /* FL_CONTRACT_P3_TAP_H */

@@ -15,7 +15,7 @@
 #include <stdint.h>
 
 /** Bump when wire caps or public typedef layout changes (P3 umbrella may _Static_assert). */
-#define FL_CONTRACT_P3_WIRE_REV 1
+#define FL_CONTRACT_P3_WIRE_REV 2
 
 /** IEEE 802.3 address length (octets). */
 #define FL_NET_ETH_ADDR_LEN 6u
@@ -46,6 +46,10 @@
 #ifndef FL_NET_CONTRACT_MAX_UDP_DATAGRAM
 #define FL_NET_CONTRACT_MAX_UDP_DATAGRAM 65507u
 #endif
+
+_Static_assert(FL_NET_CONTRACT_MAX_UDP_DATAGRAM >= 1u &&
+                   FL_NET_CONTRACT_MAX_UDP_DATAGRAM <= 65507u,
+               "FL_NET_CONTRACT_MAX_UDP_DATAGRAM must be 1..65507");
 
 /** Typical MSS for IPv4 over Ethernet (1500 − 20 − 20) unless PMTU says otherwise. */
 #define FL_NET_TCP_MSS_IPV4_ETH_DEFAULT 1460u
