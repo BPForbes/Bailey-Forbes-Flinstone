@@ -54,7 +54,7 @@ Close analogs elsewhere in computing: **interface / API contract**, **protocol s
 
 | Symbol | Meaning (module-contract / data-distribution lens) |
 |--------|-----------------------------------------------------|
-| **✅** | The **distribution and responsibility model** for that roadmap row is **explicit**, **stable**, and **complete enough** that other subsystems can rely on it **without inferring rules only from implementation**. Boundary artifacts (e.g. **`contracts/foundations/*.h`** (P0), **`contracts/runtime/*.h`** (P1), adjacent **`fl/*`** headers, or a **normative appendix** tied to the row) spell out the I/O story; there is **no major open roadmap TODO** for that same concern. |
+| **✅** | The **distribution and responsibility model** for that roadmap row is **explicit**, **stable**, and **complete enough** that other subsystems can rely on it **without inferring rules only from implementation**. Boundary artifacts (e.g. **`contracts/foundations/*.h`** (P0), **`contracts/runtime/*.h`** (P1), adjacent **`fl/*`** headers, or a **normative appendix** tied to the row) spell out the I/O story; there is **no major open contract-definition TODO** for that same concern. |
 | **⚠️** | A **real model exists** (types, surfaces, partial prose, or a thin boundary) but coverage is **incomplete**, still a **placeholder**, or a **deferred TODO** references that row. |
 | **❌** | **No** dedicated **data-distribution contract** for that row. **Code may still exist** on **`develop`**; absence here means the **contract model** is missing or not separated from implementation. |
 
