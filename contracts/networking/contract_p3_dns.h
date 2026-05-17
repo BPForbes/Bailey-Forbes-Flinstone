@@ -1,19 +1,21 @@
 /**
  * **P3-8 — DNS client** (module contract, normative).
  *
- * Obligations:
- *   - Resolver for **A** records; **AAAA** optional but **timeouts** and **retry caps**
- *     must be specified for every record type offered.
- *   - **RFC 1035** semantics **subset**; document maximum response size and truncation handling.
- *   - Transport may use **P3-6** / **P3-7** as implemented; name the stack binding in reviews.
+ * **Distribution:** DNS messages are typically carried in **UDP** datagrams (**P3-6**)
+ * bounded by **FL_NET_DNS_UDP_DEFAULT_MAX** octets for this contract’s initial subset
+ * (**RFC 1035**); **TCP** fallback is a separate explicit extension when added.
  *
- * See **docs/ROADMAP.md** Phase 3.
+ * **Timeouts / retries:** finite caps are mandatory on every resolver call surface.
  */
 #ifndef FL_CONTRACT_P3_DNS_H
 #define FL_CONTRACT_P3_DNS_H
 
-#include "contract_identity.h"
+#include "contract_p3_wire.h"
 
 #define FL_CONTRACT_P3_8_DNS_CONTRACT_DEFINED 1
+
+#ifndef FL_NET_DNS_UDP_DEFAULT_MAX
+#define FL_NET_DNS_UDP_DEFAULT_MAX 512u
+#endif
 
 #endif /* FL_CONTRACT_P3_DNS_H */

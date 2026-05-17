@@ -1,21 +1,28 @@
 /**
  * **P3-12 — DHCP client (IPv4)** (module contract, normative).
  *
- * Obligations:
- *   - Minimal **DISCOVER → OFFER → REQUEST → ACK** state machine (**RFC 2131**) with
- *     **RFC 2132** options subset explicitly listed in implementation docs.
- *   - **Finite timeouts** at each state; behaviour on **NAK** and on **lease expiry**.
- *   - Builds on **P3-6** / **P3-5**; document interaction with **static routes** and **P3-4**.
- *   - **PX-12** netboot paths may depend on this row—keep interchange surfaces stable once
- *     marked **✅** in the roadmap snapshot.
+ * **Distribution:** client packets are **UDP** payloads (**P3-6**) carrying BOOTP/DHCP
+ * messages; options blocks begin after the fixed header and must start with magic
+ * **FL_NET_DHCP_MAGIC_COOKIE_BE32** (**RFC 2131** / **RFC 2132** subset documented in code).
  *
- * See **docs/ROADMAP.md** Phase 3 and **PX-12** notes.
+ * **State machine:** **DISCOVER → OFFER → REQUEST → ACK** with finite timers per state;
+ * document **NAK** and lease expiry paths.
  */
 #ifndef FL_CONTRACT_P3_DHCP_H
 #define FL_CONTRACT_P3_DHCP_H
 
-#include "contract_identity.h"
+#include "contract_p3_wire.h"
 
 #define FL_CONTRACT_P3_12_DHCP_CONTRACT_DEFINED 1
+
+typedef enum {
+    FL_NET_DHCP_MSG_DISCOVER = 1,
+    FL_NET_DHCP_MSG_OFFER = 2,
+    FL_NET_DHCP_MSG_REQUEST = 3,
+    FL_NET_DHCP_MSG_DECLINE = 4,
+    FL_NET_DHCP_MSG_ACK = 5,
+    FL_NET_DHCP_MSG_NAK = 6,
+    FL_NET_DHCP_MSG_RELEASE = 7
+} fl_net_dhcp_message_type_t;
 
 #endif /* FL_CONTRACT_P3_DHCP_H */

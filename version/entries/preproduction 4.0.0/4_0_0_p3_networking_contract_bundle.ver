@@ -3,6 +3,6 @@ STANDARD_VERSION=0
 RELEASE_VERSION=0
 PRERELEASE=1
 DEV_VERSION=1
-DESCRIPTION=PRE 4.0.0: Add contracts/networking P3 bundle (contract_networking.h + contract_p3_* shards), Makefile/CMake include path, and ROADMAP P3 contract criterion and snapshot updates.
+DESCRIPTION=PRE 4.0.0: P3 networking contracts — wire types (contract_p3_wire.h), narrow P2-3 trust bridge (contract_p3_trust.h), fl_net_driver_t using fl_net_frame_* and fl_result_t; contracts CLI prints P3 revs; P3 is not an identity-bundle clone of P2.
 
 RELEASE_DATE=2026-05-17

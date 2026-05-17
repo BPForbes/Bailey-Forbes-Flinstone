@@ -1,23 +1,30 @@
 /**
  * **P3-1 — Device abstraction (`netdev`)** (module contract, normative).
  *
- * Obligations:
- *   - **L2 interchange** is **IEEE 802.3 Ethernet** frames (addressing, MTU vs frame size).
- *   - Expose **TX/RX** frame paths, **MAC** get/set where applicable, **promiscuous** mode
- *     as an explicit capability (deny-by-default on **H** unless elevated per **P2**),
- *     and **stats** counters with defined overflow/wrap behaviour or saturation.
- *   - **Default** path is **copy-based**; **zero-copy** is optional and must be named in
- *     implementation reviews when introduced.
- *   - Align public driver ops with **kernel/include/fl/driver/net.h** and phase gates in
- *     **docs/ROADMAP.md** Phase 3.
+ * **Distribution (octet path):**
+ *   - **TX** accepts **fl_net_frame_view_t** pointing at a full **IEEE 802.3** Ethernet
+ *     frame (destination MAC … FCS policy: driver documents whether FCS is in-band).
+ *   - **RX** fills **fl_net_frame_mut_t** up to **cap**; **len** is bytes received on success.
+ *   - **MTU** on **fl_net_driver_t** is the **L2 payload** contract default
+ *     (**FL_NET_ETH_MTU_DEFAULT**) unless the implementation negotiates jumbo and records it.
  *
- * See **docs/ROADMAP.md** Phase 3; anchor for driver and stack glue reviews.
+ * **Privilege (not redefined here):** promiscuous mode and raw **TAP**-class I/O must pass
+ * **FL_AUTHZ_OP_NETDEV_REGISTER** / **FL_AUTHZ_OP_NETDEV_IO** via **contract_p3_trust.h**
+ * before touching hardware or host fds. **P2** identity headers are **not** included here.
+ *
+ * **Surfaces:** maps to **FL_CONTRACT_SURFACE_NETDEV** in **contract_foundations.h**;
+ * errors on the hot path use **fl_result_t** (**P0-2**).
+ *
+ * See **docs/ROADMAP.md** Phase 3; **kernel/include/fl/driver/net.h** mirrors this contract.
  */
 #ifndef FL_CONTRACT_P3_NETDEV_H
 #define FL_CONTRACT_P3_NETDEV_H
 
-#include "contract_identity.h"
+#include "contract_p3_trust.h"
+#include "contract_p3_wire.h"
 
 #define FL_CONTRACT_P3_1_NETDEV_CONTRACT_DEFINED 1
+
+_Static_assert((int)FL_CONTRACT_SURFACE_NETDEV == 1, "P3-1 maps to NETDEV surface ordinal");
 
 #endif /* FL_CONTRACT_P3_NETDEV_H */

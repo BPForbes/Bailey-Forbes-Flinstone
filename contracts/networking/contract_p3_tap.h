@@ -1,20 +1,20 @@
 /**
  * **P3-3 — TAP backend (hosted only)** (module contract, normative).
  *
- * Obligations:
- *   - Read/write **IEEE 802.3 Ethernet** frames via host **TUN/TAP**; **H** track only.
- *   - **Privilege:** root or **`CAP_NET_ADMIN`** (or documented lab flag); never silent
- *     failure when capability is missing—return **`fl_result_t`**-style errors through
- *     the caller’s channel (**P0-2**).
- *   - **CI:** use **virt** runners or **`SKIP_TAP=1`** with an explicit reason in logs
- *     (**P0-3** realism).
+ * **Distribution:** Ethernet frames cross a host **TUN/TAP** fd as **fl_net_frame_view_t**
+ * on TX and **fl_net_frame_mut_t** (or equivalent blocking read) on RX.
  *
- * See **docs/ROADMAP.md** Phase 3.
+ * **Privilege:** opening the device requires **FL_AUTHZ_OP_NETDEV_REGISTER**; sustained
+ * raw I/O uses **FL_AUTHZ_OP_NETDEV_IO** (**contract_p3_trust.h**). Shell elevation
+ * (**P2-4**) is a separate include when wiring UX.
+ *
+ * **CI:** **P0-3** — document **SKIP_TAP=1** when runners lack **CAP_NET_ADMIN**.
  */
 #ifndef FL_CONTRACT_P3_TAP_H
 #define FL_CONTRACT_P3_TAP_H
 
-#include "contract_identity.h"
+#include "contract_p3_trust.h"
+#include "contract_p3_wire.h"
 
 #define FL_CONTRACT_P3_3_TAP_CONTRACT_DEFINED 1
 

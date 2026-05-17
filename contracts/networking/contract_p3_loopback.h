@@ -1,20 +1,20 @@
 /**
  * **P3-2 — Loopback (software)** (module contract, normative).
  *
- * Obligations:
- *   - Minimal **IPv4** `127.0.0.0/8` path: **ICMP echo** to self and **UDP echo** or
- *     equivalent demux so tests run **without** `/dev/net/tun` (**P3-3**).
- *   - **RFC 1122** host-requirements **subset**; document what is intentionally omitted.
- *   - Bounded buffers; drop policy under pressure must match **P3-6** queue story where
- *     UDP is involved.
+ * **Distribution:** software path delivers **IPv4** datagrams whose destination is in
+ * **127.0.0.0/8** without requiring **P3-3** TAP. Frames may still be modeled as
+ * **fl_net_frame_view_t** / **fl_ipv4_be32_t** views over host memory.
  *
- * See **docs/ROADMAP.md** Phase 3.
+ * **Constants:** loopback prefix octet for documentation and tests.
  */
 #ifndef FL_CONTRACT_P3_LOOPBACK_H
 #define FL_CONTRACT_P3_LOOPBACK_H
 
-#include "contract_identity.h"
+#include "contract_p3_wire.h"
 
 #define FL_CONTRACT_P3_2_LOOPBACK_CONTRACT_DEFINED 1
+
+/** First octet of IPv4 loopback space (**RFC 1122** §3.2.1.3 g). */
+#define FL_NET_IPV4_LOOPBACK_FIRST_OCTET 127u
 
 #endif /* FL_CONTRACT_P3_LOOPBACK_H */

@@ -1,20 +1,18 @@
 /**
  * **P3-7 — TCP (large)** (module contract, normative).
  *
- * Obligations:
- *   - Reliable **byte stream**; start with a **single** client/server pair if needed for
- *     bring-up, then generalize with explicit contract updates (**append-only** policy,
- *     **P0-1**).
- *   - **RFC 793** baseline; selective **RFC 5681** congestion behaviour documented when added.
- *   - **RTO** and RTT use **P1-7** clock; **interop** tests against host tools (**nc**,
- *     **socat**) are part of acceptance, not an optional extra.
+ * **Distribution:** byte streams move in order over **IPv4** (**P3-5**); segment headers
+ * add at least **FL_NET_TCP_HDR_LEN_MIN** octets. **MSS** defaults to
+ * **FL_NET_TCP_MSS_IPV4_ETH_DEFAULT** until PMTU discovery updates it.
  *
- * See **docs/ROADMAP.md** Phase 3.
+ * **Time:** **P1-7** is the reference for RTO/backoff; document clock choice per track.
+ *
+ * **Interop:** acceptance includes host tool peers (**nc**, **socat**) as stated in the roadmap.
  */
 #ifndef FL_CONTRACT_P3_TCP_H
 #define FL_CONTRACT_P3_TCP_H
 
-#include "contract_identity.h"
+#include "contract_p3_wire.h"
 
 #define FL_CONTRACT_P3_7_TCP_CONTRACT_DEFINED 1
 

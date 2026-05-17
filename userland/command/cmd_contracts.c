@@ -1,5 +1,6 @@
 #include "contract_p2_principal_names.h"
 #include "contract.h"
+#include "contract_networking.h"
 #include "fl/audit_log.h"
 #include "fl/history_record.h"
 #include <stdio.h>
@@ -40,6 +41,8 @@ _Static_assert(sizeof(CONTRACT_SURFACE_NAMES) / sizeof(CONTRACT_SURFACE_NAMES[0]
 static int print_summary(void) {
     printf("contracts: bundle rev %d, P0 foundations rev %d\n", FL_CONTRACT_BUNDLE_REV,
            FL_CONTRACT_P0_FOUNDATIONS_REV);
+    printf("  P3 networking: umbrella rev %d, wire rev %d (extends P0-P1; P2-3 authz ops only)\n",
+           FL_CONTRACT_P3_NETWORKING_REV, FL_CONTRACT_P3_WIRE_REV);
     printf("  fl_result_t: OK=%d ERR=%d INVAL=%d NOSYS=%d\n",
            (int)FL_RESULT_OK, (int)FL_RESULT_ERR, (int)FL_RESULT_INVAL, (int)FL_RESULT_NOSYS);
     printf("  surfaces (%zu):\n",
@@ -62,7 +65,9 @@ static int print_summary(void) {
 }
 
 static int print_json(void) {
-    printf("{\"bundle_rev\":%d,\"p0_foundations_rev\":%d,\"fl_result_ok\":%d,\"fl_result_err\":%d,"
+    printf("{\"bundle_rev\":%d,\"p0_foundations_rev\":%d,"
+           "\"p3_networking_rev\":%d,\"p3_wire_rev\":%d,"
+           "\"fl_result_ok\":%d,\"fl_result_err\":%d,"
            "\"fl_result_json_rc_min\":%d,\"fl_result_json_rc_max\":%d,"
            "\"fl_result_wire_min\":%d,\"fl_result_wire_max\":%d,"
            "\"log_rl_max_per_sec\":%d,"
@@ -70,7 +75,9 @@ static int print_json(void) {
            "\"history_record_tag\":\"%s\","
            "\"audit_env\":\"%s\",\"audit_log_relative\":\"%s\","
            "\"vfs_include\":\"fl/vfs.h (separate)\"}\n",
-           FL_CONTRACT_BUNDLE_REV, FL_CONTRACT_P0_FOUNDATIONS_REV, (int)FL_RESULT_OK, (int)FL_RESULT_ERR,
+           FL_CONTRACT_BUNDLE_REV, FL_CONTRACT_P0_FOUNDATIONS_REV,
+           FL_CONTRACT_P3_NETWORKING_REV, FL_CONTRACT_P3_WIRE_REV,
+           (int)FL_RESULT_OK, (int)FL_RESULT_ERR,
            FL_RESULT_JSON_RC_MIN, FL_RESULT_JSON_RC_MAX, FL_RESULT_WIRE_MIN, FL_RESULT_WIRE_MAX,
            FL_LOG_RL_MAX_PER_SEC,
            FL_HISTORY_RECORD_TAG, FL_AUDIT_ENV, FL_AUDIT_REL_DEFAULT);
