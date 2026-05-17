@@ -4,6 +4,7 @@
 #include "terminal.h"
 #include "cmd_decl.h"
 #include "threadpool.h"
+#include "contract_p2_principal_names.h"
 #include "fl/audit_log.h"
 #include "fl/shell_authz.h"
 #include <stdio.h>
@@ -153,10 +154,10 @@ void fl_shell_authz_set_hook(fl_shell_authz_hook_fn hook_fn, void *ctx) {
 }
 
 static int principal_is_guest(void) {
-    /* getenv is not async-signal-safe; concurrent setenv is not expected for FL_PRINCIPAL
-     * in normal shell or CUnit runs (single-threaded tests). */
-    const char *p = getenv("FL_PRINCIPAL");
-    return p && strcmp(p, "guest") == 0;
+    /* getenv is not async-signal-safe; concurrent setenv is not expected for
+     * FL_PRINCIPAL_ENV_NAME in normal shell or CUnit runs (single-threaded tests). */
+    const char *p = getenv(FL_PRINCIPAL_ENV_NAME);
+    return p && strcmp(p, FL_PRINCIPAL_GUEST_LITERAL) == 0;
 }
 
 static fl_authz_decision_t guest_builtin_policy(fl_shell_cmd_no_t no) {

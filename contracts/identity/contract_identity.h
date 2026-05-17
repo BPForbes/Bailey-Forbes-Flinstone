@@ -15,7 +15,7 @@
 
 #include "contract_runtime.h"
 
-#define FL_CONTRACT_P2_IDENTITY_REV 1
+#define FL_CONTRACT_P2_IDENTITY_REV 2
 
 #include "contract_p2_principal.h"
 #include "contract_p2_credential_store.h"

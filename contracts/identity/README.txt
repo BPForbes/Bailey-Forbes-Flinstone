@@ -8,6 +8,7 @@ Shards (normative comments plus FL_CONTRACT_P2_*_CONTRACT_DEFINED markers):
 
 | File | Roadmap |
 |------|---------|
+| contract_p2_principal_names.h | P2-1 literals (FL_PRINCIPAL / guest); no other includes |
 | contract_p2_principal.h | P2-1 |
 | contract_p2_credential_store.h | P2-2 |
 | contract_p2_authz.h | P2-3 |
