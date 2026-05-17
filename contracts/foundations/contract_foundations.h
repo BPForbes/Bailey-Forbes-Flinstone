@@ -59,4 +59,6 @@ _Static_assert((int)FL_CONTRACT_SURFACE_COUNT == 5,
 /** Set after full P0 vocabulary is visible; Px optional guards may `#if FL_CONTRACT_P0_LOCK`. */
 #define FL_CONTRACT_P0_VOCABULARY_LOCK 1
 
+#include "contract_compile_ext.h"
+
 #endif /* FL_CONTRACT_FOUNDATIONS_H */
