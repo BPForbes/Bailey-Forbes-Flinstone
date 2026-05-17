@@ -75,6 +75,11 @@ PRERELEASE / GM / DEV_VERSION / preproduction directories (VERSION uses locked; 
   PRERELEASE=1) instead of inventing a lower shipped A.B.C; let relocate place them under
   the preproduction directory.
 
+  Cursor / AI agents: never set GM=1 without explicit instruction from a human
+  maintainer. For *.ver files your branch adds or changes relative to develop: let N be
+  DEV_VERSION on develop for the same relative path (or 0 if that file is absent there).
+  After you set DEV_VERSION to exactly N+1, do not edit DEV_VERSION again; revise DESCRIPTION only.
+
   When you are ready to cut main: set GM=1 on exactly one .ver in that folder, then run
   ./scripts/promote_preproduction_for_main.sh (or make promote-preproduction-for-main).
   That script sorts every *.ver in the folder by DEV_VERSION ascending, builds one new
