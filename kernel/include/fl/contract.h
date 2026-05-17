@@ -6,13 +6,15 @@
 #ifndef FL_CONTRACT_H
 #define FL_CONTRACT_H
 
-#define FL_CONTRACT_BUNDLE_REV 4
+#define FL_CONTRACT_BUNDLE_REV 5
 
 #include "fl/contract_result.h"
 #include "fl/driver/driver.h"
 #include "fl/driver/net.h"
 #include "fl/contract_log.h"
 #include "fl/contract_auth.h"
+#include "fl/contract_imm.h"
+#include "fl/contract_asm.h"
 
 typedef enum {
     FL_CONTRACT_SURFACE_DRIVER_OPS = 0,
@@ -23,5 +25,8 @@ typedef enum {
     /** One past the last real surface; use for bounds checks / table sizes. */
     FL_CONTRACT_SURFACE_COUNT
 } fl_contract_surface_t;
+
+_Static_assert((int)FL_CONTRACT_SURFACE_COUNT == 5,
+               "fl_contract_surface_t ABI: expected five surfaces before COUNT");
 
 #endif /* FL_CONTRACT_H */

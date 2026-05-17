@@ -1,7 +1,8 @@
 #include "fl/audit_log.h"
+#include "fl/contract_asm.h"
+#include "fl/contract_imm.h"
 #include "fl/contract_log_dispatch.h"
 #include "fs_jail.h"
-#include "mem_asm.h"
 #ifndef DISK_HOST_USE_LIBC_PREADV
 #include "shell_history_asm.h"
 #endif
@@ -28,8 +29,8 @@ void fl_ring_log_reset(void) {
     pthread_mutex_lock(&s_ring_mu);
     s_ring_len = 0;
     s_ring_drops = 0;
-    asm_mem_zero(s_ring_buf, sizeof s_ring_buf);
-    asm_mem_zero(s_ring_scratch, sizeof s_ring_scratch);
+    fl_contract_mem_zero(s_ring_buf, sizeof s_ring_buf);
+    fl_contract_mem_zero(s_ring_scratch, sizeof s_ring_scratch);
     pthread_mutex_unlock(&s_ring_mu);
 }
 
@@ -59,13 +60,13 @@ void fl_ring_log_append_line(const char *line) {
         const char *nl = memchr(s_ring_buf, '\n', s_ring_len);
         if (!nl) {
             s_ring_len = 0;
-            asm_mem_zero(s_ring_buf, sizeof s_ring_buf);
+            fl_contract_mem_zero(s_ring_buf, sizeof s_ring_buf);
             break;
         }
         size_t skip = (size_t)(nl - s_ring_buf) + 1u;
         size_t rest = s_ring_len - skip;
-        asm_mem_copy(s_ring_scratch, s_ring_buf + skip, rest);
-        asm_mem_copy(s_ring_buf, s_ring_scratch, rest);
+        fl_contract_mem_copy(s_ring_scratch, s_ring_buf + skip, rest);
+        fl_contract_mem_copy(s_ring_buf, s_ring_scratch, rest);
         s_ring_len = rest;
         s_ring_buf[s_ring_len] = '\0';
         s_ring_drops++;
@@ -75,7 +76,7 @@ void fl_ring_log_append_line(const char *line) {
         pthread_mutex_unlock(&s_ring_mu);
         return;
     }
-    asm_mem_copy(s_ring_buf + s_ring_len, line, ln);
+    fl_contract_mem_copy(s_ring_buf + s_ring_len, line, ln);
     s_ring_len += ln;
     s_ring_buf[s_ring_len++] = '\n';
     s_ring_buf[s_ring_len] = '\0';
@@ -94,7 +95,7 @@ size_t fl_ring_log_copy_out(char *buf, size_t cap) {
     if (n >= cap)
         n = cap - 1u;
     if (n > 0u)
-        asm_mem_copy(buf, s_ring_buf, n);
+        fl_contract_mem_copy(buf, s_ring_buf, n);
     buf[n] = '\0';
     pthread_mutex_unlock(&s_ring_mu);
     return n;
@@ -151,40 +152,41 @@ void fl_audit_shell_completed(const char *cmd_line, int host_exit_code) {
     fl_result_t mapped =
         (host_exit_code == 0) ? FL_RESULT_OK : FL_RESULT_ERR;
 
-    char line[768];
-    int n = snprintf(line, sizeof line,
+    fl_contract_log_line_buf_t line_buf;
+    int n = snprintf(line_buf.data, sizeof line_buf.data,
                      "type=shell jail=%d bundle=%u host_rc=%d fl_rc=%d surface=%d cmd=%s",
                      fs_jail_is_active(), (unsigned)FL_CONTRACT_BUNDLE_REV,
                      host_exit_code, (int)mapped,
                      (int)FL_CONTRACT_SURFACE_FS_JAIL, safe);
-    if (n < 0 || n >= (int)sizeof line) {
-        snprintf(line, sizeof line, "type=shell [TRUNCATED] jail=%d bundle=%u",
+    if (n < 0 || n >= (int)sizeof line_buf.data) {
+        snprintf(line_buf.data, sizeof line_buf.data,
+                 "type=shell [TRUNCATED] jail=%d bundle=%u",
                  fs_jail_is_active(), (unsigned)FL_CONTRACT_BUNDLE_REV);
     }
 
     char rec[1024];
-    size_t rn = audit_stage_line_record(rec, sizeof rec, line);
+    size_t rn = audit_stage_line_record(rec, sizeof rec, line_buf.data);
     if (rn == (size_t)-1) {
         pthread_mutex_lock(&g_audit_mutex);
         FILE *fp = fopen(FL_AUDIT_REL_DEFAULT, "a");
         if (!fp) {
             pthread_mutex_unlock(&g_audit_mutex);
-            snprintf(line, sizeof line,
+            snprintf(line_buf.data, sizeof line_buf.data,
                      "type=audit_error path=%s rn=%zu context=fprintf audit_failed=fopen_null",
                      FL_AUDIT_REL_DEFAULT, rn);
             goto out_emit;
         }
-        if (fprintf(fp, "%s\n", line) < 0) {
+        if (fprintf(fp, "%s\n", line_buf.data) < 0) {
             fclose(fp);
             pthread_mutex_unlock(&g_audit_mutex);
-            snprintf(line, sizeof line,
+            snprintf(line_buf.data, sizeof line_buf.data,
                      "type=audit_error path=%s rn=%zu context=fprintf audit_failed=fprintf",
                      FL_AUDIT_REL_DEFAULT, rn);
             goto out_emit;
         }
         if (fclose(fp) != 0) {
             pthread_mutex_unlock(&g_audit_mutex);
-            snprintf(line, sizeof line,
+            snprintf(line_buf.data, sizeof line_buf.data,
                      "type=audit_error path=%s rn=%zu context=fprintf audit_failed=fclose",
                      FL_AUDIT_REL_DEFAULT, rn);
             goto out_emit;
@@ -197,7 +199,7 @@ void fl_audit_shell_completed(const char *cmd_line, int host_exit_code) {
     FILE *fp = fopen(FL_AUDIT_REL_DEFAULT, "a");
     if (!fp) {
         pthread_mutex_unlock(&g_audit_mutex);
-        snprintf(line, sizeof line,
+        snprintf(line_buf.data, sizeof line_buf.data,
                  "type=audit_error path=%s rn=%zu context=fwrite audit_failed=fopen_null",
                  FL_AUDIT_REL_DEFAULT, rn);
         goto out_emit;
@@ -205,14 +207,14 @@ void fl_audit_shell_completed(const char *cmd_line, int host_exit_code) {
     if (fwrite(rec, 1, rn, fp) != rn) {
         fclose(fp);
         pthread_mutex_unlock(&g_audit_mutex);
-        snprintf(line, sizeof line,
+        snprintf(line_buf.data, sizeof line_buf.data,
                  "type=audit_error path=%s rn=%zu context=fwrite audit_failed=fwrite",
                  FL_AUDIT_REL_DEFAULT, rn);
         goto out_emit;
     }
     if (fclose(fp) != 0) {
         pthread_mutex_unlock(&g_audit_mutex);
-        snprintf(line, sizeof line,
+        snprintf(line_buf.data, sizeof line_buf.data,
                  "type=audit_error path=%s rn=%zu context=fwrite audit_failed=fclose",
                  FL_AUDIT_REL_DEFAULT, rn);
         goto out_emit;
@@ -220,12 +222,13 @@ void fl_audit_shell_completed(const char *cmd_line, int host_exit_code) {
     pthread_mutex_unlock(&g_audit_mutex);
 
 out_emit: {
-    fl_ring_log_append_line(line);
+    fl_ring_log_append_line(line_buf.data);
     fl_log_sink_t *sink = NULL;
     pthread_mutex_lock(&g_audit_mutex);
     sink = g_audit_sink;
     pthread_mutex_unlock(&g_audit_mutex);
-    (void)fl_log_sink_emit_line(sink, (int)FL_LOG_INFO, FL_LOG_FACILITY_AUDIT, line);
+    (void)fl_log_sink_emit_line(sink, (int)FL_LOG_INFO, FL_LOG_FACILITY_AUDIT,
+                                line_buf.data);
 }
 }
 
@@ -371,20 +374,21 @@ void fl_audit_authz_event(const char *cmd_line, unsigned cmd_no, int denied) {
     char safe[512];
     sanitize_cmd_fragment(cmd_line, safe, sizeof safe);
 
-    char line[768];
-    int n = snprintf(line, sizeof line,
+    fl_contract_log_line_buf_t line_buf;
+    int n = snprintf(line_buf.data, sizeof line_buf.data,
                      "type=authz jail=%d bundle=%u cmd_no=%u denied=%d cmd=%s",
                      fs_jail_is_active(), (unsigned)FL_CONTRACT_BUNDLE_REV, cmd_no,
                      denied ? 1 : 0, safe);
-    if (n < 0 || n >= (int)sizeof line)
-        snprintf(line, sizeof line, "type=authz denied=%d cmd_no=%u [TRUNCATED]",
-                 denied ? 1 : 0, cmd_no);
+    if (n < 0 || n >= (int)sizeof line_buf.data)
+        snprintf(line_buf.data, sizeof line_buf.data,
+                 "type=authz denied=%d cmd_no=%u [TRUNCATED]", denied ? 1 : 0,
+                 cmd_no);
 
     /* Intentional split lock: do not hold g_audit_mutex across fopen/fprintf/fclose. */
     pthread_mutex_lock(&g_audit_mutex);
     FILE *fp = fopen(FL_AUDIT_REL_DEFAULT, "a");
     if (fp) {
-        if (fprintf(fp, "%s\n", line) < 0) {
+        if (fprintf(fp, "%s\n", line_buf.data) < 0) {
             (void)fclose(fp);
         } else {
             (void)fclose(fp);
@@ -392,12 +396,13 @@ void fl_audit_authz_event(const char *cmd_line, unsigned cmd_no, int denied) {
     }
     pthread_mutex_unlock(&g_audit_mutex);
 
-    fl_ring_log_append_line(line);
+    fl_ring_log_append_line(line_buf.data);
 
     /* Brief second lock: read sink pointer without blocking other writers on the file path. */
     fl_log_sink_t *sink = NULL;
     pthread_mutex_lock(&g_audit_mutex);
     sink = g_audit_sink;
     pthread_mutex_unlock(&g_audit_mutex);
-    (void)fl_log_sink_emit_line(sink, (int)FL_LOG_INFO, FL_LOG_FACILITY_AUDIT, line);
+    (void)fl_log_sink_emit_line(sink, (int)FL_LOG_INFO, FL_LOG_FACILITY_AUDIT,
+                                line_buf.data);
 }

@@ -273,7 +273,7 @@ static int test_contract_constants(void) {
     ASSERT(FL_RESULT_NOSYS == -38);
 
     /* Bundle revision */
-    ASSERT(FL_CONTRACT_BUNDLE_REV == 4);
+    ASSERT(FL_CONTRACT_BUNDLE_REV == 5);
 
     /* Surface enum ordering */
     ASSERT((int)FL_CONTRACT_SURFACE_DRIVER_OPS == 0);

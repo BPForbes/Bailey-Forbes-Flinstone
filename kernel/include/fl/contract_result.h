@@ -38,4 +38,7 @@ typedef int fl_result_t;
 #define FL_RESULT_JSON_RC_MIN (-99999)
 #define FL_RESULT_JSON_RC_MAX (99999)
 
+_Static_assert(FL_RESULT_JSON_RC_MIN < FL_RESULT_JSON_RC_MAX,
+               "FL_RESULT_JSON_RC inclusive bounds");
+
 #endif /* FL_CONTRACT_RESULT_H */
