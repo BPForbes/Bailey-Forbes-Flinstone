@@ -4,3 +4,5 @@ RELEASE_VERSION=0
 PRERELEASE=1
 DEV_VERSION=10
 DESCRIPTION=Add P4 driver contracts bundle (contracts/drivers) and mark P3 module-contract snapshot complete.
+
+RELEASE_DATE=2026-05-17
