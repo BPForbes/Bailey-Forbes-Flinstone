@@ -273,7 +273,10 @@ static int test_contract_constants(void) {
     ASSERT(FL_RESULT_NOSYS == -38);
 
     /* Bundle revision */
-    ASSERT(FL_CONTRACT_BUNDLE_REV == 5);
+    ASSERT(FL_CONTRACT_BUNDLE_REV == 6);
+    ASSERT(FL_CONTRACT_P0_VOCABULARY_LOCK == 1);
+    ASSERT(FL_RESULT_WIRE_MIN == FL_RESULT_JSON_RC_MIN);
+    ASSERT(FL_RESULT_WIRE_MAX == FL_RESULT_JSON_RC_MAX);
 
     /* Surface enum ordering */
     ASSERT((int)FL_CONTRACT_SURFACE_DRIVER_OPS == 0);

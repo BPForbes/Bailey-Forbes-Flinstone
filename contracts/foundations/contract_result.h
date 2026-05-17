@@ -41,4 +41,14 @@ typedef int fl_result_t;
 _Static_assert(FL_RESULT_JSON_RC_MIN < FL_RESULT_JSON_RC_MAX,
                "FL_RESULT_JSON_RC inclusive bounds");
 
+/**
+ * **P0-2** wire alias: same interval as **FL_RESULT_JSON_RC_*** so **Px** contracts
+ * inherit one numeric story for “legal **fl_result_t** on the wire.”
+ */
+#define FL_RESULT_WIRE_MIN FL_RESULT_JSON_RC_MIN
+#define FL_RESULT_WIRE_MAX FL_RESULT_JSON_RC_MAX
+
+_Static_assert(FL_RESULT_WIRE_MIN == FL_RESULT_JSON_RC_MIN, "wire/json rc lower bound");
+_Static_assert(FL_RESULT_WIRE_MAX == FL_RESULT_JSON_RC_MAX, "wire/json rc upper bound");
+
 #endif /* FL_CONTRACT_RESULT_H */

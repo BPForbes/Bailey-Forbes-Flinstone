@@ -1,6 +1,5 @@
 #include "cmd_decl.h"
 #include "contract.h"
-#include "contract_log_dispatch.h"
 #include "fl/audit_log.h"
 #include "fl/history_record.h"
 #include <stdio.h>
@@ -10,7 +9,7 @@ static void print_contract_help(void) {
     printf(
         "Usage: contracts [summary|json] [--help]\n"
         "\n"
-        "Print the public subsystem contract bundle (P0 headers under contracts/foundations/).\n"
+        "Print the public subsystem contract bundle (P0: contract_foundations.h / contract_extend.h under contracts/foundations/).\n"
         "Designed for automation: no prompts; use `json` for one-line parsing.\n"
         "\n"
         "Options:\n"
@@ -39,7 +38,8 @@ _Static_assert(sizeof(CONTRACT_SURFACE_NAMES) / sizeof(CONTRACT_SURFACE_NAMES[0]
                "CONTRACT_SURFACE_NAMES must match fl_contract_surface_t");
 
 static int print_summary(void) {
-    printf("contracts: bundle rev %d\n", FL_CONTRACT_BUNDLE_REV);
+    printf("contracts: bundle rev %d, P0 foundations rev %d\n", FL_CONTRACT_BUNDLE_REV,
+           FL_CONTRACT_P0_FOUNDATIONS_REV);
     printf("  fl_result_t: OK=%d ERR=%d INVAL=%d NOSYS=%d\n",
            (int)FL_RESULT_OK, (int)FL_RESULT_ERR, (int)FL_RESULT_INVAL, (int)FL_RESULT_NOSYS);
     printf("  surfaces (%zu):\n",
@@ -61,15 +61,17 @@ static int print_summary(void) {
 }
 
 static int print_json(void) {
-    printf("{\"bundle_rev\":%d,\"fl_result_ok\":%d,\"fl_result_err\":%d,"
+    printf("{\"bundle_rev\":%d,\"p0_foundations_rev\":%d,\"fl_result_ok\":%d,\"fl_result_err\":%d,"
            "\"fl_result_json_rc_min\":%d,\"fl_result_json_rc_max\":%d,"
+           "\"fl_result_wire_min\":%d,\"fl_result_wire_max\":%d,"
            "\"log_rl_max_per_sec\":%d,"
            "\"surfaces\":[\"DRIVER_OPS\",\"NETDEV\",\"LOG_SINK\",\"AUTHZ\",\"FS_JAIL\"],"
            "\"history_record_tag\":\"%s\","
            "\"audit_env\":\"%s\",\"audit_log_relative\":\"%s\","
            "\"vfs_include\":\"fl/vfs.h (separate)\"}\n",
-           FL_CONTRACT_BUNDLE_REV, (int)FL_RESULT_OK, (int)FL_RESULT_ERR,
-           FL_RESULT_JSON_RC_MIN, FL_RESULT_JSON_RC_MAX, FL_LOG_RL_MAX_PER_SEC,
+           FL_CONTRACT_BUNDLE_REV, FL_CONTRACT_P0_FOUNDATIONS_REV, (int)FL_RESULT_OK, (int)FL_RESULT_ERR,
+           FL_RESULT_JSON_RC_MIN, FL_RESULT_JSON_RC_MAX, FL_RESULT_WIRE_MIN, FL_RESULT_WIRE_MAX,
+           FL_LOG_RL_MAX_PER_SEC,
            FL_HISTORY_RECORD_TAG, FL_AUDIT_ENV, FL_AUDIT_REL_DEFAULT);
     return 0;
 }

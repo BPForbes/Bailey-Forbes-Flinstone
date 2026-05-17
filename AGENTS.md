@@ -53,7 +53,7 @@ Run builds from the repository root.
 
 ## Module contracts (AI)
 
-In this repository, a **module contract** is a **normative, stable model of how data and outcomes may cross a boundary** between subsystems: which buffers or handles move where, who allocates or frees them, which error or status channels apply, and which **surfaces** exist for interchange. It is **not product functionality by itself**—it is the **blueprint for allowed I/O and responsibility**. Headers under **`contracts/foundations/`** (P0 bundle) and closely related **`fl/*`** boundary headers are the primary **C artifacts** for contracts today; **implementation** (drivers, rate limits, IRQ paths) may **enforce** a contract but is **not** a substitute for an explicit distribution model.
+In this repository, a **module contract** is a **normative, stable model of how data and outcomes may cross a boundary** between subsystems: which buffers or handles move where, who allocates or frees them, which error or status channels apply, and which **surfaces** exist for interchange. It is **not product functionality by itself**—it is the **blueprint for allowed I/O and responsibility**. Headers under **`contracts/foundations/`** (P0 bundle) and closely related **`fl/*`** boundary headers are the primary **C artifacts** for contracts today; **`contract_extend.h`** is the documented prelude for future **Px** headers under **`contracts/extensions/`**. **Implementation** (drivers, rate limits, IRQ paths) may **enforce** a contract but is **not** a substitute for an explicit distribution model.
 
 **AI / contributors should:**
 

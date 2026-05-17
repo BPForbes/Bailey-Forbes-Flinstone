@@ -3,6 +3,6 @@ STANDARD_VERSION=0
 RELEASE_VERSION=0
 PRERELEASE=1
 DEV_VERSION=7
-DESCRIPTION=PRE 4.0.0: P0 contracts under **contracts/foundations/** (relocated from **kernel/include/fl/contract*.h**); immutability + ASM — **contract_imm.h** (**FL_CONTRACT_LOG_SINK_LINE_CAP**, **fl_contract_log_line_buf_t**, **_Static_assert**); **contract_asm.h** (**fl_contract_mem_***); **FL_CONTRACT_BUNDLE_REV** 5; **contract_result.h** JSON RC bounds static-assert; **contract.h** surface-count static-assert; Makefile/CMake **-Icontracts/foundations**. Audit and log dispatch use shared line buffer + contract mem helpers.
+DESCRIPTION=PRE 4.0.0: P0 foundations aggregate (**contract_foundations.h**), **contract_extend.h** Px prelude, **FL_CONTRACT_P0_FOUNDATIONS_REV**, **FL_CONTRACT_BUNDLE_REV** 6, **FL_RESULT_WIRE_*** (**P0-2**); contracts under **contracts/foundations/**; immutability + ASM; Makefile/CMake **-Icontracts/foundations**.
 
 RELEASE_DATE=2026-05-17
