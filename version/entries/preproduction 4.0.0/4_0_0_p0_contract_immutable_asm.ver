@@ -3,6 +3,6 @@ STANDARD_VERSION=0
 RELEASE_VERSION=0
 PRERELEASE=1
 DEV_VERSION=7
-DESCRIPTION=PRE 4.0.0: P0 foundations aggregate (**contract_foundations.h**), **contract_extend.h** Px prelude, **FL_CONTRACT_P0_FOUNDATIONS_REV**, **FL_CONTRACT_BUNDLE_REV** 6, **FL_RESULT_WIRE_*** (**P0-2**); contracts under **contracts/foundations/**; immutability + ASM; Makefile/CMake **-Icontracts/foundations**.
+DESCRIPTION=PRE 4.0.0: P0 foundations aggregate (**contract_foundations.h**), **contract_extend.h** Px prelude, **contract_compile_ext.h** compile-time extensions, **FL_CONTRACT_P0_FOUNDATIONS_REV**, **FL_CONTRACT_BUNDLE_REV** 6, **FL_RESULT_WIRE_*** (**P0-2**); **docs/ROADMAP.md** module-contract snapshot: **P0-1**/**P0-2** ✅ per **contracts/foundations/** criterion; **P0-3**–**P0-8** ❌ until separate artifacts. Makefile/CMake **-Icontracts/foundations**.
 
 RELEASE_DATE=2026-05-17

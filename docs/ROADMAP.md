@@ -42,7 +42,7 @@ Unless stated otherwise, **start at H**, prove APIs and tests, then **lift** the
 
 ## Module contracts (abstraction and P0-P9 coverage)
 
-This section is **normative for terminology** in this repo: what we mean by a **module contract**, how it differs from **functionality**, and a **snapshot** of how far **`develop`** has explicit **data-distribution** models for each **`P*-*` roadmap row**.
+This section is **normative for terminology** in this repo: what we mean by a **module contract**, how it differs from **functionality**, and a **snapshot** of how far **`develop`** has explicit **data-distribution** models for each **`P*-*` roadmap row**. For **P0-1** and **P0-2**, the snapshot also tracks the **normative C bundle** under **`contracts/foundations/`** (see the table note below).
 
 ### Abstraction (high level)
 
@@ -64,10 +64,12 @@ Close analogs elsewhere in computing: **interface / API contract**, **protocol s
 
 **Note:** Re-verify this table when preparing a release; it reflects the **contract-packaging** story, not full feature completion.
 
+**P0 row criterion (aligned with `contracts/foundations/`):** **P0-1** and **P0-2** are **✅** here because the **`contracts/foundations/`** tree defines the shipped **subsystem boundary** vocabulary (**`contract_foundations.h`**, surfaces, driver/net + log + authz wiring, **`contract_extend.h`** / **`contract_compile_ext.h`** preludes) and the **`fl_result_t`** / wire-boundary story (**`contract_result.h`**). **P0-3**–**P0-8** are **not** expressed as that C interchange bundle today and stay **❌** in this snapshot until separate contract artifacts exist (or the row is explicitly narrowed to non-header work only).
+
 | ID | Topic | Status |
 |----|--------|--------|
-| **P0-1** | Subsystem boundaries | ⚠️ |
-| **P0-2** | Error taxonomy (`fl_result_t` as outcome channel) | ⚠️ |
+| **P0-1** | Subsystem boundaries | ✅ |
+| **P0-2** | Error taxonomy (`fl_result_t` as outcome channel) | ✅ |
 | **P0-3** | CI realism | ❌ |
 | **P0-4** | ARM GIC EOI correctness | ❌ |
 | **P0-5** | x86_64 IDT + IRQ0 timer tick | ❌ |
@@ -121,7 +123,7 @@ Close analogs elsewhere in computing: **interface / API contract**, **protocol s
 | **P9-2** | Coverity / static analysis | ❌ |
 | **P9-3** | SMP bring-up (B) | ❌ |
 
-**Summary:** no **`P*-*` row is ✅** yet under this definition; the **⚠️** set is the early **boundary bundle** (**`contracts/foundations/`** P0 headers, driver/authz/log/jail surfaces, partial arenas/reentrancy, minimal `netdev`).
+**Summary:** **P0-1** and **P0-2** are **✅** under the **`contracts/foundations/`** bundle criterion above; **P0-3**–**P0-8** remain **❌** here. Downstream phases still show **⚠️** / **❌** as before (e.g. partial **netdev**, arenas, audit/log paths) until their rows meet the general legend or gain dedicated contract artifacts.
 
 ---
 
