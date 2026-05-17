@@ -51,6 +51,16 @@ Run builds from the repository root.
 - If a required toolchain or library is missing, install the packages listed in the Cursor Cloud section, then rerun the tests instead of skipping them.
 - Document any true environment blocker in the final response, including the exact command that failed and the missing prerequisite.
 
+## Module contracts (AI)
+
+In this repository, a **module contract** is a **normative, stable model of how data and outcomes may cross a boundary** between subsystems: which buffers or handles move where, who allocates or frees them, which error or status channels apply, and which **surfaces** exist for interchange. It is **not product functionality by itself**—it is the **blueprint for allowed I/O and responsibility**. Headers under **`kernel/include/fl/contract*.h`** (and closely related **`fl/*`** boundary headers) are the primary **C artifacts** for contracts today; **implementation** (drivers, rate limits, IRQ paths) may **enforce** a contract but is **not** a substitute for an explicit distribution model.
+
+**AI / contributors should:**
+
+- Extend **contract headers** and the **`contracts`** surface list when introducing a **new interchange boundary** other code must respect.
+- Keep **enforcement code** (mutexes, rate limits, drivers) clearly secondary to the **written model** when the goal is “close a contract row” in the roadmap sense.
+- Use the **❌ / ⚠️ / ✅** snapshot in **`docs/ROADMAP.md` → [Module contracts (abstraction and P0-P9 coverage)](#module-contracts-abstraction-and-p0-p9-coverage)** to see which **P0–P9** rows still lack a **data-distribution** contract on **`develop`**.
+
 ## Versioning
 
 Long-form guide: **`docs/versioning.md`** (authoring **`.ver`** files, **`RELEASE_DATE`** at relocate and after merge to **`develop`**, **A / B / C** semantics, and what GitHub Actions updates).

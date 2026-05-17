@@ -13,6 +13,7 @@ This document is the **single platform roadmap** for Flinstone: phased goals (**
 | [Phase dependency sketch](#phase-dependency-sketch-p0-to-p4) | Why **P0** and **Appendix D** front-load bare-metal correctness |
 | [How work interlinks](#how-work-interlinks-examples-across-phases-and-a-releases) | Boot ↔ net ↔ firmware ↔ time ↔ SMP coupling |
 | **Phase 0–9** | Feature IDs, goals, acceptance |
+| [Module contracts](#module-contracts-abstraction-and-p0-p9-coverage) | **Data-distribution contracts**: abstraction + **P0–P9** ❌/⚠️/✅ snapshot (see table). |
 | [Platform credibility (extended)](#platform-credibility--extended-sections-11-and-12) | **§11–§12** + staffing note only |
 | [Appendix A–D](#appendix-a--standards-map-non-exhaustive) | Standards index, DoD template, first vertical slice, bare-metal checklist |
 
@@ -36,6 +37,91 @@ Unless stated otherwise, **start at H**, prove APIs and tests, then **lift** the
 6. **Atomics & memory order:** prefer **ISO C11** `<stdatomic.h>` (**§7.17**) for new **lock-free** data structures in portable C. **Architecture barriers** (`DMB`/`DSB`/`ISB`, x86 fence intrinsics) live only under **`kernel/arch/**`** (or arch ASM), each with a **short comment** tying the barrier to the spec (e.g. ARM ARM / Intel SDM).
 7. **Public API lifecycle:** once a **P0-1** subsystem header set is marked **frozen**, exported contracts are **append-only**. **Breaking** changes require a **new feature ID**, user-visible deprecation, and a **`version/entries/*.ver`** note before removal.
 8. **Compiler hardening (CI / lab):** document optional flags alongside **P0-3** (matrix may vary): e.g. **`-fstack-protector-strong`**, **`-fsanitize=address,undefined`** on debug jobs where cost is acceptable, **`-fcf-protection=full`** (**Intel CET**, x86_64), **`-mbranch-protection=standard`** (**AArch64** PAC/BTI). Do not change default **B**/**release** presets silently—record in **`version/entries`**.
+
+---
+
+## Module contracts (abstraction and P0-P9 coverage)
+
+This section is **normative for terminology** in this repo: what we mean by a **module contract**, how it differs from **functionality**, and a **snapshot** of how far **`develop`** has explicit **data-distribution** models for each **`P*-*` roadmap row**.
+
+### Abstraction (high level)
+
+A **module contract** (also called a **distribution contract** here) is a **frozen blueprint for how data and outcomes may cross a boundary** between parts of the system: which handles or buffers move where, who allocates or frees them, which error channels apply, and which **surfaces** exist for interchange. It is **declarative**—it **models** allowed I/O and responsibility; it does **not** by itself add product features. **Implementation** (drivers, rate limits, caches, IRQ handlers) may **enforce** the model, but enforcement code is **not** the same artifact as the **contract definition** (headers, tables, and short normative prose).
+
+Close analogs elsewhere in computing: **interface / API contract**, **protocol specification** (message flow), **interchange schema**, or **ABI** when the boundary is registers and calling convention.
+
+### Legend (P0–P9 snapshot)
+
+| Symbol | Meaning (module-contract / data-distribution lens) |
+|--------|-----------------------------------------------------|
+| **✅** | The **distribution and responsibility model** for that roadmap row is **explicit**, **stable**, and **complete enough** that other subsystems can rely on it **without inferring rules only from implementation**. Boundary artifacts (e.g. **`kernel/include/fl/contract*.h`**, adjacent **`fl/*`** headers, or a **normative appendix** tied to the row) spell out the I/O story; there is **no major open roadmap TODO** for that same concern. |
+| **⚠️** | A **real model exists** (types, surfaces, partial prose, or a thin boundary) but coverage is **incomplete**, still a **placeholder**, or a **deferred TODO** references that row. |
+| **❌** | **No** dedicated **data-distribution contract** for that row. **Code may still exist** on **`develop`**; absence here means the **contract model** is missing or not separated from implementation. |
+
+**Process-only rows** (CI, fuzz jobs, static-analysis gates) remain **❌** in this table: they are **important**, but they are **not** module interchange contracts in the sense above.
+
+### P0–P9 module-contract snapshot (`develop`)
+
+**Note:** Re-verify this table when preparing a release; it reflects the **contract-packaging** story, not full feature completion.
+
+| ID | Topic | Status |
+|----|--------|--------|
+| **P0-1** | Subsystem boundaries | ⚠️ |
+| **P0-2** | Error taxonomy (`fl_result_t` as outcome channel) | ⚠️ |
+| **P0-3** | CI realism | ❌ |
+| **P0-4** | ARM GIC EOI correctness | ❌ |
+| **P0-5** | x86_64 IDT + IRQ0 timer tick | ❌ |
+| **P0-6** | x86_64 GDT (minimal flat) | ❌ |
+| **P0-7** | Device tree (FDT / DTB) metadata | ❌ |
+| **P0-8** | Early serial console (UART) | ❌ |
+| **P1-1** | Execution context | ❌ |
+| **P1-2** | Address space story | ❌ |
+| **P1-3** | Preemption contract | ❌ |
+| **P1-4** | Physical frame allocator (PMM) | ❌ |
+| **P1-5** | Memory domain arenas | ⚠️ |
+| **P1-6** | Driver model reentrancy | ⚠️ |
+| **P1-7** | Timekeeping | ❌ |
+| **P2-1** | Principal model | ❌ |
+| **P2-2** | Credential store (hosted) | ❌ |
+| **P2-3** | Authorization middleware | ⚠️ |
+| **P2-4** | Sudo-like elevation (hosted) | ❌ |
+| **P3-1** | Device abstraction (`netdev`) | ⚠️ |
+| **P3-2** | Loopback (software) | ❌ |
+| **P3-3** | TAP backend (hosted only) | ❌ |
+| **P3-4** | ARP | ❌ |
+| **P3-5** | IPv4 | ❌ |
+| **P3-6** | UDP | ❌ |
+| **P3-12** | DHCP client (IPv4) | ❌ |
+| **P3-7** | TCP (large) | ❌ |
+| **P3-8** | DNS client | ❌ |
+| **P3-9** | TLS (hosted) | ❌ |
+| **P3-10** | Wi‑Fi station path `[DEFERRED]` | ❌ |
+| **P3-11** | IPv6 + ICMPv6 `[DEFERRED]` | ❌ |
+| **P4-1** | Driver model v2 | ⚠️ |
+| **P4-2** | IRQ lifecycle | ❌ |
+| **P4-3** | PCIe config space access (lab) | ❌ |
+| **P4-4** | Virtio net/block | ❌ |
+| **P4-5** | USB stack | ❌ |
+| **P4-6** | FDT-driven machine discovery (lab) | ❌ |
+| **P4-7** | PSCI client (AArch64) | ❌ |
+| **P5-1** | VFS layer | ❌ |
+| **P5-2** | Pluggable FS | ❌ |
+| **P5-3** | Page cache | ❌ |
+| **P6-1** | Structured log API (sink / line path) | ⚠️ |
+| **P6-2** | Ring buffer sink | ❌ |
+| **P6-3** | Persistent log (hosted) | ❌ |
+| **P6-4** | Audit trail (vs history, sink path) | ⚠️ |
+| **P6-5** | Tracing hooks | ❌ |
+| **P7-1** | Service supervision | ❌ |
+| **P7-2** | Packaging | ❌ |
+| **P7-3** | Remote admin path | ❌ |
+| **P8-1** | Device timing fidelity | ❌ |
+| **P8-2** | Guest virtio | ❌ |
+| **P9-1** | Fuzzing | ❌ |
+| **P9-2** | Coverity / static analysis | ❌ |
+| **P9-3** | SMP bring-up (B) | ❌ |
+
+**Summary:** no **`P*-*` row is ✅** yet under this definition; the **⚠️** set is the early **boundary bundle** (**`fl/contract*.h`**, driver/authz/log/jail surfaces, partial arenas/reentrancy, minimal `netdev`).
 
 ---
 

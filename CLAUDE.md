@@ -2,6 +2,12 @@
 
 This repository implements **Bailey-Forbes-Flinstone**: a educational OS/shell-style codebase with a host shell (`BPForbes_Flinstone_Shell`), kernel-layer modules, drivers, and optional VM builds. Build with `make` from the repo root; see **AGENTS.md** for toolchain install and targets.
 
+## Module contracts (AI)
+
+A **module contract** here means a **data-distribution contract**: a **frozen blueprint** for how data and outcomes **may** move across a boundary (ownership, lifetimes, error channels, and named **surfaces**). It **models** I/O between parts of the system; it does **not inherently add features**. **`kernel/include/fl/contract*.h`** and related **`fl/*`** headers carry the C-side contract bundle; **implementation** enforces contracts but is **not** the definition of the contract.
+
+For a **P0–P9** row-by-row snapshot (**❌ / ⚠️ / ✅**) against **`develop`**, see **`docs/ROADMAP.md` → [Module contracts (abstraction and P0-P9 coverage)](#module-contracts-abstraction-and-p0-p9-coverage)**. Keep that table updated when contract coverage materially changes.
+
 ## Versioning (mandatory for merge-ready PRs)
 
 ### Lock system (AI assistants — mandatory)
@@ -51,6 +57,7 @@ Export current numbers without compiling: **`./scripts/export_version_record.sh`
 ## Where else this is documented
 
 - **AGENTS.md** — Cursor Cloud agents and versioning summary  
+- **`docs/ROADMAP.md`** — phased **P0–P9** work; **module contracts** abstraction + **❌/⚠️/✅** snapshot: [Module contracts (abstraction and P0-P9 coverage)](./docs/ROADMAP.md#module-contracts-abstraction-and-p0-p9-coverage)  
 - **`docs/versioning.md`** — `.ver` authoring, `RELEASE_DATE` automation, **A / B / C** semantics  
 - **`.coderabbit.yaml`** — optional CodeRabbit integration when enabled on the repo  
 - **`.cursor/rules/versioning.mdc`** — Cursor IDE versioning rules  
