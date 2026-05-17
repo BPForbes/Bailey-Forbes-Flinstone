@@ -6,7 +6,7 @@
 #ifndef FL_HISTORY_RECORD_H
 #define FL_HISTORY_RECORD_H
 
-#include "fl/contract.h"
+#include "contract.h"
 #include <stddef.h>
 
 #ifdef __cplusplus

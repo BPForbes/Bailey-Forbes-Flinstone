@@ -13,6 +13,7 @@ foreach(util ${COREUTILS_SOURCES})
     add_executable(${util_name} ${util})
     target_include_directories(${util_name} PRIVATE
         ${CMAKE_SOURCE_DIR}/kernel/include
+        ${CMAKE_SOURCE_DIR}/contracts/foundations
     )
     target_link_libraries(${util_name} PRIVATE kernel)
 endforeach()

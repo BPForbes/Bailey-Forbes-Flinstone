@@ -38,7 +38,7 @@ typedef struct fl_log_sink {
     void *impl;
 } fl_log_sink_t;
 
-/* Hosted printf-style delivery + rate limit: fl/contract_log_dispatch.h */
+/* Hosted printf-style delivery + rate limit: contract_log_dispatch.h */
 
 #ifdef __cplusplus
 }

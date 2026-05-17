@@ -2,19 +2,22 @@
  * P0-1/P0-2 contract bundle (driver, net, log sink, authz, fl_result_t).
  * Related: fl/history_record.h, fl/audit_log.h, fl/jail_contract.h;
  * VFS: fl/vfs.h.
+ *
+ * P0 (foundations) headers live under contracts/foundations/; add
+ * -Icontracts/foundations (Makefile / CMake) before including these files.
  */
 #ifndef FL_CONTRACT_H
 #define FL_CONTRACT_H
 
 #define FL_CONTRACT_BUNDLE_REV 5
 
-#include "fl/contract_result.h"
+#include "contract_result.h"
 #include "fl/driver/driver.h"
 #include "fl/driver/net.h"
-#include "fl/contract_log.h"
-#include "fl/contract_auth.h"
-#include "fl/contract_imm.h"
-#include "fl/contract_asm.h"
+#include "contract_log.h"
+#include "contract_auth.h"
+#include "contract_imm.h"
+#include "contract_asm.h"
 
 typedef enum {
     FL_CONTRACT_SURFACE_DRIVER_OPS = 0,

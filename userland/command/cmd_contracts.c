@@ -1,6 +1,6 @@
 #include "cmd_decl.h"
-#include "fl/contract.h"
-#include "fl/contract_log_dispatch.h"
+#include "contract.h"
+#include "contract_log_dispatch.h"
 #include "fl/audit_log.h"
 #include "fl/history_record.h"
 #include <stdio.h>
@@ -10,7 +10,7 @@ static void print_contract_help(void) {
     printf(
         "Usage: contracts [summary|json] [--help]\n"
         "\n"
-        "Print the public subsystem contract bundle (headers under fl/contract*.h).\n"
+        "Print the public subsystem contract bundle (P0 headers under contracts/foundations/).\n"
         "Designed for automation: no prompts; use `json` for one-line parsing.\n"
         "\n"
         "Options:\n"

@@ -1,5 +1,5 @@
-#include "fl/contract_asm.h"
-#include "fl/contract_log_dispatch.h"
+#include "contract_asm.h"
+#include "contract_log_dispatch.h"
 #include <pthread.h>
 #include <stdio.h>
 #include <string.h>

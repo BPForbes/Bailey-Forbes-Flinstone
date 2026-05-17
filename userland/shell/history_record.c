@@ -1,5 +1,5 @@
 #include "fl/history_record.h"
-#include "fl/contract_result.h"
+#include "contract_result.h"
 #ifndef DISK_HOST_USE_LIBC_PREADV
 #include "shell_history_asm.h"
 #endif

@@ -29,6 +29,7 @@ add_library(kernel_arch_aarch64 OBJECT
 target_include_directories(kernel_arch_aarch64 PUBLIC
     ${CMAKE_CURRENT_SOURCE_DIR}/include
     ${CMAKE_SOURCE_DIR}/kernel/include
+    ${CMAKE_SOURCE_DIR}/contracts/foundations
 )
 
 # Compiler flags

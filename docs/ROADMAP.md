@@ -54,7 +54,7 @@ Close analogs elsewhere in computing: **interface / API contract**, **protocol s
 
 | Symbol | Meaning (module-contract / data-distribution lens) |
 |--------|-----------------------------------------------------|
-| **✅** | The **distribution and responsibility model** for that roadmap row is **explicit**, **stable**, and **complete enough** that other subsystems can rely on it **without inferring rules only from implementation**. Boundary artifacts (e.g. **`kernel/include/fl/contract*.h`**, adjacent **`fl/*`** headers, or a **normative appendix** tied to the row) spell out the I/O story; there is **no major open roadmap TODO** for that same concern. |
+| **✅** | The **distribution and responsibility model** for that roadmap row is **explicit**, **stable**, and **complete enough** that other subsystems can rely on it **without inferring rules only from implementation**. Boundary artifacts (e.g. **`contracts/foundations/*.h`** (P0), adjacent **`fl/*`** headers, or a **normative appendix** tied to the row) spell out the I/O story; there is **no major open roadmap TODO** for that same concern. |
 | **⚠️** | A **real model exists** (types, surfaces, partial prose, or a thin boundary) but coverage is **incomplete**, still a **placeholder**, or a **deferred TODO** references that row. |
 | **❌** | **No** dedicated **data-distribution contract** for that row. **Code may still exist** on **`develop`**; absence here means the **contract model** is missing or not separated from implementation. |
 
@@ -121,7 +121,7 @@ Close analogs elsewhere in computing: **interface / API contract**, **protocol s
 | **P9-2** | Coverity / static analysis | ❌ |
 | **P9-3** | SMP bring-up (B) | ❌ |
 
-**Summary:** no **`P*-*` row is ✅** yet under this definition; the **⚠️** set is the early **boundary bundle** (**`fl/contract*.h`**, driver/authz/log/jail surfaces, partial arenas/reentrancy, minimal `netdev`).
+**Summary:** no **`P*-*` row is ✅** yet under this definition; the **⚠️** set is the early **boundary bundle** (**`contracts/foundations/`** P0 headers, driver/authz/log/jail surfaces, partial arenas/reentrancy, minimal `netdev`).
 
 ---
 

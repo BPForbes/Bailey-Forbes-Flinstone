@@ -13,8 +13,8 @@
  */
 
 #include "fl/audit_log.h"
-#include "fl/contract.h"
-#include "fl/contract_log_dispatch.h"
+#include "contract.h"
+#include "contract_log_dispatch.h"
 #include <errno.h>
 #include <stdio.h>
 #include <stdlib.h>

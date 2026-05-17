@@ -8,7 +8,7 @@
 #include <stddef.h>
 #include <stdint.h>
 #include "bus.h"
-#include "fl/contract_result.h"
+#include "contract_result.h"
 
 #ifdef __cplusplus
 extern "C" {

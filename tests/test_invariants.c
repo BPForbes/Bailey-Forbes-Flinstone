@@ -4,7 +4,7 @@
 #include "util.h"
 #include "common.h"
 #include "fl/history_record.h"
-#include "fl/contract_result.h"
+#include "contract_result.h"
 #include <stdio.h>
 #include <string.h>
 

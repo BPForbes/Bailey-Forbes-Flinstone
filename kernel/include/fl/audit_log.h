@@ -2,7 +2,7 @@
 #ifndef FL_AUDIT_LOG_H
 #define FL_AUDIT_LOG_H
 
-#include "fl/contract.h"
+#include "contract.h"
 #include <stddef.h>
 
 #ifdef __cplusplus

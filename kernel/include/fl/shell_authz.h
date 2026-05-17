@@ -9,7 +9,7 @@
 #ifndef FL_SHELL_AUTHZ_H
 #define FL_SHELL_AUTHZ_H
 
-#include "fl/contract_auth.h"
+#include "contract_auth.h"
 #include "fl_shell_cmd.h"
 
 #ifdef __cplusplus

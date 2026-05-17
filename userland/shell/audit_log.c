@@ -1,7 +1,7 @@
 #include "fl/audit_log.h"
-#include "fl/contract_asm.h"
-#include "fl/contract_imm.h"
-#include "fl/contract_log_dispatch.h"
+#include "contract_asm.h"
+#include "contract_imm.h"
+#include "contract_log_dispatch.h"
 #include "fs_jail.h"
 #ifndef DISK_HOST_USE_LIBC_PREADV
 #include "shell_history_asm.h"
