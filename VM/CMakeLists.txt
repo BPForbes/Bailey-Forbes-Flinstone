@@ -20,6 +20,8 @@ add_executable(vm_harness ${VM_SOURCES})
 target_include_directories(vm_harness PRIVATE
     ${CMAKE_SOURCE_DIR}/kernel/include
     ${CMAKE_SOURCE_DIR}/contracts/foundations
+    ${CMAKE_SOURCE_DIR}/contracts/runtime
+    ${CMAKE_SOURCE_DIR}/contracts/identity
 )
 
 # SDL2 for windowing (optional)

@@ -1,4 +1,4 @@
-#include "cmd_decl.h"
+#include "contract_p2_principal_names.h"
 #include "contract.h"
 #include "fl/audit_log.h"
 #include "fl/history_record.h"
@@ -49,8 +49,9 @@ static int print_summary(void) {
     printf("  audit: separate from history; env %s file %s (see `audit` command)\n",
            FL_AUDIT_ENV, FL_AUDIT_REL_DEFAULT);
     printf("  jail: fl/jail_contract.h + fs_jail_* when the VM host sandbox is active\n");
-    printf("  shell authz: **FL_PRINCIPAL=guest** denies destructive builtins and\n"
-           "    foreign **execvp** before dispatch; optional hook via fl_shell_authz_set_hook\n");
+    printf("  shell authz: **%s=%s** denies destructive builtins and\n"
+           "    foreign **execvp** before dispatch; optional hook via fl_shell_authz_set_hook\n",
+           FL_PRINCIPAL_ENV_NAME, FL_PRINCIPAL_GUEST_LITERAL);
     printf("  driver ops: probe/attach return fl_result_t; FL_RESULT_PROBE_SKIP when declining\n");
     printf("  log dispatch: fl_log_sink_emit_line (asm_mem_* buffer) + %d msgs/sec rate limit\n",
            FL_LOG_RL_MAX_PER_SEC);

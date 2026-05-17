@@ -1,14 +1,15 @@
 /**
  * Hosted-shell authorization (**P2-3**): gate builtins and foreign **execvp** before dispatch.
  *
- * Default policy: allow. When **FL_PRINCIPAL=guest**, deny a fixed set of disk / format /
- * destructive builtins and deny launching arbitrary host binaries.
+ * Default policy: allow. When **FL_PRINCIPAL_ENV_NAME** is set to **FL_PRINCIPAL_GUEST_LITERAL**,
+ * deny a fixed set of disk / format / destructive builtins and deny launching arbitrary host binaries.
  *
  * Tests may install a temporary hook via **fl_shell_authz_set_hook**(NULL) to restore default.
  */
 #ifndef FL_SHELL_AUTHZ_H
 #define FL_SHELL_AUTHZ_H
 
+#include "contract_p2_principal_names.h"
 #include "contract_auth.h"
 #include "fl_shell_cmd.h"
 

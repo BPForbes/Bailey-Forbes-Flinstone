@@ -70,6 +70,8 @@ set(KERNEL_INCLUDE_DIR "${CMAKE_SOURCE_DIR}/kernel/include")
 include_directories(
     ${KERNEL_INCLUDE_DIR}
     ${CMAKE_SOURCE_DIR}/contracts/foundations
+    ${CMAKE_SOURCE_DIR}/contracts/runtime
+    ${CMAKE_SOURCE_DIR}/contracts/identity
     ${KERNEL_ARCH_DIR}/include
 )
 

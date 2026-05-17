@@ -32,6 +32,7 @@
 #include "fs_facade.h"
 #include "threadpool.h"
 #include "interpreter.h"
+#include "contract_p2_principal_names.h"
 #include "fs_jail.h"
 #include "fs_provider.h"
 #include "fat32_host.h"
@@ -1095,68 +1096,68 @@ void test_diskput_fat32_roundtrip(void) {
 }
 
 /* ---------------------------------------------------------------------------
- * Guest principal (**P2-3**): **FL_PRINCIPAL=guest** denies privileged builtins.
+ * Guest principal (**P2-3**): **FL_PRINCIPAL_ENV_NAME** = **FL_PRINCIPAL_GUEST_LITERAL** denies privileged builtins.
  * -------------------------------------------------------------------------*/
 void test_guest_authz_denies_format(void) {
     char prev[256];
-    const char *old = getenv("FL_PRINCIPAL");
+    const char *old = getenv(FL_PRINCIPAL_ENV_NAME);
     if (old) {
         strncpy(prev, old, sizeof prev - 1);
         prev[sizeof prev - 1] = '\0';
     }
     (void)remove("guest_den.dat");
-    (void)setenv("FL_PRINCIPAL", "guest", 1);
+    (void)setenv(FL_PRINCIPAL_ENV_NAME, FL_PRINCIPAL_GUEST_LITERAL, 1);
     CU_ASSERT_TRUE(execute_command_str("format guest_den.dat volx 4 16") != 0);
     if (old)
-        (void)setenv("FL_PRINCIPAL", prev, 1);
+        (void)setenv(FL_PRINCIPAL_ENV_NAME, prev, 1);
     else
-        (void)unsetenv("FL_PRINCIPAL");
+        (void)unsetenv(FL_PRINCIPAL_ENV_NAME);
     (void)remove("guest_den.dat");
 }
 
 void test_guest_authz_denies_setdisk(void) {
     char prev[256];
-    const char *old = getenv("FL_PRINCIPAL");
+    const char *old = getenv(FL_PRINCIPAL_ENV_NAME);
     if (old) {
         strncpy(prev, old, sizeof prev - 1);
         prev[sizeof prev - 1] = '\0';
     }
-    (void)setenv("FL_PRINCIPAL", "guest", 1);
+    (void)setenv(FL_PRINCIPAL_ENV_NAME, FL_PRINCIPAL_GUEST_LITERAL, 1);
     CU_ASSERT_TRUE(execute_command_str("setdisk foo.dat") != 0);
     if (old)
-        (void)setenv("FL_PRINCIPAL", prev, 1);
+        (void)setenv(FL_PRINCIPAL_ENV_NAME, prev, 1);
     else
-        (void)unsetenv("FL_PRINCIPAL");
+        (void)unsetenv(FL_PRINCIPAL_ENV_NAME);
 }
 
 void test_guest_authz_denies_foreign_exec(void) {
     char prev[256];
-    const char *old = getenv("FL_PRINCIPAL");
+    const char *old = getenv(FL_PRINCIPAL_ENV_NAME);
     if (old) {
         strncpy(prev, old, sizeof prev - 1);
         prev[sizeof prev - 1] = '\0';
     }
-    (void)setenv("FL_PRINCIPAL", "guest", 1);
+    (void)setenv(FL_PRINCIPAL_ENV_NAME, FL_PRINCIPAL_GUEST_LITERAL, 1);
     CU_ASSERT_TRUE(execute_command_str("echo guest-exec-blocked") != 0);
     if (old)
-        (void)setenv("FL_PRINCIPAL", prev, 1);
+        (void)setenv(FL_PRINCIPAL_ENV_NAME, prev, 1);
     else
-        (void)unsetenv("FL_PRINCIPAL");
+        (void)unsetenv(FL_PRINCIPAL_ENV_NAME);
 }
 
 void test_guest_authz_allows_version(void) {
     char prev[256];
-    const char *old = getenv("FL_PRINCIPAL");
+    const char *old = getenv(FL_PRINCIPAL_ENV_NAME);
     if (old) {
         strncpy(prev, old, sizeof prev - 1);
         prev[sizeof prev - 1] = '\0';
     }
-    (void)setenv("FL_PRINCIPAL", "guest", 1);
+    (void)setenv(FL_PRINCIPAL_ENV_NAME, FL_PRINCIPAL_GUEST_LITERAL, 1);
     CU_ASSERT_TRUE(execute_command_str("version") == 0);
     if (old)
-        (void)setenv("FL_PRINCIPAL", prev, 1);
+        (void)setenv(FL_PRINCIPAL_ENV_NAME, prev, 1);
     else
-        (void)unsetenv("FL_PRINCIPAL");
+        (void)unsetenv(FL_PRINCIPAL_ENV_NAME);
 }
 
 /* ---------------------------------------------------------------------------

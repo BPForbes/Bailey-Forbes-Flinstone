@@ -18,6 +18,8 @@ add_executable(tests ${TEST_SOURCES})
 target_include_directories(tests PRIVATE
     ${CMAKE_SOURCE_DIR}/kernel/include
     ${CMAKE_SOURCE_DIR}/contracts/foundations
+    ${CMAKE_SOURCE_DIR}/contracts/runtime
+    ${CMAKE_SOURCE_DIR}/contracts/identity
 )
 
 target_link_libraries(tests PRIVATE

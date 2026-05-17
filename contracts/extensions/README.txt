@@ -1,7 +1,13 @@
-Future P1–P9 (Px) contract headers should live in this directory when added.
-Each Px header should start with: #include "contract_extend.h"
-(that file lives in ../foundations/ and pulls the full P0 base). Add
--Icontracts/extensions to the build when the first Px header is introduced.
+Phase-specific contract trees (preferred layout):
+  P1 → ../runtime/     (see README there)
+  P2 → ../identity/
+  P3+ → add sibling dirs under contracts/ as needed (e.g. networking/).
+
+This *extensions* directory is for cross-cutting optional helpers or small shared
+pieces that do not belong to a single phase tree. Each header here should still
+start with: #include "contract_extend.h"
+(that file lives in ../foundations/). Add -Icontracts/extensions when something
+here is first compiled in.
 
 Compile-time optional helpers: define FL_CONTRACT_HAS_<Name> from the build or
 from a small extension header when you add optional .c helpers; gate extended
