@@ -3,6 +3,6 @@ STANDARD_VERSION=0
 RELEASE_VERSION=0
 PRERELEASE=1
 DEV_VERSION=7
-DESCRIPTION=PRE 4.0.0: P0 full header bundle: **contract_foundations.h** (**FL_CONTRACT_P0_FOUNDATIONS_REV** 2) includes **contract_p0_ci.h** (**FL_CONTRACT_P0_CI_INTERCHANGE_REV** 1: default-gate surface, ownership/lifetime, exit/check failure channel) through **contract_p0_uart.h** (**P0-3**–**P0-8**); **contract_extend.h**, **contract_compile_ext.h**, **FL_CONTRACT_BUNDLE_REV** 6, **FL_RESULT_WIRE_***. **docs/ROADMAP.md**: **P0-1**–**P0-8** module-contract snapshot **✅** per **contracts/foundations/**. Makefile/CMake **-Icontracts/foundations**. **version_def.h**: CI regenerates from **.ver** (do not hand-commit on feature PRs).
+DESCRIPTION=PRE 4.0.0: P0 foundations **FL_CONTRACT_P0_FOUNDATIONS_REV** 3 — interchange blueprints on **contract_p0_ci.h** through **contract_p0_uart.h** (surface/lifetime/error + waiver macros on FDT/UART); **P0-1** per-surface lifetime/concurrency in **contract_foundations.h**; **P0-2** adds **FL_RESULT_NOMEM/ACCES/NOENT/BUSY/TIMEDOUT**. **contract_extend.h**, **FL_CONTRACT_BUNDLE_REV** 6. **docs/ROADMAP.md**: **P0-1**–**P0-8** **✅**. **version_def.h**: CI **gen_version_def.sh** only.
 
 RELEASE_DATE=2026-05-17

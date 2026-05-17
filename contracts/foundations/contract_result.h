@@ -22,6 +22,21 @@ typedef int fl_result_t;
 /** Operation not supported in this build or configuration. */
 #define FL_RESULT_NOSYS (-38)
 
+/** Out of memory / allocation failure (errno-shaped; global standard **#2** OOM path). */
+#define FL_RESULT_NOMEM (-12)
+
+/** Permission / authorization denied (errno **EACCES** shape; distinct from **FL_RESULT_ERR**). */
+#define FL_RESULT_ACCES (-13)
+
+/** Entity not found (errno **ENOENT** shape). */
+#define FL_RESULT_NOENT (-2)
+
+/** Resource busy / contended (errno **EBUSY** shape). */
+#define FL_RESULT_BUSY (-16)
+
+/** Operation timed out (errno **ETIMEDOUT** shape). */
+#define FL_RESULT_TIMEDOUT (-110)
+
 /**
  * **Driver probe** (`fl_driver_ops_t::probe`): return **`FL_RESULT_OK`** when this
  * driver claims the device and **`attach`** may run. Return **`FL_RESULT_NOSYS`**
