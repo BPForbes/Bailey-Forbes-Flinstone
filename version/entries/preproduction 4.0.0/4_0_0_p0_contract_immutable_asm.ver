@@ -4,3 +4,5 @@ RELEASE_VERSION=0
 PRERELEASE=1
 DEV_VERSION=7
 DESCRIPTION=PRE 4.0.0: P0 contract immutability + ASM — **fl/contract_imm.h** defines **FL_CONTRACT_LOG_SINK_LINE_CAP** and **fl_contract_log_line_buf_t** with **_Static_assert** layout checks; **fl/contract_asm.h** wraps **asm_mem_zero**/**asm_mem_copy** as **fl_contract_mem_*** for log sink dispatch and audit ring paths; **FL_CONTRACT_BUNDLE_REV** 5; **contract_result.h** JSON RC bounds static-assert; **contract.h** surface-count static-assert. Audit and **contract_log_dispatch** use the shared line buffer type and contract mem helpers.
+
+RELEASE_DATE=2026-05-17
