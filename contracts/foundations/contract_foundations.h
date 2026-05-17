@@ -1,10 +1,11 @@
 /*
- * Canonical **P0** contract aggregate — **P0-1** (subsystem boundaries) and **P0-2**
- * (fallible **fl_result_t** channel). This is the **only** header Px (*P1–P9*)
- * contract modules should treat as the **vocabulary base**: include it (or
- * **contract_extend.h**) **before** any Px-only declarations, analogous to
- * inheriting one base class in a higher-level language rather than re-stating
- * P0 types or caps in a second header.
+ * Canonical **P0** contract aggregate — **P0-1** (subsystem boundaries), **P0-2**
+ * (**fl_result_t**), and **P0-3**–**P0-8** normative headers (**contract_p0_*.h**)
+ * for CI, GIC EOI, x86 IDT/IRQ0, x86 GDT, DTB, and early UART expectations.
+ * This is the **only** header Px (*P1–P9*) contract modules should treat as the
+ * **vocabulary base**: include it (or **contract_extend.h**) **before** any Px-only
+ * declarations, analogous to inheriting one base class in a higher-level language
+ * rather than re-stating P0 types or caps in a second header.
  *
  * **Rules for Px authors**
  *   - Do **not** redefine **fl_result_t**, **fl_log_sink_t**, authz enums, line
@@ -26,7 +27,7 @@
 #define FL_CONTRACT_FOUNDATIONS_H
 
 /** Bump when P0 aggregate layout or required Px prelude changes (Px may _Static_assert). */
-#define FL_CONTRACT_P0_FOUNDATIONS_REV 1
+#define FL_CONTRACT_P0_FOUNDATIONS_REV 2
 
 /*
  * Include order: result + auth (no deps) → imm + asm (caps, mem) → log + dispatch
@@ -39,6 +40,14 @@
 #include "contract_log_dispatch.h"
 #include "fl/driver/driver.h"
 #include "fl/driver/net.h"
+
+/* P0-3 … P0-8 — normative contract prose + markers (implementation elsewhere). */
+#include "contract_p0_ci.h"
+#include "contract_p0_arm_gic.h"
+#include "contract_p0_x86_idt.h"
+#include "contract_p0_x86_gdt.h"
+#include "contract_p0_fdt.h"
+#include "contract_p0_uart.h"
 
 /** Shipped subsystem contract bundle revision (audit / CLI / packed metadata). */
 #define FL_CONTRACT_BUNDLE_REV 6
