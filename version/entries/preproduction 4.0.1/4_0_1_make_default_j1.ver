@@ -4,11 +4,47 @@ RELEASE_VERSION=1
 PRERELEASE=1
 DEV_VERSION=1
 DESCRIPTION<<VER_4_0_1_COMBINED
-Makefile: top-level builds default to -j1 (serial compile jobs) unless the user passes an explicit job count (-j/--jobs) or inherits a parallel jobserver; reduces out-of-memory kills from gcc on low-RAM hosts while keeping parallel builds one flag away.
+Makefile: top-level builds default to -j1 (serial compile jobs) unless the user
+passes an explicit job count (-j/--jobs) or inherits a parallel jobserver; reduces
+out-of-memory kills from gcc on low-RAM hosts while keeping parallel builds one flag away.
 
-Also includes host IPC and shell/PIC hardening merged from a sibling agent branch: pipe_write returns -1 with EAGAIN when the ring cannot accept a non-zero write; msgq_send sets errno (EINVAL, EPIPE, EAGAIN); msgq_create rejects max_messages*message_size overflow and checks pthread init failures; pipe_create checks pthread init failures; VM popup path NUL-terminates exe_path after strncpy; bare-metal 8259 PIC EOI skips spurious IRQ7 and IRQ15; fl/ipc.h documents return/errno behavior; userspace connection tests extended (pipe/msgq EAGAIN, wrong-handle rejects, msgq recv errno paths, size overflow on msgq_create).
+Also includes host IPC and shell/PIC hardening merged from a sibling agent branch:
+pipe_write returns -1 with EAGAIN when the ring cannot accept a non-zero write;
+msgq_send sets errno (EINVAL, EPIPE, EAGAIN); msgq_create rejects
+max_messages*message_size overflow and checks pthread init failures; pipe_create checks
+pthread init failures; VM popup path NUL-terminates exe_path after strncpy; bare-metal
+8259 PIC EOI skips spurious IRQ7 and IRQ15; fl/ipc.h documents return/errno behavior;
+userspace connection tests extended (pipe/msgq EAGAIN, wrong-handle rejects, msgq recv
+errno paths, size overflow on msgq_create).
 
-cd: NUL-terminate g_cwd when getcwd fails after chdir. Shell: check pthread mutex/cond init and pthread_create; guard batch command totalLen against size_t overflow; pthread_create failure path signals shutdown under g_pool.mutex before join; register atexit(shell_pool_cleanup) so exit() paths join workers and destroy pool primitives; batch setdisk/createdisk accepts cmd plus three args (four tokens) and consumes an optional fifth -y/-n flag; too-few-arg paths consume dangling argv tokens instead of re-dispatching them as commands. IPC: msgq_receive sets errno (EINVAL, EPIPE, EAGAIN, ETIMEDOUT) on host; timed-wait returns ETIMEDOUT only when the queue is still empty after pthread_cond_timedwait (avoids false timeout if a message arrived at the deadline edge); pipe_write takes the mutex before EINVAL on bad buf/count and before reading closing (no pre-lock pipe field access). VFS: safer size_t bounds for legacy disk ruler/allocs, cluster table malloc, format path; update_cluster_line checks strdup and uses size_t-safe hex line length; fs import_text_drive uses per-call heap line table (thread-safe) plus import ruler/zeros; remove_directory_recursive hoists directory scan helpers to file scope (standard C); FAT32 bytes-per-cluster multiply overflow guard; fat32_host_load rejects root_cluster<2 before cluster math; fat32_host_format_image guards FLINT.DAT size in directory entry and frees rootbuf/closes fd on that overflow; fat32_host_files cluster-chain length computed in uint64_t before cast (SIZE_MAX/UINT32_MAX checks); import_text_drive fails fast on zero-buffer OOM or cluster-size overflow instead of silently skipping cluster lines; FAT chain iteration guards use uint64_t caps (no uint32_t wrap); free_cluster_chain bounded against cycles; allocate_and_write_chain rollback clears the partially linked cluster; max_cluster_number clamps UINT32_MAX+1 wrap; Makefile drops duplicate %.o:%.s rule and treats --jobserver-auth as an active jobserver for default -j1.
+cd: NUL-terminate g_cwd when getcwd fails after chdir.
+
+Shell: check pthread mutex/cond init and pthread_create; guard batch command totalLen
+against size_t overflow; pthread_create failure path signals shutdown under
+g_pool.mutex before join; register atexit(shell_pool_cleanup) so exit() paths join
+workers and destroy pool primitives; batch setdisk/createdisk accepts cmd plus three
+args (four tokens) and consumes an optional fifth -y/-n flag; too-few-arg paths consume
+dangling argv tokens instead of re-dispatching them as commands.
+
+IPC: msgq_receive sets errno (EINVAL, EPIPE, EAGAIN, ETIMEDOUT) on host; timed-wait
+returns ETIMEDOUT only when the queue is still empty after pthread_cond_timedwait
+(avoids false timeout if a message arrived at the deadline edge); pipe_write takes the
+mutex before EINVAL on bad buf/count and before reading closing (no pre-lock pipe field
+access).
+
+VFS: safer size_t bounds for legacy disk ruler/allocs, cluster table malloc, format path;
+update_cluster_line checks strdup and uses size_t-safe hex line length; fs
+import_text_drive uses per-call heap line table (thread-safe) plus import ruler/zeros;
+remove_directory_recursive hoists directory scan helpers to file scope (standard C);
+FAT32 bytes-per-cluster multiply overflow guard; fat32_host_load rejects root_cluster<2
+before cluster math; fat32_host_format_image guards FLINT.DAT size in directory entry
+and frees rootbuf/closes fd on that overflow; fat32_host_files cluster-chain length
+computed in uint64_t before cast (SIZE_MAX/UINT32_MAX checks); import_text_drive fails
+fast on zero-buffer OOM or cluster-size overflow instead of silently skipping cluster
+lines; FAT chain iteration guards use uint64_t caps (no uint32_t wrap); free_cluster_chain
+bounded against cycles; allocate_and_write_chain rollback clears the partially linked
+cluster; max_cluster_number clamps UINT32_MAX+1 wrap; Makefile drops duplicate %.o:%.s
+rule and treats --jobserver-auth as an active jobserver for default -j1.
 VER_4_0_1_COMBINED
 
 RELEASE_DATE=2026-05-18
