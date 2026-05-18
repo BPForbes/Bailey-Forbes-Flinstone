@@ -4,3 +4,5 @@ RELEASE_VERSION=1
 PRERELEASE=1
 DEV_VERSION=1
 DESCRIPTION=Host IPC and shell/PIC hardening: pipe_write returns -1 with EAGAIN when the ring cannot accept a non-zero write; msgq_send sets errno (EINVAL, EPIPE, EAGAIN); msgq_create rejects max_messages*message_size overflow and checks pthread init failures; pipe_create checks pthread init failures; VM popup path NUL-terminates exe_path after strncpy; bare-metal 8259 PIC EOI skips spurious IRQ7 and IRQ15; syscall bridge tests unchanged; userspace connection tests extended.
+
+RELEASE_DATE=2026-05-18
