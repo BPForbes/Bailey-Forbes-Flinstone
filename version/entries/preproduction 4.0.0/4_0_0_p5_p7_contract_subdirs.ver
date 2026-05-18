@@ -3,6 +3,6 @@ STANDARD_VERSION=0
 RELEASE_VERSION=0
 PRERELEASE=1
 DEV_VERSION=11
-DESCRIPTION=PRE 4.0.0: Add **contracts/storage/** (P5), **contracts/observability/** (P6), and **contracts/operations/** (P7) placeholder trees with README stubs on branch **cursor/p5-p7-contract-subdirs-5dbc**; umbrella headers and **-I** wiring to follow. **DEV_VERSION** **11** — next free slot in **preproduction 4.0.0** after **10** (**4_0_0_p4_drivers_contract_bundle.ver**); avoids colliding with **4_0_0_major_cli_policy_drop.ver** at **1**.
+DESCRIPTION=PRE 4.0.0: Scaffold **contracts/storage/**, **contracts/observability/**, **contracts/operations/** (P5–P7 README placeholders; umbrellas and **-I** later).
 
 RELEASE_DATE=2026-05-18
