@@ -4,5 +4,3 @@ RELEASE_VERSION=0
 PRERELEASE=1
 DEV_VERSION=14
 DESCRIPTION=4.0.0: Add system contracts for inheritable lower level functionality
-
-RELEASE_DATE=2026-05-18
