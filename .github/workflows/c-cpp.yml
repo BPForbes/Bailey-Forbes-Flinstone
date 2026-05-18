@@ -74,6 +74,9 @@ jobs:
       - name: Validate prerelease .ver directory layout (version/entries)
         run: ./scripts/check_version_prerelease_layout.sh
 
+      - name: Unique MAJOR/STANDARD/RELEASE/DEV_VERSION across version/entries
+        run: ./scripts/check_version_entries_semver_dev_unique.sh
+
       - name: Main must ship GA .ver only (push)
         if: github.event_name == 'push' && github.ref == 'refs/heads/main'
         run: ./scripts/check_version_main_prerelease_policy.sh

@@ -46,6 +46,13 @@ PRERELEASE / GM / DEV_VERSION / preproduction directories (VERSION uses locked; 
   userland/shell/version_def.h VERSION_LINE (default PRE when PRERELEASE=1 and the key is absent).
   With DEV_VERSION>=1, VERSION_LINE appends ", BUILD <n>" (comma, space, BUILD, space, n).
 
+  Unique keys: every *.ver under version/entries/ (including preproduction <A>.<B>.<C>/)
+  must have a unique (MAJOR, STANDARD, RELEASE, DEV_VERSION) quadruple tree-wide.
+  Omitting DEV_VERSION= counts as DEV_VERSION 0 for this rule. Before assigning
+  DEV_VERSION for a given A.B.C, scan version/entries/ and that preproduction folder
+  and pick the smallest unused non-negative int. CI runs
+  ./scripts/check_version_entries_semver_dev_unique.sh (O(kn) over dirs and files).
+
   PRERELEASE=1 marks an in-flight prerelease line. Author new *.ver rows at the
   version/entries/ repository root with PRERELEASE=1 (same MAJOR/STANDARD/RELEASE as
   the target A.B.C); do not hand-add new PRERELEASE=1 *.ver paths under

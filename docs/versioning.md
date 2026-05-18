@@ -38,6 +38,8 @@ The shell reports **`VERSION`** as **`A.B.C`**. The numeric fields in `.ver` fil
 
 Ordering of multiple `.ver` files is by the **numeric fields inside** each file, not by filename prefix.
 
+**Unique iteration keys (CI):** Across **`version/entries/**/*.ver`**, the quadruple **`(MAJOR_VERSION, STANDARD_VERSION, RELEASE_VERSION, DEV_VERSION)`** must be **unique**. Rows with **no** **`DEV_VERSION=`** line are treated as **`DEV_VERSION=0`** for this check (so two GA-oriented rows at the same **A.B.C** without **`DEV_VERSION`** collide). Before choosing **`DEV_VERSION`** for a given **A.B.C**, scan **`version/entries/`** and **`version/entries/preproduction <A>.<B>.<C>/`** and pick the **smallest unused** non-negative integer (**O(kn)** over directories and files). **`scripts/check_version_entries_semver_dev_unique.sh`** enforces this on every CI run (after **`check_version_prerelease_layout.sh`**).
+
 ## Preproduction directories, **`PRERELEASE`**, **`GM`**, and **`DEV_VERSION`**
 
 Preproduction metadata uses **`PRERELEASE`**, optional **`PRERELEASE_TAG`**, **`GM`** (go-to-main), and **`DEV_VERSION`** (develop iteration “D” in an **`A.B.C.D`** sense — **`D`** is **not** part of the basename; **`DEV_VERSION`** feeds the **`, BUILD n`** suffix in **`VERSION_LINE`**, not **`VERSION_*`** / **`VERSION`** from **`version/locked/`**).
@@ -67,7 +69,7 @@ On **same-repo** pull requests into **`develop`** and on **feature-branch pushes
 
 **`main`** must have **no** **`preproduction *`** directories and **no** **`PRERELEASE=1`**, **`GM=1`**, or **`DEV_VERSION=`** lines — CI runs **`scripts/check_version_main_prerelease_policy.sh`**.
 
-**Layout CI:** **`scripts/check_version_prerelease_layout.sh`** validates **`version/entries`** on every run.
+**Layout CI:** **`scripts/check_version_prerelease_layout.sh`** validates **`version/entries`** on every run. **`scripts/check_version_entries_semver_dev_unique.sh`** rejects duplicate **`(MAJOR, STANDARD, RELEASE, DEV_VERSION)`** keys across the same tree.
 
 ## `RELEASE_DATE` — usually omit in entries
 

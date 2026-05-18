@@ -2,6 +2,7 @@
 # Unit tests for PR-modified version scripts:
 #   scripts/check_version_main_prerelease_policy.sh
 #   scripts/check_version_prerelease_layout.sh
+#   scripts/check_version_entries_semver_dev_unique.sh
 #   scripts/bump_dev_version.sh
 #   scripts/lib/ver_release_date_stamp.sh
 #   scripts/relocate_root_prerelease_ver_to_preproduction.sh
@@ -571,6 +572,102 @@ test_layout_preproduction_dev_version_gte_2() {
   cleanup "$d"
 }
 
+# ── Tests: check_version_entries_semver_dev_unique.sh ─────────────────────────
+
+unique_script() {
+  local fake_root="$1"
+  echo "$fake_root/scripts/check_version_entries_semver_dev_unique.sh"
+}
+
+test_unique_empty_entries() {
+  require_proc_sub "unique: empty entries directory passes" || return 0
+  local d
+  d="$(make_fake_repo check_version_entries_semver_dev_unique.sh)"
+  if bash "$(unique_script "$d")" >/dev/null 2>&1; then
+    ok "unique: empty entries directory passes"
+  else
+    fail "unique: empty entries directory should pass"
+  fi
+  cleanup "$d"
+}
+
+test_unique_two_ga_distinct_semver() {
+  require_proc_sub "unique: two GA rows different semver pass" || return 0
+  local d
+  d="$(make_fake_repo check_version_entries_semver_dev_unique.sh)"
+  write_ver_ga "$d/version/entries/1_0_0_a.ver" 1 0 0
+  write_ver_ga "$d/version/entries/2_0_0_b.ver" 2 0 0
+  if bash "$(unique_script "$d")" >/dev/null 2>&1; then
+    ok "unique: two GA rows different semver pass"
+  else
+    fail "unique: two GA rows different semver should pass"
+  fi
+  cleanup "$d"
+}
+
+test_unique_two_ga_same_semver_rejected() {
+  require_proc_sub "unique: two GA same semver rejected" || return 0
+  local d
+  d="$(make_fake_repo check_version_entries_semver_dev_unique.sh)"
+  write_ver_ga "$d/version/entries/1_0_0_a.ver" 1 0 0
+  write_ver_ga "$d/version/entries/1_0_0_b.ver" 1 0 0
+  if bash "$(unique_script "$d")" 2>/dev/null; then
+    fail "unique: two GA same semver (implicit DEV 0) should fail"
+  else
+    ok "unique: two GA same semver rejected"
+  fi
+  cleanup "$d"
+}
+
+test_unique_same_semver_distinct_dev_passes() {
+  require_proc_sub "unique: same semver different DEV_VERSION passes" || return 0
+  local d
+  d="$(make_fake_repo check_version_entries_semver_dev_unique.sh)"
+  mkdir -p "$d/version/entries/preproduction 2.0.0"
+  write_ver_prerelease "$d/version/entries/preproduction 2.0.0/a.ver" 2 0 0 1
+  write_ver_prerelease "$d/version/entries/preproduction 2.0.0/b.ver" 2 0 0 2
+  if bash "$(unique_script "$d")" >/dev/null 2>&1; then
+    ok "unique: same semver different DEV_VERSION passes"
+  else
+    fail "unique: same semver different DEV_VERSION should pass"
+  fi
+  cleanup "$d"
+}
+
+test_unique_duplicate_dev_rejected() {
+  require_proc_sub "unique: duplicate DEV_VERSION same semver rejected" || return 0
+  local d
+  d="$(make_fake_repo check_version_entries_semver_dev_unique.sh)"
+  mkdir -p "$d/version/entries/preproduction 2.0.0"
+  write_ver_prerelease "$d/version/entries/preproduction 2.0.0/a.ver" 2 0 0 3
+  write_ver_prerelease "$d/version/entries/preproduction 2.0.0/b.ver" 2 0 0 3
+  if bash "$(unique_script "$d")" 2>/dev/null; then
+    fail "unique: duplicate DEV_VERSION same semver should fail"
+  else
+    ok "unique: duplicate DEV_VERSION rejected"
+  fi
+  cleanup "$d"
+}
+
+test_unique_malformed_dev_version_rejected() {
+  require_proc_sub "unique: malformed DEV_VERSION rejected" || return 0
+  local d
+  d="$(make_fake_repo check_version_entries_semver_dev_unique.sh)"
+  cat >"$d/version/entries/bad.ver" <<'VER'
+MAJOR_VERSION=1
+STANDARD_VERSION=0
+RELEASE_VERSION=0
+DEV_VERSION=notint
+DESCRIPTION=oops
+VER
+  if bash "$(unique_script "$d")" 2>/dev/null; then
+    fail "unique: non-integer DEV_VERSION should fail"
+  else
+    ok "unique: malformed DEV_VERSION rejected"
+  fi
+  cleanup "$d"
+}
+
 # ── Tests: bump_dev_version.sh ────────────────────────────────────────────────
 
 BUMP="$REPO_ROOT/scripts/bump_dev_version.sh"
@@ -1062,6 +1159,14 @@ test_layout_multiple_preproduction_dirs
 test_layout_missing_semver_rejected
 test_layout_version_alias_keys_accepted
 test_layout_preproduction_dev_version_gte_2
+
+# check_version_entries_semver_dev_unique.sh
+test_unique_empty_entries
+test_unique_two_ga_distinct_semver
+test_unique_two_ga_same_semver_rejected
+test_unique_same_semver_distinct_dev_passes
+test_unique_duplicate_dev_rejected
+test_unique_malformed_dev_version_rejected
 
 # bump_dev_version.sh
 test_bump_increments_dev_version
