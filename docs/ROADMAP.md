@@ -42,7 +42,7 @@ Unless stated otherwise, **start at H**, prove APIs and tests, then **lift** the
 
 ## Module contracts (abstraction and P0-P9 coverage)
 
-This section is **normative for terminology** in this repo: what we mean by a **module contract**, how it differs from **functionality**, and a **snapshot** of how far **`develop`** has explicit **data-distribution** models for each **`P*-*` roadmap row**. For **P0-1** and **P0-2**, the snapshot also tracks the **normative C bundle** under **`contracts/foundations/`**; for **P1-1** … **P1-7**, it tracks the **P1 runtime bundle** under **`contracts/runtime/`**; for **P2-1** … **P2-4**, it tracks the **P2 identity bundle** under **`contracts/identity/`**; for **P3-1** … **P3-12**, it tracks the **P3 networking bundle** under **`contracts/networking/`**; for **P4-1** … **P4-7**, it tracks the **P4 driver / hardware-facing bundle** under **`contracts/drivers/`**; for **P5-1** … **P5-3**, it tracks the **P5 storage / VFS bundle** under **`contracts/storage/`** (see the table notes below).
+This section is **normative for terminology** in this repo: what we mean by a **module contract**, how it differs from **functionality**, and a **snapshot** of how far **`develop`** has explicit **data-distribution** models for each **`P*-*` roadmap row**. For **P0-1** and **P0-2**, the snapshot also tracks the **normative C bundle** under **`contracts/foundations/`**; for **P1-1** … **P1-7**, it tracks the **P1 runtime bundle** under **`contracts/runtime/`**; for **P2-1** … **P2-4**, it tracks the **P2 identity bundle** under **`contracts/identity/`**; for **P3-1** … **P3-12**, it tracks the **P3 networking bundle** under **`contracts/networking/`**; for **P4-1** … **P4-7**, it tracks the **P4 driver / hardware-facing bundle** under **`contracts/drivers/`**; for **P5-1** … **P5-3**, it tracks the **P5 storage / VFS bundle** under **`contracts/storage/`**; for **P6-1** … **P6-5**, it tracks the **P6 observability bundle** under **`contracts/observability/`** (see the table notes below).
 
 **P2 is not a second copy of P0.** **P0** freezes **cross-cutting outcomes and surfaces** (`fl_result_t`, logging and auth wiring, arch CI slices). **P2** freezes **who may act and under what proof** (principal, credentials, authorization, elevation). P2 headers **inherit** P0 and P1 so identity policy uses the same **error and authz vocabulary**; that is **reuse**, not the same roadmap phase. Phase **2** product goals (service-layer principals, hosted credential layout, enforcement depth, elevation UX) remain in the **Phase 2** table and in **TODO** callouts (notably **TODO: P2-3** later in this file).
 
@@ -51,6 +51,8 @@ This section is **normative for terminology** in this repo: what we mean by a **
 **P4 is not a second copy of P3.** **P4** freezes **IRQ lifecycle, bus/config access, virtio transports, FDT enumeration policy, firmware CPUON/OFF contracts, and driver v2 lifecycle hooks**. **IP, UDP/TCP, and TLS datagram paths** remain **P3**; include **`contract_networking.h`** only where a translation unit actually implements that stack—see **`contracts/drivers/README.txt`**.
 
 **P5 is not a second copy of P4.** **P5** freezes **VFS mount and vnode interchange, pluggable filesystem backends, and page-cache coherency vocabulary**. **Virtqueues, IRQ lifecycle, and block transport setup** remain **P4**; include **`contract_drivers.h`** only where those surfaces are implemented—see **`contracts/storage/README.txt`**.
+
+**P6 is not a second copy of P5.** **P6** freezes **structured logging policy, ring-buffer retention, hosted persistent log interchange, audit-trail caps, and static tracepoint vocabulary**. **VFS mount tables and pluggable FS backends** remain **P5**; include **`contract_storage.h`** only where those surfaces are implemented—see **`contracts/observability/README.txt`**.
 
 ### Abstraction (high level)
 
@@ -85,6 +87,8 @@ Two columns track different concerns:
 **P4 row criterion (aligned with `contracts/drivers/`):** **P4-1** through **P4-7** are **✅** for **contract completion** when the normative **C contract bundle** under **`contracts/drivers/`** defines that row via **`contract_drivers.h`** (umbrella: **`contract_extend.h`**, then **`contract_p4_*.h`** shards with **`FL_CONTRACT_P4_*_CONTRACT_DEFINED`** markers). **Module integration** is tracked separately: lab helpers under **`kernel/drivers/p4_*.c`** and **`fl/driver/p4_*.h`** (driver lock self-test, IRQ hardirq/BH, PCIe BAR/MSI, virtio golden-vector, xHCI MMIO/TRB, FDT walk, PSCI status mapping). A **full USB hub tree**, production virtio on metal, and bare-metal PSCI SMC remain **P4→P5** gates—not required for contract **✅**.
 
 **P5 row criterion (aligned with `contracts/storage/`):** **P5-1** through **P5-3** are **✅** for **contract completion** when the normative **C contract bundle** under **`contracts/storage/`** defines that row via **`contract_storage.h`** (umbrella: **`contract_extend.h`**, then **`contract_p5_*.h`** shards with **`FL_CONTRACT_P5_*_CONTRACT_DEFINED`** markers). **Module integration** (mount tables wired to real roots, pluggable backends beyond lab FAT32, unified buffer cache with net/block) still follows Phase **5** gates; this snapshot tracks **contract definition**, not “full root filesystem on **B**.”
+
+**P6 row criterion (aligned with `contracts/observability/`):** **P6-1** through **P6-5** are **✅** for **contract completion** when the normative **C contract bundle** under **`contracts/observability/`** defines that row via **`contract_observability.h`** (umbrella: **`contract_extend.h`**, then **`contract_p6_*.h`** shards with **`FL_CONTRACT_P6_*_CONTRACT_DEFINED`** markers). **P6-1** composes **`contract_log.h`** from foundations rather than redefining sink types. **Module integration** (hosted rotation/fsync policy, tamper-evident segments, trace emitters on hot paths) still follows Phase **6** gates and **TODO: P6-*** callouts below; this snapshot tracks **contract definition**, not “full **RFC 5424** export” or “signed audit segments shipped.”
 
 | ID | Topic | Contract completion | Module integration |
 |----|--------|---------------------|-------------------|
@@ -129,11 +133,11 @@ Two columns track different concerns:
 | **P5-1** | VFS layer | ✅ | ❌ |
 | **P5-2** | Pluggable FS | ✅ | ❌ |
 | **P5-3** | Page cache | ✅ | ❌ |
-| **P6-1** | Structured log API (sink / line path) | ⚠️ | ⚠️ |
-| **P6-2** | Ring buffer sink | ❌ | ❌ |
-| **P6-3** | Persistent log (hosted) | ❌ | ❌ |
-| **P6-4** | Audit trail (vs history, sink path) | ⚠️ | ⚠️ |
-| **P6-5** | Tracing hooks | ❌ | ❌ |
+| **P6-1** | Structured log API (sink / line path) | ✅ | ⚠️ |
+| **P6-2** | Ring buffer sink | ✅ | ⚠️ |
+| **P6-3** | Persistent log (hosted) | ✅ | ❌ |
+| **P6-4** | Audit trail (vs history, sink path) | ✅ | ⚠️ |
+| **P6-5** | Tracing hooks | ✅ | ❌ |
 | **P7-1** | Service supervision | ❌ | ❌ |
 | **P7-2** | Packaging | ❌ | ❌ |
 | **P7-3** | Remote admin path | ❌ | ❌ |
@@ -143,7 +147,7 @@ Two columns track different concerns:
 | **P9-2** | Coverity / static analysis | ❌ | ❌ |
 | **P9-3** | SMP bring-up (B) | ❌ | ❌ |
 
-**Summary:** **Contract completion** — **P0-1**–**P0-8**, **P1-1**–**P1-7**, **P2-1**–**P2-4**, **P3-1**–**P3-12** (including **`[DEFERRED]`** shards), **P4-1**–**P4-7**, and **P5-1**–**P5-3** are **✅** under their **`contracts/*`** bundles. **P6** onward are mostly **❌** for contracts except **P6-1** / **P6-4** (**⚠️** partial). **Module integration** — **P0-1**–**P0-3** and **P4-1**/**P4-2** are **✅** on the current hosted/lab path; **P0-4**–**P0-8**, **P1**, **P2**, **P3**, **P4-3**–**P4-7**, and **P5** are **⚠️** or **❌** (partial enforcement, lab subset, phase gates, or not started); **P3-10**/**P3-11** integration is **❌** by design. **TODO: P2-3** tracks further kernel-path **`fl_authz_subsystem_check`** wiring, not contract completeness.
+**Summary:** **Contract completion** — **P0-1**–**P0-8**, **P1-1**–**P1-7**, **P2-1**–**P2-4**, **P3-1**–**P3-12** (including **`[DEFERRED]`** shards), **P4-1**–**P4-7**, **P5-1**–**P5-3**, and **P6-1**–**P6-5** are **✅** under their **`contracts/*`** bundles. **P7** onward are mostly **❌** for contracts. **Module integration** — **P0-1**–**P0-3** and **P4-1**/**P4-2** are **✅** on the current hosted/lab path; **P0-4**–**P0-8**, **P1**, **P2**, **P3**, **P4-3**–**P4-7**, and **P5** are **⚠️** or **❌** (partial enforcement, lab subset, phase gates, or not started); **P3-10**/**P3-11** integration is **❌** by design. **TODO: P2-3** tracks further kernel-path **`fl_authz_subsystem_check`** wiring, not contract completeness.
 
 ---
 

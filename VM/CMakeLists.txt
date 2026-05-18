@@ -23,6 +23,7 @@ target_include_directories(vm_harness PRIVATE
     ${CMAKE_SOURCE_DIR}/contracts/runtime
     ${CMAKE_SOURCE_DIR}/contracts/identity
     ${CMAKE_SOURCE_DIR}/contracts/storage
+    ${CMAKE_SOURCE_DIR}/contracts/observability
 )
 
 # SDL2 for windowing (optional)
