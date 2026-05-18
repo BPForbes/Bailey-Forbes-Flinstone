@@ -1,0 +1,6 @@
+MAJOR_VERSION=4
+STANDARD_VERSION=0
+RELEASE_VERSION=1
+PRERELEASE=1
+DEV_VERSION=1
+DESCRIPTION=Makefile: top-level builds default to -j1 (serial compile jobs) unless the user passes an explicit job count (-j/--jobs) or inherits a parallel jobserver; reduces out-of-memory kills from gcc on low-RAM hosts while keeping parallel builds one flag away.
