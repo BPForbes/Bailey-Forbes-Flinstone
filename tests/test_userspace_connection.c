@@ -1,4 +1,5 @@
 #include <assert.h>
+#include <errno.h>
 #include <stdint.h>
 #include <stdio.h>
 #include <string.h>
@@ -22,6 +23,20 @@ static void test_pipe_syscalls(void) {
     long r = fl_syscall_dispatch(FL_SYS_PIPE_READ, (uintptr_t)h, (uintptr_t)out, sizeof(out), 0);
     assert(r == (long)strlen(msg));
     assert(memcmp(out, msg, strlen(msg)) == 0);
+    assert(fl_syscall_dispatch(FL_SYS_CLOSE, (uintptr_t)h, 0, 0, 0) == 0);
+    fl_sys_shutdown();
+}
+
+static void test_pipe_full_write_returns_eagain(void) {
+    fl_sys_bootstrap();
+    long h = fl_syscall_dispatch(FL_SYS_PIPE_CREATE, 4, 0, 0, 0);
+    assert(h >= 0);
+    const char *fill = "ABCD";
+    assert(fl_syscall_dispatch(FL_SYS_PIPE_WRITE, (uintptr_t)h, (uintptr_t)fill, 4, 0) == 4);
+    errno = 0;
+    long wf = fl_syscall_dispatch(FL_SYS_PIPE_WRITE, (uintptr_t)h, (uintptr_t)fill, 1, 0);
+    assert(wf == -1);
+    assert(errno == EAGAIN);
     assert(fl_syscall_dispatch(FL_SYS_CLOSE, (uintptr_t)h, 0, 0, 0) == 0);
     fl_sys_shutdown();
 }
@@ -63,6 +78,23 @@ static void test_msgq_syscalls(void) {
         }
     }
 
+    assert(fl_syscall_dispatch(FL_SYS_CLOSE, (uintptr_t)h, 0, 0, 0) == 0);
+    fl_sys_shutdown();
+}
+
+static void test_msgq_full_send_returns_eagain(void) {
+    fl_sys_bootstrap();
+    long h = fl_syscall_dispatch(FL_SYS_MSGQ_CREATE, 2, 16, 0, 0);
+    assert(h >= 0);
+    char a[] = "a";
+    char b[] = "b";
+    assert(fl_syscall_dispatch(FL_SYS_MSGQ_SEND, (uintptr_t)h, (uintptr_t)a, 2, 0) == 0);
+    assert(fl_syscall_dispatch(FL_SYS_MSGQ_SEND, (uintptr_t)h, (uintptr_t)b, 2, 0) == 0);
+    errno = 0;
+    char c[] = "c";
+    long over = fl_syscall_dispatch(FL_SYS_MSGQ_SEND, (uintptr_t)h, (uintptr_t)c, 2, 0);
+    assert(over == -1);
+    assert(errno == EAGAIN);
     assert(fl_syscall_dispatch(FL_SYS_CLOSE, (uintptr_t)h, 0, 0, 0) == 0);
     fl_sys_shutdown();
 }
@@ -112,11 +144,18 @@ static void test_msgq_empty_receive_times_out(void) {
     msgq_destroy(q);
 }
 
+static void test_msgq_create_rejects_size_overflow(void) {
+    assert(msgq_create(SIZE_MAX, 2) == NULL);
+}
+
 int main(void) {
     test_pipe_syscalls();
+    test_pipe_full_write_returns_eagain();
     test_msgq_syscalls();
+    test_msgq_full_send_returns_eagain();
     test_syscall_rejects_wrong_handle_type();
     test_msgq_empty_receive_times_out();
+    test_msgq_create_rejects_size_overflow();
     puts("userspace connection tests: OK");
     return 0;
 }
