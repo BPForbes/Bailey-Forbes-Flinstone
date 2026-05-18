@@ -88,11 +88,11 @@ Two columns track different concerns:
 
 **P4 row criterion (aligned with `contracts/drivers/`):** **P4-1** through **P4-7** are **✅** for **contract completion** when the normative **C contract bundle** under **`contracts/drivers/`** defines that row via **`contract_drivers.h`** (umbrella: **`contract_extend.h`**, then **`contract_p4_*.h`** shards with **`FL_CONTRACT_P4_*_CONTRACT_DEFINED`** markers). **Module integration** is tracked separately: lab helpers under **`kernel/drivers/p4_*.c`** and **`fl/driver/p4_*.h`** (driver lock self-test, IRQ hardirq/BH, PCIe BAR/MSI, virtio golden-vector, xHCI MMIO/TRB, FDT walk, PSCI status mapping). A **full USB hub tree**, production virtio on metal, and bare-metal PSCI SMC remain **P4→P5** gates—not required for contract **✅**.
 
-**P5 row criterion (aligned with `contracts/storage/`):** **P5-1** through **P5-3** are **✅** for **contract completion** when the normative **C contract bundle** under **`contracts/storage/`** defines that row via **`contract_storage.h`** (umbrella: **`contract_extend.h`**, then **`contract_p5_*.h`** shards with **`FL_CONTRACT_P5_*_CONTRACT_DEFINED`** markers). **Module integration** (mount tables wired to real roots, pluggable backends beyond lab FAT32, unified buffer cache with net/block) still follows Phase **5** gates; this snapshot tracks **contract definition**, not “full root filesystem on **B**.”
+**P5 row criterion (aligned with `contracts/storage/`):** **P5-1** through **P5-3** are **✅** for **contract completion** when the normative **C contract bundle** under **`contracts/storage/`** defines that row via **`contract_storage.h`** (**`FL_CONTRACT_P5_STORAGE_REV` 2**; umbrella: **`contract_extend.h`**, then **`contract_p5_*.h`** shards with **`FL_CONTRACT_P5_*_CONTRACT_DEFINED`** markers). **Module integration** (mount tables wired to real roots, pluggable backends beyond lab FAT32, unified buffer cache with net/block) still follows Phase **5** gates; this snapshot tracks **contract definition**, not “full root filesystem on **B**.”
 
-**P6 row criterion (aligned with `contracts/observability/`):** **P6-1** through **P6-5** are **✅** for **contract completion** when the normative **C contract bundle** under **`contracts/observability/`** defines that row via **`contract_observability.h`** (umbrella: **`contract_extend.h`**, then **`contract_p6_*.h`** shards with **`FL_CONTRACT_P6_*_CONTRACT_DEFINED`** markers). **P6-1** composes **`contract_log.h`** from foundations rather than redefining sink types. **Module integration** (hosted rotation/fsync policy, tamper-evident segments, trace emitters on hot paths) still follows Phase **6** gates and **TODO: P6-*** callouts below; this snapshot tracks **contract definition**, not “full **RFC 5424** export” or “signed audit segments shipped.”
+**P6 row criterion (aligned with `contracts/observability/`):** **P6-1** through **P6-5** are **✅** for **contract completion** when the normative **C contract bundle** under **`contracts/observability/`** defines that row via **`contract_observability.h`** (**`FL_CONTRACT_P6_OBSERVABILITY_REV` 2**; umbrella: **`contract_extend.h`**, then **`contract_p6_*.h`** shards with **`FL_CONTRACT_P6_*_CONTRACT_DEFINED`** markers). **P6-1** composes **`contract_log.h`** from foundations rather than redefining sink types. **Module integration** (hosted rotation/fsync policy, tamper-evident segments, trace emitters on hot paths) still follows Phase **6** gates and **TODO: P6-*** callouts below; this snapshot tracks **contract definition**, not “full **RFC 5424** export” or “signed audit segments shipped.”
 
-**P7 row criterion (aligned with `contracts/operations/`):** **P7-1** through **P7-3** are **✅** for **contract completion** when the normative **C contract bundle** under **`contracts/operations/`** defines that row via **`contract_operations.h`** (umbrella: **`contract_extend.h`**, then **`contract_p7_*.h`** shards with **`FL_CONTRACT_P7_*_CONTRACT_DEFINED`** markers, including **`contract_p7_shell_batch.h`** for batch argv caps). **Module integration** (supervision daemons, reproducible tarball/OSTree, lab reverse shell behind **`CONFIG_LAB_REVERSE_SHELL`**) still follows Phase **7** gates and **TODO: P7** callouts below; this snapshot tracks **contract definition**, not “full ops stack shipped.”
+**P7 row criterion (aligned with `contracts/operations/`):** **P7-1** through **P7-3** plus shell batch argv (**`contract_p7_shell_batch.h`**) are **✅** for **contract completion** when the normative **C contract bundle** under **`contracts/operations/`** defines that row via **`contract_operations.h`** (**`FL_CONTRACT_P7_OPERATIONS_REV` 3**; umbrella: **`contract_extend.h`**, then **`contract_p7_*.h`** shards with **`FL_CONTRACT_P7_*_CONTRACT_DEFINED`** markers). **Module integration** (supervision daemons, reproducible tarball/OSTree, lab reverse shell behind **`CONFIG_LAB_REVERSE_SHELL`**) still follows Phase **7** gates and **TODO: P7** callouts below; this snapshot tracks **contract definition**, not “full ops stack shipped.”
 
 | ID | Topic | Contract completion | Module integration |
 |----|--------|---------------------|-------------------|
@@ -145,13 +145,14 @@ Two columns track different concerns:
 | **P7-1** | Service supervision | ✅ | ❌ |
 | **P7-2** | Packaging | ✅ | ❌ |
 | **P7-3** | Remote admin path | ✅ | ❌ |
+| **P7 (batch)** | Shell batch argv (`contracts` / `audit`) | ✅ | ⚠️ |
 | **P8-1** | Device timing fidelity | ❌ | ❌ |
 | **P8-2** | Guest virtio | ❌ | ❌ |
 | **P9-1** | Fuzzing | ❌ | ❌ |
 | **P9-2** | Coverity / static analysis | ❌ | ❌ |
 | **P9-3** | SMP bring-up (B) | ❌ | ❌ |
 
-**Summary:** **Contract completion** — **P0-1**–**P0-8**, **P1-1**–**P1-7**, **P2-1**–**P2-4**, **P3-1**–**P3-12** (including **`[DEFERRED]`** shards), **P4-1**–**P4-7**, **P5-1**–**P5-3**, **P6-1**–**P6-5**, and **P7-1**–**P7-3** are **✅** under their **`contracts/*`** bundles. **P8** onward are mostly **❌** for contracts. **Module integration** — **P0-1**–**P0-3** and **P4-1**/**P4-2** are **✅** on the current hosted/lab path; **P0-4**–**P0-8**, **P1**, **P2**, **P3**, **P4-3**–**P4-7**, and **P5** are **⚠️** or **❌** (partial enforcement, lab subset, phase gates, or not started); **P3-10**/**P3-11** integration is **❌** by design. **TODO: P2-3** tracks further kernel-path **`fl_authz_subsystem_check`** wiring, not contract completeness.
+**Summary:** **Contract completion** — **P0-1**–**P0-8**, **P1-1**–**P1-7**, **P2-1**–**P2-4**, **P3-1**–**P3-12** (including **`[DEFERRED]`** shards), **P4-1**–**P4-7**, **P5-1**–**P5-3**, **P6-1**–**P6-5**, **P7-1**–**P7-3**, and **P7 (batch)** are **✅** under their **`contracts/*`** bundles. **P8** onward are mostly **❌** for contracts. **Module integration** — **P0-1**–**P0-3** and **P4-1**/**P4-2** are **✅** on the current hosted/lab path; **P0-4**–**P0-8**, **P1**, **P2**, **P3**, **P4-3**–**P4-7**, and **P5** are **⚠️** or **❌** (partial enforcement, lab subset, phase gates, or not started); **P3-10**/**P3-11** integration is **❌** by design. **TODO: P2-3** tracks further kernel-path **`fl_authz_subsystem_check`** wiring, not contract completeness.
 
 ---
 
@@ -326,6 +327,8 @@ Implement **bottom-up**: **L2 (link layer)** → IPv4/UDP → TCP → sockets fa
 
 **Dependencies:** **P5-2** on a **B** or VM guest root disk assumes **P4-4** virtio-block (or another committed block transport). Hosted-only VFS bridges may ship earlier on **H**.
 
+**Module-contract snapshot:** **P5-1**–**P5-3** are **✅** for **contract completion** (**`contracts/storage/`**, **`FL_CONTRACT_P5_STORAGE_REV` 2**). See the [P0–P9 snapshot](#p0p9-module-contract-snapshot-develop).
+
 | ID | Feature | Goal | Standards & acceptance |
 |----|---------|------|---------------------------|
 | **P5-1** | **VFS layer** | Mount table, vnode/inode abstraction, path walk cache limits. | **POSIX pathconf** subset where relevant; **ELOOP** detection on symlinks if added. |
@@ -335,6 +338,8 @@ Implement **bottom-up**: **L2 (link layer)** → IPv4/UDP → TCP → sockets fa
 ---
 
 ## Phase 6 — Observability & system loggers
+
+**Module-contract snapshot:** **P6-1**–**P6-5** are **✅** for **contract completion** (**`contracts/observability/`**, **`FL_CONTRACT_P6_OBSERVABILITY_REV` 2**). See the [P0–P9 snapshot](#p0p9-module-contract-snapshot-develop).
 
 | ID | Feature | Goal | Standards & acceptance |
 |----|---------|------|---------------------------|
@@ -362,6 +367,8 @@ The **3.3.0 contracts** workstream landed FL1 history, hosted **`.fl_audit.log`*
 ---
 
 ## Phase 7 — Shell UX, ops, and packaging
+
+**Module-contract snapshot:** **P7-1**–**P7-3** and shell batch argv (**`contract_p7_shell_batch.h`**) are **✅** for **contract completion** (**`contracts/operations/`**, **`FL_CONTRACT_P7_OPERATIONS_REV` 3**). See the [P0–P9 snapshot](#p0p9-module-contract-snapshot-develop).
 
 | ID | Feature | Goal | Standards & acceptance |
 |----|---------|------|---------------------------|
