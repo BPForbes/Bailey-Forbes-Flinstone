@@ -4,3 +4,5 @@ RELEASE_VERSION=0
 PRERELEASE=1
 DEV_VERSION=1
 DESCRIPTION=PRE 4.0.0: Add **contracts/storage/** (P5), **contracts/observability/** (P6), and **contracts/operations/** (P7) placeholder trees with README stubs on branch **cursor/p5-p7-contract-subdirs-5dbc**; umbrella headers and **-I** wiring to follow.
+
+RELEASE_DATE=2026-05-18
