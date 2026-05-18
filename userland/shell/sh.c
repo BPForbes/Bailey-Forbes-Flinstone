@@ -230,8 +230,10 @@ int main(int argc, char *argv[]) {
         ssize_t n = readlink("/proc/self/exe", exe_path, sizeof(exe_path) - 1);
         if (n > 0) exe_path[n] = '\0';
 #endif
-        if (!exe_path[0] && argv[0] && argv[0][0] == '/')
+        if (!exe_path[0] && argv[0] && argv[0][0] == '/') {
             strncpy(exe_path, argv[0], sizeof(exe_path) - 1);
+            exe_path[sizeof(exe_path) - 1] = '\0';
+        }
         if (!exe_path[0])
             snprintf(exe_path, sizeof(exe_path), "./%s", "BPForbes_Flinstone_Shell");
         printf("[VM] Sandbox: %s\n", g_vm_root);

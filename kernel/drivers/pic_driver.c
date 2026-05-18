@@ -18,6 +18,7 @@
 #define ICW1_INIT 0x11
 #define ICW4_8086 0x01
 #define PIC_EOI   0x20
+#define PIC_OCW3_READ_ISR 0x0BU
 #endif
 
 typedef struct {
@@ -51,6 +52,19 @@ static void hw_init(pic_driver_t *drv) {
 
 static void hw_eoi(pic_driver_t *drv, int irq) {
     (void)drv;
+    /* Spurious IRQ handling (8259A): avoid bogus EOI on master IRQ7; on slave IRQ15
+     * send master EOI only when the slave did not really assert the interrupt. */
+    if (irq == 7) {
+        fl_ioport_out8(PIC1_CMD, PIC_OCW3_READ_ISR);
+        if ((fl_ioport_in8(PIC1_CMD) & 0x80u) == 0u)
+            return;
+    } else if (irq == 15) {
+        fl_ioport_out8(PIC2_CMD, PIC_OCW3_READ_ISR);
+        if ((fl_ioport_in8(PIC2_CMD) & 0x80u) == 0u) {
+            fl_ioport_out8(PIC1_CMD, PIC_EOI);
+            return;
+        }
+    }
     fl_ioport_out8(PIC1_CMD, PIC_EOI);
     if (irq >= 8)
         fl_ioport_out8(PIC2_CMD, PIC_EOI);
