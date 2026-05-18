@@ -1,8 +1,0 @@
-MAJOR_VERSION=4
-STANDARD_VERSION=0
-RELEASE_VERSION=0
-PRERELEASE=1
-DEV_VERSION=11
-DESCRIPTION=PRE 4.0.0: P5–P7 contract bundles wired; P7 rev 3 adds service state enum, restart storm caps, semver component bounds, prerelease tag cap, and batch argv total budget.
-
-RELEASE_DATE=2026-05-18

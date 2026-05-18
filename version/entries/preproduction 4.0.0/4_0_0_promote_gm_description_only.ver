@@ -1,8 +1,0 @@
-MAJOR_VERSION=4
-STANDARD_VERSION=0
-RELEASE_VERSION=0
-PRERELEASE=1
-DEV_VERSION=13
-DESCRIPTION=promote_preproduction_for_main.sh: GA root .ver uses DESCRIPTION (and semver / optional RELEASE_DATE) only from the GM=1 row; other preproduction .ver files are deleted with the directory; --dry-run previews without writing. ver_field_parse.sh: reject empty assignments (KEY=) for numeric and flag fields. gen_version_def.sh: any entries .ver with PRERELEASE=1 and GM=1 sets VERSION_MAJOR/STANDARD/PATCH, VERSION, and VERSION_LINE to plain A.B.C from that row (tie-break: highest semver, then DEV_VERSION); otherwise VERSION_* come from version/locked and prerelease rows drive tagged VERSION_LINE. version_merge_sim_status.sh: compare origin/develop vs origin/main or a develop worktree (preproduction dirs, GM=1 files, git porcelain); optional --check and --promote-dry-run for merge sims; --json escapes multiline output. CI: check_version_entries_semver_dev_unique.sh enforces unique (MAJOR, STANDARD, RELEASE, DEV_VERSION) across version/entries (implicit DEV_VERSION=0 when omitted). Docs: docs/versioning.md, version/*/ABOUT.txt, AGENTS.md, CLAUDE.md, .cursor/rules/versioning.mdc, .coderabbit.yaml; tests in tests/test_version_scripts.sh.
-
-RELEASE_DATE=2026-05-18
