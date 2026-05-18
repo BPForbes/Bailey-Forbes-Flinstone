@@ -133,11 +133,7 @@ void pipe_destroy(pipe_t *p) {
 }
 
 ssize_t pipe_write(pipe_t *p, const void *buf, size_t count) {
-    /* TODO(ipc): Keep pre-mutex validation limited to NULL/argument checks only.
-     * Any future reads of pipe fields (closing, len, head, tail, cap) must happen
-     * only after pthread_mutex_lock(&p->mu) (or fl_ipc_lock) to avoid TOCTOU with
-     * pipe_destroy / concurrent readers. */
-    if (!p || !buf || count == 0) {
+    if (!p) {
 #ifndef __KERNEL__
         errno = EINVAL;
 #endif
@@ -145,12 +141,19 @@ ssize_t pipe_write(pipe_t *p, const void *buf, size_t count) {
     }
 #ifdef __KERNEL__
     fl_ipc_lock(&p->lock);
+    if (!buf || count == 0) {
+        fl_ipc_unlock(&p->lock);
+        return -1;
+    }
 #else
     pthread_mutex_lock(&p->mu);
+    if (!buf || count == 0) {
+        errno = EINVAL;
+        pthread_mutex_unlock(&p->mu);
+        return -1;
+    }
     if (p->closing) {
-#ifndef __KERNEL__
         errno = EPIPE;
-#endif
         pthread_mutex_unlock(&p->mu);
         return -1;
     }
