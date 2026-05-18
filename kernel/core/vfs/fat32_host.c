@@ -16,6 +16,7 @@
 #include <fcntl.h>
 #include <stdio.h>
 #include <stdlib.h>
+#include <stdint.h>
 #include <unistd.h>
 
 Fat32HostVol g_fat32_host_vol;
@@ -101,12 +102,15 @@ int fat32_host_load_from_fd(int fd) {
     if (bps == 0 || spc == 0 || nf == 0 || tot == 0 || fat32sz == 0)
         return -1;
 
+    if (bps != 0u && (uint32_t)spc > (UINT32_MAX / (uint32_t)bps))
+        return -1;
+    uint32_t bpc = (uint32_t)bps * (uint32_t)spc;
+
     uint32_t first_data_sec = (uint32_t)rsv + (uint32_t)nf * fat32sz;
     uint32_t data_sec = tot - first_data_sec;
     uint32_t dcc = data_sec / (uint32_t)spc;
 
     /* Read root directory (one cluster) */
-    uint32_t bpc = (uint32_t)bps * (uint32_t)spc;
     uint8_t *root = malloc(bpc);
     if (!root)
         return -1;

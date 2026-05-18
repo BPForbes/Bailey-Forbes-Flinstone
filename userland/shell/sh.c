@@ -43,6 +43,7 @@
  *****************************************************************************/
 
 #include "common.h"
+#include <stdint.h>
 #include "threadpool.h"
 #include "interpreter.h"
 #include "terminal.h"
@@ -336,11 +337,27 @@ int main(int argc, char *argv[]) {
     signal(SIGINT, SIG_IGN);
     pq_init(&g_pool.pq);
     g_pool.shutting_down = 0;
-    pthread_mutex_init(&g_pool.mutex, NULL);
-    pthread_cond_init(&g_pool.cond, NULL);
+    if (pthread_mutex_init(&g_pool.mutex, NULL) != 0) {
+        fprintf(stderr, "pthread_mutex_init: %s\n", strerror(errno));
+        exit(1);
+    }
+    if (pthread_cond_init(&g_pool.cond, NULL) != 0) {
+        pthread_mutex_destroy(&g_pool.mutex);
+        fprintf(stderr, "pthread_cond_init: %s\n", strerror(errno));
+        exit(1);
+    }
 #ifndef BATCH_SINGLE_THREAD
     for (int i = 0; i < NUM_WORKERS; i++) {
-        pthread_create(&g_pool.workers[i], NULL, worker_thread, NULL);
+        if (pthread_create(&g_pool.workers[i], NULL, worker_thread, NULL) != 0) {
+            g_pool.shutting_down = 1;
+            pthread_cond_broadcast(&g_pool.cond);
+            for (int j = 0; j < i; j++)
+                pthread_join(g_pool.workers[j], NULL);
+            pthread_cond_destroy(&g_pool.cond);
+            pthread_mutex_destroy(&g_pool.mutex);
+            fprintf(stderr, "pthread_create: %s\n", strerror(errno));
+            exit(1);
+        }
     }
 #endif
     if (original_stdout_fd < 0) {
@@ -478,8 +495,21 @@ int main(int argc, char *argv[]) {
             }
             if (tokensCount == 0) { i++; continue; }
             size_t totalLen = 0;
-            for (int k = i; k < i + tokensCount; k++)
-                totalLen += strlen(argv[k]) + 1;
+            int overflow = 0;
+            for (int k = i; k < i + tokensCount; k++) {
+                size_t sl = strlen(argv[k]);
+                size_t add = sl + 1;
+                if (totalLen > SIZE_MAX - add) {
+                    overflow = 1;
+                    break;
+                }
+                totalLen += add;
+            }
+            if (overflow || totalLen > SIZE_MAX - 1) {
+                fprintf(stderr, "batch: command length overflow, skipping tokens\n");
+                i += tokensCount;
+                continue;
+            }
             char *commandStr = malloc(totalLen + 1);
             if (!commandStr) { i += tokensCount; continue; }
             commandStr[0] = '\0';

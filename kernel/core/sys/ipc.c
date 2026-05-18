@@ -347,6 +347,9 @@ int msgq_send(msgq_t *q, const void *msg, size_t size) {
 
 int msgq_receive(msgq_t *q, void *msg, size_t size, uint64_t timeout_ms) {
     if (!q || !msg || size == 0) {
+#ifndef __KERNEL__
+        errno = EINVAL;
+#endif
         return -1;
     }
 #ifdef __KERNEL__
@@ -355,11 +358,17 @@ int msgq_receive(msgq_t *q, void *msg, size_t size, uint64_t timeout_ms) {
 #else
     pthread_mutex_lock(&q->mu);
     if (q->closing) {
+#ifndef __KERNEL__
+        errno = EPIPE;
+#endif
         pthread_mutex_unlock(&q->mu);
         return -1;
     }
     if (q->len == 0) {
         if (timeout_ms == 0) {
+#ifndef __KERNEL__
+            errno = EAGAIN;
+#endif
             pthread_mutex_unlock(&q->mu);
             return -1;
         }
@@ -371,16 +380,25 @@ int msgq_receive(msgq_t *q, void *msg, size_t size, uint64_t timeout_ms) {
             q->waiters--;
             pthread_cond_signal(&q->drain);
             if (rc == ETIMEDOUT) {
+#ifndef __KERNEL__
+                errno = ETIMEDOUT;
+#endif
                 pthread_mutex_unlock(&q->mu);
                 return -1;
             }
             if (rc != 0) {
+#ifndef __KERNEL__
+                errno = rc;
+#endif
                 pthread_mutex_unlock(&q->mu);
                 return -1;
             }
         }
     }
     if (q->closing && q->len == 0) {
+#ifndef __KERNEL__
+        errno = EPIPE;
+#endif
         pthread_mutex_unlock(&q->mu);
         return -1;
     }
@@ -389,6 +407,7 @@ int msgq_receive(msgq_t *q, void *msg, size_t size, uint64_t timeout_ms) {
 #ifdef __KERNEL__
         fl_ipc_unlock(&q->lock);
 #else
+        errno = EAGAIN;
         pthread_mutex_unlock(&q->mu);
 #endif
         return -1;

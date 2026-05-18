@@ -6,6 +6,7 @@
 #include <stdlib.h>
 #include <string.h>
 #include <errno.h>
+#include <stdint.h>
 #include <sys/stat.h>
 #include <dirent.h>
 #include <unistd.h>
@@ -236,12 +237,15 @@ void import_text_drive(const char *textFile, const char *dest_disk, int override
                 free(linesStorage[i]);
         return;
     }
-    char *ruler = malloc(clusterSz * 2 + 1);
+    char *ruler = NULL;
+    size_t cs = (size_t)clusterSz;
+    if (cs <= (SIZE_MAX - 1u) / 2u)
+        ruler = malloc(cs * 2u + 1u);
     if (ruler) {
         const char *digits = "0123456789ABCDEF";
-        for (int j = 0; j < clusterSz * 2; j++)
-            ruler[j] = digits[j % 16];
-        ruler[clusterSz * 2] = '\0';
+        for (size_t j = 0; j < cs * 2u; j++)
+            ruler[j] = digits[(int)(j % 16u)];
+        ruler[cs * 2u] = '\0';
         fprintf(out, "XX:%s\n", ruler);
         free(ruler);
     }
@@ -249,11 +253,13 @@ void import_text_drive(const char *textFile, const char *dest_disk, int override
         if (linesStorage[c])
             fprintf(out, "%02X:%s\n", c, linesStorage[c]);
         else {
-            char *zeros = malloc(clusterSz * 2 + 1);
+            char *zeros = NULL;
+            if (cs <= (SIZE_MAX - 1u) / 2u)
+                zeros = malloc(cs * 2u + 1u);
             if (zeros) {
-                for (int i = 0; i < clusterSz * 2; i++)
+                for (size_t i = 0; i < cs * 2u; i++)
                     zeros[i] = '0';
-                zeros[clusterSz * 2] = '\0';
+                zeros[cs * 2u] = '\0';
                 fprintf(out, "%02X:%s\n", c, zeros);
                 free(zeros);
             }

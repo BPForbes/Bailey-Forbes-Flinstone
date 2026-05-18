@@ -61,7 +61,9 @@ static void test_msgq_syscalls(void) {
     struct timespec t0;
     struct timespec t1;
     clock_gettime(CLOCK_MONOTONIC, &t0);
+    errno = 0;
     assert(fl_syscall_dispatch(FL_SYS_MSGQ_RECV, (uintptr_t)h, (uintptr_t)out, sizeof(out), 5) == -1);
+    assert(errno == ETIMEDOUT);
     clock_gettime(CLOCK_MONOTONIC, &t1);
     {
         long long sec = (long long)(t1.tv_sec - t0.tv_sec);
@@ -123,8 +125,10 @@ static void test_msgq_empty_receive_times_out(void) {
     const uint64_t timeout_ms = 5;
 
     assert(q);
+    errno = 0;
     clock_gettime(CLOCK_MONOTONIC, &start);
     assert(msgq_receive(q, out, sizeof(out), timeout_ms) == -1);
+    assert(errno == ETIMEDOUT);
     clock_gettime(CLOCK_MONOTONIC, &end);
     {
         long long sec = (long long)(end.tv_sec - start.tv_sec);
@@ -144,6 +148,25 @@ static void test_msgq_empty_receive_times_out(void) {
     msgq_destroy(q);
 }
 
+static void test_msgq_receive_sets_errno(void) {
+    msgq_t *q = msgq_create(1, 8);
+    char out[8] = {0};
+    assert(q);
+    errno = 0;
+    assert(msgq_receive(NULL, out, sizeof(out), 0) == -1);
+    assert(errno == EINVAL);
+    errno = 0;
+    assert(msgq_receive(q, NULL, sizeof(out), 0) == -1);
+    assert(errno == EINVAL);
+    errno = 0;
+    assert(msgq_receive(q, out, 0, 0) == -1);
+    assert(errno == EINVAL);
+    errno = 0;
+    assert(msgq_receive(q, out, sizeof(out), 0) == -1);
+    assert(errno == EAGAIN);
+    msgq_destroy(q);
+}
+
 static void test_msgq_create_rejects_size_overflow(void) {
     assert(msgq_create(SIZE_MAX, 2) == NULL);
 }
@@ -155,6 +178,7 @@ int main(void) {
     test_msgq_full_send_returns_eagain();
     test_syscall_rejects_wrong_handle_type();
     test_msgq_empty_receive_times_out();
+    test_msgq_receive_sets_errno();
     test_msgq_create_rejects_size_overflow();
     puts("userspace connection tests: OK");
     return 0;
