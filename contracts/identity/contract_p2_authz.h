@@ -16,6 +16,9 @@
  *   - Deny-by-default for **guest** on privileged **FL_AUTHZ_OP_*** checks once wired.
  *   - Log denies and allows per **P6** expectations when audit sinks are active.
  *
+ * **Hosted enforcement:** **fl/authz_subsystem.h** implements **fl_authz_subsystem_check**
+ * for subsystem ops; **fl/shell_authz.h** covers shell builtins and foreign **execvp**.
+ *
  * See **docs/ROADMAP.md** Phase 2 and **P2 → P3** gate notes.
  */
 #ifndef FL_CONTRACT_P2_AUTHZ_H

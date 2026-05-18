@@ -9,6 +9,7 @@
  *     (`stdatomic.h` vs explicit arch fences)—do not invent ad-hoc atomics.
  *   - Ordering must remain compatible with future **P9-3** SMP (IPI boundaries), even
  *     if current builds are single-core.
+ *   - Lock acquisition failures that surface to callers use **`fl_result_t`** (**P0-2**).
  *
  * See **docs/ROADMAP.md** Phase 1; **Appendix D** execution rows for spinlock races.
  */

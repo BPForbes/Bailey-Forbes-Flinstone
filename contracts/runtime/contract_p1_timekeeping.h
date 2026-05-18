@@ -10,6 +10,8 @@
  *     so **P3-7** (TCP RTO), **P3-9** (TLS time checks), and **P6** timestamps share a
  *     single declared source.
  *   - Optional **RFC 5905** (NTP) on **H** is lab-only and not an **A2** gate.
+ *   - Timer setup failures on **B** or **K** paths return **`fl_result_t`** (**P0-2**) where
+ *     the API is fallible (distinct from **P0-5** tick observability checks).
  *
  * See **docs/ROADMAP.md** Phase 1; tie-ins to **P1-1** scheduling assumptions.
  */

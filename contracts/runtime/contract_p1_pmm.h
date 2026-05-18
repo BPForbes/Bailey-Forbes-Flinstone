@@ -7,6 +7,7 @@
  *     libc **`aligned_alloc`** as a “page” where the PMM contract applies.
  *   - **Appendix D** §3.3 and execution row **11** govern stress and visibility of
  *     free-frame accounting.
+ *   - **`pmm_alloc_frame`** / **`pmm_free_frame`** report **`fl_result_t`** (**P0-2**).
  *
  * This header names the API contract; implementation lives in **pmm.c**.
  */

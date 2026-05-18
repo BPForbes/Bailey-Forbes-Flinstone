@@ -338,8 +338,8 @@ The **3.3.0 contracts** workstream landed FL1 history, hosted **`.fl_audit.log`*
 
 | TODO tag | Recommendation (review / tool source) |
 |----------|---------------------------------------|
-| **TODO: P2-3** | **Authorization middleware** is still mostly **contract + hooks**, not full enforcement: wire central **`can_*`** checks before FileManager, netdev, and mount; add **≥3** unit tests that deny a guest principal on privileged ops; ensure **audit log entries on deny and allow** (not only post-command `fl_audit_shell_completed`). |
-| **TODO: P0-2** | Optional: define **`FL_RESULT_MIN` / `FL_RESULT_MAX`** (or an allow-list) and reject out-of-range **`rc`** in **`fl_history_record_unpack_cmd`** JSON metadata if policy wants strict codes only (CodeRabbit discussion). |
+| **TODO: P2-3** | **Partial (hosted):** **`fl/authz_subsystem.h`** gates **`FL_AUTHZ_OP_***` for guest principals; shell builtins + foreign **exec** use **`fl/shell_authz.h`** with **audit on allow and deny**; CUnit guest deny suite + **`test_invariants`** subsystem denies (**≥3** ops). **Still open:** wire **`fl_authz_subsystem_check`** at FileManager / netdev / mount entry points in kernel paths as those surfaces land. |
+| ~~**TODO: P0-2**~~ | **Done:** **`FL_RESULT_MIN` / `FL_RESULT_MAX`** alias **`FL_RESULT_JSON_RC_*`**; **`fl_history_record_unpack_cmd`** rejects out-of-range **`rc`**; **P1**–**P4** contract shards cross-reference **P0-2** where fallible. |
 | **TODO: P6-4** | **`audit show N` contract:** document any **residual limits** (memory growth for very large **N** on huge logs) or add hard caps / streaming so operator expectations stay aligned with implementation. |
 | **TODO: P7 (shell batch)** | Add an **automated regression** that batch argv **`contracts audit show 5`** runs **`contracts`** (default), then **`audit`**, not a merged `contracts audit` token (Codex). |
 | **TODO: P6-2** | In-memory **ring-buffer** log sink (`dmesg`-style, drop counters) per phase table (CodeRabbit roadmap gap). |

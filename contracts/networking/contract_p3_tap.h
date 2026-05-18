@@ -8,7 +8,12 @@
  * raw I/O uses **FL_AUTHZ_OP_NETDEV_IO** (**contract_p3_trust.h**). Shell elevation
  * (**P2-4**) is a separate include when wiring UX.
  *
- * **CI:** **P0-3** — document **SKIP_TAP=1** when runners lack **CAP_NET_ADMIN**.
+ * **CI:** **P0-3** — when the runner lacks **CAP_NET_ADMIN**, set
+ * **FL_CONTRACT_P0_CI_SKIP_TAP_ENV_NAME** to **FL_CONTRACT_P0_CI_SKIP_TAP_VALUE** and
+ * log the skip rationale (do not treat missing privilege as a silent pass).
+ *
+ * **Errors:** TAP open/read/write failures return **`fl_result_t`** (**P0-2**), typically
+ * **FL_RESULT_ACCES** when **P2-3** denies **FL_AUTHZ_OP_NETDEV_REGISTER**.
  */
 #ifndef FL_CONTRACT_P3_TAP_H
 #define FL_CONTRACT_P3_TAP_H
