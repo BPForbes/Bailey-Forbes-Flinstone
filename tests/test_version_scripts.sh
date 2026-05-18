@@ -1419,6 +1419,84 @@ promote_script() {
   echo "$fake_root/scripts/promote_preproduction_for_main.sh"
 }
 
+test_promote_dry_run_keeps_preproduction() {
+  require_proc_sub "promote: --dry-run leaves preproduction tree unchanged" || return 0
+  local d out
+  d="$(make_fake_repo promote_preproduction_for_main.sh)"
+  mkdir -p "$d/version/entries/preproduction 2.0.0"
+  cat >"$d/version/entries/preproduction 2.0.0/ship.ver" <<'VER'
+MAJOR_VERSION=2
+STANDARD_VERSION=0
+RELEASE_VERSION=0
+PRERELEASE=1
+GM=1
+DEV_VERSION=1
+DESCRIPTION=go main
+VER
+  out=$(bash "$(promote_script "$d")" --dry-run 2>&1) || true
+  if [[ ! -d "$d/version/entries/preproduction 2.0.0" ]]; then
+    fail "promote dry-run: preproduction dir should remain"
+  elif [[ -e "$d/version/entries/ship.ver" ]]; then
+    fail "promote dry-run: root GA .ver should not be written"
+  elif ! echo "$out" | grep -q '\[dry-run\]'; then
+    fail "promote dry-run: expected [dry-run] lines in output"
+  else
+    ok "promote: --dry-run previews without writing"
+  fi
+  cleanup "$d"
+}
+
+merge_sim_script() {
+  local fake_root="$1"
+  echo "$fake_root/scripts/version_merge_sim_status.sh"
+}
+
+test_merge_sim_ref_lists_preproduction() {
+  require_proc_sub "merge_sim: ref scan lists preproduction dir" || return 0
+  local d out
+  d="$(mktemp -d)"
+  mkdir -p "$d/scripts/lib" "$d/version/entries/preproduction 4.0.0"
+  cp "$REPO_ROOT/scripts/lib/ver_field_parse.sh" "$d/scripts/lib/"
+  cp "$REPO_ROOT/scripts/version_merge_sim_status.sh" "$d/scripts/"
+  write_ver_prerelease "$d/version/entries/preproduction 4.0.0/a.ver" 4 0 0 1
+  (
+    cd "$d"
+    git init -q
+    git add .
+    git -c user.email=t@test -c user.name=t commit -q -m init
+  )
+  out=$(bash "$(merge_sim_script "$d")" --develop HEAD --main HEAD 2>&1)
+  if echo "$out" | grep -q 'preproduction_dirs: version/entries/preproduction 4.0.0'; then
+    ok "merge_sim: develop ref lists preproduction directory"
+  else
+    fail "merge_sim: expected preproduction dir in ref output, got: $out"
+  fi
+  cleanup "$d"
+}
+
+test_merge_sim_promote_dry_run_via_status() {
+  require_proc_sub "merge_sim: --promote-dry-run runs promote preview" || return 0
+  local d out
+  d="$(make_fake_repo promote_preproduction_for_main.sh version_merge_sim_status.sh)"
+  mkdir -p "$d/version/entries/preproduction 3.0.0"
+  cat >"$d/version/entries/preproduction 3.0.0/x.ver" <<'VER'
+MAJOR_VERSION=3
+STANDARD_VERSION=0
+RELEASE_VERSION=0
+PRERELEASE=1
+GM=1
+DEV_VERSION=1
+DESCRIPTION=sim
+VER
+  out=$(bash "$(merge_sim_script "$d")" --promote-dry-run 2>&1) || true
+  if echo "$out" | grep -q 'promote dry-run' && echo "$out" | grep -q '\[dry-run\]'; then
+    ok "merge_sim: --promote-dry-run delegates to promote script"
+  else
+    fail "merge_sim: expected promote dry-run section in output"
+  fi
+  cleanup "$d"
+}
+
 test_promote_malformed_gm_suffix_aborts() {
   require_proc_sub "promote: GM=1foo aborts without deleting preproduction" || return 0
   local d
@@ -1500,7 +1578,12 @@ test_layout_malformed_prerelease_suffix_rejected
 test_layout_malformed_gm_suffix_rejected
 
 # promote_preproduction_for_main.sh
+test_promote_dry_run_keeps_preproduction
 test_promote_malformed_gm_suffix_aborts
+
+# version_merge_sim_status.sh
+test_merge_sim_ref_lists_preproduction
+test_merge_sim_promote_dry_run_via_status
 
 # check_version_entries_semver_dev_unique.sh
 test_unique_empty_entries

@@ -9,6 +9,10 @@
 # finalize_version_locked.sh does not copy preproduction */ into locked; locked may lack
 # the folder until a prior manual copy — this script still cleans locked if present.
 set -euo pipefail
+DRY_RUN=0
+for arg in "$@"; do
+  [[ "$arg" == --dry-run ]] && DRY_RUN=1
+done
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 # shellcheck source=lib/ver_field_parse.sh
@@ -98,6 +102,12 @@ promote_root() {
       exit 1
     fi
 
+    if (( DRY_RUN )); then
+      echo "promote_preproduction_for_main: [dry-run] would write $dest from $gm_file (GA, DESCRIPTION from GM=1 file only)"
+      echo "promote_preproduction_for_main: [dry-run] would remove $dir/*.ver and delete $dir"
+      continue
+    fi
+
     {
       printf 'MAJOR_VERSION=%s\n' "$m"
       printf 'STANDARD_VERSION=%s\n' "$s"
@@ -121,4 +131,8 @@ promote_root() {
 
 promote_root "$ROOT/version/entries"
 promote_root "$ROOT/version/locked"
-echo "promote_preproduction_for_main: done"
+if (( DRY_RUN )); then
+  echo "promote_preproduction_for_main: dry-run complete (no files changed)"
+else
+  echo "promote_preproduction_for_main: done"
+fi
