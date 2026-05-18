@@ -2,8 +2,8 @@ MAJOR_VERSION=4
 STANDARD_VERSION=0
 RELEASE_VERSION=0
 PRERELEASE=1
-DEV_VERSION=1
-GM=0
+DEV_VERSION=14
+GM=1
 DESCRIPTION=Date stamp policy: we date DEV-version .ver rows just before we move them into the preproduction directory. For merges (e.g. cursor/*), upload those .ver files at version/entries/ outside preproduction A.B.C/; GitHub Actions stamps RELEASE_DATE if missing at the root, then moves them into preproduction A.B.C/. Major release 4.0.0 after 3.3.0: treat the prior 3.3 line as superseded by this milestone semver. Repository policy no longer requires CodeRabbit or Codex CLIs, install attempts, triage gates, or a no-push rule tied to those tools; use normal GitHub review and optional integrations the maintainers enable. Bump DEV_VERSION with ./scripts/bump_dev_version.sh; set GM=1 on exactly one row when ready, then ./scripts/promote_preproduction_for_main.sh before merging version trees to main.
 
 RELEASE_DATE=2026-05-13
