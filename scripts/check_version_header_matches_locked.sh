@@ -23,6 +23,7 @@ trap 'rm -f "$tmp"' EXIT
 if ! cmp -s "$tmp" "$DEF"; then
   echo "error: $DEF is out of date relative to gen_version_def.sh (locked + entries)" >&2
   echo "Run: ./scripts/gen_version_def.sh (after finalize_version_locked.sh if needed)" >&2
+  echo "AI: do not hand-edit VERSION_* / VERSION_LINE or commit header updates for GM=1 alone — GitHub Actions (c-cpp.yml, version-lock-on-merge) runs gen_version_def.sh." >&2
   echo "On same-repo feature branches, CI (c-cpp.yml versioning job) relocates .ver, regenerates this file, and pushes one commit — no hand commit needed; re-run checks after that bot push." >&2
   echo "Fork PRs: run relocate + gen_version_def.sh locally and push. develop/main: Version lock on merge publishes locked + header." >&2
   exit 1
