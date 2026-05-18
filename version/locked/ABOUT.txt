@@ -62,8 +62,8 @@ PRERELEASE / GM / DEV_VERSION / preproduction directories (VERSION uses locked; 
   DEV_VERSION between iterations with ./scripts/bump_dev_version.sh, or add another *.ver
   at the version/entries/ root with the same MAJOR/STANDARD/RELEASE, PRERELEASE=1, and
   the next DEV_VERSION (e.g. DEV_VERSION=1 then DEV_VERSION=2); relocate moves each row
-  into the same preproduction <A>.<B>.<C>/ so promotion still rolls up every file in
-  DEV_VERSION order.
+  into the same preproduction <A>.<B>.<C>/ so maintainers can review the full train before
+  promotion; the shipped GA .ver from promote uses the GM=1 row's DESCRIPTION only.
 
   AI / automation (no semver backtracking): the preproduction version is the A.B.C
   in directory names
@@ -82,10 +82,11 @@ PRERELEASE / GM / DEV_VERSION / preproduction directories (VERSION uses locked; 
 
   When you are ready to cut main: set GM=1 on exactly one .ver in that folder, then run
   ./scripts/promote_preproduction_for_main.sh (or make promote-preproduction-for-main).
-  That script sorts every *.ver in the folder by DEV_VERSION ascending, builds one new
-  root *.ver (basename from the GM=1 file) whose DESCRIPTION itemizes each source row,
-  omits PRERELEASE/GM/DEV_VERSION entirely, and deletes the entire preproduction directory
-  from version/entries (and from version/locked only if a legacy copy existed there).
+  That script builds one new root *.ver (basename from the GM=1 file) whose DESCRIPTION
+  is copied only from that GM=1 row (semver and optional RELEASE_DATE also come from it),
+  omits PRERELEASE/GM/DEV_VERSION entirely, removes every *.ver in the preproduction folder,
+  and deletes the entire preproduction directory from version/entries (and from
+  version/locked only if a legacy copy existed there).
   finalize_version_locked.sh does not copy preproduction */ into locked, so the published
   tree normally only gains the merged root .ver after promotion, then the next finalize
   copies that file into version/locked/.

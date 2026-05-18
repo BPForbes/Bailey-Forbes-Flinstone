@@ -1,9 +1,10 @@
 #!/usr/bin/env bash
 # Promote preproduction A.B.C/ directories that contain exactly one GM=1 .ver:
-#   - Sort every *.ver in that folder by DEV_VERSION ascending.
-#   - Build one new root GA .ver (basename from the GM=1 file) whose DESCRIPTION itemizes
-#     each source file's description (DEV_VERSION order), with no PRERELEASE, GM, or DEV_VERSION keys.
-#   - Remove the entire preproduction directory (and from locked only if it existed there).
+#   - Require exactly one GM=1 among *.ver in that folder.
+#   - Build one new root GA .ver (basename from the GM=1 file) whose DESCRIPTION is
+#     copied only from that GM=1 file (not a roll-up of other rows), with no PRERELEASE,
+#     GM, or DEV_VERSION keys.
+#   - Remove every *.ver in the preproduction directory, then remove the directory.
 #
 # finalize_version_locked.sh does not copy preproduction */ into locked; locked may lack
 # the folder until a prior manual copy — this script still cleans locked if present.
@@ -76,30 +77,9 @@ promote_root() {
     fi
     [[ -n "$gm_file" ]] || continue
 
-    local sort_tmp
-    sort_tmp=$(mktemp)
-    shopt -s nullglob
-    for vf in "$dir"/*.ver; do
-      [[ -f "$vf" ]] || continue
-      dv=$(get_field DEV_VERSION "$vf")
-      [[ -n "$dv" ]] || dv=0
-      printf '%s\t%s\n' "$dv" "$vf"
-    done | sort -t $'\t' -k1,1n >"$sort_tmp"
-    shopt -u nullglob
-
     local agg delim="PROMOTE_DESC_END"
-    agg=""
-    while IFS=$'\t' read -r dv fpath; do
-      [[ -f "$fpath" ]] || continue
-      local one
-      one=$(extract_description "$fpath")
-      one=${one//$'\r'/}
-      if [[ -n "$agg" ]]; then
-        agg+=$'\n'
-      fi
-      agg+="- (DEV_VERSION ${dv}) ${one}"
-    done <"$sort_tmp"
-    rm -f "$sort_tmp"
+    agg=$(extract_description "$gm_file")
+    agg=${agg//$'\r'/}
 
     local dest="$BASE/$(basename "$gm_file")"
     if [[ -e "$dest" ]]; then
@@ -136,7 +116,7 @@ promote_root() {
       echo "promote_preproduction_for_main: could not remove $dir (non-.ver files present?)" >&2
       exit 1
     fi
-    echo "promote_preproduction_for_main: promoted $(basename "$gm_file") from $dir → $(basename "$dest") (GA, aggregated DESCRIPTION)"
+    echo "promote_preproduction_for_main: promoted $(basename "$gm_file") from $dir → $(basename "$dest") (GA, DESCRIPTION from GM=1 file only)"
   done < <(find "$BASE" -mindepth 1 -maxdepth 1 -type d -name 'preproduction *' -print0 2>/dev/null)
 }
 
