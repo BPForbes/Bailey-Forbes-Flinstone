@@ -20,10 +20,14 @@ jobs:
     permissions:
       contents: write
     steps:
+      # pull_request default ref is refs/pull/N/merge. Relocate + gen_version_def + bot push
+      # must run on the real head branch so Actions can commit VERSION_* / VERSION_LINE updates
+      # to github.head_ref (not the synthetic merge commit).
       - uses: actions/checkout@v4
         with:
           fetch-depth: 0
           token: ${{ secrets.BPFORBES_PAT || secrets.VERSION_LOCK_PAT || secrets.GITHUB_TOKEN }}
+          ref: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name == github.repository && github.head_ref || github.ref }}
 
       - name: Block fork PR when root PRERELEASE=1 needs automated relocate
         if: github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name != github.repository

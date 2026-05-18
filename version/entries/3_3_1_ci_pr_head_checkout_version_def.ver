@@ -1,0 +1,4 @@
+MAJOR_VERSION=3
+STANDARD_VERSION=3
+RELEASE_VERSION=1
+DESCRIPTION=CI: checkout same-repo pull_request head ref in version-requirements so relocate + gen_version_def.sh + bot push update the real PR branch (userland/shell/version_def.h VERSION_* and VERSION_LINE), not refs/pull/*/merge.
