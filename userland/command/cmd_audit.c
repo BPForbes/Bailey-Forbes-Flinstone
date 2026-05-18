@@ -1,6 +1,7 @@
 #include "cmd_decl.h"
 #include "common.h"
 #include "fl/audit_log.h"
+#include "contract_p6_audit_trail.h"
 #include "fs_jail.h"
 #include <stdio.h>
 #include <stdlib.h>
@@ -16,13 +17,14 @@ static void print_audit_help(void) {
         "host sandbox when jail mode is active; see fl/jail_contract.h).\n"
         "\n"
         "Commands:\n"
-        "  show [N]   Print the last N lines (default 32, N in 1..10000). For very\n"
+        "  show [N]   Print the last N lines (default %d, N in 1..%u). For very\n"
         "             large logs, only the last 2 MiB is scanned for the tail, so\n"
         "             fewer than N lines may appear if newlines are sparse.\n"
         "  ring       Print the in-memory ring buffer (drops counter); see **P6-2**.\n"
         "  path       Show relative log path and whether the fs jail is active\n"
         "  --help     Show this message\n",
-        FL_AUDIT_ENV, FL_AUDIT_REL_DEFAULT);
+        FL_AUDIT_ENV, FL_AUDIT_REL_DEFAULT,
+        FL_CONTRACT_P6_AUDIT_SHOW_N_DEFAULT, FL_CONTRACT_P6_AUDIT_SHOW_N_MAX);
 }
 
 int cmd_audit_run(int argc, char **argv) {
@@ -52,7 +54,7 @@ int cmd_audit_run(int argc, char **argv) {
     }
 
     if (argc >= 2 && !strcmp(argv[1], "show")) {
-        int n = 32;
+        int n = (int)FL_CONTRACT_P6_AUDIT_SHOW_N_DEFAULT;
         if (argc >= 3) {
             char *endptr;
             long val = strtol(argv[2], &endptr, 10);
@@ -60,8 +62,9 @@ int cmd_audit_run(int argc, char **argv) {
                 fprintf(stderr, "audit: invalid number '%s'\n", argv[2]);
                 return 1;
             }
-            if (val <= 0 || val > 10000) {
-                fprintf(stderr, "audit: N must be in range 1..10000\n");
+            if (val <= 0 || val > (long)FL_CONTRACT_P6_AUDIT_SHOW_N_MAX) {
+                fprintf(stderr, "audit: N must be in range 1..%u\n",
+                        (unsigned)FL_CONTRACT_P6_AUDIT_SHOW_N_MAX);
                 return 1;
             }
             n = (int)val;

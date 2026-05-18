@@ -41,6 +41,9 @@ target_include_directories(kernel PUBLIC
     ${CMAKE_SOURCE_DIR}/contracts/foundations
     ${CMAKE_SOURCE_DIR}/contracts/runtime
     ${CMAKE_SOURCE_DIR}/contracts/identity
+    ${CMAKE_SOURCE_DIR}/contracts/storage
+    ${CMAKE_SOURCE_DIR}/contracts/observability
+    ${CMAKE_SOURCE_DIR}/contracts/operations
 )
 
 # Link libraries

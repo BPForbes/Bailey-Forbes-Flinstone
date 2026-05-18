@@ -3,6 +3,7 @@ Phase-specific contract trees (preferred layout):
   P2 → ../identity/
   P3 → ../networking/  (umbrella: contract_networking.h; see README there)
   P4 → ../drivers/     (umbrella: contract_drivers.h; see README there)
+  P5 → ../storage/   (umbrella: contract_storage.h; see README there)
 
 This *extensions* directory is for cross-cutting optional helpers or small shared
 pieces that do not belong to a single phase tree. Each header here should still

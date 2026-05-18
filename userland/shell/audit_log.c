@@ -1,4 +1,5 @@
 #include "fl/audit_log.h"
+#include "contract_p6_audit_trail.h"
 #include "contract_asm.h"
 #include "contract_imm.h"
 #include "contract_log_dispatch.h"
@@ -287,11 +288,13 @@ int fl_audit_show_last_lines(int n) {
     }
 
     enum { AUDIT_READ_MAX = 256 * 1024 };
-    enum { AUDIT_TAIL_BYTES_MAX = 2 * 1024 * 1024 };
-    const long read_floor = (sz > (long)AUDIT_TAIL_BYTES_MAX) ? (sz - (long)AUDIT_TAIL_BYTES_MAX) : 0L;
+    const long read_floor =
+        (sz > (long)FL_CONTRACT_P6_AUDIT_TAIL_SCAN_BYTES_MAX)
+            ? (sz - (long)FL_CONTRACT_P6_AUDIT_TAIL_SCAN_BYTES_MAX)
+            : 0L;
     if (read_floor > 0)
-        printf("(audit show: scanning last %d MiB of log for tail; file is larger)\n",
-               (int)(AUDIT_TAIL_BYTES_MAX / (1024 * 1024)));
+        printf("(audit show: scanning last %u MiB of log for tail; file is larger)\n",
+               (unsigned)(FL_CONTRACT_P6_AUDIT_TAIL_SCAN_BYTES_MAX / (1024u * 1024u)));
 
     size_t to_read = 0;
     char *buf = NULL;

@@ -3,17 +3,13 @@
 #define FL_AUDIT_LOG_H
 
 #include "contract.h"
+#include "contract_p6_audit_trail.h"
+#include "contract_p6_ring_buffer.h"
 #include <stddef.h>
 
 #ifdef __cplusplus
 extern "C" {
 #endif
-
-#define FL_AUDIT_REL_DEFAULT ".fl_audit.log"
-#define FL_AUDIT_ENV "FL_AUDIT"
-
-/** Max bytes of ring payload (line + newline); `audit_log.c` stores **FL_RING_LOG_CAPACITY+1** bytes including trailing NUL. */
-#define FL_RING_LOG_CAPACITY 8192u
 
 void fl_audit_set_sink(fl_log_sink_t *sink);
 void fl_audit_shell_completed(const char *cmd_line, int host_exit_code);

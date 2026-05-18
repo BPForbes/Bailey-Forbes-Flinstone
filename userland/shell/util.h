@@ -23,7 +23,7 @@ FILE *history_fopen_read(char tmp_staging[HISTORY_STAGING_PATH_SZ]);
 /* Remove persisted history (FAT32 volume file and/or legacy host file). Returns 0 on success, -1 on error. */
 int delete_history_storage(void);
 
-/** Batch argv grouping for `contracts` / `audit` (see **P7** in docs/ROADMAP.md). */
+/** Batch argv grouping for `contracts` / `audit` (see **contract_p7_shell_batch.h**). */
 int fl_batch_contracts_tokens_count(int argc, char **argv, int i);
 int fl_batch_audit_tokens_count(int argc, char **argv, int i);
 
