@@ -349,8 +349,10 @@ int main(int argc, char *argv[]) {
 #ifndef BATCH_SINGLE_THREAD
     for (int i = 0; i < NUM_WORKERS; i++) {
         if (pthread_create(&g_pool.workers[i], NULL, worker_thread, NULL) != 0) {
+            pthread_mutex_lock(&g_pool.mutex);
             g_pool.shutting_down = 1;
             pthread_cond_broadcast(&g_pool.cond);
+            pthread_mutex_unlock(&g_pool.mutex);
             for (int j = 0; j < i; j++)
                 pthread_join(g_pool.workers[j], NULL);
             pthread_cond_destroy(&g_pool.cond);

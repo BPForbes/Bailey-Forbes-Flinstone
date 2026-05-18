@@ -33,7 +33,7 @@ void msgq_destroy(msgq_t *msgq);
  * Returns 0 on success, -1 on failure.
  */
 int msgq_send(msgq_t *msgq, const void *msg, size_t size);
-/* Host: EINVAL invalid args; EPIPE closing; EAGAIN no message (timeout_ms==0); ETIMEDOUT wait timed out. */
+/* Host: EINVAL invalid args; EPIPE closing; EAGAIN no message (timeout_ms==0); ETIMEDOUT only if still empty after timed wait (avoids false timeout when a message arrives at the deadline edge). */
 int msgq_receive(msgq_t *msgq, void *msg, size_t size, uint64_t timeout_ms);
 
 #ifdef __cplusplus

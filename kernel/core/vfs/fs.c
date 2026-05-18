@@ -253,16 +253,28 @@ void import_text_drive(const char *textFile, const char *dest_disk, int override
         if (linesStorage[c])
             fprintf(out, "%02X:%s\n", c, linesStorage[c]);
         else {
-            char *zeros = NULL;
-            if (cs <= (SIZE_MAX - 1u) / 2u)
-                zeros = malloc(cs * 2u + 1u);
-            if (zeros) {
-                for (size_t i = 0; i < cs * 2u; i++)
-                    zeros[i] = '0';
-                zeros[cs * 2u] = '\0';
-                fprintf(out, "%02X:%s\n", c, zeros);
-                free(zeros);
+            if (cs > (SIZE_MAX - 1u) / 2u) {
+                fprintf(stderr, "import_text_drive: cluster size overflow for zero-fill buffer\n");
+                fclose(out);
+                for (int i = 0; i < 65536; i++)
+                    if (linesStorage[i])
+                        free(linesStorage[i]);
+                return;
             }
+            char *zeros = malloc(cs * 2u + 1u);
+            if (!zeros) {
+                fprintf(stderr, "import_text_drive: out of memory for zero-fill buffer\n");
+                fclose(out);
+                for (int i = 0; i < 65536; i++)
+                    if (linesStorage[i])
+                        free(linesStorage[i]);
+                return;
+            }
+            for (size_t i = 0; i < cs * 2u; i++)
+                zeros[i] = '0';
+            zeros[cs * 2u] = '\0';
+            fprintf(out, "%02X:%s\n", c, zeros);
+            free(zeros);
         }
     }
     fclose(out);

@@ -9,6 +9,15 @@ alwaysApply: true
 
 Human-readable guide: **`docs/versioning.md`**.
 
+## AI feature-branch merges (combined trains)
+
+When combining agent branches (for example **`cursor/*`**, **`claude/*`**, **`codex/*`**) so one pull request carries all related work:
+
+- Use **`git merge --no-ff <other-agent-branch>`** when folding a side branch into the main feature branch so the merge commit is explicit (avoid silent fast-forward across unrelated agent work).
+- After the merge, keep **one** **`.ver`** per **A.B.C** semver train on the combined branch: **retain the file that belonged to the branch you merged into** (same path/basename; often under **`version/entries/preproduction A.B.C/`** after CI **`relocate_root_prerelease_ver_to_preproduction.sh`**). Fold the merged-in branch’s release prose into that file’s **`DESCRIPTION`**, then **delete** the duplicate **`.ver`** from the merged branch.
+- Re-run **`./scripts/check_version_entries_semver_dev_unique.sh`** before push.
+- Contributor-facing prose also lives in **AGENTS.md** § *AI feature-branch workflow*. CodeRabbit review hints: **`.coderabbit.yaml`** (*Merging multiple AI-authored feature branches*).
+
 ## Hard rule — PR `.ver` files live at `version/entries/` root, never under `preproduction */` by hand
 
 - **Author new or revised release rows for a feature PR only as** **`version/entries/*.ver`** (the file’s parent directory must be **`version/entries/`** itself, **not** **`version/entries/preproduction <A>.<B>.<C>/`**).

@@ -379,14 +379,14 @@ int msgq_receive(msgq_t *q, void *msg, size_t size, uint64_t timeout_ms) {
             int rc = pthread_cond_timedwait(&q->can_read, &q->mu, &deadline);
             q->waiters--;
             pthread_cond_signal(&q->drain);
-            if (rc == ETIMEDOUT) {
+            if (rc == ETIMEDOUT && q->len == 0) {
 #ifndef __KERNEL__
                 errno = ETIMEDOUT;
 #endif
                 pthread_mutex_unlock(&q->mu);
                 return -1;
             }
-            if (rc != 0) {
+            if (rc != 0 && rc != ETIMEDOUT) {
 #ifndef __KERNEL__
                 errno = rc;
 #endif

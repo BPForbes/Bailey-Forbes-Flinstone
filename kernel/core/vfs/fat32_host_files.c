@@ -367,11 +367,14 @@ static int allocate_and_write_chain(int fd, const Fat32HostVol *v, int src_fd, s
         *first_clu_out = 0u;
         return 0;
     }
-    uint32_t need = (uint32_t)((file_sz + (uint64_t)bpc - 1u) / (uint64_t)bpc);
-    if (need == 0u)
-        need = 1u;
-    if (need > (uint32_t)(SIZE_MAX / sizeof(uint32_t)))
+    uint64_t need64 = (file_sz + (uint64_t)bpc - 1u) / (uint64_t)bpc;
+    if (need64 == 0u)
+        need64 = 1u;
+    if (need64 > (uint64_t)(SIZE_MAX / sizeof(uint32_t)))
         return -1;
+    if (need64 > (uint64_t)UINT32_MAX)
+        return -1;
+    uint32_t need = (uint32_t)need64;
     uint32_t *ch = (uint32_t *)malloc((size_t)need * sizeof(uint32_t));
     if (!ch)
         return -1;
