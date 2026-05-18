@@ -3,6 +3,6 @@ STANDARD_VERSION=0
 RELEASE_VERSION=0
 PRERELEASE=1
 DEV_VERSION=11
-DESCRIPTION=PRE 4.0.0: **P5** **contracts/storage/** (**contract_storage.h**, **contract_p5_*.h**, **-Icontracts/storage**); **P6** **contracts/observability/** (**contract_observability.h**, **contract_p6_*.h**, **-Icontracts/observability**); **P7** README-only for now.
+DESCRIPTION=PRE 4.0.0: **P5** **contracts/storage/**; **P6** **contracts/observability/**; **P7** **contracts/operations/** (**contract_operations.h**, **contract_p7_*.h**, **-Icontracts/operations**). P5–P7 normative bundles and build **-I** paths wired.
 
 RELEASE_DATE=2026-05-18

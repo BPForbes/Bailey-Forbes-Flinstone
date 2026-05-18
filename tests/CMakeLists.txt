@@ -22,6 +22,7 @@ target_include_directories(tests PRIVATE
     ${CMAKE_SOURCE_DIR}/contracts/identity
     ${CMAKE_SOURCE_DIR}/contracts/storage
     ${CMAKE_SOURCE_DIR}/contracts/observability
+    ${CMAKE_SOURCE_DIR}/contracts/operations
 )
 
 target_link_libraries(tests PRIVATE

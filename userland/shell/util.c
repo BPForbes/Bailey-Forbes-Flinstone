@@ -1,4 +1,5 @@
 #include "util.h"
+#include "contract_p7_shell_batch.h"
 #include "common.h"
 #include "mem_asm.h"
 #include "fat32_host.h"

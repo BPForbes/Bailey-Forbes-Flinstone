@@ -76,6 +76,7 @@ include_directories(
     ${CMAKE_SOURCE_DIR}/contracts/drivers
     ${CMAKE_SOURCE_DIR}/contracts/storage
     ${CMAKE_SOURCE_DIR}/contracts/observability
+    ${CMAKE_SOURCE_DIR}/contracts/operations
     ${KERNEL_ARCH_DIR}/include
 )
 
