@@ -8,10 +8,10 @@ packaging, **P7-3** remote admin path). See **docs/ROADMAP.md** Phase **7** tabl
 
 | File | Roadmap |
 |------|---------|
-| *contract_p7_service_supervision.h* | P7-1 (supervised service table cap) |
-| *contract_p7_packaging.h* | P7-2 (**SOURCE_DATE_EPOCH**, artifact path cap) |
+| *contract_p7_service_supervision.h* | P7-1 (service state enum, restart caps, supervised service table cap) |
+| *contract_p7_packaging.h* | P7-2 (semver component max, prerelease tag cap, **SOURCE_DATE_EPOCH**, artifact path cap) |
 | *contract_p7_remote_admin.h* | P7-3 (composes **contract_p6_audit_trail.h** for audit evt) |
-| *contract_p7_shell_batch.h* | Shell batch argv (see **TODO: P7** in ROADMAP) |
+| *contract_p7_shell_batch.h* | Shell batch argv (per-builtin caps + **FL_CONTRACT_P7_BATCH_MAX_TOKENS_TOTAL**) |
 
 Each shard includes **contract_extend.h** so standalone use inherits **P0** vocabulary before **P7**.
 

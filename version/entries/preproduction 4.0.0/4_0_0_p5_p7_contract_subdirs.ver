@@ -3,6 +3,6 @@ STANDARD_VERSION=0
 RELEASE_VERSION=0
 PRERELEASE=1
 DEV_VERSION=11
-DESCRIPTION=PRE 4.0.0: P5–P7 contract bundles wired; expand P5 VFS/page-cache, P6 log/audit/persistent-log, and P7 ops vocabulary per review (open-fd/dirent/mount flags, cache pressure caps, correlation id, audit event kinds, rotation budget, supervised-service cap).
+DESCRIPTION=PRE 4.0.0: P5–P7 contract bundles wired; P7 rev 3 adds service state enum, restart storm caps, semver component bounds, prerelease tag cap, and batch argv total budget.
 
 RELEASE_DATE=2026-05-18

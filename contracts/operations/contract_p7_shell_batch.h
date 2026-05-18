@@ -15,7 +15,16 @@
 /** Max tokens consumed by `contracts summary|json|--help|-h` in batch mode. */
 #define FL_CONTRACT_P7_BATCH_CONTRACTS_QUALIFIED_MAX_TOKENS 2u
 
+/** Upper bound on argv tokens one batch grouping step may consume (lab builds). */
+#define FL_CONTRACT_P7_BATCH_MAX_TOKENS_TOTAL 16u
+
 _Static_assert(FL_CONTRACT_P7_BATCH_AUDIT_SHOW_MAX_TOKENS >= 2u,
                "audit show batch must include audit + show");
+_Static_assert(FL_CONTRACT_P7_BATCH_MAX_TOKENS_TOTAL >=
+                   FL_CONTRACT_P7_BATCH_AUDIT_SHOW_MAX_TOKENS,
+               "total batch argv budget must cover audit show grouping");
+_Static_assert(FL_CONTRACT_P7_BATCH_MAX_TOKENS_TOTAL >=
+                   FL_CONTRACT_P7_BATCH_CONTRACTS_QUALIFIED_MAX_TOKENS,
+               "total batch argv budget must cover contracts grouping");
 
 #endif /* FL_CONTRACT_P7_SHELL_BATCH_H */

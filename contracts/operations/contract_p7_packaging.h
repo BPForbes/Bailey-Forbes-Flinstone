@@ -14,6 +14,12 @@
 /** Packaging must read headline A.B.C from version/locked .ver pipeline. */
 #define FL_CONTRACT_P7_PACKAGING_VERSION_FROM_LOCKED 1
 
+/** Inclusive max for each semver A.B.C numeric component in packaging metadata. */
+#define FL_CONTRACT_P7_VERSION_COMPONENT_MAX 65535u
+
+/** Max chars for pre-release tag strings (PRERELEASE rows, not shipped on main). */
+#define FL_CONTRACT_P7_PRERELEASE_TAG_MAX_CHARS 63u
+
 /** SBOM attachment is optional for lab tarballs; when present, path cap applies. */
 #define FL_CONTRACT_P7_SBOM_MANIFEST_OPTIONAL 1
 

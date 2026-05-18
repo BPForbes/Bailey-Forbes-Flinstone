@@ -5,6 +5,9 @@ _Static_assert(FL_CONTRACT_P7_BATCH_AUDIT_SHOW_MAX_TOKENS == 3u,
                "fl_batch_audit_tokens_count must match P7 contract cap");
 _Static_assert(FL_CONTRACT_P7_BATCH_CONTRACTS_QUALIFIED_MAX_TOKENS == 2u,
                "fl_batch_contracts_tokens_count must match P7 contract cap");
+_Static_assert(FL_CONTRACT_P7_BATCH_AUDIT_SHOW_MAX_TOKENS <=
+                   FL_CONTRACT_P7_BATCH_MAX_TOKENS_TOTAL,
+               "audit batch grouping must fit total argv budget");
 #include "common.h"
 #include "mem_asm.h"
 #include "fat32_host.h"
