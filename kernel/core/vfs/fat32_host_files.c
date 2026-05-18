@@ -9,6 +9,7 @@
 #include <fcntl.h>
 #include <stdio.h>
 #include <stdlib.h>
+#include <stdint.h>
 #include <string.h>
 #include <sys/stat.h>
 #include <unistd.h>
@@ -369,6 +370,8 @@ static int allocate_and_write_chain(int fd, const Fat32HostVol *v, int src_fd, s
     uint32_t need = (uint32_t)((file_sz + (uint64_t)bpc - 1u) / (uint64_t)bpc);
     if (need == 0u)
         need = 1u;
+    if (need > (uint32_t)(SIZE_MAX / sizeof(uint32_t)))
+        return -1;
     uint32_t *ch = (uint32_t *)malloc((size_t)need * sizeof(uint32_t));
     if (!ch)
         return -1;
