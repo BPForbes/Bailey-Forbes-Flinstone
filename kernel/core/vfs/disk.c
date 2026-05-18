@@ -8,6 +8,7 @@
 #include <fcntl.h>
 #include <stdio.h>
 #include <stdlib.h>
+#include <stdint.h>
 #include <string.h>
 #include <unistd.h>
 
@@ -109,17 +110,26 @@ void list_clusters_contents(void) {
             return;
         }
         printf("\n--- Disk Contents ---\n");
-        unsigned char *buf = malloc((size_t)g_cluster_size);
+        if (g_cluster_size <= 0) {
+            close(fd);
+            return;
+        }
+        size_t cs = (size_t)g_cluster_size;
+        if (cs > (SIZE_MAX - 1u) / 2u) {
+            close(fd);
+            return;
+        }
+        unsigned char *buf = malloc(cs);
         if (!buf) {
             close(fd);
             return;
         }
-        int len = g_cluster_size * 2;
-        char *ruler = malloc((size_t)len + 1);
+        size_t len = cs * 2u;
+        char *ruler = malloc(len + 1u);
         if (ruler) {
             const char *digits = "0123456789ABCDEF";
-            for (int i = 0; i < len; i++)
-                ruler[i] = digits[i % 16];
+            for (size_t i = 0; i < len; i++)
+                ruler[i] = digits[(int)(i % 16u)];
             ruler[len] = '\0';
             printf("XX:%s\n", ruler);
             free(ruler);
@@ -128,7 +138,7 @@ void list_clusters_contents(void) {
             uint64_t off = 0;
             if (fat32_host_shell_cluster_byte_offset(c, &off) != 0)
                 continue;
-            if (disk_host_pread_vol(fd, buf, (size_t)g_cluster_size, (off_t)off) != (ssize_t)g_cluster_size)
+            if (disk_host_pread_vol(fd, buf, cs, (off_t)off) != (ssize_t)cs)
                 printf("(read error cluster %02X)\n", c);
             else
                 disk_print_hex_line(c, buf, g_cluster_size);
@@ -167,15 +177,24 @@ void print_disk_formatted(void) {
         printf("No disk file found: %s\n", current_disk_file);
         return;
     }
-    int len = g_cluster_size * 2;
-    char *ruler = malloc(len + 1);
+    if (g_cluster_size <= 0) {
+        fclose(fp);
+        return;
+    }
+    size_t cs = (size_t)g_cluster_size;
+    if (cs > (SIZE_MAX - 1u) / 2u) {
+        fclose(fp);
+        return;
+    }
+    size_t len = cs * 2u;
+    char *ruler = malloc(len + 1u);
     if (!ruler) {
         fclose(fp);
         return;
     }
     const char *digits = "0123456789ABCDEF";
-    for (int i = 0; i < len; i++)
-        ruler[i] = digits[i % 16];
+    for (size_t i = 0; i < len; i++)
+        ruler[i] = digits[(int)(i % 16u)];
     ruler[len] = '\0';
     printf("XX:%s\n", ruler);
     free(ruler);
@@ -197,7 +216,12 @@ void update_cluster_line(int clu, const char *hexData) {
             printf("Cluster index %d out of range.\n", clu);
             return;
         }
-        unsigned char *bytes = malloc((size_t)g_cluster_size);
+        if (g_cluster_size <= 0) {
+            printf("Invalid cluster size.\n");
+            return;
+        }
+        size_t cbytes = (size_t)g_cluster_size;
+        unsigned char *bytes = malloc(cbytes);
         if (!bytes) {
             printf("Out of memory updating cluster.\n");
             return;
@@ -214,11 +238,11 @@ void update_cluster_line(int clu, const char *hexData) {
             free(bytes);
             return;
         }
-        ssize_t w = disk_host_pwrite_vol(fd, bytes, (size_t)g_cluster_size, (off_t)off);
+        ssize_t w = disk_host_pwrite_vol(fd, bytes, cbytes, (off_t)off);
         fsync(fd);
         close(fd);
         free(bytes);
-        if (w != (ssize_t)g_cluster_size) {
+        if (w != (ssize_t)cbytes) {
             printf("Cluster write failed (expected %d bytes).\n", g_cluster_size);
             return;
         }
@@ -226,7 +250,20 @@ void update_cluster_line(int clu, const char *hexData) {
         return;
     }
 
-    char **clusters = malloc(sizeof(char *) * (size_t)g_total_clusters);
+    if (g_total_clusters <= 0) {
+        printf("Invalid cluster count.\n");
+        return;
+    }
+    size_t ncl = (size_t)g_total_clusters;
+    if (ncl > SIZE_MAX / sizeof(char *)) {
+        printf("Cluster count too large.\n");
+        return;
+    }
+    char **clusters = malloc(sizeof(char *) * ncl);
+    if (!clusters) {
+        printf("Out of memory.\n");
+        return;
+    }
     int i = 0;
     FILE *fp = fopen(current_disk_file, "r");
     char header[256];
@@ -276,13 +313,19 @@ void update_cluster_line(int clu, const char *hexData) {
         free(clusters);
         return;
     }
-    char *ruler = malloc((size_t)(g_cluster_size * 2 + 1));
-    if (ruler) {
-        for (int j = 0; j < g_cluster_size * 2; j++)
-            ruler[j] = "0123456789ABCDEF"[j % 16];
-        ruler[g_cluster_size * 2] = '\0';
-        fprintf(fp, "XX:%s\n", ruler);
-        free(ruler);
+    if (g_cluster_size > 0) {
+        size_t cs = (size_t)g_cluster_size;
+        if (cs <= (SIZE_MAX - 1u) / 2u) {
+            size_t rlen = cs * 2u;
+            char *ruler = malloc(rlen + 1u);
+            if (ruler) {
+                for (size_t j = 0; j < rlen; j++)
+                    ruler[j] = "0123456789ABCDEF"[(int)(j % 16u)];
+                ruler[rlen] = '\0';
+                fprintf(fp, "XX:%s\n", ruler);
+                free(ruler);
+            }
+        }
     }
     for (int k = 0; k < g_total_clusters; k++) {
         fprintf(fp, "%s\n", clusters[k]);
@@ -306,54 +349,60 @@ static void flintstone_format_txt(const char *diskFileName, const char *volumeNa
         perror("Error creating disk file");
         exit(1);
     }
-    int rulerLen = clusterSize * 2;
-    char *ruler = malloc((size_t)rulerLen + 1);
+    if (clusterSize <= 0 || (size_t)clusterSize > (SIZE_MAX - 1u) / 2u) {
+        fclose(fp);
+        fprintf(stderr, "Error: invalid cluster size.\n");
+        exit(1);
+    }
+    size_t csz = (size_t)clusterSize;
+    size_t rulerLen = csz * 2u;
+    char *ruler = malloc(rulerLen + 1u);
     if (!ruler) {
         perror("malloc failed");
         exit(1);
     }
     const char *digits = "0123456789ABCDEF";
-    for (int i = 0; i < rulerLen; i++)
-        ruler[i] = digits[i % 16];
+    for (size_t i = 0; i < rulerLen; i++)
+        ruler[i] = digits[(int)(i % 16u)];
     ruler[rulerLen] = '\0';
     fprintf(fp, "XX:%s\n", ruler);
     free(ruler);
-    unsigned char *clusterData = malloc((size_t)clusterSize);
+    unsigned char *clusterData = malloc(csz);
     if (!clusterData) {
         perror("malloc failed");
         exit(1);
     }
-    for (int i = 0; i < clusterSize; i++)
+    for (size_t i = 0; i < csz; i++)
         clusterData[i] = (unsigned char)(rand() % 256);
     clusterData[0] = (rowCount > 1) ? 1 : 0;
     int volNameLen = (int)strlen(volumeName);
     int copyLen = (volNameLen < (clusterSize - 1)) ? volNameLen : (clusterSize - 1);
     asm_mem_copy(clusterData + 1, volumeName, (size_t)copyLen);
-    char *hexStr = malloc((size_t)clusterSize * 2 + 1);
+    char *hexStr = malloc(csz * 2u + 1u);
     if (!hexStr) {
         perror("malloc failed");
         exit(1);
     }
-    for (int i = 0; i < clusterSize; i++)
+    for (size_t i = 0; i < csz; i++)
         sprintf(hexStr + i * 2, "%02X", clusterData[i]);
     fprintf(fp, "00:%s\n", hexStr);
     free(hexStr);
     free(clusterData);
     for (int i = 1; i < rowCount; i++) {
-        unsigned char *data = malloc((size_t)clusterSize);
+        unsigned char *data = malloc(csz);
         if (!data) {
             perror("malloc failed");
             exit(1);
         }
-        for (int j = 0; j < clusterSize; j++)
+        for (size_t j = 0; j < csz; j++)
             data[j] = (unsigned char)(rand() % 256);
         data[0] = (i < rowCount - 1) ? i + 1 : 0;
-        hexStr = malloc((size_t)clusterSize * 2 + 1);
+        hexStr = malloc(csz * 2u + 1u);
         if (!hexStr) {
             perror("malloc failed");
             exit(1);
         }
-        for (int j = 0; j < clusterSize; j++)
+        for (size_t j = 0; j < csz; j++)
             sprintf(hexStr + j * 2, "%02X", data[j]);
         fprintf(fp, "%02X:%s\n", i, hexStr);
         free(hexStr);

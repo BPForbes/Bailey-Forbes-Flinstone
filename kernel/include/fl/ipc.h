@@ -25,6 +25,7 @@ typedef struct msgq msgq_t;
 msgq_t *msgq_create(size_t max_messages, size_t message_size);
 void msgq_destroy(msgq_t *msgq);
 int msgq_send(msgq_t *msgq, const void *msg, size_t size);
+/* Host: EINVAL invalid args; EPIPE closing; EAGAIN no message (timeout_ms==0); ETIMEDOUT wait timed out. */
 int msgq_receive(msgq_t *msgq, void *msg, size_t size, uint64_t timeout_ms);
 
 #ifdef __cplusplus

@@ -1,0 +1,6 @@
+MAJOR_VERSION=4
+STANDARD_VERSION=0
+RELEASE_VERSION=1
+PRERELEASE=1
+DEV_VERSION=1
+DESCRIPTION=cd: NUL-terminate g_cwd when getcwd fails after chdir. Shell: check pthread mutex/cond init and pthread_create; guard batch command totalLen against size_t overflow. IPC: msgq_create rejects max_messages*message_size overflow; msgq_receive sets errno (EINVAL, EPIPE, EAGAIN, ETIMEDOUT) on host. VFS: safer size_t bounds for legacy disk ruler/allocs, cluster table malloc, format path; fs import ruler/zeros; FAT32 bytes-per-cluster multiply overflow guard; fat32_host_files cluster-chain malloc overflow guard.

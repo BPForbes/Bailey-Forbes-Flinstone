@@ -1,6 +1,7 @@
 #include "fl/ipc.h"
 #include "mem_asm.h"
 #include <errno.h>
+#include <stdint.h>
 #include <stdlib.h>
 
 #ifdef __KERNEL__
@@ -179,6 +180,7 @@ ssize_t pipe_read(pipe_t *p, void *buf, size_t count) {
 
 msgq_t *msgq_create(size_t max_messages, size_t message_size) {
     if (max_messages == 0 || message_size == 0) return NULL;
+    if (message_size > SIZE_MAX / max_messages) return NULL;
     msgq_t *q = (msgq_t *)malloc(sizeof(*q));
     if (!q) return NULL;
     asm_mem_zero(q, sizeof(*q));
@@ -281,6 +283,9 @@ int msgq_send(msgq_t *q, const void *msg, size_t size) {
 
 int msgq_receive(msgq_t *q, void *msg, size_t size, uint64_t timeout_ms) {
     if (!q || !msg || size == 0) {
+#ifndef __KERNEL__
+        errno = EINVAL;
+#endif
         return -1;
     }
 #ifdef __KERNEL__
@@ -289,11 +294,17 @@ int msgq_receive(msgq_t *q, void *msg, size_t size, uint64_t timeout_ms) {
 #else
     pthread_mutex_lock(&q->mu);
     if (q->closing) {
+#ifndef __KERNEL__
+        errno = EPIPE;
+#endif
         pthread_mutex_unlock(&q->mu);
         return -1;
     }
     if (q->len == 0) {
         if (timeout_ms == 0) {
+#ifndef __KERNEL__
+            errno = EAGAIN;
+#endif
             pthread_mutex_unlock(&q->mu);
             return -1;
         }
@@ -305,16 +316,25 @@ int msgq_receive(msgq_t *q, void *msg, size_t size, uint64_t timeout_ms) {
             q->waiters--;
             pthread_cond_signal(&q->drain);
             if (rc == ETIMEDOUT) {
+#ifndef __KERNEL__
+                errno = ETIMEDOUT;
+#endif
                 pthread_mutex_unlock(&q->mu);
                 return -1;
             }
             if (rc != 0) {
+#ifndef __KERNEL__
+                errno = rc;
+#endif
                 pthread_mutex_unlock(&q->mu);
                 return -1;
             }
         }
     }
     if (q->closing && q->len == 0) {
+#ifndef __KERNEL__
+        errno = EPIPE;
+#endif
         pthread_mutex_unlock(&q->mu);
         return -1;
     }
@@ -323,6 +343,7 @@ int msgq_receive(msgq_t *q, void *msg, size_t size, uint64_t timeout_ms) {
 #ifdef __KERNEL__
         fl_ipc_unlock(&q->lock);
 #else
+        errno = EAGAIN;
         pthread_mutex_unlock(&q->mu);
 #endif
         return -1;
