@@ -16,7 +16,12 @@ pipe_t *pipe_create(size_t size);
 void pipe_destroy(pipe_t *pipe);
 /* buf must be non-NULL; NULL is rejected with return value -1. */
 ssize_t pipe_read(pipe_t *pipe, void *buf, size_t count);
-/* buf must be non-NULL; NULL is rejected with return value -1. */
+/*
+ * NULL pipe: -1, errno EINVAL on host. Otherwise the mutex is taken first; NULL buf
+ * or count==0 is then rejected with -1 (errno EINVAL on host). Returns bytes written
+ * (may be short). If the ring is full and count>0, returns -1 with errno EAGAIN on host.
+ * Broken/closing pipe: -1, errno EPIPE.
+ */
 ssize_t pipe_write(pipe_t *pipe, const void *buf, size_t count);
 
 /* Message queue */
@@ -24,7 +29,12 @@ typedef struct msgq msgq_t;
 
 msgq_t *msgq_create(size_t max_messages, size_t message_size);
 void msgq_destroy(msgq_t *msgq);
+/*
+ * On host: EINVAL invalid args; EPIPE queue closing; EAGAIN queue full (non-blocking).
+ * Returns 0 on success, -1 on failure.
+ */
 int msgq_send(msgq_t *msgq, const void *msg, size_t size);
+/* Host: EINVAL invalid args; EPIPE closing; EAGAIN no message (timeout_ms==0); ETIMEDOUT only if still empty after timed wait (avoids false timeout when a message arrives at the deadline edge). */
 int msgq_receive(msgq_t *msgq, void *msg, size_t size, uint64_t timeout_ms);
 
 #ifdef __cplusplus

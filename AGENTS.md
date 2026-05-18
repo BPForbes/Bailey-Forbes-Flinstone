@@ -16,6 +16,20 @@ Notes:
 - `curl`, `cmake`, `autoconf`, `automake`, `libtool`, `bzip2`, and `tar` are required by `make deps`, `make deps-sdl2`, and `make deps-cunit`.
 - Optional (not required to compile or run the shell): `dosfstools` (`dosfsck`, `mkfs.fat`) helps validate FAT32 disk images the project creates; it is not linked into the binary. See `docs/dependencies.md` for a consolidated list of system packages versus `make deps`.
 
+## AI feature-branch workflow (Cursor / Claude / Codex)
+
+When an agent opens a pull request or branch for one task and later needs to implement **another** item that is **not** part of that branch’s original goal, **do not** create a new branch **unless** a human explicitly allows it. **Stay on the current** feature branch and commit the additional work there—unless a human tells you to use a separate branch.
+
+If a human **does** allow a side branch for the other work, **merge** that side branch into the main feature branch **without deleting** the side branch first, so history and review stay aligned.
+
+When folding **two or more** AI-authored feature branches together (for example **`cursor/*`**, **`claude/*`**, **`codex/*`**, or other agent branches that eventually merge into **`main`** or **`develop`**), use a **non–fast-forward** merge so the combine point is visible:
+
+`git checkout <main-feature-branch> && git merge --no-ff <other-agent-branch> -m "merge: …"`
+
+Avoid a silent fast-forward when merging unrelated agent work. (Maintainer shorthand “merge collapse, no ff” here means **`git merge --no-ff`**, not fast-forward.)
+
+**Versioning (merged AI branches):** after **`git merge --no-ff`**, keep **exactly one** **`.ver`** for that semver train on the combined branch. **Keep the base branch’s file**—the **`.ver`** that already belonged to the branch you merged **into** (same path/basename, e.g. under **`version/entries/preproduction A.B.C/`** once CI has relocated). **Do not** retain a second **`.ver`** from the merged-in agent branch for the same **A.B.C** train; fold its release prose into the base file’s **`DESCRIPTION`**, then **delete** the duplicate **`.ver`**. Re-run **`./scripts/check_version_entries_semver_dev_unique.sh`**. (Elsewhere in the tree, each **`.ver`** still needs a unique **`(MAJOR, STANDARD, RELEASE, DEV_VERSION)`** quadruple—adjust **`DEV_VERSION`** only per normal rules for that single file.)
+
 ## Build targets
 
 Run builds from the repository root.

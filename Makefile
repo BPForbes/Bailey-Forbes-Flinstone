@@ -2,6 +2,19 @@
 # ARCH: x86_64_gas (default on typical desktops), x86_64_nasm, arm (AArch64).
 # On Linux arm64 (e.g. Raspberry Pi OS 64-bit), default ARCH is arm so plain `make`
 # does not feed x86-64 assembly to the AArch64 assembler (errors like unknown mnemonic `cli`).
+#
+# Parallelism: at the top invocation only, if you did not pass -j/--jobs (and no
+# jobserver token is present), MAKEFLAGS gets -j1 to cap memory from many concurrent
+# gcc processes. Pass e.g. make -j4 when you want parallel builds.
+ifeq ($(MAKELEVEL),0)
+ifeq (,$(findstring -j,$(MAKEFLAGS)))
+ifeq (,$(findstring --jobserver,$(MAKEFLAGS)))
+ifeq (,$(findstring --jobserver-auth,$(MAKEFLAGS)))
+MAKEFLAGS += -j1
+endif
+endif
+endif
+endif
 UNAME_S := $(shell uname -s 2>/dev/null)
 UNAME_M := $(shell uname -m 2>/dev/null)
 ARCH ?= $(if $(and $(filter Linux,$(UNAME_S)),$(filter aarch64 arm64,$(UNAME_M))),arm,x86_64_gas)
@@ -261,9 +274,6 @@ userland/shell/interpreter_unit.o: $(VERSION_DEF)
 	$(AS) $(ASFLAGS) -o $@ $<
 
 # Arch ASM: .s (GAS) or .asm (NASM)
-%.o: %.s
-	$(AS) $(ASFLAGS) -o $@ $<
-
 %.o: %.asm
 	$(AS) $(ASFLAGS) -o $@ $<
 

@@ -58,7 +58,7 @@ Export current numbers without compiling: **`./scripts/export_version_record.sh`
 
 ## Where else this is documented
 
-- **AGENTS.md** — Cursor Cloud agents and versioning summary  
+- **AGENTS.md** — Cursor Cloud agents, versioning summary, and **AI feature-branch workflow** (stay on one `cursor/*` / agent branch unless a human allows a split; merge side work with **`git merge --no-ff`**; **one `.ver` per combined train**—keep the base branch’s file, fold merged notes into **`DESCRIPTION`**, delete the duplicate **`.ver`**, re-run **`./scripts/check_version_entries_semver_dev_unique.sh`**)  
 - **`docs/ROADMAP.md`** — phased **P0–P9** work; **module contracts** abstraction + **❌/⚠️/✅** snapshot: [Module contracts (abstraction and P0-P9 coverage)](./docs/ROADMAP.md#module-contracts-abstraction-and-p0-p9-coverage)  
 - **`docs/versioning.md`** — `.ver` authoring, `RELEASE_DATE` automation, **A / B / C** semantics  
 - **`.coderabbit.yaml`** — optional CodeRabbit integration when enabled on the repo  

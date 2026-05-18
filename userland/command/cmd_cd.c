@@ -26,8 +26,10 @@ int cmd_cd_run(int argc, char **argv) {
         return 1;
     }
     if (chdir(resolved) == 0) {
-        if (getcwd(g_cwd, sizeof(g_cwd)) == NULL)
+        if (getcwd(g_cwd, sizeof(g_cwd)) == NULL) {
             strncpy(g_cwd, resolved, sizeof(g_cwd) - 1);
+            g_cwd[sizeof(g_cwd) - 1] = '\0';
+        }
         if (cmd_jail_blocked_path("cd", args[1], g_cwd)) {
             if (chdir(oldcwd) == 0) {
                 strncpy(g_cwd, oldcwd, sizeof(g_cwd) - 1);
