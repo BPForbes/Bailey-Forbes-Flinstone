@@ -3,6 +3,6 @@ STANDARD_VERSION=0
 RELEASE_VERSION=0
 PRERELEASE=1
 DEV_VERSION=10
-DESCRIPTION=Add P4 driver contracts bundle (contracts/drivers) and mark P3 module-contract snapshot complete. P4-5: xHCI subset contract plus arch usb_xhci_mmio_asm helpers and glue. Address CodeRabbit P0/P2/P3/P4 follow-ups: FL_RESULT_MIN/MAX (P0-2) wired through P1-P4 contract shards; P0-3 CI network-interop + SKIP_TAP env macros; P4 obligation constants (IRQ, PCIe lab, virtio, FDT, PSCI); fl_authz_subsystem_check for guest FL_AUTHZ_OP_* denies with audit allow/deny in interpreter; test_invariants extended.
+DESCRIPTION=Add P4 driver contracts bundle (contracts/drivers) and mark P3 module-contract snapshot complete. P4 lab integration: p4_irq_lifecycle, p4_pcie_lab, p4_virtio golden-vector, p4_usb_xhci_lab, p4_fdt_discovery, p4_psci, driver_model lock self-test; ROADMAP contract completion vs module integration columns; P4-1–P4-7 contract completion ✅.
 
 RELEASE_DATE=2026-05-17

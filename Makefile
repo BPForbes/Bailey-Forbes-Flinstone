@@ -55,7 +55,10 @@ UNIFIED_DRIVER_SRCS = kernel/drivers/bus.c kernel/drivers/driver_model.c \
                      kernel/drivers/block/block_driver.c kernel/drivers/block/block_transport_host.c kernel/drivers/block/block_transport_baremetal.c \
                      kernel/drivers/keyboard_driver.c kernel/drivers/display_driver.c \
                      kernel/drivers/timer_driver.c kernel/drivers/pic_driver.c kernel/drivers/drivers.c \
-                     kernel/drivers/usb_xhci_mmio_glue.c
+                     kernel/drivers/usb_xhci_mmio_glue.c \
+                     kernel/drivers/p4_irq_lifecycle.c kernel/drivers/p4_pcie_lab.c \
+                     kernel/drivers/p4_virtio.c kernel/drivers/p4_usb_xhci_lab.c \
+                     kernel/drivers/p4_fdt_discovery.c kernel/drivers/p4_psci.c
 DRIVER_SRCS = $(UNIFIED_DRIVER_SRCS)
 # PCI: x86_64 real impl, aarch64 ECAM real
 DRIVER_SRCS += $(KERNEL_DRIVERS)/pci.c
@@ -310,14 +313,20 @@ test_drivers: userland/shell/common.o $(UTIL_SHELL_LINK_OBJS) kernel/core/vfs/di
 	  kernel/drivers/bus.o kernel/drivers/driver_model.o \
 	  kernel/drivers/block/block_driver.o kernel/drivers/block/block_transport_host.o \
 	  kernel/drivers/keyboard_driver.o kernel/drivers/display_driver.o kernel/drivers/timer_driver.o kernel/drivers/pic_driver.o kernel/drivers/drivers.o \
-	  kernel/drivers/usb_xhci_mmio_glue.o $(USB_XHCI_MMIO_ASM_OBJ) \
+	  kernel/drivers/usb_xhci_mmio_glue.o kernel/drivers/p4_irq_lifecycle.o \
+	  kernel/drivers/p4_pcie_lab.o kernel/drivers/p4_virtio.o \
+	  kernel/drivers/p4_usb_xhci_lab.o kernel/drivers/p4_fdt_discovery.o \
+	  kernel/drivers/p4_psci.o $(USB_XHCI_MMIO_ASM_OBJ) \
 	  $(KERNEL_DRIVERS)/pci.o $(TEST_DRIVER_HAL_OBJS)
 	$(CC) $(CFLAGS) $(TEST_SANITIZE) -I. -Ikernel -Ikernel/include -Ikernel/drivers -Iuserland/shell -I$(ASM_SRC_DIR) -I$(KERNEL_DRIVERS) -Ikernel/arch/aarch64 -o tests/test_drivers tests/test_drivers.c \
 	  userland/shell/common.o $(UTIL_SHELL_LINK_OBJS) kernel/core/vfs/disk.o kernel/core/vfs/fat32_host.o kernel/core/vfs/fat32_host_files.o disk_host_io.o disk_asm.o kernel/core/mm/mem_domain.o kernel/core/mm/kmalloc.o $(MEM_ASM_OBJ) $(PORT_IO_OBJ) $(DISK_HOST_ASM_OBJ) $(HISTORY_ASM_OBJ) \
 	  kernel/drivers/bus.o kernel/drivers/driver_model.o \
 	  kernel/drivers/block/block_driver.o kernel/drivers/block/block_transport_host.o \
 	  kernel/drivers/keyboard_driver.o kernel/drivers/display_driver.o kernel/drivers/timer_driver.o kernel/drivers/pic_driver.o kernel/drivers/drivers.o \
-	  kernel/drivers/usb_xhci_mmio_glue.o $(USB_XHCI_MMIO_ASM_OBJ) \
+	  kernel/drivers/usb_xhci_mmio_glue.o kernel/drivers/p4_irq_lifecycle.o \
+	  kernel/drivers/p4_pcie_lab.o kernel/drivers/p4_virtio.o \
+	  kernel/drivers/p4_usb_xhci_lab.o kernel/drivers/p4_fdt_discovery.o \
+	  kernel/drivers/p4_psci.o $(USB_XHCI_MMIO_ASM_OBJ) \
 	  $(KERNEL_DRIVERS)/pci.o $(TEST_DRIVER_HAL_OBJS) -Wl,-z,noexecstack
 	./tests/test_drivers
 
