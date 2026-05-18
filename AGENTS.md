@@ -35,6 +35,7 @@ Run builds from the repository root.
 - Driver subsystem tests: `make test_drivers`
 - Core ASM and priority queue tests: `make test_core`
 - Invariant tests: `make test_invariants`
+- Contract umbrella revs (JSON): `./BPForbes_Flinstone_Shell contracts json` (includes `p8_virtualization_rev`, `p9_hardening_rev`, `bundle_rev`)
 - libc allocator tests: `make test_alloc_libc`
 - ASM allocator tests: `make test_alloc_asm`
 - VM memory tests: `make test_vm_mem`

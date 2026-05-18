@@ -7,6 +7,16 @@ echo "[baseline] Building..."
 make clean
 make -j4 2>/dev/null || make
 
+echo "[baseline] contracts json (P8/P9 rev keys)"
+out="$(./BPForbes_Flinstone_Shell contracts json 2>/dev/null)" || true
+if ! echo "$out" | grep -q 'p8_virtualization_rev'; then
+  echo "  contracts json: missing p8_virtualization_rev"; exit 1
+fi
+if ! echo "$out" | grep -q 'p9_hardening_rev'; then
+  echo "  contracts json: missing p9_hardening_rev"; exit 1
+fi
+echo "  contracts json OK"
+
 echo "[baseline] Shell: help, version, clear"
 ./BPForbes_Flinstone_Shell help | head -1
 ./BPForbes_Flinstone_Shell version
