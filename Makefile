@@ -150,12 +150,22 @@ baremetal: LDFLAGS += -no-pie
 baremetal: $(TARGET)
 
 # With embedded x86 VM: make vm && ./shell -Virtualization -y -vm
-.PHONY: version-record gen-version-def FORCE
+.PHONY: version-record gen-version-def check-version-def-sync FORCE
 version-record: $(VERSION_DEF)
 	@./scripts/export_version_record.sh
 
 gen-version-def:
 	@./scripts/gen_version_def.sh
+
+# Fail if committed userland/shell/version_def.h != relocate + gen output (CI refreshes the header on same-repo pushes).
+check-version-def-sync:
+	@./scripts/relocate_root_prerelease_ver_to_preproduction.sh
+	@./scripts/gen_version_def.sh
+	@if ! git diff --quiet HEAD -- $(VERSION_DEF); then \
+		echo "error: $(VERSION_DEF) differs from HEAD after relocate + gen_version_def.sh"; \
+		echo "Same-repo CI commits this file after apply-version-def-from-ver-trees; locally commit after gen or git checkout -- $(VERSION_DEF)."; \
+		exit 1; \
+	fi
 
 # Edit version/entries/*.ver. To publish: make finalize-version-locked (copies entries → locked), then make (refreshes version_def.h).
 .PHONY: finalize-version-locked sync-version-locked

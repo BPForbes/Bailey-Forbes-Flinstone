@@ -32,10 +32,5 @@ runs:
           git checkout -B "${GIT_REF_NAME}" "origin/${GIT_REF_NAME}"
         fi
 
-    - name: Prepare version/entries (relocate root PRERELEASE=1 .ver)
-      uses: ./.github/actions/prepare-version-entries
-
-    - name: Regenerate userland/shell/version_def.h from .ver trees
-      shell: bash
-      working-directory: ${{ github.workspace }}
-      run: ./scripts/gen_version_def.sh
+    - name: Relocate entries and regenerate version_def.h from .ver trees
+      uses: ./.github/actions/apply-version-def-from-ver-trees

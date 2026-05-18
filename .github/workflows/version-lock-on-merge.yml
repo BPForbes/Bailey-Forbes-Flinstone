@@ -83,7 +83,7 @@ jobs:
             version/locked/**
             userland/shell/version_def.h
           body: |
-            Automated sync after a push to `develop`: ran `relocate_root_prerelease_ver_to_preproduction.sh`, `finalize_version_locked.sh`, `stamp_version_release_date.sh`, and `gen_version_def.sh`.
+            Automated sync after a push to `develop`: ran `relocate_root_prerelease_ver_to_preproduction.sh`, `finalize_version_locked.sh`, `stamp_version_release_date.sh`, and `gen_version_def.sh` (same relocate + generator sequence as `.github/actions/apply-version-def-from-ver-trees`). When any `version/entries/**/*.ver` has `PRERELEASE=1` and `GM=1`, the refreshed `userland/shell/version_def.h` uses that row’s semver for `VERSION_MAJOR`/`STANDARD`/`PATCH` and plain `VERSION_LINE` (e.g. `4.0.0`); authors must not hand-edit those macros.
 
             **Branch protection** on `develop` (PR-only, required checks, verified signatures) means the sync cannot land as a direct push. Merge this PR to publish `version/entries` moves (when relocate applied), `version/locked/`, and `userland/shell/version_def.h`.
 

@@ -29,11 +29,8 @@ jobs:
         if: github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name != github.repository
         run: bash scripts/relocate_root_prerelease_ver_to_preproduction.sh --dry-run-exit-if-needed
 
-      - name: Prepare version/entries (relocate root PRERELEASE=1 .ver)
-        uses: ./.github/actions/prepare-version-entries
-
-      - name: Regenerate userland/shell/version_def.h from .ver trees
-        run: ./scripts/gen_version_def.sh
+      - name: Relocate entries and regenerate version_def.h from .ver trees
+        uses: ./.github/actions/apply-version-def-from-ver-trees
 
       - name: Publish version/entries and version_def.h (same-repo only)
         if: github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository

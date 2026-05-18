@@ -1,0 +1,34 @@
+name: Apply version_def from .ver trees
+description: >-
+  Relocate root PRERELEASE=1 *.ver, then run scripts/gen_version_def.sh so
+  userland/shell/version_def.h reflects version/locked plus version/entries
+  (ordinary prerelease VERSION_LINE, or PRERELEASE=1 + GM=1 plain A.B.C for
+  VERSION_* and VERSION_LINE). Lists any GM=1 paths for workflow logs.
+runs:
+  using: composite
+  steps:
+    - name: Prepare version entries
+      uses: ./.github/actions/prepare-version-entries
+
+    - name: Regenerate userland/shell/version_def.h
+      shell: bash
+      working-directory: ${{ github.workspace }}
+      run: ./scripts/gen_version_def.sh
+
+    - name: List go-to-main (GM=1) entry paths
+      shell: bash
+      working-directory: ${{ github.workspace }}
+      run: |
+        set -euo pipefail
+        hits=()
+        while IFS= read -r -d '' f; do
+          if grep -qE '^[[:space:]]*(int[[:space:]]+)?GM=1[[:space:]]*$' "$f" 2>/dev/null; then
+            hits+=("$f")
+          fi
+        done < <(find version/entries -type f -name '*.ver' -print0 2>/dev/null || true)
+        if ((${#hits[@]})); then
+          echo "gen_version_def: GM=1 rows drive VERSION_MAJOR/STANDARD/PATCH and plain VERSION_LINE from their .ver semver (do not hand-edit those macros in the header):"
+          printf '%s\n' "${hits[@]}"
+        else
+          echo "gen_version_def: no GM=1 under version/entries (VERSION_* from version/locked unless a GM=1 row is added)."
+        fi

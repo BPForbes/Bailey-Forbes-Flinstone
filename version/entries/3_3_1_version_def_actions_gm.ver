@@ -1,0 +1,4 @@
+MAJOR_VERSION=3
+STANDARD_VERSION=3
+RELEASE_VERSION=1
+DESCRIPTION=Versioning: document that GitHub Actions own userland/shell/version_def.h via scripts/gen_version_def.sh. Add .github/actions/apply-version-def-from-ver-trees (relocate root PRERELEASE=1 rows, then gen_version_def.sh), wire c-cpp.yml and sync-version-checkout to use it, extend generator header comments and check_version_header_matches_locked messaging, add make check-version-def-sync, and align docs (docs/versioning.md), AGENTS.md, CLAUDE.md, .cursor/rules/versioning.mdc, .coderabbit.yaml, and version-lock-on-merge PR body. When PRERELEASE=1 and GM=1, VERSION_MAJOR/STANDARD/PATCH and plain VERSION_LINE (e.g. 4.0.0) come from the winning .ver row—never hand-edit those macros in the header.
