@@ -7,7 +7,10 @@
 #include "contract_result.h"
 #include "contract_runtime.h"
 #include "contract_identity.h"
+#include "contract_drivers.h"
+#include "fl/authz_subsystem.h"
 #include <stdio.h>
+#include <stdlib.h>
 #include <string.h>
 
 #define ASSERT(c) do { if (!(c)) { fprintf(stderr, "FAIL: %s\n", #c); return 1; } } while(0)
@@ -279,12 +282,17 @@ static int test_contract_constants(void) {
     ASSERT(FL_RESULT_BUSY == -16);
     ASSERT(FL_RESULT_TIMEDOUT == -110);
 
-    ASSERT(FL_CONTRACT_P0_FOUNDATIONS_REV == 3);
+    ASSERT(FL_CONTRACT_P0_FOUNDATIONS_REV == 4);
     ASSERT(FL_CONTRACT_P0_3_CI_CONTRACT_DEFINED == 1);
-    ASSERT(FL_CONTRACT_P0_CI_INTERCHANGE_REV == 1);
+    ASSERT(FL_CONTRACT_P0_CI_INTERCHANGE_REV == 2);
     ASSERT((int)fl_contract_p0_ci_surface_default_gate ==
            FL_CONTRACT_P0_CI_SURFACE_DEFAULT_GATE);
-    ASSERT(FL_CONTRACT_P0_CI_SURFACE_COUNT == 1);
+    ASSERT((int)fl_contract_p0_ci_surface_network_interop ==
+           FL_CONTRACT_P0_CI_SURFACE_NETWORK_INTEROP);
+    ASSERT(FL_CONTRACT_P0_CI_SURFACE_COUNT == 2);
+    ASSERT(strcmp(FL_CONTRACT_P0_CI_SKIP_TAP_ENV_NAME, "SKIP_TAP") == 0);
+    ASSERT(FL_RESULT_MIN == FL_RESULT_JSON_RC_MIN);
+    ASSERT(FL_RESULT_MAX == FL_RESULT_JSON_RC_MAX);
     ASSERT(FL_CONTRACT_P0_4_GIC_CONTRACT_DEFINED == 1);
     ASSERT(FL_CONTRACT_P0_GIC_INTERCHANGE_REV == 1);
     ASSERT((int)fl_contract_p0_gic_surface_eoi_path ==
@@ -331,6 +339,11 @@ static int test_contract_constants(void) {
     ASSERT(FL_RESULT_WIRE_MIN == FL_RESULT_JSON_RC_MIN);
     ASSERT(FL_RESULT_WIRE_MAX == FL_RESULT_JSON_RC_MAX);
 
+    ASSERT(FL_CONTRACT_P4_DRIVERS_REV == 3);
+    ASSERT(FL_CONTRACT_P4_2_HARDIRQ_NO_SLEEP == 1);
+    ASSERT(FL_CONTRACT_P4_3_LAB_IOMMU_BYPASS_ASSUMED == 1);
+    ASSERT(FL_CONTRACT_P4_4_DESC_PUBLISH_BARRIER_REQUIRED == 1);
+
     /* Surface enum ordering */
     ASSERT((int)FL_CONTRACT_SURFACE_DRIVER_OPS == 0);
     ASSERT((int)FL_CONTRACT_SURFACE_NETDEV == 1);
@@ -346,6 +359,28 @@ static int test_contract_constants(void) {
     /* History record tag and separator */
     ASSERT(strcmp(FL_HISTORY_RECORD_TAG, "FL1") == 0);
     ASSERT((unsigned char)FL_HISTORY_RECORD_SEP == 0x1eu);
+    return 0;
+}
+
+static int test_authz_subsystem_guest_denies(void) {
+    char prev[256];
+    const char *old = getenv(FL_PRINCIPAL_ENV_NAME);
+    if (old) {
+        strncpy(prev, old, sizeof prev - 1);
+        prev[sizeof prev - 1] = '\0';
+    }
+    (void)setenv(FL_PRINCIPAL_ENV_NAME, FL_PRINCIPAL_GUEST_LITERAL, 1);
+    ASSERT(fl_authz_subsystem_check((unsigned)FL_AUTHZ_OP_VFS_PRIVILEGED, NULL) ==
+           FL_AUTHZ_DENY);
+    ASSERT(fl_authz_subsystem_check((unsigned)FL_AUTHZ_OP_NETDEV_REGISTER, NULL) ==
+           FL_AUTHZ_DENY);
+    ASSERT(fl_authz_subsystem_check((unsigned)FL_AUTHZ_OP_MOUNT, NULL) == FL_AUTHZ_DENY);
+    ASSERT(fl_authz_subsystem_check((unsigned)FL_AUTHZ_OP_UNSPECIFIED, NULL) ==
+           FL_AUTHZ_ALLOW);
+    if (old)
+        (void)setenv(FL_PRINCIPAL_ENV_NAME, prev, 1);
+    else
+        (void)unsetenv(FL_PRINCIPAL_ENV_NAME);
     return 0;
 }
 
@@ -433,6 +468,10 @@ int main(void) {
 
     printf("test_contract_constants... ");
     if (test_contract_constants() != 0) return 1;
+    printf("OK\n");
+
+    printf("test_authz_subsystem_guest_denies... ");
+    if (test_authz_subsystem_guest_denies() != 0) return 1;
     printf("OK\n");
 
     printf("test_history_record_tag_in_packed... ");

@@ -7,6 +7,9 @@
  *   - **Appendix D** §2.4 and execution row **7** define the review and stress
  *     expectations until dedicated HW CI exists.
  *
+ *   - Probe/remove races surface **`fl_result_t`** (**P0-2**); **P4-1** driver v2
+ *     lifecycle inherits the same outcome channel.
+ *
  * Implementation: **kernel/drivers/driver_model.c** and friends; this header is the
  * **contract anchor** for concurrent probe and remove paths.
  */

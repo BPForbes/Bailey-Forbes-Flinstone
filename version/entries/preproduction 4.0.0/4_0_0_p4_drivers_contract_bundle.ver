@@ -1,0 +1,8 @@
+MAJOR_VERSION=4
+STANDARD_VERSION=0
+RELEASE_VERSION=0
+PRERELEASE=1
+DEV_VERSION=10
+DESCRIPTION=Add P4 driver contracts bundle (contracts/drivers) and mark P3 module-contract snapshot complete. P4 lab integration: p4_irq_lifecycle, p4_pcie_lab, p4_virtio golden-vector, p4_usb_xhci_lab, p4_fdt_discovery, p4_psci, driver_model lock self-test; ROADMAP contract completion vs module integration columns; P4-1–P4-7 contract completion ✅.
+
+RELEASE_DATE=2026-05-17

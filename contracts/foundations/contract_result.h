@@ -63,7 +63,16 @@ _Static_assert(FL_RESULT_JSON_RC_MIN < FL_RESULT_JSON_RC_MAX,
 #define FL_RESULT_WIRE_MIN FL_RESULT_JSON_RC_MIN
 #define FL_RESULT_WIRE_MAX FL_RESULT_JSON_RC_MAX
 
+/**
+ * **P0-2** inclusive bounds for any stored or transmitted **fl_result_t** (CodeRabbit /
+ * roadmap **TODO: P0-2**). Same interval as **FL_RESULT_JSON_RC_*** / **FL_RESULT_WIRE_***.
+ */
+#define FL_RESULT_MIN FL_RESULT_WIRE_MIN
+#define FL_RESULT_MAX FL_RESULT_WIRE_MAX
+
 _Static_assert(FL_RESULT_WIRE_MIN == FL_RESULT_JSON_RC_MIN, "wire/json rc lower bound");
 _Static_assert(FL_RESULT_WIRE_MAX == FL_RESULT_JSON_RC_MAX, "wire/json rc upper bound");
+_Static_assert(FL_RESULT_MIN == FL_RESULT_JSON_RC_MIN, "FL_RESULT_MIN/json rc lower bound");
+_Static_assert(FL_RESULT_MAX == FL_RESULT_JSON_RC_MAX, "FL_RESULT_MAX/json rc upper bound");
 
 #endif /* FL_CONTRACT_RESULT_H */

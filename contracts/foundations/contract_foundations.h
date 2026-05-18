@@ -27,7 +27,7 @@
 #define FL_CONTRACT_FOUNDATIONS_H
 
 /** Bump when P0 aggregate layout or required Px prelude changes (Px may _Static_assert). */
-#define FL_CONTRACT_P0_FOUNDATIONS_REV 3
+#define FL_CONTRACT_P0_FOUNDATIONS_REV 4
 
 /*
  * Include order: result + auth (no deps) → imm + asm (caps, mem) → log + dispatch

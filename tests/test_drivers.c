@@ -12,6 +12,15 @@
 #include "fl/driver/device.h"
 #include "fl/driver/devfs.h"
 #include "fl/driver/irq.h"
+#include "fl/driver/usb_xhci_mmio_glue.h"
+#include "fl/driver/p4_driver_model.h"
+#include "fl/driver/p4_irq_lifecycle.h"
+#include "fl/driver/p4_pcie_lab.h"
+#include "fl/driver/p4_virtio.h"
+#include "fl/driver/p4_usb_xhci_lab.h"
+#include "fl/driver/p4_fdt_discovery.h"
+#include "fl/driver/p4_psci.h"
+#include "fl/driver/pci.h"
 #include "fl/mm.h"
 #include "common.h"
 #include <stdio.h>
@@ -33,6 +42,83 @@ static int create_temp_disk(const char *path, int clusters, int cluster_size) {
         fputc('\n', fp);
     }
     fclose(fp);
+    return 0;
+}
+
+static int test_p4_driver_model_lock(void) {
+    ASSERT(fl_driver_model_self_test_s_model_lock() == 0);
+    return 0;
+}
+
+static int test_p4_irq_lifecycle(void) {
+    fl_irq_lifecycle_init();
+    ASSERT(fl_irq_lifecycle_in_hardirq() == 0);
+    fl_irq_lifecycle_enter_hardirq();
+    ASSERT(fl_irq_lifecycle_in_hardirq() == 1);
+    fl_irq_lifecycle_leave_hardirq();
+    ASSERT(fl_irq_lifecycle_in_hardirq() == 0);
+    ASSERT(fl_irq_lifecycle_defer_bottom_half(3, NULL, NULL) == -1);
+    return 0;
+}
+
+static int test_p4_pcie_lab(void) {
+    ASSERT(fl_pcie_lab_iommu_bypass_assumed() == 1);
+    pci_config_header_t hdr;
+    memset(&hdr, 0, sizeof hdr);
+    hdr.bar[0] = 0xF0000000u;
+    fl_pcie_bar_info_t bar;
+    ASSERT(fl_pcie_lab_decode_bar(&hdr, 0u, &bar) == FL_RESULT_OK);
+    ASSERT(bar.is_mmio == 1);
+    return 0;
+}
+
+static int test_p4_virtio_golden(void) {
+    fl_virtio_split_layout_t layout = {
+        .desc_addr = 0x1000u,
+        .avail_addr = 0x1000u + 16u * 2u,
+        .used_addr = 0x1000u + 16u * 2u + 6u + 2u * 2u,
+        .queue_size = FL_VIRTIO_RING_SIZE_GOLDEN,
+    };
+    fl_virtio_desc_publish_barrier();
+    ASSERT(fl_virtio_ring_golden_vector_validate(&layout) == FL_RESULT_OK);
+    return 0;
+}
+
+static int test_p4_usb_xhci_lab(void) {
+    uint32_t mmio[256];
+    memset(mmio, 0, sizeof mmio);
+    mmio[0] = 0x00000020u;
+    fl_xhci_register_map_t map;
+    ASSERT(fl_xhci_lab_map_registers(mmio, &map) == FL_RESULT_OK);
+    fl_xhci_trb_t trb;
+    ASSERT(fl_xhci_lab_trb_publish(&trb, 0x1000u, 1u, 1) == FL_RESULT_OK);
+    ASSERT((trb.control & 1u) == 1u);
+    fl_irq_lifecycle_init();
+    ASSERT(fl_xhci_lab_event_ring_schedule_bh(1) == FL_RESULT_OK);
+    fl_irq_lifecycle_run_bottom_halves();
+    return 0;
+}
+
+static int test_p4_fdt_psci(void) {
+    uint8_t dtb[384];
+    size_t n = fl_p4_fdt_write_minimal_lab(dtb, sizeof dtb);
+    ASSERT(n > 0u);
+    fl_p4_fdt_summary_t sum;
+    ASSERT(fl_p4_fdt_walk(dtb, n, &sum) == FL_RESULT_OK);
+    ASSERT(sum.has_memory && sum.has_cpus && sum.has_psci);
+    ASSERT(fl_psci_discover_from_dtb(dtb, n) == FL_RESULT_OK);
+    ASSERT(fl_psci_status_to_result(FL_PSCI_STATUS_SUCCESS) == FL_RESULT_OK);
+    ASSERT(fl_psci_status_to_result(FL_PSCI_STATUS_DENIED) == FL_RESULT_ACCES);
+    return 0;
+}
+
+static int test_usb_xhci_mmio_glue(void) {
+    uint32_t word = 0xDEADBEEFu;
+    uint32_t r = fl_usb_xhci_mmio_read32_volatile(&word);
+    ASSERT(r == 0xDEADBEEFu);
+    fl_usb_xhci_mmio_write32_volatile(&word, 0x12345678u);
+    ASSERT(word == 0x12345678u);
+    fl_usb_xhci_mmio_rw_fence();
     return 0;
 }
 
@@ -667,6 +753,34 @@ int main(void) {
 
     printf("test_pic... ");
     if (test_pic() != 0) { drivers_shutdown(); unlink(path); return 1; }
+    printf("OK\n");
+
+    printf("test_usb_xhci_mmio_glue... ");
+    if (test_usb_xhci_mmio_glue() != 0) { drivers_shutdown(); unlink(path); return 1; }
+    printf("OK\n");
+
+    printf("test_p4_driver_model_lock... ");
+    if (test_p4_driver_model_lock() != 0) { drivers_shutdown(); unlink(path); return 1; }
+    printf("OK\n");
+
+    printf("test_p4_irq_lifecycle... ");
+    if (test_p4_irq_lifecycle() != 0) { drivers_shutdown(); unlink(path); return 1; }
+    printf("OK\n");
+
+    printf("test_p4_pcie_lab... ");
+    if (test_p4_pcie_lab() != 0) { drivers_shutdown(); unlink(path); return 1; }
+    printf("OK\n");
+
+    printf("test_p4_virtio_golden... ");
+    if (test_p4_virtio_golden() != 0) { drivers_shutdown(); unlink(path); return 1; }
+    printf("OK\n");
+
+    printf("test_p4_usb_xhci_lab... ");
+    if (test_p4_usb_xhci_lab() != 0) { drivers_shutdown(); unlink(path); return 1; }
+    printf("OK\n");
+
+    printf("test_p4_fdt_psci... ");
+    if (test_p4_fdt_psci() != 0) { drivers_shutdown(); unlink(path); return 1; }
     printf("OK\n");
 
     printf("test_probe... ");

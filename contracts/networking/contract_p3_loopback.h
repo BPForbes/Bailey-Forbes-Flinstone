@@ -5,6 +5,10 @@
  * **127.0.0.0/8** without requiring **P3-3** TAP. Frames may still be modeled as
  * **fl_net_frame_view_t** / **fl_ipv4_be32_t** views over host memory.
  *
+ * **Errors:** bind/send path failures use **`fl_result_t`** (**P0-2**). **CI:** default
+ * matrix runs loopback interop or records **P0-3** skip via
+ * **FL_CONTRACT_P0_CI_SKIP_NETWORK_INTEROP_ENV_NAME** (see **contract_p0_ci.h**).
+ *
  * **Constants:** loopback prefix octet for documentation and tests.
  */
 #ifndef FL_CONTRACT_P3_LOOPBACK_H

@@ -4,6 +4,9 @@
  * **Distribution:** datagrams are **fl_net_frame_view_t** over UDP header+payload; ports
  * use **fl_port_be16_t**. Demux tables are **bounded**; under pressure the **drop vs error**
  * outcome is part of this contract and must be logged per **P6** when sinks are active.
+ * Socket and queue pressure return **`fl_result_t`** in **FL_RESULT_MIN** … **FL_RESULT_MAX**
+ * (**P0-2**). **CI:** UDP stability interop follows **P0-3** network-interop surface
+ * (**contract_p0_ci.h**).
  *
  * **Caps:** single-datagram size is bounded by **FL_NET_CONTRACT_MAX_UDP_DATAGRAM** unless
  * a build flag documents a different lab ceiling.

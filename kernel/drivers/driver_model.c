@@ -1,4 +1,5 @@
 #include "fl/driver/drivers.h"
+#include "fl/driver/p4_irq_lifecycle.h"
 #include "drivers.h"
 #include "fl_cstr.h"
 #include "fl/mm.h"
@@ -569,7 +570,15 @@ int fl_devfs_close(fl_devfs_file_t *file) {
 }
 
 void fl_irq_init(void) {
+    fl_irq_lifecycle_init();
     asm_mem_zero(s_irq, sizeof(s_irq));
+}
+
+int fl_driver_model_self_test_s_model_lock(void) {
+    spinlock_acquire(&s_model_lock);
+    int drivers = s_driver_count;
+    spinlock_release(&s_model_lock);
+    return drivers >= 0 ? 0 : -1;
 }
 
 static int device_irq_at(const fl_device_t *dev, int irq_resource_index, int *irq_out) {
@@ -680,9 +689,12 @@ int fl_irq_dispatch(int irq) {
         return -1;
     if (!s_irq[irq].enabled || !s_irq[irq].handler)
         return -1;
+    fl_irq_lifecycle_enter_hardirq();
     s_irq[irq].handler(irq, s_irq[irq].ctx);
     s_irq[irq].dispatch_count++;
+    fl_irq_lifecycle_leave_hardirq();
     fl_irq_eoi(irq);
+    fl_irq_lifecycle_run_bottom_halves();
     return 0;
 }
 

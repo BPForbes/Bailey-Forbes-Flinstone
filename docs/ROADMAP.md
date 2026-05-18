@@ -42,11 +42,13 @@ Unless stated otherwise, **start at H**, prove APIs and tests, then **lift** the
 
 ## Module contracts (abstraction and P0-P9 coverage)
 
-This section is **normative for terminology** in this repo: what we mean by a **module contract**, how it differs from **functionality**, and a **snapshot** of how far **`develop`** has explicit **data-distribution** models for each **`P*-*` roadmap row**. For **P0-1** and **P0-2**, the snapshot also tracks the **normative C bundle** under **`contracts/foundations/`**; for **P1-1** … **P1-7**, it tracks the **P1 runtime bundle** under **`contracts/runtime/`**; for **P2-1** … **P2-4**, it tracks the **P2 identity bundle** under **`contracts/identity/`**; for **P3-1** … **P3-12**, it tracks the **P3 networking bundle** under **`contracts/networking/`** (see the table notes below).
+This section is **normative for terminology** in this repo: what we mean by a **module contract**, how it differs from **functionality**, and a **snapshot** of how far **`develop`** has explicit **data-distribution** models for each **`P*-*` roadmap row**. For **P0-1** and **P0-2**, the snapshot also tracks the **normative C bundle** under **`contracts/foundations/`**; for **P1-1** … **P1-7**, it tracks the **P1 runtime bundle** under **`contracts/runtime/`**; for **P2-1** … **P2-4**, it tracks the **P2 identity bundle** under **`contracts/identity/`**; for **P3-1** … **P3-12**, it tracks the **P3 networking bundle** under **`contracts/networking/`**; for **P4-1** … **P4-7**, it tracks the **P4 driver / hardware-facing bundle** under **`contracts/drivers/`** (see the table notes below).
 
 **P2 is not a second copy of P0.** **P0** freezes **cross-cutting outcomes and surfaces** (`fl_result_t`, logging and auth wiring, arch CI slices). **P2** freezes **who may act and under what proof** (principal, credentials, authorization, elevation). P2 headers **inherit** P0 and P1 so identity policy uses the same **error and authz vocabulary**; that is **reuse**, not the same roadmap phase. Phase **2** product goals (service-layer principals, hosted credential layout, enforcement depth, elevation UX) remain in the **Phase 2** table and in **TODO** callouts (notably **TODO: P2-3** later in this file).
 
 **P3 is not a second copy of P2.** **P3** freezes **octet paths, framing, protocol headers, queues, and time-backed network behaviour**. **P2** still owns **identity and proof**; **P3** composes **only** the **P2-3** `fl_authz_operation_t` slice (**FL_AUTHZ_OP_NETDEV_***) for raw netdev and TAP gates via **`contract_p3_trust.h`**, not the full **`contract_identity.h`** bundle—see **`contracts/networking/README.txt`**.
+
+**P4 is not a second copy of P3.** **P4** freezes **IRQ lifecycle, bus/config access, virtio transports, FDT enumeration policy, firmware CPUON/OFF contracts, and driver v2 lifecycle hooks**. **IP, UDP/TCP, and TLS datagram paths** remain **P3**; include **`contract_networking.h`** only where a translation unit actually implements that stack—see **`contracts/drivers/README.txt`**.
 
 ### Abstraction (high level)
 
@@ -56,13 +58,15 @@ Close analogs elsewhere in computing: **interface / API contract**, **protocol s
 
 ### Legend (P0–P9 snapshot)
 
-| Symbol | Meaning (module-contract / data-distribution lens) |
-|--------|-----------------------------------------------------|
-| **✅** | The **distribution and responsibility model** for that roadmap row is **explicit**, **stable**, and **complete enough** that other subsystems can rely on it **without inferring rules only from implementation**. Boundary artifacts (e.g. **`contracts/foundations/*.h`** (P0), **`contracts/runtime/*.h`** (P1), **`contracts/identity/*.h`** (P2), **`contracts/networking/*.h`** (P3), adjacent **`fl/*`** headers, or a **normative appendix** tied to the row) spell out the I/O story; there is **no major open contract-definition TODO** for that same concern. |
-| **⚠️** | A **real model exists** (types, surfaces, partial prose, or a thin boundary) but coverage is **incomplete**, still a **placeholder**, or a **deferred TODO** references that row. |
-| **❌** | **No** dedicated **data-distribution contract** for that row. **Code may still exist** on **`develop`**; absence here means the **contract model** is missing or not separated from implementation. |
+Two columns track different concerns:
 
-**Process-only rows (clarified):** **P9-1** / **P9-2**-style fuzz and static-analysis **gates** remain **❌** in this table as *interchange* contracts until promoted. **P0-3** is **✅** here because **`contract_p0_ci.h`** records the **CI realism** contract alongside **GitHub Actions** enforcement.
+| Symbol | **Contract completion** | **Module integration** |
+|--------|-------------------------|---------------------------|
+| **✅** | Normative **contract bundle** for the row is **explicit**, **stable**, and **complete enough** that other subsystems can rely on it **without inferring rules only from implementation** (**`contracts/*/*.h`**, **`FL_CONTRACT_*_CONTRACT_DEFINED`**, adjacent **`fl/*`** boundary headers). | **Enforcement / bring-up** for that row is **wired and test-covered** enough for the current track (**H** hosted lab and/or **B** where claimed)—not necessarily full product or silicon completeness. |
+| **⚠️** | A **real contract model exists** but coverage is **incomplete**, still a **placeholder**, or a **deferred TODO** references that row. | **Partial** implementation (hooks, lab subset, or hosted-only path); phase gates or **Appendix D** items still open. |
+| **❌** | **No** dedicated **data-distribution contract** for that row. | **No** meaningful integration yet (or process-only row with no module boundary). |
+
+**Process-only rows (clarified):** **P9-1** / **P9-2**-style fuzz and static-analysis **gates** remain **❌** for *contract completion* until promoted. **P0-3** is **✅** for contract completion because **`contract_p0_ci.h`** records the **CI realism** model alongside **GitHub Actions** enforcement.
 
 ### P0–P9 module-contract snapshot (`develop`)
 
@@ -74,66 +78,68 @@ Close analogs elsewhere in computing: **interface / API contract**, **protocol s
 
 **P2 row criterion (aligned with `contracts/identity/`):** **P2-1** through **P2-4** are **✅** when the normative **C contract bundle** under **`contracts/identity/`** defines that row via **`contract_identity.h`** (umbrella, inheriting **`contract_runtime.h`**) and the matching **`contract_p2_*.h`** shards (**`FL_CONTRACT_P2_*_CONTRACT_DEFINED`** markers). **Phase 2** implementation (principal wiring, lab credential files, central **`can_*`** enforcement, elevation UX) still follows phase gates and **TODO: P2-3** below; this snapshot tracks **contract definition**, not “middleware fully enforced” or “Phase **2** shipped.”
 
-**P3 row criterion (aligned with `contracts/networking/`):** **P3-1** through **P3-12** are tracked here once the normative **C contract bundle** under **`contracts/networking/`** defines that row via **`contract_networking.h`** (umbrella: **`contract_extend.h`** + **`contract_p3_wire.h`** + **`contract_p3_trust.h`**, then **`contract_p3_*.h`** shards with **`FL_CONTRACT_P3_*_CONTRACT_DEFINED`** markers). **`contract_p3_trust.h`** composes the **P2-3** `fl_authz_operation_t` slice only so **P3** is **not** an include-graph clone of **`contract_identity.h`**. Rows stay **⚠️** until obligations are **complete enough** for the legend’s **✅**; **P3-10** / **P3-11** shards record explicit **`[DEFERRED]`** scope. **Phase 3** implementation (stack, drivers, CI interop) still follows phase gates below; this snapshot tracks **contract definition**, not “UDP/TCP/TLS shipped.”
+**P3 row criterion (aligned with `contracts/networking/`):** **P3-1** through **P3-12** are **✅** here when the normative **C contract bundle** under **`contracts/networking/`** defines that row via **`contract_networking.h`** (umbrella: **`contract_extend.h`** + **`contract_p3_wire.h`** + **`contract_p3_trust.h`**, then **`contract_p3_*.h`** shards with **`FL_CONTRACT_P3_*_CONTRACT_DEFINED`** markers). **`contract_p3_trust.h`** composes the **P2-3** `fl_authz_operation_t` slice only so **P3** is **not** an include-graph clone of **`contract_identity.h`**. **P3-10** / **P3-11** shards record explicit **`[DEFERRED]`** scope at the **contract-definition** layer. **Phase 3** implementation (stack, drivers, CI interop) still follows phase gates below; this snapshot tracks **contract definition**, not “UDP/TCP/TLS shipped.”
 
-| ID | Topic | Status |
-|----|--------|--------|
-| **P0-1** | Subsystem boundaries | ✅ |
-| **P0-2** | Error taxonomy (`fl_result_t` as outcome channel) | ✅ |
-| **P0-3** | CI realism | ✅ |
-| **P0-4** | ARM GIC EOI correctness | ✅ |
-| **P0-5** | x86_64 IDT + IRQ0 timer tick | ✅ |
-| **P0-6** | x86_64 GDT (minimal flat) | ✅ |
-| **P0-7** | Device tree (FDT / DTB) metadata | ✅ |
-| **P0-8** | Early serial console (UART) | ✅ |
-| **P1-1** | Execution context | ✅ |
-| **P1-2** | Address space story | ✅ |
-| **P1-3** | Preemption contract | ✅ |
-| **P1-4** | Physical frame allocator (PMM) | ✅ |
-| **P1-5** | Memory domain arenas | ✅ |
-| **P1-6** | Driver model reentrancy | ✅ |
-| **P1-7** | Timekeeping | ✅ |
-| **P2-1** | Principal model | ✅ |
-| **P2-2** | Credential store (hosted) | ✅ |
-| **P2-3** | Authorization middleware | ✅ |
-| **P2-4** | Sudo-like elevation (hosted) | ✅ |
-| **P3-1** | Device abstraction (`netdev`) | ⚠️ |
-| **P3-2** | Loopback (software) | ⚠️ |
-| **P3-3** | TAP backend (hosted only) | ⚠️ |
-| **P3-4** | ARP | ⚠️ |
-| **P3-5** | IPv4 | ⚠️ |
-| **P3-6** | UDP | ⚠️ |
-| **P3-12** | DHCP client (IPv4) | ⚠️ |
-| **P3-7** | TCP (large) | ⚠️ |
-| **P3-8** | DNS client | ⚠️ |
-| **P3-9** | TLS (hosted) | ⚠️ |
-| **P3-10** | Wi‑Fi station path `[DEFERRED]` | ⚠️ |
-| **P3-11** | IPv6 + ICMPv6 `[DEFERRED]` | ⚠️ |
-| **P4-1** | Driver model v2 | ⚠️ |
-| **P4-2** | IRQ lifecycle | ❌ |
-| **P4-3** | PCIe config space access (lab) | ❌ |
-| **P4-4** | Virtio net/block | ❌ |
-| **P4-5** | USB stack | ❌ |
-| **P4-6** | FDT-driven machine discovery (lab) | ❌ |
-| **P4-7** | PSCI client (AArch64) | ❌ |
-| **P5-1** | VFS layer | ❌ |
-| **P5-2** | Pluggable FS | ❌ |
-| **P5-3** | Page cache | ❌ |
-| **P6-1** | Structured log API (sink / line path) | ⚠️ |
-| **P6-2** | Ring buffer sink | ❌ |
-| **P6-3** | Persistent log (hosted) | ❌ |
-| **P6-4** | Audit trail (vs history, sink path) | ⚠️ |
-| **P6-5** | Tracing hooks | ❌ |
-| **P7-1** | Service supervision | ❌ |
-| **P7-2** | Packaging | ❌ |
-| **P7-3** | Remote admin path | ❌ |
-| **P8-1** | Device timing fidelity | ❌ |
-| **P8-2** | Guest virtio | ❌ |
-| **P9-1** | Fuzzing | ❌ |
-| **P9-2** | Coverity / static analysis | ❌ |
-| **P9-3** | SMP bring-up (B) | ❌ |
+**P4 row criterion (aligned with `contracts/drivers/`):** **P4-1** through **P4-7** are **✅** for **contract completion** when the normative **C contract bundle** under **`contracts/drivers/`** defines that row via **`contract_drivers.h`** (umbrella: **`contract_extend.h`**, then **`contract_p4_*.h`** shards with **`FL_CONTRACT_P4_*_CONTRACT_DEFINED`** markers). **Module integration** is tracked separately: lab helpers under **`kernel/drivers/p4_*.c`** and **`fl/driver/p4_*.h`** (driver lock self-test, IRQ hardirq/BH, PCIe BAR/MSI, virtio golden-vector, xHCI MMIO/TRB, FDT walk, PSCI status mapping). A **full USB hub tree**, production virtio on metal, and bare-metal PSCI SMC remain **P4→P5** gates—not required for contract **✅**.
 
-**Summary:** **P0-1**–**P0-8** are **✅** under the **`contracts/foundations/`** criterion above (full P0 header bundle including **`contract_p0_*.h`**). **P1-1**–**P1-7** are **✅** under the **`contracts/runtime/`** criterion (**`contract_runtime.h`** + **`contract_p1_*.h`**). **P2-1**–**P2-4** are **✅** under the **`contracts/identity/`** criterion (**`contract_identity.h`** + **`contract_p2_*.h`**, inheriting **`contract_runtime.h`**); **TODO: P2-3** and Phase **2** gates track **enforcement**, not contract-definition completeness here. Downstream phases still show **⚠️** / **❌** as before until their rows meet the general legend or gain dedicated contract artifacts.
+| ID | Topic | Contract completion | Module integration |
+|----|--------|---------------------|-------------------|
+| **P0-1** | Subsystem boundaries | ✅ | ✅ |
+| **P0-2** | Error taxonomy (`fl_result_t` as outcome channel) | ✅ | ✅ |
+| **P0-3** | CI realism | ✅ | ✅ |
+| **P0-4** | ARM GIC EOI correctness | ✅ | ⚠️ |
+| **P0-5** | x86_64 IDT + IRQ0 timer tick | ✅ | ⚠️ |
+| **P0-6** | x86_64 GDT (minimal flat) | ✅ | ⚠️ |
+| **P0-7** | Device tree (FDT / DTB) metadata | ✅ | ⚠️ |
+| **P0-8** | Early serial console (UART) | ✅ | ⚠️ |
+| **P1-1** | Execution context | ✅ | ⚠️ |
+| **P1-2** | Address space story | ✅ | ⚠️ |
+| **P1-3** | Preemption contract | ✅ | ⚠️ |
+| **P1-4** | Physical frame allocator (PMM) | ✅ | ⚠️ |
+| **P1-5** | Memory domain arenas | ✅ | ⚠️ |
+| **P1-6** | Driver model reentrancy | ✅ | ⚠️ |
+| **P1-7** | Timekeeping | ✅ | ⚠️ |
+| **P2-1** | Principal model | ✅ | ⚠️ |
+| **P2-2** | Credential store (hosted) | ✅ | ⚠️ |
+| **P2-3** | Authorization middleware | ✅ | ⚠️ |
+| **P2-4** | Sudo-like elevation (hosted) | ✅ | ⚠️ |
+| **P3-1** | Device abstraction (`netdev`) | ✅ | ⚠️ |
+| **P3-2** | Loopback (software) | ✅ | ⚠️ |
+| **P3-3** | TAP backend (hosted only) | ✅ | ⚠️ |
+| **P3-4** | ARP | ✅ | ⚠️ |
+| **P3-5** | IPv4 | ✅ | ⚠️ |
+| **P3-6** | UDP | ✅ | ⚠️ |
+| **P3-12** | DHCP client (IPv4) | ✅ | ⚠️ |
+| **P3-7** | TCP (large) | ✅ | ⚠️ |
+| **P3-8** | DNS client | ✅ | ⚠️ |
+| **P3-9** | TLS (hosted) | ✅ | ⚠️ |
+| **P3-10** | Wi‑Fi station path `[DEFERRED]` | ✅ | ❌ |
+| **P3-11** | IPv6 + ICMPv6 `[DEFERRED]` | ✅ | ❌ |
+| **P4-1** | Driver model v2 | ✅ | ✅ |
+| **P4-2** | IRQ lifecycle | ✅ | ✅ |
+| **P4-3** | PCIe config space access (lab) | ✅ | ⚠️ |
+| **P4-4** | Virtio net/block | ✅ | ⚠️ |
+| **P4-5** | USB stack | ✅ | ⚠️ |
+| **P4-6** | FDT-driven machine discovery (lab) | ✅ | ⚠️ |
+| **P4-7** | PSCI client (AArch64) | ✅ | ⚠️ |
+| **P5-1** | VFS layer | ❌ | ❌ |
+| **P5-2** | Pluggable FS | ❌ | ❌ |
+| **P5-3** | Page cache | ❌ | ❌ |
+| **P6-1** | Structured log API (sink / line path) | ⚠️ | ⚠️ |
+| **P6-2** | Ring buffer sink | ❌ | ❌ |
+| **P6-3** | Persistent log (hosted) | ❌ | ❌ |
+| **P6-4** | Audit trail (vs history, sink path) | ⚠️ | ⚠️ |
+| **P6-5** | Tracing hooks | ❌ | ❌ |
+| **P7-1** | Service supervision | ❌ | ❌ |
+| **P7-2** | Packaging | ❌ | ❌ |
+| **P7-3** | Remote admin path | ❌ | ❌ |
+| **P8-1** | Device timing fidelity | ❌ | ❌ |
+| **P8-2** | Guest virtio | ❌ | ❌ |
+| **P9-1** | Fuzzing | ❌ | ❌ |
+| **P9-2** | Coverity / static analysis | ❌ | ❌ |
+| **P9-3** | SMP bring-up (B) | ❌ | ❌ |
+
+**Summary:** **Contract completion** — **P0-1**–**P0-8**, **P1-1**–**P1-7**, **P2-1**–**P2-4**, **P3-1**–**P3-12** (including **`[DEFERRED]`** shards), and **P4-1**–**P4-7** are **✅** under their **`contracts/*`** bundles. **P5** onward are mostly **❌** for contracts except **P6-1** / **P6-4** (**⚠️** partial). **Module integration** — **P0-1**–**P0-3** and **P4-1**/**P4-2** are **✅** on the current hosted/lab path; **P0-4**–**P0-8**, **P1**, **P2**, **P3**, and **P4-3**–**P4-7** are **⚠️** (partial enforcement, lab subset, or phase gates); **P3-10**/**P3-11** integration is **❌** by design. **TODO: P2-3** tracks further kernel-path **`fl_authz_subsystem_check`** wiring, not contract completeness.
 
 ---
 
@@ -296,7 +302,7 @@ Implement **bottom-up**: **L2 (link layer)** → IPv4/UDP → TCP → sockets fa
 | **P4-2** | **IRQ lifecycle** | Hardirq vs threaded bottom half (or workqueue analogue). | **No sleep in true hardirq path**; lockdep-style assertions in debug builds where feasible. |
 | **P4-3** | **PCIe config space access (lab)** | MMIO config for one QEMU NIC class. | **PCIe spec** excerpts in docs; **IOMMU later** milestone flagged. |
 | **P4-4** | **Virtio net/block** | Paravirtual devices for VM path. | **Virtio 1.x** spec; ring format tests with **golden vectors**. |
-| **P4-5** | **USB stack** | Deferred—document as **Phase 4+** (complex state machines). | If started: **xHCI subset** only; compliance tests out-of-tree. |
+| **P4-5** | **USB stack** | **xHCI** host-controller **lab subset** (one **PCIe** function, **QEMU**-class); **command**, **event**, and **transfer** ring ownership; **MMIO** ordering via **`fl_usb_xhci_mmio_*`** glue and **arch** **`.s`**. | **Intel xHCI** spec (register model + TRBs); **USB 3.2** informative for packet layers later; **hub** enumeration and **xHCI compliance** suites **out-of-tree** until promoted. |
 | **P4-6** | **FDT-driven machine discovery (lab)** | Walk **DTB** from **P0-7** to enumerate **memory**, **`cpus`**, and **`compatible`** for driver match—QEMU **`-dtb`** / virt DTS in docs. | Devicetree.org **FDT** spec; clarify how much parsing lives in loader vs kernel. |
 | **P4-7** | **PSCI client (AArch64)** | **SMC**-based **ARM PSCI** so **P9-3** can bring up secondaries via **`CPU_ON`**; document `CPU_OFF`/`CPU_SUSPEND` as later. | **ARM DEN0022** (PSCI); DT **`psci`** node (`arm,psci-1.0` bindings); **TF-A** as firmware provider on QEMU (informative). |
 
@@ -334,8 +340,8 @@ The **3.3.0 contracts** workstream landed FL1 history, hosted **`.fl_audit.log`*
 
 | TODO tag | Recommendation (review / tool source) |
 |----------|---------------------------------------|
-| **TODO: P2-3** | **Authorization middleware** is still mostly **contract + hooks**, not full enforcement: wire central **`can_*`** checks before FileManager, netdev, and mount; add **≥3** unit tests that deny a guest principal on privileged ops; ensure **audit log entries on deny and allow** (not only post-command `fl_audit_shell_completed`). |
-| **TODO: P0-2** | Optional: define **`FL_RESULT_MIN` / `FL_RESULT_MAX`** (or an allow-list) and reject out-of-range **`rc`** in **`fl_history_record_unpack_cmd`** JSON metadata if policy wants strict codes only (CodeRabbit discussion). |
+| **TODO: P2-3** | **Partial (hosted):** **`fl/authz_subsystem.h`** gates **`FL_AUTHZ_OP_***` for guest principals; shell builtins + foreign **exec** use **`fl/shell_authz.h`** with **audit on allow and deny**; CUnit guest deny suite + **`test_invariants`** subsystem denies (**≥3** ops). **Still open:** wire **`fl_authz_subsystem_check`** at FileManager / netdev / mount entry points in kernel paths as those surfaces land. |
+| ~~**TODO: P0-2**~~ | **Done:** **`FL_RESULT_MIN` / `FL_RESULT_MAX`** alias **`FL_RESULT_JSON_RC_*`**; **`fl_history_record_unpack_cmd`** rejects out-of-range **`rc`**; **P1**–**P4** contract shards cross-reference **P0-2** where fallible. |
 | **TODO: P6-4** | **`audit show N` contract:** document any **residual limits** (memory growth for very large **N** on huge logs) or add hard caps / streaming so operator expectations stay aligned with implementation. |
 | **TODO: P7 (shell batch)** | Add an **automated regression** that batch argv **`contracts audit show 5`** runs **`contracts`** (default), then **`audit`**, not a merged `contracts audit` token (Codex). |
 | **TODO: P6-2** | In-memory **ring-buffer** log sink (`dmesg`-style, drop counters) per phase table (CodeRabbit roadmap gap). |

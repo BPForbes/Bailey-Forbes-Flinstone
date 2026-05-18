@@ -4,8 +4,10 @@
 #include "terminal.h"
 #include "cmd_decl.h"
 #include "threadpool.h"
+#include "contract_p2_authz.h"
 #include "contract_p2_principal_names.h"
 #include "fl/audit_log.h"
+#include "fl/authz_subsystem.h"
 #include "fl/shell_authz.h"
 #include <stdio.h>
 #include <stdlib.h>
@@ -96,12 +98,14 @@ int execute_command_str(const char *line) {
 
     fl_shell_cmd_no_t id = fl_shell_cmd_lookup(args[0]);
     if (id == FL_SCMD_UNKNOWN) {
-        if (fl_shell_authz_foreign_exec(argc, args) == FL_AUTHZ_DENY) {
+        fl_authz_decision_t fx = fl_shell_authz_foreign_exec(argc, args);
+        if (fx == FL_AUTHZ_DENY) {
             fl_audit_authz_event(line, 0u, 1);
             free(cmdLine);
             out_rc = 1;
             goto finish;
         }
+        fl_audit_authz_event(line, (unsigned)FL_AUTHZ_OP_SHELL_FOREIGN_EXEC, 0);
         pid_t pid = fork();
         if (pid < 0) {
             perror("fork");
@@ -123,11 +127,26 @@ int execute_command_str(const char *line) {
         }
     }
 
-    if (fl_shell_authz_builtin(id, argc, args) == FL_AUTHZ_DENY) {
+    fl_authz_decision_t sh = fl_shell_authz_builtin(id, argc, args);
+    if (sh == FL_AUTHZ_DENY) {
         fl_audit_authz_event(line, (unsigned)id, 1);
         free(cmdLine);
         out_rc = 1;
         goto finish;
+    }
+    fl_audit_authz_event(line, (unsigned)id, 0);
+
+    {
+        unsigned sub_op = fl_authz_subsystem_op_for_shell_cmd((unsigned)id);
+        if (sub_op != (unsigned)FL_AUTHZ_OP_UNSPECIFIED) {
+            fl_authz_decision_t sub = fl_authz_subsystem_check(sub_op, NULL);
+            fl_audit_authz_event(line, sub_op, sub == FL_AUTHZ_DENY ? 1 : 0);
+            if (sub == FL_AUTHZ_DENY) {
+                free(cmdLine);
+                out_rc = 1;
+                goto finish;
+            }
+        }
     }
 
     out_rc = fl_shell_cmd_dispatch(id, argc, args);
