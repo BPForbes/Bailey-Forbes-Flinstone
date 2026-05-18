@@ -95,6 +95,29 @@ static void vm_cleanup_at_exit(void) {
     rmrf(g_vm_root);
 }
 
+#ifndef BATCH_SINGLE_THREAD
+static int g_pool_workers_started;
+#endif
+static int g_pool_cleanup_done;
+
+static void shell_pool_cleanup(void) {
+    if (g_pool_cleanup_done)
+        return;
+    g_pool_cleanup_done = 1;
+#ifndef BATCH_SINGLE_THREAD
+    if (g_pool_workers_started) {
+        pthread_mutex_lock(&g_pool.mutex);
+        g_pool.shutting_down = 1;
+        pthread_cond_broadcast(&g_pool.cond);
+        pthread_mutex_unlock(&g_pool.mutex);
+        for (int i = 0; i < NUM_WORKERS; i++)
+            pthread_join(g_pool.workers[i], NULL);
+    }
+#endif
+    pthread_mutex_destroy(&g_pool.mutex);
+    pthread_cond_destroy(&g_pool.cond);
+}
+
 /* Case-insensitive compare (no locale/allocation) */
 static int eq_ci(const char *a, const char *b) {
     while (*a && *b) {
@@ -361,7 +384,9 @@ int main(int argc, char *argv[]) {
             exit(1);
         }
     }
+    g_pool_workers_started = 1;
 #endif
+    atexit(shell_pool_cleanup);
     if (original_stdout_fd < 0) {
         original_stdout_fd = dup(fileno(stdout));
         original_stdout_file = fdopen(original_stdout_fd, "w");
@@ -428,8 +453,17 @@ int main(int argc, char *argv[]) {
                 else
                     tokensCount = 1;
             }
-            else if (!strcmp(cmd, "setdisk") || !strcmp(cmd, "createdisk"))
-                tokensCount = ((argc > i+3) ? ((argc > i+4) ? 5 : 4) : 0);
+            else if (!strcmp(cmd, "setdisk") || !strcmp(cmd, "createdisk")) {
+                if (argc > i + 4)
+                    tokensCount = (argc > i + 5) ? 5 : 4;
+                else {
+                    fprintf(stderr, "batch: %s: insufficient arguments (skipped)\n", cmd);
+                    int eat = 1;
+                    while (eat < 5 && i + eat < argc && argv[i + eat] && argv[i + eat][0] != '-')
+                        eat++;
+                    tokensCount = eat;
+                }
+            }
             else if (!strcmp(cmd, "format"))
                 tokensCount = 5;
             else if (!strcmp(cmd, "dir")) {
@@ -529,17 +563,8 @@ int main(int argc, char *argv[]) {
         exit(0);
     else
         interactive_shell();
-    
-#ifndef BATCH_SINGLE_THREAD
-    pthread_mutex_lock(&g_pool.mutex);
-    g_pool.shutting_down = 1;
-    pthread_cond_broadcast(&g_pool.cond);
-    pthread_mutex_unlock(&g_pool.mutex);
-    for (int i = 0; i < NUM_WORKERS; i++)
-        pthread_join(g_pool.workers[i], NULL);
-#endif
-    pthread_mutex_destroy(&g_pool.mutex);
-    pthread_cond_destroy(&g_pool.cond);
+
+    shell_pool_cleanup();
     drivers_shutdown();
     path_log_shutdown();
     fs_service_glue_shutdown();

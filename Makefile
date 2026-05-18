@@ -9,7 +9,9 @@
 ifeq ($(MAKELEVEL),0)
 ifeq (,$(findstring -j,$(MAKEFLAGS)))
 ifeq (,$(findstring --jobserver,$(MAKEFLAGS)))
+ifeq (,$(findstring --jobserver-auth,$(MAKEFLAGS)))
 MAKEFLAGS += -j1
+endif
 endif
 endif
 endif
@@ -272,9 +274,6 @@ userland/shell/interpreter_unit.o: $(VERSION_DEF)
 	$(AS) $(ASFLAGS) -o $@ $<
 
 # Arch ASM: .s (GAS) or .asm (NASM)
-%.o: %.s
-	$(AS) $(ASFLAGS) -o $@ $<
-
 %.o: %.asm
 	$(AS) $(ASFLAGS) -o $@ $<
 

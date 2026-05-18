@@ -272,23 +272,39 @@ void update_cluster_line(int clu, const char *hexData) {
         char buf[256];
         while (i < g_total_clusters && fgets(buf, sizeof(buf), fp)) {
             buf[strcspn(buf, "\n")] = '\0';
-            clusters[i] = strdup(buf);
-            i++;
+            char *dup = strdup(buf);
+            if (!dup) {
+                for (int k = 0; k < i; k++)
+                    free(clusters[k]);
+                free(clusters);
+                fclose(fp);
+                printf("Out of memory.\n");
+                return;
+            }
+            clusters[i++] = dup;
         }
         fclose(fp);
     }
     for (; i < g_total_clusters; i++) {
-        int prefixLen = snprintf(NULL, 0, "%02X:", i);
-        int entryLen = prefixLen + g_cluster_size * 2 + 1;
-        char *entry = malloc((size_t)entryLen);
+        size_t prefixLen = (size_t)snprintf(NULL, 0, "%02X:", i);
+        size_t gzc = (size_t)g_cluster_size;
+        if (gzc > (SIZE_MAX - prefixLen - 1u) / 2u) {
+            printf("Cluster hex width overflow.\n");
+            for (int k = 0; k < i; k++)
+                free(clusters[k]);
+            free(clusters);
+            return;
+        }
+        size_t entryLen = prefixLen + gzc * 2u + 1u;
+        char *entry = malloc(entryLen);
         if (!entry) {
             for (int k = 0; k < i; k++) free(clusters[k]);
             free(clusters);
             return;
         }
-        snprintf(entry, (size_t)entryLen, "%02X:", i);
-        memset(entry + prefixLen, '0', (size_t)(g_cluster_size * 2));
-        entry[entryLen - 1] = '\0';
+        snprintf(entry, entryLen, "%02X:", i);
+        memset(entry + prefixLen, '0', gzc * 2u);
+        entry[entryLen - 1u] = '\0';
         clusters[i] = entry;
     }
     if (clu < 0 || clu >= g_total_clusters) {
@@ -300,8 +316,16 @@ void update_cluster_line(int clu, const char *hexData) {
     }
     char newLine[256];
     snprintf(newLine, sizeof(newLine), "%02X:%s", clu, hexData);
+    char *dupnl = strdup(newLine);
+    if (!dupnl) {
+        printf("Out of memory.\n");
+        for (int k = 0; k < g_total_clusters; k++)
+            free(clusters[k]);
+        free(clusters);
+        return;
+    }
     free(clusters[clu]);
-    clusters[clu] = strdup(newLine);
+    clusters[clu] = dupnl;
 
     char tmp_path[CWD_MAX + 8];
     snprintf(tmp_path, sizeof(tmp_path), "%s.tmp", current_disk_file);

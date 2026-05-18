@@ -101,6 +101,8 @@ int fat32_host_load_from_fd(int fd) {
     uint32_t rootclus = ld_le32(sec + 0x2C);
     if (bps == 0 || spc == 0 || nf == 0 || tot == 0 || fat32sz == 0)
         return -1;
+    if (rootclus < 2u)
+        return -1;
 
     if (bps != 0u && (uint32_t)spc > (UINT32_MAX / (uint32_t)bps))
         return -1;
@@ -347,7 +349,12 @@ int fat32_host_format_image(const char *path, const char *volume_label, int shel
     de[0x0B] = 0x20;
     st_le16(de + 0x14, 0); /* cluster high */
     st_le16(de + 0x1A, 3);  /* cluster low start at 3 */
-    st_le32(de + 0x1C, (uint32_t)shell_clusters * (uint32_t)bytes_per_cluster);
+    {
+        uint64_t fsz64 = (uint64_t)(uint32_t)shell_clusters * (uint64_t)(uint32_t)bytes_per_cluster;
+        if (fsz64 > (uint64_t)UINT32_MAX)
+            return -1;
+        st_le32(de + 0x1C, (uint32_t)fsz64);
+    }
 
     if (disk_host_pwrite_vol(fd, rootbuf, (size_t)spc * (size_t)bps, (off_t)root_off) != (ssize_t)((size_t)spc * (size_t)bps)) {
         free(rootbuf);
