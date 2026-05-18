@@ -163,9 +163,13 @@ finalize-version-locked sync-version-locked:
 	@./scripts/finalize_version_locked.sh
 
 # Merge GM=1 preproduction */ trees into one root GA .ver and delete those dirs from entries + locked.
-.PHONY: promote-preproduction-for-main bump-dev-version relocate-root-prerelease-ver
+.PHONY: promote-preproduction-for-main version-merge-sim-status bump-dev-version relocate-root-prerelease-ver
 promote-preproduction-for-main:
 	@./scripts/promote_preproduction_for_main.sh
+
+# Report version/ state for develop→main merge sims (refs and/or working tree). See scripts/version_merge_sim_status.sh --help
+version-merge-sim-status:
+	@./scripts/version_merge_sim_status.sh $(ARGS)
 
 # Usage: make bump-dev-version VER=version/entries/preproduction\ 4.0.0/foo.ver
 bump-dev-version:

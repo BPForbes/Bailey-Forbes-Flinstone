@@ -2,6 +2,8 @@
 # Unit tests for PR-modified version scripts:
 #   scripts/check_version_main_prerelease_policy.sh
 #   scripts/check_version_prerelease_layout.sh
+#   scripts/check_version_entries_semver_dev_unique.sh
+#   scripts/gen_version_def.sh
 #   scripts/bump_dev_version.sh
 #   scripts/lib/ver_release_date_stamp.sh
 #   scripts/relocate_root_prerelease_ver_to_preproduction.sh
@@ -64,6 +66,7 @@ make_fake_repo() {
   mkdir -p "$tmp/scripts/lib" "$tmp/version/entries" "$tmp/version/locked" "$tmp/userland/shell"
   # Always copy the lib helper (sourced by relocate script)
   cp "$REPO_ROOT/scripts/lib/ver_release_date_stamp.sh" "$tmp/scripts/lib/"
+  cp "$REPO_ROOT/scripts/lib/ver_field_parse.sh" "$tmp/scripts/lib/"
   # Copy requested scripts
   local s
   for s in "$@"; do
@@ -571,6 +574,102 @@ test_layout_preproduction_dev_version_gte_2() {
   cleanup "$d"
 }
 
+# ── Tests: check_version_entries_semver_dev_unique.sh ─────────────────────────
+
+unique_script() {
+  local fake_root="$1"
+  echo "$fake_root/scripts/check_version_entries_semver_dev_unique.sh"
+}
+
+test_unique_empty_entries() {
+  require_proc_sub "unique: empty entries directory passes" || return 0
+  local d
+  d="$(make_fake_repo check_version_entries_semver_dev_unique.sh)"
+  if bash "$(unique_script "$d")" >/dev/null 2>&1; then
+    ok "unique: empty entries directory passes"
+  else
+    fail "unique: empty entries directory should pass"
+  fi
+  cleanup "$d"
+}
+
+test_unique_two_ga_distinct_semver() {
+  require_proc_sub "unique: two GA rows different semver pass" || return 0
+  local d
+  d="$(make_fake_repo check_version_entries_semver_dev_unique.sh)"
+  write_ver_ga "$d/version/entries/1_0_0_a.ver" 1 0 0
+  write_ver_ga "$d/version/entries/2_0_0_b.ver" 2 0 0
+  if bash "$(unique_script "$d")" >/dev/null 2>&1; then
+    ok "unique: two GA rows different semver pass"
+  else
+    fail "unique: two GA rows different semver should pass"
+  fi
+  cleanup "$d"
+}
+
+test_unique_two_ga_same_semver_rejected() {
+  require_proc_sub "unique: two GA same semver rejected" || return 0
+  local d
+  d="$(make_fake_repo check_version_entries_semver_dev_unique.sh)"
+  write_ver_ga "$d/version/entries/1_0_0_a.ver" 1 0 0
+  write_ver_ga "$d/version/entries/1_0_0_b.ver" 1 0 0
+  if bash "$(unique_script "$d")" 2>/dev/null; then
+    fail "unique: two GA same semver (implicit DEV 0) should fail"
+  else
+    ok "unique: two GA same semver rejected"
+  fi
+  cleanup "$d"
+}
+
+test_unique_same_semver_distinct_dev_passes() {
+  require_proc_sub "unique: same semver different DEV_VERSION passes" || return 0
+  local d
+  d="$(make_fake_repo check_version_entries_semver_dev_unique.sh)"
+  mkdir -p "$d/version/entries/preproduction 2.0.0"
+  write_ver_prerelease "$d/version/entries/preproduction 2.0.0/a.ver" 2 0 0 1
+  write_ver_prerelease "$d/version/entries/preproduction 2.0.0/b.ver" 2 0 0 2
+  if bash "$(unique_script "$d")" >/dev/null 2>&1; then
+    ok "unique: same semver different DEV_VERSION passes"
+  else
+    fail "unique: same semver different DEV_VERSION should pass"
+  fi
+  cleanup "$d"
+}
+
+test_unique_duplicate_dev_rejected() {
+  require_proc_sub "unique: duplicate DEV_VERSION same semver rejected" || return 0
+  local d
+  d="$(make_fake_repo check_version_entries_semver_dev_unique.sh)"
+  mkdir -p "$d/version/entries/preproduction 2.0.0"
+  write_ver_prerelease "$d/version/entries/preproduction 2.0.0/a.ver" 2 0 0 3
+  write_ver_prerelease "$d/version/entries/preproduction 2.0.0/b.ver" 2 0 0 3
+  if bash "$(unique_script "$d")" 2>/dev/null; then
+    fail "unique: duplicate DEV_VERSION same semver should fail"
+  else
+    ok "unique: duplicate DEV_VERSION rejected"
+  fi
+  cleanup "$d"
+}
+
+test_unique_malformed_dev_version_rejected() {
+  require_proc_sub "unique: malformed DEV_VERSION rejected" || return 0
+  local d
+  d="$(make_fake_repo check_version_entries_semver_dev_unique.sh)"
+  cat >"$d/version/entries/bad.ver" <<'VER'
+MAJOR_VERSION=1
+STANDARD_VERSION=0
+RELEASE_VERSION=0
+DEV_VERSION=notint
+DESCRIPTION=oops
+VER
+  if bash "$(unique_script "$d")" 2>/dev/null; then
+    fail "unique: non-integer DEV_VERSION should fail"
+  else
+    ok "unique: malformed DEV_VERSION rejected"
+  fi
+  cleanup "$d"
+}
+
 # ── Tests: bump_dev_version.sh ────────────────────────────────────────────────
 
 BUMP="$REPO_ROOT/scripts/bump_dev_version.sh"
@@ -1031,6 +1130,504 @@ test_relocate_multiple_prerelease_files() {
   rm -rf "$d"
 }
 
+# scripts/gen_version_def.sh (isolated temp repo; script copied into fake scripts/)
+test_gen_def_gm_overrides_version_and_plain_line() {
+  require_proc_sub "gen_def: GM=1 overrides shipped triple and plain VERSION_LINE" || return 0
+  local d
+  d="$(make_fake_repo gen_version_def.sh)"
+  write_ver_ga "$d/version/locked/1_0_0_shipped.ver" 1 0 0
+  mkdir -p "$d/version/entries/nested"
+  cat >"$d/version/entries/nested/gm_row.ver" <<'VER'
+MAJOR_VERSION=9
+STANDARD_VERSION=8
+RELEASE_VERSION=7
+PRERELEASE=1
+GM=1
+DEV_VERSION=42
+DESCRIPTION=GM candidate
+VER
+  local out
+  out="$(cd "$d" && ./scripts/gen_version_def.sh --stdout)"
+  if ! echo "$out" | grep -qE '^#define VERSION_MAJOR[[:space:]]+9[[:space:]]*$'; then
+    fail "gen_def: expected VERSION_MAJOR 9 from GM row, got: $out"
+  else
+    ok "gen_def: GM=1 row supplies VERSION_MAJOR"
+  fi
+  if ! echo "$out" | grep -qE '^#define VERSION_STANDARD[[:space:]]+8[[:space:]]*$'; then
+    fail "gen_def: expected VERSION_STANDARD 8"
+  else
+    ok "gen_def: GM row supplies VERSION_STANDARD"
+  fi
+  if ! echo "$out" | grep -qE '^#define VERSION_PATCH[[:space:]]+7[[:space:]]*$'; then
+    fail "gen_def: expected VERSION_PATCH 7 (RELEASE_VERSION)"
+  else
+    ok "gen_def: GM row supplies VERSION_PATCH from RELEASE_VERSION"
+  fi
+  if ! echo "$out" | grep -F '#define VERSION_LINE "9.8.7"'; then
+    fail "gen_def: expected plain VERSION_LINE 9.8.7, got: $out"
+  else
+    ok "gen_def: GM=1 yields plain A.B.C VERSION_LINE (no PRE/BUILD)"
+  fi
+  cleanup "$d"
+}
+
+test_gen_def_gm_picks_highest_semver_then_dev() {
+  require_proc_sub "gen_def: GM tie-break newest semver then DEV_VERSION" || return 0
+  local d
+  d="$(make_fake_repo gen_version_def.sh)"
+  write_ver_ga "$d/version/locked/1_0_0_shipped.ver" 1 0 0
+  mkdir -p "$d/version/entries/a" "$d/version/entries/b"
+  cat >"$d/version/entries/a/old.ver" <<'VER'
+MAJOR_VERSION=2
+STANDARD_VERSION=0
+RELEASE_VERSION=0
+PRERELEASE=1
+GM=1
+DEV_VERSION=100
+DESCRIPTION=a
+VER
+  cat >"$d/version/entries/b/newer.ver" <<'VER'
+MAJOR_VERSION=2
+STANDARD_VERSION=1
+RELEASE_VERSION=0
+PRERELEASE=1
+GM=1
+DEV_VERSION=1
+DESCRIPTION=b
+VER
+  local out
+  out="$(cd "$d" && ./scripts/gen_version_def.sh --stdout)"
+  if ! echo "$out" | grep -qE '^#define VERSION_MAJOR[[:space:]]+2[[:space:]]*$' ||
+     ! echo "$out" | grep -qE '^#define VERSION_STANDARD[[:space:]]+1[[:space:]]*$' ||
+     ! echo "$out" | grep -qE '^#define VERSION_PATCH[[:space:]]+0[[:space:]]*$'; then
+    fail "gen_def: expected 2.1.0 to win over 2.0.0 GM rows, got: $out"
+  else
+    ok "gen_def: higher semver GM row wins"
+  fi
+  if ! echo "$out" | grep -F '#define VERSION_LINE "2.1.0"'; then
+    fail "gen_def: expected VERSION_LINE 2.1.0"
+  else
+    ok "gen_def: VERSION_LINE matches winning GM semver"
+  fi
+  cleanup "$d"
+}
+
+test_gen_def_gm_same_semver_higher_dev_wins() {
+  require_proc_sub "gen_def: same semver GM rows tie-break on DEV_VERSION" || return 0
+  local d
+  d="$(make_fake_repo gen_version_def.sh)"
+  write_ver_ga "$d/version/locked/1_0_0_shipped.ver" 1 0 0
+  mkdir -p "$d/version/entries/x" "$d/version/entries/y"
+  cat >"$d/version/entries/x/lowdv.ver" <<'VER'
+MAJOR_VERSION=3
+STANDARD_VERSION=0
+RELEASE_VERSION=0
+PRERELEASE=1
+GM=1
+DEV_VERSION=1
+DESCRIPTION=x
+VER
+  cat >"$d/version/entries/y/highdv.ver" <<'VER'
+MAJOR_VERSION=3
+STANDARD_VERSION=0
+RELEASE_VERSION=0
+PRERELEASE=1
+GM=1
+DEV_VERSION=9
+DESCRIPTION=y
+VER
+  local out
+  out="$(cd "$d" && ./scripts/gen_version_def.sh --stdout)"
+  if ! echo "$out" | grep -F '#define VERSION_LINE "3.0.0"'; then
+    fail "gen_def: expected VERSION_LINE 3.0.0, got: $out"
+  else
+    ok "gen_def: same semver uses higher DEV_VERSION GM row"
+  fi
+  cleanup "$d"
+}
+
+test_gen_def_no_gm_prerelease_line_with_build() {
+  require_proc_sub "gen_def: without GM=1, prerelease VERSION_LINE keeps tag and BUILD" || return 0
+  local d
+  d="$(make_fake_repo gen_version_def.sh)"
+  write_ver_ga "$d/version/locked/2_2_2_ga.ver" 2 2 2
+  cat >"$d/version/entries/p.ver" <<'VER'
+MAJOR_VERSION=4
+STANDARD_VERSION=0
+RELEASE_VERSION=0
+PRERELEASE=1
+DEV_VERSION=3
+PRERELEASE_TAG=RC
+DESCRIPTION=pr
+VER
+  local out
+  out="$(cd "$d" && ./scripts/gen_version_def.sh --stdout)"
+  if ! echo "$out" | grep -qE '^#define VERSION_MAJOR[[:space:]]+2[[:space:]]*$'; then
+    fail "gen_def: without GM, VERSION_* should follow locked 2.2.2"
+  else
+    ok "gen_def: locked triple when no GM=1"
+  fi
+  if ! echo "$out" | grep -F '#define VERSION_LINE "RC 4.0.0, BUILD 3"'; then
+    fail "gen_def: expected tagged BUILD line, got: $(echo "$out" | grep VERSION_LINE)"
+  else
+    ok "gen_def: prerelease line uses tag and BUILD without GM"
+  fi
+  cleanup "$d"
+}
+
+test_gen_def_malformed_gm_flag_rejected() {
+  require_proc_sub "gen_def: malformed GM=1foo rejected" || return 0
+  local d
+  d="$(make_fake_repo gen_version_def.sh)"
+  write_ver_ga "$d/version/locked/1_0_0_shipped.ver" 1 0 0
+  cat >"$d/version/entries/bad_gm.ver" <<'VER'
+MAJOR_VERSION=4
+STANDARD_VERSION=0
+RELEASE_VERSION=0
+PRERELEASE=1
+GM=1foo
+DEV_VERSION=1
+DESCRIPTION=bad gm
+VER
+  if (cd "$d" && ./scripts/gen_version_def.sh --stdout) 2>/dev/null; then
+    fail "gen_def: GM=1foo should fail"
+  else
+    ok "gen_def: malformed GM flag rejected"
+  fi
+  cleanup "$d"
+}
+
+test_unique_dev_version_numeric_suffix_rejected() {
+  require_proc_sub "unique: DEV_VERSION=1abc rejected" || return 0
+  local d
+  d="$(make_fake_repo check_version_entries_semver_dev_unique.sh)"
+  cat >"$d/version/entries/bad.ver" <<'VER'
+MAJOR_VERSION=1
+STANDARD_VERSION=0
+RELEASE_VERSION=0
+DEV_VERSION=1abc
+DESCRIPTION=oops
+VER
+  if bash "$(unique_script "$d")" 2>/dev/null; then
+    fail "unique: DEV_VERSION=1abc should fail"
+  else
+    ok "unique: DEV_VERSION with numeric suffix rejected"
+  fi
+  cleanup "$d"
+}
+
+test_unique_semver_numeric_suffix_rejected() {
+  require_proc_sub "unique: MAJOR_VERSION=1abc rejected" || return 0
+  local d
+  d="$(make_fake_repo check_version_entries_semver_dev_unique.sh)"
+  cat >"$d/version/entries/bad_semver.ver" <<'VER'
+MAJOR_VERSION=1abc
+STANDARD_VERSION=0
+RELEASE_VERSION=0
+DESCRIPTION=bad semver
+VER
+  if bash "$(unique_script "$d")" 2>/dev/null; then
+    fail "unique: MAJOR_VERSION=1abc should fail"
+  else
+    ok "unique: semver with numeric suffix rejected"
+  fi
+  cleanup "$d"
+}
+
+test_unique_standard_version_suffix_rejected() {
+  require_proc_sub "unique: STANDARD_VERSION=2abc rejected" || return 0
+  local d
+  d="$(make_fake_repo check_version_entries_semver_dev_unique.sh)"
+  cat >"$d/version/entries/bad_std.ver" <<'VER'
+MAJOR_VERSION=1
+STANDARD_VERSION=2abc
+RELEASE_VERSION=0
+DESCRIPTION=bad standard
+VER
+  if bash "$(unique_script "$d")" 2>/dev/null; then
+    fail "unique: STANDARD_VERSION=2abc should fail"
+  else
+    ok "unique: STANDARD_VERSION with numeric suffix rejected"
+  fi
+  cleanup "$d"
+}
+
+test_unique_release_version_suffix_rejected() {
+  require_proc_sub "unique: RELEASE_VERSION=3abc rejected" || return 0
+  local d
+  d="$(make_fake_repo check_version_entries_semver_dev_unique.sh)"
+  cat >"$d/version/entries/bad_rel.ver" <<'VER'
+MAJOR_VERSION=1
+STANDARD_VERSION=0
+RELEASE_VERSION=3abc
+DESCRIPTION=bad release
+VER
+  if bash "$(unique_script "$d")" 2>/dev/null; then
+    fail "unique: RELEASE_VERSION=3abc should fail"
+  else
+    ok "unique: RELEASE_VERSION with numeric suffix rejected"
+  fi
+  cleanup "$d"
+}
+
+test_unique_empty_dev_version_rejected() {
+  require_proc_sub "unique: empty DEV_VERSION= rejected" || return 0
+  local d
+  d="$(make_fake_repo check_version_entries_semver_dev_unique.sh)"
+  cat >"$d/version/entries/bad_empty_dv.ver" <<'VER'
+MAJOR_VERSION=1
+STANDARD_VERSION=0
+RELEASE_VERSION=0
+DEV_VERSION=
+DESCRIPTION=empty dev
+VER
+  if bash "$(unique_script "$d")" 2>/dev/null; then
+    fail "unique: DEV_VERSION= should fail"
+  else
+    ok "unique: empty DEV_VERSION assignment rejected"
+  fi
+  cleanup "$d"
+}
+
+test_layout_empty_gm_rejected() {
+  require_proc_sub "layout: empty GM= rejected" || return 0
+  local d
+  d="$(make_fake_repo check_version_prerelease_layout.sh)"
+  mkdir -p "$d/version/entries/preproduction 1.0.0"
+  cat >"$d/version/entries/preproduction 1.0.0/bad.ver" <<'VER'
+MAJOR_VERSION=1
+STANDARD_VERSION=0
+RELEASE_VERSION=0
+PRERELEASE=1
+GM=
+DEV_VERSION=1
+DESCRIPTION=empty gm
+VER
+  if bash "$d/scripts/check_version_prerelease_layout.sh" 2>/dev/null; then
+    fail "layout: GM= should fail"
+  else
+    ok "layout: empty GM assignment rejected"
+  fi
+  cleanup "$d"
+}
+
+test_layout_empty_prerelease_rejected() {
+  require_proc_sub "layout: empty PRERELEASE= rejected" || return 0
+  local d
+  d="$(make_fake_repo check_version_prerelease_layout.sh)"
+  mkdir -p "$d/version/entries/preproduction 1.0.0"
+  cat >"$d/version/entries/preproduction 1.0.0/bad.ver" <<'VER'
+MAJOR_VERSION=1
+STANDARD_VERSION=0
+RELEASE_VERSION=0
+PRERELEASE=
+GM=0
+DEV_VERSION=1
+DESCRIPTION=empty prerelease
+VER
+  if bash "$d/scripts/check_version_prerelease_layout.sh" 2>/dev/null; then
+    fail "layout: PRERELEASE= should fail"
+  else
+    ok "layout: empty PRERELEASE assignment rejected"
+  fi
+  cleanup "$d"
+}
+
+test_layout_malformed_prerelease_suffix_rejected() {
+  require_proc_sub "layout: PRERELEASE=1abc rejected" || return 0
+  local d
+  d="$(make_fake_repo check_version_prerelease_layout.sh)"
+  mkdir -p "$d/version/entries/preproduction 1.0.0"
+  cat >"$d/version/entries/preproduction 1.0.0/bad.ver" <<'VER'
+MAJOR_VERSION=1
+STANDARD_VERSION=0
+RELEASE_VERSION=0
+PRERELEASE=1abc
+GM=0
+DEV_VERSION=1
+DESCRIPTION=bad prerelease
+VER
+  if bash "$d/scripts/check_version_prerelease_layout.sh" 2>/dev/null; then
+    fail "layout: PRERELEASE=1abc should fail"
+  else
+    ok "layout: PRERELEASE with numeric suffix rejected"
+  fi
+  cleanup "$d"
+}
+
+test_layout_malformed_gm_suffix_rejected() {
+  require_proc_sub "layout: GM=0abc rejected" || return 0
+  local d
+  d="$(make_fake_repo check_version_prerelease_layout.sh)"
+  mkdir -p "$d/version/entries/preproduction 1.0.0"
+  cat >"$d/version/entries/preproduction 1.0.0/bad.ver" <<'VER'
+MAJOR_VERSION=1
+STANDARD_VERSION=0
+RELEASE_VERSION=0
+PRERELEASE=1
+GM=0abc
+DEV_VERSION=1
+DESCRIPTION=bad gm
+VER
+  if bash "$d/scripts/check_version_prerelease_layout.sh" 2>/dev/null; then
+    fail "layout: GM=0abc should fail"
+  else
+    ok "layout: GM with numeric suffix rejected"
+  fi
+  cleanup "$d"
+}
+
+promote_script() {
+  local fake_root="$1"
+  echo "$fake_root/scripts/promote_preproduction_for_main.sh"
+}
+
+test_promote_dry_run_keeps_preproduction() {
+  require_proc_sub "promote: --dry-run leaves preproduction tree unchanged" || return 0
+  local d out
+  d="$(make_fake_repo promote_preproduction_for_main.sh)"
+  mkdir -p "$d/version/entries/preproduction 2.0.0"
+  cat >"$d/version/entries/preproduction 2.0.0/ship.ver" <<'VER'
+MAJOR_VERSION=2
+STANDARD_VERSION=0
+RELEASE_VERSION=0
+PRERELEASE=1
+GM=1
+DEV_VERSION=1
+DESCRIPTION=go main
+VER
+  out=$(bash "$(promote_script "$d")" --dry-run 2>&1) || true
+  if [[ ! -d "$d/version/entries/preproduction 2.0.0" ]]; then
+    fail "promote dry-run: preproduction dir should remain"
+  elif [[ -e "$d/version/entries/ship.ver" ]]; then
+    fail "promote dry-run: root GA .ver should not be written"
+  elif ! echo "$out" | grep -q '\[dry-run\]'; then
+    fail "promote dry-run: expected [dry-run] lines in output"
+  else
+    ok "promote: --dry-run previews without writing"
+  fi
+  cleanup "$d"
+}
+
+merge_sim_script() {
+  local fake_root="$1"
+  echo "$fake_root/scripts/version_merge_sim_status.sh"
+}
+
+test_merge_sim_ref_lists_preproduction() {
+  require_proc_sub "merge_sim: ref scan lists preproduction dir" || return 0
+  local d out
+  d="$(mktemp -d)"
+  mkdir -p "$d/scripts/lib" "$d/version/entries/preproduction 4.0.0"
+  cp "$REPO_ROOT/scripts/lib/ver_field_parse.sh" "$d/scripts/lib/"
+  cp "$REPO_ROOT/scripts/version_merge_sim_status.sh" "$d/scripts/"
+  write_ver_prerelease "$d/version/entries/preproduction 4.0.0/a.ver" 4 0 0 1
+  (
+    cd "$d"
+    git init -q
+    git add .
+    git -c user.email=t@test -c user.name=t commit -q -m init
+  )
+  out=$(bash "$(merge_sim_script "$d")" --develop HEAD --main HEAD 2>&1)
+  if echo "$out" | grep -q 'preproduction_dirs: version/entries/preproduction 4.0.0'; then
+    ok "merge_sim: develop ref lists preproduction directory"
+  else
+    fail "merge_sim: expected preproduction dir in ref output, got: $out"
+  fi
+  cleanup "$d"
+}
+
+test_merge_sim_json_output_valid() {
+  require_proc_sub "merge_sim: --json --check emits parseable JSON" || return 0
+  local d out
+  d="$(make_fake_repo version_merge_sim_status.sh check_version_prerelease_layout.sh check_version_main_prerelease_policy.sh)"
+  cat >"$d/version/entries/root_gm.ver" <<'VER'
+MAJOR_VERSION=1
+STANDARD_VERSION=0
+RELEASE_VERSION=0
+PRERELEASE=1
+GM=1
+DEV_VERSION=1
+DESCRIPTION=root gm fails layout
+VER
+  out=$(bash "$(merge_sim_script "$d")" --json --check 2>&1) || true
+  if python3 -c 'import json,sys; json.loads(sys.stdin.read())' <<<"$out" 2>/dev/null; then
+    ok "merge_sim: JSON with multiline check output parses"
+  else
+    fail "merge_sim: --json --check output should be valid JSON"
+  fi
+  cleanup "$d"
+}
+
+test_merge_sim_promote_dry_run_via_status() {
+  require_proc_sub "merge_sim: --promote-dry-run runs promote preview" || return 0
+  local d out
+  d="$(make_fake_repo promote_preproduction_for_main.sh version_merge_sim_status.sh)"
+  mkdir -p "$d/version/entries/preproduction 3.0.0"
+  cat >"$d/version/entries/preproduction 3.0.0/x.ver" <<'VER'
+MAJOR_VERSION=3
+STANDARD_VERSION=0
+RELEASE_VERSION=0
+PRERELEASE=1
+GM=1
+DEV_VERSION=1
+DESCRIPTION=sim
+VER
+  out=$(bash "$(merge_sim_script "$d")" --promote-dry-run 2>&1) || true
+  if echo "$out" | grep -q 'promote dry-run' && echo "$out" | grep -q '\[dry-run\]'; then
+    ok "merge_sim: --promote-dry-run delegates to promote script"
+  else
+    fail "merge_sim: expected promote dry-run section in output"
+  fi
+  cleanup "$d"
+}
+
+test_promote_malformed_gm_suffix_aborts() {
+  require_proc_sub "promote: GM=1foo aborts without deleting preproduction" || return 0
+  local d
+  d="$(make_fake_repo promote_preproduction_for_main.sh)"
+  mkdir -p "$d/version/entries/preproduction 2.0.0"
+  cat >"$d/version/entries/preproduction 2.0.0/bad.ver" <<'VER'
+MAJOR_VERSION=2
+STANDARD_VERSION=0
+RELEASE_VERSION=0
+PRERELEASE=1
+GM=1foo
+DEV_VERSION=1
+DESCRIPTION=bad gm
+VER
+  if bash "$(promote_script "$d")" 2>/dev/null; then
+    fail "promote: GM=1foo should fail"
+  elif [[ ! -d "$d/version/entries/preproduction 2.0.0" ]]; then
+    fail "promote: preproduction dir should remain after malformed GM"
+  else
+    ok "promote: malformed GM suffix aborts and keeps preproduction dir"
+  fi
+  cleanup "$d"
+}
+
+test_gen_def_malformed_gm_zero_suffix_rejected() {
+  require_proc_sub "gen_def: GM=0abc rejected" || return 0
+  local d
+  d="$(make_fake_repo gen_version_def.sh)"
+  write_ver_ga "$d/version/locked/1_0_0_shipped.ver" 1 0 0
+  cat >"$d/version/entries/bad_gm.ver" <<'VER'
+MAJOR_VERSION=4
+STANDARD_VERSION=0
+RELEASE_VERSION=0
+PRERELEASE=1
+GM=0abc
+DEV_VERSION=1
+DESCRIPTION=bad gm
+VER
+  if (cd "$d" && ./scripts/gen_version_def.sh --stdout) 2>/dev/null; then
+    fail "gen_def: GM=0abc should fail"
+  else
+    ok "gen_def: GM=0abc rejected"
+  fi
+  cleanup "$d"
+}
+
 # ── Run all tests ─────────────────────────────────────────────────────────────
 
 # check_version_main_prerelease_policy.sh
@@ -1062,6 +1659,32 @@ test_layout_multiple_preproduction_dirs
 test_layout_missing_semver_rejected
 test_layout_version_alias_keys_accepted
 test_layout_preproduction_dev_version_gte_2
+test_layout_malformed_prerelease_suffix_rejected
+test_layout_malformed_gm_suffix_rejected
+test_layout_empty_gm_rejected
+test_layout_empty_prerelease_rejected
+
+# promote_preproduction_for_main.sh
+test_promote_dry_run_keeps_preproduction
+test_promote_malformed_gm_suffix_aborts
+
+# version_merge_sim_status.sh
+test_merge_sim_ref_lists_preproduction
+test_merge_sim_promote_dry_run_via_status
+test_merge_sim_json_output_valid
+
+# check_version_entries_semver_dev_unique.sh
+test_unique_empty_entries
+test_unique_two_ga_distinct_semver
+test_unique_two_ga_same_semver_rejected
+test_unique_same_semver_distinct_dev_passes
+test_unique_duplicate_dev_rejected
+test_unique_malformed_dev_version_rejected
+test_unique_dev_version_numeric_suffix_rejected
+test_unique_semver_numeric_suffix_rejected
+test_unique_standard_version_suffix_rejected
+test_unique_release_version_suffix_rejected
+test_unique_empty_dev_version_rejected
 
 # bump_dev_version.sh
 test_bump_increments_dev_version
@@ -1092,6 +1715,14 @@ test_relocate_dry_run_exits_zero_when_clean
 test_relocate_idempotent
 test_relocate_refuses_overwrite
 test_relocate_multiple_prerelease_files
+
+# gen_version_def.sh (isolated temp repo; script copied into fake scripts/)
+test_gen_def_gm_overrides_version_and_plain_line
+test_gen_def_gm_picks_highest_semver_then_dev
+test_gen_def_gm_same_semver_higher_dev_wins
+test_gen_def_no_gm_prerelease_line_with_build
+test_gen_def_malformed_gm_flag_rejected
+test_gen_def_malformed_gm_zero_suffix_rejected
 
 # ── Summary ───────────────────────────────────────────────────────────────────
 

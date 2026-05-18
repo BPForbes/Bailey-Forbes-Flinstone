@@ -1,20 +1,23 @@
 #!/usr/bin/env bash
 # Promote preproduction A.B.C/ directories that contain exactly one GM=1 .ver:
-#   - Sort every *.ver in that folder by DEV_VERSION ascending.
-#   - Build one new root GA .ver (basename from the GM=1 file) whose DESCRIPTION itemizes
-#     each source file's description (DEV_VERSION order), with no PRERELEASE, GM, or DEV_VERSION keys.
-#   - Remove the entire preproduction directory (and from locked only if it existed there).
+#   - Require exactly one GM=1 among *.ver in that folder.
+#   - Build one new root GA .ver (basename from the GM=1 file) whose DESCRIPTION is
+#     copied only from that GM=1 file (not a roll-up of other rows), with no PRERELEASE,
+#     GM, or DEV_VERSION keys.
+#   - Remove every *.ver in the preproduction directory, then remove the directory.
 #
 # finalize_version_locked.sh does not copy preproduction */ into locked; locked may lack
 # the folder until a prior manual copy — this script still cleans locked if present.
 set -euo pipefail
+DRY_RUN=0
+for arg in "$@"; do
+  [[ "$arg" == --dry-run ]] && DRY_RUN=1
+done
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
-
-get_field() {
-  local key="$1" file="$2"
-  grep -E "^[[:space:]]*(int[[:space:]]+)?${key}=" "$file" 2>/dev/null | head -1 |
-    sed -E 's/^[^=]*=[[:space:]]*([0-9]+).*/\1/' || true
-}
+SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
+# shellcheck source=lib/ver_field_parse.sh
+source "$SCRIPT_DIR/lib/ver_field_parse.sh"
+VER_PARSE_ERR_PREFIX="promote_preproduction_for_main"
 
 extract_description() {
   python3 - "$1" <<'PY'
@@ -63,7 +66,8 @@ promote_root() {
     shopt -s nullglob
     for vf in "$dir"/*.ver; do
       [[ -f "$vf" ]] || continue
-      if grep -qE '^[[:space:]]*(int[[:space:]]+)?GM=1([[:space:]]|$)' "$vf"; then
+      gm_val=$(ver_parse_flag_field GM "$vf")
+      if [[ "$gm_val" == "1" ]]; then
         gm_n=$((gm_n + 1))
         gm_file=$vf
       fi
@@ -76,30 +80,9 @@ promote_root() {
     fi
     [[ -n "$gm_file" ]] || continue
 
-    local sort_tmp
-    sort_tmp=$(mktemp)
-    shopt -s nullglob
-    for vf in "$dir"/*.ver; do
-      [[ -f "$vf" ]] || continue
-      dv=$(get_field DEV_VERSION "$vf")
-      [[ -n "$dv" ]] || dv=0
-      printf '%s\t%s\n' "$dv" "$vf"
-    done | sort -t $'\t' -k1,1n >"$sort_tmp"
-    shopt -u nullglob
-
     local agg delim="PROMOTE_DESC_END"
-    agg=""
-    while IFS=$'\t' read -r dv fpath; do
-      [[ -f "$fpath" ]] || continue
-      local one
-      one=$(extract_description "$fpath")
-      one=${one//$'\r'/}
-      if [[ -n "$agg" ]]; then
-        agg+=$'\n'
-      fi
-      agg+="- (DEV_VERSION ${dv}) ${one}"
-    done <"$sort_tmp"
-    rm -f "$sort_tmp"
+    agg=$(extract_description "$gm_file")
+    agg=${agg//$'\r'/}
 
     local dest="$BASE/$(basename "$gm_file")"
     if [[ -e "$dest" ]]; then
@@ -107,16 +90,22 @@ promote_root() {
       exit 1
     fi
 
-    m=$(get_field MAJOR_VERSION "$gm_file")
-    [[ -n "$m" ]] || m=$(get_field VERSION_MAJOR "$gm_file")
-    s=$(get_field STANDARD_VERSION "$gm_file")
-    [[ -n "$s" ]] || s=$(get_field VERSION_STANDARD "$gm_file")
-    r=$(get_field RELEASE_VERSION "$gm_file")
-    [[ -n "$r" ]] || r=$(get_field MINOR_VERSION "$gm_file")
-    [[ -n "$r" ]] || r=$(get_field VERSION_PATCH "$gm_file")
+    m=$(ver_parse_nonneg_int_field MAJOR_VERSION "$gm_file")
+    [[ -n "$m" ]] || m=$(ver_parse_nonneg_int_field VERSION_MAJOR "$gm_file")
+    s=$(ver_parse_nonneg_int_field STANDARD_VERSION "$gm_file")
+    [[ -n "$s" ]] || s=$(ver_parse_nonneg_int_field VERSION_STANDARD "$gm_file")
+    r=$(ver_parse_nonneg_int_field RELEASE_VERSION "$gm_file")
+    [[ -n "$r" ]] || r=$(ver_parse_nonneg_int_field MINOR_VERSION "$gm_file")
+    [[ -n "$r" ]] || r=$(ver_parse_nonneg_int_field VERSION_PATCH "$gm_file")
     if [[ -z "$m" || -z "$s" || -z "$r" ]]; then
       echo "promote_preproduction_for_main: missing semver in $gm_file" >&2
       exit 1
+    fi
+
+    if (( DRY_RUN )); then
+      echo "promote_preproduction_for_main: [dry-run] would write $dest from $gm_file (GA, DESCRIPTION from GM=1 file only)"
+      echo "promote_preproduction_for_main: [dry-run] would remove $dir/*.ver and delete $dir"
+      continue
     fi
 
     {
@@ -136,10 +125,14 @@ promote_root() {
       echo "promote_preproduction_for_main: could not remove $dir (non-.ver files present?)" >&2
       exit 1
     fi
-    echo "promote_preproduction_for_main: promoted $(basename "$gm_file") from $dir → $(basename "$dest") (GA, aggregated DESCRIPTION)"
+    echo "promote_preproduction_for_main: promoted $(basename "$gm_file") from $dir → $(basename "$dest") (GA, DESCRIPTION from GM=1 file only)"
   done < <(find "$BASE" -mindepth 1 -maxdepth 1 -type d -name 'preproduction *' -print0 2>/dev/null)
 }
 
 promote_root "$ROOT/version/entries"
 promote_root "$ROOT/version/locked"
-echo "promote_preproduction_for_main: done"
+if (( DRY_RUN )); then
+  echo "promote_preproduction_for_main: dry-run complete (no files changed)"
+else
+  echo "promote_preproduction_for_main: done"
+fi

@@ -37,14 +37,27 @@ RELEASE_DATE (merge finalize):
   If RELEASE_DATE is still absent where tooling expects it, scripts/gen_version_changelog.c
   may use the generator's local calendar date at generation time (see that script).
 
-PRERELEASE / GM / DEV_VERSION / preproduction directories (VERSION uses locked; VERSION_LINE uses entries PRERELEASE=1):
+PRERELEASE / GM / DEV_VERSION / preproduction directories (gen_version_def.sh):
   At the root of version/entries/ (and version/locked/), GA-oriented rows omit PRERELEASE
   or set PRERELEASE=0. Optional DEV_VERSION on those rows counts develop-side iterations
   before preproduction. PRERELEASE=1 rows are authored at the version/entries/ root for
   same-repo automation (see below); never set GM=1 on a root *.ver file.
-  Optional PRERELEASE_TAG=token (letters/digits._+- only) sets the prerelease label in
-  userland/shell/version_def.h VERSION_LINE (default PRE when PRERELEASE=1 and the key is absent).
-  With DEV_VERSION>=1, VERSION_LINE appends ", BUILD <n>" (comma, space, BUILD, space, n).
+  When any .ver under version/entries/ has PRERELEASE=1 and GM=1, scripts/gen_version_def.sh
+  sets VERSION_MAJOR/STANDARD/PATCH and VERSION from that row's MAJOR/STANDARD/RELEASE
+  (RELEASE_VERSION maps to VERSION_PATCH) instead of only version/locked, and sets VERSION_LINE
+  to plain A.B.C (no PRERELEASE_TAG, no ", BUILD n"). When several such rows exist, the newest
+  wins (highest semver, then highest DEV_VERSION). Otherwise shipped VERSION_* / VERSION follow
+  the highest triple in version/locked only.
+  For ordinary prerelease rows (no winning GM=1), optional PRERELEASE_TAG=token (letters/digits._+- only)
+  sets the prerelease label in userland/shell/version_def.h VERSION_LINE (default PRE when PRERELEASE=1
+  and the key is absent). With DEV_VERSION>=1, VERSION_LINE appends ", BUILD <n>" (comma, space, BUILD, space, n).
+
+  Unique keys: every *.ver under version/entries/ (including preproduction <A>.<B>.<C>/)
+  must have a unique (MAJOR, STANDARD, RELEASE, DEV_VERSION) quadruple tree-wide.
+  Omitting DEV_VERSION= counts as DEV_VERSION 0 for this rule. Before assigning
+  DEV_VERSION for a given A.B.C, scan version/entries/ and that preproduction folder
+  and pick the smallest unused non-negative int. CI runs
+  ./scripts/check_version_entries_semver_dev_unique.sh (O(kn) over dirs and files).
 
   PRERELEASE=1 marks an in-flight prerelease line. Author new *.ver rows at the
   version/entries/ repository root with PRERELEASE=1 (same MAJOR/STANDARD/RELEASE as
@@ -62,8 +75,8 @@ PRERELEASE / GM / DEV_VERSION / preproduction directories (VERSION uses locked; 
   DEV_VERSION between iterations with ./scripts/bump_dev_version.sh, or add another *.ver
   at the version/entries/ root with the same MAJOR/STANDARD/RELEASE, PRERELEASE=1, and
   the next DEV_VERSION (e.g. DEV_VERSION=1 then DEV_VERSION=2); relocate moves each row
-  into the same preproduction <A>.<B>.<C>/ so promotion still rolls up every file in
-  DEV_VERSION order.
+  into the same preproduction <A>.<B>.<C>/ so maintainers can review the full train before
+  promotion; the shipped GA .ver from promote uses the GM=1 row's DESCRIPTION only.
 
   AI / automation (no semver backtracking): the preproduction version is the A.B.C
   in directory names
@@ -82,16 +95,18 @@ PRERELEASE / GM / DEV_VERSION / preproduction directories (VERSION uses locked; 
 
   When you are ready to cut main: set GM=1 on exactly one .ver in that folder, then run
   ./scripts/promote_preproduction_for_main.sh (or make promote-preproduction-for-main).
-  That script sorts every *.ver in the folder by DEV_VERSION ascending, builds one new
-  root *.ver (basename from the GM=1 file) whose DESCRIPTION itemizes each source row,
-  omits PRERELEASE/GM/DEV_VERSION entirely, and deletes the entire preproduction directory
-  from version/entries (and from version/locked only if a legacy copy existed there).
+  That script builds one new root *.ver (basename from the GM=1 file) whose DESCRIPTION
+  is copied only from that GM=1 row (semver and optional RELEASE_DATE also come from it),
+  omits PRERELEASE/GM/DEV_VERSION entirely, removes every *.ver in the preproduction folder,
+  and deletes the entire preproduction directory from version/entries (and from
+  version/locked only if a legacy copy existed there).
   finalize_version_locked.sh does not copy preproduction */ into locked, so the published
   tree normally only gains the merged root .ver after promotion, then the next finalize
   copies that file into version/locked/.
 
-  userland/shell/version_def.h still reports only A.B.C (metadata keys above are ignored
-  for VERSION). CI runs check_version_prerelease_layout.sh on all branches and
+  userland/shell/version_def.h reports A.B.C in VERSION_* / VERSION (normally from
+  version/locked; a winning PRERELEASE=1 + GM=1 row under version/entries overrides as above).
+  CI runs check_version_prerelease_layout.sh on all branches and
   check_version_main_prerelease_policy.sh on main and on PRs targeting main (no
   preproduction */ dirs, no PRERELEASE=1, no GM=1, no DEV_VERSION= lines).
 
@@ -107,8 +122,9 @@ Finalize (copy entries → locked, skipping preproduction */), then regenerate t
   ./scripts/finalize_version_locked.sh   # or: make finalize-version-locked
   make                                   # or: ./scripts/gen_version_def.sh
 
-userland/shell/version_def.h is generated from the highest A.B.C among all
-version/locked/**/*.ver files (recursive). Do not edit the header by hand.
+userland/shell/version_def.h is generated by scripts/gen_version_def.sh from
+version/locked (highest A.B.C) and version/entries (PRERELEASE / GM / VERSION_LINE rules above).
+Do not edit the header by hand.
 
 AI authoring (new .ver rows):
   New .ver files belong under version/entries/ at the repository root, not in a

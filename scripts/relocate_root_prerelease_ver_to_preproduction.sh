@@ -18,14 +18,12 @@
 set -euo pipefail
 ROOT="${REPO_ROOT:-$(cd "$(dirname "$0")/.." && pwd)}"
 ENT="$ROOT/version/entries"
+SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 # shellcheck source=lib/ver_release_date_stamp.sh
-source "$(cd "$(dirname "$0")" && pwd)/lib/ver_release_date_stamp.sh"
-
-get_field() {
-  local key="$1" file="$2"
-  grep -E "^[[:space:]]*(int[[:space:]]+)?${key}=" "$file" 2>/dev/null | head -1 |
-    sed -E 's/^[^=]*=[[:space:]]*([0-9]+).*/\1/' || true
-}
+source "$SCRIPT_DIR/lib/ver_release_date_stamp.sh"
+# shellcheck source=lib/ver_field_parse.sh
+source "$SCRIPT_DIR/lib/ver_field_parse.sh"
+VER_PARSE_ERR_PREFIX="relocate_root_prerelease_ver_to_preproduction"
 
 dry_gate=0
 if [[ "${1:-}" == "--dry-run-exit-if-needed" ]]; then
@@ -41,8 +39,7 @@ for f in "${ver_root[@]}"; do
   [[ -f "$f" ]] || continue
   rel="${f#"$ENT"/}"
   [[ "$(dirname "$rel")" == "." ]] || continue
-  pr=$(get_field PRERELEASE "$f")
-  [[ -n "$pr" ]] || pr=0
+  pr=$(ver_parse_flag_field PRERELEASE "$f")
   if [[ "$pr" -eq 1 ]]; then
     need_reloc=1
     break
@@ -63,17 +60,16 @@ for f in "${ver_root[@]}"; do
   [[ -f "$f" ]] || continue
   rel="${f#"$ENT"/}"
   [[ "$(dirname "$rel")" == "." ]] || continue
-  pr=$(get_field PRERELEASE "$f")
-  [[ -n "$pr" ]] || pr=0
+  pr=$(ver_parse_flag_field PRERELEASE "$f")
   (( pr == 1 )) || continue
 
-  m=$(get_field MAJOR_VERSION "$f")
-  [[ -n "$m" ]] || m=$(get_field VERSION_MAJOR "$f")
-  s=$(get_field STANDARD_VERSION "$f")
-  [[ -n "$s" ]] || s=$(get_field VERSION_STANDARD "$f")
-  r=$(get_field RELEASE_VERSION "$f")
-  [[ -n "$r" ]] || r=$(get_field MINOR_VERSION "$f")
-  [[ -n "$r" ]] || r=$(get_field VERSION_PATCH "$f")
+  m=$(ver_parse_nonneg_int_field MAJOR_VERSION "$f")
+  [[ -n "$m" ]] || m=$(ver_parse_nonneg_int_field VERSION_MAJOR "$f")
+  s=$(ver_parse_nonneg_int_field STANDARD_VERSION "$f")
+  [[ -n "$s" ]] || s=$(ver_parse_nonneg_int_field VERSION_STANDARD "$f")
+  r=$(ver_parse_nonneg_int_field RELEASE_VERSION "$f")
+  [[ -n "$r" ]] || r=$(ver_parse_nonneg_int_field MINOR_VERSION "$f")
+  [[ -n "$r" ]] || r=$(ver_parse_nonneg_int_field VERSION_PATCH "$f")
   if [[ -z "$m" || -z "$s" || -z "$r" ]]; then
     echo "relocate_root_prerelease_ver_to_preproduction: missing semver in $f" >&2
     exit 1

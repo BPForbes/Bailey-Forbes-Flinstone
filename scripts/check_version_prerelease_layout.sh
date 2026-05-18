@@ -10,39 +10,25 @@
 set -euo pipefail
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 ENT="$ROOT/version/entries"
+SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
+# shellcheck source=lib/ver_field_parse.sh
+source "$SCRIPT_DIR/lib/ver_field_parse.sh"
+VER_PARSE_ERR_PREFIX="check_version_prerelease_layout"
 err=0
-
-get_field() {
-  local key="$1" file="$2"
-  grep -E "^[[:space:]]*(int[[:space:]]+)?${key}=" "$file" 2>/dev/null | head -1 |
-    sed -E 's/^[^=]*=[[:space:]]*([0-9]+).*/\1/' || true
-}
 
 while IFS= read -r -d '' f; do
   rel="${f#"$ENT"/}"
   parent=$(dirname "$rel")
-  pr=$(get_field PRERELEASE "$f")
-  [[ -n "$pr" ]] || pr=0
-  gm=$(get_field GM "$f")
-  [[ -n "$gm" ]] || gm=0
-  dv=$(get_field DEV_VERSION "$f")
-  if ! [[ "$pr" =~ ^[0-9]+$ ]]; then
-    echo "check_version_prerelease_layout: invalid PRERELEASE in $f" >&2
-    err=1
-    continue
-  fi
-  if ! [[ "$gm" =~ ^[0-9]+$ ]]; then
-    echo "check_version_prerelease_layout: invalid GM in $f" >&2
-    err=1
-    continue
-  fi
-  m=$(get_field MAJOR_VERSION "$f")
-  [[ -n "$m" ]] || m=$(get_field VERSION_MAJOR "$f")
-  s=$(get_field STANDARD_VERSION "$f")
-  [[ -n "$s" ]] || s=$(get_field VERSION_STANDARD "$f")
-  r=$(get_field RELEASE_VERSION "$f")
-  [[ -n "$r" ]] || r=$(get_field MINOR_VERSION "$f")
-  [[ -n "$r" ]] || r=$(get_field VERSION_PATCH "$f")
+  pr=$(ver_parse_flag_field PRERELEASE "$f")
+  gm=$(ver_parse_flag_field GM "$f")
+  dv=$(ver_parse_nonneg_int_field DEV_VERSION "$f")
+  m=$(ver_parse_nonneg_int_field MAJOR_VERSION "$f")
+  [[ -n "$m" ]] || m=$(ver_parse_nonneg_int_field VERSION_MAJOR "$f")
+  s=$(ver_parse_nonneg_int_field STANDARD_VERSION "$f")
+  [[ -n "$s" ]] || s=$(ver_parse_nonneg_int_field VERSION_STANDARD "$f")
+  r=$(ver_parse_nonneg_int_field RELEASE_VERSION "$f")
+  [[ -n "$r" ]] || r=$(ver_parse_nonneg_int_field MINOR_VERSION "$f")
+  [[ -n "$r" ]] || r=$(ver_parse_nonneg_int_field VERSION_PATCH "$f")
   if [[ -z "$m" || -z "$s" || -z "$r" ]]; then
     echo "check_version_prerelease_layout: missing semver in $f" >&2
     err=1
@@ -51,7 +37,7 @@ while IFS= read -r -d '' f; do
   exp_dir="preproduction ${m}.${s}.${r}"
   if [[ "$parent" == "." ]]; then
     if [[ "$pr" -eq 1 ]]; then
-      if [[ -z "$dv" ]] || ! [[ "$dv" =~ ^[0-9]+$ ]] || (( dv < 1 )); then
+      if [[ -z "$dv" ]] || (( dv < 1 )); then
         echo "check_version_prerelease_layout: root PRERELEASE=1 requires DEV_VERSION>=1 — $f" >&2
         err=1
       fi
@@ -69,7 +55,7 @@ while IFS= read -r -d '' f; do
       echo "check_version_prerelease_layout: under ${parent}/ PRERELEASE must be 1 — $f" >&2
       err=1
     fi
-    if [[ -z "$dv" ]] || ! [[ "$dv" =~ ^[0-9]+$ ]] || (( dv < 1 )); then
+    if [[ -z "$dv" ]] || (( dv < 1 )); then
       echo "check_version_prerelease_layout: under ${parent}/ each .ver needs DEV_VERSION>=1 — $f" >&2
       err=1
     fi
@@ -80,7 +66,8 @@ while IFS= read -r -d '' dir; do
   gm_n=0
   while IFS= read -r -d '' vf; do
     [[ -f "$vf" ]] || continue
-    if grep -qE '^[[:space:]]*(int[[:space:]]+)?GM=1([[:space:]]|$)' "$vf"; then
+    gm_val=$(ver_parse_flag_field GM "$vf")
+    if [[ "$gm_val" == "1" ]]; then
       gm_n=$((gm_n + 1))
     fi
   done < <(find "$dir" -maxdepth 1 -type f -name '*.ver' -print0 2>/dev/null)

@@ -1,6 +1,7 @@
 #!/usr/bin/env bash
 # Ensure userland/shell/version_def.h matches scripts/gen_version_def.sh output
-# (shipped semver from version/locked/**/*.ver plus VERSION_LINE from version/entries/**/*.ver).
+# (see docs/versioning.md: shipped semver from version/locked unless a winning
+# PRERELEASE=1 + GM=1 row under version/entries overrides VERSION_* and plain VERSION_LINE).
 set -euo pipefail
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 DEF="$ROOT/userland/shell/version_def.h"
