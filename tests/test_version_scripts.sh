@@ -1414,6 +1414,35 @@ VER
   cleanup "$d"
 }
 
+promote_script() {
+  local fake_root="$1"
+  echo "$fake_root/scripts/promote_preproduction_for_main.sh"
+}
+
+test_promote_malformed_gm_suffix_aborts() {
+  require_proc_sub "promote: GM=1foo aborts without deleting preproduction" || return 0
+  local d
+  d="$(make_fake_repo promote_preproduction_for_main.sh)"
+  mkdir -p "$d/version/entries/preproduction 2.0.0"
+  cat >"$d/version/entries/preproduction 2.0.0/bad.ver" <<'VER'
+MAJOR_VERSION=2
+STANDARD_VERSION=0
+RELEASE_VERSION=0
+PRERELEASE=1
+GM=1foo
+DEV_VERSION=1
+DESCRIPTION=bad gm
+VER
+  if bash "$(promote_script "$d")" 2>/dev/null; then
+    fail "promote: GM=1foo should fail"
+  elif [[ ! -d "$d/version/entries/preproduction 2.0.0" ]]; then
+    fail "promote: preproduction dir should remain after malformed GM"
+  else
+    ok "promote: malformed GM suffix aborts and keeps preproduction dir"
+  fi
+  cleanup "$d"
+}
+
 test_gen_def_malformed_gm_zero_suffix_rejected() {
   require_proc_sub "gen_def: GM=0abc rejected" || return 0
   local d
@@ -1469,6 +1498,9 @@ test_layout_version_alias_keys_accepted
 test_layout_preproduction_dev_version_gte_2
 test_layout_malformed_prerelease_suffix_rejected
 test_layout_malformed_gm_suffix_rejected
+
+# promote_preproduction_for_main.sh
+test_promote_malformed_gm_suffix_aborts
 
 # check_version_entries_semver_dev_unique.sh
 test_unique_empty_entries

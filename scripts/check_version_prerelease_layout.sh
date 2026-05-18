@@ -66,7 +66,8 @@ while IFS= read -r -d '' dir; do
   gm_n=0
   while IFS= read -r -d '' vf; do
     [[ -f "$vf" ]] || continue
-    if [[ "$(ver_parse_flag_field GM "$vf")" == "1" ]]; then
+    gm_val=$(ver_parse_flag_field GM "$vf")
+    if [[ "$gm_val" == "1" ]]; then
       gm_n=$((gm_n + 1))
     fi
   done < <(find "$dir" -maxdepth 1 -type f -name '*.ver' -print0 2>/dev/null)
