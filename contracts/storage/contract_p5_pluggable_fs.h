@@ -28,4 +28,9 @@ typedef enum {
 /** NUL-terminated backend name length bound for registration tables. */
 #define FL_PLUGGABLE_FS_NAME_MAX_CHARS 63u
 
+/** Soft cap on registered pluggable backends in lab builds. */
+#define FL_PLUGGABLE_FS_DRIVER_TABLE_MAX 16u
+
+/** Read-only attach should prefer **FL_VFS_MOUNT_FLAG_RDONLY** (**contract_p5_vfs.h**) over kind-only encoding. */
+
 #endif /* FL_CONTRACT_P5_PLUGGABLE_FS_H */

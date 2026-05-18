@@ -27,7 +27,20 @@ typedef enum {
     FL_PAGE_CACHE_PRIORITY_HOT = 2
 } fl_page_cache_priority_t;
 
+/** Soft cap on resident cache lines (lab builds). */
+#define FL_PAGE_CACHE_MAX_ENTRIES 4096u
+
+/** Dirty ratio threshold (percent) before writeback pressure is required. */
+#define FL_PAGE_CACHE_DIRTY_RATIO_PERCENT_MAX 80u
+
+/** Max blocks flushed per writeback batch (bounded work per tick). */
+#define FL_PAGE_CACHE_WRITEBACK_BATCH_MAX 32u
+
 _Static_assert(FL_PAGE_CACHE_BLOCK_SHIFT_MAX >= FL_PAGE_CACHE_BLOCK_SHIFT_MIN,
                "page cache block shift bounds");
+_Static_assert(FL_PAGE_CACHE_DIRTY_RATIO_PERCENT_MAX <= 100u,
+               "dirty ratio must be a valid percentage");
+_Static_assert(FL_PAGE_CACHE_WRITEBACK_BATCH_MAX >= 1u,
+               "writeback batch must flush at least one block");
 
 #endif /* FL_CONTRACT_P5_PAGE_CACHE_H */

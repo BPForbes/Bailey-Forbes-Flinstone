@@ -23,6 +23,9 @@ typedef uint32_t fl_supervised_service_id_t;
 /** Default graceful shutdown wait before SIGKILL-style escalation (seconds). */
 #define FL_CONTRACT_P7_GRACEFUL_SHUTDOWN_TIMEOUT_SEC_DEFAULT 30u
 
+/** Soft cap on concurrently supervised services in lab builds. */
+#define FL_CONTRACT_P7_SUPERVISED_SERVICE_MAX 32u
+
 typedef enum {
     FL_CONTRACT_P7_PID_STALE_POLICY_REJECT = 0,
     FL_CONTRACT_P7_PID_STALE_POLICY_REMOVE_AND_CONTINUE = 1

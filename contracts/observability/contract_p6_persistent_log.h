@@ -26,4 +26,13 @@ typedef enum {
 /** Relative path segment cap for hosted log directory + file name reviews. */
 #define FL_CONTRACT_P6_PERSISTENT_LOG_PATH_MAX_CHARS 255u
 
+/** Max rotated segment files retained after size rotation (0 = unlimited; lab uses cap). */
+#define FL_CONTRACT_P6_PERSISTENT_LOG_MAX_ROTATED_FILES 16u
+
+/** Total on-disk budget for persistent log directory (bytes; includes active + rotated). */
+#define FL_CONTRACT_P6_PERSISTENT_LOG_DISK_BUDGET_BYTES_MAX (256u * 1024u * 1024u)
+
+_Static_assert(FL_CONTRACT_P6_PERSISTENT_LOG_MAX_ROTATED_FILES >= 1u,
+               "at least one rotated segment slot when rotation is enabled");
+
 #endif /* FL_CONTRACT_P6_PERSISTENT_LOG_H */

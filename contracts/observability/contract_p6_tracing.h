@@ -13,6 +13,7 @@ typedef enum {
     FL_CONTRACT_P6_TRACE_SCHEDULER = 0,
     FL_CONTRACT_P6_TRACE_NET = 1,
     FL_CONTRACT_P6_TRACE_BLOCK = 2,
+    FL_CONTRACT_P6_TRACE_VFS = 3,
     FL_CONTRACT_P6_TRACE_COUNT
 } fl_contract_p6_tracepoint_t;
 
@@ -27,7 +28,9 @@ void fl_contract_p6_trace_emit(fl_contract_p6_tracepoint_t tp, const char *fmt, 
 #define FL_CONTRACT_P6_TRACE(tp, ...) ((void)(tp))
 #endif
 
-_Static_assert((int)FL_CONTRACT_P6_TRACE_COUNT == 3,
+/** Trace emitters should attach **fl_contract_p6_correlation_id_t** when **P6-1** logging is active. */
+
+_Static_assert((int)FL_CONTRACT_P6_TRACE_COUNT == 4,
                "P6-5 tracepoint table size");
 
 #endif /* FL_CONTRACT_P6_TRACING_H */

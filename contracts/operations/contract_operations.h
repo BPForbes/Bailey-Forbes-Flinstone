@@ -18,7 +18,7 @@
 
 #include "contract_extend.h"
 
-#define FL_CONTRACT_P7_OPERATIONS_REV 1
+#define FL_CONTRACT_P7_OPERATIONS_REV 2
 
 #include "contract_p7_service_supervision.h"
 #include "contract_p7_packaging.h"

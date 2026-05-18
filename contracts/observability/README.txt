@@ -9,11 +9,11 @@ P6 (*contracts/observability*) — roadmap **Phase 6** (**P6-1** structured log 
 
 | File | Roadmap |
 |------|---------|
-| *contract_p6_structured_log.h* | P6-1 (composes **contract_log.h** from foundations) |
+| *contract_p6_structured_log.h* | P6-1 (min level, correlation id, filter hooks; composes **contract_log.h**) |
 | *contract_p6_ring_buffer.h* | P6-2 |
-| *contract_p6_persistent_log.h* | P6-3 |
-| *contract_p6_audit_trail.h* | P6-4 |
-| *contract_p6_tracing.h* | P6-5 |
+| *contract_p6_persistent_log.h* | P6-3 (rotation file cap, disk budget) |
+| *contract_p6_audit_trail.h* | P6-4 (event kind enum) |
+| *contract_p6_tracing.h* | P6-5 (**VFS** tracepoint; ties to correlation id) |
 
 Each shard includes **contract_extend.h** so standalone use inherits **P0** vocabulary before **P6**.
 

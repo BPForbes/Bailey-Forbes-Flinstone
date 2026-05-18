@@ -9,12 +9,25 @@
 #include "contract_extend.h"
 #include "contract_log.h"
 
+#include <stdint.h>
+
 #define FL_CONTRACT_P6_1_STRUCTURED_LOG_CONTRACT_DEFINED 1
 
 /** Default hosted rate limit (per monotonic second); override before including dispatch. */
 #ifndef FL_CONTRACT_P6_LOG_RATE_MAX_PER_SEC
 #define FL_CONTRACT_P6_LOG_RATE_MAX_PER_SEC 64
 #endif
+
+/** Default minimum severity emitted when no runtime filter is installed. */
+#define FL_CONTRACT_P6_LOG_MIN_LEVEL_DEFAULT FL_LOG_INFO
+
+/** Opaque correlation id threading log lines across subsystems (hosted/lab). */
+typedef uint64_t fl_contract_p6_correlation_id_t;
+
+#define FL_CONTRACT_P6_CORRELATION_ID_INVALID ((fl_contract_p6_correlation_id_t)0u)
+
+/** Max optional runtime level-filter hooks (implementation may use fewer). */
+#define FL_CONTRACT_P6_RUNTIME_FILTER_HOOK_MAX 4u
 
 /** Where the emit path may run (informational for reviewers and static analysis). */
 typedef enum {

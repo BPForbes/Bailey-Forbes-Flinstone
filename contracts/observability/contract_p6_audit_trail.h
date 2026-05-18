@@ -22,6 +22,14 @@
 /** Tail scan window for very large on-disk audit logs (bytes). */
 #define FL_CONTRACT_P6_AUDIT_TAIL_SCAN_BYTES_MAX (2u * 1024u * 1024u)
 
+/** Security-relevant audit event categories (line format may embed as **type=**). */
+typedef enum {
+    FL_CONTRACT_P6_AUDIT_EVT_SHELL = 0,
+    FL_CONTRACT_P6_AUDIT_EVT_AUTHZ = 1,
+    FL_CONTRACT_P6_AUDIT_EVT_MOUNT = 2,
+    FL_CONTRACT_P6_AUDIT_EVT_RAW_IO = 3
+} fl_contract_p6_audit_event_kind_t;
+
 _Static_assert(FL_CONTRACT_P6_AUDIT_SHOW_N_DEFAULT >= 1u,
                "audit show default must be positive");
 _Static_assert(FL_CONTRACT_P6_AUDIT_SHOW_N_MAX >= FL_CONTRACT_P6_AUDIT_SHOW_N_DEFAULT,

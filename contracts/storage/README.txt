@@ -8,9 +8,9 @@ P5 (*contracts/storage*) — roadmap **Phase 5** (**P5-1** VFS layer, **P5-2** p
 
 | File | Roadmap |
 |------|---------|
-| *contract_p5_vfs.h* | P5-1 |
+| *contract_p5_vfs.h* | P5-1 (open-fd cap, dirent name, mode bits, mount flags, durability class) |
 | *contract_p5_pluggable_fs.h* | P5-2 |
-| *contract_p5_page_cache.h* | P5-3 |
+| *contract_p5_page_cache.h* | P5-3 (max entries, dirty ratio, writeback batch) |
 
 Each shard includes **contract_extend.h** so standalone use inherits **P0** vocabulary before **P5**.
 

@@ -19,7 +19,7 @@
 
 #include "contract_extend.h"
 
-#define FL_CONTRACT_P6_OBSERVABILITY_REV 1
+#define FL_CONTRACT_P6_OBSERVABILITY_REV 2
 
 #include "contract_p6_structured_log.h"
 #include "contract_p6_ring_buffer.h"

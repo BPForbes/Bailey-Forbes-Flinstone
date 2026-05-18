@@ -6,6 +6,7 @@
 #define FL_CONTRACT_P7_REMOTE_ADMIN_H
 
 #include "contract_extend.h"
+#include "contract_p6_audit_trail.h"
 
 #define FL_CONTRACT_P7_3_REMOTE_ADMIN_CONTRACT_DEFINED 1
 
@@ -24,5 +25,8 @@ _Static_assert(CONFIG_LAB_REVERSE_SHELL == 0 || CONFIG_LAB_REVERSE_SHELL == 1,
 
 /** When non-zero, implementations must log enablement via **P6-4** audit before use. */
 #define FL_CONTRACT_P7_REVERSE_SHELL_REQUIRES_AUDIT_ON_ENABLE 1
+
+/** Audit category for enablement lines (**fl_contract_p6_audit_event_kind_t**). */
+#define FL_CONTRACT_P7_REVERSE_SHELL_AUDIT_EVT FL_CONTRACT_P6_AUDIT_EVT_RAW_IO
 
 #endif /* FL_CONTRACT_P7_REMOTE_ADMIN_H */
