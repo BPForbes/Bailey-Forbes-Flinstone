@@ -66,6 +66,7 @@ make_fake_repo() {
   mkdir -p "$tmp/scripts/lib" "$tmp/version/entries" "$tmp/version/locked" "$tmp/userland/shell"
   # Always copy the lib helper (sourced by relocate script)
   cp "$REPO_ROOT/scripts/lib/ver_release_date_stamp.sh" "$tmp/scripts/lib/"
+  cp "$REPO_ROOT/scripts/lib/ver_field_parse.sh" "$tmp/scripts/lib/"
   # Copy requested scripts
   local s
   for s in "$@"; do
@@ -1315,6 +1316,68 @@ VER
   cleanup "$d"
 }
 
+test_unique_semver_numeric_suffix_rejected() {
+  require_proc_sub "unique: MAJOR_VERSION=1abc rejected" || return 0
+  local d
+  d="$(make_fake_repo check_version_entries_semver_dev_unique.sh)"
+  cat >"$d/version/entries/bad_semver.ver" <<'VER'
+MAJOR_VERSION=1abc
+STANDARD_VERSION=0
+RELEASE_VERSION=0
+DESCRIPTION=bad semver
+VER
+  if bash "$(unique_script "$d")" 2>/dev/null; then
+    fail "unique: MAJOR_VERSION=1abc should fail"
+  else
+    ok "unique: semver with numeric suffix rejected"
+  fi
+  cleanup "$d"
+}
+
+test_layout_malformed_gm_suffix_rejected() {
+  require_proc_sub "layout: GM=0abc rejected" || return 0
+  local d
+  d="$(make_fake_repo check_version_prerelease_layout.sh)"
+  mkdir -p "$d/version/entries/preproduction 1.0.0"
+  cat >"$d/version/entries/preproduction 1.0.0/bad.ver" <<'VER'
+MAJOR_VERSION=1
+STANDARD_VERSION=0
+RELEASE_VERSION=0
+PRERELEASE=1
+GM=0abc
+DEV_VERSION=1
+DESCRIPTION=bad gm
+VER
+  if bash "$d/scripts/check_version_prerelease_layout.sh" 2>/dev/null; then
+    fail "layout: GM=0abc should fail"
+  else
+    ok "layout: GM with numeric suffix rejected"
+  fi
+  cleanup "$d"
+}
+
+test_gen_def_malformed_gm_zero_suffix_rejected() {
+  require_proc_sub "gen_def: GM=0abc rejected" || return 0
+  local d
+  d="$(make_fake_repo gen_version_def.sh)"
+  write_ver_ga "$d/version/locked/1_0_0_shipped.ver" 1 0 0
+  cat >"$d/version/entries/bad_gm.ver" <<'VER'
+MAJOR_VERSION=4
+STANDARD_VERSION=0
+RELEASE_VERSION=0
+PRERELEASE=1
+GM=0abc
+DEV_VERSION=1
+DESCRIPTION=bad gm
+VER
+  if (cd "$d" && ./scripts/gen_version_def.sh --stdout) 2>/dev/null; then
+    fail "gen_def: GM=0abc should fail"
+  else
+    ok "gen_def: GM=0abc rejected"
+  fi
+  cleanup "$d"
+}
+
 # ── Run all tests ─────────────────────────────────────────────────────────────
 
 # check_version_main_prerelease_policy.sh
@@ -1346,6 +1409,7 @@ test_layout_multiple_preproduction_dirs
 test_layout_missing_semver_rejected
 test_layout_version_alias_keys_accepted
 test_layout_preproduction_dev_version_gte_2
+test_layout_malformed_gm_suffix_rejected
 
 # check_version_entries_semver_dev_unique.sh
 test_unique_empty_entries
@@ -1355,6 +1419,7 @@ test_unique_same_semver_distinct_dev_passes
 test_unique_duplicate_dev_rejected
 test_unique_malformed_dev_version_rejected
 test_unique_dev_version_numeric_suffix_rejected
+test_unique_semver_numeric_suffix_rejected
 
 # bump_dev_version.sh
 test_bump_increments_dev_version
@@ -1392,6 +1457,7 @@ test_gen_def_gm_picks_highest_semver_then_dev
 test_gen_def_gm_same_semver_higher_dev_wins
 test_gen_def_no_gm_prerelease_line_with_build
 test_gen_def_malformed_gm_flag_rejected
+test_gen_def_malformed_gm_zero_suffix_rejected
 
 # ── Summary ───────────────────────────────────────────────────────────────────
 

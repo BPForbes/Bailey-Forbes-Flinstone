@@ -10,12 +10,10 @@
 # the folder until a prior manual copy — this script still cleans locked if present.
 set -euo pipefail
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
-
-get_field() {
-  local key="$1" file="$2"
-  grep -E "^[[:space:]]*(int[[:space:]]+)?${key}=" "$file" 2>/dev/null | head -1 |
-    sed -E 's/^[^=]*=[[:space:]]*([0-9]+).*/\1/' || true
-}
+SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
+# shellcheck source=lib/ver_field_parse.sh
+source "$SCRIPT_DIR/lib/ver_field_parse.sh"
+VER_PARSE_ERR_PREFIX="promote_preproduction_for_main"
 
 extract_description() {
   python3 - "$1" <<'PY'
@@ -87,13 +85,13 @@ promote_root() {
       exit 1
     fi
 
-    m=$(get_field MAJOR_VERSION "$gm_file")
-    [[ -n "$m" ]] || m=$(get_field VERSION_MAJOR "$gm_file")
-    s=$(get_field STANDARD_VERSION "$gm_file")
-    [[ -n "$s" ]] || s=$(get_field VERSION_STANDARD "$gm_file")
-    r=$(get_field RELEASE_VERSION "$gm_file")
-    [[ -n "$r" ]] || r=$(get_field MINOR_VERSION "$gm_file")
-    [[ -n "$r" ]] || r=$(get_field VERSION_PATCH "$gm_file")
+    m=$(ver_parse_nonneg_int_field MAJOR_VERSION "$gm_file")
+    [[ -n "$m" ]] || m=$(ver_parse_nonneg_int_field VERSION_MAJOR "$gm_file")
+    s=$(ver_parse_nonneg_int_field STANDARD_VERSION "$gm_file")
+    [[ -n "$s" ]] || s=$(ver_parse_nonneg_int_field VERSION_STANDARD "$gm_file")
+    r=$(ver_parse_nonneg_int_field RELEASE_VERSION "$gm_file")
+    [[ -n "$r" ]] || r=$(ver_parse_nonneg_int_field MINOR_VERSION "$gm_file")
+    [[ -n "$r" ]] || r=$(ver_parse_nonneg_int_field VERSION_PATCH "$gm_file")
     if [[ -z "$m" || -z "$s" || -z "$r" ]]; then
       echo "promote_preproduction_for_main: missing semver in $gm_file" >&2
       exit 1

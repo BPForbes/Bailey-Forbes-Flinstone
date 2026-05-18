@@ -7,41 +7,30 @@
 #
 # DEV_VERSION omitted counts as 0 for this key (GA-oriented rows). When DEV_VERSION=
 # is present, the value must be a non-negative integer (non-integer values exit 1).
+# Semver fields must likewise be non-negative integers with no trailing junk (1abc fails).
 # Authors: before assigning DEV_VERSION for a given A.B.C, scan version/entries and
 # version/entries/preproduction A.B.C/ and pick the smallest unused non-negative int.
 set -euo pipefail
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 ENT="$ROOT/version/entries"
-
-ver_field_value_raw() {
-  local key="$1" file="$2"
-  grep -E "^[[:space:]]*(int[[:space:]]+)?${key}=" "$file" 2>/dev/null | head -1 |
-    sed -E 's/^[[:space:]]*(int[[:space:]]+)?[^=]+=[[:space:]]*//' || true
-}
-
-get_field() {
-  local key="$1" file="$2"
-  grep -E "^[[:space:]]*(int[[:space:]]+)?${key}=" "$file" 2>/dev/null | head -1 |
-    sed -E 's/^[^=]*=[[:space:]]*([0-9]+).*/\1/' || true
-}
+SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
+# shellcheck source=lib/ver_field_parse.sh
+source "$SCRIPT_DIR/lib/ver_field_parse.sh"
+VER_PARSE_ERR_PREFIX="check_version_entries_semver_dev_unique"
 
 tmp="$(mktemp)"
 trap 'rm -f "$tmp"' EXIT
 
 while IFS= read -r -d '' f; do
-  m=$(get_field MAJOR_VERSION "$f")
-  [[ -n "$m" ]] || m=$(get_field VERSION_MAJOR "$f")
-  s=$(get_field STANDARD_VERSION "$f")
-  [[ -n "$s" ]] || s=$(get_field VERSION_STANDARD "$f")
-  r=$(get_field RELEASE_VERSION "$f")
-  [[ -n "$r" ]] || r=$(get_field MINOR_VERSION "$f")
-  [[ -n "$r" ]] || r=$(get_field VERSION_PATCH "$f")
+  m=$(ver_parse_nonneg_int_field MAJOR_VERSION "$f")
+  [[ -n "$m" ]] || m=$(ver_parse_nonneg_int_field VERSION_MAJOR "$f")
+  s=$(ver_parse_nonneg_int_field STANDARD_VERSION "$f")
+  [[ -n "$s" ]] || s=$(ver_parse_nonneg_int_field VERSION_STANDARD "$f")
+  r=$(ver_parse_nonneg_int_field RELEASE_VERSION "$f")
+  [[ -n "$r" ]] || r=$(ver_parse_nonneg_int_field MINOR_VERSION "$f")
+  [[ -n "$r" ]] || r=$(ver_parse_nonneg_int_field VERSION_PATCH "$f")
   if [[ -z "$m" || -z "$s" || -z "$r" ]]; then
     echo "check_version_entries_semver_dev_unique: missing semver in $f" >&2
-    exit 1
-  fi
-  if ! [[ "$m" =~ ^[0-9]+$ && "$s" =~ ^[0-9]+$ && "$r" =~ ^[0-9]+$ ]]; then
-    echo "check_version_entries_semver_dev_unique: non-integer semver component in $f" >&2
     exit 1
   fi
   dv_raw=$(ver_field_value_raw DEV_VERSION "$f")

@@ -24,47 +24,10 @@ if [[ "${1:-}" == "--stdout" ]]; then
   stdout=1
 fi
 
-get_int_field() {
-  local key="$1" file="$2"
-  grep -E "^[[:space:]]*(int[[:space:]]+)?${key}=" "$file" 2>/dev/null | head -1 |
-    sed -E 's/^[^=]*=[[:space:]]*([0-9]+).*/\1/' || true
-}
-
-ver_field_value_raw() {
-  local key="$1" file="$2"
-  grep -E "^[[:space:]]*(int[[:space:]]+)?${key}=" "$file" 2>/dev/null | head -1 |
-    sed -E 's/^[[:space:]]*(int[[:space:]]+)?[^=]+=[[:space:]]*//' || true
-}
-
-get_nonneg_int_field() {
-  # Absent key -> empty; present value must be digits only.
-  local key="$1" file="$2"
-  local raw
-  raw=$(ver_field_value_raw "$key" "$file")
-  [[ -z "$raw" ]] && return
-  if ! [[ "$raw" =~ ^[0-9]+$ ]]; then
-    echo "gen_version_def: ${key} must be a non-negative integer — $file" >&2
-    exit 1
-  fi
-  echo -n "$raw"
-}
-
-get_flag_field() {
-  # Absent key -> 0; present value must be exactly 0 or 1.
-  local key="$1" file="$2"
-  local raw
-  raw=$(ver_field_value_raw "$key" "$file")
-  if [[ -z "$raw" ]]; then
-    echo -n "0"
-    return
-  fi
-  if [[ "$raw" == "0" || "$raw" == "1" ]]; then
-    echo -n "$raw"
-    return
-  fi
-  echo "gen_version_def: ${key} must be 0 or 1 — $file" >&2
-  exit 1
-}
+SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
+# shellcheck source=lib/ver_field_parse.sh
+source "$SCRIPT_DIR/lib/ver_field_parse.sh"
+VER_PARSE_ERR_PREFIX="gen_version_def"
 
 get_prerelease_tag_token() {
   local file="$1"
@@ -92,15 +55,14 @@ c_string_escape() {
 parse_semver_from_file() {
   # Sets shell vars: _m _s _r from first arg (.ver path); exit 1 if incomplete.
   local f="$1"
-  _m=$(get_nonneg_int_field MAJOR_VERSION "$f")
-  [[ -n "$_m" ]] || _m=$(get_nonneg_int_field VERSION_MAJOR "$f")
-  _s=$(get_nonneg_int_field STANDARD_VERSION "$f")
-  [[ -n "$_s" ]] || _s=$(get_nonneg_int_field VERSION_STANDARD "$f")
-  _r=$(get_nonneg_int_field RELEASE_VERSION "$f")
-  [[ -n "$_r" ]] || _r=$(get_nonneg_int_field MINOR_VERSION "$f")
-  [[ -n "$_r" ]] || _r=$(get_nonneg_int_field VERSION_PATCH "$f")
-  if [[ -z "$_m" || -z "$_s" || -z "$_r" ]] || \
-     ! [[ "$_m" =~ ^[0-9]+$ && "$_s" =~ ^[0-9]+$ && "$_r" =~ ^[0-9]+$ ]]; then
+  _m=$(ver_parse_nonneg_int_field MAJOR_VERSION "$f")
+  [[ -n "$_m" ]] || _m=$(ver_parse_nonneg_int_field VERSION_MAJOR "$f")
+  _s=$(ver_parse_nonneg_int_field STANDARD_VERSION "$f")
+  [[ -n "$_s" ]] || _s=$(ver_parse_nonneg_int_field VERSION_STANDARD "$f")
+  _r=$(ver_parse_nonneg_int_field RELEASE_VERSION "$f")
+  [[ -n "$_r" ]] || _r=$(ver_parse_nonneg_int_field MINOR_VERSION "$f")
+  [[ -n "$_r" ]] || _r=$(ver_parse_nonneg_int_field VERSION_PATCH "$f")
+  if [[ -z "$_m" || -z "$_s" || -z "$_r" ]]; then
     echo "gen_version_def: could not parse semver from $f" >&2
     exit 1
   fi
@@ -134,14 +96,14 @@ gwm=-1 gws=-1 gwr=-1 gwdv=-1
 
 while IFS= read -r -d '' f; do
   [[ -f "$f" ]] || continue
-  pr=$(get_flag_field PRERELEASE "$f")
+  pr=$(ver_parse_flag_field PRERELEASE "$f")
   (( pr == 1 )) || continue
-  gm=$(get_flag_field GM "$f")
+  gm=$(ver_parse_flag_field GM "$f")
   (( gm == 1 )) || continue
 
   parse_semver_from_file "$f"
   m=$_m s=$_s r=$_r
-  dv=$(get_nonneg_int_field DEV_VERSION "$f")
+  dv=$(ver_parse_nonneg_int_field DEV_VERSION "$f")
   [[ -n "$dv" ]] || dv=0
 
   replace=0
@@ -177,13 +139,13 @@ else
 
   while IFS= read -r -d '' f; do
     [[ -f "$f" ]] || continue
-    pr=$(get_flag_field PRERELEASE "$f")
+    pr=$(ver_parse_flag_field PRERELEASE "$f")
     (( pr == 1 )) || continue
 
     parse_semver_from_file "$f"
     m=$_m s=$_s r=$_r
 
-    dv=$(get_nonneg_int_field DEV_VERSION "$f")
+    dv=$(ver_parse_nonneg_int_field DEV_VERSION "$f")
     [[ -n "$dv" ]] || dv=0
 
     tag_tok=$(get_prerelease_tag_token "$f")
