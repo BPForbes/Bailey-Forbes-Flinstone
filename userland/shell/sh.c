@@ -454,8 +454,8 @@ int main(int argc, char *argv[]) {
                     tokensCount = 1;
             }
             else if (!strcmp(cmd, "setdisk") || !strcmp(cmd, "createdisk")) {
-                if (argc > i + 4)
-                    tokensCount = (argc > i + 5) ? 5 : 4;
+                if (argc > i + 3)
+                    tokensCount = (argc > i + 4) ? 5 : 4;
                 else {
                     fprintf(stderr, "batch: %s: insufficient arguments (skipped)\n", cmd);
                     int eat = 1;

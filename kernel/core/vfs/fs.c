@@ -183,15 +183,20 @@ void do_redirect_output(const char *filename) {
         printf("Redirecting output to '%s'.\n", filename);
 }
 
+enum { IMPORT_TEXT_DRIVE_LINE_SLOTS = 65536 };
+
 void import_text_drive(const char *textFile, const char *dest_disk, int overrideClusters, int overrideSize) {
     FILE *fin = fopen(textFile, "r");
     if (!fin) {
         fprintf(stderr, "Cannot open text drive listing: %s\n", textFile);
         return;
     }
-    static char *linesStorage[65536];
-    for (int i = 0; i < 65536; i++)
-        linesStorage[i] = NULL;
+    char **linesStorage = calloc((size_t)IMPORT_TEXT_DRIVE_LINE_SLOTS, sizeof(char *));
+    if (!linesStorage) {
+        fprintf(stderr, "import_text_drive: out of memory for line table\n");
+        fclose(fin);
+        return;
+    }
     char line[256];
     while (fgets(line, sizeof(line), fin)) {
         char *trim = trim_whitespace(line);
@@ -206,7 +211,7 @@ void import_text_drive(const char *textFile, const char *dest_disk, int override
         char *idxStr = trim_whitespace(trim);
         char *hexData = trim_whitespace(colon + 1);
         int clusterIndex = (int)strtol(idxStr, NULL, 16);
-        if (clusterIndex < 0 || clusterIndex > 65535)
+        if (clusterIndex < 0 || clusterIndex >= IMPORT_TEXT_DRIVE_LINE_SLOTS)
             continue;
         int lenHex = (int)strlen(hexData);
         if (lenHex < 2)
@@ -229,7 +234,7 @@ void import_text_drive(const char *textFile, const char *dest_disk, int override
         int len = (int)strlen(linesStorage[0]);
         clusterSz = len / 2;
         int count = 0;
-        for (int i = 0; i < 65536; i++) {
+        for (int i = 0; i < IMPORT_TEXT_DRIVE_LINE_SLOTS; i++) {
             if (linesStorage[i])
                 count++;
         }
@@ -239,9 +244,10 @@ void import_text_drive(const char *textFile, const char *dest_disk, int override
     FILE *out = fopen(dest_disk, "w");
     if (!out) {
         fprintf(stderr, "Cannot open output disk file: %s\n", dest_disk);
-        for (int i = 0; i < 65536; i++)
+        for (int i = 0; i < IMPORT_TEXT_DRIVE_LINE_SLOTS; i++)
             if (linesStorage[i])
                 free(linesStorage[i]);
+        free(linesStorage);
         return;
     }
     char *ruler = NULL;
@@ -263,18 +269,20 @@ void import_text_drive(const char *textFile, const char *dest_disk, int override
             if (cs > (SIZE_MAX - 1u) / 2u) {
                 fprintf(stderr, "import_text_drive: cluster size overflow for zero-fill buffer\n");
                 fclose(out);
-                for (int i = 0; i < 65536; i++)
+                for (int i = 0; i < IMPORT_TEXT_DRIVE_LINE_SLOTS; i++)
                     if (linesStorage[i])
                         free(linesStorage[i]);
+                free(linesStorage);
                 return;
             }
             char *zeros = malloc(cs * 2u + 1u);
             if (!zeros) {
                 fprintf(stderr, "import_text_drive: out of memory for zero-fill buffer\n");
                 fclose(out);
-                for (int i = 0; i < 65536; i++)
+                for (int i = 0; i < IMPORT_TEXT_DRIVE_LINE_SLOTS; i++)
                     if (linesStorage[i])
                         free(linesStorage[i]);
+                free(linesStorage);
                 return;
             }
             for (size_t i = 0; i < cs * 2u; i++)
@@ -286,7 +294,8 @@ void import_text_drive(const char *textFile, const char *dest_disk, int override
     }
     fclose(out);
     printf("Imported text drive listing => %s\n", dest_disk);
-    for (int i = 0; i < 65536; i++)
+    for (int i = 0; i < IMPORT_TEXT_DRIVE_LINE_SLOTS; i++)
         if (linesStorage[i])
             free(linesStorage[i]);
+    free(linesStorage);
 }

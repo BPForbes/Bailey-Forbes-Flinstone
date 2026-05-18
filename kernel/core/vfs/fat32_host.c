@@ -351,8 +351,11 @@ int fat32_host_format_image(const char *path, const char *volume_label, int shel
     st_le16(de + 0x1A, 3);  /* cluster low start at 3 */
     {
         uint64_t fsz64 = (uint64_t)(uint32_t)shell_clusters * (uint64_t)(uint32_t)bytes_per_cluster;
-        if (fsz64 > (uint64_t)UINT32_MAX)
+        if (fsz64 > (uint64_t)UINT32_MAX) {
+            free(rootbuf);
+            close(fd);
             return -1;
+        }
         st_le32(de + 0x1C, (uint32_t)fsz64);
     }
 
