@@ -4,3 +4,5 @@ RELEASE_VERSION=0
 PRERELEASE=1
 DEV_VERSION=1
 DESCRIPTION=Reserve contracts/virtualization (P8) and contracts/hardening (P9) with README stubs; wire include paths for future umbrella headers.
+
+RELEASE_DATE=2026-05-18
