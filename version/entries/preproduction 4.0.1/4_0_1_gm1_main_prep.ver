@@ -1,0 +1,12 @@
+MAJOR_VERSION=4
+STANDARD_VERSION=0
+RELEASE_VERSION=1
+PRERELEASE=1
+DEV_VERSION=2
+GM=1
+DESCRIPTION<<VER_4_0_1_GM1_MAIN_PREP
+Go-to-main: marks the 4.0.1 preproduction train ready for
+promote_preproduction_for_main.sh before merging develop into main.
+VER_4_0_1_GM1_MAIN_PREP
+
+RELEASE_DATE=2026-05-18
