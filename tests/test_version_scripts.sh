@@ -1334,6 +1334,64 @@ VER
   cleanup "$d"
 }
 
+test_unique_standard_version_suffix_rejected() {
+  require_proc_sub "unique: STANDARD_VERSION=2abc rejected" || return 0
+  local d
+  d="$(make_fake_repo check_version_entries_semver_dev_unique.sh)"
+  cat >"$d/version/entries/bad_std.ver" <<'VER'
+MAJOR_VERSION=1
+STANDARD_VERSION=2abc
+RELEASE_VERSION=0
+DESCRIPTION=bad standard
+VER
+  if bash "$(unique_script "$d")" 2>/dev/null; then
+    fail "unique: STANDARD_VERSION=2abc should fail"
+  else
+    ok "unique: STANDARD_VERSION with numeric suffix rejected"
+  fi
+  cleanup "$d"
+}
+
+test_unique_release_version_suffix_rejected() {
+  require_proc_sub "unique: RELEASE_VERSION=3abc rejected" || return 0
+  local d
+  d="$(make_fake_repo check_version_entries_semver_dev_unique.sh)"
+  cat >"$d/version/entries/bad_rel.ver" <<'VER'
+MAJOR_VERSION=1
+STANDARD_VERSION=0
+RELEASE_VERSION=3abc
+DESCRIPTION=bad release
+VER
+  if bash "$(unique_script "$d")" 2>/dev/null; then
+    fail "unique: RELEASE_VERSION=3abc should fail"
+  else
+    ok "unique: RELEASE_VERSION with numeric suffix rejected"
+  fi
+  cleanup "$d"
+}
+
+test_layout_malformed_prerelease_suffix_rejected() {
+  require_proc_sub "layout: PRERELEASE=1abc rejected" || return 0
+  local d
+  d="$(make_fake_repo check_version_prerelease_layout.sh)"
+  mkdir -p "$d/version/entries/preproduction 1.0.0"
+  cat >"$d/version/entries/preproduction 1.0.0/bad.ver" <<'VER'
+MAJOR_VERSION=1
+STANDARD_VERSION=0
+RELEASE_VERSION=0
+PRERELEASE=1abc
+GM=0
+DEV_VERSION=1
+DESCRIPTION=bad prerelease
+VER
+  if bash "$d/scripts/check_version_prerelease_layout.sh" 2>/dev/null; then
+    fail "layout: PRERELEASE=1abc should fail"
+  else
+    ok "layout: PRERELEASE with numeric suffix rejected"
+  fi
+  cleanup "$d"
+}
+
 test_layout_malformed_gm_suffix_rejected() {
   require_proc_sub "layout: GM=0abc rejected" || return 0
   local d
@@ -1409,6 +1467,7 @@ test_layout_multiple_preproduction_dirs
 test_layout_missing_semver_rejected
 test_layout_version_alias_keys_accepted
 test_layout_preproduction_dev_version_gte_2
+test_layout_malformed_prerelease_suffix_rejected
 test_layout_malformed_gm_suffix_rejected
 
 # check_version_entries_semver_dev_unique.sh
@@ -1420,6 +1479,8 @@ test_unique_duplicate_dev_rejected
 test_unique_malformed_dev_version_rejected
 test_unique_dev_version_numeric_suffix_rejected
 test_unique_semver_numeric_suffix_rejected
+test_unique_standard_version_suffix_rejected
+test_unique_release_version_suffix_rejected
 
 # bump_dev_version.sh
 test_bump_increments_dev_version

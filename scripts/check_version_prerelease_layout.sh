@@ -66,7 +66,7 @@ while IFS= read -r -d '' dir; do
   gm_n=0
   while IFS= read -r -d '' vf; do
     [[ -f "$vf" ]] || continue
-    if grep -qE '^[[:space:]]*(int[[:space:]]+)?GM=1([[:space:]]|$)' "$vf"; then
+    if [[ "$(ver_parse_flag_field GM "$vf")" == "1" ]]; then
       gm_n=$((gm_n + 1))
     fi
   done < <(find "$dir" -maxdepth 1 -type f -name '*.ver' -print0 2>/dev/null)

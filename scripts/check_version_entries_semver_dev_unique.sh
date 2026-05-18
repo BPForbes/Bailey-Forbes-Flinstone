@@ -33,15 +33,8 @@ while IFS= read -r -d '' f; do
     echo "check_version_entries_semver_dev_unique: missing semver in $f" >&2
     exit 1
   fi
-  dv_raw=$(ver_field_value_raw DEV_VERSION "$f")
-  d=0
-  if [[ -n "$dv_raw" ]]; then
-    if ! [[ "$dv_raw" =~ ^[0-9]+$ ]]; then
-      echo "check_version_entries_semver_dev_unique: DEV_VERSION must be a non-negative integer — $f" >&2
-      exit 1
-    fi
-    d=$dv_raw
-  fi
+  d=$(ver_parse_nonneg_int_field DEV_VERSION "$f")
+  [[ -n "$d" ]] || d=0
   printf '%s\t%s\t%s\t%s\t%s\n' "$m" "$s" "$r" "$d" "$f"
 done < <(find "$ENT" -type f -name '*.ver' -print0 | sort -z) >"$tmp"
 

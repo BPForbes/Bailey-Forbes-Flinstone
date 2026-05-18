@@ -62,7 +62,7 @@ promote_root() {
     shopt -s nullglob
     for vf in "$dir"/*.ver; do
       [[ -f "$vf" ]] || continue
-      if grep -qE '^[[:space:]]*(int[[:space:]]+)?GM=1([[:space:]]|$)' "$vf"; then
+      if [[ "$(ver_parse_flag_field GM "$vf")" == "1" ]]; then
         gm_n=$((gm_n + 1))
         gm_file=$vf
       fi
