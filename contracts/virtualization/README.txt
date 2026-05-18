@@ -19,3 +19,6 @@ markers.
 **Layering:** this bundle extends **`contract_extend.h`** only. **Virtqueue mechanics** stay in
 **`contracts/drivers/`** (**`contract_p4_virtio.h`**); **IP/datagram paths** stay **P3**
 (**`contracts/networking/`**). Include **`contract_drivers.h`** only where rings are programmed.
+
+**QEMU lab docs:** **`docs/qemu-lab.md`** — worked **`-M`**, **`-accel`**, **`-icount`**, **`-drive`** /
+**`-netdev`**, and TAP bridge examples for **P8-3** / **P8-2**.

@@ -50,7 +50,7 @@
 #include "contract_p0_uart.h"
 
 /** Shipped subsystem contract bundle revision (audit / CLI / packed metadata). */
-#define FL_CONTRACT_BUNDLE_REV 7
+#define FL_CONTRACT_BUNDLE_REV 8
 
 typedef enum {
     FL_CONTRACT_SURFACE_DRIVER_OPS = 0,

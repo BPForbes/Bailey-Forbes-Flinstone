@@ -3,6 +3,7 @@
 #include "contract_drivers.h"
 #include "contract_networking.h"
 #include "contract_virtualization.h"
+#include "contract_hardening.h"
 #include "fl/audit_log.h"
 #include "fl/history_record.h"
 #include <stdio.h>
@@ -17,7 +18,7 @@ static void print_contract_help(void) {
         "\n"
         "Options:\n"
         "  summary   Human-readable listing (default)\n"
-        "  json      Single-line JSON: bundle rev, P0 rev, p3_networking_rev, p3_wire_rev, p4_drivers_rev, p8_virtualization_rev, result codes, surfaces\n"
+        "  json      Single-line JSON: bundle rev, P0 rev, p3_networking_rev, p3_wire_rev, p4_drivers_rev, p8_virtualization_rev, p9_hardening_rev, result codes, surfaces\n"
         "  --help    Show this message\n"
         "\n"
         "Examples:\n"
@@ -48,6 +49,8 @@ static int print_summary(void) {
     printf("  P4 drivers: umbrella rev %d (extends P0-P1; no P3 include)\n", FL_CONTRACT_P4_DRIVERS_REV);
     printf("  P8 virtualization: umbrella rev %d (extends P0 only; no P4 include)\n",
            FL_CONTRACT_P8_VIRTUALIZATION_REV);
+    printf("  P9 hardening: umbrella rev %d (extends P0 only; no P8 include)\n",
+           FL_CONTRACT_P9_HARDENING_REV);
     printf("  fl_result_t: OK=%d ERR=%d INVAL=%d NOSYS=%d\n",
            (int)FL_RESULT_OK, (int)FL_RESULT_ERR, (int)FL_RESULT_INVAL, (int)FL_RESULT_NOSYS);
     printf("  surfaces (%zu):\n",
@@ -72,7 +75,7 @@ static int print_summary(void) {
 static int print_json(void) {
     printf("{\"bundle_rev\":%d,\"p0_foundations_rev\":%d,"
            "\"p3_networking_rev\":%d,\"p3_wire_rev\":%d,\"p4_drivers_rev\":%d,"
-           "\"p8_virtualization_rev\":%d,"
+           "\"p8_virtualization_rev\":%d,\"p9_hardening_rev\":%d,"
            "\"fl_result_ok\":%d,\"fl_result_err\":%d,"
            "\"fl_result_json_rc_min\":%d,\"fl_result_json_rc_max\":%d,"
            "\"fl_result_wire_min\":%d,\"fl_result_wire_max\":%d,"
@@ -83,7 +86,7 @@ static int print_json(void) {
            "\"vfs_include\":\"fl/vfs.h (separate)\"}\n",
            FL_CONTRACT_BUNDLE_REV, FL_CONTRACT_P0_FOUNDATIONS_REV,
            FL_CONTRACT_P3_NETWORKING_REV, FL_CONTRACT_P3_WIRE_REV, FL_CONTRACT_P4_DRIVERS_REV,
-           FL_CONTRACT_P8_VIRTUALIZATION_REV,
+           FL_CONTRACT_P8_VIRTUALIZATION_REV, FL_CONTRACT_P9_HARDENING_REV,
            (int)FL_RESULT_OK, (int)FL_RESULT_ERR,
            FL_RESULT_JSON_RC_MIN, FL_RESULT_JSON_RC_MAX, FL_RESULT_WIRE_MIN, FL_RESULT_WIRE_MAX,
            FL_LOG_RL_MAX_PER_SEC,

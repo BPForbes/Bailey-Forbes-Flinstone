@@ -1,16 +1,22 @@
 P9 (*contracts/hardening*) — roadmap **Phase 9** (**P9-1** fuzzing, **P9-2** static analysis,
 **P9-3** SMP bring-up on **B**). See **docs/ROADMAP.md** Phase **9** table.
 
-**Status:** directory reserved for the future **P9** normative C bundle (umbrella + **`contract_p9_*.h`**
-shards with **`FL_CONTRACT_P9_*_CONTRACT_DEFINED`** markers), following the pattern used under
-**`contracts/foundations/`** through **`contracts/operations/`**.
+**Umbrella header:** *contract_hardening.h* — includes **contract_extend.h** (P0),
+**FL_CONTRACT_P9_HARDENING_REV**, and shards below with **`FL_CONTRACT_P9_*_CONTRACT_DEFINED`**
+markers.
 
-**Process note:** fuzz and static-analysis **gates** may stay **process-only** until promoted into
-contract rows; see the **P0–P9 snapshot** legend in **docs/ROADMAP.md**.
+**Shards (normative comments + contract-defined markers):**
 
-**Build:** when headers land, add **-Icontracts/hardening** next to **-Icontracts/operations** in the
-root **Makefile** **CFLAGS** and in **CMakeLists.txt** **include_directories** (already wired for
-early adoption).
+| File | Roadmap |
+|------|---------|
+| *contract_p9_fuzz.h* | **P9-1** — fuzz input size cap, corpus path cap, crash-is-bug default |
+| *contract_p9_static_analysis.h* | **P9-2** — SA severity enum, zero-new-critical gate, ruleset token |
+| *contract_p9_smp.h* | **P9-3** — SMP lock-order inherits **P1-3**, AArch64 **PSCI CPU_ON** (**P4-7**) |
 
-**Layering:** SMP contracts compose **P1-3** / **P1-6** and **P4-7** (**PSCI**); this bundle records
-**scale** and analysis vocabulary without replacing **`contracts/runtime/`** or **`contracts/drivers/`**.
+**Build:** **-Icontracts/hardening** is already in the root **Makefile** **CFLAGS** and
+**CMakeLists.txt** **include_directories**.
+
+**Layering:** extends **`contract_extend.h`** only. **Fuzz engines** and **Coverity** APIs stay
+out-of-tree; this bundle names **interchange caps** for harnesses and CI gates. **SMP execution**
+still depends on **`contracts/runtime/`** and **`contracts/drivers/`** (**PSCI**); include those
+umbrellas in TUs that implement bring-up, not in every consumer of **P9-2** alone.
