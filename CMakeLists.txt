@@ -74,6 +74,7 @@ include_directories(
     ${CMAKE_SOURCE_DIR}/contracts/identity
     ${CMAKE_SOURCE_DIR}/contracts/networking
     ${CMAKE_SOURCE_DIR}/contracts/drivers
+    ${CMAKE_SOURCE_DIR}/contracts/storage
     ${KERNEL_ARCH_DIR}/include
 )
 

@@ -8,6 +8,7 @@
 #include "contract_runtime.h"
 #include "contract_identity.h"
 #include "contract_drivers.h"
+#include "contract_storage.h"
 #include "fl/authz_subsystem.h"
 #include <stdio.h>
 #include <stdlib.h>
@@ -343,6 +344,14 @@ static int test_contract_constants(void) {
     ASSERT(FL_CONTRACT_P4_2_HARDIRQ_NO_SLEEP == 1);
     ASSERT(FL_CONTRACT_P4_3_LAB_IOMMU_BYPASS_ASSUMED == 1);
     ASSERT(FL_CONTRACT_P4_4_DESC_PUBLISH_BARRIER_REQUIRED == 1);
+
+    ASSERT(FL_CONTRACT_P5_STORAGE_REV == 1);
+    ASSERT(FL_CONTRACT_P5_VOCABULARY_LOCK == 1);
+    ASSERT(FL_CONTRACT_P5_1_VFS_CONTRACT_DEFINED == 1);
+    ASSERT(FL_CONTRACT_P5_2_PLUGGABLE_FS_CONTRACT_DEFINED == 1);
+    ASSERT(FL_CONTRACT_P5_3_PAGE_CACHE_CONTRACT_DEFINED == 1);
+    ASSERT(FL_VFS_SYMLOOP_MAX == 40);
+    ASSERT(FL_PAGE_CACHE_BLOCK_SHIFT_MIN == 9u);
 
     /* Surface enum ordering */
     ASSERT((int)FL_CONTRACT_SURFACE_DRIVER_OPS == 0);

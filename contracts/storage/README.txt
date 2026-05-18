@@ -1,6 +1,21 @@
-P5 (*contracts/storage*) — roadmap **Phase 5** (storage, VFS, durability). **P5-1** … **P5-5**
-per **docs/ROADMAP.md**.
+P5 (*contracts/storage*) — roadmap **Phase 5** (**P5-1** VFS layer, **P5-2** pluggable FS,
+**P5-3** page cache). See **docs/ROADMAP.md** Phase **5** table.
 
-This directory is reserved for normative **C** contract headers (umbrella **contract_storage.h**
-and **contract_p5_*.h** shards) once authored. **Build:** add **-Icontracts/storage** alongside
-other **contracts/** include paths when wiring compiles.
+**Umbrella header:** *contract_storage.h* — includes **contract_extend.h** (P0 plus P1),
+**FL_CONTRACT_P5_STORAGE_REV**, all shards below, and **FL_CONTRACT_P5_VOCABULARY_LOCK**.
+
+**Shards (normative comments + **FL_CONTRACT_P5_*_CONTRACT_DEFINED** markers):**
+
+| File | Roadmap |
+|------|---------|
+| *contract_p5_vfs.h* | P5-1 |
+| *contract_p5_pluggable_fs.h* | P5-2 |
+| *contract_p5_page_cache.h* | P5-3 |
+
+Each shard includes **contract_extend.h** so standalone use inherits **P0** vocabulary before **P5**.
+
+**Build:** add **-Icontracts/storage** next to **-Icontracts/drivers** in the root **Makefile**
+**CFLAGS** and in **CMakeLists.txt** include directories for targets that compile contract-aware code.
+
+**Layering:** this bundle does **not** include **contract_networking.h** or **contract_drivers.h**.
+Include them explicitly when a translation unit spans virtio/block and the VFS.
