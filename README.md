@@ -168,6 +168,8 @@ make deps        # Fetches and builds SDL2 into deps/install
 make vm-sdl      # Uses deps/install if present, else pkg-config
 ```
 
+**QEMU (external) labs** — virtio, TAP bridges, TCG **`icount`**: see **`docs/qemu-lab.md`**.
+
 **WSL one-shot build/run** (install deps + build + run):
 ```bash
 ./scripts/wsl_vm.sh       # Build + run VM popup (single script)

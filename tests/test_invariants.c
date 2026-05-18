@@ -11,12 +11,24 @@
 #include "contract_storage.h"
 #include "contract_observability.h"
 #include "contract_operations.h"
+#include "contract_virtualization.h"
+#include "contract_hardening.h"
 #include "fl/authz_subsystem.h"
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 
 #define ASSERT(c) do { if (!(c)) { fprintf(stderr, "FAIL: %s\n", #c); return 1; } } while(0)
+
+_Static_assert(FL_CONTRACT_P8_VIRTUALIZATION_REV == 1, "tests track P8 umbrella rev");
+_Static_assert(FL_CONTRACT_P8_1_TIMING_CONTRACT_DEFINED == 1, "P8-1 shard must stay defined");
+_Static_assert(FL_CONTRACT_P8_2_VIRTIO_GUEST_CONTRACT_DEFINED == 1, "P8-2 shard must stay defined");
+_Static_assert(FL_CONTRACT_P8_3_QEMU_LAB_CONTRACT_DEFINED == 1, "P8-3 shard must stay defined");
+
+_Static_assert(FL_CONTRACT_P9_HARDENING_REV == 1, "tests track P9 umbrella rev");
+_Static_assert(FL_CONTRACT_P9_1_FUZZ_CONTRACT_DEFINED == 1, "P9-1 shard must stay defined");
+_Static_assert(FL_CONTRACT_P9_2_STATIC_ANALYSIS_CONTRACT_DEFINED == 1, "P9-2 shard must stay defined");
+_Static_assert(FL_CONTRACT_P9_3_SMP_CONTRACT_DEFINED == 1, "P9-3 shard must stay defined");
 
 static int test_path_dot(void) {
     strncpy(g_cwd, "/tmp/foo", sizeof(g_cwd) - 1);
