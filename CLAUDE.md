@@ -25,7 +25,7 @@ For a **P0–P9** row-by-row snapshot (**❌ / ⚠️ / ✅**) against **`develo
 
 ### Canonical string
 
-- **`VERSION`** on **`develop`** comes from **`userland/shell/version_def.h`**, generated from **`version/locked/*.ver`** (highest **A.B.C**). The same header defines **`VERSION_LINE`** (shell display) from **`version/entries/**/*.ver`** when **`PRERELEASE=1`** rows exist. Author **`version/entries/A_B_C_slug.ver`** (preferred; avoid optional **`NNN_`** serial filename prefixes unless matching legacy files). **GitHub Actions** runs **`gen_version_changelog.c`** against **`version/locked`**, then **`make CHANGELOG_CI=1`**. Plain **`git clone` + `make`** skips changelog unless you opt in with **`CHANGELOG_CI=1`**.
+- **`VERSION`** on **`develop`** comes from **`userland/shell/version_def.h`**, generated from **`version/locked/*.ver`** (highest **A.B.C**) **unless** a winning **`PRERELEASE=1`** + **`GM=1`** row under **`version/entries/`** overrides **`VERSION_*`** / **`VERSION`** and sets **`VERSION_LINE`** to plain **`A.B.C`**. Otherwise **`VERSION_LINE`** (shell display) follows **`version/entries/**/*.ver`** **`PRERELEASE=1`** rules. Author **`version/entries/A_B_C_slug.ver`** (preferred; avoid optional **`NNN_`** serial filename prefixes unless matching legacy files). **GitHub Actions** runs **`gen_version_changelog.c`** against **`version/locked`**, then **`make CHANGELOG_CI=1`**. Plain **`git clone` + `make`** skips changelog unless you opt in with **`CHANGELOG_CI=1`**.
 - Format is **semantic versioning**: **`A.B.C`** (not date-based).
 
 ### Component meanings

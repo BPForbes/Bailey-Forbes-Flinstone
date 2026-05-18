@@ -3,6 +3,7 @@
 #   scripts/check_version_main_prerelease_policy.sh
 #   scripts/check_version_prerelease_layout.sh
 #   scripts/check_version_entries_semver_dev_unique.sh
+#   scripts/gen_version_def.sh
 #   scripts/bump_dev_version.sh
 #   scripts/lib/ver_release_date_stamp.sh
 #   scripts/relocate_root_prerelease_ver_to_preproduction.sh
@@ -1128,6 +1129,151 @@ test_relocate_multiple_prerelease_files() {
   rm -rf "$d"
 }
 
+# scripts/gen_version_def.sh (isolated temp repo; script copied into fake scripts/)
+test_gen_def_gm_overrides_version_and_plain_line() {
+  require_proc_sub "gen_def: GM=1 overrides shipped triple and plain VERSION_LINE" || return 0
+  local d
+  d="$(make_fake_repo gen_version_def.sh)"
+  write_ver_ga "$d/version/locked/1_0_0_shipped.ver" 1 0 0
+  mkdir -p "$d/version/entries/nested"
+  cat >"$d/version/entries/nested/gm_row.ver" <<'VER'
+MAJOR_VERSION=9
+STANDARD_VERSION=8
+RELEASE_VERSION=7
+PRERELEASE=1
+GM=1
+DEV_VERSION=42
+DESCRIPTION=GM candidate
+VER
+  local out
+  out="$(cd "$d" && ./scripts/gen_version_def.sh --stdout)"
+  if ! echo "$out" | grep -qE '^#define VERSION_MAJOR[[:space:]]+9[[:space:]]*$'; then
+    fail "gen_def: expected VERSION_MAJOR 9 from GM row, got: $out"
+  else
+    ok "gen_def: GM=1 row supplies VERSION_MAJOR"
+  fi
+  if ! echo "$out" | grep -qE '^#define VERSION_STANDARD[[:space:]]+8[[:space:]]*$'; then
+    fail "gen_def: expected VERSION_STANDARD 8"
+  else
+    ok "gen_def: GM row supplies VERSION_STANDARD"
+  fi
+  if ! echo "$out" | grep -qE '^#define VERSION_PATCH[[:space:]]+7[[:space:]]*$'; then
+    fail "gen_def: expected VERSION_PATCH 7 (RELEASE_VERSION)"
+  else
+    ok "gen_def: GM row supplies VERSION_PATCH from RELEASE_VERSION"
+  fi
+  if ! echo "$out" | grep -F '#define VERSION_LINE "9.8.7"'; then
+    fail "gen_def: expected plain VERSION_LINE 9.8.7, got: $out"
+  else
+    ok "gen_def: GM=1 yields plain A.B.C VERSION_LINE (no PRE/BUILD)"
+  fi
+  cleanup "$d"
+}
+
+test_gen_def_gm_picks_highest_semver_then_dev() {
+  require_proc_sub "gen_def: GM tie-break newest semver then DEV_VERSION" || return 0
+  local d
+  d="$(make_fake_repo gen_version_def.sh)"
+  write_ver_ga "$d/version/locked/1_0_0_shipped.ver" 1 0 0
+  mkdir -p "$d/version/entries/a" "$d/version/entries/b"
+  cat >"$d/version/entries/a/old.ver" <<'VER'
+MAJOR_VERSION=2
+STANDARD_VERSION=0
+RELEASE_VERSION=0
+PRERELEASE=1
+GM=1
+DEV_VERSION=100
+DESCRIPTION=a
+VER
+  cat >"$d/version/entries/b/newer.ver" <<'VER'
+MAJOR_VERSION=2
+STANDARD_VERSION=1
+RELEASE_VERSION=0
+PRERELEASE=1
+GM=1
+DEV_VERSION=1
+DESCRIPTION=b
+VER
+  local out
+  out="$(cd "$d" && ./scripts/gen_version_def.sh --stdout)"
+  if ! echo "$out" | grep -qE '^#define VERSION_MAJOR[[:space:]]+2[[:space:]]*$' ||
+     ! echo "$out" | grep -qE '^#define VERSION_STANDARD[[:space:]]+1[[:space:]]*$' ||
+     ! echo "$out" | grep -qE '^#define VERSION_PATCH[[:space:]]+0[[:space:]]*$'; then
+    fail "gen_def: expected 2.1.0 to win over 2.0.0 GM rows, got: $out"
+  else
+    ok "gen_def: higher semver GM row wins"
+  fi
+  if ! echo "$out" | grep -F '#define VERSION_LINE "2.1.0"'; then
+    fail "gen_def: expected VERSION_LINE 2.1.0"
+  else
+    ok "gen_def: VERSION_LINE matches winning GM semver"
+  fi
+  cleanup "$d"
+}
+
+test_gen_def_gm_same_semver_higher_dev_wins() {
+  require_proc_sub "gen_def: same semver GM rows tie-break on DEV_VERSION" || return 0
+  local d
+  d="$(make_fake_repo gen_version_def.sh)"
+  write_ver_ga "$d/version/locked/1_0_0_shipped.ver" 1 0 0
+  mkdir -p "$d/version/entries/x" "$d/version/entries/y"
+  cat >"$d/version/entries/x/lowdv.ver" <<'VER'
+MAJOR_VERSION=3
+STANDARD_VERSION=0
+RELEASE_VERSION=0
+PRERELEASE=1
+GM=1
+DEV_VERSION=1
+DESCRIPTION=x
+VER
+  cat >"$d/version/entries/y/highdv.ver" <<'VER'
+MAJOR_VERSION=3
+STANDARD_VERSION=0
+RELEASE_VERSION=0
+PRERELEASE=1
+GM=1
+DEV_VERSION=9
+DESCRIPTION=y
+VER
+  local out
+  out="$(cd "$d" && ./scripts/gen_version_def.sh --stdout)"
+  if ! echo "$out" | grep -F '#define VERSION_LINE "3.0.0"'; then
+    fail "gen_def: expected VERSION_LINE 3.0.0, got: $out"
+  else
+    ok "gen_def: same semver uses higher DEV_VERSION GM row"
+  fi
+  cleanup "$d"
+}
+
+test_gen_def_no_gm_prerelease_line_with_build() {
+  require_proc_sub "gen_def: without GM=1, prerelease VERSION_LINE keeps tag and BUILD" || return 0
+  local d
+  d="$(make_fake_repo gen_version_def.sh)"
+  write_ver_ga "$d/version/locked/2_2_2_ga.ver" 2 2 2
+  cat >"$d/version/entries/p.ver" <<'VER'
+MAJOR_VERSION=4
+STANDARD_VERSION=0
+RELEASE_VERSION=0
+PRERELEASE=1
+DEV_VERSION=3
+PRERELEASE_TAG=RC
+DESCRIPTION=pr
+VER
+  local out
+  out="$(cd "$d" && ./scripts/gen_version_def.sh --stdout)"
+  if ! echo "$out" | grep -qE '^#define VERSION_MAJOR[[:space:]]+2[[:space:]]*$'; then
+    fail "gen_def: without GM, VERSION_* should follow locked 2.2.2"
+  else
+    ok "gen_def: locked triple when no GM=1"
+  fi
+  if ! echo "$out" | grep -F '#define VERSION_LINE "RC 4.0.0, BUILD 3"'; then
+    fail "gen_def: expected tagged BUILD line, got: $(echo "$out" | grep VERSION_LINE)"
+  else
+    ok "gen_def: prerelease line uses tag and BUILD without GM"
+  fi
+  cleanup "$d"
+}
+
 # ── Run all tests ─────────────────────────────────────────────────────────────
 
 # check_version_main_prerelease_policy.sh
@@ -1197,6 +1343,12 @@ test_relocate_dry_run_exits_zero_when_clean
 test_relocate_idempotent
 test_relocate_refuses_overwrite
 test_relocate_multiple_prerelease_files
+
+# gen_version_def.sh (isolated temp repo; script copied into fake scripts/)
+test_gen_def_gm_overrides_version_and_plain_line
+test_gen_def_gm_picks_highest_semver_then_dev
+test_gen_def_gm_same_semver_higher_dev_wins
+test_gen_def_no_gm_prerelease_line_with_build
 
 # ── Summary ───────────────────────────────────────────────────────────────────
 

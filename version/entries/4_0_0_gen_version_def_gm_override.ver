@@ -1,0 +1,5 @@
+MAJOR_VERSION=4
+STANDARD_VERSION=0
+RELEASE_VERSION=0
+DEV_VERSION=15
+DESCRIPTION=gen_version_def.sh: when any version/entries/**/*.ver has PRERELEASE=1 and GM=1, VERSION_MAJOR/STANDARD/PATCH and VERSION follow that row's MAJOR/STANDARD/RELEASE; VERSION_LINE is plain A.B.C only (no PRERELEASE_TAG, no ", BUILD n"). Tie-break: highest semver, then highest DEV_VERSION. Otherwise shipped triple stays from version/locked and prerelease rows drive tagged VERSION_LINE. Documented in docs/versioning.md, version/*/ABOUT.txt, AGENTS.md, CLAUDE.md, .cursor/rules/versioning.mdc, .coderabbit.yaml, tests/test_version_scripts.sh.
