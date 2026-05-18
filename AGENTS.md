@@ -28,7 +28,7 @@ When folding **two or more** AI-authored feature branches together (for example 
 
 Avoid a silent fast-forward when merging unrelated agent work. (Maintainer shorthand “merge collapse, no ff” here means **`git merge --no-ff`**, not fast-forward.)
 
-**Versioning:** if two prerelease rows end up under the same **`version/entries/preproduction A.B.C/`** tree, each must keep a **unique** **`(MAJOR, STANDARD, RELEASE, DEV_VERSION)`** quadruple—run **`./scripts/check_version_entries_semver_dev_unique.sh`** and bump **`DEV_VERSION`** on the merged-in row when the quadruple would otherwise collide.
+**Versioning (merged AI branches):** after **`git merge --no-ff`**, keep **exactly one** **`.ver`** for that semver train on the combined branch. **Keep the base branch’s file**—the **`.ver`** that already belonged to the branch you merged **into** (same path/basename, e.g. under **`version/entries/preproduction A.B.C/`** once CI has relocated). **Do not** retain a second **`.ver`** from the merged-in agent branch for the same **A.B.C** train; fold its release prose into the base file’s **`DESCRIPTION`**, then **delete** the duplicate **`.ver`**. Re-run **`./scripts/check_version_entries_semver_dev_unique.sh`**. (Elsewhere in the tree, each **`.ver`** still needs a unique **`(MAJOR, STANDARD, RELEASE, DEV_VERSION)`** quadruple—adjust **`DEV_VERSION`** only per normal rules for that single file.)
 
 ## Build targets
 
