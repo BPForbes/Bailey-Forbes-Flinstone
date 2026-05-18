@@ -1,5 +1,0 @@
-MAJOR_VERSION=4
-STANDARD_VERSION=0
-RELEASE_VERSION=0
-DEV_VERSION=14
-DESCRIPTION=CI: scripts/check_version_entries_semver_dev_unique.sh enforces unique (MAJOR, STANDARD, RELEASE, DEV_VERSION) across version/entries (implicit DEV_VERSION=0 when omitted). Documented in docs/versioning.md, version/*/ABOUT.txt, .cursor/rules/versioning.mdc, .coderabbit.yaml.
