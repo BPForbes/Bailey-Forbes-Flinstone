@@ -39,7 +39,9 @@ remove_directory_recursive hoists directory scan helpers to file scope (standard
 FAT32 bytes-per-cluster multiply overflow guard; fat32_host_load rejects root_cluster<2
 before cluster math; fat32_host_format_image guards FLINT.DAT size in directory entry
 and frees rootbuf/closes fd on that overflow; fat32_host_files cluster-chain length
-computed in uint64_t before cast (SIZE_MAX/UINT32_MAX checks); import_text_drive fails
+computed in uint64_t before cast (SIZE_MAX/UINT32_MAX checks); fat32_host_file_put
+rejects host sources larger than UINT32_MAX bytes before dirent size is written,
+freeing the newly allocated cluster chain; import_text_drive fails
 fast on zero-buffer OOM or cluster-size overflow instead of silently skipping cluster
 lines; FAT chain iteration guards use uint64_t caps (no uint32_t wrap); free_cluster_chain
 bounded against cycles; allocate_and_write_chain rollback clears the partially linked

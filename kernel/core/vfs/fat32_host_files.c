@@ -912,6 +912,12 @@ int fat32_host_file_put(const char *host_src_path, const char *path_on_disk_or_n
     }
     close(src);
 
+    if (file_sz > (size_t)UINT32_MAX) {
+        free_cluster_chain(img, &g_fat32_host_vol, first_clu);
+        close(img);
+        return -1;
+    }
+
     uint8_t de[32];
     memset(de, 0, sizeof(de));
     memcpy(de, name11, 11);
