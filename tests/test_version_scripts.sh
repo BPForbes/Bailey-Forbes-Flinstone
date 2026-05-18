@@ -1274,6 +1274,47 @@ VER
   cleanup "$d"
 }
 
+test_gen_def_malformed_gm_flag_rejected() {
+  require_proc_sub "gen_def: malformed GM=1foo rejected" || return 0
+  local d
+  d="$(make_fake_repo gen_version_def.sh)"
+  write_ver_ga "$d/version/locked/1_0_0_shipped.ver" 1 0 0
+  cat >"$d/version/entries/bad_gm.ver" <<'VER'
+MAJOR_VERSION=4
+STANDARD_VERSION=0
+RELEASE_VERSION=0
+PRERELEASE=1
+GM=1foo
+DEV_VERSION=1
+DESCRIPTION=bad gm
+VER
+  if (cd "$d" && ./scripts/gen_version_def.sh --stdout) 2>/dev/null; then
+    fail "gen_def: GM=1foo should fail"
+  else
+    ok "gen_def: malformed GM flag rejected"
+  fi
+  cleanup "$d"
+}
+
+test_unique_dev_version_numeric_suffix_rejected() {
+  require_proc_sub "unique: DEV_VERSION=1abc rejected" || return 0
+  local d
+  d="$(make_fake_repo check_version_entries_semver_dev_unique.sh)"
+  cat >"$d/version/entries/bad.ver" <<'VER'
+MAJOR_VERSION=1
+STANDARD_VERSION=0
+RELEASE_VERSION=0
+DEV_VERSION=1abc
+DESCRIPTION=oops
+VER
+  if bash "$(unique_script "$d")" 2>/dev/null; then
+    fail "unique: DEV_VERSION=1abc should fail"
+  else
+    ok "unique: DEV_VERSION with numeric suffix rejected"
+  fi
+  cleanup "$d"
+}
+
 # ── Run all tests ─────────────────────────────────────────────────────────────
 
 # check_version_main_prerelease_policy.sh
@@ -1313,6 +1354,7 @@ test_unique_two_ga_same_semver_rejected
 test_unique_same_semver_distinct_dev_passes
 test_unique_duplicate_dev_rejected
 test_unique_malformed_dev_version_rejected
+test_unique_dev_version_numeric_suffix_rejected
 
 # bump_dev_version.sh
 test_bump_increments_dev_version
@@ -1349,6 +1391,7 @@ test_gen_def_gm_overrides_version_and_plain_line
 test_gen_def_gm_picks_highest_semver_then_dev
 test_gen_def_gm_same_semver_higher_dev_wins
 test_gen_def_no_gm_prerelease_line_with_build
+test_gen_def_malformed_gm_flag_rejected
 
 # ── Summary ───────────────────────────────────────────────────────────────────
 

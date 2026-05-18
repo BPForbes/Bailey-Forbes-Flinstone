@@ -5,12 +5,19 @@
 # O(kn): one linear pass over all entry .ver files (k top-level dirs × n files, plus
 # preproduction trees); one sort + linear duplicate scan.
 #
-# DEV_VERSION omitted or non-numeric is treated as 0 for this key (GA-oriented rows).
+# DEV_VERSION omitted counts as 0 for this key (GA-oriented rows). When DEV_VERSION=
+# is present, the value must be a non-negative integer (non-integer values exit 1).
 # Authors: before assigning DEV_VERSION for a given A.B.C, scan version/entries and
 # version/entries/preproduction A.B.C/ and pick the smallest unused non-negative int.
 set -euo pipefail
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 ENT="$ROOT/version/entries"
+
+ver_field_value_raw() {
+  local key="$1" file="$2"
+  grep -E "^[[:space:]]*(int[[:space:]]+)?${key}=" "$file" 2>/dev/null | head -1 |
+    sed -E 's/^[[:space:]]*(int[[:space:]]+)?[^=]+=[[:space:]]*//' || true
+}
 
 get_field() {
   local key="$1" file="$2"
@@ -37,15 +44,14 @@ while IFS= read -r -d '' f; do
     echo "check_version_entries_semver_dev_unique: non-integer semver component in $f" >&2
     exit 1
   fi
-  dv_raw=$(grep -E "^[[:space:]]*(int[[:space:]]+)?DEV_VERSION=" "$f" 2>/dev/null | head -1 || true)
+  dv_raw=$(ver_field_value_raw DEV_VERSION "$f")
   d=0
   if [[ -n "$dv_raw" ]]; then
-    dv=$(get_field DEV_VERSION "$f")
-    if [[ -z "$dv" ]] || ! [[ "$dv" =~ ^[0-9]+$ ]]; then
+    if ! [[ "$dv_raw" =~ ^[0-9]+$ ]]; then
       echo "check_version_entries_semver_dev_unique: DEV_VERSION must be a non-negative integer — $f" >&2
       exit 1
     fi
-    d=$dv
+    d=$dv_raw
   fi
   printf '%s\t%s\t%s\t%s\t%s\n' "$m" "$s" "$r" "$d" "$f"
 done < <(find "$ENT" -type f -name '*.ver' -print0 | sort -z) >"$tmp"
