@@ -36,6 +36,9 @@ set_source_files_properties(${X86_64_ASM_SOURCES}
 target_include_directories(kernel_arch_x86_64 PUBLIC
     ${CMAKE_CURRENT_SOURCE_DIR}/include
     ${CMAKE_SOURCE_DIR}/kernel/include
+    ${CMAKE_SOURCE_DIR}/contracts/foundations
+    ${CMAKE_SOURCE_DIR}/contracts/runtime
+    ${CMAKE_SOURCE_DIR}/contracts/identity
 )
 
 # Compiler flags

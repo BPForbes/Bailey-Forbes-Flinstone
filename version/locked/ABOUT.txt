@@ -1,6 +1,10 @@
 Version release notes use *.ver files (MAJOR_VERSION, STANDARD_VERSION,
-RELEASE_VERSION or MINOR_VERSION / VERSION_PATCH, DESCRIPTION, and optional
-RELEASE_DATE).
+RELEASE_VERSION or MINOR_VERSION / VERSION_PATCH, optional PRERELEASE, optional GM,
+optional DEV_VERSION, DESCRIPTION). Do not add RELEASE_DATE= when authoring under
+version/entries/: relocate (root PRERELEASE=1), Version lock, and stamp_version_release_date.sh
+append it when missing. For paths that already exist under version/locked/, keep
+version/entries/<same path> byte-identical to locked (including any RELEASE_DATE already
+stamped there) until maintainers realign via finalize / Version lock.
 
 DESCRIPTION may be:
   - One line:   DESCRIPTION=...
@@ -9,34 +13,136 @@ DESCRIPTION may be:
                 DELIM
                 (closing line is DELIM alone after trim; newlines are kept.)
 
-RELEASE_DATE (optional in entries):
-  Authors usually omit RELEASE_DATE when editing version/entries/*.ver. After
-  changes land on the develop branch, the "Version lock on merge" GitHub Actions
-  workflow runs finalize_version_locked.sh, then stamp_version_release_date.sh,
-  which appends RELEASE_DATE=YYYY-MM-DD to any *.ver under version/locked and
-  version/entries that does not already declare RELEASE_DATE, using the merge
-  calendar day. For merge date metadata, rely on that automation—do not hand-date
-  every new entry unless there is a deliberate reason to freeze an earlier date.
+Date stamp policy (DEV / preproduction intake):
+  Update date stamp policy so we date DEV-version .ver rows just before we move them
+  into the directory: for each version/entries/*.ver at the repository root with
+  PRERELEASE=1, ./scripts/relocate_root_prerelease_ver_to_preproduction.sh (CI and
+  make relocate-root-prerelease-ver) appends RELEASE_DATE=YYYY-MM-DD using that run's
+  calendar day if the key is still missing, then moves the file into
+  version/entries/preproduction <A>.<B>.<C>/. We upload .ver files for the merge
+  (e.g. cursor/* branches) at the entries root outside that directory; GitHub Actions
+  moves them inside the preproduction A.B.C directory before prerelease layout checks.
+  Same-repo pull requests get an automated commit; fork PRs must run the relocate
+  script locally and push.
 
-  If RELEASE_DATE is omitted entirely, scripts/gen_version_changelog.c may use
-  the generator's local calendar date at generation time (see that script).
+RELEASE_DATE (merge finalize):
+  After pushes to develop, Version lock on merge runs finalize_version_locked.sh,
+  then stamp_version_release_date.sh, which appends RELEASE_DATE (merge calendar
+  day) to any *.ver under version/locked and the same relative paths under
+  version/entries, then stamps every *.ver under version/entries recursively (including
+  preproduction */ trees that finalize does not copy into locked) if the key is still
+  missing. GA-oriented root rows usually rely on this pass; preproduction-only rows
+  rely on the entries-wide pass.
+
+  If RELEASE_DATE is still absent where tooling expects it, scripts/gen_version_changelog.c
+  may use the generator's local calendar date at generation time (see that script).
+
+PRERELEASE / GM / DEV_VERSION / preproduction directories (gen_version_def.sh):
+  At the root of version/entries/ (and version/locked/), GA-oriented rows omit PRERELEASE
+  or set PRERELEASE=0. Optional DEV_VERSION on those rows counts develop-side iterations
+  before preproduction. PRERELEASE=1 rows are authored at the version/entries/ root for
+  same-repo automation (see below); never set GM=1 on a root *.ver file.
+  When any .ver under version/entries/ has PRERELEASE=1 and GM=1, scripts/gen_version_def.sh
+  sets VERSION_MAJOR/STANDARD/PATCH and VERSION from that row's MAJOR/STANDARD/RELEASE
+  (RELEASE_VERSION maps to VERSION_PATCH) instead of only version/locked, and sets VERSION_LINE
+  to plain A.B.C (no PRERELEASE_TAG, no ", BUILD n"). When several such rows exist, the newest
+  wins (highest semver, then highest DEV_VERSION). Otherwise shipped VERSION_* / VERSION follow
+  the highest triple in version/locked only.
+  For ordinary prerelease rows (no winning GM=1), optional PRERELEASE_TAG=token (letters/digits._+- only)
+  sets the prerelease label in userland/shell/version_def.h VERSION_LINE (default PRE when PRERELEASE=1
+  and the key is absent). With DEV_VERSION>=1, VERSION_LINE appends ", BUILD <n>" (comma, space, BUILD, space, n).
+
+  Unique keys: every *.ver under version/entries/ (including preproduction <A>.<B>.<C>/)
+  must have a unique (MAJOR, STANDARD, RELEASE, DEV_VERSION) quadruple tree-wide.
+  Omitting DEV_VERSION= counts as DEV_VERSION 0 for this rule. Before assigning
+  DEV_VERSION for a given A.B.C, scan version/entries/ and that preproduction folder
+  and pick the smallest unused non-negative int. CI runs
+  ./scripts/check_version_entries_semver_dev_unique.sh (O(kn) over dirs and files).
+
+  PRERELEASE=1 marks an in-flight prerelease line. Author new *.ver rows at the
+  version/entries/ repository root with PRERELEASE=1 (same MAJOR/STANDARD/RELEASE as
+  the target A.B.C); do not hand-add new PRERELEASE=1 *.ver paths under
+      preproduction <A>.<B>.<C>/
+  on same-repo branches — ./scripts/relocate_root_prerelease_ver_to_preproduction.sh
+  (CI, make relocate-root-prerelease-ver, Version lock on merge) stamps RELEASE_DATE if
+  missing at the root, then moves each file into that directory. After relocate, every
+  .ver under preproduction <A>.<B>.<C>/ must match that semver in the directory name,
+  must include DEV_VERSION>=1, and may set GM=0 or GM=1. Fork pull requests cannot rely
+  on CI to push the relocate commit: run relocate locally, then commit (paths may
+  already live under preproduction */ — see ABOUT Date stamp policy).
+
+  At most one file per preproduction directory may set GM=1 (go-to-main). Bump
+  DEV_VERSION between iterations with ./scripts/bump_dev_version.sh, or add another *.ver
+  at the version/entries/ root with the same MAJOR/STANDARD/RELEASE, PRERELEASE=1, and
+  the next DEV_VERSION (e.g. DEV_VERSION=1 then DEV_VERSION=2); relocate moves each row
+  into the same preproduction <A>.<B>.<C>/ so maintainers can review the full train before
+  promotion; the shipped GA .ver from promote uses the GM=1 row's DESCRIPTION only.
+
+  AI / automation (no semver backtracking): the preproduction version is the A.B.C
+  in directory names
+      preproduction <A>.<B>.<C>/
+  (PRERELEASE=1 rows land there after relocate). Do not add a new root *.ver at
+  version/entries/ whose MAJOR.STANDARD.RELEASE is numerically below that A.B.C unless
+  a human maintainer explicitly asks for that separate shipped release. Track ongoing
+  work through DEV_VERSION and additional *.ver files at the entries root (same semver,
+  PRERELEASE=1) instead of inventing a lower shipped A.B.C; let relocate place them under
+  the preproduction directory.
+
+  Cursor / AI agents: never set GM=1 without explicit instruction from a human
+  maintainer. For *.ver files your branch adds or changes relative to develop: let N be
+  DEV_VERSION on develop for the same relative path (or 0 if that file is absent there).
+  After you set DEV_VERSION to exactly N+1, do not edit DEV_VERSION again; revise DESCRIPTION only.
+
+  When you are ready to cut main: set GM=1 on exactly one .ver in that folder, then run
+  ./scripts/promote_preproduction_for_main.sh (or make promote-preproduction-for-main).
+  That script builds one new root *.ver (basename from the GM=1 file) whose DESCRIPTION
+  is copied only from that GM=1 row (semver and optional RELEASE_DATE also come from it),
+  omits PRERELEASE/GM/DEV_VERSION entirely, removes every *.ver in the preproduction folder,
+  and deletes the entire preproduction directory from version/entries (and from
+  version/locked only if a legacy copy existed there).
+  finalize_version_locked.sh does not copy preproduction */ into locked, so the published
+  tree normally only gains the merged root .ver after promotion, then the next finalize
+  copies that file into version/locked/.
+
+  userland/shell/version_def.h reports A.B.C in VERSION_* / VERSION (normally from
+  version/locked; a winning PRERELEASE=1 + GM=1 row under version/entries overrides as above).
+  CI runs check_version_prerelease_layout.sh on all branches and
+  check_version_main_prerelease_policy.sh on main and on PRs targeting main (no
+  preproduction */ dirs, no PRERELEASE=1, no GM=1, no DEV_VERSION= lines).
 
 version/entries/  — author and edit .ver release notes here before automation publishes.
-version/locked/   — published snapshot: full copy of version/entries/ when finalize
-                   or Version lock on merge runs on develop.
+version/locked/   — published snapshot from version/entries/ when finalize or
+                   Version lock on merge runs on develop, except that top-level
+                   directories named preproduction <A>.<B>.<C>/ are not copied into
+                   locked (develop-only). Root *.ver files and ABOUT.txt are copied.
 
-Finalize (copy all of entries over locked), then regenerate the shell header
+Finalize (copy entries → locked, skipping preproduction */), then regenerate the shell header
 (maintainers or local release prep — automation does this after push to develop):
 
   ./scripts/finalize_version_locked.sh   # or: make finalize-version-locked
   make                                   # or: ./scripts/gen_version_def.sh
 
-userland/shell/version_def.h is generated from the highest A.B.C among
-version/locked/*.ver only. Do not edit the header by hand.
+userland/shell/version_def.h is generated by scripts/gen_version_def.sh from
+version/locked (highest A.B.C) and version/entries (PRERELEASE / GM / VERSION_LINE rules above).
+Do not edit the header by hand.
 
-For routine feature work: edit only version/entries/*.ver for semver and release prose.
+AI authoring (new .ver rows):
+  New .ver files belong under version/entries/ at the repository root, not in a
+  preproduction <A>.<B>.<C>/ subdirectory one level lower (even when that directory
+  already exists). Do not add new release files under version/locked/. GitHub Actions
+  runs relocate_root_prerelease_ver_to_preproduction.sh to move root PRERELEASE=1 rows
+  into version/entries/preproduction <A>.<B>.<C>/ and stamps RELEASE_DATE when missing.
+  Do not set RELEASE_DATE= on new rows — automation handles dating on relocate and
+  Version lock.
+
+For routine feature work: author new PRERELEASE=1 rows at the version/entries/ root;
+preproduction <A>.<B>.<C>/ is filled by relocate (CI or local), not by hand-adding new
+*.ver paths there on same-repo branches. Edit GA-oriented root *.ver and any existing
+preproduction subtrees for semver and release prose (do not strip RELEASE_DATE from
+rows already stamped in preproduction).
 Do not commit hand-edited version/locked/*.ver or userland/shell/version_def.h on
-typical agent-authored PRs; GitHub Actions copies entries → locked and regenerates
+typical agent-authored PRs; GitHub Actions copies entries → locked (excluding
+preproduction */ at the entries root) and regenerates
 the header after merge to develop. Exception: this ABOUT.txt file (companion
 documentation) may change together with the copy under version/entries/ or
 version/locked/ so both stay byte-identical when CI requires it.
@@ -46,8 +152,11 @@ additional *.ver files under version/entries/ (include the semver in the basenam
 often A_B_C_short_slug.ver). Ordering uses MAJOR/STANDARD/RELEASE inside the file,
 not the filename prefix.
 
-version/locked/*.ver mirrors version/entries/*.ver: each locked file must byte-match
-the same path under version/entries/ for CI. Do not hand-edit locked .ver copies;
-never let locked release prose diverge from entries.
+version/locked/**/*.ver mirrors the same paths under version/entries/ for every
+file that exists in locked: each locked file must byte-match the counterpart under
+version/entries/. Paths that exist only under version/entries/preproduction */ are
+not present in locked until promotion merges them to a root .ver. Do not hand-edit
+locked .ver copies; never let locked release prose diverge from entries for paths
+that appear in both trees.
 
 Full contributor-facing notes: docs/versioning.md

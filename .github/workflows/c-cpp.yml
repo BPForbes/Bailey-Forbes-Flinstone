@@ -6,14 +6,60 @@ on:
   pull_request:
     branches: [ "develop", "main" ]
 
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
 jobs:
   version-requirements:
     name: Versioning requirements
     runs-on: ubuntu-latest
+    permissions:
+      contents: write
     steps:
       - uses: actions/checkout@v4
         with:
           fetch-depth: 0
+          token: ${{ secrets.BPFORBES_PAT || secrets.VERSION_LOCK_PAT || secrets.GITHUB_TOKEN }}
+
+      - name: Block fork PR when root PRERELEASE=1 needs automated relocate
+        if: github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name != github.repository
+        run: bash scripts/relocate_root_prerelease_ver_to_preproduction.sh --dry-run-exit-if-needed
+
+      - name: Prepare version/entries (relocate root PRERELEASE=1 .ver)
+        uses: ./.github/actions/prepare-version-entries
+
+      - name: Regenerate userland/shell/version_def.h from .ver trees
+        run: ./scripts/gen_version_def.sh
+
+      - name: Publish version/entries and version_def.h (same-repo only)
+        if: github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository
+        env:
+          BOT_NAME: github-actions[bot]
+          BOT_EMAIL: 41898282+github-actions[bot]@users.noreply.github.com
+          GIT_HEAD_REF: ${{ github.head_ref }}
+        run: |
+          set -euo pipefail
+          if git diff --quiet -- version/entries userland/shell/version_def.h; then
+            echo "No version/entries or version_def.h changes after relocate + gen_version_def.sh."
+            exit 0
+          fi
+          if [[ "${GITHUB_REF}" == "refs/heads/develop" || "${GITHUB_REF}" == "refs/heads/main" ]]; then
+            echo "Skipping push on develop/main (relocate + header checks run here; version-lock sync PR publishes when needed)."
+            exit 0
+          fi
+          git config user.name "$BOT_NAME"
+          git config user.email "$BOT_EMAIL"
+          git add -A -- version/entries userland/shell/version_def.h
+          git commit -m "chore(version): sync entries relocate and version_def.h from .ver (automated)"
+          if [[ "${GITHUB_EVENT_NAME}" == "pull_request" ]]; then
+            git push origin "HEAD:${GIT_HEAD_REF}"
+          else
+            git push origin "HEAD:${GITHUB_REF_NAME}"
+          fi
 
       - name: Validate version locked immutability (PR only)
         if: github.event_name == 'pull_request'
@@ -25,6 +71,20 @@ jobs:
       - name: Verify version_def.h matches generator (version/locked)
         run: ./scripts/check_version_header_matches_locked.sh
 
+      - name: Validate prerelease .ver directory layout (version/entries)
+        run: ./scripts/check_version_prerelease_layout.sh
+
+      - name: Unique MAJOR/STANDARD/RELEASE/DEV_VERSION across version/entries
+        run: ./scripts/check_version_entries_semver_dev_unique.sh
+
+      - name: Main must ship GA .ver only (push)
+        if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+        run: ./scripts/check_version_main_prerelease_policy.sh
+
+      - name: Main must ship GA .ver only (PR to main)
+        if: github.event_name == 'pull_request' && github.base_ref == 'main'
+        run: ./scripts/check_version_main_prerelease_policy.sh
+
   build-and-test-x86_64:
     name: Build & test (x86_64 GAS)
     needs: version-requirements
@@ -33,6 +93,9 @@ jobs:
       - uses: actions/checkout@v4
         with:
           fetch-depth: 0
+
+      - name: Sync version checkout for build
+        uses: ./.github/actions/sync-version-checkout
 
       - name: Install dependencies
         run: sudo apt-get update -y && sudo apt-get install -y gcc binutils nasm libcunit1-dev
@@ -88,6 +151,9 @@ jobs:
         with:
           fetch-depth: 0
 
+      - name: Sync version checkout for build
+        uses: ./.github/actions/sync-version-checkout
+
       - name: Install cross-compiler
         run: sudo apt-get update -y && sudo apt-get install -y gcc gcc-aarch64-linux-gnu binutils-aarch64-linux-gnu
 
@@ -107,6 +173,9 @@ jobs:
       - uses: actions/checkout@v4
         with:
           fetch-depth: 0
+
+      - name: Sync version checkout for build
+        uses: ./.github/actions/sync-version-checkout
 
       - name: Install dependencies
         run: sudo apt-get install -y gcc binutils nasm

@@ -8,6 +8,7 @@
 #include <stddef.h>
 #include <stdint.h>
 #include "bus.h"
+#include "contract_result.h"
 
 #ifdef __cplusplus
 extern "C" {
@@ -35,10 +36,16 @@ typedef enum {
 /* Opaque device handle from bus layer (typedef in bus.h, struct in device.h) */
 struct fl_device;
 
-/* Driver operations - platform-neutral */
+/*
+ * Driver operations — fallible lifecycle returns **fl_result_t** (**P0-2**).
+ * `probe`: **FL_RESULT_OK** = claim device; **FL_RESULT_PROBE_SKIP** = not this driver;
+ *   other negatives = probe failed definitively.
+ * `attach`: **FL_RESULT_OK** on success; non-OK rolls back without **start**.
+ * `start` / `stop` / `detach`: void — errors are handled internally or ignored.
+ */
 typedef struct fl_driver_ops {
-    int  (*probe)(fl_device_t *dev);
-    int  (*attach)(fl_device_t *dev);
+    fl_result_t (*probe)(fl_device_t *dev);
+    fl_result_t (*attach)(fl_device_t *dev);
     void (*start)(fl_device_t *dev);
     void (*stop)(fl_device_t *dev);
     void (*detach)(fl_device_t *dev);
@@ -58,8 +65,8 @@ typedef struct fl_driver_desc {
 
 /* Registration */
 void fl_driver_registry_register_all(void);
-int  fl_driver_registry_register(const fl_driver_desc_t *desc);
-int  fl_driver_registry_match(const fl_device_desc_t *dev, const fl_driver_desc_t **out);
+fl_result_t fl_driver_registry_register(const fl_driver_desc_t *desc);
+fl_result_t fl_driver_registry_match(const fl_device_desc_t *dev, const fl_driver_desc_t **out);
 
 /* Init flow: register -> enumerate -> probe -> attach -> start */
 void fl_drivers_init(void);

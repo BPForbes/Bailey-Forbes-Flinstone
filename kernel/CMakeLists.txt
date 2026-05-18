@@ -38,6 +38,12 @@ add_library(kernel STATIC
 target_include_directories(kernel PUBLIC
     ${CMAKE_CURRENT_SOURCE_DIR}/include
     ${CMAKE_CURRENT_SOURCE_DIR}/arch/${TARGET_ARCH}/include
+    ${CMAKE_SOURCE_DIR}/contracts/foundations
+    ${CMAKE_SOURCE_DIR}/contracts/runtime
+    ${CMAKE_SOURCE_DIR}/contracts/identity
+    ${CMAKE_SOURCE_DIR}/contracts/storage
+    ${CMAKE_SOURCE_DIR}/contracts/observability
+    ${CMAKE_SOURCE_DIR}/contracts/operations
 )
 
 # Link libraries

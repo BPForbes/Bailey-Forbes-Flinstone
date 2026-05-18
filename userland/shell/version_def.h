@@ -4,23 +4,32 @@
 /*
  * GENERATED FILE — do not edit by hand.
  *
- * Built from finalized .ver files under version/locked/ by scripts/gen_version_def.sh (also run from the Makefile).
- * The shipped version is the highest A.B.C among those files (additional release note files may exist only under version/entries/ until finalize).
+ * Shipped numeric semver (VERSION_MAJOR/STANDARD/PATCH and VERSION): normally the highest
+ * A.B.C among all .ver files under version/locked/ (recursive); PRERELEASE, GM, and
+ * DEV_VERSION there are ignored for those macros.
  *
- *   A (VERSION_MAJOR)     — milestones / architecture-scale changes
- *   B (VERSION_STANDARD)  — new features (semver "minor")
- *   C (VERSION_PATCH)     — fixes and small corrections (semver "patch")
+ * Go-to-main (entries): when any .ver under version/entries/ has PRERELEASE=1 and GM=1,
+ * the newest such row (highest semver, then highest DEV_VERSION) supplies MAJOR/STANDARD/
+ * RELEASE for VERSION_* / VERSION (RELEASE maps to VERSION_PATCH). VERSION_LINE is then
+ * plain A.B.C with no prerelease tag and no ", BUILD n" suffix.
  *
- * To bump: add version/entries/<A>_<B>_<C>_<slug>.ver, run ./scripts/finalize_version_locked.sh, then `make` or `./scripts/gen_version_def.sh`.
+ * Otherwise VERSION_LINE follows version/entries PRERELEASE=1 rows: PRERELEASE_TAG
+ * (default PRE), semver A.B.C, and optional ", BUILD n" when DEV_VERSION>=1; if no
+ * PRERELEASE=1 rows exist, VERSION_LINE matches VERSION.
+ *
+ * To bump shipped semver: add new .ver files under version/entries/, finalize to
+ * version/locked/, then run make or ./scripts/gen_version_def.sh.
  */
-#define VERSION_MAJOR    3
-#define VERSION_STANDARD 2
-#define VERSION_PATCH    2
+#define VERSION_MAJOR    4
+#define VERSION_STANDARD 0
+#define VERSION_PATCH    0
 
 #define VERSION_STR_(x) #x
 #define VERSION_STR(x) VERSION_STR_(x)
 
 #define VERSION \
     VERSION_STR(VERSION_MAJOR) "." VERSION_STR(VERSION_STANDARD) "." VERSION_STR(VERSION_PATCH)
+
+#define VERSION_LINE "4.0.0"
 
 #endif /* VERSION_DEF_H */

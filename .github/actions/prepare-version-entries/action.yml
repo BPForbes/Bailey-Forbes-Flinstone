@@ -1,0 +1,11 @@
+name: Prepare version/entries
+description: >-
+  Stamp missing RELEASE_DATE on root PRERELEASE=1 *.ver, then move them into
+  preproduction A.B.C/ (idempotent for a given checkout).
+runs:
+  using: composite
+  steps:
+    - name: Relocate root PRERELEASE=1 .ver into preproduction
+      shell: bash
+      working-directory: ${{ github.workspace }}
+      run: bash scripts/relocate_root_prerelease_ver_to_preproduction.sh

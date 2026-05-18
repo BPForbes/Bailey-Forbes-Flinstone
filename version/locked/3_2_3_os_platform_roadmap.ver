@@ -1,0 +1,6 @@
+MAJOR_VERSION=3
+STANDARD_VERSION=2
+RELEASE_VERSION=3
+DESCRIPTION=docs/ROADMAP.md: roadmap incl. global stds #6–#8 (C11 atomics, API lifecycle, compiler hardening/CI), P3-12 DHCP, P7-2 reproducible builds+signing+semver, P7-3 CONFIG_LAB_REVERSE_SHELL, P9-2 SEI CERT C, §12 Multiboot2, Appendix B version/entries reminder, Phase 3 perf budget note; prior: interlinks, FDT/PSCI/UART/timer/IPv6, A-gates, Appendix D.
+
+RELEASE_DATE=2026-05-12

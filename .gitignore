@@ -22,6 +22,7 @@ tests/test_drivers
 tests/test_vm_mem
 tests/test_invariants
 tests/test_fs_jail
+tests/test_audit_log
 tests/test_replay
 tests/test_userspace_connection
 tests/test_vm_layer_warning
@@ -53,3 +54,6 @@ vm_hostfs/
 userland/shell/version_changelog.c
 # Built locally or in CI before running the generator (not tracked)
 /gen_version_changelog
+
+# Makefile: aggregate checksum of version/entries/**/*.ver for version_def.h freshness
+.version_entries_ver.sum

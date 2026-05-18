@@ -4,12 +4,18 @@
 #include "terminal.h"
 #include "cmd_decl.h"
 #include "threadpool.h"
+#include "contract_p2_authz.h"
+#include "contract_p2_principal_names.h"
+#include "fl/audit_log.h"
+#include "fl/authz_subsystem.h"
+#include "fl/shell_authz.h"
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 #include <unistd.h>
 #include <sys/wait.h>
 #include <signal.h>
+#include <pthread.h>
 
 /*
  * execute_command_str:
@@ -20,45 +26,61 @@
  * analogous to fl_syscall_dispatch() for kernel syscalls.
  */
 int execute_command_str(const char *line) {
+    int out_rc = 0;
     if (!line || !*line)
-        return 0;
+        goto finish;
+
     append_history(line);
+
     char buffer[512];
     strncpy(buffer, line, sizeof(buffer) - 1);
     buffer[sizeof(buffer) - 1] = '\0';
     char *tokenBuf = strdup(buffer);
+    if (!tokenBuf)
+        goto finish;
     char *trimmed = trim_whitespace(tokenBuf);
 
     if (cmd_exit_maybe(trimmed)) {
         free(tokenBuf);
-        return 1;
+        out_rc = 1;
+        goto finish;
     }
     if (cmd_clear_maybe(trimmed)) {
         free(tokenBuf);
-        return 0;
+        out_rc = 0;
+        goto finish;
     }
     if (cmd_help_maybe(trimmed)) {
         free(tokenBuf);
-        return 0;
+        out_rc = 0;
+        goto finish;
     }
     if (cmd_history_maybe(trimmed)) {
         free(tokenBuf);
-        return 0;
+        out_rc = 0;
+        goto finish;
     }
     if (cmd_cc_maybe(trimmed)) {
         free(tokenBuf);
-        return 0;
+        out_rc = 0;
+        goto finish;
     }
     if (cmd_bios_maybe(trimmed)) {
         free(tokenBuf);
-        return 0;
+        out_rc = 0;
+        goto finish;
     }
     if (cmd_make_maybe(trimmed)) {
         free(tokenBuf);
-        return 0;
+        out_rc = 0;
+        goto finish;
     }
 
     char *cmdLine = strdup(buffer);
+    if (!cmdLine) {
+        free(tokenBuf);
+        goto finish;
+    }
     char *args[64];
     int argc = 0;
     char *t = strtok(cmdLine, " \t");
@@ -68,18 +90,28 @@ int execute_command_str(const char *line) {
     }
     args[argc] = NULL;
     free(tokenBuf);
+
     if (argc == 0) {
         free(cmdLine);
-        return 0;
+        goto finish;
     }
 
     fl_shell_cmd_no_t id = fl_shell_cmd_lookup(args[0]);
     if (id == FL_SCMD_UNKNOWN) {
+        fl_authz_decision_t fx = fl_shell_authz_foreign_exec(argc, args);
+        if (fx == FL_AUTHZ_DENY) {
+            fl_audit_authz_event(line, 0u, 1);
+            free(cmdLine);
+            out_rc = 1;
+            goto finish;
+        }
+        fl_audit_authz_event(line, (unsigned)FL_AUTHZ_OP_SHELL_FOREIGN_EXEC, 0);
         pid_t pid = fork();
         if (pid < 0) {
             perror("fork");
             free(cmdLine);
-            return 1;
+            out_rc = 1;
+            goto finish;
         }
         if (pid == 0) {
             signal(SIGINT, SIG_DFL);
@@ -90,13 +122,115 @@ int execute_command_str(const char *line) {
             int status = 0;
             waitpid(pid, &status, 0);
             free(cmdLine);
-            return WEXITSTATUS(status);
+            out_rc = WEXITSTATUS(status);
+            goto finish;
         }
     }
 
-    int rc = fl_shell_cmd_dispatch(id, argc, args);
+    fl_authz_decision_t sh = fl_shell_authz_builtin(id, argc, args);
+    if (sh == FL_AUTHZ_DENY) {
+        fl_audit_authz_event(line, (unsigned)id, 1);
+        free(cmdLine);
+        out_rc = 1;
+        goto finish;
+    }
+    fl_audit_authz_event(line, (unsigned)id, 0);
+
+    {
+        unsigned sub_op = fl_authz_subsystem_op_for_shell_cmd((unsigned)id);
+        if (sub_op != (unsigned)FL_AUTHZ_OP_UNSPECIFIED) {
+            fl_authz_decision_t sub = fl_authz_subsystem_check(sub_op, NULL);
+            fl_audit_authz_event(line, sub_op, sub == FL_AUTHZ_DENY ? 1 : 0);
+            if (sub == FL_AUTHZ_DENY) {
+                free(cmdLine);
+                out_rc = 1;
+                goto finish;
+            }
+        }
+    }
+
+    out_rc = fl_shell_cmd_dispatch(id, argc, args);
     free(cmdLine);
-    return rc;
+
+finish:
+    fl_audit_shell_completed(line, out_rc);
+    return out_rc;
+}
+
+/* ---------------------------------------------------------------------------
+ * Shell authorization (**P2-3**) — same TU as the interpreter to avoid a
+ * separate userland object file; policy is hosted-only (getenv / hook).
+ * -------------------------------------------------------------------------*/
+static fl_shell_authz_hook_fn s_shell_authz_hook;
+static void *s_shell_authz_hook_ctx;
+static pthread_mutex_t s_shell_authz_mu = PTHREAD_MUTEX_INITIALIZER;
+
+void fl_shell_authz_set_hook(fl_shell_authz_hook_fn hook_fn, void *ctx) {
+    pthread_mutex_lock(&s_shell_authz_mu);
+    s_shell_authz_hook = hook_fn;
+    s_shell_authz_hook_ctx = ctx;
+    pthread_mutex_unlock(&s_shell_authz_mu);
+}
+
+static int principal_is_guest(void) {
+    /* getenv is not async-signal-safe; concurrent setenv is not expected for
+     * FL_PRINCIPAL_ENV_NAME in normal shell or CUnit runs (single-threaded tests). */
+    const char *p = getenv(FL_PRINCIPAL_ENV_NAME);
+    return p && strcmp(p, FL_PRINCIPAL_GUEST_LITERAL) == 0;
+}
+
+static fl_authz_decision_t guest_builtin_policy(fl_shell_cmd_no_t no) {
+    switch (no) {
+    case FL_SCMD_FORMAT:
+    case FL_SCMD_SETDISK:
+    case FL_SCMD_INITDISK:
+    case FL_SCMD_CREATEDISK:
+    case FL_SCMD_RMTREE:
+    case FL_SCMD_DISKPUT:
+    case FL_SCMD_DISKGET:
+    case FL_SCMD_DISKDEL:
+    case FL_SCMD_DISKMKDIR:
+    case FL_SCMD_REDIRECT:
+    case FL_SCMD_IMPORT:
+    case FL_SCMD_WRITE:
+    case FL_SCMD_WRITECLUSTER:
+    case FL_SCMD_DELCLUSTER:
+    case FL_SCMD_UPDATE:
+    case FL_SCMD_ADDCLUSTER:
+        return FL_AUTHZ_DENY;
+    default:
+        return FL_AUTHZ_ALLOW;
+    }
+}
+
+fl_authz_decision_t fl_shell_authz_builtin(fl_shell_cmd_no_t no, int argc, char **argv) {
+    fl_shell_authz_hook_fn hook = NULL;
+    void *hook_ctx = NULL;
+    pthread_mutex_lock(&s_shell_authz_mu);
+    hook = s_shell_authz_hook;
+    hook_ctx = s_shell_authz_hook_ctx;
+    pthread_mutex_unlock(&s_shell_authz_mu);
+    if (hook) {
+        return hook(no, argc, argv, hook_ctx);
+    }
+    if (!principal_is_guest())
+        return FL_AUTHZ_ALLOW;
+    return guest_builtin_policy(no);
+}
+
+fl_authz_decision_t fl_shell_authz_foreign_exec(int argc, char **argv) {
+    fl_shell_authz_hook_fn hook = NULL;
+    void *hook_ctx = NULL;
+    pthread_mutex_lock(&s_shell_authz_mu);
+    hook = s_shell_authz_hook;
+    hook_ctx = s_shell_authz_hook_ctx;
+    pthread_mutex_unlock(&s_shell_authz_mu);
+    if (hook) {
+        return hook(FL_SCMD_UNKNOWN, argc, argv, hook_ctx);
+    }
+    if (!principal_is_guest())
+        return FL_AUTHZ_ALLOW;
+    return FL_AUTHZ_DENY;
 }
 
 /* ---------------------------------------------------------------------------
