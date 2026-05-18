@@ -1,8 +1,7 @@
 MAJOR_VERSION=4
 STANDARD_VERSION=0
 RELEASE_VERSION=0
-PRERELEASE=1
-DEV_VERSION=1
+DEV_VERSION=13
 DESCRIPTION=promote_preproduction_for_main.sh: GA root .ver uses DESCRIPTION (and semver / optional RELEASE_DATE) only from the GM=1 row; other preproduction .ver files are deleted with the directory. Aligned docs: docs/versioning.md, version/*/ABOUT.txt, AGENTS.md, CLAUDE.md, .cursor/rules/versioning.mdc, .coderabbit.yaml.
 
 RELEASE_DATE=2026-05-18
