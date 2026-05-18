@@ -1370,6 +1370,69 @@ VER
   cleanup "$d"
 }
 
+test_unique_empty_dev_version_rejected() {
+  require_proc_sub "unique: empty DEV_VERSION= rejected" || return 0
+  local d
+  d="$(make_fake_repo check_version_entries_semver_dev_unique.sh)"
+  cat >"$d/version/entries/bad_empty_dv.ver" <<'VER'
+MAJOR_VERSION=1
+STANDARD_VERSION=0
+RELEASE_VERSION=0
+DEV_VERSION=
+DESCRIPTION=empty dev
+VER
+  if bash "$(unique_script "$d")" 2>/dev/null; then
+    fail "unique: DEV_VERSION= should fail"
+  else
+    ok "unique: empty DEV_VERSION assignment rejected"
+  fi
+  cleanup "$d"
+}
+
+test_layout_empty_gm_rejected() {
+  require_proc_sub "layout: empty GM= rejected" || return 0
+  local d
+  d="$(make_fake_repo check_version_prerelease_layout.sh)"
+  mkdir -p "$d/version/entries/preproduction 1.0.0"
+  cat >"$d/version/entries/preproduction 1.0.0/bad.ver" <<'VER'
+MAJOR_VERSION=1
+STANDARD_VERSION=0
+RELEASE_VERSION=0
+PRERELEASE=1
+GM=
+DEV_VERSION=1
+DESCRIPTION=empty gm
+VER
+  if bash "$d/scripts/check_version_prerelease_layout.sh" 2>/dev/null; then
+    fail "layout: GM= should fail"
+  else
+    ok "layout: empty GM assignment rejected"
+  fi
+  cleanup "$d"
+}
+
+test_layout_empty_prerelease_rejected() {
+  require_proc_sub "layout: empty PRERELEASE= rejected" || return 0
+  local d
+  d="$(make_fake_repo check_version_prerelease_layout.sh)"
+  mkdir -p "$d/version/entries/preproduction 1.0.0"
+  cat >"$d/version/entries/preproduction 1.0.0/bad.ver" <<'VER'
+MAJOR_VERSION=1
+STANDARD_VERSION=0
+RELEASE_VERSION=0
+PRERELEASE=
+GM=0
+DEV_VERSION=1
+DESCRIPTION=empty prerelease
+VER
+  if bash "$d/scripts/check_version_prerelease_layout.sh" 2>/dev/null; then
+    fail "layout: PRERELEASE= should fail"
+  else
+    ok "layout: empty PRERELEASE assignment rejected"
+  fi
+  cleanup "$d"
+}
+
 test_layout_malformed_prerelease_suffix_rejected() {
   require_proc_sub "layout: PRERELEASE=1abc rejected" || return 0
   local d
@@ -1470,6 +1533,28 @@ test_merge_sim_ref_lists_preproduction() {
     ok "merge_sim: develop ref lists preproduction directory"
   else
     fail "merge_sim: expected preproduction dir in ref output, got: $out"
+  fi
+  cleanup "$d"
+}
+
+test_merge_sim_json_output_valid() {
+  require_proc_sub "merge_sim: --json --check emits parseable JSON" || return 0
+  local d out
+  d="$(make_fake_repo version_merge_sim_status.sh check_version_prerelease_layout.sh check_version_main_prerelease_policy.sh)"
+  cat >"$d/version/entries/root_gm.ver" <<'VER'
+MAJOR_VERSION=1
+STANDARD_VERSION=0
+RELEASE_VERSION=0
+PRERELEASE=1
+GM=1
+DEV_VERSION=1
+DESCRIPTION=root gm fails layout
+VER
+  out=$(bash "$(merge_sim_script "$d")" --json --check 2>&1) || true
+  if python3 -c 'import json,sys; json.loads(sys.stdin.read())' <<<"$out" 2>/dev/null; then
+    ok "merge_sim: JSON with multiline check output parses"
+  else
+    fail "merge_sim: --json --check output should be valid JSON"
   fi
   cleanup "$d"
 }
@@ -1576,6 +1661,8 @@ test_layout_version_alias_keys_accepted
 test_layout_preproduction_dev_version_gte_2
 test_layout_malformed_prerelease_suffix_rejected
 test_layout_malformed_gm_suffix_rejected
+test_layout_empty_gm_rejected
+test_layout_empty_prerelease_rejected
 
 # promote_preproduction_for_main.sh
 test_promote_dry_run_keeps_preproduction
@@ -1584,6 +1671,7 @@ test_promote_malformed_gm_suffix_aborts
 # version_merge_sim_status.sh
 test_merge_sim_ref_lists_preproduction
 test_merge_sim_promote_dry_run_via_status
+test_merge_sim_json_output_valid
 
 # check_version_entries_semver_dev_unique.sh
 test_unique_empty_entries
@@ -1596,6 +1684,7 @@ test_unique_dev_version_numeric_suffix_rejected
 test_unique_semver_numeric_suffix_rejected
 test_unique_standard_version_suffix_rejected
 test_unique_release_version_suffix_rejected
+test_unique_empty_dev_version_rejected
 
 # bump_dev_version.sh
 test_bump_increments_dev_version

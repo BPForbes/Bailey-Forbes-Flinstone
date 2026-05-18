@@ -68,8 +68,9 @@ while [[ $# -gt 0 ]]; do
   esac
 done
 
+# JSON string body (no surrounding quotes); escapes newlines and control chars.
 json_escape() {
-  printf '%s' "$1" | sed 's/\\/\\\\/g;s/"/\\"/g'
+  python3 -c 'import json,sys; print(json.dumps(sys.argv[1])[1:-1], end="")' _ "$1"
 }
 
 json_string_array() {
@@ -104,18 +105,17 @@ ref_ver_paths() {
 }
 
 ref_gm1_files() {
-  local ref="$1" dir rel tmp gm
+  local ref="$1" dir rel gm
   while IFS= read -r dir; do
     [[ -n "$dir" ]] || continue
     while IFS= read -r rel; do
       [[ "$rel" == *.ver ]] || continue
-      tmp="$(mktemp)"
-      if ! git -C "$ROOT" show "$ref:$rel" >"$tmp" 2>/dev/null; then
-        rm -f "$tmp"
-        continue
-      fi
-      gm=$(ver_parse_flag_field GM "$tmp")
-      rm -f "$tmp"
+      gm=$(
+        tmp="$(mktemp)"
+        trap 'rm -f "$tmp"' EXIT
+        git -C "$ROOT" show "$ref:$rel" >"$tmp" 2>/dev/null || exit 0
+        ver_parse_flag_field GM "$tmp"
+      ) || continue
       [[ "$gm" == "1" ]] && echo "$rel"
     done < <(git -C "$ROOT" ls-tree -r --name-only "$ref" "$dir" 2>/dev/null || true)
   done < <(ref_preproduction_dirs "$ref")
