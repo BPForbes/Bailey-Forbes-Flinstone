@@ -7,6 +7,7 @@
 #   scripts/bump_dev_version.sh
 #   scripts/lib/ver_release_date_stamp.sh
 #   scripts/relocate_root_prerelease_ver_to_preproduction.sh
+#   scripts/stamp_version_entries_release_date.sh
 #
 # Run from repository root: bash tests/test_version_scripts.sh
 # Exit 0 on all pass, exit 1 on any failure.
@@ -1477,6 +1478,92 @@ VER
   cleanup "$d"
 }
 
+test_unique_prerelease_two_rejected() {
+  require_proc_sub "unique: PRERELEASE=2 rejected" || return 0
+  local d
+  d="$(make_fake_repo check_version_entries_semver_dev_unique.sh)"
+  cat >"$d/version/entries/bad_pr.ver" <<'VER'
+MAJOR_VERSION=1
+STANDARD_VERSION=0
+RELEASE_VERSION=0
+PRERELEASE=2
+DEV_VERSION=1
+DESCRIPTION=bad prerelease flag
+VER
+  if bash "$(unique_script "$d")" 2>/dev/null; then
+    fail "unique: PRERELEASE=2 should fail"
+  else
+    ok "unique: PRERELEASE=2 rejected (binary flag)"
+  fi
+  cleanup "$d"
+}
+
+test_unique_gm_two_rejected() {
+  require_proc_sub "unique: GM=2 rejected" || return 0
+  local d
+  d="$(make_fake_repo check_version_entries_semver_dev_unique.sh)"
+  mkdir -p "$d/version/entries/preproduction 1.0.0"
+  cat >"$d/version/entries/preproduction 1.0.0/bad.ver" <<'VER'
+MAJOR_VERSION=1
+STANDARD_VERSION=0
+RELEASE_VERSION=0
+PRERELEASE=1
+GM=2
+DEV_VERSION=1
+DESCRIPTION=bad gm flag
+VER
+  if bash "$(unique_script "$d")" 2>/dev/null; then
+    fail "unique: GM=2 should fail"
+  else
+    ok "unique: GM=2 rejected (binary flag)"
+  fi
+  cleanup "$d"
+}
+
+stamp_entries_script() {
+  local fake_root="$1"
+  echo "$fake_root/scripts/stamp_version_entries_release_date.sh"
+}
+
+test_stamp_entries_root_and_preproduction() {
+  require_proc_sub "stamp: entries root and preproduction */" || return 0
+  local d
+  d="$(make_fake_repo stamp_version_entries_release_date.sh)"
+  write_ver_ga "$d/version/entries/1_0_0_root.ver" 1 0 0
+  mkdir -p "$d/version/entries/preproduction 2.0.0"
+  write_ver_prerelease "$d/version/entries/preproduction 2.0.0/train.ver" 2 0 0 1
+  REPO_ROOT="$d" bash "$(stamp_entries_script "$d")" >/dev/null
+  if ! grep -qE '^RELEASE_DATE=[0-9]{4}-[0-9]{2}-[0-9]{2}$' "$d/version/entries/1_0_0_root.ver"; then
+    fail "stamp: missing RELEASE_DATE on entries root"
+    cleanup "$d"
+    return
+  fi
+  if ! grep -qE '^RELEASE_DATE=[0-9]{4}-[0-9]{2}-[0-9]{2}$' "$d/version/entries/preproduction 2.0.0/train.ver"; then
+    fail "stamp: missing RELEASE_DATE under preproduction */"
+    cleanup "$d"
+    return
+  fi
+  ok "stamp: entries root and preproduction */"
+  cleanup "$d"
+}
+
+test_stamp_entries_idempotent() {
+  require_proc_sub "stamp: idempotent when RELEASE_DATE present" || return 0
+  local d before after
+  d="$(make_fake_repo stamp_version_entries_release_date.sh)"
+  write_ver_ga "$d/version/entries/1_0_0_root.ver" 1 0 0
+  printf '\nRELEASE_DATE=2099-01-01\n' >>"$d/version/entries/1_0_0_root.ver"
+  before=$(grep -c '^RELEASE_DATE=' "$d/version/entries/1_0_0_root.ver" || true)
+  REPO_ROOT="$d" bash "$(stamp_entries_script "$d")" >/dev/null
+  after=$(grep -c '^RELEASE_DATE=' "$d/version/entries/1_0_0_root.ver" || true)
+  if [[ "$before" != "$after" ]] || ! grep -q '^RELEASE_DATE=2099-01-01$' "$d/version/entries/1_0_0_root.ver"; then
+    fail "stamp: should not add second RELEASE_DATE"
+  else
+    ok "stamp: idempotent when RELEASE_DATE present"
+  fi
+  cleanup "$d"
+}
+
 promote_script() {
   local fake_root="$1"
   echo "$fake_root/scripts/promote_preproduction_for_main.sh"
@@ -1685,6 +1772,12 @@ test_unique_semver_numeric_suffix_rejected
 test_unique_standard_version_suffix_rejected
 test_unique_release_version_suffix_rejected
 test_unique_empty_dev_version_rejected
+test_unique_prerelease_two_rejected
+test_unique_gm_two_rejected
+
+# stamp_version_entries_release_date.sh
+test_stamp_entries_root_and_preproduction
+test_stamp_entries_idempotent
 
 # bump_dev_version.sh
 test_bump_increments_dev_version

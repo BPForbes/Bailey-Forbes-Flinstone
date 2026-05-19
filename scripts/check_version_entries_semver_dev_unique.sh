@@ -7,6 +7,7 @@
 #
 # DEV_VERSION omitted counts as 0 for this key (GA-oriented rows). When DEV_VERSION=
 # is present, the value must be a non-negative integer (non-integer values exit 1).
+# PRERELEASE and GM, when present, must be exactly 0 or 1 (binary flags).
 # Semver fields must likewise be non-negative integers with no trailing junk (1abc fails).
 # Authors: before assigning DEV_VERSION for a given A.B.C, scan version/entries and
 # version/entries/preproduction A.B.C/ and pick the smallest unused non-negative int.
@@ -22,6 +23,8 @@ tmp="$(mktemp)"
 trap 'rm -f "$tmp"' EXIT
 
 while IFS= read -r -d '' f; do
+  ver_parse_flag_field PRERELEASE "$f" >/dev/null
+  ver_parse_flag_field GM "$f" >/dev/null
   m=$(ver_parse_nonneg_int_field MAJOR_VERSION "$f")
   [[ -n "$m" ]] || m=$(ver_parse_nonneg_int_field VERSION_MAJOR "$f")
   s=$(ver_parse_nonneg_int_field STANDARD_VERSION "$f")
