@@ -3,7 +3,6 @@ STANDARD_VERSION=0
 RELEASE_VERSION=1
 PRERELEASE=1
 DEV_VERSION=2
-GM=1
 DESCRIPTION<<VER_4_0_1_GM1_MAIN_PREP
 4.0.1: Patch release — default serial Makefile builds (-j1, jobserver-aware), host IPC and shell/PIC hardening, cd NUL-termination, VFS/FAT32 bounds and overflow guards, and shell batch/pool lifecycle fixes.
 
