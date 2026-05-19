@@ -51,3 +51,5 @@ bounded against cycles; allocate_and_write_chain rollback clears the partially l
 cluster; max_cluster_number clamps UINT32_MAX+1 wrap; Makefile drops duplicate %.o:%.s
 rule and treats --jobserver-auth as an active jobserver for default -j1.
 VER_4_0_1_GM1_MAIN_PREP
+
+RELEASE_DATE=2026-05-19
