@@ -176,9 +176,13 @@ finalize-version-locked sync-version-locked:
 	@./scripts/finalize_version_locked.sh
 
 # Merge GM=1 preproduction */ trees into one root GA .ver and delete those dirs from entries + locked.
-.PHONY: promote-preproduction-for-main version-merge-sim-status bump-dev-version relocate-root-prerelease-ver stamp-version-entries-release-date prepare-version-entries
+.PHONY: promote-preproduction-for-main normalize-gm-candidates version-merge-sim-status bump-dev-version relocate-root-prerelease-ver stamp-version-entries-release-date prepare-version-entries
 promote-preproduction-for-main:
 	@./scripts/promote_preproduction_for_main.sh
+
+# Demote lower DEV_VERSION duplicate GM=1 candidates without promoting.
+normalize-gm-candidates:
+	@./scripts/promote_preproduction_for_main.sh --normalize-gm-only
 
 # Report version/ state for develop→main merge sims (refs and/or working tree). See scripts/version_merge_sim_status.sh --help
 version-merge-sim-status:
@@ -189,7 +193,7 @@ bump-dev-version:
 	@test -n "$(VER)" || (echo "usage: make bump-dev-version VER=path/to/file.ver" >&2; exit 1)
 	@./scripts/bump_dev_version.sh "$(VER)"
 
-# Stamp missing RELEASE_DATE on root PRERELEASE=1 *.ver, then move into preproduction A.B.C/ (see docs/versioning.md).
+# Stamp missing RELEASE_DATE on non-GM root PRERELEASE=1 *.ver, then move into preproduction A.B.C/ (see docs/versioning.md).
 relocate-root-prerelease-ver:
 	@./scripts/relocate_root_prerelease_ver_to_preproduction.sh
 
@@ -197,8 +201,8 @@ relocate-root-prerelease-ver:
 stamp-version-entries-release-date:
 	@./scripts/stamp_version_entries_release_date.sh
 
-# Same sequence as GitHub Actions prepare-version-entries (relocate + stamp + optional local gen_version_def.sh).
-prepare-version-entries: relocate-root-prerelease-ver stamp-version-entries-release-date
+# Same sequence as GitHub Actions prepare-version-entries (relocate + normalize GM + stamp + optional local gen_version_def.sh).
+prepare-version-entries: relocate-root-prerelease-ver normalize-gm-candidates stamp-version-entries-release-date
 
 # Optional release build: changelog + CHANGELOG_CI=1 (version/locked is synced on merge to main/develop in CI; use finalize-version-locked locally if needed).
 .PHONY: deploy

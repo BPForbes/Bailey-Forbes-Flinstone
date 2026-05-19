@@ -1,15 +1,21 @@
 name: Prepare version/entries
 description: >-
-  Relocate root PRERELEASE=1 *.ver into preproduction A.B.C/, stamp missing
-  RELEASE_DATE on the entries root and active preproduction */ trees, then
-  gen_version_def.sh can read the full entries tree (idempotent per checkout).
+  Relocate non-GM root PRERELEASE=1 *.ver into preproduction A.B.C/, normalize
+  duplicate GM candidates, stamp missing RELEASE_DATE on the entries root and active
+  preproduction */ trees, then gen_version_def.sh can read the full entries tree
+  (idempotent per checkout).
 runs:
   using: composite
   steps:
-    - name: Relocate root PRERELEASE=1 .ver into preproduction
+    - name: Relocate non-GM root PRERELEASE=1 .ver into preproduction
       shell: bash
       working-directory: ${{ github.workspace }}
       run: bash scripts/relocate_root_prerelease_ver_to_preproduction.sh
+
+    - name: Normalize duplicate GM=1 candidates
+      shell: bash
+      working-directory: ${{ github.workspace }}
+      run: bash scripts/promote_preproduction_for_main.sh --normalize-gm-only
 
     - name: Stamp RELEASE_DATE on entries root and preproduction trees
       shell: bash

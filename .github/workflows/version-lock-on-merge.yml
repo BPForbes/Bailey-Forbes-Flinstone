@@ -1,6 +1,6 @@
-# After a push to develop, relocate root PRERELEASE=1 rows into preproduction */,
-# copy version/entries → version/locked (excluding top-level preproduction */ trees),
-# regenerate userland/shell/version_def.h. If anything changed,
+# After a push to develop, relocate non-GM root PRERELEASE=1 rows into preproduction */,
+# normalize duplicate GM candidates, copy version/entries → version/locked
+# (excluding top-level preproduction */ trees), regenerate userland/shell/version_def.h. If anything changed,
 # opens a PR into develop (do not
 # push that commit directly to develop — branch rules usually require a PR, checks,
 # and often verified signatures), then enables GitHub auto-merge on that PR so it
@@ -43,8 +43,11 @@ jobs:
           fetch-depth: 0
           token: ${{ secrets.BPFORBES_PAT || secrets.VERSION_LOCK_PAT || secrets.GITHUB_TOKEN }}
 
-      - name: Relocate root PRERELEASE=1 entries into preproduction (stamp then move)
+      - name: Relocate non-GM root PRERELEASE=1 entries into preproduction (stamp then move)
         run: bash scripts/relocate_root_prerelease_ver_to_preproduction.sh
+
+      - name: Normalize duplicate GM=1 candidates
+        run: bash scripts/promote_preproduction_for_main.sh --normalize-gm-only
 
       - name: Finalize version (copy entries → locked, skip preproduction */)
         run: ./scripts/finalize_version_locked.sh
@@ -83,11 +86,11 @@ jobs:
             version/locked/**
             userland/shell/version_def.h
           body: |
-            Automated sync after a push to `develop`: ran `relocate_root_prerelease_ver_to_preproduction.sh`, `finalize_version_locked.sh`, `stamp_version_release_date.sh`, and `gen_version_def.sh`.
+            Automated sync after a push to `develop`: ran `relocate_root_prerelease_ver_to_preproduction.sh`, `promote_preproduction_for_main.sh --normalize-gm-only`, `finalize_version_locked.sh`, `stamp_version_release_date.sh`, and `gen_version_def.sh`.
 
             **Branch protection** on `develop` (PR-only, required checks, verified signatures) means the sync cannot land as a direct push. Merge this PR to publish `version/entries` moves (when relocate applied), `version/locked/`, and `userland/shell/version_def.h`.
 
-            Root `PRERELEASE=1` rows are stamped with `RELEASE_DATE=YYYY-MM-DD` on the relocate run (calendar day) if missing, then moved under `preproduction A.B.C/` before finalize. `stamp_version_release_date.sh` appends merge-day `RELEASE_DATE` to locked `*.ver` and matching paths under `version/entries`, then walks **all** `version/entries/**/*.ver` (including `preproduction */`) so rows not mirrored into `locked` still get a merge stamp when the key is missing.
+            Root `PRERELEASE=1` rows without `GM=1` are stamped with `RELEASE_DATE=YYYY-MM-DD` on the relocate run (calendar day) if missing, then moved under `preproduction A.B.C/` before finalize. Duplicate `GM=1` rows in a preproduction directory are normalized so the highest `DEV_VERSION` remains `GM=1` and lower `DEV_VERSION` GM rows become `GM=0`. `stamp_version_release_date.sh` appends merge-day `RELEASE_DATE` to locked `*.ver` and matching paths under `version/entries`, then walks **all** `version/entries/**/*.ver` (including `preproduction */`) so rows not mirrored into `locked` still get a merge stamp when the key is missing.
 
             Uses **`BPFORBES_PAT`** or **`VERSION_LOCK_PAT`** when set; otherwise **`GITHUB_TOKEN`**. Auto-merge is enabled by the workflow when the PR is opened (waits for all required checks configured as required on the branch).
 

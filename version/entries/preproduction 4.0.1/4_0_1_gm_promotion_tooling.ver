@@ -1,0 +1,12 @@
+MAJOR_VERSION=4
+STANDARD_VERSION=0
+RELEASE_VERSION=1
+PRERELEASE=1
+DEV_VERSION=3
+DESCRIPTION<<VER_4_0_1_GM_PROMOTION_TOOLING
+Version tooling: promotion now handles duplicate GM=1 prerelease candidates by
+choosing the highest DEV_VERSION row, demoting lower GM rows to GM=0, and
+keeping root GM=1 rows from being relocated down into preproduction.
+VER_4_0_1_GM_PROMOTION_TOOLING
+
+RELEASE_DATE=2026-05-19
