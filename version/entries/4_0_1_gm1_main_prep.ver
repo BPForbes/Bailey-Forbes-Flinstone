@@ -1,10 +1,8 @@
 MAJOR_VERSION=4
 STANDARD_VERSION=0
 RELEASE_VERSION=1
-PRERELEASE=1
-DEV_VERSION=2
-GM=1
-DESCRIPTION<<VER_4_0_1_GM1_MAIN_PREP
+RELEASE_DATE=2026-05-19
+DESCRIPTION<<PROMOTE_DESC_END
 4.0.1: Patch release — default serial Makefile builds (-j1, jobserver-aware), host IPC and shell/PIC hardening, cd NUL-termination, VFS/FAT32 bounds and overflow guards, and shell batch/pool lifecycle fixes.
 
 Makefile: top-level builds default to -j1 (serial compile jobs) unless the user
@@ -53,3 +51,4 @@ rule and treats --jobserver-auth as an active jobserver for default -j1.
 VER_4_0_1_GM1_MAIN_PREP
 
 RELEASE_DATE=2026-05-19
+PROMOTE_DESC_END
