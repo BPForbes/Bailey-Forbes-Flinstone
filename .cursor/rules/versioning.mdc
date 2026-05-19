@@ -44,6 +44,11 @@ When combining agent branches (for example **`cursor/*`**, **`claude/*`**, **`co
 - Set **`GM=1` only on a new `.ver`** row (next **`DEV_VERSION`**), never by editing older train files.
 - **`DESCRIPTION`** on the **`GM=1`** row must start with **`A.B.C:`** (e.g. **`4.0.1:`**) followed by the **overall release summary** for that version. **`promote_preproduction_for_main.sh`** copies **only** this text to the GA root **`.ver`**.
 
+## CI prepare-version-entries (date stamp + `version_def.h`)
+
+- **`.github/actions/prepare-version-entries`:** **`relocate_root_prerelease_ver_to_preproduction.sh`**, then **`stamp_version_entries_release_date.sh`** (entries root **`*.ver`** and every **`preproduction <A>.<B>.<C>/`** tree), then **`gen_version_def.sh`** reads **`version/entries/**/*.ver`** (including **`preproduction */`**).
+- **`PRERELEASE`** and **`GM`:** when present, values must be exactly **`0`** or **`1`** (**`scripts/lib/ver_field_parse.sh`**; **`check_version_entries_semver_dev_unique.sh`**).
+
 ## AI / Cursor agent PRs — `version/entries` only
 
 - On **Cursor- and AI-authored pull requests**, **add** new **`version/entries/*.ver`** files for the release you are shipping; do **not** edit merge-base **`.ver`** paths.

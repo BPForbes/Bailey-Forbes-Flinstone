@@ -1,7 +1,8 @@
 name: Prepare version/entries
 description: >-
-  Stamp missing RELEASE_DATE on root PRERELEASE=1 *.ver, then move them into
-  preproduction A.B.C/ (idempotent for a given checkout).
+  Relocate root PRERELEASE=1 *.ver into preproduction A.B.C/, stamp missing
+  RELEASE_DATE on the entries root and active preproduction */ trees, then
+  gen_version_def.sh can read the full entries tree (idempotent per checkout).
 runs:
   using: composite
   steps:
@@ -9,3 +10,8 @@ runs:
       shell: bash
       working-directory: ${{ github.workspace }}
       run: bash scripts/relocate_root_prerelease_ver_to_preproduction.sh
+
+    - name: Stamp RELEASE_DATE on entries root and preproduction trees
+      shell: bash
+      working-directory: ${{ github.workspace }}
+      run: bash scripts/stamp_version_entries_release_date.sh

@@ -176,7 +176,7 @@ finalize-version-locked sync-version-locked:
 	@./scripts/finalize_version_locked.sh
 
 # Merge GM=1 preproduction */ trees into one root GA .ver and delete those dirs from entries + locked.
-.PHONY: promote-preproduction-for-main version-merge-sim-status bump-dev-version relocate-root-prerelease-ver
+.PHONY: promote-preproduction-for-main version-merge-sim-status bump-dev-version relocate-root-prerelease-ver stamp-version-entries-release-date prepare-version-entries
 promote-preproduction-for-main:
 	@./scripts/promote_preproduction_for_main.sh
 
@@ -192,6 +192,13 @@ bump-dev-version:
 # Stamp missing RELEASE_DATE on root PRERELEASE=1 *.ver, then move into preproduction A.B.C/ (see docs/versioning.md).
 relocate-root-prerelease-ver:
 	@./scripts/relocate_root_prerelease_ver_to_preproduction.sh
+
+# Stamp missing RELEASE_DATE on version/entries/*.ver and preproduction */ (CI also runs this after relocate).
+stamp-version-entries-release-date:
+	@./scripts/stamp_version_entries_release_date.sh
+
+# Same sequence as GitHub Actions prepare-version-entries (relocate + stamp + optional local gen_version_def.sh).
+prepare-version-entries: relocate-root-prerelease-ver stamp-version-entries-release-date
 
 # Optional release build: changelog + CHANGELOG_CI=1 (version/locked is synced on merge to main/develop in CI; use finalize-version-locked locally if needed).
 .PHONY: deploy

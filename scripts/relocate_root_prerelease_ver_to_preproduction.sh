@@ -4,10 +4,11 @@
 # using MAJOR/STANDARD/RELEASE (or alias keys) inside each file.
 #
 # For each such file, if RELEASE_DATE= is not yet set, appends RELEASE_DATE=YYYY-MM-DD
-# (calendar day of this run) while the file is still at the root — before the move —
-# so preproduction rows carry the relocation-day stamp. On develop, merge-time
-# stamp_version_release_date.sh also walks all version/entries/**/*.ver (including
-# under preproduction */) for any RELEASE_DATE still missing after finalize.
+# (calendar day of this run) while the file is still at the root — before the move.
+# GitHub Actions then runs stamp_version_entries_release_date.sh on the entries root
+# and every preproduction <A>.<B>.<C>/ tree so relocated rows still get a date on the
+# same job. On develop, merge-time stamp_version_release_date.sh also walks
+# version/locked and all version/entries/**/*.ver after finalize.
 #
 # Usage:
 #   ./scripts/relocate_root_prerelease_ver_to_preproduction.sh

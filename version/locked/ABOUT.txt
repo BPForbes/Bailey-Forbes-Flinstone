@@ -14,16 +14,16 @@ DESCRIPTION may be:
                 (closing line is DELIM alone after trim; newlines are kept.)
 
 Date stamp policy (DEV / preproduction intake):
-  Update date stamp policy so we date DEV-version .ver rows just before we move them
-  into the directory: for each version/entries/*.ver at the repository root with
-  PRERELEASE=1, ./scripts/relocate_root_prerelease_ver_to_preproduction.sh (CI and
-  make relocate-root-prerelease-ver) appends RELEASE_DATE=YYYY-MM-DD using that run's
-  calendar day if the key is still missing, then moves the file into
-  version/entries/preproduction <A>.<B>.<C>/. We upload .ver files for the merge
-  (e.g. cursor/* branches) at the entries root outside that directory; GitHub Actions
-  moves them inside the preproduction A.B.C directory before prerelease layout checks.
-  Same-repo pull requests get an automated commit; fork PRs must run the relocate
-  script locally and push.
+  GitHub Actions prepare-version-entries runs, in order:
+    ./scripts/relocate_root_prerelease_ver_to_preproduction.sh
+    ./scripts/stamp_version_entries_release_date.sh
+  Relocate stamps missing RELEASE_DATE on root PRERELEASE=1 rows before moving them
+  into version/entries/preproduction <A>.<B>.<C>/. stamp_version_entries_release_date.sh
+  then stamps the entries repository root (*.ver) and every active preproduction
+  <A>.<B>.<C>/ tree still missing RELEASE_DATE (so hand-placed or already-relocated
+  rows get a date on the same CI job). gen_version_def.sh reads version/entries/**/*.ver
+  (including preproduction */) for VERSION_LINE and GM=1 overrides.
+  Fork PRs must run both scripts locally (or make prepare-version-entries) and push.
 
 RELEASE_DATE (merge finalize):
   After pushes to develop, Version lock on merge runs finalize_version_locked.sh,
@@ -38,8 +38,11 @@ RELEASE_DATE (merge finalize):
   may use the generator's local calendar date at generation time (see that script).
 
 PRERELEASE / GM / DEV_VERSION / preproduction directories (gen_version_def.sh):
-  At the root of version/entries/ (and version/locked/), GA-oriented rows omit PRERELEASE
-  or set PRERELEASE=0. Optional DEV_VERSION on those rows counts develop-side iterations
+  PRERELEASE and GM are binary flags: when the key is present, the value must be exactly
+  0 or 1 (CI scripts/ver_field_parse.sh and check_version_entries_semver_dev_unique.sh
+  reject any other value). At the root of version/entries/ (and version/locked/),
+  GA-oriented rows omit PRERELEASE or set PRERELEASE=0. Optional DEV_VERSION on those rows
+  counts develop-side iterations
   before preproduction. PRERELEASE=1 rows are authored at the version/entries/ root for
   same-repo automation (see below); never set GM=1 on a root *.ver file.
   When any .ver under version/entries/ has PRERELEASE=1 and GM=1, scripts/gen_version_def.sh
