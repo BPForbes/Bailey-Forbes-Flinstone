@@ -68,7 +68,8 @@ PRERELEASE / GM / DEV_VERSION / preproduction directories (gen_version_def.sh):
       preproduction <A>.<B>.<C>/
   on same-repo branches — ./scripts/relocate_root_prerelease_ver_to_preproduction.sh
   (CI, make relocate-root-prerelease-ver, Version lock on merge) stamps RELEASE_DATE if
-  missing at the root, then moves each file into that directory. After relocate, every
+  missing at the root, then moves each non-GM file into that directory. Root GM=1 rows
+  are left at the root for promotion instead of being moved down. After relocate, every
   .ver under preproduction <A>.<B>.<C>/ must match that semver in the directory name,
   must include DEV_VERSION>=1, and may set GM=0 or GM=1. Fork pull requests cannot rely
   on CI to push the relocate commit: run relocate locally, then commit (paths may
@@ -83,13 +84,15 @@ PRERELEASE / GM / DEV_VERSION / preproduction directories (gen_version_def.sh):
   only (no DEV_VERSION re-bump) until it merges to develop; after merge, that path is
   immutable too.
 
-  At most one file per preproduction directory may set GM=1 (go-to-main). Add GM=1
-  on a new *.ver row (next DEV_VERSION), never by editing older train files. Bump
-  DEV_VERSION between iterations with ./scripts/bump_dev_version.sh, or add another *.ver
-  at the version/entries/ root with the same MAJOR/STANDARD/RELEASE, PRERELEASE=1, and
-  the next DEV_VERSION (e.g. DEV_VERSION=1 then DEV_VERSION=2); relocate moves each row
-  into the same preproduction <A>.<B>.<C>/ so maintainers can review the full train before
-  promotion; the shipped GA .ver from promote uses the GM=1 row's DESCRIPTION only.
+  At most one file per preproduction directory should set GM=1 (go-to-main). Add GM=1
+  on a new *.ver row (next DEV_VERSION), never by editing older train files. If several
+  rows are accidentally marked GM=1, promote_preproduction_for_main.sh selects the highest
+  DEV_VERSION row and rewrites lower DEV_VERSION GM rows to GM=0. Bump DEV_VERSION between
+  iterations with ./scripts/bump_dev_version.sh, or add another *.ver at the version/entries/
+  root with the same MAJOR/STANDARD/RELEASE, PRERELEASE=1, and the next DEV_VERSION
+  (e.g. DEV_VERSION=1 then DEV_VERSION=2); relocate moves each non-GM row into the same
+  preproduction <A>.<B>.<C>/ so maintainers can review the full train before promotion; the
+  shipped GA .ver from promote uses the selected GM=1 row's DESCRIPTION only.
 
   GM=1 go-to-main DESCRIPTION (release prose): the GM=1 row is the final prerelease
   record before main. Its DESCRIPTION must start with A.B.C: (literal semver, e.g.
@@ -115,11 +118,12 @@ PRERELEASE / GM / DEV_VERSION / preproduction directories (gen_version_def.sh):
   When you are ready to cut main: add a new *.ver with GM=1 (next DEV_VERSION) whose
   DESCRIPTION begins A.B.C: and summarizes the whole release, then run
   ./scripts/promote_preproduction_for_main.sh (or make promote-preproduction-for-main).
-  That script builds one new root *.ver (basename from the GM=1 file) whose DESCRIPTION
-  is copied only from that GM=1 row (semver and optional RELEASE_DATE also come from it),
-  omits PRERELEASE/GM/DEV_VERSION entirely, removes every *.ver in the preproduction folder,
-  and deletes the entire preproduction directory from version/entries (and from
-  version/locked only if a legacy copy existed there).
+  That script builds one new root *.ver (basename from the selected GM=1 file) whose
+  DESCRIPTION is copied only from that row (semver and optional RELEASE_DATE also come from
+  it), omits PRERELEASE/GM/DEV_VERSION entirely, removes every *.ver in the preproduction
+  folder, and deletes the entire preproduction directory from version/entries (and from
+  version/locked only if a legacy copy existed there). Use --normalize-gm-only to demote
+  lower DEV_VERSION duplicate GM rows without promoting.
   finalize_version_locked.sh does not copy preproduction */ into locked, so the published
   tree normally only gains the merged root .ver after promotion, then the next finalize
   copies that file into version/locked/.

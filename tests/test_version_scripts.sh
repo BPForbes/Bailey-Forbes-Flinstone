@@ -1131,6 +1131,30 @@ test_relocate_multiple_prerelease_files() {
   rm -rf "$d"
 }
 
+test_relocate_leaves_root_gm_candidate_in_place() {
+  local d
+  d="$(mktemp -d)"
+  mkdir -p "$d/version/entries"
+  cat >"$d/version/entries/2_0_0_gm.ver" <<'VER'
+MAJOR_VERSION=2
+STANDARD_VERSION=0
+RELEASE_VERSION=0
+PRERELEASE=1
+GM=1
+DEV_VERSION=5
+DESCRIPTION=GM row should not be relocated down
+VER
+
+  REPO_ROOT="$d" bash "$RELOCATE" >/dev/null
+  if [[ -f "$d/version/entries/2_0_0_gm.ver" && \
+        ! -e "$d/version/entries/preproduction 2.0.0/2_0_0_gm.ver" ]]; then
+    ok "relocate: root GM=1 prerelease row is left in place for promotion"
+  else
+    fail "relocate: root GM=1 prerelease row should not move into preproduction"
+  fi
+  rm -rf "$d"
+}
+
 # scripts/gen_version_def.sh (isolated temp repo; script copied into fake scripts/)
 test_gen_def_gm_overrides_version_and_plain_line() {
   require_proc_sub "gen_def: GM=1 overrides shipped triple and plain VERSION_LINE" || return 0
@@ -1596,6 +1620,83 @@ VER
   cleanup "$d"
 }
 
+test_promote_normalize_gm_only_demotes_lower_dev_version() {
+  require_proc_sub "promote: --normalize-gm-only demotes lower DEV_VERSION GM rows" || return 0
+  local d
+  d="$(make_fake_repo promote_preproduction_for_main.sh)"
+  mkdir -p "$d/version/entries/preproduction 2.0.0"
+  cat >"$d/version/entries/preproduction 2.0.0/lower.ver" <<'VER'
+MAJOR_VERSION=2
+STANDARD_VERSION=0
+RELEASE_VERSION=0
+PRERELEASE=1
+GM=1
+DEV_VERSION=1
+DESCRIPTION=lower candidate
+VER
+  cat >"$d/version/entries/preproduction 2.0.0/higher.ver" <<'VER'
+MAJOR_VERSION=2
+STANDARD_VERSION=0
+RELEASE_VERSION=0
+PRERELEASE=1
+GM=1
+DEV_VERSION=3
+DESCRIPTION=higher candidate
+VER
+
+  if ! bash "$(promote_script "$d")" --normalize-gm-only >/dev/null 2>&1; then
+    fail "promote normalize: command should succeed"
+  elif ! grep -q '^GM=0$' "$d/version/entries/preproduction 2.0.0/lower.ver"; then
+    fail "promote normalize: lower DEV_VERSION GM row should be set to GM=0"
+  elif ! grep -q '^GM=1$' "$d/version/entries/preproduction 2.0.0/higher.ver"; then
+    fail "promote normalize: highest DEV_VERSION GM row should stay GM=1"
+  else
+    ok "promote: --normalize-gm-only demotes lower DEV_VERSION GM rows"
+  fi
+  cleanup "$d"
+}
+
+test_promote_multiple_gm_uses_highest_dev_version() {
+  require_proc_sub "promote: multiple GM rows use highest DEV_VERSION" || return 0
+  local d out
+  d="$(make_fake_repo promote_preproduction_for_main.sh)"
+  mkdir -p "$d/version/entries/preproduction 2.0.0"
+  cat >"$d/version/entries/preproduction 2.0.0/lower.ver" <<'VER'
+MAJOR_VERSION=2
+STANDARD_VERSION=0
+RELEASE_VERSION=0
+PRERELEASE=1
+GM=1
+DEV_VERSION=1
+DESCRIPTION=lower candidate
+VER
+  cat >"$d/version/entries/preproduction 2.0.0/higher.ver" <<'VER'
+MAJOR_VERSION=2
+STANDARD_VERSION=0
+RELEASE_VERSION=0
+PRERELEASE=1
+GM=1
+DEV_VERSION=3
+DESCRIPTION=higher candidate wins
+VER
+
+  out=$(bash "$(promote_script "$d")" 2>&1) || true
+  if [[ ! -f "$d/version/entries/higher.ver" ]]; then
+    fail "promote multiple GM: highest DEV_VERSION file should become root GA"
+  elif [[ -d "$d/version/entries/preproduction 2.0.0" ]]; then
+    fail "promote multiple GM: preproduction dir should be removed"
+  elif grep -qE '^(PRERELEASE|GM|DEV_VERSION)=' "$d/version/entries/higher.ver"; then
+    fail "promote multiple GM: root GA should omit PRERELEASE, GM, and DEV_VERSION"
+  elif ! grep -q 'higher candidate wins' "$d/version/entries/higher.ver"; then
+    fail "promote multiple GM: root GA should use highest DEV_VERSION DESCRIPTION"
+  elif ! echo "$out" | grep -q 'selected higher.ver with DEV_VERSION=3'; then
+    fail "promote multiple GM: output should report selected highest DEV_VERSION"
+  else
+    ok "promote: multiple GM rows use highest DEV_VERSION candidate"
+  fi
+  cleanup "$d"
+}
+
 merge_sim_script() {
   local fake_root="$1"
   echo "$fake_root/scripts/version_merge_sim_status.sh"
@@ -1753,6 +1854,8 @@ test_layout_empty_prerelease_rejected
 
 # promote_preproduction_for_main.sh
 test_promote_dry_run_keeps_preproduction
+test_promote_normalize_gm_only_demotes_lower_dev_version
+test_promote_multiple_gm_uses_highest_dev_version
 test_promote_malformed_gm_suffix_aborts
 
 # version_merge_sim_status.sh
@@ -1808,6 +1911,7 @@ test_relocate_dry_run_exits_zero_when_clean
 test_relocate_idempotent
 test_relocate_refuses_overwrite
 test_relocate_multiple_prerelease_files
+test_relocate_leaves_root_gm_candidate_in_place
 
 # gen_version_def.sh (isolated temp repo; script copied into fake scripts/)
 test_gen_def_gm_overrides_version_and_plain_line

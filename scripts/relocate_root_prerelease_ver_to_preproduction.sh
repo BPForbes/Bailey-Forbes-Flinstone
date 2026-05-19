@@ -2,6 +2,8 @@
 # Move version/entries/*.ver with PRERELEASE=1 from the entries root into
 #   version/entries/preproduction <A>.<B>.<C>/
 # using MAJOR/STANDARD/RELEASE (or alias keys) inside each file.
+# Root rows already marked GM=1 are not relocated down into preproduction */;
+# run promote_preproduction_for_main.sh to turn those rows into GA release notes.
 #
 # For each such file, if RELEASE_DATE= is not yet set, appends RELEASE_DATE=YYYY-MM-DD
 # (calendar day of this run) while the file is still at the root — before the move.
@@ -41,7 +43,8 @@ for f in "${ver_root[@]}"; do
   rel="${f#"$ENT"/}"
   [[ "$(dirname "$rel")" == "." ]] || continue
   pr=$(ver_parse_flag_field PRERELEASE "$f")
-  if [[ "$pr" -eq 1 ]]; then
+  gm=$(ver_parse_flag_field GM "$f")
+  if [[ "$pr" -eq 1 && "$gm" -ne 1 ]]; then
     need_reloc=1
     break
   fi
@@ -63,6 +66,11 @@ for f in "${ver_root[@]}"; do
   [[ "$(dirname "$rel")" == "." ]] || continue
   pr=$(ver_parse_flag_field PRERELEASE "$f")
   (( pr == 1 )) || continue
+  gm=$(ver_parse_flag_field GM "$f")
+  if (( gm == 1 )); then
+    echo "relocate_root_prerelease_ver_to_preproduction: leaving root GM=1 row in place for promotion: $rel"
+    continue
+  fi
 
   m=$(ver_parse_nonneg_int_field MAJOR_VERSION "$f")
   [[ -n "$m" ]] || m=$(ver_parse_nonneg_int_field VERSION_MAJOR "$f")

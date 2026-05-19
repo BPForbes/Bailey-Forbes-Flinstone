@@ -32,7 +32,7 @@ runs:
           git checkout -B "${GIT_REF_NAME}" "origin/${GIT_REF_NAME}"
         fi
 
-    - name: Prepare version/entries (relocate root PRERELEASE=1 .ver)
+    - name: Prepare version/entries (relocate, normalize GM, stamp dates)
       uses: ./.github/actions/prepare-version-entries
 
     - name: Regenerate userland/shell/version_def.h from .ver trees
