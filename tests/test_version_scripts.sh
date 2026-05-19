@@ -1697,6 +1697,42 @@ VER
   cleanup "$d"
 }
 
+test_promote_multiple_gm_then_main_policy_passes() {
+  require_proc_sub "promote: duplicate GM promotion satisfies main policy" || return 0
+  local d
+  d="$(make_fake_repo promote_preproduction_for_main.sh check_version_main_prerelease_policy.sh)"
+  write_ver_ga "$d/version/entries/1_0_0_base.ver" 1 0 0
+  write_ver_ga "$d/version/locked/1_0_0_base.ver" 1 0 0
+  mkdir -p "$d/version/entries/preproduction 2.0.0"
+  cat >"$d/version/entries/preproduction 2.0.0/lower.ver" <<'VER'
+MAJOR_VERSION=2
+STANDARD_VERSION=0
+RELEASE_VERSION=0
+PRERELEASE=1
+GM=1
+DEV_VERSION=1
+DESCRIPTION=lower candidate
+VER
+  cat >"$d/version/entries/preproduction 2.0.0/higher.ver" <<'VER'
+MAJOR_VERSION=2
+STANDARD_VERSION=0
+RELEASE_VERSION=0
+PRERELEASE=1
+GM=1
+DEV_VERSION=3
+DESCRIPTION=higher candidate wins
+VER
+
+  if ! bash "$(promote_script "$d")" >/dev/null 2>&1; then
+    fail "promote main policy: promotion should succeed"
+  elif ! bash "$(main_policy_script "$d")" >/dev/null 2>&1; then
+    fail "promote main policy: promoted tree should satisfy main policy"
+  else
+    ok "promote: duplicate GM promotion satisfies main policy"
+  fi
+  cleanup "$d"
+}
+
 merge_sim_script() {
   local fake_root="$1"
   echo "$fake_root/scripts/version_merge_sim_status.sh"
@@ -1856,6 +1892,7 @@ test_layout_empty_prerelease_rejected
 test_promote_dry_run_keeps_preproduction
 test_promote_normalize_gm_only_demotes_lower_dev_version
 test_promote_multiple_gm_uses_highest_dev_version
+test_promote_multiple_gm_then_main_policy_passes
 test_promote_malformed_gm_suffix_aborts
 
 # version_merge_sim_status.sh
