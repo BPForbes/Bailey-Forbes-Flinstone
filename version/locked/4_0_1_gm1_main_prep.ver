@@ -1,14 +1,15 @@
 MAJOR_VERSION=4
 STANDARD_VERSION=0
 RELEASE_VERSION=1
-PRERELEASE=1
-DEV_VERSION=1
-DESCRIPTION<<VER_4_0_1_COMBINED
+RELEASE_DATE=2026-05-19
+DESCRIPTION<<PROMOTE_DESC_END
+4.0.1: Patch release — default serial Makefile builds (-j1, jobserver-aware), host IPC and shell/PIC hardening, cd NUL-termination, VFS/FAT32 bounds and overflow guards, and shell batch/pool lifecycle fixes.
+
 Makefile: top-level builds default to -j1 (serial compile jobs) unless the user
 passes an explicit job count (-j/--jobs) or inherits a parallel jobserver; reduces
 out-of-memory kills from gcc on low-RAM hosts while keeping parallel builds one flag away.
 
-Also includes host IPC and shell/PIC hardening merged from a sibling agent branch:
+Host IPC and shell/PIC hardening:
 pipe_write returns -1 with EAGAIN when the ring cannot accept a non-zero write;
 msgq_send sets errno (EINVAL, EPIPE, EAGAIN); msgq_create rejects
 max_messages*message_size overflow and checks pthread init failures; pipe_create checks
@@ -47,6 +48,7 @@ lines; FAT chain iteration guards use uint64_t caps (no uint32_t wrap); free_clu
 bounded against cycles; allocate_and_write_chain rollback clears the partially linked
 cluster; max_cluster_number clamps UINT32_MAX+1 wrap; Makefile drops duplicate %.o:%.s
 rule and treats --jobserver-auth as an active jobserver for default -j1.
-VER_4_0_1_COMBINED
+VER_4_0_1_GM1_MAIN_PREP
 
-RELEASE_DATE=2026-05-18
+RELEASE_DATE=2026-05-19
+PROMOTE_DESC_END

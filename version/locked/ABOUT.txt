@@ -115,8 +115,9 @@ PRERELEASE / GM / DEV_VERSION / preproduction directories (gen_version_def.sh):
   DEV_VERSION on develop for the same relative path (or 0 if that file is absent there).
   After you set DEV_VERSION to exactly N+1, do not edit DEV_VERSION again; revise DESCRIPTION only.
 
-  When you are ready to cut main: add a new *.ver with GM=1 (next DEV_VERSION) whose
-  DESCRIPTION begins A.B.C: and summarizes the whole release, then run
+  When you are ready to cut main: add a new *.ver under preproduction <A>.<B>.<C>/
+  with GM=1 (next DEV_VERSION; never GM=1 on a root *.ver file) whose DESCRIPTION begins
+  A.B.C: and summarizes the whole release, then run
   ./scripts/promote_preproduction_for_main.sh (or make promote-preproduction-for-main).
   That script builds one new root *.ver (basename from the selected GM=1 file) whose
   DESCRIPTION is copied only from that row (semver and optional RELEASE_DATE also come from

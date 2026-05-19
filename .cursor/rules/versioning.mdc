@@ -41,7 +41,7 @@ When combining agent branches (for example **`cursor/*`**, **`claude/*`**, **`co
 
 ## `GM=1` go-to-main DESCRIPTION
 
-- Set **`GM=1` only on a new `.ver`** row (next **`DEV_VERSION`**), never by editing older train files.
+- Set **`GM=1` only on a new `.ver`** row under **`version/entries/preproduction <A>.<B>.<C>/`** (next **`DEV_VERSION`**; **never** on a root **`*.ver`** file), never by editing older train files.
 - **`DESCRIPTION`** on the selected **`GM=1`** row must start with **`A.B.C:`** (e.g. **`4.0.1:`**) followed by the **overall release summary** for that version. **`promote_preproduction_for_main.sh`** selects the highest **`DEV_VERSION`** GM row when duplicates exist, rewrites lower **`DEV_VERSION`** GM rows to **`GM=0`**, and copies **only** the selected text to the GA root **`.ver`**. Use **`--normalize-gm-only`** to demote duplicate lower GM rows without promoting.
 
 ## CI prepare-version-entries (date stamp + `version_def.h`)
