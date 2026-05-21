@@ -1,6 +1,8 @@
 #include "fs_jail.h"
 #include "common.h"
 #include "mem_domain.h"
+#include "../identity/session.h"
+#include "../identity/path_property.h"
 #include <errno.h>
 #include <limits.h>
 #include <stdio.h>
@@ -102,6 +104,30 @@ static int under_jail(const char *canon) {
     return (canon[g_fs_jail_len] == '\0' || canon[g_fs_jail_len] == '/');
 }
 
+int fs_jail_check_access(const char *path) {
+    fl_path_property_t prop;
+    int jail_ok;
+
+    if (!fs_jail_is_active())
+        return 0;
+
+    jail_ok = fs_jail_check_path(path);
+    if (jail_ok != 0 && fl_session_jail_privileged())
+        jail_ok = 0;
+
+    if (jail_ok != 0)
+        return -1;
+
+    if (fl_path_property_resolve(path, &prop) != FL_RESULT_OK)
+        return 0;
+    if (!prop.requires_elevation)
+        return 0;
+    fl_session_init();
+    if (fl_session_has_elevation())
+        return 0;
+    return -1;
+}
+
 int fs_jail_check_path(const char *path) {
     if (!path)
         return -1;
@@ -176,7 +202,7 @@ int fs_jail_openat(const char *path, int flags, mode_t mode) {
     ab[sizeof(ab) - 1] = '\0';
 
     /* Check if path is under jail - this is a best-effort check */
-    if (fs_jail_check_path(path) != 0) {
+    if (fs_jail_check_access(path) != 0) {
         errno = EPERM;
         return -1;
     }
