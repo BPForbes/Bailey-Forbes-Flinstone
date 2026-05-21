@@ -76,6 +76,7 @@ fl_result_t fl_session_login(const char *name, const char *password) {
         return FL_RESULT_INVAL;
     if (!fl_user_db_verify_password(&s_db, name, password))
         return FL_RESULT_ACCES;
+    fl_elevation_revoke_all();
     strncpy(s_current, name, sizeof(s_current) - 1);
     s_current[sizeof(s_current) - 1] = '\0';
     s_active_elev = FL_ELEVATION_TOKEN_NONE;
@@ -98,6 +99,7 @@ fl_result_t fl_session_set_user(const char *name) {
     u = fl_user_db_find(&s_db, name);
     if (!u)
         return FL_RESULT_NOENT;
+    fl_elevation_revoke_all();
     strncpy(s_current, name, sizeof(s_current) - 1);
     s_current[sizeof(s_current) - 1] = '\0';
     s_active_elev = FL_ELEVATION_TOKEN_NONE;
@@ -143,7 +145,9 @@ fl_result_t fl_session_logout(void) {
     const char *def;
 
     fl_session_init();
-    fl_session_drop_elevation();
+    fl_elevation_revoke_all();
+    s_sudo_scope_depth = 0;
+    s_active_elev = FL_ELEVATION_TOKEN_NONE;
     def = s_db.default_user;
     if (!def || !def[0])
         def = "flinstone";

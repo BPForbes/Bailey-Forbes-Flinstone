@@ -2,11 +2,15 @@
 #define FL_USER_DB_H
 
 #include "contract_result.h"
+#include "contract_p2_credential_store.h"
 #include "password_hash.h"
 #include <stddef.h>
 #include <stdint.h>
 
 #define FL_USER_NAME_MAX          32u
+
+_Static_assert(FL_USER_NAME_MAX <= FL_CREDENTIAL_USERNAME_MAX_CHARS + 1u,
+               "user_db name cap must not exceed credential contract limit");
 #define FL_PASSWORD_HASH_HEX_MAX  FL_PASSWORD_HASH_RECORD_MAX
 #define FL_PASSWORD_SALT_HEX_MAX  33u
 

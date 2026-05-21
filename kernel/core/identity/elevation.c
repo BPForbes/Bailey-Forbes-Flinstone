@@ -1,4 +1,5 @@
 #include "elevation.h"
+#include "user_db.h"
 #include "timekeeping.h"
 #include "mem_domain.h"
 #include <pthread.h>
@@ -7,7 +8,7 @@
 
 typedef struct fl_elev_slot {
     fl_elevation_token_t token;
-    char                 principal[32];
+    char                 principal[FL_USER_NAME_MAX];
     int64_t              expires_ns;
     int                  used;
 } fl_elev_slot_t;

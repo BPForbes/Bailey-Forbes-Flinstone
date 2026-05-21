@@ -43,6 +43,7 @@ static const cmd_name_ent_t cmd_registry[] = {
     {"useradd", FL_SCMD_USERADD},
     {"userdel", FL_SCMD_USERDEL},
     {"passwd", FL_SCMD_PASSWD},
+    {"whoami", FL_SCMD_WHOAMI},
     {"type", FL_SCMD_TYPE},
     {"update", FL_SCMD_UPDATE},
     {"version", FL_SCMD_VERSION},

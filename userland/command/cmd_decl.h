@@ -53,8 +53,10 @@ int cmd_sudo_run(int argc, char **argv);
 int cmd_sudo_interactive_login(void);
 int cmd_su_run(int argc, char **argv);
 int cmd_login_run(int argc, char **argv);
+int cmd_logout_run(int argc, char **argv);
 int cmd_useradd_run(int argc, char **argv);
 int cmd_userdel_run(int argc, char **argv);
 int cmd_passwd_run(int argc, char **argv);
+int cmd_whoami_run(int argc, char **argv);
 
 #endif /* CMD_DECL_H */

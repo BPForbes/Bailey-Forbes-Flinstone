@@ -41,9 +41,16 @@ typedef enum {
     FL_AUTHZ_OP_NETDEV_IO = 3,
     FL_AUTHZ_OP_MOUNT = 4,
     FL_AUTHZ_OP_DISK_LOW_LEVEL = 5,
+    FL_AUTHZ_OP_IDENTITY_LOGIN = 6,
+    FL_AUTHZ_OP_IDENTITY_USERADD = 7,
+    FL_AUTHZ_OP_IDENTITY_USERDEL = 8,
+    FL_AUTHZ_OP_IDENTITY_PASSWD = 9,
     /** Foreign **execvp** / host program launch from the shell (hosted). */
     FL_AUTHZ_OP_SHELL_FOREIGN_EXEC = 100
 } fl_authz_operation_t;
+
+_Static_assert((unsigned)FL_AUTHZ_OP_IDENTITY_PASSWD < (unsigned)FL_AUTHZ_OP_SHELL_FOREIGN_EXEC,
+               "identity op codes stay below shell foreign-exec band");
 
 _Static_assert((unsigned)FL_AUTHZ_OP_SHELL_FOREIGN_EXEC > (unsigned)FL_AUTHZ_OP_DISK_LOW_LEVEL,
                "shell foreign-exec band separated from low-numbered subsystem ops");

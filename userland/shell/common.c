@@ -75,6 +75,7 @@ static const char HELP_BODY[] =
 "  audit [show [N]] | path | ring | --help   Audit log (separate from history; needs FL_AUDIT=1)\n"
 "  login <user>         Switch account (password on next line)\n"
 "  logout               Drop elevation and return to default user\n"
+"  whoami               Print current user and elevation state\n"
 "  su [-] [user]        Switch user (target user's password)\n"
 "  su -c 'cmd' [user]   Run one command as user (target password)\n"
 "  sudo [reason]        Grant elevation (your password if not elevated)\n"

@@ -25,6 +25,7 @@ int cmd_read_password(const char *prompt, char *buf, size_t buf_size) {
     if (!buf || buf_size < 2)
         return -1;
 
+    /* FL_CMD_PASSWORD: non-interactive lab/CI only; not for production auth bypass. */
     env_pw = getenv("FL_CMD_PASSWORD");
     if (env_pw && env_pw[0]) {
         strncpy(buf, env_pw, buf_size - 1);
