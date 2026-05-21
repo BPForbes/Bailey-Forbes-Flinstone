@@ -41,10 +41,12 @@ KERNEL_DRIVERS = kernel/arch/x86_64/drivers
 else ifeq ($(ARCH),arm)
 ifeq ($(ARM64_LINUX_HOST),)
 CC = aarch64-linux-gnu-gcc
+CXX = aarch64-linux-gnu-g++
 AS = aarch64-linux-gnu-as
 else
 # Same triplet as aarch64-linux-gnu-*; avoids requiring the cross package on the device.
 CC = gcc
+CXX = g++
 AS = as
 endif
 ASMSRCS_BASE = arch/arm/gas/mem_asm.s arch/arm/gas/port_io.s arch/arm/gas/disk_host_io.s arch/arm/gas/shell_history_host_asm.s kernel/arch/aarch64/boot/spinlock.s kernel/arch/aarch64/drivers/ramdisk.s \
@@ -278,6 +280,12 @@ HISTORY_ASM_OBJ = $(patsubst %.s,%.o,$(filter %/shell_history_host_asm.s,$(ASMSR
 # util.c references host FAT32 helpers; any link of util.o outside the full shell must include these.
 UTIL_HISTORY_HOST_OBJS = kernel/core/vfs/fat32_host.o kernel/core/vfs/fat32_host_files.o disk_host_io.o $(DISK_HOST_ASM_OBJ)
 UTIL_SHELL_LINK_OBJS = userland/shell/util.o userland/shell/history_record.o
+# fs_jail_check_access pulls session + path_property (and user_db/password_hash for session).
+FS_JAIL_SUPPORT_OBJS = kernel/core/time/timekeeping.o \
+                         kernel/core/identity/user_db.o kernel/core/identity/elevation.o \
+                         kernel/core/identity/path_property.o kernel/core/identity/session.o \
+                         userland/identity/password_hash.o
+FS_JAIL_TEST_LIBS = -lsqlite3 -lstdc++ -pthread
 TEST_ASMOBJS = $(MEM_ASM_OBJ) $(PORT_IO_OBJ) $(DISK_HOST_ASM_OBJ) $(HISTORY_ASM_OBJ)
 TEST_TARGET = BPForbes_Flinstone_Tests
 
@@ -387,18 +395,22 @@ test_invariants: userland/shell/common.o userland/shell/authz_subsystem.o $(UTIL
 
 # audit_log unit tests (standalone, no CUnit required)
 .PHONY: test_audit_log
-test_audit_log: userland/shell/common.o userland/shell/audit_log.o userland/shell/contract_log_dispatch.o $(UTIL_SHELL_LINK_OBJS) kernel/core/vfs/fs_jail.o kernel/core/mm/mem_domain.o $(MEM_ASM_OBJ) $(HISTORY_ASM_OBJ) $(UTIL_HISTORY_HOST_OBJS)
-	$(CC) $(CFLAGS) $(TEST_SANITIZE) -o tests/test_audit_log tests/test_audit_log.c \
+test_audit_log: userland/shell/common.o userland/shell/audit_log.o userland/shell/contract_log_dispatch.o $(UTIL_SHELL_LINK_OBJS) kernel/core/vfs/fs_jail.o $(FS_JAIL_SUPPORT_OBJS) kernel/core/mm/mem_domain.o $(MEM_ASM_OBJ) $(HISTORY_ASM_OBJ) $(UTIL_HISTORY_HOST_OBJS)
+	$(CC) $(CFLAGS) $(TEST_SANITIZE) -c -o tests/test_audit_log.o tests/test_audit_log.c
+	$(CXX) $(CXXFLAGS) $(TEST_SANITIZE) -o tests/test_audit_log tests/test_audit_log.o \
 	  userland/shell/common.o userland/shell/audit_log.o userland/shell/contract_log_dispatch.o $(UTIL_SHELL_LINK_OBJS) kernel/core/vfs/fs_jail.o \
-	  kernel/core/mm/mem_domain.o $(MEM_ASM_OBJ) $(HISTORY_ASM_OBJ) $(UTIL_HISTORY_HOST_OBJS) -Wl,-z,noexecstack
+	  $(FS_JAIL_SUPPORT_OBJS) kernel/core/mm/mem_domain.o $(MEM_ASM_OBJ) $(HISTORY_ASM_OBJ) $(UTIL_HISTORY_HOST_OBJS) \
+	  $(FS_JAIL_TEST_LIBS) -Wl,-z,noexecstack
 	./tests/test_audit_log
 
 # fs_jail unit tests (standalone, no CUnit required)
 .PHONY: test_fs_jail
-test_fs_jail: userland/shell/common.o $(UTIL_SHELL_LINK_OBJS) kernel/core/vfs/fs_jail.o kernel/core/mm/mem_domain.o $(MEM_ASM_OBJ) $(HISTORY_ASM_OBJ) $(UTIL_HISTORY_HOST_OBJS)
-	$(CC) $(CFLAGS) $(TEST_SANITIZE) -o tests/test_fs_jail tests/test_fs_jail.c \
-	  userland/shell/common.o $(UTIL_SHELL_LINK_OBJS) kernel/core/vfs/fs_jail.o \
-	  kernel/core/mm/mem_domain.o $(MEM_ASM_OBJ) $(HISTORY_ASM_OBJ) $(UTIL_HISTORY_HOST_OBJS) -Wl,-z,noexecstack
+test_fs_jail: userland/shell/common.o $(UTIL_SHELL_LINK_OBJS) kernel/core/vfs/fs_jail.o $(FS_JAIL_SUPPORT_OBJS) kernel/core/mm/mem_domain.o $(MEM_ASM_OBJ) $(HISTORY_ASM_OBJ) $(UTIL_HISTORY_HOST_OBJS)
+	$(CC) $(CFLAGS) $(TEST_SANITIZE) -c -o tests/test_fs_jail.o tests/test_fs_jail.c
+	$(CXX) $(CXXFLAGS) $(TEST_SANITIZE) -o tests/test_fs_jail tests/test_fs_jail.o \
+	  userland/shell/common.o $(UTIL_SHELL_LINK_OBJS) kernel/core/vfs/fs_jail.o $(FS_JAIL_SUPPORT_OBJS) \
+	  kernel/core/mm/mem_domain.o $(MEM_ASM_OBJ) $(HISTORY_ASM_OBJ) $(UTIL_HISTORY_HOST_OBJS) \
+	  $(FS_JAIL_TEST_LIBS) -Wl,-z,noexecstack
 	./tests/test_fs_jail
 
 .PHONY: test_p0_p2_wiring
@@ -435,9 +447,11 @@ test_vm_arch_readiness: kernel/core/mm/mem_domain.o kernel/core/sys/vrt.o kernel
 	  kernel/core/mm/mem_domain.o kernel/core/sys/vrt.o kernel/core/sys/ipc.o kernel/core/sys/syscall.o VM/devices/vm_io.o VM/devices/vm_arch.o $(MEM_ASM_OBJ) -Wl,-z,noexecstack
 	./tests/test_vm_arch_readiness
 
-test_vm_layer_warning: userland/shell/common.o kernel/core/vfs/fs_jail.o kernel/core/vfs/path_log.o kernel/core/mm/mem_domain.o $(MEM_ASM_OBJ)
-	$(CC) $(CFLAGS) $(TEST_SANITIZE) -I. -Ikernel/core/vfs -Ikernel/core/mm -Iuserland/shell -o tests/test_vm_layer_warning tests/test_vm_layer_warning.c \
-	  userland/shell/common.o kernel/core/vfs/fs_jail.o kernel/core/vfs/path_log.o kernel/core/mm/mem_domain.o $(MEM_ASM_OBJ) -Wl,-z,noexecstack
+test_vm_layer_warning: userland/shell/common.o kernel/core/vfs/fs_jail.o $(FS_JAIL_SUPPORT_OBJS) kernel/core/vfs/path_log.o kernel/core/mm/mem_domain.o $(MEM_ASM_OBJ)
+	$(CC) $(CFLAGS) $(TEST_SANITIZE) -I. -Ikernel/core/vfs -Ikernel/core/mm -Iuserland/shell -c -o tests/test_vm_layer_warning.o tests/test_vm_layer_warning.c
+	$(CXX) $(CXXFLAGS) $(TEST_SANITIZE) -o tests/test_vm_layer_warning tests/test_vm_layer_warning.o \
+	  userland/shell/common.o kernel/core/vfs/fs_jail.o $(FS_JAIL_SUPPORT_OBJS) kernel/core/vfs/path_log.o \
+	  kernel/core/mm/mem_domain.o $(MEM_ASM_OBJ) $(FS_JAIL_TEST_LIBS) -Wl,-z,noexecstack
 	./tests/test_vm_layer_warning
 
 .PHONY: test_replay

@@ -8,6 +8,7 @@ static fl_user_db_t s_db;
 static char s_current[FL_USER_NAME_MAX];
 static fl_elevation_token_t s_active_elev = FL_ELEVATION_TOKEN_NONE;
 static int s_sudo_scope_depth;
+static int s_db_ready;
 static pthread_once_t s_once = PTHREAD_ONCE_INIT;
 
 static void session_load_once(void) {
@@ -21,6 +22,7 @@ static void session_load_once(void) {
     }
     strncpy(s_current, s_db.default_user, sizeof(s_current) - 1);
     s_current[sizeof(s_current) - 1] = '\0';
+    s_db_ready = 1;
 }
 
 void fl_session_init(void) {
@@ -38,35 +40,34 @@ int fl_session_is_elevated_account(void) {
 }
 
 int fl_session_in_sudo_scope(void) {
-    fl_session_init();
     return s_sudo_scope_depth > 0;
 }
 
 void fl_session_begin_sudo_scope(void) {
-    fl_session_init();
     s_sudo_scope_depth++;
 }
 
 void fl_session_end_sudo_scope(void) {
-    fl_session_init();
     if (s_sudo_scope_depth > 0)
         s_sudo_scope_depth--;
 }
 
 int fl_session_jail_privileged(void) {
-    fl_session_init();
-    if (fl_session_is_elevated_account())
+    if (s_sudo_scope_depth > 0)
         return 1;
-    return s_sudo_scope_depth > 0;
+    if (!s_db_ready)
+        return 0;
+    return fl_user_db_is_elevated_user(&s_db, s_current);
 }
 
 int fl_session_has_elevation(void) {
-    fl_session_init();
-    if (fl_session_is_elevated_account())
-        return 1;
     if (s_sudo_scope_depth > 0)
         return 1;
-    return fl_elevation_active(s_active_elev);
+    if (fl_elevation_active(s_active_elev))
+        return 1;
+    if (!s_db_ready)
+        return 0;
+    return fl_user_db_is_elevated_user(&s_db, s_current);
 }
 
 fl_result_t fl_session_login(const char *name, const char *password) {
