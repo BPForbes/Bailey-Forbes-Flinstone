@@ -41,7 +41,7 @@ pool) and fl_elevation_active_count slot scan/reclaim; C fallbacks when FL_STACK
 is unset (e.g. x86_64_nasm). Slot layout locked with _Static_assert(sizeof(fl_elev_slot_t)==56).
 In-source TODO(Codex/CR) markers for deferred P0 bare-metal proof, P1 NASM/bare-metal PMM,
 P2 login-shell env, logout audit ordering, and audit-log file tests (see docs/p0_p2_pr_coverage.md).
-ROADMAP module-integration snapshot uses ~ prefix on checkmarks for those patch-scale TODO rows.
+ROADMAP P0-P2 module-integration snapshot: all rows ✅ or ~✅ (4.1.0 hosted/lab; ~ marks patch-scale follow-ups).
 VER_4_1_0_P0_P2
 
 RELEASE_DATE=2026-05-21
