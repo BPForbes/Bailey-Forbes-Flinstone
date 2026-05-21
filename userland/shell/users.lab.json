@@ -1,0 +1,8 @@
+{
+  "default_user": "user",
+  "users": [
+    {"name": "root", "uid": 0, "is_root": 1},
+    {"name": "user", "uid": 1000, "is_root": 0},
+    {"name": "guest", "uid": 1001, "is_root": 0}
+  ]
+}

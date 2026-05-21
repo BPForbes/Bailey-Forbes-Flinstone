@@ -52,6 +52,7 @@
 #include "path_log.h"
 #include "drivers/drivers.h"
 #include "fs_jail.h"
+#include "fl/session.h"
 #include "VM/vm.h"
 #include <stdio.h>
 #include <stdlib.h>
@@ -306,7 +307,7 @@ int main(int argc, char *argv[]) {
             "rmtree","mv","version","contracts","audit","exit","bios","clear","history","his","cc","listclusters","listdirs",
             "setdisk","createdisk","format","search","writecluster","delcluster","update","redirect",
             "initdisk","rerun","import","du","printdisk","addcluster","where","loc",
-            "diskput","diskget","diskfiles","diskdel","diskmkdir",NULL};
+            "diskput","diskget","diskfiles","diskdel","diskmkdir","sudo",NULL};
         int is_cmd = 0;
         for (int k = 0; skip[k]; k++)
             if (!strcmp(argv[1], skip[k])) { is_cmd = 1; break; }
@@ -341,6 +342,7 @@ int main(int argc, char *argv[]) {
     if (vm_configure_root_from_cwd() != 0)
         fprintf(stderr, "[VM] 5-layer driver config warning: layer 4 shell/VM root is not configured\n");
     fs_jail_init();
+    fl_session_init();
 
     /* Default host volume: ensure drive.img exists before block driver probes it. */
     if (strcmp(current_disk_file, "drive.img") == 0) {

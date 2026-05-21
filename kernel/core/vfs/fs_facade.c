@@ -1,4 +1,8 @@
 #include "fs_facade.h"
+#include "../identity/session.h"
+#include "../identity/path_property.h"
+#include "fl/authz_subsystem.h"
+#include "contract_p2_authz.h"
 #include <stdlib.h>
 #include <string.h>
 #include <stdio.h>
@@ -11,7 +15,8 @@ file_manager_service_t *fm_service_create(fs_provider_t *provider) {
     if (!svc) return NULL;
     pthread_mutex_init(&svc->undo_mutex, NULL);
     svc->provider = provider;
-    strncpy(svc->current_user, "user", FS_SESSION_USER_MAX - 1);
+    fl_session_init();
+    strncpy(svc->current_user, fl_session_current_user(), FS_SESSION_USER_MAX - 1);
     svc->current_user[FS_SESSION_USER_MAX - 1] = '\0';
     fs_chain_init(&svc->delete_chain);
     fs_chain_init(&svc->write_chain);
@@ -42,9 +47,26 @@ void fm_service_set_policy(file_manager_service_t *svc, fs_access_policy_t *poli
     svc->policy = policy;
 }
 
+static int fm_authz_path_gate(const char *path) {
+    fl_path_property_t prop;
+    if (fl_authz_subsystem_check(FL_AUTHZ_OP_VFS_PRIVILEGED, (void *)(uintptr_t)path)
+        == FL_AUTHZ_DENY)
+        return -1;
+    if (fl_path_property_resolve(path, &prop) == FL_RESULT_OK && prop.requires_elevation) {
+        if (!fl_session_has_elevation())
+            return -1;
+        if (prop.owner[0] && strcmp(prop.owner, fl_session_current_user()) != 0
+            && !fl_session_is_root())
+            return -1;
+    }
+    return 0;
+}
+
 static int check_policy_delete(const char *path, const char *arg2, void *ctx) {
     (void)arg2;
     file_manager_service_t *svc = (file_manager_service_t *)ctx;
+    if (fm_authz_path_gate(path) != 0)
+        return -1;
     if (!svc->policy || !svc->policy->vtable) return 0;
     if (!svc->policy->vtable->can_delete(svc->policy, svc->current_user, path))
         return -1;  /* denied */
@@ -54,6 +76,8 @@ static int check_policy_delete(const char *path, const char *arg2, void *ctx) {
 static int check_policy_write(const char *path, const char *arg2, void *ctx) {
     (void)arg2;
     file_manager_service_t *svc = (file_manager_service_t *)ctx;
+    if (fm_authz_path_gate(path) != 0)
+        return -1;
     if (!svc->policy || !svc->policy->vtable) return 0;
     if (!svc->policy->vtable->can_write(svc->policy, svc->current_user, path))
         return -1;

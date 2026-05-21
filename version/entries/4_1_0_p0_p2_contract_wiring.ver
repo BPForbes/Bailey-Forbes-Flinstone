@@ -1,0 +1,26 @@
+MAJOR_VERSION=4
+STANDARD_VERSION=1
+RELEASE_VERSION=0
+PRERELEASE=1
+DEV_VERSION=1
+GM=0
+DESCRIPTION<<VER_4_1_0_P0_P2
+4.1.0: P0–P2 module integration — wire contract bundles into hosted core paths.
+
+Memory (kernel/core/memory/): fl_stack free-frame pool for PMM; fl_exec_context with
+heap/stack/instruction-pointer/register snapshot; fl_result_t on fallible PMM APIs.
+
+Time (kernel/core/time/): fl_timekeeping uses POSIX time.h (CLOCK_MONOTONIC) per P1-7.
+
+Identity (kernel/core/identity/): JSON user database (users.lab.json); per-directory
+.flmeta/properties.json for owner and requires_elevation; elevation tokens (P2-4);
+path-property inheritance walks parent directories.
+
+Jail (P0 FS surface): session user bound to jail; requires_elevation enforced with
+elevation tokens before privileged paths under jail.
+
+Authz (P2-3): fm_service delete/write gates call fl_authz_subsystem_check; guest deny
+paths return FL_RESULT_ACCES; sudo builtin grants lab elevation TTL.
+
+Tests: test_p0_p2_wiring (stack, PMM, exec context, user db, path props, timekeeping).
+VER_4_1_0_P0_P2

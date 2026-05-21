@@ -42,6 +42,7 @@ typedef enum {
     FL_SCMD_DISKFILES,
     FL_SCMD_DISKDEL,
     FL_SCMD_DISKMKDIR,
+    FL_SCMD_SUDO,
 } fl_shell_cmd_no_t;
 
 #endif /* FL_SHELL_CMD_H */

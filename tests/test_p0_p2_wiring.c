@@ -1,0 +1,93 @@
+#include "fl_stack.h"
+#include "exec_context.h"
+#include "timekeeping.h"
+#include "user_db.h"
+#include "path_property.h"
+#include "pmm.h"
+#include "contract_result.h"
+#include <stdio.h>
+#include <stdlib.h>
+#include <string.h>
+#include <sys/stat.h>
+#include <unistd.h>
+
+#define ASSERT(c) do { if (!(c)) { fprintf(stderr, "FAIL: %s\n", #c); return 1; } } while(0)
+
+static int test_fl_stack(void) {
+    uintptr_t buf[4];
+    fl_stack_t s;
+    uintptr_t v;
+    ASSERT(fl_stack_init(&s, buf, 4) == 0);
+    ASSERT(fl_stack_push(&s, 10) == 0);
+    ASSERT(fl_stack_push(&s, 20) == 0);
+    ASSERT(fl_stack_pop(&s, &v) == 0 && v == 20);
+    ASSERT(fl_stack_pop(&s, &v) == 0 && v == 10);
+    return 0;
+}
+
+static int test_exec_context(void) {
+    fl_exec_context_t ctx;
+    uintptr_t w = 0;
+    void *heap = NULL;
+    ASSERT(fl_exec_context_create(&ctx, 8192, 4096) == FL_RESULT_OK);
+    ASSERT(fl_exec_context_push_stack(&ctx, 42) == FL_RESULT_OK);
+    ASSERT(fl_exec_context_pop_stack(&ctx, &w) == FL_RESULT_OK && w == 42);
+    ASSERT(fl_exec_context_heap_alloc(&ctx, 64, &heap) == FL_RESULT_OK && heap != NULL);
+    fl_exec_context_destroy(&ctx);
+    return 0;
+}
+
+static int test_timekeeping(void) {
+    int64_t a = 0, b = 0;
+    ASSERT(fl_time_monotonic_ns(&a) == FL_RESULT_OK);
+    ASSERT(fl_time_wall_sec(&b) == FL_RESULT_OK);
+    ASSERT(a > 0 && b > 0);
+    return 0;
+}
+
+static int test_user_db(void) {
+    fl_user_db_t db;
+    const fl_user_record_t *r;
+    ASSERT(fl_user_db_load(&db, "userland/shell/users.lab.json") == FL_RESULT_OK);
+    r = fl_user_db_find(&db, "root");
+    ASSERT(r && r->is_root == 1);
+    ASSERT(fl_user_db_is_root_user(&db, "root") == 1);
+    return 0;
+}
+
+static int test_path_property(void) {
+    char tmpl[] = "/tmp/fl_propXXXXXX";
+    char dir[256];
+    fl_path_property_t prop;
+    if (!mkdtemp(tmpl))
+        return 1;
+    snprintf(dir, sizeof(dir), "%s/sub", tmpl);
+    ASSERT(mkdir(dir, 0755) == 0);
+    ASSERT(fl_path_property_set_dir(dir, "user", 1) == FL_RESULT_OK);
+    ASSERT(fl_path_property_resolve(dir, &prop) == FL_RESULT_OK);
+    ASSERT(prop.requires_elevation == 1);
+    return 0;
+}
+
+static int test_pmm_stack(void) {
+    uintptr_t phys = 0;
+    size_t before, after;
+    before = pmm_free_count();
+    ASSERT(pmm_alloc_frame_result(&phys) == FL_RESULT_OK && phys != 0);
+    after = pmm_free_count();
+    ASSERT(after + 1 == before);
+    ASSERT(pmm_free_frame_result(phys) == FL_RESULT_OK);
+    ASSERT(pmm_free_count() == before);
+    return 0;
+}
+
+int main(void) {
+    if (test_fl_stack()) return 1;
+    if (test_exec_context()) return 1;
+    if (test_timekeeping()) return 1;
+    if (test_user_db()) return 1;
+    if (test_path_property()) return 1;
+    if (test_pmm_stack()) return 1;
+    printf("test_p0_p2_wiring: ok\n");
+    return 0;
+}
