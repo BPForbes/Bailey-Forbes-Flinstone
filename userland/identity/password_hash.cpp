@@ -1,5 +1,3 @@
-/* TODO(P2/contract-mount GH-128): Argon2id (libsodium) verifier upgrade per
- * contract_p2_credential_store.h; today PBKDF2-HMAC-SHA256 + legacy SHA-256. */
 #include "password_hash.h"
 #include <openssl/evp.h>
 #include <openssl/sha.h>

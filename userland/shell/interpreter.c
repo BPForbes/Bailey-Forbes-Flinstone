@@ -99,12 +99,13 @@ int execute_command_str(const char *line) {
     }
 
     if (strcmp(args[0], "sudo") == 0) {
-        if (argc >= 2 && strcmp(args[1], "-i") == 0) {
-            out_rc = cmd_sudo_interactive_login();
+        /* -i / -k: no password gate; cmd_sudo_run handles revoke and root login. */
+        if (argc >= 2 && strcmp(args[1], "-k") == 0) {
+            out_rc = cmd_sudo_run(argc, args);
             free(cmdLine);
             goto finish;
         }
-        if (argc == 2 && strcmp(args[1], "-k") == 0) {
+        if (argc >= 2 && strcmp(args[1], "-i") == 0) {
             out_rc = cmd_sudo_run(argc, args);
             free(cmdLine);
             goto finish;

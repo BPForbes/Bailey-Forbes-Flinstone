@@ -1,4 +1,3 @@
-/* TODO(contract-mount/GH-123): timekeeping.h anchors contract_p1_timekeeping.h. */
 /* TODO(P1/Codex): P1-7 arch time on B — AArch64 Generic Timer or P0-5 tick path;
  * hosted POSIX clock_gettime is reference-only on H. */
 #include "timekeeping.h"

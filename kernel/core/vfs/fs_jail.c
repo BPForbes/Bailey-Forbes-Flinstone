@@ -1,5 +1,3 @@
-/* TODO(contract-mount/GH-127): contract_p0_fs_jail.h documents return/TOCTOU semantics;
- * bare-metal jail proof still tracked under P0 below. */
 /* TODO(P0/Codex): P0-4..P0-8 bare-metal integration proof (GIC EOI, IDT/GDT/tick,
  * FDT, early UART) — this PR wires hosted VM jail + elevation only;
  * see docs/p0_p2_pr_coverage.md and docs/ROADMAP.md. */

@@ -42,7 +42,7 @@ is unset (e.g. x86_64_nasm). Slot layout locked with _Static_assert(sizeof(fl_el
 In-source TODO(Codex/CR) markers for deferred P0 bare-metal proof, P1 NASM/bare-metal PMM,
 P2 login-shell env, logout audit ordering, and audit-log file tests (see docs/p0_p2_pr_coverage.md).
 Contract-mount GH #121-128: P1/P2 impl headers anchor contract shards; new contract_p0_fs_jail.h;
-P2 credential store SQLite path (FL_CONTRACT_P2_IDENTITY_REV 3). TODO(contract-mount) in tree.
+P2 credential store SQLite path (FL_CONTRACT_P2_IDENTITY_REV 3).
 ROADMAP P0-P2 integration: ✅ P0-1..3 only; ~✅ P0-4..P2-4 (hosted wired — P1-1 exec context and P1-7 timekeeping look complete but stay ~✅ for B/arch gaps and Codex TODOs).
 VER_4_1_0_P0_P2
 
