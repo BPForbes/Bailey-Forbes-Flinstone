@@ -32,6 +32,12 @@ fl_result_t fl_session_grant_elevation(const char *reason, fl_elevation_token_t 
 void        fl_session_bind_elevation(fl_elevation_token_t token);
 void        fl_session_clear_elevation(void);
 
+/** Revoke active elevation token and end sudo command scope; keep current user. */
+void        fl_session_drop_elevation(void);
+
+/** Drop elevation and switch to the database default user (logout). */
+fl_result_t fl_session_logout(void);
+
 fl_user_db_t *fl_session_user_db_mut(void);
 const fl_user_db_t *fl_session_user_db(void);
 fl_result_t fl_session_save_users(void);

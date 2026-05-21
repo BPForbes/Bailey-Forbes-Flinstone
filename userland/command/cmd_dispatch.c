@@ -80,6 +80,8 @@ int fl_shell_cmd_dispatch(fl_shell_cmd_no_t no, int argc, char **argv) {
         return cmd_su_run(argc, argv);
     case FL_SCMD_LOGIN:
         return cmd_login_run(argc, argv);
+    case FL_SCMD_LOGOUT:
+        return cmd_logout_run(argc, argv);
     case FL_SCMD_USERADD:
         return cmd_useradd_run(argc, argv);
     case FL_SCMD_USERDEL:

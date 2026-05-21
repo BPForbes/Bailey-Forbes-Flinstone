@@ -308,7 +308,7 @@ int main(int argc, char *argv[]) {
             "setdisk","createdisk","format","search","writecluster","delcluster","update","redirect",
             "initdisk","rerun","import","du","printdisk","addcluster","where","loc",
             "diskput","diskget","diskfiles","diskdel","diskmkdir","sudo","su","login",
-            "useradd","userdel","passwd",NULL};
+            "logout","useradd","userdel","passwd",NULL};
         int is_cmd = 0;
         for (int k = 0; skip[k]; k++)
             if (!strcmp(argv[1], skip[k])) { is_cmd = 1; break; }
@@ -528,6 +528,8 @@ int main(int argc, char *argv[]) {
             }
             else if (!strcmp(cmd, "login"))
                 tokensCount = 2;
+            else if (!strcmp(cmd, "logout"))
+                tokensCount = 1;
             else if (!strcmp(cmd, "userdel"))
                 tokensCount = 2;
             else if (!strcmp(cmd, "useradd"))
@@ -535,7 +537,8 @@ int main(int argc, char *argv[]) {
             else if (!strcmp(cmd, "passwd"))
                 tokensCount = (i + 1 < argc && argv[i + 1] && argv[i + 1][0] != '-') ? 2 : 1;
             else if (!strcmp(cmd, "sudo")) {
-                if (i + 1 < argc && argv[i + 1] && !strcmp(argv[i + 1], "-i"))
+                if (i + 1 < argc && argv[i + 1] &&
+                    (!strcmp(argv[i + 1], "-i") || !strcmp(argv[i + 1], "-k")))
                     tokensCount = 2;
                 else {
                     int j = i + 1;

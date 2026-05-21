@@ -45,6 +45,7 @@ typedef enum {
     FL_SCMD_SUDO,
     FL_SCMD_SU,
     FL_SCMD_LOGIN,
+    FL_SCMD_LOGOUT,
     FL_SCMD_USERADD,
     FL_SCMD_USERDEL,
     FL_SCMD_PASSWD,

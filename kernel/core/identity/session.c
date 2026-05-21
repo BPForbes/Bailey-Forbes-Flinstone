@@ -127,7 +127,29 @@ void fl_session_bind_elevation(fl_elevation_token_t token) {
 
 void fl_session_clear_elevation(void) {
     fl_session_init();
-    s_active_elev = FL_ELEVATION_TOKEN_NONE;
+    if (s_active_elev != FL_ELEVATION_TOKEN_NONE) {
+        fl_elevation_revoke(s_active_elev);
+        s_active_elev = FL_ELEVATION_TOKEN_NONE;
+    }
+}
+
+void fl_session_drop_elevation(void) {
+    fl_session_init();
+    fl_session_clear_elevation();
+    s_sudo_scope_depth = 0;
+}
+
+fl_result_t fl_session_logout(void) {
+    const char *def;
+
+    fl_session_init();
+    fl_session_drop_elevation();
+    def = s_db.default_user;
+    if (!def || !def[0])
+        def = "flinstone";
+    strncpy(s_current, def, sizeof(s_current) - 1);
+    s_current[sizeof(s_current) - 1] = '\0';
+    return FL_RESULT_OK;
 }
 
 fl_user_db_t *fl_session_user_db_mut(void) {

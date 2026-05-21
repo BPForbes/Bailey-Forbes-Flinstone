@@ -118,8 +118,16 @@ static int test_session_login(void) {
         ASSERT(fl_session_grant_elevation("test", &tok) == FL_RESULT_OK);
         ASSERT(fl_session_has_elevation() == 1);
         ASSERT(fl_session_jail_privileged() == 0);
-        fl_session_clear_elevation();
+        ASSERT(fl_elevation_active(tok) == 1);
+        fl_session_drop_elevation();
+        ASSERT(fl_session_has_elevation() == 0);
+        ASSERT(fl_elevation_active(tok) == 0);
     }
+    ASSERT(fl_session_login("root", "root") == FL_RESULT_OK);
+    ASSERT(fl_session_logout() == FL_RESULT_OK);
+    ASSERT(strcmp(fl_session_current_user(), "flinstone") == 0);
+    ASSERT(fl_session_is_elevated_account() == 0);
+    ASSERT(fl_session_has_elevation() == 0);
     fl_session_begin_sudo_scope();
     ASSERT(fl_session_jail_privileged() == 1);
     ASSERT(fl_session_in_sudo_scope() == 1);

@@ -21,6 +21,7 @@ Jail (P0 FS surface): only elevated login or `sudo <command>` escapes VM jail
 
 Authz (P2-3): fm_service gates; non-elevated users enter their password for sudo/sudo -i;
 su/su -/su -c switch or run commands with the target account password; useradd/userdel/passwd.
+logout returns to the default user; sudo -k revokes elevation tokens without changing account.
 
 Password hashes use OpenSSL PBKDF2-HMAC-SHA256 (record stores iteration count); legacy
 stretch/single SHA-256 rows still verify. login/su/sudo read passwords on the next line.

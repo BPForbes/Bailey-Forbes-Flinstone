@@ -1,5 +1,6 @@
 #include "cmd_decl.h"
 #include "cmd_authutil.h"
+#include "fl/audit_log.h"
 #include "fl/session.h"
 #include "fl/elevation.h"
 #include "contract_p2_elevation.h"
@@ -44,8 +45,28 @@ int cmd_sudo_interactive_login(void) {
     return 0;
 }
 
+static int sudo_revoke_elevation(void) {
+    const char *user;
+
+    fl_session_init();
+    user = fl_session_current_user();
+    if (fl_session_has_elevation() && !fl_session_is_elevated_account())
+        fl_audit_elevation_event(user, "sudo -k", 0);
+    fl_session_drop_elevation();
+    printf("sudo: elevation revoked\n");
+    return 0;
+}
+
 int cmd_sudo_run(int argc, char **argv) {
     const char *reason = "lab elevation";
+
+    if (argc >= 2 && argv[1] && strcmp(argv[1], "-k") == 0) {
+        if (argc > 2) {
+            fprintf(stderr, "sudo: -k does not take additional arguments\n");
+            return 1;
+        }
+        return sudo_revoke_elevation();
+    }
 
     if (argc >= 2 && argv[1] && strcmp(argv[1], "-i") == 0)
         return cmd_sudo_interactive_login();
