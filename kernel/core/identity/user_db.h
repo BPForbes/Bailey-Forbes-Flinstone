@@ -2,11 +2,12 @@
 #define FL_USER_DB_H
 
 #include "contract_result.h"
+#include "password_hash.h"
 #include <stddef.h>
 #include <stdint.h>
 
 #define FL_USER_NAME_MAX          32u
-#define FL_PASSWORD_HASH_HEX_MAX  65u
+#define FL_PASSWORD_HASH_HEX_MAX  FL_PASSWORD_HASH_RECORD_MAX
 #define FL_PASSWORD_SALT_HEX_MAX  33u
 
 typedef struct fl_user_record {

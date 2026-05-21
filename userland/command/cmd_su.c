@@ -82,7 +82,7 @@ int cmd_su_run(int argc, char **argv) {
         return 1;
     }
 
-    if (cmd_su_require_auth(req.target, req.password) != 0)
+    if (cmd_su_require_auth(req.target) != 0)
         return 1;
 
     strncpy(saved, fl_session_current_user(), sizeof(saved) - 1);

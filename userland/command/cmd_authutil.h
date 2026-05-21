@@ -3,7 +3,7 @@
 
 #include <stddef.h>
 
-/** Read a password (no echo). Returns 0 on success. */
+/** Read a password on the next line (no echo). Returns 0 on success. */
 int cmd_read_password(const char *prompt, char *buf, size_t buf_size);
 
 /** Zero-fill a password buffer. */
@@ -16,9 +16,9 @@ void cmd_wipe_password(char *buf, size_t buf_size);
 int cmd_sudo_require_auth(void);
 
 /**
- * Verify target user's password (for su). Returns 0 on success.
- * When password is NULL, prompts interactively.
+ * Verify target user's password (for su). Always prompts on the next line.
+ * Returns 0 on success.
  */
-int cmd_su_require_auth(const char *target, const char *password);
+int cmd_su_require_auth(const char *target);
 
 #endif /* CMD_AUTHUTIL_H */

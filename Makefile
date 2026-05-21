@@ -24,7 +24,7 @@ ARM64_LINUX_HOST := $(and $(filter Linux,$(UNAME_S)),$(filter aarch64 arm64,$(UN
 CC = gcc
 AS = as
 CFLAGS = -Wall -Wextra -pthread -I. -Icontracts/foundations -Icontracts/runtime -Icontracts/identity -Icontracts/networking -Icontracts/drivers -Icontracts/storage -Icontracts/observability -Icontracts/operations -Icontracts/virtualization -Icontracts/hardening -Ikernel/include -Ikernel/core/vfs -Ikernel/core/mm -Ikernel/core/memory -Ikernel/core/time -Ikernel/core/identity -Ikernel/core/sched -Ikernel/core/sys -Iuserland/shell -Iuserland/command -Ikernel/arch/x86_64 -Ikernel/arch/aarch64
-LDFLAGS = -Wl,-z,noexecstack -lsqlite3 -lstdc++
+LDFLAGS = -Wl,-z,noexecstack -lsqlite3 -lstdc++ -lcrypto
 # Cross ARM on x86: prefer deps/install-aarch64 (./deps/fetch-sqlite-aarch64.sh); optional system libsqlite3-dev:arm64.
 ifeq ($(ARCH),arm)
 ifeq ($(ARM64_LINUX_HOST),)
@@ -39,9 +39,9 @@ ASFLAGS =
 ifneq ($(SQLITE_ARM_LIB),)
 ifneq (,$(wildcard $(SQLITE_ARM_LIB)))
 CFLAGS += -I$(SQLITE_ARM_PREFIX)/include
-LDFLAGS := -Wl,-z,noexecstack -L$(SQLITE_ARM_PREFIX)/lib -lsqlite3 -lstdc++ -ldl
+LDFLAGS := -Wl,-z,noexecstack -L$(SQLITE_ARM_PREFIX)/lib -lsqlite3 -lstdc++ -lcrypto -ldl
 else ifneq (,$(wildcard /usr/lib/aarch64-linux-gnu/libsqlite3.so))
-LDFLAGS := -Wl,-z,noexecstack -L/usr/lib/aarch64-linux-gnu -lsqlite3 -lstdc++
+LDFLAGS := -Wl,-z,noexecstack -L/usr/lib/aarch64-linux-gnu -lsqlite3 -lstdc++ -lcrypto
 endif
 endif
 
@@ -323,7 +323,7 @@ FS_JAIL_SUPPORT_OBJS = kernel/core/time/timekeeping.o \
                          kernel/core/identity/user_db.o kernel/core/identity/elevation.o \
                          kernel/core/identity/path_property.o kernel/core/identity/session.o \
                          userland/identity/password_hash.o
-FS_JAIL_TEST_LIBS = -lsqlite3 -lstdc++ -pthread
+FS_JAIL_TEST_LIBS = -lsqlite3 -lstdc++ -lcrypto -pthread
 TEST_ASMOBJS = $(MEM_ASM_OBJ) $(PORT_IO_OBJ) $(DISK_HOST_ASM_OBJ) $(HISTORY_ASM_OBJ)
 TEST_TARGET = BPForbes_Flinstone_Tests
 
@@ -464,7 +464,7 @@ test_p0_p2_wiring: kernel/core/memory/fl_stack.o kernel/core/memory/exec_context
 	  kernel/core/memory/fl_stack.o kernel/core/memory/exec_context.o kernel/core/time/timekeeping.o \
 	  kernel/core/identity/user_db.o kernel/core/identity/session.o kernel/core/identity/elevation.o \
 	  kernel/core/identity/path_property.o kernel/core/mm/mem_domain.o kernel/core/mm/pmm.o \
-	  userland/identity/password_hash.o $(MEM_ASM_OBJ) -lsqlite3 -lstdc++ -pthread -Wl,-z,noexecstack
+	  userland/identity/password_hash.o $(MEM_ASM_OBJ) -lsqlite3 -lstdc++ -lcrypto -pthread -Wl,-z,noexecstack
 	./tests/test_p0_p2_wiring
 
 check-layers:

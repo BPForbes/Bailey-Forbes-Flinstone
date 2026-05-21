@@ -19,6 +19,7 @@ void cmd_wipe_password(char *buf, size_t buf_size) {
 int cmd_read_password(const char *prompt, char *buf, size_t buf_size) {
     const char *env_pw;
     char *got;
+    const char *line_prompt = "Password: ";
 
     if (!buf || buf_size < 2)
         return -1;
@@ -30,18 +31,21 @@ int cmd_read_password(const char *prompt, char *buf, size_t buf_size) {
         return 0;
     }
 
+    if (!prompt || !prompt[0])
+        prompt = line_prompt;
+
 #if defined(__unix__) || defined(__APPLE__)
-    got = getpass(prompt ? prompt : "Password: ");
+    fputs("\n", stderr);
+    fflush(stderr);
+    got = getpass(prompt);
     if (!got)
         return -1;
     strncpy(buf, got, buf_size - 1);
     buf[buf_size - 1] = '\0';
     return 0;
 #else
-    if (prompt)
-        fputs(prompt, stderr);
-    else
-        fputs("Password: ", stderr);
+    fputs("\n", stderr);
+    fputs(prompt, stderr);
     fflush(stderr);
     if (!fgets(buf, (int)buf_size, stdin))
         return -1;
@@ -84,9 +88,8 @@ int cmd_sudo_require_auth(void) {
     return 0;
 }
 
-int cmd_su_require_auth(const char *target, const char *password) {
+int cmd_su_require_auth(const char *target) {
     char pw[128];
-    const char *check = password;
     const fl_user_db_t *db;
 
     if (!target || !target[0]) {
@@ -101,24 +104,16 @@ int cmd_su_require_auth(const char *target, const char *password) {
         return 1;
     }
 
-    if (!check) {
-        char prompt[80];
-        snprintf(prompt, sizeof(prompt), "Password: ");
-        (void)prompt;
-        if (cmd_read_password("Password: ", pw, sizeof(pw)) != 0) {
-            fprintf(stderr, "su: password read failed\n");
-            return 1;
-        }
-        check = pw;
+    if (cmd_read_password("Password: ", pw, sizeof(pw)) != 0) {
+        fprintf(stderr, "su: password read failed\n");
+        return 1;
     }
 
-    if (!fl_user_db_verify_password(db, target, check)) {
-        if (!password)
-            cmd_wipe_password(pw, sizeof(pw));
+    if (!fl_user_db_verify_password(db, target, pw)) {
+        cmd_wipe_password(pw, sizeof(pw));
         fprintf(stderr, "su: authentication failed\n");
         return 1;
     }
-    if (!password)
-        cmd_wipe_password(pw, sizeof(pw));
+    cmd_wipe_password(pw, sizeof(pw));
     return 0;
 }

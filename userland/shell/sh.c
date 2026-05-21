@@ -527,17 +527,13 @@ int main(int argc, char *argv[]) {
                     tokensCount = 1;
             }
             else if (!strcmp(cmd, "login"))
-                tokensCount = 3;
+                tokensCount = 2;
             else if (!strcmp(cmd, "userdel"))
                 tokensCount = 2;
-            else if (!strcmp(cmd, "useradd")) {
-                if (i + 2 < argc && argv[i + 2] && argv[i + 2][0] != '-')
-                    tokensCount = 3;
-                else
-                    tokensCount = 2;
-            }
+            else if (!strcmp(cmd, "useradd"))
+                tokensCount = 2;
             else if (!strcmp(cmd, "passwd"))
-                tokensCount = (i + 2 < argc) ? 3 : 2;
+                tokensCount = (i + 1 < argc && argv[i + 1] && argv[i + 1][0] != '-') ? 2 : 1;
             else if (!strcmp(cmd, "sudo")) {
                 if (i + 1 < argc && argv[i + 1] && !strcmp(argv[i + 1], "-i"))
                     tokensCount = 2;
