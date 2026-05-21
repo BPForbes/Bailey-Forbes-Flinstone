@@ -35,6 +35,10 @@ AArch64 CI cross-build: ./deps/fetch-openssl-aarch64.sh supplies libcrypto heade
 P2-3/P2-4: guest denies three privileged subsystem ops; shell cmd→subsystem op mapping;
 elevation grant/revoke audit lines (who/when/reason) when FL_AUDIT is set.
 Tests: test_p0_p2_wiring (stack, PMM, exec context, user db, path props, timekeeping, authz).
+
+ASM (arch/*/gas/fl_stack_asm.s): hot paths for fl_stack push/pop/count (PMM free-frame
+pool) and fl_elevation_active_count slot scan/reclaim; C fallbacks when FL_STACK_ASM_AVAILABLE
+is unset (e.g. x86_64_nasm). Slot layout locked with _Static_assert(sizeof(fl_elev_slot_t)==56).
 VER_4_1_0_P0_P2
 
 RELEASE_DATE=2026-05-21

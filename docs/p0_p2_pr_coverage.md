@@ -6,7 +6,7 @@ This note separates **contract completion** (normative headers under `contracts/
 
 | Area | Evidence |
 |------|----------|
-| **P1-4 / P1-7** | `fl_stack`, PMM `fl_result_t` APIs, `fl_timekeeping`, `test_p0_p2_wiring` |
+| **P1-4 / P1-7** | `fl_stack`, PMM `fl_result_t` APIs, `fl_timekeeping`, `test_p0_p2_wiring`; GAS `fl_stack_asm.s` for stack count and elevation slot scan (x86_64 + AArch64 GAS builds) |
 | **P2-2** | SQLite `user_db`, PBKDF2 password hashes, `users.lab.json` seed path |
 | **P2-3** | `fl_authz_subsystem_check`, shell `fl_shell_authz_builtin`, guest deny on ≥3 privileged ops + identity admin cmds, shell↔subsystem parity test |
 | **P2-4** | Elevation tokens, password-gated `sudo`/`su`, `sudo -k`, `logout`, `fl_audit_elevation_event` (who/when/reason when `FL_AUDIT=1`) |

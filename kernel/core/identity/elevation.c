@@ -2,6 +2,7 @@
 #include "user_db.h"
 #include "timekeeping.h"
 #include "mem_domain.h"
+#include "fl/fl_stack_asm.h"
 #include <pthread.h>
 #include <stdio.h>
 #include <string.h>
@@ -12,6 +13,8 @@ typedef struct fl_elev_slot {
     int64_t              expires_ns;
     int                  used;
 } fl_elev_slot_t;
+
+_Static_assert(sizeof(fl_elev_slot_t) == 56u, "asm_fl_elev_count_active slot layout");
 
 #define FL_ELEV_MAX_SLOTS 16u
 
@@ -97,6 +100,9 @@ size_t fl_elevation_active_count(void) {
         return 0;
 
     pthread_mutex_lock(&s_elev_mu);
+#if defined(FL_STACK_ASM_AVAILABLE)
+    n = asm_fl_elev_count_active(s_slots, FL_ELEV_MAX_SLOTS, now);
+#else
     for (i = 0; i < FL_ELEV_MAX_SLOTS; i++) {
         if (!s_slots[i].used)
             continue;
@@ -105,6 +111,7 @@ size_t fl_elevation_active_count(void) {
         else
             mem_domain_zero(&s_slots[i], sizeof(s_slots[i]));
     }
+#endif
     pthread_mutex_unlock(&s_elev_mu);
     return n;
 }

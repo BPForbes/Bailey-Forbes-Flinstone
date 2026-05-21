@@ -59,6 +59,7 @@ ifeq ($(ARCH),x86_64_nasm)
 AS = nasm
 ASFLAGS = -f elf64
 CFLAGS += -DDISK_HOST_USE_LIBC_PREADV=1
+# fl_stack_asm is GAS-only today; NASM build keeps C implementations.
 ASMSRCS_BASE = arch/x86_64/nasm/mem_asm.asm arch/x86_64/nasm/port_io.asm arch/x86_64/nasm/usb_xhci_mmio_asm.asm
 ASMSRCS_ALLOC = arch/x86_64/nasm/alloc_core.asm arch/x86_64/nasm/alloc_malloc.asm arch/x86_64/nasm/alloc_free.asm
 ASM_SRC_DIR = arch/x86_64/nasm
@@ -81,15 +82,17 @@ CC = gcc
 CXX = g++
 AS = as
 endif
-ASMSRCS_BASE = arch/arm/gas/mem_asm.s arch/arm/gas/port_io.s arch/arm/gas/disk_host_io.s arch/arm/gas/shell_history_host_asm.s kernel/arch/aarch64/boot/spinlock.s kernel/arch/aarch64/drivers/ramdisk.s \
+ASMSRCS_BASE = arch/arm/gas/mem_asm.s arch/arm/gas/fl_stack_asm.s arch/arm/gas/port_io.s arch/arm/gas/disk_host_io.s arch/arm/gas/shell_history_host_asm.s kernel/arch/aarch64/boot/spinlock.s kernel/arch/aarch64/drivers/ramdisk.s \
                kernel/arch/aarch64/drivers/usb_xhci_mmio_asm.s \
                kernel/arch/aarch64/boot/vectors.s
 ASMSRCS_ALLOC = arch/arm/gas/alloc_core.s arch/arm/gas/alloc_malloc.s arch/arm/gas/alloc_free.s
 ASM_SRC_DIR = arch/arm/gas
 KERNEL_DRIVERS = kernel/arch/aarch64/drivers
+CFLAGS += -DFL_STACK_ASM_AVAILABLE=1
 else
 # x86_64_gas (default)
-ASMSRCS_BASE = arch/x86_64/gas/mem_asm.s arch/x86_64/gas/port_io.s arch/x86_64/gas/disk_host_io.s arch/x86_64/gas/shell_history_host_asm.s kernel/arch/x86_64/boot/spinlock.s kernel/arch/x86_64/drivers/ata_pio.s \
+CFLAGS += -DFL_STACK_ASM_AVAILABLE=1
+ASMSRCS_BASE = arch/x86_64/gas/mem_asm.s arch/x86_64/gas/fl_stack_asm.s arch/x86_64/gas/port_io.s arch/x86_64/gas/disk_host_io.s arch/x86_64/gas/shell_history_host_asm.s kernel/arch/x86_64/boot/spinlock.s kernel/arch/x86_64/drivers/ata_pio.s \
                kernel/arch/x86_64/drivers/usb_xhci_mmio_asm.s \
                kernel/arch/x86_64/boot/gdt.s kernel/arch/x86_64/boot/idt.s
 ASMSRCS_ALLOC = arch/x86_64/gas/alloc/alloc_core.s arch/x86_64/gas/alloc/alloc_malloc.s arch/x86_64/gas/alloc/alloc_free.s
@@ -336,7 +339,8 @@ TEST_OBJS = $(TEST_SRCS:.c=.o) $(TEST_UNIT_INTERPRETER_OBJ)
 userland/shell/interpreter_unit.o: userland/shell/interpreter.c
 	$(CC) $(CFLAGS) -DUNIT_TEST -c $< -o $@
 MEM_ASM_OBJ = $(patsubst %.s,%.o,$(patsubst %.asm,%.o,$(firstword $(ASMSRCS_BASE))))
-PORT_IO_OBJ = $(patsubst %.s,%.o,$(patsubst %.asm,%.o,$(word 2,$(ASMSRCS_BASE))))
+FL_STACK_ASM_OBJ = $(patsubst %.s,%.o,$(patsubst %.asm,%.o,$(filter %/fl_stack_asm.s %/fl_stack_asm.asm,$(ASMSRCS))))
+PORT_IO_OBJ = $(patsubst %.s,%.o,$(patsubst %.asm,%.o,$(filter %/port_io.s %/port_io.asm,$(ASMSRCS))))
 DISK_HOST_ASM_OBJ = $(patsubst %.s,%.o,$(filter %/disk_host_io.s,$(ASMSRCS_BASE)))
 HISTORY_ASM_OBJ = $(patsubst %.s,%.o,$(filter %/shell_history_host_asm.s,$(ASMSRCS_BASE)))
 # util.c references host FAT32 helpers; any link of util.o outside the full shell must include these.
@@ -482,13 +486,13 @@ test_fs_jail: userland/shell/common.o $(UTIL_SHELL_LINK_OBJS) kernel/core/vfs/fs
 test_p0_p2_wiring: kernel/core/memory/fl_stack.o kernel/core/memory/exec_context.o kernel/core/time/timekeeping.o \
 		kernel/core/identity/user_db.o kernel/core/identity/session.o kernel/core/identity/elevation.o \
 		kernel/core/identity/path_property.o kernel/core/mm/mem_domain.o kernel/core/mm/pmm.o \
-		userland/identity/password_hash.o userland/shell/authz_subsystem.o $(MEM_ASM_OBJ)
+		userland/identity/password_hash.o userland/shell/authz_subsystem.o $(MEM_ASM_OBJ) $(FL_STACK_ASM_OBJ)
 	$(CC) $(CFLAGS) $(TEST_SANITIZE) -c -o tests/test_p0_p2_wiring.o tests/test_p0_p2_wiring.c
 	$(CXX) $(CXXFLAGS) $(TEST_SANITIZE) -o tests/test_p0_p2_wiring tests/test_p0_p2_wiring.o \
 	  kernel/core/memory/fl_stack.o kernel/core/memory/exec_context.o kernel/core/time/timekeeping.o \
 	  kernel/core/identity/user_db.o kernel/core/identity/session.o kernel/core/identity/elevation.o \
 	  kernel/core/identity/path_property.o kernel/core/mm/mem_domain.o kernel/core/mm/pmm.o \
-	  userland/identity/password_hash.o userland/shell/authz_subsystem.o $(MEM_ASM_OBJ) -lsqlite3 -lstdc++ -lcrypto -pthread -Wl,-z,noexecstack
+	  userland/identity/password_hash.o userland/shell/authz_subsystem.o $(MEM_ASM_OBJ) $(FL_STACK_ASM_OBJ) -lsqlite3 -lstdc++ -lcrypto -pthread -Wl,-z,noexecstack
 	./tests/test_p0_p2_wiring
 
 check-layers:
