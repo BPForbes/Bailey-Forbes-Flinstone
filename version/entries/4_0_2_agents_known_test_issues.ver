@@ -1,0 +1,6 @@
+MAJOR_VERSION=4
+STANDARD_VERSION=0
+RELEASE_VERSION=2
+PRERELEASE=1
+DEV_VERSION=1
+DESCRIPTION=Document known test target build issues (test_vm_mem, test_replay, test_alloc_asm) in AGENTS.md for future cloud agents.
