@@ -7,6 +7,10 @@
 #include "path_property.h"
 #include "pmm.h"
 #include "contract_result.h"
+#include "fl/authz_subsystem.h"
+#include "fl_shell_cmd.h"
+#include "contract_p2_authz.h"
+#include "contract_p2_principal_names.h"
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -125,6 +129,39 @@ static int test_session_login(void) {
     return 0;
 }
 
+static int test_authz_guest_privileged_ops(void) {
+    char prev[256];
+    const char *old = getenv(FL_PRINCIPAL_ENV_NAME);
+
+    if (old) {
+        strncpy(prev, old, sizeof prev - 1);
+        prev[sizeof prev - 1] = '\0';
+    }
+    (void)setenv(FL_PRINCIPAL_ENV_NAME, FL_PRINCIPAL_GUEST_LITERAL, 1);
+
+    ASSERT(fl_authz_subsystem_check((unsigned)FL_AUTHZ_OP_VFS_PRIVILEGED, NULL) ==
+           FL_AUTHZ_DENY);
+    ASSERT(fl_authz_subsystem_check((unsigned)FL_AUTHZ_OP_NETDEV_REGISTER, NULL) ==
+           FL_AUTHZ_DENY);
+    ASSERT(fl_authz_subsystem_check((unsigned)FL_AUTHZ_OP_DISK_LOW_LEVEL, NULL) ==
+           FL_AUTHZ_DENY);
+    ASSERT(fl_authz_subsystem_check((unsigned)FL_AUTHZ_OP_UNSPECIFIED, NULL) ==
+           FL_AUTHZ_ALLOW);
+
+    ASSERT(fl_authz_subsystem_op_for_shell_cmd((unsigned)FL_SCMD_FORMAT) ==
+           (unsigned)FL_AUTHZ_OP_DISK_LOW_LEVEL);
+    ASSERT(fl_authz_subsystem_op_for_shell_cmd((unsigned)FL_SCMD_SETDISK) ==
+           (unsigned)FL_AUTHZ_OP_DISK_LOW_LEVEL);
+    ASSERT(fl_authz_subsystem_op_for_shell_cmd((unsigned)FL_SCMD_CREATEDISK) ==
+           (unsigned)FL_AUTHZ_OP_DISK_LOW_LEVEL);
+
+    if (old)
+        (void)setenv(FL_PRINCIPAL_ENV_NAME, prev, 1);
+    else
+        (void)unsetenv(FL_PRINCIPAL_ENV_NAME);
+    return 0;
+}
+
 static int test_pmm_stack(void) {
     uintptr_t phys = 0;
     size_t before, after;
@@ -144,6 +181,7 @@ int main(void) {
     if (test_user_db()) return 1;
     if (test_session_login()) return 1;
     if (test_path_property()) return 1;
+    if (test_authz_guest_privileged_ops()) return 1;
     if (test_pmm_stack()) return 1;
     printf("test_p0_p2_wiring: ok\n");
     return 0;

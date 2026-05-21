@@ -26,7 +26,9 @@ Password hashes use OpenSSL PBKDF2-HMAC-SHA256 (record stores iteration count); 
 stretch/single SHA-256 rows still verify. login/su/sudo read passwords on the next line.
 AArch64 CI cross-build: ./deps/fetch-openssl-aarch64.sh supplies libcrypto headers/libs
 (deps/install-aarch64) alongside fetch-sqlite-aarch64.sh.
-Tests: test_p0_p2_wiring (stack, PMM, exec context, user db, path props, timekeeping).
+P2-3/P2-4: guest denies three privileged subsystem ops; shell cmd→subsystem op mapping;
+elevation grant/revoke audit lines (who/when/reason) when FL_AUDIT is set.
+Tests: test_p0_p2_wiring (stack, PMM, exec context, user db, path props, timekeeping, authz).
 VER_4_1_0_P0_P2
 
 RELEASE_DATE=2026-05-21

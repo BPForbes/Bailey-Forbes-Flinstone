@@ -1,5 +1,6 @@
 #include "cmd_decl.h"
 #include "cmd_authutil.h"
+#include "fl/audit_log.h"
 #include "fl/session.h"
 #include "session_sync.h"
 #include <stdio.h>
@@ -20,6 +21,8 @@ int cmd_login_run(int argc, char **argv) {
         fprintf(stderr, "login: password read failed\n");
         return 1;
     }
+    if (fl_session_has_elevation())
+        fl_audit_elevation_event(fl_session_current_user(), "login", 0);
     rc = fl_session_login(argv[1], pw);
     cmd_wipe_password(pw, sizeof(pw));
     if (rc != FL_RESULT_OK) {

@@ -1,4 +1,5 @@
 #include "cmd_authutil.h"
+#include "fl/audit_log.h"
 #include "fl/session.h"
 #include "fl/elevation.h"
 #include "user_db.h"
@@ -85,6 +86,7 @@ int cmd_sudo_require_auth(void) {
         fprintf(stderr, "sudo: elevation failed (%d)\n", (int)rc);
         return 1;
     }
+    fl_audit_elevation_event(fl_session_current_user(), "sudo authentication", 1);
     return 0;
 }
 

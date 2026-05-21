@@ -1,5 +1,6 @@
 #include "cmd_decl.h"
 #include "cmd_authutil.h"
+#include "fl/audit_log.h"
 #include "fl/session.h"
 #include "session_sync.h"
 #include <stdio.h>
@@ -88,6 +89,9 @@ int cmd_su_run(int argc, char **argv) {
     strncpy(saved, fl_session_current_user(), sizeof(saved) - 1);
     saved[sizeof(saved) - 1] = '\0';
 
+    if (fl_session_has_elevation())
+        fl_audit_elevation_event(saved, "su user switch", 0);
+
     rc = fl_session_set_user(req.target);
     if (rc != FL_RESULT_OK) {
         fprintf(stderr, "su: cannot switch to %s (%d)\n", req.target, (int)rc);
@@ -97,6 +101,8 @@ int cmd_su_run(int argc, char **argv) {
 
     if (req.command) {
         int cmd_rc = su_run_command(req.command);
+        if (fl_session_has_elevation())
+            fl_audit_elevation_event(fl_session_current_user(), "su restore", 0);
         (void)fl_session_set_user(saved);
         fl_session_sync_services();
         return cmd_rc;

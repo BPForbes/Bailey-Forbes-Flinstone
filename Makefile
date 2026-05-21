@@ -482,13 +482,13 @@ test_fs_jail: userland/shell/common.o $(UTIL_SHELL_LINK_OBJS) kernel/core/vfs/fs
 test_p0_p2_wiring: kernel/core/memory/fl_stack.o kernel/core/memory/exec_context.o kernel/core/time/timekeeping.o \
 		kernel/core/identity/user_db.o kernel/core/identity/session.o kernel/core/identity/elevation.o \
 		kernel/core/identity/path_property.o kernel/core/mm/mem_domain.o kernel/core/mm/pmm.o \
-		userland/identity/password_hash.o $(MEM_ASM_OBJ)
+		userland/identity/password_hash.o userland/shell/authz_subsystem.o $(MEM_ASM_OBJ)
 	$(CC) $(CFLAGS) $(TEST_SANITIZE) -c -o tests/test_p0_p2_wiring.o tests/test_p0_p2_wiring.c
 	$(CXX) $(CXXFLAGS) $(TEST_SANITIZE) -o tests/test_p0_p2_wiring tests/test_p0_p2_wiring.o \
 	  kernel/core/memory/fl_stack.o kernel/core/memory/exec_context.o kernel/core/time/timekeeping.o \
 	  kernel/core/identity/user_db.o kernel/core/identity/session.o kernel/core/identity/elevation.o \
 	  kernel/core/identity/path_property.o kernel/core/mm/mem_domain.o kernel/core/mm/pmm.o \
-	  userland/identity/password_hash.o $(MEM_ASM_OBJ) -lsqlite3 -lstdc++ -lcrypto -pthread -Wl,-z,noexecstack
+	  userland/identity/password_hash.o userland/shell/authz_subsystem.o $(MEM_ASM_OBJ) -lsqlite3 -lstdc++ -lcrypto -pthread -Wl,-z,noexecstack
 	./tests/test_p0_p2_wiring
 
 check-layers:
