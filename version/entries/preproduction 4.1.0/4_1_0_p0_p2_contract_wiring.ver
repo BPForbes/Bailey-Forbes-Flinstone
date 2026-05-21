@@ -12,15 +12,15 @@ heap/stack/instruction-pointer/register snapshot; fl_result_t on fallible PMM AP
 
 Time (kernel/core/time/): fl_timekeeping uses POSIX time.h (CLOCK_MONOTONIC) per P1-7.
 
-Identity (kernel/core/identity/): JSON accounts (username, password, is_elevated) in
-users.lab.json — default flinstone/flinstone (normal) and root/root (elevated).
-login switches account; elevated accounts need no sudo for protected ops.
+Identity (kernel/core/identity/): SQLite accounts (userland/shell/fl_users.db) with
+SHA-256 salted password hashes (userland/identity/password_hash.cpp). Defaults:
+flinstone/flinstone (normal) and root/root (elevated). login switches account.
 
-Jail (P0 FS surface): sudo or elevated login escapes VM jail (full drive access);
-requires_elevation paths still gated unless privileged.
+Jail (P0 FS surface): only elevated login or `sudo <command>` escapes VM jail
+(e.g. sudo cd /path); plain `sudo` grants a token for protected paths only.
 
-Authz (P2-3): fm_service gates; sudo [reason] grants elevation; sudo useradd/userdel/passwd
-manage accounts (persisted JSON).
+Authz (P2-3): fm_service gates; sudo [reason] grants elevation token; sudo <cmd>
+prefix runs builtins with jail scope; useradd/userdel/passwd manage accounts.
 
 Tests: test_p0_p2_wiring (stack, PMM, exec context, user db, path props, timekeeping).
 VER_4_1_0_P0_P2

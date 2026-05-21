@@ -1,17 +1,22 @@
 #include "session.h"
 #include "elevation.h"
 #include <pthread.h>
+#include <stdlib.h>
 #include <string.h>
 
 static fl_user_db_t s_db;
 static char s_current[FL_USER_NAME_MAX];
 static fl_elevation_token_t s_active_elev = FL_ELEVATION_TOKEN_NONE;
+static int s_sudo_scope_depth;
 static pthread_once_t s_once = PTHREAD_ONCE_INIT;
 
 static void session_load_once(void) {
-    if (fl_user_db_load(&s_db, FL_SESSION_USERS_PATH) != FL_RESULT_OK) {
+    const char *path = getenv("FL_USERS_DB_PATH");
+    if (!path || !path[0])
+        path = FL_SESSION_USERS_PATH;
+    if (fl_user_db_load(&s_db, path) != FL_RESULT_OK) {
         fl_user_db_seed_defaults(&s_db);
-        strncpy(s_db.path, FL_SESSION_USERS_PATH, sizeof(s_db.path) - 1);
+        strncpy(s_db.path, path, sizeof(s_db.path) - 1);
         (void)fl_user_db_save(&s_db);
     }
     strncpy(s_current, s_db.default_user, sizeof(s_current) - 1);
@@ -32,9 +37,34 @@ int fl_session_is_elevated_account(void) {
     return fl_user_db_is_elevated_user(&s_db, s_current);
 }
 
+int fl_session_in_sudo_scope(void) {
+    fl_session_init();
+    return s_sudo_scope_depth > 0;
+}
+
+void fl_session_begin_sudo_scope(void) {
+    fl_session_init();
+    s_sudo_scope_depth++;
+}
+
+void fl_session_end_sudo_scope(void) {
+    fl_session_init();
+    if (s_sudo_scope_depth > 0)
+        s_sudo_scope_depth--;
+}
+
+int fl_session_jail_privileged(void) {
+    fl_session_init();
+    if (fl_session_is_elevated_account())
+        return 1;
+    return s_sudo_scope_depth > 0;
+}
+
 int fl_session_has_elevation(void) {
     fl_session_init();
     if (fl_session_is_elevated_account())
+        return 1;
+    if (s_sudo_scope_depth > 0)
         return 1;
     return fl_elevation_active(s_active_elev);
 }

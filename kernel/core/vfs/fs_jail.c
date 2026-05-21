@@ -111,8 +111,8 @@ int fs_jail_check_access(const char *path) {
     if (!fs_jail_is_active())
         return 0;
 
-    /* sudo / elevated account: leave VM jail (access paths outside sandbox). */
-    if (fl_session_has_elevation())
+    /* elevated account or `sudo <cmd>` scope: leave VM jail. */
+    if (fl_session_jail_privileged())
         jail_ok = 0;
     else
         jail_ok = fs_jail_check_path(path);

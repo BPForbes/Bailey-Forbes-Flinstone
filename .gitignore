@@ -8,6 +8,7 @@ BPForbes_Flinstone_Tests
 
 # Shell history (user-specific)
 shell_history.txt
+userland/shell/fl_users.db
 
 # Test/generated files
 *_disk

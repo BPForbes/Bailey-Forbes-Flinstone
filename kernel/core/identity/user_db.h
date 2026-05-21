@@ -5,18 +5,20 @@
 #include <stddef.h>
 #include <stdint.h>
 
-#define FL_USER_NAME_MAX     32u
-#define FL_USER_PASSWORD_MAX 64u
+#define FL_USER_NAME_MAX          32u
+#define FL_PASSWORD_HASH_HEX_MAX  65u
+#define FL_PASSWORD_SALT_HEX_MAX  33u
 
 typedef struct fl_user_record {
     char     name[FL_USER_NAME_MAX];
-    char     password[FL_USER_PASSWORD_MAX];
+    char     password_hash[FL_PASSWORD_HASH_HEX_MAX];
+    char     salt_hex[FL_PASSWORD_SALT_HEX_MAX];
     uint32_t uid;
     int      is_elevated;
 } fl_user_record_t;
 
 #define FL_USER_DB_MAX_USERS 32u
-#define FL_USERS_DB_DEFAULT_PATH "userland/shell/users.lab.json"
+#define FL_USERS_DB_DEFAULT_PATH "userland/shell/fl_users.db"
 
 typedef struct fl_user_db {
     fl_user_record_t users[FL_USER_DB_MAX_USERS];

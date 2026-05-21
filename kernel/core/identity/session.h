@@ -9,11 +9,18 @@
 void        fl_session_init(void);
 const char *fl_session_current_user(void);
 
-/** Logged-in account has is_elevated (root-like): no sudo for protected ops or jail. */
+/** Logged-in account has is_elevated (root-like). */
 int         fl_session_is_elevated_account(void);
 
-/** Elevated account or active sudo elevation token. */
+/** Elevated account, active sudo elevation token, or sudo command scope. */
 int         fl_session_has_elevation(void);
+
+/** VM jail escape: elevated account or sudo command scope (not token-only). */
+int         fl_session_jail_privileged(void);
+
+int         fl_session_in_sudo_scope(void);
+void        fl_session_begin_sudo_scope(void);
+void        fl_session_end_sudo_scope(void);
 
 fl_result_t fl_session_login(const char *name, const char *password);
 fl_result_t fl_session_set_user(const char *name);

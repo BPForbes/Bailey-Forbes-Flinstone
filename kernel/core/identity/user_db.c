@@ -1,55 +1,118 @@
 #include "user_db.h"
+#include "password_hash.h"
 #include "mem_domain.h"
+#include <sqlite3.h>
 #include <stdio.h>
-#include <stdlib.h>
 #include <string.h>
 
-static void trim(char *s) {
-    char *e;
-    if (!s || !s[0])
-        return;
-    while (*s == ' ' || *s == '\t' || *s == '\n' || *s == '\r')
-        memmove(s, s + 1, strlen(s));
-    e = s + strlen(s);
-    while (e > s && (e[-1] == ' ' || e[-1] == '\t' || e[-1] == '\n' || e[-1] == '\r'))
-        *--e = '\0';
+static fl_result_t db_exec(sqlite3 *sql, const char *stmt) {
+    char *err = NULL;
+    if (sqlite3_exec(sql, stmt, NULL, NULL, &err) != SQLITE_OK) {
+        if (err) {
+            fprintf(stderr, "user_db: %s\n", err);
+            sqlite3_free(err);
+        }
+        return FL_RESULT_ERR;
+    }
+    return FL_RESULT_OK;
 }
 
-static int parse_quoted_value(const char *line, const char *key, char *out, size_t outsz) {
-    const char *p = strstr(line, key);
-    const char *q;
-    size_t n;
-    if (!p)
-        return 0;
-    p = strchr(p + strlen(key), '"');
-    if (!p)
-        return 0;
-    q = strchr(p + 1, '"');
-    if (!q)
-        return 0;
-    n = (size_t)(q - (p + 1));
-    if (n >= outsz)
-        n = outsz - 1;
-    memcpy(out, p + 1, n);
-    out[n] = '\0';
-    return 1;
+static fl_result_t db_init_schema(sqlite3 *sql) {
+    static const char *schema =
+        "CREATE TABLE IF NOT EXISTS users ("
+        "  name TEXT PRIMARY KEY NOT NULL,"
+        "  password_hash TEXT NOT NULL,"
+        "  salt_hex TEXT NOT NULL,"
+        "  uid INTEGER NOT NULL,"
+        "  is_elevated INTEGER NOT NULL DEFAULT 0"
+        ");"
+        "CREATE TABLE IF NOT EXISTS meta ("
+        "  key TEXT PRIMARY KEY NOT NULL,"
+        "  value TEXT NOT NULL"
+        ");";
+    return db_exec(sql, schema);
 }
 
-static int parse_int_field(const char *line, const char *key, int *out) {
-    const char *p = strstr(line, key);
-    char *end = NULL;
-    long v;
-    if (!p)
-        return 0;
-    p = strchr(p + strlen(key), ':');
-    if (!p)
-        return 0;
-    p++;
-    v = strtol(p, &end, 10);
-    if (end == p)
-        return 0;
-    *out = (int)v;
-    return 1;
+static fl_result_t db_read_meta_default(sqlite3 *db, char *out, size_t outsz) {
+    sqlite3_stmt *st = NULL;
+    const char *query = "SELECT value FROM meta WHERE key='default_user' LIMIT 1;";
+    if (sqlite3_prepare_v2(db, query, -1, &st, NULL) != SQLITE_OK)
+        return FL_RESULT_ERR;
+    out[0] = '\0';
+    if (sqlite3_step(st) == SQLITE_ROW) {
+        const char *v = (const char *)sqlite3_column_text(st, 0);
+        if (v)
+            strncpy(out, v, outsz - 1);
+    }
+    sqlite3_finalize(st);
+    out[outsz - 1] = '\0';
+    return FL_RESULT_OK;
+}
+
+static fl_result_t db_write_meta_default(sqlite3 *sql, const char *user) {
+    char stmt[128];
+    snprintf(stmt, sizeof(stmt),
+             "INSERT INTO meta(key,value) VALUES('default_user','%s') "
+             "ON CONFLICT(key) DO UPDATE SET value=excluded.value;",
+             user);
+    return db_exec(sql, stmt);
+}
+
+static fl_result_t hash_password_fields(const char *password, char *hash_hex, size_t hash_sz,
+                                        char *salt_hex, size_t salt_sz) {
+    if (fl_password_generate_salt_hex(salt_hex, salt_sz) != 0)
+        return FL_RESULT_ERR;
+    if (fl_password_hash_password(password, salt_hex, hash_hex, hash_sz) != 0)
+        return FL_RESULT_ERR;
+    return FL_RESULT_OK;
+}
+
+static fl_result_t db_upsert_user(sqlite3 *sql, const fl_user_record_t *u) {
+    sqlite3_stmt *st = NULL;
+    const char *ins =
+        "INSERT INTO users(name,password_hash,salt_hex,uid,is_elevated) "
+        "VALUES(?,?,?,?,?) "
+        "ON CONFLICT(name) DO UPDATE SET password_hash=excluded.password_hash,"
+        "salt_hex=excluded.salt_hex,uid=excluded.uid,is_elevated=excluded.is_elevated;";
+    if (sqlite3_prepare_v2(sql, ins, -1, &st, NULL) != SQLITE_OK)
+        return FL_RESULT_ERR;
+    sqlite3_bind_text(st, 1, u->name, -1, SQLITE_TRANSIENT);
+    sqlite3_bind_text(st, 2, u->password_hash, -1, SQLITE_TRANSIENT);
+    sqlite3_bind_text(st, 3, u->salt_hex, -1, SQLITE_TRANSIENT);
+    sqlite3_bind_int(st, 4, (int)u->uid);
+    sqlite3_bind_int(st, 5, u->is_elevated ? 1 : 0);
+    if (sqlite3_step(st) != SQLITE_DONE) {
+        sqlite3_finalize(st);
+        return FL_RESULT_ERR;
+    }
+    sqlite3_finalize(st);
+    return FL_RESULT_OK;
+}
+
+static fl_result_t db_load_users(sqlite3 *sql, fl_user_db_t *db) {
+    sqlite3_stmt *st = NULL;
+    const char *q = "SELECT name,password_hash,salt_hex,uid,is_elevated FROM users ORDER BY uid;";
+    if (sqlite3_prepare_v2(sql, q, -1, &st, NULL) != SQLITE_OK)
+        return FL_RESULT_ERR;
+    db->count = 0;
+    while (sqlite3_step(st) == SQLITE_ROW && db->count < FL_USER_DB_MAX_USERS) {
+        fl_user_record_t *u = &db->users[db->count];
+        const char *name = (const char *)sqlite3_column_text(st, 0);
+        const char *hash = (const char *)sqlite3_column_text(st, 1);
+        const char *salt = (const char *)sqlite3_column_text(st, 2);
+        mem_domain_zero(u, sizeof(*u));
+        if (name)
+            strncpy(u->name, name, sizeof(u->name) - 1);
+        if (hash)
+            strncpy(u->password_hash, hash, sizeof(u->password_hash) - 1);
+        if (salt)
+            strncpy(u->salt_hex, salt, sizeof(u->salt_hex) - 1);
+        u->uid = (uint32_t)sqlite3_column_int(st, 3);
+        u->is_elevated = sqlite3_column_int(st, 4) ? 1 : 0;
+        db->count++;
+    }
+    sqlite3_finalize(st);
+    return FL_RESULT_OK;
 }
 
 void fl_user_db_seed_defaults(fl_user_db_t *db) {
@@ -63,103 +126,89 @@ void fl_user_db_seed_defaults(fl_user_db_t *db) {
 }
 
 fl_result_t fl_user_db_load(fl_user_db_t *db, const char *path) {
-    FILE *f;
-    char line[512];
-    fl_user_record_t cur;
-    int in_user = 0;
+    sqlite3 *sql = NULL;
+    fl_result_t rc;
 
     if (!db || !path)
         return FL_RESULT_INVAL;
     fl_user_db_clear(db);
     strncpy(db->path, path, sizeof(db->path) - 1);
 
-    f = fopen(path, "r");
-    if (!f)
+    if (sqlite3_open(path, &sql) != SQLITE_OK)
         return FL_RESULT_NOENT;
-
-    mem_domain_zero(&cur, sizeof(cur));
-    while (fgets(line, sizeof(line), f)) {
-        trim(line);
-        if (strstr(line, "\"default_user\"")) {
-            parse_quoted_value(line, "\"default_user\"", db->default_user, sizeof(db->default_user));
-            continue;
-        }
-        if (strstr(line, "\"users\""))
-            continue;
-        if (strstr(line, "\"name\"")) {
-            if (!in_user) {
-                mem_domain_zero(&cur, sizeof(cur));
-                in_user = 1;
-            }
-            parse_quoted_value(line, "\"name\"", cur.name, sizeof(cur.name));
-        }
-        if (strstr(line, "\"password\"")) {
-            if (!in_user) {
-                mem_domain_zero(&cur, sizeof(cur));
-                in_user = 1;
-            }
-            parse_quoted_value(line, "\"password\"", cur.password, sizeof(cur.password));
-        }
-        if (strstr(line, "\"uid\"")) {
-            if (!in_user) {
-                mem_domain_zero(&cur, sizeof(cur));
-                in_user = 1;
-            }
-            parse_int_field(line, "\"uid\"", (int *)&cur.uid);
-        }
-        if (strstr(line, "\"is_elevated\"") || strstr(line, "\"is_root\"")) {
-            int v = 0;
-            if (!in_user) {
-                mem_domain_zero(&cur, sizeof(cur));
-                in_user = 1;
-            }
-            if (strstr(line, "\"is_elevated\""))
-                parse_int_field(line, "\"is_elevated\"", &v);
-            else
-                parse_int_field(line, "\"is_root\"", &v);
-            cur.is_elevated = (v != 0) ? 1 : 0;
-        }
-        if (in_user && strchr(line, '}')) {
-            if (cur.name[0] && db->count < FL_USER_DB_MAX_USERS)
-                db->users[db->count++] = cur;
-            mem_domain_zero(&cur, sizeof(cur));
-            in_user = 0;
-        }
+    if (db_init_schema(sql) != FL_RESULT_OK) {
+        sqlite3_close(sql);
+        return FL_RESULT_ERR;
     }
-    if (in_user && cur.name[0] && db->count < FL_USER_DB_MAX_USERS)
-        db->users[db->count++] = cur;
-    fclose(f);
 
+    rc = db_load_users(sql, db);
+    if (rc != FL_RESULT_OK) {
+        sqlite3_close(sql);
+        return rc;
+    }
+
+    if (db->count == 0) {
+        fl_user_record_t flin, root;
+        mem_domain_zero(&flin, sizeof(flin));
+        mem_domain_zero(&root, sizeof(root));
+        strncpy(flin.name, "flinstone", sizeof(flin.name) - 1);
+        strncpy(root.name, "root", sizeof(root.name) - 1);
+        flin.uid = 1000;
+        root.uid = 0;
+        root.is_elevated = 1;
+        if (hash_password_fields("flinstone", flin.password_hash, sizeof(flin.password_hash),
+                                 flin.salt_hex, sizeof(flin.salt_hex)) != FL_RESULT_OK
+            || hash_password_fields("root", root.password_hash, sizeof(root.password_hash),
+                                    root.salt_hex, sizeof(root.salt_hex)) != FL_RESULT_OK) {
+            sqlite3_close(sql);
+            return FL_RESULT_ERR;
+        }
+        if (db_upsert_user(sql, &flin) != FL_RESULT_OK || db_upsert_user(sql, &root) != FL_RESULT_OK) {
+            sqlite3_close(sql);
+            return FL_RESULT_ERR;
+        }
+        (void)db_write_meta_default(sql, "flinstone");
+        rc = db_load_users(sql, db);
+    }
+
+    (void)db_read_meta_default(sql, db->default_user, sizeof(db->default_user));
     if (!db->default_user[0] && db->count > 0)
         strncpy(db->default_user, db->users[0].name, sizeof(db->default_user) - 1);
+
     db->loaded = 1;
-    return FL_RESULT_OK;
+    sqlite3_close(sql);
+    return rc;
 }
 
 fl_result_t fl_user_db_save(const fl_user_db_t *db) {
-    FILE *f;
+    sqlite3 *sql = NULL;
     size_t i;
     const char *path;
+    fl_result_t rc = FL_RESULT_OK;
 
     if (!db || !db->loaded)
         return FL_RESULT_INVAL;
     path = db->path[0] ? db->path : FL_USERS_DB_DEFAULT_PATH;
-    f = fopen(path, "w");
-    if (!f)
+    if (sqlite3_open(path, &sql) != SQLITE_OK)
         return FL_RESULT_ERR;
-    fprintf(f, "{\n  \"default_user\": \"%s\",\n  \"users\": [\n",
-            db->default_user[0] ? db->default_user : "flinstone");
-    for (i = 0; i < db->count; i++) {
-        fprintf(f,
-                "    {\n      \"name\": \"%s\",\n      \"password\": \"%s\",\n"
-                "      \"uid\": %u,\n      \"is_elevated\": %d\n    }%s\n",
-                db->users[i].name, db->users[i].password,
-                (unsigned)db->users[i].uid, db->users[i].is_elevated,
-                (i + 1 < db->count) ? "," : "");
+    if (db_init_schema(sql) != FL_RESULT_OK) {
+        sqlite3_close(sql);
+        return FL_RESULT_ERR;
     }
-    fprintf(f, "  ]\n}\n");
-    fclose(f);
-    return FL_RESULT_OK;
+    if (db_exec(sql, "DELETE FROM users;") != FL_RESULT_OK) {
+        sqlite3_close(sql);
+        return FL_RESULT_ERR;
+    }
+    for (i = 0; i < db->count; i++) {
+        if (db_upsert_user(sql, &db->users[i]) != FL_RESULT_OK) {
+            rc = FL_RESULT_ERR;
+            break;
+        }
+    }
+    if (rc == FL_RESULT_OK && db->default_user[0])
+        rc = db_write_meta_default(sql, db->default_user);
+    sqlite3_close(sql);
+    return rc;
 }
 
 void fl_user_db_clear(fl_user_db_t *db) {
@@ -186,7 +235,7 @@ int fl_user_db_verify_password(const fl_user_db_t *db, const char *name, const c
     u = fl_user_db_find(db, name);
     if (!u)
         return 0;
-    return strcmp(u->password, password) == 0;
+    return fl_password_verify(password, u->salt_hex, u->password_hash);
 }
 
 int fl_user_db_is_elevated_user(const fl_user_db_t *db, const char *name) {
@@ -206,9 +255,13 @@ fl_result_t fl_user_db_add_user(fl_user_db_t *db, const char *name, const char *
     u = &db->users[db->count++];
     mem_domain_zero(u, sizeof(*u));
     strncpy(u->name, name, sizeof(u->name) - 1);
-    strncpy(u->password, password, sizeof(u->password) - 1);
     u->uid = uid;
     u->is_elevated = is_elevated ? 1 : 0;
+    if (hash_password_fields(password, u->password_hash, sizeof(u->password_hash), u->salt_hex,
+                             sizeof(u->salt_hex)) != FL_RESULT_OK) {
+        db->count--;
+        return FL_RESULT_ERR;
+    }
     db->loaded = 1;
     return FL_RESULT_OK;
 }
@@ -240,9 +293,8 @@ fl_result_t fl_user_db_set_password(fl_user_db_t *db, const char *name, const ch
     for (i = 0; i < db->count; i++) {
         if (strcmp(db->users[i].name, name) == 0) {
             u = &db->users[i];
-            strncpy(u->password, password, sizeof(u->password) - 1);
-            u->password[sizeof(u->password) - 1] = '\0';
-            return FL_RESULT_OK;
+            return hash_password_fields(password, u->password_hash, sizeof(u->password_hash),
+                                        u->salt_hex, sizeof(u->salt_hex));
         }
     }
     return FL_RESULT_NOENT;

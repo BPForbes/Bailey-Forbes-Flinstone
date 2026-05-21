@@ -48,13 +48,27 @@ static int test_timekeeping(void) {
 }
 
 static int test_user_db(void) {
+    char tmpl[] = "/tmp/fl_users_testXXXXXX";
+    char dbpath[sizeof(tmpl) + 8];
     fl_user_db_t db;
     const fl_user_record_t *r;
-    ASSERT(fl_user_db_load(&db, "userland/shell/users.lab.json") == FL_RESULT_OK);
+    int fd;
+
+    fd = mkstemp(tmpl);
+    ASSERT(fd >= 0);
+    close(fd);
+    snprintf(dbpath, sizeof(dbpath), "%s.db", tmpl);
+    ASSERT(rename(tmpl, dbpath) == 0);
+
+    ASSERT(fl_user_db_load(&db, dbpath) == FL_RESULT_OK);
+    ASSERT(db.count >= 2);
     ASSERT(fl_user_db_verify_password(&db, "flinstone", "flinstone") == 1);
+    ASSERT(fl_user_db_verify_password(&db, "root", "root") == 1);
+    ASSERT(fl_user_db_verify_password(&db, "flinstone", "wrong") == 0);
     r = fl_user_db_find(&db, "root");
     ASSERT(r && r->is_elevated == 1);
     ASSERT(fl_user_db_is_elevated_user(&db, "root") == 1);
+    unlink(dbpath);
     return 0;
 }
 
@@ -73,12 +87,39 @@ static int test_path_property(void) {
 }
 
 static int test_session_login(void) {
+    char tmpl[] = "/tmp/fl_sess_testXXXXXX";
+    char dbpath[sizeof(tmpl) + 8];
+    int fd;
+
+    fd = mkstemp(tmpl);
+    ASSERT(fd >= 0);
+    close(fd);
+    snprintf(dbpath, sizeof(dbpath), "%s.db", tmpl);
+    ASSERT(rename(tmpl, dbpath) == 0);
+
+    setenv("FL_USERS_DB_PATH", dbpath, 1);
     fl_session_init();
     ASSERT(fl_session_login("root", "root") == FL_RESULT_OK);
     ASSERT(fl_session_is_elevated_account() == 1);
     ASSERT(fl_session_has_elevation() == 1);
+    ASSERT(fl_session_jail_privileged() == 1);
     ASSERT(fl_session_login("flinstone", "flinstone") == FL_RESULT_OK);
     ASSERT(fl_session_is_elevated_account() == 0);
+    ASSERT(fl_session_has_elevation() == 0);
+    ASSERT(fl_session_jail_privileged() == 0);
+    {
+        fl_elevation_token_t tok = FL_ELEVATION_TOKEN_NONE;
+        ASSERT(fl_session_grant_elevation("test", &tok) == FL_RESULT_OK);
+        ASSERT(fl_session_has_elevation() == 1);
+        ASSERT(fl_session_jail_privileged() == 0);
+        fl_session_clear_elevation();
+    }
+    fl_session_begin_sudo_scope();
+    ASSERT(fl_session_jail_privileged() == 1);
+    ASSERT(fl_session_in_sudo_scope() == 1);
+    fl_session_end_sudo_scope();
+    ASSERT(fl_session_jail_privileged() == 0);
+    unlink(dbpath);
     return 0;
 }
 

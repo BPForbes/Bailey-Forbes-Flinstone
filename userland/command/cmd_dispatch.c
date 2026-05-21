@@ -78,6 +78,12 @@ int fl_shell_cmd_dispatch(fl_shell_cmd_no_t no, int argc, char **argv) {
         return cmd_sudo_run(argc, argv);
     case FL_SCMD_LOGIN:
         return cmd_login_run(argc, argv);
+    case FL_SCMD_USERADD:
+        return cmd_useradd_run(argc, argv);
+    case FL_SCMD_USERDEL:
+        return cmd_userdel_run(argc, argv);
+    case FL_SCMD_PASSWD:
+        return cmd_passwd_run(argc, argv);
     default:
         return -1;
     }

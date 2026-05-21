@@ -307,7 +307,8 @@ int main(int argc, char *argv[]) {
             "rmtree","mv","version","contracts","audit","exit","bios","clear","history","his","cc","listclusters","listdirs",
             "setdisk","createdisk","format","search","writecluster","delcluster","update","redirect",
             "initdisk","rerun","import","du","printdisk","addcluster","where","loc",
-            "diskput","diskget","diskfiles","diskdel","diskmkdir","sudo","login",NULL};
+            "diskput","diskget","diskfiles","diskdel","diskmkdir","sudo","login",
+            "useradd","userdel","passwd",NULL};
         int is_cmd = 0;
         for (int k = 0; skip[k]; k++)
             if (!strcmp(argv[1], skip[k])) { is_cmd = 1; break; }
