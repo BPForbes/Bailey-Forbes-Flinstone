@@ -155,10 +155,10 @@ jobs:
         uses: ./.github/actions/sync-version-checkout
 
       - name: Install cross-compiler
-        run: |
-          sudo dpkg --add-architecture arm64
-          sudo apt-get update -y
-          sudo apt-get install -y gcc g++ gcc-aarch64-linux-gnu g++-aarch64-linux-gnu binutils-aarch64-linux-gnu libsqlite3-dev libsqlite3-dev:arm64
+        run: sudo apt-get update -y && sudo apt-get install -y gcc g++ unzip curl gcc-aarch64-linux-gnu g++-aarch64-linux-gnu binutils-aarch64-linux-gnu
+
+      - name: Build SQLite for AArch64 cross link
+        run: ./deps/fetch-sqlite-aarch64.sh
 
       - name: Assemble changelog (CI-only source)
         run: |

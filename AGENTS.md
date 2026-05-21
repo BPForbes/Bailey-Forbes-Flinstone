@@ -11,7 +11,7 @@ Notes:
 - `build-essential`, `gcc`, `make`, and `binutils` are required for the default C/GAS build.
 - `nasm` is required for `ARCH=x86_64_nasm`.
 - `gcc-aarch64-linux-gnu`, `g++-aarch64-linux-gnu` (or `gcc-aarch64-linux-gnu` with `-x c++`), and `binutils-aarch64-linux-gnu` are required for `ARCH=arm` on x86 hosts.
-- For AArch64 cross links that use SQLite (`user_db.c`), also install **`libsqlite3-dev:arm64`** after **`sudo dpkg --add-architecture arm64`** (CI does this in the ARM build job).
+- For AArch64 cross links that use SQLite (`user_db.c`), run **`./deps/fetch-sqlite-aarch64.sh`** (or **`make deps-sqlite-aarch64`**) to build **`deps/install-aarch64/lib/libsqlite3.a`** when apt multiarch is unavailable (GitHub Actions ARM job).
 - `libsdl2-dev` and `pkg-config` are required for `make vm-sdl` when not using `deps/install`.
 - `libcunit1-dev` is required for the CUnit test binary.
 - `libsqlite3-dev` and `g++` are required for SQLite account storage and password hashing (`userland/identity/password_hash.cpp`).

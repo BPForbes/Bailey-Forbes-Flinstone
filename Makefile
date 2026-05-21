@@ -25,17 +25,25 @@ CC = gcc
 AS = as
 CFLAGS = -Wall -Wextra -pthread -I. -Icontracts/foundations -Icontracts/runtime -Icontracts/identity -Icontracts/networking -Icontracts/drivers -Icontracts/storage -Icontracts/observability -Icontracts/operations -Icontracts/virtualization -Icontracts/hardening -Ikernel/include -Ikernel/core/vfs -Ikernel/core/mm -Ikernel/core/memory -Ikernel/core/time -Ikernel/core/identity -Ikernel/core/sched -Ikernel/core/sys -Iuserland/shell -Iuserland/command -Ikernel/arch/x86_64 -Ikernel/arch/aarch64
 LDFLAGS = -Wl,-z,noexecstack -lsqlite3 -lstdc++
-# Cross ARM on x86: SQLite lives under /usr/lib/aarch64-linux-gnu (libsqlite3-dev:arm64).
+# Cross ARM on x86: prefer deps/install-aarch64 (./deps/fetch-sqlite-aarch64.sh); optional system libsqlite3-dev:arm64.
 ifeq ($(ARCH),arm)
-ifneq ($(ARM64_LINUX_HOST),)
-ifneq (,$(wildcard /usr/lib/aarch64-linux-gnu/libsqlite3.so))
-LDFLAGS := -Wl,-z,noexecstack -L/usr/lib/aarch64-linux-gnu -lsqlite3 -lstdc++
-endif
+ifeq ($(ARM64_LINUX_HOST),)
+SQLITE_ARM_PREFIX = deps/install-aarch64
+SQLITE_ARM_LIB = $(SQLITE_ARM_PREFIX)/lib/libsqlite3.a
 endif
 endif
 CXX = g++
 CXXFLAGS ?= $(CFLAGS) -std=c++17
 ASFLAGS =
+
+ifneq ($(SQLITE_ARM_LIB),)
+ifneq (,$(wildcard $(SQLITE_ARM_LIB)))
+CFLAGS += -I$(SQLITE_ARM_PREFIX)/include
+LDFLAGS := -Wl,-z,noexecstack -L$(SQLITE_ARM_PREFIX)/lib -lsqlite3 -lstdc++ -ldl
+else ifneq (,$(wildcard /usr/lib/aarch64-linux-gnu/libsqlite3.so))
+LDFLAGS := -Wl,-z,noexecstack -L/usr/lib/aarch64-linux-gnu -lsqlite3 -lstdc++
+endif
+endif
 
 # --- Arch-specific assembly ---
 ifeq ($(ARCH),x86_64_nasm)
@@ -255,6 +263,15 @@ deps-cunit:
 	@chmod +x deps/fetch-cunit.sh 2>/dev/null || true
 	@./deps/fetch-cunit.sh
 
+.PHONY: deps-sqlite-aarch64
+deps-sqlite-aarch64:
+	@chmod +x deps/fetch-sqlite-aarch64.sh 2>/dev/null || true
+	@./deps/fetch-sqlite-aarch64.sh
+
+$(SQLITE_ARM_LIB):
+	@chmod +x deps/fetch-sqlite-aarch64.sh 2>/dev/null || true
+	@./deps/fetch-sqlite-aarch64.sh
+
 userland/identity/%.o: userland/identity/%.cpp
 ifeq ($(CXX_IS_GCC_FOR_CPP),1)
 	$(CXX) -x c++ $(CXXFLAGS) -c -o $@ $<
@@ -262,7 +279,9 @@ else
 	$(CXX) $(CXXFLAGS) -c -o $@ $<
 endif
 
-$(TARGET): $(VERSION_DEF) $(OBJS)
+ARM_SQLITE_DEPS = $(if $(SQLITE_ARM_LIB),$(SQLITE_ARM_LIB),)
+
+$(TARGET): $(VERSION_DEF) $(OBJS) $(ARM_SQLITE_DEPS)
 	$(CXX) $(CXXFLAGS) -o $(TARGET) $(OBJS) $(LDFLAGS) -pthread
 
 # Rebuild objects that embed VERSION when the generated header changes.
