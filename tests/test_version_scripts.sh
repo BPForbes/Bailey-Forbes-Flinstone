@@ -7,6 +7,7 @@
 #   scripts/bump_dev_version.sh
 #   scripts/lib/ver_release_date_stamp.sh
 #   scripts/relocate_root_prerelease_ver_to_preproduction.sh
+#   scripts/stamp_version_entries_release_date.sh
 #
 # Run from repository root: bash tests/test_version_scripts.sh
 # Exit 0 on all pass, exit 1 on any failure.
@@ -1130,6 +1131,30 @@ test_relocate_multiple_prerelease_files() {
   rm -rf "$d"
 }
 
+test_relocate_leaves_root_gm_candidate_in_place() {
+  local d
+  d="$(mktemp -d)"
+  mkdir -p "$d/version/entries"
+  cat >"$d/version/entries/2_0_0_gm.ver" <<'VER'
+MAJOR_VERSION=2
+STANDARD_VERSION=0
+RELEASE_VERSION=0
+PRERELEASE=1
+GM=1
+DEV_VERSION=5
+DESCRIPTION=GM row should not be relocated down
+VER
+
+  REPO_ROOT="$d" bash "$RELOCATE" >/dev/null
+  if [[ -f "$d/version/entries/2_0_0_gm.ver" && \
+        ! -e "$d/version/entries/preproduction 2.0.0/2_0_0_gm.ver" ]]; then
+    ok "relocate: root GM=1 prerelease row is left in place for promotion"
+  else
+    fail "relocate: root GM=1 prerelease row should not move into preproduction"
+  fi
+  rm -rf "$d"
+}
+
 # scripts/gen_version_def.sh (isolated temp repo; script copied into fake scripts/)
 test_gen_def_gm_overrides_version_and_plain_line() {
   require_proc_sub "gen_def: GM=1 overrides shipped triple and plain VERSION_LINE" || return 0
@@ -1477,6 +1502,92 @@ VER
   cleanup "$d"
 }
 
+test_unique_prerelease_two_rejected() {
+  require_proc_sub "unique: PRERELEASE=2 rejected" || return 0
+  local d
+  d="$(make_fake_repo check_version_entries_semver_dev_unique.sh)"
+  cat >"$d/version/entries/bad_pr.ver" <<'VER'
+MAJOR_VERSION=1
+STANDARD_VERSION=0
+RELEASE_VERSION=0
+PRERELEASE=2
+DEV_VERSION=1
+DESCRIPTION=bad prerelease flag
+VER
+  if bash "$(unique_script "$d")" 2>/dev/null; then
+    fail "unique: PRERELEASE=2 should fail"
+  else
+    ok "unique: PRERELEASE=2 rejected (binary flag)"
+  fi
+  cleanup "$d"
+}
+
+test_unique_gm_two_rejected() {
+  require_proc_sub "unique: GM=2 rejected" || return 0
+  local d
+  d="$(make_fake_repo check_version_entries_semver_dev_unique.sh)"
+  mkdir -p "$d/version/entries/preproduction 1.0.0"
+  cat >"$d/version/entries/preproduction 1.0.0/bad.ver" <<'VER'
+MAJOR_VERSION=1
+STANDARD_VERSION=0
+RELEASE_VERSION=0
+PRERELEASE=1
+GM=2
+DEV_VERSION=1
+DESCRIPTION=bad gm flag
+VER
+  if bash "$(unique_script "$d")" 2>/dev/null; then
+    fail "unique: GM=2 should fail"
+  else
+    ok "unique: GM=2 rejected (binary flag)"
+  fi
+  cleanup "$d"
+}
+
+stamp_entries_script() {
+  local fake_root="$1"
+  echo "$fake_root/scripts/stamp_version_entries_release_date.sh"
+}
+
+test_stamp_entries_root_and_preproduction() {
+  require_proc_sub "stamp: entries root and preproduction */" || return 0
+  local d
+  d="$(make_fake_repo stamp_version_entries_release_date.sh)"
+  write_ver_ga "$d/version/entries/1_0_0_root.ver" 1 0 0
+  mkdir -p "$d/version/entries/preproduction 2.0.0"
+  write_ver_prerelease "$d/version/entries/preproduction 2.0.0/train.ver" 2 0 0 1
+  REPO_ROOT="$d" bash "$(stamp_entries_script "$d")" >/dev/null
+  if ! grep -qE '^RELEASE_DATE=[0-9]{4}-[0-9]{2}-[0-9]{2}$' "$d/version/entries/1_0_0_root.ver"; then
+    fail "stamp: missing RELEASE_DATE on entries root"
+    cleanup "$d"
+    return
+  fi
+  if ! grep -qE '^RELEASE_DATE=[0-9]{4}-[0-9]{2}-[0-9]{2}$' "$d/version/entries/preproduction 2.0.0/train.ver"; then
+    fail "stamp: missing RELEASE_DATE under preproduction */"
+    cleanup "$d"
+    return
+  fi
+  ok "stamp: entries root and preproduction */"
+  cleanup "$d"
+}
+
+test_stamp_entries_idempotent() {
+  require_proc_sub "stamp: idempotent when RELEASE_DATE present" || return 0
+  local d before after
+  d="$(make_fake_repo stamp_version_entries_release_date.sh)"
+  write_ver_ga "$d/version/entries/1_0_0_root.ver" 1 0 0
+  printf '\nRELEASE_DATE=2099-01-01\n' >>"$d/version/entries/1_0_0_root.ver"
+  before=$(grep -c '^RELEASE_DATE=' "$d/version/entries/1_0_0_root.ver" || true)
+  REPO_ROOT="$d" bash "$(stamp_entries_script "$d")" >/dev/null
+  after=$(grep -c '^RELEASE_DATE=' "$d/version/entries/1_0_0_root.ver" || true)
+  if [[ "$before" != "$after" ]] || ! grep -q '^RELEASE_DATE=2099-01-01$' "$d/version/entries/1_0_0_root.ver"; then
+    fail "stamp: should not add second RELEASE_DATE"
+  else
+    ok "stamp: idempotent when RELEASE_DATE present"
+  fi
+  cleanup "$d"
+}
+
 promote_script() {
   local fake_root="$1"
   echo "$fake_root/scripts/promote_preproduction_for_main.sh"
@@ -1505,6 +1616,119 @@ VER
     fail "promote dry-run: expected [dry-run] lines in output"
   else
     ok "promote: --dry-run previews without writing"
+  fi
+  cleanup "$d"
+}
+
+test_promote_normalize_gm_only_demotes_lower_dev_version() {
+  require_proc_sub "promote: --normalize-gm-only demotes lower DEV_VERSION GM rows" || return 0
+  local d
+  d="$(make_fake_repo promote_preproduction_for_main.sh)"
+  mkdir -p "$d/version/entries/preproduction 2.0.0"
+  cat >"$d/version/entries/preproduction 2.0.0/lower.ver" <<'VER'
+MAJOR_VERSION=2
+STANDARD_VERSION=0
+RELEASE_VERSION=0
+PRERELEASE=1
+GM=1
+DEV_VERSION=1
+DESCRIPTION=lower candidate
+VER
+  cat >"$d/version/entries/preproduction 2.0.0/higher.ver" <<'VER'
+MAJOR_VERSION=2
+STANDARD_VERSION=0
+RELEASE_VERSION=0
+PRERELEASE=1
+GM=1
+DEV_VERSION=3
+DESCRIPTION=higher candidate
+VER
+
+  if ! bash "$(promote_script "$d")" --normalize-gm-only >/dev/null 2>&1; then
+    fail "promote normalize: command should succeed"
+  elif ! grep -q '^GM=0$' "$d/version/entries/preproduction 2.0.0/lower.ver"; then
+    fail "promote normalize: lower DEV_VERSION GM row should be set to GM=0"
+  elif ! grep -q '^GM=1$' "$d/version/entries/preproduction 2.0.0/higher.ver"; then
+    fail "promote normalize: highest DEV_VERSION GM row should stay GM=1"
+  else
+    ok "promote: --normalize-gm-only demotes lower DEV_VERSION GM rows"
+  fi
+  cleanup "$d"
+}
+
+test_promote_multiple_gm_uses_highest_dev_version() {
+  require_proc_sub "promote: multiple GM rows use highest DEV_VERSION" || return 0
+  local d out
+  d="$(make_fake_repo promote_preproduction_for_main.sh)"
+  mkdir -p "$d/version/entries/preproduction 2.0.0"
+  cat >"$d/version/entries/preproduction 2.0.0/lower.ver" <<'VER'
+MAJOR_VERSION=2
+STANDARD_VERSION=0
+RELEASE_VERSION=0
+PRERELEASE=1
+GM=1
+DEV_VERSION=1
+DESCRIPTION=lower candidate
+VER
+  cat >"$d/version/entries/preproduction 2.0.0/higher.ver" <<'VER'
+MAJOR_VERSION=2
+STANDARD_VERSION=0
+RELEASE_VERSION=0
+PRERELEASE=1
+GM=1
+DEV_VERSION=3
+DESCRIPTION=higher candidate wins
+VER
+
+  out=$(bash "$(promote_script "$d")" 2>&1) || true
+  if [[ ! -f "$d/version/entries/higher.ver" ]]; then
+    fail "promote multiple GM: highest DEV_VERSION file should become root GA"
+  elif [[ -d "$d/version/entries/preproduction 2.0.0" ]]; then
+    fail "promote multiple GM: preproduction dir should be removed"
+  elif grep -qE '^(PRERELEASE|GM|DEV_VERSION)=' "$d/version/entries/higher.ver"; then
+    fail "promote multiple GM: root GA should omit PRERELEASE, GM, and DEV_VERSION"
+  elif ! grep -q 'higher candidate wins' "$d/version/entries/higher.ver"; then
+    fail "promote multiple GM: root GA should use highest DEV_VERSION DESCRIPTION"
+  elif ! echo "$out" | grep -q 'selected higher.ver with DEV_VERSION=3'; then
+    fail "promote multiple GM: output should report selected highest DEV_VERSION"
+  else
+    ok "promote: multiple GM rows use highest DEV_VERSION candidate"
+  fi
+  cleanup "$d"
+}
+
+test_promote_multiple_gm_then_main_policy_passes() {
+  require_proc_sub "promote: duplicate GM promotion satisfies main policy" || return 0
+  local d
+  d="$(make_fake_repo promote_preproduction_for_main.sh check_version_main_prerelease_policy.sh)"
+  write_ver_ga "$d/version/entries/1_0_0_base.ver" 1 0 0
+  write_ver_ga "$d/version/locked/1_0_0_base.ver" 1 0 0
+  mkdir -p "$d/version/entries/preproduction 2.0.0"
+  cat >"$d/version/entries/preproduction 2.0.0/lower.ver" <<'VER'
+MAJOR_VERSION=2
+STANDARD_VERSION=0
+RELEASE_VERSION=0
+PRERELEASE=1
+GM=1
+DEV_VERSION=1
+DESCRIPTION=lower candidate
+VER
+  cat >"$d/version/entries/preproduction 2.0.0/higher.ver" <<'VER'
+MAJOR_VERSION=2
+STANDARD_VERSION=0
+RELEASE_VERSION=0
+PRERELEASE=1
+GM=1
+DEV_VERSION=3
+DESCRIPTION=higher candidate wins
+VER
+
+  if ! bash "$(promote_script "$d")" >/dev/null 2>&1; then
+    fail "promote main policy: promotion should succeed"
+  elif ! bash "$(main_policy_script "$d")" >/dev/null 2>&1; then
+    fail "promote main policy: promoted tree should satisfy main policy"
+  else
+    ok "promote: duplicate GM promotion satisfies main policy"
   fi
   cleanup "$d"
 }
@@ -1666,6 +1890,9 @@ test_layout_empty_prerelease_rejected
 
 # promote_preproduction_for_main.sh
 test_promote_dry_run_keeps_preproduction
+test_promote_normalize_gm_only_demotes_lower_dev_version
+test_promote_multiple_gm_uses_highest_dev_version
+test_promote_multiple_gm_then_main_policy_passes
 test_promote_malformed_gm_suffix_aborts
 
 # version_merge_sim_status.sh
@@ -1685,6 +1912,12 @@ test_unique_semver_numeric_suffix_rejected
 test_unique_standard_version_suffix_rejected
 test_unique_release_version_suffix_rejected
 test_unique_empty_dev_version_rejected
+test_unique_prerelease_two_rejected
+test_unique_gm_two_rejected
+
+# stamp_version_entries_release_date.sh
+test_stamp_entries_root_and_preproduction
+test_stamp_entries_idempotent
 
 # bump_dev_version.sh
 test_bump_increments_dev_version
@@ -1715,6 +1948,7 @@ test_relocate_dry_run_exits_zero_when_clean
 test_relocate_idempotent
 test_relocate_refuses_overwrite
 test_relocate_multiple_prerelease_files
+test_relocate_leaves_root_gm_candidate_in_place
 
 # gen_version_def.sh (isolated temp repo; script copied into fake scripts/)
 test_gen_def_gm_overrides_version_and_plain_line

@@ -43,6 +43,7 @@
  *****************************************************************************/
 
 #include "common.h"
+#include <stdint.h>
 #include "threadpool.h"
 #include "interpreter.h"
 #include "terminal.h"
@@ -92,6 +93,29 @@ static void vm_cleanup_at_exit(void) {
     if (!g_vm_mode || !g_vm_cleanup || !g_vm_root[0]) return;
     if (chdir("/tmp") != 0) return;
     rmrf(g_vm_root);
+}
+
+#ifndef BATCH_SINGLE_THREAD
+static int g_pool_workers_started;
+#endif
+static int g_pool_cleanup_done;
+
+static void shell_pool_cleanup(void) {
+    if (g_pool_cleanup_done)
+        return;
+    g_pool_cleanup_done = 1;
+#ifndef BATCH_SINGLE_THREAD
+    if (g_pool_workers_started) {
+        pthread_mutex_lock(&g_pool.mutex);
+        g_pool.shutting_down = 1;
+        pthread_cond_broadcast(&g_pool.cond);
+        pthread_mutex_unlock(&g_pool.mutex);
+        for (int i = 0; i < NUM_WORKERS; i++)
+            pthread_join(g_pool.workers[i], NULL);
+    }
+#endif
+    pthread_mutex_destroy(&g_pool.mutex);
+    pthread_cond_destroy(&g_pool.cond);
 }
 
 /* Case-insensitive compare (no locale/allocation) */
@@ -230,8 +254,10 @@ int main(int argc, char *argv[]) {
         ssize_t n = readlink("/proc/self/exe", exe_path, sizeof(exe_path) - 1);
         if (n > 0) exe_path[n] = '\0';
 #endif
-        if (!exe_path[0] && argv[0] && argv[0][0] == '/')
+        if (!exe_path[0] && argv[0] && argv[0][0] == '/') {
             strncpy(exe_path, argv[0], sizeof(exe_path) - 1);
+            exe_path[sizeof(exe_path) - 1] = '\0';
+        }
         if (!exe_path[0])
             snprintf(exe_path, sizeof(exe_path), "./%s", "BPForbes_Flinstone_Shell");
         printf("[VM] Sandbox: %s\n", g_vm_root);
@@ -334,13 +360,33 @@ int main(int argc, char *argv[]) {
     signal(SIGINT, SIG_IGN);
     pq_init(&g_pool.pq);
     g_pool.shutting_down = 0;
-    pthread_mutex_init(&g_pool.mutex, NULL);
-    pthread_cond_init(&g_pool.cond, NULL);
+    if (pthread_mutex_init(&g_pool.mutex, NULL) != 0) {
+        fprintf(stderr, "pthread_mutex_init: %s\n", strerror(errno));
+        exit(1);
+    }
+    if (pthread_cond_init(&g_pool.cond, NULL) != 0) {
+        pthread_mutex_destroy(&g_pool.mutex);
+        fprintf(stderr, "pthread_cond_init: %s\n", strerror(errno));
+        exit(1);
+    }
 #ifndef BATCH_SINGLE_THREAD
     for (int i = 0; i < NUM_WORKERS; i++) {
-        pthread_create(&g_pool.workers[i], NULL, worker_thread, NULL);
+        if (pthread_create(&g_pool.workers[i], NULL, worker_thread, NULL) != 0) {
+            pthread_mutex_lock(&g_pool.mutex);
+            g_pool.shutting_down = 1;
+            pthread_cond_broadcast(&g_pool.cond);
+            pthread_mutex_unlock(&g_pool.mutex);
+            for (int j = 0; j < i; j++)
+                pthread_join(g_pool.workers[j], NULL);
+            pthread_cond_destroy(&g_pool.cond);
+            pthread_mutex_destroy(&g_pool.mutex);
+            fprintf(stderr, "pthread_create: %s\n", strerror(errno));
+            exit(1);
+        }
     }
+    g_pool_workers_started = 1;
 #endif
+    atexit(shell_pool_cleanup);
     if (original_stdout_fd < 0) {
         original_stdout_fd = dup(fileno(stdout));
         original_stdout_file = fdopen(original_stdout_fd, "w");
@@ -407,8 +453,17 @@ int main(int argc, char *argv[]) {
                 else
                     tokensCount = 1;
             }
-            else if (!strcmp(cmd, "setdisk") || !strcmp(cmd, "createdisk"))
-                tokensCount = ((argc > i+3) ? ((argc > i+4) ? 5 : 4) : 0);
+            else if (!strcmp(cmd, "setdisk") || !strcmp(cmd, "createdisk")) {
+                if (argc > i + 3)
+                    tokensCount = (argc > i + 4) ? 5 : 4;
+                else {
+                    fprintf(stderr, "batch: %s: insufficient arguments (skipped)\n", cmd);
+                    int eat = 1;
+                    while (eat < 5 && i + eat < argc && argv[i + eat] && argv[i + eat][0] != '-')
+                        eat++;
+                    tokensCount = eat;
+                }
+            }
             else if (!strcmp(cmd, "format"))
                 tokensCount = 5;
             else if (!strcmp(cmd, "dir")) {
@@ -476,8 +531,21 @@ int main(int argc, char *argv[]) {
             }
             if (tokensCount == 0) { i++; continue; }
             size_t totalLen = 0;
-            for (int k = i; k < i + tokensCount; k++)
-                totalLen += strlen(argv[k]) + 1;
+            int overflow = 0;
+            for (int k = i; k < i + tokensCount; k++) {
+                size_t sl = strlen(argv[k]);
+                size_t add = sl + 1;
+                if (totalLen > SIZE_MAX - add) {
+                    overflow = 1;
+                    break;
+                }
+                totalLen += add;
+            }
+            if (overflow || totalLen > SIZE_MAX - 1) {
+                fprintf(stderr, "batch: command length overflow, skipping tokens\n");
+                i += tokensCount;
+                continue;
+            }
             char *commandStr = malloc(totalLen + 1);
             if (!commandStr) { i += tokensCount; continue; }
             commandStr[0] = '\0';
@@ -495,17 +563,8 @@ int main(int argc, char *argv[]) {
         exit(0);
     else
         interactive_shell();
-    
-#ifndef BATCH_SINGLE_THREAD
-    pthread_mutex_lock(&g_pool.mutex);
-    g_pool.shutting_down = 1;
-    pthread_cond_broadcast(&g_pool.cond);
-    pthread_mutex_unlock(&g_pool.mutex);
-    for (int i = 0; i < NUM_WORKERS; i++)
-        pthread_join(g_pool.workers[i], NULL);
-#endif
-    pthread_mutex_destroy(&g_pool.mutex);
-    pthread_cond_destroy(&g_pool.cond);
+
+    shell_pool_cleanup();
     drivers_shutdown();
     path_log_shutdown();
     fs_service_glue_shutdown();

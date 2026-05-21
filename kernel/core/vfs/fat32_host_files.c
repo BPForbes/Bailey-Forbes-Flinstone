@@ -9,9 +9,11 @@
 #include <fcntl.h>
 #include <stdio.h>
 #include <stdlib.h>
+#include <stdint.h>
 #include <string.h>
 #include <sys/stat.h>
 #include <unistd.h>
+#include <stddef.h>
 
 static uint32_t ld_le32(const uint8_t *p) {
     return (uint32_t)p[0] | ((uint32_t)p[1] << 8) | ((uint32_t)p[2] << 16) | ((uint32_t)p[3] << 24);
@@ -54,7 +56,10 @@ static int cluster_data_byte_off(const Fat32HostVol *v, uint32_t cl, uint64_t *o
 }
 
 static uint32_t max_cluster_number(const Fat32HostVol *v) {
-    return v->data_cluster_count + 1u;
+    uint64_t m = (uint64_t)v->data_cluster_count + 1u;
+    if (m > (uint64_t)UINT32_MAX)
+        return UINT32_MAX;
+    return (uint32_t)m;
 }
 
 static uint32_t flint_last_cluster(const Fat32HostVol *v) {
@@ -92,9 +97,10 @@ static int write_dirent_in_dir(int fd, const Fat32HostVol *v, uint32_t dir_clu, 
         return -1;
     uint32_t cur = dir_clu;
     int s = linear_slot;
-    unsigned guard = 0;
+    uint64_t guard = 0;
+    const uint64_t guard_cap = (uint64_t)v->data_cluster_count + 4u;
     while (cur >= 2u && cur <= max_cluster_number(v)) {
-        if (++guard > v->data_cluster_count + 4u)
+        if (++guard > guard_cap)
             return -1;
         if (s < nent) {
             uint64_t base;
@@ -124,10 +130,11 @@ static int find_dirent_in_dir(int fd, const Fat32HostVol *v, uint32_t dir_clu, c
     int linear_base = 0;
     int first_empty = -1;
     uint32_t cur = dir_clu;
-    unsigned guard = 0;
+    uint64_t guard = 0;
+    const uint64_t guard_cap = (uint64_t)v->data_cluster_count + 4u;
 
     while (cur >= 2u && cur <= max_cluster_number(v)) {
-        if (++guard > v->data_cluster_count + 4u)
+        if (++guard > guard_cap)
             return -1;
         uint64_t root_off;
         if (cluster_data_byte_off(v, cur, &root_off) != 0)
@@ -335,7 +342,11 @@ static void free_cluster_chain(int fd, const Fat32HostVol *v, uint32_t first) {
     if (first < 2u)
         return;
     uint32_t c = first;
+    uint64_t steps = 0;
+    const uint64_t cap = (uint64_t)v->data_cluster_count + 4u;
     for (;;) {
+        if (++steps > cap)
+            break;
         uint32_t next = fat_read_entry(fd, v, c);
         fat_write_entry(fd, v, c, 0u);
         if (next >= 0x0FFFFFF8u)
@@ -366,9 +377,14 @@ static int allocate_and_write_chain(int fd, const Fat32HostVol *v, int src_fd, s
         *first_clu_out = 0u;
         return 0;
     }
-    uint32_t need = (uint32_t)((file_sz + (uint64_t)bpc - 1u) / (uint64_t)bpc);
-    if (need == 0u)
-        need = 1u;
+    uint64_t need64 = (file_sz + (uint64_t)bpc - 1u) / (uint64_t)bpc;
+    if (need64 == 0u)
+        need64 = 1u;
+    if (need64 > (uint64_t)(SIZE_MAX / sizeof(uint32_t)))
+        return -1;
+    if (need64 > (uint64_t)UINT32_MAX)
+        return -1;
+    uint32_t need = (uint32_t)need64;
     uint32_t *ch = (uint32_t *)malloc((size_t)need * sizeof(uint32_t));
     if (!ch)
         return -1;
@@ -378,7 +394,7 @@ static int allocate_and_write_chain(int fd, const Fat32HostVol *v, int src_fd, s
     }
     for (uint32_t i = 0; i + 1u < need; i++) {
         if (fat_write_entry(fd, v, ch[i], ch[i + 1u]) != 0) {
-            for (uint32_t j = 0; j < i; j++)
+            for (uint32_t j = 0; j <= i; j++)
                 fat_write_entry(fd, v, ch[j], 0u);
             free(ch);
             return -1;
@@ -532,10 +548,11 @@ static int find_name_any(int fd, const Fat32HostVol *v, uint32_t dir_clu, const 
     int linear_base = 0;
     int first_empty = -1;
     uint32_t cur = dir_clu;
-    unsigned guard = 0;
+    uint64_t guard = 0;
+    const uint64_t guard_cap = (uint64_t)v->data_cluster_count + 4u;
 
     while (cur >= 2u && cur <= max_cluster_number(v)) {
-        if (++guard > v->data_cluster_count + 4u)
+        if (++guard > guard_cap)
             return -1;
         uint64_t base_off;
         if (cluster_data_byte_off(v, cur, &base_off) != 0)
@@ -895,6 +912,12 @@ int fat32_host_file_put(const char *host_src_path, const char *path_on_disk_or_n
     }
     close(src);
 
+    if (file_sz > (size_t)UINT32_MAX) {
+        free_cluster_chain(img, &g_fat32_host_vol, first_clu);
+        close(img);
+        return -1;
+    }
+
     uint8_t de[32];
     memset(de, 0, sizeof(de));
     memcpy(de, name11, 11);
@@ -1048,9 +1071,10 @@ void fat32_host_file_list(const char *subdir_or_null) {
     else
         printf("Root of %s:\n", current_disk_file);
     uint32_t cur = list_clu;
-    unsigned guard = 0;
+    uint64_t guard = 0;
+    const uint64_t guard_cap = (uint64_t)g_fat32_host_vol.data_cluster_count + 4u;
     while (cur >= 2u && cur <= max_cluster_number(&g_fat32_host_vol)) {
-        if (++guard > g_fat32_host_vol.data_cluster_count + 4u)
+        if (++guard > guard_cap)
             break;
         uint64_t base_off;
         if (cluster_data_byte_off(&g_fat32_host_vol, cur, &base_off) != 0)

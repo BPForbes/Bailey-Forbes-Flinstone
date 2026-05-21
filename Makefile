@@ -2,6 +2,19 @@
 # ARCH: x86_64_gas (default on typical desktops), x86_64_nasm, arm (AArch64).
 # On Linux arm64 (e.g. Raspberry Pi OS 64-bit), default ARCH is arm so plain `make`
 # does not feed x86-64 assembly to the AArch64 assembler (errors like unknown mnemonic `cli`).
+#
+# Parallelism: at the top invocation only, if you did not pass -j/--jobs (and no
+# jobserver token is present), MAKEFLAGS gets -j1 to cap memory from many concurrent
+# gcc processes. Pass e.g. make -j4 when you want parallel builds.
+ifeq ($(MAKELEVEL),0)
+ifeq (,$(findstring -j,$(MAKEFLAGS)))
+ifeq (,$(findstring --jobserver,$(MAKEFLAGS)))
+ifeq (,$(findstring --jobserver-auth,$(MAKEFLAGS)))
+MAKEFLAGS += -j1
+endif
+endif
+endif
+endif
 UNAME_S := $(shell uname -s 2>/dev/null)
 UNAME_M := $(shell uname -m 2>/dev/null)
 ARCH ?= $(if $(and $(filter Linux,$(UNAME_S)),$(filter aarch64 arm64,$(UNAME_M))),arm,x86_64_gas)
@@ -163,9 +176,13 @@ finalize-version-locked sync-version-locked:
 	@./scripts/finalize_version_locked.sh
 
 # Merge GM=1 preproduction */ trees into one root GA .ver and delete those dirs from entries + locked.
-.PHONY: promote-preproduction-for-main version-merge-sim-status bump-dev-version relocate-root-prerelease-ver
+.PHONY: promote-preproduction-for-main normalize-gm-candidates version-merge-sim-status bump-dev-version relocate-root-prerelease-ver stamp-version-entries-release-date prepare-version-entries
 promote-preproduction-for-main:
 	@./scripts/promote_preproduction_for_main.sh
+
+# Demote lower DEV_VERSION duplicate GM=1 candidates without promoting.
+normalize-gm-candidates:
+	@./scripts/promote_preproduction_for_main.sh --normalize-gm-only
 
 # Report version/ state for develop→main merge sims (refs and/or working tree). See scripts/version_merge_sim_status.sh --help
 version-merge-sim-status:
@@ -176,9 +193,16 @@ bump-dev-version:
 	@test -n "$(VER)" || (echo "usage: make bump-dev-version VER=path/to/file.ver" >&2; exit 1)
 	@./scripts/bump_dev_version.sh "$(VER)"
 
-# Stamp missing RELEASE_DATE on root PRERELEASE=1 *.ver, then move into preproduction A.B.C/ (see docs/versioning.md).
+# Stamp missing RELEASE_DATE on non-GM root PRERELEASE=1 *.ver, then move into preproduction A.B.C/ (see docs/versioning.md).
 relocate-root-prerelease-ver:
 	@./scripts/relocate_root_prerelease_ver_to_preproduction.sh
+
+# Stamp missing RELEASE_DATE on version/entries/*.ver and preproduction */ (CI also runs this after relocate).
+stamp-version-entries-release-date:
+	@./scripts/stamp_version_entries_release_date.sh
+
+# Same sequence as GitHub Actions prepare-version-entries (relocate + normalize GM + stamp + optional local gen_version_def.sh).
+prepare-version-entries: relocate-root-prerelease-ver normalize-gm-candidates stamp-version-entries-release-date
 
 # Optional release build: changelog + CHANGELOG_CI=1 (version/locked is synced on merge to main/develop in CI; use finalize-version-locked locally if needed).
 .PHONY: deploy
@@ -261,9 +285,6 @@ userland/shell/interpreter_unit.o: $(VERSION_DEF)
 	$(AS) $(ASFLAGS) -o $@ $<
 
 # Arch ASM: .s (GAS) or .asm (NASM)
-%.o: %.s
-	$(AS) $(ASFLAGS) -o $@ $<
-
 %.o: %.asm
 	$(AS) $(ASFLAGS) -o $@ $<
 

@@ -29,10 +29,10 @@ jobs:
         if: github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name != github.repository
         run: bash scripts/relocate_root_prerelease_ver_to_preproduction.sh --dry-run-exit-if-needed
 
-      - name: Prepare version/entries (relocate root PRERELEASE=1 .ver)
+      - name: Prepare version/entries (relocate, normalize GM, stamp dates)
         uses: ./.github/actions/prepare-version-entries
 
-      - name: Regenerate userland/shell/version_def.h from .ver trees
+      - name: Regenerate userland/shell/version_def.h from .ver trees (entries + preproduction)
         run: ./scripts/gen_version_def.sh
 
       - name: Publish version/entries and version_def.h (same-repo only)
@@ -44,7 +44,7 @@ jobs:
         run: |
           set -euo pipefail
           if git diff --quiet -- version/entries userland/shell/version_def.h; then
-            echo "No version/entries or version_def.h changes after relocate + gen_version_def.sh."
+            echo "No version/entries or version_def.h changes after prepare-version-entries + gen_version_def.sh."
             exit 0
           fi
           if [[ "${GITHUB_REF}" == "refs/heads/develop" || "${GITHUB_REF}" == "refs/heads/main" ]]; then
@@ -54,7 +54,7 @@ jobs:
           git config user.name "$BOT_NAME"
           git config user.email "$BOT_EMAIL"
           git add -A -- version/entries userland/shell/version_def.h
-          git commit -m "chore(version): sync entries relocate and version_def.h from .ver (automated)"
+          git commit -m "chore(version): sync entries relocate, RELEASE_DATE stamp, and version_def.h (automated)"
           if [[ "${GITHUB_EVENT_NAME}" == "pull_request" ]]; then
             git push origin "HEAD:${GIT_HEAD_REF}"
           else

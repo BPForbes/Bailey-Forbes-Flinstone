@@ -32,7 +32,8 @@ ver_parse_nonneg_int_field() {
   echo -n "$raw"
 }
 
-# Absent key -> 0; present value must be exactly 0 or 1 (rejects 0abc, 1foo, KEY=).
+# Binary flag: absent key -> 0; present value must be exactly 0 or 1 (rejects 2, 0abc, KEY=).
+# Use for PRERELEASE and GM in *.ver files.
 ver_parse_flag_field() {
   local key="$1" file="$2"
   local raw

@@ -14,16 +14,16 @@ DESCRIPTION may be:
                 (closing line is DELIM alone after trim; newlines are kept.)
 
 Date stamp policy (DEV / preproduction intake):
-  Update date stamp policy so we date DEV-version .ver rows just before we move them
-  into the directory: for each version/entries/*.ver at the repository root with
-  PRERELEASE=1, ./scripts/relocate_root_prerelease_ver_to_preproduction.sh (CI and
-  make relocate-root-prerelease-ver) appends RELEASE_DATE=YYYY-MM-DD using that run's
-  calendar day if the key is still missing, then moves the file into
-  version/entries/preproduction <A>.<B>.<C>/. We upload .ver files for the merge
-  (e.g. cursor/* branches) at the entries root outside that directory; GitHub Actions
-  moves them inside the preproduction A.B.C directory before prerelease layout checks.
-  Same-repo pull requests get an automated commit; fork PRs must run the relocate
-  script locally and push.
+  GitHub Actions prepare-version-entries runs, in order:
+    ./scripts/relocate_root_prerelease_ver_to_preproduction.sh
+    ./scripts/stamp_version_entries_release_date.sh
+  Relocate stamps missing RELEASE_DATE on root PRERELEASE=1 rows before moving them
+  into version/entries/preproduction <A>.<B>.<C>/. stamp_version_entries_release_date.sh
+  then stamps the entries repository root (*.ver) and every active preproduction
+  <A>.<B>.<C>/ tree still missing RELEASE_DATE (so hand-placed or already-relocated
+  rows get a date on the same CI job). gen_version_def.sh reads version/entries/**/*.ver
+  (including preproduction */) for VERSION_LINE and GM=1 overrides.
+  Fork PRs must run both scripts locally (or make prepare-version-entries) and push.
 
 RELEASE_DATE (merge finalize):
   After pushes to develop, Version lock on merge runs finalize_version_locked.sh,
@@ -38,8 +38,11 @@ RELEASE_DATE (merge finalize):
   may use the generator's local calendar date at generation time (see that script).
 
 PRERELEASE / GM / DEV_VERSION / preproduction directories (gen_version_def.sh):
-  At the root of version/entries/ (and version/locked/), GA-oriented rows omit PRERELEASE
-  or set PRERELEASE=0. Optional DEV_VERSION on those rows counts develop-side iterations
+  PRERELEASE and GM are binary flags: when the key is present, the value must be exactly
+  0 or 1 (CI scripts/ver_field_parse.sh and check_version_entries_semver_dev_unique.sh
+  reject any other value). At the root of version/entries/ (and version/locked/),
+  GA-oriented rows omit PRERELEASE or set PRERELEASE=0. Optional DEV_VERSION on those rows
+  counts develop-side iterations
   before preproduction. PRERELEASE=1 rows are authored at the version/entries/ root for
   same-repo automation (see below); never set GM=1 on a root *.ver file.
   When any .ver under version/entries/ has PRERELEASE=1 and GM=1, scripts/gen_version_def.sh
@@ -65,18 +68,37 @@ PRERELEASE / GM / DEV_VERSION / preproduction directories (gen_version_def.sh):
       preproduction <A>.<B>.<C>/
   on same-repo branches — ./scripts/relocate_root_prerelease_ver_to_preproduction.sh
   (CI, make relocate-root-prerelease-ver, Version lock on merge) stamps RELEASE_DATE if
-  missing at the root, then moves each file into that directory. After relocate, every
+  missing at the root, then moves each non-GM file into that directory. Root GM=1 rows
+  are left at the root for promotion instead of being moved down. After relocate, every
   .ver under preproduction <A>.<B>.<C>/ must match that semver in the directory name,
   must include DEV_VERSION>=1, and may set GM=0 or GM=1. Fork pull requests cannot rely
   on CI to push the relocate commit: run relocate locally, then commit (paths may
   already live under preproduction */ — see ABOUT Date stamp policy).
 
-  At most one file per preproduction directory may set GM=1 (go-to-main). Bump
-  DEV_VERSION between iterations with ./scripts/bump_dev_version.sh, or add another *.ver
-  at the version/entries/ root with the same MAJOR/STANDARD/RELEASE, PRERELEASE=1, and
-  the next DEV_VERSION (e.g. DEV_VERSION=1 then DEV_VERSION=2); relocate moves each row
-  into the same preproduction <A>.<B>.<C>/ so maintainers can review the full train before
-  promotion; the shipped GA .ver from promote uses the GM=1 row's DESCRIPTION only.
+  Immutable .ver rows (AI / contributors): any version/entries/**/*.ver path that
+  already exists on the merge-base branch must not be edited on feature PRs — do not
+  change DESCRIPTION, DEV_VERSION, GM, PRERELEASE, or semver fields in those files.
+  Each new PR scope, develop iteration, or go-to-main step adds exactly one new
+  version/entries/A_B_C_slug.ver at the entries root (PRERELEASE=1 rows relocate into
+  preproduction <A>.<B>.<C>/). The new .ver your branch introduces may update DESCRIPTION
+  only (no DEV_VERSION re-bump) until it merges to develop; after merge, that path is
+  immutable too.
+
+  At most one file per preproduction directory should set GM=1 (go-to-main). Add GM=1
+  on a new *.ver row (next DEV_VERSION), never by editing older train files. If several
+  rows are accidentally marked GM=1, promote_preproduction_for_main.sh selects the highest
+  DEV_VERSION row and rewrites lower DEV_VERSION GM rows to GM=0. Bump DEV_VERSION between
+  iterations with ./scripts/bump_dev_version.sh, or add another *.ver at the version/entries/
+  root with the same MAJOR/STANDARD/RELEASE, PRERELEASE=1, and the next DEV_VERSION
+  (e.g. DEV_VERSION=1 then DEV_VERSION=2); relocate moves each non-GM row into the same
+  preproduction <A>.<B>.<C>/ so maintainers can review the full train before promotion; the
+  shipped GA .ver from promote uses the selected GM=1 row's DESCRIPTION only.
+
+  GM=1 go-to-main DESCRIPTION (release prose): the GM=1 row is the final prerelease
+  record before main. Its DESCRIPTION must start with A.B.C: (literal semver, e.g.
+  4.0.1:) followed by the overall release summary for that version — patches, features,
+  and fixes in the train. promote_preproduction_for_main.sh copies only that text (not
+  prose from other rows in the folder) into the root GA .ver on main.
 
   AI / automation (no semver backtracking): the preproduction version is the A.B.C
   in directory names
@@ -93,13 +115,16 @@ PRERELEASE / GM / DEV_VERSION / preproduction directories (gen_version_def.sh):
   DEV_VERSION on develop for the same relative path (or 0 if that file is absent there).
   After you set DEV_VERSION to exactly N+1, do not edit DEV_VERSION again; revise DESCRIPTION only.
 
-  When you are ready to cut main: set GM=1 on exactly one .ver in that folder, then run
+  When you are ready to cut main: add a new *.ver under preproduction <A>.<B>.<C>/
+  with GM=1 (next DEV_VERSION; never GM=1 on a root *.ver file) whose DESCRIPTION begins
+  A.B.C: and summarizes the whole release, then run
   ./scripts/promote_preproduction_for_main.sh (or make promote-preproduction-for-main).
-  That script builds one new root *.ver (basename from the GM=1 file) whose DESCRIPTION
-  is copied only from that GM=1 row (semver and optional RELEASE_DATE also come from it),
-  omits PRERELEASE/GM/DEV_VERSION entirely, removes every *.ver in the preproduction folder,
-  and deletes the entire preproduction directory from version/entries (and from
-  version/locked only if a legacy copy existed there).
+  That script builds one new root *.ver (basename from the selected GM=1 file) whose
+  DESCRIPTION is copied only from that row (semver and optional RELEASE_DATE also come from
+  it), omits PRERELEASE/GM/DEV_VERSION entirely, removes every *.ver in the preproduction
+  folder, and deletes the entire preproduction directory from version/entries (and from
+  version/locked only if a legacy copy existed there). Use --normalize-gm-only to demote
+  lower DEV_VERSION duplicate GM rows without promoting.
   finalize_version_locked.sh does not copy preproduction */ into locked, so the published
   tree normally only gains the merged root .ver after promotion, then the next finalize
   copies that file into version/locked/.
@@ -137,9 +162,9 @@ AI authoring (new .ver rows):
 
 For routine feature work: author new PRERELEASE=1 rows at the version/entries/ root;
 preproduction <A>.<B>.<C>/ is filled by relocate (CI or local), not by hand-adding new
-*.ver paths there on same-repo branches. Edit GA-oriented root *.ver and any existing
-preproduction subtrees for semver and release prose (do not strip RELEASE_DATE from
-rows already stamped in preproduction).
+*.ver paths there on same-repo branches. Do not edit existing .ver paths from the
+merge base — add a new root *.ver per iteration instead (see Immutable .ver rows above).
+Do not strip RELEASE_DATE from rows already stamped in preproduction.
 Do not commit hand-edited version/locked/*.ver or userland/shell/version_def.h on
 typical agent-authored PRs; GitHub Actions copies entries → locked (excluding
 preproduction */ at the entries root) and regenerates

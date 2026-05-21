@@ -26,8 +26,7 @@ void x86_idt_dispatch(uint64_t vector, uint64_t error_code) {
         s_handlers[vector](vector, error_code);
 
     /* Send EOI for remapped hardware IRQs (PIC lines 0-15 -> vectors 32-47).
-     * TODO: Add spurious IRQ detection for master IRQ7 (vec 0x27) and
-     * slave IRQ15 (vec 0x2F) per Intel 8259A spec before sending EOI. */
+     * Spurious IRQ7 / IRQ15 handling lives in the bare-metal PIC driver (8259A). */
     if (vector >= 0x20u && vector <= 0x2Fu) {
         if (g_pic_driver && g_pic_driver->eoi)
             g_pic_driver->eoi(g_pic_driver, (int)(vector - 0x20u));
