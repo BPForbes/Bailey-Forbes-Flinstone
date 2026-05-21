@@ -24,6 +24,8 @@ su/su -/su -c switch or run commands with the target account password; useradd/u
 
 Password hashes use OpenSSL PBKDF2-HMAC-SHA256 (record stores iteration count); legacy
 stretch/single SHA-256 rows still verify. login/su/sudo read passwords on the next line.
+AArch64 CI cross-build: ./deps/fetch-openssl-aarch64.sh supplies libcrypto headers/libs
+(deps/install-aarch64) alongside fetch-sqlite-aarch64.sh.
 Tests: test_p0_p2_wiring (stack, PMM, exec context, user db, path props, timekeeping).
 VER_4_1_0_P0_P2
 

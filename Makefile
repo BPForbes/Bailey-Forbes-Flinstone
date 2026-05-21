@@ -26,22 +26,31 @@ AS = as
 CFLAGS = -Wall -Wextra -pthread -I. -Icontracts/foundations -Icontracts/runtime -Icontracts/identity -Icontracts/networking -Icontracts/drivers -Icontracts/storage -Icontracts/observability -Icontracts/operations -Icontracts/virtualization -Icontracts/hardening -Ikernel/include -Ikernel/core/vfs -Ikernel/core/mm -Ikernel/core/memory -Ikernel/core/time -Ikernel/core/identity -Ikernel/core/sched -Ikernel/core/sys -Iuserland/shell -Iuserland/command -Ikernel/arch/x86_64 -Ikernel/arch/aarch64
 LDFLAGS = -Wl,-z,noexecstack -lsqlite3 -lstdc++ -lcrypto
 # Cross ARM on x86: prefer deps/install-aarch64 (./deps/fetch-sqlite-aarch64.sh); optional system libsqlite3-dev:arm64.
+# OpenSSL for password_hash.cpp: libssl-dev:arm64 (headers under /usr/include/aarch64-linux-gnu).
 ifeq ($(ARCH),arm)
 ifeq ($(ARM64_LINUX_HOST),)
 SQLITE_ARM_PREFIX = deps/install-aarch64
 SQLITE_ARM_LIB = $(SQLITE_ARM_PREFIX)/lib/libsqlite3.a
+OPENSSL_ARM_INC = deps/install-aarch64/include
+OPENSSL_ARM_LIBDIR = deps/install-aarch64/lib
+OPENSSL_ARM_LIB = deps/install-aarch64/lib/libcrypto.a
 endif
 endif
 CXX = g++
 CXXFLAGS ?= $(CFLAGS) -std=c++17
 ASFLAGS =
 
+ifneq ($(OPENSSL_ARM_INC),)
+CFLAGS += -I$(OPENSSL_ARM_INC)
+ARM_CROSS_LIBPATH = -L$(OPENSSL_ARM_LIBDIR)
+endif
+
 ifneq ($(SQLITE_ARM_LIB),)
 ifneq (,$(wildcard $(SQLITE_ARM_LIB)))
 CFLAGS += -I$(SQLITE_ARM_PREFIX)/include
-LDFLAGS := -Wl,-z,noexecstack -L$(SQLITE_ARM_PREFIX)/lib -lsqlite3 -lstdc++ -lcrypto -ldl
+LDFLAGS := -Wl,-z,noexecstack -L$(SQLITE_ARM_PREFIX)/lib $(ARM_CROSS_LIBPATH) -lsqlite3 -lstdc++ -lcrypto -ldl
 else ifneq (,$(wildcard /usr/lib/aarch64-linux-gnu/libsqlite3.so))
-LDFLAGS := -Wl,-z,noexecstack -L/usr/lib/aarch64-linux-gnu -lsqlite3 -lstdc++ -lcrypto
+LDFLAGS := -Wl,-z,noexecstack -L/usr/lib/aarch64-linux-gnu $(ARM_CROSS_LIBPATH) -lsqlite3 -lstdc++ -lcrypto
 endif
 endif
 
@@ -263,10 +272,18 @@ deps-cunit:
 	@chmod +x deps/fetch-cunit.sh 2>/dev/null || true
 	@./deps/fetch-cunit.sh
 
-.PHONY: deps-sqlite-aarch64
+.PHONY: deps-sqlite-aarch64 deps-openssl-aarch64
 deps-sqlite-aarch64:
 	@chmod +x deps/fetch-sqlite-aarch64.sh 2>/dev/null || true
 	@./deps/fetch-sqlite-aarch64.sh
+
+deps-openssl-aarch64:
+	@chmod +x deps/fetch-openssl-aarch64.sh 2>/dev/null || true
+	@./deps/fetch-openssl-aarch64.sh
+
+$(OPENSSL_ARM_LIB):
+	@chmod +x deps/fetch-openssl-aarch64.sh 2>/dev/null || true
+	@./deps/fetch-openssl-aarch64.sh
 
 $(SQLITE_ARM_LIB):
 	@chmod +x deps/fetch-sqlite-aarch64.sh 2>/dev/null || true
@@ -279,9 +296,16 @@ else
 	$(CXX) $(CXXFLAGS) -c -o $@ $<
 endif
 
-ARM_SQLITE_DEPS = $(if $(SQLITE_ARM_LIB),$(SQLITE_ARM_LIB),)
+ifeq ($(ARCH),arm)
+ifeq ($(ARM64_LINUX_HOST),)
+userland/identity/password_hash.o: $(OPENSSL_ARM_LIB)
+endif
+endif
 
-$(TARGET): $(VERSION_DEF) $(OBJS) $(ARM_SQLITE_DEPS)
+ARM_SQLITE_DEPS = $(if $(SQLITE_ARM_LIB),$(SQLITE_ARM_LIB),)
+ARM_OPENSSL_DEPS = $(if $(OPENSSL_ARM_LIB),$(OPENSSL_ARM_LIB),)
+
+$(TARGET): $(VERSION_DEF) $(OBJS) $(ARM_SQLITE_DEPS) $(ARM_OPENSSL_DEPS)
 	$(CXX) $(CXXFLAGS) -o $(TARGET) $(OBJS) $(LDFLAGS) -pthread
 
 # Rebuild objects that embed VERSION when the generated header changes.
