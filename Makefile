@@ -350,9 +350,9 @@ UTIL_SHELL_LINK_OBJS = userland/shell/util.o userland/shell/history_record.o
 FS_JAIL_SUPPORT_OBJS = kernel/core/time/timekeeping.o \
                          kernel/core/identity/user_db.o kernel/core/identity/elevation.o \
                          kernel/core/identity/path_property.o kernel/core/identity/session.o \
-                         userland/identity/password_hash.o
+                         userland/identity/password_hash.o $(FL_STACK_ASM_OBJ)
 FS_JAIL_TEST_LIBS = -lsqlite3 -lstdc++ -lcrypto -pthread
-TEST_ASMOBJS = $(MEM_ASM_OBJ) $(PORT_IO_OBJ) $(DISK_HOST_ASM_OBJ) $(HISTORY_ASM_OBJ)
+TEST_ASMOBJS = $(MEM_ASM_OBJ) $(FL_STACK_ASM_OBJ) $(PORT_IO_OBJ) $(DISK_HOST_ASM_OBJ) $(HISTORY_ASM_OBJ)
 TEST_TARGET = BPForbes_Flinstone_Tests
 
 DEPS_RPATH = -Wl,-rpath='$$ORIGIN/deps/install/lib'
