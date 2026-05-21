@@ -25,6 +25,14 @@ CC = gcc
 AS = as
 CFLAGS = -Wall -Wextra -pthread -I. -Icontracts/foundations -Icontracts/runtime -Icontracts/identity -Icontracts/networking -Icontracts/drivers -Icontracts/storage -Icontracts/observability -Icontracts/operations -Icontracts/virtualization -Icontracts/hardening -Ikernel/include -Ikernel/core/vfs -Ikernel/core/mm -Ikernel/core/memory -Ikernel/core/time -Ikernel/core/identity -Ikernel/core/sched -Ikernel/core/sys -Iuserland/shell -Iuserland/command -Ikernel/arch/x86_64 -Ikernel/arch/aarch64
 LDFLAGS = -Wl,-z,noexecstack -lsqlite3 -lstdc++
+# Cross ARM on x86: SQLite lives under /usr/lib/aarch64-linux-gnu (libsqlite3-dev:arm64).
+ifeq ($(ARCH),arm)
+ifneq ($(ARM64_LINUX_HOST),)
+ifneq (,$(wildcard /usr/lib/aarch64-linux-gnu/libsqlite3.so))
+LDFLAGS := -Wl,-z,noexecstack -L/usr/lib/aarch64-linux-gnu -lsqlite3 -lstdc++
+endif
+endif
+endif
 CXX = g++
 CXXFLAGS ?= $(CFLAGS) -std=c++17
 ASFLAGS =
@@ -41,7 +49,14 @@ KERNEL_DRIVERS = kernel/arch/x86_64/drivers
 else ifeq ($(ARCH),arm)
 ifeq ($(ARM64_LINUX_HOST),)
 CC = aarch64-linux-gnu-gcc
+# CI images often ship gcc-aarch64-linux-gnu without g++; compile/link C++ with -x c++ when needed.
+CROSS_GXX := $(shell command -v aarch64-linux-gnu-g++ 2>/dev/null)
+ifneq ($(CROSS_GXX),)
 CXX = aarch64-linux-gnu-g++
+else
+CXX = aarch64-linux-gnu-gcc
+CXX_IS_GCC_FOR_CPP = 1
+endif
 AS = aarch64-linux-gnu-as
 else
 # Same triplet as aarch64-linux-gnu-*; avoids requiring the cross package on the device.
@@ -241,7 +256,11 @@ deps-cunit:
 	@./deps/fetch-cunit.sh
 
 userland/identity/%.o: userland/identity/%.cpp
+ifeq ($(CXX_IS_GCC_FOR_CPP),1)
+	$(CXX) -x c++ $(CXXFLAGS) -c -o $@ $<
+else
 	$(CXX) $(CXXFLAGS) -c -o $@ $<
+endif
 
 $(TARGET): $(VERSION_DEF) $(OBJS)
 	$(CXX) $(CXXFLAGS) -o $(TARGET) $(OBJS) $(LDFLAGS) -pthread
@@ -252,7 +271,7 @@ $(filter userland/shell/%.o userland/command/%.o,$(OBJS)): $(VERSION_DEF)
 # --- Test Build ---
 # interpreter.c is built as interpreter_unit.o with -DUNIT_TEST (stub interactive_shell).
 # Shell builtins live in userland/command/*.c (same as main shell link).
-TEST_SRCS = BPForbes_Flinstone_Tests.c userland/shell/common.c userland/shell/util.c userland/shell/history_record.c userland/shell/audit_log.c userland/shell/authz_subsystem.c userland/shell/contract_log_dispatch.c userland/shell/terminal.c \
+TEST_SRCS = BPForbes_Flinstone_Tests.c userland/shell/common.c userland/shell/util.c userland/shell/history_record.c userland/shell/audit_log.c userland/shell/authz_subsystem.c userland/shell/contract_log_dispatch.c userland/shell/session_sync.c userland/shell/terminal.c \
             $(COMMAND_SRCS) \
             kernel/core/vfs/disk.c kernel/core/vfs/fat32_host.c kernel/core/vfs/fat32_host_files.c kernel/core/vfs/path_log.c kernel/core/vfs/cluster.c kernel/core/vfs/fs.c \
             disk_host_io.c \
@@ -291,9 +310,12 @@ TEST_TARGET = BPForbes_Flinstone_Tests
 
 DEPS_RPATH = -Wl,-rpath='$$ORIGIN/deps/install/lib'
 TEST_LDFLAGS = $(if $(DEPS_PREFIX),-L$(DEPS_PREFIX)/lib $(DEPS_RPATH),)
-$(TEST_TARGET): $(VERSION_DEF) $(TEST_OBJS) $(TEST_ASMOBJS)
-	$(CC) $(CFLAGS) -DUNIT_TEST -o $(TEST_TARGET) $(TEST_OBJS) $(TEST_ASMOBJS) -Wl,-z,noexecstack \
-		$(TEST_LDFLAGS) -lcunit
+# CUnit link needs session_sync, password_hash, and SQLite (same as main shell).
+TEST_EXTRA_LINK_OBJS = userland/identity/password_hash.o
+
+$(TEST_TARGET): $(VERSION_DEF) $(TEST_OBJS) $(TEST_ASMOBJS) $(TEST_EXTRA_LINK_OBJS)
+	$(CXX) $(CXXFLAGS) -DUNIT_TEST -o $(TEST_TARGET) $(TEST_OBJS) $(TEST_ASMOBJS) $(TEST_EXTRA_LINK_OBJS) -Wl,-z,noexecstack \
+		$(TEST_LDFLAGS) $(FS_JAIL_TEST_LIBS) -lcunit
 
 $(filter userland/shell/%.o userland/command/%.o,$(TEST_OBJS)): $(VERSION_DEF)
 BPForbes_Flinstone_Tests.o: $(VERSION_DEF)
