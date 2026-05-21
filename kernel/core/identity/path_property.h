@@ -1,7 +1,8 @@
 #ifndef FL_PATH_PROPERTY_H
 #define FL_PATH_PROPERTY_H
 
-#include "contract_result.h"
+#include "contract_p2_principal.h"
+#include "contract_p2_authz.h"
 
 #define FL_PATH_OWNER_MAX 32u
 #define FL_PATH_META_DIR  ".flmeta"

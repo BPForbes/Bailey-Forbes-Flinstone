@@ -29,6 +29,21 @@ All **P0–P2** rows are **✅** or **~✅** in **Module integration** (**4.1.0*
 | **P2-3** | **~✅** | Shell + **`fm_service`** authz + **`test_p0_p2_wiring`**; kernel netdev/mount/FileManager entry wiring still open (**TODO: P2-3** in **`docs/ROADMAP.md`**) |
 | **P2-4** | **~✅** | Elevation/sudo/su shipped; polish TODOs (**logout** audit order, login-shell env, audit file tests) |
 
+## Contract-mount (GitHub #121–#128)
+
+Implementation headers now include normative contract anchors (or new **P0** jail shard):
+
+| Issue | Fix |
+|-------|-----|
+| **#121** | `exec_context.h` → `contract_p1_execution.h` |
+| **#122** | `pmm.h`, `fl_stack.h` → `contract_p1_pmm.h` |
+| **#123** | `timekeeping.h` → `contract_p1_timekeeping.h` |
+| **#124** | `path_property.h` → `contract_p2_principal.h`, `contract_p2_authz.h` |
+| **#125** | `fl/authz_subsystem.h` → `contract_p2_authz.h` |
+| **#126** | `session.h` → `contract_identity.h` umbrella |
+| **#127** | New `contracts/foundations/contract_p0_fs_jail.h`; `fs_jail.h` include; wired in `contract_foundations.h` |
+| **#128** | `contract_p2_credential_store.h` SQLite path; **`FL_CONTRACT_P2_IDENTITY_REV` 3**; `FL_USERS_DB_DEFAULT_PATH` aliases contract macro |
+
 ## Code TODO markers (Codex / CodeRabbit follow-ups)
 
 These are **patch-scale** items: **`docs/ROADMAP.md`** marks the matching snapshot rows **~✅** in **Module integration** (legend explains the **`~`** prefix).

@@ -1,6 +1,7 @@
 #include "fl_stack.h"
 #include "fl/fl_stack_asm.h"
 
+/* TODO(contract-mount/GH-122): fl_stack.h anchors contract_p1_pmm.h (PMM pool). */
 /* TODO(P1/Codex): ARCH=x86_64_nasm has no fl_stack_asm yet — C fallbacks until
  * arch/x86_64/nasm/fl_stack_asm.asm exists (see Makefile). */
 

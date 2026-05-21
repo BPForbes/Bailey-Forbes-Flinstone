@@ -1,7 +1,7 @@
 #ifndef FL_TIMEKEEPING_H
 #define FL_TIMEKEEPING_H
 
-#include "contract_result.h"
+#include "contract_p1_timekeeping.h"
 #include <stdint.h>
 
 /** Monotonic nanoseconds since boot (hosted: CLOCK_MONOTONIC via time.h). */

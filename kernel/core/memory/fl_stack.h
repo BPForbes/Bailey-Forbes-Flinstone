@@ -1,6 +1,8 @@
 #ifndef FL_STACK_H
 #define FL_STACK_H
 
+/* P1-4 PMM free-frame pool backing (contract_p1_pmm.h). */
+#include "contract_p1_pmm.h"
 #include <stddef.h>
 #include <stdint.h>
 

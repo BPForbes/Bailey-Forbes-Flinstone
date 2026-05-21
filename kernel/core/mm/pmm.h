@@ -1,7 +1,7 @@
 #ifndef FL_PMM_H
 #define FL_PMM_H
 
-#include "contract_result.h"
+#include "contract_p1_pmm.h"
 #include <stddef.h>
 #include <stdint.h>
 

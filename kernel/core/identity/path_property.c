@@ -1,3 +1,4 @@
+/* TODO(contract-mount/GH-124): path_property.h anchors contract_p2_principal.h + contract_p2_authz.h. */
 #include "path_property.h"
 #include "mem_domain.h"
 #include <errno.h>

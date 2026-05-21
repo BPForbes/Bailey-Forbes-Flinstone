@@ -23,7 +23,7 @@ typedef struct fl_user_record {
 } fl_user_record_t;
 
 #define FL_USER_DB_MAX_USERS 32u
-#define FL_USERS_DB_DEFAULT_PATH "userland/shell/fl_users.db"
+#define FL_USERS_DB_DEFAULT_PATH FL_CREDENTIAL_STORE_LAB_SQLITE_REL
 
 typedef struct fl_user_db {
     fl_user_record_t users[FL_USER_DB_MAX_USERS];

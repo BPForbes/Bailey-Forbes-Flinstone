@@ -1,3 +1,4 @@
+/* TODO(contract-mount/GH-126): session.h anchors contract_identity.h (P2-2/3/4). */
 #include "session.h"
 #include "elevation.h"
 #include <pthread.h>

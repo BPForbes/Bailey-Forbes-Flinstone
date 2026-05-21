@@ -1,8 +1,8 @@
 #ifndef FL_SESSION_H
 #define FL_SESSION_H
 
+#include "contract_identity.h"
 #include "user_db.h"
-#include "contract_p2_elevation.h"
 
 #define FL_SESSION_USERS_PATH FL_USERS_DB_DEFAULT_PATH
 

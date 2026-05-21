@@ -7,11 +7,12 @@
 #ifndef FS_JAIL_H
 #define FS_JAIL_H
 
+#include "contract_p0_fs_jail.h"
 #include <stddef.h>
 #include <sys/types.h>
 
 /** Host directory created under g_vm_root / cwd; actual jail root is inside this. */
-#define FS_JAIL_HOST_SUBDIR "vm_hostfs"
+#define FS_JAIL_HOST_SUBDIR FL_CONTRACT_P0_FS_JAIL_HOST_SUBDIR
 
 void fs_jail_init(void);
 int  fs_jail_is_active(void);

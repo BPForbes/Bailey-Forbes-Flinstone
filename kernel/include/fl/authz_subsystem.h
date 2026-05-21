@@ -8,7 +8,7 @@
 #ifndef FL_AUTHZ_SUBSYSTEM_H
 #define FL_AUTHZ_SUBSYSTEM_H
 
-#include "contract_auth.h"
+#include "contract_p2_authz.h"
 
 #ifdef __cplusplus
 extern "C" {

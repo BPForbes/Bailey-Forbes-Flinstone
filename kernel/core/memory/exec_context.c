@@ -1,3 +1,4 @@
+/* TODO(contract-mount/GH-121): exec_context.h anchors contract_p1_execution.h. */
 /* TODO(P1/Codex): P1-1 kernel-thread / bare-metal execution context — today hosted
  * malloc stack/heap only; wire arch save/restore when B/K track lands. */
 #include "exec_context.h"

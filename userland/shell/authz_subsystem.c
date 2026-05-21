@@ -1,3 +1,4 @@
+/* TODO(contract-mount/GH-125): fl/authz_subsystem.h anchors contract_p2_authz.h. */
 #include "fl/authz_subsystem.h"
 #include "contract_p2_authz.h"
 #include "contract_p2_principal_names.h"
