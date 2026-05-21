@@ -39,6 +39,8 @@ Tests: test_p0_p2_wiring (stack, PMM, exec context, user db, path props, timekee
 ASM (arch/*/gas/fl_stack_asm.s): hot paths for fl_stack push/pop/count (PMM free-frame
 pool) and fl_elevation_active_count slot scan/reclaim; C fallbacks when FL_STACK_ASM_AVAILABLE
 is unset (e.g. x86_64_nasm). Slot layout locked with _Static_assert(sizeof(fl_elev_slot_t)==56).
+In-source TODO(Codex/CR) markers for deferred P0 bare-metal proof, P1 NASM/bare-metal PMM,
+P2 login-shell env, logout audit ordering, and audit-log file tests (see docs/p0_p2_pr_coverage.md).
 VER_4_1_0_P0_P2
 
 RELEASE_DATE=2026-05-21

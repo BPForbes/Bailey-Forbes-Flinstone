@@ -99,6 +99,8 @@ int cmd_su_run(int argc, char **argv) {
     }
     fl_session_sync_services();
 
+    /* TODO(P2/Codex): su - should apply login-shell environment (HOME/cwd), not
+     * only print "(login shell)"; session user switch is implemented today. */
     if (req.command) {
         int cmd_rc = su_run_command(req.command);
         if (fl_session_has_elevation())

@@ -1,6 +1,9 @@
 /**
  * Physical frame allocator (P1-4): bitmap tracks reserved/allocated state;
  * free frames are kept on a fixed **fl_stack** for O(1) alloc/free.
+ *
+ * TODO(P1/Codex): DRIVERS_BAREMETAL lock-order graph + PMM/arena behavior per
+ * docs/ROADMAP.md P1→P2 gate; see docs/p0_p2_pr_coverage.md (integration ⚠️).
  */
 #include "pmm.h"
 #include "../memory/fl_stack.h"

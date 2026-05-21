@@ -1,6 +1,9 @@
 #include "fl_stack.h"
 #include "fl/fl_stack_asm.h"
 
+/* TODO(P1/Codex): ARCH=x86_64_nasm has no fl_stack_asm yet — C fallbacks until
+ * arch/x86_64/nasm/fl_stack_asm.asm exists (see Makefile). */
+
 int fl_stack_init(fl_stack_t *s, uintptr_t *buf, size_t cap) {
     if (!s || !buf || cap == 0)
         return -1;

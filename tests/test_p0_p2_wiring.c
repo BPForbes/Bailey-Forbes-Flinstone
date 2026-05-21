@@ -265,6 +265,8 @@ static int test_pmm_stack(void) {
     return 0;
 }
 
+/* TODO(P2/Codex): Assert elevation grant/revoke audit lines in .fl_audit.log when
+ * FL_AUDIT=1 — covered by make test_audit_log; extend here if wiring tests need it. */
 int main(void) {
     if (test_fl_stack()) return 1;
     if (test_exec_context()) return 1;

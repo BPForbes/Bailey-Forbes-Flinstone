@@ -29,6 +29,8 @@ static int sudo_grant_token(const char *reason) {
     return 0;
 }
 
+/* TODO(P2/Codex): sudo -i could reset login environment like su -; today only
+ * fl_session_set_user("root") + sync (no separate login shell spawn). */
 int cmd_sudo_interactive_login(void) {
     fl_result_t rc;
 

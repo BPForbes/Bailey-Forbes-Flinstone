@@ -11,6 +11,8 @@ int cmd_logout_run(int argc, char **argv) {
     (void)argv;
     fl_session_init();
     before = fl_session_current_user();
+    /* TODO(P2/Codex): Emit elevation revoke audit after fl_session_logout() succeeds
+     * so failed logout does not log a revoke (CodeRabbit). */
     if (fl_session_has_elevation() && !fl_session_is_elevated_account())
         fl_audit_elevation_event(before, "logout", 0);
     if (fl_session_logout() != FL_RESULT_OK) {

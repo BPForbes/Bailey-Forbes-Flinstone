@@ -60,6 +60,7 @@ AS = nasm
 ASFLAGS = -f elf64
 CFLAGS += -DDISK_HOST_USE_LIBC_PREADV=1
 # fl_stack_asm is GAS-only today; NASM build keeps C implementations.
+# TODO(Codex): arch/x86_64/nasm/fl_stack_asm.asm for push/pop/count + elev scan parity.
 ASMSRCS_BASE = arch/x86_64/nasm/mem_asm.asm arch/x86_64/nasm/port_io.asm arch/x86_64/nasm/usb_xhci_mmio_asm.asm
 ASMSRCS_ALLOC = arch/x86_64/nasm/alloc_core.asm arch/x86_64/nasm/alloc_malloc.asm arch/x86_64/nasm/alloc_free.asm
 ASM_SRC_DIR = arch/x86_64/nasm
