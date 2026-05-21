@@ -24,3 +24,5 @@ paths return FL_RESULT_ACCES; sudo builtin grants lab elevation TTL.
 
 Tests: test_p0_p2_wiring (stack, PMM, exec context, user db, path props, timekeeping).
 VER_4_1_0_P0_P2
+
+RELEASE_DATE=2026-05-21
