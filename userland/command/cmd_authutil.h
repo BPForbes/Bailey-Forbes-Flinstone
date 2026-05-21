@@ -15,6 +15,9 @@ void cmd_wipe_password(char *buf, size_t buf_size);
  */
 int cmd_sudo_require_auth(void);
 
+/** Like cmd_sudo_require_auth; uses reason for elevation grant and audit. */
+int cmd_sudo_require_auth_reason(const char *reason);
+
 /**
  * Verify target user's password (for su). Always prompts on the next line.
  * Returns 0 on success.

@@ -60,10 +60,11 @@ int cmd_read_password(const char *prompt, char *buf, size_t buf_size) {
 #endif
 }
 
-int cmd_sudo_require_auth(void) {
+int cmd_sudo_require_auth_reason(const char *reason) {
     char pw[128];
     fl_elevation_token_t tok = FL_ELEVATION_TOKEN_NONE;
     fl_result_t rc;
+    const char *why = (reason && reason[0]) ? reason : "sudo authentication";
 
     fl_session_init();
     if (fl_session_is_elevated_account())
@@ -82,13 +83,17 @@ int cmd_sudo_require_auth(void) {
     }
     cmd_wipe_password(pw, sizeof(pw));
 
-    rc = fl_session_grant_elevation("sudo authentication", &tok);
+    rc = fl_session_grant_elevation(why, &tok);
     if (rc != FL_RESULT_OK) {
         fprintf(stderr, "sudo: elevation failed (%d)\n", (int)rc);
         return 1;
     }
-    fl_audit_elevation_event(fl_session_current_user(), "sudo authentication", 1);
+    fl_audit_elevation_event(fl_session_current_user(), why, 1);
     return 0;
+}
+
+int cmd_sudo_require_auth(void) {
+    return cmd_sudo_require_auth_reason("sudo authentication");
 }
 
 int cmd_su_require_auth(const char *target) {

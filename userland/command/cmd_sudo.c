@@ -11,14 +11,13 @@
 static int sudo_grant_token(const char *reason) {
     int had_elev;
 
-    (void)reason;
     fl_session_init();
     if (fl_session_is_elevated_account()) {
         printf("sudo: already elevated as %s\n", fl_session_current_user());
         return 0;
     }
     had_elev = fl_session_has_elevation();
-    if (cmd_sudo_require_auth() != 0)
+    if (cmd_sudo_require_auth_reason(reason) != 0)
         return 1;
     if (had_elev) {
         printf("sudo: elevation already active\n");

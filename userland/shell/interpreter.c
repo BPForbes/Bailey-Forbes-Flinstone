@@ -104,6 +104,11 @@ int execute_command_str(const char *line) {
             free(cmdLine);
             goto finish;
         }
+        if (argc == 2 && strcmp(args[1], "-k") == 0) {
+            out_rc = cmd_sudo_run(argc, args);
+            free(cmdLine);
+            goto finish;
+        }
         if (argc < 2) {
             out_rc = cmd_sudo_run(argc, args);
             free(cmdLine);
