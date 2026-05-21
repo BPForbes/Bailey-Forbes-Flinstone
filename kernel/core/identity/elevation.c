@@ -1,5 +1,3 @@
-/* TODO(P2/Codex): Optional ASM for fl_elevation_grant slot search on bare-metal;
- * active_count uses asm_fl_elev_count_active when FL_STACK_ASM_AVAILABLE (GAS only). */
 #include "elevation.h"
 #include "user_db.h"
 #include "timekeeping.h"

@@ -5,6 +5,7 @@
 #include "fl/elevation.h"
 #include "contract_p2_elevation.h"
 #include "session_sync.h"
+#include "session_login_env.h"
 #include <stdio.h>
 #include <string.h>
 
@@ -29,8 +30,6 @@ static int sudo_grant_token(const char *reason) {
     return 0;
 }
 
-/* TODO(P2/Codex): sudo -i could reset login environment like su -; today only
- * fl_session_set_user("root") + sync (no separate login shell spawn). */
 int cmd_sudo_interactive_login(void) {
     fl_result_t rc;
 
@@ -42,6 +41,7 @@ int cmd_sudo_interactive_login(void) {
         return 1;
     }
     fl_session_sync_services();
+    fl_session_apply_login_shell_env("root");
     printf("sudo: switched to root (login shell)\n");
     return 0;
 }

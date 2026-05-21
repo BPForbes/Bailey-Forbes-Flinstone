@@ -9,16 +9,18 @@ int cmd_logout_run(int argc, char **argv) {
 
     (void)argc;
     (void)argv;
+    int had_token_elev = 0;
+
     fl_session_init();
     before = fl_session_current_user();
-    /* TODO(P2/Codex): Emit elevation revoke audit after fl_session_logout() succeeds
-     * so failed logout does not log a revoke (CodeRabbit). */
-    if (fl_session_has_elevation() && !fl_session_is_elevated_account())
-        fl_audit_elevation_event(before, "logout", 0);
+    had_token_elev =
+        fl_session_has_elevation() && !fl_session_is_elevated_account();
     if (fl_session_logout() != FL_RESULT_OK) {
         fprintf(stderr, "logout: failed\n");
         return 1;
     }
+    if (had_token_elev)
+        fl_audit_elevation_event(before, "logout", 0);
     fl_session_sync_services();
     printf("logout: now %s\n", fl_session_current_user());
     return 0;

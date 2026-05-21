@@ -21,7 +21,8 @@ Jail (P0 FS surface): only elevated login or `sudo <command>` escapes VM jail
 
 Authz (P2-3): fm_service gates; non-elevated users enter their password for sudo/sudo -i;
 su/su -/su -c switch or run commands with the target account password; useradd/userdel/passwd.
-logout returns to the default user; sudo -k revokes elevation tokens without changing account.
+logout returns to the default user (elevation revoke audit after successful logout); sudo -k revokes
+elevation tokens without changing account. su - and sudo -i apply login-shell HOME/cwd (session_login_env).
 whoami prints principal and elevation state; login/su/logout purge elevation slots on user change.
 FL_AUTHZ_OP_IDENTITY_* codes and guest shell/subsystem authz parity tests (test_p0_p2_wiring).
 docs/p0_p2_pr_coverage.md: contract vs integration scope for this PR.
@@ -39,11 +40,10 @@ Tests: test_p0_p2_wiring (stack, PMM, exec context, user db, path props, timekee
 ASM (arch/*/gas/fl_stack_asm.s): hot paths for fl_stack push/pop/count (PMM free-frame
 pool) and fl_elevation_active_count slot scan/reclaim; C fallbacks when FL_STACK_ASM_AVAILABLE
 is unset (e.g. x86_64_nasm). Slot layout locked with _Static_assert(sizeof(fl_elev_slot_t)==56).
-In-source TODO(Codex/CR) markers for deferred P0 bare-metal proof, P1 NASM/bare-metal PMM,
-P2 login-shell env, logout audit ordering, and audit-log file tests (see docs/p0_p2_pr_coverage.md).
+test_audit_log asserts elevation grant/revoke audit lines when FL_AUDIT=1.
 Contract-mount GH #121-128: P1/P2 impl headers anchor contract shards; new contract_p0_fs_jail.h;
 P2 credential store SQLite path (FL_CONTRACT_P2_IDENTITY_REV 3).
-ROADMAP P0-P2 integration: ✅ P0-1..3 only; ~✅ P0-4..P2-4 (hosted wired — P1-1 exec context and P1-7 timekeeping look complete but stay ~✅ for B/arch gaps and Codex TODOs).
+ROADMAP P0-P2 integration ✅: P0-1..3, P0-6..8, P1-1, P1-7, P2-1, P2-2, P2-4; ~✅ P0-4/5, P1-2..6, P2-3 (see docs/p0_p2_pr_coverage.md).
 VER_4_1_0_P0_P2
 
 RELEASE_DATE=2026-05-21

@@ -3,6 +3,7 @@
 #include "fl/audit_log.h"
 #include "fl/session.h"
 #include "session_sync.h"
+#include "session_login_env.h"
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -98,9 +99,9 @@ int cmd_su_run(int argc, char **argv) {
         return 1;
     }
     fl_session_sync_services();
+    if (req.login_shell)
+        fl_session_apply_login_shell_env(req.target);
 
-    /* TODO(P2/Codex): su - should apply login-shell environment (HOME/cwd), not
-     * only print "(login shell)"; session user switch is implemented today. */
     if (req.command) {
         int cmd_rc = su_run_command(req.command);
         if (fl_session_has_elevation())

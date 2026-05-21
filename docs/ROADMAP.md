@@ -113,20 +113,20 @@ Two columns track different concerns:
 | **P0-3** | CI realism | ✅ | ✅ |
 | **P0-4** | ARM GIC EOI correctness | ✅ | ~✅ |
 | **P0-5** | x86_64 IDT + IRQ0 timer tick | ✅ | ~✅ |
-| **P0-6** | x86_64 GDT (minimal flat) | ✅ | ~✅ |
-| **P0-7** | Device tree (FDT / DTB) metadata | ✅ | ~✅ |
-| **P0-8** | Early serial console (UART) | ✅ | ~✅ |
-| **P1-1** | Execution context | ✅ | ~✅ |
+| **P0-6** | x86_64 GDT (minimal flat) | ✅ | ✅ |
+| **P0-7** | Device tree (FDT / DTB) metadata | ✅ | ✅ |
+| **P0-8** | Early serial console (UART) | ✅ | ✅ |
+| **P1-1** | Execution context | ✅ | ✅ |
 | **P1-2** | Address space story | ✅ | ~✅ |
 | **P1-3** | Preemption contract | ✅ | ~✅ |
 | **P1-4** | Physical frame allocator (PMM) | ✅ | ~✅ |
 | **P1-5** | Memory domain arenas | ✅ | ~✅ |
 | **P1-6** | Driver model reentrancy | ✅ | ~✅ |
-| **P1-7** | Timekeeping | ✅ | ~✅ |
-| **P2-1** | Principal model | ✅ | ~✅ |
-| **P2-2** | Credential store (hosted) | ✅ | ~✅ |
+| **P1-7** | Timekeeping | ✅ | ✅ |
+| **P2-1** | Principal model | ✅ | ✅ |
+| **P2-2** | Credential store (hosted) | ✅ | ✅ |
 | **P2-3** | Authorization middleware | ✅ | ~✅ |
-| **P2-4** | Sudo-like elevation (hosted) | ✅ | ~✅ |
+| **P2-4** | Sudo-like elevation (hosted) | ✅ | ✅ |
 | **P3-1** | Device abstraction (`netdev`) | ✅ | ⚠️ |
 | **P3-2** | Loopback (software) | ✅ | ⚠️ |
 | **P3-3** | TAP backend (hosted only) | ✅ | ⚠️ |
@@ -165,7 +165,7 @@ Two columns track different concerns:
 | **P9-2** | Coverity / static analysis | ✅ | ❌ |
 | **P9-3** | SMP bring-up (B) | ✅ | ❌ |
 
-**Summary:** **Contract completion** — **P0-1**–**P0-8**, **P1-1**–**P1-7**, **P2-1**–**P2-4**, **P3-1**–**P3-12** (including **`[DEFERRED]`** shards), **P4-1**–**P4-7**, **P5-1**–**P5-3**, **P6-1**–**P6-5**, **P7-1**–**P7-3**, **P7 (batch)**, **P8-1**–**P8-3**, and **P9-1**–**P9-3** are **✅** under their **`contracts/*`** bundles. **Module integration (P0–P2)** — **✅:** **P0-1**–**P0-3** only. **~✅:** **P0-4**–**P2-4** (hosted/lab wired on **4.1.0**; **P1-1**/**P1-7** and peers are **~✅** despite looking complete—**H**-only paths, **B** proof, or patch **`TODO(Codex)`**—see **`docs/p0_p2_pr_coverage.md`**). **P3** onward unchanged (**⚠️**/**❌**). **P4-1**/**P4-2** **✅**; **P8**/**P9** integration **❌** here.
+**Summary:** **Contract completion** — **P0-1**–**P0-8**, **P1-1**–**P1-7**, **P2-1**–**P2-4**, **P3-1**–**P3-12** (including **`[DEFERRED]`** shards), **P4-1**–**P4-7**, **P5-1**–**P5-3**, **P6-1**–**P6-5**, **P7-1**–**P7-3**, **P7 (batch)**, **P8-1**–**P8-3**, and **P9-1**–**P9-3** are **✅** under their **`contracts/*`** bundles. **Module integration (P0–P2)** — **✅:** **P0-1**–**P0-3**, **P0-6**–**P0-8**, **P1-1**, **P1-7**, **P2-1**, **P2-2**, **P2-4** (hosted/lab wired and tested on **4.1.0**). **~✅:** **P0-4**, **P0-5** (arch **B** evidence TODOs), **P1-2**–**P1-6** (**B** PMM/arena/NASM), **P2-3** (netdev/mount/FileManager gates). See **`docs/p0_p2_pr_coverage.md`**. **P3** onward unchanged (**⚠️**/**❌**). **P4-1**/**P4-2** **✅**; **P8**/**P9** integration **❌** here.
 
 ---
 
