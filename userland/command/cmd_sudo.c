@@ -1,27 +1,56 @@
 #include "cmd_decl.h"
+#include "cmd_authutil.h"
 #include "fl/session.h"
 #include "fl/elevation.h"
 #include "contract_p2_elevation.h"
+#include "session_sync.h"
 #include <stdio.h>
+#include <string.h>
 
-int cmd_sudo_run(int argc, char **argv) {
-    fl_elevation_token_t tok = FL_ELEVATION_TOKEN_NONE;
-    const char *reason = "lab elevation";
-    fl_result_t rc;
-    (void)argc;
-    if (argv[1])
-        reason = argv[1];
+static int sudo_grant_token(const char *reason) {
+    int had_elev;
+
+    (void)reason;
+    fl_session_init();
     if (fl_session_is_elevated_account()) {
         printf("sudo: already elevated as %s\n", fl_session_current_user());
         return 0;
     }
-    rc = fl_session_grant_elevation(reason, &tok);
-    if (rc != FL_RESULT_OK) {
-        fprintf(stderr, "sudo: elevation failed (%d)\n", (int)rc);
+    had_elev = fl_session_has_elevation();
+    if (cmd_sudo_require_auth() != 0)
         return 1;
+    if (had_elev) {
+        printf("sudo: elevation already active\n");
+        return 0;
     }
-    printf("sudo: elevation granted (token=%llu, ttl<=%us)\n",
-           (unsigned long long)tok, (unsigned)FL_ELEVATION_LAB_TTL_SOFT_MAX_SECONDS);
+    printf("sudo: elevation granted (ttl<=%us)\n",
+           (unsigned)FL_ELEVATION_LAB_TTL_SOFT_MAX_SECONDS);
     printf("sudo: use `sudo <command>` to escape VM jail (token alone does not)\n");
     return 0;
+}
+
+int cmd_sudo_interactive_login(void) {
+    fl_result_t rc;
+
+    if (cmd_sudo_require_auth() != 0)
+        return 1;
+    rc = fl_session_set_user("root");
+    if (rc != FL_RESULT_OK) {
+        fprintf(stderr, "sudo: cannot switch to root (%d)\n", (int)rc);
+        return 1;
+    }
+    fl_session_sync_services();
+    printf("sudo: switched to root (login shell)\n");
+    return 0;
+}
+
+int cmd_sudo_run(int argc, char **argv) {
+    const char *reason = "lab elevation";
+
+    if (argc >= 2 && argv[1] && strcmp(argv[1], "-i") == 0)
+        return cmd_sudo_interactive_login();
+
+    if (argv[1])
+        reason = argv[1];
+    return sudo_grant_token(reason);
 }

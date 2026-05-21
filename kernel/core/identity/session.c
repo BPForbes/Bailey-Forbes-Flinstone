@@ -79,7 +79,15 @@ fl_result_t fl_session_login(const char *name, const char *password) {
     strncpy(s_current, name, sizeof(s_current) - 1);
     s_current[sizeof(s_current) - 1] = '\0';
     s_active_elev = FL_ELEVATION_TOKEN_NONE;
+    s_sudo_scope_depth = 0;
     return FL_RESULT_OK;
+}
+
+int fl_session_verify_password(const char *password) {
+    fl_session_init();
+    if (!password)
+        return 0;
+    return fl_user_db_verify_password(&s_db, s_current, password) ? 1 : 0;
 }
 
 fl_result_t fl_session_set_user(const char *name) {
@@ -93,6 +101,7 @@ fl_result_t fl_session_set_user(const char *name) {
     strncpy(s_current, name, sizeof(s_current) - 1);
     s_current[sizeof(s_current) - 1] = '\0';
     s_active_elev = FL_ELEVATION_TOKEN_NONE;
+    s_sudo_scope_depth = 0;
     return FL_RESULT_OK;
 }
 

@@ -38,6 +38,7 @@ static const cmd_name_ent_t cmd_registry[] = {
     {"search", FL_SCMD_SEARCH},
     {"setdisk", FL_SCMD_SETDISK},
     {"sudo", FL_SCMD_SUDO},
+    {"su", FL_SCMD_SU},
     {"useradd", FL_SCMD_USERADD},
     {"userdel", FL_SCMD_USERDEL},
     {"passwd", FL_SCMD_PASSWD},

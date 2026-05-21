@@ -10,6 +10,7 @@
 #include "fl/authz_subsystem.h"
 #include "fl/shell_authz.h"
 #include "fl/session.h"
+#include "cmd_authutil.h"
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -98,9 +99,19 @@ int execute_command_str(const char *line) {
     }
 
     if (strcmp(args[0], "sudo") == 0) {
+        if (argc >= 2 && strcmp(args[1], "-i") == 0) {
+            out_rc = cmd_sudo_interactive_login();
+            free(cmdLine);
+            goto finish;
+        }
         if (argc < 2) {
             out_rc = cmd_sudo_run(argc, args);
             free(cmdLine);
+            goto finish;
+        }
+        if (cmd_sudo_require_auth() != 0) {
+            free(cmdLine);
+            out_rc = 1;
             goto finish;
         }
         if (argc == 2) {
@@ -120,9 +131,47 @@ int execute_command_str(const char *line) {
                 free(cmdLine);
                 goto finish;
             }
-            out_rc = cmd_sudo_run(argc, args);
-            free(cmdLine);
-            goto finish;
+            {
+                fl_authz_decision_t fx = fl_shell_authz_foreign_exec(1, &args[1]);
+                if (fx == FL_AUTHZ_DENY) {
+                    fl_audit_authz_event(line, 0u, 1);
+                    free(cmdLine);
+                    out_rc = 1;
+                    goto finish;
+                }
+                fl_audit_authz_event(line, (unsigned)FL_AUTHZ_OP_SHELL_FOREIGN_EXEC, 0);
+                fl_session_begin_sudo_scope();
+                {
+                    pid_t pid = fork();
+                    if (pid < 0) {
+                        perror("fork");
+                        fl_session_end_sudo_scope();
+                        free(cmdLine);
+                        out_rc = 1;
+                        goto finish;
+                    }
+                    if (pid == 0) {
+                        signal(SIGINT, SIG_DFL);
+                        execvp(args[1], &args[1]);
+                        perror("execvp");
+                        _exit(127);
+                    }
+                    {
+                        int status = 0;
+                        if (waitpid(pid, &status, 0) < 0)
+                            out_rc = 1;
+                        else if (WIFEXITED(status))
+                            out_rc = WEXITSTATUS(status);
+                        else if (WIFSIGNALED(status))
+                            out_rc = 128 + WTERMSIG(status);
+                        else
+                            out_rc = 1;
+                    }
+                }
+                fl_session_end_sudo_scope();
+                free(cmdLine);
+                goto finish;
+            }
         }
         {
             int inner_argc = argc - 1;
@@ -159,8 +208,14 @@ int execute_command_str(const char *line) {
                 }
                 {
                     int status = 0;
-                    waitpid(pid, &status, 0);
-                    out_rc = WEXITSTATUS(status);
+                    if (waitpid(pid, &status, 0) < 0)
+                        out_rc = 1;
+                    else if (WIFEXITED(status))
+                        out_rc = WEXITSTATUS(status);
+                    else if (WIFSIGNALED(status))
+                        out_rc = 128 + WTERMSIG(status);
+                    else
+                        out_rc = 1;
                 }
                 fl_session_end_sudo_scope();
                 free(cmdLine);
@@ -197,6 +252,12 @@ int execute_command_str(const char *line) {
         }
     }
 
+    if (strcmp(args[0], "su") == 0) {
+        out_rc = cmd_su_run(argc, args);
+        free(cmdLine);
+        goto finish;
+    }
+
     fl_shell_cmd_no_t id = fl_shell_cmd_lookup(args[0]);
     if (id == FL_SCMD_UNKNOWN) {
         fl_authz_decision_t fx = fl_shell_authz_foreign_exec(argc, args);
@@ -221,9 +282,15 @@ int execute_command_str(const char *line) {
             _exit(127);
         } else {
             int status = 0;
-            waitpid(pid, &status, 0);
+            if (waitpid(pid, &status, 0) < 0)
+                out_rc = 1;
+            else if (WIFEXITED(status))
+                out_rc = WEXITSTATUS(status);
+            else if (WIFSIGNALED(status))
+                out_rc = 128 + WTERMSIG(status);
+            else
+                out_rc = 1;
             free(cmdLine);
-            out_rc = WEXITSTATUS(status);
             goto finish;
         }
     }

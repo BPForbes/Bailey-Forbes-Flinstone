@@ -43,6 +43,7 @@ typedef enum {
     FL_SCMD_DISKDEL,
     FL_SCMD_DISKMKDIR,
     FL_SCMD_SUDO,
+    FL_SCMD_SU,
     FL_SCMD_LOGIN,
     FL_SCMD_USERADD,
     FL_SCMD_USERDEL,

@@ -106,6 +106,8 @@ static int test_session_login(void) {
     ASSERT(fl_session_login("flinstone", "flinstone") == FL_RESULT_OK);
     ASSERT(fl_session_is_elevated_account() == 0);
     ASSERT(fl_session_has_elevation() == 0);
+    ASSERT(fl_session_verify_password("flinstone") == 1);
+    ASSERT(fl_session_verify_password("wrong") == 0);
     ASSERT(fl_session_jail_privileged() == 0);
     {
         fl_elevation_token_t tok = FL_ELEVATION_TOKEN_NONE;

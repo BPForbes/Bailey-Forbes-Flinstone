@@ -307,7 +307,7 @@ int main(int argc, char *argv[]) {
             "rmtree","mv","version","contracts","audit","exit","bios","clear","history","his","cc","listclusters","listdirs",
             "setdisk","createdisk","format","search","writecluster","delcluster","update","redirect",
             "initdisk","rerun","import","du","printdisk","addcluster","where","loc",
-            "diskput","diskget","diskfiles","diskdel","diskmkdir","sudo","login",
+            "diskput","diskget","diskfiles","diskdel","diskmkdir","sudo","su","login",
             "useradd","userdel","passwd",NULL};
         int is_cmd = 0;
         for (int k = 0; skip[k]; k++)
@@ -525,6 +525,41 @@ int main(int argc, char *argv[]) {
                     tokensCount = 3;
                 else
                     tokensCount = 1;
+            }
+            else if (!strcmp(cmd, "login"))
+                tokensCount = 3;
+            else if (!strcmp(cmd, "userdel"))
+                tokensCount = 2;
+            else if (!strcmp(cmd, "useradd")) {
+                if (i + 2 < argc && argv[i + 2] && argv[i + 2][0] != '-')
+                    tokensCount = 3;
+                else
+                    tokensCount = 2;
+            }
+            else if (!strcmp(cmd, "passwd"))
+                tokensCount = (i + 2 < argc) ? 3 : 2;
+            else if (!strcmp(cmd, "sudo")) {
+                if (i + 1 < argc && argv[i + 1] && !strcmp(argv[i + 1], "-i"))
+                    tokensCount = 2;
+                else {
+                    int j = i + 1;
+                    while (j < argc && argv[j] && argv[j][0] != '-')
+                        j++;
+                    tokensCount = (j > i + 1) ? (j - i) : 2;
+                }
+            }
+            else if (!strcmp(cmd, "su")) {
+                int j = i + 1;
+                int has_c = 0;
+                while (j < argc && argv[j] && argv[j][0] != '-') {
+                    if (!strcmp(argv[j], "-c"))
+                        has_c = 1;
+                    j++;
+                }
+                if (has_c && i + 2 < argc)
+                    tokensCount = (j > i + 3) ? (j - i) : 4;
+                else
+                    tokensCount = (j > i + 1) ? (j - i) : 2;
             }
             else {
                 int j = i + 1;

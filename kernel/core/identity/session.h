@@ -25,6 +25,9 @@ void        fl_session_end_sudo_scope(void);
 fl_result_t fl_session_login(const char *name, const char *password);
 fl_result_t fl_session_set_user(const char *name);
 
+/** Verify password for the current session user (sudo-style self-auth). */
+int         fl_session_verify_password(const char *password);
+
 fl_result_t fl_session_grant_elevation(const char *reason, fl_elevation_token_t *out);
 void        fl_session_bind_elevation(fl_elevation_token_t token);
 void        fl_session_clear_elevation(void);
