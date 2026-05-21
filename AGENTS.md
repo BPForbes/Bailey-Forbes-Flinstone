@@ -187,3 +187,11 @@ For VM work:
 For SDL VM work:
 
 `make deps && make clean && make vm-sdl`
+
+## Known test target issues (as of `main`)
+
+- `make test_vm_mem` — fails to compile: `tests/test_vm_mem.c` includes `"VM/vm_mem.h"` but the header is at `VM/devices/vm_mem.h`; the include-path flags (`-IVM -IVM/devices`) do not resolve the quoted path.
+- `make test_replay` — linker errors for missing symbols (`disk_host_pwrite64_asm`, `fl_irq_lifecycle_*`); the link recipe is missing several object files.
+- `make test_alloc_asm` — `test_basic` fails at runtime (pre-existing ASM allocator issue).
+
+These are **pre-existing repo issues** on `main`, not environment problems. The working test targets are: `test_drivers`, `test_core`, `test_invariants`, `test_alloc_libc`, and the CUnit suite (`BPForbes_Flinstone_Tests`).
