@@ -14,12 +14,20 @@ This note separates **contract completion** (normative headers under `contracts/
 
 ## Module integration snapshot (**`docs/ROADMAP.md`**)
 
-All **P0–P2** rows use **✅** or **~✅** in the roadmap **Module integration** column (**4.1.0** hosted/lab scope). **~✅** means wiring and tests are in place; remaining work is **patch-scale** (in-source **`TODO(Codex)`**, bare-metal proof on **B**, or items like **TODO: P2-3** kernel-path authz)—not a missing contract row.
+All **P0–P2** rows are **✅** or **~✅** in **Module integration** (**4.1.0** hosted/lab). Use **~✅** when wiring **looks** complete on **H** but **B**-path proof, arch timers, kernel-thread exec context, or in-source **`TODO(Codex)`** remain.
 
-| Band | Integration | Notes |
-|------|-------------|-------|
-| **P0-1 … P0-3** | **✅** | Subsystems, **`fl_result_t`**, CI |
-| **P0-4 … P2-4** | **~✅** | Hosted wiring + **`test_p0_p2_wiring`**; see *Code TODO markers* below |
+| IDs | Integration | Rationale |
+|-----|-------------|-----------|
+| **P0-1 … P0-3** | **✅** | Boundaries, **`fl_result_t`**, CI |
+| **P0-4 … P0-8** | **~✅** | Arch paths built; bare-metal proof TODOs (**`arm_gic.c`**, **`idt_dispatch.c`**, **`fs_jail.c`**) |
+| **P1-1** | **~✅** | Hosted **`malloc`** stack/heap context + tests; kernel-thread / **B** exec context TODO (**`exec_context.c`**) |
+| **P1-2, P1-3** | **~✅** | **`mem_domain`** / spinlocks wired on **H**; flat/paged story and lock-order graph not closed on **B** (**`pmm.c`**) |
+| **P1-4** | **~✅** | PMM + **`fl_stack`** wired; **`pmm.c`** bare-metal / NASM ASM TODOs |
+| **P1-5, P1-6** | **~✅** | Arenas and driver tables on **H**; **P1→P2** **B** validation tied to **`pmm.c`** / driver reentrancy gates |
+| **P1-7** | **~✅** | POSIX **`clock_gettime`** on **H** + tests; arch Generic Timer / **P0-5** tick on **B** TODO (**`timekeeping.c`**) |
+| **P2-1, P2-2** | **~✅** | Session/principal + **`user_db`** on **H**; service-layer / non-hosted credential paths per phase gates |
+| **P2-3** | **~✅** | Shell + **`fm_service`** authz + **`test_p0_p2_wiring`**; kernel netdev/mount/FileManager entry wiring still open (**TODO: P2-3** in **`docs/ROADMAP.md`**) |
+| **P2-4** | **~✅** | Elevation/sudo/su shipped; polish TODOs (**logout** audit order, login-shell env, audit file tests) |
 
 ## Code TODO markers (Codex / CodeRabbit follow-ups)
 
@@ -30,7 +38,9 @@ Tracked in-source where integration is still partial:
 | Area | File | Topic |
 |------|------|--------|
 | P0-4..P0-8 | `fs_jail.c`, `arm_gic.c`, `idt_dispatch.c` | Bare-metal integration evidence |
-| P1 | `pmm.c` | DRIVERS_BAREMETAL lock-order + PMM/arenas |
+| P1-1 | `exec_context.c` | Kernel-thread / **B** execution context (today hosted **`malloc`** only) |
+| P1-7 | `timekeeping.c` | Arch timer source on **B** (Generic Timer / **P0-5**), not POSIX-only |
+| P1 | `pmm.c` | DRIVERS_BAREMETAL lock-order graph + PMM/arena behavior |
 | P1 | `fl_stack.c`, `Makefile` | NASM `fl_stack_asm` port |
 | P2 | `elevation.c` | Optional ASM for grant slot search |
 | P2 | `cmd_su.c`, `cmd_sudo.c` | Login-shell environment for `su -` / `sudo -i` |

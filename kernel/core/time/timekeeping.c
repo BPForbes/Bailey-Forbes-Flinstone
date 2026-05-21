@@ -1,3 +1,5 @@
+/* TODO(P1/Codex): P1-7 arch time on B — AArch64 Generic Timer or P0-5 tick path;
+ * hosted POSIX clock_gettime is reference-only on H. */
 #include "timekeeping.h"
 #include <time.h>
 
