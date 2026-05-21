@@ -609,6 +609,14 @@ static int append_escaped(Buf *out, const char *s) {
         } else {
             if (buf_append_fmt(out, "\\x%02x", c) != 0)
                 return -1;
+            /* C treats \\x as greedy hex; split literals if the next source byte is [0-9A-Fa-f]. */
+            if (p[1] != '\0') {
+                unsigned char n = p[1];
+                if ((n >= '0' && n <= '9') || (n >= 'a' && n <= 'f') || (n >= 'A' && n <= 'F')) {
+                    if (buf_append_cstr(out, "\"\n    \"") != 0)
+                        return -1;
+                }
+            }
         }
     }
     return 0;

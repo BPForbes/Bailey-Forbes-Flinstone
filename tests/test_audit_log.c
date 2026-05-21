@@ -324,6 +324,35 @@ static void test_emit_fn(struct fl_log_sink *sink, int level,
         strncpy(g_emit_msg, msg, sizeof g_emit_msg - 1u);
 }
 
+static int test_audit_elevation_grant_revoke(void) {
+    ASSERT(enter_tmpdir() == 0);
+    unlink(FL_AUDIT_REL_DEFAULT);
+
+    setenv(FL_AUDIT_ENV, "1", 1);
+    fl_audit_elevation_event("flinstone", "wiring-grant", 1);
+    fl_audit_elevation_event("flinstone", "wiring-revoke", 0);
+    unsetenv(FL_AUDIT_ENV);
+
+    FILE *fp = fopen(FL_AUDIT_REL_DEFAULT, "r");
+    ASSERT(fp != NULL);
+    char buf[2048];
+    size_t nr = fread(buf, 1, sizeof buf - 1u, fp);
+    ASSERT(nr > 0u);
+    buf[nr] = '\0';
+    fclose(fp);
+
+    ASSERT(strstr(buf, "type=elevation") != NULL);
+    ASSERT(strstr(buf, "principal=flinstone") != NULL);
+    ASSERT(strstr(buf, "reason=wiring-grant") != NULL);
+    ASSERT(strstr(buf, "event=grant") != NULL);
+    ASSERT(strstr(buf, "reason=wiring-revoke") != NULL);
+    ASSERT(strstr(buf, "event=revoke") != NULL);
+
+    unlink(FL_AUDIT_REL_DEFAULT);
+    leave_tmpdir();
+    return 0;
+}
+
 static int test_audit_sink_invoked(void) {
     ASSERT(enter_tmpdir() == 0);
     unlink(FL_AUDIT_REL_DEFAULT);
@@ -541,6 +570,10 @@ int main(void) {
 
     printf("test_audit_completed_sanitizes_control_chars... ");
     if (test_audit_completed_sanitizes_control_chars() != 0) return 1;
+    printf("OK\n");
+
+    printf("test_audit_elevation_grant_revoke... ");
+    if (test_audit_elevation_grant_revoke() != 0) return 1;
     printf("OK\n");
 
     printf("test_audit_sink_invoked... ");
