@@ -26,6 +26,7 @@ static const cmd_name_ent_t cmd_registry[] = {
     {"initdisk", FL_SCMD_INITDISK},
     {"listclusters", FL_SCMD_LISTCLUSTERS},
     {"listdirs", FL_SCMD_LISTDIRS},
+    {"login", FL_SCMD_LOGIN},
     {"loc", FL_SCMD_LOC},
     {"mkdir", FL_SCMD_MKDIR},
     {"mv", FL_SCMD_MV},

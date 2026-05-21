@@ -10,14 +10,9 @@ static pthread_once_t s_once = PTHREAD_ONCE_INIT;
 
 static void session_load_once(void) {
     if (fl_user_db_load(&s_db, FL_SESSION_USERS_PATH) != FL_RESULT_OK) {
-        fl_user_db_clear(&s_db);
-        strncpy(s_db.default_user, "user", sizeof(s_db.default_user) - 1);
-        if (s_db.count < FL_USER_DB_MAX_USERS) {
-            strncpy(s_db.users[0].name, "user", sizeof(s_db.users[0].name) - 1);
-            s_db.users[0].uid = 1000;
-            s_db.count = 1;
-        }
-        s_db.loaded = 1;
+        fl_user_db_seed_defaults(&s_db);
+        strncpy(s_db.path, FL_SESSION_USERS_PATH, sizeof(s_db.path) - 1);
+        (void)fl_user_db_save(&s_db);
     }
     strncpy(s_current, s_db.default_user, sizeof(s_current) - 1);
     s_current[sizeof(s_current) - 1] = '\0';
@@ -32,15 +27,28 @@ const char *fl_session_current_user(void) {
     return s_current;
 }
 
-int fl_session_is_root(void) {
+int fl_session_is_elevated_account(void) {
     fl_session_init();
-    return fl_user_db_is_root_user(&s_db, s_current);
+    return fl_user_db_is_elevated_user(&s_db, s_current);
 }
 
 int fl_session_has_elevation(void) {
-    if (fl_session_is_root())
+    fl_session_init();
+    if (fl_session_is_elevated_account())
         return 1;
     return fl_elevation_active(s_active_elev);
+}
+
+fl_result_t fl_session_login(const char *name, const char *password) {
+    fl_session_init();
+    if (!name || !name[0] || !password)
+        return FL_RESULT_INVAL;
+    if (!fl_user_db_verify_password(&s_db, name, password))
+        return FL_RESULT_ACCES;
+    strncpy(s_current, name, sizeof(s_current) - 1);
+    s_current[sizeof(s_current) - 1] = '\0';
+    s_active_elev = FL_ELEVATION_TOKEN_NONE;
+    return FL_RESULT_OK;
 }
 
 fl_result_t fl_session_set_user(const char *name) {
@@ -53,6 +61,7 @@ fl_result_t fl_session_set_user(const char *name) {
         return FL_RESULT_NOENT;
     strncpy(s_current, name, sizeof(s_current) - 1);
     s_current[sizeof(s_current) - 1] = '\0';
+    s_active_elev = FL_ELEVATION_TOKEN_NONE;
     return FL_RESULT_OK;
 }
 
@@ -61,6 +70,10 @@ fl_result_t fl_session_grant_elevation(const char *reason, fl_elevation_token_t 
     fl_session_init();
     if (!out)
         return FL_RESULT_INVAL;
+    if (fl_session_is_elevated_account()) {
+        *out = FL_ELEVATION_TOKEN_NONE;
+        return FL_RESULT_OK;
+    }
     rc = fl_elevation_grant(s_current, reason, out);
     if (rc == FL_RESULT_OK)
         s_active_elev = *out;
@@ -72,7 +85,22 @@ void fl_session_bind_elevation(fl_elevation_token_t token) {
     s_active_elev = token;
 }
 
+void fl_session_clear_elevation(void) {
+    fl_session_init();
+    s_active_elev = FL_ELEVATION_TOKEN_NONE;
+}
+
+fl_user_db_t *fl_session_user_db_mut(void) {
+    fl_session_init();
+    return &s_db;
+}
+
 const fl_user_db_t *fl_session_user_db(void) {
     fl_session_init();
     return &s_db;
+}
+
+fl_result_t fl_session_save_users(void) {
+    fl_session_init();
+    return fl_user_db_save(&s_db);
 }

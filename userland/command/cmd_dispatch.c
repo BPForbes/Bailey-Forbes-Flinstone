@@ -76,6 +76,8 @@ int fl_shell_cmd_dispatch(fl_shell_cmd_no_t no, int argc, char **argv) {
         return cmd_diskmkdir_run(argc, argv);
     case FL_SCMD_SUDO:
         return cmd_sudo_run(argc, argv);
+    case FL_SCMD_LOGIN:
+        return cmd_login_run(argc, argv);
     default:
         return -1;
     }

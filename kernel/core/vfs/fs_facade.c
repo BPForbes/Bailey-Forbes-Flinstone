@@ -56,7 +56,7 @@ static int fm_authz_path_gate(const char *path) {
         if (!fl_session_has_elevation())
             return -1;
         if (prop.owner[0] && strcmp(prop.owner, fl_session_current_user()) != 0
-            && !fl_session_is_root())
+            && !fl_session_is_elevated_account())
             return -1;
     }
     return 0;

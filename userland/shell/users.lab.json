@@ -1,8 +1,17 @@
 {
-  "default_user": "user",
+  "default_user": "flinstone",
   "users": [
-    {"name": "root", "uid": 0, "is_root": 1},
-    {"name": "user", "uid": 1000, "is_root": 0},
-    {"name": "guest", "uid": 1001, "is_root": 0}
+    {
+      "name": "flinstone",
+      "password": "flinstone",
+      "uid": 1000,
+      "is_elevated": 0
+    },
+    {
+      "name": "root",
+      "password": "root",
+      "uid": 0,
+      "is_elevated": 1
+    }
   ]
 }

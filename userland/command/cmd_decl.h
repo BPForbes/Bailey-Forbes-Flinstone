@@ -50,5 +50,6 @@ int cmd_diskfiles_run(int argc, char **argv);
 int cmd_diskdel_run(int argc, char **argv);
 int cmd_diskmkdir_run(int argc, char **argv);
 int cmd_sudo_run(int argc, char **argv);
+int cmd_login_run(int argc, char **argv);
 
 #endif /* CMD_DECL_H */

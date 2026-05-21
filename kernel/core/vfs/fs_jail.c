@@ -106,10 +106,20 @@ static int under_jail(const char *canon) {
 
 int fs_jail_check_access(const char *path) {
     fl_path_property_t prop;
-    if (fs_jail_check_path(path) != 0)
-        return -1;
+    int jail_ok;
+
     if (!fs_jail_is_active())
         return 0;
+
+    /* sudo / elevated account: leave VM jail (access paths outside sandbox). */
+    if (fl_session_has_elevation())
+        jail_ok = 0;
+    else
+        jail_ok = fs_jail_check_path(path);
+
+    if (jail_ok != 0)
+        return -1;
+
     if (fl_path_property_resolve(path, &prop) != FL_RESULT_OK)
         return 0;
     if (!prop.requires_elevation)

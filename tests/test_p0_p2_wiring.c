@@ -2,6 +2,8 @@
 #include "exec_context.h"
 #include "timekeeping.h"
 #include "user_db.h"
+#include "session.h"
+#include "elevation.h"
 #include "path_property.h"
 #include "pmm.h"
 #include "contract_result.h"
@@ -49,9 +51,10 @@ static int test_user_db(void) {
     fl_user_db_t db;
     const fl_user_record_t *r;
     ASSERT(fl_user_db_load(&db, "userland/shell/users.lab.json") == FL_RESULT_OK);
+    ASSERT(fl_user_db_verify_password(&db, "flinstone", "flinstone") == 1);
     r = fl_user_db_find(&db, "root");
-    ASSERT(r && r->is_root == 1);
-    ASSERT(fl_user_db_is_root_user(&db, "root") == 1);
+    ASSERT(r && r->is_elevated == 1);
+    ASSERT(fl_user_db_is_elevated_user(&db, "root") == 1);
     return 0;
 }
 
@@ -66,6 +69,16 @@ static int test_path_property(void) {
     ASSERT(fl_path_property_set_dir(dir, "user", 1) == FL_RESULT_OK);
     ASSERT(fl_path_property_resolve(dir, &prop) == FL_RESULT_OK);
     ASSERT(prop.requires_elevation == 1);
+    return 0;
+}
+
+static int test_session_login(void) {
+    fl_session_init();
+    ASSERT(fl_session_login("root", "root") == FL_RESULT_OK);
+    ASSERT(fl_session_is_elevated_account() == 1);
+    ASSERT(fl_session_has_elevation() == 1);
+    ASSERT(fl_session_login("flinstone", "flinstone") == FL_RESULT_OK);
+    ASSERT(fl_session_is_elevated_account() == 0);
     return 0;
 }
 
@@ -86,6 +99,7 @@ int main(void) {
     if (test_exec_context()) return 1;
     if (test_timekeeping()) return 1;
     if (test_user_db()) return 1;
+    if (test_session_login()) return 1;
     if (test_path_property()) return 1;
     if (test_pmm_stack()) return 1;
     printf("test_p0_p2_wiring: ok\n");
