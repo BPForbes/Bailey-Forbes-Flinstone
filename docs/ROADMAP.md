@@ -74,6 +74,7 @@ Two columns track different concerns:
 | Symbol | **Contract completion** | **Module integration** |
 |--------|-------------------------|---------------------------|
 | **✅** | Normative **contract bundle** for the row is **explicit**, **stable**, and **complete enough** that other subsystems can rely on it **without inferring rules only from implementation** (**`contracts/*/*.h`**, **`FL_CONTRACT_*_CONTRACT_DEFINED`**, adjacent **`fl/*`** boundary headers). | **Enforcement / bring-up** for that row is **wired and test-covered** enough for the current track (**H** hosted lab and/or **B** where claimed)—not necessarily full product or silicon completeness. |
+| **~✅** | *(prefix on **✅** only)* Same as **✅**; remaining gaps are **patch-scale** only (in-source **`TODO(P*/Codex)`** / **`TODO(CR)`**—see note below). | Same as **✅** for hosted/lab scope; **bare-metal** proof or UX polish called out in tree, not a missing contract or subsystem. |
 | **⚠️** | A **real contract model exists** but coverage is **incomplete**, still a **placeholder**, or a **deferred TODO** references that row. | **Partial** implementation (hooks, lab subset, or hosted-only path); phase gates or **Appendix D** items still open. |
 | **❌** | **No** dedicated **data-distribution contract** for that row. | **No** meaningful integration yet (or process-only row with no module boundary). |
 
@@ -82,6 +83,8 @@ Two columns track different concerns:
 ### P0–P9 module-contract snapshot (`develop`)
 
 **Note:** Re-verify this table when preparing a release; it reflects the **contract-packaging** story, not full feature completion.
+
+**Patch-scale TODOs (`~` prefix on integration ✅):** When a row’s **module integration** is **~✅**, hosted/lab wiring and tests are in place and any open work is tracked only as **minor** in-source comments (**`TODO(P*/Codex)`**, **`TODO(CR)`**) suitable for a **patch** (not a phase gate). Those markers are **ignored** for contract-completion (**✅** stays **✅**). Inventory and file paths: **`docs/p0_p2_pr_coverage.md`** (section *Code TODO markers*). As of the **4.1.0** prerelease train, **~✅** integration applies to **P0-4**, **P0-5**, **P1-4**, and **P2-4** (bare-metal evidence, NASM `fl_stack_asm`, login-shell env, logout audit ordering, optional elevation ASM). Rows still **⚠️** for substantive gaps (e.g. **P0-6**–**P0-8** without patch TODOs, **TODO: P2-3** kernel-path authz in the Phase **2** table) are unchanged.
 
 **P0 row criterion (aligned with `contracts/foundations/`):** **P0-1** through **P0-8** are **✅** when the normative **C contract bundle** under **`contracts/foundations/`** defines that row: **P0-1**/**P0-2** via **`contract_foundations.h`**, **`contract_result.h`**, log/auth/driver wiring, **`contract_extend.h`**, and **`contract_compile_ext.h`**; **P0-3**–**P0-8** via **`contract_p0_ci.h`**, **`contract_p0_arm_gic.h`**, **`contract_p0_x86_idt.h`**, **`contract_p0_x86_gdt.h`**, **`contract_p0_fdt.h`**, and **`contract_p0_uart.h`** (obligations as comments + **`FL_CONTRACT_P0_*_CONTRACT_DEFINED`** markers). **Implementation completion** for IRQ/DTB/UART/CI still follows phase gates and **Appendix D**; this snapshot tracks **contract definition**, not “all silicon paths verified.”
 
@@ -108,22 +111,22 @@ Two columns track different concerns:
 | **P0-1** | Subsystem boundaries | ✅ | ✅ |
 | **P0-2** | Error taxonomy (`fl_result_t` as outcome channel) | ✅ | ✅ |
 | **P0-3** | CI realism | ✅ | ✅ |
-| **P0-4** | ARM GIC EOI correctness | ✅ | ⚠️ |
-| **P0-5** | x86_64 IDT + IRQ0 timer tick | ✅ | ⚠️ |
+| **P0-4** | ARM GIC EOI correctness | ✅ | ~✅ |
+| **P0-5** | x86_64 IDT + IRQ0 timer tick | ✅ | ~✅ |
 | **P0-6** | x86_64 GDT (minimal flat) | ✅ | ⚠️ |
 | **P0-7** | Device tree (FDT / DTB) metadata | ✅ | ⚠️ |
 | **P0-8** | Early serial console (UART) | ✅ | ⚠️ |
 | **P1-1** | Execution context | ✅ | ⚠️ |
 | **P1-2** | Address space story | ✅ | ⚠️ |
 | **P1-3** | Preemption contract | ✅ | ⚠️ |
-| **P1-4** | Physical frame allocator (PMM) | ✅ | ⚠️ |
+| **P1-4** | Physical frame allocator (PMM) | ✅ | ~✅ |
 | **P1-5** | Memory domain arenas | ✅ | ⚠️ |
 | **P1-6** | Driver model reentrancy | ✅ | ⚠️ |
 | **P1-7** | Timekeeping | ✅ | ⚠️ |
 | **P2-1** | Principal model | ✅ | ⚠️ |
 | **P2-2** | Credential store (hosted) | ✅ | ⚠️ |
 | **P2-3** | Authorization middleware | ✅ | ⚠️ |
-| **P2-4** | Sudo-like elevation (hosted) | ✅ | ⚠️ |
+| **P2-4** | Sudo-like elevation (hosted) | ✅ | ~✅ |
 | **P3-1** | Device abstraction (`netdev`) | ✅ | ⚠️ |
 | **P3-2** | Loopback (software) | ✅ | ⚠️ |
 | **P3-3** | TAP backend (hosted only) | ✅ | ⚠️ |
@@ -162,7 +165,7 @@ Two columns track different concerns:
 | **P9-2** | Coverity / static analysis | ✅ | ❌ |
 | **P9-3** | SMP bring-up (B) | ✅ | ❌ |
 
-**Summary:** **Contract completion** — **P0-1**–**P0-8**, **P1-1**–**P1-7**, **P2-1**–**P2-4**, **P3-1**–**P3-12** (including **`[DEFERRED]`** shards), **P4-1**–**P4-7**, **P5-1**–**P5-3**, **P6-1**–**P6-5**, **P7-1**–**P7-3**, **P7 (batch)**, **P8-1**–**P8-3**, and **P9-1**–**P9-3** are **✅** under their **`contracts/*`** bundles. **Module integration** — **P0-1**–**P0-3** and **P4-1**/**P4-2** are **✅**; **P8-1**–**P8-3** and **P9-1**–**P9-3** are **❌** here (Phase **8**/**9** product gates not met). **P0-4**–**P0-8**, **P1**, **P2**, **P3**, **P4-3**–**P4-7**, and **P5** are **⚠️** or **❌** (partial enforcement, lab subset, phase gates, or not started); **P3-10**/**P3-11** integration is **❌** by design. **TODO: P2-3** tracks further kernel-path **`fl_authz_subsystem_check`** wiring, not contract completeness.
+**Summary:** **Contract completion** — **P0-1**–**P0-8**, **P1-1**–**P1-7**, **P2-1**–**P2-4**, **P3-1**–**P3-12** (including **`[DEFERRED]`** shards), **P4-1**–**P4-7**, **P5-1**–**P5-3**, **P6-1**–**P6-5**, **P7-1**–**P7-3**, **P7 (batch)**, **P8-1**–**P8-3**, and **P9-1**–**P9-3** are **✅** under their **`contracts/*`** bundles. **Module integration** — **P0-1**–**P0-3**, **P4-1**/**P4-2**, and **~✅** rows **P0-4**, **P0-5**, **P1-4**, **P2-4** (patch-scale **`TODO(Codex)`** only—see note above); **P8-1**–**P8-3** and **P9-1**–**P9-3** are **❌** here (Phase **8**/**9** product gates not met). **P0-6**–**P0-8**, other **P1**/**P2**/**P3**, **P4-3**–**P4-7**, and **P5** remain **⚠️** or **❌** (partial enforcement, lab subset, phase gates, or not started); **P3-10**/**P3-11** integration is **❌** by design. **TODO: P2-3** in the Phase **2** table tracks further kernel-path **`fl_authz_subsystem_check`** wiring—not the same as in-source patch TODOs.
 
 ---
 

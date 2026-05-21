@@ -21,6 +21,8 @@ This note separates **contract completion** (normative headers under `contracts/
 
 ## Code TODO markers (Codex / CodeRabbit follow-ups)
 
+These are **patch-scale** items: **`docs/ROADMAP.md`** marks the matching snapshot rows **~✅** in **Module integration** (legend explains the **`~`** prefix).
+
 Tracked in-source where integration is still partial:
 
 | Area | File | Topic |
