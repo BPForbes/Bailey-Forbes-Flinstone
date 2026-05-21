@@ -7,6 +7,6 @@ int cmd_jail_blocked_path(const char *op, const char *input, const char *resolve
         return 0;
     if (fs_jail_check_access(resolved) == 0)
         return 0;
-    printf("VM: %s blocked (outside project sandbox): %s\n", op, input);
+    printf("VM: %s blocked (jail access policy): %s\n", op, input);
     return 1;
 }

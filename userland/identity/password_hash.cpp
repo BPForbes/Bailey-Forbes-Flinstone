@@ -132,17 +132,36 @@ static void sha_final(Sha256Ctx &ctx, uint8_t hash[32]) {
     }
 }
 
-static std::string sha256_hex(const std::string &input) {
+static void sha256_bytes(const uint8_t *data, size_t len, uint8_t out[32]) {
     Sha256Ctx ctx;
-    uint8_t hash[32];
-    char hex[65];
     sha_init(ctx);
-    sha_update(ctx, reinterpret_cast<const uint8_t *>(input.data()), input.size());
-    sha_final(ctx, hash);
+    sha_update(ctx, data, len);
+    sha_final(ctx, out);
+}
+
+static void bytes_to_hex(const uint8_t *hash, char *hex) {
     for (int i = 0; i < 32; i++)
         snprintf(hex + i * 2, 3, "%02x", hash[i]);
     hex[64] = '\0';
-    return std::string(hex);
+}
+
+static int hash_legacy_bin(const std::vector<uint8_t> &salt, const char *password,
+                           uint8_t out[32]) {
+    std::string material;
+    material.assign(reinterpret_cast<const char *>(salt.data()), salt.size());
+    material.append(password);
+    sha256_bytes(reinterpret_cast<const uint8_t *>(material.data()), material.size(), out);
+    return 0;
+}
+
+static int hash_stretched_bin(const std::vector<uint8_t> &salt, const char *password,
+                              uint8_t out[32]) {
+    uint32_t iter;
+    if (hash_legacy_bin(salt, password, out) != 0)
+        return -1;
+    for (iter = 1; iter < FL_PASSWORD_STRETCH_ITERATIONS; iter++)
+        sha256_bytes(out, 32, out);
+    return 0;
 }
 
 static int hex_nibble(char c) {
@@ -197,33 +216,47 @@ int fl_password_generate_salt_hex(char *salt_hex, size_t salt_hex_size) {
 int fl_password_hash_password(const char *password, const char *salt_hex,
                               char *hash_hex, size_t hash_hex_size) {
     std::vector<uint8_t> salt;
-    std::string material;
-    std::string digest;
+    uint8_t digest[32];
     if (!password || !salt_hex || !hash_hex || hash_hex_size < FL_PASSWORD_HASH_HEX_CHARS + 1)
         return -1;
-    if (hex_decode(salt_hex, salt) != 0)
+    if (strlen(salt_hex) != FL_PASSWORD_SALT_HEX_CHARS)
         return -1;
-    material.assign(reinterpret_cast<const char *>(salt.data()), salt.size());
-    material.append(password);
-    digest = sha256_hex(material);
-    strncpy(hash_hex, digest.c_str(), hash_hex_size - 1);
-    hash_hex[hash_hex_size - 1] = '\0';
+    if (hex_decode(salt_hex, salt) != 0 || salt.size() != FL_PASSWORD_SALT_BYTES)
+        return -1;
+    if (hash_stretched_bin(salt, password, digest) != 0)
+        return -1;
+    bytes_to_hex(digest, hash_hex);
     return 0;
 }
 
-int fl_password_verify(const char *password, const char *salt_hex, const char *hash_hex) {
-    char computed[FL_PASSWORD_HASH_HEX_CHARS + 1];
+static int hex_digest_verify(const char *hash_hex, const uint8_t computed[32]) {
+    char computed_hex[FL_PASSWORD_HASH_HEX_CHARS + 1];
     size_t i;
     unsigned char diff = 0;
+    if (strlen(hash_hex) != FL_PASSWORD_HASH_HEX_CHARS)
+        return 0;
+    bytes_to_hex(computed, computed_hex);
+    for (i = 0; i < FL_PASSWORD_HASH_HEX_CHARS; i++)
+        diff |= (unsigned char)(hash_hex[i] ^ computed_hex[i]);
+    return diff == 0;
+}
+
+int fl_password_verify(const char *password, const char *salt_hex, const char *hash_hex) {
+    std::vector<uint8_t> salt;
+    uint8_t stretched[32];
+    uint8_t legacy[32];
     if (!password || !salt_hex || !hash_hex)
         return 0;
-    if (fl_password_hash_password(password, salt_hex, computed, sizeof(computed)) != 0)
+    if (strlen(salt_hex) != FL_PASSWORD_SALT_HEX_CHARS)
         return 0;
-    if (strlen(hash_hex) != FL_PASSWORD_HASH_HEX_CHARS || strlen(computed) != FL_PASSWORD_HASH_HEX_CHARS)
+    if (hex_decode(salt_hex, salt) != 0 || salt.size() != FL_PASSWORD_SALT_BYTES)
         return 0;
-    for (i = 0; i < FL_PASSWORD_HASH_HEX_CHARS; i++)
-        diff |= (unsigned char)(hash_hex[i] ^ computed[i]);
-    return diff == 0;
+    if (hash_stretched_bin(salt, password, stretched) == 0
+        && hex_digest_verify(hash_hex, stretched))
+        return 1;
+    if (hash_legacy_bin(salt, password, legacy) == 0 && hex_digest_verify(hash_hex, legacy))
+        return 1;
+    return 0;
 }
 
 } /* extern "C" */

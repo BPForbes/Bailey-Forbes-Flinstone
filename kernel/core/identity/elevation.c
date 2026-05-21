@@ -30,7 +30,9 @@ fl_result_t fl_elevation_grant(const char *principal, const char *reason, fl_ele
 
     pthread_mutex_lock(&s_elev_mu);
     for (i = 0; i < FL_ELEV_MAX_SLOTS; i++) {
-        if (!s_slots[i].used) {
+        if (!s_slots[i].used || s_slots[i].expires_ns <= now) {
+            if (s_slots[i].used)
+                mem_domain_zero(&s_slots[i], sizeof(s_slots[i]));
             s_slots[i].used = 1;
             s_slots[i].token = s_next ? s_next++ : 1u;
             strncpy(s_slots[i].principal, principal, sizeof(s_slots[i].principal) - 1);
@@ -57,8 +59,11 @@ int fl_elevation_active(fl_elevation_token_t token) {
 
     pthread_mutex_lock(&s_elev_mu);
     for (i = 0; i < FL_ELEV_MAX_SLOTS; i++) {
-        if (s_slots[i].used && s_slots[i].token == token && s_slots[i].expires_ns > now) {
-            ok = 1;
+        if (s_slots[i].used && s_slots[i].token == token) {
+            if (s_slots[i].expires_ns > now)
+                ok = 1;
+            else
+                mem_domain_zero(&s_slots[i], sizeof(s_slots[i]));
             break;
         }
     }

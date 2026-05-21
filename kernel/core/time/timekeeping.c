@@ -9,8 +9,7 @@ fl_result_t fl_time_monotonic_ns(int64_t *out_ns) {
     if (clock_gettime(CLOCK_MONOTONIC, &ts) != 0)
         return FL_RESULT_ERR;
 #else
-    if (clock_gettime(CLOCK_REALTIME, &ts) != 0)
-        return FL_RESULT_ERR;
+    return FL_RESULT_ERR;
 #endif
     *out_ns = (int64_t)ts.tv_sec * 1000000000LL + (int64_t)ts.tv_nsec;
     return FL_RESULT_OK;

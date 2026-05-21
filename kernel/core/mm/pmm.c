@@ -114,10 +114,13 @@ fl_result_t pmm_free_frame_result(uintptr_t phys_addr) {
         spinlock_release(&s_pmm_lock);
         return FL_RESULT_INVAL;
     }
-    bm_clear(frame);
     pmm_ensure_stack();
-    if (fl_stack_push(&s_free_stack, frame) != 0)
+    if (fl_stack_push(&s_free_stack, frame) != 0) {
         s_pmm_stack_ready = 0;
+        spinlock_release(&s_pmm_lock);
+        return FL_RESULT_ERR;
+    }
+    bm_clear(frame);
     spinlock_release(&s_pmm_lock);
     return FL_RESULT_OK;
 }

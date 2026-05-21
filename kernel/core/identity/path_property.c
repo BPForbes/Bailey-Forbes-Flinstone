@@ -50,6 +50,46 @@ static int read_props_file(const char *file, fl_path_property_t *out) {
     return out->valid ? 0 : -1;
 }
 
+static int json_escape_string(const char *in, char *out, size_t outsz) {
+    size_t o = 0;
+    if (!in || !out || outsz < 2)
+        return -1;
+    if (o + 1 >= outsz)
+        return -1;
+    out[o++] = '"';
+    for (const char *p = in; *p; p++) {
+        const char *rep = NULL;
+        char scratch[7];
+        size_t rlen = 0;
+        unsigned char c = (unsigned char)*p;
+        if (c == '"' || c == '\\') {
+            scratch[0] = '\\';
+            scratch[1] = *p;
+            scratch[2] = '\0';
+            rep = scratch;
+            rlen = 2;
+        } else if (c < 0x20) {
+            snprintf(scratch, sizeof(scratch), "\\u%04x", c);
+            rep = scratch;
+            rlen = 6;
+        } else {
+            if (o + 1 >= outsz)
+                return -1;
+            out[o++] = *p;
+            continue;
+        }
+        if (o + rlen + 1 >= outsz)
+            return -1;
+        memcpy(out + o, rep, rlen);
+        o += rlen;
+    }
+    if (o + 2 >= outsz)
+        return -1;
+    out[o++] = '"';
+    out[o] = '\0';
+    return 0;
+}
+
 static int meta_path_for(const char *dir, char *buf, size_t bufsz) {
     int n = snprintf(buf, bufsz, "%s/%s", dir, FL_PATH_META_FILE);
     return (n > 0 && (size_t)n < bufsz) ? 0 : -1;
@@ -91,8 +131,18 @@ fl_result_t fl_path_property_resolve(const char *path, fl_path_property_t *out) 
             }
         }
         slash = strrchr(walk, '/');
-        if (!slash || slash == walk)
+        if (!slash)
             break;
+        if (slash == walk) {
+            if (meta_path_for("/", meta, sizeof(meta)) == 0) {
+                fl_path_property_t cur;
+                if (read_props_file(meta, &cur) == 0) {
+                    if (!best.valid || cur.requires_elevation || cur.owner[0])
+                        best = cur;
+                }
+            }
+            break;
+        }
         *slash = '\0';
     }
 
@@ -118,11 +168,16 @@ fl_result_t fl_path_property_set_dir(const char *dir_path, const char *owner, in
         return FL_RESULT_ERR;
     if (meta_path_for(dir_path, file, sizeof(file)) != 0)
         return FL_RESULT_INVAL;
+    char owner_json[FL_PATH_OWNER_MAX * 6 + 4];
     f = fopen(file, "w");
     if (!f)
         return FL_RESULT_ERR;
-    fprintf(f, "{\n  \"owner\": \"%s\",\n  \"requires_elevation\": %d\n}\n",
-            owner ? owner : "", requires_elevation ? 1 : 0);
+    if (json_escape_string(owner ? owner : "", owner_json, sizeof(owner_json)) != 0) {
+        fclose(f);
+        return FL_RESULT_ERR;
+    }
+    fprintf(f, "{\n  \"owner\": %s,\n  \"requires_elevation\": %d\n}\n",
+            owner_json, requires_elevation ? 1 : 0);
     fclose(f);
     return FL_RESULT_OK;
 }

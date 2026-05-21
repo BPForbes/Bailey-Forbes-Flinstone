@@ -1,4 +1,5 @@
 #include "cmd_decl.h"
+#include "cmd_authutil.h"
 #include "fl/session.h"
 #include <stdio.h>
 #include <string.h>
@@ -24,7 +25,18 @@ int cmd_useradd_run(int argc, char **argv) {
         return 1;
     }
     name = argv[1];
-    pass = (argc >= 3 && argv[2]) ? argv[2] : name;
+    {
+        char pw[128];
+        if (argc >= 3 && argv[2]) {
+            pass = argv[2];
+        } else {
+            if (cmd_read_password("New password: ", pw, sizeof(pw)) != 0) {
+                fprintf(stderr, "useradd: password read failed\n");
+                return 1;
+            }
+            pass = pw;
+        }
+    }
     db = fl_session_user_db_mut();
     if (db->count > 0)
         uid = db->users[db->count - 1].uid + 1;
@@ -71,13 +83,20 @@ int cmd_passwd_run(int argc, char **argv) {
         return 1;
     user = fl_session_current_user();
     pass = NULL;
-    if (argc >= 2)
-        user = argv[1];
-    if (argc >= 3)
-        pass = argv[2];
-    if (!pass) {
-        fprintf(stderr, "passwd: usage: passwd [user] <newpassword>\n");
-        return 1;
+    {
+        char pw[128];
+        if (argc == 2) {
+            pass = argv[1];
+        } else if (argc >= 3) {
+            user = argv[1];
+            pass = argv[2];
+        } else {
+            if (cmd_read_password("New password: ", pw, sizeof(pw)) != 0) {
+                fprintf(stderr, "passwd: password read failed\n");
+                return 1;
+            }
+            pass = pw;
+        }
     }
     db = fl_session_user_db_mut();
     rc = fl_user_db_set_password(db, user, pass);

@@ -50,12 +50,21 @@ static fl_result_t db_read_meta_default(sqlite3 *db, char *out, size_t outsz) {
 }
 
 static fl_result_t db_write_meta_default(sqlite3 *sql, const char *user) {
-    char stmt[128];
-    snprintf(stmt, sizeof(stmt),
-             "INSERT INTO meta(key,value) VALUES('default_user','%s') "
-             "ON CONFLICT(key) DO UPDATE SET value=excluded.value;",
-             user);
-    return db_exec(sql, stmt);
+    sqlite3_stmt *st = NULL;
+    const char *ins =
+        "INSERT INTO meta(key,value) VALUES('default_user',?) "
+        "ON CONFLICT(key) DO UPDATE SET value=excluded.value;";
+    if (!user)
+        return FL_RESULT_INVAL;
+    if (sqlite3_prepare_v2(sql, ins, -1, &st, NULL) != SQLITE_OK)
+        return FL_RESULT_ERR;
+    sqlite3_bind_text(st, 1, user, -1, SQLITE_TRANSIENT);
+    if (sqlite3_step(st) != SQLITE_DONE) {
+        sqlite3_finalize(st);
+        return FL_RESULT_ERR;
+    }
+    sqlite3_finalize(st);
+    return FL_RESULT_OK;
 }
 
 static fl_result_t hash_password_fields(const char *password, char *hash_hex, size_t hash_sz,
@@ -195,7 +204,12 @@ fl_result_t fl_user_db_save(const fl_user_db_t *db) {
         sqlite3_close(sql);
         return FL_RESULT_ERR;
     }
+    if (db_exec(sql, "BEGIN TRANSACTION;") != FL_RESULT_OK) {
+        sqlite3_close(sql);
+        return FL_RESULT_ERR;
+    }
     if (db_exec(sql, "DELETE FROM users;") != FL_RESULT_OK) {
+        (void)db_exec(sql, "ROLLBACK;");
         sqlite3_close(sql);
         return FL_RESULT_ERR;
     }
@@ -207,6 +221,12 @@ fl_result_t fl_user_db_save(const fl_user_db_t *db) {
     }
     if (rc == FL_RESULT_OK && db->default_user[0])
         rc = db_write_meta_default(sql, db->default_user);
+    if (rc == FL_RESULT_OK) {
+        if (db_exec(sql, "COMMIT;") != FL_RESULT_OK)
+            rc = FL_RESULT_ERR;
+    } else {
+        (void)db_exec(sql, "ROLLBACK;");
+    }
     sqlite3_close(sql);
     return rc;
 }
@@ -247,6 +267,8 @@ fl_result_t fl_user_db_add_user(fl_user_db_t *db, const char *name, const char *
                                 uint32_t uid, int is_elevated) {
     fl_user_record_t *u;
     if (!db || !name || !name[0] || !password)
+        return FL_RESULT_INVAL;
+    if (strlen(name) >= sizeof(((fl_user_record_t *)0)->name))
         return FL_RESULT_INVAL;
     if (fl_user_db_find(db, name))
         return FL_RESULT_BUSY;

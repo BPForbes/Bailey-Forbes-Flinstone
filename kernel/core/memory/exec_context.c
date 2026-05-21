@@ -49,7 +49,7 @@ fl_result_t fl_exec_context_reset(fl_exec_context_t *ctx) {
 fl_result_t fl_exec_context_push_stack(fl_exec_context_t *ctx, uintptr_t word) {
     if (!ctx || !ctx->alive || !ctx->stack_base)
         return FL_RESULT_INVAL;
-    if (ctx->stack_sp < sizeof(uintptr_t))
+    if (ctx->stack_sp > ctx->stack_size || ctx->stack_sp < sizeof(uintptr_t))
         return FL_RESULT_NOMEM;
     ctx->stack_sp -= sizeof(uintptr_t);
     memcpy(ctx->stack_base + ctx->stack_sp, &word, sizeof(word));
@@ -59,7 +59,7 @@ fl_result_t fl_exec_context_push_stack(fl_exec_context_t *ctx, uintptr_t word) {
 fl_result_t fl_exec_context_pop_stack(fl_exec_context_t *ctx, uintptr_t *word) {
     if (!ctx || !ctx->alive || !ctx->stack_base)
         return FL_RESULT_INVAL;
-    if (ctx->stack_sp + sizeof(uintptr_t) > ctx->stack_size)
+    if (ctx->stack_sp > ctx->stack_size || ctx->stack_sp + sizeof(uintptr_t) > ctx->stack_size)
         return FL_RESULT_ERR;
     if (word)
         memcpy(word, ctx->stack_base + ctx->stack_sp, sizeof(*word));
@@ -76,7 +76,9 @@ fl_result_t fl_exec_context_heap_alloc(fl_exec_context_t *ctx, size_t nbytes, vo
     if (nbytes == 0)
         return FL_RESULT_INVAL;
     pad = (align - (ctx->heap_used % align)) % align;
-    if (ctx->heap_used + pad + nbytes > ctx->heap_size)
+    if (pad > ctx->heap_size - ctx->heap_used)
+        return FL_RESULT_NOMEM;
+    if (nbytes > ctx->heap_size - ctx->heap_used - pad)
         return FL_RESULT_NOMEM;
     ctx->heap_used += pad;
     p = (uint8_t *)ctx->heap_base + ctx->heap_used;
