@@ -58,10 +58,8 @@ endif
 ifeq ($(ARCH),x86_64_nasm)
 AS = nasm
 ASFLAGS = -f elf64
-CFLAGS += -DDISK_HOST_USE_LIBC_PREADV=1
-# fl_stack_asm is GAS-only today; NASM build keeps C implementations.
-# TODO(Codex): arch/x86_64/nasm/fl_stack_asm.asm for push/pop/count + elev scan parity.
-ASMSRCS_BASE = arch/x86_64/nasm/mem_asm.asm arch/x86_64/nasm/port_io.asm arch/x86_64/nasm/usb_xhci_mmio_asm.asm
+CFLAGS += -DDISK_HOST_USE_LIBC_PREADV=1 -DFL_STACK_ASM_AVAILABLE=1
+ASMSRCS_BASE = arch/x86_64/nasm/mem_asm.asm arch/x86_64/nasm/fl_stack_asm.asm arch/x86_64/nasm/port_io.asm arch/x86_64/nasm/usb_xhci_mmio_asm.asm
 ASMSRCS_ALLOC = arch/x86_64/nasm/alloc_core.asm arch/x86_64/nasm/alloc_malloc.asm arch/x86_64/nasm/alloc_free.asm
 ASM_SRC_DIR = arch/x86_64/nasm
 KERNEL_DRIVERS = kernel/arch/x86_64/drivers
@@ -143,7 +141,9 @@ COMMAND_SRCS := $(wildcard userland/command/cmd_*.c)
 SHELL_SRCS = userland/shell/common.c userland/shell/util.c userland/shell/history_record.c userland/shell/audit_log.c userland/shell/authz_subsystem.c userland/shell/contract_log_dispatch.c userland/shell/session_sync.c userland/shell/session_login_env.c userland/shell/terminal.c userland/shell/interpreter.c userland/shell/sh.c $(COMMAND_SRCS)
 # GitHub Actions (or explicit opt-in) may generate userland/shell/version_changelog.c; see scripts/gen_version_changelog.c
 ifeq ($(CHANGELOG_CI),1)
-SHELL_SRCS += userland/shell/version_changelog.c
+CHANGELOG_GEN = gen_version_changelog
+CHANGELOG_C = userland/shell/version_changelog.c
+SHELL_SRCS += $(CHANGELOG_C)
 endif
 SRCS = $(SHELL_SRCS) $(CORE_SRCS) disk_asm.c dir_asm.c
 SRCS += $(DRIVER_SRCS) $(HAL_SRCS)
@@ -309,6 +309,13 @@ endif
 ARM_SQLITE_DEPS = $(if $(SQLITE_ARM_LIB),$(SQLITE_ARM_LIB),)
 ARM_OPENSSL_DEPS = $(if $(OPENSSL_ARM_LIB),$(OPENSSL_ARM_LIB),)
 
+ifeq ($(CHANGELOG_CI),1)
+$(CHANGELOG_C): $(VERSION_DEF) scripts/gen_version_changelog.c
+	@gcc -std=c11 -Wall -Wextra -O2 -o $(CHANGELOG_GEN) scripts/gen_version_changelog.c
+	@./$(CHANGELOG_GEN)
+userland/shell/version_changelog.o: $(CHANGELOG_C) $(VERSION_DEF)
+endif
+
 $(TARGET): $(VERSION_DEF) $(OBJS) $(ARM_SQLITE_DEPS) $(ARM_OPENSSL_DEPS)
 	$(CXX) $(CXXFLAGS) -o $(TARGET) $(OBJS) $(LDFLAGS) -pthread
 
@@ -360,6 +367,10 @@ DEPS_RPATH = -Wl,-rpath='$$ORIGIN/deps/install/lib'
 TEST_LDFLAGS = $(if $(DEPS_PREFIX),-L$(DEPS_PREFIX)/lib $(DEPS_RPATH),)
 # CUnit link needs session_sync, password_hash, and SQLite (same as main shell).
 TEST_EXTRA_LINK_OBJS = userland/identity/password_hash.o
+
+ifeq ($(CHANGELOG_CI),1)
+$(TEST_TARGET): $(CHANGELOG_C)
+endif
 
 $(TEST_TARGET): $(VERSION_DEF) $(TEST_OBJS) $(TEST_ASMOBJS) $(TEST_EXTRA_LINK_OBJS)
 	$(CXX) $(CXXFLAGS) -DUNIT_TEST -o $(TEST_TARGET) $(TEST_OBJS) $(TEST_ASMOBJS) $(TEST_EXTRA_LINK_OBJS) -Wl,-z,noexecstack \

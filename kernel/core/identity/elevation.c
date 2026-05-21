@@ -93,7 +93,6 @@ void fl_elevation_revoke_all(void) {
 
 size_t fl_elevation_active_count(void) {
     int64_t now = 0;
-    size_t i;
     size_t n = 0;
 
     if (fl_time_monotonic_ns(&now) != FL_RESULT_OK)
@@ -103,6 +102,7 @@ size_t fl_elevation_active_count(void) {
 #if defined(FL_STACK_ASM_AVAILABLE)
     n = asm_fl_elev_count_active(s_slots, FL_ELEV_MAX_SLOTS, now);
 #else
+    size_t i;
     for (i = 0; i < FL_ELEV_MAX_SLOTS; i++) {
         if (!s_slots[i].used)
             continue;
