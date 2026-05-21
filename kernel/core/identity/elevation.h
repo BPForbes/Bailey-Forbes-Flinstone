@@ -3,11 +3,15 @@
 
 #include "contract_p2_elevation.h"
 #include "contract_result.h"
+#include <stddef.h>
 #include <stdint.h>
 
 fl_result_t fl_elevation_grant(const char *principal, const char *reason, fl_elevation_token_t *out);
 int         fl_elevation_active(fl_elevation_token_t token);
 void        fl_elevation_revoke(fl_elevation_token_t token);
 void        fl_elevation_revoke_all(void);
+
+/** Non-expired elevation slots currently in use (lab pool size **16**). */
+size_t      fl_elevation_active_count(void);
 
 #endif /* FL_ELEVATION_H */

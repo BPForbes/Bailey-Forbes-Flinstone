@@ -13,7 +13,7 @@ typedef struct fl_elev_slot {
     int                  used;
 } fl_elev_slot_t;
 
-#define FL_ELEV_MAX_SLOTS 8u
+#define FL_ELEV_MAX_SLOTS 16u
 
 static fl_elev_slot_t s_slots[FL_ELEV_MAX_SLOTS];
 static fl_elevation_token_t s_next = 1u;
@@ -86,4 +86,25 @@ void fl_elevation_revoke_all(void) {
     pthread_mutex_lock(&s_elev_mu);
     mem_domain_zero(s_slots, sizeof(s_slots));
     pthread_mutex_unlock(&s_elev_mu);
+}
+
+size_t fl_elevation_active_count(void) {
+    int64_t now = 0;
+    size_t i;
+    size_t n = 0;
+
+    if (fl_time_monotonic_ns(&now) != FL_RESULT_OK)
+        return 0;
+
+    pthread_mutex_lock(&s_elev_mu);
+    for (i = 0; i < FL_ELEV_MAX_SLOTS; i++) {
+        if (!s_slots[i].used)
+            continue;
+        if (s_slots[i].expires_ns > now)
+            n++;
+        else
+            mem_domain_zero(&s_slots[i], sizeof(s_slots[i]));
+    }
+    pthread_mutex_unlock(&s_elev_mu);
+    return n;
 }

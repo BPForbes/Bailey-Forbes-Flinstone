@@ -179,6 +179,23 @@ static int test_authz_shell_subsystem_parity(void) {
     return 0;
 }
 
+static int test_elevation_active_count(void) {
+    fl_elevation_token_t a = FL_ELEVATION_TOKEN_NONE;
+    fl_elevation_token_t b = FL_ELEVATION_TOKEN_NONE;
+
+    fl_elevation_revoke_all();
+    ASSERT(fl_elevation_active_count() == 0);
+    ASSERT(fl_elevation_grant("flinstone", "count-a", &a) == FL_RESULT_OK);
+    ASSERT(fl_elevation_active_count() == 1);
+    ASSERT(fl_elevation_grant("flinstone", "count-b", &b) == FL_RESULT_OK);
+    ASSERT(fl_elevation_active_count() == 2);
+    fl_elevation_revoke(a);
+    ASSERT(fl_elevation_active_count() == 1);
+    fl_elevation_revoke_all();
+    ASSERT(fl_elevation_active_count() == 0);
+    return 0;
+}
+
 static int test_elevation_revoked_on_user_change(void) {
     char tmpl[] = "/tmp/fl_elev_revokeXXXXXX";
     char dbpath[sizeof(tmpl) + 8];
@@ -257,6 +274,7 @@ int main(void) {
     if (test_path_property()) return 1;
     if (test_authz_guest_privileged_ops()) return 1;
     if (test_authz_shell_subsystem_parity()) return 1;
+    if (test_elevation_active_count()) return 1;
     if (test_elevation_revoked_on_user_change()) return 1;
     if (test_pmm_stack()) return 1;
     printf("test_p0_p2_wiring: ok\n");

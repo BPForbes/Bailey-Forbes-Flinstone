@@ -8,6 +8,7 @@
 #include <string.h>
 
 #if defined(__unix__) || defined(__APPLE__)
+#include <termios.h>
 #include <unistd.h>
 #endif
 
@@ -17,9 +18,48 @@ void cmd_wipe_password(char *buf, size_t buf_size) {
     memset(buf, 0, buf_size);
 }
 
+static int cmd_read_password_line(const char *prompt, char *buf, size_t buf_size) {
+    (void)prompt;
+    if (!fgets(buf, (int)buf_size, stdin))
+        return -1;
+    {
+        size_t n = strlen(buf);
+        if (n > 0 && buf[n - 1] == '\n')
+            buf[n - 1] = '\0';
+    }
+    return 0;
+}
+
+#if defined(__unix__) || defined(__APPLE__)
+static int cmd_read_password_tty(const char *prompt, char *buf, size_t buf_size) {
+    struct termios old_tty;
+    struct termios new_tty;
+    int rc = -1;
+
+    if (!isatty(STDIN_FILENO))
+        return cmd_read_password_line(prompt, buf, buf_size);
+
+    fputs("\n", stderr);
+    fputs(prompt, stderr);
+    fflush(stderr);
+
+    if (tcgetattr(STDIN_FILENO, &old_tty) != 0)
+        return -1;
+    new_tty = old_tty;
+    new_tty.c_lflag &= (tcflag_t)~ECHO;
+    if (tcsetattr(STDIN_FILENO, TCSAFLUSH, &new_tty) != 0)
+        return -1;
+
+    if (cmd_read_password_line("", buf, buf_size) == 0)
+        rc = 0;
+    fputc('\n', stderr);
+    (void)tcsetattr(STDIN_FILENO, TCSAFLUSH, &old_tty);
+    return rc;
+}
+#endif
+
 int cmd_read_password(const char *prompt, char *buf, size_t buf_size) {
     const char *env_pw;
-    char *got;
     const char *line_prompt = "Password: ";
 
     if (!buf || buf_size < 2)
@@ -37,26 +77,12 @@ int cmd_read_password(const char *prompt, char *buf, size_t buf_size) {
         prompt = line_prompt;
 
 #if defined(__unix__) || defined(__APPLE__)
-    fputs("\n", stderr);
-    fflush(stderr);
-    got = getpass(prompt);
-    if (!got)
-        return -1;
-    strncpy(buf, got, buf_size - 1);
-    buf[buf_size - 1] = '\0';
-    return 0;
+    return cmd_read_password_tty(prompt, buf, buf_size);
 #else
     fputs("\n", stderr);
     fputs(prompt, stderr);
     fflush(stderr);
-    if (!fgets(buf, (int)buf_size, stdin))
-        return -1;
-    {
-        size_t n = strlen(buf);
-        if (n > 0 && buf[n - 1] == '\n')
-            buf[n - 1] = '\0';
-    }
-    return 0;
+    return cmd_read_password_line(prompt, buf, buf_size);
 #endif
 }
 

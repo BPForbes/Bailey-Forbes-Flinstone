@@ -25,6 +25,8 @@ logout returns to the default user; sudo -k revokes elevation tokens without cha
 whoami prints principal and elevation state; login/su/logout purge elevation slots on user change.
 FL_AUTHZ_OP_IDENTITY_* codes and guest shell/subsystem authz parity tests (test_p0_p2_wiring).
 docs/p0_p2_pr_coverage.md: contract vs integration scope for this PR.
+Elevation slot pool raised to 16 with fl_elevation_active_count(); password prompts use
+tcgetattr (no deprecated getpass) when stdin is a TTY.
 
 Password hashes use OpenSSL PBKDF2-HMAC-SHA256 (record stores iteration count); legacy
 stretch/single SHA-256 rows still verify. login/su/sudo read passwords on the next line.
