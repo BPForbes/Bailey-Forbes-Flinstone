@@ -10,6 +10,7 @@ static fl_elevation_token_t s_active_elev = FL_ELEVATION_TOKEN_NONE;
 static int s_sudo_scope_depth;
 static int s_db_ready;
 static pthread_once_t s_once = PTHREAD_ONCE_INIT;
+static pthread_mutex_t s_sudo_scope_mu = PTHREAD_MUTEX_INITIALIZER;
 
 static void session_load_once(void) {
     const char *path = getenv("FL_USERS_DB_PATH");
@@ -40,20 +41,32 @@ int fl_session_is_elevated_account(void) {
 }
 
 int fl_session_in_sudo_scope(void) {
-    return s_sudo_scope_depth > 0;
+    int in_scope;
+    pthread_mutex_lock(&s_sudo_scope_mu);
+    in_scope = s_sudo_scope_depth > 0;
+    pthread_mutex_unlock(&s_sudo_scope_mu);
+    return in_scope;
 }
 
 void fl_session_begin_sudo_scope(void) {
+    pthread_mutex_lock(&s_sudo_scope_mu);
     s_sudo_scope_depth++;
+    pthread_mutex_unlock(&s_sudo_scope_mu);
 }
 
 void fl_session_end_sudo_scope(void) {
+    pthread_mutex_lock(&s_sudo_scope_mu);
     if (s_sudo_scope_depth > 0)
         s_sudo_scope_depth--;
+    pthread_mutex_unlock(&s_sudo_scope_mu);
 }
 
 int fl_session_jail_privileged(void) {
-    if (s_sudo_scope_depth > 0)
+    int privileged;
+    pthread_mutex_lock(&s_sudo_scope_mu);
+    privileged = s_sudo_scope_depth > 0;
+    pthread_mutex_unlock(&s_sudo_scope_mu);
+    if (privileged)
         return 1;
     if (!s_db_ready)
         return 0;
@@ -61,8 +74,12 @@ int fl_session_jail_privileged(void) {
 }
 
 int fl_session_has_elevation(void) {
-    if (s_sudo_scope_depth > 0)
+    pthread_mutex_lock(&s_sudo_scope_mu);
+    if (s_sudo_scope_depth > 0) {
+        pthread_mutex_unlock(&s_sudo_scope_mu);
         return 1;
+    }
+    pthread_mutex_unlock(&s_sudo_scope_mu);
     if (fl_elevation_active(s_active_elev))
         return 1;
     if (!s_db_ready)
@@ -80,7 +97,9 @@ fl_result_t fl_session_login(const char *name, const char *password) {
     strncpy(s_current, name, sizeof(s_current) - 1);
     s_current[sizeof(s_current) - 1] = '\0';
     s_active_elev = FL_ELEVATION_TOKEN_NONE;
+    pthread_mutex_lock(&s_sudo_scope_mu);
     s_sudo_scope_depth = 0;
+    pthread_mutex_unlock(&s_sudo_scope_mu);
     return FL_RESULT_OK;
 }
 
@@ -103,7 +122,9 @@ fl_result_t fl_session_set_user(const char *name) {
     strncpy(s_current, name, sizeof(s_current) - 1);
     s_current[sizeof(s_current) - 1] = '\0';
     s_active_elev = FL_ELEVATION_TOKEN_NONE;
+    pthread_mutex_lock(&s_sudo_scope_mu);
     s_sudo_scope_depth = 0;
+    pthread_mutex_unlock(&s_sudo_scope_mu);
     return FL_RESULT_OK;
 }
 
@@ -138,7 +159,9 @@ void fl_session_clear_elevation(void) {
 void fl_session_drop_elevation(void) {
     fl_session_init();
     fl_session_clear_elevation();
+    pthread_mutex_lock(&s_sudo_scope_mu);
     s_sudo_scope_depth = 0;
+    pthread_mutex_unlock(&s_sudo_scope_mu);
 }
 
 fl_result_t fl_session_logout(void) {
@@ -146,7 +169,9 @@ fl_result_t fl_session_logout(void) {
 
     fl_session_init();
     fl_elevation_revoke_all();
+    pthread_mutex_lock(&s_sudo_scope_mu);
     s_sudo_scope_depth = 0;
+    pthread_mutex_unlock(&s_sudo_scope_mu);
     s_active_elev = FL_ELEVATION_TOKEN_NONE;
     def = s_db.default_user;
     if (!def || !def[0])

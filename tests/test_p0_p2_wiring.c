@@ -76,6 +76,38 @@ static int test_user_db(void) {
     return 0;
 }
 
+static int test_user_db_uid_and_delete_zero(void) {
+    fl_user_db_t db;
+    uint32_t u1, u2, u3;
+
+    fl_user_db_clear(&db);
+    fl_user_db_seed_defaults(&db);
+    u1 = fl_user_db_next_uid(&db);
+    ASSERT(u1 >= FL_USER_DB_MIN_ALLOC_UID);
+    ASSERT(fl_user_db_add_user(&db, "alice", "alice", u1, 0) == FL_RESULT_OK);
+    u2 = fl_user_db_next_uid(&db);
+    ASSERT(u2 != u1 && u2 != 0u);
+    ASSERT(fl_user_db_add_user(&db, "bob", "bob", u2, 0) == FL_RESULT_OK);
+    ASSERT(fl_user_db_add_user(&db, "nobody", "x", 0u, 0) == FL_RESULT_INVAL);
+    ASSERT(fl_user_db_remove_user(&db, "alice") == FL_RESULT_OK);
+    u3 = fl_user_db_next_uid(&db);
+    ASSERT(u3 == u1);
+    return 0;
+}
+
+static int test_elevation_token_unique(void) {
+    fl_elevation_token_t a = FL_ELEVATION_TOKEN_NONE;
+    fl_elevation_token_t b = FL_ELEVATION_TOKEN_NONE;
+
+    fl_elevation_revoke_all();
+    ASSERT(fl_elevation_grant("flinstone", "t1", &a) == FL_RESULT_OK);
+    ASSERT(fl_elevation_grant("flinstone", "t2", &b) == FL_RESULT_OK);
+    ASSERT(a != FL_ELEVATION_TOKEN_NONE && b != FL_ELEVATION_TOKEN_NONE);
+    ASSERT(a != b);
+    fl_elevation_revoke_all();
+    return 0;
+}
+
 static int test_path_property(void) {
     char tmpl[] = "/tmp/fl_propXXXXXX";
     char dir[256];
@@ -270,6 +302,8 @@ int main(void) {
     if (test_exec_context()) return 1;
     if (test_timekeeping()) return 1;
     if (test_user_db()) return 1;
+    if (test_user_db_uid_and_delete_zero()) return 1;
+    if (test_elevation_token_unique()) return 1;
     if (test_session_login()) return 1;
     if (test_path_property()) return 1;
     if (test_authz_guest_privileged_ops()) return 1;

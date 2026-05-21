@@ -41,6 +41,10 @@ ASM (arch/*/gas/fl_stack_asm.s): hot paths for fl_stack push/pop/count (PMM free
 pool) and fl_elevation_active_count slot scan/reclaim; C fallbacks when FL_STACK_ASM_AVAILABLE
 is unset (e.g. x86_64_nasm). Slot layout locked with _Static_assert(sizeof(fl_elev_slot_t)==56).
 test_audit_log asserts elevation grant/revoke audit lines when FL_AUDIT=1.
+Security: elevation token allocator skips FL_ELEVATION_TOKEN_NONE; userdel zeroes hash/salt;
+useradd uses fl_user_db_next_uid (no UID 0/collisions); db->loaded only on successful load;
+fm_create_file/fm_create_dir/fm_move run write_chain authz; sudo scope depth mutex;
+legacy password verify runs both hash paths (timing).
 Contract-mount GH #121-128: P1/P2 impl headers anchor contract shards; new contract_p0_fs_jail.h;
 P2 credential store SQLite path (FL_CONTRACT_P2_IDENTITY_REV 3).
 ROADMAP P0-P2 integration ✅: P0-1..3, P0-6..8, P1-1, P1-7, P2-1, P2-2, P2-4; ~✅ P0-4/5, P1-2..6, P2-3 (see docs/p0_p2_pr_coverage.md).

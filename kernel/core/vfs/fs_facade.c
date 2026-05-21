@@ -122,6 +122,8 @@ int fm_save_text(file_manager_service_t *svc, const char *path, const char *cont
 }
 
 int fm_create_file(file_manager_service_t *svc, const char *path) {
+    if (fs_chain_run(&svc->write_chain, path, NULL, svc) != 0)
+        return -1;
     fs_command_t *cmd = fs_cmd_create_file(svc->provider, path);
     if (!cmd) return -1;
     int r = fs_cmd_execute(cmd);
@@ -137,6 +139,8 @@ int fm_create_file(file_manager_service_t *svc, const char *path) {
 }
 
 int fm_create_dir(file_manager_service_t *svc, const char *path) {
+    if (fs_chain_run(&svc->write_chain, path, NULL, svc) != 0)
+        return -1;
     fs_command_t *cmd = fs_cmd_create_dir(svc->provider, path);
     if (!cmd) return -1;
     int r = fs_cmd_execute(cmd);
@@ -172,6 +176,10 @@ int fm_delete(file_manager_service_t *svc, const char *path) {
 }
 
 int fm_move(file_manager_service_t *svc, const char *src, const char *dst) {
+    if (fs_chain_run(&svc->write_chain, src, NULL, svc) != 0)
+        return -1;
+    if (fs_chain_run(&svc->write_chain, dst, NULL, svc) != 0)
+        return -1;
     fs_command_t *cmd = fs_cmd_move(svc->provider, src, dst);
     if (!cmd) return -1;
     int r = fs_cmd_execute(cmd);

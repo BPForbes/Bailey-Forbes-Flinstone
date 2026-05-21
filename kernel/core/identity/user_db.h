@@ -43,8 +43,12 @@ int         fl_user_db_verify_password(const fl_user_db_t *db, const char *name,
                                        const char *password);
 int         fl_user_db_is_elevated_user(const fl_user_db_t *db, const char *name);
 
+#define FL_USER_DB_MIN_ALLOC_UID 2000u
+
 fl_result_t fl_user_db_add_user(fl_user_db_t *db, const char *name, const char *password,
                                 uint32_t uid, int is_elevated);
+/** Next non-root UID not already assigned (starts at **FL_USER_DB_MIN_ALLOC_UID**). */
+uint32_t    fl_user_db_next_uid(const fl_user_db_t *db);
 fl_result_t fl_user_db_remove_user(fl_user_db_t *db, const char *name);
 fl_result_t fl_user_db_set_password(fl_user_db_t *db, const char *name, const char *password);
 

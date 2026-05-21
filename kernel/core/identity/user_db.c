@@ -1,6 +1,7 @@
 #include "user_db.h"
 #include "password_hash.h"
 #include "mem_domain.h"
+#include <limits.h>
 #include <sqlite3.h>
 #include <stdio.h>
 #include <string.h>
@@ -184,7 +185,8 @@ fl_result_t fl_user_db_load(fl_user_db_t *db, const char *path) {
     if (!db->default_user[0] && db->count > 0)
         strncpy(db->default_user, db->users[0].name, sizeof(db->default_user) - 1);
 
-    db->loaded = 1;
+    if (rc == FL_RESULT_OK)
+        db->loaded = 1;
     sqlite3_close(sql);
     return rc;
 }
@@ -263,13 +265,43 @@ int fl_user_db_is_elevated_user(const fl_user_db_t *db, const char *name) {
     return (u && u->is_elevated) ? 1 : 0;
 }
 
+uint32_t fl_user_db_next_uid(const fl_user_db_t *db) {
+    uint32_t candidate = FL_USER_DB_MIN_ALLOC_UID;
+    size_t i;
+
+    if (!db)
+        return FL_USER_DB_MIN_ALLOC_UID;
+    for (;;) {
+        int taken = 0;
+        for (i = 0; i < db->count; i++) {
+            if (db->users[i].uid == candidate) {
+                taken = 1;
+                break;
+            }
+        }
+        if (!taken)
+            return candidate;
+        if (candidate == UINT32_MAX)
+            break;
+        candidate++;
+    }
+    return FL_USER_DB_MIN_ALLOC_UID;
+}
+
 fl_result_t fl_user_db_add_user(fl_user_db_t *db, const char *name, const char *password,
                                 uint32_t uid, int is_elevated) {
     fl_user_record_t *u;
+    size_t i;
     if (!db || !name || !name[0] || !password)
         return FL_RESULT_INVAL;
     if (strlen(name) >= sizeof(((fl_user_record_t *)0)->name))
         return FL_RESULT_INVAL;
+    if (!is_elevated && uid == 0u)
+        return FL_RESULT_INVAL;
+    for (i = 0; i < db->count; i++) {
+        if (db->users[i].uid == uid)
+            return FL_RESULT_BUSY;
+    }
     if (fl_user_db_find(db, name))
         return FL_RESULT_BUSY;
     if (db->count >= FL_USER_DB_MAX_USERS)
@@ -296,8 +328,11 @@ fl_result_t fl_user_db_remove_user(fl_user_db_t *db, const char *name) {
         return FL_RESULT_ACCES;
     for (i = 0; i < db->count; i++) {
         if (strcmp(db->users[i].name, name) == 0) {
-            if (db->count - 1 > i)
+            mem_domain_zero(&db->users[i], sizeof(db->users[i]));
+            if (db->count - 1 > i) {
                 db->users[i] = db->users[db->count - 1];
+                mem_domain_zero(&db->users[db->count - 1], sizeof(db->users[db->count - 1]));
+            }
             db->count--;
             if (strcmp(db->default_user, name) == 0 && db->count > 0)
                 strncpy(db->default_user, db->users[0].name, sizeof(db->default_user) - 1);

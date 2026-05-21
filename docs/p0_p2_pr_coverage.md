@@ -21,11 +21,11 @@ This note separates **contract completion** (normative headers under `contracts/
 | **P0-6 … P0-8** | **✅** | GDT/FDT/UART contract + hosted paths; no open **H** integration TODO |
 | **P1-1** | **✅** | Hosted **`fl_exec_context`** + **`test_p0_p2_wiring`**; kernel-thread **B** tracked in phase gates |
 | **P1-2, P1-3** | **~✅** | **`mem_domain`** / spinlocks on **H**; flat/paged + lock-order on **B** (**`pmm.c`**) |
-| **P1-4** | **~✅** | PMM + **`fl_stack`** wired; **`pmm.c`** / NASM **`fl_stack_asm`** TODOs |
+| **P1-4** | **~✅** | PMM + **`fl_stack`** wired; GAS + NASM **`fl_stack_asm`**; **`pmm.c`** bare-metal TODO |
 | **P1-5, P1-6** | **~✅** | Arenas and driver tables on **H**; **B** validation tied to **`pmm.c`** |
 | **P1-7** | **✅** | POSIX **`clock_gettime`** on **H** + tests; arch timer on **B** is phase follow-up |
 | **P2-1, P2-2** | **✅** | Session/principal + **`user_db`** on **H** |
-| **P2-3** | **~✅** | Shell + **`fm_service`** authz + **`test_p0_p2_wiring`**; kernel netdev/mount/FileManager entry wiring still open (**TODO: P2-3** in **`docs/ROADMAP.md`**) |
+| **P2-3** | **~✅** | Shell + **`fm_service`** authz; **`fm_create_*`** / **`fm_move`** use **`write_chain`** (**`fm_authz_path_gate`**); netdev/mount entry wiring still open |
 | **P2-4** | **✅** | Elevation/sudo/su/logout/whoami, login-shell env, audit ordering, **`test_audit_log`** elevation lines |
 
 ## Contract-mount (GitHub #121–#128)

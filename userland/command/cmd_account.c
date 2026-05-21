@@ -36,8 +36,7 @@ int cmd_useradd_run(int argc, char **argv) {
     }
     pass = pw;
     db = fl_session_user_db_mut();
-    if (db->count > 0)
-        uid = db->users[db->count - 1].uid + 1;
+    uid = fl_user_db_next_uid(db);
     rc = fl_user_db_add_user(db, name, pass, uid, 0);
     cmd_wipe_password(pw, sizeof(pw));
     if (rc != FL_RESULT_OK) {

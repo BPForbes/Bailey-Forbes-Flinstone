@@ -22,6 +22,13 @@ static fl_elev_slot_t s_slots[FL_ELEV_MAX_SLOTS];
 static fl_elevation_token_t s_next = 1u;
 static pthread_mutex_t s_elev_mu = PTHREAD_MUTEX_INITIALIZER;
 
+static fl_elevation_token_t elevation_alloc_token(void) {
+    s_next++;
+    if (s_next == FL_ELEVATION_TOKEN_NONE)
+        s_next = 1u;
+    return s_next;
+}
+
 fl_result_t fl_elevation_grant(const char *principal, const char *reason, fl_elevation_token_t *out) {
     int64_t now = 0;
     size_t i;
@@ -38,7 +45,7 @@ fl_result_t fl_elevation_grant(const char *principal, const char *reason, fl_ele
             if (s_slots[i].used)
                 mem_domain_zero(&s_slots[i], sizeof(s_slots[i]));
             s_slots[i].used = 1;
-            s_slots[i].token = s_next ? s_next++ : 1u;
+            s_slots[i].token = elevation_alloc_token();
             strncpy(s_slots[i].principal, principal, sizeof(s_slots[i].principal) - 1);
             s_slots[i].principal[sizeof(s_slots[i].principal) - 1] = '\0';
             s_slots[i].expires_ns = now + (int64_t)FL_ELEVATION_LAB_TTL_SOFT_MAX_SECONDS * 1000000000LL;

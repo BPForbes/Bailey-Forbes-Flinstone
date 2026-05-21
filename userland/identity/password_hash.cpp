@@ -175,12 +175,16 @@ int fl_password_verify(const char *password, const char *salt_hex, const char *h
     }
 
     if (strlen(hash_hex) == FL_PASSWORD_HASH_HEX_CHARS) {
-        if (hash_stretched_bin(salt, password, computed) == 0
-            && hex_digest_verify(hash_hex, computed))
-            return 1;
-        if (hash_legacy_bin(salt, password, computed) == 0
-            && hex_digest_verify(hash_hex, computed))
-            return 1;
+        uint8_t stretched[32];
+        uint8_t legacy[32];
+        int ok_stretch = 0;
+        int ok_legacy = 0;
+
+        if (hash_stretched_bin(salt, password, stretched) == 0)
+            ok_stretch = hex_digest_verify(hash_hex, stretched);
+        if (hash_legacy_bin(salt, password, legacy) == 0)
+            ok_legacy = hex_digest_verify(hash_hex, legacy);
+        return (ok_stretch | ok_legacy) ? 1 : 0;
     }
     return 0;
 }
