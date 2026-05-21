@@ -4,3 +4,5 @@ RELEASE_VERSION=2
 PRERELEASE=1
 DEV_VERSION=1
 DESCRIPTION=Document known test target build issues (test_vm_mem, test_replay, test_alloc_asm) in AGENTS.md for future cloud agents.
+
+RELEASE_DATE=2026-05-21
