@@ -13,7 +13,7 @@ history_asm_append_record:
     movq %rsi, %r9           /* cap */
     subq %rax, %r9           /* r9 = cap - used (available) */
     movq %r8, %r10
-    cmpq %r8, $-1
+    cmpq $-1, %r8
     je .L_overflow
     incq %r10                /* need = cmd_len + 1 */
     cmpq %r10, %r9
