@@ -1,5 +1,7 @@
 # NASM (x86-64) assembly — open issue reports
 
+Parent index: [../README.md](../README.md) · AArch64 audit: [../arm/README.md](../arm/README.md)
+
 Audit date: 2026-05-22  
 Scope: **NASM** sources used for `ARCH=x86_64_nasm` and the legacy mirror tree.  
 **No fixes** are included in this directory — reports only.

@@ -4,6 +4,6 @@ RELEASE_VERSION=0
 PRERELEASE=1
 DEV_VERSION=2
 GM=0
-DESCRIPTION=NASM x86-64 audit: document SysV ABI issue reports under docs/issues/nasm/ (malloc_nolock callee-saved clobber, calloc/realloc register reuse, tree drift). No allocator code fixes in this change.
+DESCRIPTION=Assembly audits (reports only): NASM x86-64 under docs/issues/nasm/ (malloc_nolock callee-saved, calloc/realloc, legacy x86-64 (NASM) drift); AArch64 GAS under docs/issues/arm/ (canonical free() x21-x25 clobber, legacy ARM/ and kernel/arch/aarch64/asm stale copies). No ASM fixes.
 
 RELEASE_DATE=2026-05-22
