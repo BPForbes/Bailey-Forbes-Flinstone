@@ -21,7 +21,7 @@ Notes:
 
 ## Replit Agent
 
-On [Replit](https://replit.com/~), the in-Repl **Replit Agent** uses **`replit.md`** and must follow the **same** rules as **CLAUDE.md**, **AGENTS.md** (this file), **`.cursor/rules/*.mdc`**, and **`.coderabbit.yaml`**—see the **Replit Agent policy** section in **`replit.md`**. App config: **`.replit`**, **`replit.nix`**.
+On [Replit](https://replit.com/~), the in-Repl **Replit Agent** uses **`replit.md`**, which states the **full explicit rules** (versioning, lock system, git workflow, build/test)—the **same** mandatory policy as **CLAUDE.md**, **AGENTS.md** (this file), **`.cursor/rules/*.mdc`**, and **`.coderabbit.yaml`**. App config: **`.replit`**, **`replit.nix`**.
 
 ## AI feature-branch workflow (Cursor / Claude / Codex / Replit)
 

@@ -8,7 +8,7 @@ This project can run on [Replit](https://replit.com/~) using Nix-backed system d
 |------|------|
 | [`.replit`](../.replit) | Run/compile commands, `cpp-clang14` module, Nix channel `stable-24_05` |
 | [`replit.nix`](../replit.nix) | `deps` array — mirrors [AGENTS.md](../AGENTS.md) / [dependencies.md](dependencies.md) |
-| [`replit.md`](../replit.md) | Replit onboarding; **Replit Agent policy** (bound to `CLAUDE.md`, `AGENTS.md`, `.cursor/rules/`, `.coderabbit.yaml`) |
+| [`replit.md`](../replit.md) | Replit onboarding; **explicit Replit Agent rules** (same policy as `CLAUDE.md`, `AGENTS.md`, `.cursor/rules/`, `.coderabbit.yaml`) |
 | [`nix/deps.json`](../nix/deps.json) | JSON manifest (apt ↔ nix names, profiles) |
 
 ## Import from GitHub
