@@ -5,13 +5,13 @@
 | **Severity** | High |
 | **ABI** | AArch64 AAPCS64 |
 | **Component** | Allocator (`ARCH=arm`) |
-| **Status** | Open (report only) |
+| **Status** | **Fixed** |
 
 ## Summary
 
-In the **canonical** tree, `free` saves only **`x19`**, **`x20`**, and **`x30`** (link register), but the coalesce / free-list walk uses **`x21`–`x25`** as long-lived locals without restoring them before `ret`.
+**Historical:** In an earlier tree, `free` saved only **`x19`**, **`x20`**, and **`x30`** while the coalesce / free-list walk used **`x21`–`x25`** without restoring them before `ret`.
 
-Under AAPCS64, **`x19`–`x28`** are callee-saved. A C caller may hold live values in those registers across a `free()` call.
+**Current (fixed):** Canonical **`arch/arm/gas/alloc_free.s`** saves and restores **`x19`–`x25`** and **`x30`** in an 80-byte 16-byte-aligned frame before `ret`. Under AAPCS64, callers may rely on callee-saved registers across `free()`.
 
 ## Affected file (built)
 

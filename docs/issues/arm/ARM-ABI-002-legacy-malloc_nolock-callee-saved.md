@@ -16,7 +16,7 @@
 | Path | Built for `ARCH=arm`? |
 |------|------------------------|
 | `ARM/alloc/alloc_core.s` | **No** |
-| `kernel/arch/aarch64/asm/alloc_core.S` | **No** (kernel copy; matches legacy style) |
+| `kernel/arch/aarch64/asm/alloc_core.S` | **Synced** (kernel copy matches canonical `arch/arm/gas/alloc_core.s`) |
 
 ## Evidence (legacy)
 
@@ -35,7 +35,7 @@ No `stp x19, x20, [sp, #-…]!` (or equivalent) before use.
 ## Impact
 
 - Misleading if developers edit **`ARM/`** expecting it to match production `ARCH=arm` behavior.
-- **`kernel/arch/aarch64/asm/alloc_core.S`** repeats the same pattern — risk if kernel build ever links these objects instead of `arch/arm/gas/`.
+- **`kernel/arch/aarch64/asm/alloc_core.S`** was stale; it is now synced from **`arch/arm/gas/alloc_core.s`** (PR #154).
 
 ## Recommended fix (do not implement here)
 

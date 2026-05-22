@@ -3,11 +3,13 @@
 | Field | Value |
 |-------|-------|
 | **Severity** | Medium |
-| **Status** | Open (report only) |
+| **Status** | **Closed** (legacy tree removed) |
 
 ## Summary
 
-The repository keeps a top-level **`ARM/`** tree that resembles the AArch64 layout but is **not** selected by `make ARCH=arm`. The Makefile uses **`arch/arm/gas/`** exclusively.
+**Historical:** The repository once kept a top-level **`ARM/`** tree that resembled the AArch64 layout but was **not** selected by `make ARCH=arm`.
+
+**Current:** The Makefile uses **`arch/arm/gas/`** exclusively. The legacy **`ARM/`** directory was **removed** on branch `cursor/nasm-abi-issue-reports-7cb1` (PR #154).
 
 ## Structural differences
 
@@ -26,7 +28,7 @@ The repository keeps a top-level **`ARM/`** tree that resembles the AArch64 layo
 - **MIGRATION_GUIDE.md** still references `ARM/*` as migration sources while copies under `kernel/arch/aarch64/asm/` remain stale ([ARM-SYNC-002](ARM-SYNC-002-kernel-aarch64-asm-stale.md)).
 - NASM-style confusion: same class of problem as [NASM-SYNC-001](../nasm/NASM-SYNC-001-legacy-tree-drift.md).
 
-## Recommended fix (do not implement here)
+## Resolution
 
-- Declare **`arch/arm/gas/`** sole source of truth in docs (see `docs/ARCH.md`).
-- Remove `ARM/` or add CI drift check / one-way sync from canonical.
+- **`arch/arm/gas/`** is the sole AArch64 asm source of truth (see `docs/ARCH.md`, `MIGRATION_GUIDE.md`).
+- Legacy **`ARM/`** removed; use **`arch/arm/gas/`** only.

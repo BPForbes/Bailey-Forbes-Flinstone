@@ -13,8 +13,8 @@ HDR_SIZE  equ 16
 FLAG_FREE equ 1
 
 section .bss
-global heap_end
-global free_head
+global heap_end:hidden
+global free_head:hidden
 heap_end:   resq 1
 free_head:  resq 1
 alloc_lock: resq 1
@@ -23,7 +23,7 @@ section .text
 lock_acquire:
     mov eax, 1
 .spin:
-    xchg [rel alloc_lock], rax
+    xchg qword [rel alloc_lock], rax
     test rax, rax
     jz .got
     pause

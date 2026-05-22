@@ -397,6 +397,7 @@ userland/shell/interpreter_unit.o: $(VERSION_DEF)
 
 # x86_64_nasm: kernel/arch/x86_64/**/*.s must use GAS (AS=nasm cannot assemble .s)
 ifeq ($(ARCH),x86_64_nasm)
+# Override generic %.o: %.s — these paths are GAS syntax, not NASM (AS=nasm would fail).
 kernel/arch/x86_64/%.o: kernel/arch/x86_64/%.s
 	$(CC) -c $(CFLAGS) -Wa,--noexecstack -o $@ $<
 endif

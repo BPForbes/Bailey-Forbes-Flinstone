@@ -21,8 +21,11 @@
 .equ FLAG_FREE, 1
 
 .comm heap_end, 8, 8
+.hidden heap_end
 .comm free_head, 8, 8
+.hidden free_head
 .comm alloc_lock, 8, 8
+.hidden alloc_lock
 
 /* lock_acquire - spin until we get the lock */
 lock_acquire:

@@ -15,7 +15,7 @@
 .equ FLAG_FREE, 1
 
 free:
-    str     x30, [sp, #-104]!
+    str     x30, [sp, #-80]!
     stp     x19, x20, [sp, #16]
     stp     x21, x22, [sp, #32]
     stp     x23, x24, [sp, #48]
@@ -72,5 +72,5 @@ free:
     ldp     x23, x24, [sp, #48]
     ldp     x21, x22, [sp, #32]
     ldp     x19, x20, [sp, #16]
-    ldr     x30, [sp], #104
+    ldr     x30, [sp], #80
     ret

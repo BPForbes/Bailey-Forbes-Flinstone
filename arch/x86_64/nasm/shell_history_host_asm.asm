@@ -13,6 +13,8 @@ history_asm_append_record:
     mov r9, rsi
     sub r9, rax
     mov r10, r8
+    cmp r8, -1
+    je .overflow
     inc r10
     cmp r9, r10
     jb .overflow
