@@ -11,6 +11,7 @@
 .extern init_heap_once_nolock
 .extern malloc_nolock
 .extern free
+.extern asm_mem_copy
 
 .equ HDR_SIZE, 16
 
@@ -104,8 +105,8 @@ realloc:
     cmova %r13, %rcx
     movq %rbx, %rdi          /* dst */
     movq %r12, %rsi          /* src */
-    cld
-    rep movsb
+    movq %rcx, %rdx          /* n (asm_mem_copy uses rdx, not rcx) */
+    call asm_mem_copy
     movq %r12, %rdi
     call free
     movq %rbx, %rax

@@ -4,6 +4,6 @@ RELEASE_VERSION=0
 PRERELEASE=1
 DEV_VERSION=2
 GM=0
-DESCRIPTION=ASM under arch/: ABI fixes (malloc_nolock callee-saved, AArch64 free, AAPCS64 16-byte stack frames on malloc/calloc/realloc/free, cld, lock release); GAS fl_stack elev slot zeroing; GAS shell_history_host_asm cmp immediate operand order (cmpq $-1, %r8); allocator .hidden plus alloc_internal_local.ver; NASM disk/history overflow hardening; kernel asm sync; docs/issues; remove legacy ARM/, x86-64 (NASM)/, repo-root alloc/.
+DESCRIPTION=ASM under arch/: ABI fixes (malloc_nolock callee-saved, AArch64 free, AAPCS64 16-byte stack frames on malloc/calloc/realloc/free, cld, lock release); GAS fl_stack elev slot zeroing; GAS shell_history_host_asm cmp immediate operand order (cmpq $-1, %r8); x86-64 realloc growth copy via asm_mem_copy (GitHub #156, NASM/GAS/kernel); allocator .hidden plus alloc_internal_local.ver; NASM disk/history overflow hardening; kernel asm sync; docs/issues; remove legacy ARM/, x86-64 (NASM)/, repo-root alloc/.
 
 RELEASE_DATE=2026-05-22

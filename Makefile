@@ -433,8 +433,8 @@ test_alloc_libc: tests/test_alloc.c
 	./tests/test_alloc
 
 ALLOC_OBJS = $(patsubst %.s,%.o,$(patsubst %.asm,%.o,$(ASMSRCS_ALLOC)))
-test_alloc_asm: $(ALLOC_OBJS)
-	$(CC) $(CFLAGS) -I. -o tests/test_alloc tests/test_alloc.c $(ALLOC_OBJS)
+test_alloc_asm: $(ALLOC_OBJS) $(MEM_ASM_OBJ)
+	$(CC) $(CFLAGS) -I. -o tests/test_alloc tests/test_alloc.c $(ALLOC_OBJS) $(MEM_ASM_OBJ)
 	./tests/test_alloc
 
 test_priority_queue: priority_queue.o $(MEM_ASM_OBJ)

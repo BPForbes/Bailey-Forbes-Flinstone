@@ -22,8 +22,9 @@ Legacy **`x86-64 (NASM)/`** was **removed** (was an unmaintained mirror).
 | NASM-ABI-003 | **Fixed** | `hidden` + `scripts/linker/alloc_internal_local.ver` on `USE_ASM_ALLOC=1` |
 | NASM-SYNC-001 | **Closed** | Legacy tree deleted |
 | NASM-LINK-001 | **Closed** | Legacy tree deleted |
+| NASM-PERF-001 | **Fixed** | `realloc` uses `asm_mem_copy` (GitHub #156); GAS parity in `alloc/alloc_malloc.s` |
 
-Historical detail: see `NASM-ABI-*.md` and `NASM-SYNC-001-*.md` in this directory.
+Historical detail: see `NASM-ABI-*.md`, `NASM-PERF-001-*.md`, and `NASM-SYNC-001-*.md` in this directory.
 
 ## Files reviewed (no open ABI report)
 
