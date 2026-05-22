@@ -27,7 +27,7 @@ Historical detail: see `NASM-ABI-*.md` and `NASM-SYNC-001-*.md` in this director
 
 ## Files reviewed (no open ABI report)
 
-`mem_asm.asm`, `port_io.asm`, `fl_stack_asm.asm`, `usb_xhci_mmio_asm.asm`
+`mem_asm.asm`, `port_io.asm`, `fl_stack_asm.asm`, `disk_host_io.asm`, `shell_history_host_asm.asm`, `usb_xhci_mmio_asm.asm`
 
 ## GAS parity
 
