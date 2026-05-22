@@ -64,6 +64,7 @@ sys_brk:
 
 /* init_heap_once_nolock */
 init_heap_once_nolock:
+    str     x30, [sp, #-16]!
     adrp    x10, heap_end
     add     x10, x10, :lo12:heap_end
     ldr     x8, [x10]
@@ -74,6 +75,7 @@ init_heap_once_nolock:
     add     x10, x10, :lo12:heap_end
     str     x0, [x10]
 .Ldone:
+    ldr     x30, [sp], #16
     ret
 
 /* unlink_free(x0=prev, x1=cur) */
@@ -104,7 +106,7 @@ malloc_nolock:
     stp     x19, x20, [sp, #-64]!
     stp     x21, x22, [sp, #16]
     stp     x23, x24, [sp, #32]
-    str     x25, [sp, #48]
+    stp     x25, x30, [sp, #48]
     bl      align16
     mov     x19, x0                  /* aligned size */
     adrp    x10, free_head
@@ -159,13 +161,13 @@ malloc_nolock:
     str     x19, [x20]
 .Lreturn_ptr:
     add     x0, x20, #HDR_SIZE
-    ldr     x25, [sp, #48]
+    ldp     x25, x30, [sp, #48]
     ldp     x23, x24, [sp, #32]
     ldp     x21, x22, [sp, #16]
     ldp     x19, x20, [sp], #64
     ret
 .Lret0_fail:
-    ldr     x25, [sp, #48]
+    ldp     x25, x30, [sp, #48]
     ldp     x23, x24, [sp, #32]
     ldp     x21, x22, [sp, #16]
     ldp     x19, x20, [sp], #64
