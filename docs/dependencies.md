@@ -2,6 +2,10 @@
 
 This project uses **system packages** (via `apt` on Debian/Ubuntu) for the toolchain and optional libraries, and **`make deps`** for in-tree builds of SDL2 and CUnit. The canonical one-line install for Cursor Cloud and similar images is in [AGENTS.md](../AGENTS.md) at the repository root.
 
+## Replit ([replit.com/~](https://replit.com/~))
+
+Import the repo as a Replit App with **`.replit`** and **`replit.nix`** (see [docs/replit.md](replit.md) and [replit.md](../replit.md)). Nix package names are also listed in [`nix/deps.json`](../nix/deps.json).
+
 ## Required to compile (typical Linux host)
 
 | Component | Purpose |
