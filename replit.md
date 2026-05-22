@@ -150,6 +150,7 @@ If this **`replit.md`** explicit section and **`CLAUDE.md`**, **`AGENTS.md`**, *
 2. Wait for the Nix environment to sync (shell reload after `replit.nix` changes).
 3. **Run** — builds via `compile`, then runs `./BPForbes_Flinstone_Shell help`.
 4. In the **Shell** pane for an interactive session:
+
    ```bash
    make
    ./BPForbes_Flinstone_Shell

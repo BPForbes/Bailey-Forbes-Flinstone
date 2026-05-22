@@ -19,6 +19,14 @@
 
       baseBuild = pkgs: resolvePackages pkgs [ "sqlite" "openssl" ];
 
+      crossAarch64Shell = pkgs:
+        let
+          cross = pkgs.pkgsCross.aarch64-multiplatform;
+        in pkgs.mkShell {
+          buildInputs = baseBuild cross;
+          nativeBuildInputs = baseNative pkgs ++ [ cross.stdenv.cc ];
+        };
+
     in {
       devShells = forAllSystems (system:
         let pkgs = import nixpkgs { inherit system; };
@@ -35,6 +43,12 @@
             buildInputs = baseBuild pkgs ++ [ pkgs.libcunit ];
             nativeBuildInputs = baseNative pkgs;
           };
+          cross-aarch64 =
+            if system == "x86_64-linux" then crossAarch64Shell pkgs
+            else pkgs.mkShell {
+              buildInputs = baseBuild pkgs;
+              nativeBuildInputs = baseNative pkgs;
+            };
         });
     };
 }
