@@ -84,7 +84,7 @@ asm_fl_elev_count_active:
 .elev_expire:
     xor r9, r9
 .elev_zero_q:
-    mov qword [r8 + r9*8], 0
+    mov qword [r8 + r9], 0
     add r9, 8
     cmp r9, FL_ELEV_STRIDE
     jb .elev_zero_q

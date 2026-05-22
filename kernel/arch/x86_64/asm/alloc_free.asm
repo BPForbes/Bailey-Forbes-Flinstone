@@ -1,6 +1,6 @@
 ; alloc_free.asm - free (NASM x86-64)
+section .note.GNU-stack progbits alloc noexec
 section .text
-
 global free
 
 extern lock_acquire
@@ -8,14 +8,13 @@ extern lock_release
 extern init_heap_once_nolock
 extern push_free
 extern unlink_free
+
+HDR_SIZE  equ 16
+FLAG_FREE equ 1
+
 extern heap_end
 extern free_head
 
-HDR_SIZE equ 16
-FLAG_FREE equ 1
-
-; free(void* ptr)
-; rdi = ptr
 free:
     push rbx
     push r12
@@ -23,7 +22,7 @@ free:
     jz .done_fast
     call lock_acquire
     call init_heap_once_nolock
-    lea rbx, [rdi - HDR_SIZE]
+    lea rbx, [rdi-HDR_SIZE]
     mov rax, [rbx]
     and rax, -16
     or rax, FLAG_FREE
@@ -32,7 +31,7 @@ free:
     call push_free
     mov rax, [rbx]
     and rax, -16
-    lea r12, [rbx + HDR_SIZE]
+    lea r12, [rbx+HDR_SIZE]
     add r12, rax
     mov rcx, [rel heap_end]
     cmp r12, rcx
@@ -45,10 +44,10 @@ free:
 .search:
     test r9, r9
     jz .unlock_done
-    cmp r9, r12
+    cmp r12, r9
     je .found
     mov r8, r9
-    mov r9, [r9 + 8]
+    mov r9, [r9+8]
     jmp .search
 .found:
     mov rdi, r8
