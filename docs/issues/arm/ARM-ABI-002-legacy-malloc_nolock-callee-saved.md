@@ -4,7 +4,7 @@
 |-------|-------|
 | **Severity** | High (legacy path only) |
 | **ABI** | AArch64 AAPCS64 |
-| **Status** | Open (report only) |
+| **Status** | **Closed** (legacy `ARM/` removed; kernel copy synced) |
 | **Related** | [ARM-SYNC-001](ARM-SYNC-001-legacy-arm-directory-drift.md), [NASM-ABI-001](../nasm/NASM-ABI-001-malloc_nolock-callee-saved.md) |
 
 ## Summary
@@ -34,9 +34,10 @@ No `stp x19, x20, [sp, #-…]!` (or equivalent) before use.
 
 ## Impact
 
-- Misleading if developers edit **`ARM/`** expecting it to match production `ARCH=arm` behavior.
-- **`kernel/arch/aarch64/asm/alloc_core.S`** was stale; it is now synced from **`arch/arm/gas/alloc_core.s`** (PR #154).
+- Misleading if developers edit **`ARM/`** expecting it to match production `ARCH=arm` behavior (tree removed on PR #154).
 
-## Recommended fix (do not implement here)
+## Resolution (PR #154)
 
-Sync or delete legacy/kernel copies; keep single canonical `arch/arm/gas/alloc_core.s` (already correct for this defect).
+- Legacy **`ARM/`** deleted.
+- **`kernel/arch/aarch64/asm/alloc_core.S`** synced from **`arch/arm/gas/alloc_core.s`** (callee-saved prologue, `.hidden` BSS, `x30` save in `malloc_nolock` / `init_heap_once_nolock`).
+- Production **`make ARCH=arm`** uses canonical **`arch/arm/gas/`** only.

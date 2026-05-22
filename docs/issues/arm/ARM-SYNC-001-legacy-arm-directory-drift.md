@@ -25,7 +25,7 @@
 ## Impact
 
 - Bug fixes applied only under **`ARM/`** do not affect **`make ARCH=arm`**.
-- **MIGRATION_GUIDE.md** still references `ARM/*` as migration sources while copies under `kernel/arch/aarch64/asm/` remain stale ([ARM-SYNC-002](ARM-SYNC-002-kernel-aarch64-asm-stale.md)).
+- **MIGRATION_GUIDE.md** now marks legacy **`ARM/`** removed and **`arch/arm/gas/`** as canonical; kernel copies synced ([ARM-SYNC-002](ARM-SYNC-002-kernel-aarch64-asm-stale.md) **Fixed**).
 - NASM-style confusion: same class of problem as [NASM-SYNC-001](../nasm/NASM-SYNC-001-legacy-tree-drift.md).
 
 ## Resolution
