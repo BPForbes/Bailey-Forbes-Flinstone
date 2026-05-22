@@ -59,7 +59,12 @@ ifeq ($(ARCH),x86_64_nasm)
 AS = nasm
 ASFLAGS = -f elf64
 CFLAGS += -DFL_STACK_ASM_AVAILABLE=1
-ASMSRCS_BASE = arch/x86_64/nasm/mem_asm.asm arch/x86_64/nasm/fl_stack_asm.asm arch/x86_64/nasm/port_io.asm arch/x86_64/nasm/disk_host_io.asm arch/x86_64/nasm/shell_history_host_asm.asm arch/x86_64/nasm/usb_xhci_mmio_asm.asm
+# Kernel x86_64 boot/driver .s are GAS; compile with $(CC) -c (see rule below), not NASM.
+KERNEL_X86_GAS_ASM = kernel/arch/x86_64/boot/spinlock.s kernel/arch/x86_64/drivers/ata_pio.s \
+                     kernel/arch/x86_64/boot/gdt.s kernel/arch/x86_64/boot/idt.s
+ASMSRCS_BASE = arch/x86_64/nasm/mem_asm.asm arch/x86_64/nasm/fl_stack_asm.asm arch/x86_64/nasm/port_io.asm \
+               arch/x86_64/nasm/disk_host_io.asm arch/x86_64/nasm/shell_history_host_asm.asm \
+               arch/x86_64/nasm/usb_xhci_mmio_asm.asm $(KERNEL_X86_GAS_ASM)
 ASMSRCS_ALLOC = arch/x86_64/nasm/alloc_core.asm arch/x86_64/nasm/alloc_malloc.asm arch/x86_64/nasm/alloc_free.asm
 ASM_SRC_DIR = arch/x86_64/nasm
 KERNEL_DRIVERS = kernel/arch/x86_64/drivers
@@ -115,10 +120,8 @@ DRIVER_SRCS = $(UNIFIED_DRIVER_SRCS)
 DRIVER_SRCS += $(KERNEL_DRIVERS)/pci.c
 # x86: ATA IDENTIFY + helpers, IDT dispatcher
 ifneq ($(ARCH),arm)
-ifneq ($(ARCH),x86_64_nasm)
 DRIVER_SRCS += $(KERNEL_DRIVERS)/ata_pio_baremetal.c
 DRIVER_SRCS += kernel/arch/x86_64/boot/idt_dispatch.c
-endif
 endif
 # HAL: ioport (x86 real, arm stubs) + ARM MMIO HAL (arm only)
 HAL_SRCS = $(KERNEL_DRIVERS)/../hal/ioport.c
@@ -178,6 +181,7 @@ ASMSRCS = $(ASMSRCS_BASE)
 ifeq ($(USE_ASM_ALLOC),1)
 ASMSRCS += $(ASMSRCS_ALLOC)
 CFLAGS += -DUSE_ASM_ALLOC=1 -DBATCH_SINGLE_THREAD=1
+LDFLAGS += -Wl,--version-script=scripts/linker/alloc_internal_local.ver
 endif
 # P4-5 xHCI: arch MMIO object (see kernel/drivers/usb_xhci_mmio_glue.c).
 USB_XHCI_MMIO_ASM_OBJ = $(patsubst %.s,%.o,$(patsubst %.asm,%.o,$(filter %usb_xhci_mmio_asm.s %usb_xhci_mmio_asm.asm,$(ASMSRCS))))
@@ -390,6 +394,12 @@ userland/shell/interpreter_unit.o: $(VERSION_DEF)
 # Arch ASM: .s (GAS) or .asm (NASM)
 %.o: %.asm
 	$(AS) $(ASFLAGS) -o $@ $<
+
+# x86_64_nasm: kernel/arch/x86_64/**/*.s must use GAS (AS=nasm cannot assemble .s)
+ifeq ($(ARCH),x86_64_nasm)
+kernel/arch/x86_64/%.o: kernel/arch/x86_64/%.s
+	$(CC) -c $(CFLAGS) -Wa,--noexecstack -o $@ $<
+endif
 
 $(KERNEL_DRIVERS)/%.o: $(KERNEL_DRIVERS)/%.c
 	$(CC) $(CFLAGS) -I$(KERNEL_DRIVERS) -c $< -o $@

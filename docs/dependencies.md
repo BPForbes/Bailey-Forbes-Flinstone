@@ -33,3 +33,7 @@ Then prefer `deps/install` paths as described in `AGENTS.md` for SDL2 and CUnit.
 ## Host disk I/O and assembly
 
 On Linux x86-64 and AArch64 host builds, positioned file reads/writes for FAT32 images and cluster offsets use **`disk_host_io`** assembly (`pread64` / `pwrite64` syscalls): GAS **`disk_host_io.s`**, NASM **`disk_host_io.asm`**. Shell history and audit tail append use **`shell_history_host_asm`** (GAS **`.s`**, NASM **`.asm`**). Cluster buffers use **`mem_asm`** (`asm_mem_copy`, `asm_mem_zero`).
+
+**`USE_ASM_ALLOC=1`:** only **`malloc`**, **`calloc`**, **`realloc`**, and **`free`** are global in the final link; allocator internals are **`.hidden`** in asm and **`local:`** via **`scripts/linker/alloc_internal_local.ver`**.
+
+**`ARCH=x86_64_nasm`:** userland asm under **`arch/x86_64/nasm/`**; kernel boot/driver asm under **`kernel/arch/x86_64/`** is still assembled with GAS (**`$(CC) -c`** on **`.s`**).

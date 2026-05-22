@@ -19,7 +19,7 @@ Legacy **`x86-64 (NASM)/`** was **removed** (was an unmaintained mirror).
 |----|--------|------------|
 | NASM-ABI-001 | **Fixed** | `malloc_nolock` push/pop `rbx`, `r12`, `r13` in `alloc_core.asm` |
 | NASM-ABI-002 | **Fixed** | Resolved by NASM-ABI-001 (`calloc`/`realloc` reuse preserved regs) |
-| NASM-ABI-003 | **Fixed** | Allocator internals marked `hidden` in NASM/GAS |
+| NASM-ABI-003 | **Fixed** | `hidden` + `scripts/linker/alloc_internal_local.ver` on `USE_ASM_ALLOC=1` |
 | NASM-SYNC-001 | **Closed** | Legacy tree deleted |
 | NASM-LINK-001 | **Closed** | Legacy tree deleted |
 
@@ -32,3 +32,5 @@ Historical detail: see `NASM-ABI-*.md` and `NASM-SYNC-001-*.md` in this director
 ## GAS parity
 
 `arch/x86_64/gas/alloc/alloc_core.s` received the same `malloc_nolock` callee-saved fix as NASM.
+
+**`ARCH=x86_64_nasm`** also links kernel **`kernel/arch/x86_64/**/*.s`** (spinlock, ATA PIO, GDT, IDT) via GAS while userland arch code stays NASM; **`ata_pio_baremetal.c`** and **`idt_dispatch.c`** are included like the default GAS build.

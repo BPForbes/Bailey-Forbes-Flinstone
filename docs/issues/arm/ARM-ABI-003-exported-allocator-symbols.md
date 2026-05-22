@@ -3,7 +3,7 @@
 | Field | Value |
 |-------|-------|
 | **Severity** | Medium |
-| **Status** | Open (report only) |
+| **Status** | **Fixed** |
 
 ## Summary
 
@@ -14,9 +14,9 @@
 - Direct calls from future C code bypassing `malloc`/`free` locking discipline.
 - ABI expectations apply to every exported symbol ([ARM-ABI-001](ARM-ABI-001-free-callee-saved.md) for `free`; `malloc_nolock` itself is compliant in canonical tree).
 
-## Recommended fix (do not implement here)
+## Resolution (implemented)
 
-Hide internals (`.local` / static linkage) or rename (e.g. `malloc_nolock_locked`) and document that only `malloc`, `calloc`, `realloc`, `free` are public.
+Same as NASM-ABI-003: **`.hidden`** on internals in `alloc_core.s`, plus **`scripts/linker/alloc_internal_local.ver`** on **`USE_ASM_ALLOC=1`** links so only **`malloc`**, **`calloc`**, **`realloc`**, **`free`** are global in the final binary.
 
 ## Files
 

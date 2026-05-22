@@ -4,7 +4,7 @@
 |-------|-------|
 | **Severity** | Medium |
 | **Component** | Allocator exports (NASM x86-64) |
-| **Status** | Open (report only) |
+| **Status** | **Fixed** |
 | **Related** | [NASM-ABI-001](NASM-ABI-001-malloc_nolock-callee-saved.md) |
 
 ## Summary
@@ -26,11 +26,11 @@ Several allocator helpers are **`global`** and therefore visible to the linker a
 
 Future C code (or LTO across translation units) may call `malloc_nolock` or `lock_acquire` directly. Even if current C only calls `malloc`/`free`, **linker visibility + ABI violation** is a footgun and breaks interoperability with compiler-generated prologues that assume SysV rules.
 
-## Recommended fix (do not implement in this report)
+## Resolution (implemented)
 
-- Make internal symbols **local** (`.global` → not exported, or static inline C wrappers only), **or**
-- Give each exported symbol a full SysV-compliant prologue/epilogue, **or**
-- Rename to private symbols (e.g. `malloc_nolock_locked`) and keep a single C-facing `malloc`.
+- Allocator internals remain **`.globl` / `global`** only for inter-**`.o`** link (`alloc_core` ↔ `alloc_malloc` / `alloc_free`).
+- **`global …:hidden`** (NASM) and **`.hidden`** (GAS/ARM) block external linkage.
+- **`USE_ASM_ALLOC=1`** final links add **`scripts/linker/alloc_internal_local.ver`** (`local:` for `malloc_nolock`, locks, free-list helpers, `heap_end`, `free_head`, `alloc_lock`). Only **`malloc`**, **`calloc`**, **`realloc`**, **`free`** stay globally visible.
 
 ## Files
 

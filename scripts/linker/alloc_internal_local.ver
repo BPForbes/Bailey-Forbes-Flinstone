@@ -1,0 +1,16 @@
+/* Localize ASM allocator internals at final link.
+ * Public libc-style API: malloc, calloc, realloc, free only.
+ * USE_ASM_ALLOC=1 builds pass -Wl,--version-script=scripts/linker/alloc_internal_local.ver
+ */
+{
+  local:
+    malloc_nolock;
+    init_heap_once_nolock;
+    lock_acquire;
+    lock_release;
+    push_free;
+    unlink_free;
+    heap_end;
+    free_head;
+    alloc_lock;
+};
