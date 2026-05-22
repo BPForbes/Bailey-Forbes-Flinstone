@@ -76,6 +76,9 @@ push_free:
 malloc_nolock:
     test rdi, rdi
     jz .ret0
+    push rbx
+    push r12
+    push r13
     call align16
     mov r12, rax
     xor r13, r13
@@ -120,11 +123,18 @@ malloc_nolock:
     add rdi, r12
     call sys_brk
     cmp rax, rdi
-    jb .ret0
+    jb .ret0_pop
     mov [rel heap_end], rax
     mov [rbx], r12
 .return_ptr:
     lea rax, [rbx+HDR_SIZE]
+    jmp .ret_pop
+.ret0_pop:
+    xor rax, rax
+.ret_pop:
+    pop r13
+    pop r12
+    pop rbx
     ret
 .ret0:
     xor rax, rax

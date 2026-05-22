@@ -15,8 +15,11 @@
 .equ FLAG_FREE, 1
 
 free:
-    str     x30, [sp, #-48]!
+    str     x30, [sp, #-96]!
     stp     x19, x20, [sp, #16]
+    stp     x21, x22, [sp, #32]
+    stp     x23, x24, [sp, #48]
+    str     x25, [sp, #64]
     cbz     x0, .Ldone_fast
     bl      lock_acquire
     bl      init_heap_once_nolock
@@ -65,6 +68,9 @@ free:
 .Lunlock_done:
     bl      lock_release
 .Ldone_fast:
+    ldr     x25, [sp, #64]
+    ldp     x23, x24, [sp, #48]
+    ldp     x21, x22, [sp, #32]
     ldp     x19, x20, [sp, #16]
-    ldr     x30, [sp], #48
+    ldr     x30, [sp], #96
     ret
