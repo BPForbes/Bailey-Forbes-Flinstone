@@ -4,6 +4,6 @@ RELEASE_VERSION=0
 PRERELEASE=1
 DEV_VERSION=2
 GM=0
-DESCRIPTION=Assembly audits (reports only): NASM x86-64 under docs/issues/nasm/ (malloc_nolock callee-saved, calloc/realloc, legacy x86-64 (NASM) drift); AArch64 GAS under docs/issues/arm/ (canonical free() x21-x25 clobber, legacy ARM/ and kernel/arch/aarch64/asm stale copies). No ASM fixes.
+DESCRIPTION=ASM allocator ABI: document issues under docs/issues/nasm/ and docs/issues/arm/; fix NASM/GAS malloc_nolock callee-saved (rbx/r12/r13), AArch64 free (x21-x25), sync kernel/arch allocator asm from arch/; remove legacy ARM/, x86-64 (NASM)/, and repo-root alloc/ duplicates.
 
 RELEASE_DATE=2026-05-22
