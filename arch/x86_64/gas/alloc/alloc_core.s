@@ -86,6 +86,9 @@ push_free:
 malloc_nolock:
     testq %rdi, %rdi
     jz .Lret0
+    pushq %rbx
+    pushq %r12
+    pushq %r13
     call align16
     movq %rax, %r12
     xorq %r13, %r13
@@ -134,12 +137,20 @@ malloc_nolock:
     addq %r12, %rdi
     call sys_brk
     cmpq %rdi, %rax
-    jb .Lret0
+    jb .Lret0_pop
     movq %rax, heap_end(%rip)
     movq %r12, (%rbx)
 
 .Lreturn_ptr:
     leaq HDR_SIZE(%rbx), %rax
+    jmp .Lret_pop
+
+.Lret0_pop:
+    xorq %rax, %rax
+.Lret_pop:
+    popq %r13
+    popq %r12
+    popq %rbx
     ret
 
 .Lret0:

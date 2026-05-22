@@ -1,6 +1,6 @@
 ; alloc_malloc.asm - malloc, calloc, realloc (NASM x86-64)
+section .note.GNU-stack progbits alloc noexec
 section .text
-
 global malloc
 global calloc
 global realloc
@@ -13,8 +13,6 @@ extern free
 
 HDR_SIZE equ 16
 
-; malloc(size_t size) -> void*
-; rdi = size
 malloc:
     push rbx
     push r12
@@ -32,8 +30,6 @@ malloc:
     pop rbx
     ret
 
-; calloc(size_t nmemb, size_t size) -> void*
-; rdi = nmemb, rsi = size
 calloc:
     push rbx
     push r12
@@ -76,8 +72,6 @@ calloc:
     pop rbx
     ret
 
-; realloc(void* ptr, size_t size) -> void*
-; rdi = ptr, rsi = size
 realloc:
     push rbx
     push r12
@@ -87,24 +81,23 @@ realloc:
     jz .realloc_malloc
     test rsi, rsi
     jz .realloc_free
-    mov r12, rdi          ; ptr
-    mov r13, rsi          ; new size
-    mov r14, [rdi - HDR_SIZE]
-    and r14, -16          ; old_payload, preserved
+    mov r12, rdi
+    mov r13, rsi
+    mov r14, [rdi-HDR_SIZE]
+    and r14, -16
     call lock_acquire
     call init_heap_once_nolock
     mov rdi, r13
     call malloc_nolock
-    mov rbx, rax          ; newptr
+    mov rbx, rax
     call lock_release
     test rbx, rbx
     jz .realloc_fail
-    ; copy_len = min(old_payload, new_size)
     mov rcx, r14
     cmp r14, r13
     cmova rcx, r13
-    mov rdi, rbx          ; dst
-    mov rsi, r12          ; src
+    mov rdi, rbx
+    mov rsi, r12
     rep movsb
     mov rdi, r12
     call free

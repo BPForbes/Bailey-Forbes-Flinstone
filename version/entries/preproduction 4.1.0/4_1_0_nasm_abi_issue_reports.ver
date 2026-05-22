@@ -1,0 +1,9 @@
+MAJOR_VERSION=4
+STANDARD_VERSION=1
+RELEASE_VERSION=0
+PRERELEASE=1
+DEV_VERSION=2
+GM=0
+DESCRIPTION=Assembly audits (reports only): NASM x86-64 under docs/issues/nasm/ (malloc_nolock callee-saved, calloc/realloc, legacy x86-64 (NASM) drift); AArch64 GAS under docs/issues/arm/ (canonical free() x21-x25 clobber, legacy ARM/ and kernel/arch/aarch64/asm stale copies). No ASM fixes.
+
+RELEASE_DATE=2026-05-22

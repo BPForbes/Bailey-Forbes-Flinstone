@@ -79,10 +79,9 @@ flowchart LR
 | **cluster.c / .h** | Cluster management, hex conversion |
 | **mem_asm.s** | x86-64 ASM: `asm_mem_copy`, `asm_mem_zero`, `asm_block_fill` |
 | **disk_host_io.s** | Linux host: `pread64` / `pwrite64` syscalls for positioned volume I/O (GAS x86-64 / AArch64) |
-| **alloc/alloc_core.s** | Thread-safe allocator core: lock, brk, free-list, malloc_nolock |
-| **alloc/alloc_malloc.s** | malloc, calloc, realloc (GAS/AT&T x86-64) |
-| **alloc/alloc_free.s** | free with forward coalescing |
-| **alloc/alloc.h** | C declarations for ASM allocator |
+| **arch/x86_64/gas/alloc/alloc_core.s** | Thread-safe allocator core: lock, brk, free-list, malloc_nolock |
+| **arch/x86_64/gas/alloc/alloc_malloc.s** | malloc, calloc, realloc (GAS/AT&T x86-64) |
+| **arch/x86_64/gas/alloc/alloc_free.s** | free with forward coalescing |
 | **dir_asm.c / .h** | ASM-backed directory buffer ops |
 | **drivers/port_io.s** | x86-64 ASM: `port_inb`, `port_outb`, `port_inw`, `port_outw` |
 | **drivers/block_driver.c** | Block device (sector I/O) – host: disk_asm, BAREMETAL: IDE |

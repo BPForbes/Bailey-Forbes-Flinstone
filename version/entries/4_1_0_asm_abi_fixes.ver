@@ -1,0 +1,7 @@
+MAJOR_VERSION=4
+STANDARD_VERSION=1
+RELEASE_VERSION=0
+PRERELEASE=1
+DEV_VERSION=3
+GM=0
+DESCRIPTION=Fix allocator ASM ABI: NASM/GAS malloc_nolock saves rbx/r12/r13; AArch64 free saves x21-x25. Remove legacy ARM/ and x86-64 (NASM)/ trees; sync kernel/arch allocator asm from arch/; drop repo-root alloc/ duplicate.
