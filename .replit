@@ -1,6 +1,7 @@
 # Bailey-Forbes-Flinstone — Replit app configuration
 # https://docs.replit.com/replit-app/configuration
 # Hosted IDE: https://replit.com/~
+# Replit Agent policy: replit.md (same rules as CLAUDE.md, AGENTS.md, .cursor/rules/, .coderabbit.yaml)
 
 run = "./BPForbes_Flinstone_Shell help"
 compile = "make -j$(nproc 2>/dev/null || echo 2)"

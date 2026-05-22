@@ -4,6 +4,6 @@ RELEASE_VERSION=0
 PRERELEASE=1
 DEV_VERSION=3
 GM=0
-DESCRIPTION=Replit support: .replit and replit.nix for https://replit.com/~ GitHub import; replit.md and docs/replit.md; nix/deps.json manifest and optional flake.nix for local Nix dev shells.
+DESCRIPTION=Replit support: .replit and replit.nix for https://replit.com/~ GitHub import; replit.md agent policy aligned with CLAUDE.md, AGENTS.md, .cursor/rules/, and .coderabbit.yaml; docs/replit.md; nix/deps.json manifest and optional flake.nix for local Nix dev shells.
 
 RELEASE_DATE=2026-05-22
