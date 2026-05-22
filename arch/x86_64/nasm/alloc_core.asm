@@ -1,20 +1,20 @@
 ; alloc_core.asm - thread-safe allocator core (NASM x86-64)
 section .note.GNU-stack progbits alloc noexec
 section .text
-global malloc_nolock
-global init_heap_once_nolock
-global lock_acquire
-global lock_release
-global push_free
-global unlink_free
+global malloc_nolock:hidden
+global init_heap_once_nolock:hidden
+global lock_acquire:hidden
+global lock_release:hidden
+global push_free:hidden
+global unlink_free:hidden
 
 SYS_brk   equ 12
 HDR_SIZE  equ 16
 FLAG_FREE equ 1
 
 section .bss
-global heap_end
-global free_head
+global heap_end:hidden
+global free_head:hidden
 heap_end:   resq 1
 free_head:  resq 1
 alloc_lock: resq 1
@@ -33,7 +33,8 @@ lock_acquire:
     ret
 
 lock_release:
-    mov qword [rel alloc_lock], 0
+    xor rax, rax
+    xchg qword [rel alloc_lock], rax
     ret
 
 align16:

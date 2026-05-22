@@ -9,6 +9,12 @@
 .globl lock_release
 .globl push_free
 .globl unlink_free
+.hidden malloc_nolock
+.hidden init_heap_once_nolock
+.hidden lock_acquire
+.hidden lock_release
+.hidden push_free
+.hidden unlink_free
 
 .equ SYS_brk, 214
 .equ HDR_SIZE, 16
@@ -38,7 +44,7 @@ lock_acquire:
 lock_release:
     adrp    x10, alloc_lock
     add     x10, x10, :lo12:alloc_lock
-    str     xzr, [x10]
+    stlr    xzr, [x10]
     ret
 
 /* align16(x0) -> x0 */

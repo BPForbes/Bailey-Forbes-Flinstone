@@ -12,6 +12,12 @@
 .globl lock_release
 .globl push_free
 .globl unlink_free
+.hidden malloc_nolock
+.hidden init_heap_once_nolock
+.hidden lock_acquire
+.hidden lock_release
+.hidden push_free
+.hidden unlink_free
 
 .equ SYS_brk, 12
 .equ HDR_SIZE, 16
@@ -35,9 +41,10 @@ lock_acquire:
 .Lgot:
     ret
 
-/* lock_release: alloc_lock = 0 */
+/* lock_release: alloc_lock = 0 (xchg is always locked on memory) */
 lock_release:
-    movq $0, alloc_lock(%rip)
+    xorq %rax, %rax
+    xchgq %rax, alloc_lock(%rip)
     ret
 
 /* align16(rdi) -> rax, align up to 16 */

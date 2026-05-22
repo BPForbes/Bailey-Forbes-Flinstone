@@ -58,6 +58,7 @@ calloc:
     movq %r13, %rcx
     xorq %rax, %rax
     movq %rcx, %r12
+    cld
     shrq $3, %rcx
     rep stosq
     movq %r12, %rcx
@@ -103,6 +104,7 @@ realloc:
     cmova %r13, %rcx
     movq %rbx, %rdi          /* dst */
     movq %r12, %rsi          /* src */
+    cld
     rep movsb
     movq %r12, %rdi
     call free

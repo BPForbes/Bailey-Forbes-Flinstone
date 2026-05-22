@@ -19,7 +19,7 @@ Legacy **`x86-64 (NASM)/`** was **removed** (was an unmaintained mirror).
 |----|--------|------------|
 | NASM-ABI-001 | **Fixed** | `malloc_nolock` push/pop `rbx`, `r12`, `r13` in `alloc_core.asm` |
 | NASM-ABI-002 | **Fixed** | Resolved by NASM-ABI-001 (`calloc`/`realloc` reuse preserved regs) |
-| NASM-ABI-003 | Open | Exported internals still `.global` |
+| NASM-ABI-003 | **Fixed** | Allocator internals marked `hidden` in NASM/GAS |
 | NASM-SYNC-001 | **Closed** | Legacy tree deleted |
 | NASM-LINK-001 | **Closed** | Legacy tree deleted |
 

@@ -24,7 +24,7 @@ Legacy **`ARM/`** and repo-root **`alloc/`** (x86 duplicate) were **removed**.
 | ARM-SYNC-001 | **Closed** | `ARM/` deleted |
 | ARM-SYNC-002 | **Fixed** | Kernel `asm/*.S` copied from `arch/arm/gas/` |
 | ARM-SYNC-003 | **Closed** | Repo-root `alloc/` deleted |
-| ARM-ABI-003 | Open | Exported internals still `.global` |
+| ARM-ABI-003 | **Fixed** | Allocator internals `.hidden` in GAS |
 
 Historical detail: see `ARM-*.md` in this directory.
 

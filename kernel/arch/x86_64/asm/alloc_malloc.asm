@@ -55,6 +55,7 @@ calloc:
     mov rcx, r13
     xor rax, rax
     mov r12, rcx
+    cld
     shr rcx, 3
     rep stosq
     mov rcx, r12
@@ -98,6 +99,7 @@ realloc:
     cmova rcx, r13
     mov rdi, rbx
     mov rsi, r12
+    cld
     rep movsb
     mov rdi, r12
     call free

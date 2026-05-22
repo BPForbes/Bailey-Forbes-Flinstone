@@ -84,7 +84,7 @@ asm_fl_elev_count_active:
 .L_elev_expire:
     xorq %r9, %r9
 .L_elev_zero_q:
-    movq %r9, (%r8,%r9,8)
+    movq $0, (%r8,%r9,1)
     addq $8, %r9
     cmpq $FL_ELEV_STRIDE, %r9
     jb .L_elev_zero_q
