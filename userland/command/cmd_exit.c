@@ -1,5 +1,6 @@
 #include "common.h"
 #include "cmd_decl.h"
+#include "cmd_batch.h"
 #include "util.h"
 #include <stdio.h>
 #include <stdlib.h>
@@ -55,4 +56,8 @@ int cmd_exit_maybe(char *trimmed) {
         shell_running = 0;
         exit(0);
     }
+}
+
+int cmd_exit_batch_tokens_count(int argc, char **argv, int i) {
+    return cmd_batch_flag_yn_arity(argc, argv, i);
 }

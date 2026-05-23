@@ -53,7 +53,13 @@ void pmm_reserve_range(uintptr_t base, size_t bytes) {
     uintptr_t start, end, region_end;
     size_t first_frame, last_frame, f;
 
-    if (bytes == 0 || base + bytes <= PMM_PHYS_BASE)
+    if (bytes == 0)
+        return;
+    if (base < PMM_PHYS_BASE && base + bytes <= PMM_PHYS_BASE)
+        return;
+    if (base > PMM_PHYS_BASE + PMM_PHYS_MEM - 1u)
+        return;
+    if (bytes > PMM_PHYS_MEM || base > PMM_PHYS_BASE + PMM_PHYS_MEM - bytes)
         return;
     start = (base < PMM_PHYS_BASE) ? PMM_PHYS_BASE : base;
     end = base + bytes;
@@ -107,6 +113,8 @@ fl_result_t pmm_free_frame_result(uintptr_t phys_addr) {
     size_t frame;
 
     if (phys_addr < PMM_PHYS_BASE)
+        return FL_RESULT_INVAL;
+    if ((phys_addr - PMM_PHYS_BASE) % PMM_FRAME_SIZE != 0u)
         return FL_RESULT_INVAL;
     frame = (size_t)((phys_addr - PMM_PHYS_BASE) / PMM_FRAME_SIZE);
     if (frame >= PMM_NUM_FRAMES)

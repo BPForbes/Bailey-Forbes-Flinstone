@@ -1,5 +1,6 @@
 #include "common.h"
 #include "cmd_decl.h"
+#include "cmd_batch.h"
 #include "cmd_util.h"
 #include "disk.h"
 #include "mem_domain.h"
@@ -31,4 +32,8 @@ int cmd_format_run(int argc, char **argv) {
     g_cluster_size = nibbleCount / 2;
     g_total_clusters = rowCount;
     return 0;
+}
+
+int cmd_format_batch_tokens_count(int argc, char **argv, int i) {
+    (void)argc; (void)argv; (void)i; return 5;
 }
