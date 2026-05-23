@@ -2,7 +2,7 @@ name: Sync version checkout for CI build
 description: >-
   After the versioning job, pick up bot-pushed version files without abandoning
   the PR merge checkout: on pull_request, overlay userland/shell/version_def.h
-  and version/entries from origin/<head>; on push, fast-forward to origin/<ref>.
+  and version/entries from origin/<head>; on push, overlay from origin/<ref>.
   Then relocate idempotently and regenerate version_def.h.
 runs:
   using: composite
@@ -16,6 +16,7 @@ runs:
          github.ref != 'refs/heads/main')
       env:
         GITHUB_TOKEN: ${{ github.token }}
+        GITHUB_REPOSITORY: ${{ github.repository }}
         GIT_HEAD_REF: ${{ github.head_ref }}
         GIT_REF_NAME: ${{ github.ref_name }}
         PR_HEAD_SHA: ${{ github.event.pull_request.head.sha }}
@@ -23,32 +24,40 @@ runs:
       working-directory: ${{ github.workspace }}
       run: |
         set -euo pipefail
-        # checkout@v4 sets this on the initial clone; re-apply so composite-step fetch works.
-        if [[ -n "${GITHUB_TOKEN}" ]]; then
-          auth="AUTHORIZATION: basic $(printf 'x-access-token:%s' "${GITHUB_TOKEN}" | base64 | tr -d '\n')"
-          git config --local http.https://github.com/.extraheader "${auth}"
+        if [[ -z "${GITHUB_TOKEN}" ]]; then
+          echo "sync-version-checkout: GITHUB_TOKEN is required" >&2
+          exit 1
         fi
+        git remote set-url origin \
+          "https://x-access-token:${GITHUB_TOKEN}@github.com/${GITHUB_REPOSITORY}.git"
+
+        version_ref=""
         if [[ "${GITHUB_EVENT_NAME}" == "pull_request" ]]; then
           if [[ -n "${GIT_HEAD_REF}" ]]; then
             git fetch --no-tags origin "${GIT_HEAD_REF}"
+            version_ref="origin/${GIT_HEAD_REF}"
           elif [[ -n "${PR_HEAD_SHA}" ]]; then
             git fetch --no-tags origin "${PR_HEAD_SHA}"
+            version_ref="${PR_HEAD_SHA}"
           else
-            echo "sync-version-checkout: missing head ref and PR head SHA" >&2
+            echo "sync-version-checkout: pull_request missing head ref and head SHA" >&2
             exit 1
           fi
-          ref="origin/${GIT_HEAD_REF}"
-          if ! git rev-parse --verify --quiet "${ref}" >/dev/null 2>&1; then
-            ref="${PR_HEAD_SHA}"
-          fi
-          if git rev-parse --verify --quiet "${ref}" >/dev/null 2>&1; then
-            git checkout "${ref}" -- userland/shell/version_def.h 2>/dev/null || true
-            git checkout "${ref}" -- version/entries 2>/dev/null || true
-          fi
         else
+          if [[ -z "${GIT_REF_NAME}" ]]; then
+            echo "sync-version-checkout: push missing ref name" >&2
+            exit 1
+          fi
           git fetch --no-tags origin "${GIT_REF_NAME}"
-          git checkout -B "${GIT_REF_NAME}" "origin/${GIT_REF_NAME}"
+          version_ref="origin/${GIT_REF_NAME}"
         fi
+
+        if ! git rev-parse --verify --quiet "${version_ref}" >/dev/null 2>&1; then
+          echo "sync-version-checkout: cannot resolve ${version_ref}" >&2
+          exit 1
+        fi
+        git checkout "${version_ref}" -- userland/shell/version_def.h 2>/dev/null || true
+        git checkout "${version_ref}" -- version/entries 2>/dev/null || true
 
     - name: Prepare version/entries (relocate, normalize GM, stamp dates)
       uses: ./.github/actions/prepare-version-entries
