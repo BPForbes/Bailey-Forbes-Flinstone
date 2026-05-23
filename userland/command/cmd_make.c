@@ -1,6 +1,5 @@
 #include "common.h"
 #include "cmd_decl.h"
-#include "cmd_batch.h"
 #include "fs.h"
 #include "path_log.h"
 #include "fs_service_glue.h"
@@ -51,8 +50,4 @@ int cmd_make_maybe(char *trimmed) {
         do_make_file(rpath);
     }
     return 1;
-}
-
-int cmd_make_batch_tokens_count(int argc, char **argv, int i) {
-    (void)argc; (void)argv; (void)i; return 2;
 }

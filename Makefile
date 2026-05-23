@@ -36,6 +36,7 @@ OPENSSL_ARM_LIBDIR = deps/install-aarch64/lib
 OPENSSL_ARM_LIB = deps/install-aarch64/lib/libcrypto.a
 endif
 endif
+CXX = g++
 CXXFLAGS ?= $(CFLAGS) -std=c++17
 ASFLAGS =
 
@@ -94,7 +95,6 @@ KERNEL_DRIVERS = kernel/arch/aarch64/drivers
 CFLAGS += -DFL_STACK_ASM_AVAILABLE=1
 else
 # x86_64_gas (default)
-CXX = g++
 CFLAGS += -DFL_STACK_ASM_AVAILABLE=1
 ASMSRCS_BASE = arch/x86_64/gas/mem_asm.s arch/x86_64/gas/fl_stack_asm.s arch/x86_64/gas/port_io.s arch/x86_64/gas/disk_host_io.s arch/x86_64/gas/shell_history_host_asm.s kernel/arch/x86_64/boot/spinlock.s kernel/arch/x86_64/drivers/ata_pio.s \
                kernel/arch/x86_64/drivers/usb_xhci_mmio_asm.s \
@@ -481,9 +481,8 @@ test_userspace_connection: kernel/core/sys/vrt.o kernel/core/sys/ipc.o kernel/co
 
 # Invariant tests (property + contract headers). Uses $(CFLAGS), which already
 # includes -Icontracts/virtualization and -Icontracts/hardening for P8/P9 shards.
-TEST_INVARIANTS_CMD_OBJS = userland/command/cmd_batch_audit_tokens.o userland/command/cmd_batch_contracts_tokens.o
-test_invariants: userland/shell/common.o userland/shell/authz_subsystem.o $(UTIL_SHELL_LINK_OBJS) $(TEST_INVARIANTS_CMD_OBJS) $(MEM_ASM_OBJ) $(HISTORY_ASM_OBJ) $(UTIL_HISTORY_HOST_OBJS)
-	$(CC) $(CFLAGS) $(TEST_SANITIZE) -o tests/test_invariants tests/test_invariants.c userland/shell/common.o userland/shell/authz_subsystem.o $(UTIL_SHELL_LINK_OBJS) $(TEST_INVARIANTS_CMD_OBJS) $(MEM_ASM_OBJ) $(HISTORY_ASM_OBJ) $(UTIL_HISTORY_HOST_OBJS)
+test_invariants: userland/shell/common.o userland/shell/authz_subsystem.o $(UTIL_SHELL_LINK_OBJS) $(MEM_ASM_OBJ) $(HISTORY_ASM_OBJ) $(UTIL_HISTORY_HOST_OBJS)
+	$(CC) $(CFLAGS) $(TEST_SANITIZE) -o tests/test_invariants tests/test_invariants.c userland/shell/common.o userland/shell/authz_subsystem.o $(UTIL_SHELL_LINK_OBJS) $(MEM_ASM_OBJ) $(HISTORY_ASM_OBJ) $(UTIL_HISTORY_HOST_OBJS)
 	./tests/test_invariants
 
 # audit_log unit tests (standalone, no CUnit required)

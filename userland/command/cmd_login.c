@@ -1,5 +1,4 @@
 #include "cmd_decl.h"
-#include "cmd_batch.h"
 #include "cmd_authutil.h"
 #include "fl/audit_log.h"
 #include "fl/session.h"
@@ -34,8 +33,4 @@ int cmd_login_run(int argc, char **argv) {
     printf("login: now %s%s\n", fl_session_current_user(),
            fl_session_is_elevated_account() ? " (elevated)" : "");
     return 0;
-}
-
-int cmd_login_batch_tokens_count(int argc, char **argv, int i) {
-    (void)argc; (void)argv; (void)i; return 2;
 }

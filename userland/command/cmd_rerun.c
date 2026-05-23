@@ -1,5 +1,4 @@
 #include "cmd_decl.h"
-#include "cmd_batch.h"
 #include "interpreter.h"
 #include "util.h"
 #include <stdio.h>
@@ -25,8 +24,4 @@ int cmd_rerun_run(int argc, char **argv) {
     int rc = execute_command_str(cmd);
     free(cmd);
     return rc;
-}
-
-int cmd_rerun_batch_tokens_count(int argc, char **argv, int i) {
-    (void)argc; (void)argv; (void)i; return 2;
 }

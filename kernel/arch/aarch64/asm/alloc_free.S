@@ -21,10 +21,9 @@ free:
     stp     x23, x24, [sp, #48]
     str     x25, [sp, #64]
     cbz     x0, .Ldone_fast
-    mov     x19, x0
     bl      lock_acquire
     bl      init_heap_once_nolock
-    sub     x19, x19, #HDR_SIZE      /* block = ptr - HDR_SIZE */
+    sub     x19, x0, #HDR_SIZE       /* block = ptr - HDR_SIZE */
     ldr     x20, [x19]
     and     x20, x20, #-16
     orr     x20, x20, #FLAG_FREE

@@ -4,7 +4,6 @@
 #include "contract_p2_principal.h"
 #include "contract_p2_authz.h"
 
-/* Lab cap (32) matches FL_USER_NAME_MAX; contract allows up to FL_CREDENTIAL_USERNAME_MAX_CHARS. */
 #define FL_PATH_OWNER_MAX 32u
 #define FL_PATH_META_DIR  ".flmeta"
 #define FL_PATH_META_FILE ".flmeta/properties.json"
