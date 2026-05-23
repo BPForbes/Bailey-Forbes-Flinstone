@@ -1,0 +1,35 @@
+MAJOR_VERSION=4
+STANDARD_VERSION=1
+RELEASE_VERSION=1
+PRERELEASE=1
+DEV_VERSION=2
+GM=0
+DESCRIPTION<<BUG_AUDIT_DESC_END
+4.1.1 preproduction build 2: bug audit — six potential defects identified across kernel scheduler, disk I/O, and identity subsystems.
+
+threadpool.c:22 — missing NULL check on strdup return: create_job does not verify
+strdup(line) succeeded before storing into job->command_str; a failed allocation
+produces a NULL command_str that run_job_task dereferences unconditionally.
+
+threadpool.c:67–81 — TOCTOU / use-after-free in job lifecycle: worker_thread can
+call run_job_task (which destroys job->mutex and condvar) between queue_job_priority
+and the caller's pthread_mutex_lock on job->mutex, locking freed memory.
+
+disk_asm.c:179 — sprintf buffer overflow in hex loop: each sprintf call null-terminates
+in-place, writing one byte past the current position; the aggregate null writes escape
+the allocated hex_str buffer (g_cluster_size * 2 + 1 bytes) on the final iteration,
+corrupting the adjacent heap object.
+
+cmd_su.c:74 — static saved[32] buffer truncates usernames longer than 31 bytes:
+fl_session_current_user() may return strings up to FL_USER_NAME_MAX characters; strncpy
+silently clips the name, breaking the restore path after a failed su.
+
+elevation.c:49–50 — strncpy / null-terminator ordering window: the explicit
+s_slots[i].principal[sizeof-1] = '\0' on line 50 correctly terminates the field, but
+a concurrent reader between lines 49 and 50 observes an unterminated principal string;
+the lock is released before line 50 in some code paths.
+
+cmd_authutil.c:23 — size_t-to-int cast in fgets: (int)buf_size truncates to a negative
+or near-zero value when buf_size exceeds INT_MAX, causing fgets to read an incorrect
+number of bytes or return immediately.
+BUG_AUDIT_DESC_END
