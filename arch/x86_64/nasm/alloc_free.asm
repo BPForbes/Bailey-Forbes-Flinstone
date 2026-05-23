@@ -1,5 +1,5 @@
 ; alloc_free.asm - free (NASM x86-64)
-section .note.GNU-stack progbits alloc noexec
+section .note.GNU-stack progbits noalloc noexec nowrite
 section .text
 global free
 

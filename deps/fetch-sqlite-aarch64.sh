@@ -9,10 +9,28 @@ INSTALL_PREFIX="${DEPS_ROOT}/deps/install-aarch64"
 BUILD_DIR="${DEPS_ROOT}/deps/build/sqlite-aarch64"
 SQLITE_VERSION="${SQLITE_VERSION:-3460100}"
 SQLITE_ZIP="sqlite-amalgamation-${SQLITE_VERSION}.zip"
-SQLITE_URL="https://www.sqlite.org/2024/${SQLITE_ZIP}"
+# SQLite publishes amalgamation zips under https://www.sqlite.org/<year>/; probe recent years.
+SQLITE_SHA256="${SQLITE_SHA256:-77823cb110929c2bcb0f5d48e4833b5c59a8a6e40cdea3936b99e199dbbe5784}"
 
 CC_ARM="${CC_ARM:-aarch64-linux-gnu-gcc}"
 AR_ARM="${AR_ARM:-aarch64-linux-gnu-ar}"
+
+verify_sha256() {
+    file="$1"
+    expected="$2"
+    actual="$(sha256sum "$file" | awk '{print $1}')"
+    if [ "$actual" != "$expected" ]; then
+        echo "[deps] SHA-256 mismatch for $(basename "$file")" >&2
+        echo "[deps]   expected: $expected" >&2
+        echo "[deps]   actual:   $actual" >&2
+        exit 1
+    fi
+}
+
+sqlite_download_url() {
+    year="$1"
+    printf '%s' "https://www.sqlite.org/${year}/${SQLITE_ZIP}"
+}
 
 mkdir -p "${DEPS_ROOT}/deps/download" "${BUILD_DIR}"
 
@@ -32,9 +50,23 @@ command -v "${AR_ARM}" >/dev/null 2>&1 || {
 
 ARCHIVE="${DEPS_ROOT}/deps/download/${SQLITE_ZIP}"
 if [ ! -f "$ARCHIVE" ]; then
+    SQLITE_URL=""
+    for year in ${SQLITE_YEAR:-} 2025 2024 2023; do
+        [ -n "$year" ] || continue
+        candidate="$(sqlite_download_url "$year")"
+        if curl -fsI "$candidate" >/dev/null 2>&1; then
+            SQLITE_URL="$candidate"
+            break
+        fi
+    done
+    if [ -z "$SQLITE_URL" ]; then
+        echo "[deps] Could not find ${SQLITE_ZIP} on sqlite.org (tried recent release years)" >&2
+        exit 1
+    fi
     echo "[deps] Downloading SQLite amalgamation ${SQLITE_VERSION}..."
     curl -fsSL "$SQLITE_URL" -o "$ARCHIVE"
 fi
+verify_sha256 "$ARCHIVE" "$SQLITE_SHA256"
 
 echo "[deps] Extracting SQLite..."
 rm -rf "${BUILD_DIR}/sqlite-amalgamation-${SQLITE_VERSION}"

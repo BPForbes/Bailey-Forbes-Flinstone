@@ -1,0 +1,7 @@
+MAJOR_VERSION=4
+STANDARD_VERSION=1
+RELEASE_VERSION=1
+PRERELEASE=1
+DEV_VERSION=1
+GM=0
+DESCRIPTION=4.1.1 preproduction build 1: GitHub issues #169-#207 (PR #168 follow-ups)—Makefile ARM CXX/deps, batch argv per cmd_*.c with CodeRabbit follow-ups (import geometry, du dtl, su/sudo/setdisk spans, audit numeric tokens), CI sync-version-checkout and checkout persist-credentials=false, account DB reload errors, cmd_su login-env restore on apply failure, and related hardening from PR #168.

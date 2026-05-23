@@ -4,7 +4,7 @@
 |-------|-------|
 | **Severity** | Medium |
 | **Component** | Repository layout / NASM maintenance |
-| **Status** | Open (report only) |
+| **Status** | **Closed** (legacy tree removed; canonical `arch/x86_64/nasm/`) |
 
 ## Summary
 

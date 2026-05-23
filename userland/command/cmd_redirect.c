@@ -1,5 +1,6 @@
 #include "common.h"
 #include "cmd_decl.h"
+#include "cmd_batch.h"
 #include "cmd_util.h"
 #include "fs.h"
 #include "util.h"
@@ -22,4 +23,8 @@ int cmd_redirect_run(int argc, char **argv) {
         do_redirect_output(rpath);
     }
     return 0;
+}
+
+int cmd_redirect_batch_tokens_count(int argc, char **argv, int i) {
+    (void)argc; (void)argv; (void)i; return 2;
 }

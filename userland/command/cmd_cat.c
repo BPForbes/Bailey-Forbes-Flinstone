@@ -1,5 +1,6 @@
 #include "common.h"
 #include "cmd_decl.h"
+#include "cmd_batch.h"
 #include "cmd_util.h"
 #include "path_log.h"
 #include "fs_service_glue.h"
@@ -31,4 +32,10 @@ int cmd_cat_run(int argc, char **argv) {
         cat_file(rpath);
     }
     return 0;
+}
+
+int cmd_cat_batch_tokens_count(int argc, char **argv, int i) {
+    if (i + 1 < argc && argv[i + 1] && argv[i + 1][0] != '-')
+        return 2;
+    return 1;
 }

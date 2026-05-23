@@ -1,5 +1,5 @@
 ; alloc_core.asm - thread-safe allocator core (NASM x86-64)
-section .note.GNU-stack progbits alloc noexec
+section .note.GNU-stack progbits noalloc noexec nowrite
 section .text
 global malloc_nolock:hidden
 global init_heap_once_nolock:hidden
