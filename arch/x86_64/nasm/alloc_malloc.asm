@@ -10,6 +10,7 @@ extern lock_release
 extern init_heap_once_nolock
 extern malloc_nolock
 extern free
+extern asm_mem_copy
 
 HDR_SIZE equ 16
 
@@ -55,6 +56,7 @@ calloc:
     mov rcx, r13
     xor rax, rax
     mov r12, rcx
+    cld
     shr rcx, 3
     rep stosq
     mov rcx, r12
@@ -98,7 +100,8 @@ realloc:
     cmova rcx, r13
     mov rdi, rbx
     mov rsi, r12
-    rep movsb
+    mov rdx, rcx
+    call asm_mem_copy
     mov rdi, r12
     call free
     mov rax, rbx

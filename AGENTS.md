@@ -5,18 +5,25 @@
 Assume a fresh Linux image may have no build libraries installed. Before building
 or testing, install the project toolchain and optional VM/test dependencies:
 
-`sudo apt-get update && sudo apt-get install -y build-essential gcc make binutils nasm gcc-aarch64-linux-gnu binutils-aarch64-linux-gnu pkg-config curl ca-certificates cmake autoconf automake libtool bzip2 tar libsdl2-dev libcunit1-dev`
+`sudo apt-get update && sudo apt-get install -y build-essential gcc g++ make binutils nasm gcc-aarch64-linux-gnu g++-aarch64-linux-gnu binutils-aarch64-linux-gnu pkg-config curl ca-certificates cmake autoconf automake libtool bzip2 tar libsdl2-dev libcunit1-dev libsqlite3-dev`
 
 Notes:
 - `build-essential`, `gcc`, `make`, and `binutils` are required for the default C/GAS build.
 - `nasm` is required for `ARCH=x86_64_nasm`.
-- `gcc-aarch64-linux-gnu` and `binutils-aarch64-linux-gnu` are required for `ARCH=arm`.
+- `gcc-aarch64-linux-gnu`, `g++-aarch64-linux-gnu` (or `gcc-aarch64-linux-gnu` with `-x c++`), and `binutils-aarch64-linux-gnu` are required for `ARCH=arm` on x86 hosts.
+- For AArch64 cross links that use SQLite (`user_db.c`), run **`./deps/fetch-sqlite-aarch64.sh`** (or **`make deps-sqlite-aarch64`**) to build **`deps/install-aarch64/lib/libsqlite3.a`** when apt multiarch is unavailable (GitHub Actions ARM job).
+- For AArch64 cross links that use OpenSSL (`password_hash.cpp`), run **`./deps/fetch-openssl-aarch64.sh`** (or **`make deps-openssl-aarch64`**) — CI **build-arm** does this after **fetch-sqlite-aarch64**; host **`libssl-dev`** headers are the wrong architecture on x86 runners.
 - `libsdl2-dev` and `pkg-config` are required for `make vm-sdl` when not using `deps/install`.
 - `libcunit1-dev` is required for the CUnit test binary.
+- `libsqlite3-dev` and `g++` are required for SQLite account storage and password hashing (`userland/identity/password_hash.cpp`).
 - `curl`, `cmake`, `autoconf`, `automake`, `libtool`, `bzip2`, and `tar` are required by `make deps`, `make deps-sdl2`, and `make deps-cunit`.
 - Optional (not required to compile or run the shell): `dosfstools` (`dosfsck`, `mkfs.fat`) helps validate FAT32 disk images the project creates; it is not linked into the binary. See `docs/dependencies.md` for a consolidated list of system packages versus `make deps`.
 
-## AI feature-branch workflow (Cursor / Claude / Codex)
+## Replit Agent
+
+On [Replit](https://replit.com/~), the in-Repl **Replit Agent** uses **`replit.md`**, which states the **full explicit rules** (versioning, lock system, git workflow, build/test)—the **same** mandatory policy as **CLAUDE.md**, **AGENTS.md** (this file), **`.cursor/rules/*.mdc`**, and **`.coderabbit.yaml`**. App config: **`.replit`**, **`replit.nix`**.
+
+## AI feature-branch workflow (Cursor / Claude / Codex / Replit)
 
 When an agent opens a pull request or branch for one task and later needs to implement **another** item that is **not** part of that branch’s original goal, **do not** create a new branch **unless** a human explicitly allows it. **Stay on the current** feature branch and commit the additional work there—unless a human tells you to use a separate branch.
 

@@ -98,7 +98,7 @@ jobs:
         uses: ./.github/actions/sync-version-checkout
 
       - name: Install dependencies
-        run: sudo apt-get update -y && sudo apt-get install -y gcc binutils nasm libcunit1-dev
+        run: sudo apt-get update -y && sudo apt-get install -y gcc g++ binutils nasm libcunit1-dev libsqlite3-dev libssl-dev
 
       - name: Assemble changelog (CI-only source)
         run: |
@@ -155,7 +155,13 @@ jobs:
         uses: ./.github/actions/sync-version-checkout
 
       - name: Install cross-compiler
-        run: sudo apt-get update -y && sudo apt-get install -y gcc gcc-aarch64-linux-gnu binutils-aarch64-linux-gnu
+        run: sudo apt-get update -y && sudo apt-get install -y gcc g++ unzip curl perl make gcc-aarch64-linux-gnu g++-aarch64-linux-gnu binutils-aarch64-linux-gnu
+
+      - name: Build SQLite for AArch64 cross link
+        run: ./deps/fetch-sqlite-aarch64.sh
+
+      - name: Build OpenSSL for AArch64 cross link
+        run: ./deps/fetch-openssl-aarch64.sh
 
       - name: Assemble changelog (CI-only source)
         run: |
@@ -178,7 +184,7 @@ jobs:
         uses: ./.github/actions/sync-version-checkout
 
       - name: Install dependencies
-        run: sudo apt-get install -y gcc binutils nasm
+        run: sudo apt-get update -y && sudo apt-get install -y gcc g++ binutils nasm libsqlite3-dev libssl-dev
 
       - name: Assemble changelog (CI-only source)
         run: |
