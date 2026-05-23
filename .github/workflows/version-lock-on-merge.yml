@@ -1,5 +1,5 @@
 # After a push to develop, relocate non-GM root PRERELEASE=1 rows into preproduction */,
-# normalize duplicate GM candidates, copy version/entries → version/locked
+# normalize duplicate GM candidates, promote GM=1 preproduction to root GA .ver, copy version/entries → version/locked
 # (excluding top-level preproduction */ trees), regenerate userland/shell/version_def.h. If anything changed,
 # opens a PR into develop (do not
 # push that commit directly to develop — branch rules usually require a PR, checks,
@@ -49,6 +49,9 @@ jobs:
       - name: Normalize duplicate GM=1 candidates
         run: bash scripts/promote_preproduction_for_main.sh --normalize-gm-only
 
+      - name: Promote GM=1 preproduction rows to root GA .ver
+        run: bash scripts/promote_preproduction_for_main.sh
+
       - name: Finalize version (copy entries → locked, skip preproduction */)
         run: ./scripts/finalize_version_locked.sh
 
@@ -86,7 +89,7 @@ jobs:
             version/locked/**
             userland/shell/version_def.h
           body: |
-            Automated sync after a push to `develop`: ran `relocate_root_prerelease_ver_to_preproduction.sh`, `promote_preproduction_for_main.sh --normalize-gm-only`, `finalize_version_locked.sh`, `stamp_version_release_date.sh`, and `gen_version_def.sh`.
+            Automated sync after a push to `develop`: ran `relocate_root_prerelease_ver_to_preproduction.sh`, `promote_preproduction_for_main.sh --normalize-gm-only`, `promote_preproduction_for_main.sh` (GA promote when GM=1 is present), `finalize_version_locked.sh`, `stamp_version_release_date.sh`, and `gen_version_def.sh`.
 
             **Branch protection** on `develop` (PR-only, required checks, verified signatures) means the sync cannot land as a direct push. Merge this PR to publish `version/entries` moves (when relocate applied), `version/locked/`, and `userland/shell/version_def.h`.
 
