@@ -8,6 +8,8 @@ Run this repo on [Replit](https://replit.com/~) (import from GitHub or fork).
 
 **Canonical copies (update together when policy changes):** [`CLAUDE.md`](CLAUDE.md) · [`AGENTS.md`](AGENTS.md) · [`.cursor/rules/versioning.mdc`](.cursor/rules/versioning.mdc) · [`.cursor/rules/review_tools.mdc`](.cursor/rules/review_tools.mdc) · [`.coderabbit.yaml`](.coderabbit.yaml) · [`docs/versioning.md`](docs/versioning.md)
 
+> **`GM=1` (go-to-main):** Replit Agent **must not** set **`GM=1`** on any **`.ver`** file **unless** a **human maintainer** explicitly tells you that you may. Without that instruction, **never** add **`GM=1`**—use **`GM=0`** or omit **`GM`**. **For the current 4.1.0 prerelease train (`4_1_0_replit_support.ver` and related rows): do not set `GM=1`.** Go-to-main is a maintainer decision, not an agent default.
+
 ---
 
 ### 1. Project context
@@ -77,7 +79,7 @@ Examples: **`2.2.4` → `2.3.0`** (minor); **`2.3.7` → `3.0.0`** (major); **`2
 - **`DEV_VERSION`:** compare to **`develop`** (merge base). Let **`N`** = **`DEV_VERSION`** on **`develop`** for that path, or **`0`** if absent. You may set **`DEV_VERSION`** to exactly **`N+1`** **once** when establishing that row; **never** change **`DEV_VERSION`** again on that path—update **`DESCRIPTION`** only. **Never** increase mid-PR (e.g. **8→9**). **Do not** run **`./scripts/bump_dev_version.sh`** to chase BUILD numbers.
 - With **`PRERELEASE=1`**, use **`DEV_VERSION >= 1`**.
 - **`(MAJOR, STANDARD, RELEASE, DEV_VERSION)`** must be **unique** across **`version/entries/**/*.ver`** (missing **`DEV_VERSION=`** counts as **0**). Before push: **`./scripts/check_version_entries_semver_dev_unique.sh`**.
-- **`GM=1` (go-to-main):** **Replit Agent must not set `GM=1` or hand-add any row under `version/entries/preproduction */`.** Go-to-main is **maintainer-only**. When a maintainer runs promotion, they add a **new** **`.ver`** under the existing **`preproduction <A>.<B>.<C>/`** folder (next **`DEV_VERSION`**, **`GM=1`**, **`DESCRIPTION`** starting with **`A.B.C:`**)—**never** on a root **`*.ver`**. **`promote_preproduction_for_main.sh`** then writes one GA root **`.ver`** at **`version/entries/`** before **`main`**.
+- **`GM=1` (go-to-main):** **Replit Agent must not set `GM=1` unless a human maintainer explicitly instructs you that you may** (written go-ahead in the task or PR—do not infer it from “ready to merge”). Without that instruction, **never** set **`GM=1`** on any row (including under **`preproduction */`**). **Do not set `GM=1` for version 4.1.0** on this Replit support work—keep **`GM=0`** or omit **`GM`**. **Never** hand-add rows under **`version/entries/preproduction */`**. When a **maintainer** runs go-to-main, they add a **new** **`.ver`** under the existing **`preproduction <A>.<B>.<C>/`** folder (next **`DEV_VERSION`**, **`GM=1`**, **`DESCRIPTION`** starting with **`A.B.C:`**)—**never** on a root **`*.ver`**. **`promote_preproduction_for_main.sh`** then writes one GA root **`.ver`** at **`version/entries/`** before **`main`**.
 
 #### 3.6 No semver backtracking (AI)
 
@@ -185,4 +187,4 @@ Package list and profiles: `nix/deps.json`. Local Nix flakes: `flake.nix` (not u
 
 ## Versioning (quick reminder)
 
-Full rules are in **§3** above. Replit Agent: **typically one new** root **`version/entries/A_B_C_slug.ver`** per PR train (extra root rows only when combining branches or a new iteration requires it—see **§3.3**); **`PRERELEASE=1` at root only** (CI moves to **`preproduction */`**); **never** hand-add under **`preproduction */`**; **never** **`GM=1`**; **never** merge-base **`.ver`** edits; **`DESCRIPTION` only** on each root row this PR added (even after relocate); **never** **`version/locked/**`** or **`version_def.h`** commits.
+Full rules are in **§3** above. Replit Agent: **typically one new** root **`version/entries/A_B_C_slug.ver`** per PR train (extra root rows only when combining branches or a new iteration requires it—see **§3.3**); **`PRERELEASE=1` at root only** (CI moves to **`preproduction */`**); **never** hand-add under **`preproduction */`**; **`GM=1` only if a human maintainer explicitly allows it** (not for **4.1.0** on this PR); **never** merge-base **`.ver`** edits; **`DESCRIPTION` only** on each root row this PR added (even after relocate); **never** **`version/locked/**`** or **`version_def.h`** commits.
