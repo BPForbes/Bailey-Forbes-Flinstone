@@ -1,0 +1,47 @@
+MAJOR_VERSION=4
+STANDARD_VERSION=1
+RELEASE_VERSION=0
+DESCRIPTION<<PROMOTE_DESC_END
+4.1.0: Minor release — P0–P2 contract integration, identity/auth subsystem, ASM ABI hardening, and Replit support.
+
+Memory (kernel/core/memory/): fl_stack free-frame pool for PMM; fl_exec_context
+snapshot (heap/stack/IP/registers); fl_result_t on fallible PMM APIs.
+
+Time (kernel/core/time/): fl_timekeeping via POSIX CLOCK_MONOTONIC (P1-7 hosted path).
+
+Identity (kernel/core/identity/): SQLite user_db with PBKDF2-HMAC-SHA256 password
+hashes (OpenSSL); login/logout/su/sudo/sudo -i/sudo -k/whoami/useradd/userdel/passwd
+shell commands; session_login_env HOME/cwd apply on su -/sudo -i; elevation pool of
+16 slots; tcgetattr password prompts; db->loaded guard; userdel hash/salt zero;
+useradd fl_user_db_next_uid; guest privileged-op deny; audit grant/revoke lines.
+
+Jail (P0 FS): fs_jail elevation-aware; elevated or sudo required to escape VM jail.
+
+Authz (P2-3): fm_service write_chain gates on create/move; FL_AUTHZ_OP_IDENTITY_*
+shell→subsystem mapping; test_p0_p2_wiring covers stack, PMM, exec_context, user_db,
+path_property, timekeeping, and authz.
+
+ASM (arch/*/gas/, arch/x86_64/nasm/): fl_stack_asm push/pop/count hot paths and
+fl_elevation_active_count slot scan; _Static_assert slot layout (56 bytes);
+ABI fixes — malloc_nolock callee-saved registers, AArch64 free mov x19 before
+lock_acquire, AAPCS64 16-byte frames, cld, lock release; x86-64 realloc via
+asm_mem_copy; NASM .note.GNU-stack noalloc/noexec/nowrite; alloc .hidden;
+shell_history_host_asm cmp order; disk_host_io NASM; kernel asm sync;
+legacy ARM/ and x86-64 (NASM)/ root trees removed.
+
+Replit: .replit, replit.nix, replit.md, docs/replit.md, flake.nix, nix/deps.json
+for https://replit.com/~ GitHub import; Replit Agent rules aligned with CLAUDE.md,
+AGENTS.md, .cursor/rules/, and .coderabbit.yaml.
+
+CI/Makefile: AArch64 cross-build with fetch-openssl-aarch64.sh and
+fetch-sqlite-aarch64.sh; SHA-256 checksum verification for fetched deps;
+persist-credentials: false on CI checkouts; sync-version-checkout GITHUB_TOKEN
+remote URL and overlay mode; test_p0_p2_wiring added to .gitignore.
+
+Contracts: contract_p0_fs_jail.h; contract_p2_authz; contract_p2_credential_store;
+FL_CONTRACT_P2_IDENTITY_REV 3; P0–P2 ROADMAP integration column updated.
+
+Docs: docs/p0_p2_pr_coverage.md; MIGRATION_GUIDE status rows updated to ✅;
+docs/ARCH.md ARCH=arm = AArch64 clarification; NASM-SYNC-001 closed.
+VER_4_1_0_GM1_DEV4
+PROMOTE_DESC_END

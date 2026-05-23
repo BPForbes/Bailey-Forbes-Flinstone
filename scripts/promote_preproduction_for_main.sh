@@ -202,6 +202,9 @@ promote_root() {
     if (( DRY_RUN )); then
       demote_lower_gm_files "$gm_file" "${lower_gm_files[@]}"
       echo "promote_preproduction_for_main: [dry-run] would write $dest from $gm_file (GA, DESCRIPTION from GM=1 file only)"
+      if [[ "$BASE" == "$ROOT/version/entries" ]]; then
+        echo "promote_preproduction_for_main: [dry-run] would clone to version/locked/$(basename "$gm_file")"
+      fi
       echo "promote_preproduction_for_main: [dry-run] would remove $dir/*.ver and delete $dir"
       continue
     fi
@@ -219,6 +222,14 @@ promote_root() {
       printf '%s\n' "$agg"
       printf '%s\n' "$delim"
     } >"$dest"
+
+    # When promoting from entries, clone the GA file into version/locked/ immediately.
+    if [[ "$BASE" == "$ROOT/version/entries" ]]; then
+      local lck_dir="$ROOT/version/locked"
+      mkdir -p "$lck_dir"
+      cp "$dest" "$lck_dir/$(basename "$gm_file")"
+      echo "promote_preproduction_for_main: cloned to locked: version/locked/$(basename "$gm_file")"
+    fi
 
     rm -f "$dir"/*.ver
     if ! rmdir "$dir" 2>/dev/null; then
