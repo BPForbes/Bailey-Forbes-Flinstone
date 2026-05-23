@@ -15,20 +15,38 @@ runs:
          github.ref != 'refs/heads/develop' &&
          github.ref != 'refs/heads/main')
       env:
+        GITHUB_TOKEN: ${{ github.token }}
         GIT_HEAD_REF: ${{ github.head_ref }}
         GIT_REF_NAME: ${{ github.ref_name }}
+        PR_HEAD_SHA: ${{ github.event.pull_request.head.sha }}
       shell: bash
       working-directory: ${{ github.workspace }}
       run: |
         set -euo pipefail
-        git fetch origin
+        # checkout@v4 sets this on the initial clone; re-apply so composite-step fetch works.
+        if [[ -n "${GITHUB_TOKEN}" ]]; then
+          auth="AUTHORIZATION: basic $(printf 'x-access-token:%s' "${GITHUB_TOKEN}" | base64 | tr -d '\n')"
+          git config --local http.https://github.com/.extraheader "${auth}"
+        fi
         if [[ "${GITHUB_EVENT_NAME}" == "pull_request" ]]; then
-          git fetch origin "${GIT_HEAD_REF}"
-          if git rev-parse --verify --quiet "origin/${GIT_HEAD_REF}" >/dev/null; then
-            git checkout "origin/${GIT_HEAD_REF}" -- userland/shell/version_def.h 2>/dev/null || true
-            git checkout "origin/${GIT_HEAD_REF}" -- version/entries 2>/dev/null || true
+          if [[ -n "${GIT_HEAD_REF}" ]]; then
+            git fetch --no-tags origin "${GIT_HEAD_REF}"
+          elif [[ -n "${PR_HEAD_SHA}" ]]; then
+            git fetch --no-tags origin "${PR_HEAD_SHA}"
+          else
+            echo "sync-version-checkout: missing head ref and PR head SHA" >&2
+            exit 1
+          fi
+          ref="origin/${GIT_HEAD_REF}"
+          if ! git rev-parse --verify --quiet "${ref}" >/dev/null 2>&1; then
+            ref="${PR_HEAD_SHA}"
+          fi
+          if git rev-parse --verify --quiet "${ref}" >/dev/null 2>&1; then
+            git checkout "${ref}" -- userland/shell/version_def.h 2>/dev/null || true
+            git checkout "${ref}" -- version/entries 2>/dev/null || true
           fi
         else
+          git fetch --no-tags origin "${GIT_REF_NAME}"
           git checkout -B "${GIT_REF_NAME}" "origin/${GIT_REF_NAME}"
         fi
 
