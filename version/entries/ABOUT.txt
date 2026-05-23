@@ -12,6 +12,8 @@ DESCRIPTION may be:
                 ...any amount of text, multiple lines...
                 DELIM
                 (closing line is DELIM alone after trim; newlines are kept.)
+  - Line length: each line inside the heredoc body must be at most 120 characters.
+    Split long sentences across multiple lines; do not rely on soft-wrapping in editors.
 
 Date stamp policy (DEV / preproduction intake):
   GitHub Actions prepare-version-entries runs, in order:
@@ -95,10 +97,12 @@ PRERELEASE / GM / DEV_VERSION / preproduction directories (gen_version_def.sh):
   shipped GA .ver from promote uses the selected GM=1 row's DESCRIPTION only.
 
   GM=1 go-to-main DESCRIPTION (release prose): the GM=1 row is the final prerelease
-  record before main. Its DESCRIPTION must start with A.B.C: (literal semver, e.g.
-  4.0.1:) followed by the overall release summary for that version — patches, features,
-  and fixes in the train. promote_preproduction_for_main.sh copies only that text (not
-  prose from other rows in the folder) into the root GA .ver on main.
+  record before main. Its first DESCRIPTION line must start with A.B.C: (e.g. 4.0.1:)
+  or RELEASE A.B.C: (e.g. RELEASE 4.1.0:) followed by the overall release summary for
+  that version — patches, features, and fixes in the train (compare develop vs main).
+  Each DESCRIPTION line must be at most 120 characters; use multiple lines when needed.
+  promote_preproduction_for_main.sh copies only that text (not prose from other rows in
+  the folder) into the root GA .ver on main.
 
   AI / automation (no semver backtracking): the preproduction version is the A.B.C
   in directory names

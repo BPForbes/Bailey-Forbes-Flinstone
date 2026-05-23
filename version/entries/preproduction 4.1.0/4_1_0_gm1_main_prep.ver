@@ -1,0 +1,40 @@
+MAJOR_VERSION=4
+STANDARD_VERSION=1
+RELEASE_VERSION=0
+PRERELEASE=1
+DEV_VERSION=2
+GM=1
+DESCRIPTION<<VER_4_1_0_GM1
+RELEASE 4.1.0: Minor release — P0–P2 integration (develop vs main); go-to-main GM summary.
+
+Replit / cloud agent hosts (AGENTS.md): g++, libsqlite3-dev; AArch64 cross SQLite/OpenSSL via
+deps/fetch-sqlite-aarch64.sh and fetch-openssl-aarch64.sh; Makefile deps-sqlite/openssl-aarch64.
+
+ASM: arch/arm/gas and arch/x86_64/gas fl_stack_asm.s; x86_64/nasm fl_stack_asm.asm — push/pop/count,
+asm_fl_elev_count_active (56-byte slot stride). C fallbacks when FL_STACK_ASM_UNAVAILABLE; Makefile
+links fl_stack_asm.o in shell and tests; _Static_assert(sizeof(fl_elev_slot_t)==56).
+
+P0: contract_p0_fs_jail.h; fs_jail elevation-aware access; arm_gic.c and idt_dispatch.c integration notes.
+
+P1: fl_stack PMM free-frame pool; fl_exec_context snapshot; fl_timekeeping CLOCK_MONOTONIC; pmm fl_result_t;
+contract-mount on exec_context, pmm, fl_stack, timekeeping headers.
+
+P2: SQLite user_db; PBKDF2 password_hash (OpenSSL); session, path_property, elevation (pool 16, audit);
+login/logout/su/sudo/sudo -i/-k/whoami/useradd/userdel/passwd; session_login_env; authz_subsystem;
+fm_service write_chain on create/move; guest privileged-op deny; FL_CONTRACT_P2_IDENTITY_REV 3.
+
+Shell/commands .c: interpreter auth; sh batch wiring; audit_log elevation; cmd_login/logout/su/sudo/whoami/
+account/authutil; session_sync.
+
+Contracts .h: contract_foundations (+P0 jail), contract_p2_authz, contract_p2_credential_store, identity.
+
+Bugfix .c/.h: fs_facade authz gates; user_db loaded flag, userdel hash zero, fl_user_db_next_uid; elevation
+token none skip; tcgetattr passwords; sudo -k fast-path; security PR facade/user_db/elevation; CI CUnit
+session_login_env + fl_stack_asm; NASM fl_stack link after clean.
+
+Tests: test_p0_p2_wiring, test_audit_log elevation lines, test_invariants; BPForbes_Flinstone_Tests auth cmds.
+
+CI/Makefile: c-cpp build-arm OpenSSL fetch; .gitignore deps/install-aarch64; gen_version_changelog path fix.
+
+Docs: docs/p0_p2_pr_coverage.md; ROADMAP P0–P2 integration column; deps/README cross-build scripts.
+VER_4_1_0_GM1
