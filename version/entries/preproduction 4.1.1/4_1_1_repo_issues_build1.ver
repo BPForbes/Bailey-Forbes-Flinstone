@@ -1,0 +1,9 @@
+MAJOR_VERSION=4
+STANDARD_VERSION=1
+RELEASE_VERSION=1
+PRERELEASE=1
+DEV_VERSION=1
+GM=0
+DESCRIPTION=4.1.1 preproduction build 1: GitHub issues #169-#207 (PR #168 follow-ups)—Makefile ARM CXX, deps fetch checksums and SQLite URL year, cmd_logout/cmd_su session env, batch sudo/su layout-based argv spans (no split on argument words like help), account DB reload on save failure, AArch64 free() pointer save, session mutex, fs_jail fail-closed, interpreter sudo scope ordering, path_property nearest match, user_db overflow guard, migration guide sync, and related hardening.
+
+RELEASE_DATE=2026-05-23

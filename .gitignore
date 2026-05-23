@@ -29,6 +29,7 @@ tests/test_userspace_connection
 tests/test_vm_layer_warning
 tests/test_vm_syscall_bridge
 tests/test_vm_arch_readiness
+tests/test_p0_p2_wiring
 
 # Fetched/built deps
 deps/install

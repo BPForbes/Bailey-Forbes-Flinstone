@@ -11,6 +11,12 @@ static int ensure_privilege(void) {
     return 1;
 }
 
+/** Drop in-memory account mutations when persistence fails. */
+static void account_reload_db_from_disk(fl_user_db_t *db) {
+    if (db && db->path[0])
+        (void)fl_user_db_load(db, db->path);
+}
+
 int cmd_useradd_run(int argc, char **argv) {
     fl_user_db_t *db;
     fl_result_t rc;
@@ -31,6 +37,7 @@ int cmd_useradd_run(int argc, char **argv) {
     }
     name = argv[1];
     if (cmd_read_password("New password: ", pw, sizeof(pw)) != 0) {
+        cmd_wipe_password(pw, sizeof(pw));
         fprintf(stderr, "useradd: password read failed\n");
         return 1;
     }
@@ -43,8 +50,11 @@ int cmd_useradd_run(int argc, char **argv) {
         fprintf(stderr, "useradd: failed (%d)\n", (int)rc);
         return 1;
     }
-    if (fl_session_save_users() != FL_RESULT_OK)
-        fprintf(stderr, "useradd: warning: could not save %s\n", FL_SESSION_USERS_PATH);
+    if (fl_session_save_users() != FL_RESULT_OK) {
+        account_reload_db_from_disk(db);
+        fprintf(stderr, "useradd: could not save %s\n", FL_SESSION_USERS_PATH);
+        return 1;
+    }
     printf("useradd: added %s (uid=%u)\n", name, (unsigned)uid);
     return 0;
 }
@@ -59,14 +69,21 @@ int cmd_userdel_run(int argc, char **argv) {
         fprintf(stderr, "userdel: usage: userdel <username>\n");
         return 1;
     }
+    if (!strcmp(argv[1], "root")) {
+        fprintf(stderr, "userdel: cannot remove root\n");
+        return 1;
+    }
     db = fl_session_user_db_mut();
     rc = fl_user_db_remove_user(db, argv[1]);
     if (rc != FL_RESULT_OK) {
         fprintf(stderr, "userdel: %s (%d)\n", argv[1], (int)rc);
         return 1;
     }
-    if (fl_session_save_users() != FL_RESULT_OK)
-        fprintf(stderr, "userdel: warning: could not save %s\n", FL_SESSION_USERS_PATH);
+    if (fl_session_save_users() != FL_RESULT_OK) {
+        account_reload_db_from_disk(db);
+        fprintf(stderr, "userdel: could not save %s\n", FL_SESSION_USERS_PATH);
+        return 1;
+    }
     printf("userdel: removed %s\n", argv[1]);
     return 0;
 }
@@ -88,6 +105,7 @@ int cmd_passwd_run(int argc, char **argv) {
                 "passwd: password is read on the next line (not as a command argument)\n");
     }
     if (cmd_read_password("New password: ", pw, sizeof(pw)) != 0) {
+        cmd_wipe_password(pw, sizeof(pw));
         fprintf(stderr, "passwd: password read failed\n");
         return 1;
     }
@@ -99,8 +117,11 @@ int cmd_passwd_run(int argc, char **argv) {
         fprintf(stderr, "passwd: failed for %s (%d)\n", user, (int)rc);
         return 1;
     }
-    if (fl_session_save_users() != FL_RESULT_OK)
-        fprintf(stderr, "passwd: warning: could not save %s\n", FL_SESSION_USERS_PATH);
+    if (fl_session_save_users() != FL_RESULT_OK) {
+        account_reload_db_from_disk(db);
+        fprintf(stderr, "passwd: could not save %s\n", FL_SESSION_USERS_PATH);
+        return 1;
+    }
     printf("passwd: password updated for %s\n", user);
     return 0;
 }

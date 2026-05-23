@@ -90,6 +90,169 @@ static void rmrf(const char *path) {
     rmdir(path);
 }
 
+static int batch_argv_tokens_plain(int argc, char **argv, int i);
+
+/** Validate full argv layout when **sudo_i**..**sudo_end** (exclusive) are one sudo invocation. */
+static int batch_argv_layout_with_sudo_span(int argc, char **argv, int sudo_i, int sudo_end) {
+    int cur = 1;
+
+    if (sudo_i < 1 || sudo_end <= sudo_i || sudo_end > argc)
+        return 0;
+    while (cur < argc) {
+        int tc;
+
+        if (cur == sudo_i)
+            tc = sudo_end - sudo_i;
+        else
+            tc = batch_argv_tokens_plain(argc, argv, cur);
+        if (tc < 1)
+            return 0;
+        cur += tc;
+    }
+    return 1;
+}
+
+/** Tokens for **sudo** in batch argv (do not split on argument words like **help**). */
+static int batch_argv_sudo_tokens(int argc, char **argv, int i) {
+    int end;
+
+    if (i >= argc || !argv[i] || strcmp(argv[i], "sudo"))
+        return 1;
+    if (i + 1 < argc && argv[i + 1] &&
+        (!strcmp(argv[i + 1], "-i") || !strcmp(argv[i + 1], "-k")))
+        return 2;
+    for (end = argc; end > i + 1; end--) {
+        if (batch_argv_layout_with_sudo_span(argc, argv, i, end))
+            return end - i;
+    }
+    return 2;
+}
+
+static int batch_argv_su_tokens(int argc, char **argv, int i) {
+    int j;
+
+    if (i >= argc || !argv[i] || strcmp(argv[i], "su"))
+        return 1;
+    j = i + 1;
+    while (j < argc && argv[j]) {
+        if (!strcmp(argv[j], "-c") && j + 1 < argc) {
+            j += 2;
+            continue;
+        }
+        if (argv[j][0] == '-' && strcmp(argv[j], "-") && strcmp(argv[j], "-c"))
+            break;
+        j++;
+    }
+    if (j <= i)
+        return 1;
+    return j - i;
+}
+
+static int batch_argv_tokens_plain(int argc, char **argv, int i) {
+    char *cmd;
+
+    if (i >= argc || !argv[i])
+        return 0;
+    cmd = argv[i];
+    if (!strcmp(cmd, "help") || !strcmp(cmd, "listclusters") || !strcmp(cmd, "clear") ||
+        !strcmp(cmd, "history") || !strcmp(cmd, "his") || !strcmp(cmd, "cc"))
+        return 1;
+    if (!strcmp(cmd, "version")) {
+        if (i + 1 < argc &&
+            (!strcmp(argv[i + 1], "-y") || !strcmp(argv[i + 1], "-n") ||
+             !strcmp(argv[i + 1], "-Y") || !strcmp(argv[i + 1], "-N")))
+            return 2;
+        return 1;
+    }
+    if (!strcmp(cmd, "contracts"))
+        return fl_batch_contracts_tokens_count(argc, argv, i);
+    if (!strcmp(cmd, "audit"))
+        return fl_batch_audit_tokens_count(argc, argv, i);
+    if (!strcmp(cmd, "exit")) {
+        if (i + 1 < argc &&
+            (!strcmp(argv[i + 1], "-y") || !strcmp(argv[i + 1], "-Y") ||
+             !strcmp(argv[i + 1], "-n") || !strcmp(argv[i + 1], "-N")))
+            return 2;
+        return 1;
+    }
+    if (!strcmp(cmd, "bios")) {
+        if (i + 1 < argc && (!strcmp(argv[i + 1], "-y") || !strcmp(argv[i + 1], "-Y")))
+            return 2;
+        return 1;
+    }
+    if (!strcmp(cmd, "setdisk") || !strcmp(cmd, "createdisk")) {
+        if (argc > i + 3)
+            return (argc > i + 4) ? 5 : 4;
+        {
+            int eat = 1;
+            while (eat < 5 && i + eat < argc && argv[i + eat] && argv[i + eat][0] != '-')
+                eat++;
+            return eat;
+        }
+    }
+    if (!strcmp(cmd, "format"))
+        return 5;
+    if (!strcmp(cmd, "dir"))
+        return (i + 1 < argc && argv[i + 1] && argv[i + 1][0] != '-') ? 2 : 1;
+    if (!strcmp(cmd, "make"))
+        return 2;
+    if (!strcmp(cmd, "mkdir") || !strcmp(cmd, "rmtree") || !strcmp(cmd, "rmdir"))
+        return 2;
+    if (!strcmp(cmd, "mv"))
+        return 3;
+    if (!strcmp(cmd, "write"))
+        return (argc > i + 2) ? (argc - i) : 0;
+    if (!strcmp(cmd, "type") || !strcmp(cmd, "cat"))
+        return 2;
+    if (!strcmp(cmd, "where") || !strcmp(cmd, "loc"))
+        return (i + 1 < argc && argv[i + 1] && argv[i + 1][0] != '-') ? 2 : 1;
+    if (!strcmp(cmd, "search") || !strcmp(cmd, "delcluster") || !strcmp(cmd, "rerun") ||
+        !strcmp(cmd, "redirect"))
+        return 2;
+    if (!strcmp(cmd, "cd"))
+        return (i + 1 < argc && argv[i + 1] && argv[i + 1][0] != '-') ? 2 : 1;
+    if (!strcmp(cmd, "writecluster"))
+        return 4;
+    if (!strcmp(cmd, "initdisk"))
+        return 3;
+    if (!strcmp(cmd, "import"))
+        return (i + 4 < argc) ? 5 : 3;
+    if (!strcmp(cmd, "diskput"))
+        return (i + 2 < argc && argv[i + 2] && argv[i + 2][0] != '-') ? 3 : 2;
+    if (!strcmp(cmd, "diskget"))
+        return 3;
+    if (!strcmp(cmd, "diskfiles"))
+        return (i + 1 < argc && argv[i + 1] && argv[i + 1][0] != '-') ? 2 : 1;
+    if (!strcmp(cmd, "diskdel") || !strcmp(cmd, "diskmkdir"))
+        return 2;
+    if (!strcmp(cmd, "update"))
+        return 4;
+    if (!strcmp(cmd, "addcluster")) {
+        if (i + 2 < argc && (!strcmp(argv[i + 1], "-t") || !strcmp(argv[i + 1], "-h")))
+            return 3;
+        return 1;
+    }
+    if (!strcmp(cmd, "listdirs") || !strcmp(cmd, "du") || !strcmp(cmd, "printdisk"))
+        return 1;
+    if (!strcmp(cmd, "login") || !strcmp(cmd, "userdel") || !strcmp(cmd, "useradd"))
+        return 2;
+    if (!strcmp(cmd, "logout") || !strcmp(cmd, "whoami"))
+        return 1;
+    if (!strcmp(cmd, "passwd"))
+        return (i + 1 < argc && argv[i + 1] && argv[i + 1][0] != '-') ? 2 : 1;
+    if (!strcmp(cmd, "sudo"))
+        return batch_argv_sudo_tokens(argc, argv, i);
+    if (!strcmp(cmd, "su"))
+        return batch_argv_su_tokens(argc, argv, i);
+    {
+        int j = i + 1;
+        while (j < argc && argv[j] && argv[j][0] != '-' && strcmp(argv[j], "make") != 0 &&
+               strcmp(argv[j], "write") != 0)
+            j++;
+        return j - i;
+    }
+}
+
 static void vm_cleanup_at_exit(void) {
     if (!g_vm_mode || !g_vm_cleanup || !g_vm_root[0]) return;
     if (chdir("/tmp") != 0) return;
@@ -217,6 +380,9 @@ static void vm_warn_layer_config(void) {
 }
 
 int main(int argc, char *argv[]) {
+    /* Hosted lab default accounts; set FL_USERS_LAB_DEFAULTS=0 before launch to disable weak seeds. */
+    if (!getenv("FL_USERS_LAB_DEFAULTS"))
+        (void)setenv("FL_USERS_LAB_DEFAULTS", "1", 0);
     /* Seed the random number generator */
     srand((unsigned) time(NULL));
 
@@ -416,157 +582,22 @@ int main(int argc, char *argv[]) {
     if (argc > 1) {
         int i = 1;
         while (i < argc) {
-            int tokensCount = 1;
+            int tokensCount;
             char *cmd = argv[i];
             if (!cmd) { i++; continue; }
-            if (!strcmp(cmd, "help") || !strcmp(cmd, "listclusters") || !strcmp(cmd, "clear") ||
-                !strcmp(cmd, "history") || !strcmp(cmd, "his") || !strcmp(cmd, "cc"))
-            {
-                tokensCount = 1;
+            tokensCount = batch_argv_tokens_plain(argc, argv, i);
+            if (!strcmp(cmd, "exit") && tokensCount == 1) {
+                submit_single_command("exit -n");
+                i++;
+                continue;
             }
-            else if (!strcmp(cmd, "version")) {
-                if (i + 1 < argc &&
-                    (!strcmp(argv[i + 1], "-y") || !strcmp(argv[i + 1], "-n") ||
-                     !strcmp(argv[i + 1], "-Y") || !strcmp(argv[i + 1], "-N"))) {
-                    tokensCount = 2;
-                } else {
-                    tokensCount = 1;
-                }
+            if ((!strcmp(cmd, "setdisk") || !strcmp(cmd, "createdisk")) &&
+                argc <= i + 3 && tokensCount > 0) {
+                fprintf(stderr, "batch: %s: insufficient arguments (skipped)\n", cmd);
             }
-            else if (!strcmp(cmd, "contracts")) {
-                tokensCount = fl_batch_contracts_tokens_count(argc, argv, i);
-            }
-            else if (!strcmp(cmd, "audit")) {
-                tokensCount = fl_batch_audit_tokens_count(argc, argv, i);
-            }
-            else if (!strcmp(cmd, "exit")) {
-                if (i + 1 < argc &&
-                    (!strcmp(argv[i+1], "-y") || !strcmp(argv[i+1], "-Y") ||
-                     !strcmp(argv[i+1], "-n") || !strcmp(argv[i+1], "-N"))) {
-                    tokensCount = 2;
-                } else {
-                    submit_single_command("exit -n");
-                    i++;
-                    continue;
-                }
-            }
-            else if (!strcmp(cmd, "bios")) {
-                if (i + 1 < argc && (!strcmp(argv[i+1], "-y") || !strcmp(argv[i+1], "-Y")))
-                    tokensCount = 2;
-                else
-                    tokensCount = 1;
-            }
-            else if (!strcmp(cmd, "setdisk") || !strcmp(cmd, "createdisk")) {
-                if (argc > i + 3)
-                    tokensCount = (argc > i + 4) ? 5 : 4;
-                else {
-                    fprintf(stderr, "batch: %s: insufficient arguments (skipped)\n", cmd);
-                    int eat = 1;
-                    while (eat < 5 && i + eat < argc && argv[i + eat] && argv[i + eat][0] != '-')
-                        eat++;
-                    tokensCount = eat;
-                }
-            }
-            else if (!strcmp(cmd, "format"))
-                tokensCount = 5;
-            else if (!strcmp(cmd, "dir")) {
-                if (i + 1 < argc && argv[i+1] && argv[i+1][0] != '-')
-                    tokensCount = 2;
-                else
-                    tokensCount = 1;
-            }
-            else if (!strcmp(cmd, "make"))
-                tokensCount = 2;
-            else if (!strcmp(cmd, "mkdir") || !strcmp(cmd, "rmtree") || !strcmp(cmd, "rmdir"))
-                tokensCount = 2;
-            else if (!strcmp(cmd, "mv"))
-                tokensCount = 3;
-            else if (!strcmp(cmd, "write"))
-                tokensCount = (argc > i + 2) ? (argc - i) : 0;
-            else if (!strcmp(cmd, "type") || !strcmp(cmd, "cat"))
-                tokensCount = 2;
-            else if (!strcmp(cmd, "where") || !strcmp(cmd, "loc"))
-                tokensCount = (i + 1 < argc && argv[i+1] && argv[i+1][0] != '-') ? 2 : 1;
-            else if (!strcmp(cmd, "search") || !strcmp(cmd, "delcluster") || !strcmp(cmd, "rerun") ||
-                     !strcmp(cmd, "redirect"))
-                tokensCount = 2;
-            else if (!strcmp(cmd, "cd"))
-                tokensCount = (i + 1 < argc && argv[i+1] && argv[i+1][0] != '-') ? 2 : 1;
-            else if (!strcmp(cmd, "writecluster"))
-                tokensCount = 4;
-            else if (!strcmp(cmd, "initdisk"))
-                tokensCount = 3;
-            else if (!strcmp(cmd, "import")) {
-                if (i + 4 < argc)
-                    tokensCount = 5;
-                else
-                    tokensCount = 3;
-            }
-            else if (!strcmp(cmd, "diskput")) {
-                if (i + 2 < argc && argv[i + 2] && argv[i + 2][0] != '-')
-                    tokensCount = 3;
-                else
-                    tokensCount = 2;
-            } else if (!strcmp(cmd, "diskget"))
-                tokensCount = 3;
-            else if (!strcmp(cmd, "diskfiles")) {
-                if (i + 1 < argc && argv[i + 1] && argv[i + 1][0] != '-')
-                    tokensCount = 2;
-                else
-                    tokensCount = 1;
-            } else if (!strcmp(cmd, "diskdel"))
-                tokensCount = 2;
-            else if (!strcmp(cmd, "diskmkdir"))
-                tokensCount = 2;
-            else if (!strcmp(cmd, "update"))
-                tokensCount = 4;
-            else if (!strcmp(cmd, "addcluster")) {
-                if (i + 2 < argc && (!strcmp(argv[i+1], "-t") || !strcmp(argv[i+1], "-h")))
-                    tokensCount = 3;
-                else
-                    tokensCount = 1;
-            }
-            else if (!strcmp(cmd, "login"))
-                tokensCount = 2;
-            else if (!strcmp(cmd, "logout") || !strcmp(cmd, "whoami"))
-                tokensCount = 1;
-            else if (!strcmp(cmd, "userdel"))
-                tokensCount = 2;
-            else if (!strcmp(cmd, "useradd"))
-                tokensCount = 2;
-            else if (!strcmp(cmd, "passwd"))
-                tokensCount = (i + 1 < argc && argv[i + 1] && argv[i + 1][0] != '-') ? 2 : 1;
-            else if (!strcmp(cmd, "sudo")) {
-                if (i + 1 < argc && argv[i + 1] &&
-                    (!strcmp(argv[i + 1], "-i") || !strcmp(argv[i + 1], "-k")))
-                    tokensCount = 2;
-                else {
-                    int j = i + 1;
-                    while (j < argc && argv[j] && argv[j][0] != '-')
-                        j++;
-                    tokensCount = (j > i + 1) ? (j - i) : 2;
-                }
-            }
-            else if (!strcmp(cmd, "su")) {
-                int j = i + 1;
-                int has_c = 0;
-                while (j < argc && argv[j] && argv[j][0] != '-') {
-                    if (!strcmp(argv[j], "-c"))
-                        has_c = 1;
-                    j++;
-                }
-                if (has_c && i + 2 < argc)
-                    tokensCount = (j > i + 3) ? (j - i) : 4;
-                else
-                    tokensCount = (j > i + 1) ? (j - i) : 2;
-            }
-            else {
-                int j = i + 1;
-                while (j < argc && argv[j] && argv[j][0] != '-' && strcmp(argv[j], "make") != 0 && strcmp(argv[j], "write") != 0)
-                    j++;
-                tokensCount = j - i;
-            }
-            if (tokensCount == 0) { i++; continue; }
+            if (tokensCount > argc - i)
+                tokensCount = argc - i;
+            if (tokensCount <= 0) { i++; continue; }
             size_t totalLen = 0;
             int overflow = 0;
             for (int k = i; k < i + tokensCount; k++) {
