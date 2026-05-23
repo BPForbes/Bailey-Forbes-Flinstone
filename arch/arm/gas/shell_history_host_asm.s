@@ -10,8 +10,6 @@ history_asm_append_record:
     cmp     x2, x1                  /* if used > cap */
     b.hi    .L_overflow
     sub     x5, x1, x2              /* avail = cap - used */
-    cmn     x4, #1                  /* cmd_len == UINT64_MAX => need wraps */
-    b.eq    .L_overflow
     add     x6, x4, #1              /* need = cmd_len + 1 */
     cmp     x5, x6
     b.lo    .L_overflow

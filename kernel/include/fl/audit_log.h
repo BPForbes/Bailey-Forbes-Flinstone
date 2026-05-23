@@ -15,8 +15,6 @@ void fl_audit_set_sink(fl_log_sink_t *sink);
 void fl_audit_shell_completed(const char *cmd_line, int host_exit_code);
 /** Emit an **authz** line (deny/allow) when **FL_AUDIT** is enabled; **cmd_no** is 0 for foreign exec. */
 void fl_audit_authz_event(const char *cmd_line, unsigned cmd_no, int denied);
-/** Emit **P2-4** elevation grant/revoke (**grant** non-zero = grant, zero = revoke). */
-void fl_audit_elevation_event(const char *principal, const char *reason, int grant);
 int fl_audit_show_last_lines(int n);
 
 void fl_ring_log_append_line(const char *line);

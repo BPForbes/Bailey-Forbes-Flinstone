@@ -801,12 +801,7 @@ void test_jail_check_prefix_attack_blocked(void) {
     CU_ASSERT_TRUE(fs_jail_is_active() == 1);
     /* Build a sibling: s_jail_tmpdir + "_evil" - same prefix but not a child */
     char sibling[PATH_MAX];
-    size_t base_len = strlen(s_jail_tmpdir);
-    CU_ASSERT_TRUE(base_len + 5u < sizeof(sibling));
-    if (base_len + 5u >= sizeof(sibling))
-        return;
-    memcpy(sibling, s_jail_tmpdir, base_len);
-    memcpy(sibling + base_len, "_evil", 6);
+    snprintf(sibling, sizeof(sibling), "%s_evil", s_jail_tmpdir);
     mkdir(sibling, 0755);
     int ret = fs_jail_check_path(sibling);
     CU_ASSERT_TRUE(ret == -1);
@@ -1011,17 +1006,16 @@ void test_interpreter_format_allowed_inside_jail(void) {
     print_test_header("interpreter format: format inside jail is allowed");
     CU_ASSERT_TRUE(fs_jail_is_active() == 1);
 
-    const char *diskfile = "jail_disk.dat";
-    char fullpath[PATH_MAX];
-    snprintf(fullpath, sizeof(fullpath), "%s/%s", g_fs_jail_root, diskfile);
+    char diskfile[PATH_MAX];
+    snprintf(diskfile, sizeof(diskfile), "%s/jail_disk.dat", g_fs_jail_root);
 
-    /* format <path> <vol> <rows> <nibbles> (relative path; g_cwd is inside jail) */
+    /* format <path> <vol> <rows> <nibbles> */
     char cmd[512];
     snprintf(cmd, sizeof(cmd), "format %s jailtest 4 16", diskfile);
     int ret = execute_command_str(cmd);
     CU_ASSERT_TRUE(ret == 0);
-    CU_ASSERT_TRUE(access(fullpath, F_OK) == 0);
-    remove(fullpath);
+    CU_ASSERT_TRUE(access(diskfile, F_OK) == 0);
+    remove(diskfile);
 }
 
 void test_interpreter_setdisk_blocked_outside_jail(void) {
@@ -1049,9 +1043,8 @@ void test_interpreter_setdisk_allowed_inside_jail(void) {
     CU_ASSERT_TRUE(fs_jail_is_active() == 1);
 
     /* Create a valid disk file inside the jail */
-    const char *diskrel = "setdisk_inside.dat";
     char diskfile[PATH_MAX];
-    snprintf(diskfile, sizeof(diskfile), "%s/%s", g_fs_jail_root, diskrel);
+    snprintf(diskfile, sizeof(diskfile), "%s/setdisk_inside.dat", g_fs_jail_root);
     FILE *f = fopen(diskfile, "w");
     CU_ASSERT_PTR_NOT_NULL(f);
     if (f) {
@@ -1060,10 +1053,10 @@ void test_interpreter_setdisk_allowed_inside_jail(void) {
     }
 
     char cmd[512];
-    snprintf(cmd, sizeof(cmd), "setdisk %s", diskrel);
+    snprintf(cmd, sizeof(cmd), "setdisk %s", diskfile);
     int ret = execute_command_str(cmd);
     CU_ASSERT_TRUE(ret == 0);
-    CU_ASSERT_TRUE(strcmp(current_disk_file, diskrel) == 0);
+    CU_ASSERT_TRUE(strcmp(current_disk_file, diskfile) == 0);
 
     remove(diskfile);
 }

@@ -1,9 +1,6 @@
 /**
  * ARM GIC v2 - real MMIO init and EOI (QEMU virt).
  * GICD base 0x08000000, GICC base 0x08010000.
- *
- * TODO(P0/Codex): P0-4 ARM GIC EOI integration evidence / waivers for bare-metal
- * gate — see docs/p0_p2_pr_coverage.md (contract ✅, integration ⚠️).
  */
 #include "arm_gic.h"
 #include "arm_plat.h"

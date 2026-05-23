@@ -30,20 +30,20 @@ This document outlines the reorganization of the codebase to match the new struc
 
 | Old Location | New Location | Status |
 |-------------|-------------|--------|
-| `arch/x86_64/nasm/mem_asm.asm` | `kernel/arch/x86_64/asm/memcpy.asm` | ✅ Canonical under `arch/`; kernel copy |
-| `arch/x86_64/nasm/alloc_*.asm` | `kernel/arch/x86_64/asm/` | ✅ Synced from `arch/x86_64/nasm/` |
-| `arch/x86_64/nasm/port_io.asm` | `kernel/arch/x86_64/drivers/port_io.asm` | ✅ See `arch/x86_64/nasm/` |
+| `x86-64 (NASM)/mem_asm.asm` | `kernel/arch/x86_64/asm/memcpy.asm` | ✅ Moved |
+| `x86-64 (NASM)/alloc/*.asm` | `kernel/arch/x86_64/asm/` | ✅ Moved |
+| `x86-64 (NASM)/drivers/port_io.asm` | `kernel/arch/x86_64/drivers/port_io.asm` | ✅ Moved |
 | `drivers/*.c/h` | `kernel/arch/x86_64/drivers/` | ⚠️ Needs move |
-| (legacy `x86-64 (NASM)/`) | — | 🗑️ Removed; use `arch/x86_64/nasm/` |
+| `x86-64 (NASM)/disk_asm.c/h` | `kernel/arch/x86_64/mm/` | ⚠️ Needs move |
 
 ### Kernel Architecture-Specific (aarch64)
 
 | Old Location | New Location | Status |
 |-------------|-------------|--------|
-| `arch/arm/gas/mem_asm.s` | `kernel/arch/aarch64/asm/memcpy.S` | ✅ Canonical under `arch/`; kernel copy |
-| `arch/arm/gas/alloc_*.s` | `kernel/arch/aarch64/asm/` | ✅ Synced from `arch/arm/gas/` |
-| `arch/arm/gas/port_io.s` | `kernel/arch/aarch64/drivers/port_io.S` | ✅ Stubs in `arch/arm/gas/` |
-| (legacy `ARM/`) | — | 🗑️ Removed; use `arch/arm/gas/` |
+| `ARM/mem_asm.s` | `kernel/arch/aarch64/asm/memcpy.S` | ✅ Moved |
+| `ARM/alloc/*.s` | `kernel/arch/aarch64/asm/` | ✅ Moved |
+| `ARM/drivers/port_io.s` | `kernel/arch/aarch64/drivers/port_io.S` | ✅ Moved |
+| `ARM/disk_asm.c/h` | `kernel/arch/aarch64/mm/` | ⚠️ Needs move |
 
 ### Userland
 

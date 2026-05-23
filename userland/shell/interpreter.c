@@ -9,8 +9,6 @@
 #include "fl/audit_log.h"
 #include "fl/authz_subsystem.h"
 #include "fl/shell_authz.h"
-#include "fl/session.h"
-#include "cmd_authutil.h"
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -98,172 +96,6 @@ int execute_command_str(const char *line) {
         goto finish;
     }
 
-    if (strcmp(args[0], "sudo") == 0) {
-        /* -i / -k: no password gate; cmd_sudo_run handles revoke and root login. */
-        if (argc >= 2 && strcmp(args[1], "-k") == 0) {
-            out_rc = cmd_sudo_run(argc, args);
-            free(cmdLine);
-            goto finish;
-        }
-        if (argc >= 2 && strcmp(args[1], "-i") == 0) {
-            out_rc = cmd_sudo_run(argc, args);
-            free(cmdLine);
-            goto finish;
-        }
-        if (argc < 2) {
-            out_rc = cmd_sudo_run(argc, args);
-            free(cmdLine);
-            goto finish;
-        }
-        if (cmd_sudo_require_auth() != 0) {
-            free(cmdLine);
-            out_rc = 1;
-            goto finish;
-        }
-        if (argc == 2) {
-            fl_shell_cmd_no_t sub = fl_shell_cmd_lookup(args[1]);
-            if (sub != FL_SCMD_UNKNOWN && sub != FL_SCMD_SUDO) {
-                fl_authz_decision_t sh = fl_shell_authz_builtin(sub, 1, &args[1]);
-                if (sh == FL_AUTHZ_DENY) {
-                    fl_audit_authz_event(line, (unsigned)sub, 1);
-                    free(cmdLine);
-                    out_rc = 1;
-                    goto finish;
-                }
-                fl_audit_authz_event(line, (unsigned)sub, 0);
-                fl_session_begin_sudo_scope();
-                out_rc = fl_shell_cmd_dispatch(sub, 1, &args[1]);
-                fl_session_end_sudo_scope();
-                free(cmdLine);
-                goto finish;
-            }
-            {
-                fl_authz_decision_t fx = fl_shell_authz_foreign_exec(1, &args[1]);
-                if (fx == FL_AUTHZ_DENY) {
-                    fl_audit_authz_event(line, 0u, 1);
-                    free(cmdLine);
-                    out_rc = 1;
-                    goto finish;
-                }
-                fl_audit_authz_event(line, (unsigned)FL_AUTHZ_OP_SHELL_FOREIGN_EXEC, 0);
-                fl_session_begin_sudo_scope();
-                {
-                    pid_t pid = fork();
-                    if (pid < 0) {
-                        perror("fork");
-                        fl_session_end_sudo_scope();
-                        free(cmdLine);
-                        out_rc = 1;
-                        goto finish;
-                    }
-                    if (pid == 0) {
-                        signal(SIGINT, SIG_DFL);
-                        execvp(args[1], &args[1]);
-                        perror("execvp");
-                        _exit(127);
-                    }
-                    {
-                        int status = 0;
-                        if (waitpid(pid, &status, 0) < 0)
-                            out_rc = 1;
-                        else if (WIFEXITED(status))
-                            out_rc = WEXITSTATUS(status);
-                        else if (WIFSIGNALED(status))
-                            out_rc = 128 + WTERMSIG(status);
-                        else
-                            out_rc = 1;
-                    }
-                }
-                fl_session_end_sudo_scope();
-                free(cmdLine);
-                goto finish;
-            }
-        }
-        {
-            int inner_argc = argc - 1;
-            char **inner_argv = args + 1;
-            fl_shell_cmd_no_t inner_id = fl_shell_cmd_lookup(inner_argv[0]);
-            if (inner_id == FL_SCMD_SUDO) {
-                out_rc = cmd_sudo_run(inner_argc, inner_argv);
-                free(cmdLine);
-                goto finish;
-            }
-            if (inner_id == FL_SCMD_UNKNOWN) {
-                fl_authz_decision_t fx = fl_shell_authz_foreign_exec(inner_argc, inner_argv);
-                if (fx == FL_AUTHZ_DENY) {
-                    fl_audit_authz_event(line, 0u, 1);
-                    free(cmdLine);
-                    out_rc = 1;
-                    goto finish;
-                }
-                fl_audit_authz_event(line, (unsigned)FL_AUTHZ_OP_SHELL_FOREIGN_EXEC, 0);
-                fl_session_begin_sudo_scope();
-                pid_t pid = fork();
-                if (pid < 0) {
-                    perror("fork");
-                    fl_session_end_sudo_scope();
-                    free(cmdLine);
-                    out_rc = 1;
-                    goto finish;
-                }
-                if (pid == 0) {
-                    signal(SIGINT, SIG_DFL);
-                    execvp(inner_argv[0], inner_argv);
-                    perror("execvp");
-                    _exit(127);
-                }
-                {
-                    int status = 0;
-                    if (waitpid(pid, &status, 0) < 0)
-                        out_rc = 1;
-                    else if (WIFEXITED(status))
-                        out_rc = WEXITSTATUS(status);
-                    else if (WIFSIGNALED(status))
-                        out_rc = 128 + WTERMSIG(status);
-                    else
-                        out_rc = 1;
-                }
-                fl_session_end_sudo_scope();
-                free(cmdLine);
-                goto finish;
-            }
-            {
-                fl_authz_decision_t sh = fl_shell_authz_builtin(inner_id, inner_argc, inner_argv);
-                if (sh == FL_AUTHZ_DENY) {
-                    fl_audit_authz_event(line, (unsigned)inner_id, 1);
-                    free(cmdLine);
-                    out_rc = 1;
-                    goto finish;
-                }
-                fl_audit_authz_event(line, (unsigned)inner_id, 0);
-                {
-                    unsigned sub_op = fl_authz_subsystem_op_for_shell_cmd((unsigned)inner_id);
-                    if (sub_op != (unsigned)FL_AUTHZ_OP_UNSPECIFIED) {
-                        fl_authz_decision_t sub =
-                            fl_authz_subsystem_check(sub_op, NULL);
-                        fl_audit_authz_event(line, sub_op, sub == FL_AUTHZ_DENY ? 1 : 0);
-                        if (sub == FL_AUTHZ_DENY) {
-                            free(cmdLine);
-                            out_rc = 1;
-                            goto finish;
-                        }
-                    }
-                }
-                fl_session_begin_sudo_scope();
-                out_rc = fl_shell_cmd_dispatch(inner_id, inner_argc, inner_argv);
-                fl_session_end_sudo_scope();
-            }
-            free(cmdLine);
-            goto finish;
-        }
-    }
-
-    if (strcmp(args[0], "su") == 0) {
-        out_rc = cmd_su_run(argc, args);
-        free(cmdLine);
-        goto finish;
-    }
-
     fl_shell_cmd_no_t id = fl_shell_cmd_lookup(args[0]);
     if (id == FL_SCMD_UNKNOWN) {
         fl_authz_decision_t fx = fl_shell_authz_foreign_exec(argc, args);
@@ -288,15 +120,9 @@ int execute_command_str(const char *line) {
             _exit(127);
         } else {
             int status = 0;
-            if (waitpid(pid, &status, 0) < 0)
-                out_rc = 1;
-            else if (WIFEXITED(status))
-                out_rc = WEXITSTATUS(status);
-            else if (WIFSIGNALED(status))
-                out_rc = 128 + WTERMSIG(status);
-            else
-                out_rc = 1;
+            waitpid(pid, &status, 0);
             free(cmdLine);
+            out_rc = WEXITSTATUS(status);
             goto finish;
         }
     }
@@ -353,6 +179,30 @@ static int principal_is_guest(void) {
     return p && strcmp(p, FL_PRINCIPAL_GUEST_LITERAL) == 0;
 }
 
+static fl_authz_decision_t guest_builtin_policy(fl_shell_cmd_no_t no) {
+    switch (no) {
+    case FL_SCMD_FORMAT:
+    case FL_SCMD_SETDISK:
+    case FL_SCMD_INITDISK:
+    case FL_SCMD_CREATEDISK:
+    case FL_SCMD_RMTREE:
+    case FL_SCMD_DISKPUT:
+    case FL_SCMD_DISKGET:
+    case FL_SCMD_DISKDEL:
+    case FL_SCMD_DISKMKDIR:
+    case FL_SCMD_REDIRECT:
+    case FL_SCMD_IMPORT:
+    case FL_SCMD_WRITE:
+    case FL_SCMD_WRITECLUSTER:
+    case FL_SCMD_DELCLUSTER:
+    case FL_SCMD_UPDATE:
+    case FL_SCMD_ADDCLUSTER:
+        return FL_AUTHZ_DENY;
+    default:
+        return FL_AUTHZ_ALLOW;
+    }
+}
+
 fl_authz_decision_t fl_shell_authz_builtin(fl_shell_cmd_no_t no, int argc, char **argv) {
     fl_shell_authz_hook_fn hook = NULL;
     void *hook_ctx = NULL;
@@ -365,7 +215,7 @@ fl_authz_decision_t fl_shell_authz_builtin(fl_shell_cmd_no_t no, int argc, char 
     }
     if (!principal_is_guest())
         return FL_AUTHZ_ALLOW;
-    return fl_authz_guest_shell_builtin((unsigned)no);
+    return guest_builtin_policy(no);
 }
 
 fl_authz_decision_t fl_shell_authz_foreign_exec(int argc, char **argv) {

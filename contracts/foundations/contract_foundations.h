@@ -48,7 +48,6 @@
 #include "contract_p0_x86_gdt.h"
 #include "contract_p0_fdt.h"
 #include "contract_p0_uart.h"
-#include "contract_p0_fs_jail.h"
 
 /** Shipped subsystem contract bundle revision (audit / CLI / packed metadata). */
 #define FL_CONTRACT_BUNDLE_REV 8

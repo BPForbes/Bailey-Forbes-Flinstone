@@ -30,36 +30,6 @@ static fl_authz_decision_t guest_subsystem_policy(unsigned op, void *ctx) {
     case FL_AUTHZ_OP_NETDEV_IO:
     case FL_AUTHZ_OP_MOUNT:
     case FL_AUTHZ_OP_DISK_LOW_LEVEL:
-    case FL_AUTHZ_OP_IDENTITY_USERADD:
-    case FL_AUTHZ_OP_IDENTITY_USERDEL:
-    case FL_AUTHZ_OP_IDENTITY_PASSWD:
-        return FL_AUTHZ_DENY;
-    default:
-        return FL_AUTHZ_ALLOW;
-    }
-}
-
-fl_authz_decision_t fl_authz_guest_shell_builtin(unsigned cmd_no) {
-    switch ((fl_shell_cmd_no_t)cmd_no) {
-    case FL_SCMD_FORMAT:
-    case FL_SCMD_SETDISK:
-    case FL_SCMD_INITDISK:
-    case FL_SCMD_CREATEDISK:
-    case FL_SCMD_RMTREE:
-    case FL_SCMD_DISKPUT:
-    case FL_SCMD_DISKGET:
-    case FL_SCMD_DISKDEL:
-    case FL_SCMD_DISKMKDIR:
-    case FL_SCMD_REDIRECT:
-    case FL_SCMD_IMPORT:
-    case FL_SCMD_WRITE:
-    case FL_SCMD_WRITECLUSTER:
-    case FL_SCMD_DELCLUSTER:
-    case FL_SCMD_UPDATE:
-    case FL_SCMD_ADDCLUSTER:
-    case FL_SCMD_USERADD:
-    case FL_SCMD_USERDEL:
-    case FL_SCMD_PASSWD:
         return FL_AUTHZ_DENY;
     default:
         return FL_AUTHZ_ALLOW;
@@ -99,14 +69,6 @@ unsigned fl_authz_subsystem_op_for_shell_cmd(unsigned cmd_no) {
     case FL_SCMD_UPDATE:
     case FL_SCMD_ADDCLUSTER:
         return (unsigned)FL_AUTHZ_OP_DISK_LOW_LEVEL;
-    case FL_SCMD_LOGIN:
-        return (unsigned)FL_AUTHZ_OP_IDENTITY_LOGIN;
-    case FL_SCMD_USERADD:
-        return (unsigned)FL_AUTHZ_OP_IDENTITY_USERADD;
-    case FL_SCMD_USERDEL:
-        return (unsigned)FL_AUTHZ_OP_IDENTITY_USERDEL;
-    case FL_SCMD_PASSWD:
-        return (unsigned)FL_AUTHZ_OP_IDENTITY_PASSWD;
     default:
         return (unsigned)FL_AUTHZ_OP_UNSPECIFIED;
     }

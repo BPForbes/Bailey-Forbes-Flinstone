@@ -1,10 +1,8 @@
 #include "fl/audit_log.h"
-#include "contract_p2_elevation.h"
 #include "contract_p6_audit_trail.h"
 #include "contract_asm.h"
 #include "contract_imm.h"
 #include "contract_log_dispatch.h"
-#include "timekeeping.h"
 #include "fs_jail.h"
 #ifndef DISK_HOST_USE_LIBC_PREADV
 #include "shell_history_asm.h"
@@ -369,42 +367,6 @@ int fl_audit_show_last_lines(int n) {
         fputc('\n', stdout);
     free(buf);
     return 0;
-}
-
-void fl_audit_elevation_event(const char *principal, const char *reason, int grant) {
-    if (!fl_audit_env_enabled())
-        return;
-
-    char who[64];
-    char why[FL_ELEVATION_REASON_MAX_CHARS + 1u];
-    int64_t when_sec = 0;
-    fl_contract_log_line_buf_t line_buf;
-
-    sanitize_cmd_fragment(principal ? principal : "", who, sizeof who);
-    sanitize_cmd_fragment(reason ? reason : "", why, sizeof why);
-    if (fl_time_wall_sec(&when_sec) != FL_RESULT_OK)
-        when_sec = 0;
-
-    snprintf(line_buf.data, sizeof line_buf.data,
-             "type=elevation principal=%s when=%lld reason=%s event=%s",
-             who, (long long)when_sec, why, grant ? "grant" : "revoke");
-
-    pthread_mutex_lock(&g_audit_mutex);
-    FILE *fp = fopen(FL_AUDIT_REL_DEFAULT, "a");
-    if (fp) {
-        (void)fprintf(fp, "%s\n", line_buf.data);
-        (void)fclose(fp);
-    }
-    pthread_mutex_unlock(&g_audit_mutex);
-
-    fl_ring_log_append_line(line_buf.data);
-
-    fl_log_sink_t *sink = NULL;
-    pthread_mutex_lock(&g_audit_mutex);
-    sink = g_audit_sink;
-    pthread_mutex_unlock(&g_audit_mutex);
-    (void)fl_log_sink_emit_line(sink, (int)FL_LOG_INFO, FL_LOG_FACILITY_AUDIT,
-                                line_buf.data);
 }
 
 void fl_audit_authz_event(const char *cmd_line, unsigned cmd_no, int denied) {

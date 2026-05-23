@@ -2,7 +2,7 @@
  * **P2-1** — Hosted principal **literals** (no other contract includes).
  *
  * Use this header in translation units that must not pull **contract_runtime.h**
- * (for example public headers under kernel/include/fl/) while still sharing the
+ * (for example public headers under **kernel/include/fl/**) while still sharing the
  * same **FL_PRINCIPAL** environment variable name and **guest** spelling as the
  * shell implementation.
  *
