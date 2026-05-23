@@ -42,3 +42,5 @@ CI/Makefile: c-cpp build-arm OpenSSL fetch; .gitignore deps/install-aarch64; gen
 
 Docs: docs/p0_p2_pr_coverage.md; ROADMAP P0–P2 integration column; deps/README cross-build scripts.
 VER_4_1_0_GM1
+
+RELEASE_DATE=2026-05-23
