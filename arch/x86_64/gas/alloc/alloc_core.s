@@ -12,6 +12,12 @@
 .globl lock_release
 .globl push_free
 .globl unlink_free
+.hidden malloc_nolock
+.hidden init_heap_once_nolock
+.hidden lock_acquire
+.hidden lock_release
+.hidden push_free
+.hidden unlink_free
 
 .equ SYS_brk, 12
 .equ HDR_SIZE, 16
@@ -19,8 +25,11 @@
 
 /* heap_end, free_head, alloc_lock - in alloc_data.s (separate) */
 .comm heap_end, 8, 8
+.hidden heap_end
 .comm free_head, 8, 8
+.hidden free_head
 .comm alloc_lock, 8, 8
+.hidden alloc_lock
 
 /* lock_acquire: spin until alloc_lock=0, then set to 1 */
 lock_acquire:
@@ -35,9 +44,10 @@ lock_acquire:
 .Lgot:
     ret
 
-/* lock_release: alloc_lock = 0 */
+/* lock_release: alloc_lock = 0 (xchg is always locked on memory) */
 lock_release:
-    movq $0, alloc_lock(%rip)
+    xorq %rax, %rax
+    xchgq %rax, alloc_lock(%rip)
     ret
 
 /* align16(rdi) -> rax, align up to 16 */
@@ -86,6 +96,9 @@ push_free:
 malloc_nolock:
     testq %rdi, %rdi
     jz .Lret0
+    pushq %rbx
+    pushq %r12
+    pushq %r13
     call align16
     movq %rax, %r12
     xorq %r13, %r13
@@ -134,12 +147,20 @@ malloc_nolock:
     addq %r12, %rdi
     call sys_brk
     cmpq %rdi, %rax
-    jb .Lret0
+    jb .Lret0_pop
     movq %rax, heap_end(%rip)
     movq %r12, (%rbx)
 
 .Lreturn_ptr:
     leaq HDR_SIZE(%rbx), %rax
+    jmp .Lret_pop
+
+.Lret0_pop:
+    xorq %rax, %rax
+.Lret_pop:
+    popq %r13
+    popq %r12
+    popq %rbx
     ret
 
 .Lret0:

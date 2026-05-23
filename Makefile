@@ -58,8 +58,13 @@ endif
 ifeq ($(ARCH),x86_64_nasm)
 AS = nasm
 ASFLAGS = -f elf64
-CFLAGS += -DDISK_HOST_USE_LIBC_PREADV=1 -DFL_STACK_ASM_AVAILABLE=1
-ASMSRCS_BASE = arch/x86_64/nasm/mem_asm.asm arch/x86_64/nasm/fl_stack_asm.asm arch/x86_64/nasm/port_io.asm arch/x86_64/nasm/usb_xhci_mmio_asm.asm
+CFLAGS += -DFL_STACK_ASM_AVAILABLE=1
+# Kernel x86_64 boot/driver .s are GAS; compile with $(CC) -c (see rule below), not NASM.
+KERNEL_X86_GAS_ASM = kernel/arch/x86_64/boot/spinlock.s kernel/arch/x86_64/drivers/ata_pio.s \
+                     kernel/arch/x86_64/boot/gdt.s kernel/arch/x86_64/boot/idt.s
+ASMSRCS_BASE = arch/x86_64/nasm/mem_asm.asm arch/x86_64/nasm/fl_stack_asm.asm arch/x86_64/nasm/port_io.asm \
+               arch/x86_64/nasm/disk_host_io.asm arch/x86_64/nasm/shell_history_host_asm.asm \
+               arch/x86_64/nasm/usb_xhci_mmio_asm.asm $(KERNEL_X86_GAS_ASM)
 ASMSRCS_ALLOC = arch/x86_64/nasm/alloc_core.asm arch/x86_64/nasm/alloc_malloc.asm arch/x86_64/nasm/alloc_free.asm
 ASM_SRC_DIR = arch/x86_64/nasm
 KERNEL_DRIVERS = kernel/arch/x86_64/drivers
@@ -115,10 +120,8 @@ DRIVER_SRCS = $(UNIFIED_DRIVER_SRCS)
 DRIVER_SRCS += $(KERNEL_DRIVERS)/pci.c
 # x86: ATA IDENTIFY + helpers, IDT dispatcher
 ifneq ($(ARCH),arm)
-ifneq ($(ARCH),x86_64_nasm)
 DRIVER_SRCS += $(KERNEL_DRIVERS)/ata_pio_baremetal.c
 DRIVER_SRCS += kernel/arch/x86_64/boot/idt_dispatch.c
-endif
 endif
 # HAL: ioport (x86 real, arm stubs) + ARM MMIO HAL (arm only)
 HAL_SRCS = $(KERNEL_DRIVERS)/../hal/ioport.c
@@ -178,6 +181,7 @@ ASMSRCS = $(ASMSRCS_BASE)
 ifeq ($(USE_ASM_ALLOC),1)
 ASMSRCS += $(ASMSRCS_ALLOC)
 CFLAGS += -DUSE_ASM_ALLOC=1 -DBATCH_SINGLE_THREAD=1
+LDFLAGS += -Wl,--version-script=scripts/linker/alloc_internal_local.ver
 endif
 # P4-5 xHCI: arch MMIO object (see kernel/drivers/usb_xhci_mmio_glue.c).
 USB_XHCI_MMIO_ASM_OBJ = $(patsubst %.s,%.o,$(patsubst %.asm,%.o,$(filter %usb_xhci_mmio_asm.s %usb_xhci_mmio_asm.asm,$(ASMSRCS))))
@@ -349,8 +353,8 @@ userland/shell/interpreter_unit.o: userland/shell/interpreter.c
 MEM_ASM_OBJ = $(patsubst %.s,%.o,$(patsubst %.asm,%.o,$(firstword $(ASMSRCS_BASE))))
 FL_STACK_ASM_OBJ = $(patsubst %.s,%.o,$(patsubst %.asm,%.o,$(filter %/fl_stack_asm.s %/fl_stack_asm.asm,$(ASMSRCS))))
 PORT_IO_OBJ = $(patsubst %.s,%.o,$(patsubst %.asm,%.o,$(filter %/port_io.s %/port_io.asm,$(ASMSRCS))))
-DISK_HOST_ASM_OBJ = $(patsubst %.s,%.o,$(filter %/disk_host_io.s,$(ASMSRCS_BASE)))
-HISTORY_ASM_OBJ = $(patsubst %.s,%.o,$(filter %/shell_history_host_asm.s,$(ASMSRCS_BASE)))
+DISK_HOST_ASM_OBJ = $(patsubst %.s,%.o,$(patsubst %.asm,%.o,$(filter %/disk_host_io.s %/disk_host_io.asm,$(ASMSRCS_BASE))))
+HISTORY_ASM_OBJ = $(patsubst %.s,%.o,$(patsubst %.asm,%.o,$(filter %/shell_history_host_asm.s %/shell_history_host_asm.asm,$(ASMSRCS_BASE))))
 # util.c references host FAT32 helpers; any link of util.o outside the full shell must include these.
 UTIL_HISTORY_HOST_OBJS = kernel/core/vfs/fat32_host.o kernel/core/vfs/fat32_host_files.o disk_host_io.o $(DISK_HOST_ASM_OBJ)
 UTIL_SHELL_LINK_OBJS = userland/shell/util.o userland/shell/history_record.o
@@ -391,6 +395,13 @@ userland/shell/interpreter_unit.o: $(VERSION_DEF)
 %.o: %.asm
 	$(AS) $(ASFLAGS) -o $@ $<
 
+# x86_64_nasm: kernel/arch/x86_64/**/*.s must use GAS (AS=nasm cannot assemble .s)
+ifeq ($(ARCH),x86_64_nasm)
+# Override generic %.o: %.s — these paths are GAS syntax, not NASM (AS=nasm would fail).
+kernel/arch/x86_64/%.o: kernel/arch/x86_64/%.s
+	$(CC) -c $(CFLAGS) -Wa,--noexecstack -o $@ $<
+endif
+
 $(KERNEL_DRIVERS)/%.o: $(KERNEL_DRIVERS)/%.c
 	$(CC) $(CFLAGS) -I$(KERNEL_DRIVERS) -c $< -o $@
 
@@ -422,8 +433,8 @@ test_alloc_libc: tests/test_alloc.c
 	./tests/test_alloc
 
 ALLOC_OBJS = $(patsubst %.s,%.o,$(patsubst %.asm,%.o,$(ASMSRCS_ALLOC)))
-test_alloc_asm: $(ALLOC_OBJS)
-	$(CC) $(CFLAGS) -I. -o tests/test_alloc tests/test_alloc.c $(ALLOC_OBJS)
+test_alloc_asm: $(ALLOC_OBJS) $(MEM_ASM_OBJ)
+	$(CC) $(CFLAGS) -I. -o tests/test_alloc tests/test_alloc.c $(ALLOC_OBJS) $(MEM_ASM_OBJ)
 	./tests/test_alloc
 
 test_priority_queue: priority_queue.o $(MEM_ASM_OBJ)

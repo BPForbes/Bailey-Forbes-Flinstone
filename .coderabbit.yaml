@@ -56,4 +56,8 @@ reviews:
 
     - path: "AGENTS.md"
       instructions: |
-        Keep versioning rules in sync with `.coderabbit.yaml`, `.cursor/rules/versioning.mdc`, and CLAUDE.md.
+        Keep versioning rules in sync with `.coderabbit.yaml`, `.cursor/rules/versioning.mdc`, CLAUDE.md, and **replit.md** (Replit Agent policy).
+
+    - path: "replit.md"
+      instructions: |
+        **Replit Agent** instructions must stay aligned with **CLAUDE.md**, **AGENTS.md**, **`.cursor/rules/versioning.mdc`**, **`.cursor/rules/review_tools.mdc`**, and the global **`reviews.instructions`** in this file. Do not document a separate or weaker policy for Replit-only agents. Update the policy table when any of those sources change.

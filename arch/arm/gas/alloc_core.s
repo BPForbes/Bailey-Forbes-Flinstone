@@ -9,14 +9,23 @@
 .globl lock_release
 .globl push_free
 .globl unlink_free
+.hidden malloc_nolock
+.hidden init_heap_once_nolock
+.hidden lock_acquire
+.hidden lock_release
+.hidden push_free
+.hidden unlink_free
 
 .equ SYS_brk, 214
 .equ HDR_SIZE, 16
 .equ FLAG_FREE, 1
 
 .comm heap_end, 8, 8
+.hidden heap_end
 .comm free_head, 8, 8
+.hidden free_head
 .comm alloc_lock, 8, 8
+.hidden alloc_lock
 
 /* lock_acquire - spin until we get the lock */
 lock_acquire:
@@ -38,7 +47,7 @@ lock_acquire:
 lock_release:
     adrp    x10, alloc_lock
     add     x10, x10, :lo12:alloc_lock
-    str     xzr, [x10]
+    stlr    xzr, [x10]
     ret
 
 /* align16(x0) -> x0 */
@@ -55,6 +64,7 @@ sys_brk:
 
 /* init_heap_once_nolock */
 init_heap_once_nolock:
+    str     x30, [sp, #-16]!
     adrp    x10, heap_end
     add     x10, x10, :lo12:heap_end
     ldr     x8, [x10]
@@ -65,6 +75,7 @@ init_heap_once_nolock:
     add     x10, x10, :lo12:heap_end
     str     x0, [x10]
 .Ldone:
+    ldr     x30, [sp], #16
     ret
 
 /* unlink_free(x0=prev, x1=cur) */
@@ -95,7 +106,7 @@ malloc_nolock:
     stp     x19, x20, [sp, #-64]!
     stp     x21, x22, [sp, #16]
     stp     x23, x24, [sp, #32]
-    str     x25, [sp, #48]
+    stp     x25, x30, [sp, #48]
     bl      align16
     mov     x19, x0                  /* aligned size */
     adrp    x10, free_head
@@ -150,13 +161,13 @@ malloc_nolock:
     str     x19, [x20]
 .Lreturn_ptr:
     add     x0, x20, #HDR_SIZE
-    ldr     x25, [sp, #48]
+    ldp     x25, x30, [sp, #48]
     ldp     x23, x24, [sp, #32]
     ldp     x21, x22, [sp, #16]
     ldp     x19, x20, [sp], #64
     ret
 .Lret0_fail:
-    ldr     x25, [sp, #48]
+    ldp     x25, x30, [sp, #48]
     ldp     x23, x24, [sp, #32]
     ldp     x21, x22, [sp, #16]
     ldp     x19, x20, [sp], #64

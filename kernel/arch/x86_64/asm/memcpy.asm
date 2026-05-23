@@ -1,4 +1,5 @@
 ; ASM memory primitives for disk buffer operations (x86-64 NASM)
+section .note.GNU-stack progbits alloc noexec
 section .text
 
 global asm_mem_copy
