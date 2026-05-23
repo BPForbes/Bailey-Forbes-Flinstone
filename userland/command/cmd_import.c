@@ -1,5 +1,6 @@
 #include "common.h"
 #include "cmd_decl.h"
+#include "cmd_batch.h"
 #include "cmd_util.h"
 #include "fs.h"
 #include "util.h"
@@ -43,4 +44,9 @@ int cmd_import_run(int argc, char **argv) {
     }
     printf("Usage: import <listfile> <diskfile> [clusters clusterSize]\n");
     return 1;
+}
+
+int cmd_import_batch_tokens_count(int argc, char **argv, int i) {
+    (void)argv;
+    return (i + 4 < argc) ? 5 : 3;
 }

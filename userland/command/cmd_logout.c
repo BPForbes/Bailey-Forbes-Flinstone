@@ -1,4 +1,5 @@
 #include "cmd_decl.h"
+#include "cmd_batch.h"
 #include "fl/audit_log.h"
 #include "fl/session.h"
 #include "session_sync.h"
@@ -26,4 +27,8 @@ int cmd_logout_run(int argc, char **argv) {
     fl_session_sync_services();
     printf("logout: now %s\n", fl_session_current_user());
     return 0;
+}
+
+int cmd_logout_batch_tokens_count(int argc, char **argv, int i) {
+    (void)argc; (void)argv; (void)i; return 1;
 }

@@ -1,4 +1,5 @@
 #include "cmd_decl.h"
+#include "cmd_batch.h"
 #include "cmd_authutil.h"
 #include "common.h"
 #include "fl/audit_log.h"
@@ -136,4 +137,24 @@ int cmd_su_run(int argc, char **argv) {
     printf("su: switched to %s%s\n", req.target,
            req.login_shell ? " (login shell)" : "");
     return 0;
+}
+
+int cmd_su_batch_tokens_count(int argc, char **argv, int i) {
+    int j;
+
+    if (i >= argc || !argv[i] || strcmp(argv[i], "su"))
+        return 1;
+    j = i + 1;
+    while (j < argc && argv[j]) {
+        if (!strcmp(argv[j], "-c") && j + 1 < argc) {
+            j += 2;
+            continue;
+        }
+        if (argv[j][0] == '-' && strcmp(argv[j], "-") && strcmp(argv[j], "-c"))
+            break;
+        j++;
+    }
+    if (j <= i)
+        return 1;
+    return j - i;
 }

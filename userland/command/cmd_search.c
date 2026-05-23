@@ -1,5 +1,6 @@
 #include "common.h"
 #include "cmd_decl.h"
+#include "cmd_batch.h"
 #include "cluster.h"
 #include "mem_domain.h"
 #include "util.h"
@@ -70,4 +71,8 @@ int cmd_search_run(int argc, char **argv) {
     if (!found)
         printf("'%s' not found.\n", searchStr);
     return 0;
+}
+
+int cmd_search_batch_tokens_count(int argc, char **argv, int i) {
+    (void)argc; (void)argv; (void)i; return 2;
 }

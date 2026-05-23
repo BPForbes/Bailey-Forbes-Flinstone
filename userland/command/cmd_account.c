@@ -1,5 +1,6 @@
 #include "cmd_decl.h"
 #include "cmd_authutil.h"
+#include "cmd_batch.h"
 #include "fl/session.h"
 #include <stdio.h>
 #include <string.h>
@@ -124,4 +125,22 @@ int cmd_passwd_run(int argc, char **argv) {
     }
     printf("passwd: password updated for %s\n", user);
     return 0;
+}
+
+int cmd_useradd_batch_tokens_count(int argc, char **argv, int i) {
+    (void)argc;
+    (void)argv;
+    (void)i;
+    return 2;
+}
+
+int cmd_userdel_batch_tokens_count(int argc, char **argv, int i) {
+    (void)argc;
+    (void)argv;
+    (void)i;
+    return 2;
+}
+
+int cmd_passwd_batch_tokens_count(int argc, char **argv, int i) {
+    return cmd_batch_opt_path_arity(argc, argv, i);
 }

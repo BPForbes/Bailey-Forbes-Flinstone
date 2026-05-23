@@ -1,5 +1,6 @@
 #include "common.h"
 #include "cmd_decl.h"
+#include "cmd_batch.h"
 #include "cmd_util.h"
 #include "disk.h"
 #include "fat32_host.h"
@@ -32,4 +33,10 @@ int cmd_diskput_run(int argc, char **argv) {
     }
     printf("diskput: stored %s on volume.\n", src);
     return 0;
+}
+
+int cmd_diskput_batch_tokens_count(int argc, char **argv, int i) {
+    if (i + 2 < argc && argv[i + 2] && argv[i + 2][0] != '-')
+        return 3;
+    return 2;
 }

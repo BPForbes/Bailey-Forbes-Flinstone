@@ -1,5 +1,6 @@
 #include "common.h"
 #include "cmd_decl.h"
+#include "cmd_batch.h"
 #include "disk.h"
 #include "fat32_host.h"
 #include "interpreter.h"
@@ -24,4 +25,8 @@ int cmd_diskmkdir_run(int argc, char **argv) {
     }
     printf("diskmkdir: ok %s\n", args[1]);
     return 0;
+}
+
+int cmd_diskmkdir_batch_tokens_count(int argc, char **argv, int i) {
+    (void)argc; (void)argv; (void)i; return 2;
 }

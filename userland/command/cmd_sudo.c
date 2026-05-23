@@ -1,4 +1,5 @@
 #include "cmd_decl.h"
+#include "cmd_batch.h"
 #include "cmd_authutil.h"
 #include "fl/audit_log.h"
 #include "fl/session.h"
@@ -75,4 +76,19 @@ int cmd_sudo_run(int argc, char **argv) {
     if (argv[1])
         reason = argv[1];
     return sudo_grant_token(reason);
+}
+
+int cmd_sudo_batch_tokens_count(int argc, char **argv, int i) {
+    int end;
+
+    if (i >= argc || !argv[i] || strcmp(argv[i], "sudo"))
+        return 1;
+    if (i + 1 < argc && argv[i + 1] &&
+        (!strcmp(argv[i + 1], "-i") || !strcmp(argv[i + 1], "-k")))
+        return 2;
+    for (end = argc; end > i + 1; end--) {
+        if (fl_batch_argv_layout_valid(argc, argv, i, end))
+            return end - i;
+    }
+    return 2;
 }

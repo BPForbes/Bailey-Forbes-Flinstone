@@ -1,5 +1,6 @@
 #include "common.h"
 #include "cmd_decl.h"
+#include "cmd_batch.h"
 #include "cluster.h"
 #include "disk.h"
 #include <stdio.h>
@@ -23,4 +24,8 @@ int cmd_writecluster_run(int argc, char **argv) {
         return 1;
     }
     return 0;
+}
+
+int cmd_writecluster_batch_tokens_count(int argc, char **argv, int i) {
+    (void)argc; (void)argv; (void)i; return 4;
 }

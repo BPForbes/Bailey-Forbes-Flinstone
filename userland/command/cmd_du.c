@@ -1,5 +1,6 @@
 #include "common.h"
 #include "cmd_decl.h"
+#include "cmd_batch.h"
 #include "cluster.h"
 #include <ctype.h>
 #include <stdio.h>
@@ -78,4 +79,8 @@ int cmd_du_run(int argc, char **argv) {
     if (avail == 0)
         printf("***Disk full***\n");
     return 0;
+}
+
+int cmd_du_batch_tokens_count(int argc, char **argv, int i) {
+    (void)argc; (void)argv; (void)i; return 1;
 }
