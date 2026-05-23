@@ -4,6 +4,7 @@
 #include <limits.h>
 #include <sqlite3.h>
 #include <stdio.h>
+#include <stdlib.h>
 #include <string.h>
 
 static fl_result_t db_exec(sqlite3 *sql, const char *stmt) {
@@ -105,24 +106,44 @@ static fl_result_t db_load_users(sqlite3 *sql, fl_user_db_t *db) {
     if (sqlite3_prepare_v2(sql, q, -1, &st, NULL) != SQLITE_OK)
         return FL_RESULT_ERR;
     db->count = 0;
-    while (sqlite3_step(st) == SQLITE_ROW && db->count < FL_USER_DB_MAX_USERS) {
-        fl_user_record_t *u = &db->users[db->count];
-        const char *name = (const char *)sqlite3_column_text(st, 0);
-        const char *hash = (const char *)sqlite3_column_text(st, 1);
-        const char *salt = (const char *)sqlite3_column_text(st, 2);
-        mem_domain_zero(u, sizeof(*u));
-        if (name)
-            strncpy(u->name, name, sizeof(u->name) - 1);
-        if (hash)
-            strncpy(u->password_hash, hash, sizeof(u->password_hash) - 1);
-        if (salt)
-            strncpy(u->salt_hex, salt, sizeof(u->salt_hex) - 1);
-        u->uid = (uint32_t)sqlite3_column_int(st, 3);
-        u->is_elevated = sqlite3_column_int(st, 4) ? 1 : 0;
-        db->count++;
+    for (;;) {
+        int step_rc = sqlite3_step(st);
+
+        if (step_rc == SQLITE_DONE)
+            break;
+        if (step_rc != SQLITE_ROW) {
+            sqlite3_finalize(st);
+            return FL_RESULT_ERR;
+        }
+        if (db->count >= FL_USER_DB_MAX_USERS) {
+            sqlite3_finalize(st);
+            return FL_RESULT_ERR;
+        }
+        {
+            fl_user_record_t *u = &db->users[db->count];
+            const char *name = (const char *)sqlite3_column_text(st, 0);
+            const char *hash = (const char *)sqlite3_column_text(st, 1);
+            const char *salt = (const char *)sqlite3_column_text(st, 2);
+
+            mem_domain_zero(u, sizeof(*u));
+            if (name)
+                strncpy(u->name, name, sizeof(u->name) - 1);
+            if (hash)
+                strncpy(u->password_hash, hash, sizeof(u->password_hash) - 1);
+            if (salt)
+                strncpy(u->salt_hex, salt, sizeof(u->salt_hex) - 1);
+            u->uid = (uint32_t)sqlite3_column_int(st, 3);
+            u->is_elevated = sqlite3_column_int(st, 4) ? 1 : 0;
+            db->count++;
+        }
     }
     sqlite3_finalize(st);
     return FL_RESULT_OK;
+}
+
+static int user_db_lab_defaults_enabled(void) {
+    const char *v = getenv("FL_USERS_LAB_DEFAULTS");
+    return v && v[0] && v[0] != '0';
 }
 
 void fl_user_db_seed_defaults(fl_user_db_t *db) {
@@ -130,6 +151,12 @@ void fl_user_db_seed_defaults(fl_user_db_t *db) {
         return;
     fl_user_db_clear(db);
     strncpy(db->default_user, "flinstone", sizeof(db->default_user) - 1);
+    if (!user_db_lab_defaults_enabled()) {
+        fprintf(stderr,
+                "user_db: refusing known default passwords; set FL_USERS_LAB_DEFAULTS=1 for lab seeds\n");
+        db->loaded = 0;
+        return;
+    }
     fl_user_db_add_user(db, "flinstone", "flinstone", 1000, 0);
     fl_user_db_add_user(db, "root", "root", 0, 1);
     db->loaded = 1;
@@ -159,6 +186,15 @@ fl_result_t fl_user_db_load(fl_user_db_t *db, const char *path) {
 
     if (db->count == 0) {
         fl_user_record_t flin, root;
+        const char *flin_pw;
+        const char *root_pw;
+
+        if (!user_db_lab_defaults_enabled()) {
+            sqlite3_close(sql);
+            return FL_RESULT_ERR;
+        }
+        flin_pw = "flinstone";
+        root_pw = "root";
         mem_domain_zero(&flin, sizeof(flin));
         mem_domain_zero(&root, sizeof(root));
         strncpy(flin.name, "flinstone", sizeof(flin.name) - 1);
@@ -166,9 +202,9 @@ fl_result_t fl_user_db_load(fl_user_db_t *db, const char *path) {
         flin.uid = 1000;
         root.uid = 0;
         root.is_elevated = 1;
-        if (hash_password_fields("flinstone", flin.password_hash, sizeof(flin.password_hash),
+        if (hash_password_fields(flin_pw, flin.password_hash, sizeof(flin.password_hash),
                                  flin.salt_hex, sizeof(flin.salt_hex)) != FL_RESULT_OK
-            || hash_password_fields("root", root.password_hash, sizeof(root.password_hash),
+            || hash_password_fields(root_pw, root.password_hash, sizeof(root.password_hash),
                                     root.salt_hex, sizeof(root.salt_hex)) != FL_RESULT_OK) {
             sqlite3_close(sql);
             return FL_RESULT_ERR;

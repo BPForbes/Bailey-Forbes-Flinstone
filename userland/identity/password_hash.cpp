@@ -2,6 +2,7 @@
 #include <openssl/evp.h>
 #include <openssl/sha.h>
 #include <cstdio>
+#include <climits>
 #include <cstdint>
 #include <cstring>
 #include <vector>
@@ -83,7 +84,7 @@ static int parse_pbkdf2_record(const char *hash_hex, uint32_t *out_iter, char *d
         return -1;
     p = hash_hex + strlen(FL_PASSWORD_RECORD_PREFIX);
     iter = strtoul(p, &end, 10);
-    if (!end || *end != '$' || iter == 0 || iter > UINT32_MAX)
+    if (!end || *end != '$' || iter == 0 || iter > UINT32_MAX || iter > (unsigned long)INT_MAX)
         return -1;
     p = end + 1;
     if (strlen(p) != FL_PASSWORD_HASH_HEX_CHARS)

@@ -236,6 +236,7 @@ int execute_command_str(const char *line) {
                     goto finish;
                 }
                 fl_audit_authz_event(line, (unsigned)inner_id, 0);
+                fl_session_begin_sudo_scope();
                 {
                     unsigned sub_op = fl_authz_subsystem_op_for_shell_cmd((unsigned)inner_id);
                     if (sub_op != (unsigned)FL_AUTHZ_OP_UNSPECIFIED) {
@@ -243,13 +244,13 @@ int execute_command_str(const char *line) {
                             fl_authz_subsystem_check(sub_op, NULL);
                         fl_audit_authz_event(line, sub_op, sub == FL_AUTHZ_DENY ? 1 : 0);
                         if (sub == FL_AUTHZ_DENY) {
+                            fl_session_end_sudo_scope();
                             free(cmdLine);
                             out_rc = 1;
                             goto finish;
                         }
                     }
                 }
-                fl_session_begin_sudo_scope();
                 out_rc = fl_shell_cmd_dispatch(inner_id, inner_argc, inner_argv);
                 fl_session_end_sudo_scope();
             }

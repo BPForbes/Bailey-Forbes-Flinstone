@@ -1,5 +1,6 @@
 #include "cmd_decl.h"
 #include "cmd_authutil.h"
+#include "common.h"
 #include "fl/audit_log.h"
 #include "fl/session.h"
 #include "session_sync.h"
@@ -72,9 +73,11 @@ static int su_run_command(const char *command) {
 int cmd_su_run(int argc, char **argv) {
     su_request_t req;
     char saved[32];
+    char saved_home[CWD_MAX];
+    char saved_cwd[CWD_MAX];
     fl_result_t rc;
 
-    if (argc < 2) {
+    if (argc < 1) {
         fprintf(stderr, "su: usage: su [-] [username]\n");
         fprintf(stderr, "su:        su -c 'command' [username]\n");
         return 1;
@@ -99,14 +102,23 @@ int cmd_su_run(int argc, char **argv) {
         return 1;
     }
     fl_session_sync_services();
-    if (req.login_shell)
+    if (req.login_shell) {
+        fl_session_save_login_shell_env(saved_home, sizeof(saved_home),
+                                        saved_cwd, sizeof(saved_cwd));
         fl_session_apply_login_shell_env(req.target);
+    }
 
     if (req.command) {
         int cmd_rc = su_run_command(req.command);
         if (fl_session_has_elevation())
             fl_audit_elevation_event(fl_session_current_user(), "su restore", 0);
-        (void)fl_session_set_user(saved);
+        rc = fl_session_set_user(saved);
+        if (rc != FL_RESULT_OK) {
+            fprintf(stderr, "su: cannot restore session user %s (%d)\n", saved, (int)rc);
+            return 1;
+        }
+        if (req.login_shell)
+            fl_session_restore_login_shell_env(saved_home, saved_cwd);
         fl_session_sync_services();
         return cmd_rc;
     }

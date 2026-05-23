@@ -36,7 +36,6 @@ OPENSSL_ARM_LIBDIR = deps/install-aarch64/lib
 OPENSSL_ARM_LIB = deps/install-aarch64/lib/libcrypto.a
 endif
 endif
-CXX = g++
 CXXFLAGS ?= $(CFLAGS) -std=c++17
 ASFLAGS =
 
@@ -95,6 +94,7 @@ KERNEL_DRIVERS = kernel/arch/aarch64/drivers
 CFLAGS += -DFL_STACK_ASM_AVAILABLE=1
 else
 # x86_64_gas (default)
+CXX = g++
 CFLAGS += -DFL_STACK_ASM_AVAILABLE=1
 ASMSRCS_BASE = arch/x86_64/gas/mem_asm.s arch/x86_64/gas/fl_stack_asm.s arch/x86_64/gas/port_io.s arch/x86_64/gas/disk_host_io.s arch/x86_64/gas/shell_history_host_asm.s kernel/arch/x86_64/boot/spinlock.s kernel/arch/x86_64/drivers/ata_pio.s \
                kernel/arch/x86_64/drivers/usb_xhci_mmio_asm.s \
@@ -310,8 +310,8 @@ userland/identity/password_hash.o: $(OPENSSL_ARM_LIB)
 endif
 endif
 
-ARM_SQLITE_DEPS = $(if $(SQLITE_ARM_LIB),$(SQLITE_ARM_LIB),)
-ARM_OPENSSL_DEPS = $(if $(OPENSSL_ARM_LIB),$(OPENSSL_ARM_LIB),)
+ARM_SQLITE_DEPS = $(if $(and $(SQLITE_ARM_LIB),$(wildcard $(SQLITE_ARM_LIB))),$(SQLITE_ARM_LIB),)
+ARM_OPENSSL_DEPS = $(if $(and $(OPENSSL_ARM_LIB),$(wildcard $(OPENSSL_ARM_LIB))),$(OPENSSL_ARM_LIB),)
 
 ifeq ($(CHANGELOG_CI),1)
 $(CHANGELOG_C): $(VERSION_DEF) scripts/gen_version_changelog.c

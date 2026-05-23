@@ -90,6 +90,27 @@ static void rmrf(const char *path) {
     rmdir(path);
 }
 
+/** True when **word** begins a new shell command in batch argv (not a sub-arg). */
+static int batch_starts_shell_command(const char *word) {
+    static const char *const cmds[] = {
+        "help", "listclusters", "clear", "history", "his", "cc", "version",
+        "contracts", "audit", "exit", "bios", "setdisk", "createdisk", "format",
+        "dir", "make", "mkdir", "rmtree", "rmdir", "mv", "write", "type", "cat",
+        "where", "loc", "search", "delcluster", "rerun", "redirect", "cd",
+        "writecluster", "initdisk", "import", "diskput", "diskget", "diskfiles",
+        "diskdel", "diskmkdir", "update", "addcluster", "login", "logout",
+        "whoami", "userdel", "useradd", "passwd", "sudo", "su", NULL
+    };
+    size_t n;
+
+    if (!word || !word[0])
+        return 0;
+    for (n = 0; cmds[n]; n++)
+        if (!strcmp(word, cmds[n]))
+            return 1;
+    return 0;
+}
+
 static void vm_cleanup_at_exit(void) {
     if (!g_vm_mode || !g_vm_cleanup || !g_vm_root[0]) return;
     if (chdir("/tmp") != 0) return;
@@ -217,6 +238,9 @@ static void vm_warn_layer_config(void) {
 }
 
 int main(int argc, char *argv[]) {
+    /* Hosted lab default accounts; set FL_USERS_LAB_DEFAULTS=0 before launch to disable weak seeds. */
+    if (!getenv("FL_USERS_LAB_DEFAULTS"))
+        (void)setenv("FL_USERS_LAB_DEFAULTS", "1", 0);
     /* Seed the random number generator */
     srand((unsigned) time(NULL));
 
@@ -542,23 +566,26 @@ int main(int argc, char *argv[]) {
                     tokensCount = 2;
                 else {
                     int j = i + 1;
-                    while (j < argc && argv[j] && argv[j][0] != '-')
+                    while (j < argc && argv[j]) {
+                        if (j > i + 1 && batch_starts_shell_command(argv[j]))
+                            break;
                         j++;
+                    }
                     tokensCount = (j > i + 1) ? (j - i) : 2;
                 }
             }
             else if (!strcmp(cmd, "su")) {
                 int j = i + 1;
-                int has_c = 0;
-                while (j < argc && argv[j] && argv[j][0] != '-') {
-                    if (!strcmp(argv[j], "-c"))
-                        has_c = 1;
+                while (j < argc && argv[j]) {
+                    if (j > i + 1 && batch_starts_shell_command(argv[j]))
+                        break;
+                    if (!strcmp(argv[j], "-c") && j + 1 < argc) {
+                        j += 2;
+                        continue;
+                    }
                     j++;
                 }
-                if (has_c && i + 2 < argc)
-                    tokensCount = (j > i + 3) ? (j - i) : 4;
-                else
-                    tokensCount = (j > i + 1) ? (j - i) : 2;
+                tokensCount = (j > i) ? (j - i) : 1;
             }
             else {
                 int j = i + 1;
@@ -566,7 +593,9 @@ int main(int argc, char *argv[]) {
                     j++;
                 tokensCount = j - i;
             }
-            if (tokensCount == 0) { i++; continue; }
+            if (tokensCount > argc - i)
+                tokensCount = argc - i;
+            if (tokensCount <= 0) { i++; continue; }
             size_t totalLen = 0;
             int overflow = 0;
             for (int k = i; k < i + tokensCount; k++) {
