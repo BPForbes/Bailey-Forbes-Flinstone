@@ -1,8 +1,7 @@
 /* P7 shell batch argv grouping (module contract, normative). Batch mode consumes
  * contiguous argv tokens per builtin (`contracts`, `audit`) so `contracts audit show N`
  * runs **contracts** then **audit**, not a merged token. Implemented by **fl_batch_*_tokens_count**
- * in userland/command/cmd_*.c (dispatch: cmd_batch_dispatch.c); caps below are review hooks.
- * See docs/ROADMAP.md **TODO: P7**. */
+ * in userland/shell/util.c; caps below are review hooks. See docs/ROADMAP.md **TODO: P7**. */
 #ifndef FL_CONTRACT_P7_SHELL_BATCH_H
 #define FL_CONTRACT_P7_SHELL_BATCH_H
 

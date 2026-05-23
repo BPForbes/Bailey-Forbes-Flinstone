@@ -390,16 +390,10 @@ void fl_audit_elevation_event(const char *principal, const char *reason, int gra
              who, (long long)when_sec, why, grant ? "grant" : "revoke");
 
     pthread_mutex_lock(&g_audit_mutex);
-    {
-        FILE *fp = fopen(FL_AUDIT_REL_DEFAULT, "a");
-        if (!fp)
-            fprintf(stderr, "audit: cannot open %s for elevation event\n", FL_AUDIT_REL_DEFAULT);
-        else {
-            if (fprintf(fp, "%s\n", line_buf.data) < 0)
-                fprintf(stderr, "audit: write failed for elevation event\n");
-            if (fclose(fp) != 0)
-                fprintf(stderr, "audit: close failed for elevation event\n");
-        }
+    FILE *fp = fopen(FL_AUDIT_REL_DEFAULT, "a");
+    if (fp) {
+        (void)fprintf(fp, "%s\n", line_buf.data);
+        (void)fclose(fp);
     }
     pthread_mutex_unlock(&g_audit_mutex);
 

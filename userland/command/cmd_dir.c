@@ -1,6 +1,5 @@
 #include "common.h"
 #include "cmd_decl.h"
-#include "cmd_batch.h"
 #include "cmd_util.h"
 #include "path_log.h"
 #include "fs_service_glue.h"
@@ -33,8 +32,4 @@ int cmd_dir_run(int argc, char **argv) {
         list_files(rpath);
     }
     return 0;
-}
-
-int cmd_dir_batch_tokens_count(int argc, char **argv, int i) {
-    return cmd_batch_opt_path_arity(argc, argv, i);
 }

@@ -1,21 +1,18 @@
 #include "cmd_decl.h"
-#include "cmd_batch.h"
 #include "fl/audit_log.h"
 #include "fl/session.h"
 #include "session_sync.h"
 #include <stdio.h>
-#include <string.h>
 
 int cmd_logout_run(int argc, char **argv) {
-    char before[33];
-    int had_token_elev = 0;
+    const char *before;
 
     (void)argc;
     (void)argv;
+    int had_token_elev = 0;
 
     fl_session_init();
-    strncpy(before, fl_session_current_user(), sizeof(before) - 1u);
-    before[sizeof(before) - 1] = '\0';
+    before = fl_session_current_user();
     had_token_elev =
         fl_session_has_elevation() && !fl_session_is_elevated_account();
     if (fl_session_logout() != FL_RESULT_OK) {
@@ -27,8 +24,4 @@ int cmd_logout_run(int argc, char **argv) {
     fl_session_sync_services();
     printf("logout: now %s\n", fl_session_current_user());
     return 0;
-}
-
-int cmd_logout_batch_tokens_count(int argc, char **argv, int i) {
-    (void)argc; (void)argv; (void)i; return 1;
 }

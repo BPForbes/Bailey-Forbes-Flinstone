@@ -1,6 +1,5 @@
 #include "common.h"
 #include "cmd_decl.h"
-#include "cmd_batch.h"
 #include "cmd_util.h"
 #include "path_log.h"
 #include "fs.h"
@@ -20,8 +19,4 @@ int cmd_rmtree_run(int argc, char **argv) {
     path_log_record(PATH_OP_DELETE, rpath);
     remove_directory_recursive(rpath);
     return 0;
-}
-
-int cmd_rmtree_batch_tokens_count(int argc, char **argv, int i) {
-    (void)argc; (void)argv; (void)i; return 2;
 }

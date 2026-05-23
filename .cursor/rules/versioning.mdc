@@ -46,7 +46,7 @@ When combining agent branches (for example **`cursor/*`**, **`claude/*`**, **`co
 
 ## CI prepare-version-entries (date stamp + `version_def.h`)
 
-- **`.github/actions/prepare-version-entries`:** **`relocate_root_prerelease_ver_to_preproduction.sh`**, **`promote_preproduction_for_main.sh --normalize-gm-only`**, then **`stamp_version_entries_release_date.sh`** (entries root **`*.ver`** and every **`preproduction <A>.<B>.<C>/`** tree), then **`gen_version_def.sh`** reads **`version/entries/**/*.ver`** (including **`preproduction */`**).
+- **`.github/actions/prepare-version-entries`:** **`relocate_root_prerelease_ver_to_preproduction.sh`**, **`promote_preproduction_for_main.sh --normalize-gm-only`**, **`promote_preproduction_for_main.sh`** (GA promote when **`GM=1`** is present), then **`stamp_version_entries_release_date.sh`** (entries root **`*.ver`** and every **`preproduction <A>.<B>.<C>/`** tree), then **`gen_version_def.sh`** reads **`version/entries/**/*.ver`** (including **`preproduction */`**).
 - **`PRERELEASE`** and **`GM`:** when present, values must be exactly **`0`** or **`1`** (**`scripts/lib/ver_field_parse.sh`**; **`check_version_entries_semver_dev_unique.sh`**).
 
 ## AI / Cursor agent PRs — `version/entries` only

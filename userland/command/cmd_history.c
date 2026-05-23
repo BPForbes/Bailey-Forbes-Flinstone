@@ -1,6 +1,5 @@
 #include "common.h"
 #include "cmd_decl.h"
-#include "cmd_batch.h"
 #include "util.h"
 #include "fl/history_record.h"
 #include <stdio.h>
@@ -33,8 +32,4 @@ int cmd_history_maybe(const char *trimmed) {
     if (tmp[0])
         unlink(tmp);
     return 1;
-}
-
-int cmd_history_batch_tokens_count(int argc, char **argv, int i) {
-    (void)argc; (void)argv; (void)i; return 1;
 }

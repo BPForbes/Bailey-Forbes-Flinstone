@@ -1,6 +1,5 @@
 #include "common.h"
 #include "cmd_decl.h"
-#include "cmd_batch.h"
 #include <stdio.h>
 #include <stdlib.h>
 
@@ -20,8 +19,4 @@ int cmd_initdisk_run(int argc, char **argv) {
     g_cluster_size = newSize;
     printf("Soft init: clusters=%d, size=%d bytes (in memory only).\n", g_total_clusters, g_cluster_size);
     return 0;
-}
-
-int cmd_initdisk_batch_tokens_count(int argc, char **argv, int i) {
-    (void)argc; (void)argv; (void)i; return 3;
 }

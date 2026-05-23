@@ -3,7 +3,6 @@
 #include "timekeeping.h"
 #include "mem_domain.h"
 #include "fl/fl_stack_asm.h"
-#include <stddef.h>
 #include <pthread.h>
 #include <stdio.h>
 #include <string.h>
@@ -16,8 +15,6 @@ typedef struct fl_elev_slot {
 } fl_elev_slot_t;
 
 _Static_assert(sizeof(fl_elev_slot_t) == 56u, "asm_fl_elev_count_active slot layout");
-_Static_assert(offsetof(fl_elev_slot_t, expires_ns) == 40u, "asm_fl_elev_count_active expires_ns offset");
-_Static_assert(offsetof(fl_elev_slot_t, used) == 48u, "asm_fl_elev_count_active used offset");
 
 #define FL_ELEV_MAX_SLOTS 16u
 

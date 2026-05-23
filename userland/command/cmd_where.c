@@ -1,5 +1,4 @@
 #include "cmd_decl.h"
-#include "cmd_batch.h"
 #include "path_log.h"
 #include <stdio.h>
 #include <stdlib.h>
@@ -19,8 +18,4 @@ int cmd_where_run(int argc, char **argv) {
     }
     path_log_print(n);
     return 0;
-}
-
-int cmd_where_batch_tokens_count(int argc, char **argv, int i) {
-    return cmd_batch_opt_path_arity(argc, argv, i);
 }

@@ -8,7 +8,7 @@ The project supports multiple assembly backends for memory primitives, port I/O,
 |------|----------|----------|-------|
 | `x86_64_gas` | GAS (GNU as) | gcc | Default. AT&T syntax. |
 | `x86_64_nasm` | NASM | gcc | Intel syntax. Requires `nasm`. |
-| `arm` | GAS (AArch64) | aarch64-linux-gnu-gcc | ARM64/Linux. **`ARCH=arm` selects AArch64**; sources live under `arch/arm/gas/` (historical directory name, not 32-bit ARM). Port I/O stubs (no x86 in/out). |
+| `arm` | GAS (AArch64) | aarch64-linux-gnu-gcc | ARM64/Linux. Port I/O stubs (no x86 in/out). |
 
 ## Build
 
