@@ -90,5 +90,5 @@ int cmd_sudo_batch_tokens_count(int argc, char **argv, int i) {
         if (fl_batch_argv_layout_valid(argc, argv, i, end))
             return end - i;
     }
-    return 2;
+    return 1;
 }

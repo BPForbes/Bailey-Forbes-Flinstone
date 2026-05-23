@@ -35,5 +35,7 @@ int cmd_cat_run(int argc, char **argv) {
 }
 
 int cmd_cat_batch_tokens_count(int argc, char **argv, int i) {
-    (void)argc; (void)argv; (void)i; return 2;
+    if (i + 1 < argc && argv[i + 1] && argv[i + 1][0] != '-')
+        return 2;
+    return 1;
 }

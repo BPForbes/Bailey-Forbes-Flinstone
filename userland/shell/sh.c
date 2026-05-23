@@ -429,9 +429,15 @@ int main(int argc, char *argv[]) {
                 i++;
                 continue;
             }
-            if ((!strcmp(cmd, "setdisk") || !strcmp(cmd, "createdisk")) &&
-                argc <= i + 3 && tokensCount > 0) {
-                fprintf(stderr, "batch: %s: insufficient arguments (skipped)\n", cmd);
+            if (!strcmp(cmd, "setdisk") || !strcmp(cmd, "createdisk")) {
+                const int minTokens = (!strcmp(cmd, "setdisk")) ? 2 : 4;
+
+                if (tokensCount > 0 && tokensCount < minTokens) {
+                    fprintf(stderr, "batch: %s: insufficient arguments (skipped)\n",
+                            cmd);
+                    i += tokensCount;
+                    continue;
+                }
             }
             if (tokensCount > argc - i)
                 tokensCount = argc - i;

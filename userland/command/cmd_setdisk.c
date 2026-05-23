@@ -31,13 +31,9 @@ int cmd_setdisk_run(int argc, char **argv) {
 }
 
 int cmd_setdisk_batch_tokens_count(int argc, char **argv, int i) {
-    if (argc > i + 3)
-        return (argc > i + 4) ? 5 : 4;
-    {
-        int eat = 1;
+    int eat = 1;
 
-        while (eat < 5 && i + eat < argc && argv[i + eat] && argv[i + eat][0] != '-')
-            eat++;
-        return eat;
-    }
+    while (eat < 5 && i + eat < argc && argv[i + eat] && argv[i + eat][0] != '-')
+        eat++;
+    return eat;
 }

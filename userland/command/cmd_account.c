@@ -2,6 +2,7 @@
 #include "cmd_authutil.h"
 #include "cmd_batch.h"
 #include "fl/session.h"
+#include "user_db.h"
 #include <stdio.h>
 #include <string.h>
 
@@ -13,9 +14,14 @@ static int ensure_privilege(void) {
 }
 
 /** Drop in-memory account mutations when persistence fails. */
-static void account_reload_db_from_disk(fl_user_db_t *db) {
-    if (db && db->path[0])
-        (void)fl_user_db_load(db, db->path);
+static int account_reload_db_from_disk(fl_user_db_t *db) {
+    if (!db || !db->path[0])
+        return 0;
+    if (fl_user_db_load(db, db->path) != FL_RESULT_OK) {
+        fprintf(stderr, "account: could not reload %s from disk\n", db->path);
+        return 1;
+    }
+    return 0;
 }
 
 int cmd_useradd_run(int argc, char **argv) {
@@ -52,7 +58,7 @@ int cmd_useradd_run(int argc, char **argv) {
         return 1;
     }
     if (fl_session_save_users() != FL_RESULT_OK) {
-        account_reload_db_from_disk(db);
+        (void)account_reload_db_from_disk(db);
         fprintf(stderr, "useradd: could not save %s\n", FL_SESSION_USERS_PATH);
         return 1;
     }
@@ -81,7 +87,7 @@ int cmd_userdel_run(int argc, char **argv) {
         return 1;
     }
     if (fl_session_save_users() != FL_RESULT_OK) {
-        account_reload_db_from_disk(db);
+        (void)account_reload_db_from_disk(db);
         fprintf(stderr, "userdel: could not save %s\n", FL_SESSION_USERS_PATH);
         return 1;
     }
@@ -119,7 +125,7 @@ int cmd_passwd_run(int argc, char **argv) {
         return 1;
     }
     if (fl_session_save_users() != FL_RESULT_OK) {
-        account_reload_db_from_disk(db);
+        (void)account_reload_db_from_disk(db);
         fprintf(stderr, "passwd: could not save %s\n", FL_SESSION_USERS_PATH);
         return 1;
     }
@@ -128,17 +134,17 @@ int cmd_passwd_run(int argc, char **argv) {
 }
 
 int cmd_useradd_batch_tokens_count(int argc, char **argv, int i) {
-    (void)argc;
-    (void)argv;
-    (void)i;
-    return 2;
+    if (i + 1 < argc && argv[i + 1] && argv[i + 1][0] != '-' &&
+        !cmd_batch_token_is_shell_command(argv[i + 1]))
+        return 2;
+    return 1;
 }
 
 int cmd_userdel_batch_tokens_count(int argc, char **argv, int i) {
-    (void)argc;
-    (void)argv;
-    (void)i;
-    return 2;
+    if (i + 1 < argc && argv[i + 1] && argv[i + 1][0] != '-' &&
+        !cmd_batch_token_is_shell_command(argv[i + 1]))
+        return 2;
+    return 1;
 }
 
 int cmd_passwd_batch_tokens_count(int argc, char **argv, int i) {

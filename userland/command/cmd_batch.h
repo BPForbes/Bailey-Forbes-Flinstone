@@ -24,4 +24,7 @@ int cmd_batch_flag_yn_arity(int argc, char **argv, int i);
 /** Optional -y/-Y only. */
 int cmd_batch_flag_y_arity(int argc, char **argv, int i);
 
+/** True when **tok** names a registered or legacy batch shell command. */
+int cmd_batch_token_is_shell_command(const char *tok);
+
 #endif /* CMD_BATCH_H */

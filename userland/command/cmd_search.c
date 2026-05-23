@@ -74,5 +74,8 @@ int cmd_search_run(int argc, char **argv) {
 }
 
 int cmd_search_batch_tokens_count(int argc, char **argv, int i) {
-    (void)argc; (void)argv; (void)i; return 2;
+    if (i + 2 < argc && argv[i + 2] &&
+        (!strcmp(argv[i + 2], "-h") || !strcmp(argv[i + 2], "-t")))
+        return 3;
+    return 2;
 }

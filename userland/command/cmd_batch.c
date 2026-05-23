@@ -23,6 +23,18 @@ int cmd_batch_flag_y_arity(int argc, char **argv, int i) {
     return 1;
 }
 
+int cmd_batch_token_is_shell_command(const char *tok) {
+    if (!tok || !tok[0])
+        return 0;
+    if (fl_shell_cmd_lookup(tok) != FL_SCMD_UNKNOWN)
+        return 1;
+    if (!strcmp(tok, "help") || !strcmp(tok, "clear") || !strcmp(tok, "history") ||
+        !strcmp(tok, "his") || !strcmp(tok, "cc") || !strcmp(tok, "exit") ||
+        !strcmp(tok, "bios") || !strcmp(tok, "make") || !strcmp(tok, "type"))
+        return 1;
+    return 0;
+}
+
 static int batch_unknown_tokens_count(int argc, char **argv, int i) {
     int j = i + 1;
 

@@ -81,6 +81,27 @@ int cmd_du_run(int argc, char **argv) {
     return 0;
 }
 
+static int du_batch_cluster_index_token(const char *tok) {
+    const char *p;
+
+    if (!tok || !tok[0])
+        return 0;
+    for (p = tok; *p; p++) {
+        if (!isdigit((unsigned char)*p))
+            return 0;
+    }
+    return 1;
+}
+
 int cmd_du_batch_tokens_count(int argc, char **argv, int i) {
-    (void)argc; (void)argv; (void)i; return 1;
+    int j;
+
+    if (i + 1 < argc && argv[i + 1] && !strcmp(argv[i + 1], "dtl")) {
+        j = i + 2;
+        while (j < argc && argv[j] && du_batch_cluster_index_token(argv[j]) &&
+               !cmd_batch_token_is_shell_command(argv[j]))
+            j++;
+        return j - i;
+    }
+    return 1;
 }

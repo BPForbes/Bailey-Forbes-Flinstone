@@ -27,5 +27,8 @@ int cmd_writecluster_run(int argc, char **argv) {
 }
 
 int cmd_writecluster_batch_tokens_count(int argc, char **argv, int i) {
-    (void)argc; (void)argv; (void)i; return 4;
+    (void)argv;
+    if (i < 0 || i + 3 >= argc)
+        return 0;
+    return 4;
 }

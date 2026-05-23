@@ -310,8 +310,8 @@ userland/identity/password_hash.o: $(OPENSSL_ARM_LIB)
 endif
 endif
 
-ARM_SQLITE_DEPS = $(if $(and $(SQLITE_ARM_LIB),$(wildcard $(SQLITE_ARM_LIB))),$(SQLITE_ARM_LIB),)
-ARM_OPENSSL_DEPS = $(if $(and $(OPENSSL_ARM_LIB),$(wildcard $(OPENSSL_ARM_LIB))),$(OPENSSL_ARM_LIB),)
+ARM_SQLITE_DEPS = $(if $(SQLITE_ARM_LIB),$(SQLITE_ARM_LIB),)
+ARM_OPENSSL_DEPS = $(if $(OPENSSL_ARM_LIB),$(OPENSSL_ARM_LIB),)
 
 ifeq ($(CHANGELOG_CI),1)
 $(CHANGELOG_C): $(VERSION_DEF) scripts/gen_version_changelog.c

@@ -36,7 +36,8 @@ int cmd_diskput_run(int argc, char **argv) {
 }
 
 int cmd_diskput_batch_tokens_count(int argc, char **argv, int i) {
-    if (i + 2 < argc && argv[i + 2] && argv[i + 2][0] != '-')
+    if (i + 2 < argc && argv[i + 2] && argv[i + 2][0] != '-' &&
+        !cmd_batch_token_is_shell_command(argv[i + 2]))
         return 3;
     return 2;
 }

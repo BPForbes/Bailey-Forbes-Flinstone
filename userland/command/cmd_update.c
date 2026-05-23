@@ -33,5 +33,13 @@ int cmd_update_run(int argc, char **argv) {
 }
 
 int cmd_update_batch_tokens_count(int argc, char **argv, int i) {
-    (void)argc; (void)argv; (void)i; return 4;
+    int remaining;
+
+    (void)argv;
+    if (i < 0 || i >= argc)
+        return 0;
+    remaining = argc - i;
+    if (remaining < 4)
+        return remaining;
+    return 4;
 }

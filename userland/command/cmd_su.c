@@ -109,6 +109,7 @@ int cmd_su_run(int argc, char **argv) {
         if (fl_session_apply_login_shell_env(req.target) != 0) {
             fprintf(stderr, "su: failed to apply login-shell environment for %s\n",
                     req.target);
+            fl_session_restore_login_shell_env(saved_home, saved_cwd);
             (void)fl_session_set_user(saved);
             fl_session_sync_services();
             return 1;
@@ -141,17 +142,26 @@ int cmd_su_run(int argc, char **argv) {
 
 int cmd_su_batch_tokens_count(int argc, char **argv, int i) {
     int j;
+    int saw_user = 0;
 
     if (i >= argc || !argv[i] || strcmp(argv[i], "su"))
         return 1;
     j = i + 1;
     while (j < argc && argv[j]) {
-        if (!strcmp(argv[j], "-c") && j + 1 < argc) {
-            j += 2;
-            continue;
+        if (!strcmp(argv[j], "-c")) {
+            if (j + 1 >= argc)
+                return (j + 1) - i;
+            if (j + 2 < argc && argv[j + 2] && argv[j + 2][0] != '-')
+                return (j + 3) - i;
+            return (j + 2) - i;
         }
         if (argv[j][0] == '-' && strcmp(argv[j], "-") && strcmp(argv[j], "-c"))
             break;
+        if (argv[j][0] != '-') {
+            if (saw_user)
+                break;
+            saw_user = 1;
+        }
         j++;
     }
     if (j <= i)
