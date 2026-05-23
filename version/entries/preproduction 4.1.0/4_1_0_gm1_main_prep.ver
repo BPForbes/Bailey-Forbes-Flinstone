@@ -2,17 +2,21 @@ MAJOR_VERSION=4
 STANDARD_VERSION=1
 RELEASE_VERSION=0
 PRERELEASE=1
-DEV_VERSION=2
+DEV_VERSION=4
 GM=1
 DESCRIPTION<<VER_4_1_0_GM1
-RELEASE 4.1.0: Minor release — P0–P2 integration (develop vs main); go-to-main GM summary.
+RELEASE 4.1.0: Minor release — full 4.1.0 train (develop vs main); go-to-main GM summary (DEV 4).
 
-Replit / cloud agent hosts (AGENTS.md): g++, libsqlite3-dev; AArch64 cross SQLite/OpenSSL via
-deps/fetch-sqlite-aarch64.sh and fetch-openssl-aarch64.sh; Makefile deps-sqlite/openssl-aarch64.
+Replit: .replit, replit.nix, replit.md, docs/replit.md, flake.nix, nix/deps.json — replit.com/~ import;
+agent rules aligned with AGENTS.md, CLAUDE.md, .cursor/rules/, .coderabbit.yaml.
 
-ASM: arch/arm/gas and arch/x86_64/gas fl_stack_asm.s; x86_64/nasm fl_stack_asm.asm — push/pop/count,
-asm_fl_elev_count_active (56-byte slot stride). C fallbacks when FL_STACK_ASM_UNAVAILABLE; Makefile
-links fl_stack_asm.o in shell and tests; _Static_assert(sizeof(fl_elev_slot_t)==56).
+Cloud hosts (AGENTS.md): g++, libsqlite3-dev; deps/fetch-sqlite-aarch64.sh and fetch-openssl-aarch64.sh;
+Makefile deps-sqlite-aarch64 / deps-openssl-aarch64 for user_db and password_hash cross links.
+
+ASM (arch/ + kernel asm): fl_stack_asm GAS/NASM push/pop/count and elev slot scan; ABI fixes on alloc
+(malloc_nolock callee-saved, AArch64 free, AAPCS64 16-byte frames, cld, lock release); shell_history
+host cmp order; x86-64 realloc via asm_mem_copy (#156); NASM disk_host_io + shell_history_host_asm;
+alloc .hidden + alloc_internal_local.ver; remove legacy ARM/, x86-64 (NASM)/, root alloc/; docs/issues/*.
 
 P0: contract_p0_fs_jail.h; fs_jail elevation-aware access; arm_gic.c and idt_dispatch.c integration notes.
 
@@ -29,8 +33,8 @@ account/authutil; session_sync.
 Contracts .h: contract_foundations (+P0 jail), contract_p2_authz, contract_p2_credential_store, identity.
 
 Bugfix .c/.h: fs_facade authz gates; user_db loaded flag, userdel hash zero, fl_user_db_next_uid; elevation
-token none skip; tcgetattr passwords; sudo -k fast-path; security PR facade/user_db/elevation; CI CUnit
-session_login_env + fl_stack_asm; NASM fl_stack link after clean.
+token none skip; tcgetattr passwords; sudo -k fast-path; security PR #130-152 facade/user_db/elevation; CI
+CUnit session_login_env + fl_stack_asm; CodeRabbit NASM elev loop scale, AArch64 malloc_nolock x30 frame.
 
 Tests: test_p0_p2_wiring, test_audit_log elevation lines, test_invariants; BPForbes_Flinstone_Tests auth cmds.
 
