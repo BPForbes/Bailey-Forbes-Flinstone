@@ -1,5 +1,3 @@
-/* TODO(P0/Codex): P0-5 x86 IDT/tick full integration evidence on target hardware —
- * dispatch path exists; hosted CI does not claim bare-metal P0-8 completeness. */
 #include "idt.h"
 #include "drivers.h"
 #include <stdint.h>

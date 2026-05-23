@@ -23,80 +23,37 @@ ARM64_LINUX_HOST := $(and $(filter Linux,$(UNAME_S)),$(filter aarch64 arm64,$(UN
 # Compiler and flags
 CC = gcc
 AS = as
-CFLAGS = -Wall -Wextra -pthread -I. -Icontracts/foundations -Icontracts/runtime -Icontracts/identity -Icontracts/networking -Icontracts/drivers -Icontracts/storage -Icontracts/observability -Icontracts/operations -Icontracts/virtualization -Icontracts/hardening -Ikernel/include -Ikernel/core/vfs -Ikernel/core/mm -Ikernel/core/memory -Ikernel/core/time -Ikernel/core/identity -Ikernel/core/sched -Ikernel/core/sys -Iuserland/shell -Iuserland/command -Ikernel/arch/x86_64 -Ikernel/arch/aarch64
-LDFLAGS = -Wl,-z,noexecstack -lsqlite3 -lstdc++ -lcrypto
-# Cross ARM on x86: prefer deps/install-aarch64 (./deps/fetch-sqlite-aarch64.sh); optional system libsqlite3-dev:arm64.
-# OpenSSL for password_hash.cpp: libssl-dev:arm64 (headers under /usr/include/aarch64-linux-gnu).
-ifeq ($(ARCH),arm)
-ifeq ($(ARM64_LINUX_HOST),)
-SQLITE_ARM_PREFIX = deps/install-aarch64
-SQLITE_ARM_LIB = $(SQLITE_ARM_PREFIX)/lib/libsqlite3.a
-OPENSSL_ARM_INC = deps/install-aarch64/include
-OPENSSL_ARM_LIBDIR = deps/install-aarch64/lib
-OPENSSL_ARM_LIB = deps/install-aarch64/lib/libcrypto.a
-endif
-endif
-CXX = g++
-CXXFLAGS ?= $(CFLAGS) -std=c++17
+CFLAGS = -Wall -Wextra -pthread -I. -Icontracts/foundations -Icontracts/runtime -Icontracts/identity -Icontracts/networking -Icontracts/drivers -Icontracts/storage -Icontracts/observability -Icontracts/operations -Icontracts/virtualization -Icontracts/hardening -Ikernel/include -Ikernel/core/vfs -Ikernel/core/mm -Ikernel/core/sched -Ikernel/core/sys -Iuserland/shell -Iuserland/command -Ikernel/arch/x86_64 -Ikernel/arch/aarch64
+LDFLAGS = -Wl,-z,noexecstack
 ASFLAGS =
-
-ifneq ($(OPENSSL_ARM_INC),)
-CFLAGS += -I$(OPENSSL_ARM_INC)
-ARM_CROSS_LIBPATH = -L$(OPENSSL_ARM_LIBDIR)
-endif
-
-ifneq ($(SQLITE_ARM_LIB),)
-ifneq (,$(wildcard $(SQLITE_ARM_LIB)))
-CFLAGS += -I$(SQLITE_ARM_PREFIX)/include
-LDFLAGS := -Wl,-z,noexecstack -L$(SQLITE_ARM_PREFIX)/lib $(ARM_CROSS_LIBPATH) -lsqlite3 -lstdc++ -lcrypto -ldl
-else ifneq (,$(wildcard /usr/lib/aarch64-linux-gnu/libsqlite3.so))
-LDFLAGS := -Wl,-z,noexecstack -L/usr/lib/aarch64-linux-gnu $(ARM_CROSS_LIBPATH) -lsqlite3 -lstdc++ -lcrypto
-endif
-endif
 
 # --- Arch-specific assembly ---
 ifeq ($(ARCH),x86_64_nasm)
 AS = nasm
 ASFLAGS = -f elf64
-CFLAGS += -DFL_STACK_ASM_AVAILABLE=1
-# Kernel x86_64 boot/driver .s are GAS; compile with $(CC) -c (see rule below), not NASM.
-KERNEL_X86_GAS_ASM = kernel/arch/x86_64/boot/spinlock.s kernel/arch/x86_64/drivers/ata_pio.s \
-                     kernel/arch/x86_64/boot/gdt.s kernel/arch/x86_64/boot/idt.s
-ASMSRCS_BASE = arch/x86_64/nasm/mem_asm.asm arch/x86_64/nasm/fl_stack_asm.asm arch/x86_64/nasm/port_io.asm \
-               arch/x86_64/nasm/disk_host_io.asm arch/x86_64/nasm/shell_history_host_asm.asm \
-               arch/x86_64/nasm/usb_xhci_mmio_asm.asm $(KERNEL_X86_GAS_ASM)
+CFLAGS += -DDISK_HOST_USE_LIBC_PREADV=1
+ASMSRCS_BASE = arch/x86_64/nasm/mem_asm.asm arch/x86_64/nasm/port_io.asm arch/x86_64/nasm/usb_xhci_mmio_asm.asm
 ASMSRCS_ALLOC = arch/x86_64/nasm/alloc_core.asm arch/x86_64/nasm/alloc_malloc.asm arch/x86_64/nasm/alloc_free.asm
 ASM_SRC_DIR = arch/x86_64/nasm
 KERNEL_DRIVERS = kernel/arch/x86_64/drivers
 else ifeq ($(ARCH),arm)
 ifeq ($(ARM64_LINUX_HOST),)
 CC = aarch64-linux-gnu-gcc
-# CI images often ship gcc-aarch64-linux-gnu without g++; compile/link C++ with -x c++ when needed.
-CROSS_GXX := $(shell command -v aarch64-linux-gnu-g++ 2>/dev/null)
-ifneq ($(CROSS_GXX),)
-CXX = aarch64-linux-gnu-g++
-else
-CXX = aarch64-linux-gnu-gcc
-CXX_IS_GCC_FOR_CPP = 1
-endif
 AS = aarch64-linux-gnu-as
 else
 # Same triplet as aarch64-linux-gnu-*; avoids requiring the cross package on the device.
 CC = gcc
-CXX = g++
 AS = as
 endif
-ASMSRCS_BASE = arch/arm/gas/mem_asm.s arch/arm/gas/fl_stack_asm.s arch/arm/gas/port_io.s arch/arm/gas/disk_host_io.s arch/arm/gas/shell_history_host_asm.s kernel/arch/aarch64/boot/spinlock.s kernel/arch/aarch64/drivers/ramdisk.s \
+ASMSRCS_BASE = arch/arm/gas/mem_asm.s arch/arm/gas/port_io.s arch/arm/gas/disk_host_io.s arch/arm/gas/shell_history_host_asm.s kernel/arch/aarch64/boot/spinlock.s kernel/arch/aarch64/drivers/ramdisk.s \
                kernel/arch/aarch64/drivers/usb_xhci_mmio_asm.s \
                kernel/arch/aarch64/boot/vectors.s
 ASMSRCS_ALLOC = arch/arm/gas/alloc_core.s arch/arm/gas/alloc_malloc.s arch/arm/gas/alloc_free.s
 ASM_SRC_DIR = arch/arm/gas
 KERNEL_DRIVERS = kernel/arch/aarch64/drivers
-CFLAGS += -DFL_STACK_ASM_AVAILABLE=1
 else
 # x86_64_gas (default)
-CFLAGS += -DFL_STACK_ASM_AVAILABLE=1
-ASMSRCS_BASE = arch/x86_64/gas/mem_asm.s arch/x86_64/gas/fl_stack_asm.s arch/x86_64/gas/port_io.s arch/x86_64/gas/disk_host_io.s arch/x86_64/gas/shell_history_host_asm.s kernel/arch/x86_64/boot/spinlock.s kernel/arch/x86_64/drivers/ata_pio.s \
+ASMSRCS_BASE = arch/x86_64/gas/mem_asm.s arch/x86_64/gas/port_io.s arch/x86_64/gas/disk_host_io.s arch/x86_64/gas/shell_history_host_asm.s kernel/arch/x86_64/boot/spinlock.s kernel/arch/x86_64/drivers/ata_pio.s \
                kernel/arch/x86_64/drivers/usb_xhci_mmio_asm.s \
                kernel/arch/x86_64/boot/gdt.s kernel/arch/x86_64/boot/idt.s
 ASMSRCS_ALLOC = arch/x86_64/gas/alloc/alloc_core.s arch/x86_64/gas/alloc/alloc_malloc.s arch/x86_64/gas/alloc/alloc_free.s
@@ -120,8 +77,10 @@ DRIVER_SRCS = $(UNIFIED_DRIVER_SRCS)
 DRIVER_SRCS += $(KERNEL_DRIVERS)/pci.c
 # x86: ATA IDENTIFY + helpers, IDT dispatcher
 ifneq ($(ARCH),arm)
+ifneq ($(ARCH),x86_64_nasm)
 DRIVER_SRCS += $(KERNEL_DRIVERS)/ata_pio_baremetal.c
 DRIVER_SRCS += kernel/arch/x86_64/boot/idt_dispatch.c
+endif
 endif
 # HAL: ioport (x86 real, arm stubs) + ARM MMIO HAL (arm only)
 HAL_SRCS = $(KERNEL_DRIVERS)/../hal/ioport.c
@@ -135,22 +94,16 @@ CORE_SRCS = kernel/core/vfs/disk.c kernel/core/vfs/fat32_host.c kernel/core/vfs/
             kernel/core/sched/threadpool.c priority_queue.c kernel/core/vfs/fs_jail.c kernel/core/vfs/fs_provider.c kernel/core/vfs/fs_command.c \
             kernel/core/vfs/fs_events.c kernel/core/vfs/fs_policy.c kernel/core/vfs/fs_chain.c kernel/core/vfs/fs_facade.c \
             kernel/core/vfs/fs_service_glue.c kernel/core/mm/mem_domain.c kernel/core/mm/kmalloc.c kernel/core/mm/pmm.c \
-            kernel/core/memory/fl_stack.c kernel/core/memory/exec_context.c \
-            kernel/core/time/timekeeping.c \
-            kernel/core/identity/user_db.c kernel/core/identity/elevation.c kernel/core/identity/path_property.c \
-            kernel/core/identity/session.c \
             kernel/core/sys/vrt.c kernel/core/sys/ipc.c kernel/core/sys/syscall.c kernel/core/vfs/vfs.c
 COMMAND_SRCS := $(wildcard userland/command/cmd_*.c)
-SHELL_SRCS = userland/shell/common.c userland/shell/util.c userland/shell/history_record.c userland/shell/audit_log.c userland/shell/authz_subsystem.c userland/shell/contract_log_dispatch.c userland/shell/session_sync.c userland/shell/session_login_env.c userland/shell/terminal.c userland/shell/interpreter.c userland/shell/sh.c $(COMMAND_SRCS)
+SHELL_SRCS = userland/shell/common.c userland/shell/util.c userland/shell/history_record.c userland/shell/audit_log.c userland/shell/authz_subsystem.c userland/shell/contract_log_dispatch.c userland/shell/terminal.c userland/shell/interpreter.c userland/shell/sh.c $(COMMAND_SRCS)
 # GitHub Actions (or explicit opt-in) may generate userland/shell/version_changelog.c; see scripts/gen_version_changelog.c
 ifeq ($(CHANGELOG_CI),1)
-CHANGELOG_GEN = gen_version_changelog
-CHANGELOG_C = userland/shell/version_changelog.c
-SHELL_SRCS += $(CHANGELOG_C)
+SHELL_SRCS += userland/shell/version_changelog.c
 endif
 SRCS = $(SHELL_SRCS) $(CORE_SRCS) disk_asm.c dir_asm.c
 SRCS += $(DRIVER_SRCS) $(HAL_SRCS)
-CFLAGS += -I$(ASM_SRC_DIR) -I$(KERNEL_DRIVERS) -Ikernel -Ikernel/drivers -Iuserland/identity
+CFLAGS += -I$(ASM_SRC_DIR) -I$(KERNEL_DRIVERS) -Ikernel -Ikernel/drivers
 ifeq ($(ARCH),arm)
 CFLAGS += -Ikernel/arch/aarch64
 endif
@@ -181,14 +134,12 @@ ASMSRCS = $(ASMSRCS_BASE)
 ifeq ($(USE_ASM_ALLOC),1)
 ASMSRCS += $(ASMSRCS_ALLOC)
 CFLAGS += -DUSE_ASM_ALLOC=1 -DBATCH_SINGLE_THREAD=1
-LDFLAGS += -Wl,--version-script=scripts/linker/alloc_internal_local.ver
 endif
 # P4-5 xHCI: arch MMIO object (see kernel/drivers/usb_xhci_mmio_glue.c).
 USB_XHCI_MMIO_ASM_OBJ = $(patsubst %.s,%.o,$(patsubst %.asm,%.o,$(filter %usb_xhci_mmio_asm.s %usb_xhci_mmio_asm.asm,$(ASMSRCS))))
 # Object names: .s/.asm -> .o (strip arch path for .o in obj list)
 ASMOBJS = $(patsubst %.s,%.o,$(patsubst %.asm,%.o,$(ASMSRCS)))
-IDENTITY_OBJS = userland/identity/password_hash.o
-OBJS = $(SRCS:.c=.o) $(ASMOBJS) $(IDENTITY_OBJS)
+OBJS = $(SRCS:.c=.o) $(ASMOBJS)
 TARGET = BPForbes_Flinstone_Shell
 .DEFAULT_GOAL := all
 
@@ -280,48 +231,8 @@ deps-cunit:
 	@chmod +x deps/fetch-cunit.sh 2>/dev/null || true
 	@./deps/fetch-cunit.sh
 
-.PHONY: deps-sqlite-aarch64 deps-openssl-aarch64
-deps-sqlite-aarch64:
-	@chmod +x deps/fetch-sqlite-aarch64.sh 2>/dev/null || true
-	@./deps/fetch-sqlite-aarch64.sh
-
-deps-openssl-aarch64:
-	@chmod +x deps/fetch-openssl-aarch64.sh 2>/dev/null || true
-	@./deps/fetch-openssl-aarch64.sh
-
-$(OPENSSL_ARM_LIB):
-	@chmod +x deps/fetch-openssl-aarch64.sh 2>/dev/null || true
-	@./deps/fetch-openssl-aarch64.sh
-
-$(SQLITE_ARM_LIB):
-	@chmod +x deps/fetch-sqlite-aarch64.sh 2>/dev/null || true
-	@./deps/fetch-sqlite-aarch64.sh
-
-userland/identity/%.o: userland/identity/%.cpp
-ifeq ($(CXX_IS_GCC_FOR_CPP),1)
-	$(CXX) -x c++ $(CXXFLAGS) -c -o $@ $<
-else
-	$(CXX) $(CXXFLAGS) -c -o $@ $<
-endif
-
-ifeq ($(ARCH),arm)
-ifeq ($(ARM64_LINUX_HOST),)
-userland/identity/password_hash.o: $(OPENSSL_ARM_LIB)
-endif
-endif
-
-ARM_SQLITE_DEPS = $(if $(SQLITE_ARM_LIB),$(SQLITE_ARM_LIB),)
-ARM_OPENSSL_DEPS = $(if $(OPENSSL_ARM_LIB),$(OPENSSL_ARM_LIB),)
-
-ifeq ($(CHANGELOG_CI),1)
-$(CHANGELOG_C): $(VERSION_DEF) scripts/gen_version_changelog.c
-	@gcc -std=c11 -Wall -Wextra -O2 -o $(CHANGELOG_GEN) scripts/gen_version_changelog.c
-	@./$(CHANGELOG_GEN)
-userland/shell/version_changelog.o: $(CHANGELOG_C) $(VERSION_DEF)
-endif
-
-$(TARGET): $(VERSION_DEF) $(OBJS) $(ARM_SQLITE_DEPS) $(ARM_OPENSSL_DEPS)
-	$(CXX) $(CXXFLAGS) -o $(TARGET) $(OBJS) $(LDFLAGS) -pthread
+$(TARGET): $(VERSION_DEF) $(OBJS)
+	$(CC) $(CFLAGS) -o $(TARGET) $(OBJS) $(LDFLAGS)
 
 # Rebuild objects that embed VERSION when the generated header changes.
 $(filter userland/shell/%.o userland/command/%.o,$(OBJS)): $(VERSION_DEF)
@@ -329,17 +240,13 @@ $(filter userland/shell/%.o userland/command/%.o,$(OBJS)): $(VERSION_DEF)
 # --- Test Build ---
 # interpreter.c is built as interpreter_unit.o with -DUNIT_TEST (stub interactive_shell).
 # Shell builtins live in userland/command/*.c (same as main shell link).
-TEST_SRCS = BPForbes_Flinstone_Tests.c userland/shell/common.c userland/shell/util.c userland/shell/history_record.c userland/shell/audit_log.c userland/shell/authz_subsystem.c userland/shell/contract_log_dispatch.c userland/shell/session_sync.c userland/shell/session_login_env.c userland/shell/terminal.c \
+TEST_SRCS = BPForbes_Flinstone_Tests.c userland/shell/common.c userland/shell/util.c userland/shell/history_record.c userland/shell/audit_log.c userland/shell/authz_subsystem.c userland/shell/contract_log_dispatch.c userland/shell/terminal.c \
             $(COMMAND_SRCS) \
             kernel/core/vfs/disk.c kernel/core/vfs/fat32_host.c kernel/core/vfs/fat32_host_files.c kernel/core/vfs/path_log.c kernel/core/vfs/cluster.c kernel/core/vfs/fs.c \
             disk_host_io.c \
             kernel/core/sched/threadpool.c priority_queue.c kernel/core/vfs/fs_jail.c kernel/core/vfs/fs_provider.c kernel/core/vfs/fs_command.c \
             kernel/core/vfs/fs_events.c kernel/core/vfs/fs_policy.c kernel/core/vfs/fs_chain.c kernel/core/vfs/fs_facade.c \
             kernel/core/vfs/fs_service_glue.c kernel/core/mm/mem_domain.c kernel/core/mm/kmalloc.c kernel/core/mm/pmm.c \
-            kernel/core/memory/fl_stack.c kernel/core/memory/exec_context.c \
-            kernel/core/time/timekeeping.c \
-            kernel/core/identity/user_db.c kernel/core/identity/elevation.c kernel/core/identity/path_property.c \
-            kernel/core/identity/session.c \
             kernel/core/sys/vrt.c kernel/core/sys/ipc.c kernel/core/sys/syscall.c
 TEST_SRCS += disk_asm.c dir_asm.c
 ifeq ($(CHANGELOG_CI),1)
@@ -351,34 +258,20 @@ TEST_OBJS = $(TEST_SRCS:.c=.o) $(TEST_UNIT_INTERPRETER_OBJ)
 userland/shell/interpreter_unit.o: userland/shell/interpreter.c
 	$(CC) $(CFLAGS) -DUNIT_TEST -c $< -o $@
 MEM_ASM_OBJ = $(patsubst %.s,%.o,$(patsubst %.asm,%.o,$(firstword $(ASMSRCS_BASE))))
-FL_STACK_ASM_OBJ = $(patsubst %.s,%.o,$(patsubst %.asm,%.o,$(filter %/fl_stack_asm.s %/fl_stack_asm.asm,$(ASMSRCS))))
-PORT_IO_OBJ = $(patsubst %.s,%.o,$(patsubst %.asm,%.o,$(filter %/port_io.s %/port_io.asm,$(ASMSRCS))))
-DISK_HOST_ASM_OBJ = $(patsubst %.s,%.o,$(patsubst %.asm,%.o,$(filter %/disk_host_io.s %/disk_host_io.asm,$(ASMSRCS_BASE))))
-HISTORY_ASM_OBJ = $(patsubst %.s,%.o,$(patsubst %.asm,%.o,$(filter %/shell_history_host_asm.s %/shell_history_host_asm.asm,$(ASMSRCS_BASE))))
+PORT_IO_OBJ = $(patsubst %.s,%.o,$(patsubst %.asm,%.o,$(word 2,$(ASMSRCS_BASE))))
+DISK_HOST_ASM_OBJ = $(patsubst %.s,%.o,$(filter %/disk_host_io.s,$(ASMSRCS_BASE)))
+HISTORY_ASM_OBJ = $(patsubst %.s,%.o,$(filter %/shell_history_host_asm.s,$(ASMSRCS_BASE)))
 # util.c references host FAT32 helpers; any link of util.o outside the full shell must include these.
 UTIL_HISTORY_HOST_OBJS = kernel/core/vfs/fat32_host.o kernel/core/vfs/fat32_host_files.o disk_host_io.o $(DISK_HOST_ASM_OBJ)
 UTIL_SHELL_LINK_OBJS = userland/shell/util.o userland/shell/history_record.o
-# fs_jail_check_access pulls session + path_property (and user_db/password_hash for session).
-FS_JAIL_SUPPORT_OBJS = kernel/core/time/timekeeping.o \
-                         kernel/core/identity/user_db.o kernel/core/identity/elevation.o \
-                         kernel/core/identity/path_property.o kernel/core/identity/session.o \
-                         userland/identity/password_hash.o $(FL_STACK_ASM_OBJ)
-FS_JAIL_TEST_LIBS = -lsqlite3 -lstdc++ -lcrypto -pthread
-TEST_ASMOBJS = $(MEM_ASM_OBJ) $(FL_STACK_ASM_OBJ) $(PORT_IO_OBJ) $(DISK_HOST_ASM_OBJ) $(HISTORY_ASM_OBJ)
+TEST_ASMOBJS = $(MEM_ASM_OBJ) $(PORT_IO_OBJ) $(DISK_HOST_ASM_OBJ) $(HISTORY_ASM_OBJ)
 TEST_TARGET = BPForbes_Flinstone_Tests
 
 DEPS_RPATH = -Wl,-rpath='$$ORIGIN/deps/install/lib'
 TEST_LDFLAGS = $(if $(DEPS_PREFIX),-L$(DEPS_PREFIX)/lib $(DEPS_RPATH),)
-# CUnit link needs session_sync, password_hash, and SQLite (same as main shell).
-TEST_EXTRA_LINK_OBJS = userland/identity/password_hash.o
-
-ifeq ($(CHANGELOG_CI),1)
-$(TEST_TARGET): $(CHANGELOG_C)
-endif
-
-$(TEST_TARGET): $(VERSION_DEF) $(TEST_OBJS) $(TEST_ASMOBJS) $(TEST_EXTRA_LINK_OBJS)
-	$(CXX) $(CXXFLAGS) -DUNIT_TEST -o $(TEST_TARGET) $(TEST_OBJS) $(TEST_ASMOBJS) $(TEST_EXTRA_LINK_OBJS) -Wl,-z,noexecstack \
-		$(TEST_LDFLAGS) $(FS_JAIL_TEST_LIBS) -lcunit
+$(TEST_TARGET): $(VERSION_DEF) $(TEST_OBJS) $(TEST_ASMOBJS)
+	$(CC) $(CFLAGS) -DUNIT_TEST -o $(TEST_TARGET) $(TEST_OBJS) $(TEST_ASMOBJS) -Wl,-z,noexecstack \
+		$(TEST_LDFLAGS) -lcunit
 
 $(filter userland/shell/%.o userland/command/%.o,$(TEST_OBJS)): $(VERSION_DEF)
 BPForbes_Flinstone_Tests.o: $(VERSION_DEF)
@@ -394,13 +287,6 @@ userland/shell/interpreter_unit.o: $(VERSION_DEF)
 # Arch ASM: .s (GAS) or .asm (NASM)
 %.o: %.asm
 	$(AS) $(ASFLAGS) -o $@ $<
-
-# x86_64_nasm: kernel/arch/x86_64/**/*.s must use GAS (AS=nasm cannot assemble .s)
-ifeq ($(ARCH),x86_64_nasm)
-# Override generic %.o: %.s — these paths are GAS syntax, not NASM (AS=nasm would fail).
-kernel/arch/x86_64/%.o: kernel/arch/x86_64/%.s
-	$(CC) -c $(CFLAGS) -Wa,--noexecstack -o $@ $<
-endif
 
 $(KERNEL_DRIVERS)/%.o: $(KERNEL_DRIVERS)/%.c
 	$(CC) $(CFLAGS) -I$(KERNEL_DRIVERS) -c $< -o $@
@@ -433,8 +319,8 @@ test_alloc_libc: tests/test_alloc.c
 	./tests/test_alloc
 
 ALLOC_OBJS = $(patsubst %.s,%.o,$(patsubst %.asm,%.o,$(ASMSRCS_ALLOC)))
-test_alloc_asm: $(ALLOC_OBJS) $(MEM_ASM_OBJ)
-	$(CC) $(CFLAGS) -I. -o tests/test_alloc tests/test_alloc.c $(ALLOC_OBJS) $(MEM_ASM_OBJ)
+test_alloc_asm: $(ALLOC_OBJS)
+	$(CC) $(CFLAGS) -I. -o tests/test_alloc tests/test_alloc.c $(ALLOC_OBJS)
 	./tests/test_alloc
 
 test_priority_queue: priority_queue.o $(MEM_ASM_OBJ)
@@ -487,36 +373,19 @@ test_invariants: userland/shell/common.o userland/shell/authz_subsystem.o $(UTIL
 
 # audit_log unit tests (standalone, no CUnit required)
 .PHONY: test_audit_log
-test_audit_log: userland/shell/common.o userland/shell/audit_log.o userland/shell/contract_log_dispatch.o $(UTIL_SHELL_LINK_OBJS) kernel/core/vfs/fs_jail.o $(FS_JAIL_SUPPORT_OBJS) kernel/core/mm/mem_domain.o $(MEM_ASM_OBJ) $(HISTORY_ASM_OBJ) $(UTIL_HISTORY_HOST_OBJS)
-	$(CC) $(CFLAGS) $(TEST_SANITIZE) -c -o tests/test_audit_log.o tests/test_audit_log.c
-	$(CXX) $(CXXFLAGS) $(TEST_SANITIZE) -o tests/test_audit_log tests/test_audit_log.o \
+test_audit_log: userland/shell/common.o userland/shell/audit_log.o userland/shell/contract_log_dispatch.o $(UTIL_SHELL_LINK_OBJS) kernel/core/vfs/fs_jail.o kernel/core/mm/mem_domain.o $(MEM_ASM_OBJ) $(HISTORY_ASM_OBJ) $(UTIL_HISTORY_HOST_OBJS)
+	$(CC) $(CFLAGS) $(TEST_SANITIZE) -o tests/test_audit_log tests/test_audit_log.c \
 	  userland/shell/common.o userland/shell/audit_log.o userland/shell/contract_log_dispatch.o $(UTIL_SHELL_LINK_OBJS) kernel/core/vfs/fs_jail.o \
-	  $(FS_JAIL_SUPPORT_OBJS) kernel/core/mm/mem_domain.o $(MEM_ASM_OBJ) $(HISTORY_ASM_OBJ) $(UTIL_HISTORY_HOST_OBJS) \
-	  $(FS_JAIL_TEST_LIBS) -Wl,-z,noexecstack
+	  kernel/core/mm/mem_domain.o $(MEM_ASM_OBJ) $(HISTORY_ASM_OBJ) $(UTIL_HISTORY_HOST_OBJS) -Wl,-z,noexecstack
 	./tests/test_audit_log
 
 # fs_jail unit tests (standalone, no CUnit required)
 .PHONY: test_fs_jail
-test_fs_jail: userland/shell/common.o $(UTIL_SHELL_LINK_OBJS) kernel/core/vfs/fs_jail.o $(FS_JAIL_SUPPORT_OBJS) kernel/core/mm/mem_domain.o $(MEM_ASM_OBJ) $(HISTORY_ASM_OBJ) $(UTIL_HISTORY_HOST_OBJS)
-	$(CC) $(CFLAGS) $(TEST_SANITIZE) -c -o tests/test_fs_jail.o tests/test_fs_jail.c
-	$(CXX) $(CXXFLAGS) $(TEST_SANITIZE) -o tests/test_fs_jail tests/test_fs_jail.o \
-	  userland/shell/common.o $(UTIL_SHELL_LINK_OBJS) kernel/core/vfs/fs_jail.o $(FS_JAIL_SUPPORT_OBJS) \
-	  kernel/core/mm/mem_domain.o $(MEM_ASM_OBJ) $(HISTORY_ASM_OBJ) $(UTIL_HISTORY_HOST_OBJS) \
-	  $(FS_JAIL_TEST_LIBS) -Wl,-z,noexecstack
+test_fs_jail: userland/shell/common.o $(UTIL_SHELL_LINK_OBJS) kernel/core/vfs/fs_jail.o kernel/core/mm/mem_domain.o $(MEM_ASM_OBJ) $(HISTORY_ASM_OBJ) $(UTIL_HISTORY_HOST_OBJS)
+	$(CC) $(CFLAGS) $(TEST_SANITIZE) -o tests/test_fs_jail tests/test_fs_jail.c \
+	  userland/shell/common.o $(UTIL_SHELL_LINK_OBJS) kernel/core/vfs/fs_jail.o \
+	  kernel/core/mm/mem_domain.o $(MEM_ASM_OBJ) $(HISTORY_ASM_OBJ) $(UTIL_HISTORY_HOST_OBJS) -Wl,-z,noexecstack
 	./tests/test_fs_jail
-
-.PHONY: test_p0_p2_wiring
-test_p0_p2_wiring: kernel/core/memory/fl_stack.o kernel/core/memory/exec_context.o kernel/core/time/timekeeping.o \
-		kernel/core/identity/user_db.o kernel/core/identity/session.o kernel/core/identity/elevation.o \
-		kernel/core/identity/path_property.o kernel/core/mm/mem_domain.o kernel/core/mm/pmm.o \
-		userland/identity/password_hash.o userland/shell/authz_subsystem.o $(MEM_ASM_OBJ) $(FL_STACK_ASM_OBJ)
-	$(CC) $(CFLAGS) $(TEST_SANITIZE) -c -o tests/test_p0_p2_wiring.o tests/test_p0_p2_wiring.c
-	$(CXX) $(CXXFLAGS) $(TEST_SANITIZE) -o tests/test_p0_p2_wiring tests/test_p0_p2_wiring.o \
-	  kernel/core/memory/fl_stack.o kernel/core/memory/exec_context.o kernel/core/time/timekeeping.o \
-	  kernel/core/identity/user_db.o kernel/core/identity/session.o kernel/core/identity/elevation.o \
-	  kernel/core/identity/path_property.o kernel/core/mm/mem_domain.o kernel/core/mm/pmm.o \
-	  userland/identity/password_hash.o userland/shell/authz_subsystem.o $(MEM_ASM_OBJ) $(FL_STACK_ASM_OBJ) -lsqlite3 -lstdc++ -lcrypto -pthread -Wl,-z,noexecstack
-	./tests/test_p0_p2_wiring
 
 check-layers:
 	@./scripts/check_layers.sh
@@ -539,11 +408,9 @@ test_vm_arch_readiness: kernel/core/mm/mem_domain.o kernel/core/sys/vrt.o kernel
 	  kernel/core/mm/mem_domain.o kernel/core/sys/vrt.o kernel/core/sys/ipc.o kernel/core/sys/syscall.o VM/devices/vm_io.o VM/devices/vm_arch.o $(MEM_ASM_OBJ) -Wl,-z,noexecstack
 	./tests/test_vm_arch_readiness
 
-test_vm_layer_warning: userland/shell/common.o kernel/core/vfs/fs_jail.o $(FS_JAIL_SUPPORT_OBJS) kernel/core/vfs/path_log.o kernel/core/mm/mem_domain.o $(MEM_ASM_OBJ)
-	$(CC) $(CFLAGS) $(TEST_SANITIZE) -I. -Ikernel/core/vfs -Ikernel/core/mm -Iuserland/shell -c -o tests/test_vm_layer_warning.o tests/test_vm_layer_warning.c
-	$(CXX) $(CXXFLAGS) $(TEST_SANITIZE) -o tests/test_vm_layer_warning tests/test_vm_layer_warning.o \
-	  userland/shell/common.o kernel/core/vfs/fs_jail.o $(FS_JAIL_SUPPORT_OBJS) kernel/core/vfs/path_log.o \
-	  kernel/core/mm/mem_domain.o $(MEM_ASM_OBJ) $(FS_JAIL_TEST_LIBS) -Wl,-z,noexecstack
+test_vm_layer_warning: userland/shell/common.o kernel/core/vfs/fs_jail.o kernel/core/vfs/path_log.o kernel/core/mm/mem_domain.o $(MEM_ASM_OBJ)
+	$(CC) $(CFLAGS) $(TEST_SANITIZE) -I. -Ikernel/core/vfs -Ikernel/core/mm -Iuserland/shell -o tests/test_vm_layer_warning tests/test_vm_layer_warning.c \
+	  userland/shell/common.o kernel/core/vfs/fs_jail.o kernel/core/vfs/path_log.o kernel/core/mm/mem_domain.o $(MEM_ASM_OBJ) -Wl,-z,noexecstack
 	./tests/test_vm_layer_warning
 
 .PHONY: test_replay

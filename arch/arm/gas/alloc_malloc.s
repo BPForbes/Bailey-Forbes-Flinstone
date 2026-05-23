@@ -16,7 +16,7 @@
 .equ HDR_SIZE, 16
 
 malloc:
-    stp     x30, xzr, [sp, #-32]!
+    str     x30, [sp, #-48]!
     stp     x19, x20, [sp, #16]
     mov     x19, x0
     bl      lock_acquire
@@ -27,11 +27,11 @@ malloc:
     bl      lock_release
     mov     x0, x20
     ldp     x19, x20, [sp, #16]
-    ldp     x30, xzr, [sp], #32
+    ldr     x30, [sp], #48
     ret
 
 calloc:
-    stp     x30, xzr, [sp, #-32]!
+    str     x30, [sp, #-48]!
     stp     x19, x20, [sp, #16]
     cbz     x0, .Lret0
     cbz     x1, .Lret0
@@ -50,16 +50,16 @@ calloc:
     bl      asm_mem_zero
     mov     x0, x20
     ldp     x19, x20, [sp, #16]
-    ldp     x30, xzr, [sp], #32
+    ldr     x30, [sp], #48
     ret
 .Lret0:
     mov     x0, #0
     ldp     x19, x20, [sp, #16]
-    ldp     x30, xzr, [sp], #32
+    ldr     x30, [sp], #48
     ret
 
 realloc:
-    stp     x30, xzr, [sp, #-48]!
+    str     x30, [sp, #-64]!
     stp     x19, x20, [sp, #16]
     stp     x21, x22, [sp, #32]
     cbz     x0, .Lrealloc_malloc
@@ -85,24 +85,24 @@ realloc:
     mov     x0, x22
     ldp     x21, x22, [sp, #32]
     ldp     x19, x20, [sp, #16]
-    ldp     x30, xzr, [sp], #48
+    ldr     x30, [sp], #64
     ret
 .Lrealloc_malloc:
     mov     x0, x1
     ldp     x21, x22, [sp, #32]
     ldp     x19, x20, [sp, #16]
-    ldp     x30, xzr, [sp], #48
+    ldr     x30, [sp], #64
     b       malloc
 .Lrealloc_free:
     bl      free
     mov     x0, #0
     ldp     x21, x22, [sp, #32]
     ldp     x19, x20, [sp, #16]
-    ldp     x30, xzr, [sp], #48
+    ldr     x30, [sp], #64
     ret
 .Lrealloc_fail:
     mov     x0, #0
     ldp     x21, x22, [sp, #32]
     ldp     x19, x20, [sp, #16]
-    ldp     x30, xzr, [sp], #48
+    ldr     x30, [sp], #64
     ret

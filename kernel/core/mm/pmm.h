@@ -1,7 +1,6 @@
 #ifndef FL_PMM_H
 #define FL_PMM_H
 
-#include "contract_p1_pmm.h"
 #include <stddef.h>
 #include <stdint.h>
 
@@ -22,13 +21,8 @@ void pmm_reserve_range(uintptr_t base, size_t bytes);
  * Returns the physical address of the frame, or 0 on exhaustion. */
 uintptr_t pmm_alloc_frame(void);
 
-/* P0-2 / P1-4: fallible alloc; *out_phys set on FL_RESULT_OK. */
-fl_result_t pmm_alloc_frame_result(uintptr_t *out_phys);
-
 /* Return a previously allocated frame to the free pool. */
 void pmm_free_frame(uintptr_t phys_addr);
-
-fl_result_t pmm_free_frame_result(uintptr_t phys_addr);
 
 /* Return the number of currently free frames. */
 size_t pmm_free_count(void);

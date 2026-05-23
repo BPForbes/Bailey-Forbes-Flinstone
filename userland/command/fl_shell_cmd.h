@@ -42,14 +42,6 @@ typedef enum {
     FL_SCMD_DISKFILES,
     FL_SCMD_DISKDEL,
     FL_SCMD_DISKMKDIR,
-    FL_SCMD_SUDO,
-    FL_SCMD_SU,
-    FL_SCMD_LOGIN,
-    FL_SCMD_LOGOUT,
-    FL_SCMD_USERADD,
-    FL_SCMD_USERDEL,
-    FL_SCMD_PASSWD,
-    FL_SCMD_WHOAMI,
 } fl_shell_cmd_no_t;
 
 #endif /* FL_SHELL_CMD_H */
