@@ -1,5 +1,5 @@
 ; Linux x86-64 pread64/pwrite64 syscalls for host disk cluster I/O.
-section .note.GNU-stack progbits alloc noexec
+section .note.GNU-stack progbits noalloc noexec nowrite
 section .text
 
 %define SYS_pread64 17

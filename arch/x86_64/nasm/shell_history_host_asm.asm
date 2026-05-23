@@ -1,5 +1,5 @@
 ; Host shell: append one command line + LF using rep movsb (x86-64 System V ABI).
-section .note.GNU-stack progbits alloc noexec
+section .note.GNU-stack progbits noalloc noexec nowrite
 section .text
 
 global history_asm_append_record

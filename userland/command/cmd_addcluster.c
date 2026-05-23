@@ -1,5 +1,6 @@
 #include "common.h"
 #include "cmd_decl.h"
+#include "cmd_batch.h"
 #include "cluster.h"
 #include "disk.h"
 #include <stdio.h>
@@ -42,4 +43,10 @@ int cmd_addcluster_run(int argc, char **argv) {
         printf("Created new cluster %d.\n", g_total_clusters - 1);
     }
     return 0;
+}
+
+int cmd_addcluster_batch_tokens_count(int argc, char **argv, int i) {
+    if (i + 2 < argc && (!strcmp(argv[i + 1], "-t") || !strcmp(argv[i + 1], "-h")))
+        return 3;
+    return 1;
 }

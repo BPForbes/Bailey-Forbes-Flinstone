@@ -1,4 +1,5 @@
 #include "cmd_decl.h"
+#include "cmd_batch.h"
 #include "fl/session.h"
 #include <stdio.h>
 
@@ -25,4 +26,8 @@ int cmd_whoami_run(int argc, char **argv) {
         fputs(" [sudo scope]", stdout);
     fputc('\n', stdout);
     return 0;
+}
+
+int cmd_whoami_batch_tokens_count(int argc, char **argv, int i) {
+    (void)argc; (void)argv; (void)i; return 1;
 }
