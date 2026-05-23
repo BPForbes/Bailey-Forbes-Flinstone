@@ -1,5 +1,4 @@
 #include "cmd_decl.h"
-#include "cmd_batch.h"
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -36,8 +35,4 @@ int cmd_bios_maybe(char *trimmed) {
         printf("Failed. Try: sudo systemctl reboot --firmware-setup\n");
     }
     return 1;
-}
-
-int cmd_bios_batch_tokens_count(int argc, char **argv, int i) {
-    return cmd_batch_flag_y_arity(argc, argv, i);
 }

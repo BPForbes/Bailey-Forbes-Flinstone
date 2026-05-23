@@ -1,6 +1,5 @@
 #include "common.h"
 #include "cmd_decl.h"
-#include "cmd_batch.h"
 #include "cmd_util.h"
 #include "disk.h"
 #include "fat32_host.h"
@@ -31,8 +30,4 @@ int cmd_diskget_run(int argc, char **argv) {
     }
     printf("diskget: wrote %s\n", dst);
     return 0;
-}
-
-int cmd_diskget_batch_tokens_count(int argc, char **argv, int i) {
-    (void)argc; (void)argv; (void)i; return 3;
 }

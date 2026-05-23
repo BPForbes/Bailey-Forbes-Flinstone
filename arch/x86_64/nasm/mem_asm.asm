@@ -1,6 +1,6 @@
 ; ASM memory primitives for disk buffer operations (x86-64 NASM)
 ; Same API as GAS version - SysV ABI: rdi, rsi, rdx, rcx, r8, r9
-section .note.GNU-stack progbits noalloc noexec nowrite
+section .note.GNU-stack progbits alloc noexec
 section .text
 global asm_mem_copy
 global asm_mem_zero

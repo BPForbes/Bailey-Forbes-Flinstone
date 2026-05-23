@@ -1,6 +1,5 @@
 #include "common.h"
 #include "cmd_decl.h"
-#include "cmd_batch.h"
 #include "cluster.h"
 #include "mem_domain.h"
 #include "util.h"
@@ -71,11 +70,4 @@ int cmd_search_run(int argc, char **argv) {
     if (!found)
         printf("'%s' not found.\n", searchStr);
     return 0;
-}
-
-int cmd_search_batch_tokens_count(int argc, char **argv, int i) {
-    if (i + 2 < argc && argv[i + 2] &&
-        (!strcmp(argv[i + 2], "-h") || !strcmp(argv[i + 2], "-t")))
-        return 3;
-    return 2;
 }

@@ -298,7 +298,6 @@ static int test_pmm_stack(void) {
 }
 
 int main(void) {
-    (void)setenv("FL_USERS_LAB_DEFAULTS", "1", 1);
     if (test_fl_stack()) return 1;
     if (test_exec_context()) return 1;
     if (test_timekeeping()) return 1;

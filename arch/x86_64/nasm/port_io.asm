@@ -1,5 +1,5 @@
 ; x86-64 Port I/O primitives - NASM
-section .note.GNU-stack progbits noalloc noexec nowrite
+section .note.GNU-stack progbits alloc noexec
 section .text
 global port_inb
 global port_outb

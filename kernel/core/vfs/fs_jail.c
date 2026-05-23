@@ -118,13 +118,8 @@ int fs_jail_check_access(const char *path) {
     if (jail_ok != 0)
         return -1;
 
-    {
-        fl_result_t prop_rc = fl_path_property_resolve(path, &prop);
-        if (prop_rc == FL_RESULT_NOENT)
-            return 0;
-        if (prop_rc != FL_RESULT_OK)
-            return -1;
-    }
+    if (fl_path_property_resolve(path, &prop) != FL_RESULT_OK)
+        return 0;
     if (!prop.requires_elevation)
         return 0;
     fl_session_init();

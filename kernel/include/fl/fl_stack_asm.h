@@ -8,16 +8,10 @@
 #else
 #include <stddef.h>
 #include <stdint.h>
-#ifdef __cplusplus
-extern "C" {
-#endif
 int     asm_fl_stack_push(void *stack, uintptr_t v);
 int     asm_fl_stack_pop(void *stack, uintptr_t *out);
 size_t  asm_fl_stack_count(const void *stack);
 size_t  asm_fl_elev_count_active(void *slots, size_t max_slots, int64_t now_ns);
-#ifdef __cplusplus
-}
-#endif
 #endif
 
 #endif /* FL_FL_STACK_ASM_H */

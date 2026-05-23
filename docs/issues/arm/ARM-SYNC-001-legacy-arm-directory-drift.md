@@ -32,4 +32,3 @@
 
 - **`arch/arm/gas/`** is the sole AArch64 asm source of truth (see `docs/ARCH.md`, `MIGRATION_GUIDE.md`).
 - Legacy **`ARM/`** removed; use **`arch/arm/gas/`** only.
-- **`ARCH=arm`** in the Makefile selects **AArch64** (`arch/arm/gas/`), not 32-bit ARM — the directory name is historical.
