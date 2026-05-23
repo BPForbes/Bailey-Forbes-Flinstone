@@ -19,7 +19,11 @@ Notes:
 - `curl`, `cmake`, `autoconf`, `automake`, `libtool`, `bzip2`, and `tar` are required by `make deps`, `make deps-sdl2`, and `make deps-cunit`.
 - Optional (not required to compile or run the shell): `dosfstools` (`dosfsck`, `mkfs.fat`) helps validate FAT32 disk images the project creates; it is not linked into the binary. See `docs/dependencies.md` for a consolidated list of system packages versus `make deps`.
 
-## AI feature-branch workflow (Cursor / Claude / Codex)
+## Replit Agent
+
+On [Replit](https://replit.com/~), the in-Repl **Replit Agent** uses **`replit.md`**, which states the **full explicit rules** (versioning, lock system, git workflow, build/test)—the **same** mandatory policy as **CLAUDE.md**, **AGENTS.md** (this file), **`.cursor/rules/*.mdc`**, and **`.coderabbit.yaml`**. App config: **`.replit`**, **`replit.nix`**.
+
+## AI feature-branch workflow (Cursor / Claude / Codex / Replit)
 
 When an agent opens a pull request or branch for one task and later needs to implement **another** item that is **not** part of that branch’s original goal, **do not** create a new branch **unless** a human explicitly allows it. **Stay on the current** feature branch and commit the additional work there—unless a human tells you to use a separate branch.
 

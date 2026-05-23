@@ -176,6 +176,8 @@ make vm-sdl      # Uses deps/install if present, else pkg-config
 ./scripts/run_vm_wsl.sh  # Run only (requires prior build)
 ```
 
+**Replit** ([replit.com/~](https://replit.com/~)): import from GitHub with `.replit` and `replit.nix`; use **Run** or `make` in the Shell. See [docs/replit.md](docs/replit.md).
+
 ### Run
 
 ```bash

@@ -1,0 +1,25 @@
+# Bailey-Forbes-Flinstone — Replit app configuration
+# https://docs.replit.com/replit-app/configuration
+# Hosted IDE: https://replit.com/~
+# Replit Agent policy: replit.md (same rules as CLAUDE.md, AGENTS.md, .cursor/rules/, .coderabbit.yaml)
+
+run = "./BPForbes_Flinstone_Shell help"
+compile = "make -j$(nproc 2>/dev/null || echo 2)"
+entrypoint = "BPForbes_Flinstone_Shell"
+
+modules = ["cpp-clang14"]
+
+hidden = [".git", "deps", "build", "obj", ".cursor"]
+
+[nix]
+channel = "stable-24_05"
+
+[gitHubImport]
+requiredFiles = [".replit", "replit.nix"]
+
+[env]
+MAKEFLAGS = "-j2"
+
+[deployment]
+run = ["./BPForbes_Flinstone_Shell", "help"]
+ignorePorts = true
