@@ -1,0 +1,121 @@
+{
+  "schema_version": 1,
+  "project": "Bailey-Forbes-Flinstone",
+  "description": "System and library dependencies mapped from AGENTS.md, docs/dependencies.md, and Makefile link flags.",
+  "nixpkgs_channel": "nixpkgs-unstable",
+  "profiles": {
+    "default": {
+      "description": "Host build: shell, USE_ASM_ALLOC, tests, VM (no SDL window)",
+      "systems": ["x86_64-linux"],
+      "linked_libraries": [
+        { "name": "sqlite3", "nix": "sqlite", "apt": "libsqlite3-dev", "make_flag": "-lsqlite3" },
+        { "name": "openssl-crypto", "nix": "openssl", "apt": "libssl-dev", "make_flag": "-lcrypto" },
+        { "name": "libstdc++", "nix": "stdenv.cc.cc.lib", "apt": "g++", "make_flag": "-lstdc++" },
+        { "name": "pthread", "nix": null, "apt": "(libc/gcc)", "make_flag": "-pthread", "note": "Provided by stdenv / gcc" }
+      ],
+      "nativeBuildInputs": [
+        "pkg-config",
+        "curl",
+        "cacert",
+        "cmake",
+        "autoconf",
+        "automake",
+        "libtool",
+        "bzip2",
+        "gnutar",
+        "nasm",
+        "gnumake"
+      ],
+      "buildInputs": [
+        "sqlite",
+        "openssl"
+      ]
+    },
+    "vm_sdl": {
+      "description": "Adds SDL2 for make vm-sdl",
+      "extends": "default",
+      "buildInputs": ["SDL2"],
+      "apt": ["libsdl2-dev"],
+      "make_target": "vm-sdl",
+      "in_repo_alternative": "make deps / deps/install"
+    },
+    "tests_cunit": {
+      "description": "CUnit test binary BPForbes_Flinstone_Tests",
+      "extends": "default",
+      "buildInputs": ["libcunit"],
+      "apt": ["libcunit1-dev"],
+      "make_target": "BPForbes_Flinstone_Tests",
+      "in_repo_alternative": "make deps-cunit / deps/install"
+    },
+    "arch_nasm": {
+      "description": "make ARCH=x86_64_nasm",
+      "extends": "default",
+      "nativeBuildInputs_extra": ["nasm"],
+      "apt_extra": ["nasm"]
+    },
+    "cross_aarch64": {
+      "description": "make ARCH=arm on x86_64-linux host",
+      "systems": ["x86_64-linux"],
+      "crossSystem": "aarch64-unknown-linux-gnu",
+      "linked_libraries": [
+        { "name": "sqlite3", "nix_cross": "sqlite", "apt": "libsqlite3-dev:arm64", "in_repo": "make deps-sqlite-aarch64" },
+        { "name": "openssl-crypto", "nix_cross": "openssl", "apt": "libssl-dev:arm64", "in_repo": "make deps-openssl-aarch64" },
+        { "name": "libstdc++", "nix_cross": "stdenv.cc.cc.lib", "apt": "g++-aarch64-linux-gnu" },
+        { "name": "libdl", "nix_cross": null, "make_flag": "-ldl", "note": "glibc on target" }
+      ],
+      "nativeBuildInputs": [
+        "pkg-config",
+        "curl",
+        "cacert",
+        "cmake",
+        "autoconf",
+        "automake",
+        "libtool",
+        "bzip2",
+        "gnutar",
+        "nasm",
+        "gnumake"
+      ],
+      "buildInputs_cross": ["sqlite", "openssl"]
+    },
+    "optional_tools": {
+      "description": "Not linked; validation only",
+      "packages": [
+        { "nix": "dosfstools", "apt": "dosfstools", "purpose": "dosfsck / mkfs.fat for FAT32 images" },
+        { "nix": "file", "apt": "file", "purpose": "magic checks on disk images" }
+      ]
+    }
+  },
+  "apt_one_liner": {
+    "comment": "Equivalent to AGENTS.md Cursor Cloud install",
+    "packages": [
+      "build-essential",
+      "gcc",
+      "g++",
+      "make",
+      "binutils",
+      "nasm",
+      "gcc-aarch64-linux-gnu",
+      "g++-aarch64-linux-gnu",
+      "binutils-aarch64-linux-gnu",
+      "pkg-config",
+      "curl",
+      "ca-certificates",
+      "cmake",
+      "autoconf",
+      "automake",
+      "libtool",
+      "bzip2",
+      "tar",
+      "libsdl2-dev",
+      "libcunit1-dev",
+      "libsqlite3-dev",
+      "libssl-dev"
+    ]
+  },
+  "make_deps_in_repo": {
+    "deps": ["SDL2", "libcunit"],
+    "deps_sqlite_aarch64": ["sqlite static in deps/install-aarch64"],
+    "deps_openssl_aarch64": ["openssl libcrypto in deps/install-aarch64"]
+  }
+}

@@ -8,6 +8,7 @@ BPForbes_Flinstone_Tests
 
 # Shell history (user-specific)
 shell_history.txt
+userland/shell/fl_users.db
 
 # Test/generated files
 *_disk
@@ -31,6 +32,7 @@ tests/test_vm_arch_readiness
 
 # Fetched/built deps
 deps/install
+deps/install-aarch64
 deps/build
 deps/download
 
