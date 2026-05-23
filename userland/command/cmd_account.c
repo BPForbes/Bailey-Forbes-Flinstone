@@ -51,7 +51,7 @@ int cmd_useradd_run(int argc, char **argv) {
         return 1;
     }
     if (fl_session_save_users() != FL_RESULT_OK) {
-        (void)fl_user_db_remove_user(db, name);
+        account_reload_db_from_disk(db);
         fprintf(stderr, "useradd: could not save %s\n", FL_SESSION_USERS_PATH);
         return 1;
     }
