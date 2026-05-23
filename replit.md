@@ -50,30 +50,34 @@ Examples: **`2.2.4` → `2.3.0`** (minor); **`2.3.7` → `3.0.0`** (major); **`2
 #### 3.2 Lock system — never rewrite published history
 
 - **`version/locked/`** on the **merge target** is the **published** record. **Do not modify** any path under **`version/locked/`** that already exists on the branch you merge **into**.
-- **`version/entries/`** is where you **author** release prose. It may contain drafts (including **`preproduction */`**) not yet in **`locked`** until automation runs.
+- **`version/entries/`** is where you **author** new release rows (at the **entries root** only—see **§3.4**). After CI, **`preproduction <A>.<B>.<C>/`** trees may appear under **`version/entries/`**; they are **not** where Replit Agent hand-writes new PR rows.
 - **Do not commit `version/locked/**`** on normal agent feature PRs. After merge to **`develop`**, **Version lock on merge** (GitHub Actions) relocates root **`PRERELEASE=1`** rows, finalizes **`version/locked/`**, regenerates **`version_def.h`**, and may open a housekeeping PR.
 - **`version/entries/ABOUT.txt`** must **byte-match** the merge target’s **`version/locked/ABOUT.txt`** while **`version/locked/`** on the target is unchanged.
 
-#### 3.3 Immutable `.ver` rows — always add new files
+#### 3.3 Immutable `.ver` rows — add new files; do not rewrite history
 
-- Any **`version/entries/**/*.ver`** path on the **merge base** is **immutable**: **do not** edit **`DESCRIPTION`**, **`DEV_VERSION`**, **`GM`**, **`PRERELEASE`**, or semver fields in those files.
-- Each PR / iteration: **add exactly one new** **`version/entries/A_B_C_short_slug.ver`** at the **`version/entries/` root** (prefer **`A_B_C_slug.ver`**; avoid legacy **`NNN_`** filename prefixes unless matching existing files).
-- The **new** `.ver` your branch introduces may change **`DESCRIPTION` only** until merge (no **`DEV_VERSION`** re-bump). After merge to **`develop`**, that path becomes immutable too.
-- **`.ver` files that exist only on your feature branch** (not on merge base) may be edited freely until merge.
+- Any **`version/entries/**/*.ver`** path on the **merge base** is **immutable**: **do not** edit **`DESCRIPTION`**, **`DEV_VERSION`**, **`GM`**, **`PRERELEASE`**, or semver fields in those files (including rows already under **`preproduction */`** on the merge base).
+- Each PR / iteration: **typically add one new** **`version/entries/A_B_C_short_slug.ver`** at the **`version/entries/` root** (prefer **`A_B_C_slug.ver`**; avoid legacy **`NNN_`** filename prefixes unless matching existing files). **Exception:** after **`git merge --no-ff`** of another agent branch, or when a new develop iteration needs its own train row, you may add **more than one** root **`.ver`**—**delete** duplicate **`.ver`** for the same **A.B.C** train from the merged-in branch, **do not edit** immutable merge-base rows, and fold combined prose into the **newest** root **`.ver`** this combined PR adds (or add **one new** root **`.ver`** with the next free **`DEV_VERSION`**).
+- Each **new** root **`.ver` this PR adds** (authored at **`version/entries/`**, even after CI moves it under **`preproduction */`**): **`DESCRIPTION` only** until merge to **`develop`** (no **`DEV_VERSION`** re-bump). After merge, that path is immutable.
+- **Do not** edit other **`.ver`** files on your branch—especially under **`preproduction */`** from an earlier train, another PR, or merge-base history. “Only on my branch” is **not** permission to rewrite semver fields or unrelated rows.
 
-#### 3.4 Where to author `.ver` files (hard rule)
+#### 3.4 Replit Agent — where to author `.ver` files (same-repo PRs)
 
-- **Author new PR release rows only as** **`version/entries/*.ver`** at the **`version/entries/`** directory itself—**not** under **`version/entries/preproduction <A>.<B>.<C>/`** by hand on same-repo branches.
-- For **`PRERELEASE=1`**: create a **new root** **`*.ver`** with **`PRERELEASE=1`**. CI **`relocate_root_prerelease_ver_to_preproduction.sh`** moves it into **`preproduction <A>.<B>.<C>/`** and may stamp **`RELEASE_DATE`**. **Do not** hand-add new **`PRERELEASE=1`** paths under **`preproduction */`** to “save a step.”
-- **Omit `RELEASE_DATE=`** on new root rows unless a maintainer workflow says otherwise; let CI stamp on relocate / Version lock.
+| Action | Replit Agent |
+|--------|----------------|
+| New PR / train row | **Add** **`version/entries/A_B_C_slug.ver`** at the **`version/entries/` directory root only |
+| **`PRERELEASE=1`** | Set on a **new root** **`*.ver`**; CI **`relocate_root_prerelease_ver_to_preproduction.sh`** moves it into **`preproduction <A>.<B>.<C>/`** |
+| Hand-add under **`preproduction */`** | **Never** (no new **`*.ver`**, no **`PRERELEASE=1`**, no **`GM=1`**) |
+| Edit a row already under **`preproduction */`** | **Only** the **one** **`.ver`** this PR created at the entries root (after CI relocate): **`DESCRIPTION` only**. **Never** edit other trains’ rows there; for a new train, add another **root** **`.ver`** |
+| **`RELEASE_DATE=`** on new rows | **Omit**; CI stamps on relocate / Version lock |
 
-#### 3.5 `DEV_VERSION`, `PRERELEASE`, `GM`
+#### 3.5 `DEV_VERSION`, `PRERELEASE`, and `GM`
 
 - **`PRERELEASE`** and **`GM`**: when present, values must be exactly **`0`** or **`1`**.
 - **`DEV_VERSION`:** compare to **`develop`** (merge base). Let **`N`** = **`DEV_VERSION`** on **`develop`** for that path, or **`0`** if absent. You may set **`DEV_VERSION`** to exactly **`N+1`** **once** when establishing that row; **never** change **`DEV_VERSION`** again on that path—update **`DESCRIPTION`** only. **Never** increase mid-PR (e.g. **8→9**). **Do not** run **`./scripts/bump_dev_version.sh`** to chase BUILD numbers.
 - With **`PRERELEASE=1`**, use **`DEV_VERSION >= 1`**.
 - **`(MAJOR, STANDARD, RELEASE, DEV_VERSION)`** must be **unique** across **`version/entries/**/*.ver`** (missing **`DEV_VERSION=`** counts as **0**). Before push: **`./scripts/check_version_entries_semver_dev_unique.sh`**.
-- **`GM=1`:** **Replit Agent must never set `GM=1`** unless a **human maintainer** explicitly instructs. **`GM=1`** belongs on a **new** row under **`version/entries/preproduction <A>.<B>.<C>/`** (next **`DEV_VERSION`**), **never** on a root **`*.ver`**. **`DESCRIPTION`** must start with **`A.B.C:`** and summarize the overall release. Maintainers run **`promote_preproduction_for_main.sh`** before **`main`**.
+- **`GM=1` (go-to-main):** **Replit Agent must not set `GM=1` or hand-add any row under `version/entries/preproduction */`.** Go-to-main is **maintainer-only**. When a maintainer runs promotion, they add a **new** **`.ver`** under the existing **`preproduction <A>.<B>.<C>/`** folder (next **`DEV_VERSION`**, **`GM=1`**, **`DESCRIPTION`** starting with **`A.B.C:`**)—**never** on a root **`*.ver`**. **`promote_preproduction_for_main.sh`** then writes one GA root **`.ver`** at **`version/entries/`** before **`main`**.
 
 #### 3.6 No semver backtracking (AI)
 
@@ -150,10 +154,11 @@ If this **`replit.md`** explicit section and **`CLAUDE.md`**, **`AGENTS.md`**, *
 2. Wait for the Nix environment to sync (shell reload after `replit.nix` changes).
 3. **Run** — builds via `compile`, then runs `./BPForbes_Flinstone_Shell help`.
 4. In the **Shell** pane for an interactive session:
-   ```bash
-   make
-   ./BPForbes_Flinstone_Shell
-   ```
+
+```bash
+make
+./BPForbes_Flinstone_Shell
+```
 
 ## Common make targets
 
@@ -180,4 +185,4 @@ Package list and profiles: `nix/deps.json`. Local Nix flakes: `flake.nix` (not u
 
 ## Versioning (quick reminder)
 
-Full rules are in **§3** above. Replit Agent: **entries only** on feature PRs; **never** merge-base **`.ver`** edits; **never** **`version/locked/**`** or **`version_def.h`** commits; **one new** root **`version/entries/A_B_C_slug.ver`** per PR train when needed.
+Full rules are in **§3** above. Replit Agent: **typically one new** root **`version/entries/A_B_C_slug.ver`** per PR train (extra root rows only when combining branches or a new iteration requires it—see **§3.3**); **`PRERELEASE=1` at root only** (CI moves to **`preproduction */`**); **never** hand-add under **`preproduction */`**; **never** **`GM=1`**; **never** merge-base **`.ver`** edits; **`DESCRIPTION` only** on each root row this PR added (even after relocate); **never** **`version/locked/**`** or **`version_def.h`** commits.
