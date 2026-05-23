@@ -250,8 +250,8 @@ relocate-root-prerelease-ver:
 stamp-version-entries-release-date:
 	@./scripts/stamp_version_entries_release_date.sh
 
-# Same sequence as GitHub Actions prepare-version-entries (relocate + normalize GM + stamp + optional local gen_version_def.sh).
-prepare-version-entries: relocate-root-prerelease-ver normalize-gm-candidates stamp-version-entries-release-date
+# Same sequence as GitHub Actions prepare-version-entries (relocate + normalize GM + promote + stamp + optional local gen_version_def.sh).
+prepare-version-entries: relocate-root-prerelease-ver normalize-gm-candidates promote-preproduction-for-main stamp-version-entries-release-date
 
 # Optional release build: changelog + CHANGELOG_CI=1 (version/locked is synced on merge to main/develop in CI; use finalize-version-locked locally if needed).
 .PHONY: deploy
