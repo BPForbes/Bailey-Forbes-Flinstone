@@ -17,18 +17,22 @@ runs:
       env:
         GIT_HEAD_REF: ${{ github.head_ref }}
         GIT_REF_NAME: ${{ github.ref_name }}
+        GITHUB_TOKEN: ${{ github.token }}
       shell: bash
       working-directory: ${{ github.workspace }}
       run: |
         set -euo pipefail
-        git fetch origin
+        # actions/checkout in downstream jobs may leave origin as unauthenticated HTTPS;
+        # version-requirements can push to the PR head, so we must fetch that tip here.
+        git remote set-url origin "https://x-access-token:${GITHUB_TOKEN}@github.com/${GITHUB_REPOSITORY}.git"
         if [[ "${GITHUB_EVENT_NAME}" == "pull_request" ]]; then
-          git fetch origin "${GIT_HEAD_REF}"
+          git fetch origin --no-tags --prune "+refs/heads/${GIT_HEAD_REF}:refs/remotes/origin/${GIT_HEAD_REF}"
           if git rev-parse --verify --quiet "origin/${GIT_HEAD_REF}" >/dev/null; then
             git checkout "origin/${GIT_HEAD_REF}" -- userland/shell/version_def.h 2>/dev/null || true
             git checkout "origin/${GIT_HEAD_REF}" -- version/entries 2>/dev/null || true
           fi
         else
+          git fetch origin --no-tags --prune "+refs/heads/${GIT_REF_NAME}:refs/remotes/origin/${GIT_REF_NAME}"
           git checkout -B "${GIT_REF_NAME}" "origin/${GIT_REF_NAME}"
         fi
 
