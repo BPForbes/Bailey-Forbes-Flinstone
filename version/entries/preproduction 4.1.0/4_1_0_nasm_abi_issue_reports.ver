@@ -1,9 +1,0 @@
-MAJOR_VERSION=4
-STANDARD_VERSION=1
-RELEASE_VERSION=0
-PRERELEASE=1
-DEV_VERSION=2
-GM=0
-DESCRIPTION=ASM under arch/: ABI fixes (malloc_nolock callee-saved, AArch64 free, AAPCS64 16-byte stack frames on malloc/calloc/realloc/free, cld, lock release); GAS fl_stack elev slot zeroing; GAS shell_history_host_asm cmp immediate operand order (cmpq $-1, %r8); x86-64 realloc growth copy via asm_mem_copy (GitHub #156, NASM/GAS/kernel); allocator .hidden plus alloc_internal_local.ver; NASM disk/history overflow hardening; kernel asm sync; docs/issues; remove legacy ARM/, x86-64 (NASM)/, repo-root alloc/. CodeRabbit #159–#163: NASM fl_stack_asm elev_expire zero loop scale (r9 not r9*8); AArch64 malloc_nolock stp/ldp x30 and init_heap_once_nolock x30 frame; ARM shell_history UINT64_MAX guard; kernel memcpy.asm .note.GNU-stack. Docs: ARM-ABI-002/ARM-SYNC-001/002 status aligned; PR-154-coderabbit-inline-resolutions.md records resolved/skipped inline review items.
-
-RELEASE_DATE=2026-05-22

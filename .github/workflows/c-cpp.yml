@@ -29,7 +29,7 @@ jobs:
         if: github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name != github.repository
         run: bash scripts/relocate_root_prerelease_ver_to_preproduction.sh --dry-run-exit-if-needed
 
-      - name: Prepare version/entries (relocate, normalize GM, stamp dates)
+      - name: Prepare version/entries (relocate, normalize GM, promote, stamp dates)
         uses: ./.github/actions/prepare-version-entries
 
       - name: Regenerate userland/shell/version_def.h from .ver trees (entries + preproduction)
