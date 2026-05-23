@@ -54,7 +54,7 @@ if [ ! -f "$ARCHIVE" ]; then
     for year in ${SQLITE_YEAR:-} 2025 2024 2023; do
         [ -n "$year" ] || continue
         candidate="$(sqlite_download_url "$year")"
-        if curl -fsI "$candidate" 2>/dev/null | grep -q '200 OK'; then
+        if curl -fsI "$candidate" >/dev/null 2>&1; then
             SQLITE_URL="$candidate"
             break
         fi

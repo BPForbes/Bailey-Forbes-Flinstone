@@ -11,6 +11,12 @@ static int ensure_privilege(void) {
     return 1;
 }
 
+/** Drop in-memory account mutations when persistence fails. */
+static void account_reload_db_from_disk(fl_user_db_t *db) {
+    if (db && db->path[0])
+        (void)fl_user_db_load(db, db->path);
+}
+
 int cmd_useradd_run(int argc, char **argv) {
     fl_user_db_t *db;
     fl_result_t rc;
@@ -45,6 +51,7 @@ int cmd_useradd_run(int argc, char **argv) {
         return 1;
     }
     if (fl_session_save_users() != FL_RESULT_OK) {
+        (void)fl_user_db_remove_user(db, name);
         fprintf(stderr, "useradd: could not save %s\n", FL_SESSION_USERS_PATH);
         return 1;
     }
@@ -73,6 +80,7 @@ int cmd_userdel_run(int argc, char **argv) {
         return 1;
     }
     if (fl_session_save_users() != FL_RESULT_OK) {
+        account_reload_db_from_disk(db);
         fprintf(stderr, "userdel: could not save %s\n", FL_SESSION_USERS_PATH);
         return 1;
     }
@@ -110,6 +118,7 @@ int cmd_passwd_run(int argc, char **argv) {
         return 1;
     }
     if (fl_session_save_users() != FL_RESULT_OK) {
+        account_reload_db_from_disk(db);
         fprintf(stderr, "passwd: could not save %s\n", FL_SESSION_USERS_PATH);
         return 1;
     }

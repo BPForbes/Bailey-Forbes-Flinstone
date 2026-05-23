@@ -98,7 +98,8 @@ static int batch_starts_shell_command(const char *word) {
         "dir", "make", "mkdir", "rmtree", "rmdir", "mv", "write", "type", "cat",
         "where", "loc", "search", "delcluster", "rerun", "redirect", "cd",
         "writecluster", "initdisk", "import", "diskput", "diskget", "diskfiles",
-        "diskdel", "diskmkdir", "update", "addcluster", "login", "logout",
+        "diskdel", "diskmkdir", "update", "addcluster", "listdirs", "du", "printdisk",
+        "login", "logout",
         "whoami", "userdel", "useradd", "passwd", "sudo", "su", NULL
     };
     size_t n;

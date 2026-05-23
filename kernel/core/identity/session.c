@@ -34,8 +34,14 @@ void fl_session_init(void) {
 }
 
 const char *fl_session_current_user(void) {
+    static _Thread_local char tls_current[FL_USER_NAME_MAX];
+
     fl_session_init();
-    return s_current;
+    pthread_mutex_lock(&s_session_mu);
+    strncpy(tls_current, s_current, sizeof(tls_current) - 1);
+    tls_current[sizeof(tls_current) - 1] = '\0';
+    pthread_mutex_unlock(&s_session_mu);
+    return tls_current;
 }
 
 int fl_session_is_elevated_account(void) {
@@ -155,11 +161,12 @@ fl_result_t fl_session_grant_elevation(const char *reason, fl_elevation_token_t 
     fl_session_init();
     if (!out)
         return FL_RESULT_INVAL;
-    if (fl_session_is_elevated_account()) {
+    pthread_mutex_lock(&s_session_mu);
+    if (fl_user_db_is_elevated_user(&s_db, s_current)) {
         *out = FL_ELEVATION_TOKEN_NONE;
+        pthread_mutex_unlock(&s_session_mu);
         return FL_RESULT_OK;
     }
-    pthread_mutex_lock(&s_session_mu);
     rc = fl_elevation_grant(s_current, reason, out);
     if (rc == FL_RESULT_OK)
         s_active_elev = *out;

@@ -105,7 +105,13 @@ int cmd_su_run(int argc, char **argv) {
     if (req.login_shell) {
         fl_session_save_login_shell_env(saved_home, sizeof(saved_home),
                                         saved_cwd, sizeof(saved_cwd));
-        fl_session_apply_login_shell_env(req.target);
+        if (fl_session_apply_login_shell_env(req.target) != 0) {
+            fprintf(stderr, "su: failed to apply login-shell environment for %s\n",
+                    req.target);
+            (void)fl_session_set_user(saved);
+            fl_session_sync_services();
+            return 1;
+        }
     }
 
     if (req.command) {
@@ -115,6 +121,10 @@ int cmd_su_run(int argc, char **argv) {
         rc = fl_session_set_user(saved);
         if (rc != FL_RESULT_OK) {
             fprintf(stderr, "su: cannot restore session user %s (%d)\n", saved, (int)rc);
+            (void)fl_session_set_user("guest");
+            if (req.login_shell)
+                fl_session_restore_login_shell_env(saved_home, saved_cwd);
+            fl_session_sync_services();
             return 1;
         }
         if (req.login_shell)
