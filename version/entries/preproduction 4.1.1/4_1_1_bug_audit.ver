@@ -33,3 +33,5 @@ cmd_authutil.c:23 — size_t-to-int cast in fgets: (int)buf_size truncates to a 
 or near-zero value when buf_size exceeds INT_MAX, causing fgets to read an incorrect
 number of bytes or return immediately.
 BUG_AUDIT_DESC_END
+
+RELEASE_DATE=2026-05-23

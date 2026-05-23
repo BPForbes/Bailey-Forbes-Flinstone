@@ -45,3 +45,5 @@ Docs: docs/p0_p2_pr_coverage.md; MIGRATION_GUIDE status rows updated to ✅;
 docs/ARCH.md ARCH=arm = AArch64 clarification; NASM-SYNC-001 closed.
 VER_4_1_0_GM1_DEV4
 PROMOTE_DESC_END
+
+RELEASE_DATE=2026-05-23
