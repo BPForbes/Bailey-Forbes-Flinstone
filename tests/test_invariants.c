@@ -20,6 +20,7 @@
 #include <stdlib.h>
 #include <string.h>
 #include <unistd.h>
+#include <fcntl.h>
 
 #define ASSERT(c) do { if (!(c)) { fprintf(stderr, "FAIL: %s\n", #c); return 1; } } while(0)
 
@@ -265,15 +266,58 @@ static int test_batch_argv_sh_clamp_edges(void) {
     return 0;
 }
 
-/* Issue #219 / #186: session hardening rejects invalid principals. */
-static int test_session_set_user_edges(void) {
+/* Issue #219 / #186: session mutex-backed state, elevation, and sudo scope. */
+static int test_session_hardening_issue186(void) {
+    char tmpl[] = "/tmp/fl_inv_sessXXXXXX";
+    char dbpath[sizeof(tmpl) + 8];
+    int fd;
+
+    fd = mkstemp(tmpl);
+    ASSERT(fd >= 0);
+    close(fd);
+    snprintf(dbpath, sizeof(dbpath), "%s.db", tmpl);
+    ASSERT(rename(tmpl, dbpath) == 0);
+
+    (void)setenv("FL_USERS_DB_PATH", dbpath, 1);
     (void)setenv("FL_USERS_LAB_DEFAULTS", "1", 1);
     fl_session_init();
+
     ASSERT(fl_session_set_user(NULL) == FL_RESULT_INVAL);
     ASSERT(fl_session_set_user("") == FL_RESULT_INVAL);
     ASSERT(fl_session_set_user("no_such_user_xyz") == FL_RESULT_NOENT);
+
+    ASSERT(fl_session_login("root", "root") == FL_RESULT_OK);
+    ASSERT(fl_session_is_elevated_account() == 1);
+    ASSERT(fl_session_has_elevation() == 1);
+    ASSERT(fl_session_jail_privileged() == 1);
+
     ASSERT(fl_session_login("flinstone", "flinstone") == FL_RESULT_OK);
     ASSERT(strcmp(fl_session_current_user(), "flinstone") == 0);
+    ASSERT(fl_session_is_elevated_account() == 0);
+    ASSERT(fl_session_has_elevation() == 0);
+    ASSERT(fl_session_verify_password("flinstone") == 1);
+    ASSERT(fl_session_verify_password("wrong") == 0);
+    ASSERT(fl_session_jail_privileged() == 0);
+
+    {
+        fl_elevation_token_t tok = FL_ELEVATION_TOKEN_NONE;
+        ASSERT(fl_session_grant_elevation("issue186", &tok) == FL_RESULT_OK);
+        ASSERT(fl_session_has_elevation() == 1);
+        ASSERT(fl_elevation_active(tok) == 1);
+        fl_session_drop_elevation();
+        ASSERT(fl_session_has_elevation() == 0);
+        ASSERT(fl_elevation_active(tok) == 0);
+    }
+
+    fl_session_begin_sudo_scope();
+    ASSERT(fl_session_in_sudo_scope() == 1);
+    ASSERT(fl_session_jail_privileged() == 1);
+    fl_session_end_sudo_scope();
+    ASSERT(fl_session_in_sudo_scope() == 0);
+    ASSERT(fl_session_jail_privileged() == 0);
+
+    ASSERT(fl_session_logout() == FL_RESULT_OK);
+    unlink(dbpath);
     return 0;
 }
 
@@ -545,8 +589,8 @@ int main(void) {
     if (test_batch_argv_sh_clamp_edges() != 0) return 1;
     printf("OK\n");
 
-    printf("test_session_set_user_edges... ");
-    if (test_session_set_user_edges() != 0) return 1;
+    printf("test_session_hardening_issue186... ");
+    if (test_session_hardening_issue186() != 0) return 1;
     printf("OK\n");
 
     printf("test_history_unpack_strips_trailing_newline... ");

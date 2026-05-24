@@ -22,4 +22,16 @@ done
 if [ "$fail" -ne 0 ]; then
     exit 1
 fi
+# Smoke-test the shared helper (issue #218).
+# shellcheck source=deps/lib/verify_archive_sha256.sh
+. "$ROOT/deps/lib/verify_archive_sha256.sh"
+tmp="$ROOT/deps/download/.verify_smoke_$$"
+mkdir -p "$ROOT/deps/download"
+printf 'fl-deps-verify-smoke\n' >"$tmp"
+expected="$(sha256sum "$tmp" | awk '{print $1}')"
+verify_archive_sha256 "$tmp" "$expected" || fail=1
+rm -f "$tmp"
+if [ "$fail" -ne 0 ]; then
+    exit 1
+fi
 echo "check_deps_fetch_verify_sha256: ok"

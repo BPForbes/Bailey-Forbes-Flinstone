@@ -95,6 +95,9 @@ jobs:
       - name: Deps fetch scripts must verify archive SHA-256
         run: bash scripts/check_deps_fetch_verify_sha256.sh
 
+      - name: Batch dispatch wires account commands (#220.7)
+        run: bash scripts/check_batch_dispatch_account_cmds.sh
+
       - name: Main must ship GA .ver only (push)
         if: github.event_name == 'push' && github.ref == 'refs/heads/main'
         run: ./scripts/check_version_main_prerelease_policy.sh
@@ -139,6 +142,9 @@ jobs:
 
       - name: Test — invariants
         run: make test_invariants
+
+      - name: Test — threadpool (#222)
+        run: make test_threadpool_issue222
 
       - name: Test — fs_jail
         run: make test_fs_jail

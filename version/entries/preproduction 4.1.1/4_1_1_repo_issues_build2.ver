@@ -4,6 +4,6 @@ RELEASE_VERSION=1
 PRERELEASE=1
 DEV_VERSION=2
 GM=0
-DESCRIPTION=4.1.1 preproduction build 2: GitHub issues #218-#222—shared deps archive SHA-256 verification and CI guard; batch token arity fixes (#220.1-#220.8); identity and session hardening (#221.1-#221.5); threadpool job lifecycle and disk hex encoding safety (#222.1-#222.3); expanded test_invariants coverage for session edges and batch argv bounds (#219).
+DESCRIPTION=4.1.1 preproduction build 2: GitHub issues #218-#222 complete—#218 shared deps SHA-256 + CI smoke; #219 test_invariants session hardening (#186) and batch clamp (#204) plus test_batch_argv_issue220 per #220.x; #220.7 dispatch CI check; batch arity fixes (#220.1-#220.8); identity/session (#221.1-#221.5); threadpool/disk safety (#222.1-#222.3) with test_threadpool_issue222.
 
 RELEASE_DATE=2026-05-24

@@ -35,6 +35,8 @@ int cmd_batch_token_is_shell_command(const char *tok) {
     return 0;
 }
 
+#if !defined(TEST_BATCH_ARGV_HELPERS_ONLY)
+
 static int batch_unknown_tokens_count(int argc, char **argv, int i) {
     int j = i + 1;
 
@@ -93,3 +95,5 @@ int fl_batch_argv_tokens_count(int argc, char **argv, int i) {
 
     return batch_unknown_tokens_count(argc, argv, i);
 }
+
+#endif /* !TEST_BATCH_ARGV_HELPERS_ONLY */

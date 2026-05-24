@@ -486,9 +486,43 @@ TEST_INVARIANTS_SESSION_OBJS = kernel/core/time/timekeeping.o kernel/core/mm/mem
 	kernel/core/identity/user_db.o kernel/core/identity/elevation.o kernel/core/identity/session.o \
 	userland/identity/password_hash.o $(FL_STACK_ASM_OBJ)
 TEST_INVARIANTS_LIBS = -lsqlite3 -lstdc++ -lcrypto -pthread
-test_invariants: userland/shell/common.o userland/shell/authz_subsystem.o $(UTIL_SHELL_LINK_OBJS) $(TEST_INVARIANTS_CMD_OBJS) $(TEST_INVARIANTS_SESSION_OBJS) $(MEM_ASM_OBJ) $(HISTORY_ASM_OBJ) $(UTIL_HISTORY_HOST_OBJS)
+test_invariants: test_batch_argv_issue220 userland/shell/common.o userland/shell/authz_subsystem.o $(UTIL_SHELL_LINK_OBJS) $(TEST_INVARIANTS_CMD_OBJS) $(TEST_INVARIANTS_SESSION_OBJS) $(MEM_ASM_OBJ) $(HISTORY_ASM_OBJ) $(UTIL_HISTORY_HOST_OBJS)
 	$(CC) $(CFLAGS) $(TEST_SANITIZE) -o tests/test_invariants tests/test_invariants.c userland/shell/common.o userland/shell/authz_subsystem.o $(UTIL_SHELL_LINK_OBJS) $(TEST_INVARIANTS_CMD_OBJS) $(TEST_INVARIANTS_SESSION_OBJS) $(MEM_ASM_OBJ) $(HISTORY_ASM_OBJ) $(UTIL_HISTORY_HOST_OBJS) $(TEST_INVARIANTS_LIBS) -Wl,-z,noexecstack
 	./tests/test_invariants
+
+# Issue #220 / #204: batch arity helpers (-ffunction-sections avoids pulling cmd_*_run).
+TEST_BATCH_GC_DIR = tests/obj/issue220
+TEST_BATCH_GC_FLAGS = -ffunction-sections -fdata-sections
+TEST_BATCH_ISSUE220_CMD_BASENAMES = cmd_addcluster cmd_createdisk cmd_rmdir cmd_rmtree \
+	cmd_setdisk cmd_diskput cmd_su cmd_login cmd_sudo cmd_account cmd_registry
+TEST_BATCH_ISSUE220_CMD_OBJS = $(addprefix $(TEST_BATCH_GC_DIR)/,$(addsuffix .o,$(TEST_BATCH_ISSUE220_CMD_BASENAMES))) \
+	$(TEST_BATCH_GC_DIR)/cmd_batch.o
+
+$(TEST_BATCH_GC_DIR):
+	@mkdir -p $(TEST_BATCH_GC_DIR)
+
+$(TEST_BATCH_GC_DIR)/%.o: userland/command/%.c | $(TEST_BATCH_GC_DIR)
+	$(CC) $(CFLAGS) $(TEST_BATCH_GC_FLAGS) -c $< -o $@
+
+$(TEST_BATCH_GC_DIR)/cmd_batch.o: userland/command/cmd_batch.c | $(TEST_BATCH_GC_DIR)
+	$(CC) $(CFLAGS) $(TEST_BATCH_GC_FLAGS) -DTEST_BATCH_ARGV_HELPERS_ONLY -c userland/command/cmd_batch.c -o $@
+
+.PHONY: test_batch_argv_issue220
+test_batch_argv_issue220: tests/test_batch_argv_issue220.c tests/stub_batch_layout_valid.c $(TEST_BATCH_ISSUE220_CMD_OBJS)
+	$(CC) $(CFLAGS) $(TEST_SANITIZE) -o tests/test_batch_argv_issue220 tests/test_batch_argv_issue220.c tests/stub_batch_layout_valid.c $(TEST_BATCH_ISSUE220_CMD_OBJS) -Wl,--gc-sections -Wl,-z,noexecstack
+	./tests/test_batch_argv_issue220
+
+TEST_THREADPOOL_GC_DIR = tests/obj/issue222
+$(TEST_THREADPOOL_GC_DIR):
+	@mkdir -p $(TEST_THREADPOOL_GC_DIR)
+
+$(TEST_THREADPOOL_GC_DIR)/threadpool.o: kernel/core/sched/threadpool.c | $(TEST_THREADPOOL_GC_DIR)
+	$(CC) $(CFLAGS) $(TEST_BATCH_GC_FLAGS) -c $< -o $@
+
+.PHONY: test_threadpool_issue222
+test_threadpool_issue222: tests/test_threadpool_issue222.c $(TEST_THREADPOOL_GC_DIR)/threadpool.o
+	$(CC) $(CFLAGS) $(TEST_SANITIZE) -o tests/test_threadpool_issue222 tests/test_threadpool_issue222.c $(TEST_THREADPOOL_GC_DIR)/threadpool.o -lpthread -Wl,--gc-sections -Wl,-z,noexecstack
+	./tests/test_threadpool_issue222
 
 # audit_log unit tests (standalone, no CUnit required)
 .PHONY: test_audit_log
