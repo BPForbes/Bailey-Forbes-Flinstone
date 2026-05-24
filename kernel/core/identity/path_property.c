@@ -125,7 +125,7 @@ fl_result_t fl_path_property_resolve(const char *path, fl_path_property_t *out) 
             if (meta_path_for(probe, meta, sizeof(meta)) == 0) {
                 fl_path_property_t cur;
                 if (read_props_file(meta, &cur) == 0) {
-                    if (!best.valid || cur.requires_elevation || cur.owner[0])
+                    if (!best.valid)
                         best = cur;
                 }
             }
@@ -137,7 +137,7 @@ fl_result_t fl_path_property_resolve(const char *path, fl_path_property_t *out) 
             if (meta_path_for("/", meta, sizeof(meta)) == 0) {
                 fl_path_property_t cur;
                 if (read_props_file(meta, &cur) == 0) {
-                    if (!best.valid || cur.requires_elevation || cur.owner[0])
+                    if (!best.valid)
                         best = cur;
                 }
             }
