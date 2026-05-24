@@ -8,6 +8,9 @@ INSTALL_PREFIX="${DEPS_ROOT}/deps/install"
 BUILD_DIR="${DEPS_ROOT}/deps/build"
 CUNIT_VERSION="${CUNIT_VERSION:-2.1-3}"
 CUNIT_URL="https://downloads.sourceforge.net/project/cunit/CUnit/${CUNIT_VERSION}/CUnit-${CUNIT_VERSION}.tar.bz2"
+CUNIT_SHA256="${CUNIT_SHA256:-f5b29137f845bb08b77ec60584fdb728b4e58f1023e6f249a464efa49a40f214}"
+
+. "$SCRIPT_DIR/lib/verify_archive_sha256.sh"
 
 mkdir -p "${BUILD_DIR}" "${DEPS_ROOT}/deps/download"
 
@@ -24,6 +27,7 @@ if [ ! -f "$ARCHIVE" ]; then
         exit 1
     }
 fi
+verify_archive_sha256 "$ARCHIVE" "$CUNIT_SHA256" || exit 1
 
 echo "[deps] Extracting CUnit..."
 rm -rf "${BUILD_DIR}/CUnit-${CUNIT_VERSION}"

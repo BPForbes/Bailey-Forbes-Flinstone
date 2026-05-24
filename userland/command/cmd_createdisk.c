@@ -1,5 +1,6 @@
 #include "common.h"
 #include "cmd_decl.h"
+#include "cmd_batch.h"
 #include "disk.h"
 #include "interpreter.h"
 #include <stdio.h>
@@ -29,4 +30,16 @@ int cmd_createdisk_run(int argc, char **argv) {
     if (argc >= 5 && (!strcmp(args[4], "-y") || !strcmp(args[4], "-Y")))
         interactive_shell();
     return 0;
+}
+
+int cmd_createdisk_batch_tokens_count(int argc, char **argv, int i) {
+    if (i + 3 >= argc) {
+        int remain = argc - i;
+        return remain > 0 ? remain : 1;
+    }
+    if (i + 4 < argc && argv[i + 4] &&
+        (!strcmp(argv[i + 4], "-y") || !strcmp(argv[i + 4], "-n") ||
+         !strcmp(argv[i + 4], "-Y") || !strcmp(argv[i + 4], "-N")))
+        return 5;
+    return 4;
 }

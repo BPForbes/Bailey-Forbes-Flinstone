@@ -65,6 +65,7 @@
 #include <dirent.h>
 #include <limits.h>
 #include "util.h"
+#include "cmd_batch.h"
 
 #ifndef PATH_MAX
 #define PATH_MAX 4096
@@ -217,6 +218,9 @@ static void vm_warn_layer_config(void) {
 }
 
 int main(int argc, char *argv[]) {
+    /* Lab weak seeds are opt-in; set FL_USERS_LAB_DEFAULTS=1 to enable. */
+    if (!getenv("FL_USERS_LAB_DEFAULTS"))
+        (void)setenv("FL_USERS_LAB_DEFAULTS", "0", 0);
     /* Seed the random number generator */
     srand((unsigned) time(NULL));
 
@@ -416,157 +420,28 @@ int main(int argc, char *argv[]) {
     if (argc > 1) {
         int i = 1;
         while (i < argc) {
-            int tokensCount = 1;
+            int tokensCount;
             char *cmd = argv[i];
             if (!cmd) { i++; continue; }
-            if (!strcmp(cmd, "help") || !strcmp(cmd, "listclusters") || !strcmp(cmd, "clear") ||
-                !strcmp(cmd, "history") || !strcmp(cmd, "his") || !strcmp(cmd, "cc"))
-            {
-                tokensCount = 1;
+            tokensCount = fl_batch_argv_tokens_count(argc, argv, i);
+            if (!strcmp(cmd, "exit") && tokensCount == 1) {
+                submit_single_command("exit -n");
+                i++;
+                continue;
             }
-            else if (!strcmp(cmd, "version")) {
-                if (i + 1 < argc &&
-                    (!strcmp(argv[i + 1], "-y") || !strcmp(argv[i + 1], "-n") ||
-                     !strcmp(argv[i + 1], "-Y") || !strcmp(argv[i + 1], "-N"))) {
-                    tokensCount = 2;
-                } else {
-                    tokensCount = 1;
-                }
-            }
-            else if (!strcmp(cmd, "contracts")) {
-                tokensCount = fl_batch_contracts_tokens_count(argc, argv, i);
-            }
-            else if (!strcmp(cmd, "audit")) {
-                tokensCount = fl_batch_audit_tokens_count(argc, argv, i);
-            }
-            else if (!strcmp(cmd, "exit")) {
-                if (i + 1 < argc &&
-                    (!strcmp(argv[i+1], "-y") || !strcmp(argv[i+1], "-Y") ||
-                     !strcmp(argv[i+1], "-n") || !strcmp(argv[i+1], "-N"))) {
-                    tokensCount = 2;
-                } else {
-                    submit_single_command("exit -n");
-                    i++;
+            if (!strcmp(cmd, "setdisk") || !strcmp(cmd, "createdisk")) {
+                const int minTokens = (!strcmp(cmd, "setdisk")) ? 2 : 4;
+
+                if (tokensCount > 0 && tokensCount < minTokens) {
+                    fprintf(stderr, "batch: %s: insufficient arguments (skipped)\n",
+                            cmd);
+                    i += tokensCount;
                     continue;
                 }
             }
-            else if (!strcmp(cmd, "bios")) {
-                if (i + 1 < argc && (!strcmp(argv[i+1], "-y") || !strcmp(argv[i+1], "-Y")))
-                    tokensCount = 2;
-                else
-                    tokensCount = 1;
-            }
-            else if (!strcmp(cmd, "setdisk") || !strcmp(cmd, "createdisk")) {
-                if (argc > i + 3)
-                    tokensCount = (argc > i + 4) ? 5 : 4;
-                else {
-                    fprintf(stderr, "batch: %s: insufficient arguments (skipped)\n", cmd);
-                    int eat = 1;
-                    while (eat < 5 && i + eat < argc && argv[i + eat] && argv[i + eat][0] != '-')
-                        eat++;
-                    tokensCount = eat;
-                }
-            }
-            else if (!strcmp(cmd, "format"))
-                tokensCount = 5;
-            else if (!strcmp(cmd, "dir")) {
-                if (i + 1 < argc && argv[i+1] && argv[i+1][0] != '-')
-                    tokensCount = 2;
-                else
-                    tokensCount = 1;
-            }
-            else if (!strcmp(cmd, "make"))
-                tokensCount = 2;
-            else if (!strcmp(cmd, "mkdir") || !strcmp(cmd, "rmtree") || !strcmp(cmd, "rmdir"))
-                tokensCount = 2;
-            else if (!strcmp(cmd, "mv"))
-                tokensCount = 3;
-            else if (!strcmp(cmd, "write"))
-                tokensCount = (argc > i + 2) ? (argc - i) : 0;
-            else if (!strcmp(cmd, "type") || !strcmp(cmd, "cat"))
-                tokensCount = 2;
-            else if (!strcmp(cmd, "where") || !strcmp(cmd, "loc"))
-                tokensCount = (i + 1 < argc && argv[i+1] && argv[i+1][0] != '-') ? 2 : 1;
-            else if (!strcmp(cmd, "search") || !strcmp(cmd, "delcluster") || !strcmp(cmd, "rerun") ||
-                     !strcmp(cmd, "redirect"))
-                tokensCount = 2;
-            else if (!strcmp(cmd, "cd"))
-                tokensCount = (i + 1 < argc && argv[i+1] && argv[i+1][0] != '-') ? 2 : 1;
-            else if (!strcmp(cmd, "writecluster"))
-                tokensCount = 4;
-            else if (!strcmp(cmd, "initdisk"))
-                tokensCount = 3;
-            else if (!strcmp(cmd, "import")) {
-                if (i + 4 < argc)
-                    tokensCount = 5;
-                else
-                    tokensCount = 3;
-            }
-            else if (!strcmp(cmd, "diskput")) {
-                if (i + 2 < argc && argv[i + 2] && argv[i + 2][0] != '-')
-                    tokensCount = 3;
-                else
-                    tokensCount = 2;
-            } else if (!strcmp(cmd, "diskget"))
-                tokensCount = 3;
-            else if (!strcmp(cmd, "diskfiles")) {
-                if (i + 1 < argc && argv[i + 1] && argv[i + 1][0] != '-')
-                    tokensCount = 2;
-                else
-                    tokensCount = 1;
-            } else if (!strcmp(cmd, "diskdel"))
-                tokensCount = 2;
-            else if (!strcmp(cmd, "diskmkdir"))
-                tokensCount = 2;
-            else if (!strcmp(cmd, "update"))
-                tokensCount = 4;
-            else if (!strcmp(cmd, "addcluster")) {
-                if (i + 2 < argc && (!strcmp(argv[i+1], "-t") || !strcmp(argv[i+1], "-h")))
-                    tokensCount = 3;
-                else
-                    tokensCount = 1;
-            }
-            else if (!strcmp(cmd, "login"))
-                tokensCount = 2;
-            else if (!strcmp(cmd, "logout") || !strcmp(cmd, "whoami"))
-                tokensCount = 1;
-            else if (!strcmp(cmd, "userdel"))
-                tokensCount = 2;
-            else if (!strcmp(cmd, "useradd"))
-                tokensCount = 2;
-            else if (!strcmp(cmd, "passwd"))
-                tokensCount = (i + 1 < argc && argv[i + 1] && argv[i + 1][0] != '-') ? 2 : 1;
-            else if (!strcmp(cmd, "sudo")) {
-                if (i + 1 < argc && argv[i + 1] &&
-                    (!strcmp(argv[i + 1], "-i") || !strcmp(argv[i + 1], "-k")))
-                    tokensCount = 2;
-                else {
-                    int j = i + 1;
-                    while (j < argc && argv[j] && argv[j][0] != '-')
-                        j++;
-                    tokensCount = (j > i + 1) ? (j - i) : 2;
-                }
-            }
-            else if (!strcmp(cmd, "su")) {
-                int j = i + 1;
-                int has_c = 0;
-                while (j < argc && argv[j] && argv[j][0] != '-') {
-                    if (!strcmp(argv[j], "-c"))
-                        has_c = 1;
-                    j++;
-                }
-                if (has_c && i + 2 < argc)
-                    tokensCount = (j > i + 3) ? (j - i) : 4;
-                else
-                    tokensCount = (j > i + 1) ? (j - i) : 2;
-            }
-            else {
-                int j = i + 1;
-                while (j < argc && argv[j] && argv[j][0] != '-' && strcmp(argv[j], "make") != 0 && strcmp(argv[j], "write") != 0)
-                    j++;
-                tokensCount = j - i;
-            }
-            if (tokensCount == 0) { i++; continue; }
+            if (tokensCount > argc - i)
+                tokensCount = argc - i;
+            if (tokensCount <= 0) { i++; continue; }
             size_t totalLen = 0;
             int overflow = 0;
             for (int k = i; k < i + tokensCount; k++) {

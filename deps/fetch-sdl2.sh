@@ -8,6 +8,9 @@ INSTALL_PREFIX="${DEPS_ROOT}/deps/install"
 BUILD_DIR="${DEPS_ROOT}/deps/build"
 SDL_VERSION="${SDL_VERSION:-2.30.0}"
 SDL_URL="https://github.com/libsdl-org/SDL/releases/download/release-${SDL_VERSION}/SDL2-${SDL_VERSION}.tar.gz"
+SDL_SHA256="${SDL_SHA256:-36e2e41557e0fa4a1519315c0f5958a87ccb27e25c51776beb6f1239526447b0}"
+
+. "$SCRIPT_DIR/lib/verify_archive_sha256.sh"
 
 mkdir -p "${DEPS_ROOT}/deps/build" "${DEPS_ROOT}/deps/download"
 
@@ -21,6 +24,7 @@ if [ ! -f "$ARCHIVE" ]; then
     echo "[deps] Downloading SDL2 ${SDL_VERSION}..."
     curl -sL "$SDL_URL" -o "$ARCHIVE" || { echo "[deps] Download failed. Try: apt install libsdl2-dev"; exit 1; }
 fi
+verify_archive_sha256 "$ARCHIVE" "$SDL_SHA256" || exit 1
 
 echo "[deps] Extracting SDL2..."
 rm -rf "${BUILD_DIR}/SDL2-${SDL_VERSION}"

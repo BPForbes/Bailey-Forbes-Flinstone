@@ -32,10 +32,13 @@ jobs:
       - name: Prepare version/entries (relocate, normalize GM, promote, stamp dates)
         uses: ./.github/actions/prepare-version-entries
 
+      - name: GM=1 preproduction rows must be promoted (not left for header-only sync)
+        run: ./scripts/check_version_gm1_preproduction_promoted.sh
+
       - name: Regenerate userland/shell/version_def.h from .ver trees (entries + preproduction)
         run: ./scripts/gen_version_def.sh
 
-      - name: Publish version/entries and version_def.h (same-repo only)
+      - name: Publish version/entries, version/locked, and version_def.h (same-repo only)
         if: github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository
         env:
           BOT_NAME: github-actions[bot]
@@ -43,8 +46,8 @@ jobs:
           GIT_HEAD_REF: ${{ github.head_ref }}
         run: |
           set -euo pipefail
-          if git diff --quiet -- version/entries userland/shell/version_def.h; then
-            echo "No version/entries or version_def.h changes after prepare-version-entries + gen_version_def.sh."
+          if git diff --quiet -- version/entries version/locked userland/shell/version_def.h; then
+            echo "No version/entries, version/locked, or version_def.h changes after prepare-version-entries + gen_version_def.sh."
             exit 0
           fi
           if [[ "${GITHUB_REF}" == "refs/heads/develop" || "${GITHUB_REF}" == "refs/heads/main" ]]; then
@@ -53,8 +56,8 @@ jobs:
           fi
           git config user.name "$BOT_NAME"
           git config user.email "$BOT_EMAIL"
-          git add -A -- version/entries userland/shell/version_def.h
-          git commit -m "chore(version): sync entries relocate, RELEASE_DATE stamp, and version_def.h (automated)"
+          git add -A -- version/entries version/locked userland/shell/version_def.h
+          git commit -m "chore(version): sync entries promote, finalize locked, and version_def.h (automated)"
           if [[ "${GITHUB_EVENT_NAME}" == "pull_request" ]]; then
             git push origin "HEAD:${GIT_HEAD_REF}"
           else

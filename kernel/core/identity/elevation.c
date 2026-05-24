@@ -3,6 +3,7 @@
 #include "timekeeping.h"
 #include "mem_domain.h"
 #include "fl/fl_stack_asm.h"
+#include <stddef.h>
 #include <pthread.h>
 #include <stdio.h>
 #include <string.h>
@@ -15,6 +16,8 @@ typedef struct fl_elev_slot {
 } fl_elev_slot_t;
 
 _Static_assert(sizeof(fl_elev_slot_t) == 56u, "asm_fl_elev_count_active slot layout");
+_Static_assert(offsetof(fl_elev_slot_t, expires_ns) == 40u, "asm_fl_elev_count_active expires_ns offset");
+_Static_assert(offsetof(fl_elev_slot_t, used) == 48u, "asm_fl_elev_count_active used offset");
 
 #define FL_ELEV_MAX_SLOTS 16u
 
@@ -46,8 +49,8 @@ fl_result_t fl_elevation_grant(const char *principal, const char *reason, fl_ele
                 mem_domain_zero(&s_slots[i], sizeof(s_slots[i]));
             s_slots[i].used = 1;
             s_slots[i].token = elevation_alloc_token();
-            strncpy(s_slots[i].principal, principal, sizeof(s_slots[i].principal) - 1);
-            s_slots[i].principal[sizeof(s_slots[i].principal) - 1] = '\0';
+            (void)snprintf(s_slots[i].principal, sizeof(s_slots[i].principal),
+                           "%s", principal);
             s_slots[i].expires_ns = now + (int64_t)FL_ELEVATION_LAB_TTL_SOFT_MAX_SECONDS * 1000000000LL;
             *out = s_slots[i].token;
             pthread_mutex_unlock(&s_elev_mu);

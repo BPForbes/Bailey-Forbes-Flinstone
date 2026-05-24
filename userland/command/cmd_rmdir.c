@@ -1,5 +1,6 @@
 #include "common.h"
 #include "cmd_decl.h"
+#include "cmd_batch.h"
 #include "cmd_util.h"
 #include "path_log.h"
 #include "fs_service_glue.h"
@@ -33,4 +34,11 @@ int cmd_rmdir_run(int argc, char **argv) {
         return 1;
     }
     return 0;
+}
+
+int cmd_rmdir_batch_tokens_count(int argc, char **argv, int i) {
+    (void)argv;
+    if (i < 0 || i + 1 >= argc)
+        return 0;
+    return 2;
 }

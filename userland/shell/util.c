@@ -1,8 +1,10 @@
 #include "util.h"
 #include "contract_p7_shell_batch.h"
 
+/* contract_p7_shell_batch.h: audit-show batch argv cap (mirror if P7 changes). */
 _Static_assert(FL_CONTRACT_P7_BATCH_AUDIT_SHOW_MAX_TOKENS == 3u,
                "fl_batch_audit_tokens_count must match P7 contract cap");
+/* contract_p7_shell_batch.h: contracts-qualified batch argv cap. */
 _Static_assert(FL_CONTRACT_P7_BATCH_CONTRACTS_QUALIFIED_MAX_TOKENS == 2u,
                "fl_batch_contracts_tokens_count must match P7 contract cap");
 _Static_assert(FL_CONTRACT_P7_BATCH_AUDIT_SHOW_MAX_TOKENS <=
@@ -279,35 +281,3 @@ void free_history(char **history, int count) {
     free(history);
 }
 
-static int batch_audit_show_has_count_token(const char *tok) {
-    if (!tok || !tok[0])
-        return 0;
-    if (isdigit((unsigned char)tok[0]))
-        return 1;
-    if ((tok[0] == '-' || tok[0] == '+') && tok[1] != '\0' &&
-        isdigit((unsigned char)tok[1]))
-        return 1;
-    return 0;
-}
-
-int fl_batch_audit_tokens_count(int argc, char **argv, int i) {
-    if (i + 1 < argc && !strcmp(argv[i + 1], "show")) {
-        if (i + 2 < argc && batch_audit_show_has_count_token(argv[i + 2]))
-            return 3;
-        return 2;
-    }
-    if (i + 1 < argc &&
-        (!strcmp(argv[i + 1], "path") || !strcmp(argv[i + 1], "ring") ||
-         !strcmp(argv[i + 1], "--help") || !strcmp(argv[i + 1], "-h")))
-        return 2;
-    return 1;
-}
-
-int fl_batch_contracts_tokens_count(int argc, char **argv, int i) {
-    if (i + 1 < argc &&
-        (!strcmp(argv[i + 1], "summary") || !strcmp(argv[i + 1], "json") ||
-         !strcmp(argv[i + 1], "--help") || !strcmp(argv[i + 1], "-h")))
-        return 2;
-    (void)argc;
-    return 1;
-}

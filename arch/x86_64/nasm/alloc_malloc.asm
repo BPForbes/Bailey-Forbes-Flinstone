@@ -1,5 +1,5 @@
 ; alloc_malloc.asm - malloc, calloc, realloc (NASM x86-64)
-section .note.GNU-stack progbits alloc noexec
+section .note.GNU-stack progbits noalloc noexec nowrite
 section .text
 global malloc
 global calloc

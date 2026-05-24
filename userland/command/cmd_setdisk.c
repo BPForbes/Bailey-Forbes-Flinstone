@@ -1,5 +1,6 @@
 #include "common.h"
 #include "cmd_decl.h"
+#include "cmd_batch.h"
 #include "cmd_util.h"
 #include "disk.h"
 #include "mem_domain.h"
@@ -27,4 +28,10 @@ int cmd_setdisk_run(int argc, char **argv) {
     current_disk_file[sizeof(current_disk_file) - 1] = '\0';
     read_disk_header();
     return 0;
+}
+
+int cmd_setdisk_batch_tokens_count(int argc, char **argv, int i) {
+    if (i + 1 < argc && argv[i + 1] && argv[i + 1][0] != '-')
+        return 2;
+    return 1;
 }

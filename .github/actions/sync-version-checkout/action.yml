@@ -27,6 +27,7 @@ runs:
           if git rev-parse --verify --quiet "origin/${GIT_HEAD_REF}" >/dev/null; then
             git checkout "origin/${GIT_HEAD_REF}" -- userland/shell/version_def.h 2>/dev/null || true
             git checkout "origin/${GIT_HEAD_REF}" -- version/entries 2>/dev/null || true
+            git checkout "origin/${GIT_HEAD_REF}" -- version/locked 2>/dev/null || true
           fi
         else
           git checkout -B "${GIT_REF_NAME}" "origin/${GIT_REF_NAME}"

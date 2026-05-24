@@ -10,9 +10,12 @@ BUILD_DIR="${DEPS_ROOT}/deps/build/openssl-aarch64"
 OPENSSL_VERSION="${OPENSSL_VERSION:-3.0.15}"
 OPENSSL_TAR="openssl-${OPENSSL_VERSION}.tar.gz"
 OPENSSL_URL="https://www.openssl.org/source/${OPENSSL_TAR}"
+OPENSSL_SHA256="${OPENSSL_SHA256:-23c666d0edf20f14249b3d8f0368acaee9ab585b09e1de82107c66e1f3ec9533}"
 
 CC_ARM="${CC_ARM:-aarch64-linux-gnu-gcc}"
 CROSS_PREFIX="${CROSS_PREFIX:-aarch64-linux-gnu-}"
+
+. "$SCRIPT_DIR/lib/verify_archive_sha256.sh"
 
 mkdir -p "${DEPS_ROOT}/deps/download" "${BUILD_DIR}"
 
@@ -36,6 +39,7 @@ if [ ! -f "$ARCHIVE" ]; then
     echo "[deps] Downloading OpenSSL ${OPENSSL_VERSION}..."
     curl -fsSL "$OPENSSL_URL" -o "$ARCHIVE"
 fi
+verify_archive_sha256 "$ARCHIVE" "$OPENSSL_SHA256" || exit 1
 
 echo "[deps] Extracting OpenSSL..."
 rm -rf "${BUILD_DIR}/openssl-${OPENSSL_VERSION}"

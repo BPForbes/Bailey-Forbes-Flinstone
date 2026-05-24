@@ -1,0 +1,40 @@
+#!/bin/sh
+# CI: every deps/fetch-*.sh that downloads an archive must source verify_archive_sha256.sh
+# and call verify_archive_sha256 after the archive path is known (issue #218).
+set -e
+ROOT="$(cd "$(dirname "$0")/.." && pwd)"
+fail=0
+for script in "$ROOT"/deps/fetch-*.sh; do
+    [ -f "$script" ] || continue
+    base="$(basename "$script")"
+    downloads_archive=0
+    if grep -Eq 'curl[^#]*[[:space:]]-o[[:space:]]+|wget[^#]*(-O|--output-document)[[:space:]]+' "$script" 2>/dev/null; then
+        downloads_archive=1
+    fi
+    if [ "$downloads_archive" -eq 1 ] && \
+       ! grep -Eq '^[[:space:]]*verify_archive_sha256[[:space:]]+' "$script" 2>/dev/null; then
+        echo "check_deps_fetch_verify_sha256: $base downloads but does not call verify_archive_sha256" >&2
+        fail=1
+    fi
+    if [ "$downloads_archive" -eq 1 ] && \
+       ! grep -q 'verify_archive_sha256\.sh' "$script" 2>/dev/null; then
+        echo "check_deps_fetch_verify_sha256: $base must source deps/lib/verify_archive_sha256.sh" >&2
+        fail=1
+    fi
+done
+if [ "$fail" -ne 0 ]; then
+    exit 1
+fi
+# Smoke-test the shared helper (issue #218).
+# shellcheck source=deps/lib/verify_archive_sha256.sh
+. "$ROOT/deps/lib/verify_archive_sha256.sh"
+tmp="$ROOT/deps/download/.verify_smoke_$$"
+mkdir -p "$ROOT/deps/download"
+printf 'fl-deps-verify-smoke\n' >"$tmp"
+expected="$(sha256sum "$tmp" | awk '{print $1}')"
+verify_archive_sha256 "$tmp" "$expected" || fail=1
+rm -f "$tmp"
+if [ "$fail" -ne 0 ]; then
+    exit 1
+fi
+echo "check_deps_fetch_verify_sha256: ok"
