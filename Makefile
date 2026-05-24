@@ -339,6 +339,7 @@ TEST_SRCS = BPForbes_Flinstone_Tests.c userland/shell/common.c userland/shell/ut
             kernel/core/vfs/fs_service_glue.c kernel/core/mm/mem_domain.c kernel/core/mm/kmalloc.c kernel/core/mm/pmm.c \
             kernel/core/memory/fl_stack.c kernel/core/memory/exec_context.c \
             kernel/core/time/timekeeping.c \
+            kernel/core/net/net_ping_host.c kernel/core/net/net_requirements.c \
             kernel/core/identity/user_db.c kernel/core/identity/elevation.c kernel/core/identity/path_property.c \
             kernel/core/identity/session.c \
             kernel/core/sys/vrt.c kernel/core/sys/ipc.c kernel/core/sys/syscall.c
