@@ -1,0 +1,82 @@
+MAJOR_VERSION=4
+STANDARD_VERSION=1
+RELEASE_VERSION=1
+RELEASE_DATE=2026-05-24
+DESCRIPTION<<PROMOTE_DESC_END
+4.1.1: Go-to-main (GM=1) preproduction BUILD 3 — resolves GitHub issues #169–#222 and subissues from PR #168/#217/#223 audits.
+
+Fix: #169 — Makefile ~55: only assign CXX=g++ when ARCH is not arm; preserve aarch64 cross CXX from earlier detection.
+Fix: #170 — deps/fetch-sqlite-aarch64.sh ~37: derive SQLite tarball year from current UTC date instead of hardcoded 2024.
+Fix: #171 — deps/fetch-*.sh: verify downloaded archives with SHA-256 (shared helper in #218); abort fetch on mismatch.
+Fix: #172 — userland/command/cmd_logout.c ~13: copy current username into stack buffer before fl_session_logout() rewrites session state for audit attribution.
+Fix: #173 — userland/command/cmd_su.c ~74–111: restore caller login-shell HOME/cwd via session_login_env after su -c completes or on apply failure.
+Fix: #174 — docs/MIGRATION_GUIDE.md, docs/ROADMAP.md: document legacy ARM/NASM/alloc tree removal and canonical arch/ paths (4.2.0 migration tracking; stubs aligned in BUILD 1).
+Fix: #175 — deps/fetch-openssl-aarch64.sh ~43: use dynamic year in OpenSSL source URL and verify archive SHA-256 after download.
+Fix: #176 — deps/fetch-sqlite-aarch64.sh ~37: dynamic SQLite version year URL plus SHA-256 verification gate.
+Fix: #177 — docs/issues/arm/ARM-SYNC-001-legacy-arm-directory-drift.md ~33: update drift doc to reflect kernel/arch/aarch64 canonical paths.
+Fix: #178 — docs/issues/nasm/NASM-SYNC-001-legacy-tree-drift.md ~8: document NASM tree under arch/x86_64/nasm and removed legacy folder.
+Fix: #179 — docs/ROADMAP.md ~87: correct module-contract P0–P9 snapshot links and integration status wording.
+Fix: #180 — kernel/arch/aarch64/asm/alloc_free.S ~26: AAPCS64 16-byte frame and preserve x30 in free path.
+Fix: #181 — kernel/arch/aarch64/include/fl_stack_asm.h ~18: align stack asm declarations with GAS implementation and elevation slot scan.
+Fix: #182 — kernel/arch/x86_64/asm/alloc_core.asm ~2: NASM alloc core prologue/epilogue and hidden symbol visibility fixes.
+Fix: #183 — kernel/core/identity/elevation.c ~17: refactor elevation slot principal copy to snprintf for guaranteed NUL termination.
+Fix: #184 — kernel/core/identity/path_property.c ~129: harden path_property lookup bounds and error returns.
+Fix: #185 — kernel/core/identity/path_property.h ~13: document path_property buffer sizes and contract expectations.
+Fix: #186 — kernel/core/identity/session.c ~13: session hardening: validate null/invalid session handles and privilege transitions (#219 adds regression tests).
+Fix: #187 — kernel/core/identity/user_db.c ~125: surface SQLite reload failures instead of silent ignore.
+Fix: #188 — kernel/core/identity/user_db.c ~135: userdel clears password hash and marks row deleted consistently.
+Fix: #189 — kernel/core/memory/fl_stack.c ~21: fl_stack push/pop/count wrappers call arch asm with correct frame sizes.
+Fix: #190 — kernel/core/mm/pmm.c ~60: PMM free-frame pool returns fl_result_t errors on invalid inputs.
+Fix: #191 — kernel/core/mm/pmm.c ~113: guard double-free and out-of-range frame indices in PMM release.
+Fix: #192 — kernel/core/vfs/fs_jail.c ~123: elevation-aware fs_jail access checks per contract_p0_fs_jail.
+Fix: #193 — kernel/include/fl/fl_stack_asm.h ~15: unify fl_stack_asm prototypes across arch includes.
+Fix: #194 — Makefile ~55: ARM cross-compile: defer CXX=g++ override; wire deps-sqlite/openssl-aarch64 targets.
+Fix: #195 — userland/command/cmd_account.c ~35: batch token helper returns 0 when argv tail incomplete.
+Fix: #196 — userland/command/cmd_account.c ~48: useradd/passwd batch arity matches cmd_account_run consumption.
+Fix: #197 — userland/command/cmd_account.c ~70: userdel batch tokens bounded; no swallowing next command.
+Fix: #198 — userland/command/cmd_su.c ~81: su batch -c lookahead stops after target user parsed.
+Fix: #199 — userland/command/cmd_su.c ~111: restore saved login env on su apply failure using FL_USER_NAME_MAX buffer.
+Fix: #200 — userland/identity/password_hash.cpp ~96: PBKDF2 buffer sizing and OpenSSL error handling hardened.
+Fix: #201 — userland/shell/audit_log.c ~398: audit lines attribute elevation events with correct principal strings.
+Fix: #202 — userland/shell/interpreter.c ~254: interpreter auth gate respects session privilege before builtins.
+Fix: #203 — userland/shell/session_login_env.c ~47: apply login env only updates g_cwd after successful chdir.
+Fix: #204 — userland/shell/sh.c ~561: batch argv clamp limits per-command token spans; prevents critical shift of trailing commands.
+Fix: #205 — userland/shell/version_def.h ~25: stop committing PRERELEASE VERSION_LINE churn on feature branches (CI generates header).
+Fix: #206 — version/entries/4_1_0_gm1_main_prep.ver ~47: align GM=1 DESCRIPTION heredoc with promote_preproduction_for_main policy.
+Fix: #207 — arch/arm/gas/alloc_free.s ~26: legacy path doc: canonical alloc_free lives under kernel/arch/aarch64/asm.
+Fix: #208 — version/entries + PR #208: land PRE 4.1.1 BUILD 1 train for issues #169–#207.
+Fix: #209 — version/entries: prerelease BUILD 2 audit umbrella (superseded by #218–#222 fixes).
+Fix: #210 — git revert #208: temporarily revert BUILD 1; reapplied via #214/#217.
+Fix: #211 — git: sync develop with main branch alignment.
+Fix: #212 — git: merge main into develop resolving conflicts favoring main.
+Fix: #213 — git: second develop/main sync pass for branch parity.
+Fix: #214 — git: reapply BUILD 1 fixes after revert (#210).
+Fix: #215 — .github/actions/prepare-version-entries: run promote_preproduction_for_main when GM=1 present.
+Fix: #216 — CI #215 merge: GM=1 promotion wired in prepare-version-entries workflow.
+Fix: #217 — PR #217: reapply BUILD 1 code fixes for GitHub issues #169–#207 on develop.
+Fix: #218 — deps/lib/verify_archive_sha256.sh + deps/fetch-*.sh: shared verify_archive_sha256() for all archive downloads; scripts/check_deps_fetch_verify_sha256.sh in CI.
+Fix: #219 — tests/test_invariants.c: add test_session_hardening_issue186 and test_batch_argv_sh_clamp_edges covering #186 and #204 critical paths.
+Fix: #220.1 — userland/command/cmd_addcluster.c ~52: return 3 tokens whenever i+2<argc (flags no longer shrink count).
+Fix: #220.2 — userland/command/cmd_createdisk.c ~49: count optional -y/-n at argv[i+4]; incomplete invocations return argc-i trailing span.
+Fix: #220.3 — userland/command/cmd_rmdir.c ~41: return 0 when i+1>=argc instead of always 2.
+Fix: #220.4 — userland/command/cmd_rmtree.c ~27: return 0 when operand missing (same guard as rmdir).
+Fix: #220.5 — userland/command/cmd_setdisk.c ~39: consume at most one path operand (2 tokens) in batch mode.
+Fix: #220.6 — userland/command/cmd_su.c ~164: stop accepting -c after target username parsed in batch counter.
+Fix: #220.7 — userland/command/cmd_account.c ~152 / cmd_batch_dispatch.c: CI script verifies FL_SCMD_USERADD/USERDEL/PASSWD batch dispatch wiring.
+Fix: #220.8 — userland/command/cmd_diskput.c ~40: remove shell-command-name guard so FAT destinations like help are not split.
+Fix: #221.1 — userland/shell/sh.c ~223: default FL_USERS_LAB_DEFAULTS to 0 (opt-in lab seeds).
+Fix: #221.2 — userland/shell/session_login_env.c ~63: chdir before updating g_cwd; only commit cwd on success.
+Fix: #221.3 — userland/command/cmd_su.c ~74: saved[] sized FL_USER_NAME_MAX+1 to avoid truncated restore principal.
+Fix: #221.4 — kernel/core/identity/elevation.c ~49: snprintf principal into slot (no strncpy NUL race).
+Fix: #221.5 — userland/command/cmd_authutil.c ~23: cap fgets read size at INT_MAX before int cast.
+Fix: #222.1 — kernel/core/sched/threadpool.c ~22: NULL-check strdup; abort job enqueue on OOM.
+Fix: #222.2 — kernel/core/sched/threadpool.c ~67–81: caller-owned sem_t done_sem; threadpool_sem_wait_done retries EINTR.
+Fix: #222.3 — disk_asm.c ~179 (+ arch variants): lookup-table hex encode; single NUL at end (no per-iteration sprintf overflow).
+Fix: CI — Makefile: test_issue222; test_invariants compile+link via g++; clean issue220/issue222 artifacts.
+Fix: build — util.c: fl_batch_* only in cmd_batch_*_tokens.c (no duplicate symbols with full shell).
+Fix: version — CI prepare-version-entries runs finalize_version_locked (entries → locked); gen_version_def reads locked for VERSION_* (no ent_root scan; bot publishes locked + version_def.h).
+VER_4_1_1_GM1_BUILD3_END
+PROMOTE_DESC_END
+
+RELEASE_DATE=2026-05-24
+PROMOTE_DESC_END
