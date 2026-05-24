@@ -71,6 +71,9 @@ Fix: #221.5 — userland/command/cmd_authutil.c ~23: cap fgets read size at INT_
 Fix: #222.1 — kernel/core/sched/threadpool.c ~22: NULL-check strdup; abort job enqueue on OOM.
 Fix: #222.2 — kernel/core/sched/threadpool.c ~67–81: caller-owned sem_t done_sem; threadpool_sem_wait_done retries EINTR.
 Fix: #222.3 — disk_asm.c ~179 (+ arch variants): lookup-table hex encode; single NUL at end (no per-iteration sprintf overflow).
+Fix: CI — Makefile: test_issue222; test_invariants compile+link via g++; clean issue220/issue222 artifacts.
+Fix: build — util.c: fl_batch_* only in cmd_batch_*_tokens.c (no duplicate symbols with full shell).
+Fix: version — gen_version_def uses version/locked for VERSION_* until Version lock publishes GA 4.1.1 (no ent_root scan; feature PRs do not commit version_def.h).
 VER_4_1_1_GM1_BUILD3_END
 PROMOTE_DESC_END
 
