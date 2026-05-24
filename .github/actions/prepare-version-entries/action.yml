@@ -1,9 +1,9 @@
 name: Prepare version/entries
 description: >-
   Relocate non-GM root PRERELEASE=1 *.ver into preproduction A.B.C/, normalize
-  duplicate GM candidates, stamp missing RELEASE_DATE on the entries root and active
-  preproduction */ trees, copy version/entries → version/locked (skip preproduction */).
-  Full GM=1 promotion to root GA runs on Version lock on merge to develop, not here.
+  duplicate GM candidates, promote GM=1 preproduction rows to root GA .ver (and remove
+  those preproduction trees), stamp RELEASE_DATE on the entries root and any remaining
+  preproduction */ trees, then copy version/entries → version/locked (skip preproduction */).
 runs:
   using: composite
   steps:
@@ -16,6 +16,11 @@ runs:
       shell: bash
       working-directory: ${{ github.workspace }}
       run: bash scripts/promote_preproduction_for_main.sh --normalize-gm-only
+
+    - name: Promote GM=1 preproduction rows to root GA .ver
+      shell: bash
+      working-directory: ${{ github.workspace }}
+      run: bash scripts/promote_preproduction_for_main.sh
 
     - name: Stamp RELEASE_DATE on entries root and preproduction trees
       shell: bash
