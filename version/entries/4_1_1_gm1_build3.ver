@@ -1,10 +1,7 @@
 MAJOR_VERSION=4
 STANDARD_VERSION=1
 RELEASE_VERSION=1
-PRERELEASE=1
-DEV_VERSION=3
-GM=1
-DESCRIPTION<<VER_4_1_1_GM1_BUILD3_END
+DESCRIPTION<<PROMOTE_DESC_END
 4.1.1: Go-to-main (GM=1) preproduction BUILD 3 — resolves GitHub issues #169–#222 and subissues from PR #168/#217/#223 audits.
 
 Fix: #169 — Makefile ~55: only assign CXX=g++ when ARCH is not arm; preserve aarch64 cross CXX from earlier detection.
@@ -75,3 +72,6 @@ Fix: #222.1 — kernel/core/sched/threadpool.c ~22: NULL-check strdup; abort job
 Fix: #222.2 — kernel/core/sched/threadpool.c ~67–81: caller-owned sem_t done_sem; threadpool_sem_wait_done retries EINTR.
 Fix: #222.3 — disk_asm.c ~179 (+ arch variants): lookup-table hex encode; single NUL at end (no per-iteration sprintf overflow).
 VER_4_1_1_GM1_BUILD3_END
+PROMOTE_DESC_END
+
+RELEASE_DATE=2026-05-24
