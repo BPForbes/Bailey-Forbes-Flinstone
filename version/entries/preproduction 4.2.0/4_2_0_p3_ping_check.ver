@@ -4,7 +4,7 @@ RELEASE_VERSION=0
 PRERELEASE=1
 DEV_VERSION=1
 DESCRIPTION<<VER_END
-PRE 4.2.0 (P3): shell ping to loopback or IPv4 host; check requirements reports loopback ICMP and internet TCP reachability; CI network requirement script honors SKIP_NETWORK_INTEROP.
+PRE 4.2.0 (P3): ping and check requirements take any DNS/IPv4 host and port (ICMP when port 0, else TCP connect); live resolve and real RTT; CI uses P3_PROBE_HOST/P3_PROBE_PORT env.
 VER_END
 
 RELEASE_DATE=2026-05-24

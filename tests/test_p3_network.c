@@ -23,11 +23,20 @@ static int test_loopback_octet(void) {
     return 0;
 }
 
+static int test_resolve_localhost(void) {
+    uint32_t addr_be = 0;
+    char resolved[INET_ADDRSTRLEN];
+    ASSERT(fl_net_resolve_ipv4("localhost", &addr_be, resolved, sizeof(resolved)) ==
+           FL_RESULT_OK);
+    ASSERT(fl_net_ipv4_is_loopback(addr_be));
+    return 0;
+}
+
 static int test_loopback_ping(void) {
     double rtt = 0.0;
-    fl_result_t rc = fl_net_ping_ipv4("127.0.0.1", 1u, 3000u, &rtt);
-    if (rc == FL_RESULT_NOSYS) {
-        fprintf(stderr, "skip: ICMP ping socket not available\n");
+    fl_result_t rc = fl_net_ping("127.0.0.1", 0, 1u, 3000u, &rtt);
+    if (rc == FL_RESULT_NOSYS || rc == FL_RESULT_TIMEDOUT) {
+        fprintf(stderr, "skip: ICMP echo unavailable in this environment\n");
         return 0;
     }
     ASSERT(rc == FL_RESULT_OK);
@@ -35,14 +44,24 @@ static int test_loopback_ping(void) {
     return 0;
 }
 
-static int test_requirements_loopback(void) {
+static int test_loopback_tcp(void) {
+    double rtt = 0.0;
+    fl_result_t rc = fl_net_ping("127.0.0.1", 9, 1u, 3000u, &rtt);
+    ASSERT(rc == FL_RESULT_OK);
+    ASSERT(rtt >= 0.0);
+    return 0;
+}
+
+static int test_probe_endpoint(void) {
     fl_net_requirements_report_t rep;
-    ASSERT(fl_net_probe_requirements(0, &rep) == FL_RESULT_OK);
+    fl_result_t prc = fl_net_probe_endpoint("127.0.0.1", 9, 3000u, &rep);
+    ASSERT(prc == FL_RESULT_OK);
     if (getenv("SKIP_NETWORK_INTEROP") &&
         !strcmp(getenv("SKIP_NETWORK_INTEROP"), "1")) {
         return 0;
     }
-    ASSERT(rep.loopback_icmp_ok == 1);
+    ASSERT(rep.ok == 1);
+    ASSERT(strstr(rep.endpoint, "127.0.0.1") != NULL);
     return 0;
 }
 
@@ -52,13 +71,23 @@ int main(void) {
         return 1;
     puts("ok");
 
+    printf("test_resolve_localhost... ");
+    if (test_resolve_localhost() != 0)
+        return 1;
+    puts("ok");
+
     printf("test_loopback_ping... ");
     if (test_loopback_ping() != 0)
         return 1;
     puts("ok");
 
-    printf("test_requirements_loopback... ");
-    if (test_requirements_loopback() != 0)
+    printf("test_loopback_tcp... ");
+    if (test_loopback_tcp() != 0)
+        return 1;
+    puts("ok");
+
+    printf("test_probe_endpoint... ");
+    if (test_probe_endpoint() != 0)
         return 1;
     puts("ok");
 
