@@ -1,6 +1,12 @@
 #include "util.h"
 #include "contract_p7_shell_batch.h"
 
+/* contract_p7_shell_batch.h: audit-show batch argv cap (mirror if P7 changes). */
+_Static_assert(FL_CONTRACT_P7_BATCH_AUDIT_SHOW_MAX_TOKENS == 3u,
+               "fl_batch_audit_tokens_count must match P7 contract cap");
+/* contract_p7_shell_batch.h: contracts-qualified batch argv cap. */
+_Static_assert(FL_CONTRACT_P7_BATCH_CONTRACTS_QUALIFIED_MAX_TOKENS == 2u,
+               "fl_batch_contracts_tokens_count must match P7 contract cap");
 _Static_assert(FL_CONTRACT_P7_BATCH_AUDIT_SHOW_MAX_TOKENS <=
                    FL_CONTRACT_P7_BATCH_MAX_TOKENS_TOTAL,
                "audit batch grouping must fit total argv budget");
