@@ -27,3 +27,8 @@ runs:
       shell: bash
       working-directory: ${{ github.workspace }}
       run: bash scripts/stamp_version_entries_release_date.sh
+
+    - name: Finalize version (copy entries → locked, skip preproduction */)
+      shell: bash
+      working-directory: ${{ github.workspace }}
+      run: ./scripts/finalize_version_locked.sh
