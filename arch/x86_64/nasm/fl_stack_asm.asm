@@ -1,5 +1,5 @@
 ; fl_stack_t and elevation slot counting (x86-64 NASM, SysV AMD64).
-section .note.GNU-stack progbits alloc noexec
+section .note.GNU-stack progbits noalloc noexec nowrite
 section .text
 global asm_fl_stack_push
 global asm_fl_stack_pop

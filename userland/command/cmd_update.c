@@ -1,5 +1,6 @@
 #include "common.h"
 #include "cmd_decl.h"
+#include "cmd_batch.h"
 #include "cluster.h"
 #include "disk.h"
 #include <stdio.h>
@@ -29,4 +30,16 @@ int cmd_update_run(int argc, char **argv) {
         return 1;
     }
     return 0;
+}
+
+int cmd_update_batch_tokens_count(int argc, char **argv, int i) {
+    int remaining;
+
+    (void)argv;
+    if (i < 0 || i >= argc)
+        return 0;
+    remaining = argc - i;
+    if (remaining < 4)
+        return remaining;
+    return 4;
 }

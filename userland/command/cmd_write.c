@@ -1,5 +1,6 @@
 #include "common.h"
 #include "cmd_decl.h"
+#include "cmd_batch.h"
 #include "cmd_util.h"
 #include "path_log.h"
 #include "fs_service_glue.h"
@@ -41,4 +42,9 @@ int cmd_write_run(int argc, char **argv) {
             perror("write");
     }
     return 0;
+}
+
+int cmd_write_batch_tokens_count(int argc, char **argv, int i) {
+    (void)argv;
+    return (argc > i + 2) ? (argc - i) : 0;
 }

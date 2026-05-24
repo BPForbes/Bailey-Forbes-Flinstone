@@ -1,5 +1,5 @@
 ; xHCI MMIO helpers (P4-5) — x86-64 NASM (SysV rdi, rsi, …)
-section .note.GNU-stack progbits alloc noexec
+section .note.GNU-stack progbits noalloc noexec nowrite
 section .text
 global fl_usb_xhci_mmio_read32_asm
 global fl_usb_xhci_mmio_write32_asm
