@@ -21,6 +21,10 @@ static int test_issue220_1_addcluster(void) {
     ASSERT(cmd_addcluster_batch_tokens_count(4, av, 1) == 3);
     char *av2[] = {"p", "addcluster"};
     ASSERT(cmd_addcluster_batch_tokens_count(2, av2, 1) == 1);
+    char *av3[] = {"p", "addcluster", "setdisk", "vol.img"};
+    ASSERT(cmd_addcluster_batch_tokens_count(4, av3, 1) == 1);
+    char *av4[] = {"p", "addcluster", "-t", "payload"};
+    ASSERT(cmd_addcluster_batch_tokens_count(4, av4, 1) == 3);
     return 0;
 }
 
@@ -70,6 +74,8 @@ static int test_issue220_6_su(void) {
 static int test_issue220_8_diskput(void) {
     char *dp[] = {"p", "diskput", "host.bin", "help"};
     ASSERT(cmd_diskput_batch_tokens_count(4, dp, 1) == 3);
+    char *dp2[] = {"p", "diskput", "host.bin", "setdisk", "vol.img"};
+    ASSERT(cmd_diskput_batch_tokens_count(5, dp2, 1) == 2);
     return 0;
 }
 

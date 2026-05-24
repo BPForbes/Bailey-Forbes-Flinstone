@@ -11,11 +11,11 @@ for pair in \
 do
     case_tag="${pair%%:*}"
     func="${pair#*:}"
-    if ! grep -q "$case_tag" "$DISPATCH"; then
+    if ! grep -Eq "case[[:space:]]+$case_tag[[:space:]]*:" "$DISPATCH"; then
         echo "check_batch_dispatch_account_cmds: missing $case_tag in cmd_batch_dispatch.c" >&2
         fail=1
     fi
-    if ! grep -q "$func" "$DISPATCH"; then
+    if ! grep -Eq "\\b$func[[:space:]]*\\(" "$DISPATCH"; then
         echo "check_batch_dispatch_account_cmds: missing $func in cmd_batch_dispatch.c" >&2
         fail=1
     fi

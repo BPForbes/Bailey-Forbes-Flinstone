@@ -7,14 +7,17 @@ fail=0
 for script in "$ROOT"/deps/fetch-*.sh; do
     [ -f "$script" ] || continue
     base="$(basename "$script")"
-    if ! grep -q 'verify_archive_sha256' "$script" 2>/dev/null; then
-        if grep -qE 'curl.*-o.*ARCHIVE|curl.*-o.*"\$ARCHIVE"' "$script" 2>/dev/null; then
-            echo "check_deps_fetch_verify_sha256: $base downloads but does not call verify_archive_sha256" >&2
-            fail=1
-        fi
-        continue
+    downloads_archive=0
+    if grep -Eq 'curl[^#]*[[:space:]]-o[[:space:]]+|wget[^#]*(-O|--output-document)[[:space:]]+' "$script" 2>/dev/null; then
+        downloads_archive=1
     fi
-    if ! grep -q 'verify_archive_sha256\.sh' "$script" 2>/dev/null; then
+    if [ "$downloads_archive" -eq 1 ] && \
+       ! grep -Eq '^[[:space:]]*verify_archive_sha256[[:space:]]+' "$script" 2>/dev/null; then
+        echo "check_deps_fetch_verify_sha256: $base downloads but does not call verify_archive_sha256" >&2
+        fail=1
+    fi
+    if [ "$downloads_archive" -eq 1 ] && \
+       ! grep -q 'verify_archive_sha256\.sh' "$script" 2>/dev/null; then
         echo "check_deps_fetch_verify_sha256: $base must source deps/lib/verify_archive_sha256.sh" >&2
         fail=1
     fi
