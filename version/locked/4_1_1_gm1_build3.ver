@@ -2,7 +2,7 @@ MAJOR_VERSION=4
 STANDARD_VERSION=1
 RELEASE_VERSION=1
 RELEASE_DATE=2026-05-24
-DESCRIPTION<<PROMOTE_DESC_END
+DESCRIPTION<<VER_4_1_1_GM1_BUILD3_END
 4.1.1: Go-to-main (GM=1) preproduction BUILD 3 — resolves GitHub issues #169–#222 and subissues from PR #168/#217/#223 audits.
 
 Fix: #169 — Makefile ~55: only assign CXX=g++ when ARCH is not arm; preserve aarch64 cross CXX from earlier detection.
@@ -76,7 +76,3 @@ Fix: CI — Makefile: test_issue222; test_invariants compile+link via g++; clean
 Fix: build — util.c: fl_batch_* only in cmd_batch_*_tokens.c (no duplicate symbols with full shell).
 Fix: version — CI prepare-version-entries runs finalize_version_locked (entries → locked); gen_version_def reads locked for VERSION_* (no ent_root scan; bot publishes locked + version_def.h).
 VER_4_1_1_GM1_BUILD3_END
-PROMOTE_DESC_END
-
-RELEASE_DATE=2026-05-24
-PROMOTE_DESC_END
