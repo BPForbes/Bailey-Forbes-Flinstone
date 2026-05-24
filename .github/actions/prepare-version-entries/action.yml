@@ -17,12 +17,12 @@ runs:
       working-directory: ${{ github.workspace }}
       run: bash scripts/promote_preproduction_for_main.sh --normalize-gm-only
 
-    - name: Promote GM=1 preproduction rows to root GA .ver
-      shell: bash
-      working-directory: ${{ github.workspace }}
-      run: bash scripts/promote_preproduction_for_main.sh
-
     - name: Stamp RELEASE_DATE on entries root and preproduction trees
       shell: bash
       working-directory: ${{ github.workspace }}
       run: bash scripts/stamp_version_entries_release_date.sh
+
+    - name: Finalize version (copy entries → locked, skip preproduction */)
+      shell: bash
+      working-directory: ${{ github.workspace }}
+      run: ./scripts/finalize_version_locked.sh
