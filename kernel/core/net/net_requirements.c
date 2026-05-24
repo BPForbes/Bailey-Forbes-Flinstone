@@ -1,6 +1,7 @@
 #include "net_requirements.h"
 
 #include "contract_p0_ci.h"
+#include "net_dns.h"
 #include "net_ping_host.h"
 
 #include <arpa/inet.h>

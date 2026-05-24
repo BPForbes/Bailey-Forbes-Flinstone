@@ -4,7 +4,7 @@ RELEASE_VERSION=0
 PRERELEASE=1
 DEV_VERSION=1
 DESCRIPTION<<VER_END
-PRE 4.2.0 (P3): ping and check requirements take any DNS/IPv4 host and port (ICMP when port 0, else TCP connect); live resolve and real RTT; CI uses P3_PROBE_HOST/P3_PROBE_PORT env.
+PRE 4.2.0 (P3): ping and check requirements for any DNS/IPv4 host and port (ICMP when port 0, TCP SYN otherwise); in-tree IPv4/ICMP/TCP/DNS and software loopback with hosted syscall shim only; CI uses P3_PROBE_HOST/P3_PROBE_PORT env.
 VER_END
 
 RELEASE_DATE=2026-05-24

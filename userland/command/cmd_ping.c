@@ -2,6 +2,8 @@
 #include "cmd_batch.h"
 #include "fl/authz_subsystem.h"
 #include "contract_p2_authz.h"
+#include "net_dns.h"
+#include "net_ipv4.h"
 #include "net_ping_host.h"
 
 #include <arpa/inet.h>

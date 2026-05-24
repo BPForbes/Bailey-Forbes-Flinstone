@@ -9,7 +9,7 @@
 #ifndef FL_CONTRACT_P3_WIRE_H
 #define FL_CONTRACT_P3_WIRE_H
 
-#include "contract_extend.h"
+#include "contract_result.h"
 
 #include <stddef.h>
 #include <stdint.h>

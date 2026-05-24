@@ -1,3 +1,5 @@
+#include "net_dns.h"
+#include "net_ipv4.h"
 #include "net_ping_host.h"
 #include "net_requirements.h"
 
