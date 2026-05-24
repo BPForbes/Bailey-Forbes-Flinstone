@@ -50,6 +50,8 @@ typedef enum {
     FL_SCMD_USERDEL,
     FL_SCMD_PASSWD,
     FL_SCMD_WHOAMI,
+    FL_SCMD_PING,
+    FL_SCMD_CHECK,
 } fl_shell_cmd_no_t;
 
 #endif /* FL_SHELL_CMD_H */

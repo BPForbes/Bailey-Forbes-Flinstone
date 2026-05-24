@@ -1,0 +1,8 @@
+MAJOR_VERSION=4
+STANDARD_VERSION=2
+RELEASE_VERSION=0
+PRERELEASE=1
+DEV_VERSION=1
+DESCRIPTION<<VER_END
+PRE 4.2.0 (P3): shell ping to loopback or IPv4 host; check requirements reports loopback ICMP and internet TCP reachability; CI network requirement script honors SKIP_NETWORK_INTEROP.
+VER_END

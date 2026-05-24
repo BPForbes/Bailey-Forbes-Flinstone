@@ -85,6 +85,8 @@ static const char HELP_BODY[] =
 "  useradd <u>          Add account (password on next line; needs elevation)\n"
 "  userdel <u>          Remove account (needs elevation)\n"
 "  passwd [u]           Change password (new password on next line)\n"
+"  ping [host]          ICMP echo (default 127.0.0.1; -c count, -W timeout_ms)\n"
+"  check requirements   Probe loopback ICMP and internet TCP (P3 CI)\n"
 "  help                 Display this help\n"
 "  redirect <file>      Redirect output (use \"redirect off\" to restore)\n"
 "  rerun <N>            Re-run Nth history command\n"
