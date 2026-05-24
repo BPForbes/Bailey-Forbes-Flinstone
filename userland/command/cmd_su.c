@@ -4,6 +4,7 @@
 #include "common.h"
 #include "fl/audit_log.h"
 #include "fl/session.h"
+#include "user_db.h"
 #include "session_sync.h"
 #include "session_login_env.h"
 #include <stdio.h>
@@ -73,7 +74,7 @@ static int su_run_command(const char *command) {
 
 int cmd_su_run(int argc, char **argv) {
     su_request_t req;
-    char saved[32];
+    char saved[FL_USER_NAME_MAX];
     char saved_home[CWD_MAX];
     char saved_cwd[CWD_MAX];
     fl_result_t rc;
@@ -149,6 +150,8 @@ int cmd_su_batch_tokens_count(int argc, char **argv, int i) {
     j = i + 1;
     while (j < argc && argv[j]) {
         if (!strcmp(argv[j], "-c")) {
+            if (saw_user)
+                break;
             if (j + 1 >= argc)
                 return (j + 1) - i;
             if (j + 2 < argc && argv[j + 2] && argv[j + 2][0] != '-')

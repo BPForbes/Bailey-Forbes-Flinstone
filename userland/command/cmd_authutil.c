@@ -3,6 +3,7 @@
 #include "fl/session.h"
 #include "fl/elevation.h"
 #include "user_db.h"
+#include <limits.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -20,8 +21,11 @@ void cmd_wipe_password(char *buf, size_t buf_size) {
 
 static int cmd_read_password_line(const char *prompt, char *buf, size_t buf_size) {
     (void)prompt;
-    if (!fgets(buf, (int)buf_size, stdin))
-        return -1;
+    {
+        int read_size = (buf_size > (size_t)INT_MAX) ? INT_MAX : (int)buf_size;
+        if (!fgets(buf, read_size, stdin))
+            return -1;
+    }
     {
         size_t n = strlen(buf);
         if (n > 0 && buf[n - 1] == '\n')

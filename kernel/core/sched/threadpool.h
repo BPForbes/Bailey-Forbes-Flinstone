@@ -4,6 +4,7 @@
 #include "common.h"
 #include "priority_queue.h"
 #include <pthread.h>
+#include <semaphore.h>
 #include <time.h>
 
 #define PRIORITY_IMMEDIATE  0   /* user commands */
@@ -12,6 +13,7 @@
 
 typedef struct job_node {
     char *command_str;
+    sem_t *done_sem;
     pthread_mutex_t mutex;
     pthread_cond_t cond;
     int done;
@@ -33,7 +35,7 @@ extern thread_pool_t g_pool;
 job_node *create_job(const char *line);
 void free_job(job_node *job);
 void queue_job(job_node *job);
-void queue_job_priority(job_node *job, int priority);
+int queue_job_priority(job_node *job, int priority);
 void submit_single_command(const char *line);
 void submit_single_command_priority(const char *line, int priority);
 void *worker_thread(void *arg);

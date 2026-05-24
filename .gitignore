@@ -30,6 +30,9 @@ tests/test_vm_layer_warning
 tests/test_vm_syscall_bridge
 tests/test_vm_arch_readiness
 tests/test_p0_p2_wiring
+tests/test_batch_argv_issue220
+tests/test_threadpool_issue222
+tests/test_disk_hex_issue222
 
 # Fetched/built deps
 deps/install

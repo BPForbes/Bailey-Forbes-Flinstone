@@ -45,9 +45,16 @@ int disk_asm_write_cluster(int clu_index, const unsigned char *buf) {
         return -1;
     char *hex_str = mem_domain_alloc(MEM_DOMAIN_FS, (size_t)g_cluster_size * 2 + 1);
     if (!hex_str) return -1;
-    for (int i = 0; i < g_cluster_size; i++)
-        sprintf(hex_str + i * 2, "%02X", buf[i]);
-    hex_str[g_cluster_size * 2] = '\0';
+    {
+        static const char hex[] = "0123456789ABCDEF";
+        size_t cluster_size = (size_t)g_cluster_size;
+        for (size_t i = 0; i < cluster_size; i++) {
+            size_t off = i * 2u;
+            hex_str[off]     = hex[(buf[i] >> 4) & 0xF];
+            hex_str[off + 1] = hex[buf[i] & 0xF];
+        }
+        hex_str[cluster_size * 2u] = '\0';
+    }
     update_cluster_line(clu_index, hex_str);
     mem_domain_free(MEM_DOMAIN_FS, hex_str);
     return 0;

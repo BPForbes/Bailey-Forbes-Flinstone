@@ -482,9 +482,55 @@ test_userspace_connection: kernel/core/sys/vrt.o kernel/core/sys/ipc.o kernel/co
 # Invariant tests (property + contract headers). Uses $(CFLAGS), which already
 # includes -Icontracts/virtualization and -Icontracts/hardening for P8/P9 shards.
 TEST_INVARIANTS_CMD_OBJS = userland/command/cmd_batch_audit_tokens.o userland/command/cmd_batch_contracts_tokens.o
-test_invariants: userland/shell/common.o userland/shell/authz_subsystem.o $(UTIL_SHELL_LINK_OBJS) $(TEST_INVARIANTS_CMD_OBJS) $(MEM_ASM_OBJ) $(HISTORY_ASM_OBJ) $(UTIL_HISTORY_HOST_OBJS)
-	$(CC) $(CFLAGS) $(TEST_SANITIZE) -o tests/test_invariants tests/test_invariants.c userland/shell/common.o userland/shell/authz_subsystem.o $(UTIL_SHELL_LINK_OBJS) $(TEST_INVARIANTS_CMD_OBJS) $(MEM_ASM_OBJ) $(HISTORY_ASM_OBJ) $(UTIL_HISTORY_HOST_OBJS)
+TEST_INVARIANTS_SESSION_OBJS = kernel/core/time/timekeeping.o kernel/core/mm/mem_domain.o \
+	kernel/core/identity/user_db.o kernel/core/identity/elevation.o kernel/core/identity/session.o \
+	userland/identity/password_hash.o $(FL_STACK_ASM_OBJ)
+TEST_INVARIANTS_LIBS = -lsqlite3 -lstdc++ -lcrypto -pthread
+test_invariants: test_batch_argv_issue220 userland/shell/common.o userland/shell/authz_subsystem.o $(UTIL_SHELL_LINK_OBJS) $(TEST_INVARIANTS_CMD_OBJS) $(TEST_INVARIANTS_SESSION_OBJS) $(MEM_ASM_OBJ) $(HISTORY_ASM_OBJ) $(UTIL_HISTORY_HOST_OBJS)
+	$(CC) $(CFLAGS) $(TEST_SANITIZE) -o tests/test_invariants tests/test_invariants.c userland/shell/common.o userland/shell/authz_subsystem.o $(UTIL_SHELL_LINK_OBJS) $(TEST_INVARIANTS_CMD_OBJS) $(TEST_INVARIANTS_SESSION_OBJS) $(MEM_ASM_OBJ) $(HISTORY_ASM_OBJ) $(UTIL_HISTORY_HOST_OBJS) $(TEST_INVARIANTS_LIBS) -Wl,-z,noexecstack
 	./tests/test_invariants
+
+# Issue #220 / #204: batch arity helpers (-ffunction-sections avoids pulling cmd_*_run).
+TEST_BATCH_GC_DIR = tests/obj/issue220
+TEST_BATCH_GC_FLAGS = -ffunction-sections -fdata-sections
+TEST_BATCH_ISSUE220_CMD_BASENAMES = cmd_addcluster cmd_createdisk cmd_rmdir cmd_rmtree \
+	cmd_setdisk cmd_diskput cmd_su cmd_login cmd_sudo cmd_account cmd_registry
+TEST_BATCH_ISSUE220_CMD_OBJS = $(addprefix $(TEST_BATCH_GC_DIR)/,$(addsuffix .o,$(TEST_BATCH_ISSUE220_CMD_BASENAMES))) \
+	$(TEST_BATCH_GC_DIR)/cmd_batch.o
+
+$(TEST_BATCH_GC_DIR):
+	@mkdir -p $(TEST_BATCH_GC_DIR)
+
+$(TEST_BATCH_GC_DIR)/%.o: userland/command/%.c | $(TEST_BATCH_GC_DIR)
+	$(CC) $(CFLAGS) $(TEST_BATCH_GC_FLAGS) -c $< -o $@
+
+$(TEST_BATCH_GC_DIR)/cmd_batch.o: userland/command/cmd_batch.c | $(TEST_BATCH_GC_DIR)
+	$(CC) $(CFLAGS) $(TEST_BATCH_GC_FLAGS) -DTEST_BATCH_ARGV_HELPERS_ONLY -c userland/command/cmd_batch.c -o $@
+
+.PHONY: test_batch_argv_issue220
+test_batch_argv_issue220: tests/test_batch_argv_issue220.c tests/stub_batch_layout_valid.c $(TEST_BATCH_ISSUE220_CMD_OBJS)
+	$(CC) $(CFLAGS) $(TEST_SANITIZE) -o tests/test_batch_argv_issue220 tests/test_batch_argv_issue220.c tests/stub_batch_layout_valid.c $(TEST_BATCH_ISSUE220_CMD_OBJS) -Wl,--gc-sections -Wl,-z,noexecstack
+	./tests/test_batch_argv_issue220
+
+TEST_THREADPOOL_GC_DIR = tests/obj/issue222
+$(TEST_THREADPOOL_GC_DIR):
+	@mkdir -p $(TEST_THREADPOOL_GC_DIR)
+
+THREADPOOL_TEST_CFLAGS = $(filter-out -DBATCH_SINGLE_THREAD=1,$(CFLAGS)) -UBATCH_SINGLE_THREAD
+
+$(TEST_THREADPOOL_GC_DIR)/threadpool.o: kernel/core/sched/threadpool.c | $(TEST_THREADPOOL_GC_DIR)
+	$(CC) $(THREADPOOL_TEST_CFLAGS) $(TEST_BATCH_GC_FLAGS) -c $< -o $@
+
+.PHONY: test_threadpool_issue222 test_disk_hex_issue222 test_issue222
+test_threadpool_issue222: tests/test_threadpool_issue222.c $(TEST_THREADPOOL_GC_DIR)/threadpool.o priority_queue.o $(MEM_ASM_OBJ)
+	$(CC) $(THREADPOOL_TEST_CFLAGS) $(TEST_SANITIZE) -o tests/test_threadpool_issue222 tests/test_threadpool_issue222.c $(TEST_THREADPOOL_GC_DIR)/threadpool.o priority_queue.o $(MEM_ASM_OBJ) -lpthread -Wl,--gc-sections -Wl,-z,noexecstack
+	./tests/test_threadpool_issue222
+
+test_disk_hex_issue222: tests/test_disk_hex_issue222.c
+	$(CC) $(CFLAGS) $(TEST_SANITIZE) -o tests/test_disk_hex_issue222 tests/test_disk_hex_issue222.c -Wl,-z,noexecstack
+	./tests/test_disk_hex_issue222
+
+test_issue222: test_threadpool_issue222 test_disk_hex_issue222
 
 # audit_log unit tests (standalone, no CUnit required)
 .PHONY: test_audit_log
@@ -578,6 +624,8 @@ clean:
 	rm -f kernel/arch/*/drivers/*.o kernel/arch/*/hal/*.o kernel/drivers/*.o kernel/drivers/block/*.o VM/devices/*.o
 	rm -f arch/*/*/*.o arch/*/*/alloc/*.o
 	rm -f tests/test_mem_asm tests/test_alloc tests/test_priority_queue tests/test_drivers tests/test_vm_mem tests/test_replay tests/test_invariants tests/test_userspace_connection tests/test_vm_syscall_bridge tests/test_vm_arch_readiness
+	rm -f tests/test_batch_argv_issue220 tests/test_threadpool_issue222 tests/test_disk_hex_issue222
+	rm -rf tests/obj/issue220 tests/obj/issue222
 
 # Architecture-specific build targets
 .PHONY: arm x86-64-nasm x86_64_nasm parity

@@ -46,7 +46,15 @@ int cmd_addcluster_run(int argc, char **argv) {
 }
 
 int cmd_addcluster_batch_tokens_count(int argc, char **argv, int i) {
-    if (i + 2 < argc && (!strcmp(argv[i + 1], "-t") || !strcmp(argv[i + 1], "-h")))
+    if (i < 0 || i >= argc || !argv || !argv[i])
+        return 0;
+    if (i + 1 < argc && argv[i + 1] &&
+        (!strcmp(argv[i + 1], "-t") || !strcmp(argv[i + 1], "-h"))) {
+        return (i + 2 < argc && argv[i + 2]) ? 3 : 2;
+    }
+    if (i + 2 < argc && argv[i + 1] && argv[i + 2] &&
+        !cmd_batch_token_is_shell_command(argv[i + 1]) &&
+        !cmd_batch_token_is_shell_command(argv[i + 2]))
         return 3;
     return 1;
 }

@@ -1,0 +1,9 @@
+MAJOR_VERSION=4
+STANDARD_VERSION=1
+RELEASE_VERSION=1
+PRERELEASE=1
+DEV_VERSION=2
+GM=0
+DESCRIPTION=4.1.1 preproduction build 2: GitHub issues #218-#222 complete—#218 deps SHA-256 CI; #219 session/batch tests; #220 batch arity (#220.1-#220.8, createdisk incomplete span); #221 identity/session; #222 threadpool strdup/done_sem/EINTR (#222.1-#222.2) and disk hex encoding (#222.3) with make test_issue222.
+
+RELEASE_DATE=2026-05-24

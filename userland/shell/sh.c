@@ -218,9 +218,9 @@ static void vm_warn_layer_config(void) {
 }
 
 int main(int argc, char *argv[]) {
-    /* Hosted lab default accounts; set FL_USERS_LAB_DEFAULTS=0 before launch to disable weak seeds. */
+    /* Lab weak seeds are opt-in; set FL_USERS_LAB_DEFAULTS=1 to enable. */
     if (!getenv("FL_USERS_LAB_DEFAULTS"))
-        (void)setenv("FL_USERS_LAB_DEFAULTS", "1", 0);
+        (void)setenv("FL_USERS_LAB_DEFAULTS", "0", 0);
     /* Seed the random number generator */
     srand((unsigned) time(NULL));
 
