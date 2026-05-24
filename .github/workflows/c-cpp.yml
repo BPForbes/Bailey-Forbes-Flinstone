@@ -32,6 +32,9 @@ jobs:
       - name: Prepare version/entries (relocate, normalize GM, promote, stamp dates)
         uses: ./.github/actions/prepare-version-entries
 
+      - name: GM=1 preproduction rows must be promoted (not left for header-only sync)
+        run: ./scripts/check_version_gm1_preproduction_promoted.sh
+
       - name: Regenerate userland/shell/version_def.h from .ver trees (entries + preproduction)
         run: ./scripts/gen_version_def.sh
 
