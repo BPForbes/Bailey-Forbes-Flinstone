@@ -487,7 +487,10 @@ TEST_INVARIANTS_SESSION_OBJS = kernel/core/time/timekeeping.o kernel/core/mm/mem
 	userland/identity/password_hash.o $(FL_STACK_ASM_OBJ)
 TEST_INVARIANTS_LIBS = -lsqlite3 -lstdc++ -lcrypto -pthread
 test_invariants: test_batch_argv_issue220 userland/shell/common.o userland/shell/authz_subsystem.o $(UTIL_SHELL_LINK_OBJS) $(TEST_INVARIANTS_CMD_OBJS) $(TEST_INVARIANTS_SESSION_OBJS) $(MEM_ASM_OBJ) $(HISTORY_ASM_OBJ) $(UTIL_HISTORY_HOST_OBJS)
-	$(CC) $(CFLAGS) $(TEST_SANITIZE) -o tests/test_invariants tests/test_invariants.c userland/shell/common.o userland/shell/authz_subsystem.o $(UTIL_SHELL_LINK_OBJS) $(TEST_INVARIANTS_CMD_OBJS) $(TEST_INVARIANTS_SESSION_OBJS) $(MEM_ASM_OBJ) $(HISTORY_ASM_OBJ) $(UTIL_HISTORY_HOST_OBJS) $(TEST_INVARIANTS_LIBS) -Wl,-z,noexecstack
+	$(CC) $(CFLAGS) $(TEST_SANITIZE) -c -o tests/test_invariants.o tests/test_invariants.c
+	$(CXX) $(CXXFLAGS) $(TEST_SANITIZE) -o tests/test_invariants tests/test_invariants.o \
+	  userland/shell/common.o userland/shell/authz_subsystem.o $(UTIL_SHELL_LINK_OBJS) $(TEST_INVARIANTS_CMD_OBJS) $(TEST_INVARIANTS_SESSION_OBJS) \
+	  $(MEM_ASM_OBJ) $(HISTORY_ASM_OBJ) $(UTIL_HISTORY_HOST_OBJS) $(TEST_INVARIANTS_LIBS) -Wl,-z,noexecstack
 	./tests/test_invariants
 
 # Issue #220 / #204: batch arity helpers (-ffunction-sections avoids pulling cmd_*_run).

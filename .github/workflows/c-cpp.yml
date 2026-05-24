@@ -24,7 +24,6 @@ jobs:
         with:
           fetch-depth: 0
           token: ${{ secrets.BPFORBES_PAT || secrets.VERSION_LOCK_PAT || secrets.GITHUB_TOKEN }}
-          persist-credentials: false
 
       - name: Block fork PR when root PRERELEASE=1 needs automated relocate
         if: github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name != github.repository
@@ -36,45 +35,31 @@ jobs:
       - name: Regenerate userland/shell/version_def.h from .ver trees (entries + preproduction)
         run: ./scripts/gen_version_def.sh
 
-      - name: Publish version/entries and version_def.h (same-repo only)
+      - name: Publish version/entries, version/locked, and version_def.h (same-repo only)
         if: github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository
         env:
           BOT_NAME: github-actions[bot]
           BOT_EMAIL: 41898282+github-actions[bot]@users.noreply.github.com
-          GITHUB_TOKEN: ${{ secrets.BPFORBES_PAT || secrets.VERSION_LOCK_PAT || secrets.GITHUB_TOKEN }}
-          GIT_HEAD_REF: ${{ github.head_ref || github.event.pull_request.head.ref }}
-          PR_HEAD_REF: ${{ github.event.pull_request.head.ref }}
+          GIT_HEAD_REF: ${{ github.head_ref }}
         run: |
           set -euo pipefail
-          if git diff --quiet -- version/entries userland/shell/version_def.h; then
-            echo "No version/entries or version_def.h changes after prepare-version-entries + gen_version_def.sh."
+          if git diff --quiet -- version/entries version/locked userland/shell/version_def.h; then
+            echo "No version/entries, version/locked, or version_def.h changes after prepare-version-entries + gen_version_def.sh."
             exit 0
           fi
           if [[ "${GITHUB_REF}" == "refs/heads/develop" || "${GITHUB_REF}" == "refs/heads/main" ]]; then
             echo "Skipping push on develop/main (relocate + header checks run here; version-lock sync PR publishes when needed)."
             exit 0
           fi
-          if [[ -z "${GITHUB_TOKEN}" ]]; then
-            echo "Publish version: GITHUB_TOKEN is required to push bot commit" >&2
-            exit 1
-          fi
-          git remote set-url origin \
-            "https://x-access-token:${GITHUB_TOKEN}@github.com/${GITHUB_REPOSITORY}.git"
           git config user.name "$BOT_NAME"
           git config user.email "$BOT_EMAIL"
-          git add -A -- version/entries userland/shell/version_def.h
-          git commit -m "chore(version): sync entries relocate, RELEASE_DATE stamp, and version_def.h (automated)"
-          push_ref=""
+          git add -A -- version/entries version/locked userland/shell/version_def.h
+          git commit -m "chore(version): sync entries relocate, finalize locked, and version_def.h (automated)"
           if [[ "${GITHUB_EVENT_NAME}" == "pull_request" ]]; then
-            push_ref="${GIT_HEAD_REF:-${PR_HEAD_REF:-}}"
+            git push origin "HEAD:${GIT_HEAD_REF}"
           else
-            push_ref="${GITHUB_REF_NAME}"
+            git push origin "HEAD:${GITHUB_REF_NAME}"
           fi
-          if [[ -z "${push_ref}" ]]; then
-            echo "Publish version: cannot resolve branch ref to push (event=${GITHUB_EVENT_NAME})" >&2
-            exit 1
-          fi
-          git push origin "HEAD:${push_ref}"
 
       - name: Validate version locked immutability (PR only)
         if: github.event_name == 'pull_request'
@@ -114,8 +99,6 @@ jobs:
       - uses: actions/checkout@v4
         with:
           fetch-depth: 0
-          token: ${{ secrets.BPFORBES_PAT || secrets.VERSION_LOCK_PAT || secrets.GITHUB_TOKEN }}
-          persist-credentials: false
 
       - name: Sync version checkout for build
         uses: ./.github/actions/sync-version-checkout
@@ -176,8 +159,6 @@ jobs:
       - uses: actions/checkout@v4
         with:
           fetch-depth: 0
-          token: ${{ secrets.BPFORBES_PAT || secrets.VERSION_LOCK_PAT || secrets.GITHUB_TOKEN }}
-          persist-credentials: false
 
       - name: Sync version checkout for build
         uses: ./.github/actions/sync-version-checkout
@@ -207,8 +188,6 @@ jobs:
       - uses: actions/checkout@v4
         with:
           fetch-depth: 0
-          token: ${{ secrets.BPFORBES_PAT || secrets.VERSION_LOCK_PAT || secrets.GITHUB_TOKEN }}
-          persist-credentials: false
 
       - name: Sync version checkout for build
         uses: ./.github/actions/sync-version-checkout
