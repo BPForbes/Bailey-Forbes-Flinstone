@@ -143,8 +143,8 @@ jobs:
       - name: Test — invariants
         run: make test_invariants
 
-      - name: Test — threadpool (#222)
-        run: make test_threadpool_issue222
+      - name: Test — threadpool and disk hex (#222)
+        run: make test_issue222
 
       - name: Test — fs_jail
         run: make test_fs_jail

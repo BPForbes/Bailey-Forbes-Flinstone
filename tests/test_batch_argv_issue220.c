@@ -29,6 +29,11 @@ static int test_issue220_2_createdisk(void) {
     ASSERT(cmd_createdisk_batch_tokens_count(7, cd, 1) == 5);
     char *cd2[] = {"p", "createdisk", "vol", "8", "16"};
     ASSERT(cmd_createdisk_batch_tokens_count(5, cd2, 1) == 4);
+    /* Incomplete: return all trailing tokens so sh.c insufficient-args path skips them. */
+    char *short_cd[] = {"p", "createdisk", "vol"};
+    ASSERT(cmd_createdisk_batch_tokens_count(3, short_cd, 1) == 2);
+    char *only_cd[] = {"p", "createdisk"};
+    ASSERT(cmd_createdisk_batch_tokens_count(2, only_cd, 1) == 1);
     return 0;
 }
 

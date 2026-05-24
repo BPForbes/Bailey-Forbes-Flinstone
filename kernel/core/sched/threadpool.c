@@ -1,9 +1,22 @@
 #include "threadpool.h"
 #include "interpreter.h"
 #include "common.h"
+#include <errno.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+
+#ifndef BATCH_SINGLE_THREAD
+static int threadpool_sem_wait_done(sem_t *done_sem) {
+    while (sem_wait(done_sem) != 0) {
+        if (errno != EINTR) {
+            perror("threadpool: sem_wait");
+            return -1;
+        }
+    }
+    return 0;
+}
+#endif
 
 thread_pool_t g_pool;
 
@@ -99,8 +112,12 @@ void submit_single_command_priority(const char *line, int priority) {
         free_job(job);
         return;
     }
-    if (sem_wait(&done_sem) != 0)
-        perror("threadpool: sem_wait");
+    if (threadpool_sem_wait_done(&done_sem) != 0) {
+        job->done_sem = NULL;
+        sem_destroy(&done_sem);
+        free_job(job);
+        return;
+    }
     job->done_sem = NULL;
     sem_destroy(&done_sem);
     free_job(job);

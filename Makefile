@@ -516,13 +516,21 @@ TEST_THREADPOOL_GC_DIR = tests/obj/issue222
 $(TEST_THREADPOOL_GC_DIR):
 	@mkdir -p $(TEST_THREADPOOL_GC_DIR)
 
-$(TEST_THREADPOOL_GC_DIR)/threadpool.o: kernel/core/sched/threadpool.c | $(TEST_THREADPOOL_GC_DIR)
-	$(CC) $(CFLAGS) $(TEST_BATCH_GC_FLAGS) -c $< -o $@
+THREADPOOL_TEST_CFLAGS = $(filter-out -DBATCH_SINGLE_THREAD=1,$(CFLAGS)) -UBATCH_SINGLE_THREAD
 
-.PHONY: test_threadpool_issue222
-test_threadpool_issue222: tests/test_threadpool_issue222.c $(TEST_THREADPOOL_GC_DIR)/threadpool.o
-	$(CC) $(CFLAGS) $(TEST_SANITIZE) -o tests/test_threadpool_issue222 tests/test_threadpool_issue222.c $(TEST_THREADPOOL_GC_DIR)/threadpool.o -lpthread -Wl,--gc-sections -Wl,-z,noexecstack
+$(TEST_THREADPOOL_GC_DIR)/threadpool.o: kernel/core/sched/threadpool.c | $(TEST_THREADPOOL_GC_DIR)
+	$(CC) $(THREADPOOL_TEST_CFLAGS) $(TEST_BATCH_GC_FLAGS) -c $< -o $@
+
+.PHONY: test_threadpool_issue222 test_disk_hex_issue222 test_issue222
+test_threadpool_issue222: tests/test_threadpool_issue222.c $(TEST_THREADPOOL_GC_DIR)/threadpool.o priority_queue.o $(MEM_ASM_OBJ)
+	$(CC) $(THREADPOOL_TEST_CFLAGS) $(TEST_SANITIZE) -o tests/test_threadpool_issue222 tests/test_threadpool_issue222.c $(TEST_THREADPOOL_GC_DIR)/threadpool.o priority_queue.o $(MEM_ASM_OBJ) -lpthread -Wl,--gc-sections -Wl,-z,noexecstack
 	./tests/test_threadpool_issue222
+
+test_disk_hex_issue222: tests/test_disk_hex_issue222.c
+	$(CC) $(CFLAGS) $(TEST_SANITIZE) -o tests/test_disk_hex_issue222 tests/test_disk_hex_issue222.c -Wl,-z,noexecstack
+	./tests/test_disk_hex_issue222
+
+test_issue222: test_threadpool_issue222 test_disk_hex_issue222
 
 # audit_log unit tests (standalone, no CUnit required)
 .PHONY: test_audit_log

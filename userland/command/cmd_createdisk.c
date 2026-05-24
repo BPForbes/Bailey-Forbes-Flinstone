@@ -33,8 +33,10 @@ int cmd_createdisk_run(int argc, char **argv) {
 }
 
 int cmd_createdisk_batch_tokens_count(int argc, char **argv, int i) {
-    if (i + 3 >= argc)
-        return 0;
+    if (i + 3 >= argc) {
+        int remain = argc - i;
+        return remain > 0 ? remain : 1;
+    }
     if (i + 4 < argc && argv[i + 4] &&
         (!strcmp(argv[i + 4], "-y") || !strcmp(argv[i + 4], "-n") ||
          !strcmp(argv[i + 4], "-Y") || !strcmp(argv[i + 4], "-N")))
