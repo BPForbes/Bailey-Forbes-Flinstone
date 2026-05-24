@@ -73,7 +73,7 @@ Fix: #222.2 — kernel/core/sched/threadpool.c ~67–81: caller-owned sem_t done
 Fix: #222.3 — disk_asm.c ~179 (+ arch variants): lookup-table hex encode; single NUL at end (no per-iteration sprintf overflow).
 Fix: CI — Makefile: test_issue222; test_invariants compile+link via g++; clean issue220/issue222 artifacts.
 Fix: build — util.c: fl_batch_* only in cmd_batch_*_tokens.c (no duplicate symbols with full shell).
-Fix: version — finalize_version_locked copies GA 4.1.1 to version/locked; gen_version_def reads locked for VERSION_* (no ent_root scan; CI publishes version_def.h on feature PRs).
+Fix: version — CI prepare-version-entries runs finalize_version_locked (entries → locked); gen_version_def reads locked for VERSION_* (no ent_root scan; bot publishes locked + version_def.h).
 VER_4_1_1_GM1_BUILD3_END
 PROMOTE_DESC_END
 
