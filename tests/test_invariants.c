@@ -14,9 +14,12 @@
 #include "contract_virtualization.h"
 #include "contract_hardening.h"
 #include "fl/authz_subsystem.h"
+#include "fl/session.h"
+#include "contract_p7_shell_batch.h"
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <unistd.h>
 
 #define ASSERT(c) do { if (!(c)) { fprintf(stderr, "FAIL: %s\n", #c); return 1; } } while(0)
 
@@ -244,6 +247,33 @@ static int test_batch_argv_contracts_audit(void) {
     ASSERT(fl_batch_contracts_tokens_count(3, av2, 1) == 2);
     char *av3[] = {"prog", "audit", "ring"};
     ASSERT(fl_batch_audit_tokens_count(3, av3, 1) == 2);
+    return 0;
+}
+
+/* Issue #219 / #204: batch driver clamps token spans to argc-i (sh.c pattern). */
+static int batch_argv_clamp_tokens(int tokens_count, int argc, int i) {
+    if (tokens_count > argc - i)
+        tokens_count = argc - i;
+    return tokens_count;
+}
+
+static int test_batch_argv_sh_clamp_edges(void) {
+    ASSERT(batch_argv_clamp_tokens(99, 2, 1) == 1);
+    ASSERT(batch_argv_clamp_tokens(4, 5, 1) == 4);
+    ASSERT(batch_argv_clamp_tokens(0, 5, 1) == 0);
+    ASSERT(FL_CONTRACT_P7_BATCH_MAX_TOKENS_TOTAL <= 16u);
+    return 0;
+}
+
+/* Issue #219 / #186: session hardening rejects invalid principals. */
+static int test_session_set_user_edges(void) {
+    (void)setenv("FL_USERS_LAB_DEFAULTS", "1", 1);
+    fl_session_init();
+    ASSERT(fl_session_set_user(NULL) == FL_RESULT_INVAL);
+    ASSERT(fl_session_set_user("") == FL_RESULT_INVAL);
+    ASSERT(fl_session_set_user("no_such_user_xyz") == FL_RESULT_NOENT);
+    ASSERT(fl_session_login("flinstone", "flinstone") == FL_RESULT_OK);
+    ASSERT(strcmp(fl_session_current_user(), "flinstone") == 0);
     return 0;
 }
 
@@ -509,6 +539,14 @@ int main(void) {
 
     printf("test_batch_argv_contracts_audit... ");
     if (test_batch_argv_contracts_audit() != 0) return 1;
+    printf("OK\n");
+
+    printf("test_batch_argv_sh_clamp_edges... ");
+    if (test_batch_argv_sh_clamp_edges() != 0) return 1;
+    printf("OK\n");
+
+    printf("test_session_set_user_edges... ");
+    if (test_session_set_user_edges() != 0) return 1;
     printf("OK\n");
 
     printf("test_history_unpack_strips_trailing_newline... ");

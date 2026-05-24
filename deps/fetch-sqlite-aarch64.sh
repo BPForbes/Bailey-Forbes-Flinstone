@@ -15,17 +15,7 @@ SQLITE_SHA256="${SQLITE_SHA256:-77823cb110929c2bcb0f5d48e4833b5c59a8a6e40cdea393
 CC_ARM="${CC_ARM:-aarch64-linux-gnu-gcc}"
 AR_ARM="${AR_ARM:-aarch64-linux-gnu-ar}"
 
-verify_sha256() {
-    file="$1"
-    expected="$2"
-    actual="$(sha256sum "$file" | awk '{print $1}')"
-    if [ "$actual" != "$expected" ]; then
-        echo "[deps] SHA-256 mismatch for $(basename "$file")" >&2
-        echo "[deps]   expected: $expected" >&2
-        echo "[deps]   actual:   $actual" >&2
-        exit 1
-    fi
-}
+. "$SCRIPT_DIR/lib/verify_archive_sha256.sh"
 
 sqlite_download_url() {
     year="$1"
@@ -66,7 +56,7 @@ if [ ! -f "$ARCHIVE" ]; then
     echo "[deps] Downloading SQLite amalgamation ${SQLITE_VERSION}..."
     curl -fsSL "$SQLITE_URL" -o "$ARCHIVE"
 fi
-verify_sha256 "$ARCHIVE" "$SQLITE_SHA256"
+verify_archive_sha256 "$ARCHIVE" "$SQLITE_SHA256" || exit 1
 
 echo "[deps] Extracting SQLite..."
 rm -rf "${BUILD_DIR}/sqlite-amalgamation-${SQLITE_VERSION}"

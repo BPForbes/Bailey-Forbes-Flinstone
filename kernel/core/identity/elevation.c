@@ -49,8 +49,8 @@ fl_result_t fl_elevation_grant(const char *principal, const char *reason, fl_ele
                 mem_domain_zero(&s_slots[i], sizeof(s_slots[i]));
             s_slots[i].used = 1;
             s_slots[i].token = elevation_alloc_token();
-            strncpy(s_slots[i].principal, principal, sizeof(s_slots[i].principal) - 1);
-            s_slots[i].principal[sizeof(s_slots[i].principal) - 1] = '\0';
+            (void)snprintf(s_slots[i].principal, sizeof(s_slots[i].principal),
+                           "%s", principal);
             s_slots[i].expires_ns = now + (int64_t)FL_ELEVATION_LAB_TTL_SOFT_MAX_SECONDS * 1000000000LL;
             *out = s_slots[i].token;
             pthread_mutex_unlock(&s_elev_mu);

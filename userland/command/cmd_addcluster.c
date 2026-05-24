@@ -46,7 +46,8 @@ int cmd_addcluster_run(int argc, char **argv) {
 }
 
 int cmd_addcluster_batch_tokens_count(int argc, char **argv, int i) {
-    if (i + 2 < argc && (!strcmp(argv[i + 1], "-t") || !strcmp(argv[i + 1], "-h")))
+    (void)argv;
+    if (i + 2 < argc)
         return 3;
     return 1;
 }

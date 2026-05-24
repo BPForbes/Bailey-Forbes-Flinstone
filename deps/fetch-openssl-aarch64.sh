@@ -15,17 +15,7 @@ OPENSSL_SHA256="${OPENSSL_SHA256:-23c666d0edf20f14249b3d8f0368acaee9ab585b09e1de
 CC_ARM="${CC_ARM:-aarch64-linux-gnu-gcc}"
 CROSS_PREFIX="${CROSS_PREFIX:-aarch64-linux-gnu-}"
 
-verify_sha256() {
-    file="$1"
-    expected="$2"
-    actual="$(sha256sum "$file" | awk '{print $1}')"
-    if [ "$actual" != "$expected" ]; then
-        echo "[deps] SHA-256 mismatch for $(basename "$file")" >&2
-        echo "[deps]   expected: $expected" >&2
-        echo "[deps]   actual:   $actual" >&2
-        exit 1
-    fi
-}
+. "$SCRIPT_DIR/lib/verify_archive_sha256.sh"
 
 mkdir -p "${DEPS_ROOT}/deps/download" "${BUILD_DIR}"
 
@@ -49,7 +39,7 @@ if [ ! -f "$ARCHIVE" ]; then
     echo "[deps] Downloading OpenSSL ${OPENSSL_VERSION}..."
     curl -fsSL "$OPENSSL_URL" -o "$ARCHIVE"
 fi
-verify_sha256 "$ARCHIVE" "$OPENSSL_SHA256"
+verify_archive_sha256 "$ARCHIVE" "$OPENSSL_SHA256" || exit 1
 
 echo "[deps] Extracting OpenSSL..."
 rm -rf "${BUILD_DIR}/openssl-${OPENSSL_VERSION}"

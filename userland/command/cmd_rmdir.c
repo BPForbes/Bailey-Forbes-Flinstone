@@ -37,5 +37,8 @@ int cmd_rmdir_run(int argc, char **argv) {
 }
 
 int cmd_rmdir_batch_tokens_count(int argc, char **argv, int i) {
-    (void)argc; (void)argv; (void)i; return 2;
+    (void)argv;
+    if (i < 0 || i + 1 >= argc)
+        return 0;
+    return 2;
 }

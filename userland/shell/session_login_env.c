@@ -56,10 +56,12 @@ void fl_session_restore_login_shell_env(const char *home, const char *cwd) {
     if (home && home[0])
         (void)setenv("HOME", home, 1);
     if (cwd && cwd[0]) {
-        strncpy(g_cwd, cwd, sizeof(g_cwd) - 1u);
-        g_cwd[sizeof(g_cwd) - 1u] = '\0';
-        if (chdir(g_cwd) != 0)
+        if (chdir(cwd) != 0)
             perror("login-shell chdir");
+        else {
+            strncpy(g_cwd, cwd, sizeof(g_cwd) - 1u);
+            g_cwd[sizeof(g_cwd) - 1u] = '\0';
+        }
     }
 }
 

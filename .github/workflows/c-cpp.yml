@@ -92,6 +92,9 @@ jobs:
       - name: Unique MAJOR/STANDARD/RELEASE/DEV_VERSION across version/entries
         run: ./scripts/check_version_entries_semver_dev_unique.sh
 
+      - name: Deps fetch scripts must verify archive SHA-256
+        run: bash scripts/check_deps_fetch_verify_sha256.sh
+
       - name: Main must ship GA .ver only (push)
         if: github.event_name == 'push' && github.ref == 'refs/heads/main'
         run: ./scripts/check_version_main_prerelease_policy.sh

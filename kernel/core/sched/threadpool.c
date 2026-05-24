@@ -9,7 +9,13 @@ thread_pool_t g_pool;
 
 static void run_job_task(void *arg) {
     job_node *job = (job_node *)arg;
-    (void)execute_command_str(job->command_str);
+
+    if (job->command_str)
+        (void)execute_command_str(job->command_str);
+    if (job->done_sem) {
+        sem_post(job->done_sem);
+        return;
+    }
     pthread_mutex_lock(&job->mutex);
     job->done = 1;
     pthread_cond_broadcast(&job->cond);
@@ -18,11 +24,18 @@ static void run_job_task(void *arg) {
 
 job_node *create_job(const char *line) {
     job_node *job = calloc(1, sizeof(*job));
-    if (!job) return NULL;
+
+    if (!job)
+        return NULL;
     job->command_str = strdup(line);
+    if (!job->command_str) {
+        free(job);
+        return NULL;
+    }
     pthread_mutex_init(&job->mutex, NULL);
     pthread_cond_init(&job->cond, NULL);
     job->done = 0;
+    job->done_sem = NULL;
     job->priority = PRIORITY_IMMEDIATE;
     job->enqueue_time = time(NULL);
     return job;
@@ -40,7 +53,7 @@ void queue_job(job_node *job) {
     queue_job_priority(job, PRIORITY_IMMEDIATE);
 }
 
-void queue_job_priority(job_node *job, int priority) {
+int queue_job_priority(job_node *job, int priority) {
     job->priority = priority;
     job->enqueue_time = time(NULL);
     job->pq_handle = -1;
@@ -48,7 +61,7 @@ void queue_job_priority(job_node *job, int priority) {
     if (pq_count(&g_pool.pq) >= PQ_MAX_ITEMS) {
         fprintf(stderr, "Job queue overflow!\n");
         pthread_mutex_unlock(&g_pool.mutex);
-        return;
+        return -1;
     }
     pq_handle_t h = pq_push(&g_pool.pq, priority, run_job_task, job);
     if (h >= 0) {
@@ -58,6 +71,7 @@ void queue_job_priority(job_node *job, int priority) {
     }
     pthread_cond_signal(&g_pool.cond);
     pthread_mutex_unlock(&g_pool.mutex);
+    return (h >= 0) ? 0 : -1;
 }
 
 void submit_single_command(const char *line) {
@@ -70,12 +84,25 @@ void submit_single_command_priority(const char *line, int priority) {
     (void)execute_command_str(line);
 #else
     job_node *job = create_job(line);
-    if (!job) return;
-    queue_job_priority(job, priority);
-    pthread_mutex_lock(&job->mutex);
-    while (!job->done)
-        pthread_cond_wait(&job->cond, &job->mutex);
-    pthread_mutex_unlock(&job->mutex);
+    sem_t done_sem;
+
+    if (!job)
+        return;
+    if (sem_init(&done_sem, 0, 0) != 0) {
+        free_job(job);
+        return;
+    }
+    job->done_sem = &done_sem;
+    if (queue_job_priority(job, priority) != 0) {
+        job->done_sem = NULL;
+        sem_destroy(&done_sem);
+        free_job(job);
+        return;
+    }
+    if (sem_wait(&done_sem) != 0)
+        perror("threadpool: sem_wait");
+    job->done_sem = NULL;
+    sem_destroy(&done_sem);
     free_job(job);
 #endif
 }
