@@ -4,7 +4,7 @@ RELEASE_VERSION=0
 PRERELEASE=1
 DEV_VERSION=2
 DESCRIPTION<<VER_END
-PRE 4.2.0 (P3): P3-4 ARP cache and request/reply on netdev (asm_net_arp_cache_* table ops); P3-5 IPv4 routing table (fix TAP network prefix); ICMP echo on in-tree wire path (loopback + TAP when configured); docs: ~✅ P3-4/P3-5; P3-13 server host/join/leave/kill + background messaging spec (#239).
+PRE 4.2.0 (P3): P3-4 ARP cache and request/reply on netdev (asm_net_arp_cache_* table ops); P3-5 IPv4 routing table (fix TAP network prefix); ICMP echo on in-tree wire path (loopback + TAP when configured); docs: ~✅ P3-4/P3-5; P3-13 chat room implementation plan (docs/P3_13_CHAT_SERVER.md, #238/#239).
 VER_END
 
 RELEASE_DATE=2026-05-25

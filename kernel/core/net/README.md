@@ -1,6 +1,6 @@
 # `kernel/core/net` — P3 implementation
 
-Long-form guide: **`docs/P3_NETWORKING.md`**.
+Long-form guide: **`docs/P3_NETWORKING.md`**. **P3-13 chat room plan:** **`docs/P3_13_CHAT_SERVER.md`**.
 
 ## Quick file index
 
@@ -22,6 +22,8 @@ Long-form guide: **`docs/P3_NETWORKING.md`**.
 | `net_wire_host_syscall.c` | Linux socket syscall bridge |
 | `net_ping_host.c` | `fl_net_ping` |
 | `net_requirements.c` | CI probe report |
+
+**Planned (P3-13 — see `docs/P3_13_CHAT_SERVER.md`):** `net_socket.c`, `net_server.c`, `net_udp.c` (P3-6), TCP FSM in `net_tcp.c` (P3-7); shell `cmd_server.c`.
 
 ## Includes
 

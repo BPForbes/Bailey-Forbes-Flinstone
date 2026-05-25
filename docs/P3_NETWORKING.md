@@ -7,40 +7,19 @@ Normative contracts live under **`contracts/networking/`** (umbrella **`contract
 - **In-tree** IPv4 framing, ICMP echo, TCP SYN probe, minimal DNS A-record lookup, and **software loopback** (P3-2) without calling `/bin/ping` or `getaddrinfo`.
 - **Hosted edge only:** Linux **socket syscalls** (and optional **TAP**) are the OS boundary; probes build and parse packets in C.
 - **Shell:** `ping` and `check requirements` for CI and lab validation (`scripts/check_network_requirements.sh`).
-- **Next product goal (P3-13):** let **two or more** Flinstone users talk over the network via a shared **`server`** session (background task) and a **message** path on top of the in-tree socket/TCP stack (see § [P3-13 — `server` session and messaging](#p3-13--server-session-and-messaging)).
+- **End state (P3-13):** multi-user **chat room** via shell **`server`** — implementation plan: **[`docs/P3_13_CHAT_SERVER.md`](P3_13_CHAT_SERVER.md)** (wire protocol, hub topology, module layout, phased tests). Tracked in **#239**; prerequisites in **#238**.
 
-## P3-13 — `server` session and messaging
+## P3-13 — chat room (summary)
 
-**Purpose:** multiple people running Flinstone can join the same logical **server** and exchange text messages while the shell stays usable (session runs as a **background task**).
+| Item | Detail |
+|------|--------|
+| **Product** | `server host/join <ip:port>`, `server msg`, `server leave`, `server kill` (host-only) |
+| **Topology** | Star: host listens; members connect; host relays **`MSG`** |
+| **Transport** | TCP (**RFC 793**) after **P3-7**; framing + opcodes in **`P3_13_CHAT_SERVER.md`** §4 |
+| **Shell** | Background **pthread** recv loop + inbound ring (see plan §7) |
+| **Build order** | P3-6 → P3-7 → socket shim → `net_server.c` → `cmd_server.c` |
 
-**Depends on:** **P3-7** TCP state machine (listen/accept/connect), **P3-5** routing, **P3-4** ARP on wire paths, optional **P3-6** UDP helpers (`udpsend` / `udplisten`). Tracked in GitHub **#239**.
-
-### Shell syntax (normative product shape)
-
-| Subcommand | Arguments | Who | Effect |
-|------------|-----------|-----|--------|
-| **`host`** | **`ip:port`** | Any user | Start listening on **`ip:port`**; caller becomes **host**. Example: `server host 45.68.43.4:80` binds/listens on port **80** at **45.68.43.4**. |
-| **`join`** | **`ip:port`** | Any user | Connect to an existing session (e.g. `server join 45.68.43.4:80`). |
-| **`leave`** | — | Any member | Disconnect from the session. If the **host** leaves, the session **promotes a new host** from remaining members (default policy: longest-connected member). |
-| **`kill`** | — | **Host only** | Tear down the listener and disconnect **all** members. Non-host **`kill`** → **P2-3** authz deny. |
-
-**Background task:** after **`host`** or **`join`**, the TCP session and receive loop run **without blocking the prompt** so users can run other builtins and send chat via a message subcommand (e.g. **`server msg <text>`** — exact name TBD in **#239**).
-
-### Messaging (goal)
-
-- **Framing:** length-prefixed payloads over the shared TCP connection (**RFC 793**), e.g. `[uint16_be length][utf-8 bytes]`.
-- **Broadcast:** a member’s message is delivered to every other connected peer in the session.
-- **Bounds:** capped message size and member count; drop or reject when tables are full.
-- **Display:** inbound peer messages appear on the terminal without tearing down the interactive shell (buffered or interleaved with the prompt — implementation choice in **#239**).
-
-### Socket shim (implementation layer under the shell)
-
-Internal API (not necessarily POSIX-visible to guests): **`fl_socket`**, **`fl_bind`**, **`fl_listen`**, **`fl_accept`**, **`fl_connect`**, **`fl_send`**, **`fl_recv`**, **`fl_close`** dispatching to **P3-6**/**P3-7** with hosted fallback when no Flinstone route matches (same pattern as ICMP today). Contract shard: **`contract_p3_sockets.h`** (planned).
-
-### Convenience UDP builtins (optional, after demux)
-
-- **`udpsend <ip:port> <text>`** — single datagram (**RFC 768**)
-- **`udplisten <port>`** — print datagrams (lab/debug; not the chat server)
+Full spec: **[`docs/P3_13_CHAT_SERVER.md`](P3_13_CHAT_SERVER.md)**.
 
 ## Layer map
 
@@ -189,6 +168,7 @@ make check-network-requirements
 
 ## Related docs
 
+- **`docs/P3_13_CHAT_SERVER.md`** — **P3-13** chat room implementation plan (wire protocol, APIs, tests)
 - **`contracts/networking/README.txt`** — contract shards vs P2
 - **`docs/ROADMAP.md`** — P3 rows and phase gates
 - **`kernel/core/net/README.md`** — file index and include graph
@@ -207,7 +187,7 @@ make check-network-requirements
 | Priority | Item | Notes |
 |----------|------|--------|
 | **P3-12** | DHCP client | **RFC 2131**/**2132**; replaces **FL_NET_TAP_*** env bootstrap |
-| **P3-13** | `server` session + chat | **`server host/join/leave/kill`**, background task, **`server msg`**, socket shim; host-transfer on host **`leave`** |
+| **P3-13** | Chat room | See **`docs/P3_13_CHAT_SERVER.md`**; **#239** / **#238** |
 | Patch | ARP cache TTL sweep | Tick-based age only today; add periodic **`fl_net_arp_tick`** for bare metal |
 | Patch | Consolidate loopback egress | **`egress_loopback`** vs **`wire_loopback_exchange`** dedupe |
 | **P3-5** | Drop Linux ICMP fallback | When TAP LPM route always matches **dst** |
