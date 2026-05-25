@@ -42,6 +42,7 @@ asm_net_checksum16:
     add     w2, w2, w5, lsl #8
 .L_csum_fold:
     add     w5, w2, w2, lsr #16
+    add     w5, w5, w5, lsr #16
     and     w2, w5, #0xffff
     mvn     w2, w2
     and     w0, w2, #0xffff
@@ -71,6 +72,7 @@ asm_net_tcp_build_syn:
     mov     w5, #FL_NET_TCP_FLAG_SYN
     strb    w5, [x0, #13]
     mov     w5, #0x2000
+    rev16   w5, w5
     strh    w5, [x0, #14]
     mov     x0, #FL_NET_TCP_HDR_LEN
     ret
@@ -239,6 +241,7 @@ asm_net_pseudo_checksum_tcpudp:
     bl      .L_net_accum16_be
 .L_pseudo_fold:
     add     w1, w0, w0, lsr #16
+    add     w1, w1, w1, lsr #16
     and     w0, w1, #0xffff
     mvn     w0, w0
     and     w0, w0, #0xffff

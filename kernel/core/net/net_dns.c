@@ -89,9 +89,13 @@ static fl_result_t dns_query_a(const char *host, uint32_t *out_addr_be) {
     query[qlen++] = 0;
     query[qlen++] = 1;
 
-    if (fl_net_wire_send_udp(ns_be, 40053, 53, query, qlen, answer, sizeof(answer), &alen,
-                             4000u) != FL_RESULT_OK)
-        return FL_RESULT_TIMEDOUT;
+    {
+        fl_result_t udp_rc =
+            fl_net_wire_send_udp(ns_be, 40053, 53, query, qlen, answer, sizeof(answer), &alen,
+                                 4000u);
+        if (udp_rc != FL_RESULT_OK)
+            return udp_rc;
+    }
 
     if (alen < 12 + 12 + 16)
         return FL_RESULT_ERR;
@@ -107,15 +111,33 @@ static fl_result_t dns_query_a(const char *host, uint32_t *out_addr_be) {
         uint16_t rdlen;
 
         while (off < alen) {
-            if ((answer[off] & 0xc0u) == 0xc0u) {
-                off += 2;
-                break;
-            }
             if (answer[off] == 0) {
                 off++;
                 break;
             }
+            if (off + 1u + (size_t)answer[off] > alen)
+                return FL_RESULT_ERR;
             off += 1u + (size_t)answer[off];
+        }
+        if (off + 4 > alen)
+            return FL_RESULT_ERR;
+        off += 4; /* QTYPE + QCLASS */
+
+        if (off >= alen)
+            return FL_RESULT_ERR;
+        if ((answer[off] & 0xc0u) == 0xc0u) {
+            if (off + 2 > alen)
+                return FL_RESULT_ERR;
+            off += 2;
+        } else {
+            while (off < alen && answer[off] != 0) {
+                if (off + 1u + (size_t)answer[off] > alen)
+                    return FL_RESULT_ERR;
+                off += 1u + (size_t)answer[off];
+            }
+            if (off >= alen)
+                return FL_RESULT_ERR;
+            off++;
         }
         if (off + 10 > alen)
             return FL_RESULT_ERR;

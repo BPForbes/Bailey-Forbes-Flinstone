@@ -82,7 +82,8 @@ asm_net_tcp_build_syn:
     movl    $0, 8(%rdi)
     movb    $0x50, 12(%rdi)
     movb    $FL_NET_TCP_FLAG_SYN, 13(%rdi)
-    movw    $0x2000, 14(%rdi)
+    movb    $0x20, 14(%rdi)
+    movb    $0x00, 15(%rdi)
     movq    $FL_NET_TCP_HDR_LEN, %rax
     ret
 .L_tcp_zero:

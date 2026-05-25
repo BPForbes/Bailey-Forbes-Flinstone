@@ -237,7 +237,13 @@ fl_result_t fl_net_wire_send_tcp_syn(uint32_t dst_be, uint16_t sport, uint16_t d
         tv.tv_usec = (suseconds_t)((timeout_ms % 1000u) * 1000u);
         so = select(sock + 1, &rfds, NULL, NULL, &tv);
         gettimeofday(&t1, NULL);
-        if (so <= 0) {
+        if (so < 0) {
+            close(sock);
+            if (note && note_len > 0)
+                snprintf(note, note_len, "tcp syn wait: %s", strerror(errno));
+            return FL_RESULT_ERR;
+        }
+        if (so == 0) {
             close(sock);
             if (note && note_len > 0)
                 snprintf(note, note_len, "tcp syn timeout");
@@ -252,18 +258,45 @@ fl_result_t fl_net_wire_send_tcp_syn(uint32_t dst_be, uint16_t sport, uint16_t d
         if (out_rtt_ms)
             *out_rtt_ms = timeval_delta_ms(&t0, &t1);
 
-        if (note && note_len > 0) {
+        {
             size_t ip_hdr_len = (size_t)((rx[0] & 0x0FU) * 4U);
+            const uint8_t *rx_tcp;
+            size_t rx_tcp_len;
+            uint32_t rx_src_be;
+            uint32_t syn_seq;
+            uint32_t rx_ack;
+            uint16_t rx_sport;
+            uint16_t rx_dport;
 
-            if (ip_hdr_len < FL_NET_IPV4_HDR_LEN_MIN || ip_hdr_len > (size_t)n) {
-                snprintf(note, note_len, "tcp reply too short");
-            } else {
-                const uint8_t *rx_tcp = rx + ip_hdr_len;
-                size_t rx_tcp_len = (size_t)n - ip_hdr_len;
+            if (ip_hdr_len < FL_NET_IPV4_HDR_LEN_MIN || ip_hdr_len > (size_t)n)
+                return FL_RESULT_ERR;
 
-                if (rx_tcp_len < FL_NET_TCP_HDR_LEN_MIN) {
-                    snprintf(note, note_len, "tcp reply too short");
-                } else if (rx_tcp[13] & (FL_NET_TCP_FLAG_RST | FL_NET_TCP_FLAG_ACK)) {
+            rx_tcp = rx + ip_hdr_len;
+            rx_tcp_len = (size_t)n - ip_hdr_len;
+            if (rx_tcp_len < FL_NET_TCP_HDR_LEN_MIN)
+                return FL_RESULT_ERR;
+
+            rx_src_be = (uint32_t)rx[12] | ((uint32_t)rx[13] << 8) | ((uint32_t)rx[14] << 16) |
+                        ((uint32_t)rx[15] << 24);
+            if (rx_src_be != dst_be)
+                return FL_RESULT_ERR;
+
+            rx_sport = (uint16_t)(((uint16_t)rx_tcp[0] << 8) | rx_tcp[1]);
+            rx_dport = (uint16_t)(((uint16_t)rx_tcp[2] << 8) | rx_tcp[3]);
+            if (rx_sport != dport || rx_dport != sport)
+                return FL_RESULT_ERR;
+
+            syn_seq = ((uint32_t)tcp[4] << 24) | ((uint32_t)tcp[5] << 16) |
+                      ((uint32_t)tcp[6] << 8) | (uint32_t)tcp[7];
+            rx_ack = ((uint32_t)rx_tcp[8] << 24) | ((uint32_t)rx_tcp[9] << 16) |
+                     ((uint32_t)rx_tcp[10] << 8) | (uint32_t)rx_tcp[11];
+            if ((rx_tcp[13] & (FL_NET_TCP_FLAG_SYN | FL_NET_TCP_FLAG_ACK)) ==
+                    (FL_NET_TCP_FLAG_SYN | FL_NET_TCP_FLAG_ACK) &&
+                rx_ack != syn_seq + 1u)
+                return FL_RESULT_ERR;
+
+            if (note && note_len > 0) {
+                if (rx_tcp[13] & (FL_NET_TCP_FLAG_RST | FL_NET_TCP_FLAG_ACK)) {
                     snprintf(note, note_len, "tcp rst+ack (wire)");
                 } else if ((rx_tcp[13] & FL_NET_TCP_FLAG_SYN) &&
                            (rx_tcp[13] & FL_NET_TCP_FLAG_ACK)) {

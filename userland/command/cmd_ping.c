@@ -6,7 +6,6 @@
 #include "net_ipv4.h"
 #include "net_ping_host.h"
 
-#include <arpa/inet.h>
 #include <errno.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -14,15 +13,14 @@
 
 static int host_needs_netdev_io(const char *host) {
     uint32_t addr_be = 0;
-    char resolved[INET_ADDRSTRLEN];
 
     if (!host || !host[0])
         return 0;
     if (strcmp(host, "localhost") == 0)
         return 0;
-    if (fl_net_resolve_ipv4(host, &addr_be, resolved, sizeof(resolved)) != FL_RESULT_OK)
-        return 1;
-    return !fl_net_ipv4_is_loopback(addr_be);
+    if (fl_net_ipv4_parse_literal(host, &addr_be))
+        return !fl_net_ipv4_is_loopback(addr_be);
+    return 1; /* hostnames may require DNS/network I/O */
 }
 
 static int parse_port_arg(const char *s, uint16_t *out) {

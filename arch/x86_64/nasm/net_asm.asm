@@ -79,7 +79,8 @@ asm_net_tcp_build_syn:
     mov dword [rdi + 8], 0
     mov byte [rdi + 12], 0x50
     mov byte [rdi + 13], FL_NET_TCP_FLAG_SYN
-    mov word [rdi + 14], 0x2000
+    mov byte [rdi + 14], 0x20
+    mov byte [rdi + 15], 0
     mov rax, FL_NET_TCP_HDR_LEN
     ret
 .L_tcp_zero:
