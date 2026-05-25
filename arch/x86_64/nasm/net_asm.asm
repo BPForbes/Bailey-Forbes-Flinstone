@@ -78,9 +78,9 @@ asm_net_tcp_build_syn:
 
 asm_net_tcp_build_rst_ack:
     cmp rsi, FL_NET_TCP_HDR_LEN
-    jb .L_tcp_zero
+    jb .L_rst_zero
     cmp rcx, FL_NET_TCP_HDR_LEN
-    jb .L_tcp_zero
+    jb .L_rst_zero
     movzx eax, byte [rdi + 2]
     shl eax, 8
     movzx r8d, byte [rdi + 3]
@@ -104,6 +104,9 @@ asm_net_tcp_build_rst_ack:
     mov byte [rdx + 13], FL_NET_TCP_FLAG_RST | FL_NET_TCP_FLAG_ACK
     mov word [rdx + 14], 0
     mov rax, FL_NET_TCP_HDR_LEN
+    ret
+.L_rst_zero:
+    xor eax, eax
     ret
 
 asm_net_tcp_read_ports_be:

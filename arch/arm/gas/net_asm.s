@@ -94,7 +94,7 @@ asm_net_tcp_build_rst_ack:
     strb    w5, [x2, #12]
     mov     w5, #(FL_NET_TCP_FLAG_RST | FL_NET_TCP_FLAG_ACK)
     strb    w5, [x2, #13]
-    strh    xzr, [x2, #14]
+    strh    wzr, [x2, #14]
     mov     x0, #FL_NET_TCP_HDR_LEN
     ret
 
