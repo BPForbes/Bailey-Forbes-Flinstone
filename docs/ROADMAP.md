@@ -92,7 +92,7 @@ Two columns track different concerns:
 
 **P2 row criterion (aligned with `contracts/identity/`):** **P2-1** through **P2-4** are **✅** when the normative **C contract bundle** under **`contracts/identity/`** defines that row via **`contract_identity.h`** (umbrella, inheriting **`contract_runtime.h`**) and the matching **`contract_p2_*.h`** shards (**`FL_CONTRACT_P2_*_CONTRACT_DEFINED`** markers). **Phase 2** implementation (principal wiring, lab credential files, central **`can_*`** enforcement, elevation UX) still follows phase gates and **TODO: P2-3** below; this snapshot tracks **contract definition**, not “middleware fully enforced” or “Phase **2** shipped.”
 
-**P3 row criterion (aligned with `contracts/networking/`):** **P3-1** through **P3-12** are **✅** here when the normative **C contract bundle** under **`contracts/networking/`** defines that row via **`contract_networking.h`** (umbrella: **`contract_extend.h`** + **`contract_p3_wire.h`** + **`contract_p3_trust.h`**, then **`contract_p3_*.h`** shards with **`FL_CONTRACT_P3_*_CONTRACT_DEFINED`** markers). **`contract_p3_trust.h`** composes the **P2-3** `fl_authz_operation_t` slice only so **P3** is **not** an include-graph clone of **`contract_identity.h`**. **P3-10** / **P3-11** shards record explicit **`[DEFERRED]`** scope at the **contract-definition** layer. **Phase 3** implementation (stack, drivers, CI interop) still follows phase gates below; this snapshot tracks **contract definition**, not “UDP/TCP/TLS shipped.”
+**P3 row criterion (aligned with `contracts/networking/`):** **P3-1** through **P3-12** are **✅** here when the normative **C contract bundle** under **`contracts/networking/`** defines that row via **`contract_networking.h`** (umbrella: **`contract_extend.h`** + **`contract_p3_wire.h`** + **`contract_p3_trust.h`**, then **`contract_p3_*.h`** shards with **`FL_CONTRACT_P3_*_CONTRACT_DEFINED`** markers). **`contract_p3_trust.h`** composes the **P2-3** `fl_authz_operation_t` slice only so **P3** is **not** an include-graph clone of **`contract_identity.h`**. **P3-10** / **P3-11** shards record explicit **`[DEFERRED]`** scope at the **contract-definition** layer. **Phase 3** implementation (stack, drivers, CI interop) still follows phase gates below; the **Module integration** column tracks **`kernel/core/net/`** + hosted shims on **`develop`** / **PRE 4.2.0** trains (**`docs/P3_NETWORKING.md`**). Legend: **✅** shipped to phase acceptance; **~✅** usable lab subset (shell **`ping`** / **`check requirements`**, CUnit, documented skips); **⚠️** started but below row goals; **❌** no in-tree implementation.
 
 **P4 row criterion (aligned with `contracts/drivers/`):** **P4-1** through **P4-7** are **✅** for **contract completion** when the normative **C contract bundle** under **`contracts/drivers/`** defines that row via **`contract_drivers.h`** (umbrella: **`contract_extend.h`**, then **`contract_p4_*.h`** shards with **`FL_CONTRACT_P4_*_CONTRACT_DEFINED`** markers). **Module integration** is tracked separately: lab helpers under **`kernel/drivers/p4_*.c`** and **`fl/driver/p4_*.h`** (driver lock self-test, IRQ hardirq/BH, PCIe BAR/MSI, virtio golden-vector, xHCI MMIO/TRB, FDT walk, PSCI status mapping). A **full USB hub tree**, production virtio on metal, and bare-metal PSCI SMC remain **P4→P5** gates—not required for contract **✅**.
 
@@ -127,16 +127,16 @@ Two columns track different concerns:
 | **P2-2** | Credential store (hosted) | ✅ | ✅ |
 | **P2-3** | Authorization middleware | ✅ | ~✅ |
 | **P2-4** | Sudo-like elevation (hosted) | ✅ | ✅ |
-| **P3-1** | Device abstraction (`netdev`) | ✅ | ⚠️ |
-| **P3-2** | Loopback (software) | ✅ | ⚠️ |
-| **P3-3** | TAP backend (hosted only) | ✅ | ⚠️ |
-| **P3-4** | ARP | ✅ | ⚠️ |
-| **P3-5** | IPv4 | ✅ | ⚠️ |
-| **P3-6** | UDP | ✅ | ⚠️ |
-| **P3-12** | DHCP client (IPv4) | ✅ | ⚠️ |
+| **P3-1** | Device abstraction (`netdev`) | ✅ | ~✅ |
+| **P3-2** | Loopback (software) | ✅ | ~✅ |
+| **P3-3** | TAP backend (hosted only) | ✅ | ~✅ |
+| **P3-4** | ARP | ✅ | ❌ |
+| **P3-5** | IPv4 | ✅ | ~✅ |
+| **P3-6** | UDP | ✅ | ~✅ |
+| **P3-12** | DHCP client (IPv4) | ✅ | ❌ |
 | **P3-7** | TCP (large) | ✅ | ⚠️ |
-| **P3-8** | DNS client | ✅ | ⚠️ |
-| **P3-9** | TLS (hosted) | ✅ | ⚠️ |
+| **P3-8** | DNS client | ✅ | ~✅ |
+| **P3-9** | TLS (hosted) | ✅ | ❌ |
 | **P3-10** | Wi‑Fi station path `[DEFERRED]` | ✅ | ❌ |
 | **P3-11** | IPv6 + ICMPv6 `[DEFERRED]` | ✅ | ❌ |
 | **P4-1** | Driver model v2 | ✅ | ✅ |
@@ -165,7 +165,7 @@ Two columns track different concerns:
 | **P9-2** | Coverity / static analysis | ✅ | ❌ |
 | **P9-3** | SMP bring-up (B) | ✅ | ❌ |
 
-**Summary:** **Contract completion** — **P0-1**–**P0-8**, **P1-1**–**P1-7**, **P2-1**–**P2-4**, **P3-1**–**P3-12** (including **`[DEFERRED]`** shards), **P4-1**–**P4-7**, **P5-1**–**P5-3**, **P6-1**–**P6-5**, **P7-1**–**P7-3**, **P7 (batch)**, **P8-1**–**P8-3**, and **P9-1**–**P9-3** are **✅** under their **`contracts/*`** bundles. **Module integration (P0–P2)** — **✅:** **P0-1**–**P0-3**, **P0-6**–**P0-8**, **P1-1**, **P2-1**, **P2-2**, **P2-4** (hosted/lab wired and tested on **4.1.0**). **~✅:** **P1-7** (hosted POSIX `clock_gettime` only; **B** Generic Timer / **P0-5** tick follow-up). **~✅:** **P0-4**, **P0-5** (arch **B** evidence TODOs), **P1-2**–**P1-6** (**B** PMM/arena/NASM), **P2-3** (netdev/mount/FileManager gates). See **`docs/p0_p2_pr_coverage.md`**. **P3** onward unchanged (**⚠️**/**❌**). **P4-1**/**P4-2** **✅**; **P8**/**P9** integration **❌** here.
+**Summary:** **Contract completion** — **P0-1**–**P0-8**, **P1-1**–**P1-7**, **P2-1**–**P2-4**, **P3-1**–**P3-12** (including **`[DEFERRED]`** shards), **P4-1**–**P4-7**, **P5-1**–**P5-3**, **P6-1**–**P6-5**, **P7-1**–**P7-3**, **P7 (batch)**, **P8-1**–**P8-3**, and **P9-1**–**P9-3** are **✅** under their **`contracts/*`** bundles. **Module integration (P0–P2)** — **✅:** **P0-1**–**P0-3**, **P0-6**–**P0-8**, **P1-1**, **P2-1**, **P2-2**, **P2-4** (hosted/lab wired and tested on **4.1.0**). **~✅:** **P1-7** (hosted POSIX `clock_gettime` only; **B** Generic Timer / **P0-5** tick follow-up). **~✅:** **P0-4**, **P0-5** (arch **B** evidence TODOs), **P1-2**–**P1-6** (**B** PMM/arena/NASM), **P2-3** (guest deny suite + shell gates; netdev hook on **PRE 4.2.0** **`ping`** path—see **TODO: P2-3**). See **`docs/p0_p2_pr_coverage.md`**. **Module integration (P3, PRE 4.2.0)** — **~✅:** **P3-1**–**P3-3**, **P3-5**, **P3-6**, **P3-8** (in-tree stack, **`ping`** / **`check requirements`**, **`make test_p3_network`**, **`make check-network-requirements`**; TAP/Interop skips documented). **⚠️:** **P3-7** (TCP SYN probe + loopback RST+ACK only). **❌:** **P3-4** ARP, **P3-9** TLS, **P3-12** DHCP, **P3-10**/**P3-11** deferrals. Detail: **`docs/P3_NETWORKING.md`**. **P4-1**/**P4-2** **✅**; **P8**/**P9** integration **❌** here.
 
 ---
 
@@ -176,7 +176,7 @@ Use this table when asking what “**the next A release**” means in terms of p
 | Release | Phases / artifacts targeted (summary) | Example gate criteria |
 |---------|----------------------------------------|------------------------|
 | **A1** | **P0** + **Appendix D** execution rows **1–7** (through spinlocks / driver reentrancy) | Default CI green; **P0-1** subsystem headers stable; bare-metal IRQ + table races not blocking K/B bring-up |
-| **A2** | **P1** + **P2** + **P3** through **P3-6** (UDP) with loopback + TAP path | **P1-4**/**P1-5** PMM/arenas validated on **B** where applicable; **P2-3** authz tests deny guest on privileged ops; UDP/loopback interop tests in CI or documented skip |
+| **A2** | **P1** + **P2** + **P3** through **P3-6** (UDP) with loopback + TAP path | **P1-4**/**P1-5** PMM/arenas validated on **B** where applicable; **P2-3** authz tests deny guest on privileged ops; UDP/loopback interop tests in CI or documented skip. **PRE 4.2.0** progress: loopback + hosted UDP/ICMP/DNS + TAP smoke (**~✅** subset); **P3-4** ARP and **P3-12** DHCP still **❌** for full **A2** |
 | **A3** | **P4** (virtio **P4-4** + IRQ model) + **P6-1**/**P6-2** logging | Virtio ring / golden vectors; **no sleep in hardirq** asserts in debug builds; structured log + ring buffer under test |
 | **A4** | **P5**–**P9** as needed (VFS, VM fidelity, hardening) | **P9-1** fuzz triage workflow; **P9-3** SMP bring-up documented with arch memory-model refs + **PSCI** (**P4-7**) where AArch64 applies |
 
@@ -316,6 +316,26 @@ Implement **bottom-up**: **L2 (link layer)** → IPv4/UDP → TCP → sockets fa
 
 **Security standards:** default **no promisc**; **no raw TX** from shell without principal + audit; rate-limit outgoing ARP/ICMP in lab builds.
 
+#### Implementation snapshot (PRE 4.2.0 — `kernel/core/net/`)
+
+Shipped on the **PRE 4.2.0** train (**PR #231** class work). This is the **module integration** view for the [P0–P9 snapshot](#p0p9-module-contract-snapshot-develop) **Module integration** column—not a claim that every Phase 3 acceptance bullet is closed.
+
+| ID | Integration | Notes |
+|----|-------------|--------|
+| **P3-1** | ~✅ | **`net_netdev.c`**: driver registry, timeouts, **P2-3** authz hook; loopback + TAP backends |
+| **P3-2** | ~✅ | **`net_loopback.c`**: Ethernet+IPv4 frame path; ICMP echo reply; TCP RST+ACK on SYN |
+| **P3-3** | ~✅ | **`net_tap.c`**: Linux TAP; **`SKIP_TAP=1`** / capability skips in CI |
+| **P3-4** | ❌ | No ARP cache or **RFC 826** path |
+| **P3-5** | ~✅ | **`net_wire.c`** / **`net_ipv4.c`**: frame build/parse, checksum (**ASM**), ICMP echo; no routing table |
+| **P3-6** | ~✅ | Hosted datagram path + DNS UDP; not a general socket layer |
+| **P3-7** | ⚠️ | **`net_tcp.c`**: SYN build (**ASM**), raw-TCP wire probe; no **RFC 793** state machine |
+| **P3-8** | ~✅ | **`net_dns.c`**: minimal **A** query via **`/etc/resolv.conf`** |
+| **P3-9** | ❌ | No TLS command or library bridge in-tree |
+| **P3-12** | ❌ | No DHCP client |
+| **P3-10** / **P3-11** | ❌ | Contract **`[DEFERRED]`** only |
+
+**Shell / CI:** **`ping`**, **`check requirements`**; **`make test_p3_network`**, **`make test_invariants`**, **`make test_core`**, **`make check-network-requirements`**. **ASM:** **`arch/*/net_asm.*`**, **`arch/*/net_wire_host_asm.*`** (x86_64 GAS/NASM, AArch64 GAS). Follow-ups: **#232**–**#235** (netdev shutdown, authz hygiene, batch registry)—out of scope for the networking PR.
+
 ---
 
 ## Phase 4 — Drivers & hardware (K/B; staged complexity)
@@ -370,7 +390,7 @@ The **3.3.0 contracts** workstream landed FL1 history, hosted **`.fl_audit.log`*
 
 | TODO tag | Recommendation (review / tool source) |
 |----------|---------------------------------------|
-| **TODO: P2-3** | **Partial (hosted):** **`fl/authz_subsystem.h`** gates **`FL_AUTHZ_OP_***` for guest principals; shell builtins + foreign **exec** use **`fl/shell_authz.h`** with **audit on allow and deny**; CUnit guest deny suite + **`test_invariants`** subsystem denies (**≥3** ops). **Still open:** wire **`fl_authz_subsystem_check`** at FileManager / netdev / mount entry points in kernel paths as those surfaces land. |
+| **TODO: P2-3** | **Partial (hosted):** **`fl/authz_subsystem.h`** gates **`FL_AUTHZ_OP_***` for guest principals; shell builtins + foreign **exec** use **`fl/shell_authz.h`** with **audit on allow and deny**; CUnit guest deny suite + **`test_invariants`** subsystem denies (**≥3** ops). **PRE 4.2.0:** **`fl_net_netdev_set_authz_hook`** + **`ping`** checks **`FL_AUTHZ_OP_NETDEV_IO`** before wire/DNS I/O (**~✅** netdev gate for that command). **Still open:** FileManager / mount kernel entry points; paired **`fl_net_netdev_shutdown()`** (**#232**). |
 | ~~**TODO: P0-2**~~ | **Done:** **`FL_RESULT_MIN` / `FL_RESULT_MAX`** alias **`FL_RESULT_JSON_RC_*`**; **`fl_history_record_unpack_cmd`** rejects out-of-range **`rc`**; **P1**–**P4** contract shards cross-reference **P0-2** where fallible. |
 | **TODO: P6-4** | **`audit show N` contract:** document any **residual limits** (memory growth for very large **N** on huge logs) or add hard caps / streaming so operator expectations stay aligned with implementation. |
 | **TODO: P7 (shell batch)** | Add an **automated regression** that batch argv **`contracts audit show 5`** runs **`contracts`** (default), then **`audit`**, not a merged `contracts audit` token (Codex). |

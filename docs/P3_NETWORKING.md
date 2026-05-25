@@ -90,17 +90,20 @@ Build: **`FL_NET_ASM_AVAILABLE=1`** (with **`FL_STACK_ASM_AVAILABLE`**) and **`N
 
 ## P3-x status on this branch
 
-| Row | Contract | Implementation on branch |
-|-----|----------|---------------------------|
-| **P3-1** | ✅ | `net_netdev.c`, authz hook in `sh.c` |
-| **P3-2** | ✅ | `net_loopback.c` frame path + RX queue |
-| **P3-3** | ✅ | `net_tap.c` (CI often skips without `CAP_NET_ADMIN`) |
-| **P3-4** ARP | ✅ contract | ❌ not implemented |
-| **P3-5** IPv4 | ✅ contract | ⚠️ build/parse/checksum; no full routing |
-| **P3-6** UDP | ✅ contract | ⚠️ DNS + wire host datagrams only |
-| **P3-7** TCP | ✅ contract | ⚠️ SYN probe only |
-| **P3-8** DNS | ✅ contract | ⚠️ A record, single nameserver |
-| **P3-12** DHCP | ✅ contract | ❌ not implemented |
+Legend matches **`docs/ROADMAP.md`**: **✅** complete; **~✅** usable lab subset; **⚠️** in progress; **❌** not started.
+
+| Row | Contract | Integration |
+|-----|----------|-------------|
+| **P3-1** | ✅ | ~✅ — `net_netdev.c`, authz hook in `sh.c` |
+| **P3-2** | ✅ | ~✅ — `net_loopback.c` frame path + RX queue |
+| **P3-3** | ✅ | ~✅ — `net_tap.c` (CI often skips without `CAP_NET_ADMIN`) |
+| **P3-4** ARP | ✅ | ❌ |
+| **P3-5** IPv4 | ✅ | ~✅ — build/parse/checksum; no full routing |
+| **P3-6** UDP | ✅ | ~✅ — DNS + wire host datagrams only |
+| **P3-7** TCP | ✅ | ⚠️ — SYN probe only |
+| **P3-8** DNS | ✅ | ~✅ — A record, single nameserver |
+| **P3-9** TLS | ✅ | ❌ |
+| **P3-12** DHCP | ✅ | ❌ |
 
 ## Shell commands
 

@@ -4,7 +4,7 @@ RELEASE_VERSION=0
 PRERELEASE=1
 DEV_VERSION=1
 DESCRIPTION<<VER_END
-PRE 4.2.0 (P3): ping/check; P3 wire; P3-1–3; net ASM (checksum double-fold on AArch64, TCP window BE, ICMP/pseudo/DNS); DNS answer parse and UDP error propagation; ping authz before DNS; TCP SYN reply match on wire; prior CR ABI/guards bounds.
+PRE 4.2.0 (P3): ping/check; P3 wire; P3-1–3; net ASM; DNS/TCP wire fixes; docs/ROADMAP.md P3 integration snapshot (~✅/⚠️/❌); prior CR rounds.
 VER_END
 
 RELEASE_DATE=2026-05-24
