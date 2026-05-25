@@ -4,6 +4,7 @@
 #include "net_dns.h"
 #include "net_eth.h"
 #include "net_wire.h"
+#include "net_checksum.h"
 #include "net_icmp.h"
 #include "net_ipv4.h"
 #include "net_loopback.h"
@@ -68,6 +69,34 @@ static int test_wire_vocabulary(void) {
     ASSERT(fl_net_wire_check_rx_fill(&mut, 14u) == FL_RESULT_OK);
     ASSERT(mut.len == 14u);
 
+    return 0;
+}
+
+static int test_icmp_echo_asm_layout(void) {
+    uint8_t req[64];
+    uint8_t reply[16];
+    size_t len;
+    len = fl_net_icmp_echo_request_build(req, sizeof(req), 0x1234u, 0x0009u, 4u);
+    ASSERT(len == FL_NET_ICMPV4_HDR_MIN + 4u);
+    ASSERT(req[0] == (uint8_t)FL_NET_ICMPV4_TYPE_ECHO);
+    ASSERT(req[1] == 0);
+    ASSERT(req[4] == 0x12 && req[5] == 0x34);
+    ASSERT(req[6] == 0 && req[7] == 9);
+    ASSERT(req[8] == 0x5a && req[9] == 0x5a);
+    /* Ones-complement over the full echo (checksum field included) folds to 0. */
+    ASSERT(fl_net_checksum16(req, len) == 0u);
+
+    reply[0] = (uint8_t)FL_NET_ICMPV4_TYPE_ECHO_REPLY;
+    reply[1] = 0;
+    reply[2] = 0;
+    reply[3] = 0;
+    reply[4] = 0x12;
+    reply[5] = 0x34;
+    reply[6] = 0;
+    reply[7] = 9;
+    ASSERT(fl_net_icmp_echo_reply_match(reply, FL_NET_ICMPV4_HDR_MIN, 0x1234u, 9u));
+    reply[0] = (uint8_t)FL_NET_ICMPV4_TYPE_ECHO;
+    ASSERT(!fl_net_icmp_echo_reply_match(reply, FL_NET_ICMPV4_HDR_MIN, 0x1234u, 9u));
     return 0;
 }
 
@@ -220,6 +249,11 @@ int main(void) {
 
     printf("test_wire_vocabulary... ");
     if (test_wire_vocabulary() != 0)
+        return 1;
+    puts("ok");
+
+    printf("test_icmp_echo_asm_layout... ");
+    if (test_icmp_echo_asm_layout() != 0)
         return 1;
     puts("ok");
 

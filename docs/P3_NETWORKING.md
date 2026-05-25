@@ -72,6 +72,11 @@ flowchart LR
 | **`asm_net_tcp_build_syn`** | same | same | same |
 | **`asm_net_tcp_build_rst_ack`** | same | same | same |
 | **`asm_net_tcp_read_ports_be`** | same | same | same |
+| **`asm_net_icmp_echo_request_build`** | same | same | same |
+| **`asm_net_icmp_echo_reply_match`** | same | same | same |
+| **`asm_net_pseudo_header_fill12`** | same | same | same |
+| **`asm_net_pseudo_checksum_tcpudp`** | same | same | same |
+| **`asm_net_dns_query_header_prefix`** | same | same | same |
 | **`net_host_socket_asm`** | `arch/x86_64/gas/net_wire_host_asm.s` | `arch/x86_64/nasm/net_wire_host_asm.asm` | `arch/arm/gas/net_wire_host_asm.s` |
 | **`net_host_bind_asm`** | same | same | same |
 | **`net_host_sendto_asm`** | same | same | same |

@@ -3,6 +3,8 @@
 #include "net_ipv4.h"
 #include "net_wire_host.h"
 
+#include "fl/net_asm.h"
+
 #include <stdio.h>
 #include <string.h>
 
@@ -68,10 +70,14 @@ static fl_result_t dns_query_a(const char *host, uint32_t *out_addr_be) {
         return FL_RESULT_ERR;
 
     memset(query, 0, sizeof(query));
+#if defined(FL_NET_ASM_AVAILABLE)
+    asm_net_dns_query_header_prefix(query, txid);
+#else
     query[0] = (uint8_t)(txid >> 8);
     query[1] = (uint8_t)(txid & 0xff);
     query[2] = 0x01;
     query[5] = 0x01;
+#endif
     nlen = dns_encode_name(host, query + 12, sizeof(query) - 12);
     if (nlen < 0)
         return FL_RESULT_INVAL;

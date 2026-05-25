@@ -37,6 +37,9 @@ uint16_t fl_net_ipv4_checksum(const void *hdr, size_t hdr_len) {
 
 uint16_t fl_net_pseudo_checksum_tcpudp(uint32_t src_be, uint32_t dst_be, uint8_t proto,
                                        const void *seg, size_t seg_len) {
+#if defined(FL_NET_ASM_AVAILABLE)
+    return asm_net_pseudo_checksum_tcpudp(src_be, dst_be, proto, seg, seg_len);
+#else
     uint8_t pseudo[12];
     uint32_t sum = 0;
 
@@ -60,4 +63,5 @@ uint16_t fl_net_pseudo_checksum_tcpudp(uint32_t src_be, uint32_t dst_be, uint8_t
     while (sum >> 16)
         sum = (sum & 0xffffu) + (sum >> 16);
     return (uint16_t)(~sum);
+#endif
 }
