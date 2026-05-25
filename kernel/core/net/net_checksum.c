@@ -2,6 +2,7 @@
 
 #include "fl/net_asm.h"
 
+#if !defined(FL_NET_ASM_AVAILABLE)
 static uint32_t checksum16_accum(const uint8_t *p, size_t len) {
     uint32_t sum = 0;
 
@@ -14,6 +15,7 @@ static uint32_t checksum16_accum(const uint8_t *p, size_t len) {
         sum += (uint16_t)p[0] << 8;
     return sum;
 }
+#endif
 
 uint16_t fl_net_checksum16(const void *data, size_t len) {
     if (!data || len == 0)
