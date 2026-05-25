@@ -21,6 +21,7 @@
 #include "contract_p1_arenas.h"
 #include "contract_p1_driver_reentrancy.h"
 #include "contract_p1_timekeeping.h"
+#include "contract_p1_workqueue.h"
 
 #define FL_CONTRACT_P1_VOCABULARY_LOCK 1
 

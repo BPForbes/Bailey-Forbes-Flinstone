@@ -136,6 +136,7 @@ HAL_SRCS += kernel/arch/aarch64/hal/arm_plat.c kernel/arch/aarch64/hal/arm_uart.
             kernel/arch/aarch64/boot/exc_dispatch.c
 endif
 NET_CORE_SRCS = kernel/core/net/net_checksum.c kernel/core/net/net_wire.c kernel/core/net/net_eth.c \
+    kernel/core/net/net_background.c \
                 kernel/core/net/net_ipv4.c kernel/core/net/net_arp.c kernel/core/net/net_route.c \
                 kernel/core/net/net_wire_egress.c \
                 kernel/core/net/net_icmp.c kernel/core/net/net_tcp.c kernel/core/net/net_loopback.c \
@@ -145,7 +146,8 @@ NET_CORE_SRCS = kernel/core/net/net_checksum.c kernel/core/net/net_wire.c kernel
 NET_ASM_OBJ = $(patsubst %.s,%.o,$(patsubst %.asm,%.o,$(filter %/net_asm.s %/net_asm.asm %/net_wire_host_asm.s %/net_wire_host_asm.asm,$(ASMSRCS))))
 CORE_SRCS = kernel/core/vfs/disk.c kernel/core/vfs/fat32_host.c kernel/core/vfs/fat32_host_files.c kernel/core/vfs/path_log.c kernel/core/vfs/cluster.c kernel/core/vfs/fs.c \
             disk_host_io.c \
-            kernel/core/sched/threadpool.c priority_queue.c kernel/core/vfs/fs_jail.c kernel/core/vfs/fs_provider.c kernel/core/vfs/fs_command.c \
+            kernel/core/sched/threadpool.c priority_queue.c kernel/core/sched/workqueue.c \
+            kernel/core/sched/bg_jobs.c kernel/core/vfs/fs_jail.c kernel/core/vfs/fs_provider.c kernel/core/vfs/fs_command.c \
             kernel/core/vfs/fs_events.c kernel/core/vfs/fs_policy.c kernel/core/vfs/fs_chain.c kernel/core/vfs/fs_facade.c \
             kernel/core/vfs/fs_service_glue.c kernel/core/mm/mem_domain.c kernel/core/mm/kmalloc.c kernel/core/mm/pmm.c \
             kernel/core/memory/fl_stack.c kernel/core/memory/exec_context.c \
@@ -347,7 +349,8 @@ TEST_SRCS = BPForbes_Flinstone_Tests.c userland/shell/common.c userland/shell/ut
             $(COMMAND_SRCS) \
             kernel/core/vfs/disk.c kernel/core/vfs/fat32_host.c kernel/core/vfs/fat32_host_files.c kernel/core/vfs/path_log.c kernel/core/vfs/cluster.c kernel/core/vfs/fs.c \
             disk_host_io.c \
-            kernel/core/sched/threadpool.c priority_queue.c kernel/core/vfs/fs_jail.c kernel/core/vfs/fs_provider.c kernel/core/vfs/fs_command.c \
+            kernel/core/sched/threadpool.c priority_queue.c kernel/core/sched/workqueue.c \
+            kernel/core/sched/bg_jobs.c kernel/core/vfs/fs_jail.c kernel/core/vfs/fs_provider.c kernel/core/vfs/fs_command.c \
             kernel/core/vfs/fs_events.c kernel/core/vfs/fs_policy.c kernel/core/vfs/fs_chain.c kernel/core/vfs/fs_facade.c \
             kernel/core/vfs/fs_service_glue.c kernel/core/mm/mem_domain.c kernel/core/mm/kmalloc.c kernel/core/mm/pmm.c \
             kernel/core/memory/fl_stack.c kernel/core/memory/exec_context.c \
@@ -587,7 +590,7 @@ test_p0_p2_wiring: kernel/core/memory/fl_stack.o kernel/core/memory/exec_context
 .PHONY: test_p3_network
 test_p3_network: $(NET_ASM_OBJ)
 	$(CC) $(CFLAGS) $(TEST_SANITIZE) -o tests/test_p3_network tests/test_p3_network.c \
-	  $(NET_CORE_SRCS) $(NET_ASM_OBJ) \
+	  $(NET_CORE_SRCS) kernel/core/sched/workqueue.c $(NET_ASM_OBJ) \
 	  -Wl,-z,noexecstack
 	./tests/test_p3_network
 

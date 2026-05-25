@@ -16,6 +16,7 @@ base), **FL_CONTRACT_P1_RUNTIME_REV**, all shards below, and
 | *contract_p1_arenas.h* | P1-5 |
 | *contract_p1_driver_reentrancy.h* | P1-6 |
 | *contract_p1_timekeeping.h* | P1-7 |
+| *contract_p1_workqueue.h* | P1-8 |
 
 Each shard starts with **#include "contract_extend.h"** (see *../foundations/*).
 

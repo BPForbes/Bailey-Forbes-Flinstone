@@ -38,7 +38,18 @@ Kernel jobs must respect **P1-3** (lock ordering, no unbounded work under spinlo
 - Per-item **work struct**: function pointer, context, **no unbounded heap** in the dispatcher
 - Integration with **`fl_net_netdev_shutdown`** (**#232**) and driver teardown (**P4-2**)
 
-**Contract (planned):** **`contracts/runtime/contract_p1_workqueue.h`** via **`contract_runtime.h`**.
+**Contract:** **`contracts/runtime/contract_p1_workqueue.h`** (included from **`contract_runtime.h`**).
+
+**Source tree (scaffold — builds, handlers mostly no-op):**
+
+| Path | Row | Notes |
+|------|-----|--------|
+| **`kernel/core/sched/workqueue.c`** | **P1-8** | Default queue: **`fl_wq_enqueue`**, **`fl_wq_poll`**, **`fl_wq_drain`** |
+| **`kernel/core/sched/bg_jobs.c`** | **P1-9**, **P1-10**, tick hub | **`fl_bg_jobs_tick`**; reclaim/watchdog stubs |
+| **`kernel/core/net/net_background.c`** | **P3-14** | **`fl_net_background_tick`**, ARP sweep kick stub |
+| **`kernel/core/sched/threadpool.c`** | — | Shell command pool on **H** (not kernel workqueue) |
+
+Planned domain files (not yet in tree): **P5-4** writeback, **P4-8** IRQ bottom-half queue, **P9-4** RCU grace jobs.
 
 **Acceptance:**
 
