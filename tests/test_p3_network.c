@@ -86,7 +86,7 @@ static int test_icmp_echo_asm_layout(void) {
     ASSERT(req[6] == 0 && req[7] == 9);
     ASSERT(req[8] == 0x5a && req[9] == 0x5a);
     /* Ones-complement over the full echo (checksum field included) folds to 0. */
-    ASSERT(fl_net_checksum16(req, len) == 0u);
+    ASSERT(fl_net_checksum16_valid(req, len));
 
     reply[0] = (uint8_t)FL_NET_ICMPV4_TYPE_ECHO_REPLY;
     reply[1] = 0;
