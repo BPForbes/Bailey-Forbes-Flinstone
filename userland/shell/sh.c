@@ -53,6 +53,8 @@
 #include "drivers/drivers.h"
 #include "fs_jail.h"
 #include "fl/session.h"
+#include "fl/authz_subsystem.h"
+#include "net_netdev.h"
 #include "VM/vm.h"
 #include <stdio.h>
 #include <stdlib.h>
@@ -312,7 +314,7 @@ int main(int argc, char *argv[]) {
             "setdisk","createdisk","format","search","writecluster","delcluster","update","redirect",
             "initdisk","rerun","import","du","printdisk","addcluster","where","loc",
             "diskput","diskget","diskfiles","diskdel","diskmkdir","sudo","su","login",
-            "logout","useradd","userdel","passwd","whoami",NULL};
+            "logout","useradd","userdel","passwd","whoami","ping","check",NULL};
         int is_cmd = 0;
         for (int k = 0; skip[k]; k++)
             if (!strcmp(argv[1], skip[k])) { is_cmd = 1; break; }
@@ -348,6 +350,8 @@ int main(int argc, char *argv[]) {
         fprintf(stderr, "[VM] 5-layer driver config warning: layer 4 shell/VM root is not configured\n");
     fs_jail_init();
     fl_session_init();
+    fl_net_netdev_init();
+    fl_net_netdev_set_authz_hook(fl_authz_subsystem_check, NULL);
 
     /* Default host volume: ensure drive.img exists before block driver probes it. */
     if (strcmp(current_disk_file, "drive.img") == 0) {

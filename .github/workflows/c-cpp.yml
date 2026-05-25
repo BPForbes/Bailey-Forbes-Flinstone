@@ -132,6 +132,9 @@ jobs:
       - name: Test — userspace connection
         run: make test_userspace_connection
 
+      - name: Test — P3 network (ping / check requirements)
+        run: make check-network-requirements
+
       - name: Build CUnit suite
         run: make BPForbes_Flinstone_Tests CHANGELOG_CI=1
 

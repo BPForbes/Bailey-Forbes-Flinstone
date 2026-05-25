@@ -58,6 +58,8 @@ int cmd_useradd_run(int argc, char **argv);
 int cmd_userdel_run(int argc, char **argv);
 int cmd_passwd_run(int argc, char **argv);
 int cmd_whoami_run(int argc, char **argv);
+int cmd_ping_run(int argc, char **argv);
+int cmd_check_run(int argc, char **argv);
 
 /* Batch argv token counts (see cmd_batch.h, cmd_batch_dispatch.c). */
 int fl_shell_cmd_batch_tokens_count(fl_shell_cmd_no_t no, int argc, char **argv, int i);
@@ -109,5 +111,7 @@ int cmd_useradd_batch_tokens_count(int argc, char **argv, int i);
 int cmd_userdel_batch_tokens_count(int argc, char **argv, int i);
 int cmd_passwd_batch_tokens_count(int argc, char **argv, int i);
 int cmd_whoami_batch_tokens_count(int argc, char **argv, int i);
+int cmd_ping_batch_tokens_count(int argc, char **argv, int i);
+int cmd_check_batch_tokens_count(int argc, char **argv, int i);
 
 #endif /* CMD_DECL_H */
