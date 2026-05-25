@@ -25,11 +25,11 @@ global asm_net_tcp_read_ports_be
 
 asm_net_checksum16:
     xor eax, eax
+    test rdi, rdi
+    jz .L_csum_empty
     test rsi, rsi
     jz .L_csum_empty
-    test rdx, rdx
-    jz .L_csum_empty
-    mov r8, rdx
+    mov r8, rsi
 .L_csum_pair:
     cmp r8, 1
     jbe .L_csum_odd
@@ -164,7 +164,7 @@ asm_net_icmp_echo_request_build:
     rep stosb
 .L_icmp_csum:
     mov rdi, rbx
-    mov rdx, r9
+    mov rsi, r9
     call asm_net_checksum16
     mov [rbx + 2], ah
     mov [rbx + 3], al

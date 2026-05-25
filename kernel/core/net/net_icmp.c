@@ -1,5 +1,6 @@
 #include "net_icmp.h"
 
+#include "contract_p3_wire.h"
 #include "net_checksum.h"
 #include "net_ipv4.h"
 #include "net_wire_host.h"
@@ -10,14 +11,16 @@
 
 size_t fl_net_icmp_echo_request_build(uint8_t *buf, size_t cap, uint16_t id, uint16_t seq,
                                       size_t payload_len) {
+    if (!buf || cap < FL_NET_ICMPV4_HDR_MIN)
+        return 0;
+    if (payload_len > cap - FL_NET_ICMPV4_HDR_MIN)
+        return 0;
+
 #if defined(FL_NET_ASM_AVAILABLE)
     return asm_net_icmp_echo_request_build(buf, cap, id, seq, payload_len);
 #else
     size_t need = FL_NET_ICMPV4_HDR_MIN + payload_len;
     uint16_t csum;
-
-    if (!buf || cap < need)
-        return 0;
 
     buf[0] = (uint8_t)FL_NET_ICMPV4_TYPE_ECHO;
     buf[1] = 0;
@@ -38,11 +41,12 @@ size_t fl_net_icmp_echo_request_build(uint8_t *buf, size_t cap, uint16_t id, uin
 }
 
 int fl_net_icmp_echo_reply_match(const uint8_t *buf, size_t len, uint16_t id, uint16_t seq) {
+    if (!buf || len < FL_NET_ICMPV4_HDR_MIN)
+        return 0;
+
 #if defined(FL_NET_ASM_AVAILABLE)
     return asm_net_icmp_echo_reply_match(buf, len, id, seq);
 #else
-    if (!buf || len < FL_NET_ICMPV4_HDR_MIN)
-        return 0;
     if (buf[0] != (uint8_t)FL_NET_ICMPV4_TYPE_ECHO_REPLY)
         return 0;
     if (((uint16_t)buf[4] << 8 | buf[5]) != id)

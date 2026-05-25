@@ -49,7 +49,7 @@ int cmd_ping_run(int argc, char **argv) {
     double rtt = 0.0;
     fl_result_t rc;
     char msg[256];
-    char tcp_note[96];
+    char tcp_note[96] = {0};
     int i;
     int host_set = 0;
     int port_set = 0;

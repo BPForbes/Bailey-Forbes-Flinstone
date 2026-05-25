@@ -25,11 +25,11 @@
 /* uint16_t asm_net_checksum16(const void *data, size_t len); */
 asm_net_checksum16:
     xorl    %eax, %eax
+    testq   %rdi, %rdi
+    jz      .L_csum_empty
     testq   %rsi, %rsi
     jz      .L_csum_empty
-    testq   %rdx, %rdx
-    jz      .L_csum_empty
-    movq    %rdx, %r8
+    movq    %rsi, %r8
 .L_csum_pair:
     cmpq    $1, %r8
     jbe     .L_csum_odd
@@ -170,7 +170,7 @@ asm_net_icmp_echo_request_build:
     rep stosb
 .L_icmp_csum:
     movq    %rbx, %rdi
-    movq    %r9, %rdx
+    movq    %r9, %rsi
     call    asm_net_checksum16
     movb    %ah, 2(%rbx)
     movb    %al, 3(%rbx)

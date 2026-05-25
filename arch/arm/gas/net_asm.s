@@ -249,6 +249,7 @@ asm_net_pseudo_checksum_tcpudp:
     ret
 
 .L_net_accum16_be:
+    mov     w4, w0
     mov     w2, #0
     cbz     x1, .L_accum16_done
 .L_accum16_pair:
@@ -264,7 +265,7 @@ asm_net_pseudo_checksum_tcpudp:
     ldrb    w3, [x0]
     add     w2, w2, w3, lsl #8
 .L_accum16_done:
-    add     w0, w0, w2
+    add     w0, w4, w2
     ret
 
 /* x0=query w1=txid */

@@ -82,6 +82,8 @@ static fl_result_t dns_query_a(const char *host, uint32_t *out_addr_be) {
     if (nlen < 0)
         return FL_RESULT_INVAL;
     qlen = (size_t)(12 + nlen);
+    if (qlen + 4 > sizeof(query))
+        return FL_RESULT_INVAL;
     query[qlen++] = 0;
     query[qlen++] = 1;
     query[qlen++] = 0;
