@@ -11,6 +11,7 @@
 #include "net_loopback.h"
 #include "net_netdev.h"
 #include "net_tcp.h"
+#include "net_wire_egress.h"
 #include "net_wire_host_syscall.h"
 
 #include <errno.h>
@@ -127,8 +128,21 @@ fl_result_t fl_net_wire_send_icmp(uint32_t dst_be, const uint8_t *icmp, size_t i
     gettimeofday(&t0, NULL);
 
     if (fl_net_loopback_owns(dst_be)) {
+        fl_result_t eg =
+            fl_net_wire_egress_l4(dst_be, FL_NET_IP_PROTO_ICMP, icmp, icmp_len, rx, rx_cap, rx_len,
+                                  timeout_ms, out_rtt_ms);
+        if (eg == FL_RESULT_OK)
+            return FL_RESULT_OK;
         return wire_loopback_exchange(icmp, icmp_len, FL_NET_IP_PROTO_ICMP, dst_be, rx, rx_cap,
                                       rx_len, timeout_ms, out_rtt_ms);
+    }
+
+    {
+        fl_result_t eg =
+            fl_net_wire_egress_l4(dst_be, FL_NET_IP_PROTO_ICMP, icmp, icmp_len, rx, rx_cap, rx_len,
+                                  timeout_ms, out_rtt_ms);
+        if (eg == FL_RESULT_OK)
+            return FL_RESULT_OK;
     }
 
 #if defined(__linux__)

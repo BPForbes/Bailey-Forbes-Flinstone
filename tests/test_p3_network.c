@@ -1,8 +1,10 @@
 #include "contract_p0_ci.h"
 #include "contract_p3_ipv4.h"
 #include "contract_p3_wire.h"
+#include "net_arp.h"
 #include "net_dns.h"
 #include "net_eth.h"
+#include "net_route.h"
 #include "net_wire.h"
 #include "net_checksum.h"
 #include "net_icmp.h"
@@ -97,6 +99,74 @@ static int test_icmp_echo_asm_layout(void) {
     ASSERT(fl_net_icmp_echo_reply_match(reply, FL_NET_ICMPV4_HDR_MIN, 0x1234u, 9u));
     reply[0] = (uint8_t)FL_NET_ICMPV4_TYPE_ECHO;
     ASSERT(!fl_net_icmp_echo_reply_match(reply, FL_NET_ICMPV4_HDR_MIN, 0x1234u, 9u));
+    return 0;
+}
+
+static int test_arp_cache_and_frame(void) {
+    uint8_t mac[6] = {0x02, 0, 0x5e, 0, 0, 0x09};
+    uint8_t out[6];
+    uint8_t frame[64];
+    uint8_t host_mac[6];
+    uint16_t op = 0;
+    size_t len;
+
+    fl_net_arp_init();
+    ASSERT(fl_net_arp_cache_insert((uint32_t)(10 | (9 << 8) | (8 << 16) | (7 << 24)), mac) ==
+           FL_RESULT_OK);
+    ASSERT(fl_net_arp_cache_lookup((uint32_t)(10 | (9 << 8) | (8 << 16) | (7 << 24)), out));
+    ASSERT(memcmp(out, mac, 6) == 0);
+
+    fl_net_loopback_mac_host(host_mac);
+    len = fl_net_arp_build_request(frame, sizeof(frame), host_mac,
+                                   (uint32_t)127 | (1u << 24),
+                                   (uint32_t)127 | (2u << 24));
+    ASSERT(len > FL_NET_ETH_FRAME_HDR_LEN);
+    ASSERT(fl_net_arp_parse_eth(frame, len, &op, NULL, NULL, NULL, NULL));
+    ASSERT(op == FL_NET_ARP_OP_REQUEST);
+    return 0;
+}
+
+static int test_ipv4_prefix_match(void) {
+    uint32_t a = (uint32_t)10 | (0 << 8) | (2 << 16) | (15 << 24);
+    uint32_t n = (uint32_t)10 | (0 << 8) | (2 << 16) | (0 << 24);
+    ASSERT(fl_net_ipv4_prefix_match(a, n, 24u));
+    ASSERT(!fl_net_ipv4_prefix_match(a, n, 32u));
+    return 0;
+}
+
+static int test_loopback_arp_exchange(void) {
+    uint8_t host_mac[6];
+    uint8_t frame[128];
+    uint8_t rx[128];
+    size_t len;
+    fl_net_frame_view_t view;
+    fl_net_frame_mut_t mut;
+    fl_result_t rc;
+
+    fl_net_arp_init();
+    fl_net_route_init();
+    fl_net_loopback_reset();
+    fl_net_loopback_mac_host(host_mac);
+
+    len = fl_net_arp_build_request(frame, sizeof(frame), host_mac,
+                                   (uint32_t)127 | (2u << 24),
+                                   (uint32_t)127 | (1u << 24));
+    ASSERT(len > 0);
+    view.data = frame;
+    view.len = len;
+    ASSERT(fl_net_netdev_send(fl_net_netdev_loopback(), &view) == FL_RESULT_OK);
+
+    mut.data = rx;
+    mut.cap = sizeof(rx);
+    mut.len = 0;
+    rc = fl_net_netdev_recv(fl_net_netdev_loopback(), &mut, 2000u);
+    ASSERT(rc == FL_RESULT_OK);
+    ASSERT(mut.len > FL_NET_ETH_FRAME_HDR_LEN);
+    {
+        uint16_t op = 0;
+        ASSERT(fl_net_arp_parse_eth(rx, mut.len, &op, NULL, NULL, NULL, NULL));
+        ASSERT(op == FL_NET_ARP_OP_REPLY);
+    }
     return 0;
 }
 
@@ -249,6 +319,21 @@ int main(void) {
 
     printf("test_wire_vocabulary... ");
     if (test_wire_vocabulary() != 0)
+        return 1;
+    puts("ok");
+
+    printf("test_ipv4_prefix_match... ");
+    if (test_ipv4_prefix_match() != 0)
+        return 1;
+    puts("ok");
+
+    printf("test_arp_cache_and_frame... ");
+    if (test_arp_cache_and_frame() != 0)
+        return 1;
+    puts("ok");
+
+    printf("test_loopback_arp_exchange... ");
+    if (test_loopback_arp_exchange() != 0)
         return 1;
     puts("ok");
 

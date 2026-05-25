@@ -7,6 +7,9 @@ Long-form guide: **`docs/P3_NETWORKING.md`**.
 | File | Purpose |
 |------|---------|
 | `net_wire.c` | L2/L3 frame vocabulary (`contract_p3_wire.h`) |
+| `net_arp.c` | P3-4 ARP cache, request/reply, resolve |
+| `net_route.c` | P3-5 routing table |
+| `net_wire_egress.c` | IPv4 L4 egress (ARP + netdev) |
 | `net_ipv4.c` | IPv4 header construction |
 | `net_checksum.c` | Checksum (+ `asm_net_checksum16`) |
 | `net_icmp.c` | ICMP echo |

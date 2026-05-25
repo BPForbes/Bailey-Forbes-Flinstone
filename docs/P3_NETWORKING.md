@@ -14,6 +14,9 @@ Normative contracts live under **`contracts/networking/`** (umbrella **`contract
 |--------|---------|------|
 | **`net_wire.c`** | Wire vocabulary | Ethernet+IPv4 frame build/parse, MTU, `fl_net_frame_view_t` / `fl_net_frame_mut_t` |
 | **`net_eth.c`** | L2 helpers | Aliases/constants over wire |
+| **`net_arp.c`** | P3-4 | ARP request/reply, bounded cache, resolve over netdev |
+| **`net_route.c`** | P3-5 (partial) | Longest-prefix routing table; TAP lab via **FL_NET_TAP_*** env |
+| **`net_wire_egress.c`** | P3-5 / P3-6 path | IPv4 L4 send/recv on routed netdev (ARP + ICMP echo) |
 | **`net_ipv4.c`** | P3-5 (partial) | IPv4 header build, literal/loopback address helpers |
 | **`net_checksum.c`** | P3-5 | Internet checksum; **`asm_net_checksum16`** when `FL_NET_ASM_AVAILABLE` |
 | **`net_icmp.c`** | P3-5 | ICMP echo request/reply exchange |
@@ -97,8 +100,8 @@ Legend matches **`docs/ROADMAP.md`**: **✅** complete; **~✅** usable lab subs
 | **P3-1** | ✅ | ~✅ — `net_netdev.c`, authz hook in `sh.c` |
 | **P3-2** | ✅ | ~✅ — `net_loopback.c` frame path + RX queue |
 | **P3-3** | ✅ | ~✅ — `net_tap.c` (CI often skips without `CAP_NET_ADMIN`) |
-| **P3-4** ARP | ✅ | ❌ |
-| **P3-5** IPv4 | ✅ | ~✅ — build/parse/checksum; no full routing |
+| **P3-4** ARP | ✅ | ~✅ — `net_arp.c` cache + request/reply on loopback/TAP |
+| **P3-5** IPv4 | ✅ | ~✅ — routing table + ICMP on netdev path; no full PMTU/offload |
 | **P3-6** UDP | ✅ | ~✅ — DNS + wire host datagrams only |
 | **P3-7** TCP | ✅ | ⚠️ — SYN probe only |
 | **P3-8** DNS | ✅ | ~✅ — A record, single nameserver |
@@ -137,9 +140,17 @@ make check-network-requirements
 - **`kernel/core/net/README.md`** — file index and include graph
 - **`AGENTS.md`** — build/test and versioning for this PR
 
+## Lab TAP addressing
+
+| Variable | Default | Meaning |
+|----------|---------|---------|
+| **`FL_NET_TAP_IPV4`** | `10.0.2.15` | Host address on TAP |
+| **`FL_NET_TAP_PREFIX`** | `24` | Prefix length |
+| **`FL_NET_TAP_GW`** | `10.0.2.2` | Default gateway for off-subnet ARP |
+
 ## Future work
 
-- **P3-4** ARP + **P3-5** routing table for off-loopback without raw sockets
+- Off-loopback ICMP without Linux datagram socket when TAP route covers **dst**
 - **P3-7** full TCP state machine; move raw-TCP **`select`** path to ASM or netdev TX
 - **P3-12** DHCP for hosted labs
 - Bare-metal NIC driver feeding **`fl_net_driver_t`** instead of TAP/socket shim

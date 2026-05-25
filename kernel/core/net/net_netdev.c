@@ -1,7 +1,9 @@
 #include "net_netdev.h"
 
 #include "contract_p0_ci.h"
+#include "net_arp.h"
 #include "net_loopback.h"
+#include "net_route.h"
 #include "net_tap.h"
 #include "net_wire.h"
 
@@ -23,6 +25,8 @@ static char s_tap_error[96];
 
 void fl_net_netdev_init(void) {
     fl_net_wire_init();
+    fl_net_arp_init();
+    fl_net_route_init();
     fl_net_loopback_reset();
 
     memset(&s_loopback_drv, 0, sizeof(s_loopback_drv));
@@ -164,6 +168,15 @@ fl_result_t fl_net_netdev_tap_open(const char *ifname_hint) {
 
     s_tap_drv.impl = (void *)(intptr_t)s_tap_fd;
     s_tap_error[0] = '\0';
+
+#if defined(__linux__)
+    {
+        uint8_t tap_mac[6];
+        if (fl_net_tap_hwaddr(s_tap_fd, s_tap_ifname, tap_mac) == FL_RESULT_OK)
+            (void)fl_net_route_configure_tap(&s_tap_drv, tap_mac, s_tap_ifname);
+    }
+#endif
+
     return FL_RESULT_OK;
 }
 
