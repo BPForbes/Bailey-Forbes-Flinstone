@@ -1,5 +1,7 @@
 #include "net_checksum.h"
 
+#include "fl/net_asm.h"
+
 static uint32_t checksum16_accum(const uint8_t *p, size_t len) {
     uint32_t sum = 0;
 
@@ -14,15 +16,19 @@ static uint32_t checksum16_accum(const uint8_t *p, size_t len) {
 }
 
 uint16_t fl_net_checksum16(const void *data, size_t len) {
-    uint32_t sum;
-
     if (!data || len == 0)
         return 0xffffu;
 
-    sum = checksum16_accum((const uint8_t *)data, len);
+#if defined(FL_NET_ASM_AVAILABLE)
+    return asm_net_checksum16(data, len);
+#else
+    {
+    uint32_t sum = checksum16_accum((const uint8_t *)data, len);
     while (sum >> 16)
         sum = (sum & 0xffffu) + (sum >> 16);
     return (uint16_t)(~sum);
+    }
+#endif
 }
 
 uint16_t fl_net_ipv4_checksum(const void *hdr, size_t hdr_len) {
@@ -32,7 +38,7 @@ uint16_t fl_net_ipv4_checksum(const void *hdr, size_t hdr_len) {
 uint16_t fl_net_pseudo_checksum_tcpudp(uint32_t src_be, uint32_t dst_be, uint8_t proto,
                                        const void *seg, size_t seg_len) {
     uint8_t pseudo[12];
-    uint32_t sum;
+    uint32_t sum = 0;
 
     pseudo[0] = (uint8_t)(src_be & 0xffu);
     pseudo[1] = (uint8_t)((src_be >> 8) & 0xffu);

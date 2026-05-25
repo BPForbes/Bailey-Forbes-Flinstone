@@ -57,12 +57,13 @@ endif
 ifeq ($(ARCH),x86_64_nasm)
 AS = nasm
 ASFLAGS = -f elf64
-CFLAGS += -DFL_STACK_ASM_AVAILABLE=1
+CFLAGS += -DFL_STACK_ASM_AVAILABLE=1 -DFL_NET_ASM_AVAILABLE=1
 # Kernel x86_64 boot/driver .s are GAS; compile with $(CC) -c (see rule below), not NASM.
 KERNEL_X86_GAS_ASM = kernel/arch/x86_64/boot/spinlock.s kernel/arch/x86_64/drivers/ata_pio.s \
                      kernel/arch/x86_64/boot/gdt.s kernel/arch/x86_64/boot/idt.s
 ASMSRCS_BASE = arch/x86_64/nasm/mem_asm.asm arch/x86_64/nasm/fl_stack_asm.asm arch/x86_64/nasm/port_io.asm \
-               arch/x86_64/nasm/disk_host_io.asm arch/x86_64/nasm/shell_history_host_asm.asm \
+               arch/x86_64/nasm/disk_host_io.asm arch/x86_64/nasm/net_asm.asm \
+               arch/x86_64/nasm/net_wire_host_asm.asm arch/x86_64/nasm/shell_history_host_asm.asm \
                arch/x86_64/nasm/usb_xhci_mmio_asm.asm $(KERNEL_X86_GAS_ASM)
 ASMSRCS_ALLOC = arch/x86_64/nasm/alloc_core.asm arch/x86_64/nasm/alloc_malloc.asm arch/x86_64/nasm/alloc_free.asm
 ASM_SRC_DIR = arch/x86_64/nasm
@@ -85,18 +86,22 @@ CC = gcc
 CXX = g++
 AS = as
 endif
-ASMSRCS_BASE = arch/arm/gas/mem_asm.s arch/arm/gas/fl_stack_asm.s arch/arm/gas/port_io.s arch/arm/gas/disk_host_io.s arch/arm/gas/shell_history_host_asm.s kernel/arch/aarch64/boot/spinlock.s kernel/arch/aarch64/drivers/ramdisk.s \
+ASMSRCS_BASE = arch/arm/gas/mem_asm.s arch/arm/gas/fl_stack_asm.s arch/arm/gas/port_io.s arch/arm/gas/disk_host_io.s \
+               arch/arm/gas/net_asm.s arch/arm/gas/net_wire_host_asm.s arch/arm/gas/shell_history_host_asm.s \
+               kernel/arch/aarch64/boot/spinlock.s kernel/arch/aarch64/drivers/ramdisk.s \
                kernel/arch/aarch64/drivers/usb_xhci_mmio_asm.s \
                kernel/arch/aarch64/boot/vectors.s
 ASMSRCS_ALLOC = arch/arm/gas/alloc_core.s arch/arm/gas/alloc_malloc.s arch/arm/gas/alloc_free.s
 ASM_SRC_DIR = arch/arm/gas
 KERNEL_DRIVERS = kernel/arch/aarch64/drivers
-CFLAGS += -DFL_STACK_ASM_AVAILABLE=1
+CFLAGS += -DFL_STACK_ASM_AVAILABLE=1 -DFL_NET_ASM_AVAILABLE=1
 else
 # x86_64_gas (default)
 CXX = g++
-CFLAGS += -DFL_STACK_ASM_AVAILABLE=1
-ASMSRCS_BASE = arch/x86_64/gas/mem_asm.s arch/x86_64/gas/fl_stack_asm.s arch/x86_64/gas/port_io.s arch/x86_64/gas/disk_host_io.s arch/x86_64/gas/shell_history_host_asm.s kernel/arch/x86_64/boot/spinlock.s kernel/arch/x86_64/drivers/ata_pio.s \
+CFLAGS += -DFL_STACK_ASM_AVAILABLE=1 -DFL_NET_ASM_AVAILABLE=1
+ASMSRCS_BASE = arch/x86_64/gas/mem_asm.s arch/x86_64/gas/fl_stack_asm.s arch/x86_64/gas/port_io.s \
+               arch/x86_64/gas/disk_host_io.s arch/x86_64/gas/net_asm.s arch/x86_64/gas/net_wire_host_asm.s \
+               arch/x86_64/gas/shell_history_host_asm.s kernel/arch/x86_64/boot/spinlock.s kernel/arch/x86_64/drivers/ata_pio.s \
                kernel/arch/x86_64/drivers/usb_xhci_mmio_asm.s \
                kernel/arch/x86_64/boot/gdt.s kernel/arch/x86_64/boot/idt.s
 ASMSRCS_ALLOC = arch/x86_64/gas/alloc/alloc_core.s arch/x86_64/gas/alloc/alloc_malloc.s arch/x86_64/gas/alloc/alloc_free.s
@@ -134,7 +139,9 @@ NET_CORE_SRCS = kernel/core/net/net_checksum.c kernel/core/net/net_wire.c kernel
                 kernel/core/net/net_ipv4.c \
                 kernel/core/net/net_icmp.c kernel/core/net/net_tcp.c kernel/core/net/net_loopback.c \
                 kernel/core/net/net_netdev.c kernel/core/net/net_tap.c kernel/core/net/net_wire_host.c \
+                kernel/core/net/net_wire_host_syscall.c \
                 kernel/core/net/net_dns.c kernel/core/net/net_ping_host.c kernel/core/net/net_requirements.c
+NET_ASM_OBJ = $(patsubst %.s,%.o,$(patsubst %.asm,%.o,$(filter %/net_asm.s %/net_asm.asm %/net_wire_host_asm.s %/net_wire_host_asm.asm,$(ASMSRCS))))
 CORE_SRCS = kernel/core/vfs/disk.c kernel/core/vfs/fat32_host.c kernel/core/vfs/fat32_host_files.c kernel/core/vfs/path_log.c kernel/core/vfs/cluster.c kernel/core/vfs/fs.c \
             disk_host_io.c \
             kernel/core/sched/threadpool.c priority_queue.c kernel/core/vfs/fs_jail.c kernel/core/vfs/fs_provider.c kernel/core/vfs/fs_command.c \
@@ -576,9 +583,9 @@ test_p0_p2_wiring: kernel/core/memory/fl_stack.o kernel/core/memory/exec_context
 	./tests/test_p0_p2_wiring
 
 .PHONY: test_p3_network
-test_p3_network:
+test_p3_network: $(NET_ASM_OBJ)
 	$(CC) $(CFLAGS) $(TEST_SANITIZE) -o tests/test_p3_network tests/test_p3_network.c \
-	  $(NET_CORE_SRCS) \
+	  $(NET_CORE_SRCS) $(NET_ASM_OBJ) \
 	  -Wl,-z,noexecstack
 	./tests/test_p3_network
 

@@ -75,6 +75,10 @@ Run builds from the repository root.
 - If a required toolchain or library is missing, install the packages listed in the Cursor Cloud section, then rerun the tests instead of skipping them.
 - Document any true environment blocker in the final response, including the exact command that failed and the missing prerequisite.
 
+## P3 networking (implementation)
+
+Hosted and loopback IPv4 probes (`ping`, `check requirements`) live in **`kernel/core/net/`**. See **`docs/P3_NETWORKING.md`** for layer map, ASM backing (**`arch/*/net_asm.*`**, **`arch/*/net_wire_host_asm.*`** on x86_64 NASM/GAS and AArch64), and P3-x status. Tests: **`make test_p3_network`**, **`make check-network-requirements`**.
+
 ## Module contracts (AI)
 
 In this repository, a **module contract** is a **normative, stable model of how data and outcomes may cross a boundary** between subsystems: which buffers or handles move where, who allocates or frees them, which error or status channels apply, and which **surfaces** exist for interchange. It is **not product functionality by itself**—it is the **blueprint for allowed I/O and responsibility**. Headers under **`contracts/foundations/`** (P0 bundle) and closely related **`fl/*`** boundary headers are the primary **C artifacts** for contracts today; **`contract_extend.h`** is the documented prelude for future **Px** headers under **`contracts/extensions/`**. **Implementation** (drivers, rate limits, IRQ paths) may **enforce** a contract but is **not** a substitute for an explicit distribution model.

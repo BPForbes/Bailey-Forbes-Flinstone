@@ -5,11 +5,13 @@
 #include "net_wire_host.h"
 
 #include "contract_p3_ipv4.h"
+#include "fl/net_asm.h"
 #include "net_ipv4.h"
 #include "net_wire.h"
 #include "net_loopback.h"
 #include "net_netdev.h"
 #include "net_tcp.h"
+#include "net_wire_host_syscall.h"
 
 #include <errno.h>
 #include <stdio.h>
@@ -32,6 +34,17 @@ static double timeval_delta_ms(const struct timeval *a, const struct timeval *b)
 
 static uint32_t wire_loopback_src_be(void) {
     return (uint32_t)FL_NET_IPV4_LOOPBACK_FIRST_OCTET | (1u << 24);
+}
+
+static void wire_host_sin4(struct sockaddr_in *sa, uint32_t addr_be, uint16_t port_host) {
+    memset(sa, 0, sizeof(*sa));
+    sa->sin_family = AF_INET;
+    sa->sin_addr.s_addr = addr_be;
+#if defined(FL_NET_ASM_AVAILABLE)
+    sa->sin_port = asm_net_htons_be16(port_host);
+#else
+    sa->sin_port = htons(port_host);
+#endif
 }
 
 static fl_result_t wire_loopback_exchange(const uint8_t *l4, size_t l4_len, uint8_t ip_proto,
@@ -120,30 +133,28 @@ fl_result_t fl_net_wire_send_icmp(uint32_t dst_be, const uint8_t *icmp, size_t i
 
 #if defined(__linux__)
     {
-        int sock;
         struct sockaddr_in dst;
         struct timeval tv;
         ssize_t n;
+        int sock;
 
-        memset(&dst, 0, sizeof(dst));
-        dst.sin_family = AF_INET;
-        dst.sin_addr.s_addr = dst_be;
+        wire_host_sin4(&dst, dst_be, 0);
 
-        sock = socket(AF_INET, SOCK_DGRAM, IPPROTO_ICMP);
+        sock = net_host_socket(AF_INET, SOCK_DGRAM, IPPROTO_ICMP);
         if (sock < 0)
             return (errno == EACCES) ? FL_RESULT_ACCES : FL_RESULT_ERR;
 
         tv.tv_sec = (time_t)(timeout_ms / 1000u);
         tv.tv_usec = (suseconds_t)((timeout_ms % 1000u) * 1000u);
-        (void)setsockopt(sock, SOL_SOCKET, SO_RCVTIMEO, &tv, sizeof(tv));
+        (void)net_host_setsockopt(sock, SOL_SOCKET, SO_RCVTIMEO, &tv, (unsigned int)sizeof(tv));
 
-        if (sendto(sock, icmp, icmp_len, 0, (struct sockaddr *)&dst, sizeof(dst)) < 0) {
-            close(sock);
+        if (net_host_sendto(sock, icmp, icmp_len, 0, &dst, (unsigned int)sizeof(dst)) < 0) {
+            net_host_close(sock);
             return FL_RESULT_ERR;
         }
 
-        n = recvfrom(sock, rx, rx_cap, 0, NULL, NULL);
-        close(sock);
+        n = net_host_recvfrom(sock, rx, rx_cap, 0, NULL, NULL);
+        net_host_close(sock);
         gettimeofday(&t1, NULL);
         if (n < 0)
             return (errno == EAGAIN || errno == EWOULDBLOCK) ? FL_RESULT_TIMEDOUT
@@ -160,16 +171,19 @@ fl_result_t fl_net_wire_send_icmp(uint32_t dst_be, const uint8_t *icmp, size_t i
 #endif
 }
 
-fl_result_t fl_net_wire_send_tcp_syn(uint32_t dst_be, uint16_t sport_unused, uint16_t dport,
+fl_result_t fl_net_wire_send_tcp_syn(uint32_t dst_be, uint16_t sport, uint16_t dport,
                                      const uint8_t *tcp, size_t tcp_len,
                                      unsigned timeout_ms, double *out_rtt_ms, char *note,
                                      size_t note_len) {
     struct timeval t0, t1;
+    uint16_t pkt_sport;
 
     if (!tcp || tcp_len < FL_NET_TCP_HDR_LEN_MIN)
         return FL_RESULT_INVAL;
 
-    (void)sport_unused;
+    pkt_sport = (uint16_t)(((uint16_t)tcp[0] << 8) | tcp[1]);
+    if (pkt_sport != sport)
+        return FL_RESULT_INVAL;
 
     gettimeofday(&t0, NULL);
 
@@ -188,7 +202,6 @@ fl_result_t fl_net_wire_send_tcp_syn(uint32_t dst_be, uint16_t sport_unused, uin
 
 #if defined(__linux__)
     {
-        int sock;
         struct sockaddr_in dst;
         struct timeval tv;
         fd_set rfds;
@@ -196,6 +209,7 @@ fl_result_t fl_net_wire_send_tcp_syn(uint32_t dst_be, uint16_t sport_unused, uin
         ssize_t n;
         int flags;
         int so;
+        int sock;
 
         sock = socket(AF_INET, SOCK_RAW, IPPROTO_TCP);
         if (sock < 0) {
@@ -204,10 +218,7 @@ fl_result_t fl_net_wire_send_tcp_syn(uint32_t dst_be, uint16_t sport_unused, uin
             return (errno == EPERM || errno == EACCES) ? FL_RESULT_ACCES : FL_RESULT_ERR;
         }
 
-        memset(&dst, 0, sizeof(dst));
-        dst.sin_family = AF_INET;
-        dst.sin_addr.s_addr = dst_be;
-        dst.sin_port = htons(dport);
+        wire_host_sin4(&dst, dst_be, dport);
 
         flags = fcntl(sock, F_GETFL, 0);
         if (flags >= 0)
@@ -259,8 +270,11 @@ fl_result_t fl_net_wire_send_tcp_syn(uint32_t dst_be, uint16_t sport_unused, uin
         return FL_RESULT_OK;
     }
 #else
-    (void)sport_unused;
+    (void)dst_be;
+    (void)sport;
     (void)dport;
+    (void)tcp;
+    (void)tcp_len;
     (void)timeout_ms;
     (void)note;
     (void)note_len;
@@ -268,47 +282,51 @@ fl_result_t fl_net_wire_send_tcp_syn(uint32_t dst_be, uint16_t sport_unused, uin
 #endif
 }
 
-fl_result_t fl_net_wire_send_udp(uint32_t dst_be, uint16_t sport_unused, uint16_t dport,
+fl_result_t fl_net_wire_send_udp(uint32_t dst_be, uint16_t sport, uint16_t dport,
                                  const uint8_t *payload, size_t payload_len, uint8_t *rx,
                                  size_t rx_cap, size_t *rx_len, unsigned timeout_ms) {
 #if defined(__linux__)
-    int sock;
+    struct sockaddr_in local;
     struct sockaddr_in dst;
     struct timeval tv;
     ssize_t n;
+    int sock;
 
     if (!payload || payload_len == 0 || !rx || !rx_len)
         return FL_RESULT_INVAL;
 
-    (void)sport_unused;
+    wire_host_sin4(&dst, dst_be, dport);
 
-    sock = socket(AF_INET, SOCK_DGRAM, 0);
+    sock = net_host_socket(AF_INET, SOCK_DGRAM, 0);
     if (sock < 0)
         return FL_RESULT_ERR;
 
-    memset(&dst, 0, sizeof(dst));
-    dst.sin_family = AF_INET;
-    dst.sin_addr.s_addr = dst_be;
-    dst.sin_port = htons(dport);
+    if (sport != 0u) {
+        wire_host_sin4(&local, 0, sport);
+        if (net_host_bind(sock, &local, (unsigned int)sizeof(local)) < 0) {
+            net_host_close(sock);
+            return FL_RESULT_ERR;
+        }
+    }
 
     tv.tv_sec = (time_t)(timeout_ms / 1000u);
     tv.tv_usec = (suseconds_t)((timeout_ms % 1000u) * 1000u);
-    (void)setsockopt(sock, SOL_SOCKET, SO_RCVTIMEO, &tv, sizeof(tv));
+    (void)net_host_setsockopt(sock, SOL_SOCKET, SO_RCVTIMEO, &tv, (unsigned int)sizeof(tv));
 
-    if (sendto(sock, payload, payload_len, 0, (struct sockaddr *)&dst, sizeof(dst)) < 0) {
-        close(sock);
+    if (net_host_sendto(sock, payload, payload_len, 0, &dst, (unsigned int)sizeof(dst)) < 0) {
+        net_host_close(sock);
         return FL_RESULT_ERR;
     }
 
-    n = recvfrom(sock, rx, rx_cap, 0, NULL, NULL);
-    close(sock);
+    n = net_host_recvfrom(sock, rx, rx_cap, 0, NULL, NULL);
+    net_host_close(sock);
     if (n < 0)
         return (errno == EAGAIN || errno == EWOULDBLOCK) ? FL_RESULT_TIMEDOUT : FL_RESULT_ERR;
     *rx_len = (size_t)n;
     return FL_RESULT_OK;
 #else
     (void)dst_be;
-    (void)sport_unused;
+    (void)sport;
     (void)dport;
     (void)payload;
     (void)payload_len;

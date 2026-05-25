@@ -42,3 +42,7 @@ networking or **fl/driver/net.h**.
 
 **Driver API:** **kernel/include/fl/driver/net.h** uses **fl_net_frame_view_t** /
 **fl_net_frame_mut_t** and **fl_result_t** for **P3-1** interchange.
+
+**Implementation (PRE 4.2.0):** **kernel/core/net/** — see **docs/P3_NETWORKING.md** and
+**kernel/core/net/README.md**. Hosted wire I/O uses **arch/*/net_asm.*** (checksum) and
+**arch/*/net_wire_host_asm.*** (Linux socket syscalls on x86_64 and AArch64).
