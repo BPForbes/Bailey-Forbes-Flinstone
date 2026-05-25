@@ -4,7 +4,7 @@ RELEASE_VERSION=0
 PRERELEASE=1
 DEV_VERSION=2
 DESCRIPTION<<VER_END
-PRE 4.2.0 (P3): P3-4 ARP cache and request/reply on netdev (asm_net_arp_cache_* table ops); P3-5 IPv4 routing table (fix TAP network prefix); ICMP echo on in-tree wire path (loopback + TAP when configured); docs: ~✅ P3-4/P3-5; P3-13 chat plan (docs/P3_13_CHAT_SERVER.md); kernel background jobs: P1-8–P1-10, P3-14, P4-8, P5-4, P9-4 contract shards (#242); P1-8 MLQ workqueue + test_workqueue_p18; P3-14 net_background kick stub; docs/BACKGROUND_JOBS.md.
+PRE 4.2.0 (P3): P3-4 ARP cache and request/reply on netdev (asm_net_arp_cache_* table ops); P3-5 IPv4 routing table (fix TAP network prefix); ICMP echo on in-tree wire path (loopback + TAP when configured); docs: ~✅ P3-4/P3-5; P3-13 chat plan (docs/P3_13_CHAT_SERVER.md); kernel background jobs: P1-8–P1-10, P3-14, P4-8, P5-4, P9-4 contract shards (#242); P1-8 MLQ workqueue + test_workqueue_p18; test_invariants umbrella rev sync; P3-14 net_background kick stub; docs/BACKGROUND_JOBS.md.
 VER_END
 
 RELEASE_DATE=2026-05-25
