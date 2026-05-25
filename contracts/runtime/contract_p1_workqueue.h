@@ -19,4 +19,19 @@
 /** Work handler must not block indefinitely; may not allocate without bound. */
 #define FL_WQ_HANDLER_STACK_HINT_BYTES 512u
 
+/**
+ * MLQ layer indices (0 = highest priority). Same semantics as
+ * **PQ_NUM_PRIORITIES** in **priority_queue.h** / shell **threadpool**.
+ */
+#define FL_WQ_LAYER_URGENT      0 /* watchdog, time-critical */
+#define FL_WQ_LAYER_NORMAL      1
+#define FL_WQ_LAYER_BACKGROUND  2 /* reclaim, net timers */
+#define FL_WQ_LAYER_IDLE        3
+
+/**
+ * **fl_wq_default()** is single-writer until **P9-3** SMP: one thread (or
+ * tick loop) may call **fl_wq_enqueue** / **fl_wq_poll** without locks.
+ * Debug builds may assert no nested **fl_wq_poll** (**FL_WQ_DEBUG_REENTRANCY**).
+ */
+
 #endif /* FL_CONTRACT_P1_WORKQUEUE_H */

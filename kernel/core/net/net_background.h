@@ -5,6 +5,9 @@
 
 /** P3-14 — network stack background work (RX dequeue, TCP timers, ARP TTL). */
 
+/** **fl_wq_work_t.tag** for ARP cache TTL sweep kick (**#240**). */
+#define FL_NET_BG_TAG_ARP_TICK 0x0314u
+
 void fl_net_background_init(void);
 void fl_net_background_shutdown(void);
 

@@ -54,9 +54,23 @@ Planned domain files (not yet in tree): **P5-4** writeback, **P4-8** IRQ bottom-
 
 **Acceptance:**
 
-- [ ] Enqueue 1000 no-op jobs without leak; clean shutdown with pending work
-- [ ] Assert **P1-3** lock-order violations in debug builds when a job takes forbidden locks
-- [ ] Document which jobs may block vs must stay non-blocking
+- [x] Enqueue 1000 no-op jobs without leak; clean shutdown with pending work — **`make test_workqueue_p18`** (**#242**)
+- [ ] Assert **P1-3** lock-order violations in debug builds when a job takes forbidden locks (future)
+- [x] Document which jobs may block vs must stay non-blocking (table below)
+
+### Handler blocking policy (**#242**)
+
+| Job / kick | Row | May block? | Notes |
+|------------|-----|------------|--------|
+| **P1-8** dispatcher (`fl_wq_poll`) | **P1-8** | N/A | Runs handlers synchronously; keep each handler short |
+| **`bg_reclaim_work`** | **P1-9** | No (target) | Must not take **P1-3** locks while holding PMM locks out of order |
+| **`bg_watchdog_work`** | **P1-10** | No (target) | Read-only health checks; panic policy is explicit |
+| **`net_bg_work`** (ARP tick) | **P3-14** | No (target) | Bounded cache walk only; no wire I/O in tick |
+| **P5-4** writeback (planned) | **P5-4** | Yes (bounded) | May wait on block I/O; rate-limited batches |
+| **P4-8** IRQ bottom half (planned) | **P4-8** | Yes (bounded) | Locks allowed per **P1-3** graph after hardirq |
+| **P9-4** RCU grace (planned) | **P9-4** | No | Wait for quiescent state, no unbounded sleep |
+
+**SMP / locking:** **`fl_wq_default()`** is **single-writer** until **P9-3** (documented in **`contract_p1_workqueue.h`**). Debug builds assert no nested **`fl_wq_poll`**. **`fl_wq_drain(..., timeout_ms)`** uses **P1-7** **`fl_time_monotonic_ns`** when **`timeout_ms > 0`**.
 
 ---
 

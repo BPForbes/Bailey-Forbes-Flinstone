@@ -21,7 +21,7 @@ fl_result_t fl_net_background_arp_tick_kick(void) {
     fl_wq_work_t w = {
         .fn = net_bg_work,
         .ctx = NULL,
-        .tag = 0x0314u,
+        .tag = FL_NET_BG_TAG_ARP_TICK,
         .pq_layer = FL_WQ_LAYER_BACKGROUND,
     };
 

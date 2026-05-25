@@ -460,6 +460,11 @@ test_priority_queue: priority_queue.o $(MEM_ASM_OBJ)
 	$(CC) $(CFLAGS) $(TEST_SANITIZE) -I. -o tests/test_priority_queue tests/test_priority_queue.c priority_queue.o $(MEM_ASM_OBJ)
 	./tests/test_priority_queue
 
+test_workqueue_p18: kernel/core/sched/workqueue.o priority_queue.o kernel/core/time/timekeeping.o $(MEM_ASM_OBJ)
+	$(CC) $(CFLAGS) $(TEST_SANITIZE) -I. -o tests/test_workqueue_p18 tests/test_workqueue_p18.c \
+	  kernel/core/sched/workqueue.o priority_queue.o kernel/core/time/timekeeping.o $(MEM_ASM_OBJ) -Wl,-z,noexecstack
+	./tests/test_workqueue_p18
+
 # Stub gate runs before driver tests (CI / make test_drivers)
 test_drivers: check-stubs
 TEST_DRIVER_HAL_OBJS = $(KERNEL_DRIVERS)/../hal/ioport.o
@@ -488,7 +493,7 @@ test_drivers: userland/shell/common.o $(UTIL_SHELL_LINK_OBJS) kernel/core/vfs/di
 	  $(KERNEL_DRIVERS)/pci.o $(TEST_DRIVER_HAL_OBJS) -Wl,-z,noexecstack
 	./tests/test_drivers
 
-test_core: test_mem_asm test_priority_queue
+test_core: test_mem_asm test_priority_queue test_workqueue_p18
 	@echo "Core tests done. Run 'make test_alloc_libc' or 'make test_alloc_asm' for allocator."
 
 
@@ -590,7 +595,7 @@ test_p0_p2_wiring: kernel/core/memory/fl_stack.o kernel/core/memory/exec_context
 .PHONY: test_p3_network
 test_p3_network: $(NET_ASM_OBJ)
 	$(CC) $(CFLAGS) $(TEST_SANITIZE) -o tests/test_p3_network tests/test_p3_network.c \
-	  $(NET_CORE_SRCS) kernel/core/sched/workqueue.c priority_queue.o $(MEM_ASM_OBJ) $(NET_ASM_OBJ) \
+	  $(NET_CORE_SRCS) kernel/core/sched/workqueue.c kernel/core/time/timekeeping.o priority_queue.o $(MEM_ASM_OBJ) $(NET_ASM_OBJ) \
 	  -Wl,-z,noexecstack
 	./tests/test_p3_network
 

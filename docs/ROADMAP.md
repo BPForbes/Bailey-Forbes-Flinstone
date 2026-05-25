@@ -89,7 +89,7 @@ Two columns track different concerns:
 
 **P0 row criterion (aligned with `contracts/foundations/`):** **P0-1** through **P0-8** are **✅** when the normative **C contract bundle** under **`contracts/foundations/`** defines that row: **P0-1**/**P0-2** via **`contract_foundations.h`**, **`contract_result.h`**, log/auth/driver wiring, **`contract_extend.h`**, and **`contract_compile_ext.h`**; **P0-3**–**P0-8** via **`contract_p0_ci.h`**, **`contract_p0_arm_gic.h`**, **`contract_p0_x86_idt.h`**, **`contract_p0_x86_gdt.h`**, **`contract_p0_fdt.h`**, and **`contract_p0_uart.h`** (obligations as comments + **`FL_CONTRACT_P0_*_CONTRACT_DEFINED`** markers). **Implementation completion** for IRQ/DTB/UART/CI still follows phase gates and **Appendix D**; this snapshot tracks **contract definition**, not “all silicon paths verified.”
 
-**P1 row criterion (aligned with `contracts/runtime/`):** **P1-1** through **P1-7** are **✅** when the normative **C contract bundle** under **`contracts/runtime/`** defines that row via **`contract_runtime.h`** (umbrella) and the **`contract_p1_*.h`** shards (**`FL_CONTRACT_P1_*_CONTRACT_DEFINED`** markers). **P1-8** has **`contract_p1_workqueue.h`** and a **scaffold** in **`kernel/core/sched/workqueue.c`** (**⚠️** until acceptance criteria in **`docs/BACKGROUND_JOBS.md`**); **P1-9**–**P1-10** and domain rows remain **⚠️** / **❌** for full implementation—see **[Background jobs](#background-jobs-kernel-workqueues)**. **Kernel / scheduler / MM implementation** still follows phase gates (e.g. **P1 → P2**); this snapshot tracks **contract definition**, not full **B**-path validation of PMM or arenas.
+**P1 row criterion (aligned with `contracts/runtime/`):** **P1-1** through **P1-7** are **✅** when the normative **C contract bundle** under **`contracts/runtime/`** defines that row via **`contract_runtime.h`** (umbrella) and the **`contract_p1_*.h`** shards (**`FL_CONTRACT_P1_*_CONTRACT_DEFINED`** markers). **P1-8** is **✅** contract-complete (**`contract_p1_workqueue.h`**, MLQ layers, **`make test_workqueue_p18`**); module integration **~✅** (scaffold + acceptance, domain handlers still stubs). **P1-9**–**P1-10** and **P3-14** remain **⚠️** contract / **~⚠️** integration for kicks only—see **[Background jobs](#background-jobs-kernel-workqueues)** and **#242**. **Kernel / scheduler / MM implementation** still follows phase gates (e.g. **P1 → P2**); this snapshot tracks **contract definition**, not full **B**-path validation of PMM or arenas.
 
 **P2 row criterion (aligned with `contracts/identity/`):** **P2-1** through **P2-4** are **✅** when the normative **C contract bundle** under **`contracts/identity/`** defines that row via **`contract_identity.h`** (umbrella, inheriting **`contract_runtime.h`**) and the matching **`contract_p2_*.h`** shards (**`FL_CONTRACT_P2_*_CONTRACT_DEFINED`** markers). **Phase 2** implementation (principal wiring, lab credential files, central **`can_*`** enforcement, elevation UX) still follows phase gates and **TODO: P2-3** below; this snapshot tracks **contract definition**, not “middleware fully enforced” or “Phase **2** shipped.”
 
@@ -124,7 +124,7 @@ Two columns track different concerns:
 | **P1-5** | Memory domain arenas | ✅ | ~✅ |
 | **P1-6** | Driver model reentrancy | ✅ | ~✅ |
 | **P1-7** | Timekeeping | ✅ | ~✅ |
-| **P1-8** | Background jobs (workqueues) | ⚠️ | ❌ |
+| **P1-8** | Background jobs (workqueues) | ✅ | ~✅ |
 | **P1-9** | Memory reclaim job (`kswapd`) | ⚠️ | ❌ |
 | **P1-10** | Watchdog / health monitor | ⚠️ | ❌ |
 | **P2-1** | Principal model | ✅ | ✅ |
@@ -139,7 +139,7 @@ Two columns track different concerns:
 | **P3-6** | UDP | ✅ | ~✅ |
 | **P3-12** | DHCP client (IPv4) | ✅ | ❌ |
 | **P3-13** | Chat room (`server`) | ⚠️ | ❌ |
-| **P3-14** | Net stack background jobs | ⚠️ | ❌ |
+| **P3-14** | Net stack background jobs | ⚠️ | ~⚠️ |
 | **P3-7** | TCP (large) | ✅ | ⚠️ |
 | **P3-8** | DNS client | ✅ | ~✅ |
 | **P3-9** | TLS (hosted) | ✅ | ❌ |
@@ -310,7 +310,7 @@ These items unblock almost everything else.
 | **P1-5** | **Memory domain arenas** | Domains backed by **fixed arenas** (libc-free on **DRIVERS_BAREMETAL**), not discarded `malloc` wrappers. | **Appendix D** §2.1 / execution row **6**; exhaustion visible; sizes documented per domain. |
 | **P1-6** | **Driver model reentrancy** | `s_model_lock` (and related) guard static registration / IRQ dispatch tables. | **Appendix D** §2.4 / execution row **7**; concurrent probe/remove stress test or static review checklist until HW CI exists. |
 | **P1-7** | **Timekeeping (arch timers + POSIX view on H)** | **AArch64:** **ARM Generic Timer** (`CNTPCT_EL0` / `CNTVCT_EL0`, control regs per **ARM ARM** §D11). **x86_64:** align **P0-5** PIT/APIC/HPET story in one doc. **H:** **POSIX.1** `clock_gettime(CLOCK_MONOTONIC)` as reference clock. | Single doc names **which counter** backs **TCP** timeouts (**P3-7**), **TLS** time checks (**P3-9**), and **RFC 5424** timestamps (**P6**). Optional **RFC 5905** (NTP) on **H** for wall-clock labs—not an **A2** gate. |
-| **P1-8** | **Background jobs framework (workqueues)** | Kernel **workqueues** / **kernel threads**: enqueue bounded deferred work outside hardirq and outside the interactive shell path. | **P1-3** lock graph honored in job context; clean drain on shutdown (**#232**); **`contract_p1_workqueue.h`** + **`workqueue.c`** scaffold. See **[Background jobs](#background-jobs-kernel-workqueues)** and **`docs/BACKGROUND_JOBS.md`**. |
+| **P1-8** | **Background jobs framework (workqueues)** | Kernel **workqueues** / **kernel threads**: enqueue bounded deferred work outside hardirq and outside the interactive shell path. | MLQ **`priority_queue_t`**; **`make test_workqueue_p18`** (**#242**); **`contract_p1_workqueue.h`** layers + single-writer policy. See **`docs/BACKGROUND_JOBS.md`**. |
 | **P1-9** | **Memory reclaim job (`kswapd` analog)** | Periodic or pressure-driven reclaim of physical frames; reduce OOM before **P1-4** alloc fails. | Runs on **P1-8**; uses **P1-4**/**P1-5**; **RFC 1122**-style pressure behavior (subset). |
 | **P1-10** | **Watchdog / health monitor** | Detect stuck subsystems; enforce timeouts; optional panic in lab builds. | **P1-7**/**P0-5** timebase; coordinates with **P1-8** job heartbeats; policy in **`docs/BACKGROUND_JOBS.md`**. |
 
@@ -375,7 +375,7 @@ Shipped on the **PRE 4.2.0** train (**PR #231** class work). This is the **modul
 | **P3-9** | ❌ | No TLS command or library bridge in-tree |
 | **P3-12** | ❌ | No DHCP client |
 | **P3-13** | ❌ | Chat room not implemented; full plan **`docs/P3_13_CHAT_SERVER.md`**; **#239** / **#238** |
-| **P3-14** | ❌ | No workqueue-driven net RX/TCP timers/ARP sweep; see **`docs/BACKGROUND_JOBS.md`** |
+| **P3-14** | ~⚠️ | **`net_background.c`**: MLQ ARP-tick kick stub; no RX dequeue or TCP timer wheel yet (**`docs/BACKGROUND_JOBS.md`**, **#240**) |
 | **P3-10** / **P3-11** | ❌ | Contract **`[DEFERRED]`** only |
 
 **Shell / CI:** **`ping`**, **`check requirements`**; **`make test_p3_network`**, **`make test_invariants`**, **`make test_core`**, **`make check-network-requirements`**. **ASM:** **`arch/*/net_asm.*`**, **`arch/*/net_wire_host_asm.*`** (x86_64 GAS/NASM, AArch64 GAS). **PRE 4.2.0 gaps (tracked in issues):** **#241** bare-metal **802.3** netdev + route bootstrap; **#240** ~✅→✅ checklist (ARP TTL, ICMP fallback, doc sync); **#239** **P3-13** sockets/server; **P3-12** DHCP (open). Follow-ups: **#232**–**#235** (netdev shutdown, authz hygiene, batch registry).
