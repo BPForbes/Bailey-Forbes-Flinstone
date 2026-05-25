@@ -1,0 +1,8 @@
+MAJOR_VERSION=4
+STANDARD_VERSION=2
+RELEASE_VERSION=0
+PRERELEASE=1
+DEV_VERSION=2
+DESCRIPTION<<VER_END
+PRE 4.2.0 (P3): P3-4 ARP cache and request/reply on netdev; P3-5 IPv4 routing table; ICMP echo on in-tree wire path (loopback + TAP when configured).
+VER_END
