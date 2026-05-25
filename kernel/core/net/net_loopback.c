@@ -132,7 +132,11 @@ static fl_result_t loopback_process_ipv4(const uint8_t *ip, size_t ip_len, uint8
         size_t tcp_len = ip_len - hdr_len;
         uint8_t tcp_reply[64];
         size_t tcp_reply_len = 0;
-        uint16_t dport = (uint16_t)(((uint16_t)tcp[2] << 8) | tcp[3]);
+        uint16_t dport = 0;
+
+        if (tcp_len < 4)
+            return FL_RESULT_ERR;
+        dport = (uint16_t)(((uint16_t)tcp[2] << 8) | tcp[3]);
 
         if (fl_net_loopback_tcp_syn(tcp, tcp_len, dport, tcp_reply, sizeof(tcp_reply),
                                     &tcp_reply_len) != FL_RESULT_OK)
@@ -197,6 +201,8 @@ fl_result_t fl_net_loopback_tcp_syn(const uint8_t *tcp_syn, size_t tcp_len, uint
     sport = (uint16_t)((tcp_syn[0] << 8) | tcp_syn[1]);
     seq = ((uint32_t)tcp_syn[4] << 24) | ((uint32_t)tcp_syn[5] << 16) |
           ((uint32_t)tcp_syn[6] << 8) | (uint32_t)tcp_syn[7];
+    if (tcp_syn[13] & FL_NET_TCP_FLAG_SYN)
+        seq++;
 
     tcp_reply[0] = tcp_syn[2];
     tcp_reply[1] = tcp_syn[3];

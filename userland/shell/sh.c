@@ -351,7 +351,7 @@ int main(int argc, char *argv[]) {
     fs_jail_init();
     fl_session_init();
     fl_net_netdev_init();
-    fl_net_netdev_set_authz_hook((fl_net_netdev_authz_fn)fl_authz_subsystem_check, NULL);
+    fl_net_netdev_set_authz_hook(fl_authz_subsystem_check, NULL);
 
     /* Default host volume: ensure drive.img exists before block driver probes it. */
     if (strcmp(current_disk_file, "drive.img") == 0) {

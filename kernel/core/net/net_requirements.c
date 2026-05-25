@@ -32,24 +32,24 @@ fl_result_t fl_net_probe_endpoint(const char *host, uint16_t port, unsigned time
     if (fl_net_resolve_ipv4(host, &addr_be, resolved, sizeof(resolved)) != FL_RESULT_OK) {
         snprintf(out->endpoint, sizeof(out->endpoint), "%s:%u", host, (unsigned)port);
         snprintf(out->detail, sizeof(out->detail), "dns/resolve failed");
-        return FL_RESULT_OK;
+        return FL_RESULT_INVAL;
     }
 
     snprintf(out->endpoint, sizeof(out->endpoint), "%s:%u", resolved, (unsigned)port);
 
-    rc = fl_net_ping(host, port, 1u, timeout_ms, &rtt);
+    rc = fl_net_ping(host, port, 1u, timeout_ms, &rtt, NULL, 0);
     if (rc == FL_RESULT_OK) {
         out->ok = 1;
         out->rtt_ms = rtt;
         snprintf(out->detail, sizeof(out->detail), "%s ok (%.2f ms)",
                  port > 0u ? "tcp" : "icmp", rtt);
-    } else {
-        out->ok = 0;
-        snprintf(out->detail, sizeof(out->detail), "%s failed (%d)",
-                 port > 0u ? "tcp" : "icmp", (int)rc);
+        return FL_RESULT_OK;
     }
 
-    return FL_RESULT_OK;
+    out->ok = 0;
+    snprintf(out->detail, sizeof(out->detail), "%s failed (%d)",
+             port > 0u ? "tcp" : "icmp", (int)rc);
+    return rc;
 }
 
 void fl_net_print_requirements_report(const fl_net_requirements_report_t *rep) {

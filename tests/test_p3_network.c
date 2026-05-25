@@ -91,7 +91,7 @@ static int test_resolve_localhost(void) {
 
 static int test_loopback_ping(void) {
     double rtt = 0.0;
-    fl_result_t rc = fl_net_ping("127.0.0.1", 0, 1u, 3000u, &rtt);
+    fl_result_t rc = fl_net_ping("127.0.0.1", 0, 1u, 3000u, &rtt, NULL, 0);
     if (rc == FL_RESULT_NOSYS || rc == FL_RESULT_TIMEDOUT) {
         fprintf(stderr, "skip: ICMP echo unavailable in this environment\n");
         return 0;
@@ -103,7 +103,7 @@ static int test_loopback_ping(void) {
 
 static int test_loopback_tcp(void) {
     double rtt = 0.0;
-    fl_result_t rc = fl_net_ping("127.0.0.1", 9, 1u, 3000u, &rtt);
+    fl_result_t rc = fl_net_ping("127.0.0.1", 9, 1u, 3000u, &rtt, NULL, 0);
     ASSERT(rc == FL_RESULT_OK);
     ASSERT(rtt >= 0.0);
     return 0;

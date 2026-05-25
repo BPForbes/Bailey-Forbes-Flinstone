@@ -2,6 +2,7 @@
 
 #include "net_checksum.h"
 
+#include <stdint.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -55,8 +56,17 @@ void fl_net_ipv4_format_addr(uint32_t addr_be, char *buf, size_t buf_len) {
 size_t fl_net_ipv4_build(fl_net_ipv4_hdr_t *hdr, uint8_t *buf, size_t cap, uint8_t proto,
                          uint32_t src_be, uint32_t dst_be, const void *payload,
                          size_t payload_len, uint16_t id_be) {
-    size_t total = FL_NET_IPV4_HDR_LEN_MIN + payload_len;
+    size_t total;
     uint16_t csum;
+    const size_t max_payload = (size_t)UINT16_MAX - FL_NET_IPV4_HDR_LEN_MIN;
+
+    if (payload_len > 0 && !payload)
+        return 0;
+    if (payload_len > max_payload)
+        return 0;
+    total = FL_NET_IPV4_HDR_LEN_MIN + payload_len;
+    if (total > (size_t)UINT16_MAX)
+        return 0;
 
     if (!buf || cap < total || !hdr)
         return 0;

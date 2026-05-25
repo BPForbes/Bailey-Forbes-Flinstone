@@ -1,3 +1,7 @@
+#ifndef _DEFAULT_SOURCE
+#define _DEFAULT_SOURCE
+#endif
+
 #include "net_wire_host.h"
 
 #include "contract_p3_ipv4.h"
@@ -15,10 +19,6 @@
 #include <sys/socket.h>
 #include <sys/time.h>
 #include <unistd.h>
-
-#ifndef _DEFAULT_SOURCE
-#define _DEFAULT_SOURCE
-#endif
 #include <netinet/in.h>
 
 #if defined(__linux__)
@@ -243,22 +243,23 @@ fl_result_t fl_net_wire_send_tcp_syn(uint32_t dst_be, uint16_t sport_unused, uin
 
         if (note && note_len > 0) {
             size_t ip_hdr_len = (size_t)((rx[0] & 0x0fu) * 4u);
-            const uint8_t *tcp = rx + ip_hdr_len;
-            size_t tcp_len = (size_t)n - ip_hdr_len;
+            const uint8_t *rx_tcp = rx + ip_hdr_len;
+            size_t rx_tcp_len = (size_t)n - ip_hdr_len;
 
-            if (tcp_len < FL_NET_TCP_HDR_LEN_MIN) {
+            if (rx_tcp_len < FL_NET_TCP_HDR_LEN_MIN) {
                 snprintf(note, note_len, "tcp reply too short");
-            } else if (tcp[13] & (FL_NET_TCP_FLAG_RST | FL_NET_TCP_FLAG_ACK))
+            } else if (rx_tcp[13] & (FL_NET_TCP_FLAG_RST | FL_NET_TCP_FLAG_ACK)) {
                 snprintf(note, note_len, "tcp rst+ack (wire)");
-            else if ((tcp[13] & FL_NET_TCP_FLAG_SYN) && (tcp[13] & FL_NET_TCP_FLAG_ACK))
+            } else if ((rx_tcp[13] & FL_NET_TCP_FLAG_SYN) && (rx_tcp[13] & FL_NET_TCP_FLAG_ACK)) {
                 snprintf(note, note_len, "tcp syn+ack (wire)");
-            else
-                snprintf(note, note_len, "tcp flags 0x%02x", (unsigned)tcp[13]);
+            } else {
+                snprintf(note, note_len, "tcp flags 0x%02x", (unsigned)rx_tcp[13]);
+            }
         }
         return FL_RESULT_OK;
     }
 #else
-    (void)sport;
+    (void)sport_unused;
     (void)dport;
     (void)timeout_ms;
     (void)note;
@@ -307,7 +308,7 @@ fl_result_t fl_net_wire_send_udp(uint32_t dst_be, uint16_t sport_unused, uint16_
     return FL_RESULT_OK;
 #else
     (void)dst_be;
-    (void)sport;
+    (void)sport_unused;
     (void)dport;
     (void)payload;
     (void)payload_len;

@@ -49,21 +49,36 @@ int cmd_ping_run(int argc, char **argv) {
     double rtt = 0.0;
     fl_result_t rc;
     char msg[256];
+    char tcp_note[96];
     int i;
     int host_set = 0;
     int port_set = 0;
 
     for (i = 1; i < argc; i++) {
-        if (!strcmp(argv[i], "-c") && i + 1 < argc) {
-            count = (unsigned)atoi(argv[++i]);
+        if (!strcmp(argv[i], "-c") || !strcmp(argv[i], "-W")) {
+            uint16_t parsed = 0;
+            const char *opt = argv[i];
+
+            if (i + 1 >= argc || parse_port_arg(argv[i + 1], &parsed) != 0) {
+                fprintf(stderr, "ping: invalid value for %s\n", opt);
+                return 1;
+            }
+            i++;
+            if (!strcmp(opt, "-c")) {
+                if (parsed == 0) {
+                    fprintf(stderr, "ping: -c must be >= 1\n");
+                    return 1;
+                }
+                count = (unsigned)parsed;
+            } else {
+                timeout_ms = (unsigned)parsed;
+            }
             continue;
         }
-        if (!strcmp(argv[i], "-W") && i + 1 < argc) {
-            timeout_ms = (unsigned)atoi(argv[++i]);
-            continue;
+        if (argv[i][0] == '-') {
+            fprintf(stderr, "ping: unknown option '%s'\n", argv[i]);
+            return 1;
         }
-        if (argv[i][0] == '-')
-            continue;
         if (!host_set) {
             host = argv[i];
             host_set = 1;
@@ -86,15 +101,15 @@ int cmd_ping_run(int argc, char **argv) {
     if (host_needs_netdev_io(host)) {
         if (fl_authz_subsystem_check((unsigned)FL_AUTHZ_OP_NETDEV_IO, NULL) ==
             FL_AUTHZ_DENY) {
-            fl_net_ping_format_result(host, port, FL_RESULT_ACCES, 0.0, msg, sizeof(msg));
+            fl_net_ping_format_result(host, port, FL_RESULT_ACCES, 0.0, msg, sizeof(msg), NULL);
             fputs(msg, stdout);
             fputc('\n', stdout);
             return 1;
         }
     }
 
-    rc = fl_net_ping(host, port, count, timeout_ms, &rtt);
-    fl_net_ping_format_result(host, port, rc, rtt, msg, sizeof(msg));
+    rc = fl_net_ping(host, port, count, timeout_ms, &rtt, tcp_note, sizeof(tcp_note));
+    fl_net_ping_format_result(host, port, rc, rtt, msg, sizeof(msg), tcp_note);
     fputs(msg, stdout);
     fputc('\n', stdout);
     return (rc == FL_RESULT_OK) ? 0 : 1;
@@ -103,17 +118,24 @@ int cmd_ping_run(int argc, char **argv) {
 int cmd_ping_batch_tokens_count(int argc, char **argv, int i) {
     int used = 1;
     int pos = 0;
-    int j;
+    int j = i + 1;
 
-    for (j = i + 1; j < argc && argv[j][0] != '-'; j++) {
-        if (pos == 0 || pos == 1)
-            used++;
-        pos++;
-    }
-    if (i + 2 < argc && !strcmp(argv[i], "-c"))
-        used += 2;
-    if (i + 2 < argc && !strcmp(argv[i], "-W"))
-        used += 2;
     (void)argc;
+    while (j < argc) {
+        if (!strcmp(argv[j], "-c") || !strcmp(argv[j], "-W")) {
+            if (j + 1 >= argc)
+                return used + 1;
+            used += 2;
+            j += 2;
+            continue;
+        }
+        if (argv[j][0] == '-')
+            break;
+        if (pos >= 2)
+            break;
+        used++;
+        pos++;
+        j++;
+    }
     return used;
 }

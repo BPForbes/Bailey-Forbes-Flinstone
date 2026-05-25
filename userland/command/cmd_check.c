@@ -61,12 +61,14 @@ int cmd_check_run(int argc, char **argv) {
 
 int cmd_check_batch_tokens_count(int argc, char **argv, int i) {
     int used = 1;
-    if (i + 1 < argc && !strcmp(argv[i + 1], "requirements"))
-        used++;
-    if (i + 2 < argc && !strcmp(argv[i + 1], "requirements"))
-        used++;
-    if (i + 3 < argc && !strcmp(argv[i + 1], "requirements"))
-        used++;
+
     (void)argc;
+    if (i + 1 < argc && !strcmp(argv[i + 1], "requirements")) {
+        used++;
+        if (i + 2 < argc)
+            used++;
+        if (i + 3 < argc)
+            used++;
+    }
     return used;
 }

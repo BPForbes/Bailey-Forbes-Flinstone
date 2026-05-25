@@ -156,6 +156,12 @@ int fl_net_wire_parse_eth_ipv4(const uint8_t *frame, size_t len, size_t *ip_off,
     iplen = (size_t)(((uint16_t)ip[2] << 8) | (uint16_t)ip[3]);
     if (iplen < FL_NET_IPV4_HDR_LEN_MIN || off + iplen > len)
         return 0;
+    {
+        uint8_t ver_ihl = ip[0];
+        size_t ihl = (size_t)(ver_ihl & 0x0fu) * 4u;
+        if ((ver_ihl >> 4) != 4u || ihl < FL_NET_IPV4_HDR_LEN_MIN || ihl > iplen)
+            return 0;
+    }
 
     *ip_off = off;
     *ip_len = iplen;

@@ -94,29 +94,31 @@ static fl_result_t dns_query_a(const char *host, uint32_t *out_addr_be) {
 
     {
         size_t off = 12;
-        while (off < alen && answer[off] != 0) {
-            if ((answer[off] & 0xc0) == 0xc0) {
+        uint16_t rtype;
+        uint16_t rclass;
+        uint16_t rdlen;
+
+        while (off < alen) {
+            if ((answer[off] & 0xc0u) == 0xc0u) {
                 off += 2;
+                break;
+            }
+            if (answer[off] == 0) {
+                off++;
                 break;
             }
             off += 1u + (size_t)answer[off];
         }
-        if (off >= alen)
+        if (off + 10 > alen)
             return FL_RESULT_ERR;
-        if (answer[off] == 0)
-            off++;
-        off += 4;
-        if (off + 2 > alen)
-            return FL_RESULT_ERR;
-        if (((uint16_t)answer[off] << 8 | answer[off + 1]) != 1)
-            return FL_RESULT_ERR;
+        rtype = (uint16_t)(((uint16_t)answer[off] << 8) | answer[off + 1]);
         off += 2;
-        if (off + 2 > alen)
-            return FL_RESULT_ERR;
-        if (((uint16_t)answer[off] << 8 | answer[off + 1]) != 4)
-            return FL_RESULT_ERR;
-        off += 8;
-        if (off + 4 > alen)
+        rclass = (uint16_t)(((uint16_t)answer[off] << 8) | answer[off + 1]);
+        off += 2;
+        off += 4; /* TTL */
+        rdlen = (uint16_t)(((uint16_t)answer[off] << 8) | answer[off + 1]);
+        off += 2;
+        if (rtype != 1u || rclass != 1u || rdlen != 4u || off + 4 > alen)
             return FL_RESULT_ERR;
         *out_addr_be = (uint32_t)answer[off] | ((uint32_t)answer[off + 1] << 8) |
                        ((uint32_t)answer[off + 2] << 16) | ((uint32_t)answer[off + 3] << 24);
@@ -140,8 +142,11 @@ fl_result_t fl_net_resolve_ipv4(const char *host, uint32_t *out_addr_be, char *r
         return FL_RESULT_OK;
     }
 
-    if (dns_query_a(host, out_addr_be) != FL_RESULT_OK)
-        return FL_RESULT_INVAL;
+    {
+        fl_result_t dns_rc = dns_query_a(host, out_addr_be);
+        if (dns_rc != FL_RESULT_OK)
+            return dns_rc;
+    }
 
     fl_net_ipv4_format_addr(*out_addr_be, resolved_ip, resolved_ip_len);
     return FL_RESULT_OK;

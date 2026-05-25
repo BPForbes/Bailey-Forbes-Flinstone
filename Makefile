@@ -130,6 +130,11 @@ HAL_SRCS += kernel/arch/aarch64/hal/arm_plat.c kernel/arch/aarch64/hal/arm_uart.
             kernel/arch/aarch64/hal/arm_timer.c kernel/arch/aarch64/hal/arm_gic.c \
             kernel/arch/aarch64/boot/exc_dispatch.c
 endif
+NET_CORE_SRCS = kernel/core/net/net_checksum.c kernel/core/net/net_wire.c kernel/core/net/net_eth.c \
+                kernel/core/net/net_ipv4.c \
+                kernel/core/net/net_icmp.c kernel/core/net/net_tcp.c kernel/core/net/net_loopback.c \
+                kernel/core/net/net_netdev.c kernel/core/net/net_tap.c kernel/core/net/net_wire_host.c \
+                kernel/core/net/net_dns.c kernel/core/net/net_ping_host.c kernel/core/net/net_requirements.c
 CORE_SRCS = kernel/core/vfs/disk.c kernel/core/vfs/fat32_host.c kernel/core/vfs/fat32_host_files.c kernel/core/vfs/path_log.c kernel/core/vfs/cluster.c kernel/core/vfs/fs.c \
             disk_host_io.c \
             kernel/core/sched/threadpool.c priority_queue.c kernel/core/vfs/fs_jail.c kernel/core/vfs/fs_provider.c kernel/core/vfs/fs_command.c \
@@ -137,11 +142,7 @@ CORE_SRCS = kernel/core/vfs/disk.c kernel/core/vfs/fat32_host.c kernel/core/vfs/
             kernel/core/vfs/fs_service_glue.c kernel/core/mm/mem_domain.c kernel/core/mm/kmalloc.c kernel/core/mm/pmm.c \
             kernel/core/memory/fl_stack.c kernel/core/memory/exec_context.c \
             kernel/core/time/timekeeping.c \
-            kernel/core/net/net_checksum.c kernel/core/net/net_wire.c kernel/core/net/net_eth.c \
-            kernel/core/net/net_ipv4.c \
-            kernel/core/net/net_icmp.c kernel/core/net/net_tcp.c kernel/core/net/net_loopback.c \
-            kernel/core/net/net_netdev.c kernel/core/net/net_tap.c kernel/core/net/net_wire_host.c \
-            kernel/core/net/net_dns.c kernel/core/net/net_ping_host.c kernel/core/net/net_requirements.c \
+            $(NET_CORE_SRCS) \
             kernel/core/identity/user_db.c kernel/core/identity/elevation.c kernel/core/identity/path_property.c \
             kernel/core/identity/session.c \
             kernel/core/sys/vrt.c kernel/core/sys/ipc.c kernel/core/sys/syscall.c kernel/core/vfs/vfs.c
@@ -343,11 +344,7 @@ TEST_SRCS = BPForbes_Flinstone_Tests.c userland/shell/common.c userland/shell/ut
             kernel/core/vfs/fs_service_glue.c kernel/core/mm/mem_domain.c kernel/core/mm/kmalloc.c kernel/core/mm/pmm.c \
             kernel/core/memory/fl_stack.c kernel/core/memory/exec_context.c \
             kernel/core/time/timekeeping.c \
-            kernel/core/net/net_checksum.c kernel/core/net/net_wire.c kernel/core/net/net_eth.c \
-            kernel/core/net/net_ipv4.c \
-            kernel/core/net/net_icmp.c kernel/core/net/net_tcp.c kernel/core/net/net_loopback.c \
-            kernel/core/net/net_netdev.c kernel/core/net/net_tap.c kernel/core/net/net_wire_host.c \
-            kernel/core/net/net_dns.c kernel/core/net/net_ping_host.c kernel/core/net/net_requirements.c \
+            $(NET_CORE_SRCS) \
             kernel/core/identity/user_db.c kernel/core/identity/elevation.c kernel/core/identity/path_property.c \
             kernel/core/identity/session.c \
             kernel/core/sys/vrt.c kernel/core/sys/ipc.c kernel/core/sys/syscall.c
@@ -581,11 +578,7 @@ test_p0_p2_wiring: kernel/core/memory/fl_stack.o kernel/core/memory/exec_context
 .PHONY: test_p3_network
 test_p3_network:
 	$(CC) $(CFLAGS) $(TEST_SANITIZE) -o tests/test_p3_network tests/test_p3_network.c \
-	  kernel/core/net/net_checksum.c kernel/core/net/net_wire.c kernel/core/net/net_eth.c \
-	  kernel/core/net/net_ipv4.c \
-	  kernel/core/net/net_icmp.c kernel/core/net/net_tcp.c kernel/core/net/net_loopback.c \
-	  kernel/core/net/net_netdev.c kernel/core/net/net_tap.c kernel/core/net/net_wire_host.c \
-	  kernel/core/net/net_dns.c kernel/core/net/net_ping_host.c kernel/core/net/net_requirements.c \
+	  $(NET_CORE_SRCS) \
 	  -Wl,-z,noexecstack
 	./tests/test_p3_network
 

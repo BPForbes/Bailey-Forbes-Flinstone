@@ -17,11 +17,13 @@ extern "C" {
  * count applies to ICMP only (clamped 1..16); TCP performs one SYN exchange.
  */
 fl_result_t fl_net_ping(const char *host, uint16_t port, unsigned count,
-                        unsigned timeout_ms, double *out_rtt_ms);
+                        unsigned timeout_ms, double *out_rtt_ms, char *tcp_note,
+                        size_t tcp_note_len);
 
 /** Human-readable outcome for **fl_net_ping** (TCP vs ICMP, timeout/refused/permission). */
 void fl_net_ping_format_result(const char *host, uint16_t port, fl_result_t rc,
-                               double rtt_ms, char *buf, size_t buf_len);
+                               double rtt_ms, char *buf, size_t buf_len,
+                               const char *tcp_note);
 
 #ifdef __cplusplus
 }
