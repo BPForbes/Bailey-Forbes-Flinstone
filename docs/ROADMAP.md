@@ -15,6 +15,7 @@ This document is the **single platform roadmap** for Flinstone: phased goals (**
 | **Phase 0–9** | Feature IDs, goals, acceptance |
 | [QEMU lab bring-up](qemu-lab.md) | Phase **8** external **QEMU** recipes (**`-M`**, virtio, TAP, **`-icount`**) |
 | [Module contracts](#module-contracts-abstraction-and-p0-p9-coverage) | **Data-distribution contracts**: abstraction + **P0–P9** ❌/⚠️/✅ snapshot (see table). |
+| [Background jobs](#background-jobs-kernel-workqueues) | **P1-8** framework + domain jobs (kswapd, writeback, kworker, net, RCU, watchdog). Detail: **`docs/BACKGROUND_JOBS.md`**. |
 | [Platform credibility (extended)](#platform-credibility--extended-sections-11-and-12) | **§11–§12** + staffing note only |
 | [Appendix A–D](#appendix-a--standards-map-non-exhaustive) | Standards index, DoD template, first vertical slice, bare-metal checklist |
 
@@ -88,7 +89,7 @@ Two columns track different concerns:
 
 **P0 row criterion (aligned with `contracts/foundations/`):** **P0-1** through **P0-8** are **✅** when the normative **C contract bundle** under **`contracts/foundations/`** defines that row: **P0-1**/**P0-2** via **`contract_foundations.h`**, **`contract_result.h`**, log/auth/driver wiring, **`contract_extend.h`**, and **`contract_compile_ext.h`**; **P0-3**–**P0-8** via **`contract_p0_ci.h`**, **`contract_p0_arm_gic.h`**, **`contract_p0_x86_idt.h`**, **`contract_p0_x86_gdt.h`**, **`contract_p0_fdt.h`**, and **`contract_p0_uart.h`** (obligations as comments + **`FL_CONTRACT_P0_*_CONTRACT_DEFINED`** markers). **Implementation completion** for IRQ/DTB/UART/CI still follows phase gates and **Appendix D**; this snapshot tracks **contract definition**, not “all silicon paths verified.”
 
-**P1 row criterion (aligned with `contracts/runtime/`):** **P1-1** through **P1-7** are **✅** when the normative **C contract bundle** under **`contracts/runtime/`** defines that row via **`contract_runtime.h`** (umbrella) and the **`contract_p1_*.h`** shards (**`FL_CONTRACT_P1_*_CONTRACT_DEFINED`** markers). **Kernel / scheduler / MM implementation** still follows phase gates (e.g. **P1 → P2**); this snapshot tracks **contract definition**, not full **B**-path validation of PMM or arenas.
+**P1 row criterion (aligned with `contracts/runtime/`):** **P1-1** through **P1-7** are **✅** when the normative **C contract bundle** under **`contracts/runtime/`** defines that row via **`contract_runtime.h`** (umbrella) and the **`contract_p1_*.h`** shards (**`FL_CONTRACT_P1_*_CONTRACT_DEFINED`** markers). **P1-8**–**P1-10** (background jobs) are **⚠️** until **`contract_p1_workqueue.h`** (and related shards) land—see **[Background jobs](#background-jobs-kernel-workqueues)** and **`docs/BACKGROUND_JOBS.md`**. **Kernel / scheduler / MM implementation** still follows phase gates (e.g. **P1 → P2**); this snapshot tracks **contract definition**, not full **B**-path validation of PMM or arenas.
 
 **P2 row criterion (aligned with `contracts/identity/`):** **P2-1** through **P2-4** are **✅** when the normative **C contract bundle** under **`contracts/identity/`** defines that row via **`contract_identity.h`** (umbrella, inheriting **`contract_runtime.h`**) and the matching **`contract_p2_*.h`** shards (**`FL_CONTRACT_P2_*_CONTRACT_DEFINED`** markers). **Phase 2** implementation (principal wiring, lab credential files, central **`can_*`** enforcement, elevation UX) still follows phase gates and **TODO: P2-3** below; this snapshot tracks **contract definition**, not “middleware fully enforced” or “Phase **2** shipped.”
 
@@ -123,6 +124,9 @@ Two columns track different concerns:
 | **P1-5** | Memory domain arenas | ✅ | ~✅ |
 | **P1-6** | Driver model reentrancy | ✅ | ~✅ |
 | **P1-7** | Timekeeping | ✅ | ~✅ |
+| **P1-8** | Background jobs (workqueues) | ⚠️ | ❌ |
+| **P1-9** | Memory reclaim job (`kswapd`) | ⚠️ | ❌ |
+| **P1-10** | Watchdog / health monitor | ⚠️ | ❌ |
 | **P2-1** | Principal model | ✅ | ✅ |
 | **P2-2** | Credential store (hosted) | ✅ | ✅ |
 | **P2-3** | Authorization middleware | ✅ | ~✅ |
@@ -135,6 +139,7 @@ Two columns track different concerns:
 | **P3-6** | UDP | ✅ | ~✅ |
 | **P3-12** | DHCP client (IPv4) | ✅ | ❌ |
 | **P3-13** | Chat room (`server`) | ⚠️ | ❌ |
+| **P3-14** | Net stack background jobs | ⚠️ | ❌ |
 | **P3-7** | TCP (large) | ✅ | ⚠️ |
 | **P3-8** | DNS client | ✅ | ~✅ |
 | **P3-9** | TLS (hosted) | ✅ | ❌ |
@@ -147,9 +152,11 @@ Two columns track different concerns:
 | **P4-5** | USB stack | ✅ | ⚠️ |
 | **P4-6** | FDT-driven machine discovery (lab) | ✅ | ⚠️ |
 | **P4-7** | PSCI client (AArch64) | ✅ | ⚠️ |
+| **P4-8** | Deferred IRQ work (`kworker`) | ⚠️ | ❌ |
 | **P5-1** | VFS layer | ✅ | ❌ |
 | **P5-2** | Pluggable FS | ✅ | ❌ |
 | **P5-3** | Page cache | ✅ | ❌ |
+| **P5-4** | Dirty page writeback job | ⚠️ | ❌ |
 | **P6-1** | Structured log API (sink / line path) | ✅ | ⚠️ |
 | **P6-2** | Ring buffer sink | ✅ | ⚠️ |
 | **P6-3** | Persistent log (hosted) | ✅ | ❌ |
@@ -165,6 +172,7 @@ Two columns track different concerns:
 | **P9-1** | Fuzzing | ✅ | ❌ |
 | **P9-2** | Coverity / static analysis | ✅ | ❌ |
 | **P9-3** | SMP bring-up (B) | ✅ | ❌ |
+| **P9-4** | RCU grace-period jobs | ⚠️ | ❌ |
 
 **Summary:** **Contract completion** — **P0-1**–**P0-8**, **P1-1**–**P1-7**, **P2-1**–**P2-4**, **P3-1**–**P3-12** (including **`[DEFERRED]`** shards), **P4-1**–**P4-7**, **P5-1**–**P5-3**, **P6-1**–**P6-5**, **P7-1**–**P7-3**, **P7 (batch)**, **P8-1**–**P8-3**, and **P9-1**–**P9-3** are **✅** under their **`contracts/*`** bundles. **Module integration (P0–P2)** — **✅:** **P0-1**–**P0-3**, **P0-6**–**P0-8**, **P1-1**, **P2-1**, **P2-2**, **P2-4** (hosted/lab wired and tested on **4.1.0**). **~✅:** **P1-7** (hosted POSIX `clock_gettime` only; **B** Generic Timer / **P0-5** tick follow-up). **~✅:** **P0-4**, **P0-5** (arch **B** evidence TODOs), **P1-2**–**P1-6** (**B** PMM/arena/NASM), **P2-3** (guest deny suite + shell gates; netdev hook on **PRE 4.2.0** **`ping`** path—see **TODO: P2-3**). See **`docs/p0_p2_pr_coverage.md`**. **Module integration (P3, PRE 4.2.0)** — **~✅:** **P3-1**–**P3-6**, **P3-8** (in-tree stack, **`net_arp.c`** / **`net_route.c`** / **`net_wire_egress.c`**, **`ping`** / **`check requirements`**, **`make test_p3_network`**, **`make check-network-requirements`**; TAP/Interop skips documented). **⚠️:** **P3-7** (TCP SYN probe + loopback RST+ACK only); **P3-13** (planning row—contract shard pending). **❌:** **P3-9** TLS, **P3-12** DHCP, **P3-13** sockets/server builtins, **P3-10**/**P3-11** deferrals. Detail: **`docs/P3_NETWORKING.md`**. **P4-1**/**P4-2** **✅**; **P8**/**P9** integration **❌** here.
 
@@ -223,6 +231,13 @@ flowchart TD
   P0_7[P0-7 DTB metadata] --> P4_6[P4-6 FDT discovery]
   P4_7[P4-7 PSCI client] --> P9_3[P9-3 SMP]
   P1_7[P1-7 arch time] --> P3_7[P3-7 TCP]
+  P1_8[P1-8 workqueues] --> P1_9[P1-9 kswapd]
+  P1_8 --> P4_8[P4-8 kworker]
+  P1_8 --> P3_14[P3-14 net background]
+  P1_8 --> P5_4[P5-4 writeback]
+  P1_3 --> P9_4[P9-4 RCU jobs]
+  P9_3[P9-3 SMP] --> P9_4
+  P1_8 --> P1_10[P1-10 watchdog]
 ```
 
 ---
@@ -241,6 +256,27 @@ Phases and **A** milestones are **dependency-ordered**, but real releases often 
 | **PSCI ↔ SMP** | **P4-7** (`CPU_ON`, **DEN0022**) + **`cpus` / `psci` nodes** in DT | **P9-3** secondary cores on AArch64; coordinates with **P1-3**/**P1-6** locking |
 | **Time** (**P1-7**) | Arch **Generic Timer** (AArch64) or **P0-5** tick path (x86) | **P3-7** TCP RTOs; **P3-9** cert validity windows; **P6** **RFC 5424** timestamps; optional **RFC 5905** NTP on **H** |
 | **IPv6** (**P3-11** when promoted) | **P3-1** L2 + neighbor discovery | Dual-stack next to **P3-5**; **P3-8** **AAAA** already anticipates records |
+| **Background jobs** | **P1-8** workqueue + **P1-7** timers | **P3-14** net timers/RX; **P4-8** IRQ bottom halves; **P5-4** writeback; **P1-9** reclaim; **P9-4** RCU (**P9-3**); **P1-10** watchdog |
+
+---
+
+## Background jobs (kernel workqueues)
+
+Real kernels run much of their work **asynchronously**—outside the interrupt handler and outside the user’s interactive path—via **kernel threads**, **workqueues**, and periodic **daemons**. Flinstone maps those roles to explicit roadmap rows so subsystems do not grow ad-hoc **`pthread`** or polling loops.
+
+**Implementation guide:** **`docs/BACKGROUND_JOBS.md`**.
+
+| Linux-style role | Flinstone row | Depends on |
+|------------------|---------------|------------|
+| **Workqueue / `kthread` framework** | **P1-8** | **P1-3**, **P1-1** |
+| **`kswapd` (memory reclaim)** | **P1-9** | **P1-8**, **P1-4**, **P1-5** |
+| **`flush` / writeback (dirty pages)** | **P5-4** | **P1-8**, **P5-3**, **P4-4** |
+| **`kworker` (deferred IRQ work)** | **P4-8** | **P1-8**, **P4-2** |
+| **Net stack background (RX queue, TCP timers, ARP sweep)** | **P3-14** | **P1-8**, **P3-1**, **P3-7**, **P1-7** |
+| **`rcuop` / `rcuc` (RCU grace)** | **P9-4** | **P1-8**, **P9-3**, **P1-3** |
+| **Watchdog / health monitor** | **P1-10** | **P1-8**, **P1-7**, **P0-5** |
+
+**Userland note:** **P3-13** **`server`** chat uses a **hosted shell background thread** (**`docs/P3_13_CHAT_SERVER.md`**). That is intentional for **H** labs; kernel **P1-8** still owns supervisor-side async work (net timers, reclaim, writeback).
 
 ---
 
@@ -274,8 +310,11 @@ These items unblock almost everything else.
 | **P1-5** | **Memory domain arenas** | Domains backed by **fixed arenas** (libc-free on **DRIVERS_BAREMETAL**), not discarded `malloc` wrappers. | **Appendix D** §2.1 / execution row **6**; exhaustion visible; sizes documented per domain. |
 | **P1-6** | **Driver model reentrancy** | `s_model_lock` (and related) guard static registration / IRQ dispatch tables. | **Appendix D** §2.4 / execution row **7**; concurrent probe/remove stress test or static review checklist until HW CI exists. |
 | **P1-7** | **Timekeeping (arch timers + POSIX view on H)** | **AArch64:** **ARM Generic Timer** (`CNTPCT_EL0` / `CNTVCT_EL0`, control regs per **ARM ARM** §D11). **x86_64:** align **P0-5** PIT/APIC/HPET story in one doc. **H:** **POSIX.1** `clock_gettime(CLOCK_MONOTONIC)` as reference clock. | Single doc names **which counter** backs **TCP** timeouts (**P3-7**), **TLS** time checks (**P3-9**), and **RFC 5424** timestamps (**P6**). Optional **RFC 5905** (NTP) on **H** for wall-clock labs—not an **A2** gate. |
+| **P1-8** | **Background jobs framework (workqueues)** | Kernel **workqueues** / **kernel threads**: enqueue bounded deferred work outside hardirq and outside the interactive shell path. | **P1-3** lock graph honored in job context; clean drain on shutdown (**#232**); contract shard planned **`contract_p1_workqueue.h`**. See **[Background jobs](#background-jobs-kernel-workqueues)** and **`docs/BACKGROUND_JOBS.md`**. |
+| **P1-9** | **Memory reclaim job (`kswapd` analog)** | Periodic or pressure-driven reclaim of physical frames; reduce OOM before **P1-4** alloc fails. | Runs on **P1-8**; uses **P1-4**/**P1-5**; **RFC 1122**-style pressure behavior (subset). |
+| **P1-10** | **Watchdog / health monitor** | Detect stuck subsystems; enforce timeouts; optional panic in lab builds. | **P1-7**/**P0-5** timebase; coordinates with **P1-8** job heartbeats; policy in **`docs/BACKGROUND_JOBS.md`**. |
 
-**References:** POSIX.1 threads; Linux *Understanding the Linux Kernel* (scheduler/MM chapters) as conceptual guide only.
+**References:** POSIX.1 threads; Linux *Understanding the Linux Kernel* (scheduler/MM, workqueue, RCU chapters) as conceptual guides only.
 
 ---
 
@@ -315,6 +354,7 @@ Implement **bottom-up**: **L2 (link layer)** → IPv4/UDP → TCP → sockets fa
 | **P3-9** | **TLS (hosted)** | Prefer **userland** TLS (e.g. mbedTLS/OpenSSL) behind shell command or libc. | **No TLS in “kernel” layer** until stable memory and time APIs exist on K/B. |
 | **P3-10** | **Wi‑Fi station path** `[DEFERRED]` | Do **not** silently drop the gap: either promote to active work or keep this row as the **explicit deferral**. | **IEEE 802.11** / **802.11i** / **802.1X** / **EAP** (informative stack); **P3-12** DHCP after L2; **not** an A1–A2 gate. When un-deferred, expect **P4**-class firmware/driver work plus reuse of **P3** IPv4/UDP/TCP. |
 | **P3-11** | **IPv6 + ICMPv6** `[DEFERRED]` | Keep dual-stack as an **explicit** later step, not an accidental omission. | **RFC 8200** (IPv6); **RFC 4291** (addressing); **RFC 4443** (ICMPv6); **RFC 4861** (ND); ties to **P3-1** L2 and **P3-8** **AAAA** when promoted. |
+| **P3-14** | **Network stack background jobs** | Async RX dequeuing, TCP timer wheel / delayed ACK (**RFC 793**), ARP cache TTL sweep; avoids one-off polling in drivers. | Scheduled on **P1-8**; **P3-1**/**P3-7**/**P1-7**; ties to **#240** ARP TTL. |
 
 **Security standards:** default **no promisc**; **no raw TX** from shell without principal + audit; rate-limit outgoing ARP/ICMP in lab builds.
 
@@ -335,6 +375,7 @@ Shipped on the **PRE 4.2.0** train (**PR #231** class work). This is the **modul
 | **P3-9** | ❌ | No TLS command or library bridge in-tree |
 | **P3-12** | ❌ | No DHCP client |
 | **P3-13** | ❌ | Chat room not implemented; full plan **`docs/P3_13_CHAT_SERVER.md`**; **#239** / **#238** |
+| **P3-14** | ❌ | No workqueue-driven net RX/TCP timers/ARP sweep; see **`docs/BACKGROUND_JOBS.md`** |
 | **P3-10** / **P3-11** | ❌ | Contract **`[DEFERRED]`** only |
 
 **Shell / CI:** **`ping`**, **`check requirements`**; **`make test_p3_network`**, **`make test_invariants`**, **`make test_core`**, **`make check-network-requirements`**. **ASM:** **`arch/*/net_asm.*`**, **`arch/*/net_wire_host_asm.*`** (x86_64 GAS/NASM, AArch64 GAS). **PRE 4.2.0 gaps (tracked in issues):** **#241** bare-metal **802.3** netdev + route bootstrap; **#240** ~✅→✅ checklist (ARP TTL, ICMP fallback, doc sync); **#239** **P3-13** sockets/server; **P3-12** DHCP (open). Follow-ups: **#232**–**#235** (netdev shutdown, authz hygiene, batch registry).
@@ -354,6 +395,7 @@ Shipped on the **PRE 4.2.0** train (**PR #231** class work). This is the **modul
 | **P4-5** | **USB stack** | **xHCI** host-controller **lab subset** (one **PCIe** function, **QEMU**-class); **command**, **event**, and **transfer** ring ownership; **MMIO** ordering via **`fl_usb_xhci_mmio_*`** glue and **arch** **`.s`**. | **Intel xHCI** spec (register model + TRBs); **USB 3.2** informative for packet layers later; **hub** enumeration and **xHCI compliance** suites **out-of-tree** until promoted. |
 | **P4-6** | **FDT-driven machine discovery (lab)** | Walk **DTB** from **P0-7** to enumerate **memory**, **`cpus`**, and **`compatible`** for driver match—QEMU **`-dtb`** / virt DTS in docs. | Devicetree.org **FDT** spec; clarify how much parsing lives in loader vs kernel. |
 | **P4-7** | **PSCI client (AArch64)** | **SMC**-based **ARM PSCI** so **P9-3** can bring up secondaries via **`CPU_ON`**; document `CPU_OFF`/`CPU_SUSPEND` as later. | **ARM DEN0022** (PSCI); DT **`psci`** node (`arm,psci-1.0` bindings); **TF-A** as firmware provider on QEMU (informative). |
+| **P4-8** | **Deferred IRQ work (`kworker` analog)** | Queue bottom-half work from **P4-2** hardirq onto **P1-8** threads; no heavy work in true hardirq. | **Appendix D** hardirq rules; stress test with synthetic IRQ load; see **`docs/BACKGROUND_JOBS.md`**. |
 
 **Hardware policy:** each driver ships with **QEMU command line** + **known-good hardware ID** table.
 
@@ -370,6 +412,7 @@ Shipped on the **PRE 4.2.0** train (**PR #231** class work). This is the **modul
 | **P5-1** | **VFS layer** | Mount table, vnode/inode abstraction, path walk cache limits. | **POSIX pathconf** subset where relevant; **ELOOP** detection on symlinks if added. |
 | **P5-2** | **Pluggable FS** | ext4 read-only or FUSE-hosted bridge on H before native ext4 on B. | **fsck** story documented; **journalling** requirements tabled. |
 | **P5-3** | **Page cache** | Unified buffer cache between net and block (long-term). | **POSIX fadvise** semantics optional; **coherency rules** documented. |
+| **P5-4** | **Dirty page writeback job (`flush` / `bdi-writeback` analog)** | Periodic write of dirty **P5-3** buffers to block storage for crash consistency. | Runs on **P1-8**; bounded bandwidth; **P4-4** block path required on **B**. |
 
 ---
 
@@ -433,6 +476,7 @@ The **3.3.0 contracts** workstream landed FL1 history, hosted **`.fl_audit.log`*
 | **P9-1** | **Fuzzing** | syscall / netdev / FS parsers under AFL++ or libFuzzer (hosted shims). | **Crash = bug**; corpus checked in CI cache optional. Caps: **`contract_p9_fuzz.h`** (**`FL_CONTRACT_P9_FUZZ_INPUT_MAX_BYTES`**, corpus path max). |
 | **P9-2** | **Coverity / static analysis** | Clean critical triage. | **Zero** new high-severity defects per release gate. Use **SEI CERT C Coding Standard** (https://www.sei.cmu.edu/downloads/sei-cert-c-coding-standard.pdf) as the primary **human-readable** ruleset for new C; **MISRA C** optional for driver subsets where maintainers adopt a profile. Severity ladder: **`contract_p9_static_analysis.h`**. |
 | **P9-3** | **SMP bring-up (B)** | IPIs, per-CPU variables, barrier rules. | **Memory model** doc for AArch64/x86 per **ARM ARM** / Intel SDM. **AArch64:** secondary CPUs via **PSCI `CPU_ON`** (**ARM DEN0022**) per **P4-7** + DT **`cpus`**; **x86_64:** AP entry per **Intel SDM**. Builds on **P1-3** / **P1-6**; expect driver audits, not a greenfield lock story. Vocabulary: **`contract_p9_smp.h`**. |
+| **P9-4** | **RCU grace-period jobs (`rcuop` / `rcuc` analog)** | Defer freeing shared structures until read-side critical sections end; enables lock-free readers on **P9-3**. | Runs on **P1-8**; **P1-3** memory ordering; see **`docs/BACKGROUND_JOBS.md`**. |
 
 **Module-contract snapshot:** **P9-1**–**P9-3** are **✅** for **contract completion** (**`contracts/hardening/`**, **`FL_CONTRACT_P9_HARDENING_REV` 1**). See the [P0–P9 snapshot](#p0p9-module-contract-snapshot-develop).
 

@@ -174,6 +174,8 @@ int fl_server_poll_inbound(char *buf, size_t cap);  /* non-blocking line for she
 
 **Requirement:** after **`server host`** or **`server join`**, the user can still type commands; inbound chat must appear without blocking **`readline`** forever.
 
+**Layering:** this is a **userland** background thread on **H** (see **`userland/shell/sh.c`** pthread usage). Kernel **workqueues** (**P1-8**, **P3-14** net timers/RX) are separate—see **`docs/BACKGROUND_JOBS.md`**.
+
 **Hosted v1 approach (documented):**
 
 1. **`pthread_create`** dedicated **recv thread** (see existing **`pthread`** / worker pool in **`userland/shell/sh.c`**).

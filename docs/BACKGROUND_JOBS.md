@@ -1,0 +1,118 @@
+# Kernel background jobs (workqueues)
+
+Normative roadmap rows live in **`docs/ROADMAP.md`** (Phase 1 **P1-8**–**P1-10**, plus **P3-14**, **P4-8**, **P5-4**, **P9-4**). This document explains **why** those rows exist, how they relate to common kernel daemons, and what “done” looks like for implementers.
+
+## Two layers: kernel jobs vs userland tasks
+
+| Layer | Examples in Flinstone | Roadmap |
+|-------|----------------------|---------|
+| **Kernel / supervisor** | `kswapd`-class reclaim, writeback flush, `kworker` deferred IRQ, net RX/timer jobs, RCU grace threads, watchdog | **P1-8** framework + domain rows below |
+| **Userland (hosted shell)** | **`server`** chat recv **`pthread`** (**P3-13**) | **`docs/P3_13_CHAT_SERVER.md`** §7 — **not** a substitute for **P1-8** |
+
+Kernel jobs must respect **P1-3** (lock ordering, no unbounded work under spinlocks) and **P1-7** (timers for periodic wakeups).
+
+---
+
+## Linux analog → Flinstone roadmap
+
+| Domain | Typical Linux component | Flinstone row | Goal (summary) |
+|--------|-------------------------|---------------|----------------|
+| **Framework** | `kthread`, `workqueue`, `schedule_work` | **P1-8** | Schedule bounded asynchronous work outside hardirq; park/wake/teardown API |
+| **Memory management** | **`kswapd`** — reclaim inactive pages, swap, avoid OOM | **P1-9** | Background scan of **P1-4** PMM / **P1-5** arenas; pressure hooks before alloc fails |
+| **Storage & FS** | **`flush`** / **pdflush** / **bdi-writeback** — dirty page writeback | **P5-4** | Periodic flush of **P5-3** dirty cache to **P4-4** block backends |
+| **CPU / SMP** | **`rcuop`**, **`rcuc`** — RCU grace periods | **P9-4** | Deferred free after read-side critical sections (**P9-3** SMP) |
+| **System maintenance** | **`kworker`** — deferred work from IRQ | **P4-8** | Queue bottom-half work from **P4-2** hardirq; run on **P1-8** threads |
+| **Networking** | softirq, NAPI, TCP timer wheel, delayed ACK | **P3-14** | RX dequeue, connection timers, ARP cache sweep (**#240**) on **P1-8** |
+| **System timing** | **watchdog** + timekeeping work | **P1-10** | Health/timeouts using **P1-7** / **P0-5**; lab panic policy documented |
+
+**Informative references (not copy Linux verbatim):** kernel workqueue design notes; **RFC 1122** (host requirements) for memory and net timeouts; **RFC 793** for TCP timers; **ARM DEN0022** / Intel SDM where jobs interact with power or IPIs (**P9-3**).
+
+---
+
+## P1-8 — Workqueue framework (build first)
+
+**Deliverables:**
+
+- **`fl_workqueue_t`** (or equivalent) with: init, destroy, enqueue, flush, drain-on-shutdown
+- **Kernel threads** or hosted **pthread** bridge on **H** that share one **scheduling contract**
+- Per-item **work struct**: function pointer, context, **no unbounded heap** in the dispatcher
+- Integration with **`fl_net_netdev_shutdown`** (**#232**) and driver teardown (**P4-2**)
+
+**Contract (planned):** **`contracts/runtime/contract_p1_workqueue.h`** via **`contract_runtime.h`**.
+
+**Acceptance:**
+
+- [ ] Enqueue 1000 no-op jobs without leak; clean shutdown with pending work
+- [ ] Assert **P1-3** lock-order violations in debug builds when a job takes forbidden locks
+- [ ] Document which jobs may block vs must stay non-blocking
+
+---
+
+## Domain jobs (after P1-8)
+
+### P1-9 — Memory reclaim (`kswapd` analog)
+
+- Wake on alloc failure trend or periodic tick
+- Reclaim cold frames from PMM free lists; optional swap stub on **H** only
+- Depends: **P1-4**, **P1-5**, **P1-8**
+
+### P5-4 — Dirty writeback (`flush` / `bdi-writeback` analog)
+
+- Walk dirty **P5-3** pages; issue block I/O in batches
+- Rate-limit writes under memory pressure
+- Depends: **P5-3**, **P4-4**, **P1-8**
+
+### P4-8 — Deferred IRQ work (`kworker` analog)
+
+- **Hardirq** (**P4-2**) queues short descriptor to workqueue; handler runs with locks allowed per graph
+- Depends: **P4-2**, **P1-3**, **P1-8**
+
+### P3-14 — Network stack background
+
+- RX: pull frames from **P3-1** netdev queue into stack
+- TCP: RTO/retransmit timer tick (**P3-7**), delayed ACK timer
+- ARP: optional **`fl_net_arp_tick`** TTL sweep (**#240**)
+- Depends: **P3-1**, **P3-7**, **P1-7**, **P1-8**
+
+### P9-4 — RCU grace-period jobs (`rcuop` / `rcuc` analog)
+
+- Read-side markers + grace-period detection before freeing shared structures
+- Depends: **P9-3**, **P1-3**, **P1-8**
+
+### P1-10 — Watchdog / health monitor
+
+- Periodic check: tick advancement (**P0-5** / **P1-7**), stuck workqueue, net stall
+- Policy: log, reset subsystem, or panic (lab **Kconfig**)
+- Depends: **P1-7**, **P1-8**
+
+---
+
+## Suggested implementation order
+
+```mermaid
+flowchart TD
+  P18[P1-8 workqueue]
+  P19[P1-9 kswapd]
+  P48[P4-8 kworker]
+  P314[P3-14 net jobs]
+  P54[P5-4 writeback]
+  P94[P9-4 RCU]
+  P110[P1-10 watchdog]
+  P18 --> P19
+  P18 --> P48
+  P18 --> P314
+  P18 --> P54
+  P18 --> P94
+  P18 --> P110
+  P314 --> P313[P3-13 server pthread]
+```
+
+**P3-13** chat can ship on hosted **pthread** before **P1-8** exists; migrating net timers to **P3-14** reduces duplicate ad-hoc threads later.
+
+---
+
+## Related docs
+
+- **`docs/ROADMAP.md`** — authoritative **P\*** IDs and snapshot table
+- **`docs/P3_13_CHAT_SERVER.md`** — userland background recv for **`server`**
+- **`docs/P3_NETWORKING.md`** — stack layers fed by **P3-14**
