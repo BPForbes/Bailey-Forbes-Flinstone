@@ -309,7 +309,7 @@ Implement **bottom-up**: **L2 (link layer)** → IPv4/UDP → TCP → sockets fa
 | **P3-5** | **IPv4** | Addresses, netmask, routing table (default route), ICMP echo (ping). | **RFC 791** + **RFC 792**; **checksum offload** optional; **path MTU** stub documented. |
 | **P3-6** | **UDP** | Demux by port; checksum; basic socket buffer caps. | **RFC 768**; **bounded queues**; drop policy under pressure documented. |
 | **P3-12** | **DHCP client (IPv4)** | Minimal **DISCOVER → OFFER → REQUEST → ACK** client for lab addressing and **PX-12** netboot paths. | **RFC 2131**; **RFC 2132** (options subset); finite state machine with **timeouts**; builds on **P3-6**; document interaction with **P3-5** static routes. |
-| **P3-13** | **Sockets & server façade** | User-facing **socket API** and shell **server** builtins on top of **P3-6**/**P3-7** (not raw wire helpers only). | **RFC 793**/**RFC 768** stream/datagram semantics at the API boundary; shell **`udpsend`** / **`udplisten`** (and TCP **`listen`**/**`accept`** when **P3-7** matures); bounded buffers; **P2-3** authz on bind/connect; defers TLS (**P3-9**) to userland. |
+| **P3-13** | **Sockets, `server` session, messaging** | **Multi-user chat** between Flinstone instances: shell **`server`** (**`host`** / **`join`** / **`leave`** / **`kill`**) on **`ip:port`**, background session task, framed peer messages; socket shim on **P3-6**/**P3-7**. | **RFC 793** TCP session + **RFC 768** UDP helpers; **`server kill`** host-only (**P2-3**); host **`leave`** promotes a new host; bounded members/messages; defers TLS (**P3-9**) to userland. Detail: **`docs/P3_NETWORKING.md`** § P3-13. |
 | **P3-7** | **TCP (large)** | Reliable stream for one client/server pair first. | **RFC 793** + selective **RFC 5681** congestion basics later; **interop test** against Linux `nc` or `socat`. |
 | **P3-8** | **DNS client** | Resolver for A/AAAA records (AAAA optional). | **RFC 1035** semantics subset; **timeouts** and **retry caps**. |
 | **P3-9** | **TLS (hosted)** | Prefer **userland** TLS (e.g. mbedTLS/OpenSSL) behind shell command or libc. | **No TLS in “kernel” layer** until stable memory and time APIs exist on K/B. |
@@ -334,7 +334,7 @@ Shipped on the **PRE 4.2.0** train (**PR #231** class work). This is the **modul
 | **P3-8** | ~✅ | **`net_dns.c`**: minimal **A** query via **`/etc/resolv.conf`** |
 | **P3-9** | ❌ | No TLS command or library bridge in-tree |
 | **P3-12** | ❌ | No DHCP client |
-| **P3-13** | ❌ | No **`udpsend`** / **`udplisten`** or in-tree listen/accept; see GitHub issues for sockets/server track |
+| **P3-13** | ❌ | No **`server`** session, messaging, or socket shim; spec in **`docs/P3_NETWORKING.md`** § P3-13; track **#239** |
 | **P3-10** / **P3-11** | ❌ | Contract **`[DEFERRED]`** only |
 
 **Shell / CI:** **`ping`**, **`check requirements`**; **`make test_p3_network`**, **`make test_invariants`**, **`make test_core`**, **`make check-network-requirements`**. **ASM:** **`arch/*/net_asm.*`**, **`arch/*/net_wire_host_asm.*`** (x86_64 GAS/NASM, AArch64 GAS). **PRE 4.2.0 gaps (tracked in issues):** **#241** bare-metal **802.3** netdev + route bootstrap; **#240** ~✅→✅ checklist (ARP TTL, ICMP fallback, doc sync); **#239** **P3-13** sockets/server; **P3-12** DHCP (open). Follow-ups: **#232**–**#235** (netdev shutdown, authz hygiene, batch registry).
