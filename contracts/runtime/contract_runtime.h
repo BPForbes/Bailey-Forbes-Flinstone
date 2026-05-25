@@ -2,7 +2,7 @@
  * P1 core runtime contract bundle (directory contracts/runtime, see README).
  *
  * Include this header (or individual contract_p1_*.h shards after
- * contract_extend.h) when implementing or reviewing P1-1 through P1-7 work.
+ * contract_extend.h) when implementing or reviewing P1-1 through P1-10 work.
  * Build with -Icontracts/runtime alongside -Icontracts/foundations.
  *
  * Bump FL_CONTRACT_P1_RUNTIME_REV when shard set or mandatory P1 vocabulary changes.
@@ -12,7 +12,7 @@
 
 #include "contract_extend.h"
 
-#define FL_CONTRACT_P1_RUNTIME_REV 1
+#define FL_CONTRACT_P1_RUNTIME_REV 2
 
 #include "contract_p1_execution.h"
 #include "contract_p1_address_space.h"
@@ -22,6 +22,8 @@
 #include "contract_p1_driver_reentrancy.h"
 #include "contract_p1_timekeeping.h"
 #include "contract_p1_workqueue.h"
+#include "contract_p1_reclaim.h"
+#include "contract_p1_watchdog.h"
 
 #define FL_CONTRACT_P1_VOCABULARY_LOCK 1
 

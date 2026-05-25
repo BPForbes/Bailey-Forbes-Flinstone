@@ -17,11 +17,12 @@
 
 #include "contract_extend.h"
 
-#define FL_CONTRACT_P5_STORAGE_REV 2
+#define FL_CONTRACT_P5_STORAGE_REV 3
 
 #include "contract_p5_vfs.h"
 #include "contract_p5_pluggable_fs.h"
 #include "contract_p5_page_cache.h"
+#include "contract_p5_writeback.h"
 
 #define FL_CONTRACT_P5_VOCABULARY_LOCK 1
 

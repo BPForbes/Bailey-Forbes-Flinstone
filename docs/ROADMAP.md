@@ -89,7 +89,7 @@ Two columns track different concerns:
 
 **P0 row criterion (aligned with `contracts/foundations/`):** **P0-1** through **P0-8** are **✅** when the normative **C contract bundle** under **`contracts/foundations/`** defines that row: **P0-1**/**P0-2** via **`contract_foundations.h`**, **`contract_result.h`**, log/auth/driver wiring, **`contract_extend.h`**, and **`contract_compile_ext.h`**; **P0-3**–**P0-8** via **`contract_p0_ci.h`**, **`contract_p0_arm_gic.h`**, **`contract_p0_x86_idt.h`**, **`contract_p0_x86_gdt.h`**, **`contract_p0_fdt.h`**, and **`contract_p0_uart.h`** (obligations as comments + **`FL_CONTRACT_P0_*_CONTRACT_DEFINED`** markers). **Implementation completion** for IRQ/DTB/UART/CI still follows phase gates and **Appendix D**; this snapshot tracks **contract definition**, not “all silicon paths verified.”
 
-**P1 row criterion (aligned with `contracts/runtime/`):** **P1-1** through **P1-7** are **✅** when the normative **C contract bundle** under **`contracts/runtime/`** defines that row via **`contract_runtime.h`** (umbrella) and the **`contract_p1_*.h`** shards (**`FL_CONTRACT_P1_*_CONTRACT_DEFINED`** markers). **P1-8** is **✅** contract-complete (**`contract_p1_workqueue.h`**, MLQ layers, **`make test_workqueue_p18`**); module integration **~✅** (scaffold + acceptance, domain handlers still stubs). **P1-9**–**P1-10** and **P3-14** remain **⚠️** contract / **~⚠️** integration for kicks only—see **[Background jobs](#background-jobs-kernel-workqueues)** and **#242**. **Kernel / scheduler / MM implementation** still follows phase gates (e.g. **P1 → P2**); this snapshot tracks **contract definition**, not full **B**-path validation of PMM or arenas.
+**P1 row criterion (aligned with `contracts/runtime/`):** **P1-1** through **P1-7** are **✅** when the normative **C contract bundle** under **`contracts/runtime/`** defines that row via **`contract_runtime.h`** (umbrella) and the **`contract_p1_*.h`** shards (**`FL_CONTRACT_P1_*_CONTRACT_DEFINED`** markers). **P1-8**–**P1-10** are **✅** for **contract completion** (**`contract_p1_workqueue.h`**, **`contract_p1_reclaim.h`**, **`contract_p1_watchdog.h`** in **`contract_runtime.h`**); **P1-8** module integration **~✅** (**`make test_workqueue_p18`**, **#242**). **P1-9**/**P1-10** integration **❌** (stub handlers). **P3-14** contract **✅** (**`contract_p3_background.h`**); integration **~⚠️**. **P4-8**, **P5-4**, **P9-4** contract shards exist; integration **❌**—see **[Background jobs](#background-jobs-kernel-workqueues)**. **Kernel / scheduler / MM implementation** still follows phase gates (e.g. **P1 → P2**); this snapshot tracks **contract definition**, not full **B**-path validation of PMM or arenas.
 
 **P2 row criterion (aligned with `contracts/identity/`):** **P2-1** through **P2-4** are **✅** when the normative **C contract bundle** under **`contracts/identity/`** defines that row via **`contract_identity.h`** (umbrella, inheriting **`contract_runtime.h`**) and the matching **`contract_p2_*.h`** shards (**`FL_CONTRACT_P2_*_CONTRACT_DEFINED`** markers). **Phase 2** implementation (principal wiring, lab credential files, central **`can_*`** enforcement, elevation UX) still follows phase gates and **TODO: P2-3** below; this snapshot tracks **contract definition**, not “middleware fully enforced” or “Phase **2** shipped.”
 
@@ -125,8 +125,8 @@ Two columns track different concerns:
 | **P1-6** | Driver model reentrancy | ✅ | ~✅ |
 | **P1-7** | Timekeeping | ✅ | ~✅ |
 | **P1-8** | Background jobs (workqueues) | ✅ | ~✅ |
-| **P1-9** | Memory reclaim job (`kswapd`) | ⚠️ | ❌ |
-| **P1-10** | Watchdog / health monitor | ⚠️ | ❌ |
+| **P1-9** | Memory reclaim job (`kswapd`) | ✅ | ❌ |
+| **P1-10** | Watchdog / health monitor | ✅ | ❌ |
 | **P2-1** | Principal model | ✅ | ✅ |
 | **P2-2** | Credential store (hosted) | ✅ | ✅ |
 | **P2-3** | Authorization middleware | ✅ | ~✅ |
@@ -139,7 +139,7 @@ Two columns track different concerns:
 | **P3-6** | UDP | ✅ | ~✅ |
 | **P3-12** | DHCP client (IPv4) | ✅ | ❌ |
 | **P3-13** | Chat room (`server`) | ⚠️ | ❌ |
-| **P3-14** | Net stack background jobs | ⚠️ | ~⚠️ |
+| **P3-14** | Net stack background jobs | ✅ | ~⚠️ |
 | **P3-7** | TCP (large) | ✅ | ⚠️ |
 | **P3-8** | DNS client | ✅ | ~✅ |
 | **P3-9** | TLS (hosted) | ✅ | ❌ |
@@ -152,11 +152,11 @@ Two columns track different concerns:
 | **P4-5** | USB stack | ✅ | ⚠️ |
 | **P4-6** | FDT-driven machine discovery (lab) | ✅ | ⚠️ |
 | **P4-7** | PSCI client (AArch64) | ✅ | ⚠️ |
-| **P4-8** | Deferred IRQ work (`kworker`) | ⚠️ | ❌ |
+| **P4-8** | Deferred IRQ work (`kworker`) | ✅ | ❌ |
 | **P5-1** | VFS layer | ✅ | ❌ |
 | **P5-2** | Pluggable FS | ✅ | ❌ |
 | **P5-3** | Page cache | ✅ | ❌ |
-| **P5-4** | Dirty page writeback job | ⚠️ | ❌ |
+| **P5-4** | Dirty page writeback job | ✅ | ❌ |
 | **P6-1** | Structured log API (sink / line path) | ✅ | ⚠️ |
 | **P6-2** | Ring buffer sink | ✅ | ⚠️ |
 | **P6-3** | Persistent log (hosted) | ✅ | ❌ |
@@ -172,7 +172,7 @@ Two columns track different concerns:
 | **P9-1** | Fuzzing | ✅ | ❌ |
 | **P9-2** | Coverity / static analysis | ✅ | ❌ |
 | **P9-3** | SMP bring-up (B) | ✅ | ❌ |
-| **P9-4** | RCU grace-period jobs | ⚠️ | ❌ |
+| **P9-4** | RCU grace-period jobs | ✅ | ❌ |
 
 **Summary:** **Contract completion** — **P0-1**–**P0-8**, **P1-1**–**P1-7**, **P2-1**–**P2-4**, **P3-1**–**P3-12** (including **`[DEFERRED]`** shards), **P4-1**–**P4-7**, **P5-1**–**P5-3**, **P6-1**–**P6-5**, **P7-1**–**P7-3**, **P7 (batch)**, **P8-1**–**P8-3**, and **P9-1**–**P9-3** are **✅** under their **`contracts/*`** bundles. **Module integration (P0–P2)** — **✅:** **P0-1**–**P0-3**, **P0-6**–**P0-8**, **P1-1**, **P2-1**, **P2-2**, **P2-4** (hosted/lab wired and tested on **4.1.0**). **~✅:** **P1-7** (hosted POSIX `clock_gettime` only; **B** Generic Timer / **P0-5** tick follow-up). **~✅:** **P0-4**, **P0-5** (arch **B** evidence TODOs), **P1-2**–**P1-6** (**B** PMM/arena/NASM), **P2-3** (guest deny suite + shell gates; netdev hook on **PRE 4.2.0** **`ping`** path—see **TODO: P2-3**). See **`docs/p0_p2_pr_coverage.md`**. **Module integration (P3, PRE 4.2.0)** — **~✅:** **P3-1**–**P3-6**, **P3-8** (in-tree stack, **`net_arp.c`** / **`net_route.c`** / **`net_wire_egress.c`**, **`ping`** / **`check requirements`**, **`make test_p3_network`**, **`make check-network-requirements`**; TAP/Interop skips documented). **⚠️:** **P3-7** (TCP SYN probe + loopback RST+ACK only); **P3-13** (planning row—contract shard pending). **❌:** **P3-9** TLS, **P3-12** DHCP, **P3-13** sockets/server builtins, **P3-10**/**P3-11** deferrals. Detail: **`docs/P3_NETWORKING.md`**. **P4-1**/**P4-2** **✅**; **P8**/**P9** integration **❌** here.
 

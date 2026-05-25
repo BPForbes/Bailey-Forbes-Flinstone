@@ -38,7 +38,19 @@ Kernel jobs must respect **P1-3** (lock ordering, no unbounded work under spinlo
 - Per-item **work struct**: function pointer, context, **no unbounded heap** in the dispatcher
 - Integration with **`fl_net_netdev_shutdown`** (**#232**) and driver teardown (**P4-2**)
 
-**Contract:** **`contracts/runtime/contract_p1_workqueue.h`** (included from **`contract_runtime.h`**).
+**Contracts (normative shards):**
+
+| Row | Header | Umbrella |
+|-----|--------|----------|
+| **P1-8** | **`contracts/runtime/contract_p1_workqueue.h`** | **`contract_runtime.h`** |
+| **P1-9** | **`contract_p1_reclaim.h`** | **`contract_runtime.h`** |
+| **P1-10** | **`contract_p1_watchdog.h`** | **`contract_runtime.h`** |
+| **P3-14** | **`contracts/networking/contract_p3_background.h`** | **`contract_networking.h`** |
+| **P4-8** | **`contracts/drivers/contract_p4_kworker.h`** | **`contract_drivers.h`** |
+| **P5-4** | **`contracts/storage/contract_p5_writeback.h`** | **`contract_storage.h`** |
+| **P9-4** | **`contracts/hardening/contract_p9_rcu.h`** | **`contract_hardening.h`** |
+
+Work tags (**`FL_BG_JOB_TAG_*`**, **`FL_NET_BG_TAG_ARP_TICK`**) and MLQ layers (**`FL_WQ_LAYER_*`**) live in these headers, not only in implementation **`.h`** files.
 
 **Source tree (scaffold — builds, handlers mostly no-op):**
 
