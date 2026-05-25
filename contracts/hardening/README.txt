@@ -1,5 +1,5 @@
 P9 (*contracts/hardening*) — roadmap **Phase 9** (**P9-1** fuzzing, **P9-2** static analysis,
-**P9-3** SMP bring-up on **B**). See **docs/ROADMAP.md** Phase **9** table.
+**P9-3** SMP bring-up on **B**, **P9-4** RCU grace jobs). See **docs/ROADMAP.md** Phase **9** table.
 
 **Umbrella header:** *contract_hardening.h* — includes **contract_extend.h** (P0),
 **FL_CONTRACT_P9_HARDENING_REV**, and shards below with **`FL_CONTRACT_P9_*_CONTRACT_DEFINED`**
@@ -12,6 +12,7 @@ markers.
 | *contract_p9_fuzz.h* | **P9-1** — fuzz input size cap, corpus path cap, crash-is-bug default |
 | *contract_p9_static_analysis.h* | **P9-2** — SA severity enum, zero-new-critical gate, ruleset token |
 | *contract_p9_smp.h* | **P9-3** — SMP lock-order inherits **P1-3**, AArch64 **PSCI CPU_ON** (**P4-7**) |
+| *contract_p9_rcu.h* | **P9-4** — RCU grace-period work on **P1-8** |
 
 **Build:** **-Icontracts/hardening** is already in the root **Makefile** **CFLAGS** and
 **CMakeLists.txt** **include_directories**.

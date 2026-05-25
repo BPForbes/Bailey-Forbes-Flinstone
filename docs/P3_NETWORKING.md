@@ -1,12 +1,25 @@
 # P3 networking (PRE 4.2.0)
 
-Normative contracts live under **`contracts/networking/`** (umbrella **`contract_networking.h`**). This document describes the **implementation** in **`kernel/core/net/`**, how it maps to roadmap rows **P3-1 … P3-12**, and how **architecture-specific ASM** backs hosted wire I/O and checksum hot paths.
+Normative contracts live under **`contracts/networking/`** (umbrella **`contract_networking.h`**). This document describes the **implementation** in **`kernel/core/net/`**, how it maps to roadmap rows **P3-1 … P3-13**, and how **architecture-specific ASM** backs hosted wire I/O and checksum hot paths.
 
 ## Goals
 
 - **In-tree** IPv4 framing, ICMP echo, TCP SYN probe, minimal DNS A-record lookup, and **software loopback** (P3-2) without calling `/bin/ping` or `getaddrinfo`.
 - **Hosted edge only:** Linux **socket syscalls** (and optional **TAP**) are the OS boundary; probes build and parse packets in C.
 - **Shell:** `ping` and `check requirements` for CI and lab validation (`scripts/check_network_requirements.sh`).
+- **End state (P3-13):** multi-user **chat room** via shell **`server`** — implementation plan: **[`docs/P3_13_CHAT_SERVER.md`](P3_13_CHAT_SERVER.md)** (wire protocol, hub topology, module layout, phased tests). Tracked in **#239**; prerequisites in **#238**.
+
+## P3-13 — chat room (summary)
+
+| Item | Detail |
+|------|--------|
+| **Product** | `server host/join <ip:port>`, `server msg`, `server leave`, `server kill` (host-only) |
+| **Topology** | Star: host listens; members connect; host relays **`MSG`** |
+| **Transport** | TCP (**RFC 793**) after **P3-7**; framing + opcodes in **`P3_13_CHAT_SERVER.md`** §4 |
+| **Shell** | Background **pthread** recv loop + inbound ring (see plan §7) |
+| **Build order** | P3-6 → P3-7 → socket shim → `net_server.c` → `cmd_server.c` |
+
+Full spec: **[`docs/P3_13_CHAT_SERVER.md`](P3_13_CHAT_SERVER.md)**.
 
 ## Layer map
 
@@ -14,6 +27,9 @@ Normative contracts live under **`contracts/networking/`** (umbrella **`contract
 |--------|---------|------|
 | **`net_wire.c`** | Wire vocabulary | Ethernet+IPv4 frame build/parse, MTU, `fl_net_frame_view_t` / `fl_net_frame_mut_t` |
 | **`net_eth.c`** | L2 helpers | Aliases/constants over wire |
+| **`net_arp.c`** | P3-4 | ARP request/reply, bounded cache, resolve over netdev |
+| **`net_route.c`** | P3-5 | Longest-prefix routing table; TAP lab via **FL_NET_TAP_*** env |
+| **`net_wire_egress.c`** | P3-5 / P3-6 path | IPv4 L4 send/recv on routed netdev (ARP + ICMP echo) |
 | **`net_ipv4.c`** | P3-5 (partial) | IPv4 header build, literal/loopback address helpers |
 | **`net_checksum.c`** | P3-5 | Internet checksum; **`asm_net_checksum16`** when `FL_NET_ASM_AVAILABLE` |
 | **`net_icmp.c`** | P3-5 | ICMP echo request/reply exchange |
@@ -77,6 +93,10 @@ flowchart LR
 | **`asm_net_pseudo_header_fill12`** | same | same | same |
 | **`asm_net_pseudo_checksum_tcpudp`** | same | same | same |
 | **`asm_net_dns_query_header_prefix`** | same | same | same |
+| **`asm_net_arp_cache_clear`** | same | same | same |
+| **`asm_net_arp_cache_lookup`** | same | same | same |
+| **`asm_net_arp_cache_insert`** | same | same | same |
+| **`asm_net_arp_cache_evict_oldest`** | same | same | same |
 | **`net_host_socket_asm`** | `arch/x86_64/gas/net_wire_host_asm.s` | `arch/x86_64/nasm/net_wire_host_asm.asm` | `arch/arm/gas/net_wire_host_asm.s` |
 | **`net_host_bind_asm`** | same | same | same |
 | **`net_host_sendto_asm`** | same | same | same |
@@ -97,13 +117,29 @@ Legend matches **`docs/ROADMAP.md`**: **✅** complete; **~✅** usable lab subs
 | **P3-1** | ✅ | ~✅ — `net_netdev.c`, authz hook in `sh.c` |
 | **P3-2** | ✅ | ~✅ — `net_loopback.c` frame path + RX queue |
 | **P3-3** | ✅ | ~✅ — `net_tap.c` (CI often skips without `CAP_NET_ADMIN`) |
-| **P3-4** ARP | ✅ | ❌ |
-| **P3-5** IPv4 | ✅ | ~✅ — build/parse/checksum; no full routing |
+| **P3-4** ARP | ✅ | ~✅ — `net_arp.c` cache (**ASM** table ops) + request/reply on loopback/TAP |
+| **P3-5** IPv4 | ✅ | ~✅ — LPM routes + **`fl_net_wire_egress_l4`**; ICMP on netdev; Linux ICMP fallback; PMTU/offload open |
 | **P3-6** UDP | ✅ | ~✅ — DNS + wire host datagrams only |
 | **P3-7** TCP | ✅ | ⚠️ — SYN probe only |
 | **P3-8** DNS | ✅ | ~✅ — A record, single nameserver |
 | **P3-9** TLS | ✅ | ❌ |
 | **P3-12** DHCP | ✅ | ❌ |
+| **P3-13** `server` + messaging | ⚠️ | ❌ — **`server host/join/leave/kill`**, background session, framed chat (**#239**) |
+
+## Standards map (integration targets)
+
+| Layer / feature | Normative references | PRE 4.2.0 status |
+|-----------------|----------------------|------------------|
+| Ethernet L2 | **IEEE 802.3**; IPv4 over Ethernet **RFC 894** | ~✅ TAP + loopback frames |
+| ARP (**P3-4**) | **RFC 826** | ~✅ in-tree cache + exchange |
+| IPv4 / ICMP (**P3-5**) | **RFC 791**, **RFC 792** | ~✅ routing + netdev ICMP |
+| UDP (**P3-6**) | **RFC 768** | ~✅ DNS + hosted datagram shim |
+| TCP (**P3-7**) | **RFC 793** | ⚠️ SYN probe only |
+| DNS (**P3-8**) | **RFC 1035** (subset) | ~✅ A record |
+| DHCP (**P3-12**) | **RFC 2131**, **RFC 2132** | ❌ |
+| `server` + messaging (**P3-13**) | **RFC 793** (TCP session); **RFC 768** (UDP helpers) | ❌ |
+
+Bare-metal integration requires **802.3**-framed TX/RX through **`fl_net_driver_t`** (not Linux TAP/socket shims alone). Track gaps in GitHub issues (bare metal, P3 gap checklist, sockets/server).
 
 ## Shell commands
 
@@ -132,14 +168,30 @@ make check-network-requirements
 
 ## Related docs
 
+- **`docs/P3_13_CHAT_SERVER.md`** — **P3-13** chat room implementation plan (wire protocol, APIs, tests)
 - **`contracts/networking/README.txt`** — contract shards vs P2
 - **`docs/ROADMAP.md`** — P3 rows and phase gates
 - **`kernel/core/net/README.md`** — file index and include graph
 - **`AGENTS.md`** — build/test and versioning for this PR
 
+## Lab TAP addressing
+
+| Variable | Default | Meaning |
+|----------|---------|---------|
+| **`FL_NET_TAP_IPV4`** | `10.0.2.15` | Host address on TAP |
+| **`FL_NET_TAP_PREFIX`** | `24` | Prefix length |
+| **`FL_NET_TAP_GW`** | `10.0.2.2` | Default gateway for off-subnet ARP |
+
 ## Future work
 
-- **P3-4** ARP + **P3-5** routing table for off-loopback without raw sockets
-- **P3-7** full TCP state machine; move raw-TCP **`select`** path to ASM or netdev TX
-- **P3-12** DHCP for hosted labs
-- Bare-metal NIC driver feeding **`fl_net_driver_t`** instead of TAP/socket shim
+| Priority | Item | Notes |
+|----------|------|--------|
+| **P3-12** | DHCP client | **RFC 2131**/**2132**; replaces **FL_NET_TAP_*** env bootstrap |
+| **P3-13** | Chat room | See **`docs/P3_13_CHAT_SERVER.md`**; **#239** / **#238** |
+| Patch | ARP cache TTL sweep | Tick-based age only today; add periodic **`fl_net_arp_tick`** for bare metal |
+| Patch | Consolidate loopback egress | **`egress_loopback`** vs **`wire_loopback_exchange`** dedupe |
+| **P3-5** | Drop Linux ICMP fallback | When TAP LPM route always matches **dst** |
+| **P3-7** | Full TCP | **RFC 793** state machine; netdev TX instead of raw **`select`** |
+| **B** | Bare-metal netdev | **IEEE 802.3** driver → **`fl_net_route_add`** (no **`#if __linux__`** TAP helper only) |
+
+**GitHub issues:** **#239** (P3-13 sockets/server), **#240** (gap tracker + standards checklist), **#241** (bare-metal **IEEE 802.3** path); **#232**–**#235** (netdev lifecycle / authz / batch registry).

@@ -53,6 +53,30 @@ void fl_net_ipv4_format_addr(uint32_t addr_be, char *buf, size_t buf_len) {
              (unsigned)((addr_be >> 24) & 0xffu));
 }
 
+uint32_t fl_net_ipv4_network_addr(uint32_t addr_be, uint8_t prefix_len) {
+    uint32_t net_be = addr_be;
+    unsigned i;
+
+    if (prefix_len > 32u)
+        prefix_len = 32u;
+
+    for (i = 0; i < 4u; i++) {
+        unsigned bits;
+        uint8_t mask;
+
+        if (prefix_len <= i * 8u) {
+            net_be &= ~((uint32_t)0xffu << (i * 8u));
+            continue;
+        }
+        bits = (unsigned)prefix_len - i * 8u;
+        if (bits >= 8u)
+            continue;
+        mask = (uint8_t)(0xffu << (8u - bits));
+        net_be &= ((uint32_t)mask << (i * 8u));
+    }
+    return net_be;
+}
+
 size_t fl_net_ipv4_build(fl_net_ipv4_hdr_t *hdr, uint8_t *buf, size_t cap, uint8_t proto,
                          uint32_t src_be, uint32_t dst_be, const void *payload,
                          size_t payload_len, uint16_t id_be) {

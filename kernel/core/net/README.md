@@ -1,12 +1,15 @@
 # `kernel/core/net` — P3 implementation
 
-Long-form guide: **`docs/P3_NETWORKING.md`**.
+Long-form guide: **`docs/P3_NETWORKING.md`**. **P3-13 chat room plan:** **`docs/P3_13_CHAT_SERVER.md`**.
 
 ## Quick file index
 
 | File | Purpose |
 |------|---------|
 | `net_wire.c` | L2/L3 frame vocabulary (`contract_p3_wire.h`) |
+| `net_arp.c` | P3-4 ARP cache (**asm_net_arp_cache_***), request/reply, resolve |
+| `net_route.c` | P3-5 routing table |
+| `net_wire_egress.c` | IPv4 L4 egress (ARP + netdev) |
 | `net_ipv4.c` | IPv4 header construction |
 | `net_checksum.c` | Checksum (+ `asm_net_checksum16`) |
 | `net_icmp.c` | ICMP echo |
@@ -19,6 +22,9 @@ Long-form guide: **`docs/P3_NETWORKING.md`**.
 | `net_wire_host_syscall.c` | Linux socket syscall bridge |
 | `net_ping_host.c` | `fl_net_ping` |
 | `net_requirements.c` | CI probe report |
+| `net_background.c` | **P3-14** workqueue tick / ARP sweep kick (scaffold) |
+
+**Planned (P3-13 — see `docs/P3_13_CHAT_SERVER.md`):** `net_socket.c`, `net_server.c`, `net_udp.c` (P3-6), TCP FSM in `net_tcp.c` (P3-7); shell `cmd_server.c`.
 
 ## Includes
 

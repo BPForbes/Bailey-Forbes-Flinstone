@@ -15,7 +15,7 @@
 
 #include "contract_extend.h"
 
-#define FL_CONTRACT_P4_DRIVERS_REV 3
+#define FL_CONTRACT_P4_DRIVERS_REV 4
 
 #include "contract_p4_driver_model.h"
 #include "contract_p4_irq_lifecycle.h"
@@ -24,6 +24,7 @@
 #include "contract_p4_usb.h"
 #include "contract_p4_fdt_discovery.h"
 #include "contract_p4_psci.h"
+#include "contract_p4_kworker.h"
 
 #define FL_CONTRACT_P4_VOCABULARY_LOCK 1
 

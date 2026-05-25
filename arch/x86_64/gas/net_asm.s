@@ -11,6 +11,15 @@
 .globl asm_net_pseudo_checksum_tcpudp
 .globl asm_net_dns_query_header_prefix
 .globl asm_net_tcp_read_ports_be
+.globl asm_net_arp_cache_clear
+.globl asm_net_arp_cache_lookup
+.globl asm_net_arp_cache_insert
+.globl asm_net_arp_cache_evict_oldest
+
+.equ FL_NET_ARP_CACHE_ENTRY_STRIDE, 16
+.equ FL_NET_ARP_CACHE_OFF_IP, 0
+.equ FL_NET_ARP_CACHE_OFF_MAC, 4
+.equ FL_NET_ARP_CACHE_OFF_AGE, 12
 
 .equ FL_NET_TCP_HDR_LEN, 20
 .equ FL_NET_TCP_FLAG_SYN, 0x02
@@ -316,4 +325,197 @@ asm_net_dns_query_header_prefix:
     movb    $0, 3(%rdi)
     movb    $0, 4(%rdi)
     movb    $0x01, 5(%rdi)
+    ret
+
+/* void asm_net_arp_cache_clear(void *table, size_t max_entries, unsigned *count,
+ *                              unsigned *tick); */
+asm_net_arp_cache_clear:
+    testq   %rdi, %rdi
+    jz      .L_arp_clr_done
+    testq   %rdx, %rdx
+    jz      .L_arp_clr_done
+    testq   %rcx, %rcx
+    jz      .L_arp_clr_done
+    movl    $0, (%rdx)
+    movl    $0, (%rcx)
+    testq   %rsi, %rsi
+    jz      .L_arp_clr_done
+    movq    %rdi, %rax
+    imulq   $FL_NET_ARP_CACHE_ENTRY_STRIDE, %rsi, %r8
+    addq    %rdi, %r8
+.L_arp_clr_row:
+    cmpq    %r8, %rax
+    jae     .L_arp_clr_done
+    movq    $0, (%rax)
+    movq    $0, 8(%rax)
+    addq    $FL_NET_ARP_CACHE_ENTRY_STRIDE, %rax
+    jmp     .L_arp_clr_row
+.L_arp_clr_done:
+    ret
+
+/* int asm_net_arp_cache_lookup(const void *table, unsigned count, uint32_t ip_be,
+ *                               uint8_t *mac_out, unsigned *tick); */
+asm_net_arp_cache_lookup:
+    xorl    %eax, %eax
+    testq   %rdi, %rdi
+    jz      .L_arp_lk_fail
+    testq   %rcx, %rcx
+    jz      .L_arp_lk_fail
+    testq   %r8, %r8
+    jz      .L_arp_lk_fail
+.L_arp_lk_loop:
+    cmpl    %esi, %eax
+    jae     .L_arp_lk_fail
+    movq    %rax, %r11
+    shlq    $4, %r11
+    addq    %rdi, %r11
+    movl    FL_NET_ARP_CACHE_OFF_IP(%r11), %r10d
+    cmpl    %edx, %r10d
+    jne     .L_arp_lk_next
+    movl    FL_NET_ARP_CACHE_OFF_MAC(%r11), %r10d
+    movl    %r10d, (%rcx)
+    movzwl  FL_NET_ARP_CACHE_OFF_MAC + 4(%r11), %r10d
+    movw    %r10w, 4(%rcx)
+    movzbl  FL_NET_ARP_CACHE_OFF_MAC + 5(%r11), %r10d
+    movb    %r10b, 5(%rcx)
+    movl    (%r8), %r10d
+    incl    %r10d
+    movl    %r10d, (%r8)
+    movl    %r10d, FL_NET_ARP_CACHE_OFF_AGE(%r11)
+    movl    $1, %eax
+    ret
+.L_arp_lk_next:
+    incl    %eax
+    jmp     .L_arp_lk_loop
+.L_arp_lk_fail:
+    xorl    %eax, %eax
+    ret
+
+/* void asm_net_arp_cache_evict_oldest(void *table, unsigned *count); */
+asm_net_arp_cache_evict_oldest:
+    pushq   %r12
+    testq   %rdi, %rdi
+    jz      .L_arp_ev_done
+    testq   %rsi, %rsi
+    jz      .L_arp_ev_done
+    movl    (%rsi), %eax
+    testl   %eax, %eax
+    jz      .L_arp_ev_done
+    cmpl    $1, %eax
+    je      .L_arp_ev_one
+    xorl    %r12d, %r12d
+    movl    FL_NET_ARP_CACHE_OFF_AGE(%rdi), %r9d
+    movl    $1, %ecx
+.L_arp_ev_scan:
+    cmpl    %ecx, %eax
+    jae     .L_arp_ev_copy
+    movq    %rcx, %r11
+    shlq    $4, %r11
+    addq    %rdi, %r11
+    movl    FL_NET_ARP_CACHE_OFF_AGE(%r11), %r10d
+    cmpl    %r10d, %r9d
+    jae     .L_arp_ev_scan_next
+    movl    %r10d, %r9d
+    movl    %ecx, %r12d
+.L_arp_ev_scan_next:
+    incl    %ecx
+    jmp     .L_arp_ev_scan
+.L_arp_ev_copy:
+    decl    %eax
+    cmpl    %r12d, %eax
+    je      .L_arp_ev_store
+    movq    %rax, %r11
+    shlq    $4, %r11
+    addq    %rdi, %r11
+    movq    %r12, %rcx
+    shlq    $4, %rcx
+    addq    %rdi, %rcx
+    movq    (%r11), %r10
+    movq    %r10, (%rcx)
+    movq    8(%r11), %r10
+    movq    %r10, 8(%rcx)
+.L_arp_ev_store:
+    movl    %eax, (%rsi)
+    jmp     .L_arp_ev_done
+.L_arp_ev_one:
+    movl    $0, (%rsi)
+.L_arp_ev_done:
+    popq    %r12
+    ret
+
+/* int asm_net_arp_cache_insert(void *table, unsigned *count, unsigned max_entries,
+ *                               unsigned *tick, uint32_t ip_be, const uint8_t *mac); */
+asm_net_arp_cache_insert:
+    pushq   %r12
+    testq   %r9, %r9
+    jz      .L_arp_ins_inval
+    testq   %rsi, %rsi
+    jz      .L_arp_ins_inval
+    testq   %rcx, %rcx
+    jz      .L_arp_ins_inval
+    movl    (%rsi), %eax
+    xorl    %r10d, %r10d
+.L_arp_ins_scan:
+    cmpl    %r10d, %eax
+    jae     .L_arp_ins_new
+    movq    %r10, %r11
+    shlq    $4, %r11
+    addq    %rdi, %r11
+    cmpl    %r8d, FL_NET_ARP_CACHE_OFF_IP(%r11)
+    jne     .L_arp_ins_next
+    movl    (%r9), %r10d
+    movl    %r10d, FL_NET_ARP_CACHE_OFF_MAC(%r11)
+    movzwl  4(%r9), %r10d
+    movw    %r10w, FL_NET_ARP_CACHE_OFF_MAC + 4(%r11)
+    movzbl  5(%r9), %r10d
+    movb    %r10b, FL_NET_ARP_CACHE_OFF_MAC + 5(%r11)
+    movl    (%rcx), %r10d
+    incl    %r10d
+    movl    %r10d, (%rcx)
+    movl    %r10d, FL_NET_ARP_CACHE_OFF_AGE(%r11)
+    xorl    %eax, %eax
+    popq    %r12
+    ret
+.L_arp_ins_next:
+    incl    %r10d
+    jmp     .L_arp_ins_scan
+.L_arp_ins_new:
+    cmpl    %eax, %edx
+    jb      .L_arp_ins_append
+    pushq   %rbx
+    pushq   %rdx
+    pushq   %rcx
+    pushq   %r8
+    pushq   %r9
+    movq    %rdi, %rbx
+    call    asm_net_arp_cache_evict_oldest
+    movq    %rbx, %rdi
+    popq    %r9
+    popq    %r8
+    popq    %rcx
+    popq    %rdx
+    popq    %rbx
+    movl    (%rsi), %eax
+.L_arp_ins_append:
+    movq    %rax, %r11
+    shlq    $4, %r11
+    addq    %rdi, %r11
+    movl    %r8d, FL_NET_ARP_CACHE_OFF_IP(%r11)
+    movl    (%r9), %r10d
+    movl    %r10d, FL_NET_ARP_CACHE_OFF_MAC(%r11)
+    movzwl  4(%r9), %r10d
+    movw    %r10w, FL_NET_ARP_CACHE_OFF_MAC + 4(%r11)
+    movzbl  5(%r9), %r10d
+    movb    %r10b, FL_NET_ARP_CACHE_OFF_MAC + 5(%r11)
+    movl    (%rcx), %r10d
+    incl    %r10d
+    movl    %r10d, (%rcx)
+    movl    %r10d, FL_NET_ARP_CACHE_OFF_AGE(%r11)
+    incl    (%rsi)
+    xorl    %eax, %eax
+    popq    %r12
+    ret
+.L_arp_ins_inval:
+    movl    $-22, %eax
+    popq    %r12
     ret

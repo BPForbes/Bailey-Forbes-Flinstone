@@ -1,7 +1,9 @@
 #include "net_loopback.h"
 
 #include "contract_p3_ipv4.h"
+#include "contract_p3_wire.h"
 #include "fl/net_asm.h"
+#include "net_arp.h"
 #include "net_checksum.h"
 #include "net_ipv4.h"
 #include "net_tcp.h"
@@ -91,6 +93,19 @@ static size_t loopback_build_ipv4_reply(const uint8_t *req_ip, size_t req_ip_len
     out_ip[10] = (uint8_t)(csum >> 8);
     out_ip[11] = (uint8_t)(csum & 0xff);
     return hdr_len + payload_len;
+}
+
+static fl_result_t loopback_process_arp(const uint8_t *frame, size_t len, uint8_t *eth_reply,
+                                        size_t eth_cap, size_t *eth_reply_len) {
+    uint8_t host_mac[6];
+    uint32_t local_ip;
+
+    if (!frame || !eth_reply || !eth_reply_len)
+        return FL_RESULT_INVAL;
+
+    fl_net_loopback_mac_host(host_mac);
+    local_ip = (uint32_t)FL_NET_IPV4_LOOPBACK_FIRST_OCTET | (1u << 24);
+    return fl_net_arp_input(frame, len, local_ip, host_mac, eth_reply, eth_cap, eth_reply_len);
 }
 
 static fl_result_t loopback_process_ipv4(const uint8_t *ip, size_t ip_len, uint8_t *eth_reply,
@@ -256,6 +271,17 @@ fl_result_t fl_net_loopback_driver_send(fl_net_driver_t *drv, const fl_net_frame
         return FL_RESULT_INVAL;
 
     s_lb_tx++;
+
+    {
+        int eth_ok = 0;
+        uint16_t ethertype = fl_net_wire_ethertype_be16(frame->data, frame->len, &eth_ok);
+        if (eth_ok && ethertype == FL_ETHERTYPE_ARP) {
+            if (loopback_process_arp(frame->data, frame->len, reply, sizeof(reply), &reply_len) !=
+                FL_RESULT_OK)
+                return FL_RESULT_OK;
+            return loopback_rx_enqueue(reply, reply_len);
+        }
+    }
 
     if (!fl_net_wire_parse_eth_ipv4(frame->data, frame->len, &ip_off, &ip_len, &dst_be))
         return FL_RESULT_OK;
