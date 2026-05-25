@@ -2,7 +2,8 @@
  * P1-8 — Kernel background jobs / workqueues (contract shard).
  *
  * Normative vocabulary for deferred work outside hardirq and outside the
- * interactive shell path. Implementation: kernel/core/sched/workqueue.c.
+ * interactive shell path. Implementation: kernel/core/sched/workqueue.c on
+ * priority_queue_t (same MLQ as threadpool).
  */
 #ifndef FL_CONTRACT_P1_WORKQUEUE_H
 #define FL_CONTRACT_P1_WORKQUEUE_H

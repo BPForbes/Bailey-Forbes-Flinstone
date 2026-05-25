@@ -1,22 +1,45 @@
 #include "workqueue.h"
 
 #include <stdlib.h>
-#include <string.h>
 
-typedef struct wq_node {
-    fl_wq_work_t work;
-    struct wq_node *next;
-} wq_node_t;
+typedef struct {
+    fl_wq_work_fn_t fn;
+    void *ctx;
+    uint32_t tag;
+} wq_item_t;
 
 struct fl_workqueue {
-    wq_node_t *head;
-    wq_node_t *tail;
-    unsigned count;
+    priority_queue_t pq;
     unsigned shutdown;
 };
 
 static fl_workqueue_t s_default_wq;
 static int s_default_inited;
+
+static void wq_dispatch(void *arg) {
+    wq_item_t *item = (wq_item_t *)arg;
+
+    if (item) {
+        if (item->fn)
+            item->fn(item->ctx);
+        free(item);
+    }
+}
+
+static int wq_resolve_layer(const fl_wq_work_t *work) {
+    int layer = FL_WQ_LAYER_BACKGROUND;
+
+    if (!work)
+        return layer;
+    if (work->pq_layer >= 0 && work->pq_layer < PQ_NUM_PRIORITIES)
+        layer = work->pq_layer;
+    return layer;
+}
+
+static void wq_discard_task(pq_task_t *task) {
+    if (task && task->arg)
+        free(task->arg);
+}
 
 fl_workqueue_t *fl_wq_default(void) {
     if (!s_default_inited) {
@@ -29,52 +52,50 @@ fl_workqueue_t *fl_wq_default(void) {
 fl_result_t fl_wq_init(fl_workqueue_t *wq) {
     if (!wq)
         return FL_RESULT_INVAL;
-    wq->head = NULL;
-    wq->tail = NULL;
-    wq->count = 0;
+    pq_init(&wq->pq);
     wq->shutdown = 0;
     return FL_RESULT_OK;
 }
 
 void fl_wq_shutdown(fl_workqueue_t *wq) {
-    wq_node_t *n;
-    wq_node_t *next;
+    pq_task_t task;
 
     if (!wq)
         return;
     wq->shutdown = 1;
-    for (n = wq->head; n; n = next) {
-        next = n->next;
-        /* Hosted builds may use libc; **B** path should use arena allocator later. */
-        free(n);
+    while (!pq_is_empty(&wq->pq)) {
+        if (pq_pop(&wq->pq, &task) != 0)
+            break;
+        wq_discard_task(&task);
     }
-    wq->head = NULL;
-    wq->tail = NULL;
-    wq->count = 0;
 }
 
 fl_result_t fl_wq_enqueue(fl_workqueue_t *wq, const fl_wq_work_t *work) {
-    wq_node_t *n;
+    wq_item_t *item;
+    int layer;
+    pq_handle_t h;
 
     if (!wq || !work || !work->fn)
         return FL_RESULT_INVAL;
     if (wq->shutdown)
         return FL_RESULT_BUSY;
-    if (wq->count >= FL_WQ_PENDING_MAX)
+    if ((unsigned)pq_count(&wq->pq) >= FL_WQ_PENDING_MAX)
         return FL_RESULT_BUSY;
 
-    n = (wq_node_t *)calloc(1, sizeof(*n));
-    if (!n)
+    item = (wq_item_t *)calloc(1, sizeof(*item));
+    if (!item)
         return FL_RESULT_NOMEM;
 
-    n->work = *work;
-    n->next = NULL;
-    if (wq->tail)
-        wq->tail->next = n;
-    else
-        wq->head = n;
-    wq->tail = n;
-    wq->count++;
+    item->fn = work->fn;
+    item->ctx = work->ctx;
+    item->tag = work->tag;
+
+    layer = wq_resolve_layer(work);
+    h = pq_push(&wq->pq, layer, wq_dispatch, item);
+    if (h < 0) {
+        free(item);
+        return FL_RESULT_BUSY;
+    }
     return FL_RESULT_OK;
 }
 
@@ -84,18 +105,13 @@ unsigned fl_wq_poll(fl_workqueue_t *wq, unsigned max_items) {
     if (!wq || max_items == 0)
         return 0;
 
-    while (ran < max_items && wq->head) {
-        wq_node_t *n = wq->head;
-        fl_wq_work_t work = n->work;
+    while (ran < max_items && !pq_is_empty(&wq->pq)) {
+        pq_task_t task;
 
-        wq->head = n->next;
-        if (!wq->head)
-            wq->tail = NULL;
-        wq->count--;
-        free(n);
-
-        if (work.fn)
-            work.fn(work.ctx);
+        if (pq_pop(&wq->pq, &task) != 0)
+            break;
+        if (task.fn)
+            task.fn(task.arg);
         ran++;
     }
     return ran;
@@ -105,7 +121,7 @@ fl_result_t fl_wq_drain(fl_workqueue_t *wq, unsigned timeout_ms) {
     (void)timeout_ms;
     if (!wq)
         return FL_RESULT_INVAL;
-    while (wq->head)
+    while (!pq_is_empty(&wq->pq))
         (void)fl_wq_poll(wq, FL_WQ_PENDING_MAX);
     return FL_RESULT_OK;
 }

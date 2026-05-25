@@ -22,6 +22,7 @@ fl_result_t fl_net_background_arp_tick_kick(void) {
         .fn = net_bg_work,
         .ctx = NULL,
         .tag = 0x0314u,
+        .pq_layer = FL_WQ_LAYER_BACKGROUND,
     };
 
     if (!s_net_bg_inited)

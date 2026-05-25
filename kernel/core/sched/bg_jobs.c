@@ -34,6 +34,7 @@ fl_result_t fl_bg_job_reclaim_kick(void) {
         .fn = bg_reclaim_work,
         .ctx = NULL,
         .tag = FL_BG_JOB_TAG_RECLAIM,
+        .pq_layer = FL_WQ_LAYER_BACKGROUND,
     };
     return fl_wq_enqueue(fl_wq_default(), &w);
 }
@@ -43,6 +44,7 @@ fl_result_t fl_bg_job_watchdog_kick(void) {
         .fn = bg_watchdog_work,
         .ctx = NULL,
         .tag = FL_BG_JOB_TAG_WATCHDOG,
+        .pq_layer = FL_WQ_LAYER_URGENT,
     };
     return fl_wq_enqueue(fl_wq_default(), &w);
 }

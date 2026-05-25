@@ -2,7 +2,6 @@
  * Scheduler-grade MLQ: O(1) push/pop/update/remove, safe handles, nonempty bitmap.
  * ASM-backed: mem_asm for copy/zero (x86-64 and ARM).
  */
-#include "fl/sched.h"
 #include "priority_queue.h"
 #include "mem_asm.h"
 #include <string.h>

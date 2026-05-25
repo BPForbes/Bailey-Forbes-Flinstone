@@ -33,7 +33,7 @@ Kernel jobs must respect **P1-3** (lock ordering, no unbounded work under spinlo
 
 **Deliverables:**
 
-- **`fl_workqueue_t`** (or equivalent) with: init, destroy, enqueue, flush, drain-on-shutdown
+- **`fl_workqueue_t`** backed by the existing **`priority_queue_t`** MLQ (**`kernel/core/sched/priority_queue.c`**, same structure as shell **`threadpool`** jobs)
 - **Kernel threads** or hosted **pthread** bridge on **H** that share one **scheduling contract**
 - Per-item **work struct**: function pointer, context, **no unbounded heap** in the dispatcher
 - Integration with **`fl_net_netdev_shutdown`** (**#232**) and driver teardown (**P4-2**)
@@ -44,7 +44,8 @@ Kernel jobs must respect **P1-3** (lock ordering, no unbounded work under spinlo
 
 | Path | Row | Notes |
 |------|-----|--------|
-| **`kernel/core/sched/workqueue.c`** | **P1-8** | Default queue: **`fl_wq_enqueue`**, **`fl_wq_poll`**, **`fl_wq_drain`** |
+| **`kernel/core/sched/workqueue.c`** | **P1-8** | MLQ wrapper: **`fl_wq_enqueue`** → **`pq_push`**, **`fl_wq_poll`** → **`pq_pop`** |
+| **`kernel/core/sched/priority_queue.c`** | shared | Scheduler-grade multilevel queue (also **`g_pool.pq`** in **`threadpool.c`**) |
 | **`kernel/core/sched/bg_jobs.c`** | **P1-9**, **P1-10**, tick hub | **`fl_bg_jobs_tick`**; reclaim/watchdog stubs |
 | **`kernel/core/net/net_background.c`** | **P3-14** | **`fl_net_background_tick`**, ARP sweep kick stub |
 | **`kernel/core/sched/threadpool.c`** | — | Shell command pool on **H** (not kernel workqueue) |

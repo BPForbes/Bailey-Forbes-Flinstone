@@ -590,7 +590,7 @@ test_p0_p2_wiring: kernel/core/memory/fl_stack.o kernel/core/memory/exec_context
 .PHONY: test_p3_network
 test_p3_network: $(NET_ASM_OBJ)
 	$(CC) $(CFLAGS) $(TEST_SANITIZE) -o tests/test_p3_network tests/test_p3_network.c \
-	  $(NET_CORE_SRCS) kernel/core/sched/workqueue.c $(NET_ASM_OBJ) \
+	  $(NET_CORE_SRCS) kernel/core/sched/workqueue.c priority_queue.o $(MEM_ASM_OBJ) $(NET_ASM_OBJ) \
 	  -Wl,-z,noexecstack
 	./tests/test_p3_network
 
