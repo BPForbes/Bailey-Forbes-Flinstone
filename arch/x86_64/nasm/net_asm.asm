@@ -22,6 +22,15 @@ global asm_net_pseudo_header_fill12
 global asm_net_pseudo_checksum_tcpudp
 global asm_net_dns_query_header_prefix
 global asm_net_tcp_read_ports_be
+global asm_net_arp_cache_clear
+global asm_net_arp_cache_lookup
+global asm_net_arp_cache_insert
+global asm_net_arp_cache_evict_oldest
+
+%define FL_NET_ARP_CACHE_ENTRY_STRIDE 16
+%define FL_NET_ARP_CACHE_OFF_IP 0
+%define FL_NET_ARP_CACHE_OFF_MAC 4
+%define FL_NET_ARP_CACHE_OFF_AGE 12
 
 asm_net_checksum16:
     xor eax, eax
@@ -302,4 +311,190 @@ asm_net_dns_query_header_prefix:
     mov byte [rdi + 3], 0
     mov byte [rdi + 4], 0
     mov byte [rdi + 5], 0x01
+    ret
+
+asm_net_arp_cache_clear:
+    test rdi, rdi
+    jz .L_arp_clr_done
+    test rdx, rdx
+    jz .L_arp_clr_done
+    test rcx, rcx
+    jz .L_arp_clr_done
+    mov dword [rdx], 0
+    mov dword [rcx], 0
+    test rsi, rsi
+    jz .L_arp_clr_done
+    mov rax, rdi
+    imul r8, rsi, FL_NET_ARP_CACHE_ENTRY_STRIDE
+    add r8, rdi
+.L_arp_clr_row:
+    cmp rax, r8
+    jae .L_arp_clr_done
+    mov qword [rax], 0
+    mov qword [rax + 8], 0
+    add rax, FL_NET_ARP_CACHE_ENTRY_STRIDE
+    jmp .L_arp_clr_row
+.L_arp_clr_done:
+    ret
+
+asm_net_arp_cache_lookup:
+    xor eax, eax
+    test rdi, rdi
+    jz .L_arp_lk_fail
+    test rcx, rcx
+    jz .L_arp_lk_fail
+    test r8, r8
+    jz .L_arp_lk_fail
+.L_arp_lk_loop:
+    cmp eax, esi
+    jae .L_arp_lk_fail
+    mov r11, rax
+    shl r11, 4
+    add r11, rdi
+    mov r10d, [r11 + FL_NET_ARP_CACHE_OFF_IP]
+    cmp r10d, edx
+    jne .L_arp_lk_next
+    mov r10d, [r11 + FL_NET_ARP_CACHE_OFF_MAC]
+    mov [rcx], r10d
+    movzx r10d, word [r11 + FL_NET_ARP_CACHE_OFF_MAC + 4]
+    mov [rcx + 4], r10w
+    movzx r10d, byte [r11 + FL_NET_ARP_CACHE_OFF_MAC + 6]
+    mov [rcx + 6], r10b
+    mov r10d, [r8]
+    inc r10d
+    mov [r8], r10d
+    mov [r11 + FL_NET_ARP_CACHE_OFF_AGE], r10d
+    mov eax, 1
+    ret
+.L_arp_lk_next:
+    inc eax
+    jmp .L_arp_lk_loop
+.L_arp_lk_fail:
+    xor eax, eax
+    ret
+
+asm_net_arp_cache_evict_oldest:
+    push r12
+    test rdi, rdi
+    jz .L_arp_ev_done
+    test rsi, rsi
+    jz .L_arp_ev_done
+    mov eax, [rsi]
+    test eax, eax
+    jz .L_arp_ev_done
+    cmp eax, 1
+    je .L_arp_ev_one
+    xor r12d, r12d
+    mov r9d, [rdi + FL_NET_ARP_CACHE_OFF_AGE]
+    mov ecx, 1
+.L_arp_ev_scan:
+    cmp ecx, eax
+    jae .L_arp_ev_copy
+    mov r11, rcx
+    shl r11, 4
+    add r11, rdi
+    mov r10d, [r11 + FL_NET_ARP_CACHE_OFF_AGE]
+    cmp r10d, r9d
+    jae .L_arp_ev_scan_next
+    mov r9d, r10d
+    mov r12d, ecx
+.L_arp_ev_scan_next:
+    inc ecx
+    jmp .L_arp_ev_scan
+.L_arp_ev_copy:
+    dec eax
+    cmp r12d, eax
+    je .L_arp_ev_store
+    mov r11, rax
+    shl r11, 4
+    add r11, rdi
+    mov rcx, r12
+    shl rcx, 4
+    add rcx, rdi
+    mov r10, [r11]
+    mov [rcx], r10
+    mov r10, [r11 + 8]
+    mov [rcx + 8], r10
+.L_arp_ev_store:
+    mov [rsi], eax
+    jmp .L_arp_ev_done
+.L_arp_ev_one:
+    mov dword [rsi], 0
+.L_arp_ev_done:
+    pop r12
+    ret
+
+asm_net_arp_cache_insert:
+    push r12
+    test r9, r9
+    jz .L_arp_ins_inval
+    test rsi, rsi
+    jz .L_arp_ins_inval
+    test rcx, rcx
+    jz .L_arp_ins_inval
+    mov eax, [rsi]
+    xor r10d, r10d
+.L_arp_ins_scan:
+    cmp r10d, eax
+    jae .L_arp_ins_new
+    mov r11, r10
+    shl r11, 4
+    add r11, rdi
+    cmp r8d, [r11 + FL_NET_ARP_CACHE_OFF_IP]
+    jne .L_arp_ins_next
+    mov r10d, [r9]
+    mov [r11 + FL_NET_ARP_CACHE_OFF_MAC], r10d
+    movzx r10d, word [r9 + 4]
+    mov [r11 + FL_NET_ARP_CACHE_OFF_MAC + 4], r10w
+    movzx r10d, byte [r9 + 6]
+    mov [r11 + FL_NET_ARP_CACHE_OFF_MAC + 6], r10b
+    mov r10d, [rcx]
+    inc r10d
+    mov [rcx], r10d
+    mov [r11 + FL_NET_ARP_CACHE_OFF_AGE], r10d
+    xor eax, eax
+    pop r12
+    ret
+.L_arp_ins_next:
+    inc r10d
+    jmp .L_arp_ins_scan
+.L_arp_ins_new:
+    cmp eax, edx
+    jb .L_arp_ins_append
+    push rbx
+    push rdx
+    push rcx
+    push r8
+    push r9
+    mov rbx, rdi
+    call asm_net_arp_cache_evict_oldest
+    mov rdi, rbx
+    pop r9
+    pop r8
+    pop rcx
+    pop rdx
+    pop rbx
+    mov eax, [rsi]
+.L_arp_ins_append:
+    mov r11, rax
+    shl r11, 4
+    add r11, rdi
+    mov [r11 + FL_NET_ARP_CACHE_OFF_IP], r8d
+    mov r10d, [r9]
+    mov [r11 + FL_NET_ARP_CACHE_OFF_MAC], r10d
+    movzx r10d, word [r9 + 4]
+    mov [r11 + FL_NET_ARP_CACHE_OFF_MAC + 4], r10w
+    movzx r10d, byte [r9 + 6]
+    mov [r11 + FL_NET_ARP_CACHE_OFF_MAC + 6], r10b
+    mov r10d, [rcx]
+    inc r10d
+    mov [rcx], r10d
+    mov [r11 + FL_NET_ARP_CACHE_OFF_AGE], r10d
+    inc dword [rsi]
+    xor eax, eax
+    pop r12
+    ret
+.L_arp_ins_inval:
+    mov eax, -22
+    pop r12
     ret

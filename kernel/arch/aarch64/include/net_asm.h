@@ -29,4 +29,11 @@ uint16_t asm_net_pseudo_checksum_tcpudp(uint32_t src_be, uint32_t dst_be, uint8_
 
 void asm_net_dns_query_header_prefix(uint8_t *query, uint16_t txid);
 
+void asm_net_arp_cache_clear(void *table, size_t max_entries, unsigned *count, unsigned *tick);
+int asm_net_arp_cache_lookup(const void *table, unsigned count, uint32_t ip_be,
+                               uint8_t mac_out[6], unsigned *tick);
+int asm_net_arp_cache_insert(void *table, unsigned *count, unsigned max_entries,
+                             unsigned *tick, uint32_t ip_be, const uint8_t mac[6]);
+void asm_net_arp_cache_evict_oldest(void *table, unsigned *count);
+
 #endif /* NET_ASM_H */

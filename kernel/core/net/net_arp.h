@@ -18,6 +18,12 @@
 #define FL_NET_ARP_CACHE_MAX 32u
 #endif
 
+/** Fixed stride for **asm_net_arp_cache_*** and C **fl_net_arp_cache_entry_t**. */
+#define FL_NET_ARP_CACHE_ENTRY_STRIDE 16u
+#define FL_NET_ARP_CACHE_OFF_IP_BE 0u
+#define FL_NET_ARP_CACHE_OFF_MAC 4u
+#define FL_NET_ARP_CACHE_OFF_AGE 12u
+
 void fl_net_arp_init(void);
 void fl_net_arp_clear(void);
 

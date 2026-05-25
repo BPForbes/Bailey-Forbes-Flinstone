@@ -1,6 +1,7 @@
 #include "net_arp.h"
 
 #include "contract_p3_arp.h"
+#include "fl/net_asm.h"
 #include "net_ipv4.h"
 #include "net_loopback.h"
 #include "net_netdev.h"
@@ -16,6 +17,9 @@ typedef struct {
     unsigned age;
 } fl_net_arp_cache_entry_t;
 
+_Static_assert(sizeof(fl_net_arp_cache_entry_t) == FL_NET_ARP_CACHE_ENTRY_STRIDE,
+               "fl_net_arp_cache_entry_t must match asm_net_arp_cache_* stride");
+
 static fl_net_arp_cache_entry_t s_arp_cache[FL_NET_ARP_CACHE_MAX];
 static unsigned s_arp_cache_count;
 static unsigned s_arp_tick;
@@ -25,11 +29,16 @@ void fl_net_arp_init(void) {
 }
 
 void fl_net_arp_clear(void) {
+#if defined(FL_NET_ASM_AVAILABLE)
+    asm_net_arp_cache_clear(s_arp_cache, FL_NET_ARP_CACHE_MAX, &s_arp_cache_count, &s_arp_tick);
+#else
     memset(s_arp_cache, 0, sizeof(s_arp_cache));
     s_arp_cache_count = 0;
     s_arp_tick = 0;
+#endif
 }
 
+#if !defined(FL_NET_ASM_AVAILABLE)
 static void arp_cache_evict_oldest(void) {
     unsigned i;
     unsigned oldest = 0;
@@ -45,12 +54,19 @@ static void arp_cache_evict_oldest(void) {
         s_arp_cache[oldest] = s_arp_cache[s_arp_cache_count - 1u];
     s_arp_cache_count--;
 }
+#endif
 
 fl_result_t fl_net_arp_cache_insert(uint32_t ipv4_be, const uint8_t mac[FL_NET_ETH_ADDR_LEN]) {
-    unsigned i;
-
     if (!mac)
         return FL_RESULT_INVAL;
+
+#if defined(FL_NET_ASM_AVAILABLE)
+    return (asm_net_arp_cache_insert(s_arp_cache, &s_arp_cache_count, FL_NET_ARP_CACHE_MAX,
+                                     &s_arp_tick, ipv4_be, mac) == 0)
+               ? FL_RESULT_OK
+               : FL_RESULT_INVAL;
+#else
+    unsigned i;
 
     for (i = 0; i < s_arp_cache_count; i++) {
         if (s_arp_cache[i].ip_be == ipv4_be) {
@@ -68,13 +84,17 @@ fl_result_t fl_net_arp_cache_insert(uint32_t ipv4_be, const uint8_t mac[FL_NET_E
     s_arp_cache[s_arp_cache_count].age = ++s_arp_tick;
     s_arp_cache_count++;
     return FL_RESULT_OK;
+#endif
 }
 
 int fl_net_arp_cache_lookup(uint32_t ipv4_be, uint8_t mac_out[FL_NET_ETH_ADDR_LEN]) {
-    unsigned i;
-
     if (!mac_out)
         return 0;
+
+#if defined(FL_NET_ASM_AVAILABLE)
+    return asm_net_arp_cache_lookup(s_arp_cache, s_arp_cache_count, ipv4_be, mac_out, &s_arp_tick);
+#else
+    unsigned i;
 
     for (i = 0; i < s_arp_cache_count; i++) {
         if (s_arp_cache[i].ip_be == ipv4_be) {
@@ -84,6 +104,7 @@ int fl_net_arp_cache_lookup(uint32_t ipv4_be, uint8_t mac_out[FL_NET_ETH_ADDR_LE
         }
     }
     return 0;
+#endif
 }
 
 static size_t arp_build_eth(uint8_t *frame, size_t cap, const uint8_t dst_mac[FL_NET_ETH_ADDR_LEN],

@@ -11,6 +11,15 @@
 .globl asm_net_pseudo_checksum_tcpudp
 .globl asm_net_dns_query_header_prefix
 .globl asm_net_tcp_read_ports_be
+.globl asm_net_arp_cache_clear
+.globl asm_net_arp_cache_lookup
+.globl asm_net_arp_cache_insert
+.globl asm_net_arp_cache_evict_oldest
+
+.equ FL_NET_ARP_CACHE_ENTRY_STRIDE, 16
+.equ FL_NET_ARP_CACHE_OFF_IP, 0
+.equ FL_NET_ARP_CACHE_OFF_MAC, 4
+.equ FL_NET_ARP_CACHE_OFF_AGE, 12
 
 .equ FL_NET_TCP_HDR_LEN, 20
 .equ FL_NET_TCP_FLAG_SYN, 0x02
@@ -280,4 +289,167 @@ asm_net_dns_query_header_prefix:
     strb    wzr, [x0, #3]
     strb    wzr, [x0, #4]
     strb    w2, [x0, #5]
+    ret
+
+/* x0=table x1=max x2=count x3=tick */
+asm_net_arp_cache_clear:
+    cbz     x0, .L_arp_clr_done
+    cbz     x2, .L_arp_clr_done
+    cbz     x3, .L_arp_clr_done
+    str     wzr, [x2]
+    str     wzr, [x3]
+    cbz     x1, .L_arp_clr_done
+    mov     x4, x0
+    add     x5, x0, x1, lsl #4
+.L_arp_clr_row:
+    cmp     x4, x5
+    b.hs    .L_arp_clr_done
+    str     xzr, [x4]
+    str     xzr, [x4, #8]
+    add     x4, x4, #FL_NET_ARP_CACHE_ENTRY_STRIDE
+    b       .L_arp_clr_row
+.L_arp_clr_done:
+    ret
+
+/* x0=table w1=count w2=ip x3=mac_out x4=tick -> 0/1 */
+asm_net_arp_cache_lookup:
+    mov     w6, #0
+    cbz     x0, .L_arp_lk_fail
+    cbz     x3, .L_arp_lk_fail
+    cbz     x4, .L_arp_lk_fail
+.L_arp_lk_loop:
+    cmp     w6, w1
+    b.hs    .L_arp_lk_fail
+    add     x5, x0, x6, lsl #4
+    ldr     w7, [x5, #FL_NET_ARP_CACHE_OFF_IP]
+    cmp     w7, w2
+    b.ne    .L_arp_lk_next
+    ldr     w7, [x5, #FL_NET_ARP_CACHE_OFF_MAC]
+    str     w7, [x3]
+    ldrh    w7, [x5, #FL_NET_ARP_CACHE_OFF_MAC + 4]
+    strh    w7, [x3, #4]
+    ldrb    w7, [x5, #FL_NET_ARP_CACHE_OFF_MAC + 6]
+    strb    w7, [x3, #6]
+    ldr     w7, [x4]
+    add     w7, w7, #1
+    str     w7, [x4]
+    str     w7, [x5, #FL_NET_ARP_CACHE_OFF_AGE]
+    mov     w0, #1
+    ret
+.L_arp_lk_next:
+    add     w6, w6, #1
+    b       .L_arp_lk_loop
+.L_arp_lk_fail:
+    mov     w0, #0
+    ret
+
+/* x0=table x1=count */
+asm_net_arp_cache_evict_oldest:
+    cbz     x1, .L_arp_ev_done
+    ldr     w2, [x1]
+    cbz     w2, .L_arp_ev_done
+    cmp     w2, #1
+    b.eq    .L_arp_ev_one
+    mov     w8, #0
+    ldr     w9, [x0, #FL_NET_ARP_CACHE_OFF_AGE]
+    mov     w10, #1
+.L_arp_ev_scan:
+    cmp     w10, w2
+    b.hs    .L_arp_ev_copy
+    add     x11, x0, x10, lsl #4
+    ldr     w12, [x11, #FL_NET_ARP_CACHE_OFF_AGE]
+    cmp     w12, w9
+    b.hs    .L_arp_ev_next
+    mov     w9, w12
+    mov     w8, w10
+.L_arp_ev_next:
+    add     w10, w10, #1
+    b       .L_arp_ev_scan
+.L_arp_ev_copy:
+    sub     w2, w2, #1
+    cmp     w8, w2
+    b.eq    .L_arp_ev_store
+    add     x11, x0, w2, uxtw #4
+    add     x12, x0, w8, uxtw #4
+    ldr     x13, [x11]
+    str     x13, [x12]
+    ldr     x13, [x11, #8]
+    str     x13, [x12, #8]
+.L_arp_ev_store:
+    str     w2, [x1]
+    ret
+.L_arp_ev_one:
+    str     wzr, [x1]
+.L_arp_ev_done:
+    ret
+
+/* x0=table x1=count w2=max x3=tick w4=ip x5=mac */
+asm_net_arp_cache_insert:
+    cbz     x5, .L_arp_ins_inval
+    cbz     x1, .L_arp_ins_inval
+    cbz     x3, .L_arp_ins_inval
+    ldr     w6, [x1]
+    mov     w7, #0
+.L_arp_ins_scan:
+    cmp     w7, w6
+    b.hs    .L_arp_ins_new
+    add     x8, x0, x7, lsl #4
+    ldr     w9, [x8, #FL_NET_ARP_CACHE_OFF_IP]
+    cmp     w9, w4
+    b.ne    .L_arp_ins_next
+    ldr     w9, [x5]
+    str     w9, [x8, #FL_NET_ARP_CACHE_OFF_MAC]
+    ldrh    w9, [x5, #4]
+    strh    w9, [x8, #FL_NET_ARP_CACHE_OFF_MAC + 4]
+    ldrb    w9, [x5, #6]
+    strb    w9, [x8, #FL_NET_ARP_CACHE_OFF_MAC + 6]
+    ldr     w9, [x3]
+    add     w9, w9, #1
+    str     w9, [x3]
+    str     w9, [x8, #FL_NET_ARP_CACHE_OFF_AGE]
+    mov     w0, #0
+    ret
+.L_arp_ins_next:
+    add     w7, w7, #1
+    b       .L_arp_ins_scan
+.L_arp_ins_new:
+    cmp     w6, w2
+    b.lo    .L_arp_ins_append
+    stp     x19, x20, [sp, #-48]!
+    stp     x21, x22, [sp, #16]
+    stp     x23, x24, [sp, #32]
+    mov     x19, x0
+    mov     x20, x1
+    mov     x21, x3
+    mov     x22, x4
+    mov     x23, x5
+    bl      asm_net_arp_cache_evict_oldest
+    mov     x0, x19
+    mov     x1, x20
+    mov     x3, x21
+    mov     x4, x22
+    mov     x5, x23
+    ldp     x23, x24, [sp, #32]
+    ldp     x21, x22, [sp, #16]
+    ldp     x19, x20, [sp], #48
+    ldr     w6, [x1]
+.L_arp_ins_append:
+    add     x8, x0, w6, uxtw #4
+    str     w4, [x8, #FL_NET_ARP_CACHE_OFF_IP]
+    ldr     w9, [x5]
+    str     w9, [x8, #FL_NET_ARP_CACHE_OFF_MAC]
+    ldrh    w9, [x5, #4]
+    strh    w9, [x8, #FL_NET_ARP_CACHE_OFF_MAC + 4]
+    ldrb    w9, [x5, #6]
+    strb    w9, [x8, #FL_NET_ARP_CACHE_OFF_MAC + 6]
+    ldr     w9, [x3]
+    add     w9, w9, #1
+    str     w9, [x3]
+    str     w9, [x8, #FL_NET_ARP_CACHE_OFF_AGE]
+    add     w6, w6, #1
+    str     w6, [x1]
+    mov     w0, #0
+    ret
+.L_arp_ins_inval:
+    mov     w0, #-22
     ret

@@ -80,6 +80,10 @@ flowchart LR
 | **`asm_net_pseudo_header_fill12`** | same | same | same |
 | **`asm_net_pseudo_checksum_tcpudp`** | same | same | same |
 | **`asm_net_dns_query_header_prefix`** | same | same | same |
+| **`asm_net_arp_cache_clear`** | same | same | same |
+| **`asm_net_arp_cache_lookup`** | same | same | same |
+| **`asm_net_arp_cache_insert`** | same | same | same |
+| **`asm_net_arp_cache_evict_oldest`** | same | same | same |
 | **`net_host_socket_asm`** | `arch/x86_64/gas/net_wire_host_asm.s` | `arch/x86_64/nasm/net_wire_host_asm.asm` | `arch/arm/gas/net_wire_host_asm.s` |
 | **`net_host_bind_asm`** | same | same | same |
 | **`net_host_sendto_asm`** | same | same | same |
@@ -100,7 +104,7 @@ Legend matches **`docs/ROADMAP.md`**: **✅** complete; **~✅** usable lab subs
 | **P3-1** | ✅ | ~✅ — `net_netdev.c`, authz hook in `sh.c` |
 | **P3-2** | ✅ | ~✅ — `net_loopback.c` frame path + RX queue |
 | **P3-3** | ✅ | ~✅ — `net_tap.c` (CI often skips without `CAP_NET_ADMIN`) |
-| **P3-4** ARP | ✅ | ~✅ — `net_arp.c` cache + request/reply on loopback/TAP |
+| **P3-4** ARP | ✅ | ~✅ — `net_arp.c` cache (**ASM** table ops) + request/reply on loopback/TAP |
 | **P3-5** IPv4 | ✅ | ~✅ — routing table + ICMP on netdev path; no full PMTU/offload |
 | **P3-6** UDP | ✅ | ~✅ — DNS + wire host datagrams only |
 | **P3-7** TCP | ✅ | ⚠️ — SYN probe only |
