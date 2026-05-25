@@ -53,6 +53,8 @@
 #include "drivers/drivers.h"
 #include "fs_jail.h"
 #include "fl/session.h"
+#include "fl/authz_subsystem.h"
+#include "net_netdev.h"
 #include "VM/vm.h"
 #include <stdio.h>
 #include <stdlib.h>
@@ -348,6 +350,8 @@ int main(int argc, char *argv[]) {
         fprintf(stderr, "[VM] 5-layer driver config warning: layer 4 shell/VM root is not configured\n");
     fs_jail_init();
     fl_session_init();
+    fl_net_netdev_init();
+    fl_net_netdev_set_authz_hook((fl_net_netdev_authz_fn)fl_authz_subsystem_check, NULL);
 
     /* Default host volume: ensure drive.img exists before block driver probes it. */
     if (strcmp(current_disk_file, "drive.img") == 0) {

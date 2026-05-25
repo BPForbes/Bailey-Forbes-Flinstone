@@ -84,14 +84,14 @@ size_t fl_net_ipv4_build(fl_net_ipv4_hdr_t *hdr, uint8_t *buf, size_t cap, uint8
     buf[9] = hdr->protocol;
     buf[10] = 0;
     buf[11] = 0;
-    buf[12] = (uint8_t)(src_be >> 24);
-    buf[13] = (uint8_t)(src_be >> 16);
-    buf[14] = (uint8_t)(src_be >> 8);
-    buf[15] = (uint8_t)(src_be);
-    buf[16] = (uint8_t)(dst_be >> 24);
-    buf[17] = (uint8_t)(dst_be >> 16);
-    buf[18] = (uint8_t)(dst_be >> 8);
-    buf[19] = (uint8_t)(dst_be);
+    buf[12] = (uint8_t)(src_be & 0xffu);
+    buf[13] = (uint8_t)((src_be >> 8) & 0xffu);
+    buf[14] = (uint8_t)((src_be >> 16) & 0xffu);
+    buf[15] = (uint8_t)((src_be >> 24) & 0xffu);
+    buf[16] = (uint8_t)(dst_be & 0xffu);
+    buf[17] = (uint8_t)((dst_be >> 8) & 0xffu);
+    buf[18] = (uint8_t)((dst_be >> 16) & 0xffu);
+    buf[19] = (uint8_t)((dst_be >> 24) & 0xffu);
 
     if (payload && payload_len > 0)
         memcpy(buf + FL_NET_IPV4_HDR_LEN_MIN, payload, payload_len);

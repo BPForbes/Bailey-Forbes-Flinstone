@@ -1,5 +1,11 @@
+#include "contract_p0_ci.h"
+#include "contract_p3_ipv4.h"
 #include "net_dns.h"
+#include "net_eth.h"
+#include "net_icmp.h"
 #include "net_ipv4.h"
+#include "net_loopback.h"
+#include "net_netdev.h"
 #include "net_ping_host.h"
 #include "net_requirements.h"
 
@@ -54,6 +60,99 @@ static int test_loopback_tcp(void) {
     return 0;
 }
 
+static int test_netdev_loopback_frame(void) {
+    uint8_t host_mac[6];
+    uint8_t peer_mac[6];
+    uint8_t icmp[64];
+    uint8_t ip[128];
+    uint8_t frame[192];
+    uint8_t rx[256];
+    size_t icmp_len;
+    size_t ip_len;
+    size_t frame_len;
+    uint32_t dst_be = (uint32_t)127 | (1u << 24);
+    uint32_t src_be = (uint32_t)127 | (1u << 24);
+    fl_net_ipv4_hdr_t hdr;
+    fl_net_frame_view_t view;
+    fl_net_frame_mut_t mut;
+    fl_net_netdev_stats_t stats;
+    fl_result_t rc;
+
+    fl_net_loopback_reset();
+
+    icmp_len = fl_net_icmp_echo_request_build(icmp, sizeof(icmp), 0x4242u, 1u, 8u);
+    ASSERT(icmp_len > 0);
+    ip_len = fl_net_ipv4_build(&hdr, ip, sizeof(ip), FL_NET_IP_PROTO_ICMP, src_be, dst_be, icmp,
+                               icmp_len, 0x1001u);
+    ASSERT(ip_len > 0);
+
+    fl_net_loopback_mac_host(host_mac);
+    fl_net_loopback_mac_peer(peer_mac);
+    frame_len = fl_net_eth_build_ipv4(frame, sizeof(frame), peer_mac, host_mac, ip, ip_len);
+    ASSERT(frame_len > 0);
+
+    view.data = frame;
+    view.len = frame_len;
+    ASSERT(fl_net_netdev_send(fl_net_netdev_loopback(), &view) == FL_RESULT_OK);
+
+    mut.data = rx;
+    mut.cap = sizeof(rx);
+    mut.len = 0;
+    rc = fl_net_netdev_recv(fl_net_netdev_loopback(), &mut, 2000u);
+    ASSERT(rc == FL_RESULT_OK);
+    ASSERT(mut.len > FL_NET_ETH_HDR_LEN);
+
+    fl_net_netdev_stats(fl_net_netdev_loopback(), &stats);
+    ASSERT(stats.tx_frames >= 1u);
+    ASSERT(stats.rx_frames >= 1u);
+    return 0;
+}
+
+static int test_tap_smoke(void) {
+    const char *skip;
+    uint8_t frame[FL_NET_ETH_HDR_LEN + 4];
+    fl_net_frame_view_t view;
+    fl_net_frame_mut_t mut;
+    fl_result_t rc;
+
+    skip = getenv(FL_CONTRACT_P0_CI_SKIP_TAP_ENV_NAME);
+    if (skip && strcmp(skip, FL_CONTRACT_P0_CI_SKIP_TAP_VALUE) == 0) {
+        fprintf(stderr, "skip: %s=%s\n", FL_CONTRACT_P0_CI_SKIP_TAP_ENV_NAME, skip);
+        return 0;
+    }
+
+    fl_net_netdev_init();
+    rc = fl_net_netdev_tap_open(NULL);
+    if (rc != FL_RESULT_OK) {
+        fprintf(stderr, "skip: TAP open (%s)\n", fl_net_netdev_tap_last_error());
+        return 0;
+    }
+
+    memset(frame, 0xff, 6);
+    memset(frame + 6, 0x02, 6);
+    frame[12] = 0x08;
+    frame[13] = 0x06;
+    frame[14] = 0;
+    frame[15] = 0x01;
+    view.data = frame;
+    view.len = sizeof(frame);
+    rc = fl_net_netdev_send(fl_net_netdev_tap(), &view);
+    if (rc == FL_RESULT_ACCES) {
+        fprintf(stderr, "skip: TAP send denied (netdev I/O authz)\n");
+        fl_net_netdev_tap_close();
+        return 0;
+    }
+    ASSERT(rc == FL_RESULT_OK);
+
+    mut.data = frame;
+    mut.cap = sizeof(frame);
+    mut.len = 0;
+    (void)fl_net_netdev_recv(fl_net_netdev_tap(), &mut, 100u);
+
+    fl_net_netdev_tap_close();
+    return 0;
+}
+
 static int test_probe_endpoint(void) {
     fl_net_requirements_report_t rep;
     fl_result_t prc = fl_net_probe_endpoint("127.0.0.1", 9, 3000u, &rep);
@@ -68,6 +167,8 @@ static int test_probe_endpoint(void) {
 }
 
 int main(void) {
+    fl_net_netdev_init();
+
     printf("test_loopback_octet... ");
     if (test_loopback_octet() != 0)
         return 1;
@@ -90,6 +191,16 @@ int main(void) {
 
     printf("test_probe_endpoint... ");
     if (test_probe_endpoint() != 0)
+        return 1;
+    puts("ok");
+
+    printf("test_netdev_loopback_frame... ");
+    if (test_netdev_loopback_frame() != 0)
+        return 1;
+    puts("ok");
+
+    printf("test_tap_smoke... ");
+    if (test_tap_smoke() != 0)
         return 1;
     puts("ok");
 
