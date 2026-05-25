@@ -5,6 +5,7 @@
 #include "net_netdev.h"
 #include "net_wire.h"
 
+#include <errno.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -53,9 +54,13 @@ void fl_net_route_clear(void) {
 void fl_net_route_add_loopback(void) {
     uint8_t host_mac[FL_NET_ETH_ADDR_LEN];
     uint32_t loop_net;
+    fl_net_route_entry_t existing;
 
     fl_net_loopback_mac_host(host_mac);
     loop_net = (uint32_t)FL_NET_IPV4_LOOPBACK_FIRST_OCTET;
+    if (fl_net_route_lookup(loop_net, &existing) == FL_RESULT_OK &&
+        existing.prefix_len == 8u && existing.drv == fl_net_netdev_loopback())
+        return;
     (void)fl_net_route_add(loop_net, 8u, 0, fl_net_netdev_loopback(),
                            (uint32_t)FL_NET_IPV4_LOOPBACK_FIRST_OCTET | (1u << 24), host_mac);
 }
@@ -118,6 +123,24 @@ uint32_t fl_net_route_next_hop(uint32_t dst_be, const fl_net_route_entry_t *rout
     return route->gw_be;
 }
 
+static int route_parse_prefix(const char *prefix_s, unsigned *out_prefix) {
+    char *end = NULL;
+    unsigned long v;
+    unsigned long max = 32u;
+
+    if (!prefix_s || !prefix_s[0] || !out_prefix)
+        return 0;
+
+    errno = 0;
+    v = strtoul(prefix_s, &end, 10);
+    if (errno == ERANGE || end == prefix_s || (end && *end != '\0'))
+        return 0;
+    if (v == 0 || v > max)
+        return 0;
+    *out_prefix = (unsigned)v;
+    return 1;
+}
+
 #if defined(__linux__)
 fl_result_t fl_net_route_configure_tap(fl_net_driver_t *tap_drv, const uint8_t tap_mac[6],
                                        const char *tap_ifname) {
@@ -138,8 +161,13 @@ fl_result_t fl_net_route_configure_tap(fl_net_driver_t *tap_drv, const uint8_t t
     if (!addr_s || !addr_s[0])
         addr_s = "10.0.2.15";
     prefix_s = getenv("FL_NET_TAP_PREFIX");
-    if (prefix_s && prefix_s[0])
-        prefix = (unsigned)strtoul(prefix_s, NULL, 10);
+    if (prefix_s && prefix_s[0]) {
+        unsigned parsed = 0;
+
+        if (!route_parse_prefix(prefix_s, &parsed))
+            return FL_RESULT_INVAL;
+        prefix = parsed;
+    }
     gw_s = getenv("FL_NET_TAP_GW");
     if (!gw_s || !gw_s[0])
         gw_s = "10.0.2.2";

@@ -29,7 +29,8 @@ fl_result_t fl_net_route_add(uint32_t addr_be, uint8_t prefix_len, uint32_t gw_b
                              const uint8_t src_mac[6]);
 
 /**
- * Longest-prefix match. **out_next_hop_be** is **dst_be** on-link or gateway for off-subnet.
+ * Longest-prefix match. On success, **out** holds the route; use **fl_net_route_next_hop**
+ * for on-link **dst_be** or the gateway when off-subnet.
  */
 fl_result_t fl_net_route_lookup(uint32_t dst_be, fl_net_route_entry_t *out);
 

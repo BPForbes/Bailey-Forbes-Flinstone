@@ -171,8 +171,11 @@ fl_result_t fl_wq_drain(fl_workqueue_t *wq, unsigned timeout_ms) {
         if (timeout_ms == 0)
             continue;
 
-        if (!have_deadline)
+        if (!have_deadline) {
+            if (pq_is_empty(&wq->pq))
+                return FL_RESULT_OK;
             return FL_RESULT_BUSY;
+        }
 
         {
             int64_t now_ns = 0;

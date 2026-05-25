@@ -16,6 +16,28 @@ static double egress_delta_ms(const struct timeval *t0, const struct timeval *t1
            (double)(t1->tv_usec - t0->tv_usec) / 1000.0;
 }
 
+static fl_result_t egress_copy_ipv4_l4(const uint8_t *rx_frame, size_t frame_len, size_t ip_off,
+                                       size_t ip_len_rx, uint8_t *rx_l4, size_t rx_l4_cap,
+                                       size_t *rx_l4_len) {
+    size_t hdr_len;
+    size_t payload;
+
+    if (!rx_frame || !rx_l4 || !rx_l4_len || ip_off + 20u > frame_len)
+        return FL_RESULT_ERR;
+
+    hdr_len = (size_t)((rx_frame[ip_off] & 0x0fu) * 4u);
+    if (hdr_len < 20u || ip_len_rx < hdr_len || ip_off + ip_len_rx > frame_len)
+        return FL_RESULT_ERR;
+
+    payload = ip_len_rx - hdr_len;
+    if (payload > rx_l4_cap || ip_off + hdr_len + payload > frame_len)
+        return FL_RESULT_ERR;
+
+    memcpy(rx_l4, rx_frame + ip_off + hdr_len, payload);
+    *rx_l4_len = payload;
+    return FL_RESULT_OK;
+}
+
 static fl_result_t egress_loopback(uint32_t dst_be, uint8_t ip_proto, const uint8_t *l4,
                                    size_t l4_len, uint8_t *rx_l4, size_t rx_l4_cap,
                                    size_t *rx_l4_len, unsigned timeout_ms, double *out_rtt_ms) {
@@ -71,15 +93,7 @@ static fl_result_t egress_loopback(uint32_t dst_be, uint8_t ip_proto, const uint
 
     if (!fl_net_wire_parse_eth_ipv4(rx_frame, mut.len, &ip_off, &ip_len_rx, &dummy_dst))
         return FL_RESULT_ERR;
-    {
-        size_t hdr_len = (size_t)((rx_frame[ip_off] & 0x0fu) * 4u);
-        size_t payload = ip_len_rx - hdr_len;
-        if (payload > rx_l4_cap)
-            return FL_RESULT_ERR;
-        memcpy(rx_l4, rx_frame + ip_off + hdr_len, payload);
-        *rx_l4_len = payload;
-    }
-    return FL_RESULT_OK;
+    return egress_copy_ipv4_l4(rx_frame, mut.len, ip_off, ip_len_rx, rx_l4, rx_l4_cap, rx_l4_len);
 }
 
 static fl_result_t egress_process_rx_arp(const uint8_t *frame, size_t len,
@@ -165,8 +179,10 @@ static fl_result_t egress_tap_path(const fl_net_route_entry_t *route, uint32_t d
         mut.len = 0;
         rc = fl_net_netdev_recv(route->drv, &mut, wait);
         elapsed += wait;
-        if (rc != FL_RESULT_OK)
+        if (rc == FL_RESULT_TIMEDOUT)
             continue;
+        if (rc != FL_RESULT_OK)
+            return rc;
 
         ethertype = fl_net_wire_ethertype_be16(rx_frame, mut.len, &ok);
         if (ok && ethertype == FL_ETHERTYPE_ARP) {
@@ -179,14 +195,9 @@ static fl_result_t egress_tap_path(const fl_net_route_entry_t *route, uint32_t d
         if (rx_dst != route->src_ip_be)
             continue;
 
-        {
-            size_t hdr_len = (size_t)((rx_frame[ip_off] & 0x0fu) * 4u);
-            size_t payload = ip_len_rx - hdr_len;
-            if (payload > rx_l4_cap)
-                return FL_RESULT_ERR;
-            memcpy(rx_l4, rx_frame + ip_off + hdr_len, payload);
-            *rx_l4_len = payload;
-        }
+        rc = egress_copy_ipv4_l4(rx_frame, mut.len, ip_off, ip_len_rx, rx_l4, rx_l4_cap, rx_l4_len);
+        if (rc != FL_RESULT_OK)
+            return rc;
         gettimeofday(&t1, NULL);
         if (out_rtt_ms)
             *out_rtt_ms = egress_delta_ms(&t0, &t1);

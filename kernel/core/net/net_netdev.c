@@ -172,8 +172,25 @@ fl_result_t fl_net_netdev_tap_open(const char *ifname_hint) {
 #if defined(__linux__)
     {
         uint8_t tap_mac[6];
-        if (fl_net_tap_hwaddr(s_tap_fd, s_tap_ifname, tap_mac) == FL_RESULT_OK)
-            (void)fl_net_route_configure_tap(&s_tap_drv, tap_mac, s_tap_ifname);
+        fl_result_t hw_rc;
+        fl_result_t route_rc;
+
+        hw_rc = fl_net_tap_hwaddr(s_tap_fd, s_tap_ifname, tap_mac);
+        if (hw_rc != FL_RESULT_OK) {
+            snprintf(s_tap_error, sizeof(s_tap_error), "TAP hwaddr query failed");
+            fl_net_tap_close(s_tap_fd);
+            s_tap_fd = -1;
+            s_tap_drv.impl = (void *)(intptr_t)-1;
+            return hw_rc;
+        }
+        route_rc = fl_net_route_configure_tap(&s_tap_drv, tap_mac, s_tap_ifname);
+        if (route_rc != FL_RESULT_OK) {
+            snprintf(s_tap_error, sizeof(s_tap_error), "TAP route configuration failed");
+            fl_net_tap_close(s_tap_fd);
+            s_tap_fd = -1;
+            s_tap_drv.impl = (void *)(intptr_t)-1;
+            return route_rc;
+        }
     }
 #endif
 

@@ -358,8 +358,6 @@ asm_net_arp_cache_lookup:
     mov [rcx], r10d
     movzx r10d, word [r11 + FL_NET_ARP_CACHE_OFF_MAC + 4]
     mov [rcx + 4], r10w
-    movzx r10d, byte [r11 + FL_NET_ARP_CACHE_OFF_MAC + 6]
-    mov [rcx + 6], r10b
     mov r10d, [r8]
     inc r10d
     mov [r8], r10d
@@ -446,8 +444,6 @@ asm_net_arp_cache_insert:
     mov [r11 + FL_NET_ARP_CACHE_OFF_MAC], r10d
     movzx r10d, word [r9 + 4]
     mov [r11 + FL_NET_ARP_CACHE_OFF_MAC + 4], r10w
-    movzx r10d, byte [r9 + 6]
-    mov [r11 + FL_NET_ARP_CACHE_OFF_MAC + 6], r10b
     mov r10d, [rcx]
     inc r10d
     mov [rcx], r10d
@@ -484,8 +480,6 @@ asm_net_arp_cache_insert:
     mov [r11 + FL_NET_ARP_CACHE_OFF_MAC], r10d
     movzx r10d, word [r9 + 4]
     mov [r11 + FL_NET_ARP_CACHE_OFF_MAC + 4], r10w
-    movzx r10d, byte [r9 + 6]
-    mov [r11 + FL_NET_ARP_CACHE_OFF_MAC + 6], r10b
     mov r10d, [rcx]
     inc r10d
     mov [rcx], r10d

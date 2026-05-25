@@ -87,7 +87,7 @@ static int test_shutdown_discards_pending(void) {
 
     ASSERT(fl_wq_init(wq) == FL_RESULT_OK);
     ASSERT(fl_wq_enqueue(wq, &w) == FL_RESULT_OK);
-    (void)fl_wq_poll(wq, 1);
+    ASSERT(fl_wq_poll(wq, 1) == 1);
     ASSERT(s_noop_ran == 1);
     fl_wq_shutdown(wq);
     return 0;
@@ -127,7 +127,7 @@ static int test_layer_priority(void) {
 
     ASSERT(fl_wq_enqueue(wq, &w_back) == FL_RESULT_OK);
     ASSERT(fl_wq_enqueue(wq, &w_urgent) == FL_RESULT_OK);
-    (void)fl_wq_poll(wq, 2);
+    ASSERT(fl_wq_poll(wq, 2) == 2);
 
     ASSERT(s_layer_count == 2);
     ASSERT(s_layer_order[0] == (unsigned)FL_WQ_LAYER_URGENT);

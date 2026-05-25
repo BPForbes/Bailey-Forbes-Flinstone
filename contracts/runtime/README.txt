@@ -1,4 +1,4 @@
-P1 (*contracts/runtime*) — roadmap **P1-1** … **P1-7** (execution context, address
+P1 (*contracts/runtime*) — roadmap **P1-1** … **P1-8** (execution context, address
 space, preemption, PMM, domain arenas, driver reentrancy, timekeeping).
 
 **Umbrella header:** *contract_runtime.h* — includes **contract_extend.h** (P0

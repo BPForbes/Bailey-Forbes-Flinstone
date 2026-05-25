@@ -14,6 +14,7 @@
 #include <string.h>
 #include <sys/ioctl.h>
 #include <sys/select.h>
+#include <sys/socket.h>
 #include <unistd.h>
 
 #if defined(__linux__)
@@ -118,15 +119,25 @@ fl_result_t fl_net_tap_driver_recv(fl_net_driver_t *drv, fl_net_frame_mut_t *out
 
 fl_result_t fl_net_tap_hwaddr(int fd, const char *ifname, uint8_t mac_out[6]) {
     struct ifreq ifr;
+    int sock;
 
-    if (fd < 0 || !ifname || !mac_out)
+    (void)fd;
+
+    if (!ifname || !mac_out)
         return FL_RESULT_INVAL;
+
+    sock = socket(AF_INET, SOCK_DGRAM, 0);
+    if (sock < 0)
+        return FL_RESULT_ERR;
 
     memset(&ifr, 0, sizeof(ifr));
     snprintf(ifr.ifr_name, IFNAMSIZ, "%s", ifname);
-    if (ioctl(fd, SIOCGIFHWADDR, &ifr) < 0)
+    if (ioctl(sock, SIOCGIFHWADDR, &ifr) < 0) {
+        close(sock);
         return FL_RESULT_ERR;
+    }
     memcpy(mac_out, ifr.ifr_hwaddr.sa_data, 6);
+    close(sock);
     return FL_RESULT_OK;
 }
 

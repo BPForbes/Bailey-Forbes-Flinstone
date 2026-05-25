@@ -376,8 +376,8 @@ asm_net_arp_cache_lookup:
     movl    %r10d, (%rcx)
     movzwl  FL_NET_ARP_CACHE_OFF_MAC + 4(%r11), %r10d
     movw    %r10w, 4(%rcx)
-    movzbl  FL_NET_ARP_CACHE_OFF_MAC + 6(%r11), %r10d
-    movb    %r10b, 6(%rcx)
+    movzbl  FL_NET_ARP_CACHE_OFF_MAC + 5(%r11), %r10d
+    movb    %r10b, 5(%rcx)
     movl    (%r8), %r10d
     incl    %r10d
     movl    %r10d, (%r8)
@@ -467,8 +467,8 @@ asm_net_arp_cache_insert:
     movl    %r10d, FL_NET_ARP_CACHE_OFF_MAC(%r11)
     movzwl  4(%r9), %r10d
     movw    %r10w, FL_NET_ARP_CACHE_OFF_MAC + 4(%r11)
-    movzbl  6(%r9), %r10d
-    movb    %r10b, FL_NET_ARP_CACHE_OFF_MAC + 6(%r11)
+    movzbl  5(%r9), %r10d
+    movb    %r10b, FL_NET_ARP_CACHE_OFF_MAC + 5(%r11)
     movl    (%rcx), %r10d
     incl    %r10d
     movl    %r10d, (%rcx)
@@ -505,8 +505,8 @@ asm_net_arp_cache_insert:
     movl    %r10d, FL_NET_ARP_CACHE_OFF_MAC(%r11)
     movzwl  4(%r9), %r10d
     movw    %r10w, FL_NET_ARP_CACHE_OFF_MAC + 4(%r11)
-    movzbl  6(%r9), %r10d
-    movb    %r10b, FL_NET_ARP_CACHE_OFF_MAC + 6(%r11)
+    movzbl  5(%r9), %r10d
+    movb    %r10b, FL_NET_ARP_CACHE_OFF_MAC + 5(%r11)
     movl    (%rcx), %r10d
     incl    %r10d
     movl    %r10d, (%rcx)

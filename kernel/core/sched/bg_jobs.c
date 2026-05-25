@@ -18,7 +18,7 @@ static int s_bg_inited;
 void fl_bg_jobs_init(void) {
     if (s_bg_inited)
         return;
-    (void)fl_wq_init(fl_wq_default());
+    (void)fl_wq_default();
     s_bg_inited = 1;
 }
 

@@ -328,8 +328,8 @@ asm_net_arp_cache_lookup:
     str     w7, [x3]
     ldrh    w7, [x5, #FL_NET_ARP_CACHE_OFF_MAC + 4]
     strh    w7, [x3, #4]
-    ldrb    w7, [x5, #FL_NET_ARP_CACHE_OFF_MAC + 6]
-    strb    w7, [x3, #6]
+    ldrb    w7, [x5, #FL_NET_ARP_CACHE_OFF_MAC + 5]
+    strb    w7, [x3, #5]
     ldr     w7, [x4]
     add     w7, w7, #1
     str     w7, [x4]
@@ -401,8 +401,8 @@ asm_net_arp_cache_insert:
     str     w9, [x8, #FL_NET_ARP_CACHE_OFF_MAC]
     ldrh    w9, [x5, #4]
     strh    w9, [x8, #FL_NET_ARP_CACHE_OFF_MAC + 4]
-    ldrb    w9, [x5, #6]
-    strb    w9, [x8, #FL_NET_ARP_CACHE_OFF_MAC + 6]
+    ldrb    w9, [x5, #5]
+    strb    w9, [x8, #FL_NET_ARP_CACHE_OFF_MAC + 5]
     ldr     w9, [x3]
     add     w9, w9, #1
     str     w9, [x3]
@@ -415,9 +415,10 @@ asm_net_arp_cache_insert:
 .L_arp_ins_new:
     cmp     w6, w2
     b.lo    .L_arp_ins_append
-    stp     x19, x20, [sp, #-48]!
-    stp     x21, x22, [sp, #16]
-    stp     x23, x24, [sp, #32]
+    stp     x29, x30, [sp, #-64]!
+    stp     x19, x20, [sp, #16]
+    stp     x21, x22, [sp, #32]
+    stp     x23, x24, [sp, #48]
     mov     x19, x0
     mov     x20, x1
     mov     x21, x3
@@ -429,9 +430,10 @@ asm_net_arp_cache_insert:
     mov     x3, x21
     mov     x4, x22
     mov     x5, x23
-    ldp     x23, x24, [sp, #32]
-    ldp     x21, x22, [sp, #16]
-    ldp     x19, x20, [sp], #48
+    ldp     x23, x24, [sp, #48]
+    ldp     x21, x22, [sp, #32]
+    ldp     x19, x20, [sp, #16]
+    ldp     x29, x30, [sp], #64
     ldr     w6, [x1]
 .L_arp_ins_append:
     add     x8, x0, w6, uxtw #4
@@ -440,8 +442,8 @@ asm_net_arp_cache_insert:
     str     w9, [x8, #FL_NET_ARP_CACHE_OFF_MAC]
     ldrh    w9, [x5, #4]
     strh    w9, [x8, #FL_NET_ARP_CACHE_OFF_MAC + 4]
-    ldrb    w9, [x5, #6]
-    strb    w9, [x8, #FL_NET_ARP_CACHE_OFF_MAC + 6]
+    ldrb    w9, [x5, #5]
+    strb    w9, [x8, #FL_NET_ARP_CACHE_OFF_MAC + 5]
     ldr     w9, [x3]
     add     w9, w9, #1
     str     w9, [x3]
