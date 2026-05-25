@@ -1,14 +1,15 @@
 #include "net_loopback.h"
 
+#include "contract_p3_ipv4.h"
 #include "net_checksum.h"
-#include "net_eth.h"
 #include "net_ipv4.h"
 #include "net_tcp.h"
+#include "net_wire.h"
 
 #include <string.h>
 
 #define FL_NET_LOOPBACK_RX_SLOTS 8u
-#define FL_NET_LOOPBACK_RX_MAX (FL_NET_ETH_HDR_LEN + 576u)
+#define FL_NET_LOOPBACK_RX_MAX FL_NET_WIRE_FRAME_BUF_MAX
 
 typedef struct {
     size_t len;
@@ -115,7 +116,7 @@ static fl_result_t loopback_process_ipv4(const uint8_t *ip, size_t ip_len, uint8
     fl_net_loopback_mac_host(host_mac);
     fl_net_loopback_mac_peer(peer_mac);
 
-    if (ip[9] == 1u) {
+    if (ip[9] == FL_NET_IP_PROTO_ICMP) {
         const uint8_t *icmp = ip + hdr_len;
         size_t icmp_len = ip_len - hdr_len;
         uint8_t icmp_reply[FL_NET_LOOPBACK_RX_MAX];
@@ -126,7 +127,7 @@ static fl_result_t loopback_process_ipv4(const uint8_t *ip, size_t ip_len, uint8
             return FL_RESULT_ERR;
         ip_reply_len = loopback_build_ipv4_reply(ip, ip_len, icmp_reply, icmp_reply_len, ip_reply,
                                                  sizeof(ip_reply));
-    } else if (ip[9] == 6u) {
+    } else if (ip[9] == FL_NET_IP_PROTO_TCP) {
         const uint8_t *tcp = ip + hdr_len;
         size_t tcp_len = ip_len - hdr_len;
         uint8_t tcp_reply[64];
@@ -145,8 +146,8 @@ static fl_result_t loopback_process_ipv4(const uint8_t *ip, size_t ip_len, uint8
     if (ip_reply_len == 0)
         return FL_RESULT_ERR;
 
-    *eth_reply_len =
-        fl_net_eth_build_ipv4(eth_reply, eth_cap, host_mac, peer_mac, ip_reply, ip_reply_len);
+    *eth_reply_len = fl_net_wire_build_eth_ipv4(eth_reply, eth_cap, host_mac, peer_mac, ip_reply,
+                                                ip_reply_len);
     return (*eth_reply_len > 0) ? FL_RESULT_OK : FL_RESULT_ERR;
 }
 
@@ -232,12 +233,12 @@ fl_result_t fl_net_loopback_driver_send(fl_net_driver_t *drv, const fl_net_frame
 
     (void)drv;
 
-    if (!frame || !frame->data || frame->len < FL_NET_ETH_HDR_LEN)
+    if (fl_net_wire_check_view(frame, FL_NET_ETH_FRAME_HDR_LEN) != FL_RESULT_OK)
         return FL_RESULT_INVAL;
 
     s_lb_tx++;
 
-    if (!fl_net_eth_parse_ipv4(frame->data, frame->len, &ip_off, &ip_len, &dst_be))
+    if (!fl_net_wire_parse_eth_ipv4(frame->data, frame->len, &ip_off, &ip_len, &dst_be))
         return FL_RESULT_OK;
 
     if (loopback_process_ipv4(frame->data + ip_off, ip_len, reply, sizeof(reply), &reply_len) !=
@@ -252,10 +253,12 @@ fl_result_t fl_net_loopback_driver_recv(fl_net_driver_t *drv, fl_net_frame_mut_t
 
     (void)drv;
 
-    if (!out || !out->data || out->cap == 0)
+    if (fl_net_wire_check_mut(out) != FL_RESULT_OK)
         return FL_RESULT_INVAL;
 
     rc = loopback_rx_dequeue(out->data, out->cap, &out->len);
+    if (rc == FL_RESULT_OK)
+        (void)fl_net_wire_check_rx_fill(out, out->len);
     if (rc == FL_RESULT_OK)
         s_lb_stat_rx++;
     return rc;

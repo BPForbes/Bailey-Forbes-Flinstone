@@ -1,7 +1,9 @@
 #include "contract_p0_ci.h"
 #include "contract_p3_ipv4.h"
+#include "contract_p3_wire.h"
 #include "net_dns.h"
 #include "net_eth.h"
+#include "net_wire.h"
 #include "net_icmp.h"
 #include "net_ipv4.h"
 #include "net_loopback.h"
@@ -21,6 +23,53 @@
             return 1; \
         } \
     } while (0)
+
+static int test_wire_vocabulary(void) {
+    uint8_t buf[128];
+    uint8_t ip[40];
+    fl_net_frame_view_t view;
+    fl_net_frame_mut_t mut;
+    size_t frame_len;
+    size_t parsed_ip_len = 0;
+    size_t ip_off = 0;
+    fl_ipv4_be32_t dst = 0;
+
+    ASSERT(FL_NET_WIRE_IMPL_DEFINED == 1);
+    ASSERT(FL_CONTRACT_P3_WIRE_REV >= 3u);
+    ASSERT(FL_NET_ETH_FRAME_HDR_LEN == 14u);
+    ASSERT(fl_net_wire_frame_max(FL_NET_ETH_MTU_DEFAULT) == FL_NET_WIRE_FRAME_BUF_MAX);
+
+    fl_net_wire_init();
+
+    memset(ip, 0, sizeof(ip));
+    ip[0] = 0x45;
+    ip[9] = FL_NET_IP_PROTO_ICMP;
+    ip[12] = 127;
+    ip[16] = 127;
+    ip[19] = 1;
+    ip[2] = 0;
+    ip[3] = 40;
+
+    {
+        uint8_t mac[6];
+        fl_net_loopback_mac_host(mac);
+        frame_len = fl_net_wire_build_eth_ipv4(buf, sizeof(buf), mac, mac, ip, 40u);
+    }
+    ASSERT(frame_len > FL_NET_ETH_FRAME_HDR_LEN);
+
+    view = fl_net_frame_view_make(buf, frame_len);
+    ASSERT(fl_net_wire_check_tx(&view, FL_NET_ETH_MTU_DEFAULT) == FL_RESULT_OK);
+    ASSERT(fl_net_wire_ethertype_is_ipv4(buf, frame_len));
+    ASSERT(fl_net_wire_parse_eth_ipv4(buf, frame_len, &ip_off, &parsed_ip_len, &dst));
+    ASSERT(fl_net_ipv4_is_loopback((uint32_t)dst));
+
+    mut = fl_net_frame_mut_make(buf, sizeof(buf));
+    ASSERT(fl_net_wire_check_mut(&mut) == FL_RESULT_OK);
+    ASSERT(fl_net_wire_check_rx_fill(&mut, 14u) == FL_RESULT_OK);
+    ASSERT(mut.len == 14u);
+
+    return 0;
+}
 
 static int test_loopback_octet(void) {
     struct in_addr a;
@@ -168,6 +217,11 @@ static int test_probe_endpoint(void) {
 
 int main(void) {
     fl_net_netdev_init();
+
+    printf("test_wire_vocabulary... ");
+    if (test_wire_vocabulary() != 0)
+        return 1;
+    puts("ok");
 
     printf("test_loopback_octet... ");
     if (test_loopback_octet() != 0)

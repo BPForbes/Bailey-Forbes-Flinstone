@@ -1,8 +1,8 @@
 #include "net_wire_host.h"
 
 #include "contract_p3_ipv4.h"
-#include "net_eth.h"
 #include "net_ipv4.h"
+#include "net_wire.h"
 #include "net_loopback.h"
 #include "net_netdev.h"
 #include "net_tcp.h"
@@ -39,8 +39,8 @@ static fl_result_t wire_loopback_exchange(const uint8_t *l4, size_t l4_len, uint
                                           size_t *rx_l4_len, unsigned timeout_ms,
                                           double *out_rtt_ms) {
     uint8_t ipbuf[576];
-    uint8_t frame[FL_NET_ETH_HDR_LEN + 576];
-    uint8_t rx_frame[FL_NET_ETH_HDR_LEN + 576];
+    uint8_t frame[FL_NET_WIRE_FRAME_BUF_MAX];
+    uint8_t rx_frame[FL_NET_WIRE_FRAME_BUF_MAX];
     uint8_t host_mac[6];
     uint8_t peer_mac[6];
     fl_net_ipv4_hdr_t hdr;
@@ -66,7 +66,7 @@ static fl_result_t wire_loopback_exchange(const uint8_t *l4, size_t l4_len, uint
 
     fl_net_loopback_mac_peer(peer_mac);
     fl_net_loopback_mac_host(host_mac);
-    frame_len = fl_net_eth_build_ipv4(frame, sizeof(frame), peer_mac, host_mac, ipbuf, ip_len);
+    frame_len = fl_net_wire_build_eth_ipv4(frame, sizeof(frame), peer_mac, host_mac, ipbuf, ip_len);
     if (frame_len == 0)
         return FL_RESULT_ERR;
 
@@ -88,7 +88,7 @@ static fl_result_t wire_loopback_exchange(const uint8_t *l4, size_t l4_len, uint
     if (out_rtt_ms)
         *out_rtt_ms = timeval_delta_ms(&t0, &t1);
 
-    if (!fl_net_eth_parse_ipv4(rx_frame, mut.len, &ip_off, &ip_len_rx, &dummy_dst))
+    if (!fl_net_wire_parse_eth_ipv4(rx_frame, mut.len, &ip_off, &ip_len_rx, &dummy_dst))
         return FL_RESULT_ERR;
     if (ip_len_rx <= (size_t)((rx_frame[ip_off] & 0x0fu) * 4u) ||
         ip_len_rx - (size_t)((rx_frame[ip_off] & 0x0fu) * 4u) > rx_l4_cap)

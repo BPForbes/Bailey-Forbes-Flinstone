@@ -5,6 +5,9 @@
  * sizes and **non-owning buffer views** that cross **P3** boundaries. Authorization
  * and principal proof stay in **P2**; see **contract_p3_trust.h** for the narrow
  * **P2-3** hook surface used by privileged netdev operations.
+ *
+ * **Implementation:** **kernel/core/net/net_wire.c** (**net_wire.h**) enforces
+ * **fl_net_frame_view_t** / **fl_net_frame_mut_t** bounds and DIX Ethernet helpers.
  */
 #ifndef FL_CONTRACT_P3_WIRE_H
 #define FL_CONTRACT_P3_WIRE_H
@@ -15,7 +18,7 @@
 #include <stdint.h>
 
 /** Bump when wire caps or public typedef layout changes (P3 umbrella may _Static_assert). */
-#define FL_CONTRACT_P3_WIRE_REV 2
+#define FL_CONTRACT_P3_WIRE_REV 3
 
 /** IEEE 802.3 address length (octets). */
 #define FL_NET_ETH_ADDR_LEN 6u
@@ -24,6 +27,9 @@
 #define FL_NET_ETH_MTU_DEFAULT 1500u
 
 #define FL_NET_ETH_FCS_LEN 4u
+
+/** DIX Ethernet header length (dst + src + ethertype); **FCS** is driver policy (**P3-1**). */
+#define FL_NET_ETH_FRAME_HDR_LEN (FL_NET_ETH_ADDR_LEN + FL_NET_ETH_ADDR_LEN + 2u)
 
 /** Common DIX ethertypes (network byte order constants as **uint16_t** values). */
 #define FL_ETHERTYPE_IPV4 0x0800u

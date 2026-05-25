@@ -3,6 +3,7 @@
 #include "contract_p0_ci.h"
 #include "net_loopback.h"
 #include "net_tap.h"
+#include "net_wire.h"
 
 #include <stdio.h>
 #include <stdlib.h>
@@ -21,6 +22,7 @@ static char s_tap_ifname[16];
 static char s_tap_error[96];
 
 void fl_net_netdev_init(void) {
+    fl_net_wire_init();
     fl_net_loopback_reset();
 
     memset(&s_loopback_drv, 0, sizeof(s_loopback_drv));
@@ -62,8 +64,15 @@ fl_net_driver_t *fl_net_netdev_tap(void) {
 }
 
 fl_result_t fl_net_netdev_send(fl_net_driver_t *drv, const fl_net_frame_view_t *frame) {
+    fl_result_t rc;
+
     if (!drv || !drv->send)
         return FL_RESULT_INVAL;
+
+    rc = fl_net_wire_check_tx(frame, drv->mtu);
+    if (rc != FL_RESULT_OK)
+        return rc;
+
     return drv->send(drv, frame);
 }
 

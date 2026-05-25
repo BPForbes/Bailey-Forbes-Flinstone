@@ -6,6 +6,7 @@
 
 #include "contract_p0_ci.h"
 #include "net_netdev.h"
+#include "net_wire.h"
 
 #include <errno.h>
 #include <fcntl.h>
@@ -68,6 +69,9 @@ fl_result_t fl_net_tap_driver_send(fl_net_driver_t *drv, const fl_net_frame_view
     if (!drv || !frame || !frame->data || frame->len == 0)
         return FL_RESULT_INVAL;
 
+    if (fl_net_wire_check_tx(frame, drv->mtu) != FL_RESULT_OK)
+        return FL_RESULT_INVAL;
+
     if (fl_net_netdev_authz_check((unsigned)FL_AUTHZ_OP_NETDEV_IO) != FL_RESULT_OK)
         return FL_RESULT_ACCES;
 
@@ -89,7 +93,7 @@ fl_result_t fl_net_tap_driver_recv(fl_net_driver_t *drv, fl_net_frame_mut_t *out
     int fd;
     ssize_t n;
 
-    if (!drv || !out || !out->data || out->cap == 0)
+    if (fl_net_wire_check_mut(out) != FL_RESULT_OK)
         return FL_RESULT_INVAL;
 
     if (fl_net_netdev_authz_check((unsigned)FL_AUTHZ_OP_NETDEV_IO) != FL_RESULT_OK)
@@ -105,7 +109,9 @@ fl_result_t fl_net_tap_driver_recv(fl_net_driver_t *drv, fl_net_frame_mut_t *out
     if (n == 0)
         return FL_RESULT_TIMEDOUT;
 
-    out->len = (size_t)n;
+    if (fl_net_wire_check_rx_fill(out, (size_t)n) != FL_RESULT_OK)
+        return FL_RESULT_ERR;
+
     s_tap_rx++;
     return FL_RESULT_OK;
 }

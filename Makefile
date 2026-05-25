@@ -137,7 +137,8 @@ CORE_SRCS = kernel/core/vfs/disk.c kernel/core/vfs/fat32_host.c kernel/core/vfs/
             kernel/core/vfs/fs_service_glue.c kernel/core/mm/mem_domain.c kernel/core/mm/kmalloc.c kernel/core/mm/pmm.c \
             kernel/core/memory/fl_stack.c kernel/core/memory/exec_context.c \
             kernel/core/time/timekeeping.c \
-            kernel/core/net/net_checksum.c kernel/core/net/net_eth.c kernel/core/net/net_ipv4.c \
+            kernel/core/net/net_checksum.c kernel/core/net/net_wire.c kernel/core/net/net_eth.c \
+            kernel/core/net/net_ipv4.c \
             kernel/core/net/net_icmp.c kernel/core/net/net_tcp.c kernel/core/net/net_loopback.c \
             kernel/core/net/net_netdev.c kernel/core/net/net_tap.c kernel/core/net/net_wire_host.c \
             kernel/core/net/net_dns.c kernel/core/net/net_ping_host.c kernel/core/net/net_requirements.c \
@@ -342,7 +343,8 @@ TEST_SRCS = BPForbes_Flinstone_Tests.c userland/shell/common.c userland/shell/ut
             kernel/core/vfs/fs_service_glue.c kernel/core/mm/mem_domain.c kernel/core/mm/kmalloc.c kernel/core/mm/pmm.c \
             kernel/core/memory/fl_stack.c kernel/core/memory/exec_context.c \
             kernel/core/time/timekeeping.c \
-            kernel/core/net/net_checksum.c kernel/core/net/net_eth.c kernel/core/net/net_ipv4.c \
+            kernel/core/net/net_checksum.c kernel/core/net/net_wire.c kernel/core/net/net_eth.c \
+            kernel/core/net/net_ipv4.c \
             kernel/core/net/net_icmp.c kernel/core/net/net_tcp.c kernel/core/net/net_loopback.c \
             kernel/core/net/net_netdev.c kernel/core/net/net_tap.c kernel/core/net/net_wire_host.c \
             kernel/core/net/net_dns.c kernel/core/net/net_ping_host.c kernel/core/net/net_requirements.c \
@@ -579,7 +581,8 @@ test_p0_p2_wiring: kernel/core/memory/fl_stack.o kernel/core/memory/exec_context
 .PHONY: test_p3_network
 test_p3_network:
 	$(CC) $(CFLAGS) $(TEST_SANITIZE) -o tests/test_p3_network tests/test_p3_network.c \
-	  kernel/core/net/net_checksum.c kernel/core/net/net_eth.c kernel/core/net/net_ipv4.c \
+	  kernel/core/net/net_checksum.c kernel/core/net/net_wire.c kernel/core/net/net_eth.c \
+	  kernel/core/net/net_ipv4.c \
 	  kernel/core/net/net_icmp.c kernel/core/net/net_tcp.c kernel/core/net/net_loopback.c \
 	  kernel/core/net/net_netdev.c kernel/core/net/net_tap.c kernel/core/net/net_wire_host.c \
 	  kernel/core/net/net_dns.c kernel/core/net/net_ping_host.c kernel/core/net/net_requirements.c \

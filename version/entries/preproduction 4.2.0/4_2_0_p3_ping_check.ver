@@ -4,7 +4,7 @@ RELEASE_VERSION=0
 PRERELEASE=1
 DEV_VERSION=1
 DESCRIPTION<<VER_END
-PRE 4.2.0 (P3): ping/check any host+port; P3-1 netdev (fl_net_driver send/recv), P3-2 loopback Ethernet+IPv4, P3-3 TAP hosted backend; partial P3-5/6/7/8 probes unchanged for later; CI P3_PROBE_* and SKIP_TAP.
+PRE 4.2.0 (P3): ping/check; P3 wire (contract_p3_wire.h, net_wire.c frame views/MTU/L2 IPv4); P3-1 netdev, P3-2 loopback frames, P3-3 TAP; partial P3-5/6/7/8 later; CI P3_PROBE_* and SKIP_TAP.
 VER_END
 
 RELEASE_DATE=2026-05-24
