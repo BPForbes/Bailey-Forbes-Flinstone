@@ -1,6 +1,7 @@
 #include "net_loopback.h"
 
 #include "contract_p3_ipv4.h"
+#include "fl/net_asm.h"
 #include "net_checksum.h"
 #include "net_ipv4.h"
 #include "net_tcp.h"
@@ -132,13 +133,20 @@ static fl_result_t loopback_process_ipv4(const uint8_t *ip, size_t ip_len, uint8
         size_t tcp_len = ip_len - hdr_len;
         uint8_t tcp_reply[64];
         size_t tcp_reply_len = 0;
+        uint16_t sport = 0;
         uint16_t dport = 0;
 
         if (tcp_len < 4)
             return FL_RESULT_ERR;
+#if defined(FL_NET_ASM_AVAILABLE)
+        if (asm_net_tcp_read_ports_be(tcp, tcp_len, &sport, &dport) != 0)
+            return FL_RESULT_ERR;
+#else
+        sport = (uint16_t)(((uint16_t)tcp[0] << 8) | tcp[1]);
         dport = (uint16_t)(((uint16_t)tcp[2] << 8) | tcp[3]);
+#endif
 
-        if (fl_net_loopback_tcp_syn(tcp, tcp_len, dport, tcp_reply, sizeof(tcp_reply),
+        if (fl_net_loopback_tcp_syn(tcp, tcp_len, sport, dport, tcp_reply, sizeof(tcp_reply),
                                     &tcp_reply_len) != FL_RESULT_OK)
             return FL_RESULT_ERR;
         ip_reply_len = loopback_build_ipv4_reply(ip, ip_len, tcp_reply, tcp_reply_len, ip_reply,
@@ -184,49 +192,54 @@ fl_result_t fl_net_loopback_icmp_echo(const uint8_t *icmp_req, size_t icmp_len,
     return FL_RESULT_OK;
 }
 
-fl_result_t fl_net_loopback_tcp_syn(const uint8_t *tcp_syn, size_t tcp_len, uint16_t dport,
-                                    uint8_t *tcp_reply, size_t reply_cap, size_t *reply_len) {
-    uint32_t seq;
-    uint16_t sport;
-    uint16_t csum;
-
-    (void)dport;
+fl_result_t fl_net_loopback_tcp_syn(const uint8_t *tcp_syn, size_t tcp_len, uint16_t sport,
+                                    uint16_t dport, uint8_t *tcp_reply, size_t reply_cap,
+                                    size_t *reply_len) {
+    uint16_t pkt_sport = 0;
+    uint16_t pkt_dport = 0;
+    size_t built;
 
     if (!tcp_syn || tcp_len < FL_NET_TCP_HDR_LEN_MIN || !tcp_reply || !reply_len)
         return FL_RESULT_INVAL;
     if (reply_cap < FL_NET_TCP_HDR_LEN_MIN)
         return FL_RESULT_ERR;
 
-    memset(tcp_reply, 0, FL_NET_TCP_HDR_LEN_MIN);
-    sport = (uint16_t)((tcp_syn[0] << 8) | tcp_syn[1]);
-    seq = ((uint32_t)tcp_syn[4] << 24) | ((uint32_t)tcp_syn[5] << 16) |
-          ((uint32_t)tcp_syn[6] << 8) | (uint32_t)tcp_syn[7];
-    if (tcp_syn[13] & FL_NET_TCP_FLAG_SYN)
-        seq++;
+#if defined(FL_NET_ASM_AVAILABLE)
+    if (asm_net_tcp_read_ports_be(tcp_syn, tcp_len, &pkt_sport, &pkt_dport) != 0)
+        return FL_RESULT_ERR;
+    if (pkt_sport != sport || pkt_dport != dport)
+        return FL_RESULT_INVAL;
+    built = asm_net_tcp_build_rst_ack(tcp_syn, tcp_len, tcp_reply, reply_cap);
+#else
+    {
+        uint32_t seq;
 
-    tcp_reply[0] = tcp_syn[2];
-    tcp_reply[1] = tcp_syn[3];
-    tcp_reply[2] = tcp_syn[0];
-    tcp_reply[3] = tcp_syn[1];
-    tcp_reply[4] = 0;
-    tcp_reply[5] = 0;
-    tcp_reply[6] = 0;
-    tcp_reply[7] = 0;
-    tcp_reply[8] = (uint8_t)((seq >> 24) & 0xff);
-    tcp_reply[9] = (uint8_t)((seq >> 16) & 0xff);
-    tcp_reply[10] = (uint8_t)((seq >> 8) & 0xff);
-    tcp_reply[11] = (uint8_t)(seq & 0xff);
-    tcp_reply[12] = (uint8_t)(5u << 4);
-    tcp_reply[13] = (uint8_t)(FL_NET_TCP_FLAG_RST | FL_NET_TCP_FLAG_ACK);
-    tcp_reply[14] = 0;
-    tcp_reply[15] = 0;
+        pkt_sport = (uint16_t)(((uint16_t)tcp_syn[0] << 8) | tcp_syn[1]);
+        pkt_dport = (uint16_t)(((uint16_t)tcp_syn[2] << 8) | tcp_syn[3]);
+        if (pkt_sport != sport || pkt_dport != dport)
+            return FL_RESULT_INVAL;
+        memset(tcp_reply, 0, FL_NET_TCP_HDR_LEN_MIN);
+        seq = ((uint32_t)tcp_syn[4] << 24) | ((uint32_t)tcp_syn[5] << 16) |
+              ((uint32_t)tcp_syn[6] << 8) | (uint32_t)tcp_syn[7];
+        if (tcp_syn[13] & FL_NET_TCP_FLAG_SYN)
+            seq++;
+        tcp_reply[0] = tcp_syn[2];
+        tcp_reply[1] = tcp_syn[3];
+        tcp_reply[2] = tcp_syn[0];
+        tcp_reply[3] = tcp_syn[1];
+        tcp_reply[8] = (uint8_t)((seq >> 24) & 0xff);
+        tcp_reply[9] = (uint8_t)((seq >> 16) & 0xff);
+        tcp_reply[10] = (uint8_t)((seq >> 8) & 0xff);
+        tcp_reply[11] = (uint8_t)(seq & 0xff);
+        tcp_reply[12] = (uint8_t)(5u << 4);
+        tcp_reply[13] = (uint8_t)(FL_NET_TCP_FLAG_RST | FL_NET_TCP_FLAG_ACK);
+        built = FL_NET_TCP_HDR_LEN_MIN;
+    }
+#endif
 
-    csum = 0;
-    tcp_reply[16] = 0;
-    tcp_reply[17] = 0;
-    (void)sport;
-    (void)csum;
-    *reply_len = FL_NET_TCP_HDR_LEN_MIN;
+    if (built != FL_NET_TCP_HDR_LEN_MIN)
+        return FL_RESULT_ERR;
+    *reply_len = built;
     return FL_RESULT_OK;
 }
 

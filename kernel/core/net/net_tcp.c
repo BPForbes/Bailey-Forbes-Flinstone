@@ -1,10 +1,9 @@
 #include "net_tcp.h"
 
-#include "net_checksum.h"
-#include "net_ipv4.h"
+#include "contract_p3_wire.h"
+#include "fl/net_asm.h"
 #include "net_wire_host.h"
 
-#include <stdio.h>
 #include <string.h>
 
 size_t fl_net_tcp_build_syn(uint8_t *buf, size_t cap, uint16_t sport, uint16_t dport,
@@ -12,6 +11,9 @@ size_t fl_net_tcp_build_syn(uint8_t *buf, size_t cap, uint16_t sport, uint16_t d
     if (!buf || cap < FL_NET_TCP_HDR_LEN_MIN)
         return 0;
 
+#if defined(FL_NET_ASM_AVAILABLE)
+    return asm_net_tcp_build_syn(buf, cap, sport, dport, seq_be);
+#else
     memset(buf, 0, FL_NET_TCP_HDR_LEN_MIN);
     buf[0] = (uint8_t)(sport >> 8);
     buf[1] = (uint8_t)(sport & 0xff);
@@ -21,22 +23,19 @@ size_t fl_net_tcp_build_syn(uint8_t *buf, size_t cap, uint16_t sport, uint16_t d
     buf[5] = (uint8_t)(seq_be >> 16);
     buf[6] = (uint8_t)(seq_be >> 8);
     buf[7] = (uint8_t)(seq_be);
-    buf[8] = 0;
-    buf[9] = 0;
-    buf[10] = 0;
-    buf[11] = 0;
     buf[12] = (uint8_t)(5u << 4);
     buf[13] = FL_NET_TCP_FLAG_SYN;
     buf[14] = 0x20;
     buf[15] = 0x00;
     return FL_NET_TCP_HDR_LEN_MIN;
+#endif
 }
 
 fl_result_t fl_net_tcp_syn_probe(uint32_t dst_be, uint16_t dport, unsigned timeout_ms,
                                  double *out_rtt_ms, char *note, size_t note_len) {
     uint8_t tcp[FL_NET_TCP_HDR_LEN_MIN];
     size_t tcp_len;
-    uint16_t sport = 40000u + (uint16_t)(dport & 0xffu);
+    uint16_t sport = (uint16_t)(40000u + (dport & 0xffu));
 
     tcp_len = fl_net_tcp_build_syn(tcp, sizeof(tcp), sport, dport, 1u);
     if (tcp_len == 0)
