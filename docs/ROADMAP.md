@@ -130,10 +130,11 @@ Two columns track different concerns:
 | **P3-1** | Device abstraction (`netdev`) | ✅ | ~✅ |
 | **P3-2** | Loopback (software) | ✅ | ~✅ |
 | **P3-3** | TAP backend (hosted only) | ✅ | ~✅ |
-| **P3-4** | ARP | ✅ | ❌ |
+| **P3-4** | ARP | ✅ | ~✅ |
 | **P3-5** | IPv4 | ✅ | ~✅ |
 | **P3-6** | UDP | ✅ | ~✅ |
 | **P3-12** | DHCP client (IPv4) | ✅ | ❌ |
+| **P3-13** | Sockets & server façade | ⚠️ | ❌ |
 | **P3-7** | TCP (large) | ✅ | ⚠️ |
 | **P3-8** | DNS client | ✅ | ~✅ |
 | **P3-9** | TLS (hosted) | ✅ | ❌ |
@@ -165,7 +166,7 @@ Two columns track different concerns:
 | **P9-2** | Coverity / static analysis | ✅ | ❌ |
 | **P9-3** | SMP bring-up (B) | ✅ | ❌ |
 
-**Summary:** **Contract completion** — **P0-1**–**P0-8**, **P1-1**–**P1-7**, **P2-1**–**P2-4**, **P3-1**–**P3-12** (including **`[DEFERRED]`** shards), **P4-1**–**P4-7**, **P5-1**–**P5-3**, **P6-1**–**P6-5**, **P7-1**–**P7-3**, **P7 (batch)**, **P8-1**–**P8-3**, and **P9-1**–**P9-3** are **✅** under their **`contracts/*`** bundles. **Module integration (P0–P2)** — **✅:** **P0-1**–**P0-3**, **P0-6**–**P0-8**, **P1-1**, **P2-1**, **P2-2**, **P2-4** (hosted/lab wired and tested on **4.1.0**). **~✅:** **P1-7** (hosted POSIX `clock_gettime` only; **B** Generic Timer / **P0-5** tick follow-up). **~✅:** **P0-4**, **P0-5** (arch **B** evidence TODOs), **P1-2**–**P1-6** (**B** PMM/arena/NASM), **P2-3** (guest deny suite + shell gates; netdev hook on **PRE 4.2.0** **`ping`** path—see **TODO: P2-3**). See **`docs/p0_p2_pr_coverage.md`**. **Module integration (P3, PRE 4.2.0)** — **~✅:** **P3-1**–**P3-3**, **P3-5**, **P3-6**, **P3-8** (in-tree stack, **`ping`** / **`check requirements`**, **`make test_p3_network`**, **`make check-network-requirements`**; TAP/Interop skips documented). **⚠️:** **P3-7** (TCP SYN probe + loopback RST+ACK only). **❌:** **P3-4** ARP, **P3-9** TLS, **P3-12** DHCP, **P3-10**/**P3-11** deferrals. Detail: **`docs/P3_NETWORKING.md`**. **P4-1**/**P4-2** **✅**; **P8**/**P9** integration **❌** here.
+**Summary:** **Contract completion** — **P0-1**–**P0-8**, **P1-1**–**P1-7**, **P2-1**–**P2-4**, **P3-1**–**P3-12** (including **`[DEFERRED]`** shards), **P4-1**–**P4-7**, **P5-1**–**P5-3**, **P6-1**–**P6-5**, **P7-1**–**P7-3**, **P7 (batch)**, **P8-1**–**P8-3**, and **P9-1**–**P9-3** are **✅** under their **`contracts/*`** bundles. **Module integration (P0–P2)** — **✅:** **P0-1**–**P0-3**, **P0-6**–**P0-8**, **P1-1**, **P2-1**, **P2-2**, **P2-4** (hosted/lab wired and tested on **4.1.0**). **~✅:** **P1-7** (hosted POSIX `clock_gettime` only; **B** Generic Timer / **P0-5** tick follow-up). **~✅:** **P0-4**, **P0-5** (arch **B** evidence TODOs), **P1-2**–**P1-6** (**B** PMM/arena/NASM), **P2-3** (guest deny suite + shell gates; netdev hook on **PRE 4.2.0** **`ping`** path—see **TODO: P2-3**). See **`docs/p0_p2_pr_coverage.md`**. **Module integration (P3, PRE 4.2.0)** — **~✅:** **P3-1**–**P3-6**, **P3-8** (in-tree stack, **`net_arp.c`** / **`net_route.c`** / **`net_wire_egress.c`**, **`ping`** / **`check requirements`**, **`make test_p3_network`**, **`make check-network-requirements`**; TAP/Interop skips documented). **⚠️:** **P3-7** (TCP SYN probe + loopback RST+ACK only); **P3-13** (planning row—contract shard pending). **❌:** **P3-9** TLS, **P3-12** DHCP, **P3-13** sockets/server builtins, **P3-10**/**P3-11** deferrals. Detail: **`docs/P3_NETWORKING.md`**. **P4-1**/**P4-2** **✅**; **P8**/**P9** integration **❌** here.
 
 ---
 
@@ -176,7 +177,7 @@ Use this table when asking what “**the next A release**” means in terms of p
 | Release | Phases / artifacts targeted (summary) | Example gate criteria |
 |---------|----------------------------------------|------------------------|
 | **A1** | **P0** + **Appendix D** execution rows **1–7** (through spinlocks / driver reentrancy) | Default CI green; **P0-1** subsystem headers stable; bare-metal IRQ + table races not blocking K/B bring-up |
-| **A2** | **P1** + **P2** + **P3** through **P3-6** (UDP) with loopback + TAP path | **P1-4**/**P1-5** PMM/arenas validated on **B** where applicable; **P2-3** authz tests deny guest on privileged ops; UDP/loopback interop tests in CI or documented skip. **PRE 4.2.0** progress: loopback + hosted UDP/ICMP/DNS + TAP smoke (**~✅** subset); **P3-4** ARP and **P3-12** DHCP still **❌** for full **A2** |
+| **A2** | **P1** + **P2** + **P3** through **P3-6** (UDP) with loopback + TAP path | **P1-4**/**P1-5** PMM/arenas validated on **B** where applicable; **P2-3** authz tests deny guest on privileged ops; UDP/loopback interop tests in CI or documented skip. **PRE 4.2.0** progress: loopback + ARP + LPM routes + hosted UDP/ICMP/DNS + TAP smoke (**~✅** subset); **P3-12** DHCP and **P3-13** sockets/server still **❌** for full **A2** |
 | **A3** | **P4** (virtio **P4-4** + IRQ model) + **P6-1**/**P6-2** logging | Virtio ring / golden vectors; **no sleep in hardirq** asserts in debug builds; structured log + ring buffer under test |
 | **A4** | **P5**–**P9** as needed (VFS, VM fidelity, hardening) | **P9-1** fuzz triage workflow; **P9-3** SMP bring-up documented with arch memory-model refs + **PSCI** (**P4-7**) where AArch64 applies |
 
@@ -308,6 +309,7 @@ Implement **bottom-up**: **L2 (link layer)** → IPv4/UDP → TCP → sockets fa
 | **P3-5** | **IPv4** | Addresses, netmask, routing table (default route), ICMP echo (ping). | **RFC 791** + **RFC 792**; **checksum offload** optional; **path MTU** stub documented. |
 | **P3-6** | **UDP** | Demux by port; checksum; basic socket buffer caps. | **RFC 768**; **bounded queues**; drop policy under pressure documented. |
 | **P3-12** | **DHCP client (IPv4)** | Minimal **DISCOVER → OFFER → REQUEST → ACK** client for lab addressing and **PX-12** netboot paths. | **RFC 2131**; **RFC 2132** (options subset); finite state machine with **timeouts**; builds on **P3-6**; document interaction with **P3-5** static routes. |
+| **P3-13** | **Sockets & server façade** | User-facing **socket API** and shell **server** builtins on top of **P3-6**/**P3-7** (not raw wire helpers only). | **RFC 793**/**RFC 768** stream/datagram semantics at the API boundary; shell **`udpsend`** / **`udplisten`** (and TCP **`listen`**/**`accept`** when **P3-7** matures); bounded buffers; **P2-3** authz on bind/connect; defers TLS (**P3-9**) to userland. |
 | **P3-7** | **TCP (large)** | Reliable stream for one client/server pair first. | **RFC 793** + selective **RFC 5681** congestion basics later; **interop test** against Linux `nc` or `socat`. |
 | **P3-8** | **DNS client** | Resolver for A/AAAA records (AAAA optional). | **RFC 1035** semantics subset; **timeouts** and **retry caps**. |
 | **P3-9** | **TLS (hosted)** | Prefer **userland** TLS (e.g. mbedTLS/OpenSSL) behind shell command or libc. | **No TLS in “kernel” layer** until stable memory and time APIs exist on K/B. |
@@ -325,16 +327,17 @@ Shipped on the **PRE 4.2.0** train (**PR #231** class work). This is the **modul
 | **P3-1** | ~✅ | **`net_netdev.c`**: driver registry, timeouts, **P2-3** authz hook; loopback + TAP backends |
 | **P3-2** | ~✅ | **`net_loopback.c`**: Ethernet+IPv4 frame path; ICMP echo reply; TCP RST+ACK on SYN |
 | **P3-3** | ~✅ | **`net_tap.c`**: Linux TAP; **`SKIP_TAP=1`** / capability skips in CI |
-| **P3-4** | ❌ | No ARP cache or **RFC 826** path |
-| **P3-5** | ~✅ | **`net_wire.c`** / **`net_ipv4.c`**: frame build/parse, checksum (**ASM**), ICMP echo; no routing table |
+| **P3-4** | ~✅ | **`net_arp.c`**: **RFC 826** request/reply, 32-entry cache (**ASM** table ops), **`fl_net_arp_resolve`**; loopback answers **127.0.0.0/8**; tick-based cache age (no wall-clock TTL sweep yet) |
+| **P3-5** | ~✅ | **`net_route.c`** LPM table + **`net_wire_egress.c`**; **`net_wire.c`** / **`net_ipv4.c`** frame build/parse, checksum (**ASM**), ICMP on netdev path; Linux ICMP socket fallback when no route; path MTU/offload still open |
 | **P3-6** | ~✅ | Hosted datagram path + DNS UDP; not a general socket layer |
 | **P3-7** | ⚠️ | **`net_tcp.c`**: SYN build (**ASM**), raw-TCP wire probe; no **RFC 793** state machine |
 | **P3-8** | ~✅ | **`net_dns.c`**: minimal **A** query via **`/etc/resolv.conf`** |
 | **P3-9** | ❌ | No TLS command or library bridge in-tree |
 | **P3-12** | ❌ | No DHCP client |
+| **P3-13** | ❌ | No **`udpsend`** / **`udplisten`** or in-tree listen/accept; see GitHub issues for sockets/server track |
 | **P3-10** / **P3-11** | ❌ | Contract **`[DEFERRED]`** only |
 
-**Shell / CI:** **`ping`**, **`check requirements`**; **`make test_p3_network`**, **`make test_invariants`**, **`make test_core`**, **`make check-network-requirements`**. **ASM:** **`arch/*/net_asm.*`**, **`arch/*/net_wire_host_asm.*`** (x86_64 GAS/NASM, AArch64 GAS). Follow-ups: **#232**–**#235** (netdev shutdown, authz hygiene, batch registry)—out of scope for the networking PR.
+**Shell / CI:** **`ping`**, **`check requirements`**; **`make test_p3_network`**, **`make test_invariants`**, **`make test_core`**, **`make check-network-requirements`**. **ASM:** **`arch/*/net_asm.*`**, **`arch/*/net_wire_host_asm.*`** (x86_64 GAS/NASM, AArch64 GAS). **PRE 4.2.0 gaps (tracked in issues):** **#241** bare-metal **802.3** netdev + route bootstrap; **#240** ~✅→✅ checklist (ARP TTL, ICMP fallback, doc sync); **#239** **P3-13** sockets/server; **P3-12** DHCP (open). Follow-ups: **#232**–**#235** (netdev shutdown, authz hygiene, batch registry).
 
 ---
 

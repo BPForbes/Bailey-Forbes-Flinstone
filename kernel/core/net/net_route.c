@@ -151,18 +151,7 @@ fl_result_t fl_net_route_configure_tap(fl_net_driver_t *tap_drv, const uint8_t t
     if (prefix > 32u)
         prefix = 32u;
 
-    net_be = addr_be;
-    {
-        unsigned i;
-        for (i = 0; i < 4u && prefix > i * 8u; i++) {
-            unsigned bits = prefix - i * 8u;
-            uint8_t mask;
-            if (bits > 8u)
-                bits = 8u;
-            mask = (uint8_t)(bits == 8u ? 0xffu : (uint8_t)(0xffu << (8u - bits)));
-            net_be &= ~((uint32_t)mask << (i * 8u));
-        }
-    }
+    net_be = fl_net_ipv4_network_addr(addr_be, (uint8_t)prefix);
 
     return fl_net_route_add(net_be, (uint8_t)prefix, gw_be, tap_drv, addr_be, tap_mac);
 }

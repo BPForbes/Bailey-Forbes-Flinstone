@@ -131,6 +131,8 @@ static int test_ipv4_prefix_match(void) {
     uint32_t n = (uint32_t)10 | (0 << 8) | (2 << 16) | (0 << 24);
     ASSERT(fl_net_ipv4_prefix_match(a, n, 24u));
     ASSERT(!fl_net_ipv4_prefix_match(a, n, 32u));
+    ASSERT(fl_net_ipv4_network_addr(a, 24u) == n);
+    ASSERT(fl_net_ipv4_prefix_match(a, fl_net_ipv4_network_addr(a, 24u), 24u));
     return 0;
 }
 
