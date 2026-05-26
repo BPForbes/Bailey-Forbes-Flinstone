@@ -16,6 +16,8 @@
 #include "net_ping_host.h"
 #include "net_requirements.h"
 #include "net_background.h"
+#include "net_udp.h"
+#include "contract_p3_socket.h"
 
 #include <arpa/inet.h>
 #include <stdio.h>
@@ -451,6 +453,42 @@ static int test_net_task_backend_server_relay(void) {
     return 0;
 }
 
+static int test_net_udp_build_datagram(void) {
+    uint8_t buf[64];
+    const char payload[] = "udp";
+    size_t len;
+    uint32_t loopback = (uint32_t)FL_NET_IPV4_LOOPBACK_FIRST_OCTET | (1u << 24);
+
+    len = fl_net_udp_build_datagram(buf, sizeof(buf), loopback, loopback, 48001u, 7777u,
+                                    (const uint8_t *)payload, sizeof(payload) - 1u);
+    ASSERT(len == (size_t)FL_NET_UDP_HDR_LEN + sizeof(payload) - 1u);
+    ASSERT(buf[0] == (uint8_t)(48001u >> 8));
+    ASSERT(buf[1] == (uint8_t)(48001u & 0xff));
+    ASSERT(buf[2] == (uint8_t)(7777u >> 8));
+    ASSERT(buf[3] == (uint8_t)(7777u & 0xff));
+    return 0;
+}
+
+static int test_net_task_backend_socket_send_smoke(void) {
+    fl_net_socket_endpoint_t ep;
+    fl_result_t rc;
+    uint32_t loopback = (uint32_t)FL_NET_IPV4_LOOPBACK_FIRST_OCTET | (1u << 24);
+    const char payload[] = "socket arp blend";
+
+    ep.local_ip_be = loopback;
+    ep.local_port_be = htons(48002u);
+    ep.peer_ip_be = loopback;
+    ep.peer_port_be = htons((uint16_t)FL_NET_TASK_BACKEND_WIRE_SERVER_PORT);
+
+    rc = fl_net_task_backend_socket_send(&ep, (const uint8_t *)payload, sizeof(payload) - 1u);
+    if (rc == FL_RESULT_NOSYS) {
+        fprintf(stderr, "skip: socket send unavailable on this platform\n");
+        return 0;
+    }
+    ASSERT(rc == FL_RESULT_OK);
+    return 0;
+}
+
 static int test_net_task_backend_client_wire_send_smoke(void) {
     fl_result_t rc;
     uint8_t frame[128];
@@ -526,6 +564,16 @@ int main(void) {
 
     printf("test_net_task_backend_client_wire_send_smoke... ");
     if (test_net_task_backend_client_wire_send_smoke() != 0)
+        return 1;
+    puts("ok");
+
+    printf("test_net_udp_build_datagram... ");
+    if (test_net_udp_build_datagram() != 0)
+        return 1;
+    puts("ok");
+
+    printf("test_net_task_backend_socket_send_smoke... ");
+    if (test_net_task_backend_socket_send_smoke() != 0)
         return 1;
     puts("ok");
 

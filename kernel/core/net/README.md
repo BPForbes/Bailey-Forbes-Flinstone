@@ -10,7 +10,8 @@ Long-form guide: **`docs/P3_NETWORKING.md`**. **P3-13 chat room plan:** **`docs/
 | `net_packet.c` | Layered **fl_net_packet_t** parse + RX/TX pipeline helpers (`contract_p3_packet.h`) |
 | `net_arp.c` | P3-4 ARP cache (**asm_net_arp_cache_***), request/reply, resolve |
 | `net_route.c` | P3-5 routing table |
-| `net_wire_egress.c` | IPv4 L4 egress (ARP + netdev) |
+| `net_wire_egress.c` | IPv4 L4 egress (ARP + netdev); `fl_net_wire_egress_l4_xmit` |
+| `net_udp.c` | UDP datagram build for socket/task-backend path |
 | `net_ipv4.c` | IPv4 header construction |
 | `net_checksum.c` | Checksum (+ `asm_net_checksum16`) |
 | `net_icmp.c` | ICMP echo |
@@ -23,9 +24,9 @@ Long-form guide: **`docs/P3_NETWORKING.md`**. **P3-13 chat room plan:** **`docs/
 | `net_wire_host_syscall.c` | Linux socket syscall bridge |
 | `net_ping_host.c` | `fl_net_ping` |
 | `net_requirements.c` | CI probe report |
-| `net_background.c` | **P3-14** workqueue tick; **task backend** client→server wire egress + server relay/inbox (P3-13 TODO for wire RX / shell) |
+| `net_background.c` | **P3-14** workqueue tick; **task backend** socket four-tuple + ARP xmit, client→server→clients relay (P3-13 TODO for wire RX / shell) |
 
-**Planned (P3-13 — see `docs/P3_13_CHAT_SERVER.md`):** `net_socket.c`, `net_server.c`, `net_udp.c` (P3-6), TCP FSM in `net_tcp.c` (P3-7); shell `cmd_server.c`.
+**Planned (P3-13 — see `docs/P3_13_CHAT_SERVER.md`):** `net_socket.c`, `net_server.c`, TCP FSM in `net_tcp.c` (P3-7); shell `cmd_server.c`.
 
 ## Includes
 

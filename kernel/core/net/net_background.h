@@ -3,6 +3,7 @@
 
 #include "contract_p3_background.h"
 #include "contract_p3_packet.h"
+#include "contract_p3_socket.h"
 #include "contract_result.h"
 
 #include <stddef.h>
@@ -18,27 +19,38 @@ void fl_net_background_tick(unsigned max_items);
 fl_result_t fl_net_background_arp_tick_kick(void);
 
 /**
- * Network task backend — packet distribution hub (client → server → clients).
+ * Network task backend — blended **socket** + **ARP** distribution hub.
  *
- * **Flow (normative for P3-13 message/server work):**
- * 1. **Client egress:** `fl_net_task_backend_client_wire_send` copies the parsed
- *    packet L4 payload onto the wire (UDP today) toward the server host.
- * 2. **Server ingress:** TODO P3-13 — wire RX demux parses frames and calls
- *    `fl_net_task_backend_server_ingress` (not wired to netdev RX in this PR).
- * 3. **Server relay:** `fl_net_task_backend_server_relay_to_clients` enqueues the
- *    packet L4 payload into every other connected client inbox (msgq_t).
+ * **Model:** Socket(A,B) = (IP_A, Port_A, IP_B, Port_B). Send path:
  *
- * Payload bytes use asm-backed copies (`fl_net_packet_copy_l4`, msgq I/O).
- * Full `server` shell / TCP hub lives in P3-13 (`docs/P3_13_CHAT_SERVER.md`).
+ *   Data → UDP segment → IPv4 → ARP(peer IP) → Ethernet frame → netdev
+ *
+ * **Client → server:** `fl_net_task_backend_socket_send` toward hub (**peer** = server).
+ * **Server → clients:** `fl_net_task_backend_server_relay_to_clients` fans out inboxes
+ * and, when peers are bound, transmits Socket(hub, C_i) with **ARP(IP_Ci)** per client.
+ *
+ * TODO: P3-13 — full TCP/socket shim, wire RX demux, `server` shell command.
  */
 #define FL_NET_TASK_BACKEND_MAX_USERS 16u
 #define FL_NET_TASK_BACKEND_INBOX_PAYLOAD_MAX 2046u
 
-/** Lab default server UDP port for backend wire egress (P3-13 may override). */
+/** Lab default server UDP port (P3-13 may override). */
 #define FL_NET_TASK_BACKEND_WIRE_SERVER_PORT 7777u
+
+/** Default ARP resolve wait for backend wire xmit (milliseconds). */
+#define FL_NET_TASK_BACKEND_ARP_TIMEOUT_MS 500u
 
 fl_result_t fl_net_task_backend_user_open(unsigned slot, unsigned max_inbox_messages);
 void fl_net_task_backend_user_close(unsigned slot);
+
+/**
+ * Bind **peer** IPv4/port for **slot** (client address for server→client ARP wire relay).
+ * **port_host** is host byte order (1–65535).
+ */
+fl_result_t fl_net_task_backend_peer_bind(unsigned slot, uint32_t peer_ip_be, uint16_t port_host);
+
+/** Hub identity for server relay wire path (local IP/port on the server). */
+fl_result_t fl_net_task_backend_hub_bind(uint32_t hub_ip_be, uint16_t hub_port_host);
 
 /** Enqueue parsed packet L4 payload into dst_user's inbox. */
 fl_result_t fl_net_task_backend_send_packet(unsigned dst_slot, const fl_net_packet_t *pkt);
@@ -51,23 +63,27 @@ fl_result_t fl_net_task_backend_recv_packet(unsigned src_slot, uint8_t *out, siz
                                               size_t *out_len);
 
 /**
- * Client path: send packet L4 payload to **server_addr_be**:**server_port** on the wire.
- * One-way egress (recv timeout is treated as success when the datagram was sent).
+ * Socket egress: build UDP from **endpoint** + payload, transmit via routed netdev + ARP.
+ * On **FL_RESULT_NOENT**, falls back to hosted **fl_net_wire_send_udp**.
+ */
+fl_result_t fl_net_task_backend_socket_send(const fl_net_socket_endpoint_t *endpoint,
+                                            const uint8_t *payload, size_t payload_len);
+
+/**
+ * Client → server convenience wrapper (builds **fl_net_socket_endpoint_t**).
  */
 fl_result_t fl_net_task_backend_client_wire_send(uint32_t server_addr_be, uint16_t client_sport,
                                                  uint16_t server_port,
                                                  const fl_net_packet_t *pkt);
 
 /**
- * Server path: relay **pkt** to every open client inbox except **src_slot**.
- * Returns **FL_RESULT_OK** when at least one client received the payload.
+ * Server hub: relay to other clients (inbox + ARP/socket wire when peers are bound).
  */
 fl_result_t fl_net_task_backend_server_relay_to_clients(unsigned src_slot,
                                                         const fl_net_packet_t *pkt);
 
 /**
- * Server path: accept an inbound packet at the hub and relay to other clients.
- * TODO: P3-13 wire RX demux calls this after parsing server-bound frames.
+ * Server ingress after wire RX parse. TODO: P3-13 demux calls this.
  */
 fl_result_t fl_net_task_backend_server_ingress(unsigned from_client_slot,
                                                const fl_net_packet_t *pkt);

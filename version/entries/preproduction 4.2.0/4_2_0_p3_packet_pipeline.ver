@@ -4,7 +4,7 @@ RELEASE_VERSION=0
 PRERELEASE=1
 DEV_VERSION=3
 DESCRIPTION<<VER_END
-PRE 4.2.0 (P3): Packet layering contract (contract_p3_packet.h): fl_net_packet_t L2/IPv4/L4 slices and RX/TX pipeline stages; net_packet.c parse/copy/pipeline feed; net_wire_egress uses packet parser; net_background task backend for client wire egress, server relay/inbox distribution (P3-13 server shell TODO); docs/P3_NETWORKING.md packet backbone section; FL_CONTRACT_P3_NETWORKING_REV 7.
+PRE 4.2.0 (P3): Packet layering (contract_p3_packet.h) and socket four-tuple (contract_p3_socket.h); net_udp.c datagram build; net_wire_egress_l4_xmit (route, ARP, TX); net_background task backend blends Socket(A,B) with ARP for client to server to clients relay (inbox plus peer or hub wire bind); no loopback drain in background tick; P3-13 full socket shim and wire RX demux TODO; docs/P3_NETWORKING.md blended ARP plus socket section; FL_CONTRACT_P3_NETWORKING_REV 8.
 VER_END
 
 RELEASE_DATE=2026-05-26

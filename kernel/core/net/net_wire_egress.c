@@ -201,6 +201,98 @@ static fl_result_t egress_tap_path(const fl_net_route_entry_t *route, uint32_t d
     return FL_RESULT_TIMEDOUT;
 }
 
+static fl_result_t egress_loopback_xmit(uint32_t dst_be, uint8_t ip_proto, const uint8_t *l4,
+                                        size_t l4_len) {
+    uint8_t ipbuf[576];
+    uint8_t frame[FL_NET_WIRE_FRAME_BUF_MAX];
+    uint8_t host_mac[6];
+    uint8_t peer_mac[6];
+    fl_net_ipv4_hdr_t hdr;
+    fl_net_frame_view_t view;
+    size_t ip_len;
+    size_t frame_len;
+    uint32_t src_be = (uint32_t)FL_NET_IPV4_LOOPBACK_FIRST_OCTET | (1u << 24);
+
+    (void)ip_proto;
+
+    fl_net_loopback_reset();
+
+    ip_len = fl_net_ipv4_build(&hdr, ipbuf, sizeof(ipbuf), ip_proto, src_be, dst_be, l4, l4_len,
+                               0x5151u);
+    if (ip_len == 0)
+        return FL_RESULT_ERR;
+
+    fl_net_loopback_mac_peer(peer_mac);
+    fl_net_loopback_mac_host(host_mac);
+    frame_len = fl_net_wire_build_eth_ipv4(frame, sizeof(frame), peer_mac, host_mac, ipbuf, ip_len);
+    if (frame_len == 0)
+        return FL_RESULT_ERR;
+
+    view.data = frame;
+    view.len = frame_len;
+    return fl_net_netdev_send(fl_net_netdev_loopback(), &view);
+}
+
+static fl_result_t egress_tap_xmit(const fl_net_route_entry_t *route, uint32_t dst_be,
+                                 uint8_t ip_proto, const uint8_t *l4, size_t l4_len,
+                                 unsigned arp_timeout_ms) {
+    uint8_t ipbuf[576];
+    uint8_t tx_frame[FL_NET_WIRE_FRAME_BUF_MAX];
+    uint8_t dst_mac[6];
+    fl_net_ipv4_hdr_t hdr;
+    fl_net_frame_view_t view;
+    size_t ip_len;
+    size_t frame_len;
+    uint32_t next_hop;
+    fl_result_t rc;
+
+    if (!route->src_mac_valid)
+        return FL_RESULT_ERR;
+
+    next_hop = fl_net_route_next_hop(dst_be, route);
+
+    rc = fl_net_arp_resolve(route->drv, route->src_mac, route->src_ip_be, next_hop, dst_mac,
+                            arp_timeout_ms);
+    if (rc != FL_RESULT_OK)
+        return rc;
+
+    ip_len = fl_net_ipv4_build(&hdr, ipbuf, sizeof(ipbuf), ip_proto, route->src_ip_be, dst_be, l4,
+                               l4_len, 0x5151u);
+    if (ip_len == 0)
+        return FL_RESULT_ERR;
+
+    frame_len = fl_net_wire_build_eth_ipv4(tx_frame, sizeof(tx_frame), dst_mac, route->src_mac,
+                                           ipbuf, ip_len);
+    if (frame_len == 0)
+        return FL_RESULT_ERR;
+
+    view.data = tx_frame;
+    view.len = frame_len;
+    return fl_net_netdev_send(route->drv, &view);
+}
+
+fl_result_t fl_net_wire_egress_l4_xmit(uint32_t dst_be, uint8_t ip_proto, const uint8_t *l4,
+                                       size_t l4_len, unsigned arp_timeout_ms) {
+    fl_net_route_entry_t route;
+
+    if (!l4 || l4_len == 0)
+        return FL_RESULT_INVAL;
+
+    if (fl_net_loopback_owns(dst_be))
+        return egress_loopback_xmit(dst_be, ip_proto, l4, l4_len);
+
+    if (fl_net_route_lookup(dst_be, &route) != FL_RESULT_OK)
+        return FL_RESULT_NOENT;
+
+    if (route.drv == fl_net_netdev_loopback())
+        return egress_loopback_xmit(dst_be, ip_proto, l4, l4_len);
+
+    if (route.drv == fl_net_netdev_tap() && fl_net_netdev_tap_is_open())
+        return egress_tap_xmit(&route, dst_be, ip_proto, l4, l4_len, arp_timeout_ms);
+
+    return FL_RESULT_NOENT;
+}
+
 fl_result_t fl_net_wire_egress_l4(uint32_t dst_be, uint8_t ip_proto, const uint8_t *l4,
                                   size_t l4_len, uint8_t *rx_l4, size_t rx_l4_cap,
                                   size_t *rx_l4_len, unsigned timeout_ms, double *out_rtt_ms) {
