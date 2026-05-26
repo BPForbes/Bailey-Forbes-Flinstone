@@ -26,10 +26,13 @@ Full spec: **[`docs/P3_13_CHAT_SERVER.md`](P3_13_CHAT_SERVER.md)**.
 | Module | Roadmap | Role |
 |--------|---------|------|
 | **`net_wire.c`** | Wire vocabulary | Ethernet+IPv4 frame build/parse, MTU, `fl_net_frame_view_t` / `fl_net_frame_mut_t` |
+| **`net_packet.c`** | Packet backbone | Layered **L2 / IPv4 / L4** slices (`fl_net_packet_t`), RX/TX pipeline stages (**`contract_p3_packet.h`**) |
 | **`net_eth.c`** | L2 helpers | Aliases/constants over wire |
 | **`net_arp.c`** | P3-4 | ARP request/reply, bounded cache, resolve over netdev |
 | **`net_route.c`** | P3-5 | Longest-prefix routing table; TAP lab via **FL_NET_TAP_*** env |
-| **`net_wire_egress.c`** | P3-5 / P3-6 path | IPv4 L4 send/recv on routed netdev (ARP + ICMP echo) |
+| **`net_wire_egress.c`** | P3-5 / P3-6 path | IPv4 L4 send/recv on routed netdev (ARP + ICMP echo); **`fl_net_wire_egress_l4_xmit`** for one-way UDP |
+| **`net_udp.c`** | P3-6 (partial) | **`fl_net_udp_build_datagram`** for task-backend socket egress |
+| **`net_background.c`** | P3-14 / distribution | Workqueue tick; blended socket + ARP task backend (P3-13 wire RX TODO) |
 | **`net_ipv4.c`** | P3-5 (partial) | IPv4 header build, literal/loopback address helpers |
 | **`net_checksum.c`** | P3-5 | Internet checksum; **`asm_net_checksum16`** when `FL_NET_ASM_AVAILABLE` |
 | **`net_icmp.c`** | P3-5 | ICMP echo request/reply exchange |
@@ -42,6 +45,51 @@ Full spec: **[`docs/P3_13_CHAT_SERVER.md`](P3_13_CHAT_SERVER.md)**.
 | **`net_wire_host_syscall.c`** | Hosted shim | C errno bridge to **`net_host_*_asm`** |
 | **`net_ping_host.c`** | Shell API | `fl_net_ping` / format helpers |
 | **`net_requirements.c`** | CI | `fl_net_probe_endpoint`, `SKIP_NETWORK_INTEROP` |
+
+## Packet structuring (cross-cutting)
+
+Packets are the shared backbone for **P3-4** … **P3-12** — not a separate roadmap row. Normative types live in **`contracts/networking/contract_p3_packet.h`** (included from **`contract_networking.h`**):
+
+| Type | Role |
+|------|------|
+| **`fl_net_pkt_slice_t`** | Non-owning **off** + **len** inside a frame buffer |
+| **`fl_net_packet_t`** | Parsed **Ethernet + IPv4** view with optional **l4** slice and **valid** layer bits |
+| **`fl_net_pipeline_rx_t`** | RX stages: **DRV_RX → PARSE_L2 → PARSE_L3 → PARSE_L4 → ROUTE → DELIVER** |
+| **`fl_net_pipeline_tx_t`** | TX stages: **BUILD_L4 → BUILD_IPV4 → BUILD_L2 → ROUTE → ARP → DRV_TX** |
+
+**Implementation:** **`fl_net_packet_parse_eth_ipv4`**, **`fl_net_packet_copy_l4`**, **`fl_net_pipeline_rx_feed`** in **`net_packet.c`**. **`net_wire_egress.c`** uses the packet parser for ICMP echo reply extraction. **P3-12** DHCP and **P3-6** UDP should build on the same slices when those clients land.
+
+## Blended ARP + socket model (task backend)
+
+Logical channels use the **socket four-tuple** from **`contract_p3_socket.h`**:
+
+\[
+\text{Socket}(A,B) = (IP_A, Port_A, IP_B, Port_B)
+\]
+
+(all multi-byte fields in **network byte order** in **`fl_net_socket_endpoint_t`**).
+
+**Send path** (implemented today for UDP datagrams):
+
+\[
+\text{App Data} \rightarrow \text{Socket} \rightarrow \text{UDP} \rightarrow \text{IPv4} \rightarrow \operatorname{ARP}(IP_B) \rightarrow \text{Ethernet} \rightarrow \text{NIC}
+\]
+
+| Module | Role |
+|--------|------|
+| **`net_udp.c`** | **`fl_net_udp_build_datagram`** — UDP header + payload (host-order ports at API) |
+| **`net_wire_egress.c`** | **`fl_net_wire_egress_l4_xmit`** — route → ARP → IPv4/Ethernet TX (no reply wait) |
+| **`net_background.c`** | Task backend hub: **`fl_net_task_backend_socket_send`**, **`peer_bind`**, **`hub_bind`**, **`server_relay_to_clients`** |
+
+**Client → server → other clients** (relay model; full **P3-13** TCP/socket shim TODO):
+
+\[
+C_1 \xrightarrow{\text{Socket}(C_1,S)} S \xrightarrow{\text{Socket}(S,C_2)} C_2
+\]
+
+- **Same-host:** inbox fan-out via **`fl_net_task_backend_send_packet`**.
+- **Wire:** when **`hub_bind`** and per-client **`peer_bind`** are set, the server relay builds **Socket(hub, Cᵢ)** and calls **`fl_net_wire_egress_l4_xmit`** (ARP per destination IP).
+- **`fl_net_background_tick`** does **not** recv from the shared loopback netdev queue (ICMP/TCP probes use that queue via **`net_wire_egress`**).
 
 ## Data path (ping)
 

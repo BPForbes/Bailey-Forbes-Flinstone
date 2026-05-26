@@ -1,5 +1,6 @@
 #include "contract_p0_ci.h"
 #include "contract_p3_ipv4.h"
+#include "contract_p3_loopback.h"
 #include "contract_p3_wire.h"
 #include "net_arp.h"
 #include "net_dns.h"
@@ -11,8 +12,12 @@
 #include "net_ipv4.h"
 #include "net_loopback.h"
 #include "net_netdev.h"
+#include "net_packet.h"
 #include "net_ping_host.h"
 #include "net_requirements.h"
+#include "net_background.h"
+#include "net_udp.h"
+#include "contract_p3_socket.h"
 
 #include <arpa/inet.h>
 #include <stdio.h>
@@ -303,6 +308,214 @@ static int test_tap_smoke(void) {
     return 0;
 }
 
+static int test_packet_pipeline(void) {
+    uint8_t buf[128];
+    uint8_t ip[40];
+    uint8_t l4_out[64];
+    size_t frame_len;
+    size_t l4_len = 0;
+    fl_net_packet_t pkt;
+    fl_net_pipeline_rx_t pipe;
+
+    memset(ip, 0, sizeof(ip));
+    ip[0] = 0x45;
+    ip[9] = FL_NET_IP_PROTO_ICMP;
+    ip[12] = 127;
+    ip[16] = 127;
+    ip[19] = 1;
+    ip[2] = 0;
+    ip[3] = 40;
+
+    {
+        uint8_t mac[6];
+        fl_net_loopback_mac_host(mac);
+        frame_len = fl_net_wire_build_eth_ipv4(buf, sizeof(buf), mac, mac, ip, 40u);
+    }
+    ASSERT(frame_len > FL_NET_ETH_FRAME_HDR_LEN);
+    ASSERT(FL_NET_PACKET_IMPL_DEFINED == 1);
+
+    ASSERT(fl_net_packet_parse_eth_ipv4(buf, frame_len, &pkt) == FL_RESULT_OK);
+    ASSERT((pkt.valid & FL_NET_PKT_VALID_L2) != 0);
+    ASSERT((pkt.valid & FL_NET_PKT_VALID_IPV4) != 0);
+    ASSERT((pkt.valid & FL_NET_PKT_VALID_L4) != 0);
+    ASSERT(pkt.ip_proto == FL_NET_IP_PROTO_ICMP);
+    ASSERT(pkt.l4.len == 20u);
+    ASSERT(fl_net_packet_copy_l4(&pkt, l4_out, sizeof(l4_out), &l4_len) == FL_RESULT_OK);
+    ASSERT(l4_len == 20u);
+
+    fl_net_pipeline_rx_reset(&pipe);
+    ASSERT(fl_net_pipeline_rx_feed(&pipe, FL_NET_PIPE_STAGE_PARSE_L4, buf, frame_len) ==
+           FL_RESULT_OK);
+    ASSERT(pipe.stage == FL_NET_PIPE_STAGE_PARSE_L4);
+    ASSERT((pipe.pkt.valid & FL_NET_PKT_VALID_L4) != 0);
+
+    /* Crafted slice must not pass overflow-prone bounds (off + len wrap). */
+    pkt.l4.off = pkt.frame.len - 1u;
+    pkt.l4.len = 8u;
+    ASSERT(fl_net_packet_copy_l4(&pkt, l4_out, sizeof(l4_out), &l4_len) == FL_RESULT_ERR);
+
+    fl_net_pipeline_rx_reset(&pipe);
+    ASSERT(fl_net_pipeline_rx_feed(&pipe, FL_NET_PIPE_STAGE_DRV_RX, buf, frame_len) ==
+           FL_RESULT_OK);
+    ASSERT(pipe.pkt.valid == 0u);
+
+    return 0;
+}
+
+static int test_net_task_backend_packet_delivery(void) {
+    fl_result_t rc;
+    uint8_t frame[128];
+    uint8_t out[FL_NET_TASK_BACKEND_INBOX_PAYLOAD_MAX];
+    size_t out_len = 0;
+    const char payload[] = "user->user payload";
+    size_t payload_len = sizeof(payload) - 1u;
+
+    memset(frame, 0, sizeof(frame));
+    memcpy(frame + 64u, payload, payload_len);
+
+    fl_net_packet_t pkt;
+    memset(&pkt, 0, sizeof(pkt));
+    pkt.frame.data = frame;
+    pkt.frame.len = sizeof(frame);
+    pkt.l4.off = 64u;
+    pkt.l4.len = payload_len;
+    pkt.valid = FL_NET_PKT_VALID_L4;
+
+    rc = fl_net_task_backend_user_open(0u, 4u);
+    ASSERT(rc == FL_RESULT_OK);
+    rc = fl_net_task_backend_user_open(1u, 4u);
+    ASSERT(rc == FL_RESULT_OK);
+
+    rc = fl_net_task_backend_send_packet(1u, &pkt);
+    ASSERT(rc == FL_RESULT_OK);
+
+    out_len = 0;
+    rc = fl_net_task_backend_recv_packet(1u, out, sizeof(out), &out_len);
+    ASSERT(rc == FL_RESULT_OK);
+    ASSERT(out_len == payload_len);
+    ASSERT(memcmp(out, payload, payload_len) == 0);
+
+    fl_net_task_backend_user_close(0u);
+    fl_net_task_backend_user_close(1u);
+    return 0;
+}
+
+static int test_net_task_backend_server_relay(void) {
+    fl_result_t rc;
+    uint8_t frame[128];
+    uint8_t out_a[FL_NET_TASK_BACKEND_INBOX_PAYLOAD_MAX];
+    uint8_t out_b[FL_NET_TASK_BACKEND_INBOX_PAYLOAD_MAX];
+    size_t out_len = 0;
+    const char payload[] = "client->server->clients";
+    size_t payload_len = sizeof(payload) - 1u;
+
+    memset(frame, 0, sizeof(frame));
+    memcpy(frame + 32u, payload, payload_len);
+
+    fl_net_packet_t pkt;
+    memset(&pkt, 0, sizeof(pkt));
+    pkt.frame.data = frame;
+    pkt.frame.len = sizeof(frame);
+    pkt.l4.off = 32u;
+    pkt.l4.len = payload_len;
+    pkt.valid = FL_NET_PKT_VALID_L4;
+
+    rc = fl_net_task_backend_user_open(0u, 4u);
+    ASSERT(rc == FL_RESULT_OK);
+    rc = fl_net_task_backend_user_open(1u, 4u);
+    ASSERT(rc == FL_RESULT_OK);
+    rc = fl_net_task_backend_user_open(2u, 4u);
+    ASSERT(rc == FL_RESULT_OK);
+
+    /* Client 0 -> server hub -> clients 1 and 2 (server shell TODO in P3-13). */
+    rc = fl_net_task_backend_server_ingress(0u, &pkt);
+    ASSERT(rc == FL_RESULT_OK);
+
+    out_len = 0;
+    rc = fl_net_task_backend_recv_packet(1u, out_a, sizeof(out_a), &out_len);
+    ASSERT(rc == FL_RESULT_OK);
+    ASSERT(out_len == payload_len);
+    ASSERT(memcmp(out_a, payload, payload_len) == 0);
+
+    out_len = 0;
+    rc = fl_net_task_backend_recv_packet(2u, out_b, sizeof(out_b), &out_len);
+    ASSERT(rc == FL_RESULT_OK);
+    ASSERT(out_len == payload_len);
+    ASSERT(memcmp(out_b, payload, payload_len) == 0);
+
+    out_len = 0;
+    rc = fl_net_task_backend_recv_packet(0u, out_a, sizeof(out_a), &out_len);
+    ASSERT(rc == FL_RESULT_TIMEDOUT);
+
+    fl_net_task_backend_user_close(0u);
+    fl_net_task_backend_user_close(1u);
+    fl_net_task_backend_user_close(2u);
+    return 0;
+}
+
+static int test_net_udp_build_datagram(void) {
+    uint8_t buf[64];
+    const char payload[] = "udp";
+    size_t len;
+    uint32_t loopback = (uint32_t)FL_NET_IPV4_LOOPBACK_FIRST_OCTET | (1u << 24);
+
+    len = fl_net_udp_build_datagram(buf, sizeof(buf), loopback, loopback, 48001u, 7777u,
+                                    (const uint8_t *)payload, sizeof(payload) - 1u);
+    ASSERT(len == (size_t)FL_NET_UDP_HDR_LEN + sizeof(payload) - 1u);
+    ASSERT(buf[0] == (uint8_t)(48001u >> 8));
+    ASSERT(buf[1] == (uint8_t)(48001u & 0xff));
+    ASSERT(buf[2] == (uint8_t)(7777u >> 8));
+    ASSERT(buf[3] == (uint8_t)(7777u & 0xff));
+    return 0;
+}
+
+static int test_net_task_backend_socket_send_smoke(void) {
+    fl_net_socket_endpoint_t ep;
+    fl_result_t rc;
+    uint32_t loopback = (uint32_t)FL_NET_IPV4_LOOPBACK_FIRST_OCTET | (1u << 24);
+    const char payload[] = "socket arp blend";
+
+    ep.local_ip_be = loopback;
+    ep.local_port_be = htons(48002u);
+    ep.peer_ip_be = loopback;
+    ep.peer_port_be = htons((uint16_t)FL_NET_TASK_BACKEND_WIRE_SERVER_PORT);
+
+    rc = fl_net_task_backend_socket_send(&ep, (const uint8_t *)payload, sizeof(payload) - 1u);
+    if (rc == FL_RESULT_NOSYS) {
+        fprintf(stderr, "skip: socket send unavailable on this platform\n");
+        return 0;
+    }
+    ASSERT(rc == FL_RESULT_OK);
+    return 0;
+}
+
+static int test_net_task_backend_client_wire_send_smoke(void) {
+    fl_result_t rc;
+    uint8_t frame[128];
+    const char payload[] = "wire egress smoke";
+    size_t payload_len = sizeof(payload) - 1u;
+    fl_net_packet_t pkt;
+    uint32_t loopback = (uint32_t)FL_NET_IPV4_LOOPBACK_FIRST_OCTET | (1u << 24);
+
+    memset(frame, 0, sizeof(frame));
+    memcpy(frame + 16u, payload, payload_len);
+    memset(&pkt, 0, sizeof(pkt));
+    pkt.frame.data = frame;
+    pkt.frame.len = sizeof(frame);
+    pkt.l4.off = 16u;
+    pkt.l4.len = payload_len;
+    pkt.valid = FL_NET_PKT_VALID_L4;
+
+    rc = fl_net_task_backend_client_wire_send(loopback, 48001u,
+                                              FL_NET_TASK_BACKEND_WIRE_SERVER_PORT, &pkt);
+    if (rc == FL_RESULT_NOSYS) {
+        fprintf(stderr, "skip: client wire send unavailable on this platform\n");
+        return 0;
+    }
+    ASSERT(rc == FL_RESULT_OK);
+    return 0;
+}
+
 static int test_probe_endpoint(void) {
     fl_net_requirements_report_t rep;
     fl_result_t prc = fl_net_probe_endpoint("127.0.0.1", 9, 3000u, &rep);
@@ -331,6 +544,36 @@ int main(void) {
 
     printf("test_arp_cache_and_frame... ");
     if (test_arp_cache_and_frame() != 0)
+        return 1;
+    puts("ok");
+
+    printf("test_packet_pipeline... ");
+    if (test_packet_pipeline() != 0)
+        return 1;
+    puts("ok");
+
+    printf("test_net_task_backend_packet_delivery... ");
+    if (test_net_task_backend_packet_delivery() != 0)
+        return 1;
+    puts("ok");
+
+    printf("test_net_task_backend_server_relay... ");
+    if (test_net_task_backend_server_relay() != 0)
+        return 1;
+    puts("ok");
+
+    printf("test_net_task_backend_client_wire_send_smoke... ");
+    if (test_net_task_backend_client_wire_send_smoke() != 0)
+        return 1;
+    puts("ok");
+
+    printf("test_net_udp_build_datagram... ");
+    if (test_net_udp_build_datagram() != 0)
+        return 1;
+    puts("ok");
+
+    printf("test_net_task_backend_socket_send_smoke... ");
+    if (test_net_task_backend_socket_send_smoke() != 0)
         return 1;
     puts("ok");
 

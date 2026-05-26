@@ -4,6 +4,7 @@
  * **Distribution:** client packets are **UDP** payloads (**P3-6**) carrying BOOTP/DHCP
  * messages; options blocks begin after the fixed header and must start with magic
  * **FL_NET_DHCP_MAGIC_COOKIE_BE32** (**RFC 2131** / **RFC 2132** subset documented in code).
+ * Layered offsets use **fl_net_packet_t** / **fl_net_pkt_slice_t** (**contract_p3_packet.h**).
  *
  * **State machine:** **DISCOVER → OFFER → REQUEST → ACK** with finite timers per state;
  * document **NAK** and lease expiry paths.
