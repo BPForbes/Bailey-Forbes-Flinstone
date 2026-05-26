@@ -2,6 +2,7 @@
 
 #include "contract_p3_ipv4.h"
 #include "net_arp.h"
+#include "net_packet.h"
 #include "net_ipv4.h"
 #include "net_loopback.h"
 #include "net_netdev.h"
@@ -19,23 +20,16 @@ static double egress_delta_ms(const struct timeval *t0, const struct timeval *t1
 static fl_result_t egress_copy_ipv4_l4(const uint8_t *rx_frame, size_t frame_len, size_t ip_off,
                                        size_t ip_len_rx, uint8_t *rx_l4, size_t rx_l4_cap,
                                        size_t *rx_l4_len) {
-    size_t hdr_len;
-    size_t payload;
+    fl_net_packet_t pkt;
+    fl_result_t rc;
 
-    if (!rx_frame || !rx_l4 || !rx_l4_len || ip_off + 20u > frame_len)
-        return FL_RESULT_ERR;
+    (void)ip_off;
+    (void)ip_len_rx;
 
-    hdr_len = (size_t)((rx_frame[ip_off] & 0x0fu) * 4u);
-    if (hdr_len < 20u || ip_len_rx < hdr_len || ip_off + ip_len_rx > frame_len)
-        return FL_RESULT_ERR;
-
-    payload = ip_len_rx - hdr_len;
-    if (payload > rx_l4_cap || ip_off + hdr_len + payload > frame_len)
-        return FL_RESULT_ERR;
-
-    memcpy(rx_l4, rx_frame + ip_off + hdr_len, payload);
-    *rx_l4_len = payload;
-    return FL_RESULT_OK;
+    rc = fl_net_packet_parse_eth_ipv4(rx_frame, frame_len, &pkt);
+    if (rc != FL_RESULT_OK)
+        return rc;
+    return fl_net_packet_copy_l4(&pkt, rx_l4, rx_l4_cap, rx_l4_len);
 }
 
 static fl_result_t egress_loopback(uint32_t dst_be, uint8_t ip_proto, const uint8_t *l4,

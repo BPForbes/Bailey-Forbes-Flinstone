@@ -19,6 +19,7 @@ shards below, and **FL_CONTRACT_P3_VOCABULARY_LOCK**.
 | File | Roadmap |
 |------|---------|
 | *contract_p3_wire.h* | Shared wire vocabulary (not a **P3-**`*` row) |
+| *contract_p3_packet.h* | Layered packet + pipeline stages (cross-cutting; not a **P3-**`*` row) |
 | *contract_p3_trust.h* | Narrow **P2-3** include (not a **P3-**`*` row) |
 | *contract_p3_netdev.h* | P3-1 |
 | *contract_p3_loopback.h* | P3-2 |

@@ -11,6 +11,7 @@
 #include "net_ipv4.h"
 #include "net_loopback.h"
 #include "net_netdev.h"
+#include "net_packet.h"
 #include "net_ping_host.h"
 #include "net_requirements.h"
 
@@ -303,6 +304,50 @@ static int test_tap_smoke(void) {
     return 0;
 }
 
+static int test_packet_pipeline(void) {
+    uint8_t buf[128];
+    uint8_t ip[40];
+    uint8_t l4_out[64];
+    size_t frame_len;
+    size_t l4_len = 0;
+    fl_net_packet_t pkt;
+    fl_net_pipeline_rx_t pipe;
+
+    memset(ip, 0, sizeof(ip));
+    ip[0] = 0x45;
+    ip[9] = FL_NET_IP_PROTO_ICMP;
+    ip[12] = 127;
+    ip[16] = 127;
+    ip[19] = 1;
+    ip[2] = 0;
+    ip[3] = 40;
+
+    {
+        uint8_t mac[6];
+        fl_net_loopback_mac_host(mac);
+        frame_len = fl_net_wire_build_eth_ipv4(buf, sizeof(buf), mac, mac, ip, 40u);
+    }
+    ASSERT(frame_len > FL_NET_ETH_FRAME_HDR_LEN);
+    ASSERT(FL_NET_PACKET_IMPL_DEFINED == 1);
+
+    ASSERT(fl_net_packet_parse_eth_ipv4(buf, frame_len, &pkt) == FL_RESULT_OK);
+    ASSERT((pkt.valid & FL_NET_PKT_VALID_L2) != 0);
+    ASSERT((pkt.valid & FL_NET_PKT_VALID_IPV4) != 0);
+    ASSERT((pkt.valid & FL_NET_PKT_VALID_L4) != 0);
+    ASSERT(pkt.ip_proto == FL_NET_IP_PROTO_ICMP);
+    ASSERT(pkt.l4.len == 20u);
+    ASSERT(fl_net_packet_copy_l4(&pkt, l4_out, sizeof(l4_out), &l4_len) == FL_RESULT_OK);
+    ASSERT(l4_len == 20u);
+
+    fl_net_pipeline_rx_reset(&pipe);
+    ASSERT(fl_net_pipeline_rx_feed(&pipe, FL_NET_PIPE_STAGE_PARSE_L4, buf, frame_len) ==
+           FL_RESULT_OK);
+    ASSERT(pipe.stage == FL_NET_PIPE_STAGE_PARSE_L4);
+    ASSERT((pipe.pkt.valid & FL_NET_PKT_VALID_L4) != 0);
+
+    return 0;
+}
+
 static int test_probe_endpoint(void) {
     fl_net_requirements_report_t rep;
     fl_result_t prc = fl_net_probe_endpoint("127.0.0.1", 9, 3000u, &rep);
@@ -331,6 +376,11 @@ int main(void) {
 
     printf("test_arp_cache_and_frame... ");
     if (test_arp_cache_and_frame() != 0)
+        return 1;
+    puts("ok");
+
+    printf("test_packet_pipeline... ");
+    if (test_packet_pipeline() != 0)
         return 1;
     puts("ok");
 

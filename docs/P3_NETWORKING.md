@@ -26,6 +26,7 @@ Full spec: **[`docs/P3_13_CHAT_SERVER.md`](P3_13_CHAT_SERVER.md)**.
 | Module | Roadmap | Role |
 |--------|---------|------|
 | **`net_wire.c`** | Wire vocabulary | Ethernet+IPv4 frame build/parse, MTU, `fl_net_frame_view_t` / `fl_net_frame_mut_t` |
+| **`net_packet.c`** | Packet backbone | Layered **L2 / IPv4 / L4** slices (`fl_net_packet_t`), RX/TX pipeline stages (**`contract_p3_packet.h`**) |
 | **`net_eth.c`** | L2 helpers | Aliases/constants over wire |
 | **`net_arp.c`** | P3-4 | ARP request/reply, bounded cache, resolve over netdev |
 | **`net_route.c`** | P3-5 | Longest-prefix routing table; TAP lab via **FL_NET_TAP_*** env |
@@ -42,6 +43,19 @@ Full spec: **[`docs/P3_13_CHAT_SERVER.md`](P3_13_CHAT_SERVER.md)**.
 | **`net_wire_host_syscall.c`** | Hosted shim | C errno bridge to **`net_host_*_asm`** |
 | **`net_ping_host.c`** | Shell API | `fl_net_ping` / format helpers |
 | **`net_requirements.c`** | CI | `fl_net_probe_endpoint`, `SKIP_NETWORK_INTEROP` |
+
+## Packet structuring (cross-cutting)
+
+Packets are the shared backbone for **P3-4** … **P3-12** — not a separate roadmap row. Normative types live in **`contracts/networking/contract_p3_packet.h`** (included from **`contract_networking.h`**):
+
+| Type | Role |
+|------|------|
+| **`fl_net_pkt_slice_t`** | Non-owning **off** + **len** inside a frame buffer |
+| **`fl_net_packet_t`** | Parsed **Ethernet + IPv4** view with optional **l4** slice and **valid** layer bits |
+| **`fl_net_pipeline_rx_t`** | RX stages: **DRV_RX → PARSE_L2 → PARSE_L3 → PARSE_L4 → ROUTE → DELIVER** |
+| **`fl_net_pipeline_tx_t`** | TX stages: **BUILD_L4 → BUILD_IPV4 → BUILD_L2 → ROUTE → ARP → DRV_TX** |
+
+**Implementation:** **`fl_net_packet_parse_eth_ipv4`**, **`fl_net_packet_copy_l4`**, **`fl_net_pipeline_rx_feed`** in **`net_packet.c`**. **`net_wire_egress.c`** uses the packet parser for ICMP echo reply extraction. **P3-12** DHCP and **P3-6** UDP should build on the same slices when those clients land.
 
 ## Data path (ping)
 

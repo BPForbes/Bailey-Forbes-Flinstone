@@ -19,9 +19,10 @@
 
 #include "contract_extend.h"
 #include "contract_p3_wire.h"
+#include "contract_p3_packet.h"
 #include "contract_p3_trust.h"
 
-#define FL_CONTRACT_P3_NETWORKING_REV 6
+#define FL_CONTRACT_P3_NETWORKING_REV 7
 
 #ifndef FL_CONTRACT_P3_WIRE_REV
 #error "FL_CONTRACT_P3_WIRE_REV must be defined by contract_p3_wire.h"

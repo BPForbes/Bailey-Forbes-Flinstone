@@ -7,6 +7,7 @@ Long-form guide: **`docs/P3_NETWORKING.md`**. **P3-13 chat room plan:** **`docs/
 | File | Purpose |
 |------|---------|
 | `net_wire.c` | L2/L3 frame vocabulary (`contract_p3_wire.h`) |
+| `net_packet.c` | Layered **fl_net_packet_t** parse + RX/TX pipeline helpers (`contract_p3_packet.h`) |
 | `net_arp.c` | P3-4 ARP cache (**asm_net_arp_cache_***), request/reply, resolve |
 | `net_route.c` | P3-5 routing table |
 | `net_wire_egress.c` | IPv4 L4 egress (ARP + netdev) |
