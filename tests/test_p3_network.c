@@ -1,5 +1,6 @@
 #include "contract_p0_ci.h"
 #include "contract_p3_ipv4.h"
+#include "contract_p3_loopback.h"
 #include "contract_p3_wire.h"
 #include "net_arp.h"
 #include "net_dns.h"
@@ -397,6 +398,86 @@ static int test_net_task_backend_packet_delivery(void) {
     return 0;
 }
 
+static int test_net_task_backend_server_relay(void) {
+    fl_result_t rc;
+    uint8_t frame[128];
+    uint8_t out_a[FL_NET_TASK_BACKEND_INBOX_PAYLOAD_MAX];
+    uint8_t out_b[FL_NET_TASK_BACKEND_INBOX_PAYLOAD_MAX];
+    size_t out_len = 0;
+    const char payload[] = "client->server->clients";
+    size_t payload_len = sizeof(payload) - 1u;
+
+    memset(frame, 0, sizeof(frame));
+    memcpy(frame + 32u, payload, payload_len);
+
+    fl_net_packet_t pkt;
+    memset(&pkt, 0, sizeof(pkt));
+    pkt.frame.data = frame;
+    pkt.frame.len = sizeof(frame);
+    pkt.l4.off = 32u;
+    pkt.l4.len = payload_len;
+    pkt.valid = FL_NET_PKT_VALID_L4;
+
+    rc = fl_net_task_backend_user_open(0u, 4u);
+    ASSERT(rc == FL_RESULT_OK);
+    rc = fl_net_task_backend_user_open(1u, 4u);
+    ASSERT(rc == FL_RESULT_OK);
+    rc = fl_net_task_backend_user_open(2u, 4u);
+    ASSERT(rc == FL_RESULT_OK);
+
+    /* Client 0 -> server hub -> clients 1 and 2 (server shell TODO in P3-13). */
+    rc = fl_net_task_backend_server_ingress(0u, &pkt);
+    ASSERT(rc == FL_RESULT_OK);
+
+    out_len = 0;
+    rc = fl_net_task_backend_recv_packet(1u, out_a, sizeof(out_a), &out_len);
+    ASSERT(rc == FL_RESULT_OK);
+    ASSERT(out_len == payload_len);
+    ASSERT(memcmp(out_a, payload, payload_len) == 0);
+
+    out_len = 0;
+    rc = fl_net_task_backend_recv_packet(2u, out_b, sizeof(out_b), &out_len);
+    ASSERT(rc == FL_RESULT_OK);
+    ASSERT(out_len == payload_len);
+    ASSERT(memcmp(out_b, payload, payload_len) == 0);
+
+    out_len = 0;
+    rc = fl_net_task_backend_recv_packet(0u, out_a, sizeof(out_a), &out_len);
+    ASSERT(rc == FL_RESULT_TIMEDOUT);
+
+    fl_net_task_backend_user_close(0u);
+    fl_net_task_backend_user_close(1u);
+    fl_net_task_backend_user_close(2u);
+    return 0;
+}
+
+static int test_net_task_backend_client_wire_send_smoke(void) {
+    fl_result_t rc;
+    uint8_t frame[128];
+    const char payload[] = "wire egress smoke";
+    size_t payload_len = sizeof(payload) - 1u;
+    fl_net_packet_t pkt;
+    uint32_t loopback = (uint32_t)FL_NET_IPV4_LOOPBACK_FIRST_OCTET | (1u << 24);
+
+    memset(frame, 0, sizeof(frame));
+    memcpy(frame + 16u, payload, payload_len);
+    memset(&pkt, 0, sizeof(pkt));
+    pkt.frame.data = frame;
+    pkt.frame.len = sizeof(frame);
+    pkt.l4.off = 16u;
+    pkt.l4.len = payload_len;
+    pkt.valid = FL_NET_PKT_VALID_L4;
+
+    rc = fl_net_task_backend_client_wire_send(loopback, 48001u,
+                                              FL_NET_TASK_BACKEND_WIRE_SERVER_PORT, &pkt);
+    if (rc == FL_RESULT_NOSYS) {
+        fprintf(stderr, "skip: client wire send unavailable on this platform\n");
+        return 0;
+    }
+    ASSERT(rc == FL_RESULT_OK);
+    return 0;
+}
+
 static int test_probe_endpoint(void) {
     fl_net_requirements_report_t rep;
     fl_result_t prc = fl_net_probe_endpoint("127.0.0.1", 9, 3000u, &rep);
@@ -435,6 +516,16 @@ int main(void) {
 
     printf("test_net_task_backend_packet_delivery... ");
     if (test_net_task_backend_packet_delivery() != 0)
+        return 1;
+    puts("ok");
+
+    printf("test_net_task_backend_server_relay... ");
+    if (test_net_task_backend_server_relay() != 0)
+        return 1;
+    puts("ok");
+
+    printf("test_net_task_backend_client_wire_send_smoke... ");
+    if (test_net_task_backend_client_wire_send_smoke() != 0)
         return 1;
     puts("ok");
 

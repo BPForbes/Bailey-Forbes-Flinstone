@@ -5,7 +5,9 @@
 
 #include "workqueue.h"
 
+#include "contract_p3_ipv4.h"
 #include "net_packet.h"
+#include "net_wire_host.h"
 
 #include <pthread.h>
 
@@ -23,7 +25,7 @@ static pthread_mutex_t s_user_inboxes_mu = PTHREAD_MUTEX_INITIALIZER;
 
 static void net_bg_work(void *ctx) {
     (void)ctx;
-    /* P3-14: RX dequeue, TCP timer wheel, delayed ACK — not implemented. */
+    /* TODO: P3-14 — RX dequeue, TCP timer wheel, delayed ACK. */
 }
 
 static int s_net_bg_inited;
@@ -72,12 +74,11 @@ void fl_net_background_tick(unsigned max_items) {
     if (!s_net_bg_inited)
         fl_net_background_init();
 
-    /* P3-14: do not recv from fl_net_netdev_loopback() here — that queue is shared
-     * with request/response paths (ICMP/TCP probes in net_wire_egress). Draining it
-     * in the background tick steals replies and causes intermittent timeouts.
+    /* TODO: P3-14 — do not recv from fl_net_netdev_loopback() here; that queue is
+     * shared with ICMP/TCP probes (net_wire_egress). Draining it steals replies.
      *
-     * Connected-user delivery uses fl_net_task_backend_send_packet() directly until
-     * P3-13 server/socket demux owns RX (see docs/P3_13_CHAT_SERVER.md).
+     * Distribution today: client wire egress + server relay/inbox APIs below.
+     * TODO: P3-13 — wire RX demux calls fl_net_task_backend_server_ingress().
      */
 }
 
@@ -207,4 +208,71 @@ fl_result_t fl_net_task_backend_recv_packet(unsigned src_slot, uint8_t *out, siz
     asm_mem_copy(out, msg.payload, (size_t)msg.payload_len);
     *out_len = (size_t)msg.payload_len;
     return FL_RESULT_OK;
+}
+
+fl_result_t fl_net_task_backend_client_wire_send(uint32_t server_addr_be, uint16_t client_sport,
+                                                 uint16_t server_port,
+                                                 const fl_net_packet_t *pkt) {
+    uint8_t payload[FL_NET_TASK_BACKEND_INBOX_PAYLOAD_MAX];
+    uint8_t rx_dummy[64];
+    size_t payload_len = 0;
+    size_t rx_len = 0;
+    fl_result_t rc;
+
+    if (!pkt)
+        return FL_RESULT_INVAL;
+    if (server_port == 0u)
+        server_port = (uint16_t)FL_NET_TASK_BACKEND_WIRE_SERVER_PORT;
+
+    rc = fl_net_packet_copy_l4(pkt, payload, sizeof(payload), &payload_len);
+    if (rc != FL_RESULT_OK)
+        return rc;
+    if (payload_len == 0u)
+        return FL_RESULT_INVAL;
+
+    rc = fl_net_wire_send_udp(server_addr_be, client_sport, server_port, payload, payload_len,
+                              rx_dummy, sizeof(rx_dummy), &rx_len, 1u);
+    if (rc == FL_RESULT_TIMEDOUT)
+        return FL_RESULT_OK;
+    return rc;
+}
+
+fl_result_t fl_net_task_backend_server_relay_to_clients(unsigned src_slot,
+                                                        const fl_net_packet_t *pkt) {
+    unsigned delivered = 0;
+    fl_result_t last_err = FL_RESULT_NOENT;
+
+    if (!pkt)
+        return FL_RESULT_INVAL;
+
+    src_slot = user_slot_sanity(src_slot);
+    if (src_slot == (unsigned)-1)
+        return FL_RESULT_INVAL;
+
+    for (unsigned i = 0; i < FL_NET_TASK_BACKEND_MAX_USERS; i++) {
+        fl_result_t rc;
+
+        if (i == src_slot)
+            continue;
+        rc = fl_net_task_backend_send_packet(i, pkt);
+        if (rc == FL_RESULT_OK) {
+            delivered++;
+            continue;
+        }
+        if (rc == FL_RESULT_NOENT)
+            continue;
+        last_err = rc;
+    }
+
+    if (delivered > 0)
+        return FL_RESULT_OK;
+    return last_err;
+}
+
+fl_result_t fl_net_task_backend_server_ingress(unsigned from_client_slot,
+                                               const fl_net_packet_t *pkt) {
+    /* TODO: P3-13 — map wire source (port/session) to from_client_slot; validate
+     * UDP/TCP L4 length before routing (skip when l4.len < 4 for port demux).
+     */
+    return fl_net_task_backend_server_relay_to_clients(from_client_slot, pkt);
 }

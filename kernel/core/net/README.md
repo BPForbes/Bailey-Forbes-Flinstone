@@ -23,7 +23,7 @@ Long-form guide: **`docs/P3_NETWORKING.md`**. **P3-13 chat room plan:** **`docs/
 | `net_wire_host_syscall.c` | Linux socket syscall bridge |
 | `net_ping_host.c` | `fl_net_ping` |
 | `net_requirements.c` | CI probe report |
-| `net_background.c` | **P3-14** workqueue tick / ARP sweep kick (scaffold) |
+| `net_background.c` | **P3-14** workqueue tick; **task backend** client→server wire egress + server relay/inbox (P3-13 TODO for wire RX / shell) |
 
 **Planned (P3-13 — see `docs/P3_13_CHAT_SERVER.md`):** `net_socket.c`, `net_server.c`, `net_udp.c` (P3-6), TCP FSM in `net_tcp.c` (P3-7); shell `cmd_server.c`.
 
