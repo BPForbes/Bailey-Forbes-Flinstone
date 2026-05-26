@@ -6,3 +6,5 @@ DEV_VERSION=3
 DESCRIPTION<<VER_END
 PRE 4.2.0 (P3): Packet layering contract (contract_p3_packet.h): fl_net_packet_t L2/IPv4/L4 slices and RX/TX pipeline stages; net_packet.c parse/copy/pipeline feed; net_wire_egress uses packet parser; docs/P3_NETWORKING.md packet backbone section; FL_CONTRACT_P3_NETWORKING_REV 7.
 VER_END
+
+RELEASE_DATE=2026-05-26
