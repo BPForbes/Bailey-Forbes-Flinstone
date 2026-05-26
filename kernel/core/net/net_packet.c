@@ -92,7 +92,8 @@ fl_result_t fl_net_packet_copy_l4(const fl_net_packet_t *pkt, uint8_t *dst, size
         return FL_RESULT_ERR;
 
     base = pkt->frame.data;
-    if (!base || pkt->l4.off + pkt->l4.len > pkt->frame.len)
+    if (!base || pkt->l4.off > pkt->frame.len ||
+        pkt->l4.len > pkt->frame.len - pkt->l4.off)
         return FL_RESULT_ERR;
 
     /* Payload copy is the "packet send" hot path; use ASM-backed memcpy. */
@@ -109,10 +110,14 @@ fl_result_t fl_net_pipeline_rx_feed(fl_net_pipeline_rx_t *pipe, fl_net_pipeline_
         return FL_RESULT_INVAL;
 
     pipe->stage = stage;
-    if (stage == FL_NET_PIPE_STAGE_NONE)
+    if (stage == FL_NET_PIPE_STAGE_NONE) {
+        fl_net_packet_reset(&pipe->pkt);
+        pipe->last_rc = FL_RESULT_OK;
         return FL_RESULT_OK;
+    }
 
     if (stage < FL_NET_PIPE_STAGE_PARSE_L2) {
+        fl_net_packet_reset(&pipe->pkt);
         pipe->pkt.frame = fl_net_frame_view_make(frame, len);
         pipe->last_rc = FL_RESULT_OK;
         return FL_RESULT_OK;

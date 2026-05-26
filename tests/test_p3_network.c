@@ -346,6 +346,16 @@ static int test_packet_pipeline(void) {
     ASSERT(pipe.stage == FL_NET_PIPE_STAGE_PARSE_L4);
     ASSERT((pipe.pkt.valid & FL_NET_PKT_VALID_L4) != 0);
 
+    /* Crafted slice must not pass overflow-prone bounds (off + len wrap). */
+    pkt.l4.off = pkt.frame.len - 1u;
+    pkt.l4.len = 8u;
+    ASSERT(fl_net_packet_copy_l4(&pkt, l4_out, sizeof(l4_out), &l4_len) == FL_RESULT_ERR);
+
+    fl_net_pipeline_rx_reset(&pipe);
+    ASSERT(fl_net_pipeline_rx_feed(&pipe, FL_NET_PIPE_STAGE_DRV_RX, buf, frame_len) ==
+           FL_RESULT_OK);
+    ASSERT(pipe.pkt.valid == 0u);
+
     return 0;
 }
 
