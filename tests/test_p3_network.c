@@ -14,6 +14,7 @@
 #include "net_packet.h"
 #include "net_ping_host.h"
 #include "net_requirements.h"
+#include "net_background.h"
 
 #include <arpa/inet.h>
 #include <stdio.h>
@@ -348,6 +349,44 @@ static int test_packet_pipeline(void) {
     return 0;
 }
 
+static int test_net_task_backend_packet_delivery(void) {
+    fl_result_t rc;
+    uint8_t frame[128];
+    uint8_t out[FL_NET_TASK_BACKEND_INBOX_PAYLOAD_MAX];
+    size_t out_len = 0;
+    const char payload[] = "user->user payload";
+    size_t payload_len = sizeof(payload) - 1u;
+
+    memset(frame, 0, sizeof(frame));
+    memcpy(frame + 64u, payload, payload_len);
+
+    fl_net_packet_t pkt;
+    memset(&pkt, 0, sizeof(pkt));
+    pkt.frame.data = frame;
+    pkt.frame.len = sizeof(frame);
+    pkt.l4.off = 64u;
+    pkt.l4.len = payload_len;
+    pkt.valid = FL_NET_PKT_VALID_L4;
+
+    rc = fl_net_task_backend_user_open(0u, 4u);
+    ASSERT(rc == FL_RESULT_OK);
+    rc = fl_net_task_backend_user_open(1u, 4u);
+    ASSERT(rc == FL_RESULT_OK);
+
+    rc = fl_net_task_backend_send_packet(1u, &pkt);
+    ASSERT(rc == FL_RESULT_OK);
+
+    out_len = 0;
+    rc = fl_net_task_backend_recv_packet(1u, out, sizeof(out), &out_len);
+    ASSERT(rc == FL_RESULT_OK);
+    ASSERT(out_len == payload_len);
+    ASSERT(memcmp(out, payload, payload_len) == 0);
+
+    fl_net_task_backend_user_close(0u);
+    fl_net_task_backend_user_close(1u);
+    return 0;
+}
+
 static int test_probe_endpoint(void) {
     fl_net_requirements_report_t rep;
     fl_result_t prc = fl_net_probe_endpoint("127.0.0.1", 9, 3000u, &rep);
@@ -381,6 +420,11 @@ int main(void) {
 
     printf("test_packet_pipeline... ");
     if (test_packet_pipeline() != 0)
+        return 1;
+    puts("ok");
+
+    printf("test_net_task_backend_packet_delivery... ");
+    if (test_net_task_backend_packet_delivery() != 0)
         return 1;
     puts("ok");
 

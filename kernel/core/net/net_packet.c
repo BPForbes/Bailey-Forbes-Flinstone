@@ -2,6 +2,8 @@
 
 #include "net_wire.h"
 
+#include "fl/mem_asm.h"
+
 #include <string.h>
 
 void fl_net_packet_reset(fl_net_packet_t *pkt) {
@@ -93,7 +95,8 @@ fl_result_t fl_net_packet_copy_l4(const fl_net_packet_t *pkt, uint8_t *dst, size
     if (!base || pkt->l4.off + pkt->l4.len > pkt->frame.len)
         return FL_RESULT_ERR;
 
-    memcpy(dst, base + pkt->l4.off, pkt->l4.len);
+    /* Payload copy is the "packet send" hot path; use ASM-backed memcpy. */
+    asm_mem_copy(dst, base + pkt->l4.off, pkt->l4.len);
     *out_len = pkt->l4.len;
     return FL_RESULT_OK;
 }
