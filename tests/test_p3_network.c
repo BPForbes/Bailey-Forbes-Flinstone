@@ -17,6 +17,7 @@
 #include "net_requirements.h"
 #include "net_background.h"
 #include "net_udp.h"
+#include "net_socket.h"
 #include "contract_p3_socket.h"
 
 #include <arpa/inet.h>
@@ -453,6 +454,82 @@ static int test_net_task_backend_server_relay(void) {
     return 0;
 }
 
+static int test_net_udp_demux_queue(void) {
+    fl_net_udp_rx_meta_t meta;
+    uint8_t out[64];
+    size_t out_len = 0;
+    fl_result_t rc;
+    const char payload[] = "demux-payload";
+    uint32_t loopback = (uint32_t)FL_NET_IPV4_LOOPBACK_FIRST_OCTET | (1u << 24);
+
+    fl_net_udp_demux_reset();
+    rc = fl_net_udp_bind_port(47001u);
+    ASSERT(rc == FL_RESULT_OK);
+
+    rc = fl_net_udp_deliver_inbound(loopback, 48000u, 47001u, (const uint8_t *)payload,
+                                    sizeof(payload) - 1u);
+    ASSERT(rc == FL_RESULT_OK);
+
+    rc = fl_net_udp_recv_from_port(47001u, &meta, out, sizeof(out), &out_len);
+    ASSERT(rc == FL_RESULT_OK);
+    ASSERT(out_len == sizeof(payload) - 1u);
+    ASSERT(memcmp(out, payload, out_len) == 0);
+    ASSERT(meta.dst_port_host == 47001u);
+
+    fl_net_udp_unbind_port(47001u);
+    return 0;
+}
+
+static int test_net_socket_tcp_loopback(void) {
+    fl_net_sock_handle_t listen_h = FL_NET_SOCK_INVALID;
+    fl_net_sock_handle_t client_h = FL_NET_SOCK_INVALID;
+    fl_net_sock_handle_t accepted_h = FL_NET_SOCK_INVALID;
+    fl_result_t rc;
+    uint32_t loopback = (uint32_t)FL_NET_IPV4_LOOPBACK_FIRST_OCTET | (1u << 24);
+    const char msg[] = "tcp-loopback-prep";
+    char rx[32];
+    size_t sent = 0;
+    size_t got = 0;
+
+    rc = fl_net_sock_init();
+    ASSERT(rc == FL_RESULT_OK);
+
+    rc = fl_net_sock_open(FL_NET_SOCK_TYPE_STREAM, &listen_h);
+    if (rc == FL_RESULT_NOSYS) {
+        fprintf(stderr, "skip: hosted sockets unavailable\n");
+        return 0;
+    }
+    ASSERT(rc == FL_RESULT_OK);
+
+    rc = fl_net_sock_bind(listen_h, loopback, 48777u);
+    ASSERT(rc == FL_RESULT_OK);
+    rc = fl_net_sock_listen(listen_h, FL_NET_SOCK_DEFAULT_LISTEN_BACKLOG);
+    ASSERT(rc == FL_RESULT_OK);
+
+    rc = fl_net_sock_open(FL_NET_SOCK_TYPE_STREAM, &client_h);
+    ASSERT(rc == FL_RESULT_OK);
+    rc = fl_net_sock_connect(client_h, loopback, 48777u);
+    ASSERT(rc == FL_RESULT_OK);
+
+    rc = fl_net_sock_accept(listen_h, &accepted_h);
+    ASSERT(rc == FL_RESULT_OK);
+
+    rc = fl_net_sock_send(client_h, msg, sizeof(msg) - 1u, &sent);
+    ASSERT(rc == FL_RESULT_OK);
+    ASSERT(sent == sizeof(msg) - 1u);
+
+    rc = fl_net_sock_recv(accepted_h, rx, sizeof(rx), &got, 2000u);
+    ASSERT(rc == FL_RESULT_OK);
+    ASSERT(got == sizeof(msg) - 1u);
+    ASSERT(memcmp(rx, msg, got) == 0);
+
+    fl_net_sock_close(client_h);
+    fl_net_sock_close(accepted_h);
+    fl_net_sock_close(listen_h);
+    fl_net_sock_shutdown();
+    return 0;
+}
+
 static int test_net_udp_build_datagram(void) {
     uint8_t buf[64];
     const char payload[] = "udp";
@@ -567,8 +644,18 @@ int main(void) {
         return 1;
     puts("ok");
 
+    printf("test_net_udp_demux_queue... ");
+    if (test_net_udp_demux_queue() != 0)
+        return 1;
+    puts("ok");
+
     printf("test_net_udp_build_datagram... ");
     if (test_net_udp_build_datagram() != 0)
+        return 1;
+    puts("ok");
+
+    printf("test_net_socket_tcp_loopback... ");
+    if (test_net_socket_tcp_loopback() != 0)
         return 1;
     puts("ok");
 

@@ -11,7 +11,8 @@ Long-form guide: **`docs/P3_NETWORKING.md`**. **P3-13 chat room plan:** **`docs/
 | `net_arp.c` | P3-4 ARP cache (**asm_net_arp_cache_***), request/reply, resolve |
 | `net_route.c` | P3-5 routing table |
 | `net_wire_egress.c` | IPv4 L4 egress (ARP + netdev); `fl_net_wire_egress_l4_xmit` |
-| `net_udp.c` | UDP datagram build for socket/task-backend path |
+| `net_udp.c` | UDP datagram build + port demux RX queues |
+| `net_socket.c` | **P3-13a** hosted socket shim (`fl_net_sock_*`) |
 | `net_ipv4.c` | IPv4 header construction |
 | `net_checksum.c` | Checksum (+ `asm_net_checksum16`) |
 | `net_icmp.c` | ICMP echo |

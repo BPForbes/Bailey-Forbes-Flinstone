@@ -7,7 +7,8 @@
  *   App → Socket → UDP/TCP segment → IPv4 → ARP(MAC_B) → Ethernet → NIC
  *
  * **Implementation:** **kernel/core/net/net_background.c** (task backend relay);
- * **net_wire_egress.c** (ARP + routed netdev); **net_udp.c** (UDP L4 build).
+ * **net_wire_egress.c** (ARP + routed netdev); **net_udp.c** (UDP L4 build + demux);
+ * **net_socket.c** (**P3-13a** hosted shim). See **docs/SERVER.md**.
  */
 #ifndef FL_CONTRACT_P3_SOCKET_H
 #define FL_CONTRACT_P3_SOCKET_H

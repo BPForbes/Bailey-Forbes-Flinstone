@@ -1,0 +1,8 @@
+MAJOR_VERSION=4
+STANDARD_VERSION=2
+RELEASE_VERSION=0
+PRERELEASE=1
+DEV_VERSION=4
+DESCRIPTION<<VER_END
+PRE 4.2.0 (P3/P5): Network prep for future server PR — UDP port demux and bounded RX queues (net_udp.c); hosted socket shim (contract_p3_sockets.h, net_socket.c); session wire opcodes (contract_p3_session_wire.h); FL_CONTRACT_P3_NETWORKING_REV 9. Storage contracts for server_share, file delivery, and member identity (P5-5..P5-7, FL_CONTRACT_P5_STORAGE_REV 4). docs/SERVER.md architecture (ANSI colours, server send -file/-message, packets, disposition flags). ROADMAP Phase 3/5 updates. No cmd_server or net_server in this train.
+VER_END

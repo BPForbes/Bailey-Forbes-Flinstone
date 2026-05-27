@@ -35,6 +35,8 @@ shards below, and **FL_CONTRACT_P3_VOCABULARY_LOCK**.
 | *contract_p3_wifi_deferred.h* | P3-10 |
 | *contract_p3_ipv6_deferred.h* | P3-11 |
 | *contract_p3_background.h* | P3-14 |
+| *contract_p3_sockets.h* | P3-13a (socket shim vocabulary) |
+| *contract_p3_session_wire.h* | P3-13 (session frame opcodes; app in **docs/SERVER.md**) |
 
 Most shards include **contract_p3_wire.h** (which pulls **contract_extend.h**). **P3-1** and
 **P3-3** also include **contract_p3_trust.h** for netdev **authz** op references.

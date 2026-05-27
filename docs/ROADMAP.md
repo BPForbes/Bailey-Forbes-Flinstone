@@ -97,7 +97,7 @@ Two columns track different concerns:
 
 **P4 row criterion (aligned with `contracts/drivers/`):** **P4-1** through **P4-7** are **✅** for **contract completion** when the normative **C contract bundle** under **`contracts/drivers/`** defines that row via **`contract_drivers.h`** (umbrella: **`contract_extend.h`**, then **`contract_p4_*.h`** shards with **`FL_CONTRACT_P4_*_CONTRACT_DEFINED`** markers). **Module integration** is tracked separately: lab helpers under **`kernel/drivers/p4_*.c`** and **`fl/driver/p4_*.h`** (driver lock self-test, IRQ hardirq/BH, PCIe BAR/MSI, virtio golden-vector, xHCI MMIO/TRB, FDT walk, PSCI status mapping). A **full USB hub tree**, production virtio on metal, and bare-metal PSCI SMC remain **P4→P5** gates—not required for contract **✅**.
 
-**P5 row criterion (aligned with `contracts/storage/`):** **P5-1** through **P5-3** are **✅** for **contract completion** when the normative **C contract bundle** under **`contracts/storage/`** defines that row via **`contract_storage.h`** (**`FL_CONTRACT_P5_STORAGE_REV` 2**; umbrella: **`contract_extend.h`**, then **`contract_p5_*.h`** shards with **`FL_CONTRACT_P5_*_CONTRACT_DEFINED`** markers). **Module integration** (mount tables wired to real roots, pluggable backends beyond lab FAT32, unified buffer cache with net/block) still follows Phase **5** gates; this snapshot tracks **contract definition**, not “full root filesystem on **B**.”
+**P5 row criterion (aligned with `contracts/storage/`):** **P5-1** through **P5-7** are **✅** for **contract completion** when the normative **C contract bundle** under **`contracts/storage/`** defines that row via **`contract_storage.h`** (**`FL_CONTRACT_P5_STORAGE_REV` 4**; umbrella: **`contract_extend.h`**, then **`contract_p5_*.h`** shards with **`FL_CONTRACT_P5_*_CONTRACT_DEFINED`** markers). **P5-5**–**P5-7** freeze **server_share** staging, cross-user **file delivery** metadata, and **member identity** disambiguation for the **P3-13** server product (**`docs/SERVER.md`**). **Module integration** (mount tables wired to real roots, pluggable backends beyond lab FAT32, unified buffer cache with net/block, **`server_share/`** on disk) still follows Phase **5** gates; this snapshot tracks **contract definition**, not “full root filesystem on **B**.”
 
 **P6 row criterion (aligned with `contracts/observability/`):** **P6-1** through **P6-5** are **✅** for **contract completion** when the normative **C contract bundle** under **`contracts/observability/`** defines that row via **`contract_observability.h`** (**`FL_CONTRACT_P6_OBSERVABILITY_REV` 2**; umbrella: **`contract_extend.h`**, then **`contract_p6_*.h`** shards with **`FL_CONTRACT_P6_*_CONTRACT_DEFINED`** markers). **P6-1** composes **`contract_log.h`** from foundations rather than redefining sink types. **Module integration** (hosted rotation/fsync policy, tamper-evident segments, trace emitters on hot paths) still follows Phase **6** gates and **TODO: P6-*** callouts below; this snapshot tracks **contract definition**, not “full **RFC 5424** export” or “signed audit segments shipped.”
 
@@ -157,6 +157,9 @@ Two columns track different concerns:
 | **P5-2** | Pluggable FS | ✅ | ❌ |
 | **P5-3** | Page cache | ✅ | ❌ |
 | **P5-4** | Dirty page writeback job | ✅ | ❌ |
+| **P5-5** | Server share staging (`server_share/`) | ✅ | ❌ |
+| **P5-6** | Cross-user file delivery (server send -file) | ✅ | ❌ |
+| **P5-7** | Server member identity (principal + member_id) | ✅ | ❌ |
 | **P6-1** | Structured log API (sink / line path) | ✅ | ⚠️ |
 | **P6-2** | Ring buffer sink | ✅ | ⚠️ |
 | **P6-3** | Persistent log (hosted) | ✅ | ❌ |
@@ -174,7 +177,7 @@ Two columns track different concerns:
 | **P9-3** | SMP bring-up (B) | ✅ | ❌ |
 | **P9-4** | RCU grace-period jobs | ✅ | ❌ |
 
-**Summary:** **Contract completion** — **P0-1**–**P0-8**, **P1-1**–**P1-7**, **P2-1**–**P2-4**, **P3-1**–**P3-12** (including **`[DEFERRED]`** shards), **P4-1**–**P4-7**, **P5-1**–**P5-3**, **P6-1**–**P6-5**, **P7-1**–**P7-3**, **P7 (batch)**, **P8-1**–**P8-3**, and **P9-1**–**P9-3** are **✅** under their **`contracts/*`** bundles. **Module integration (P0–P2)** — **✅:** **P0-1**–**P0-3**, **P0-6**–**P0-8**, **P1-1**, **P2-1**, **P2-2**, **P2-4** (hosted/lab wired and tested on **4.1.0**). **~✅:** **P1-7** (hosted POSIX `clock_gettime` only; **B** Generic Timer / **P0-5** tick follow-up). **~✅:** **P0-4**, **P0-5** (arch **B** evidence TODOs), **P1-2**–**P1-6** (**B** PMM/arena/NASM), **P2-3** (guest deny suite + shell gates; netdev hook on **PRE 4.2.0** **`ping`** path—see **TODO: P2-3**). See **`docs/p0_p2_pr_coverage.md`**. **Module integration (P3, PRE 4.2.0)** — **~✅:** **P3-1**–**P3-6**, **P3-8** (in-tree stack, **`net_arp.c`** / **`net_route.c`** / **`net_wire_egress.c`**, **`ping`** / **`check requirements`**, **`make test_p3_network`**, **`make check-network-requirements`**; TAP/Interop skips documented). **⚠️:** **P3-7** (TCP SYN probe + loopback RST+ACK only); **P3-13** (planning row—contract shard pending). **❌:** **P3-9** TLS, **P3-12** DHCP, **P3-13** sockets/server builtins, **P3-10**/**P3-11** deferrals. Detail: **`docs/P3_NETWORKING.md`**. **P4-1**/**P4-2** **✅**; **P8**/**P9** integration **❌** here.
+**Summary:** **Contract completion** — **P0-1**–**P0-8**, **P1-1**–**P1-7**, **P2-1**–**P2-4**, **P3-1**–**P3-12** (including **`[DEFERRED]`** shards), **P4-1**–**P4-7**, **P5-1**–**P5-7**, **P6-1**–**P6-5**, **P7-1**–**P7-3**, **P7 (batch)**, **P8-1**–**P8-3**, and **P9-1**–**P9-3** are **✅** under their **`contracts/*`** bundles. **Module integration (P0–P2)** — **✅:** **P0-1**–**P0-3**, **P0-6**–**P0-8**, **P1-1**, **P2-1**, **P2-2**, **P2-4** (hosted/lab wired and tested on **4.1.0**). **~✅:** **P1-7** (hosted POSIX `clock_gettime` only; **B** Generic Timer / **P0-5** tick follow-up). **~✅:** **P0-4**, **P0-5** (arch **B** evidence TODOs), **P1-2**–**P1-6** (**B** PMM/arena/NASM), **P2-3** (guest deny suite + shell gates; netdev hook on **PRE 4.2.0** **`ping`** path—see **TODO: P2-3**). See **`docs/p0_p2_pr_coverage.md`**. **Module integration (P3, PRE 4.2.0)** — **~✅:** **P3-1**–**P3-6**, **P3-8** (in-tree stack, **`net_arp.c`** / **`net_route.c`** / **`net_wire_egress.c`**, **`ping`** / **`check requirements`**, **`make test_p3_network`**, **`make check-network-requirements`**; TAP/Interop skips documented). **⚠️:** **P3-7** (TCP SYN probe + loopback RST+ACK only); **P3-13** (planning row—contract shard pending). **❌:** **P3-9** TLS, **P3-12** DHCP, **P3-13** sockets/server builtins, **P3-10**/**P3-11** deferrals. Detail: **`docs/P3_NETWORKING.md`**. **P4-1**/**P4-2** **✅**; **P8**/**P9** integration **❌** here.
 
 ---
 
@@ -348,7 +351,7 @@ Implement **bottom-up**: **L2 (link layer)** → IPv4/UDP → TCP → sockets fa
 | **P3-5** | **IPv4** | Addresses, netmask, routing table (default route), ICMP echo (ping). | **RFC 791** + **RFC 792**; **checksum offload** optional; **path MTU** stub documented. |
 | **P3-6** | **UDP** | Demux by port; checksum; basic socket buffer caps. | **RFC 768**; **bounded queues**; drop policy under pressure documented. |
 | **P3-12** | **DHCP client (IPv4)** | Minimal **DISCOVER → OFFER → REQUEST → ACK** client for lab addressing and **PX-12** netboot paths. | **RFC 2131**; **RFC 2132** (options subset); finite state machine with **timeouts**; builds on **P3-6**; document interaction with **P3-5** static routes. |
-| **P3-13** | **Chat room (`server`)** | **Multi-user chat** between Flinstone instances: **`server host/join <ip:port>`**, **`server msg`**, **`server leave`**, **`server kill`** (host-only); background recv task; hub relay over TCP. | **RFC 793** + **RFC 768** helpers; **P2-3** on **`kill`**; implementation plan: **`docs/P3_13_CHAT_SERVER.md`**; issues **#239** (app), **#238** (TCP/UDP). |
+| **P3-13** | **Chat room (`server`)** | **Multi-user chat** and **`server send`** (messages/files): **`server host/join <ip:port>`**, **`server msg`**, **`server send -message`**, **`server send -file`**, **`server leave`**, **`server kill`** (host-only); background recv; hub relay over TCP; ANSI status colours (**`docs/SERVER.md`**). | **RFC 793** + **RFC 768** helpers; **P2-3** on **`kill`** and jail-crossing **`-file`**; **`docs/P3_13_CHAT_SERVER.md`**, **`docs/SERVER.md`**; network prep: **`contract_p3_sockets.h`**, **`contract_p3_session_wire.h`**, **`net_socket.c`**, UDP demux; issues **#239** (app), **#238** (TCP/UDP). |
 | **P3-7** | **TCP (large)** | Reliable stream for one client/server pair first. | **RFC 793** + selective **RFC 5681** congestion basics later; **interop test** against Linux `nc` or `socat`. |
 | **P3-8** | **DNS client** | Resolver for A/AAAA records (AAAA optional). | **RFC 1035** semantics subset; **timeouts** and **retry caps**. |
 | **P3-9** | **TLS (hosted)** | Prefer **userland** TLS (e.g. mbedTLS/OpenSSL) behind shell command or libc. | **No TLS in “kernel” layer** until stable memory and time APIs exist on K/B. |
@@ -369,12 +372,12 @@ Shipped on the **PRE 4.2.0** train (**PR #231** class work). This is the **modul
 | **P3-3** | ~✅ | **`net_tap.c`**: Linux TAP; **`SKIP_TAP=1`** / capability skips in CI |
 | **P3-4** | ~✅ | **`net_arp.c`**: **RFC 826** request/reply, 32-entry cache (**ASM** table ops), **`fl_net_arp_resolve`**; loopback answers **127.0.0.0/8**; tick-based cache age (no wall-clock TTL sweep yet) |
 | **P3-5** | ~✅ | **`net_route.c`** LPM table + **`net_wire_egress.c`**; **`net_wire.c`** / **`net_ipv4.c`** frame build/parse, checksum (**ASM**), ICMP on netdev path; Linux ICMP socket fallback when no route; path MTU/offload still open |
-| **P3-6** | ~✅ | Hosted datagram path + DNS UDP; not a general socket layer |
-| **P3-7** | ⚠️ | **`net_tcp.c`**: SYN build (**ASM**), raw-TCP wire probe; no **RFC 793** state machine |
+| **P3-6** | ~✅ | **`fl_net_udp_build_datagram`** + **port demux** RX queues (**`fl_net_udp_bind_port`** / **`fl_net_udp_deliver_inbound`**); loopback delivers bound UDP to queues |
+| **P3-7** | ⚠️ | **`net_tcp.c`**: SYN probe; **`net_socket.c`**: hosted **TCP** listen/connect/send/recv for server prep — in-tree **RFC 793** FSM still TODO |
 | **P3-8** | ~✅ | **`net_dns.c`**: minimal **A** query via **`/etc/resolv.conf`** |
 | **P3-9** | ❌ | No TLS command or library bridge in-tree |
 | **P3-12** | ❌ | No DHCP client |
-| **P3-13** | ❌ | Chat room not implemented; full plan **`docs/P3_13_CHAT_SERVER.md`**; **#239** / **#238** |
+| **P3-13** | ❌ | Server shell/hub not implemented; contracts **`contract_p3_sockets.h`**, **`contract_p3_session_wire.h`**; **`docs/SERVER.md`**, **`docs/P3_13_CHAT_SERVER.md`**; **#239** / **#238** |
 | **P3-14** | ~⚠️ | **`net_background.c`**: MLQ ARP-tick kick stub; no RX dequeue or TCP timer wheel yet (**`docs/BACKGROUND_JOBS.md`**, **#240**) |
 | **P3-10** / **P3-11** | ❌ | Contract **`[DEFERRED]`** only |
 
@@ -405,7 +408,7 @@ Shipped on the **PRE 4.2.0** train (**PR #231** class work). This is the **modul
 
 **Dependencies:** **P5-2** on a **B** or VM guest root disk assumes **P4-4** virtio-block (or another committed block transport). Hosted-only VFS bridges may ship earlier on **H**.
 
-**Module-contract snapshot:** **P5-1**–**P5-3** are **✅** for **contract completion** (**`contracts/storage/`**, **`FL_CONTRACT_P5_STORAGE_REV` 2**). See the [P0–P9 snapshot](#p0p9-module-contract-snapshot-develop).
+**Module-contract snapshot:** **P5-1**–**P5-7** are **✅** for **contract completion** (**`contracts/storage/`**, **`FL_CONTRACT_P5_STORAGE_REV` 4**). See the [P0–P9 snapshot](#p0p9-module-contract-snapshot-develop).
 
 | ID | Feature | Goal | Standards & acceptance |
 |----|---------|------|---------------------------|
@@ -413,6 +416,9 @@ Shipped on the **PRE 4.2.0** train (**PR #231** class work). This is the **modul
 | **P5-2** | **Pluggable FS** | ext4 read-only or FUSE-hosted bridge on H before native ext4 on B. | **fsck** story documented; **journalling** requirements tabled. |
 | **P5-3** | **Page cache** | Unified buffer cache between net and block (long-term). | **POSIX fadvise** semantics optional; **coherency rules** documented. |
 | **P5-4** | **Dirty page writeback job (`flush` / `bdi-writeback` analog)** | Periodic write of dirty **P5-3** buffers to block storage for crash consistency. | Runs on **P1-8**; bounded bandwidth; **P4-4** block path required on **B**. |
+| **P5-5** | **Server share staging** | Default **`server_share/`** directory for inbound files when the recipient has no file at the captured path. | **`contract_p5_server_share.h`**; **`docs/SERVER.md`**; VFS mkdir/write on server PR. |
+| **P5-6** | **Cross-user file delivery** | **`server send -file`** metadata: sender path, disposition flags (overwrite / share / decline). | **`contract_p5_file_delivery.h`**; wire **`FILE_*`** opcodes in **`contract_p3_session_wire.h`**. |
+| **P5-7** | **Server member identity** | Principal = logged-in user; **`member_id`** when principals collide. | **`contract_p5_member_identity.h`**; **`HELLO`** / **`HELLO_ACK`** in server PR. |
 
 ---
 
