@@ -21,6 +21,15 @@ Normative contracts live under **`contracts/networking/`** (umbrella **`contract
 
 Full spec: **[`docs/P3_13_CHAT_SERVER.md`](P3_13_CHAT_SERVER.md)**.
 
+
+## P3-1 driver type (terminology)
+
+**P3-1** (**netdev**) is the device-abstraction row: registry and send/recv helpers in **`net_netdev.c`**, normative distribution in **`contracts/networking/contract_p3_netdev.h`**.
+
+The concrete driver vtable type is **`fl_net_driver_t`** — **`typedef struct fl_net_driver fl_net_driver_t`** in **`kernel/include/fl/driver/net.h`**. Loopback and TAP implementations install **`send`** / **`recv`** function pointers on that struct; **`fl_net_netdev_loopback()`** and **`fl_net_netdev_tap()`** return **`fl_net_driver_t *`**.
+
+Prose **netdev** names the P3-1 layer; it is not a separate C typedef. Bare-metal **802.3** work extends **`fl_net_driver_t`** drivers (see [Future work](#future-work)), not a parallel stack API.
+
 ## Layer map
 
 | Module | Roadmap | Role |
@@ -40,7 +49,7 @@ Full spec: **[`docs/P3_13_CHAT_SERVER.md`](P3_13_CHAT_SERVER.md)**.
 | **`net_tcp.c`** | P3-7 (probe only) | **`fl_net_tcp_build_syn_pkt`** + SYN probe; hosted **`fl_net_tcp_stream_*`** |
 | **`net_dns.c`** | P3-8 (minimal) | DNS-over-UDP A query via `/etc/resolv.conf` |
 | **`net_loopback.c`** | P3-2 | In-memory netdev: ICMP echo reply, TCP RST+ACK on SYN |
-| **`net_netdev.c`** | P3-1 | Driver registry, send/recv, timeouts, P2-3 authz hook |
+| **`net_netdev.c`** | P3-1 | **`fl_net_netdev_*`** registry on **`fl_net_driver_t`** (**`kernel/include/fl/driver/net.h`**) |
 | **`net_tap.c`** | P3-3 | Linux TAP (`IFF_TAP \| IFF_NO_PI`), `SKIP_TAP=1` |
 | **`net_wire_host.c`** | Hosted edge | **`fl_net_wire_send_icmp_pkt`** / **`send_udp_pkt`**; off-loopback syscalls; loopback via netdev |
 | **`net_wire_host_syscall.c`** | Hosted shim | C errno bridge to **`net_host_*_asm`** |
@@ -269,6 +278,6 @@ make check-network-requirements
 | Patch | Consolidate loopback egress | **`egress_loopback`** vs **`wire_loopback_exchange`** dedupe |
 | **P3-5** | Drop Linux ICMP fallback | When TAP LPM route always matches **dst** |
 | **P3-7** | Full TCP | **RFC 793** state machine; netdev TX instead of raw **`select`** |
-| **B** | Bare-metal netdev | **IEEE 802.3** driver → **`fl_net_route_add`** (no **`#if __linux__`** TAP helper only) |
+| **B** | Bare-metal **`fl_net_driver_t`** | **IEEE 802.3** **`send`**/**`recv`** per **`kernel/include/fl/driver/net.h`** → **`fl_net_route_add`** (no **`#if __linux__`** TAP helper only) |
 
 **GitHub issues:** **#239** (P3-13 sockets/server), **#240** (gap tracker + standards checklist), **#241** (bare-metal **IEEE 802.3** path); **#232**–**#235** (netdev lifecycle / authz / batch registry).
