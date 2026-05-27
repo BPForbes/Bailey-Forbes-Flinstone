@@ -523,7 +523,8 @@ test_invariants: test_batch_argv_issue220 userland/shell/common.o userland/shell
 TEST_BATCH_GC_DIR = tests/obj/issue220
 TEST_BATCH_GC_FLAGS = -ffunction-sections -fdata-sections
 TEST_BATCH_ISSUE220_CMD_BASENAMES = cmd_addcluster cmd_createdisk cmd_rmdir cmd_rmtree \
-	cmd_setdisk cmd_diskput cmd_su cmd_login cmd_sudo cmd_account cmd_registry
+	cmd_setdisk cmd_diskput cmd_su cmd_login cmd_sudo cmd_account cmd_registry \
+	cmd_ping cmd_check
 TEST_BATCH_ISSUE220_CMD_OBJS = $(addprefix $(TEST_BATCH_GC_DIR)/,$(addsuffix .o,$(TEST_BATCH_ISSUE220_CMD_BASENAMES))) \
 	$(TEST_BATCH_GC_DIR)/cmd_batch.o
 

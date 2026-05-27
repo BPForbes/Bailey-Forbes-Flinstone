@@ -1,0 +1,10 @@
+MAJOR_VERSION=4
+STANDARD_VERSION=2
+RELEASE_VERSION=0
+PRERELEASE=1
+DEV_VERSION=5
+DESCRIPTION<<VER_END
+PRE 4.2.0 (docs): Sync docs/P3_NETWORKING.md with PR #244 UDP demux, ARP sweep, and DHCP lab client (issues #255, #261; DHCP FSM #254). P3-1 terminology: fl_net_driver_t in kernel/include/fl/driver/net.h. Issue #234: ping/check batch token docs and tests.
+VER_END
+
+RELEASE_DATE=2026-05-27

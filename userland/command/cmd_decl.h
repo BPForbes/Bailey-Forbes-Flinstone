@@ -61,7 +61,12 @@ int cmd_whoami_run(int argc, char **argv);
 int cmd_ping_run(int argc, char **argv);
 int cmd_check_run(int argc, char **argv);
 
-/* Batch argv token counts (see cmd_batch.h, cmd_batch_dispatch.c). */
+/*
+ * Batch argv token counts (see cmd_batch.h).
+ * Most commands are reached only via fl_shell_cmd_batch_tokens_count() in
+ * cmd_batch_dispatch.c (called from cmd_batch.c); static analysis may
+ * report the per-command helpers as unused even though the switch calls them.
+ */
 int fl_shell_cmd_batch_tokens_count(fl_shell_cmd_no_t no, int argc, char **argv, int i);
 int cmd_help_batch_tokens_count(int argc, char **argv, int i);
 int cmd_clear_batch_tokens_count(int argc, char **argv, int i);
@@ -111,7 +116,9 @@ int cmd_useradd_batch_tokens_count(int argc, char **argv, int i);
 int cmd_userdel_batch_tokens_count(int argc, char **argv, int i);
 int cmd_passwd_batch_tokens_count(int argc, char **argv, int i);
 int cmd_whoami_batch_tokens_count(int argc, char **argv, int i);
+/* Indirect: fl_shell_cmd_batch_tokens_count(FL_SCMD_PING, ...) in cmd_batch_dispatch.c */
 int cmd_ping_batch_tokens_count(int argc, char **argv, int i);
+/* Indirect: fl_shell_cmd_batch_tokens_count(FL_SCMD_CHECK, ...) in cmd_batch_dispatch.c */
 int cmd_check_batch_tokens_count(int argc, char **argv, int i);
 
 #endif /* CMD_DECL_H */
