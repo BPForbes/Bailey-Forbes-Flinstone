@@ -85,6 +85,13 @@ fl_result_t fl_net_sock_open(fl_net_sock_type_t type, fl_net_sock_handle_t *out_
     if (fd < 0)
         return FL_RESULT_ERR;
 
+#if defined(__APPLE__)
+    if (sock_type == SOCK_STREAM) {
+        int nosigpipe = 1;
+        (void)setsockopt(fd, SOL_SOCKET, SO_NOSIGPIPE, &nosigpipe, sizeof(nosigpipe));
+    }
+#endif
+
     s_socks[i].fd = fd;
     s_socks[i].type = type;
     s_socks[i].in_use = 1u;
@@ -107,12 +114,14 @@ fl_result_t fl_net_sock_close(fl_net_sock_handle_t handle) {
     return FL_RESULT_OK;
 }
 
+#if defined(FL_NET_SOCK_HOSTED)
 static void sock_sin4(struct sockaddr_in *sa, uint32_t addr_be, uint16_t port_host) {
     memset(sa, 0, sizeof(*sa));
     sa->sin_family = AF_INET;
     sa->sin_addr.s_addr = addr_be;
     sa->sin_port = htons(port_host);
 }
+#endif
 
 fl_result_t fl_net_sock_bind(fl_net_sock_handle_t handle, uint32_t addr_be, uint16_t port_host) {
 #if !defined(FL_NET_SOCK_HOSTED)
@@ -227,8 +236,11 @@ fl_result_t fl_net_sock_send(fl_net_sock_handle_t handle, const void *buf, size_
     if (len > FL_NET_SOCK_IO_CHUNK_MAX)
         len = FL_NET_SOCK_IO_CHUNK_MAX;
 
-    if (s->type == FL_NET_SOCK_TYPE_DGRAM)
-        flags = 0;
+    if (s->type == FL_NET_SOCK_TYPE_STREAM) {
+#if defined(MSG_NOSIGNAL)
+        flags = MSG_NOSIGNAL;
+#endif
+    }
     n = send(s->fd, buf, len, flags);
     if (n < 0)
         return FL_RESULT_ERR;
