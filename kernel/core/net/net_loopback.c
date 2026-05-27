@@ -183,9 +183,8 @@ static fl_result_t loopback_process_ipv4(const uint8_t *ip, size_t ip_len, uint8
         src_be = (uint32_t)ip[12] | ((uint32_t)ip[13] << 8) | ((uint32_t)ip[14] << 16) |
                  ((uint32_t)ip[15] << 24);
 
-        if (fl_net_udp_deliver_inbound(src_be, sport, dport, udp + FL_NET_UDP_HDR_LEN,
-                                       payload_len) == FL_RESULT_OK)
-            return FL_RESULT_TIMEDOUT;
+        (void)fl_net_udp_deliver_inbound(src_be, sport, dport, udp + FL_NET_UDP_HDR_LEN,
+                                         payload_len);
         return FL_RESULT_TIMEDOUT;
     } else {
         return FL_RESULT_TIMEDOUT;
