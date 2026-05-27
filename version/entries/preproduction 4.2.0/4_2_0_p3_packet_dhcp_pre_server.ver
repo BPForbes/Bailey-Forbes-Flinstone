@@ -6,3 +6,5 @@ DEV_VERSION=5
 DESCRIPTION<<VER_END
 PRE 4.2.0: Complete pre-server P3 integration — DHCP codec and lab client via fl_net_packet_bind_l4 / fl_net_dhcp_*_pkt; ARP cache sweep on P3-14 workqueue; hosted TCP stream wrappers (net_tcp_stream_*); TLS hosted sizing hook; fl_net_sock_init idempotent (fixes listen+accept). Packet module: l4_view for UDP/DHCP payloads. Tests and docs/P3_NETWORKING.md updated.
 VER_END
+
+RELEASE_DATE=2026-05-27
