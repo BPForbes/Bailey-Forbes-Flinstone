@@ -64,7 +64,7 @@ int cmd_check_run(int argc, char **argv);
 /*
  * Batch argv token counts (see cmd_batch.h).
  * Most commands are reached only via fl_shell_cmd_batch_tokens_count() in
- * cmd_batch_dispatch.c (indirect dispatch from cmd_batch.c); static analysis may
+ * cmd_batch_dispatch.c (called from cmd_batch.c); static analysis may
  * report the per-command helpers as unused even though the switch calls them.
  */
 int fl_shell_cmd_batch_tokens_count(fl_shell_cmd_no_t no, int argc, char **argv, int i);
