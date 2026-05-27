@@ -154,8 +154,8 @@ fl_result_t fl_net_route_configure_static(fl_net_driver_t *drv, const uint8_t sr
         return FL_RESULT_INVAL;
     if (!fl_net_ipv4_parse_literal(gw_s, &gw_be))
         return FL_RESULT_INVAL;
-    if (prefix_len > 32u)
-        prefix_len = 32u;
+    if (prefix_len == 0u || prefix_len > 32u)
+        return FL_RESULT_INVAL;
 
     net_be = fl_net_ipv4_network_addr(addr_be, (uint8_t)prefix_len);
     return fl_net_route_add(net_be, (uint8_t)prefix_len, gw_be, drv, addr_be, src_mac);

@@ -66,17 +66,27 @@ static void host_msleep(timer_driver_t *drv, unsigned int ms) {
 #ifdef DRIVERS_BAREMETAL
 #if defined(__x86_64__) || defined(__i386__)
 #include "boot/idt.h"
+#include "fl/driver/p4_irq_lifecycle.h"
 #include "net_baremetal.h"
 
 static timer_impl_t *s_irq0_impl;
 
+static void baremetal_net_timer_bh(int irq, void *ctx) {
+    (void)irq;
+    (void)ctx;
+    /* ~100 Hz PIT: ARP TTL sweep outside hardirq (**#240**). */
+    fl_net_baremetal_timer_poll(10u);
+}
+
 static void x86_irq0_handler(uint64_t vector, uint64_t error_code) {
     (void)vector;
     (void)error_code;
+    fl_irq_lifecycle_enter_hardirq();
     if (s_irq0_impl)
         s_irq0_impl->ticks++;
-    /* ~100 Hz PIT: drive ARP TTL sweep on bare-metal lab netdev (**#240**). */
-    fl_net_baremetal_timer_poll(10u);
+    (void)fl_irq_lifecycle_defer_bottom_half(0, baremetal_net_timer_bh, NULL);
+    fl_irq_lifecycle_leave_hardirq();
+    fl_irq_lifecycle_run_bottom_halves();
 }
 
 static uint64_t hw_tick_count(timer_driver_t *drv) {

@@ -89,12 +89,17 @@ fl_result_t fl_net_arp_cache_insert(uint32_t ipv4_be, const uint8_t mac[FL_NET_E
 
 unsigned fl_net_arp_tick(unsigned elapsed_ms) {
     static unsigned s_accum_ms;
-    if (elapsed_ms > 0u)
-        s_accum_ms += elapsed_ms;
-    if (s_accum_ms < FL_NET_ARP_TICK_PERIOD_MS)
+    unsigned removed = 0u;
+
+    if (elapsed_ms == 0u)
         return 0u;
-    s_accum_ms = 0u;
-    return fl_net_arp_cache_sweep(FL_NET_ARP_CACHE_STALE_TICKS);
+    s_accum_ms += elapsed_ms;
+    while (s_accum_ms >= FL_NET_ARP_TICK_PERIOD_MS) {
+        s_accum_ms -= FL_NET_ARP_TICK_PERIOD_MS;
+        ++s_arp_tick;
+        removed += fl_net_arp_cache_sweep(FL_NET_ARP_CACHE_STALE_TICKS);
+    }
+    return removed;
 }
 
 unsigned fl_net_arp_cache_sweep(unsigned max_age_ticks) {

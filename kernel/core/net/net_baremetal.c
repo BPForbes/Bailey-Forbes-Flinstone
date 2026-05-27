@@ -223,6 +223,14 @@ int fl_net_baremetal_lab_is_up(void) {
     return s_lab_up;
 }
 
+uint64_t fl_net_baremetal_lab_stat_tx(void) {
+    return s_lab_tx;
+}
+
+uint64_t fl_net_baremetal_lab_stat_rx(void) {
+    return s_lab_stat_rx;
+}
+
 void fl_net_baremetal_timer_poll(unsigned elapsed_ms) {
     (void)fl_net_arp_tick(elapsed_ms);
 }

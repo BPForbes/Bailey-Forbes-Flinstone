@@ -356,6 +356,7 @@ int main(int argc, char *argv[]) {
     fl_session_init();
     fl_net_netdev_init();
     fl_net_netdev_set_authz_hook(fl_authz_subsystem_check, NULL);
+    atexit(shell_netdev_cleanup_at_exit);
 
     /* Default host volume: ensure drive.img exists before block driver probes it. */
     if (strcmp(current_disk_file, "drive.img") == 0) {
@@ -402,7 +403,6 @@ int main(int argc, char *argv[]) {
     g_pool_workers_started = 1;
 #endif
     atexit(shell_pool_cleanup);
-    atexit(shell_netdev_cleanup_at_exit);
     if (original_stdout_fd < 0) {
         original_stdout_fd = dup(fileno(stdout));
         original_stdout_file = fdopen(original_stdout_fd, "w");
