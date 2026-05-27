@@ -205,6 +205,13 @@ void fl_net_netdev_tap_close(void) {
     }
 }
 
+void fl_net_netdev_shutdown(void) {
+    fl_net_netdev_tap_close();
+    fl_net_loopback_reset();
+    s_authz_fn = NULL;
+    s_authz_ctx = NULL;
+}
+
 int fl_net_netdev_tap_is_open(void) {
     return s_tap_fd >= 0;
 }

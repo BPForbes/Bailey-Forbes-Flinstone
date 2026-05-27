@@ -23,7 +23,7 @@
 #include "contract_p3_socket.h"
 #include "contract_p3_trust.h"
 
-#define FL_CONTRACT_P3_NETWORKING_REV 9
+#define FL_CONTRACT_P3_NETWORKING_REV 10
 
 #ifndef FL_CONTRACT_P3_WIRE_REV
 #error "FL_CONTRACT_P3_WIRE_REV must be defined by contract_p3_wire.h"

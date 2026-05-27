@@ -15,6 +15,8 @@
  * **Surfaces:** maps to **FL_CONTRACT_SURFACE_NETDEV** in **contract_foundations.h**;
  * errors on the hot path use **fl_result_t** (**P0-2**).
  *
+ * **Lifecycle:** **fl_net_netdev_init** / **fl_net_netdev_shutdown** pair TAP, loopback, authz (**#232**).
+ *
  * See **docs/ROADMAP.md** Phase 3; **kernel/include/fl/driver/net.h** mirrors this contract.
  */
 #ifndef FL_CONTRACT_P3_NETDEV_H

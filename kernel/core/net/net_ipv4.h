@@ -32,4 +32,6 @@ size_t fl_net_ipv4_build(fl_net_ipv4_hdr_t *hdr, uint8_t *buf, size_t cap, uint8
                          uint32_t src_be, uint32_t dst_be, const void *payload,
                          size_t payload_len, uint16_t id_be);
 
+/* Path MTU discovery stub (#240): oversize frames rejected at wire check; no ICMP PTB yet. */
+
 #endif /* NET_IPV4_H */

@@ -7,10 +7,12 @@
 #include "net_checksum.h"
 #include "net_ipv4.h"
 #include "net_tcp.h"
+#include "net_netdev.h"
 #include "net_packet.h"
 #include "net_udp.h"
 #include "net_wire.h"
 
+#include <sys/time.h>
 #include <string.h>
 
 #define FL_NET_LOOPBACK_RX_SLOTS 8u
@@ -207,6 +209,63 @@ static fl_result_t loopback_process_ipv4(const uint8_t *ip, size_t ip_len, uint8
 
 int fl_net_loopback_owns(uint32_t dst_be) {
     return fl_net_ipv4_is_loopback(dst_be);
+}
+
+static double loopback_exchange_delta_ms(const struct timeval *t0, const struct timeval *t1) {
+    return (double)(t1->tv_sec - t0->tv_sec) * 1000.0 +
+           (double)(t1->tv_usec - t0->tv_usec) / 1000.0;
+}
+
+fl_result_t fl_net_loopback_exchange(uint32_t dst_be, uint8_t ip_proto, const uint8_t *l4,
+                                     size_t l4_len, uint8_t *rx_l4, size_t rx_l4_cap,
+                                     size_t *rx_l4_len, unsigned timeout_ms,
+                                     double *out_rtt_ms) {
+    uint8_t ipbuf[576];
+    uint8_t frame[FL_NET_WIRE_FRAME_BUF_MAX];
+    uint8_t rx_frame[FL_NET_WIRE_FRAME_BUF_MAX];
+    uint8_t host_mac[6];
+    uint8_t peer_mac[6];
+    fl_net_ipv4_hdr_t hdr;
+    fl_net_frame_view_t view;
+    fl_net_frame_mut_t mut;
+    size_t ip_len;
+    size_t frame_len;
+    struct timeval t0, t1;
+    fl_net_packet_t rx_pkt;
+    fl_result_t rc;
+    uint32_t src_be = (uint32_t)FL_NET_IPV4_LOOPBACK_FIRST_OCTET | (1u << 24);
+
+    if (!l4 || l4_len == 0u || !rx_l4 || !rx_l4_len)
+        return FL_RESULT_INVAL;
+    fl_net_loopback_reset();
+    ip_len = fl_net_ipv4_build(&hdr, ipbuf, sizeof(ipbuf), ip_proto, src_be, dst_be, l4, l4_len,
+                               0x4242u);
+    if (ip_len == 0)
+        return FL_RESULT_ERR;
+    fl_net_loopback_mac_peer(peer_mac);
+    fl_net_loopback_mac_host(host_mac);
+    frame_len = fl_net_wire_build_eth_ipv4(frame, sizeof(frame), peer_mac, host_mac, ipbuf, ip_len);
+    if (frame_len == 0)
+        return FL_RESULT_ERR;
+    view.data = frame;
+    view.len = frame_len;
+    gettimeofday(&t0, NULL);
+    rc = fl_net_netdev_send(fl_net_netdev_loopback(), &view);
+    if (rc != FL_RESULT_OK)
+        return rc;
+    mut.data = rx_frame;
+    mut.cap = sizeof(rx_frame);
+    mut.len = 0;
+    rc = fl_net_netdev_recv(fl_net_netdev_loopback(), &mut, timeout_ms);
+    gettimeofday(&t1, NULL);
+    if (rc != FL_RESULT_OK)
+        return rc;
+    if (out_rtt_ms)
+        *out_rtt_ms = loopback_exchange_delta_ms(&t0, &t1);
+    rc = fl_net_packet_parse_eth_ipv4(rx_frame, mut.len, &rx_pkt);
+    if (rc != FL_RESULT_OK)
+        return rc;
+    return fl_net_packet_copy_l4(&rx_pkt, rx_l4, rx_l4_cap, rx_l4_len);
 }
 
 fl_result_t fl_net_loopback_icmp_echo(const uint8_t *icmp_req, size_t icmp_len,

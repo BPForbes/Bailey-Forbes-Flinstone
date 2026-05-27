@@ -31,6 +31,9 @@ fl_result_t fl_net_route_add(uint32_t addr_be, uint8_t prefix_len, uint32_t gw_b
 /**
  * Longest-prefix match. On success, **out** holds the route; use **fl_net_route_next_hop**
  * for on-link **dst_be** or the gateway when off-subnet.
+ *
+ * **Default route (0.0.0.0/0):** not installed on loopback-only hosts. Hosted TAP uses
+ * **fl_net_route_configure_tap** (**FL_NET_TAP_*** env). Bare-metal default route: **#237**.
  */
 fl_result_t fl_net_route_lookup(uint32_t dst_be, fl_net_route_entry_t *out);
 

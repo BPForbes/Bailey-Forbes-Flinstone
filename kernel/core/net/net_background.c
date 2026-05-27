@@ -48,7 +48,7 @@ static unsigned s_hub_bound;
 static void net_bg_work(void *ctx) {
     (void)ctx;
     /* P3-14: ARP cache TTL sweep (**#240**). TCP timer wheel / RX dequeue remain future. */
-    (void)fl_net_arp_cache_sweep(FL_NET_ARP_CACHE_STALE_TICKS);
+    (void)fl_net_arp_tick(FL_NET_ARP_TICK_PERIOD_MS);
 }
 
 static int s_net_bg_inited;

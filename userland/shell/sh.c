@@ -99,6 +99,14 @@ static void vm_cleanup_at_exit(void) {
     rmrf(g_vm_root);
 }
 
+static fl_authz_decision_t shell_netdev_authz(unsigned op, void *ctx) {
+    return fl_authz_subsystem_check(op, ctx);
+}
+
+static void shell_netdev_cleanup_at_exit(void) {
+    fl_net_netdev_shutdown();
+}
+
 #ifndef BATCH_SINGLE_THREAD
 static int g_pool_workers_started;
 #endif

@@ -1,0 +1,8 @@
+MAJOR_VERSION=4
+STANDARD_VERSION=2
+RELEASE_VERSION=0
+PRERELEASE=1
+DEV_VERSION=6
+DESCRIPTION<<VER_END
+PRE 4.2.0 (P3 hosted): fl_net_netdev_shutdown and shell atexit; netdev authz adapter; fl_net_arp_tick on background paths; fl_net_loopback_exchange shared by egress and wire host. Closes #232, #233, #235. Partial #240 (not bare metal). P3-7 RFC 793 FSM remains open (#238).
+VER_END
