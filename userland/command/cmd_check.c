@@ -59,6 +59,7 @@ int cmd_check_run(int argc, char **argv) {
     return run_requirements(host, port);
 }
 
+__attribute__((used))
 int cmd_check_batch_tokens_count(int argc, char **argv, int i) {
     int used = 1;
 

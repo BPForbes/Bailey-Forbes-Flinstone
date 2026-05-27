@@ -113,6 +113,7 @@ int cmd_ping_run(int argc, char **argv) {
     return (rc == FL_RESULT_OK) ? 0 : 1;
 }
 
+__attribute__((used))
 int cmd_ping_batch_tokens_count(int argc, char **argv, int i) {
     int used = 1;
     int pos = 0;
