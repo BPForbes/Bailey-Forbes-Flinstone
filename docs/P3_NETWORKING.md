@@ -189,6 +189,33 @@ Legend matches **`docs/ROADMAP.md`**: **✅** complete; **~✅** usable lab subs
 | DHCP (**P3-12**) | **RFC 2131**, **RFC 2132** | ~✅ codec + lab client (not production lease manager) |
 | `server` + messaging (**P3-13**) | **RFC 793** (TCP session); **RFC 768** (UDP helpers) | ❌ |
 
+## Application-layer and common Internet protocols
+
+Inventory of **named protocols** (and closely related APIs) versus what this tree implements today. Transport and below are included for context; module mapping is in [Layer map](#layer-map) and [Standards map](#standards-map-integration-targets).
+
+| Protocol / product API | Ports (typical) | Normative refs | In repo today | Where / notes |
+|------------------------|-----------------|----------------|---------------|---------------|
+| **ICMP echo** (ping) | — (IP proto 1) | **RFC 792** | ~✅ | **`net_icmp.c`**, **`fl_net_ping`**, shell **`ping`** (port 0) |
+| **UDP** | 1–65535 | **RFC 768** | ~✅ | **`net_udp.c`**, **`fl_net_wire_send_udp_pkt`**; not a general datagram API for apps yet |
+| **TCP** | 1–65535 | **RFC 793** | ~✅ (shim) | **`net_tcp.c`** SYN probe; hosted **`fl_net_tcp_stream_*`** / **`fl_net_sock_*`**; in-tree FSM TODO |
+| **TLS** | 443 (HTTPS) | **RFC 8446** (TLS 1.3); **RFC 5246** (TLS 1.2) | ~✅ (boundary only) | **`net_tls_hosted.c`** — **`FL_NET_TLS_MAX_PLAINTEXT_RECORD`** sizing hook; **no** mbedTLS/OpenSSL in tree (**P3-9**) |
+| **DNS** | 53/udp | **RFC 1035** (subset) | ~✅ | **`net_dns.c`** — **`fl_net_resolve_ipv4`**: literals, **`localhost`**, single nameserver from **`/etc/resolv.conf`**, **A** records only (no AAAA, no caching, no EDNS) |
+| **DHCP** (IPv4) | 67/68/udp | **RFC 2131**, **RFC 2132** | ~✅ (lab) | **`net_dhcp.c`** — BOOTP/DHCP codec, **`fl_net_dhcp_*_pkt`**; lab client via UDP; **not** a production lease manager or renew/rebind FSM |
+| **HTTP** | 80/tcp | **RFC 9110**, **RFC 9112** | ❌ | Planned userland client (**`docs/ROADMAP.md`** §11.1, **PX-11**); needs **P3-7** TCP + parsers |
+| **HTTPS** | 443/tcp | **RFC 9110** + **RFC 8446** | ❌ | Same as HTTP over **P3-9** TLS on hosted builds; **HTTP(S) boot** (**PX-12**) reuses **P3-7**/**P3-9** |
+| **SMTP** | 25, 587/tcp | **RFC 5321** | ❌ | Not planned in **P3**; no module |
+| **IMAP** | 143, 993/tcp | **RFC 3501** | ❌ | Not planned in **P3**; no module |
+| **FTP** | 20–21/tcp | **RFC 959** | ❌ | Not used; file sharing uses **custom TCP framing** (**`docs/SERVER.md`**, **`contract_p3_session_wire.h`**, **P5** file delivery), not FTP |
+| **SFTP** | 22/tcp (SSH) | **RFC 4253** / draft SFTP | ❌ | Not implemented; same **server** file path as FTP row |
+| **TFTP** | 69/udp | **RFC 1350** | ❌ | Future **PX-12** netboot path over **P3-6** UDP (**`docs/ROADMAP.md`** §12) |
+| **Flinstone `server`** (chat + files) | user **`ip:port`** | **RFC 793** transport; app opcodes in **`contract_p3_session_wire.h`** | ❌ (app) | Product spec **`docs/SERVER.md`**, plan **`docs/P3_13_CHAT_SERVER.md`**; prep PR has socket/session contracts only |
+
+**Clarifications**
+
+- **“Implemented”** here means **in-tree or hosted-shim code in `kernel/core/net/`** (or shell **`ping`** / **`check requirements`**), not every POSIX **`curl`**, **`sendmail`**, or **`ftp`** binary on the host OS.
+- **HTTPS** is **not** a separate stack layer in this repo: it is **HTTP over TLS**, with TLS intended to stay in **userland** libraries on **H** per **`contract_p3_tls_hosted.h`**.
+- **Mail (SMTP/IMAP)** and **FTP/SFTP** are **out of scope** for the current **PRE 4.2.0** network prep train; document them here so expectations stay aligned with **`docs/ROADMAP.md`** and **`docs/SERVER.md`**.
+
 Bare-metal integration requires **802.3**-framed TX/RX through **`fl_net_driver_t`** (not Linux TAP/socket shims alone). Track gaps in GitHub issues (bare metal, P3 gap checklist, sockets/server).
 
 ## Shell commands
@@ -218,6 +245,7 @@ make check-network-requirements
 
 ## Related docs
 
+- **[Application-layer and common Internet protocols](#application-layer-and-common-internet-protocols)** — DNS, DHCP, HTTP/HTTPS, SMTP/IMAP, FTP/SFTP, TFTP, **`server`** status table
 - **`docs/P3_13_CHAT_SERVER.md`** — **P3-13** chat room implementation plan (wire protocol, APIs, tests)
 - **`contracts/networking/README.txt`** — contract shards vs P2
 - **`docs/ROADMAP.md`** — P3 rows and phase gates
@@ -236,7 +264,7 @@ make check-network-requirements
 
 | Priority | Item | Notes |
 |----------|------|--------|
-| **P3-12** | DHCP client | **RFC 2131**/**2132**; replaces **FL_NET_TAP_*** env bootstrap |
+| **P3-12** | DHCP production client | Renew/rebind FSM, lease DB; replaces **FL_NET_TAP_*** env bootstrap (codec exists) |
 | **P3-13** | Chat room | See **`docs/P3_13_CHAT_SERVER.md`**; **#239** / **#238** |
 | Patch | ARP cache TTL sweep | Tick-based age only today; add periodic **`fl_net_arp_tick`** for bare metal |
 | Patch | Consolidate loopback egress | **`egress_loopback`** vs **`wire_loopback_exchange`** dedupe |

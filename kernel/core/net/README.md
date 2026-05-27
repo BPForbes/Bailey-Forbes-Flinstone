@@ -1,6 +1,6 @@
 # `kernel/core/net` — P3 implementation
 
-Long-form guide: **`docs/P3_NETWORKING.md`**. **P3-13 chat room plan:** **`docs/P3_13_CHAT_SERVER.md`**.
+Long-form guide: **`docs/P3_NETWORKING.md`** (includes **[application-layer protocol inventory](docs/P3_NETWORKING.md#application-layer-and-common-internet-protocols)** — DNS, DHCP, HTTP/HTTPS, SMTP/IMAP, FTP/SFTP, TFTP, **`server`**). **P3-13 chat room plan:** **`docs/P3_13_CHAT_SERVER.md`**.
 
 ## Quick file index
 
