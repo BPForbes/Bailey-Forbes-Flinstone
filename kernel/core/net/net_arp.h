@@ -56,4 +56,10 @@ fl_result_t fl_net_arp_resolve(fl_net_driver_t *drv, const uint8_t src_mac[FL_NE
                                uint32_t src_ip_be, uint32_t target_ip_be,
                                uint8_t mac_out[FL_NET_ETH_ADDR_LEN], unsigned timeout_ms);
 
+/**
+ * Evict cache entries older than **max_age_ticks** (tick delta from **s_arp_tick**).
+ * **P3-14** background sweep; returns count removed.
+ */
+unsigned fl_net_arp_cache_sweep(unsigned max_age_ticks);
+
 #endif /* NET_ARP_H */

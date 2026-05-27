@@ -9,6 +9,7 @@
 #include "contract_p3_loopback.h"
 #include "net_packet.h"
 #include "net_route.h"
+#include "net_arp.h"
 #include "net_udp.h"
 #include "net_wire_egress.h"
 #include "net_wire_host.h"
@@ -40,9 +41,14 @@ static uint32_t s_hub_ip_be;
 static uint16_t s_hub_port_host;
 static unsigned s_hub_bound;
 
+#ifndef FL_NET_ARP_CACHE_STALE_TICKS
+#define FL_NET_ARP_CACHE_STALE_TICKS 512u
+#endif
+
 static void net_bg_work(void *ctx) {
     (void)ctx;
-    /* TODO: P3-14 — RX dequeue, TCP timer wheel, delayed ACK. */
+    /* P3-14: ARP cache TTL sweep (**#240**). TCP timer wheel / RX dequeue remain future. */
+    (void)fl_net_arp_cache_sweep(FL_NET_ARP_CACHE_STALE_TICKS);
 }
 
 static int s_net_bg_inited;
@@ -168,22 +174,26 @@ static fl_result_t task_backend_resolve_local_ip(uint32_t peer_ip_be, uint32_t *
     return FL_RESULT_OK;
 }
 
-static fl_result_t task_backend_xmit_udp_socket(const fl_net_socket_endpoint_t *endpoint,
-                                                const uint8_t *payload, size_t payload_len) {
+static fl_result_t task_backend_xmit_udp_socket_pkt(const fl_net_socket_endpoint_t *endpoint,
+                                                    const fl_net_packet_t *payload_pkt) {
     uint8_t udp[FL_NET_TASK_BACKEND_INBOX_PAYLOAD_MAX + FL_NET_UDP_HDR_LEN];
+    fl_net_packet_t udp_pkt;
     size_t udp_len;
     fl_result_t rc;
 
-    udp_len = fl_net_udp_build_datagram(udp, sizeof(udp), endpoint->local_ip_be,
-                                        endpoint->peer_ip_be,
-                                        port_be_to_host16(endpoint->local_port_be),
-                                        port_be_to_host16(endpoint->peer_port_be), payload,
-                                        payload_len);
+    udp_len = fl_net_udp_build_datagram_from_pkt(
+        udp, sizeof(udp), endpoint->local_ip_be, endpoint->peer_ip_be,
+        port_be_to_host16(endpoint->local_port_be), port_be_to_host16(endpoint->peer_port_be),
+        payload_pkt);
     if (udp_len == 0)
         return FL_RESULT_ERR;
 
-    rc = fl_net_wire_egress_l4_xmit(endpoint->peer_ip_be, FL_NET_IP_PROTO_UDP, udp, udp_len,
-                                    FL_NET_TASK_BACKEND_ARP_TIMEOUT_MS);
+    rc = fl_net_packet_bind_l4(&udp_pkt, udp, sizeof(udp), 0u, udp_len);
+    if (rc != FL_RESULT_OK)
+        return rc;
+
+    rc = fl_net_wire_egress_l4_xmit_pkt(endpoint->peer_ip_be, FL_NET_IP_PROTO_UDP, &udp_pkt,
+                                        FL_NET_TASK_BACKEND_ARP_TIMEOUT_MS);
     if (rc == FL_RESULT_OK)
         return FL_RESULT_OK;
 
@@ -193,11 +203,12 @@ static fl_result_t task_backend_xmit_udp_socket(const fl_net_socket_endpoint_t *
     {
         uint8_t rx_dummy[64];
         size_t rx_len = 0;
+        fl_net_packet_t rx_pkt;
         uint16_t sport = port_be_to_host16(endpoint->local_port_be);
         uint16_t dport = port_be_to_host16(endpoint->peer_port_be);
 
-        rc = fl_net_wire_send_udp(endpoint->peer_ip_be, sport, dport, payload, payload_len,
-                                  rx_dummy, sizeof(rx_dummy), &rx_len, 1u);
+        rc = fl_net_wire_send_udp_pkt(endpoint->peer_ip_be, sport, dport, payload_pkt, &rx_pkt,
+                                      rx_dummy, sizeof(rx_dummy), &rx_len, 1u);
         if (rc == FL_RESULT_TIMEDOUT)
             return FL_RESULT_OK;
     }
@@ -206,15 +217,22 @@ static fl_result_t task_backend_xmit_udp_socket(const fl_net_socket_endpoint_t *
 
 fl_result_t fl_net_task_backend_socket_send(const fl_net_socket_endpoint_t *endpoint,
                                             const uint8_t *payload, size_t payload_len) {
+    fl_net_packet_t payload_pkt;
     fl_net_socket_endpoint_t ep;
+    fl_result_t rc;
 
     if (!endpoint || !payload || payload_len == 0u)
         return FL_RESULT_INVAL;
     if (payload_len > FL_NET_TASK_BACKEND_INBOX_PAYLOAD_MAX)
         return FL_RESULT_INVAL;
 
+    rc = fl_net_packet_bind_l4(&payload_pkt, (uint8_t *)(uintptr_t)payload, payload_len, 0u,
+                               payload_len);
+    if (rc != FL_RESULT_OK)
+        return rc;
+
     ep = *endpoint;
-    return task_backend_xmit_udp_socket(&ep, payload, payload_len);
+    return task_backend_xmit_udp_socket_pkt(&ep, &payload_pkt);
 }
 
 fl_result_t fl_net_task_backend_user_open(unsigned slot, unsigned max_inbox_messages) {

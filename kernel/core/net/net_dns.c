@@ -1,6 +1,7 @@
 #include "net_dns.h"
 
 #include "net_ipv4.h"
+#include "net_packet.h"
 #include "net_wire_host.h"
 
 #include "fl/net_asm.h"
@@ -90,9 +91,15 @@ static fl_result_t dns_query_a(const char *host, uint32_t *out_addr_be) {
     query[qlen++] = 1;
 
     {
-        fl_result_t udp_rc =
-            fl_net_wire_send_udp(ns_be, 40053, 53, query, qlen, answer, sizeof(answer), &alen,
-                                 4000u);
+        fl_net_packet_t query_pkt;
+        fl_net_packet_t answer_pkt;
+        fl_result_t udp_rc;
+
+        udp_rc = fl_net_packet_bind_l4(&query_pkt, query, sizeof(query), 0u, qlen);
+        if (udp_rc != FL_RESULT_OK)
+            return udp_rc;
+        udp_rc = fl_net_wire_send_udp_pkt(ns_be, 40053, 53, &query_pkt, &answer_pkt, answer,
+                                          sizeof(answer), &alen, 4000u);
         if (udp_rc != FL_RESULT_OK)
             return udp_rc;
     }

@@ -3,6 +3,7 @@
 #include "contract_p3_wire.h"
 #include "net_checksum.h"
 #include "net_ipv4.h"
+#include "net_packet.h"
 #include "net_wire_host.h"
 
 #include "fl/net_asm.h"
@@ -70,10 +71,18 @@ fl_result_t fl_net_icmp_echo_exchange(uint32_t dst_be, uint16_t id, uint16_t seq
     if (req_len == 0)
         return FL_RESULT_ERR;
 
-    rc = fl_net_wire_send_icmp(dst_be, req, req_len, rx, sizeof(rx), &rx_len, timeout_ms,
-                               out_rtt_ms);
-    if (rc != FL_RESULT_OK)
-        return rc;
+    {
+        fl_net_packet_t req_pkt;
+        fl_net_packet_t rx_pkt;
+
+        rc = fl_net_packet_bind_l4(&req_pkt, req, sizeof(req), 0u, req_len);
+        if (rc != FL_RESULT_OK)
+            return rc;
+        rc = fl_net_wire_send_icmp_pkt(dst_be, &req_pkt, &rx_pkt, rx, sizeof(rx), &rx_len,
+                                       timeout_ms, out_rtt_ms);
+        if (rc != FL_RESULT_OK)
+            return rc;
+    }
     if (!fl_net_icmp_echo_reply_match(rx, rx_len, id, seq))
         return FL_RESULT_ERR;
     return FL_RESULT_OK;

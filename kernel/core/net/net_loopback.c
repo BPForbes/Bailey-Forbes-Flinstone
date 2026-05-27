@@ -7,6 +7,8 @@
 #include "net_checksum.h"
 #include "net_ipv4.h"
 #include "net_tcp.h"
+#include "net_packet.h"
+#include "net_udp.h"
 #include "net_wire.h"
 
 #include <string.h>
@@ -166,6 +168,31 @@ static fl_result_t loopback_process_ipv4(const uint8_t *ip, size_t ip_len, uint8
             return FL_RESULT_ERR;
         ip_reply_len = loopback_build_ipv4_reply(ip, ip_len, tcp_reply, tcp_reply_len, ip_reply,
                                                  sizeof(ip_reply));
+    } else if (ip[9] == FL_NET_IP_PROTO_UDP) {
+        const uint8_t *udp = ip + hdr_len;
+        size_t udp_len = ip_len - hdr_len;
+        uint16_t sport = 0;
+        uint16_t dport = 0;
+        uint32_t src_be;
+        size_t payload_len;
+
+        if (udp_len < FL_NET_UDP_HDR_LEN)
+            return FL_RESULT_ERR;
+        sport = (uint16_t)(((uint16_t)udp[0] << 8) | udp[1]);
+        dport = (uint16_t)(((uint16_t)udp[2] << 8) | udp[3]);
+        payload_len = udp_len - FL_NET_UDP_HDR_LEN;
+        src_be = (uint32_t)ip[12] | ((uint32_t)ip[13] << 8) | ((uint32_t)ip[14] << 16) |
+                 ((uint32_t)ip[15] << 24);
+
+        {
+            fl_net_packet_t app_pkt;
+
+            if (fl_net_packet_bind_l4(&app_pkt, (uint8_t *)ip, ip_len,
+                                      hdr_len + FL_NET_UDP_HDR_LEN, payload_len) ==
+                FL_RESULT_OK)
+                (void)fl_net_udp_deliver_inbound_pkt(src_be, sport, dport, &app_pkt);
+        }
+        return FL_RESULT_TIMEDOUT;
     } else {
         return FL_RESULT_TIMEDOUT;
     }

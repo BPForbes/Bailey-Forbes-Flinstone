@@ -137,12 +137,14 @@ HAL_SRCS += kernel/arch/aarch64/hal/arm_plat.c kernel/arch/aarch64/hal/arm_uart.
 endif
 NET_CORE_SRCS = kernel/core/net/net_checksum.c kernel/core/net/net_wire.c kernel/core/net/net_eth.c \
     kernel/core/net/net_background.c kernel/core/net/net_packet.c kernel/core/net/net_udp.c \
+    kernel/core/net/net_socket.c \
                 kernel/core/net/net_ipv4.c kernel/core/net/net_arp.c kernel/core/net/net_route.c \
                 kernel/core/net/net_wire_egress.c \
                 kernel/core/net/net_icmp.c kernel/core/net/net_tcp.c kernel/core/net/net_loopback.c \
                 kernel/core/net/net_netdev.c kernel/core/net/net_tap.c kernel/core/net/net_wire_host.c \
                 kernel/core/net/net_wire_host_syscall.c \
-                kernel/core/net/net_dns.c kernel/core/net/net_ping_host.c kernel/core/net/net_requirements.c
+                kernel/core/net/net_dns.c kernel/core/net/net_dhcp.c kernel/core/net/net_tls_hosted.c \
+                kernel/core/net/net_ping_host.c kernel/core/net/net_requirements.c
 NET_ASM_OBJ = $(patsubst %.s,%.o,$(patsubst %.asm,%.o,$(filter %/net_asm.s %/net_asm.asm %/net_wire_host_asm.s %/net_wire_host_asm.asm,$(ASMSRCS))))
 CORE_SRCS = kernel/core/vfs/disk.c kernel/core/vfs/fat32_host.c kernel/core/vfs/fat32_host_files.c kernel/core/vfs/path_log.c kernel/core/vfs/cluster.c kernel/core/vfs/fs.c \
             disk_host_io.c \

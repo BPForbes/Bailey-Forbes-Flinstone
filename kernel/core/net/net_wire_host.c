@@ -11,6 +11,8 @@
 #include "net_loopback.h"
 #include "net_netdev.h"
 #include "net_tcp.h"
+#include "net_packet.h"
+#include "net_udp.h"
 #include "net_wire_egress.h"
 #include "net_wire_host_syscall.h"
 
@@ -62,9 +64,6 @@ static fl_result_t wire_loopback_exchange(const uint8_t *l4, size_t l4_len, uint
     fl_net_frame_mut_t mut;
     size_t ip_len;
     size_t frame_len;
-    size_t ip_off;
-    size_t ip_len_rx;
-    uint32_t dummy_dst;
     struct timeval t0, t1;
     fl_result_t rc;
 
@@ -102,52 +101,55 @@ static fl_result_t wire_loopback_exchange(const uint8_t *l4, size_t l4_len, uint
     if (out_rtt_ms)
         *out_rtt_ms = timeval_delta_ms(&t0, &t1);
 
-    if (!fl_net_wire_parse_eth_ipv4(rx_frame, mut.len, &ip_off, &ip_len_rx, &dummy_dst))
-        return FL_RESULT_ERR;
-    if (ip_len_rx <= (size_t)((rx_frame[ip_off] & 0x0fu) * 4u) ||
-        ip_len_rx - (size_t)((rx_frame[ip_off] & 0x0fu) * 4u) > rx_l4_cap)
-        return FL_RESULT_ERR;
-
     {
-        size_t hdr_len = (size_t)((rx_frame[ip_off] & 0x0fu) * 4u);
-        size_t payload = ip_len_rx - hdr_len;
-        memcpy(rx_l4, rx_frame + ip_off + hdr_len, payload);
-        *rx_l4_len = payload;
+        fl_net_packet_t rx_pkt;
+        fl_result_t prc;
+
+        prc = fl_net_packet_parse_eth_ipv4(rx_frame, mut.len, &rx_pkt);
+        if (prc != FL_RESULT_OK)
+            return prc;
+        return fl_net_packet_copy_l4(&rx_pkt, rx_l4, rx_l4_cap, rx_l4_len);
     }
-    return FL_RESULT_OK;
 }
 
-fl_result_t fl_net_wire_send_icmp(uint32_t dst_be, const uint8_t *icmp, size_t icmp_len,
-                                  uint8_t *rx, size_t rx_cap, size_t *rx_len,
-                                  unsigned timeout_ms, double *out_rtt_ms) {
-    struct timeval t0, t1;
+fl_result_t fl_net_wire_send_icmp_pkt(uint32_t dst_be, const fl_net_packet_t *icmp_pkt,
+                                      fl_net_packet_t *rx_pkt, uint8_t *rx_backing,
+                                      size_t rx_backing_cap, size_t *rx_len,
+                                      unsigned timeout_ms, double *out_rtt_ms) {
+    const uint8_t *icmp;
+    size_t icmp_len;
+    fl_result_t rc;
 
-    if (!icmp || icmp_len < 8 || !rx || !rx_len)
+    if (!icmp_pkt || !rx_pkt || !rx_backing || !rx_len)
         return FL_RESULT_INVAL;
 
-    gettimeofday(&t0, NULL);
+    rc = fl_net_packet_l4_view(icmp_pkt, &icmp, &icmp_len);
+    if (rc != FL_RESULT_OK || icmp_len < 8u)
+        return FL_RESULT_INVAL;
 
-    if (fl_net_loopback_owns(dst_be)) {
-        fl_result_t eg =
-            fl_net_wire_egress_l4(dst_be, FL_NET_IP_PROTO_ICMP, icmp, icmp_len, rx, rx_cap, rx_len,
-                                  timeout_ms, out_rtt_ms);
-        if (eg == FL_RESULT_OK)
-            return FL_RESULT_OK;
-        return wire_loopback_exchange(icmp, icmp_len, FL_NET_IP_PROTO_ICMP, dst_be, rx, rx_cap,
-                                      rx_len, timeout_ms, out_rtt_ms);
+    rc = fl_net_wire_egress_l4_pkt(dst_be, FL_NET_IP_PROTO_ICMP, icmp_pkt, rx_backing,
+                                   rx_backing_cap, rx_len, timeout_ms, out_rtt_ms);
+    if (rc == FL_RESULT_OK) {
+        fl_result_t bind_rc =
+            fl_net_packet_bind_l4(rx_pkt, rx_backing, rx_backing_cap, 0u, *rx_len);
+        return bind_rc;
     }
 
-    {
-        fl_result_t eg =
-            fl_net_wire_egress_l4(dst_be, FL_NET_IP_PROTO_ICMP, icmp, icmp_len, rx, rx_cap, rx_len,
-                                  timeout_ms, out_rtt_ms);
-        if (eg == FL_RESULT_OK)
-            return FL_RESULT_OK;
+    if (fl_net_loopback_owns(dst_be)) {
+        fl_result_t bind_rc;
+
+        rc = wire_loopback_exchange(icmp, icmp_len, FL_NET_IP_PROTO_ICMP, dst_be, rx_backing,
+                                    rx_backing_cap, rx_len, timeout_ms, out_rtt_ms);
+        if (rc != FL_RESULT_OK)
+            return rc;
+        bind_rc = fl_net_packet_bind_l4(rx_pkt, rx_backing, rx_backing_cap, 0u, *rx_len);
+        return bind_rc;
     }
 
 #if defined(__linux__)
     {
         struct sockaddr_in dst;
+        struct timeval t0, t1;
         struct timeval tv;
         ssize_t n;
         int sock;
@@ -162,27 +164,49 @@ fl_result_t fl_net_wire_send_icmp(uint32_t dst_be, const uint8_t *icmp, size_t i
         tv.tv_usec = (suseconds_t)((timeout_ms % 1000u) * 1000u);
         (void)net_host_setsockopt(sock, SOL_SOCKET, SO_RCVTIMEO, &tv, (unsigned int)sizeof(tv));
 
+        gettimeofday(&t0, NULL);
         if (net_host_sendto(sock, icmp, icmp_len, 0, &dst, (unsigned int)sizeof(dst)) < 0) {
             net_host_close(sock);
             return FL_RESULT_ERR;
         }
 
-        n = net_host_recvfrom(sock, rx, rx_cap, 0, NULL, NULL);
+        n = net_host_recvfrom(sock, rx_backing, rx_backing_cap, 0, NULL, NULL);
         net_host_close(sock);
         gettimeofday(&t1, NULL);
         if (n < 0)
             return (errno == EAGAIN || errno == EWOULDBLOCK) ? FL_RESULT_TIMEDOUT
                                                              : FL_RESULT_ERR;
         *rx_len = (size_t)n;
+        rc = fl_net_packet_bind_l4(rx_pkt, rx_backing, rx_backing_cap, 0u, *rx_len);
+        if (rc != FL_RESULT_OK)
+            return rc;
         if (out_rtt_ms)
             *out_rtt_ms = timeval_delta_ms(&t0, &t1);
         return FL_RESULT_OK;
     }
 #else
     (void)timeout_ms;
-    (void)rx_cap;
+    (void)out_rtt_ms;
     return FL_RESULT_NOSYS;
 #endif
+}
+
+fl_result_t fl_net_wire_send_icmp(uint32_t dst_be, const uint8_t *icmp, size_t icmp_len,
+                                  uint8_t *rx, size_t rx_cap, size_t *rx_len,
+                                  unsigned timeout_ms, double *out_rtt_ms) {
+    fl_net_packet_t req_pkt;
+    fl_net_packet_t rx_pkt;
+    fl_result_t rc;
+
+    if (!icmp || icmp_len < 8 || !rx || !rx_len)
+        return FL_RESULT_INVAL;
+
+    rc = fl_net_packet_bind_l4(&req_pkt, (uint8_t *)(uintptr_t)icmp, icmp_len, 0u, icmp_len);
+    if (rc != FL_RESULT_OK)
+        return rc;
+
+    return fl_net_wire_send_icmp_pkt(dst_be, &req_pkt, &rx_pkt, rx, rx_cap, rx_len, timeout_ms,
+                                     out_rtt_ms);
 }
 
 fl_result_t fl_net_wire_send_tcp_syn(uint32_t dst_be, uint16_t sport, uint16_t dport,
@@ -335,9 +359,9 @@ fl_result_t fl_net_wire_send_tcp_syn(uint32_t dst_be, uint16_t sport, uint16_t d
 #endif
 }
 
-fl_result_t fl_net_wire_send_udp(uint32_t dst_be, uint16_t sport, uint16_t dport,
-                                 const uint8_t *payload, size_t payload_len, uint8_t *rx,
-                                 size_t rx_cap, size_t *rx_len, unsigned timeout_ms) {
+static fl_result_t wire_host_send_udp_buf(uint32_t dst_be, uint16_t sport, uint16_t dport,
+                                          const uint8_t *payload, size_t payload_len, uint8_t *rx,
+                                          size_t rx_cap, size_t *rx_len, unsigned timeout_ms) {
 #if defined(__linux__)
     struct sockaddr_in local;
     struct sockaddr_in dst;
@@ -389,4 +413,47 @@ fl_result_t fl_net_wire_send_udp(uint32_t dst_be, uint16_t sport, uint16_t dport
     (void)timeout_ms;
     return FL_RESULT_NOSYS;
 #endif
+}
+
+fl_result_t fl_net_wire_send_udp_pkt(uint32_t dst_be, uint16_t sport, uint16_t dport,
+                                     const fl_net_packet_t *payload_pkt, fl_net_packet_t *rx_pkt,
+                                     uint8_t *rx_backing, size_t rx_backing_cap, size_t *rx_len,
+                                     unsigned timeout_ms) {
+    const uint8_t *payload;
+    size_t payload_len;
+    fl_result_t rc;
+
+    if (!payload_pkt || !rx_pkt || !rx_backing || !rx_len)
+        return FL_RESULT_INVAL;
+
+    rc = fl_net_packet_l4_view(payload_pkt, &payload, &payload_len);
+    if (rc != FL_RESULT_OK || payload_len == 0u)
+        return FL_RESULT_INVAL;
+
+    rc = wire_host_send_udp_buf(dst_be, sport, dport, payload, payload_len, rx_backing,
+                                rx_backing_cap, rx_len, timeout_ms);
+    if (rc == FL_RESULT_OK) {
+        fl_result_t bind_rc =
+            fl_net_packet_bind_l4(rx_pkt, rx_backing, rx_backing_cap, 0u, *rx_len);
+        if (bind_rc != FL_RESULT_OK)
+            return bind_rc;
+    }
+    return rc;
+}
+
+fl_result_t fl_net_wire_send_udp(uint32_t dst_be, uint16_t sport, uint16_t dport,
+                                 const uint8_t *payload, size_t payload_len, uint8_t *rx,
+                                 size_t rx_cap, size_t *rx_len, unsigned timeout_ms) {
+    fl_net_packet_t tx_pkt;
+    fl_net_packet_t rx_pkt;
+
+    if (!payload || payload_len == 0 || !rx || !rx_len)
+        return FL_RESULT_INVAL;
+
+    if (fl_net_packet_bind_l4(&tx_pkt, (uint8_t *)(uintptr_t)payload, payload_len, 0u,
+                              payload_len) != FL_RESULT_OK)
+        return FL_RESULT_ERR;
+
+    return fl_net_wire_send_udp_pkt(dst_be, sport, dport, &tx_pkt, &rx_pkt, rx, rx_cap, rx_len,
+                                    timeout_ms);
 }

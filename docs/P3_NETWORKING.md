@@ -30,18 +30,19 @@ Full spec: **[`docs/P3_13_CHAT_SERVER.md`](P3_13_CHAT_SERVER.md)**.
 | **`net_eth.c`** | L2 helpers | Aliases/constants over wire |
 | **`net_arp.c`** | P3-4 | ARP request/reply, bounded cache, resolve over netdev |
 | **`net_route.c`** | P3-5 | Longest-prefix routing table; TAP lab via **FL_NET_TAP_*** env |
-| **`net_wire_egress.c`** | P3-5 / P3-6 path | IPv4 L4 send/recv on routed netdev (ARP + ICMP echo); **`fl_net_wire_egress_l4_xmit`** for one-way UDP |
+| **`net_wire_egress.c`** | P3-5 / P3-6 | IPv4 L4 egress (ARP + netdev); **`fl_net_wire_egress_l4_pkt`** / **`l4_xmit_pkt`** |
 | **`net_udp.c`** | P3-6 (partial) | **`fl_net_udp_build_datagram`** for task-backend socket egress |
+| **`net_dhcp.c`** | P3-12 (lab) | BOOTP codec; **`fl_net_packet_bind_l4`** / **`fl_net_dhcp_*_pkt`** over L4 slices |
 | **`net_background.c`** | P3-14 / distribution | Workqueue tick; blended socket + ARP task backend (P3-13 wire RX TODO) |
 | **`net_ipv4.c`** | P3-5 (partial) | IPv4 header build, literal/loopback address helpers |
 | **`net_checksum.c`** | P3-5 | Internet checksum; **`asm_net_checksum16`** when `FL_NET_ASM_AVAILABLE` |
 | **`net_icmp.c`** | P3-5 | ICMP echo request/reply exchange |
-| **`net_tcp.c`** | P3-7 (probe only) | TCP SYN build + SYN probe via wire host |
+| **`net_tcp.c`** | P3-7 (probe only) | **`fl_net_tcp_build_syn_pkt`** + SYN probe; hosted **`fl_net_tcp_stream_*`** |
 | **`net_dns.c`** | P3-8 (minimal) | DNS-over-UDP A query via `/etc/resolv.conf` |
 | **`net_loopback.c`** | P3-2 | In-memory netdev: ICMP echo reply, TCP RST+ACK on SYN |
 | **`net_netdev.c`** | P3-1 | Driver registry, send/recv, timeouts, P2-3 authz hook |
 | **`net_tap.c`** | P3-3 | Linux TAP (`IFF_TAP \| IFF_NO_PI`), `SKIP_TAP=1` |
-| **`net_wire_host.c`** | Hosted shim | Off-loopback ICMP/UDP via ASM syscalls; loopback via netdev |
+| **`net_wire_host.c`** | Hosted edge | **`fl_net_wire_send_icmp_pkt`** / **`send_udp_pkt`**; off-loopback syscalls; loopback via netdev |
 | **`net_wire_host_syscall.c`** | Hosted shim | C errno bridge to **`net_host_*_asm`** |
 | **`net_ping_host.c`** | Shell API | `fl_net_ping` / format helpers |
 | **`net_requirements.c`** | CI | `fl_net_probe_endpoint`, `SKIP_NETWORK_INTEROP` |
@@ -57,7 +58,7 @@ Packets are the shared backbone for **P3-4** … **P3-12** — not a separate ro
 | **`fl_net_pipeline_rx_t`** | RX stages: **DRV_RX → PARSE_L2 → PARSE_L3 → PARSE_L4 → ROUTE → DELIVER** |
 | **`fl_net_pipeline_tx_t`** | TX stages: **BUILD_L4 → BUILD_IPV4 → BUILD_L2 → ROUTE → ARP → DRV_TX** |
 
-**Implementation:** **`fl_net_packet_parse_eth_ipv4`**, **`fl_net_packet_copy_l4`**, **`fl_net_pipeline_rx_feed`** in **`net_packet.c`**. **`net_wire_egress.c`** uses the packet parser for ICMP echo reply extraction. **P3-12** DHCP and **P3-6** UDP should build on the same slices when those clients land.
+**Implementation:** **`fl_net_packet_parse_eth_ipv4`**, **`fl_net_packet_bind_l4`**, **`fl_net_packet_l4_view`**, **`fl_net_packet_copy_l4`**, **`fl_net_pipeline_rx_feed`** in **`net_packet.c`**. **`net_wire_egress.c`** uses the parser for ICMP echo reply extraction. **`net_dhcp.c`** binds BOOTP as L4-only packets before hosted UDP send; **`net_background.c`** relays via **`fl_net_packet_copy_l4`**.
 
 ## Blended ARP + socket model (task backend)
 
@@ -168,11 +169,12 @@ Legend matches **`docs/ROADMAP.md`**: **✅** complete; **~✅** usable lab subs
 | **P3-4** ARP | ✅ | ~✅ — `net_arp.c` cache (**ASM** table ops) + request/reply on loopback/TAP |
 | **P3-5** IPv4 | ✅ | ~✅ — LPM routes + **`fl_net_wire_egress_l4`**; ICMP on netdev; Linux ICMP fallback; PMTU/offload open |
 | **P3-6** UDP | ✅ | ~✅ — DNS + wire host datagrams only |
-| **P3-7** TCP | ✅ | ⚠️ — SYN probe only |
+| **P3-7** TCP | ✅ | ~✅ — SYN probe + **`fl_net_tcp_stream_*`** hosted listen/connect/accept |
 | **P3-8** DNS | ✅ | ~✅ — A record, single nameserver |
-| **P3-9** TLS | ✅ | ❌ |
-| **P3-12** DHCP | ✅ | ❌ |
-| **P3-13** `server` + messaging | ⚠️ | ❌ — **`server host/join/leave/kill`**, background session, framed chat (**#239**) |
+| **P3-9** TLS | ✅ | ~✅ — **`net_tls_hosted.c`** record-size boundary (no mbedtls yet) |
+| **P3-12** DHCP | ✅ | ~✅ — BOOTP codec + **`fl_net_dhcp_*_pkt`** over **`fl_net_packet_t`** |
+| **P3-14** background | ✅ | ~✅ — ARP cache sweep on **`fl_wq_enqueue`** (**`net_background.c`**) |
+| **P3-13** `server` + messaging | ✅ | ❌ — product spec **`docs/SERVER.md`**; **`cmd_server`** / hub app **#239** |
 
 ## Standards map (integration targets)
 
@@ -182,10 +184,37 @@ Legend matches **`docs/ROADMAP.md`**: **✅** complete; **~✅** usable lab subs
 | ARP (**P3-4**) | **RFC 826** | ~✅ in-tree cache + exchange |
 | IPv4 / ICMP (**P3-5**) | **RFC 791**, **RFC 792** | ~✅ routing + netdev ICMP |
 | UDP (**P3-6**) | **RFC 768** | ~✅ DNS + hosted datagram shim |
-| TCP (**P3-7**) | **RFC 793** | ⚠️ SYN probe only |
+| TCP (**P3-7**) | **RFC 793** | ~✅ SYN probe + hosted stream shim (in-tree FSM TODO) |
 | DNS (**P3-8**) | **RFC 1035** (subset) | ~✅ A record |
-| DHCP (**P3-12**) | **RFC 2131**, **RFC 2132** | ❌ |
+| DHCP (**P3-12**) | **RFC 2131**, **RFC 2132** | ~✅ codec + lab client (not production lease manager) |
 | `server` + messaging (**P3-13**) | **RFC 793** (TCP session); **RFC 768** (UDP helpers) | ❌ |
+
+## Application-layer and common Internet protocols
+
+Inventory of **named protocols** (and closely related APIs) versus what this tree implements today. Transport and below are included for context; module mapping is in [Layer map](#layer-map) and [Standards map](#standards-map-integration-targets).
+
+| Protocol / product API | Ports (typical) | Normative refs | In repo today | Where / notes |
+|------------------------|-----------------|----------------|---------------|---------------|
+| **ICMP echo** (ping) | — (IP proto 1) | **RFC 792** | ~✅ | **`net_icmp.c`**, **`fl_net_ping`**, shell **`ping`** (port 0) |
+| **UDP** | 1–65535 | **RFC 768** | ~✅ | **`net_udp.c`**, **`fl_net_wire_send_udp_pkt`**; not a general datagram API for apps yet |
+| **TCP** | 1–65535 | **RFC 793** | ~✅ (shim) | **`net_tcp.c`** SYN probe; hosted **`fl_net_tcp_stream_*`** / **`fl_net_sock_*`**; in-tree FSM TODO |
+| **TLS** | 443 (HTTPS) | **RFC 8446** (TLS 1.3); **RFC 5246** (TLS 1.2) | ~✅ (boundary only) | **`net_tls_hosted.c`** — **`FL_NET_TLS_MAX_PLAINTEXT_RECORD`** sizing hook; **no** mbedTLS/OpenSSL in tree (**P3-9**) |
+| **DNS** | 53/udp | **RFC 1035** (subset) | ~✅ | **`net_dns.c`** — **`fl_net_resolve_ipv4`**: literals, **`localhost`**, single nameserver from **`/etc/resolv.conf`**, **A** records only (no AAAA, no caching, no EDNS) |
+| **DHCP** (IPv4) | 67/68/udp | **RFC 2131**, **RFC 2132** | ~✅ (lab) | **`net_dhcp.c`** — BOOTP/DHCP codec, **`fl_net_dhcp_*_pkt`**; lab client via UDP; **not** a production lease manager or renew/rebind FSM |
+| **HTTP** | 80/tcp | **RFC 9110**, **RFC 9112** | ❌ | Planned userland client (**`docs/ROADMAP.md`** §11.1, **PX-11**); needs **P3-7** TCP + parsers |
+| **HTTPS** | 443/tcp | **RFC 9110** + **RFC 8446** | ❌ | Same as HTTP over **P3-9** TLS on hosted builds; **HTTP(S) boot** (**PX-12**) reuses **P3-7**/**P3-9** |
+| **SMTP** | 25, 587/tcp | **RFC 5321** | ❌ | Not planned in **P3**; no module |
+| **IMAP** | 143, 993/tcp | **RFC 3501** | ❌ | Not planned in **P3**; no module |
+| **FTP** | 20–21/tcp | **RFC 959** | ❌ | Not used; file sharing uses **custom TCP framing** (**`docs/SERVER.md`**, **`contract_p3_session_wire.h`**, **P5** file delivery), not FTP |
+| **SFTP** | 22/tcp (SSH) | **RFC 4253** / draft SFTP | ❌ | Not implemented; same **server** file path as FTP row |
+| **TFTP** | 69/udp | **RFC 1350** | ❌ | Future **PX-12** netboot path over **P3-6** UDP (**`docs/ROADMAP.md`** §12) |
+| **Flinstone `server`** (chat + files) | user **`ip:port`** | **RFC 793** transport; app opcodes in **`contract_p3_session_wire.h`** | ❌ (app) | Product spec **`docs/SERVER.md`**, plan **`docs/P3_13_CHAT_SERVER.md`**; prep PR has socket/session contracts only |
+
+**Clarifications**
+
+- **“Implemented”** here means **in-tree or hosted-shim code in `kernel/core/net/`** (or shell **`ping`** / **`check requirements`**), not every POSIX **`curl`**, **`sendmail`**, or **`ftp`** binary on the host OS.
+- **HTTPS** is **not** a separate stack layer in this repo: it is **HTTP over TLS**, with TLS intended to stay in **userland** libraries on **H** per **`contract_p3_tls_hosted.h`**.
+- **Mail (SMTP/IMAP)** and **FTP/SFTP** are **out of scope** for the current **PRE 4.2.0** network prep train; document them here so expectations stay aligned with **`docs/ROADMAP.md`** and **`docs/SERVER.md`**.
 
 Bare-metal integration requires **802.3**-framed TX/RX through **`fl_net_driver_t`** (not Linux TAP/socket shims alone). Track gaps in GitHub issues (bare metal, P3 gap checklist, sockets/server).
 
@@ -216,6 +245,7 @@ make check-network-requirements
 
 ## Related docs
 
+- **[Application-layer and common Internet protocols](#application-layer-and-common-internet-protocols)** — DNS, DHCP, HTTP/HTTPS, SMTP/IMAP, FTP/SFTP, TFTP, **`server`** status table
 - **`docs/P3_13_CHAT_SERVER.md`** — **P3-13** chat room implementation plan (wire protocol, APIs, tests)
 - **`contracts/networking/README.txt`** — contract shards vs P2
 - **`docs/ROADMAP.md`** — P3 rows and phase gates
@@ -234,7 +264,7 @@ make check-network-requirements
 
 | Priority | Item | Notes |
 |----------|------|--------|
-| **P3-12** | DHCP client | **RFC 2131**/**2132**; replaces **FL_NET_TAP_*** env bootstrap |
+| **P3-12** | DHCP production client | Renew/rebind FSM, lease DB; replaces **FL_NET_TAP_*** env bootstrap (codec exists) |
 | **P3-13** | Chat room | See **`docs/P3_13_CHAT_SERVER.md`**; **#239** / **#238** |
 | Patch | ARP cache TTL sweep | Tick-based age only today; add periodic **`fl_net_arp_tick`** for bare metal |
 | Patch | Consolidate loopback egress | **`egress_loopback`** vs **`wire_loopback_exchange`** dedupe |

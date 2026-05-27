@@ -1,5 +1,6 @@
 #include "net_packet.h"
 
+#include "contract_p3_udp.h"
 #include "net_wire.h"
 
 #include "fl/mem_asm.h"
@@ -77,6 +78,55 @@ fl_result_t fl_net_packet_parse_eth_ipv4(const uint8_t *frame, size_t len, fl_ne
         out->valid |= FL_NET_PKT_VALID_L4;
     }
 
+    return FL_RESULT_OK;
+}
+
+fl_result_t fl_net_packet_bind_l4(fl_net_packet_t *pkt, uint8_t *backing, size_t backing_len,
+                                  size_t l4_off, size_t l4_len) {
+    if (!pkt || !backing)
+        return FL_RESULT_INVAL;
+    if (l4_off > backing_len || l4_len > backing_len - l4_off)
+        return FL_RESULT_INVAL;
+
+    fl_net_packet_reset(pkt);
+    pkt->frame.data = backing;
+    pkt->frame.len = backing_len;
+    pkt->l4.off = l4_off;
+    pkt->l4.len = l4_len;
+    pkt->valid = FL_NET_PKT_VALID_L4;
+    return FL_RESULT_OK;
+}
+
+fl_result_t fl_net_packet_udp_app_view(const fl_net_packet_t *pkt, const uint8_t **app_out,
+                                       size_t *app_len_out) {
+    const uint8_t *udp;
+    size_t udp_len;
+
+    if (!app_out || !app_len_out)
+        return FL_RESULT_INVAL;
+
+    if (fl_net_packet_l4_view(pkt, &udp, &udp_len) != FL_RESULT_OK)
+        return FL_RESULT_ERR;
+    if (udp_len < FL_NET_UDP_HDR_LEN)
+        return FL_RESULT_ERR;
+
+    *app_out = udp + FL_NET_UDP_HDR_LEN;
+    *app_len_out = udp_len - FL_NET_UDP_HDR_LEN;
+    return FL_RESULT_OK;
+}
+
+fl_result_t fl_net_packet_l4_view(const fl_net_packet_t *pkt, const uint8_t **data_out,
+                                  size_t *len_out) {
+    if (!pkt || !data_out || !len_out)
+        return FL_RESULT_INVAL;
+    if ((pkt->valid & FL_NET_PKT_VALID_L4) == 0)
+        return FL_RESULT_ERR;
+    if (!pkt->frame.data || pkt->l4.off > pkt->frame.len ||
+        pkt->l4.len > pkt->frame.len - pkt->l4.off)
+        return FL_RESULT_ERR;
+
+    *data_out = pkt->frame.data + pkt->l4.off;
+    *len_out = pkt->l4.len;
     return FL_RESULT_OK;
 }
 

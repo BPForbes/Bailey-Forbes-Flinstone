@@ -9,6 +9,7 @@
 #include "net_route.h"
 #include "net_wire.h"
 
+#include <stdint.h>
 #include <string.h>
 #include <sys/time.h>
 
@@ -271,11 +272,52 @@ static fl_result_t egress_tap_xmit(const fl_net_route_entry_t *route, uint32_t d
     return fl_net_netdev_send(route->drv, &view);
 }
 
+static fl_result_t egress_bind_l4_const(fl_net_packet_t *pkt, const uint8_t *l4, size_t l4_len) {
+    return fl_net_packet_bind_l4(pkt, (uint8_t *)(uintptr_t)l4, l4_len, 0u, l4_len);
+}
+
 fl_result_t fl_net_wire_egress_l4_xmit(uint32_t dst_be, uint8_t ip_proto, const uint8_t *l4,
                                        size_t l4_len, unsigned arp_timeout_ms) {
-    fl_net_route_entry_t route;
+    fl_net_packet_t pkt;
+    fl_result_t rc;
 
     if (!l4 || l4_len == 0)
+        return FL_RESULT_INVAL;
+
+    rc = egress_bind_l4_const(&pkt, l4, l4_len);
+    if (rc != FL_RESULT_OK)
+        return rc;
+    return fl_net_wire_egress_l4_xmit_pkt(dst_be, ip_proto, &pkt, arp_timeout_ms);
+}
+
+fl_result_t fl_net_wire_egress_l4(uint32_t dst_be, uint8_t ip_proto, const uint8_t *l4,
+                                  size_t l4_len, uint8_t *rx_l4, size_t rx_l4_cap,
+                                  size_t *rx_l4_len, unsigned timeout_ms, double *out_rtt_ms) {
+    fl_net_packet_t pkt;
+    fl_result_t rc;
+
+    if (!l4 || l4_len == 0 || !rx_l4 || !rx_l4_len)
+        return FL_RESULT_INVAL;
+
+    rc = egress_bind_l4_const(&pkt, l4, l4_len);
+    if (rc != FL_RESULT_OK)
+        return rc;
+    return fl_net_wire_egress_l4_pkt(dst_be, ip_proto, &pkt, rx_l4, rx_l4_cap, rx_l4_len,
+                                     timeout_ms, out_rtt_ms);
+}
+
+fl_result_t fl_net_wire_egress_l4_xmit_pkt(uint32_t dst_be, uint8_t ip_proto,
+                                           const fl_net_packet_t *l4_pkt,
+                                           unsigned arp_timeout_ms) {
+    const uint8_t *l4;
+    size_t l4_len;
+    fl_net_route_entry_t route;
+    fl_result_t rc;
+
+    if (!l4_pkt)
+        return FL_RESULT_INVAL;
+    rc = fl_net_packet_l4_view(l4_pkt, &l4, &l4_len);
+    if (rc != FL_RESULT_OK || l4_len == 0)
         return FL_RESULT_INVAL;
 
     if (fl_net_loopback_owns(dst_be))
@@ -293,12 +335,19 @@ fl_result_t fl_net_wire_egress_l4_xmit(uint32_t dst_be, uint8_t ip_proto, const 
     return FL_RESULT_NOENT;
 }
 
-fl_result_t fl_net_wire_egress_l4(uint32_t dst_be, uint8_t ip_proto, const uint8_t *l4,
-                                  size_t l4_len, uint8_t *rx_l4, size_t rx_l4_cap,
-                                  size_t *rx_l4_len, unsigned timeout_ms, double *out_rtt_ms) {
+fl_result_t fl_net_wire_egress_l4_pkt(uint32_t dst_be, uint8_t ip_proto,
+                                      const fl_net_packet_t *l4_pkt, uint8_t *rx_l4,
+                                      size_t rx_l4_cap, size_t *rx_l4_len, unsigned timeout_ms,
+                                      double *out_rtt_ms) {
+    const uint8_t *l4;
+    size_t l4_len;
     fl_net_route_entry_t route;
+    fl_result_t rc;
 
-    if (!l4 || l4_len == 0 || !rx_l4 || !rx_l4_len)
+    if (!l4_pkt || !rx_l4 || !rx_l4_len)
+        return FL_RESULT_INVAL;
+    rc = fl_net_packet_l4_view(l4_pkt, &l4, &l4_len);
+    if (rc != FL_RESULT_OK || l4_len == 0)
         return FL_RESULT_INVAL;
 
     if (fl_net_loopback_owns(dst_be))

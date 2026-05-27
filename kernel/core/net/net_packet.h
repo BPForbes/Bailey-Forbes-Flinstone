@@ -28,6 +28,24 @@ fl_result_t fl_net_packet_parse_eth_ipv4(const uint8_t *frame, size_t len, fl_ne
 fl_result_t fl_net_packet_copy_l4(const fl_net_packet_t *pkt, uint8_t *dst, size_t cap,
                                   size_t *out_len);
 
+/**
+ * Bind **backing** as an L4-only packet (UDP/TCP/DHCP BOOTP payload without Ethernet parse).
+ * Used by **P3-6** / **P3-12** before **fl_net_udp_build_datagram** or **fl_net_packet_copy_l4**.
+ */
+fl_result_t fl_net_packet_bind_l4(fl_net_packet_t *pkt, uint8_t *backing, size_t backing_len,
+                                  size_t l4_off, size_t l4_len);
+
+/** Non-owning L4 slice pointer when **FL_NET_PKT_VALID_L4** is set. */
+fl_result_t fl_net_packet_l4_view(const fl_net_packet_t *pkt, const uint8_t **data_out,
+                                  size_t *len_out);
+
+/**
+ * When **pkt** L4 is a full UDP datagram (header + payload), return the application payload slice.
+ * For L4-only packets that already hold app bytes only, use **fl_net_packet_l4_view** instead.
+ */
+fl_result_t fl_net_packet_udp_app_view(const fl_net_packet_t *pkt, const uint8_t **app_out,
+                                       size_t *app_len_out);
+
 /** Advance RX pipeline to **stage** after filling **pipe->pkt** from **frame**. */
 fl_result_t fl_net_pipeline_rx_feed(fl_net_pipeline_rx_t *pipe, fl_net_pipeline_stage_t stage,
                                     const uint8_t *frame, size_t len);
