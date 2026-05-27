@@ -11,9 +11,8 @@ Long-form guide: **`docs/P3_NETWORKING.md`**. **P3-13 chat room plan:** **`docs/
 | `net_dhcp.c` | P3-12 DHCP codec; BOOTP over **fl_net_packet_t** L4 slices |
 | `net_arp.c` | P3-4 ARP cache (**asm_net_arp_cache_***), request/reply, resolve |
 | `net_route.c` | P3-5 routing table |
-| `net_wire_egress.c` | IPv4 L4 egress (ARP + netdev); `fl_net_wire_egress_l4_xmit` |
+| `net_wire_egress.c` | IPv4 L4 egress (ARP + netdev); **`fl_net_wire_egress_l4_pkt`** / **`l4_xmit_pkt`** |
 | `net_udp.c` | UDP datagram build + demux; **`*_from_pkt`** / **`deliver_inbound_pkt`** |
-| `net_wire_egress.c` | IPv4 egress; **`fl_net_wire_egress_l4_pkt`** / **`l4_xmit_pkt`** |
 | `net_socket.c` | **P3-13a** hosted socket shim (`fl_net_sock_*`) |
 | `net_ipv4.c` | IPv4 header construction |
 | `net_checksum.c` | Checksum (+ `asm_net_checksum16`) |

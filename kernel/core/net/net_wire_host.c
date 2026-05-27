@@ -130,16 +130,20 @@ fl_result_t fl_net_wire_send_icmp_pkt(uint32_t dst_be, const fl_net_packet_t *ic
     rc = fl_net_wire_egress_l4_pkt(dst_be, FL_NET_IP_PROTO_ICMP, icmp_pkt, rx_backing,
                                    rx_backing_cap, rx_len, timeout_ms, out_rtt_ms);
     if (rc == FL_RESULT_OK) {
-        (void)fl_net_packet_bind_l4(rx_pkt, rx_backing, rx_backing_cap, 0u, *rx_len);
-        return FL_RESULT_OK;
+        fl_result_t bind_rc =
+            fl_net_packet_bind_l4(rx_pkt, rx_backing, rx_backing_cap, 0u, *rx_len);
+        return bind_rc;
     }
 
     if (fl_net_loopback_owns(dst_be)) {
+        fl_result_t bind_rc;
+
         rc = wire_loopback_exchange(icmp, icmp_len, FL_NET_IP_PROTO_ICMP, dst_be, rx_backing,
                                     rx_backing_cap, rx_len, timeout_ms, out_rtt_ms);
-        if (rc == FL_RESULT_OK)
-            (void)fl_net_packet_bind_l4(rx_pkt, rx_backing, rx_backing_cap, 0u, *rx_len);
-        return rc;
+        if (rc != FL_RESULT_OK)
+            return rc;
+        bind_rc = fl_net_packet_bind_l4(rx_pkt, rx_backing, rx_backing_cap, 0u, *rx_len);
+        return bind_rc;
     }
 
 #if defined(__linux__)
@@ -173,7 +177,9 @@ fl_result_t fl_net_wire_send_icmp_pkt(uint32_t dst_be, const fl_net_packet_t *ic
             return (errno == EAGAIN || errno == EWOULDBLOCK) ? FL_RESULT_TIMEDOUT
                                                              : FL_RESULT_ERR;
         *rx_len = (size_t)n;
-        (void)fl_net_packet_bind_l4(rx_pkt, rx_backing, rx_backing_cap, 0u, *rx_len);
+        rc = fl_net_packet_bind_l4(rx_pkt, rx_backing, rx_backing_cap, 0u, *rx_len);
+        if (rc != FL_RESULT_OK)
+            return rc;
         if (out_rtt_ms)
             *out_rtt_ms = timeval_delta_ms(&t0, &t1);
         return FL_RESULT_OK;
@@ -426,8 +432,12 @@ fl_result_t fl_net_wire_send_udp_pkt(uint32_t dst_be, uint16_t sport, uint16_t d
 
     rc = wire_host_send_udp_buf(dst_be, sport, dport, payload, payload_len, rx_backing,
                                 rx_backing_cap, rx_len, timeout_ms);
-    if (rc == FL_RESULT_OK)
-        (void)fl_net_packet_bind_l4(rx_pkt, rx_backing, rx_backing_cap, 0u, *rx_len);
+    if (rc == FL_RESULT_OK) {
+        fl_result_t bind_rc =
+            fl_net_packet_bind_l4(rx_pkt, rx_backing, rx_backing_cap, 0u, *rx_len);
+        if (bind_rc != FL_RESULT_OK)
+            return bind_rc;
+    }
     return rc;
 }
 

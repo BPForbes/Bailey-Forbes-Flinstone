@@ -718,8 +718,10 @@ static int test_net_tcp_stream_listen_connect(void) {
     uint32_t loopback = (uint32_t)FL_NET_IPV4_LOOPBACK_FIRST_OCTET | (1u << 24);
 
     rc = fl_net_tcp_stream_listen(loopback, 48778u, &listen_h);
-    if (rc == FL_RESULT_NOSYS)
+    if (rc == FL_RESULT_NOSYS) {
+        fl_net_sock_shutdown();
         return 0;
+    }
     ASSERT(rc == FL_RESULT_OK);
 
     rc = fl_net_tcp_stream_connect(loopback, 48778u, &client_h);

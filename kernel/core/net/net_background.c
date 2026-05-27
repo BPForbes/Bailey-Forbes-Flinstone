@@ -10,7 +10,6 @@
 #include "net_packet.h"
 #include "net_route.h"
 #include "net_arp.h"
-#include "net_packet.h"
 #include "net_udp.h"
 #include "net_wire_egress.h"
 #include "net_wire_host.h"
