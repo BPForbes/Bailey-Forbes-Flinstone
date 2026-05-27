@@ -65,12 +65,65 @@ All commands are subcommands of **`server`**. Parsing is **`server <verb> [optio
 | **`server leave`** | `server leave` | Disconnect; host may **promote** another member |
 | **`server kill`** | `server kill` | **Host only** — end session (**P2-3** authz) |
 
-### 3.2 Messaging and files (this document)
+### 3.2 Session roster (`server connected`)
 
 | Command | Example | Effect |
 |---------|---------|--------|
-| **`server send -message`** | `server send -message "Hello" -user "JohnDoe"` | Deliver UTF-8 text to one connected member |
-| **`server send -file`** | `server send -file "./funny/joke.txt" -user "JohnDoe"` | Offer file bytes + metadata; recipient chooses disposition |
+| **`server connected`** | `server connected` | List every member in the session with **`member_id`**, principal, optional host-global nickname, and host marker |
+
+**Default output** (no nicknames yet; **JohnDoe** joined twice):
+
+```text
+[1] JohnDoe
+[2] JohnDoe
+[3] Flinstone
+```
+
+With a **host** on slot 1:
+
+```text
+[1] JohnDoe <— host
+[2] JohnDoe
+[3] Flinstone
+```
+
+With **host-global** nicknames (host set slot 2 to **Jeff**; slot 1 left unset):
+
+```text
+[1] JohnDoe
+[2] JohnDoe {Jeff}
+[3] Flinstone
+```
+
+**Local-only** nicknames (only the viewer sees `{nick}`) — e.g. **Flinstone** nicknames slot 1 as **Ashly** for themselves only:
+
+```text
+[1] JohnDoe {Ashly}
+[2] JohnDoe
+[3] Flinstone
+```
+
+Other members still see `[1] JohnDoe` without **Ashly**. See §5.2.
+
+The host assigns **`member_id`** at join (**`HELLO`** / **`HELLO_ACK`**). Ids are **stable for the connection** and listed in join order unless a maintainer documents reordering on host promote.
+
+### 3.3 Messaging and files
+
+| Command | Example | Effect |
+|---------|---------|--------|
+| **`server send -message`** | `server send -message "Hello" -user "JohnDoe"` | Deliver UTF-8 text to one member (ambiguous if several **JohnDoe**) |
+| **`server send -message`** (by id) | `server send -message "Hello" -user "JohnDoe" -id 1` | Deliver to **`member_id` 1** only |
+| **`server send -file`** | `server send -file "./funny/joke.txt" -user "JohnDoe"` | File offer (resolve recipient; use **`-id`** when needed) |
+| **`server send -file`** (by nick) | `server send -file "./funny/joke.txt" -user "Jeff"` | Valid when **Jeff** is a **host-global** nick for that member |
+
+**Targeting rules:**
+
+| Target form | Who resolves it |
+|-------------|-----------------|
+| **`-user "JohnDoe" -id 1`** | Always **`member_id` 1** (required when multiple principals share a name) |
+| **`-user "Jeff"`** | **Host-global** nick only (everyone may use after host sets it) |
+| **`-user "Ashly"`** | **Local** nick only for the caller who set **Ashly** on that slot |
+| **`-user "JohnDoe"`** (no **`-id`**) | Error if more than one connected **JohnDoe**; ok if unique |
 
 **Privileged paths:** sending a file **outside the session jail** requires **root** or **`sudo`** (same policy as other jail-crossing builtins). In-jail relative paths use the caller's resolved cwd.
 
@@ -108,7 +161,7 @@ Constants: **`contracts/networking/contract_p3_session_wire.h`**.
 | 4 | 2 | **`length_be`** (payload length, **0..`FL_NET_SESSION_MAX_MSG`**) |
 | 6 | *n* | **payload** (UTF-8 for text; binary for file chunks) |
 
-**Chat opcodes:** **`HELLO`**, **`HELLO_ACK`**, **`MSG`**, **`MSG_BROADCAST`**, **`CTRL_*`**, **`ERR`** — see **`docs/P3_13_CHAT_SERVER.md`**.
+**Chat opcodes:** **`HELLO`**, **`HELLO_ACK`**, **`MEMBER_LIST`**, **`NICK_PROMPT`**, **`MSG`**, **`MSG_BROADCAST`**, **`CTRL_*`**, **`HOST_NICK_SET`**, **`ERR`** — see **`docs/P3_13_CHAT_SERVER.md`** and **`contract_p3_session_wire.h`**.
 
 **File opcodes (v1 extension):**
 
@@ -137,20 +190,63 @@ The host **does not** mesh peer TCP; it relays frames to every other member exce
 
 ---
 
-## 5 — Member identity (**P5-7**)
+## 5 — Member identity and nicknames (**P5-7**)
+
+### 5.1 Session ids (`member_id`)
 
 | Field | Rule |
 |-------|------|
-| **principal** | Logged-in shell user (e.g. **`flinstone`**) |
-| **member_id** | **`0`** when unique; otherwise a stable disambiguator |
-| **disambiguated** | **`1`** when **`member_id`** was assigned due to duplicate principals |
+| **principal** | Logged-in shell user (e.g. **`flinstone`**, **`JohnDoe`**) |
+| **member_id** | **`1..N`** shown in **`server connected`** as **`[1]`**, **`[2]`**, … |
+| **disambiguated** | **`1`** when another connected member already uses the same principal |
+| **is_host** | **`1`** for the listener / elected host after promote |
 
-Disambiguation sources (implementation choice, document in **`.ver`** when fixed):
+Assignment (document in **`.ver`** when fixed): monotonic join order at **`HELLO`**; optional hardware-token hash stored for audit, not shown in the default list.
 
-- Hardware token id hash (preferred when available), else
-- Monotonic **join order** slot assigned by the host at **`HELLO`**.
+Wire: **`HELLO`** carries **`principal`**; **`HELLO_ACK`** returns **`member_id`**. **`MEMBER_LIST`** (**`contract_p3_session_wire.h`**) refreshes the roster after join, leave, or host nick change.
 
-Wire **`HELLO`** payload carries **`principal`** ASCII; **`HELLO_ACK`** returns **`member_slot`** / **`member_id`**.
+### 5.2 Nicknames (local vs host-global)
+
+| Scope | Who sets it | Who sees it | Send targeting |
+|-------|-------------|-------------|----------------|
+| **Local** | Any member, client-side | Only that member’s **`server connected`** | That member may **`-user "Ashly"`** (their local alias) |
+| **Host-global** | **Host only** | **Everyone** in **`server connected`** | **Anyone** may **`-user "Jeff"`** without **`-id`** |
+
+**Duplicate principal on join:** if **JohnDoe** connects when **JohnDoe** is already present, the host may send **`NICK_PROMPT`** so the new member may choose a **host-global** nick (optional). Example: second **JohnDoe** accepts nick **Jeff** → everyone sees **`[2] JohnDoe {Jeff}`**.
+
+**Host-global example:** host nicknames slot 2 as **Jeff**:
+
+```text
+[1] JohnDoe
+[2] JohnDoe {Jeff}
+[3] Flinstone
+```
+
+All members may run:
+
+```text
+server send -file "./funny/joke.txt" -user "Jeff"
+```
+
+**Local nickname example:** **Flinstone** (only) nicknames slot 1 as **Ashly**:
+
+```text
+[1] JohnDoe {Ashly}
+[2] JohnDoe
+[3] Flinstone
+```
+
+Only **Flinstone** may use:
+
+```text
+server send -file "./funny/joke.txt" -user "Ashly"
+```
+
+Everyone else must use **`server send … -user "JohnDoe" -id 1`**.
+
+Planned shell verbs (server application PR): **`server nick -id <n> -name "<nick>"`** (local), **`server nick -id <n> -name "<nick>" -global`** (host only → **`HOST_NICK_SET`** on the wire).
+
+Normative C types: **`fl_server_member_t`**, **`fl_server_nick_scope_t`** in **`contract_p5_member_identity.h`**.
 
 ---
 
@@ -164,7 +260,8 @@ Normative C struct: **`fl_server_file_offer_t`** in **`contract_p5_file_delivery
 | **`sender_principal`** | Who sent |
 | **`recipient_principal`** | Intended recipient |
 | **`file_size`** | Total bytes |
-| **`sender_member_id`** | Wire identity |
+| **`sender_member_id`** | Sender’s session id |
+| **`recipient_member_id`** | **`0`** or explicit **`[n]`** from **`-id`** on **`server send`** |
 | **`disposition.overwrite_existing`** | **1** → replace recipient file at same relative path |
 | **`disposition.use_server_share`** | **1** → use **`server_share/`** when appropriate |
 | **`disposition.decline_storage`** | **1** → recipient rejects storage |
@@ -194,7 +291,7 @@ VFS integration (**P5-1**/**P5-2**) must respect **jail** and **P2-3** when open
 
 | Path | Responsibility |
 |------|----------------|
-| **`userland/command/cmd_server.c`** | Parse **`host`/`join`/`send`/`leave`/`kill`** |
+| **`userland/command/cmd_server.c`** | Parse **`host`/`join`/`connected`/`send`/`nick`/`leave`/`kill`** |
 | **`userland/shell/server_bg.c`** | Background **`recv`** → inbound ring |
 | **`kernel/core/net/net_server.c`** | Hub, framing, relay, file session state |
 | **`kernel/core/net/net_socket.c`** | Socket shim (**prep PR**) |

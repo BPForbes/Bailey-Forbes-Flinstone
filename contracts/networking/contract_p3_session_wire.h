@@ -38,11 +38,17 @@
 /** Opcodes — chat control plane (v1). */
 #define FL_NET_SESSION_OP_HELLO 0x01u
 #define FL_NET_SESSION_OP_HELLO_ACK 0x02u
+/** Host snapshot or reply: member list for server connected (ids + principals + host nick). */
+#define FL_NET_SESSION_OP_MEMBER_LIST 0x03u
+/** Host to member: principal collision; optional nickname requested (see docs/SERVER.md). */
+#define FL_NET_SESSION_OP_NICK_PROMPT 0x04u
 #define FL_NET_SESSION_OP_MSG 0x10u
 #define FL_NET_SESSION_OP_MSG_BROADCAST 0x11u
 #define FL_NET_SESSION_OP_CTRL_LEAVE 0x20u
 #define FL_NET_SESSION_OP_CTRL_KILL 0x21u
 #define FL_NET_SESSION_OP_CTRL_HOST_PROMOTE 0x22u
+/** Host sets a host-global nickname for member_id (visible to all; target -user nick). */
+#define FL_NET_SESSION_OP_HOST_NICK_SET 0x23u
 #define FL_NET_SESSION_OP_FILE_OFFER 0x30u
 #define FL_NET_SESSION_OP_FILE_CHUNK 0x31u
 #define FL_NET_SESSION_OP_FILE_DONE 0x32u

@@ -9,6 +9,7 @@
 #define FL_CONTRACT_P5_FILE_DELIVERY_H
 
 #include "contract_p5_server_share.h"
+#include "contract_p5_member_identity.h"
 
 #include <stdint.h>
 
@@ -35,6 +36,11 @@ typedef struct {
     char recipient_principal[64];
     uint64_t file_size;
     uint32_t sender_member_id;
+    /**
+     * Target session id from server connected ([1], [2], ...). 0 means resolve by
+     * recipient_principal and/or -user nick (local or host-global) only.
+     */
+    fl_server_member_id_t recipient_member_id;
     fl_server_file_disposition_t disposition;
 } fl_server_file_offer_t;
 
