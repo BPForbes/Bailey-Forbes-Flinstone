@@ -99,6 +99,10 @@ static void vm_cleanup_at_exit(void) {
     rmrf(g_vm_root);
 }
 
+static void shell_netdev_cleanup_at_exit(void) {
+    fl_net_netdev_shutdown();
+}
+
 #ifndef BATCH_SINGLE_THREAD
 static int g_pool_workers_started;
 #endif
