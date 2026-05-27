@@ -497,6 +497,7 @@ static int test_net_socket_tcp_loopback(void) {
     rc = fl_net_sock_open(FL_NET_SOCK_TYPE_STREAM, &listen_h);
     if (rc == FL_RESULT_NOSYS) {
         fprintf(stderr, "skip: hosted sockets unavailable\n");
+        fl_net_sock_shutdown();
         return 0;
     }
     ASSERT(rc == FL_RESULT_OK);

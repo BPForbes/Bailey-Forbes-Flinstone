@@ -290,7 +290,7 @@ fl_result_t fl_net_sock_recv(fl_net_sock_handle_t handle, void *buf, size_t cap,
         return FL_RESULT_ERR;
     }
     if (n == 0)
-        return FL_RESULT_TIMEDOUT;
+        return FL_RESULT_EOF;
     *got = (size_t)n;
     return FL_RESULT_OK;
 #endif
