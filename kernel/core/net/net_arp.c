@@ -87,6 +87,23 @@ fl_result_t fl_net_arp_cache_insert(uint32_t ipv4_be, const uint8_t mac[FL_NET_E
 #endif
 }
 
+unsigned fl_net_arp_cache_sweep(unsigned max_age_ticks) {
+    unsigned removed = 0;
+    unsigned i = 0;
+
+    while (i < s_arp_cache_count) {
+        if (s_arp_tick - s_arp_cache[i].age > max_age_ticks) {
+            if (i < s_arp_cache_count - 1u)
+                s_arp_cache[i] = s_arp_cache[s_arp_cache_count - 1u];
+            s_arp_cache_count--;
+            removed++;
+            continue;
+        }
+        i++;
+    }
+    return removed;
+}
+
 int fl_net_arp_cache_lookup(uint32_t ipv4_be, uint8_t mac_out[FL_NET_ETH_ADDR_LEN]) {
     if (!mac_out)
         return 0;

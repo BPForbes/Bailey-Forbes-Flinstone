@@ -9,6 +9,7 @@
 #include "contract_p3_loopback.h"
 #include "net_packet.h"
 #include "net_route.h"
+#include "net_arp.h"
 #include "net_udp.h"
 #include "net_wire_egress.h"
 #include "net_wire_host.h"
@@ -40,9 +41,14 @@ static uint32_t s_hub_ip_be;
 static uint16_t s_hub_port_host;
 static unsigned s_hub_bound;
 
+#ifndef FL_NET_ARP_CACHE_STALE_TICKS
+#define FL_NET_ARP_CACHE_STALE_TICKS 512u
+#endif
+
 static void net_bg_work(void *ctx) {
     (void)ctx;
-    /* TODO: P3-14 — RX dequeue, TCP timer wheel, delayed ACK. */
+    /* P3-14: ARP cache TTL sweep (**#240**). TCP timer wheel / RX dequeue remain future. */
+    (void)fl_net_arp_cache_sweep(FL_NET_ARP_CACHE_STALE_TICKS);
 }
 
 static int s_net_bg_inited;

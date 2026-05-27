@@ -18,6 +18,11 @@
 #include "net_background.h"
 #include "net_udp.h"
 #include "net_socket.h"
+#include "net_dhcp.h"
+#include "net_tcp.h"
+#include "net_tls_hosted.h"
+#include "contract_p3_dhcp.h"
+#include "contract_p3_tls_hosted.h"
 #include "contract_p3_socket.h"
 
 #include <arpa/inet.h>
@@ -360,6 +365,19 @@ static int test_packet_pipeline(void) {
            FL_RESULT_OK);
     ASSERT(pipe.pkt.valid == 0u);
 
+    {
+        uint8_t udp_payload[8] = {0xde, 0xad, 0xbe, 0xef, 0x01, 0x02, 0x03, 0x04};
+        fl_net_packet_t l4_only;
+
+        ASSERT(fl_net_packet_bind_l4(&l4_only, udp_payload, sizeof(udp_payload), 0u,
+                                     sizeof(udp_payload)) == FL_RESULT_OK);
+        ASSERT((l4_only.valid & FL_NET_PKT_VALID_L4) != 0);
+        l4_len = 0;
+        ASSERT(fl_net_packet_copy_l4(&l4_only, l4_out, sizeof(l4_out), &l4_len) == FL_RESULT_OK);
+        ASSERT(l4_len == sizeof(udp_payload));
+        ASSERT(memcmp(l4_out, udp_payload, l4_len) == 0);
+    }
+
     return 0;
 }
 
@@ -593,6 +611,104 @@ static int test_net_task_backend_client_wire_send_smoke(void) {
     return 0;
 }
 
+static int test_net_arp_cache_sweep(void) {
+    uint8_t mac[6] = {0x02, 0, 0, 0, 0, 1};
+    fl_result_t kick;
+
+    fl_net_arp_clear();
+    ASSERT(fl_net_arp_cache_sweep(1u) == 0u);
+    ASSERT(fl_net_arp_cache_insert((uint32_t)(10u | (1u << 24)), mac) == FL_RESULT_OK);
+    (void)fl_net_arp_cache_sweep(100000u);
+
+    fl_net_background_init();
+    kick = fl_net_background_arp_tick_kick();
+    ASSERT(kick == FL_RESULT_OK);
+    return 0;
+}
+
+static int test_net_dhcp_frame_codec(void) {
+    uint8_t req[320];
+    uint8_t reply[320];
+    size_t len = 0;
+    uint8_t mac[6] = {0x02, 0x11, 0x22, 0x33, 0x44, 0x55};
+    uint32_t xid = 0xAABBCCDDu;
+    uint32_t parsed_xid = 0;
+    uint32_t yi = (10u << 24) | 9u; /* 10.0.0.9 (yiaddr, network byte order) */
+    uint32_t parsed_yi = 0;
+    uint8_t msg = 0;
+    fl_net_packet_t req_pkt;
+    fl_net_packet_t reply_pkt;
+    const uint8_t *l4;
+    size_t l4_len = 0;
+    fl_result_t rc;
+
+    rc = fl_net_dhcp_build_request_pkt(&req_pkt, req, sizeof(req), FL_NET_DHCP_MSG_DISCOVER, xid,
+                                       mac);
+    ASSERT(rc == FL_RESULT_OK);
+    ASSERT((req_pkt.valid & FL_NET_PKT_VALID_L4) != 0);
+    rc = fl_net_packet_l4_view(&req_pkt, &l4, &l4_len);
+    ASSERT(rc == FL_RESULT_OK);
+    ASSERT(l4_len > FL_NET_BOOTP_FIXED_LEN);
+
+    memset(reply, 0, sizeof(reply));
+    memcpy(reply, l4, l4_len);
+    reply[0] = 2;
+    reply[16] = (uint8_t)((yi >> 24) & 0xffu);
+    reply[17] = (uint8_t)((yi >> 16) & 0xffu);
+    reply[18] = (uint8_t)((yi >> 8) & 0xffu);
+    reply[19] = (uint8_t)(yi & 0xffu);
+    {
+        size_t o = FL_NET_BOOTP_FIXED_LEN;
+        reply[o++] = 0x63;
+        reply[o++] = 0x82;
+        reply[o++] = 0x53;
+        reply[o++] = 0x63;
+        reply[o++] = FL_NET_DHCP_OPT_MESSAGE_TYPE;
+        reply[o++] = 1;
+        reply[o++] = FL_NET_DHCP_MSG_OFFER;
+        reply[o++] = FL_NET_DHCP_OPT_END;
+        len = o;
+    }
+
+    rc = fl_net_packet_bind_l4(&reply_pkt, reply, sizeof(reply), 0u, len);
+    ASSERT(rc == FL_RESULT_OK);
+    rc = fl_net_dhcp_parse_reply_pkt(&reply_pkt, &parsed_xid, &parsed_yi, &msg);
+    ASSERT(rc == FL_RESULT_OK);
+    ASSERT(parsed_xid == xid);
+    ASSERT(parsed_yi == yi);
+    ASSERT(msg == FL_NET_DHCP_MSG_OFFER);
+    return 0;
+}
+
+static int test_net_tls_hosted_cap(void) {
+    ASSERT(fl_net_tls_hosted_max_plaintext_record() == (size_t)FL_NET_TLS_MAX_PLAINTEXT_RECORD);
+    return 0;
+}
+
+static int test_net_tcp_stream_listen_connect(void) {
+    fl_net_sock_handle_t listen_h = FL_NET_SOCK_INVALID;
+    fl_net_sock_handle_t client_h = FL_NET_SOCK_INVALID;
+    fl_net_sock_handle_t accepted_h = FL_NET_SOCK_INVALID;
+    fl_result_t rc;
+    uint32_t loopback = (uint32_t)FL_NET_IPV4_LOOPBACK_FIRST_OCTET | (1u << 24);
+
+    rc = fl_net_tcp_stream_listen(loopback, 48778u, &listen_h);
+    if (rc == FL_RESULT_NOSYS)
+        return 0;
+    ASSERT(rc == FL_RESULT_OK);
+
+    rc = fl_net_tcp_stream_connect(loopback, 48778u, &client_h);
+    ASSERT(rc == FL_RESULT_OK);
+    rc = fl_net_tcp_stream_accept(listen_h, &accepted_h);
+    ASSERT(rc == FL_RESULT_OK);
+
+    fl_net_sock_close(client_h);
+    fl_net_sock_close(accepted_h);
+    fl_net_sock_close(listen_h);
+    fl_net_sock_shutdown();
+    return 0;
+}
+
 static int test_probe_endpoint(void) {
     fl_net_requirements_report_t rep;
     fl_result_t prc = fl_net_probe_endpoint("127.0.0.1", 9, 3000u, &rep);
@@ -656,6 +772,26 @@ int main(void) {
 
     printf("test_net_socket_tcp_loopback... ");
     if (test_net_socket_tcp_loopback() != 0)
+        return 1;
+    puts("ok");
+
+    printf("test_net_arp_cache_sweep... ");
+    if (test_net_arp_cache_sweep() != 0)
+        return 1;
+    puts("ok");
+
+    printf("test_net_dhcp_frame_codec... ");
+    if (test_net_dhcp_frame_codec() != 0)
+        return 1;
+    puts("ok");
+
+    printf("test_net_tls_hosted_cap... ");
+    if (test_net_tls_hosted_cap() != 0)
+        return 1;
+    puts("ok");
+
+    printf("test_net_tcp_stream_listen_connect... ");
+    if (test_net_tcp_stream_listen_connect() != 0)
         return 1;
     puts("ok");
 

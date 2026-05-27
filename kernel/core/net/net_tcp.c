@@ -2,6 +2,7 @@
 
 #include "contract_p3_wire.h"
 #include "fl/net_asm.h"
+#include "net_socket.h"
 #include "net_wire_host.h"
 
 #include <string.h>
@@ -43,4 +44,64 @@ fl_result_t fl_net_tcp_syn_probe(uint32_t dst_be, uint16_t dport, unsigned timeo
 
     return fl_net_wire_send_tcp_syn(dst_be, sport, dport, tcp, tcp_len, timeout_ms,
                                     out_rtt_ms, note, note_len);
+}
+
+fl_result_t fl_net_tcp_stream_listen(uint32_t bind_be, uint16_t port_host,
+                                     fl_net_sock_handle_t *listen_out) {
+    fl_net_sock_handle_t h;
+    fl_result_t rc;
+
+    if (!listen_out)
+        return FL_RESULT_INVAL;
+
+    rc = fl_net_sock_init();
+    if (rc != FL_RESULT_OK && rc != FL_RESULT_NOSYS)
+        return rc;
+
+    rc = fl_net_sock_open(FL_NET_SOCK_TYPE_STREAM, &h);
+    if (rc != FL_RESULT_OK)
+        return rc;
+    rc = fl_net_sock_bind(h, bind_be, port_host);
+    if (rc != FL_RESULT_OK) {
+        fl_net_sock_close(h);
+        return rc;
+    }
+    rc = fl_net_sock_listen(h, FL_NET_SOCK_DEFAULT_LISTEN_BACKLOG);
+    if (rc != FL_RESULT_OK) {
+        fl_net_sock_close(h);
+        return rc;
+    }
+    *listen_out = h;
+    return FL_RESULT_OK;
+}
+
+fl_result_t fl_net_tcp_stream_accept(fl_net_sock_handle_t listen_h,
+                                     fl_net_sock_handle_t *client_out) {
+    if (!client_out)
+        return FL_RESULT_INVAL;
+    return fl_net_sock_accept(listen_h, client_out);
+}
+
+fl_result_t fl_net_tcp_stream_connect(uint32_t peer_be, uint16_t port_host,
+                                      fl_net_sock_handle_t *out) {
+    fl_net_sock_handle_t h;
+    fl_result_t rc;
+
+    if (!out)
+        return FL_RESULT_INVAL;
+
+    rc = fl_net_sock_init();
+    if (rc != FL_RESULT_OK && rc != FL_RESULT_NOSYS)
+        return rc;
+
+    rc = fl_net_sock_open(FL_NET_SOCK_TYPE_STREAM, &h);
+    if (rc != FL_RESULT_OK)
+        return rc;
+    rc = fl_net_sock_connect(h, peer_be, port_host);
+    if (rc != FL_RESULT_OK) {
+        fl_net_sock_close(h);
+        return rc;
+    }
+    *out = h;
+    return FL_RESULT_OK;
 }

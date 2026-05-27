@@ -33,6 +33,8 @@ static fl_net_sock_slot_t *sock_lookup(fl_net_sock_handle_t h) {
 }
 
 fl_result_t fl_net_sock_init(void) {
+    if (s_sock_inited)
+        return FL_RESULT_OK;
     memset(s_socks, 0, sizeof(s_socks));
     s_sock_inited = 1u;
     return FL_RESULT_OK;

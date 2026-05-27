@@ -32,6 +32,7 @@ Full spec: **[`docs/P3_13_CHAT_SERVER.md`](P3_13_CHAT_SERVER.md)**.
 | **`net_route.c`** | P3-5 | Longest-prefix routing table; TAP lab via **FL_NET_TAP_*** env |
 | **`net_wire_egress.c`** | P3-5 / P3-6 path | IPv4 L4 send/recv on routed netdev (ARP + ICMP echo); **`fl_net_wire_egress_l4_xmit`** for one-way UDP |
 | **`net_udp.c`** | P3-6 (partial) | **`fl_net_udp_build_datagram`** for task-backend socket egress |
+| **`net_dhcp.c`** | P3-12 (lab) | BOOTP codec; **`fl_net_packet_bind_l4`** / **`fl_net_dhcp_*_pkt`** over L4 slices |
 | **`net_background.c`** | P3-14 / distribution | Workqueue tick; blended socket + ARP task backend (P3-13 wire RX TODO) |
 | **`net_ipv4.c`** | P3-5 (partial) | IPv4 header build, literal/loopback address helpers |
 | **`net_checksum.c`** | P3-5 | Internet checksum; **`asm_net_checksum16`** when `FL_NET_ASM_AVAILABLE` |
@@ -57,7 +58,7 @@ Packets are the shared backbone for **P3-4** … **P3-12** — not a separate ro
 | **`fl_net_pipeline_rx_t`** | RX stages: **DRV_RX → PARSE_L2 → PARSE_L3 → PARSE_L4 → ROUTE → DELIVER** |
 | **`fl_net_pipeline_tx_t`** | TX stages: **BUILD_L4 → BUILD_IPV4 → BUILD_L2 → ROUTE → ARP → DRV_TX** |
 
-**Implementation:** **`fl_net_packet_parse_eth_ipv4`**, **`fl_net_packet_copy_l4`**, **`fl_net_pipeline_rx_feed`** in **`net_packet.c`**. **`net_wire_egress.c`** uses the packet parser for ICMP echo reply extraction. **P3-12** DHCP and **P3-6** UDP should build on the same slices when those clients land.
+**Implementation:** **`fl_net_packet_parse_eth_ipv4`**, **`fl_net_packet_bind_l4`**, **`fl_net_packet_l4_view`**, **`fl_net_packet_copy_l4`**, **`fl_net_pipeline_rx_feed`** in **`net_packet.c`**. **`net_wire_egress.c`** uses the parser for ICMP echo reply extraction. **`net_dhcp.c`** binds BOOTP as L4-only packets before hosted UDP send; **`net_background.c`** relays via **`fl_net_packet_copy_l4`**.
 
 ## Blended ARP + socket model (task backend)
 
@@ -168,11 +169,12 @@ Legend matches **`docs/ROADMAP.md`**: **✅** complete; **~✅** usable lab subs
 | **P3-4** ARP | ✅ | ~✅ — `net_arp.c` cache (**ASM** table ops) + request/reply on loopback/TAP |
 | **P3-5** IPv4 | ✅ | ~✅ — LPM routes + **`fl_net_wire_egress_l4`**; ICMP on netdev; Linux ICMP fallback; PMTU/offload open |
 | **P3-6** UDP | ✅ | ~✅ — DNS + wire host datagrams only |
-| **P3-7** TCP | ✅ | ⚠️ — SYN probe only |
+| **P3-7** TCP | ✅ | ~✅ — SYN probe + **`fl_net_tcp_stream_*`** hosted listen/connect/accept |
 | **P3-8** DNS | ✅ | ~✅ — A record, single nameserver |
-| **P3-9** TLS | ✅ | ❌ |
-| **P3-12** DHCP | ✅ | ❌ |
-| **P3-13** `server` + messaging | ⚠️ | ❌ — **`server host/join/leave/kill`**, background session, framed chat (**#239**) |
+| **P3-9** TLS | ✅ | ~✅ — **`net_tls_hosted.c`** record-size boundary (no mbedtls yet) |
+| **P3-12** DHCP | ✅ | ~✅ — BOOTP codec + **`fl_net_dhcp_*_pkt`** over **`fl_net_packet_t`** |
+| **P3-14** background | ✅ | ~✅ — ARP cache sweep on **`fl_wq_enqueue`** (**`net_background.c`**) |
+| **P3-13** `server` + messaging | ✅ | ❌ — product spec **`docs/SERVER.md`**; **`cmd_server`** / hub app **#239** |
 
 ## Standards map (integration targets)
 
@@ -182,9 +184,9 @@ Legend matches **`docs/ROADMAP.md`**: **✅** complete; **~✅** usable lab subs
 | ARP (**P3-4**) | **RFC 826** | ~✅ in-tree cache + exchange |
 | IPv4 / ICMP (**P3-5**) | **RFC 791**, **RFC 792** | ~✅ routing + netdev ICMP |
 | UDP (**P3-6**) | **RFC 768** | ~✅ DNS + hosted datagram shim |
-| TCP (**P3-7**) | **RFC 793** | ⚠️ SYN probe only |
+| TCP (**P3-7**) | **RFC 793** | ~✅ SYN probe + hosted stream shim (in-tree FSM TODO) |
 | DNS (**P3-8**) | **RFC 1035** (subset) | ~✅ A record |
-| DHCP (**P3-12**) | **RFC 2131**, **RFC 2132** | ❌ |
+| DHCP (**P3-12**) | **RFC 2131**, **RFC 2132** | ~✅ codec + lab client (not production lease manager) |
 | `server` + messaging (**P3-13**) | **RFC 793** (TCP session); **RFC 768** (UDP helpers) | ❌ |
 
 Bare-metal integration requires **802.3**-framed TX/RX through **`fl_net_driver_t`** (not Linux TAP/socket shims alone). Track gaps in GitHub issues (bare metal, P3 gap checklist, sockets/server).
