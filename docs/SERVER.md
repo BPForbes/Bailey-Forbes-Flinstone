@@ -65,6 +65,28 @@ All commands are subcommands of **`server`**. Parsing is **`server <verb> [optio
 | **`server leave`** | `server leave` | Disconnect; host may **promote** another member |
 | **`server kill`** | `server kill` | **Host only** — end session (**P2-3** authz) |
 
+#### Bind address: any `ip:port` the machine can use (not a fixed whitelist)
+
+**`server host`** and **`server join`** take a user-supplied endpoint (`<ipv4>:<port>`), parsed by **`fl_server_parse_endpoint`** (**`docs/P3_13_CHAT_SERVER.md`**). There is **no** hardcoded list of allowed addresses in the product design—examples like **`10.0.2.15:7777`** (TAP lab) and **`45.68.43.4:80`** (public routable) are illustrations only.
+
+| You specify | Typical use |
+|-------------|-------------|
+| **`127.0.0.1:PORT`** | Same-machine or loopback-only lab |
+| **`10.0.2.15:PORT`** (or **`FL_NET_TAP_IPV4`**) | QEMU/TAP private lab |
+| **LAN address** (e.g. **`192.168.1.50:7777`**) | Shells on the same network |
+| **Public routable IPv4** (e.g. **`45.68.43.4:80`**) | Internet-facing host when that address is assigned to the machine (or forwarded to it) and policy allows |
+| **`0.0.0.0:PORT`** | Listen on **all local IPv4 interfaces** (POSIX **INADDR_ANY**); members connect using a concrete IP they can reach |
+
+**Port:** any **1–65535** at parse time. Ports **&lt; 1024** usually need **root** / **`sudo`** on hosted Unix (same as binding **`:80`** elsewhere).
+
+**What must still be true (environment, not app whitelist):**
+
+1. **Bind succeeds** — the IPv4 address is local to an interface (or **`0.0.0.0`**) and nothing else holds that **port**.
+2. **Members can route to the host** — they **`server join`** the same **ip:port** (or a hostname that resolves to a reachable address); NAT/firewall must allow inbound TCP.
+3. **Stack path** — on **hosted (H)**, **`fl_net_sock_bind`** / **`listen`** delegate to the OS (full routing table). On an in-tree-only path later, the host address must exist on a netdev with a matching **`fl_net_route_add`** entry (**P3-5** + **P3-4** ARP).
+
+**v1 limits:** IPv4 literals only (no **`[::1]:port`**). No automatic “pick best public IP”—the operator chooses the bind string.
+
 ### 3.2 Session roster (`server connected`)
 
 | Command | Example | Effect |
