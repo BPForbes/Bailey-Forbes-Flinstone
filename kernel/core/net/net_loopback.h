@@ -25,9 +25,4 @@ void fl_net_loopback_reset(void);
 uint64_t fl_net_loopback_stat_tx(void);
 uint64_t fl_net_loopback_stat_rx(void);
 
-fl_result_t fl_net_loopback_exchange(uint32_t dst_be, uint8_t ip_proto, const uint8_t *l4,
-                                     size_t l4_len, uint8_t *rx_l4, size_t rx_l4_cap,
-                                     size_t *rx_l4_len, unsigned timeout_ms,
-                                     double *out_rtt_ms);
-
 #endif /* NET_LOOPBACK_H */

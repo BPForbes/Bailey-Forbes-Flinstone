@@ -99,14 +99,6 @@ static void vm_cleanup_at_exit(void) {
     rmrf(g_vm_root);
 }
 
-static fl_authz_decision_t shell_netdev_authz(unsigned op, void *ctx) {
-    return fl_authz_subsystem_check(op, ctx);
-}
-
-static void shell_netdev_cleanup_at_exit(void) {
-    fl_net_netdev_shutdown();
-}
-
 #ifndef BATCH_SINGLE_THREAD
 static int g_pool_workers_started;
 #endif
@@ -406,6 +398,7 @@ int main(int argc, char *argv[]) {
     g_pool_workers_started = 1;
 #endif
     atexit(shell_pool_cleanup);
+    atexit(shell_netdev_cleanup_at_exit);
     if (original_stdout_fd < 0) {
         original_stdout_fd = dup(fileno(stdout));
         original_stdout_file = fdopen(original_stdout_fd, "w");

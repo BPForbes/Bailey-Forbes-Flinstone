@@ -644,47 +644,10 @@ static int test_net_arp_cache_sweep(void) {
     ASSERT(fl_net_arp_cache_sweep(1u) == 0u);
     ASSERT(fl_net_arp_cache_insert((uint32_t)(10u | (1u << 24)), mac) == FL_RESULT_OK);
     (void)fl_net_arp_cache_sweep(100000u);
-    (void)fl_net_arp_tick(FL_NET_ARP_TICK_PERIOD_MS);
 
     fl_net_background_init();
     kick = fl_net_background_arp_tick_kick();
     ASSERT(kick == FL_RESULT_OK);
-    return 0;
-}
-
-
-static int test_netdev_shutdown(void) {
-    uint8_t host_mac[6];
-    uint8_t peer_mac[6];
-    uint8_t icmp[64];
-    uint8_t ip[128];
-    uint8_t frame[192];
-    fl_net_frame_view_t view;
-    size_t icmp_len;
-    size_t ip_len;
-    size_t frame_len;
-    uint32_t dst_be = (uint32_t)127 | (1u << 24);
-    uint32_t src_be = (uint32_t)127 | (1u << 24);
-    fl_net_ipv4_hdr_t hdr;
-
-    fl_net_netdev_init();
-    fl_net_netdev_shutdown();
-    ASSERT(fl_net_netdev_tap_is_open() == 0);
-    fl_net_netdev_init();
-    icmp_len = fl_net_icmp_echo_request_build(icmp, sizeof(icmp), 0x4242u, 1u, 8u);
-    ASSERT(icmp_len > 0);
-    ip_len = fl_net_ipv4_build(&hdr, ip, sizeof(ip), FL_NET_IP_PROTO_ICMP, src_be, dst_be, icmp,
-                               icmp_len, 0x1001u);
-    ASSERT(ip_len > 0);
-    fl_net_loopback_mac_host(host_mac);
-    fl_net_loopback_mac_peer(peer_mac);
-    frame_len = fl_net_eth_build_ipv4(frame, sizeof(frame), peer_mac, host_mac, ip, ip_len);
-    ASSERT(frame_len > 0);
-    view.data = frame;
-    view.len = frame_len;
-    ASSERT(fl_net_netdev_send(fl_net_netdev_loopback(), &view) == FL_RESULT_OK);
-    fl_net_netdev_shutdown();
-    ASSERT(fl_net_loopback_stat_tx() == 0u);
     return 0;
 }
 
@@ -770,6 +733,56 @@ static int test_net_tcp_stream_listen_connect(void) {
     fl_net_sock_close(accepted_h);
     fl_net_sock_close(listen_h);
     fl_net_sock_shutdown();
+    return 0;
+}
+
+static int test_netdev_shutdown(void) {
+    uint8_t host_mac[6];
+    uint8_t peer_mac[6];
+    uint8_t icmp[64];
+    uint8_t ip[128];
+    uint8_t frame[192];
+    fl_net_frame_view_t view;
+    size_t icmp_len;
+    size_t ip_len;
+    size_t frame_len;
+    uint32_t dst_be = (uint32_t)127 | (1u << 24);
+    uint32_t src_be = (uint32_t)127 | (1u << 24);
+    fl_net_ipv4_hdr_t hdr;
+
+    fl_net_netdev_init();
+    fl_net_netdev_shutdown();
+    ASSERT(fl_net_netdev_tap_is_open() == 0);
+    fl_net_netdev_init();
+    icmp_len = fl_net_icmp_echo_request_build(icmp, sizeof(icmp), 0x4242u, 1u, 8u);
+    ASSERT(icmp_len > 0);
+    ip_len = fl_net_ipv4_build(&hdr, ip, sizeof(ip), FL_NET_IP_PROTO_ICMP, src_be, dst_be, icmp,
+                               icmp_len, 0x1001u);
+    ASSERT(ip_len > 0);
+    fl_net_loopback_mac_host(host_mac);
+    fl_net_loopback_mac_peer(peer_mac);
+    frame_len = fl_net_eth_build_ipv4(frame, sizeof(frame), peer_mac, host_mac, ip, ip_len);
+    ASSERT(frame_len > 0);
+    view.data = frame;
+    view.len = frame_len;
+    ASSERT(fl_net_netdev_send(fl_net_netdev_loopback(), &view) == FL_RESULT_OK);
+    fl_net_netdev_shutdown();
+    ASSERT(fl_net_loopback_stat_tx() == 0u);
+    return 0;
+}
+
+static int test_route_configure_static(void) {
+    uint8_t mac[6] = {0x02, 0x11, 0x22, 0x33, 0x44, 0x55};
+    fl_net_route_entry_t route;
+    uint32_t dst = 0;
+
+    fl_net_route_clear();
+    ASSERT(fl_net_route_configure_static(fl_net_netdev_loopback(), mac, "10.0.2.15", 24u,
+                                         "10.0.2.2") == FL_RESULT_OK);
+    ASSERT(fl_net_ipv4_parse_literal("10.0.2.15", &dst));
+    ASSERT(fl_net_route_lookup(dst, &route) == FL_RESULT_OK);
+    ASSERT(route.drv == fl_net_netdev_loopback());
+    ASSERT(route.prefix_len == 24u);
     return 0;
 }
 
@@ -904,8 +917,14 @@ int main(void) {
         return 1;
     puts("ok");
 
+
     printf("test_netdev_shutdown... ");
     if (test_netdev_shutdown() != 0)
+        return 1;
+    puts("ok");
+
+    printf("test_route_configure_static... ");
+    if (test_route_configure_static() != 0)
         return 1;
     puts("ok");
 

@@ -368,3 +368,21 @@ fl_result_t fl_net_arp_resolve(fl_net_driver_t *drv, const uint8_t src_mac[FL_NE
 
     return arp_exchange_wire(drv, src_mac, src_ip_be, target_ip_be, mac_out, timeout_ms);
 }
+
+
+fl_result_t fl_net_arp_send_gratuitous(fl_net_driver_t *drv, const uint8_t src_mac[6],
+                                       uint32_t src_ip_be) {
+    uint8_t frame[FL_NET_ETH_FRAME_HDR_LEN + FL_NET_ARP_PKT_LEN];
+    size_t len;
+    fl_net_frame_view_t view;
+
+    if (!drv || !src_mac)
+        return FL_RESULT_INVAL;
+
+    len = fl_net_arp_build_request(frame, sizeof(frame), src_mac, src_ip_be, src_ip_be);
+    if (len == 0)
+        return FL_RESULT_ERR;
+    view.data = frame;
+    view.len = len;
+    return fl_net_netdev_send(drv, &view);
+}

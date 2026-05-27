@@ -7,6 +7,10 @@
 #include "net_tap.h"
 #include "net_wire.h"
 
+#ifdef DRIVERS_BAREMETAL
+#include "net_baremetal.h"
+#endif
+
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -46,6 +50,10 @@ void fl_net_netdev_init(void) {
     s_tap_fd = -1;
     s_tap_ifname[0] = '\0';
     s_tap_error[0] = '\0';
+
+#ifdef DRIVERS_BAREMETAL
+    fl_net_baremetal_init();
+#endif
 }
 
 void fl_net_netdev_set_authz_hook(fl_net_netdev_authz_fn fn, void *ctx) {
@@ -206,6 +214,9 @@ void fl_net_netdev_tap_close(void) {
 }
 
 void fl_net_netdev_shutdown(void) {
+#ifdef DRIVERS_BAREMETAL
+    fl_net_baremetal_shutdown();
+#endif
     fl_net_netdev_tap_close();
     fl_net_loopback_reset();
     s_authz_fn = NULL;
@@ -232,4 +243,10 @@ void fl_net_netdev_stats(fl_net_driver_t *drv, fl_net_netdev_stats_t *out) {
         out->tx_frames = fl_net_tap_stat_tx();
         out->rx_frames = fl_net_tap_stat_rx();
     }
+#ifdef DRIVERS_BAREMETAL
+    else if (drv == fl_net_netdev_lab()) {
+        out->tx_frames = fl_net_baremetal_lab_stat_tx();
+        out->rx_frames = fl_net_baremetal_lab_stat_rx();
+    }
+#endif
 }

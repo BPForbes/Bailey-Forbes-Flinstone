@@ -266,10 +266,9 @@ make check-network-requirements
 |----------|------|--------|
 | **P3-12** | DHCP production client | Renew/rebind FSM, lease DB; replaces **FL_NET_TAP_*** env bootstrap (codec exists) |
 | **P3-13** | Chat room | See **`docs/P3_13_CHAT_SERVER.md`**; **#239** / **#238** |
-| Patch | ARP cache TTL sweep (hosted) | **`fl_net_arp_tick`** + background paths (**#240** partial); BM timer **#237** |
-| Patch | Consolidate loopback egress | **`fl_net_loopback_exchange`** (**#240** partial) |
+| Patch | ARP cache TTL sweep | Tick-based age only today; add periodic **`fl_net_arp_tick`** for bare metal |
+| Patch | Consolidate loopback egress | **`egress_loopback`** vs **`wire_loopback_exchange`** dedupe |
 | **P3-5** | Drop Linux ICMP fallback | When TAP LPM route always matches **dst** |
 | **P3-7** | Full TCP | **RFC 793** state machine; netdev TX instead of raw **`select`** |
-| **B** | Bare-metal netdev | **IEEE 802.3** driver → **`fl_net_route_add`** (no **`#if __linux__`** TAP helper only) |
 
 **GitHub issues:** **#239** (P3-13 sockets/server), **#240** (gap tracker + standards checklist), **#241** (bare-metal **IEEE 802.3** path); **#232**–**#235** (netdev lifecycle / authz / batch registry).

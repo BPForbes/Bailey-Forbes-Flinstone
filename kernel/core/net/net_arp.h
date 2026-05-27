@@ -70,4 +70,8 @@ unsigned fl_net_arp_cache_sweep(unsigned max_age_ticks);
 #endif
 unsigned fl_net_arp_tick(unsigned elapsed_ms);
 
+/** Broadcast ARP request for **src_ip_be** (gratuitous ARP, **#240** / **#237**). */
+fl_result_t fl_net_arp_send_gratuitous(fl_net_driver_t *drv, const uint8_t src_mac[6],
+                                       uint32_t src_ip_be);
+
 #endif /* NET_ARP_H */

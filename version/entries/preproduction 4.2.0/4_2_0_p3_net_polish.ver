@@ -4,7 +4,7 @@ RELEASE_VERSION=0
 PRERELEASE=1
 DEV_VERSION=6
 DESCRIPTION<<VER_END
-PRE 4.2.0 (P3 hosted): fl_net_netdev_shutdown and shell atexit; netdev authz adapter; fl_net_arp_tick on background paths; fl_net_loopback_exchange shared by egress and wire host. Closes #232, #233, #235. Partial #240 (not bare metal). P3-7 RFC 793 FSM remains open (#238).
+PRE 4.2.0 (P3): hosted netdev shutdown + shell atexit; netdev authz; ARP tick and gratuitous ARP; fl_net_route_configure_static; bare-metal lab netdev (802.3-style RX ring, ICMP/ARP on wire) with PIT-driven fl_net_baremetal_timer_poll. Full loopback paths retained in net_wire_egress/host. Closes #232, #233, #235; partial #237/#240/#241 (no virtio NIC). P3-7 RFC 793 FSM open (#238).
 VER_END
 
 RELEASE_DATE=2026-05-27

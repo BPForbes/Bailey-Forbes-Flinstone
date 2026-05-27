@@ -31,9 +31,6 @@ fl_result_t fl_net_route_add(uint32_t addr_be, uint8_t prefix_len, uint32_t gw_b
 /**
  * Longest-prefix match. On success, **out** holds the route; use **fl_net_route_next_hop**
  * for on-link **dst_be** or the gateway when off-subnet.
- *
- * **Default route (0.0.0.0/0):** not installed on loopback-only hosts. Hosted TAP uses
- * **fl_net_route_configure_tap** (**FL_NET_TAP_*** env). Bare-metal default route: **#237**.
  */
 fl_result_t fl_net_route_lookup(uint32_t dst_be, fl_net_route_entry_t *out);
 
@@ -42,6 +39,11 @@ uint32_t fl_net_route_next_hop(uint32_t dst_be, const fl_net_route_entry_t *rout
 
 /** Register loopback **127.0.0.0/8** route (idempotent). */
 void fl_net_route_add_loopback(void);
+
+/** Register a static on-subnet route (bare-metal lab or hosted TAP). */
+fl_result_t fl_net_route_configure_static(fl_net_driver_t *drv, const uint8_t src_mac[6],
+                                          const char *addr_s, unsigned prefix_len,
+                                          const char *gw_s);
 
 #if defined(__linux__)
 /** Apply **FL_NET_TAP_IPV4**, **FL_NET_TAP_PREFIX**, **FL_NET_TAP_GW** when TAP is open. */

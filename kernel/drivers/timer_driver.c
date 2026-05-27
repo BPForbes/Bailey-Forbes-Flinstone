@@ -66,6 +66,7 @@ static void host_msleep(timer_driver_t *drv, unsigned int ms) {
 #ifdef DRIVERS_BAREMETAL
 #if defined(__x86_64__) || defined(__i386__)
 #include "boot/idt.h"
+#include "net_baremetal.h"
 
 static timer_impl_t *s_irq0_impl;
 
@@ -74,6 +75,8 @@ static void x86_irq0_handler(uint64_t vector, uint64_t error_code) {
     (void)error_code;
     if (s_irq0_impl)
         s_irq0_impl->ticks++;
+    /* ~100 Hz PIT: drive ARP TTL sweep on bare-metal lab netdev (**#240**). */
+    fl_net_baremetal_timer_poll(10u);
 }
 
 static uint64_t hw_tick_count(timer_driver_t *drv) {
