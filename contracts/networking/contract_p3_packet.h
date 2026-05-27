@@ -6,7 +6,9 @@
  * (L2 / IPv4 / L4) and **RX/TX pipeline stages** so ARP, routing, UDP, DHCP, and future
  * socket code share one parse/build vocabulary without duplicating offset math.
  *
- * **Implementation:** **kernel/core/net/net_packet.c** (**net_packet.h**).
+ * **Implementation:** **kernel/core/net/net_packet.c** (**net_packet.h**). **P3-6** UDP,
+ * **P3-12** DHCP, **net_wire_egress**, and **net_wire_host** move app/L4 bytes via
+ * **fl_net_packet_bind_l4**, **fl_net_packet_l4_view**, and **fl_net_packet_copy_l4**.
  */
 #ifndef FL_CONTRACT_P3_PACKET_H
 #define FL_CONTRACT_P3_PACKET_H

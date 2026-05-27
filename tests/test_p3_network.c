@@ -474,7 +474,6 @@ static int test_net_task_backend_server_relay(void) {
 
 static int test_net_udp_demux_queue(void) {
     fl_net_udp_rx_meta_t meta;
-    uint8_t out[64];
     size_t out_len = 0;
     fl_result_t rc;
     const char payload[] = "demux-payload";
@@ -484,15 +483,30 @@ static int test_net_udp_demux_queue(void) {
     rc = fl_net_udp_bind_port(47001u);
     ASSERT(rc == FL_RESULT_OK);
 
-    rc = fl_net_udp_deliver_inbound(loopback, 48000u, 47001u, (const uint8_t *)payload,
-                                    sizeof(payload) - 1u);
-    ASSERT(rc == FL_RESULT_OK);
+    {
+        uint8_t payload_buf[32];
+        fl_net_packet_t payload_pkt;
 
-    rc = fl_net_udp_recv_from_port(47001u, &meta, out, sizeof(out), &out_len);
-    ASSERT(rc == FL_RESULT_OK);
-    ASSERT(out_len == sizeof(payload) - 1u);
-    ASSERT(memcmp(out, payload, out_len) == 0);
-    ASSERT(meta.dst_port_host == 47001u);
+        memcpy(payload_buf, payload, sizeof(payload) - 1u);
+        ASSERT(fl_net_packet_bind_l4(&payload_pkt, payload_buf, sizeof(payload_buf), 0u,
+                                     sizeof(payload) - 1u) == FL_RESULT_OK);
+        rc = fl_net_udp_deliver_inbound_pkt(loopback, 48000u, 47001u, &payload_pkt);
+        ASSERT(rc == FL_RESULT_OK);
+    }
+
+    {
+        fl_net_packet_t rx_pkt;
+        uint8_t rx_buf[64];
+        const uint8_t *rx_ptr;
+
+        rc = fl_net_udp_recv_from_port_pkt(47001u, &meta, &rx_pkt, rx_buf, sizeof(rx_buf));
+        ASSERT(rc == FL_RESULT_OK);
+        rc = fl_net_packet_l4_view(&rx_pkt, &rx_ptr, &out_len);
+        ASSERT(rc == FL_RESULT_OK);
+        ASSERT(out_len == sizeof(payload) - 1u);
+        ASSERT(memcmp(rx_ptr, payload, out_len) == 0);
+        ASSERT(meta.dst_port_host == 47001u);
+    }
 
     fl_net_udp_unbind_port(47001u);
     return 0;
@@ -551,12 +565,22 @@ static int test_net_socket_tcp_loopback(void) {
 
 static int test_net_udp_build_datagram(void) {
     uint8_t buf[64];
+    uint8_t payload_buf[8];
     const char payload[] = "udp";
+    fl_net_packet_t payload_pkt;
     size_t len;
     uint32_t loopback = (uint32_t)FL_NET_IPV4_LOOPBACK_FIRST_OCTET | (1u << 24);
 
+    memcpy(payload_buf, payload, sizeof(payload) - 1u);
+    ASSERT(fl_net_packet_bind_l4(&payload_pkt, payload_buf, sizeof(payload_buf), 0u,
+                                 sizeof(payload) - 1u) == FL_RESULT_OK);
+
     len = fl_net_udp_build_datagram(buf, sizeof(buf), loopback, loopback, 48001u, 7777u,
                                     (const uint8_t *)payload, sizeof(payload) - 1u);
+    ASSERT(len == (size_t)FL_NET_UDP_HDR_LEN + sizeof(payload) - 1u);
+
+    len = fl_net_udp_build_datagram_from_pkt(buf, sizeof(buf), loopback, loopback, 48001u, 7777u,
+                                             &payload_pkt);
     ASSERT(len == (size_t)FL_NET_UDP_HDR_LEN + sizeof(payload) - 1u);
     ASSERT(buf[0] == (uint8_t)(48001u >> 8));
     ASSERT(buf[1] == (uint8_t)(48001u & 0xff));

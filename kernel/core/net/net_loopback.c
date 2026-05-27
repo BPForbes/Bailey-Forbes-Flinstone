@@ -7,6 +7,7 @@
 #include "net_checksum.h"
 #include "net_ipv4.h"
 #include "net_tcp.h"
+#include "net_packet.h"
 #include "net_udp.h"
 #include "net_wire.h"
 
@@ -183,8 +184,14 @@ static fl_result_t loopback_process_ipv4(const uint8_t *ip, size_t ip_len, uint8
         src_be = (uint32_t)ip[12] | ((uint32_t)ip[13] << 8) | ((uint32_t)ip[14] << 16) |
                  ((uint32_t)ip[15] << 24);
 
-        (void)fl_net_udp_deliver_inbound(src_be, sport, dport, udp + FL_NET_UDP_HDR_LEN,
-                                         payload_len);
+        {
+            fl_net_packet_t app_pkt;
+
+            if (fl_net_packet_bind_l4(&app_pkt, (uint8_t *)ip, ip_len,
+                                      hdr_len + FL_NET_UDP_HDR_LEN, payload_len) ==
+                FL_RESULT_OK)
+                (void)fl_net_udp_deliver_inbound_pkt(src_be, sport, dport, &app_pkt);
+        }
         return FL_RESULT_TIMEDOUT;
     } else {
         return FL_RESULT_TIMEDOUT;

@@ -4,7 +4,7 @@ RELEASE_VERSION=0
 PRERELEASE=1
 DEV_VERSION=4
 DESCRIPTION<<VER_END
-PRE 4.2.0 (P3/P5): Network prep for future server PR — UDP demux, socket shim, session wire (MEMBER_LIST, HOST_NICK_SET, NICK_PROMPT); P5 server_share, file delivery (recipient_member_id), member identity and nick scopes. docs/SERVER.md: server connected roster, -id on send, local vs host-global nicknames, targeting rules. Pre-server P3: DHCP codec/lab client and fl_net_packet_bind_l4 / fl_net_dhcp_*_pkt; ARP cache sweep on P3-14 workqueue; hosted TCP stream wrappers; TLS hosted sizing hook; ROADMAP/P3_NETWORKING ~✅ for P3-1–P3-9, P3-12, P3-14. No cmd_server or net_server in this train.
+PRE 4.2.0 (P3/P5): Network prep for future server PR — UDP demux, socket shim, session wire (MEMBER_LIST, HOST_NICK_SET, NICK_PROMPT); P5 server_share, file delivery (recipient_member_id), member identity and nick scopes. docs/SERVER.md: server connected roster, -id on send, local vs host-global nicknames, targeting rules. Pre-server P3 on fl_net_packet_t: bind_l4/l4_view across UDP, DHCP, ICMP, DNS, wire egress/host, loopback demux, task-backend xmit; ARP sweep (P3-14); TCP stream + syn_pkt; TLS sizing hook; ROADMAP ~✅ P3-1–P3-9, P3-12, P3-14. No cmd_server or net_server in this train.
 VER_END
 
 RELEASE_DATE=2026-05-27

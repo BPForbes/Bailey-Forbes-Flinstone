@@ -39,6 +39,13 @@ fl_result_t fl_net_packet_bind_l4(fl_net_packet_t *pkt, uint8_t *backing, size_t
 fl_result_t fl_net_packet_l4_view(const fl_net_packet_t *pkt, const uint8_t **data_out,
                                   size_t *len_out);
 
+/**
+ * When **pkt** L4 is a full UDP datagram (header + payload), return the application payload slice.
+ * For L4-only packets that already hold app bytes only, use **fl_net_packet_l4_view** instead.
+ */
+fl_result_t fl_net_packet_udp_app_view(const fl_net_packet_t *pkt, const uint8_t **app_out,
+                                       size_t *app_len_out);
+
 /** Advance RX pipeline to **stage** after filling **pipe->pkt** from **frame**. */
 fl_result_t fl_net_pipeline_rx_feed(fl_net_pipeline_rx_t *pipe, fl_net_pipeline_stage_t stage,
                                     const uint8_t *frame, size_t len);

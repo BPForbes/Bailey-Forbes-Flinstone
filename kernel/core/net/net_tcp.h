@@ -1,6 +1,7 @@
 #ifndef NET_TCP_H
 #define NET_TCP_H
 
+#include "contract_p3_packet.h"
 #include "contract_p3_sockets.h"
 #include "contract_result.h"
 
@@ -13,6 +14,10 @@
 
 size_t fl_net_tcp_build_syn(uint8_t *buf, size_t cap, uint16_t sport, uint16_t dport,
                             uint32_t seq_be);
+
+/** Bind **pkt** L4 over SYN segment written to **backing**. */
+fl_result_t fl_net_tcp_build_syn_pkt(fl_net_packet_t *pkt, uint8_t *backing, size_t cap,
+                                     uint16_t sport, uint16_t dport, uint32_t seq_be);
 
 fl_result_t fl_net_tcp_syn_probe(uint32_t dst_be, uint16_t dport, unsigned timeout_ms,
                                  double *out_rtt_ms, char *note, size_t note_len);

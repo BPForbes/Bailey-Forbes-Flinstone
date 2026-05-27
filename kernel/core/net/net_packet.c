@@ -1,5 +1,6 @@
 #include "net_packet.h"
 
+#include "contract_p3_udp.h"
 #include "net_wire.h"
 
 #include "fl/mem_asm.h"
@@ -93,6 +94,24 @@ fl_result_t fl_net_packet_bind_l4(fl_net_packet_t *pkt, uint8_t *backing, size_t
     pkt->l4.off = l4_off;
     pkt->l4.len = l4_len;
     pkt->valid = FL_NET_PKT_VALID_L4;
+    return FL_RESULT_OK;
+}
+
+fl_result_t fl_net_packet_udp_app_view(const fl_net_packet_t *pkt, const uint8_t **app_out,
+                                       size_t *app_len_out) {
+    const uint8_t *udp;
+    size_t udp_len;
+
+    if (!app_out || !app_len_out)
+        return FL_RESULT_INVAL;
+
+    if (fl_net_packet_l4_view(pkt, &udp, &udp_len) != FL_RESULT_OK)
+        return FL_RESULT_ERR;
+    if (udp_len < FL_NET_UDP_HDR_LEN)
+        return FL_RESULT_ERR;
+
+    *app_out = udp + FL_NET_UDP_HDR_LEN;
+    *app_len_out = udp_len - FL_NET_UDP_HDR_LEN;
     return FL_RESULT_OK;
 }
 

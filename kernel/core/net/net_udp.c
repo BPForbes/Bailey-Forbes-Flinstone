@@ -3,6 +3,7 @@
 #include "contract_p3_ipv4.h"
 #include "contract_result.h"
 #include "net_checksum.h"
+#include "net_packet.h"
 
 #include "fl/mem_asm.h"
 #include "fl/net_asm.h"
@@ -76,6 +77,20 @@ size_t fl_net_udp_build_datagram(uint8_t *buf, size_t cap, uint32_t src_be, uint
     return total;
 }
 
+size_t fl_net_udp_build_datagram_from_pkt(uint8_t *buf, size_t cap, uint32_t src_be, uint32_t dst_be,
+                                          uint16_t sport_host, uint16_t dport_host,
+                                          const fl_net_packet_t *payload_pkt) {
+    const uint8_t *payload;
+    size_t payload_len;
+
+    if (!payload_pkt)
+        return 0;
+    if (fl_net_packet_l4_view(payload_pkt, &payload, &payload_len) != FL_RESULT_OK)
+        return 0;
+    return fl_net_udp_build_datagram(buf, cap, src_be, dst_be, sport_host, dport_host, payload,
+                                     payload_len);
+}
+
 void fl_net_udp_demux_reset(void) {
     memset(s_udp_bind, 0, sizeof(s_udp_bind));
 }
@@ -118,6 +133,21 @@ fl_result_t fl_net_udp_unbind_port(uint16_t dport_host) {
         return FL_RESULT_NOENT;
     memset(e, 0, sizeof(*e));
     return FL_RESULT_OK;
+}
+
+fl_result_t fl_net_udp_deliver_inbound_pkt(uint32_t src_ip_be, uint16_t src_port_host,
+                                           uint16_t dport_host,
+                                           const fl_net_packet_t *payload_pkt) {
+    const uint8_t *payload;
+    size_t payload_len;
+    fl_result_t rc;
+
+    if (!payload_pkt)
+        return FL_RESULT_INVAL;
+    rc = fl_net_packet_l4_view(payload_pkt, &payload, &payload_len);
+    if (rc != FL_RESULT_OK)
+        return rc;
+    return fl_net_udp_deliver_inbound(src_ip_be, src_port_host, dport_host, payload, payload_len);
 }
 
 fl_result_t fl_net_udp_deliver_inbound(uint32_t src_ip_be, uint16_t src_port_host,
@@ -178,4 +208,19 @@ fl_result_t fl_net_udp_recv_from_port(uint16_t dport_host, fl_net_udp_rx_meta_t 
     e->head = (e->head + 1u) % FL_NET_UDP_DEFAULT_RX_QUEUE_DATAGRAMS;
     e->count--;
     return FL_RESULT_OK;
+}
+
+fl_result_t fl_net_udp_recv_from_port_pkt(uint16_t dport_host, fl_net_udp_rx_meta_t *meta,
+                                          fl_net_packet_t *pkt_out, uint8_t *backing,
+                                          size_t backing_cap) {
+    size_t len = 0;
+    fl_result_t rc;
+
+    if (!pkt_out || !backing)
+        return FL_RESULT_INVAL;
+
+    rc = fl_net_udp_recv_from_port(dport_host, meta, backing, backing_cap, &len);
+    if (rc != FL_RESULT_OK)
+        return rc;
+    return fl_net_packet_bind_l4(pkt_out, backing, backing_cap, 0u, len);
 }

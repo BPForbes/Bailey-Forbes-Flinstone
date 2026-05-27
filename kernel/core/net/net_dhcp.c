@@ -154,8 +154,6 @@ fl_result_t fl_net_dhcp_lab_acquire(uint32_t *leased_addr_be, unsigned timeout_m
     uint8_t msg_type = 0;
     fl_net_packet_t discover_pkt;
     fl_net_packet_t reply_pkt;
-    const uint8_t *wire_payload;
-    size_t wire_len = 0;
     fl_result_t rc;
 
     if (!leased_addr_be)
@@ -165,19 +163,12 @@ fl_result_t fl_net_dhcp_lab_acquire(uint32_t *leased_addr_be, unsigned timeout_m
                                        FL_NET_DHCP_MSG_DISCOVER, xid, mac);
     if (rc != FL_RESULT_OK)
         return rc;
-    rc = fl_net_packet_l4_view(&discover_pkt, &wire_payload, &wire_len);
+    rc = fl_net_wire_send_udp_pkt(FL_NET_DHCP_BROADCAST_BE32, FL_NET_DHCP_CLIENT_PORT,
+                                  FL_NET_DHCP_SERVER_PORT, &discover_pkt, &reply_pkt, reply,
+                                  sizeof(reply), &rlen, timeout_ms);
     if (rc != FL_RESULT_OK)
         return rc;
 
-    rc = fl_net_wire_send_udp(FL_NET_DHCP_BROADCAST_BE32, FL_NET_DHCP_CLIENT_PORT,
-                              FL_NET_DHCP_SERVER_PORT, wire_payload, wire_len, reply,
-                              sizeof(reply), &rlen, timeout_ms);
-    if (rc != FL_RESULT_OK)
-        return rc;
-
-    rc = fl_net_packet_bind_l4(&reply_pkt, reply, sizeof(reply), 0u, rlen);
-    if (rc != FL_RESULT_OK)
-        return rc;
     rc = fl_net_dhcp_parse_reply_pkt(&reply_pkt, NULL, &yiaddr, &msg_type);
     if (rc != FL_RESULT_OK || msg_type != FL_NET_DHCP_MSG_OFFER || yiaddr == 0u)
         return FL_RESULT_ERR;
@@ -186,20 +177,14 @@ fl_result_t fl_net_dhcp_lab_acquire(uint32_t *leased_addr_be, unsigned timeout_m
                                        FL_NET_DHCP_MSG_REQUEST, xid, mac);
     if (rc != FL_RESULT_OK)
         return rc;
-    rc = fl_net_packet_l4_view(&discover_pkt, &wire_payload, &wire_len);
-    if (rc != FL_RESULT_OK)
-        return rc;
 
     rlen = 0;
-    rc = fl_net_wire_send_udp(FL_NET_DHCP_BROADCAST_BE32, FL_NET_DHCP_CLIENT_PORT,
-                              FL_NET_DHCP_SERVER_PORT, wire_payload, wire_len, reply,
-                              sizeof(reply), &rlen, timeout_ms);
+    rc = fl_net_wire_send_udp_pkt(FL_NET_DHCP_BROADCAST_BE32, FL_NET_DHCP_CLIENT_PORT,
+                                  FL_NET_DHCP_SERVER_PORT, &discover_pkt, &reply_pkt, reply,
+                                  sizeof(reply), &rlen, timeout_ms);
     if (rc != FL_RESULT_OK)
         return rc;
 
-    rc = fl_net_packet_bind_l4(&reply_pkt, reply, sizeof(reply), 0u, rlen);
-    if (rc != FL_RESULT_OK)
-        return rc;
     rc = fl_net_dhcp_parse_reply_pkt(&reply_pkt, NULL, &yiaddr, &msg_type);
     if (rc != FL_RESULT_OK || msg_type != FL_NET_DHCP_MSG_ACK)
         return FL_RESULT_ERR;
