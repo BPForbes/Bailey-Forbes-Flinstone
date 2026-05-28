@@ -10,3 +10,5 @@ alwaysApply: true
 There is **no** requirement to install or run the **CodeRabbit** or **Codex** command-line tools before **`git push`**. Use ordinary GitHub pull-request review and any optional checks configured on the repository.
 
 If you change **versioning** wording in **`.coderabbit.yaml`**, keep **AGENTS.md**, **CLAUDE.md**, **`docs/versioning.md`**, and **`.cursor/rules/versioning.mdc`** aligned.
+
+**CodeRabbit and `version_def.h`:** **`.coderabbit.yaml`** instructs reviewers to inspect **PR commit history** before flagging **`userland/shell/version_def.h`** — changes from **`github-actions[bot]`** / **`chore(version):`** / **`gen_version_def.sh`** automation are legitimate CI publish, not agent policy violations.

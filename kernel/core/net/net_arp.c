@@ -87,6 +87,21 @@ fl_result_t fl_net_arp_cache_insert(uint32_t ipv4_be, const uint8_t mac[FL_NET_E
 #endif
 }
 
+unsigned fl_net_arp_tick(unsigned elapsed_ms) {
+    static unsigned s_accum_ms;
+    unsigned removed = 0u;
+
+    if (elapsed_ms == 0u)
+        return 0u;
+    s_accum_ms += elapsed_ms;
+    while (s_accum_ms >= FL_NET_ARP_TICK_PERIOD_MS) {
+        s_accum_ms -= FL_NET_ARP_TICK_PERIOD_MS;
+        ++s_arp_tick;
+        removed += fl_net_arp_cache_sweep(FL_NET_ARP_CACHE_STALE_TICKS);
+    }
+    return removed;
+}
+
 unsigned fl_net_arp_cache_sweep(unsigned max_age_ticks) {
     unsigned removed = 0;
     unsigned i = 0;
@@ -357,4 +372,22 @@ fl_result_t fl_net_arp_resolve(fl_net_driver_t *drv, const uint8_t src_mac[FL_NE
         return arp_resolve_loopback(target_ip_be, mac_out);
 
     return arp_exchange_wire(drv, src_mac, src_ip_be, target_ip_be, mac_out, timeout_ms);
+}
+
+
+fl_result_t fl_net_arp_send_gratuitous(fl_net_driver_t *drv, const uint8_t src_mac[6],
+                                       uint32_t src_ip_be) {
+    uint8_t frame[FL_NET_ETH_FRAME_HDR_LEN + FL_NET_ARP_PKT_LEN];
+    size_t len;
+    fl_net_frame_view_t view;
+
+    if (!drv || !src_mac)
+        return FL_RESULT_INVAL;
+
+    len = fl_net_arp_build_request(frame, sizeof(frame), src_mac, src_ip_be, src_ip_be);
+    if (len == 0)
+        return FL_RESULT_ERR;
+    view.data = frame;
+    view.len = len;
+    return fl_net_netdev_send(drv, &view);
 }

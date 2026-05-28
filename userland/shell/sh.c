@@ -99,6 +99,10 @@ static void vm_cleanup_at_exit(void) {
     rmrf(g_vm_root);
 }
 
+static void shell_netdev_cleanup_at_exit(void) {
+    fl_net_netdev_shutdown();
+}
+
 #ifndef BATCH_SINGLE_THREAD
 static int g_pool_workers_started;
 #endif
@@ -352,6 +356,7 @@ int main(int argc, char *argv[]) {
     fl_session_init();
     fl_net_netdev_init();
     fl_net_netdev_set_authz_hook(fl_authz_subsystem_check, NULL);
+    atexit(shell_netdev_cleanup_at_exit);
 
     /* Default host volume: ensure drive.img exists before block driver probes it. */
     if (strcmp(current_disk_file, "drive.img") == 0) {

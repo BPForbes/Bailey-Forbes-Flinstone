@@ -12,6 +12,7 @@ extern "C" {
 typedef fl_authz_decision_t (*fl_net_netdev_authz_fn)(unsigned op, void *ctx);
 
 void fl_net_netdev_init(void);
+void fl_net_netdev_shutdown(void);
 void fl_net_netdev_set_authz_hook(fl_net_netdev_authz_fn fn, void *ctx);
 
 fl_result_t fl_net_netdev_authz_check(unsigned op);

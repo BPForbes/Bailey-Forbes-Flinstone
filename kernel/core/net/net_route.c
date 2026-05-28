@@ -141,16 +141,33 @@ static int route_parse_prefix(const char *prefix_s, unsigned *out_prefix) {
     return 1;
 }
 
+fl_result_t fl_net_route_configure_static(fl_net_driver_t *drv, const uint8_t src_mac[6],
+                                          const char *addr_s, unsigned prefix_len,
+                                          const char *gw_s) {
+    uint32_t addr_be = 0;
+    uint32_t gw_be = 0;
+    uint32_t net_be;
+
+    if (!drv || !src_mac || !addr_s || !addr_s[0] || !gw_s || !gw_s[0])
+        return FL_RESULT_INVAL;
+    if (!fl_net_ipv4_parse_literal(addr_s, &addr_be))
+        return FL_RESULT_INVAL;
+    if (!fl_net_ipv4_parse_literal(gw_s, &gw_be))
+        return FL_RESULT_INVAL;
+    if (prefix_len == 0u || prefix_len > 32u)
+        return FL_RESULT_INVAL;
+
+    net_be = fl_net_ipv4_network_addr(addr_be, (uint8_t)prefix_len);
+    return fl_net_route_add(net_be, (uint8_t)prefix_len, gw_be, drv, addr_be, src_mac);
+}
+
 #if defined(__linux__)
 fl_result_t fl_net_route_configure_tap(fl_net_driver_t *tap_drv, const uint8_t tap_mac[6],
                                        const char *tap_ifname) {
     const char *addr_s;
     const char *prefix_s;
     const char *gw_s;
-    uint32_t addr_be = 0;
-    uint32_t gw_be = 0;
     unsigned prefix = 24;
-    uint32_t net_be;
 
     (void)tap_ifname;
 
@@ -172,15 +189,6 @@ fl_result_t fl_net_route_configure_tap(fl_net_driver_t *tap_drv, const uint8_t t
     if (!gw_s || !gw_s[0])
         gw_s = "10.0.2.2";
 
-    if (!fl_net_ipv4_parse_literal(addr_s, &addr_be))
-        return FL_RESULT_INVAL;
-    if (!fl_net_ipv4_parse_literal(gw_s, &gw_be))
-        return FL_RESULT_INVAL;
-    if (prefix > 32u)
-        prefix = 32u;
-
-    net_be = fl_net_ipv4_network_addr(addr_be, (uint8_t)prefix);
-
-    return fl_net_route_add(net_be, (uint8_t)prefix, gw_be, tap_drv, addr_be, tap_mac);
+    return fl_net_route_configure_static(tap_drv, tap_mac, addr_s, prefix, gw_s);
 }
 #endif

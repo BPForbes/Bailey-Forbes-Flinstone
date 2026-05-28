@@ -7,6 +7,7 @@
 #include "net_loopback.h"
 #include "net_netdev.h"
 #include "net_route.h"
+#include "net_baremetal.h"
 #include "net_wire.h"
 
 #include <stdint.h>
@@ -332,6 +333,11 @@ fl_result_t fl_net_wire_egress_l4_xmit_pkt(uint32_t dst_be, uint8_t ip_proto,
     if (route.drv == fl_net_netdev_tap() && fl_net_netdev_tap_is_open())
         return egress_tap_xmit(&route, dst_be, ip_proto, l4, l4_len, arp_timeout_ms);
 
+#ifdef DRIVERS_BAREMETAL
+    if (route.drv == fl_net_netdev_lab() && fl_net_baremetal_lab_is_up())
+        return egress_tap_xmit(&route, dst_be, ip_proto, l4, l4_len, arp_timeout_ms);
+#endif
+
     return FL_RESULT_NOENT;
 }
 
@@ -364,6 +370,12 @@ fl_result_t fl_net_wire_egress_l4_pkt(uint32_t dst_be, uint8_t ip_proto,
     if (route.drv == fl_net_netdev_tap() && fl_net_netdev_tap_is_open())
         return egress_tap_path(&route, dst_be, ip_proto, l4, l4_len, rx_l4, rx_l4_cap, rx_l4_len,
                                timeout_ms, out_rtt_ms);
+
+#ifdef DRIVERS_BAREMETAL
+    if (route.drv == fl_net_netdev_lab() && fl_net_baremetal_lab_is_up())
+        return egress_tap_path(&route, dst_be, ip_proto, l4, l4_len, rx_l4, rx_l4_cap, rx_l4_len,
+                               timeout_ms, out_rtt_ms);
+#endif
 
     return FL_RESULT_NOENT;
 }
