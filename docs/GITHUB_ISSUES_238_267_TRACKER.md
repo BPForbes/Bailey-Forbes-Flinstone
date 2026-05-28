@@ -35,9 +35,13 @@ Primary networking map: [`docs/P3_NETWORKING.md`](P3_NETWORKING.md).
 | #261 | CLOSED | `P3_NETWORKING.md` sync |
 | #263–#266 | CLOSED | Protocol gap index / UDP façade trackers |
 
+## Progress
+
+- **#262** — Done on this branch: Linux ICMP fallback removed; loopback ICMP/TCP SYN use `fl_net_wire_egress_l4` only.
+
 ## Suggested work order
 
-1. **#262** — Small, localized egress/ICMP cleanup (unblocks honest P3-5 status).
+1. ~~**#262**~~ — Small, localized egress/ICMP cleanup (unblocks honest P3-5 status).
 2. **#238** — UDP demux + in-tree TCP FSM (blocks many L7 items; **#239** stays out of this PR).
 3. **#247**, **#251**, **#252** — Production DHCP, DNS, TLS (order by dependency on #238).
 4. **#267** — IPv4 routing/PMTU/offload policy.
