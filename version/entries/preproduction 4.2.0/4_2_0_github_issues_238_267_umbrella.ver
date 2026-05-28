@@ -1,0 +1,10 @@
+MAJOR_VERSION=4
+STANDARD_VERSION=2
+RELEASE_VERSION=0
+PRERELEASE=1
+DEV_VERSION=7
+DESCRIPTION<<VER_END
+PRE 4.2.0 umbrella #238–#267 (excl. #239): loopback TCP FSM and UDP demux (#238); egress-only ICMP/UDP (#262); multi-NS DNS (#251); DHCP acquire (#247); OpenSSL TLS bridge when libssl present (#252); HTTP GET and TFTP client subsets (#259/#260); Wi-Fi/IPv6 deferred trackers (#257/#258); default-route policy (#267); PRE 4.2.0 integration checklist (#240). Tracker docs/GITHUB_ISSUES_238_267_TRACKER.md.
+VER_END
+
+RELEASE_DATE=2026-05-28

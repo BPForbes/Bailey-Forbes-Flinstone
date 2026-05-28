@@ -371,17 +371,17 @@ Shipped on the **PRE 4.2.0** train (**PR #231** class work). This is the **modul
 | **P3-2** | ~✅ | **`net_loopback.c`**: Ethernet+IPv4 frame path; ICMP echo reply; TCP RST+ACK on SYN |
 | **P3-3** | ~✅ | **`net_tap.c`**: Linux TAP; **`SKIP_TAP=1`** / capability skips in CI |
 | **P3-4** | ✅ | **`net_arp.c`**: **RFC 826** cache (**ASM**), **`fl_net_arp_tick`**, gratuitous ARP; hosted workqueue + bare-metal PIT bottom-half |
-| **P3-5** | ~✅ | **`net_route.c`** LPM + **`fl_net_route_configure_static`**; **`net_wire_egress.c`**; lab route on **B** without **FL_NET_TAP_***; Linux ICMP fallback when unrouted; PMTU stub in **`net_ipv4.h`** |
-| **P3-6** | ~✅ | **`fl_net_udp_build_datagram`** + **port demux** RX queues (**`fl_net_udp_bind_port`** / **`fl_net_udp_deliver_inbound`**); loopback delivers bound UDP to queues |
-| **P3-7** | ~✅ | **`net_tcp.c`**: SYN probe + **`fl_net_tcp_stream_*`**; **`net_socket.c`**: hosted **TCP** listen/connect/accept — in-tree **RFC 793** FSM still TODO |
-| **P3-8** | ~✅ | **`net_dns.c`**: minimal **A** query via **`/etc/resolv.conf`** |
-| **P3-9** | ~✅ | **`net_tls_hosted.c`**: max plaintext record boundary; no mbedtls/OpenSSL bridge yet |
-| **P3-12** | ~✅ | **`net_dhcp.c`**: BOOTP codec + lab client over **`fl_net_packet_t`** L4 slices |
+| **P3-5** | ✅ | **`net_route.c`** LPM + static/TAP configure; **`net_wire_egress.c`**; no **0.0.0.0/0** in-table (**#267**); egress-only ICMP/UDP when unrouted (**#262**); PMTU/offload policy in **`net_ipv4.h`** |
+| **P3-6** | ✅ | **`net_udp.c`**: build/parse/xmit/echo; demux queues; loopback + egress wire send |
+| **P3-7** | ~✅ | **`net_tcp_fsm.c`** loopback **RFC 793** subset + **`net_tcp.c`** stream/SYN probe; production timers/retransmit remain **#238** follow-up |
+| **P3-8** | ✅ | **`net_dns.c`**: **A** queries; up to three nameservers, retries, rotating TXIDs (**#251**) |
+| **P3-9** | ~✅ | **`net_tls_hosted.c`**: record cap + optional OpenSSL client bridge when **libssl** present (**#252**) |
+| **P3-12** | ~✅ | **`net_dhcp.c`**: codec + **`fl_net_dhcp_acquire`** over egress (**#247**) |
 | **P3-13** | ❌ | Server shell/hub not implemented; contracts **`contract_p3_sockets.h`**, **`contract_p3_session_wire.h`**; **`docs/SERVER.md`**, **`docs/P3_13_CHAT_SERVER.md`**; **#239** / **#238** |
-| **P3-14** | ~✅ | **`net_background.c`**: **`fl_net_arp_tick`** on workqueue; RX dequeue / TCP timer wheel remain **#238** |
+| **P3-14** | ~✅ | **`net_background.c`**: **`fl_net_arp_tick`**; RX dequeue / TCP timer wheel remain future |
 | **P3-10** / **P3-11** | ❌ | Contract **`[DEFERRED]`** only |
 
-**Shell / CI:** **`ping`**, **`check requirements`**; **`make test_p3_network`**, **`make baremetal`**, **`make test_invariants`**, **`make test_core`**, **`make check-network-requirements`**. **ASM:** **`arch/*/net_asm.*`**, **`arch/*/net_wire_host_asm.*`**. **PRE 4.2.0 (this train):** lab bare-metal **802.3** path (**`net_baremetal.c`**, **#237** / **#241** / **#240** checklist) — closes those issues; **#238** (full TCP FSM + UDP demux), **#239** (**`server`**) remain open; production virtio NIC is **P4**-class follow-up.
+**Shell / CI:** **`ping`**, **`check requirements`**; **`make test_p3_network`**, **`make baremetal`**, **`make test_invariants`**, **`make test_core`**, **`make check-network-requirements`**. **ASM:** **`arch/*/net_asm.*`**, **`arch/*/net_wire_host_asm.*`**. **PRE 4.2.0 (this train):** lab bare-metal **802.3** path (**`net_baremetal.c`**, **#237** / **#241** / **#240**); umbrella **#238–#267** (excl. **#239** **`server`**) on PR **#275**; production virtio NIC is **P4**-class follow-up.
 
 ---
 

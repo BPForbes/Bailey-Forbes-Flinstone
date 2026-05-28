@@ -321,3 +321,16 @@ fl_result_t fl_net_sock_set_nonblock(fl_net_sock_handle_t handle, int nonblock) 
     return FL_RESULT_OK;
 #endif
 }
+
+int fl_net_sock_host_fd(fl_net_sock_handle_t handle) {
+#if !defined(FL_NET_SOCK_HOSTED)
+    (void)handle;
+    return -1;
+#else
+    fl_net_sock_slot_t *s = sock_lookup(handle);
+
+    if (!s || s->fd < 0)
+        return -1;
+    return s->fd;
+#endif
+}

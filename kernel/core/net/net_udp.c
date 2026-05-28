@@ -4,6 +4,9 @@
 #include "contract_result.h"
 #include "net_checksum.h"
 #include "net_packet.h"
+#include "net_ipv4.h"
+#include "net_route.h"
+#include "net_wire_egress.h"
 
 #include "fl/mem_asm.h"
 #include "fl/net_asm.h"
@@ -26,6 +29,12 @@ typedef struct {
 } fl_net_udp_bind_entry_t;
 
 static fl_net_udp_bind_entry_t s_udp_bind[FL_NET_UDP_BIND_SLOTS_MAX];
+
+static uint16_t net_udp_read_be16(const uint8_t *p) {
+    return (uint16_t)(((uint16_t)p[0] << 8) | (uint16_t)p[1]);
+}
+
+static fl_net_udp_bind_entry_t *udp_find_bound(uint16_t dport_host);
 
 /** Store **host** port/length as big-endian wire octets (uses **asm_net_htons_be16**). */
 static void net_udp_store_be16(uint8_t *dst, uint16_t host) {
@@ -101,6 +110,115 @@ static fl_net_udp_bind_entry_t *udp_find_bound(uint16_t dport_host) {
             return &s_udp_bind[i];
     }
     return NULL;
+}
+
+
+fl_result_t fl_net_udp_parse(const uint8_t *udp, size_t len, uint32_t src_be, uint32_t dst_be,
+                             int verify_csum, fl_net_udp_parsed_t *out) {
+    uint16_t ulen;
+
+    if (!udp || !out)
+        return FL_RESULT_INVAL;
+    if (len < FL_NET_UDP_HDR_LEN)
+        return FL_RESULT_INVAL;
+
+    ulen = net_udp_read_be16(udp + 4);
+    if (ulen < FL_NET_UDP_HDR_LEN || (size_t)ulen > len)
+        return FL_RESULT_ERR;
+
+    if (verify_csum && !fl_net_udp_checksum_valid(src_be, dst_be, udp, (size_t)ulen))
+        return FL_RESULT_ERR;
+
+    out->sport_host = net_udp_read_be16(udp + 0);
+    out->dport_host = net_udp_read_be16(udp + 2);
+    out->length_host = ulen;
+    out->payload = udp + FL_NET_UDP_HDR_LEN;
+    out->payload_len = (size_t)ulen - FL_NET_UDP_HDR_LEN;
+    return FL_RESULT_OK;
+}
+
+fl_result_t fl_net_udp_xmit_pkt(uint32_t dst_be, uint16_t sport_host, uint16_t dport_host,
+                                const fl_net_packet_t *payload_pkt, unsigned arp_timeout_ms) {
+    uint8_t l4[FL_NET_UDP_HDR_LEN + FL_NET_UDP_LAB_RX_PAYLOAD_MAX];
+    uint32_t src_be;
+    size_t l4_len;
+    fl_net_packet_t udp_pkt;
+    fl_result_t rc;
+
+    if (!payload_pkt)
+        return FL_RESULT_INVAL;
+    if (fl_net_ipv4_is_loopback(dst_be)) {
+        src_be = (uint32_t)FL_NET_IPV4_LOOPBACK_FIRST_OCTET | (1u << 24);
+    } else {
+        fl_net_route_entry_t route;
+
+        if (fl_net_route_lookup(dst_be, &route) != FL_RESULT_OK)
+            return FL_RESULT_NOENT;
+        src_be = route.src_ip_be;
+    }
+
+    l4_len = fl_net_udp_build_datagram_from_pkt(l4, sizeof(l4), src_be, dst_be, sport_host,
+                                                dport_host, payload_pkt);
+    if (l4_len == 0)
+        return FL_RESULT_ERR;
+
+    rc = fl_net_packet_bind_l4(&udp_pkt, l4, sizeof(l4), 0u, l4_len);
+    if (rc != FL_RESULT_OK)
+        return rc;
+    return fl_net_wire_egress_l4_xmit_pkt(dst_be, FL_NET_IP_PROTO_UDP, &udp_pkt, arp_timeout_ms);
+}
+
+fl_result_t fl_net_udp_xmit(uint32_t dst_be, uint16_t sport_host, uint16_t dport_host,
+                            const uint8_t *payload, size_t payload_len, unsigned arp_timeout_ms) {
+    fl_net_packet_t pkt;
+
+    if (!payload && payload_len > 0u)
+        return FL_RESULT_INVAL;
+    if (fl_net_packet_bind_l4(&pkt, (uint8_t *)(uintptr_t)payload, payload_len, 0u,
+                              payload_len) != FL_RESULT_OK)
+        return FL_RESULT_ERR;
+    return fl_net_udp_xmit_pkt(dst_be, sport_host, dport_host, &pkt, arp_timeout_ms);
+}
+
+fl_result_t fl_net_udp_echo_exchange(uint32_t dst_be, uint16_t sport_host, uint16_t dport_host,
+                                     const uint8_t *payload, size_t payload_len, uint8_t *rx,
+                                     size_t rx_cap, size_t *rx_len, unsigned timeout_ms) {
+    uint8_t l4[FL_NET_UDP_HDR_LEN + FL_NET_UDP_LAB_RX_PAYLOAD_MAX];
+    uint32_t src_be = (uint32_t)FL_NET_IPV4_LOOPBACK_FIRST_OCTET | (1u << 24);
+    size_t l4_len;
+    fl_net_packet_t tx_pkt;
+    fl_result_t rc;
+
+    if (!rx || !rx_len)
+        return FL_RESULT_INVAL;
+    if (!udp_find_bound(dport_host))
+        return FL_RESULT_NOENT;
+
+    l4_len = fl_net_udp_build_datagram(l4, sizeof(l4), src_be, dst_be, sport_host, dport_host,
+                                       payload, payload_len);
+    if (l4_len == 0)
+        return FL_RESULT_ERR;
+
+    rc = fl_net_packet_bind_l4(&tx_pkt, l4, sizeof(l4), 0u, l4_len);
+    if (rc != FL_RESULT_OK)
+        return rc;
+
+    rc = fl_net_wire_egress_l4_pkt(dst_be, FL_NET_IP_PROTO_UDP, &tx_pkt, rx, rx_cap, rx_len,
+                                     timeout_ms, NULL);
+    if (rc != FL_RESULT_OK)
+        return rc;
+
+    {
+        fl_net_udp_parsed_t parsed;
+
+        if (fl_net_udp_parse(rx, *rx_len, dst_be, src_be, 0, &parsed) != FL_RESULT_OK)
+            return FL_RESULT_ERR;
+        if (parsed.payload_len > rx_cap)
+            return FL_RESULT_ERR;
+        memmove(rx, parsed.payload, parsed.payload_len);
+        *rx_len = parsed.payload_len;
+    }
+    return FL_RESULT_OK;
 }
 
 static fl_net_udp_bind_entry_t *udp_alloc_bind(uint16_t dport_host) {
