@@ -6,3 +6,5 @@ DEV_VERSION=8
 DESCRIPTION<<VER_END
 PRE 4.2.0 (P3-13 / P3-10 / P3-11): branch cut from develop to carry the server work (#239 — BSD socket shim, `server host/join/leave/kill`, peer-to-peer messaging) and the deferred-item promotion tracks (#279 — Wi-Fi 802.11 station path; #280 — IPv6 + ICMPv6 + NDP dual-stack). Replit Nix dependency list (replit.nix) confirmed to already carry `pkgs.openssl` for libcrypto (password_hash.cpp today; future TLS for the server transport); no replit.nix change required in this PR. Scaffolding entry only — no code under kernel/core/net or userland/shell in this commit; subsequent commits on this branch will land contract shards, socket shim, server shell command, Wi-Fi station FSM, and IPv6/ICMPv6/NDP modules per the linked issues.
 VER_END
+
+RELEASE_DATE=2026-05-28
