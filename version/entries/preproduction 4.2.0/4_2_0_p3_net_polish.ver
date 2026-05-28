@@ -4,7 +4,7 @@ RELEASE_VERSION=0
 PRERELEASE=1
 DEV_VERSION=6
 DESCRIPTION<<VER_END
-PRE 4.2.0 (P3): hosted netdev shutdown + shell atexit (register cleanup right after netdev init); netdev authz; ARP tick advances cache age and preserves ms remainder; gratuitous ARP; fl_net_route_configure_static rejects invalid prefix; bare-metal lab netdev stats accessors, PIT ARP poll via IRQ bottom-half. Full loopback paths retained in net_wire_egress/host. Closes #232, #233, #235; partial #237/#240/#241 (no virtio NIC). P3-7 RFC 793 FSM open (#238).
+PRE 4.2.0 (P3): hosted netdev shutdown + atexit; ARP tick + gratuitous ARP + fl_net_route_configure_static; bare-metal lab 802.3 netdev (route bootstrap without FL_NET_TAP_* env, PIT ARP tick via IRQ bottom-half, loopback dedup via fl_net_loopback_exchange). Closes #232, #233, #235, #237, #240, #241 (lab path; production virtio NIC remains P4). Open: #238 (RFC 793 TCP FSM + UDP demux), #239 (P3-13 server).
 VER_END
 
 RELEASE_DATE=2026-05-27

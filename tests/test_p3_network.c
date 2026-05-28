@@ -651,6 +651,24 @@ static int test_net_arp_cache_sweep(void) {
     return 0;
 }
 
+static int test_net_arp_tick_stale_eviction(void) {
+    uint8_t mac[6] = {0x02, 0x11, 0x22, 0x33, 0x44, 0x55};
+    uint8_t out_mac[6];
+    uint32_t ip = (10u << 24) | 2u | (15u << 8); /* 10.0.2.15 */
+    unsigned elapsed;
+    unsigned removed;
+
+    fl_net_arp_clear();
+    ASSERT(fl_net_arp_cache_insert(ip, mac) == FL_RESULT_OK);
+    ASSERT(fl_net_arp_cache_lookup(ip, out_mac) != 0);
+
+    elapsed = FL_NET_ARP_TICK_PERIOD_MS * (FL_NET_ARP_CACHE_STALE_TICKS + 3u);
+    removed = fl_net_arp_tick(elapsed);
+    ASSERT(removed >= 1u);
+    ASSERT(fl_net_arp_cache_lookup(ip, out_mac) == 0);
+    return 0;
+}
+
 static int test_net_dhcp_frame_codec(void) {
     uint8_t req[320];
     uint8_t reply[320];
@@ -783,6 +801,10 @@ static int test_route_configure_static(void) {
     ASSERT(fl_net_route_lookup(dst, &route) == FL_RESULT_OK);
     ASSERT(route.drv == fl_net_netdev_loopback());
     ASSERT(route.prefix_len == 24u);
+    ASSERT(fl_net_route_configure_static(fl_net_netdev_loopback(), mac, "10.0.2.15", 0u,
+                                         "10.0.2.2") == FL_RESULT_INVAL);
+    ASSERT(fl_net_route_configure_static(fl_net_netdev_loopback(), mac, "10.0.2.15", 33u,
+                                         "10.0.2.2") == FL_RESULT_INVAL);
     return 0;
 }
 
@@ -854,6 +876,11 @@ int main(void) {
 
     printf("test_net_arp_cache_sweep... ");
     if (test_net_arp_cache_sweep() != 0)
+        return 1;
+    puts("ok");
+
+    printf("test_net_arp_tick_stale_eviction... ");
+    if (test_net_arp_tick_stale_eviction() != 0)
         return 1;
     puts("ok");
 

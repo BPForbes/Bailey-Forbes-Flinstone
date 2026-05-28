@@ -370,18 +370,18 @@ Shipped on the **PRE 4.2.0** train (**PR #231** class work). This is the **modul
 | **P3-1** | ~✅ | **`net_netdev.c`**: driver registry, timeouts, **P2-3** authz hook; loopback + TAP backends |
 | **P3-2** | ~✅ | **`net_loopback.c`**: Ethernet+IPv4 frame path; ICMP echo reply; TCP RST+ACK on SYN |
 | **P3-3** | ~✅ | **`net_tap.c`**: Linux TAP; **`SKIP_TAP=1`** / capability skips in CI |
-| **P3-4** | ~✅ | **`net_arp.c`**: **RFC 826** request/reply, 32-entry cache (**ASM** table ops), **`fl_net_arp_resolve`**; loopback answers **127.0.0.0/8**; tick-based cache age (no wall-clock TTL sweep yet) |
-| **P3-5** | ~✅ | **`net_route.c`** LPM table + **`net_wire_egress.c`**; **`net_wire.c`** / **`net_ipv4.c`** frame build/parse, checksum (**ASM**), ICMP on netdev path; Linux ICMP socket fallback when no route; path MTU/offload still open |
+| **P3-4** | ✅ | **`net_arp.c`**: **RFC 826** cache (**ASM**), **`fl_net_arp_tick`**, gratuitous ARP; hosted workqueue + bare-metal PIT bottom-half |
+| **P3-5** | ~✅ | **`net_route.c`** LPM + **`fl_net_route_configure_static`**; **`net_wire_egress.c`**; lab route on **B** without **FL_NET_TAP_***; Linux ICMP fallback when unrouted; PMTU stub in **`net_ipv4.h`** |
 | **P3-6** | ~✅ | **`fl_net_udp_build_datagram`** + **port demux** RX queues (**`fl_net_udp_bind_port`** / **`fl_net_udp_deliver_inbound`**); loopback delivers bound UDP to queues |
 | **P3-7** | ~✅ | **`net_tcp.c`**: SYN probe + **`fl_net_tcp_stream_*`**; **`net_socket.c`**: hosted **TCP** listen/connect/accept — in-tree **RFC 793** FSM still TODO |
 | **P3-8** | ~✅ | **`net_dns.c`**: minimal **A** query via **`/etc/resolv.conf`** |
 | **P3-9** | ~✅ | **`net_tls_hosted.c`**: max plaintext record boundary; no mbedtls/OpenSSL bridge yet |
 | **P3-12** | ~✅ | **`net_dhcp.c`**: BOOTP codec + lab client over **`fl_net_packet_t`** L4 slices |
 | **P3-13** | ❌ | Server shell/hub not implemented; contracts **`contract_p3_sockets.h`**, **`contract_p3_session_wire.h`**; **`docs/SERVER.md`**, **`docs/P3_13_CHAT_SERVER.md`**; **#239** / **#238** |
-| **P3-14** | ~✅ | **`net_background.c`**: ARP cache sweep on workqueue; RX dequeue / TCP timer wheel TODO (**`docs/BACKGROUND_JOBS.md`**, **#240**) |
+| **P3-14** | ~✅ | **`net_background.c`**: **`fl_net_arp_tick`** on workqueue; RX dequeue / TCP timer wheel remain **#238** |
 | **P3-10** / **P3-11** | ❌ | Contract **`[DEFERRED]`** only |
 
-**Shell / CI:** **`ping`**, **`check requirements`**; **`make test_p3_network`**, **`make test_invariants`**, **`make test_core`**, **`make check-network-requirements`**. **ASM:** **`arch/*/net_asm.*`**, **`arch/*/net_wire_host_asm.*`** (x86_64 GAS/NASM, AArch64 GAS). **PRE 4.2.0 gaps (tracked in issues):** **#241** bare-metal **802.3** netdev + route bootstrap; **#240** checklist (TCP timer wheel, RX dequeue, doc sync); **#239** **P3-13** **`server`** application. Follow-ups: **#232**–**#235** (netdev shutdown, authz hygiene, batch registry).
+**Shell / CI:** **`ping`**, **`check requirements`**; **`make test_p3_network`**, **`make baremetal`**, **`make test_invariants`**, **`make test_core`**, **`make check-network-requirements`**. **ASM:** **`arch/*/net_asm.*`**, **`arch/*/net_wire_host_asm.*`**. **PRE 4.2.0 (this train):** lab bare-metal **802.3** path (**`net_baremetal.c`**, **#237** / **#241** / **#240** checklist) — closes those issues; **#238** (full TCP FSM + UDP demux), **#239** (**`server`**) remain open; production virtio NIC is **P4**-class follow-up.
 
 ---
 

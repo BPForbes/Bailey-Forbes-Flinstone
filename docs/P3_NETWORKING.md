@@ -28,8 +28,9 @@ Full spec: **[`docs/P3_13_CHAT_SERVER.md`](P3_13_CHAT_SERVER.md)**.
 | **`net_wire.c`** | Wire vocabulary | Ethernet+IPv4 frame build/parse, MTU, `fl_net_frame_view_t` / `fl_net_frame_mut_t` |
 | **`net_packet.c`** | Packet backbone | Layered **L2 / IPv4 / L4** slices (`fl_net_packet_t`), RX/TX pipeline stages (**`contract_p3_packet.h`**) |
 | **`net_eth.c`** | L2 helpers | Aliases/constants over wire |
-| **`net_arp.c`** | P3-4 | ARP request/reply, bounded cache, resolve over netdev |
-| **`net_route.c`** | P3-5 | Longest-prefix routing table; TAP lab via **FL_NET_TAP_*** env |
+| **`net_arp.c`** | P3-4 | ARP request/reply, bounded cache, **`fl_net_arp_tick`**, gratuitous ARP |
+| **`net_baremetal.c`** | P3-1 / **#241** | **`DRIVERS_BAREMETAL`** lab **802.3** driver (RX ring, ARP/ICMP on wire) |
+| **`net_route.c`** | P3-5 | LPM table; **`fl_net_route_configure_static`**; TAP via **FL_NET_TAP_*** (Linux) |
 | **`net_wire_egress.c`** | P3-5 / P3-6 | IPv4 L4 egress (ARP + netdev); **`fl_net_wire_egress_l4_pkt`** / **`l4_xmit_pkt`** |
 | **`net_udp.c`** | P3-6 (partial) | **`fl_net_udp_build_datagram`** for task-backend socket egress |
 | **`net_dhcp.c`** | P3-12 (lab) | BOOTP codec; **`fl_net_packet_bind_l4`** / **`fl_net_dhcp_*_pkt`** over L4 slices |
@@ -166,22 +167,22 @@ Legend matches **`docs/ROADMAP.md`**: **✅** complete; **~✅** usable lab subs
 | **P3-1** | ✅ | ~✅ — `net_netdev.c`, authz hook in `sh.c` |
 | **P3-2** | ✅ | ~✅ — `net_loopback.c` frame path + RX queue |
 | **P3-3** | ✅ | ~✅ — `net_tap.c` (CI often skips without `CAP_NET_ADMIN`) |
-| **P3-4** ARP | ✅ | ~✅ — `net_arp.c` cache (**ASM** table ops) + request/reply on loopback/TAP |
-| **P3-5** IPv4 | ✅ | ~✅ — LPM routes + **`fl_net_wire_egress_l4`**; ICMP on netdev; Linux ICMP fallback; PMTU/offload open |
+| **P3-4** ARP | ✅ | ✅ — cache + exchange; **`fl_net_arp_tick`** (hosted workqueue + bare-metal PIT BH); gratuitous ARP |
+| **P3-5** IPv4 | ✅ | ~✅ — LPM + **`fl_net_route_configure_static`**; lab route without **FL_NET_TAP_*** on **B**; Linux ICMP fallback when unrouted |
 | **P3-6** UDP | ✅ | ~✅ — DNS + wire host datagrams only |
 | **P3-7** TCP | ✅ | ~✅ — SYN probe + **`fl_net_tcp_stream_*`** hosted listen/connect/accept |
 | **P3-8** DNS | ✅ | ~✅ — A record, single nameserver |
 | **P3-9** TLS | ✅ | ~✅ — **`net_tls_hosted.c`** record-size boundary (no mbedtls yet) |
 | **P3-12** DHCP | ✅ | ~✅ — BOOTP codec + **`fl_net_dhcp_*_pkt`** over **`fl_net_packet_t`** |
-| **P3-14** background | ✅ | ~✅ — ARP cache sweep on **`fl_wq_enqueue`** (**`net_background.c`**) |
+| **P3-14** background | ✅ | ~✅ — **`fl_net_arp_tick`** on workqueue; TCP timer wheel / RX dequeue still **#238** |
 | **P3-13** `server` + messaging | ✅ | ❌ — product spec **`docs/SERVER.md`**; **`cmd_server`** / hub app **#239** |
 
 ## Standards map (integration targets)
 
 | Layer / feature | Normative references | PRE 4.2.0 status |
 |-----------------|----------------------|------------------|
-| Ethernet L2 | **IEEE 802.3**; IPv4 over Ethernet **RFC 894** | ~✅ TAP + loopback frames |
-| ARP (**P3-4**) | **RFC 826** | ~✅ in-tree cache + exchange |
+| Ethernet L2 | **IEEE 802.3**; IPv4 over Ethernet **RFC 894** | ✅ TAP + loopback + **B** lab **`net_baremetal.c`** |
+| ARP (**P3-4**) | **RFC 826** | ✅ cache, exchange, **`fl_net_arp_tick`**, gratuitous ARP |
 | IPv4 / ICMP (**P3-5**) | **RFC 791**, **RFC 792** | ~✅ routing + netdev ICMP |
 | UDP (**P3-6**) | **RFC 768** | ~✅ DNS + hosted datagram shim |
 | TCP (**P3-7**) | **RFC 793** | ~✅ SYN probe + hosted stream shim (in-tree FSM TODO) |
@@ -216,7 +217,22 @@ Inventory of **named protocols** (and closely related APIs) versus what this tre
 - **HTTPS** is **not** a separate stack layer in this repo: it is **HTTP over TLS**, with TLS intended to stay in **userland** libraries on **H** per **`contract_p3_tls_hosted.h`**.
 - **Mail (SMTP/IMAP)** and **FTP/SFTP** are **out of scope** for the current **PRE 4.2.0** network prep train; document them here so expectations stay aligned with **`docs/ROADMAP.md`** and **`docs/SERVER.md`**.
 
-Bare-metal integration requires **802.3**-framed TX/RX through **`fl_net_driver_t`** (not Linux TAP/socket shims alone). Track gaps in GitHub issues (bare metal, P3 gap checklist, sockets/server).
+## Bare-metal lab bring-up (**DRIVERS_BAREMETAL**, **#237** / **#241**)
+
+PRE **4.2.0** ships an in-tree **lab** path (not production virtio/MMIO — that stays **P4**-class):
+
+| Step | API / module |
+|------|----------------|
+| Init | **`fl_net_baremetal_init()`** — lab **`fl_net_driver_t`**, MAC **`02:11:22:33:44:55`**, IPv4 **`10.0.2.15/24`**, GW **`10.0.2.2`** |
+| Route | **`fl_net_route_configure_static`** — no **`FL_NET_TAP_*`** env on **B** |
+| Neighbor | **`fl_net_arp_send_gratuitous`** on bring-up; **`fl_net_arp_tick`** from PIT IRQ0 bottom-half (~100 Hz) |
+| Frames | **`lab_driver_send` / `recv`** — **802.3**-style RX ring; ARP + ICMP echo for lab addresses |
+| Loopback | **`fl_net_loopback_exchange`** — shared egress/host path (**#237** gap 4) |
+| Shutdown | **`fl_net_baremetal_shutdown()`** via **`fl_net_netdev_shutdown()`** |
+
+**Build:** **`make baremetal`** links the lab driver; **`make test_p3_network`** covers ARP tick eviction and static routes on the hosted test binary.
+
+**Still open:** production NIC (**virtio** / board MMIO), full **RFC 793** TCP FSM, general UDP demux for apps — **#238** / **P4** / **#239**.
 
 ## Shell commands
 
@@ -266,9 +282,9 @@ make check-network-requirements
 |----------|------|--------|
 | **P3-12** | DHCP production client | Renew/rebind FSM, lease DB; replaces **FL_NET_TAP_*** env bootstrap (codec exists) |
 | **P3-13** | Chat room | See **`docs/P3_13_CHAT_SERVER.md`**; **#239** / **#238** |
-| Patch | ARP cache TTL sweep (hosted) | Workqueue **`fl_net_arp_tick`**; bare-metal PIT defers via IRQ bottom-half (**#240**) |
-| ~~Patch~~ | ~~Consolidate loopback egress~~ | Done: **`fl_net_loopback_exchange`** shared by egress and host wire paths |
+| ~~Patch~~ | ~~ARP cache TTL / loopback dedup~~ | Done (**#237**, **#240**): **`fl_net_arp_tick`**, **`fl_net_loopback_exchange`**, PIT BH on **B** |
 | **P3-5** | Drop Linux ICMP fallback | When TAP LPM route always matches **dst** |
-| **P3-7** | Full TCP | **RFC 793** state machine; netdev TX instead of raw **`select`** |
+| **P3-7** | Full TCP FSM | **RFC 793** state machine — **#238** (SYN probe + hosted shim only today) |
+| **P4** | Production **802.3** / virtio NIC | Board/MMIO driver feeding **`fl_net_driver_t`** (beyond lab **`net_baremetal.c`**) |
 
-**GitHub issues:** **#239** (P3-13 sockets/server), **#240** (gap tracker + standards checklist), **#241** (bare-metal **IEEE 802.3** path); **#232**–**#235** (netdev lifecycle / authz / batch registry).
+**GitHub issues (this train):** closes **#237**, **#240**, **#241** (lab bare-metal + checklist); **#232**–**#235** (hosted polish); remains **#238** (UDP demux + TCP FSM), **#239** (P3-13 **`server`**).
