@@ -7,17 +7,26 @@
 #include <string.h>
 
 fl_result_t fl_net_http_parse_status(const char *hdr, size_t hdr_len, int *status_out) {
+    size_t i;
     int code = 0;
 
     if (!hdr || !status_out)
         return FL_RESULT_INVAL;
     if (hdr_len < 12u)
         return FL_RESULT_ERR;
+    if (memcmp(hdr, "HTTP/", 5) != 0)
+        return FL_RESULT_ERR;
 
-    if (strncmp(hdr, "HTTP/", 5) != 0)
+    i = 5;
+    while (i < hdr_len && hdr[i] != ' ')
+        i++;
+    if (i + 4u > hdr_len)
         return FL_RESULT_ERR;
-    if (sscanf(hdr, "HTTP/%*d.%*d %d", &code) != 1)
+    i++;
+    if (hdr[i] < '0' || hdr[i] > '9' || hdr[i + 1] < '0' || hdr[i + 1] > '9' ||
+        hdr[i + 2] < '0' || hdr[i + 2] > '9')
         return FL_RESULT_ERR;
+    code = (hdr[i] - '0') * 100 + (hdr[i + 1] - '0') * 10 + (hdr[i + 2] - '0');
     *status_out = code;
     return FL_RESULT_OK;
 }
@@ -27,9 +36,10 @@ fl_result_t fl_net_http_get(uint32_t peer_be, uint16_t port_host, const char *ho
                             unsigned timeout_ms) {
     char req[512];
     char rx[4096];
-    size_t got = 0;
+    size_t total = 0;
     size_t hdr_end = 0;
     int status = 0;
+    int headers_done = 0;
     fl_net_sock_handle_t h = FL_NET_SOCK_INVALID;
     fl_result_t rc;
 
@@ -53,20 +63,33 @@ fl_result_t fl_net_http_get(uint32_t peer_be, uint16_t port_host, const char *ho
     if (rc != FL_RESULT_OK)
         return rc;
 
-    rc = fl_net_sock_send(h, req, strlen(req), &got);
-    if (rc != FL_RESULT_OK || got != strlen(req)) {
+    rc = fl_net_sock_send(h, req, strlen(req), &total);
+    if (rc != FL_RESULT_OK || total != strlen(req)) {
         fl_net_sock_close(h);
         return FL_RESULT_ERR;
     }
 
-    got = 0;
-    rc = fl_net_sock_recv(h, rx, sizeof(rx) - 1u, &got, timeout_ms);
+    total = 0;
+    while (total < sizeof(rx) - 1u) {
+        size_t chunk = 0;
+
+        rc = fl_net_sock_recv(h, rx + total, sizeof(rx) - 1u - total, &chunk, timeout_ms);
+        if (rc == FL_RESULT_EOF)
+            break;
+        if (rc != FL_RESULT_OK) {
+            fl_net_sock_close(h);
+            return rc;
+        }
+        if (chunk == 0u)
+            break;
+        total += chunk;
+        rx[total] = '\0';
+        if (!headers_done && strstr(rx, "\r\n\r\n") != NULL)
+            headers_done = 1;
+    }
     fl_net_sock_close(h);
-    if (rc != FL_RESULT_OK)
-        return rc;
-    if (got < 12u)
+    if (total < 12u)
         return FL_RESULT_ERR;
-    rx[got] = '\0';
 
     {
         const char *term = strstr(rx, "\r\n\r\n");
@@ -81,13 +104,13 @@ fl_result_t fl_net_http_get(uint32_t peer_be, uint16_t port_host, const char *ho
     if (status < 200 || status > 299)
         return FL_RESULT_ERR;
 
-    if (hdr_end > got) {
+    if (hdr_end > total) {
         *body_len = 0;
         return FL_RESULT_OK;
     }
-    if (got - hdr_end > body_cap)
+    if (total - hdr_end > body_cap)
         return FL_RESULT_ERR;
-    memcpy(body, rx + hdr_end, got - hdr_end);
-    *body_len = got - hdr_end;
+    memcpy(body, rx + hdr_end, total - hdr_end);
+    *body_len = total - hdr_end;
     return FL_RESULT_OK;
 }

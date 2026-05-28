@@ -243,6 +243,10 @@ static fl_result_t wire_udp_resolve_src(uint32_t dst_be, uint32_t *src_be_out) {
         *src_be_out = (uint32_t)FL_NET_IPV4_LOOPBACK_FIRST_OCTET | (1u << 24);
         return FL_RESULT_OK;
     }
+    if (dst_be == 0xFFFFFFFFu) {
+        *src_be_out = 0u;
+        return FL_RESULT_OK;
+    }
     {
         fl_net_route_entry_t route;
 

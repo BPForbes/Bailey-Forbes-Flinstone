@@ -184,15 +184,24 @@ fl_result_t fl_net_udp_echo_exchange(uint32_t dst_be, uint16_t sport_host, uint1
                                      const uint8_t *payload, size_t payload_len, uint8_t *rx,
                                      size_t rx_cap, size_t *rx_len, unsigned timeout_ms) {
     uint8_t l4[FL_NET_UDP_HDR_LEN + FL_NET_UDP_LAB_RX_PAYLOAD_MAX];
-    uint32_t src_be = (uint32_t)FL_NET_IPV4_LOOPBACK_FIRST_OCTET | (1u << 24);
+    uint32_t src_be;
     size_t l4_len;
     fl_net_packet_t tx_pkt;
     fl_result_t rc;
 
     if (!rx || !rx_len)
         return FL_RESULT_INVAL;
-    if (!udp_find_bound(dport_host))
+    if (!udp_find_bound(sport_host))
         return FL_RESULT_NOENT;
+    if (fl_net_ipv4_is_loopback(dst_be)) {
+        src_be = (uint32_t)FL_NET_IPV4_LOOPBACK_FIRST_OCTET | (1u << 24);
+    } else {
+        fl_net_route_entry_t route;
+
+        if (fl_net_route_lookup(dst_be, &route) != FL_RESULT_OK)
+            return FL_RESULT_NOENT;
+        src_be = route.src_ip_be;
+    }
 
     l4_len = fl_net_udp_build_datagram(l4, sizeof(l4), src_be, dst_be, sport_host, dport_host,
                                        payload, payload_len);

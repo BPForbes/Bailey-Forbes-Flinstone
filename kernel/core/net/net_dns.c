@@ -9,6 +9,10 @@
 #include <stdio.h>
 #include <string.h>
 
+#if defined(__linux__)
+#include <sys/random.h>
+#endif
+
 #ifndef FL_NET_DNS_NS_MAX
 #define FL_NET_DNS_NS_MAX 3u
 #endif
@@ -67,13 +71,25 @@ static unsigned dns_read_nameservers(uint32_t *ns_be, unsigned ns_cap) {
 }
 
 static uint16_t dns_next_txid(void) {
-    static uint16_t s_txid = 0x4f4cu;
-    s_txid = (uint16_t)(s_txid + 0x1317u);
-    return s_txid;
+    uint16_t v = 0;
+#if defined(__linux__)
+    if (getrandom(&v, sizeof(v), 0) == (ssize_t)sizeof(v))
+        return v;
+#endif
+    {
+        static uint16_t s_fallback = 0x4f4cu;
+        s_fallback = (uint16_t)(s_fallback ^ (uint16_t)(s_fallback << 7) ^
+                                (uint16_t)(s_fallback >> 9) ^ 0x1317u);
+        return s_fallback;
+    }
+}
+
+static uint16_t dns_query_sport(uint16_t txid, unsigned attempt) {
+    return (uint16_t)(40000u + ((txid + (uint16_t)(attempt * 17u)) & 0x0FFFu));
 }
 
 static fl_result_t dns_query_a_once(const char *host, uint32_t ns_be, uint16_t txid,
-                                    uint32_t *out_addr_be) {
+                                    uint16_t sport_host, uint32_t *out_addr_be) {
     uint8_t query[256];
     uint8_t answer[512];
     size_t qlen;
@@ -108,7 +124,7 @@ static fl_result_t dns_query_a_once(const char *host, uint32_t ns_be, uint16_t t
         udp_rc = fl_net_packet_bind_l4(&query_pkt, query, sizeof(query), 0u, qlen);
         if (udp_rc != FL_RESULT_OK)
             return udp_rc;
-        udp_rc = fl_net_wire_send_udp_pkt(ns_be, 40053, 53, &query_pkt, &answer_pkt, answer,
+        udp_rc = fl_net_wire_send_udp_pkt(ns_be, sport_host, 53, &query_pkt, &answer_pkt, answer,
                                           sizeof(answer), &alen, 4000u);
         if (udp_rc != FL_RESULT_OK)
             return udp_rc;
@@ -185,7 +201,8 @@ static fl_result_t dns_query_a(const char *host, uint32_t *out_addr_be) {
     for (unsigned n = 0; n < ns_count; n++) {
         for (unsigned attempt = 0; attempt < FL_NET_DNS_QUERY_RETRIES; attempt++) {
             uint16_t txid = dns_next_txid();
-            fl_result_t rc = dns_query_a_once(host, ns_list[n], txid, out_addr_be);
+            uint16_t sport = dns_query_sport(txid, attempt);
+            fl_result_t rc = dns_query_a_once(host, ns_list[n], txid, sport, out_addr_be);
 
             if (rc == FL_RESULT_OK)
                 return FL_RESULT_OK;

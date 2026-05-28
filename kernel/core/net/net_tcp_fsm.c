@@ -431,6 +431,19 @@ fl_result_t fl_net_tcp_loopback_input(uint32_t src_be, uint32_t dst_be, const ui
             return FL_RESULT_OK;
         }
 
+        for (unsigned i = 0; i < FL_NET_TCP_FSM_CONN_MAX; i++) {
+            fl_net_tcp_fsm_conn_t *existing = &s_conn[i];
+
+            if (existing->state != FL_NET_TCP_STATE_SYN_RECV)
+                continue;
+            if (existing->local_ip_be != dst_be || existing->remote_ip_be != src_be ||
+                existing->local_port != dport || existing->remote_port != sport)
+                continue;
+            c = existing;
+            c->rcv_nxt = seq + 1u;
+            goto syn_reply;
+        }
+
         c = conn_alloc();
         if (!c)
             return FL_RESULT_ERR;
@@ -443,6 +456,7 @@ fl_result_t fl_net_tcp_loopback_input(uint32_t src_be, uint32_t dst_be, const ui
         c->iss = s_isn_base + 0x8000u + (uint32_t)(c - s_conn);
         c->rcv_nxt = seq + 1u;
         c->snd_nxt = c->iss + 1u;
+    syn_reply:
 
         *reply_len = tcp_build_segment(reply, reply_cap, dport, sport, c->iss, c->rcv_nxt,
                                        (uint8_t)(FL_NET_TCP_FLAG_SYN | FL_NET_TCP_FLAG_ACK), NULL,
@@ -458,6 +472,8 @@ fl_result_t fl_net_tcp_loopback_input(uint32_t src_be, uint32_t dst_be, const ui
             return FL_RESULT_TIMEDOUT;
 
         if ((flags & FL_NET_TCP_FLAG_ACK) && c->state == FL_NET_TCP_STATE_SYN_RECV) {
+            if (ack != c->snd_nxt || seq != c->rcv_nxt)
+                return FL_RESULT_ERR;
             c->state = FL_NET_TCP_STATE_ESTABLISHED;
             c->accept_ready = 1u;
             return FL_RESULT_OK;

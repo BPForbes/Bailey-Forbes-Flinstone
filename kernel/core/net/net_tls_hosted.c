@@ -36,8 +36,15 @@ static SSL_CTX *tls_client_ctx(void) {
         const SSL_METHOD *method = TLS_client_method();
 
         s_tls_client_ctx = SSL_CTX_new(method);
-        if (s_tls_client_ctx)
+        if (s_tls_client_ctx) {
             (void)SSL_CTX_set_min_proto_version(s_tls_client_ctx, TLS1_2_VERSION);
+            if (SSL_CTX_set_default_verify_paths(s_tls_client_ctx) != 1) {
+                SSL_CTX_free(s_tls_client_ctx);
+                s_tls_client_ctx = NULL;
+            } else {
+                SSL_CTX_set_verify(s_tls_client_ctx, SSL_VERIFY_PEER, NULL);
+            }
+        }
     }
     return s_tls_client_ctx;
 }
@@ -63,12 +70,16 @@ fl_result_t fl_net_tls_hosted_client_connect(int tcp_fd, const char *sni_host,
         return FL_RESULT_ERR;
     }
     if (sni_host && sni_host[0]) {
-        if (SSL_set_tlsext_host_name(ssl, sni_host) != 1) {
+        if (SSL_set_tlsext_host_name(ssl, sni_host) != 1 || SSL_set1_host(ssl, sni_host) != 1) {
             SSL_free(ssl);
             return FL_RESULT_ERR;
         }
     }
     if (SSL_connect(ssl) != 1) {
+        SSL_free(ssl);
+        return FL_RESULT_ERR;
+    }
+    if (SSL_get_verify_result(ssl) != X509_V_OK) {
         SSL_free(ssl);
         return FL_RESULT_ERR;
     }
@@ -84,10 +95,18 @@ fl_result_t fl_net_tls_hosted_read(fl_net_tls_session_t session, void *buf, size
     if (!ssl || !buf || !got || cap == 0u)
         return FL_RESULT_INVAL;
     n = SSL_read(ssl, buf, (int)cap);
-    if (n <= 0)
-        return FL_RESULT_ERR;
-    *got = (size_t)n;
-    return FL_RESULT_OK;
+    if (n > 0) {
+        *got = (size_t)n;
+        return FL_RESULT_OK;
+    }
+    if (n <= 0) {
+        int err = SSL_get_error(ssl, n);
+        if (err == SSL_ERROR_ZERO_RETURN) {
+            *got = 0;
+            return FL_RESULT_EOF;
+        }
+    }
+    return FL_RESULT_ERR;
 }
 
 fl_result_t fl_net_tls_hosted_write(fl_net_tls_session_t session, const void *buf, size_t len,

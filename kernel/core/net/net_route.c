@@ -69,8 +69,9 @@ fl_result_t fl_net_route_add(uint32_t addr_be, uint8_t prefix_len, uint32_t gw_b
                              fl_net_driver_t *drv, uint32_t src_ip_be, const uint8_t src_mac[6]) {
     fl_net_route_entry_t *e;
 
-    /* #267: no 0.0.0.0/0 default route in the in-tree table until P3-12 policy lands. */
-    if (addr_be == 0u && prefix_len == 0u)
+    /* #267: no 0.0.0.0/0 default route until P3-12; reject other /0 catch-alls (prefix_match
+     * treats prefix_len==0 as match-all regardless of addr_be). */
+    if (prefix_len == 0u)
         return FL_RESULT_INVAL;
     if (!drv || prefix_len > FL_NET_IPV4_MAX_PREFIX_LEN)
         return FL_RESULT_INVAL;

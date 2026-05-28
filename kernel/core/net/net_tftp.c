@@ -45,6 +45,25 @@ size_t fl_net_tftp_build_rrq(uint8_t *buf, size_t cap, const char *filename, con
     return total;
 }
 
+static fl_result_t tftp_xmit_ack(uint32_t server_be, uint16_t sport, uint16_t server_dport,
+                                 uint32_t src_be, uint16_t block, uint8_t *tx_l4,
+                                 uint8_t *rx_l4, size_t rx_cap, size_t *rx_len,
+                                 fl_net_packet_t *rx_pkt, unsigned timeout_ms) {
+    fl_net_packet_t ack_pkt;
+    size_t ack_l4 = 4u;
+    tftp_write_be16(tx_l4 + FL_NET_UDP_HDR_LEN, TFTP_OP_ACK);
+    tftp_write_be16(tx_l4 + FL_NET_UDP_HDR_LEN + 2, block);
+    if (fl_net_udp_build_datagram(tx_l4, FL_NET_UDP_HDR_LEN + 8, src_be, server_be, sport,
+                                  server_dport, tx_l4 + FL_NET_UDP_HDR_LEN, ack_l4) == 0)
+        return FL_RESULT_ERR;
+    if (fl_net_packet_bind_l4(&ack_pkt, tx_l4, FL_NET_UDP_HDR_LEN + 8, 0u,
+                              FL_NET_UDP_HDR_LEN + ack_l4) != FL_RESULT_OK)
+        return FL_RESULT_ERR;
+    *rx_len = 0;
+    return fl_net_wire_send_udp_pkt(server_be, sport, server_dport, &ack_pkt, rx_pkt, rx_l4,
+                                    rx_cap, rx_len, timeout_ms);
+}
+
 fl_result_t fl_net_tftp_read_file(uint32_t server_be, uint16_t port_host, const char *filename,
                                   uint8_t *buf, size_t cap, size_t *out_len,
                                   unsigned timeout_ms) {
@@ -57,6 +76,7 @@ fl_result_t fl_net_tftp_read_file(uint32_t server_be, uint16_t port_host, const 
     size_t total = 0;
     uint16_t block = 1;
     uint16_t sport = (uint16_t)(FL_NET_UDP_EPHEMERAL_PORT_MIN + 77u);
+    uint16_t server_dport = port_host;
     fl_net_packet_t req_pkt;
     fl_net_packet_t rx_pkt;
     fl_result_t rc;
@@ -87,6 +107,7 @@ fl_result_t fl_net_tftp_read_file(uint32_t server_be, uint16_t port_host, const 
 
         if (fl_net_udp_parse(rx_l4, rx_len, server_be, src_be, 0, &parsed) != FL_RESULT_OK)
             return FL_RESULT_ERR;
+        server_dport = parsed.sport_host;
         tftp = parsed.payload;
         tftp_len = parsed.payload_len;
         if (tftp_len < 4u)
@@ -111,28 +132,19 @@ fl_result_t fl_net_tftp_read_file(uint32_t server_be, uint16_t port_host, const 
         }
 
         if (tftp_len - 4u < FL_NET_TFTP_BLOCK_SIZE) {
+            rc = tftp_xmit_ack(server_be, sport, server_dport, src_be, blk, tx_l4, rx_l4,
+                               sizeof(rx_l4), &rx_len, &rx_pkt, timeout_ms);
+            if (rc != FL_RESULT_OK)
+                return rc;
             *out_len = total;
             return FL_RESULT_OK;
         }
 
-        block++;
-        tftp_write_be16(tx_l4 + FL_NET_UDP_HDR_LEN, TFTP_OP_ACK);
-        tftp_write_be16(tx_l4 + FL_NET_UDP_HDR_LEN + 2, blk);
-        {
-            fl_net_packet_t ack_pkt;
-            size_t ack_l4 = 4u;
+        rc = tftp_xmit_ack(server_be, sport, server_dport, src_be, blk, tx_l4, rx_l4,
+                           sizeof(rx_l4), &rx_len, &rx_pkt, timeout_ms);
+        if (rc != FL_RESULT_OK)
+            return rc;
 
-            if (fl_net_udp_build_datagram(tx_l4, sizeof(tx_l4), src_be, server_be, sport,
-                                          port_host, tx_l4 + FL_NET_UDP_HDR_LEN, ack_l4) == 0)
-                return FL_RESULT_ERR;
-            if (fl_net_packet_bind_l4(&ack_pkt, tx_l4, sizeof(tx_l4), 0u,
-                                      FL_NET_UDP_HDR_LEN + ack_l4) != FL_RESULT_OK)
-                return FL_RESULT_ERR;
-            rx_len = 0;
-            rc = fl_net_wire_send_udp_pkt(server_be, sport, port_host, &ack_pkt, &rx_pkt, rx_l4,
-                                          sizeof(rx_l4), &rx_len, timeout_ms);
-            if (rc != FL_RESULT_OK)
-                return rc;
-        }
+        block++;
     }
 }
