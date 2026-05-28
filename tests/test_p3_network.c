@@ -878,12 +878,24 @@ static int test_net_dhcp_frame_codec(void) {
 
 static int test_net_http_parse_status(void) {
     const char *hdr = "HTTP/1.1 200 OK\r\n";
+    const char *full =
+        "HTTP/1.1 200 OK\r\n"
+        "Content-Length: 42\r\n"
+        "Transfer-Encoding: chunked\r\n"
+        "\r\n";
     int code = 0;
+    size_t clen = 0;
 
     ASSERT(fl_net_http_parse_status(hdr, strlen(hdr), &code) == FL_RESULT_OK);
     ASSERT(code == 200);
     ASSERT(fl_net_http_parse_status("HTTP/1.0 404 Not Found\r\n", 22, &code) == FL_RESULT_OK);
     ASSERT(code == 404);
+    ASSERT(fl_net_http_parse_status(hdr, 11, &code) == FL_RESULT_ERR);
+
+    ASSERT(fl_net_http_parse_content_length(full, strlen(full), &clen) == FL_RESULT_OK);
+    ASSERT(clen == 42u);
+    ASSERT(fl_net_http_transfer_encoding_is_chunked(full, strlen(full)) != 0);
+    ASSERT(fl_net_http_parse_content_length(hdr, strlen(hdr), &clen) == FL_RESULT_NOENT);
     return 0;
 }
 
