@@ -24,7 +24,10 @@ ARM64_LINUX_HOST := $(and $(filter Linux,$(UNAME_S)),$(filter aarch64 arm64,$(UN
 CC = gcc
 AS = as
 CFLAGS = -Wall -Wextra -pthread -I. -Icontracts/foundations -Icontracts/runtime -Icontracts/identity -Icontracts/networking -Icontracts/drivers -Icontracts/storage -Icontracts/observability -Icontracts/operations -Icontracts/virtualization -Icontracts/hardening -Ikernel/include -Ikernel/core/vfs -Ikernel/core/mm -Ikernel/core/memory -Ikernel/core/time -Ikernel/core/net -Ikernel/core/identity -Ikernel/core/sched -Ikernel/core/sys -Iuserland/shell -Iuserland/command -Ikernel/arch/x86_64 -Ikernel/arch/aarch64
-LDFLAGS = -Wl,-z,noexecstack -lsqlite3 -lstdc++ -lcrypto
+OPENSSL_SSL_LIBS = -lssl
+OPENSSL_CRYPTO_LIBS = -lcrypto
+OPENSSL_TLS_LIBS = $(OPENSSL_SSL_LIBS) $(OPENSSL_CRYPTO_LIBS)
+LDFLAGS = -Wl,-z,noexecstack -lsqlite3 -lstdc++ $(OPENSSL_TLS_LIBS)
 # Cross ARM on x86: prefer deps/install-aarch64 (./deps/fetch-sqlite-aarch64.sh); optional system libsqlite3-dev:arm64.
 # OpenSSL for password_hash.cpp: libssl-dev:arm64 (headers under /usr/include/aarch64-linux-gnu).
 ifeq ($(ARCH),arm)
@@ -33,7 +36,9 @@ SQLITE_ARM_PREFIX = deps/install-aarch64
 SQLITE_ARM_LIB = $(SQLITE_ARM_PREFIX)/lib/libsqlite3.a
 OPENSSL_ARM_INC = deps/install-aarch64/include
 OPENSSL_ARM_LIBDIR = deps/install-aarch64/lib
-OPENSSL_ARM_LIB = deps/install-aarch64/lib/libcrypto.a
+OPENSSL_ARM_SSL_LIB = deps/install-aarch64/lib/libssl.a
+OPENSSL_ARM_CRYPTO_LIB = deps/install-aarch64/lib/libcrypto.a
+OPENSSL_ARM_LIB = $(OPENSSL_ARM_SSL_LIB) $(OPENSSL_ARM_CRYPTO_LIB)
 endif
 endif
 CXXFLAGS ?= $(CFLAGS) -std=c++17
@@ -47,9 +52,9 @@ endif
 ifneq ($(SQLITE_ARM_LIB),)
 ifneq (,$(wildcard $(SQLITE_ARM_LIB)))
 CFLAGS += -I$(SQLITE_ARM_PREFIX)/include
-LDFLAGS := -Wl,-z,noexecstack -L$(SQLITE_ARM_PREFIX)/lib $(ARM_CROSS_LIBPATH) -lsqlite3 -lstdc++ -lcrypto -ldl
+LDFLAGS := -Wl,-z,noexecstack -L$(SQLITE_ARM_PREFIX)/lib $(ARM_CROSS_LIBPATH) -lsqlite3 -lstdc++ $(OPENSSL_TLS_LIBS) -ldl
 else ifneq (,$(wildcard /usr/lib/aarch64-linux-gnu/libsqlite3.so))
-LDFLAGS := -Wl,-z,noexecstack -L/usr/lib/aarch64-linux-gnu $(ARM_CROSS_LIBPATH) -lsqlite3 -lstdc++ -lcrypto
+LDFLAGS := -Wl,-z,noexecstack -L/usr/lib/aarch64-linux-gnu $(ARM_CROSS_LIBPATH) -lsqlite3 -lstdc++ $(OPENSSL_TLS_LIBS)
 endif
 endif
 
@@ -385,7 +390,8 @@ FS_JAIL_SUPPORT_OBJS = kernel/core/time/timekeeping.o \
                          kernel/core/identity/user_db.o kernel/core/identity/elevation.o \
                          kernel/core/identity/path_property.o kernel/core/identity/session.o \
                          userland/identity/password_hash.o $(FL_STACK_ASM_OBJ)
-FS_JAIL_TEST_LIBS = -lsqlite3 -lstdc++ -lcrypto -pthread
+FS_JAIL_TEST_LIBS = -lsqlite3 -lstdc++ $(OPENSSL_CRYPTO_LIBS) -pthread
+TEST_TLS_LIBS = -lsqlite3 -lstdc++ $(OPENSSL_TLS_LIBS) -pthread
 TEST_ASMOBJS = $(MEM_ASM_OBJ) $(FL_STACK_ASM_OBJ) $(PORT_IO_OBJ) $(DISK_HOST_ASM_OBJ) \
                $(HISTORY_ASM_OBJ) $(NET_ASM_OBJ)
 TEST_TARGET = BPForbes_Flinstone_Tests
@@ -401,7 +407,7 @@ endif
 
 $(TEST_TARGET): $(VERSION_DEF) $(TEST_OBJS) $(TEST_ASMOBJS) $(TEST_EXTRA_LINK_OBJS)
 	$(CXX) $(CXXFLAGS) -DUNIT_TEST -o $(TEST_TARGET) $(TEST_OBJS) $(TEST_ASMOBJS) $(TEST_EXTRA_LINK_OBJS) -Wl,-z,noexecstack \
-		$(TEST_LDFLAGS) $(FS_JAIL_TEST_LIBS) -lcunit
+		$(TEST_LDFLAGS) $(TEST_TLS_LIBS) -lcunit
 
 $(filter userland/shell/%.o userland/command/%.o,$(TEST_OBJS)): $(VERSION_DEF)
 BPForbes_Flinstone_Tests.o: $(VERSION_DEF)
@@ -513,7 +519,7 @@ TEST_INVARIANTS_CMD_OBJS = userland/command/cmd_batch_audit_tokens.o userland/co
 TEST_INVARIANTS_SESSION_OBJS = kernel/core/time/timekeeping.o kernel/core/mm/mem_domain.o \
 	kernel/core/identity/user_db.o kernel/core/identity/elevation.o kernel/core/identity/session.o \
 	userland/identity/password_hash.o $(FL_STACK_ASM_OBJ)
-TEST_INVARIANTS_LIBS = -lsqlite3 -lstdc++ -lcrypto -pthread
+TEST_INVARIANTS_LIBS = -lsqlite3 -lstdc++ $(OPENSSL_CRYPTO_LIBS) -pthread
 test_invariants: test_batch_argv_issue220 userland/shell/common.o userland/shell/authz_subsystem.o $(UTIL_SHELL_LINK_OBJS) $(TEST_INVARIANTS_CMD_OBJS) $(TEST_INVARIANTS_SESSION_OBJS) $(MEM_ASM_OBJ) $(HISTORY_ASM_OBJ) $(UTIL_HISTORY_HOST_OBJS)
 	$(CC) $(CFLAGS) $(TEST_SANITIZE) -c -o tests/test_invariants.o tests/test_invariants.c
 	$(CXX) $(CXXFLAGS) $(TEST_SANITIZE) -o tests/test_invariants tests/test_invariants.o \
@@ -594,14 +600,14 @@ test_p0_p2_wiring: kernel/core/memory/fl_stack.o kernel/core/memory/exec_context
 	  kernel/core/memory/fl_stack.o kernel/core/memory/exec_context.o kernel/core/time/timekeeping.o \
 	  kernel/core/identity/user_db.o kernel/core/identity/session.o kernel/core/identity/elevation.o \
 	  kernel/core/identity/path_property.o kernel/core/mm/mem_domain.o kernel/core/mm/pmm.o \
-	  userland/identity/password_hash.o userland/shell/authz_subsystem.o $(MEM_ASM_OBJ) $(FL_STACK_ASM_OBJ) -lsqlite3 -lstdc++ -lcrypto -pthread -Wl,-z,noexecstack
+	  userland/identity/password_hash.o userland/shell/authz_subsystem.o $(MEM_ASM_OBJ) $(FL_STACK_ASM_OBJ) -lsqlite3 -lstdc++ $(OPENSSL_CRYPTO_LIBS) -pthread -Wl,-z,noexecstack
 	./tests/test_p0_p2_wiring
 
 .PHONY: test_p3_network
 test_p3_network: $(NET_ASM_OBJ) $(MEM_ASM_OBJ) priority_queue.o kernel/core/time/timekeeping.o kernel/core/sys/ipc.o
 	$(CC) $(CFLAGS) $(TEST_SANITIZE) -o tests/test_p3_network tests/test_p3_network.c \
 	  $(NET_CORE_SRCS) kernel/core/sched/workqueue.c kernel/core/sys/ipc.o kernel/core/time/timekeeping.o priority_queue.o $(MEM_ASM_OBJ) $(NET_ASM_OBJ) \
-	  -Wl,-z,noexecstack
+	  $(OPENSSL_TLS_LIBS) -Wl,-z,noexecstack
 	./tests/test_p3_network
 
 check-network-requirements:
