@@ -64,7 +64,7 @@ fl_result_t fl_net_task_backend_recv_packet(unsigned src_slot, uint8_t *out, siz
 
 /**
  * Socket egress: build UDP from **endpoint** + payload, transmit via routed netdev + ARP.
- * On **FL_RESULT_NOENT**, falls back to hosted **fl_net_wire_send_udp**.
+ * On **FL_RESULT_NOENT**, retries **fl_net_udp_xmit_pkt** (egress xmit-only, no reply wait).
  */
 fl_result_t fl_net_task_backend_socket_send(const fl_net_socket_endpoint_t *endpoint,
                                             const uint8_t *payload, size_t payload_len);

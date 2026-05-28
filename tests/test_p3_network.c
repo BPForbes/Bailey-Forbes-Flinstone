@@ -226,6 +226,28 @@ static int test_icmp_unreachable_no_linux_fallback(void) {
     return 0;
 }
 
+static int test_udp_unreachable_no_linux_fallback(void) {
+    uint8_t payload[] = "dns-probe";
+    uint8_t rx[64];
+    size_t rx_len = 0;
+    uint32_t dst_be;
+    struct in_addr a;
+    fl_net_packet_t tx_pkt;
+    fl_net_packet_t rx_pkt;
+    fl_result_t rc;
+
+    ASSERT(inet_aton("203.0.113.99", &a) != 0);
+    dst_be = a.s_addr;
+
+    ASSERT(fl_net_packet_bind_l4(&tx_pkt, payload, sizeof(payload) - 1u, 0u,
+                               sizeof(payload) - 1u) == FL_RESULT_OK);
+
+    rc = fl_net_wire_send_udp_pkt(dst_be, 40053u, 53u, &tx_pkt, &rx_pkt, rx, sizeof(rx), &rx_len,
+                                  500u);
+    ASSERT(rc == FL_RESULT_NOENT);
+    return 0;
+}
+
 
 static int test_udp_echo_loopback(void) {
     const char payload[] = "udp-echo-roundtrip";
@@ -999,7 +1021,12 @@ int main(void) {
         return 1;
     puts("ok");
 
-    printf("test_udp_echo_loopback... ");
+    printf("test_udp_unreachable_no_linux_fallback... ");
+    if (test_udp_unreachable_no_linux_fallback() != 0)
+        return 1;
+    printf("ok\n");
+
+        printf("test_udp_echo_loopback... ");
     if (test_udp_echo_loopback() != 0)
         return 1;
     puts("ok");

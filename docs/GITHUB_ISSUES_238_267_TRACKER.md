@@ -39,12 +39,13 @@ Primary networking map: [`docs/P3_NETWORKING.md`](P3_NETWORKING.md).
 
 - **#262** — Done: Linux ICMP fallback removed; loopback via `fl_net_wire_egress_l4`.
 - **#238** — P3-6/P3-7 on branch: `fl_net_udp_parse`/xmit/echo; `net_tcp_fsm.c` loopback RFC 793 subset (listen, connect, send/recv).
+- **UDP egress** — `fl_net_wire_send_udp_pkt` builds in-tree UDP and uses `fl_net_wire_egress_l4_pkt` (no Linux `SOCK_DGRAM`); unblocks **#251** / **#247** on routed TAP/loopback paths.
 
 ## Suggested work order
 
 1. ~~**#262**~~ — Small, localized egress/ICMP cleanup (unblocks honest P3-5 status).
-2. **#238** — UDP demux + in-tree TCP FSM (blocks many L7 items; **#239** stays out of this PR).
-3. **#247**, **#251**, **#252** — Production DHCP, DNS, TLS (order by dependency on #238).
+2. **#238** — Loopback lab done; production TAP TCP FSM / retransmit remain.
+3. **#247**, **#251**, **#252** — Production DHCP, DNS, TLS (egress UDP path ready for routed builds).
 4. **#267** — IPv4 routing/PMTU/offload policy.
 5. **#240** — PRE 4.2.0 standards checklist as rows flip to ✅.
 6. **#257–#260** — Deferred promotion trackers and doc cross-links as code lands.
