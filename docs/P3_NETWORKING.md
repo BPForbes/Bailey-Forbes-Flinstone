@@ -282,9 +282,9 @@ make check-network-requirements
 |----------|------|--------|
 | **P3-12** | DHCP production client | Renew/rebind FSM, lease DB; replaces **FL_NET_TAP_*** env bootstrap (codec exists) |
 | **P3-13** | Chat room | See **`docs/P3_13_CHAT_SERVER.md`**; **#239** / **#238** |
-| ~~Patch~~ | ~~ARP cache TTL / loopback dedup~~ | Done (**#237**, **#240**): **`fl_net_arp_tick`**, **`fl_net_loopback_exchange`**, PIT BH on **B** |
-| **P3-5** | Drop Linux ICMP fallback | When TAP LPM route always matches **dst** |
+| ~~Patch~~ | ~~ARP cache TTL / loopback dedup~~ | Done (**#237**, **#240**): **`fl_net_arp_tick`**, loopback via **`fl_net_wire_egress_l4`**, PIT BH on **B** |
+| ~~Patch~~ | ~~Drop Linux ICMP fallback / consolidate loopback egress~~ | Done (**#262**): **`fl_net_wire_send_icmp_pkt`** uses egress only; no **`SOCK_DGRAM`/`IPPROTO_ICMP`** fallback |
 | **P3-7** | Full TCP FSM | **RFC 793** state machine — **#238** (SYN probe + hosted shim only today) |
 | **P4** | Production **802.3** / virtio NIC | Board/MMIO driver feeding **`fl_net_driver_t`** (beyond lab **`net_baremetal.c`**) |
 
-**GitHub issues (this train):** closes **#237**, **#240**, **#241** (lab bare-metal + checklist); **#232**–**#235** (hosted polish); remains **#238** (UDP demux + TCP FSM), **#239** (P3-13 **`server`**). Umbrella for **#238–#267** (excl. **#239**): **[`docs/GITHUB_ISSUES_238_267_TRACKER.md`](GITHUB_ISSUES_238_267_TRACKER.md)**.
+**GitHub issues (this train):** closes **#237**, **#240**, **#241** (lab bare-metal + checklist); **#232**–**#235** (hosted polish); remains **#238** (UDP demux + TCP FSM), **#239** (P3-13 **`server`**).

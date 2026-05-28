@@ -15,6 +15,7 @@
 #include "net_packet.h"
 #include "net_ping_host.h"
 #include "net_requirements.h"
+#include "net_wire_host.h"
 #include "net_background.h"
 #include "net_udp.h"
 #include "net_socket.h"
@@ -198,6 +199,29 @@ static int test_resolve_localhost(void) {
     ASSERT(fl_net_resolve_ipv4("localhost", &addr_be, resolved, sizeof(resolved)) ==
            FL_RESULT_OK);
     ASSERT(fl_net_ipv4_is_loopback(addr_be));
+    return 0;
+}
+
+static int test_icmp_unreachable_no_linux_fallback(void) {
+    uint8_t req[FL_NET_ICMPV4_HDR_MIN + 8];
+    uint8_t rx[64];
+    size_t req_len;
+    size_t rx_len = 0;
+    uint32_t dst_be;
+    struct in_addr a;
+    fl_net_packet_t req_pkt;
+    fl_net_packet_t rx_pkt;
+    fl_result_t rc;
+
+    ASSERT(inet_aton("203.0.113.99", &a) != 0);
+    dst_be = a.s_addr;
+
+    req_len = fl_net_icmp_echo_request_build(req, sizeof(req), 0xabcdu, 1u, 8u);
+    ASSERT(req_len > 0);
+    ASSERT(fl_net_packet_bind_l4(&req_pkt, req, sizeof(req), 0u, req_len) == FL_RESULT_OK);
+
+    rc = fl_net_wire_send_icmp_pkt(dst_be, &req_pkt, &rx_pkt, rx, sizeof(rx), &rx_len, 500u, NULL);
+    ASSERT(rc == FL_RESULT_NOENT);
     return 0;
 }
 
@@ -921,6 +945,11 @@ int main(void) {
 
     printf("test_resolve_localhost... ");
     if (test_resolve_localhost() != 0)
+        return 1;
+    puts("ok");
+
+    printf("test_icmp_unreachable_no_linux_fallback... ");
+    if (test_icmp_unreachable_no_linux_fallback() != 0)
         return 1;
     puts("ok");
 
