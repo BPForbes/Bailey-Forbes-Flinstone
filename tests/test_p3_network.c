@@ -21,6 +21,7 @@
 #include "net_socket.h"
 #include "net_dhcp.h"
 #include "net_tcp.h"
+#include "net_tcp_fsm.h"
 #include "net_tls_hosted.h"
 #include "contract_p3_dhcp.h"
 #include "contract_p3_tls_hosted.h"
@@ -222,6 +223,51 @@ static int test_icmp_unreachable_no_linux_fallback(void) {
 
     rc = fl_net_wire_send_icmp_pkt(dst_be, &req_pkt, &rx_pkt, rx, sizeof(rx), &rx_len, 500u, NULL);
     ASSERT(rc == FL_RESULT_NOENT);
+    return 0;
+}
+
+
+static int test_udp_echo_loopback(void) {
+    const char payload[] = "udp-echo-roundtrip";
+    uint8_t rx[64];
+    size_t rx_len = 0;
+    uint32_t loopback = (uint32_t)FL_NET_IPV4_LOOPBACK_FIRST_OCTET | (1u << 24);
+    fl_result_t rc;
+
+    fl_net_udp_demux_reset();
+    ASSERT(fl_net_udp_bind_port(47002u) == FL_RESULT_OK);
+    rc = fl_net_udp_echo_exchange(loopback, 48002u, 47002u, (const uint8_t *)payload,
+                                  sizeof(payload) - 1u, rx, sizeof(rx), &rx_len, 3000u);
+    ASSERT(rc == FL_RESULT_OK);
+    ASSERT(rx_len == sizeof(payload) - 1u);
+    ASSERT(memcmp(rx, payload, rx_len) == 0);
+    return 0;
+}
+
+static int test_tcp_fsm_loopback(void) {
+    unsigned server_id = 0;
+    unsigned client_id = 0;
+    uint32_t loopback = (uint32_t)FL_NET_IPV4_LOOPBACK_FIRST_OCTET | (1u << 24);
+    const char msg[] = "fsm-data";
+    char rx[32];
+    size_t rx_len = 0;
+    fl_result_t rc;
+
+    fl_net_tcp_fsm_reset();
+    fl_net_udp_demux_reset();
+    ASSERT(fl_net_tcp_listen_port(48790u) == FL_RESULT_OK);
+    rc = fl_net_tcp_connect(loopback, 48790u, &client_id);
+    ASSERT(rc == FL_RESULT_OK);
+    rc = fl_net_tcp_accept(48790u, &server_id);
+    ASSERT(rc == FL_RESULT_OK);
+    rc = fl_net_tcp_send(client_id, (const uint8_t *)msg, sizeof(msg) - 1u);
+    ASSERT(rc == FL_RESULT_OK);
+    rc = fl_net_tcp_recv(server_id, (uint8_t *)rx, sizeof(rx), &rx_len);
+    ASSERT(rc == FL_RESULT_OK);
+    ASSERT(rx_len == sizeof(msg) - 1u);
+    ASSERT(memcmp(rx, msg, rx_len) == 0);
+    (void)fl_net_tcp_close(client_id);
+    (void)fl_net_tcp_close(server_id);
     return 0;
 }
 
@@ -950,6 +996,16 @@ int main(void) {
 
     printf("test_icmp_unreachable_no_linux_fallback... ");
     if (test_icmp_unreachable_no_linux_fallback() != 0)
+        return 1;
+    puts("ok");
+
+    printf("test_udp_echo_loopback... ");
+    if (test_udp_echo_loopback() != 0)
+        return 1;
+    puts("ok");
+
+    printf("test_tcp_fsm_loopback... ");
+    if (test_tcp_fsm_loopback() != 0)
         return 1;
     puts("ok");
 

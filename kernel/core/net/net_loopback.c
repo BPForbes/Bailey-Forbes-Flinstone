@@ -7,6 +7,7 @@
 #include "net_checksum.h"
 #include "net_ipv4.h"
 #include "net_tcp.h"
+#include "net_tcp_fsm.h"
 #include "net_packet.h"
 #include "net_udp.h"
 #include "net_wire.h"
@@ -148,51 +149,61 @@ static fl_result_t loopback_process_ipv4(const uint8_t *ip, size_t ip_len, uint8
     } else if (ip[9] == FL_NET_IP_PROTO_TCP) {
         const uint8_t *tcp = ip + hdr_len;
         size_t tcp_len = ip_len - hdr_len;
-        uint8_t tcp_reply[64];
+        uint8_t tcp_reply[FL_NET_TCP_HDR_LEN_MIN + FL_NET_TCP_FSM_RX_CAP];
         size_t tcp_reply_len = 0;
-        uint16_t sport = 0;
-        uint16_t dport = 0;
+        uint32_t src_be;
+        uint32_t dst_be;
+        fl_result_t trc;
 
-        if (tcp_len < 4)
-            return FL_RESULT_ERR;
-#if defined(FL_NET_ASM_AVAILABLE)
-        if (asm_net_tcp_read_ports_be(tcp, tcp_len, &sport, &dport) != 0)
-            return FL_RESULT_ERR;
-#else
-        sport = (uint16_t)(((uint16_t)tcp[0] << 8) | tcp[1]);
-        dport = (uint16_t)(((uint16_t)tcp[2] << 8) | tcp[3]);
-#endif
+        src_be = (uint32_t)ip[12] | ((uint32_t)ip[13] << 8) | ((uint32_t)ip[14] << 16) |
+                 ((uint32_t)ip[15] << 24);
+        dst_be = (uint32_t)ip[16] | ((uint32_t)ip[17] << 8) | ((uint32_t)ip[18] << 16) |
+                 ((uint32_t)ip[19] << 24);
 
-        if (fl_net_loopback_tcp_syn(tcp, tcp_len, sport, dport, tcp_reply, sizeof(tcp_reply),
-                                    &tcp_reply_len) != FL_RESULT_OK)
-            return FL_RESULT_ERR;
+        trc = fl_net_tcp_loopback_input(src_be, dst_be, tcp, tcp_len, tcp_reply, sizeof(tcp_reply),
+                                        &tcp_reply_len);
+        if (trc == FL_RESULT_TIMEDOUT)
+            return FL_RESULT_TIMEDOUT;
+        if (trc != FL_RESULT_OK)
+            return trc;
+        if (tcp_reply_len == 0)
+            return FL_RESULT_TIMEDOUT;
         ip_reply_len = loopback_build_ipv4_reply(ip, ip_len, tcp_reply, tcp_reply_len, ip_reply,
                                                  sizeof(ip_reply));
     } else if (ip[9] == FL_NET_IP_PROTO_UDP) {
         const uint8_t *udp = ip + hdr_len;
         size_t udp_len = ip_len - hdr_len;
-        uint16_t sport = 0;
-        uint16_t dport = 0;
+        fl_net_udp_parsed_t parsed;
         uint32_t src_be;
-        size_t payload_len;
+        uint32_t dst_reply_be;
+        uint8_t udp_reply[FL_NET_UDP_HDR_LEN + FL_NET_UDP_LAB_RX_PAYLOAD_MAX];
+        size_t echo_len;
 
-        if (udp_len < FL_NET_UDP_HDR_LEN)
-            return FL_RESULT_ERR;
-        sport = (uint16_t)(((uint16_t)udp[0] << 8) | udp[1]);
-        dport = (uint16_t)(((uint16_t)udp[2] << 8) | udp[3]);
-        payload_len = udp_len - FL_NET_UDP_HDR_LEN;
         src_be = (uint32_t)ip[12] | ((uint32_t)ip[13] << 8) | ((uint32_t)ip[14] << 16) |
                  ((uint32_t)ip[15] << 24);
+        dst_reply_be = (uint32_t)ip[16] | ((uint32_t)ip[17] << 8) | ((uint32_t)ip[18] << 16) |
+                       ((uint32_t)ip[19] << 24);
+
+        if (fl_net_udp_parse(udp, udp_len, src_be, dst_reply_be, 0, &parsed) != FL_RESULT_OK)
+            return FL_RESULT_ERR;
 
         {
             fl_net_packet_t app_pkt;
 
-            if (fl_net_packet_bind_l4(&app_pkt, (uint8_t *)ip, ip_len,
-                                      hdr_len + FL_NET_UDP_HDR_LEN, payload_len) ==
+            if (fl_net_packet_bind_l4(&app_pkt, (uint8_t *)(uintptr_t)parsed.payload,
+                                      parsed.payload_len, 0u, parsed.payload_len) ==
                 FL_RESULT_OK)
-                (void)fl_net_udp_deliver_inbound_pkt(src_be, sport, dport, &app_pkt);
+                (void)fl_net_udp_deliver_inbound_pkt(src_be, parsed.sport_host,
+                                                     parsed.dport_host, &app_pkt);
         }
-        return FL_RESULT_TIMEDOUT;
+
+        echo_len = fl_net_udp_build_datagram(udp_reply, sizeof(udp_reply), dst_reply_be, src_be,
+                                             parsed.dport_host, parsed.sport_host, parsed.payload,
+                                             parsed.payload_len);
+        if (echo_len == 0)
+            return FL_RESULT_ERR;
+        ip_reply_len = loopback_build_ipv4_reply(ip, ip_len, udp_reply, echo_len, ip_reply,
+                                                 sizeof(ip_reply));
     } else {
         return FL_RESULT_TIMEDOUT;
     }

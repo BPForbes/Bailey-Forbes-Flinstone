@@ -37,7 +37,8 @@ Primary networking map: [`docs/P3_NETWORKING.md`](P3_NETWORKING.md).
 
 ## Progress
 
-- **#262** — Done on this branch: Linux ICMP fallback removed; loopback ICMP/TCP SYN use `fl_net_wire_egress_l4` only.
+- **#262** — Done: Linux ICMP fallback removed; loopback via `fl_net_wire_egress_l4`.
+- **#238** — P3-6/P3-7 on branch: `fl_net_udp_parse`/xmit/echo; `net_tcp_fsm.c` loopback RFC 793 subset (listen, connect, send/recv).
 
 ## Suggested work order
 

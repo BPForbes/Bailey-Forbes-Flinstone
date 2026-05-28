@@ -4,7 +4,7 @@ RELEASE_VERSION=0
 PRERELEASE=1
 DEV_VERSION=7
 DESCRIPTION<<VER_END
-PRE 4.2.0: #262 — drop Linux ICMP socket fallback; loopback ICMP/TCP SYN via fl_net_wire_egress_l4 only (net_wire_host.c). Umbrella for #238–#267 (excl. #239); tracker docs/GITHUB_ISSUES_238_267_TRACKER.md.
+PRE 4.2.0: #238 P3-6 UDP parse/xmit/loopback echo and P3-7 in-tree TCP FSM on loopback (net_tcp_fsm.c); #262 egress-only ICMP. Umbrella #262 — drop Linux ICMP socket fallback; loopback ICMP/TCP SYN via fl_net_wire_egress_l4 only (net_wire_host.c). Umbrella for #238–#267 (excl. #239); tracker docs/GITHUB_ISSUES_238_267_TRACKER.md.
 VER_END
 
 RELEASE_DATE=2026-05-28
