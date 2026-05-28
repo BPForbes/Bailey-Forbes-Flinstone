@@ -137,6 +137,12 @@ fl_result_t fl_net_sock_bind(fl_net_sock_handle_t handle, uint32_t addr_be, uint
 
     if (!s)
         return FL_RESULT_INVAL;
+    /* SO_REUSEADDR keeps demo / test bind from failing when a prior listener
+     * left the port in TIME_WAIT. Best-effort: ignore setsockopt errors. */
+    {
+        int yes = 1;
+        (void)setsockopt(s->fd, SOL_SOCKET, SO_REUSEADDR, &yes, sizeof(yes));
+    }
     sock_sin4(&sa, addr_be, port_host);
     if (bind(s->fd, (struct sockaddr *)&sa, sizeof(sa)) != 0)
         return FL_RESULT_ERR;

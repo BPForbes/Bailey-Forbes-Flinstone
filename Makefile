@@ -149,7 +149,8 @@ NET_CORE_SRCS = kernel/core/net/net_checksum.c kernel/core/net/net_wire.c kernel
                 kernel/core/net/net_wire_host_syscall.c \
                 kernel/core/net/net_dns.c kernel/core/net/net_dhcp.c kernel/core/net/net_tls_hosted.c \
                 kernel/core/net/net_http.c kernel/core/net/net_tftp.c \
-                kernel/core/net/net_ping_host.c kernel/core/net/net_requirements.c
+                kernel/core/net/net_ping_host.c kernel/core/net/net_requirements.c \
+                kernel/core/net/net_server.c kernel/core/net/net_client.c kernel/core/net/server_bg.c
 NET_ASM_OBJ = $(patsubst %.s,%.o,$(patsubst %.asm,%.o,$(filter %/net_asm.s %/net_asm.asm %/net_wire_host_asm.s %/net_wire_host_asm.asm,$(ASMSRCS))))
 CORE_SRCS = kernel/core/vfs/disk.c kernel/core/vfs/fat32_host.c kernel/core/vfs/fat32_host_files.c kernel/core/vfs/path_log.c kernel/core/vfs/cluster.c kernel/core/vfs/fs.c \
             disk_host_io.c \
@@ -606,6 +607,13 @@ test_p3_network: $(NET_ASM_OBJ) $(MEM_ASM_OBJ) priority_queue.o kernel/core/time
 	  $(NET_CORE_SRCS) kernel/core/sched/workqueue.c kernel/core/sys/ipc.o kernel/core/time/timekeeping.o priority_queue.o $(MEM_ASM_OBJ) $(NET_ASM_OBJ) \
 	  $(OPENSSL_LIBS) -Wl,-z,noexecstack
 	./tests/test_p3_network
+
+.PHONY: test_p3_server
+test_p3_server: $(NET_ASM_OBJ) $(MEM_ASM_OBJ) priority_queue.o kernel/core/time/timekeeping.o kernel/core/sys/ipc.o
+	$(CC) $(CFLAGS) $(TEST_SANITIZE) -Iuserland/shell -o tests/test_p3_server tests/test_p3_server.c \
+	  $(NET_CORE_SRCS) kernel/core/sched/workqueue.c kernel/core/sys/ipc.o kernel/core/time/timekeeping.o priority_queue.o $(MEM_ASM_OBJ) $(NET_ASM_OBJ) \
+	  $(OPENSSL_LIBS) -pthread -Wl,-z,noexecstack
+	./tests/test_p3_server
 
 check-network-requirements:
 	@bash scripts/check_network_requirements.sh

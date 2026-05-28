@@ -64,4 +64,5 @@ userland/shell/version_changelog.c
 # Makefile: aggregate checksum of version/entries/**/*.ver for version_def.h freshness
 .version_entries_ver.sum
 tests/test_p3_network
+tests/test_p3_server
 tests/test_workqueue_*

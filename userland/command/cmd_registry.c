@@ -38,6 +38,7 @@ static const cmd_name_ent_t cmd_registry[] = {
     {"rmdir", FL_SCMD_RMDIR},
     {"rmtree", FL_SCMD_RMTREE},
     {"search", FL_SCMD_SEARCH},
+    {"server", FL_SCMD_SERVER},
     {"setdisk", FL_SCMD_SETDISK},
     {"sudo", FL_SCMD_SUDO},
     {"su", FL_SCMD_SU},
