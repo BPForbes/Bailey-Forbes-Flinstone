@@ -9,9 +9,16 @@
 #include <stdio.h>
 #include <string.h>
 
+#ifndef FL_NET_DNS_NS_MAX
+#define FL_NET_DNS_NS_MAX 3u
+#endif
+
+#ifndef FL_NET_DNS_QUERY_RETRIES
+#define FL_NET_DNS_QUERY_RETRIES 2u
+#endif
+
 static int dns_encode_name(const char *host, uint8_t *out, size_t cap) {
     const char *p = host;
-    uint8_t *len_ptr;
     size_t pos = 0;
 
     if (!host || !out || cap < 2)
@@ -22,8 +29,7 @@ static int dns_encode_name(const char *host, uint8_t *out, size_t cap) {
         size_t labellen = dot ? (size_t)(dot - p) : strlen(p);
         if (labellen == 0 || labellen > 63 || pos + 1 + labellen >= cap)
             return -1;
-        len_ptr = out + pos++;
-        *len_ptr = (uint8_t)labellen;
+        out[pos++] = (uint8_t)labellen;
         memcpy(out + pos, p, labellen);
         pos += labellen;
         if (!dot)
@@ -36,39 +42,44 @@ static int dns_encode_name(const char *host, uint8_t *out, size_t cap) {
     return (int)pos;
 }
 
-static int dns_read_nameserver(uint32_t *out_be) {
+static unsigned dns_read_nameservers(uint32_t *ns_be, unsigned ns_cap) {
     FILE *f;
     char line[256];
+    unsigned count = 0;
+
+    if (!ns_be || ns_cap == 0u)
+        return 0;
 
     f = fopen("/etc/resolv.conf", "r");
     if (!f)
         return 0;
 
-    while (fgets(line, sizeof(line), f)) {
+    while (fgets(line, sizeof(line), f) && count < ns_cap) {
         unsigned o[4];
         if (sscanf(line, " nameserver %u.%u.%u.%u", &o[0], &o[1], &o[2], &o[3]) == 4 ||
             sscanf(line, "nameserver %u.%u.%u.%u", &o[0], &o[1], &o[2], &o[3]) == 4) {
-            fclose(f);
-            *out_be = (uint32_t)o[0] | ((uint32_t)o[1] << 8) | ((uint32_t)o[2] << 16) |
-                      ((uint32_t)o[3] << 24);
-            return 1;
+            ns_be[count++] = (uint32_t)o[0] | ((uint32_t)o[1] << 8) | ((uint32_t)o[2] << 16) |
+                             ((uint32_t)o[3] << 24);
         }
     }
     fclose(f);
-    return 0;
+    return count;
 }
 
-static fl_result_t dns_query_a(const char *host, uint32_t *out_addr_be) {
+static uint16_t dns_next_txid(void) {
+    static uint16_t s_txid = 0x4f4cu;
+    s_txid = (uint16_t)(s_txid + 0x1317u);
+    return s_txid;
+}
+
+static fl_result_t dns_query_a_once(const char *host, uint32_t ns_be, uint16_t txid,
+                                    uint32_t *out_addr_be) {
     uint8_t query[256];
     uint8_t answer[512];
     size_t qlen;
     size_t alen;
     int nlen;
-    uint32_t ns_be = 0;
-    uint16_t txid = 0x4f4c;
-
-    if (!dns_read_nameserver(&ns_be))
-        return FL_RESULT_ERR;
+    fl_result_t udp_rc;
 
     memset(query, 0, sizeof(query));
 #if defined(FL_NET_ASM_AVAILABLE)
@@ -93,7 +104,6 @@ static fl_result_t dns_query_a(const char *host, uint32_t *out_addr_be) {
     {
         fl_net_packet_t query_pkt;
         fl_net_packet_t answer_pkt;
-        fl_result_t udp_rc;
 
         udp_rc = fl_net_packet_bind_l4(&query_pkt, query, sizeof(query), 0u, qlen);
         if (udp_rc != FL_RESULT_OK)
@@ -128,7 +138,7 @@ static fl_result_t dns_query_a(const char *host, uint32_t *out_addr_be) {
         }
         if (off + 4 > alen)
             return FL_RESULT_ERR;
-        off += 4; /* QTYPE + QCLASS */
+        off += 4;
 
         if (off >= alen)
             return FL_RESULT_ERR;
@@ -152,7 +162,7 @@ static fl_result_t dns_query_a(const char *host, uint32_t *out_addr_be) {
         off += 2;
         rclass = (uint16_t)(((uint16_t)answer[off] << 8) | answer[off + 1]);
         off += 2;
-        off += 4; /* TTL */
+        off += 4;
         rdlen = (uint16_t)(((uint16_t)answer[off] << 8) | answer[off + 1]);
         off += 2;
         if (rtype != 1u || rclass != 1u || rdlen != 4u || off + 4 > alen)
@@ -161,6 +171,30 @@ static fl_result_t dns_query_a(const char *host, uint32_t *out_addr_be) {
                        ((uint32_t)answer[off + 2] << 16) | ((uint32_t)answer[off + 3] << 24);
         return FL_RESULT_OK;
     }
+}
+
+static fl_result_t dns_query_a(const char *host, uint32_t *out_addr_be) {
+    uint32_t ns_list[FL_NET_DNS_NS_MAX];
+    unsigned ns_count;
+    fl_result_t last = FL_RESULT_ERR;
+
+    ns_count = dns_read_nameservers(ns_list, FL_NET_DNS_NS_MAX);
+    if (ns_count == 0u)
+        return FL_RESULT_ERR;
+
+    for (unsigned n = 0; n < ns_count; n++) {
+        for (unsigned attempt = 0; attempt < FL_NET_DNS_QUERY_RETRIES; attempt++) {
+            uint16_t txid = dns_next_txid();
+            fl_result_t rc = dns_query_a_once(host, ns_list[n], txid, out_addr_be);
+
+            if (rc == FL_RESULT_OK)
+                return FL_RESULT_OK;
+            last = rc;
+            if (rc == FL_RESULT_INVAL)
+                return rc;
+        }
+    }
+    return last;
 }
 
 fl_result_t fl_net_resolve_ipv4(const char *host, uint32_t *out_addr_be, char *resolved_ip,

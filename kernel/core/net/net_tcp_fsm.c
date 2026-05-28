@@ -6,6 +6,7 @@
 #include "net_packet.h"
 #include "fl/net_asm.h"
 #include "net_ipv4.h"
+#include "net_route.h"
 #include "net_wire_egress.h"
 
 #include <string.h>
@@ -143,6 +144,55 @@ static fl_net_tcp_fsm_conn_t *conn_find_quad(uint32_t local_ip, uint16_t local_p
     return NULL;
 }
 
+
+static void conn_release(fl_net_tcp_fsm_conn_t *c) {
+    if (c)
+        memset(c, 0, sizeof(*c));
+}
+
+static int tcp_local_port_in_use(uint16_t sport_host) {
+    for (unsigned i = 0; i < FL_NET_TCP_FSM_CONN_MAX; i++) {
+        if (s_conn[i].in_use && s_conn[i].local_port == sport_host)
+            return 1;
+    }
+    return 0;
+}
+
+static uint16_t tcp_ephemeral_port_pick(void) {
+    static uint32_t s_next = FL_NET_UDP_EPHEMERAL_PORT_MIN;
+
+    for (unsigned t = 0; t < 4096u; t++) {
+        uint16_t p = (uint16_t)(s_next & 0xffffu);
+
+        s_next++;
+        if (p < (uint16_t)FL_NET_UDP_EPHEMERAL_PORT_MIN ||
+            p > (uint16_t)FL_NET_UDP_EPHEMERAL_PORT_MAX) {
+            s_next = FL_NET_UDP_EPHEMERAL_PORT_MIN;
+            p = (uint16_t)FL_NET_UDP_EPHEMERAL_PORT_MIN;
+        }
+        if (!tcp_local_port_in_use(p))
+            return p;
+    }
+    return 0;
+}
+
+static fl_result_t tcp_resolve_src(uint32_t dst_be, uint32_t *src_be_out) {
+    if (!src_be_out)
+        return FL_RESULT_INVAL;
+    if (fl_net_ipv4_is_loopback(dst_be)) {
+        *src_be_out = (uint32_t)FL_NET_IPV4_LOOPBACK_FIRST_OCTET | (1u << 24);
+        return FL_RESULT_OK;
+    }
+    {
+        fl_net_route_entry_t route;
+
+        if (fl_net_route_lookup(dst_be, &route) != FL_RESULT_OK)
+            return FL_RESULT_NOENT;
+        *src_be_out = route.src_ip_be;
+    }
+    return FL_RESULT_OK;
+}
+
 void fl_net_tcp_fsm_reset(void) {
     memset(s_conn, 0, sizeof(s_conn));
     memset(s_listen, 0, sizeof(s_listen));
@@ -168,15 +218,23 @@ fl_result_t fl_net_tcp_connect(uint32_t dst_be, uint16_t dport_host, unsigned *c
     uint8_t syn[FL_NET_TCP_HDR_LEN_MIN];
     uint8_t rx[FL_NET_TCP_HDR_LEN_MIN + 16];
     size_t rx_len = 0;
-    uint32_t src_be = (uint32_t)FL_NET_IPV4_LOOPBACK_FIRST_OCTET | (1u << 24);
-    uint16_t sport = (uint16_t)(FL_NET_UDP_EPHEMERAL_PORT_MIN + 42u);
+    uint32_t src_be;
+    uint16_t sport;
     fl_net_tcp_fsm_conn_t *c;
     fl_net_packet_t pkt;
     fl_result_t rc;
     unsigned conn_id;
 
-    if (!conn_id_out || !fl_net_ipv4_is_loopback(dst_be))
+    if (!conn_id_out || dport_host == 0u)
         return FL_RESULT_INVAL;
+
+    rc = tcp_resolve_src(dst_be, &src_be);
+    if (rc != FL_RESULT_OK)
+        return rc;
+
+    sport = tcp_ephemeral_port_pick();
+    if (sport == 0u)
+        return FL_RESULT_BUSY;
 
     c = conn_alloc();
     if (!c)
@@ -192,49 +250,71 @@ fl_result_t fl_net_tcp_connect(uint32_t dst_be, uint16_t dport_host, unsigned *c
     c->snd_nxt = c->iss + 1u;
     c->rcv_nxt = 0;
 
-    if (tcp_build_segment(syn, sizeof(syn), sport, dport_host, c->iss, 0, FL_NET_TCP_FLAG_SYN,
-                          NULL, 0, src_be, dst_be) != FL_NET_TCP_HDR_LEN_MIN)
+    if (tcp_build_segment(syn, sizeof(syn), sport, dport_host, c->iss, 0, FL_NET_TCP_FLAG_SYN, NULL,
+                          0, src_be, dst_be) != FL_NET_TCP_HDR_LEN_MIN) {
+        conn_release(c);
         return FL_RESULT_ERR;
+    }
 
     rc = fl_net_packet_bind_l4(&pkt, syn, sizeof(syn), 0u, FL_NET_TCP_HDR_LEN_MIN);
-    if (rc != FL_RESULT_OK)
+    if (rc != FL_RESULT_OK) {
+        conn_release(c);
         return rc;
+    }
 
-    rc = fl_net_wire_egress_l4_pkt(dst_be, FL_NET_IP_PROTO_TCP, &pkt, rx, sizeof(rx), &rx_len,
-                                   3000u, NULL);
-    if (rc != FL_RESULT_OK)
+    rc = fl_net_wire_egress_l4_pkt(dst_be, FL_NET_IP_PROTO_TCP, &pkt, rx, sizeof(rx), &rx_len, 3000u,
+                                   NULL);
+    if (rc != FL_RESULT_OK) {
+        conn_release(c);
         return rc;
-    if (rx_len < FL_NET_TCP_HDR_LEN_MIN)
+    }
+    if (rx_len < FL_NET_TCP_HDR_LEN_MIN) {
+        conn_release(c);
         return FL_RESULT_ERR;
+    }
 
     {
         const uint8_t *rx_tcp = rx;
         uint8_t flags = rx_tcp[13];
         uint32_t ack_seq = tcp_read_u32_be(rx_tcp + 8);
 
+        if (flags & FL_NET_TCP_FLAG_RST) {
+            conn_release(c);
+            return FL_RESULT_EOF;
+        }
         if ((flags & (FL_NET_TCP_FLAG_SYN | FL_NET_TCP_FLAG_ACK)) !=
-                (FL_NET_TCP_FLAG_SYN | FL_NET_TCP_FLAG_ACK))
+                (FL_NET_TCP_FLAG_SYN | FL_NET_TCP_FLAG_ACK)) {
+            conn_release(c);
             return FL_RESULT_ERR;
-        if (ack_seq != c->iss + 1u)
+        }
+        if (ack_seq != c->iss + 1u) {
+            conn_release(c);
             return FL_RESULT_ERR;
+        }
         c->rcv_nxt = tcp_read_u32_be(rx_tcp + 4) + 1u;
     }
 
     {
         uint8_t ack_seg[FL_NET_TCP_HDR_LEN_MIN];
-        size_t ack_len =
-            tcp_build_segment(ack_seg, sizeof(ack_seg), sport, dport_host, c->snd_nxt, c->rcv_nxt,
-                              FL_NET_TCP_FLAG_ACK, NULL, 0, src_be, dst_be);
+        size_t ack_len = tcp_build_segment(ack_seg, sizeof(ack_seg), sport, dport_host, c->snd_nxt,
+                                           c->rcv_nxt, FL_NET_TCP_FLAG_ACK, NULL, 0, src_be,
+                                           dst_be);
         fl_net_packet_t ack_pkt;
 
-        if (ack_len != FL_NET_TCP_HDR_LEN_MIN)
+        if (ack_len != FL_NET_TCP_HDR_LEN_MIN) {
+            conn_release(c);
             return FL_RESULT_ERR;
+        }
         rc = fl_net_packet_bind_l4(&ack_pkt, ack_seg, sizeof(ack_seg), 0u, ack_len);
-        if (rc != FL_RESULT_OK)
+        if (rc != FL_RESULT_OK) {
+            conn_release(c);
             return rc;
+        }
         rc = fl_net_wire_egress_l4_xmit_pkt(dst_be, FL_NET_IP_PROTO_TCP, &ack_pkt, 500u);
-        if (rc != FL_RESULT_OK)
+        if (rc != FL_RESULT_OK) {
+            conn_release(c);
             return rc;
+        }
     }
 
     c->state = FL_NET_TCP_STATE_ESTABLISHED;
@@ -309,7 +389,7 @@ fl_result_t fl_net_tcp_close(unsigned conn_id) {
 
     if (!c)
         return FL_RESULT_INVAL;
-    memset(c, 0, sizeof(*c));
+    conn_release(c);
     return FL_RESULT_OK;
 }
 

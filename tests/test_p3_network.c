@@ -266,6 +266,64 @@ static int test_udp_echo_loopback(void) {
     return 0;
 }
 
+
+static int test_tcp_connect_rst_slot_release(void) {
+    uint32_t loopback = (uint32_t)FL_NET_IPV4_LOOPBACK_FIRST_OCTET | (1u << 24);
+    unsigned client_id = 0;
+    fl_result_t rc;
+    unsigned i;
+
+    fl_net_tcp_fsm_reset();
+    ASSERT(fl_net_tcp_listen_port(48820u) == FL_RESULT_OK);
+
+    for (i = 0; i < 10u; i++) {
+        rc = fl_net_tcp_connect(loopback, 48821u, &client_id);
+        ASSERT(rc == FL_RESULT_EOF || rc == FL_RESULT_ERR || rc == FL_RESULT_TIMEDOUT);
+    }
+
+    rc = fl_net_tcp_connect(loopback, 48820u, &client_id);
+    ASSERT(rc == FL_RESULT_OK);
+    (void)fl_net_tcp_close(client_id);
+    return 0;
+}
+
+static int test_tcp_dual_connect_loopback(void) {
+    uint32_t loopback = (uint32_t)FL_NET_IPV4_LOOPBACK_FIRST_OCTET | (1u << 24);
+    unsigned c1 = 0;
+    unsigned c2 = 0;
+    unsigned s1 = 0;
+    unsigned s2 = 0;
+    const char msg[] = "dual";
+    char rx[16];
+    size_t rx_len = 0;
+    fl_result_t rc;
+
+    fl_net_tcp_fsm_reset();
+    ASSERT(fl_net_tcp_listen_port(48830u) == FL_RESULT_OK);
+
+    rc = fl_net_tcp_connect(loopback, 48830u, &c1);
+    ASSERT(rc == FL_RESULT_OK);
+    rc = fl_net_tcp_connect(loopback, 48830u, &c2);
+    ASSERT(rc == FL_RESULT_OK);
+
+    rc = fl_net_tcp_accept(48830u, &s1);
+    ASSERT(rc == FL_RESULT_OK);
+    rc = fl_net_tcp_accept(48830u, &s2);
+    ASSERT(rc == FL_RESULT_OK);
+    ASSERT(s1 != s2);
+
+    rc = fl_net_tcp_send(c1, (const uint8_t *)msg, sizeof(msg) - 1u);
+    ASSERT(rc == FL_RESULT_OK);
+    rc = fl_net_tcp_recv(s1, (uint8_t *)rx, sizeof(rx), &rx_len);
+    ASSERT(rc == FL_RESULT_OK);
+
+    (void)fl_net_tcp_close(c1);
+    (void)fl_net_tcp_close(c2);
+    (void)fl_net_tcp_close(s1);
+    (void)fl_net_tcp_close(s2);
+    return 0;
+}
+
 static int test_tcp_fsm_loopback(void) {
     unsigned server_id = 0;
     unsigned client_id = 0;
@@ -1031,7 +1089,17 @@ int main(void) {
         return 1;
     puts("ok");
 
-    printf("test_tcp_fsm_loopback... ");
+    printf("test_tcp_connect_rst_slot_release... ");
+    if (test_tcp_connect_rst_slot_release() != 0)
+        return 1;
+    printf("ok\n");
+
+    printf("test_tcp_dual_connect_loopback... ");
+    if (test_tcp_dual_connect_loopback() != 0)
+        return 1;
+    printf("ok\n");
+
+        printf("test_tcp_fsm_loopback... ");
     if (test_tcp_fsm_loopback() != 0)
         return 1;
     puts("ok");

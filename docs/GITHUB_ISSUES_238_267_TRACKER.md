@@ -8,10 +8,7 @@ Primary networking map: [`docs/P3_NETWORKING.md`](P3_NETWORKING.md).
 
 | Issue | Title | Kind |
 |-------|--------|------|
-| [#238](https://github.com/BPForbes/Bailey-Forbes-Flinstone/issues/238) | P3-6 / P3-7: UDP demux and TCP state machine | Implementation |
 | [#240](https://github.com/BPForbes/Bailey-Forbes-Flinstone/issues/240) | P3 PRE 4.2.0 gap tracker: integration ~✅ → ✅ | Checklist / docs |
-| [#247](https://github.com/BPForbes/Bailey-Forbes-Flinstone/issues/247) | P3-12: DHCP production client | Implementation |
-| [#251](https://github.com/BPForbes/Bailey-Forbes-Flinstone/issues/251) | P3-8: DNS client enhancements | Implementation |
 | [#252](https://github.com/BPForbes/Bailey-Forbes-Flinstone/issues/252) | P3-9: TLS library bridge | Implementation |
 | [#257](https://github.com/BPForbes/Bailey-Forbes-Flinstone/issues/257) | P3-10: Wi-Fi station path (deferred) | Tracker |
 | [#258](https://github.com/BPForbes/Bailey-Forbes-Flinstone/issues/258) | P3-11: IPv6 + ICMPv6 (deferred) | Tracker |
@@ -34,18 +31,23 @@ Primary networking map: [`docs/P3_NETWORKING.md`](P3_NETWORKING.md).
 | #253–#256 | CLOSED | TLS/DHCP/DNS follow-ups + docs sync |
 | #261 | CLOSED | `P3_NETWORKING.md` sync |
 | #263–#266 | CLOSED | Protocol gap index / UDP façade trackers |
+| #238 | IN PROGRESS (loopback) | TCP FSM + UDP demux on branch |
+| #251 | DONE (branch) | Multi-NS DNS + egress UDP |
+| #247 | DONE (branch) | `fl_net_dhcp_acquire` + route |
 
 ## Progress
 
-- **#262** — Done: Linux ICMP fallback removed; loopback via `fl_net_wire_egress_l4`.
-- **#238** — P3-6/P3-7 on branch: `fl_net_udp_parse`/xmit/echo; `net_tcp_fsm.c` loopback RFC 793 subset (listen, connect, send/recv).
-- **UDP egress** — `fl_net_wire_send_udp_pkt` builds in-tree UDP and uses `fl_net_wire_egress_l4_pkt` (no Linux `SOCK_DGRAM`); unblocks **#251** / **#247** on routed TAP/loopback paths.
+- **#262** — Done: egress-only ICMP/UDP; no Linux datagram shim on unrouted `dst`.
+- **#238** — Loopback TCP FSM: unique ephemeral ports, RST/ACK connect cleanup, routed `fl_net_tcp_connect` via egress; dual-client tests.
+- **#251** — DNS: up to three nameservers from `/etc/resolv.conf`, per-NS retries, rotating query IDs.
+- **#247** — `fl_net_dhcp_acquire` (DISCOVER/OFFER/REQUEST/ACK over egress; optional static route install).
 
 ## Suggested work order
 
-1. ~~**#262**~~ — Small, localized egress/ICMP cleanup (unblocks honest P3-5 status).
-2. **#238** — Loopback lab done; production TAP TCP FSM / retransmit remain.
-3. **#247**, **#251**, **#252** — Production DHCP, DNS, TLS (egress UDP path ready for routed builds).
+1. ~~**#262**~~, ~~**#238** (loopback lab)~~, ~~**#251**~~, ~~**#247** (acquire + route)~~.
+2. **#252** — TLS library bridge.
+3. **#238** follow-up — TAP production TCP timers/retransmit/TIME_WAIT (beyond loopback lab).
+4. **#267** — IPv4 default-route / PMTU / offload policy.
 4. **#267** — IPv4 routing/PMTU/offload policy.
 5. **#240** — PRE 4.2.0 standards checklist as rows flip to ✅.
 6. **#257–#260** — Deferred promotion trackers and doc cross-links as code lands.

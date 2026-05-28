@@ -121,11 +121,11 @@ flowchart LR
 2. **ICMP** (`port == 0`): **`fl_net_icmp_echo_exchange`** → **`fl_net_wire_send_icmp`**.
 3. **TCP** (`port > 0`): **`fl_net_tcp_syn_probe`** builds SYN with explicit **`sport`** → **`fl_net_wire_send_tcp_syn`** validates header ports match.
 4. **Loopback:** full **Ethernet+IPv4** frame through **`fl_net_netdev_loopback()`** (P3-2).
-5. **Off-loopback:** ICMP and UDP use **`fl_net_wire_egress_l4_pkt`** (loopback netdev or TAP when routed); unrouted **`dst`** returns **`FL_RESULT_NOENT`** (no Linux **`SOCK_DGRAM`** shim). TCP raw probe still uses libc **`socket`/`select`** for `SOCK_RAW` (documented gap).
+5. **Off-loopback:** ICMP/UDP use **`net_host_socket` / `sendto` / `recvfrom`** (ASM on Linux x86_64 and AArch64). TCP raw probe still uses libc **`socket`/`select`** for `SOCK_RAW` (documented gap).
 
 ## Source port (`sport`)
 
-- **UDP** (`fl_net_wire_send_udp_pkt`): **`sport`** is encoded in the in-tree UDP header (**`fl_net_udp_build_datagram_from_pkt`**); DNS uses **`sport = 40053`** toward port 53.
+- **UDP** (`fl_net_wire_send_udp`): when **`sport != 0`**, the hosted path **`bind(2)`**s the datagram socket to **`INADDR_ANY:sport`** before **`sendto`**. DNS uses **`sport = 40053`** toward port 53.
 - **TCP SYN:** **`sport`** is encoded in the SYN segment by **`fl_net_tcp_build_syn`**; **`fl_net_wire_send_tcp_syn`** rejects a mismatch between the argument and **`tcp[0..1]`** (no silent ignore).
 - There is **no** `(void)sport_unused` discard: unused parameters were removed in favor of real bind/validation.
 
@@ -280,7 +280,7 @@ make check-network-requirements
 
 | Priority | Item | Notes |
 |----------|------|--------|
-| **P3-12** | DHCP production client | Renew/rebind FSM, lease DB; replaces **FL_NET_TAP_*** env bootstrap (codec exists) |
+| **P3-12** | DHCP renew/rebind FSM | Lease DB and renew/rebind after **`fl_net_dhcp_acquire`** |
 | **P3-13** | Chat room | See **`docs/P3_13_CHAT_SERVER.md`**; **#239** / **#238** |
 | ~~Patch~~ | ~~ARP cache TTL / loopback dedup~~ | Done (**#237**, **#240**): **`fl_net_arp_tick`**, **`fl_net_loopback_exchange`**, PIT BH on **B** |
 | **P3-5** | Drop Linux ICMP fallback | When TAP LPM route always matches **dst** |

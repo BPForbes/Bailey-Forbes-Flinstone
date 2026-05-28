@@ -1,9 +1,9 @@
 #include "net_dhcp.h"
 
 #include "contract_p3_ipv4.h"
+#include "net_ipv4.h"
 #include "net_packet.h"
 #include "net_route.h"
-#include "net_tap.h"
 #include "net_udp.h"
 #include "net_wire_host.h"
 
@@ -31,11 +31,11 @@ fl_result_t fl_net_dhcp_build_request(uint8_t *buf, size_t cap, uint8_t dhcp_msg
         return FL_RESULT_INVAL;
 
     memset(buf, 0, FL_NET_BOOTP_FIXED_LEN);
-    buf[0] = 1; /* BOOTREQUEST */
-    buf[1] = 1; /* Ethernet */
+    buf[0] = 1;
+    buf[1] = 1;
     buf[2] = FL_NET_ETH_ADDR_LEN;
     dhcp_store_be32(buf + 4, xid);
-    buf[10] = 0x80; /* broadcast flag high byte */
+    buf[10] = 0x80;
     memcpy(buf + 28, mac, FL_NET_ETH_ADDR_LEN);
 
     dhcp_store_be32(buf + 236, FL_NET_DHCP_MAGIC_COOKIE_BE32);
@@ -105,7 +105,7 @@ fl_result_t fl_net_dhcp_parse_reply(const uint8_t *buf, size_t len, uint32_t *xi
 
     if (!buf || len < FL_NET_BOOTP_FIXED_LEN + 4u)
         return FL_RESULT_INVAL;
-    if (buf[0] != 2) /* BOOTREPLY */
+    if (buf[0] != 2)
         return FL_RESULT_ERR;
 
     if (xid_out)
@@ -128,7 +128,7 @@ fl_result_t fl_net_dhcp_parse_reply(const uint8_t *buf, size_t len, uint32_t *xi
 }
 
 fl_result_t fl_net_dhcp_parse_reply_pkt(const fl_net_packet_t *pkt, uint32_t *xid_out,
-                                      uint32_t *yiaddr_be_out, uint8_t *dhcp_msg_type_out) {
+                                        uint32_t *yiaddr_be_out, uint8_t *dhcp_msg_type_out) {
     const uint8_t *buf;
     size_t len;
     fl_result_t rc;
@@ -139,33 +139,36 @@ fl_result_t fl_net_dhcp_parse_reply_pkt(const fl_net_packet_t *pkt, uint32_t *xi
     return fl_net_dhcp_parse_reply(buf, len, xid_out, yiaddr_be_out, dhcp_msg_type_out);
 }
 
-fl_result_t fl_net_dhcp_lab_acquire(uint32_t *leased_addr_be, unsigned timeout_ms) {
-#if !defined(__linux__)
-    (void)leased_addr_be;
-    (void)timeout_ms;
-    return FL_RESULT_NOSYS;
-#else
+static fl_result_t dhcp_exchange(const fl_net_packet_t *req_pkt, fl_net_packet_t *reply_pkt,
+                                 uint8_t *reply_backing, size_t reply_cap, size_t *reply_len,
+                                 unsigned timeout_ms) {
+    return fl_net_wire_send_udp_pkt(FL_NET_DHCP_BROADCAST_BE32, FL_NET_DHCP_CLIENT_PORT,
+                                    FL_NET_DHCP_SERVER_PORT, req_pkt, reply_pkt, reply_backing,
+                                    reply_cap, reply_len, timeout_ms);
+}
+
+fl_result_t fl_net_dhcp_acquire(fl_net_driver_t *drv, const uint8_t mac[FL_NET_ETH_ADDR_LEN],
+                                const char *subnet_addr_s, unsigned prefix_len, const char *gw_s,
+                                uint32_t *leased_addr_be, unsigned timeout_ms) {
     uint8_t discover[300];
     uint8_t reply[576];
     size_t rlen = 0;
     uint32_t xid = 0x44584350u;
-    uint8_t mac[FL_NET_ETH_ADDR_LEN] = {0x02, 0x42, 0x00, 0x00, 0x01, 0x02};
     uint32_t yiaddr = 0;
     uint8_t msg_type = 0;
     fl_net_packet_t discover_pkt;
     fl_net_packet_t reply_pkt;
     fl_result_t rc;
+    char addr_buf[32];
 
-    if (!leased_addr_be)
+    if (!mac || !leased_addr_be)
         return FL_RESULT_INVAL;
 
     rc = fl_net_dhcp_build_request_pkt(&discover_pkt, discover, sizeof(discover),
                                        FL_NET_DHCP_MSG_DISCOVER, xid, mac);
     if (rc != FL_RESULT_OK)
         return rc;
-    rc = fl_net_wire_send_udp_pkt(FL_NET_DHCP_BROADCAST_BE32, FL_NET_DHCP_CLIENT_PORT,
-                                  FL_NET_DHCP_SERVER_PORT, &discover_pkt, &reply_pkt, reply,
-                                  sizeof(reply), &rlen, timeout_ms);
+    rc = dhcp_exchange(&discover_pkt, &reply_pkt, reply, sizeof(reply), &rlen, timeout_ms);
     if (rc != FL_RESULT_OK)
         return rc;
 
@@ -179,9 +182,7 @@ fl_result_t fl_net_dhcp_lab_acquire(uint32_t *leased_addr_be, unsigned timeout_m
         return rc;
 
     rlen = 0;
-    rc = fl_net_wire_send_udp_pkt(FL_NET_DHCP_BROADCAST_BE32, FL_NET_DHCP_CLIENT_PORT,
-                                  FL_NET_DHCP_SERVER_PORT, &discover_pkt, &reply_pkt, reply,
-                                  sizeof(reply), &rlen, timeout_ms);
+    rc = dhcp_exchange(&discover_pkt, &reply_pkt, reply, sizeof(reply), &rlen, timeout_ms);
     if (rc != FL_RESULT_OK)
         return rc;
 
@@ -190,6 +191,21 @@ fl_result_t fl_net_dhcp_lab_acquire(uint32_t *leased_addr_be, unsigned timeout_m
         return FL_RESULT_ERR;
 
     *leased_addr_be = yiaddr;
+
+    if (drv && subnet_addr_s && subnet_addr_s[0] && gw_s && gw_s[0] && prefix_len > 0u &&
+        prefix_len <= 32u) {
+        fl_net_ipv4_format_addr(yiaddr, addr_buf, sizeof(addr_buf));
+        (void)subnet_addr_s;
+        rc = fl_net_route_configure_static(drv, mac, addr_buf, prefix_len, gw_s);
+        if (rc != FL_RESULT_OK)
+            return rc;
+    }
+
     return FL_RESULT_OK;
-#endif
+}
+
+fl_result_t fl_net_dhcp_lab_acquire(uint32_t *leased_addr_be, unsigned timeout_ms) {
+    uint8_t mac[FL_NET_ETH_ADDR_LEN] = {0x02, 0x42, 0x00, 0x00, 0x01, 0x02};
+
+    return fl_net_dhcp_acquire(NULL, mac, NULL, 0u, NULL, leased_addr_be, timeout_ms);
 }
