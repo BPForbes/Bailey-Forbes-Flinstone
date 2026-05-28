@@ -897,14 +897,15 @@ static int test_net_tftp_build_rrq(void) {
     return 0;
 }
 
-static int test_route_reject_default(void) {
+static int test_route_zero_prefix_policy(void) {
     uint8_t mac[6] = {0x02, 0, 0, 0, 0, 1};
     uint32_t catch_all_be = 0;
 
     fl_net_route_clear();
     ASSERT(fl_net_route_add(0u, 0u, 0x0200000au, fl_net_netdev_loopback(),
                             (uint32_t)FL_NET_IPV4_LOOPBACK_FIRST_OCTET | (1u << 24), mac) ==
-           FL_RESULT_INVAL);
+           FL_RESULT_OK);
+    fl_net_route_clear();
     ASSERT(fl_net_ipv4_parse_literal("1.2.3.4", &catch_all_be));
     ASSERT(fl_net_route_add(catch_all_be, 0u, 0, fl_net_netdev_loopback(), catch_all_be, mac) ==
            FL_RESULT_INVAL);
@@ -1097,8 +1098,8 @@ int main(void) {
         return 1;
     puts("ok");
 
-    printf("test_route_reject_default... ");
-    if (test_route_reject_default() != 0)
+    printf("test_route_zero_prefix_policy... ");
+    if (test_route_zero_prefix_policy() != 0)
         return 1;
     puts("ok");
 

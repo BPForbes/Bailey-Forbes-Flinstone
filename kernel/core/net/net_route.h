@@ -42,9 +42,9 @@ void fl_net_route_add_loopback(void);
 
 /**
  * Register a static on-subnet route (bare-metal lab or hosted TAP).
- * Does **not** install **0.0.0.0/0** (**#267**): **fl_net_route_add** rejects prefix **0**
- * on **0.0.0.0**. Off-subnet traffic uses the route **gw** or hosted socket paths until
- * production default-route policy lands.
+ * Rejects non-zero prefix-length-0 nets (only 0.0.0.0 at prefix 0 is valid).
+ * Off-subnet traffic uses the route **gw** or hosted socket fallbacks until **P3-12**
+ * DHCP / production default-route policy lands.
  */
 fl_result_t fl_net_route_configure_static(fl_net_driver_t *drv, const uint8_t src_mac[6],
                                           const char *addr_s, unsigned prefix_len,
