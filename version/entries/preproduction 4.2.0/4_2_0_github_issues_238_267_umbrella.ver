@@ -4,7 +4,7 @@ RELEASE_VERSION=0
 PRERELEASE=1
 DEV_VERSION=7
 DESCRIPTION<<VER_END
-PRE 4.2.0 umbrella #238–#267 (excl. #239): loopback TCP FSM and UDP demux (#238); egress-only ICMP/UDP (#262); multi-NS DNS (#251); DHCP acquire (#247); OpenSSL TLS bridge when libssl present (#252); HTTP GET and TFTP client subsets (#259/#260); Wi-Fi/IPv6 deferred trackers (#257/#258); default-route /0 allows only 0.0.0.0/0, rejects non-zero catch-alls (#267); CodeRabbit review fixes (TCP/TFTP/TLS/DHCP/DNS/HTTP); PRE 4.2.0 integration checklist (#240). Tracker docs/GITHUB_ISSUES_238_267_TRACKER.md.
+PRE 4.2.0 umbrella #238–#267 (excl. #239): loopback TCP FSM and UDP demux (#238); egress-only ICMP/UDP (#262); multi-NS DNS (#251); DHCP acquire (#247); OpenSSL TLS bridge when libssl present (#252); HTTP GET and TFTP client subsets (#259/#260); Wi-Fi/IPv6 deferred trackers (#257/#258); default-route /0 allows only 0.0.0.0/0, rejects non-zero catch-alls (#267); CodeRabbit review fixes (TCP/TFTP/TLS/DHCP/DNS/HTTP); task-backend UDP fallback propagates send errors via fl_net_wire_xmit_udp_pkt; PRE 4.2.0 integration checklist (#240). Tracker docs/GITHUB_ISSUES_238_267_TRACKER.md.
 VER_END
 
 RELEASE_DATE=2026-05-28
