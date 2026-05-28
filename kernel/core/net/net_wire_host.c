@@ -326,3 +326,49 @@ fl_result_t fl_net_wire_send_udp(uint32_t dst_be, uint16_t sport, uint16_t dport
     return fl_net_wire_send_udp_pkt(dst_be, sport, dport, &tx_pkt, &rx_pkt, rx, rx_cap, rx_len,
                                     timeout_ms);
 }
+
+fl_result_t fl_net_wire_xmit_udp_pkt(uint32_t dst_be, uint16_t sport, uint16_t dport,
+                                     const fl_net_packet_t *l4_pkt) {
+    const uint8_t *payload;
+    size_t payload_len;
+    fl_result_t rc;
+
+    if (!l4_pkt)
+        return FL_RESULT_INVAL;
+    rc = fl_net_packet_l4_view(l4_pkt, &payload, &payload_len);
+    if (rc != FL_RESULT_OK || payload_len == 0u)
+        return FL_RESULT_INVAL;
+
+#if defined(__linux__)
+    {
+        struct sockaddr_in local;
+        struct sockaddr_in dst;
+        int sock;
+
+        wire_host_sin4(&dst, dst_be, dport);
+        sock = net_host_socket(AF_INET, SOCK_DGRAM, 0);
+        if (sock < 0)
+            return FL_RESULT_ERR;
+        if (sport != 0u) {
+            wire_host_sin4(&local, 0, sport);
+            if (net_host_bind(sock, &local, (unsigned int)sizeof(local)) < 0) {
+                net_host_close(sock);
+                return FL_RESULT_ERR;
+            }
+        }
+        if (net_host_sendto(sock, payload, payload_len, 0, &dst, (unsigned int)sizeof(dst)) < 0) {
+            net_host_close(sock);
+            return FL_RESULT_ERR;
+        }
+        net_host_close(sock);
+        return FL_RESULT_OK;
+    }
+#else
+    (void)dst_be;
+    (void)sport;
+    (void)dport;
+    (void)payload;
+    (void)payload_len;
+    return FL_RESULT_NOSYS;
+#endif
+}

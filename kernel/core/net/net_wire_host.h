@@ -30,4 +30,7 @@ fl_result_t fl_net_wire_send_udp_pkt(uint32_t dst_be, uint16_t sport, uint16_t d
                                      uint8_t *rx_backing, size_t rx_backing_cap, size_t *rx_len,
                                      unsigned timeout_ms);
 
+fl_result_t fl_net_wire_xmit_udp_pkt(uint32_t dst_be, uint16_t sport, uint16_t dport,
+                                     const fl_net_packet_t *l4_pkt);
+
 #endif /* NET_WIRE_HOST_H */
