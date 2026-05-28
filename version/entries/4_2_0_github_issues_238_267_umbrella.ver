@@ -1,0 +1,8 @@
+MAJOR_VERSION=4
+STANDARD_VERSION=2
+RELEASE_VERSION=0
+PRERELEASE=1
+DEV_VERSION=7
+DESCRIPTION<<VER_END
+PRE 4.2.0 (docs): Umbrella tracker for GitHub issues #238–#267 (excl. #239) — docs/GITHUB_ISSUES_238_267_TRACKER.md and coordination PR branch cursor/github-issues-238-267-b55d.
+VER_END

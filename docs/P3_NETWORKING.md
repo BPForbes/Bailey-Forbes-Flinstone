@@ -287,4 +287,4 @@ make check-network-requirements
 | **P3-7** | Full TCP FSM | **RFC 793** state machine — **#238** (SYN probe + hosted shim only today) |
 | **P4** | Production **802.3** / virtio NIC | Board/MMIO driver feeding **`fl_net_driver_t`** (beyond lab **`net_baremetal.c`**) |
 
-**GitHub issues (this train):** closes **#237**, **#240**, **#241** (lab bare-metal + checklist); **#232**–**#235** (hosted polish); remains **#238** (UDP demux + TCP FSM), **#239** (P3-13 **`server`**).
+**GitHub issues (this train):** closes **#237**, **#240**, **#241** (lab bare-metal + checklist); **#232**–**#235** (hosted polish); remains **#238** (UDP demux + TCP FSM), **#239** (P3-13 **`server`**). Umbrella for **#238–#267** (excl. **#239**): **[`docs/GITHUB_ISSUES_238_267_TRACKER.md`](GITHUB_ISSUES_238_267_TRACKER.md)**.
