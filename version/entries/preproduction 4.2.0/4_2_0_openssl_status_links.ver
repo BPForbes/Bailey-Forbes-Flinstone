@@ -1,8 +1,0 @@
-MAJOR_VERSION=4
-STANDARD_VERSION=2
-RELEASE_VERSION=0
-PRERELEASE=1
-DEV_VERSION=8
-DESCRIPTION=PRE 4.2.0 follow-up: link hosted TLS builds against libssl as well as libcrypto across x86-64, AArch64 cross, VM-enabled, and P3 network test targets after the OpenSSL TLS bridge landed.
-
-RELEASE_DATE=2026-05-28
