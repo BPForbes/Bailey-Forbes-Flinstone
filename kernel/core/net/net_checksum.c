@@ -1,5 +1,9 @@
 #include "net_checksum.h"
 
+#include "contract_p3_ipv4.h"
+#include "contract_p3_wire.h"
+#include "contract_p3_ipv4.h"
+#include "contract_p3_wire.h"
 #include "fl/net_asm.h"
 
 #include <stddef.h>
@@ -98,4 +102,20 @@ uint16_t fl_net_pseudo_checksum_tcpudp(uint32_t src_be, uint32_t dst_be, uint8_t
     if (seg && seg_len > 0)
         sum = checksum16_accum(sum, (const uint8_t *)seg, seg_len);
     return checksum16_ones_complement(sum);
+}
+
+
+int fl_net_udp_checksum_valid(uint32_t src_be, uint32_t dst_be, const uint8_t *udp, size_t len) {
+    uint16_t csum;
+
+    if (!udp || len < FL_NET_UDP_HDR_LEN)
+        return 0;
+    csum = (uint16_t)(((uint16_t)udp[6] << 8) | (uint16_t)udp[7]);
+    if (csum == 0)
+        return 1;
+    {
+        uint32_t sum = checksum16_accum_ipv4_pseudo(0, src_be, dst_be, FL_NET_IP_PROTO_UDP, len);
+        sum = checksum16_accum(sum, udp, len);
+        return checksum16_acc_is_valid(sum);
+    }
 }

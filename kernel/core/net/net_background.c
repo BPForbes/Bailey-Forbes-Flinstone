@@ -200,19 +200,9 @@ static fl_result_t task_backend_xmit_udp_socket_pkt(const fl_net_socket_endpoint
     if (rc != FL_RESULT_NOENT)
         return rc;
 
-    {
-        uint8_t rx_dummy[64];
-        size_t rx_len = 0;
-        fl_net_packet_t rx_pkt;
-        uint16_t sport = port_be_to_host16(endpoint->local_port_be);
-        uint16_t dport = port_be_to_host16(endpoint->peer_port_be);
-
-        rc = fl_net_wire_send_udp_pkt(endpoint->peer_ip_be, sport, dport, payload_pkt, &rx_pkt,
-                                      rx_dummy, sizeof(rx_dummy), &rx_len, 1u);
-        if (rc == FL_RESULT_TIMEDOUT)
-            return FL_RESULT_OK;
-    }
-    return rc;
+    return fl_net_wire_xmit_udp_pkt(endpoint->peer_ip_be,
+                                    port_be_to_host16(endpoint->local_port_be),
+                                    port_be_to_host16(endpoint->peer_port_be), &udp_pkt);
 }
 
 fl_result_t fl_net_task_backend_socket_send(const fl_net_socket_endpoint_t *endpoint,

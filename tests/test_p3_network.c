@@ -15,12 +15,16 @@
 #include "net_packet.h"
 #include "net_ping_host.h"
 #include "net_requirements.h"
+#include "net_wire_host.h"
 #include "net_background.h"
 #include "net_udp.h"
 #include "net_socket.h"
 #include "net_dhcp.h"
 #include "net_tcp.h"
+#include "net_tcp_fsm.h"
 #include "net_tls_hosted.h"
+#include "net_http.h"
+#include "net_tftp.h"
 #include "contract_p3_dhcp.h"
 #include "contract_p3_tls_hosted.h"
 #include "contract_p3_socket.h"
@@ -198,6 +202,154 @@ static int test_resolve_localhost(void) {
     ASSERT(fl_net_resolve_ipv4("localhost", &addr_be, resolved, sizeof(resolved)) ==
            FL_RESULT_OK);
     ASSERT(fl_net_ipv4_is_loopback(addr_be));
+    return 0;
+}
+
+static int test_icmp_unreachable_no_linux_fallback(void) {
+    uint8_t req[FL_NET_ICMPV4_HDR_MIN + 8];
+    uint8_t rx[64];
+    size_t req_len;
+    size_t rx_len = 0;
+    uint32_t dst_be;
+    struct in_addr a;
+    fl_net_packet_t req_pkt;
+    fl_net_packet_t rx_pkt;
+    fl_result_t rc;
+
+    ASSERT(inet_aton("203.0.113.99", &a) != 0);
+    dst_be = a.s_addr;
+
+    req_len = fl_net_icmp_echo_request_build(req, sizeof(req), 0xabcdu, 1u, 8u);
+    ASSERT(req_len > 0);
+    ASSERT(fl_net_packet_bind_l4(&req_pkt, req, sizeof(req), 0u, req_len) == FL_RESULT_OK);
+
+    rc = fl_net_wire_send_icmp_pkt(dst_be, &req_pkt, &rx_pkt, rx, sizeof(rx), &rx_len, 500u, NULL);
+    ASSERT(rc == FL_RESULT_NOENT);
+    return 0;
+}
+
+static int test_udp_unreachable_no_linux_fallback(void) {
+    uint8_t payload[] = "dns-probe";
+    uint8_t rx[64];
+    size_t rx_len = 0;
+    uint32_t dst_be;
+    struct in_addr a;
+    fl_net_packet_t tx_pkt;
+    fl_net_packet_t rx_pkt;
+    fl_result_t rc;
+
+    ASSERT(inet_aton("203.0.113.99", &a) != 0);
+    dst_be = a.s_addr;
+
+    ASSERT(fl_net_packet_bind_l4(&tx_pkt, payload, sizeof(payload) - 1u, 0u,
+                               sizeof(payload) - 1u) == FL_RESULT_OK);
+
+    rc = fl_net_wire_send_udp_pkt(dst_be, 40053u, 53u, &tx_pkt, &rx_pkt, rx, sizeof(rx), &rx_len,
+                                  500u);
+    ASSERT(rc == FL_RESULT_NOENT);
+    return 0;
+}
+
+
+static int test_udp_echo_loopback(void) {
+    const char payload[] = "udp-echo-roundtrip";
+    uint8_t rx[64];
+    size_t rx_len = 0;
+    uint32_t loopback = (uint32_t)FL_NET_IPV4_LOOPBACK_FIRST_OCTET | (1u << 24);
+    fl_result_t rc;
+
+    fl_net_udp_demux_reset();
+    ASSERT(fl_net_udp_bind_port(48002u) == FL_RESULT_OK);
+    rc = fl_net_udp_echo_exchange(loopback, 48002u, 47002u, (const uint8_t *)payload,
+                                  sizeof(payload) - 1u, rx, sizeof(rx), &rx_len, 3000u);
+    ASSERT(rc == FL_RESULT_OK);
+    ASSERT(rx_len == sizeof(payload) - 1u);
+    ASSERT(memcmp(rx, payload, rx_len) == 0);
+    return 0;
+}
+
+
+static int test_tcp_connect_rst_slot_release(void) {
+    uint32_t loopback = (uint32_t)FL_NET_IPV4_LOOPBACK_FIRST_OCTET | (1u << 24);
+    unsigned client_id = 0;
+    fl_result_t rc;
+    unsigned i;
+
+    fl_net_tcp_fsm_reset();
+    ASSERT(fl_net_tcp_listen_port(48820u) == FL_RESULT_OK);
+
+    for (i = 0; i < 10u; i++) {
+        rc = fl_net_tcp_connect(loopback, 48821u, &client_id);
+        ASSERT(rc == FL_RESULT_EOF || rc == FL_RESULT_ERR || rc == FL_RESULT_TIMEDOUT);
+    }
+
+    rc = fl_net_tcp_connect(loopback, 48820u, &client_id);
+    ASSERT(rc == FL_RESULT_OK);
+    (void)fl_net_tcp_close(client_id);
+    return 0;
+}
+
+static int test_tcp_dual_connect_loopback(void) {
+    uint32_t loopback = (uint32_t)FL_NET_IPV4_LOOPBACK_FIRST_OCTET | (1u << 24);
+    unsigned c1 = 0;
+    unsigned c2 = 0;
+    unsigned s1 = 0;
+    unsigned s2 = 0;
+    const char msg[] = "dual";
+    char rx[16];
+    size_t rx_len = 0;
+    fl_result_t rc;
+
+    fl_net_tcp_fsm_reset();
+    ASSERT(fl_net_tcp_listen_port(48830u) == FL_RESULT_OK);
+
+    rc = fl_net_tcp_connect(loopback, 48830u, &c1);
+    ASSERT(rc == FL_RESULT_OK);
+    rc = fl_net_tcp_connect(loopback, 48830u, &c2);
+    ASSERT(rc == FL_RESULT_OK);
+
+    rc = fl_net_tcp_accept(48830u, &s1);
+    ASSERT(rc == FL_RESULT_OK);
+    rc = fl_net_tcp_accept(48830u, &s2);
+    ASSERT(rc == FL_RESULT_OK);
+    ASSERT(s1 != s2);
+
+    rc = fl_net_tcp_send(c1, (const uint8_t *)msg, sizeof(msg) - 1u);
+    ASSERT(rc == FL_RESULT_OK);
+    rc = fl_net_tcp_recv(s1, (uint8_t *)rx, sizeof(rx), &rx_len);
+    ASSERT(rc == FL_RESULT_OK);
+
+    (void)fl_net_tcp_close(c1);
+    (void)fl_net_tcp_close(c2);
+    (void)fl_net_tcp_close(s1);
+    (void)fl_net_tcp_close(s2);
+    return 0;
+}
+
+static int test_tcp_fsm_loopback(void) {
+    unsigned server_id = 0;
+    unsigned client_id = 0;
+    uint32_t loopback = (uint32_t)FL_NET_IPV4_LOOPBACK_FIRST_OCTET | (1u << 24);
+    const char msg[] = "fsm-data";
+    char rx[32];
+    size_t rx_len = 0;
+    fl_result_t rc;
+
+    fl_net_tcp_fsm_reset();
+    fl_net_udp_demux_reset();
+    ASSERT(fl_net_tcp_listen_port(48790u) == FL_RESULT_OK);
+    rc = fl_net_tcp_connect(loopback, 48790u, &client_id);
+    ASSERT(rc == FL_RESULT_OK);
+    rc = fl_net_tcp_accept(48790u, &server_id);
+    ASSERT(rc == FL_RESULT_OK);
+    rc = fl_net_tcp_send(client_id, (const uint8_t *)msg, sizeof(msg) - 1u);
+    ASSERT(rc == FL_RESULT_OK);
+    rc = fl_net_tcp_recv(server_id, (uint8_t *)rx, sizeof(rx), &rx_len);
+    ASSERT(rc == FL_RESULT_OK);
+    ASSERT(rx_len == sizeof(msg) - 1u);
+    ASSERT(memcmp(rx, msg, rx_len) == 0);
+    (void)fl_net_tcp_close(client_id);
+    (void)fl_net_tcp_close(server_id);
     return 0;
 }
 
@@ -723,6 +875,65 @@ static int test_net_dhcp_frame_codec(void) {
     return 0;
 }
 
+
+static int test_net_http_parse_status(void) {
+    const char *hdr = "HTTP/1.1 200 OK\r\n";
+    const char *full =
+        "HTTP/1.1 200 OK\r\n"
+        "Content-Length: 42\r\n"
+        "Transfer-Encoding: chunked\r\n"
+        "\r\n";
+    int code = 0;
+    size_t clen = 0;
+
+    ASSERT(fl_net_http_parse_status(hdr, strlen(hdr), &code) == FL_RESULT_OK);
+    ASSERT(code == 200);
+    ASSERT(fl_net_http_parse_status("HTTP/1.0 404 Not Found\r\n", 22, &code) == FL_RESULT_OK);
+    ASSERT(code == 404);
+    ASSERT(fl_net_http_parse_status(hdr, 11, &code) == FL_RESULT_ERR);
+
+    ASSERT(fl_net_http_parse_content_length(full, strlen(full), &clen) == FL_RESULT_OK);
+    ASSERT(clen == 42u);
+    ASSERT(fl_net_http_transfer_encoding_is_chunked(full, strlen(full)) != 0);
+    ASSERT(fl_net_http_parse_content_length(hdr, strlen(hdr), &clen) == FL_RESULT_NOENT);
+    return 0;
+}
+
+static int test_net_tftp_build_rrq(void) {
+    uint8_t buf[80];
+    size_t n;
+
+    n = fl_net_tftp_build_rrq(buf, sizeof(buf), "boot.bin", "octet");
+    ASSERT(n > 6u);
+    ASSERT(buf[0] == 0 && buf[1] == 1);
+    return 0;
+}
+
+static int test_route_zero_prefix_policy(void) {
+    uint8_t mac[6] = {0x02, 0, 0, 0, 0, 1};
+    uint32_t catch_all_be = 0;
+
+    fl_net_route_clear();
+    ASSERT(fl_net_route_add(0u, 0u, 0x0200000au, fl_net_netdev_loopback(),
+                            (uint32_t)FL_NET_IPV4_LOOPBACK_FIRST_OCTET | (1u << 24), mac) ==
+           FL_RESULT_OK);
+    fl_net_route_clear();
+    ASSERT(fl_net_ipv4_parse_literal("1.2.3.4", &catch_all_be));
+    ASSERT(fl_net_route_add(catch_all_be, 0u, 0, fl_net_netdev_loopback(), catch_all_be, mac) ==
+           FL_RESULT_INVAL);
+    return 0;
+}
+
+static int test_net_tls_openssl_bridge(void) {
+    ASSERT(fl_net_tls_hosted_max_plaintext_record() == (size_t)FL_NET_TLS_MAX_PLAINTEXT_RECORD);
+    if (!fl_net_tls_hosted_openssl_available()) {
+        fl_net_tls_session_t sess = FL_NET_TLS_SESSION_INVALID;
+        ASSERT(fl_net_tls_hosted_client_connect(-1, "localhost", &sess) == FL_RESULT_NOSYS);
+        return 0;
+    }
+    return 0;
+}
+
 static int test_net_tls_hosted_cap(void) {
     ASSERT(fl_net_tls_hosted_max_plaintext_record() == (size_t)FL_NET_TLS_MAX_PLAINTEXT_RECORD);
     return 0;
@@ -889,6 +1100,26 @@ int main(void) {
         return 1;
     puts("ok");
 
+    printf("test_net_http_parse_status... ");
+    if (test_net_http_parse_status() != 0)
+        return 1;
+    puts("ok");
+
+    printf("test_net_tftp_build_rrq... ");
+    if (test_net_tftp_build_rrq() != 0)
+        return 1;
+    puts("ok");
+
+    printf("test_route_zero_prefix_policy... ");
+    if (test_route_zero_prefix_policy() != 0)
+        return 1;
+    puts("ok");
+
+    printf("test_net_tls_openssl_bridge... ");
+    if (test_net_tls_openssl_bridge() != 0)
+        return 1;
+    puts("ok");
+
     printf("test_net_tls_hosted_cap... ");
     if (test_net_tls_hosted_cap() != 0)
         return 1;
@@ -921,6 +1152,36 @@ int main(void) {
 
     printf("test_resolve_localhost... ");
     if (test_resolve_localhost() != 0)
+        return 1;
+    puts("ok");
+
+    printf("test_icmp_unreachable_no_linux_fallback... ");
+    if (test_icmp_unreachable_no_linux_fallback() != 0)
+        return 1;
+    puts("ok");
+
+    printf("test_udp_unreachable_no_linux_fallback... ");
+    if (test_udp_unreachable_no_linux_fallback() != 0)
+        return 1;
+    printf("ok\n");
+
+        printf("test_udp_echo_loopback... ");
+    if (test_udp_echo_loopback() != 0)
+        return 1;
+    puts("ok");
+
+    printf("test_tcp_connect_rst_slot_release... ");
+    if (test_tcp_connect_rst_slot_release() != 0)
+        return 1;
+    printf("ok\n");
+
+    printf("test_tcp_dual_connect_loopback... ");
+    if (test_tcp_dual_connect_loopback() != 0)
+        return 1;
+    printf("ok\n");
+
+        printf("test_tcp_fsm_loopback... ");
+    if (test_tcp_fsm_loopback() != 0)
         return 1;
     puts("ok");
 

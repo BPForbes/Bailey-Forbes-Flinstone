@@ -7,9 +7,8 @@
 #include "contract_p3_ipv4.h"
 #include "fl/net_asm.h"
 #include "net_ipv4.h"
+#include "net_route.h"
 #include "net_wire.h"
-#include "net_loopback.h"
-#include "net_netdev.h"
 #include "net_tcp.h"
 #include "net_packet.h"
 #include "net_udp.h"
@@ -35,10 +34,6 @@ static double timeval_delta_ms(const struct timeval *a, const struct timeval *b)
            (double)(b->tv_usec - a->tv_usec) / 1000.0;
 }
 
-static uint32_t wire_loopback_src_be(void) {
-    return (uint32_t)FL_NET_IPV4_LOOPBACK_FIRST_OCTET | (1u << 24);
-}
-
 static void wire_host_sin4(struct sockaddr_in *sa, uint32_t addr_be, uint16_t port_host) {
     memset(sa, 0, sizeof(*sa));
     sa->sin_family = AF_INET;
@@ -48,68 +43,6 @@ static void wire_host_sin4(struct sockaddr_in *sa, uint32_t addr_be, uint16_t po
 #else
     sa->sin_port = htons(port_host);
 #endif
-}
-
-static fl_result_t wire_loopback_exchange(const uint8_t *l4, size_t l4_len, uint8_t ip_proto,
-                                          uint32_t dst_be, uint8_t *rx_l4, size_t rx_l4_cap,
-                                          size_t *rx_l4_len, unsigned timeout_ms,
-                                          double *out_rtt_ms) {
-    uint8_t ipbuf[576];
-    uint8_t frame[FL_NET_WIRE_FRAME_BUF_MAX];
-    uint8_t rx_frame[FL_NET_WIRE_FRAME_BUF_MAX];
-    uint8_t host_mac[6];
-    uint8_t peer_mac[6];
-    fl_net_ipv4_hdr_t hdr;
-    fl_net_frame_view_t view;
-    fl_net_frame_mut_t mut;
-    size_t ip_len;
-    size_t frame_len;
-    struct timeval t0, t1;
-    fl_result_t rc;
-
-    if (!l4 || l4_len == 0 || !rx_l4 || !rx_l4_len)
-        return FL_RESULT_INVAL;
-
-    fl_net_loopback_reset();
-
-    ip_len = fl_net_ipv4_build(&hdr, ipbuf, sizeof(ipbuf), ip_proto, wire_loopback_src_be(),
-                               dst_be, l4, l4_len, 0x4242u);
-    if (ip_len == 0)
-        return FL_RESULT_ERR;
-
-    fl_net_loopback_mac_peer(peer_mac);
-    fl_net_loopback_mac_host(host_mac);
-    frame_len = fl_net_wire_build_eth_ipv4(frame, sizeof(frame), peer_mac, host_mac, ipbuf, ip_len);
-    if (frame_len == 0)
-        return FL_RESULT_ERR;
-
-    view.data = frame;
-    view.len = frame_len;
-
-    gettimeofday(&t0, NULL);
-    rc = fl_net_netdev_send(fl_net_netdev_loopback(), &view);
-    if (rc != FL_RESULT_OK)
-        return rc;
-
-    mut.data = rx_frame;
-    mut.cap = sizeof(rx_frame);
-    mut.len = 0;
-    rc = fl_net_netdev_recv(fl_net_netdev_loopback(), &mut, timeout_ms);
-    gettimeofday(&t1, NULL);
-    if (rc != FL_RESULT_OK)
-        return rc;
-    if (out_rtt_ms)
-        *out_rtt_ms = timeval_delta_ms(&t0, &t1);
-
-    {
-        fl_net_packet_t rx_pkt;
-        fl_result_t prc;
-
-        prc = fl_net_packet_parse_eth_ipv4(rx_frame, mut.len, &rx_pkt);
-        if (prc != FL_RESULT_OK)
-            return prc;
-        return fl_net_packet_copy_l4(&rx_pkt, rx_l4, rx_l4_cap, rx_l4_len);
-    }
 }
 
 fl_result_t fl_net_wire_send_icmp_pkt(uint32_t dst_be, const fl_net_packet_t *icmp_pkt,
@@ -129,66 +62,10 @@ fl_result_t fl_net_wire_send_icmp_pkt(uint32_t dst_be, const fl_net_packet_t *ic
 
     rc = fl_net_wire_egress_l4_pkt(dst_be, FL_NET_IP_PROTO_ICMP, icmp_pkt, rx_backing,
                                    rx_backing_cap, rx_len, timeout_ms, out_rtt_ms);
-    if (rc == FL_RESULT_OK) {
-        fl_result_t bind_rc =
-            fl_net_packet_bind_l4(rx_pkt, rx_backing, rx_backing_cap, 0u, *rx_len);
-        return bind_rc;
-    }
+    if (rc != FL_RESULT_OK)
+        return rc;
 
-    if (fl_net_loopback_owns(dst_be)) {
-        fl_result_t bind_rc;
-
-        rc = wire_loopback_exchange(icmp, icmp_len, FL_NET_IP_PROTO_ICMP, dst_be, rx_backing,
-                                    rx_backing_cap, rx_len, timeout_ms, out_rtt_ms);
-        if (rc != FL_RESULT_OK)
-            return rc;
-        bind_rc = fl_net_packet_bind_l4(rx_pkt, rx_backing, rx_backing_cap, 0u, *rx_len);
-        return bind_rc;
-    }
-
-#if defined(__linux__)
-    {
-        struct sockaddr_in dst;
-        struct timeval t0, t1;
-        struct timeval tv;
-        ssize_t n;
-        int sock;
-
-        wire_host_sin4(&dst, dst_be, 0);
-
-        sock = net_host_socket(AF_INET, SOCK_DGRAM, IPPROTO_ICMP);
-        if (sock < 0)
-            return (errno == EACCES) ? FL_RESULT_ACCES : FL_RESULT_ERR;
-
-        tv.tv_sec = (time_t)(timeout_ms / 1000u);
-        tv.tv_usec = (suseconds_t)((timeout_ms % 1000u) * 1000u);
-        (void)net_host_setsockopt(sock, SOL_SOCKET, SO_RCVTIMEO, &tv, (unsigned int)sizeof(tv));
-
-        gettimeofday(&t0, NULL);
-        if (net_host_sendto(sock, icmp, icmp_len, 0, &dst, (unsigned int)sizeof(dst)) < 0) {
-            net_host_close(sock);
-            return FL_RESULT_ERR;
-        }
-
-        n = net_host_recvfrom(sock, rx_backing, rx_backing_cap, 0, NULL, NULL);
-        net_host_close(sock);
-        gettimeofday(&t1, NULL);
-        if (n < 0)
-            return (errno == EAGAIN || errno == EWOULDBLOCK) ? FL_RESULT_TIMEDOUT
-                                                             : FL_RESULT_ERR;
-        *rx_len = (size_t)n;
-        rc = fl_net_packet_bind_l4(rx_pkt, rx_backing, rx_backing_cap, 0u, *rx_len);
-        if (rc != FL_RESULT_OK)
-            return rc;
-        if (out_rtt_ms)
-            *out_rtt_ms = timeval_delta_ms(&t0, &t1);
-        return FL_RESULT_OK;
-    }
-#else
-    (void)timeout_ms;
-    (void)out_rtt_ms;
-    return FL_RESULT_NOSYS;
-#endif
+    return fl_net_packet_bind_l4(rx_pkt, rx_backing, rx_backing_cap, 0u, *rx_len);
 }
 
 fl_result_t fl_net_wire_send_icmp(uint32_t dst_be, const uint8_t *icmp, size_t icmp_len,
@@ -225,14 +102,14 @@ fl_result_t fl_net_wire_send_tcp_syn(uint32_t dst_be, uint16_t sport, uint16_t d
 
     gettimeofday(&t0, NULL);
 
-    if (fl_net_loopback_owns(dst_be)) {
-        uint8_t reply[64];
+    if (fl_net_ipv4_is_loopback(dst_be)) {
+        uint8_t reply[128];
         size_t reply_len = 0;
-        fl_result_t rc = wire_loopback_exchange(tcp, tcp_len, FL_NET_IP_PROTO_TCP, dst_be, reply,
-                                              sizeof(reply), &reply_len, timeout_ms, out_rtt_ms);
+        fl_result_t rc = fl_net_wire_egress_l4(dst_be, FL_NET_IP_PROTO_TCP, tcp, tcp_len, reply,
+                                               sizeof(reply), &reply_len, timeout_ms, out_rtt_ms);
         if (rc == FL_RESULT_OK) {
             if (note && note_len > 0)
-                snprintf(note, note_len, "loopback tcp rst+ack (P3-2 netdev)");
+                snprintf(note, note_len, "loopback tcp rst+ack (P3-2 egress)");
             return FL_RESULT_OK;
         }
         return rc;
@@ -359,86 +236,78 @@ fl_result_t fl_net_wire_send_tcp_syn(uint32_t dst_be, uint16_t sport, uint16_t d
 #endif
 }
 
-static fl_result_t wire_host_send_udp_buf(uint32_t dst_be, uint16_t sport, uint16_t dport,
-                                          const uint8_t *payload, size_t payload_len, uint8_t *rx,
-                                          size_t rx_cap, size_t *rx_len, unsigned timeout_ms) {
-#if defined(__linux__)
-    struct sockaddr_in local;
-    struct sockaddr_in dst;
-    struct timeval tv;
-    ssize_t n;
-    int sock;
+static fl_result_t wire_udp_resolve_src(uint32_t dst_be, uint32_t *src_be_out) {
+    if (!src_be_out)
+        return FL_RESULT_INVAL;
+    if (fl_net_ipv4_is_loopback(dst_be)) {
+        *src_be_out = (uint32_t)FL_NET_IPV4_LOOPBACK_FIRST_OCTET | (1u << 24);
+        return FL_RESULT_OK;
+    }
+    if (dst_be == 0xFFFFFFFFu) {
+        *src_be_out = 0u;
+        return FL_RESULT_OK;
+    }
+    {
+        fl_net_route_entry_t route;
 
-    if (!payload || payload_len == 0 || !rx || !rx_len)
+        if (fl_net_route_lookup(dst_be, &route) != FL_RESULT_OK)
+            return FL_RESULT_NOENT;
+        *src_be_out = route.src_ip_be;
+    }
+    return FL_RESULT_OK;
+}
+
+static fl_result_t wire_udp_rx_to_app_payload(uint32_t peer_be, uint32_t local_be, uint8_t *rx,
+                                              size_t rx_cap, size_t *rx_len,
+                                              fl_net_packet_t *rx_pkt) {
+    fl_net_udp_parsed_t parsed;
+    fl_result_t rc;
+
+    if (!rx || !rx_len || !rx_pkt)
         return FL_RESULT_INVAL;
 
-    wire_host_sin4(&dst, dst_be, dport);
-
-    sock = net_host_socket(AF_INET, SOCK_DGRAM, 0);
-    if (sock < 0)
+    rc = fl_net_udp_parse(rx, *rx_len, peer_be, local_be, 0, &parsed);
+    if (rc != FL_RESULT_OK)
+        return rc;
+    if (parsed.payload_len > rx_cap)
         return FL_RESULT_ERR;
-
-    if (sport != 0u) {
-        wire_host_sin4(&local, 0, sport);
-        if (net_host_bind(sock, &local, (unsigned int)sizeof(local)) < 0) {
-            net_host_close(sock);
-            return FL_RESULT_ERR;
-        }
-    }
-
-    tv.tv_sec = (time_t)(timeout_ms / 1000u);
-    tv.tv_usec = (suseconds_t)((timeout_ms % 1000u) * 1000u);
-    (void)net_host_setsockopt(sock, SOL_SOCKET, SO_RCVTIMEO, &tv, (unsigned int)sizeof(tv));
-
-    if (net_host_sendto(sock, payload, payload_len, 0, &dst, (unsigned int)sizeof(dst)) < 0) {
-        net_host_close(sock);
-        return FL_RESULT_ERR;
-    }
-
-    n = net_host_recvfrom(sock, rx, rx_cap, 0, NULL, NULL);
-    net_host_close(sock);
-    if (n < 0)
-        return (errno == EAGAIN || errno == EWOULDBLOCK) ? FL_RESULT_TIMEDOUT : FL_RESULT_ERR;
-    *rx_len = (size_t)n;
-    return FL_RESULT_OK;
-#else
-    (void)dst_be;
-    (void)sport;
-    (void)dport;
-    (void)payload;
-    (void)payload_len;
-    (void)rx;
-    (void)rx_cap;
-    (void)rx_len;
-    (void)timeout_ms;
-    return FL_RESULT_NOSYS;
-#endif
+    memmove(rx, parsed.payload, parsed.payload_len);
+    *rx_len = parsed.payload_len;
+    return fl_net_packet_bind_l4(rx_pkt, rx, rx_cap, 0u, *rx_len);
 }
 
 fl_result_t fl_net_wire_send_udp_pkt(uint32_t dst_be, uint16_t sport, uint16_t dport,
                                      const fl_net_packet_t *payload_pkt, fl_net_packet_t *rx_pkt,
                                      uint8_t *rx_backing, size_t rx_backing_cap, size_t *rx_len,
                                      unsigned timeout_ms) {
-    const uint8_t *payload;
-    size_t payload_len;
+    uint8_t l4[FL_NET_UDP_HDR_LEN + FL_NET_UDP_LAB_RX_PAYLOAD_MAX];
+    uint32_t src_be;
+    size_t l4_len;
+    fl_net_packet_t udp_pkt;
     fl_result_t rc;
 
     if (!payload_pkt || !rx_pkt || !rx_backing || !rx_len)
         return FL_RESULT_INVAL;
 
-    rc = fl_net_packet_l4_view(payload_pkt, &payload, &payload_len);
-    if (rc != FL_RESULT_OK || payload_len == 0u)
-        return FL_RESULT_INVAL;
+    rc = wire_udp_resolve_src(dst_be, &src_be);
+    if (rc != FL_RESULT_OK)
+        return rc;
 
-    rc = wire_host_send_udp_buf(dst_be, sport, dport, payload, payload_len, rx_backing,
-                                rx_backing_cap, rx_len, timeout_ms);
-    if (rc == FL_RESULT_OK) {
-        fl_result_t bind_rc =
-            fl_net_packet_bind_l4(rx_pkt, rx_backing, rx_backing_cap, 0u, *rx_len);
-        if (bind_rc != FL_RESULT_OK)
-            return bind_rc;
-    }
-    return rc;
+    l4_len = fl_net_udp_build_datagram_from_pkt(l4, sizeof(l4), src_be, dst_be, sport, dport,
+                                                payload_pkt);
+    if (l4_len == 0)
+        return FL_RESULT_ERR;
+
+    rc = fl_net_packet_bind_l4(&udp_pkt, l4, sizeof(l4), 0u, l4_len);
+    if (rc != FL_RESULT_OK)
+        return rc;
+
+    rc = fl_net_wire_egress_l4_pkt(dst_be, FL_NET_IP_PROTO_UDP, &udp_pkt, rx_backing,
+                                   rx_backing_cap, rx_len, timeout_ms, NULL);
+    if (rc != FL_RESULT_OK)
+        return rc;
+
+    return wire_udp_rx_to_app_payload(dst_be, src_be, rx_backing, rx_backing_cap, rx_len, rx_pkt);
 }
 
 fl_result_t fl_net_wire_send_udp(uint32_t dst_be, uint16_t sport, uint16_t dport,
@@ -456,4 +325,50 @@ fl_result_t fl_net_wire_send_udp(uint32_t dst_be, uint16_t sport, uint16_t dport
 
     return fl_net_wire_send_udp_pkt(dst_be, sport, dport, &tx_pkt, &rx_pkt, rx, rx_cap, rx_len,
                                     timeout_ms);
+}
+
+fl_result_t fl_net_wire_xmit_udp_pkt(uint32_t dst_be, uint16_t sport, uint16_t dport,
+                                     const fl_net_packet_t *l4_pkt) {
+    const uint8_t *payload;
+    size_t payload_len;
+    fl_result_t rc;
+
+    if (!l4_pkt)
+        return FL_RESULT_INVAL;
+    rc = fl_net_packet_l4_view(l4_pkt, &payload, &payload_len);
+    if (rc != FL_RESULT_OK || payload_len == 0u)
+        return FL_RESULT_INVAL;
+
+#if defined(__linux__)
+    {
+        struct sockaddr_in local;
+        struct sockaddr_in dst;
+        int sock;
+
+        wire_host_sin4(&dst, dst_be, dport);
+        sock = net_host_socket(AF_INET, SOCK_DGRAM, 0);
+        if (sock < 0)
+            return FL_RESULT_ERR;
+        if (sport != 0u) {
+            wire_host_sin4(&local, 0, sport);
+            if (net_host_bind(sock, &local, (unsigned int)sizeof(local)) < 0) {
+                net_host_close(sock);
+                return FL_RESULT_ERR;
+            }
+        }
+        if (net_host_sendto(sock, payload, payload_len, 0, &dst, (unsigned int)sizeof(dst)) < 0) {
+            net_host_close(sock);
+            return FL_RESULT_ERR;
+        }
+        net_host_close(sock);
+        return FL_RESULT_OK;
+    }
+#else
+    (void)dst_be;
+    (void)sport;
+    (void)dport;
+    (void)payload;
+    (void)payload_len;
+    return FL_RESULT_NOSYS;
+#endif
 }

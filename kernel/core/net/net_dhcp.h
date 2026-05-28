@@ -4,6 +4,7 @@
 #include "contract_p3_dhcp.h"
 #include "contract_p3_packet.h"
 #include "contract_result.h"
+#include "fl/driver/net.h"
 
 #include <stddef.h>
 #include <stdint.h>

@@ -69,6 +69,10 @@ fl_result_t fl_net_route_add(uint32_t addr_be, uint8_t prefix_len, uint32_t gw_b
                              fl_net_driver_t *drv, uint32_t src_ip_be, const uint8_t src_mac[6]) {
     fl_net_route_entry_t *e;
 
+    /* #267: only 0.0.0.0/0 is valid for prefix /0; other nets with /0 are catch-alls in
+     * fl_net_ipv4_prefix_match and are rejected (e.g. 1.2.3.4/0). */
+    if (prefix_len == 0u && addr_be != 0u)
+        return FL_RESULT_INVAL;
     if (!drv || prefix_len > FL_NET_IPV4_MAX_PREFIX_LEN)
         return FL_RESULT_INVAL;
     if (s_route_count >= FL_NET_ROUTE_TABLE_MAX)

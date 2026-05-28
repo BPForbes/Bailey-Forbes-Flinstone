@@ -19,7 +19,7 @@ fl_result_t fl_net_wire_egress_l4(uint32_t dst_be, uint8_t ip_proto, const uint8
 /**
  * One-way L4 transmit: route → **ARP(IP_dst)** → build IPv4/Ethernet → netdev TX.
  * Does not wait for a reply (UDP/datagram friendly). Falls back to **FL_RESULT_NOENT**
- * when no routed netdev path exists (caller may use hosted **fl_net_wire_send_udp**).
+ * when no routed netdev path exists (**FL_RESULT_NOENT**; no Linux datagram shim).
  */
 fl_result_t fl_net_wire_egress_l4_xmit(uint32_t dst_be, uint8_t ip_proto, const uint8_t *l4,
                                        size_t l4_len, unsigned arp_timeout_ms);
