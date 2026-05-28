@@ -1,0 +1,4 @@
+MAJOR=4
+STANDARD=2
+RELEASE=0
+DESCRIPTION=4.2.0: server and deferred items implementation — adds server runtime and asynchronous deferred item processing infrastructure.
