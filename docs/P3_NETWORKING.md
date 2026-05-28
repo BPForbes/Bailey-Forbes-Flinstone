@@ -198,17 +198,17 @@ Inventory of **named protocols** (and closely related APIs) versus what this tre
 |------------------------|-----------------|----------------|---------------|---------------|
 | **ICMP echo** (ping) | — (IP proto 1) | **RFC 792** | ~✅ | **`net_icmp.c`**, **`fl_net_ping`**, shell **`ping`** (port 0) |
 | **UDP** | 1–65535 | **RFC 768** | ~✅ | **`net_udp.c`**, **`fl_net_wire_send_udp_pkt`**; not a general datagram API for apps yet |
-| **TCP** | 1–65535 | **RFC 793** | ~✅ (shim) | **`net_tcp.c`** SYN probe; hosted **`fl_net_tcp_stream_*`** / **`fl_net_sock_*`**; in-tree FSM TODO |
-| **TLS** | 443 (HTTPS) | **RFC 8446** (TLS 1.3); **RFC 5246** (TLS 1.2) | ~✅ (boundary only) | **`net_tls_hosted.c`** — **`FL_NET_TLS_MAX_PLAINTEXT_RECORD`** sizing hook; **no** mbedTLS/OpenSSL in tree (**P3-9**) |
-| **DNS** | 53/udp | **RFC 1035** (subset) | ~✅ | **`net_dns.c`** — **`fl_net_resolve_ipv4`**: literals, **`localhost`**, single nameserver from **`/etc/resolv.conf`**, **A** records only (no AAAA, no caching, no EDNS) |
-| **DHCP** (IPv4) | 67/68/udp | **RFC 2131**, **RFC 2132** | ~✅ (lab) | **`net_dhcp.c`** — BOOTP/DHCP codec, **`fl_net_dhcp_*_pkt`**; lab client via UDP; **not** a production lease manager or renew/rebind FSM |
-| **HTTP** | 80/tcp | **RFC 9110**, **RFC 9112** | ❌ | Planned userland client (**`docs/ROADMAP.md`** §11.1, **PX-11**); needs **P3-7** TCP + parsers |
+| **TCP** | 1–65535 | **RFC 793** | ~✅ | **`net_tcp_fsm.c`** loopback FSM + **`net_tcp.c`** / **`fl_net_tcp_stream_*`** |
+| **TLS** | 443 (HTTPS) | **RFC 8446** (TLS 1.3); **RFC 5246** (TLS 1.2) | ~✅ | **`net_tls_hosted.c`** — record cap + optional OpenSSL client bridge (**#252**) |
+| **DNS** | 53/udp | **RFC 1035** (subset) | ✅ | **`net_dns.c`** — multi-NS **`/etc/resolv.conf`**, retries, **A** only (**#251**) |
+| **DHCP** (IPv4) | 67/68/udp | **RFC 2131**, **RFC 2132** | ~✅ | **`net_dhcp.c`** — codec + **`fl_net_dhcp_acquire`** (**#247**); renew/rebind FSM future |
+| **HTTP** | 80/tcp | **RFC 9110**, **RFC 9112** | ~✅ (subset) | **`net_http.c`** — HTTP/1.0 GET + status parse (**#259** / **PX-11**) |
 | **HTTPS** | 443/tcp | **RFC 9110** + **RFC 8446** | ❌ | Same as HTTP over **P3-9** TLS on hosted builds; **HTTP(S) boot** (**PX-12**) reuses **P3-7**/**P3-9** |
 | **SMTP** | 25, 587/tcp | **RFC 5321** | ❌ | Not planned in **P3**; no module |
 | **IMAP** | 143, 993/tcp | **RFC 3501** | ❌ | Not planned in **P3**; no module |
 | **FTP** | 20–21/tcp | **RFC 959** | ❌ | Not used; file sharing uses **custom TCP framing** (**`docs/SERVER.md`**, **`contract_p3_session_wire.h`**, **P5** file delivery), not FTP |
 | **SFTP** | 22/tcp (SSH) | **RFC 4253** / draft SFTP | ❌ | Not implemented; same **server** file path as FTP row |
-| **TFTP** | 69/udp | **RFC 1350** | ❌ | Future **PX-12** netboot path over **P3-6** UDP (**`docs/ROADMAP.md`** §12) |
+| **TFTP** | 69/udp | **RFC 1350** | ~✅ (subset) | **`net_tftp.c`** — RRQ build + client read over egress UDP (**#260** / **PX-12**) |
 | **Flinstone `server`** (chat + files) | user **`ip:port`** | **RFC 793** transport; app opcodes in **`contract_p3_session_wire.h`** | ❌ (app) | Product spec **`docs/SERVER.md`**, plan **`docs/P3_13_CHAT_SERVER.md`**; prep PR has socket/session contracts only |
 
 **Clarifications**
@@ -283,8 +283,8 @@ make check-network-requirements
 | **P3-12** | DHCP renew/rebind FSM | Lease DB and renew/rebind after **`fl_net_dhcp_acquire`** |
 | **P3-13** | Chat room | See **`docs/P3_13_CHAT_SERVER.md`**; **#239** / **#238** |
 | ~~Patch~~ | ~~ARP cache TTL / loopback dedup~~ | Done (**#237**, **#240**): **`fl_net_arp_tick`**, **`fl_net_loopback_exchange`**, PIT BH on **B** |
-| **P3-5** | Drop Linux ICMP fallback | When TAP LPM route always matches **dst** |
-| **P3-7** | Full TCP FSM | **RFC 793** state machine — **#238** (SYN probe + hosted shim only today) |
+| ~~P3-5~~ | ~~Drop Linux ICMP fallback~~ | Done (**#262**): egress-only ICMP/UDP when unrouted |
+| **P3-7** | Production TCP timers | Loopback **RFC 793** FSM landed (**#238**); TAP retransmit/TIME_WAIT remain |
 | **P4** | Production **802.3** / virtio NIC | Board/MMIO driver feeding **`fl_net_driver_t`** (beyond lab **`net_baremetal.c`**) |
 
-**GitHub issues (this train):** closes **#237**, **#240**, **#241** (lab bare-metal + checklist); **#232**–**#235** (hosted polish); remains **#238** (UDP demux + TCP FSM), **#239** (P3-13 **`server`**).
+**GitHub issues (umbrella):** PR **#275** closes **#238–#267** except **#239** (P3-13 **`server`**); tracker [`docs/GITHUB_ISSUES_238_267_TRACKER.md`](GITHUB_ISSUES_238_267_TRACKER.md).

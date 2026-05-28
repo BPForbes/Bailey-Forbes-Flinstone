@@ -23,6 +23,8 @@
 #include "net_tcp.h"
 #include "net_tcp_fsm.h"
 #include "net_tls_hosted.h"
+#include "net_http.h"
+#include "net_tftp.h"
 #include "contract_p3_dhcp.h"
 #include "contract_p3_tls_hosted.h"
 #include "contract_p3_socket.h"
@@ -873,6 +875,48 @@ static int test_net_dhcp_frame_codec(void) {
     return 0;
 }
 
+
+static int test_net_http_parse_status(void) {
+    const char *hdr = "HTTP/1.1 200 OK\r\n";
+    int code = 0;
+
+    ASSERT(fl_net_http_parse_status(hdr, strlen(hdr), &code) == FL_RESULT_OK);
+    ASSERT(code == 200);
+    ASSERT(fl_net_http_parse_status("HTTP/1.0 404 Not Found\r\n", 22, &code) == FL_RESULT_OK);
+    ASSERT(code == 404);
+    return 0;
+}
+
+static int test_net_tftp_build_rrq(void) {
+    uint8_t buf[80];
+    size_t n;
+
+    n = fl_net_tftp_build_rrq(buf, sizeof(buf), "boot.bin", "octet");
+    ASSERT(n > 6u);
+    ASSERT(buf[0] == 0 && buf[1] == 1);
+    return 0;
+}
+
+static int test_route_reject_default(void) {
+    uint8_t mac[6] = {0x02, 0, 0, 0, 0, 1};
+
+    fl_net_route_clear();
+    ASSERT(fl_net_route_add(0u, 0u, 0x0200000au, fl_net_netdev_loopback(),
+                            (uint32_t)FL_NET_IPV4_LOOPBACK_FIRST_OCTET | (1u << 24), mac) ==
+           FL_RESULT_INVAL);
+    return 0;
+}
+
+static int test_net_tls_openssl_bridge(void) {
+    ASSERT(fl_net_tls_hosted_max_plaintext_record() == (size_t)FL_NET_TLS_MAX_PLAINTEXT_RECORD);
+    if (!fl_net_tls_hosted_openssl_available()) {
+        fl_net_tls_session_t sess = FL_NET_TLS_SESSION_INVALID;
+        ASSERT(fl_net_tls_hosted_client_connect(-1, "localhost", &sess) == FL_RESULT_NOSYS);
+        return 0;
+    }
+    return 0;
+}
+
 static int test_net_tls_hosted_cap(void) {
     ASSERT(fl_net_tls_hosted_max_plaintext_record() == (size_t)FL_NET_TLS_MAX_PLAINTEXT_RECORD);
     return 0;
@@ -1036,6 +1080,26 @@ int main(void) {
 
     printf("test_net_dhcp_frame_codec... ");
     if (test_net_dhcp_frame_codec() != 0)
+        return 1;
+    puts("ok");
+
+    printf("test_net_http_parse_status... ");
+    if (test_net_http_parse_status() != 0)
+        return 1;
+    puts("ok");
+
+    printf("test_net_tftp_build_rrq... ");
+    if (test_net_tftp_build_rrq() != 0)
+        return 1;
+    puts("ok");
+
+    printf("test_route_reject_default... ");
+    if (test_route_reject_default() != 0)
+        return 1;
+    puts("ok");
+
+    printf("test_net_tls_openssl_bridge... ");
+    if (test_net_tls_openssl_bridge() != 0)
         return 1;
     puts("ok");
 

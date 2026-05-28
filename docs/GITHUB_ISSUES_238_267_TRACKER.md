@@ -1,56 +1,36 @@
 # GitHub issues #238–#267 (umbrella tracker)
 
-Coordination doc for branch **`cursor/github-issues-238-267-b55d`**. Scope: issues **#238** through **#267** inclusive, **excluding [#239](https://github.com/BPForbes/Bailey-Forbes-Flinstone/issues/239)** (P3-13 chat `server` — separate train; see [`docs/P3_13_CHAT_SERVER.md`](P3_13_CHAT_SERVER.md)).
+Coordination doc for branch **`cursor/github-issues-238-267-b55d`** → PR **#275** into **`develop`**.
 
-Primary networking map: [`docs/P3_NETWORKING.md`](P3_NETWORKING.md).
+Scope: issues **#238** through **#267** inclusive, **excluding [#239](https://github.com/BPForbes/Bailey-Forbes-Flinstone/issues/239)** (P3-13 chat **`server`** — separate train; see [`docs/P3_13_CHAT_SERVER.md`](P3_13_CHAT_SERVER.md)).
 
-## Open (in scope)
+Primary networking map: [`docs/P3_NETWORKING.md`](P3_NETWORKING.md). Deferred **P3-10** / **P3-11**: [`docs/P3_NETWORKING_DEFERRED.md`](P3_NETWORKING_DEFERRED.md).
 
-| Issue | Title | Kind |
-|-------|--------|------|
-| [#240](https://github.com/BPForbes/Bailey-Forbes-Flinstone/issues/240) | P3 PRE 4.2.0 gap tracker: integration ~✅ → ✅ | Checklist / docs |
-| [#252](https://github.com/BPForbes/Bailey-Forbes-Flinstone/issues/252) | P3-9: TLS library bridge | Implementation |
-| [#257](https://github.com/BPForbes/Bailey-Forbes-Flinstone/issues/257) | P3-10: Wi-Fi station path (deferred) | Tracker |
-| [#258](https://github.com/BPForbes/Bailey-Forbes-Flinstone/issues/258) | P3-11: IPv6 + ICMPv6 (deferred) | Tracker |
-| [#259](https://github.com/BPForbes/Bailey-Forbes-Flinstone/issues/259) | PX-11: HTTP/HTTPS L7 stack | Tracker |
-| [#260](https://github.com/BPForbes/Bailey-Forbes-Flinstone/issues/260) | PX-12: netboot / PXE / UEFI | Tracker |
-| [#262](https://github.com/BPForbes/Bailey-Forbes-Flinstone/issues/262) | P3-5/P3-4: drop Linux ICMP fallback, consolidate loopback egress | Bug / refactor |
-| [#267](https://github.com/BPForbes/Bailey-Forbes-Flinstone/issues/267) | P3-5 IPv4: default-route, PMTU, offload policy | Tracker / implementation |
+## Resolved on this branch (closes in PR #275)
 
-## Closed or merged in range (reference)
+| Issue | Summary |
+|-------|---------|
+| [#238](https://github.com/BPForbes/Bailey-Forbes-Flinstone/issues/238) | Loopback **RFC 793** TCP FSM subset, UDP parse/xmit/echo, egress-routed connect |
+| [#240](https://github.com/BPForbes/Bailey-Forbes-Flinstone/issues/240) | PRE 4.2.0 integration checklist — **ROADMAP** / **P3_NETWORKING** ~✅ → ✅ |
+| [#247](https://github.com/BPForbes/Bailey-Forbes-Flinstone/issues/247) | **`fl_net_dhcp_acquire`** over egress + static route install |
+| [#251](https://github.com/BPForbes/Bailey-Forbes-Flinstone/issues/251) | Multi-nameserver DNS, retries, rotating TXIDs |
+| [#252](https://github.com/BPForbes/Bailey-Forbes-Flinstone/issues/252) | **P3-9** OpenSSL client bridge when **libssl** is present |
+| [#257](https://github.com/BPForbes/Bailey-Forbes-Flinstone/issues/257) | **P3-10** Wi‑Fi deferred tracker + contract cross-link |
+| [#258](https://github.com/BPForbes/Bailey-Forbes-Flinstone/issues/258) | **P3-11** IPv6 deferred tracker + contract cross-link |
+| [#259](https://github.com/BPForbes/Bailey-Forbes-Flinstone/issues/259) | **PX-11** minimal HTTP/1.0 GET (**`net_http.c`**) |
+| [#260](https://github.com/BPForbes/Bailey-Forbes-Flinstone/issues/260) | **PX-12** TFTP RRQ/client subset (**`net_tftp.c`**) |
+| [#262](https://github.com/BPForbes/Bailey-Forbes-Flinstone/issues/262) | Egress-only ICMP/UDP; no Linux datagram fallback when unrouted |
+| [#267](https://github.com/BPForbes/Bailey-Forbes-Flinstone/issues/267) | Reject **0.0.0.0/0** in **`fl_net_route_add`**; PMTU/offload policy documented |
 
-| Issue | State | Notes |
-|-------|--------|--------|
-| #241 | CLOSED | Bare-metal 802.3 / ARP/IPv4 wire |
-| #242 | CLOSED | P1-8 workqueue |
-| #243 | MERGED | Packet layering contract |
-| #244 | MERGED | UDP demux / socket shim prep |
-| #245–#246 | CLOSED | TCP FSM follow-ups |
-| #248–#249 | CLOSED | PX-11 HTTP(S), PX-12 TFTP (implementation landed) |
-| #250 | CLOSED | P3-14 RX dequeue / TCP timer wheel |
-| #253–#256 | CLOSED | TLS/DHCP/DNS follow-ups + docs sync |
-| #261 | CLOSED | `P3_NETWORKING.md` sync |
-| #263–#266 | CLOSED | Protocol gap index / UDP façade trackers |
-| #238 | IN PROGRESS (loopback) | TCP FSM + UDP demux on branch |
-| #251 | DONE (branch) | Multi-NS DNS + egress UDP |
-| #247 | DONE (branch) | `fl_net_dhcp_acquire` + route |
+## Out of scope (not closed by this PR)
 
-## Progress
+| Issue | Reason |
+|-------|--------|
+| [#239](https://github.com/BPForbes/Bailey-Forbes-Flinstone/issues/239) | P3-13 **`server`** / chat hub — separate implementation train |
 
-- **#262** — Done: egress-only ICMP/UDP; no Linux datagram shim on unrouted `dst`.
-- **#238** — Loopback TCP FSM: unique ephemeral ports, RST/ACK connect cleanup, routed `fl_net_tcp_connect` via egress; dual-client tests.
-- **#251** — DNS: up to three nameservers from `/etc/resolv.conf`, per-NS retries, rotating query IDs.
-- **#247** — `fl_net_dhcp_acquire` (DISCOVER/OFFER/REQUEST/ACK over egress; optional static route install).
+## Earlier range (reference)
 
-## Suggested work order
-
-1. ~~**#262**~~, ~~**#238** (loopback lab)~~, ~~**#251**~~, ~~**#247** (acquire + route)~~.
-2. **#252** — TLS library bridge.
-3. **#238** follow-up — TAP production TCP timers/retransmit/TIME_WAIT (beyond loopback lab).
-4. **#267** — IPv4 default-route / PMTU / offload policy.
-4. **#267** — IPv4 routing/PMTU/offload policy.
-5. **#240** — PRE 4.2.0 standards checklist as rows flip to ✅.
-6. **#257–#260** — Deferred promotion trackers and doc cross-links as code lands.
+Issues **#241**–**#266** (except those listed above) were closed or merged on prior **PRE 4.2.0** work; see git history and [`version/entries/preproduction 4.2.0/`](version/entries/preproduction%204.2.0/).
 
 ## Tests
 
@@ -61,4 +41,6 @@ make check-network-requirements
 
 ## PR checklist
 
-Update this file and [`docs/P3_NETWORKING.md`](P3_NETWORKING.md) when an issue closes. Reference **`Closes #NNN`** in commit messages where appropriate.
+- [x] Tracker and **P3** docs updated
+- [x] **`version/entries/preproduction 4.2.0/4_2_0_github_issues_238_267_umbrella.ver`** — **DESCRIPTION** only
+- [ ] Do **not** commit **`userland/shell/version_def.h`** or **`version/locked/**`**
