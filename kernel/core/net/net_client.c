@@ -1,3 +1,12 @@
+/*
+ * net_client.c — joining-peer side of the P3-13 session protocol.
+ *
+ * Owns one TCP stream to the host, the assigned member_id, a cached
+ * snapshot of the roster (rebuilt from each OP_MEMBER_LIST_SNAPSHOT),
+ * and the partial-frame parser state used by the non-blocking poller.
+ * The host side lives in net_server.c; both share the wire codec from
+ * net_server.h so encode/decode logic stays in one place.
+ */
 #include "net_client.h"
 
 #include "net_server.h" /* fl_net_session_*_frame, encode/recv helpers */
@@ -16,7 +25,17 @@ fl_result_t fl_net_client_init(fl_net_client_t *client) {
     return fl_net_sock_init();
 }
 
-/* Internal helper used by both the public and source-IP-bound connects. */
+/*
+ * Open a TCP socket (optionally bound to `local_be` first), connect to
+ * `peer_be:port_host`, send our HELLO with the principal, then block up
+ * to `timeout_ms` for HELLO_ACK so the caller can return synchronously
+ * with `assigned_member_id` and `display_name` already populated.
+ *
+ * The synchronous HELLO_ACK wait uses the blocking codec (not the nb
+ * one) because there is only one window's worth of bytes to read here
+ * and a partial read across that window is impossible — recv with a
+ * positive timeout either fills the buffer or times out cleanly.
+ */
 static fl_result_t client_connect_impl(fl_net_client_t *client,
                                        uint32_t local_be,
                                        uint32_t peer_be, uint16_t port_host,
@@ -163,6 +182,9 @@ fl_result_t fl_net_client_set_nick(fl_net_client_t *client, const char *nick) {
                                      (const uint8_t *)nick, (uint16_t)n);
 }
 
+/* Map a wire opcode to the externally-visible event the shell renders.
+ * Unknown / internal opcodes (e.g. handshake echoes) collapse to NONE so
+ * the poll loop skips them without spending a callback round trip. */
 static fl_net_server_event_kind_t opcode_to_event(uint8_t opcode) {
     switch (opcode) {
     case FL_NET_SESSION_OP_HELLO_ACK:
@@ -194,13 +216,19 @@ static fl_net_server_event_kind_t opcode_to_event(uint8_t opcode) {
     }
 }
 
-/* Parse OP_MEMBER_LIST_SNAPSHOT payload into the cached member array. */
+/* Parse OP_MEMBER_LIST_SNAPSHOT into the cached roster.
+ *
+ * Local-only nicks (a viewer's private label for some other member) are
+ * NOT carried on the wire — only the host-global nick is. To avoid
+ * losing them every time the host re-broadcasts the snapshot, we copy
+ * any local_nicks set on the OLD cache aside, rebuild the cache from
+ * the wire, then re-apply by member_id. Members who disconnect between
+ * snapshots silently drop their local_nick along with the slot, which
+ * is the right behaviour. */
 static void client_decode_member_list(fl_net_client_t *client,
                                       const uint8_t *payload, size_t plen) {
     size_t off = 0;
     size_t out = 0;
-
-    /* Preserve any local-only nicks across snapshots: index by member_id. */
     char saved_local_nicks[FL_NET_SERVER_MAX_MEMBERS][FL_NET_SERVER_NICK_MAX];
     fl_net_server_member_id_t saved_ids[FL_NET_SERVER_MAX_MEMBERS];
     size_t saved_n = 0;
@@ -269,6 +297,12 @@ client_member_const(const fl_net_client_t *client, fl_net_server_member_id_t id)
     return NULL;
 }
 
+/* Render precedence (display-name rule, contract_p3_server.h):
+ *   host-global nick  >  client-local nick  >  Principal {N}  >  Principal
+ *
+ * The host-global override means a viewer who set a local nick "Sis" for
+ * member 3 still sees "Boss" if the host later assigns that global nick,
+ * matching the user-facing rule that the host's view is authoritative. */
 static void render_client_member_display(const fl_net_client_member_t *m,
                                          char *out, size_t cap) {
     if (!out || cap == 0u)
@@ -276,7 +310,6 @@ static void render_client_member_display(const fl_net_client_member_t *m,
     out[0] = '\0';
     if (!m)
         return;
-    /* Host-global nick wins over any client-local override (per spec). */
     if (m->nick[0] != '\0') {
         snprintf(out, cap, "%s", m->nick);
         return;
@@ -305,6 +338,11 @@ fl_result_t fl_net_client_member_display(const fl_net_client_t *client,
     return FL_RESULT_OK;
 }
 
+/* Two-pass lookup so a nick (which is by construction unique) short-
+ * circuits before we scan principals. The second pass refuses to return
+ * an ambiguous principal match unless `disambig_match` pins the `{N}`
+ * ordinal; this is how `server msg -user X` errors out with a clear
+ * message instead of silently delivering to a random duplicate. */
 fl_net_server_member_id_t
 fl_net_client_member_lookup(const fl_net_client_t *client, const char *name,
                             unsigned disambig_match) {
@@ -312,7 +350,6 @@ fl_net_client_member_lookup(const fl_net_client_t *client, const char *name,
     unsigned principal_count = 0;
     if (!client || !name || !name[0])
         return FL_NET_SERVER_MEMBER_ID_NONE;
-    /* First pass: exact host-global nick or local-only nick wins (one match). */
     for (size_t i = 0; i < client->member_count; i++) {
         const fl_net_client_member_t *m = &client->members[i];
         if (m->nick[0] && strncmp(m->nick, name, FL_NET_SERVER_NICK_MAX) == 0)

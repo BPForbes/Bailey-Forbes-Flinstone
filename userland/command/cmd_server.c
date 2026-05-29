@@ -400,6 +400,9 @@ static void maybe_handle_nick_prompt_sync(void) {
 /* Verb handlers                                                             */
 /* ------------------------------------------------------------------------- */
 
+/* `server host <ip:port>` — bind the listener, insert host as member 1,
+ * spawn the bg accept/poll loop. Fails if a join is already in flight or
+ * if hosted sockets are unavailable on this build (FL_RESULT_NOSYS). */
 static int verb_host(int argc, char **argv) {
     uint32_t addr_be = 0;
     uint16_t port = 0;
@@ -442,6 +445,11 @@ static int verb_host(int argc, char **argv) {
     return 0;
 }
 
+/* `server join <ip:port> [-bind <local_ip>]` — connect, synchronously
+ * run the optional Y/N nick prompt (so the prompt and the user's typed
+ * answer never race with a background announce), then hand off to the
+ * bg receive loop. `-bind` selects the local source IP for multi-IP /
+ * netns lab setups. */
 static int verb_join(int argc, char **argv) {
     uint32_t peer_be = 0;
     uint16_t port = 0;
@@ -496,6 +504,9 @@ static int verb_join(int argc, char **argv) {
     return 0;
 }
 
+/* `server leave` is dual-role: from a host shell it triggers transfer-
+ * and-stop (the lowest non-host id is promoted and a blue announce
+ * tells everyone); from a joined shell it simply disconnects. */
 static int verb_leave(void) {
     if (g_server_running) {
         /* Host leaving: transfer + stop. */
@@ -542,6 +553,10 @@ static int verb_kill(void) {
     return 0;
 }
 
+/* `server msg [-all | -user <name> [-id <N>] | -id <N>] <text...>`
+ * Routes through one of the public (MSG_BROADCAST) or private
+ * (MSG_DIRECT) wire paths. Sender renders nothing on success; the
+ * server skips the sender on fan-out so there is no echo to suppress. */
 static int verb_msg(int argc, char **argv) {
     /* server msg [-all] <text...>
      * server msg -user <name> [-id <N>] <text...>
@@ -769,6 +784,8 @@ static int verb_nick(int argc, char **argv) {
     return 0;
 }
 
+/* `server connected` — roster. Host reads the live registry; client
+ * reads the cached OP_MEMBER_LIST_SNAPSHOT. Anyone can run it. */
 static int verb_connected(void) {
     if (g_server_running) {
         char disp[FL_NET_SERVER_DISPLAY_NAME_MAX];

@@ -1,3 +1,19 @@
+/*
+ * net_server.c — host side of the P3-13 session protocol.
+ *
+ * Owns the TCP listener, the member registry (host inserted at
+ * member_id 1 as a self-member with no socket), the wire codec used
+ * by both server and client, and the announcement / chat / nick /
+ * host-transfer dispatch. All writes go through one of:
+ *
+ *   broadcast_to_peers          — to every peer with a live socket
+ *   broadcast_to_peers_except   — fan-out that skips the sender (chat)
+ *   fl_net_session_send_frame   — point-to-point (private DM, errors)
+ *
+ * Reads happen one frame at a time per peer via the non-blocking
+ * fl_net_session_recv_frame_nb helper, with per-slot rx state in
+ * s_member_rx[] so a partial TCP segment never desyncs the parser.
+ */
 #include "net_server.h"
 
 #include "fl_colors.h"
@@ -24,6 +40,9 @@ static void member_rx_reset_slot(size_t i) {
 /* Wire codec                                                                */
 /* ------------------------------------------------------------------------- */
 
+/* Wire encoder: [magic(1)][version(1)][opcode(1)][flags(1)=0][len_be(2)]
+ * followed by `payload_len` raw bytes. The reserved flags byte is always
+ * emitted as 0; the matching recv path rejects non-zero on input. */
 size_t fl_net_session_encode_frame(uint8_t *buf, size_t cap, uint8_t opcode,
                                    const uint8_t *payload, uint16_t payload_len) {
     size_t need;
@@ -50,8 +69,10 @@ size_t fl_net_session_encode_frame(uint8_t *buf, size_t cap, uint8_t opcode,
     return need;
 }
 
-/* Read exactly `n` bytes from `handle` into `out`, honouring the per-call
- * timeout. Returns FL_RESULT_OK only when all bytes have arrived. */
+/* Loop fl_net_sock_recv until `n` bytes are in `out` or we hit an error.
+ * The blocking variant of the recv path uses this directly; the
+ * non-blocking poller does NOT (it would lose bytes on EAGAIN — see
+ * fl_net_session_recv_frame_nb and its per-stream rx state). */
 static fl_result_t recv_exact(fl_net_sock_handle_t handle, uint8_t *out, size_t n,
                               unsigned timeout_ms) {
     size_t total = 0;
@@ -230,6 +251,8 @@ fl_result_t fl_net_session_send_frame(fl_net_sock_handle_t handle, uint8_t opcod
 /* Member registry helpers                                                   */
 /* ------------------------------------------------------------------------- */
 
+/* Linear scan — bounded by FL_NET_SERVER_MAX_MEMBERS (16) so any
+ * dictionary would be larger than the search it replaces. */
 static fl_net_server_member_t *member_by_id(fl_net_server_t *srv,
                                             fl_net_server_member_id_t id) {
     if (!srv || id == FL_NET_SERVER_MEMBER_ID_NONE)
@@ -279,7 +302,10 @@ static unsigned principal_count_other(const fl_net_server_t *srv,
     return n;
 }
 
-/* Recompute disambig_index for every member sharing `principal`. */
+/* Re-walk the registry to assign `{1}..{N}` to every member that shares
+ * `principal`, or clear the marker when only one such member remains.
+ * Called on join and drop so `flinstone {2}` leaving correctly reverts
+ * the remaining `flinstone {1}` to plain `flinstone`. */
 static void recompute_disambig(fl_net_server_t *srv, const char *principal) {
     unsigned same_count = 0;
     unsigned ordinal = 0;
@@ -601,6 +627,10 @@ fl_result_t fl_net_server_broadcast_member_list(fl_net_server_t *srv) {
 /* Host transfer                                                             */
 /* ------------------------------------------------------------------------- */
 
+/* Successor selection rule: lowest non-host member_id with a live
+ * socket. This is the "stack" promotion mode — the user who joined
+ * earliest becomes the new host. A future map-style mode (explicit
+ * host pick) is sketched in the contract but not in this train. */
 fl_result_t fl_net_server_transfer_and_stop(fl_net_server_t *srv,
                                             fl_net_server_member_id_t *new_host_out) {
     fl_net_server_member_t *succ = NULL;
