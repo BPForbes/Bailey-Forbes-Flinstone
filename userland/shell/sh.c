@@ -43,6 +43,7 @@
  *****************************************************************************/
 
 #include "common.h"
+#include "shell_io.h"
 #include <stdint.h>
 #include "threadpool.h"
 #include "interpreter.h"
@@ -227,6 +228,10 @@ int main(int argc, char *argv[]) {
     /* Lab weak seeds are opt-in; set FL_USERS_LAB_DEFAULTS=1 to enable. */
     if (!getenv("FL_USERS_LAB_DEFAULTS"))
         (void)setenv("FL_USERS_LAB_DEFAULTS", "0", 0);
+    /* Register the prompt-aware async print hooks so server / client
+     * background threads can interleave colour-tagged output with the
+     * interactive readline without gluing onto "shell> ". */
+    fl_shell_io_init();
     /* Seed the random number generator */
     srand((unsigned) time(NULL));
 

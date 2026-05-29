@@ -328,6 +328,70 @@ fl_result_t fl_net_sock_set_nonblock(fl_net_sock_handle_t handle, int nonblock) 
 #endif
 }
 
+fl_result_t fl_net_sock_connect_from(fl_net_sock_handle_t handle,
+                                     uint32_t local_be,
+                                     uint32_t peer_be, uint16_t port_host) {
+#if !defined(FL_NET_SOCK_HOSTED)
+    (void)handle;
+    (void)local_be;
+    (void)peer_be;
+    (void)port_host;
+    return FL_RESULT_NOSYS;
+#else
+    fl_net_sock_slot_t *s = sock_lookup(handle);
+    struct sockaddr_in sa;
+    if (!s)
+        return FL_RESULT_INVAL;
+    if (local_be != 0u) {
+        int yes = 1;
+        (void)setsockopt(s->fd, SOL_SOCKET, SO_REUSEADDR, &yes, sizeof(yes));
+        sock_sin4(&sa, local_be, 0);
+        if (bind(s->fd, (struct sockaddr *)&sa, sizeof(sa)) != 0)
+            return FL_RESULT_ERR;
+    }
+    sock_sin4(&sa, peer_be, port_host);
+    if (connect(s->fd, (struct sockaddr *)&sa, sizeof(sa)) != 0)
+        return FL_RESULT_ERR;
+    return FL_RESULT_OK;
+#endif
+}
+
+fl_result_t fl_net_sock_peer_ipv4(fl_net_sock_handle_t handle, uint32_t *out_be) {
+#if !defined(FL_NET_SOCK_HOSTED)
+    (void)handle;
+    (void)out_be;
+    return FL_RESULT_NOSYS;
+#else
+    fl_net_sock_slot_t *s = sock_lookup(handle);
+    struct sockaddr_in sa;
+    socklen_t slen = sizeof(sa);
+    if (!s || !out_be)
+        return FL_RESULT_INVAL;
+    if (getpeername(s->fd, (struct sockaddr *)&sa, &slen) != 0)
+        return FL_RESULT_ERR;
+    *out_be = sa.sin_addr.s_addr;
+    return FL_RESULT_OK;
+#endif
+}
+
+fl_result_t fl_net_sock_local_ipv4(fl_net_sock_handle_t handle, uint32_t *out_be) {
+#if !defined(FL_NET_SOCK_HOSTED)
+    (void)handle;
+    (void)out_be;
+    return FL_RESULT_NOSYS;
+#else
+    fl_net_sock_slot_t *s = sock_lookup(handle);
+    struct sockaddr_in sa;
+    socklen_t slen = sizeof(sa);
+    if (!s || !out_be)
+        return FL_RESULT_INVAL;
+    if (getsockname(s->fd, (struct sockaddr *)&sa, &slen) != 0)
+        return FL_RESULT_ERR;
+    *out_be = sa.sin_addr.s_addr;
+    return FL_RESULT_OK;
+#endif
+}
+
 int fl_net_sock_host_fd(fl_net_sock_handle_t handle) {
 #if !defined(FL_NET_SOCK_HOSTED)
     (void)handle;

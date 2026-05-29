@@ -2,7 +2,7 @@
 
 This document describes the **multi-user server** product: shell commands, terminal colours, TCP framing, file and message transfer, and member identity. It is **normative for product behaviour** on top of the network contracts.
 
-**This train (network prep PR) does not ship the server.** It adds **P3-6** UDP demux, a **P3-13a** hosted socket shim (**`net_socket.c`**), session wire constants (**`contract_p3_session_wire.h`**), and **P5-5**–**P5-7** storage contracts for **`server_share/`** and file delivery. A follow-up PR implements **`cmd_server.c`**, **`net_server.c`**, and the background receive path.
+**Status (PRE 4.2.0 BUILD 8+):** the server foundation is implemented and lives at **`kernel/core/net/net_server.[ch]`** (host + member registry, ANSI announcement protocol), **`kernel/core/net/net_client.[ch]`** (client state machine + cached roster snapshot + private-message send), **`kernel/core/net/server_bg.[ch]`** (pthread receive loops), **`userland/command/cmd_server.c`** (shell verbs), and **`userland/shell/fl_colors.[ch]`** + **`userland/shell/shell_io.[ch]`** (colour palette + prompt-aware async output). See **§3.4 Private and public messages**, **§3.5 Multi-IP / non-loopback hosting**, and **§3.6 Host transfer on leave / exit** below for the additions that ship in this train; file transfer (**`server send -file`**) is still scoped for a follow-up commit.
 
 Related: **`docs/P3_13_CHAT_SERVER.md`** (chat-room v1), **`docs/P3_NETWORKING.md`** ([protocol inventory](P3_NETWORKING.md#application-layer-and-common-internet-protocols) — this product is **not** FTP/SFTP/HTTP), **`docs/ROADMAP.md`**.
 
@@ -42,12 +42,27 @@ Source pattern (CC BY-SA 4.0, [Stack Overflow](https://stackoverflow.com/a/23657
 
 | Role | Macro | Example output |
 |------|-------|----------------|
-| Normal user / shell input | **WHT** | `server send -message "Hello" -user JohnDoe` |
-| Server success | **GRN** | `[server] message delivered to JohnDoe` |
-| Server error | **RED** | `[server] user JohnDoe not connected` |
-| Server warning | **YEL** | `[server] file exists; pass -overwrite to replace` |
+| Normal user / shell input | **KWHT** | `server send -message "Hello" -user JohnDoe` |
+| Server success | **KGRN** | `[Server] hosting as 'flinstone' on 10.99.0.1:49913` |
+| Server error | **KRED** | `[ERROR] nickname 'flinstone' is taken or matches another member's username` |
+| Server warning / interactive nick prompt | **KYEL** | `Your username flinstone is already in use by another connected user, would you want to be nicked [Y/N]?` |
+| Server announcement | **KBLU** | `[Server Announcement] User flinstone {2} has been nicked by host. Their nickname is "Jeff".` |
+| Public / private chat | **KCYN** | `[Server Message, You -> Bobby]: Hello private` |
 
-Implementation note: wrap **only** the server-prefixed status lines; do not colour arbitrary user **`echo`** output unless the user opts in.
+The exact macro definitions (matching the **Stack Overflow** CC BY-SA 2.5 reference at **<https://stackoverflow.com/a/3586005>**, retrieved 2026-05-29) live in **`userland/shell/fl_colors.h`**:
+
+```c
+#define KNRM "\x1B[0m"
+#define KRED "\x1B[31m"
+#define KGRN "\x1B[32m"
+#define KYEL "\x1B[33m"
+#define KBLU "\x1B[34m"
+#define KMAG "\x1B[35m"
+#define KCYN "\x1B[36m"
+#define KWHT "\x1B[37m"
+```
+
+Implementation note: wrap **only** the server-prefixed status lines; do not colour arbitrary user **`echo`** output unless the user opts in. The colour helpers route through prompt-aware prelude/postlude hooks registered by **`userland/shell/shell_io.c`** so that an asynchronous announcement is never glued onto the live `shell> ` prompt — the helper clears the input line, prints the tagged message on its own line, then redraws `shell> ` plus the buffered keystrokes.
 
 ---
 
@@ -129,12 +144,61 @@ Other members still see `[1] JohnDoe` without **Ashly**. See §5.2.
 
 The host assigns **`member_id`** at join (**`HELLO`** / **`HELLO_ACK`**). Ids are **stable for the connection** and listed in join order unless a maintainer documents reordering on host promote.
 
-### 3.3 Messaging and files
+### 3.3 Private and public messages (`server msg`)
+
+Both shipped today; **`server send -file`** remains scoped for a follow-up commit.
+
+| Command | Effect | Local render (sender) | Remote render (receiver) |
+|---------|--------|------------------------|---------------------------|
+| **`server msg <text>`** | Broadcast to every member | `[Server Message, You -> All]: <text>` | `[Server Message, From <sender>]: <text>` |
+| **`server msg -all <text>`** | Explicit broadcast (same as above) | `[Server Message, You -> All]: <text>` | `[Server Message, From <sender>]: <text>` |
+| **`server msg -user <name> <text>`** | Private chat (resolved by host-global nick → local nick → unique principal) | `[Server Message, You -> <name>]: <text>` | `[Server Message, <sender> -> You]: <text>` |
+| **`server msg -user <name> -id <N> <text>`** | Private chat; pin to the duplicate ordinal `{N}` when several connected members share the principal | `[Server Message, You -> <name> {N}]: <text>` | `[Server Message, <sender> -> You]: <text>` |
+| **`server msg -id <N> <text>`** | Private chat by raw `member_id` (`N` is the assigned id, not the disambiguation ordinal) | `[Server Message, You -> <display>]: <text>` | `[Server Message, <sender> -> You]: <text>` |
+
+All chat lines render in **KCYN**. Private messages travel as **`OP_MSG_DIRECT`** (client → host) and **`OP_MSG_DIRECT_DELIVER`** (host → recipient) and are **not** copied to any other peer.
+
+**Nick preference for display:** host-global nick wins over a client-local nick. When the local viewer has set a client-side nick for a member who later receives a host-global nick, the host-global value overrides the local one in every render (private messages included). The original wording in **`docs/SERVER.md` §5** still applies for client-local overrides on the viewer side.
+
+### 3.4 Multi-IP / non-loopback hosting
+
+`server host` and `server join` accept any local-or-routable IPv4 endpoint. `server join` adds an optional `-bind <local_ip>` flag so the joining client sources its TCP from a specific local IP (used by lab demos that put each peer on a distinct `10.99.0.X` loopback alias, and by the auto-reconnect path after a host transfer):
+
+```sh
+server join 10.99.0.1:49913 -bind 10.99.0.10
+```
+
+When `-bind` is omitted, the kernel picks the default source IP for the route to the destination (same as a plain `connect()`).
+
+### 3.5 Host transfer on `server leave` / shell `exit`
+
+When the host runs `server leave` (or the shell's `exit` / `exit -y` / `exit -n` while still hosting), the server picks the lowest non-host `member_id` as the successor, broadcasts **`OP_CTRL_HOST_PROMOTE`** with payload `[u16 new_host_id][u32 new_host_ip_be][u16 new_host_port]`, and tears down the old listener. The successor's client side automatically:
+
+1. Stops its receive loop.
+2. Disconnects from the old session.
+3. Calls `fl_net_server_host_start` on its **own** local IP (recorded at join time via `getsockname()`) and the same port.
+4. Starts the server receive loop and prints `[Server] you are now the host on this session`.
+
+Every other peer:
+
+1. Stops its receive loop.
+2. Disconnects from the old session.
+3. Retries `fl_net_client_connect_from(local_ip, new_ip, new_port)` up to 10× with 150 ms back-off so the new listener has time to bind, then resumes background receive.
+4. Re-enters the optional `Y/N` nick prompt if the new session triggers a principal collision.
+
+When the host is the only member, the same code path emits **`OP_CTRL_KILL`** instead of promote and closes every socket.
+
+### 3.6 Shell `exit` integration
+
+Both `exit` (interactive prompt) and `exit -y` / `exit -n` (one-shot) call `cmd_server_atexit()` before tearing the shell down. The hook routes through `verb_leave` semantics: a hosting shell triggers `fl_net_server_transfer_and_stop` (so the session survives), and a joined client shell triggers `fl_net_client_disconnect`. The user does not have to remember to run `server leave` before quitting.
+
+### 3.7 File transfer (planned)
+
+`server send -file` is **not** shipped in this train. The original verb table for the v1 file-transfer surface is preserved below for the follow-up implementation:
 
 | Command | Example | Effect |
 |---------|---------|--------|
-| **`server send -message`** | `server send -message "Hello" -user "JohnDoe"` | Deliver UTF-8 text to one member (ambiguous if several **JohnDoe**) |
-| **`server send -message`** (by id) | `server send -message "Hello" -user "JohnDoe" -id 1` | Deliver to **`member_id` 1** only |
+| **`server send -message`** (legacy alias) | `server send -message "Hello" -user "JohnDoe"` | Deliver UTF-8 text to one member; new code should use **`server msg -user`** instead |
 | **`server send -file`** | `server send -file "./funny/joke.txt" -user "JohnDoe"` | File offer (resolve recipient; use **`-id`** when needed) |
 | **`server send -file`** (by nick) | `server send -file "./funny/joke.txt" -user "Jeff"` | Valid when **Jeff** is a **host-global** nick for that member |
 

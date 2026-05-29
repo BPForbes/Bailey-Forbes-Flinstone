@@ -5,108 +5,95 @@
 #include <stdio.h>
 
 /*
- * ANSI colour macros and tagged print helpers for the Flinstone shell.
+ * Flinstone shell colour helpers.
  *
- * Palette (matches docs/SERVER.md §2 and the announcement convention in
- * contracts/networking/contract_p3_server.h):
+ * ANSI macros (K-prefixed, matching the convention in contracts/networking/
+ * contract_p3_server.h and docs/SERVER.md). Source pattern from
+ * https://stackoverflow.com/a/3586005 (karlphillip et al., CC BY-SA 2.5,
+ * retrieved 2026-05-29):
  *
- *   RED  -> "[ERROR] <text>"            -- shell or server errors
- *   GRN  -> "[Server] <text>"           -- local success acknowledgements
- *   BLU  -> "[Server Announcement] ..." -- host/server-pushed announcements
+ *   #define KNRM  "\x1B[0m"
+ *   #define KRED  "\x1B[31m"
+ *   #define KGRN  "\x1B[32m"
+ *   #define KYEL  "\x1B[33m"
+ *   #define KBLU  "\x1B[34m"
+ *   #define KMAG  "\x1B[35m"
+ *   #define KCYN  "\x1B[36m"
+ *   #define KWHT  "\x1B[37m"
  *
- * Helpers always append "\n" and always emit the closing RESET so a missing
- * newline in the caller's format string cannot leak the colour into the next
- * line. When stdout/stderr is not a TTY (or FL_COLORS_NO_COLOR is non-zero)
- * the ANSI sequences are suppressed and only the tagged text is written, so
- * pipes, logs, and CI capture stay readable.
+ * Palette:
+ *   KRED  -> "[ERROR] <text>"                  -- shell or server errors
+ *   KGRN  -> "[Server] <text>"                 -- local success acks
+ *   KYEL  -> warnings, interactive nick prompt
+ *   KBLU  -> "[Server Announcement] <text>"    -- host/server-pushed announces
+ *   KCYN  -> "[Server Message, ...]: <text>"   -- public / private chat
  *
- * This is a header-only helper to keep the dependency surface minimal: anyone
- * that includes it gets the printers without extra Makefile churn.
+ * Prompt-aware print: each tagged helper calls into optional shell-side
+ * prelude/postlude hooks so that asynchronous output (background receive
+ * loop) does not glue onto the shell's currently-displayed `shell> ` prompt.
+ * The hooks are NULL by default (and tests / non-shell binaries simply skip
+ * them); the shell registers a pthread-mutexed implementation in
+ * `userland/shell/shell_io.c` that clears the input line, prints the tagged
+ * message on its own line, then redraws `shell> ` plus the typed buffer.
  */
 
-#define FL_COLOR_RED   "\x1B[31m"
-#define FL_COLOR_GRN   "\x1B[32m"
-#define FL_COLOR_YEL   "\x1B[33m"
-#define FL_COLOR_BLU   "\x1B[34m"
-#define FL_COLOR_MAG   "\x1B[35m"
-#define FL_COLOR_CYN   "\x1B[36m"
-#define FL_COLOR_WHT   "\x1B[37m"
-#define FL_COLOR_RESET "\x1B[0m"
+#define KNRM "\x1B[0m"
+#define KRED "\x1B[31m"
+#define KGRN "\x1B[32m"
+#define KYEL "\x1B[33m"
+#define KBLU "\x1B[34m"
+#define KMAG "\x1B[35m"
+#define KCYN "\x1B[36m"
+#define KWHT "\x1B[37m"
 
-/* Global suppression hook. Tests / batch mode set this to 1 to strip ANSI. */
-static int fl_color_disabled = 0;
+/* Back-compat aliases (older code may still reference FL_COLOR_*). */
+#define FL_COLOR_RED   KRED
+#define FL_COLOR_GRN   KGRN
+#define FL_COLOR_YEL   KYEL
+#define FL_COLOR_BLU   KBLU
+#define FL_COLOR_MAG   KMAG
+#define FL_COLOR_CYN   KCYN
+#define FL_COLOR_WHT   KWHT
+#define FL_COLOR_RESET KNRM
 
-static inline void fl_color_set_disabled(int disabled) {
-    fl_color_disabled = disabled ? 1 : 0;
-}
-
-static inline int fl_color_is_enabled_for(FILE *fp) {
-    if (fl_color_disabled)
-        return 0;
-    if (!fp)
-        return 0;
-#if defined(_POSIX_C_SOURCE) || defined(__unix__) || defined(__APPLE__) || \
-    defined(__linux__) || defined(__FreeBSD__)
-    {
-        extern int isatty(int);
-        extern int fileno(FILE *);
-        return isatty(fileno(fp)) ? 1 : 0;
-    }
-#else
-    return 0;
+#ifdef __cplusplus
+extern "C" {
 #endif
+
+/* Global colour-disable flag (set to 1 by tests/pipes to strip ANSI). */
+extern int fl_color_disabled;
+
+/* Prompt-aware hooks. Both NULL by default. Registered by shell_io_init(). */
+typedef void (*fl_color_prelude_fn)(void);   /* called before tagged line */
+typedef void (*fl_color_postlude_fn)(void);  /* called after newline */
+extern fl_color_prelude_fn fl_color_prelude_hook;
+extern fl_color_postlude_fn fl_color_postlude_hook;
+
+void fl_color_set_disabled(int disabled);
+int  fl_color_is_enabled_for(FILE *fp);
+
+void fl_color_vfprintf_tagged(FILE *fp, const char *color, const char *tag,
+                              const char *fmt, va_list ap);
+
+/* Blue, "[Server Announcement] " prefix (stdout). */
+void fl_color_announce(const char *fmt, ...);
+/* Red, "[ERROR] " prefix (stderr). */
+void fl_color_error(const char *fmt, ...);
+/* Green, "[Server] " prefix (stdout). */
+void fl_color_success(const char *fmt, ...);
+/* Yellow, "[Server] " prefix (stdout); also used for the interactive nick prompt. */
+void fl_color_warn(const char *fmt, ...);
+/* Yellow, no tag — for interactive prompts (no trailing newline). */
+void fl_color_prompt_yellow(const char *fmt, ...);
+
+/* Cyan "[Server Message, ...]: " family for public and private chat lines. */
+void fl_color_msg_to_user(const char *recipient_display, const char *fmt, ...);
+void fl_color_msg_from_user(const char *sender_display, const char *fmt, ...);
+void fl_color_msg_to_all(const char *fmt, ...);
+void fl_color_msg_from_all(const char *sender_display, const char *fmt, ...);
+
+#ifdef __cplusplus
 }
-
-static inline void fl_color_vfprintf_tagged(FILE *fp, const char *color,
-                                            const char *tag, const char *fmt,
-                                            va_list ap) {
-    int use_color;
-
-    if (!fp)
-        fp = stdout;
-    use_color = fl_color_is_enabled_for(fp);
-
-    if (use_color)
-        fputs(color, fp);
-    fputs(tag, fp);
-    vfprintf(fp, fmt, ap);
-    if (use_color)
-        fputs(FL_COLOR_RESET, fp);
-    fputc('\n', fp);
-    fflush(fp);
-}
-
-/* Blue, "[Server Announcement] " prefix; goes to stdout. */
-static inline void fl_color_announce(const char *fmt, ...) {
-    va_list ap;
-    va_start(ap, fmt);
-    fl_color_vfprintf_tagged(stdout, FL_COLOR_BLU,
-                             "[Server Announcement] ", fmt, ap);
-    va_end(ap);
-}
-
-/* Red, "[ERROR] " prefix; goes to stderr by convention. */
-static inline void fl_color_error(const char *fmt, ...) {
-    va_list ap;
-    va_start(ap, fmt);
-    fl_color_vfprintf_tagged(stderr, FL_COLOR_RED, "[ERROR] ", fmt, ap);
-    va_end(ap);
-}
-
-/* Green, "[Server] " prefix; goes to stdout. */
-static inline void fl_color_success(const char *fmt, ...) {
-    va_list ap;
-    va_start(ap, fmt);
-    fl_color_vfprintf_tagged(stdout, FL_COLOR_GRN, "[Server] ", fmt, ap);
-    va_end(ap);
-}
-
-/* Yellow, "[Server] " prefix for warnings; goes to stdout. */
-static inline void fl_color_warn(const char *fmt, ...) {
-    va_list ap;
-    va_start(ap, fmt);
-    fl_color_vfprintf_tagged(stdout, FL_COLOR_YEL, "[Server] ", fmt, ap);
-    va_end(ap);
-}
+#endif
 
 #endif /* FL_COLORS_H */

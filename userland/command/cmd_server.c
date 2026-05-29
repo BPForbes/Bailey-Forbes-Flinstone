@@ -1,26 +1,27 @@
 /*
- * `server` shell built-in (foundations).
+ * `server` shell built-in.
  *
- * Verbs implemented in this train:
+ * Verbs:
+ *   server host <ip:port>                        -- bind listener + start bg
+ *   server join <ip:port> [-bind <local_ip>]     -- connect; optional source bind
+ *   server msg <text...>                          -- broadcast (global, CYN)
+ *   server msg -all <text...>                     -- broadcast (explicit)
+ *   server msg -user <name> [-id <N>] <text...>   -- private (CYN)
+ *   server msg -id <N> <text...>                  -- private by id
+ *   server announce <text...>                     -- host-only; blue announce
+ *   server nick -id <N> -name <nick>              -- host-only global nick
+ *   server nick -local -id <N> -name <local-nick> -- client-local nick
+ *   server connected                              -- roster (anyone)
+ *   server leave                                  -- client disconnect (or
+ *                                                    host: transfer-and-stop)
+ *   server kill                                   -- host-only; kill all peers
  *
- *   server host <ip:port>            -- bind listener + start background loop
- *   server join <ip:port> [nick]     -- connect; optional nick request
- *   server msg <text>                -- broadcast chat (any member)
- *   server announce <text>           -- host-only; blue "[Server Announcement]"
- *   server nick -id <n> -name <nick> -- host-only global nick reassignment
- *   server connected                 -- print roster (host side)
- *   server leave                     -- client disconnect
- *   server kill                      -- host-only; tear down session
- *
- * Output palette (see userland/shell/fl_colors.h):
- *   RED  -> "[ERROR] ..."                  -- usage and authz errors
- *   GRN  -> "[Server] ..."                 -- local success acknowledgements
- *   BLU  -> "[Server Announcement] ..."    -- host/peer-pushed announcements
- *
- * State model: a process holds exactly **one** of
- *   - a live host server (g_server_running == 1), or
- *   - a live joined client (g_client.state == CONNECTED).
- * Verbs that need one side error out clearly when the other side is active.
+ * Output palette (userland/shell/fl_colors.h):
+ *   KRED  -> "[ERROR] ..."                  -- usage and authz errors
+ *   KGRN  -> "[Server] ..."                 -- local success acknowledgements
+ *   KYEL  -> warnings and interactive prompts (nick prompt)
+ *   KBLU  -> "[Server Announcement] ..."    -- host/peer-pushed announces
+ *   KCYN  -> "[Server Message, ...]: ..."   -- public / private chat
  */
 
 #include "cmd_decl.h"
@@ -31,11 +32,17 @@
 #include "net_ipv4.h"
 #include "server_bg.h"
 #include "session.h"
+#include "shell_io.h"
 
+#include <arpa/inet.h>
 #include <errno.h>
+#include <netinet/in.h>
+#include <pthread.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <time.h>
+#include <unistd.h>
 
 /* ------------------------------------------------------------------------- */
 /* Process-wide session state                                                */
@@ -55,11 +62,14 @@ static const char *current_principal(void) {
     return "Flinstone";
 }
 
+/* Public accessor so cmd_exit (and any other shell teardown path) can
+ * cleanly drop the session before the process dies. */
+void cmd_server_atexit(void);
+
 /* ------------------------------------------------------------------------- */
 /* Helpers                                                                   */
 /* ------------------------------------------------------------------------- */
 
-/* Parse "ip:port" into (addr_be, port_host). IPv4 literal only (v1). */
 static int parse_endpoint(const char *s, uint32_t *addr_be_out, uint16_t *port_out) {
     char buf[64];
     char *colon;
@@ -78,10 +88,8 @@ static int parse_endpoint(const char *s, uint32_t *addr_be_out, uint16_t *port_o
     if (!colon || colon == buf)
         return -1;
     *colon = '\0';
-
     if (!fl_net_ipv4_parse_literal(buf, addr_be_out))
         return -1;
-
     errno = 0;
     port = strtol(colon + 1, &end, 10);
     if (errno != 0 || end == colon + 1 || (end && *end != '\0'))
@@ -106,13 +114,37 @@ static fl_net_server_member_id_t parse_member_id_arg(const char *s) {
     return (fl_net_server_member_id_t)v;
 }
 
+static void join_argv_into(char *dst, size_t cap, int argc, char **argv, int from) {
+    size_t off = 0;
+    dst[0] = '\0';
+    for (int i = from; i < argc; i++) {
+        size_t need = strnlen(argv[i], cap);
+        if (off > 0u && off + 1u < cap) {
+            dst[off++] = ' ';
+            dst[off] = '\0';
+        }
+        if (off + need >= cap)
+            need = cap - 1u - off;
+        if (need > 0u) {
+            memcpy(dst + off, argv[i], need);
+            off += need;
+            dst[off] = '\0';
+        }
+    }
+}
+
 /* ------------------------------------------------------------------------- */
-/* Client-side event sink                                                    */
+/* Client-side event sink (called from the background pthread)               */
 /* ------------------------------------------------------------------------- */
+
+/* Forward declarations referenced by the client event sink. */
+static void start_client_bg(void);
+static void spawn_promote_thread(int am_new_host, uint32_t new_ip_be,
+                                 uint16_t new_port);
+static void maybe_handle_nick_prompt_sync(void);
 
 static void client_event_print(fl_net_server_event_kind_t kind, const char *text,
                                fl_net_server_member_id_t mid, void *data) {
-    (void)mid;
     (void)data;
     switch (kind) {
     case FL_NET_SERVER_EVENT_JOIN_ANNOUNCE:
@@ -122,12 +154,37 @@ static void client_event_print(fl_net_server_event_kind_t kind, const char *text
         fl_color_announce("%s", text);
         break;
     case FL_NET_SERVER_EVENT_NICK_PROMPT:
+        /* In normal flow we handle the prompt synchronously in verb_join
+         * before starting the background loop. If it ever arrives later,
+         * just surface it as a warning so the user sees it. */
         fl_color_warn("nick prompt: %s", text);
         break;
-    case FL_NET_SERVER_EVENT_MSG:
-        /* Chat lines render plain so the shell does not colour user content. */
-        printf("%s\n", text);
-        fflush(stdout);
+    case FL_NET_SERVER_EVENT_MSG: {
+        /* Public chat — already prefixed "Sender: text" by the host. Split
+         * it back into sender + text so we render with the CYN msg helper. */
+        const char *colon = strchr(text, ':');
+        if (colon && colon > text && colon[1] == ' ') {
+            char sender[FL_NET_SERVER_DISPLAY_NAME_MAX];
+            size_t slen = (size_t)(colon - text);
+            if (slen >= sizeof(sender)) slen = sizeof(sender) - 1u;
+            memcpy(sender, text, slen);
+            sender[slen] = '\0';
+            fl_color_msg_from_all(sender, "%s", colon + 2);
+        } else {
+            fl_color_msg_from_all("?", "%s", text);
+        }
+        break;
+    }
+    case FL_NET_SERVER_EVENT_MSG_PRIVATE: {
+        char sender[FL_NET_SERVER_DISPLAY_NAME_MAX];
+        if (fl_net_client_member_display(&g_client, mid, sender,
+                                         sizeof(sender)) != FL_RESULT_OK)
+            snprintf(sender, sizeof(sender), "member %u", (unsigned)mid);
+        fl_color_msg_from_user(sender, "%s", text);
+        break;
+    }
+    case FL_NET_SERVER_EVENT_MEMBER_LIST:
+        /* Silent: we already cached the roster in net_client. */
         break;
     case FL_NET_SERVER_EVENT_ERR:
         fl_color_error("%s", text);
@@ -135,10 +192,211 @@ static void client_event_print(fl_net_server_event_kind_t kind, const char *text
     case FL_NET_SERVER_EVENT_CLOSED:
         fl_color_warn("session closed by host");
         break;
+    case FL_NET_SERVER_EVENT_HOST_PROMOTE: {
+        /* Payload layout: [u16_be new_host_id][u32 ip_be little-endian-in-our-tx][u16_be port]
+         * net_server.c serialises the IP as 4 raw bytes of the network-byte-
+         * order address; decode that back. */
+        const uint8_t *p = (const uint8_t *)text;
+        uint16_t new_id_be = mid;
+        uint32_t new_ip_be;
+        uint16_t new_port;
+        char peer_ip_str[INET_ADDRSTRLEN] = "?";
+        if (!p) {
+            fl_color_warn("host promote received with no payload; leaving");
+            return;
+        }
+        new_ip_be = (uint32_t)p[2] | ((uint32_t)p[3] << 8) |
+                    ((uint32_t)p[4] << 16) | ((uint32_t)p[5] << 24);
+        new_port = (uint16_t)(((uint16_t)p[6] << 8) | p[7]);
+        {
+            struct in_addr ia;
+            ia.s_addr = new_ip_be;
+            (void)inet_ntop(AF_INET, &ia, peer_ip_str, sizeof(peer_ip_str));
+        }
+        if (new_id_be == g_client.assigned_member_id) {
+            fl_color_announce("you are the new host on %s:%u", peer_ip_str,
+                              (unsigned)new_port);
+            spawn_promote_thread(1, new_ip_be, new_port);
+        } else {
+            fl_color_announce("session host moved to %s:%u; reconnecting...",
+                              peer_ip_str, (unsigned)new_port);
+            spawn_promote_thread(0, new_ip_be, new_port);
+        }
+        break;
+    }
+    case FL_NET_SERVER_EVENT_HOST_REDIRECT:
     case FL_NET_SERVER_EVENT_HELLO_ACK:
     case FL_NET_SERVER_EVENT_NONE:
     default:
         break;
+    }
+}
+
+static void start_client_bg(void) {
+    if (g_client_bg)
+        return;
+    (void)fl_server_bg_start_client(&g_client, client_event_print, NULL, &g_client_bg);
+}
+
+/* ------------------------------------------------------------------------- */
+/* Host transfer transition (spawned as a short-lived detached thread when   */
+/* OP_CTRL_HOST_PROMOTE arrives on the client bg loop)                       */
+/* ------------------------------------------------------------------------- */
+
+typedef struct {
+    int    am_new_host;
+    uint32_t new_ip_be;
+    uint16_t new_port;
+    uint32_t local_ip_be;
+    char     principal[FL_NET_SERVER_PRINCIPAL_MAX];
+} promote_args_t;
+
+static void *promote_thread_main(void *arg) {
+    promote_args_t *pa = (promote_args_t *)arg;
+    struct timespec ts = { 0, 80 * 1000 * 1000 }; /* 80ms settle window */
+    nanosleep(&ts, NULL);
+
+    /* Drop the old client (we are NOT inside that bg loop). */
+    if (g_client_bg) {
+        fl_server_bg_stop_client(g_client_bg);
+        g_client_bg = NULL;
+    }
+    fl_net_client_disconnect(&g_client);
+
+    if (pa->am_new_host) {
+        fl_result_t rc = fl_net_server_host_start(&g_server, pa->local_ip_be,
+                                                  pa->new_port, pa->principal);
+        if (rc != FL_RESULT_OK) {
+            fl_color_error("host takeover bind failed (rc=%d); please run "
+                           "'server host <ip:port>' manually", (int)rc);
+            free(pa);
+            return NULL;
+        }
+        rc = fl_server_bg_start_server(&g_server, &g_server_bg);
+        if (rc != FL_RESULT_OK) {
+            fl_net_server_host_stop(&g_server);
+            fl_color_error("host takeover bg start failed (rc=%d)", (int)rc);
+            free(pa);
+            return NULL;
+        }
+        g_server_running = 1;
+        fl_color_success("you are now the host on this session");
+    } else {
+        /* Re-join the new host. Use our same local IP as source so the new
+         * host can see us coming from a consistent address. The new host's
+         * listener may still be coming up — retry a few times. */
+        fl_result_t rc = FL_RESULT_ERR;
+        for (int attempt = 0; attempt < 10; attempt++) {
+            rc = fl_net_client_connect_from(&g_client, pa->local_ip_be,
+                                            pa->new_ip_be, pa->new_port,
+                                            pa->principal, 1000u);
+            if (rc == FL_RESULT_OK)
+                break;
+            {
+                struct timespec rs = { 0, 150 * 1000 * 1000 }; /* 150ms */
+                nanosleep(&rs, NULL);
+            }
+        }
+        if (rc != FL_RESULT_OK) {
+            fl_color_error("reconnect to new host failed (rc=%d); run "
+                           "'server join <ip:port>' manually", (int)rc);
+            free(pa);
+            return NULL;
+        }
+        maybe_handle_nick_prompt_sync();
+        start_client_bg();
+        fl_color_success("reconnected to new host on member_id %u",
+                         (unsigned)g_client.assigned_member_id);
+    }
+    free(pa);
+    return NULL;
+}
+
+static void spawn_promote_thread(int am_new_host, uint32_t new_ip_be,
+                                 uint16_t new_port) {
+    pthread_t tid;
+    promote_args_t *pa = (promote_args_t *)calloc(1, sizeof(*pa));
+    if (!pa)
+        return;
+    pa->am_new_host = am_new_host;
+    pa->new_ip_be = new_ip_be;
+    pa->new_port = new_port;
+    pa->local_ip_be = g_client.local_ip_be;
+    strncpy(pa->principal, current_principal(), sizeof(pa->principal) - 1u);
+    if (pthread_create(&tid, NULL, promote_thread_main, pa) != 0) {
+        free(pa);
+        return;
+    }
+    pthread_detach(tid);
+}
+
+/* ------------------------------------------------------------------------- */
+/* Interactive Y/N nick prompt on join (synchronous; runs while raw_mode
+ * is OFF in interpreter.c). Returns FL_RESULT_OK after the optional nick
+ * has been sent, or when no prompt arrived. */
+/* ------------------------------------------------------------------------- */
+
+static int read_yn_default_n(void) {
+    char buf[16];
+    if (!fgets(buf, sizeof(buf), stdin))
+        return 0;
+    return (buf[0] == 'Y' || buf[0] == 'y') ? 1 : 0;
+}
+
+static int read_nick_line(char *out, size_t cap) {
+    if (!fgets(out, (int)cap, stdin))
+        return -1;
+    /* strip trailing newline + spaces */
+    size_t n = strlen(out);
+    while (n > 0u && (out[n - 1] == '\n' || out[n - 1] == '\r' ||
+                       out[n - 1] == ' ' || out[n - 1] == '\t')) {
+        out[--n] = '\0';
+    }
+    return n > 0u ? 0 : -1;
+}
+
+static void maybe_handle_nick_prompt_sync(void) {
+    /* Drain frames non-blocking until we either see NICK_PROMPT (handled
+     * inline) or there is nothing pending. */
+    for (int i = 0; i < 50; i++) {
+        uint8_t opcode = 0;
+        uint8_t payload[FL_NET_SESSION_MAX_MSG];
+        uint16_t plen = 0;
+        fl_result_t rc;
+        struct timespec ts = { 0, 20 * 1000 * 1000 }; /* 20ms */
+        nanosleep(&ts, NULL);
+        rc = fl_net_session_recv_frame(g_client.peer_handle, &opcode, payload,
+                                       sizeof(payload), &plen, 0u);
+        if (rc == FL_RESULT_TIMEDOUT)
+            continue;
+        if (rc != FL_RESULT_OK)
+            return;
+        if (opcode == (uint8_t)FL_NET_SESSION_OP_NICK_PROMPT) {
+            char nick[FL_NET_SERVER_NICK_MAX];
+            fl_color_prompt_yellow(
+                "Your username %s is already in use by another connected user, "
+                "would you want to be nicked [Y/N]? ",
+                current_principal());
+            if (!read_yn_default_n()) {
+                fl_color_success("keeping disambiguated principal");
+                return;
+            }
+            fl_color_prompt_yellow("Please enter the nickname you wish to use: ");
+            if (read_nick_line(nick, sizeof(nick)) != 0 || nick[0] == '\0') {
+                fl_color_warn("empty nick — keeping disambiguated principal");
+                return;
+            }
+            if (fl_net_client_set_nick(&g_client, nick) == FL_RESULT_OK)
+                fl_color_success("nick requested: '%s'", nick);
+            else
+                fl_color_error("nick request '%s' rejected", nick);
+            return;
+        }
+        /* Other frames received during the prompt window: drop them silently.
+         * MEMBER_LIST_SNAPSHOT in particular is fine to discard — the next
+         * snapshot after our nick-set will refill the cache. */
+        (void)payload;
+        (void)plen;
     }
 }
 
@@ -173,7 +431,8 @@ static int verb_host(int argc, char **argv) {
         return 1;
     }
     if (rc != FL_RESULT_OK) {
-        fl_color_error("server host failed (rc=%d)", (int)rc);
+        fl_color_error("server host failed (rc=%d); is the port already bound?",
+                       (int)rc);
         return 1;
     }
     rc = fl_server_bg_start_server(&g_server, &g_server_bg);
@@ -188,13 +447,13 @@ static int verb_host(int argc, char **argv) {
 }
 
 static int verb_join(int argc, char **argv) {
-    uint32_t addr_be = 0;
+    uint32_t peer_be = 0;
     uint16_t port = 0;
+    uint32_t local_be = 0;
     fl_result_t rc;
-    const char *nick = NULL;
 
     if (argc < 3) {
-        fl_color_error("usage: server join <ip:port> [nick]");
+        fl_color_error("usage: server join <ip:port> [-bind <local_ip>]");
         return 1;
     }
     if (g_server_running) {
@@ -205,14 +464,22 @@ static int verb_join(int argc, char **argv) {
         fl_color_error("already joined; leave first");
         return 1;
     }
-    if (parse_endpoint(argv[2], &addr_be, &port) != 0) {
+    if (parse_endpoint(argv[2], &peer_be, &port) != 0) {
         fl_color_error("invalid ip:port '%s'", argv[2]);
         return 1;
     }
-    if (argc >= 4 && argv[3] && argv[3][0])
-        nick = argv[3];
-
-    rc = fl_net_client_connect(&g_client, addr_be, port, current_principal(), 3000u);
+    /* Optional -bind <local_ip> for multi-IP demos / tests. */
+    for (int i = 3; i + 1 < argc; i++) {
+        if (!strcmp(argv[i], "-bind")) {
+            if (!fl_net_ipv4_parse_literal(argv[i + 1], &local_be)) {
+                fl_color_error("invalid -bind ip '%s'", argv[i + 1]);
+                return 1;
+            }
+            i++;
+        }
+    }
+    rc = fl_net_client_connect_from(&g_client, local_be, peer_be, port,
+                                    current_principal(), 3000u);
     if (rc == FL_RESULT_NOSYS) {
         fl_color_error("hosted sockets unavailable; cannot join");
         return 1;
@@ -221,24 +488,31 @@ static int verb_join(int argc, char **argv) {
         fl_color_error("server join failed (rc=%d)", (int)rc);
         return 1;
     }
-    rc = fl_server_bg_start_client(&g_client, client_event_print, NULL, &g_client_bg);
-    if (rc != FL_RESULT_OK) {
-        fl_net_client_disconnect(&g_client);
-        fl_color_error("client background start failed (rc=%d)", (int)rc);
-        return 1;
-    }
     fl_color_success("joined as '%s' (member_id %u)", g_client.display_name,
                      (unsigned)g_client.assigned_member_id);
-    if (nick) {
-        if (fl_net_client_set_nick(&g_client, nick) == FL_RESULT_OK)
-            fl_color_success("requested nick '%s'", nick);
-        else
-            fl_color_error("nick request '%s' rejected", nick);
-    }
+    /* Synchronously handle the NICK_PROMPT (if any) BEFORE we start the
+     * background loop so the Y/N dialogue is clean. */
+    maybe_handle_nick_prompt_sync();
+    start_client_bg();
     return 0;
 }
 
 static int verb_leave(void) {
+    if (g_server_running) {
+        /* Host leaving: transfer + stop. */
+        fl_net_server_member_id_t new_host = FL_NET_SERVER_MEMBER_ID_NONE;
+        if (g_server_bg) {
+            fl_server_bg_stop_server(g_server_bg);
+            g_server_bg = NULL;
+        }
+        (void)fl_net_server_transfer_and_stop(&g_server, &new_host);
+        g_server_running = 0;
+        if (new_host != FL_NET_SERVER_MEMBER_ID_NONE)
+            fl_color_success("host transferred to member_id %u", (unsigned)new_host);
+        else
+            fl_color_success("session terminated (no remaining members)");
+        return 0;
+    }
     if (fl_net_client_state(&g_client) != FL_NET_CLIENT_STATE_CONNECTED) {
         fl_color_error("not currently joined");
         return 1;
@@ -268,83 +542,137 @@ static int verb_kill(void) {
 }
 
 static int verb_msg(int argc, char **argv) {
-    char joined[FL_NET_SESSION_MAX_MSG];
-    size_t off = 0;
+    /* server msg [-all] <text...>
+     * server msg -user <name> [-id <N>] <text...>
+     * server msg -id <N> <text...>
+     */
     int i;
-    fl_result_t rc;
+    const char *target_name = NULL;
+    unsigned target_disambig = 0;
+    int is_private = 0;
+    int explicit_all = 0;
+    int first_text = 2;
+    char joined[FL_NET_SESSION_MAX_MSG];
 
     if (argc < 3) {
-        fl_color_error("usage: server msg <text...>");
+        fl_color_error("usage: server msg [-all | -user <name> [-id <N>] | -id <N>] <text...>");
         return 1;
     }
-    if (fl_net_client_state(&g_client) != FL_NET_CLIENT_STATE_CONNECTED &&
-        !g_server_running) {
-        fl_color_error("not in a session; host or join first");
+    /* Parse leading -flags. */
+    i = 2;
+    while (i < argc && argv[i][0] == '-') {
+        if (!strcmp(argv[i], "-all")) {
+            explicit_all = 1;
+            i++;
+        } else if (!strcmp(argv[i], "-user") && i + 1 < argc) {
+            target_name = argv[i + 1];
+            is_private = 1;
+            i += 2;
+        } else if (!strcmp(argv[i], "-id") && i + 1 < argc) {
+            target_disambig = (unsigned)atoi(argv[i + 1]);
+            is_private = 1;
+            i += 2;
+        } else {
+            break;
+        }
+    }
+    first_text = i;
+    if (first_text >= argc) {
+        fl_color_error("server msg: missing message text");
         return 1;
     }
-    /* Join argv[2..] with single spaces. */
-    joined[0] = '\0';
-    for (i = 2; i < argc; i++) {
-        size_t need = strnlen(argv[i], sizeof(joined));
-        if (off > 0u && off + 1u < sizeof(joined)) {
-            joined[off++] = ' ';
-            joined[off] = '\0';
-        }
-        if (off + need >= sizeof(joined))
-            need = sizeof(joined) - 1u - off;
-        if (need > 0u) {
-            memcpy(joined + off, argv[i], need);
-            off += need;
-            joined[off] = '\0';
-        }
+    if (explicit_all && is_private) {
+        fl_color_error("server msg: -all and -user/-id are mutually exclusive");
+        return 1;
     }
-    if (off == 0u) {
+    join_argv_into(joined, sizeof(joined), argc, argv, first_text);
+    if (joined[0] == '\0') {
         fl_color_error("server msg: empty text");
         return 1;
     }
 
-    if (g_server_running) {
-        /* Host: broadcast as "Host: text" via OP_MSG_BROADCAST. */
-        char line[FL_NET_SESSION_MAX_MSG];
-        char disp[FL_NET_SERVER_DISPLAY_NAME_MAX];
-        int n;
-        fl_net_server_member_display(&g_server, FL_NET_SERVER_MEMBER_ID_HOST,
-                                     disp, sizeof(disp));
-        n = snprintf(line, sizeof(line), "%s: %s", disp, joined);
-        if (n <= 0) {
-            fl_color_error("server msg: encode failed");
+    if (!g_server_running &&
+        fl_net_client_state(&g_client) != FL_NET_CLIENT_STATE_CONNECTED) {
+        fl_color_error("not in a session; host or join first");
+        return 1;
+    }
+
+    if (!is_private) {
+        /* Global broadcast. */
+        if (g_server_running) {
+            if (fl_net_server_send_public(&g_server, joined) != FL_RESULT_OK) {
+                fl_color_error("server msg: broadcast failed");
+                return 1;
+            }
+            fl_color_msg_to_all("%s", joined);
+            return 0;
+        }
+        if (fl_net_client_send_msg(&g_client, joined) != FL_RESULT_OK) {
+            fl_color_error("server msg: send failed");
             return 1;
         }
-        if ((size_t)n >= sizeof(line))
-            n = (int)sizeof(line) - 1;
-        /* Reach into the server: send MSG_BROADCAST to every peer. */
-        for (size_t k = 0; k < fl_net_server_member_count(&g_server); k++) {
-            const fl_net_server_member_t *m = fl_net_server_member_at(&g_server, k);
-            if (!m || m->is_host || m->peer_handle == FL_NET_SOCK_INVALID)
-                continue;
-            (void)fl_net_session_send_frame(m->peer_handle,
-                                            (uint8_t)FL_NET_SESSION_OP_MSG_BROADCAST,
-                                            (const uint8_t *)line, (uint16_t)n);
-        }
-        /* Local echo for the host. */
-        printf("%s\n", line);
-        fflush(stdout);
+        fl_color_msg_to_all("%s", joined);
         return 0;
     }
 
-    rc = fl_net_client_send_msg(&g_client, joined);
-    if (rc != FL_RESULT_OK) {
-        fl_color_error("server msg: send failed (rc=%d)", (int)rc);
-        return 1;
+    /* Private message — resolve recipient_id, render local confirmation. */
+    {
+        fl_net_server_member_id_t recipient = FL_NET_SERVER_MEMBER_ID_NONE;
+        char recipient_display[FL_NET_SERVER_DISPLAY_NAME_MAX] = {0};
+
+        if (target_name && !g_server_running) {
+            recipient = fl_net_client_member_lookup(&g_client, target_name,
+                                                    target_disambig);
+        } else if (target_name && g_server_running) {
+            /* Host side: walk own member registry. */
+            for (size_t k = 0; k < fl_net_server_member_count(&g_server); k++) {
+                const fl_net_server_member_t *m = fl_net_server_member_at(&g_server, k);
+                if (!m || m->is_host) continue;
+                if ((m->nick[0] && strcmp(m->nick, target_name) == 0) ||
+                    (target_disambig == 0u &&
+                     strcmp(m->principal, target_name) == 0) ||
+                    (target_disambig != 0u &&
+                     m->disambig_index == (uint8_t)target_disambig &&
+                     strcmp(m->principal, target_name) == 0)) {
+                    recipient = m->member_id;
+                    break;
+                }
+            }
+        } else if (!target_name) {
+            /* -id only path: numeric member id. */
+            recipient = (fl_net_server_member_id_t)target_disambig;
+        }
+        if (recipient == FL_NET_SERVER_MEMBER_ID_NONE) {
+            fl_color_error("no such recipient '%s' (use -id <N> to disambiguate)",
+                           target_name ? target_name : "?");
+            return 1;
+        }
+
+        if (g_server_running) {
+            (void)fl_net_server_member_display(&g_server, recipient,
+                                               recipient_display,
+                                               sizeof(recipient_display));
+            if (fl_net_server_send_private(&g_server, recipient, joined) != FL_RESULT_OK) {
+                fl_color_error("server msg: deliver failed");
+                return 1;
+            }
+        } else {
+            (void)fl_net_client_member_display(&g_client, recipient,
+                                               recipient_display,
+                                               sizeof(recipient_display));
+            if (fl_net_client_send_private(&g_client, recipient, joined) != FL_RESULT_OK) {
+                fl_color_error("server msg: send failed");
+                return 1;
+            }
+        }
+        fl_color_msg_to_user(recipient_display[0] ? recipient_display : "?",
+                             "%s", joined);
     }
     return 0;
 }
 
 static int verb_announce(int argc, char **argv) {
     char joined[FL_NET_SERVER_ANNOUNCEMENT_MAX];
-    size_t off = 0;
-    int i;
-
     if (!g_server_running) {
         fl_color_error("server announce: host only");
         return 1;
@@ -353,22 +681,8 @@ static int verb_announce(int argc, char **argv) {
         fl_color_error("usage: server announce <text...>");
         return 1;
     }
-    joined[0] = '\0';
-    for (i = 2; i < argc; i++) {
-        size_t need = strnlen(argv[i], sizeof(joined));
-        if (off > 0u && off + 1u < sizeof(joined)) {
-            joined[off++] = ' ';
-            joined[off] = '\0';
-        }
-        if (off + need >= sizeof(joined))
-            need = sizeof(joined) - 1u - off;
-        if (need > 0u) {
-            memcpy(joined + off, argv[i], need);
-            off += need;
-            joined[off] = '\0';
-        }
-    }
-    if (off == 0u) {
+    join_argv_into(joined, sizeof(joined), argc, argv, 2);
+    if (joined[0] == '\0') {
         fl_color_error("server announce: empty text");
         return 1;
     }
@@ -382,60 +696,120 @@ static int verb_announce(int argc, char **argv) {
 static int verb_nick(int argc, char **argv) {
     fl_net_server_member_id_t target = FL_NET_SERVER_MEMBER_ID_NONE;
     const char *new_nick = NULL;
+    int is_local = 0;
     int i;
-    fl_result_t rc;
 
-    if (!g_server_running) {
-        fl_color_error("server nick: host only");
-        return 1;
-    }
-    for (i = 2; i + 1 < argc; i++) {
-        if (!strcmp(argv[i], "-id"))
+    for (i = 2; i < argc; i++) {
+        if (!strcmp(argv[i], "-local"))
+            is_local = 1;
+        else if (!strcmp(argv[i], "-id") && i + 1 < argc)
             target = parse_member_id_arg(argv[++i]);
-        else if (!strcmp(argv[i], "-name"))
+        else if (!strcmp(argv[i], "-name") && i + 1 < argc)
             new_nick = argv[++i];
     }
     if (target == FL_NET_SERVER_MEMBER_ID_NONE || !new_nick) {
-        fl_color_error("usage: server nick -id <member_id> -name <nick>");
+        fl_color_error("usage: server nick [-local] -id <member_id> -name <nick>");
         return 1;
     }
-    rc = fl_net_server_set_host_nick(&g_server, target, new_nick);
-    if (rc == FL_RESULT_BUSY) {
-        fl_color_error("nickname '%s' is taken or matches another member's username",
-                       new_nick);
+    if (is_local) {
+        if (fl_net_client_state(&g_client) != FL_NET_CLIENT_STATE_CONNECTED) {
+            fl_color_error("server nick -local: not currently joined");
+            return 1;
+        }
+        if (fl_net_client_set_local_nick(&g_client, target, new_nick) != FL_RESULT_OK) {
+            fl_color_error("server nick -local: unknown member_id %u", (unsigned)target);
+            return 1;
+        }
+        fl_color_success("local nick on member_id %u set to '%s'",
+                         (unsigned)target, new_nick);
+        return 0;
+    }
+    if (!g_server_running) {
+        fl_color_error("server nick: host only (pass -local for client-side override)");
         return 1;
     }
-    if (rc == FL_RESULT_NOENT) {
-        fl_color_error("no such member_id %u", (unsigned)target);
-        return 1;
-    }
-    if (rc != FL_RESULT_OK) {
-        fl_color_error("server nick: rejected (rc=%d)", (int)rc);
-        return 1;
+    {
+        fl_result_t rc = fl_net_server_set_host_nick(&g_server, target, new_nick);
+        if (rc == FL_RESULT_BUSY) {
+            fl_color_error("nickname '%s' is taken or matches another member's username",
+                           new_nick);
+            return 1;
+        }
+        if (rc == FL_RESULT_NOENT) {
+            fl_color_error("no such member_id %u", (unsigned)target);
+            return 1;
+        }
+        if (rc != FL_RESULT_OK) {
+            fl_color_error("server nick: rejected (rc=%d)", (int)rc);
+            return 1;
+        }
     }
     fl_color_success("nick set on member_id %u", (unsigned)target);
     return 0;
 }
 
 static int verb_connected(void) {
-    char disp[FL_NET_SERVER_DISPLAY_NAME_MAX];
-    size_t count;
-
-    if (!g_server_running) {
-        fl_color_error("server connected: host only (run on host)");
+    if (g_server_running) {
+        char disp[FL_NET_SERVER_DISPLAY_NAME_MAX];
+        size_t count = fl_net_server_member_count(&g_server);
+        fl_shell_io_lock();
+        for (size_t k = 0; k < count; k++) {
+            const fl_net_server_member_t *m = fl_net_server_member_at(&g_server, k);
+            if (!m) continue;
+            fl_net_server_member_display(&g_server, m->member_id, disp, sizeof(disp));
+            printf("[%u] %s%s\n", (unsigned)m->member_id, disp,
+                   m->is_host ? " <- host" : "");
+        }
+        fflush(stdout);
+        fl_shell_io_unlock();
+        return 0;
+    }
+    if (fl_net_client_state(&g_client) != FL_NET_CLIENT_STATE_CONNECTED) {
+        fl_color_error("server connected: not currently in a session");
         return 1;
     }
-    count = fl_net_server_member_count(&g_server);
-    for (size_t k = 0; k < count; k++) {
-        const fl_net_server_member_t *m = fl_net_server_member_at(&g_server, k);
-        if (!m)
-            continue;
-        fl_net_server_member_display(&g_server, m->member_id, disp, sizeof(disp));
-        printf("[%u] %s%s\n", (unsigned)m->member_id, disp,
-               m->is_host ? " <- host" : "");
+    /* Client view from the cached member-list snapshot. */
+    {
+        size_t count = fl_net_client_member_count(&g_client);
+        char disp[FL_NET_SERVER_DISPLAY_NAME_MAX];
+        fl_shell_io_lock();
+        for (size_t k = 0; k < count; k++) {
+            const fl_net_client_member_t *m = fl_net_client_member_at(&g_client, k);
+            if (!m) continue;
+            (void)fl_net_client_member_display(&g_client, m->member_id, disp,
+                                               sizeof(disp));
+            printf("[%u] %s%s%s\n", (unsigned)m->member_id, disp,
+                   m->is_host ? " <- host" : "",
+                   m->member_id == g_client.assigned_member_id ? " (you)" : "");
+        }
+        fflush(stdout);
+        fl_shell_io_unlock();
     }
-    fflush(stdout);
     return 0;
+}
+
+/* ------------------------------------------------------------------------- */
+/* Public exit hook (called by cmd_exit before the shell tears down)         */
+/* ------------------------------------------------------------------------- */
+
+void cmd_server_atexit(void) {
+    if (g_server_running) {
+        fl_net_server_member_id_t new_host = FL_NET_SERVER_MEMBER_ID_NONE;
+        if (g_server_bg) {
+            fl_server_bg_stop_server(g_server_bg);
+            g_server_bg = NULL;
+        }
+        (void)fl_net_server_transfer_and_stop(&g_server, &new_host);
+        g_server_running = 0;
+        return;
+    }
+    if (fl_net_client_state(&g_client) == FL_NET_CLIENT_STATE_CONNECTED) {
+        if (g_client_bg) {
+            fl_server_bg_stop_client(g_client_bg);
+            g_client_bg = NULL;
+        }
+        fl_net_client_disconnect(&g_client);
+    }
 }
 
 /* ------------------------------------------------------------------------- */
@@ -447,22 +821,14 @@ int cmd_server_run(int argc, char **argv) {
         fl_color_error("usage: server <host|join|msg|announce|nick|connected|leave|kill> ...");
         return 1;
     }
-    if (!strcmp(argv[1], "host"))
-        return verb_host(argc, argv);
-    if (!strcmp(argv[1], "join"))
-        return verb_join(argc, argv);
-    if (!strcmp(argv[1], "leave"))
-        return verb_leave();
-    if (!strcmp(argv[1], "kill"))
-        return verb_kill();
-    if (!strcmp(argv[1], "msg"))
-        return verb_msg(argc, argv);
-    if (!strcmp(argv[1], "announce"))
-        return verb_announce(argc, argv);
-    if (!strcmp(argv[1], "nick"))
-        return verb_nick(argc, argv);
-    if (!strcmp(argv[1], "connected"))
-        return verb_connected();
+    if (!strcmp(argv[1], "host"))      return verb_host(argc, argv);
+    if (!strcmp(argv[1], "join"))      return verb_join(argc, argv);
+    if (!strcmp(argv[1], "leave"))     return verb_leave();
+    if (!strcmp(argv[1], "kill"))      return verb_kill();
+    if (!strcmp(argv[1], "msg"))       return verb_msg(argc, argv);
+    if (!strcmp(argv[1], "announce"))  return verb_announce(argc, argv);
+    if (!strcmp(argv[1], "nick"))      return verb_nick(argc, argv);
+    if (!strcmp(argv[1], "connected")) return verb_connected();
     fl_color_error("unknown server verb '%s'", argv[1]);
     return 1;
 }
@@ -471,9 +837,6 @@ __attribute__((used))
 int cmd_server_batch_tokens_count(int argc, char **argv, int i) {
     int used = 1;
     int j = i + 1;
-    /* Consume all positional args until a non-server token shape; cmd_server
-     * verbs are 0..many trailing free-form tokens. We greedily eat the rest
-     * of the batch slice. */
     (void)argv;
     while (j < argc) {
         used++;

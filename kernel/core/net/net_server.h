@@ -104,6 +104,41 @@ fl_result_t fl_net_server_set_host_nick(fl_net_server_t *srv,
                                         const char *nick);
 
 /**
+ * Host-only: broadcast a public chat message as `[Server Message, From <host>]`
+ * on every member. The host also renders its own copy via the colour helper.
+ * Sender for non-host messages goes through `dispatch_member_frame` instead.
+ */
+fl_result_t fl_net_server_send_public(fl_net_server_t *srv, const char *text);
+
+/**
+ * Host-only: deliver a private chat message from the host to one recipient.
+ * Returns FL_RESULT_NOENT when the recipient id is unknown or is the host
+ * itself; FL_RESULT_OK on a successful single-socket write.
+ */
+fl_result_t fl_net_server_send_private(fl_net_server_t *srv,
+                                       fl_net_server_member_id_t recipient_id,
+                                       const char *text);
+
+/**
+ * Broadcast an OP_MEMBER_LIST_SNAPSHOT to every peer. Called after join,
+ * leave, and nick changes so clients can render private-message senders
+ * and `server connected` without an extra round trip.
+ */
+fl_result_t fl_net_server_broadcast_member_list(fl_net_server_t *srv);
+
+/**
+ * Host-only: select a successor (lowest non-host member id), broadcast
+ * `OP_CTRL_HOST_PROMOTE` with the successor's id / peer IP / port, then
+ * stop the listener and close all sockets. Returns
+ * - FL_RESULT_OK and writes the chosen new_host_id into `*new_host_out`
+ *   when there was a successor;
+ * - FL_RESULT_NOENT when the host was the only member; in that case the
+ *   server is still stopped but no transfer frame is sent.
+ */
+fl_result_t fl_net_server_transfer_and_stop(fl_net_server_t *srv,
+                                            fl_net_server_member_id_t *new_host_out);
+
+/**
  * Render the display name for `member_id` into `out` (`out` must be at least
  * `FL_NET_SERVER_DISPLAY_NAME_MAX` bytes). Returns `FL_RESULT_OK` and writes
  * either `"Principal"`, `"Principal {N}"`, or `"Nick"` per the rules in

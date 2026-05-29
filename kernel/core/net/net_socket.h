@@ -21,6 +21,23 @@ fl_result_t fl_net_sock_accept(fl_net_sock_handle_t listen_handle,
 fl_result_t fl_net_sock_connect(fl_net_sock_handle_t handle, uint32_t peer_be,
                                 uint16_t port_host);
 
+/**
+ * Same as `fl_net_sock_connect` but binds the **local source** address to
+ * `local_be:0` (ephemeral port) before connecting. Used by the multi-IP
+ * server demo / tests so each client sources its TCP from a distinct
+ * 10.99.0.X loopback alias instead of the default 0.0.0.0 → 127.0.0.1.
+ * Pass `local_be == 0` to behave like the plain `fl_net_sock_connect`.
+ */
+fl_result_t fl_net_sock_connect_from(fl_net_sock_handle_t handle,
+                                     uint32_t local_be,
+                                     uint32_t peer_be, uint16_t port_host);
+
+/** Hosted-only helper: write the connected peer or local IPv4 into
+ * `*out_be`. Returns FL_RESULT_OK on success, FL_RESULT_NOSYS / INVAL
+ * otherwise. */
+fl_result_t fl_net_sock_peer_ipv4(fl_net_sock_handle_t handle, uint32_t *out_be);
+fl_result_t fl_net_sock_local_ipv4(fl_net_sock_handle_t handle, uint32_t *out_be);
+
 fl_result_t fl_net_sock_send(fl_net_sock_handle_t handle, const void *buf, size_t len,
                              size_t *sent);
 fl_result_t fl_net_sock_recv(fl_net_sock_handle_t handle, void *buf, size_t cap, size_t *got,

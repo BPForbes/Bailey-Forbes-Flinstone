@@ -392,6 +392,180 @@ static void announce_nick(fl_net_server_t *srv, const char *old_display,
 }
 
 /* ------------------------------------------------------------------------- */
+/* Public / private chat (server side)                                       */
+/* ------------------------------------------------------------------------- */
+
+fl_result_t fl_net_server_send_public(fl_net_server_t *srv, const char *text) {
+    char line[FL_NET_SESSION_MAX_MSG];
+    char host_disp[FL_NET_SERVER_DISPLAY_NAME_MAX];
+    int n;
+    size_t tlen;
+
+    if (!srv || !srv->running || !text)
+        return FL_RESULT_INVAL;
+    tlen = strnlen(text, FL_NET_SESSION_MAX_MSG);
+    if (tlen == 0u)
+        return FL_RESULT_INVAL;
+    render_member_display(member_by_id(srv, FL_NET_SERVER_MEMBER_ID_HOST),
+                          host_disp, sizeof(host_disp));
+    n = snprintf(line, sizeof(line), "%s: %.*s", host_disp,
+                 (int)tlen, text);
+    if (n <= 0)
+        return FL_RESULT_INVAL;
+    if ((size_t)n >= sizeof(line))
+        n = (int)sizeof(line) - 1;
+    broadcast_to_peers(srv, (uint8_t)FL_NET_SESSION_OP_MSG_BROADCAST,
+                       (const uint8_t *)line, (uint16_t)n);
+    /* Host's own copy is rendered by cmd_server.c via fl_color_msg_to_all. */
+    return FL_RESULT_OK;
+}
+
+fl_result_t fl_net_server_send_private(fl_net_server_t *srv,
+                                       fl_net_server_member_id_t recipient_id,
+                                       const char *text) {
+    fl_net_server_member_t *m;
+    uint8_t payload[FL_NET_SESSION_MAX_MSG];
+    size_t tlen;
+
+    if (!srv || !srv->running || !text)
+        return FL_RESULT_INVAL;
+    m = member_by_id(srv, recipient_id);
+    if (!m || m->peer_handle == FL_NET_SOCK_INVALID)
+        return FL_RESULT_NOENT;
+    tlen = strnlen(text, FL_NET_SESSION_MAX_MSG - 4u);
+    if (tlen == 0u)
+        return FL_RESULT_INVAL;
+    /* Payload: [sender_member_id_be16][reserved_be16=0][text...] */
+    payload[0] = 0u; /* host id 1: high byte */
+    payload[1] = (uint8_t)FL_NET_SERVER_MEMBER_ID_HOST;
+    payload[2] = 0u;
+    payload[3] = 0u;
+    memcpy(payload + 4, text, tlen);
+    return fl_net_session_send_frame(m->peer_handle,
+                                     (uint8_t)FL_NET_SESSION_OP_MSG_DIRECT_DELIVER,
+                                     payload, (uint16_t)(4u + tlen));
+}
+
+/* ------------------------------------------------------------------------- */
+/* Member list snapshot                                                      */
+/* ------------------------------------------------------------------------- */
+
+static size_t encode_member_list_snapshot(const fl_net_server_t *srv,
+                                          uint8_t *buf, size_t cap) {
+    size_t off = 0;
+    if (!srv || !buf)
+        return 0;
+    for (size_t i = 0; i < FL_NET_SERVER_MAX_MEMBERS; i++) {
+        const fl_net_server_member_t *m = &srv->members[i];
+        size_t plen, nlen;
+        if (!m->in_use)
+            continue;
+        plen = strnlen(m->principal, FL_NET_SERVER_PRINCIPAL_MAX);
+        nlen = strnlen(m->nick, FL_NET_SERVER_NICK_MAX);
+        if (plen > 255u) plen = 255u;
+        if (nlen > 255u) nlen = 255u;
+        if (off + 6u + plen + nlen > cap)
+            break;
+        buf[off++] = (uint8_t)((m->member_id >> 8) & 0xFFu);
+        buf[off++] = (uint8_t)(m->member_id & 0xFFu);
+        buf[off++] = m->is_host ? 1u : 0u;
+        buf[off++] = m->disambig_index;
+        buf[off++] = (uint8_t)plen;
+        memcpy(buf + off, m->principal, plen);
+        off += plen;
+        buf[off++] = (uint8_t)nlen;
+        memcpy(buf + off, m->nick, nlen);
+        off += nlen;
+    }
+    return off;
+}
+
+fl_result_t fl_net_server_broadcast_member_list(fl_net_server_t *srv) {
+    uint8_t buf[FL_NET_SESSION_MAX_MSG];
+    size_t n;
+    if (!srv || !srv->running)
+        return FL_RESULT_INVAL;
+    n = encode_member_list_snapshot(srv, buf, sizeof(buf));
+    broadcast_to_peers(srv, (uint8_t)FL_NET_SESSION_OP_MEMBER_LIST_SNAPSHOT,
+                       buf, (uint16_t)n);
+    return FL_RESULT_OK;
+}
+
+/* ------------------------------------------------------------------------- */
+/* Host transfer                                                             */
+/* ------------------------------------------------------------------------- */
+
+fl_result_t fl_net_server_transfer_and_stop(fl_net_server_t *srv,
+                                            fl_net_server_member_id_t *new_host_out) {
+    fl_net_server_member_t *succ = NULL;
+    fl_net_server_member_id_t lowest_id = FL_NET_SERVER_MEMBER_ID_NONE;
+
+    if (!srv)
+        return FL_RESULT_INVAL;
+    if (new_host_out)
+        *new_host_out = FL_NET_SERVER_MEMBER_ID_NONE;
+    if (!srv->running) {
+        /* Listener may still be open from a half-init; clean it up. */
+        if (srv->listen_handle != FL_NET_SOCK_INVALID) {
+            fl_net_sock_close(srv->listen_handle);
+            srv->listen_handle = FL_NET_SOCK_INVALID;
+        }
+        return FL_RESULT_OK;
+    }
+
+    /* Pick the lowest non-host member id with a live socket. */
+    for (size_t i = 0; i < FL_NET_SERVER_MAX_MEMBERS; i++) {
+        fl_net_server_member_t *m = &srv->members[i];
+        if (!m->in_use || m->is_host)
+            continue;
+        if (m->peer_handle == FL_NET_SOCK_INVALID)
+            continue;
+        if (lowest_id == FL_NET_SERVER_MEMBER_ID_NONE || m->member_id < lowest_id) {
+            lowest_id = m->member_id;
+            succ = m;
+        }
+    }
+
+    if (succ) {
+        uint8_t payload[8];
+        payload[0] = (uint8_t)((succ->member_id >> 8) & 0xFFu);
+        payload[1] = (uint8_t)(succ->member_id & 0xFFu);
+        /* peer_ip_be is already network byte order; serialise as raw bytes. */
+        payload[2] = (uint8_t)((succ->peer_ip_be) & 0xFFu);
+        payload[3] = (uint8_t)((succ->peer_ip_be >> 8) & 0xFFu);
+        payload[4] = (uint8_t)((succ->peer_ip_be >> 16) & 0xFFu);
+        payload[5] = (uint8_t)((succ->peer_ip_be >> 24) & 0xFFu);
+        payload[6] = (uint8_t)((srv->bind_port_host >> 8) & 0xFFu);
+        payload[7] = (uint8_t)(srv->bind_port_host & 0xFFu);
+        broadcast_to_peers(srv, (uint8_t)FL_NET_SESSION_OP_CTRL_HOST_PROMOTE,
+                           payload, (uint16_t)sizeof(payload));
+        if (new_host_out)
+            *new_host_out = succ->member_id;
+    } else {
+        /* No successor — just KILL everyone. */
+        broadcast_to_peers(srv, (uint8_t)FL_NET_SESSION_OP_CTRL_KILL, NULL, 0u);
+    }
+
+    /* Close every member socket + listener. */
+    for (size_t i = 0; i < FL_NET_SERVER_MAX_MEMBERS; i++) {
+        fl_net_server_member_t *m = &srv->members[i];
+        if (!m->in_use)
+            continue;
+        if (m->peer_handle != FL_NET_SOCK_INVALID) {
+            fl_net_sock_close(m->peer_handle);
+            m->peer_handle = FL_NET_SOCK_INVALID;
+        }
+        m->in_use = 0u;
+    }
+    if (srv->listen_handle != FL_NET_SOCK_INVALID) {
+        fl_net_sock_close(srv->listen_handle);
+        srv->listen_handle = FL_NET_SOCK_INVALID;
+    }
+    srv->running = 0u;
+    return succ ? FL_RESULT_OK : FL_RESULT_NOENT;
+}
+
+/* ------------------------------------------------------------------------- */
 /* Nick validation                                                           */
 /* ------------------------------------------------------------------------- */
 
@@ -451,6 +625,7 @@ fl_result_t fl_net_server_set_host_nick(fl_net_server_t *srv,
     strncpy(m->nick, nick, sizeof(m->nick) - 1);
 
     announce_nick(srv, old_display, m->nick);
+    (void)fl_net_server_broadcast_member_list(srv);
     return FL_RESULT_OK;
 }
 
@@ -627,6 +802,7 @@ fl_result_t fl_net_server_accept_pending(fl_net_server_t *srv,
     if (srv->next_member_id == FL_NET_SERVER_MEMBER_ID_NONE)
         srv->next_member_id = (fl_net_server_member_id_t)(FL_NET_SERVER_MEMBER_ID_HOST + 1);
     m->peer_handle = client_h;
+    (void)fl_net_sock_peer_ipv4(client_h, &m->peer_ip_be); /* best-effort */
     /* payload may not be NUL-terminated on the wire. */
     {
         size_t n = plen < (sizeof(m->principal) - 1u) ? plen : sizeof(m->principal) - 1u;
@@ -654,6 +830,9 @@ fl_result_t fl_net_server_accept_pending(fl_net_server_t *srv,
      * Per the contract sequencing rule the JOIN_ANNOUNCE fires first. */
     announce_join(srv, m->member_id);
     maybe_send_nick_prompt(srv, m);
+    /* Snapshot the roster so the new peer (and existing peers) can resolve
+     * private-message senders + render `server connected`. */
+    (void)fl_net_server_broadcast_member_list(srv);
 
     if (display_out && display_cap > 0u) {
         size_t dn = strnlen(disp, sizeof(disp));
@@ -690,6 +869,7 @@ static void drop_member(fl_net_server_t *srv, fl_net_server_member_t *m) {
 
     recompute_disambig(srv, principal_copy);
     announce_leave(srv, disp);
+    (void)fl_net_server_broadcast_member_list(srv);
 }
 
 /* One incoming frame from member `m`. Returns 1 when the member should be
@@ -737,6 +917,46 @@ static int dispatch_member_frame(fl_net_server_t *srv, fl_net_server_member_t *m
                                             (const uint8_t *)err,
                                             (uint16_t)(sizeof(err) - 1u));
         }
+        return 0;
+    }
+    case FL_NET_SESSION_OP_MSG_DIRECT: {
+        /* Private chat: payload = [recipient_id_be16][reserved_be16][text]. */
+        fl_net_server_member_id_t recipient_id;
+        fl_net_server_member_t *to;
+        const char *text;
+        uint16_t text_len;
+        uint8_t deliver[FL_NET_SESSION_MAX_MSG];
+
+        if (plen < 4u)
+            return 0;
+        recipient_id = (fl_net_server_member_id_t)
+            (((uint16_t)payload[0] << 8) | payload[1]);
+        text = (const char *)(payload + 4);
+        text_len = (uint16_t)(plen - 4u);
+        to = member_by_id(srv, recipient_id);
+        if (!to || to->member_id == m->member_id ||
+            to->peer_handle == FL_NET_SOCK_INVALID) {
+            char err[64];
+            int en = snprintf(err, sizeof(err),
+                              "no such recipient member_id %u",
+                              (unsigned)recipient_id);
+            if (en > 0)
+                (void)fl_net_session_send_frame(m->peer_handle,
+                                                (uint8_t)FL_NET_SESSION_OP_ERR,
+                                                (const uint8_t *)err,
+                                                (uint16_t)en);
+            return 0;
+        }
+        if (text_len > sizeof(deliver) - 4u)
+            text_len = (uint16_t)(sizeof(deliver) - 4u);
+        deliver[0] = (uint8_t)((m->member_id >> 8) & 0xFFu);
+        deliver[1] = (uint8_t)(m->member_id & 0xFFu);
+        deliver[2] = 0u;
+        deliver[3] = 0u;
+        memcpy(deliver + 4, text, text_len);
+        (void)fl_net_session_send_frame(to->peer_handle,
+                                        (uint8_t)FL_NET_SESSION_OP_MSG_DIRECT_DELIVER,
+                                        deliver, (uint16_t)(4u + text_len));
         return 0;
     }
     case FL_NET_SESSION_OP_CTRL_LEAVE:

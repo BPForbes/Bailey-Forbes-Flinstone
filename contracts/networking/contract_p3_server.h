@@ -60,7 +60,7 @@
 #include "contract_p3_sockets.h"
 
 #define FL_CONTRACT_P3_13_SERVER_CONTRACT_DEFINED 1
-#define FL_CONTRACT_P3_13_SERVER_REV 1u
+#define FL_CONTRACT_P3_13_SERVER_REV 2u
 
 /* ------------------------------------------------------------------------- */
 /* Capacity / wire caps                                                      */
@@ -131,6 +131,53 @@ _Static_assert(FL_NET_SERVER_ANNOUNCEMENT_MAX <= FL_NET_SESSION_MAX_MSG,
  */
 #define FL_NET_SESSION_OP_SERVER_ANNOUNCE 0x08u
 
+/**
+ * Client → host: request a direct (private) chat message to one recipient.
+ * Payload:
+ *   `[u16_be recipient_member_id][u16_be reserved (0)][utf8 text]`
+ * Host validates the recipient is connected and routes a matching
+ * **OP_MSG_DIRECT_DELIVER** frame to the recipient socket only. No global
+ * fan-out; sender renders its own confirmation locally.
+ */
+#define FL_NET_SESSION_OP_MSG_DIRECT 0x12u
+
+/**
+ * Host → recipient: delivery of a private message. Payload:
+ *   `[u16_be sender_member_id][u16_be reserved (0)][utf8 text]`
+ * The recipient's client decodes this into an `EVENT_MSG_PRIVATE` carrying
+ * the sender display name (resolved client-side from the prior MEMBER_LIST
+ * snapshot and any local-only nicknames the recipient has set).
+ */
+#define FL_NET_SESSION_OP_MSG_DIRECT_DELIVER 0x13u
+
+/**
+ * Host → all members. Snapshot of the live member registry so each client
+ * can resolve sender display names for private messages and the
+ * `server connected` verb without round-tripping to the host. Payload:
+ *   for each member: `[u16_be member_id][u8 is_host][u8 disambig_index]
+ *                     [u8 principal_len][principal bytes]
+ *                     [u8 nick_len]    [nick bytes]`
+ * Frames smaller than the full roster are valid prefixes; the receiver
+ * clears its cache and replays the body. Maximum payload is bounded by
+ * `FL_NET_SESSION_MAX_MSG` and capped by `FL_NET_SERVER_MAX_MEMBERS`.
+ */
+#define FL_NET_SESSION_OP_MEMBER_LIST_SNAPSHOT 0x09u
+
+/**
+ * Host → all members at the moment the host is about to leave or transfer.
+ * Payload (foundations encoding):
+ *   `[u16_be new_host_member_id][u32_be new_host_ip_be][u16_be new_host_port_host_BE]`
+ * The recipient whose own `assigned_member_id == new_host_member_id` shall
+ * locally tear down its client and call `fl_net_server_host_start` on its
+ * own IP and the supplied port; other recipients shall reconnect to
+ * `new_host_ip:new_host_port`. When `new_host_member_id == 0` (zero) the
+ * host could not pick a successor and recipients should simply leave.
+ *
+ * (Wire opcode 0x22 was already reserved by contract_p3_session_wire.h as
+ * `OP_CTRL_HOST_PROMOTE`; this shard extends its payload encoding for the
+ * foundations build — the older opcode constant is reused unchanged.)
+ */
+
 /* ------------------------------------------------------------------------- */
 /* In-memory types (host + client share these definitions)                   */
 /* ------------------------------------------------------------------------- */
@@ -164,6 +211,8 @@ typedef struct {
     char nick[FL_NET_SERVER_NICK_MAX];
     /** Hosted socket handle for this member's TCP stream (host side only). */
     fl_net_sock_handle_t peer_handle;
+    /** Network-byte-order IPv4 of the peer (host's accept side; 0 for self). */
+    uint32_t peer_ip_be;
 } fl_net_server_member_t;
 
 /**
@@ -199,7 +248,15 @@ typedef enum {
     /** Host sent OP_ERR (payload is the error text). */
     FL_NET_SERVER_EVENT_ERR = 8,
     /** Host closed the session (CTRL_KILL or peer EOF). */
-    FL_NET_SERVER_EVENT_CLOSED = 9
+    FL_NET_SERVER_EVENT_CLOSED = 9,
+    /** Direct (private) message arrived; `member_id` = sender id. */
+    FL_NET_SERVER_EVENT_MSG_PRIVATE = 10,
+    /** Host published an updated member-list snapshot. */
+    FL_NET_SERVER_EVENT_MEMBER_LIST = 11,
+    /** Host asked this client to take over (CTRL_HOST_PROMOTE). */
+    FL_NET_SERVER_EVENT_HOST_PROMOTE = 12,
+    /** Host asked a non-chosen client to reconnect to the new host. */
+    FL_NET_SERVER_EVENT_HOST_REDIRECT = 13
 } fl_net_server_event_kind_t;
 
 /** Client state machine (see docs/SERVER.md and #239 client/host model). */

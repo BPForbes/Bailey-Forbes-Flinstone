@@ -4,6 +4,7 @@
 #include "terminal.h"
 #include "cmd_decl.h"
 #include "threadpool.h"
+#include "shell_io.h"
 #include "contract_p2_authz.h"
 #include "contract_p2_principal_names.h"
 #include "fl/audit_log.h"
@@ -422,6 +423,7 @@ void interactive_shell(void) {
         pos = 0;
         memset(line, 0, sizeof(line));
         currHistIndex = g_interactive_history_count;
+        fl_shell_io_set_prompt_active(1, line, len, pos);
         while (1) {
             char c;
             ssize_t nread = read(STDIN_FILENO, &c, 1);
@@ -429,6 +431,7 @@ void interactive_shell(void) {
                 break;
             if (c == '\r' || c == '\n') {
                 write(STDOUT_FILENO, "\n", 1);
+                fl_shell_io_set_prompt_active(0, NULL, 0, 0);
                 break;
             } else if ((unsigned char)c == 127 || (unsigned char)c == '\b') {
                 /* DEL (127) or BS (8): delete before cursor; redraw so the prompt stays consistent. */
@@ -515,6 +518,9 @@ void interactive_shell(void) {
                     }
                 }
             }
+            /* Refresh the snapshot used by shell_io for prompt-aware async
+             * prints (background server / client events). */
+            fl_shell_io_set_prompt_active(1, line, len, pos);
         }
         disable_raw_mode();
         if (len > 0) {
