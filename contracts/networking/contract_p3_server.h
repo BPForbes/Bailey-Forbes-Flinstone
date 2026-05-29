@@ -35,7 +35,10 @@
  *     cannot impersonate another real user). Comparison is case-sensitive.
  *   - A nick may not equal **any other connected member's existing nick**.
  *   - A member's nick **may** equal their own principal (no-op rename).
- *   - On collision the host returns **OP_ERR** to the requester.
+ *   - On collision the host returns **OP_ERR** to the requester (wire) and
+ *     the in-process API (`fl_net_server_set_host_nick`) returns
+ *     **`FL_RESULT_BUSY`** so callers on the host side can branch on the
+ *     same condition without parsing the OP_ERR frame.
  *
  * **Join → nick sequencing:** the host emits **OP_JOIN_ANNOUNCE** for a new
  * member **before** any **OP_NICK_SET_ANNOUNCE** that the same member triggers
