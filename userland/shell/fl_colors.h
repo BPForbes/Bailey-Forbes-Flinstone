@@ -25,7 +25,7 @@
  *   KRED  -> "[ERROR] <text>"                  -- shell or server errors
  *   KGRN  -> "[Server] <text>"                 -- local success acks
  *   KYEL  -> warnings, interactive nick prompt
- *   KBLU  -> "[Server Announcement] <text>"    -- host/server-pushed announces
+ *   KBLU  -> "[Server Announcement]: <text>"   -- host/server-pushed announces
  *   KCYN  -> "[Server Message, ...]: <text>"   -- public / private chat
  *
  * Prompt-aware print: each tagged helper calls into optional shell-side

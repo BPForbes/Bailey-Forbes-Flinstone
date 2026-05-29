@@ -311,6 +311,27 @@ static void broadcast_to_peers(fl_net_server_t *srv, uint8_t opcode,
     }
 }
 
+/* Same as broadcast_to_peers but skips one specific member_id. Used by the
+ * chat-relay path so the server does not echo a public message back to the
+ * sender — the sender already knows what they typed. */
+static void broadcast_to_peers_except(fl_net_server_t *srv,
+                                      fl_net_server_member_id_t skip,
+                                      uint8_t opcode,
+                                      const uint8_t *payload, uint16_t plen) {
+    if (!srv)
+        return;
+    for (size_t i = 0; i < FL_NET_SERVER_MAX_MEMBERS; i++) {
+        fl_net_server_member_t *m = &srv->members[i];
+        if (!m->in_use)
+            continue;
+        if (m->peer_handle == FL_NET_SOCK_INVALID)
+            continue;
+        if (m->member_id == skip)
+            continue;
+        (void)fl_net_session_send_frame(m->peer_handle, opcode, payload, plen);
+    }
+}
+
 /* Compose "[Server Announcement] <text>" locally on the host's terminal.
  * Peers render their own copy when they receive the announce opcode. */
 static void emit_local_announce(const char *text) {
@@ -414,9 +435,12 @@ fl_result_t fl_net_server_send_public(fl_net_server_t *srv, const char *text) {
         return FL_RESULT_INVAL;
     if ((size_t)n >= sizeof(line))
         n = (int)sizeof(line) - 1;
-    broadcast_to_peers(srv, (uint8_t)FL_NET_SESSION_OP_MSG_BROADCAST,
-                       (const uint8_t *)line, (uint16_t)n);
-    /* Host's own copy is rendered by cmd_server.c via fl_color_msg_to_all. */
+    /* Skip the host's own self-member (peer_handle = INVALID anyway, but
+     * pass the id explicitly so the intent is clear: the host's local
+     * terminal does not need its own message echoed back). */
+    broadcast_to_peers_except(srv, FL_NET_SERVER_MEMBER_ID_HOST,
+                              (uint8_t)FL_NET_SESSION_OP_MSG_BROADCAST,
+                              (const uint8_t *)line, (uint16_t)n);
     return FL_RESULT_OK;
 }
 
@@ -527,7 +551,27 @@ fl_result_t fl_net_server_transfer_and_stop(fl_net_server_t *srv,
     }
 
     if (succ) {
+        char disp[FL_NET_SERVER_DISPLAY_NAME_MAX];
+        char line[FL_NET_SERVER_ANNOUNCEMENT_MAX];
+        int n;
         uint8_t payload[8];
+
+        /* Blue "[Server Announcement]: <display> is now the host" to ALL
+         * peers (and to the host's own terminal). Reuses the same wire path
+         * any other announcement uses; the OLD-session display name carries
+         * (the new host re-indexes to member_id 1 in its fresh server, but
+         * other peers identify the successor by the name they already know). */
+        render_member_display(succ, disp, sizeof(disp));
+        n = snprintf(line, sizeof(line), "%s is now the host", disp);
+        if (n > 0) {
+            if ((size_t)n >= sizeof(line))
+                n = (int)sizeof(line) - 1;
+            broadcast_to_peers(srv,
+                               (uint8_t)FL_NET_SESSION_OP_SERVER_ANNOUNCE,
+                               (const uint8_t *)line, (uint16_t)n);
+            emit_local_announce(line);
+        }
+
         payload[0] = (uint8_t)((succ->member_id >> 8) & 0xFFu);
         payload[1] = (uint8_t)(succ->member_id & 0xFFu);
         /* peer_ip_be is already network byte order; serialise as raw bytes. */
@@ -881,7 +925,10 @@ static int dispatch_member_frame(fl_net_server_t *srv, fl_net_server_member_t *m
 
     switch (opcode) {
     case FL_NET_SESSION_OP_MSG: {
-        /* Build "Sender: text" and broadcast as MSG_BROADCAST. */
+        /* Build "Sender: text" and broadcast as MSG_BROADCAST to every
+         * peer EXCEPT the sender — the sender already knows what they
+         * typed (see issue feedback: "the server does not need to send
+         * data back to clients what they give to the server for others"). */
         char line[FL_NET_SESSION_MAX_MSG];
         int n;
         render_member_display(m, disp, sizeof(disp));
@@ -891,8 +938,9 @@ static int dispatch_member_frame(fl_net_server_t *srv, fl_net_server_member_t *m
             return 0;
         if ((size_t)n >= sizeof(line))
             n = (int)sizeof(line) - 1;
-        broadcast_to_peers(srv, (uint8_t)FL_NET_SESSION_OP_MSG_BROADCAST,
-                           (const uint8_t *)line, (uint16_t)n);
+        broadcast_to_peers_except(srv, m->member_id,
+                                  (uint8_t)FL_NET_SESSION_OP_MSG_BROADCAST,
+                                  (const uint8_t *)line, (uint16_t)n);
         return 0;
     }
     case FL_NET_SESSION_OP_HOST_NICK_SET: {

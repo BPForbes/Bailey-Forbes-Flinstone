@@ -66,7 +66,8 @@ void fl_color_vfprintf_tagged(FILE *fp, const char *color, const char *tag,
 void fl_color_announce(const char *fmt, ...) {
     va_list ap;
     va_start(ap, fmt);
-    fl_color_vfprintf_tagged(stdout, KBLU, "[Server Announcement] ", fmt, ap);
+    /* "[Server Announcement]: " — colon after the tag, per the user spec. */
+    fl_color_vfprintf_tagged(stdout, KBLU, "[Server Announcement]: ", fmt, ap);
     va_end(ap);
 }
 void fl_color_error(const char *fmt, ...) {

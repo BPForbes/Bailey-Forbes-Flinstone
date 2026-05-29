@@ -308,10 +308,21 @@ static int test_messages_and_roster(void) {
     /* Jill should not have seen the private message via the public MSG path. */
     ASSERT(strstr(logJill.last_msg, "Hello") == NULL);
 
-    /* Jack -> All public broadcast. */
-    ASSERT(fl_net_client_send_msg(&cJack, "Hi everyone") == FL_RESULT_OK);
-    pump(clients, logs, 2, 30);
-    ASSERT(strstr(logJill.last_msg, "Jack: Hi everyone") != NULL);
+    /* Jack -> All public broadcast.
+     *   - Jill (other client) receives "Jack: Hi everyone".
+     *   - Jack himself must NOT receive his own message back: the server
+     *     skips the sender on MSG_BROADCAST fan-out per the issue feedback
+     *     ("the server does not need to send data back to clients what they
+     *     give to the server for others"). We test this by snapshotting
+     *     Jack's last_msg count BEFORE the send and asserting it stays
+     *     unchanged after pumping. */
+    {
+        int jack_msg_before = logJack.msgs;
+        ASSERT(fl_net_client_send_msg(&cJack, "Hi everyone") == FL_RESULT_OK);
+        pump(clients, logs, 2, 30);
+        ASSERT(strstr(logJill.last_msg, "Jack: Hi everyone") != NULL);
+        ASSERT(logJack.msgs == jack_msg_before); /* no echo back to sender */
+    }
 
     /* Local-only nick: Jack nicks Jill to "Sis". */
     ASSERT(fl_net_client_set_local_nick(&cJack, jill_id, "Sis") == FL_RESULT_OK);

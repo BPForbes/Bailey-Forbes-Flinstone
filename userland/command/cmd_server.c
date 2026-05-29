@@ -20,7 +20,7 @@
  *   KRED  -> "[ERROR] ..."                  -- usage and authz errors
  *   KGRN  -> "[Server] ..."                 -- local success acknowledgements
  *   KYEL  -> warnings and interactive prompts (nick prompt)
- *   KBLU  -> "[Server Announcement] ..."    -- host/peer-pushed announces
+ *   KBLU  -> "[Server Announcement]: ..."   -- host/peer-pushed announces
  *   KCYN  -> "[Server Message, ...]: ..."   -- public / private chat
  */
 
@@ -198,14 +198,16 @@ static void client_event_print(fl_net_server_event_kind_t kind, const char *text
         fl_color_warn("session closed by host");
         break;
     case FL_NET_SERVER_EVENT_HOST_PROMOTE: {
-        /* Payload layout: [u16_be new_host_id][u32 ip_be little-endian-in-our-tx][u16_be port]
-         * net_server.c serialises the IP as 4 raw bytes of the network-byte-
-         * order address; decode that back. */
+        /* Wire payload: [u16_be new_id][u32 new_ip_be][u16_be new_port].
+         * No user-visible message here — the OLD host already broadcast a
+         * blue "[Server Announcement]: <display> is now the host" line
+         * (server-side SERVER_ANNOUNCE) right before sending this frame, so
+         * every peer has been told. We just decode and spawn the takeover/
+         * reconnect transition thread silently. */
         const uint8_t *p = (const uint8_t *)text;
         uint16_t new_id_be = mid;
         uint32_t new_ip_be;
         uint16_t new_port;
-        char peer_ip_str[INET_ADDRSTRLEN] = "?";
         if (!p) {
             fl_color_warn("host promote received with no payload; leaving");
             return;
@@ -213,20 +215,8 @@ static void client_event_print(fl_net_server_event_kind_t kind, const char *text
         new_ip_be = (uint32_t)p[2] | ((uint32_t)p[3] << 8) |
                     ((uint32_t)p[4] << 16) | ((uint32_t)p[5] << 24);
         new_port = (uint16_t)(((uint16_t)p[6] << 8) | p[7]);
-        {
-            struct in_addr ia;
-            ia.s_addr = new_ip_be;
-            (void)inet_ntop(AF_INET, &ia, peer_ip_str, sizeof(peer_ip_str));
-        }
-        if (new_id_be == g_client.assigned_member_id) {
-            fl_color_announce("you are the new host on %s:%u", peer_ip_str,
-                              (unsigned)new_port);
-            spawn_promote_thread(1, new_ip_be, new_port);
-        } else {
-            fl_color_announce("session host moved to %s:%u; reconnecting...",
-                              peer_ip_str, (unsigned)new_port);
-            spawn_promote_thread(0, new_ip_be, new_port);
-        }
+        spawn_promote_thread(new_id_be == g_client.assigned_member_id ? 1 : 0,
+                             new_ip_be, new_port);
         break;
     }
     case FL_NET_SERVER_EVENT_HOST_REDIRECT:
@@ -285,9 +275,16 @@ static void *promote_thread_main(void *arg) {
             return NULL;
         }
         g_server_running = 1;
-        /* Cyan SERVER message addressed to this user only (matches the
-         * "[SERVER]: <text>" format from issue #239 follow-up). */
-        fl_color_server_dm("You are now the host.");
+        /* No local "you are now the host" message here: the OLD host's
+         * `fl_net_server_transfer_and_stop()` already broadcast a blue
+         * "[Server Announcement]: <display> is now the host" to every peer
+         * (including this one) before tearing down, so the user has already
+         * seen the same line as everyone else. The promotion mechanics are
+         * mute by design. New host always reindexes to member_id 1 by virtue
+         * of starting a fresh `fl_net_server_host_start()`; reconnecting
+         * peers get sequential ids from 2 upward (stack-style for the auto
+         * path; the future "host selects successor" path will extend the
+         * map instead, but is not in this train). */
     } else {
         /* Re-join the new host. Use our same local IP as source so the new
          * host can see us coming from a consistent address. The new host's
@@ -529,10 +526,12 @@ static int verb_leave(void) {
         }
         (void)fl_net_server_transfer_and_stop(&g_server, &new_host);
         g_server_running = 0;
-        if (new_host != FL_NET_SERVER_MEMBER_ID_NONE)
-            fl_color_success("host transferred to member_id %u", (unsigned)new_host);
-        else
+        if (new_host == FL_NET_SERVER_MEMBER_ID_NONE) {
             fl_color_success("session terminated (no remaining members)");
+        }
+        /* When transfer DID happen, fl_net_server_transfer_and_stop already
+         * broadcast and locally echoed "[Server Announcement]: <display> is
+         * now the host" — no extra local line needed. */
         return 0;
     }
     if (fl_net_client_state(&g_client) != FL_NET_CLIENT_STATE_CONNECTED) {
@@ -620,20 +619,21 @@ static int verb_msg(int argc, char **argv) {
     }
 
     if (!is_private) {
-        /* Global broadcast. */
+        /* Global broadcast. No local "You -> All" echo is rendered: the
+         * server does not echo our own message back to us (see issue
+         * feedback) and the user already typed the text themselves, so
+         * silence is success. Errors still surface as [ERROR]. */
         if (g_server_running) {
             if (fl_net_server_send_public(&g_server, joined) != FL_RESULT_OK) {
                 fl_color_error("server msg: broadcast failed");
                 return 1;
             }
-            fl_color_msg_to_all("%s", joined);
             return 0;
         }
         if (fl_net_client_send_msg(&g_client, joined) != FL_RESULT_OK) {
             fl_color_error("server msg: send failed");
             return 1;
         }
-        fl_color_msg_to_all("%s", joined);
         return 0;
     }
 
@@ -687,8 +687,9 @@ static int verb_msg(int argc, char **argv) {
                 return 1;
             }
         }
-        fl_color_msg_to_user(recipient_display[0] ? recipient_display : "?",
-                             "%s", joined);
+        /* As with the global path, no local "You -> <recipient>" echo:
+         * silence == success. Recipient renders their own "From X -> You". */
+        (void)recipient_display;
     }
     return 0;
 }
