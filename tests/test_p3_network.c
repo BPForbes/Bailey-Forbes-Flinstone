@@ -715,6 +715,52 @@ static int test_net_socket_tcp_loopback(void) {
     return 0;
 }
 
+/* End-to-end BSD shim coverage for fl_socket / fl_bind / fl_send / fl_recv
+ * via FL_NET_SOCK_TYPE_DGRAM — the same surface udpsend/udplisten use. */
+static int test_net_socket_udp_loopback(void) {
+    fl_net_sock_handle_t listen_h = FL_NET_SOCK_INVALID;
+    fl_net_sock_handle_t send_h = FL_NET_SOCK_INVALID;
+    fl_result_t rc;
+    uint32_t loopback = (uint32_t)FL_NET_IPV4_LOOPBACK_FIRST_OCTET | (1u << 24);
+    const char msg[] = "udp-loopback-shim";
+    char rx[64];
+    size_t sent = 0u;
+    size_t got = 0u;
+
+    rc = fl_net_sock_init();
+    ASSERT(rc == FL_RESULT_OK);
+
+    rc = fl_net_sock_open(FL_NET_SOCK_TYPE_DGRAM, &listen_h);
+    if (rc == FL_RESULT_NOSYS) {
+        fprintf(stderr, "skip: hosted sockets unavailable\n");
+        fl_net_sock_shutdown();
+        return 0;
+    }
+    ASSERT(rc == FL_RESULT_OK);
+
+    rc = fl_net_sock_bind(listen_h, loopback, 48923u);
+    ASSERT(rc == FL_RESULT_OK);
+
+    rc = fl_net_sock_open(FL_NET_SOCK_TYPE_DGRAM, &send_h);
+    ASSERT(rc == FL_RESULT_OK);
+    rc = fl_net_sock_connect(send_h, loopback, 48923u);
+    ASSERT(rc == FL_RESULT_OK);
+
+    rc = fl_net_sock_send(send_h, msg, sizeof(msg) - 1u, &sent);
+    ASSERT(rc == FL_RESULT_OK);
+    ASSERT(sent == sizeof(msg) - 1u);
+
+    rc = fl_net_sock_recv(listen_h, rx, sizeof(rx), &got, 2000u);
+    ASSERT(rc == FL_RESULT_OK);
+    ASSERT(got == sizeof(msg) - 1u);
+    ASSERT(memcmp(rx, msg, got) == 0);
+
+    fl_net_sock_close(send_h);
+    fl_net_sock_close(listen_h);
+    fl_net_sock_shutdown();
+    return 0;
+}
+
 static int test_net_udp_build_datagram(void) {
     uint8_t buf[64];
     uint8_t payload_buf[8];
@@ -1082,6 +1128,11 @@ int main(void) {
 
     printf("test_net_socket_tcp_loopback... ");
     if (test_net_socket_tcp_loopback() != 0)
+        return 1;
+    puts("ok");
+
+    printf("test_net_socket_udp_loopback... ");
+    if (test_net_socket_udp_loopback() != 0)
         return 1;
     puts("ok");
 
