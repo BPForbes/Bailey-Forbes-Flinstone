@@ -101,9 +101,17 @@ sleep 0.4
 $T send-keys -t "$S:0.3" "server leave" C-m
 sleep 1
 
+# Bobby (client B) leaves, then runs whoami: the host-global nick "Bobby"
+# is a SESSION-only label; the shell login must still be the real shell
+# user ("flinstone"). This is the test the user asked for in the follow-up.
+$T send-keys -t "$S:0.2" "server leave" C-m
+sleep 0.5
+$T send-keys -t "$S:0.2" "whoami" C-m
+sleep 0.5
+
 # Host leaves (transfer to next member).
 $T send-keys -t "$S:0.0" "server leave" C-m
-sleep 1
+sleep 1.5
 
 # Capture each pane WITH scrollback so all the events appear in the file.
 mkdir -p /opt/cursor/artifacts

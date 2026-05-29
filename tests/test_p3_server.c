@@ -331,6 +331,13 @@ static int test_messages_and_roster(void) {
         ASSERT(strcmp(disp, "Boss") == 0); /* host-global wins over local "Sis" */
     }
 
+    /* Nick is session-only: the cached client.principal (which mirrors the
+     * shell login the client used at connect time) must NOT be touched by
+     * a nick set. This is the structural guarantee behind the
+     * `server leave; whoami` flow the user asked us to demonstrate: the
+     * shell username is unaffected by any host-global nick. */
+    ASSERT(strcmp(cJill.principal, "Jill") == 0);
+
     fl_net_client_disconnect(&cJack);
     fl_net_client_disconnect(&cJill);
     ASSERT(fl_server_bg_stop_server(bg) == FL_RESULT_OK);

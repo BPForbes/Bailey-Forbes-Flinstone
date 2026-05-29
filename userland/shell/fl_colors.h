@@ -92,6 +92,14 @@ void fl_color_msg_from_user(const char *sender_display, const char *fmt, ...);
 void fl_color_msg_to_all(const char *fmt, ...);
 void fl_color_msg_from_all(const char *sender_display, const char *fmt, ...);
 
+/*
+ * Cyan "[SERVER]: <text>" -- system-to-individual server message (e.g.
+ * the host-transfer notification "You are now the host."). Distinct from
+ * the `[Server Message, ...]` chat family above: this one is the server
+ * itself talking to one user, not a chat between peers.
+ */
+void fl_color_server_dm(const char *fmt, ...);
+
 #ifdef __cplusplus
 }
 #endif

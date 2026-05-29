@@ -155,9 +155,14 @@ static void client_event_print(fl_net_server_event_kind_t kind, const char *text
         break;
     case FL_NET_SERVER_EVENT_NICK_PROMPT:
         /* In normal flow we handle the prompt synchronously in verb_join
-         * before starting the background loop. If it ever arrives later,
-         * just surface it as a warning so the user sees it. */
-        fl_color_warn("nick prompt: %s", text);
+         * before starting the background loop. If it arrives later (e.g.
+         * after an auto-reconnect on host transfer), surface it as a cyan
+         * SERVER message — the user can run `server nick -name <nick>` on
+         * their own schedule. */
+        fl_color_server_dm(
+            "Your principal '%s' collides with another connected user. "
+            "Run 'server set-nick <nick>' to choose a nickname.",
+            current_principal());
         break;
     case FL_NET_SERVER_EVENT_MSG: {
         /* Public chat — already prefixed "Sender: text" by the host. Split
@@ -280,7 +285,9 @@ static void *promote_thread_main(void *arg) {
             return NULL;
         }
         g_server_running = 1;
-        fl_color_success("you are now the host on this session");
+        /* Cyan SERVER message addressed to this user only (matches the
+         * "[SERVER]: <text>" format from issue #239 follow-up). */
+        fl_color_server_dm("You are now the host.");
     } else {
         /* Re-join the new host. Use our same local IP as source so the new
          * host can see us coming from a consistent address. The new host's
@@ -303,7 +310,12 @@ static void *promote_thread_main(void *arg) {
             free(pa);
             return NULL;
         }
-        maybe_handle_nick_prompt_sync();
+        /* Do NOT run the synchronous Y/N nick prompt from this background
+         * thread — the interpreter's foreground read loop is also reading
+         * from stdin, so two threads would race for the user's input. If a
+         * NICK_PROMPT frame arrives, the client-event sink surfaces it as a
+         * cyan SERVER message and the user can react with `server nick` on
+         * their own schedule. */
         start_client_bg();
         fl_color_success("reconnected to new host on member_id %u",
                          (unsigned)g_client.assigned_member_id);
@@ -373,19 +385,29 @@ static void maybe_handle_nick_prompt_sync(void) {
             return;
         if (opcode == (uint8_t)FL_NET_SESSION_OP_NICK_PROMPT) {
             char nick[FL_NET_SERVER_NICK_MAX];
+            /* Take the shell stdout lock for the entire Y/N + nick sequence
+             * so background announcements (from any future bg client) cannot
+             * interleave between the prompt and the user's typed answer.
+             * The interpreter's prompt_active is already 0 here (we are
+             * inside submit_single_command), so async helpers will not try
+             * to redraw "shell> " on top of our yellow prompt. */
+            fl_shell_io_lock();
             fl_color_prompt_yellow(
                 "Your username %s is already in use by another connected user, "
                 "would you want to be nicked [Y/N]? ",
                 current_principal());
             if (!read_yn_default_n()) {
+                fl_shell_io_unlock();
                 fl_color_success("keeping disambiguated principal");
                 return;
             }
             fl_color_prompt_yellow("Please enter the nickname you wish to use: ");
             if (read_nick_line(nick, sizeof(nick)) != 0 || nick[0] == '\0') {
+                fl_shell_io_unlock();
                 fl_color_warn("empty nick — keeping disambiguated principal");
                 return;
             }
+            fl_shell_io_unlock();
             if (fl_net_client_set_nick(&g_client, nick) == FL_RESULT_OK)
                 fl_color_success("nick requested: '%s'", nick);
             else
@@ -693,6 +715,27 @@ static int verb_announce(int argc, char **argv) {
     return 0;
 }
 
+/* `server set-nick <name>` -- joined user requests a host-global nick. The
+ * host validates it the same way it validates a host-driven nick (no
+ * collision with any other principal or nick) and broadcasts the
+ * announcement on success. */
+static int verb_set_nick(int argc, char **argv) {
+    if (fl_net_client_state(&g_client) != FL_NET_CLIENT_STATE_CONNECTED) {
+        fl_color_error("server set-nick: not currently joined");
+        return 1;
+    }
+    if (argc < 3 || !argv[2] || !argv[2][0]) {
+        fl_color_error("usage: server set-nick <nick>");
+        return 1;
+    }
+    if (fl_net_client_set_nick(&g_client, argv[2]) != FL_RESULT_OK) {
+        fl_color_error("server set-nick: invalid nick '%s'", argv[2]);
+        return 1;
+    }
+    fl_color_success("nick requested: '%s'", argv[2]);
+    return 0;
+}
+
 static int verb_nick(int argc, char **argv) {
     fl_net_server_member_id_t target = FL_NET_SERVER_MEMBER_ID_NONE;
     const char *new_nick = NULL;
@@ -828,6 +871,7 @@ int cmd_server_run(int argc, char **argv) {
     if (!strcmp(argv[1], "msg"))       return verb_msg(argc, argv);
     if (!strcmp(argv[1], "announce"))  return verb_announce(argc, argv);
     if (!strcmp(argv[1], "nick"))      return verb_nick(argc, argv);
+    if (!strcmp(argv[1], "set-nick"))  return verb_set_nick(argc, argv);
     if (!strcmp(argv[1], "connected")) return verb_connected();
     fl_color_error("unknown server verb '%s'", argv[1]);
     return 1;

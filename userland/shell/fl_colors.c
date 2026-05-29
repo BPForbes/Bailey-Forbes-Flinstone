@@ -161,3 +161,10 @@ void fl_color_msg_from_all(const char *sender_display, const char *fmt, ...) {
     msg_vprint(prefix, fmt, ap);
     va_end(ap);
 }
+
+void fl_color_server_dm(const char *fmt, ...) {
+    va_list ap;
+    va_start(ap, fmt);
+    msg_vprint("[SERVER]: ", fmt, ap);
+    va_end(ap);
+}
