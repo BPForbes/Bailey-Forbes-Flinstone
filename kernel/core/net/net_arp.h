@@ -30,6 +30,27 @@ void fl_net_arp_clear(void);
 fl_result_t fl_net_arp_cache_insert(uint32_t ipv4_be, const uint8_t mac[FL_NET_ETH_ADDR_LEN]);
 int fl_net_arp_cache_lookup(uint32_t ipv4_be, uint8_t mac_out[FL_NET_ETH_ADDR_LEN]);
 
+/**
+ * Snapshot row used by `arp` / `netsh arp` shell verbs and CI sweep tests.
+ * `age_ticks` is the monotonic counter at insert / refresh time (used by
+ * fl_net_arp_cache_sweep); callers may compare against the current tick
+ * returned via fl_net_arp_tick_now to derive "seconds since refresh".
+ */
+typedef struct {
+    uint32_t ip_be;
+    uint8_t  mac[FL_NET_ETH_ADDR_LEN];
+    unsigned age_ticks;
+} fl_net_arp_cache_row_t;
+
+/** Copy at most `cap` cache rows into `out`; return number written. */
+unsigned fl_net_arp_cache_snapshot(fl_net_arp_cache_row_t *out, unsigned cap);
+
+/** Current internal age tick (monotonic, unitless). */
+unsigned fl_net_arp_tick_now(void);
+
+/** Remove the entry for `ipv4_be` if present; returns FL_RESULT_OK or NOENT. */
+fl_result_t fl_net_arp_cache_delete(uint32_t ipv4_be);
+
 size_t fl_net_arp_build_request(uint8_t *frame, size_t cap, const uint8_t src_mac[FL_NET_ETH_ADDR_LEN],
                                 uint32_t src_ip_be, uint32_t target_ip_be);
 
