@@ -55,6 +55,12 @@ typedef enum {
     FL_SCMD_SERVER,
     FL_SCMD_UDPSEND,
     FL_SCMD_UDPLISTEN,
+    FL_SCMD_ARP,
+    FL_SCMD_IFCONFIG,
+    FL_SCMD_ROUTE,
+    FL_SCMD_NETSTAT,
+    FL_SCMD_NSLOOKUP,
+    FL_SCMD_NETSH,
 } fl_shell_cmd_no_t;
 
 #endif /* FL_SHELL_CMD_H */

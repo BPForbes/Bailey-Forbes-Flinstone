@@ -100,6 +100,18 @@ int fl_shell_cmd_dispatch(fl_shell_cmd_no_t no, int argc, char **argv) {
         return cmd_udpsend_run(argc, argv);
     case FL_SCMD_UDPLISTEN:
         return cmd_udplisten_run(argc, argv);
+    case FL_SCMD_ARP:
+        return cmd_arp_run(argc, argv);
+    case FL_SCMD_IFCONFIG:
+        return cmd_ifconfig_run(argc, argv);
+    case FL_SCMD_ROUTE:
+        return cmd_route_run(argc, argv);
+    case FL_SCMD_NETSTAT:
+        return cmd_netstat_run(argc, argv);
+    case FL_SCMD_NSLOOKUP:
+        return cmd_nslookup_run(argc, argv);
+    case FL_SCMD_NETSH:
+        return cmd_netsh_run(argc, argv);
     default:
         return -1;
     }

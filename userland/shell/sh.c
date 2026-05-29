@@ -324,7 +324,8 @@ int main(int argc, char *argv[]) {
             "initdisk","rerun","import","du","printdisk","addcluster","where","loc",
             "diskput","diskget","diskfiles","diskdel","diskmkdir","sudo","su","login",
             "logout","useradd","userdel","passwd","whoami","ping","check","server",
-            "udpsend","udplisten",NULL};
+            "udpsend","udplisten","arp","ifconfig","route","netstat","nslookup",
+            "netsh",NULL};
         int is_cmd = 0;
         for (int k = 0; skip[k]; k++)
             if (!strcmp(argv[1], skip[k])) { is_cmd = 1; break; }

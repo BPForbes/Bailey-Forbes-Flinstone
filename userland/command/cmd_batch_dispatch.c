@@ -96,6 +96,18 @@ int fl_shell_cmd_batch_tokens_count(fl_shell_cmd_no_t no, int argc, char **argv,
         return cmd_udpsend_batch_tokens_count(argc, argv, i);
     case FL_SCMD_UDPLISTEN:
         return cmd_udplisten_batch_tokens_count(argc, argv, i);
+    case FL_SCMD_ARP:
+        return cmd_arp_batch_tokens_count(argc, argv, i);
+    case FL_SCMD_IFCONFIG:
+        return cmd_ifconfig_batch_tokens_count(argc, argv, i);
+    case FL_SCMD_ROUTE:
+        return cmd_route_batch_tokens_count(argc, argv, i);
+    case FL_SCMD_NETSTAT:
+        return cmd_netstat_batch_tokens_count(argc, argv, i);
+    case FL_SCMD_NSLOOKUP:
+        return cmd_nslookup_batch_tokens_count(argc, argv, i);
+    case FL_SCMD_NETSH:
+        return cmd_netsh_batch_tokens_count(argc, argv, i);
     default:
         return 1;
     }
