@@ -228,7 +228,7 @@ Legend matches **`docs/ROADMAP.md`**: **✅** complete; **~✅** usable lab subs
 | **P3-9** TLS | ✅ | ~✅ — **`net_tls_hosted.c`** record-size boundary (no mbedtls yet) |
 | **P3-12** DHCP | ✅ | ~✅ — BOOTP codec + **`fl_net_dhcp_*_pkt`** over **`fl_net_packet_t`** |
 | **P3-14** background | ✅ | ~✅ — **`fl_net_arp_tick`** on workqueue; TCP timer wheel / RX dequeue still **#238** |
-| **P3-13** `server` + messaging | ✅ | ~✅ — `server host/join/msg/announce/nick/connected/leave/kill` shipped (PR #282); `udpsend` / `udplisten` shell verbs added (#239); product spec **`docs/SERVER.md`**; deferred siblings: **#283** (`OP_CTRL_HOST_PROMOTE6`), **#280** (IPv6), **#279** (Wi-Fi station), native `fl_socket` waits on **P3-7** TCP state machine |
+| **P3-13** `server` + messaging | ✅ | ~✅ — `server host/join/msg/announce/nick/connected/leave/kill` shipped (PR #282); `udpsend` / `udplisten` shell verbs added (#239); product spec **`docs/SERVER.md`**; deferred siblings: **#283** (`OP_CTRL_HOST_PROMOTE6`), **#280** (IPv6), **#279** (Wi-Fi station), native `fl_socket` waits on **P3-7** TCP state machine. Full per-item follow-up status: **`docs/P3_13_FOLLOWUP.md`** |
 
 ## Standards map (integration targets)
 

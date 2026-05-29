@@ -2,6 +2,8 @@
 
 This document describes the **multi-user server** product: shell commands, terminal colours, TCP framing, file and message transfer, and member identity. It is **normative for product behaviour** on top of the network contracts.
 
+**Follow-up tracker:** every CodeRabbit / Codex item from PR `#282` and every in-source `TODO` for P3-13 lives in **`docs/P3_13_FOLLOWUP.md`**. The companion roadmap rows live in **`docs/ROADMAP.md`** under `TODO: P3-13 (#283)` / `(#280)` / `(#279)` / `(#238)` / `(single-device WAN demo)`.
+
 **Status (PRE 4.2.0 BUILD 8+):** the server foundation is implemented and lives at **`kernel/core/net/net_server.[ch]`** (host + member registry, ANSI announcement protocol), **`kernel/core/net/net_client.[ch]`** (client state machine + cached roster snapshot + private-message send), **`kernel/core/net/server_bg.[ch]`** (pthread receive loops), **`userland/command/cmd_server.c`** (shell verbs), and **`userland/shell/fl_colors.[ch]`** + **`userland/shell/shell_io.[ch]`** (colour palette + prompt-aware async output). See **§3.4 Private and public messages**, **§3.5 Multi-IP / non-loopback hosting**, and **§3.6 Host transfer on leave / exit** below for the additions that ship in this train; file transfer (**`server send -file`**) is still scoped for a follow-up commit.
 
 Related: **`docs/P3_13_CHAT_SERVER.md`** (chat-room v1), **`docs/P3_NETWORKING.md`** ([protocol inventory](P3_NETWORKING.md#application-layer-and-common-internet-protocols) — this product is **not** FTP/SFTP/HTTP), **`docs/ROADMAP.md`**.
