@@ -268,6 +268,29 @@ Default landing directory name: **`server_share/`** (**`FL_SERVER_SHARE_DIR_NAME
 
 Hosted labs use **`fl_net_sock_*`** (**`net_socket.c`**), which maps to POSIX **`socket`/`bind`/`listen`/`accept`/`connect`/`send`/`recv`** until the in-tree **P3-7** FSM owns the path.
 
+### 4.1.1 BSD shim coverage (`fl_socket / fl_bind / fl_listen / fl_accept / fl_send / fl_recv / fl_close`)
+
+The same surface backs three #239 acceptance items:
+
+| Surface | Verb / call site | End-to-end test |
+|---|---|---|
+| `fl_socket / fl_bind / fl_listen / fl_accept / fl_send / fl_recv / fl_close` | `server host`, `server join`, the **STREAM** path | `tests/test_p3_network.c::test_net_socket_tcp_loopback` |
+| `fl_socket / fl_bind / fl_send / fl_recv / fl_close` | `udpsend`, `udplisten`, the **DGRAM** path | `tests/test_p3_network.c::test_net_socket_udp_loopback` |
+| `udpsend` + `udplisten` shell verbs (loopback echo) | `userland/command/cmd_udp.c` | `tests/test_p3_udp_cmds.c` via `make test_p3_udp_cmds` |
+
+### 4.1.2 “No Linux kernel socket required for loopback or TAP destinations”
+
+This is one of the **#239** acceptance criteria. Current status: the **hosted** shim still delegates to POSIX sockets, but **loopback is fully covered by the in-tree path** (`net_loopback.c`, `test_loopback_arp_exchange`, `test_loopback_ping`, `test_loopback_tcp`, `test_udp_echo_loopback`, `test_netdev_loopback_frame`), and TAP frames round-trip via `net_tap.c` + `test_tap_smoke`. The remaining ask — making `fl_net_sock_open(STREAM)` itself bypass the Linux kernel socket on a loopback or TAP destination — depends on **P3-7** TCP state machine + **P3-6** UDP demux promoting from “lab helpers” to “the native path the shim auto-selects”. The shim already has a place to add that switch (the `FL_NET_SOCK_HOSTED` define in `net_socket.c`); once P3-7 owns the listener / connect path, the shim can prefer the in-tree FSM when `addr_be` is loopback or a configured TAP route, and fall back to POSIX otherwise.
+
+### 4.1.3 `udpsend` / `udplisten` shell verbs
+
+```text
+udpsend <ip:port> <message...>
+udplisten <port> [-c count] [-W timeout_ms] [-bind <local_ip>]
+```
+
+`udpsend` opens `fl_net_sock_open(DGRAM)` → `fl_net_sock_connect(peer_be, port)` → `fl_net_sock_send(payload)`. `udplisten` opens `DGRAM` → `fl_net_sock_bind(local, port)` → loops `fl_net_sock_recv(buf, timeout_ms)` and prints each datagram. Implementation: **`userland/command/cmd_udp.c`**. Loopback echo proof: **`make test_p3_udp_cmds`**.
+
 ### 4.2 Session frame (TCP byte stream)
 
 Constants: **`contracts/networking/contract_p3_session_wire.h`**.

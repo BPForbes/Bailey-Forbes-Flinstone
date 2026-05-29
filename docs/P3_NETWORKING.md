@@ -175,7 +175,7 @@ Legend matches **`docs/ROADMAP.md`**: **✅** complete; **~✅** usable lab subs
 | **P3-9** TLS | ✅ | ~✅ — **`net_tls_hosted.c`** record-size boundary (no mbedtls yet) |
 | **P3-12** DHCP | ✅ | ~✅ — BOOTP codec + **`fl_net_dhcp_*_pkt`** over **`fl_net_packet_t`** |
 | **P3-14** background | ✅ | ~✅ — **`fl_net_arp_tick`** on workqueue; TCP timer wheel / RX dequeue still **#238** |
-| **P3-13** `server` + messaging | ✅ | ❌ — product spec **`docs/SERVER.md`**; **`cmd_server`** / hub app **#239** |
+| **P3-13** `server` + messaging | ✅ | ~✅ — `server host/join/msg/announce/nick/connected/leave/kill` shipped (PR #282); `udpsend` / `udplisten` shell verbs added (#239); product spec **`docs/SERVER.md`**; deferred siblings: **#283** (`OP_CTRL_HOST_PROMOTE6`), **#280** (IPv6), **#279** (Wi-Fi station), native `fl_socket` waits on **P3-7** TCP state machine |
 
 ## Standards map (integration targets)
 
@@ -188,7 +188,7 @@ Legend matches **`docs/ROADMAP.md`**: **✅** complete; **~✅** usable lab subs
 | TCP (**P3-7**) | **RFC 793** | ~✅ SYN probe + hosted stream shim (in-tree FSM TODO) |
 | DNS (**P3-8**) | **RFC 1035** (subset) | ~✅ A record |
 | DHCP (**P3-12**) | **RFC 2131**, **RFC 2132** | ~✅ codec + lab client (not production lease manager) |
-| `server` + messaging (**P3-13**) | **RFC 793** (TCP session); **RFC 768** (UDP helpers) | ❌ |
+| `server` + messaging (**P3-13**) | **RFC 793** (TCP session); **RFC 768** (UDP helpers) | ~✅ — hosted-socket implementation (PR #282 + #239); native non-hosted path queued behind **P3-7** TCP state machine |
 
 ## Application-layer and common Internet protocols
 
@@ -281,7 +281,7 @@ make check-network-requirements
 | Priority | Item | Notes |
 |----------|------|--------|
 | **P3-12** | DHCP renew/rebind FSM | Lease DB and renew/rebind after **`fl_net_dhcp_acquire`** |
-| **P3-13** | Chat room | See **`docs/P3_13_CHAT_SERVER.md`**; **#239** / **#238** |
+| **P3-13** | Chat room | Foundations shipped (PR #282 + #239 `udpsend`/`udplisten`); deferred siblings: **#283** (`OP_CTRL_HOST_PROMOTE6`), **#280** (IPv6 + ICMPv6 + NDP), **#279** (Wi-Fi station); native non-hosted `fl_socket` gated on **P3-7** TCP state machine |
 | ~~Patch~~ | ~~ARP cache TTL / loopback dedup~~ | Done (**#237**, **#240**): **`fl_net_arp_tick`**, **`fl_net_loopback_exchange`**, PIT BH on **B** |
 | ~~P3-5~~ | ~~Drop Linux ICMP fallback~~ | Done (**#262**): egress-only ICMP/UDP when unrouted |
 | **P3-7** | Production TCP timers | Loopback **RFC 793** FSM landed (**#238**); TAP retransmit/TIME_WAIT remain |

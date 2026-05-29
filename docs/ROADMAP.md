@@ -138,7 +138,7 @@ Two columns track different concerns:
 | **P3-5** | IPv4 | ✅ | ~✅ |
 | **P3-6** | UDP | ✅ | ~✅ |
 | **P3-12** | DHCP client (IPv4) | ✅ | ~✅ |
-| **P3-13** | Chat room (`server`) | ✅ | ❌ |
+| **P3-13** | Chat room (`server`) | ✅ | ~✅ |
 | **P3-14** | Net stack background jobs | ✅ | ~✅ |
 | **P3-7** | TCP (large) | ✅ | ~✅ |
 | **P3-8** | DNS client | ✅ | ~✅ |
@@ -188,7 +188,7 @@ Use this table when asking what “**the next A release**” means in terms of p
 | Release | Phases / artifacts targeted (summary) | Example gate criteria |
 |---------|----------------------------------------|------------------------|
 | **A1** | **P0** + **Appendix D** execution rows **1–7** (through spinlocks / driver reentrancy) | Default CI green; **P0-1** subsystem headers stable; bare-metal IRQ + table races not blocking K/B bring-up |
-| **A2** | **P1** + **P2** + **P3** through **P3-6** (UDP) with loopback + TAP path | **P1-4**/**P1-5** PMM/arenas validated on **B** where applicable; **P2-3** authz tests deny guest on privileged ops; UDP/loopback interop tests in CI or documented skip. **PRE 4.2.0** progress: loopback + ARP + LPM + hosted UDP/ICMP/DNS + DHCP codec (**~✅**); **P3-13** **`server`** app still **❌** for full **A2** |
+| **A2** | **P1** + **P2** + **P3** through **P3-6** (UDP) with loopback + TAP path | **P1-4**/**P1-5** PMM/arenas validated on **B** where applicable; **P2-3** authz tests deny guest on privileged ops; UDP/loopback interop tests in CI or documented skip. **PRE 4.2.0** progress: loopback + ARP + LPM + hosted UDP/ICMP/DNS + DHCP codec (**~✅**); **P3-13** **`server`** app now **~✅** (PR #282 server foundations + #239 `udpsend`/`udplisten` shell verbs) |
 | **A3** | **P4** (virtio **P4-4** + IRQ model) + **P6-1**/**P6-2** logging | Virtio ring / golden vectors; **no sleep in hardirq** asserts in debug builds; structured log + ring buffer under test |
 | **A4** | **P5**–**P9** as needed (VFS, VM fidelity, hardening) | **P9-1** fuzz triage workflow; **P9-3** SMP bring-up documented with arch memory-model refs + **PSCI** (**P4-7**) where AArch64 applies |
 
@@ -377,7 +377,7 @@ Shipped on the **PRE 4.2.0** train (**PR #231** class work). This is the **modul
 | **P3-8** | ✅ | **`net_dns.c`**: **A** queries; up to three nameservers, retries, rotating TXIDs (**#251**) |
 | **P3-9** | ~✅ | **`net_tls_hosted.c`**: record cap + optional OpenSSL client bridge when **libssl** present (**#252**) |
 | **P3-12** | ~✅ | **`net_dhcp.c`**: codec + **`fl_net_dhcp_acquire`** over egress (**#247**) |
-| **P3-13** | ❌ | Server shell/hub not implemented; contracts **`contract_p3_sockets.h`**, **`contract_p3_session_wire.h`**; **`docs/SERVER.md`**, **`docs/P3_13_CHAT_SERVER.md`**; **#239** / **#238** |
+| **P3-13** | ~✅ | Server foundations shipped on **PRE 4.2.0** (#239 / PR #282): BSD socket shim (**`net_socket.c`**), **`server host/join/leave/kill/announce/msg/nick`** built-ins, dual-role host + member registry, host transfer + auto-promote, prompt-aware async output, cyan private DMs, blue announcements, cross-subnet `netns` pcap proof. `udpsend` / `udplisten` shell verbs added (**`userland/command/cmd_udp.c`**); endianness fix for `OP_CTRL_HOST_PROMOTE` IPv4 wire field (#284). Deferred siblings remain tracked: **#283** (`OP_CTRL_HOST_PROMOTE6`), **#280** (IPv6 + ICMPv6 + NDP), **#279** (Wi-Fi station). Native (non-hosted) `fl_socket` path is gated on **P3-7** TCP state machine. Contracts: **`contract_p3_sockets.h`**, **`contract_p3_session_wire.h`**, **`contract_p3_server.h`** (REV 2). |
 | **P3-14** | ~✅ | **`net_background.c`**: **`fl_net_arp_tick`**; RX dequeue / TCP timer wheel remain future |
 | **P3-10** / **P3-11** | ❌ | Contract **`[DEFERRED]`** only |
 
