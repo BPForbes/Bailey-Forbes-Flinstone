@@ -53,6 +53,8 @@ typedef enum {
     FL_SCMD_PING,
     FL_SCMD_CHECK,
     FL_SCMD_SERVER,
+    FL_SCMD_UDPSEND,
+    FL_SCMD_UDPLISTEN,
 } fl_shell_cmd_no_t;
 
 #endif /* FL_SHELL_CMD_H */

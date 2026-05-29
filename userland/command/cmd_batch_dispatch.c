@@ -92,6 +92,10 @@ int fl_shell_cmd_batch_tokens_count(fl_shell_cmd_no_t no, int argc, char **argv,
         return cmd_check_batch_tokens_count(argc, argv, i);
     case FL_SCMD_SERVER:
         return cmd_server_batch_tokens_count(argc, argv, i);
+    case FL_SCMD_UDPSEND:
+        return cmd_udpsend_batch_tokens_count(argc, argv, i);
+    case FL_SCMD_UDPLISTEN:
+        return cmd_udplisten_batch_tokens_count(argc, argv, i);
     default:
         return 1;
     }

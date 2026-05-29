@@ -103,6 +103,8 @@ static const char HELP_BODY[] =
 "  ping <host> [port]   ICMP when port omitted/0; TCP connect when port 1-65535\n"
 "                       (-c count, -W timeout_ms; host may be DNS or IPv4)\n"
 "  check requirements <host> <port>  Live probe (ICMP or TCP); no fixed targets\n"
+"  udpsend <ip:port> <message...>    Send one UDP datagram\n"
+"  udplisten <port> [-c N] [-W ms] [-bind ip]  Recv UDP datagrams on <port>\n"
 "  help                 Display this help\n"
 "  redirect <file>      Redirect output (use \"redirect off\" to restore)\n"
 "  rerun <N>            Re-run Nth history command\n"

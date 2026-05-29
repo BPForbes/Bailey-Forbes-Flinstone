@@ -48,6 +48,8 @@ static const cmd_name_ent_t cmd_registry[] = {
     {"ping", FL_SCMD_PING},
     {"whoami", FL_SCMD_WHOAMI},
     {"type", FL_SCMD_TYPE},
+    {"udplisten", FL_SCMD_UDPLISTEN},
+    {"udpsend", FL_SCMD_UDPSEND},
     {"update", FL_SCMD_UPDATE},
     {"version", FL_SCMD_VERSION},
     {"where", FL_SCMD_WHERE},

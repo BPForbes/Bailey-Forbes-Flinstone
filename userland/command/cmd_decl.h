@@ -61,6 +61,8 @@ int cmd_whoami_run(int argc, char **argv);
 int cmd_ping_run(int argc, char **argv);
 int cmd_check_run(int argc, char **argv);
 int cmd_server_run(int argc, char **argv);
+int cmd_udpsend_run(int argc, char **argv);
+int cmd_udplisten_run(int argc, char **argv);
 
 /*
  * Batch argv token counts (see cmd_batch.h).
@@ -123,5 +125,9 @@ int cmd_ping_batch_tokens_count(int argc, char **argv, int i);
 int cmd_check_batch_tokens_count(int argc, char **argv, int i);
 /* Indirect: fl_shell_cmd_batch_tokens_count(FL_SCMD_SERVER, ...) in cmd_batch_dispatch.c */
 int cmd_server_batch_tokens_count(int argc, char **argv, int i);
+/* Indirect: fl_shell_cmd_batch_tokens_count(FL_SCMD_UDPSEND, ...) in cmd_batch_dispatch.c */
+int cmd_udpsend_batch_tokens_count(int argc, char **argv, int i);
+/* Indirect: fl_shell_cmd_batch_tokens_count(FL_SCMD_UDPLISTEN, ...) in cmd_batch_dispatch.c */
+int cmd_udplisten_batch_tokens_count(int argc, char **argv, int i);
 
 #endif /* CMD_DECL_H */
