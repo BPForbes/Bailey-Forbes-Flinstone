@@ -11,6 +11,24 @@
 #define FL_NET_SERVER_HOSTED 1
 #endif
 
+/* Parallel to fl_net_server_t::members[] — one partial-frame parser per
+ * accepted peer. Kept here (not in the contract struct) so the public
+ * fl_net_server_member_t layout stays stable while the internal codec
+ * carries the cross-poll state it needs to survive TCP segmentation
+ * (Codex P1 follow-up: a poll that returns FL_RESULT_TIMEDOUT mid-frame
+ * must not lose the bytes already consumed from the socket).
+ *
+ * Each entry is keyed by the same slot index used in `srv->members[]`; the
+ * accept path resets one slot, and the drop path resets the same slot. The
+ * file-static array bounds the lifetime to the single foreground server
+ * process — the same scope as `g_server` in `cmd_server.c`. */
+static fl_net_session_rx_t s_member_rx[FL_NET_SERVER_MAX_MEMBERS];
+
+static void member_rx_reset_slot(size_t i) {
+    if (i < FL_NET_SERVER_MAX_MEMBERS)
+        fl_net_session_rx_reset(&s_member_rx[i]);
+}
+
 /* ------------------------------------------------------------------------- */
 /* Wire codec                                                                */
 /* ------------------------------------------------------------------------- */
@@ -95,21 +113,18 @@ fl_result_t fl_net_session_recv_frame(fl_net_sock_handle_t handle, uint8_t *opco
         if (rc != FL_RESULT_OK)
             return rc;
     } else {
-        /* Truncate: read into a local buffer and discard the tail.
-         * Foundations test path never hits this (callers size their buffers
-         * to FL_NET_SESSION_MAX_MSG), but we still drain so the stream stays
-         * in sync. */
+        /* Truncate: read into a local scratch buffer and discard the tail
+         * so the stream stays in sync. `*payload_len_out` keeps the true
+         * wire `plen` (set above the if) — the caller can detect truncation
+         * by comparing `*payload_len_out > payload_cap`. */
         uint8_t scratch[64];
         size_t remaining = plen;
-        size_t took_into_caller = 0;
 
         if (payload_out && payload_cap > 0u) {
             rc = recv_exact(handle, payload_out, payload_cap, timeout_ms);
             if (rc != FL_RESULT_OK)
                 return rc;
-            took_into_caller = payload_cap;
             remaining -= payload_cap;
-            *payload_len_out = (uint16_t)payload_cap;
         }
         while (remaining > 0u) {
             size_t chunk = remaining < sizeof(scratch) ? remaining : sizeof(scratch);
@@ -118,8 +133,86 @@ fl_result_t fl_net_session_recv_frame(fl_net_sock_handle_t handle, uint8_t *opco
                 return rc;
             remaining -= chunk;
         }
-        (void)took_into_caller;
     }
+    return FL_RESULT_OK;
+}
+
+void fl_net_session_rx_reset(fl_net_session_rx_t *st) {
+    if (!st)
+        return;
+    st->hdr_filled = 0u;
+    st->expected_plen = 0u;
+    st->body_filled = 0u;
+}
+
+fl_result_t fl_net_session_recv_frame_nb(fl_net_sock_handle_t handle,
+                                          fl_net_session_rx_t *st,
+                                          uint8_t *opcode_out,
+                                          uint8_t *payload_out, size_t payload_cap,
+                                          uint16_t *payload_len_out) {
+    if (!st || !opcode_out || !payload_len_out)
+        return FL_RESULT_INVAL;
+
+    /* Phase 1: accumulate the 6-byte header. Partial reads survive across
+     * calls in `st->hdr` + `st->hdr_filled`, which is the whole point of
+     * the nb variant (see header comment). */
+    while (st->hdr_filled < FL_NET_SESSION_HDR_LEN) {
+        size_t want = (size_t)FL_NET_SESSION_HDR_LEN - st->hdr_filled;
+        size_t got = 0;
+        fl_result_t rc = fl_net_sock_recv(handle, st->hdr + st->hdr_filled,
+                                          want, &got, 0u);
+        if (rc == FL_RESULT_TIMEDOUT)
+            return FL_RESULT_TIMEDOUT;
+        if (rc == FL_RESULT_EOF)
+            return FL_RESULT_EOF;
+        if (rc != FL_RESULT_OK)
+            return rc;
+        if (got == 0u)
+            return FL_RESULT_EOF;
+        st->hdr_filled = (uint16_t)(st->hdr_filled + got);
+    }
+
+    /* Parse + validate the freshly-completed header exactly once. */
+    if (st->body_filled == 0u && st->expected_plen == 0u) {
+        if (st->hdr[0] != (uint8_t)FL_NET_SESSION_MAGIC ||
+            st->hdr[1] != (uint8_t)FL_NET_SESSION_VERSION) {
+            /* Malformed; reset so the caller can drop the peer and a fresh
+             * connection starts clean. */
+            fl_net_session_rx_reset(st);
+            return FL_RESULT_INVAL;
+        }
+        st->expected_plen = (uint16_t)(((uint16_t)st->hdr[4] << 8) | st->hdr[5]);
+        if (st->expected_plen > FL_NET_SESSION_MAX_MSG) {
+            fl_net_session_rx_reset(st);
+            return FL_RESULT_INVAL;
+        }
+    }
+
+    /* Phase 2: accumulate the payload bytes (may be zero). */
+    while (st->body_filled < st->expected_plen) {
+        size_t want = (size_t)st->expected_plen - st->body_filled;
+        size_t got = 0;
+        fl_result_t rc = fl_net_sock_recv(handle, st->body + st->body_filled,
+                                          want, &got, 0u);
+        if (rc == FL_RESULT_TIMEDOUT)
+            return FL_RESULT_TIMEDOUT;
+        if (rc == FL_RESULT_EOF)
+            return FL_RESULT_EOF;
+        if (rc != FL_RESULT_OK)
+            return rc;
+        if (got == 0u)
+            return FL_RESULT_EOF;
+        st->body_filled = (uint16_t)(st->body_filled + got);
+    }
+
+    /* Full frame ready — publish to the caller and reset for the next. */
+    *opcode_out = st->hdr[2];
+    *payload_len_out = st->expected_plen;
+    if (payload_out && payload_cap > 0u && st->expected_plen > 0u) {
+        size_t n = st->expected_plen < payload_cap ? st->expected_plen : payload_cap;
+        memcpy(payload_out, st->body, n);
+    }
+    fl_net_session_rx_reset(st);
     return FL_RESULT_OK;
 }
 
@@ -599,6 +692,7 @@ fl_result_t fl_net_server_transfer_and_stop(fl_net_server_t *srv,
             fl_net_sock_close(m->peer_handle);
             m->peer_handle = FL_NET_SOCK_INVALID;
         }
+        member_rx_reset_slot(i);
         m->in_use = 0u;
     }
     if (srv->listen_handle != FL_NET_SOCK_INVALID) {
@@ -683,6 +777,10 @@ fl_result_t fl_net_server_init(fl_net_server_t *srv) {
     memset(srv, 0, sizeof(*srv));
     srv->listen_handle = FL_NET_SOCK_INVALID;
     srv->next_member_id = FL_NET_SERVER_MEMBER_ID_HOST;
+    /* Clear any partial-frame state from a prior session so a fresh server
+     * never sees stale half-headers from a previous peer. */
+    for (size_t i = 0; i < FL_NET_SERVER_MAX_MEMBERS; i++)
+        member_rx_reset_slot(i);
     return fl_net_sock_init();
 }
 
@@ -765,6 +863,7 @@ fl_result_t fl_net_server_host_stop(fl_net_server_t *srv) {
             fl_net_sock_close(m->peer_handle);
             m->peer_handle = FL_NET_SOCK_INVALID;
         }
+        member_rx_reset_slot(i);
         m->in_use = 0u;
     }
     if (srv->listen_handle != FL_NET_SOCK_INVALID) {
@@ -839,6 +938,10 @@ fl_result_t fl_net_server_accept_pending(fl_net_server_t *srv,
         fl_net_sock_close(client_h);
         return FL_RESULT_NOMEM;
     }
+    /* Reset the partial-frame parser for this slot before the new peer
+     * starts streaming into it (Codex P1: TCP segmentation must not be
+     * mistaken for protocol corruption across reuses of a slot). */
+    member_rx_reset_slot((size_t)(m - srv->members));
     memset(m, 0, sizeof(*m));
     m->in_use = 1u;
     m->is_host = 0u;
@@ -908,6 +1011,9 @@ static void drop_member(fl_net_server_t *srv, fl_net_server_member_t *m) {
         fl_net_sock_close(m->peer_handle);
         m->peer_handle = FL_NET_SOCK_INVALID;
     }
+    /* Discard any half-frame this peer left behind so the slot is clean
+     * when the next accept reuses it. */
+    member_rx_reset_slot((size_t)(m - srv->members));
     m->in_use = 0u;
     m->member_id = FL_NET_SERVER_MEMBER_ID_NONE;
 
@@ -1027,28 +1133,37 @@ fl_result_t fl_net_server_poll_members(fl_net_server_t *srv) {
 
     for (size_t i = 0; i < FL_NET_SERVER_MAX_MEMBERS; i++) {
         fl_net_server_member_t *m = &srv->members[i];
-        uint8_t opcode = 0;
-        uint8_t payload[FL_NET_SESSION_MAX_MSG];
-        uint16_t plen = 0;
-        fl_result_t rc;
-
         if (!m->in_use)
             continue;
         if (m->peer_handle == FL_NET_SOCK_INVALID)
             continue; /* host self-member */
 
-        /* Non-blocking peek for an inbound frame. */
+        /* Non-blocking peek for inbound frames. Drain up to a small batch
+         * per poll so a chatty peer cannot starve the others, but always
+         * yield on FL_RESULT_TIMEDOUT so the foreground stays responsive.
+         * The per-slot fl_net_session_rx_t in s_member_rx[i] preserves any
+         * partial frame across calls — TCP segmentation that lands the
+         * 6-byte header (or a long payload) in two segments no longer
+         * looks like a magic-byte mismatch. */
         (void)fl_net_sock_set_nonblock(m->peer_handle, 1);
-        rc = fl_net_session_recv_frame(m->peer_handle, &opcode, payload,
-                                       sizeof(payload), &plen, 0u);
-        if (rc == FL_RESULT_TIMEDOUT)
-            continue;
-        if (rc == FL_RESULT_EOF || rc != FL_RESULT_OK) {
-            drop_member(srv, m);
-            continue;
+        for (unsigned drained = 0; drained < 8u; drained++) {
+            uint8_t opcode = 0;
+            uint8_t payload[FL_NET_SESSION_MAX_MSG];
+            uint16_t plen = 0;
+            fl_result_t rc = fl_net_session_recv_frame_nb(
+                m->peer_handle, &s_member_rx[i],
+                &opcode, payload, sizeof(payload), &plen);
+            if (rc == FL_RESULT_TIMEDOUT)
+                break;
+            if (rc == FL_RESULT_EOF || rc != FL_RESULT_OK) {
+                drop_member(srv, m);
+                break;
+            }
+            if (dispatch_member_frame(srv, m, opcode, payload, plen)) {
+                drop_member(srv, m);
+                break;
+            }
         }
-        if (dispatch_member_frame(srv, m, opcode, payload, plen))
-            drop_member(srv, m);
     }
     return FL_RESULT_OK;
 }

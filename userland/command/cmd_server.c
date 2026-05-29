@@ -227,7 +227,28 @@ static void client_event_print(fl_net_server_event_kind_t kind, const char *text
     }
 }
 
+/*
+ * The client BG loop exits on its own when the session is closed by the
+ * host (CTRL_KILL / EOF). At that point `g_client_bg` still points at the
+ * thread handle but the thread itself has returned; without this reap the
+ * next `server join` would see the non-NULL pointer in start_client_bg()
+ * and skip starting a new loop, leaving the user "joined" but never
+ * receiving announcements (Codex P2 follow-up).
+ *
+ * pthread_join on an already-returned thread is well-defined — it returns
+ * immediately and frees the kernel-side resources, which is exactly the
+ * cleanup we want.
+ */
+static void reap_client_bg_if_dead(void) {
+    if (g_client_bg &&
+        fl_net_client_state(&g_client) == FL_NET_CLIENT_STATE_DISCONNECTED) {
+        fl_server_bg_stop_client(g_client_bg);
+        g_client_bg = NULL;
+    }
+}
+
 static void start_client_bg(void) {
+    reap_client_bg_if_dead();
     if (g_client_bg)
         return;
     (void)fl_server_bg_start_client(&g_client, client_event_print, NULL, &g_client_bg);
@@ -366,7 +387,12 @@ static int read_nick_line(char *out, size_t cap) {
 
 static void maybe_handle_nick_prompt_sync(void) {
     /* Drain frames non-blocking until we either see NICK_PROMPT (handled
-     * inline) or there is nothing pending. */
+     * inline) or there is nothing pending. Any non-prompt frame received
+     * during this window is dispatched through the same path the BG loop
+     * would use (`fl_net_client_dispatch_frame`) so the host's initial
+     * MEMBER_LIST_SNAPSHOT / JOIN_ANNOUNCE / SERVER_ANNOUNCE are preserved
+     * and `server connected` + `server msg -user` work immediately after
+     * the join completes (Codex P2 follow-up). */
     for (int i = 0; i < 50; i++) {
         uint8_t opcode = 0;
         uint8_t payload[FL_NET_SESSION_MAX_MSG];
@@ -374,8 +400,10 @@ static void maybe_handle_nick_prompt_sync(void) {
         fl_result_t rc;
         struct timespec ts = { 0, 20 * 1000 * 1000 }; /* 20ms */
         nanosleep(&ts, NULL);
-        rc = fl_net_session_recv_frame(g_client.peer_handle, &opcode, payload,
-                                       sizeof(payload), &plen, 0u);
+        rc = fl_net_session_recv_frame_nb(g_client.peer_handle,
+                                          &g_client.rx_state,
+                                          &opcode, payload, sizeof(payload),
+                                          &plen);
         if (rc == FL_RESULT_TIMEDOUT)
             continue;
         if (rc != FL_RESULT_OK)
@@ -411,11 +439,12 @@ static void maybe_handle_nick_prompt_sync(void) {
                 fl_color_error("nick request '%s' rejected", nick);
             return;
         }
-        /* Other frames received during the prompt window: drop them silently.
-         * MEMBER_LIST_SNAPSHOT in particular is fine to discard — the next
-         * snapshot after our nick-set will refill the cache. */
-        (void)payload;
-        (void)plen;
+        /* Non-prompt frame: feed it through the normal client dispatch so
+         * the cached roster snapshot, announcements, and any other
+         * background-loop side effects survive even when this drain
+         * consumed the frame before the BG loop got to it. */
+        (void)fl_net_client_dispatch_frame(&g_client, opcode, payload, plen,
+                                            client_event_print, NULL);
     }
 }
 
@@ -475,6 +504,11 @@ static int verb_join(int argc, char **argv) {
         fl_color_error("usage: server join <ip:port> [-bind <local_ip>]");
         return 1;
     }
+    /* Reap any background loop left from a previous session that the host
+     * closed on its side (the thread has already exited but the handle
+     * was never freed). Must happen BEFORE the "already joined" check so
+     * a stale handle does not block a legitimate re-join. */
+    reap_client_bg_if_dead();
     if (g_server_running) {
         fl_color_error("already hosting; kill first to join a different server");
         return 1;

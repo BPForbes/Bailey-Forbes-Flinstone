@@ -187,6 +187,15 @@ typedef uint16_t fl_net_server_member_id_t;
 #define FL_NET_SERVER_MEMBER_ID_NONE ((fl_net_server_member_id_t)0)
 #define FL_NET_SERVER_MEMBER_ID_HOST ((fl_net_server_member_id_t)1)
 
+/* Host always sits at member_id 1 by construction (see
+ * fl_net_server_host_start, host-transfer reindex). Enforce in source so a
+ * future refactor that re-orders slot assignment cannot silently break the
+ * stack-style reindex described in `docs/SERVER.md` §3.6. */
+_Static_assert(FL_NET_SERVER_MEMBER_ID_HOST == 1u,
+               "host member_id is fixed at slot 1 by the dual-role model");
+_Static_assert(FL_NET_SERVER_MEMBER_ID_NONE == 0u,
+               "0 is the sentinel \"no member\" id");
+
 /**
  * One member entry in the host's registry. The same struct mirrors on the
  * client side via the **OP_MEMBER_LIST** snapshot; `peer_handle` is **valid

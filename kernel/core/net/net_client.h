@@ -4,6 +4,7 @@
 #include "contract_p3_server.h"
 #include "contract_p3_sockets.h"
 #include "contract_result.h"
+#include "net_server.h" /* fl_net_session_rx_t for the embedded parser */
 
 #include <stddef.h>
 #include <stdint.h>
@@ -60,7 +61,26 @@ struct fl_net_client_s {
      * resolution for private messages + `server connected` listing). */
     fl_net_client_member_t members[FL_NET_SERVER_MAX_MEMBERS];
     size_t member_count;
+    /* Partial-frame parser state for the non-blocking poll path. Reset by
+     * fl_net_client_init and on every successful (re)connect so the new
+     * stream never sees stale half-headers from a previous session. */
+    fl_net_session_rx_t rx_state;
 };
+
+/**
+ * Dispatch a single already-received session frame to the client. Updates
+ * cached state (the OP_MEMBER_LIST_SNAPSHOT cache, the assigned member id
+ * on HELLO_ACK) and invokes `cb` with the mapped event kind. Used by the
+ * `server join` synchronous nick-prompt drain so the host's initial
+ * MEMBER_LIST_SNAPSHOT / JOIN_ANNOUNCE / SERVER_ANNOUNCE frames that
+ * arrive in the same window as a potential NICK_PROMPT are not discarded
+ * (Codex P2 follow-up). Returns the event kind that was fired, or
+ * FL_NET_SERVER_EVENT_NONE for opcodes the client does not surface.
+ */
+fl_net_server_event_kind_t
+fl_net_client_dispatch_frame(fl_net_client_t *client, uint8_t opcode,
+                              const uint8_t *payload, uint16_t plen,
+                              fl_net_client_event_cb cb, void *data);
 
 /** Reset `client` to the disconnected zero state. */
 fl_result_t fl_net_client_init(fl_net_client_t *client);

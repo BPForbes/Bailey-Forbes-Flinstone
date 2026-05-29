@@ -167,15 +167,66 @@ size_t fl_net_session_encode_frame(uint8_t *buf, size_t cap, uint8_t opcode,
 /**
  * Block-read one full session frame from `handle` (header + payload).
  * On `FL_RESULT_OK`, sets `*opcode_out` and `*payload_len_out` and copies the
- * payload into `payload_out` (truncating to `payload_cap`).
- * Returns `FL_RESULT_EOF` on clean close, `FL_RESULT_TIMEDOUT` on read
- * timeout, or other errors as appropriate.
+ * payload into `payload_out` (truncating to `payload_cap`; on truncation the
+ * caller's buffer holds the first `payload_cap` bytes but `*payload_len_out`
+ * remains the true wire length so the caller can detect it via
+ * `*payload_len_out > payload_cap`). Returns `FL_RESULT_EOF` on clean close,
+ * `FL_RESULT_TIMEDOUT` on read timeout, or other errors as appropriate.
+ *
+ * NOT safe for non-blocking polling: a partial read at `timeout_ms == 0` will
+ * silently discard bytes already in the local `hdr` / payload buffers and
+ * leave the next call starting mid-frame. Use `fl_net_session_recv_frame_nb`
+ * with a per-stream `fl_net_session_rx_t` for background pollers; this
+ * variant is intended for synchronous handshake paths (e.g.
+ * `fl_net_client_connect` waiting for HELLO_ACK) where the timeout is high
+ * enough that the full frame is expected to arrive in one window.
  */
 fl_result_t fl_net_session_recv_frame(fl_net_sock_handle_t handle,
                                       uint8_t *opcode_out,
                                       uint8_t *payload_out, size_t payload_cap,
                                       uint16_t *payload_len_out,
                                       unsigned timeout_ms);
+
+/**
+ * Per-stream parser state for the non-blocking recv path. Holds the bytes
+ * of any in-progress frame so a `FL_RESULT_TIMEDOUT` mid-frame preserves
+ * progress across poll iterations (TCP segments may split the 6-byte
+ * session header or the payload at any offset). Owner is the caller (one
+ * per remote stream — per accepted member on the server, one per client).
+ *
+ * Zero-initialise (or `fl_net_session_rx_reset()`) before the first call,
+ * and again on disconnect/reconnect so a fresh session does not see stale
+ * bytes from the previous one.
+ */
+typedef struct {
+    uint8_t  hdr[FL_NET_SESSION_HDR_LEN];
+    uint16_t hdr_filled;     /* 0..FL_NET_SESSION_HDR_LEN */
+    uint16_t expected_plen;  /* parsed once hdr_filled == HDR_LEN */
+    uint16_t body_filled;    /* 0..expected_plen */
+    uint8_t  body[FL_NET_SESSION_MAX_MSG];
+} fl_net_session_rx_t;
+
+/** Reset to "no frame in progress". Safe to call on a struct in any state. */
+void fl_net_session_rx_reset(fl_net_session_rx_t *st);
+
+/**
+ * Non-blocking incremental recv: accumulates bytes into `*st` across
+ * successive calls and returns `FL_RESULT_OK` once a full frame has been
+ * assembled (output buffers are filled and `*st` is reset for the next
+ * frame). Returns `FL_RESULT_TIMEDOUT` when more bytes are needed (caller
+ * tries again later; the in-progress bytes are kept in `*st`),
+ * `FL_RESULT_EOF` on clean close, `FL_RESULT_INVAL` on a malformed magic
+ * or version byte (the caller should drop the peer), or another rc on a
+ * socket error.
+ *
+ * The function uses `fl_net_sock_recv(handle, ..., 0)` internally — the
+ * socket must be in non-blocking mode (e.g. `fl_net_sock_set_nonblock`).
+ */
+fl_result_t fl_net_session_recv_frame_nb(fl_net_sock_handle_t handle,
+                                          fl_net_session_rx_t *st,
+                                          uint8_t *opcode_out,
+                                          uint8_t *payload_out, size_t payload_cap,
+                                          uint16_t *payload_len_out);
 
 /**
  * Send one full session frame on `handle` (uses the encode helper internally).

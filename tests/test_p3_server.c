@@ -46,6 +46,7 @@ typedef struct {
     int nick_announces;
     int server_announces;
     int msgs;
+    int privates;
     int errs;
     int closed;
     char last_join[160];
@@ -53,6 +54,7 @@ typedef struct {
     char last_nick_announce[256];
     char last_server_announce[256];
     char last_msg[256];
+    char last_private[256];
     char last_err[256];
 } event_log_t;
 
@@ -84,6 +86,11 @@ static void event_sink(fl_net_server_event_kind_t kind, const char *text,
     case FL_NET_SERVER_EVENT_MSG:
         log->msgs++;
         snprintf(log->last_msg, sizeof(log->last_msg), "%s", text ? text : "");
+        break;
+    case FL_NET_SERVER_EVENT_MSG_PRIVATE:
+        log->privates++;
+        snprintf(log->last_private, sizeof(log->last_private), "%s",
+                 text ? text : "");
         break;
     case FL_NET_SERVER_EVENT_ERR:
         log->errs++;
@@ -288,25 +295,37 @@ static int test_messages_and_roster(void) {
     /* Jack -> Jill private message. */
     jill_id = fl_net_client_member_lookup(&cJack, "Jill", 0);
     ASSERT(jill_id != FL_NET_SERVER_MEMBER_ID_NONE);
-    ASSERT(fl_net_client_send_private(&cJack, jill_id, "Hello") == FL_RESULT_OK);
-    pump(clients, logs, 2, 30);
-    /* Jill receives MSG_PRIVATE with text "Hello" from sender Jack. */
     {
-        int saw_private = 0;
-        char disp[FL_NET_SERVER_DISPLAY_NAME_MAX] = {0};
-        /* Use a dedicated check by inspecting cached member id of Jack on Jill side. */
+        int jill_priv_before = logJill.privates;
+        int jack_msg_before = logJack.msgs;
+        int jack_priv_before = logJack.privates;
+        ASSERT(fl_net_client_send_private(&cJack, jill_id, "Hello") == FL_RESULT_OK);
+        pump(clients, logs, 2, 30);
+
+        /* Recipient (Jill) MUST have received a MSG_PRIVATE event whose
+         * text contains "Hello". This pins the private-delivery path —
+         * before this assertion existed (CodeRabbit feedback) the test
+         * only checked that the message did NOT leak via the public
+         * MSG_BROADCAST channel, which is a weaker guarantee. */
+        ASSERT(logJill.privates == jill_priv_before + 1);
+        ASSERT(strstr(logJill.last_private, "Hello") != NULL);
+
+        /* Sender Jack's display name resolves correctly on Jill's side. */
         jack_id = fl_net_client_member_lookup(&cJill, "Jack", 0);
         ASSERT(jack_id != FL_NET_SERVER_MEMBER_ID_NONE);
-        (void)fl_net_client_member_display(&cJill, jack_id, disp, sizeof(disp));
-        ASSERT(strcmp(disp, "Jack") == 0);
-        /* event_sink stored last_msg for any MSG event; for PRIVATE we add a hook below. */
-        (void)saw_private;
+        {
+            char disp[FL_NET_SERVER_DISPLAY_NAME_MAX] = {0};
+            (void)fl_net_client_member_display(&cJill, jack_id, disp, sizeof(disp));
+            ASSERT(strcmp(disp, "Jack") == 0);
+        }
+
+        /* The private path must NOT leak into the public MSG channel for
+         * EITHER side. */
+        ASSERT(strstr(logJack.last_msg, "Hello") == NULL);
+        ASSERT(strstr(logJill.last_msg, "Hello") == NULL);
+        ASSERT(logJack.msgs == jack_msg_before);
+        ASSERT(logJack.privates == jack_priv_before); /* sender no self-deliver */
     }
-    /* Direct verification: Jack's log should NOT contain a public broadcast
-     * containing "Hello" (only the private path was used). */
-    ASSERT(strstr(logJack.last_msg, "Hello") == NULL);
-    /* Jill should not have seen the private message via the public MSG path. */
-    ASSERT(strstr(logJill.last_msg, "Hello") == NULL);
 
     /* Jack -> All public broadcast.
      *   - Jill (other client) receives "Jack: Hi everyone".

@@ -12,6 +12,7 @@ fl_result_t fl_net_client_init(fl_net_client_t *client) {
     memset(client, 0, sizeof(*client));
     client->peer_handle = FL_NET_SOCK_INVALID;
     client->state = FL_NET_CLIENT_STATE_DISCONNECTED;
+    fl_net_session_rx_reset(&client->rx_state);
     return fl_net_sock_init();
 }
 
@@ -91,8 +92,12 @@ static fl_result_t client_connect_impl(fl_net_client_t *client,
     }
     /* Save the connected local IP for the host-transfer path. */
     (void)fl_net_sock_local_ipv4(h, &client->local_ip_be);
-    /* Switch to non-blocking so the foreground shell stays responsive. */
+    /* Switch to non-blocking so the foreground shell stays responsive,
+     * and reset the partial-frame parser so the brand-new socket starts
+     * from a clean slate (any state left from a prior aborted connect
+     * attempt on the same client struct would be stale). */
     (void)fl_net_sock_set_nonblock(h, 1);
+    fl_net_session_rx_reset(&client->rx_state);
     client->state = FL_NET_CLIENT_STATE_CONNECTED;
     return FL_RESULT_OK;
 }
@@ -386,6 +391,65 @@ fl_result_t fl_net_client_send_private(fl_net_client_t *client,
                                      payload, (uint16_t)(4u + tlen));
 }
 
+fl_net_server_event_kind_t
+fl_net_client_dispatch_frame(fl_net_client_t *client, uint8_t opcode,
+                              const uint8_t *payload, uint16_t plen,
+                              fl_net_client_event_cb cb, void *data) {
+    fl_net_server_event_kind_t kind;
+    fl_net_server_member_id_t mid = FL_NET_SERVER_MEMBER_ID_NONE;
+    size_t text_off = 0;
+    char text[FL_NET_SESSION_MAX_MSG + 1];
+    size_t text_len;
+
+    if (!client)
+        return FL_NET_SERVER_EVENT_NONE;
+
+    kind = opcode_to_event(opcode);
+    if (kind == FL_NET_SERVER_EVENT_NONE)
+        return FL_NET_SERVER_EVENT_NONE;
+
+    /* MEMBER_LIST_SNAPSHOT: refresh cache before firing the event so a
+     * subsequent `server connected` from the same shell reflects the
+     * up-to-date roster. */
+    if (opcode == (uint8_t)FL_NET_SESSION_OP_MEMBER_LIST_SNAPSHOT) {
+        client_decode_member_list(client, payload, plen);
+        if (cb)
+            cb(FL_NET_SERVER_EVENT_MEMBER_LIST, "",
+               FL_NET_SERVER_MEMBER_ID_NONE, data);
+        return FL_NET_SERVER_EVENT_MEMBER_LIST;
+    }
+
+    /* Opcodes with a structured payload prefix. */
+    if (opcode == (uint8_t)FL_NET_SESSION_OP_HELLO_ACK && plen >= 2u) {
+        mid = (fl_net_server_member_id_t)
+            (((uint16_t)payload[0] << 8) | payload[1]);
+        text_off = 2u;
+    }
+    if (opcode == (uint8_t)FL_NET_SESSION_OP_MSG_DIRECT_DELIVER && plen >= 4u) {
+        mid = (fl_net_server_member_id_t)
+            (((uint16_t)payload[0] << 8) | payload[1]);
+        text_off = 4u;
+    }
+    if (opcode == (uint8_t)FL_NET_SESSION_OP_CTRL_HOST_PROMOTE && plen >= 8u) {
+        mid = (fl_net_server_member_id_t)
+            (((uint16_t)payload[0] << 8) | payload[1]);
+        /* Leave full payload bytes intact for cmd_server.c to parse the
+         * trailing [ip_be][port] tuple. */
+        text_off = 0u;
+    }
+
+    text_len = plen > text_off ? (size_t)(plen - text_off) : 0u;
+    if (text_len >= sizeof(text))
+        text_len = sizeof(text) - 1u;
+    if (text_len > 0u)
+        memcpy(text, payload + text_off, text_len);
+    text[text_len] = '\0';
+
+    if (cb)
+        cb(kind, text, mid, data);
+    return kind;
+}
+
 int fl_net_client_poll(fl_net_client_t *client, fl_net_client_event_cb cb,
                        void *data, unsigned max_frames) {
     int dispatched = 0;
@@ -401,15 +465,16 @@ int fl_net_client_poll(fl_net_client_t *client, fl_net_client_event_cb cb,
         uint8_t opcode = 0;
         uint8_t payload[FL_NET_SESSION_MAX_MSG];
         uint16_t plen = 0;
-        fl_result_t rc;
-        char text[FL_NET_SESSION_MAX_MSG + 1];
         fl_net_server_event_kind_t kind;
-        fl_net_server_member_id_t mid = FL_NET_SERVER_MEMBER_ID_NONE;
-        size_t text_off = 0;
-        size_t text_len;
+        fl_result_t rc;
 
-        rc = fl_net_session_recv_frame(client->peer_handle, &opcode, payload,
-                                       sizeof(payload), &plen, 0u);
+        /* Use the partial-frame-preserving non-blocking recv so a TCP
+         * segment boundary that splits the 6-byte header or a long body
+         * is not mistaken for a magic-byte mismatch (Codex P1 follow-up). */
+        rc = fl_net_session_recv_frame_nb(client->peer_handle,
+                                          &client->rx_state,
+                                          &opcode, payload, sizeof(payload),
+                                          &plen);
         if (rc == FL_RESULT_TIMEDOUT)
             break;
         if (rc == FL_RESULT_EOF || rc != FL_RESULT_OK) {
@@ -418,52 +483,18 @@ int fl_net_client_poll(fl_net_client_t *client, fl_net_client_event_cb cb,
                 fl_net_sock_close(client->peer_handle);
                 client->peer_handle = FL_NET_SOCK_INVALID;
             }
+            fl_net_session_rx_reset(&client->rx_state);
             if (cb)
-                cb(FL_NET_SERVER_EVENT_CLOSED, "", FL_NET_SERVER_MEMBER_ID_NONE, data);
+                cb(FL_NET_SERVER_EVENT_CLOSED, "",
+                   FL_NET_SERVER_MEMBER_ID_NONE, data);
             dispatched++;
             break;
         }
 
-        kind = opcode_to_event(opcode);
-        if (kind == FL_NET_SERVER_EVENT_NONE)
-            continue;
-
-        /* HELLO_ACK includes a 2-byte member_id prefix. */
-        if (opcode == (uint8_t)FL_NET_SESSION_OP_HELLO_ACK && plen >= 2u) {
-            mid = (fl_net_server_member_id_t)(((uint16_t)payload[0] << 8) | payload[1]);
-            text_off = 2u;
-        }
-        /* MSG_DIRECT_DELIVER prefix: [sender_id_be16][reserved_be16]. */
-        if (opcode == (uint8_t)FL_NET_SESSION_OP_MSG_DIRECT_DELIVER && plen >= 4u) {
-            mid = (fl_net_server_member_id_t)(((uint16_t)payload[0] << 8) | payload[1]);
-            text_off = 4u;
-        }
-        /* MEMBER_LIST_SNAPSHOT: refresh cache then fire one event. */
-        if (opcode == (uint8_t)FL_NET_SESSION_OP_MEMBER_LIST_SNAPSHOT) {
-            client_decode_member_list(client, payload, plen);
-            if (cb)
-                cb(FL_NET_SERVER_EVENT_MEMBER_LIST, "", FL_NET_SERVER_MEMBER_ID_NONE,
-                   data);
+        kind = fl_net_client_dispatch_frame(client, opcode, payload, plen,
+                                            cb, data);
+        if (kind != FL_NET_SERVER_EVENT_NONE)
             dispatched++;
-            continue;
-        }
-        /* HOST_PROMOTE: leave payload bytes for the callback to parse. */
-        if (opcode == (uint8_t)FL_NET_SESSION_OP_CTRL_HOST_PROMOTE && plen >= 8u) {
-            mid = (fl_net_server_member_id_t)(((uint16_t)payload[0] << 8) | payload[1]);
-            /* Pass the full payload via text + mid; cmd_server parses ip/port. */
-            text_off = 0u;
-        }
-
-        text_len = plen > text_off ? (size_t)(plen - text_off) : 0u;
-        if (text_len >= sizeof(text))
-            text_len = sizeof(text) - 1u;
-        if (text_len > 0u)
-            memcpy(text, payload + text_off, text_len);
-        text[text_len] = '\0';
-
-        if (cb)
-            cb(kind, text, mid, data);
-        dispatched++;
 
         if (kind == FL_NET_SERVER_EVENT_CLOSED) {
             client->state = FL_NET_CLIENT_STATE_DISCONNECTED;
@@ -471,6 +502,7 @@ int fl_net_client_poll(fl_net_client_t *client, fl_net_client_event_cb cb,
                 fl_net_sock_close(client->peer_handle);
                 client->peer_handle = FL_NET_SOCK_INVALID;
             }
+            fl_net_session_rx_reset(&client->rx_state);
             break;
         }
     }
