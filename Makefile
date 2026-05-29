@@ -616,6 +616,23 @@ test_p3_server: $(NET_ASM_OBJ) $(MEM_ASM_OBJ) priority_queue.o kernel/core/time/
 	  $(OPENSSL_LIBS) -pthread -Wl,-z,noexecstack
 	./tests/test_p3_server
 
+# Cross-subnet (multi-network) end-to-end demo + tcpdump capture on the
+# router namespace. Requires sudo, iproute2, tcpdump, tmux, and (optional)
+# the `scapy` Python package for the per-frame decode artifact.
+#
+# Gated by FL_NETNS_PCAP_OK=1 so the default `make test_*` sweep never
+# tries to take sudo / open netns on environments that cannot. Inside the
+# script every capability is rechecked and the run skips cleanly with
+# status 0 if any prerequisite is missing.
+.PHONY: test_netns_pcap
+test_netns_pcap:
+ifeq ($(FL_NETNS_PCAP_OK),1)
+	./tests/manual_demo_netns_pcap.sh
+else
+	@echo "test_netns_pcap: skipped (set FL_NETNS_PCAP_OK=1 to run)"
+	@echo "  needs: sudo, iproute2, tcpdump, tmux; optional: scapy for decode"
+endif
+
 check-network-requirements:
 	@bash scripts/check_network_requirements.sh
 

@@ -160,7 +160,41 @@ All chat lines render in **KCYN**. Private messages travel as **`OP_MSG_DIRECT`*
 
 **Nick preference for display:** host-global nick wins over a client-local nick. When the local viewer has set a client-side nick for a member who later receives a host-global nick, the host-global value overrides the local one in every render (private messages included). The original wording in **`docs/SERVER.md` §5** still applies for client-local overrides on the viewer side.
 
-### 3.4 Multi-IP / non-loopback hosting
+### 3.4 Packet capture (cross-subnet end-to-end evidence)
+
+`make test_netns_pcap` (gated by `FL_NETNS_PCAP_OK=1`) runs **`tests/manual_demo_netns_pcap.sh`**, which builds a two-subnet routed topology entirely in network namespaces:
+
+```text
+   netA (192.168.10.0/24)              netB (192.168.20.0/24)
+   fl_host    192.168.10.2 ---|       |--- fl_client 192.168.20.2
+                              br-a   br-b
+                                |    |
+                            fl_router (192.168.10.1 / 192.168.20.1,
+                                       net.ipv4.ip_forward=1)
+```
+
+`tcpdump` runs **inside the router namespace** so every TCP segment that crosses the subnet boundary lands in the capture. Three artifacts are written into `/opt/cursor/artifacts/`:
+
+| File | Content |
+|---|---|
+| `netns_router_capture.pcap` | Raw frames, openable in Wireshark / `tshark` |
+| `netns_router_capture.txt` | `tcpdump -r ... -n -tttt` timeline |
+| `netns_router_session_frames.txt` | Per-frame session-protocol decode produced by **`tests/decode_session_pcap.py`** (magic `0x46`, version, opcode → name from `contract_p3_session_wire.h`, flags, payload length, ASCII preview) + per-opcode counts |
+
+The decoder is standalone and reusable: `python3 tests/decode_session_pcap.py <any.pcap> [--counts]` works on any Flinstone capture, not just the one this demo produces. It requires `python3 -m pip install scapy` for the per-frame view; without scapy installed it exits 0 with a one-line note and the raw `.pcap` is still produced as the primary artifact.
+
+**Sandbox prerequisites** (matches `AGENTS.md` § *Cursor Cloud specific instructions*):
+
+```bash
+sudo apt-get install -y iproute2 tcpdump
+sudo sysctl -w net.bridge.bridge-nf-call-iptables=0
+```
+
+The `bridge-nf-call-*` sysctl is the single most common reason a working topology silently drops frames — by default the kernel sends bridged traffic through `iptables`, which then drops anything not explicitly accepted. Setting it to `0` is reversible and only needs to happen once per host boot.
+
+Mininet (`apt-get install -y mininet openvswitch-switch`) is an equally valid choice on environments where the `openvswitch` kernel module is loadable. In containerised CI / Cursor Cloud it is not, so the raw `ip netns` recipe in this script is the portable path.
+
+### 3.5 Multi-IP / non-loopback hosting
 
 `server host` and `server join` accept any local-or-routable IPv4 endpoint. `server join` adds an optional `-bind <local_ip>` flag so the joining client sources its TCP from a specific local IP (used by lab demos that put each peer on a distinct `10.99.0.X` loopback alias, and by the auto-reconnect path after a host transfer):
 
@@ -170,7 +204,7 @@ server join 10.99.0.1:49913 -bind 10.99.0.10
 
 When `-bind` is omitted, the kernel picks the default source IP for the route to the destination (same as a plain `connect()`).
 
-### 3.5 Host transfer on `server leave` / shell `exit`
+### 3.6 Host transfer on `server leave` / shell `exit`
 
 When the host runs `server leave` (or the shell's `exit` / `exit -y` / `exit -n` while still hosting), the server picks the lowest non-host `member_id` as the successor, broadcasts **`OP_CTRL_HOST_PROMOTE`** with payload `[u16 new_host_id][u32 new_host_ip_be][u16 new_host_port]`, and tears down the old listener. The successor's client side automatically:
 
@@ -188,11 +222,11 @@ Every other peer:
 
 When the host is the only member, the same code path emits **`OP_CTRL_KILL`** instead of promote and closes every socket.
 
-### 3.6 Shell `exit` integration
+### 3.7 Shell `exit` integration
 
 Both `exit` (interactive prompt) and `exit -y` / `exit -n` (one-shot) call `cmd_server_atexit()` before tearing the shell down. The hook routes through `verb_leave` semantics: a hosting shell triggers `fl_net_server_transfer_and_stop` (so the session survives), and a joined client shell triggers `fl_net_client_disconnect`. The user does not have to remember to run `server leave` before quitting.
 
-### 3.7 File transfer (planned)
+### 3.8 File transfer (planned)
 
 `server send -file` is **not** shipped in this train. The original verb table for the v1 file-transfer surface is preserved below for the follow-up implementation:
 
