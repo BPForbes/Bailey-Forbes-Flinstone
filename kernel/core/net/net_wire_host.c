@@ -6,6 +6,7 @@
 
 #include "contract_p3_ipv4.h"
 #include "fl/net_asm.h"
+#include "net_endian.h"
 #include "net_ipv4.h"
 #include "net_route.h"
 #include "net_wire.h"
@@ -38,11 +39,10 @@ static void wire_host_sin4(struct sockaddr_in *sa, uint32_t addr_be, uint16_t po
     memset(sa, 0, sizeof(*sa));
     sa->sin_family = AF_INET;
     sa->sin_addr.s_addr = addr_be;
-#if defined(FL_NET_ASM_AVAILABLE)
-    sa->sin_port = asm_net_htons_be16(port_host);
-#else
-    sa->sin_port = htons(port_host);
-#endif
+    /* fl_net_htons is the first-class internal architecture import; it
+     * routes through asm_net_htons_be16 when FL_NET_ASM_AVAILABLE is on
+     * and falls back to the in-tree bit-shift form otherwise. */
+    sa->sin_port = fl_net_htons(port_host);
 }
 
 fl_result_t fl_net_wire_send_icmp_pkt(uint32_t dst_be, const fl_net_packet_t *icmp_pkt,

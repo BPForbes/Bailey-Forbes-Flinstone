@@ -18,6 +18,10 @@
 #include "net_route.h"
 #include "net_udp.h"
 
+#if defined(FL_NET_ASM_AVAILABLE)
+#include "fl/net_asm.h"
+#endif
+
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -136,10 +140,8 @@ static int test_netsh_dispatches(void) {
     return 0;
 }
 
-/* No-arpa/inet.h regression: assert the endian helpers round-trip without
- * matching the host-byte-order representation of "127.0.0.1" exactly. We
- * spell the loopback as raw octets (matches the wire) and confirm the
- * snapshot bytes don't change. */
+/* Internal architecture path: fl_net_* helpers round-trip + ASM and
+ * portable bit-shift forms agree bit-for-bit when both are present. */
 static int test_endian_loopback_constant(void) {
     uint8_t wire[4] = {127u, 0u, 0u, 1u};
     uint32_t loop_nbo = fl_net_get_u32_nbo(wire);
@@ -153,6 +155,30 @@ static int test_endian_loopback_constant(void) {
     ASSERT(fl_net_htons(0x0001u) == 0x0100u);
     ASSERT(fl_net_ntohs(fl_net_htons(0xABCDu)) == 0xABCDu);
     ASSERT(fl_net_ntohl(fl_net_htonl(0xDEADBEEFu)) == 0xDEADBEEFu);
+
+    /* On a build with FL_NET_ASM_AVAILABLE the ASM backend (`bswap` on
+     * x86, `rev` on AArch64) must produce the exact same bit pattern as
+     * the portable bit-shift fallback. This locks the two backends in
+     * step so the packet module never sees byte-order drift between
+     * ARCH=x86_64_gas / ARCH=x86_64_nasm / ARCH=arm. */
+#if defined(FL_NET_ASM_AVAILABLE)
+    {
+        const uint16_t h16 = 0xABCDu;
+        const uint32_t h32 = 0xDEADBEEFu;
+        uint16_t portable16 = (uint16_t)((h16 << 8) | (h16 >> 8));
+        uint32_t portable32 = ((h32 & 0x000000FFu) << 24) |
+                              ((h32 & 0x0000FF00u) << 8)  |
+                              ((h32 & 0x00FF0000u) >> 8)  |
+                              ((h32 & 0xFF000000u) >> 24);
+        ASSERT(asm_net_htons_be16(h16) == portable16);
+        ASSERT(asm_net_ntohs_be16(portable16) == h16);
+        ASSERT(asm_net_htonl_be32(h32) == portable32);
+        ASSERT(asm_net_ntohl_be32(portable32) == h32);
+        /* And fl_net_* must equal the ASM result it routes through. */
+        ASSERT(fl_net_htons(h16) == asm_net_htons_be16(h16));
+        ASSERT(fl_net_htonl(h32) == asm_net_htonl_be32(h32));
+    }
+#endif
     return 0;
 }
 

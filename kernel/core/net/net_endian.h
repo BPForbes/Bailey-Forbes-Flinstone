@@ -1,16 +1,23 @@
 /*
  * net_endian.h — byte-order helpers for P3 wire framing.
  *
- * API policy: the **fl_net_***  helpers in this header are the **first-class
- * internal architecture import** for callers throughout the tree (tests,
- * shell commands, contract-adjacent code). Whether the implementation calls
- * libc <arpa/inet.h> `htons` underneath or runs the portable bit-shift
- * fallback is a build-time detail; per AGENTS.md a hosted libc fallback is
- * acceptable, and on hosted Linux builds the libc form compiles to the same
- * `bswap` (x86) / `rev` (AArch64) instruction as the manual shift. The
- * baremetal / bare-arch build (no `__linux__` / `__APPLE__` / `__FreeBSD__`)
- * automatically picks the portable path, so this header stays usable
- * without any libc dependency on K/B.
+ * Internal architecture, not libc. Two implementations stack:
+ *
+ *   1. ASM-backed (preferred): when `FL_NET_ASM_AVAILABLE` is defined the
+ *      helpers route through `asm_net_htons_be16` / `asm_net_htonl_be32`
+ *      / `asm_net_ntohs_be16` / `asm_net_ntohl_be32` in
+ *      arch/x86_64/{gas,nasm}/net_asm.* and arch/arm/gas/net_asm.s, which
+ *      compile to a single `bswap` (x86) / `rev` (AArch64) instruction.
+ *      That's the "endian-extended packets" path the packet module
+ *      (net_packet.c, net_wire*.c) and the P3-14 net background MLQ
+ *      (kernel/core/sched/workqueue + priority_queue.h) call into when
+ *      packets are framed for send.
+ *
+ *   2. Pure C fallback (K/B without ASM, or hosts where the project is
+ *      compiled without -DFL_NET_ASM_AVAILABLE): in-tree bit-shift forms
+ *      that have zero libc dependency. Both forms have identical
+ *      observable behaviour, so callers always see the same `fl_net_*`
+ *      surface regardless of which backend is selected at build time.
  *
  * Why memcpy and not bit-shifts on `peer_ip_be`:
  *   `peer_ip_be` is a uint32_t whose memory bytes are already in network
@@ -19,7 +26,7 @@
  *   behaviour: on a BE host the bytes come out reversed. memcpy of the
  *   storage preserves wire order on every host.
  *
- * Tracked by issue #284.
+ * Tracked by issue #284 (endian round-trip bug + helper consolidation).
  */
 #ifndef FL_NET_ENDIAN_H
 #define FL_NET_ENDIAN_H
@@ -27,15 +34,14 @@
 #include <stdint.h>
 #include <string.h>
 
-#if defined(__linux__) || defined(__APPLE__) || defined(__FreeBSD__)
-#include <arpa/inet.h>
-#define FL_NET_ENDIAN_HAVE_POSIX 1
+#if defined(FL_NET_ASM_AVAILABLE)
+#include "fl/net_asm.h"
 #endif
 
 /* Host -> network 16-bit. */
 static inline uint16_t fl_net_htons(uint16_t v) {
-#if defined(FL_NET_ENDIAN_HAVE_POSIX)
-    return htons(v);
+#if defined(FL_NET_ASM_AVAILABLE)
+    return asm_net_htons_be16(v);
 #else
     return (uint16_t)((v << 8) | (v >> 8));
 #endif
@@ -43,17 +49,17 @@ static inline uint16_t fl_net_htons(uint16_t v) {
 
 /* Network -> host 16-bit. */
 static inline uint16_t fl_net_ntohs(uint16_t v) {
-#if defined(FL_NET_ENDIAN_HAVE_POSIX)
-    return ntohs(v);
+#if defined(FL_NET_ASM_AVAILABLE)
+    return asm_net_ntohs_be16(v);
 #else
-    return fl_net_htons(v);
+    return (uint16_t)((v << 8) | (v >> 8));
 #endif
 }
 
 /* Host -> network 32-bit. */
 static inline uint32_t fl_net_htonl(uint32_t v) {
-#if defined(FL_NET_ENDIAN_HAVE_POSIX)
-    return htonl(v);
+#if defined(FL_NET_ASM_AVAILABLE)
+    return asm_net_htonl_be32(v);
 #else
     return ((v & 0x000000FFu) << 24) |
            ((v & 0x0000FF00u) << 8)  |
@@ -64,10 +70,13 @@ static inline uint32_t fl_net_htonl(uint32_t v) {
 
 /* Network -> host 32-bit. */
 static inline uint32_t fl_net_ntohl(uint32_t v) {
-#if defined(FL_NET_ENDIAN_HAVE_POSIX)
-    return ntohl(v);
+#if defined(FL_NET_ASM_AVAILABLE)
+    return asm_net_ntohl_be32(v);
 #else
-    return fl_net_htonl(v);
+    return ((v & 0x000000FFu) << 24) |
+           ((v & 0x0000FF00u) << 8)  |
+           ((v & 0x00FF0000u) >> 8)  |
+           ((v & 0xFF000000u) >> 24);
 #endif
 }
 

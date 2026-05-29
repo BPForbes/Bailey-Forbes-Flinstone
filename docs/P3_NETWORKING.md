@@ -123,6 +123,54 @@ flowchart LR
 4. **Loopback:** full **Ethernet+IPv4** frame through **`fl_net_netdev_loopback()`** (P3-2).
 5. **Off-loopback:** ICMP/UDP use **`net_host_socket` / `sendto` / `recvfrom`** (ASM on Linux x86_64 and AArch64). TCP raw probe still uses libc **`socket`/`select`** for `SOCK_RAW` (documented gap).
 
+## Endian / packet / MLQ framework (internal-only path)
+
+The networking stack uses a layered, in-tree byte-order path so packets and
+their headers can be framed and dispatched without leaning on libc or the
+hosted shim. This is the path the `udpsend` / `udplisten` / `server` /
+distro-style verbs ride on for hot writes.
+
+```
+       call site                  fl_net_htons / fl_net_htonl
+       in shell verb              fl_net_ntohs / fl_net_ntohl     (net_endian.h)
+       or test                                  |
+                                                v
+       inline header              FL_NET_ASM_AVAILABLE? --yes--> asm_net_htons_be16
+       byte writes                                                asm_net_htonl_be32
+       via fl_net_put_u16_be /                                    asm_net_ntohs_be16
+       fl_net_put_u32_nbo                                         asm_net_ntohl_be32
+       (memcpy-clean on every                                    (single `bswap` / `rev`)
+       host endianness)                       --no--> portable bit-shift fallback
+
+       v
+       net_packet.c               fl_net_packet_parse_eth_ipv4 / _bind_l4 / _l4_view
+       (P3 layered slices)        fl_net_pipeline_rx_feed / fl_net_pipeline_tx_*
+
+       v
+       net_background.c           Workqueue / MLQ (priority_queue.h, PQ_NUM_PRIORITIES=4)
+       (P3-14 task hub)           drains the bound socket + ARP tasks in priority order
+                                  (`fl_net_arp_tick` already runs here; future RX dequeue
+                                  / TCP timer wheel ride the same MLQ — see #238).
+```
+
+**Why this matters:**
+
+- The endian helpers are the **first-class internal architecture import**.
+  They never delegate to libc. ASM is the preferred backend; pure bit-shift
+  is the K/B / cross-arch fallback. See `kernel/core/net/net_endian.h`.
+- The packet module (`net_packet.c`) and wire builders (`net_wire*.c`)
+  build every frame through `fl_net_put_u16_be` / `fl_net_put_u32_nbo`
+  (memcpy-clean, host-endian independent) plus `fl_net_htons` / `fl_net_htonl`
+  for inline header field writes. There is no open-coded `htons(3)` /
+  `htonl(3)` left in the application path.
+- The **net MLQ** in `priority_queue.h` (scheduler-grade, `PQ_NUM_PRIORITIES = 4`,
+  `O(1)` push/pop, bitmap layer select) is the dispatch fabric for the
+  P3-14 background hub (`net_background.c`). Anything the packet module
+  emits for "framed for send" or "ready for RX dispatch" can land on that
+  queue via the existing workqueue surface; the endian helpers are safe to
+  call from any layer (signal-handler-safe / hardirq-safe / pure functions
+  with no globals).
+
 ## Source port (`sport`)
 
 - **UDP** (`fl_net_wire_send_udp`): when **`sport != 0`**, the hosted path **`bind(2)`**s the datagram socket to **`INADDR_ANY:sport`** before **`sendto`**. DNS uses **`sport = 40053`** toward port 53.
@@ -135,6 +183,9 @@ flowchart LR
 |--------|------------|-------------|-------------|
 | **`asm_net_checksum16`** | `arch/x86_64/gas/net_asm.s` | `arch/x86_64/nasm/net_asm.asm` | `arch/arm/gas/net_asm.s` |
 | **`asm_net_htons_be16`** | same | same | same |
+| **`asm_net_ntohs_be16`** | same | same | same |
+| **`asm_net_htonl_be32`** | same | same | same |
+| **`asm_net_ntohl_be32`** | same | same | same |
 | **`asm_net_tcp_build_syn`** | same | same | same |
 | **`asm_net_tcp_build_rst_ack`** | same | same | same |
 | **`asm_net_tcp_read_ports_be`** | same | same | same |

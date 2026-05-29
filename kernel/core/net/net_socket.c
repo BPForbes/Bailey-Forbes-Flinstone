@@ -1,5 +1,6 @@
 #include "net_socket.h"
 
+#include "net_endian.h"
 #include "net_wire_host_syscall.h"
 
 #include <errno.h>
@@ -121,7 +122,9 @@ static void sock_sin4(struct sockaddr_in *sa, uint32_t addr_be, uint16_t port_ho
     memset(sa, 0, sizeof(*sa));
     sa->sin_family = AF_INET;
     sa->sin_addr.s_addr = addr_be;
-    sa->sin_port = htons(port_host);
+    /* First-class internal helper; libc htons is fine on hosted but we
+     * route through fl_net_htons so the entire tree uses one entry point. */
+    sa->sin_port = fl_net_htons(port_host);
 }
 #endif
 
