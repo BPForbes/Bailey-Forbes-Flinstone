@@ -186,6 +186,8 @@ distro-style verbs ride on for hot writes.
 | **`asm_net_ntohs_be16`** | same | same | same |
 | **`asm_net_htonl_be32`** | same | same | same |
 | **`asm_net_ntohl_be32`** | same | same | same |
+| **`asm_net_htonll_be64`** | same | same | same |
+| **`asm_net_ntohll_be64`** | same | same | same |
 | **`asm_net_tcp_build_syn`** | same | same | same |
 | **`asm_net_tcp_build_rst_ack`** | same | same | same |
 | **`asm_net_tcp_read_ports_be`** | same | same | same |

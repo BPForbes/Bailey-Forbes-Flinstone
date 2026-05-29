@@ -13,6 +13,8 @@ uint16_t asm_net_htons_be16(uint16_t host);
 uint16_t asm_net_ntohs_be16(uint16_t net);
 uint32_t asm_net_htonl_be32(uint32_t host);
 uint32_t asm_net_ntohl_be32(uint32_t net);
+uint64_t asm_net_htonll_be64(uint64_t host);
+uint64_t asm_net_ntohll_be64(uint64_t net);
 #endif
 
 #endif /* FL_NET_ASM_H */

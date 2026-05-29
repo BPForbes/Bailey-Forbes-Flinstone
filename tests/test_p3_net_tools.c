@@ -165,20 +165,47 @@ static int test_endian_loopback_constant(void) {
     {
         const uint16_t h16 = 0xABCDu;
         const uint32_t h32 = 0xDEADBEEFu;
+        const uint64_t h64 = 0x0123456789ABCDEFull;
         uint16_t portable16 = (uint16_t)((h16 << 8) | (h16 >> 8));
         uint32_t portable32 = ((h32 & 0x000000FFu) << 24) |
                               ((h32 & 0x0000FF00u) << 8)  |
                               ((h32 & 0x00FF0000u) >> 8)  |
                               ((h32 & 0xFF000000u) >> 24);
+        uint64_t portable64 = ((h64 & 0x00000000000000FFull) << 56) |
+                              ((h64 & 0x000000000000FF00ull) << 40) |
+                              ((h64 & 0x0000000000FF0000ull) << 24) |
+                              ((h64 & 0x00000000FF000000ull) << 8)  |
+                              ((h64 & 0x000000FF00000000ull) >> 8)  |
+                              ((h64 & 0x0000FF0000000000ull) >> 24) |
+                              ((h64 & 0x00FF000000000000ull) >> 40) |
+                              ((h64 & 0xFF00000000000000ull) >> 56);
         ASSERT(asm_net_htons_be16(h16) == portable16);
         ASSERT(asm_net_ntohs_be16(portable16) == h16);
         ASSERT(asm_net_htonl_be32(h32) == portable32);
         ASSERT(asm_net_ntohl_be32(portable32) == h32);
+        ASSERT(asm_net_htonll_be64(h64) == portable64);
+        ASSERT(asm_net_ntohll_be64(portable64) == h64);
         /* And fl_net_* must equal the ASM result it routes through. */
         ASSERT(fl_net_htons(h16) == asm_net_htons_be16(h16));
         ASSERT(fl_net_htonl(h32) == asm_net_htonl_be32(h32));
+        ASSERT(fl_net_htonll(h64) == asm_net_htonll_be64(h64));
     }
 #endif
+
+    /* fl_net_put_u32_be / fl_net_put_u64_be byte sequences must match the
+     * wire layout of the IPv4 / 64-bit timestamp values they represent. */
+    {
+        uint8_t w4[4] = {0};
+        uint8_t w8[8] = {0};
+        fl_net_put_u32_be(w4, 0xDEADBEEFu);
+        ASSERT(w4[0] == 0xDEu && w4[1] == 0xADu &&
+               w4[2] == 0xBEu && w4[3] == 0xEFu);
+        ASSERT(fl_net_get_u32_be(w4) == 0xDEADBEEFu);
+        fl_net_put_u64_be(w8, 0x0123456789ABCDEFull);
+        ASSERT(w8[0] == 0x01u && w8[1] == 0x23u && w8[2] == 0x45u && w8[3] == 0x67u);
+        ASSERT(w8[4] == 0x89u && w8[5] == 0xABu && w8[6] == 0xCDu && w8[7] == 0xEFu);
+        ASSERT(fl_net_get_u64_be(w8) == 0x0123456789ABCDEFull);
+    }
     return 0;
 }
 

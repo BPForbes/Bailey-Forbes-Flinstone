@@ -17,6 +17,8 @@ global asm_net_htons_be16
 global asm_net_ntohs_be16
 global asm_net_htonl_be32
 global asm_net_ntohl_be32
+global asm_net_htonll_be64
+global asm_net_ntohll_be64
 global asm_net_tcp_build_syn
 global asm_net_tcp_build_rst_ack
 global asm_net_icmp_echo_request_build
@@ -89,6 +91,16 @@ asm_net_htonl_be32:
 asm_net_ntohl_be32:
     mov eax, edi
     bswap eax
+    ret
+
+asm_net_htonll_be64:
+    mov rax, rdi
+    bswap rax
+    ret
+
+asm_net_ntohll_be64:
+    mov rax, rdi
+    bswap rax
     ret
 
 asm_net_tcp_build_syn:

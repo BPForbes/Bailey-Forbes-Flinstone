@@ -80,6 +80,41 @@ static inline uint32_t fl_net_ntohl(uint32_t v) {
 #endif
 }
 
+/* Host -> network 64-bit. Eight `0xFF` byte-masks select one byte each
+ * (positions 0..7) and shift them to the mirror position. Used for any
+ * future P3 wire field wider than 32 bits and for 64-bit MLQ keys
+ * shipped over the wire. */
+static inline uint64_t fl_net_htonll(uint64_t v) {
+#if defined(FL_NET_ASM_AVAILABLE)
+    return asm_net_htonll_be64(v);
+#else
+    return ((v & 0x00000000000000FFull) << 56) |
+           ((v & 0x000000000000FF00ull) << 40) |
+           ((v & 0x0000000000FF0000ull) << 24) |
+           ((v & 0x00000000FF000000ull) << 8)  |
+           ((v & 0x000000FF00000000ull) >> 8)  |
+           ((v & 0x0000FF0000000000ull) >> 24) |
+           ((v & 0x00FF000000000000ull) >> 40) |
+           ((v & 0xFF00000000000000ull) >> 56);
+#endif
+}
+
+/* Network -> host 64-bit. */
+static inline uint64_t fl_net_ntohll(uint64_t v) {
+#if defined(FL_NET_ASM_AVAILABLE)
+    return asm_net_ntohll_be64(v);
+#else
+    return ((v & 0x00000000000000FFull) << 56) |
+           ((v & 0x000000000000FF00ull) << 40) |
+           ((v & 0x0000000000FF0000ull) << 24) |
+           ((v & 0x00000000FF000000ull) << 8)  |
+           ((v & 0x000000FF00000000ull) >> 8)  |
+           ((v & 0x0000FF0000000000ull) >> 24) |
+           ((v & 0x00FF000000000000ull) >> 40) |
+           ((v & 0xFF00000000000000ull) >> 56);
+#endif
+}
+
 /* Write a uint16 host-value as 2 network-byte-order bytes at out[0..1]. */
 static inline void fl_net_put_u16_be(uint8_t *out, uint16_t host_value) {
     out[0] = (uint8_t)((host_value >> 8) & 0xFFu);
@@ -104,6 +139,46 @@ static inline uint32_t fl_net_get_u32_nbo(const uint8_t *in) {
     uint32_t value_nbo = 0u;
     memcpy(&value_nbo, in, 4u);
     return value_nbo;
+}
+
+/* Write a uint32 host-value as 4 network-byte-order bytes at out[0..3]. */
+static inline void fl_net_put_u32_be(uint8_t *out, uint32_t host_value) {
+    out[0] = (uint8_t)((host_value >> 24) & 0xFFu);
+    out[1] = (uint8_t)((host_value >> 16) & 0xFFu);
+    out[2] = (uint8_t)((host_value >> 8) & 0xFFu);
+    out[3] = (uint8_t)(host_value & 0xFFu);
+}
+
+/* Read a uint32 host-value from 4 network-byte-order bytes at in[0..3]. */
+static inline uint32_t fl_net_get_u32_be(const uint8_t *in) {
+    return ((uint32_t)in[0] << 24) |
+           ((uint32_t)in[1] << 16) |
+           ((uint32_t)in[2] << 8)  |
+           (uint32_t)in[3];
+}
+
+/* Write a uint64 host-value as 8 network-byte-order bytes at out[0..7]. */
+static inline void fl_net_put_u64_be(uint8_t *out, uint64_t host_value) {
+    out[0] = (uint8_t)((host_value >> 56) & 0xFFu);
+    out[1] = (uint8_t)((host_value >> 48) & 0xFFu);
+    out[2] = (uint8_t)((host_value >> 40) & 0xFFu);
+    out[3] = (uint8_t)((host_value >> 32) & 0xFFu);
+    out[4] = (uint8_t)((host_value >> 24) & 0xFFu);
+    out[5] = (uint8_t)((host_value >> 16) & 0xFFu);
+    out[6] = (uint8_t)((host_value >> 8) & 0xFFu);
+    out[7] = (uint8_t)(host_value & 0xFFu);
+}
+
+/* Read a uint64 host-value from 8 network-byte-order bytes at in[0..7]. */
+static inline uint64_t fl_net_get_u64_be(const uint8_t *in) {
+    return ((uint64_t)in[0] << 56) |
+           ((uint64_t)in[1] << 48) |
+           ((uint64_t)in[2] << 40) |
+           ((uint64_t)in[3] << 32) |
+           ((uint64_t)in[4] << 24) |
+           ((uint64_t)in[5] << 16) |
+           ((uint64_t)in[6] << 8)  |
+           (uint64_t)in[7];
 }
 
 #endif /* FL_NET_ENDIAN_H */

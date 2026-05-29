@@ -6,6 +6,8 @@
 .globl asm_net_ntohs_be16
 .globl asm_net_htonl_be32
 .globl asm_net_ntohl_be32
+.globl asm_net_htonll_be64
+.globl asm_net_ntohll_be64
 .globl asm_net_tcp_build_syn
 .globl asm_net_tcp_build_rst_ack
 .globl asm_net_icmp_echo_request_build
@@ -82,6 +84,16 @@ asm_net_htonl_be32:
 /* uint32_t asm_net_ntohl_be32(uint32_t net); — alias of htonl on rev hw. */
 asm_net_ntohl_be32:
     rev     w0, w0
+    ret
+
+/* uint64_t asm_net_htonll_be64(uint64_t host); */
+asm_net_htonll_be64:
+    rev     x0, x0
+    ret
+
+/* uint64_t asm_net_ntohll_be64(uint64_t net); — alias of htonll on rev hw. */
+asm_net_ntohll_be64:
+    rev     x0, x0
     ret
 
 /* x0=buf x1=cap w2=sport w3=dport w4=seq */
