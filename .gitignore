@@ -66,4 +66,5 @@ userland/shell/version_changelog.c
 tests/test_p3_network
 tests/test_p3_server
 tests/test_p3_udp_cmds
+tests/test_p3_net_tools
 tests/test_workqueue_*

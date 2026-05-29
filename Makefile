@@ -451,7 +451,7 @@ VM/devices/%.o: VM/devices/%.c
 # --- ASM + Alloc + PQ unit tests (no CUnit) ---
 # Use -fsanitize when NOT using ASM allocator (libc tests only)
 TEST_SANITIZE = -fsanitize=address,undefined -fno-omit-frame-pointer
-.PHONY: test_mem_asm test_alloc test_priority_queue test_drivers test_core test_invariants test_audit_log test_p3_network test_p3_udp_cmds test_vm_layer_warning check-layers check-network-requirements
+.PHONY: test_mem_asm test_alloc test_priority_queue test_drivers test_core test_invariants test_audit_log test_p3_network test_p3_udp_cmds test_p3_net_tools test_vm_layer_warning check-layers check-network-requirements
 test_mem_asm: $(MEM_ASM_OBJ)
 	$(CC) $(CFLAGS) $(TEST_SANITIZE) -I. -o tests/test_mem_asm tests/test_mem_asm.c $(MEM_ASM_OBJ)
 	./tests/test_mem_asm
@@ -628,6 +628,19 @@ test_p3_udp_cmds: $(NET_ASM_OBJ) $(MEM_ASM_OBJ) priority_queue.o kernel/core/tim
 	  $(MEM_ASM_OBJ) $(NET_ASM_OBJ) \
 	  $(OPENSSL_LIBS) -pthread -Wl,-z,noexecstack
 	./tests/test_p3_udp_cmds
+
+# arp / ifconfig / route / netstat / nslookup / netsh shell verb coverage
+# (issue #239 internal-only audit). Drives cmd_net_tools.c entry points
+# in-process against the in-tree fl_net_arp / fl_net_route / fl_net_udp /
+# fl_net_resolve_ipv4 APIs; no arpa/inet.h, no libc DNS.
+.PHONY: test_p3_net_tools
+test_p3_net_tools: $(NET_ASM_OBJ) $(MEM_ASM_OBJ) priority_queue.o kernel/core/time/timekeeping.o kernel/core/sys/ipc.o
+	$(CC) $(CFLAGS) $(TEST_SANITIZE) -o tests/test_p3_net_tools \
+	  tests/test_p3_net_tools.c userland/command/cmd_net_tools.c \
+	  $(NET_CORE_SRCS) kernel/core/sched/workqueue.c kernel/core/sys/ipc.o kernel/core/time/timekeeping.o priority_queue.o \
+	  $(MEM_ASM_OBJ) $(NET_ASM_OBJ) \
+	  $(OPENSSL_LIBS) -pthread -Wl,-z,noexecstack
+	./tests/test_p3_net_tools
 
 # Cross-subnet (multi-network) end-to-end demo + tcpdump capture on the
 # router namespace. Requires sudo, iproute2, tcpdump, tmux, and (optional)
