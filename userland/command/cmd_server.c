@@ -15,9 +15,7 @@
 #include "session.h"
 #include "shell_io.h"
 
-#include <arpa/inet.h>
 #include <errno.h>
-#include <netinet/in.h>
 #include <pthread.h>
 #include <stdio.h>
 #include <stdlib.h>

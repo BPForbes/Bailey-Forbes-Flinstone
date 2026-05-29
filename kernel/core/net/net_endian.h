@@ -1,15 +1,23 @@
 /*
  * net_endian.h — byte-order helpers for P3 wire framing.
  *
+ * API policy: the **fl_net_***  helpers in this header are the **first-class
+ * internal architecture import** for callers throughout the tree (tests,
+ * shell commands, contract-adjacent code). Whether the implementation calls
+ * libc <arpa/inet.h> `htons` underneath or runs the portable bit-shift
+ * fallback is a build-time detail; per AGENTS.md a hosted libc fallback is
+ * acceptable, and on hosted Linux builds the libc form compiles to the same
+ * `bswap` (x86) / `rev` (AArch64) instruction as the manual shift. The
+ * baremetal / bare-arch build (no `__linux__` / `__APPLE__` / `__FreeBSD__`)
+ * automatically picks the portable path, so this header stays usable
+ * without any libc dependency on K/B.
+ *
  * Why memcpy and not bit-shifts on `peer_ip_be`:
  *   `peer_ip_be` is a uint32_t whose memory bytes are already in network
- *   order (filled from POSIX `s_addr`). Reading it as a numeric value and
- *   then shifting (>> 8, >> 16, ...) yields LE-only behaviour: on a BE
- *   host the bytes come out reversed. memcpy of the storage preserves
- *   wire order on every host.
- *
- * Provides both byte-shuffling primitives (htons/ntohs/htonl/ntohl) and
- * memcpy-based serializers for "already in network byte order" uint16/u32.
+ *   order (filled from POSIX `s_addr` inside the hosted shim). Reading it
+ *   as a numeric value and then shifting (>> 8, >> 16, ...) yields LE-only
+ *   behaviour: on a BE host the bytes come out reversed. memcpy of the
+ *   storage preserves wire order on every host.
  *
  * Tracked by issue #284.
  */
@@ -38,7 +46,7 @@ static inline uint16_t fl_net_ntohs(uint16_t v) {
 #if defined(FL_NET_ENDIAN_HAVE_POSIX)
     return ntohs(v);
 #else
-    return (uint16_t)((v << 8) | (v >> 8));
+    return fl_net_htons(v);
 #endif
 }
 

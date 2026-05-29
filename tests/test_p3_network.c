@@ -29,7 +29,8 @@
 #include "contract_p3_tls_hosted.h"
 #include "contract_p3_socket.h"
 
-#include <arpa/inet.h>
+#include "net_endian.h"
+
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -188,17 +189,19 @@ static int test_loopback_arp_exchange(void) {
 }
 
 static int test_loopback_octet(void) {
-    struct in_addr a;
-    ASSERT(inet_pton(AF_INET, "127.0.0.1", &a) == 1);
-    ASSERT(fl_net_ipv4_is_loopback(a.s_addr));
-    ASSERT(inet_pton(AF_INET, "8.8.8.8", &a) == 1);
-    ASSERT(!fl_net_ipv4_is_loopback(a.s_addr));
+    uint32_t a = 0u;
+    ASSERT(fl_net_ipv4_parse_literal("127.0.0.1", &a) != 0);
+    ASSERT(fl_net_ipv4_is_loopback(a));
+    ASSERT(fl_net_ipv4_parse_literal("8.8.8.8", &a) != 0);
+    ASSERT(!fl_net_ipv4_is_loopback(a));
     return 0;
 }
 
 static int test_resolve_localhost(void) {
     uint32_t addr_be = 0;
-    char resolved[INET_ADDRSTRLEN];
+    /* 16 = "255.255.255.255\0" — same width as the libc INET_ADDRSTRLEN
+     * literal we used to depend on, but no header is required. */
+    char resolved[16];
     ASSERT(fl_net_resolve_ipv4("localhost", &addr_be, resolved, sizeof(resolved)) ==
            FL_RESULT_OK);
     ASSERT(fl_net_ipv4_is_loopback(addr_be));
@@ -210,14 +213,12 @@ static int test_icmp_unreachable_no_linux_fallback(void) {
     uint8_t rx[64];
     size_t req_len;
     size_t rx_len = 0;
-    uint32_t dst_be;
-    struct in_addr a;
+    uint32_t dst_be = 0u;
     fl_net_packet_t req_pkt;
     fl_net_packet_t rx_pkt;
     fl_result_t rc;
 
-    ASSERT(inet_aton("203.0.113.99", &a) != 0);
-    dst_be = a.s_addr;
+    ASSERT(fl_net_ipv4_parse_literal("203.0.113.99", &dst_be) != 0);
 
     req_len = fl_net_icmp_echo_request_build(req, sizeof(req), 0xabcdu, 1u, 8u);
     ASSERT(req_len > 0);
@@ -232,14 +233,12 @@ static int test_udp_unreachable_no_linux_fallback(void) {
     uint8_t payload[] = "dns-probe";
     uint8_t rx[64];
     size_t rx_len = 0;
-    uint32_t dst_be;
-    struct in_addr a;
+    uint32_t dst_be = 0u;
     fl_net_packet_t tx_pkt;
     fl_net_packet_t rx_pkt;
     fl_result_t rc;
 
-    ASSERT(inet_aton("203.0.113.99", &a) != 0);
-    dst_be = a.s_addr;
+    ASSERT(fl_net_ipv4_parse_literal("203.0.113.99", &dst_be) != 0);
 
     ASSERT(fl_net_packet_bind_l4(&tx_pkt, payload, sizeof(payload) - 1u, 0u,
                                sizeof(payload) - 1u) == FL_RESULT_OK);
@@ -794,9 +793,9 @@ static int test_net_task_backend_socket_send_smoke(void) {
     const char payload[] = "socket arp blend";
 
     ep.local_ip_be = loopback;
-    ep.local_port_be = htons(48002u);
+    ep.local_port_be = fl_net_htons(48002u);
     ep.peer_ip_be = loopback;
-    ep.peer_port_be = htons((uint16_t)FL_NET_TASK_BACKEND_WIRE_SERVER_PORT);
+    ep.peer_port_be = fl_net_htons((uint16_t)FL_NET_TASK_BACKEND_WIRE_SERVER_PORT);
 
     rc = fl_net_task_backend_socket_send(&ep, (const uint8_t *)payload, sizeof(payload) - 1u);
     if (rc == FL_RESULT_NOSYS) {

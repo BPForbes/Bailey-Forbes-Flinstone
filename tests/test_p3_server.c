@@ -22,7 +22,6 @@
 #include "server_bg.h"
 #include "fl_colors.h"
 
-#include <arpa/inet.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -129,7 +128,7 @@ static int test_announce_join_leave_nick(void) {
     fl_net_client_t *clients[2] = { &cA, &cB };
     event_log_t *logs[2] = { &logA, &logB };
     fl_server_bg_t *bg = NULL;
-    uint32_t loopback = htonl(0x7F000001u); /* 127.0.0.1 */
+    uint32_t loopback = fl_net_htonl(0x7F000001u); /* 127.0.0.1 */
     const uint16_t port = 49801u;
     fl_result_t rc;
 
@@ -265,7 +264,7 @@ static int test_messages_and_roster(void) {
     fl_net_client_t *clients[2] = { &cJack, &cJill };
     event_log_t *logs[2] = { &logJack, &logJill };
     fl_server_bg_t *bg = NULL;
-    uint32_t loopback = htonl(0x7F000001u);
+    uint32_t loopback = fl_net_htonl(0x7F000001u);
     const uint16_t port = 49811u;
     fl_result_t rc;
     fl_net_server_member_id_t jill_id, jack_id;
@@ -371,7 +370,7 @@ static int test_leave_restores_singleton(void) {
     fl_net_client_t *clients[2] = { &cA, &cB };
     event_log_t *logs[2] = { &logA, &logB };
     fl_server_bg_t *bg = NULL;
-    uint32_t loopback = htonl(0x7F000001u);
+    uint32_t loopback = fl_net_htonl(0x7F000001u);
     const uint16_t port = 49821u;
     fl_result_t rc;
 
@@ -429,7 +428,7 @@ static int test_host_transfer_on_leave(void) {
     fl_net_client_t *clients[3] = { &cA, &cB, &cC };
     event_log_t *logs[3] = { &logA, &logB, &logC };
     fl_server_bg_t *bg = NULL;
-    uint32_t loopback = htonl(0x7F000001u);
+    uint32_t loopback = fl_net_htonl(0x7F000001u);
     const uint16_t port = 49831u;
     fl_net_server_member_id_t new_host = FL_NET_SERVER_MEMBER_ID_NONE;
     fl_result_t rc;

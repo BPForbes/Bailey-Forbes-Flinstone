@@ -4,7 +4,6 @@
 #include "net_dns.h"
 #include "net_ping_host.h"
 
-#include <arpa/inet.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -13,7 +12,9 @@ fl_result_t fl_net_probe_endpoint(const char *host, uint16_t port, unsigned time
                                   fl_net_requirements_report_t *out) {
     double rtt = 0.0;
     fl_result_t rc;
-    char resolved[INET_ADDRSTRLEN];
+    /* 16 = "255.255.255.255\0" — matches the libc INET_ADDRSTRLEN literal
+     * without pulling in arpa/inet.h. */
+    char resolved[16];
     uint32_t addr_be = 0;
     const char *skip;
 
