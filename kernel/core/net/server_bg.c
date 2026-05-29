@@ -15,15 +15,8 @@ struct fl_server_bg_s {
     pthread_t thread;
     /* 1 = server loop owns this handle; 0 = client loop owns it. */
     int is_server;
-    /* CodeRabbit item 5: formally atomic stop signal. The previous
-     * `volatile int` worked in practice on x86 + glibc (the loop reload
-     * was forced by `volatile` and cross-thread visibility was
-     * incidentally provided by surrounding pthread side effects), but
-     * C11 strictly requires either `_Atomic` access or an explicit
-     * pthread barrier for cross-thread observability of a plain int.
-     * `atomic_int` makes the store/load relationship sequentially
-     * consistent on every supported toolchain without affecting the
-     * existing loops or callers. */
+    /* Atomic stop signal; regular `=`/`!` on atomic_int are sequentially
+     * consistent under C11, no extra pthread barrier needed. */
     atomic_int stop;
     /* Loop targets (only one of these is set per handle). */
     fl_net_server_t *srv;

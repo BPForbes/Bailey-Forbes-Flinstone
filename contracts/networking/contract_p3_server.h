@@ -102,45 +102,23 @@ _Static_assert(FL_NET_SERVER_ANNOUNCEMENT_MAX <= FL_NET_SESSION_MAX_MSG,
 /* server-side push announcements.                                           */
 /* ------------------------------------------------------------------------- */
 
-/**
- * Host → all members. Payload is the **full UTF-8 announcement line**
- * (already composed by the host so every receiver renders identical
- * text). Today's host emits:
- *     `"<display> has joined."`
- * where `<display>` follows the display-name rule (`P`, `P {N}`, or
- * `Nick`). The peer's renderer prefixes `"[Server Announcement]: "` and
- * applies KBLU; it does NOT re-format the payload.
- */
-#define FL_NET_SESSION_OP_JOIN_ANNOUNCE 0x05u
-
-/**
- * Host → all members. Payload is the **full UTF-8 announcement line**
- * carrying the leaving member's post-nick display at the moment of
- * departure:
- *     `"<display> has left."`
- * (See JOIN_ANNOUNCE above for renderer behaviour.)
- */
-#define FL_NET_SESSION_OP_LEAVE_ANNOUNCE 0x06u
-
-/**
- * Host → all members. Emitted whenever a host-global nick is set or
- * changed via **OP_HOST_NICK_SET** (host-driven) or accepted from
- * **OP_NICK_PROMPT**. Payload is one UTF-8 line composed by the host:
- *     `User <old_display> has been nicked by host. Their nickname is "<new_nick>".`
- * where `<old_display>` is the renderer output **before** the nick was
- * applied (peer prefixes `"[Server Announcement]: "` + KBLU).
- */
-#define FL_NET_SESSION_OP_NICK_SET_ANNOUNCE 0x07u
-
-/**
- * Host → all members. Free-form `server announce <message>` from the host
- * — or, when used by `fl_net_server_transfer_and_stop()`, the host-
- * transfer line:
- *     `"<new_host_display> is now the host"`
- * Payload is one UTF-8 line up to `FL_NET_SERVER_ANNOUNCEMENT_MAX` bytes.
- * Rendered as `[Server Announcement]: <payload>` in KBLU.
- */
-#define FL_NET_SESSION_OP_SERVER_ANNOUNCE 0x08u
+/* Announce-family opcodes (host -> all). Each payload is a full UTF-8
+ * line composed by the host; peer renderer prefixes
+ * "[Server Announcement]: " and applies KBLU, no further formatting.
+ *
+ *   JOIN_ANNOUNCE       "<display> has joined."
+ *   LEAVE_ANNOUNCE      "<display> has left."     (post-nick display)
+ *   NICK_SET_ANNOUNCE   "User <old_display> has been nicked by host. "
+ *                       "Their nickname is \"<new_nick>\"."
+ *   SERVER_ANNOUNCE     free-form `server announce <text>` from the host;
+ *                       fl_net_server_transfer_and_stop() also sends
+ *                       "<new_host_display> is now the host" here.
+ *
+ * Payloads are bounded by FL_NET_SERVER_ANNOUNCEMENT_MAX. */
+#define FL_NET_SESSION_OP_JOIN_ANNOUNCE      0x05u
+#define FL_NET_SESSION_OP_LEAVE_ANNOUNCE     0x06u
+#define FL_NET_SESSION_OP_NICK_SET_ANNOUNCE  0x07u
+#define FL_NET_SESSION_OP_SERVER_ANNOUNCE    0x08u
 
 /**
  * Client → host: request a direct (private) chat message to one recipient.
@@ -175,38 +153,20 @@ _Static_assert(FL_NET_SERVER_ANNOUNCEMENT_MAX <= FL_NET_SESSION_MAX_MSG,
 #define FL_NET_SESSION_OP_MEMBER_LIST_SNAPSHOT 0x09u
 
 /**
- * Host → all members at the moment the host is about to leave or transfer.
- * Payload (foundations encoding, IPv4 only):
- *   `[u16_be new_host_member_id][u32_be new_host_ip_be][u16_be new_host_port_host_BE]`
- * The recipient whose own `assigned_member_id == new_host_member_id` shall
- * locally tear down its client and call `fl_net_server_host_start` on its
- * own IP and the supplied port; other recipients shall reconnect to
- * `new_host_ip:new_host_port`. When `new_host_member_id == 0` (zero) the
- * host could not pick a successor and recipients should simply leave.
+ * Host -> all at leave/transfer. Payload (IPv4 only today):
+ *   [u16_be new_host_member_id][u32_be new_host_ip_be][u16_be new_host_port]
+ * Recipient with `assigned_member_id == new_host_member_id` becomes the
+ * new host (fl_net_server_host_start on its own IP + the supplied port);
+ * other recipients reconnect to `new_host_ip:new_host_port`. When
+ * `new_host_member_id == 0` there is no successor and recipients leave.
  *
- * **CodeRabbit item 11 — IPv6 forward-compat plan (#280 follow-up).**
- * The current fixed-width `u32_be` IP field is IPv4-only. When #280
- * promotes the dual-stack work, this opcode is expected to gain an
- * address-family discriminator. Two encodings are on the table:
- *   1. **Sibling opcode `OP_CTRL_HOST_PROMOTE6` (0x24)** that carries
- *      `[u16 new_id][16 bytes ipv6_be][u16 port]` (16 + 2 + 2 = 20 bytes).
- *      Pros: cleanest forward compat; old code that only knows 0x22
- *      sees a v4 promote and old hosts cannot accidentally emit a v6
- *      payload that a v4-only client mis-parses. Cons: doubles the
- *      opcode usage for the same event.
- *   2. **Family-tagged payload** under the existing 0x22:
- *      `[u16 new_id][u8 addr_family (4|6)][u32 or [16] ip][u16 port]`
- *      Pros: one opcode. Cons: shorter v4 payloads (9 bytes) become
- *      ambiguous with the current 8-byte v4 layout unless we add a
- *      version byte, which is itself a wire break.
- * Pending the #280 design call, this contract documents option (1) as
- * the recommended path so the v4 payload encoding can stay byte-for-
- * byte stable through the dual-stack switchover.
+ * IPv6 (#280): a sibling OP_CTRL_HOST_PROMOTE6 (0x24) carrying
+ *   [u16 new_id][16 bytes ipv6_be][u16 port]
+ * is the recommended forward shape so the v4 payload above stays byte-
+ * stable across the dual-stack switchover.
  *
- * (Wire opcode 0x22 was already reserved by contract_p3_session_wire.h
- * as `OP_CTRL_HOST_PROMOTE`; this shard extends its payload encoding
- * for the foundations build — the older opcode constant is reused
- * unchanged.)
+ * (0x22 was reserved by contract_p3_session_wire.h as
+ * OP_CTRL_HOST_PROMOTE; this shard extends the payload encoding.)
  */
 
 /* ------------------------------------------------------------------------- */
@@ -218,10 +178,8 @@ typedef uint16_t fl_net_server_member_id_t;
 #define FL_NET_SERVER_MEMBER_ID_NONE ((fl_net_server_member_id_t)0)
 #define FL_NET_SERVER_MEMBER_ID_HOST ((fl_net_server_member_id_t)1)
 
-/* Host always sits at member_id 1 by construction (see
- * fl_net_server_host_start, host-transfer reindex). Enforce in source so a
- * future refactor that re-orders slot assignment cannot silently break the
- * stack-style reindex described in `docs/SERVER.md` §3.6. */
+/* Host is always member_id 1 by construction; pin in source so a future
+ * slot-assignment refactor cannot silently break the stack-style reindex. */
 _Static_assert(FL_NET_SERVER_MEMBER_ID_HOST == 1u,
                "host member_id is fixed at slot 1 by the dual-role model");
 _Static_assert(FL_NET_SERVER_MEMBER_ID_NONE == 0u,

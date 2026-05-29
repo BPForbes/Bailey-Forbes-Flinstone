@@ -1,27 +1,7 @@
 /*
- * `server` shell built-in.
- *
- * Verbs:
- *   server host <ip:port>                        -- bind listener + start bg
- *   server join <ip:port> [-bind <local_ip>]     -- connect; optional source bind
- *   server msg <text...>                          -- broadcast (global, CYN)
- *   server msg -all <text...>                     -- broadcast (explicit)
- *   server msg -user <name> [-id <N>] <text...>   -- private (CYN)
- *   server msg -id <N> <text...>                  -- private by id
- *   server announce <text...>                     -- host-only; blue announce
- *   server nick -id <N> -name <nick>              -- host-only global nick
- *   server nick -local -id <N> -name <local-nick> -- client-local nick
- *   server connected                              -- roster (anyone)
- *   server leave                                  -- client disconnect (or
- *                                                    host: transfer-and-stop)
- *   server kill                                   -- host-only; kill all peers
- *
- * Output palette (userland/shell/fl_colors.h):
- *   KRED  -> "[ERROR] ..."                  -- usage and authz errors
- *   KGRN  -> "[Server] ..."                 -- local success acknowledgements
- *   KYEL  -> warnings and interactive prompts (nick prompt)
- *   KBLU  -> "[Server Announcement]: ..."   -- host/peer-pushed announces
- *   KCYN  -> "[Server Message, ...]: ..."   -- public / private chat
+ * `server` shell built-in: host / join / msg / announce / nick / set-nick /
+ * connected / leave / kill verbs. See docs/SERVER.md for the user surface
+ * and the colour palette (KRED / KGRN / KYEL / KBLU / KCYN).
  */
 
 #include "cmd_decl.h"
@@ -84,20 +64,9 @@ static int parse_endpoint(const char *s, uint32_t *addr_be_out, uint16_t *port_o
         return -1;
     memcpy(buf, s, n);
     buf[n] = '\0';
-    /*
-     * TODO(#280): IPv6 dual-stack will need bracketed-endpoint parsing
-     *   `[2001:db8::1]:49913`
-     * because an IPv6 literal contains colons that would otherwise
-     * confuse the `strrchr(buf, ':')` port split below. The right shape
-     * once the v6 stack lands:
-     *   - if buf[0] == '['  -> find matching ']' then expect ":port"
-     *     after it, parse the bracketed portion with `inet_pton(AF_INET6,
-     *     ...)` into a `struct in6_addr`, and extend `*addr_be_out` to a
-     *     family-tagged variant (see also OP_CTRL_HOST_PROMOTE item 11).
-     *   - otherwise fall through to the current IPv4 path (this function).
-     * Until #280 promotes from [DEFERRED], this stays v4-only and any v6
-     * literal is rejected here by `fl_net_ipv4_parse_literal`.
-     */
+    /* TODO(#280): bracketed-endpoint parsing for `[2001:db8::1]:port` —
+     * inet_pton(AF_INET6, ...) then port; family-tag addr_be_out. v4-only
+     * today; v6 literals reject below via fl_net_ipv4_parse_literal. */
     colon = strrchr(buf, ':');
     if (!colon || colon == buf)
         return -1;
@@ -168,19 +137,15 @@ static void client_event_print(fl_net_server_event_kind_t kind, const char *text
         fl_color_announce("%s", text);
         break;
     case FL_NET_SERVER_EVENT_NICK_PROMPT:
-        /* In normal flow we handle the prompt synchronously in verb_join
-         * before starting the background loop. If it arrives later (e.g.
-         * after an auto-reconnect on host transfer), surface it as a cyan
-         * SERVER message — the user can run `server nick -name <nick>` on
-         * their own schedule. */
+        /* verb_join handles the sync prompt; only surfaces here after a
+         * post-reconnect collision where BG can't read stdin. */
         fl_color_server_dm(
             "Your principal '%s' collides with another connected user. "
             "Run 'server set-nick <nick>' to choose a nickname.",
             current_principal());
         break;
     case FL_NET_SERVER_EVENT_MSG: {
-        /* Public chat — already prefixed "Sender: text" by the host. Split
-         * it back into sender + text so we render with the CYN msg helper. */
+        /* Public chat is prefixed "Sender: text" by the host; split back. */
         const char *colon = strchr(text, ':');
         if (colon && colon > text && colon[1] == ' ') {
             char sender[FL_NET_SERVER_DISPLAY_NAME_MAX];
@@ -212,12 +177,9 @@ static void client_event_print(fl_net_server_event_kind_t kind, const char *text
         fl_color_warn("session closed by host");
         break;
     case FL_NET_SERVER_EVENT_HOST_PROMOTE: {
-        /* Wire payload: [u16_be new_id][u32 new_ip_be][u16_be new_port].
-         * No user-visible message here — the OLD host already broadcast a
-         * blue "[Server Announcement]: <display> is now the host" line
-         * (server-side SERVER_ANNOUNCE) right before sending this frame, so
-         * every peer has been told. We just decode and spawn the takeover/
-         * reconnect transition thread silently. */
+        /* Payload: [u16_be new_id][u32 new_ip_be][u16_be new_port].
+         * Silent here — old host already broadcast the blue announce
+         * before sending this frame. Just decode + spawn the transition. */
         const uint8_t *p = (const uint8_t *)text;
         uint16_t new_id_be = mid;
         uint32_t new_ip_be;
@@ -241,18 +203,10 @@ static void client_event_print(fl_net_server_event_kind_t kind, const char *text
     }
 }
 
-/*
- * The client BG loop exits on its own when the session is closed by the
- * host (CTRL_KILL / EOF). At that point `g_client_bg` still points at the
- * thread handle but the thread itself has returned; without this reap the
- * next `server join` would see the non-NULL pointer in start_client_bg()
- * and skip starting a new loop, leaving the user "joined" but never
- * receiving announcements (Codex P2 follow-up).
- *
- * pthread_join on an already-returned thread is well-defined — it returns
- * immediately and frees the kernel-side resources, which is exactly the
- * cleanup we want.
- */
+/* When the host closes the session, the BG client loop exits on its own
+ * but g_client_bg still points at the thread handle. pthread_join on a
+ * returned thread is well-defined, so call it here before the next join
+ * looks at the pointer and skips starting a new loop. */
 static void reap_client_bg_if_dead(void) {
     if (g_client_bg &&
         fl_net_client_state(&g_client) == FL_NET_CLIENT_STATE_DISCONNECTED) {
@@ -310,20 +264,13 @@ static void *promote_thread_main(void *arg) {
             return NULL;
         }
         g_server_running = 1;
-        /* No local "you are now the host" message here: the OLD host's
-         * `fl_net_server_transfer_and_stop()` already broadcast a blue
-         * "[Server Announcement]: <display> is now the host" to every peer
-         * (including this one) before tearing down, so the user has already
-         * seen the same line as everyone else. The promotion mechanics are
-         * mute by design. New host always reindexes to member_id 1 by virtue
-         * of starting a fresh `fl_net_server_host_start()`; reconnecting
-         * peers get sequential ids from 2 upward (stack-style for the auto
-         * path; the future "host selects successor" path will extend the
-         * map instead, but is not in this train). */
+        /* No local "you are the host" line: the old host already broadcast
+         * "[Server Announcement]: <display> is now the host" to all peers
+         * including this one. New host reindexes to member_id 1 by virtue
+         * of a fresh fl_net_server_host_start(); peers reconnect from 2 up. */
     } else {
-        /* Re-join the new host. Use our same local IP as source so the new
-         * host can see us coming from a consistent address. The new host's
-         * listener may still be coming up — retry a few times. */
+        /* Re-join the new host from the same local IP. The new listener
+         * may not be bound yet — retry a few times with back-off. */
         fl_result_t rc = FL_RESULT_ERR;
         for (int attempt = 0; attempt < 10; attempt++) {
             rc = fl_net_client_connect_from(&g_client, pa->local_ip_be,
@@ -342,12 +289,9 @@ static void *promote_thread_main(void *arg) {
             free(pa);
             return NULL;
         }
-        /* Do NOT run the synchronous Y/N nick prompt from this background
-         * thread — the interpreter's foreground read loop is also reading
-         * from stdin, so two threads would race for the user's input. If a
-         * NICK_PROMPT frame arrives, the client-event sink surfaces it as a
-         * cyan SERVER message and the user can react with `server nick` on
-         * their own schedule. */
+        /* Do NOT run a sync Y/N prompt from this background thread — the
+         * interpreter's main loop owns stdin. A late NICK_PROMPT will
+         * surface as a cyan SERVER message via the BG event sink. */
         start_client_bg();
         fl_color_success("reconnected to new host on member_id %u",
                          (unsigned)g_client.assigned_member_id);
@@ -400,13 +344,9 @@ static int read_nick_line(char *out, size_t cap) {
 }
 
 static void maybe_handle_nick_prompt_sync(void) {
-    /* Drain frames non-blocking until we either see NICK_PROMPT (handled
-     * inline) or there is nothing pending. Any non-prompt frame received
-     * during this window is dispatched through the same path the BG loop
-     * would use (`fl_net_client_dispatch_frame`) so the host's initial
-     * MEMBER_LIST_SNAPSHOT / JOIN_ANNOUNCE / SERVER_ANNOUNCE are preserved
-     * and `server connected` + `server msg -user` work immediately after
-     * the join completes (Codex P2 follow-up). */
+    /* Drain non-blocking until NICK_PROMPT or quiet. Non-prompt frames go
+     * through fl_net_client_dispatch_frame so the host's initial
+     * MEMBER_LIST_SNAPSHOT / JOIN_ANNOUNCE survive into the BG loop. */
     for (int i = 0; i < 50; i++) {
         uint8_t opcode = 0;
         uint8_t payload[FL_NET_SESSION_MAX_MSG];
@@ -424,12 +364,8 @@ static void maybe_handle_nick_prompt_sync(void) {
             return;
         if (opcode == (uint8_t)FL_NET_SESSION_OP_NICK_PROMPT) {
             char nick[FL_NET_SERVER_NICK_MAX];
-            /* Take the shell stdout lock for the entire Y/N + nick sequence
-             * so background announcements (from any future bg client) cannot
-             * interleave between the prompt and the user's typed answer.
-             * The interpreter's prompt_active is already 0 here (we are
-             * inside submit_single_command), so async helpers will not try
-             * to redraw "shell> " on top of our yellow prompt. */
+            /* Lock stdout for the whole Y/N + nick read so no async
+             * announce can interleave between prompt and answer. */
             fl_shell_io_lock();
             fl_color_prompt_yellow(
                 "Your username %s is already in use by another connected user, "
@@ -453,10 +389,8 @@ static void maybe_handle_nick_prompt_sync(void) {
                 fl_color_error("nick request '%s' rejected", nick);
             return;
         }
-        /* Non-prompt frame: feed it through the normal client dispatch so
-         * the cached roster snapshot, announcements, and any other
-         * background-loop side effects survive even when this drain
-         * consumed the frame before the BG loop got to it. */
+        /* Feed non-prompt frames through normal dispatch so cached roster
+         * + announcements survive even though this drain consumed them. */
         (void)fl_net_client_dispatch_frame(&g_client, opcode, payload, plen,
                                             client_event_print, NULL);
     }
@@ -518,10 +452,8 @@ static int verb_join(int argc, char **argv) {
         fl_color_error("usage: server join <ip:port> [-bind <local_ip>]");
         return 1;
     }
-    /* Reap any background loop left from a previous session that the host
-     * closed on its side (the thread has already exited but the handle
-     * was never freed). Must happen BEFORE the "already joined" check so
-     * a stale handle does not block a legitimate re-join. */
+    /* Reap any dead BG handle from a host-closed prior session BEFORE
+     * the "already joined" check so a stale pointer cannot block re-join. */
     reap_client_bg_if_dead();
     if (g_server_running) {
         fl_color_error("already hosting; kill first to join a different server");
@@ -667,10 +599,8 @@ static int verb_msg(int argc, char **argv) {
     }
 
     if (!is_private) {
-        /* Global broadcast. No local "You -> All" echo is rendered: the
-         * server does not echo our own message back to us (see issue
-         * feedback) and the user already typed the text themselves, so
-         * silence is success. Errors still surface as [ERROR]. */
+        /* No local echo: server skips the sender on broadcast and the
+         * user already typed the text. Silence = success; errors print. */
         if (g_server_running) {
             if (fl_net_server_send_public(&g_server, joined) != FL_RESULT_OK) {
                 fl_color_error("server msg: broadcast failed");
@@ -735,8 +665,7 @@ static int verb_msg(int argc, char **argv) {
                 return 1;
             }
         }
-        /* As with the global path, no local "You -> <recipient>" echo:
-         * silence == success. Recipient renders their own "From X -> You". */
+        /* Recipient renders "From X -> You"; sender stays silent on success. */
         (void)recipient_display;
     }
     return 0;

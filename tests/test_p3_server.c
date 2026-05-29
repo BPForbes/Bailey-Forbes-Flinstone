@@ -302,15 +302,15 @@ static int test_messages_and_roster(void) {
         ASSERT(fl_net_client_send_private(&cJack, jill_id, "Hello") == FL_RESULT_OK);
         pump(clients, logs, 2, 30);
 
-        /* Recipient (Jill) MUST have received a MSG_PRIVATE event whose
-         * text contains "Hello". This pins the private-delivery path —
-         * before this assertion existed (CodeRabbit feedback) the test
-         * only checked that the message did NOT leak via the public
-         * MSG_BROADCAST channel, which is a weaker guarantee. */
+        /* Recipient receives one MSG_PRIVATE with "Hello"; sender stays
+         * quiet on both public and private channels. */
         ASSERT(logJill.privates == jill_priv_before + 1);
         ASSERT(strstr(logJill.last_private, "Hello") != NULL);
+        ASSERT(strstr(logJack.last_msg, "Hello") == NULL);
+        ASSERT(strstr(logJill.last_msg, "Hello") == NULL);
+        ASSERT(logJack.msgs == jack_msg_before);
+        ASSERT(logJack.privates == jack_priv_before);
 
-        /* Sender Jack's display name resolves correctly on Jill's side. */
         jack_id = fl_net_client_member_lookup(&cJill, "Jack", 0);
         ASSERT(jack_id != FL_NET_SERVER_MEMBER_ID_NONE);
         {
@@ -318,23 +318,9 @@ static int test_messages_and_roster(void) {
             (void)fl_net_client_member_display(&cJill, jack_id, disp, sizeof(disp));
             ASSERT(strcmp(disp, "Jack") == 0);
         }
-
-        /* The private path must NOT leak into the public MSG channel for
-         * EITHER side. */
-        ASSERT(strstr(logJack.last_msg, "Hello") == NULL);
-        ASSERT(strstr(logJill.last_msg, "Hello") == NULL);
-        ASSERT(logJack.msgs == jack_msg_before);
-        ASSERT(logJack.privates == jack_priv_before); /* sender no self-deliver */
     }
 
-    /* Jack -> All public broadcast.
-     *   - Jill (other client) receives "Jack: Hi everyone".
-     *   - Jack himself must NOT receive his own message back: the server
-     *     skips the sender on MSG_BROADCAST fan-out per the issue feedback
-     *     ("the server does not need to send data back to clients what they
-     *     give to the server for others"). We test this by snapshotting
-     *     Jack's last_msg count BEFORE the send and asserting it stays
-     *     unchanged after pumping. */
+    /* Jack -> All: Jill receives, Jack does not (server skips sender). */
     {
         int jack_msg_before = logJack.msgs;
         ASSERT(fl_net_client_send_msg(&cJack, "Hi everyone") == FL_RESULT_OK);
@@ -361,11 +347,9 @@ static int test_messages_and_roster(void) {
         ASSERT(strcmp(disp, "Boss") == 0); /* host-global wins over local "Sis" */
     }
 
-    /* Nick is session-only: the cached client.principal (which mirrors the
-     * shell login the client used at connect time) must NOT be touched by
-     * a nick set. This is the structural guarantee behind the
-     * `server leave; whoami` flow the user asked us to demonstrate: the
-     * shell username is unaffected by any host-global nick. */
+    /* Nick is session-only: client.principal (the shell login at connect
+     * time) is never touched. Backs `server leave; whoami` showing the
+     * shell username, not the nick. */
     ASSERT(strcmp(cJill.principal, "Jill") == 0);
 
     fl_net_client_disconnect(&cJack);

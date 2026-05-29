@@ -91,64 +91,41 @@ fl_result_t fl_net_server_poll_members(fl_net_server_t *srv);
 fl_result_t fl_net_server_announce(fl_net_server_t *srv, const char *fmt, ...);
 
 /**
- * Host-only: assign a global nick to `member_id`. Validates that the nick
- * does not collide with another member's principal or another member's
- * current nick, then broadcasts OP_NICK_SET_ANNOUNCE.
- *
- * Return codes (CodeRabbit item 12 — doc fix; previous version
- * inaccurately collapsed all failures into `FL_RESULT_INVAL`):
- *   - `FL_RESULT_OK`     — nick applied, announcement broadcast, roster
- *                          snapshot refreshed.
- *   - `FL_RESULT_INVAL`  — `srv` NULL, server not running, or nick fails
- *                          the syntactic check in `nick_is_valid`
- *                          (empty, oversize, or contains control bytes).
- *   - `FL_RESULT_NOENT`  — no member has that `member_id`.
- *   - `FL_RESULT_BUSY`   — nick collides with another connected
- *                          member's principal or another member's
- *                          current nick (member may rename to its own
- *                          principal — that's a no-op rename, not a
- *                          collision). The caller (the shell command)
- *                          maps this onto a red `[ERROR]` line and the
- *                          host-driven path additionally emits an
- *                          `OP_ERR` wire frame to the requester when the
- *                          collision came from `OP_HOST_NICK_SET` on a
- *                          client socket.
+ * Host-only: assign a global nick to `member_id`. Returns:
+ *   OK     — nick applied, announcement broadcast, roster refreshed.
+ *   INVAL  — `srv` NULL / not running, or `nick` fails nick_is_valid
+ *            (empty, oversize, control bytes).
+ *   NOENT  — no member has that `member_id`.
+ *   BUSY   — nick collides with another connected member's principal
+ *            or current nick (a member renaming to its own principal
+ *            is a no-op, not a collision). On the wire side, a
+ *            client-driven OP_HOST_NICK_SET that hits BUSY also gets
+ *            an OP_ERR frame from the host.
  */
 fl_result_t fl_net_server_set_host_nick(fl_net_server_t *srv,
                                         fl_net_server_member_id_t member_id,
                                         const char *nick);
 
-/**
- * Host-only: broadcast a public chat message as `[Server Message, From <host>]`
- * on every member. The host also renders its own copy via the colour helper.
- * Sender for non-host messages goes through `dispatch_member_frame` instead.
- */
+/** Host-only: broadcast a public chat line as MSG_BROADCAST. Skips the
+ *  host's own self-member; the host renders locally via fl_color_msg_*. */
 fl_result_t fl_net_server_send_public(fl_net_server_t *srv, const char *text);
 
-/**
- * Host-only: deliver a private chat message from the host to one recipient.
- * Returns FL_RESULT_NOENT when the recipient id is unknown or is the host
- * itself; FL_RESULT_OK on a successful single-socket write.
- */
+/** Host-only: deliver a private chat message to one recipient.
+ *  NOENT when the recipient id is unknown or is the host itself. */
 fl_result_t fl_net_server_send_private(fl_net_server_t *srv,
                                        fl_net_server_member_id_t recipient_id,
                                        const char *text);
 
-/**
- * Broadcast an OP_MEMBER_LIST_SNAPSHOT to every peer. Called after join,
- * leave, and nick changes so clients can render private-message senders
- * and `server connected` without an extra round trip.
- */
+/** Push an OP_MEMBER_LIST_SNAPSHOT to every peer. Called after join, leave,
+ *  and nick changes so clients can render private-msg senders + connected. */
 fl_result_t fl_net_server_broadcast_member_list(fl_net_server_t *srv);
 
 /**
- * Host-only: select a successor (lowest non-host member id), broadcast
- * `OP_CTRL_HOST_PROMOTE` with the successor's id / peer IP / port, then
- * stop the listener and close all sockets. Returns
- * - FL_RESULT_OK and writes the chosen new_host_id into `*new_host_out`
- *   when there was a successor;
- * - FL_RESULT_NOENT when the host was the only member; in that case the
- *   server is still stopped but no transfer frame is sent.
+ * Host-only: pick the lowest non-host member as successor, broadcast
+ * OP_CTRL_HOST_PROMOTE with [id, peer_ip_be, port], then close listener
+ * and all member sockets. Returns OK + writes the successor into
+ * `*new_host_out`, or NOENT when the host was the only member (server
+ * is still stopped, no transfer frame is sent).
  */
 fl_result_t fl_net_server_transfer_and_stop(fl_net_server_t *srv,
                                             fl_net_server_member_id_t *new_host_out);
@@ -180,21 +157,17 @@ size_t fl_net_session_encode_frame(uint8_t *buf, size_t cap, uint8_t opcode,
                                    const uint8_t *payload, uint16_t payload_len);
 
 /**
- * Block-read one full session frame from `handle` (header + payload).
- * On `FL_RESULT_OK`, sets `*opcode_out` and `*payload_len_out` and copies the
- * payload into `payload_out` (truncating to `payload_cap`; on truncation the
- * caller's buffer holds the first `payload_cap` bytes but `*payload_len_out`
- * remains the true wire length so the caller can detect it via
- * `*payload_len_out > payload_cap`). Returns `FL_RESULT_EOF` on clean close,
- * `FL_RESULT_TIMEDOUT` on read timeout, or other errors as appropriate.
+ * Block-read one full session frame from `handle`. Returns FL_RESULT_OK
+ * (sets `*opcode_out`, `*payload_len_out`, copies payload up to
+ * `payload_cap`; on truncation `*payload_len_out` keeps the true wire
+ * length so the caller can detect `plen > payload_cap`), FL_RESULT_EOF
+ * on close, FL_RESULT_TIMEDOUT on timeout, or another rc on error.
  *
- * NOT safe for non-blocking polling: a partial read at `timeout_ms == 0` will
- * silently discard bytes already in the local `hdr` / payload buffers and
- * leave the next call starting mid-frame. Use `fl_net_session_recv_frame_nb`
- * with a per-stream `fl_net_session_rx_t` for background pollers; this
- * variant is intended for synchronous handshake paths (e.g.
- * `fl_net_client_connect` waiting for HELLO_ACK) where the timeout is high
- * enough that the full frame is expected to arrive in one window.
+ * Not safe for non-blocking polling: a partial read at `timeout_ms == 0`
+ * loses local-buffer bytes. Use `fl_net_session_recv_frame_nb` with a
+ * per-stream `fl_net_session_rx_t` for poll loops; this variant is for
+ * synchronous handshake paths (`fl_net_client_connect` waiting for
+ * HELLO_ACK) where one window covers the full frame.
  */
 fl_result_t fl_net_session_recv_frame(fl_net_sock_handle_t handle,
                                       uint8_t *opcode_out,
@@ -203,39 +176,28 @@ fl_result_t fl_net_session_recv_frame(fl_net_sock_handle_t handle,
                                       unsigned timeout_ms);
 
 /**
- * Per-stream parser state for the non-blocking recv path. Holds the bytes
- * of any in-progress frame so a `FL_RESULT_TIMEDOUT` mid-frame preserves
- * progress across poll iterations (TCP segments may split the 6-byte
- * session header or the payload at any offset). Owner is the caller (one
- * per remote stream — per accepted member on the server, one per client).
- *
- * Zero-initialise (or `fl_net_session_rx_reset()`) before the first call,
- * and again on disconnect/reconnect so a fresh session does not see stale
- * bytes from the previous one.
+ * Per-stream parser state for the non-blocking recv path. Holds any
+ * in-progress frame so a `FL_RESULT_TIMEDOUT` mid-frame preserves
+ * progress across poll iterations (TCP may split the 6-byte header or
+ * the payload at any offset). One per remote stream; zero-initialise
+ * or `fl_net_session_rx_reset()` before first use and on reconnect.
  */
 typedef struct {
     uint8_t  hdr[FL_NET_SESSION_HDR_LEN];
     uint16_t hdr_filled;     /* 0..FL_NET_SESSION_HDR_LEN */
-    uint16_t expected_plen;  /* parsed once hdr_filled == HDR_LEN */
+    uint16_t expected_plen;  /* parsed once hdr is complete */
     uint16_t body_filled;    /* 0..expected_plen */
     uint8_t  body[FL_NET_SESSION_MAX_MSG];
 } fl_net_session_rx_t;
 
-/** Reset to "no frame in progress". Safe to call on a struct in any state. */
 void fl_net_session_rx_reset(fl_net_session_rx_t *st);
 
 /**
- * Non-blocking incremental recv: accumulates bytes into `*st` across
- * successive calls and returns `FL_RESULT_OK` once a full frame has been
- * assembled (output buffers are filled and `*st` is reset for the next
- * frame). Returns `FL_RESULT_TIMEDOUT` when more bytes are needed (caller
- * tries again later; the in-progress bytes are kept in `*st`),
- * `FL_RESULT_EOF` on clean close, `FL_RESULT_INVAL` on a malformed magic
- * or version byte (the caller should drop the peer), or another rc on a
- * socket error.
- *
- * The function uses `fl_net_sock_recv(handle, ..., 0)` internally — the
- * socket must be in non-blocking mode (e.g. `fl_net_sock_set_nonblock`).
+ * Non-blocking incremental recv. Accumulates bytes into `*st` across
+ * calls. Returns FL_RESULT_OK when a full frame is assembled (outputs
+ * filled, `*st` reset), FL_RESULT_TIMEDOUT when more bytes are needed,
+ * FL_RESULT_EOF on close, FL_RESULT_INVAL on a malformed header (caller
+ * drops the peer). Socket must be non-blocking (`fl_net_sock_set_nonblock`).
  */
 fl_result_t fl_net_session_recv_frame_nb(fl_net_sock_handle_t handle,
                                           fl_net_session_rx_t *st,

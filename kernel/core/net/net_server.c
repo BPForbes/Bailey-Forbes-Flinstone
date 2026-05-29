@@ -11,17 +11,8 @@
 #define FL_NET_SERVER_HOSTED 1
 #endif
 
-/* Parallel to fl_net_server_t::members[] — one partial-frame parser per
- * accepted peer. Kept here (not in the contract struct) so the public
- * fl_net_server_member_t layout stays stable while the internal codec
- * carries the cross-poll state it needs to survive TCP segmentation
- * (Codex P1 follow-up: a poll that returns FL_RESULT_TIMEDOUT mid-frame
- * must not lose the bytes already consumed from the socket).
- *
- * Each entry is keyed by the same slot index used in `srv->members[]`; the
- * accept path resets one slot, and the drop path resets the same slot. The
- * file-static array bounds the lifetime to the single foreground server
- * process — the same scope as `g_server` in `cmd_server.c`. */
+/* One partial-frame parser per member slot, parallel to srv->members[].
+ * Kept out of the contract struct so fl_net_server_member_t stays stable. */
 static fl_net_session_rx_t s_member_rx[FL_NET_SERVER_MAX_MEMBERS];
 
 static void member_rx_reset_slot(size_t i) {
@@ -97,23 +88,10 @@ fl_result_t fl_net_session_recv_frame(fl_net_sock_handle_t handle, uint8_t *opco
     if (rc != FL_RESULT_OK)
         return rc;
 
-    if (hdr[0] != (uint8_t)FL_NET_SESSION_MAGIC || hdr[1] != (uint8_t)FL_NET_SESSION_VERSION)
+    if (hdr[0] != (uint8_t)FL_NET_SESSION_MAGIC ||
+        hdr[1] != (uint8_t)FL_NET_SESSION_VERSION ||
+        hdr[3] != 0u) /* flags reserved; the encoder always emits 0 */
         return FL_RESULT_INVAL;
-    /*
-     * CodeRabbit item 10 — flags byte (hdr[3]) policy.
-     * The session header reserves one byte at offset 3 for future flags
-     * (see contract_p3_session_wire.h `FL_NET_SESSION_HDR_LEN`). We
-     * deliberately accept ANY value here for forward compatibility
-     * (Postel's law: be liberal in what you accept). `fl_net_session_
-     * encode_frame` always emits 0, so a non-zero byte today indicates
-     * either a malformed peer or a future protocol revision the current
-     * code is not aware of. When a flag is formally allocated (e.g. a
-     * future P3-13 compression bit), validation should land here as
-     *     if ((hdr[3] & ~FL_NET_SESSION_KNOWN_FLAGS_MASK) != 0)
-     *         return FL_RESULT_INVAL;
-     * with `FL_NET_SESSION_KNOWN_FLAGS_MASK` exported alongside the new
-     * flag macros in `contract_p3_session_wire.h`.
-     */
     *opcode_out = hdr[2];
     plen = (uint16_t)((uint16_t)hdr[4] << 8) | (uint16_t)hdr[5];
     if (plen > FL_NET_SESSION_MAX_MSG)
@@ -128,10 +106,8 @@ fl_result_t fl_net_session_recv_frame(fl_net_sock_handle_t handle, uint8_t *opco
         if (rc != FL_RESULT_OK)
             return rc;
     } else {
-        /* Truncate: read into a local scratch buffer and discard the tail
-         * so the stream stays in sync. `*payload_len_out` keeps the true
-         * wire `plen` (set above the if) — the caller can detect truncation
-         * by comparing `*payload_len_out > payload_cap`. */
+        /* Truncate into scratch; *payload_len_out keeps the true wire plen
+         * so the caller can detect truncation via plen > payload_cap. */
         uint8_t scratch[64];
         size_t remaining = plen;
 
@@ -168,9 +144,7 @@ fl_result_t fl_net_session_recv_frame_nb(fl_net_sock_handle_t handle,
     if (!st || !opcode_out || !payload_len_out)
         return FL_RESULT_INVAL;
 
-    /* Phase 1: accumulate the 6-byte header. Partial reads survive across
-     * calls in `st->hdr` + `st->hdr_filled`, which is the whole point of
-     * the nb variant (see header comment). */
+    /* Phase 1: header bytes — survive a mid-read FL_RESULT_TIMEDOUT via st. */
     while (st->hdr_filled < FL_NET_SESSION_HDR_LEN) {
         size_t want = (size_t)FL_NET_SESSION_HDR_LEN - st->hdr_filled;
         size_t got = 0;
@@ -187,15 +161,11 @@ fl_result_t fl_net_session_recv_frame_nb(fl_net_sock_handle_t handle,
         st->hdr_filled = (uint16_t)(st->hdr_filled + got);
     }
 
-    /* Parse + validate the freshly-completed header exactly once.
-     * CodeRabbit item 10: the reserved flags byte (st->hdr[3]) is not
-     * checked here either; see the comment in fl_net_session_recv_frame
-     * for the forward-compat policy. */
+    /* Validate the completed header exactly once per frame. */
     if (st->body_filled == 0u && st->expected_plen == 0u) {
         if (st->hdr[0] != (uint8_t)FL_NET_SESSION_MAGIC ||
-            st->hdr[1] != (uint8_t)FL_NET_SESSION_VERSION) {
-            /* Malformed; reset so the caller can drop the peer and a fresh
-             * connection starts clean. */
+            st->hdr[1] != (uint8_t)FL_NET_SESSION_VERSION ||
+            st->hdr[3] != 0u) {
             fl_net_session_rx_reset(st);
             return FL_RESULT_INVAL;
         }
@@ -206,7 +176,7 @@ fl_result_t fl_net_session_recv_frame_nb(fl_net_sock_handle_t handle,
         }
     }
 
-    /* Phase 2: accumulate the payload bytes (may be zero). */
+    /* Phase 2: payload bytes (may be zero for a header-only frame). */
     while (st->body_filled < st->expected_plen) {
         size_t want = (size_t)st->expected_plen - st->body_filled;
         size_t got = 0;
@@ -223,7 +193,7 @@ fl_result_t fl_net_session_recv_frame_nb(fl_net_sock_handle_t handle,
         st->body_filled = (uint16_t)(st->body_filled + got);
     }
 
-    /* Full frame ready — publish to the caller and reset for the next. */
+    /* Full frame ready — publish + reset for the next. */
     *opcode_out = st->hdr[2];
     *payload_len_out = st->expected_plen;
     if (payload_out && payload_cap > 0u && st->expected_plen > 0u) {
@@ -422,9 +392,8 @@ static void broadcast_to_peers(fl_net_server_t *srv, uint8_t opcode,
     }
 }
 
-/* Same as broadcast_to_peers but skips one specific member_id. Used by the
- * chat-relay path so the server does not echo a public message back to the
- * sender — the sender already knows what they typed. */
+/* Broadcast variant that skips one member so the chat relay does not echo
+ * a sender's own public message back to them. */
 static void broadcast_to_peers_except(fl_net_server_t *srv,
                                       fl_net_server_member_id_t skip,
                                       uint8_t opcode,
@@ -535,8 +504,7 @@ fl_result_t fl_net_server_send_public(fl_net_server_t *srv, const char *text) {
 
     if (!srv || !srv->running || !text)
         return FL_RESULT_INVAL;
-    /* Item 4: peek one past MAX_MSG so an exactly-fit text is allowed
-     * (the wire codec accepts payload_len up to and including MAX_MSG). */
+    /* Peek one past so an exactly-MAX_MSG payload is accepted. */
     tlen = strnlen(text, (size_t)FL_NET_SESSION_MAX_MSG + 1u);
     if (tlen == 0u || tlen > (size_t)FL_NET_SESSION_MAX_MSG)
         return FL_RESULT_INVAL;
@@ -569,7 +537,7 @@ fl_result_t fl_net_server_send_private(fl_net_server_t *srv,
     m = member_by_id(srv, recipient_id);
     if (!m || m->peer_handle == FL_NET_SOCK_INVALID)
         return FL_RESULT_NOENT;
-    /* Item 4: 4-byte [sender_id][reserved] prefix in front of the text. */
+    /* 4-byte [sender_id][reserved] prefix sits in front of the text. */
     tlen = strnlen(text, (size_t)FL_NET_SESSION_MAX_MSG - 4u + 1u);
     if (tlen == 0u || tlen > (size_t)FL_NET_SESSION_MAX_MSG - 4u)
         return FL_RESULT_INVAL;
@@ -670,11 +638,8 @@ fl_result_t fl_net_server_transfer_and_stop(fl_net_server_t *srv,
         int n;
         uint8_t payload[8];
 
-        /* Blue "[Server Announcement]: <display> is now the host" to ALL
-         * peers (and to the host's own terminal). Reuses the same wire path
-         * any other announcement uses; the OLD-session display name carries
-         * (the new host re-indexes to member_id 1 in its fresh server, but
-         * other peers identify the successor by the name they already know). */
+        /* "[Server Announcement]: <display> is now the host" to all peers
+         * (and locally to the host) before the listener is torn down. */
         render_member_display(succ, disp, sizeof(disp));
         n = snprintf(line, sizeof(line), "%s is now the host", disp);
         if (n > 0) {
@@ -688,7 +653,7 @@ fl_result_t fl_net_server_transfer_and_stop(fl_net_server_t *srv,
 
         payload[0] = (uint8_t)((succ->member_id >> 8) & 0xFFu);
         payload[1] = (uint8_t)(succ->member_id & 0xFFu);
-        /* peer_ip_be is already network byte order; serialise as raw bytes. */
+        /* peer_ip_be is network byte order; serialise raw bytes. */
         payload[2] = (uint8_t)((succ->peer_ip_be) & 0xFFu);
         payload[3] = (uint8_t)((succ->peer_ip_be >> 8) & 0xFFu);
         payload[4] = (uint8_t)((succ->peer_ip_be >> 16) & 0xFFu);
@@ -798,8 +763,6 @@ fl_result_t fl_net_server_init(fl_net_server_t *srv) {
     memset(srv, 0, sizeof(*srv));
     srv->listen_handle = FL_NET_SOCK_INVALID;
     srv->next_member_id = FL_NET_SERVER_MEMBER_ID_HOST;
-    /* Clear any partial-frame state from a prior session so a fresh server
-     * never sees stale half-headers from a previous peer. */
     for (size_t i = 0; i < FL_NET_SERVER_MAX_MEMBERS; i++)
         member_rx_reset_slot(i);
     return fl_net_sock_init();
@@ -959,9 +922,6 @@ fl_result_t fl_net_server_accept_pending(fl_net_server_t *srv,
         fl_net_sock_close(client_h);
         return FL_RESULT_NOMEM;
     }
-    /* Reset the partial-frame parser for this slot before the new peer
-     * starts streaming into it (Codex P1: TCP segmentation must not be
-     * mistaken for protocol corruption across reuses of a slot). */
     member_rx_reset_slot((size_t)(m - srv->members));
     memset(m, 0, sizeof(*m));
     m->in_use = 1u;
@@ -1032,8 +992,6 @@ static void drop_member(fl_net_server_t *srv, fl_net_server_member_t *m) {
         fl_net_sock_close(m->peer_handle);
         m->peer_handle = FL_NET_SOCK_INVALID;
     }
-    /* Discard any half-frame this peer left behind so the slot is clean
-     * when the next accept reuses it. */
     member_rx_reset_slot((size_t)(m - srv->members));
     m->in_use = 0u;
     m->member_id = FL_NET_SERVER_MEMBER_ID_NONE;
@@ -1052,10 +1010,7 @@ static int dispatch_member_frame(fl_net_server_t *srv, fl_net_server_member_t *m
 
     switch (opcode) {
     case FL_NET_SESSION_OP_MSG: {
-        /* Build "Sender: text" and broadcast as MSG_BROADCAST to every
-         * peer EXCEPT the sender — the sender already knows what they
-         * typed (see issue feedback: "the server does not need to send
-         * data back to clients what they give to the server for others"). */
+        /* "Sender: text" relayed to everyone except the sender. */
         char line[FL_NET_SESSION_MAX_MSG];
         int n;
         render_member_display(m, disp, sizeof(disp));
@@ -1159,12 +1114,8 @@ fl_result_t fl_net_server_poll_members(fl_net_server_t *srv) {
         if (m->peer_handle == FL_NET_SOCK_INVALID)
             continue; /* host self-member */
 
-        /* Non-blocking peek for inbound frames. Drain up to a small batch
-         * per poll so a chatty peer cannot starve the others, but always
-         * yield on FL_RESULT_TIMEDOUT so the foreground stays responsive.
-         * The per-slot fl_net_session_rx_t in s_member_rx[i] preserves any
-         * partial frame across calls — TCP segmentation that lands the
-         * 6-byte header (or a long payload) in two segments no longer
+        /* Drain up to a small batch per poll; per-slot s_member_rx[i]
+         * preserves partial frames across calls so TCP segmentation never
          * looks like a magic-byte mismatch. */
         (void)fl_net_sock_set_nonblock(m->peer_handle, 1);
         for (unsigned drained = 0; drained < 8u; drained++) {

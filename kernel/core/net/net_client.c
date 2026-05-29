@@ -90,12 +90,8 @@ static fl_result_t client_connect_impl(fl_net_client_t *client,
         memcpy(client->display_name, payload + 2, name_len);
         client->display_name[name_len] = '\0';
     }
-    /* Save the connected local IP for the host-transfer path. */
+    /* Save local IP for host-transfer; non-blocking + clean parser. */
     (void)fl_net_sock_local_ipv4(h, &client->local_ip_be);
-    /* Switch to non-blocking so the foreground shell stays responsive,
-     * and reset the partial-frame parser so the brand-new socket starts
-     * from a clean slate (any state left from a prior aborted connect
-     * attempt on the same client struct would be stale). */
     (void)fl_net_sock_set_nonblock(h, 1);
     fl_net_session_rx_reset(&client->rx_state);
     client->state = FL_NET_CLIENT_STATE_CONNECTED;
@@ -141,11 +137,7 @@ fl_result_t fl_net_client_send_msg(fl_net_client_t *client, const char *text) {
     if (client->state != FL_NET_CLIENT_STATE_CONNECTED ||
         client->peer_handle == FL_NET_SOCK_INVALID)
         return FL_RESULT_INVAL;
-    /* CodeRabbit item 4: the wire codec accepts payload_len up to and
-     * including FL_NET_SESSION_MAX_MSG (see fl_net_session_encode_frame's
-     * `> MAX_MSG` check). Scan one past the limit so a `MAX_MSG`-byte text
-     * is accepted (previously rejected by the conservative `n >= MAX_MSG`),
-     * and anything strictly longer than `MAX_MSG` is still refused. */
+    /* Peek one past MAX_MSG so an exactly-fit text is accepted. */
     n = strnlen(text, (size_t)FL_NET_SESSION_MAX_MSG + 1u);
     if (n == 0u || n > (size_t)FL_NET_SESSION_MAX_MSG)
         return FL_RESULT_INVAL;
@@ -161,12 +153,8 @@ fl_result_t fl_net_client_set_nick(fl_net_client_t *client, const char *nick) {
     if (client->state != FL_NET_CLIENT_STATE_CONNECTED ||
         client->peer_handle == FL_NET_SOCK_INVALID)
         return FL_RESULT_INVAL;
-    /* Nick must fit inside FL_NET_SERVER_NICK_MAX *with* a NUL byte once
-     * the host stores it in fl_net_server_member_t.nick (a char[NICK_MAX]
-     * array), so the strict upper bound stays `>= NICK_MAX` (NICK_MAX-1
-     * characters of actual nick). This differs from MSG payloads (item 4)
-     * because the storage on the receiving side is C-string, not a raw
-     * length-prefixed buffer. */
+    /* Host-side storage is char[NICK_MAX] (C string) so the upper bound
+     * stays `>= NICK_MAX` to leave room for the NUL. */
     n = strnlen(nick, (size_t)FL_NET_SERVER_NICK_MAX);
     if (n == 0u || n >= (size_t)FL_NET_SERVER_NICK_MAX)
         return FL_RESULT_INVAL;
@@ -389,9 +377,7 @@ fl_result_t fl_net_client_send_private(fl_net_client_t *client,
     if (client->state != FL_NET_CLIENT_STATE_CONNECTED ||
         client->peer_handle == FL_NET_SOCK_INVALID)
         return FL_RESULT_INVAL;
-    /* Private deliver carries a 4-byte [sender_id][reserved] prefix in
-     * front of the text, so the effective text limit is MAX_MSG - 4. Peek
-     * one past so an exactly-fit text is allowed (per item 4). */
+    /* 4-byte [sender_id][reserved] prefix sits in front of the text. */
     tlen = strnlen(text, (size_t)FL_NET_SESSION_MAX_MSG - 4u + 1u);
     if (tlen == 0u || tlen > (size_t)FL_NET_SESSION_MAX_MSG - 4u)
         return FL_RESULT_INVAL;
@@ -422,9 +408,8 @@ fl_net_client_dispatch_frame(fl_net_client_t *client, uint8_t opcode,
     if (kind == FL_NET_SERVER_EVENT_NONE)
         return FL_NET_SERVER_EVENT_NONE;
 
-    /* MEMBER_LIST_SNAPSHOT: refresh cache before firing the event so a
-     * subsequent `server connected` from the same shell reflects the
-     * up-to-date roster. */
+    /* Refresh the cached roster before firing so a subsequent
+     * `server connected` from the same shell sees the new state. */
     if (opcode == (uint8_t)FL_NET_SESSION_OP_MEMBER_LIST_SNAPSHOT) {
         client_decode_member_list(client, payload, plen);
         if (cb)
@@ -433,7 +418,8 @@ fl_net_client_dispatch_frame(fl_net_client_t *client, uint8_t opcode,
         return FL_NET_SERVER_EVENT_MEMBER_LIST;
     }
 
-    /* Opcodes with a structured payload prefix. */
+    /* Structured prefixes. HOST_PROMOTE leaves full payload for the
+     * shell to parse the trailing [ip_be][port] tuple. */
     if (opcode == (uint8_t)FL_NET_SESSION_OP_HELLO_ACK && plen >= 2u) {
         mid = (fl_net_server_member_id_t)
             (((uint16_t)payload[0] << 8) | payload[1]);
@@ -447,8 +433,6 @@ fl_net_client_dispatch_frame(fl_net_client_t *client, uint8_t opcode,
     if (opcode == (uint8_t)FL_NET_SESSION_OP_CTRL_HOST_PROMOTE && plen >= 8u) {
         mid = (fl_net_server_member_id_t)
             (((uint16_t)payload[0] << 8) | payload[1]);
-        /* Leave full payload bytes intact for cmd_server.c to parse the
-         * trailing [ip_be][port] tuple. */
         text_off = 0u;
     }
 
@@ -482,9 +466,8 @@ int fl_net_client_poll(fl_net_client_t *client, fl_net_client_event_cb cb,
         fl_net_server_event_kind_t kind;
         fl_result_t rc;
 
-        /* Use the partial-frame-preserving non-blocking recv so a TCP
-         * segment boundary that splits the 6-byte header or a long body
-         * is not mistaken for a magic-byte mismatch (Codex P1 follow-up). */
+        /* Partial-frame-preserving recv: a TCP boundary that splits the
+         * 6-byte header or a long body never looks like magic mismatch. */
         rc = fl_net_session_recv_frame_nb(client->peer_handle,
                                           &client->rx_state,
                                           &opcode, payload, sizeof(payload),

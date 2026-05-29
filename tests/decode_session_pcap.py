@@ -91,17 +91,8 @@ def main(argv):
         return 0
 
     pkts = rdpcap(pcap_path)
-    # CodeRabbit item 9: reassemble per-stream payloads in TCP sequence
-    # order, not pcap arrival order. The previous version concatenated
-    # `bytes(p[Raw].load)` in capture order, which silently produces a
-    # garbled byte stream whenever the pcap contains a retransmit or an
-    # out-of-order segment (common when capturing on `-i any` because the
-    # router reports each forwarded packet twice). Per-key we now collect
-    # (seq, data) tuples, sort by seq, drop exact duplicates from the
-    # double In/Out reporting, and merge overlapping retransmits.
-    #
-    # Schema: streams[key] = list of (seq, bytes) (seq is the TCP seq of
-    # the FIRST byte of `data` in this segment).
+    # Per-stream payload reassembled by TCP seq, not pcap arrival order, so
+    # `-i any` In/Out duplicates and retransmits collapse to one byte stream.
     streams = {}
     for p in pkts:
         if TCP not in p or Raw not in p:
@@ -112,35 +103,23 @@ def main(argv):
         streams[key].append((int(p[TCP].seq), bytes(p[Raw].load)))
 
     def reassemble(segments):
-        """Sort by seq, drop exact duplicates and overlap with what we've
-        already emitted. Returns one bytes object per stream. Handles the
-        normal `-i any` double-report (same seq + same data) AND a true
-        retransmit (same seq, possibly same data) without doubling output.
-        """
+        """Sort by seq, drop overlap with already-emitted bytes, fill capture
+        gaps with 0xFF so the frame walker resyncs at the next magic byte."""
         if not segments:
             return b""
         segments = sorted(segments, key=lambda t: t[0])
         out = bytearray()
-        # next_seq is the seq number we expect for the next byte after
-        # what we have already appended (relative to the first segment).
-        base = segments[0][0]
-        next_seq = base
+        next_seq = segments[0][0]
         for seq, data in segments:
             if not data:
                 continue
             if seq < next_seq:
-                # Segment starts before our current cursor — skip the
-                # already-covered prefix (retransmit / pure duplicate).
                 skip = next_seq - seq
                 if skip >= len(data):
                     continue
                 data = data[skip:]
                 seq = next_seq
             if seq > next_seq:
-                # Gap (segment lost from the capture itself). Emit a
-                # marker so the per-frame walker downstream knows to
-                # resync at the next magic byte rather than silently
-                # treating the post-gap bytes as a continuation.
                 out.extend(b"\xff" * (seq - next_seq))
                 next_seq = seq
             out.extend(data)

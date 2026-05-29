@@ -53,29 +53,22 @@ struct fl_net_client_s {
     fl_net_client_state_t state;
     char principal[FL_NET_SERVER_PRINCIPAL_MAX];
     char display_name[FL_NET_SERVER_DISPLAY_NAME_MAX];
-    /* Own TCP source address (network byte order) recorded via
-     * getsockname() on connect. Used by the host-transfer path to bind the
-     * new listener on the same IP this client used to reach the old host. */
+    /* Own TCP source (network byte order) from getsockname() on connect;
+     * the host-transfer path binds the new listener on this IP. */
     uint32_t local_ip_be;
-    /* Cache of the most recent OP_MEMBER_LIST_SNAPSHOT (sender-display
-     * resolution for private messages + `server connected` listing). */
+    /* Cached OP_MEMBER_LIST_SNAPSHOT for sender resolution + connected. */
     fl_net_client_member_t members[FL_NET_SERVER_MAX_MEMBERS];
     size_t member_count;
-    /* Partial-frame parser state for the non-blocking poll path. Reset by
-     * fl_net_client_init and on every successful (re)connect so the new
-     * stream never sees stale half-headers from a previous session. */
+    /* Non-blocking poll parser state; reset on init + every (re)connect. */
     fl_net_session_rx_t rx_state;
 };
 
 /**
- * Dispatch a single already-received session frame to the client. Updates
- * cached state (the OP_MEMBER_LIST_SNAPSHOT cache, the assigned member id
- * on HELLO_ACK) and invokes `cb` with the mapped event kind. Used by the
- * `server join` synchronous nick-prompt drain so the host's initial
- * MEMBER_LIST_SNAPSHOT / JOIN_ANNOUNCE / SERVER_ANNOUNCE frames that
- * arrive in the same window as a potential NICK_PROMPT are not discarded
- * (Codex P2 follow-up). Returns the event kind that was fired, or
- * FL_NET_SERVER_EVENT_NONE for opcodes the client does not surface.
+ * Dispatch one already-received session frame: updates the cached roster
+ * on OP_MEMBER_LIST_SNAPSHOT, parses the HELLO_ACK / MSG_DIRECT_DELIVER /
+ * HOST_PROMOTE structured prefixes, then fires `cb`. Used by the `server
+ * join` sync drain so non-NICK_PROMPT frames are preserved instead of
+ * dropped. Returns the event kind, or NONE for opcodes the client ignores.
  */
 fl_net_server_event_kind_t
 fl_net_client_dispatch_frame(fl_net_client_t *client, uint8_t opcode,
