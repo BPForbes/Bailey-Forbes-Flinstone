@@ -103,31 +103,42 @@ _Static_assert(FL_NET_SERVER_ANNOUNCEMENT_MAX <= FL_NET_SESSION_MAX_MSG,
 /* ------------------------------------------------------------------------- */
 
 /**
- * Host → all members. Payload is one UTF-8 line: the **display name** of the
- * newly joined member, including the `{N}` disambiguator when applicable.
- * Examples: `"Flinstone"`, `"JohnDoe {2}"`.
+ * Host → all members. Payload is the **full UTF-8 announcement line**
+ * (already composed by the host so every receiver renders identical
+ * text). Today's host emits:
+ *     `"<display> has joined."`
+ * where `<display>` follows the display-name rule (`P`, `P {N}`, or
+ * `Nick`). The peer's renderer prefixes `"[Server Announcement]: "` and
+ * applies KBLU; it does NOT re-format the payload.
  */
 #define FL_NET_SESSION_OP_JOIN_ANNOUNCE 0x05u
 
 /**
- * Host → all members. Payload is one UTF-8 line: the **display name** the
- * leaving member had at the moment of departure (post-nick if set).
+ * Host → all members. Payload is the **full UTF-8 announcement line**
+ * carrying the leaving member's post-nick display at the moment of
+ * departure:
+ *     `"<display> has left."`
+ * (See JOIN_ANNOUNCE above for renderer behaviour.)
  */
 #define FL_NET_SESSION_OP_LEAVE_ANNOUNCE 0x06u
 
 /**
- * Host → all members. Emitted whenever a host-global nick is set or changed
- * via **OP_HOST_NICK_SET** (host-driven) or accepted from **OP_NICK_PROMPT**.
- * Payload (UTF-8, single line):
- *     `User <old_display>. Their nickname is "<new_nick>".`
- * where `<old_display>` is the renderer output **before** the nick was applied.
+ * Host → all members. Emitted whenever a host-global nick is set or
+ * changed via **OP_HOST_NICK_SET** (host-driven) or accepted from
+ * **OP_NICK_PROMPT**. Payload is one UTF-8 line composed by the host:
+ *     `User <old_display> has been nicked by host. Their nickname is "<new_nick>".`
+ * where `<old_display>` is the renderer output **before** the nick was
+ * applied (peer prefixes `"[Server Announcement]: "` + KBLU).
  */
 #define FL_NET_SESSION_OP_NICK_SET_ANNOUNCE 0x07u
 
 /**
- * Host → all members. Free-form `server announce <message>` from the host.
+ * Host → all members. Free-form `server announce <message>` from the host
+ * — or, when used by `fl_net_server_transfer_and_stop()`, the host-
+ * transfer line:
+ *     `"<new_host_display> is now the host"`
  * Payload is one UTF-8 line up to `FL_NET_SERVER_ANNOUNCEMENT_MAX` bytes.
- * Rendered as `[Server Announcement] <payload>` in **BLU**.
+ * Rendered as `[Server Announcement]: <payload>` in KBLU.
  */
 #define FL_NET_SESSION_OP_SERVER_ANNOUNCE 0x08u
 
@@ -165,7 +176,7 @@ _Static_assert(FL_NET_SERVER_ANNOUNCEMENT_MAX <= FL_NET_SESSION_MAX_MSG,
 
 /**
  * Host → all members at the moment the host is about to leave or transfer.
- * Payload (foundations encoding):
+ * Payload (foundations encoding, IPv4 only):
  *   `[u16_be new_host_member_id][u32_be new_host_ip_be][u16_be new_host_port_host_BE]`
  * The recipient whose own `assigned_member_id == new_host_member_id` shall
  * locally tear down its client and call `fl_net_server_host_start` on its
@@ -173,9 +184,29 @@ _Static_assert(FL_NET_SERVER_ANNOUNCEMENT_MAX <= FL_NET_SESSION_MAX_MSG,
  * `new_host_ip:new_host_port`. When `new_host_member_id == 0` (zero) the
  * host could not pick a successor and recipients should simply leave.
  *
- * (Wire opcode 0x22 was already reserved by contract_p3_session_wire.h as
- * `OP_CTRL_HOST_PROMOTE`; this shard extends its payload encoding for the
- * foundations build — the older opcode constant is reused unchanged.)
+ * **CodeRabbit item 11 — IPv6 forward-compat plan (#280 follow-up).**
+ * The current fixed-width `u32_be` IP field is IPv4-only. When #280
+ * promotes the dual-stack work, this opcode is expected to gain an
+ * address-family discriminator. Two encodings are on the table:
+ *   1. **Sibling opcode `OP_CTRL_HOST_PROMOTE6` (0x24)** that carries
+ *      `[u16 new_id][16 bytes ipv6_be][u16 port]` (16 + 2 + 2 = 20 bytes).
+ *      Pros: cleanest forward compat; old code that only knows 0x22
+ *      sees a v4 promote and old hosts cannot accidentally emit a v6
+ *      payload that a v4-only client mis-parses. Cons: doubles the
+ *      opcode usage for the same event.
+ *   2. **Family-tagged payload** under the existing 0x22:
+ *      `[u16 new_id][u8 addr_family (4|6)][u32 or [16] ip][u16 port]`
+ *      Pros: one opcode. Cons: shorter v4 payloads (9 bytes) become
+ *      ambiguous with the current 8-byte v4 layout unless we add a
+ *      version byte, which is itself a wire break.
+ * Pending the #280 design call, this contract documents option (1) as
+ * the recommended path so the v4 payload encoding can stay byte-for-
+ * byte stable through the dual-stack switchover.
+ *
+ * (Wire opcode 0x22 was already reserved by contract_p3_session_wire.h
+ * as `OP_CTRL_HOST_PROMOTE`; this shard extends its payload encoding
+ * for the foundations build — the older opcode constant is reused
+ * unchanged.)
  */
 
 /* ------------------------------------------------------------------------- */

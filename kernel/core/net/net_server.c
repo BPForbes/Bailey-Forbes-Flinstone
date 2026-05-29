@@ -99,6 +99,21 @@ fl_result_t fl_net_session_recv_frame(fl_net_sock_handle_t handle, uint8_t *opco
 
     if (hdr[0] != (uint8_t)FL_NET_SESSION_MAGIC || hdr[1] != (uint8_t)FL_NET_SESSION_VERSION)
         return FL_RESULT_INVAL;
+    /*
+     * CodeRabbit item 10 — flags byte (hdr[3]) policy.
+     * The session header reserves one byte at offset 3 for future flags
+     * (see contract_p3_session_wire.h `FL_NET_SESSION_HDR_LEN`). We
+     * deliberately accept ANY value here for forward compatibility
+     * (Postel's law: be liberal in what you accept). `fl_net_session_
+     * encode_frame` always emits 0, so a non-zero byte today indicates
+     * either a malformed peer or a future protocol revision the current
+     * code is not aware of. When a flag is formally allocated (e.g. a
+     * future P3-13 compression bit), validation should land here as
+     *     if ((hdr[3] & ~FL_NET_SESSION_KNOWN_FLAGS_MASK) != 0)
+     *         return FL_RESULT_INVAL;
+     * with `FL_NET_SESSION_KNOWN_FLAGS_MASK` exported alongside the new
+     * flag macros in `contract_p3_session_wire.h`.
+     */
     *opcode_out = hdr[2];
     plen = (uint16_t)((uint16_t)hdr[4] << 8) | (uint16_t)hdr[5];
     if (plen > FL_NET_SESSION_MAX_MSG)
@@ -172,7 +187,10 @@ fl_result_t fl_net_session_recv_frame_nb(fl_net_sock_handle_t handle,
         st->hdr_filled = (uint16_t)(st->hdr_filled + got);
     }
 
-    /* Parse + validate the freshly-completed header exactly once. */
+    /* Parse + validate the freshly-completed header exactly once.
+     * CodeRabbit item 10: the reserved flags byte (st->hdr[3]) is not
+     * checked here either; see the comment in fl_net_session_recv_frame
+     * for the forward-compat policy. */
     if (st->body_filled == 0u && st->expected_plen == 0u) {
         if (st->hdr[0] != (uint8_t)FL_NET_SESSION_MAGIC ||
             st->hdr[1] != (uint8_t)FL_NET_SESSION_VERSION) {
@@ -517,8 +535,10 @@ fl_result_t fl_net_server_send_public(fl_net_server_t *srv, const char *text) {
 
     if (!srv || !srv->running || !text)
         return FL_RESULT_INVAL;
-    tlen = strnlen(text, FL_NET_SESSION_MAX_MSG);
-    if (tlen == 0u)
+    /* Item 4: peek one past MAX_MSG so an exactly-fit text is allowed
+     * (the wire codec accepts payload_len up to and including MAX_MSG). */
+    tlen = strnlen(text, (size_t)FL_NET_SESSION_MAX_MSG + 1u);
+    if (tlen == 0u || tlen > (size_t)FL_NET_SESSION_MAX_MSG)
         return FL_RESULT_INVAL;
     render_member_display(member_by_id(srv, FL_NET_SERVER_MEMBER_ID_HOST),
                           host_disp, sizeof(host_disp));
@@ -549,8 +569,9 @@ fl_result_t fl_net_server_send_private(fl_net_server_t *srv,
     m = member_by_id(srv, recipient_id);
     if (!m || m->peer_handle == FL_NET_SOCK_INVALID)
         return FL_RESULT_NOENT;
-    tlen = strnlen(text, FL_NET_SESSION_MAX_MSG - 4u);
-    if (tlen == 0u)
+    /* Item 4: 4-byte [sender_id][reserved] prefix in front of the text. */
+    tlen = strnlen(text, (size_t)FL_NET_SESSION_MAX_MSG - 4u + 1u);
+    if (tlen == 0u || tlen > (size_t)FL_NET_SESSION_MAX_MSG - 4u)
         return FL_RESULT_INVAL;
     /* Payload: [sender_member_id_be16][reserved_be16=0][text...] */
     payload[0] = 0u; /* host id 1: high byte */

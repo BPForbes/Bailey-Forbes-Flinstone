@@ -95,9 +95,24 @@ fl_result_t fl_net_server_announce(fl_net_server_t *srv, const char *fmt, ...);
  * does not collide with another member's principal or another member's
  * current nick, then broadcasts OP_NICK_SET_ANNOUNCE.
  *
- * Returns `FL_RESULT_OK` on success or `FL_RESULT_INVAL` on collision /
- * unknown id / empty nick. The caller (the shell command) is responsible
- * for reporting the failure to the user via the colour helper.
+ * Return codes (CodeRabbit item 12 — doc fix; previous version
+ * inaccurately collapsed all failures into `FL_RESULT_INVAL`):
+ *   - `FL_RESULT_OK`     — nick applied, announcement broadcast, roster
+ *                          snapshot refreshed.
+ *   - `FL_RESULT_INVAL`  — `srv` NULL, server not running, or nick fails
+ *                          the syntactic check in `nick_is_valid`
+ *                          (empty, oversize, or contains control bytes).
+ *   - `FL_RESULT_NOENT`  — no member has that `member_id`.
+ *   - `FL_RESULT_BUSY`   — nick collides with another connected
+ *                          member's principal or another member's
+ *                          current nick (member may rename to its own
+ *                          principal — that's a no-op rename, not a
+ *                          collision). The caller (the shell command)
+ *                          maps this onto a red `[ERROR]` line and the
+ *                          host-driven path additionally emits an
+ *                          `OP_ERR` wire frame to the requester when the
+ *                          collision came from `OP_HOST_NICK_SET` on a
+ *                          client socket.
  */
 fl_result_t fl_net_server_set_host_nick(fl_net_server_t *srv,
                                         fl_net_server_member_id_t member_id,

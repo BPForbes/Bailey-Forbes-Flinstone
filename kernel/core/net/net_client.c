@@ -141,8 +141,13 @@ fl_result_t fl_net_client_send_msg(fl_net_client_t *client, const char *text) {
     if (client->state != FL_NET_CLIENT_STATE_CONNECTED ||
         client->peer_handle == FL_NET_SOCK_INVALID)
         return FL_RESULT_INVAL;
-    n = strnlen(text, FL_NET_SESSION_MAX_MSG);
-    if (n == 0u || n >= FL_NET_SESSION_MAX_MSG)
+    /* CodeRabbit item 4: the wire codec accepts payload_len up to and
+     * including FL_NET_SESSION_MAX_MSG (see fl_net_session_encode_frame's
+     * `> MAX_MSG` check). Scan one past the limit so a `MAX_MSG`-byte text
+     * is accepted (previously rejected by the conservative `n >= MAX_MSG`),
+     * and anything strictly longer than `MAX_MSG` is still refused. */
+    n = strnlen(text, (size_t)FL_NET_SESSION_MAX_MSG + 1u);
+    if (n == 0u || n > (size_t)FL_NET_SESSION_MAX_MSG)
         return FL_RESULT_INVAL;
     return fl_net_session_send_frame(client->peer_handle,
                                      (uint8_t)FL_NET_SESSION_OP_MSG,
@@ -156,8 +161,14 @@ fl_result_t fl_net_client_set_nick(fl_net_client_t *client, const char *nick) {
     if (client->state != FL_NET_CLIENT_STATE_CONNECTED ||
         client->peer_handle == FL_NET_SOCK_INVALID)
         return FL_RESULT_INVAL;
-    n = strnlen(nick, FL_NET_SERVER_NICK_MAX);
-    if (n == 0u || n >= FL_NET_SERVER_NICK_MAX)
+    /* Nick must fit inside FL_NET_SERVER_NICK_MAX *with* a NUL byte once
+     * the host stores it in fl_net_server_member_t.nick (a char[NICK_MAX]
+     * array), so the strict upper bound stays `>= NICK_MAX` (NICK_MAX-1
+     * characters of actual nick). This differs from MSG payloads (item 4)
+     * because the storage on the receiving side is C-string, not a raw
+     * length-prefixed buffer. */
+    n = strnlen(nick, (size_t)FL_NET_SERVER_NICK_MAX);
+    if (n == 0u || n >= (size_t)FL_NET_SERVER_NICK_MAX)
         return FL_RESULT_INVAL;
     return fl_net_session_send_frame(client->peer_handle,
                                      (uint8_t)FL_NET_SESSION_OP_HOST_NICK_SET,
@@ -378,8 +389,11 @@ fl_result_t fl_net_client_send_private(fl_net_client_t *client,
     if (client->state != FL_NET_CLIENT_STATE_CONNECTED ||
         client->peer_handle == FL_NET_SOCK_INVALID)
         return FL_RESULT_INVAL;
-    tlen = strnlen(text, FL_NET_SESSION_MAX_MSG - 4u);
-    if (tlen == 0u)
+    /* Private deliver carries a 4-byte [sender_id][reserved] prefix in
+     * front of the text, so the effective text limit is MAX_MSG - 4. Peek
+     * one past so an exactly-fit text is allowed (per item 4). */
+    tlen = strnlen(text, (size_t)FL_NET_SESSION_MAX_MSG - 4u + 1u);
+    if (tlen == 0u || tlen > (size_t)FL_NET_SESSION_MAX_MSG - 4u)
         return FL_RESULT_INVAL;
     payload[0] = (uint8_t)((recipient_id >> 8) & 0xFFu);
     payload[1] = (uint8_t)(recipient_id & 0xFFu);

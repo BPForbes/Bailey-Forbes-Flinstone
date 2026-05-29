@@ -84,6 +84,20 @@ static int parse_endpoint(const char *s, uint32_t *addr_be_out, uint16_t *port_o
         return -1;
     memcpy(buf, s, n);
     buf[n] = '\0';
+    /*
+     * TODO(#280): IPv6 dual-stack will need bracketed-endpoint parsing
+     *   `[2001:db8::1]:49913`
+     * because an IPv6 literal contains colons that would otherwise
+     * confuse the `strrchr(buf, ':')` port split below. The right shape
+     * once the v6 stack lands:
+     *   - if buf[0] == '['  -> find matching ']' then expect ":port"
+     *     after it, parse the bracketed portion with `inet_pton(AF_INET6,
+     *     ...)` into a `struct in6_addr`, and extend `*addr_be_out` to a
+     *     family-tagged variant (see also OP_CTRL_HOST_PROMOTE item 11).
+     *   - otherwise fall through to the current IPv4 path (this function).
+     * Until #280 promotes from [DEFERRED], this stays v4-only and any v6
+     * literal is rejected here by `fl_net_ipv4_parse_literal`.
+     */
     colon = strrchr(buf, ':');
     if (!colon || colon == buf)
         return -1;
