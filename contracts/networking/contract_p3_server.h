@@ -163,10 +163,14 @@ _Static_assert(FL_NET_SERVER_ANNOUNCEMENT_MAX <= FL_NET_SESSION_MAX_MSG,
  * other recipients reconnect to `new_host_ip:new_host_port`. When
  * `new_host_member_id == 0` there is no successor and recipients leave.
  *
- * IPv6 (#280): a sibling OP_CTRL_HOST_PROMOTE6 (0x24) carrying
+ * IPv6 forward path (tracked in #283; depends on dual-stack #280):
+ * a sibling OP_CTRL_HOST_PROMOTE6 (0x24) carrying
  *   [u16 new_id][16 bytes ipv6_be][u16 port]
- * is the recommended forward shape so the v4 payload above stays byte-
- * stable across the dual-stack switchover.
+ * keeps the v4 payload above byte-stable across the switchover.
+ *
+ * Endianness: the IPv4 field is now serialized via fl_net_put_u32_nbo
+ * / fl_net_get_u32_nbo in net_endian.h. Earlier bit-shift versions were
+ * LE-only and decoded to the wrong octet order on BE hosts (#284).
  *
  * (0x22 was reserved by contract_p3_session_wire.h as
  * OP_CTRL_HOST_PROMOTE; this shard extends the payload encoding.)

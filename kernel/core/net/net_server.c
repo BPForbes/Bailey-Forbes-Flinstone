@@ -17,6 +17,7 @@
 #include "net_server.h"
 
 #include "fl_colors.h"
+#include "net_endian.h"
 #include "net_socket.h"
 
 #include <stdarg.h>
@@ -681,15 +682,15 @@ fl_result_t fl_net_server_transfer_and_stop(fl_net_server_t *srv,
             emit_local_announce(line);
         }
 
-        payload[0] = (uint8_t)((succ->member_id >> 8) & 0xFFu);
-        payload[1] = (uint8_t)(succ->member_id & 0xFFu);
-        /* peer_ip_be is network byte order; serialise raw bytes. */
-        payload[2] = (uint8_t)((succ->peer_ip_be) & 0xFFu);
-        payload[3] = (uint8_t)((succ->peer_ip_be >> 8) & 0xFFu);
-        payload[4] = (uint8_t)((succ->peer_ip_be >> 16) & 0xFFu);
-        payload[5] = (uint8_t)((succ->peer_ip_be >> 24) & 0xFFu);
-        payload[6] = (uint8_t)((srv->bind_port_host >> 8) & 0xFFu);
-        payload[7] = (uint8_t)(srv->bind_port_host & 0xFFu);
+        /* OP_CTRL_HOST_PROMOTE wire layout (8 bytes):
+         *   [0..1] new_id      uint16 BE
+         *   [2..5] new_ip_be   raw 4 bytes of network-order IPv4 (memcpy)
+         *   [6..7] new_port    uint16 BE
+         * memcpy of peer_ip_be is host-endian-independent; shifting was
+         * LE-only and decoded to the wrong octet order on BE hosts (#284). */
+        fl_net_put_u16_be(&payload[0], succ->member_id);
+        fl_net_put_u32_nbo(&payload[2], succ->peer_ip_be);
+        fl_net_put_u16_be(&payload[6], srv->bind_port_host);
         broadcast_to_peers(srv, (uint8_t)FL_NET_SESSION_OP_CTRL_HOST_PROMOTE,
                            payload, (uint16_t)sizeof(payload));
         if (new_host_out)

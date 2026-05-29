@@ -8,6 +8,7 @@
 #include "cmd_batch.h"
 #include "fl_colors.h"
 #include "net_client.h"
+#include "net_endian.h"
 #include "net_server.h"
 #include "net_ipv4.h"
 #include "server_bg.h"
@@ -188,9 +189,10 @@ static void client_event_print(fl_net_server_event_kind_t kind, const char *text
             fl_color_warn("host promote received with no payload; leaving");
             return;
         }
-        new_ip_be = (uint32_t)p[2] | ((uint32_t)p[3] << 8) |
-                    ((uint32_t)p[4] << 16) | ((uint32_t)p[5] << 24);
-        new_port = (uint16_t)(((uint16_t)p[6] << 8) | p[7]);
+        /* Wire layout matches fl_net_server_transfer_and_stop (#284):
+         * [2..5] new_ip_be (raw NBO bytes), [6..7] new_port (uint16 BE). */
+        new_ip_be = fl_net_get_u32_nbo(&p[2]);
+        new_port = fl_net_get_u16_be(&p[6]);
         spawn_promote_thread(new_id_be == g_client.assigned_member_id ? 1 : 0,
                              new_ip_be, new_port);
         break;

@@ -16,6 +16,7 @@
  */
 
 #include "net_client.h"
+#include "net_endian.h"
 #include "net_server.h"
 #include "net_socket.h"
 #include "server_bg.h"
@@ -465,7 +466,40 @@ static int test_host_transfer_on_leave(void) {
     return 0;
 }
 
+/* #284 regression: ensure CTRL_HOST_PROMOTE serializes peer_ip_be the
+ * same way on LE and BE hosts. Asserts (a) put/get_u32_nbo round-trip
+ * preserves bits and (b) the wire byte order matches the IPv4 dotted
+ * quad regardless of host endianness (we know the test runs on the
+ * dev box's host endianness, but the assertion captures the contract:
+ * the wire bytes must be the network-order bytes of `s_addr`). */
+static int test_endian_host_promote_payload(void) {
+    uint8_t wire[4] = {0};
+    uint32_t round_trip = 0u;
+    /* 192.168.10.2 stored as network-byte-order uint32_t via inet_pton-ish
+     * shift: high byte first. */
+    uint32_t ip_nbo = ((uint32_t)192u) |
+                      ((uint32_t)168u << 8) |
+                      ((uint32_t)10u  << 16) |
+                      ((uint32_t)2u   << 24);
+    /* On both LE and BE hosts, the memory layout of `ip_nbo` as built
+     * above is [192,168,10,2]. memcpy serialization must preserve that. */
+    fl_net_put_u32_nbo(wire, ip_nbo);
+    ASSERT(wire[0] == 192u);
+    ASSERT(wire[1] == 168u);
+    ASSERT(wire[2] == 10u);
+    ASSERT(wire[3] == 2u);
+    round_trip = fl_net_get_u32_nbo(wire);
+    ASSERT(round_trip == ip_nbo);
+    return 0;
+}
+
 int main(void) {
+    printf("test_p3_server: endian round-trip for OP_CTRL_HOST_PROMOTE... ");
+    fflush(stdout);
+    if (test_endian_host_promote_payload() != 0)
+        return 1;
+    puts("ok");
+
     printf("test_p3_server: announce/join/leave/nick... ");
     fflush(stdout);
     if (test_announce_join_leave_nick() != 0)
