@@ -5,7 +5,7 @@
 Assume a fresh Linux image may have no build libraries installed. Before building
 or testing, install the project toolchain and optional VM/test dependencies:
 
-`sudo apt-get update && sudo apt-get install -y build-essential gcc g++ make binutils nasm gcc-aarch64-linux-gnu g++-aarch64-linux-gnu binutils-aarch64-linux-gnu pkg-config curl ca-certificates cmake autoconf automake libtool bzip2 tar libsdl2-dev libcunit1-dev libsqlite3-dev`
+`sudo apt-get update && sudo apt-get install -y build-essential gcc g++ make binutils nasm gcc-aarch64-linux-gnu g++-aarch64-linux-gnu binutils-aarch64-linux-gnu pkg-config curl ca-certificates cmake autoconf automake libtool bzip2 tar libsdl2-dev libcunit1-dev libsqlite3-dev iproute2 tcpdump tmux`
 
 Notes:
 - `build-essential`, `gcc`, `make`, and `binutils` are required for the default C/GAS build.
@@ -18,6 +18,7 @@ Notes:
 - `libsqlite3-dev` and `g++` are required for SQLite account storage and password hashing (`userland/identity/password_hash.cpp`).
 - `curl`, `cmake`, `autoconf`, `automake`, `libtool`, `bzip2`, and `tar` are required by `make deps`, `make deps-sdl2`, and `make deps-cunit`.
 - Optional (not required to compile or run the shell): `dosfstools` (`dosfsck`, `mkfs.fat`) helps validate FAT32 disk images the project creates; it is not linked into the binary. See `docs/dependencies.md` for a consolidated list of system packages versus `make deps`.
+- `iproute2`, `tcpdump`, and `tmux` are used by **`make test_netns_pcap`** and the `tests/manual_demo_*` server demos (gated by `FL_NETNS_PCAP_OK=1` for the pcap target). The netns script requires passwordless `sudo`, sets `net.bridge.bridge-nf-call-iptables=0` so bridged frames are not silently filtered, and emits a `.pcap`, a `tcpdump -tttt` timeline, and a decoded session-frame view (the per-frame decoder uses `python3 -m pip install scapy` when available; without scapy the pcap is still produced and the decode artifact contains a one-line note). The default `make test_*` sweep does NOT invoke this target; it must be opted in. Mininet itself (`apt-get install -y mininet openvswitch-switch`) is also supported but its default OVS backend requires a loadable `openvswitch` kernel module — unavailable inside containerised CI / Cursor Cloud — so the raw `ip netns` recipe is the portable path.
 
 ## Replit Agent
 

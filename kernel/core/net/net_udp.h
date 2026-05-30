@@ -58,6 +58,12 @@ fl_result_t fl_net_udp_bind_port(uint16_t dport_host);
 fl_result_t fl_net_udp_unbind_port(uint16_t dport_host);
 
 /**
+ * Snapshot bound UDP demux ports (host order) into `out[0..cap-1]`. Returns
+ * count written (<= cap). Used by `netstat` / `netsh netstat`.
+ */
+unsigned fl_net_udp_bound_ports_snapshot(uint16_t *out, unsigned cap);
+
+/**
  * Enqueue **payload** for **dport_host**. Under pressure drops the oldest datagram in
  * that port's queue (**P3-6** drop policy).
  */

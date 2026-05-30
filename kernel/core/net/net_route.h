@@ -58,4 +58,10 @@ fl_result_t fl_net_route_configure_tap(fl_net_driver_t *tap_drv, const uint8_t t
 
 int fl_net_ipv4_prefix_match(uint32_t addr_be, uint32_t net_be, uint8_t prefix_len);
 
+/**
+ * Snapshot the live route table (oldest-first / insertion order). `out` may
+ * be NULL when `cap == 0`. Returns the number of rows copied.
+ */
+unsigned fl_net_route_snapshot(fl_net_route_entry_t *out, unsigned cap);
+
 #endif /* NET_ROUTE_H */

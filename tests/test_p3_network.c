@@ -29,7 +29,8 @@
 #include "contract_p3_tls_hosted.h"
 #include "contract_p3_socket.h"
 
-#include <arpa/inet.h>
+#include "net_endian.h"
+
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -188,17 +189,19 @@ static int test_loopback_arp_exchange(void) {
 }
 
 static int test_loopback_octet(void) {
-    struct in_addr a;
-    ASSERT(inet_pton(AF_INET, "127.0.0.1", &a) == 1);
-    ASSERT(fl_net_ipv4_is_loopback(a.s_addr));
-    ASSERT(inet_pton(AF_INET, "8.8.8.8", &a) == 1);
-    ASSERT(!fl_net_ipv4_is_loopback(a.s_addr));
+    uint32_t a = 0u;
+    ASSERT(fl_net_ipv4_parse_literal("127.0.0.1", &a) != 0);
+    ASSERT(fl_net_ipv4_is_loopback(a));
+    ASSERT(fl_net_ipv4_parse_literal("8.8.8.8", &a) != 0);
+    ASSERT(!fl_net_ipv4_is_loopback(a));
     return 0;
 }
 
 static int test_resolve_localhost(void) {
     uint32_t addr_be = 0;
-    char resolved[INET_ADDRSTRLEN];
+    /* 16 = "255.255.255.255\0" — same width as the libc INET_ADDRSTRLEN
+     * literal we used to depend on, but no header is required. */
+    char resolved[16];
     ASSERT(fl_net_resolve_ipv4("localhost", &addr_be, resolved, sizeof(resolved)) ==
            FL_RESULT_OK);
     ASSERT(fl_net_ipv4_is_loopback(addr_be));
@@ -210,14 +213,12 @@ static int test_icmp_unreachable_no_linux_fallback(void) {
     uint8_t rx[64];
     size_t req_len;
     size_t rx_len = 0;
-    uint32_t dst_be;
-    struct in_addr a;
+    uint32_t dst_be = 0u;
     fl_net_packet_t req_pkt;
     fl_net_packet_t rx_pkt;
     fl_result_t rc;
 
-    ASSERT(inet_aton("203.0.113.99", &a) != 0);
-    dst_be = a.s_addr;
+    ASSERT(fl_net_ipv4_parse_literal("203.0.113.99", &dst_be) != 0);
 
     req_len = fl_net_icmp_echo_request_build(req, sizeof(req), 0xabcdu, 1u, 8u);
     ASSERT(req_len > 0);
@@ -232,14 +233,12 @@ static int test_udp_unreachable_no_linux_fallback(void) {
     uint8_t payload[] = "dns-probe";
     uint8_t rx[64];
     size_t rx_len = 0;
-    uint32_t dst_be;
-    struct in_addr a;
+    uint32_t dst_be = 0u;
     fl_net_packet_t tx_pkt;
     fl_net_packet_t rx_pkt;
     fl_result_t rc;
 
-    ASSERT(inet_aton("203.0.113.99", &a) != 0);
-    dst_be = a.s_addr;
+    ASSERT(fl_net_ipv4_parse_literal("203.0.113.99", &dst_be) != 0);
 
     ASSERT(fl_net_packet_bind_l4(&tx_pkt, payload, sizeof(payload) - 1u, 0u,
                                sizeof(payload) - 1u) == FL_RESULT_OK);
@@ -715,6 +714,52 @@ static int test_net_socket_tcp_loopback(void) {
     return 0;
 }
 
+/* End-to-end BSD shim coverage for fl_socket / fl_bind / fl_send / fl_recv
+ * via FL_NET_SOCK_TYPE_DGRAM — the same surface udpsend/udplisten use. */
+static int test_net_socket_udp_loopback(void) {
+    fl_net_sock_handle_t listen_h = FL_NET_SOCK_INVALID;
+    fl_net_sock_handle_t send_h = FL_NET_SOCK_INVALID;
+    fl_result_t rc;
+    uint32_t loopback = (uint32_t)FL_NET_IPV4_LOOPBACK_FIRST_OCTET | (1u << 24);
+    const char msg[] = "udp-loopback-shim";
+    char rx[64];
+    size_t sent = 0u;
+    size_t got = 0u;
+
+    rc = fl_net_sock_init();
+    ASSERT(rc == FL_RESULT_OK);
+
+    rc = fl_net_sock_open(FL_NET_SOCK_TYPE_DGRAM, &listen_h);
+    if (rc == FL_RESULT_NOSYS) {
+        fprintf(stderr, "skip: hosted sockets unavailable\n");
+        fl_net_sock_shutdown();
+        return 0;
+    }
+    ASSERT(rc == FL_RESULT_OK);
+
+    rc = fl_net_sock_bind(listen_h, loopback, 48923u);
+    ASSERT(rc == FL_RESULT_OK);
+
+    rc = fl_net_sock_open(FL_NET_SOCK_TYPE_DGRAM, &send_h);
+    ASSERT(rc == FL_RESULT_OK);
+    rc = fl_net_sock_connect(send_h, loopback, 48923u);
+    ASSERT(rc == FL_RESULT_OK);
+
+    rc = fl_net_sock_send(send_h, msg, sizeof(msg) - 1u, &sent);
+    ASSERT(rc == FL_RESULT_OK);
+    ASSERT(sent == sizeof(msg) - 1u);
+
+    rc = fl_net_sock_recv(listen_h, rx, sizeof(rx), &got, 2000u);
+    ASSERT(rc == FL_RESULT_OK);
+    ASSERT(got == sizeof(msg) - 1u);
+    ASSERT(memcmp(rx, msg, got) == 0);
+
+    fl_net_sock_close(send_h);
+    fl_net_sock_close(listen_h);
+    fl_net_sock_shutdown();
+    return 0;
+}
+
 static int test_net_udp_build_datagram(void) {
     uint8_t buf[64];
     uint8_t payload_buf[8];
@@ -748,9 +793,9 @@ static int test_net_task_backend_socket_send_smoke(void) {
     const char payload[] = "socket arp blend";
 
     ep.local_ip_be = loopback;
-    ep.local_port_be = htons(48002u);
+    ep.local_port_be = fl_net_htons(48002u);
     ep.peer_ip_be = loopback;
-    ep.peer_port_be = htons((uint16_t)FL_NET_TASK_BACKEND_WIRE_SERVER_PORT);
+    ep.peer_port_be = fl_net_htons((uint16_t)FL_NET_TASK_BACKEND_WIRE_SERVER_PORT);
 
     rc = fl_net_task_backend_socket_send(&ep, (const uint8_t *)payload, sizeof(payload) - 1u);
     if (rc == FL_RESULT_NOSYS) {
@@ -1082,6 +1127,11 @@ int main(void) {
 
     printf("test_net_socket_tcp_loopback... ");
     if (test_net_socket_tcp_loopback() != 0)
+        return 1;
+    puts("ok");
+
+    printf("test_net_socket_udp_loopback... ");
+    if (test_net_socket_udp_loopback() != 0)
         return 1;
     puts("ok");
 

@@ -3,6 +3,11 @@
 .text
 .globl asm_net_checksum16
 .globl asm_net_htons_be16
+.globl asm_net_ntohs_be16
+.globl asm_net_htonl_be32
+.globl asm_net_ntohl_be32
+.globl asm_net_htonll_be64
+.globl asm_net_ntohll_be64
 .globl asm_net_tcp_build_syn
 .globl asm_net_tcp_build_rst_ack
 .globl asm_net_icmp_echo_request_build
@@ -72,6 +77,36 @@ asm_net_checksum16:
 asm_net_htons_be16:
     movzwl  %di, %eax
     rolw    $8, %ax
+    ret
+
+/* uint16_t asm_net_ntohs_be16(uint16_t net); — alias on bswap hardware. */
+asm_net_ntohs_be16:
+    movzwl  %di, %eax
+    rolw    $8, %ax
+    ret
+
+/* uint32_t asm_net_htonl_be32(uint32_t host); */
+asm_net_htonl_be32:
+    movl    %edi, %eax
+    bswapl  %eax
+    ret
+
+/* uint32_t asm_net_ntohl_be32(uint32_t net); — alias of htonl on bswap hw. */
+asm_net_ntohl_be32:
+    movl    %edi, %eax
+    bswapl  %eax
+    ret
+
+/* uint64_t asm_net_htonll_be64(uint64_t host); */
+asm_net_htonll_be64:
+    movq    %rdi, %rax
+    bswapq  %rax
+    ret
+
+/* uint64_t asm_net_ntohll_be64(uint64_t net); — alias of htonll on bswap hw. */
+asm_net_ntohll_be64:
+    movq    %rdi, %rax
+    bswapq  %rax
     ret
 
 /* size_t asm_net_tcp_build_syn(uint8_t *buf, size_t cap, uint16_t sport,

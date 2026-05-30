@@ -2,7 +2,9 @@
 
 This document describes the **multi-user server** product: shell commands, terminal colours, TCP framing, file and message transfer, and member identity. It is **normative for product behaviour** on top of the network contracts.
 
-**This train (network prep PR) does not ship the server.** It adds **P3-6** UDP demux, a **P3-13a** hosted socket shim (**`net_socket.c`**), session wire constants (**`contract_p3_session_wire.h`**), and **P5-5**–**P5-7** storage contracts for **`server_share/`** and file delivery. A follow-up PR implements **`cmd_server.c`**, **`net_server.c`**, and the background receive path.
+**Follow-up tracker:** every CodeRabbit / Codex item from PR `#282` and every in-source `TODO` for P3-13 lives in **`docs/P3_13_FOLLOWUP.md`**. The companion roadmap rows live in **`docs/ROADMAP.md`** under `TODO: P3-13 (#283)` / `(#280)` / `(#279)` / `(#238)` / `(single-device WAN demo)`.
+
+**Status (PRE 4.2.0 BUILD 8+):** the server foundation is implemented and lives at **`kernel/core/net/net_server.[ch]`** (host + member registry, ANSI announcement protocol), **`kernel/core/net/net_client.[ch]`** (client state machine + cached roster snapshot + private-message send), **`kernel/core/net/server_bg.[ch]`** (pthread receive loops), **`userland/command/cmd_server.c`** (shell verbs), and **`userland/shell/fl_colors.[ch]`** + **`userland/shell/shell_io.[ch]`** (colour palette + prompt-aware async output). See **§3.4 Private and public messages**, **§3.5 Multi-IP / non-loopback hosting**, and **§3.6 Host transfer on leave / exit** below for the additions that ship in this train; file transfer (**`server send -file`**) is still scoped for a follow-up commit.
 
 Related: **`docs/P3_13_CHAT_SERVER.md`** (chat-room v1), **`docs/P3_NETWORKING.md`** ([protocol inventory](P3_NETWORKING.md#application-layer-and-common-internet-protocols) — this product is **not** FTP/SFTP/HTTP), **`docs/ROADMAP.md`**.
 
@@ -16,10 +18,10 @@ Related: **`docs/P3_13_CHAT_SERVER.md`** (chat-room v1), **`docs/P3_NETWORKING.m
 | TCP byte stream | **P3-7** | Hosted **`fl_net_sock_*`**; in-tree FSM still TODO |
 | Socket API | **P3-13a** | **`contract_p3_sockets.h`**, **`net_socket.c`** |
 | Session wire constants | **P3-13** | **`contract_p3_session_wire.h`** |
-| Server hub + shell | **P3-13** | **Not in prep PR** — see §8 |
+| Server hub + shell | **P3-13** | **Shipped on PRE 4.2.0 BUILD 8+** (`net_server.c` framing/relay, `cmd_server.c` shell verbs, `server_bg.c` background recv) — see §3.4–§3.6 and §8 for what's in the file-transfer follow-up |
 | **`server_share/`** + file metadata | **P5-5**–**P5-7** | Contracts only |
 
-Build order for the **server PR**: socket shim (done here) → **`net_server.c`** framing + relay → **`cmd_server.c`** + background recv → file chunk path with **P2-3** authz on privileged paths.
+Build order followed in this train: socket shim → **`net_server.c`** framing + relay → **`cmd_server.c`** + background recv → file chunk path with **P2-3** authz on privileged paths (last step still scoped for the **`server send -file`** follow-up, see §8).
 
 ---
 
@@ -42,12 +44,27 @@ Source pattern (CC BY-SA 4.0, [Stack Overflow](https://stackoverflow.com/a/23657
 
 | Role | Macro | Example output |
 |------|-------|----------------|
-| Normal user / shell input | **WHT** | `server send -message "Hello" -user JohnDoe` |
-| Server success | **GRN** | `[server] message delivered to JohnDoe` |
-| Server error | **RED** | `[server] user JohnDoe not connected` |
-| Server warning | **YEL** | `[server] file exists; pass -overwrite to replace` |
+| Normal user / shell input | **KWHT** | `server send -message "Hello" -user JohnDoe` |
+| Server success | **KGRN** | `[Server] hosting as 'flinstone' on 10.99.0.1:49913` |
+| Server error | **KRED** | `[ERROR] nickname 'flinstone' is taken or matches another member's username` |
+| Server warning / interactive nick prompt | **KYEL** | `Your username flinstone is already in use by another connected user, would you want to be nicked [Y/N]?` |
+| Server announcement | **KBLU** | `[Server Announcement] User flinstone {2} has been nicked by host. Their nickname is "Jeff".` |
+| Public / private chat | **KCYN** | `[Server Message, You -> Bobby]: Hello private` |
 
-Implementation note: wrap **only** the server-prefixed status lines; do not colour arbitrary user **`echo`** output unless the user opts in.
+The exact macro definitions (matching the **Stack Overflow** CC BY-SA 2.5 reference at **<https://stackoverflow.com/a/3586005>**, retrieved 2026-05-29) live in **`userland/shell/fl_colors.h`**:
+
+```c
+#define KNRM "\x1B[0m"
+#define KRED "\x1B[31m"
+#define KGRN "\x1B[32m"
+#define KYEL "\x1B[33m"
+#define KBLU "\x1B[34m"
+#define KMAG "\x1B[35m"
+#define KCYN "\x1B[36m"
+#define KWHT "\x1B[37m"
+```
+
+Implementation note: wrap **only** the server-prefixed status lines; do not colour arbitrary user **`echo`** output unless the user opts in. The colour helpers route through prompt-aware prelude/postlude hooks registered by **`userland/shell/shell_io.c`** so that an asynchronous announcement is never glued onto the live `shell> ` prompt — the helper clears the input line, prints the tagged message on its own line, then redraws `shell> ` plus the buffered keystrokes.
 
 ---
 
@@ -129,12 +146,95 @@ Other members still see `[1] JohnDoe` without **Ashly**. See §5.2.
 
 The host assigns **`member_id`** at join (**`HELLO`** / **`HELLO_ACK`**). Ids are **stable for the connection** and listed in join order unless a maintainer documents reordering on host promote.
 
-### 3.3 Messaging and files
+### 3.3 Private and public messages (`server msg`)
+
+Both shipped today; **`server send -file`** remains scoped for a follow-up commit.
+
+| Command | Effect | Local render (sender) | Remote render (receiver) |
+|---------|--------|------------------------|---------------------------|
+| **`server msg <text>`** | Broadcast to every member | `[Server Message, You -> All]: <text>` | `[Server Message, From <sender>]: <text>` |
+| **`server msg -all <text>`** | Explicit broadcast (same as above) | `[Server Message, You -> All]: <text>` | `[Server Message, From <sender>]: <text>` |
+| **`server msg -user <name> <text>`** | Private chat (resolved by host-global nick → local nick → unique principal) | `[Server Message, You -> <name>]: <text>` | `[Server Message, <sender> -> You]: <text>` |
+| **`server msg -user <name> -id <N> <text>`** | Private chat; pin to the duplicate ordinal `{N}` when several connected members share the principal | `[Server Message, You -> <name> {N}]: <text>` | `[Server Message, <sender> -> You]: <text>` |
+| **`server msg -id <N> <text>`** | Private chat by raw `member_id` (`N` is the assigned id, not the disambiguation ordinal) | `[Server Message, You -> <display>]: <text>` | `[Server Message, <sender> -> You]: <text>` |
+
+All chat lines render in **KCYN**. Private messages travel as **`OP_MSG_DIRECT`** (client → host) and **`OP_MSG_DIRECT_DELIVER`** (host → recipient) and are **not** copied to any other peer.
+
+**Nick preference for display:** host-global nick wins over a client-local nick. When the local viewer has set a client-side nick for a member who later receives a host-global nick, the host-global value overrides the local one in every render (private messages included). The original wording in **`docs/SERVER.md` §5** still applies for client-local overrides on the viewer side.
+
+### 3.4 Packet capture (cross-subnet end-to-end evidence)
+
+`make test_netns_pcap` (gated by `FL_NETNS_PCAP_OK=1`) runs **`tests/manual_demo_netns_pcap.sh`**, which builds a two-subnet routed topology entirely in network namespaces:
+
+```text
+   netA (192.168.10.0/24)              netB (192.168.20.0/24)
+   fl_host    192.168.10.2 ---|       |--- fl_client 192.168.20.2
+                              br-a   br-b
+                                |    |
+                            fl_router (192.168.10.1 / 192.168.20.1,
+                                       net.ipv4.ip_forward=1)
+```
+
+`tcpdump` runs **inside the router namespace** so every TCP segment that crosses the subnet boundary lands in the capture. Three artifacts are written into `/opt/cursor/artifacts/`:
+
+| File | Content |
+|---|---|
+| `netns_router_capture.pcap` | Raw frames, openable in Wireshark / `tshark` |
+| `netns_router_capture.txt` | `tcpdump -r ... -n -tttt` timeline |
+| `netns_router_session_frames.txt` | Per-frame session-protocol decode produced by **`tests/decode_session_pcap.py`** (magic `0x46`, version, opcode → name from `contract_p3_session_wire.h`, flags, payload length, ASCII preview) + per-opcode counts |
+
+The decoder is standalone and reusable: `python3 tests/decode_session_pcap.py <any.pcap> [--counts]` works on any Flinstone capture, not just the one this demo produces. It requires `python3 -m pip install scapy` for the per-frame view; without scapy installed it exits 0 with a one-line note and the raw `.pcap` is still produced as the primary artifact.
+
+**Sandbox prerequisites** (matches `AGENTS.md` § *Cursor Cloud specific instructions*):
+
+```bash
+sudo apt-get install -y iproute2 tcpdump tmux
+sudo sysctl -w net.bridge.bridge-nf-call-iptables=0
+```
+
+The `bridge-nf-call-*` sysctl is the single most common reason a working topology silently drops frames — by default the kernel sends bridged traffic through `iptables`, which then drops anything not explicitly accepted. Setting it to `0` is reversible and only needs to happen once per host boot.
+
+Mininet (`apt-get install -y mininet openvswitch-switch`) is an equally valid choice on environments where the `openvswitch` kernel module is loadable. In containerised CI / Cursor Cloud it is not, so the raw `ip netns` recipe in this script is the portable path.
+
+### 3.5 Multi-IP / non-loopback hosting
+
+`server host` and `server join` accept any local-or-routable IPv4 endpoint. `server join` adds an optional `-bind <local_ip>` flag so the joining client sources its TCP from a specific local IP (used by lab demos that put each peer on a distinct `10.99.0.X` loopback alias, and by the auto-reconnect path after a host transfer):
+
+```sh
+server join 10.99.0.1:49913 -bind 10.99.0.10
+```
+
+When `-bind` is omitted, the kernel picks the default source IP for the route to the destination (same as a plain `connect()`).
+
+### 3.6 Host transfer on `server leave` / shell `exit`
+
+When the host runs `server leave` (or the shell's `exit` / `exit -y` / `exit -n` while still hosting), the server picks the lowest non-host `member_id` as the successor, broadcasts **`OP_CTRL_HOST_PROMOTE`** with payload `[u16 new_host_id][u32 new_host_ip_be][u16 new_host_port]`, and tears down the old listener. The successor's client side automatically:
+
+1. Stops its receive loop.
+2. Disconnects from the old session.
+3. Calls `fl_net_server_host_start` on its **own** local IP (recorded at join time via `getsockname()`) and the same port.
+4. Starts the server receive loop and prints `[Server] you are now the host on this session`.
+
+Every other peer:
+
+1. Stops its receive loop.
+2. Disconnects from the old session.
+3. Retries `fl_net_client_connect_from(local_ip, new_ip, new_port)` up to 10× with 150 ms back-off so the new listener has time to bind, then resumes background receive.
+4. Re-enters the optional `Y/N` nick prompt if the new session triggers a principal collision.
+
+When the host is the only member, the same code path emits **`OP_CTRL_KILL`** instead of promote and closes every socket.
+
+### 3.7 Shell `exit` integration
+
+Both `exit` (interactive prompt) and `exit -y` / `exit -n` (one-shot) call `cmd_server_atexit()` before tearing the shell down. The hook routes through `verb_leave` semantics: a hosting shell triggers `fl_net_server_transfer_and_stop` (so the session survives), and a joined client shell triggers `fl_net_client_disconnect`. The user does not have to remember to run `server leave` before quitting.
+
+### 3.8 File transfer (planned)
+
+`server send -file` is **not** shipped in this train. The original verb table for the v1 file-transfer surface is preserved below for the follow-up implementation:
 
 | Command | Example | Effect |
 |---------|---------|--------|
-| **`server send -message`** | `server send -message "Hello" -user "JohnDoe"` | Deliver UTF-8 text to one member (ambiguous if several **JohnDoe**) |
-| **`server send -message`** (by id) | `server send -message "Hello" -user "JohnDoe" -id 1` | Deliver to **`member_id` 1** only |
+| **`server send -message`** (legacy alias) | `server send -message "Hello" -user "JohnDoe"` | Deliver UTF-8 text to one member; new code should use **`server msg -user`** instead |
 | **`server send -file`** | `server send -file "./funny/joke.txt" -user "JohnDoe"` | File offer (resolve recipient; use **`-id`** when needed) |
 | **`server send -file`** (by nick) | `server send -file "./funny/joke.txt" -user "Jeff"` | Valid when **Jeff** is a **host-global** nick for that member |
 
@@ -169,6 +269,29 @@ Default landing directory name: **`server_share/`** (**`FL_SERVER_SHARE_DIR_NAME
 - **Optional lab/datagram side channel:** **UDP** via **P3-6** demux (not required for v1 chat).
 
 Hosted labs use **`fl_net_sock_*`** (**`net_socket.c`**), which maps to POSIX **`socket`/`bind`/`listen`/`accept`/`connect`/`send`/`recv`** until the in-tree **P3-7** FSM owns the path.
+
+### 4.1.1 BSD shim coverage (`fl_socket / fl_bind / fl_listen / fl_accept / fl_send / fl_recv / fl_close`)
+
+The same surface backs three #239 acceptance items:
+
+| Surface | Verb / call site | End-to-end test |
+|---|---|---|
+| `fl_socket / fl_bind / fl_listen / fl_accept / fl_send / fl_recv / fl_close` | `server host`, `server join`, the **STREAM** path | `tests/test_p3_network.c::test_net_socket_tcp_loopback` |
+| `fl_socket / fl_bind / fl_send / fl_recv / fl_close` | `udpsend`, `udplisten`, the **DGRAM** path | `tests/test_p3_network.c::test_net_socket_udp_loopback` |
+| `udpsend` + `udplisten` shell verbs (loopback echo) | `userland/command/cmd_udp.c` | `tests/test_p3_udp_cmds.c` via `make test_p3_udp_cmds` |
+
+### 4.1.2 “No Linux kernel socket required for loopback or TAP destinations”
+
+This is one of the **#239** acceptance criteria. Current status: the **hosted** shim still delegates to POSIX sockets, but **loopback is fully covered by the in-tree path** (`net_loopback.c`, `test_loopback_arp_exchange`, `test_loopback_ping`, `test_loopback_tcp`, `test_udp_echo_loopback`, `test_netdev_loopback_frame`), and TAP frames round-trip via `net_tap.c` + `test_tap_smoke`. The remaining ask — making `fl_net_sock_open(STREAM)` itself bypass the Linux kernel socket on a loopback or TAP destination — depends on **P3-7** TCP state machine + **P3-6** UDP demux promoting from “lab helpers” to “the native path the shim auto-selects”. The shim already has a place to add that switch (the `FL_NET_SOCK_HOSTED` define in `net_socket.c`); once P3-7 owns the listener / connect path, the shim can prefer the in-tree FSM when `addr_be` is loopback or a configured TAP route, and fall back to POSIX otherwise.
+
+### 4.1.3 `udpsend` / `udplisten` shell verbs
+
+```text
+udpsend <ip:port> <message...>
+udplisten <port> [-c count] [-W timeout_ms] [-bind <local_ip>]
+```
+
+`udpsend` opens `fl_net_sock_open(DGRAM)` → `fl_net_sock_connect(peer_be, port)` → `fl_net_sock_send(payload)`. `udplisten` opens `DGRAM` → `fl_net_sock_bind(local, port)` → loops `fl_net_sock_recv(buf, timeout_ms)` and prints each datagram. Implementation: **`userland/command/cmd_udp.c`**. Loopback echo proof: **`make test_p3_udp_cmds`**.
 
 ### 4.2 Session frame (TCP byte stream)
 
@@ -309,28 +432,35 @@ VFS integration (**P5-1**/**P5-2**) must respect **jail** and **P2-3** when open
 
 ---
 
-## 8 — Module map (future server PR)
+## 8 — Module map (server foundation shipped; `server send -file` pending)
 
-| Path | Responsibility |
-|------|----------------|
-| **`userland/command/cmd_server.c`** | Parse **`host`/`join`/`connected`/`send`/`nick`/`leave`/`kill`** |
-| **`userland/shell/server_bg.c`** | Background **`recv`** → inbound ring |
-| **`kernel/core/net/net_server.c`** | Hub, framing, relay, file session state |
-| **`kernel/core/net/net_socket.c`** | Socket shim (**prep PR**) |
-| **`kernel/core/net/net_udp.c`** | UDP demux (**prep PR**) |
+| Path | Status | Responsibility |
+|------|--------|----------------|
+| **`userland/command/cmd_server.c`** | ✅ shipped | Parse **`host`/`join`/`connected`/`msg`/`announce`/`nick`/`set-nick`/`leave`/`kill`**; host transfer + auto-reconnect glue |
+| **`kernel/core/net/server_bg.c`** | ✅ shipped | pthread background **`recv`** loops for both host (accept + member poll) and client (event delivery) |
+| **`kernel/core/net/net_server.c`** | ✅ shipped | Host listener, member registry, framing, relay, ANSI announcement protocol, host-transfer state machine |
+| **`kernel/core/net/net_client.c`** | ✅ shipped | Client connect / disconnect / send / receive + cached roster snapshot |
+| **`userland/shell/fl_colors.[ch]`** | ✅ shipped | `K*` ANSI macros + prompt-aware async output helpers |
+| **`userland/shell/shell_io.[ch]`** | ✅ shipped | pthread mutex + readline buffer snapshot so background announcements don't glue to the prompt |
+| **`kernel/core/net/net_socket.c`** | ✅ shipped | Socket shim (`fl_net_sock_*`); STREAM + DGRAM |
+| **`kernel/core/net/net_udp.c`** | ✅ shipped | UDP demux + `fl_net_udp_bound_ports_snapshot` |
+| File-chunk path (`server send -file`) | ⏳ pending | `FILE_OFFER` / `FILE_CHUNK` / `FILE_DONE` opcodes are already reserved in **`contract_p3_session_wire.h`**; cross-user delivery + `server_share/` staging from **`contract_p5_file_delivery.h`** lands in the follow-up commit |
 
-Register **`server`** in the shell command table like **`ping`**.
+`server` is registered in the shell command table like `ping`, and tears down through `cmd_server_atexit()` on `exit`.
 
 ---
 
 ## 9 — Testing
 
-| Test | Train |
-|------|-------|
-| **`test_net_udp_demux_queue`** | Prep PR — **`make test_p3_network`** |
-| **`test_net_socket_tcp_loopback`** | Prep PR — hosted TCP |
-| **`test_server_host_join_msg`** | Server PR |
-| **`test_server_file_offer_roundtrip`** | Server PR |
+| Test | Train | Status |
+|------|-------|--------|
+| `test_net_udp_demux_queue` | `make test_p3_network` | ✅ shipped |
+| `test_net_socket_tcp_loopback` | `make test_p3_network` | ✅ shipped |
+| `test_net_socket_udp_loopback` | `make test_p3_network` | ✅ shipped (#239) |
+| `test_p3_server::announce_join_leave_nick` etc. (5 sub-tests) | `make test_p3_server` | ✅ shipped (#239) |
+| `test_p3_udp_cmds` | `make test_p3_udp_cmds` | ✅ shipped (#239) |
+| `test_p3_net_tools` (arp/ifconfig/route/netstat/nslookup/netsh + endian parity) | `make test_p3_net_tools` | ✅ shipped (#239) |
+| `test_server_file_offer_roundtrip` | follow-up file-transfer PR | ⏳ pending |
 
 ---
 

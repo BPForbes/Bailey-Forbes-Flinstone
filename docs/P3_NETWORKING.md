@@ -123,6 +123,54 @@ flowchart LR
 4. **Loopback:** full **Ethernet+IPv4** frame through **`fl_net_netdev_loopback()`** (P3-2).
 5. **Off-loopback:** ICMP/UDP use **`net_host_socket` / `sendto` / `recvfrom`** (ASM on Linux x86_64 and AArch64). TCP raw probe still uses libc **`socket`/`select`** for `SOCK_RAW` (documented gap).
 
+## Endian / packet / MLQ framework (internal-only path)
+
+The networking stack uses a layered, in-tree byte-order path so packets and
+their headers can be framed and dispatched without leaning on libc or the
+hosted shim. This is the path the `udpsend` / `udplisten` / `server` /
+distro-style verbs ride on for hot writes.
+
+```text
+       call site                  fl_net_htons / fl_net_htonl
+       in shell verb              fl_net_ntohs / fl_net_ntohl     (net_endian.h)
+       or test                                  |
+                                                v
+       inline header              FL_NET_ASM_AVAILABLE? --yes--> asm_net_htons_be16
+       byte writes                                                asm_net_htonl_be32
+       via fl_net_put_u16_be /                                    asm_net_ntohs_be16
+       fl_net_put_u32_nbo                                         asm_net_ntohl_be32
+       (memcpy-clean on every                                    (single `bswap` / `rev`)
+       host endianness)                       --no--> portable bit-shift fallback
+
+       v
+       net_packet.c               fl_net_packet_parse_eth_ipv4 / _bind_l4 / _l4_view
+       (P3 layered slices)        fl_net_pipeline_rx_feed / fl_net_pipeline_tx_*
+
+       v
+       net_background.c           Workqueue / MLQ (priority_queue.h, PQ_NUM_PRIORITIES=4)
+       (P3-14 task hub)           drains the bound socket + ARP tasks in priority order
+                                  (`fl_net_arp_tick` already runs here; future RX dequeue
+                                  / TCP timer wheel ride the same MLQ — see #238).
+```
+
+**Why this matters:**
+
+- The endian helpers are the **first-class internal architecture import**.
+  They never delegate to libc. ASM is the preferred backend; pure bit-shift
+  is the K/B / cross-arch fallback. See `kernel/core/net/net_endian.h`.
+- The packet module (`net_packet.c`) and wire builders (`net_wire*.c`)
+  build every frame through `fl_net_put_u16_be` / `fl_net_put_u32_nbo`
+  (memcpy-clean, host-endian independent) plus `fl_net_htons` / `fl_net_htonl`
+  for inline header field writes. There is no open-coded `htons(3)` /
+  `htonl(3)` left in the application path.
+- The **net MLQ** in `priority_queue.h` (scheduler-grade, `PQ_NUM_PRIORITIES = 4`,
+  `O(1)` push/pop, bitmap layer select) is the dispatch fabric for the
+  P3-14 background hub (`net_background.c`). Anything the packet module
+  emits for "framed for send" or "ready for RX dispatch" can land on that
+  queue via the existing workqueue surface; the endian helpers are safe to
+  call from any layer (signal-handler-safe / hardirq-safe / pure functions
+  with no globals).
+
 ## Source port (`sport`)
 
 - **UDP** (`fl_net_wire_send_udp`): when **`sport != 0`**, the hosted path **`bind(2)`**s the datagram socket to **`INADDR_ANY:sport`** before **`sendto`**. DNS uses **`sport = 40053`** toward port 53.
@@ -135,6 +183,11 @@ flowchart LR
 |--------|------------|-------------|-------------|
 | **`asm_net_checksum16`** | `arch/x86_64/gas/net_asm.s` | `arch/x86_64/nasm/net_asm.asm` | `arch/arm/gas/net_asm.s` |
 | **`asm_net_htons_be16`** | same | same | same |
+| **`asm_net_ntohs_be16`** | same | same | same |
+| **`asm_net_htonl_be32`** | same | same | same |
+| **`asm_net_ntohl_be32`** | same | same | same |
+| **`asm_net_htonll_be64`** | same | same | same |
+| **`asm_net_ntohll_be64`** | same | same | same |
 | **`asm_net_tcp_build_syn`** | same | same | same |
 | **`asm_net_tcp_build_rst_ack`** | same | same | same |
 | **`asm_net_tcp_read_ports_be`** | same | same | same |
@@ -175,7 +228,7 @@ Legend matches **`docs/ROADMAP.md`**: **✅** complete; **~✅** usable lab subs
 | **P3-9** TLS | ✅ | ~✅ — **`net_tls_hosted.c`** record-size boundary (no mbedtls yet) |
 | **P3-12** DHCP | ✅ | ~✅ — BOOTP codec + **`fl_net_dhcp_*_pkt`** over **`fl_net_packet_t`** |
 | **P3-14** background | ✅ | ~✅ — **`fl_net_arp_tick`** on workqueue; TCP timer wheel / RX dequeue still **#238** |
-| **P3-13** `server` + messaging | ✅ | ❌ — product spec **`docs/SERVER.md`**; **`cmd_server`** / hub app **#239** |
+| **P3-13** `server` + messaging | ✅ | ~✅ — `server host/join/msg/announce/nick/connected/leave/kill` shipped (PR #282); `udpsend` / `udplisten` shell verbs added (#239); product spec **`docs/SERVER.md`**; deferred siblings: **#283** (`OP_CTRL_HOST_PROMOTE6`), **#280** (IPv6), **#279** (Wi-Fi station), native `fl_socket` waits on **P3-7** TCP state machine. Full per-item follow-up status: **`docs/P3_13_FOLLOWUP.md`** |
 
 ## Standards map (integration targets)
 
@@ -188,7 +241,7 @@ Legend matches **`docs/ROADMAP.md`**: **✅** complete; **~✅** usable lab subs
 | TCP (**P3-7**) | **RFC 793** | ~✅ SYN probe + hosted stream shim (in-tree FSM TODO) |
 | DNS (**P3-8**) | **RFC 1035** (subset) | ~✅ A record |
 | DHCP (**P3-12**) | **RFC 2131**, **RFC 2132** | ~✅ codec + lab client (not production lease manager) |
-| `server` + messaging (**P3-13**) | **RFC 793** (TCP session); **RFC 768** (UDP helpers) | ❌ |
+| `server` + messaging (**P3-13**) | **RFC 793** (TCP session); **RFC 768** (UDP helpers) | ~✅ — hosted-socket implementation (PR #282 + #239); native non-hosted path queued behind **P3-7** TCP state machine |
 
 ## Application-layer and common Internet protocols
 
@@ -209,7 +262,7 @@ Inventory of **named protocols** (and closely related APIs) versus what this tre
 | **FTP** | 20–21/tcp | **RFC 959** | ❌ | Not used; file sharing uses **custom TCP framing** (**`docs/SERVER.md`**, **`contract_p3_session_wire.h`**, **P5** file delivery), not FTP |
 | **SFTP** | 22/tcp (SSH) | **RFC 4253** / draft SFTP | ❌ | Not implemented; same **server** file path as FTP row |
 | **TFTP** | 69/udp | **RFC 1350** | ~✅ (subset) | **`net_tftp.c`** — RRQ build + client read over egress UDP (**#260** / **PX-12**) |
-| **Flinstone `server`** (chat + files) | user **`ip:port`** | **RFC 793** transport; app opcodes in **`contract_p3_session_wire.h`** | ❌ (app) | Product spec **`docs/SERVER.md`**, plan **`docs/P3_13_CHAT_SERVER.md`**; prep PR has socket/session contracts only |
+| **Flinstone `server`** (chat + files) | user **`ip:port`** | **RFC 793** transport; app opcodes in **`contract_p3_session_wire.h`** | ~✅ (chat); ⏳ (files) | Hosted-socket implementation shipped on PR **#282** / **#239**: `server host/join/msg/announce/nick/set-nick/connected/leave/kill`, host transfer + auto-reconnect, prompt-aware async output; `udpsend` / `udplisten` and `arp` / `ifconfig` / `route` / `netstat` / `nslookup` / `netsh` distro-style verbs landed alongside. File-chunk path (`server send -file` via `FILE_OFFER`/`FILE_CHUNK`/`FILE_DONE`) is the remaining follow-up. Product spec **`docs/SERVER.md`**, plan **`docs/P3_13_CHAT_SERVER.md`**, per-item review status **`docs/P3_13_FOLLOWUP.md`**. |
 
 **Clarifications**
 
@@ -281,7 +334,7 @@ make check-network-requirements
 | Priority | Item | Notes |
 |----------|------|--------|
 | **P3-12** | DHCP renew/rebind FSM | Lease DB and renew/rebind after **`fl_net_dhcp_acquire`** |
-| **P3-13** | Chat room | See **`docs/P3_13_CHAT_SERVER.md`**; **#239** / **#238** |
+| **P3-13** | Chat room | Foundations shipped (PR #282 + #239 `udpsend`/`udplisten`); deferred siblings: **#283** (`OP_CTRL_HOST_PROMOTE6`), **#280** (IPv6 + ICMPv6 + NDP), **#279** (Wi-Fi station); native non-hosted `fl_socket` gated on **P3-7** TCP state machine |
 | ~~Patch~~ | ~~ARP cache TTL / loopback dedup~~ | Done (**#237**, **#240**): **`fl_net_arp_tick`**, **`fl_net_loopback_exchange`**, PIT BH on **B** |
 | ~~P3-5~~ | ~~Drop Linux ICMP fallback~~ | Done (**#262**): egress-only ICMP/UDP when unrouted |
 | **P3-7** | Production TCP timers | Loopback **RFC 793** FSM landed (**#238**); TAP retransmit/TIME_WAIT remain |

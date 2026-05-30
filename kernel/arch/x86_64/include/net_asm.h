@@ -11,6 +11,19 @@
 uint16_t asm_net_checksum16(const void *data, size_t len);
 uint16_t asm_net_htons_be16(uint16_t host);
 
+/**
+ * Endian primitives backing fl_net_htons / fl_net_htonl / fl_net_ntohs /
+ * fl_net_ntohl in kernel/core/net/net_endian.h. ntohs / ntohl are aliases
+ * of htons / htonl on bswap-style hardware; we declare both so callers
+ * can keep their intent obvious at the API boundary. The packet module
+ * (net_packet.c, net_wire*.c) uses these for header field writes.
+ */
+uint16_t asm_net_ntohs_be16(uint16_t net);
+uint32_t asm_net_htonl_be32(uint32_t host);
+uint32_t asm_net_ntohl_be32(uint32_t net);
+uint64_t asm_net_htonll_be64(uint64_t host);
+uint64_t asm_net_ntohll_be64(uint64_t net);
+
 size_t asm_net_tcp_build_syn(uint8_t *buf, size_t cap, uint16_t sport, uint16_t dport,
                               uint32_t seq);
 size_t asm_net_tcp_build_rst_ack(const uint8_t *syn, size_t syn_len, uint8_t *reply,

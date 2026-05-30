@@ -60,6 +60,15 @@ int cmd_passwd_run(int argc, char **argv);
 int cmd_whoami_run(int argc, char **argv);
 int cmd_ping_run(int argc, char **argv);
 int cmd_check_run(int argc, char **argv);
+int cmd_server_run(int argc, char **argv);
+int cmd_udpsend_run(int argc, char **argv);
+int cmd_udplisten_run(int argc, char **argv);
+int cmd_arp_run(int argc, char **argv);
+int cmd_ifconfig_run(int argc, char **argv);
+int cmd_route_run(int argc, char **argv);
+int cmd_netstat_run(int argc, char **argv);
+int cmd_nslookup_run(int argc, char **argv);
+int cmd_netsh_run(int argc, char **argv);
 
 /*
  * Batch argv token counts (see cmd_batch.h).
@@ -120,5 +129,23 @@ int cmd_whoami_batch_tokens_count(int argc, char **argv, int i);
 int cmd_ping_batch_tokens_count(int argc, char **argv, int i);
 /* Indirect: fl_shell_cmd_batch_tokens_count(FL_SCMD_CHECK, ...) in cmd_batch_dispatch.c */
 int cmd_check_batch_tokens_count(int argc, char **argv, int i);
+/* Indirect: fl_shell_cmd_batch_tokens_count(FL_SCMD_SERVER, ...) in cmd_batch_dispatch.c */
+int cmd_server_batch_tokens_count(int argc, char **argv, int i);
+/* Indirect: fl_shell_cmd_batch_tokens_count(FL_SCMD_UDPSEND, ...) in cmd_batch_dispatch.c */
+int cmd_udpsend_batch_tokens_count(int argc, char **argv, int i);
+/* Indirect: fl_shell_cmd_batch_tokens_count(FL_SCMD_UDPLISTEN, ...) in cmd_batch_dispatch.c */
+int cmd_udplisten_batch_tokens_count(int argc, char **argv, int i);
+/* Indirect: fl_shell_cmd_batch_tokens_count(FL_SCMD_ARP, ...) in cmd_batch_dispatch.c */
+int cmd_arp_batch_tokens_count(int argc, char **argv, int i);
+/* Indirect: fl_shell_cmd_batch_tokens_count(FL_SCMD_IFCONFIG, ...) in cmd_batch_dispatch.c */
+int cmd_ifconfig_batch_tokens_count(int argc, char **argv, int i);
+/* Indirect: fl_shell_cmd_batch_tokens_count(FL_SCMD_ROUTE, ...) in cmd_batch_dispatch.c */
+int cmd_route_batch_tokens_count(int argc, char **argv, int i);
+/* Indirect: fl_shell_cmd_batch_tokens_count(FL_SCMD_NETSTAT, ...) in cmd_batch_dispatch.c */
+int cmd_netstat_batch_tokens_count(int argc, char **argv, int i);
+/* Indirect: fl_shell_cmd_batch_tokens_count(FL_SCMD_NSLOOKUP, ...) in cmd_batch_dispatch.c */
+int cmd_nslookup_batch_tokens_count(int argc, char **argv, int i);
+/* Indirect: fl_shell_cmd_batch_tokens_count(FL_SCMD_NETSH, ...) in cmd_batch_dispatch.c */
+int cmd_netsh_batch_tokens_count(int argc, char **argv, int i);
 
 #endif /* CMD_DECL_H */

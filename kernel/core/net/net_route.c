@@ -117,6 +117,18 @@ fl_result_t fl_net_route_lookup(uint32_t dst_be, fl_net_route_entry_t *out) {
     return FL_RESULT_OK;
 }
 
+unsigned fl_net_route_snapshot(fl_net_route_entry_t *out, unsigned cap) {
+    unsigned n = s_route_count;
+    unsigned i;
+    if (!out)
+        return 0u;
+    if (n > cap)
+        n = cap;
+    for (i = 0; i < n; i++)
+        out[i] = s_routes[i];
+    return n;
+}
+
 uint32_t fl_net_route_next_hop(uint32_t dst_be, const fl_net_route_entry_t *route) {
     if (!route)
         return dst_be;

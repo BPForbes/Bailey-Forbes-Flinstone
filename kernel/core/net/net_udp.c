@@ -104,6 +104,17 @@ void fl_net_udp_demux_reset(void) {
     memset(s_udp_bind, 0, sizeof(s_udp_bind));
 }
 
+unsigned fl_net_udp_bound_ports_snapshot(uint16_t *out, unsigned cap) {
+    unsigned written = 0u;
+    if (!out)
+        return 0u;
+    for (unsigned i = 0; i < FL_NET_UDP_BIND_SLOTS_MAX && written < cap; i++) {
+        if (s_udp_bind[i].bound)
+            out[written++] = s_udp_bind[i].dport_host;
+    }
+    return written;
+}
+
 static fl_net_udp_bind_entry_t *udp_find_bound(uint16_t dport_host) {
     for (unsigned i = 0; i < FL_NET_UDP_BIND_SLOTS_MAX; i++) {
         if (s_udp_bind[i].bound && s_udp_bind[i].dport_host == dport_host)

@@ -102,6 +102,38 @@ unsigned fl_net_arp_tick(unsigned elapsed_ms) {
     return removed;
 }
 
+unsigned fl_net_arp_cache_snapshot(fl_net_arp_cache_row_t *out, unsigned cap) {
+    unsigned i;
+    unsigned n = s_arp_cache_count;
+    if (!out)
+        return 0u;
+    if (n > cap)
+        n = cap;
+    for (i = 0; i < n; i++) {
+        out[i].ip_be = s_arp_cache[i].ip_be;
+        memcpy(out[i].mac, s_arp_cache[i].mac, FL_NET_ETH_ADDR_LEN);
+        out[i].age_ticks = s_arp_cache[i].age;
+    }
+    return n;
+}
+
+unsigned fl_net_arp_tick_now(void) {
+    return s_arp_tick;
+}
+
+fl_result_t fl_net_arp_cache_delete(uint32_t ipv4_be) {
+    unsigned i;
+    for (i = 0; i < s_arp_cache_count; i++) {
+        if (s_arp_cache[i].ip_be == ipv4_be) {
+            if (i < s_arp_cache_count - 1u)
+                s_arp_cache[i] = s_arp_cache[s_arp_cache_count - 1u];
+            s_arp_cache_count--;
+            return FL_RESULT_OK;
+        }
+    }
+    return FL_RESULT_NOENT;
+}
+
 unsigned fl_net_arp_cache_sweep(unsigned max_age_ticks) {
     unsigned removed = 0;
     unsigned i = 0;

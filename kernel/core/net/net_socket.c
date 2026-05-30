@@ -1,5 +1,6 @@
 #include "net_socket.h"
 
+#include "net_endian.h"
 #include "net_wire_host_syscall.h"
 
 #include <errno.h>
@@ -121,7 +122,9 @@ static void sock_sin4(struct sockaddr_in *sa, uint32_t addr_be, uint16_t port_ho
     memset(sa, 0, sizeof(*sa));
     sa->sin_family = AF_INET;
     sa->sin_addr.s_addr = addr_be;
-    sa->sin_port = htons(port_host);
+    /* First-class internal helper; libc htons is fine on hosted but we
+     * route through fl_net_htons so the entire tree uses one entry point. */
+    sa->sin_port = fl_net_htons(port_host);
 }
 #endif
 
@@ -137,6 +140,15 @@ fl_result_t fl_net_sock_bind(fl_net_sock_handle_t handle, uint32_t addr_be, uint
 
     if (!s)
         return FL_RESULT_INVAL;
+    /* SO_REUSEADDR keeps demo / test bind from failing when a prior STREAM
+     * listener left the port in TIME_WAIT. UDP doesn't have TIME_WAIT and
+     * enabling it on a DGRAM socket lets two demo clients bind the same
+     * port simultaneously (and silently race for recv), so gate by type.
+     * Best-effort: setsockopt errors are ignored. */
+    if (s->type == FL_NET_SOCK_TYPE_STREAM) {
+        int yes = 1;
+        (void)setsockopt(s->fd, SOL_SOCKET, SO_REUSEADDR, &yes, sizeof(yes));
+    }
     sock_sin4(&sa, addr_be, port_host);
     if (bind(s->fd, (struct sockaddr *)&sa, sizeof(sa)) != 0)
         return FL_RESULT_ERR;
@@ -179,8 +191,14 @@ fl_result_t fl_net_sock_accept(fl_net_sock_handle_t listen_handle,
         return FL_RESULT_INVAL;
 
     cfd = accept(listen->fd, (struct sockaddr *)&peer, &peer_len);
-    if (cfd < 0)
+    if (cfd < 0) {
+        /* Differentiate "nothing pending right now" from a real error
+         * so the caller (e.g. fl_net_server_accept_pending) can keep
+         * polling on TIMEDOUT and surface BUSY / ERR otherwise. */
+        if (errno == EAGAIN || errno == EWOULDBLOCK || errno == EINTR)
+            return FL_RESULT_TIMEDOUT;
         return FL_RESULT_ERR;
+    }
 
     for (i = 0; i < FL_NET_SOCK_TABLE_MAX; i++) {
         if (!s_socks[i].in_use)
@@ -318,6 +336,72 @@ fl_result_t fl_net_sock_set_nonblock(fl_net_sock_handle_t handle, int nonblock) 
         flags &= ~O_NONBLOCK;
     if (fcntl(s->fd, F_SETFL, flags) != 0)
         return FL_RESULT_ERR;
+    return FL_RESULT_OK;
+#endif
+}
+
+fl_result_t fl_net_sock_connect_from(fl_net_sock_handle_t handle,
+                                     uint32_t local_be,
+                                     uint32_t peer_be, uint16_t port_host) {
+#if !defined(FL_NET_SOCK_HOSTED)
+    (void)handle;
+    (void)local_be;
+    (void)peer_be;
+    (void)port_host;
+    return FL_RESULT_NOSYS;
+#else
+    fl_net_sock_slot_t *s = sock_lookup(handle);
+    struct sockaddr_in sa;
+    if (!s)
+        return FL_RESULT_INVAL;
+    if (local_be != 0u) {
+        if (s->type == FL_NET_SOCK_TYPE_STREAM) {
+            int yes = 1;
+            (void)setsockopt(s->fd, SOL_SOCKET, SO_REUSEADDR, &yes, sizeof(yes));
+        }
+        sock_sin4(&sa, local_be, 0);
+        if (bind(s->fd, (struct sockaddr *)&sa, sizeof(sa)) != 0)
+            return FL_RESULT_ERR;
+    }
+    sock_sin4(&sa, peer_be, port_host);
+    if (connect(s->fd, (struct sockaddr *)&sa, sizeof(sa)) != 0)
+        return FL_RESULT_ERR;
+    return FL_RESULT_OK;
+#endif
+}
+
+fl_result_t fl_net_sock_peer_ipv4(fl_net_sock_handle_t handle, uint32_t *out_be) {
+#if !defined(FL_NET_SOCK_HOSTED)
+    (void)handle;
+    (void)out_be;
+    return FL_RESULT_NOSYS;
+#else
+    fl_net_sock_slot_t *s = sock_lookup(handle);
+    struct sockaddr_in sa;
+    socklen_t slen = sizeof(sa);
+    if (!s || !out_be)
+        return FL_RESULT_INVAL;
+    if (getpeername(s->fd, (struct sockaddr *)&sa, &slen) != 0)
+        return FL_RESULT_ERR;
+    *out_be = sa.sin_addr.s_addr;
+    return FL_RESULT_OK;
+#endif
+}
+
+fl_result_t fl_net_sock_local_ipv4(fl_net_sock_handle_t handle, uint32_t *out_be) {
+#if !defined(FL_NET_SOCK_HOSTED)
+    (void)handle;
+    (void)out_be;
+    return FL_RESULT_NOSYS;
+#else
+    fl_net_sock_slot_t *s = sock_lookup(handle);
+    struct sockaddr_in sa;
+    socklen_t slen = sizeof(sa);
+    if (!s || !out_be)
+        return FL_RESULT_INVAL;
+    if (getsockname(s->fd, (struct sockaddr *)&sa, &slen) != 0)
+        return FL_RESULT_ERR;
+    *out_be = sa.sin_addr.s_addr;
     return FL_RESULT_OK;
 #endif
 }
