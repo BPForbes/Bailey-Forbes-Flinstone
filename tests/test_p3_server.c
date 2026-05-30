@@ -49,6 +49,8 @@ typedef struct {
     int privates;
     int errs;
     int closed;
+    int host_promotes;   /* mid == own assigned_member_id */
+    int host_redirects;  /* mid is some other peer's id */
     char last_join[160];
     char last_leave[160];
     char last_nick_announce[256];
@@ -98,6 +100,12 @@ static void event_sink(fl_net_server_event_kind_t kind, const char *text,
         break;
     case FL_NET_SERVER_EVENT_CLOSED:
         log->closed++;
+        break;
+    case FL_NET_SERVER_EVENT_HOST_PROMOTE:
+        log->host_promotes++;
+        break;
+    case FL_NET_SERVER_EVENT_HOST_REDIRECT:
+        log->host_redirects++;
         break;
     default:
         break;
@@ -456,8 +464,20 @@ static int test_host_transfer_on_leave(void) {
     /* Lowest non-host member_id is 2 (cA). */
     ASSERT(new_host == (fl_net_server_member_id_t)2u);
 
-    /* Clients all see CLOSED / promote frames; both A and B/C have non-zero
-     * event counts. The host listener has been torn down. */
+    /* Drain the client receive paths so OP_CTRL_HOST_PROMOTE delivery
+     * is verified, not assumed. cA (the chosen successor) must observe
+     * HOST_PROMOTE; cB and cC must observe HOST_REDIRECT (the net_client
+     * dispatcher splits them by mid==assigned_member_id). The
+     * "[Server Announcement]: <display> is now the host" line counts as
+     * a server_announce on every recipient. */
+    pump(clients, logs, 3, 60);
+    ASSERT(logA.host_promotes >= 1);
+    ASSERT(logB.host_redirects >= 1);
+    ASSERT(logC.host_redirects >= 1);
+    ASSERT(logA.server_announces >= 1);
+    ASSERT(logB.server_announces >= 1);
+    ASSERT(logC.server_announces >= 1);
+
     fl_net_client_disconnect(&cA);
     fl_net_client_disconnect(&cB);
     fl_net_client_disconnect(&cC);
@@ -474,14 +494,14 @@ static int test_host_transfer_on_leave(void) {
 static int test_endian_host_promote_payload(void) {
     uint8_t wire[4] = {0};
     uint32_t round_trip = 0u;
-    /* 192.168.10.2 stored as network-byte-order uint32_t via inet_pton-ish
-     * shift: high byte first. */
-    uint32_t ip_nbo = ((uint32_t)192u) |
-                      ((uint32_t)168u << 8) |
-                      ((uint32_t)10u  << 16) |
-                      ((uint32_t)2u   << 24);
-    /* On both LE and BE hosts, the memory layout of `ip_nbo` as built
-     * above is [192,168,10,2]. memcpy serialization must preserve that. */
+    /* 192.168.10.2 in host order (0xC0A80A02), then converted to the
+     * project's NBO scalar via the endian helper so the test is
+     * portable across LE and BE hosts (the previous hand-assembled
+     * little-endian literal broke on BE). */
+    uint32_t ip_nbo = fl_net_htonl(0xC0A80A02U);
+    /* On both LE and BE hosts, the memory layout of `ip_nbo` after the
+     * htonl above is [192,168,10,2] (network byte order). memcpy
+     * serialization must preserve that. */
     fl_net_put_u32_nbo(wire, ip_nbo);
     ASSERT(wire[0] == 192u);
     ASSERT(wire[1] == 168u);

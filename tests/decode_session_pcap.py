@@ -67,6 +67,12 @@ def decode_stream(payload: bytes):
         if magic != MAGIC or ver != VERSION:
             yield ("desync", off, magic, ver, payload[off:])
             return
+        # Bounds-check the body before yielding a complete frame; a
+        # truncated tail is reported as ("partial", ...) and we stop so
+        # `off` never advances past the captured payload.
+        if off + HDR_LEN + plen > len(payload):
+            yield ("partial", off, payload[off:])
+            return
         body = payload[off + HDR_LEN:off + HDR_LEN + plen]
         yield ("frame", off, op, flags, plen, body)
         off += HDR_LEN + plen

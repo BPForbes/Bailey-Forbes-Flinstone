@@ -59,6 +59,11 @@ command -v tmux    >/dev/null 2>&1 || skip "tmux not installed"
 cleanup() {
     [ -n "${TCPDUMP_PID:-}" ] && sudo kill "$TCPDUMP_PID" 2>/dev/null || true
     $T kill-session -t "$S" 2>/dev/null || true
+    # Restore the bridge netfilter sysctls we toggled in setup so the host
+    # is not left in a modified firewalling state after an opted-in run.
+    [ -n "${ORIG_BR_NF_IPTABLES:-}" ]  && sudo sysctl -w net.bridge.bridge-nf-call-iptables="$ORIG_BR_NF_IPTABLES"  >/dev/null 2>&1 || true
+    [ -n "${ORIG_BR_NF_IP6TABLES:-}" ] && sudo sysctl -w net.bridge.bridge-nf-call-ip6tables="$ORIG_BR_NF_IP6TABLES" >/dev/null 2>&1 || true
+    [ -n "${ORIG_BR_NF_ARPTABLES:-}" ] && sudo sysctl -w net.bridge.bridge-nf-call-arptables="$ORIG_BR_NF_ARPTABLES" >/dev/null 2>&1 || true
     sudo ip link del br-a 2>/dev/null || true
     sudo ip link del br-b 2>/dev/null || true
     sudo ip netns del fl_router 2>/dev/null || true
@@ -69,8 +74,12 @@ trap cleanup EXIT
 cleanup
 
 # Bridge netfilter is on by default on most kernels and silently drops
-# bridged traffic that has no iptables rule to accept it. Disable per-bridge
-# netfilter for the duration of the test; cheap and reversible.
+# bridged traffic that has no iptables rule to accept it. Capture the
+# original values so cleanup() can restore them, then disable per-bridge
+# netfilter for the duration of the test.
+ORIG_BR_NF_IPTABLES=$(sudo sysctl -n  net.bridge.bridge-nf-call-iptables  2>/dev/null || echo)
+ORIG_BR_NF_IP6TABLES=$(sudo sysctl -n net.bridge.bridge-nf-call-ip6tables 2>/dev/null || echo)
+ORIG_BR_NF_ARPTABLES=$(sudo sysctl -n net.bridge.bridge-nf-call-arptables 2>/dev/null || echo)
 sudo sysctl -w net.bridge.bridge-nf-call-iptables=0  >/dev/null
 sudo sysctl -w net.bridge.bridge-nf-call-ip6tables=0 >/dev/null
 sudo sysctl -w net.bridge.bridge-nf-call-arptables=0 >/dev/null

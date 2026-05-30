@@ -14,7 +14,11 @@
 # Captures every pane's ANSI buffer to /opt/cursor/artifacts/ for review.
 
 set -e
-cd /workspace
+# Resolve repo root from the script location so the demo runs from any
+# CWD (Cursor container, normal checkout, packaged tarball).
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]:-$0}")" && pwd)"
+REPO_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
+cd "$REPO_ROOT"
 
 T="tmux -f /exec-daemon/tmux.portal.conf"
 S=server-multi-ip-demo

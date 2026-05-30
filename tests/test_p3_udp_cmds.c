@@ -46,11 +46,15 @@ static int test_udp_cmds_loopback(void) {
     int send_argc = 5;
 
     ASSERT(pthread_create(&tid, NULL, listen_thread, &la) == 0);
-    /* Let udplisten bind before udpsend fires. 50 ms is generous on a
-     * loopback. */
-    usleep(50 * 1000);
-
-    send_rc = cmd_udpsend_run(send_argc, send_argv);
+    /* Replace the flaky fixed 50 ms sleep with a bounded poll loop: try
+     * the send every 10 ms until it succeeds, up to 1 s. udplisten on
+     * loopback comes up well under that on every machine the test runs
+     * on, but a busy CI worker may still skip the first attempt. */
+    send_rc = 1;
+    for (int attempt = 0; attempt < 100 && send_rc != 0; attempt++) {
+        usleep(10 * 1000);
+        send_rc = cmd_udpsend_run(send_argc, send_argv);
+    }
     ASSERT(send_rc == 0);
 
     pthread_join(tid, NULL);

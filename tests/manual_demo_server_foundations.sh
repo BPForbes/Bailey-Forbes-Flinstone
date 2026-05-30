@@ -2,7 +2,15 @@
 # Drives a complete server foundations demo using 3 BPForbes_Flinstone_Shell
 # instances under tmux. Captures each pane's content to /opt/cursor/artifacts.
 set -e
-cd /workspace
+# Resolve repo root from the script location (preferring git when
+# available) so the demo runs from any CWD.
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]:-$0}")" && pwd)"
+REPO_ROOT="$(git -C "$SCRIPT_DIR" rev-parse --show-toplevel 2>/dev/null || cd "$SCRIPT_DIR/.." && pwd)"
+if [ -z "$REPO_ROOT" ] || [ ! -d "$REPO_ROOT" ]; then
+    echo "manual_demo_server_foundations.sh: could not resolve repo root" >&2
+    exit 1
+fi
+cd "$REPO_ROOT"
 
 T="tmux -f /exec-daemon/tmux.portal.conf"
 S=server-demo-recap
