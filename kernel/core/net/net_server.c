@@ -1033,7 +1033,7 @@ fl_result_t fl_net_server_accept_pending(fl_net_server_t *srv,
         fl_net_sock_close(client_h);
         /* Update disambiguation suffixes immediately so stale {N} markers
          * are not left on existing members until the next join/leave. */
-        recompute_disambig(srv, principal_copy);
+        recompute_disambig(srv, m->principal);
         return rc;
     }
 
