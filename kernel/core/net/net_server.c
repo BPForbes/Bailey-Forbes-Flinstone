@@ -1031,6 +1031,9 @@ fl_result_t fl_net_server_accept_pending(fl_net_server_t *srv,
         m->in_use = 0u;
         m->peer_handle = FL_NET_SOCK_INVALID;
         fl_net_sock_close(client_h);
+        /* Update disambiguation suffixes immediately so stale {N} markers
+         * are not left on existing members until the next join/leave. */
+        recompute_disambig(srv, principal_copy);
         return rc;
     }
 

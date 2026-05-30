@@ -80,6 +80,11 @@ cleanup
 ORIG_BR_NF_IPTABLES=$(sudo sysctl -n  net.bridge.bridge-nf-call-iptables  2>/dev/null || echo)
 ORIG_BR_NF_IP6TABLES=$(sudo sysctl -n net.bridge.bridge-nf-call-ip6tables 2>/dev/null || echo)
 ORIG_BR_NF_ARPTABLES=$(sudo sysctl -n net.bridge.bridge-nf-call-arptables 2>/dev/null || echo)
+# If any knob is absent, skip the test with status 0 instead of aborting.
+if [ -z "$ORIG_BR_NF_IPTABLES" ] || [ -z "$ORIG_BR_NF_IP6TABLES" ] || [ -z "$ORIG_BR_NF_ARPTABLES" ]; then
+    echo "manual_demo_netns_pcap.sh: bridge netfilter sysctls not available, skipping." >&2
+    exit 0
+fi
 sudo sysctl -w net.bridge.bridge-nf-call-iptables=0  >/dev/null
 sudo sysctl -w net.bridge.bridge-nf-call-ip6tables=0 >/dev/null
 sudo sysctl -w net.bridge.bridge-nf-call-arptables=0 >/dev/null

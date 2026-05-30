@@ -287,10 +287,11 @@ __attribute__((used))
 int cmd_netstat_batch_tokens_count(int argc, char **argv, int i) {
     int used = 1;
     int j = i + 1;
-    /* Consume the optional `-u` / `--udp` flag so batch dispatch doesn't
-     * leave it dangling as the next command. */
+    /* Consume any leading option tokens (starting with '-') so batch
+     * dispatch doesn't leave unknown flags like "-x" dangling as the
+     * next command, allowing cmd_netstat_run() to report invalid flags. */
     while (j < argc) {
-        if (!strcmp(argv[j], "-u") || !strcmp(argv[j], "--udp")) {
+        if (argv[j][0] == '-') {
             used++;
             j++;
             continue;

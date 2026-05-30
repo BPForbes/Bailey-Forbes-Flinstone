@@ -325,7 +325,7 @@ int main(int argc, char *argv[]) {
          * builtins (help / exit / clear / history / cc / make / bios)
          * that aren't in the numeric dispatch table. */
         static const char *line_mode_builtins[] = {
-            "help", "exit", "clear", "history", "his", "cc", "make", "bios",
+            "help", "exit", "clear", "history", "his", "cc", "make", "bios", "version",
             NULL
         };
         int is_cmd = (fl_shell_cmd_lookup(argv[1]) != FL_SCMD_UNKNOWN);
