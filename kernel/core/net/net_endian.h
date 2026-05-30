@@ -38,11 +38,36 @@
 #include "fl/net_asm.h"
 #endif
 
+/* Compile-time endianness probe used by the non-ASM fallbacks. `htons` /
+ * `htonl` etc. are value transformations: on a BE host the host integer
+ * already has the network byte layout, so the helpers must be a no-op
+ * there; on LE they must byte-swap. (#284) */
+#if defined(__BYTE_ORDER__) && defined(__ORDER_LITTLE_ENDIAN__) && \
+    defined(__ORDER_BIG_ENDIAN__)
+#  define FL_NET_HOST_IS_LE (__BYTE_ORDER__ == __ORDER_LITTLE_ENDIAN__)
+#  define FL_NET_HOST_IS_BE (__BYTE_ORDER__ == __ORDER_BIG_ENDIAN__)
+#elif defined(__LITTLE_ENDIAN__)
+#  define FL_NET_HOST_IS_LE 1
+#  define FL_NET_HOST_IS_BE 0
+#elif defined(__BIG_ENDIAN__)
+#  define FL_NET_HOST_IS_LE 0
+#  define FL_NET_HOST_IS_BE 1
+#else
+   /* All currently-supported targets (x86_64 H/K/B, AArch64 lab) are LE.
+    * Default to LE so the C fallback keeps working when the compiler
+    * doesn't expose the standard endian macros; if you port to a BE
+    * target add the case here. */
+#  define FL_NET_HOST_IS_LE 1
+#  define FL_NET_HOST_IS_BE 0
+#endif
+
 /* Host -> network 16-bit. */
 static inline uint16_t fl_net_htons(uint16_t v) {
 #if defined(FL_NET_ASM_AVAILABLE)
     return asm_net_htons_be16(v);
 #else
+    if (FL_NET_HOST_IS_BE)
+        return v;
     return (uint16_t)((v << 8) | (v >> 8));
 #endif
 }
@@ -52,6 +77,8 @@ static inline uint16_t fl_net_ntohs(uint16_t v) {
 #if defined(FL_NET_ASM_AVAILABLE)
     return asm_net_ntohs_be16(v);
 #else
+    if (FL_NET_HOST_IS_BE)
+        return v;
     return (uint16_t)((v << 8) | (v >> 8));
 #endif
 }
@@ -61,6 +88,8 @@ static inline uint32_t fl_net_htonl(uint32_t v) {
 #if defined(FL_NET_ASM_AVAILABLE)
     return asm_net_htonl_be32(v);
 #else
+    if (FL_NET_HOST_IS_BE)
+        return v;
     return ((v & 0x000000FFu) << 24) |
            ((v & 0x0000FF00u) << 8)  |
            ((v & 0x00FF0000u) >> 8)  |
@@ -73,6 +102,8 @@ static inline uint32_t fl_net_ntohl(uint32_t v) {
 #if defined(FL_NET_ASM_AVAILABLE)
     return asm_net_ntohl_be32(v);
 #else
+    if (FL_NET_HOST_IS_BE)
+        return v;
     return ((v & 0x000000FFu) << 24) |
            ((v & 0x0000FF00u) << 8)  |
            ((v & 0x00FF0000u) >> 8)  |
@@ -88,6 +119,8 @@ static inline uint64_t fl_net_htonll(uint64_t v) {
 #if defined(FL_NET_ASM_AVAILABLE)
     return asm_net_htonll_be64(v);
 #else
+    if (FL_NET_HOST_IS_BE)
+        return v;
     return ((v & 0x00000000000000FFull) << 56) |
            ((v & 0x000000000000FF00ull) << 40) |
            ((v & 0x0000000000FF0000ull) << 24) |
@@ -104,6 +137,8 @@ static inline uint64_t fl_net_ntohll(uint64_t v) {
 #if defined(FL_NET_ASM_AVAILABLE)
     return asm_net_ntohll_be64(v);
 #else
+    if (FL_NET_HOST_IS_BE)
+        return v;
     return ((v & 0x00000000000000FFull) << 56) |
            ((v & 0x000000000000FF00ull) << 40) |
            ((v & 0x0000000000FF0000ull) << 24) |

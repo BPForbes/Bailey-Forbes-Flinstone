@@ -140,9 +140,12 @@ fl_result_t fl_net_sock_bind(fl_net_sock_handle_t handle, uint32_t addr_be, uint
 
     if (!s)
         return FL_RESULT_INVAL;
-    /* SO_REUSEADDR keeps demo / test bind from failing when a prior listener
-     * left the port in TIME_WAIT. Best-effort: ignore setsockopt errors. */
-    {
+    /* SO_REUSEADDR keeps demo / test bind from failing when a prior STREAM
+     * listener left the port in TIME_WAIT. UDP doesn't have TIME_WAIT and
+     * enabling it on a DGRAM socket lets two demo clients bind the same
+     * port simultaneously (and silently race for recv), so gate by type.
+     * Best-effort: setsockopt errors are ignored. */
+    if (s->type == FL_NET_SOCK_TYPE_STREAM) {
         int yes = 1;
         (void)setsockopt(s->fd, SOL_SOCKET, SO_REUSEADDR, &yes, sizeof(yes));
     }
@@ -188,8 +191,14 @@ fl_result_t fl_net_sock_accept(fl_net_sock_handle_t listen_handle,
         return FL_RESULT_INVAL;
 
     cfd = accept(listen->fd, (struct sockaddr *)&peer, &peer_len);
-    if (cfd < 0)
+    if (cfd < 0) {
+        /* Differentiate "nothing pending right now" from a real error
+         * so the caller (e.g. fl_net_server_accept_pending) can keep
+         * polling on TIMEDOUT and surface BUSY / ERR otherwise. */
+        if (errno == EAGAIN || errno == EWOULDBLOCK || errno == EINTR)
+            return FL_RESULT_TIMEDOUT;
         return FL_RESULT_ERR;
+    }
 
     for (i = 0; i < FL_NET_SOCK_TABLE_MAX; i++) {
         if (!s_socks[i].in_use)
@@ -346,8 +355,10 @@ fl_result_t fl_net_sock_connect_from(fl_net_sock_handle_t handle,
     if (!s)
         return FL_RESULT_INVAL;
     if (local_be != 0u) {
-        int yes = 1;
-        (void)setsockopt(s->fd, SOL_SOCKET, SO_REUSEADDR, &yes, sizeof(yes));
+        if (s->type == FL_NET_SOCK_TYPE_STREAM) {
+            int yes = 1;
+            (void)setsockopt(s->fd, SOL_SOCKET, SO_REUSEADDR, &yes, sizeof(yes));
+        }
         sock_sin4(&sa, local_be, 0);
         if (bind(s->fd, (struct sockaddr *)&sa, sizeof(sa)) != 0)
             return FL_RESULT_ERR;

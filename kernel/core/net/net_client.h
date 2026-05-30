@@ -119,9 +119,12 @@ fl_result_t fl_net_client_send_private(fl_net_client_t *client,
                                        const char *text);
 
 /**
- * Look up the cached display name for `member_id`. Honour local-only nick
- * if set; otherwise host-global nick; otherwise `Principal {N}` (or just
- * `Principal` when singular). Returns FL_RESULT_NOENT when unknown.
+ * Look up the cached display name for `member_id`. Precedence (matches
+ * `render_client_member_display` and `contract_p3_server.h`):
+ *   1. host-global nick (`m->nick`) when set,
+ *   2. otherwise local-only nick (`m->local_nick`) when set,
+ *   3. otherwise `Principal {N}` (or just `Principal` when singular).
+ * Returns FL_RESULT_NOENT when no cached member has that id.
  */
 fl_result_t fl_net_client_member_display(const fl_net_client_t *client,
                                          fl_net_server_member_id_t member_id,

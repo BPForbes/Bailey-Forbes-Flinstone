@@ -53,7 +53,19 @@ static fl_result_t client_connect_impl(fl_net_client_t *client,
     if (client->state != FL_NET_CLIENT_STATE_DISCONNECTED)
         return FL_RESULT_BUSY;
 
-    fl_net_client_init(client);
+    /* Reject overlong / empty principals up front (before we open a
+     * socket) so the server side doesn't see a truncated HELLO. The
+     * cap is the client-side storage minus the trailing NUL, and we
+     * also clamp at FL_NET_SESSION_MAX_MSG so the wire payload fits. */
+    prin_len = strnlen(principal, sizeof(client->principal));
+    if (prin_len == 0u ||
+        prin_len == sizeof(client->principal) ||
+        prin_len > (size_t)FL_NET_SESSION_MAX_MSG)
+        return FL_RESULT_INVAL;
+
+    rc = fl_net_client_init(client);
+    if (rc != FL_RESULT_OK)
+        return rc;
 
     rc = fl_net_sock_open(FL_NET_SOCK_TYPE_STREAM, &h);
     if (rc != FL_RESULT_OK)
@@ -70,16 +82,10 @@ static fl_result_t client_connect_impl(fl_net_client_t *client,
         return rc;
     }
     client->peer_handle = h;
-    strncpy(client->principal, principal, sizeof(client->principal) - 1);
-
-    /* HELLO with principal as the payload (no terminating NUL on wire). */
-    prin_len = strnlen(client->principal, sizeof(client->principal));
-    if (prin_len == 0u || prin_len > FL_NET_SESSION_MAX_MSG) {
-        fl_net_sock_close(h);
-        client->peer_handle = FL_NET_SOCK_INVALID;
-        client->state = FL_NET_CLIENT_STATE_DISCONNECTED;
-        return FL_RESULT_INVAL;
-    }
+    /* prin_len is the strnlen above; copy exactly that many bytes and
+     * NUL-terminate explicitly so the storage is always valid. */
+    memcpy(client->principal, principal, prin_len);
+    client->principal[prin_len] = '\0';
     rc = fl_net_session_send_frame(h, (uint8_t)FL_NET_SESSION_OP_HELLO,
                                    (const uint8_t *)client->principal,
                                    (uint16_t)prin_len);
@@ -414,6 +420,22 @@ fl_result_t fl_net_client_send_private(fl_net_client_t *client,
     if (client->state != FL_NET_CLIENT_STATE_CONNECTED ||
         client->peer_handle == FL_NET_SOCK_INVALID)
         return FL_RESULT_INVAL;
+    /* Pre-check the cached roster so the caller gets FL_RESULT_NOENT
+     * synchronously instead of waiting for an OP_ERR / silent drop from
+     * the host. The roster is refreshed on every MEMBER_LIST_SNAPSHOT
+     * (set_local_nick / dispatch_frame). The host self-id (1) is always
+     * a valid recipient even when the snapshot hasn't arrived yet. */
+    if (recipient_id != FL_NET_SERVER_MEMBER_ID_HOST) {
+        int found = 0;
+        for (size_t i = 0; i < client->member_count; i++) {
+            if (client->members[i].member_id == recipient_id) {
+                found = 1;
+                break;
+            }
+        }
+        if (!found)
+            return FL_RESULT_NOENT;
+    }
     /* 4-byte [sender_id][reserved] prefix sits in front of the text. */
     tlen = strnlen(text, (size_t)FL_NET_SESSION_MAX_MSG - 4u + 1u);
     if (tlen == 0u || tlen > (size_t)FL_NET_SESSION_MAX_MSG - 4u)
@@ -471,6 +493,14 @@ fl_net_client_dispatch_frame(fl_net_client_t *client, uint8_t opcode,
         mid = (fl_net_server_member_id_t)
             (((uint16_t)payload[0] << 8) | payload[1]);
         text_off = 0u;
+        /* Disambiguate: only the local recipient with assigned_member_id
+         * == new_host_id is being promoted; every other peer is being
+         * told to reconnect to the new host. Keeping these two events
+         * distinct lets the shell-side handler skip the bind path on
+         * REDIRECT (it just needs to reconnect). */
+        kind = (mid == client->assigned_member_id)
+                   ? FL_NET_SERVER_EVENT_HOST_PROMOTE
+                   : FL_NET_SERVER_EVENT_HOST_REDIRECT;
     }
 
     text_len = plen > text_off ? (size_t)(plen - text_off) : 0u;

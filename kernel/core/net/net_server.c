@@ -405,18 +405,34 @@ fl_net_server_member_at(const fl_net_server_t *srv, size_t index) {
  * own self-member which has peer_handle = FL_NET_SOCK_INVALID). Drops the
  * member on permanent send error and emits a follow-up leave announcement.
  */
+/* Forward declaration: cleanup helper used by the broadcast functions
+ * to evict peers whose send_frame failed mid-fan-out (see comment block
+ * before drop_member for the full cleanup semantics). */
+static void drop_member(fl_net_server_t *srv, fl_net_server_member_t *m);
+
 static void broadcast_to_peers(fl_net_server_t *srv, uint8_t opcode,
                                const uint8_t *payload, uint16_t plen) {
+    /* Collect failed slot indices during the fan-out and drop them
+     * after the loop completes; doing it in-loop would invalidate the
+     * iterator (drop_member triggers announce_leave + a recursive
+     * broadcast that mutates the same members table). */
+    size_t failed[FL_NET_SERVER_MAX_MEMBERS];
+    size_t failed_n = 0;
     if (!srv)
         return;
     for (size_t i = 0; i < FL_NET_SERVER_MAX_MEMBERS; i++) {
         fl_net_server_member_t *m = &srv->members[i];
+        fl_result_t rc;
         if (!m->in_use)
             continue;
         if (m->peer_handle == FL_NET_SOCK_INVALID)
             continue;
-        (void)fl_net_session_send_frame(m->peer_handle, opcode, payload, plen);
+        rc = fl_net_session_send_frame(m->peer_handle, opcode, payload, plen);
+        if (rc != FL_RESULT_OK)
+            failed[failed_n++] = i;
     }
+    for (size_t k = 0; k < failed_n; k++)
+        drop_member(srv, &srv->members[failed[k]]);
 }
 
 /* Broadcast variant that skips one member so the chat relay does not echo
@@ -425,18 +441,25 @@ static void broadcast_to_peers_except(fl_net_server_t *srv,
                                       fl_net_server_member_id_t skip,
                                       uint8_t opcode,
                                       const uint8_t *payload, uint16_t plen) {
+    size_t failed[FL_NET_SERVER_MAX_MEMBERS];
+    size_t failed_n = 0;
     if (!srv)
         return;
     for (size_t i = 0; i < FL_NET_SERVER_MAX_MEMBERS; i++) {
         fl_net_server_member_t *m = &srv->members[i];
+        fl_result_t rc;
         if (!m->in_use)
             continue;
         if (m->peer_handle == FL_NET_SOCK_INVALID)
             continue;
         if (m->member_id == skip)
             continue;
-        (void)fl_net_session_send_frame(m->peer_handle, opcode, payload, plen);
+        rc = fl_net_session_send_frame(m->peer_handle, opcode, payload, plen);
+        if (rc != FL_RESULT_OK)
+            failed[failed_n++] = i;
     }
+    for (size_t k = 0; k < failed_n; k++)
+        drop_member(srv, &srv->members[failed[k]]);
 }
 
 /* Compose "[Server Announcement] <text>" locally on the host's terminal.
@@ -537,10 +560,21 @@ fl_result_t fl_net_server_send_public(fl_net_server_t *srv, const char *text) {
         return FL_RESULT_INVAL;
     render_member_display(member_by_id(srv, FL_NET_SERVER_MEMBER_ID_HOST),
                           host_disp, sizeof(host_disp));
+    /* "<display>: <text>" must fit in line[FL_NET_SESSION_MAX_MSG] without
+     * silent truncation. Reject when the combined size would overflow so
+     * the caller learns rather than the recipient seeing a clipped tail. */
+    {
+        size_t disp_len = strnlen(host_disp, sizeof(host_disp));
+        size_t needed = disp_len + 2u /* ": " */ + tlen;
+        if (needed > (size_t)FL_NET_SESSION_MAX_MSG)
+            return FL_RESULT_INVAL;
+    }
     n = snprintf(line, sizeof(line), "%s: %.*s", host_disp,
                  (int)tlen, text);
     if (n <= 0)
         return FL_RESULT_INVAL;
+    /* The length check above already guarantees n < sizeof(line); the
+     * snprintf-truncation guard stays as a belt-and-suspenders. */
     if ((size_t)n >= sizeof(line))
         n = (int)sizeof(line) - 1;
     /* Skip the host's own self-member (peer_handle = INVALID anyway, but
@@ -930,10 +964,13 @@ fl_result_t fl_net_server_accept_pending(fl_net_server_t *srv,
         return FL_RESULT_INVAL;
 
     rc = fl_net_sock_accept(srv->listen_handle, &client_h);
-    if (rc == FL_RESULT_NOSYS)
-        return FL_RESULT_NOSYS;
-    if (rc != FL_RESULT_OK)
-        return FL_RESULT_TIMEDOUT; /* nothing pending */
+    if (rc != FL_RESULT_OK) {
+        /* Preserve the real error from the shim (NOSYS on non-hosted
+         * builds, TIMEDOUT for "nothing pending", anything else is a
+         * genuine failure the caller should see). Masking everything as
+         * TIMEDOUT hid socket-table corruption and FD limit errors. */
+        return rc;
+    }
 
     /* Read HELLO from new peer. */
     rc = fl_net_session_recv_frame(client_h, &opcode, payload, sizeof(payload),
@@ -982,8 +1019,20 @@ fl_result_t fl_net_server_accept_pending(fl_net_server_t *srv,
         memcpy(ack_payload + 2, disp, dn);
         ack_len = 2u + dn;
     }
-    (void)fl_net_session_send_frame(client_h, (uint8_t)FL_NET_SESSION_OP_HELLO_ACK,
-                                    ack_payload, (uint16_t)ack_len);
+    rc = fl_net_session_send_frame(client_h, (uint8_t)FL_NET_SESSION_OP_HELLO_ACK,
+                                   ack_payload, (uint16_t)ack_len);
+    if (rc != FL_RESULT_OK) {
+        /* Roll the just-allocated slot back so the broken peer does not
+         * stay advertised in the member registry. close() shuts down
+         * the half-open TCP connection; the rx parser slot was reset
+         * above and stays reset because the caller can re-accept later. */
+        size_t slot_idx = (size_t)(m - srv->members);
+        member_rx_reset_slot(slot_idx);
+        m->in_use = 0u;
+        m->peer_handle = FL_NET_SOCK_INVALID;
+        fl_net_sock_close(client_h);
+        return rc;
+    }
 
     /* Optional NICK_PROMPT before join announcement when there's a collision.
      * Per the contract sequencing rule the JOIN_ANNOUNCE fires first. */
@@ -1041,10 +1090,18 @@ static int dispatch_member_frame(fl_net_server_t *srv, fl_net_server_member_t *m
 
     switch (opcode) {
     case FL_NET_SESSION_OP_MSG: {
-        /* "Sender: text" relayed to everyone except the sender. */
+        /* "Sender: text" relayed to everyone except the sender. Mirror the
+         * fl_net_server_send_public size guard: reject (do not silently
+         * truncate) when "<display>: <text>" would overflow the wire
+         * payload. The client got an OK locally; the host just drops the
+         * over-sized relay rather than corrupting it. */
         char line[FL_NET_SESSION_MAX_MSG];
         int n;
+        size_t disp_len;
         render_member_display(m, disp, sizeof(disp));
+        disp_len = strnlen(disp, sizeof(disp));
+        if (disp_len + 2u /* ": " */ + (size_t)plen > (size_t)FL_NET_SESSION_MAX_MSG)
+            return 0;
         n = snprintf(line, sizeof(line), "%s: %.*s", disp, (int)plen,
                      plen > 0u ? (const char *)payload : "");
         if (n <= 0)
