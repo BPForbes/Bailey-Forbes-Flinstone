@@ -1022,18 +1022,21 @@ fl_result_t fl_net_server_accept_pending(fl_net_server_t *srv,
     rc = fl_net_session_send_frame(client_h, (uint8_t)FL_NET_SESSION_OP_HELLO_ACK,
                                    ack_payload, (uint16_t)ack_len);
     if (rc != FL_RESULT_OK) {
+        char principal_copy[FL_NET_SERVER_PRINCIPAL_MAX];
         /* Roll the just-allocated slot back so the broken peer does not
          * stay advertised in the member registry. close() shuts down
          * the half-open TCP connection; the rx parser slot was reset
          * above and stays reset because the caller can re-accept later. */
+        memcpy(principal_copy, m->principal, sizeof(principal_copy));
+        principal_copy[sizeof(principal_copy) - 1] = '\0';
         size_t slot_idx = (size_t)(m - srv->members);
         member_rx_reset_slot(slot_idx);
         m->in_use = 0u;
         m->peer_handle = FL_NET_SOCK_INVALID;
-        fl_net_sock_close(client_h);
         /* Update disambiguation suffixes immediately so stale {N} markers
          * are not left on existing members until the next join/leave. */
-        recompute_disambig(srv, m->principal);
+        recompute_disambig(srv, principal_copy);
+        fl_net_sock_close(client_h);
         return rc;
     }
 

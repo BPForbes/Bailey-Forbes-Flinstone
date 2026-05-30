@@ -85,9 +85,18 @@ if [ -z "$ORIG_BR_NF_IPTABLES" ] || [ -z "$ORIG_BR_NF_IP6TABLES" ] || [ -z "$ORI
     echo "manual_demo_netns_pcap.sh: bridge netfilter sysctls not available, skipping." >&2
     exit 0
 fi
-sudo sysctl -w net.bridge.bridge-nf-call-iptables=0  >/dev/null
-sudo sysctl -w net.bridge.bridge-nf-call-ip6tables=0 >/dev/null
-sudo sysctl -w net.bridge.bridge-nf-call-arptables=0 >/dev/null
+if ! sudo sysctl -w net.bridge.bridge-nf-call-iptables=0  >/dev/null 2>&1; then
+    echo "manual_demo_netns_pcap.sh: bridge-nf-call-iptables not writable, skipping." >&2
+    exit 0
+fi
+if ! sudo sysctl -w net.bridge.bridge-nf-call-ip6tables=0 >/dev/null 2>&1; then
+    echo "manual_demo_netns_pcap.sh: bridge-nf-call-ip6tables not writable, skipping." >&2
+    exit 0
+fi
+if ! sudo sysctl -w net.bridge.bridge-nf-call-arptables=0 >/dev/null 2>&1; then
+    echo "manual_demo_netns_pcap.sh: bridge-nf-call-arptables not writable, skipping." >&2
+    exit 0
+fi
 
 # -- topology ---------------------------------------------------------------
 for ns in fl_host fl_client fl_router; do sudo ip netns add "$ns"; done
