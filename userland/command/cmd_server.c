@@ -27,6 +27,8 @@
 /* Process-wide session state                                                */
 /* ------------------------------------------------------------------------- */
 
+static pthread_mutex_t session_mutex = PTHREAD_MUTEX_INITIALIZER;
+
 static fl_net_server_t g_server;
 static fl_server_bg_t *g_server_bg;
 static int g_server_running;
@@ -243,6 +245,8 @@ static void *promote_thread_main(void *arg) {
     struct timespec ts = { 0, 80 * 1000 * 1000 }; /* 80ms settle window */
     nanosleep(&ts, NULL);
 
+    pthread_mutex_lock(&session_mutex);
+
     /* Drop the old client (we are NOT inside that bg loop). */
     if (g_client_bg) {
         fl_server_bg_stop_client(g_client_bg);
@@ -254,6 +258,7 @@ static void *promote_thread_main(void *arg) {
         fl_result_t rc = fl_net_server_host_start(&g_server, pa->local_ip_be,
                                                   pa->new_port, pa->principal);
         if (rc != FL_RESULT_OK) {
+            pthread_mutex_unlock(&session_mutex);
             fl_color_error("host takeover bind failed (rc=%d); please run "
                            "'server host <ip:port>' manually", (int)rc);
             free(pa);
@@ -262,11 +267,13 @@ static void *promote_thread_main(void *arg) {
         rc = fl_server_bg_start_server(&g_server, &g_server_bg);
         if (rc != FL_RESULT_OK) {
             fl_net_server_host_stop(&g_server);
+            pthread_mutex_unlock(&session_mutex);
             fl_color_error("host takeover bg start failed (rc=%d)", (int)rc);
             free(pa);
             return NULL;
         }
         g_server_running = 1;
+        pthread_mutex_unlock(&session_mutex);
         /* No local "you are the host" line: the old host already broadcast
          * "[Server Announcement]: <display> is now the host" to all peers
          * including this one. New host reindexes to member_id 1 by virtue
@@ -287,6 +294,7 @@ static void *promote_thread_main(void *arg) {
             }
         }
         if (rc != FL_RESULT_OK) {
+            pthread_mutex_unlock(&session_mutex);
             fl_color_error("reconnect to new host failed (rc=%d); run "
                            "'server join <ip:port>' manually", (int)rc);
             free(pa);
@@ -298,16 +306,18 @@ static void *promote_thread_main(void *arg) {
         {
             fl_result_t bg_rc = start_client_bg();
             if (bg_rc != FL_RESULT_OK) {
+                fl_net_client_disconnect(&g_client);
+                pthread_mutex_unlock(&session_mutex);
                 fl_color_error("reconnect bg start failed (rc=%d); run "
                                "'server join <ip:port>' manually",
                                (int)bg_rc);
-                fl_net_client_disconnect(&g_client);
                 free(pa);
                 return NULL;
             }
         }
         fl_color_success("reconnected to new host on member_id %u",
                          (unsigned)g_client.assigned_member_id);
+        pthread_mutex_unlock(&session_mutex);
     }
     free(pa);
     return NULL;
@@ -425,24 +435,30 @@ static int verb_host(int argc, char **argv) {
         fl_color_error("usage: server host <ip:port>");
         return 1;
     }
+    pthread_mutex_lock(&session_mutex);
     if (g_server_running) {
+        pthread_mutex_unlock(&session_mutex);
         fl_color_error("server already hosting");
         return 1;
     }
     if (fl_net_client_state(&g_client) == FL_NET_CLIENT_STATE_CONNECTED) {
+        pthread_mutex_unlock(&session_mutex);
         fl_color_error("already joined a server; leave first");
         return 1;
     }
     if (parse_endpoint(argv[2], &addr_be, &port) != 0) {
+        pthread_mutex_unlock(&session_mutex);
         fl_color_error("invalid ip:port '%s'", argv[2]);
         return 1;
     }
     rc = fl_net_server_host_start(&g_server, addr_be, port, current_principal());
     if (rc == FL_RESULT_NOSYS) {
+        pthread_mutex_unlock(&session_mutex);
         fl_color_error("hosted sockets unavailable; cannot host");
         return 1;
     }
     if (rc != FL_RESULT_OK) {
+        pthread_mutex_unlock(&session_mutex);
         fl_color_error("server host failed (rc=%d); is the port already bound?",
                        (int)rc);
         return 1;
@@ -450,10 +466,12 @@ static int verb_host(int argc, char **argv) {
     rc = fl_server_bg_start_server(&g_server, &g_server_bg);
     if (rc != FL_RESULT_OK) {
         fl_net_server_host_stop(&g_server);
+        pthread_mutex_unlock(&session_mutex);
         fl_color_error("server background start failed (rc=%d)", (int)rc);
         return 1;
     }
     g_server_running = 1;
+    pthread_mutex_unlock(&session_mutex);
     fl_color_success("hosting as '%s' on %s", current_principal(), argv[2]);
     return 0;
 }
@@ -473,14 +491,17 @@ static int verb_join(int argc, char **argv) {
         fl_color_error("usage: server join <ip:port> [-bind <local_ip>]");
         return 1;
     }
+    pthread_mutex_lock(&session_mutex);
     /* Reap any dead BG handle from a host-closed prior session BEFORE
      * the "already joined" check so a stale pointer cannot block re-join. */
     reap_client_bg_if_dead();
     if (g_server_running) {
+        pthread_mutex_unlock(&session_mutex);
         fl_color_error("already hosting; kill first to join a different server");
         return 1;
     }
     if (fl_net_client_state(&g_client) == FL_NET_CLIENT_STATE_CONNECTED) {
+        pthread_mutex_unlock(&session_mutex);
         fl_color_error("already joined; leave first");
         return 1;
     }
@@ -492,6 +513,7 @@ static int verb_join(int argc, char **argv) {
     for (int i = 3; i + 1 < argc; i++) {
         if (!strcmp(argv[i], "-bind")) {
             if (!fl_net_ipv4_parse_literal(argv[i + 1], &local_be)) {
+                pthread_mutex_unlock(&session_mutex);
                 fl_color_error("invalid -bind ip '%s'", argv[i + 1]);
                 return 1;
             }
@@ -501,10 +523,12 @@ static int verb_join(int argc, char **argv) {
     rc = fl_net_client_connect_from(&g_client, local_be, peer_be, port,
                                     current_principal(), 3000u);
     if (rc == FL_RESULT_NOSYS) {
+        pthread_mutex_unlock(&session_mutex);
         fl_color_error("hosted sockets unavailable; cannot join");
         return 1;
     }
     if (rc != FL_RESULT_OK) {
+        pthread_mutex_unlock(&session_mutex);
         fl_color_error("server join failed (rc=%d)", (int)rc);
         return 1;
     }
@@ -518,11 +542,13 @@ static int verb_join(int argc, char **argv) {
         /* Surfacing this prevents a "connected but deaf" session where
          * the user sees the join success line but never receives any
          * messages. Tear the half-open client back down. */
+        fl_net_client_disconnect(&g_client);
+        pthread_mutex_unlock(&session_mutex);
         fl_color_error("server join: background receive start failed (rc=%d)",
                        (int)rc);
-        fl_net_client_disconnect(&g_client);
         return 1;
     }
+    pthread_mutex_unlock(&session_mutex);
     return 0;
 }
 
@@ -530,6 +556,7 @@ static int verb_join(int argc, char **argv) {
  * and-stop (the lowest non-host id is promoted and a blue announce
  * tells everyone); from a joined shell it simply disconnects. */
 static int verb_leave(void) {
+    pthread_mutex_lock(&session_mutex);
     if (g_server_running) {
         /* Host leaving: transfer + stop. */
         fl_net_server_member_id_t new_host = FL_NET_SERVER_MEMBER_ID_NONE;
@@ -539,6 +566,7 @@ static int verb_leave(void) {
         }
         (void)fl_net_server_transfer_and_stop(&g_server, &new_host);
         g_server_running = 0;
+        pthread_mutex_unlock(&session_mutex);
         if (new_host == FL_NET_SERVER_MEMBER_ID_NONE) {
             fl_color_success("session terminated (no remaining members)");
         }
@@ -548,6 +576,7 @@ static int verb_leave(void) {
         return 0;
     }
     if (fl_net_client_state(&g_client) != FL_NET_CLIENT_STATE_CONNECTED) {
+        pthread_mutex_unlock(&session_mutex);
         fl_color_error("not currently joined");
         return 1;
     }
@@ -556,12 +585,15 @@ static int verb_leave(void) {
         g_client_bg = NULL;
     }
     fl_net_client_disconnect(&g_client);
+    pthread_mutex_unlock(&session_mutex);
     fl_color_success("left session");
     return 0;
 }
 
 static int verb_kill(void) {
+    pthread_mutex_lock(&session_mutex);
     if (!g_server_running) {
+        pthread_mutex_unlock(&session_mutex);
         fl_color_error("not hosting; nothing to kill");
         return 1;
     }
@@ -571,6 +603,7 @@ static int verb_kill(void) {
     }
     fl_net_server_host_stop(&g_server);
     g_server_running = 0;
+    pthread_mutex_unlock(&session_mutex);
     fl_color_success("session terminated");
     return 0;
 }
@@ -629,8 +662,10 @@ static int verb_msg(int argc, char **argv) {
         return 1;
     }
 
+    pthread_mutex_lock(&session_mutex);
     if (!g_server_running &&
         fl_net_client_state(&g_client) != FL_NET_CLIENT_STATE_CONNECTED) {
+        pthread_mutex_unlock(&session_mutex);
         fl_color_error("not in a session; host or join first");
         return 1;
     }
@@ -640,15 +675,19 @@ static int verb_msg(int argc, char **argv) {
          * user already typed the text. Silence = success; errors print. */
         if (g_server_running) {
             if (fl_net_server_send_public(&g_server, joined) != FL_RESULT_OK) {
+                pthread_mutex_unlock(&session_mutex);
                 fl_color_error("server msg: broadcast failed");
                 return 1;
             }
+            pthread_mutex_unlock(&session_mutex);
             return 0;
         }
         if (fl_net_client_send_msg(&g_client, joined) != FL_RESULT_OK) {
+            pthread_mutex_unlock(&session_mutex);
             fl_color_error("server msg: send failed");
             return 1;
         }
+        pthread_mutex_unlock(&session_mutex);
         return 0;
     }
 
@@ -680,6 +719,7 @@ static int verb_msg(int argc, char **argv) {
             recipient = (fl_net_server_member_id_t)target_disambig;
         }
         if (recipient == FL_NET_SERVER_MEMBER_ID_NONE) {
+            pthread_mutex_unlock(&session_mutex);
             fl_color_error("no such recipient '%s' (use -id <N> to disambiguate)",
                            target_name ? target_name : "?");
             return 1;
@@ -690,6 +730,7 @@ static int verb_msg(int argc, char **argv) {
                                                recipient_display,
                                                sizeof(recipient_display));
             if (fl_net_server_send_private(&g_server, recipient, joined) != FL_RESULT_OK) {
+                pthread_mutex_unlock(&session_mutex);
                 fl_color_error("server msg: deliver failed");
                 return 1;
             }
@@ -698,6 +739,7 @@ static int verb_msg(int argc, char **argv) {
                                                recipient_display,
                                                sizeof(recipient_display));
             if (fl_net_client_send_private(&g_client, recipient, joined) != FL_RESULT_OK) {
+                pthread_mutex_unlock(&session_mutex);
                 fl_color_error("server msg: send failed");
                 return 1;
             }
@@ -705,6 +747,7 @@ static int verb_msg(int argc, char **argv) {
         /* Recipient renders "From X -> You"; sender stays silent on success. */
         (void)recipient_display;
     }
+    pthread_mutex_unlock(&session_mutex);
     return 0;
 }
 
@@ -809,9 +852,11 @@ static int verb_nick(int argc, char **argv) {
 /* `server connected` — roster. Host reads the live registry; client
  * reads the cached OP_MEMBER_LIST_SNAPSHOT. Anyone can run it. */
 static int verb_connected(void) {
+    pthread_mutex_lock(&session_mutex);
     if (g_server_running) {
         char disp[FL_NET_SERVER_DISPLAY_NAME_MAX];
         size_t count = fl_net_server_member_count(&g_server);
+        pthread_mutex_unlock(&session_mutex);
         fl_shell_io_lock();
         for (size_t k = 0; k < count; k++) {
             const fl_net_server_member_t *m = fl_net_server_member_at(&g_server, k);
@@ -825,6 +870,7 @@ static int verb_connected(void) {
         return 0;
     }
     if (fl_net_client_state(&g_client) != FL_NET_CLIENT_STATE_CONNECTED) {
+        pthread_mutex_unlock(&session_mutex);
         fl_color_error("server connected: not currently in a session");
         return 1;
     }
@@ -832,6 +878,7 @@ static int verb_connected(void) {
     {
         size_t count = fl_net_client_member_count(&g_client);
         char disp[FL_NET_SERVER_DISPLAY_NAME_MAX];
+        pthread_mutex_unlock(&session_mutex);
         fl_shell_io_lock();
         for (size_t k = 0; k < count; k++) {
             const fl_net_client_member_t *m = fl_net_client_member_at(&g_client, k);
@@ -853,6 +900,7 @@ static int verb_connected(void) {
 /* ------------------------------------------------------------------------- */
 
 void cmd_server_atexit(void) {
+    pthread_mutex_lock(&session_mutex);
     if (g_server_running) {
         fl_net_server_member_id_t new_host = FL_NET_SERVER_MEMBER_ID_NONE;
         if (g_server_bg) {
@@ -861,6 +909,7 @@ void cmd_server_atexit(void) {
         }
         (void)fl_net_server_transfer_and_stop(&g_server, &new_host);
         g_server_running = 0;
+        pthread_mutex_unlock(&session_mutex);
         return;
     }
     if (fl_net_client_state(&g_client) == FL_NET_CLIENT_STATE_CONNECTED) {
@@ -870,6 +919,7 @@ void cmd_server_atexit(void) {
         }
         fl_net_client_disconnect(&g_client);
     }
+    pthread_mutex_unlock(&session_mutex);
 }
 
 /* ------------------------------------------------------------------------- */
