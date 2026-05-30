@@ -43,6 +43,7 @@
  *****************************************************************************/
 
 #include "common.h"
+#include "cmd_decl.h"
 #include "shell_io.h"
 #include <stdint.h>
 #include "threadpool.h"
@@ -317,18 +318,25 @@ int main(int argc, char *argv[]) {
        treat as createdisk shortcut.
     */
     if ((argc == 4 || argc == 5) && argv[1] && argv[1][0] != '-') {
-        /* Must include every builtin name so batch mode does not treat them as createdisk shortcut */
-        static const char *skip[] = {"help","cd","dir","make","write","cat","type","mkdir","rmdir",
-            "rmtree","mv","version","contracts","audit","exit","bios","clear","history","his","cc","listclusters","listdirs",
-            "setdisk","createdisk","format","search","writecluster","delcluster","update","redirect",
-            "initdisk","rerun","import","du","printdisk","addcluster","where","loc",
-            "diskput","diskget","diskfiles","diskdel","diskmkdir","sudo","su","login",
-            "logout","useradd","userdel","passwd","whoami","ping","check","server",
-            "udpsend","udplisten","arp","ifconfig","route","netstat","nslookup",
-            "netsh",NULL};
-        int is_cmd = 0;
-        for (int k = 0; skip[k]; k++)
-            if (!strcmp(argv[1], skip[k])) { is_cmd = 1; break; }
+        /* Replaces the legacy hard-coded skip[] list. The central command
+         * registry (cmd_registry.c, fl_shell_cmd_lookup) covers every
+         * registered builtin, so new commands no longer need a sync
+         * update here. A small fixed list still covers the *line-mode*
+         * builtins (help / exit / clear / history / cc / make / bios)
+         * that aren't in the numeric dispatch table. */
+        static const char *line_mode_builtins[] = {
+            "help", "exit", "clear", "history", "his", "cc", "make", "bios",
+            NULL
+        };
+        int is_cmd = (fl_shell_cmd_lookup(argv[1]) != FL_SCMD_UNKNOWN);
+        if (!is_cmd) {
+            for (int k = 0; line_mode_builtins[k]; k++) {
+                if (!strcmp(argv[1], line_mode_builtins[k])) {
+                    is_cmd = 1;
+                    break;
+                }
+            }
+        }
         if (!is_cmd) {
         int rowCount = atoi(argv[2]);
         int nibbleCount = atoi(argv[3]);

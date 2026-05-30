@@ -120,7 +120,7 @@ static void join_argv_into(char *dst, size_t cap, int argc, char **argv, int fro
 /* ------------------------------------------------------------------------- */
 
 /* Forward declarations referenced by the client event sink. */
-static void start_client_bg(void);
+static fl_result_t start_client_bg(void);
 static void spawn_promote_thread(int am_new_host, uint32_t new_ip_be,
                                  uint16_t new_port);
 static void maybe_handle_nick_prompt_sync(void);
@@ -175,14 +175,18 @@ static void client_event_print(fl_net_server_event_kind_t kind, const char *text
     case FL_NET_SERVER_EVENT_CLOSED:
         fl_color_warn("session closed by host");
         break;
-    case FL_NET_SERVER_EVENT_HOST_PROMOTE: {
+    case FL_NET_SERVER_EVENT_HOST_PROMOTE:
+    case FL_NET_SERVER_EVENT_HOST_REDIRECT: {
         /* Payload: [u16_be new_id][u32 new_ip_be][u16_be new_port].
-         * Silent here — old host already broadcast the blue announce
-         * before sending this frame. Just decode + spawn the transition. */
+         * Silent here \xe2\x80\x94 old host already broadcast the blue announce
+         * before sending this frame. The net_client.c dispatcher already
+         * chose between PROMOTE (we are the new host) and REDIRECT
+         * (reconnect to someone else); honour that distinction here. */
         const uint8_t *p = (const uint8_t *)text;
-        uint16_t new_id_be = mid;
         uint32_t new_ip_be;
         uint16_t new_port;
+        int am_new_host = (kind == FL_NET_SERVER_EVENT_HOST_PROMOTE) ? 1 : 0;
+        (void)mid;
         if (!p) {
             fl_color_warn("host promote received with no payload; leaving");
             return;
@@ -191,11 +195,9 @@ static void client_event_print(fl_net_server_event_kind_t kind, const char *text
          * [2..5] new_ip_be (raw NBO bytes), [6..7] new_port (uint16 BE). */
         new_ip_be = fl_net_get_u32_nbo(&p[2]);
         new_port = fl_net_get_u16_be(&p[6]);
-        spawn_promote_thread(new_id_be == g_client.assigned_member_id ? 1 : 0,
-                             new_ip_be, new_port);
+        spawn_promote_thread(am_new_host, new_ip_be, new_port);
         break;
     }
-    case FL_NET_SERVER_EVENT_HOST_REDIRECT:
     case FL_NET_SERVER_EVENT_HELLO_ACK:
     case FL_NET_SERVER_EVENT_NONE:
     default:
@@ -215,11 +217,12 @@ static void reap_client_bg_if_dead(void) {
     }
 }
 
-static void start_client_bg(void) {
+static fl_result_t start_client_bg(void) {
     reap_client_bg_if_dead();
     if (g_client_bg)
-        return;
-    (void)fl_server_bg_start_client(&g_client, client_event_print, NULL, &g_client_bg);
+        return FL_RESULT_OK;
+    return fl_server_bg_start_client(&g_client, client_event_print, NULL,
+                                     &g_client_bg);
 }
 
 /* ------------------------------------------------------------------------- */
@@ -292,7 +295,17 @@ static void *promote_thread_main(void *arg) {
         /* Do NOT run a sync Y/N prompt from this background thread — the
          * interpreter's main loop owns stdin. A late NICK_PROMPT will
          * surface as a cyan SERVER message via the BG event sink. */
-        start_client_bg();
+        {
+            fl_result_t bg_rc = start_client_bg();
+            if (bg_rc != FL_RESULT_OK) {
+                fl_color_error("reconnect bg start failed (rc=%d); run "
+                               "'server join <ip:port>' manually",
+                               (int)bg_rc);
+                fl_net_client_disconnect(&g_client);
+                free(pa);
+                return NULL;
+            }
+        }
         fl_color_success("reconnected to new host on member_id %u",
                          (unsigned)g_client.assigned_member_id);
     }
@@ -500,7 +513,16 @@ static int verb_join(int argc, char **argv) {
     /* Synchronously handle the NICK_PROMPT (if any) BEFORE we start the
      * background loop so the Y/N dialogue is clean. */
     maybe_handle_nick_prompt_sync();
-    start_client_bg();
+    rc = start_client_bg();
+    if (rc != FL_RESULT_OK) {
+        /* Surfacing this prevents a "connected but deaf" session where
+         * the user sees the join success line but never receives any
+         * messages. Tear the half-open client back down. */
+        fl_color_error("server join: background receive start failed (rc=%d)",
+                       (int)rc);
+        fl_net_client_disconnect(&g_client);
+        return 1;
+    }
     return 0;
 }
 
@@ -856,7 +878,7 @@ void cmd_server_atexit(void) {
 
 int cmd_server_run(int argc, char **argv) {
     if (argc < 2) {
-        fl_color_error("usage: server <host|join|msg|announce|nick|connected|leave|kill> ...");
+        fl_color_error("usage: server <host|join|msg|announce|nick|set-nick|connected|leave|kill> ...");
         return 1;
     }
     if (!strcmp(argv[1], "host"))      return verb_host(argc, argv);

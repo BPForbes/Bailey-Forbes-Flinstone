@@ -256,8 +256,21 @@ int cmd_route_batch_tokens_count(int argc, char **argv, int i) {
 int cmd_netstat_run(int argc, char **argv) {
     uint16_t ports[64];
     unsigned n;
-    (void)argc;
-    (void)argv;
+    int udp_only = 0;
+    /* Accept the documented `-u` / `--udp` flag (UDP-only summary; today
+     * the only protocol we expose anyway, but the flag keeps the surface
+     * stable as we add TCP/socket listings). Unknown options error out
+     * so the batch token counter and the runtime stay aligned. */
+    for (int k = 1; k < argc; k++) {
+        if (!strcmp(argv[k], "-u") || !strcmp(argv[k], "--udp"))
+            udp_only = 1;
+        else {
+            fprintf(stderr, "netstat: unknown option '%s' (usage: netstat [-u])\n",
+                    argv[k]);
+            return 1;
+        }
+    }
+    (void)udp_only; /* reserved for future protocol gating */
     n = fl_net_udp_bound_ports_snapshot(ports, (unsigned)(sizeof(ports) /
                                                           sizeof(ports[0])));
     printf("Proto Local-Port  State\n");
@@ -272,10 +285,19 @@ int cmd_netstat_run(int argc, char **argv) {
 
 __attribute__((used))
 int cmd_netstat_batch_tokens_count(int argc, char **argv, int i) {
-    (void)argc;
-    (void)argv;
-    (void)i;
-    return 1;
+    int used = 1;
+    int j = i + 1;
+    /* Consume the optional `-u` / `--udp` flag so batch dispatch doesn't
+     * leave it dangling as the next command. */
+    while (j < argc) {
+        if (!strcmp(argv[j], "-u") || !strcmp(argv[j], "--udp")) {
+            used++;
+            j++;
+            continue;
+        }
+        break;
+    }
+    return used;
 }
 
 /* ------------------------------------------------------------------------- */
@@ -342,11 +364,13 @@ int cmd_netsh_batch_tokens_count(int argc, char **argv, int i) {
     used++; /* sub-verb token */
     if (!strcmp(argv[j], "arp"))
         return used + cmd_arp_batch_tokens_count(argc, argv, j) - 1;
+    if (!strcmp(argv[j], "netstat"))
+        return used + cmd_netstat_batch_tokens_count(argc, argv, j) - 1;
     if (!strcmp(argv[j], "nslookup")) {
         if (j + 1 < argc)
             used++;
         return used;
     }
-    /* ifconfig / route / netstat are bare verbs (no extra tokens) */
+    /* ifconfig / route are bare verbs (no extra tokens) */
     return used;
 }

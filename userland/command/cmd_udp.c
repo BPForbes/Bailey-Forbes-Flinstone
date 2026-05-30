@@ -239,9 +239,17 @@ __attribute__((used))
 int cmd_udpsend_batch_tokens_count(int argc, char **argv, int i) {
     int used = 1;
     int j = i + 1;
-    (void)argv;
-    /* udpsend <ip:port> <message...> — consume all remaining non-flag tokens. */
+    /* udpsend <ip:port> <message...>. The runtime concatenates every
+     * remaining argv token as part of the message. In batch mode that
+     * would swallow the next builtin (e.g. `udpsend X:1 hi help` should
+     * still run `help`), so stop on the first token that is a known
+     * shell command and on the first '-' flag (the runtime rejects
+     * those with an error). */
     while (j < argc) {
+        if (argv[j][0] == '-')
+            break;
+        if (fl_shell_cmd_lookup(argv[j]) != FL_SCMD_UNKNOWN)
+            break;
         used++;
         j++;
     }
