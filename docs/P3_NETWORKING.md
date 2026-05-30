@@ -130,7 +130,7 @@ their headers can be framed and dispatched without leaning on libc or the
 hosted shim. This is the path the `udpsend` / `udplisten` / `server` /
 distro-style verbs ride on for hot writes.
 
-```
+```text
        call site                  fl_net_htons / fl_net_htonl
        in shell verb              fl_net_ntohs / fl_net_ntohl     (net_endian.h)
        or test                                  |
@@ -262,7 +262,7 @@ Inventory of **named protocols** (and closely related APIs) versus what this tre
 | **FTP** | 20–21/tcp | **RFC 959** | ❌ | Not used; file sharing uses **custom TCP framing** (**`docs/SERVER.md`**, **`contract_p3_session_wire.h`**, **P5** file delivery), not FTP |
 | **SFTP** | 22/tcp (SSH) | **RFC 4253** / draft SFTP | ❌ | Not implemented; same **server** file path as FTP row |
 | **TFTP** | 69/udp | **RFC 1350** | ~✅ (subset) | **`net_tftp.c`** — RRQ build + client read over egress UDP (**#260** / **PX-12**) |
-| **Flinstone `server`** (chat + files) | user **`ip:port`** | **RFC 793** transport; app opcodes in **`contract_p3_session_wire.h`** | ❌ (app) | Product spec **`docs/SERVER.md`**, plan **`docs/P3_13_CHAT_SERVER.md`**; prep PR has socket/session contracts only |
+| **Flinstone `server`** (chat + files) | user **`ip:port`** | **RFC 793** transport; app opcodes in **`contract_p3_session_wire.h`** | ~✅ (chat); ⏳ (files) | Hosted-socket implementation shipped on PR **#282** / **#239**: `server host/join/msg/announce/nick/set-nick/connected/leave/kill`, host transfer + auto-reconnect, prompt-aware async output; `udpsend` / `udplisten` and `arp` / `ifconfig` / `route` / `netstat` / `nslookup` / `netsh` distro-style verbs landed alongside. File-chunk path (`server send -file` via `FILE_OFFER`/`FILE_CHUNK`/`FILE_DONE`) is the remaining follow-up. Product spec **`docs/SERVER.md`**, plan **`docs/P3_13_CHAT_SERVER.md`**, per-item review status **`docs/P3_13_FOLLOWUP.md`**. |
 
 **Clarifications**
 

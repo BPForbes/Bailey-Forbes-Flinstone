@@ -72,6 +72,16 @@ commit. Current status:
 
 ---
 
+## Deferred items from the second-round CR sweep (`#282`)
+
+These are items CR raised on the second-round review that are intentionally
+deferred to a follow-up PR (with a one-line reason). Everything else from
+that sweep landed in the same PR.
+
+| Area | Item | Reason for deferral |
+|------|------|---------------------|
+| `userland/command/cmd_server.c::promote_thread_main` | Add a session-state mutex around every read/write to `g_client` / `g_client_bg` / `g_server` / `g_server_bg` / `g_server_running`, including from `verb_join` / `verb_leave` / `verb_kill` / `verb_msg` / `verb_connected` / `cmd_server_atexit`. | Correct implementation must also avoid (a) deadlocking against `shell_io_lock` already held by the prompt-aware async output path, (b) holding the session mutex across blocking I/O (`fl_net_session_send_frame`, `fl_net_session_recv_frame*`, `fl_net_sock_accept`), and (c) racing with the bg loops that the mutex itself starts/stops. The current pthread serialization works in practice (verified by the host-transfer tests in `test_p3_server.c`, now augmented with the post-transfer client-side `HOST_PROMOTE` / `HOST_REDIRECT` assertions) because the shell thread is blocked on stdin during the promote window. Splitting the audit into its own PR keeps this review's scope tight; tracked as a fresh follow-up TODO. |
+
 ## CodeRabbit recommendation logs (single-device WAN emulation)
 
 PR `#282` discussion thread asked about a `tailscale + tmux + mininet + custom

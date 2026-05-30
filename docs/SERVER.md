@@ -18,10 +18,10 @@ Related: **`docs/P3_13_CHAT_SERVER.md`** (chat-room v1), **`docs/P3_NETWORKING.m
 | TCP byte stream | **P3-7** | Hosted **`fl_net_sock_*`**; in-tree FSM still TODO |
 | Socket API | **P3-13a** | **`contract_p3_sockets.h`**, **`net_socket.c`** |
 | Session wire constants | **P3-13** | **`contract_p3_session_wire.h`** |
-| Server hub + shell | **P3-13** | **Not in prep PR** — see §8 |
+| Server hub + shell | **P3-13** | **Shipped on PRE 4.2.0 BUILD 8+** (`net_server.c` framing/relay, `cmd_server.c` shell verbs, `server_bg.c` background recv) — see §3.4–§3.6 and §8 for what's in the file-transfer follow-up |
 | **`server_share/`** + file metadata | **P5-5**–**P5-7** | Contracts only |
 
-Build order for the **server PR**: socket shim (done here) → **`net_server.c`** framing + relay → **`cmd_server.c`** + background recv → file chunk path with **P2-3** authz on privileged paths.
+Build order followed in this train: socket shim → **`net_server.c`** framing + relay → **`cmd_server.c`** + background recv → file chunk path with **P2-3** authz on privileged paths (last step still scoped for the **`server send -file`** follow-up, see §8).
 
 ---
 
@@ -188,7 +188,7 @@ The decoder is standalone and reusable: `python3 tests/decode_session_pcap.py <a
 **Sandbox prerequisites** (matches `AGENTS.md` § *Cursor Cloud specific instructions*):
 
 ```bash
-sudo apt-get install -y iproute2 tcpdump
+sudo apt-get install -y iproute2 tcpdump tmux
 sudo sysctl -w net.bridge.bridge-nf-call-iptables=0
 ```
 
@@ -432,28 +432,35 @@ VFS integration (**P5-1**/**P5-2**) must respect **jail** and **P2-3** when open
 
 ---
 
-## 8 — Module map (future server PR)
+## 8 — Module map (server foundation shipped; `server send -file` pending)
 
-| Path | Responsibility |
-|------|----------------|
-| **`userland/command/cmd_server.c`** | Parse **`host`/`join`/`connected`/`send`/`nick`/`leave`/`kill`** |
-| **`userland/shell/server_bg.c`** | Background **`recv`** → inbound ring |
-| **`kernel/core/net/net_server.c`** | Hub, framing, relay, file session state |
-| **`kernel/core/net/net_socket.c`** | Socket shim (**prep PR**) |
-| **`kernel/core/net/net_udp.c`** | UDP demux (**prep PR**) |
+| Path | Status | Responsibility |
+|------|--------|----------------|
+| **`userland/command/cmd_server.c`** | ✅ shipped | Parse **`host`/`join`/`connected`/`msg`/`announce`/`nick`/`set-nick`/`leave`/`kill`**; host transfer + auto-reconnect glue |
+| **`kernel/core/net/server_bg.c`** | ✅ shipped | pthread background **`recv`** loops for both host (accept + member poll) and client (event delivery) |
+| **`kernel/core/net/net_server.c`** | ✅ shipped | Host listener, member registry, framing, relay, ANSI announcement protocol, host-transfer state machine |
+| **`kernel/core/net/net_client.c`** | ✅ shipped | Client connect / disconnect / send / receive + cached roster snapshot |
+| **`userland/shell/fl_colors.[ch]`** | ✅ shipped | `K*` ANSI macros + prompt-aware async output helpers |
+| **`userland/shell/shell_io.[ch]`** | ✅ shipped | pthread mutex + readline buffer snapshot so background announcements don't glue to the prompt |
+| **`kernel/core/net/net_socket.c`** | ✅ shipped | Socket shim (`fl_net_sock_*`); STREAM + DGRAM |
+| **`kernel/core/net/net_udp.c`** | ✅ shipped | UDP demux + `fl_net_udp_bound_ports_snapshot` |
+| File-chunk path (`server send -file`) | ⏳ pending | `FILE_OFFER` / `FILE_CHUNK` / `FILE_DONE` opcodes are already reserved in **`contract_p3_session_wire.h`**; cross-user delivery + `server_share/` staging from **`contract_p5_file_delivery.h`** lands in the follow-up commit |
 
-Register **`server`** in the shell command table like **`ping`**.
+`server` is registered in the shell command table like `ping`, and tears down through `cmd_server_atexit()` on `exit`.
 
 ---
 
 ## 9 — Testing
 
-| Test | Train |
-|------|-------|
-| **`test_net_udp_demux_queue`** | Prep PR — **`make test_p3_network`** |
-| **`test_net_socket_tcp_loopback`** | Prep PR — hosted TCP |
-| **`test_server_host_join_msg`** | Server PR |
-| **`test_server_file_offer_roundtrip`** | Server PR |
+| Test | Train | Status |
+|------|-------|--------|
+| `test_net_udp_demux_queue` | `make test_p3_network` | ✅ shipped |
+| `test_net_socket_tcp_loopback` | `make test_p3_network` | ✅ shipped |
+| `test_net_socket_udp_loopback` | `make test_p3_network` | ✅ shipped (#239) |
+| `test_p3_server::announce_join_leave_nick` etc. (5 sub-tests) | `make test_p3_server` | ✅ shipped (#239) |
+| `test_p3_udp_cmds` | `make test_p3_udp_cmds` | ✅ shipped (#239) |
+| `test_p3_net_tools` (arp/ifconfig/route/netstat/nslookup/netsh + endian parity) | `make test_p3_net_tools` | ✅ shipped (#239) |
+| `test_server_file_offer_roundtrip` | follow-up file-transfer PR | ⏳ pending |
 
 ---
 

@@ -5,7 +5,7 @@
 Assume a fresh Linux image may have no build libraries installed. Before building
 or testing, install the project toolchain and optional VM/test dependencies:
 
-`sudo apt-get update && sudo apt-get install -y build-essential gcc g++ make binutils nasm gcc-aarch64-linux-gnu g++-aarch64-linux-gnu binutils-aarch64-linux-gnu pkg-config curl ca-certificates cmake autoconf automake libtool bzip2 tar libsdl2-dev libcunit1-dev libsqlite3-dev iproute2 tcpdump`
+`sudo apt-get update && sudo apt-get install -y build-essential gcc g++ make binutils nasm gcc-aarch64-linux-gnu g++-aarch64-linux-gnu binutils-aarch64-linux-gnu pkg-config curl ca-certificates cmake autoconf automake libtool bzip2 tar libsdl2-dev libcunit1-dev libsqlite3-dev iproute2 tcpdump tmux`
 
 Notes:
 - `build-essential`, `gcc`, `make`, and `binutils` are required for the default C/GAS build.
