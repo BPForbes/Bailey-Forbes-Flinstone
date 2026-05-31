@@ -3,6 +3,6 @@ STANDARD_VERSION=2
 RELEASE_VERSION=0
 PRERELEASE=1
 DEV_VERSION=9
-DESCRIPTION=Implementation of File Transfer Protocols; consolidate file-transfer contracts into contract_p3_packet.h and contract_p3_session_wire.h; add server file commands and net_file_delivery implementation
+DESCRIPTION=Implementation of File Transfer Protocols; unified file-transfer contracts in contract_p3_packet.h and contract_p3_session_wire.h; server file commands with sender no-echo, wire MSB revoke scan, and net_file_delivery implementation
 
 RELEASE_DATE=2026-05-31

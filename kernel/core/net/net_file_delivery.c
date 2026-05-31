@@ -755,16 +755,17 @@ fl_result_t fl_server_file_render_offer_line(const fl_server_file_offer_t *offer
 {
     if (!offer || !out || out_cap == 0u)
         return FL_RESULT_INVAL;
+    /* Sender already got local command status; no offer echo line. */
+    if (offer->sender_member_id == viewer_member_id) {
+        out[0] = '\0';
+        return FL_RESULT_OK;
+    }
     if (offer->receiver_member_id == 0u) {
-        if (offer->sender_member_id == viewer_member_id)
-            snprintf(out, out_cap, "[Server File, From %s]: %s",
-                     offer->sender_display, offer->file_name);
-        else
-            snprintf(out, out_cap, "[Server File, %s -> You]: %s",
-                     offer->sender_display, offer->file_name);
-    } else if (offer->sender_member_id == viewer_member_id) {
-        snprintf(out, out_cap, "[Server File, You -> %s]: %s",
-                 offer->receiver_display, offer->file_name);
+        snprintf(out, out_cap, "[Server File, From %s]: %s",
+                 offer->sender_display, offer->file_name);
+    } else if (offer->receiver_member_id == viewer_member_id) {
+        snprintf(out, out_cap, "[Server File, %s -> You]: %s",
+                 offer->sender_display, offer->file_name);
     } else {
         snprintf(out, out_cap, "[Server File, %s -> %s]: %s",
                  offer->sender_display, offer->receiver_display, offer->file_name);
@@ -968,6 +969,8 @@ fl_result_t fl_net_file_host_relay(fl_net_server_t *srv,
         return rc;
 
     if (opcode == FL_NET_SESSION_OP_FILE_OFFER) {
+        if (fl_file_offer_wire_payload_revoked(payload, plen))
+            return FL_RESULT_ACCES;
         rc = fl_file_packet_decode_offer(payload, plen, &offer);
         if (rc != FL_RESULT_OK)
             return rc;

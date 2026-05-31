@@ -317,7 +317,8 @@ File-transfer encode/decode and session routing live in **`contract_p3_packet.h`
 
 ### Phase 3: Packet module
 
-- Add `net_file_packet.c` / `net_file_packet.h`.
+- Implement file packet encode/decode in **`kernel/core/net/net_file_delivery.c`**
+  (APIs declared in **`contract_p3_packet.h`**).
 - Encode and decode offer, chunk, done, accept, decline, revoke, list, and status payloads.
 - Validate file opcodes and payload lengths.
 

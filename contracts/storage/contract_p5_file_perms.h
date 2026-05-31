@@ -74,6 +74,12 @@ static inline int fl_file_perms_is_revoked(fl_file_perms_t perms)
     return (perms & FL_FILE_FLAG_REVOKED) != 0;
 }
 
+/** MSB-side denial scan: any bit in the high byte set denies (revoke is bit 15). */
+static inline int fl_file_msb_denied(fl_file_perms_t perms)
+{
+    return (perms >> 15) != 0;
+}
+
 static inline int fl_file_perms_is_public(fl_file_perms_t perms)
 {
     return (perms & FL_FILE_FLAG_PUBLIC) != 0;

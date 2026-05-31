@@ -190,12 +190,12 @@ static int verb_file_send(const cmd_server_ctx_t *ctx, int argc, char **argv)
                                              &receiver_id);
         if (rc == FL_RESULT_BUSY) {
             pthread_mutex_unlock(ctx->mutex);
-            fl_color_error("ambiguous recipient '%s' (use -id <N>)", target_name ? target_name : "?");
+            fl_color_warn("file offer failed: ambiguous nickname");
             return 1;
         }
         if (rc != FL_RESULT_OK) {
             pthread_mutex_unlock(ctx->mutex);
-            fl_color_error("no such recipient");
+            fl_color_warn("file offer failed: user not found");
             return 1;
         }
         rc = fl_server_file_offer_create(&offer, sender_member_id(ctx, hosting),
@@ -224,10 +224,10 @@ static int verb_file_send(const cmd_server_ctx_t *ctx, int argc, char **argv)
                                 sender_member_id(ctx, hosting), &offer);
     pthread_mutex_unlock(ctx->mutex);
     if (rc != FL_RESULT_OK) {
-        fl_color_error("server file: send failed (rc=%d)", (int)rc);
+        fl_color_warn("file offer failed");
         return 1;
     }
-    fl_color_success("file offer sent (%s)", offer.share_id);
+    fl_color_success("file offer sent");
     return 0;
 }
 

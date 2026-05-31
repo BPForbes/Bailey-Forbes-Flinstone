@@ -509,12 +509,22 @@ fl_net_client_dispatch_frame(fl_net_client_t *client, uint8_t opcode,
         fl_server_file_offer_t offer;
         text[0] = '\0';
         text_len = 0u;
-        if (fl_file_packet_decode_offer(payload, plen, &offer) == FL_RESULT_OK) {
-            (void)fl_server_file_store_offer(&offer);
-            (void)fl_server_file_render_offer_line(&offer,
-                                                   client->assigned_member_id,
-                                                   text, sizeof(text));
-            text_len = strlen(text);
+        if (fl_file_offer_wire_payload_revoked(payload, plen)) {
+            kind = FL_NET_SERVER_EVENT_NONE;
+        } else if (fl_file_packet_decode_offer(payload, plen, &offer) == FL_RESULT_OK) {
+            if (offer.sender_member_id == client->assigned_member_id) {
+                kind = FL_NET_SERVER_EVENT_NONE;
+            } else {
+                (void)fl_server_file_store_offer(&offer);
+                if (fl_server_file_render_offer_line(&offer,
+                                                     client->assigned_member_id,
+                                                     text, sizeof(text)) == FL_RESULT_OK &&
+                    text[0] != '\0') {
+                    text_len = strlen(text);
+                } else {
+                    kind = FL_NET_SERVER_EVENT_NONE;
+                }
+            }
         }
     } else {
         text_len = plen > text_off ? (size_t)(plen - text_off) : 0u;
@@ -525,7 +535,7 @@ fl_net_client_dispatch_frame(fl_net_client_t *client, uint8_t opcode,
         text[text_len] = '\0';
     }
 
-    if (cb)
+    if (cb && kind != FL_NET_SERVER_EVENT_NONE)
         cb(kind, text, mid, data);
     return kind;
 }

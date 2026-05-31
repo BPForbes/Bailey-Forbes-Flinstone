@@ -170,7 +170,20 @@ static void client_event_print(fl_net_server_event_kind_t kind, const char *text
         break;
     }
     case FL_NET_SERVER_EVENT_FILE_OFFER:
-        fl_color_msg_from_user("File", "%s", text);
+        if (text[0]) {
+            int use_color = fl_color_is_enabled_for(stdout);
+            if (fl_color_prelude_hook)
+                fl_color_prelude_hook();
+            if (use_color)
+                fputs(KCYN, stdout);
+            fputs(text, stdout);
+            if (use_color)
+                fputs(KNRM, stdout);
+            fputc('\n', stdout);
+            fflush(stdout);
+            if (fl_color_postlude_hook)
+                fl_color_postlude_hook();
+        }
         break;
     case FL_NET_SERVER_EVENT_MEMBER_LIST:
         /* Silent: we already cached the roster in net_client. */

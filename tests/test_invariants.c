@@ -462,6 +462,13 @@ static int test_contract_constants(void) {
     ASSERT((fl_file_perms_normalize(FL_FILE_PERM_EDIT) & FL_FILE_PERM_VIEW) != 0);
     ASSERT(fl_file_perms_has(FL_FILE_PERM_EDIT | FL_FILE_PERM_VIEW, FL_FILE_PERM_VIEW) == 1);
     ASSERT(fl_file_share_validate_access(FL_FILE_FLAG_REVOKED, 0, 0) == FL_RESULT_ACCES);
+    ASSERT(fl_file_msb_denied(FL_FILE_FLAG_REVOKED) == 1);
+    ASSERT(fl_file_msb_denied(FL_FILE_PERM_VIEW) == 0);
+    {
+        const uint8_t revoked_offer[] = {0, 0, 0, 0, 0x80, 0x01};
+        ASSERT(fl_file_offer_wire_payload_revoked(revoked_offer,
+                                                  (uint16_t)sizeof(revoked_offer)) == 1);
+    }
     ASSERT(FL_VFS_SYMLOOP_MAX == 40);
     ASSERT(FL_VFS_OPEN_FD_MAX == 256u);
     ASSERT(FL_VFS_DIRENT_NAME_MAX_CHARS == 255u);
