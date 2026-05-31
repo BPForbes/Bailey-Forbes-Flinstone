@@ -1,54 +1,147 @@
 /**
  * **P5-6 — Cross-user file delivery** (module contract, normative).
  *
- * **Distribution:** describes how a **server** session moves file bytes and metadata
- * between members. The shell **`server send`** command is implemented in a later PR;
- * this shard freezes the interchange record the VFS and net layers must respect.
+ * **Distribution:** describes how a native Flinstone **server file** session moves
+ * file offers, chunks, completion state, receiver disposition, revocation, and
+ * display snapshots between members. SFTP is a compatibility adapter over this
+ * native contract, not the core file-transfer system.
  */
 #ifndef FL_CONTRACT_P5_FILE_DELIVERY_H
 #define FL_CONTRACT_P5_FILE_DELIVERY_H
 
-#include "contract_p5_server_share.h"
+#include "contract_p5_file_perms.h"
 #include "contract_p5_member_identity.h"
+#include "contract_p5_server_share.h"
 
 #include <stdint.h>
 
 #define FL_CONTRACT_P5_6_FILE_DELIVERY_CONTRACT_DEFINED 1
 
-/** Recipient disposition flags (binary 0/1 in interchange; may be packed in wire flags). */
-typedef struct {
-    /** **1** — write through to the path captured on the recipient (overwrite). */
-    uint8_t overwrite_existing;
-    /** **1** — place under **FL_SERVER_SHARE_DIR_NAME** when no file exists at path. */
-    uint8_t use_server_share;
-    /** **1** — recipient explicitly declines storage (no share, no overwrite). */
-    uint8_t decline_storage;
-} fl_server_file_disposition_t;
-
-/**
- * File offer metadata exchanged before chunk payloads (**P3** **FILE_OFFER** opcode).
- * **sender_path** is the resolved path on the sender at send time (NUL-terminated in C
- * interchange; on-wire encoding may be length-prefixed UTF-8).
- */
-typedef struct {
-    char sender_path[FL_SERVER_SHARE_SENDER_PATH_MAX];
-    char sender_principal[64];
-    char recipient_principal[64];
-    uint64_t file_size;
-    uint32_t sender_member_id;
-    /**
-     * Target session id from server connected ([1], [2], ...). 0 means resolve by
-     * recipient_principal and/or -user nick (local or host-global) only.
-     */
-    fl_server_member_id_t recipient_member_id;
-    fl_server_file_disposition_t disposition;
-} fl_server_file_offer_t;
-
-/** Max bytes per **FILE_CHUNK** payload on the session wire. */
+#ifndef FL_SERVER_SHARE_ID_MAX
+#define FL_SERVER_SHARE_ID_MAX      64u
+#endif
+#ifndef FL_SERVER_PATH_MAX
+#define FL_SERVER_PATH_MAX          256u
+#endif
+#ifndef FL_SERVER_FILE_NAME_MAX
+#define FL_SERVER_FILE_NAME_MAX     128u
+#endif
+#ifndef FL_SERVER_FILE_HASH_MAX
+#define FL_SERVER_FILE_HASH_MAX     32u
+#endif
+#ifndef FL_SERVER_DISPLAY_MAX
+#define FL_SERVER_DISPLAY_MAX       96u
+#endif
+#ifndef FL_SERVER_PRINCIPAL_MAX
+#define FL_SERVER_PRINCIPAL_MAX     64u
+#endif
 #ifndef FL_SERVER_FILE_CHUNK_MAX
-#define FL_SERVER_FILE_CHUNK_MAX 4096u
+#define FL_SERVER_FILE_CHUNK_MAX    384u
 #endif
 
-_Static_assert(FL_SERVER_FILE_CHUNK_MAX >= 512u, "file chunk cap unexpectedly small");
+typedef struct fl_bytes_view {
+    const uint8_t *data;
+    uint16_t len;
+} fl_bytes_view_t;
+
+typedef struct fl_bytes_writer {
+    uint8_t *buf;
+    uint16_t cap;
+    uint16_t len;
+} fl_bytes_writer_t;
+
+/** Offer metadata decoded from a FILE_OFFER payload. */
+typedef struct fl_server_file_offer {
+    char share_id[FL_SERVER_SHARE_ID_MAX];
+
+    uint16_t sender_member_id;
+    uint16_t receiver_member_id;   /* 0 means public/all. */
+
+    fl_file_perms_t file_perms;
+    uint16_t reserved0;
+
+    uint64_t created_at;
+    uint64_t expires_at;           /* 0 means never expires. */
+
+    uint64_t file_size;
+    uint32_t chunk_size;
+    uint32_t total_chunks;
+
+    char sender_path[FL_SERVER_PATH_MAX];
+    char suggested_dest_path[FL_SERVER_PATH_MAX];
+    char file_name[FL_SERVER_FILE_NAME_MAX];
+
+    char sender_display[FL_SERVER_DISPLAY_MAX];
+    char receiver_display[FL_SERVER_DISPLAY_MAX];
+
+    char sender_principal[FL_SERVER_PRINCIPAL_MAX];
+    char receiver_principal[FL_SERVER_PRINCIPAL_MAX];
+
+    char sender_nick_snapshot[FL_SERVER_NICK_MAX];
+    char receiver_nick_snapshot[FL_SERVER_NICK_MAX];
+
+    uint8_t checksum[FL_SERVER_FILE_HASH_MAX];
+} fl_server_file_offer_t;
+
+typedef struct fl_server_file_chunk_header {
+    char share_id[FL_SERVER_SHARE_ID_MAX];
+    uint32_t chunk_index;
+    uint32_t chunk_len;
+    uint64_t file_offset;
+} fl_server_file_chunk_header_t;
+
+typedef struct fl_server_file_done {
+    char share_id[FL_SERVER_SHARE_ID_MAX];
+    uint64_t total_bytes;
+    uint32_t total_chunks;
+    uint8_t checksum[FL_SERVER_FILE_HASH_MAX];
+    uint8_t status;
+} fl_server_file_done_t;
+
+fl_result_t fl_wire_put_bytes16(fl_bytes_writer_t *w,
+                                const uint8_t *data,
+                                uint16_t len);
+
+fl_result_t fl_wire_get_bytes16(const uint8_t *buf,
+                                uint16_t cap,
+                                uint16_t *offset,
+                                fl_bytes_view_t *out);
+
+fl_result_t fl_server_file_offer_create(fl_server_file_offer_t *out,
+                                        uint16_t sender_id,
+                                        uint16_t receiver_id,
+                                        const char *sender_path,
+                                        const char *suggested_dest,
+                                        fl_file_perms_t file_perms,
+                                        uint64_t expires_at);
+
+fl_result_t fl_server_file_offer_validate(const fl_server_file_offer_t *offer,
+                                          uint16_t current_member_id,
+                                          uint64_t now);
+
+fl_result_t fl_server_file_offer_encode(const fl_server_file_offer_t *offer,
+                                        uint8_t *out,
+                                        uint16_t out_cap,
+                                        uint16_t *out_len);
+
+fl_result_t fl_server_file_offer_decode(const uint8_t *payload,
+                                        uint16_t payload_len,
+                                        fl_server_file_offer_t *out);
+
+fl_result_t fl_server_file_chunk_encode(const fl_server_file_chunk_header_t *chunk,
+                                        const uint8_t *data,
+                                        uint32_t data_len,
+                                        uint8_t *out,
+                                        uint16_t out_cap,
+                                        uint16_t *out_len);
+
+fl_result_t fl_server_file_chunk_decode(const uint8_t *payload,
+                                        uint16_t payload_len,
+                                        fl_server_file_chunk_header_t *chunk,
+                                        fl_bytes_view_t *data);
+
+_Static_assert(FL_SERVER_FILE_CHUNK_MAX <= 4096u, "file chunk cap must fit bounded session buffers");
+_Static_assert(FL_SERVER_SHARE_ID_MAX >= 32u, "share id cap too small");
+_Static_assert(FL_SERVER_DISPLAY_MAX >= FL_SERVER_NICK_MAX, "display cap must include nick snapshots");
 
 #endif /* FL_CONTRACT_P5_FILE_DELIVERY_H */

@@ -49,9 +49,14 @@
 #define FL_NET_SESSION_OP_CTRL_HOST_PROMOTE 0x22u
 /** Host sets a host-global nickname for member_id (visible to all; target -user nick). */
 #define FL_NET_SESSION_OP_HOST_NICK_SET 0x23u
-#define FL_NET_SESSION_OP_FILE_OFFER 0x30u
-#define FL_NET_SESSION_OP_FILE_CHUNK 0x31u
-#define FL_NET_SESSION_OP_FILE_DONE 0x32u
+#define FL_NET_SESSION_OP_FILE_OFFER   0x30u
+#define FL_NET_SESSION_OP_FILE_CHUNK   0x31u
+#define FL_NET_SESSION_OP_FILE_DONE    0x32u
+#define FL_NET_SESSION_OP_FILE_ACCEPT  0x33u
+#define FL_NET_SESSION_OP_FILE_DECLINE 0x34u
+#define FL_NET_SESSION_OP_FILE_REVOKE  0x35u
+#define FL_NET_SESSION_OP_FILE_LIST    0x36u
+#define FL_NET_SESSION_OP_FILE_STATUS  0x37u
 #define FL_NET_SESSION_OP_ERR 0x7Fu
 
 _Static_assert(FL_NET_SESSION_HDR_LEN >= 6u, "session header must include length field");
