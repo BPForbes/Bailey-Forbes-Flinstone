@@ -22,11 +22,11 @@ static int test_datetime_utc(void)
 {
     uint64_t exp = 0;
     ASSERT(fl_server_file_parse_expire_arg("12-31-2030", &exp) == 0);
-    ASSERT(exp > 0u);
+    ASSERT(exp == 1924905600u);
     ASSERT(fl_server_file_parse_expire_arg("06-01-2030 15:30", &exp) == 0);
-    ASSERT(exp > 0u);
+    ASSERT(exp == 1906558200u);
     ASSERT(fl_server_file_parse_expire_arg("06-01-2030 15:30:45", &exp) == 0);
-    ASSERT(exp > 0u);
+    ASSERT(exp == 1906558245u);
     return 0;
 }
 

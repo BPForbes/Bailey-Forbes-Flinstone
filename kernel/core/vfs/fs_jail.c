@@ -189,6 +189,11 @@ int fs_jail_openat(const char *path, int flags, mode_t mode) {
         return -1;
     }
 
+    if (fl_server_shared_path_is_expired_quarantine(path)) {
+        errno = EPERM;
+        return -1;
+    }
+
     /* If jail not active, fall back to regular open */
     if (!fs_jail_is_active() || g_jail_dirfd < 0) {
         return open(path, flags, mode);

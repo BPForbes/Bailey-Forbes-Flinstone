@@ -598,6 +598,11 @@ test_server_file_expire:
 	$(CC) $(CFLAGS) $(TEST_SANITIZE) -o tests/test_server_file_expire tests/test_server_file_expire.c userland/command/server_file_expire.c -Wl,-z,noexecstack
 	./tests/test_server_file_expire
 
+.PHONY: purge_shared_expired_harness
+purge_shared_expired_harness: kernel/core/vfs/server_shared_fs.o userland/shell/common.o
+	$(CC) $(CFLAGS) $(TEST_SANITIZE) -o tests/purge_shared_expired_harness tests/purge_shared_expired_harness.c \
+	  kernel/core/vfs/server_shared_fs.o userland/shell/common.o -Wl,-z,noexecstack
+
 .PHONY: test_p0_p2_wiring
 test_p0_p2_wiring: kernel/core/memory/fl_stack.o kernel/core/memory/exec_context.o kernel/core/time/timekeeping.o \
 		kernel/core/identity/user_db.o kernel/core/identity/session.o kernel/core/identity/elevation.o \
@@ -612,7 +617,7 @@ test_p0_p2_wiring: kernel/core/memory/fl_stack.o kernel/core/memory/exec_context
 	./tests/test_p0_p2_wiring
 
 .PHONY: test_p3_network
-test_p3_network: $(NET_ASM_OBJ) $(MEM_ASM_OBJ) priority_queue.o kernel/core/time/timekeeping.o kernel/core/sys/ipc.o
+test_p3_network: $(NET_ASM_OBJ) $(MEM_ASM_OBJ) $(NET_TEST_SHELL_OBJS) priority_queue.o kernel/core/time/timekeeping.o kernel/core/sys/ipc.o
 	$(CC) $(CFLAGS) $(TEST_SANITIZE) -o tests/test_p3_network tests/test_p3_network.c \
 	  $(NET_TEST_SHELL_OBJS) \
 	  $(NET_CORE_SRCS) kernel/core/sched/workqueue.c kernel/core/sys/ipc.o kernel/core/time/timekeeping.o priority_queue.o $(MEM_ASM_OBJ) $(NET_ASM_OBJ) \
@@ -632,7 +637,7 @@ test_p3_server: $(NET_ASM_OBJ) $(MEM_ASM_OBJ) priority_queue.o kernel/core/time/
 # NET_CORE_SRCS the rest of the P3 unit tests use, so the BSD socket shim
 # (`fl_net_sock_open(DGRAM)` + bind/connect/send/recv) is exercised end-to-end.
 .PHONY: test_p3_udp_cmds
-test_p3_udp_cmds: $(NET_ASM_OBJ) $(MEM_ASM_OBJ) priority_queue.o kernel/core/time/timekeeping.o kernel/core/sys/ipc.o
+test_p3_udp_cmds: $(NET_ASM_OBJ) $(MEM_ASM_OBJ) $(NET_TEST_SHELL_OBJS) priority_queue.o kernel/core/time/timekeeping.o kernel/core/sys/ipc.o
 	$(CC) $(CFLAGS) $(TEST_SANITIZE) -o tests/test_p3_udp_cmds \
 	  tests/test_p3_udp_cmds.c userland/command/cmd_udp.c userland/command/cmd_registry.c \
 	  $(NET_TEST_SHELL_OBJS) \
@@ -646,7 +651,7 @@ test_p3_udp_cmds: $(NET_ASM_OBJ) $(MEM_ASM_OBJ) priority_queue.o kernel/core/tim
 # in-process against the in-tree fl_net_arp / fl_net_route / fl_net_udp /
 # fl_net_resolve_ipv4 APIs; no arpa/inet.h, no libc DNS.
 .PHONY: test_p3_net_tools
-test_p3_net_tools: $(NET_ASM_OBJ) $(MEM_ASM_OBJ) priority_queue.o kernel/core/time/timekeeping.o kernel/core/sys/ipc.o
+test_p3_net_tools: $(NET_ASM_OBJ) $(MEM_ASM_OBJ) $(NET_TEST_SHELL_OBJS) priority_queue.o kernel/core/time/timekeeping.o kernel/core/sys/ipc.o
 	$(CC) $(CFLAGS) $(TEST_SANITIZE) -o tests/test_p3_net_tools \
 	  tests/test_p3_net_tools.c userland/command/cmd_net_tools.c \
 	  $(NET_TEST_SHELL_OBJS) \

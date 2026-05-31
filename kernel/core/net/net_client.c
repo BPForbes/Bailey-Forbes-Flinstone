@@ -534,6 +534,8 @@ fl_net_client_dispatch_frame(fl_net_client_t *client, uint8_t opcode,
                     kind = FL_NET_SERVER_EVENT_NONE;
                 }
             }
+        } else {
+            kind = FL_NET_SERVER_EVENT_NONE;
         }
     } else {
         text_len = plen > text_off ? (size_t)(plen - text_off) : 0u;

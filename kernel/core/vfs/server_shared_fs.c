@@ -3,6 +3,7 @@
 #include "common.h"
 #include "contract_p5_server_share.h"
 
+#include <ctype.h>
 #include <dirent.h>
 #include <errno.h>
 #include <stdio.h>
@@ -35,26 +36,96 @@ static int mkdir_p(const char *path, mode_t mode)
     return 0;
 }
 
-static void join_path(char *out, size_t cap, const char *a, const char *b)
+static int join_path(char *out, size_t cap, const char *a, const char *b)
 {
+    int r;
+
     if (!out || cap == 0u)
-        return;
-    if (!a || !a[0]) {
-        snprintf(out, cap, "%s", b ? b : "");
-        return;
-    }
-    if (a[strlen(a) - 1] == '/')
-        snprintf(out, cap, "%s%s", a, b ? b : "");
+        return -1;
+    if (!a || !a[0])
+        r = snprintf(out, cap, "%s", b ? b : "");
+    else if (a[strlen(a) - 1] == '/')
+        r = snprintf(out, cap, "%s%s", a, b ? b : "");
     else
-        snprintf(out, cap, "%s/%s", a, b ? b : "");
+        r = snprintf(out, cap, "%s/%s", a, b ? b : "");
+    if (r < 0 || (size_t)r >= cap) {
+        errno = ENAMETOOLONG;
+        return -ENAMETOOLONG;
+    }
+    return 0;
+}
+
+static fl_result_t path_component_safe(const char *s)
+{
+    size_t i;
+    size_t len;
+
+    if (!s || !s[0])
+        return FL_RESULT_INVAL;
+    if (!strcmp(s, ".") || !strcmp(s, ".."))
+        return FL_RESULT_INVAL;
+    len = strlen(s);
+    for (i = 0; i < len; i++) {
+        unsigned char c = (unsigned char)s[i];
+        if (c == '/' || c == '\\')
+            return FL_RESULT_INVAL;
+        if (!isalnum(c) && c != '-' && c != '_' && c != '.')
+            return FL_RESULT_INVAL;
+    }
+    return FL_RESULT_OK;
+}
+
+static fl_result_t resolve_local_path(const char *local_path, char *out, size_t out_cap)
+{
+    char ab[4096];
+    char rbuf[4096];
+    char base_real[4096];
+    int n;
+    size_t base_len;
+
+    if (!local_path || !local_path[0] || !out || out_cap == 0u)
+        return FL_RESULT_INVAL;
+    if (local_path[0] == '/' || strchr(local_path, '\\'))
+        return FL_RESULT_ACCES;
+    if (strstr(local_path, "/../") || strstr(local_path, "../") ||
+        !strcmp(local_path, "..") || !strncmp(local_path, "../", 3))
+        return FL_RESULT_ACCES;
+    n = snprintf(ab, sizeof(ab), "%s/%s", g_cwd, local_path);
+    if (n < 0 || (size_t)n >= sizeof(ab))
+        return FL_RESULT_INVAL;
+    if (realpath(g_cwd, base_real) == NULL) {
+        strncpy(base_real, g_cwd, sizeof(base_real) - 1u);
+        base_real[sizeof(base_real) - 1u] = '\0';
+    }
+    base_len = strlen(base_real);
+    if (realpath(ab, rbuf) != NULL) {
+        if (strncmp(rbuf, base_real, base_len) != 0 ||
+            (rbuf[base_len] != '\0' && rbuf[base_len] != '/'))
+            return FL_RESULT_ACCES;
+        if (strlen(rbuf) >= out_cap)
+            return FL_RESULT_INVAL;
+        strncpy(out, rbuf, out_cap - 1u);
+        out[out_cap - 1u] = '\0';
+        return FL_RESULT_OK;
+    }
+    if (strncmp(ab, base_real, base_len) != 0 ||
+        (ab[base_len] != '\0' && ab[base_len] != '/'))
+        return FL_RESULT_ACCES;
+    if (strlen(ab) >= out_cap)
+        return FL_RESULT_INVAL;
+    strncpy(out, ab, out_cap - 1u);
+    out[out_cap - 1u] = '\0';
+    return FL_RESULT_OK;
 }
 
 fl_result_t fl_server_shared_init(void)
 {
     char root[512];
     char expired[512];
-    join_path(root, sizeof(root), ".", FL_SERVER_SHARED_DIR_NAME);
-    join_path(expired, sizeof(expired), root, FL_SERVER_SHARED_EXPIRED_DIR_NAME);
+    if (join_path(root, sizeof(root), ".", FL_SERVER_SHARED_DIR_NAME) != 0)
+        return FL_RESULT_ERR;
+    if (join_path(expired, sizeof(expired), root, FL_SERVER_SHARED_EXPIRED_DIR_NAME) != 0)
+        return FL_RESULT_ERR;
     if (mkdir_p(root, 0700) != 0)
         return FL_RESULT_ERR;
     if (mkdir_p(expired, 0700) != 0)
@@ -96,7 +167,8 @@ static fl_result_t write_meta(const char *dir, const fl_server_file_offer_t *off
     FILE *fp;
     if (!dir || !offer)
         return FL_RESULT_INVAL;
-    join_path(meta, sizeof(meta), dir, "offer.meta");
+    if (join_path(meta, sizeof(meta), dir, "offer.meta") != 0)
+        return FL_RESULT_ERR;
     fp = fopen(meta, "w");
     if (!fp)
         return FL_RESULT_ERR;
@@ -119,13 +191,19 @@ fl_result_t fl_server_shared_save_offer(const fl_server_file_offer_t *offer,
     FILE *fp;
     if (!offer || !offer->share_id[0] || !offer->file_name[0])
         return FL_RESULT_INVAL;
+    if (path_component_safe(offer->share_id) != FL_RESULT_OK ||
+        path_component_safe(offer->file_name) != FL_RESULT_OK)
+        return FL_RESULT_INVAL;
     if (fl_server_shared_init() != FL_RESULT_OK)
         return FL_RESULT_ERR;
-    join_path(root, sizeof(root), ".", FL_SERVER_SHARED_DIR_NAME);
-    join_path(dir, sizeof(dir), root, offer->share_id);
+    if (join_path(root, sizeof(root), ".", FL_SERVER_SHARED_DIR_NAME) != 0)
+        return FL_RESULT_ERR;
+    if (join_path(dir, sizeof(dir), root, offer->share_id) != 0)
+        return FL_RESULT_ERR;
     if (mkdir_p(dir, 0700) != 0)
         return FL_RESULT_ERR;
-    join_path(file_path, sizeof(file_path), dir, offer->file_name);
+    if (join_path(file_path, sizeof(file_path), dir, offer->file_name) != 0)
+        return FL_RESULT_ERR;
     fp = fopen(file_path, "wb");
     if (!fp)
         return FL_RESULT_ERR;
@@ -149,14 +227,20 @@ fl_result_t fl_server_shared_overwrite_local(const fl_server_file_offer_t *offer
                                              const uint8_t *data,
                                              size_t data_len)
 {
+    char safe_path[512];
     char parent[512];
     char *slash;
     FILE *fp;
+    fl_result_t rc;
+
     if (!offer || !local_path || !local_path[0])
         return FL_RESULT_INVAL;
-    if (fl_server_shared_path_is_expired_quarantine(local_path))
+    rc = resolve_local_path(local_path, safe_path, sizeof(safe_path));
+    if (rc != FL_RESULT_OK)
+        return rc;
+    if (fl_server_shared_path_is_expired_quarantine(safe_path))
         return FL_RESULT_ACCES;
-    strncpy(parent, local_path, sizeof(parent) - 1u);
+    strncpy(parent, safe_path, sizeof(parent) - 1u);
     parent[sizeof(parent) - 1u] = '\0';
     slash = strrchr(parent, '/');
     if (slash && slash != parent) {
@@ -164,7 +248,7 @@ fl_result_t fl_server_shared_overwrite_local(const fl_server_file_offer_t *offer
         if (mkdir_p(parent, 0700) != 0 && errno != EEXIST)
             return FL_RESULT_ERR;
     }
-    fp = fopen(local_path, "wb");
+    fp = fopen(safe_path, "wb");
     if (!fp)
         return FL_RESULT_ERR;
     if (data_len > 0u && data &&
@@ -184,10 +268,16 @@ static fl_result_t move_dir_to_expired(const char *share_id)
     char dst[512];
     if (!share_id || !share_id[0])
         return FL_RESULT_INVAL;
-    join_path(root, sizeof(root), ".", FL_SERVER_SHARED_DIR_NAME);
-    join_path(expired_root, sizeof(expired_root), root, FL_SERVER_SHARED_EXPIRED_DIR_NAME);
-    join_path(src, sizeof(src), root, share_id);
-    join_path(dst, sizeof(dst), expired_root, share_id);
+    if (path_component_safe(share_id) != FL_RESULT_OK)
+        return FL_RESULT_INVAL;
+    if (join_path(root, sizeof(root), ".", FL_SERVER_SHARED_DIR_NAME) != 0)
+        return FL_RESULT_ERR;
+    if (join_path(expired_root, sizeof(expired_root), root, FL_SERVER_SHARED_EXPIRED_DIR_NAME) != 0)
+        return FL_RESULT_ERR;
+    if (join_path(src, sizeof(src), root, share_id) != 0)
+        return FL_RESULT_ERR;
+    if (join_path(dst, sizeof(dst), expired_root, share_id) != 0)
+        return FL_RESULT_ERR;
     if (mkdir_p(expired_root, 0700) != 0 && errno != EEXIST)
         return FL_RESULT_ERR;
     if (rename(src, dst) != 0)
@@ -203,7 +293,8 @@ fl_result_t fl_server_shared_purge_expired(uint64_t now)
     struct dirent *ent;
     if (fl_server_shared_init() != FL_RESULT_OK)
         return FL_RESULT_ERR;
-    join_path(root, sizeof(root), ".", FL_SERVER_SHARED_DIR_NAME);
+    if (join_path(root, sizeof(root), ".", FL_SERVER_SHARED_DIR_NAME) != 0)
+        return FL_RESULT_ERR;
     d = opendir(root);
     if (!d)
         return FL_RESULT_ERR;
@@ -216,8 +307,10 @@ fl_result_t fl_server_shared_purge_expired(uint64_t now)
             continue;
         if (!strcmp(ent->d_name, FL_SERVER_SHARED_EXPIRED_DIR_NAME))
             continue;
-        join_path(dir_path, sizeof(dir_path), root, ent->d_name);
-        join_path(meta_path, sizeof(meta_path), dir_path, "offer.meta");
+        if (join_path(dir_path, sizeof(dir_path), root, ent->d_name) != 0)
+            continue;
+        if (join_path(meta_path, sizeof(meta_path), dir_path, "offer.meta") != 0)
+            continue;
         fp = fopen(meta_path, "r");
         if (!fp)
             continue;

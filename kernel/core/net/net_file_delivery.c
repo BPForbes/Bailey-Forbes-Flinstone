@@ -378,7 +378,7 @@ fl_result_t fl_server_file_offer_decode(const uint8_t *payload,
         return FL_RESULT_INVAL;
     memset(out, 0, sizeof(*out));
 
-    if (fl_pkt_wire_has_meta(payload, payload_len))
+    if (fl_pkt_file_offer_has_meta_layout(payload, payload_len))
         off = (uint16_t)FL_PKT_CHANNEL_META_LEN;
 
     rc = get_u16(payload, payload_len, &off, &out->sender_member_id);
@@ -903,9 +903,13 @@ fl_result_t fl_server_share_public_list(void)
 {
     size_t i;
     int any = 0;
+    uint64_t now = (uint64_t)time(NULL);
+    share_purge_expired(now);
     for (i = 0; i < FL_SERVER_FILE_SHARE_SLOTS; i++) {
         const fl_server_file_offer_t *o = &s_shares[i].offer;
         if (!s_shares[i].active || o->receiver_member_id != 0u)
+            continue;
+        if (share_access_ok(o, now) != FL_RESULT_OK)
             continue;
         printf("%s  %s  from %s\n", o->share_id, o->file_name, o->sender_display);
         any = 1;
@@ -1087,8 +1091,13 @@ fl_result_t fl_net_file_store_done(const uint8_t *payload, uint16_t plen)
         return FL_RESULT_NOENT;
     if (share_access_ok(&slot->offer, (uint64_t)time(NULL)) != FL_RESULT_OK)
         return FL_RESULT_ACCES;
-    if (done.total_bytes <= slot->file_cap)
-        slot->file_len = (size_t)done.total_bytes;
+    if (done.total_bytes > slot->file_cap ||
+        done.total_bytes > (uint64_t)slot->file_len)
+        return FL_RESULT_INVAL;
+    if (slot->offer.total_chunks != 0u &&
+        done.total_chunks != slot->offer.total_chunks)
+        return FL_RESULT_INVAL;
+    slot->file_len = (size_t)done.total_bytes;
     slot->transfer_complete = 1u;
     return FL_RESULT_OK;
 }
@@ -1117,6 +1126,12 @@ fl_result_t fl_net_file_send_file_contents(fl_net_server_t *srv,
         uint8_t payload[FL_NET_SESSION_MAX_MSG];
         uint16_t plen = 0;
         if (n == 0u && feof(fp))
+            break;
+        if (n < sizeof(buf) && ferror(fp)) {
+            rc = FL_RESULT_ERR;
+            break;
+        }
+        if (n == 0u)
             break;
         memset(&chunk, 0, sizeof(chunk));
         copy_str_field(chunk.share_id, sizeof(chunk.share_id), offer->share_id);
@@ -1228,8 +1243,10 @@ fl_result_t fl_net_file_host_relay(fl_net_server_t *srv,
         rc = fl_file_packet_decode_offer(payload, plen, &offer);
         if (rc != FL_RESULT_OK)
             return rc;
-        if (offer.sender_member_id == 0u)
-            offer.sender_member_id = sender_id;
+        if (offer.sender_member_id != 0u &&
+            offer.sender_member_id != sender_id)
+            return FL_RESULT_ACCES;
+        offer.sender_member_id = sender_id;
         if (share_access_ok(&offer, (uint64_t)time(NULL)) != FL_RESULT_OK)
             return FL_RESULT_ACCES;
         if (share_find(offer.share_id) == NULL) {
@@ -1262,6 +1279,8 @@ fl_result_t fl_net_file_host_relay(fl_net_server_t *srv,
         slot = share_find(share_id);
         if (!slot)
             return FL_RESULT_NOENT;
+        if (slot->offer.sender_member_id != sender_id)
+            return FL_RESULT_ACCES;
         if (slot->offer.receiver_member_id == 0u)
             return fl_net_server_broadcast_except(srv, sender_id, opcode, payload, plen);
         return fl_net_server_send_to_member(srv, slot->offer.receiver_member_id, opcode,
@@ -1283,19 +1302,38 @@ fl_result_t fl_net_file_host_relay(fl_net_server_t *srv,
                 if (fl_file_packet_decode_revoke(payload, plen, share_id,
                                                  sizeof(share_id), &actor) != FL_RESULT_OK)
                     return FL_RESULT_INVAL;
+                slot = share_find(share_id);
+                if (!slot)
+                    return FL_RESULT_NOENT;
+                if (sender_id != slot->offer.sender_member_id ||
+                    (actor != 0u && actor != sender_id))
+                    return FL_RESULT_ACCES;
             } else if (opcode == FL_NET_SESSION_OP_FILE_DECLINE) {
                 if (fl_file_packet_decode_decline(payload, plen, share_id,
                                                   sizeof(share_id), &actor) != FL_RESULT_OK)
                     return FL_RESULT_INVAL;
+                slot = share_find(share_id);
+                if (!slot)
+                    return FL_RESULT_NOENT;
+                if (sender_id == slot->offer.sender_member_id ||
+                    (slot->offer.receiver_member_id != 0u &&
+                     sender_id != slot->offer.receiver_member_id) ||
+                    (actor != 0u && actor != sender_id))
+                    return FL_RESULT_ACCES;
             } else {
                 fl_server_file_disposition_t disp = FL_SERVER_FILE_DECLINE;
                 if (fl_file_packet_decode_accept(payload, plen, share_id, sizeof(share_id),
                                                  &actor, &disp) != FL_RESULT_OK)
                     return FL_RESULT_INVAL;
+                slot = share_find(share_id);
+                if (!slot)
+                    return FL_RESULT_NOENT;
+                if (sender_id == slot->offer.sender_member_id ||
+                    (slot->offer.receiver_member_id != 0u &&
+                     sender_id != slot->offer.receiver_member_id) ||
+                    (actor != 0u && actor != sender_id))
+                    return FL_RESULT_ACCES;
             }
-            slot = share_find(share_id);
-            if (!slot)
-                return FL_RESULT_NOENT;
             return fl_net_server_send_to_member(srv, slot->offer.sender_member_id,
                                                 opcode, payload, plen);
         }
