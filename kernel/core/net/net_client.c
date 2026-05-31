@@ -10,6 +10,7 @@
 #include "net_client.h"
 #include "net_file_delivery.h"
 
+#include "contract_p3_packet.h"
 #include "net_server.h" /* fl_net_session_*_frame, encode/recv helpers */
 #include "net_socket.h"
 

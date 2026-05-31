@@ -388,6 +388,8 @@ UTIL_HISTORY_HOST_OBJS = kernel/core/vfs/fat32_host.o kernel/core/vfs/fat32_host
 UTIL_SHELL_LINK_OBJS = userland/shell/util.o userland/shell/history_record.o
 # fs_jail_check_access pulls session + path_property (and user_db/password_hash for session).
 FS_JAIL_CORE_OBJS = kernel/core/vfs/fs_jail.o kernel/core/vfs/server_shared_fs.o
+# server_shared_fs.c resolves relative paths via g_cwd (userland/shell/common.c).
+NET_TEST_SHELL_OBJS = userland/shell/common.o
 FS_JAIL_SUPPORT_OBJS = kernel/core/time/timekeeping.o \
                          kernel/core/identity/user_db.o kernel/core/identity/elevation.o \
                          kernel/core/identity/path_property.o kernel/core/identity/session.o \
@@ -612,6 +614,7 @@ test_p0_p2_wiring: kernel/core/memory/fl_stack.o kernel/core/memory/exec_context
 .PHONY: test_p3_network
 test_p3_network: $(NET_ASM_OBJ) $(MEM_ASM_OBJ) priority_queue.o kernel/core/time/timekeeping.o kernel/core/sys/ipc.o
 	$(CC) $(CFLAGS) $(TEST_SANITIZE) -o tests/test_p3_network tests/test_p3_network.c \
+	  $(NET_TEST_SHELL_OBJS) \
 	  $(NET_CORE_SRCS) kernel/core/sched/workqueue.c kernel/core/sys/ipc.o kernel/core/time/timekeeping.o priority_queue.o $(MEM_ASM_OBJ) $(NET_ASM_OBJ) \
 	  $(OPENSSL_LIBS) -Wl,-z,noexecstack
 	./tests/test_p3_network
@@ -632,6 +635,7 @@ test_p3_server: $(NET_ASM_OBJ) $(MEM_ASM_OBJ) priority_queue.o kernel/core/time/
 test_p3_udp_cmds: $(NET_ASM_OBJ) $(MEM_ASM_OBJ) priority_queue.o kernel/core/time/timekeeping.o kernel/core/sys/ipc.o
 	$(CC) $(CFLAGS) $(TEST_SANITIZE) -o tests/test_p3_udp_cmds \
 	  tests/test_p3_udp_cmds.c userland/command/cmd_udp.c userland/command/cmd_registry.c \
+	  $(NET_TEST_SHELL_OBJS) \
 	  $(NET_CORE_SRCS) kernel/core/sched/workqueue.c kernel/core/sys/ipc.o kernel/core/time/timekeeping.o priority_queue.o \
 	  $(MEM_ASM_OBJ) $(NET_ASM_OBJ) \
 	  $(OPENSSL_LIBS) -pthread -Wl,-z,noexecstack
@@ -645,6 +649,7 @@ test_p3_udp_cmds: $(NET_ASM_OBJ) $(MEM_ASM_OBJ) priority_queue.o kernel/core/tim
 test_p3_net_tools: $(NET_ASM_OBJ) $(MEM_ASM_OBJ) priority_queue.o kernel/core/time/timekeeping.o kernel/core/sys/ipc.o
 	$(CC) $(CFLAGS) $(TEST_SANITIZE) -o tests/test_p3_net_tools \
 	  tests/test_p3_net_tools.c userland/command/cmd_net_tools.c \
+	  $(NET_TEST_SHELL_OBJS) \
 	  $(NET_CORE_SRCS) kernel/core/sched/workqueue.c kernel/core/sys/ipc.o kernel/core/time/timekeeping.o priority_queue.o \
 	  $(MEM_ASM_OBJ) $(NET_ASM_OBJ) \
 	  $(OPENSSL_LIBS) -pthread -Wl,-z,noexecstack

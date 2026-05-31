@@ -153,7 +153,7 @@ static int verb_file_send(const cmd_server_ctx_t *ctx, int argc, char **argv)
     }
 
     if (!path) {
-        fl_color_error("usage: server file [-all | -user <name> [-id <N>] | -id <N>] <path> [-vweor...] [-Ex<duration>]");
+        fl_color_error("usage: server file [-all | -user <name> [-id <N>] | -id <N>] <path> [-vweor...] [-Ex<duration|mm-dd-yyyy [hh:mm[:ss]]>]");
         return 1;
     }
     if (public_offer && (target_name || target_id != 0u)) {
