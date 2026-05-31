@@ -34,7 +34,14 @@ typedef uint16_t fl_file_perms_t;
 #define FL_FILE_FLAG_PUBLIC         0x4000u /* bit 14 */
 #define FL_FILE_FLAG_REVOKED        0x8000u /* bit 15 */
 
-/** Compact v1 fallback layout if an implementation must serialize one byte. */
+/**
+ * Compact v1 fallback layout if an implementation must serialize one byte.
+ *
+ * This is not a low-byte truncation of fl_file_perms_t: compact bit
+ * positions intentionally differ from the 16-bit native permission word
+ * (for example ACCEPT is bit 4 here, but bit 11 in fl_file_perms_t).
+ * Use fl_file_perms8_to_16() when widening compact wire data.
+ */
 typedef uint8_t fl_file_perms8_t;
 
 #define FL_FILE8_PERM_OVERWRITE  0x01u
@@ -45,6 +52,30 @@ typedef uint8_t fl_file_perms8_t;
 #define FL_FILE8_FLAG_EXPIRES    0x20u
 #define FL_FILE8_FLAG_PUBLIC     0x40u
 #define FL_FILE8_FLAG_REVOKED    0x80u
+
+static inline fl_file_perms_t fl_file_perms8_to_16(fl_file_perms8_t compact)
+{
+    fl_file_perms_t perms = 0u;
+
+    if (compact & FL_FILE8_PERM_OVERWRITE)
+        perms |= FL_FILE_PERM_OVERWRITE;
+    if (compact & FL_FILE8_PERM_WRITE)
+        perms |= FL_FILE_PERM_WRITE;
+    if (compact & FL_FILE8_PERM_EDIT)
+        perms |= FL_FILE_PERM_EDIT;
+    if (compact & FL_FILE8_PERM_RUN)
+        perms |= FL_FILE_PERM_RUN;
+    if (compact & FL_FILE8_PERM_ACCEPT)
+        perms |= FL_FILE_PERM_ACCEPT;
+    if (compact & FL_FILE8_FLAG_EXPIRES)
+        perms |= FL_FILE_FLAG_EXPIRES;
+    if (compact & FL_FILE8_FLAG_PUBLIC)
+        perms |= FL_FILE_FLAG_PUBLIC;
+    if (compact & FL_FILE8_FLAG_REVOKED)
+        perms |= FL_FILE_FLAG_REVOKED;
+
+    return perms;
+}
 
 static inline fl_file_perms_t fl_file_perms_normalize(fl_file_perms_t perms)
 {
@@ -74,7 +105,14 @@ static inline int fl_file_perms_is_revoked(fl_file_perms_t perms)
     return (perms & FL_FILE_FLAG_REVOKED) != 0;
 }
 
-/** MSB-side denial scan: any bit in the high byte set denies (revoke is bit 15). */
+/**
+ * Revoke check for the session layer's big-endian MSB scan.
+ *
+ * Only bit 15 is a denial signal: the packet path reads the most significant
+ * permission bit first and blocks dispatch when FL_FILE_FLAG_REVOKED is set.
+ * Other high-byte flags are metadata and must not deny by this helper. The
+ * shift form mirrors the session layer's MSB-first permission scan.
+ */
 static inline int fl_file_msb_denied(fl_file_perms_t perms)
 {
     return (perms >> 15) != 0;
