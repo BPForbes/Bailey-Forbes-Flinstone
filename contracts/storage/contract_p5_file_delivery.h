@@ -9,6 +9,7 @@
 #ifndef FL_CONTRACT_P5_FILE_DELIVERY_H
 #define FL_CONTRACT_P5_FILE_DELIVERY_H
 
+#include "contract_pkt_channel_meta.h"
 #include "contract_p5_file_perms.h"
 #include "contract_p5_member_identity.h"
 #include "contract_p5_server_share.h"
@@ -39,18 +40,7 @@
 #define FL_SERVER_FILE_CHUNK_MAX    384u
 #endif
 
-/** Byte offset of file_perms within a FILE_OFFER payload (after sender/receiver ids). */
-#define FL_FILE_OFFER_WIRE_FILE_PERMS_OFFSET 4u
-#define FL_FILE_OFFER_WIRE_MIN_LEN (FL_FILE_OFFER_WIRE_FILE_PERMS_OFFSET + 1u)
-
-/** Big-endian wire scan: first byte of file_perms is MSB (revoke = 0x80). */
-static inline int fl_file_offer_wire_payload_revoked(const uint8_t *payload,
-                                                     uint16_t payload_len)
-{
-    if (!payload || payload_len < FL_FILE_OFFER_WIRE_MIN_LEN)
-        return 0;
-    return (payload[FL_FILE_OFFER_WIRE_FILE_PERMS_OFFSET] & 0x80u) != 0;
-}
+/* FILE_OFFER metadata layout and revoke fast-path: contract_pkt_channel_meta.h */
 
 typedef struct fl_bytes_view {
     const uint8_t *data;
