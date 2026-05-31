@@ -2,6 +2,7 @@
 
 #include "fl_colors.h"
 #include "net_file_delivery.h"
+#include "server_file_expire.h"
 #include "session.h"
 
 #include <errno.h>
@@ -97,20 +98,7 @@ static fl_file_perms_t parse_perm_flags(const char *flag)
 
 static int parse_expire_arg(const char *arg, uint64_t *expires_at_out)
 {
-    unsigned long n = 0;
-    char unit = '\0';
-    if (!arg || !expires_at_out)
-        return -1;
-    if (sscanf(arg, "%lu%c", &n, &unit) < 1)
-        return -1;
-    *expires_at_out = (uint64_t)time(NULL);
-    switch (unit) {
-    case 'h': case 'H': *expires_at_out += (uint64_t)n * 3600u; break;
-    case 'm': case 'M': *expires_at_out += (uint64_t)n * 60u; break;
-    case 'd': case 'D': *expires_at_out += (uint64_t)n * 86400u; break;
-    default: *expires_at_out += (uint64_t)n; break;
-    }
-    return 0;
+    return fl_server_file_parse_expire_arg(arg, expires_at_out);
 }
 
 static int stat_local_file(const char *path, uint64_t *size_out)
@@ -222,6 +210,10 @@ static int verb_file_send(const cmd_server_ctx_t *ctx, int argc, char **argv)
 
     rc = fl_net_file_send_offer(ctx->server, ctx->client, hosting,
                                 sender_member_id(ctx, hosting), &offer);
+    if (rc == FL_RESULT_OK)
+        rc = fl_net_file_send_file_contents(ctx->server, ctx->client, hosting,
+                                            sender_member_id(ctx, hosting),
+                                            &offer, path);
     pthread_mutex_unlock(ctx->mutex);
     if (rc != FL_RESULT_OK) {
         fl_color_warn("file offer failed");

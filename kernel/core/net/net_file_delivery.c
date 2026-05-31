@@ -2,6 +2,7 @@
 
 #include "contract_p3_packet.h"
 #include "net_endian.h"
+#include "server_shared_fs.h"
 
 #include <stdio.h>
 #include <stdlib.h>
@@ -10,9 +11,14 @@
 
 #define FL_SERVER_FILE_LOOKUP_MAX FL_NET_SERVER_MAX_MEMBERS
 #define FL_SERVER_FILE_SHARE_SLOTS 32u
+#define FL_SERVER_FILE_MAX_BYTES (16u * 1024u * 1024u)
 
 typedef struct {
     uint8_t active;
+    uint8_t transfer_complete;
+    uint8_t *file_data;
+    size_t file_len;
+    size_t file_cap;
     fl_server_file_offer_t offer;
 } fl_server_file_share_slot_t;
 
@@ -125,13 +131,97 @@ static fl_server_file_share_slot_t *share_find(const char *share_id)
     return NULL;
 }
 
+static void share_slot_free_data(fl_server_file_share_slot_t *slot)
+{
+    if (!slot)
+        return;
+    free(slot->file_data);
+    slot->file_data = NULL;
+    slot->file_len = 0u;
+    slot->file_cap = 0u;
+    slot->transfer_complete = 0u;
+}
+
+static void share_slot_release(fl_server_file_share_slot_t *slot)
+{
+    if (!slot)
+        return;
+    share_slot_free_data(slot);
+    slot->active = 0u;
+}
+
+static fl_result_t share_slot_ensure_cap(fl_server_file_share_slot_t *slot, size_t need)
+{
+    uint8_t *nbuf;
+    if (!slot)
+        return FL_RESULT_INVAL;
+    if (need > FL_SERVER_FILE_MAX_BYTES)
+        return FL_RESULT_NOMEM;
+    if (need <= slot->file_cap)
+        return FL_RESULT_OK;
+    nbuf = (uint8_t *)realloc(slot->file_data, need);
+    if (!nbuf)
+        return FL_RESULT_NOMEM;
+    slot->file_data = nbuf;
+    slot->file_cap = need;
+    return FL_RESULT_OK;
+}
+
+static void share_purge_expired(uint64_t now)
+{
+    size_t i;
+    (void)fl_server_shared_purge_expired(now);
+    for (i = 0; i < FL_SERVER_FILE_SHARE_SLOTS; i++) {
+        fl_server_file_share_slot_t *slot = &s_shares[i];
+        if (!slot->active)
+            continue;
+        if (fl_file_share_validate_access(slot->offer.file_perms,
+                                          slot->offer.expires_at,
+                                          now) == FL_RESULT_OK)
+            continue;
+        slot->offer.file_perms |= FL_FILE_FLAG_REVOKED;
+        share_slot_release(slot);
+    }
+}
+
+static fl_result_t share_access_ok(const fl_server_file_offer_t *offer, uint64_t now)
+{
+    if (!offer)
+        return FL_RESULT_INVAL;
+    return fl_file_share_validate_access(offer->file_perms, offer->expires_at, now);
+}
+
+static void append_expiry_notice(char *out, uint16_t out_cap, uint64_t expires_at)
+{
+    time_t t;
+    struct tm tmv;
+    char suffix[96];
+    size_t used;
+    if (!out || out_cap == 0u || expires_at == 0u)
+        return;
+    t = (time_t)expires_at;
+    if (!gmtime_r(&t, &tmv))
+        return;
+    snprintf(suffix, sizeof(suffix),
+             " (expires %02d-%02d-%04d %02d:%02d:%02d UTC)",
+             tmv.tm_mon + 1, tmv.tm_mday, tmv.tm_year + 1900,
+             tmv.tm_hour, tmv.tm_min, tmv.tm_sec);
+    used = strlen(out);
+    if (used >= out_cap)
+        return;
+    snprintf(out + used, (size_t)out_cap - used, "%s", suffix);
+}
+
 static fl_server_file_share_slot_t *share_alloc(const fl_server_file_offer_t *offer)
 {
     size_t i;
     for (i = 0; i < FL_SERVER_FILE_SHARE_SLOTS; i++) {
         if (!s_shares[i].active) {
+            share_slot_free_data(&s_shares[i]);
             s_shares[i].active = 1u;
             s_shares[i].offer = *offer;
+            if (offer->file_size == 0u)
+                s_shares[i].transfer_complete = 1u;
             return &s_shares[i];
         }
     }
@@ -770,6 +860,10 @@ fl_result_t fl_server_file_render_offer_line(const fl_server_file_offer_t *offer
         snprintf(out, out_cap, "[Server File, %s -> %s]: %s",
                  offer->sender_display, offer->receiver_display, offer->file_name);
     }
+    if (offer->expires_at != 0u &&
+        (offer->receiver_member_id == 0u ||
+         offer->receiver_member_id == viewer_member_id))
+        append_expiry_notice(out, out_cap, offer->expires_at);
     return FL_RESULT_OK;
 }
 
@@ -777,13 +871,22 @@ fl_result_t fl_server_share_inbox_list(uint16_t member_id)
 {
     size_t i;
     int any = 0;
+    uint64_t now = (uint64_t)time(NULL);
+    share_purge_expired(now);
     for (i = 0; i < FL_SERVER_FILE_SHARE_SLOTS; i++) {
         const fl_server_file_offer_t *o = &s_shares[i].offer;
+        char expbuf[64];
         if (!s_shares[i].active)
+            continue;
+        if (share_access_ok(o, now) != FL_RESULT_OK)
             continue;
         if (o->receiver_member_id != member_id)
             continue;
-        printf("%s  %s  from %s\n", o->share_id, o->file_name, o->sender_display);
+        expbuf[0] = '\0';
+        if (o->expires_at != 0u)
+            append_expiry_notice(expbuf, (uint16_t)sizeof(expbuf), o->expires_at);
+        printf("%s  %s  from %s%s\n", o->share_id, o->file_name, o->sender_display,
+               expbuf);
         any = 1;
     }
     if (!any)
@@ -829,22 +932,46 @@ fl_result_t fl_server_share_accept(const char *share_id,
                                    fl_server_file_disposition_t disposition)
 {
     fl_server_file_share_slot_t *slot = share_find(share_id);
+    uint64_t now = (uint64_t)time(NULL);
+    fl_result_t rc;
     if (!slot)
         return FL_RESULT_NOENT;
+    share_purge_expired(now);
+    slot = share_find(share_id);
+    if (!slot)
+        return FL_RESULT_NOENT;
+    rc = share_access_ok(&slot->offer, now);
+    if (rc != FL_RESULT_OK)
+        return rc;
     if (slot->offer.receiver_member_id != 0u &&
         slot->offer.receiver_member_id != receiver_id)
         return FL_RESULT_ACCES;
+    if (!slot->transfer_complete && slot->offer.file_size > 0u)
+        return FL_RESULT_BUSY;
     if (disposition == FL_SERVER_FILE_OVERWRITE_LOCAL &&
         !fl_file_perms_can_overwrite(slot->offer.file_perms))
         return FL_RESULT_ACCES;
     if (disposition == FL_SERVER_FILE_SAVE_TO_SERVER_SHARE &&
         !(slot->offer.file_perms & FL_FILE_PERM_SERVER_SHARE))
         return FL_RESULT_ACCES;
+    if (disposition == FL_SERVER_FILE_SAVE_TO_SERVER_SHARE) {
+        char saved[512];
+        rc = fl_server_shared_save_offer(&slot->offer, slot->file_data,
+                                         slot->file_len, saved, sizeof(saved));
+    } else if (disposition == FL_SERVER_FILE_OVERWRITE_LOCAL) {
+        rc = fl_server_shared_overwrite_local(&slot->offer,
+                                              slot->offer.suggested_dest_path,
+                                              slot->file_data, slot->file_len);
+    } else {
+        rc = FL_RESULT_OK;
+    }
+    if (rc != FL_RESULT_OK)
+        return rc;
     printf("[Server] accepted %s (%s)\n", share_id,
            disposition == FL_SERVER_FILE_OVERWRITE_LOCAL ? "overwrite" :
-           disposition == FL_SERVER_FILE_SAVE_TO_SERVER_SHARE ? "server_share" :
+           disposition == FL_SERVER_FILE_SAVE_TO_SERVER_SHARE ? "server_shared" :
            "decline");
-    slot->active = 0u;
+    share_slot_release(slot);
     return FL_RESULT_OK;
 }
 
@@ -854,10 +981,12 @@ fl_result_t fl_server_share_decline(const char *share_id,
     fl_server_file_share_slot_t *slot = share_find(share_id);
     if (!slot)
         return FL_RESULT_NOENT;
+    if (share_access_ok(&slot->offer, (uint64_t)time(NULL)) != FL_RESULT_OK)
+        return FL_RESULT_ACCES;
     if (slot->offer.receiver_member_id != 0u &&
         slot->offer.receiver_member_id != receiver_id)
         return FL_RESULT_ACCES;
-    slot->active = 0u;
+    share_slot_release(slot);
     return FL_RESULT_OK;
 }
 
@@ -870,21 +999,28 @@ fl_result_t fl_server_share_revoke(const char *share_id,
     if (slot->offer.sender_member_id != owner_id)
         return FL_RESULT_ACCES;
     slot->offer.file_perms |= FL_FILE_FLAG_REVOKED;
-    slot->active = 0u;
+    share_slot_release(slot);
     return FL_RESULT_OK;
 }
 
 fl_result_t fl_server_share_save_to_server_share(const fl_server_file_offer_t *offer)
 {
-    (void)offer;
-    return FL_RESULT_OK;
+    if (!offer)
+        return FL_RESULT_INVAL;
+    if (share_access_ok(offer, (uint64_t)time(NULL)) != FL_RESULT_OK)
+        return FL_RESULT_ACCES;
+    return fl_server_shared_init();
 }
 
 fl_result_t fl_server_share_overwrite_local(const fl_server_file_offer_t *offer,
                                             const char *local_path)
 {
-    (void)offer;
-    (void)local_path;
+    if (!offer || !local_path)
+        return FL_RESULT_INVAL;
+    if (share_access_ok(offer, (uint64_t)time(NULL)) != FL_RESULT_OK)
+        return FL_RESULT_ACCES;
+    if (fl_server_shared_path_is_expired_quarantine(local_path))
+        return FL_RESULT_ACCES;
     return FL_RESULT_OK;
 }
 
@@ -892,11 +1028,124 @@ fl_result_t fl_server_file_store_offer(const fl_server_file_offer_t *offer)
 {
     if (!offer)
         return FL_RESULT_INVAL;
+    if (share_access_ok(offer, (uint64_t)time(NULL)) != FL_RESULT_OK)
+        return FL_RESULT_ACCES;
     if (share_find(offer->share_id) != NULL)
         return FL_RESULT_OK;
     if (share_alloc(offer) == NULL)
         return FL_RESULT_NOMEM;
+    (void)fl_server_shared_init();
     return FL_RESULT_OK;
+}
+
+fl_result_t fl_net_file_store_chunk(const uint8_t *payload, uint16_t plen)
+{
+    fl_server_file_chunk_header_t chunk;
+    fl_bytes_view_t data;
+    fl_server_file_share_slot_t *slot;
+    size_t end;
+    fl_result_t rc;
+
+    if (!payload)
+        return FL_RESULT_INVAL;
+    rc = fl_file_packet_decode_chunk(payload, plen, &chunk, &data);
+    if (rc != FL_RESULT_OK)
+        return rc;
+    slot = share_find(chunk.share_id);
+    if (!slot)
+        return FL_RESULT_NOENT;
+    if (share_access_ok(&slot->offer, (uint64_t)time(NULL)) != FL_RESULT_OK)
+        return FL_RESULT_ACCES;
+    end = (size_t)chunk.file_offset + (size_t)data.len;
+    if (end > FL_SERVER_FILE_MAX_BYTES)
+        return FL_RESULT_NOMEM;
+    rc = share_slot_ensure_cap(slot, end);
+    if (rc != FL_RESULT_OK)
+        return rc;
+    if (data.len > 0u && data.data)
+        memcpy(slot->file_data + chunk.file_offset, data.data, data.len);
+    if (end > slot->file_len)
+        slot->file_len = end;
+    return FL_RESULT_OK;
+}
+
+fl_result_t fl_net_file_store_done(const uint8_t *payload, uint16_t plen)
+{
+    fl_server_file_done_t done;
+    fl_server_file_share_slot_t *slot;
+    if (!payload)
+        return FL_RESULT_INVAL;
+    if (fl_file_packet_decode_done(payload, plen, &done) != FL_RESULT_OK)
+        return FL_RESULT_INVAL;
+    slot = share_find(done.share_id);
+    if (!slot)
+        return FL_RESULT_NOENT;
+    if (share_access_ok(&slot->offer, (uint64_t)time(NULL)) != FL_RESULT_OK)
+        return FL_RESULT_ACCES;
+    if (done.total_bytes <= slot->file_cap)
+        slot->file_len = (size_t)done.total_bytes;
+    slot->transfer_complete = 1u;
+    return FL_RESULT_OK;
+}
+
+fl_result_t fl_net_file_send_file_contents(fl_net_server_t *srv,
+                                           fl_net_client_t *client,
+                                           int hosting,
+                                           fl_net_server_member_id_t sender_id,
+                                           const fl_server_file_offer_t *offer,
+                                           const char *local_path)
+{
+    FILE *fp;
+    uint8_t buf[FL_SERVER_FILE_CHUNK_MAX];
+    uint32_t index = 0;
+    uint64_t offset = 0;
+    fl_result_t rc = FL_RESULT_OK;
+
+    if (!offer || !local_path)
+        return FL_RESULT_INVAL;
+    fp = fopen(local_path, "rb");
+    if (!fp)
+        return FL_RESULT_ERR;
+    for (;;) {
+        size_t n = fread(buf, 1, sizeof(buf), fp);
+        fl_server_file_chunk_header_t chunk;
+        uint8_t payload[FL_NET_SESSION_MAX_MSG];
+        uint16_t plen = 0;
+        if (n == 0u && feof(fp))
+            break;
+        memset(&chunk, 0, sizeof(chunk));
+        copy_str_field(chunk.share_id, sizeof(chunk.share_id), offer->share_id);
+        chunk.chunk_index = index++;
+        chunk.chunk_len = (uint32_t)n;
+        chunk.file_offset = offset;
+        rc = fl_file_packet_encode_chunk(&chunk, buf, (uint32_t)n, payload,
+                                         sizeof(payload), &plen);
+        if (rc != FL_RESULT_OK)
+            break;
+        rc = fl_net_file_send_control(srv, client, hosting, sender_id,
+                                      FL_NET_SESSION_OP_FILE_CHUNK, payload, plen);
+        if (rc != FL_RESULT_OK)
+            break;
+        offset += (uint64_t)n;
+        if (n < sizeof(buf))
+            break;
+    }
+    if (rc == FL_RESULT_OK) {
+        fl_server_file_done_t done;
+        uint8_t payload[FL_NET_SESSION_MAX_MSG];
+        uint16_t plen = 0;
+        memset(&done, 0, sizeof(done));
+        copy_str_field(done.share_id, sizeof(done.share_id), offer->share_id);
+        done.total_bytes = offset;
+        done.total_chunks = index;
+        done.status = 1u;
+        rc = fl_file_packet_encode_done(&done, payload, sizeof(payload), &plen);
+        if (rc == FL_RESULT_OK)
+            rc = fl_net_file_send_control(srv, client, hosting, sender_id,
+                                          FL_NET_SESSION_OP_FILE_DONE, payload, plen);
+    }
+    fclose(fp);
+    return rc;
 }
 
 fl_result_t fl_net_file_send_offer(fl_net_server_t *srv,
@@ -976,6 +1225,8 @@ fl_result_t fl_net_file_host_relay(fl_net_server_t *srv,
             return rc;
         if (offer.sender_member_id == 0u)
             offer.sender_member_id = sender_id;
+        if (share_access_ok(&offer, (uint64_t)time(NULL)) != FL_RESULT_OK)
+            return FL_RESULT_ACCES;
         if (share_find(offer.share_id) == NULL) {
             if (share_alloc(&offer) == NULL)
                 return FL_RESULT_NOMEM;
@@ -987,11 +1238,34 @@ fl_result_t fl_net_file_host_relay(fl_net_server_t *srv,
                                             payload, plen);
     }
 
+    if (opcode == FL_NET_SESSION_OP_FILE_CHUNK ||
+        opcode == FL_NET_SESSION_OP_FILE_DONE) {
+        char share_id[FL_SERVER_SHARE_ID_MAX];
+        fl_server_file_share_slot_t *slot = NULL;
+        if (opcode == FL_NET_SESSION_OP_FILE_CHUNK) {
+            fl_server_file_chunk_header_t chunk;
+            fl_bytes_view_t data;
+            if (fl_file_packet_decode_chunk(payload, plen, &chunk, &data) != FL_RESULT_OK)
+                return FL_RESULT_INVAL;
+            copy_str_field(share_id, sizeof(share_id), chunk.share_id);
+        } else {
+            fl_server_file_done_t done;
+            if (fl_file_packet_decode_done(payload, plen, &done) != FL_RESULT_OK)
+                return FL_RESULT_INVAL;
+            copy_str_field(share_id, sizeof(share_id), done.share_id);
+        }
+        slot = share_find(share_id);
+        if (!slot)
+            return FL_RESULT_NOENT;
+        if (slot->offer.receiver_member_id == 0u)
+            return fl_net_server_broadcast_except(srv, sender_id, opcode, payload, plen);
+        return fl_net_server_send_to_member(srv, slot->offer.receiver_member_id, opcode,
+                                            payload, plen);
+    }
+
     if (opcode == FL_NET_SESSION_OP_FILE_ACCEPT ||
         opcode == FL_NET_SESSION_OP_FILE_DECLINE ||
         opcode == FL_NET_SESSION_OP_FILE_REVOKE ||
-        opcode == FL_NET_SESSION_OP_FILE_CHUNK ||
-        opcode == FL_NET_SESSION_OP_FILE_DONE ||
         opcode == FL_NET_SESSION_OP_FILE_LIST ||
         opcode == FL_NET_SESSION_OP_FILE_STATUS) {
         char share_id[FL_SERVER_SHARE_ID_MAX];

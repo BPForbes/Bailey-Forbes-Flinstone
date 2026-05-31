@@ -15,7 +15,10 @@
 #define FL_CONTRACT_P5_5_SERVER_SHARE_CONTRACT_DEFINED 1
 
 /** Default directory name (single path component; no trailing slash in the constant). */
-#define FL_SERVER_SHARE_DIR_NAME "server_share"
+#define FL_SERVER_SHARED_DIR_NAME "server_shared"
+#define FL_SERVER_SHARED_EXPIRED_DIR_NAME "expired"
+/** Legacy alias retained for older docs and SFTP virtual paths. */
+#define FL_SERVER_SHARE_DIR_NAME FL_SERVER_SHARED_DIR_NAME
 #define FL_SERVER_SHARE_INBOX_DIR_NAME "inbox"
 #define FL_SERVER_SHARE_PUBLIC_DIR_NAME "public"
 #define FL_SERVER_SHARE_SENT_DIR_NAME "sent"
