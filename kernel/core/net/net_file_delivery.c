@@ -374,7 +374,12 @@ fl_result_t fl_server_file_offer_decode(const uint8_t *payload,
 
     if (!payload || !out)
         return FL_RESULT_INVAL;
+    if (payload_len < FL_FILE_OFFER_WIRE_MIN_LEN)
+        return FL_RESULT_INVAL;
     memset(out, 0, sizeof(*out));
+
+    if (fl_pkt_wire_has_meta(payload, payload_len))
+        off = (uint16_t)FL_PKT_CHANNEL_META_LEN;
 
     rc = get_u16(payload, payload_len, &off, &out->sender_member_id);
     if (rc != FL_RESULT_OK) return rc;
