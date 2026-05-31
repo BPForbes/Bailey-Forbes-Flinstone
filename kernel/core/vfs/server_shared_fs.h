@@ -12,7 +12,7 @@ fl_result_t fl_server_shared_init(void);
 /** True when resolved path lies under server_shared/expired (hard deny for all principals). */
 int fl_server_shared_path_is_expired_quarantine(const char *path);
 
-/** Save bytes to server_shared/<share_id>/<filename> and write offer.meta sidecar. */
+/** Save bytes to server_shared/<filename>; share_id sidecar is server_shared/<share_id>.meta. */
 fl_result_t fl_server_shared_save_offer(const fl_server_file_offer_t *offer,
                                         const uint8_t *data,
                                         size_t data_len,

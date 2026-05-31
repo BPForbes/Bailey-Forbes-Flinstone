@@ -11,7 +11,7 @@ HTML = ART / "demo_file_share_content_match.html"
 
 QUOTE = "The road goes ever on and on, down from the door where it began."
 SENDER_PATH = "/workspace/.tmp_msg_file_demo/demo_share.txt"
-RECEIVER_PATH = "server_shared/share-1780267182-1/demo_share.txt"
+RECEIVER_PATH = "server_shared/demo_share.txt"
 SHARE_ID = "share-1780267182-1"
 PORT = "49917"
 

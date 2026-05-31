@@ -16,16 +16,19 @@ echo 'expire-me' >"$WORK/payload.txt"
 python3 - <<'PY' "$WORK"
 import os, sys, time
 work = sys.argv[1]
-shared = os.path.join(work, "server_shared", "share-test", "payload.txt")
-expired = os.path.join(work, "server_shared", "expired", "share-test", "payload.txt")
-os.makedirs(os.path.dirname(shared), exist_ok=True)
-with open(shared, "w") as f:
+shared_root = os.path.join(work, "server_shared")
+shared_file = os.path.join(shared_root, "payload.txt")
+expired_file = os.path.join(shared_root, "expired", "payload.txt")
+expired_meta = os.path.join(shared_root, "expired", "share-test.meta")
+os.makedirs(shared_root, exist_ok=True)
+with open(shared_file, "w") as f:
     f.write("expire-me\n")
-meta = os.path.join(os.path.dirname(shared), "offer.meta")
+meta = os.path.join(shared_root, "share-test.meta")
 with open(meta, "w") as f:
     f.write("share_id=share-test\n")
     f.write(f"expires_at={int(time.time()) - 1}\n")
     f.write("file_name=payload.txt\n")
+os.makedirs(os.path.join(shared_root, "expired"), exist_ok=True)
 print("prepared expired share metadata:", meta)
 PY
 
@@ -34,12 +37,16 @@ PY
   "$ROOT/tests/purge_shared_expired_harness"
 )
 
-if [[ ! -f "$WORK/server_shared/expired/share-test/payload.txt" ]]; then
+if [[ ! -f "$WORK/server_shared/expired/payload.txt" ]]; then
   echo "expected expired quarantine payload missing" >&2
   exit 1
 fi
-if [[ -d "$WORK/server_shared/share-test" ]]; then
-  echo "expired share was not moved out of server_shared/" >&2
+if [[ -f "$WORK/server_shared/payload.txt" ]]; then
+  echo "expired payload was not moved out of server_shared/" >&2
+  exit 1
+fi
+if [[ ! -f "$WORK/server_shared/expired/share-test.meta" ]]; then
+  echo "expected expired sidecar meta missing" >&2
   exit 1
 fi
 echo "expired quarantine path match: OK"

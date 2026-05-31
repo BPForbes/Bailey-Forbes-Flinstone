@@ -87,7 +87,7 @@ rm -f "$INBOX_SNAP"
 if [[ -n "${SHARE_ID:-}" ]]; then
     $T send-keys -t "$S:0.2" "server file accept ${SHARE_ID} --server-share" C-m
     sleep 2
-    $T send-keys -t "$S:0.2" "cat server_shared/${SHARE_ID}/demo_share.txt" C-m
+    $T send-keys -t "$S:0.2" "cat server_shared/demo_share.txt" C-m
     sleep 0.8
 else
     $T send-keys -t "$S:0.2" "echo WARN_no_share_id_in_inbox" C-m

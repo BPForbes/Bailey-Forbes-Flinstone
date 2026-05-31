@@ -118,6 +118,86 @@ static fl_result_t resolve_local_path(const char *local_path, char *out, size_t 
     return FL_RESULT_OK;
 }
 
+static int share_meta_sidecar_name(const char *name, char *share_id_out, size_t share_id_cap)
+{
+    size_t nlen;
+    const char *suffix = ".meta";
+    size_t slen = strlen(suffix);
+
+    if (!name || !share_id_out || share_id_cap == 0u)
+        return 0;
+    nlen = strlen(name);
+    if (nlen <= slen + 6u)
+        return 0;
+    if (strcmp(name + nlen - slen, suffix) != 0)
+        return 0;
+    if (strncmp(name, "share-", 6) != 0)
+        return 0;
+    if (nlen - slen >= share_id_cap)
+        return 0;
+    memcpy(share_id_out, name, nlen - slen);
+    share_id_out[nlen - slen] = '\0';
+    return 1;
+}
+
+static fl_result_t share_meta_path(char *out, size_t cap, const char *root,
+                                   const char *share_id)
+{
+    char sidecar[FL_SERVER_SHARE_ID_MAX + 8u];
+    if (!out || cap == 0u || !root || !share_id)
+        return FL_RESULT_INVAL;
+    if (path_component_safe(share_id) != FL_RESULT_OK)
+        return FL_RESULT_INVAL;
+    if (snprintf(sidecar, sizeof(sidecar), "%s.meta", share_id) >= (int)sizeof(sidecar))
+        return FL_RESULT_INVAL;
+    if (join_path(out, cap, root, sidecar) != 0)
+        return FL_RESULT_ERR;
+    return FL_RESULT_OK;
+}
+
+static fl_result_t read_meta_file(const char *meta_path, char *file_name_out,
+                                  size_t file_name_cap, uint64_t *expires_at_out)
+{
+    FILE *fp;
+    char line[256];
+    int have_name = 0;
+
+    if (!meta_path || !file_name_out || file_name_cap == 0u || !expires_at_out)
+        return FL_RESULT_INVAL;
+    file_name_out[0] = '\0';
+    *expires_at_out = 0u;
+    fp = fopen(meta_path, "r");
+    if (!fp)
+        return FL_RESULT_NOENT;
+    while (fgets(line, sizeof(line), fp)) {
+        unsigned long long v;
+        if (sscanf(line, "expires_at=%llu", &v) == 1)
+            *expires_at_out = (uint64_t)v;
+        if (sscanf(line, "file_name=%255[^\n]", file_name_out) == 1)
+            have_name = 1;
+    }
+    fclose(fp);
+    return have_name ? FL_RESULT_OK : FL_RESULT_INVAL;
+}
+
+static fl_result_t write_meta(const char *root, const fl_server_file_offer_t *offer)
+{
+    char meta[512];
+    FILE *fp;
+    if (!root || !offer)
+        return FL_RESULT_INVAL;
+    if (share_meta_path(meta, sizeof(meta), root, offer->share_id) != FL_RESULT_OK)
+        return FL_RESULT_ERR;
+    fp = fopen(meta, "w");
+    if (!fp)
+        return FL_RESULT_ERR;
+    fprintf(fp, "share_id=%s\n", offer->share_id);
+    fprintf(fp, "expires_at=%llu\n", (unsigned long long)offer->expires_at);
+    fprintf(fp, "file_name=%s\n", offer->file_name);
+    fclose(fp);
+    return FL_RESULT_OK;
+}
+
 fl_result_t fl_server_shared_init(void)
 {
     char root[512];
@@ -161,24 +241,6 @@ int fl_server_shared_path_is_expired_quarantine(const char *path)
     return path_has_expired_component(ab);
 }
 
-static fl_result_t write_meta(const char *dir, const fl_server_file_offer_t *offer)
-{
-    char meta[512];
-    FILE *fp;
-    if (!dir || !offer)
-        return FL_RESULT_INVAL;
-    if (join_path(meta, sizeof(meta), dir, "offer.meta") != 0)
-        return FL_RESULT_ERR;
-    fp = fopen(meta, "w");
-    if (!fp)
-        return FL_RESULT_ERR;
-    fprintf(fp, "share_id=%s\n", offer->share_id);
-    fprintf(fp, "expires_at=%llu\n", (unsigned long long)offer->expires_at);
-    fprintf(fp, "file_name=%s\n", offer->file_name);
-    fclose(fp);
-    return FL_RESULT_OK;
-}
-
 fl_result_t fl_server_shared_save_offer(const fl_server_file_offer_t *offer,
                                         const uint8_t *data,
                                         size_t data_len,
@@ -186,7 +248,6 @@ fl_result_t fl_server_shared_save_offer(const fl_server_file_offer_t *offer,
                                         size_t out_path_cap)
 {
     char root[512];
-    char dir[512];
     char file_path[512];
     FILE *fp;
     if (!offer || !offer->share_id[0] || !offer->file_name[0])
@@ -198,11 +259,7 @@ fl_result_t fl_server_shared_save_offer(const fl_server_file_offer_t *offer,
         return FL_RESULT_ERR;
     if (join_path(root, sizeof(root), ".", FL_SERVER_SHARED_DIR_NAME) != 0)
         return FL_RESULT_ERR;
-    if (join_path(dir, sizeof(dir), root, offer->share_id) != 0)
-        return FL_RESULT_ERR;
-    if (mkdir_p(dir, 0700) != 0)
-        return FL_RESULT_ERR;
-    if (join_path(file_path, sizeof(file_path), dir, offer->file_name) != 0)
+    if (join_path(file_path, sizeof(file_path), root, offer->file_name) != 0)
         return FL_RESULT_ERR;
     fp = fopen(file_path, "wb");
     if (!fp)
@@ -213,7 +270,7 @@ fl_result_t fl_server_shared_save_offer(const fl_server_file_offer_t *offer,
         return FL_RESULT_ERR;
     }
     fclose(fp);
-    if (write_meta(dir, offer) != FL_RESULT_OK)
+    if (write_meta(root, offer) != FL_RESULT_OK)
         return FL_RESULT_ERR;
     if (out_path && out_path_cap > 0u) {
         strncpy(out_path, file_path, out_path_cap - 1u);
@@ -260,12 +317,17 @@ fl_result_t fl_server_shared_overwrite_local(const fl_server_file_offer_t *offer
     return FL_RESULT_OK;
 }
 
-static fl_result_t move_dir_to_expired(const char *share_id)
+static fl_result_t move_share_to_expired(const char *share_id)
 {
     char root[512];
     char expired_root[512];
-    char src[512];
-    char dst[512];
+    char meta_src[512];
+    char meta_dst[512];
+    char file_src[512];
+    char file_dst[512];
+    char file_name[256];
+    uint64_t expires_at = 0u;
+
     if (!share_id || !share_id[0])
         return FL_RESULT_INVAL;
     if (path_component_safe(share_id) != FL_RESULT_OK)
@@ -274,13 +336,23 @@ static fl_result_t move_dir_to_expired(const char *share_id)
         return FL_RESULT_ERR;
     if (join_path(expired_root, sizeof(expired_root), root, FL_SERVER_SHARED_EXPIRED_DIR_NAME) != 0)
         return FL_RESULT_ERR;
-    if (join_path(src, sizeof(src), root, share_id) != 0)
+    if (share_meta_path(meta_src, sizeof(meta_src), root, share_id) != FL_RESULT_OK)
         return FL_RESULT_ERR;
-    if (join_path(dst, sizeof(dst), expired_root, share_id) != 0)
+    if (read_meta_file(meta_src, file_name, sizeof(file_name), &expires_at) != FL_RESULT_OK)
+        return FL_RESULT_INVAL;
+    if (path_component_safe(file_name) != FL_RESULT_OK)
+        return FL_RESULT_INVAL;
+    if (join_path(file_src, sizeof(file_src), root, file_name) != 0)
+        return FL_RESULT_ERR;
+    if (join_path(file_dst, sizeof(file_dst), expired_root, file_name) != 0)
+        return FL_RESULT_ERR;
+    if (share_meta_path(meta_dst, sizeof(meta_dst), expired_root, share_id) != FL_RESULT_OK)
         return FL_RESULT_ERR;
     if (mkdir_p(expired_root, 0700) != 0 && errno != EEXIST)
         return FL_RESULT_ERR;
-    if (rename(src, dst) != 0)
+    if (rename(file_src, file_dst) != 0 && errno != ENOENT)
+        return FL_RESULT_ERR;
+    if (rename(meta_src, meta_dst) != 0)
         return FL_RESULT_ERR;
     return FL_RESULT_OK;
 }
@@ -299,30 +371,19 @@ fl_result_t fl_server_shared_purge_expired(uint64_t now)
     if (!d)
         return FL_RESULT_ERR;
     while ((ent = readdir(d)) != NULL) {
-        char dir_path[512];
+        char share_id[FL_SERVER_SHARE_ID_MAX];
+        char file_name[256];
         uint64_t expires_at = 0u;
-        FILE *fp;
-        char line[256];
         if (ent->d_name[0] == '.')
             continue;
-        if (!strcmp(ent->d_name, FL_SERVER_SHARED_EXPIRED_DIR_NAME))
+        if (!share_meta_sidecar_name(ent->d_name, share_id, sizeof(share_id)))
             continue;
-        if (join_path(dir_path, sizeof(dir_path), root, ent->d_name) != 0)
+        if (join_path(meta_path, sizeof(meta_path), root, ent->d_name) != 0)
             continue;
-        if (join_path(meta_path, sizeof(meta_path), dir_path, "offer.meta") != 0)
+        if (read_meta_file(meta_path, file_name, sizeof(file_name), &expires_at) != FL_RESULT_OK)
             continue;
-        fp = fopen(meta_path, "r");
-        if (!fp)
-            continue;
-        expires_at = 0u;
-        while (fgets(line, sizeof(line), fp)) {
-            unsigned long long v;
-            if (sscanf(line, "expires_at=%llu", &v) == 1)
-                expires_at = (uint64_t)v;
-        }
-        fclose(fp);
         if (expires_at != 0u && now > expires_at)
-            (void)move_dir_to_expired(ent->d_name);
+            (void)move_share_to_expired(share_id);
     }
     closedir(d);
     return FL_RESULT_OK;
