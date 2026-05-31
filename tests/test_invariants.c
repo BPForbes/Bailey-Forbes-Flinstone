@@ -463,8 +463,19 @@ static int test_contract_constants(void) {
     ASSERT((fl_file_perms_normalize(FL_FILE_PERM_EDIT) & FL_FILE_PERM_VIEW) != 0);
     ASSERT(fl_file_perms_has(FL_FILE_PERM_EDIT | FL_FILE_PERM_VIEW, FL_FILE_PERM_VIEW) == 1);
     ASSERT(fl_file_share_validate_access(FL_FILE_FLAG_REVOKED, 0, 0) == FL_RESULT_ACCES);
+    ASSERT(fl_file_perms8_to_16(FL_FILE8_PERM_ACCEPT) == FL_FILE_PERM_ACCEPT);
+    ASSERT(fl_file_perms8_to_16(FL_FILE8_FLAG_REVOKED) == FL_FILE_FLAG_REVOKED);
     ASSERT(fl_file_msb_denied(FL_FILE_FLAG_REVOKED) == 1);
+    ASSERT(fl_file_msb_denied(FL_FILE_FLAG_LOCKED | FL_FILE_FLAG_PUBLIC) == 0);
     ASSERT(fl_file_msb_denied(FL_FILE_PERM_VIEW) == 0);
+    {
+        uint8_t bytes_writer_buf[4] = {0};
+        fl_bytes_writer_t writer;
+        fl_bytes_writer_init(&writer, bytes_writer_buf, (uint16_t)sizeof(bytes_writer_buf));
+        ASSERT(writer.buf == bytes_writer_buf);
+        ASSERT(writer.cap == sizeof(bytes_writer_buf));
+        ASSERT(writer.len == 0u);
+    }
     {
         const uint8_t revoked_offer[] = {0, 0, 0, 0, 0x80, 0x01};
         ASSERT(fl_file_offer_wire_payload_revoked(revoked_offer,
