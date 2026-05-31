@@ -11,9 +11,10 @@ export FL_USERS_LAB_DEFAULTS=1
 make -q BPForbes_Flinstone_Shell 2>/dev/null || make BPForbes_Flinstone_Shell
 
 WORK="$REPO_ROOT/.tmp_msg_file_demo"
-rm -rf "$WORK"
+QUOTE='The road goes ever on and on, down from the door where it began.'
+rm -rf "$WORK" server_shared
 mkdir -p "$WORK"
-echo 'Hello from native server file transfer.' >"$WORK/demo_share.txt"
+printf '%s\n' "$QUOTE" >"$WORK/demo_share.txt"
 echo 'Public bulletin for all members.' >"$WORK/public_note.txt"
 
 # One process creates drive.img before parallel interactive shells open it.
@@ -72,6 +73,8 @@ $T send-keys -t "$S:0.2" "server msg -user Alice Got your ping" C-m
 sleep 1
 
 # --- Private file offer Alice -> Bob ---
+$T send-keys -t "$S:0.1" "cat $WORK/demo_share.txt" C-m
+sleep 0.6
 $T send-keys -t "$S:0.1" "server file -user Bob $WORK/demo_share.txt -vw" C-m
 sleep 2.5
 $T send-keys -t "$S:0.2" "server file inbox" C-m
@@ -84,6 +87,8 @@ rm -f "$INBOX_SNAP"
 if [[ -n "${SHARE_ID:-}" ]]; then
     $T send-keys -t "$S:0.2" "server file accept ${SHARE_ID} --server-share" C-m
     sleep 2
+    $T send-keys -t "$S:0.2" "cat server_shared/${SHARE_ID}/demo_share.txt" C-m
+    sleep 0.8
 else
     $T send-keys -t "$S:0.2" "echo WARN_no_share_id_in_inbox" C-m
     sleep 0.5
@@ -119,3 +124,12 @@ if [[ -z "${SHARE_ID:-}" ]]; then
     exit 1
 fi
 echo "accepted share: ${SHARE_ID}"
+if ! grep -Fq "$QUOTE" /opt/cursor/artifacts/demo_msg_file_alice.txt; then
+    echo "FAIL: sender pane does not show shared file quote" >&2
+    exit 1
+fi
+if ! grep -Fq "$QUOTE" /opt/cursor/artifacts/demo_msg_file_bob.txt; then
+    echo "FAIL: receiver pane does not show shared file quote after accept" >&2
+    exit 1
+fi
+echo "quote visible on sender and receiver: OK"

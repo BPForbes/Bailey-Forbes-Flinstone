@@ -52,7 +52,7 @@ html = f"""<!doctype html>
   pre {{ margin: 0; padding: 10px; font-size: 11px; white-space: pre-wrap; }}
 </style></head><body>
 <h1>Server messaging + native file share (tmux, 3 shells)</h1>
-<p class="sub">127.0.0.1 hub · server msg broadcast/private · server file -user / -all · inbox accept --server-share</p>
+<p class="sub">127.0.0.1 hub · server msg broadcast/private · server file -user / -all · inbox accept --server-share · sender/receiver <code>cat</code> the shared quote</p>
 {''.join(sections)}
 </body></html>"""
 
@@ -67,10 +67,12 @@ subprocess.run(
         "--headless=new",
         "--disable-gpu",
         "--no-sandbox",
+        "--user-data-dir=/tmp/chrome-msg-file-demo",
         f"--screenshot={png_path}",
-        "--window-size=1280,2400",
+        "--window-size=1280,2600",
         f"file://{html_path}",
     ],
     check=True,
+    timeout=30,
 )
 print(f"wrote {png_path}")
