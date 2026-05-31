@@ -4,3 +4,5 @@ RELEASE_VERSION=0
 PRERELEASE=1
 DEV_VERSION=10
 DESCRIPTION=Issue #297: 5-byte channel packet metadata (contract_pkt_channel_meta.h) with big-endian MSB-first flag layout; FILE_OFFER prepends meta bytes 0–4 (Valid gate, file perms/state mapping); fl_net_put_u16_be for file_perms wire field; legacy revoke scan fallback.
+
+RELEASE_DATE=2026-05-31
