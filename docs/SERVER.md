@@ -406,8 +406,8 @@ Normative contracts:
 
 - **`contract_p5_file_perms.h`** defines the 16-bit file permission word, normalization, and quick revocation / overwrite checks.
 - **`contract_p5_file_delivery.h`** defines **`fl_server_file_offer_t`**, chunk/done records, byte-string helpers, and receiver disposition.
-- **`contract_p3_file_packet.h`** defines packet encode/decode boundaries so command and router code do not hand-assemble byte offsets.
-- **`contract_p3_file_session.h`** defines message-style receiver resolution, display snapshots, and offer rendering.
+- **`contract_p3_packet.h`** defines FILE_* payload encode/decode boundaries so command and router code do not hand-assemble byte offsets.
+- **`contract_p3_session_wire.h`** defines the shared session frame channel, file opcodes, receiver resolution, display snapshots, and offer rendering.
 - **`contract_p3_sftp_adapter.h`** records that SFTP maps onto native server-file policy instead of bypassing it.
 
 | Field group | Meaning |

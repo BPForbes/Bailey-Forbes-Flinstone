@@ -8,7 +8,7 @@
 #ifndef FL_CONTRACT_P3_SFTP_ADAPTER_H
 #define FL_CONTRACT_P3_SFTP_ADAPTER_H
 
-#include "contract_p3_file_session.h"
+#include "contract_p3_session_wire.h"
 
 #define FL_CONTRACT_P3_SFTP_ADAPTER_CONTRACT_DEFINED 1
 

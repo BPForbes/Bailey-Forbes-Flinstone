@@ -19,7 +19,7 @@ shards below, and **FL_CONTRACT_P3_VOCABULARY_LOCK**.
 | File | Roadmap |
 |------|---------|
 | *contract_p3_wire.h* | Shared wire vocabulary (not a **P3-**`*` row) |
-| *contract_p3_packet.h* | Layered packet + pipeline stages (cross-cutting; not a **P3-**`*` row) |
+| *contract_p3_packet.h* | Layered packet + pipeline stages; FILE_* session payload encode/decode |
 | *contract_p3_socket.h* | Socket four-tuple endpoint (cross-cutting; full **P3-13** shim TODO) |
 | *contract_p3_trust.h* | Narrow **P2-3** include (not a **P3-**`*` row) |
 | *contract_p3_netdev.h* | P3-1 |
@@ -36,9 +36,7 @@ shards below, and **FL_CONTRACT_P3_VOCABULARY_LOCK**.
 | *contract_p3_ipv6_deferred.h* | P3-11 |
 | *contract_p3_background.h* | P3-14 |
 | *contract_p3_sockets.h* | P3-13a (socket shim vocabulary) |
-| *contract_p3_session_wire.h* | P3-13 (session frame opcodes; app in **docs/SERVER.md**) |
-| *contract_p3_file_packet.h* | P3-13 file packet encode/decode boundary |
-| *contract_p3_file_session.h* | P3-13 native server file routing contract |
+| *contract_p3_session_wire.h* | P3-13 session frame opcodes, file routing, and channel validation |
 | *contract_p3_sftp_adapter.h* | SFTP compatibility adapter over native server file |
 
 Most shards include **contract_p3_wire.h** (which pulls **contract_extend.h**). **P3-1** and

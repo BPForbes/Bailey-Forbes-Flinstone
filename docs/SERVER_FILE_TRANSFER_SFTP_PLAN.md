@@ -134,10 +134,10 @@ Command and routing logic should not manually assemble raw byte offsets.
 cmd_server_file.c
         |
         v
-contract_p3_file_session
+contract_p3_session_wire.h
         |
         v
-packet module
+contract_p3_packet.h (FILE_* payload encode/decode)
         |
         v
 server session router
@@ -276,16 +276,18 @@ contract_extend.h
 contract_p3_session_wire.h  contract_storage.h
         |                   |
         v                   v
-contract_p3_file_packet.h   contract_p5_file_perms.h
+contract_p3_packet.h         contract_p5_file_perms.h
         |                   |
-        v                   v
-contract_p3_file_session.h  contract_p5_file_delivery.h
-                            |
-                            v
-                    contract_p5_server_share.h
-                            |
-                            v
-                    contract_p3_sftp_adapter.h
+        |                   v
+        |           contract_p5_file_delivery.h
+        |                   |
+        |                   v
+        |           contract_p5_server_share.h
+        |                   |
+        +-------------------+
+                    |
+                    v
+            contract_p3_sftp_adapter.h
 ```
 
 New or expanded contract files:
@@ -294,10 +296,11 @@ New or expanded contract files:
 contracts/storage/contract_p5_file_perms.h
 contracts/storage/contract_p5_file_delivery.h
 contracts/storage/contract_p5_server_share.h
-contracts/networking/contract_p3_file_packet.h
-contracts/networking/contract_p3_file_session.h
 contracts/networking/contract_p3_sftp_adapter.h
 ```
+
+File-transfer encode/decode and session routing live in **`contract_p3_packet.h`** and
+**`contract_p3_session_wire.h`** respectively (no separate file-only shard headers).
 
 ## Implementation roadmap
 

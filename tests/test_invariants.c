@@ -487,10 +487,9 @@ static int test_contract_constants(void) {
     ASSERT(FL_CONTRACT_P7_BATCH_AUDIT_SHOW_MAX_TOKENS == 3u);
     ASSERT(FL_CONTRACT_P7_BATCH_MAX_TOKENS_TOTAL == 16u);
 
-    ASSERT(FL_CONTRACT_P3_NETWORKING_REV == 12);
+    ASSERT(FL_CONTRACT_P3_NETWORKING_REV == 13);
     ASSERT(FL_CONTRACT_P3_PACKET_CONTRACT_DEFINED == 1);
-    ASSERT(FL_CONTRACT_P3_FILE_PACKET_CONTRACT_DEFINED == 1);
-    ASSERT(FL_CONTRACT_P3_FILE_SESSION_CONTRACT_DEFINED == 1);
+    ASSERT(FL_CONTRACT_P3_13_SESSION_WIRE_CONTRACT_DEFINED == 1);
     ASSERT(FL_CONTRACT_P3_SFTP_ADAPTER_CONTRACT_DEFINED == 1);
     ASSERT(FL_NET_PKT_VALID_L2 == (unsigned)(1u << 0));
     ASSERT((int)FL_NET_PIPE_STAGE_DELIVER == 6);
@@ -498,10 +497,10 @@ static int test_contract_constants(void) {
     ASSERT(FL_NET_BG_TAG_ARP_TICK == 0x0314u);
     ASSERT((int)FL_NET_SESSION_OP_FILE_OFFER == 0x30);
     ASSERT((int)FL_NET_SESSION_OP_FILE_STATUS == 0x37);
-    ASSERT(fl_file_packet_is_file_opcode(FL_NET_SESSION_OP_FILE_OFFER) == 1);
-    ASSERT(fl_file_packet_is_file_opcode(FL_NET_SESSION_OP_FILE_STATUS) == 1);
-    ASSERT(fl_file_packet_is_file_opcode(0x2fu) == 0);
-    ASSERT(fl_file_packet_is_file_opcode(0x38u) == 0);
+    ASSERT(fl_net_session_is_file_opcode(FL_NET_SESSION_OP_FILE_OFFER) == 1);
+    ASSERT(fl_net_session_is_file_opcode(FL_NET_SESSION_OP_FILE_STATUS) == 1);
+    ASSERT(fl_net_session_is_file_opcode(0x2fu) == 0);
+    ASSERT(fl_net_session_is_file_opcode(0x38u) == 0);
     ASSERT(FL_SERVER_FILE_STATUS_QUEUED == 1u);
     ASSERT(strcmp(FL_SFTP_VPATH_HOME, "/sftp/home") == 0);
 
