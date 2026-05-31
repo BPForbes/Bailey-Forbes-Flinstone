@@ -211,4 +211,18 @@ fl_result_t fl_net_session_recv_frame_nb(fl_net_sock_handle_t handle,
 fl_result_t fl_net_session_send_frame(fl_net_sock_handle_t handle, uint8_t opcode,
                                       const uint8_t *payload, uint16_t payload_len);
 
+/** Deliver one frame to a single connected member (excluding host self-slot). */
+fl_result_t fl_net_server_send_to_member(fl_net_server_t *srv,
+                                         fl_net_server_member_id_t to,
+                                         uint8_t opcode,
+                                         const uint8_t *payload,
+                                         uint16_t plen);
+
+/** Fan-out to every peer except `skip` (and the host self-member). */
+fl_result_t fl_net_server_broadcast_except(fl_net_server_t *srv,
+                                           fl_net_server_member_id_t skip,
+                                           uint8_t opcode,
+                                           const uint8_t *payload,
+                                           uint16_t plen);
+
 #endif /* NET_SERVER_H */

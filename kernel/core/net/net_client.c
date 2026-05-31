@@ -8,6 +8,7 @@
  * net_server.h so encode/decode logic stays in one place.
  */
 #include "net_client.h"
+#include "net_file_delivery.h"
 
 #include "net_server.h" /* fl_net_session_*_frame, encode/recv helpers */
 #include "net_socket.h"
@@ -217,6 +218,8 @@ static fl_net_server_event_kind_t opcode_to_event(uint8_t opcode) {
         return FL_NET_SERVER_EVENT_ERR;
     case FL_NET_SESSION_OP_CTRL_KILL:
         return FL_NET_SERVER_EVENT_CLOSED;
+    case FL_NET_SESSION_OP_FILE_OFFER:
+        return FL_NET_SERVER_EVENT_FILE_OFFER;
     default:
         return FL_NET_SERVER_EVENT_NONE;
     }
@@ -502,13 +505,25 @@ fl_net_client_dispatch_frame(fl_net_client_t *client, uint8_t opcode,
                    ? FL_NET_SERVER_EVENT_HOST_PROMOTE
                    : FL_NET_SERVER_EVENT_HOST_REDIRECT;
     }
-
-    text_len = plen > text_off ? (size_t)(plen - text_off) : 0u;
-    if (text_len >= sizeof(text))
-        text_len = sizeof(text) - 1u;
-    if (text_len > 0u)
-        memcpy(text, payload + text_off, text_len);
-    text[text_len] = '\0';
+    if (opcode == (uint8_t)FL_NET_SESSION_OP_FILE_OFFER) {
+        fl_server_file_offer_t offer;
+        text[0] = '\0';
+        text_len = 0u;
+        if (fl_file_packet_decode_offer(payload, plen, &offer) == FL_RESULT_OK) {
+            (void)fl_server_file_store_offer(&offer);
+            (void)fl_server_file_render_offer_line(&offer,
+                                                   client->assigned_member_id,
+                                                   text, sizeof(text));
+            text_len = strlen(text);
+        }
+    } else {
+        text_len = plen > text_off ? (size_t)(plen - text_off) : 0u;
+        if (text_len >= sizeof(text))
+            text_len = sizeof(text) - 1u;
+        if (text_len > 0u)
+            memcpy(text, payload + text_off, text_len);
+        text[text_len] = '\0';
+    }
 
     if (cb)
         cb(kind, text, mid, data);

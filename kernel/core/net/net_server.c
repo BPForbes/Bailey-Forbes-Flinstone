@@ -15,6 +15,7 @@
  * s_member_rx[] so a partial TCP segment never desyncs the parser.
  */
 #include "net_server.h"
+#include "net_file_delivery.h"
 
 #include "fl_colors.h"
 #include "net_endian.h"
@@ -460,6 +461,36 @@ static void broadcast_to_peers_except(fl_net_server_t *srv,
     }
     for (size_t k = 0; k < failed_n; k++)
         drop_member(srv, &srv->members[failed[k]]);
+}
+
+fl_result_t fl_net_server_send_to_member(fl_net_server_t *srv,
+                                         fl_net_server_member_id_t to,
+                                         uint8_t opcode,
+                                         const uint8_t *payload,
+                                         uint16_t plen)
+{
+    fl_net_server_member_t *m;
+    if (!srv)
+        return FL_RESULT_INVAL;
+    for (size_t i = 0; i < FL_NET_SERVER_MAX_MEMBERS; i++) {
+        m = &srv->members[i];
+        if (!m->in_use || m->member_id != to)
+            continue;
+        if (m->peer_handle == FL_NET_SOCK_INVALID)
+            return FL_RESULT_NOENT;
+        return fl_net_session_send_frame(m->peer_handle, opcode, payload, plen);
+    }
+    return FL_RESULT_NOENT;
+}
+
+fl_result_t fl_net_server_broadcast_except(fl_net_server_t *srv,
+                                           fl_net_server_member_id_t skip,
+                                           uint8_t opcode,
+                                           const uint8_t *payload,
+                                           uint16_t plen)
+{
+    broadcast_to_peers_except(srv, skip, opcode, payload, plen);
+    return FL_RESULT_OK;
 }
 
 /* Compose "[Server Announcement] <text>" locally on the host's terminal.
@@ -1190,7 +1221,10 @@ static int dispatch_member_frame(fl_net_server_t *srv, fl_net_server_member_t *m
          * to them via fl_net_server_host_stop. */
         return 0;
     default:
-        /* Foundation build does not yet handle file opcodes or unknown ops. */
+        if (fl_net_session_is_file_opcode(opcode)) {
+            (void)fl_net_file_host_relay(srv, m->member_id, opcode, payload, plen);
+            return 0;
+        }
         return 0;
     }
 }

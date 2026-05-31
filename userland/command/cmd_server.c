@@ -6,6 +6,7 @@
 
 #include "cmd_decl.h"
 #include "cmd_batch.h"
+#include "cmd_server_file.h"
 #include "fl_colors.h"
 #include "net_client.h"
 #include "net_endian.h"
@@ -168,6 +169,9 @@ static void client_event_print(fl_net_server_event_kind_t kind, const char *text
         fl_color_msg_from_user(sender, "%s", text);
         break;
     }
+    case FL_NET_SERVER_EVENT_FILE_OFFER:
+        fl_color_msg_from_user("File", "%s", text);
+        break;
     case FL_NET_SERVER_EVENT_MEMBER_LIST:
         /* Silent: we already cached the roster in net_client. */
         break;
@@ -927,8 +931,17 @@ void cmd_server_atexit(void) {
 /* ------------------------------------------------------------------------- */
 
 int cmd_server_run(int argc, char **argv) {
+    cmd_server_ctx_t ctx = {
+        .mutex = &session_mutex,
+        .server = &g_server,
+        .server_bg = &g_server_bg,
+        .server_running = &g_server_running,
+        .client = &g_client,
+        .client_bg = &g_client_bg,
+    };
+
     if (argc < 2) {
-        fl_color_error("usage: server <host|join|msg|announce|nick|set-nick|connected|leave|kill> ...");
+        fl_color_error("usage: server <host|join|msg|file|send|announce|nick|set-nick|connected|leave|kill> ...");
         return 1;
     }
     if (!strcmp(argv[1], "host"))      return verb_host(argc, argv);
@@ -936,6 +949,8 @@ int cmd_server_run(int argc, char **argv) {
     if (!strcmp(argv[1], "leave"))     return verb_leave();
     if (!strcmp(argv[1], "kill"))      return verb_kill();
     if (!strcmp(argv[1], "msg"))       return verb_msg(argc, argv);
+    if (!strcmp(argv[1], "file"))      return cmd_server_file_run(&ctx, argc, argv);
+    if (!strcmp(argv[1], "send"))      return cmd_server_send_file_alias(&ctx, argc, argv);
     if (!strcmp(argv[1], "announce"))  return verb_announce(argc, argv);
     if (!strcmp(argv[1], "nick"))      return verb_nick(argc, argv);
     if (!strcmp(argv[1], "set-nick"))  return verb_set_nick(argc, argv);
