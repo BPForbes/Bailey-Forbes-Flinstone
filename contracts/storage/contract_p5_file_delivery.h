@@ -63,6 +63,18 @@ typedef struct fl_bytes_writer {
     uint16_t len;
 } fl_bytes_writer_t;
 
+static inline void fl_bytes_writer_init(fl_bytes_writer_t *w,
+                                        uint8_t *buf,
+                                        uint16_t cap)
+{
+    if (!w)
+        return;
+
+    w->buf = buf;
+    w->cap = cap;
+    w->len = 0u;
+}
+
 /** Offer metadata decoded from a FILE_OFFER payload. */
 typedef struct fl_server_file_offer {
     char share_id[FL_SERVER_SHARE_ID_MAX];

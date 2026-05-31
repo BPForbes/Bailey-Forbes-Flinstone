@@ -4,7 +4,9 @@
  * **Distribution:** one **TCP** byte stream carries length-prefixed **frames**.
  * Application payloads are UTF-8 unless a future **flags** bit says otherwise.
  * File-transfer frames reuse the same header and channel as chat control traffic;
- * payload layout is in **P5-6** (**contract_p5_file_delivery.h**) and **docs/SERVER.md**.
+ * the P3 -> P5 include is an intentional cross-layer seam so packet routing,
+ * storage disposition, and command rendering use the same native payload model.
+ * Payload layout is in **P5-6** (**contract_p5_file_delivery.h**) and **docs/SERVER.md**.
  * Encode/decode of FILE_* payloads lives in **contract_p3_packet.h**.
  *
  * **Implementation:** **net_server.c** / **cmd_server.c** are **not** part of the
