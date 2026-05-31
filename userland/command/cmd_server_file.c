@@ -130,7 +130,7 @@ static int verb_file_send(const cmd_server_ctx_t *ctx, int argc, char **argv)
     if (!session_active(ctx, &hosting))
         return 1;
 
-    for (i = 2; i < argc; i++) {
+    for (i = 0; i < argc; i++) {
         if (!strcmp(argv[i], "-all")) {
             public_offer = 1;
         } else if (!strcmp(argv[i], "-user") && i + 1 < argc) {
@@ -250,12 +250,12 @@ static int verb_file_accept(const cmd_server_ctx_t *ctx, int argc, char **argv)
 
     if (!session_active(ctx, &hosting))
         return 1;
-    if (argc < 3) {
+    if (argc < 2) {
         fl_color_error("usage: server file accept <share_id> [--overwrite | --server-share]");
         return 1;
     }
-    share_id = argv[2];
-    for (i = 3; i < argc; i++) {
+    share_id = argv[1];
+    for (i = 2; i < argc; i++) {
         if (!strcmp(argv[i], "--overwrite"))
             disp = FL_SERVER_FILE_OVERWRITE_LOCAL;
         else if (!strcmp(argv[i], "--server-share"))
@@ -297,11 +297,11 @@ static int verb_file_decline(const cmd_server_ctx_t *ctx, int argc, char **argv)
     const char *share_id;
     if (!session_active(ctx, &hosting))
         return 1;
-    if (argc < 3) {
+    if (argc < 2) {
         fl_color_error("usage: server file decline <share_id>");
         return 1;
     }
-    share_id = argv[2];
+    share_id = argv[1];
     pthread_mutex_lock(ctx->mutex);
     {
         uint8_t payload[FL_NET_SESSION_MAX_MSG];
@@ -332,11 +332,11 @@ static int verb_file_revoke(const cmd_server_ctx_t *ctx, int argc, char **argv)
     const char *share_id;
     if (!session_active(ctx, &hosting))
         return 1;
-    if (argc < 3) {
+    if (argc < 2) {
         fl_color_error("usage: server file revoke <share_id>");
         return 1;
     }
-    share_id = argv[2];
+    share_id = argv[1];
     pthread_mutex_lock(ctx->mutex);
     {
         uint8_t payload[FL_NET_SESSION_MAX_MSG];
@@ -363,7 +363,16 @@ static int verb_file_revoke(const cmd_server_ctx_t *ctx, int argc, char **argv)
 
 int cmd_server_file_run(const cmd_server_ctx_t *ctx, int argc, char **argv)
 {
+    int sub_argc;
+    char **sub_argv;
+
     if (argc < 3) {
+        fl_color_error("usage: server file <send|inbox|public|sent|accept|decline|revoke> ...");
+        return 1;
+    }
+    sub_argc = argc - 2;
+    sub_argv = argv + 2;
+    if (sub_argc <= 0) {
         fl_color_error("usage: server file <send|inbox|public|sent|accept|decline|revoke> ...");
         return 1;
     }
@@ -374,12 +383,12 @@ int cmd_server_file_run(const cmd_server_ctx_t *ctx, int argc, char **argv)
     if (!strcmp(argv[2], "sent"))
         return verb_file_list(ctx, "sent");
     if (!strcmp(argv[2], "accept"))
-        return verb_file_accept(ctx, argc, argv);
+        return verb_file_accept(ctx, sub_argc, sub_argv);
     if (!strcmp(argv[2], "decline"))
-        return verb_file_decline(ctx, argc, argv);
+        return verb_file_decline(ctx, sub_argc, sub_argv);
     if (!strcmp(argv[2], "revoke"))
-        return verb_file_revoke(ctx, argc, argv);
-    return verb_file_send(ctx, argc, argv);
+        return verb_file_revoke(ctx, sub_argc, sub_argv);
+    return verb_file_send(ctx, sub_argc, sub_argv);
 }
 
 int cmd_server_send_file_alias(const cmd_server_ctx_t *ctx, int argc, char **argv)

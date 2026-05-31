@@ -91,10 +91,21 @@
 #define FL_FILE_OFFER_WIRE_LEGACY_FILE_PERMS_OFFSET 4u
 #define FL_FILE_OFFER_WIRE_LEGACY_MIN_LEN 5u
 
-/** True when **payload** has a metadata prefix and **FL_PKT_VALID** is set. */
+/** True when **payload** is long enough to carry the 5-byte metadata prefix. */
 static inline int fl_pkt_wire_has_meta(const uint8_t *payload, uint16_t payload_len)
 {
     return payload != NULL && payload_len >= FL_PKT_CHANNEL_META_LEN;
+}
+
+/**
+ * True when **payload** uses the metadata-prefixed FILE_OFFER layout (not legacy).
+ * Requires the explicit **FL_PKT_TYPE** marker in byte 0, not length alone.
+ */
+static inline int fl_pkt_file_offer_has_meta_layout(const uint8_t *payload,
+                                                    uint16_t payload_len)
+{
+    return payload != NULL && payload_len >= FL_PKT_CHANNEL_META_LEN &&
+           (payload[0] & FL_PKT_TYPE) != 0;
 }
 
 /** Unified pre-dispatch gate: Byte 0 bit 7 (MSB) must be set. */
@@ -123,7 +134,7 @@ static inline int fl_file_offer_wire_payload_revoked(const uint8_t *payload,
 {
     if (!payload)
         return 0;
-    if (fl_pkt_wire_has_meta(payload, payload_len))
+    if (fl_pkt_file_offer_has_meta_layout(payload, payload_len))
         return !fl_pkt_wire_valid(payload, payload_len);
     if (payload_len < FL_FILE_OFFER_WIRE_LEGACY_MIN_LEN)
         return 0;

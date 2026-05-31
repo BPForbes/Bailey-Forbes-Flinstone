@@ -21,6 +21,36 @@ static int days_in_month(int y, int m)
     return dim[m - 1];
 }
 
+static time_t utc_mktime(struct tm *tmv)
+{
+#if defined(_BSD_SOURCE) || defined(_DEFAULT_SOURCE) || defined(_GNU_SOURCE)
+    return timegm(tmv);
+#else
+    struct tm local_copy;
+    struct tm utc_copy;
+    time_t local_t;
+    time_t utc_t;
+    long offset;
+
+    local_t = mktime(tmv);
+    if (local_t < 0)
+        return (time_t)-1;
+    if (!localtime_r(&local_t, &local_copy) || !gmtime_r(&local_t, &utc_copy))
+        return (time_t)-1;
+    offset = (long)(local_copy.tm_hour - utc_copy.tm_hour) * 3600l +
+             (long)(local_copy.tm_min - utc_copy.tm_min) * 60l +
+             (long)(local_copy.tm_sec - utc_copy.tm_sec);
+    if (local_copy.tm_yday != utc_copy.tm_yday) {
+        if (local_copy.tm_yday > utc_copy.tm_yday)
+            offset += 86400l;
+        else
+            offset -= 86400l;
+    }
+    utc_t = local_t - offset;
+    return utc_t;
+#endif
+}
+
 static int parse_datetime_utc(const char *arg, uint64_t *expires_at_out)
 {
     int mm = 0;
@@ -29,31 +59,34 @@ static int parse_datetime_utc(const char *arg, uint64_t *expires_at_out)
     int hh = 0;
     int mi = 0;
     int ss = 0;
-    char rest[8];
     int n;
+    int consumed = 0;
+    size_t len;
 
     if (!arg || !expires_at_out)
         return -1;
+    len = strlen(arg);
 
-    rest[0] = '\0';
-    n = sscanf(arg, "%d-%d-%d %d:%d:%d %7s", &mm, &dd, &yyyy, &hh, &mi, &ss, rest);
-    if (n >= 3 && n <= 6) {
-        if (n == 3) {
+    n = sscanf(arg, "%d-%d-%d %d:%d:%d%n", &mm, &dd, &yyyy, &hh, &mi, &ss, &consumed);
+    if (n == 6) {
+        if (consumed != (int)len)
+            return -1;
+    } else {
+        consumed = 0;
+        n = sscanf(arg, "%d-%d-%d %d:%d%n", &mm, &dd, &yyyy, &hh, &mi, &consumed);
+        if (n == 5) {
+            if (consumed != (int)len)
+                return -1;
+            ss = 0;
+        } else {
+            consumed = 0;
+            n = sscanf(arg, "%d-%d-%d%n", &mm, &dd, &yyyy, &consumed);
+            if (n != 3 || consumed != (int)len)
+                return -1;
             hh = 0;
             mi = 0;
             ss = 0;
-        } else if (n == 5) {
-            ss = 0;
-        } else if (n == 6 && rest[0] != '\0') {
-            return -1;
         }
-    } else {
-        n = sscanf(arg, "%d-%d-%d %7s", &mm, &dd, &yyyy, rest);
-        if (n != 3 || rest[0] != '\0')
-            return -1;
-        hh = 0;
-        mi = 0;
-        ss = 0;
     }
 
     if (mm < 1 || mm > 12 || dd < 1 || dd > days_in_month(yyyy, mm))
@@ -71,25 +104,7 @@ static int parse_datetime_utc(const char *arg, uint64_t *expires_at_out)
         tmv.tm_hour = hh;
         tmv.tm_min = mi;
         tmv.tm_sec = ss;
-#if defined(_BSD_SOURCE) || defined(_DEFAULT_SOURCE) || defined(_GNU_SOURCE)
-        t = timegm(&tmv);
-#else
-        {
-            char tzbuf[64];
-            const char *old_tz = getenv("TZ");
-            if (old_tz)
-                strncpy(tzbuf, old_tz, sizeof(tzbuf) - 1u);
-            tzbuf[sizeof(tzbuf) - 1u] = '\0';
-            setenv("TZ", "UTC0", 1);
-            tzset();
-            t = mktime(&tmv);
-            if (old_tz)
-                setenv("TZ", tzbuf, 1);
-            else
-                unsetenv("TZ");
-            tzset();
-        }
-#endif
+        t = utc_mktime(&tmv);
         if (t < 0)
             return -1;
         *expires_at_out = (uint64_t)t;

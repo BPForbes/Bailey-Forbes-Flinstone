@@ -1,8 +1,8 @@
 /**
  * **P5-5 — Server share staging** (module contract, normative).
  *
- * **Distribution:** accepted server-file offers can land in **`/server_share`**
- * (or the implementation's normalized session-root equivalent), be written over
+ * **Distribution:** accepted server-file offers can land in **`server_shared`**
+ * (**`FL_SERVER_SHARED_DIR_NAME`**, or the session-root equivalent), be written over
  * a matching local destination when the overwrite bit permits it, or be declined.
  */
 #ifndef FL_CONTRACT_P5_SERVER_SHARE_H

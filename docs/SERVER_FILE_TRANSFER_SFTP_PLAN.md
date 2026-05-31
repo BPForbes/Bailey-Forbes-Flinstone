@@ -237,16 +237,16 @@ command; local command status is enough.
 When a receiver gets a file offer, they can:
 
 1. overwrite a matching local file;
-2. place the file into `/server_share`;
+2. place the file into `server_share/`;
 3. decline the file.
 
-Overwrite requires `FL_FILE_PERM_OVERWRITE`. Saving to `/server_share` requires
+Overwrite requires `FL_FILE_PERM_OVERWRITE`. Saving to `server_share/` requires
 `FL_FILE_PERM_SERVER_SHARE`.
 
 Suggested storage layout:
 
 ```text
-/server_share
+server_share/
     /inbox/<share_id>/offer.meta
     /inbox/<share_id>/file.bin
     /public/<share_id>/offer.meta
@@ -257,7 +257,7 @@ Suggested storage layout:
 For sender-aware placement:
 
 ```text
-/server_share/inbox/<sender_display>/<share_id>/<filename>
+server_share/inbox/<sender_display>/<share_id>/<filename>
 ```
 
 ## Contract structure
