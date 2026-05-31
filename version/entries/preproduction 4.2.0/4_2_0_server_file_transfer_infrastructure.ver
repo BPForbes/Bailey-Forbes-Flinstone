@@ -6,3 +6,5 @@ DEV_VERSION=9
 DESCRIPTION<<VER_END
 Implementation of File Transfer Protocols
 VER_END
+
+RELEASE_DATE=2026-05-31
