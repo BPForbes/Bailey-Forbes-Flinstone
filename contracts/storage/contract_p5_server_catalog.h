@@ -33,6 +33,9 @@
 /** Max blob bytes the catalog stores per row (matches file delivery cap). */
 #define FL_SERVER_CATALOG_MAX_BYTES (16u * 1024u * 1024u)
 
+/** Max rows returned by fl_server_catalog_list_for_member in one call. */
+#define FL_SERVER_CATALOG_LIST_MAX    64u
+
 typedef enum fl_server_catalog_status {
     FL_SERVER_CATALOG_PENDING  = 0,
     FL_SERVER_CATALOG_COMPLETE = 1,
