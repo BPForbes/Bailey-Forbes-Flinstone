@@ -3,7 +3,6 @@
 #include "common.h"
 #include "contract_p5_server_share.h"
 
-#include <ctype.h>
 #include <dirent.h>
 #include <errno.h>
 #include <stdio.h>
@@ -57,26 +56,6 @@ static int join_path(char *out, size_t cap, const char *a, const char *b)
     return 0;
 }
 
-static fl_result_t path_component_safe(const char *s)
-{
-    size_t i;
-    size_t len;
-
-    if (!s || !s[0])
-        return FL_RESULT_INVAL;
-    if (!strcmp(s, ".") || !strcmp(s, ".."))
-        return FL_RESULT_INVAL;
-    len = strlen(s);
-    for (i = 0; i < len; i++) {
-        unsigned char c = (unsigned char)s[i];
-        if (c == '/' || c == '\\')
-            return FL_RESULT_INVAL;
-        if (!isalnum(c) && c != '-' && c != '_' && c != '.')
-            return FL_RESULT_INVAL;
-    }
-    return FL_RESULT_OK;
-}
-
 /** Flat landing basename (allows spaces; rejects path separators). */
 static fl_result_t landing_basename_safe(const char *s)
 {
@@ -96,15 +75,125 @@ static fl_result_t landing_basename_safe(const char *s)
     return FL_RESULT_OK;
 }
 
-static fl_result_t write_expiry_sidecar(const char *root,
-                                        const char *landed,
-                                        const fl_server_file_offer_t *offer)
+static fl_result_t read_meta_share_id(const char *meta_path,
+                                      char *share_id,
+                                      size_t share_id_cap)
+{
+    char line[256];
+    FILE *fp;
+
+    if (!meta_path || !share_id || share_id_cap == 0u)
+        return FL_RESULT_INVAL;
+    share_id[0] = '\0';
+    fp = fopen(meta_path, "r");
+    if (!fp)
+        return FL_RESULT_NOENT;
+    while (fgets(line, sizeof(line), fp)) {
+        if (sscanf(line, "share_id=%63[^\n]", share_id) == 1)
+            break;
+    }
+    fclose(fp);
+    return share_id[0] ? FL_RESULT_OK : FL_RESULT_NOENT;
+}
+
+static int landing_path_exists(const char *root, const char *landed)
+{
+    char path[512];
+    if (join_path(path, sizeof(path), root, landed) != 0)
+        return 0;
+    return access(path, F_OK) == 0;
+}
+
+static int landing_meta_exists(const char *root, const char *landed)
+{
+    char meta_path[512];
+    int n;
+    n = snprintf(meta_path, sizeof(meta_path), "%s/%s%s",
+                 root, landed, FL_SERVER_SHARED_META_SUFFIX);
+    if (n < 0 || (size_t)n >= sizeof(meta_path))
+        return 0;
+    return access(meta_path, F_OK) == 0;
+}
+
+/** `n` 1 = base name; 2+ = `stem (n).ext` disambiguation without share id in the name. */
+static fl_result_t landing_candidate_name(const char *file_name,
+                                          unsigned n,
+                                          char *out,
+                                          size_t out_cap)
+{
+    const char *dot;
+    int w;
+
+    if (!file_name || !file_name[0] || !out || out_cap == 0u)
+        return FL_RESULT_INVAL;
+    if (n < 2u) {
+        if (strlen(file_name) >= out_cap)
+            return FL_RESULT_INVAL;
+        strncpy(out, file_name, out_cap - 1u);
+        out[out_cap - 1u] = '\0';
+        return FL_RESULT_OK;
+    }
+    dot = strrchr(file_name, '.');
+    if (dot && dot != file_name) {
+        w = snprintf(out, out_cap, "%.*s (%u)%s", (int)(dot - file_name),
+                     file_name, n, dot);
+    } else {
+        w = snprintf(out, out_cap, "%s (%u)", file_name, n);
+    }
+    if (w < 0 || (size_t)w >= out_cap)
+        return FL_RESULT_INVAL;
+    return landing_basename_safe(out);
+}
+
+static int landing_conflicts(const char *root,
+                             const char *landed,
+                             const char *share_id)
+{
+    char meta_path[512];
+    char existing[FL_SERVER_SHARE_ID_MAX];
+    int n;
+    fl_result_t rc;
+
+    if (!landing_path_exists(root, landed) && !landing_meta_exists(root, landed))
+        return 0;
+    n = snprintf(meta_path, sizeof(meta_path), "%s/%s%s",
+                 root, landed, FL_SERVER_SHARED_META_SUFFIX);
+    if (n < 0 || (size_t)n >= sizeof(meta_path))
+        return 1;
+    rc = read_meta_share_id(meta_path, existing, sizeof(existing));
+    if (rc == FL_RESULT_OK && !strcmp(existing, share_id))
+        return 0;
+    return 1;
+}
+
+static fl_result_t resolve_unique_landed(const char *root,
+                                         const fl_server_file_offer_t *offer,
+                                         char *landed,
+                                         size_t landed_cap)
+{
+    unsigned n;
+
+    if (!root || !offer || !landed || landed_cap == 0u)
+        return FL_RESULT_INVAL;
+    for (n = 1u; n < 1000u; n++) {
+        if (landing_candidate_name(offer->file_name, n, landed, landed_cap) !=
+            FL_RESULT_OK)
+            return FL_RESULT_INVAL;
+        if (!landing_conflicts(root, landed, offer->share_id))
+            return FL_RESULT_OK;
+    }
+    return FL_RESULT_INVAL;
+}
+
+static fl_result_t write_landing_sidecar(const char *root,
+                                         const char *landed,
+                                         const fl_server_file_offer_t *offer)
 {
     char meta_path[512];
     int n;
     FILE *fp;
-    if (!root || !landed || !offer || offer->expires_at == 0u)
-        return FL_RESULT_OK;
+    if (!root || !landed || !offer)
+        return FL_RESULT_INVAL;
     n = snprintf(meta_path, sizeof(meta_path), "%s/%s%s",
                  root, landed, FL_SERVER_SHARED_META_SUFFIX);
     if (n < 0 || (size_t)n >= sizeof(meta_path))
@@ -113,7 +202,8 @@ static fl_result_t write_expiry_sidecar(const char *root,
     if (!fp)
         return FL_RESULT_ERR;
     fprintf(fp, "share_id=%s\n", offer->share_id);
-    fprintf(fp, "expires_at=%llu\n", (unsigned long long)offer->expires_at);
+    if (offer->expires_at != 0u)
+        fprintf(fp, "expires_at=%llu\n", (unsigned long long)offer->expires_at);
     fprintf(fp, "file_name=%s\n", offer->file_name);
     fclose(fp);
     return FL_RESULT_OK;
@@ -234,20 +324,14 @@ fl_result_t fl_server_shared_landed_basename(const fl_server_file_offer_t *offer
                                              char *out,
                                              size_t out_cap)
 {
-    int n;
     if (!offer || !out || out_cap == 0u || !offer->share_id[0] || !offer->file_name[0])
-        return FL_RESULT_INVAL;
-    if (path_component_safe(offer->share_id) != FL_RESULT_OK)
         return FL_RESULT_INVAL;
     if (landing_basename_safe(offer->file_name) != FL_RESULT_OK)
         return FL_RESULT_INVAL;
-    n = snprintf(out, out_cap, "%zu$%s$%zu$%s",
-                 strlen(offer->share_id), offer->share_id,
-                 strlen(offer->file_name), offer->file_name);
-    if (n < 0 || (size_t)n >= out_cap)
+    if (strlen(offer->file_name) >= out_cap)
         return FL_RESULT_INVAL;
-    if (landing_basename_safe(out) != FL_RESULT_OK)
-        return FL_RESULT_INVAL;
+    strncpy(out, offer->file_name, out_cap - 1u);
+    out[out_cap - 1u] = '\0';
     return FL_RESULT_OK;
 }
 
@@ -264,13 +348,13 @@ fl_result_t fl_server_shared_save_offer(const fl_server_file_offer_t *offer,
     fl_result_t rc;
     if (!offer || !offer->share_id[0] || !offer->file_name[0])
         return FL_RESULT_INVAL;
-    rc = fl_server_shared_landed_basename(offer, landed, sizeof(landed));
-    if (rc != FL_RESULT_OK)
-        return rc;
     if (fl_server_shared_init() != FL_RESULT_OK)
         return FL_RESULT_ERR;
     if (join_path(root, sizeof(root), ".", FL_SERVER_SHARED_DIR_NAME) != 0)
         return FL_RESULT_ERR;
+    rc = resolve_unique_landed(root, offer, landed, sizeof(landed));
+    if (rc != FL_RESULT_OK)
+        return rc;
     if (join_path(file_path, sizeof(file_path), root, landed) != 0)
         return FL_RESULT_ERR;
     fp = fopen(file_path, "wb");
@@ -282,7 +366,7 @@ fl_result_t fl_server_shared_save_offer(const fl_server_file_offer_t *offer,
         return FL_RESULT_ERR;
     }
     fclose(fp);
-    rc = write_expiry_sidecar(root, landed, offer);
+    rc = write_landing_sidecar(root, landed, offer);
     if (rc != FL_RESULT_OK) {
         (void)remove(file_path);
         return rc;
