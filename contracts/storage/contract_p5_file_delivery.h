@@ -113,6 +113,13 @@ typedef struct fl_server_file_done {
     uint8_t status;
 } fl_server_file_done_t;
 
+/** Session-only sidecar for in-flight tracking (mirrors `<share_id>.meta` text fields). */
+typedef struct fl_server_file_meta {
+    char share_id[FL_SERVER_SHARE_ID_MAX];
+    uint64_t expires_at;
+    char file_name[FL_SERVER_FILE_NAME_MAX];
+} fl_server_file_meta_t;
+
 fl_result_t fl_wire_put_bytes16(fl_bytes_writer_t *w,
                                 const uint8_t *data,
                                 uint16_t len);
@@ -154,6 +161,18 @@ fl_result_t fl_server_file_chunk_decode(const uint8_t *payload,
                                         uint16_t payload_len,
                                         fl_server_file_chunk_header_t *chunk,
                                         fl_bytes_view_t *data);
+
+fl_result_t fl_server_file_meta_from_offer(const fl_server_file_offer_t *offer,
+                                           fl_server_file_meta_t *out);
+
+fl_result_t fl_server_file_meta_encode(const fl_server_file_meta_t *meta,
+                                       uint8_t *out,
+                                       uint16_t out_cap,
+                                       uint16_t *out_len);
+
+fl_result_t fl_server_file_meta_decode(const uint8_t *payload,
+                                       uint16_t payload_len,
+                                       fl_server_file_meta_t *out);
 
 _Static_assert(FL_SERVER_FILE_CHUNK_MAX <= 4096u, "file chunk cap must fit bounded session buffers");
 _Static_assert(FL_SERVER_SHARE_ID_MAX >= 32u, "share id cap too small");

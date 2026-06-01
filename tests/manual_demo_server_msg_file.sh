@@ -76,7 +76,7 @@ sleep 1
 $T send-keys -t "$S:0.1" "cat $WORK/demo_share.txt" C-m
 sleep 0.6
 $T send-keys -t "$S:0.1" "server file -user Bob $WORK/demo_share.txt -vw" C-m
-sleep 2.5
+sleep 5
 $T send-keys -t "$S:0.2" "server file inbox" C-m
 sleep 1.2
 
@@ -86,9 +86,13 @@ SHARE_ID="$(grep -oE 'share-[0-9]+-[0-9]+' "$INBOX_SNAP" | head -1 || true)"
 rm -f "$INBOX_SNAP"
 if [[ -n "${SHARE_ID:-}" ]]; then
     $T send-keys -t "$S:0.2" "server file accept ${SHARE_ID} --server-share" C-m
-    sleep 2
+    sleep 3
     $T send-keys -t "$S:0.2" "cat server_shared/demo_share.txt" C-m
     sleep 0.8
+    if [[ -f "$REPO_ROOT/server_shared/${SHARE_ID}.meta" ]]; then
+        echo "FAIL: meta sidecar persisted on receiver image" >&2
+        exit 1
+    fi
 else
     $T send-keys -t "$S:0.2" "echo WARN_no_share_id_in_inbox" C-m
     sleep 0.5

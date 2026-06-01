@@ -65,7 +65,9 @@
 #define FL_NET_SESSION_OP_FILE_REVOKE   0x35u
 #define FL_NET_SESSION_OP_FILE_LIST     0x36u
 #define FL_NET_SESSION_OP_FILE_STATUS   0x37u
-#define FL_NET_SESSION_OP_FILE_LAST     0x37u
+/** In-flight share sidecar (share_id, expires_at, file_name); never persisted on receiver drive. */
+#define FL_NET_SESSION_OP_FILE_META     0x38u
+#define FL_NET_SESSION_OP_FILE_LAST     0x38u
 
 #define FL_NET_SESSION_OP_ERR 0x7Fu
 

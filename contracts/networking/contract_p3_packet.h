@@ -121,6 +121,15 @@ fl_result_t fl_file_packet_decode_done(const uint8_t *payload,
                                        uint16_t payload_len,
                                        fl_server_file_done_t *out);
 
+fl_result_t fl_file_packet_encode_meta(const fl_server_file_meta_t *meta,
+                                       uint8_t *out,
+                                       uint16_t out_cap,
+                                       uint16_t *out_len);
+
+fl_result_t fl_file_packet_decode_meta(const uint8_t *payload,
+                                       uint16_t payload_len,
+                                       fl_server_file_meta_t *out);
+
 fl_result_t fl_file_packet_encode_accept(const char *share_id,
                                          uint16_t receiver_member_id,
                                          fl_server_file_disposition_t disposition,
