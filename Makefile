@@ -388,7 +388,8 @@ HISTORY_ASM_OBJ = $(patsubst %.s,%.o,$(patsubst %.asm,%.o,$(filter %/shell_histo
 UTIL_HISTORY_HOST_OBJS = kernel/core/vfs/fat32_host.o kernel/core/vfs/fat32_host_files.o disk_host_io.o $(DISK_HOST_ASM_OBJ)
 UTIL_SHELL_LINK_OBJS = userland/shell/util.o userland/shell/history_record.o
 # fs_jail_check_access pulls session + path_property (and user_db/password_hash for session).
-FS_JAIL_CORE_OBJS = kernel/core/vfs/fs_jail.o kernel/core/vfs/server_shared_fs.o
+FS_JAIL_CORE_OBJS = kernel/core/vfs/fs_jail.o kernel/core/vfs/server_shared_fs.o \
+	kernel/core/vfs/server_shared_db.o kernel/core/vfs/server_shared_digest.o
 # server_shared_fs.c resolves relative paths via g_cwd (userland/shell/common.c).
 NET_TEST_SHELL_OBJS = userland/shell/common.o
 FS_JAIL_SUPPORT_OBJS = kernel/core/time/timekeeping.o \
@@ -640,9 +641,9 @@ test_channel_sidecar: kernel/core/net/net_channel_sidecar.o kernel/core/net/net_
 	./tests/test_channel_sidecar
 
 .PHONY: server_shared_quarantine_harness
-server_shared_quarantine_harness: kernel/core/vfs/server_shared_fs.o userland/shell/common.o
+server_shared_quarantine_harness: kernel/core/vfs/server_shared_fs.o kernel/core/vfs/server_shared_db.o kernel/core/vfs/server_shared_digest.o userland/shell/common.o
 	$(CC) $(CFLAGS) $(TEST_SANITIZE) -o tests/server_shared_quarantine_harness tests/server_shared_quarantine_harness.c \
-	  kernel/core/vfs/server_shared_fs.o userland/shell/common.o -Wl,-z,noexecstack
+	  kernel/core/vfs/server_shared_fs.o kernel/core/vfs/server_shared_db.o kernel/core/vfs/server_shared_digest.o userland/shell/common.o -lsqlite3 $(OPENSSL_LIBS) -Wl,-z,noexecstack
 
 .PHONY: purge_shared_expired_harness
 purge_shared_expired_harness: server_shared_quarantine_harness
