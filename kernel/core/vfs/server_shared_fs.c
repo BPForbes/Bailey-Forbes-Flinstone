@@ -74,6 +74,25 @@ static fl_result_t path_component_safe(const char *s)
     return FL_RESULT_OK;
 }
 
+/** Single path component for flat server_shared landing (allows spaces, etc.). */
+static fl_result_t landing_basename_safe(const char *s)
+{
+    size_t i;
+    size_t len;
+
+    if (!s || !s[0])
+        return FL_RESULT_INVAL;
+    if (!strcmp(s, ".") || !strcmp(s, ".."))
+        return FL_RESULT_INVAL;
+    len = strlen(s);
+    for (i = 0; i < len; i++) {
+        unsigned char c = (unsigned char)s[i];
+        if (c == '/' || c == '\\')
+            return FL_RESULT_INVAL;
+    }
+    return FL_RESULT_OK;
+}
+
 static fl_result_t resolve_local_path(const char *local_path, char *out, size_t out_cap)
 {
     char ab[4096];
@@ -167,13 +186,14 @@ fl_result_t fl_server_shared_landed_basename(const fl_server_file_offer_t *offer
     int n;
     if (!offer || !out || out_cap == 0u || !offer->share_id[0] || !offer->file_name[0])
         return FL_RESULT_INVAL;
-    if (path_component_safe(offer->share_id) != FL_RESULT_OK ||
-        path_component_safe(offer->file_name) != FL_RESULT_OK)
+    if (path_component_safe(offer->share_id) != FL_RESULT_OK)
+        return FL_RESULT_INVAL;
+    if (landing_basename_safe(offer->file_name) != FL_RESULT_OK)
         return FL_RESULT_INVAL;
     n = snprintf(out, out_cap, "%s_%s", offer->share_id, offer->file_name);
     if (n < 0 || (size_t)n >= out_cap)
         return FL_RESULT_INVAL;
-    if (path_component_safe(out) != FL_RESULT_OK)
+    if (landing_basename_safe(out) != FL_RESULT_OK)
         return FL_RESULT_INVAL;
     return FL_RESULT_OK;
 }
