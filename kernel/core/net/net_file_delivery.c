@@ -1,7 +1,10 @@
 #include "net_file_delivery.h"
 
 #include "contract_p3_packet.h"
+#include "net_channel_sidecar.h"
 #include "net_endian.h"
+#include "net_pkt_channel_meta.h"
+#include "server_shared_db.h"
 #include "server_shared_fs.h"
 
 #include <stdio.h>
@@ -172,6 +175,7 @@ static void share_purge_expired(uint64_t now)
 {
     size_t i;
     (void)fl_server_shared_purge_expired(now);
+    (void)fl_server_catalog_purge_expired(now);
     for (i = 0; i < FL_SERVER_FILE_SHARE_SLOTS; i++) {
         fl_server_file_share_slot_t *slot = &s_shares[i];
         if (!slot->active)
@@ -192,15 +196,23 @@ static fl_result_t share_access_ok(const fl_server_file_offer_t *offer, uint64_t
     return fl_file_share_validate_access(offer->file_perms, offer->expires_at, now);
 }
 
-static fl_result_t meta_matches_offer(const fl_server_file_meta_t *meta,
+static fl_result_t meta_matches_offer(const fl_channel_sidecar_t *meta,
                                       const fl_server_file_offer_t *offer)
 {
     if (!meta || !offer)
         return FL_RESULT_INVAL;
-    if (meta->file_name[0] &&
-        strcmp(meta->file_name, offer->file_name) != 0)
+    if (meta->transfer_id[0] &&
+        strcmp(meta->transfer_id, offer->share_id) != 0)
+        return FL_RESULT_INVAL;
+    if (meta->payload_name[0] &&
+        strcmp(meta->payload_name, offer->file_name) != 0)
         return FL_RESULT_INVAL;
     if (meta->expires_at != offer->expires_at)
+        return FL_RESULT_INVAL;
+    if (meta->sender_member_id != 0u &&
+        meta->sender_member_id != offer->sender_member_id)
+        return FL_RESULT_INVAL;
+    if (meta->receiver_member_id != offer->receiver_member_id)
         return FL_RESULT_INVAL;
     return FL_RESULT_OK;
 }
@@ -224,6 +236,122 @@ static void append_expiry_notice(char *out, uint16_t out_cap, uint64_t expires_a
     if (used >= out_cap)
         return;
     snprintf(out + used, (size_t)out_cap - used, "%s", suffix);
+}
+
+static void host_catalog_commit_if_done(const char *share_id)
+{
+    fl_server_file_share_slot_t *slot = share_find(share_id);
+    if (!slot || !slot->transfer_complete)
+        return;
+    (void)fl_server_catalog_commit_file_offer(&slot->offer, slot->file_data,
+                                              slot->file_len);
+}
+
+static fl_result_t offer_from_catalog_entry(const fl_server_catalog_entry_t *entry,
+                                            fl_server_file_offer_t *offer)
+{
+    if (!entry || !offer)
+        return FL_RESULT_INVAL;
+    memset(offer, 0, sizeof(*offer));
+    strncpy(offer->share_id, entry->transfer_id, sizeof(offer->share_id) - 1u);
+    strncpy(offer->file_name, entry->payload_name, sizeof(offer->file_name) - 1u);
+    offer->sender_member_id = entry->sender_member_id;
+    offer->receiver_member_id = entry->receiver_member_id;
+    offer->file_perms = entry->file_perms;
+    offer->expires_at = entry->expires_at;
+    offer->file_size = entry->total_bytes;
+    return FL_RESULT_OK;
+}
+
+static fl_result_t accept_from_catalog(const char *share_id,
+                                       uint16_t receiver_id,
+                                       fl_server_file_disposition_t disposition,
+                                       uint64_t now)
+{
+    fl_server_catalog_entry_t entry;
+    fl_server_file_offer_t offer;
+    uint8_t *data = NULL;
+    size_t data_len = 0;
+    fl_result_t rc;
+
+    rc = fl_server_catalog_lookup_transfer(share_id, &entry);
+    if (rc != FL_RESULT_OK)
+        return rc;
+    if (entry.payload_kind != FL_CHANNEL_PAYLOAD_FILE)
+        return FL_RESULT_INVAL;
+    rc = fl_server_catalog_member_can_fetch(&entry, receiver_id, now);
+    if (rc != FL_RESULT_OK)
+        return rc;
+    if (entry.receiver_member_id != 0u && entry.receiver_member_id != receiver_id)
+        return FL_RESULT_ACCES;
+    if (disposition == FL_SERVER_FILE_OVERWRITE_LOCAL &&
+        !fl_file_perms_can_overwrite(entry.file_perms))
+        return FL_RESULT_ACCES;
+    if (disposition == FL_SERVER_FILE_SAVE_TO_SERVER_SHARE &&
+        !(entry.file_perms & FL_FILE_PERM_SERVER_SHARE))
+        return FL_RESULT_ACCES;
+    if (entry.total_bytes > FL_SERVER_FILE_MAX_BYTES)
+        return FL_RESULT_NOMEM;
+    data = (uint8_t *)malloc((size_t)entry.total_bytes + 1u);
+    if (!data && entry.total_bytes > 0u)
+        return FL_RESULT_NOMEM;
+    rc = fl_server_catalog_read_blob(&entry, data, (size_t)entry.total_bytes, &data_len);
+    if (rc != FL_RESULT_OK) {
+        free(data);
+        return rc;
+    }
+    rc = offer_from_catalog_entry(&entry, &offer);
+    if (rc != FL_RESULT_OK) {
+        free(data);
+        return rc;
+    }
+    if (disposition == FL_SERVER_FILE_SAVE_TO_SERVER_SHARE) {
+        char saved[512];
+        rc = fl_server_shared_save_offer(&offer, data, data_len, saved, sizeof(saved));
+        if (rc == FL_RESULT_OK) {
+            const char *base = strrchr(saved, '/');
+            printf("[Server] saved to server_shared/%s (hash %s)\n",
+                   base ? base + 1 : saved, entry.content_hash);
+        }
+    } else if (disposition == FL_SERVER_FILE_OVERWRITE_LOCAL) {
+        rc = fl_server_shared_overwrite_local(&offer, offer.suggested_dest_path,
+                                              data, data_len);
+    } else {
+        rc = FL_RESULT_OK;
+    }
+    free(data);
+    if (rc != FL_RESULT_OK)
+        return rc;
+    printf("[Server] accepted %s from catalog (hash %s)\n", share_id, entry.content_hash);
+    return FL_RESULT_OK;
+}
+
+static void print_catalog_rows(uint16_t member_id,
+                               uint64_t now,
+                               int mode)
+{
+    fl_server_catalog_entry_t rows[FL_SERVER_CATALOG_LIST_MAX];
+    size_t count = 0;
+    size_t i;
+
+    if (fl_server_catalog_list_for_member(member_id, now, rows,
+                                          FL_SERVER_CATALOG_LIST_MAX, &count) != FL_RESULT_OK)
+        return;
+    for (i = 0; i < count; i++) {
+        const fl_server_catalog_entry_t *e = &rows[i];
+        if (e->payload_kind != FL_CHANNEL_PAYLOAD_FILE)
+            continue;
+        if (mode == 0 && e->receiver_member_id != member_id)
+            continue;
+        if (mode == 1 && e->receiver_member_id != 0u && !e->is_public)
+            continue;
+        if (mode == 2 && e->sender_member_id != member_id)
+            continue;
+        printf("%s  %s  hash=%s  member %u->%u\n",
+               e->transfer_id, e->payload_name, e->content_hash,
+               (unsigned)e->sender_member_id,
+               (unsigned)e->receiver_member_id);
+    }
 }
 
 static fl_server_file_share_slot_t *share_alloc(const fl_server_file_offer_t *offer)
@@ -911,6 +1039,7 @@ fl_result_t fl_server_share_inbox_list(uint16_t member_id)
     }
     if (!any)
         printf("(inbox empty)\n");
+    print_catalog_rows(member_id, now, 0);
     return FL_RESULT_OK;
 }
 
@@ -931,6 +1060,7 @@ fl_result_t fl_server_share_public_list(void)
     }
     if (!any)
         printf("(public empty)\n");
+    print_catalog_rows(1u, now, 1);
     return FL_RESULT_OK;
 }
 
@@ -948,6 +1078,7 @@ fl_result_t fl_server_share_sent_list(uint16_t member_id)
     }
     if (!any)
         printf("(sent empty)\n");
+    print_catalog_rows(member_id, (uint64_t)time(NULL), 2);
     return FL_RESULT_OK;
 }
 
@@ -958,12 +1089,10 @@ fl_result_t fl_server_share_accept(const char *share_id,
     fl_server_file_share_slot_t *slot = share_find(share_id);
     uint64_t now = (uint64_t)time(NULL);
     fl_result_t rc;
-    if (!slot)
-        return FL_RESULT_NOENT;
     share_purge_expired(now);
     slot = share_find(share_id);
     if (!slot)
-        return FL_RESULT_NOENT;
+        return accept_from_catalog(share_id, receiver_id, disposition, now);
     rc = share_access_ok(&slot->offer, now);
     if (rc != FL_RESULT_OK)
         return rc;
@@ -980,13 +1109,12 @@ fl_result_t fl_server_share_accept(const char *share_id,
         return FL_RESULT_ACCES;
     if (disposition == FL_SERVER_FILE_SAVE_TO_SERVER_SHARE) {
         char saved[512];
-        char landed[FL_SERVER_SHARED_LANDED_MAX];
         rc = fl_server_shared_save_offer(&slot->offer, slot->file_data,
                                          slot->file_len, saved, sizeof(saved));
-        if (rc == FL_RESULT_OK &&
-            fl_server_shared_landed_basename(&slot->offer, landed,
-                                             sizeof(landed)) == FL_RESULT_OK) {
-            printf("[Server] saved to server_shared/%s\n", landed);
+        if (rc == FL_RESULT_OK) {
+            const char *base = strrchr(saved, '/');
+            printf("[Server] saved to server_shared/%s\n",
+                   base ? base + 1 : saved);
         }
     } else if (disposition == FL_SERVER_FILE_OVERWRITE_LOCAL) {
         rc = fl_server_shared_overwrite_local(&slot->offer,
@@ -1024,11 +1152,19 @@ fl_result_t fl_server_share_revoke(const char *share_id,
                                    uint16_t owner_id)
 {
     fl_server_file_share_slot_t *slot = share_find(share_id);
-    if (!slot)
-        return FL_RESULT_NOENT;
+    if (!slot) {
+        fl_server_catalog_entry_t entry;
+        if (fl_server_catalog_lookup_transfer(share_id, &entry) != FL_RESULT_OK)
+            return FL_RESULT_NOENT;
+        if (entry.sender_member_id != owner_id)
+            return FL_RESULT_ACCES;
+        (void)fl_server_catalog_revoke_transfer(share_id);
+        return FL_RESULT_OK;
+    }
     if (slot->offer.sender_member_id != owner_id)
         return FL_RESULT_ACCES;
     slot->offer.file_perms |= FL_FILE_FLAG_REVOKED;
+    (void)fl_server_catalog_revoke_transfer(share_id);
     share_slot_release(slot);
     return FL_RESULT_OK;
 }
@@ -1128,12 +1264,22 @@ fl_result_t fl_net_file_store_done(const uint8_t *payload, uint16_t plen)
 fl_result_t fl_server_file_meta_from_offer(const fl_server_file_offer_t *offer,
                                            fl_server_file_meta_t *out)
 {
+    uint8_t pkt_meta[FL_PKT_CHANNEL_META_LEN];
+    fl_pkt_meta_route_ctx_t route = {0};
+
     if (!offer || !out || !offer->share_id[0] || !offer->file_name[0])
         return FL_RESULT_INVAL;
+    if (fl_pkt_meta_encode_file_offer(offer, &route, pkt_meta) != FL_RESULT_OK)
+        return FL_RESULT_INVAL;
     memset(out, 0, sizeof(*out));
-    copy_str_field(out->share_id, sizeof(out->share_id), offer->share_id);
+    memcpy(out->pkt_meta, pkt_meta, FL_PKT_CHANNEL_META_LEN);
+    out->sender_member_id = offer->sender_member_id;
+    out->receiver_member_id = offer->receiver_member_id;
     out->expires_at = offer->expires_at;
-    copy_str_field(out->file_name, sizeof(out->file_name), offer->file_name);
+    out->payload_kind = FL_CHANNEL_PAYLOAD_FILE;
+    out->wire_rev = FL_CHANNEL_SIDECAR_WIRE_REV;
+    strncpy(out->transfer_id, offer->share_id, sizeof(out->transfer_id) - 1u);
+    strncpy(out->payload_name, offer->file_name, sizeof(out->payload_name) - 1u);
     return FL_RESULT_OK;
 }
 
@@ -1142,45 +1288,14 @@ fl_result_t fl_server_file_meta_encode(const fl_server_file_meta_t *meta,
                                        uint16_t out_cap,
                                        uint16_t *out_len)
 {
-    fl_bytes_writer_t w;
-    fl_result_t rc;
-    if (!meta || !out || !out_len)
-        return FL_RESULT_INVAL;
-    w.buf = out;
-    w.cap = out_cap;
-    w.len = 0u;
-    rc = put_cstring16(&w, meta->share_id);
-    if (rc != FL_RESULT_OK)
-        return rc;
-    rc = put_u64(&w, meta->expires_at);
-    if (rc != FL_RESULT_OK)
-        return rc;
-    rc = put_cstring16(&w, meta->file_name);
-    if (rc != FL_RESULT_OK)
-        return rc;
-    *out_len = w.len;
-    return FL_RESULT_OK;
+    return fl_channel_sidecar_encode(meta, out, out_cap, out_len);
 }
 
 fl_result_t fl_server_file_meta_decode(const uint8_t *payload,
                                        uint16_t payload_len,
                                        fl_server_file_meta_t *out)
 {
-    uint16_t off = 0;
-    fl_result_t rc;
-    if (!payload || !out)
-        return FL_RESULT_INVAL;
-    memset(out, 0, sizeof(*out));
-    rc = get_cstring16(payload, payload_len, &off, out->share_id, sizeof(out->share_id));
-    if (rc != FL_RESULT_OK)
-        return rc;
-    rc = get_u64(payload, payload_len, &off, &out->expires_at);
-    if (rc != FL_RESULT_OK)
-        return rc;
-    rc = get_cstring16(payload, payload_len, &off, out->file_name, sizeof(out->file_name));
-    if (rc != FL_RESULT_OK)
-        return rc;
-    return FL_RESULT_OK;
+    return fl_channel_sidecar_decode(payload, payload_len, out);
 }
 
 fl_result_t fl_file_packet_encode_meta(const fl_server_file_meta_t *meta,
@@ -1209,7 +1324,7 @@ fl_result_t fl_net_file_store_meta(const uint8_t *payload, uint16_t plen)
     rc = fl_file_packet_decode_meta(payload, plen, &meta);
     if (rc != FL_RESULT_OK)
         return rc;
-    slot = share_find(meta.share_id);
+    slot = share_find(meta.transfer_id);
     if (!slot)
         return FL_RESULT_NOENT;
     if (share_access_ok(&slot->offer, (uint64_t)time(NULL)) != FL_RESULT_OK)
@@ -1398,6 +1513,7 @@ fl_result_t fl_net_file_host_relay(fl_net_server_t *srv,
             if (share_alloc(&offer) == NULL)
                 return FL_RESULT_NOMEM;
         }
+        (void)fl_server_catalog_register_file_offer(&offer);
         if (offer.receiver_member_id == 0u) {
             return fl_net_server_broadcast_except(srv, sender_id, opcode, payload, plen);
         }
@@ -1410,7 +1526,7 @@ fl_result_t fl_net_file_host_relay(fl_net_server_t *srv,
         opcode == FL_NET_SESSION_OP_FILE_META) {
         char share_id[FL_SERVER_SHARE_ID_MAX];
         fl_server_file_share_slot_t *slot = NULL;
-        fl_server_file_meta_t meta;
+        fl_channel_sidecar_t meta;
         int have_meta = 0;
         memset(&meta, 0, sizeof(meta));
         if (opcode == FL_NET_SESSION_OP_FILE_CHUNK) {
@@ -1422,7 +1538,7 @@ fl_result_t fl_net_file_host_relay(fl_net_server_t *srv,
         } else if (opcode == FL_NET_SESSION_OP_FILE_META) {
             if (fl_file_packet_decode_meta(payload, plen, &meta) != FL_RESULT_OK)
                 return FL_RESULT_INVAL;
-            copy_str_field(share_id, sizeof(share_id), meta.share_id);
+            copy_str_field(share_id, sizeof(share_id), meta.transfer_id);
             have_meta = 1;
         } else {
             fl_server_file_done_t done;
@@ -1439,6 +1555,21 @@ fl_result_t fl_net_file_host_relay(fl_net_server_t *srv,
             fl_result_t mrc = meta_matches_offer(&meta, &slot->offer);
             if (mrc != FL_RESULT_OK)
                 return mrc;
+            if (meta.wire_rev != 0u &&
+                !fl_pkt_wire_valid(meta.pkt_meta, FL_PKT_CHANNEL_META_LEN))
+                return FL_RESULT_INVAL;
+            /* In-flight sidecar: validate at relay, never forward to final peer. */
+            return FL_RESULT_OK;
+        }
+        if (opcode == FL_NET_SESSION_OP_FILE_CHUNK) {
+            rc = fl_net_file_store_chunk(payload, plen);
+            if (rc != FL_RESULT_OK)
+                return rc;
+        } else if (opcode == FL_NET_SESSION_OP_FILE_DONE) {
+            rc = fl_net_file_store_done(payload, plen);
+            if (rc != FL_RESULT_OK)
+                return rc;
+            host_catalog_commit_if_done(share_id);
         }
         if (slot->offer.receiver_member_id == 0u)
             return fl_net_server_broadcast_except(srv, sender_id, opcode, payload, plen);
@@ -1467,6 +1598,7 @@ fl_result_t fl_net_file_host_relay(fl_net_server_t *srv,
                 if (sender_id != slot->offer.sender_member_id ||
                     (actor != 0u && actor != sender_id))
                     return FL_RESULT_ACCES;
+                (void)fl_server_catalog_revoke_transfer(share_id);
             } else if (opcode == FL_NET_SESSION_OP_FILE_DECLINE) {
                 if (fl_file_packet_decode_decline(payload, plen, share_id,
                                                   sizeof(share_id), &actor) != FL_RESULT_OK)

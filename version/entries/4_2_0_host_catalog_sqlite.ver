@@ -1,0 +1,6 @@
+MAJOR_VERSION=4
+STANDARD_VERSION=2
+RELEASE_VERSION=0
+PRERELEASE=1
+DEV_VERSION=11
+DESCRIPTION=Host-side SQLite catalog (server_shared/host_catalog.db): SHA-256 content-hash fetch keys, ACL member ids, public/expiry/revoke metadata for files and messages at the session hub; host relay assembles transfers then continues the chain; catalog checkpoint on host promote and import_handoff for successor server_shared; server file fetch by hash after host stop

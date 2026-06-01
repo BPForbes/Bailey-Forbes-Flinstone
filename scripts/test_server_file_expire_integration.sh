@@ -19,10 +19,10 @@ echo 'blocked' >"$WORK/server_shared/expired/blocked.txt"
 )
 
 if [[ -f "$WORK/server_shared/share-test.meta" ]]; then
-  echo "unexpected .meta sidecar on receiver image" >&2
+  echo "unexpected legacy share_id.meta sidecar (use <landed>.meta)" >&2
   exit 1
 fi
-echo "no on-disk share meta sidecar: OK"
+echo "no legacy share_id.meta sidecar: OK"
 
 # tmux startup smoke only (no -Ex2s end-to-end expiry assertion in this script).
 if command -v tmux >/dev/null 2>&1; then
