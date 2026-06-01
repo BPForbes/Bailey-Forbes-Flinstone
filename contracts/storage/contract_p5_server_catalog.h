@@ -4,7 +4,8 @@
  * When a file or message reaches the session **host**, metadata and payload bytes
  * are indexed in **`server_shared/host_catalog.db`**. Lookups use a **SHA-256
  * content hash** (hex); **transfer_id** (share_id / message correlation id)
- * ties in-flight wire frames to catalog rows until completion.
+ * ties in-flight wire frames to catalog rows until completion. Multiple rows may
+ * share the same **content_hash** when bytes match; ACL is per **transfer_id**.
  *
  * **Distribution:** host relay stores at the hub, then continues the chain to
  * recipients. On host promotion the **`server_shared/`** tree (DB + **`blobs/`**)
@@ -29,8 +30,8 @@
 /** SHA-256 digest as lowercase hex (+ NUL). */
 #define FL_SERVER_CATALOG_HASH_HEX_MAX      65u
 
-/** Max rows returned by list helpers in one call. */
-#define FL_SERVER_CATALOG_LIST_MAX          256u
+/** Max blob bytes the catalog stores per row (matches file delivery cap). */
+#define FL_SERVER_CATALOG_MAX_BYTES (16u * 1024u * 1024u)
 
 typedef enum fl_server_catalog_status {
     FL_SERVER_CATALOG_PENDING  = 0,
@@ -93,6 +94,7 @@ fl_result_t fl_server_catalog_fetch_by_hash(const char *content_hash_hex,
                                           size_t out_data_cap,
                                           size_t *out_data_len);
 
+/** Read blob bytes; out_data_cap must be >= entry->total_bytes for complete rows. */
 fl_result_t fl_server_catalog_read_blob(const fl_server_catalog_entry_t *entry,
                                         uint8_t *out_data,
                                         size_t out_data_cap,

@@ -93,7 +93,7 @@ static fl_result_t db_init_schema(sqlite3 *sql)
     static const char *schema =
         "CREATE TABLE IF NOT EXISTS catalog_entry ("
         "  transfer_id TEXT PRIMARY KEY NOT NULL,"
-        "  content_hash TEXT UNIQUE NOT NULL,"
+        "  content_hash TEXT NOT NULL,"
         "  payload_kind INTEGER NOT NULL,"
         "  sender_member_id INTEGER NOT NULL,"
         "  receiver_member_id INTEGER NOT NULL DEFAULT 0,"
@@ -107,11 +107,12 @@ static fl_result_t db_init_schema(sqlite3 *sql)
         "  total_bytes INTEGER NOT NULL DEFAULT 0"
         ");"
         "CREATE TABLE IF NOT EXISTS catalog_acl ("
-        "  content_hash TEXT NOT NULL,"
+        "  transfer_id TEXT NOT NULL,"
         "  member_id INTEGER NOT NULL,"
-        "  PRIMARY KEY (content_hash, member_id)"
+        "  PRIMARY KEY (transfer_id, member_id)"
         ");"
         "CREATE INDEX IF NOT EXISTS idx_catalog_transfer ON catalog_entry(transfer_id);"
+        "CREATE INDEX IF NOT EXISTS idx_catalog_hash ON catalog_entry(content_hash);"
         "CREATE INDEX IF NOT EXISTS idx_catalog_receiver ON catalog_entry(receiver_member_id);";
     return db_exec(sql, schema);
 }
@@ -143,14 +144,16 @@ static void fill_entry_from_stmt(sqlite3_stmt *st, fl_server_catalog_entry_t *ou
     out->total_bytes = (uint64_t)sqlite3_column_int64(st, 12);
 }
 
-static fl_result_t db_set_acl(sqlite3 *sql, const char *content_hash,
+static fl_result_t db_set_acl(sqlite3 *sql, const char *transfer_id,
                               uint16_t sender_id, uint16_t receiver_id, int is_public)
 {
     sqlite3_stmt *st = NULL;
-    const char *ins = "INSERT OR IGNORE INTO catalog_acl(content_hash,member_id) VALUES(?,?);";
+    const char *ins = "INSERT OR IGNORE INTO catalog_acl(transfer_id,member_id) VALUES(?,?);";
+    if (!transfer_id || !transfer_id[0])
+        return FL_RESULT_INVAL;
     if (sqlite3_prepare_v2(sql, ins, -1, &st, NULL) != SQLITE_OK)
         return FL_RESULT_ERR;
-    sqlite3_bind_text(st, 1, content_hash, -1, SQLITE_TRANSIENT);
+    sqlite3_bind_text(st, 1, transfer_id, -1, SQLITE_TRANSIENT);
     sqlite3_bind_int(st, 2, (int)sender_id);
     if (sqlite3_step(st) != SQLITE_DONE) {
         sqlite3_finalize(st);
@@ -161,7 +164,7 @@ static fl_result_t db_set_acl(sqlite3 *sql, const char *content_hash,
         return FL_RESULT_OK;
     if (sqlite3_prepare_v2(sql, ins, -1, &st, NULL) != SQLITE_OK)
         return FL_RESULT_ERR;
-    sqlite3_bind_text(st, 1, content_hash, -1, SQLITE_TRANSIENT);
+    sqlite3_bind_text(st, 1, transfer_id, -1, SQLITE_TRANSIENT);
     sqlite3_bind_int(st, 2, (int)receiver_id);
     if (sqlite3_step(st) != SQLITE_DONE) {
         sqlite3_finalize(st);
@@ -316,6 +319,8 @@ fl_result_t fl_server_catalog_commit_file_offer(const fl_server_file_offer_t *of
 
     if (!offer || !offer->share_id[0])
         return FL_RESULT_INVAL;
+    if (data_len > FL_SERVER_CATALOG_MAX_BYTES)
+        return FL_RESULT_NOMEM;
     if (fl_server_catalog_open() != FL_RESULT_OK)
         return FL_RESULT_ERR;
     if (fl_server_shared_sha256_hex(data, data_len, hash_hex, sizeof(hash_hex)) != FL_RESULT_OK)
@@ -337,7 +342,7 @@ fl_result_t fl_server_catalog_commit_file_offer(const fl_server_file_offer_t *of
     sqlite3_finalize(st);
     is_public = (offer->receiver_member_id == 0u ||
                  (offer->file_perms & FL_FILE_FLAG_PUBLIC) != 0) ? 1 : 0;
-    return db_set_acl(s_catalog_db, hash_hex, offer->sender_member_id,
+    return db_set_acl(s_catalog_db, offer->share_id, offer->sender_member_id,
                       offer->receiver_member_id, is_public);
 }
 
@@ -420,7 +425,7 @@ fl_result_t fl_server_catalog_store_message(uint16_t sender_member_id,
         return FL_RESULT_ERR;
     }
     sqlite3_finalize(st);
-    if (db_set_acl(s_catalog_db, hash_hex, sender_member_id, receiver_member_id,
+    if (db_set_acl(s_catalog_db, transfer_id, sender_member_id, receiver_member_id,
                    is_public) != FL_RESULT_OK)
         return FL_RESULT_ERR;
     if (out_transfer_id && out_transfer_id_cap > 0u) {
@@ -452,10 +457,10 @@ fl_result_t fl_server_catalog_member_can_fetch(const fl_server_catalog_entry_t *
     if (!s_catalog_db && fl_server_catalog_open() != FL_RESULT_OK)
         return FL_RESULT_ERR;
     if (sqlite3_prepare_v2(s_catalog_db,
-                           "SELECT 1 FROM catalog_acl WHERE content_hash=? AND member_id=? LIMIT 1;",
+                           "SELECT 1 FROM catalog_acl WHERE transfer_id=? AND member_id=? LIMIT 1;",
                            -1, &st, NULL) != SQLITE_OK)
         return FL_RESULT_ERR;
-    sqlite3_bind_text(st, 1, entry->content_hash, -1, SQLITE_TRANSIENT);
+    sqlite3_bind_text(st, 1, entry->transfer_id, -1, SQLITE_TRANSIENT);
     sqlite3_bind_int(st, 2, (int)member_id);
     if (sqlite3_step(st) == SQLITE_ROW) {
         sqlite3_finalize(st);
@@ -502,8 +507,15 @@ fl_result_t fl_server_catalog_read_blob(const fl_server_catalog_entry_t *entry,
     if (!entry || !out_data_len)
         return FL_RESULT_INVAL;
     *out_data_len = 0u;
+    if (entry->status != FL_SERVER_CATALOG_COMPLETE)
+        return FL_RESULT_ACCES;
     if (entry->storage_relpath[0] == '\0')
         return FL_RESULT_NOENT;
+    if (entry->total_bytes > FL_SERVER_CATALOG_MAX_BYTES)
+        return FL_RESULT_NOMEM;
+    if (entry->total_bytes > 0u &&
+        (!out_data || out_data_cap < (size_t)entry->total_bytes))
+        return FL_RESULT_NOMEM;
     if (join_path(path, sizeof(path), g_cwd, FL_SERVER_SHARED_DIR_NAME) != 0)
         return FL_RESULT_ERR;
     {
@@ -516,12 +528,16 @@ fl_result_t fl_server_catalog_read_blob(const fl_server_catalog_entry_t *entry,
     fp = fopen(path, "rb");
     if (!fp)
         return FL_RESULT_ERR;
-    n = fread(out_data, 1, out_data_cap, fp);
+    n = fread(out_data, 1, (size_t)entry->total_bytes, fp);
     if (ferror(fp)) {
         fclose(fp);
         return FL_RESULT_ERR;
     }
     fclose(fp);
+    if (n != (size_t)entry->total_bytes) {
+        *out_data_len = n;
+        return FL_RESULT_ERR;
+    }
     *out_data_len = n;
     return FL_RESULT_OK;
 }
@@ -536,12 +552,13 @@ fl_result_t fl_server_catalog_fetch_by_hash(const char *content_hash_hex,
 {
     sqlite3_stmt *st = NULL;
     fl_server_catalog_entry_t row;
-    fl_result_t rc;
+    fl_result_t rc = FL_RESULT_NOENT;
     const char *q =
         "SELECT content_hash,transfer_id,payload_kind,sender_member_id,"
         "receiver_member_id,file_perms,is_public,created_at,expires_at,"
         "payload_name,storage_relpath,status,total_bytes "
-        "FROM catalog_entry WHERE content_hash=? LIMIT 1;";
+        "FROM catalog_entry WHERE content_hash=? AND status=? "
+        "ORDER BY created_at DESC;";
 
     if (!content_hash_hex || !out_meta)
         return FL_RESULT_INVAL;
@@ -550,13 +567,16 @@ fl_result_t fl_server_catalog_fetch_by_hash(const char *content_hash_hex,
     if (sqlite3_prepare_v2(s_catalog_db, q, -1, &st, NULL) != SQLITE_OK)
         return FL_RESULT_ERR;
     sqlite3_bind_text(st, 1, content_hash_hex, -1, SQLITE_TRANSIENT);
-    if (sqlite3_step(st) != SQLITE_ROW) {
-        sqlite3_finalize(st);
-        return FL_RESULT_NOENT;
+    sqlite3_bind_int(st, 2, (int)FL_SERVER_CATALOG_COMPLETE);
+    while (sqlite3_step(st) == SQLITE_ROW) {
+        fill_entry_from_stmt(st, &row);
+        rc = fl_server_catalog_member_can_fetch(&row, member_id, now);
+        if (rc == FL_RESULT_OK)
+            break;
+        if (rc != FL_RESULT_ACCES)
+            break;
     }
-    fill_entry_from_stmt(st, &row);
     sqlite3_finalize(st);
-    rc = fl_server_catalog_member_can_fetch(&row, member_id, now);
     if (rc != FL_RESULT_OK)
         return rc;
     *out_meta = row;

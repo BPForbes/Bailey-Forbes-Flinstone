@@ -241,10 +241,15 @@ static void append_expiry_notice(char *out, uint16_t out_cap, uint64_t expires_a
 static void host_catalog_commit_if_done(const char *share_id)
 {
     fl_server_file_share_slot_t *slot = share_find(share_id);
+    fl_result_t rc;
+
     if (!slot || !slot->transfer_complete)
         return;
-    (void)fl_server_catalog_commit_file_offer(&slot->offer, slot->file_data,
-                                              slot->file_len);
+    rc = fl_server_catalog_commit_file_offer(&slot->offer, slot->file_data,
+                                             slot->file_len);
+    if (rc != FL_RESULT_OK)
+        fprintf(stderr, "[Server] host catalog commit failed for %s (rc=%d)\n",
+                share_id, (int)rc);
 }
 
 static fl_result_t offer_from_catalog_entry(const fl_server_catalog_entry_t *entry,

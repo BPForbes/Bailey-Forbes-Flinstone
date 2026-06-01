@@ -367,10 +367,11 @@ static int verb_file_fetch(const cmd_server_ctx_t *ctx, int argc, char **argv)
 {
     int hosting = 0;
     fl_server_catalog_entry_t meta;
-    uint8_t buf[4096];
+    uint8_t *buf = NULL;
     size_t len = 0;
     uint64_t now = (uint64_t)time(NULL);
     fl_result_t rc;
+    int ret = 1;
 
     if (argc < 2 || !argv[1] || !argv[1][0]) {
         fl_color_error("usage: server file fetch <content_hash>");
@@ -381,14 +382,34 @@ static int verb_file_fetch(const cmd_server_ctx_t *ctx, int argc, char **argv)
     (void)hosting;
     rc = fl_server_catalog_fetch_by_hash(argv[1],
                                          sender_member_id(ctx, hosting),
-                                         now, &meta, buf, sizeof(buf), &len);
+                                         now, &meta, NULL, 0, NULL);
     if (rc != FL_RESULT_OK) {
         fl_color_error("fetch failed (rc=%d)", (int)rc);
         return 1;
     }
+    if (meta.total_bytes > FL_SERVER_CATALOG_MAX_BYTES) {
+        fl_color_error("catalog blob too large (%llu bytes)",
+                         (unsigned long long)meta.total_bytes);
+        return 1;
+    }
+    if (meta.total_bytes > 0u) {
+        buf = (uint8_t *)malloc((size_t)meta.total_bytes + 1u);
+        if (!buf) {
+            fl_color_error("out of memory for %llu-byte fetch",
+                           (unsigned long long)meta.total_bytes);
+            return 1;
+        }
+        rc = fl_server_catalog_read_blob(&meta, buf, (size_t)meta.total_bytes, &len);
+        if (rc != FL_RESULT_OK) {
+            fl_color_error("fetch read failed (rc=%d)", (int)rc);
+            free(buf);
+            return 1;
+        }
+    }
     if (meta.payload_kind == FL_CHANNEL_PAYLOAD_MSG) {
         printf("[catalog msg %s] %.*s\n", meta.transfer_id, (int)len,
                len > 0u ? (const char *)buf : "");
+        ret = 0;
     } else {
         char out_path[512];
         fl_server_file_offer_t offer;
@@ -397,14 +418,16 @@ static int verb_file_fetch(const cmd_server_ctx_t *ctx, int argc, char **argv)
         strncpy(offer.file_name, meta.payload_name, sizeof(offer.file_name) - 1u);
         offer.file_perms = meta.file_perms;
         rc = fl_server_shared_save_offer(&offer, buf, len, out_path, sizeof(out_path));
-        if (rc != FL_RESULT_OK) {
+        if (rc != FL_RESULT_OK)
             fl_color_error("could not land fetched file (rc=%d)", (int)rc);
-            return 1;
+        else {
+            fl_color_success("fetched hash %s -> %s (%zu bytes)", argv[1],
+                             meta.payload_name, len);
+            ret = 0;
         }
-        fl_color_success("fetched hash %s -> %s (%zu bytes)", argv[1],
-                         meta.payload_name, len);
     }
-    return 0;
+    free(buf);
+    return ret;
 }
 
 int cmd_server_file_run(const cmd_server_ctx_t *ctx, int argc, char **argv)
