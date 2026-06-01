@@ -150,7 +150,8 @@ NET_CORE_SRCS = kernel/core/net/net_checksum.c kernel/core/net/net_wire.c kernel
                 kernel/core/net/net_dns.c kernel/core/net/net_dhcp.c kernel/core/net/net_tls_hosted.c \
                 kernel/core/net/net_http.c kernel/core/net/net_tftp.c \
                 kernel/core/net/net_ping_host.c kernel/core/net/net_requirements.c \
-                kernel/core/net/net_server.c kernel/core/net/net_client.c kernel/core/net/server_bg.c \
+                kernel/core/net/net_server.c kernel/core/net/net_client.c kernel/core/net/net_file_delivery.c kernel/core/net/net_pkt_channel_meta.c kernel/core/net/server_bg.c \
+                kernel/core/vfs/server_shared_fs.c \
                 userland/shell/fl_colors.c
 NET_ASM_OBJ = $(patsubst %.s,%.o,$(patsubst %.asm,%.o,$(filter %/net_asm.s %/net_asm.asm %/net_wire_host_asm.s %/net_wire_host_asm.asm,$(ASMSRCS))))
 CORE_SRCS = kernel/core/vfs/disk.c kernel/core/vfs/fat32_host.c kernel/core/vfs/fat32_host_files.c kernel/core/vfs/path_log.c kernel/core/vfs/cluster.c kernel/core/vfs/fs.c \
@@ -165,7 +166,7 @@ CORE_SRCS = kernel/core/vfs/disk.c kernel/core/vfs/fat32_host.c kernel/core/vfs/
             kernel/core/identity/user_db.c kernel/core/identity/elevation.c kernel/core/identity/path_property.c \
             kernel/core/identity/session.c \
             kernel/core/sys/vrt.c kernel/core/sys/ipc.c kernel/core/sys/syscall.c kernel/core/vfs/vfs.c
-COMMAND_SRCS := $(wildcard userland/command/cmd_*.c)
+COMMAND_SRCS := $(wildcard userland/command/cmd_*.c) userland/command/server_file_expire.c
 SHELL_SRCS = userland/shell/common.c userland/shell/util.c userland/shell/history_record.c userland/shell/audit_log.c userland/shell/authz_subsystem.c userland/shell/contract_log_dispatch.c userland/shell/session_sync.c userland/shell/session_login_env.c userland/shell/terminal.c userland/shell/interpreter.c userland/shell/sh.c userland/shell/shell_io.c $(COMMAND_SRCS)
 # GitHub Actions (or explicit opt-in) may generate userland/shell/version_changelog.c; see scripts/gen_version_changelog.c
 ifeq ($(CHANGELOG_CI),1)
@@ -386,6 +387,9 @@ HISTORY_ASM_OBJ = $(patsubst %.s,%.o,$(patsubst %.asm,%.o,$(filter %/shell_histo
 UTIL_HISTORY_HOST_OBJS = kernel/core/vfs/fat32_host.o kernel/core/vfs/fat32_host_files.o disk_host_io.o $(DISK_HOST_ASM_OBJ)
 UTIL_SHELL_LINK_OBJS = userland/shell/util.o userland/shell/history_record.o
 # fs_jail_check_access pulls session + path_property (and user_db/password_hash for session).
+FS_JAIL_CORE_OBJS = kernel/core/vfs/fs_jail.o kernel/core/vfs/server_shared_fs.o
+# server_shared_fs.c resolves relative paths via g_cwd (userland/shell/common.c).
+NET_TEST_SHELL_OBJS = userland/shell/common.o
 FS_JAIL_SUPPORT_OBJS = kernel/core/time/timekeeping.o \
                          kernel/core/identity/user_db.o kernel/core/identity/elevation.o \
                          kernel/core/identity/path_property.o kernel/core/identity/session.o \
@@ -571,23 +575,61 @@ test_issue222: test_threadpool_issue222 test_disk_hex_issue222
 
 # audit_log unit tests (standalone, no CUnit required)
 .PHONY: test_audit_log
-test_audit_log: userland/shell/common.o userland/shell/audit_log.o userland/shell/contract_log_dispatch.o $(UTIL_SHELL_LINK_OBJS) kernel/core/vfs/fs_jail.o $(FS_JAIL_SUPPORT_OBJS) kernel/core/mm/mem_domain.o $(MEM_ASM_OBJ) $(HISTORY_ASM_OBJ) $(UTIL_HISTORY_HOST_OBJS)
+test_audit_log: userland/shell/common.o userland/shell/audit_log.o userland/shell/contract_log_dispatch.o $(UTIL_SHELL_LINK_OBJS) $(FS_JAIL_CORE_OBJS) $(FS_JAIL_SUPPORT_OBJS) kernel/core/mm/mem_domain.o $(MEM_ASM_OBJ) $(HISTORY_ASM_OBJ) $(UTIL_HISTORY_HOST_OBJS)
 	$(CC) $(CFLAGS) $(TEST_SANITIZE) -c -o tests/test_audit_log.o tests/test_audit_log.c
 	$(CXX) $(CXXFLAGS) $(TEST_SANITIZE) -o tests/test_audit_log tests/test_audit_log.o \
-	  userland/shell/common.o userland/shell/audit_log.o userland/shell/contract_log_dispatch.o $(UTIL_SHELL_LINK_OBJS) kernel/core/vfs/fs_jail.o \
+	  userland/shell/common.o userland/shell/audit_log.o userland/shell/contract_log_dispatch.o $(UTIL_SHELL_LINK_OBJS) $(FS_JAIL_CORE_OBJS) \
 	  $(FS_JAIL_SUPPORT_OBJS) kernel/core/mm/mem_domain.o $(MEM_ASM_OBJ) $(HISTORY_ASM_OBJ) $(UTIL_HISTORY_HOST_OBJS) \
 	  $(FS_JAIL_TEST_LIBS) -Wl,-z,noexecstack
 	./tests/test_audit_log
 
 # fs_jail unit tests (standalone, no CUnit required)
 .PHONY: test_fs_jail
-test_fs_jail: userland/shell/common.o $(UTIL_SHELL_LINK_OBJS) kernel/core/vfs/fs_jail.o $(FS_JAIL_SUPPORT_OBJS) kernel/core/mm/mem_domain.o $(MEM_ASM_OBJ) $(HISTORY_ASM_OBJ) $(UTIL_HISTORY_HOST_OBJS)
+test_fs_jail: userland/shell/common.o $(UTIL_SHELL_LINK_OBJS) $(FS_JAIL_CORE_OBJS) $(FS_JAIL_SUPPORT_OBJS) kernel/core/mm/mem_domain.o $(MEM_ASM_OBJ) $(HISTORY_ASM_OBJ) $(UTIL_HISTORY_HOST_OBJS)
 	$(CC) $(CFLAGS) $(TEST_SANITIZE) -c -o tests/test_fs_jail.o tests/test_fs_jail.c
 	$(CXX) $(CXXFLAGS) $(TEST_SANITIZE) -o tests/test_fs_jail tests/test_fs_jail.o \
-	  userland/shell/common.o $(UTIL_SHELL_LINK_OBJS) kernel/core/vfs/fs_jail.o $(FS_JAIL_SUPPORT_OBJS) \
+	  userland/shell/common.o $(UTIL_SHELL_LINK_OBJS) $(FS_JAIL_CORE_OBJS) $(FS_JAIL_SUPPORT_OBJS) \
 	  kernel/core/mm/mem_domain.o $(MEM_ASM_OBJ) $(HISTORY_ASM_OBJ) $(UTIL_HISTORY_HOST_OBJS) \
 	  $(FS_JAIL_TEST_LIBS) -Wl,-z,noexecstack
 	./tests/test_fs_jail
+
+.PHONY: test_server_file_expire
+test_server_file_expire:
+	$(CC) $(CFLAGS) $(TEST_SANITIZE) -o tests/test_server_file_expire tests/test_server_file_expire.c userland/command/server_file_expire.c -Wl,-z,noexecstack
+	./tests/test_server_file_expire
+
+.PHONY: test_server_file_meta
+test_server_file_meta: kernel/core/net/net_file_delivery.o kernel/core/vfs/server_shared_fs.o userland/shell/common.o
+	$(CC) $(CFLAGS) $(TEST_SANITIZE) -o tests/test_server_file_meta tests/test_server_file_meta.c tests/stubs_file_delivery_net.c \
+	  kernel/core/net/net_file_delivery.o kernel/core/vfs/server_shared_fs.o userland/shell/common.o -Wl,-z,noexecstack
+	./tests/test_server_file_meta
+
+.PHONY: test_server_shared_landed_name
+test_server_shared_landed_name: kernel/core/vfs/server_shared_fs.o userland/shell/common.o
+	$(CC) $(CFLAGS) $(TEST_SANITIZE) -o tests/test_server_shared_landed_name tests/test_server_shared_landed_name.c \
+	  kernel/core/vfs/server_shared_fs.o userland/shell/common.o -Wl,-z,noexecstack
+	./tests/test_server_shared_landed_name
+
+.PHONY: test_server_file_accept_path
+test_server_file_accept_path: kernel/core/net/net_file_delivery.o kernel/core/vfs/server_shared_fs.o userland/shell/common.o
+	$(CC) $(CFLAGS) $(TEST_SANITIZE) -o tests/test_server_file_accept_path tests/test_server_file_accept_path.c tests/stubs_file_delivery_net.c \
+	  kernel/core/net/net_file_delivery.o kernel/core/vfs/server_shared_fs.o userland/shell/common.o -Wl,-z,noexecstack
+	./tests/test_server_file_accept_path
+
+.PHONY: test_server_shared_purge
+test_server_shared_purge: kernel/core/vfs/server_shared_fs.o userland/shell/common.o
+	$(CC) $(CFLAGS) $(TEST_SANITIZE) -o tests/test_server_shared_purge tests/test_server_shared_purge.c \
+	  kernel/core/vfs/server_shared_fs.o userland/shell/common.o -Wl,-z,noexecstack
+	./tests/test_server_shared_purge
+
+.PHONY: server_shared_quarantine_harness
+server_shared_quarantine_harness: kernel/core/vfs/server_shared_fs.o userland/shell/common.o
+	$(CC) $(CFLAGS) $(TEST_SANITIZE) -o tests/server_shared_quarantine_harness tests/server_shared_quarantine_harness.c \
+	  kernel/core/vfs/server_shared_fs.o userland/shell/common.o -Wl,-z,noexecstack
+
+.PHONY: purge_shared_expired_harness
+purge_shared_expired_harness: server_shared_quarantine_harness
+	@echo "purge_shared_expired_harness is deprecated; use server_shared_quarantine_harness"
 
 .PHONY: test_p0_p2_wiring
 test_p0_p2_wiring: kernel/core/memory/fl_stack.o kernel/core/memory/exec_context.o kernel/core/time/timekeeping.o \
@@ -603,8 +645,9 @@ test_p0_p2_wiring: kernel/core/memory/fl_stack.o kernel/core/memory/exec_context
 	./tests/test_p0_p2_wiring
 
 .PHONY: test_p3_network
-test_p3_network: $(NET_ASM_OBJ) $(MEM_ASM_OBJ) priority_queue.o kernel/core/time/timekeeping.o kernel/core/sys/ipc.o
+test_p3_network: $(NET_ASM_OBJ) $(MEM_ASM_OBJ) $(NET_TEST_SHELL_OBJS) priority_queue.o kernel/core/time/timekeeping.o kernel/core/sys/ipc.o
 	$(CC) $(CFLAGS) $(TEST_SANITIZE) -o tests/test_p3_network tests/test_p3_network.c \
+	  $(NET_TEST_SHELL_OBJS) \
 	  $(NET_CORE_SRCS) kernel/core/sched/workqueue.c kernel/core/sys/ipc.o kernel/core/time/timekeeping.o priority_queue.o $(MEM_ASM_OBJ) $(NET_ASM_OBJ) \
 	  $(OPENSSL_LIBS) -Wl,-z,noexecstack
 	./tests/test_p3_network
@@ -612,6 +655,7 @@ test_p3_network: $(NET_ASM_OBJ) $(MEM_ASM_OBJ) priority_queue.o kernel/core/time
 .PHONY: test_p3_server
 test_p3_server: $(NET_ASM_OBJ) $(MEM_ASM_OBJ) priority_queue.o kernel/core/time/timekeeping.o kernel/core/sys/ipc.o
 	$(CC) $(CFLAGS) $(TEST_SANITIZE) -Iuserland/shell -o tests/test_p3_server tests/test_p3_server.c \
+	  userland/shell/common.o \
 	  $(NET_CORE_SRCS) kernel/core/sched/workqueue.c kernel/core/sys/ipc.o kernel/core/time/timekeeping.o priority_queue.o $(MEM_ASM_OBJ) $(NET_ASM_OBJ) \
 	  $(OPENSSL_LIBS) -pthread -Wl,-z,noexecstack
 	./tests/test_p3_server
@@ -621,9 +665,10 @@ test_p3_server: $(NET_ASM_OBJ) $(MEM_ASM_OBJ) priority_queue.o kernel/core/time/
 # NET_CORE_SRCS the rest of the P3 unit tests use, so the BSD socket shim
 # (`fl_net_sock_open(DGRAM)` + bind/connect/send/recv) is exercised end-to-end.
 .PHONY: test_p3_udp_cmds
-test_p3_udp_cmds: $(NET_ASM_OBJ) $(MEM_ASM_OBJ) priority_queue.o kernel/core/time/timekeeping.o kernel/core/sys/ipc.o
+test_p3_udp_cmds: $(NET_ASM_OBJ) $(MEM_ASM_OBJ) $(NET_TEST_SHELL_OBJS) priority_queue.o kernel/core/time/timekeeping.o kernel/core/sys/ipc.o
 	$(CC) $(CFLAGS) $(TEST_SANITIZE) -o tests/test_p3_udp_cmds \
 	  tests/test_p3_udp_cmds.c userland/command/cmd_udp.c userland/command/cmd_registry.c \
+	  $(NET_TEST_SHELL_OBJS) \
 	  $(NET_CORE_SRCS) kernel/core/sched/workqueue.c kernel/core/sys/ipc.o kernel/core/time/timekeeping.o priority_queue.o \
 	  $(MEM_ASM_OBJ) $(NET_ASM_OBJ) \
 	  $(OPENSSL_LIBS) -pthread -Wl,-z,noexecstack
@@ -634,9 +679,10 @@ test_p3_udp_cmds: $(NET_ASM_OBJ) $(MEM_ASM_OBJ) priority_queue.o kernel/core/tim
 # in-process against the in-tree fl_net_arp / fl_net_route / fl_net_udp /
 # fl_net_resolve_ipv4 APIs; no arpa/inet.h, no libc DNS.
 .PHONY: test_p3_net_tools
-test_p3_net_tools: $(NET_ASM_OBJ) $(MEM_ASM_OBJ) priority_queue.o kernel/core/time/timekeeping.o kernel/core/sys/ipc.o
+test_p3_net_tools: $(NET_ASM_OBJ) $(MEM_ASM_OBJ) $(NET_TEST_SHELL_OBJS) priority_queue.o kernel/core/time/timekeeping.o kernel/core/sys/ipc.o
 	$(CC) $(CFLAGS) $(TEST_SANITIZE) -o tests/test_p3_net_tools \
 	  tests/test_p3_net_tools.c userland/command/cmd_net_tools.c \
+	  $(NET_TEST_SHELL_OBJS) \
 	  $(NET_CORE_SRCS) kernel/core/sched/workqueue.c kernel/core/sys/ipc.o kernel/core/time/timekeeping.o priority_queue.o \
 	  $(MEM_ASM_OBJ) $(NET_ASM_OBJ) \
 	  $(OPENSSL_LIBS) -pthread -Wl,-z,noexecstack
@@ -683,10 +729,10 @@ test_vm_arch_readiness: kernel/core/mm/mem_domain.o kernel/core/sys/vrt.o kernel
 	  kernel/core/mm/mem_domain.o kernel/core/sys/vrt.o kernel/core/sys/ipc.o kernel/core/sys/syscall.o VM/devices/vm_io.o VM/devices/vm_arch.o $(MEM_ASM_OBJ) -Wl,-z,noexecstack
 	./tests/test_vm_arch_readiness
 
-test_vm_layer_warning: userland/shell/common.o kernel/core/vfs/fs_jail.o $(FS_JAIL_SUPPORT_OBJS) kernel/core/vfs/path_log.o kernel/core/mm/mem_domain.o $(MEM_ASM_OBJ)
+test_vm_layer_warning: userland/shell/common.o $(FS_JAIL_CORE_OBJS) $(FS_JAIL_SUPPORT_OBJS) kernel/core/vfs/path_log.o kernel/core/mm/mem_domain.o $(MEM_ASM_OBJ)
 	$(CC) $(CFLAGS) $(TEST_SANITIZE) -I. -Ikernel/core/vfs -Ikernel/core/mm -Iuserland/shell -c -o tests/test_vm_layer_warning.o tests/test_vm_layer_warning.c
 	$(CXX) $(CXXFLAGS) $(TEST_SANITIZE) -o tests/test_vm_layer_warning tests/test_vm_layer_warning.o \
-	  userland/shell/common.o kernel/core/vfs/fs_jail.o $(FS_JAIL_SUPPORT_OBJS) kernel/core/vfs/path_log.o \
+	  userland/shell/common.o $(FS_JAIL_CORE_OBJS) $(FS_JAIL_SUPPORT_OBJS) kernel/core/vfs/path_log.o \
 	  kernel/core/mm/mem_domain.o $(MEM_ASM_OBJ) $(FS_JAIL_TEST_LIBS) -Wl,-z,noexecstack
 	./tests/test_vm_layer_warning
 
@@ -698,7 +744,7 @@ test_replay:
 	  userland/shell/common.o $(UTIL_SHELL_LINK_OBJS) userland/shell/terminal.o kernel/core/vfs/disk.o kernel/core/vfs/fat32_host.o kernel/core/vfs/fat32_host_files.o disk_host_io.o disk_asm.o dir_asm.o \
 	  kernel/core/vfs/path_log.o kernel/core/vfs/cluster.o kernel/core/vfs/fs.o priority_queue.o \
 	  kernel/core/vfs/fs_provider.o kernel/core/vfs/fs_command.o kernel/core/vfs/fs_events.o kernel/core/vfs/fs_policy.o \
-	  kernel/core/vfs/fs_chain.o kernel/core/vfs/fs_facade.o kernel/core/vfs/fs_service_glue.o kernel/core/vfs/fs_jail.o kernel/core/mm/mem_domain.o kernel/core/mm/kmalloc.o \
+	  kernel/core/vfs/fs_chain.o kernel/core/vfs/fs_facade.o kernel/core/vfs/fs_service_glue.o $(FS_JAIL_CORE_OBJS) kernel/core/mm/mem_domain.o kernel/core/mm/kmalloc.o \
 	  kernel/core/sys/vrt.o kernel/core/sys/ipc.o kernel/core/sys/syscall.o kernel/core/vfs/vfs.o \
 	  kernel/drivers/bus.o kernel/drivers/driver_model.o \
 	  kernel/drivers/block/block_driver.o kernel/drivers/block/block_transport_host.o kernel/drivers/keyboard_driver.o kernel/drivers/display_driver.o \

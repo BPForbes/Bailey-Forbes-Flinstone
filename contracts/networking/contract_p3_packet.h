@@ -6,6 +6,10 @@
  * (L2 / IPv4 / L4) and **RX/TX pipeline stages** so ARP, routing, UDP, DHCP, and future
  * socket code share one parse/build vocabulary without duplicating offset math.
  *
+ * **Session file payloads:** FILE_* opcodes on the **P3-13** TCP session channel
+ * (**contract_p3_session_wire.h**) encode and decode through the APIs below. Policy
+ * (permissions, revocation, routing) stays in **P5** and **contract_p3_session_wire.h**.
+ *
  * **Implementation:** **kernel/core/net/net_packet.c** (**net_packet.h**). **P3-6** UDP,
  * **P3-12** DHCP, **net_wire_egress**, and **net_wire_host** move app/L4 bytes via
  * **fl_net_packet_bind_l4**, **fl_net_packet_l4_view**, and **fl_net_packet_copy_l4**.
@@ -15,6 +19,7 @@
 
 #include "contract_p3_ipv4.h"
 #include "contract_p3_wire.h"
+#include "contract_p5_file_delivery.h"
 
 #define FL_CONTRACT_P3_PACKET_CONTRACT_DEFINED 1
 
@@ -80,5 +85,87 @@ typedef struct {
     fl_net_frame_view_t frame;
     fl_result_t last_rc;
 } fl_net_pipeline_tx_t;
+
+/**
+ * **P3-13 session file payloads** — byte-order conversion, u16_be byte-string framing,
+ * payload length checks, and FILE_* structure layout. Opcode validation and routing
+ * belong to **contract_p3_session_wire.h**; permission policy belongs to **P5**.
+ */
+fl_result_t fl_file_packet_encode_offer(const fl_server_file_offer_t *offer,
+                                        uint8_t *out,
+                                        uint16_t out_cap,
+                                        uint16_t *out_len);
+
+fl_result_t fl_file_packet_decode_offer(const uint8_t *payload,
+                                        uint16_t payload_len,
+                                        fl_server_file_offer_t *out);
+
+fl_result_t fl_file_packet_encode_chunk(const fl_server_file_chunk_header_t *chunk,
+                                        const uint8_t *data,
+                                        uint32_t data_len,
+                                        uint8_t *out,
+                                        uint16_t out_cap,
+                                        uint16_t *out_len);
+
+fl_result_t fl_file_packet_decode_chunk(const uint8_t *payload,
+                                        uint16_t payload_len,
+                                        fl_server_file_chunk_header_t *chunk,
+                                        fl_bytes_view_t *data);
+
+fl_result_t fl_file_packet_encode_done(const fl_server_file_done_t *done,
+                                       uint8_t *out,
+                                       uint16_t out_cap,
+                                       uint16_t *out_len);
+
+fl_result_t fl_file_packet_decode_done(const uint8_t *payload,
+                                       uint16_t payload_len,
+                                       fl_server_file_done_t *out);
+
+fl_result_t fl_file_packet_encode_meta(const fl_server_file_meta_t *meta,
+                                       uint8_t *out,
+                                       uint16_t out_cap,
+                                       uint16_t *out_len);
+
+fl_result_t fl_file_packet_decode_meta(const uint8_t *payload,
+                                       uint16_t payload_len,
+                                       fl_server_file_meta_t *out);
+
+fl_result_t fl_file_packet_encode_accept(const char *share_id,
+                                         uint16_t receiver_member_id,
+                                         fl_server_file_disposition_t disposition,
+                                         uint8_t *out,
+                                         uint16_t out_cap,
+                                         uint16_t *out_len);
+
+fl_result_t fl_file_packet_decode_accept(const uint8_t *payload,
+                                         uint16_t payload_len,
+                                         char *share_id,
+                                         uint16_t share_id_cap,
+                                         uint16_t *receiver_member_id,
+                                         fl_server_file_disposition_t *disposition);
+
+fl_result_t fl_file_packet_encode_decline(const char *share_id,
+                                          uint16_t receiver_member_id,
+                                          uint8_t *out,
+                                          uint16_t out_cap,
+                                          uint16_t *out_len);
+
+fl_result_t fl_file_packet_decode_decline(const uint8_t *payload,
+                                          uint16_t payload_len,
+                                          char *share_id,
+                                          uint16_t share_id_cap,
+                                          uint16_t *receiver_member_id);
+
+fl_result_t fl_file_packet_encode_revoke(const char *share_id,
+                                         uint16_t owner_member_id,
+                                         uint8_t *out,
+                                         uint16_t out_cap,
+                                         uint16_t *out_len);
+
+fl_result_t fl_file_packet_decode_revoke(const uint8_t *payload,
+                                         uint16_t payload_len,
+                                         char *share_id,
+                                         uint16_t share_id_cap,
+                                         uint16_t *owner_member_id);
 
 #endif /* FL_CONTRACT_P3_PACKET_H */

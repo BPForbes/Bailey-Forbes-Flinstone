@@ -17,13 +17,14 @@
 
 #include "contract_extend.h"
 
-#define FL_CONTRACT_P5_STORAGE_REV 4
+#define FL_CONTRACT_P5_STORAGE_REV 5
 
 #include "contract_p5_vfs.h"
 #include "contract_p5_pluggable_fs.h"
 #include "contract_p5_page_cache.h"
 #include "contract_p5_writeback.h"
 #include "contract_p5_server_share.h"
+#include "contract_p5_file_perms.h"
 #include "contract_p5_file_delivery.h"
 #include "contract_p5_member_identity.h"
 

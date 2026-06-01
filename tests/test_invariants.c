@@ -16,6 +16,7 @@
 #include "contract_networking.h"
 #include "fl/authz_subsystem.h"
 #include "fl/session.h"
+#include "elevation.h"
 #include "contract_p7_shell_batch.h"
 #include <stdio.h>
 #include <stdlib.h>
@@ -445,12 +446,41 @@ static int test_contract_constants(void) {
     ASSERT(FL_CONTRACT_P4_4_DESC_PUBLISH_BARRIER_REQUIRED == 1);
     ASSERT(FL_CONTRACT_P4_8_KWORKER_CONTRACT_DEFINED == 1);
 
-    ASSERT(FL_CONTRACT_P5_STORAGE_REV == 4);
+    ASSERT(FL_CONTRACT_P5_STORAGE_REV == 5);
     ASSERT(FL_CONTRACT_P5_VOCABULARY_LOCK == 1);
     ASSERT(FL_CONTRACT_P5_1_VFS_CONTRACT_DEFINED == 1);
     ASSERT(FL_CONTRACT_P5_2_PLUGGABLE_FS_CONTRACT_DEFINED == 1);
     ASSERT(FL_CONTRACT_P5_3_PAGE_CACHE_CONTRACT_DEFINED == 1);
     ASSERT(FL_CONTRACT_P5_4_WRITEBACK_CONTRACT_DEFINED == 1);
+    ASSERT(FL_CONTRACT_P5_5_SERVER_SHARE_CONTRACT_DEFINED == 1);
+    ASSERT(FL_CONTRACT_P5_6_FILE_DELIVERY_CONTRACT_DEFINED == 1);
+    ASSERT(FL_CONTRACT_P5_FILE_PERMS_CONTRACT_DEFINED == 1);
+    ASSERT(strcmp(FL_SERVER_SHARED_DIR_NAME, "server_shared") == 0);
+    ASSERT(strcmp(FL_SERVER_SHARE_DIR_NAME, "server_shared") == 0);
+    ASSERT((int)FL_SERVER_FILE_SAVE_TO_SERVER_SHARE == 1);
+    ASSERT((int)FL_SERVER_FILE_OVERWRITE_LOCAL == 2);
+    ASSERT(FL_FILE_PERM_EDIT == 0x0004u);
+    ASSERT((fl_file_perms_normalize(FL_FILE_PERM_EDIT) & FL_FILE_PERM_VIEW) != 0);
+    ASSERT(fl_file_perms_has(FL_FILE_PERM_EDIT | FL_FILE_PERM_VIEW, FL_FILE_PERM_VIEW) == 1);
+    ASSERT(fl_file_share_validate_access(FL_FILE_FLAG_REVOKED, 0, 0) == FL_RESULT_ACCES);
+    ASSERT(fl_file_perms8_to_16(FL_FILE8_PERM_ACCEPT) == FL_FILE_PERM_ACCEPT);
+    ASSERT(fl_file_perms8_to_16(FL_FILE8_FLAG_REVOKED) == FL_FILE_FLAG_REVOKED);
+    ASSERT(fl_file_msb_denied(FL_FILE_FLAG_REVOKED) == 1);
+    ASSERT(fl_file_msb_denied(FL_FILE_FLAG_LOCKED | FL_FILE_FLAG_PUBLIC) == 0);
+    ASSERT(fl_file_msb_denied(FL_FILE_PERM_VIEW) == 0);
+    {
+        uint8_t bytes_writer_buf[4] = {0};
+        fl_bytes_writer_t writer;
+        fl_bytes_writer_init(&writer, bytes_writer_buf, (uint16_t)sizeof(bytes_writer_buf));
+        ASSERT(writer.buf == bytes_writer_buf);
+        ASSERT(writer.cap == sizeof(bytes_writer_buf));
+        ASSERT(writer.len == 0u);
+    }
+    {
+        const uint8_t revoked_offer[] = {0, 0, 0, 0, 0x80, 0x01};
+        ASSERT(fl_file_offer_wire_payload_revoked(revoked_offer,
+                                                  (uint16_t)sizeof(revoked_offer)) == 1);
+    }
     ASSERT(FL_VFS_SYMLOOP_MAX == 40);
     ASSERT(FL_VFS_OPEN_FD_MAX == 256u);
     ASSERT(FL_VFS_DIRENT_NAME_MAX_CHARS == 255u);
@@ -476,12 +506,24 @@ static int test_contract_constants(void) {
     ASSERT(FL_CONTRACT_P7_BATCH_AUDIT_SHOW_MAX_TOKENS == 3u);
     ASSERT(FL_CONTRACT_P7_BATCH_MAX_TOKENS_TOTAL == 16u);
 
-    ASSERT(FL_CONTRACT_P3_NETWORKING_REV == 11);
+    ASSERT(FL_CONTRACT_P3_NETWORKING_REV == 14);
     ASSERT(FL_CONTRACT_P3_PACKET_CONTRACT_DEFINED == 1);
+    ASSERT(FL_CONTRACT_P3_13_SESSION_WIRE_CONTRACT_DEFINED == 1);
+    ASSERT(FL_CONTRACT_P3_SFTP_ADAPTER_CONTRACT_DEFINED == 1);
     ASSERT(FL_NET_PKT_VALID_L2 == (unsigned)(1u << 0));
     ASSERT((int)FL_NET_PIPE_STAGE_DELIVER == 6);
     ASSERT(FL_CONTRACT_P3_14_BACKGROUND_CONTRACT_DEFINED == 1);
     ASSERT(FL_NET_BG_TAG_ARP_TICK == 0x0314u);
+    ASSERT((int)FL_NET_SESSION_OP_FILE_OFFER == 0x30);
+    ASSERT((int)FL_NET_SESSION_OP_FILE_STATUS == 0x37);
+    ASSERT((int)FL_NET_SESSION_OP_FILE_META == 0x38);
+    ASSERT(fl_net_session_is_file_opcode(FL_NET_SESSION_OP_FILE_OFFER) == 1);
+    ASSERT(fl_net_session_is_file_opcode(FL_NET_SESSION_OP_FILE_STATUS) == 1);
+    ASSERT(fl_net_session_is_file_opcode(FL_NET_SESSION_OP_FILE_META) == 1);
+    ASSERT(fl_net_session_is_file_opcode(0x2fu) == 0);
+    ASSERT(fl_net_session_is_file_opcode(0x39u) == 0);
+    ASSERT(FL_SERVER_FILE_STATUS_QUEUED == 1u);
+    ASSERT(strcmp(FL_SFTP_VPATH_HOME, "/sftp/home") == 0);
 
     /* Surface enum ordering */
     ASSERT((int)FL_CONTRACT_SURFACE_DRIVER_OPS == 0);

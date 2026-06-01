@@ -1,6 +1,7 @@
 #include "fs_jail.h"
 #include "common.h"
 #include "mem_domain.h"
+#include "server_shared_fs.h"
 #include "../identity/session.h"
 #include "../identity/path_property.h"
 #include <errno.h>
@@ -108,6 +109,9 @@ int fs_jail_check_access(const char *path) {
     fl_path_property_t prop;
     int jail_ok;
 
+    if (fl_server_shared_path_is_expired_quarantine(path))
+        return -1;
+
     if (!fs_jail_is_active())
         return 0;
 
@@ -135,6 +139,8 @@ int fs_jail_check_access(const char *path) {
 
 int fs_jail_check_path(const char *path) {
     if (!path)
+        return -1;
+    if (fl_server_shared_path_is_expired_quarantine(path))
         return -1;
     if (!fs_jail_is_active())
         return 0;
@@ -180,6 +186,11 @@ int fs_jail_check_path(const char *path) {
 int fs_jail_openat(const char *path, int flags, mode_t mode) {
     if (!path) {
         errno = EINVAL;
+        return -1;
+    }
+
+    if (fl_server_shared_path_is_expired_quarantine(path)) {
+        errno = EPERM;
         return -1;
     }
 

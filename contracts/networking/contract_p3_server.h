@@ -63,7 +63,7 @@
 #include "contract_p3_sockets.h"
 
 #define FL_CONTRACT_P3_13_SERVER_CONTRACT_DEFINED 1
-#define FL_CONTRACT_P3_13_SERVER_REV 2u
+#define FL_CONTRACT_P3_13_SERVER_REV 3u
 
 /* ------------------------------------------------------------------------- */
 /* Capacity / wire caps                                                      */
@@ -261,7 +261,9 @@ typedef enum {
     /** Host asked this client to take over (CTRL_HOST_PROMOTE). */
     FL_NET_SERVER_EVENT_HOST_PROMOTE = 12,
     /** Host asked a non-chosen client to reconnect to the new host. */
-    FL_NET_SERVER_EVENT_HOST_REDIRECT = 13
+    FL_NET_SERVER_EVENT_HOST_REDIRECT = 13,
+    /** Inbound native file offer (rendered line in `text`). */
+    FL_NET_SERVER_EVENT_FILE_OFFER = 14
 } fl_net_server_event_kind_t;
 
 /** Client state machine (see docs/SERVER.md and #239 client/host model). */
