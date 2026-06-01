@@ -13,6 +13,7 @@
 #include "net_server.h"
 #include "net_ipv4.h"
 #include "server_bg.h"
+#include "server_shared_db.h"
 #include "session.h"
 #include "shell_io.h"
 
@@ -290,6 +291,7 @@ static void *promote_thread_main(void *arg) {
             return NULL;
         }
         g_server_running = 1;
+        (void)fl_server_catalog_open();
         pthread_mutex_unlock(&session_mutex);
         /* No local "you are the host" line: the old host already broadcast
          * "[Server Announcement]: <display> is now the host" to all peers

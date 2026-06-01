@@ -16,6 +16,7 @@
  */
 #include "net_server.h"
 #include "net_file_delivery.h"
+#include "server_shared_db.h"
 
 #include "fl_colors.h"
 #include "net_endian.h"
@@ -758,6 +759,7 @@ fl_result_t fl_net_server_transfer_and_stop(fl_net_server_t *srv,
         fl_net_put_u16_be(&payload[6], srv->bind_port_host);
         broadcast_to_peers(srv, (uint8_t)FL_NET_SESSION_OP_CTRL_HOST_PROMOTE,
                            payload, (uint16_t)sizeof(payload));
+        (void)fl_server_catalog_checkpoint();
         if (new_host_out)
             *new_host_out = succ->member_id;
     } else {
@@ -1145,6 +1147,10 @@ static int dispatch_member_frame(fl_net_server_t *srv, fl_net_server_member_t *m
             return 0;
         if ((size_t)n >= sizeof(line))
             n = (int)sizeof(line) - 1;
+        (void)fl_server_catalog_store_message(m->member_id, 0u, "broadcast",
+                                              payload, plen, 0u,
+                                              FL_FILE_FLAG_PUBLIC,
+                                              NULL, 0, NULL, 0);
         broadcast_to_peers_except(srv, m->member_id,
                                   (uint8_t)FL_NET_SESSION_OP_MSG_BROADCAST,
                                   (const uint8_t *)line, (uint16_t)n);
@@ -1209,6 +1215,9 @@ static int dispatch_member_frame(fl_net_server_t *srv, fl_net_server_member_t *m
         deliver[2] = 0u;
         deliver[3] = 0u;
         memcpy(deliver + 4, text, text_len);
+        (void)fl_server_catalog_store_message(m->member_id, recipient_id, "direct",
+                                              (const uint8_t *)text, text_len, 0u, 0,
+                                              NULL, 0, NULL, 0);
         (void)fl_net_session_send_frame(to->peer_handle,
                                         (uint8_t)FL_NET_SESSION_OP_MSG_DIRECT_DELIVER,
                                         deliver, (uint16_t)(4u + text_len));

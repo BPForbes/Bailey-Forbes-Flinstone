@@ -3,6 +3,8 @@
 #include "fl_colors.h"
 #include "net_file_delivery.h"
 #include "server_file_expire.h"
+#include "server_shared_db.h"
+#include "server_shared_fs.h"
 #include "session.h"
 
 #include <errno.h>
@@ -361,19 +363,63 @@ static int verb_file_revoke(const cmd_server_ctx_t *ctx, int argc, char **argv)
     return 0;
 }
 
+static int verb_file_fetch(const cmd_server_ctx_t *ctx, int argc, char **argv)
+{
+    int hosting = 0;
+    fl_server_catalog_entry_t meta;
+    uint8_t buf[4096];
+    size_t len = 0;
+    uint64_t now = (uint64_t)time(NULL);
+    fl_result_t rc;
+
+    if (argc < 2 || !argv[1] || !argv[1][0]) {
+        fl_color_error("usage: server file fetch <content_hash>");
+        return 1;
+    }
+    if (!session_active(ctx, &hosting))
+        return 1;
+    (void)hosting;
+    rc = fl_server_catalog_fetch_by_hash(argv[1],
+                                         sender_member_id(ctx, hosting),
+                                         now, &meta, buf, sizeof(buf), &len);
+    if (rc != FL_RESULT_OK) {
+        fl_color_error("fetch failed (rc=%d)", (int)rc);
+        return 1;
+    }
+    if (meta.payload_kind == FL_CHANNEL_PAYLOAD_MSG) {
+        printf("[catalog msg %s] %.*s\n", meta.transfer_id, (int)len,
+               len > 0u ? (const char *)buf : "");
+    } else {
+        char out_path[512];
+        fl_server_file_offer_t offer;
+        memset(&offer, 0, sizeof(offer));
+        strncpy(offer.share_id, meta.transfer_id, sizeof(offer.share_id) - 1u);
+        strncpy(offer.file_name, meta.payload_name, sizeof(offer.file_name) - 1u);
+        offer.file_perms = meta.file_perms;
+        rc = fl_server_shared_save_offer(&offer, buf, len, out_path, sizeof(out_path));
+        if (rc != FL_RESULT_OK) {
+            fl_color_error("could not land fetched file (rc=%d)", (int)rc);
+            return 1;
+        }
+        fl_color_success("fetched hash %s -> %s (%zu bytes)", argv[1],
+                         meta.payload_name, len);
+    }
+    return 0;
+}
+
 int cmd_server_file_run(const cmd_server_ctx_t *ctx, int argc, char **argv)
 {
     int sub_argc;
     char **sub_argv;
 
     if (argc < 3) {
-        fl_color_error("usage: server file <send|inbox|public|sent|accept|decline|revoke> ...");
+        fl_color_error("usage: server file <send|inbox|public|sent|accept|decline|revoke|fetch> ...");
         return 1;
     }
     sub_argc = argc - 2;
     sub_argv = argv + 2;
     if (sub_argc <= 0) {
-        fl_color_error("usage: server file <send|inbox|public|sent|accept|decline|revoke> ...");
+        fl_color_error("usage: server file <send|inbox|public|sent|accept|decline|revoke|fetch> ...");
         return 1;
     }
     if (!strcmp(argv[2], "inbox"))
@@ -388,6 +434,8 @@ int cmd_server_file_run(const cmd_server_ctx_t *ctx, int argc, char **argv)
         return verb_file_decline(ctx, sub_argc, sub_argv);
     if (!strcmp(argv[2], "revoke"))
         return verb_file_revoke(ctx, sub_argc, sub_argv);
+    if (!strcmp(argv[2], "fetch"))
+        return verb_file_fetch(ctx, sub_argc, sub_argv);
     return verb_file_send(ctx, sub_argc, sub_argv);
 }
 
