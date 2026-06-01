@@ -18,6 +18,7 @@
 #include "contract_p3_session_wire.h"
 #include "net_client.h"
 #include "net_endian.h"
+#include "net_endpoint.h"
 #include "net_ipv4.h"
 #include "net_server.h"
 #include "net_socket.h"
@@ -542,6 +543,50 @@ static int test_host_promote6_v4_mapped(void) {
     return 0;
 }
 
+static int test_endpoint_v6_native_parse(void) {
+    fl_net_endpoint_t ep;
+    static const uint8_t expect[16] =
+        {0x20, 0x01, 0x0d, 0xb8, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1};
+    ASSERT(fl_net_endpoint_parse("[2001:db8::1]:8080", &ep));
+    ASSERT(ep.family == FL_NET_ADDR_FAMILY_V6);
+    ASSERT(ep.port_host == 8080u);
+    ASSERT(memcmp(ep.addr.v6_be, expect, 16) == 0);
+    return 0;
+}
+
+static int test_v6_loopback_session(void) {
+    fl_net_server_t srv;
+    fl_net_client_t client;
+    fl_server_bg_t *bg = NULL;
+    static const uint8_t loop6[16] =
+        {0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1};
+    fl_net_endpoint_t host_ep;
+    fl_net_endpoint_t join_ep;
+    const uint16_t port = 49806u;
+    fl_result_t rc;
+
+    fl_net_endpoint_from_v6(loop6, port, &host_ep);
+    join_ep = host_ep;
+
+    rc = fl_net_server_host_start_ep(&srv, &host_ep, "HostV6");
+    if (rc == FL_RESULT_NOSYS)
+        return 0;
+    ASSERT(rc == FL_RESULT_OK);
+    ASSERT(fl_server_bg_start_server(&srv, &bg) == FL_RESULT_OK);
+
+    fl_net_client_init(&client);
+    rc = fl_net_client_connect_ep(&client, NULL, &join_ep, "ClientV6", 3000u);
+    ASSERT(rc == FL_RESULT_OK);
+    ASSERT(client.assigned_member_id >= 2u);
+    ASSERT(client.local_ep.family == FL_NET_ADDR_FAMILY_V6);
+
+    fl_net_client_disconnect(&client);
+    fl_server_bg_stop_server(bg);
+    fl_net_server_host_stop(&srv);
+    fl_net_sock_shutdown();
+    return 0;
+}
+
 int main(void) {
     printf("test_p3_server: bracketed endpoint parse (#280)... ");
     fflush(stdout);
@@ -552,6 +597,18 @@ int main(void) {
     printf("test_p3_server: OP_CTRL_HOST_PROMOTE6 v4-mapped (#283)... ");
     fflush(stdout);
     if (test_host_promote6_v4_mapped() != 0)
+        return 1;
+    puts("ok");
+
+    printf("test_p3_server: native IPv6 endpoint parse (#280)... ");
+    fflush(stdout);
+    if (test_endpoint_v6_native_parse() != 0)
+        return 1;
+    puts("ok");
+
+    printf("test_p3_server: IPv6 loopback host/join (#280)... ");
+    fflush(stdout);
+    if (test_v6_loopback_session() != 0)
         return 1;
     puts("ok");
 

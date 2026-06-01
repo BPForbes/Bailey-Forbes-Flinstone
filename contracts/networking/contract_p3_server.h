@@ -216,8 +216,12 @@ typedef struct {
     char nick[FL_NET_SERVER_NICK_MAX];
     /** Hosted socket handle for this member's TCP stream (host side only). */
     fl_net_sock_handle_t peer_handle;
-    /** Network-byte-order IPv4 of the peer (host's accept side; 0 for self). */
+    /** FL_NET_ADDR_FAMILY_V4 / FL_NET_ADDR_FAMILY_V6; 0 when unknown. */
+    uint8_t peer_addr_family;
+    /** Network-byte-order IPv4 of the peer (host accept side; 0 for self / native v6). */
     uint32_t peer_ip_be;
+    /** Wire-format IPv6 when peer_addr_family is V6 (native or mappable). */
+    uint8_t peer_addr_v6_be[16];
 } fl_net_server_member_t;
 
 /**

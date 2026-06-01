@@ -38,27 +38,27 @@ fl_result_t fl_net_client_init(fl_net_client_t *client) {
  * and a partial read across that window is impossible — recv with a
  * positive timeout either fills the buffer or times out cleanly.
  */
-static fl_result_t client_connect_impl(fl_net_client_t *client,
-                                       uint32_t local_be,
-                                       uint32_t peer_be, uint16_t port_host,
-                                       const char *principal,
-                                       unsigned timeout_ms) {
+static fl_result_t client_connect_ep_impl(fl_net_client_t *client,
+                                          const fl_net_endpoint_t *local,
+                                          const fl_net_endpoint_t *peer,
+                                          const char *principal,
+                                          unsigned timeout_ms) {
     fl_result_t rc;
     fl_net_sock_handle_t h = FL_NET_SOCK_INVALID;
     uint8_t opcode = 0;
     uint8_t payload[FL_NET_SESSION_MAX_MSG];
     uint16_t plen = 0;
     size_t prin_len;
+    fl_net_endpoint_t local_ep;
 
-    if (!client || !principal || !principal[0])
+    if (!client || !peer || !principal || !principal[0])
+        return FL_RESULT_INVAL;
+    if (peer->family != FL_NET_ADDR_FAMILY_V4 &&
+        peer->family != FL_NET_ADDR_FAMILY_V6)
         return FL_RESULT_INVAL;
     if (client->state != FL_NET_CLIENT_STATE_DISCONNECTED)
         return FL_RESULT_BUSY;
 
-    /* Reject overlong / empty principals up front (before we open a
-     * socket) so the server side doesn't see a truncated HELLO. The
-     * cap is the client-side storage minus the trailing NUL, and we
-     * also clamp at FL_NET_SESSION_MAX_MSG so the wire payload fits. */
     prin_len = strnlen(principal, sizeof(client->principal));
     if (prin_len == 0u ||
         prin_len == sizeof(client->principal) ||
@@ -69,23 +69,21 @@ static fl_result_t client_connect_impl(fl_net_client_t *client,
     if (rc != FL_RESULT_OK)
         return rc;
 
-    rc = fl_net_sock_open(FL_NET_SOCK_TYPE_STREAM, &h);
+    rc = fl_net_sock_open_for(peer, FL_NET_SOCK_TYPE_STREAM, &h);
     if (rc != FL_RESULT_OK)
         return rc;
 
     client->state = FL_NET_CLIENT_STATE_CONNECTING;
-    if (local_be != 0u)
-        rc = fl_net_sock_connect_from(h, local_be, peer_be, port_host);
+    if (local && local->family != 0u)
+        rc = fl_net_sock_connect_from_ep(h, local, peer);
     else
-        rc = fl_net_sock_connect(h, peer_be, port_host);
+        rc = fl_net_sock_connect_from_ep(h, NULL, peer);
     if (rc != FL_RESULT_OK) {
         fl_net_sock_close(h);
         client->state = FL_NET_CLIENT_STATE_DISCONNECTED;
         return rc;
     }
     client->peer_handle = h;
-    /* prin_len is the strnlen above; copy exactly that many bytes and
-     * NUL-terminate explicitly so the storage is always valid. */
     memcpy(client->principal, principal, prin_len);
     client->principal[prin_len] = '\0';
     rc = fl_net_session_send_frame(h, (uint8_t)FL_NET_SESSION_OP_HELLO,
@@ -98,7 +96,6 @@ static fl_result_t client_connect_impl(fl_net_client_t *client,
         return rc;
     }
 
-    /* Wait for HELLO_ACK. */
     rc = fl_net_session_recv_frame(h, &opcode, payload, sizeof(payload), &plen,
                                    timeout_ms == 0u ? 2000u : timeout_ms);
     if (rc != FL_RESULT_OK || opcode != (uint8_t)FL_NET_SESSION_OP_HELLO_ACK ||
@@ -117,12 +114,35 @@ static fl_result_t client_connect_impl(fl_net_client_t *client,
         memcpy(client->display_name, payload + 2, name_len);
         client->display_name[name_len] = '\0';
     }
-    /* Save local IP for host-transfer; non-blocking + clean parser. */
-    (void)fl_net_sock_local_ipv4(h, &client->local_ip_be);
+    memset(&local_ep, 0, sizeof(local_ep));
+    if (fl_net_sock_local_endpoint(h, &local_ep) == FL_RESULT_OK) {
+        client->local_ep = local_ep;
+        (void)fl_net_endpoint_to_v4(&local_ep, &client->local_ip_be);
+    } else {
+        (void)fl_net_sock_local_ipv4(h, &client->local_ip_be);
+        fl_net_endpoint_from_v4(client->local_ip_be, 0u, &client->local_ep);
+    }
     (void)fl_net_sock_set_nonblock(h, 1);
     fl_net_session_rx_reset(&client->rx_state);
     client->state = FL_NET_CLIENT_STATE_CONNECTED;
     return FL_RESULT_OK;
+}
+
+static fl_result_t client_connect_impl(fl_net_client_t *client,
+                                       uint32_t local_be,
+                                       uint32_t peer_be, uint16_t port_host,
+                                       const char *principal,
+                                       unsigned timeout_ms) {
+    fl_net_endpoint_t local;
+    fl_net_endpoint_t peer;
+
+    fl_net_endpoint_from_v4(peer_be, port_host, &peer);
+    if (local_be != 0u)
+        fl_net_endpoint_from_v4(local_be, 0u, &local);
+    else
+        memset(&local, 0, sizeof(local));
+    return client_connect_ep_impl(client, local_be != 0u ? &local : NULL, &peer,
+                                  principal, timeout_ms);
 }
 
 fl_result_t fl_net_client_connect(fl_net_client_t *client, uint32_t peer_be,
@@ -137,6 +157,14 @@ fl_result_t fl_net_client_connect_from(fl_net_client_t *client,
                                        unsigned timeout_ms) {
     return client_connect_impl(client, local_be, peer_be, port_host, principal,
                                 timeout_ms);
+}
+
+fl_result_t fl_net_client_connect_ep(fl_net_client_t *client,
+                                     const fl_net_endpoint_t *local,
+                                     const fl_net_endpoint_t *peer,
+                                     const char *principal,
+                                     unsigned timeout_ms) {
+    return client_connect_ep_impl(client, local, peer, principal, timeout_ms);
 }
 
 fl_result_t fl_net_client_disconnect(fl_net_client_t *client) {

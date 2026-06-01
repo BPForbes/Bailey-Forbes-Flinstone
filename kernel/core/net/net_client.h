@@ -4,6 +4,7 @@
 #include "contract_p3_server.h"
 #include "contract_p3_sockets.h"
 #include "contract_result.h"
+#include "net_endpoint.h"
 #include "net_server.h" /* fl_net_session_rx_t for the embedded parser */
 
 #include <stddef.h>
@@ -53,8 +54,8 @@ struct fl_net_client_s {
     fl_net_client_state_t state;
     char principal[FL_NET_SERVER_PRINCIPAL_MAX];
     char display_name[FL_NET_SERVER_DISPLAY_NAME_MAX];
-    /* Own TCP source (network byte order) from getsockname() on connect;
-     * the host-transfer path binds the new listener on this IP. */
+    /* Own TCP source from getsockname() on connect; used for host transfer. */
+    fl_net_endpoint_t local_ep;
     uint32_t local_ip_be;
     /* Cached OP_MEMBER_LIST_SNAPSHOT for sender resolution + connected. */
     fl_net_client_member_t members[FL_NET_SERVER_MAX_MEMBERS];
@@ -98,6 +99,13 @@ fl_result_t fl_net_client_connect_from(fl_net_client_t *client,
                                        uint32_t peer_be, uint16_t port_host,
                                        const char *principal,
                                        unsigned timeout_ms);
+
+/** Connect using parsed local/peer endpoints (IPv4 or native IPv6). */
+fl_result_t fl_net_client_connect_ep(fl_net_client_t *client,
+                                     const fl_net_endpoint_t *local,
+                                     const fl_net_endpoint_t *peer,
+                                     const char *principal,
+                                     unsigned timeout_ms);
 
 /**
  * Send CTRL_LEAVE and close the socket. Idempotent.

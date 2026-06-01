@@ -734,6 +734,9 @@ fl_result_t fl_net_server_transfer_and_stop(fl_net_server_t *srv,
         char line[FL_NET_SERVER_ANNOUNCEMENT_MAX];
         int n;
         uint8_t payload[8];
+        uint8_t payload6[FL_NET_SESSION_CTRL_HOST_PROMOTE6_PAYLOAD_LEN];
+        uint32_t v4_be = 0u;
+        int use_promote6 = 0;
 
         /* "[Server Announcement]: <display> is now the host" to all peers
          * (and locally to the host) before the listener is torn down. */
@@ -748,17 +751,31 @@ fl_result_t fl_net_server_transfer_and_stop(fl_net_server_t *srv,
             emit_local_announce(line);
         }
 
-        /* OP_CTRL_HOST_PROMOTE wire layout (8 bytes):
-         *   [0..1] new_id      uint16 BE
-         *   [2..5] new_ip_be   raw 4 bytes of network-order IPv4 (memcpy)
-         *   [6..7] new_port    uint16 BE
-         * memcpy of peer_ip_be is host-endian-independent; shifting was
-         * LE-only and decoded to the wrong octet order on BE hosts (#284). */
-        fl_net_put_u16_be(&payload[0], succ->member_id);
-        fl_net_put_u32_nbo(&payload[2], succ->peer_ip_be);
-        fl_net_put_u16_be(&payload[6], srv->bind_port_host);
-        broadcast_to_peers(srv, (uint8_t)FL_NET_SESSION_OP_CTRL_HOST_PROMOTE,
-                           payload, (uint16_t)sizeof(payload));
+        /* OP_CTRL_HOST_PROMOTE / PROMOTE6: successor reconnects to the new
+         * host's own TCP source address captured at accept time. Native
+         * IPv6 successors use PROMOTE6; v4 and v4-mapped use the legacy v4
+         * payload (#283 / #280 foundation). */
+        if (succ->peer_addr_family == FL_NET_ADDR_FAMILY_V6 &&
+            !fl_net_ipv6_wire_to_v4(succ->peer_addr_v6_be, &v4_be)) {
+            fl_net_put_u16_be(&payload6[0], succ->member_id);
+            memcpy(&payload6[2], succ->peer_addr_v6_be, 16);
+            fl_net_put_u16_be(&payload6[18], srv->bind_port_host);
+            broadcast_to_peers(srv,
+                               (uint8_t)FL_NET_SESSION_OP_CTRL_HOST_PROMOTE6,
+                               payload6, (uint16_t)sizeof(payload6));
+            use_promote6 = 1;
+        }
+        if (!use_promote6) {
+            if (succ->peer_ip_be != 0u)
+                v4_be = succ->peer_ip_be;
+            else if (succ->peer_addr_family == FL_NET_ADDR_FAMILY_V6)
+                (void)fl_net_ipv6_wire_to_v4(succ->peer_addr_v6_be, &v4_be);
+            fl_net_put_u16_be(&payload[0], succ->member_id);
+            fl_net_put_u32_nbo(&payload[2], v4_be);
+            fl_net_put_u16_be(&payload[6], srv->bind_port_host);
+            broadcast_to_peers(srv, (uint8_t)FL_NET_SESSION_OP_CTRL_HOST_PROMOTE,
+                               payload, (uint16_t)sizeof(payload));
+        }
         (void)fl_server_catalog_checkpoint();
         if (new_host_out)
             *new_host_out = succ->member_id;
@@ -866,14 +883,17 @@ fl_result_t fl_net_server_init(fl_net_server_t *srv) {
     return fl_net_sock_init();
 }
 
-fl_result_t fl_net_server_host_start(fl_net_server_t *srv,
-                                     uint32_t bind_addr_be, uint16_t port_host,
-                                     const char *host_principal) {
+fl_result_t fl_net_server_host_start_ep(fl_net_server_t *srv,
+                                        const fl_net_endpoint_t *bind_ep,
+                                        const char *host_principal) {
     fl_result_t rc;
     fl_net_sock_handle_t listen_h = FL_NET_SOCK_INVALID;
     fl_net_server_member_t *self;
 
-    if (!srv || !host_principal || !host_principal[0])
+    if (!srv || !bind_ep || !host_principal || !host_principal[0])
+        return FL_RESULT_INVAL;
+    if (bind_ep->family != FL_NET_ADDR_FAMILY_V4 &&
+        bind_ep->family != FL_NET_ADDR_FAMILY_V6)
         return FL_RESULT_INVAL;
     if (srv->running)
         return FL_RESULT_BUSY;
@@ -882,13 +902,13 @@ fl_result_t fl_net_server_host_start(fl_net_server_t *srv,
     if (rc != FL_RESULT_OK)
         return rc;
 
-    rc = fl_net_sock_open(FL_NET_SOCK_TYPE_STREAM, &listen_h);
+    rc = fl_net_sock_open_for(bind_ep, FL_NET_SOCK_TYPE_STREAM, &listen_h);
     if (rc == FL_RESULT_NOSYS)
         return FL_RESULT_NOSYS;
     if (rc != FL_RESULT_OK)
         return rc;
 
-    rc = fl_net_sock_bind(listen_h, bind_addr_be, port_host);
+    rc = fl_net_sock_bind_ep(listen_h, bind_ep);
     if (rc != FL_RESULT_OK) {
         fl_net_sock_close(listen_h);
         return rc;
@@ -898,10 +918,8 @@ fl_result_t fl_net_server_host_start(fl_net_server_t *srv,
         fl_net_sock_close(listen_h);
         return rc;
     }
-    /* Non-blocking listener so accept_pending can poll without stalling. */
     (void)fl_net_sock_set_nonblock(listen_h, 1);
 
-    /* Register host as member_id 1. */
     self = member_alloc_slot(srv);
     if (!self) {
         fl_net_sock_close(listen_h);
@@ -911,17 +929,28 @@ fl_result_t fl_net_server_host_start(fl_net_server_t *srv,
     self->in_use = 1u;
     self->is_host = 1u;
     self->member_id = FL_NET_SERVER_MEMBER_ID_HOST;
-    self->peer_handle = FL_NET_SOCK_INVALID; /* host has no socket to itself */
+    self->peer_handle = FL_NET_SOCK_INVALID;
     strncpy(self->principal, host_principal, sizeof(self->principal) - 1);
 
     recompute_disambig(srv, self->principal);
 
     srv->listen_handle = listen_h;
-    srv->bind_addr_be = bind_addr_be;
-    srv->bind_port_host = port_host;
+    srv->bind_ep = *bind_ep;
+    srv->bind_port_host = bind_ep->port_host;
+    srv->bind_addr_be = (bind_ep->family == FL_NET_ADDR_FAMILY_V4)
+                            ? bind_ep->addr.v4_be
+                            : 0u;
     srv->next_member_id = (fl_net_server_member_id_t)(FL_NET_SERVER_MEMBER_ID_HOST + 1);
     srv->running = 1u;
     return FL_RESULT_OK;
+}
+
+fl_result_t fl_net_server_host_start(fl_net_server_t *srv,
+                                     uint32_t bind_addr_be, uint16_t port_host,
+                                     const char *host_principal) {
+    fl_net_endpoint_t ep;
+    fl_net_endpoint_from_v4(bind_addr_be, port_host, &ep);
+    return fl_net_server_host_start_ep(srv, &ep, host_principal);
 }
 
 fl_result_t fl_net_server_host_stop(fl_net_server_t *srv) {
@@ -1031,7 +1060,22 @@ fl_result_t fl_net_server_accept_pending(fl_net_server_t *srv,
     if (srv->next_member_id == FL_NET_SERVER_MEMBER_ID_NONE)
         srv->next_member_id = (fl_net_server_member_id_t)(FL_NET_SERVER_MEMBER_ID_HOST + 1);
     m->peer_handle = client_h;
-    (void)fl_net_sock_peer_ipv4(client_h, &m->peer_ip_be); /* best-effort */
+    {
+        fl_net_endpoint_t peer_ep;
+        if (fl_net_sock_peer_endpoint(client_h, &peer_ep) == FL_RESULT_OK) {
+            m->peer_addr_family = peer_ep.family;
+            if (peer_ep.family == FL_NET_ADDR_FAMILY_V4) {
+                m->peer_ip_be = peer_ep.addr.v4_be;
+            } else if (peer_ep.family == FL_NET_ADDR_FAMILY_V6) {
+                memcpy(m->peer_addr_v6_be, peer_ep.addr.v6_be, 16);
+                (void)fl_net_ipv6_wire_to_v4(peer_ep.addr.v6_be, &m->peer_ip_be);
+            }
+        } else {
+            (void)fl_net_sock_peer_ipv4(client_h, &m->peer_ip_be);
+            if (m->peer_ip_be != 0u)
+                m->peer_addr_family = FL_NET_ADDR_FAMILY_V4;
+        }
+    }
     /* payload may not be NUL-terminated on the wire. */
     {
         size_t n = plen < (sizeof(m->principal) - 1u) ? plen : sizeof(m->principal) - 1u;
