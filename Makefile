@@ -598,10 +598,32 @@ test_server_file_expire:
 	$(CC) $(CFLAGS) $(TEST_SANITIZE) -o tests/test_server_file_expire tests/test_server_file_expire.c userland/command/server_file_expire.c -Wl,-z,noexecstack
 	./tests/test_server_file_expire
 
-.PHONY: purge_shared_expired_harness
-purge_shared_expired_harness: kernel/core/vfs/server_shared_fs.o userland/shell/common.o
-	$(CC) $(CFLAGS) $(TEST_SANITIZE) -o tests/purge_shared_expired_harness tests/purge_shared_expired_harness.c \
+.PHONY: test_server_file_meta
+test_server_file_meta: kernel/core/net/net_file_delivery.o kernel/core/vfs/server_shared_fs.o userland/shell/common.o
+	$(CC) $(CFLAGS) $(TEST_SANITIZE) -o tests/test_server_file_meta tests/test_server_file_meta.c tests/stubs_file_delivery_net.c \
+	  kernel/core/net/net_file_delivery.o kernel/core/vfs/server_shared_fs.o userland/shell/common.o -Wl,-z,noexecstack
+	./tests/test_server_file_meta
+
+.PHONY: test_server_shared_landed_name
+test_server_shared_landed_name: kernel/core/vfs/server_shared_fs.o userland/shell/common.o
+	$(CC) $(CFLAGS) $(TEST_SANITIZE) -o tests/test_server_shared_landed_name tests/test_server_shared_landed_name.c \
 	  kernel/core/vfs/server_shared_fs.o userland/shell/common.o -Wl,-z,noexecstack
+	./tests/test_server_shared_landed_name
+
+.PHONY: test_server_file_accept_path
+test_server_file_accept_path: kernel/core/net/net_file_delivery.o kernel/core/vfs/server_shared_fs.o userland/shell/common.o
+	$(CC) $(CFLAGS) $(TEST_SANITIZE) -o tests/test_server_file_accept_path tests/test_server_file_accept_path.c tests/stubs_file_delivery_net.c \
+	  kernel/core/net/net_file_delivery.o kernel/core/vfs/server_shared_fs.o userland/shell/common.o -Wl,-z,noexecstack
+	./tests/test_server_file_accept_path
+
+.PHONY: server_shared_quarantine_harness
+server_shared_quarantine_harness: kernel/core/vfs/server_shared_fs.o userland/shell/common.o
+	$(CC) $(CFLAGS) $(TEST_SANITIZE) -o tests/server_shared_quarantine_harness tests/server_shared_quarantine_harness.c \
+	  kernel/core/vfs/server_shared_fs.o userland/shell/common.o -Wl,-z,noexecstack
+
+.PHONY: purge_shared_expired_harness
+purge_shared_expired_harness: server_shared_quarantine_harness
+	@echo "purge_shared_expired_harness is deprecated; use server_shared_quarantine_harness"
 
 .PHONY: test_p0_p2_wiring
 test_p0_p2_wiring: kernel/core/memory/fl_stack.o kernel/core/memory/exec_context.o kernel/core/time/timekeeping.o \

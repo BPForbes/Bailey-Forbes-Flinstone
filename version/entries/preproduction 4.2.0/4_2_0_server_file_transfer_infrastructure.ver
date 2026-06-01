@@ -3,6 +3,6 @@ STANDARD_VERSION=2
 RELEASE_VERSION=0
 PRERELEASE=1
 DEV_VERSION=9
-DESCRIPTION=Implementation of File Transfer Protocols; server file expiration (-Ex durations and UTC datetime), server_shared storage with expired quarantine jail deny, chunk transfer, enforced accept/list expiry, argv dispatch and relay auth hardening, path validation, and public-list expiry filtering
+DESCRIPTION=Implementation of File Transfer Protocols; server file expiration (-Ex durations and UTC datetime), flat server_shared/ landing as share_id_filename (collision-safe), in-session FILE_META sidecar for in-flight tracking (never persisted on receiver drive), expired quarantine jail deny, chunk transfer, enforced accept/list expiry, argv dispatch and relay auth hardening, path validation, and public-list expiry filtering
 
 RELEASE_DATE=2026-05-31

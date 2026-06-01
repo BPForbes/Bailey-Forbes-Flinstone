@@ -45,6 +45,12 @@ OPCODES = {
     0x30: "FILE_OFFER",
     0x31: "FILE_CHUNK",
     0x32: "FILE_DONE",
+    0x33: "FILE_ACCEPT",
+    0x34: "FILE_DECLINE",
+    0x35: "FILE_REVOKE",
+    0x36: "FILE_LIST",
+    0x37: "FILE_STATUS",
+    0x38: "FILE_META",
     0x7F: "ERR",
 }
 

@@ -516,10 +516,12 @@ static int test_contract_constants(void) {
     ASSERT(FL_NET_BG_TAG_ARP_TICK == 0x0314u);
     ASSERT((int)FL_NET_SESSION_OP_FILE_OFFER == 0x30);
     ASSERT((int)FL_NET_SESSION_OP_FILE_STATUS == 0x37);
+    ASSERT((int)FL_NET_SESSION_OP_FILE_META == 0x38);
     ASSERT(fl_net_session_is_file_opcode(FL_NET_SESSION_OP_FILE_OFFER) == 1);
     ASSERT(fl_net_session_is_file_opcode(FL_NET_SESSION_OP_FILE_STATUS) == 1);
+    ASSERT(fl_net_session_is_file_opcode(FL_NET_SESSION_OP_FILE_META) == 1);
     ASSERT(fl_net_session_is_file_opcode(0x2fu) == 0);
-    ASSERT(fl_net_session_is_file_opcode(0x38u) == 0);
+    ASSERT(fl_net_session_is_file_opcode(0x39u) == 0);
     ASSERT(FL_SERVER_FILE_STATUS_QUEUED == 1u);
     ASSERT(strcmp(FL_SFTP_VPATH_HOME, "/sftp/home") == 0);
 

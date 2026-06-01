@@ -51,4 +51,12 @@ fl_result_t fl_net_file_store_chunk(const uint8_t *payload, uint16_t plen);
 
 fl_result_t fl_net_file_store_done(const uint8_t *payload, uint16_t plen);
 
+fl_result_t fl_net_file_send_meta(fl_net_server_t *srv,
+                                  fl_net_client_t *client,
+                                  int hosting,
+                                  fl_net_server_member_id_t sender_id,
+                                  const fl_server_file_offer_t *offer);
+
+fl_result_t fl_net_file_store_meta(const uint8_t *payload, uint16_t plen);
+
 #endif /* NET_FILE_DELIVERY_H */

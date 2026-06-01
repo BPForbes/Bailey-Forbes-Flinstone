@@ -472,6 +472,10 @@ fl_net_client_dispatch_frame(fl_net_client_t *client, uint8_t opcode,
         (void)fl_net_file_store_chunk(payload, plen);
         return FL_NET_SERVER_EVENT_NONE;
     }
+    if (opcode == (uint8_t)FL_NET_SESSION_OP_FILE_META) {
+        (void)fl_net_file_store_meta(payload, plen);
+        return FL_NET_SERVER_EVENT_NONE;
+    }
     if (opcode == (uint8_t)FL_NET_SESSION_OP_FILE_DONE) {
         (void)fl_net_file_store_done(payload, plen);
         return FL_NET_SERVER_EVENT_NONE;
