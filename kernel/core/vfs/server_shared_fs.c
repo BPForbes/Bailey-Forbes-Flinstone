@@ -2,6 +2,7 @@
 
 #include "common.h"
 #include "contract_p5_server_share.h"
+#include "server_shared_db.h"
 
 #include <dirent.h>
 #include <errno.h>
@@ -289,6 +290,7 @@ fl_result_t fl_server_shared_init(void)
         return FL_RESULT_ERR;
     if (mkdir_p(expired, 0700) != 0)
         return FL_RESULT_ERR;
+    (void)fl_server_catalog_open();
     return FL_RESULT_OK;
 }
 
@@ -472,5 +474,6 @@ fl_result_t fl_server_shared_purge_expired(uint64_t now)
             (void)move_landed_to_expired(root, expired_root, landed);
     }
     closedir(d);
+    (void)fl_server_catalog_purge_expired(now);
     return FL_RESULT_OK;
 }
