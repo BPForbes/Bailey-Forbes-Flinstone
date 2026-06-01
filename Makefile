@@ -616,6 +616,12 @@ test_server_file_accept_path: kernel/core/net/net_file_delivery.o kernel/core/vf
 	  kernel/core/net/net_file_delivery.o kernel/core/vfs/server_shared_fs.o userland/shell/common.o -Wl,-z,noexecstack
 	./tests/test_server_file_accept_path
 
+.PHONY: test_server_shared_purge
+test_server_shared_purge: kernel/core/vfs/server_shared_fs.o userland/shell/common.o
+	$(CC) $(CFLAGS) $(TEST_SANITIZE) -o tests/test_server_shared_purge tests/test_server_shared_purge.c \
+	  kernel/core/vfs/server_shared_fs.o userland/shell/common.o -Wl,-z,noexecstack
+	./tests/test_server_shared_purge
+
 .PHONY: server_shared_quarantine_harness
 server_shared_quarantine_harness: kernel/core/vfs/server_shared_fs.o userland/shell/common.o
 	$(CC) $(CFLAGS) $(TEST_SANITIZE) -o tests/server_shared_quarantine_harness tests/server_shared_quarantine_harness.c \

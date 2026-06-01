@@ -217,7 +217,7 @@ def render_pillow(share_id: str, seq, counts):
 
     draw.text(
         (28, h - 36),
-        f"pcap: /opt/cursor/artifacts/server_file_exchange.pcap · html: server_file_exchange.html",
+        "pcap: /opt/cursor/artifacts/server_file_exchange.pcap · html: server_file_exchange.html",
         fill="#8b949e", font=body,
     )
     img.save(OUT_PNG)
