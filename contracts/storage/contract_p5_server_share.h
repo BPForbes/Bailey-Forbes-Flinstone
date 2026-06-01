@@ -2,7 +2,8 @@
  * **P5-5 — Server share staging** (module contract, normative).
  *
  * **Distribution:** accepted server-file offers land in **`server_shared`**
- * as **`<share_id>_<file_name>`** (flat directory, no per-share folders), can be
+ * as **`file_name`** (flat directory, no per-share folders; share id lives in the
+ * in-flight sidecar / session offer, not in the landed basename), can be
  * written over a matching local destination when the overwrite bit permits it,
  * or be declined.
  */
