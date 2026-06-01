@@ -3,6 +3,6 @@ STANDARD_VERSION=2
 RELEASE_VERSION=0
 PRERELEASE=1
 DEV_VERSION=10
-DESCRIPTION=Unified in-flight channel sidecar (fl_channel_sidecar_t) for file and message transfers: 5-byte MSB-first prefix, share/transfer id, expires_at, sender/receiver member ids, center_freq_hz (#279 hook), FILE_META/MSG_META wire rev 1; relay strips sidecar before delivery; server_shared lands payload file_name only; OP_CTRL_HOST_PROMOTE6 (0x24) opcode (#283); tracks #239 #280 #284 #285 foundation
+DESCRIPTION=Unified in-flight channel sidecar (fl_channel_sidecar_t) for file and message transfers: 5-byte MSB-first prefix, share/transfer id, expires_at, sender/receiver member ids, center_freq_hz (#279 hook), FILE_META/MSG_META wire rev 1; relay strips wire sidecar before delivery; server_shared restores injective landing (<sidlen>$<share_id>$<fnlen>$<file_name>) plus host <landed>.meta expiry purge into expired/; OP_CTRL_HOST_PROMOTE6 (0x24) opcode (#283); tracks #239 #280 #284 #285 foundation
 
 RELEASE_DATE=2026-06-01

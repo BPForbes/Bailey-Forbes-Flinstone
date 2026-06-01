@@ -611,9 +611,16 @@ test_server_shared_landed_name: kernel/core/vfs/server_shared_fs.o userland/shel
 	  kernel/core/vfs/server_shared_fs.o userland/shell/common.o -Wl,-z,noexecstack
 	./tests/test_server_shared_landed_name
 
+.PHONY: test_server_shared_purge
+test_server_shared_purge: kernel/core/vfs/server_shared_fs.o userland/shell/common.o
+	$(CC) $(CFLAGS) $(TEST_SANITIZE) -o tests/test_server_shared_purge tests/test_server_shared_purge.c \
+	  kernel/core/vfs/server_shared_fs.o userland/shell/common.o -Wl,-z,noexecstack
+	./tests/test_server_shared_purge
+
 .PHONY: test_server_file_accept_path
-test_server_file_accept_path: kernel/core/net/net_file_delivery.o kernel/core/vfs/server_shared_fs.o userland/shell/common.o
+test_server_file_accept_path: kernel/core/net/net_channel_sidecar.o kernel/core/net/net_pkt_channel_meta.o kernel/core/net/net_file_delivery.o kernel/core/vfs/server_shared_fs.o userland/shell/common.o
 	$(CC) $(CFLAGS) $(TEST_SANITIZE) -o tests/test_server_file_accept_path tests/test_server_file_accept_path.c tests/stubs_file_delivery_net.c \
+	  kernel/core/net/net_channel_sidecar.o kernel/core/net/net_pkt_channel_meta.o \
 	  kernel/core/net/net_file_delivery.o kernel/core/vfs/server_shared_fs.o userland/shell/common.o -Wl,-z,noexecstack
 	./tests/test_server_file_accept_path
 

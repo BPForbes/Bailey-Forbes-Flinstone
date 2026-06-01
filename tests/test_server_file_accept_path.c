@@ -64,7 +64,7 @@ static int test_accept_after_session_meta(void)
         char path[512];
         ASSERT(fl_server_shared_landed_basename(&offer, landed, sizeof(landed)) ==
                FL_RESULT_OK);
-        ASSERT(strcmp(landed, "joke.txt") == 0);
+        ASSERT(strcmp(landed, "12$share-test-1$8$joke.txt") == 0);
         snprintf(path, sizeof(path), "%s/%s", FL_SERVER_SHARED_DIR_NAME, landed);
         ASSERT(access(path, R_OK) == 0);
     }

@@ -2,8 +2,10 @@
  * **P5-5 — Server share staging** (module contract, normative).
  *
  * **Distribution:** accepted server-file offers land in **`server_shared`**
- * as **`file_name`** (flat directory, no per-share folders; share id lives in the
- * in-flight sidecar / session offer, not in the landed basename), can be
+ * as an injective flat basename **`<sidlen>$<share_id>$<fnlen>$<file_name>`**
+ * (no per-share folders); in-flight wire sidecar fields are not written to the
+ * payload file — host **`expires_at`** is recorded in **`<landed>.meta`** for
+ * post-session purge into **`server_shared/expired/`**. Offers can
  * written over a matching local destination when the overwrite bit permits it,
  * or be declined.
  */
