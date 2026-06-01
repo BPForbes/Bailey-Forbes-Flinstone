@@ -61,6 +61,8 @@
 #define FL_NET_SESSION_OP_HOST_NICK_SET 0x23u
 /** IPv6 host transfer (#283 / #280); payload [u16 id][16 ipv6_be][u16 port]. */
 #define FL_NET_SESSION_OP_CTRL_HOST_PROMOTE6 0x24u
+#define FL_NET_SESSION_CTRL_HOST_PROMOTE_PAYLOAD_LEN  8u
+#define FL_NET_SESSION_CTRL_HOST_PROMOTE6_PAYLOAD_LEN 20u
 
 /** File-transfer opcodes — same session frame header as chat (v1 extension). */
 #define FL_NET_SESSION_OP_FILE_FIRST    0x30u

@@ -2,6 +2,8 @@
 
 #include "net_checksum.h"
 
+#include <arpa/inet.h>
+#include <errno.h>
 #include <stdint.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -43,6 +45,93 @@ int fl_net_ipv4_parse_literal(const char *s, uint32_t *out_be) {
 
     *out_be = ipv4_pack_octets(o[0], o[1], o[2], o[3]);
     return 1;
+}
+
+int fl_net_ipv6_wire_to_v4(const uint8_t addr_be[16], uint32_t *v4_be_out)
+{
+    static const uint8_t loop6[16] =
+        {0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1};
+    static const uint8_t mapped_prefix[12] =
+        {0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0xff, 0xff};
+
+    if (!addr_be || !v4_be_out)
+        return 0;
+    if (memcmp(addr_be, loop6, sizeof(loop6)) == 0) {
+        *v4_be_out = ipv4_pack_octets(127u, 0u, 0u, 1u);
+        return 1;
+    }
+    if (memcmp(addr_be, mapped_prefix, sizeof(mapped_prefix)) == 0) {
+        *v4_be_out = ipv4_pack_octets(addr_be[12], addr_be[13], addr_be[14], addr_be[15]);
+        return 1;
+    }
+    return 0;
+}
+
+static int parse_endpoint_port(const char *port_str, uint16_t *port_out)
+{
+    long port;
+    char *end = NULL;
+
+    if (!port_str || !port_out)
+        return 0;
+    errno = 0;
+    port = strtol(port_str, &end, 10);
+    if (errno != 0 || end == port_str || (end && *end != '\0'))
+        return 0;
+    if (port <= 0 || port > 65535)
+        return 0;
+    *port_out = (uint16_t)port;
+    return 1;
+}
+
+int fl_net_endpoint_parse_v4(const char *s, uint32_t *addr_be_out, uint16_t *port_out)
+{
+    char buf[128];
+    char host[128];
+    size_t n;
+    const char *port_str;
+
+    if (!s || !addr_be_out || !port_out)
+        return 0;
+    n = strnlen(s, sizeof(buf));
+    if (n == 0u || n >= sizeof(buf))
+        return 0;
+    memcpy(buf, s, n);
+    buf[n] = '\0';
+
+    if (buf[0] == '[') {
+        char *end_br = strchr(buf, ']');
+        size_t host_len;
+        if (!end_br || end_br[1] != ':')
+            return 0;
+        host_len = (size_t)(end_br - (buf + 1));
+        if (host_len == 0u || host_len >= sizeof(host))
+            return 0;
+        memcpy(host, buf + 1, host_len);
+        host[host_len] = '\0';
+        port_str = end_br + 2;
+        if (fl_net_ipv4_parse_literal(host, addr_be_out))
+            return parse_endpoint_port(port_str, port_out);
+        {
+            unsigned char raw[16];
+            if (inet_pton(AF_INET6, host, raw) != 1)
+                return 0;
+            if (!fl_net_ipv6_wire_to_v4(raw, addr_be_out))
+                return 0;
+            return parse_endpoint_port(port_str, port_out);
+        }
+    }
+
+    {
+        char *colon = strrchr(buf, ':');
+        if (!colon || colon == buf)
+            return 0;
+        *colon = '\0';
+        port_str = colon + 1;
+        if (!fl_net_ipv4_parse_literal(buf, addr_be_out))
+            return 0;
+        return parse_endpoint_port(port_str, port_out);
+    }
 }
 
 void fl_net_ipv4_format_addr(uint32_t addr_be, char *buf, size_t buf_len) {

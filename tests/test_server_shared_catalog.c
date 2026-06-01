@@ -3,9 +3,11 @@
 
 #include "common.h"
 
+#include <errno.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <sys/stat.h>
 #include <unistd.h>
 
 #define ASSERT(c) do { if (!(c)) { fprintf(stderr, "FAIL: %s\n", #c); return 1; } } while (0)
@@ -182,6 +184,56 @@ static int test_catalog_duplicate_hash_two_transfers(void)
     return 0;
 }
 
+static int test_catalog_import_handoff(void)
+{
+    char src[] = "/tmp/fl_catalog_src_XXXXXX";
+    char dst[] = "/tmp/fl_catalog_dst_XXXXXX";
+    fl_server_file_offer_t offer;
+    const uint8_t payload[] = "handoff blob";
+    fl_server_catalog_entry_t entry;
+
+    ASSERT(mkdtemp(src) != NULL);
+    ASSERT(mkdtemp(dst) != NULL);
+    {
+        char shared[512];
+        snprintf(shared, sizeof(shared), "%s/server_shared", src);
+        ASSERT(mkdir(shared, 0700) == 0 || errno == EEXIST);
+        if (chdir(src) != 0)
+            return 1;
+        strncpy(g_cwd, src, sizeof(g_cwd) - 1u);
+        g_cwd[sizeof(g_cwd) - 1u] = '\0';
+    }
+    memset(&offer, 0, sizeof(offer));
+    strncpy(offer.share_id, "share-handoff-1", sizeof(offer.share_id) - 1u);
+    strncpy(offer.file_name, "handoff.txt", sizeof(offer.file_name) - 1u);
+    offer.sender_member_id = 2u;
+    offer.receiver_member_id = 3u;
+    offer.file_perms = FL_FILE_PERM_VIEW | FL_FILE_PERM_SERVER_SHARE;
+    ASSERT(fl_server_catalog_register_file_offer(&offer) == FL_RESULT_OK);
+    ASSERT(fl_server_catalog_commit_file_offer(&offer, payload, sizeof(payload) - 1u) ==
+           FL_RESULT_OK);
+    (void)fl_server_catalog_close();
+
+    {
+        char shared[512];
+        snprintf(shared, sizeof(shared), "%s/server_shared", dst);
+        ASSERT(mkdir(shared, 0700) == 0 || errno == EEXIST);
+        if (chdir(dst) != 0)
+            return 1;
+        strncpy(g_cwd, dst, sizeof(g_cwd) - 1u);
+        g_cwd[sizeof(g_cwd) - 1u] = '\0';
+    }
+    {
+        char src_shared[512];
+        snprintf(src_shared, sizeof(src_shared), "%s/server_shared", src);
+        ASSERT(fl_server_catalog_import_handoff(src_shared) == FL_RESULT_OK);
+    }
+    ASSERT(fl_server_catalog_lookup_transfer("share-handoff-1", &entry) == FL_RESULT_OK);
+    ASSERT(entry.status == FL_SERVER_CATALOG_COMPLETE);
+    (void)fl_server_catalog_close();
+    return 0;
+}
+
 int main(void)
 {
     if (test_catalog_file_roundtrip() != 0)
@@ -191,6 +243,8 @@ int main(void)
     if (test_catalog_large_blob_fetch() != 0)
         return 1;
     if (test_catalog_duplicate_hash_two_transfers() != 0)
+        return 1;
+    if (test_catalog_import_handoff() != 0)
         return 1;
     printf("All server_shared catalog tests passed.\n");
     return 0;

@@ -41,6 +41,7 @@ OPCODES = {
     0x20: "CTRL_LEAVE",
     0x21: "CTRL_KILL",
     0x22: "CTRL_HOST_PROMOTE",
+    0x24: "CTRL_HOST_PROMOTE6",
     0x23: "HOST_NICK_SET",
     0x30: "FILE_OFFER",
     0x31: "FILE_CHUNK",

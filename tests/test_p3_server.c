@@ -15,8 +15,10 @@
  *   - leave -> LEAVE_ANNOUNCE on remaining peer
  */
 
+#include "contract_p3_session_wire.h"
 #include "net_client.h"
 #include "net_endian.h"
+#include "net_ipv4.h"
 #include "net_server.h"
 #include "net_socket.h"
 #include "server_bg.h"
@@ -512,7 +514,47 @@ static int test_endian_host_promote_payload(void) {
     return 0;
 }
 
+static int test_endpoint_brackets(void) {
+    uint32_t ip = 0u;
+    uint16_t port = 0u;
+    ASSERT(fl_net_endpoint_parse_v4("127.0.0.1:49913", &ip, &port));
+    ASSERT(port == 49913u);
+    ASSERT(fl_net_endpoint_parse_v4("[127.0.0.1]:49913", &ip, &port));
+    ASSERT(port == 49913u);
+    ASSERT(fl_net_endpoint_parse_v4("[::1]:49913", &ip, &port));
+    ASSERT(port == 49913u);
+    ASSERT(fl_net_ipv4_is_loopback(ip));
+    return 0;
+}
+
+static int test_host_promote6_v4_mapped(void) {
+    uint8_t payload[FL_NET_SESSION_CTRL_HOST_PROMOTE6_PAYLOAD_LEN];
+    uint32_t ip = 0u;
+    uint32_t expect = fl_net_htonl(0xC0A80A02U);
+    memset(payload, 0, sizeof(payload));
+    fl_net_put_u16_be(payload, 2u);
+    fl_net_put_u32_nbo(payload + 2 + 12, expect);
+    payload[2 + 10] = 0xffu;
+    payload[2 + 11] = 0xffu;
+    fl_net_put_u16_be(payload + 18, 50123u);
+    ASSERT(fl_net_ipv6_wire_to_v4(payload + 2, &ip));
+    ASSERT(ip == expect);
+    return 0;
+}
+
 int main(void) {
+    printf("test_p3_server: bracketed endpoint parse (#280)... ");
+    fflush(stdout);
+    if (test_endpoint_brackets() != 0)
+        return 1;
+    puts("ok");
+
+    printf("test_p3_server: OP_CTRL_HOST_PROMOTE6 v4-mapped (#283)... ");
+    fflush(stdout);
+    if (test_host_promote6_v4_mapped() != 0)
+        return 1;
+    puts("ok");
+
     printf("test_p3_server: endian round-trip for OP_CTRL_HOST_PROMOTE... ");
     fflush(stdout);
     if (test_endian_host_promote_payload() != 0)

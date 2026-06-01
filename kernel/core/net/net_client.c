@@ -509,11 +509,17 @@ fl_net_client_dispatch_frame(fl_net_client_t *client, uint8_t opcode,
         mid = (fl_net_server_member_id_t)
             (((uint16_t)payload[0] << 8) | payload[1]);
         text_off = 0u;
-        /* Disambiguate: only the local recipient with assigned_member_id
-         * == new_host_id is being promoted; every other peer is being
-         * told to reconnect to the new host. Keeping these two events
-         * distinct lets the shell-side handler skip the bind path on
-         * REDIRECT (it just needs to reconnect). */
+        client->last_host_promote_payload_len = plen;
+        kind = (mid == client->assigned_member_id)
+                   ? FL_NET_SERVER_EVENT_HOST_PROMOTE
+                   : FL_NET_SERVER_EVENT_HOST_REDIRECT;
+    }
+    if (opcode == (uint8_t)FL_NET_SESSION_OP_CTRL_HOST_PROMOTE6 &&
+        plen >= FL_NET_SESSION_CTRL_HOST_PROMOTE6_PAYLOAD_LEN) {
+        mid = (fl_net_server_member_id_t)
+            (((uint16_t)payload[0] << 8) | payload[1]);
+        text_off = 0u;
+        client->last_host_promote_payload_len = plen;
         kind = (mid == client->assigned_member_id)
                    ? FL_NET_SERVER_EVENT_HOST_PROMOTE
                    : FL_NET_SERVER_EVENT_HOST_REDIRECT;

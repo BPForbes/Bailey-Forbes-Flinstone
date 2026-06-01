@@ -61,6 +61,8 @@ struct fl_net_client_s {
     size_t member_count;
     /* Non-blocking poll parser state; reset on init + every (re)connect. */
     fl_net_session_rx_t rx_state;
+    /** Wire length of the last HOST_PROMOTE / HOST_PROMOTE6 payload delivered. */
+    uint16_t last_host_promote_payload_len;
 };
 
 /**

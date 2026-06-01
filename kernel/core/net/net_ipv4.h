@@ -25,6 +25,10 @@ typedef struct {
 
 int fl_net_ipv4_is_loopback(uint32_t addr_be);
 int fl_net_ipv4_parse_literal(const char *s, uint32_t *out_be);
+/** Parse `host:port` or `[host]:port` (#280). IPv6 literals map ::1 and ::ffff:v4 only. */
+int fl_net_endpoint_parse_v4(const char *s, uint32_t *addr_be_out, uint16_t *port_out);
+/** Map IPv6 wire bytes from OP_CTRL_HOST_PROMOTE6 to IPv4 when ::1 or v4-mapped. */
+int fl_net_ipv6_wire_to_v4(const uint8_t addr_be[16], uint32_t *v4_be_out);
 void fl_net_ipv4_format_addr(uint32_t addr_be, char *buf, size_t buf_len);
 uint32_t fl_net_ipv4_network_addr(uint32_t addr_be, uint8_t prefix_len);
 
