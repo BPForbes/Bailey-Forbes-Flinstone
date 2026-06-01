@@ -966,8 +966,14 @@ fl_result_t fl_server_share_accept(const char *share_id,
         return FL_RESULT_ACCES;
     if (disposition == FL_SERVER_FILE_SAVE_TO_SERVER_SHARE) {
         char saved[512];
+        char landed[FL_SERVER_SHARE_ID_MAX + FL_SERVER_FILE_NAME_MAX + 2u];
         rc = fl_server_shared_save_offer(&slot->offer, slot->file_data,
                                          slot->file_len, saved, sizeof(saved));
+        if (rc == FL_RESULT_OK &&
+            fl_server_shared_landed_basename(&slot->offer, landed,
+                                             sizeof(landed)) == FL_RESULT_OK) {
+            printf("[Server] saved to server_shared/%s\n", landed);
+        }
     } else if (disposition == FL_SERVER_FILE_OVERWRITE_LOCAL) {
         rc = fl_server_shared_overwrite_local(&slot->offer,
                                               slot->offer.suggested_dest_path,

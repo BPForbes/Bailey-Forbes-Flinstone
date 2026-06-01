@@ -1,8 +1,10 @@
 #include "contract_p3_packet.h"
 #include "net_file_delivery.h"
+#include "server_shared_fs.h"
 
 #include <stdio.h>
 #include <string.h>
+#include <unistd.h>
 
 #define ASSERT(c) do { if (!(c)) { fprintf(stderr, "FAIL: %s\n", #c); return 1; } } while(0)
 
@@ -57,6 +59,15 @@ static int test_accept_after_session_meta(void)
 
     ASSERT(fl_server_share_accept(offer.share_id, 3u,
                                   FL_SERVER_FILE_SAVE_TO_SERVER_SHARE) == FL_RESULT_OK);
+    {
+        char landed[256];
+        char path[512];
+        ASSERT(fl_server_shared_landed_basename(&offer, landed, sizeof(landed)) ==
+               FL_RESULT_OK);
+        ASSERT(strcmp(landed, "share-test-1_joke.txt") == 0);
+        snprintf(path, sizeof(path), "%s/%s", FL_SERVER_SHARED_DIR_NAME, landed);
+        ASSERT(access(path, R_OK) == 0);
+    }
     return 0;
 }
 

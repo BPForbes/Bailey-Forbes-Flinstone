@@ -85,7 +85,7 @@ rm -f "$INBOX_SNAP"
 if [[ -n "${SHARE_ID:-}" ]]; then
     $T send-keys -t "$S:0.2" "server file accept ${SHARE_ID} --server-share" C-m
     sleep 2
-    $T send-keys -t "$S:0.2" "cat server_shared/joke.txt" C-m
+    $T send-keys -t "$S:0.2" "cat server_shared/${SHARE_ID}_joke.txt" C-m
     sleep 0.6
 fi
 

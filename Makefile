@@ -604,6 +604,12 @@ test_server_file_meta: kernel/core/net/net_file_delivery.o kernel/core/vfs/serve
 	  kernel/core/net/net_file_delivery.o kernel/core/vfs/server_shared_fs.o userland/shell/common.o -Wl,-z,noexecstack
 	./tests/test_server_file_meta
 
+.PHONY: test_server_shared_landed_name
+test_server_shared_landed_name: kernel/core/vfs/server_shared_fs.o userland/shell/common.o
+	$(CC) $(CFLAGS) $(TEST_SANITIZE) -o tests/test_server_shared_landed_name tests/test_server_shared_landed_name.c \
+	  kernel/core/vfs/server_shared_fs.o userland/shell/common.o -Wl,-z,noexecstack
+	./tests/test_server_shared_landed_name
+
 .PHONY: test_server_file_accept_path
 test_server_file_accept_path: kernel/core/net/net_file_delivery.o kernel/core/vfs/server_shared_fs.o userland/shell/common.o
 	$(CC) $(CFLAGS) $(TEST_SANITIZE) -o tests/test_server_file_accept_path tests/test_server_file_accept_path.c tests/stubs_file_delivery_net.c \

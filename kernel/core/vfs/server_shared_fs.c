@@ -160,6 +160,24 @@ int fl_server_shared_path_is_expired_quarantine(const char *path)
     return path_has_expired_component(ab);
 }
 
+fl_result_t fl_server_shared_landed_basename(const fl_server_file_offer_t *offer,
+                                             char *out,
+                                             size_t out_cap)
+{
+    int n;
+    if (!offer || !out || out_cap == 0u || !offer->share_id[0] || !offer->file_name[0])
+        return FL_RESULT_INVAL;
+    if (path_component_safe(offer->share_id) != FL_RESULT_OK ||
+        path_component_safe(offer->file_name) != FL_RESULT_OK)
+        return FL_RESULT_INVAL;
+    n = snprintf(out, out_cap, "%s_%s", offer->share_id, offer->file_name);
+    if (n < 0 || (size_t)n >= out_cap)
+        return FL_RESULT_INVAL;
+    if (path_component_safe(out) != FL_RESULT_OK)
+        return FL_RESULT_INVAL;
+    return FL_RESULT_OK;
+}
+
 fl_result_t fl_server_shared_save_offer(const fl_server_file_offer_t *offer,
                                         const uint8_t *data,
                                         size_t data_len,
@@ -167,18 +185,20 @@ fl_result_t fl_server_shared_save_offer(const fl_server_file_offer_t *offer,
                                         size_t out_path_cap)
 {
     char root[512];
+    char landed[FL_SERVER_SHARE_ID_MAX + FL_SERVER_FILE_NAME_MAX + 2u];
     char file_path[512];
     FILE *fp;
+    fl_result_t rc;
     if (!offer || !offer->share_id[0] || !offer->file_name[0])
         return FL_RESULT_INVAL;
-    if (path_component_safe(offer->share_id) != FL_RESULT_OK ||
-        path_component_safe(offer->file_name) != FL_RESULT_OK)
-        return FL_RESULT_INVAL;
+    rc = fl_server_shared_landed_basename(offer, landed, sizeof(landed));
+    if (rc != FL_RESULT_OK)
+        return rc;
     if (fl_server_shared_init() != FL_RESULT_OK)
         return FL_RESULT_ERR;
     if (join_path(root, sizeof(root), ".", FL_SERVER_SHARED_DIR_NAME) != 0)
         return FL_RESULT_ERR;
-    if (join_path(file_path, sizeof(file_path), root, offer->file_name) != 0)
+    if (join_path(file_path, sizeof(file_path), root, landed) != 0)
         return FL_RESULT_ERR;
     fp = fopen(file_path, "wb");
     if (!fp)
