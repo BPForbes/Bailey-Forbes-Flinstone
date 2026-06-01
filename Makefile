@@ -150,7 +150,7 @@ NET_CORE_SRCS = kernel/core/net/net_checksum.c kernel/core/net/net_wire.c kernel
                 kernel/core/net/net_dns.c kernel/core/net/net_dhcp.c kernel/core/net/net_tls_hosted.c \
                 kernel/core/net/net_http.c kernel/core/net/net_tftp.c \
                 kernel/core/net/net_ping_host.c kernel/core/net/net_requirements.c \
-                kernel/core/net/net_server.c kernel/core/net/net_client.c kernel/core/net/net_file_delivery.c kernel/core/net/net_pkt_channel_meta.c kernel/core/net/server_bg.c \
+                kernel/core/net/net_server.c kernel/core/net/net_client.c kernel/core/net/net_file_delivery.c kernel/core/net/net_pkt_channel_meta.c kernel/core/net/net_channel_sidecar.c kernel/core/net/server_bg.c \
                 kernel/core/vfs/server_shared_fs.c \
                 userland/shell/fl_colors.c
 NET_ASM_OBJ = $(patsubst %.s,%.o,$(patsubst %.asm,%.o,$(filter %/net_asm.s %/net_asm.asm %/net_wire_host_asm.s %/net_wire_host_asm.asm,$(ASMSRCS))))
@@ -599,8 +599,9 @@ test_server_file_expire:
 	./tests/test_server_file_expire
 
 .PHONY: test_server_file_meta
-test_server_file_meta: kernel/core/net/net_file_delivery.o kernel/core/vfs/server_shared_fs.o userland/shell/common.o
+test_server_file_meta: kernel/core/net/net_channel_sidecar.o kernel/core/net/net_pkt_channel_meta.o kernel/core/net/net_file_delivery.o kernel/core/vfs/server_shared_fs.o userland/shell/common.o
 	$(CC) $(CFLAGS) $(TEST_SANITIZE) -o tests/test_server_file_meta tests/test_server_file_meta.c tests/stubs_file_delivery_net.c \
+	  kernel/core/net/net_channel_sidecar.o kernel/core/net/net_pkt_channel_meta.o \
 	  kernel/core/net/net_file_delivery.o kernel/core/vfs/server_shared_fs.o userland/shell/common.o -Wl,-z,noexecstack
 	./tests/test_server_file_meta
 
@@ -616,11 +617,12 @@ test_server_file_accept_path: kernel/core/net/net_file_delivery.o kernel/core/vf
 	  kernel/core/net/net_file_delivery.o kernel/core/vfs/server_shared_fs.o userland/shell/common.o -Wl,-z,noexecstack
 	./tests/test_server_file_accept_path
 
-.PHONY: test_server_shared_purge
-test_server_shared_purge: kernel/core/vfs/server_shared_fs.o userland/shell/common.o
-	$(CC) $(CFLAGS) $(TEST_SANITIZE) -o tests/test_server_shared_purge tests/test_server_shared_purge.c \
-	  kernel/core/vfs/server_shared_fs.o userland/shell/common.o -Wl,-z,noexecstack
-	./tests/test_server_shared_purge
+.PHONY: test_channel_sidecar
+test_channel_sidecar: kernel/core/net/net_channel_sidecar.o kernel/core/net/net_pkt_channel_meta.o kernel/core/net/net_file_delivery.o kernel/core/vfs/server_shared_fs.o userland/shell/common.o tests/stubs_file_delivery_net.c
+	$(CC) $(CFLAGS) $(TEST_SANITIZE) -o tests/test_channel_sidecar tests/test_channel_sidecar.c \
+	  kernel/core/net/net_channel_sidecar.o kernel/core/net/net_pkt_channel_meta.o \
+	  kernel/core/net/net_file_delivery.o kernel/core/vfs/server_shared_fs.o userland/shell/common.o tests/stubs_file_delivery_net.c -Wl,-z,noexecstack
+	./tests/test_channel_sidecar
 
 .PHONY: server_shared_quarantine_harness
 server_shared_quarantine_harness: kernel/core/vfs/server_shared_fs.o userland/shell/common.o

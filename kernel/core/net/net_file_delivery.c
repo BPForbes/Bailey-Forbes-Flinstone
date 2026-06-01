@@ -1,7 +1,9 @@
 #include "net_file_delivery.h"
 
 #include "contract_p3_packet.h"
+#include "net_channel_sidecar.h"
 #include "net_endian.h"
+#include "net_pkt_channel_meta.h"
 #include "server_shared_fs.h"
 
 #include <stdio.h>
@@ -192,15 +194,23 @@ static fl_result_t share_access_ok(const fl_server_file_offer_t *offer, uint64_t
     return fl_file_share_validate_access(offer->file_perms, offer->expires_at, now);
 }
 
-static fl_result_t meta_matches_offer(const fl_server_file_meta_t *meta,
+static fl_result_t meta_matches_offer(const fl_channel_sidecar_t *meta,
                                       const fl_server_file_offer_t *offer)
 {
     if (!meta || !offer)
         return FL_RESULT_INVAL;
-    if (meta->file_name[0] &&
-        strcmp(meta->file_name, offer->file_name) != 0)
+    if (meta->transfer_id[0] &&
+        strcmp(meta->transfer_id, offer->share_id) != 0)
+        return FL_RESULT_INVAL;
+    if (meta->payload_name[0] &&
+        strcmp(meta->payload_name, offer->file_name) != 0)
         return FL_RESULT_INVAL;
     if (meta->expires_at != offer->expires_at)
+        return FL_RESULT_INVAL;
+    if (meta->sender_member_id != 0u &&
+        meta->sender_member_id != offer->sender_member_id)
+        return FL_RESULT_INVAL;
+    if (meta->receiver_member_id != offer->receiver_member_id)
         return FL_RESULT_INVAL;
     return FL_RESULT_OK;
 }
@@ -1128,12 +1138,22 @@ fl_result_t fl_net_file_store_done(const uint8_t *payload, uint16_t plen)
 fl_result_t fl_server_file_meta_from_offer(const fl_server_file_offer_t *offer,
                                            fl_server_file_meta_t *out)
 {
+    uint8_t pkt_meta[FL_PKT_CHANNEL_META_LEN];
+    fl_pkt_meta_route_ctx_t route = {0};
+
     if (!offer || !out || !offer->share_id[0] || !offer->file_name[0])
         return FL_RESULT_INVAL;
+    if (fl_pkt_meta_encode_file_offer(offer, &route, pkt_meta) != FL_RESULT_OK)
+        return FL_RESULT_INVAL;
     memset(out, 0, sizeof(*out));
-    copy_str_field(out->share_id, sizeof(out->share_id), offer->share_id);
+    memcpy(out->pkt_meta, pkt_meta, FL_PKT_CHANNEL_META_LEN);
+    out->sender_member_id = offer->sender_member_id;
+    out->receiver_member_id = offer->receiver_member_id;
     out->expires_at = offer->expires_at;
-    copy_str_field(out->file_name, sizeof(out->file_name), offer->file_name);
+    out->payload_kind = FL_CHANNEL_PAYLOAD_FILE;
+    out->wire_rev = FL_CHANNEL_SIDECAR_WIRE_REV;
+    strncpy(out->transfer_id, offer->share_id, sizeof(out->transfer_id) - 1u);
+    strncpy(out->payload_name, offer->file_name, sizeof(out->payload_name) - 1u);
     return FL_RESULT_OK;
 }
 
@@ -1142,45 +1162,14 @@ fl_result_t fl_server_file_meta_encode(const fl_server_file_meta_t *meta,
                                        uint16_t out_cap,
                                        uint16_t *out_len)
 {
-    fl_bytes_writer_t w;
-    fl_result_t rc;
-    if (!meta || !out || !out_len)
-        return FL_RESULT_INVAL;
-    w.buf = out;
-    w.cap = out_cap;
-    w.len = 0u;
-    rc = put_cstring16(&w, meta->share_id);
-    if (rc != FL_RESULT_OK)
-        return rc;
-    rc = put_u64(&w, meta->expires_at);
-    if (rc != FL_RESULT_OK)
-        return rc;
-    rc = put_cstring16(&w, meta->file_name);
-    if (rc != FL_RESULT_OK)
-        return rc;
-    *out_len = w.len;
-    return FL_RESULT_OK;
+    return fl_channel_sidecar_encode(meta, out, out_cap, out_len);
 }
 
 fl_result_t fl_server_file_meta_decode(const uint8_t *payload,
                                        uint16_t payload_len,
                                        fl_server_file_meta_t *out)
 {
-    uint16_t off = 0;
-    fl_result_t rc;
-    if (!payload || !out)
-        return FL_RESULT_INVAL;
-    memset(out, 0, sizeof(*out));
-    rc = get_cstring16(payload, payload_len, &off, out->share_id, sizeof(out->share_id));
-    if (rc != FL_RESULT_OK)
-        return rc;
-    rc = get_u64(payload, payload_len, &off, &out->expires_at);
-    if (rc != FL_RESULT_OK)
-        return rc;
-    rc = get_cstring16(payload, payload_len, &off, out->file_name, sizeof(out->file_name));
-    if (rc != FL_RESULT_OK)
-        return rc;
-    return FL_RESULT_OK;
+    return fl_channel_sidecar_decode(payload, payload_len, out);
 }
 
 fl_result_t fl_file_packet_encode_meta(const fl_server_file_meta_t *meta,
@@ -1209,7 +1198,7 @@ fl_result_t fl_net_file_store_meta(const uint8_t *payload, uint16_t plen)
     rc = fl_file_packet_decode_meta(payload, plen, &meta);
     if (rc != FL_RESULT_OK)
         return rc;
-    slot = share_find(meta.share_id);
+    slot = share_find(meta.transfer_id);
     if (!slot)
         return FL_RESULT_NOENT;
     if (share_access_ok(&slot->offer, (uint64_t)time(NULL)) != FL_RESULT_OK)
@@ -1410,7 +1399,7 @@ fl_result_t fl_net_file_host_relay(fl_net_server_t *srv,
         opcode == FL_NET_SESSION_OP_FILE_META) {
         char share_id[FL_SERVER_SHARE_ID_MAX];
         fl_server_file_share_slot_t *slot = NULL;
-        fl_server_file_meta_t meta;
+        fl_channel_sidecar_t meta;
         int have_meta = 0;
         memset(&meta, 0, sizeof(meta));
         if (opcode == FL_NET_SESSION_OP_FILE_CHUNK) {
@@ -1422,7 +1411,7 @@ fl_result_t fl_net_file_host_relay(fl_net_server_t *srv,
         } else if (opcode == FL_NET_SESSION_OP_FILE_META) {
             if (fl_file_packet_decode_meta(payload, plen, &meta) != FL_RESULT_OK)
                 return FL_RESULT_INVAL;
-            copy_str_field(share_id, sizeof(share_id), meta.share_id);
+            copy_str_field(share_id, sizeof(share_id), meta.transfer_id);
             have_meta = 1;
         } else {
             fl_server_file_done_t done;
@@ -1439,6 +1428,11 @@ fl_result_t fl_net_file_host_relay(fl_net_server_t *srv,
             fl_result_t mrc = meta_matches_offer(&meta, &slot->offer);
             if (mrc != FL_RESULT_OK)
                 return mrc;
+            if (meta.wire_rev != 0u &&
+                !fl_pkt_wire_valid(meta.pkt_meta, FL_PKT_CHANNEL_META_LEN))
+                return FL_RESULT_INVAL;
+            /* In-flight sidecar: validate at relay, never forward to final peer. */
+            return FL_RESULT_OK;
         }
         if (slot->offer.receiver_member_id == 0u)
             return fl_net_server_broadcast_except(srv, sender_id, opcode, payload, plen);
