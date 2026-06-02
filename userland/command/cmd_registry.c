@@ -35,6 +35,7 @@ static const cmd_name_ent_t cmd_registry[] = {
     {"mkdir", FL_SCMD_MKDIR},
     {"mv", FL_SCMD_MV},
     {"netsh", FL_SCMD_NETSH},
+    {"wifi", FL_SCMD_WIFI},
     {"netstat", FL_SCMD_NETSTAT},
     {"nslookup", FL_SCMD_NSLOOKUP},
     {"resolve", FL_SCMD_RESOLVE},

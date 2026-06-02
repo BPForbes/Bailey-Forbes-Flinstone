@@ -73,20 +73,23 @@ static int test_scan_enrich_from_ies(void) {
     return 0;
 }
 
-static int test_station_api_nosys(void) {
+static int test_station_api_lab(void) {
     fl_net_wifi_scan_entry_t entries[4];
     size_t count = 0;
+    fl_net_wifi_cred_t cred;
 
     ASSERT(fl_net_wifi_station_init() == FL_RESULT_OK);
     ASSERT(fl_net_wifi_state() == FL_WIFI_STATE_IDLE);
     ASSERT(fl_net_wifi_station_netdev() == NULL);
-    ASSERT(fl_net_wifi_scan(FL_WIFI_BAND_ANY, 1000u) == FL_RESULT_NOSYS);
-    ASSERT(fl_net_wifi_scan_result(entries, 4, &count) == FL_RESULT_NOSYS);
-    {
-        fl_net_wifi_cred_t cred;
-        memset(&cred, 0, sizeof(cred));
-        ASSERT(fl_net_wifi_connect(&cred, 0u) == FL_RESULT_NOSYS);
-    }
+    ASSERT(fl_net_wifi_scan(FL_WIFI_BAND_ANY, 1000u) == FL_RESULT_OK);
+    ASSERT(fl_net_wifi_scan_result(entries, 4, &count) == FL_RESULT_OK);
+    ASSERT(count >= 1u);
+    memset(&cred, 0, sizeof(cred));
+    strncpy(cred.ssid, "LabAxHome", sizeof(cred.ssid) - 1u);
+    strncpy(cred.passphrase, "secret", sizeof(cred.passphrase) - 1u);
+    cred.auth_mode = FL_WIFI_AUTH_WPA3_SAE;
+    ASSERT(fl_net_wifi_connect(&cred, 0u) == FL_RESULT_OK);
+    ASSERT(fl_net_wifi_state() == FL_WIFI_STATE_CONNECTED);
     ASSERT(fl_net_wifi_twt_setup(NULL, NULL) == FL_RESULT_NOSYS);
     ASSERT(fl_net_wifi_disconnect() == FL_RESULT_OK);
     return 0;
@@ -107,7 +110,7 @@ int main(void) {
         return 1;
     if (test_scan_enrich_from_ies() != 0)
         return 1;
-    if (test_station_api_nosys() != 0)
+    if (test_station_api_lab() != 0)
         return 1;
     if (test_mgmt_hdr_probe() != 0)
         return 1;
