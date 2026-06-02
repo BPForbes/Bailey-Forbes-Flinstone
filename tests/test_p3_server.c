@@ -68,11 +68,11 @@ static int g_last_promote_ep_valid;
 
 static void event_sink(fl_net_server_event_kind_t kind, const char *text,
                        fl_net_server_member_id_t mid,
-                       const fl_net_endpoint_t *host_ep, void *data) {
+                       const fl_net_addr_t *host_addr, void *data) {
     event_log_t *log = (event_log_t *)data;
     (void)mid;
-    if (host_ep) {
-        g_last_promote_ep = *host_ep;
+    if (host_addr) {
+        g_last_promote_ep = *(const fl_net_endpoint_t *)host_addr;
         g_last_promote_ep_valid = 1;
     }
     if (!log)

@@ -644,16 +644,16 @@ fl_net_client_dispatch_frame(fl_net_client_t *client, uint8_t opcode,
     }
 
     if (cb && kind != FL_NET_SERVER_EVENT_NONE) {
-        const fl_net_endpoint_t *host_ep = NULL;
+        const fl_net_addr_t *host_addr = NULL;
 
         if ((kind == FL_NET_SERVER_EVENT_HOST_PROMOTE ||
              kind == FL_NET_SERVER_EVENT_HOST_REDIRECT) &&
             client->last_host_promote_ep_valid)
-            host_ep = &client->last_host_promote_ep;
+            host_addr = (const fl_net_addr_t *)&client->last_host_promote_ep;
         if (kind == FL_NET_SERVER_EVENT_HOST_PROMOTE ||
             kind == FL_NET_SERVER_EVENT_HOST_REDIRECT)
             text[0] = '\0';
-        cb(kind, text, mid, host_ep, data);
+        cb(kind, text, mid, host_addr, data);
     }
     return kind;
 }

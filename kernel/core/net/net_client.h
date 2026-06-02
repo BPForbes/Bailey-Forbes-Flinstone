@@ -27,13 +27,14 @@ typedef struct fl_net_client_s fl_net_client_t;
  * `data` pointer is whatever the caller passed to `_poll`. `text` is a
  * NUL-terminated copy of the payload (already-truncated to fit a stack
  * buffer); for HELLO_ACK, `member_id` is the assigned id parsed from the
- * payload prefix. For **HOST_PROMOTE** / **HOST_REDIRECT**, `host_ep` is
- * the decoded successor address (non-NULL); `text` is empty for those events.
+ * payload prefix. For **HOST_PROMOTE** / **HOST_REDIRECT**, `host_addr` is
+ * the decoded successor address (non-NULL; same layout as `fl_net_endpoint_t`);
+ * `text` is empty for those events.
  */
 typedef void (*fl_net_client_event_cb)(fl_net_server_event_kind_t kind,
                                        const char *text,
                                        fl_net_server_member_id_t member_id,
-                                       const fl_net_endpoint_t *host_ep,
+                                       const fl_net_addr_t *host_addr,
                                        void *data);
 
 /* Cached snapshot of one remote member (parsed from

@@ -103,7 +103,7 @@ static void maybe_handle_nick_prompt_sync(void);
 
 static void client_event_print(fl_net_server_event_kind_t kind, const char *text,
                                fl_net_server_member_id_t mid,
-                               const fl_net_endpoint_t *host_ep, void *data) {
+                               const fl_net_addr_t *host_addr, void *data) {
     (void)data;
     switch (kind) {
     case FL_NET_SERVER_EVENT_JOIN_ANNOUNCE:
@@ -173,11 +173,11 @@ static void client_event_print(fl_net_server_event_kind_t kind, const char *text
         int am_new_host = (kind == FL_NET_SERVER_EVENT_HOST_PROMOTE) ? 1 : 0;
         (void)mid;
         (void)text;
-        if (!host_ep) {
+        if (!host_addr) {
             fl_color_warn("host promote received with no address; leaving");
             return;
         }
-        spawn_promote_thread(am_new_host, host_ep);
+        spawn_promote_thread(am_new_host, (const fl_net_endpoint_t *)host_addr);
         break;
     }
     case FL_NET_SERVER_EVENT_HELLO_ACK:
