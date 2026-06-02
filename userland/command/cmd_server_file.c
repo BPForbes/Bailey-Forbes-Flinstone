@@ -1,5 +1,6 @@
 #include "cmd_server_file.h"
 
+#include "contract_p3_packet.h"
 #include "fl_colors.h"
 #include "net_file_delivery.h"
 #include "server_file_expire.h"
