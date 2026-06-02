@@ -6,3 +6,5 @@ DEV_VERSION=12
 DESCRIPTION<<VER_END
 PRE 4.2.0 #279 Wi-Fi 802.11ax foundation: promote contract_p3_wifi.h (P3-10 REV 1); FL_CONTRACT_P3_NETWORKING_REV 18; net_wifi_he IE parser (HE Capabilities/Operation); station/mgmt/sae/wpa/twt API stubs (FL_RESULT_NOSYS without NIC); test_p3_wifi.
 VER_END
+
+RELEASE_DATE=2026-06-02
