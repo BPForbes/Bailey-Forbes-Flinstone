@@ -9,6 +9,7 @@
  */
 #include "net_client.h"
 #include "net_file_delivery.h"
+#include "net_file_delivery.h"
 
 #include "contract_p3_packet.h"
 #include "net_server.h" /* fl_net_session_*_frame, encode/recv helpers */
@@ -185,8 +186,13 @@ fl_result_t fl_net_client_disconnect(fl_net_client_t *client) {
     return FL_RESULT_OK;
 }
 
+static uint32_t s_client_msg_serial;
+
 fl_result_t fl_net_client_send_msg(fl_net_client_t *client, const char *text) {
     size_t n;
+    char transfer_id[FL_SERVER_SHARE_ID_MAX];
+    fl_result_t rc;
+
     if (!client || !text)
         return FL_RESULT_INVAL;
     if (client->state != FL_NET_CLIENT_STATE_CONNECTED ||
@@ -196,6 +202,11 @@ fl_result_t fl_net_client_send_msg(fl_net_client_t *client, const char *text) {
     n = strnlen(text, (size_t)FL_NET_SESSION_MAX_MSG + 1u);
     if (n == 0u || n > (size_t)FL_NET_SESSION_MAX_MSG)
         return FL_RESULT_INVAL;
+    s_client_msg_serial++;
+    snprintf(transfer_id, sizeof(transfer_id), "msg-%u-%u",
+             (unsigned)client->assigned_member_id, s_client_msg_serial);
+    (void)fl_net_msg_send_meta_broadcast(client, transfer_id, "broadcast", 0u,
+                                         FL_FILE_FLAG_PUBLIC);
     return fl_net_session_send_frame(client->peer_handle,
                                      (uint8_t)FL_NET_SESSION_OP_MSG,
                                      (const uint8_t *)text, (uint16_t)n);
@@ -477,6 +488,14 @@ fl_result_t fl_net_client_send_private(fl_net_client_t *client,
     payload[2] = 0u;
     payload[3] = 0u;
     memcpy(payload + 4, text, tlen);
+    s_client_msg_serial++;
+    {
+        char transfer_id[FL_SERVER_SHARE_ID_MAX];
+        snprintf(transfer_id, sizeof(transfer_id), "msg-%u-%u",
+                 (unsigned)client->assigned_member_id, s_client_msg_serial);
+        (void)fl_net_msg_send_meta_direct(client, transfer_id, "direct",
+                                          recipient_id, 0u, 0);
+    }
     return fl_net_session_send_frame(client->peer_handle,
                                      (uint8_t)FL_NET_SESSION_OP_MSG_DIRECT,
                                      payload, (uint16_t)(4u + tlen));
@@ -502,6 +521,10 @@ fl_net_client_dispatch_frame(fl_net_client_t *client, uint8_t opcode,
     }
     if (opcode == (uint8_t)FL_NET_SESSION_OP_FILE_META) {
         (void)fl_net_file_store_meta(payload, plen);
+        return FL_NET_SERVER_EVENT_NONE;
+    }
+    if (opcode == (uint8_t)FL_NET_SESSION_OP_MSG_META) {
+        (void)fl_net_msg_store_meta(payload, plen);
         return FL_NET_SERVER_EVENT_NONE;
     }
     if (opcode == (uint8_t)FL_NET_SESSION_OP_FILE_DONE) {

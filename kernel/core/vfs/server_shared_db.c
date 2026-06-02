@@ -366,6 +366,108 @@ fl_result_t fl_server_catalog_revoke_transfer(const char *transfer_id)
     return FL_RESULT_OK;
 }
 
+fl_result_t fl_server_catalog_register_message_pending(const char *transfer_id,
+                                                       uint16_t sender_member_id,
+                                                       uint16_t receiver_member_id,
+                                                       uint64_t expires_at,
+                                                       fl_file_perms_t file_perms,
+                                                       const char *payload_name)
+{
+    char pending_hash[FL_SERVER_SHARE_ID_MAX + 16u];
+    sqlite3_stmt *st = NULL;
+    const char *ins =
+        "INSERT INTO catalog_entry(transfer_id,content_hash,payload_kind,"
+        "sender_member_id,receiver_member_id,file_perms,is_public,created_at,"
+        "expires_at,payload_name,storage_relpath,status,total_bytes) "
+        "VALUES(?,?,?,?,?,?,?,?,?,?, '', ?, 0) "
+        "ON CONFLICT(transfer_id) DO UPDATE SET "
+        "sender_member_id=excluded.sender_member_id,"
+        "receiver_member_id=excluded.receiver_member_id,"
+        "file_perms=excluded.file_perms,"
+        "is_public=excluded.is_public,"
+        "expires_at=excluded.expires_at,"
+        "payload_name=excluded.payload_name,"
+        "status=excluded.status;";
+    int is_public;
+    uint64_t now;
+    const char *name = payload_name ? payload_name : "message";
+
+    if (!transfer_id || !transfer_id[0])
+        return FL_RESULT_INVAL;
+    if (fl_server_catalog_open() != FL_RESULT_OK)
+        return FL_RESULT_ERR;
+    snprintf(pending_hash, sizeof(pending_hash), "pending:%s", transfer_id);
+    is_public = (receiver_member_id == 0u ||
+                 (file_perms & FL_FILE_FLAG_PUBLIC) != 0) ? 1 : 0;
+    now = (uint64_t)time(NULL);
+    if (sqlite3_prepare_v2(s_catalog_db, ins, -1, &st, NULL) != SQLITE_OK)
+        return FL_RESULT_ERR;
+    sqlite3_bind_text(st, 1, transfer_id, -1, SQLITE_TRANSIENT);
+    sqlite3_bind_text(st, 2, pending_hash, -1, SQLITE_TRANSIENT);
+    sqlite3_bind_int(st, 3, (int)FL_CHANNEL_PAYLOAD_MSG);
+    sqlite3_bind_int(st, 4, (int)sender_member_id);
+    sqlite3_bind_int(st, 5, (int)receiver_member_id);
+    sqlite3_bind_int(st, 6, (int)file_perms);
+    sqlite3_bind_int(st, 7, is_public);
+    sqlite3_bind_int64(st, 8, (sqlite3_int64)now);
+    sqlite3_bind_int64(st, 9, (sqlite3_int64)expires_at);
+    sqlite3_bind_text(st, 10, name, -1, SQLITE_TRANSIENT);
+    sqlite3_bind_int(st, 11, (int)FL_SERVER_CATALOG_PENDING);
+    if (sqlite3_step(st) != SQLITE_DONE) {
+        sqlite3_finalize(st);
+        return FL_RESULT_ERR;
+    }
+    sqlite3_finalize(st);
+    return db_set_acl(s_catalog_db, transfer_id, sender_member_id, receiver_member_id,
+                      is_public);
+}
+
+fl_result_t fl_server_catalog_commit_message(const char *transfer_id,
+                                             const uint8_t *body,
+                                             size_t body_len)
+{
+    char hash_hex[FL_SERVER_CATALOG_HASH_HEX_MAX];
+    char storage_relpath[FL_SERVER_SHARE_REL_PATH_MAX];
+    sqlite3_stmt *st = NULL;
+    const char *upd =
+        "UPDATE catalog_entry SET content_hash=?, storage_relpath=?, "
+        "status=?, total_bytes=? WHERE transfer_id=? AND payload_kind=?;";
+    fl_server_catalog_entry_t entry;
+
+    if (!transfer_id || !transfer_id[0])
+        return FL_RESULT_INVAL;
+    if (!body && body_len > 0u)
+        return FL_RESULT_INVAL;
+    if (body_len > FL_SERVER_CATALOG_MAX_BYTES)
+        return FL_RESULT_NOMEM;
+    if (fl_server_catalog_open() != FL_RESULT_OK)
+        return FL_RESULT_ERR;
+    if (fl_server_catalog_lookup_transfer(transfer_id, &entry) != FL_RESULT_OK)
+        return FL_RESULT_NOENT;
+    if (entry.payload_kind != FL_CHANNEL_PAYLOAD_MSG)
+        return FL_RESULT_INVAL;
+    if (fl_server_shared_sha256_hex(body, body_len, hash_hex, sizeof(hash_hex)) !=
+        FL_RESULT_OK)
+        return FL_RESULT_ERR;
+    if (write_blob_file(hash_hex, body, body_len, storage_relpath,
+                        sizeof(storage_relpath)) != FL_RESULT_OK)
+        return FL_RESULT_ERR;
+    if (sqlite3_prepare_v2(s_catalog_db, upd, -1, &st, NULL) != SQLITE_OK)
+        return FL_RESULT_ERR;
+    sqlite3_bind_text(st, 1, hash_hex, -1, SQLITE_TRANSIENT);
+    sqlite3_bind_text(st, 2, storage_relpath, -1, SQLITE_TRANSIENT);
+    sqlite3_bind_int(st, 3, (int)FL_SERVER_CATALOG_COMPLETE);
+    sqlite3_bind_int64(st, 4, (sqlite3_int64)body_len);
+    sqlite3_bind_text(st, 5, transfer_id, -1, SQLITE_TRANSIENT);
+    sqlite3_bind_int(st, 6, (int)FL_CHANNEL_PAYLOAD_MSG);
+    if (sqlite3_step(st) != SQLITE_DONE) {
+        sqlite3_finalize(st);
+        return FL_RESULT_ERR;
+    }
+    sqlite3_finalize(st);
+    return FL_RESULT_OK;
+}
+
 fl_result_t fl_server_catalog_store_message(uint16_t sender_member_id,
                                             uint16_t receiver_member_id,
                                             const char *payload_name,

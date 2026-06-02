@@ -1191,10 +1191,8 @@ static int dispatch_member_frame(fl_net_server_t *srv, fl_net_server_member_t *m
             return 0;
         if ((size_t)n >= sizeof(line))
             n = (int)sizeof(line) - 1;
-        (void)fl_server_catalog_store_message(m->member_id, 0u, "broadcast",
-                                              payload, plen, 0u,
-                                              FL_FILE_FLAG_PUBLIC,
-                                              NULL, 0, NULL, 0);
+        (void)fl_net_msg_host_catalog_body(m->member_id, 0u, "broadcast", payload,
+                                          plen, FL_FILE_FLAG_PUBLIC);
         broadcast_to_peers_except(srv, m->member_id,
                                   (uint8_t)FL_NET_SESSION_OP_MSG_BROADCAST,
                                   (const uint8_t *)line, (uint16_t)n);
@@ -1259,14 +1257,17 @@ static int dispatch_member_frame(fl_net_server_t *srv, fl_net_server_member_t *m
         deliver[2] = 0u;
         deliver[3] = 0u;
         memcpy(deliver + 4, text, text_len);
-        (void)fl_server_catalog_store_message(m->member_id, recipient_id, "direct",
-                                              (const uint8_t *)text, text_len, 0u, 0,
-                                              NULL, 0, NULL, 0);
+        (void)fl_net_msg_host_catalog_body(m->member_id, recipient_id, "direct",
+                                          (const uint8_t *)text, text_len, 0);
         (void)fl_net_session_send_frame(to->peer_handle,
                                         (uint8_t)FL_NET_SESSION_OP_MSG_DIRECT_DELIVER,
                                         deliver, (uint16_t)(4u + text_len));
         return 0;
     }
+    case FL_NET_SESSION_OP_MSG_META:
+        if (fl_net_msg_host_handle_meta(m->member_id, payload, plen) != FL_RESULT_OK)
+            return 0;
+        return 0;
     case FL_NET_SESSION_OP_CTRL_LEAVE:
         return 1;
     case FL_NET_SESSION_OP_CTRL_KILL:

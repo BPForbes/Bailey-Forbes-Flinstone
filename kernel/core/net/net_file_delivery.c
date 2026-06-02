@@ -31,6 +31,15 @@ static size_t s_lookup_count;
 static fl_server_file_share_slot_t s_shares[FL_SERVER_FILE_SHARE_SLOTS];
 static uint32_t s_share_serial;
 
+#define FL_MSG_META_PENDING_MAX 16u
+typedef struct {
+    uint8_t in_use;
+    fl_net_server_member_id_t sender_id;
+    fl_channel_sidecar_t meta;
+} fl_msg_meta_pending_t;
+
+static fl_msg_meta_pending_t s_msg_meta_pending[FL_MSG_META_PENDING_MAX];
+
 static fl_result_t put_u16(fl_bytes_writer_t *w, uint16_t v)
 {
     if (!w || w->len + 2u > w->cap)
@@ -194,6 +203,62 @@ static fl_result_t share_access_ok(const fl_server_file_offer_t *offer, uint64_t
     if (!offer)
         return FL_RESULT_INVAL;
     return fl_file_share_validate_access(offer->file_perms, offer->expires_at, now);
+}
+
+static fl_result_t meta_matches_message(const fl_channel_sidecar_t *meta,
+                                        fl_net_server_member_id_t sender_id,
+                                        uint16_t receiver_member_id)
+{
+    if (!meta || !meta->transfer_id[0])
+        return FL_RESULT_INVAL;
+    if (meta->payload_kind != FL_CHANNEL_PAYLOAD_MSG)
+        return FL_RESULT_INVAL;
+    if (meta->sender_member_id != 0u && meta->sender_member_id != sender_id)
+        return FL_RESULT_INVAL;
+    if (meta->receiver_member_id != receiver_member_id)
+        return FL_RESULT_INVAL;
+    return FL_RESULT_OK;
+}
+
+static fl_msg_meta_pending_t *msg_meta_find_transfer(const char *transfer_id)
+{
+    size_t i;
+    if (!transfer_id || !transfer_id[0])
+        return NULL;
+    for (i = 0; i < FL_MSG_META_PENDING_MAX; i++) {
+        if (!s_msg_meta_pending[i].in_use)
+            continue;
+        if (!strcmp(s_msg_meta_pending[i].meta.transfer_id, transfer_id))
+            return &s_msg_meta_pending[i];
+    }
+    return NULL;
+}
+
+static fl_msg_meta_pending_t *msg_meta_alloc(fl_net_server_member_id_t sender_id)
+{
+    size_t i;
+    for (i = 0; i < FL_MSG_META_PENDING_MAX; i++) {
+        if (s_msg_meta_pending[i].in_use &&
+            s_msg_meta_pending[i].sender_id == sender_id) {
+            memset(&s_msg_meta_pending[i], 0, sizeof(s_msg_meta_pending[i]));
+        }
+    }
+    for (i = 0; i < FL_MSG_META_PENDING_MAX; i++) {
+        if (!s_msg_meta_pending[i].in_use) {
+            memset(&s_msg_meta_pending[i], 0, sizeof(s_msg_meta_pending[i]));
+            s_msg_meta_pending[i].in_use = 1u;
+            s_msg_meta_pending[i].sender_id = sender_id;
+            return &s_msg_meta_pending[i];
+        }
+    }
+    return NULL;
+}
+
+static void msg_meta_release(fl_msg_meta_pending_t *slot)
+{
+    if (!slot)
+        return;
+    memset(slot, 0, sizeof(*slot));
 }
 
 static fl_result_t meta_matches_offer(const fl_channel_sidecar_t *meta,
@@ -1339,6 +1404,182 @@ fl_result_t fl_net_file_store_meta(const uint8_t *payload, uint16_t plen)
         return rc;
     slot->meta_received = 1u;
     return FL_RESULT_OK;
+}
+
+static fl_result_t msg_meta_encode_and_send(fl_net_client_t *client,
+                                            const fl_channel_sidecar_t *meta)
+{
+    uint8_t payload[FL_NET_SESSION_MAX_MSG];
+    uint16_t plen = 0;
+    fl_result_t rc;
+
+    if (!client || !meta)
+        return FL_RESULT_INVAL;
+    if (client->peer_handle == FL_NET_SOCK_INVALID)
+        return FL_RESULT_INVAL;
+    rc = fl_file_packet_encode_meta(meta, payload, sizeof(payload), &plen);
+    if (rc != FL_RESULT_OK)
+        return rc;
+    return fl_net_session_send_frame(client->peer_handle,
+                                     (uint8_t)FL_NET_SESSION_OP_MSG_META,
+                                     payload, plen);
+}
+
+fl_result_t fl_net_msg_store_meta(const uint8_t *payload, uint16_t plen)
+{
+    fl_channel_sidecar_t meta;
+    fl_msg_meta_pending_t *slot;
+    fl_result_t rc;
+
+    if (!payload)
+        return FL_RESULT_INVAL;
+    rc = fl_file_packet_decode_meta(payload, plen, &meta);
+    if (rc != FL_RESULT_OK)
+        return rc;
+    if (meta.payload_kind != FL_CHANNEL_PAYLOAD_MSG)
+        return FL_RESULT_INVAL;
+    slot = msg_meta_find_transfer(meta.transfer_id);
+    if (!slot)
+        return FL_RESULT_NOENT;
+    if (meta_matches_message(&meta, slot->sender_id,
+                             meta.receiver_member_id) != FL_RESULT_OK)
+        return FL_RESULT_INVAL;
+    if (meta.wire_rev != 0u &&
+        !fl_pkt_wire_valid(meta.pkt_meta, FL_PKT_CHANNEL_META_LEN))
+        return FL_RESULT_INVAL;
+    slot->meta = meta;
+    return FL_RESULT_OK;
+}
+
+fl_result_t fl_net_msg_host_handle_meta(fl_net_server_member_id_t sender_id,
+                                        const uint8_t *payload,
+                                        uint16_t plen)
+{
+    fl_channel_sidecar_t meta;
+    fl_msg_meta_pending_t *slot;
+    fl_file_perms_t perms;
+    fl_result_t rc;
+    const char *name;
+
+    if (!payload)
+        return FL_RESULT_INVAL;
+    rc = fl_file_packet_decode_meta(payload, plen, &meta);
+    if (rc != FL_RESULT_OK)
+        return rc;
+    if (meta.payload_kind != FL_CHANNEL_PAYLOAD_MSG)
+        return FL_RESULT_INVAL;
+    if (meta.wire_rev != 0u &&
+        !fl_pkt_wire_valid(meta.pkt_meta, FL_PKT_CHANNEL_META_LEN))
+        return FL_RESULT_INVAL;
+    rc = meta_matches_message(&meta, sender_id, meta.receiver_member_id);
+    if (rc != FL_RESULT_OK)
+        return rc;
+    slot = msg_meta_alloc(sender_id);
+    if (!slot)
+        return FL_RESULT_NOMEM;
+    slot->meta = meta;
+    name = meta.payload_name[0] ? meta.payload_name : "message";
+    perms = (meta.receiver_member_id == 0u) ? FL_FILE_FLAG_PUBLIC : 0;
+    return fl_server_catalog_register_message_pending(meta.transfer_id, sender_id,
+                                                      meta.receiver_member_id,
+                                                      meta.expires_at, perms, name);
+}
+
+fl_result_t fl_net_msg_host_catalog_body(fl_net_server_member_id_t sender_id,
+                                         uint16_t receiver_member_id,
+                                         const char *payload_name,
+                                         const uint8_t *body,
+                                         size_t body_len,
+                                         fl_file_perms_t file_perms)
+{
+    fl_msg_meta_pending_t *slot;
+    fl_result_t rc;
+    const char *name = payload_name ? payload_name : "message";
+
+    for (size_t i = 0; i < FL_MSG_META_PENDING_MAX; i++) {
+        if (!s_msg_meta_pending[i].in_use ||
+            s_msg_meta_pending[i].sender_id != sender_id)
+            continue;
+        slot = &s_msg_meta_pending[i];
+        if (meta_matches_message(&slot->meta, sender_id, receiver_member_id) !=
+            FL_RESULT_OK)
+            continue;
+        rc = fl_server_catalog_commit_message(slot->meta.transfer_id, body,
+                                              body_len);
+        msg_meta_release(slot);
+        if (rc == FL_RESULT_OK)
+            return FL_RESULT_OK;
+        return rc;
+    }
+    return fl_server_catalog_store_message(sender_id, receiver_member_id, name,
+                                           body, body_len, 0u, file_perms,
+                                           NULL, 0, NULL, 0);
+}
+
+static fl_result_t msg_meta_from_ids(fl_net_client_t *client,
+                                     const char *transfer_id,
+                                     const char *payload_name,
+                                     uint16_t receiver_member_id,
+                                     uint64_t expires_at,
+                                     fl_file_perms_t file_perms,
+                                     fl_channel_sidecar_t *out)
+{
+    fl_server_file_offer_t offer;
+
+    if (!client || !transfer_id || !transfer_id[0] || !out)
+        return FL_RESULT_INVAL;
+    memset(&offer, 0, sizeof(offer));
+    strncpy(offer.share_id, transfer_id, sizeof(offer.share_id) - 1u);
+    if (payload_name && payload_name[0])
+        strncpy(offer.file_name, payload_name, sizeof(offer.file_name) - 1u);
+    else
+        strncpy(offer.file_name, "message", sizeof(offer.file_name) - 1u);
+    offer.sender_member_id = client->assigned_member_id;
+    offer.receiver_member_id = receiver_member_id;
+    offer.expires_at = expires_at;
+    offer.file_perms = file_perms;
+    if (fl_server_file_meta_from_offer(&offer, out) != FL_RESULT_OK)
+        return FL_RESULT_ERR;
+    out->payload_kind = FL_CHANNEL_PAYLOAD_MSG;
+    strncpy(out->transfer_id, transfer_id, sizeof(out->transfer_id) - 1u);
+    if (payload_name && payload_name[0])
+        strncpy(out->payload_name, payload_name, sizeof(out->payload_name) - 1u);
+    return FL_RESULT_OK;
+}
+
+fl_result_t fl_net_msg_send_meta_broadcast(fl_net_client_t *client,
+                                           const char *transfer_id,
+                                           const char *payload_name,
+                                           uint64_t expires_at,
+                                           fl_file_perms_t file_perms)
+{
+    fl_channel_sidecar_t meta;
+    fl_result_t rc;
+
+    rc = msg_meta_from_ids(client, transfer_id, payload_name, 0u, expires_at,
+                           file_perms, &meta);
+    if (rc != FL_RESULT_OK)
+        return rc;
+    return msg_meta_encode_and_send(client, &meta);
+}
+
+fl_result_t fl_net_msg_send_meta_direct(fl_net_client_t *client,
+                                        const char *transfer_id,
+                                        const char *payload_name,
+                                        uint16_t receiver_member_id,
+                                        uint64_t expires_at,
+                                        fl_file_perms_t file_perms)
+{
+    fl_channel_sidecar_t meta;
+    fl_result_t rc;
+
+    if (receiver_member_id == 0u)
+        return FL_RESULT_INVAL;
+    rc = msg_meta_from_ids(client, transfer_id, payload_name, receiver_member_id,
+                           expires_at, file_perms, &meta);
+    if (rc != FL_RESULT_OK)
+        return rc;
+    return msg_meta_encode_and_send(client, &meta);
 }
 
 fl_result_t fl_net_file_send_meta(fl_net_server_t *srv,

@@ -70,6 +70,19 @@ fl_result_t fl_server_catalog_commit_file_offer(const fl_server_file_offer_t *of
                                                 size_t data_len);
 fl_result_t fl_server_catalog_revoke_transfer(const char *transfer_id);
 
+/** Pending row from in-flight MSG_META (host relay); completed on matching MSG. */
+fl_result_t fl_server_catalog_register_message_pending(const char *transfer_id,
+                                                       uint16_t sender_member_id,
+                                                       uint16_t receiver_member_id,
+                                                       uint64_t expires_at,
+                                                       fl_file_perms_t file_perms,
+                                                       const char *payload_name);
+
+/** Complete a pending message row with body bytes (transfer_id from MSG_META). */
+fl_result_t fl_server_catalog_commit_message(const char *transfer_id,
+                                             const uint8_t *body,
+                                             size_t body_len);
+
 fl_result_t fl_server_catalog_store_message(uint16_t sender_member_id,
                                             uint16_t receiver_member_id,
                                             const char *payload_name,

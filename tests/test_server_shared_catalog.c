@@ -54,6 +54,34 @@ static int test_catalog_file_roundtrip(void)
     return 0;
 }
 
+static int test_catalog_msg_meta_pending_commit(void)
+{
+    char tmp[] = "/tmp/fl_catalog_mmeta_XXXXXX";
+    const uint8_t body[] = "catalog via MSG_META pending row";
+    fl_server_catalog_entry_t entry;
+    char hash[FL_SERVER_CATALOG_HASH_HEX_MAX];
+
+    ASSERT(mkdtemp(tmp) != NULL);
+    if (chdir(tmp) != 0)
+        return 1;
+    strncpy(g_cwd, tmp, sizeof(g_cwd) - 1u);
+    g_cwd[sizeof(g_cwd) - 1u] = '\0';
+
+    ASSERT(fl_server_catalog_register_message_pending(
+               "msg-meta-1", 2u, 0u, 0u, FL_FILE_FLAG_PUBLIC, "broadcast") ==
+           FL_RESULT_OK);
+    ASSERT(fl_server_catalog_commit_message("msg-meta-1", body,
+                                            sizeof(body) - 1u) == FL_RESULT_OK);
+    ASSERT(fl_server_catalog_lookup_transfer("msg-meta-1", &entry) == FL_RESULT_OK);
+    ASSERT(entry.status == FL_SERVER_CATALOG_COMPLETE);
+    ASSERT(entry.payload_kind == FL_CHANNEL_PAYLOAD_MSG);
+    strncpy(hash, entry.content_hash, sizeof(hash) - 1u);
+    ASSERT(fl_server_catalog_fetch_by_hash(hash, 5u, 0u, &entry, NULL, 0, NULL) ==
+           FL_RESULT_OK);
+    (void)fl_server_catalog_close();
+    return 0;
+}
+
 static int test_catalog_message_public(void)
 {
     char tmp[] = "/tmp/fl_catalog_msg_XXXXXX";
@@ -237,6 +265,8 @@ static int test_catalog_import_handoff(void)
 int main(void)
 {
     if (test_catalog_file_roundtrip() != 0)
+        return 1;
+    if (test_catalog_msg_meta_pending_commit() != 0)
         return 1;
     if (test_catalog_message_public() != 0)
         return 1;
