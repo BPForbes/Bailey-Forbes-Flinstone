@@ -22,4 +22,7 @@ void fl_net_endpoint_from_v6(const uint8_t v6_be[16], uint16_t port_host, fl_net
 
 int fl_net_endpoint_is_loopback(const fl_net_endpoint_t *ep);
 
+/** Format as `a.b.c.d:port` (v4) or `[addr]:port` (v6). Returns 1 on success. */
+int fl_net_endpoint_format(const fl_net_endpoint_t *ep, char *out, size_t cap);
+
 #endif /* NET_ENDPOINT_H */

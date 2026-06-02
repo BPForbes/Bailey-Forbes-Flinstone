@@ -451,7 +451,13 @@ static int verb_host(int argc, char **argv) {
     }
     g_server_running = 1;
     pthread_mutex_unlock(&session_mutex);
-    fl_color_success("hosting as '%s' on %s", current_principal(), argv[2]);
+    {
+        char bind_txt[128];
+        if (fl_net_endpoint_format(&ep, bind_txt, sizeof(bind_txt)))
+            fl_color_success("hosting as '%s' on %s", current_principal(), bind_txt);
+        else
+            fl_color_success("hosting as '%s' on %s", current_principal(), argv[2]);
+    }
     return 0;
 }
 
@@ -488,16 +494,14 @@ static int verb_join(int argc, char **argv) {
         fl_color_error("invalid ip:port '%s'", argv[2]);
         return 1;
     }
-    /* Optional -bind <local_ip> for multi-IP demos / tests. */
+    /* Optional -bind <local_ip> for multi-IP demos / tests (IPv4 or [IPv6]). */
     for (int i = 3; i + 1 < argc; i++) {
         if (!strcmp(argv[i], "-bind")) {
-            uint32_t local_be = 0u;
-            if (!fl_net_ipv4_parse_literal(argv[i + 1], &local_be)) {
+            if (!fl_net_endpoint_parse(argv[i + 1], &local)) {
                 pthread_mutex_unlock(&session_mutex);
-                fl_color_error("invalid -bind ip '%s'", argv[i + 1]);
+                fl_color_error("invalid -bind address '%s'", argv[i + 1]);
                 return 1;
             }
-            fl_net_endpoint_from_v4(local_be, 0u, &local);
             i++;
         }
     }
@@ -513,8 +517,15 @@ static int verb_join(int argc, char **argv) {
         fl_color_error("server join failed (rc=%d)", (int)rc);
         return 1;
     }
-    fl_color_success("joined as '%s' (member_id %u)", g_client.display_name,
-                     (unsigned)g_client.assigned_member_id);
+    {
+        char peer_txt[128];
+        if (fl_net_endpoint_format(&peer, peer_txt, sizeof(peer_txt)))
+            fl_color_success("joined '%s' as '%s' (member_id %u)", peer_txt,
+                             g_client.display_name, (unsigned)g_client.assigned_member_id);
+        else
+            fl_color_success("joined as '%s' (member_id %u)", g_client.display_name,
+                             (unsigned)g_client.assigned_member_id);
+    }
     /* Synchronously handle the NICK_PROMPT (if any) BEFORE we start the
      * background loop so the Y/N dialogue is clean. */
     maybe_handle_nick_prompt_sync();
@@ -842,9 +853,15 @@ static int verb_connected(void) {
         for (size_t k = 0; k < count; k++) {
             const fl_net_server_member_t *m = fl_net_server_member_at(&g_server, k);
             if (!m) continue;
+            char peer_txt[128];
             fl_net_server_member_display(&g_server, m->member_id, disp, sizeof(disp));
-            printf("[%u] %s%s\n", (unsigned)m->member_id, disp,
-                   m->is_host ? " <- host" : "");
+            if (m->in_use && m->peer_addr.family &&
+                fl_net_endpoint_format(&m->peer_addr, peer_txt, sizeof(peer_txt)))
+                printf("[%u] %s  %s%s\n", (unsigned)m->member_id, disp, peer_txt,
+                       m->is_host ? " <- host" : "");
+            else
+                printf("[%u] %s%s\n", (unsigned)m->member_id, disp,
+                       m->is_host ? " <- host" : "");
         }
         fflush(stdout);
         fl_shell_io_unlock();
