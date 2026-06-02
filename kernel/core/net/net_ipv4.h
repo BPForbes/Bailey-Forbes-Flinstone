@@ -29,6 +29,9 @@ int fl_net_ipv4_parse_literal(const char *s, uint32_t *out_be);
 void fl_net_ipv4_format_addr(uint32_t addr_be, char *buf, size_t buf_len);
 uint32_t fl_net_ipv4_network_addr(uint32_t addr_be, uint8_t prefix_len);
 
+/** Count prefix bits in a subnet mask (**network byte order**). Returns 0 if not contiguous. */
+unsigned fl_net_ipv4_prefix_from_mask_be(uint32_t mask_be);
+
 size_t fl_net_ipv4_build(fl_net_ipv4_hdr_t *hdr, uint8_t *buf, size_t cap, uint8_t proto,
                          uint32_t src_be, uint32_t dst_be, const void *payload,
                          size_t payload_len, uint16_t id_be);

@@ -25,6 +25,8 @@ static fl_net_driver_t s_loopback_drv;
 static fl_net_driver_t s_tap_drv;
 static int s_tap_fd = -1;
 static char s_tap_ifname[16];
+static uint8_t s_tap_mac[FL_NET_ETH_ADDR_LEN];
+static int s_tap_mac_valid;
 static char s_tap_error[96];
 
 void fl_net_netdev_init(void) {
@@ -49,6 +51,7 @@ void fl_net_netdev_init(void) {
 
     s_tap_fd = -1;
     s_tap_ifname[0] = '\0';
+    s_tap_mac_valid = 0;
     s_tap_error[0] = '\0';
 
 #ifdef DRIVERS_BAREMETAL
@@ -191,12 +194,23 @@ fl_result_t fl_net_netdev_tap_open(const char *ifname_hint) {
             s_tap_drv.impl = (void *)(intptr_t)-1;
             return hw_rc;
         }
-        route_rc = fl_net_route_configure_tap(&s_tap_drv, tap_mac, s_tap_ifname);
+        memcpy(s_tap_mac, tap_mac, sizeof(s_tap_mac));
+        s_tap_mac_valid = 1;
+
+        {
+            const char *dhcp_mode = getenv("FL_NET_TAP_DHCP");
+
+            if (dhcp_mode && dhcp_mode[0] == '1' && dhcp_mode[1] == '\0')
+                route_rc = fl_net_route_configure_dhcp_pending(&s_tap_drv, tap_mac);
+            else
+                route_rc = fl_net_route_configure_tap(&s_tap_drv, tap_mac, s_tap_ifname);
+        }
         if (route_rc != FL_RESULT_OK) {
             snprintf(s_tap_error, sizeof(s_tap_error), "TAP route configuration failed");
             fl_net_tap_close(s_tap_fd);
             s_tap_fd = -1;
             s_tap_drv.impl = (void *)(intptr_t)-1;
+            s_tap_mac_valid = 0;
             return route_rc;
         }
     }
@@ -207,10 +221,23 @@ fl_result_t fl_net_netdev_tap_open(const char *ifname_hint) {
 
 void fl_net_netdev_tap_close(void) {
     if (s_tap_fd >= 0) {
+        fl_net_route_remove_drv(&s_tap_drv);
         fl_net_tap_close(s_tap_fd);
         s_tap_fd = -1;
         s_tap_drv.impl = (void *)(intptr_t)-1;
+        s_tap_mac_valid = 0;
     }
+}
+
+const char *fl_net_netdev_tap_ifname(void) {
+    return s_tap_ifname;
+}
+
+fl_result_t fl_net_netdev_tap_hwaddr(uint8_t mac_out[FL_NET_ETH_ADDR_LEN]) {
+    if (!mac_out || !s_tap_mac_valid)
+        return FL_RESULT_INVAL;
+    memcpy(mac_out, s_tap_mac, FL_NET_ETH_ADDR_LEN);
+    return FL_RESULT_OK;
 }
 
 void fl_net_netdev_shutdown(void) {

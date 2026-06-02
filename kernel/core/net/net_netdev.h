@@ -35,6 +35,12 @@ int fl_net_netdev_tap_is_open(void);
 /** When TAP open failed, human-readable reason for CI logs (may be empty). */
 const char *fl_net_netdev_tap_last_error(void);
 
+/** TAP interface name after **fl_net_netdev_tap_open** (empty when closed). */
+const char *fl_net_netdev_tap_ifname(void);
+
+/** Hardware MAC for the open TAP (requires **fl_net_netdev_tap_is_open**). */
+fl_result_t fl_net_netdev_tap_hwaddr(uint8_t mac_out[FL_NET_ETH_ADDR_LEN]);
+
 typedef struct {
     uint64_t tx_frames;
     uint64_t rx_frames;

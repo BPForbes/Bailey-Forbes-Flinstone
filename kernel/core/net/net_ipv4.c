@@ -77,6 +77,26 @@ uint32_t fl_net_ipv4_network_addr(uint32_t addr_be, uint8_t prefix_len) {
     return net_be;
 }
 
+unsigned fl_net_ipv4_prefix_from_mask_be(uint32_t mask_be) {
+    unsigned bits = 0;
+    unsigned i;
+    int seen_zero = 0;
+
+    for (i = 0; i < 32u; i++) {
+        unsigned shift = 31u - i;
+        int bit = (int)((mask_be >> shift) & 1u);
+
+        if (bit) {
+            if (seen_zero)
+                return 0;
+            bits++;
+        } else {
+            seen_zero = 1;
+        }
+    }
+    return bits;
+}
+
 size_t fl_net_ipv4_build(fl_net_ipv4_hdr_t *hdr, uint8_t *buf, size_t cap, uint8_t proto,
                          uint32_t src_be, uint32_t dst_be, const void *payload,
                          size_t payload_len, uint16_t id_be) {

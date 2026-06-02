@@ -120,6 +120,7 @@ static const char HELP_BODY[] =
 "  netstat                           Show UDP demux bound ports\n"
 "  nslookup <host>                   Resolve A and AAAA records for a hostname\n"
 "  resolve <host>                    Alias for nslookup (dual-stack DNS)\n"
+"  dhcp acquire [-t ms] [ifname]     DHCP IPv4 lease on TAP (host bridge required)\n"
 "  netsh <arp|ifconfig|route|...>    Windows-style umbrella over the above\n"
 "  wifi scan [-band any|2|5|6]       Scan for Wi-Fi networks (802.11ax lab list when no NIC)\n"
 "  wifi join <name> [password]       Join and save profile (hashed password in fl_wifi.db)\n"

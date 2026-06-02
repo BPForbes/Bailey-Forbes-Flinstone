@@ -125,6 +125,22 @@ fl_result_t fl_net_route_lookup(uint32_t dst_be, fl_net_route_entry_t *out) {
     return FL_RESULT_OK;
 }
 
+void fl_net_route_remove_drv(fl_net_driver_t *drv) {
+    unsigned i;
+    unsigned w = 0;
+
+    if (!drv)
+        return;
+    for (i = 0; i < s_route_count; i++) {
+        if (s_routes[i].drv == drv)
+            continue;
+        if (w != i)
+            s_routes[w] = s_routes[i];
+        w++;
+    }
+    s_route_count = w;
+}
+
 unsigned fl_net_route_snapshot(fl_net_route_entry_t *out, unsigned cap) {
     unsigned n = s_route_count;
     unsigned i;
@@ -214,6 +230,13 @@ fl_result_t fl_net_route_configure_tap(fl_net_driver_t *tap_drv, const uint8_t t
         gw_s = "10.0.2.2";
 
     return fl_net_route_configure_static(tap_drv, tap_mac, addr_s, prefix, gw_s);
+}
+
+fl_result_t fl_net_route_configure_dhcp_pending(fl_net_driver_t *tap_drv, const uint8_t tap_mac[6]) {
+    if (!tap_drv || !tap_mac)
+        return FL_RESULT_INVAL;
+    fl_net_route_remove_drv(tap_drv);
+    return fl_net_route_add(0u, 0u, 0u, tap_drv, 0u, tap_mac);
 }
 #endif
 

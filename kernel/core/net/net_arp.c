@@ -400,6 +400,11 @@ fl_result_t fl_net_arp_resolve(fl_net_driver_t *drv, const uint8_t src_mac[FL_NE
     if (fl_net_arp_cache_lookup(target_ip_be, mac_out))
         return FL_RESULT_OK;
 
+    if (target_ip_be == UINT32_C(0xffffffff)) {
+        memset(mac_out, 0xff, FL_NET_ETH_ADDR_LEN);
+        return FL_RESULT_OK;
+    }
+
     if (drv == fl_net_netdev_loopback())
         return arp_resolve_loopback(target_ip_be, mac_out);
 
