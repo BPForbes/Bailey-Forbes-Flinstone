@@ -4,14 +4,25 @@ Explicit promotion trackers for roadmap rows marked **`[DEFERRED]`** at the **co
 
 | Issue | Roadmap | Contract header | Integration (PRE 4.2.0) |
 |-------|---------|-----------------|-------------------------|
-| [#257](https://github.com/BPForbes/Bailey-Forbes-Flinstone/issues/257) / [#279](https://github.com/BPForbes/Bailey-Forbes-Flinstone/issues/279) | **P3-10** Wi‑Fi station | `contract_p3_wifi_deferred.h` | **❌** — still deferred (no 802.11 station code) |
+| [#257](https://github.com/BPForbes/Bailey-Forbes-Flinstone/issues/257) / [#279](https://github.com/BPForbes/Bailey-Forbes-Flinstone/issues/279) | **P3-10** Wi‑Fi station | **`contract_p3_wifi.h`** (`contract_p3_wifi_deferred.h` forwards) | **~✅ foundation** — contract + HE IE parser + API stubs; **❌** NIC/P4 + WPA3/SAE production |
 | [#258](https://github.com/BPForbes/Bailey-Forbes-Flinstone/issues/258) / [#280](https://github.com/BPForbes/Bailey-Forbes-Flinstone/issues/280) | **P3-11** IPv6 + ICMPv6 | **`contract_p3_ipv6.h`** (forward: `contract_p3_ipv6_deferred.h`) | **~✅ foundation** — see below |
 
 ## P3-10 Wi‑Fi (#257 / #279)
 
 When promoted, **802.11** data frames still cross **`fl_net_frame_view_t`**, then bind to existing **P3-5** / **P3-6** / **P3-7** like today’s Ethernet path. Expect **P4** firmware/driver work before lab or production claims. **P3-12** DHCP remains the addressing step after L2 comes up.
 
-**PRE 4.2.0:** only the **channel sidecar** `center_freq_hz` hook exists (`contract_p3_channel_sidecar.h`); full station mode is **not** implemented.
+**PRE 4.2.0 foundation (#279, in progress):**
+
+| Area | Status | Where |
+|------|--------|--------|
+| Contract | ✅ promoted | **`contract_p3_wifi.h`** in **`contract_networking.h`** |
+| HE IE parser | ✅ unit-tested | **`net_wifi_he.c`** — HE Capabilities / HE Operation from Beacon IEs |
+| Station API | ⚠️ stubs | **`net_wifi_station.c`** — scan/connect/TWT return **`FL_RESULT_NOSYS`** until NIC backend |
+| WPA3-SAE / WPA2 / TWT wire | ❌ tail | **`net_wifi_sae.c`**, **`net_wifi_wpa.c`**, **`net_wifi_twt.c`** |
+| Tests | ✅ | **`make test_p3_wifi`** |
+| Channel sidecar | ✅ hook | **`center_freq_hz`** in **`contract_p3_channel_sidecar.h`** |
+
+**Blocking (per [#279](https://github.com/BPForbes/Bailey-Forbes-Flinstone/issues/279)):** P4 firmware/driver scope and a confirmed QEMU 802.11ax or physical WiFi 6 NIC before production association/DHCP claims.
 
 ## P3-11 IPv6 (#258 / #280)
 

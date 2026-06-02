@@ -32,7 +32,7 @@ shards below, and **FL_CONTRACT_P3_VOCABULARY_LOCK**.
 | *contract_p3_tcp.h* | P3-7 |
 | *contract_p3_dns.h* | P3-8 |
 | *contract_p3_tls_hosted.h* | P3-9 |
-| *contract_p3_wifi_deferred.h* | P3-10 |
+| *contract_p3_wifi.h* | P3-10 (promoted; *contract_p3_wifi_deferred.h* forwards) |
 | *contract_p3_ipv6.h* | P3-11 (promoted; *contract_p3_ipv6_deferred.h* forwards) |
 | *contract_p3_host_promote6.h* | P3-13 / P3-11 host-transfer v6 wire (#283) |
 | *contract_p3_background.h* | P3-14 |

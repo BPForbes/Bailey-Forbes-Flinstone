@@ -151,6 +151,9 @@ NET_CORE_SRCS = kernel/core/net/net_checksum.c kernel/core/net/net_wire.c kernel
                 kernel/core/net/net_dns.c kernel/core/net/net_dhcp.c kernel/core/net/net_tls_hosted.c \
                 kernel/core/net/net_http.c kernel/core/net/net_tftp.c \
                 kernel/core/net/net_ping_host.c kernel/core/net/net_ping6_host.c \
+                kernel/core/net/net_wifi_he.c kernel/core/net/net_wifi_station.c \
+                kernel/core/net/net_wifi_mgmt.c kernel/core/net/net_wifi_sae.c \
+                kernel/core/net/net_wifi_wpa.c kernel/core/net/net_wifi_twt.c \
                 kernel/core/net/net_requirements.c \
                 kernel/core/net/net_server.c kernel/core/net/net_client.c kernel/core/net/net_file_delivery.c kernel/core/net/net_pkt_channel_meta.c kernel/core/net/net_channel_sidecar.c kernel/core/net/server_bg.c \
                 kernel/core/vfs/server_shared_fs.c kernel/core/vfs/server_shared_db.c \
@@ -699,6 +702,16 @@ test_p3_udp_cmds: $(NET_ASM_OBJ) $(MEM_ASM_OBJ) $(NET_TEST_SHELL_OBJS) priority_
 # (issue #239 internal-only audit). Drives cmd_net_tools.c entry points
 # in-process against the in-tree fl_net_arp / fl_net_route / fl_net_udp /
 # fl_net_resolve_ipv4 APIs; no arpa/inet.h, no libc DNS.
+.PHONY: test_p3_wifi
+test_p3_wifi: $(NET_ASM_OBJ) $(MEM_ASM_OBJ) priority_queue.o kernel/core/time/timekeeping.o kernel/core/sys/ipc.o
+	$(CC) $(CFLAGS) $(TEST_SANITIZE) -o tests/test_p3_wifi tests/test_p3_wifi.c \
+	  kernel/core/net/net_wifi_he.c kernel/core/net/net_wifi_station.c \
+	  kernel/core/net/net_wifi_mgmt.c kernel/core/net/net_wifi_sae.c \
+	  kernel/core/net/net_wifi_wpa.c kernel/core/net/net_wifi_twt.c \
+	  kernel/core/sched/workqueue.c kernel/core/sys/ipc.o kernel/core/time/timekeeping.o priority_queue.o \
+	  $(MEM_ASM_OBJ) $(NET_ASM_OBJ) -Wl,-z,noexecstack
+	./tests/test_p3_wifi
+
 .PHONY: test_p3_net_tools
 test_p3_net_tools: $(NET_ASM_OBJ) $(MEM_ASM_OBJ) $(NET_TEST_SHELL_OBJS) priority_queue.o kernel/core/time/timekeeping.o kernel/core/sys/ipc.o
 	$(CC) $(CFLAGS) $(TEST_SANITIZE) -o tests/test_p3_net_tools \
