@@ -36,6 +36,9 @@ Full spec: **[`docs/P3_13_CHAT_SERVER.md`](P3_13_CHAT_SERVER.md)**.
 | **`net_dhcp.c`** | P3-12 (lab) | BOOTP codec; **`fl_net_packet_bind_l4`** / **`fl_net_dhcp_*_pkt`** over L4 slices |
 | **`net_background.c`** | P3-14 / distribution | Workqueue tick; blended socket + ARP task backend (P3-13 wire RX TODO) |
 | **`net_ipv4.c`** | P3-5 (partial) | IPv4 header build, literal/loopback address helpers |
+| **`net_ipv6.c`** | P3-11 | IPv6 header build/parse, loopback/link-local helpers |
+| **`net_icmpv6.c`** | P3-11 | ICMPv6 echo on software loopback |
+| **`net_ndp.c`** | P3-11 | NDP NS/NA + neighbor cache (loopback) |
 | **`net_checksum.c`** | P3-5 | Internet checksum; **`asm_net_checksum16`** when `FL_NET_ASM_AVAILABLE` |
 | **`net_icmp.c`** | P3-5 | ICMP echo request/reply exchange |
 | **`net_tcp.c`** | P3-7 (probe only) | **`fl_net_tcp_build_syn_pkt`** + SYN probe; hosted **`fl_net_tcp_stream_*`** |
@@ -334,7 +337,7 @@ make check-network-requirements
 | Priority | Item | Notes |
 |----------|------|--------|
 | **P3-12** | DHCP renew/rebind FSM | Lease DB and renew/rebind after **`fl_net_dhcp_acquire`** |
-| **P3-13** | Chat room | Foundations shipped (PR #282 + #239 `udpsend`/`udplisten`); deferred siblings: **#283** (`OP_CTRL_HOST_PROMOTE6`), **#280** (IPv6 + ICMPv6 + NDP), **#279** (Wi-Fi station); native non-hosted `fl_socket` gated on **P3-7** TCP state machine |
+| **P3-13** | Chat room | Foundations shipped (PR #282 + #239 `udpsend`/`udplisten`); **#283** PROMOTE6 foundation; **#280** IPv6 loopback/NDP foundation (PR #301); **#279** Wi-Fi station; native non-hosted `fl_socket` gated on **P3-7** TCP state machine |
 | ~~Patch~~ | ~~ARP cache TTL / loopback dedup~~ | Done (**#237**, **#240**): **`fl_net_arp_tick`**, **`fl_net_loopback_exchange`**, PIT BH on **B** |
 | ~~P3-5~~ | ~~Drop Linux ICMP fallback~~ | Done (**#262**): egress-only ICMP/UDP when unrouted |
 | **P3-7** | Production TCP timers | Loopback **RFC 793** FSM landed (**#238**); TAP retransmit/TIME_WAIT remain |

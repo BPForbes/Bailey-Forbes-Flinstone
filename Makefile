@@ -141,7 +141,8 @@ endif
 NET_CORE_SRCS = kernel/core/net/net_checksum.c kernel/core/net/net_wire.c kernel/core/net/net_eth.c \
     kernel/core/net/net_background.c kernel/core/net/net_packet.c kernel/core/net/net_udp.c \
     kernel/core/net/net_socket.c kernel/core/net/net_endpoint.c \
-                kernel/core/net/net_ipv4.c kernel/core/net/net_arp.c kernel/core/net/net_route.c \
+                kernel/core/net/net_ipv4.c kernel/core/net/net_ipv6.c kernel/core/net/net_icmpv6.c \
+                kernel/core/net/net_ndp.c kernel/core/net/net_arp.c kernel/core/net/net_route.c \
                 kernel/core/net/net_wire_egress.c \
                 kernel/core/net/net_icmp.c kernel/core/net/net_tcp.c kernel/core/net/net_tcp_fsm.c \
                 kernel/core/net/net_loopback.c \

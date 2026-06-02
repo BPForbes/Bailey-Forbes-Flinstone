@@ -144,7 +144,7 @@ Two columns track different concerns:
 | **P3-8** | DNS client | ✅ | ~✅ |
 | **P3-9** | TLS (hosted) | ✅ | ~✅ |
 | **P3-10** | Wi‑Fi station path `[DEFERRED]` | ✅ | ❌ |
-| **P3-11** | IPv6 + ICMPv6 `[DEFERRED]` | ✅ | ❌ |
+| **P3-11** | IPv6 + ICMPv6 | ✅ | ~✅ |
 | **P4-1** | Driver model v2 | ✅ | ✅ |
 | **P4-2** | IRQ lifecycle | ✅ | ✅ |
 | **P4-3** | PCIe config space access (lab) | ✅ | ⚠️ |
@@ -379,7 +379,8 @@ Shipped on the **PRE 4.2.0** train (**PR #231** class work). This is the **modul
 | **P3-12** | ~✅ | **`net_dhcp.c`**: codec + **`fl_net_dhcp_acquire`** over egress (**#247**) |
 | **P3-13** | ~✅ | Server foundations shipped on **PRE 4.2.0** (#239 / PR #282): BSD socket shim (**`net_socket.c`**), **`server host/join/leave/kill/announce/msg/nick`** built-ins, dual-role host + member registry, host transfer + auto-promote, prompt-aware async output, cyan private DMs, blue announcements, cross-subnet `netns` pcap proof. `udpsend` / `udplisten` shell verbs added (**`userland/command/cmd_udp.c`**); endianness fix for `OP_CTRL_HOST_PROMOTE` IPv4 wire field (#284). Deferred siblings remain tracked: **#283** (`OP_CTRL_HOST_PROMOTE6`), **#280** (IPv6 + ICMPv6 + NDP), **#279** (Wi-Fi station). Native (non-hosted) `fl_socket` path is gated on **P3-7** TCP state machine. Contracts: **`contract_p3_sockets.h`**, **`contract_p3_session_wire.h`**, **`contract_p3_server.h`** (REV 2). Per-item follow-up status (CR + Codex review items, in-source TODOs): **`docs/P3_13_FOLLOWUP.md`**. |
 | **P3-14** | ~✅ | **`net_background.c`**: **`fl_net_arp_tick`**; RX dequeue / TCP timer wheel remain future |
-| **P3-10** / **P3-11** | ❌ | Contract **`[DEFERRED]`** only |
+| **P3-10** | ❌ | Wi-Fi **`[DEFERRED]`** contract only |
+| **P3-11** | ~✅ | **`contract_p3_ipv6.h`**, **`net_ipv6`/`net_icmpv6`/`net_ndp`**, loopback ICMPv6 + NDP; TAP/wire egress IPv6 stretch remains |
 
 **Shell / CI:** **`ping`**, **`check requirements`**; **`make test_p3_network`**, **`make baremetal`**, **`make test_invariants`**, **`make test_core`**, **`make check-network-requirements`**. **ASM:** **`arch/*/net_asm.*`**, **`arch/*/net_wire_host_asm.*`**. **PRE 4.2.0 (this train):** lab bare-metal **802.3** path (**`net_baremetal.c`**, **#237** / **#241** / **#240**); umbrella **#238–#267** (excl. **#239** **`server`**) on PR **#275**; production virtio NIC is **P4**-class follow-up.
 

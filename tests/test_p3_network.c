@@ -9,7 +9,11 @@
 #include "net_wire.h"
 #include "net_checksum.h"
 #include "net_icmp.h"
+#include "net_icmpv6.h"
 #include "net_ipv4.h"
+#include "net_ipv6.h"
+#include "net_ndp.h"
+#include "net_dns.h"
 #include "net_loopback.h"
 #include "net_netdev.h"
 #include "net_packet.h"
@@ -417,6 +421,117 @@ static int test_netdev_loopback_frame(void) {
     fl_net_netdev_stats(fl_net_netdev_loopback(), &stats);
     ASSERT(stats.tx_frames >= 1u);
     ASSERT(stats.rx_frames >= 1u);
+    return 0;
+}
+
+static int test_ipv6_icmp_echo_loopback(void) {
+    uint8_t lb[16];
+    uint8_t host_mac[6];
+    uint8_t peer_mac[6];
+    uint8_t icmp[64];
+    uint8_t ip6[128];
+    uint8_t frame[256];
+    uint8_t rx[256];
+    size_t icmp_len;
+    size_t ip6_len;
+    size_t frame_len;
+    fl_net_frame_view_t view;
+    fl_net_frame_mut_t mut;
+    fl_result_t rc;
+
+    fl_net_loopback_reset();
+    fl_net_ipv6_loopback_addr(lb);
+    icmp_len = fl_net_icmpv6_echo_request_build(icmp, sizeof(icmp), 0x6a6au, 1u, 8u);
+    ASSERT(icmp_len > 0);
+    ip6_len = fl_net_ipv6_build(lb, lb, FL_NET_IP_PROTO_ICMPV6, icmp, icmp_len, ip6, sizeof(ip6));
+    ASSERT(ip6_len > 0);
+    fl_net_loopback_mac_host(host_mac);
+    fl_net_loopback_mac_peer(peer_mac);
+    frame_len = fl_net_wire_build_eth_ipv6(frame, sizeof(frame), peer_mac, host_mac, ip6, ip6_len);
+    ASSERT(frame_len > 0);
+    view.data = frame;
+    view.len = frame_len;
+    ASSERT(fl_net_netdev_send(fl_net_netdev_loopback(), &view) == FL_RESULT_OK);
+    mut.data = rx;
+    mut.cap = sizeof(rx);
+    mut.len = 0;
+    rc = fl_net_netdev_recv(fl_net_netdev_loopback(), &mut, 2000u);
+    ASSERT(rc == FL_RESULT_OK);
+    {
+        size_t off = 0;
+        size_t iplen = 0;
+        ASSERT(fl_net_wire_parse_eth_ipv6(rx, mut.len, &off, &iplen));
+        ASSERT(fl_net_icmpv6_echo_reply_match(rx + off + FL_NET_IPV6_HDR_LEN,
+                                              iplen - FL_NET_IPV6_HDR_LEN, 0x6a6au, 1u));
+    }
+    return 0;
+}
+
+static int test_ipv6_ndp_ns_na_loopback(void) {
+    uint8_t lb[16];
+    uint8_t host_mac[6];
+    uint8_t peer_mac[6];
+    uint8_t icmp[64];
+    uint8_t ip6[128];
+    uint8_t frame[256];
+    uint8_t rx[256];
+    size_t icmp_len;
+    size_t ip6_len;
+    size_t frame_len;
+    fl_net_frame_view_t view;
+    fl_net_frame_mut_t mut;
+    fl_result_t rc;
+
+    fl_net_loopback_reset();
+    fl_net_ipv6_loopback_addr(lb);
+    fl_net_loopback_mac_host(host_mac);
+    fl_net_loopback_mac_peer(peer_mac);
+    icmp_len = fl_net_ndp_build_neighbor_solicit(icmp, sizeof(icmp), lb, peer_mac);
+    ASSERT(icmp_len > 0);
+    ip6_len = fl_net_ipv6_build(lb, lb, FL_NET_IP_PROTO_ICMPV6, icmp, icmp_len, ip6, sizeof(ip6));
+    ASSERT(ip6_len > 0);
+    frame_len = fl_net_wire_build_eth_ipv6(frame, sizeof(frame), peer_mac, host_mac, ip6, ip6_len);
+    ASSERT(frame_len > 0);
+    view.data = frame;
+    view.len = frame_len;
+    ASSERT(fl_net_netdev_send(fl_net_netdev_loopback(), &view) == FL_RESULT_OK);
+    mut.data = rx;
+    mut.cap = sizeof(rx);
+    mut.len = 0;
+    rc = fl_net_netdev_recv(fl_net_netdev_loopback(), &mut, 2000u);
+    ASSERT(rc == FL_RESULT_OK);
+    {
+        size_t off = 0;
+        size_t iplen = 0;
+        const uint8_t *na;
+        ASSERT(fl_net_wire_parse_eth_ipv6(rx, mut.len, &off, &iplen));
+        na = rx + off + FL_NET_IPV6_HDR_LEN;
+        ASSERT(na[0] == (uint8_t)FL_NET_ICMPV6_TYPE_NA);
+    }
+    return 0;
+}
+
+static int test_ipv6_route_lookup_loopback(void) {
+    uint8_t lb[16];
+    fl_net_route6_entry_t route;
+
+    fl_net_route_init();
+    fl_net_ipv6_loopback_addr(lb);
+    ASSERT(fl_net_route_lookup6(lb, &route) == FL_RESULT_OK);
+    ASSERT(route.drv == fl_net_netdev_loopback());
+    ASSERT(route.prefix_len == 128u);
+    return 0;
+}
+
+static int test_dns_resolve_aaaa_localhost(void) {
+    uint8_t out6[16];
+    uint8_t expect[16];
+    char txt[64];
+
+    fl_net_ipv6_loopback_addr(expect);
+    ASSERT(fl_net_dns_resolve_aaaa("localhost", out6, txt, sizeof(txt)) == FL_RESULT_OK);
+    ASSERT(memcmp(out6, expect, 16) == 0);
+    ASSERT(strstr(txt, "::1") != NULL || txt[0] != '\0');
     return 0;
 }
 
@@ -1255,6 +1370,25 @@ int main(void) {
         return 1;
     puts("ok");
 
+    printf("test_ipv6_icmp_echo_loopback... ");
+    if (test_ipv6_icmp_echo_loopback() != 0)
+        return 1;
+    puts("ok");
+
+    printf("test_ipv6_ndp_ns_na_loopback... ");
+    if (test_ipv6_ndp_ns_na_loopback() != 0)
+        return 1;
+    puts("ok");
+
+    printf("test_ipv6_route_lookup_loopback... ");
+    if (test_ipv6_route_lookup_loopback() != 0)
+        return 1;
+    puts("ok");
+
+    printf("test_dns_resolve_aaaa_localhost... ");
+    if (test_dns_resolve_aaaa_localhost() != 0)
+        return 1;
+    puts("ok");
 
     printf("test_netdev_shutdown... ");
     if (test_netdev_shutdown() != 0)
