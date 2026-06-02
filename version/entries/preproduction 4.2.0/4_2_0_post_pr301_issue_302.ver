@@ -17,3 +17,5 @@ PRE 4.2.0 (#302, #303 on cursor/p3-issues-279-302-303):
 - Shell: ping6; nslookup and resolve print A + AAAA; server host/join/connected use formatted endpoints; join -bind accepts IPv6 literals
 - fl_net_icmpv6_echo_exchange and fl_net_ping6 for loopback ICMPv6
 VER_END
+
+RELEASE_DATE=2026-06-02
