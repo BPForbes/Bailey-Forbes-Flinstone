@@ -25,6 +25,7 @@ PRE 4.2.0 (#302, #303 on cursor/p3-issues-279-302-303):
 - SQLite wifi_router table (name, hashed password, salt, BSSID/band/channel/auth/HE makeup, join state) in userland/shell/fl_wifi.db
 - Shell: wifi scan, wifi join <name> [password], wifi known; hosted lab scan/join until P4 NIC
 - Docs: P3-10 module ~✅ in ROADMAP/P3_NETWORKING; docs/GITHUB_ISSUE_SYNC_279.md for #279 checklist
+- #279 lab tail: FSM through UP, loopback fl_net_driver_t, mgmt probe/assoc, SAE/WPA crypto+vectors, TWT mock, make test_p3_wifi expanded
 VER_END
 
 RELEASE_DATE=2026-06-02

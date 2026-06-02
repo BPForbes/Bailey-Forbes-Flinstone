@@ -1,15 +1,30 @@
 #ifndef NET_WIFI_MGMT_H
 #define NET_WIFI_MGMT_H
 
+#include "contract_p3_wifi.h"
+
 #include <stddef.h>
 #include <stdint.h>
 
-/** 802.11 management frame type/subtype: Probe Request (0x04). */
-#define FL_WIFI_MGMT_PROBE_REQ 0x04u
+#define FL_WIFI_MGMT_HDR_LEN 24u
+#define FL_WIFI_ELEM_SSID 0u
+
+int fl_net_wifi_mgmt_hdr_valid(const uint8_t *frame, size_t len);
+
+/** Build a minimal Probe Request (24-byte hdr + SSID IE). */
+fl_result_t fl_net_wifi_mgmt_build_probe_req(const char *ssid, uint8_t *out, size_t out_cap,
+                                             size_t *out_len);
 
 /**
- * Minimum length check for a management frame header (FC + Duration + DA + SA + BSSID + Seq).
+ * Parse Probe Response / Beacon fixed fields + IE blob.
+ * **ies_out** points into **frame**; valid while **frame** is alive.
  */
-int fl_net_wifi_mgmt_hdr_valid(const uint8_t *frame, size_t len);
+fl_result_t fl_net_wifi_mgmt_parse_mgmt_ies(const uint8_t *frame, size_t len,
+                                            const uint8_t **ies_out, size_t *ies_len);
+
+/** Build Association Request (header + SSID + RSNE placeholder + HE cap stub). */
+fl_result_t fl_net_wifi_mgmt_build_assoc_req(const char *ssid, const uint8_t bssid[6],
+                                             const uint8_t sta_mac[6], uint8_t *out,
+                                             size_t out_cap, size_t *out_len);
 
 #endif /* NET_WIFI_MGMT_H */

@@ -21,4 +21,11 @@
 
 #define FL_CONTRACT_P3_COMPOSES_P2_AUTHZ_ONLY 1
 
+/**
+ * **P3-10 Wi-Fi:** scan/connect require the same netdev I/O gate as **ping** / TAP.
+ * Long-term SSID credentials belong in P2/P5 stores (**wifi_router**), not in
+ * **fl_net_wifi_cred_t** beyond ephemeral association.
+ */
+#define FL_NET_WIFI_AUTHZ_OP_SCAN_CONNECT FL_AUTHZ_OP_NETDEV_IO
+
 #endif /* FL_CONTRACT_P3_TRUST_H */

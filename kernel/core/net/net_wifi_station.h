@@ -27,4 +27,7 @@ fl_result_t fl_net_wifi_twt_setup(const fl_net_wifi_twt_params_t *req,
                                   fl_net_wifi_twt_params_t *agreed_out);
 fl_result_t fl_net_wifi_twt_teardown(uint8_t flow_id);
 
+/** Zero ephemeral passphrase bytes after use (P2/P5 owns long-term storage). */
+void fl_net_wifi_cred_scrub_passphrase(fl_net_wifi_cred_t *cred);
+
 #endif /* NET_WIFI_STATION_H */

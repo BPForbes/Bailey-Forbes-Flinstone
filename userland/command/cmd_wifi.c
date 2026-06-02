@@ -188,7 +188,11 @@ static int cmd_wifi_join(int argc, char **argv) {
         return 1;
     }
     (void)fl_wifi_db_mark_joined(name, 1);
-    printf("wifi join: associated with '%s' (lab/hosted; netdev pending P4 driver)\n", name);
+    fl_net_wifi_cred_scrub_passphrase(&cred);
+    printf("wifi join: associated with '%s' (state %d", name, (int)fl_net_wifi_state());
+    if (fl_net_wifi_station_netdev() != NULL)
+        fputs(", loopback netdev UP", stdout);
+    puts(")");
     fl_wifi_db_close();
     return 0;
 }
