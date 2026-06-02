@@ -379,7 +379,6 @@ static int verb_file_fetch(const cmd_server_ctx_t *ctx, int argc, char **argv)
     }
     if (!session_active(ctx, &hosting))
         return 1;
-    (void)hosting;
     rc = fl_server_catalog_fetch_by_hash(argv[1],
                                          sender_member_id(ctx, hosting),
                                          now, &meta, NULL, 0, NULL);
@@ -405,6 +404,7 @@ static int verb_file_fetch(const cmd_server_ctx_t *ctx, int argc, char **argv)
             free(buf);
             return 1;
         }
+        buf[len] = '\0';
     }
     if (meta.payload_kind == FL_CHANNEL_PAYLOAD_MSG) {
         printf("[catalog msg %s] %.*s\n", meta.transfer_id, (int)len,

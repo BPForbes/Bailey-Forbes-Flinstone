@@ -3,13 +3,38 @@
 #include "net_checksum.h"
 #include "net_endian.h"
 
+#include <stdio.h>
 #include <string.h>
+
+#if defined(__linux__) || defined(__APPLE__) || defined(__FreeBSD__)
+#include <arpa/inet.h>
+#define FL_NET_IPV6_FORMAT_HOSTED 1
+#endif
 
 void fl_net_ipv6_loopback_addr(uint8_t addr[FL_NET_IPV6_ADDR_LEN]) {
     if (!addr)
         return;
     memset(addr, 0, FL_NET_IPV6_ADDR_LEN);
     addr[15] = 1u;
+}
+
+int fl_net_ipv6_format_addr(const uint8_t addr[FL_NET_IPV6_ADDR_LEN], char *buf, size_t buflen) {
+    if (!addr || !buf || buflen == 0u)
+        return 0;
+#if defined(FL_NET_IPV6_FORMAT_HOSTED)
+    if (inet_ntop(AF_INET6, addr, buf, buflen) == NULL)
+        return 0;
+    return 1;
+#else
+    (void)addr;
+    if (buflen < 40u)
+        return 0;
+    snprintf(buf, buflen,
+             "%02x%02x:%02x%02x:%02x%02x:%02x%02x:%02x%02x:%02x%02x:%02x%02x:%02x%02x",
+             addr[0], addr[1], addr[2], addr[3], addr[4], addr[5], addr[6], addr[7], addr[8],
+             addr[9], addr[10], addr[11], addr[12], addr[13], addr[14], addr[15]);
+    return 1;
+#endif
 }
 
 int fl_net_ipv6_is_loopback(const uint8_t addr[FL_NET_IPV6_ADDR_LEN]) {

@@ -70,8 +70,8 @@ size_t fl_net_ndp_build_neighbor_solicit(uint8_t *icmp6, size_t cap, const uint8
     memset(dst6, 0, sizeof(dst6));
     dst6[0] = 0xffu;
     dst6[1] = 0x02u;
-    dst6[13] = 0x01u;
-    dst6[15] = 0xffu;
+    dst6[11] = 0x01u;
+    dst6[12] = 0xffu;
     memcpy(&dst6[13], target + 13, 3);
 
     icmp6[0] = (uint8_t)FL_NET_ICMPV6_TYPE_NS;
@@ -85,8 +85,7 @@ size_t fl_net_ndp_build_neighbor_solicit(uint8_t *icmp6, size_t cap, const uint8
     memcpy(icmp6 + 8, target, 16);
     icmp6[24] = 1; /* source link-layer */
     icmp6[25] = 1;
-    icmp6[26] = (uint8_t)(6u << 3);
-    memcpy(icmp6 + 27, src_mac, 6);
+    memcpy(icmp6 + 26, src_mac, 6);
 
     csum = fl_net_ipv6_icmp6_checksum(src6, dst6, icmp6, need);
     icmp6[2] = (uint8_t)(csum >> 8);
@@ -128,8 +127,7 @@ size_t fl_net_ndp_build_neighbor_advert(uint8_t *icmp6, size_t cap, const uint8_
     memcpy(icmp6 + 8, target, 16);
     icmp6[24] = 2; /* target link-layer */
     icmp6[25] = 1;
-    icmp6[26] = (uint8_t)(6u << 3);
-    memcpy(icmp6 + 27, tgt_mac, 6);
+    memcpy(icmp6 + 26, tgt_mac, 6);
 
     csum = fl_net_ipv6_icmp6_checksum(src6, dst6, icmp6, need);
     icmp6[2] = (uint8_t)(csum >> 8);

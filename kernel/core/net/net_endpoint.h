@@ -6,7 +6,7 @@
 #include <stddef.h>
 #include <stdint.h>
 
-/** Matches POSIX AF_INET / AF_INET6 on hosted builds. */
+/** Internal IP-version tags (4 / 6), not POSIX AF_INET / AF_INET6 socket constants. */
 #define FL_NET_ADDR_FAMILY_V4 4u
 #define FL_NET_ADDR_FAMILY_V6 6u
 

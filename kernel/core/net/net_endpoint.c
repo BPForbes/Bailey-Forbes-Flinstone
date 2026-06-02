@@ -1,8 +1,11 @@
 #include "net_endpoint.h"
 
+#include "contract_p3_server.h"
+#include "net_endian.h"
 #include "net_ipv4.h"
 
 #include <errno.h>
+#include <stddef.h>
 #include <stdlib.h>
 #include <string.h>
 
@@ -34,21 +37,16 @@ int fl_net_ipv6_wire_to_v4(const uint8_t addr_be[16], uint32_t *v4_be_out)
         {0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1};
     static const uint8_t mapped_prefix[12] =
         {0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0xff, 0xff};
-    unsigned o0, o1, o2, o3;
 
     if (!addr_be || !v4_be_out)
         return 0;
     if (memcmp(addr_be, loop6, sizeof(loop6)) == 0) {
-        *v4_be_out = ((uint32_t)127u) | ((uint32_t)0u << 8) |
-                     ((uint32_t)0u << 16) | ((uint32_t)1u << 24);
+        static const uint8_t v4_loop_nbo[4] = {127u, 0u, 0u, 1u};
+        *v4_be_out = fl_net_get_u32_nbo(v4_loop_nbo);
         return 1;
     }
     if (memcmp(addr_be, mapped_prefix, sizeof(mapped_prefix)) == 0) {
-        o0 = addr_be[12];
-        o1 = addr_be[13];
-        o2 = addr_be[14];
-        o3 = addr_be[15];
-        *v4_be_out = o0 | (o1 << 8) | (o2 << 16) | (o3 << 24);
+        *v4_be_out = fl_net_get_u32_nbo(addr_be + 12);
         return 1;
     }
     return 0;
@@ -181,6 +179,16 @@ int fl_net_endpoint_parse_v4(const char *s, uint32_t *addr_be_out, uint16_t *por
         return 0;
     if (!fl_net_endpoint_to_v4(&ep, addr_be_out))
         return 0;
-    *port_out = ep.port_host;
+    if (port_out)
+        *port_out = ep.port_host;
     return 1;
 }
+
+_Static_assert(sizeof(fl_net_endpoint_t) == sizeof(fl_net_server_addr_t),
+               "fl_net_endpoint_t and fl_net_server_addr_t must match");
+_Static_assert(offsetof(fl_net_endpoint_t, family) == offsetof(fl_net_server_addr_t, family),
+               "endpoint/server_addr family offset");
+_Static_assert(offsetof(fl_net_endpoint_t, port_host) == offsetof(fl_net_server_addr_t, port_host),
+               "endpoint/server_addr port_host offset");
+_Static_assert(offsetof(fl_net_endpoint_t, addr) == offsetof(fl_net_server_addr_t, addr),
+               "endpoint/server_addr address union offset");

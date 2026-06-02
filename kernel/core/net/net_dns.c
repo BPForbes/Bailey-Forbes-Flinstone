@@ -347,7 +347,8 @@ fl_result_t fl_net_dns_resolve_aaaa(const char *host, uint8_t out6[16], char *re
 
     if (strcmp(host, "localhost") == 0 || strcmp(host, "::1") == 0) {
         fl_net_ipv6_loopback_addr(out6);
-        if (resolved_txt && resolved_txt_len > 0)
+        if (resolved_txt && resolved_txt_len > 0 &&
+            !fl_net_ipv6_format_addr(out6, resolved_txt, resolved_txt_len))
             snprintf(resolved_txt, resolved_txt_len, "::1");
         return FL_RESULT_OK;
     }
@@ -363,8 +364,9 @@ fl_result_t fl_net_dns_resolve_aaaa(const char *host, uint8_t out6[16], char *re
             fl_result_t rc = dns_query_aaaa_once(host, ns_list[n], txid, sport, out6);
 
             if (rc == FL_RESULT_OK) {
-                if (resolved_txt && resolved_txt_len > 0)
-                    snprintf(resolved_txt, resolved_txt_len, "::1");
+                if (resolved_txt && resolved_txt_len > 0 &&
+                    !fl_net_ipv6_format_addr(out6, resolved_txt, resolved_txt_len))
+                    resolved_txt[0] = '\0';
                 return FL_RESULT_OK;
             }
             if (rc == FL_RESULT_INVAL)

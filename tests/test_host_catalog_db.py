@@ -96,8 +96,8 @@ def run_session_scenario(work: Path, port: int, report: Report) -> str | None:
     env = os.environ.copy()
     env["FL_USERS_LAB_DEFAULTS"] = "1"
 
-    tmux("has-session", "-t", f"={session}", "2>/dev/null")  # noqa: shell redirect ignored
-    tmux("kill-session", "-t", session)
+    if tmux("has-session", "-t", session).returncode == 0:
+        tmux("kill-session", "-t", session)
 
     if tmux("new-session", "-d", "-s", session, "-c", str(REPO_ROOT), "-x", "240", "-y", "64", "--", "bash", "-l").returncode != 0:
         raise RuntimeError("tmux new-session failed")

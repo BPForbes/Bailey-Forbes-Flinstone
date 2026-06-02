@@ -1,5 +1,6 @@
 #include "net_icmpv6.h"
 
+#include "net_endian.h"
 #include "net_ipv6.h"
 
 #include <string.h>
@@ -18,19 +19,15 @@ size_t fl_net_icmpv6_echo_request_build(uint8_t *buf, size_t cap, uint16_t id, u
 
     buf[0] = (uint8_t)FL_NET_ICMPV6_TYPE_ECHO;
     buf[1] = 0;
-    buf[2] = 0;
-    buf[3] = 0;
-    buf[4] = (uint8_t)(id >> 8);
-    buf[5] = (uint8_t)(id & 0xff);
-    buf[6] = (uint8_t)(seq >> 8);
-    buf[7] = (uint8_t)(seq & 0xff);
+    fl_net_put_u16_be(buf + 2, 0u);
+    fl_net_put_u16_be(buf + 4, id);
+    fl_net_put_u16_be(buf + 6, seq);
     if (payload_len > 0)
         memset(buf + FL_NET_ICMPV6_HDR_MIN, 0x5a, payload_len);
 
     fl_net_ipv6_loopback_addr(lb);
     csum = fl_net_ipv6_icmp6_checksum(lb, lb, buf, need);
-    buf[2] = (uint8_t)(csum >> 8);
-    buf[3] = (uint8_t)(csum & 0xff);
+    fl_net_put_u16_be(buf + 2, csum);
     return need;
 }
 
@@ -39,9 +36,9 @@ int fl_net_icmpv6_echo_reply_match(const uint8_t *buf, size_t len, uint16_t id, 
         return 0;
     if (buf[0] != (uint8_t)FL_NET_ICMPV6_TYPE_ECHO_REPLY)
         return 0;
-    if (((uint16_t)buf[4] << 8 | buf[5]) != id)
+    if (fl_net_get_u16_be(buf + 4) != id)
         return 0;
-    if (((uint16_t)buf[6] << 8 | buf[7]) != seq)
+    if (fl_net_get_u16_be(buf + 6) != seq)
         return 0;
     return 1;
 }
@@ -62,11 +59,9 @@ fl_result_t fl_net_loopback_icmpv6_echo(const uint8_t *icmp_req, size_t icmp_len
 
     memcpy(icmp_reply, icmp_req, icmp_len);
     icmp_reply[0] = (uint8_t)FL_NET_ICMPV6_TYPE_ECHO_REPLY;
-    icmp_reply[2] = 0;
-    icmp_reply[3] = 0;
+    fl_net_put_u16_be(icmp_reply + 2, 0u);
     csum = fl_net_ipv6_icmp6_checksum(dst6, src6, icmp_reply, icmp_len);
-    icmp_reply[2] = (uint8_t)(csum >> 8);
-    icmp_reply[3] = (uint8_t)(csum & 0xff);
+    fl_net_put_u16_be(icmp_reply + 2, csum);
     *reply_len = icmp_len;
     return FL_RESULT_OK;
 }

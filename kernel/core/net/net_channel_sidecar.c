@@ -148,5 +148,5 @@ int fl_channel_sidecar_may_forward_to(uint16_t receiver_member_id,
 {
     if (receiver_member_id == 0u)
         return 1;
-    return receiver_member_id != target_member_id;
+    return receiver_member_id == target_member_id;
 }

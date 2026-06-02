@@ -186,7 +186,12 @@ static fl_result_t write_blob_file(const char *hash_hex, const uint8_t *data, si
         return FL_RESULT_ERR;
     if (mkdir_p_simple(blobs_root) != FL_RESULT_OK)
         return FL_RESULT_ERR;
-    snprintf(rel, sizeof(rel), "%s/%s", FL_SERVER_CATALOG_BLOBS_DIR_NAME, hash_hex);
+    {
+        int rel_len = snprintf(rel, sizeof(rel), "%s/%s", FL_SERVER_CATALOG_BLOBS_DIR_NAME,
+                               hash_hex);
+        if (rel_len < 0 || (size_t)rel_len >= sizeof(rel))
+            return FL_RESULT_ERR;
+    }
     if (join_path(blob_path, sizeof(blob_path), g_cwd, FL_SERVER_SHARED_DIR_NAME) != 0)
         return FL_RESULT_ERR;
     {

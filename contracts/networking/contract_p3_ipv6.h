@@ -26,8 +26,8 @@
 #define FL_NET_ICMPV6_TYPE_NS 135u
 #define FL_NET_ICMPV6_TYPE_NA 136u
 
-#define FL_NET_NDP_OPT_TARGET_LL 2u
 #define FL_NET_NDP_OPT_TARGET 2u /* target link-layer address option type in NA */
+#define FL_NET_NDP_OPT_TARGET_LL FL_NET_NDP_OPT_TARGET
 
 #ifndef FL_NET_NDP_CACHE_MAX
 #define FL_NET_NDP_CACHE_MAX 16u

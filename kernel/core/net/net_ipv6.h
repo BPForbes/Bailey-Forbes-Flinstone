@@ -9,6 +9,9 @@
 
 void fl_net_ipv6_loopback_addr(uint8_t addr[FL_NET_IPV6_ADDR_LEN]);
 
+/** Format 16-byte wire address to text (hosted: `inet_ntop`). Returns 1 on success. */
+int fl_net_ipv6_format_addr(const uint8_t addr[FL_NET_IPV6_ADDR_LEN], char *buf, size_t buflen);
+
 int fl_net_ipv6_is_loopback(const uint8_t addr[FL_NET_IPV6_ADDR_LEN]);
 int fl_net_ipv6_is_link_local(const uint8_t addr[FL_NET_IPV6_ADDR_LEN]);
 int fl_net_ipv6_prefix_match(const uint8_t addr[FL_NET_IPV6_ADDR_LEN],

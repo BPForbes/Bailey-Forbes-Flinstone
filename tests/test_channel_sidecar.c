@@ -41,6 +41,14 @@ static int test_sidecar_roundtrip(void)
     return 0;
 }
 
+static int test_sidecar_forward_acl(void)
+{
+    ASSERT(fl_channel_sidecar_may_forward_to(0u, 3u) == 1);
+    ASSERT(fl_channel_sidecar_may_forward_to(3u, 3u) == 1);
+    ASSERT(fl_channel_sidecar_may_forward_to(2u, 3u) == 0);
+    return 0;
+}
+
 static int test_legacy_meta_decode(void)
 {
     fl_channel_sidecar_t decoded;
@@ -62,6 +70,8 @@ static int test_legacy_meta_decode(void)
 int main(void)
 {
     if (test_sidecar_roundtrip() != 0)
+        return 1;
+    if (test_sidecar_forward_acl() != 0)
         return 1;
     if (test_legacy_meta_decode() != 0)
         return 1;

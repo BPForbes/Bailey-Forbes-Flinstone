@@ -9,7 +9,6 @@
  */
 #include "net_client.h"
 #include "net_file_delivery.h"
-#include "net_file_delivery.h"
 
 #include "contract_p3_packet.h"
 #include "contract_p3_session_wire.h"
