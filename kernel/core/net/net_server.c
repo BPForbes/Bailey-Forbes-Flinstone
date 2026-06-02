@@ -676,7 +676,8 @@ static size_t encode_member_list_snapshot(const fl_net_server_t *srv,
         nlen = strnlen(m->nick, FL_NET_SERVER_NICK_MAX);
         if (plen > 255u) plen = 255u;
         if (nlen > 255u) nlen = 255u;
-        if (off + 6u + plen + nlen > cap)
+        /* Base member record plus optional peer_addr tail (up to 19 bytes). */
+        if (off + 6u + plen + nlen + 19u > cap)
             break;
         buf[off++] = (uint8_t)((m->member_id >> 8) & 0xFFu);
         buf[off++] = (uint8_t)(m->member_id & 0xFFu);
@@ -688,6 +689,23 @@ static size_t encode_member_list_snapshot(const fl_net_server_t *srv,
         buf[off++] = (uint8_t)nlen;
         memcpy(buf + off, m->nick, nlen);
         off += nlen;
+        if (m->peer_addr.family == FL_NET_ADDR_FAMILY_V4) {
+            if (off + 7u > cap)
+                break;
+            buf[off++] = FL_NET_ADDR_FAMILY_V4;
+            fl_net_put_u16_be(buf + off, m->peer_addr.port_host);
+            off += 2u;
+            fl_net_put_u32_be(buf + off, m->peer_addr.addr.v4_be);
+            off += 4u;
+        } else if (m->peer_addr.family == FL_NET_ADDR_FAMILY_V6) {
+            if (off + 19u > cap)
+                break;
+            buf[off++] = FL_NET_ADDR_FAMILY_V6;
+            fl_net_put_u16_be(buf + off, m->peer_addr.port_host);
+            off += 2u;
+            memcpy(buf + off, m->peer_addr.addr.v6_be, 16);
+            off += 16u;
+        }
     }
     return off;
 }

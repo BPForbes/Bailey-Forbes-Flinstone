@@ -61,9 +61,10 @@
 
 #include "contract_p3_session_wire.h"
 #include "contract_p3_sockets.h"
+#include "contract_p3_wire.h"
 
 #define FL_CONTRACT_P3_13_SERVER_CONTRACT_DEFINED 1
-#define FL_CONTRACT_P3_13_SERVER_REV 3u
+#define FL_CONTRACT_P3_13_SERVER_REV 5u
 
 /* ------------------------------------------------------------------------- */
 /* Capacity / wire caps                                                      */
@@ -148,7 +149,9 @@ _Static_assert(FL_NET_SERVER_ANNOUNCEMENT_MAX <= FL_NET_SESSION_MAX_MSG,
  * `server connected` verb without round-tripping to the host. Payload:
  *   for each member: `[u16_be member_id][u8 is_host][u8 disambig_index]
  *                     [u8 principal_len][principal bytes]
- *                     [u8 nick_len]    [nick bytes]`
+ *                     [u8 nick_len][nick bytes]`
+ *                     optional peer tail when present: `[u8 family=4|6]
+ *                     [u16_be port][4 or 16 byte addr]` (omitted when unknown).
  * Frames smaller than the full roster are valid prefixes; the receiver
  * clears its cache and replays the body. Maximum payload is bounded by
  * `FL_NET_SESSION_MAX_MSG` and capped by `FL_NET_SERVER_MAX_MEMBERS`.
@@ -179,21 +182,11 @@ _Static_assert(FL_NET_SERVER_ANNOUNCEMENT_MAX <= FL_NET_SESSION_MAX_MSG,
 /* In-memory types (host + client share these definitions)                   */
 /* ------------------------------------------------------------------------- */
 
-/** Dual-stack socket address (#283 / #280); same field layout as fl_net_endpoint_t. */
-#define FL_NET_ADDR_FAMILY_V4 4u
-#define FL_NET_ADDR_FAMILY_V6 6u
-
-typedef struct fl_net_server_addr {
-    uint8_t family;
-    uint16_t port_host;
-    union {
-        uint32_t v4_be;
-        uint8_t v6_be[16];
-    } addr;
-} fl_net_server_addr_t;
+/** Dual-stack socket address (#283 / #280); alias of **fl_net_endpoint_t** (#302). */
+typedef fl_net_endpoint_t fl_net_server_addr_t;
 
 /** Alias for dual-stack member addressing (#283). */
-typedef fl_net_server_addr_t fl_net_addr_t;
+typedef fl_net_endpoint_t fl_net_addr_t;
 
 /** Member id assigned by the host at HELLO_ACK. `0` is reserved as "none". */
 typedef uint16_t fl_net_server_member_id_t;

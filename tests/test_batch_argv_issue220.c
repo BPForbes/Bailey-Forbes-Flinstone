@@ -93,6 +93,8 @@ static int test_issue234_ping_check_batch_tokens(void) {
     ASSERT(cmd_ping_batch_tokens_count(3, (char*[]){"p", "ping", "host", NULL}, 1) == 2);
     ASSERT(cmd_ping_batch_tokens_count(5, (char*[]){"p", "ping", "-c", "3", "host", NULL}, 1) == 4);
     ASSERT(cmd_ping_batch_tokens_count(4, (char*[]){"p", "ping", "host", "80", NULL}, 1) == 3);
+    ASSERT(cmd_ping6_batch_tokens_count(7, (char*[]){"p", "ping6", "-c", "2", "-W", "500", "::1", NULL},
+                                         1) == 6);
     ASSERT(cmd_check_batch_tokens_count(4, (char*[]){"p", "check", "requirements", "host", NULL}, 1) == 3);
     ASSERT(cmd_check_batch_tokens_count(5, (char*[]){"p", "check", "requirements", "host", "443", NULL}, 1) == 4);
     return 0;

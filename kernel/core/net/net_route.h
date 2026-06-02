@@ -82,4 +82,7 @@ fl_result_t fl_net_route_lookup6(const uint8_t dst6[16], fl_net_route6_entry_t *
 
 void fl_net_route_add6_loopback(void);
 
+/** Snapshot the IPv6 FIB (insertion order). `out` may be NULL when `cap == 0`. */
+unsigned fl_net_route_snapshot6(fl_net_route6_entry_t *out, unsigned cap);
+
 #endif /* NET_ROUTE_H */

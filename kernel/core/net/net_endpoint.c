@@ -1,11 +1,12 @@
 #include "net_endpoint.h"
 
-#include "contract_p3_server.h"
 #include "net_endian.h"
 #include "net_ipv4.h"
+#include "net_ipv6.h"
 
 #include <errno.h>
 #include <stddef.h>
+#include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 
@@ -172,6 +173,32 @@ int fl_net_endpoint_parse(const char *s, fl_net_endpoint_t *out)
     }
 }
 
+int fl_net_endpoint_parse_bind(const char *s, fl_net_endpoint_t *out)
+{
+    if (!s || !out)
+        return 0;
+    memset(out, 0, sizeof(*out));
+    if (fl_net_endpoint_parse(s, out))
+        return 1;
+    {
+        uint32_t v4_be = 0u;
+        if (fl_net_ipv4_parse_literal(s, &v4_be)) {
+            fl_net_endpoint_from_v4(v4_be, 0u, out);
+            return 1;
+        }
+    }
+#if defined(FL_NET_ENDPOINT_HOSTED)
+    if (strchr(s, ':') != NULL && s[0] != '[') {
+        if (inet_pton(AF_INET6, s, out->addr.v6_be) == 1) {
+            out->family = FL_NET_ADDR_FAMILY_V6;
+            out->port_host = 0u;
+            return 1;
+        }
+    }
+#endif
+    return 0;
+}
+
 int fl_net_endpoint_parse_v4(const char *s, uint32_t *addr_be_out, uint16_t *port_out)
 {
     fl_net_endpoint_t ep;
@@ -184,11 +211,25 @@ int fl_net_endpoint_parse_v4(const char *s, uint32_t *addr_be_out, uint16_t *por
     return 1;
 }
 
-_Static_assert(sizeof(fl_net_endpoint_t) == sizeof(fl_net_server_addr_t),
-               "fl_net_endpoint_t and fl_net_server_addr_t must match");
-_Static_assert(offsetof(fl_net_endpoint_t, family) == offsetof(fl_net_server_addr_t, family),
-               "endpoint/server_addr family offset");
-_Static_assert(offsetof(fl_net_endpoint_t, port_host) == offsetof(fl_net_server_addr_t, port_host),
-               "endpoint/server_addr port_host offset");
-_Static_assert(offsetof(fl_net_endpoint_t, addr) == offsetof(fl_net_server_addr_t, addr),
-               "endpoint/server_addr address union offset");
+int fl_net_endpoint_format(const fl_net_endpoint_t *ep, char *out, size_t cap)
+{
+    char addr[64];
+    int n;
+
+    if (!ep || !out || cap == 0u)
+        return 0;
+    if (ep->family == FL_NET_ADDR_FAMILY_V4) {
+        fl_net_ipv4_format_addr(ep->addr.v4_be, addr, sizeof(addr));
+        n = snprintf(out, cap, "%s:%u", addr, (unsigned)ep->port_host);
+        return (n > 0 && (size_t)n < cap) ? 1 : 0;
+    }
+    if (ep->family == FL_NET_ADDR_FAMILY_V6) {
+        if (!fl_net_ipv6_format_addr(ep->addr.v6_be, addr, sizeof(addr)))
+            return 0;
+        n = snprintf(out, cap, "[%s]:%u", addr, (unsigned)ep->port_host);
+        return (n > 0 && (size_t)n < cap) ? 1 : 0;
+    }
+    return 0;
+}
+
+/* fl_net_endpoint_t layout is normative in contract_p3_wire.h; fl_net_server_addr_t aliases it. */

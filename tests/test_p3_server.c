@@ -614,6 +614,26 @@ static int test_v6_loopback_session(void) {
     ASSERT(rc == FL_RESULT_OK);
     ASSERT(client.assigned_member_id >= 2u);
     ASSERT(client.local_ep.family == FL_NET_ADDR_FAMILY_V6);
+    {
+        fl_net_client_t *clients[1] = { &client };
+        event_log_t log = {0};
+        event_log_t *logs[1] = { &log };
+        pump(clients, logs, 1, 20);
+    }
+    ASSERT(client.member_count >= 2u);
+    {
+        size_t k;
+        int saw_self_peer = 0;
+        for (k = 0; k < client.member_count; k++) {
+            const fl_net_client_member_t *m = &client.members[k];
+            if (m->member_id == client.assigned_member_id &&
+                m->peer_addr.family == FL_NET_ADDR_FAMILY_V6) {
+                saw_self_peer = 1;
+                break;
+            }
+        }
+        ASSERT(saw_self_peer);
+    }
 
     fl_net_client_disconnect(&client);
     fl_server_bg_stop_server(bg);

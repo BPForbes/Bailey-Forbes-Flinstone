@@ -150,7 +150,13 @@ NET_CORE_SRCS = kernel/core/net/net_checksum.c kernel/core/net/net_wire.c kernel
                 kernel/core/net/net_wire_host_syscall.c \
                 kernel/core/net/net_dns.c kernel/core/net/net_dhcp.c kernel/core/net/net_tls_hosted.c \
                 kernel/core/net/net_http.c kernel/core/net/net_tftp.c \
-                kernel/core/net/net_ping_host.c kernel/core/net/net_requirements.c \
+                kernel/core/net/net_ping_host.c kernel/core/net/net_ping6_host.c \
+                kernel/core/net/net_wifi_he.c kernel/core/net/net_wifi_station.c \
+                kernel/core/net/net_wifi_db.c \
+                kernel/core/net/net_wifi_mgmt.c kernel/core/net/net_wifi_sae.c \
+                kernel/core/net/net_wifi_wpa.c kernel/core/net/net_wifi_twt.c \
+                kernel/core/net/net_wifi_crypto.c \
+                kernel/core/net/net_requirements.c \
                 kernel/core/net/net_server.c kernel/core/net/net_client.c kernel/core/net/net_file_delivery.c kernel/core/net/net_pkt_channel_meta.c kernel/core/net/net_channel_sidecar.c kernel/core/net/server_bg.c \
                 kernel/core/vfs/server_shared_fs.c kernel/core/vfs/server_shared_db.c \
                 kernel/core/vfs/server_shared_digest.c \
@@ -398,7 +404,8 @@ FS_JAIL_SUPPORT_OBJS = kernel/core/time/timekeeping.o \
                          kernel/core/identity/path_property.o kernel/core/identity/session.o \
                          userland/identity/password_hash.o $(FL_STACK_ASM_OBJ)
 FS_JAIL_TEST_LIBS = -lsqlite3 -lstdc++ $(OPENSSL_LIBS) -pthread
-NET_TEST_LIBS = -lsqlite3 $(OPENSSL_LIBS)
+NET_TEST_EXTRA_OBJS = userland/identity/password_hash.o
+NET_TEST_LIBS = -lsqlite3 -lstdc++ $(OPENSSL_LIBS)
 TEST_ASMOBJS = $(MEM_ASM_OBJ) $(FL_STACK_ASM_OBJ) $(PORT_IO_OBJ) $(DISK_HOST_ASM_OBJ) \
                $(HISTORY_ASM_OBJ) $(NET_ASM_OBJ)
 TEST_TARGET = BPForbes_Flinstone_Tests
@@ -539,7 +546,7 @@ TEST_BATCH_GC_DIR = tests/obj/issue220
 TEST_BATCH_GC_FLAGS = -ffunction-sections -fdata-sections
 TEST_BATCH_ISSUE220_CMD_BASENAMES = cmd_addcluster cmd_createdisk cmd_rmdir cmd_rmtree \
 	cmd_setdisk cmd_diskput cmd_su cmd_login cmd_sudo cmd_account cmd_registry \
-	cmd_ping cmd_check
+	cmd_ping cmd_ping6 cmd_check
 TEST_BATCH_ISSUE220_CMD_OBJS = $(addprefix $(TEST_BATCH_GC_DIR)/,$(addsuffix .o,$(TEST_BATCH_ISSUE220_CMD_BASENAMES))) \
 	$(TEST_BATCH_GC_DIR)/cmd_batch.o
 
@@ -665,19 +672,19 @@ test_p0_p2_wiring: kernel/core/memory/fl_stack.o kernel/core/memory/exec_context
 	./tests/test_p0_p2_wiring
 
 .PHONY: test_p3_network
-test_p3_network: $(NET_ASM_OBJ) $(MEM_ASM_OBJ) $(NET_TEST_SHELL_OBJS) priority_queue.o kernel/core/time/timekeeping.o kernel/core/sys/ipc.o
+test_p3_network: $(NET_ASM_OBJ) $(MEM_ASM_OBJ) $(NET_TEST_SHELL_OBJS) $(NET_TEST_EXTRA_OBJS) priority_queue.o kernel/core/time/timekeeping.o kernel/core/sys/ipc.o
 	$(CC) $(CFLAGS) $(TEST_SANITIZE) -o tests/test_p3_network tests/test_p3_network.c \
 	  $(NET_TEST_SHELL_OBJS) \
 	  $(NET_CORE_SRCS) kernel/core/sched/workqueue.c kernel/core/sys/ipc.o kernel/core/time/timekeeping.o priority_queue.o $(MEM_ASM_OBJ) $(NET_ASM_OBJ) \
-	  $(NET_TEST_LIBS) -Wl,-z,noexecstack
+	  $(NET_TEST_EXTRA_OBJS) $(NET_TEST_LIBS) -Wl,-z,noexecstack
 	./tests/test_p3_network
 
 .PHONY: test_p3_server
-test_p3_server: $(NET_ASM_OBJ) $(MEM_ASM_OBJ) priority_queue.o kernel/core/time/timekeeping.o kernel/core/sys/ipc.o
+test_p3_server: $(NET_ASM_OBJ) $(MEM_ASM_OBJ) $(NET_TEST_EXTRA_OBJS) priority_queue.o kernel/core/time/timekeeping.o kernel/core/sys/ipc.o
 	$(CC) $(CFLAGS) $(TEST_SANITIZE) -Iuserland/shell -o tests/test_p3_server tests/test_p3_server.c \
 	  userland/shell/common.o \
 	  $(NET_CORE_SRCS) kernel/core/sched/workqueue.c kernel/core/sys/ipc.o kernel/core/time/timekeeping.o priority_queue.o $(MEM_ASM_OBJ) $(NET_ASM_OBJ) \
-	  $(NET_TEST_LIBS) -pthread -Wl,-z,noexecstack
+	  $(NET_TEST_EXTRA_OBJS) $(NET_TEST_LIBS) -pthread -Wl,-z,noexecstack
 	./tests/test_p3_server
 
 # Loopback echo coverage for the udpsend / udplisten shell verbs
@@ -685,27 +692,54 @@ test_p3_server: $(NET_ASM_OBJ) $(MEM_ASM_OBJ) priority_queue.o kernel/core/time/
 # NET_CORE_SRCS the rest of the P3 unit tests use, so the BSD socket shim
 # (`fl_net_sock_open(DGRAM)` + bind/connect/send/recv) is exercised end-to-end.
 .PHONY: test_p3_udp_cmds
-test_p3_udp_cmds: $(NET_ASM_OBJ) $(MEM_ASM_OBJ) $(NET_TEST_SHELL_OBJS) priority_queue.o kernel/core/time/timekeeping.o kernel/core/sys/ipc.o
+test_p3_udp_cmds: $(NET_ASM_OBJ) $(MEM_ASM_OBJ) $(NET_TEST_SHELL_OBJS) $(NET_TEST_EXTRA_OBJS) priority_queue.o kernel/core/time/timekeeping.o kernel/core/sys/ipc.o
 	$(CC) $(CFLAGS) $(TEST_SANITIZE) -o tests/test_p3_udp_cmds \
 	  tests/test_p3_udp_cmds.c userland/command/cmd_udp.c userland/command/cmd_registry.c \
 	  $(NET_TEST_SHELL_OBJS) \
 	  $(NET_CORE_SRCS) kernel/core/sched/workqueue.c kernel/core/sys/ipc.o kernel/core/time/timekeeping.o priority_queue.o \
 	  $(MEM_ASM_OBJ) $(NET_ASM_OBJ) \
-	  $(NET_TEST_LIBS) -pthread -Wl,-z,noexecstack
+	  $(NET_TEST_EXTRA_OBJS) $(NET_TEST_LIBS) -pthread -Wl,-z,noexecstack
 	./tests/test_p3_udp_cmds
 
 # arp / ifconfig / route / netstat / nslookup / netsh shell verb coverage
 # (issue #239 internal-only audit). Drives cmd_net_tools.c entry points
 # in-process against the in-tree fl_net_arp / fl_net_route / fl_net_udp /
 # fl_net_resolve_ipv4 APIs; no arpa/inet.h, no libc DNS.
+.PHONY: test_p3_wifi test_wifi_db
+WIFI_TEST_NET_OBJS = kernel/core/net/net_checksum.c kernel/core/net/net_wire.c \
+	kernel/core/net/net_eth.c kernel/core/net/net_ipv4.c kernel/core/net/net_ipv6.c \
+	kernel/core/net/net_icmpv6.c kernel/core/net/net_ndp.c kernel/core/net/net_udp.c \
+	kernel/core/net/net_tcp_fsm.c kernel/core/net/net_packet.c kernel/core/net/net_tap.c \
+	kernel/core/net/net_wire_egress.c \
+	kernel/core/net/net_route.c kernel/core/net/net_loopback.c \
+	kernel/core/net/net_netdev.c kernel/core/net/net_arp.c
+
+test_p3_wifi: $(NET_ASM_OBJ) $(MEM_ASM_OBJ) priority_queue.o kernel/core/time/timekeeping.o kernel/core/sys/ipc.o
+	$(CC) $(CFLAGS) $(TEST_SANITIZE) -o tests/test_p3_wifi tests/test_p3_wifi.c \
+	  kernel/core/net/net_wifi_he.c kernel/core/net/net_wifi_station.c \
+	  kernel/core/net/net_wifi_mgmt.c kernel/core/net/net_wifi_sae.c \
+	  kernel/core/net/net_wifi_wpa.c kernel/core/net/net_wifi_twt.c \
+	  kernel/core/net/net_wifi_crypto.c \
+	  $(WIFI_TEST_NET_OBJS) \
+	  kernel/core/sched/workqueue.c kernel/core/sys/ipc.o kernel/core/time/timekeeping.o priority_queue.o \
+	  $(MEM_ASM_OBJ) $(NET_ASM_OBJ) $(OPENSSL_LIBS) -Wl,-z,noexecstack
+	./tests/test_p3_wifi
+
+test_wifi_db: userland/identity/password_hash.o kernel/core/net/net_wifi_db.o kernel/core/time/timekeeping.o
+	$(CC) $(CFLAGS) $(TEST_SANITIZE) -Iuserland/identity -c tests/test_wifi_db.c -o tests/test_wifi_db_main.o
+	$(CXX) $(CXXFLAGS) $(TEST_SANITIZE) -o tests/test_wifi_db tests/test_wifi_db_main.o \
+	  kernel/core/net/net_wifi_db.o userland/identity/password_hash.o \
+	  kernel/core/time/timekeeping.o -lsqlite3 $(OPENSSL_LIBS) -Wl,-z,noexecstack
+	FL_WIFI_DB_PATH=/tmp/fl_test_wifi.db rm -f /tmp/fl_test_wifi.db; ./tests/test_wifi_db
+
 .PHONY: test_p3_net_tools
-test_p3_net_tools: $(NET_ASM_OBJ) $(MEM_ASM_OBJ) $(NET_TEST_SHELL_OBJS) priority_queue.o kernel/core/time/timekeeping.o kernel/core/sys/ipc.o
+test_p3_net_tools: $(NET_ASM_OBJ) $(MEM_ASM_OBJ) $(NET_TEST_SHELL_OBJS) $(NET_TEST_EXTRA_OBJS) priority_queue.o kernel/core/time/timekeeping.o kernel/core/sys/ipc.o
 	$(CC) $(CFLAGS) $(TEST_SANITIZE) -o tests/test_p3_net_tools \
 	  tests/test_p3_net_tools.c userland/command/cmd_net_tools.c \
 	  $(NET_TEST_SHELL_OBJS) \
 	  $(NET_CORE_SRCS) kernel/core/sched/workqueue.c kernel/core/sys/ipc.o kernel/core/time/timekeeping.o priority_queue.o \
 	  $(MEM_ASM_OBJ) $(NET_ASM_OBJ) \
-	  $(NET_TEST_LIBS) -pthread -Wl,-z,noexecstack
+	  $(NET_TEST_EXTRA_OBJS) $(NET_TEST_LIBS) -pthread -Wl,-z,noexecstack
 	./tests/test_p3_net_tools
 
 # Cross-subnet (multi-network) end-to-end demo + tcpdump capture on the

@@ -1,0 +1,31 @@
+MAJOR_VERSION=4
+STANDARD_VERSION=2
+RELEASE_VERSION=0
+PRERELEASE=1
+DEV_VERSION=11
+DESCRIPTION<<VER_END
+PRE 4.2.0 (#302, #303 on cursor/p3-issues-279-302-303):
+
+#302 — post-PR #301 cleanup
+- contract_p3_wire.h: fl_net_endpoint_t at contract layer (wire rev 4); fl_net_server_addr_t typedef alias; drop net_endpoint.c layout _Static_asserts
+- server_shared_db: catalog message transfer_id is UUID v4 (OpenSSL RAND_bytes) with PRIMARY KEY retry (up to 3 attempts)
+- FL_CONTRACT_P3_NETWORKING_REV 17
+
+#303 — IPv6 UI/UX (foundation from #280 / PR #301)
+- fl_net_endpoint_format: a.b.c.d:port or [addr]:port
+- fl_net_route_snapshot6; ifconfig prints inet / inet6 from route tables (loopback inet6 ::1 prefixlen 128)
+- Shell: ping6; nslookup and resolve print A + AAAA; server host/join/connected use formatted endpoints
+- fl_net_endpoint_parse_bind: server join -bind accepts bare IPv4/IPv6 (port 0) for multi-IP demos
+- OP_MEMBER_LIST_SNAPSHOT optional peer tail (family/port/addr); client roster shows [addr]:port
+- ping6 batch tokenizer matches ping (-c/-W then host)
+- fl_net_icmpv6_echo_exchange and fl_net_ping6 for loopback ICMPv6
+
+#279 — Wi-Fi 802.11ax foundation (P3-10)
+- contract_p3_wifi.h promoted; FL_CONTRACT_P3_NETWORKING_REV 18; net_wifi_he IE parser
+- SQLite wifi_router table (name, hashed password, salt, BSSID/band/channel/auth/HE makeup, join state) in userland/shell/fl_wifi.db
+- Shell: wifi scan, wifi join <name> [password], wifi known; hosted lab scan/join until P4 NIC
+- Docs: P3-10 module ~✅ in ROADMAP/P3_NETWORKING; docs/GITHUB_ISSUE_SYNC_279.md for #279 checklist
+- #279 lab tail: FSM through UP, loopback fl_net_driver_t, mgmt probe/assoc, SAE/WPA crypto+vectors, TWT mock, make test_p3_wifi expanded
+VER_END
+
+RELEASE_DATE=2026-06-02

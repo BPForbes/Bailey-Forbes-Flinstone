@@ -82,11 +82,24 @@ static int test_catalog_msg_meta_pending_commit(void)
     return 0;
 }
 
+static int transfer_id_looks_like_uuid_v4(const char *id)
+{
+    size_t n;
+    if (!id)
+        return 0;
+    n = strlen(id);
+    if (n != 36u)
+        return 0;
+    return id[8] == '-' && id[13] == '-' && id[18] == '-' && id[23] == '-' &&
+           id[14] == '4';
+}
+
 static int test_catalog_message_public(void)
 {
     char tmp[] = "/tmp/fl_catalog_msg_XXXXXX";
     const uint8_t body[] = "hello catalog";
     char hash[FL_SERVER_CATALOG_HASH_HEX_MAX];
+    char transfer_id[FL_SERVER_SHARE_ID_MAX];
     fl_server_catalog_entry_t entry;
 
     ASSERT(mkdtemp(tmp) != NULL);
@@ -96,8 +109,11 @@ static int test_catalog_message_public(void)
     g_cwd[sizeof(g_cwd) - 1u] = '\0';
 
     ASSERT(fl_server_catalog_store_message(2u, 0u, "broadcast", body, sizeof(body) - 1u,
-                                         0u, FL_FILE_FLAG_PUBLIC,
-                                         NULL, 0, hash, sizeof(hash)) == FL_RESULT_OK);
+                                         0u, FL_FILE_FLAG_PUBLIC, transfer_id,
+                                         sizeof(transfer_id), hash, sizeof(hash)) ==
+           FL_RESULT_OK);
+    ASSERT(transfer_id_looks_like_uuid_v4(transfer_id));
+    ASSERT(fl_server_catalog_lookup_transfer(transfer_id, &entry) == FL_RESULT_OK);
     ASSERT(fl_server_catalog_fetch_by_hash(hash, 5u, 0u, &entry, NULL, 0, NULL) ==
            FL_RESULT_OK);
     ASSERT(entry.is_public == 1u);

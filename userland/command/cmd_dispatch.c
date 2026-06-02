@@ -92,6 +92,8 @@ int fl_shell_cmd_dispatch(fl_shell_cmd_no_t no, int argc, char **argv) {
         return cmd_whoami_run(argc, argv);
     case FL_SCMD_PING:
         return cmd_ping_run(argc, argv);
+    case FL_SCMD_PING6:
+        return cmd_ping6_run(argc, argv);
     case FL_SCMD_CHECK:
         return cmd_check_run(argc, argv);
     case FL_SCMD_SERVER:
@@ -110,8 +112,12 @@ int fl_shell_cmd_dispatch(fl_shell_cmd_no_t no, int argc, char **argv) {
         return cmd_netstat_run(argc, argv);
     case FL_SCMD_NSLOOKUP:
         return cmd_nslookup_run(argc, argv);
+    case FL_SCMD_RESOLVE:
+        return cmd_resolve_run(argc, argv);
     case FL_SCMD_NETSH:
         return cmd_netsh_run(argc, argv);
+    case FL_SCMD_WIFI:
+        return cmd_wifi_run(argc, argv);
     default:
         return -1;
     }
