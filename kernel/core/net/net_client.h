@@ -26,12 +26,14 @@ typedef struct fl_net_client_s fl_net_client_t;
  * Event callback fired by `fl_net_client_poll` for each inbound frame. The
  * `data` pointer is whatever the caller passed to `_poll`. `text` is a
  * NUL-terminated copy of the payload (already-truncated to fit a stack
- * buffer); for HELLO_ACK, `member_id_out` is the assigned id parsed from the
- * payload prefix.
+ * buffer); for HELLO_ACK, `member_id` is the assigned id parsed from the
+ * payload prefix. For **HOST_PROMOTE** / **HOST_REDIRECT**, `host_ep` is
+ * the decoded successor address (non-NULL); `text` is empty for those events.
  */
 typedef void (*fl_net_client_event_cb)(fl_net_server_event_kind_t kind,
                                        const char *text,
                                        fl_net_server_member_id_t member_id,
+                                       const fl_net_endpoint_t *host_ep,
                                        void *data);
 
 /* Cached snapshot of one remote member (parsed from
@@ -61,9 +63,14 @@ struct fl_net_client_s {
     size_t member_count;
     /* Non-blocking poll parser state; reset on init + every (re)connect. */
     fl_net_session_rx_t rx_state;
-    /** Wire length of the last HOST_PROMOTE / HOST_PROMOTE6 payload delivered. */
-    uint16_t last_host_promote_payload_len;
+    /** Last decoded HOST_PROMOTE / PROMOTE6 endpoint (#283). */
+    fl_net_endpoint_t last_host_promote_ep;
+    uint8_t last_host_promote_ep_valid;
 };
+
+/** Decode v4 **OP_CTRL_HOST_PROMOTE** or v6 **OP_CTRL_HOST_PROMOTE6** payload. */
+int fl_net_session_decode_host_promote(const uint8_t *payload, uint16_t plen,
+                                       fl_net_endpoint_t *out);
 
 /**
  * Dispatch one already-received session frame: updates the cached roster

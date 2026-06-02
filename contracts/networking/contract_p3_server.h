@@ -192,6 +192,9 @@ typedef struct fl_net_server_addr {
     } addr;
 } fl_net_server_addr_t;
 
+/** Alias for dual-stack member addressing (#283). */
+typedef fl_net_server_addr_t fl_net_addr_t;
+
 /** Member id assigned by the host at HELLO_ACK. `0` is reserved as "none". */
 typedef uint16_t fl_net_server_member_id_t;
 #define FL_NET_SERVER_MEMBER_ID_NONE ((fl_net_server_member_id_t)0)

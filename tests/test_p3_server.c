@@ -63,10 +63,18 @@ typedef struct {
     char last_err[256];
 } event_log_t;
 
+static fl_net_endpoint_t g_last_promote_ep;
+static int g_last_promote_ep_valid;
+
 static void event_sink(fl_net_server_event_kind_t kind, const char *text,
-                       fl_net_server_member_id_t mid, void *data) {
+                       fl_net_server_member_id_t mid,
+                       const fl_net_endpoint_t *host_ep, void *data) {
     event_log_t *log = (event_log_t *)data;
     (void)mid;
+    if (host_ep) {
+        g_last_promote_ep = *host_ep;
+        g_last_promote_ep_valid = 1;
+    }
     if (!log)
         return;
     switch (kind) {
@@ -528,6 +536,33 @@ static int test_endpoint_brackets(void) {
     return 0;
 }
 
+static int test_host_promote_callback_ep(void) {
+    fl_net_client_t client;
+    uint8_t payload[FL_NET_SESSION_CTRL_HOST_PROMOTE6_PAYLOAD_LEN];
+    static const uint8_t native6[16] =
+        {0x20, 0x01, 0x0d, 0xb8, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1};
+    event_log_t log;
+
+    memset(&log, 0, sizeof(log));
+    fl_net_client_init(&client);
+    client.assigned_member_id = 2u;
+    client.state = FL_NET_CLIENT_STATE_CONNECTED;
+
+    g_last_promote_ep_valid = 0;
+    fl_net_put_u16_be(payload, 2u);
+    memcpy(payload + 2, native6, 16);
+    fl_net_put_u16_be(payload + 18, 50123u);
+    (void)fl_net_client_dispatch_frame(&client, (uint8_t)FL_NET_SESSION_OP_CTRL_HOST_PROMOTE6,
+                                       payload, (uint16_t)sizeof(payload), event_sink, &log);
+    ASSERT(g_last_promote_ep_valid);
+    ASSERT(g_last_promote_ep.family == FL_NET_ADDR_FAMILY_V6);
+    ASSERT(g_last_promote_ep.port_host == 50123u);
+    ASSERT(memcmp(g_last_promote_ep.addr.v6_be, native6, 16) == 0);
+    ASSERT(log.host_promotes == 1);
+    ASSERT(log.host_redirects == 0);
+    return 0;
+}
+
 static int test_host_promote6_v4_mapped(void) {
     uint8_t payload[FL_NET_SESSION_CTRL_HOST_PROMOTE6_PAYLOAD_LEN];
     uint32_t ip = 0u;
@@ -597,6 +632,12 @@ int main(void) {
     printf("test_p3_server: OP_CTRL_HOST_PROMOTE6 v4-mapped (#283)... ");
     fflush(stdout);
     if (test_host_promote6_v4_mapped() != 0)
+        return 1;
+    puts("ok");
+
+    printf("test_p3_server: host promote callback endpoint (#283)... ");
+    fflush(stdout);
+    if (test_host_promote_callback_ep() != 0)
         return 1;
     puts("ok");
 

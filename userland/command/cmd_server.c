@@ -59,34 +59,6 @@ static int parse_endpoint_full(const char *s, fl_net_endpoint_t *out) {
     return fl_net_endpoint_parse(s, out) ? 0 : -1;
 }
 
-static int parse_host_promote_payload(const uint8_t *payload, uint16_t plen,
-                                      fl_net_endpoint_t *out)
-{
-    uint32_t v4_be = 0u;
-
-    if (!payload || !out)
-        return -1;
-    memset(out, 0, sizeof(*out));
-    if (plen >= FL_NET_SESSION_CTRL_HOST_PROMOTE6_PAYLOAD_LEN) {
-        out->port_host = fl_net_get_u16_be(payload + 18);
-        memcpy(out->addr.v6_be, payload + 2, 16);
-        if (fl_net_ipv6_wire_to_v4(out->addr.v6_be, &v4_be)) {
-            out->family = FL_NET_ADDR_FAMILY_V4;
-            out->addr.v4_be = v4_be;
-            return 0;
-        }
-        out->family = FL_NET_ADDR_FAMILY_V6;
-        return 0;
-    }
-    if (plen >= FL_NET_SESSION_CTRL_HOST_PROMOTE_PAYLOAD_LEN) {
-        out->family = FL_NET_ADDR_FAMILY_V4;
-        out->addr.v4_be = fl_net_get_u32_nbo(payload + 2);
-        out->port_host = fl_net_get_u16_be(payload + 6);
-        return 0;
-    }
-    return -1;
-}
-
 static fl_net_server_member_id_t parse_member_id_arg(const char *s) {
     long v;
     char *end = NULL;
@@ -130,7 +102,8 @@ static void spawn_promote_thread(int am_new_host, const fl_net_endpoint_t *new_h
 static void maybe_handle_nick_prompt_sync(void);
 
 static void client_event_print(fl_net_server_event_kind_t kind, const char *text,
-                               fl_net_server_member_id_t mid, void *data) {
+                               fl_net_server_member_id_t mid,
+                               const fl_net_endpoint_t *host_ep, void *data) {
     (void)data;
     switch (kind) {
     case FL_NET_SERVER_EVENT_JOIN_ANNOUNCE:
@@ -197,20 +170,14 @@ static void client_event_print(fl_net_server_event_kind_t kind, const char *text
         break;
     case FL_NET_SERVER_EVENT_HOST_PROMOTE:
     case FL_NET_SERVER_EVENT_HOST_REDIRECT: {
-        const uint8_t *p = (const uint8_t *)text;
-        fl_net_endpoint_t new_host;
         int am_new_host = (kind == FL_NET_SERVER_EVENT_HOST_PROMOTE) ? 1 : 0;
         (void)mid;
-        if (!p) {
-            fl_color_warn("host promote received with no payload; leaving");
+        (void)text;
+        if (!host_ep) {
+            fl_color_warn("host promote received with no address; leaving");
             return;
         }
-        if (parse_host_promote_payload(p, g_client.last_host_promote_payload_len,
-                                       &new_host) != 0) {
-            fl_color_warn("host promote payload unsupported");
-            return;
-        }
-        spawn_promote_thread(am_new_host, &new_host);
+        spawn_promote_thread(am_new_host, host_ep);
         break;
     }
     case FL_NET_SERVER_EVENT_HELLO_ACK:

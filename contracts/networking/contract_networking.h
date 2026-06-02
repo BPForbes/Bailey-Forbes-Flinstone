@@ -52,6 +52,7 @@ _Static_assert(FL_CONTRACT_P3_WIRE_REV == FL_CONTRACT_P3_NETWORKING_EXPECT_WIRE_
 #include "contract_p3_session_wire.h"
 #include "contract_p3_channel_sidecar.h"
 #include "contract_p3_sftp_adapter.h"
+#include "contract_p3_host_promote6.h"
 #include "contract_p3_server.h"
 
 #define FL_CONTRACT_P3_VOCABULARY_LOCK 1

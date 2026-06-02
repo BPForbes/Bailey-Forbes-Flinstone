@@ -12,11 +12,40 @@
 #include "net_file_delivery.h"
 
 #include "contract_p3_packet.h"
+#include "contract_p3_session_wire.h"
+#include "net_endian.h"
 #include "net_server.h" /* fl_net_session_*_frame, encode/recv helpers */
 #include "net_socket.h"
 
 #include <stdio.h>
 #include <string.h>
+
+int fl_net_session_decode_host_promote(const uint8_t *payload, uint16_t plen,
+                                       fl_net_endpoint_t *out) {
+    uint32_t v4_be = 0u;
+
+    if (!payload || !out)
+        return -1;
+    memset(out, 0, sizeof(*out));
+    if (plen >= FL_NET_SESSION_CTRL_HOST_PROMOTE6_PAYLOAD_LEN) {
+        out->port_host = fl_net_get_u16_be(payload + 18);
+        memcpy(out->addr.v6_be, payload + 2, 16);
+        if (fl_net_ipv6_wire_to_v4(out->addr.v6_be, &v4_be)) {
+            out->family = FL_NET_ADDR_FAMILY_V4;
+            out->addr.v4_be = v4_be;
+            return 0;
+        }
+        out->family = FL_NET_ADDR_FAMILY_V6;
+        return 0;
+    }
+    if (plen >= FL_NET_SESSION_CTRL_HOST_PROMOTE_PAYLOAD_LEN) {
+        out->family = FL_NET_ADDR_FAMILY_V4;
+        out->addr.v4_be = fl_net_get_u32_nbo(payload + 2);
+        out->port_host = fl_net_get_u16_be(payload + 6);
+        return 0;
+    }
+    return -1;
+}
 
 fl_result_t fl_net_client_init(fl_net_client_t *client) {
     if (!client)
@@ -253,6 +282,7 @@ static fl_net_server_event_kind_t opcode_to_event(uint8_t opcode) {
     case FL_NET_SESSION_OP_MEMBER_LIST_SNAPSHOT:
         return FL_NET_SERVER_EVENT_MEMBER_LIST;
     case FL_NET_SESSION_OP_CTRL_HOST_PROMOTE:
+    case FL_NET_SESSION_OP_CTRL_HOST_PROMOTE6:
         return FL_NET_SERVER_EVENT_HOST_PROMOTE;
     case FL_NET_SESSION_OP_ERR:
         return FL_NET_SERVER_EVENT_ERR;
@@ -539,8 +569,8 @@ fl_net_client_dispatch_frame(fl_net_client_t *client, uint8_t opcode,
     if (opcode == (uint8_t)FL_NET_SESSION_OP_MEMBER_LIST_SNAPSHOT) {
         client_decode_member_list(client, payload, plen);
         if (cb)
-            cb(FL_NET_SERVER_EVENT_MEMBER_LIST, "",
-               FL_NET_SERVER_MEMBER_ID_NONE, data);
+            cb(FL_NET_SERVER_EVENT_MEMBER_LIST, "", FL_NET_SERVER_MEMBER_ID_NONE,
+               NULL, data);
         return FL_NET_SERVER_EVENT_MEMBER_LIST;
     }
 
@@ -560,7 +590,10 @@ fl_net_client_dispatch_frame(fl_net_client_t *client, uint8_t opcode,
         mid = (fl_net_server_member_id_t)
             (((uint16_t)payload[0] << 8) | payload[1]);
         text_off = 0u;
-        client->last_host_promote_payload_len = plen;
+        client->last_host_promote_ep_valid = 0u;
+        if (fl_net_session_decode_host_promote(payload, plen,
+                                               &client->last_host_promote_ep) == 0)
+            client->last_host_promote_ep_valid = 1u;
         kind = (mid == client->assigned_member_id)
                    ? FL_NET_SERVER_EVENT_HOST_PROMOTE
                    : FL_NET_SERVER_EVENT_HOST_REDIRECT;
@@ -570,7 +603,10 @@ fl_net_client_dispatch_frame(fl_net_client_t *client, uint8_t opcode,
         mid = (fl_net_server_member_id_t)
             (((uint16_t)payload[0] << 8) | payload[1]);
         text_off = 0u;
-        client->last_host_promote_payload_len = plen;
+        client->last_host_promote_ep_valid = 0u;
+        if (fl_net_session_decode_host_promote(payload, plen,
+                                               &client->last_host_promote_ep) == 0)
+            client->last_host_promote_ep_valid = 1u;
         kind = (mid == client->assigned_member_id)
                    ? FL_NET_SERVER_EVENT_HOST_PROMOTE
                    : FL_NET_SERVER_EVENT_HOST_REDIRECT;
@@ -607,8 +643,18 @@ fl_net_client_dispatch_frame(fl_net_client_t *client, uint8_t opcode,
         text[text_len] = '\0';
     }
 
-    if (cb && kind != FL_NET_SERVER_EVENT_NONE)
-        cb(kind, text, mid, data);
+    if (cb && kind != FL_NET_SERVER_EVENT_NONE) {
+        const fl_net_endpoint_t *host_ep = NULL;
+
+        if ((kind == FL_NET_SERVER_EVENT_HOST_PROMOTE ||
+             kind == FL_NET_SERVER_EVENT_HOST_REDIRECT) &&
+            client->last_host_promote_ep_valid)
+            host_ep = &client->last_host_promote_ep;
+        if (kind == FL_NET_SERVER_EVENT_HOST_PROMOTE ||
+            kind == FL_NET_SERVER_EVENT_HOST_REDIRECT)
+            text[0] = '\0';
+        cb(kind, text, mid, host_ep, data);
+    }
     return kind;
 }
 
@@ -646,8 +692,8 @@ int fl_net_client_poll(fl_net_client_t *client, fl_net_client_event_cb cb,
             }
             fl_net_session_rx_reset(&client->rx_state);
             if (cb)
-                cb(FL_NET_SERVER_EVENT_CLOSED, "",
-                   FL_NET_SERVER_MEMBER_ID_NONE, data);
+                cb(FL_NET_SERVER_EVENT_CLOSED, "", FL_NET_SERVER_MEMBER_ID_NONE,
+                   NULL, data);
             dispatched++;
             break;
         }
