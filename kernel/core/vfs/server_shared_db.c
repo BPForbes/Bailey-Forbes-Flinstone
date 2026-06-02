@@ -13,7 +13,6 @@
 #include <time.h>
 
 static sqlite3 *s_catalog_db;
-static uint32_t s_msg_serial;
 
 static fl_result_t db_exec(sqlite3 *sql, const char *stmt)
 {
@@ -504,9 +503,6 @@ fl_result_t fl_server_catalog_store_message(uint16_t sender_member_id,
         return FL_RESULT_ERR;
     if (fl_server_shared_sha256_hex(body, body_len, hash_hex, sizeof(hash_hex)) != FL_RESULT_OK)
         return FL_RESULT_ERR;
-    s_msg_serial++;
-    snprintf(transfer_id, sizeof(transfer_id), "msg-%lu-%u",
-             (unsigned long)now, s_msg_serial);
     if (write_blob_file(hash_hex, body, body_len, storage_relpath,
                         sizeof(storage_relpath)) != FL_RESULT_OK)
         return FL_RESULT_ERR;
@@ -514,24 +510,51 @@ fl_result_t fl_server_catalog_store_message(uint16_t sender_member_id,
                  (file_perms & FL_FILE_FLAG_PUBLIC) != 0) ? 1 : 0;
     if (sqlite3_prepare_v2(s_catalog_db, ins, -1, &st, NULL) != SQLITE_OK)
         return FL_RESULT_ERR;
-    sqlite3_bind_text(st, 1, transfer_id, -1, SQLITE_TRANSIENT);
-    sqlite3_bind_text(st, 2, hash_hex, -1, SQLITE_TRANSIENT);
-    sqlite3_bind_int(st, 3, (int)FL_CHANNEL_PAYLOAD_MSG);
-    sqlite3_bind_int(st, 4, (int)sender_member_id);
-    sqlite3_bind_int(st, 5, (int)receiver_member_id);
-    sqlite3_bind_int(st, 6, (int)file_perms);
-    sqlite3_bind_int(st, 7, is_public);
-    sqlite3_bind_int64(st, 8, (sqlite3_int64)now);
-    sqlite3_bind_int64(st, 9, (sqlite3_int64)expires_at);
-    sqlite3_bind_text(st, 10, name, -1, SQLITE_TRANSIENT);
-    sqlite3_bind_text(st, 11, storage_relpath, -1, SQLITE_TRANSIENT);
-    sqlite3_bind_int(st, 12, (int)FL_SERVER_CATALOG_COMPLETE);
-    sqlite3_bind_int64(st, 13, (sqlite3_int64)body_len);
-    if (sqlite3_step(st) != SQLITE_DONE) {
+    {
+        int attempt;
+        int inserted = 0;
+
+        for (attempt = 0; attempt < 3; attempt++) {
+            int rc;
+            int ex;
+
+            if (fl_server_shared_uuid_v4_lower(transfer_id, sizeof(transfer_id)) !=
+                FL_RESULT_OK) {
+                sqlite3_finalize(st);
+                return FL_RESULT_ERR;
+            }
+            if (attempt > 0) {
+                sqlite3_reset(st);
+                sqlite3_clear_bindings(st);
+            }
+            sqlite3_bind_text(st, 1, transfer_id, -1, SQLITE_TRANSIENT);
+            sqlite3_bind_text(st, 2, hash_hex, -1, SQLITE_TRANSIENT);
+            sqlite3_bind_int(st, 3, (int)FL_CHANNEL_PAYLOAD_MSG);
+            sqlite3_bind_int(st, 4, (int)sender_member_id);
+            sqlite3_bind_int(st, 5, (int)receiver_member_id);
+            sqlite3_bind_int(st, 6, (int)file_perms);
+            sqlite3_bind_int(st, 7, is_public);
+            sqlite3_bind_int64(st, 8, (sqlite3_int64)now);
+            sqlite3_bind_int64(st, 9, (sqlite3_int64)expires_at);
+            sqlite3_bind_text(st, 10, name, -1, SQLITE_TRANSIENT);
+            sqlite3_bind_text(st, 11, storage_relpath, -1, SQLITE_TRANSIENT);
+            sqlite3_bind_int(st, 12, (int)FL_SERVER_CATALOG_COMPLETE);
+            sqlite3_bind_int64(st, 13, (sqlite3_int64)body_len);
+            rc = sqlite3_step(st);
+            if (rc == SQLITE_DONE) {
+                inserted = 1;
+                break;
+            }
+            ex = sqlite3_extended_errcode(s_catalog_db);
+            if (ex == SQLITE_CONSTRAINT_PRIMARYKEY || ex == SQLITE_CONSTRAINT)
+                continue;
+            sqlite3_finalize(st);
+            return FL_RESULT_ERR;
+        }
         sqlite3_finalize(st);
-        return FL_RESULT_ERR;
+        if (!inserted)
+            return FL_RESULT_ERR;
     }
-    sqlite3_finalize(st);
     if (db_set_acl(s_catalog_db, transfer_id, sender_member_id, receiver_member_id,
                    is_public) != FL_RESULT_OK)
         return FL_RESULT_ERR;

@@ -1,23 +1,11 @@
 #ifndef NET_ENDPOINT_H
 #define NET_ENDPOINT_H
 
+#include "contract_p3_wire.h"
 #include "contract_result.h"
 
 #include <stddef.h>
 #include <stdint.h>
-
-/** Internal IP-version tags (4 / 6), not POSIX AF_INET / AF_INET6 socket constants. */
-#define FL_NET_ADDR_FAMILY_V4 4u
-#define FL_NET_ADDR_FAMILY_V6 6u
-
-typedef struct fl_net_endpoint {
-    uint8_t family;
-    uint16_t port_host;
-    union {
-        uint32_t v4_be;
-        uint8_t v6_be[16];
-    } addr;
-} fl_net_endpoint_t;
 
 /** Parse `host:port` or `[host]:port`. Supports IPv4, `::1`, v4-mapped IPv6, native IPv6. */
 int fl_net_endpoint_parse(const char *s, fl_net_endpoint_t *out);

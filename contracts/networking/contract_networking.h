@@ -23,7 +23,7 @@
 #include "contract_p3_socket.h"
 #include "contract_p3_trust.h"
 
-#define FL_CONTRACT_P3_NETWORKING_REV 16
+#define FL_CONTRACT_P3_NETWORKING_REV 17
 
 #ifndef FL_CONTRACT_P3_WIRE_REV
 #error "FL_CONTRACT_P3_WIRE_REV must be defined by contract_p3_wire.h"
@@ -31,7 +31,7 @@
 _Static_assert(FL_CONTRACT_P3_WIRE_REV >= 1, "Unexpected P3 wire revision");
 
 /** Keep in lockstep with **FL_CONTRACT_P3_WIRE_REV** in **contract_p3_wire.h**. */
-#define FL_CONTRACT_P3_NETWORKING_EXPECT_WIRE_REV 3
+#define FL_CONTRACT_P3_NETWORKING_EXPECT_WIRE_REV 4
 _Static_assert(FL_CONTRACT_P3_WIRE_REV == FL_CONTRACT_P3_NETWORKING_EXPECT_WIRE_REV,
                "Bump FL_CONTRACT_P3_NETWORKING_REV when contract_p3_wire.h FL_CONTRACT_P3_WIRE_REV changes");
 

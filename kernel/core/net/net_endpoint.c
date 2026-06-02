@@ -1,6 +1,5 @@
 #include "net_endpoint.h"
 
-#include "contract_p3_server.h"
 #include "net_endian.h"
 #include "net_ipv4.h"
 
@@ -184,11 +183,4 @@ int fl_net_endpoint_parse_v4(const char *s, uint32_t *addr_be_out, uint16_t *por
     return 1;
 }
 
-_Static_assert(sizeof(fl_net_endpoint_t) == sizeof(fl_net_server_addr_t),
-               "fl_net_endpoint_t and fl_net_server_addr_t must match");
-_Static_assert(offsetof(fl_net_endpoint_t, family) == offsetof(fl_net_server_addr_t, family),
-               "endpoint/server_addr family offset");
-_Static_assert(offsetof(fl_net_endpoint_t, port_host) == offsetof(fl_net_server_addr_t, port_host),
-               "endpoint/server_addr port_host offset");
-_Static_assert(offsetof(fl_net_endpoint_t, addr) == offsetof(fl_net_server_addr_t, addr),
-               "endpoint/server_addr address union offset");
+/* fl_net_endpoint_t layout is normative in contract_p3_wire.h; fl_net_server_addr_t aliases it. */
