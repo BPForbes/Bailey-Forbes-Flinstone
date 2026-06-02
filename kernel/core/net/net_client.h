@@ -54,9 +54,8 @@ struct fl_net_client_s {
     fl_net_client_state_t state;
     char principal[FL_NET_SERVER_PRINCIPAL_MAX];
     char display_name[FL_NET_SERVER_DISPLAY_NAME_MAX];
-    /* Own TCP source from getsockname() on connect; used for host transfer. */
+    /* Own TCP source from getsockname() on connect; used for host transfer (#283). */
     fl_net_endpoint_t local_ep;
-    uint32_t local_ip_be;
     /* Cached OP_MEMBER_LIST_SNAPSHOT for sender resolution + connected. */
     fl_net_client_member_t members[FL_NET_SERVER_MAX_MEMBERS];
     size_t member_count;

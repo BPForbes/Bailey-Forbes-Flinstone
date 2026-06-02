@@ -116,12 +116,12 @@ static fl_result_t client_connect_ep_impl(fl_net_client_t *client,
         client->display_name[name_len] = '\0';
     }
     memset(&local_ep, 0, sizeof(local_ep));
-    if (fl_net_sock_local_endpoint(h, &local_ep) == FL_RESULT_OK) {
+    if (fl_net_sock_local_endpoint(h, &local_ep) == FL_RESULT_OK)
         client->local_ep = local_ep;
-        (void)fl_net_endpoint_to_v4(&local_ep, &client->local_ip_be);
-    } else {
-        (void)fl_net_sock_local_ipv4(h, &client->local_ip_be);
-        fl_net_endpoint_from_v4(client->local_ip_be, 0u, &client->local_ep);
+    else {
+        uint32_t local_v4 = 0u;
+        (void)fl_net_sock_local_ipv4(h, &local_v4);
+        fl_net_endpoint_from_v4(local_v4, 0u, &client->local_ep);
     }
     (void)fl_net_sock_set_nonblock(h, 1);
     fl_net_session_rx_reset(&client->rx_state);
