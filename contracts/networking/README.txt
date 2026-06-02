@@ -33,7 +33,8 @@ shards below, and **FL_CONTRACT_P3_VOCABULARY_LOCK**.
 | *contract_p3_dns.h* | P3-8 |
 | *contract_p3_tls_hosted.h* | P3-9 |
 | *contract_p3_wifi_deferred.h* | P3-10 |
-| *contract_p3_ipv6_deferred.h* | P3-11 |
+| *contract_p3_ipv6.h* | P3-11 (promoted; *contract_p3_ipv6_deferred.h* forwards) |
+| *contract_p3_host_promote6.h* | P3-13 / P3-11 host-transfer v6 wire (#283) |
 | *contract_p3_background.h* | P3-14 |
 | *contract_p3_sockets.h* | P3-13a (socket shim vocabulary) |
 | *contract_p3_session_wire.h* | P3-13 session frame opcodes, file routing, and channel validation |

@@ -4,7 +4,7 @@ Coordination doc for branch **`cursor/github-issues-238-267-b55d`** → PR **#27
 
 Scope: issues **#238** through **#267** inclusive, **excluding [#239](https://github.com/BPForbes/Bailey-Forbes-Flinstone/issues/239)** (P3-13 chat **`server`** — separate train; see [`docs/P3_13_CHAT_SERVER.md`](P3_13_CHAT_SERVER.md)).
 
-Primary networking map: [`docs/P3_NETWORKING.md`](P3_NETWORKING.md). Deferred **P3-10** / **P3-11**: [`docs/P3_NETWORKING_DEFERRED.md`](P3_NETWORKING_DEFERRED.md).
+Primary networking map: [`docs/P3_NETWORKING.md`](P3_NETWORKING.md). **P3-10** deferral and **P3-11** promotion status: [`docs/P3_NETWORKING_DEFERRED.md`](P3_NETWORKING_DEFERRED.md). **PR #301** issue-body sync: [`docs/GITHUB_ISSUE_SYNC_PR301.md`](GITHUB_ISSUE_SYNC_PR301.md).
 
 ## Resolved on this branch (closes in PR #275)
 
@@ -16,7 +16,7 @@ Primary networking map: [`docs/P3_NETWORKING.md`](P3_NETWORKING.md). Deferred **
 | [#251](https://github.com/BPForbes/Bailey-Forbes-Flinstone/issues/251) | Multi-nameserver DNS, retries, rotating TXIDs |
 | [#252](https://github.com/BPForbes/Bailey-Forbes-Flinstone/issues/252) | **P3-9** OpenSSL client bridge when **libssl** is present |
 | [#257](https://github.com/BPForbes/Bailey-Forbes-Flinstone/issues/257) | **P3-10** Wi‑Fi deferred tracker + contract cross-link |
-| [#258](https://github.com/BPForbes/Bailey-Forbes-Flinstone/issues/258) | **P3-11** IPv6 deferred tracker + contract cross-link |
+| [#258](https://github.com/BPForbes/Bailey-Forbes-Flinstone/issues/258) | **P3-11** IPv6 tracker (legacy); active epic **[#280](https://github.com/BPForbes/Bailey-Forbes-Flinstone/issues/280)** — **`contract_p3_ipv6.h`** + loopback foundation on **PR #301** |
 | [#259](https://github.com/BPForbes/Bailey-Forbes-Flinstone/issues/259) | **PX-11** minimal HTTP/1.0 GET (**`net_http.c`**) |
 | [#260](https://github.com/BPForbes/Bailey-Forbes-Flinstone/issues/260) | **PX-12** TFTP RRQ/client subset (**`net_tftp.c`**) |
 | [#262](https://github.com/BPForbes/Bailey-Forbes-Flinstone/issues/262) | Egress-only ICMP/UDP; no Linux datagram fallback when unrouted |

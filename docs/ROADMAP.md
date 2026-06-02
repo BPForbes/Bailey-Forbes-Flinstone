@@ -356,7 +356,7 @@ Implement **bottom-up**: **L2 (link layer)** → IPv4/UDP → TCP → sockets fa
 | **P3-8** | **DNS client** | Resolver for A/AAAA records (AAAA optional). | **RFC 1035** semantics subset; **timeouts** and **retry caps**. |
 | **P3-9** | **TLS (hosted)** | Prefer **userland** TLS (e.g. mbedTLS/OpenSSL) behind shell command or libc. | **No TLS in “kernel” layer** until stable memory and time APIs exist on K/B. |
 | **P3-10** | **Wi‑Fi station path** `[DEFERRED]` | Do **not** silently drop the gap: either promote to active work or keep this row as the **explicit deferral**. | **IEEE 802.11** / **802.11i** / **802.1X** / **EAP** (informative stack); **P3-12** DHCP after L2; **not** an A1–A2 gate. When un-deferred, expect **P4**-class firmware/driver work plus reuse of **P3** IPv4/UDP/TCP. |
-| **P3-11** | **IPv6 + ICMPv6** `[DEFERRED]` | Keep dual-stack as an **explicit** later step, not an accidental omission. | **RFC 8200** (IPv6); **RFC 4291** (addressing); **RFC 4443** (ICMPv6); **RFC 4861** (ND); ties to **P3-1** L2 and **P3-8** **AAAA** when promoted. |
+| **P3-11** | **IPv6 + ICMPv6** | Contract **✅**; module integration **~✅** on loopback (**PR #301** / **#280**). Epic tail: TAP/wire egress, TCPv6, SLAAC/DHCPv6. | **RFC 8200**; **RFC 4291**; **RFC 4443**; **RFC 4861**; **P3-8** **AAAA** stub in **`net_dns.c`**. See **`docs/P3_NETWORKING_DEFERRED.md`**. |
 | **P3-14** | **Network stack background jobs** | Async RX dequeuing, TCP timer wheel / delayed ACK (**RFC 793**), ARP cache TTL sweep; avoids one-off polling in drivers. | Scheduled on **P1-8**; **P3-1**/**P3-7**/**P1-7**; ties to **#240** ARP TTL. |
 
 **Security standards:** default **no promisc**; **no raw TX** from shell without principal + audit; rate-limit outgoing ARP/ICMP in lab builds.
@@ -557,7 +557,7 @@ Promote a **PX-** row into numbered phases when it becomes a **merge-sized** com
 |--------|----------------------------------|
 | C ABI / hosted behavior | ISO C11; POSIX.1-2008 where hosted. |
 | Networking | **IEEE 802.3** (Ethernet L2/MAC & framing); **RFC 894** (IPv4 over Ethernet); **RFC 826** (ARP); **RFC 791**, **792**, **768**, **793**, **1035**; **RFC 2131**, **2132** (DHCP, **P3-12**); later TLS **RFC 5246** / **8446** via library. |
-| IPv6 (defer) | **RFC 8200**, **4291**, **4443**, **4861** (ND). See **P3-11** `[DEFERRED]`. |
+| IPv6 (**P3-11**) | **RFC 8200**, **4291**, **4443**, **4861** (ND). Loopback foundation **~✅** (**PR #301**); production wire/TCPv6 on **#280** tail. |
 | Wi‑Fi | **IEEE 802.11**, **802.11i**; **802.1X** / **EAP**; **RFC 2131** (DHCP after link). See **P3-10** `[DEFERRED]`. |
 | HTTP / packages | **RFC 9110**, **9112**; **RFC 8446**, **5280**; **RFC 4880** (OpenPGP); Debian archive conventions (informative). |
 | Boot / firmware | **UEFI**; **GNU Multiboot2** (QEMU **`-kernel`** / GRUB); **RFC 2131**, **2132**, **1350** (PXE path); **PKCS #7** (Secure Boot). See **§12**. |
