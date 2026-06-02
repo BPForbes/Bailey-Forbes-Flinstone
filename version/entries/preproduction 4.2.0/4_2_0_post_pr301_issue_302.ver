@@ -1,8 +1,0 @@
-MAJOR_VERSION=4
-STANDARD_VERSION=2
-RELEASE_VERSION=0
-PRERELEASE=1
-DEV_VERSION=11
-DESCRIPTION=PRE 4.2.0 (#302): contract-layer fl_net_endpoint_t in contract_p3_wire.h with fl_net_server_addr_t alias (drops net_endpoint.c layout _Static_asserts); catalog message transfer_id uses UUID v4 (OpenSSL RAND_bytes) with PRIMARY KEY retry.
-
-RELEASE_DATE=2026-06-02
