@@ -403,7 +403,8 @@ FS_JAIL_SUPPORT_OBJS = kernel/core/time/timekeeping.o \
                          kernel/core/identity/path_property.o kernel/core/identity/session.o \
                          userland/identity/password_hash.o $(FL_STACK_ASM_OBJ)
 FS_JAIL_TEST_LIBS = -lsqlite3 -lstdc++ $(OPENSSL_LIBS) -pthread
-NET_TEST_LIBS = -lsqlite3 $(OPENSSL_LIBS)
+NET_TEST_EXTRA_OBJS = userland/identity/password_hash.o
+NET_TEST_LIBS = -lsqlite3 -lstdc++ $(OPENSSL_LIBS)
 TEST_ASMOBJS = $(MEM_ASM_OBJ) $(FL_STACK_ASM_OBJ) $(PORT_IO_OBJ) $(DISK_HOST_ASM_OBJ) \
                $(HISTORY_ASM_OBJ) $(NET_ASM_OBJ)
 TEST_TARGET = BPForbes_Flinstone_Tests
@@ -670,19 +671,19 @@ test_p0_p2_wiring: kernel/core/memory/fl_stack.o kernel/core/memory/exec_context
 	./tests/test_p0_p2_wiring
 
 .PHONY: test_p3_network
-test_p3_network: $(NET_ASM_OBJ) $(MEM_ASM_OBJ) $(NET_TEST_SHELL_OBJS) priority_queue.o kernel/core/time/timekeeping.o kernel/core/sys/ipc.o
+test_p3_network: $(NET_ASM_OBJ) $(MEM_ASM_OBJ) $(NET_TEST_SHELL_OBJS) $(NET_TEST_EXTRA_OBJS) priority_queue.o kernel/core/time/timekeeping.o kernel/core/sys/ipc.o
 	$(CC) $(CFLAGS) $(TEST_SANITIZE) -o tests/test_p3_network tests/test_p3_network.c \
 	  $(NET_TEST_SHELL_OBJS) \
 	  $(NET_CORE_SRCS) kernel/core/sched/workqueue.c kernel/core/sys/ipc.o kernel/core/time/timekeeping.o priority_queue.o $(MEM_ASM_OBJ) $(NET_ASM_OBJ) \
-	  $(NET_TEST_LIBS) -Wl,-z,noexecstack
+	  $(NET_TEST_EXTRA_OBJS) $(NET_TEST_LIBS) -Wl,-z,noexecstack
 	./tests/test_p3_network
 
 .PHONY: test_p3_server
-test_p3_server: $(NET_ASM_OBJ) $(MEM_ASM_OBJ) priority_queue.o kernel/core/time/timekeeping.o kernel/core/sys/ipc.o
+test_p3_server: $(NET_ASM_OBJ) $(MEM_ASM_OBJ) $(NET_TEST_EXTRA_OBJS) priority_queue.o kernel/core/time/timekeeping.o kernel/core/sys/ipc.o
 	$(CC) $(CFLAGS) $(TEST_SANITIZE) -Iuserland/shell -o tests/test_p3_server tests/test_p3_server.c \
 	  userland/shell/common.o \
 	  $(NET_CORE_SRCS) kernel/core/sched/workqueue.c kernel/core/sys/ipc.o kernel/core/time/timekeeping.o priority_queue.o $(MEM_ASM_OBJ) $(NET_ASM_OBJ) \
-	  $(NET_TEST_LIBS) -pthread -Wl,-z,noexecstack
+	  $(NET_TEST_EXTRA_OBJS) $(NET_TEST_LIBS) -pthread -Wl,-z,noexecstack
 	./tests/test_p3_server
 
 # Loopback echo coverage for the udpsend / udplisten shell verbs
@@ -690,13 +691,13 @@ test_p3_server: $(NET_ASM_OBJ) $(MEM_ASM_OBJ) priority_queue.o kernel/core/time/
 # NET_CORE_SRCS the rest of the P3 unit tests use, so the BSD socket shim
 # (`fl_net_sock_open(DGRAM)` + bind/connect/send/recv) is exercised end-to-end.
 .PHONY: test_p3_udp_cmds
-test_p3_udp_cmds: $(NET_ASM_OBJ) $(MEM_ASM_OBJ) $(NET_TEST_SHELL_OBJS) priority_queue.o kernel/core/time/timekeeping.o kernel/core/sys/ipc.o
+test_p3_udp_cmds: $(NET_ASM_OBJ) $(MEM_ASM_OBJ) $(NET_TEST_SHELL_OBJS) $(NET_TEST_EXTRA_OBJS) priority_queue.o kernel/core/time/timekeeping.o kernel/core/sys/ipc.o
 	$(CC) $(CFLAGS) $(TEST_SANITIZE) -o tests/test_p3_udp_cmds \
 	  tests/test_p3_udp_cmds.c userland/command/cmd_udp.c userland/command/cmd_registry.c \
 	  $(NET_TEST_SHELL_OBJS) \
 	  $(NET_CORE_SRCS) kernel/core/sched/workqueue.c kernel/core/sys/ipc.o kernel/core/time/timekeeping.o priority_queue.o \
 	  $(MEM_ASM_OBJ) $(NET_ASM_OBJ) \
-	  $(NET_TEST_LIBS) -pthread -Wl,-z,noexecstack
+	  $(NET_TEST_EXTRA_OBJS) $(NET_TEST_LIBS) -pthread -Wl,-z,noexecstack
 	./tests/test_p3_udp_cmds
 
 # arp / ifconfig / route / netstat / nslookup / netsh shell verb coverage
@@ -721,13 +722,13 @@ test_wifi_db: userland/identity/password_hash.o kernel/core/net/net_wifi_db.o ke
 	FL_WIFI_DB_PATH=/tmp/fl_test_wifi.db rm -f /tmp/fl_test_wifi.db; ./tests/test_wifi_db
 
 .PHONY: test_p3_net_tools
-test_p3_net_tools: $(NET_ASM_OBJ) $(MEM_ASM_OBJ) $(NET_TEST_SHELL_OBJS) priority_queue.o kernel/core/time/timekeeping.o kernel/core/sys/ipc.o
+test_p3_net_tools: $(NET_ASM_OBJ) $(MEM_ASM_OBJ) $(NET_TEST_SHELL_OBJS) $(NET_TEST_EXTRA_OBJS) priority_queue.o kernel/core/time/timekeeping.o kernel/core/sys/ipc.o
 	$(CC) $(CFLAGS) $(TEST_SANITIZE) -o tests/test_p3_net_tools \
 	  tests/test_p3_net_tools.c userland/command/cmd_net_tools.c \
 	  $(NET_TEST_SHELL_OBJS) \
 	  $(NET_CORE_SRCS) kernel/core/sched/workqueue.c kernel/core/sys/ipc.o kernel/core/time/timekeeping.o priority_queue.o \
 	  $(MEM_ASM_OBJ) $(NET_ASM_OBJ) \
-	  $(NET_TEST_LIBS) -pthread -Wl,-z,noexecstack
+	  $(NET_TEST_EXTRA_OBJS) $(NET_TEST_LIBS) -pthread -Wl,-z,noexecstack
 	./tests/test_p3_net_tools
 
 # Cross-subnet (multi-network) end-to-end demo + tcpdump capture on the
