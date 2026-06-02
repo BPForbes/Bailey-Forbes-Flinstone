@@ -17,4 +17,8 @@ fl_result_t fl_net_loopback_icmpv6_echo(const uint8_t *icmp_req, size_t icmp_len
                                         uint8_t *icmp_reply, size_t reply_cap,
                                         size_t *reply_len);
 
+/** Loopback **::1** ICMPv6 echo exchange via the software netdev (#303). */
+fl_result_t fl_net_icmpv6_echo_exchange(const uint8_t dst6[FL_NET_IPV6_ADDR_LEN], uint16_t id,
+                                        uint16_t seq, unsigned timeout_ms, double *out_rtt_ms);
+
 #endif /* NET_ICMPV6_H */

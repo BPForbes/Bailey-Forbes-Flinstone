@@ -265,6 +265,19 @@ fl_result_t fl_net_route_lookup6(const uint8_t dst6[16], fl_net_route6_entry_t *
     return FL_RESULT_OK;
 }
 
+unsigned fl_net_route_snapshot6(fl_net_route6_entry_t *out, unsigned cap) {
+    unsigned n = s_route6_count;
+    unsigned i;
+
+    if (!out || cap == 0u)
+        return s_route6_count;
+    if (n > cap)
+        n = cap;
+    for (i = 0; i < n; i++)
+        out[i] = s_routes6[i];
+    return n;
+}
+
 void fl_net_route_add6_loopback(void) {
     uint8_t loop6[16];
     uint8_t host_mac[FL_NET_ETH_ADDR_LEN];

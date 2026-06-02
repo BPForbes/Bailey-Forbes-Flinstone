@@ -1,26 +1,20 @@
 #ifndef NET_ENDPOINT_H
 #define NET_ENDPOINT_H
 
+#include "contract_p3_wire.h"
 #include "contract_result.h"
 
 #include <stddef.h>
 #include <stdint.h>
 
-/** Internal IP-version tags (4 / 6), not POSIX AF_INET / AF_INET6 socket constants. */
-#define FL_NET_ADDR_FAMILY_V4 4u
-#define FL_NET_ADDR_FAMILY_V6 6u
-
-typedef struct fl_net_endpoint {
-    uint8_t family;
-    uint16_t port_host;
-    union {
-        uint32_t v4_be;
-        uint8_t v6_be[16];
-    } addr;
-} fl_net_endpoint_t;
-
 /** Parse `host:port` or `[host]:port`. Supports IPv4, `::1`, v4-mapped IPv6, native IPv6. */
 int fl_net_endpoint_parse(const char *s, fl_net_endpoint_t *out);
+
+/**
+ * Parse a bind/local address for `server join -bind`: accepts full `host:port`,
+ * bare IPv4 (port 0), or bare IPv6 (hosted `inet_pton`, port 0).
+ */
+int fl_net_endpoint_parse_bind(const char *s, fl_net_endpoint_t *out);
 
 /** Legacy helper: succeed only when the endpoint maps to IPv4 (`::1`, v4-mapped, or plain v4). */
 int fl_net_endpoint_parse_v4(const char *s, uint32_t *addr_be_out, uint16_t *port_out);
@@ -33,5 +27,8 @@ void fl_net_endpoint_from_v4(uint32_t v4_be, uint16_t port_host, fl_net_endpoint
 void fl_net_endpoint_from_v6(const uint8_t v6_be[16], uint16_t port_host, fl_net_endpoint_t *out);
 
 int fl_net_endpoint_is_loopback(const fl_net_endpoint_t *ep);
+
+/** Format as `a.b.c.d:port` (v4) or `[addr]:port` (v6). Returns 1 on success. */
+int fl_net_endpoint_format(const fl_net_endpoint_t *ep, char *out, size_t cap);
 
 #endif /* NET_ENDPOINT_H */

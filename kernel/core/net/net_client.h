@@ -49,6 +49,7 @@ typedef struct {
     char principal[FL_NET_SERVER_PRINCIPAL_MAX];
     char nick[FL_NET_SERVER_NICK_MAX];        /* host-global */
     char local_nick[FL_NET_SERVER_NICK_MAX];  /* client-local override */
+    fl_net_endpoint_t peer_addr;              /* from snapshot tail (#303) */
 } fl_net_client_member_t;
 
 struct fl_net_client_s {

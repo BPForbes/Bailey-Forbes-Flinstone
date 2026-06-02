@@ -17,6 +17,8 @@
 #include "net_netdev.h"
 #include "net_route.h"
 #include "net_udp.h"
+#include "net_endpoint.h"
+#include "net_ping6_host.h"
 
 #if defined(FL_NET_ASM_AVAILABLE)
 #include "fl/net_asm.h"
@@ -77,12 +79,41 @@ static int test_arp_add_show_delete(void) {
     return 0;
 }
 
-/* ifconfig must always succeed; the only requirement is it doesn't crash
- * with the loopback driver registered. */
+static int capture_cmd_stdout(int (*run)(int, char **), int argc, char **argv, char *buf,
+                              size_t cap) {
+    FILE *save = stdout;
+    FILE *tmp = tmpfile();
+    size_t n;
+
+    if (!tmp)
+        return -1;
+    stdout = tmp;
+    if (run(argc, argv) != 0) {
+        stdout = save;
+        fclose(tmp);
+        return -1;
+    }
+    fflush(stdout);
+    stdout = save;
+    rewind(tmp);
+    n = fread(buf, 1, cap - 1u, tmp);
+    fclose(tmp);
+    buf[n] = '\0';
+    return 0;
+}
+
+/* ifconfig must always succeed; loopback shows inet6 ::1 after route bootstrap. */
 static int test_ifconfig_loopback(void) {
     char *argv[] = {(char *)"ifconfig", NULL};
+    char out[2048];
+
+    fl_net_route_add6_loopback();
     ASSERT(cmd_ifconfig_run(1, argv) == 0);
     ASSERT(fl_net_netdev_loopback() != NULL);
+    ASSERT(capture_cmd_stdout(cmd_ifconfig_run, 1, argv, out, sizeof(out)) == 0);
+    ASSERT(strstr(out, "inet6") != NULL);
+    ASSERT(strstr(out, "::1") != NULL);
+    ASSERT(strstr(out, "prefixlen 128") != NULL);
     return 0;
 }
 
@@ -122,10 +153,53 @@ static int test_netstat_lists_bound_udp(void) {
     return 0;
 }
 
-/* nslookup: localhost must resolve to a loopback address. */
+/* nslookup: localhost must resolve to A and AAAA loopback addresses. */
 static int test_nslookup_localhost(void) {
     char *argv[] = {(char *)"nslookup", (char *)"localhost", NULL};
+    char out[512];
+
     ASSERT(cmd_nslookup_run(2, argv) == 0);
+    ASSERT(capture_cmd_stdout(cmd_nslookup_run, 2, argv, out, sizeof(out)) == 0);
+    ASSERT(strstr(out, "A:") != NULL);
+    ASSERT(strstr(out, "AAAA:") != NULL);
+    ASSERT(strstr(out, "::1") != NULL);
+    return 0;
+}
+
+static int test_ping6_loopback(void) {
+    double rtt = 0.0;
+    fl_result_t rc = fl_net_ping6("::1", 1u, 3000u, &rtt);
+    if (rc == FL_RESULT_NOSYS) {
+        fprintf(stderr, "skip: ping6 unavailable\n");
+        return 0;
+    }
+    ASSERT(rc == FL_RESULT_OK);
+    ASSERT(rtt >= 0.0);
+    return 0;
+}
+
+static int test_endpoint_parse_bind_bare_ipv4(void) {
+    fl_net_endpoint_t ep;
+    uint32_t expect = 0u;
+
+    ASSERT(fl_net_ipv4_parse_literal("10.99.0.10", &expect));
+    ASSERT(fl_net_endpoint_parse_bind("10.99.0.10", &ep));
+    ASSERT(ep.family == FL_NET_ADDR_FAMILY_V4);
+    ASSERT(ep.port_host == 0u);
+    ASSERT(ep.addr.v4_be == expect);
+    return 0;
+}
+
+static int test_endpoint_format_v6(void) {
+    fl_net_endpoint_t ep;
+    char txt[128];
+
+    fl_net_endpoint_from_v6((const uint8_t[16]){0}, 5000u, &ep);
+    ep.addr.v6_be[15] = 1u;
+    ep.family = FL_NET_ADDR_FAMILY_V6;
+    ASSERT(fl_net_endpoint_format(&ep, txt, sizeof(txt)));
+    ASSERT(strstr(txt, "[") != NULL);
+    ASSERT(strstr(txt, "]:5000") != NULL);
     return 0;
 }
 
@@ -214,6 +288,7 @@ int main(void) {
     /* fl_net_route_add_loopback runs inside fl_net_route_init, called by
      * fl_net_netdev_init's downstream wiring; if not, call explicitly. */
     fl_net_route_add_loopback();
+    fl_net_route_add6_loopback();
 
     printf("test_p3_net_tools: endian round-trip without libc... ");
     if (test_endian_loopback_constant() != 0)
@@ -247,6 +322,21 @@ int main(void) {
 
     printf("test_p3_net_tools: netsh dispatches to sub-verbs... ");
     if (test_netsh_dispatches() != 0)
+        return 1;
+    puts("ok");
+
+    printf("test_p3_net_tools: ping6 ::1... ");
+    if (test_ping6_loopback() != 0)
+        return 1;
+    puts("ok");
+
+    printf("test_p3_net_tools: fl_net_endpoint_format v6... ");
+    if (test_endpoint_format_v6() != 0)
+        return 1;
+    puts("ok");
+
+    printf("test_p3_net_tools: endpoint parse_bind bare IPv4... ");
+    if (test_endpoint_parse_bind_bare_ipv4() != 0)
         return 1;
     puts("ok");
 

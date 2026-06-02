@@ -352,6 +352,27 @@ static void client_decode_member_list(fl_net_client_t *client,
         }
         off += nlen_b;
 
+        m->peer_addr.family = 0u;
+        if (off < plen && (payload[off] == FL_NET_ADDR_FAMILY_V4 ||
+                           payload[off] == FL_NET_ADDR_FAMILY_V6)) {
+            m->peer_addr.family = payload[off++];
+            if (off + 2u > plen)
+                break;
+            m->peer_addr.port_host = fl_net_get_u16_be(payload + off);
+            off += 2u;
+            if (m->peer_addr.family == FL_NET_ADDR_FAMILY_V4) {
+                if (off + 4u > plen)
+                    break;
+                m->peer_addr.addr.v4_be = fl_net_get_u32_be(payload + off);
+                off += 4u;
+            } else {
+                if (off + 16u > plen)
+                    break;
+                memcpy(m->peer_addr.addr.v6_be, payload + off, 16);
+                off += 16u;
+            }
+        }
+
         /* Re-apply any local nick the viewer had for this id. */
         for (size_t s = 0; s < saved_n; s++) {
             if (saved_ids[s] == m->member_id) {

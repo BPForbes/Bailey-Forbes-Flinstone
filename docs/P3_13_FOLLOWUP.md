@@ -68,7 +68,7 @@ commit. Current status:
 | `kernel/core/net/net_background.c:107` | `TODO: P3-13` | Wire RX demux calls `fl_net_task_backend_server_ingress()`. | **TODO: P3-13 (#238)** |
 | `kernel/core/net/net_background.c:453` | `TODO: P3-13` | Map wire source (port/session) to `from_client_slot`; validate. | **TODO: P3-13 (#238)** |
 | `contracts/networking/contract_p3_socket.h:2` | doc note | Full **P3-13** shim TODO — covered by the native non-hosted `fl_socket` path row in the roadmap. | **TODO: P3-13** (native shim) |
-| `contracts/networking/contract_p3_wifi_deferred.h:4` | explicit deferral | Wi-Fi 802.11 station mode. | **TODO: P3-13 (#279)** |
+| `contracts/networking/contract_p3_wifi.h` | foundation (#279) | Contract + HE IE parser + station API stubs; NIC/P4 + WPA3-SAE tail open. | **TODO: P3-13 (#279)** |
 
 ---
 

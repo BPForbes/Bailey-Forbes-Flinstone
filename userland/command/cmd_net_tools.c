@@ -19,7 +19,9 @@
 
 #include "net_arp.h"
 #include "net_dns.h"
+#include "net_endpoint.h"
 #include "net_ipv4.h"
+#include "net_ipv6.h"
 #include "net_netdev.h"
 #include "net_route.h"
 #include "net_udp.h"
@@ -171,6 +173,48 @@ int cmd_arp_batch_tokens_count(int argc, char **argv, int i) {
 /* ifconfig                                                                  */
 /* ------------------------------------------------------------------------- */
 
+static void ifconfig_print_addrs(const char *name, fl_net_driver_t *drv) {
+    fl_net_route_entry_t v4[FL_NET_ROUTE_TABLE_MAX];
+    fl_net_route6_entry_t v6[FL_NET_ROUTE_TABLE_MAX];
+    unsigned n4;
+    unsigned n6;
+    char addr[64];
+
+    if (!drv)
+        return;
+    n4 = fl_net_route_snapshot(v4, FL_NET_ROUTE_TABLE_MAX);
+    for (unsigned i = 0; i < n4; i++) {
+        uint32_t host_be;
+        if (v4[i].drv != drv)
+            continue;
+        host_be = v4[i].src_ip_be ? v4[i].src_ip_be : v4[i].addr_be;
+        if (host_be == 0u)
+            continue;
+        fl_net_ipv4_format_addr(host_be, addr, sizeof(addr));
+        printf("%-6s inet %s  netmask prefixlen %u\n", name, addr,
+               (unsigned)v4[i].prefix_len);
+    }
+    n6 = fl_net_route_snapshot6(v6, FL_NET_ROUTE_TABLE_MAX);
+    for (unsigned i = 0; i < n6; i++) {
+        const uint8_t *host6;
+        if (v6[i].drv != drv)
+            continue;
+        {
+            int has_src6 = 0;
+            for (unsigned k = 0; k < FL_NET_IPV6_ADDR_LEN; k++) {
+                if (v6[i].src6[k] != 0u) {
+                    has_src6 = 1;
+                    break;
+                }
+            }
+            host6 = has_src6 ? v6[i].src6 : v6[i].addr_be;
+        }
+        if (!fl_net_ipv6_format_addr(host6, addr, sizeof(addr)))
+            continue;
+        printf("%-6s inet6 %s  prefixlen %u\n", name, addr, (unsigned)v6[i].prefix_len);
+    }
+}
+
 static void ifconfig_print_driver(const char *name, fl_net_driver_t *drv) {
     fl_net_netdev_stats_t stats = {0};
     if (!drv) {
@@ -183,11 +227,14 @@ static void ifconfig_print_driver(const char *name, fl_net_driver_t *drv) {
            drv->mtu ? drv->mtu : 1500u,
            (unsigned long long)stats.tx_frames,
            (unsigned long long)stats.rx_frames);
+    ifconfig_print_addrs(name, drv);
 }
 
 int cmd_ifconfig_run(int argc, char **argv) {
     (void)argc;
     (void)argv;
+    fl_net_route_add_loopback();
+    fl_net_route_add6_loopback();
     ifconfig_print_driver("lo", fl_net_netdev_loopback());
     if (fl_net_netdev_tap_is_open()) {
         ifconfig_print_driver("tap0", fl_net_netdev_tap());
@@ -307,20 +354,33 @@ int cmd_netstat_batch_tokens_count(int argc, char **argv, int i) {
 
 int cmd_nslookup_run(int argc, char **argv) {
     uint32_t addr_be = 0u;
-    char resolved[16];
-    fl_result_t rc;
+    uint8_t addr6[FL_NET_IPV6_ADDR_LEN];
+    char resolved4[32];
+    char resolved6[64];
+    fl_result_t rc4;
+    fl_result_t rc6;
+
     if (argc != 2) {
         fprintf(stderr, "nslookup: usage: nslookup <host>\n");
         return 1;
     }
-    rc = fl_net_resolve_ipv4(argv[1], &addr_be, resolved, sizeof(resolved));
-    if (rc != FL_RESULT_OK) {
-        fprintf(stderr, "nslookup: '%s' did not resolve (rc=%d)\n",
-                argv[1], (int)rc);
+    rc4 = fl_net_resolve_ipv4(argv[1], &addr_be, resolved4, sizeof(resolved4));
+    rc6 = fl_net_dns_resolve_aaaa(argv[1], addr6, resolved6, sizeof(resolved6));
+    if (rc4 != FL_RESULT_OK && rc6 != FL_RESULT_OK) {
+        fprintf(stderr, "nslookup: '%s' did not resolve (A rc=%d, AAAA rc=%d)\n",
+                argv[1], (int)rc4, (int)rc6);
         return 1;
     }
-    printf("Name:    %s\nAddress: %s\n", argv[1], resolved);
+    printf("Name: %s\n", argv[1]);
+    if (rc4 == FL_RESULT_OK)
+        printf("A:    %s\n", resolved4);
+    if (rc6 == FL_RESULT_OK)
+        printf("AAAA: %s\n", resolved6);
     return 0;
+}
+
+int cmd_resolve_run(int argc, char **argv) {
+    return cmd_nslookup_run(argc, argv);
 }
 
 __attribute__((used))
@@ -350,7 +410,7 @@ int cmd_netsh_run(int argc, char **argv) {
         return cmd_route_run(argc - 1, argv + 1);
     if (!strcmp(argv[1], "netstat"))
         return cmd_netstat_run(argc - 1, argv + 1);
-    if (!strcmp(argv[1], "nslookup"))
+    if (!strcmp(argv[1], "nslookup") || !strcmp(argv[1], "resolve"))
         return cmd_nslookup_run(argc - 1, argv + 1);
     fprintf(stderr, "netsh: unknown sub-verb '%s'\n", argv[1]);
     return 1;

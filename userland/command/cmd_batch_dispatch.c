@@ -88,6 +88,8 @@ int fl_shell_cmd_batch_tokens_count(fl_shell_cmd_no_t no, int argc, char **argv,
         return cmd_whoami_batch_tokens_count(argc, argv, i);
     case FL_SCMD_PING:
         return cmd_ping_batch_tokens_count(argc, argv, i);
+    case FL_SCMD_PING6:
+        return cmd_ping6_batch_tokens_count(argc, argv, i);
     case FL_SCMD_CHECK:
         return cmd_check_batch_tokens_count(argc, argv, i);
     case FL_SCMD_SERVER:
@@ -105,6 +107,7 @@ int fl_shell_cmd_batch_tokens_count(fl_shell_cmd_no_t no, int argc, char **argv,
     case FL_SCMD_NETSTAT:
         return cmd_netstat_batch_tokens_count(argc, argv, i);
     case FL_SCMD_NSLOOKUP:
+    case FL_SCMD_RESOLVE:
         return cmd_nslookup_batch_tokens_count(argc, argv, i);
     case FL_SCMD_NETSH:
         return cmd_netsh_batch_tokens_count(argc, argv, i);
