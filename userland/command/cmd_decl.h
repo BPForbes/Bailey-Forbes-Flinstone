@@ -69,6 +69,7 @@ int cmd_route_run(int argc, char **argv);
 int cmd_netstat_run(int argc, char **argv);
 int cmd_nslookup_run(int argc, char **argv);
 int cmd_netsh_run(int argc, char **argv);
+int cmd_dhcp_run(int argc, char **argv);
 
 /*
  * Batch argv token counts (see cmd_batch.h).
@@ -147,5 +148,7 @@ int cmd_netstat_batch_tokens_count(int argc, char **argv, int i);
 int cmd_nslookup_batch_tokens_count(int argc, char **argv, int i);
 /* Indirect: fl_shell_cmd_batch_tokens_count(FL_SCMD_NETSH, ...) in cmd_batch_dispatch.c */
 int cmd_netsh_batch_tokens_count(int argc, char **argv, int i);
+/* Indirect: fl_shell_cmd_batch_tokens_count(FL_SCMD_DHCP, ...) in cmd_batch_dispatch.c */
+int cmd_dhcp_batch_tokens_count(int argc, char **argv, int i);
 
 #endif /* CMD_DECL_H */

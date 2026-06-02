@@ -209,6 +209,15 @@ static int test_endian_loopback_constant(void) {
     return 0;
 }
 
+static int test_dhcp_usage(void) {
+    char *bad[] = {(char *)"dhcp", NULL};
+    char *good[] = {(char *)"dhcp", (char *)"acquire", NULL};
+
+    ASSERT(cmd_dhcp_run(1, bad) != 0);
+    ASSERT(cmd_dhcp_run(2, good) != 0); /* no bridge/DHCP server in unit test */
+    return 0;
+}
+
 int main(void) {
     fl_net_netdev_init();
     /* fl_net_route_add_loopback runs inside fl_net_route_init, called by
@@ -247,6 +256,11 @@ int main(void) {
 
     printf("test_p3_net_tools: netsh dispatches to sub-verbs... ");
     if (test_netsh_dispatches() != 0)
+        return 1;
+    puts("ok");
+
+    printf("test_p3_net_tools: dhcp usage / acquire path... ");
+    if (test_dhcp_usage() != 0)
         return 1;
     puts("ok");
 

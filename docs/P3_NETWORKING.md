@@ -336,6 +336,11 @@ make check-network-requirements
 | **`FL_NET_TAP_IPV4`** | `10.0.2.15` | Host address on TAP |
 | **`FL_NET_TAP_PREFIX`** | `24` | Prefix length |
 | **`FL_NET_TAP_GW`** | `10.0.2.2` | Default gateway for off-subnet ARP |
+| **`FL_NET_TAP_DHCP`** | *(unset)* | When `1`, TAP open skips static addressing; use **`dhcp acquire`** (see **`docs/P3_REAL_NETWORK_PHASE1.md`**) |
+
+## Real home LAN (Phase 1)
+
+Hosted Linux can obtain a **router DHCP lease** on TAP using the TAP hardware MAC, a host **bridge** to `wlan0`/`eth0`, and the shell command **`dhcp acquire`**. Wi‑Fi station code (#279) and live IPv6 (#280) are not required for this step. Guide: **`docs/P3_REAL_NETWORK_PHASE1.md`**.
 
 ## Future work
 

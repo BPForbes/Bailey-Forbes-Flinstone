@@ -1035,6 +1035,57 @@ static int test_net_dhcp_frame_codec(void) {
     return 0;
 }
 
+static int test_net_dhcp_parse_lease_options(void) {
+    uint8_t reply[320];
+    size_t o = FL_NET_BOOTP_FIXED_LEN;
+    fl_net_dhcp_lease_t lease;
+    uint32_t yi = (192u << 24) | (168u << 16) | (1u << 8) | 50u;
+    fl_result_t rc;
+
+    memset(reply, 0, sizeof(reply));
+    reply[0] = 2;
+    reply[16] = (uint8_t)((yi >> 24) & 0xffu);
+    reply[17] = (uint8_t)((yi >> 16) & 0xffu);
+    reply[18] = (uint8_t)((yi >> 8) & 0xffu);
+    reply[19] = (uint8_t)(yi & 0xffu);
+    reply[o++] = 0x63;
+    reply[o++] = 0x82;
+    reply[o++] = 0x53;
+    reply[o++] = 0x63;
+    reply[o++] = FL_NET_DHCP_OPT_MESSAGE_TYPE;
+    reply[o++] = 1;
+    reply[o++] = FL_NET_DHCP_MSG_ACK;
+    reply[o++] = FL_NET_DHCP_OPT_SUBNET_MASK;
+    reply[o++] = 4;
+    reply[o++] = 255;
+    reply[o++] = 255;
+    reply[o++] = 255;
+    reply[o++] = 0;
+    reply[o++] = FL_NET_DHCP_OPT_ROUTER;
+    reply[o++] = 4;
+    reply[o++] = 192;
+    reply[o++] = 168;
+    reply[o++] = 1;
+    reply[o++] = 1;
+    reply[o++] = FL_NET_DHCP_OPT_END;
+
+    rc = fl_net_dhcp_parse_lease(reply, o, &lease);
+    ASSERT(rc == FL_RESULT_OK);
+    ASSERT(lease.yiaddr_be == yi);
+    ASSERT(lease.msg_type == FL_NET_DHCP_MSG_ACK);
+    ASSERT(lease.subnet_mask_be == ((255u << 24) | (255u << 16) | (255u << 8)));
+    ASSERT(lease.router_be == ((192u << 24) | (168u << 16) | (1u << 8) | 1u));
+    ASSERT(lease.prefix_len == 24u);
+    return 0;
+}
+
+static int test_ipv4_prefix_from_mask(void) {
+    ASSERT(fl_net_ipv4_prefix_from_mask_be(0xFFFFFF00u) == 24u);
+    ASSERT(fl_net_ipv4_prefix_from_mask_be(0xFF000000u) == 8u);
+    ASSERT(fl_net_ipv4_prefix_from_mask_be(0xFFFF0000u) == 16u);
+    ASSERT(fl_net_ipv4_prefix_from_mask_be(0x80808080u) == 0u);
+    return 0;
+}
 
 static int test_net_http_parse_status(void) {
     const char *hdr = "HTTP/1.1 200 OK\r\n";
@@ -1262,6 +1313,16 @@ int main(void) {
 
     printf("test_net_dhcp_frame_codec... ");
     if (test_net_dhcp_frame_codec() != 0)
+        return 1;
+    puts("ok");
+
+    printf("test_net_dhcp_parse_lease_options... ");
+    if (test_net_dhcp_parse_lease_options() != 0)
+        return 1;
+    puts("ok");
+
+    printf("test_ipv4_prefix_from_mask... ");
+    if (test_ipv4_prefix_from_mask() != 0)
         return 1;
     puts("ok");
 

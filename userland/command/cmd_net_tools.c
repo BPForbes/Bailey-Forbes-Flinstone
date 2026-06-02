@@ -7,7 +7,8 @@
  *   route                                    Dump the longest-prefix routing table
  *   netstat [-u]                             UDP demux bound ports
  *   nslookup <host>                          Resolve hostname via fl_net_resolve_ipv4
- *   netsh <verb> ...                         Windows-style umbrella -> arp/ifconfig/route/netstat/nslookup
+ *   dhcp acquire [-t ms] [ifname]            IPv4 DHCP on TAP (real MAC; host bridge required)
+ *   netsh <verb> ...                         Windows-style umbrella -> arp/ifconfig/route/netstat/nslookup/dhcp
  *
  * Every formatter uses fl_net_ipv4_format_addr (in-tree) and the bit-shift
  * helpers in net_endian.h. MAC parsing and formatting are also in-tree
@@ -18,6 +19,7 @@
 #include "cmd_batch.h"
 
 #include "net_arp.h"
+#include "net_dhcp.h"
 #include "net_dns.h"
 #include "net_ipv4.h"
 #include "net_netdev.h"
@@ -333,13 +335,123 @@ int cmd_nslookup_batch_tokens_count(int argc, char **argv, int i) {
 }
 
 /* ------------------------------------------------------------------------- */
+/* dhcp                                                                      */
+/* ------------------------------------------------------------------------- */
+
+static void dhcp_print_dotted(uint32_t addr_be, const char *label) {
+    char buf[32];
+
+    if (!label)
+        return;
+    (void)snprintf(buf, sizeof(buf), "%u.%u.%u.%u", (unsigned)((addr_be >> 24) & 0xffu),
+                   (unsigned)((addr_be >> 16) & 0xffu), (unsigned)((addr_be >> 8) & 0xffu),
+                   (unsigned)(addr_be & 0xffu));
+    printf("%s%s\n", label, buf);
+}
+
+int cmd_dhcp_run(int argc, char **argv) {
+    unsigned timeout_ms = 5000u;
+    const char *ifname = NULL;
+    fl_net_dhcp_lease_t lease;
+    fl_result_t rc;
+    int argi = 1;
+
+    if (argc < 2 || strcmp(argv[1], "acquire") != 0) {
+        fprintf(stderr, "dhcp: usage: dhcp acquire [-t <timeout_ms>] [<tap_ifname_hint>]\n");
+        fprintf(stderr,
+                "      Bridge the TAP to your LAN first — see docs/P3_REAL_NETWORK_PHASE1.md\n");
+        return 1;
+    }
+    argi = 2;
+    while (argi < argc) {
+        if (!strcmp(argv[argi], "-t") && argi + 1 < argc) {
+            char *end = NULL;
+            unsigned long v;
+
+            errno = 0;
+            v = strtoul(argv[argi + 1], &end, 10);
+            if (errno != 0 || end == argv[argi + 1] || (end && *end != '\0') || v == 0ul ||
+                v > 120000ul) {
+                fprintf(stderr, "dhcp: invalid timeout '%s'\n", argv[argi + 1]);
+                return 1;
+            }
+            timeout_ms = (unsigned)v;
+            argi += 2;
+            continue;
+        }
+        if (argv[argi][0] == '-') {
+            fprintf(stderr, "dhcp: unknown option '%s'\n", argv[argi]);
+            return 1;
+        }
+        ifname = argv[argi];
+        argi++;
+    }
+    if (argi < argc) {
+        fprintf(stderr, "dhcp: unexpected argument '%s'\n", argv[argi]);
+        return 1;
+    }
+
+    fl_net_netdev_init();
+    rc = fl_net_dhcp_acquire_on_tap(ifname, timeout_ms, &lease);
+    if (rc != FL_RESULT_OK) {
+        const char *tap_err = fl_net_netdev_tap_last_error();
+
+        fprintf(stderr, "dhcp: acquire failed (rc=%d)", (int)rc);
+        if (tap_err && tap_err[0])
+            fprintf(stderr, " — %s", tap_err);
+        fputc('\n', stderr);
+        return 1;
+    }
+
+    if (fl_net_netdev_tap_is_open()) {
+        const char *name = fl_net_netdev_tap_ifname();
+
+        printf("dhcp: lease on tap %s\n", (name && name[0]) ? name : "tap0");
+    } else {
+        puts("dhcp: lease acquired");
+    }
+    dhcp_print_dotted(lease.yiaddr_be, "  address ");
+    if (lease.subnet_mask_be != 0u)
+        dhcp_print_dotted(lease.subnet_mask_be, "  netmask ");
+    else
+        printf("  prefix  /%u\n", lease.prefix_len ? lease.prefix_len : 24u);
+    if (lease.router_be != 0u)
+        dhcp_print_dotted(lease.router_be, "  router  ");
+    puts("dhcp: route table updated (see route)");
+    return 0;
+}
+
+__attribute__((used))
+int cmd_dhcp_batch_tokens_count(int argc, char **argv, int i) {
+    int used = 1;
+    int j = i + 1;
+
+    if (j >= argc || strcmp(argv[j], "acquire") != 0)
+        return used;
+    used++;
+    j++;
+    while (j < argc) {
+        if (!strcmp(argv[j], "-t") && j + 1 < argc) {
+            used += 2;
+            j += 2;
+            continue;
+        }
+        if (argv[j][0] == '-')
+            return used + 1;
+        used++;
+        j++;
+    }
+    return used;
+}
+
+/* ------------------------------------------------------------------------- */
 /* netsh — Windows-style umbrella that dispatches to the above               */
 /* ------------------------------------------------------------------------- */
 
 int cmd_netsh_run(int argc, char **argv) {
     if (argc < 2) {
         fprintf(stderr,
-                "netsh: usage: netsh <arp|ifconfig|route|netstat|nslookup> [args]\n");
+                "netsh: usage: netsh <arp|ifconfig|route|netstat|nslookup|dhcp> [args]\n");
         return 1;
     }
     if (!strcmp(argv[1], "arp"))
@@ -352,6 +464,8 @@ int cmd_netsh_run(int argc, char **argv) {
         return cmd_netstat_run(argc - 1, argv + 1);
     if (!strcmp(argv[1], "nslookup"))
         return cmd_nslookup_run(argc - 1, argv + 1);
+    if (!strcmp(argv[1], "dhcp"))
+        return cmd_dhcp_run(argc - 1, argv + 1);
     fprintf(stderr, "netsh: unknown sub-verb '%s'\n", argv[1]);
     return 1;
 }
@@ -372,6 +486,8 @@ int cmd_netsh_batch_tokens_count(int argc, char **argv, int i) {
             used++;
         return used;
     }
+    if (!strcmp(argv[j], "dhcp"))
+        return used + cmd_dhcp_batch_tokens_count(argc, argv, j) - 1;
     /* ifconfig / route are bare verbs (no extra tokens) */
     return used;
 }

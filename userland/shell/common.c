@@ -110,6 +110,7 @@ static const char HELP_BODY[] =
 "  route                             Dump the in-tree IPv4 routing table\n"
 "  netstat                           Show UDP demux bound ports\n"
 "  nslookup <host>                   Resolve a hostname via fl_net_resolve_ipv4\n"
+"  dhcp acquire [-t ms] [ifname]     DHCP IPv4 lease on TAP (host bridge required)\n"
 "  netsh <arp|ifconfig|route|...>    Windows-style umbrella over the above\n"
 "  help                 Display this help\n"
 "  redirect <file>      Redirect output (use \"redirect off\" to restore)\n"

@@ -108,6 +108,8 @@ int fl_shell_cmd_batch_tokens_count(fl_shell_cmd_no_t no, int argc, char **argv,
         return cmd_nslookup_batch_tokens_count(argc, argv, i);
     case FL_SCMD_NETSH:
         return cmd_netsh_batch_tokens_count(argc, argv, i);
+    case FL_SCMD_DHCP:
+        return cmd_dhcp_batch_tokens_count(argc, argv, i);
     default:
         return 1;
     }

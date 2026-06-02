@@ -15,6 +15,7 @@ static const cmd_name_ent_t cmd_registry[] = {
     {"cd", FL_SCMD_CD},
     {"contracts", FL_SCMD_CONTRACTS},
     {"createdisk", FL_SCMD_CREATEDISK},
+    {"dhcp", FL_SCMD_DHCP},
     {"delcluster", FL_SCMD_DELCLUSTER},
     {"diskdel", FL_SCMD_DISKDEL},
     {"diskfiles", FL_SCMD_DISKFILES},

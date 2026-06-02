@@ -33,8 +33,10 @@ typedef enum {
 #define FL_NET_DHCP_SERVER_PORT 67u
 #define FL_NET_DHCP_CLIENT_PORT 68u
 
-/** Option codes used by the lab client subset. */
+/** Option codes used by the lab / TAP client subset (**RFC 2132**). */
 #define FL_NET_DHCP_OPT_PAD 0u
+#define FL_NET_DHCP_OPT_SUBNET_MASK 1u
+#define FL_NET_DHCP_OPT_ROUTER 3u
 #define FL_NET_DHCP_OPT_MESSAGE_TYPE 53u
 #define FL_NET_DHCP_OPT_END 255u
 

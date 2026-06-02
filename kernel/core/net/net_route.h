@@ -50,10 +50,20 @@ fl_result_t fl_net_route_configure_static(fl_net_driver_t *drv, const uint8_t sr
                                           const char *addr_s, unsigned prefix_len,
                                           const char *gw_s);
 
+/** Drop every IPv4 route bound to **drv** (loopback routes are on another driver). */
+void fl_net_route_remove_drv(fl_net_driver_t *drv);
+
 #if defined(__linux__)
 /** Apply **FL_NET_TAP_IPV4**, **FL_NET_TAP_PREFIX**, **FL_NET_TAP_GW** when TAP is open. */
 fl_result_t fl_net_route_configure_tap(fl_net_driver_t *tap_drv, const uint8_t tap_mac[6],
                                        const char *tap_ifname);
+
+/**
+ * Pre-DHCP default route: **0.0.0.0/0** on **tap_drv** with **src_ip_be == 0** so
+ * Discover/Request use an unset IPv4 source per **RFC 2131**.
+ */
+fl_result_t fl_net_route_configure_dhcp_pending(fl_net_driver_t *tap_drv,
+                                                const uint8_t tap_mac[6]);
 #endif
 
 int fl_net_ipv4_prefix_match(uint32_t addr_be, uint32_t net_be, uint8_t prefix_len);
