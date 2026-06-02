@@ -45,9 +45,9 @@ Check these; leave issue **open** only if tracking epic tail (TAP egress, TCPv6,
 | Wi‑Fi → **#279** | Leave **[ ]** |
 | Native `fl_socket` | Leave **[ ]** (P3-7 gate) |
 
-## #279 — no change
+## #279 — use PR #306 sync doc
 
-No Wi‑Fi station implementation on this branch; only **`center_freq_hz`** on **`fl_channel_sidecar_t`**. Do **not** check off **#279** checklist items.
+Wi‑Fi **P3-10** foundation landed on **`cursor/p3-issues-279-302-303-790d`** (PR **#306**). For checklist alignment use **`docs/GITHUB_ISSUE_SYNC_279.md`** — do **not** mirror that checklist here.
 
 ## Already closed
 

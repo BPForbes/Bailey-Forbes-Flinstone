@@ -24,6 +24,7 @@ PRE 4.2.0 (#302, #303 on cursor/p3-issues-279-302-303):
 - contract_p3_wifi.h promoted; FL_CONTRACT_P3_NETWORKING_REV 18; net_wifi_he IE parser
 - SQLite wifi_router table (name, hashed password, salt, BSSID/band/channel/auth/HE makeup, join state) in userland/shell/fl_wifi.db
 - Shell: wifi scan, wifi join <name> [password], wifi known; hosted lab scan/join until P4 NIC
+- Docs: P3-10 module ~✅ in ROADMAP/P3_NETWORKING; docs/GITHUB_ISSUE_SYNC_279.md for #279 checklist
 VER_END
 
 RELEASE_DATE=2026-06-02
