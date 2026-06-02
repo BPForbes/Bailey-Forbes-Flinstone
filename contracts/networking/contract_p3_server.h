@@ -64,7 +64,7 @@
 #include "contract_p3_wire.h"
 
 #define FL_CONTRACT_P3_13_SERVER_CONTRACT_DEFINED 1
-#define FL_CONTRACT_P3_13_SERVER_REV 4u
+#define FL_CONTRACT_P3_13_SERVER_REV 5u
 
 /* ------------------------------------------------------------------------- */
 /* Capacity / wire caps                                                      */
@@ -149,7 +149,9 @@ _Static_assert(FL_NET_SERVER_ANNOUNCEMENT_MAX <= FL_NET_SESSION_MAX_MSG,
  * `server connected` verb without round-tripping to the host. Payload:
  *   for each member: `[u16_be member_id][u8 is_host][u8 disambig_index]
  *                     [u8 principal_len][principal bytes]
- *                     [u8 nick_len]    [nick bytes]`
+ *                     [u8 nick_len][nick bytes]`
+ *                     optional peer tail when present: `[u8 family=4|6]
+ *                     [u16_be port][4 or 16 byte addr]` (omitted when unknown).
  * Frames smaller than the full roster are valid prefixes; the receiver
  * clears its cache and replays the body. Maximum payload is bounded by
  * `FL_NET_SESSION_MAX_MSG` and capped by `FL_NET_SERVER_MAX_MEMBERS`.

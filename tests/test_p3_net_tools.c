@@ -178,6 +178,18 @@ static int test_ping6_loopback(void) {
     return 0;
 }
 
+static int test_endpoint_parse_bind_bare_ipv4(void) {
+    fl_net_endpoint_t ep;
+    uint32_t expect = 0u;
+
+    ASSERT(fl_net_ipv4_parse_literal("10.99.0.10", &expect));
+    ASSERT(fl_net_endpoint_parse_bind("10.99.0.10", &ep));
+    ASSERT(ep.family == FL_NET_ADDR_FAMILY_V4);
+    ASSERT(ep.port_host == 0u);
+    ASSERT(ep.addr.v4_be == expect);
+    return 0;
+}
+
 static int test_endpoint_format_v6(void) {
     fl_net_endpoint_t ep;
     char txt[128];
@@ -320,6 +332,11 @@ int main(void) {
 
     printf("test_p3_net_tools: fl_net_endpoint_format v6... ");
     if (test_endpoint_format_v6() != 0)
+        return 1;
+    puts("ok");
+
+    printf("test_p3_net_tools: endpoint parse_bind bare IPv4... ");
+    if (test_endpoint_parse_bind_bare_ipv4() != 0)
         return 1;
     puts("ok");
 

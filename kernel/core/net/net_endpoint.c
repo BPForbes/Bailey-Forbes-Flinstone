@@ -173,6 +173,32 @@ int fl_net_endpoint_parse(const char *s, fl_net_endpoint_t *out)
     }
 }
 
+int fl_net_endpoint_parse_bind(const char *s, fl_net_endpoint_t *out)
+{
+    if (!s || !out)
+        return 0;
+    memset(out, 0, sizeof(*out));
+    if (fl_net_endpoint_parse(s, out))
+        return 1;
+    {
+        uint32_t v4_be = 0u;
+        if (fl_net_ipv4_parse_literal(s, &v4_be)) {
+            fl_net_endpoint_from_v4(v4_be, 0u, out);
+            return 1;
+        }
+    }
+#if defined(FL_NET_ENDPOINT_HOSTED)
+    if (strchr(s, ':') != NULL && s[0] != '[') {
+        if (inet_pton(AF_INET6, s, out->addr.v6_be) == 1) {
+            out->family = FL_NET_ADDR_FAMILY_V6;
+            out->port_host = 0u;
+            return 1;
+        }
+    }
+#endif
+    return 0;
+}
+
 int fl_net_endpoint_parse_v4(const char *s, uint32_t *addr_be_out, uint16_t *port_out)
 {
     fl_net_endpoint_t ep;

@@ -103,18 +103,25 @@ int cmd_ping6_run(int argc, char **argv) {
 __attribute__((used))
 int cmd_ping6_batch_tokens_count(int argc, char **argv, int i) {
     int used = 1;
+    int pos = 0;
     int j = i + 1;
 
     (void)argc;
-    while (j < argc && argv[j][0] == '-') {
+    while (j < argc) {
         if (!strcmp(argv[j], "-c") || !strcmp(argv[j], "-W")) {
             if (j + 1 >= argc)
                 return used + 1;
-            return used + 3;
+            used += 2;
+            j += 2;
+            continue;
         }
-        return used + 1;
+        if (argv[j][0] == '-')
+            break;
+        if (pos >= 1)
+            break;
+        used++;
+        pos++;
+        j++;
     }
-    if (j < argc)
-        return used + 2;
     return used;
 }

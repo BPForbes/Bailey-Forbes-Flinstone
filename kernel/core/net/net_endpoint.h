@@ -10,6 +10,12 @@
 /** Parse `host:port` or `[host]:port`. Supports IPv4, `::1`, v4-mapped IPv6, native IPv6. */
 int fl_net_endpoint_parse(const char *s, fl_net_endpoint_t *out);
 
+/**
+ * Parse a bind/local address for `server join -bind`: accepts full `host:port`,
+ * bare IPv4 (port 0), or bare IPv6 (hosted `inet_pton`, port 0).
+ */
+int fl_net_endpoint_parse_bind(const char *s, fl_net_endpoint_t *out);
+
 /** Legacy helper: succeed only when the endpoint maps to IPv4 (`::1`, v4-mapped, or plain v4). */
 int fl_net_endpoint_parse_v4(const char *s, uint32_t *addr_be_out, uint16_t *port_out);
 

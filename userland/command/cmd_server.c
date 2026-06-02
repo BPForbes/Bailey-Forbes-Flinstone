@@ -497,7 +497,7 @@ static int verb_join(int argc, char **argv) {
     /* Optional -bind <local_ip> for multi-IP demos / tests (IPv4 or [IPv6]). */
     for (int i = 3; i + 1 < argc; i++) {
         if (!strcmp(argv[i], "-bind")) {
-            if (!fl_net_endpoint_parse(argv[i + 1], &local)) {
+            if (!fl_net_endpoint_parse_bind(argv[i + 1], &local)) {
                 pthread_mutex_unlock(&session_mutex);
                 fl_color_error("invalid -bind address '%s'", argv[i + 1]);
                 return 1;
@@ -881,11 +881,18 @@ static int verb_connected(void) {
         for (size_t k = 0; k < count; k++) {
             const fl_net_client_member_t *m = fl_net_client_member_at(&g_client, k);
             if (!m) continue;
+            char peer_txt[128];
             (void)fl_net_client_member_display(&g_client, m->member_id, disp,
                                                sizeof(disp));
-            printf("[%u] %s%s%s\n", (unsigned)m->member_id, disp,
-                   m->is_host ? " <- host" : "",
-                   m->member_id == g_client.assigned_member_id ? " (you)" : "");
+            if (m->peer_addr.family &&
+                fl_net_endpoint_format(&m->peer_addr, peer_txt, sizeof(peer_txt)))
+                printf("[%u] %s  %s%s%s\n", (unsigned)m->member_id, disp, peer_txt,
+                       m->is_host ? " <- host" : "",
+                       m->member_id == g_client.assigned_member_id ? " (you)" : "");
+            else
+                printf("[%u] %s%s%s\n", (unsigned)m->member_id, disp,
+                       m->is_host ? " <- host" : "",
+                       m->member_id == g_client.assigned_member_id ? " (you)" : "");
         }
         fflush(stdout);
         fl_shell_io_unlock();
