@@ -23,7 +23,7 @@
 #include "contract_p3_socket.h"
 #include "contract_p3_trust.h"
 
-#define FL_CONTRACT_P3_NETWORKING_REV 14
+#define FL_CONTRACT_P3_NETWORKING_REV 16
 
 #ifndef FL_CONTRACT_P3_WIRE_REV
 #error "FL_CONTRACT_P3_WIRE_REV must be defined by contract_p3_wire.h"
@@ -46,11 +46,13 @@ _Static_assert(FL_CONTRACT_P3_WIRE_REV == FL_CONTRACT_P3_NETWORKING_EXPECT_WIRE_
 #include "contract_p3_dns.h"
 #include "contract_p3_tls_hosted.h"
 #include "contract_p3_wifi_deferred.h"
-#include "contract_p3_ipv6_deferred.h"
+#include "contract_p3_ipv6.h"
 #include "contract_p3_background.h"
 #include "contract_p3_sockets.h"
 #include "contract_p3_session_wire.h"
+#include "contract_p3_channel_sidecar.h"
 #include "contract_p3_sftp_adapter.h"
+#include "contract_p3_host_promote6.h"
 #include "contract_p3_server.h"
 
 #define FL_CONTRACT_P3_VOCABULARY_LOCK 1

@@ -1,13 +1,13 @@
 #include "net_checksum.h"
 
 #include "contract_p3_ipv4.h"
-#include "contract_p3_wire.h"
-#include "contract_p3_ipv4.h"
+#include "contract_p3_ipv6.h"
 #include "contract_p3_wire.h"
 #include "fl/net_asm.h"
 
 #include <stddef.h>
 #include <stdint.h>
+#include <string.h>
 
 /** Use ASM Internet checksum when buffer is at least this long (octets). */
 #ifndef FL_NET_CHECKSUM_ASM_THRESHOLD
@@ -104,6 +104,30 @@ uint16_t fl_net_pseudo_checksum_tcpudp(uint32_t src_be, uint32_t dst_be, uint8_t
     return checksum16_ones_complement(sum);
 }
 
+
+uint16_t fl_net_ipv6_pseudo_checksum_icmp6(const uint8_t src[16], const uint8_t dst[16],
+                                           const uint8_t *icmp6, size_t icmp6_len) {
+    uint8_t pseudo[40];
+    uint32_t sum;
+
+    if (!src || !dst || !icmp6)
+        return 0xffffu;
+
+    memcpy(pseudo, src, 16);
+    memcpy(pseudo + 16, dst, 16);
+    pseudo[32] = (uint8_t)((icmp6_len >> 24) & 0xffu);
+    pseudo[33] = (uint8_t)((icmp6_len >> 16) & 0xffu);
+    pseudo[34] = (uint8_t)((icmp6_len >> 8) & 0xffu);
+    pseudo[35] = (uint8_t)(icmp6_len & 0xffu);
+    pseudo[36] = 0;
+    pseudo[37] = 0;
+    pseudo[38] = 0;
+    pseudo[39] = FL_NET_IP_PROTO_ICMPV6;
+
+    sum = checksum16_accum(0, pseudo, sizeof(pseudo));
+    sum = checksum16_accum(sum, icmp6, icmp6_len);
+    return checksum16_ones_complement(sum);
+}
 
 int fl_net_udp_checksum_valid(uint32_t src_be, uint32_t dst_be, const uint8_t *udp, size_t len) {
     uint16_t csum;

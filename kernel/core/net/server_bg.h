@@ -27,10 +27,7 @@ typedef struct fl_server_bg_s fl_server_bg_t;
 fl_result_t fl_server_bg_start_server(fl_net_server_t *srv, fl_server_bg_t **handle_out);
 fl_result_t fl_server_bg_stop_server(fl_server_bg_t *handle);
 
-typedef void (*fl_server_bg_client_cb)(fl_net_server_event_kind_t kind,
-                                       const char *text,
-                                       fl_net_server_member_id_t mid,
-                                       void *data);
+typedef fl_net_client_event_cb fl_server_bg_client_cb;
 
 fl_result_t fl_server_bg_start_client(fl_net_client_t *client,
                                       fl_server_bg_client_cb cb, void *data,

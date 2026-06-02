@@ -4,6 +4,7 @@
 #include "contract_p3_server.h"
 #include "contract_p3_sockets.h"
 #include "contract_result.h"
+#include "net_endpoint.h"
 #include "net_server.h" /* fl_net_session_rx_t for the embedded parser */
 
 #include <stddef.h>
@@ -25,12 +26,15 @@ typedef struct fl_net_client_s fl_net_client_t;
  * Event callback fired by `fl_net_client_poll` for each inbound frame. The
  * `data` pointer is whatever the caller passed to `_poll`. `text` is a
  * NUL-terminated copy of the payload (already-truncated to fit a stack
- * buffer); for HELLO_ACK, `member_id_out` is the assigned id parsed from the
- * payload prefix.
+ * buffer); for HELLO_ACK, `member_id` is the assigned id parsed from the
+ * payload prefix. For **HOST_PROMOTE** / **HOST_REDIRECT**, `host_addr` is
+ * the decoded successor address (non-NULL; same layout as `fl_net_endpoint_t`);
+ * `text` is empty for those events.
  */
 typedef void (*fl_net_client_event_cb)(fl_net_server_event_kind_t kind,
                                        const char *text,
                                        fl_net_server_member_id_t member_id,
+                                       const fl_net_addr_t *host_addr,
                                        void *data);
 
 /* Cached snapshot of one remote member (parsed from
@@ -53,15 +57,21 @@ struct fl_net_client_s {
     fl_net_client_state_t state;
     char principal[FL_NET_SERVER_PRINCIPAL_MAX];
     char display_name[FL_NET_SERVER_DISPLAY_NAME_MAX];
-    /* Own TCP source (network byte order) from getsockname() on connect;
-     * the host-transfer path binds the new listener on this IP. */
-    uint32_t local_ip_be;
+    /* Own TCP source from getsockname() on connect; used for host transfer (#283). */
+    fl_net_endpoint_t local_ep;
     /* Cached OP_MEMBER_LIST_SNAPSHOT for sender resolution + connected. */
     fl_net_client_member_t members[FL_NET_SERVER_MAX_MEMBERS];
     size_t member_count;
     /* Non-blocking poll parser state; reset on init + every (re)connect. */
     fl_net_session_rx_t rx_state;
+    /** Last decoded HOST_PROMOTE / PROMOTE6 endpoint (#283). */
+    fl_net_endpoint_t last_host_promote_ep;
+    uint8_t last_host_promote_ep_valid;
 };
+
+/** Decode v4 **OP_CTRL_HOST_PROMOTE** or v6 **OP_CTRL_HOST_PROMOTE6** payload. */
+int fl_net_session_decode_host_promote(const uint8_t *payload, uint16_t plen,
+                                       fl_net_endpoint_t *out);
 
 /**
  * Dispatch one already-received session frame: updates the cached roster
@@ -96,6 +106,13 @@ fl_result_t fl_net_client_connect_from(fl_net_client_t *client,
                                        uint32_t peer_be, uint16_t port_host,
                                        const char *principal,
                                        unsigned timeout_ms);
+
+/** Connect using parsed local/peer endpoints (IPv4 or native IPv6). */
+fl_result_t fl_net_client_connect_ep(fl_net_client_t *client,
+                                     const fl_net_endpoint_t *local,
+                                     const fl_net_endpoint_t *peer,
+                                     const char *principal,
+                                     unsigned timeout_ms);
 
 /**
  * Send CTRL_LEAVE and close the socket. Idempotent.

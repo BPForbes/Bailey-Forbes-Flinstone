@@ -64,4 +64,22 @@ int fl_net_ipv4_prefix_match(uint32_t addr_be, uint32_t net_be, uint8_t prefix_l
  */
 unsigned fl_net_route_snapshot(fl_net_route_entry_t *out, unsigned cap);
 
+/* IPv6 FIB (#280) */
+typedef struct {
+    uint8_t addr_be[16];
+    uint8_t prefix_len;
+    fl_net_driver_t *drv;
+    uint8_t src6[16];
+    uint8_t src_mac[6];
+    int src_mac_valid;
+} fl_net_route6_entry_t;
+
+fl_result_t fl_net_route_add6(const uint8_t addr_be[16], uint8_t prefix_len,
+                              fl_net_driver_t *drv, const uint8_t src6[16],
+                              const uint8_t src_mac[6]);
+
+fl_result_t fl_net_route_lookup6(const uint8_t dst6[16], fl_net_route6_entry_t *out);
+
+void fl_net_route_add6_loopback(void);
+
 #endif /* NET_ROUTE_H */

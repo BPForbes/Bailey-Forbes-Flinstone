@@ -5,6 +5,7 @@ Normative contracts live under **`contracts/networking/`** (umbrella **`contract
 ## Goals
 
 - **In-tree** IPv4 framing, ICMP echo, TCP SYN probe, minimal DNS A-record lookup, and **software loopback** (P3-2) without calling `/bin/ping` or `getaddrinfo`.
+- **IPv6 foundation (P3-11):** **`net_ipv6`**, **`net_icmpv6`**, **`net_ndp`**, loopback **`FL_ETHERTYPE_IPV6`** dispatch, IPv6 FIB, and **`fl_net_dns_resolve_aaaa`** stub — see **#280** / PR **#301**; TAP/wire egress and production TCPv6 remain epic tail.
 - **Hosted edge only:** Linux **socket syscalls** (and optional **TAP**) are the OS boundary; probes build and parse packets in C.
 - **Shell:** `ping` and `check requirements` for CI and lab validation (`scripts/check_network_requirements.sh`).
 - **End state (P3-13):** multi-user **chat room** via shell **`server`** — implementation plan: **[`docs/P3_13_CHAT_SERVER.md`](P3_13_CHAT_SERVER.md)** (wire protocol, hub topology, module layout, phased tests). Tracked in **#239**; prerequisites in **#238**.
@@ -30,16 +31,19 @@ Full spec: **[`docs/P3_13_CHAT_SERVER.md`](P3_13_CHAT_SERVER.md)**.
 | **`net_eth.c`** | L2 helpers | Aliases/constants over wire |
 | **`net_arp.c`** | P3-4 | ARP request/reply, bounded cache, **`fl_net_arp_tick`**, gratuitous ARP |
 | **`net_baremetal.c`** | P3-1 / **#241** | **`DRIVERS_BAREMETAL`** lab **802.3** driver (RX ring, ARP/ICMP on wire) |
-| **`net_route.c`** | P3-5 | LPM table; **`fl_net_route_configure_static`**; TAP via **FL_NET_TAP_*** (Linux) |
+| **`net_route.c`** | P3-5 / P3-11 | LPM table (IPv4 + **`fl_net_route_add6`** / **`fl_net_route_lookup6`**); **`fl_net_route_configure_static`**; TAP via **FL_NET_TAP_*** (Linux) |
 | **`net_wire_egress.c`** | P3-5 / P3-6 | IPv4 L4 egress (ARP + netdev); **`fl_net_wire_egress_l4_pkt`** / **`l4_xmit_pkt`** |
 | **`net_udp.c`** | P3-6 (partial) | **`fl_net_udp_build_datagram`** for task-backend socket egress |
 | **`net_dhcp.c`** | P3-12 (lab) | BOOTP codec; **`fl_net_packet_bind_l4`** / **`fl_net_dhcp_*_pkt`** over L4 slices |
 | **`net_background.c`** | P3-14 / distribution | Workqueue tick; blended socket + ARP task backend (P3-13 wire RX TODO) |
 | **`net_ipv4.c`** | P3-5 (partial) | IPv4 header build, literal/loopback address helpers |
+| **`net_ipv6.c`** | P3-11 | IPv6 header build/parse, loopback/link-local helpers |
+| **`net_icmpv6.c`** | P3-11 | ICMPv6 echo on software loopback |
+| **`net_ndp.c`** | P3-11 | NDP NS/NA + neighbor cache (loopback) |
 | **`net_checksum.c`** | P3-5 | Internet checksum; **`asm_net_checksum16`** when `FL_NET_ASM_AVAILABLE` |
 | **`net_icmp.c`** | P3-5 | ICMP echo request/reply exchange |
 | **`net_tcp.c`** | P3-7 (probe only) | **`fl_net_tcp_build_syn_pkt`** + SYN probe; hosted **`fl_net_tcp_stream_*`** |
-| **`net_dns.c`** | P3-8 (minimal) | DNS-over-UDP A query via `/etc/resolv.conf` |
+| **`net_dns.c`** | P3-8 (minimal) | DNS-over-UDP **A** + **`fl_net_dns_resolve_aaaa`** (localhost stub + UDP AAAA) via `/etc/resolv.conf` |
 | **`net_loopback.c`** | P3-2 | In-memory netdev: ICMP echo reply, TCP RST+ACK on SYN |
 | **`net_netdev.c`** | P3-1 | Driver registry, send/recv, timeouts, P2-3 authz hook |
 | **`net_tap.c`** | P3-3 | Linux TAP (`IFF_TAP \| IFF_NO_PI`), `SKIP_TAP=1` |
@@ -224,11 +228,12 @@ Legend matches **`docs/ROADMAP.md`**: **✅** complete; **~✅** usable lab subs
 | **P3-5** IPv4 | ✅ | ~✅ — LPM + **`fl_net_route_configure_static`**; lab route without **FL_NET_TAP_*** on **B**; Linux ICMP fallback when unrouted |
 | **P3-6** UDP | ✅ | ~✅ — DNS + wire host datagrams only |
 | **P3-7** TCP | ✅ | ~✅ — SYN probe + **`fl_net_tcp_stream_*`** hosted listen/connect/accept |
-| **P3-8** DNS | ✅ | ~✅ — A record, single nameserver |
+| **P3-8** DNS | ✅ | ~✅ — A record + **AAAA** stub (`fl_net_dns_resolve_aaaa`) |
+| **P3-11** IPv6 + ICMPv6 | ✅ | ~✅ — loopback ICMPv6/NDP, IPv6 FIB, ethertype dispatch; TAP/wire IPv6 stretch (**#280**) |
 | **P3-9** TLS | ✅ | ~✅ — **`net_tls_hosted.c`** record-size boundary (no mbedtls yet) |
 | **P3-12** DHCP | ✅ | ~✅ — BOOTP codec + **`fl_net_dhcp_*_pkt`** over **`fl_net_packet_t`** |
 | **P3-14** background | ✅ | ~✅ — **`fl_net_arp_tick`** on workqueue; TCP timer wheel / RX dequeue still **#238** |
-| **P3-13** `server` + messaging | ✅ | ~✅ — `server host/join/msg/announce/nick/connected/leave/kill` shipped (PR #282); `udpsend` / `udplisten` shell verbs added (#239); product spec **`docs/SERVER.md`**; deferred siblings: **#283** (`OP_CTRL_HOST_PROMOTE6`), **#280** (IPv6), **#279** (Wi-Fi station), native `fl_socket` waits on **P3-7** TCP state machine. Full per-item follow-up status: **`docs/P3_13_FOLLOWUP.md`** |
+| **P3-13** `server` + messaging | ✅ | ~✅ — `server host/join/msg/announce/nick/connected/leave/kill` shipped (PR #282); `udpsend` / `udplisten` (#239); **#283** PROMOTE6 + `host_addr` callback; **#280** IPv6 loopback/NDP foundation (PR #301); **#279** Wi-Fi station deferred; native `fl_socket` waits on **P3-7** TCP state machine. **`docs/P3_13_FOLLOWUP.md`** |
 
 ## Standards map (integration targets)
 
@@ -237,6 +242,7 @@ Legend matches **`docs/ROADMAP.md`**: **✅** complete; **~✅** usable lab subs
 | Ethernet L2 | **IEEE 802.3**; IPv4 over Ethernet **RFC 894** | ✅ TAP + loopback + **B** lab **`net_baremetal.c`** |
 | ARP (**P3-4**) | **RFC 826** | ✅ cache, exchange, **`fl_net_arp_tick`**, gratuitous ARP |
 | IPv4 / ICMP (**P3-5**) | **RFC 791**, **RFC 792** | ~✅ routing + netdev ICMP |
+| IPv6 / ICMPv6 / NDP (**P3-11**) | **RFC 8200**, **RFC 4443**, **RFC 4861** | ~✅ loopback foundation (**`net_ipv6`**, **`net_icmpv6`**, **`net_ndp`**); TAP/production path **#280** tail |
 | UDP (**P3-6**) | **RFC 768** | ~✅ DNS + hosted datagram shim |
 | TCP (**P3-7**) | **RFC 793** | ~✅ SYN probe + hosted stream shim (in-tree FSM TODO) |
 | DNS (**P3-8**) | **RFC 1035** (subset) | ~✅ A record |
@@ -253,7 +259,7 @@ Inventory of **named protocols** (and closely related APIs) versus what this tre
 | **UDP** | 1–65535 | **RFC 768** | ~✅ | **`net_udp.c`**, **`fl_net_wire_send_udp_pkt`**; not a general datagram API for apps yet |
 | **TCP** | 1–65535 | **RFC 793** | ~✅ | **`net_tcp_fsm.c`** loopback FSM + **`net_tcp.c`** / **`fl_net_tcp_stream_*`** |
 | **TLS** | 443 (HTTPS) | **RFC 8446** (TLS 1.3); **RFC 5246** (TLS 1.2) | ~✅ | **`net_tls_hosted.c`** — record cap + optional OpenSSL client bridge (**#252**) |
-| **DNS** | 53/udp | **RFC 1035** (subset) | ✅ | **`net_dns.c`** — multi-NS **`/etc/resolv.conf`**, retries, **A** only (**#251**) |
+| **DNS** | 53/udp | **RFC 1035** (subset) | ~✅ | **`net_dns.c`** — multi-NS **`/etc/resolv.conf`**, retries, **A** + **AAAA** stub (**#251**, **#280**) |
 | **DHCP** (IPv4) | 67/68/udp | **RFC 2131**, **RFC 2132** | ~✅ | **`net_dhcp.c`** — codec + **`fl_net_dhcp_acquire`** (**#247**); renew/rebind FSM future |
 | **HTTP** | 80/tcp | **RFC 9110**, **RFC 9112** | ~✅ (subset) | **`net_http.c`** — HTTP/1.0 GET + status parse (**#259** / **PX-11**) |
 | **HTTPS** | 443/tcp | **RFC 9110** + **RFC 8446** | ❌ | Same as HTTP over **P3-9** TLS on hosted builds; **HTTP(S) boot** (**PX-12**) reuses **P3-7**/**P3-9** |
@@ -318,6 +324,8 @@ make check-network-requirements
 - **`docs/P3_13_CHAT_SERVER.md`** — **P3-13** chat room implementation plan (wire protocol, APIs, tests)
 - **`contracts/networking/README.txt`** — contract shards vs P2
 - **`docs/ROADMAP.md`** — P3 rows and phase gates
+- **`docs/P3_NETWORKING_DEFERRED.md`** — P3-10 / P3-11 deferral vs **~✅** foundation (not “IPv4-only”)
+- **`docs/GITHUB_ISSUE_SYNC_PR301.md`** — maintainer checklist for **#280** / **#283** issue bodies
 - **`kernel/core/net/README.md`** — file index and include graph
 - **`AGENTS.md`** — build/test and versioning for this PR
 
@@ -334,7 +342,7 @@ make check-network-requirements
 | Priority | Item | Notes |
 |----------|------|--------|
 | **P3-12** | DHCP renew/rebind FSM | Lease DB and renew/rebind after **`fl_net_dhcp_acquire`** |
-| **P3-13** | Chat room | Foundations shipped (PR #282 + #239 `udpsend`/`udplisten`); deferred siblings: **#283** (`OP_CTRL_HOST_PROMOTE6`), **#280** (IPv6 + ICMPv6 + NDP), **#279** (Wi-Fi station); native non-hosted `fl_socket` gated on **P3-7** TCP state machine |
+| **P3-13** | Chat room | Foundations shipped (PR #282 + #239 `udpsend`/`udplisten`); **#283** PROMOTE6 foundation; **#280** IPv6 loopback/NDP foundation (PR #301); **#279** Wi-Fi station; native non-hosted `fl_socket` gated on **P3-7** TCP state machine |
 | ~~Patch~~ | ~~ARP cache TTL / loopback dedup~~ | Done (**#237**, **#240**): **`fl_net_arp_tick`**, **`fl_net_loopback_exchange`**, PIT BH on **B** |
 | ~~P3-5~~ | ~~Drop Linux ICMP fallback~~ | Done (**#262**): egress-only ICMP/UDP when unrouted |
 | **P3-7** | Production TCP timers | Loopback **RFC 793** FSM landed (**#238**); TAP retransmit/TIME_WAIT remain |

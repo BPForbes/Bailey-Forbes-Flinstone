@@ -1,5 +1,7 @@
 #include "net_wire.h"
 
+#include "net_ipv6.h"
+
 #include <string.h>
 
 _Static_assert(FL_NET_WIRE_EXPECT_REV == FL_CONTRACT_P3_WIRE_REV,
@@ -136,6 +138,62 @@ size_t fl_net_wire_build_eth_ipv4(uint8_t *frame, size_t cap, const uint8_t dst_
         return 0;
 
     return total;
+}
+
+size_t fl_net_wire_build_eth_ipv6(uint8_t *frame, size_t cap, const uint8_t dst_mac[6],
+                                  const uint8_t src_mac[6], const uint8_t *ipv6,
+                                  size_t ipv6_len) {
+    size_t total;
+    fl_net_frame_view_t probe;
+
+    if (!frame || !dst_mac || !src_mac || !ipv6 || ipv6_len < FL_NET_IPV6_HDR_LEN)
+        return 0;
+    if (ipv6_len > (size_t)FL_NET_ETH_MTU_DEFAULT)
+        return 0;
+
+    total = (size_t)FL_NET_ETH_FRAME_HDR_LEN + ipv6_len;
+    if (cap < total)
+        return 0;
+
+    memcpy(frame, dst_mac, FL_NET_ETH_ADDR_LEN);
+    memcpy(frame + FL_NET_ETH_ADDR_LEN, src_mac, FL_NET_ETH_ADDR_LEN);
+    frame[12] = (uint8_t)(FL_ETHERTYPE_IPV6 >> 8);
+    frame[13] = (uint8_t)(FL_ETHERTYPE_IPV6 & 0xff);
+    memcpy(frame + FL_NET_ETH_FRAME_HDR_LEN, ipv6, ipv6_len);
+
+    probe = fl_net_frame_view_make(frame, total);
+    if (fl_net_wire_check_tx(&probe, FL_NET_ETH_MTU_DEFAULT) != FL_RESULT_OK)
+        return 0;
+    return total;
+}
+
+int fl_net_wire_ethertype_is_ipv6(const uint8_t *frame, size_t len) {
+    int ok = 0;
+    uint16_t et = fl_net_wire_ethertype_be16(frame, len, &ok);
+    return ok && et == FL_ETHERTYPE_IPV6;
+}
+
+int fl_net_wire_parse_eth_ipv6(const uint8_t *frame, size_t len, size_t *ip_off,
+                               size_t *ip_len) {
+    size_t off;
+    const uint8_t *ip;
+
+    if (!frame || len < FL_NET_ETH_FRAME_HDR_LEN + FL_NET_IPV6_HDR_LEN || !ip_off || !ip_len)
+        return 0;
+    if (!fl_net_wire_ethertype_is_ipv6(frame, len))
+        return 0;
+
+    off = (size_t)FL_NET_ETH_FRAME_HDR_LEN;
+    ip = frame + off;
+    {
+        size_t pl_off = 0;
+        size_t pl_len = 0;
+        if (!fl_net_ipv6_parse(ip, len - off, &pl_off, &pl_len, NULL))
+            return 0;
+        *ip_off = off;
+        *ip_len = pl_off + pl_len;
+    }
+    return 1;
 }
 
 int fl_net_wire_parse_eth_ipv4(const uint8_t *frame, size_t len, size_t *ip_off,

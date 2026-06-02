@@ -13,8 +13,7 @@
 #include "net_udp.h"
 #include "net_wire_egress.h"
 #include "net_wire_host.h"
-
-#include "fl/net_asm.h"
+#include "net_endian.h"
 
 #include <pthread.h>
 
@@ -138,22 +137,6 @@ fl_result_t fl_net_task_backend_hub_bind(uint32_t hub_ip_be, uint16_t hub_port_h
     return FL_RESULT_OK;
 }
 
-static uint16_t port_host_to_be16(uint16_t port_host) {
-#if defined(FL_NET_ASM_AVAILABLE)
-    return asm_net_htons_be16(port_host);
-#else
-    return (uint16_t)((port_host >> 8) | (port_host << 8));
-#endif
-}
-
-static uint16_t port_be_to_host16(uint16_t port_be) {
-#if defined(FL_NET_ASM_AVAILABLE)
-    return asm_net_htons_be16(port_be);
-#else
-    return (uint16_t)((port_be >> 8) | (port_be << 8));
-#endif
-}
-
 static fl_result_t task_backend_resolve_local_ip(uint32_t peer_ip_be, uint32_t *local_ip_be) {
     fl_net_route_entry_t route;
 
@@ -170,7 +153,7 @@ static fl_result_t task_backend_resolve_local_ip(uint32_t peer_ip_be, uint32_t *
         return FL_RESULT_OK;
     }
 
-    *local_ip_be = (uint32_t)FL_NET_IPV4_LOOPBACK_FIRST_OCTET | (1u << 24);
+    *local_ip_be = fl_net_htonl(0x7F000001u);
     return FL_RESULT_OK;
 }
 
@@ -183,7 +166,7 @@ static fl_result_t task_backend_xmit_udp_socket_pkt(const fl_net_socket_endpoint
 
     udp_len = fl_net_udp_build_datagram_from_pkt(
         udp, sizeof(udp), endpoint->local_ip_be, endpoint->peer_ip_be,
-        port_be_to_host16(endpoint->local_port_be), port_be_to_host16(endpoint->peer_port_be),
+        fl_net_ntohs(endpoint->local_port_be), fl_net_ntohs(endpoint->peer_port_be),
         payload_pkt);
     if (udp_len == 0)
         return FL_RESULT_ERR;
@@ -201,8 +184,8 @@ static fl_result_t task_backend_xmit_udp_socket_pkt(const fl_net_socket_endpoint
         return rc;
 
     return fl_net_wire_xmit_udp_pkt(endpoint->peer_ip_be,
-                                    port_be_to_host16(endpoint->local_port_be),
-                                    port_be_to_host16(endpoint->peer_port_be), &udp_pkt);
+                                    fl_net_ntohs(endpoint->local_port_be),
+                                    fl_net_ntohs(endpoint->peer_port_be), &udp_pkt);
 }
 
 fl_result_t fl_net_task_backend_socket_send(const fl_net_socket_endpoint_t *endpoint,
@@ -378,9 +361,9 @@ fl_result_t fl_net_task_backend_client_wire_send(uint32_t server_addr_be, uint16
         return rc;
 
     ep.local_ip_be = local_ip_be;
-    ep.local_port_be = port_host_to_be16(client_sport);
+    ep.local_port_be = fl_net_htons(client_sport);
     ep.peer_ip_be = server_addr_be;
-    ep.peer_port_be = port_host_to_be16(server_port);
+    ep.peer_port_be = fl_net_htons(server_port);
 
     return fl_net_task_backend_socket_send(&ep, payload, payload_len);
 }
@@ -425,16 +408,16 @@ fl_result_t fl_net_task_backend_server_relay_to_clients(unsigned src_slot,
         peer_bound = s_peers[i].bound;
         peer_ip = s_peers[i].peer_ip_be;
         peer_port = s_peers[i].peer_port_host;
-        hub_ip = s_hub_bound ? s_hub_ip_be : (uint32_t)FL_NET_IPV4_LOOPBACK_FIRST_OCTET | (1u << 24);
+        hub_ip = s_hub_bound ? s_hub_ip_be : fl_net_htonl(0x7F000001u);
         pthread_mutex_unlock(&s_user_inboxes_mu);
 
         if (!peer_bound || !s_hub_bound)
             continue;
 
         ep.local_ip_be = hub_ip;
-        ep.local_port_be = port_host_to_be16(s_hub_port_host);
+        ep.local_port_be = fl_net_htons(s_hub_port_host);
         ep.peer_ip_be = peer_ip;
-        ep.peer_port_be = port_host_to_be16(peer_port);
+        ep.peer_port_be = fl_net_htons(peer_port);
 
         rc = fl_net_task_backend_socket_send(&ep, payload, payload_len);
         if (rc == FL_RESULT_OK)

@@ -19,17 +19,20 @@ static int test_meta_roundtrip(void)
     strncpy(offer.share_id, "share-1717198800-1", sizeof(offer.share_id) - 1u);
     strncpy(offer.file_name, "joke.txt", sizeof(offer.file_name) - 1u);
     offer.expires_at = 1906558245u;
+    offer.sender_member_id = 1u;
+    offer.receiver_member_id = 2u;
+    offer.file_perms = FL_FILE_PERM_VIEW | FL_FILE_FLAG_EXPIRES;
 
     ASSERT(fl_server_file_meta_from_offer(&offer, &meta) == FL_RESULT_OK);
-    ASSERT(strcmp(meta.share_id, offer.share_id) == 0);
-    ASSERT(strcmp(meta.file_name, "joke.txt") == 0);
+    ASSERT(strcmp(meta.transfer_id, offer.share_id) == 0);
+    ASSERT(strcmp(meta.payload_name, "joke.txt") == 0);
     ASSERT(meta.expires_at == offer.expires_at);
 
     ASSERT(fl_file_packet_encode_meta(&meta, wire, sizeof(wire), &wire_len) == FL_RESULT_OK);
     ASSERT(wire_len > 0u);
     ASSERT(fl_file_packet_decode_meta(wire, wire_len, &decoded) == FL_RESULT_OK);
-    ASSERT(strcmp(decoded.share_id, meta.share_id) == 0);
-    ASSERT(strcmp(decoded.file_name, meta.file_name) == 0);
+    ASSERT(strcmp(decoded.transfer_id, meta.transfer_id) == 0);
+    ASSERT(strcmp(decoded.payload_name, meta.payload_name) == 0);
     ASSERT(decoded.expires_at == meta.expires_at);
     return 0;
 }

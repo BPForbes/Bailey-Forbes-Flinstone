@@ -5,6 +5,7 @@
 #include "contract_p3_session_wire.h"
 #include "contract_p3_sockets.h"
 #include "contract_result.h"
+#include "net_endpoint.h"
 
 #include <stdarg.h>
 #include <stddef.h>
@@ -23,6 +24,7 @@
 typedef struct {
     fl_net_server_member_t members[FL_NET_SERVER_MAX_MEMBERS];
     fl_net_sock_handle_t listen_handle;
+    fl_net_endpoint_t bind_ep;
     uint32_t bind_addr_be;
     uint16_t bind_port_host;
     fl_net_server_member_id_t next_member_id;
@@ -45,6 +47,11 @@ fl_result_t fl_net_server_init(fl_net_server_t *srv);
 fl_result_t fl_net_server_host_start(fl_net_server_t *srv,
                                      uint32_t bind_addr_be, uint16_t port_host,
                                      const char *host_principal);
+
+/** Bind/listen using a parsed endpoint (IPv4 or native IPv6 on hosted builds). */
+fl_result_t fl_net_server_host_start_ep(fl_net_server_t *srv,
+                                        const fl_net_endpoint_t *bind_ep,
+                                        const char *host_principal);
 
 /**
  * Broadcast `CTRL_KILL`, close every member socket and the listener, and

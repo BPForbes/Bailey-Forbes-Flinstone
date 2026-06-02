@@ -59,4 +59,32 @@ fl_result_t fl_net_file_send_meta(fl_net_server_t *srv,
 
 fl_result_t fl_net_file_store_meta(const uint8_t *payload, uint16_t plen);
 
+/** Host: validate and retain in-flight MSG_META (not forwarded to peers). */
+fl_result_t fl_net_msg_host_handle_meta(fl_net_server_member_id_t sender_id,
+                                        const uint8_t *payload,
+                                        uint16_t plen);
+
+/** Host: catalog a chat payload; uses pending MSG_META when present. */
+fl_result_t fl_net_msg_host_catalog_body(fl_net_server_member_id_t sender_id,
+                                         uint16_t receiver_member_id,
+                                         const char *payload_name,
+                                         const uint8_t *body,
+                                         size_t body_len,
+                                         fl_file_perms_t file_perms);
+
+fl_result_t fl_net_msg_store_meta(const uint8_t *payload, uint16_t plen);
+
+fl_result_t fl_net_msg_send_meta_broadcast(fl_net_client_t *client,
+                                           const char *transfer_id,
+                                           const char *payload_name,
+                                           uint64_t expires_at,
+                                           fl_file_perms_t file_perms);
+
+fl_result_t fl_net_msg_send_meta_direct(fl_net_client_t *client,
+                                        const char *transfer_id,
+                                        const char *payload_name,
+                                        uint16_t receiver_member_id,
+                                        uint64_t expires_at,
+                                        fl_file_perms_t file_perms);
+
 #endif /* NET_FILE_DELIVERY_H */

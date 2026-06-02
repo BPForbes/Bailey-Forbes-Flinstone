@@ -38,12 +38,12 @@ commit. Current status:
 | 3 | `*payload_len_out` set to `payload_cap` instead of true wire `plen` | ✅ resolved | `kernel/core/net/net_server.c` — `*payload_len_out = plen` is set before the truncation branch; caller-visible truncation comment documents `*payload_len_out > payload_cap`. |
 | 4 | Conservative `n >= MAX_MSG` rejected legal max-length payload | ✅ resolved | `kernel/core/net/net_client.c` — `strnlen(text, MAX_MSG + 1u)` + `n > MAX_MSG` reject; private path subtracts the 4-byte prefix. |
 | 5 | `volatile int stop` not strictly C11 atomic | ✅ resolved | `kernel/core/net/server_bg.c` — switched to `atomic_int stop` (`stdatomic.h`). |
-| 6 | `parse_endpoint` missing `TODO(#280)` for `[::1]:port` | ✅ resolved | `userland/command/cmd_server.c` line 66 — explicit `TODO(#280)` block above `strrchr`. |
+| 6 | `parse_endpoint` missing `TODO(#280)` for `[::1]:port` | ✅ resolved | `fl_net_endpoint_parse` in `kernel/core/net/net_endpoint.c` + `cmd_server.c` bracket paths (#280 / PR #301). |
 | 7 | `FL_NET_SERVER_EVENT_MSG_PRIVATE` case missing from test event sink | ✅ resolved | `tests/test_p3_server.c` — `last_private[256]`, `case` handler, and `ASSERT(strstr(logJill.last_private, "Hello") != NULL)`. |
 | 8 | Contract `OP_*_ANNOUNCE` payload doc said bare display name; impl sends full line | ✅ resolved | `contracts/networking/contract_p3_server.h` — `JOIN/LEAVE/NICK_SET/SERVER_ANNOUNCE` blocks rewritten to the actual wire payloads (`"<display> has joined."`, etc.). |
 | 9 | `tests/decode_session_pcap.py` ignored TCP sequence numbers (`-i any` double-count) | ✅ resolved | Decoder sorts segments by `seq`, handles overlap, fills gaps with `\xff` sentinel; opcode counts dropped from 2× to 1× on the rerun. |
 | 10 | Flags byte `hdr[3]` not validated | ✅ resolved | `kernel/core/net/net_server.c` — `hdr[3] != 0u` guard in both `fl_net_session_recv_frame` and `_nb` paths returns `FL_RESULT_INVAL`. |
-| 11 | `OP_CTRL_HOST_PROMOTE` payload is IPv4-only | 🟡 deferred → **`#283`** | `contracts/networking/contract_p3_server.h` documents the recommended sibling `OP_CTRL_HOST_PROMOTE6 (0x24)` with `[u16 new_id][16 bytes ipv6_be][u16 port]`. Tracked in **`docs/ROADMAP.md`** TODO row **TODO: P3-13 (#283)**. |
+| 11 | `OP_CTRL_HOST_PROMOTE` payload is IPv4-only | ✅ resolved → **`#283`** | `OP_CTRL_HOST_PROMOTE6 (0x24)` dispatch, `fl_net_session_decode_host_promote`, `host_addr` on event callback, `contract_p3_host_promote6.h` (PR #301). |
 | 12 | Nick collision return code: contract said `OP_ERR` only, didn't mention `FL_RESULT_BUSY` for the local C API | ✅ resolved | `contracts/networking/contract_p3_server.h` lines 38–41 *and* `kernel/core/net/net_server.h` lines 95–104 both document the `OK / INVAL / NOENT / BUSY` matrix with explicit cross-reference to the wire-side `OP_ERR`. |
 
 ---
@@ -63,7 +63,7 @@ commit. Current status:
 
 | Location | Tag | What it tracks | Roadmap row |
 |----------|-----|----------------|-------------|
-| `userland/command/cmd_server.c:66` | `TODO(#280)` | Bracketed-endpoint parsing for `[2001:db8::1]:port` (requires `inet_pton(AF_INET6, …)` and family-tagged `addr_be_out`). | **TODO: P3-13 (#280)** |
+| `userland/command/cmd_server.c` | *(removed)* | Bracketed-endpoint parsing via `fl_net_endpoint_parse` / `fl_net_server_host_start_ep` (#280 foundation). | ✅ **#280** foundation |
 | `kernel/core/net/net_background.c:103` | `TODO: P3-14` | Do not recv from `fl_net_netdev_loopback()` in `fl_net_background_tick` — that queue is owned by `net_wire_egress` for ICMP/TCP probes. | **TODO: P3-13 (#238)** |
 | `kernel/core/net/net_background.c:107` | `TODO: P3-13` | Wire RX demux calls `fl_net_task_backend_server_ingress()`. | **TODO: P3-13 (#238)** |
 | `kernel/core/net/net_background.c:453` | `TODO: P3-13` | Map wire source (port/session) to `from_client_slot`; validate. | **TODO: P3-13 (#238)** |

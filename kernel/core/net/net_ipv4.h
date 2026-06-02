@@ -4,6 +4,7 @@
 #include "contract_p3_ipv4.h"
 #include "contract_p3_loopback.h"
 #include "contract_result.h"
+#include "net_endpoint.h"
 
 #include <stddef.h>
 #include <stdint.h>

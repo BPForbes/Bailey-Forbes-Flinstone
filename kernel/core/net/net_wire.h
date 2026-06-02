@@ -42,6 +42,15 @@ size_t fl_net_wire_build_eth_ipv4(uint8_t *frame, size_t cap, const uint8_t dst_
                                   const uint8_t src_mac[6], const uint8_t *ipv4,
                                   size_t ipv4_len);
 
+size_t fl_net_wire_build_eth_ipv6(uint8_t *frame, size_t cap, const uint8_t dst_mac[6],
+                                  const uint8_t src_mac[6], const uint8_t *ipv6,
+                                  size_t ipv6_len);
+
+int fl_net_wire_ethertype_is_ipv6(const uint8_t *frame, size_t len);
+
+int fl_net_wire_parse_eth_ipv6(const uint8_t *frame, size_t len, size_t *ip_off,
+                               size_t *ip_len);
+
 int fl_net_wire_parse_eth_ipv4(const uint8_t *frame, size_t len, size_t *ip_off,
                                size_t *ip_len, fl_ipv4_be32_t *dst_addr);
 

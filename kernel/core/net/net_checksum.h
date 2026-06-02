@@ -11,4 +11,8 @@ uint16_t fl_net_pseudo_checksum_tcpudp(uint32_t src_be, uint32_t dst_be, uint8_t
                                        const void *seg, size_t seg_len);
 int fl_net_udp_checksum_valid(uint32_t src_be, uint32_t dst_be, const uint8_t *udp, size_t len);
 
+/** ICMPv6 checksum with IPv6 pseudo-header (RFC 4443). */
+uint16_t fl_net_ipv6_pseudo_checksum_icmp6(const uint8_t src[16], const uint8_t dst[16],
+                                           const uint8_t *icmp6, size_t icmp6_len);
+
 #endif /* NET_CHECKSUM_H */

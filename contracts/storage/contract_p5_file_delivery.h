@@ -10,6 +10,7 @@
 #define FL_CONTRACT_P5_FILE_DELIVERY_H
 
 #include "contract_pkt_channel_meta.h"
+#include "contract_p3_channel_sidecar.h"
 #include "contract_p5_file_perms.h"
 #include "contract_p5_member_identity.h"
 #include "contract_p5_server_share.h"
@@ -113,12 +114,7 @@ typedef struct fl_server_file_done {
     uint8_t status;
 } fl_server_file_done_t;
 
-/** Session-only sidecar for in-flight tracking (mirrors `<share_id>.meta` text fields). */
-typedef struct fl_server_file_meta {
-    char share_id[FL_SERVER_SHARE_ID_MAX];
-    uint64_t expires_at;
-    char file_name[FL_SERVER_FILE_NAME_MAX];
-} fl_server_file_meta_t;
+/* fl_server_file_meta_t / fl_channel_sidecar_t: contract_p3_channel_sidecar.h */
 
 fl_result_t fl_wire_put_bytes16(fl_bytes_writer_t *w,
                                 const uint8_t *data,

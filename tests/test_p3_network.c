@@ -9,7 +9,11 @@
 #include "net_wire.h"
 #include "net_checksum.h"
 #include "net_icmp.h"
+#include "net_icmpv6.h"
 #include "net_ipv4.h"
+#include "net_ipv6.h"
+#include "net_ndp.h"
+#include "net_dns.h"
 #include "net_loopback.h"
 #include "net_netdev.h"
 #include "net_packet.h"
@@ -134,8 +138,8 @@ static int test_arp_cache_and_frame(void) {
 
     fl_net_loopback_mac_host(host_mac);
     len = fl_net_arp_build_request(frame, sizeof(frame), host_mac,
-                                   (uint32_t)127 | (1u << 24),
-                                   (uint32_t)127 | (2u << 24));
+                                   fl_net_htonl(0x7F000001u),
+                                   fl_net_htonl(0x7F000002u));
     ASSERT(len > FL_NET_ETH_FRAME_HDR_LEN);
     ASSERT(fl_net_arp_parse_eth(frame, len, &op, NULL, NULL, NULL, NULL));
     ASSERT(op == FL_NET_ARP_OP_REQUEST);
@@ -167,8 +171,8 @@ static int test_loopback_arp_exchange(void) {
     fl_net_loopback_mac_host(host_mac);
 
     len = fl_net_arp_build_request(frame, sizeof(frame), host_mac,
-                                   (uint32_t)127 | (2u << 24),
-                                   (uint32_t)127 | (1u << 24));
+                                   fl_net_htonl(0x7F000002u),
+                                   fl_net_htonl(0x7F000001u));
     ASSERT(len > 0);
     view.data = frame;
     view.len = len;
@@ -254,7 +258,7 @@ static int test_udp_echo_loopback(void) {
     const char payload[] = "udp-echo-roundtrip";
     uint8_t rx[64];
     size_t rx_len = 0;
-    uint32_t loopback = (uint32_t)FL_NET_IPV4_LOOPBACK_FIRST_OCTET | (1u << 24);
+    uint32_t loopback = fl_net_htonl(0x7F000001u);
     fl_result_t rc;
 
     fl_net_udp_demux_reset();
@@ -269,7 +273,7 @@ static int test_udp_echo_loopback(void) {
 
 
 static int test_tcp_connect_rst_slot_release(void) {
-    uint32_t loopback = (uint32_t)FL_NET_IPV4_LOOPBACK_FIRST_OCTET | (1u << 24);
+    uint32_t loopback = fl_net_htonl(0x7F000001u);
     unsigned client_id = 0;
     fl_result_t rc;
     unsigned i;
@@ -289,7 +293,7 @@ static int test_tcp_connect_rst_slot_release(void) {
 }
 
 static int test_tcp_dual_connect_loopback(void) {
-    uint32_t loopback = (uint32_t)FL_NET_IPV4_LOOPBACK_FIRST_OCTET | (1u << 24);
+    uint32_t loopback = fl_net_htonl(0x7F000001u);
     unsigned c1 = 0;
     unsigned c2 = 0;
     unsigned s1 = 0;
@@ -328,7 +332,7 @@ static int test_tcp_dual_connect_loopback(void) {
 static int test_tcp_fsm_loopback(void) {
     unsigned server_id = 0;
     unsigned client_id = 0;
-    uint32_t loopback = (uint32_t)FL_NET_IPV4_LOOPBACK_FIRST_OCTET | (1u << 24);
+    uint32_t loopback = fl_net_htonl(0x7F000001u);
     const char msg[] = "fsm-data";
     char rx[32];
     size_t rx_len = 0;
@@ -382,8 +386,8 @@ static int test_netdev_loopback_frame(void) {
     size_t icmp_len;
     size_t ip_len;
     size_t frame_len;
-    uint32_t dst_be = (uint32_t)127 | (1u << 24);
-    uint32_t src_be = (uint32_t)127 | (1u << 24);
+    uint32_t dst_be = fl_net_htonl(0x7F000001u);
+    uint32_t src_be = fl_net_htonl(0x7F000001u);
     fl_net_ipv4_hdr_t hdr;
     fl_net_frame_view_t view;
     fl_net_frame_mut_t mut;
@@ -417,6 +421,117 @@ static int test_netdev_loopback_frame(void) {
     fl_net_netdev_stats(fl_net_netdev_loopback(), &stats);
     ASSERT(stats.tx_frames >= 1u);
     ASSERT(stats.rx_frames >= 1u);
+    return 0;
+}
+
+static int test_ipv6_icmp_echo_loopback(void) {
+    uint8_t lb[16];
+    uint8_t host_mac[6];
+    uint8_t peer_mac[6];
+    uint8_t icmp[64];
+    uint8_t ip6[128];
+    uint8_t frame[256];
+    uint8_t rx[256];
+    size_t icmp_len;
+    size_t ip6_len;
+    size_t frame_len;
+    fl_net_frame_view_t view;
+    fl_net_frame_mut_t mut;
+    fl_result_t rc;
+
+    fl_net_loopback_reset();
+    fl_net_ipv6_loopback_addr(lb);
+    icmp_len = fl_net_icmpv6_echo_request_build(icmp, sizeof(icmp), 0x6a6au, 1u, 8u);
+    ASSERT(icmp_len > 0);
+    ip6_len = fl_net_ipv6_build(lb, lb, FL_NET_IP_PROTO_ICMPV6, icmp, icmp_len, ip6, sizeof(ip6));
+    ASSERT(ip6_len > 0);
+    fl_net_loopback_mac_host(host_mac);
+    fl_net_loopback_mac_peer(peer_mac);
+    frame_len = fl_net_wire_build_eth_ipv6(frame, sizeof(frame), peer_mac, host_mac, ip6, ip6_len);
+    ASSERT(frame_len > 0);
+    view.data = frame;
+    view.len = frame_len;
+    ASSERT(fl_net_netdev_send(fl_net_netdev_loopback(), &view) == FL_RESULT_OK);
+    mut.data = rx;
+    mut.cap = sizeof(rx);
+    mut.len = 0;
+    rc = fl_net_netdev_recv(fl_net_netdev_loopback(), &mut, 2000u);
+    ASSERT(rc == FL_RESULT_OK);
+    {
+        size_t off = 0;
+        size_t iplen = 0;
+        ASSERT(fl_net_wire_parse_eth_ipv6(rx, mut.len, &off, &iplen));
+        ASSERT(fl_net_icmpv6_echo_reply_match(rx + off + FL_NET_IPV6_HDR_LEN,
+                                              iplen - FL_NET_IPV6_HDR_LEN, 0x6a6au, 1u));
+    }
+    return 0;
+}
+
+static int test_ipv6_ndp_ns_na_loopback(void) {
+    uint8_t lb[16];
+    uint8_t host_mac[6];
+    uint8_t peer_mac[6];
+    uint8_t icmp[64];
+    uint8_t ip6[128];
+    uint8_t frame[256];
+    uint8_t rx[256];
+    size_t icmp_len;
+    size_t ip6_len;
+    size_t frame_len;
+    fl_net_frame_view_t view;
+    fl_net_frame_mut_t mut;
+    fl_result_t rc;
+
+    fl_net_loopback_reset();
+    fl_net_ipv6_loopback_addr(lb);
+    fl_net_loopback_mac_host(host_mac);
+    fl_net_loopback_mac_peer(peer_mac);
+    icmp_len = fl_net_ndp_build_neighbor_solicit(icmp, sizeof(icmp), lb, peer_mac);
+    ASSERT(icmp_len > 0);
+    ip6_len = fl_net_ipv6_build(lb, lb, FL_NET_IP_PROTO_ICMPV6, icmp, icmp_len, ip6, sizeof(ip6));
+    ASSERT(ip6_len > 0);
+    frame_len = fl_net_wire_build_eth_ipv6(frame, sizeof(frame), peer_mac, host_mac, ip6, ip6_len);
+    ASSERT(frame_len > 0);
+    view.data = frame;
+    view.len = frame_len;
+    ASSERT(fl_net_netdev_send(fl_net_netdev_loopback(), &view) == FL_RESULT_OK);
+    mut.data = rx;
+    mut.cap = sizeof(rx);
+    mut.len = 0;
+    rc = fl_net_netdev_recv(fl_net_netdev_loopback(), &mut, 2000u);
+    ASSERT(rc == FL_RESULT_OK);
+    {
+        size_t off = 0;
+        size_t iplen = 0;
+        const uint8_t *na;
+        ASSERT(fl_net_wire_parse_eth_ipv6(rx, mut.len, &off, &iplen));
+        na = rx + off + FL_NET_IPV6_HDR_LEN;
+        ASSERT(na[0] == (uint8_t)FL_NET_ICMPV6_TYPE_NA);
+    }
+    return 0;
+}
+
+static int test_ipv6_route_lookup_loopback(void) {
+    uint8_t lb[16];
+    fl_net_route6_entry_t route;
+
+    fl_net_route_init();
+    fl_net_ipv6_loopback_addr(lb);
+    ASSERT(fl_net_route_lookup6(lb, &route) == FL_RESULT_OK);
+    ASSERT(route.drv == fl_net_netdev_loopback());
+    ASSERT(route.prefix_len == 128u);
+    return 0;
+}
+
+static int test_dns_resolve_aaaa_localhost(void) {
+    uint8_t out6[16];
+    uint8_t expect[16];
+    char txt[64];
+
+    fl_net_ipv6_loopback_addr(expect);
+    ASSERT(fl_net_dns_resolve_aaaa("localhost", out6, txt, sizeof(txt)) == FL_RESULT_OK);
+    ASSERT(memcmp(out6, expect, 16) == 0);
+    ASSERT(strstr(txt, "::1") != NULL || txt[0] != '\0');
     return 0;
 }
 
@@ -628,7 +743,7 @@ static int test_net_udp_demux_queue(void) {
     size_t out_len = 0;
     fl_result_t rc;
     const char payload[] = "demux-payload";
-    uint32_t loopback = (uint32_t)FL_NET_IPV4_LOOPBACK_FIRST_OCTET | (1u << 24);
+    uint32_t loopback = fl_net_htonl(0x7F000001u);
 
     fl_net_udp_demux_reset();
     rc = fl_net_udp_bind_port(47001u);
@@ -668,7 +783,7 @@ static int test_net_socket_tcp_loopback(void) {
     fl_net_sock_handle_t client_h = FL_NET_SOCK_INVALID;
     fl_net_sock_handle_t accepted_h = FL_NET_SOCK_INVALID;
     fl_result_t rc;
-    uint32_t loopback = (uint32_t)FL_NET_IPV4_LOOPBACK_FIRST_OCTET | (1u << 24);
+    uint32_t loopback = fl_net_htonl(0x7F000001u);
     const char msg[] = "tcp-loopback-prep";
     char rx[32];
     size_t sent = 0;
@@ -720,7 +835,7 @@ static int test_net_socket_udp_loopback(void) {
     fl_net_sock_handle_t listen_h = FL_NET_SOCK_INVALID;
     fl_net_sock_handle_t send_h = FL_NET_SOCK_INVALID;
     fl_result_t rc;
-    uint32_t loopback = (uint32_t)FL_NET_IPV4_LOOPBACK_FIRST_OCTET | (1u << 24);
+    uint32_t loopback = fl_net_htonl(0x7F000001u);
     const char msg[] = "udp-loopback-shim";
     char rx[64];
     size_t sent = 0u;
@@ -766,7 +881,7 @@ static int test_net_udp_build_datagram(void) {
     const char payload[] = "udp";
     fl_net_packet_t payload_pkt;
     size_t len;
-    uint32_t loopback = (uint32_t)FL_NET_IPV4_LOOPBACK_FIRST_OCTET | (1u << 24);
+    uint32_t loopback = fl_net_htonl(0x7F000001u);
 
     memcpy(payload_buf, payload, sizeof(payload) - 1u);
     ASSERT(fl_net_packet_bind_l4(&payload_pkt, payload_buf, sizeof(payload_buf), 0u,
@@ -789,7 +904,7 @@ static int test_net_udp_build_datagram(void) {
 static int test_net_task_backend_socket_send_smoke(void) {
     fl_net_socket_endpoint_t ep;
     fl_result_t rc;
-    uint32_t loopback = (uint32_t)FL_NET_IPV4_LOOPBACK_FIRST_OCTET | (1u << 24);
+    uint32_t loopback = fl_net_htonl(0x7F000001u);
     const char payload[] = "socket arp blend";
 
     ep.local_ip_be = loopback;
@@ -812,7 +927,7 @@ static int test_net_task_backend_client_wire_send_smoke(void) {
     const char payload[] = "wire egress smoke";
     size_t payload_len = sizeof(payload) - 1u;
     fl_net_packet_t pkt;
-    uint32_t loopback = (uint32_t)FL_NET_IPV4_LOOPBACK_FIRST_OCTET | (1u << 24);
+    uint32_t loopback = fl_net_htonl(0x7F000001u);
 
     memset(frame, 0, sizeof(frame));
     memcpy(frame + 16u, payload, payload_len);
@@ -839,7 +954,7 @@ static int test_net_arp_cache_sweep(void) {
 
     fl_net_arp_clear();
     ASSERT(fl_net_arp_cache_sweep(1u) == 0u);
-    ASSERT(fl_net_arp_cache_insert((uint32_t)(10u | (1u << 24)), mac) == FL_RESULT_OK);
+    ASSERT(fl_net_arp_cache_insert(fl_net_htonl(0x0A000001u), mac) == FL_RESULT_OK);
     (void)fl_net_arp_cache_sweep(100000u);
 
     fl_net_background_init();
@@ -960,7 +1075,7 @@ static int test_route_zero_prefix_policy(void) {
 
     fl_net_route_clear();
     ASSERT(fl_net_route_add(0u, 0u, 0x0200000au, fl_net_netdev_loopback(),
-                            (uint32_t)FL_NET_IPV4_LOOPBACK_FIRST_OCTET | (1u << 24), mac) ==
+                            fl_net_htonl(0x7F000001u), mac) ==
            FL_RESULT_OK);
     fl_net_route_clear();
     ASSERT(fl_net_ipv4_parse_literal("1.2.3.4", &catch_all_be));
@@ -989,7 +1104,7 @@ static int test_net_tcp_stream_listen_connect(void) {
     fl_net_sock_handle_t client_h = FL_NET_SOCK_INVALID;
     fl_net_sock_handle_t accepted_h = FL_NET_SOCK_INVALID;
     fl_result_t rc;
-    uint32_t loopback = (uint32_t)FL_NET_IPV4_LOOPBACK_FIRST_OCTET | (1u << 24);
+    uint32_t loopback = fl_net_htonl(0x7F000001u);
 
     rc = fl_net_tcp_stream_listen(loopback, 48778u, &listen_h);
     if (rc == FL_RESULT_NOSYS) {
@@ -1020,8 +1135,8 @@ static int test_netdev_shutdown(void) {
     size_t icmp_len;
     size_t ip_len;
     size_t frame_len;
-    uint32_t dst_be = (uint32_t)127 | (1u << 24);
-    uint32_t src_be = (uint32_t)127 | (1u << 24);
+    uint32_t dst_be = fl_net_htonl(0x7F000001u);
+    uint32_t src_be = fl_net_htonl(0x7F000001u);
     fl_net_ipv4_hdr_t hdr;
 
     fl_net_netdev_init();
@@ -1255,6 +1370,25 @@ int main(void) {
         return 1;
     puts("ok");
 
+    printf("test_ipv6_icmp_echo_loopback... ");
+    if (test_ipv6_icmp_echo_loopback() != 0)
+        return 1;
+    puts("ok");
+
+    printf("test_ipv6_ndp_ns_na_loopback... ");
+    if (test_ipv6_ndp_ns_na_loopback() != 0)
+        return 1;
+    puts("ok");
+
+    printf("test_ipv6_route_lookup_loopback... ");
+    if (test_ipv6_route_lookup_loopback() != 0)
+        return 1;
+    puts("ok");
+
+    printf("test_dns_resolve_aaaa_localhost... ");
+    if (test_dns_resolve_aaaa_localhost() != 0)
+        return 1;
+    puts("ok");
 
     printf("test_netdev_shutdown... ");
     if (test_netdev_shutdown() != 0)

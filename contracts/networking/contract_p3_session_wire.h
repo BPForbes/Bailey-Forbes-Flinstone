@@ -2,6 +2,7 @@
  * **P3-13 — Session wire vocabulary** (normative constants + file-session routing).
  *
  * **Distribution:** one **TCP** byte stream carries length-prefixed **frames**.
+ * All multi-byte wire fields are **big-endian (network byte order)** unless noted.
  * Application payloads are UTF-8 unless a future **flags** bit says otherwise.
  * File-transfer frames reuse the same header and channel as chat control traffic;
  * the P3 -> P5 include is an intentional cross-layer seam so packet routing,
@@ -49,11 +50,20 @@
 #define FL_NET_SESSION_OP_NICK_PROMPT 0x04u
 #define FL_NET_SESSION_OP_MSG 0x10u
 #define FL_NET_SESSION_OP_MSG_BROADCAST 0x11u
+#define FL_NET_SESSION_OP_MSG_DIRECT 0x12u
+#define FL_NET_SESSION_OP_MSG_DIRECT_DELIVER 0x13u
+/** In-flight message sidecar (same layout as FILE_META / fl_channel_sidecar_t). */
+#define FL_NET_SESSION_OP_MSG_META 0x14u
+
 #define FL_NET_SESSION_OP_CTRL_LEAVE 0x20u
 #define FL_NET_SESSION_OP_CTRL_KILL 0x21u
 #define FL_NET_SESSION_OP_CTRL_HOST_PROMOTE 0x22u
 /** Host sets a host-global nickname for member_id (visible to all; target -user nick). */
 #define FL_NET_SESSION_OP_HOST_NICK_SET 0x23u
+/** IPv6 host transfer (#283 / #280); payload [u16 id][16 ipv6_be][u16 port]. */
+#define FL_NET_SESSION_OP_CTRL_HOST_PROMOTE6 0x24u
+#define FL_NET_SESSION_CTRL_HOST_PROMOTE_PAYLOAD_LEN  8u
+#define FL_NET_SESSION_CTRL_HOST_PROMOTE6_PAYLOAD_LEN 20u
 
 /** File-transfer opcodes — same session frame header as chat (v1 extension). */
 #define FL_NET_SESSION_OP_FILE_FIRST    0x30u
@@ -65,7 +75,7 @@
 #define FL_NET_SESSION_OP_FILE_REVOKE   0x35u
 #define FL_NET_SESSION_OP_FILE_LIST     0x36u
 #define FL_NET_SESSION_OP_FILE_STATUS   0x37u
-/** In-flight share sidecar (share_id, expires_at, file_name); never persisted on receiver drive. */
+/** In-flight share sidecar (fl_channel_sidecar_t); stripped before final delivery. */
 #define FL_NET_SESSION_OP_FILE_META     0x38u
 #define FL_NET_SESSION_OP_FILE_LAST     0x38u
 

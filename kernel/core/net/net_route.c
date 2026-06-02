@@ -1,6 +1,8 @@
 #include "net_route.h"
 
 #include "net_ipv4.h"
+#include "net_endian.h"
+#include "net_ipv6.h"
 #include "net_loopback.h"
 #include "net_netdev.h"
 #include "net_wire.h"
@@ -12,6 +14,9 @@
 
 static fl_net_route_entry_t s_routes[FL_NET_ROUTE_TABLE_MAX];
 static unsigned s_route_count;
+
+static fl_net_route6_entry_t s_routes6[FL_NET_ROUTE_TABLE_MAX];
+static unsigned s_route6_count;
 
 int fl_net_ipv4_prefix_match(uint32_t addr_be, uint32_t net_be, uint8_t prefix_len) {
     unsigned i;
@@ -44,11 +49,14 @@ int fl_net_ipv4_prefix_match(uint32_t addr_be, uint32_t net_be, uint8_t prefix_l
 void fl_net_route_init(void) {
     fl_net_route_clear();
     fl_net_route_add_loopback();
+    fl_net_route_add6_loopback();
 }
 
 void fl_net_route_clear(void) {
     memset(s_routes, 0, sizeof(s_routes));
     s_route_count = 0;
+    memset(s_routes6, 0, sizeof(s_routes6));
+    s_route6_count = 0;
 }
 
 void fl_net_route_add_loopback(void) {
@@ -57,12 +65,12 @@ void fl_net_route_add_loopback(void) {
     fl_net_route_entry_t existing;
 
     fl_net_loopback_mac_host(host_mac);
-    loop_net = (uint32_t)FL_NET_IPV4_LOOPBACK_FIRST_OCTET;
+    loop_net = fl_net_htonl(0x7F000000u);
     if (fl_net_route_lookup(loop_net, &existing) == FL_RESULT_OK &&
         existing.prefix_len == 8u && existing.drv == fl_net_netdev_loopback())
         return;
-    (void)fl_net_route_add(loop_net, 8u, 0, fl_net_netdev_loopback(),
-                           (uint32_t)FL_NET_IPV4_LOOPBACK_FIRST_OCTET | (1u << 24), host_mac);
+    (void)fl_net_route_add(loop_net, 8u, 0, fl_net_netdev_loopback(), fl_net_htonl(0x7F000001u),
+                           host_mac);
 }
 
 fl_result_t fl_net_route_add(uint32_t addr_be, uint8_t prefix_len, uint32_t gw_be,
@@ -208,3 +216,64 @@ fl_result_t fl_net_route_configure_tap(fl_net_driver_t *tap_drv, const uint8_t t
     return fl_net_route_configure_static(tap_drv, tap_mac, addr_s, prefix, gw_s);
 }
 #endif
+
+fl_result_t fl_net_route_add6(const uint8_t addr_be[16], uint8_t prefix_len, fl_net_driver_t *drv,
+                              const uint8_t src6[16], const uint8_t src_mac[6]) {
+    fl_net_route6_entry_t *e;
+
+    if (!addr_be || !drv || prefix_len > FL_NET_IPV6_MAX_PREFIX_LEN)
+        return FL_RESULT_INVAL;
+    if (s_route6_count >= FL_NET_ROUTE_TABLE_MAX)
+        return FL_RESULT_ERR;
+
+    e = &s_routes6[s_route6_count++];
+    memcpy(e->addr_be, addr_be, 16);
+    e->prefix_len = prefix_len;
+    e->drv = drv;
+    e->src_mac_valid = 0;
+    if (src6)
+        memcpy(e->src6, src6, 16);
+    else
+        memset(e->src6, 0, 16);
+    if (src_mac) {
+        memcpy(e->src_mac, src_mac, 6);
+        e->src_mac_valid = 1;
+    }
+    return FL_RESULT_OK;
+}
+
+fl_result_t fl_net_route_lookup6(const uint8_t dst6[16], fl_net_route6_entry_t *out) {
+    unsigned i;
+    fl_net_route6_entry_t *best = NULL;
+    uint8_t best_prefix = 0;
+
+    if (!dst6 || !out)
+        return FL_RESULT_INVAL;
+
+    for (i = 0; i < s_route6_count; i++) {
+        fl_net_route6_entry_t *e = &s_routes6[i];
+        if (!fl_net_ipv6_prefix_match(dst6, e->addr_be, e->prefix_len))
+            continue;
+        if (!best || e->prefix_len > best_prefix) {
+            best = e;
+            best_prefix = e->prefix_len;
+        }
+    }
+    if (!best)
+        return FL_RESULT_NOENT;
+    *out = *best;
+    return FL_RESULT_OK;
+}
+
+void fl_net_route_add6_loopback(void) {
+    uint8_t loop6[16];
+    uint8_t host_mac[FL_NET_ETH_ADDR_LEN];
+    fl_net_route6_entry_t existing;
+
+    fl_net_ipv6_loopback_addr(loop6);
+    if (fl_net_route_lookup6(loop6, &existing) == FL_RESULT_OK &&
+        existing.prefix_len == 128u && existing.drv == fl_net_netdev_loopback())
+        return;
+    fl_net_loopback_mac_host(host_mac);
+    (void)fl_net_route_add6(loop6, 128u, fl_net_netdev_loopback(), loop6, host_mac);
+}

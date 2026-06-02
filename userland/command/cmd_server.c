@@ -7,12 +7,15 @@
 #include "cmd_decl.h"
 #include "cmd_batch.h"
 #include "cmd_server_file.h"
+#include "contract_p3_session_wire.h"
 #include "fl_colors.h"
 #include "net_client.h"
 #include "net_endian.h"
-#include "net_server.h"
+#include "net_endpoint.h"
 #include "net_ipv4.h"
+#include "net_server.h"
 #include "server_bg.h"
+#include "server_shared_db.h"
 #include "session.h"
 #include "shell_io.h"
 
@@ -52,37 +55,8 @@ void cmd_server_atexit(void);
 /* Helpers                                                                   */
 /* ------------------------------------------------------------------------- */
 
-static int parse_endpoint(const char *s, uint32_t *addr_be_out, uint16_t *port_out) {
-    char buf[64];
-    char *colon;
-    long port;
-    size_t n;
-    char *end;
-
-    if (!s || !addr_be_out || !port_out)
-        return -1;
-    n = strnlen(s, sizeof(buf));
-    if (n == 0u || n >= sizeof(buf))
-        return -1;
-    memcpy(buf, s, n);
-    buf[n] = '\0';
-    /* TODO(#280): bracketed-endpoint parsing for `[2001:db8::1]:port` —
-     * inet_pton(AF_INET6, ...) then port; family-tag addr_be_out. v4-only
-     * today; v6 literals reject below via fl_net_ipv4_parse_literal. */
-    colon = strrchr(buf, ':');
-    if (!colon || colon == buf)
-        return -1;
-    *colon = '\0';
-    if (!fl_net_ipv4_parse_literal(buf, addr_be_out))
-        return -1;
-    errno = 0;
-    port = strtol(colon + 1, &end, 10);
-    if (errno != 0 || end == colon + 1 || (end && *end != '\0'))
-        return -1;
-    if (port <= 0 || port > 65535)
-        return -1;
-    *port_out = (uint16_t)port;
-    return 0;
+static int parse_endpoint_full(const char *s, fl_net_endpoint_t *out) {
+    return fl_net_endpoint_parse(s, out) ? 0 : -1;
 }
 
 static fl_net_server_member_id_t parse_member_id_arg(const char *s) {
@@ -124,12 +98,12 @@ static void join_argv_into(char *dst, size_t cap, int argc, char **argv, int fro
 
 /* Forward declarations referenced by the client event sink. */
 static fl_result_t start_client_bg(void);
-static void spawn_promote_thread(int am_new_host, uint32_t new_ip_be,
-                                 uint16_t new_port);
+static void spawn_promote_thread(int am_new_host, const fl_net_endpoint_t *new_host);
 static void maybe_handle_nick_prompt_sync(void);
 
 static void client_event_print(fl_net_server_event_kind_t kind, const char *text,
-                               fl_net_server_member_id_t mid, void *data) {
+                               fl_net_server_member_id_t mid,
+                               const fl_net_addr_t *host_addr, void *data) {
     (void)data;
     switch (kind) {
     case FL_NET_SERVER_EVENT_JOIN_ANNOUNCE:
@@ -196,25 +170,14 @@ static void client_event_print(fl_net_server_event_kind_t kind, const char *text
         break;
     case FL_NET_SERVER_EVENT_HOST_PROMOTE:
     case FL_NET_SERVER_EVENT_HOST_REDIRECT: {
-        /* Payload: [u16_be new_id][u32 new_ip_be][u16_be new_port].
-         * Silent here \xe2\x80\x94 old host already broadcast the blue announce
-         * before sending this frame. The net_client.c dispatcher already
-         * chose between PROMOTE (we are the new host) and REDIRECT
-         * (reconnect to someone else); honour that distinction here. */
-        const uint8_t *p = (const uint8_t *)text;
-        uint32_t new_ip_be;
-        uint16_t new_port;
         int am_new_host = (kind == FL_NET_SERVER_EVENT_HOST_PROMOTE) ? 1 : 0;
         (void)mid;
-        if (!p) {
-            fl_color_warn("host promote received with no payload; leaving");
+        (void)text;
+        if (!host_addr) {
+            fl_color_warn("host promote received with no address; leaving");
             return;
         }
-        /* Wire layout matches fl_net_server_transfer_and_stop (#284):
-         * [2..5] new_ip_be (raw NBO bytes), [6..7] new_port (uint16 BE). */
-        new_ip_be = fl_net_get_u32_nbo(&p[2]);
-        new_port = fl_net_get_u16_be(&p[6]);
-        spawn_promote_thread(am_new_host, new_ip_be, new_port);
+        spawn_promote_thread(am_new_host, (const fl_net_endpoint_t *)host_addr);
         break;
     }
     case FL_NET_SERVER_EVENT_HELLO_ACK:
@@ -250,30 +213,32 @@ static fl_result_t start_client_bg(void) {
 /* ------------------------------------------------------------------------- */
 
 typedef struct {
-    int    am_new_host;
-    uint32_t new_ip_be;
-    uint16_t new_port;
-    uint32_t local_ip_be;
-    char     principal[FL_NET_SERVER_PRINCIPAL_MAX];
+    int am_new_host;
+    fl_net_endpoint_t new_host;
+    fl_net_endpoint_t local;
+    char principal[FL_NET_SERVER_PRINCIPAL_MAX];
 } promote_args_t;
 
 static void *promote_thread_main(void *arg) {
     promote_args_t *pa = (promote_args_t *)arg;
     struct timespec ts = { 0, 80 * 1000 * 1000 }; /* 80ms settle window */
+    fl_result_t rc;
+
     nanosleep(&ts, NULL);
 
     pthread_mutex_lock(&session_mutex);
-
-    /* Drop the old client (we are NOT inside that bg loop). */
     if (g_client_bg) {
         fl_server_bg_stop_client(g_client_bg);
         g_client_bg = NULL;
     }
     fl_net_client_disconnect(&g_client);
+    pthread_mutex_unlock(&session_mutex);
 
     if (pa->am_new_host) {
-        fl_result_t rc = fl_net_server_host_start(&g_server, pa->local_ip_be,
-                                                  pa->new_port, pa->principal);
+        fl_net_endpoint_t bind_ep = pa->local;
+        bind_ep.port_host = pa->new_host.port_host;
+        rc = fl_net_server_host_start_ep(&g_server, &bind_ep, pa->principal);
+        pthread_mutex_lock(&session_mutex);
         if (rc != FL_RESULT_OK) {
             pthread_mutex_unlock(&session_mutex);
             fl_color_error("host takeover bind failed (rc=%d); please run "
@@ -290,19 +255,21 @@ static void *promote_thread_main(void *arg) {
             return NULL;
         }
         g_server_running = 1;
+        (void)fl_server_catalog_open();
         pthread_mutex_unlock(&session_mutex);
-        /* No local "you are the host" line: the old host already broadcast
-         * "[Server Announcement]: <display> is now the host" to all peers
-         * including this one. New host reindexes to member_id 1 by virtue
-         * of a fresh fl_net_server_host_start(); peers reconnect from 2 up. */
     } else {
-        /* Re-join the new host from the same local IP. The new listener
-         * may not be bound yet — retry a few times with back-off. */
-        fl_result_t rc = FL_RESULT_ERR;
+        fl_net_endpoint_t local = pa->local;
+        fl_net_endpoint_t new_host = pa->new_host;
+        const fl_net_endpoint_t *local_ptr =
+            (local.family != 0u) ? &local : NULL;
+        char principal[FL_NET_SERVER_PRINCIPAL_MAX];
+        strncpy(principal, pa->principal, sizeof(principal) - 1u);
+        principal[sizeof(principal) - 1u] = '\0';
+
+        rc = FL_RESULT_ERR;
         for (int attempt = 0; attempt < 10; attempt++) {
-            rc = fl_net_client_connect_from(&g_client, pa->local_ip_be,
-                                            pa->new_ip_be, pa->new_port,
-                                            pa->principal, 1000u);
+            rc = fl_net_client_connect_ep(&g_client, local_ptr, &new_host,
+                                          principal, 1000u);
             if (rc == FL_RESULT_OK)
                 break;
             {
@@ -310,6 +277,7 @@ static void *promote_thread_main(void *arg) {
                 nanosleep(&rs, NULL);
             }
         }
+        pthread_mutex_lock(&session_mutex);
         if (rc != FL_RESULT_OK) {
             pthread_mutex_unlock(&session_mutex);
             fl_color_error("reconnect to new host failed (rc=%d); run "
@@ -317,9 +285,6 @@ static void *promote_thread_main(void *arg) {
             free(pa);
             return NULL;
         }
-        /* Do NOT run a sync Y/N prompt from this background thread — the
-         * interpreter's main loop owns stdin. A late NICK_PROMPT will
-         * surface as a cyan SERVER message via the BG event sink. */
         {
             fl_result_t bg_rc = start_client_bg();
             if (bg_rc != FL_RESULT_OK) {
@@ -340,16 +305,14 @@ static void *promote_thread_main(void *arg) {
     return NULL;
 }
 
-static void spawn_promote_thread(int am_new_host, uint32_t new_ip_be,
-                                 uint16_t new_port) {
+static void spawn_promote_thread(int am_new_host, const fl_net_endpoint_t *new_host) {
     pthread_t tid;
     promote_args_t *pa = (promote_args_t *)calloc(1, sizeof(*pa));
-    if (!pa)
+    if (!pa || !new_host)
         return;
     pa->am_new_host = am_new_host;
-    pa->new_ip_be = new_ip_be;
-    pa->new_port = new_port;
-    pa->local_ip_be = g_client.local_ip_be;
+    pa->new_host = *new_host;
+    pa->local = g_client.local_ep;
     strncpy(pa->principal, current_principal(), sizeof(pa->principal) - 1u);
     if (pthread_create(&tid, NULL, promote_thread_main, pa) != 0) {
         free(pa);
@@ -444,8 +407,7 @@ static void maybe_handle_nick_prompt_sync(void) {
  * spawn the bg accept/poll loop. Fails if a join is already in flight or
  * if hosted sockets are unavailable on this build (FL_RESULT_NOSYS). */
 static int verb_host(int argc, char **argv) {
-    uint32_t addr_be = 0;
-    uint16_t port = 0;
+    fl_net_endpoint_t ep;
     fl_result_t rc;
 
     if (argc < 3) {
@@ -463,12 +425,12 @@ static int verb_host(int argc, char **argv) {
         fl_color_error("already joined a server; leave first");
         return 1;
     }
-    if (parse_endpoint(argv[2], &addr_be, &port) != 0) {
+    if (parse_endpoint_full(argv[2], &ep) != 0) {
         pthread_mutex_unlock(&session_mutex);
         fl_color_error("invalid ip:port '%s'", argv[2]);
         return 1;
     }
-    rc = fl_net_server_host_start(&g_server, addr_be, port, current_principal());
+    rc = fl_net_server_host_start_ep(&g_server, &ep, current_principal());
     if (rc == FL_RESULT_NOSYS) {
         pthread_mutex_unlock(&session_mutex);
         fl_color_error("hosted sockets unavailable; cannot host");
@@ -499,15 +461,15 @@ static int verb_host(int argc, char **argv) {
  * bg receive loop. `-bind` selects the local source IP for multi-IP /
  * netns lab setups. */
 static int verb_join(int argc, char **argv) {
-    uint32_t peer_be = 0;
-    uint16_t port = 0;
-    uint32_t local_be = 0;
+    fl_net_endpoint_t peer;
+    fl_net_endpoint_t local;
     fl_result_t rc;
 
     if (argc < 3) {
         fl_color_error("usage: server join <ip:port> [-bind <local_ip>]");
         return 1;
     }
+    memset(&local, 0, sizeof(local));
     pthread_mutex_lock(&session_mutex);
     /* Reap any dead BG handle from a host-closed prior session BEFORE
      * the "already joined" check so a stale pointer cannot block re-join. */
@@ -522,23 +484,25 @@ static int verb_join(int argc, char **argv) {
         fl_color_error("already joined; leave first");
         return 1;
     }
-    if (parse_endpoint(argv[2], &peer_be, &port) != 0) {
+    if (parse_endpoint_full(argv[2], &peer) != 0) {
         fl_color_error("invalid ip:port '%s'", argv[2]);
         return 1;
     }
     /* Optional -bind <local_ip> for multi-IP demos / tests. */
     for (int i = 3; i + 1 < argc; i++) {
         if (!strcmp(argv[i], "-bind")) {
+            uint32_t local_be = 0u;
             if (!fl_net_ipv4_parse_literal(argv[i + 1], &local_be)) {
                 pthread_mutex_unlock(&session_mutex);
                 fl_color_error("invalid -bind ip '%s'", argv[i + 1]);
                 return 1;
             }
+            fl_net_endpoint_from_v4(local_be, 0u, &local);
             i++;
         }
     }
-    rc = fl_net_client_connect_from(&g_client, local_be, peer_be, port,
-                                    current_principal(), 3000u);
+    rc = fl_net_client_connect_ep(&g_client, local.family ? &local : NULL, &peer,
+                                  current_principal(), 3000u);
     if (rc == FL_RESULT_NOSYS) {
         pthread_mutex_unlock(&session_mutex);
         fl_color_error("hosted sockets unavailable; cannot join");

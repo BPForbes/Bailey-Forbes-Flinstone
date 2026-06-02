@@ -144,7 +144,7 @@ Two columns track different concerns:
 | **P3-8** | DNS client | ✅ | ~✅ |
 | **P3-9** | TLS (hosted) | ✅ | ~✅ |
 | **P3-10** | Wi‑Fi station path `[DEFERRED]` | ✅ | ❌ |
-| **P3-11** | IPv6 + ICMPv6 `[DEFERRED]` | ✅ | ❌ |
+| **P3-11** | IPv6 + ICMPv6 | ✅ | ~✅ |
 | **P4-1** | Driver model v2 | ✅ | ✅ |
 | **P4-2** | IRQ lifecycle | ✅ | ✅ |
 | **P4-3** | PCIe config space access (lab) | ✅ | ⚠️ |
@@ -356,7 +356,7 @@ Implement **bottom-up**: **L2 (link layer)** → IPv4/UDP → TCP → sockets fa
 | **P3-8** | **DNS client** | Resolver for A/AAAA records (AAAA optional). | **RFC 1035** semantics subset; **timeouts** and **retry caps**. |
 | **P3-9** | **TLS (hosted)** | Prefer **userland** TLS (e.g. mbedTLS/OpenSSL) behind shell command or libc. | **No TLS in “kernel” layer** until stable memory and time APIs exist on K/B. |
 | **P3-10** | **Wi‑Fi station path** `[DEFERRED]` | Do **not** silently drop the gap: either promote to active work or keep this row as the **explicit deferral**. | **IEEE 802.11** / **802.11i** / **802.1X** / **EAP** (informative stack); **P3-12** DHCP after L2; **not** an A1–A2 gate. When un-deferred, expect **P4**-class firmware/driver work plus reuse of **P3** IPv4/UDP/TCP. |
-| **P3-11** | **IPv6 + ICMPv6** `[DEFERRED]` | Keep dual-stack as an **explicit** later step, not an accidental omission. | **RFC 8200** (IPv6); **RFC 4291** (addressing); **RFC 4443** (ICMPv6); **RFC 4861** (ND); ties to **P3-1** L2 and **P3-8** **AAAA** when promoted. |
+| **P3-11** | **IPv6 + ICMPv6** | Contract **✅**; module integration **~✅** on loopback (**PR #301** / **#280**). Epic tail: TAP/wire egress, TCPv6, SLAAC/DHCPv6. | **RFC 8200**; **RFC 4291**; **RFC 4443**; **RFC 4861**; **P3-8** **AAAA** stub in **`net_dns.c`**. See **`docs/P3_NETWORKING_DEFERRED.md`**. |
 | **P3-14** | **Network stack background jobs** | Async RX dequeuing, TCP timer wheel / delayed ACK (**RFC 793**), ARP cache TTL sweep; avoids one-off polling in drivers. | Scheduled on **P1-8**; **P3-1**/**P3-7**/**P1-7**; ties to **#240** ARP TTL. |
 
 **Security standards:** default **no promisc**; **no raw TX** from shell without principal + audit; rate-limit outgoing ARP/ICMP in lab builds.
@@ -377,9 +377,10 @@ Shipped on the **PRE 4.2.0** train (**PR #231** class work). This is the **modul
 | **P3-8** | ✅ | **`net_dns.c`**: **A** queries; up to three nameservers, retries, rotating TXIDs (**#251**) |
 | **P3-9** | ~✅ | **`net_tls_hosted.c`**: record cap + optional OpenSSL client bridge when **libssl** present (**#252**) |
 | **P3-12** | ~✅ | **`net_dhcp.c`**: codec + **`fl_net_dhcp_acquire`** over egress (**#247**) |
-| **P3-13** | ~✅ | Server foundations shipped on **PRE 4.2.0** (#239 / PR #282): BSD socket shim (**`net_socket.c`**), **`server host/join/leave/kill/announce/msg/nick`** built-ins, dual-role host + member registry, host transfer + auto-promote, prompt-aware async output, cyan private DMs, blue announcements, cross-subnet `netns` pcap proof. `udpsend` / `udplisten` shell verbs added (**`userland/command/cmd_udp.c`**); endianness fix for `OP_CTRL_HOST_PROMOTE` IPv4 wire field (#284). Deferred siblings remain tracked: **#283** (`OP_CTRL_HOST_PROMOTE6`), **#280** (IPv6 + ICMPv6 + NDP), **#279** (Wi-Fi station). Native (non-hosted) `fl_socket` path is gated on **P3-7** TCP state machine. Contracts: **`contract_p3_sockets.h`**, **`contract_p3_session_wire.h`**, **`contract_p3_server.h`** (REV 2). Per-item follow-up status (CR + Codex review items, in-source TODOs): **`docs/P3_13_FOLLOWUP.md`**. |
+| **P3-13** | ~✅ | Server foundations (**#239** / PR #282) plus PR #301: channel sidecar, host catalog, **#283** PROMOTE6 + `host_addr` callback, **#280** IPv6 loopback foundation, **#284** endian norm. **#279** Wi-Fi station deferred. Native `fl_socket` gated on **P3-7** TCP. **`docs/P3_13_FOLLOWUP.md`**. |
 | **P3-14** | ~✅ | **`net_background.c`**: **`fl_net_arp_tick`**; RX dequeue / TCP timer wheel remain future |
-| **P3-10** / **P3-11** | ❌ | Contract **`[DEFERRED]`** only |
+| **P3-10** | ❌ | Wi-Fi **`[DEFERRED]`** contract only |
+| **P3-11** | ~✅ | **`contract_p3_ipv6.h`**, **`net_ipv6`/`net_icmpv6`/`net_ndp`**, loopback ICMPv6 + NDP; TAP/wire egress IPv6 stretch remains |
 
 **Shell / CI:** **`ping`**, **`check requirements`**; **`make test_p3_network`**, **`make baremetal`**, **`make test_invariants`**, **`make test_core`**, **`make check-network-requirements`**. **ASM:** **`arch/*/net_asm.*`**, **`arch/*/net_wire_host_asm.*`**. **PRE 4.2.0 (this train):** lab bare-metal **802.3** path (**`net_baremetal.c`**, **#237** / **#241** / **#240**); umbrella **#238–#267** (excl. **#239** **`server`**) on PR **#275**; production virtio NIC is **P4**-class follow-up.
 
@@ -448,8 +449,8 @@ The **3.3.0 contracts** workstream landed FL1 history, hosted **`.fl_audit.log`*
 | **TODO: P7 (shell batch)** | Add an **automated regression** that batch argv **`contracts audit show 5`** runs **`contracts`** (default), then **`audit`**, not a merged `contracts audit` token (Codex). |
 | **TODO: P6-2** | In-memory **ring-buffer** log sink (`dmesg`-style, drop counters) per phase table (CodeRabbit roadmap gap). |
 | **TODO: P6-4** | **Signed / tamper-evident** log segments (optional later per phase table). |
-| **TODO: P3-13 (#283)** | **`OP_CTRL_HOST_PROMOTE6`** sibling opcode for IPv6 host transfer. Wire layout `[u16 new_id][16 bytes ipv6_be][u16 port]` is already documented in **`contracts/networking/contract_p3_server.h`** as the forward-compat path; promote to active code once **#280** dual-stack lands. Keeps the existing v4 `OP_CTRL_HOST_PROMOTE` payload byte-stable. |
-| **TODO: P3-13 (#280)** | IPv6 bracketed-endpoint parsing in **`cmd_server.c::parse_endpoint`** (`[2001:db8::1]:port`). In-source `TODO(#280)` is in place above `strrchr`; the rewrite needs an `inet_pton(AF_INET6, …)` switch and a family-tagged `addr_be_out`. Same issue gates the IPv6 + ICMPv6 + NDP dual-stack work. |
+| **TODO: P3-13 (#283)** | ✅ **Foundation shipped (PR #301):** `OP_CTRL_HOST_PROMOTE6`, `fl_net_addr_t` / `peer_addr`, `host_addr` event callback, `contract_p3_host_promote6.h`. NDP-backed successor on production wire remains **#280** epic tail. |
+| **TODO: P3-13 (#280)** | ✅ **Foundation shipped (PR #301):** `net_ipv6` / `net_icmpv6` / `net_ndp`, IPv6 FIB, loopback ethertype dispatch, AAAA stub, bracket `fl_net_endpoint_parse`. TAP/wire egress IPv6 + production TCPv6 + SLAAC/DHCPv6 remain open on **#280**. |
 | **TODO: P3-13 (#279)** | Wi-Fi 802.11 station mode (per the existing **P3-10** deferred row + **`contract_p3_wifi_deferred.h`**). Server foundations on **PRE 4.2.0** are interface-agnostic; bringing this row up requires **P4**-class firmware/driver work plus reusing the existing **P3** IPv4/UDP/TCP stack. |
 | **TODO: P3-13** | Native (non-hosted) **`fl_socket`** path — `net_socket.c::fl_net_sock_open` currently always delegates to POSIX. The switch-to-in-tree predicate (loopback / configured TAP route) is gated on **P3-7** TCP state machine + **P3-6** UDP demux promoting from "lab helpers" to "the native path the shim auto-selects". Acceptance criterion ("No Linux kernel socket required for loopback or TAP destinations") is documented in **`docs/SERVER.md` §4.1.2**. |
 | **TODO: P3-13 (#238)** | TCP timer wheel + RX dequeue on the **net background MLQ** (**`priority_queue.h`** + **`net_background.c`**). `fl_net_arp_tick` already runs there; the remaining slots are wire-RX dispatch (`TODO: P3-13` at `net_background.c:107`, `:453`) and the loopback-recv carve-out (`TODO: P3-14` at `net_background.c:103`). |
@@ -556,7 +557,7 @@ Promote a **PX-** row into numbered phases when it becomes a **merge-sized** com
 |--------|----------------------------------|
 | C ABI / hosted behavior | ISO C11; POSIX.1-2008 where hosted. |
 | Networking | **IEEE 802.3** (Ethernet L2/MAC & framing); **RFC 894** (IPv4 over Ethernet); **RFC 826** (ARP); **RFC 791**, **792**, **768**, **793**, **1035**; **RFC 2131**, **2132** (DHCP, **P3-12**); later TLS **RFC 5246** / **8446** via library. |
-| IPv6 (defer) | **RFC 8200**, **4291**, **4443**, **4861** (ND). See **P3-11** `[DEFERRED]`. |
+| IPv6 (**P3-11**) | **RFC 8200**, **4291**, **4443**, **4861** (ND). Loopback foundation **~✅** (**PR #301**); production wire/TCPv6 on **#280** tail. |
 | Wi‑Fi | **IEEE 802.11**, **802.11i**; **802.1X** / **EAP**; **RFC 2131** (DHCP after link). See **P3-10** `[DEFERRED]`. |
 | HTTP / packages | **RFC 9110**, **9112**; **RFC 8446**, **5280**; **RFC 4880** (OpenPGP); Debian archive conventions (informative). |
 | Boot / firmware | **UEFI**; **GNU Multiboot2** (QEMU **`-kernel`** / GRUB); **RFC 2131**, **2132**, **1350** (PXE path); **PKCS #7** (Secure Boot). See **§12**. |

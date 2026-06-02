@@ -1,11 +1,16 @@
 #include "net_loopback.h"
 
 #include "contract_p3_ipv4.h"
+#include "contract_p3_ipv6.h"
 #include "contract_p3_wire.h"
 #include "fl/net_asm.h"
 #include "net_arp.h"
 #include "net_checksum.h"
+#include "net_endian.h"
+#include "net_icmpv6.h"
 #include "net_ipv4.h"
+#include "net_ipv6.h"
+#include "net_ndp.h"
 #include "net_tcp.h"
 #include "net_tcp_fsm.h"
 #include "net_packet.h"
@@ -107,8 +112,103 @@ static fl_result_t loopback_process_arp(const uint8_t *frame, size_t len, uint8_
         return FL_RESULT_INVAL;
 
     fl_net_loopback_mac_host(host_mac);
-    local_ip = (uint32_t)FL_NET_IPV4_LOOPBACK_FIRST_OCTET | (1u << 24);
+    local_ip = fl_net_htonl(0x7F000001u);
     return fl_net_arp_input(frame, len, local_ip, host_mac, eth_reply, eth_cap, eth_reply_len);
+}
+
+static size_t loopback_build_ipv6_reply(const uint8_t *req_ip6, size_t req_ip6_len,
+                                        const void *payload, size_t payload_len,
+                                        uint8_t *out_ip6, size_t out_cap) {
+    size_t hdr_len = FL_NET_IPV6_HDR_LEN;
+    size_t total;
+
+    if (!req_ip6 || req_ip6_len < hdr_len || !out_ip6)
+        return 0;
+    total = hdr_len + payload_len;
+    if (out_cap < total)
+        return 0;
+
+    memcpy(out_ip6, req_ip6, hdr_len);
+    memcpy(out_ip6 + 8, req_ip6 + 24, 16);
+    memcpy(out_ip6 + 24, req_ip6 + 8, 16);
+    fl_net_put_u16_be(&out_ip6[4], (uint16_t)payload_len);
+    if (payload && payload_len > 0)
+        memcpy(out_ip6 + hdr_len, payload, payload_len);
+    return total;
+}
+
+static fl_result_t loopback_process_ipv6(const uint8_t *ip6, size_t ip6_len, uint8_t *eth_reply,
+                                         size_t eth_cap, size_t *eth_reply_len) {
+    size_t pl_off;
+    size_t pl_len;
+    uint8_t next_hdr;
+    uint8_t host_mac[6];
+    uint8_t peer_mac[6];
+    uint8_t ip_reply[FL_NET_LOOPBACK_RX_MAX];
+    size_t ip_reply_len;
+    const uint8_t *dst6;
+    const uint8_t *src6;
+
+    if (!ip6 || ip6_len < FL_NET_IPV6_HDR_LEN || !eth_reply || !eth_reply_len)
+        return FL_RESULT_INVAL;
+    if (!fl_net_ipv6_parse(ip6, ip6_len, &pl_off, &pl_len, &next_hdr))
+        return FL_RESULT_INVAL;
+
+    dst6 = ip6 + 24;
+    if (!fl_net_ipv6_is_loopback(dst6))
+        return FL_RESULT_TIMEDOUT;
+
+    fl_net_loopback_mac_host(host_mac);
+    fl_net_loopback_mac_peer(peer_mac);
+    src6 = ip6 + 8;
+
+    if (next_hdr == FL_NET_IP_PROTO_ICMPV6) {
+        const uint8_t *icmp = ip6 + pl_off;
+        uint8_t icmp_reply[FL_NET_LOOPBACK_RX_MAX];
+        size_t icmp_reply_len = 0;
+
+        if (icmp[0] == (uint8_t)FL_NET_ICMPV6_TYPE_ECHO) {
+            if (fl_net_loopback_icmpv6_echo(icmp, pl_len, src6, dst6, icmp_reply,
+                                            sizeof(icmp_reply), &icmp_reply_len) != FL_RESULT_OK)
+                return FL_RESULT_ERR;
+        } else if (icmp[0] == (uint8_t)FL_NET_ICMPV6_TYPE_NS) {
+            if (fl_net_ndp_input(icmp, pl_len, src6, dst6, peer_mac, icmp_reply,
+                                 sizeof(icmp_reply), &icmp_reply_len) != FL_RESULT_OK)
+                return FL_RESULT_ERR;
+        } else {
+            return FL_RESULT_TIMEDOUT;
+        }
+        ip_reply_len = loopback_build_ipv6_reply(ip6, ip6_len, icmp_reply, icmp_reply_len,
+                                                 ip_reply, sizeof(ip_reply));
+    } else if (next_hdr == FL_NET_IP_PROTO_UDP) {
+        const uint8_t *udp = ip6 + pl_off;
+        uint8_t udp_body[FL_NET_UDP_HDR_LEN + FL_NET_UDP_LAB_RX_PAYLOAD_MAX];
+        uint16_t sport;
+        uint16_t dport;
+        size_t payload_len;
+        size_t ulen;
+
+        if (pl_len < FL_NET_UDP_HDR_LEN)
+            return FL_RESULT_ERR;
+        sport = (uint16_t)(((uint16_t)udp[0] << 8) | udp[1]);
+        dport = (uint16_t)(((uint16_t)udp[2] << 8) | udp[3]);
+        payload_len = pl_len - FL_NET_UDP_HDR_LEN;
+        ulen = fl_net_udp_build_datagram(udp_body, sizeof(udp_body), 0u, 0u, dport, sport,
+                                         udp + FL_NET_UDP_HDR_LEN, payload_len);
+        if (ulen == 0)
+            return FL_RESULT_ERR;
+        ip_reply_len = fl_net_ipv6_build(dst6, src6, FL_NET_IP_PROTO_UDP, udp_body + FL_NET_UDP_HDR_LEN,
+                                         ulen - FL_NET_UDP_HDR_LEN, ip_reply, sizeof(ip_reply));
+    } else {
+        return FL_RESULT_TIMEDOUT;
+    }
+
+    if (ip_reply_len == 0)
+        return FL_RESULT_ERR;
+
+    *eth_reply_len = fl_net_wire_build_eth_ipv6(eth_reply, eth_cap, peer_mac, host_mac, ip_reply,
+                                                ip_reply_len);
+    return (*eth_reply_len > 0) ? FL_RESULT_OK : FL_RESULT_ERR;
 }
 
 static fl_result_t loopback_process_ipv4(const uint8_t *ip, size_t ip_len, uint8_t *eth_reply,
@@ -321,6 +421,18 @@ fl_result_t fl_net_loopback_driver_send(fl_net_driver_t *drv, const fl_net_frame
         }
     }
 
+    {
+        size_t ip6_off = 0;
+        size_t ip6_len = 0;
+
+        if (fl_net_wire_parse_eth_ipv6(frame->data, frame->len, &ip6_off, &ip6_len)) {
+            if (loopback_process_ipv6(frame->data + ip6_off, ip6_len, reply, sizeof(reply),
+                                      &reply_len) == FL_RESULT_OK)
+                return loopback_rx_enqueue(reply, reply_len);
+            return FL_RESULT_OK;
+        }
+    }
+
     if (!fl_net_wire_parse_eth_ipv4(frame->data, frame->len, &ip_off, &ip_len, &dst_be))
         return FL_RESULT_OK;
 
@@ -359,4 +471,5 @@ void fl_net_loopback_reset(void) {
     loopback_rx_clear();
     s_lb_tx = 0;
     s_lb_stat_rx = 0;
+    fl_net_ndp_init();
 }

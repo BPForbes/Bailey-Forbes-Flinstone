@@ -1,6 +1,7 @@
 #include "net_socket.h"
 
 #include "net_endian.h"
+#include "net_endpoint.h"
 #include "net_wire_host_syscall.h"
 
 #include <errno.h>
@@ -19,6 +20,7 @@
 typedef struct {
     int fd;
     fl_net_sock_type_t type;
+    int af;
     unsigned in_use;
 } fl_net_sock_slot_t;
 
@@ -56,9 +58,16 @@ void fl_net_sock_shutdown(void) {
 }
 
 fl_result_t fl_net_sock_open(fl_net_sock_type_t type, fl_net_sock_handle_t *out_handle) {
+    return fl_net_sock_open_for(NULL, type, out_handle);
+}
+
+fl_result_t fl_net_sock_open_for(const fl_net_endpoint_t *endpoint_hint,
+                                   fl_net_sock_type_t type,
+                                   fl_net_sock_handle_t *out_handle) {
     unsigned i;
     int sock_type;
     int fd;
+    int af = AF_INET;
 
     if (!out_handle)
         return FL_RESULT_INVAL;
@@ -66,10 +75,13 @@ fl_result_t fl_net_sock_open(fl_net_sock_type_t type, fl_net_sock_handle_t *out_
         fl_net_sock_init();
 
 #if !defined(FL_NET_SOCK_HOSTED)
+    (void)endpoint_hint;
     (void)type;
     *out_handle = FL_NET_SOCK_INVALID;
     return FL_RESULT_NOSYS;
 #else
+    if (endpoint_hint && endpoint_hint->family == FL_NET_ADDR_FAMILY_V6)
+        af = AF_INET6;
     if (type == FL_NET_SOCK_TYPE_STREAM)
         sock_type = SOCK_STREAM;
     else if (type == FL_NET_SOCK_TYPE_DGRAM)
@@ -84,7 +96,7 @@ fl_result_t fl_net_sock_open(fl_net_sock_type_t type, fl_net_sock_handle_t *out_
     if (i >= FL_NET_SOCK_TABLE_MAX)
         return FL_RESULT_BUSY;
 
-    fd = net_host_socket(AF_INET, sock_type, 0);
+    fd = net_host_socket(af, sock_type, 0);
     if (fd < 0)
         return FL_RESULT_ERR;
 
@@ -94,9 +106,14 @@ fl_result_t fl_net_sock_open(fl_net_sock_type_t type, fl_net_sock_handle_t *out_
         (void)setsockopt(fd, SOL_SOCKET, SO_NOSIGPIPE, &nosigpipe, sizeof(nosigpipe));
     }
 #endif
+    if (af == AF_INET6) {
+        int v6only = 1;
+        (void)setsockopt(fd, IPPROTO_IPV6, IPV6_V6ONLY, &v6only, sizeof(v6only));
+    }
 
     s_socks[i].fd = fd;
     s_socks[i].type = type;
+    s_socks[i].af = af;
     s_socks[i].in_use = 1u;
     *out_handle = (fl_net_sock_handle_t)(i + 1);
     return FL_RESULT_OK;
@@ -125,6 +142,52 @@ static void sock_sin4(struct sockaddr_in *sa, uint32_t addr_be, uint16_t port_ho
     /* First-class internal helper; libc htons is fine on hosted but we
      * route through fl_net_htons so the entire tree uses one entry point. */
     sa->sin_port = fl_net_htons(port_host);
+}
+
+static void sock_sin6(struct sockaddr_in6 *sa, const uint8_t v6_be[16], uint16_t port_host) {
+    memset(sa, 0, sizeof(*sa));
+    sa->sin6_family = AF_INET6;
+    sa->sin6_port = fl_net_htons(port_host);
+    if (v6_be)
+        memcpy(&sa->sin6_addr, v6_be, 16);
+}
+
+static fl_result_t endpoint_to_sockaddr(const fl_net_endpoint_t *ep,
+                                          struct sockaddr_storage *ss,
+                                          socklen_t *slen_out) {
+    if (!ep || !ss || !slen_out)
+        return FL_RESULT_INVAL;
+    if (ep->family == FL_NET_ADDR_FAMILY_V4) {
+        struct sockaddr_in *sa = (struct sockaddr_in *)ss;
+        sock_sin4(sa, ep->addr.v4_be, ep->port_host);
+        *slen_out = (socklen_t)sizeof(*sa);
+        return FL_RESULT_OK;
+    }
+    if (ep->family == FL_NET_ADDR_FAMILY_V6) {
+        struct sockaddr_in6 *sa = (struct sockaddr_in6 *)ss;
+        sock_sin6(sa, ep->addr.v6_be, ep->port_host);
+        *slen_out = (socklen_t)sizeof(*sa);
+        return FL_RESULT_OK;
+    }
+    return FL_RESULT_INVAL;
+}
+
+static fl_result_t sockaddr_to_endpoint(const struct sockaddr *sa, socklen_t slen,
+                                          fl_net_endpoint_t *out) {
+    if (!sa || !out)
+        return FL_RESULT_INVAL;
+    if (sa->sa_family == AF_INET && slen >= (socklen_t)sizeof(struct sockaddr_in)) {
+        const struct sockaddr_in *sin = (const struct sockaddr_in *)sa;
+        fl_net_endpoint_from_v4(sin->sin_addr.s_addr, fl_net_ntohs(sin->sin_port), out);
+        return FL_RESULT_OK;
+    }
+    if (sa->sa_family == AF_INET6 && slen >= (socklen_t)sizeof(struct sockaddr_in6)) {
+        const struct sockaddr_in6 *sin6 = (const struct sockaddr_in6 *)sa;
+        fl_net_endpoint_from_v6((const uint8_t *)&sin6->sin6_addr,
+                                fl_net_ntohs(sin6->sin6_port), out);
+        return FL_RESULT_OK;
+    }
+    return FL_RESULT_INVAL;
 }
 #endif
 
@@ -181,11 +244,12 @@ fl_result_t fl_net_sock_accept(fl_net_sock_handle_t listen_handle,
     return FL_RESULT_NOSYS;
 #else
     fl_net_sock_slot_t *listen = sock_lookup(listen_handle);
-    struct sockaddr_in peer;
+    struct sockaddr_storage peer;
     socklen_t peer_len = sizeof(peer);
     int cfd;
     unsigned i;
     fl_net_sock_handle_t client_h;
+    int client_af = AF_INET;
 
     if (!listen || !out_client || listen->type != FL_NET_SOCK_TYPE_STREAM)
         return FL_RESULT_INVAL;
@@ -209,8 +273,12 @@ fl_result_t fl_net_sock_accept(fl_net_sock_handle_t listen_handle,
         return FL_RESULT_BUSY;
     }
 
+    if (peer.ss_family == AF_INET6)
+        client_af = AF_INET6;
+
     s_socks[i].fd = cfd;
     s_socks[i].type = FL_NET_SOCK_TYPE_STREAM;
+    s_socks[i].af = client_af;
     s_socks[i].in_use = 1u;
     client_h = (fl_net_sock_handle_t)(i + 1);
     *out_client = client_h;
@@ -367,6 +435,102 @@ fl_result_t fl_net_sock_connect_from(fl_net_sock_handle_t handle,
     if (connect(s->fd, (struct sockaddr *)&sa, sizeof(sa)) != 0)
         return FL_RESULT_ERR;
     return FL_RESULT_OK;
+#endif
+}
+
+fl_result_t fl_net_sock_bind_ep(fl_net_sock_handle_t handle, const fl_net_endpoint_t *local) {
+#if !defined(FL_NET_SOCK_HOSTED)
+    (void)handle;
+    (void)local;
+    return FL_RESULT_NOSYS;
+#else
+    fl_net_sock_slot_t *s = sock_lookup(handle);
+    struct sockaddr_storage ss;
+    socklen_t slen;
+
+    if (!s || !local)
+        return FL_RESULT_INVAL;
+    if (s->type == FL_NET_SOCK_TYPE_STREAM) {
+        int yes = 1;
+        (void)setsockopt(s->fd, SOL_SOCKET, SO_REUSEADDR, &yes, sizeof(yes));
+    }
+    if (endpoint_to_sockaddr(local, &ss, &slen) != FL_RESULT_OK)
+        return FL_RESULT_INVAL;
+    if (bind(s->fd, (struct sockaddr *)&ss, slen) != 0)
+        return FL_RESULT_ERR;
+    return FL_RESULT_OK;
+#endif
+}
+
+fl_result_t fl_net_sock_connect_from_ep(fl_net_sock_handle_t handle,
+                                        const fl_net_endpoint_t *local,
+                                        const fl_net_endpoint_t *peer) {
+#if !defined(FL_NET_SOCK_HOSTED)
+    (void)handle;
+    (void)local;
+    (void)peer;
+    return FL_RESULT_NOSYS;
+#else
+    fl_net_sock_slot_t *s = sock_lookup(handle);
+    struct sockaddr_storage ss;
+    socklen_t slen;
+    fl_net_endpoint_t bind_ep;
+
+    if (!s || !peer)
+        return FL_RESULT_INVAL;
+    if (local && local->family != 0u) {
+        if (s->type == FL_NET_SOCK_TYPE_STREAM) {
+            int yes = 1;
+            (void)setsockopt(s->fd, SOL_SOCKET, SO_REUSEADDR, &yes, sizeof(yes));
+        }
+        bind_ep = *local;
+        bind_ep.port_host = 0u;
+        if (endpoint_to_sockaddr(&bind_ep, &ss, &slen) != FL_RESULT_OK)
+            return FL_RESULT_INVAL;
+        if (bind(s->fd, (struct sockaddr *)&ss, slen) != 0)
+            return FL_RESULT_ERR;
+    }
+    if (endpoint_to_sockaddr(peer, &ss, &slen) != FL_RESULT_OK)
+        return FL_RESULT_INVAL;
+    if (connect(s->fd, (struct sockaddr *)&ss, slen) != 0)
+        return FL_RESULT_ERR;
+    return FL_RESULT_OK;
+#endif
+}
+
+fl_result_t fl_net_sock_peer_endpoint(fl_net_sock_handle_t handle, fl_net_endpoint_t *out) {
+#if !defined(FL_NET_SOCK_HOSTED)
+    (void)handle;
+    (void)out;
+    return FL_RESULT_NOSYS;
+#else
+    fl_net_sock_slot_t *s = sock_lookup(handle);
+    struct sockaddr_storage ss;
+    socklen_t slen = (socklen_t)sizeof(ss);
+
+    if (!s || !out)
+        return FL_RESULT_INVAL;
+    if (getpeername(s->fd, (struct sockaddr *)&ss, &slen) != 0)
+        return FL_RESULT_ERR;
+    return sockaddr_to_endpoint((struct sockaddr *)&ss, slen, out);
+#endif
+}
+
+fl_result_t fl_net_sock_local_endpoint(fl_net_sock_handle_t handle, fl_net_endpoint_t *out) {
+#if !defined(FL_NET_SOCK_HOSTED)
+    (void)handle;
+    (void)out;
+    return FL_RESULT_NOSYS;
+#else
+    fl_net_sock_slot_t *s = sock_lookup(handle);
+    struct sockaddr_storage ss;
+    socklen_t slen = (socklen_t)sizeof(ss);
+
+    if (!s || !out)
+        return FL_RESULT_INVAL;
+    if (getsockname(s->fd, (struct sockaddr *)&ss, &slen) != 0)
+        return FL_RESULT_ERR;
+    return sockaddr_to_endpoint((struct sockaddr *)&ss, slen, out);
 #endif
 }
 

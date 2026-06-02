@@ -11,11 +11,40 @@
 #include "net_file_delivery.h"
 
 #include "contract_p3_packet.h"
+#include "contract_p3_session_wire.h"
+#include "net_endian.h"
 #include "net_server.h" /* fl_net_session_*_frame, encode/recv helpers */
 #include "net_socket.h"
 
 #include <stdio.h>
 #include <string.h>
+
+int fl_net_session_decode_host_promote(const uint8_t *payload, uint16_t plen,
+                                       fl_net_endpoint_t *out) {
+    uint32_t v4_be = 0u;
+
+    if (!payload || !out)
+        return -1;
+    memset(out, 0, sizeof(*out));
+    if (plen >= FL_NET_SESSION_CTRL_HOST_PROMOTE6_PAYLOAD_LEN) {
+        out->port_host = fl_net_get_u16_be(payload + 18);
+        memcpy(out->addr.v6_be, payload + 2, 16);
+        if (fl_net_ipv6_wire_to_v4(out->addr.v6_be, &v4_be)) {
+            out->family = FL_NET_ADDR_FAMILY_V4;
+            out->addr.v4_be = v4_be;
+            return 0;
+        }
+        out->family = FL_NET_ADDR_FAMILY_V6;
+        return 0;
+    }
+    if (plen >= FL_NET_SESSION_CTRL_HOST_PROMOTE_PAYLOAD_LEN) {
+        out->family = FL_NET_ADDR_FAMILY_V4;
+        out->addr.v4_be = fl_net_get_u32_nbo(payload + 2);
+        out->port_host = fl_net_get_u16_be(payload + 6);
+        return 0;
+    }
+    return -1;
+}
 
 fl_result_t fl_net_client_init(fl_net_client_t *client) {
     if (!client)
@@ -38,27 +67,27 @@ fl_result_t fl_net_client_init(fl_net_client_t *client) {
  * and a partial read across that window is impossible — recv with a
  * positive timeout either fills the buffer or times out cleanly.
  */
-static fl_result_t client_connect_impl(fl_net_client_t *client,
-                                       uint32_t local_be,
-                                       uint32_t peer_be, uint16_t port_host,
-                                       const char *principal,
-                                       unsigned timeout_ms) {
+static fl_result_t client_connect_ep_impl(fl_net_client_t *client,
+                                          const fl_net_endpoint_t *local,
+                                          const fl_net_endpoint_t *peer,
+                                          const char *principal,
+                                          unsigned timeout_ms) {
     fl_result_t rc;
     fl_net_sock_handle_t h = FL_NET_SOCK_INVALID;
     uint8_t opcode = 0;
     uint8_t payload[FL_NET_SESSION_MAX_MSG];
     uint16_t plen = 0;
     size_t prin_len;
+    fl_net_endpoint_t local_ep;
 
-    if (!client || !principal || !principal[0])
+    if (!client || !peer || !principal || !principal[0])
+        return FL_RESULT_INVAL;
+    if (peer->family != FL_NET_ADDR_FAMILY_V4 &&
+        peer->family != FL_NET_ADDR_FAMILY_V6)
         return FL_RESULT_INVAL;
     if (client->state != FL_NET_CLIENT_STATE_DISCONNECTED)
         return FL_RESULT_BUSY;
 
-    /* Reject overlong / empty principals up front (before we open a
-     * socket) so the server side doesn't see a truncated HELLO. The
-     * cap is the client-side storage minus the trailing NUL, and we
-     * also clamp at FL_NET_SESSION_MAX_MSG so the wire payload fits. */
     prin_len = strnlen(principal, sizeof(client->principal));
     if (prin_len == 0u ||
         prin_len == sizeof(client->principal) ||
@@ -69,23 +98,21 @@ static fl_result_t client_connect_impl(fl_net_client_t *client,
     if (rc != FL_RESULT_OK)
         return rc;
 
-    rc = fl_net_sock_open(FL_NET_SOCK_TYPE_STREAM, &h);
+    rc = fl_net_sock_open_for(peer, FL_NET_SOCK_TYPE_STREAM, &h);
     if (rc != FL_RESULT_OK)
         return rc;
 
     client->state = FL_NET_CLIENT_STATE_CONNECTING;
-    if (local_be != 0u)
-        rc = fl_net_sock_connect_from(h, local_be, peer_be, port_host);
+    if (local && local->family != 0u)
+        rc = fl_net_sock_connect_from_ep(h, local, peer);
     else
-        rc = fl_net_sock_connect(h, peer_be, port_host);
+        rc = fl_net_sock_connect_from_ep(h, NULL, peer);
     if (rc != FL_RESULT_OK) {
         fl_net_sock_close(h);
         client->state = FL_NET_CLIENT_STATE_DISCONNECTED;
         return rc;
     }
     client->peer_handle = h;
-    /* prin_len is the strnlen above; copy exactly that many bytes and
-     * NUL-terminate explicitly so the storage is always valid. */
     memcpy(client->principal, principal, prin_len);
     client->principal[prin_len] = '\0';
     rc = fl_net_session_send_frame(h, (uint8_t)FL_NET_SESSION_OP_HELLO,
@@ -98,7 +125,6 @@ static fl_result_t client_connect_impl(fl_net_client_t *client,
         return rc;
     }
 
-    /* Wait for HELLO_ACK. */
     rc = fl_net_session_recv_frame(h, &opcode, payload, sizeof(payload), &plen,
                                    timeout_ms == 0u ? 2000u : timeout_ms);
     if (rc != FL_RESULT_OK || opcode != (uint8_t)FL_NET_SESSION_OP_HELLO_ACK ||
@@ -117,12 +143,35 @@ static fl_result_t client_connect_impl(fl_net_client_t *client,
         memcpy(client->display_name, payload + 2, name_len);
         client->display_name[name_len] = '\0';
     }
-    /* Save local IP for host-transfer; non-blocking + clean parser. */
-    (void)fl_net_sock_local_ipv4(h, &client->local_ip_be);
+    memset(&local_ep, 0, sizeof(local_ep));
+    if (fl_net_sock_local_endpoint(h, &local_ep) == FL_RESULT_OK)
+        client->local_ep = local_ep;
+    else {
+        uint32_t local_v4 = 0u;
+        (void)fl_net_sock_local_ipv4(h, &local_v4);
+        fl_net_endpoint_from_v4(local_v4, 0u, &client->local_ep);
+    }
     (void)fl_net_sock_set_nonblock(h, 1);
     fl_net_session_rx_reset(&client->rx_state);
     client->state = FL_NET_CLIENT_STATE_CONNECTED;
     return FL_RESULT_OK;
+}
+
+static fl_result_t client_connect_impl(fl_net_client_t *client,
+                                       uint32_t local_be,
+                                       uint32_t peer_be, uint16_t port_host,
+                                       const char *principal,
+                                       unsigned timeout_ms) {
+    fl_net_endpoint_t local;
+    fl_net_endpoint_t peer;
+
+    fl_net_endpoint_from_v4(peer_be, port_host, &peer);
+    if (local_be != 0u)
+        fl_net_endpoint_from_v4(local_be, 0u, &local);
+    else
+        memset(&local, 0, sizeof(local));
+    return client_connect_ep_impl(client, local_be != 0u ? &local : NULL, &peer,
+                                  principal, timeout_ms);
 }
 
 fl_result_t fl_net_client_connect(fl_net_client_t *client, uint32_t peer_be,
@@ -137,6 +186,14 @@ fl_result_t fl_net_client_connect_from(fl_net_client_t *client,
                                        unsigned timeout_ms) {
     return client_connect_impl(client, local_be, peer_be, port_host, principal,
                                 timeout_ms);
+}
+
+fl_result_t fl_net_client_connect_ep(fl_net_client_t *client,
+                                     const fl_net_endpoint_t *local,
+                                     const fl_net_endpoint_t *peer,
+                                     const char *principal,
+                                     unsigned timeout_ms) {
+    return client_connect_ep_impl(client, local, peer, principal, timeout_ms);
 }
 
 fl_result_t fl_net_client_disconnect(fl_net_client_t *client) {
@@ -157,8 +214,13 @@ fl_result_t fl_net_client_disconnect(fl_net_client_t *client) {
     return FL_RESULT_OK;
 }
 
+static uint32_t s_client_msg_serial;
+
 fl_result_t fl_net_client_send_msg(fl_net_client_t *client, const char *text) {
     size_t n;
+    char transfer_id[FL_SERVER_SHARE_ID_MAX];
+    fl_result_t rc;
+
     if (!client || !text)
         return FL_RESULT_INVAL;
     if (client->state != FL_NET_CLIENT_STATE_CONNECTED ||
@@ -168,6 +230,11 @@ fl_result_t fl_net_client_send_msg(fl_net_client_t *client, const char *text) {
     n = strnlen(text, (size_t)FL_NET_SESSION_MAX_MSG + 1u);
     if (n == 0u || n > (size_t)FL_NET_SESSION_MAX_MSG)
         return FL_RESULT_INVAL;
+    s_client_msg_serial++;
+    snprintf(transfer_id, sizeof(transfer_id), "msg-%u-%u",
+             (unsigned)client->assigned_member_id, s_client_msg_serial);
+    (void)fl_net_msg_send_meta_broadcast(client, transfer_id, "broadcast", 0u,
+                                         FL_FILE_FLAG_PUBLIC);
     return fl_net_session_send_frame(client->peer_handle,
                                      (uint8_t)FL_NET_SESSION_OP_MSG,
                                      (const uint8_t *)text, (uint16_t)n);
@@ -214,6 +281,7 @@ static fl_net_server_event_kind_t opcode_to_event(uint8_t opcode) {
     case FL_NET_SESSION_OP_MEMBER_LIST_SNAPSHOT:
         return FL_NET_SERVER_EVENT_MEMBER_LIST;
     case FL_NET_SESSION_OP_CTRL_HOST_PROMOTE:
+    case FL_NET_SESSION_OP_CTRL_HOST_PROMOTE6:
         return FL_NET_SERVER_EVENT_HOST_PROMOTE;
     case FL_NET_SESSION_OP_ERR:
         return FL_NET_SERVER_EVENT_ERR;
@@ -449,6 +517,14 @@ fl_result_t fl_net_client_send_private(fl_net_client_t *client,
     payload[2] = 0u;
     payload[3] = 0u;
     memcpy(payload + 4, text, tlen);
+    s_client_msg_serial++;
+    {
+        char transfer_id[FL_SERVER_SHARE_ID_MAX];
+        snprintf(transfer_id, sizeof(transfer_id), "msg-%u-%u",
+                 (unsigned)client->assigned_member_id, s_client_msg_serial);
+        (void)fl_net_msg_send_meta_direct(client, transfer_id, "direct",
+                                          recipient_id, 0u, 0);
+    }
     return fl_net_session_send_frame(client->peer_handle,
                                      (uint8_t)FL_NET_SESSION_OP_MSG_DIRECT,
                                      payload, (uint16_t)(4u + tlen));
@@ -476,6 +552,10 @@ fl_net_client_dispatch_frame(fl_net_client_t *client, uint8_t opcode,
         (void)fl_net_file_store_meta(payload, plen);
         return FL_NET_SERVER_EVENT_NONE;
     }
+    if (opcode == (uint8_t)FL_NET_SESSION_OP_MSG_META) {
+        (void)fl_net_msg_store_meta(payload, plen);
+        return FL_NET_SERVER_EVENT_NONE;
+    }
     if (opcode == (uint8_t)FL_NET_SESSION_OP_FILE_DONE) {
         (void)fl_net_file_store_done(payload, plen);
         return FL_NET_SERVER_EVENT_NONE;
@@ -488,8 +568,8 @@ fl_net_client_dispatch_frame(fl_net_client_t *client, uint8_t opcode,
     if (opcode == (uint8_t)FL_NET_SESSION_OP_MEMBER_LIST_SNAPSHOT) {
         client_decode_member_list(client, payload, plen);
         if (cb)
-            cb(FL_NET_SERVER_EVENT_MEMBER_LIST, "",
-               FL_NET_SERVER_MEMBER_ID_NONE, data);
+            cb(FL_NET_SERVER_EVENT_MEMBER_LIST, "", FL_NET_SERVER_MEMBER_ID_NONE,
+               NULL, data);
         return FL_NET_SERVER_EVENT_MEMBER_LIST;
     }
 
@@ -509,11 +589,23 @@ fl_net_client_dispatch_frame(fl_net_client_t *client, uint8_t opcode,
         mid = (fl_net_server_member_id_t)
             (((uint16_t)payload[0] << 8) | payload[1]);
         text_off = 0u;
-        /* Disambiguate: only the local recipient with assigned_member_id
-         * == new_host_id is being promoted; every other peer is being
-         * told to reconnect to the new host. Keeping these two events
-         * distinct lets the shell-side handler skip the bind path on
-         * REDIRECT (it just needs to reconnect). */
+        client->last_host_promote_ep_valid = 0u;
+        if (fl_net_session_decode_host_promote(payload, plen,
+                                               &client->last_host_promote_ep) == 0)
+            client->last_host_promote_ep_valid = 1u;
+        kind = (mid == client->assigned_member_id)
+                   ? FL_NET_SERVER_EVENT_HOST_PROMOTE
+                   : FL_NET_SERVER_EVENT_HOST_REDIRECT;
+    }
+    if (opcode == (uint8_t)FL_NET_SESSION_OP_CTRL_HOST_PROMOTE6 &&
+        plen >= FL_NET_SESSION_CTRL_HOST_PROMOTE6_PAYLOAD_LEN) {
+        mid = (fl_net_server_member_id_t)
+            (((uint16_t)payload[0] << 8) | payload[1]);
+        text_off = 0u;
+        client->last_host_promote_ep_valid = 0u;
+        if (fl_net_session_decode_host_promote(payload, plen,
+                                               &client->last_host_promote_ep) == 0)
+            client->last_host_promote_ep_valid = 1u;
         kind = (mid == client->assigned_member_id)
                    ? FL_NET_SERVER_EVENT_HOST_PROMOTE
                    : FL_NET_SERVER_EVENT_HOST_REDIRECT;
@@ -550,8 +642,18 @@ fl_net_client_dispatch_frame(fl_net_client_t *client, uint8_t opcode,
         text[text_len] = '\0';
     }
 
-    if (cb && kind != FL_NET_SERVER_EVENT_NONE)
-        cb(kind, text, mid, data);
+    if (cb && kind != FL_NET_SERVER_EVENT_NONE) {
+        const fl_net_addr_t *host_addr = NULL;
+
+        if ((kind == FL_NET_SERVER_EVENT_HOST_PROMOTE ||
+             kind == FL_NET_SERVER_EVENT_HOST_REDIRECT) &&
+            client->last_host_promote_ep_valid)
+            host_addr = (const fl_net_addr_t *)&client->last_host_promote_ep;
+        if (kind == FL_NET_SERVER_EVENT_HOST_PROMOTE ||
+            kind == FL_NET_SERVER_EVENT_HOST_REDIRECT)
+            text[0] = '\0';
+        cb(kind, text, mid, host_addr, data);
+    }
     return kind;
 }
 
@@ -589,8 +691,8 @@ int fl_net_client_poll(fl_net_client_t *client, fl_net_client_event_cb cb,
             }
             fl_net_session_rx_reset(&client->rx_state);
             if (cb)
-                cb(FL_NET_SERVER_EVENT_CLOSED, "",
-                   FL_NET_SERVER_MEMBER_ID_NONE, data);
+                cb(FL_NET_SERVER_EVENT_CLOSED, "", FL_NET_SERVER_MEMBER_ID_NONE,
+                   NULL, data);
             dispatched++;
             break;
         }
