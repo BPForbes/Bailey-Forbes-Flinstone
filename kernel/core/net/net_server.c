@@ -39,6 +39,19 @@ static void member_rx_reset_slot(size_t i) {
         fl_net_session_rx_reset(&s_member_rx[i]);
 }
 
+static void member_peer_from_endpoint(fl_net_server_member_t *m,
+                                      const fl_net_endpoint_t *ep)
+{
+    if (!m || !ep)
+        return;
+    m->peer_addr.family = ep->family;
+    m->peer_addr.port_host = ep->port_host;
+    if (ep->family == FL_NET_ADDR_FAMILY_V6)
+        memcpy(m->peer_addr.addr.v6_be, ep->addr.v6_be, 16);
+    else
+        m->peer_addr.addr.v4_be = ep->addr.v4_be;
+}
+
 /* ------------------------------------------------------------------------- */
 /* Wire codec                                                                */
 /* ------------------------------------------------------------------------- */
@@ -755,10 +768,10 @@ fl_result_t fl_net_server_transfer_and_stop(fl_net_server_t *srv,
          * host's own TCP source address captured at accept time. Native
          * IPv6 successors use PROMOTE6; v4 and v4-mapped use the legacy v4
          * payload (#283 / #280 foundation). */
-        if (succ->peer_addr_family == FL_NET_ADDR_FAMILY_V6 &&
-            !fl_net_ipv6_wire_to_v4(succ->peer_addr_v6_be, &v4_be)) {
+        if (succ->peer_addr.family == FL_NET_ADDR_FAMILY_V6 &&
+            !fl_net_ipv6_wire_to_v4(succ->peer_addr.addr.v6_be, &v4_be)) {
             fl_net_put_u16_be(&payload6[0], succ->member_id);
-            memcpy(&payload6[2], succ->peer_addr_v6_be, 16);
+            memcpy(&payload6[2], succ->peer_addr.addr.v6_be, 16);
             fl_net_put_u16_be(&payload6[18], srv->bind_port_host);
             broadcast_to_peers(srv,
                                (uint8_t)FL_NET_SESSION_OP_CTRL_HOST_PROMOTE6,
@@ -766,10 +779,10 @@ fl_result_t fl_net_server_transfer_and_stop(fl_net_server_t *srv,
             use_promote6 = 1;
         }
         if (!use_promote6) {
-            if (succ->peer_ip_be != 0u)
-                v4_be = succ->peer_ip_be;
-            else if (succ->peer_addr_family == FL_NET_ADDR_FAMILY_V6)
-                (void)fl_net_ipv6_wire_to_v4(succ->peer_addr_v6_be, &v4_be);
+            if (succ->peer_addr.addr.v4_be != 0u)
+                v4_be = succ->peer_addr.addr.v4_be;
+            else if (succ->peer_addr.family == FL_NET_ADDR_FAMILY_V6)
+                (void)fl_net_ipv6_wire_to_v4(succ->peer_addr.addr.v6_be, &v4_be);
             fl_net_put_u16_be(&payload[0], succ->member_id);
             fl_net_put_u32_nbo(&payload[2], v4_be);
             fl_net_put_u16_be(&payload[6], srv->bind_port_host);
@@ -1063,17 +1076,13 @@ fl_result_t fl_net_server_accept_pending(fl_net_server_t *srv,
     {
         fl_net_endpoint_t peer_ep;
         if (fl_net_sock_peer_endpoint(client_h, &peer_ep) == FL_RESULT_OK) {
-            m->peer_addr_family = peer_ep.family;
-            if (peer_ep.family == FL_NET_ADDR_FAMILY_V4) {
-                m->peer_ip_be = peer_ep.addr.v4_be;
-            } else if (peer_ep.family == FL_NET_ADDR_FAMILY_V6) {
-                memcpy(m->peer_addr_v6_be, peer_ep.addr.v6_be, 16);
-                (void)fl_net_ipv6_wire_to_v4(peer_ep.addr.v6_be, &m->peer_ip_be);
-            }
+            member_peer_from_endpoint(m, &peer_ep);
         } else {
-            (void)fl_net_sock_peer_ipv4(client_h, &m->peer_ip_be);
-            if (m->peer_ip_be != 0u)
-                m->peer_addr_family = FL_NET_ADDR_FAMILY_V4;
+            uint32_t peer_v4 = 0u;
+            fl_net_endpoint_t fallback;
+            (void)fl_net_sock_peer_ipv4(client_h, &peer_v4);
+            fl_net_endpoint_from_v4(peer_v4, 0u, &fallback);
+            member_peer_from_endpoint(m, &fallback);
         }
     }
     /* payload may not be NUL-terminated on the wire. */

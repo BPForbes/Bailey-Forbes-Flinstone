@@ -163,10 +163,9 @@ _Static_assert(FL_NET_SERVER_ANNOUNCEMENT_MAX <= FL_NET_SESSION_MAX_MSG,
  * other recipients reconnect to `new_host_ip:new_host_port`. When
  * `new_host_member_id == 0` there is no successor and recipients leave.
  *
- * IPv6 forward path (tracked in #283; depends on dual-stack #280):
- * a sibling OP_CTRL_HOST_PROMOTE6 (0x24) carrying
- *   [u16 new_id][16 bytes ipv6_be][u16 port]
- * keeps the v4 payload above byte-stable across the switchover.
+ * IPv6 successor path (**#283** foundation, **OP_CTRL_HOST_PROMOTE6** `0x24` in
+ * **contract_p3_session_wire.h**): `[u16 new_id][16 bytes ipv6_be][u16 port]`.
+ * The v4 payload above stays byte-stable for IPv4-only peers.
  *
  * Endianness: the IPv4 field is now serialized via fl_net_put_u32_nbo
  * / fl_net_get_u32_nbo in net_endian.h. Earlier bit-shift versions were
@@ -179,6 +178,19 @@ _Static_assert(FL_NET_SERVER_ANNOUNCEMENT_MAX <= FL_NET_SESSION_MAX_MSG,
 /* ------------------------------------------------------------------------- */
 /* In-memory types (host + client share these definitions)                   */
 /* ------------------------------------------------------------------------- */
+
+/** Dual-stack socket address (#283 / #280); same field layout as fl_net_endpoint_t. */
+#define FL_NET_ADDR_FAMILY_V4 4u
+#define FL_NET_ADDR_FAMILY_V6 6u
+
+typedef struct fl_net_server_addr {
+    uint8_t family;
+    uint16_t port_host;
+    union {
+        uint32_t v4_be;
+        uint8_t v6_be[16];
+    } addr;
+} fl_net_server_addr_t;
 
 /** Member id assigned by the host at HELLO_ACK. `0` is reserved as "none". */
 typedef uint16_t fl_net_server_member_id_t;
@@ -216,12 +228,8 @@ typedef struct {
     char nick[FL_NET_SERVER_NICK_MAX];
     /** Hosted socket handle for this member's TCP stream (host side only). */
     fl_net_sock_handle_t peer_handle;
-    /** FL_NET_ADDR_FAMILY_V4 / FL_NET_ADDR_FAMILY_V6; 0 when unknown. */
-    uint8_t peer_addr_family;
-    /** Network-byte-order IPv4 of the peer (host accept side; 0 for self / native v6). */
-    uint32_t peer_ip_be;
-    /** Wire-format IPv6 when peer_addr_family is V6 (native or mappable). */
-    uint8_t peer_addr_v6_be[16];
+    /** Peer TCP source captured at accept (for host-transfer promote payloads). */
+    fl_net_server_addr_t peer_addr;
 } fl_net_server_member_t;
 
 /**

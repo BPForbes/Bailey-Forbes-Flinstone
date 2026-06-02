@@ -7,6 +7,7 @@
 #include "net_ipv4.h"
 #include "net_route.h"
 #include "net_wire_egress.h"
+#include "net_endian.h"
 
 #include "fl/mem_asm.h"
 #include "fl/net_asm.h"
@@ -36,17 +37,9 @@ static uint16_t net_udp_read_be16(const uint8_t *p) {
 
 static fl_net_udp_bind_entry_t *udp_find_bound(uint16_t dport_host);
 
-/** Store **host** port/length as big-endian wire octets (uses **asm_net_htons_be16**). */
+/** Store **host** port/length as big-endian wire octets (#284: fl_net_htons). */
 static void net_udp_store_be16(uint8_t *dst, uint16_t host) {
-    uint16_t n;
-
-#if defined(FL_NET_ASM_AVAILABLE)
-    n = asm_net_htons_be16(host);
-#else
-    n = (uint16_t)((host >> 8) | (host << 8));
-#endif
-    dst[0] = ((const uint8_t *)&n)[0];
-    dst[1] = ((const uint8_t *)&n)[1];
+    fl_net_put_u16_be(dst, host);
 }
 
 size_t fl_net_udp_build_datagram(uint8_t *buf, size_t cap, uint32_t src_be, uint32_t dst_be,

@@ -2,6 +2,7 @@
  * **P3-13 — Session wire vocabulary** (normative constants + file-session routing).
  *
  * **Distribution:** one **TCP** byte stream carries length-prefixed **frames**.
+ * All multi-byte wire fields are **big-endian (network byte order)** unless noted.
  * Application payloads are UTF-8 unless a future **flags** bit says otherwise.
  * File-transfer frames reuse the same header and channel as chat control traffic;
  * the P3 -> P5 include is an intentional cross-layer seam so packet routing,
