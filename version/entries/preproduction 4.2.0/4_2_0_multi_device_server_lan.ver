@@ -4,3 +4,5 @@ RELEASE_VERSION=0
 PRERELEASE=1
 DEV_VERSION=12
 DESCRIPTION=PRE 4.2.0 multi-device server and LAN/WLAN hosting: net_host_iface (getifaddrs IPv4 enumeration), server interfaces verb, server host -all/:port for 0.0.0.0 listen with LAN join hints, POSIX bind/connect errno via fl_net_sock_last_errno and clearer host/join errors; net_wifi_host_linux wpa_supplicant (wpa_cli) scan/connect with FL_NET_WIFI_IFACE/FL_NET_WIFI_USE_WPA; wifi status; tests/test_p3_server_lan (127.0.0.2/127.0.0.3 multi-IP path).
+
+RELEASE_DATE=2026-06-04
