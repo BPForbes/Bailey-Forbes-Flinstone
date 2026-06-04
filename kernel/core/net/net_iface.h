@@ -21,6 +21,9 @@ typedef struct fl_net_iface_entry {
     fl_net_driver_t *drv;
     uint32_t addr_be;
     uint8_t prefix_len;
+    uint8_t addr6[16];
+    uint8_t prefix6_len;
+    int has_ipv6;
 } fl_net_iface_entry_t;
 
 /** Rebuild the interface table from the in-tree route FIB and netdev registry. */

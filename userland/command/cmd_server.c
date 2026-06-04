@@ -13,6 +13,7 @@
 #include "net_endian.h"
 #include "net_endpoint.h"
 #include "net_iface.h"
+#include "net_ipv6.h"
 #include "net_ipv4.h"
 #include "net_server.h"
 #include "net_socket.h"
@@ -128,13 +129,18 @@ static int verb_interfaces(int argc, char **argv) {
         fl_color_error("interface list unavailable on this build");
         return 1;
     }
-    puts("IPv4 interfaces (use one for server host, or server host -all <port>):");
+    puts("Interfaces (IPv4; IPv6 when assigned by router after wifi join):");
     for (i = 0; i < count; i++) {
+        char addr6[64];
         fl_net_ipv4_format_addr(entries[i].addr_be, addr, sizeof(addr));
-        printf("  %s %-15s/%u %s%s\n", entries[i].name, addr,
+        printf("  %s %-15s/%u %s%s", entries[i].name, addr,
                (unsigned)entries[i].prefix_len,
                (entries[i].flags & FL_NET_IFF_UP) ? "up" : "down",
                (entries[i].flags & FL_NET_IFF_LOOPBACK) ? " loopback" : "");
+        if (entries[i].has_ipv6 &&
+            fl_net_ipv6_format_addr(entries[i].addr6, addr6, sizeof(addr6)))
+            printf("  v6 %s/%u", addr6, (unsigned)entries[i].prefix6_len);
+        putchar('\n');
     }
     if (fl_net_iface_suggest_ipv4(NULL, suggest, sizeof(suggest)))
         printf("Suggested LAN join address for peers: %s\n", suggest);

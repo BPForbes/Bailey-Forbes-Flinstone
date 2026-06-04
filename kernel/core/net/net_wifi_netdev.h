@@ -28,4 +28,9 @@ void fl_net_wifi_netdev_down(void);
 
 fl_result_t fl_net_wifi_netdev_ipv4(uint32_t *addr_be_out);
 
+/** Register router-assigned global IPv6 on the WLAN netdev FIB. */
+fl_result_t fl_net_wifi_netdev_add_ipv6(const uint8_t src6[16], uint8_t prefix_len);
+
+fl_result_t fl_net_wifi_netdev_ipv6(uint8_t addr6[16], uint8_t *prefix_len_out);
+
 #endif /* NET_WIFI_NETDEV_H */

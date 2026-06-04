@@ -85,4 +85,7 @@ void fl_net_route_add6_loopback(void);
 /** Snapshot the IPv6 FIB (insertion order). `out` may be NULL when `cap == 0`. */
 unsigned fl_net_route_snapshot6(fl_net_route6_entry_t *out, unsigned cap);
 
+/** Drop all IPv4 and IPv6 FIB rows bound to **drv** (e.g. WLAN leave). */
+void fl_net_route_remove_drv(fl_net_driver_t *drv);
+
 #endif /* NET_ROUTE_H */

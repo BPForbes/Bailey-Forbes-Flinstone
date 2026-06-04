@@ -2,6 +2,7 @@
 
 #include "net_iface.h"
 #include "net_ipv4.h"
+#include "net_ipv6.h"
 
 #include <ctype.h>
 #include <stdio.h>
@@ -196,17 +197,49 @@ static unsigned prefix_from_netmask(uint32_t mask_be) {
     return n > 0u ? n : 24u;
 }
 
+static unsigned prefix_from_netmask6(const uint8_t mask[16]) {
+    unsigned n = 0;
+    unsigned i;
+
+    for (i = 0; i < 16u; i++) {
+        uint8_t b = mask[i];
+        if (b == 0xffu) {
+            n += 8u;
+            continue;
+        }
+        while (b & 0x80u) {
+            n++;
+            b = (uint8_t)(b << 1);
+        }
+        break;
+    }
+    return n > 0u ? n : 64u;
+}
+
+static int ipv4_pick_score(uint32_t addr) {
+    if (addr == 0u || fl_net_ipv4_is_apipa(addr))
+        return 0;
+    if (fl_net_ipv4_is_private_rfc1918(addr))
+        return 2;
+    return 1;
+}
+
 static fl_result_t read_iface_ipv4_route(uint32_t *addr_be_out, uint8_t *prefix_len_out,
                                        uint32_t *gw_be_out) {
     struct ifaddrs *ifa = NULL;
     struct ifaddrs *cur;
-    uint32_t addr = 0u;
-    uint32_t mask = 0u;
+    uint32_t best_addr = 0u;
+    uint32_t best_mask = 0u;
+    int best_score = 0;
 
     if (getifaddrs(&ifa) != 0)
         return FL_RESULT_ERR;
     for (cur = ifa; cur; cur = cur->ifa_next) {
         struct sockaddr_in *sin;
+        uint32_t addr;
+        uint32_t mask = 0u;
+        int score;
+
         if (!cur->ifa_addr || !cur->ifa_name)
             continue;
         if (strcmp(cur->ifa_name, s_wifi_iface) != 0)
@@ -215,26 +248,75 @@ static fl_result_t read_iface_ipv4_route(uint32_t *addr_be_out, uint8_t *prefix_
             continue;
         sin = (struct sockaddr_in *)cur->ifa_addr;
         addr = sin->sin_addr.s_addr;
+        score = ipv4_pick_score(addr);
+        if (score == 0)
+            continue;
         if (cur->ifa_netmask && cur->ifa_netmask->sa_family == AF_INET) {
             struct sockaddr_in *nm = (struct sockaddr_in *)cur->ifa_netmask;
             mask = nm->sin_addr.s_addr;
         }
+        if (score > best_score || (score == best_score && best_addr == 0u)) {
+            best_addr = addr;
+            best_mask = mask;
+            best_score = score;
+        }
+    }
+    freeifaddrs(ifa);
+    if (best_addr == 0u)
+        return FL_RESULT_NOENT;
+    if (addr_be_out)
+        *addr_be_out = best_addr;
+    if (prefix_len_out)
+        *prefix_len_out = (uint8_t)prefix_from_netmask(best_mask);
+    if (gw_be_out) {
+        uint32_t gw = (best_addr & 0xffffff00u) | 1u;
+        *gw_be_out = gw;
+    }
+    return FL_RESULT_OK;
+}
+
+static fl_result_t read_iface_ipv6_route(uint8_t addr6_out[16], uint8_t *prefix_len_out) {
+    struct ifaddrs *ifa = NULL;
+    struct ifaddrs *cur;
+    uint8_t best[16];
+    uint8_t best_mask[16];
+    int have = 0;
+
+    if (!addr6_out)
+        return FL_RESULT_INVAL;
+    if (getifaddrs(&ifa) != 0)
+        return FL_RESULT_ERR;
+    memset(best, 0, sizeof(best));
+    memset(best_mask, 0, sizeof(best_mask));
+    for (cur = ifa; cur; cur = cur->ifa_next) {
+        struct sockaddr_in6 *sin6;
+        uint8_t mask[16];
+
+        if (!cur->ifa_addr || !cur->ifa_name)
+            continue;
+        if (strcmp(cur->ifa_name, s_wifi_iface) != 0)
+            continue;
+        if (cur->ifa_addr->sa_family != AF_INET6)
+            continue;
+        sin6 = (struct sockaddr_in6 *)cur->ifa_addr;
+        if (!fl_net_ipv6_is_global_unicast(sin6->sin6_addr.s6_addr))
+            continue;
+        memset(mask, 0, sizeof(mask));
+        if (cur->ifa_netmask && cur->ifa_netmask->sa_family == AF_INET6) {
+            struct sockaddr_in6 *nm = (struct sockaddr_in6 *)cur->ifa_netmask;
+            memcpy(mask, nm->sin6_addr.s6_addr, 16);
+        }
+        memcpy(best, sin6->sin6_addr.s6_addr, 16);
+        memcpy(best_mask, mask, 16);
+        have = 1;
         break;
     }
     freeifaddrs(ifa);
-    if (addr == 0u)
+    if (!have)
         return FL_RESULT_NOENT;
-    if ((ntohl(addr) & 0xffu) == 169u && ((ntohl(addr) >> 8) & 0xffu) == 254u)
-        return FL_RESULT_NOENT;
-    if (addr_be_out)
-        *addr_be_out = addr;
+    memcpy(addr6_out, best, 16);
     if (prefix_len_out)
-        *prefix_len_out = (uint8_t)prefix_from_netmask(mask);
-    if (gw_be_out) {
-        uint32_t a = ntohl(addr);
-        uint32_t gw = (a & 0xffffff00u) | 1u;
-        *gw_be_out = htonl(gw);
-    }
+        *prefix_len_out = (uint8_t)prefix_from_netmask6(best_mask);
     return FL_RESULT_OK;
 }
 
@@ -246,6 +328,22 @@ static fl_result_t wait_for_ipv4(unsigned timeout_ms, uint32_t *addr_be_out,
 
     while (elapsed <= timeout_ms) {
         rc = read_iface_ipv4_route(addr_be_out, prefix_len_out, gw_be_out);
+        if (rc == FL_RESULT_OK)
+            return rc;
+        usleep((useconds_t)step_ms * 1000u);
+        elapsed += step_ms;
+    }
+    return FL_RESULT_TIMEDOUT;
+}
+
+static fl_result_t wait_for_ipv6(unsigned timeout_ms, uint8_t addr6_out[16],
+                                 uint8_t *prefix_len_out) {
+    unsigned elapsed = 0u;
+    const unsigned step_ms = 250u;
+    fl_result_t rc;
+
+    while (elapsed <= timeout_ms) {
+        rc = read_iface_ipv6_route(addr6_out, prefix_len_out);
         if (rc == FL_RESULT_OK)
             return rc;
         usleep((useconds_t)step_ms * 1000u);
@@ -396,6 +494,8 @@ fl_result_t fl_net_wifi_host_linux_connect(const fl_net_wifi_cred_t *cred,
     if (rc != FL_RESULT_OK && rc != FL_RESULT_TIMEDOUT)
         return rc;
 
+    (void)wait_for_ipv6(timeout_ms > 0u ? timeout_ms : 15000u, NULL, NULL);
+
     strncpy(s_wpa_joined_ssid, cred->ssid, sizeof(s_wpa_joined_ssid) - 1u);
     return FL_RESULT_OK;
 #endif
@@ -432,6 +532,40 @@ fl_result_t fl_net_wifi_host_linux_ipv4(uint32_t *addr_be_out, char *buf, size_t
         *addr_be_out = addr;
     if (buf && buf_len > 0u)
         fl_net_ipv4_format_addr(addr, buf, buf_len);
+    return FL_RESULT_OK;
+#endif
+}
+
+
+fl_result_t fl_net_wifi_host_linux_ipv6_route(uint8_t addr6[16], uint8_t *prefix_len_out) {
+#if !defined(FL_NET_WIFI_HOST_LINUX)
+    (void)addr6;
+    (void)prefix_len_out;
+    return FL_RESULT_NOSYS;
+#else
+    load_env_once();
+    return read_iface_ipv6_route(addr6, prefix_len_out);
+#endif
+}
+
+fl_result_t fl_net_wifi_host_linux_ipv6(uint8_t addr6[16], char *buf, size_t buf_len) {
+#if !defined(FL_NET_WIFI_HOST_LINUX)
+    (void)addr6;
+    (void)buf;
+    (void)buf_len;
+    return FL_RESULT_NOSYS;
+#else
+    uint8_t local[16];
+    fl_result_t rc;
+
+    load_env_once();
+    rc = read_iface_ipv6_route(local, NULL);
+    if (rc != FL_RESULT_OK)
+        return rc;
+    if (addr6)
+        memcpy(addr6, local, 16);
+    if (buf && buf_len > 0u)
+        fl_net_ipv6_format_addr(local, buf, buf_len);
     return FL_RESULT_OK;
 #endif
 }

@@ -4,6 +4,7 @@
 #include "contract_p2_authz.h"
 #include "net_wifi_db.h"
 #include "net_ipv4.h"
+#include "net_ipv6.h"
 #include "net_wifi_netdev.h"
 #include "net_wifi_host_linux.h"
 #include "net_wifi_station.h"
@@ -45,6 +46,7 @@ static int wifi_usage(void) {
     fputs("Usage:\n"
           "  wifi scan [-band any|2|5|6]\n"
           "  wifi join [-b <bssid>] <name> [password]\n"
+          "  wifi leave                          Disconnect and drop WLAN addresses\n"
           "  wifi known\n"
           "  wifi status\n"
           "  Real Wi-Fi (Linux): wpa_supplicant + wpa_cli on FL_NET_WIFI_IFACE (default wlan0).\n",
@@ -242,6 +244,38 @@ static int cmd_wifi_join(int argc, char **argv) {
     return 0;
 }
 
+
+static int cmd_wifi_leave(int argc, char **argv) {
+    fl_result_t rc;
+    (void)argc;
+    (void)argv;
+    if (fl_authz_subsystem_check((unsigned)FL_AUTHZ_OP_NETDEV_IO, NULL) ==
+        FL_AUTHZ_DENY) {
+        fputs("wifi leave: permission denied (netdev I/O)\n", stderr);
+        return 1;
+    }
+    (void)fl_net_wifi_station_init();
+    rc = fl_net_wifi_disconnect();
+    if (rc != FL_RESULT_OK) {
+        fprintf(stderr, "wifi leave: failed (%d)\n", (int)rc);
+        return 1;
+    }
+    if (fl_wifi_db_open(NULL) == FL_RESULT_OK) {
+        fl_wifi_db_router_t rows[FL_WIFI_DB_MAX_ROUTERS];
+        size_t count = 0;
+        size_t i;
+        if (fl_wifi_db_list(rows, FL_WIFI_DB_MAX_ROUTERS, &count) == FL_RESULT_OK) {
+            for (i = 0; i < count; i++) {
+                if (rows[i].is_joined)
+                    (void)fl_wifi_db_mark_joined(rows[i].name, 0);
+            }
+        }
+        fl_wifi_db_close();
+    }
+    puts("wifi leave: disconnected (WLAN IPv4/IPv6 removed from shell env)");
+    return 0;
+}
+
 static int cmd_wifi_status(int argc, char **argv) {
     char ip[32];
     uint32_t ip_be = 0u;
@@ -255,15 +289,26 @@ static int cmd_wifi_status(int argc, char **argv) {
         puts("Backend: wpa_supplicant available (not associated)");
     else
         puts("Backend: in-tree 802.11 lab (net_wifi_netdev + MLME/WPA)");
-    if (fl_net_wifi_netdev_is_up() &&
-        fl_net_wifi_netdev_ipv4(&ip_be) == FL_RESULT_OK) {
-        fl_net_ipv4_format_addr(ip_be, ip, sizeof(ip));
-        printf("Interface wlan0 IPv4: %s (server host %s:<port> or server host -all <port>)\n",
-               ip, ip);
-    } else if (fl_net_wifi_station_netdev() != NULL) {
-        puts("Interface wlan0: associating…");
-    } else {
-        puts("Interface wlan0: down (wifi join to associate)");
+    {
+        const char *ifname = fl_net_wifi_host_linux_iface();
+        if (!ifname || !ifname[0])
+            ifname = "wlan0";
+        if (fl_net_wifi_netdev_is_up() &&
+            fl_net_wifi_netdev_ipv4(&ip_be) == FL_RESULT_OK) {
+            char ip6[64];
+            uint8_t addr6[16];
+            uint8_t p6 = 0u;
+            fl_net_ipv4_format_addr(ip_be, ip, sizeof(ip));
+            printf("Interface %s IPv4: %s (server host %s:<port> or server host -all <port>)\n",
+                   ifname, ip, ip);
+            if (fl_net_wifi_netdev_ipv6(addr6, &p6) == FL_RESULT_OK &&
+                fl_net_ipv6_format_addr(addr6, ip6, sizeof(ip6)))
+                printf("Interface %s IPv6: %s/%u\n", ifname, ip6, (unsigned)p6);
+        } else if (fl_net_wifi_station_netdev() != NULL) {
+            printf("Interface %s: associating…\n", ifname);
+        } else {
+            printf("Interface %s: down (wifi join to associate)\n", ifname);
+        }
     }
     return 0;
 }
@@ -308,6 +353,8 @@ int cmd_wifi_run(int argc, char **argv) {
         return cmd_wifi_join(argc, argv);
     if (!strcmp(argv[1], "known"))
         return cmd_wifi_known(argc, argv);
+    if (!strcmp(argv[1], "leave"))
+        return cmd_wifi_leave(argc, argv);
     if (!strcmp(argv[1], "status"))
         return cmd_wifi_status(argc, argv);
     fprintf(stderr, "wifi: unknown subcommand '%s'\n", argv[1]);
@@ -343,6 +390,8 @@ int cmd_wifi_batch_tokens_count(int argc, char **argv, int i) {
         return used;
     }
     if (!strcmp(argv[j], "known"))
+        return used;
+    if (!strcmp(argv[j], "leave"))
         return used;
     if (!strcmp(argv[j], "status"))
         return used;

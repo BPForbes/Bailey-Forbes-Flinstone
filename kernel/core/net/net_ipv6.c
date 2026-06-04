@@ -51,6 +51,47 @@ int fl_net_ipv6_is_link_local(const uint8_t addr[FL_NET_IPV6_ADDR_LEN]) {
     return addr[0] == 0xfeu && (addr[1] & 0xc0u) == 0x80u;
 }
 
+int fl_net_ipv6_is_global_unicast(const uint8_t addr[FL_NET_IPV6_ADDR_LEN]) {
+    unsigned i;
+
+    if (!addr)
+        return 0;
+    if (fl_net_ipv6_is_loopback(addr) || fl_net_ipv6_is_link_local(addr))
+        return 0;
+    if (addr[0] == 0xffu)
+        return 0;
+    for (i = 0; i < FL_NET_IPV6_ADDR_LEN; i++) {
+        if (addr[i] != 0u)
+            break;
+    }
+    if (i == FL_NET_IPV6_ADDR_LEN)
+        return 0;
+    return (addr[0] & 0xe0u) == 0x20u;
+}
+
+void fl_net_ipv6_network_addr(const uint8_t addr[FL_NET_IPV6_ADDR_LEN], uint8_t prefix_len,
+                              uint8_t net[FL_NET_IPV6_ADDR_LEN]) {
+    unsigned full_bytes;
+    uint8_t mask;
+
+    if (!addr || !net || prefix_len > FL_NET_IPV6_MAX_PREFIX_LEN) {
+        if (net)
+            memset(net, 0, FL_NET_IPV6_ADDR_LEN);
+        return;
+    }
+    memcpy(net, addr, FL_NET_IPV6_ADDR_LEN);
+    if (prefix_len >= FL_NET_IPV6_MAX_PREFIX_LEN)
+        return;
+    full_bytes = (unsigned)prefix_len / 8u;
+    if (prefix_len % 8u != 0u) {
+        mask = (uint8_t)(0xffu << (8u - (prefix_len % 8u)));
+        net[full_bytes] = (uint8_t)(addr[full_bytes] & mask);
+        full_bytes++;
+    }
+    if (full_bytes < FL_NET_IPV6_ADDR_LEN)
+        memset(net + full_bytes, 0, FL_NET_IPV6_ADDR_LEN - full_bytes);
+}
+
 int fl_net_ipv6_prefix_match(const uint8_t addr[FL_NET_IPV6_ADDR_LEN],
                              const uint8_t net[FL_NET_IPV6_ADDR_LEN], uint8_t prefix_len) {
     unsigned full_bytes;

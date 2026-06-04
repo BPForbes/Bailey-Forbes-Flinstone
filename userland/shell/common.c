@@ -125,7 +125,7 @@ static const char HELP_BODY[] =
 "  resolve <host>                    Alias for nslookup (dual-stack DNS)\n"
 "  netsh <arp|ifconfig|route|...>    Windows-style umbrella over the above\n"
 "  wifi scan [-band any|2|5|6]       Scan for Wi-Fi networks (802.11ax lab list when no NIC)\n"
-"  wifi join <name> [password]       Join and save profile (hashed password in fl_wifi.db)\n"
+"  wifi join [-b <bssid>] <name> [password]  Join router network (DHCP IPv4 + IPv6 when available)\n  wifi leave                        Disconnect; drop WLAN addresses from shell env\n"
 "  wifi known                        List saved/joined router profiles\n"
 "  help                 Display this help\n"
 "  redirect <file>      Redirect output (use \"redirect off\" to restore)\n"

@@ -25,6 +25,10 @@ typedef struct {
 } fl_net_ipv4_hdr_t;
 
 int fl_net_ipv4_is_loopback(uint32_t addr_be);
+/** RFC 1918 private unicast (10/8, 172.16/12, 192.168/16). */
+int fl_net_ipv4_is_private_rfc1918(uint32_t addr_be);
+/** IPv4 link-local / APIPA 169.254.0.0/16. */
+int fl_net_ipv4_is_apipa(uint32_t addr_be);
 int fl_net_ipv4_parse_literal(const char *s, uint32_t *out_be);
 void fl_net_ipv4_format_addr(uint32_t addr_be, char *buf, size_t buf_len);
 uint32_t fl_net_ipv4_network_addr(uint32_t addr_be, uint8_t prefix_len);

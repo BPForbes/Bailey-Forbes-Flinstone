@@ -2,6 +2,7 @@
 
 #include "net_endian.h"
 #include "net_ipv4.h"
+#include "net_ipv6.h"
 #include "net_loopback.h"
 #include "net_netdev.h"
 #include "net_route.h"
@@ -38,6 +39,53 @@ static fl_net_iface_entry_t *iface_alloc(const char *name, fl_net_driver_t *drv,
     e->flags = flags | FL_NET_IFF_UP;
     e->drv = drv;
     return e;
+}
+
+
+static void iface_add_route6_row(const fl_net_route6_entry_t *route) {
+    fl_net_iface_entry_t *e;
+    const char *name;
+    int empty6 = 1;
+    unsigned i;
+
+    if (!route || !route->drv)
+        return;
+    for (i = 0; i < 16u; i++) {
+        if (route->src6[i] != 0u) {
+            empty6 = 0;
+            break;
+        }
+    }
+    if (empty6)
+        return;
+
+    e = iface_find_driver(route->drv);
+    if (!e) {
+        if (route->drv == fl_net_netdev_loopback()) {
+            name = "lo";
+            e = iface_alloc(name, route->drv, FL_NET_IFF_LOOPBACK);
+        } else if (fl_net_netdev_tap() && route->drv == fl_net_netdev_tap()) {
+            name = fl_net_netdev_tap_ifname();
+            if (!name || !name[0])
+                name = "tap0";
+            e = iface_alloc(name, route->drv, 0u);
+        } else if (fl_net_wifi_netdev_driver() &&
+                   route->drv == fl_net_wifi_netdev_driver()) {
+            const char *wlan = fl_net_wifi_host_linux_iface();
+            if (!wlan || !wlan[0])
+                wlan = "wlan0";
+            e = iface_alloc(wlan, route->drv, 0u);
+        } else {
+            char gen[FL_NET_IFACE_NAME_MAX];
+            snprintf(gen, sizeof(gen), "eth%u", s_iface_count);
+            e = iface_alloc(gen, route->drv, 0u);
+        }
+    }
+    if (!e)
+        return;
+    memcpy(e->addr6, route->src6, 16);
+    e->prefix6_len = route->prefix_len;
+    e->has_ipv6 = 1;
 }
 
 static void iface_add_route_row(const fl_net_route_entry_t *route) {
@@ -78,7 +126,9 @@ static void iface_add_route_row(const fl_net_route_entry_t *route) {
 
 void fl_net_iface_refresh(void) {
     fl_net_route_entry_t routes[FL_NET_ROUTE_TABLE_MAX];
+    fl_net_route6_entry_t routes6[FL_NET_ROUTE_TABLE_MAX];
     unsigned n;
+    unsigned n6;
     unsigned i;
 
     s_iface_count = 0u;
@@ -88,6 +138,10 @@ void fl_net_iface_refresh(void) {
     n = fl_net_route_snapshot(routes, FL_NET_ROUTE_TABLE_MAX);
     for (i = 0; i < n; i++)
         iface_add_route_row(&routes[i]);
+
+    n6 = fl_net_route_snapshot6(routes6, FL_NET_ROUTE_TABLE_MAX);
+    for (i = 0; i < n6; i++)
+        iface_add_route6_row(&routes6[i]);
 
     if (s_iface_count == 0u) {
         fl_net_route_entry_t loop;

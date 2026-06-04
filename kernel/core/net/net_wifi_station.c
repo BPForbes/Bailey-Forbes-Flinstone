@@ -225,6 +225,12 @@ static fl_result_t host_linux_connect(const fl_net_wifi_cred_t *cred, unsigned t
     } else {
         rc = fl_net_wifi_netdev_up(&ap, sta_mac);
     }
+    if (rc == FL_RESULT_OK) {
+        uint8_t ip6[16];
+        uint8_t p6 = 0u;
+        if (fl_net_wifi_host_linux_ipv6_route(ip6, &p6) == FL_RESULT_OK)
+            (void)fl_net_wifi_netdev_add_ipv6(ip6, p6);
+    }
     if (rc != FL_RESULT_OK) {
         (void)fl_net_wifi_host_linux_disconnect();
         return rc;

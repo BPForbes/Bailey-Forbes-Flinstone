@@ -9,6 +9,7 @@
 #include "net_route.h"
 #include "net_wire.h"
 #include "net_checksum.h"
+#include "net_ipv6.h"
 
 #include <stdio.h>
 #include <string.h>
@@ -31,6 +32,9 @@ static uint8_t s_ap_bssid[6];
 static uint8_t s_sta_mac[6];
 static char s_joined_ssid[FL_WIFI_SSID_MAX];
 static uint32_t s_wifi_ip_be;
+static uint8_t s_wifi_ip6[16];
+static uint8_t s_wifi_prefix6;
+static int s_wifi_has_ipv6;
 
 static fl_result_t wifi_rx_enqueue(const uint8_t *frame, size_t len) {
     unsigned idx;
@@ -212,11 +216,16 @@ fl_result_t fl_net_wifi_netdev_up_with_ipv4(const fl_net_wifi_scan_entry_t *ap,
 }
 
 void fl_net_wifi_netdev_down(void) {
+    if (s_wifi_up)
+        fl_net_route_remove_drv(&s_wifi_drv);
     s_wifi_up = 0;
     s_wifi_rx_head = 0u;
     s_wifi_rx_count = 0u;
     s_joined_ssid[0] = '\0';
     s_wifi_ip_be = 0u;
+    memset(s_wifi_ip6, 0, sizeof(s_wifi_ip6));
+    s_wifi_prefix6 = 0u;
+    s_wifi_has_ipv6 = 0;
     fl_net_iface_refresh();
 }
 
@@ -225,5 +234,30 @@ fl_result_t fl_net_wifi_netdev_ipv4(uint32_t *addr_be_out) {
         return FL_RESULT_NOENT;
     if (addr_be_out)
         *addr_be_out = s_wifi_ip_be;
+    return FL_RESULT_OK;
+}
+
+fl_result_t fl_net_wifi_netdev_add_ipv6(const uint8_t src6[16], uint8_t prefix_len) {
+    uint8_t net6[16];
+
+    if (!s_wifi_up || !src6 || prefix_len == 0u || prefix_len > FL_NET_IPV6_MAX_PREFIX_LEN)
+        return FL_RESULT_INVAL;
+    fl_net_ipv6_network_addr(src6, prefix_len, net6);
+    if (fl_net_route_add6(net6, prefix_len, &s_wifi_drv, src6, s_sta_mac) != FL_RESULT_OK)
+        return FL_RESULT_ERR;
+    memcpy(s_wifi_ip6, src6, 16);
+    s_wifi_prefix6 = prefix_len;
+    s_wifi_has_ipv6 = 1;
+    fl_net_iface_refresh();
+    return FL_RESULT_OK;
+}
+
+fl_result_t fl_net_wifi_netdev_ipv6(uint8_t addr6[16], uint8_t *prefix_len_out) {
+    if (!s_wifi_up || !s_wifi_has_ipv6)
+        return FL_RESULT_NOENT;
+    if (addr6)
+        memcpy(addr6, s_wifi_ip6, 16);
+    if (prefix_len_out)
+        *prefix_len_out = s_wifi_prefix6;
     return FL_RESULT_OK;
 }

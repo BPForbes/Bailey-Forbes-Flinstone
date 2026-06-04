@@ -36,6 +36,12 @@ fl_result_t fl_net_wifi_host_linux_ipv4(uint32_t *addr_be_out, char *buf, size_t
 fl_result_t fl_net_wifi_host_linux_ipv4_route(uint32_t *addr_be_out, uint8_t *prefix_len_out,
                                               uint32_t *gw_be_out);
 
+/** Global unicast IPv6 on the WLAN interface after router SLAAC/DHCPv6. */
+fl_result_t fl_net_wifi_host_linux_ipv6(uint8_t addr6[16], char *buf, size_t buf_len);
+
+/** IPv6 prefix length on the WLAN interface when known. */
+fl_result_t fl_net_wifi_host_linux_ipv6_route(uint8_t addr6[16], uint8_t *prefix_len_out);
+
 const char *fl_net_wifi_host_linux_iface(void);
 
 #endif /* NET_WIFI_HOST_LINUX_H */

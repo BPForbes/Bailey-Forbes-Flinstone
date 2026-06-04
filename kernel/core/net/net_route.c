@@ -278,6 +278,35 @@ unsigned fl_net_route_snapshot6(fl_net_route6_entry_t *out, unsigned cap) {
     return n;
 }
 
+void fl_net_route_remove_drv(fl_net_driver_t *drv) {
+    unsigned i;
+
+    if (!drv)
+        return;
+    i = 0;
+    while (i < s_route_count) {
+        if (s_routes[i].drv == drv) {
+            if (i + 1u < s_route_count)
+                memmove(&s_routes[i], &s_routes[i + 1u],
+                        (size_t)(s_route_count - i - 1u) * sizeof(s_routes[0]));
+            s_route_count--;
+        } else {
+            i++;
+        }
+    }
+    i = 0;
+    while (i < s_route6_count) {
+        if (s_routes6[i].drv == drv) {
+            if (i + 1u < s_route6_count)
+                memmove(&s_routes6[i], &s_routes6[i + 1u],
+                        (size_t)(s_route6_count - i - 1u) * sizeof(s_routes6[0]));
+            s_route6_count--;
+        } else {
+            i++;
+        }
+    }
+}
+
 void fl_net_route_add6_loopback(void) {
     uint8_t loop6[16];
     uint8_t host_mac[FL_NET_ETH_ADDR_LEN];
