@@ -18,6 +18,12 @@ int fl_net_wifi_netdev_is_up(void);
 
 fl_result_t fl_net_wifi_netdev_up(const fl_net_wifi_scan_entry_t *ap,
                                   const uint8_t sta_mac[6]);
+
+/** Lab default IP (10.0.2.15) or host-supplied address after real association. */
+fl_result_t fl_net_wifi_netdev_up_with_ipv4(const fl_net_wifi_scan_entry_t *ap,
+                                            const uint8_t sta_mac[6],
+                                            const char *addr_s, uint8_t prefix_len,
+                                            const char *gw_s);
 void fl_net_wifi_netdev_down(void);
 
 fl_result_t fl_net_wifi_netdev_ipv4(uint32_t *addr_be_out);

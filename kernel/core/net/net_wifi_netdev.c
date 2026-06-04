@@ -8,8 +8,11 @@
 #include "net_netdev.h"
 #include "net_route.h"
 #include "net_wire.h"
+#include "net_checksum.h"
 
+#include <stdio.h>
 #include <string.h>
+#include <arpa/inet.h>
 
 #define FL_NET_WIFI_RX_SLOTS 8u
 #define FL_NET_WIFI_RX_MAX FL_NET_WIRE_FRAME_BUF_MAX
@@ -150,10 +153,8 @@ int fl_net_wifi_netdev_is_up(void) {
     return s_wifi_up;
 }
 
-fl_result_t fl_net_wifi_netdev_up(const fl_net_wifi_scan_entry_t *ap,
-                                  const uint8_t sta_mac[6]) {
-    uint32_t ip_be;
-    uint8_t mac[6];
+static fl_result_t wifi_netdev_up_common(const fl_net_wifi_scan_entry_t *ap,
+                                           const uint8_t sta_mac[6]) {
     if (!ap || !sta_mac)
         return FL_RESULT_INVAL;
     memset(&s_wifi_drv, 0, sizeof(s_wifi_drv));
@@ -166,14 +167,48 @@ fl_result_t fl_net_wifi_netdev_up(const fl_net_wifi_scan_entry_t *ap,
     s_wifi_rx_head = 0u;
     s_wifi_rx_count = 0u;
     s_wifi_up = 1;
-    fl_net_loopback_mac_host(mac);
-    (void)mac;
-    if (!fl_net_ipv4_parse_literal("10.0.2.15", &ip_be))
+    return FL_RESULT_OK;
+}
+
+fl_result_t fl_net_wifi_netdev_up(const fl_net_wifi_scan_entry_t *ap,
+                                  const uint8_t sta_mac[6]) {
+    fl_result_t rc = wifi_netdev_up_common(ap, sta_mac);
+    if (rc != FL_RESULT_OK)
+        return rc;
+    if (!fl_net_ipv4_parse_literal("10.0.2.15", &s_wifi_ip_be))
         return FL_RESULT_ERR;
-    s_wifi_ip_be = ip_be;
     (void)fl_net_route_configure_static(&s_wifi_drv, sta_mac, "10.0.2.15", 24u, "10.0.2.2");
     fl_net_iface_refresh();
     return FL_RESULT_OK;
+}
+
+fl_result_t fl_net_wifi_netdev_up_with_ipv4(const fl_net_wifi_scan_entry_t *ap,
+                                            const uint8_t sta_mac[6],
+                                            const char *addr_s, uint8_t prefix_len,
+                                            const char *gw_s) {
+    fl_result_t rc;
+    uint32_t ip_be = 0u;
+    const char *gw = gw_s;
+
+    rc = wifi_netdev_up_common(ap, sta_mac);
+    if (rc != FL_RESULT_OK)
+        return rc;
+    if (!addr_s || !addr_s[0] || !fl_net_ipv4_parse_literal(addr_s, &ip_be))
+        return FL_RESULT_ERR;
+    s_wifi_ip_be = ip_be;
+    if (!gw || !gw[0]) {
+        static char gw_buf[16];
+        uint32_t host = ntohl(ip_be);
+        snprintf(gw_buf, sizeof(gw_buf), "%u.%u.%u.1",
+                 (unsigned)((host >> 24) & 0xffu), (unsigned)((host >> 16) & 0xffu),
+                 (unsigned)((host >> 8) & 0xffu));
+        gw = gw_buf;
+    }
+    if (prefix_len == 0u)
+        prefix_len = 24u;
+    rc = fl_net_route_configure_static(&s_wifi_drv, sta_mac, addr_s, prefix_len, gw);
+    fl_net_iface_refresh();
+    return rc;
 }
 
 void fl_net_wifi_netdev_down(void) {

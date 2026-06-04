@@ -1,4 +1,6 @@
 #include "net_sock_native.h"
+#include "net_stack_sync.h"
+#include "net_rx_demux.h"
 #include "net_endian.h"
 
 #include "net_ipv4.h"
@@ -40,6 +42,13 @@ static int driver_is_in_tree(const fl_net_driver_t *drv) {
     if (fl_net_wifi_netdev_driver() && drv == fl_net_wifi_netdev_driver())
         return 1;
     return 0;
+}
+
+
+void fl_net_sock_native_pump(unsigned max_frames) {
+    if (!fl_net_sock_native_enabled())
+        return;
+    (void)fl_net_rx_demux_poll(max_frames);
 }
 
 int fl_net_sock_native_enabled(void) {
@@ -118,7 +127,9 @@ fl_result_t fl_net_sock_native_listen(fl_net_sock_handle_t handle) {
     fl_result_t rc;
     if (!n || !n->in_use)
         return FL_RESULT_INVAL;
+    fl_net_stack_lock();
     rc = fl_net_tcp_listen_port(n->local_port);
+    fl_net_stack_unlock();
     if (rc != FL_RESULT_OK)
         return rc;
     n->is_listen = 1u;
@@ -133,7 +144,10 @@ fl_result_t fl_net_sock_native_accept(fl_net_sock_handle_t listen_handle,
     fl_result_t rc;
     if (!listen || !out_client || !listen->is_listen)
         return FL_RESULT_INVAL;
+    fl_net_stack_lock();
+    (void)fl_net_rx_demux_poll(8u);
     rc = fl_net_tcp_accept(listen->local_port, &conn_id);
+    fl_net_stack_unlock();
     if (rc != FL_RESULT_OK)
         return rc;
     client = native_slot(*out_client);
@@ -160,7 +174,9 @@ fl_result_t fl_net_sock_native_connect_v4(fl_net_sock_handle_t handle, uint32_t 
     n->peer_be = peer_be;
     n->peer_port = port_host;
     n->local_be = local_be;
+    fl_net_stack_lock();
     rc = fl_net_tcp_connect_src(local_be, peer_be, port_host, &conn_id);
+    fl_net_stack_unlock();
     if (rc != FL_RESULT_OK) {
         n->in_use = 0u;
         return rc;
@@ -177,7 +193,9 @@ fl_result_t fl_net_sock_native_send(fl_net_sock_handle_t handle, const void *buf
         return FL_RESULT_INVAL;
     if (!buf || !sent)
         return FL_RESULT_INVAL;
+    fl_net_stack_lock();
     rc = fl_net_tcp_send(n->tcp_conn_id, (const uint8_t *)buf, len);
+    fl_net_stack_unlock();
     if (rc != FL_RESULT_OK)
         return rc;
     *sent = len;
@@ -196,7 +214,10 @@ fl_result_t fl_net_sock_native_recv(fl_net_sock_handle_t handle, void *buf, size
     if (!buf || !got)
         return FL_RESULT_INVAL;
     for (;;) {
+        (void)fl_net_rx_demux_poll(8u);
+        fl_net_stack_lock();
         rc = fl_net_tcp_recv(n->tcp_conn_id, (uint8_t *)buf, cap, &nread);
+        fl_net_stack_unlock();
         if (rc == FL_RESULT_OK) {
             *got = nread;
             return FL_RESULT_OK;
@@ -214,7 +235,9 @@ fl_result_t fl_net_sock_native_close(fl_net_sock_handle_t handle) {
     if (!n || !n->in_use)
         return FL_RESULT_INVAL;
     if (!n->is_listen)
+        fl_net_stack_lock();
         (void)fl_net_tcp_close(n->tcp_conn_id);
+        fl_net_stack_unlock();
     memset(n, 0, sizeof(*n));
     return FL_RESULT_OK;
 }

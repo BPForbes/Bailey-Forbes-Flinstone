@@ -5,6 +5,7 @@
 #include "net_wifi_db.h"
 #include "net_ipv4.h"
 #include "net_wifi_netdev.h"
+#include "net_wifi_host_linux.h"
 #include "net_wifi_station.h"
 
 #include <stdio.h>
@@ -43,10 +44,22 @@ static const char *band_name(uint8_t band) {
 static int wifi_usage(void) {
     fputs("Usage:\n"
           "  wifi scan [-band any|2|5|6]\n"
-          "  wifi join <name> [password]\n"
+          "  wifi join [-b <bssid>] <name> [password]\n"
           "  wifi known\n"
-          "  wifi status\n",
+          "  wifi status\n"
+          "  Real Wi-Fi (Linux): wpa_supplicant + wpa_cli on FL_NET_WIFI_IFACE (default wlan0).\n",
           stderr);
+    return 1;
+}
+
+static int parse_bssid_arg(const char *s, uint8_t out[6]) {
+    unsigned o[6];
+    if (!s || !out)
+        return 0;
+    if (sscanf(s, "%x:%x:%x:%x:%x:%x", &o[0], &o[1], &o[2], &o[3], &o[4], &o[5]) != 6)
+        return 0;
+    for (int i = 0; i < 6; i++)
+        out[i] = (uint8_t)o[i];
     return 1;
 }
 
@@ -121,21 +134,32 @@ static int cmd_wifi_scan(int argc, char **argv) {
 }
 
 static int cmd_wifi_join(int argc, char **argv) {
-    const char *name;
+    const char *name = NULL;
     const char *password = "";
+    const char *bssid_arg = NULL;
     fl_net_wifi_cred_t cred;
     fl_net_wifi_scan_entry_t entries[16];
     size_t count = 0;
     size_t i;
+    int a;
     fl_result_t rc;
 
-    if (argc < 3) {
+    for (a = 2; a < argc; a++) {
+        if (!strcmp(argv[a], "-b") && a + 1 < argc) {
+            bssid_arg = argv[++a];
+            continue;
+        }
+        if (!name) {
+            name = argv[a];
+            continue;
+        }
+        if (!password[0])
+            password = argv[a];
+    }
+    if (!name) {
         fputs("wifi join: missing network name\n", stderr);
         return 1;
     }
-    name = argv[2];
-    if (argc >= 4)
-        password = argv[3];
     if (fl_authz_subsystem_check((unsigned)FL_AUTHZ_OP_NETDEV_IO, NULL) ==
         FL_AUTHZ_DENY) {
         fputs("wifi join: permission denied (netdev I/O)\n", stderr);
@@ -150,6 +174,11 @@ static int cmd_wifi_join(int argc, char **argv) {
     (void)fl_net_wifi_scan_result(entries, 16, &count);
     memset(&cred, 0, sizeof(cred));
     strncpy(cred.ssid, name, sizeof(cred.ssid) - 1u);
+    if (bssid_arg && !parse_bssid_arg(bssid_arg, cred.bssid)) {
+        fprintf(stderr, "wifi join: invalid BSSID '%s' (use aa:bb:cc:dd:ee:ff)\n", bssid_arg);
+        fl_wifi_db_close();
+        return 1;
+    }
     if (password[0]) {
         strncpy(cred.passphrase, password, sizeof(cred.passphrase) - 1u);
         if (fl_wifi_db_set_password(name, password) != FL_RESULT_OK) {
@@ -159,19 +188,24 @@ static int cmd_wifi_join(int argc, char **argv) {
         }
     }
     for (i = 0; i < count; i++) {
-        if (!strcmp(entries[i].ssid, name)) {
-            cred.auth_mode = entries[i].auth_mode;
-            cred.band_hint = entries[i].band;
-            memcpy(cred.bssid, entries[i].bssid, 6);
-            (void)fl_wifi_db_apply_scan_entry(name, &entries[i]);
-            break;
+        if (strcmp(entries[i].ssid, name))
+            continue;
+        if (bssid_arg) {
+            if (memcmp(entries[i].bssid, cred.bssid, 6) != 0)
+                continue;
         }
+        cred.auth_mode = entries[i].auth_mode;
+        cred.band_hint = entries[i].band;
+        if (!bssid_arg)
+            memcpy(cred.bssid, entries[i].bssid, 6);
+        (void)fl_wifi_db_apply_scan_entry(name, &entries[i]);
+        break;
     }
     if (cred.auth_mode == 0 && password[0])
         cred.auth_mode = FL_WIFI_AUTH_WPA3_SAE;
     rc = fl_net_wifi_connect(&cred, 15000u);
     if (rc == FL_RESULT_NOSYS) {
-        fputs("wifi join: no Wi-Fi NIC driver (profile saved if password given)\n", stderr);
+        fputs("wifi join: no Wi-Fi backend (need wpa_supplicant on FL_NET_WIFI_IFACE or lab mode)\n", stderr);
         fl_wifi_db_close();
         return 1;
     }
@@ -214,7 +248,13 @@ static int cmd_wifi_status(int argc, char **argv) {
     (void)argc;
     (void)argv;
     printf("Wi-Fi state: %d\n", (int)fl_net_wifi_state());
-    puts("Backend: in-tree 802.11 station (net_wifi_netdev + MLME/WPA)");
+    if (fl_net_wifi_station_host_backend())
+        printf("Backend: wpa_supplicant (%s via wpa_cli)\n",
+               fl_net_wifi_host_linux_iface());
+    else if (fl_net_wifi_host_linux_available())
+        puts("Backend: wpa_supplicant available (not associated)");
+    else
+        puts("Backend: in-tree 802.11 lab (net_wifi_netdev + MLME/WPA)");
     if (fl_net_wifi_netdev_is_up() &&
         fl_net_wifi_netdev_ipv4(&ip_be) == FL_RESULT_OK) {
         fl_net_ipv4_format_addr(ip_be, ip, sizeof(ip));
@@ -289,9 +329,16 @@ int cmd_wifi_batch_tokens_count(int argc, char **argv, int i) {
         return used;
     }
     if (!strcmp(argv[j], "join")) {
-        if (j + 1 < argc)
-            used++;
-        if (j + 2 < argc && argv[j + 2][0] != '-')
+        int k = j + 1;
+        while (k < argc && argv[k][0] == '-') {
+            if (!strcmp(argv[k], "-b") && k + 1 < argc)
+                k += 2;
+            else
+                k++;
+        }
+        if (k < argc)
+            used += (k - j);
+        if (k + 1 < argc && argv[k + 1][0] != '-')
             used++;
         return used;
     }

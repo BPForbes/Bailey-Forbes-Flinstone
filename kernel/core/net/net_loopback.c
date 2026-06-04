@@ -16,6 +16,7 @@
 #include "net_packet.h"
 #include "net_udp.h"
 #include "net_wire.h"
+#include "net_stack_sync.h"
 
 #include <string.h>
 
@@ -211,7 +212,7 @@ static fl_result_t loopback_process_ipv6(const uint8_t *ip6, size_t ip6_len, uin
     return (*eth_reply_len > 0) ? FL_RESULT_OK : FL_RESULT_ERR;
 }
 
-static fl_result_t loopback_process_ipv4(const uint8_t *ip, size_t ip_len, uint8_t *eth_reply,
+fl_result_t fl_net_loopback_deliver_ipv4(const uint8_t *ip, size_t ip_len, uint8_t *eth_reply,
                                          size_t eth_cap, size_t *eth_reply_len) {
     size_t hdr_len;
     uint8_t host_mac[6];
@@ -402,11 +403,16 @@ fl_result_t fl_net_loopback_driver_send(fl_net_driver_t *drv, const fl_net_frame
     uint32_t dst_be;
     uint8_t reply[FL_NET_LOOPBACK_RX_MAX];
     size_t reply_len = 0;
+    fl_result_t rc;
 
     (void)drv;
 
-    if (fl_net_wire_check_view(frame, FL_NET_ETH_FRAME_HDR_LEN) != FL_RESULT_OK)
+    fl_net_stack_lock();
+
+    if (fl_net_wire_check_view(frame, FL_NET_ETH_FRAME_HDR_LEN) != FL_RESULT_OK) {
+        fl_net_stack_unlock();
         return FL_RESULT_INVAL;
+    }
 
     s_lb_tx++;
 
@@ -415,9 +421,13 @@ fl_result_t fl_net_loopback_driver_send(fl_net_driver_t *drv, const fl_net_frame
         uint16_t ethertype = fl_net_wire_ethertype_be16(frame->data, frame->len, &eth_ok);
         if (eth_ok && ethertype == FL_ETHERTYPE_ARP) {
             if (loopback_process_arp(frame->data, frame->len, reply, sizeof(reply), &reply_len) !=
-                FL_RESULT_OK)
+                FL_RESULT_OK) {
+                fl_net_stack_unlock();
                 return FL_RESULT_OK;
-            return loopback_rx_enqueue(reply, reply_len);
+            }
+            rc = loopback_rx_enqueue(reply, reply_len);
+            fl_net_stack_unlock();
+            return rc;
         }
     }
 
@@ -427,20 +437,30 @@ fl_result_t fl_net_loopback_driver_send(fl_net_driver_t *drv, const fl_net_frame
 
         if (fl_net_wire_parse_eth_ipv6(frame->data, frame->len, &ip6_off, &ip6_len)) {
             if (loopback_process_ipv6(frame->data + ip6_off, ip6_len, reply, sizeof(reply),
-                                      &reply_len) == FL_RESULT_OK)
-                return loopback_rx_enqueue(reply, reply_len);
+                                      &reply_len) == FL_RESULT_OK) {
+                rc = loopback_rx_enqueue(reply, reply_len);
+                fl_net_stack_unlock();
+                return rc;
+            }
+            fl_net_stack_unlock();
             return FL_RESULT_OK;
         }
     }
 
-    if (!fl_net_wire_parse_eth_ipv4(frame->data, frame->len, &ip_off, &ip_len, &dst_be))
+    if (!fl_net_wire_parse_eth_ipv4(frame->data, frame->len, &ip_off, &ip_len, &dst_be)) {
+        fl_net_stack_unlock();
         return FL_RESULT_OK;
+    }
 
-    if (loopback_process_ipv4(frame->data + ip_off, ip_len, reply, sizeof(reply), &reply_len) !=
-        FL_RESULT_OK)
+    if (fl_net_loopback_deliver_ipv4(frame->data + ip_off, ip_len, reply, sizeof(reply), &reply_len) !=
+        FL_RESULT_OK) {
+        fl_net_stack_unlock();
         return FL_RESULT_OK;
+    }
 
-    return loopback_rx_enqueue(reply, reply_len);
+    rc = loopback_rx_enqueue(reply, reply_len);
+    fl_net_stack_unlock();
+    return rc;
 }
 
 fl_result_t fl_net_loopback_driver_recv(fl_net_driver_t *drv, fl_net_frame_mut_t *out) {
@@ -451,11 +471,13 @@ fl_result_t fl_net_loopback_driver_recv(fl_net_driver_t *drv, fl_net_frame_mut_t
     if (fl_net_wire_check_mut(out) != FL_RESULT_OK)
         return FL_RESULT_INVAL;
 
+    fl_net_stack_lock();
     rc = loopback_rx_dequeue(out->data, out->cap, &out->len);
     if (rc == FL_RESULT_OK)
         (void)fl_net_wire_check_rx_fill(out, out->len);
     if (rc == FL_RESULT_OK)
         s_lb_stat_rx++;
+    fl_net_stack_unlock();
     return rc;
 }
 
@@ -468,8 +490,10 @@ uint64_t fl_net_loopback_stat_rx(void) {
 }
 
 void fl_net_loopback_reset(void) {
+    fl_net_stack_lock();
     loopback_rx_clear();
     s_lb_tx = 0;
     s_lb_stat_rx = 0;
     fl_net_ndp_init();
+    fl_net_stack_unlock();
 }

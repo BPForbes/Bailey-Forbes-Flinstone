@@ -6,6 +6,7 @@
 #include "net_netdev.h"
 #include "net_route.h"
 #include "net_wifi_netdev.h"
+#include "net_wifi_host_linux.h"
 
 #include <stdio.h>
 #include <string.h>
@@ -58,7 +59,10 @@ static void iface_add_route_row(const fl_net_route_entry_t *route) {
             e = iface_alloc(name, route->drv, 0u);
         } else if (fl_net_wifi_netdev_driver() &&
                    route->drv == fl_net_wifi_netdev_driver()) {
-            e = iface_alloc("wlan0", route->drv, 0u);
+            const char *wlan = fl_net_wifi_host_linux_iface();
+            if (!wlan || !wlan[0])
+                wlan = "wlan0";
+            e = iface_alloc(wlan, route->drv, 0u);
         } else {
             char gen[FL_NET_IFACE_NAME_MAX];
             snprintf(gen, sizeof(gen), "eth%u", s_iface_count);

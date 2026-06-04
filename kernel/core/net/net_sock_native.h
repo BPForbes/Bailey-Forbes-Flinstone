@@ -34,4 +34,6 @@ fl_result_t fl_net_sock_native_close(fl_net_sock_handle_t handle);
 fl_result_t fl_net_sock_native_local_ipv4(fl_net_sock_handle_t handle, uint32_t *out_be);
 fl_result_t fl_net_sock_native_peer_ipv4(fl_net_sock_handle_t handle, uint32_t *out_be);
 
+void fl_net_sock_native_pump(unsigned max_frames);
+
 #endif /* NET_SOCK_NATIVE_H */
