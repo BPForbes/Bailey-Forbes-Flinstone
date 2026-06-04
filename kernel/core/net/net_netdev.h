@@ -35,6 +35,9 @@ int fl_net_netdev_tap_is_open(void);
 /** When TAP open failed, human-readable reason for CI logs (may be empty). */
 const char *fl_net_netdev_tap_last_error(void);
 
+/** TAP interface name after successful open (empty when closed). */
+const char *fl_net_netdev_tap_ifname(void);
+
 typedef struct {
     uint64_t tx_frames;
     uint64_t rx_frames;

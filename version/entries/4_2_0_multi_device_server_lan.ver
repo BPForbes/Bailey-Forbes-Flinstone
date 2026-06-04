@@ -3,4 +3,4 @@ STANDARD_VERSION=2
 RELEASE_VERSION=0
 PRERELEASE=1
 DEV_VERSION=12
-DESCRIPTION=PRE 4.2.0 multi-device server and LAN/WLAN hosting: net_host_iface (getifaddrs IPv4 enumeration), server interfaces verb, server host -all/:port for 0.0.0.0 listen with LAN join hints, POSIX bind/connect errno via fl_net_sock_last_errno and clearer host/join errors; net_wifi_host_linux wpa_supplicant (wpa_cli) scan/connect with FL_NET_WIFI_IFACE/FL_NET_WIFI_USE_WPA; wifi status; tests/test_p3_server_lan (127.0.0.2/127.0.0.3 multi-IP path).
+DESCRIPTION=PRE 4.2.0 first-principles multi-device server and WLAN: net_iface in-tree netdev/FIB view (lo/tap0/wlan0), server interfaces and host -all/:port; route-aware fl_net_sock_native over P3-7 TCP FSM + wire egress with POSIX fallback; net_wifi_netdev 802.11 fl_net_driver_t with MLME/WPA (no wpa_cli/getifaddrs); wifi status; tests/test_p3_server_lan.

@@ -231,6 +231,10 @@ const char *fl_net_netdev_tap_last_error(void) {
     return s_tap_error;
 }
 
+const char *fl_net_netdev_tap_ifname(void) {
+    return (s_tap_fd >= 0) ? s_tap_ifname : "";
+}
+
 void fl_net_netdev_stats(fl_net_driver_t *drv, fl_net_netdev_stats_t *out) {
     if (!out)
         return;

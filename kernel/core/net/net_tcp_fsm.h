@@ -25,6 +25,10 @@ fl_result_t fl_net_tcp_listen_port(uint16_t port_host);
 
 fl_result_t fl_net_tcp_connect(uint32_t dst_be, uint16_t dport_host, unsigned *conn_id_out);
 
+/** Like **fl_net_tcp_connect** but binds the local IPv4 source when **src_be** is non-zero. */
+fl_result_t fl_net_tcp_connect_src(uint32_t src_be, uint32_t dst_be, uint16_t dport_host,
+                                   unsigned *conn_id_out);
+
 /** Non-blocking: **FL_RESULT_OK** when a connection is ready; **FL_RESULT_TIMEDOUT** if none. */
 fl_result_t fl_net_tcp_accept(uint16_t listen_port_host, unsigned *conn_id_out);
 

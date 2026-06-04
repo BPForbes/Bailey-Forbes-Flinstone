@@ -12,7 +12,7 @@
 #include "net_client.h"
 #include "net_endian.h"
 #include "net_endpoint.h"
-#include "net_host_iface.h"
+#include "net_iface.h"
 #include "net_ipv4.h"
 #include "net_server.h"
 #include "net_socket.h"
@@ -114,15 +114,17 @@ static int parse_host_endpoint(int argc, char **argv, fl_net_endpoint_t *ep) {
 }
 
 static int verb_interfaces(int argc, char **argv) {
-    fl_net_host_iface_entry_t entries[32];
-    size_t count = 0u;
+    fl_net_iface_entry_t entries[32];
+    unsigned count = 0u;
     size_t i;
     char addr[32];
     char suggest[32];
 
     (void)argc;
     (void)argv;
-    if (!fl_net_host_iface_list(entries, 32, &count)) {
+    fl_net_iface_refresh();
+    count = fl_net_iface_list(entries, 32);
+    if (count == 0u) {
         fl_color_error("interface list unavailable on this build");
         return 1;
     }
@@ -131,10 +133,10 @@ static int verb_interfaces(int argc, char **argv) {
         fl_net_ipv4_format_addr(entries[i].addr_be, addr, sizeof(addr));
         printf("  %s %-15s/%u %s%s\n", entries[i].name, addr,
                (unsigned)entries[i].prefix_len,
-               entries[i].is_up ? "up" : "down",
-               entries[i].is_loopback ? " loopback" : "");
+               (entries[i].flags & FL_NET_IFF_UP) ? "up" : "down",
+               (entries[i].flags & FL_NET_IFF_LOOPBACK) ? " loopback" : "");
     }
-    if (fl_net_host_iface_suggest_ipv4(NULL, suggest, sizeof(suggest)))
+    if (fl_net_iface_suggest_ipv4(NULL, suggest, sizeof(suggest)))
         printf("Suggested LAN join address for peers: %s\n", suggest);
     else
         puts("No non-loopback IPv4 found; use server host -all <port> for all interfaces.");
@@ -541,7 +543,7 @@ static int verb_host(int argc, char **argv) {
             fl_color_success("hosting as '%s' on %s", current_principal(), argv[2]);
         if (ep.family == FL_NET_ADDR_FAMILY_V4 && ep.addr.v4_be == 0u) {
             char suggest[32];
-            if (fl_net_host_iface_suggest_ipv4(NULL, suggest, sizeof(suggest)))
+            if (fl_net_iface_suggest_ipv4(NULL, suggest, sizeof(suggest)))
                 fl_color_success("peers on LAN can: server join %s:%u", suggest,
                                  (unsigned)ep.port_host);
         }

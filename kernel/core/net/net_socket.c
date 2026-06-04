@@ -2,6 +2,7 @@
 
 #include "net_endian.h"
 #include "net_endpoint.h"
+#include "net_sock_native.h"
 #include "net_wire_host_syscall.h"
 
 #include <errno.h>
@@ -22,6 +23,7 @@ typedef struct {
     fl_net_sock_type_t type;
     int af;
     unsigned in_use;
+    unsigned native;
 } fl_net_sock_slot_t;
 
 static fl_net_sock_slot_t s_socks[FL_NET_SOCK_TABLE_MAX];
@@ -129,6 +131,8 @@ fl_result_t fl_net_sock_open_for(const fl_net_endpoint_t *endpoint_hint,
     s_socks[i].type = type;
     s_socks[i].af = af;
     s_socks[i].in_use = 1u;
+    s_socks[i].native = 0u;
+    fl_net_sock_native_slot_init((fl_net_sock_handle_t)(i + 1), type);
     *out_handle = (fl_net_sock_handle_t)(i + 1);
     return FL_RESULT_OK;
 #endif
@@ -139,6 +143,10 @@ fl_result_t fl_net_sock_close(fl_net_sock_handle_t handle) {
     if (!s)
         return FL_RESULT_INVAL;
 
+    if (s->native) {
+        (void)fl_net_sock_native_close(handle);
+        s->native = 0u;
+    }
 #if defined(FL_NET_SOCK_HOSTED)
     if (s->fd >= 0)
         close(s->fd);
@@ -226,6 +234,17 @@ fl_result_t fl_net_sock_bind(fl_net_sock_handle_t handle, uint32_t addr_be, uint
         int yes = 1;
         (void)setsockopt(s->fd, SOL_SOCKET, SO_REUSEADDR, &yes, sizeof(yes));
     }
+    if (s->type == FL_NET_SOCK_TYPE_STREAM &&
+        fl_net_sock_native_eligible_bind_v4(addr_be)) {
+        fl_result_t nrc;
+        if (s->fd >= 0) {
+            close(s->fd);
+            s->fd = -1;
+        }
+        s->native = 1u;
+        nrc = fl_net_sock_native_bind_v4(handle, addr_be, port_host);
+        return nrc;
+    }
     sock_sin4(&sa, addr_be, port_host);
     if (bind(s->fd, (struct sockaddr *)&sa, sizeof(sa)) != 0)
         return sock_fail_from_errno();
@@ -242,6 +261,8 @@ fl_result_t fl_net_sock_listen(fl_net_sock_handle_t handle, int backlog) {
     fl_net_sock_slot_t *s = sock_lookup(handle);
     if (!s || s->type != FL_NET_SOCK_TYPE_STREAM)
         return FL_RESULT_INVAL;
+    if (s->native)
+        return fl_net_sock_native_listen(handle);
     if (backlog <= 0)
         backlog = FL_NET_SOCK_DEFAULT_LISTEN_BACKLOG;
     if (listen(s->fd, backlog) != 0)
@@ -267,6 +288,31 @@ fl_result_t fl_net_sock_accept(fl_net_sock_handle_t listen_handle,
 
     if (!listen || !out_client || listen->type != FL_NET_SOCK_TYPE_STREAM)
         return FL_RESULT_INVAL;
+
+    if (listen->native) {
+        unsigned i;
+        fl_result_t rc;
+        for (i = 0; i < FL_NET_SOCK_TABLE_MAX; i++) {
+            if (!s_socks[i].in_use)
+                break;
+        }
+        if (i >= FL_NET_SOCK_TABLE_MAX)
+            return FL_RESULT_BUSY;
+        s_socks[i].fd = -1;
+        s_socks[i].type = FL_NET_SOCK_TYPE_STREAM;
+        s_socks[i].af = AF_INET;
+        s_socks[i].in_use = 1u;
+        s_socks[i].native = 1u;
+        *out_client = (fl_net_sock_handle_t)(i + 1);
+        fl_net_sock_native_slot_init(*out_client, FL_NET_SOCK_TYPE_STREAM);
+        rc = fl_net_sock_native_accept(listen_handle, out_client);
+        if (rc != FL_RESULT_OK) {
+            s_socks[i].in_use = 0u;
+            s_socks[i].native = 0u;
+            return rc;
+        }
+        return FL_RESULT_OK;
+    }
 
     cfd = accept(listen->fd, (struct sockaddr *)&peer, &peer_len);
     if (cfd < 0) {
@@ -313,6 +359,15 @@ fl_result_t fl_net_sock_connect(fl_net_sock_handle_t handle, uint32_t peer_be,
 
     if (!s)
         return FL_RESULT_INVAL;
+    if (s->type == FL_NET_SOCK_TYPE_STREAM &&
+        fl_net_sock_native_eligible_peer_v4(peer_be)) {
+        if (s->fd >= 0) {
+            close(s->fd);
+            s->fd = -1;
+        }
+        s->native = 1u;
+        return fl_net_sock_native_connect_v4(handle, 0u, peer_be, port_host);
+    }
     sock_sin4(&sa, peer_be, port_host);
     if (connect(s->fd, (struct sockaddr *)&sa, sizeof(sa)) != 0)
         return sock_fail_from_errno();
@@ -335,6 +390,8 @@ fl_result_t fl_net_sock_send(fl_net_sock_handle_t handle, const void *buf, size_
 
     if (!s || !buf || !sent)
         return FL_RESULT_INVAL;
+    if (s->native)
+        return fl_net_sock_native_send(handle, buf, len, sent);
     if (len > FL_NET_SOCK_IO_CHUNK_MAX)
         len = FL_NET_SOCK_IO_CHUNK_MAX;
 
@@ -366,6 +423,8 @@ fl_result_t fl_net_sock_recv(fl_net_sock_handle_t handle, void *buf, size_t cap,
 
     if (!s || !buf || !got)
         return FL_RESULT_INVAL;
+    if (s->native)
+        return fl_net_sock_native_recv(handle, buf, cap, got, timeout_ms);
     if (cap > FL_NET_SOCK_IO_CHUNK_MAX)
         cap = FL_NET_SOCK_IO_CHUNK_MAX;
 
@@ -409,6 +468,8 @@ fl_result_t fl_net_sock_set_nonblock(fl_net_sock_handle_t handle, int nonblock) 
 
     if (!s)
         return FL_RESULT_INVAL;
+    if (s->native)
+        return FL_RESULT_OK;
     flags = fcntl(s->fd, F_GETFL, 0);
     if (flags < 0)
         return FL_RESULT_ERR;
@@ -436,6 +497,15 @@ fl_result_t fl_net_sock_connect_from(fl_net_sock_handle_t handle,
     struct sockaddr_in sa;
     if (!s)
         return FL_RESULT_INVAL;
+    if (s->type == FL_NET_SOCK_TYPE_STREAM &&
+        fl_net_sock_native_eligible_peer_v4(peer_be)) {
+        if (s->fd >= 0) {
+            close(s->fd);
+            s->fd = -1;
+        }
+        s->native = 1u;
+        return fl_net_sock_native_connect_v4(handle, local_be, peer_be, port_host);
+    }
     if (local_be != 0u) {
         if (s->type == FL_NET_SOCK_TYPE_STREAM) {
             int yes = 1;
@@ -468,6 +538,18 @@ fl_result_t fl_net_sock_bind_ep(fl_net_sock_handle_t handle, const fl_net_endpoi
         int yes = 1;
         (void)setsockopt(s->fd, SOL_SOCKET, SO_REUSEADDR, &yes, sizeof(yes));
     }
+    if (local->family == FL_NET_ADDR_FAMILY_V4 &&
+        s->type == FL_NET_SOCK_TYPE_STREAM &&
+        fl_net_sock_native_eligible_bind_v4(local->addr.v4_be)) {
+        fl_result_t nrc;
+        if (s->fd >= 0) {
+            close(s->fd);
+            s->fd = -1;
+        }
+        s->native = 1u;
+        nrc = fl_net_sock_native_bind_v4(handle, local->addr.v4_be, local->port_host);
+        return nrc;
+    }
     if (endpoint_to_sockaddr(local, &ss, &slen) != FL_RESULT_OK)
         return FL_RESULT_INVAL;
     if (bind(s->fd, (struct sockaddr *)&ss, slen) != 0)
@@ -492,6 +574,20 @@ fl_result_t fl_net_sock_connect_from_ep(fl_net_sock_handle_t handle,
 
     if (!s || !peer)
         return FL_RESULT_INVAL;
+    if (peer->family == FL_NET_ADDR_FAMILY_V4 &&
+        s->type == FL_NET_SOCK_TYPE_STREAM &&
+        fl_net_sock_native_eligible_peer_v4(peer->addr.v4_be)) {
+        uint32_t local_be = 0u;
+        if (local && local->family == FL_NET_ADDR_FAMILY_V4)
+            local_be = local->addr.v4_be;
+        if (s->fd >= 0) {
+            close(s->fd);
+            s->fd = -1;
+        }
+        s->native = 1u;
+        return fl_net_sock_native_connect_v4(handle, local_be, peer->addr.v4_be,
+                                             peer->port_host);
+    }
     if (local && local->family != 0u) {
         if (s->type == FL_NET_SOCK_TYPE_STREAM) {
             int yes = 1;
@@ -559,6 +655,8 @@ fl_result_t fl_net_sock_peer_ipv4(fl_net_sock_handle_t handle, uint32_t *out_be)
     socklen_t slen = sizeof(sa);
     if (!s || !out_be)
         return FL_RESULT_INVAL;
+    if (s->native)
+        return fl_net_sock_native_peer_ipv4(handle, out_be);
     if (getpeername(s->fd, (struct sockaddr *)&sa, &slen) != 0)
         return FL_RESULT_ERR;
     *out_be = sa.sin_addr.s_addr;
@@ -577,6 +675,8 @@ fl_result_t fl_net_sock_local_ipv4(fl_net_sock_handle_t handle, uint32_t *out_be
     socklen_t slen = sizeof(sa);
     if (!s || !out_be)
         return FL_RESULT_INVAL;
+    if (s->native)
+        return fl_net_sock_native_local_ipv4(handle, out_be);
     if (getsockname(s->fd, (struct sockaddr *)&sa, &slen) != 0)
         return FL_RESULT_ERR;
     *out_be = sa.sin_addr.s_addr;
@@ -591,7 +691,7 @@ int fl_net_sock_host_fd(fl_net_sock_handle_t handle) {
 #else
     fl_net_sock_slot_t *s = sock_lookup(handle);
 
-    if (!s || s->fd < 0)
+    if (!s || s->native || s->fd < 0)
         return -1;
     return s->fd;
 #endif

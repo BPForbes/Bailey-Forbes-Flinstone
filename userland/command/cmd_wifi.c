@@ -3,7 +3,8 @@
 #include "fl/authz_subsystem.h"
 #include "contract_p2_authz.h"
 #include "net_wifi_db.h"
-#include "net_wifi_host_linux.h"
+#include "net_ipv4.h"
+#include "net_wifi_netdev.h"
 #include "net_wifi_station.h"
 
 #include <stdio.h>
@@ -192,12 +193,15 @@ static int cmd_wifi_join(int argc, char **argv) {
     (void)fl_wifi_db_mark_joined(name, 1);
     fl_net_wifi_cred_scrub_passphrase(&cred);
     printf("wifi join: associated with '%s' (state %d", name, (int)fl_net_wifi_state());
-    if (fl_net_wifi_host_linux_available()) {
+    if (fl_net_wifi_netdev_is_up()) {
         char ip[32];
-        if (fl_net_wifi_host_linux_ipv4(NULL, ip, sizeof(ip)) == FL_RESULT_OK)
-            printf(", ip %s — peers: server join %s:<port>", ip, ip);
+        uint32_t ip_be = 0u;
+        if (fl_net_wifi_netdev_ipv4(&ip_be) == FL_RESULT_OK) {
+            fl_net_ipv4_format_addr(ip_be, ip, sizeof(ip));
+            printf(", wlan0 %s — peers: server join %s:<port>", ip, ip);
+        }
     } else if (fl_net_wifi_station_netdev() != NULL) {
-        fputs(", loopback netdev UP", stdout);
+        fputs(", wlan0 netdev UP", stdout);
     }
     puts(")");
     fl_wifi_db_close();
@@ -206,23 +210,20 @@ static int cmd_wifi_join(int argc, char **argv) {
 
 static int cmd_wifi_status(int argc, char **argv) {
     char ip[32];
-    const char *iface;
-
+    uint32_t ip_be = 0u;
     (void)argc;
     (void)argv;
     printf("Wi-Fi state: %d\n", (int)fl_net_wifi_state());
-    if (fl_net_wifi_host_linux_available()) {
-        iface = fl_net_wifi_host_linux_iface();
-        printf("Backend: wpa_supplicant (%s)\n", iface);
-        if (fl_net_wifi_host_linux_ipv4(NULL, ip, sizeof(ip)) == FL_RESULT_OK)
-            printf("IPv4: %s (server host %s:<port> or server host -all <port>)\n", ip,
-                   ip);
-        else
-            puts("IPv4: (none yet — wait for DHCP or check wpa_supplicant)");
+    puts("Backend: in-tree 802.11 station (net_wifi_netdev + MLME/WPA)");
+    if (fl_net_wifi_netdev_is_up() &&
+        fl_net_wifi_netdev_ipv4(&ip_be) == FL_RESULT_OK) {
+        fl_net_ipv4_format_addr(ip_be, ip, sizeof(ip));
+        printf("Interface wlan0 IPv4: %s (server host %s:<port> or server host -all <port>)\n",
+               ip, ip);
+    } else if (fl_net_wifi_station_netdev() != NULL) {
+        puts("Interface wlan0: associating…");
     } else {
-        puts("Backend: in-tree lab simulation (set FL_NET_WIFI_USE_WPA=1 with wpa_cli for WLAN)");
-        if (fl_net_wifi_station_netdev() != NULL)
-            puts("Lab netdev: loopback stand-in only");
+        puts("Interface wlan0: down (wifi join to associate)");
     }
     return 0;
 }

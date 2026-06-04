@@ -215,6 +215,11 @@ fl_result_t fl_net_tcp_listen_port(uint16_t port_host) {
 }
 
 fl_result_t fl_net_tcp_connect(uint32_t dst_be, uint16_t dport_host, unsigned *conn_id_out) {
+    return fl_net_tcp_connect_src(0u, dst_be, dport_host, conn_id_out);
+}
+
+fl_result_t fl_net_tcp_connect_src(uint32_t src_hint_be, uint32_t dst_be, uint16_t dport_host,
+                                   unsigned *conn_id_out) {
     uint8_t syn[FL_NET_TCP_HDR_LEN_MIN];
     uint8_t rx[FL_NET_TCP_HDR_LEN_MIN + 16];
     size_t rx_len = 0;
@@ -231,6 +236,8 @@ fl_result_t fl_net_tcp_connect(uint32_t dst_be, uint16_t dport_host, unsigned *c
     rc = tcp_resolve_src(dst_be, &src_be);
     if (rc != FL_RESULT_OK)
         return rc;
+    if (src_hint_be != 0u)
+        src_be = src_hint_be;
 
     sport = tcp_ephemeral_port_pick();
     if (sport == 0u)

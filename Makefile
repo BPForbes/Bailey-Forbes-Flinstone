@@ -141,7 +141,8 @@ endif
 NET_CORE_SRCS = kernel/core/net/net_checksum.c kernel/core/net/net_wire.c kernel/core/net/net_eth.c \
     kernel/core/net/net_background.c kernel/core/net/net_packet.c kernel/core/net/net_udp.c \
     kernel/core/net/net_socket.c kernel/core/net/net_endpoint.c \
-    kernel/core/net/net_host_iface.c \
+    kernel/core/net/net_iface.c \
+    kernel/core/net/net_sock_native.c \
                 kernel/core/net/net_ipv4.c kernel/core/net/net_ipv6.c kernel/core/net/net_icmpv6.c \
                 kernel/core/net/net_ndp.c kernel/core/net/net_arp.c kernel/core/net/net_route.c \
                 kernel/core/net/net_wire_egress.c \
@@ -152,8 +153,8 @@ NET_CORE_SRCS = kernel/core/net/net_checksum.c kernel/core/net/net_wire.c kernel
                 kernel/core/net/net_dns.c kernel/core/net/net_dhcp.c kernel/core/net/net_tls_hosted.c \
                 kernel/core/net/net_http.c kernel/core/net/net_tftp.c \
                 kernel/core/net/net_ping_host.c kernel/core/net/net_ping6_host.c \
-                kernel/core/net/net_wifi_he.c                 kernel/core/net/net_wifi_station.c \
-                kernel/core/net/net_wifi_host_linux.c \
+                kernel/core/net/net_wifi_he.c kernel/core/net/net_wifi_station.c \
+                kernel/core/net/net_wifi_netdev.c \
                 kernel/core/net/net_wifi_db.c \
                 kernel/core/net/net_wifi_mgmt.c kernel/core/net/net_wifi_sae.c \
                 kernel/core/net/net_wifi_wpa.c kernel/core/net/net_wifi_twt.c \
