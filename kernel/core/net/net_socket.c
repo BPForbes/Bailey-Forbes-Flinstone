@@ -26,6 +26,20 @@ typedef struct {
 
 static fl_net_sock_slot_t s_socks[FL_NET_SOCK_TABLE_MAX];
 static unsigned s_sock_inited;
+static int s_last_sock_errno;
+
+static fl_result_t sock_fail_from_errno(void) {
+    s_last_sock_errno = errno;
+    if (errno == EACCES)
+        return FL_RESULT_ACCES;
+    if (errno == EADDRINUSE || errno == EADDRNOTAVAIL)
+        return FL_RESULT_BUSY;
+    if (errno == ECONNREFUSED)
+        return FL_RESULT_NOENT;
+    if (errno == ETIMEDOUT)
+        return FL_RESULT_TIMEDOUT;
+    return FL_RESULT_ERR;
+}
 
 static fl_net_sock_slot_t *sock_lookup(fl_net_sock_handle_t h) {
     if (h <= 0 || (unsigned)h > FL_NET_SOCK_TABLE_MAX)
@@ -98,7 +112,7 @@ fl_result_t fl_net_sock_open_for(const fl_net_endpoint_t *endpoint_hint,
 
     fd = net_host_socket(af, sock_type, 0);
     if (fd < 0)
-        return FL_RESULT_ERR;
+        return sock_fail_from_errno();
 
 #if defined(__APPLE__)
     if (sock_type == SOCK_STREAM) {
@@ -214,7 +228,7 @@ fl_result_t fl_net_sock_bind(fl_net_sock_handle_t handle, uint32_t addr_be, uint
     }
     sock_sin4(&sa, addr_be, port_host);
     if (bind(s->fd, (struct sockaddr *)&sa, sizeof(sa)) != 0)
-        return FL_RESULT_ERR;
+        return sock_fail_from_errno();
     return FL_RESULT_OK;
 #endif
 }
@@ -231,7 +245,7 @@ fl_result_t fl_net_sock_listen(fl_net_sock_handle_t handle, int backlog) {
     if (backlog <= 0)
         backlog = FL_NET_SOCK_DEFAULT_LISTEN_BACKLOG;
     if (listen(s->fd, backlog) != 0)
-        return FL_RESULT_ERR;
+        return sock_fail_from_errno();
     return FL_RESULT_OK;
 #endif
 }
@@ -261,7 +275,7 @@ fl_result_t fl_net_sock_accept(fl_net_sock_handle_t listen_handle,
          * polling on TIMEDOUT and surface BUSY / ERR otherwise. */
         if (errno == EAGAIN || errno == EWOULDBLOCK || errno == EINTR)
             return FL_RESULT_TIMEDOUT;
-        return FL_RESULT_ERR;
+        return sock_fail_from_errno();
     }
 
     for (i = 0; i < FL_NET_SOCK_TABLE_MAX; i++) {
@@ -301,7 +315,7 @@ fl_result_t fl_net_sock_connect(fl_net_sock_handle_t handle, uint32_t peer_be,
         return FL_RESULT_INVAL;
     sock_sin4(&sa, peer_be, port_host);
     if (connect(s->fd, (struct sockaddr *)&sa, sizeof(sa)) != 0)
-        return FL_RESULT_ERR;
+        return sock_fail_from_errno();
     return FL_RESULT_OK;
 #endif
 }
@@ -429,11 +443,11 @@ fl_result_t fl_net_sock_connect_from(fl_net_sock_handle_t handle,
         }
         sock_sin4(&sa, local_be, 0);
         if (bind(s->fd, (struct sockaddr *)&sa, sizeof(sa)) != 0)
-            return FL_RESULT_ERR;
+            return sock_fail_from_errno();
     }
     sock_sin4(&sa, peer_be, port_host);
     if (connect(s->fd, (struct sockaddr *)&sa, sizeof(sa)) != 0)
-        return FL_RESULT_ERR;
+        return sock_fail_from_errno();
     return FL_RESULT_OK;
 #endif
 }
@@ -457,7 +471,7 @@ fl_result_t fl_net_sock_bind_ep(fl_net_sock_handle_t handle, const fl_net_endpoi
     if (endpoint_to_sockaddr(local, &ss, &slen) != FL_RESULT_OK)
         return FL_RESULT_INVAL;
     if (bind(s->fd, (struct sockaddr *)&ss, slen) != 0)
-        return FL_RESULT_ERR;
+        return sock_fail_from_errno();
     return FL_RESULT_OK;
 #endif
 }
@@ -488,12 +502,12 @@ fl_result_t fl_net_sock_connect_from_ep(fl_net_sock_handle_t handle,
         if (endpoint_to_sockaddr(&bind_ep, &ss, &slen) != FL_RESULT_OK)
             return FL_RESULT_INVAL;
         if (bind(s->fd, (struct sockaddr *)&ss, slen) != 0)
-            return FL_RESULT_ERR;
+            return sock_fail_from_errno();
     }
     if (endpoint_to_sockaddr(peer, &ss, &slen) != FL_RESULT_OK)
         return FL_RESULT_INVAL;
     if (connect(s->fd, (struct sockaddr *)&ss, slen) != 0)
-        return FL_RESULT_ERR;
+        return sock_fail_from_errno();
     return FL_RESULT_OK;
 #endif
 }
@@ -581,4 +595,12 @@ int fl_net_sock_host_fd(fl_net_sock_handle_t handle) {
         return -1;
     return s->fd;
 #endif
+}
+
+int fl_net_sock_last_errno(void) {
+    return s_last_sock_errno;
+}
+
+void fl_net_sock_clear_errno(void) {
+    s_last_sock_errno = 0;
 }

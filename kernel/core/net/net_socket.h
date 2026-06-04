@@ -56,6 +56,10 @@ fl_result_t fl_net_sock_recv(fl_net_sock_handle_t handle, void *buf, size_t cap,
 /** Set non-blocking mode when **nonblock** is non-zero (hosted path). */
 fl_result_t fl_net_sock_set_nonblock(fl_net_sock_handle_t handle, int nonblock);
 
+/** Last host errno from bind/connect/listen/open (hosted path); 0 if none. */
+int fl_net_sock_last_errno(void);
+void fl_net_sock_clear_errno(void);
+
 /** Hosted BSD socket fd, or **-1** when unavailable (**#252** TLS bridge). */
 int fl_net_sock_host_fd(fl_net_sock_handle_t handle);
 

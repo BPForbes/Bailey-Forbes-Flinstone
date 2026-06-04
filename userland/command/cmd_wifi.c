@@ -3,6 +3,7 @@
 #include "fl/authz_subsystem.h"
 #include "contract_p2_authz.h"
 #include "net_wifi_db.h"
+#include "net_wifi_host_linux.h"
 #include "net_wifi_station.h"
 
 #include <stdio.h>
@@ -42,7 +43,8 @@ static int wifi_usage(void) {
     fputs("Usage:\n"
           "  wifi scan [-band any|2|5|6]\n"
           "  wifi join <name> [password]\n"
-          "  wifi known\n",
+          "  wifi known\n"
+          "  wifi status\n",
           stderr);
     return 1;
 }
@@ -190,10 +192,38 @@ static int cmd_wifi_join(int argc, char **argv) {
     (void)fl_wifi_db_mark_joined(name, 1);
     fl_net_wifi_cred_scrub_passphrase(&cred);
     printf("wifi join: associated with '%s' (state %d", name, (int)fl_net_wifi_state());
-    if (fl_net_wifi_station_netdev() != NULL)
+    if (fl_net_wifi_host_linux_available()) {
+        char ip[32];
+        if (fl_net_wifi_host_linux_ipv4(NULL, ip, sizeof(ip)) == FL_RESULT_OK)
+            printf(", ip %s — peers: server join %s:<port>", ip, ip);
+    } else if (fl_net_wifi_station_netdev() != NULL) {
         fputs(", loopback netdev UP", stdout);
+    }
     puts(")");
     fl_wifi_db_close();
+    return 0;
+}
+
+static int cmd_wifi_status(int argc, char **argv) {
+    char ip[32];
+    const char *iface;
+
+    (void)argc;
+    (void)argv;
+    printf("Wi-Fi state: %d\n", (int)fl_net_wifi_state());
+    if (fl_net_wifi_host_linux_available()) {
+        iface = fl_net_wifi_host_linux_iface();
+        printf("Backend: wpa_supplicant (%s)\n", iface);
+        if (fl_net_wifi_host_linux_ipv4(NULL, ip, sizeof(ip)) == FL_RESULT_OK)
+            printf("IPv4: %s (server host %s:<port> or server host -all <port>)\n", ip,
+                   ip);
+        else
+            puts("IPv4: (none yet — wait for DHCP or check wpa_supplicant)");
+    } else {
+        puts("Backend: in-tree lab simulation (set FL_NET_WIFI_USE_WPA=1 with wpa_cli for WLAN)");
+        if (fl_net_wifi_station_netdev() != NULL)
+            puts("Lab netdev: loopback stand-in only");
+    }
     return 0;
 }
 
@@ -237,6 +267,8 @@ int cmd_wifi_run(int argc, char **argv) {
         return cmd_wifi_join(argc, argv);
     if (!strcmp(argv[1], "known"))
         return cmd_wifi_known(argc, argv);
+    if (!strcmp(argv[1], "status"))
+        return cmd_wifi_status(argc, argv);
     fprintf(stderr, "wifi: unknown subcommand '%s'\n", argv[1]);
     return wifi_usage();
 }
@@ -263,6 +295,8 @@ int cmd_wifi_batch_tokens_count(int argc, char **argv, int i) {
         return used;
     }
     if (!strcmp(argv[j], "known"))
+        return used;
+    if (!strcmp(argv[j], "status"))
         return used;
     return used;
 }
