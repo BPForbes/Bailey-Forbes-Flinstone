@@ -18,12 +18,21 @@
 #endif
 
 #if defined(FL_NET_WIFI_HOST_LINUX)
-static char s_wifi_iface[FL_NET_IFACE_NAME_MAX] = "wlan0";
+typedef enum {
+    FL_WIFI_HOST_NONE = 0,
+    FL_WIFI_HOST_WPA_CLI,
+    FL_WIFI_HOST_NMCLI
+} fl_wifi_host_kind_t;
+
+static char s_wifi_iface[FL_NET_IFACE_NAME_MAX] = "";
 static char s_wpa_cli[128] = "wpa_cli";
+static char s_nmcli[128] = "nmcli";
+static char s_wpa_ctrl_dir[256] = "";
 static fl_net_wifi_scan_entry_t s_wpa_scan[32];
 static size_t s_wpa_scan_count;
 static char s_wpa_joined_ssid[FL_WIFI_SSID_MAX];
-static int s_wpa_probed;
+static int s_host_probed;
+static fl_wifi_host_kind_t s_host_kind = FL_WIFI_HOST_NONE;
 
 
 static int env_truthy(const char *v) {
@@ -34,18 +43,78 @@ static int env_falsy(const char *v) {
     return v && (v[0] == '0' || v[0] == 'n' || v[0] == 'N' || v[0] == 'f' || v[0] == 'F');
 }
 
+static int iface_is_wireless(const char *name) {
+    char path[256];
+    if (!name || !name[0])
+        return 0;
+    snprintf(path, sizeof(path), "/sys/class/net/%s/wireless", name);
+    return access(path, F_OK) == 0;
+}
+
+static int pick_wireless_iface(char *out, size_t out_cap) {
+    FILE *fp;
+    char line[256];
+    const char *nm;
+
+    if (!out || out_cap == 0u)
+        return 0;
+    nm = getenv("FL_NET_WIFI_IFACE");
+    if (nm && nm[0] && iface_is_wireless(nm)) {
+        strncpy(out, nm, out_cap - 1u);
+        out[out_cap - 1u] = '\0';
+        return 1;
+    }
+    fp = popen("nmcli -t -f DEVICE,TYPE device 2>/dev/null", "r");
+    if (fp) {
+        while (fgets(line, sizeof(line), fp) != NULL) {
+            char dev[FL_NET_IFACE_NAME_MAX];
+            char kind[32];
+            if (sscanf(line, "%31[^:]:%31s", dev, kind) == 2 && !strcmp(kind, "wifi")) {
+                pclose(fp);
+                strncpy(out, dev, out_cap - 1u);
+                out[out_cap - 1u] = '\0';
+                return 1;
+            }
+        }
+        pclose(fp);
+    }
+    fp = fopen("/proc/net/wireless", "r");
+    if (fp) {
+        (void)fgets(line, sizeof(line), fp);
+        (void)fgets(line, sizeof(line), fp);
+        while (fgets(line, sizeof(line), fp) != NULL) {
+            char dev[FL_NET_IFACE_NAME_MAX];
+            if (sscanf(line, " %31s", dev) == 1 && dev[0] != ':') {
+                fclose(fp);
+                strncpy(out, dev, out_cap - 1u);
+                out[out_cap - 1u] = '\0';
+                return 1;
+            }
+        }
+        fclose(fp);
+    }
+    if (iface_is_wireless("wlan0")) {
+        strncpy(out, "wlan0", out_cap - 1u);
+        out[out_cap - 1u] = '\0';
+        return 1;
+    }
+    return 0;
+}
+
 static void load_env_once(void) {
-    const char *iface;
     const char *cli;
-    if (s_wpa_probed)
+    const char *nm;
+    if (s_host_probed)
         return;
-    s_wpa_probed = 1;
-    iface = getenv("FL_NET_WIFI_IFACE");
-    if (iface && iface[0])
-        strncpy(s_wifi_iface, iface, sizeof(s_wifi_iface) - 1u);
+    s_host_probed = 1;
     cli = getenv("FL_NET_WIFI_WPA_CLI");
     if (cli && cli[0])
         strncpy(s_wpa_cli, cli, sizeof(s_wpa_cli) - 1u);
+    nm = getenv("FL_NET_WIFI_NMCLI");
+    if (nm && nm[0])
+        strncpy(s_nmcli, nm, sizeof(s_nmcli) - 1u);
+    if (!pick_wireless_iface(s_wifi_iface, sizeof(s_wifi_iface)))
+        strncpy(s_wifi_iface, "wlan0", sizeof(s_wifi_iface) - 1u);
 }
 
 static int wpa_use_requested(void) {
@@ -62,9 +131,14 @@ static int run_wpa_cli(const char *cmd, char *out, size_t out_cap) {
     char line[512];
     FILE *fp;
 
-    if (!cmd)
+    if (!cmd || s_host_kind != FL_WIFI_HOST_WPA_CLI)
         return 0;
-    snprintf(line, sizeof(line), "%s -i %s %s 2>/dev/null", s_wpa_cli, s_wifi_iface, cmd);
+    if (s_wpa_ctrl_dir[0])
+        snprintf(line, sizeof(line), "%s -i %s -p %s %s 2>/dev/null", s_wpa_cli,
+                 s_wifi_iface, s_wpa_ctrl_dir, cmd);
+    else
+        snprintf(line, sizeof(line), "%s -i %s %s 2>/dev/null", s_wpa_cli, s_wifi_iface,
+                 cmd);
     fp = popen(line, "r");
     if (!fp)
         return 0;
@@ -77,6 +151,82 @@ static int run_wpa_cli(const char *cmd, char *out, size_t out_cap) {
             ;
     }
     return pclose(fp) == 0;
+}
+
+static int popen_nmcli(const char *args, char *out, size_t out_cap) {
+    char line[768];
+    FILE *fp;
+
+    if (!args)
+        return 0;
+    snprintf(line, sizeof(line), "%s %s 2>/dev/null", s_nmcli, args);
+    fp = popen(line, "r");
+    if (!fp)
+        return 0;
+    if (out && out_cap > 0u) {
+        size_t n = fread(out, 1, out_cap - 1u, fp);
+        out[n] = '\0';
+    } else {
+        char discard[256];
+        while (fgets(discard, sizeof(discard), fp) != NULL)
+            ;
+    }
+    return pclose(fp) == 0;
+}
+
+static int run_nmcli(const char *args, char *out, size_t out_cap) {
+    if (s_host_kind != FL_WIFI_HOST_NMCLI)
+        return 0;
+    return popen_nmcli(args, out, out_cap);
+}
+
+static int wpa_ping_with_ctrl(const char *ctrl_dir) {
+    char out[64];
+    char cmd[512];
+    FILE *fp;
+
+    if (ctrl_dir && ctrl_dir[0])
+        snprintf(cmd, sizeof(cmd), "%s -i %s -p %s ping 2>/dev/null", s_wpa_cli,
+                 s_wifi_iface, ctrl_dir);
+    else
+        snprintf(cmd, sizeof(cmd), "%s -i %s ping 2>/dev/null", s_wpa_cli, s_wifi_iface);
+    fp = popen(cmd, "r");
+    if (!fp)
+        return 0;
+    out[0] = '\0';
+    (void)fread(out, 1, sizeof(out) - 1u, fp);
+    out[sizeof(out) - 1u] = '\0';
+    (void)pclose(fp);
+    return strstr(out, "PONG") != NULL;
+}
+
+static int probe_wpa_cli(void) {
+    static const char *ctrl_dirs[] = {"", "/run/wpa_supplicant", "/var/run/wpa_supplicant",
+                                      NULL};
+    size_t i;
+
+    for (i = 0; ctrl_dirs[i] != NULL; i++) {
+        if (wpa_ping_with_ctrl(ctrl_dirs[i])) {
+            if (ctrl_dirs[i][0])
+                strncpy(s_wpa_ctrl_dir, ctrl_dirs[i], sizeof(s_wpa_ctrl_dir) - 1u);
+            else
+                s_wpa_ctrl_dir[0] = '\0';
+            s_host_kind = FL_WIFI_HOST_WPA_CLI;
+            return 1;
+        }
+    }
+    return 0;
+}
+
+static int probe_nmcli(void) {
+    char out[128];
+
+    if (!popen_nmcli("-t -f RUNNING general", out, sizeof(out)))
+        return 0;
+    if (!strstr(out, "yes"))
+        return 0;
+    s_host_kind = FL_WIFI_HOST_NMCLI;
+    return 1;
 }
 
 static int parse_bssid(const char *s, uint8_t bssid[6]) {
@@ -176,6 +326,125 @@ static void parse_scan_results(const char *text, uint8_t band_filter) {
             continue;
         s_wpa_scan_count++;
     }
+}
+
+static void unescape_nmcli_field(const char *in, char *out, size_t out_cap) {
+    size_t o = 0;
+    if (!in || !out || out_cap == 0u)
+        return;
+    while (*in && o + 1u < out_cap) {
+        if (in[0] == '\\' && in[1]) {
+            out[o++] = in[1];
+            in += 2;
+            continue;
+        }
+        out[o++] = *in++;
+    }
+    out[o] = '\0';
+}
+
+static int nmcli_next_field(const char **pp, char *out, size_t out_cap) {
+    const char *p = *pp;
+    size_t o = 0;
+
+    if (!p || !*p) {
+        if (out && out_cap > 0u)
+            out[0] = '\0';
+        return 0;
+    }
+    while (*p && o + 2u < out_cap) {
+        if (p[0] == '\\' && p[1]) {
+            out[o++] = p[1];
+            p += 2;
+            continue;
+        }
+        if (*p == ':') {
+            out[o] = '\0';
+            *pp = p + 1;
+            return 1;
+        }
+        out[o++] = *p++;
+    }
+    out[o] = '\0';
+    *pp = p;
+    return (o > 0u);
+}
+
+static void parse_nmcli_scan_results(const char *text, uint8_t band_filter) {
+    const char *p = text;
+
+    s_wpa_scan_count = 0;
+    if (!text)
+        return;
+    while (*p && s_wpa_scan_count < 32u) {
+        char ssid[FL_WIFI_SSID_MAX];
+        char bssid_txt[32];
+        char signal_txt[16];
+        char chan_txt[16];
+        char freq_txt[32];
+        char sec_txt[128];
+        fl_net_wifi_scan_entry_t *e;
+        int freq = 0;
+        int signal = -127;
+
+        while (*p == '\n' || *p == '\r')
+            p++;
+        if (!*p)
+            break;
+        if (!nmcli_next_field(&p, ssid, sizeof(ssid)))
+            continue;
+        if (!nmcli_next_field(&p, bssid_txt, sizeof(bssid_txt)))
+            continue;
+        if (!nmcli_next_field(&p, signal_txt, sizeof(signal_txt)))
+            continue;
+        if (!nmcli_next_field(&p, chan_txt, sizeof(chan_txt)))
+            continue;
+        if (!nmcli_next_field(&p, freq_txt, sizeof(freq_txt)))
+            continue;
+        if (!nmcli_next_field(&p, sec_txt, sizeof(sec_txt)))
+            sec_txt[0] = '\0';
+        {
+            const char *eol = strchr(p, '\n');
+            p = eol ? eol + 1 : p + strlen(p);
+        }
+        unescape_nmcli_field(ssid, ssid, sizeof(ssid));
+        unescape_nmcli_field(bssid_txt, bssid_txt, sizeof(bssid_txt));
+        if (!ssid[0] || !bssid_txt[0])
+            continue;
+        e = &s_wpa_scan[s_wpa_scan_count];
+        memset(e, 0, sizeof(*e));
+        (void)parse_bssid(bssid_txt, e->bssid);
+        strncpy(e->ssid, ssid, sizeof(e->ssid) - 1u);
+        signal = atoi(signal_txt);
+        e->rssi_dbm = signal;
+        e->channel = (uint8_t)atoi(chan_txt);
+        if (sscanf(freq_txt, "%d", &freq) != 1)
+            freq = 0;
+        e->auth_mode = parse_auth_token(sec_txt);
+        e->band = band_from_freq(freq);
+        e->channel_width_mhz = 20;
+        if (band_filter != FL_WIFI_BAND_ANY && e->band != band_filter)
+            continue;
+        s_wpa_scan_count++;
+    }
+}
+
+static int nmcli_state_connected(void) {
+    char out[512];
+    char line[256];
+    const char *p;
+
+    if (!run_nmcli("-t -f DEVICE,STATE device", out, sizeof(out)))
+        return 0;
+    p = out;
+    while (nmcli_next_field(&p, line, sizeof(line))) {
+        char state[64];
+        if (!nmcli_next_field(&p, state, sizeof(state)))
+            break;
+        if (!strcmp(line, s_wifi_iface) && !strcmp(state, "connected"))
+            return 1;
+    }
+    return 0;
 }
 
 static int wpa_state_completed(void) {
@@ -366,18 +635,44 @@ static fl_result_t wait_for_wpa_completed(unsigned timeout_ms) {
 }
 #endif
 
+static void probe_host_backend_once(void) {
+    int mode;
+
+    load_env_once();
+    if (s_host_kind != FL_WIFI_HOST_NONE)
+        return;
+    mode = wpa_use_requested();
+    if (mode == 0)
+        return;
+    if (mode == 1) {
+        if (probe_wpa_cli())
+            return;
+        return;
+    }
+    if (probe_wpa_cli())
+        return;
+    (void)probe_nmcli();
+}
+
 int fl_net_wifi_host_linux_available(void) {
 #if !defined(FL_NET_WIFI_HOST_LINUX)
     return 0;
 #else
-    char out[64];
-    int mode = wpa_use_requested();
-    load_env_once();
-    if (mode == 0)
-        return 0;
-    if (!run_wpa_cli("ping", out, sizeof(out)))
-        return 0;
-    return strstr(out, "PONG") != NULL;
+    probe_host_backend_once();
+    return s_host_kind != FL_WIFI_HOST_NONE;
+#endif
+}
+
+const char *fl_net_wifi_host_linux_backend_name(void) {
+#if !defined(FL_NET_WIFI_HOST_LINUX)
+    return NULL;
+#else
+    probe_host_backend_once();
+    if (s_host_kind == FL_WIFI_HOST_WPA_CLI)
+        return "wpa_cli";
+    if (s_host_kind == FL_WIFI_HOST_NMCLI)
+        return "nmcli";
+    return NULL;
 #endif
 }
 
@@ -397,9 +692,19 @@ fl_result_t fl_net_wifi_host_linux_scan(uint8_t band, unsigned timeout_ms) {
     return FL_RESULT_NOSYS;
 #else
     char out[8192];
+    char cmd[256];
     (void)timeout_ms;
     if (!fl_net_wifi_host_linux_available())
         return FL_RESULT_NOSYS;
+    if (s_host_kind == FL_WIFI_HOST_NMCLI) {
+        snprintf(cmd, sizeof(cmd),
+                 "-t -f SSID,BSSID,SIGNAL,CHAN,FREQ,SECURITY device wifi list ifname %s",
+                 s_wifi_iface);
+        if (!run_nmcli(cmd, out, sizeof(out)))
+            return FL_RESULT_ERR;
+        parse_nmcli_scan_results(out, band);
+        return FL_RESULT_OK;
+    }
     if (!run_wpa_cli("scan", NULL, 0))
         return FL_RESULT_ERR;
     usleep(500000);
@@ -447,6 +752,40 @@ fl_result_t fl_net_wifi_host_linux_connect(const fl_net_wifi_cred_t *cred,
         return FL_RESULT_INVAL;
     if (!fl_net_wifi_host_linux_available())
         return FL_RESULT_NOSYS;
+
+    if (s_host_kind == FL_WIFI_HOST_NMCLI) {
+        char cmd[512];
+        if (cred->passphrase[0])
+            snprintf(cmd, sizeof(cmd), "device wifi connect \"%s\" password \"%s\" ifname %s",
+                     cred->ssid, cred->passphrase, s_wifi_iface);
+        else
+            snprintf(cmd, sizeof(cmd), "device wifi connect \"%s\" ifname %s", cred->ssid,
+                     s_wifi_iface);
+        if (!run_nmcli(cmd, NULL, 0))
+            return FL_RESULT_ERR;
+        {
+            unsigned elapsed = 0u;
+            const unsigned step_ms = 250u;
+            const unsigned limit = timeout_ms > 0u ? timeout_ms : 15000u;
+            rc = FL_RESULT_TIMEDOUT;
+            while (elapsed <= limit) {
+                if (nmcli_state_connected()) {
+                    rc = FL_RESULT_OK;
+                    break;
+                }
+                usleep((useconds_t)step_ms * 1000u);
+                elapsed += step_ms;
+            }
+            if (rc != FL_RESULT_OK)
+                return rc;
+        }
+        rc = wait_for_ipv4(timeout_ms > 0u ? timeout_ms : 15000u, NULL, NULL, NULL);
+        if (rc != FL_RESULT_OK && rc != FL_RESULT_TIMEDOUT)
+            return rc;
+        (void)wait_for_ipv6(timeout_ms > 0u ? timeout_ms : 15000u, NULL, NULL);
+        strncpy(s_wpa_joined_ssid, cred->ssid, sizeof(s_wpa_joined_ssid) - 1u);
+        return FL_RESULT_OK;
+    }
 
     if (!run_wpa_cli("disconnect", NULL, 0))
         return FL_RESULT_ERR;
@@ -508,6 +847,13 @@ fl_result_t fl_net_wifi_host_linux_disconnect(void) {
     s_wpa_joined_ssid[0] = '\0';
     if (!fl_net_wifi_host_linux_available())
         return FL_RESULT_NOSYS;
+    if (s_host_kind == FL_WIFI_HOST_NMCLI) {
+        char cmd[128];
+        snprintf(cmd, sizeof(cmd), "device disconnect %s", s_wifi_iface);
+        if (!run_nmcli(cmd, NULL, 0))
+            return FL_RESULT_ERR;
+        return FL_RESULT_OK;
+    }
     if (!run_wpa_cli("disconnect", NULL, 0))
         return FL_RESULT_ERR;
     return FL_RESULT_OK;

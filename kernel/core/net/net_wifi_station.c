@@ -22,6 +22,7 @@ static fl_net_wifi_state_t s_wifi_state = FL_WIFI_STATE_IDLE;
 static fl_net_wifi_he_cap_t s_negotiated_he;
 static int s_netdev_ready;
 static int s_host_backend;
+static int s_lab_backend;
 
 #if defined(FL_NET_WIFI_HOSTED_LAB)
 static fl_net_wifi_scan_entry_t s_lab_scan[8];
@@ -86,6 +87,7 @@ fl_result_t fl_net_wifi_station_init(void) {
     memset(&s_negotiated_he, 0, sizeof(s_negotiated_he));
     s_wifi_state = FL_WIFI_STATE_IDLE;
     s_netdev_ready = 0;
+    s_lab_backend = 0;
 #if defined(FL_NET_WIFI_HOSTED_LAB)
     s_lab_scan_count = 0;
     s_lab_joined_ssid[0] = '\0';
@@ -113,8 +115,13 @@ int fl_net_wifi_station_host_backend(void) {
     return s_host_backend;
 }
 
+int fl_net_wifi_station_lab_backend(void) {
+    return s_lab_backend;
+}
+
 fl_result_t fl_net_wifi_scan(uint8_t band, unsigned timeout_ms) {
 #if defined(FL_NET_WIFI_HOSTED_LAB)
+    s_lab_backend = 0;
     if (fl_net_wifi_host_linux_available()) {
         fl_result_t rc = fl_net_wifi_host_linux_scan(band, timeout_ms);
         if (rc == FL_RESULT_OK) {
@@ -124,6 +131,7 @@ fl_result_t fl_net_wifi_scan(uint8_t band, unsigned timeout_ms) {
         if (rc != FL_RESULT_NOSYS)
             return rc;
     }
+    s_lab_backend = 1;
     lab_seed_scan(band);
     s_wifi_state = FL_WIFI_STATE_SCANNING;
     return FL_RESULT_OK;

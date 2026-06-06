@@ -3,6 +3,6 @@ STANDARD_VERSION=2
 RELEASE_VERSION=0
 PRERELEASE=1
 DEV_VERSION=12
-DESCRIPTION=PRE 4.2.0 first-principles multi-device server and WLAN: net_iface in-tree netdev/FIB view (IPv4+IPv6); route-aware fl_net_sock_native (opt-in FL_NET_SOCK_NATIVE=1); Linux P4 Wi-Fi driver backend (wpa_supplicant/wpa_cli) for real scan/join on FL_NET_WIFI_IFACE with router DHCP IPv4 (prefer RFC1918 e.g. 192.168.1.x) and SLAAC/DHCPv6 global IPv6; wifi leave drops WLAN addresses from FIB/iface; lab MLME/WPA fallback; server interfaces/host -all; tests/test_p3_server_lan.
+DESCRIPTION=PRE 4.2.0 first-principles multi-device server and WLAN: net_iface in-tree netdev/FIB view (IPv4+IPv6); route-aware fl_net_sock_native (opt-in FL_NET_SOCK_NATIVE=1); Linux P4 Wi-Fi driver backend (wpa_cli with auto socket path, NetworkManager nmcli fallback, wireless iface auto-detect) for real scan/join on FL_NET_WIFI_IFACE with router DHCP IPv4 (prefer RFC1918 e.g. 192.168.1.x) and SLAAC/DHCPv6 global IPv6; wifi scan warns on lab simulation; fl_wifi.db opens under ~/.local/share with fallback; wifi leave drops WLAN addresses from FIB/iface; lab MLME/WPA fallback; server interfaces/host -all; tests/test_p3_server_lan.
 
 RELEASE_DATE=2026-06-04

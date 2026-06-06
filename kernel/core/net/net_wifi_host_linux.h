@@ -13,14 +13,18 @@
  * remain the lab path when no NIC is present.
  *
  * Env:
- *   **FL_NET_WIFI_IFACE** — interface name (default `wlan0`)
+ *   **FL_NET_WIFI_IFACE** — interface name (auto-detect first Wi-Fi netdev when unset)
  *   **FL_NET_WIFI_WPA_CLI** — path to wpa_cli (default `wpa_cli`)
- *   **FL_NET_WIFI_USE_WPA=1** — force wpa path
+ *   **FL_NET_WIFI_NMCLI** — path to nmcli (default `nmcli`)
+ *   **FL_NET_WIFI_USE_WPA=1** — force wpa_cli path
  *   **FL_NET_WIFI_USE_WPA=0** — force in-tree lab simulation
- *   (unset) — auto: use wpa when `wpa_cli ping` succeeds
+ *   (unset) — auto: wpa_cli when `ping` succeeds, else NetworkManager **nmcli**
  */
 
 int fl_net_wifi_host_linux_available(void);
+
+/** `"wpa_cli"`, `"nmcli"`, or NULL when no host backend is active. */
+const char *fl_net_wifi_host_linux_backend_name(void);
 
 fl_result_t fl_net_wifi_host_linux_scan(uint8_t band, unsigned timeout_ms);
 fl_result_t fl_net_wifi_host_linux_scan_result(fl_net_wifi_scan_entry_t *entries, size_t cap,
