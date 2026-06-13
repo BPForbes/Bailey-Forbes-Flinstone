@@ -7,6 +7,8 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <sys/stat.h>
+#include <unistd.h>
 
 static sqlite3 *s_wifi_db;
 
@@ -81,13 +83,65 @@ static void fill_router_from_stmt(sqlite3_stmt *st, fl_wifi_db_router_t *out) {
     out->is_joined = (uint8_t)sqlite3_column_int(st, 14);
 }
 
+static void wifi_db_ensure_parent_dir(const char *db_path) {
+    char dir[512];
+    size_t i;
+    size_t len;
+
+    if (!db_path || !db_path[0] || db_path[0] == ':')
+        return;
+    strncpy(dir, db_path, sizeof(dir) - 1u);
+    dir[sizeof(dir) - 1u] = '\0';
+    len = strlen(dir);
+    for (i = len; i > 0u; i--) {
+        if (dir[i - 1u] == '/') {
+            dir[i - 1u] = '\0';
+            break;
+        }
+    }
+    if (!dir[0] || !strcmp(dir, ".") || !strcmp(dir, "/"))
+        return;
+    len = strlen(dir);
+    for (i = 1u; i < len; i++) {
+        if (dir[i] != '/')
+            continue;
+        dir[i] = '\0';
+        (void)mkdir(dir, 0700);
+        dir[i] = '/';
+    }
+    (void)mkdir(dir, 0700);
+}
+
+static const char *wifi_db_resolve_default_path(void) {
+    static char path[512];
+    const char *home = getenv("HOME");
+
+    if (home && home[0]) {
+        snprintf(path, sizeof(path), "%s/.local/share/BPForbes_Flinstone_Shell/fl_wifi.db",
+                 home);
+        return path;
+    }
+    return "/tmp/fl_wifi.db";
+}
+
 fl_result_t fl_wifi_db_open(const char *path) {
     const char *env = getenv("FL_WIFI_DB_PATH");
-    const char *db_path = path && path[0] ? path : (env && env[0] ? env : FL_WIFI_DB_PATH_DEFAULT);
+    const char *db_path = path && path[0] ? path : (env && env[0] ? env : NULL);
+    const char *fallback = wifi_db_resolve_default_path();
+
     if (s_wifi_db)
         return FL_RESULT_OK;
-    if (sqlite3_open(db_path, &s_wifi_db) != SQLITE_OK)
-        return FL_RESULT_ERR;
+    if (!db_path || !db_path[0])
+        db_path = FL_WIFI_DB_PATH_DEFAULT;
+    wifi_db_ensure_parent_dir(db_path);
+    if (sqlite3_open(db_path, &s_wifi_db) != SQLITE_OK) {
+        s_wifi_db = NULL;
+        wifi_db_ensure_parent_dir(fallback);
+        if (sqlite3_open(fallback, &s_wifi_db) != SQLITE_OK) {
+            s_wifi_db = NULL;
+            return FL_RESULT_ERR;
+        }
+    }
     return db_init_schema(s_wifi_db);
 }
 

@@ -13,6 +13,11 @@
 fl_result_t fl_net_wifi_station_init(void);
 fl_net_driver_t *fl_net_wifi_station_netdev(void);
 
+int fl_net_wifi_station_host_backend(void);
+
+/** Non-zero when the last scan/connect path used in-tree lab data (no host NIC). */
+int fl_net_wifi_station_lab_backend(void);
+
 fl_result_t fl_net_wifi_scan(uint8_t band, unsigned timeout_ms);
 fl_result_t fl_net_wifi_scan_result(fl_net_wifi_scan_entry_t *entries, size_t cap,
                                     size_t *count_out);

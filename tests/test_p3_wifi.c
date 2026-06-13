@@ -5,6 +5,8 @@
 #include "net_wifi_mgmt.h"
 #include "net_wifi_sae.h"
 #include "net_wifi_station.h"
+#include "net_iface.h"
+#include "net_route.h"
 #include "net_wifi_wpa.h"
 #include "net_wifi_crypto.h"
 
@@ -178,6 +180,40 @@ static int test_station_fsm_netdev(void) {
     return 0;
 }
 
+
+static int test_disconnect_clears_wlan_iface(void) {
+    fl_net_wifi_cred_t cred;
+    fl_net_iface_entry_t entries[16];
+    unsigned count;
+    size_t i;
+    int saw_wlan = 0;
+
+    
+    fl_net_route_init();
+    ASSERT(fl_net_wifi_station_init() == FL_RESULT_OK);
+    ASSERT(fl_net_wifi_scan(FL_WIFI_BAND_ANY, 1000u) == FL_RESULT_OK);
+    memset(&cred, 0, sizeof(cred));
+    strncpy(cred.ssid, "LabAxHome", sizeof(cred.ssid) - 1u);
+    strncpy(cred.passphrase, "secret", sizeof(cred.passphrase) - 1u);
+    cred.auth_mode = FL_WIFI_AUTH_WPA3_SAE;
+    ASSERT(fl_net_wifi_connect(&cred, 0u) == FL_RESULT_OK);
+    fl_net_iface_refresh();
+    count = fl_net_iface_list(entries, 16);
+    for (i = 0; i < count; i++) {
+        if (!(entries[i].flags & FL_NET_IFF_LOOPBACK) && entries[i].addr_be != 0u)
+            saw_wlan = 1;
+    }
+    ASSERT(saw_wlan);
+    ASSERT(fl_net_wifi_disconnect() == FL_RESULT_OK);
+    fl_net_iface_refresh();
+    count = fl_net_iface_list(entries, 16);
+    for (i = 0; i < count; i++) {
+        if (!(entries[i].flags & FL_NET_IFF_LOOPBACK) && entries[i].addr_be != 0u)
+            return 1;
+    }
+    return 0;
+}
+
 static int test_wpa2_connect_lab(void) {
     fl_net_wifi_cred_t cred;
 
@@ -220,6 +256,8 @@ int main(void) {
     if (test_station_fsm_netdev() != 0)
         return 1;
     if (test_wpa2_connect_lab() != 0)
+        return 1;
+    if (test_disconnect_clears_wlan_iface() != 0)
         return 1;
     if (test_mgmt_hdr_probe() != 0)
         return 1;

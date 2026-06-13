@@ -15,6 +15,26 @@ int fl_net_ipv4_is_loopback(uint32_t addr_be) {
     return (addr_be & 0xffu) == (uint32_t)FL_NET_IPV4_LOOPBACK_FIRST_OCTET;
 }
 
+int fl_net_ipv4_is_private_rfc1918(uint32_t addr_be) {
+    unsigned o0 = (unsigned)(addr_be & 0xffu);
+    unsigned o1 = (unsigned)((addr_be >> 8) & 0xffu);
+
+    if (o0 == 10u)
+        return 1;
+    if (o0 == 172u && o1 >= 16u && o1 <= 31u)
+        return 1;
+    if (o0 == 192u && o1 == 168u)
+        return 1;
+    return 0;
+}
+
+int fl_net_ipv4_is_apipa(uint32_t addr_be) {
+    unsigned o0 = (unsigned)(addr_be & 0xffu);
+    unsigned o1 = (unsigned)((addr_be >> 8) & 0xffu);
+
+    return o0 == 169u && o1 == 254u;
+}
+
 int fl_net_ipv4_parse_literal(const char *s, uint32_t *out_be) {
     unsigned o[4];
     unsigned i;

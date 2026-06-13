@@ -14,6 +14,10 @@ int fl_net_ipv6_format_addr(const uint8_t addr[FL_NET_IPV6_ADDR_LEN], char *buf,
 
 int fl_net_ipv6_is_loopback(const uint8_t addr[FL_NET_IPV6_ADDR_LEN]);
 int fl_net_ipv6_is_link_local(const uint8_t addr[FL_NET_IPV6_ADDR_LEN]);
+/** Global unicast (2000::/3) — excludes loopback, link-local, multicast, ::. */
+int fl_net_ipv6_is_global_unicast(const uint8_t addr[FL_NET_IPV6_ADDR_LEN]);
+void fl_net_ipv6_network_addr(const uint8_t addr[FL_NET_IPV6_ADDR_LEN], uint8_t prefix_len,
+                              uint8_t net[FL_NET_IPV6_ADDR_LEN]);
 int fl_net_ipv6_prefix_match(const uint8_t addr[FL_NET_IPV6_ADDR_LEN],
                              const uint8_t net[FL_NET_IPV6_ADDR_LEN], uint8_t prefix_len);
 

@@ -17,6 +17,13 @@ fl_result_t fl_net_loopback_tcp_syn(const uint8_t *tcp_syn, size_t tcp_len, uint
                                     uint16_t dport, uint8_t *tcp_reply, size_t reply_cap,
                                     size_t *reply_len);
 
+/**
+ * Deliver one IPv4 datagram to local stack handlers (TCP FSM, ICMP, UDP).
+ * Builds a loopback Ethernet reply frame when a reply is required.
+ */
+fl_result_t fl_net_loopback_deliver_ipv4(const uint8_t *ip, size_t ip_len, uint8_t *eth_reply,
+                                         size_t eth_cap, size_t *eth_reply_len);
+
 /** **P3-2** netdev **send** / **recv** handlers (see **fl_net_driver_t** in **P3-1**). */
 fl_result_t fl_net_loopback_driver_send(fl_net_driver_t *drv, const fl_net_frame_view_t *frame);
 fl_result_t fl_net_loopback_driver_recv(fl_net_driver_t *drv, fl_net_frame_mut_t *out);

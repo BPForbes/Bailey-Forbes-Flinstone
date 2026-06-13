@@ -18,7 +18,7 @@ When promoted, **802.11** data frames still cross **`fl_net_frame_view_t`**, the
 | Contract | ✅ promoted | **`contract_p3_wifi.h`** in **`contract_networking.h`** (REV **18**) |
 | HE IE parser | ✅ unit-tested | **`net_wifi_he.c`** — HE Capabilities / HE Operation from Beacon IEs |
 | Station API | ~✅ lab | **`net_wifi_station.c`** — with **`FL_NET_WIFI_HOSTED_LAB`**, **`fl_net_wifi_scan`/`_connect`/`_disconnect`** and **`fl_net_wifi_he_cap`** work on seeded APs; **`fl_net_wifi_station_netdev()`** is **NULL** (no L2 shim) |
-| Shell + profiles | ✅ hosted | **`cmd_wifi.c`** — **`wifi scan`**, **`wifi join`**, **`wifi known`**; **`net_wifi_db.c`** — SQLite **`wifi_router`** in **`fl_wifi.db`** (hashed passphrase) |
+| Shell + profiles | ✅ hosted | **`cmd_wifi.c`** — **`wifi scan`**, **`wifi join`**, **`wifi leave`**, **`wifi status`**, **`wifi known`**; Linux **`wpa_cli`** / **`nmcli`** host backends (**`net_wifi_host_linux.c`**); **`net_wifi_db.c`** — SQLite **`wifi_router`** in **`fl_wifi.db`** (hashed passphrase; **`~/.local/share`** fallback) |
 | WPA3-SAE / WPA2 / TWT wire | ❌ tail | **`net_wifi_sae.c`**, **`net_wifi_wpa.c`**, **`net_wifi_twt.c`**, **`fl_net_wifi_twt_*`** → **`FL_RESULT_NOSYS`** |
 | 802.11 mgmt frames | ❌ tail | **`net_wifi_mgmt.c`** — header validity only |
 | Tests | ✅ | **`make test_p3_wifi`**, **`make test_wifi_db`** |

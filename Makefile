@@ -141,6 +141,8 @@ endif
 NET_CORE_SRCS = kernel/core/net/net_checksum.c kernel/core/net/net_wire.c kernel/core/net/net_eth.c \
     kernel/core/net/net_background.c kernel/core/net/net_packet.c kernel/core/net/net_udp.c \
     kernel/core/net/net_socket.c kernel/core/net/net_endpoint.c \
+    kernel/core/net/net_iface.c \
+    kernel/core/net/net_sock_native.c kernel/core/net/net_rx_demux.c kernel/core/net/net_stack_sync.c \
                 kernel/core/net/net_ipv4.c kernel/core/net/net_ipv6.c kernel/core/net/net_icmpv6.c \
                 kernel/core/net/net_ndp.c kernel/core/net/net_arp.c kernel/core/net/net_route.c \
                 kernel/core/net/net_wire_egress.c \
@@ -151,7 +153,8 @@ NET_CORE_SRCS = kernel/core/net/net_checksum.c kernel/core/net/net_wire.c kernel
                 kernel/core/net/net_dns.c kernel/core/net/net_dhcp.c kernel/core/net/net_tls_hosted.c \
                 kernel/core/net/net_http.c kernel/core/net/net_tftp.c \
                 kernel/core/net/net_ping_host.c kernel/core/net/net_ping6_host.c \
-                kernel/core/net/net_wifi_he.c kernel/core/net/net_wifi_station.c \
+                kernel/core/net/net_wifi_he.c kernel/core/net/net_wifi_station.c kernel/core/net/net_wifi_host_linux.c \
+                kernel/core/net/net_wifi_netdev.c \
                 kernel/core/net/net_wifi_db.c \
                 kernel/core/net/net_wifi_mgmt.c kernel/core/net/net_wifi_sae.c \
                 kernel/core/net/net_wifi_wpa.c kernel/core/net/net_wifi_twt.c \
@@ -691,6 +694,15 @@ test_p3_server: $(NET_ASM_OBJ) $(MEM_ASM_OBJ) $(NET_TEST_EXTRA_OBJS) priority_qu
 # (issue #239 acceptance criterion). Compiles cmd_udp.c against the same
 # NET_CORE_SRCS the rest of the P3 unit tests use, so the BSD socket shim
 # (`fl_net_sock_open(DGRAM)` + bind/connect/send/recv) is exercised end-to-end.
+
+.PHONY: test_p3_server_lan
+test_p3_server_lan: $(NET_ASM_OBJ) $(MEM_ASM_OBJ) $(NET_TEST_EXTRA_OBJS) priority_queue.o kernel/core/time/timekeeping.o kernel/core/sys/ipc.o
+	$(CC) $(CFLAGS) $(TEST_SANITIZE) -Iuserland/shell -o tests/test_p3_server_lan tests/test_p3_server_lan.c \
+	  userland/shell/common.o \
+	  $(NET_CORE_SRCS) kernel/core/sched/workqueue.c kernel/core/sys/ipc.o kernel/core/time/timekeeping.o priority_queue.o $(MEM_ASM_OBJ) $(NET_ASM_OBJ) \
+	  $(NET_TEST_EXTRA_OBJS) $(NET_TEST_LIBS) -pthread -Wl,-z,noexecstack
+	./tests/test_p3_server_lan
+
 .PHONY: test_p3_udp_cmds
 test_p3_udp_cmds: $(NET_ASM_OBJ) $(MEM_ASM_OBJ) $(NET_TEST_SHELL_OBJS) $(NET_TEST_EXTRA_OBJS) priority_queue.o kernel/core/time/timekeeping.o kernel/core/sys/ipc.o
 	$(CC) $(CFLAGS) $(TEST_SANITIZE) -o tests/test_p3_udp_cmds \
@@ -712,11 +724,11 @@ WIFI_TEST_NET_OBJS = kernel/core/net/net_checksum.c kernel/core/net/net_wire.c \
 	kernel/core/net/net_tcp_fsm.c kernel/core/net/net_packet.c kernel/core/net/net_tap.c \
 	kernel/core/net/net_wire_egress.c \
 	kernel/core/net/net_route.c kernel/core/net/net_loopback.c \
-	kernel/core/net/net_netdev.c kernel/core/net/net_arp.c
+	kernel/core/net/net_netdev.c kernel/core/net/net_arp.c kernel/core/net/net_stack_sync.c kernel/core/net/net_wifi_netdev.c kernel/core/net/net_iface.c
 
 test_p3_wifi: $(NET_ASM_OBJ) $(MEM_ASM_OBJ) priority_queue.o kernel/core/time/timekeeping.o kernel/core/sys/ipc.o
 	$(CC) $(CFLAGS) $(TEST_SANITIZE) -o tests/test_p3_wifi tests/test_p3_wifi.c \
-	  kernel/core/net/net_wifi_he.c kernel/core/net/net_wifi_station.c \
+	  kernel/core/net/net_wifi_he.c kernel/core/net/net_wifi_station.c kernel/core/net/net_wifi_host_linux.c \
 	  kernel/core/net/net_wifi_mgmt.c kernel/core/net/net_wifi_sae.c \
 	  kernel/core/net/net_wifi_wpa.c kernel/core/net/net_wifi_twt.c \
 	  kernel/core/net/net_wifi_crypto.c \
@@ -821,7 +833,7 @@ clean:
 	rm -f kernel/arch/*/drivers/*.o kernel/arch/*/hal/*.o kernel/drivers/*.o kernel/drivers/block/*.o VM/devices/*.o
 	rm -f arch/*/*/*.o arch/*/*/alloc/*.o
 	rm -f tests/test_mem_asm tests/test_alloc tests/test_priority_queue tests/test_drivers tests/test_vm_mem tests/test_replay tests/test_invariants tests/test_userspace_connection tests/test_vm_syscall_bridge tests/test_vm_arch_readiness
-	rm -f tests/test_p3_network tests/test_p3_server tests/test_p3_udp_cmds tests/test_p3_net_tools
+	rm -f tests/test_p3_network tests/test_p3_server tests/test_p3_server_lan tests/test_p3_udp_cmds tests/test_p3_net_tools
 	rm -f tests/test_batch_argv_issue220 tests/test_threadpool_issue222 tests/test_disk_hex_issue222
 	rm -rf tests/obj/issue220 tests/obj/issue222
 

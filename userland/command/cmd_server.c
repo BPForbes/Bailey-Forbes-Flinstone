@@ -12,8 +12,11 @@
 #include "net_client.h"
 #include "net_endian.h"
 #include "net_endpoint.h"
+#include "net_iface.h"
+#include "net_ipv6.h"
 #include "net_ipv4.h"
 #include "net_server.h"
+#include "net_socket.h"
 #include "server_bg.h"
 #include "server_shared_db.h"
 #include "session.h"
@@ -58,6 +61,94 @@ void cmd_server_atexit(void);
 static int parse_endpoint_full(const char *s, fl_net_endpoint_t *out) {
     return fl_net_endpoint_parse(s, out) ? 0 : -1;
 }
+
+static void print_sock_error(const char *verb, fl_result_t rc) {
+    int e = fl_net_sock_last_errno();
+    if (e != 0)
+        fl_color_error("%s failed (rc=%d): %s", verb, (int)rc, strerror(e));
+    else if (rc == FL_RESULT_ACCES)
+        fl_color_error("%s failed: permission denied (try a port >= 1024 or run as root)", verb);
+    else if (rc == FL_RESULT_BUSY)
+        fl_color_error("%s failed: address in use or not available on this host", verb);
+    else
+        fl_color_error("%s failed (rc=%d)", verb, (int)rc);
+}
+
+static int parse_host_endpoint(int argc, char **argv, fl_net_endpoint_t *ep) {
+    uint32_t any_be = 0u;
+    long port;
+    char *end = NULL;
+
+    if (argc < 3 || !ep)
+        return -1;
+    if (!strcmp(argv[2], "-all")) {
+        if (argc < 4) {
+            fl_color_error("usage: server host -all <port>");
+            return -1;
+        }
+        errno = 0;
+        port = strtol(argv[3], &end, 10);
+        if (errno != 0 || end == argv[3] || (end && *end != '\0') || port <= 0 || port > 65535) {
+            fl_color_error("invalid port '%s'", argv[3]);
+            return -1;
+        }
+        if (!fl_net_ipv4_parse_literal("0.0.0.0", &any_be))
+            return -1;
+        fl_net_endpoint_from_v4(any_be, (uint16_t)port, ep);
+        return 0;
+    }
+    if (argv[2][0] == ':' && argv[2][1] != '\0') {
+        errno = 0;
+        port = strtol(argv[2] + 1, &end, 10);
+        if (errno != 0 || end == argv[2] + 1 || (end && *end != '\0') || port <= 0 || port > 65535) {
+            fl_color_error("invalid port '%s'", argv[2]);
+            return -1;
+        }
+        if (!fl_net_ipv4_parse_literal("0.0.0.0", &any_be))
+            return -1;
+        fl_net_endpoint_from_v4(any_be, (uint16_t)port, ep);
+        return 0;
+    }
+    if (parse_endpoint_full(argv[2], ep) != 0)
+        return -1;
+    return 0;
+}
+
+static int verb_interfaces(int argc, char **argv) {
+    fl_net_iface_entry_t entries[32];
+    unsigned count = 0u;
+    size_t i;
+    char addr[32];
+    char suggest[32];
+
+    (void)argc;
+    (void)argv;
+    fl_net_iface_refresh();
+    count = fl_net_iface_list(entries, 32);
+    if (count == 0u) {
+        fl_color_error("interface list unavailable on this build");
+        return 1;
+    }
+    puts("Interfaces (IPv4; IPv6 when assigned by router after wifi join):");
+    for (i = 0; i < count; i++) {
+        char addr6[64];
+        fl_net_ipv4_format_addr(entries[i].addr_be, addr, sizeof(addr));
+        printf("  %s %-15s/%u %s%s", entries[i].name, addr,
+               (unsigned)entries[i].prefix_len,
+               (entries[i].flags & FL_NET_IFF_UP) ? "up" : "down",
+               (entries[i].flags & FL_NET_IFF_LOOPBACK) ? " loopback" : "");
+        if (entries[i].has_ipv6 &&
+            fl_net_ipv6_format_addr(entries[i].addr6, addr6, sizeof(addr6)))
+            printf("  v6 %s/%u", addr6, (unsigned)entries[i].prefix6_len);
+        putchar('\n');
+    }
+    if (fl_net_iface_suggest_ipv4(NULL, suggest, sizeof(suggest)))
+        printf("Suggested LAN join address for peers: %s\n", suggest);
+    else
+        puts("No non-loopback IPv4 found; use server host -all <port> for all interfaces.");
+    return 0;
+}
+
 
 static fl_net_server_member_id_t parse_member_id_arg(const char *s) {
     long v;
@@ -411,7 +502,7 @@ static int verb_host(int argc, char **argv) {
     fl_result_t rc;
 
     if (argc < 3) {
-        fl_color_error("usage: server host <ip:port>");
+        fl_color_error("usage: server host <ip:port> | server host -all <port> | server host :<port>");
         return 1;
     }
     pthread_mutex_lock(&session_mutex);
@@ -425,9 +516,9 @@ static int verb_host(int argc, char **argv) {
         fl_color_error("already joined a server; leave first");
         return 1;
     }
-    if (parse_endpoint_full(argv[2], &ep) != 0) {
+    fl_net_sock_clear_errno();
+    if (parse_host_endpoint(argc, argv, &ep) != 0) {
         pthread_mutex_unlock(&session_mutex);
-        fl_color_error("invalid ip:port '%s'", argv[2]);
         return 1;
     }
     rc = fl_net_server_host_start_ep(&g_server, &ep, current_principal());
@@ -438,8 +529,7 @@ static int verb_host(int argc, char **argv) {
     }
     if (rc != FL_RESULT_OK) {
         pthread_mutex_unlock(&session_mutex);
-        fl_color_error("server host failed (rc=%d); is the port already bound?",
-                       (int)rc);
+        print_sock_error("server host", rc);
         return 1;
     }
     rc = fl_server_bg_start_server(&g_server, &g_server_bg);
@@ -457,6 +547,12 @@ static int verb_host(int argc, char **argv) {
             fl_color_success("hosting as '%s' on %s", current_principal(), bind_txt);
         else
             fl_color_success("hosting as '%s' on %s", current_principal(), argv[2]);
+        if (ep.family == FL_NET_ADDR_FAMILY_V4 && ep.addr.v4_be == 0u) {
+            char suggest[32];
+            if (fl_net_iface_suggest_ipv4(NULL, suggest, sizeof(suggest)))
+                fl_color_success("peers on LAN can: server join %s:%u", suggest,
+                                 (unsigned)ep.port_host);
+        }
     }
     return 0;
 }
@@ -505,6 +601,7 @@ static int verb_join(int argc, char **argv) {
             i++;
         }
     }
+    fl_net_sock_clear_errno();
     rc = fl_net_client_connect_ep(&g_client, local.family ? &local : NULL, &peer,
                                   current_principal(), 3000u);
     if (rc == FL_RESULT_NOSYS) {
@@ -514,7 +611,7 @@ static int verb_join(int argc, char **argv) {
     }
     if (rc != FL_RESULT_OK) {
         pthread_mutex_unlock(&session_mutex);
-        fl_color_error("server join failed (rc=%d)", (int)rc);
+        print_sock_error("server join", rc);
         return 1;
     }
     {
@@ -942,9 +1039,10 @@ int cmd_server_run(int argc, char **argv) {
     };
 
     if (argc < 2) {
-        fl_color_error("usage: server <host|join|msg|file|send|announce|nick|set-nick|connected|leave|kill> ...");
+        fl_color_error("usage: server <host|join|interfaces|msg|file|send|announce|nick|set-nick|connected|leave|kill> ...");
         return 1;
     }
+    if (!strcmp(argv[1], "interfaces")) return verb_interfaces(argc, argv);
     if (!strcmp(argv[1], "host"))      return verb_host(argc, argv);
     if (!strcmp(argv[1], "join"))      return verb_join(argc, argv);
     if (!strcmp(argv[1], "leave"))     return verb_leave();
