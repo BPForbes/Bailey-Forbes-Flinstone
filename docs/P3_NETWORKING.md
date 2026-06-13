@@ -301,15 +301,55 @@ PRE **4.2.0** ships an in-tree **lab** path (not production virtio/MMIO — that
 ping <host> [port] [-c count] [-W timeout_ms]
 ping6 <host> [-c count] [-W timeout_ms]
 check requirements <host> <port>
-wifi scan [band]
-wifi join <profile> [password]
+wifi scan [-band any|2|5|6]
+wifi join [-b <bssid>] <ssid> [password]
+wifi leave
+wifi status
 wifi known
 ```
 
 - **`port` omitted or 0** — ICMP echo (loopback via netdev; off-loopback ICMP socket).
 - **`port` 1–65535** — TCP SYN probe (loopback RST+ACK; off-loopback raw TCP).
 
-Environment:
+### Wi‑Fi (`wifi`) — P3-10
+
+Shell verbs live in **`userland/command/cmd_wifi.c`**. Saved router profiles use SQLite **`wifi_router`** in **`fl_wifi.db`** (**`net_wifi_db.c`**); passphrases are stored hashed, not plaintext.
+
+| Command | Purpose |
+|---------|---------|
+| **`wifi scan [-band any\|2\|5\|6]`** | Scan for APs. On **Linux**, uses **`wpa_cli`** when its control socket answers, else **NetworkManager `nmcli`**. Without a host backend, falls back to the in-tree **lab** list (`LabAxHome`, `GuestOpen`) and prints a stderr warning. |
+| **`wifi join [-b <bssid>] <ssid> [password]`** | Associate with an SSID from the last scan. **`-b`** pins a BSSID when several APs share a name. After join on Linux, copies router **DHCP IPv4** (prefers RFC1918) and **SLAAC/DHCPv6** global IPv6 into the shell netdev/FIB when available. |
+| **`wifi leave`** | Disconnect and remove WLAN IPv4/IPv6 from the in-tree iface/route view; clears joined flags in **`fl_wifi.db`**. |
+| **`wifi status`** | Prints FSM state, active backend (`wpa_cli`, `nmcli`, or lab), interface name, and assigned IPv4/IPv6 when up. |
+| **`wifi known`** | List saved profiles (BSSID, band, auth, joined flag, last-join time). |
+
+**Linux host backend** (real hardware scan/join):
+
+| Variable | Default | Meaning |
+|----------|---------|---------|
+| **`FL_NET_WIFI_IFACE`** | auto-detect | Wireless netdev (`wlan0`, `wlp2s0`, …). Probed via **`nmcli`**, **`/proc/net/wireless`**, then **`wlan0`**. |
+| **`FL_NET_WIFI_WPA_CLI`** | `wpa_cli` | Path to **`wpa_cli`** when **`wpa_supplicant`** owns the interface. |
+| **`FL_NET_WIFI_NMCLI`** | `nmcli` | Path to **`nmcli`** when NetworkManager manages Wi‑Fi. |
+| **`FL_NET_WIFI_USE_WPA`** | unset | **`1`** — force **`wpa_cli`** only; **`0`** — force in-tree lab simulation; unset — try **`wpa_cli`**, then **`nmcli`**. |
+| **`FL_WIFI_DB_PATH`** | see below | Override SQLite profile DB location. |
+
+**Profile database:** tries **`FL_WIFI_DB_PATH`**, then repo-relative **`userland/shell/fl_wifi.db`**, then **`~/.local/share/BPForbes_Flinstone_Shell/fl_wifi.db`**, then **`/tmp/fl_wifi.db`**.
+
+**Prerequisites (Linux, real scan):** install **`network-manager`** and/or **`wpasupplicant`** so **`nmcli`** or **`wpa_cli`** is on **`PATH`**. Requires **`FL_AUTHZ_OP_NETDEV_IO`** (shell grants this on hosted builds). **macOS/Windows** and container/CI environments without a Wi‑Fi netdev always use the lab list.
+
+**Examples:**
+
+```text
+wifi scan
+wifi scan -band 5
+wifi join "Hilton Honors" my-passphrase
+wifi join -b aa:bb:cc:dd:ee:ff "Hilton Honors"
+wifi status
+wifi leave
+wifi known
+```
+
+Environment (general networking):
 
 | Variable | Meaning |
 |----------|---------|
