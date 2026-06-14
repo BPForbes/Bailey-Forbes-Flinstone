@@ -521,3 +521,25 @@ void disk_ensure_default_fat32(const char *path, int clusters, int bytes_per_clu
     close(fd);
     g_disk_host_fat32 = 1;
 }
+
+/* Like disk_ensure_default_fat32 but overwrites an existing blank/corrupt image. */
+void disk_reinit_default_fat32(const char *path, int clusters, int bytes_per_cluster) {
+    if (!disk_use_fat32_cluster_bytes(bytes_per_cluster))
+        return;
+    if (fat32_host_format_image(path, "NO NAME", clusters, bytes_per_cluster, "DFLT") != 0)
+        return;
+    int fd = open(path, O_RDONLY);
+    if (fd < 0) {
+        g_disk_host_fat32 = 0;
+        fat32_host_invalidate();
+        return;
+    }
+    if (fat32_host_load_from_fd(fd) != 0) {
+        close(fd);
+        g_disk_host_fat32 = 0;
+        fat32_host_invalidate();
+        return;
+    }
+    close(fd);
+    g_disk_host_fat32 = 1;
+}
