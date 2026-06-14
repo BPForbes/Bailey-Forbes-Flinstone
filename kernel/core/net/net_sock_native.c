@@ -234,10 +234,11 @@ fl_result_t fl_net_sock_native_close(fl_net_sock_handle_t handle) {
     fl_net_sock_native_slot_t *n = native_slot(handle);
     if (!n || !n->in_use)
         return FL_RESULT_INVAL;
-    if (!n->is_listen)
+    if (!n->is_listen) {
         fl_net_stack_lock();
         (void)fl_net_tcp_close(n->tcp_conn_id);
         fl_net_stack_unlock();
+    }
     memset(n, 0, sizeof(*n));
     return FL_RESULT_OK;
 }

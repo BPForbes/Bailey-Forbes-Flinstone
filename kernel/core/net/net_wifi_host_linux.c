@@ -229,6 +229,46 @@ static int probe_nmcli(void) {
     return 1;
 }
 
+/* Wrap a value in single-quotes for safe shell embedding.
+ * Any single-quote inside the value is ended, escaped, and re-opened: ' -> '\'' */
+static void shell_single_quote(const char *in, char *out, size_t out_cap) {
+    /* Note: all chars other than ' are literal inside sh single-quotes. */
+    size_t o = 0;
+    if (!in || !out || out_cap < 3u) {
+        if (out && out_cap > 0u)
+            out[0] = '\0';
+        return;
+    }
+    out[o++] = '\'';
+    while (*in && o + 5u < out_cap) {
+        if (*in == '\'') {
+            out[o++] = '\'';
+            out[o++] = '\\';
+            out[o++] = '\'';
+            out[o++] = '\'';
+        } else {
+            out[o++] = *in;
+        }
+        in++;
+    }
+    out[o++] = '\'';
+    out[o] = '\0';
+}
+
+/* Escape a value so it is safe inside a sh double-quoted string ("...").
+ * Escapes " $ ` and \ which are the only chars with special meaning there. */
+static void shell_dquote_content(const char *in, char *out, size_t out_cap) {
+    size_t o = 0;
+    while (*in && o + 2u < out_cap) {
+        if (*in == '"' || *in == '$' || *in == '`' || *in == '\\')
+            out[o++] = '\\';
+        if (o < out_cap - 1u)
+            out[o++] = *in;
+        in++;
+    }
+    out[o] = '\0';
+}
+
 static int parse_bssid(const char *s, uint8_t bssid[6]) {
     unsigned o[6];
     if (!s || !bssid)
@@ -754,13 +794,18 @@ fl_result_t fl_net_wifi_host_linux_connect(const fl_net_wifi_cred_t *cred,
         return FL_RESULT_NOSYS;
 
     if (s_host_kind == FL_WIFI_HOST_NMCLI) {
-        char cmd[512];
-        if (cred->passphrase[0])
-            snprintf(cmd, sizeof(cmd), "device wifi connect \"%s\" password \"%s\" ifname %s",
-                     cred->ssid, cred->passphrase, s_wifi_iface);
-        else
-            snprintf(cmd, sizeof(cmd), "device wifi connect \"%s\" ifname %s", cred->ssid,
-                     s_wifi_iface);
+        char cmd[768];
+        char ssid_q[FL_WIFI_SSID_MAX * 5 + 4];
+        char pass_q[sizeof(cred->passphrase) * 5 + 4];
+        shell_single_quote(cred->ssid, ssid_q, sizeof(ssid_q));
+        if (cred->passphrase[0]) {
+            shell_single_quote(cred->passphrase, pass_q, sizeof(pass_q));
+            snprintf(cmd, sizeof(cmd), "device wifi connect %s password %s ifname %s",
+                     ssid_q, pass_q, s_wifi_iface);
+        } else {
+            snprintf(cmd, sizeof(cmd), "device wifi connect %s ifname %s",
+                     ssid_q, s_wifi_iface);
+        }
         if (!run_nmcli(cmd, NULL, 0))
             return FL_RESULT_ERR;
         {
@@ -797,7 +842,11 @@ fl_result_t fl_net_wifi_host_linux_connect(const fl_net_wifi_cred_t *cred,
     if (net_id < 0)
         return FL_RESULT_ERR;
 
-    snprintf(cmd, sizeof(cmd), "set_network %d ssid \"%s\"", net_id, cred->ssid);
+    {
+        char ssid_esc[FL_WIFI_SSID_MAX * 2 + 1];
+        shell_dquote_content(cred->ssid, ssid_esc, sizeof(ssid_esc));
+        snprintf(cmd, sizeof(cmd), "set_network %d ssid \"%s\"", net_id, ssid_esc);
+    }
     if (!run_wpa_cli(cmd, NULL, 0))
         return FL_RESULT_ERR;
     if (cred_bssid_set(cred->bssid)) {
@@ -809,7 +858,9 @@ fl_result_t fl_net_wifi_host_linux_connect(const fl_net_wifi_cred_t *cred,
             return FL_RESULT_ERR;
     }
     if (cred->passphrase[0]) {
-        snprintf(cmd, sizeof(cmd), "set_network %d psk \"%s\"", net_id, cred->passphrase);
+        char psk_esc[sizeof(cred->passphrase) * 2 + 1];
+        shell_dquote_content(cred->passphrase, psk_esc, sizeof(psk_esc));
+        snprintf(cmd, sizeof(cmd), "set_network %d psk \"%s\"", net_id, psk_esc);
         if (!run_wpa_cli(cmd, NULL, 0))
             return FL_RESULT_ERR;
     } else {

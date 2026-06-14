@@ -4,7 +4,7 @@ RELEASE_VERSION=0
 PRERELEASE=1
 DEV_VERSION=14
 DESCRIPTION<<VER_END
-PRE 4.2.0: Wi-Fi scan home SSID + SSID-based join
+PRE 4.2.0: Wi-Fi scan home SSID + SSID-based join; Codex security fixes
 
 - wifi scan (lab backend): reads FL_NET_WIFI_HOME_SSID env var and includes the
   user's home network in scan results; FL_NET_WIFI_HOME_AUTH (open/wpa2/wpa3)
@@ -14,6 +14,15 @@ PRE 4.2.0: Wi-Fi scan home SSID + SSID-based join
   SSID + password so home and hidden networks can be joined directly by name
 - wifi join usage: clarified as `wifi join <ssid> [password]`; BSSID option
   shown on its own line as an advanced pin-to-AP flag, no longer top-billed
+- security: shell-escape SSID and passphrase before popen nmcli/wpa_cli calls
+  (shell injection via crafted SSID or passphrase — net_wifi_host_linux.c)
+- security: reject sparse file-transfer chunks whose file_offset != bytes already
+  received; also reject chunks that exceed the advertised file size
+  (uninitialized-memory write to disk via out-of-order chunks — net_file_delivery.c)
+- fix: preserve statted file_size across fl_server_file_offer_create memset so
+  total_chunks is not always zero (cmd_server_file.c)
+- fix: add missing braces in fl_net_sock_native_close so listener sockets do not
+  close tcp_conn_id 0 or call stack_unlock without a matching lock (net_sock_native.c)
 VER_END
 
 RELEASE_DATE=2026-06-14
