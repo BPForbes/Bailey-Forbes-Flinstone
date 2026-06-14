@@ -337,13 +337,13 @@ flinstone-ps:
 	@echo "To build the Windows .exe: make flinstone-ps-windows"
 
 # Cross-compile for Windows (requires mingw-w64: apt install mingw-w64).
-# Link with -lwlanapi when replacing netsh stubs with native WlanAPI calls.
 .PHONY: flinstone-ps-windows
 flinstone-ps-windows:
 	x86_64-w64-mingw32-g++ -std=c++17 -Wall -Wextra \
 	    -o tools/FlinstonePowershell/FlinstonePowershell.exe \
-	    tools/FlinstonePowershell/FlinstonePowershell.cpp
-	@echo "Built tools/FlinstonePowershell/FlinstonePowershell.exe (Windows)"
+	    tools/FlinstonePowershell/FlinstonePowershell.cpp \
+	    -lwlanapi -lole32
+	@echo "Built tools/FlinstonePowershell/FlinstonePowershell.exe (Windows/WlanAPI)"
 	@echo "Copy to a directory on your Windows PATH so WSL interop can find it."
 
 $(OPENSSL_ARM_LIB):

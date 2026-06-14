@@ -8,11 +8,11 @@
  *
  * Build targets
  * -------------
- * Windows / mingw32 cross-compile (final form, full WlanAPI support):
+ * Windows / mingw32 cross-compile (full WlanAPI support):
  *   x86_64-w64-mingw32-g++ -std=c++17 -o FlinstonePowershell.exe \
  *       FlinstonePowershell.cpp -lwlanapi -lole32
  *
- * Linux / WSL (development build, uses netsh.exe via WSL interop):
+ * Linux / WSL (development build, uses dev stubs):
  *   g++ -std=c++17 -o FlinstonePowershell FlinstonePowershell.cpp
  *
  * stdout protocol (consumed by parse_flinstone_ps_scan in net_wifi_host_linux.c)
@@ -39,20 +39,9 @@
 #if defined(_WIN32)
 #define WIN32_LEAN_AND_MEAN
 #include <windows.h>
-/*
- * TODO (full WlanAPI implementation):
- *   #include <wlanapi.h>
- *   #pragma comment(lib, "wlanapi.lib")
- *   #pragma comment(lib, "ole32.lib")
- *
- * Replace the netsh-based stubs below with native calls:
- *   WlanOpenHandle / WlanCloseHandle
- *   WlanEnumInterfaces
- *   WlanScan + WlanGetNetworkBssList  (wifi-scan)
- *   WlanSetProfile + WlanConnect      (wifi-join)
- *   WlanDisconnect                    (wifi-leave)
- *   WlanQueryInterface                (wifi-status)
- */
+#include <wlanapi.h>
+#pragma comment(lib, "wlanapi.lib")
+#pragma comment(lib, "ole32.lib")
 #endif
 
 #include <cstdio>
@@ -63,164 +52,220 @@
 #include <vector>
 
 /* -------------------------------------------------------------------------
- * Helpers
+ * Windows-only helpers
  * ---------------------------------------------------------------------- */
 
-static std::string trim(const std::string &s) {
-    size_t a = s.find_first_not_of(" \t\r\n");
-    if (a == std::string::npos)
-        return "";
-    size_t b = s.find_last_not_of(" \t\r\n");
-    return s.substr(a, b - a + 1);
-}
-
-/* Run a command, return all stdout. Only needed on Windows builds. */
 #if defined(_WIN32)
-static std::string capture(const char *cmd) {
-    std::string out;
-    FILE *fp = popen(cmd, "r");
-    if (!fp)
-        return out;
-    char buf[256];
-    while (fgets(buf, (int)sizeof(buf), fp))
-        out += buf;
-    pclose(fp);
-    return out;
-}
-#endif
 
-/* Convert Windows signal percentage (0–100) to approximate dBm. */
-static int pct_to_rssi(int pct) {
-    /* 100% ≈ -30 dBm, 0% ≈ -100 dBm */
-    return -100 + (pct * 70 / 100);
-}
+/* RAII handle for WlanAPI client handle. */
+struct WlanHandle {
+    HANDLE  h   = nullptr;
+    DWORD   ver = 0;
 
-/* -------------------------------------------------------------------------
- * netsh output parser (used until WlanAPI is wired in)
- * ---------------------------------------------------------------------- */
-
-struct WifiNet {
-    std::string ssid;
-    std::string bssid;
-    int         rssi  = -127;
-    std::string auth  = "wpa2";
-    std::string band  = "2.4";
-    int         chan  = 0;
-};
-
-/*
- * Parse `netsh wlan show networks mode=bssid` output.
- * Each SSID block starts with "SSID N : <name>" and may contain multiple
- * "BSSID N : <mac>" sub-blocks; we emit one WifiNet per BSSID.
- */
-static std::vector<WifiNet> parse_netsh(const std::string &text) {
-    std::vector<WifiNet> result;
-    WifiNet cur;
-    bool in_ssid   = false;
-    bool in_bssid  = false;
-
-    auto flush = [&]() {
-        if (in_ssid && !cur.ssid.empty())
-            result.push_back(cur);
-    };
-
-    const char *p = text.c_str();
-    while (*p) {
-        const char *nl = strchr(p, '\n');
-        std::string raw(p, nl ? (size_t)(nl - p) : strlen(p));
-        p = nl ? nl + 1 : p + raw.size();
-        if (!raw.empty() && raw.back() == '\r')
-            raw.pop_back();
-        std::string line = trim(raw);
-
-        /* "SSID N : name" — must not contain "BSSID" */
-        if (line.find("SSID ") == 0 && line.find("BSSID") == std::string::npos) {
-            size_t colon = line.rfind(": ");
-            if (colon != std::string::npos) {
-                flush();
-                cur   = WifiNet();
-                in_ssid  = true;
-                in_bssid = false;
-                cur.ssid = trim(line.substr(colon + 2));
-            }
-            continue;
-        }
-        if (!in_ssid)
-            continue;
-
-        /* "Authentication : WPA2-Personal" */
-        if (line.find("Authentication") != std::string::npos) {
-            size_t c = line.find(": ");
-            if (c != std::string::npos) {
-                std::string v = trim(line.substr(c + 2));
-                if (v.find("WPA3") != std::string::npos || v.find("SAE") != std::string::npos)
-                    cur.auth = "wpa3";
-                else if (v.find("WPA2") != std::string::npos || v.find("WPA") != std::string::npos)
-                    cur.auth = "wpa2";
-                else
-                    cur.auth = "open";
-            }
-            continue;
-        }
-
-        /* "BSSID N : aa:bb:cc:dd:ee:ff" */
-        if (line.find("BSSID ") == 0) {
-            if (in_bssid) {
-                /* Additional BSSID for same SSID — save current, clone for next */
-                result.push_back(cur);
-                std::string ssid = cur.ssid, auth = cur.auth;
-                cur      = WifiNet();
-                cur.ssid = ssid;
-                cur.auth = auth;
-            }
-            in_bssid = true;
-            size_t c = line.rfind(": ");
-            if (c != std::string::npos)
-                cur.bssid = trim(line.substr(c + 2));
-            continue;
-        }
-
-        if (!in_bssid)
-            continue;
-
-        /* "Signal : 85%" */
-        if (line.find("Signal") != std::string::npos && line.find('%') != std::string::npos) {
-            size_t c = line.find(": ");
-            if (c != std::string::npos)
-                cur.rssi = pct_to_rssi(atoi(trim(line.substr(c + 2)).c_str()));
-            continue;
-        }
-
-        /* "Radio type : 802.11ax" */
-        if (line.find("Radio type") != std::string::npos) {
-            size_t c = line.find(": ");
-            if (c != std::string::npos) {
-                std::string v = trim(line.substr(c + 2));
-                /* 6 GHz uses 802.11ax and channel > 177; set tentatively */
-                if (v.find("6GHz") != std::string::npos || v.find("6 GHz") != std::string::npos)
-                    cur.band = "6";
-            }
-            continue;
-        }
-
-        /* "Channel : 6" */
-        if (line.find("Channel") != std::string::npos) {
-            size_t c = line.find(": ");
-            if (c != std::string::npos) {
-                cur.chan = atoi(trim(line.substr(c + 2)).c_str());
-                if (cur.band != "6") {
-                    if (cur.chan >= 36 && cur.chan <= 177)
-                        cur.band = "5";
-                    else if (cur.chan >= 1 && cur.chan <= 14)
-                        cur.band = "2.4";
-                }
-            }
-            continue;
+    WlanHandle() {
+        DWORD cur = 0;
+        if (WlanOpenHandle(2, nullptr, &cur, &h) != ERROR_SUCCESS) {
+            h   = nullptr;
+            ver = 0;
+        } else {
+            ver = cur;
         }
     }
-    flush();
-    return result;
+
+    ~WlanHandle() {
+        if (h) {
+            WlanCloseHandle(h, nullptr);
+            h = nullptr;
+        }
+    }
+
+    bool ok() const { return h != nullptr; }
+};
+
+/* Convert a UTF-8 std::string to a Windows WCHAR string. */
+static std::wstring to_wide(const std::string &s) {
+    if (s.empty())
+        return L"";
+    int n = MultiByteToWideChar(CP_UTF8, 0, s.c_str(), -1, nullptr, 0);
+    if (n <= 0)
+        return L"";
+    std::wstring w(n - 1, L'\0');
+    MultiByteToWideChar(CP_UTF8, 0, s.c_str(), -1, &w[0], n);
+    return w;
 }
+
+/* Convert a WLAN DOT11_SSID to a UTF-8 std::string. */
+static std::string ssid_to_str(const DOT11_SSID &s) {
+    return std::string(reinterpret_cast<const char *>(s.ucSSID), s.uSSIDLength);
+}
+
+/* Convert a DOT11_MAC_ADDRESS to "aa:bb:cc:dd:ee:ff". */
+static std::string mac_to_str(const DOT11_MAC_ADDRESS &m) {
+    char buf[18];
+    snprintf(buf, sizeof(buf), "%02x:%02x:%02x:%02x:%02x:%02x",
+             m[0], m[1], m[2], m[3], m[4], m[5]);
+    return buf;
+}
+
+/* Escape a string for inclusion inside XML element text or attribute values. */
+static std::string xml_escape(const std::string &s) {
+    std::string out;
+    out.reserve(s.size());
+    for (unsigned char c : s) {
+        switch (c) {
+        case '&':  out += "&amp;";  break;
+        case '<':  out += "&lt;";   break;
+        case '>':  out += "&gt;";   break;
+        case '"':  out += "&quot;"; break;
+        case '\'': out += "&apos;"; break;
+        default:   out += (char)c;  break;
+        }
+    }
+    return out;
+}
+
+/*
+ * Derive auth mode from the raw 802.11 Information Elements blob.
+ *   RSN IE (tag 0x30): WPA2 or WPA3 (AKM suite 00:0F:AC:08 = SAE → WPA3)
+ *   Vendor IE (0xDD, OUI 00:50:F2, type 0x01): WPA1
+ * Returns "open", "wpa2", or "wpa3".
+ */
+static std::string auth_from_ies(const UCHAR *ies, ULONG ie_len) {
+    bool has_wpa  = false;
+    bool has_rsn  = false;
+    bool has_sae  = false;
+
+    const UCHAR *p   = ies;
+    const UCHAR *end = ies + ie_len;
+
+    while (p + 2 <= end) {
+        UCHAR tag = p[0];
+        UCHAR len = p[1];
+        const UCHAR *body = p + 2;
+
+        if (body + len > end)
+            break;
+
+        if (tag == 0x30 && len >= 2) {
+            /* RSN IE: skip version (2) + group cipher (4) */
+            has_rsn = true;
+            if (len >= 8) {
+                UINT16 pairwise_cnt = (UINT16)(body[4] | ((UINT16)body[5] << 8));
+                const UCHAR *akm_start = body + 6 + pairwise_cnt * 4;
+                if (akm_start + 2 <= body + len) {
+                    UINT16 akm_cnt = (UINT16)(akm_start[0] | ((UINT16)akm_start[1] << 8));
+                    const UCHAR *akm = akm_start + 2;
+                    for (UINT16 i = 0; i < akm_cnt && akm + 4 <= body + len; i++, akm += 4) {
+                        /* OUI 00:0F:AC, type 08 = SAE (WPA3-Personal) */
+                        if (akm[0] == 0x00 && akm[1] == 0x0F &&
+                            akm[2] == 0xAC && akm[3] == 0x08) {
+                            has_sae = true;
+                        }
+                    }
+                }
+            }
+        } else if (tag == 0xDD && len >= 4) {
+            /* Vendor IE: OUI 00:50:F2, type 01 = Microsoft WPA */
+            if (body[0] == 0x00 && body[1] == 0x50 &&
+                body[2] == 0xF2 && body[3] == 0x01) {
+                has_wpa = true;
+            }
+        }
+
+        p += 2 + len;
+    }
+
+    if (has_sae)
+        return "wpa3";
+    if (has_rsn)
+        return "wpa2";
+    if (has_wpa)
+        return "wpa2"; /* WPA1 — treat as wpa2 for display */
+    return "open";
+}
+
+/* Convert centre frequency in kHz to 802.11 channel number. */
+static int chan_from_khz(ULONG freq_khz) {
+    ULONG mhz = freq_khz / 1000;
+
+    /* 2.4 GHz band: 2412 MHz = ch1, 5 MHz steps */
+    if (mhz >= 2412 && mhz <= 2484) {
+        if (mhz == 2484)
+            return 14;
+        return (int)((mhz - 2407) / 5);
+    }
+
+    /* 5 GHz band: 5180 MHz = ch36, 5 MHz steps */
+    if (mhz >= 5160 && mhz <= 5885)
+        return (int)((mhz - 5000) / 5);
+
+    /* 6 GHz band: 5955 MHz = ch1, 5 MHz steps */
+    if (mhz >= 5935 && mhz <= 7115)
+        return (int)((mhz - 5950) / 5 + 1);
+
+    return 0;
+}
+
+/* Convert centre frequency in kHz to band string "2.4", "5", or "6". */
+static const char *band_from_khz(ULONG freq_khz) {
+    ULONG mhz = freq_khz / 1000;
+    if (mhz >= 2400 && mhz < 2500)
+        return "2.4";
+    if (mhz >= 5000 && mhz < 5900)
+        return "5";
+    if (mhz >= 5900 && mhz <= 7200)
+        return "6";
+    return "2.4";
+}
+
+/*
+ * Build a WLANProfile XML document for WlanSetProfile.
+ * Produces a WPA2-PSK/AES profile when password is non-empty; otherwise open.
+ */
+static std::string build_profile_xml(const std::string &ssid,
+                                     const std::string &password) {
+    bool open = password.empty();
+    std::string xs = xml_escape(ssid);
+    std::string xp = xml_escape(password);
+
+    std::string xml;
+    xml += "<?xml version=\"1.0\"?>\r\n";
+    xml += "<WLANProfile xmlns=\"http://www.microsoft.com/networking/WLAN/profile/v1\">\r\n";
+    xml += "\t<name>" + xs + "</name>\r\n";
+    xml += "\t<SSIDConfig>\r\n";
+    xml += "\t\t<SSID>\r\n";
+    xml += "\t\t\t<name>" + xs + "</name>\r\n";
+    xml += "\t\t</SSID>\r\n";
+    xml += "\t</SSIDConfig>\r\n";
+    xml += "\t<connectionType>ESS</connectionType>\r\n";
+    xml += "\t<connectionMode>manual</connectionMode>\r\n";
+    xml += "\t<MSM>\r\n";
+    xml += "\t\t<security>\r\n";
+    if (open) {
+        xml += "\t\t\t<authEncryption>\r\n";
+        xml += "\t\t\t\t<authentication>open</authentication>\r\n";
+        xml += "\t\t\t\t<encryption>none</encryption>\r\n";
+        xml += "\t\t\t\t<useOneX>false</useOneX>\r\n";
+        xml += "\t\t\t</authEncryption>\r\n";
+    } else {
+        xml += "\t\t\t<authEncryption>\r\n";
+        xml += "\t\t\t\t<authentication>WPA2PSK</authentication>\r\n";
+        xml += "\t\t\t\t<encryption>AES</encryption>\r\n";
+        xml += "\t\t\t\t<useOneX>false</useOneX>\r\n";
+        xml += "\t\t\t</authEncryption>\r\n";
+        xml += "\t\t\t<sharedKey>\r\n";
+        xml += "\t\t\t\t<keyType>passPhrase</keyType>\r\n";
+        xml += "\t\t\t\t<protected>false</protected>\r\n";
+        xml += "\t\t\t\t<keyMaterial>" + xp + "</keyMaterial>\r\n";
+        xml += "\t\t\t</sharedKey>\r\n";
+    }
+    xml += "\t\t</security>\r\n";
+    xml += "\t</MSM>\r\n";
+    xml += "</WLANProfile>\r\n";
+    return xml;
+}
+
+#endif /* _WIN32 */
 
 /* -------------------------------------------------------------------------
  * Commands
@@ -228,72 +273,157 @@ static std::vector<WifiNet> parse_netsh(const std::string &text) {
 
 static void cmd_wifi_scan(void) {
 #if defined(_WIN32)
-    /*
-     * Current: delegate to netsh (always available on Windows).
-     * TODO: replace with WlanEnumInterfaces + WlanScan + WlanGetNetworkBssList
-     */
-    std::string raw = capture("netsh wlan show networks mode=bssid 2>nul");
-#else
-    /* Linux/macOS development stub — mimics realistic netsh output. */
-    std::string raw =
-        "SSID 1 : FlintstoneTestNet\r\n"
-        " Authentication          : WPA2-Personal\r\n"
-        " BSSID 1                 : AA:BB:CC:DD:EE:FF\r\n"
-        "      Signal             : 80%\r\n"
-        "      Radio type         : 802.11n\r\n"
-        "      Channel            : 6\r\n";
-#endif
-
-    std::vector<WifiNet> nets = parse_netsh(raw);
-    for (const WifiNet &n : nets) {
-        if (n.ssid.empty())
-            continue;
-        printf("ssid=%s\tbssid=%s\trssi=%d\tauth=%s\tband=%s\tchan=%d\n",
-               n.ssid.c_str(),
-               n.bssid.empty() ? "00:00:00:00:00:00" : n.bssid.c_str(),
-               n.rssi,
-               n.auth.c_str(),
-               n.band.c_str(),
-               n.chan);
+    WlanHandle wlan;
+    if (!wlan.ok()) {
+        fprintf(stderr, "FlinstonePowershell: WlanOpenHandle failed\n");
+        return;
     }
+
+    PWLAN_INTERFACE_INFO_LIST iface_list = nullptr;
+    if (WlanEnumInterfaces(wlan.h, nullptr, &iface_list) != ERROR_SUCCESS ||
+        !iface_list || iface_list->dwNumberOfItems == 0) {
+        if (iface_list)
+            WlanFreeMemory(iface_list);
+        fprintf(stderr, "FlinstonePowershell: no wireless interfaces\n");
+        return;
+    }
+
+    for (DWORD i = 0; i < iface_list->dwNumberOfItems; i++) {
+        GUID *guid = &iface_list->InterfaceInfo[i].InterfaceGuid;
+
+        /* Trigger a scan and wait for the radio to settle. */
+        WlanScan(wlan.h, guid, nullptr, nullptr, nullptr);
+        Sleep(1500);
+
+        PWLAN_BSS_LIST bss_list = nullptr;
+        if (WlanGetNetworkBssList(wlan.h, guid, nullptr,
+                                  dot11_BSS_type_infrastructure,
+                                  FALSE, nullptr, &bss_list) != ERROR_SUCCESS ||
+            !bss_list) {
+            if (bss_list)
+                WlanFreeMemory(bss_list);
+            continue;
+        }
+
+        for (ULONG j = 0; j < bss_list->dwNumberOfItems; j++) {
+            const WLAN_BSS_ENTRY &e = bss_list->wlanBssEntries[j];
+
+            std::string ssid = ssid_to_str(e.dot11Ssid);
+            if (ssid.empty())
+                continue;
+
+            std::string bssid = mac_to_str(e.dot11Bssid);
+            int         rssi  = (int)e.lRssi;
+
+            const UCHAR *ies    = reinterpret_cast<const UCHAR *>(&e) +
+                                  e.ulIeOffset;
+            ULONG        ie_len = e.ulIeSize;
+            std::string  auth   = auth_from_ies(ies, ie_len);
+            const char  *band   = band_from_khz(e.ulChCenterFrequency);
+            int          chan   = chan_from_khz(e.ulChCenterFrequency);
+
+            printf("ssid=%s\tbssid=%s\trssi=%d\tauth=%s\tband=%s\tchan=%d\n",
+                   ssid.c_str(), bssid.c_str(), rssi,
+                   auth.c_str(), band, chan);
+        }
+        WlanFreeMemory(bss_list);
+    }
+    WlanFreeMemory(iface_list);
+
+#else
+    /* Linux/macOS development stub — mimics realistic scan output. */
+    printf("ssid=FlintstoneTestNet\tbssid=AA:BB:CC:DD:EE:FF\trssi=-56\tauth=wpa2\tband=2.4\tchan=6\n");
+#endif
 }
 
 static void cmd_wifi_join(const char *ssid, const char *password) {
-    (void)password; /* future: embed PSK in the profile XML */
 #if defined(_WIN32)
-    /*
-     * Current: netsh connect requires a pre-existing Windows profile.
-     * TODO: build a WPA2-PSK profile XML in memory and call WlanSetProfile +
-     *       WlanConnect so arbitrary networks can be joined without a prior
-     *       profile.
-     */
-    char cmd[512];
-    snprintf(cmd, sizeof(cmd), "netsh wlan connect name=\"%s\" 2>nul", ssid);
-    std::string out = capture(cmd);
-    if (out.find("successfully") != std::string::npos ||
-        out.find("completed") != std::string::npos) {
+    WlanHandle wlan;
+    if (!wlan.ok()) {
+        printf("result=error\tmsg=WlanOpenHandle failed\n");
+        return;
+    }
+
+    PWLAN_INTERFACE_INFO_LIST iface_list = nullptr;
+    if (WlanEnumInterfaces(wlan.h, nullptr, &iface_list) != ERROR_SUCCESS ||
+        !iface_list || iface_list->dwNumberOfItems == 0) {
+        if (iface_list)
+            WlanFreeMemory(iface_list);
+        printf("result=error\tmsg=No wireless interfaces\n");
+        return;
+    }
+
+    /* Build and install the profile on the first interface. */
+    GUID *guid = &iface_list->InterfaceInfo[0].InterfaceGuid;
+    std::string xml = build_profile_xml(ssid, password ? password : "");
+    std::wstring wxml = to_wide(xml);
+
+    DWORD reason = 0;
+    DWORD rc = WlanSetProfile(wlan.h, guid, 0, wxml.c_str(),
+                              nullptr, TRUE, nullptr, &reason);
+    if (rc != ERROR_SUCCESS) {
+        WlanFreeMemory(iface_list);
+        char msg[128];
+        snprintf(msg, sizeof(msg), "WlanSetProfile failed (rc=%lu reason=%lu)", rc, reason);
+        printf("result=error\tmsg=%s\n", msg);
+        return;
+    }
+
+    /* Connect using the newly installed profile. */
+    std::wstring wssid = to_wide(ssid);
+    WLAN_CONNECTION_PARAMETERS params = {};
+    params.wlanConnectionMode = wlan_connection_mode_profile;
+    params.strProfile         = wssid.c_str();
+    params.pDot11Ssid         = nullptr;
+    params.pDesiredBssidList  = nullptr;
+    params.dot11BssType       = dot11_BSS_type_infrastructure;
+    params.dwFlags            = 0;
+
+    rc = WlanConnect(wlan.h, guid, &params, nullptr);
+    WlanFreeMemory(iface_list);
+
+    if (rc == ERROR_SUCCESS) {
         printf("result=ok\tssid=%s\n", ssid);
     } else {
-        fprintf(stderr,
-                "FlinstonePowershell: wifi-join '%s': no saved Windows profile.\n"
-                "  Create a profile in Windows first, or wait for WlanAPI integration.\n",
-                ssid);
-        printf("result=error\tmsg=No saved Windows profile for '%s'\n", ssid);
+        char msg[128];
+        snprintf(msg, sizeof(msg), "WlanConnect failed (rc=%lu)", rc);
+        printf("result=error\tmsg=%s\n", msg);
     }
 #else
     /* Stub for Linux dev builds */
+    (void)password;
     printf("result=ok\tssid=%s\n", ssid);
 #endif
 }
 
 static void cmd_wifi_leave(void) {
 #if defined(_WIN32)
-    /*
-     * TODO: replace with WlanDisconnect
-     */
-    std::string out = capture("netsh wlan disconnect 2>nul");
-    if (out.find("successfully") != std::string::npos ||
-        out.find("completed") != std::string::npos)
+    WlanHandle wlan;
+    if (!wlan.ok()) {
+        puts("result=error\tmsg=WlanOpenHandle failed");
+        return;
+    }
+
+    PWLAN_INTERFACE_INFO_LIST iface_list = nullptr;
+    if (WlanEnumInterfaces(wlan.h, nullptr, &iface_list) != ERROR_SUCCESS ||
+        !iface_list || iface_list->dwNumberOfItems == 0) {
+        if (iface_list)
+            WlanFreeMemory(iface_list);
+        puts("result=error\tmsg=No wireless interfaces");
+        return;
+    }
+
+    DWORD rc = ERROR_SUCCESS;
+    for (DWORD i = 0; i < iface_list->dwNumberOfItems; i++) {
+        DWORD r = WlanDisconnect(wlan.h,
+                                 &iface_list->InterfaceInfo[i].InterfaceGuid,
+                                 nullptr);
+        if (r != ERROR_SUCCESS)
+            rc = r;
+    }
+    WlanFreeMemory(iface_list);
+
+    if (rc == ERROR_SUCCESS)
         puts("result=ok");
     else
         puts("result=error\tmsg=Disconnect failed or not connected");
@@ -304,41 +434,49 @@ static void cmd_wifi_leave(void) {
 
 static void cmd_wifi_status(void) {
 #if defined(_WIN32)
-    /*
-     * TODO: replace with WlanQueryInterface(wlan_intf_opcode_current_connection)
-     */
-    std::string raw = capture("netsh wlan show interfaces 2>nul");
-    std::string ssid;
-    bool connected = false;
-
-    const char *p = raw.c_str();
-    while (*p) {
-        const char *nl = strchr(p, '\n');
-        std::string line(p, nl ? (size_t)(nl - p) : strlen(p));
-        p = nl ? nl + 1 : p + line.size();
-        if (!line.empty() && line.back() == '\r')
-            line.pop_back();
-        line = trim(line);
-
-        if (line.find("State") != std::string::npos) {
-            size_t c = line.find(": ");
-            if (c != std::string::npos)
-                connected = (trim(line.substr(c + 2)) == "connected");
-        }
-        /* "SSID" but not "BSSID" */
-        if (line.find("SSID") != std::string::npos &&
-            line.find("BSSID") == std::string::npos) {
-            size_t c = line.find(": ");
-            if (c != std::string::npos)
-                ssid = trim(line.substr(c + 2));
-        }
+    WlanHandle wlan;
+    if (!wlan.ok()) {
+        puts("state=disconnected");
+        return;
     }
 
-    if (connected && !ssid.empty())
-        printf("state=connected\tssid=%s\n", ssid.c_str());
-    else if (connected)
-        puts("state=connected");
-    else
+    PWLAN_INTERFACE_INFO_LIST iface_list = nullptr;
+    if (WlanEnumInterfaces(wlan.h, nullptr, &iface_list) != ERROR_SUCCESS ||
+        !iface_list || iface_list->dwNumberOfItems == 0) {
+        if (iface_list)
+            WlanFreeMemory(iface_list);
+        puts("state=disconnected");
+        return;
+    }
+
+    bool printed = false;
+    for (DWORD i = 0; i < iface_list->dwNumberOfItems; i++) {
+        GUID *guid = &iface_list->InterfaceInfo[i].InterfaceGuid;
+
+        PWLAN_CONNECTION_ATTRIBUTES attrs = nullptr;
+        DWORD size = sizeof(WLAN_CONNECTION_ATTRIBUTES);
+        if (WlanQueryInterface(wlan.h, guid,
+                               wlan_intf_opcode_current_connection,
+                               nullptr, &size,
+                               reinterpret_cast<PVOID *>(&attrs),
+                               nullptr) == ERROR_SUCCESS && attrs) {
+            if (attrs->isState == wlan_interface_state_connected) {
+                std::string ssid = ssid_to_str(
+                    attrs->wlanAssociationAttributes.dot11Ssid);
+                if (!ssid.empty())
+                    printf("state=connected\tssid=%s\n", ssid.c_str());
+                else
+                    puts("state=connected");
+                printed = true;
+            }
+            WlanFreeMemory(attrs);
+        }
+        if (printed)
+            break;
+    }
+    WlanFreeMemory(iface_list);
+
+    if (!printed)
         puts("state=disconnected");
 #else
     puts("state=disconnected");

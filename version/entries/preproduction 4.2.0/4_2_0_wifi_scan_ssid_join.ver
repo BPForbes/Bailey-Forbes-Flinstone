@@ -10,12 +10,17 @@ PRE 4.2.0: Wi-Fi scan home SSID + SSID-based join; WSL detection; FlinstonePower
   FL_PLATFORM_WSL / FL_PLATFORM_LINUX / FL_PLATFORM_MACOS; checks /proc/version
   and WSL_DISTRO_NAME so WSL1 and WSL2 are both detected; result cached
 - FlinstonePowershell (tools/FlinstonePowershell/FlinstonePowershell.cpp):
-  basic C++ bridge program for the WSL ↔ Windows Wi-Fi path; commands:
-  wifi-scan, wifi-join, wifi-leave, wifi-status, platform; current implementation
-  wraps netsh.exe (always available on Windows via WSL interop); Windows API stubs
-  (WlanEnumInterfaces, WlanScan, WlanGetNetworkBssList, WlanConnect) marked TODO
-  for native WlanAPI integration; build with `make flinstone-ps` (Linux/WSL dev) or
-  `make flinstone-ps-windows` (mingw32 cross-compile to .exe)
+  C++ bridge program for the WSL ↔ Windows Wi-Fi path; commands:
+  wifi-scan, wifi-join, wifi-leave, wifi-status, platform; Windows build
+  (make flinstone-ps-windows, links -lwlanapi -lole32) uses native WlanAPI:
+  WlanOpenHandle/WlanCloseHandle (RAII), WlanEnumInterfaces, WlanScan +
+  Sleep(1500) + WlanGetNetworkBssList for scanning (raw BSS IE parsing for
+  auth mode: RSN IE tag 0x30 with AKM 00:0F:AC:08=SAE→wpa3, else wpa2;
+  vendor IE 0xDD OUI 00:50:F2:01=WPA1), centre-frequency-to-band/channel
+  conversion (2.4/5/6 GHz), WlanSetProfile (WPA2-PSK or open WLANProfile
+  XML built in memory) + WlanConnect for wifi-join, WlanDisconnect for
+  wifi-leave, WlanQueryInterface(wlan_intf_opcode_current_connection) for
+  wifi-status; Linux dev build (make flinstone-ps) uses hardcoded stubs
 - wifi host backend (net_wifi_host_linux.c): on WSL, probe_host_backend_once()
   routes through FlinstonePowershell instead of wpa_cli/nmcli; FL_WIFI_HOST_FLINSTONE_PS
   backend kind; exe located via FL_NET_WIFI_FLINSTONE_PS env var or PATH search;
