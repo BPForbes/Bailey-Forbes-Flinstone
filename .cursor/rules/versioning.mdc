@@ -96,6 +96,14 @@ So a **minor** bump from **`2.2.4`** is **`2.3.0`**: **`A`** stays `2`, **`B`** 
 
 If a single release mixes major, minor, and patch-style work, still apply **only** the **highest** applicable bump once (e.g. milestone + architecture → **`A`** only → **`3.0.0`** after **`2.x.y`**); do not stack multiple component bumps for the same release.
 
+## PR target branch from `.ver` state (mandatory)
+
+The `.ver` file your PR adds determines which branch to target. Using the wrong base causes CI to fail:
+
+- **`PRERELEASE=1` + `DEV_VERSION=<N>`** → PR must target **`develop`**. All prerelease trains merge to `develop`. `check_version_main_prerelease_policy.sh` rejects `PRERELEASE=1` or `DEV_VERSION=` rows on any PR targeting `main`.
+- **`GM=1`** → PR targets **`main`** — only after a human maintainer explicitly authorizes `GM=1`. Agents must never self-authorize.
+- **Never open a PR against `main` while the branch `.ver` has `PRERELEASE=1` or `DEV_VERSION=`.** These two states are mutually exclusive merge targets.
+
 ## Merge / PR checks
 
 Before merging **incoming → base** (examples: `bug/*` → `develop`, `develop` → `main`):

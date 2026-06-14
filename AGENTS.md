@@ -154,6 +154,15 @@ If a single release mixes milestone/architecture work, features, and fixes: **in
 
 ### Merge / PR expectation
 
+**PR target branch from `.ver` state (AI — mandatory):** The `.ver` file on your branch determines which branch the PR must target.
+
+| `.ver` state | PR targets | Notes |
+|---|---|---|
+| `PRERELEASE=1` + `DEV_VERSION=<N>` | **`develop`** | All prerelease trains land on `develop`; `check_version_main_prerelease_policy.sh` fails if `PRERELEASE=1` or `DEV_VERSION=` appear on a `main`-targeted PR |
+| `GM=1` | **`main`** | Only after a human maintainer explicitly authorizes `GM=1`; agents must never self-authorize |
+
+**Never open a PR against `main` while the branch's `.ver` has `PRERELEASE=1` or `DEV_VERSION=`.** These two states are mutually exclusive merge targets.
+
 Before merging **incoming → base** (e.g. `bug/*` → `develop`, `develop` → `main`):
 
 1. Compare **published** **`VERSION_*` / `VERSION` on the target branch** (`userland/shell/version_def.h`, from **`version/locked/*.ver`** on the target) to the **incoming** release: either the semver in **`version/entries/*.ver`** on the incoming branch (must exceed the target) or incoming **`version_def.h`** if the PR already updated **`version/locked/`** via a maintainer finalize.

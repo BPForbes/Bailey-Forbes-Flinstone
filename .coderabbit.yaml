@@ -22,6 +22,8 @@ reviews:
     - **`version/entries/`** may contain **extra** `.ver` files not yet in **`version/locked/`** until that merge (or a local finalize). CI requires every **`version/locked/`** file to **byte-match** the same relative path under **`version/entries/`** (`check_version_locked_subset_of_entries.sh`).
     - AI-assisted refactors must **exclude** historical **`version/locked/**`** from bulk edits.
 
+    **PR target branch from `.ver` state:** The `.ver` file added by a PR determines which branch it must target. `PRERELEASE=1` + `DEV_VERSION=<N>` → PR must target **`develop`** (all prerelease trains merge to `develop`; `check_version_main_prerelease_policy.sh` fails a `main`-targeted PR that contains `PRERELEASE=1` or `DEV_VERSION=` rows). `GM=1` → PR targets **`main`** (only after a human maintainer explicitly authorizes `GM=1`; agents must not self-authorize). These are **mutually exclusive targets** — never a `main`-targeted PR while the `.ver` still has `PRERELEASE=1` or `DEV_VERSION=`.
+
     When reviewing a PR that merges **incoming → base** (e.g. `bug/*` → `develop`, `develop` → `main`):
 
     1. Compare the **target branch** published **`VERSION`** (`userland/shell/version_def.h`) to the **incoming** release recorded in **`version/entries/*.ver`** (must be strictly greater when the PR does not already update **`version/locked/`**), or to incoming **`VERSION`** if the PR includes a maintainer finalize of **`version/locked/`**.
