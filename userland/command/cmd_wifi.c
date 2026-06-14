@@ -45,10 +45,12 @@ static const char *band_name(uint8_t band) {
 static int wifi_usage(void) {
     fputs("Usage:\n"
           "  wifi scan [-band any|2|5|6]\n"
-          "  wifi join [-b <bssid>] <name> [password]\n"
-          "  wifi leave                          Disconnect and drop WLAN addresses\n"
+          "  wifi join <ssid> [password]              Join by network name and password\n"
+          "  wifi join -b <bssid> <ssid> [password]  Pin to a specific AP by MAC address\n"
+          "  wifi leave                               Disconnect and drop WLAN addresses\n"
           "  wifi known\n"
           "  wifi status\n"
+          "  Lab scan: set FL_NET_WIFI_HOME_SSID to include your home network in scan results.\n"
           "  Real Wi-Fi (Linux): wpa_cli or nmcli on FL_NET_WIFI_IFACE (auto-detect when unset).\n",
           stderr);
     return 1;

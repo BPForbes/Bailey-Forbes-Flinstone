@@ -1,0 +1,17 @@
+MAJOR_VERSION=4
+STANDARD_VERSION=2
+RELEASE_VERSION=0
+PRERELEASE=1
+DEV_VERSION=14
+DESCRIPTION<<VER_END
+PRE 4.2.0: Wi-Fi scan home SSID + SSID-based join
+
+- wifi scan (lab backend): reads FL_NET_WIFI_HOME_SSID env var and includes the
+  user's home network in scan results; FL_NET_WIFI_HOME_AUTH (open/wpa2/wpa3)
+  and FL_NET_WIFI_HOME_BAND (2/5/6) are optional — defaults are wpa2 and 2.4 GHz
+- wifi join: lab backend no longer requires the target SSID to appear in the last
+  scan; if the network is absent a synthetic scan entry is built from the supplied
+  SSID + password so home and hidden networks can be joined directly by name
+- wifi join usage: clarified as `wifi join <ssid> [password]`; BSSID option
+  shown on its own line as an advanced pin-to-AP flag, no longer top-billed
+VER_END
