@@ -37,7 +37,8 @@ PRE 4.2.0: Wi-Fi scan home SSID + SSID-based join; WSL detection; FlinstonePower
 - wifi join: when the session carries sudo elevation, prompts "Sudo Password: " first
   to re-authenticate, then "WiFi Password: " — distinguishing the two credentials
 - scripts/install_deps.sh: added wpasupplicant and network-manager as runtime deps
-  for the Linux Wi-Fi host backend (wpa_cli / nmcli)
+  for the Linux Wi-Fi host backend (wpa_cli / nmcli); added mingw-w64 as the
+  cross-compiler toolchain required for `make flinstone-ps-windows`
 - README.md: added sudo ./scripts/install_deps.sh instruction under Prerequisites
 - security: shell-escape SSID and passphrase before popen nmcli/wpa_cli calls
   (shell injection via crafted SSID or passphrase — net_wifi_host_linux.c)
