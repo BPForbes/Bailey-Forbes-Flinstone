@@ -177,7 +177,6 @@ CORE_SRCS = kernel/core/vfs/disk.c kernel/core/vfs/fat32_host.c kernel/core/vfs/
             $(NET_CORE_SRCS) \
             kernel/core/identity/user_db.c kernel/core/identity/elevation.c kernel/core/identity/path_property.c \
             kernel/core/identity/session.c \
-            kernel/core/platform/fl_platform.c \
             kernel/core/sys/vrt.c kernel/core/sys/ipc.c kernel/core/sys/syscall.c kernel/core/vfs/vfs.c
 COMMAND_SRCS := $(wildcard userland/command/cmd_*.c) userland/command/server_file_expire.c
 SHELL_SRCS = userland/shell/common.c userland/shell/util.c userland/shell/history_record.c userland/shell/audit_log.c userland/shell/authz_subsystem.c userland/shell/contract_log_dispatch.c userland/shell/session_sync.c userland/shell/session_login_env.c userland/shell/terminal.c userland/shell/interpreter.c userland/shell/sh.c userland/shell/shell_io.c $(COMMAND_SRCS)
