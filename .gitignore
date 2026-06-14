@@ -1,7 +1,7 @@
 # Visual Studio
 .vs/
 
-# Build artifacts
+# Build artifacts (make intermediate object files)
 *.o
 *.exe
 *.dll

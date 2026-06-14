@@ -867,6 +867,7 @@ clean:
 	rm -f tests/test_p3_network tests/test_p3_server tests/test_p3_server_lan tests/test_p3_udp_cmds tests/test_p3_net_tools
 	rm -f tests/test_batch_argv_issue220 tests/test_threadpool_issue222 tests/test_disk_hex_issue222
 	rm -rf tests/obj/issue220 tests/obj/issue222
+	find . -name '*.o' -type f ! -path './deps/*' ! -path './.git/*' -exec rm -f {} +
 
 # Architecture-specific build targets
 .PHONY: arm x86-64-nasm x86_64_nasm parity
