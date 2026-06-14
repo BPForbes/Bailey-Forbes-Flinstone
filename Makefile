@@ -228,6 +228,11 @@ ASMOBJS = $(patsubst %.s,%.o,$(patsubst %.asm,%.o,$(ASMSRCS)))
 IDENTITY_OBJS = userland/identity/password_hash.o
 OBJS = $(SRCS:.c=.o) $(ASMOBJS) $(IDENTITY_OBJS)
 TARGET = BPForbes_Flinstone_Shell
+MINGW_CXX = x86_64-w64-mingw32-g++
+FLINSTONE_PS_EXE_OUT = tools/FlinstonePowershell/FlinstonePowershell.exe
+ifneq ($(shell command -v $(MINGW_CXX) 2>/dev/null),)
+FLINSTONE_PS_EXE = $(FLINSTONE_PS_EXE_OUT)
+endif
 .DEFAULT_GOAL := all
 
 # version_def.h is generated from version/locked/**/*.ver (shipped A.B.C) plus
@@ -242,7 +247,7 @@ $(VERSION_ENTRIES_VER_SUM): FORCE
 $(VERSION_DEF): scripts/gen_version_def.sh $(VER_LOCKED_FILES) $(VERSION_ENTRIES_VER_SUM)
 	@./scripts/gen_version_def.sh
 
-all: $(TARGET)
+all: $(TARGET) $(FLINSTONE_PS_EXE)
 
 # Bare-metal: use port I/O and VGA (for kernel build, not userspace)
 baremetal: CFLAGS += -DDRIVERS_BAREMETAL=1
@@ -336,15 +341,18 @@ flinstone-ps:
 	@echo "Built tools/FlinstonePowershell/FlinstonePowershell (Linux dev build)"
 	@echo "To build the Windows .exe: make flinstone-ps-windows"
 
-# Cross-compile for Windows (requires mingw-w64: apt install mingw-w64).
-.PHONY: flinstone-ps-windows
-flinstone-ps-windows:
-	x86_64-w64-mingw32-g++ -std=c++17 -Wall -Wextra \
-	    -o tools/FlinstonePowershell/FlinstonePowershell.exe \
+# Cross-compile for Windows (requires mingw-w64: sudo ./scripts/install_deps.sh).
+# Included in the default `all` target automatically when x86_64-w64-mingw32-g++ is found.
+$(FLINSTONE_PS_EXE_OUT): tools/FlinstonePowershell/FlinstonePowershell.cpp
+	$(MINGW_CXX) -std=c++17 -Wall -Wextra \
+	    -o $(FLINSTONE_PS_EXE_OUT) \
 	    tools/FlinstonePowershell/FlinstonePowershell.cpp \
 	    -lwlanapi -lole32
-	@echo "Built tools/FlinstonePowershell/FlinstonePowershell.exe (Windows/WlanAPI)"
+	@echo "Built $(FLINSTONE_PS_EXE_OUT) (Windows/WlanAPI)"
 	@echo "Copy to a directory on your Windows PATH so WSL interop can find it."
+
+.PHONY: flinstone-ps-windows
+flinstone-ps-windows: $(FLINSTONE_PS_EXE_OUT)
 
 $(OPENSSL_ARM_LIB):
 	@chmod +x deps/fetch-openssl-aarch64.sh 2>/dev/null || true
