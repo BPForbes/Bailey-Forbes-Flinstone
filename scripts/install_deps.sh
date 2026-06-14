@@ -53,6 +53,17 @@ if [ "$IS_WSL" = "1" ]; then
     apt-get install -y mingw-w64
 fi
 
+# Wire SDL2 system headers into deps/install/include so `make vm-sdl` finds <SDL.h>.
+# libsdl2-dev installs under /usr/include/SDL2/ but the VM build uses -Ideps/install/include.
+if [ -d /usr/include/SDL2 ]; then
+    REPO_ROOT="$(cd "$(dirname "$0")/.." && pwd)"
+    mkdir -p "$REPO_ROOT/deps/install/include"
+    for f in /usr/include/SDL2/*.h; do
+        ln -sf "$f" "$REPO_ROOT/deps/install/include/$(basename "$f")"
+    done
+    echo "SDL2 headers linked into deps/install/include/ ($(ls /usr/include/SDL2/*.h | wc -l) files)"
+fi
+
 echo ""
 echo "All dependencies installed."
 echo "Optional AArch64 cross-deps (OpenSSL/SQLite static libs):"
