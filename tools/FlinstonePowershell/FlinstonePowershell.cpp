@@ -40,8 +40,11 @@
 #define WIN32_LEAN_AND_MEAN
 #include <windows.h>
 #include <wlanapi.h>
+#include <iphlpapi.h>
+#include <ws2tcpip.h>
 #pragma comment(lib, "wlanapi.lib")
 #pragma comment(lib, "ole32.lib")
+#pragma comment(lib, "iphlpapi.lib")
 #endif
 
 #include <cstdio>
@@ -265,6 +268,72 @@ static std::string build_profile_xml(const std::string &ssid,
     return xml;
 }
 
+/*
+ * Look up the IPv4 address, prefix length, and default gateway for the
+ * Windows adapter identified by a GUID.  Fills ipv4 (dotted-decimal),
+ * *prefix (prefix length in bits), and gw (gateway dotted-decimal).
+ * Returns true on success, false if the adapter was not found or has no
+ * suitable address.
+ */
+static bool get_iface_addr(const GUID *guid, char *ipv4, size_t ip_len,
+                           UINT8 *prefix, char *gw, size_t gw_len) {
+    /* Build lowercase dashed GUID string without braces. */
+    char guid_str[37];
+    snprintf(guid_str, sizeof(guid_str),
+             "%08x-%04x-%04x-%02x%02x-%02x%02x%02x%02x%02x%02x",
+             (unsigned)guid->Data1,
+             (unsigned)guid->Data2,
+             (unsigned)guid->Data3,
+             (unsigned)guid->Data4[0], (unsigned)guid->Data4[1],
+             (unsigned)guid->Data4[2], (unsigned)guid->Data4[3],
+             (unsigned)guid->Data4[4], (unsigned)guid->Data4[5],
+             (unsigned)guid->Data4[6], (unsigned)guid->Data4[7]);
+
+    /* Query buffer size then allocate. */
+    ULONG size = 0;
+    GetAdaptersAddresses(AF_INET, GAA_FLAG_INCLUDE_GATEWAYS, NULL, NULL, &size);
+    if (size == 0)
+        return false;
+
+    std::vector<BYTE> buf(size);
+    IP_ADAPTER_ADDRESSES *list =
+        reinterpret_cast<IP_ADAPTER_ADDRESSES *>(buf.data());
+    if (GetAdaptersAddresses(AF_INET, GAA_FLAG_INCLUDE_GATEWAYS, NULL, list,
+                             &size) != ERROR_SUCCESS)
+        return false;
+
+    for (IP_ADAPTER_ADDRESSES *a = list; a; a = a->Next) {
+        /* AdapterName is the GUID string without braces. */
+        if (_stricmp(a->AdapterName, guid_str) != 0)
+            continue;
+
+        /* First unicast IPv4 address. */
+        IP_ADAPTER_UNICAST_ADDRESS *ua = a->FirstUnicastAddress;
+        if (!ua || !ua->Address.lpSockaddr)
+            return false;
+        struct sockaddr_in *sin =
+            reinterpret_cast<struct sockaddr_in *>(ua->Address.lpSockaddr);
+        if (!inet_ntop(AF_INET, &sin->sin_addr, ipv4, (socklen_t)ip_len))
+            return false;
+        if (prefix)
+            *prefix = ua->OnLinkPrefixLength;
+
+        /* First gateway. */
+        if (gw && gw_len > 0) {
+            gw[0] = '\0';
+            IP_ADAPTER_GATEWAY_ADDRESS_LH *gwaddr = a->FirstGatewayAddress;
+            if (gwaddr && gwaddr->Address.lpSockaddr) {
+                struct sockaddr_in *gsin =
+                    reinterpret_cast<struct sockaddr_in *>(
+                        gwaddr->Address.lpSockaddr);
+                inet_ntop(AF_INET, &gsin->sin_addr, gw, (socklen_t)gw_len);
+            }
+        }
+        return true;
+    }
+    return false;
+}
+
 #endif /* _WIN32 */
 
 /* -------------------------------------------------------------------------
@@ -463,10 +532,27 @@ static void cmd_wifi_status(void) {
             if (attrs->isState == wlan_interface_state_connected) {
                 std::string ssid = ssid_to_str(
                     attrs->wlanAssociationAttributes.dot11Ssid);
-                if (!ssid.empty())
-                    printf("state=connected\tssid=%s\n", ssid.c_str());
-                else
-                    puts("state=connected");
+
+                /* Query the real Windows adapter IP for this interface. */
+                char ipv4[16] = "";
+                char gw[16]   = "";
+                UINT8 pfx     = 24;
+                bool have_ip  = get_iface_addr(guid, ipv4, sizeof(ipv4),
+                                               &pfx, gw, sizeof(gw));
+
+                if (!ssid.empty()) {
+                    if (have_ip && ipv4[0])
+                        printf("state=connected\tssid=%s\tipv4=%s\tprefix=%u\tgateway=%s\n",
+                               ssid.c_str(), ipv4, (unsigned)pfx, gw);
+                    else
+                        printf("state=connected\tssid=%s\n", ssid.c_str());
+                } else {
+                    if (have_ip && ipv4[0])
+                        printf("state=connected\tipv4=%s\tprefix=%u\tgateway=%s\n",
+                               ipv4, (unsigned)pfx, gw);
+                    else
+                        puts("state=connected");
+                }
                 printed = true;
             }
             WlanFreeMemory(attrs);
@@ -479,6 +565,7 @@ static void cmd_wifi_status(void) {
     if (!printed)
         puts("state=disconnected");
 #else
+    /* Linux dev stub — real IP fields are only available in the Windows build. */
     puts("state=disconnected");
 #endif
 }

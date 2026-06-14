@@ -25,7 +25,12 @@ PRE 4.2.0: Wi-Fi scan home SSID + SSID-based join; WSL detection; FlinstonePower
   routes through FlinstonePowershell instead of wpa_cli/nmcli; FL_WIFI_HOST_FLINSTONE_PS
   backend kind; exe located via FL_NET_WIFI_FLINSTONE_PS env var or PATH search;
   tab-separated key=value scan output parsed into fl_net_wifi_scan_entry_t;
-  connect/disconnect call wifi-join/wifi-leave subcommands
+  connect/disconnect call wifi-join/wifi-leave subcommands; after a successful
+  connect the backend immediately queries wifi-status to cache the real Windows
+  Wi-Fi IP (ipv4=, prefix=, gateway= fields from GetAdaptersAddresses via
+  iphlpapi); fl_net_wifi_host_linux_ipv4() and _ipv4_route() return the cached
+  values so wifi status shows the actual adapter address instead of the QEMU
+  NAT fallback 10.0.2.15; cache is cleared on disconnect
 - wifi scan (lab backend): reads FL_NET_WIFI_HOME_SSID env var and includes the
   user's home network in scan results; FL_NET_WIFI_HOME_AUTH (open/wpa2/wpa3)
   and FL_NET_WIFI_HOME_BAND (2/5/6) are optional — defaults are wpa2 and 2.4 GHz

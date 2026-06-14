@@ -36,7 +36,47 @@ static size_t s_wpa_scan_count;
 static char s_wpa_joined_ssid[FL_WIFI_SSID_MAX];
 static int s_host_probed;
 static fl_wifi_host_kind_t s_host_kind = FL_WIFI_HOST_NONE;
+static char s_fps_ipv4[16] = "";   /* IPv4 cached from FlinstonePowershell wifi-status */
+static uint8_t s_fps_prefix = 24u;
+static char s_fps_gw[16] = "";
 
+
+/*
+ * Search tab-separated key=value text for a given key and copy the value
+ * (up to the next \t, \r, or \n) into out.  Returns 1 if found, 0 if not.
+ */
+static int parse_fps_field(const char *text, const char *key, char *out,
+                           size_t out_cap) {
+    size_t klen;
+    const char *p;
+
+    if (!text || !key || !out || out_cap == 0u)
+        return 0;
+    klen = strlen(key);
+    p = text;
+    while (*p) {
+        if (strncmp(p, key, klen) == 0 && p[klen] == '=') {
+            const char *val = p + klen + 1;
+            size_t i = 0u;
+            while (val[i] && val[i] != '\t' && val[i] != '\r' && val[i] != '\n'
+                   && i + 1u < out_cap)
+                i++;
+            memcpy(out, val, i);
+            out[i] = '\0';
+            return 1;
+        }
+        /* Advance to next tab or newline boundary. */
+        while (*p && *p != '\t' && *p != '\r' && *p != '\n')
+            p++;
+        while (*p == '\t')
+            p++;
+        if (*p == '\r' || *p == '\n') {
+            while (*p == '\r' || *p == '\n')
+                p++;
+        }
+    }
+    return 0;
+}
 
 static int env_truthy(const char *v) {
     return v && (v[0] == '1' || v[0] == 'y' || v[0] == 'Y' || v[0] == 't' || v[0] == 'T');
@@ -992,6 +1032,20 @@ fl_result_t fl_net_wifi_host_linux_connect(const fl_net_wifi_cred_t *cred,
         if (!strstr(join_out, "result=ok"))
             return FL_RESULT_ERR;
         strncpy(s_wpa_joined_ssid, cred->ssid, sizeof(s_wpa_joined_ssid) - 1u);
+        /* Query real Windows Wi-Fi IP via wifi-status */
+        {
+            char st_out[512];
+            s_fps_ipv4[0] = '\0';
+            s_fps_prefix  = 24u;
+            s_fps_gw[0]   = '\0';
+            if (run_flinstone_ps("wifi-status", st_out, sizeof(st_out))) {
+                char plen_s[8] = "";
+                parse_fps_field(st_out, "ipv4",    s_fps_ipv4, sizeof(s_fps_ipv4));
+                parse_fps_field(st_out, "gateway", s_fps_gw,   sizeof(s_fps_gw));
+                if (parse_fps_field(st_out, "prefix", plen_s, sizeof(plen_s)) && plen_s[0])
+                    s_fps_prefix = (uint8_t)atoi(plen_s);
+            }
+        }
         (void)timeout_ms;
         return FL_RESULT_OK;
     }
@@ -1102,6 +1156,9 @@ fl_result_t fl_net_wifi_host_linux_disconnect(void) {
     if (!fl_net_wifi_host_linux_available())
         return FL_RESULT_NOSYS;
     if (s_host_kind == FL_WIFI_HOST_FLINSTONE_PS) {
+        s_fps_ipv4[0] = '\0';
+        s_fps_gw[0]   = '\0';
+        s_fps_prefix  = 24u;
         (void)run_flinstone_ps("wifi-leave", NULL, 0);
         return FL_RESULT_OK;
     }
@@ -1129,6 +1186,15 @@ fl_result_t fl_net_wifi_host_linux_ipv4(uint32_t *addr_be_out, char *buf, size_t
     fl_result_t rc;
 
     load_env_once();
+    if (s_host_kind == FL_WIFI_HOST_FLINSTONE_PS) {
+        if (!s_fps_ipv4[0])
+            return FL_RESULT_NOENT;
+        if (addr_be_out && !fl_net_ipv4_parse_literal(s_fps_ipv4, addr_be_out))
+            return FL_RESULT_ERR;
+        if (buf && buf_len > 0u)
+            strncpy(buf, s_fps_ipv4, buf_len - 1u);
+        return FL_RESULT_OK;
+    }
     rc = read_iface_ipv4_route(&addr, NULL, NULL);
     if (rc != FL_RESULT_OK)
         return rc;
@@ -1183,6 +1249,19 @@ fl_result_t fl_net_wifi_host_linux_ipv4_route(uint32_t *addr_be_out, uint8_t *pr
     return FL_RESULT_NOSYS;
 #else
     load_env_once();
+    if (s_host_kind == FL_WIFI_HOST_FLINSTONE_PS) {
+        if (!s_fps_ipv4[0])
+            return FL_RESULT_NOENT;
+        if (addr_be_out && !fl_net_ipv4_parse_literal(s_fps_ipv4, addr_be_out))
+            return FL_RESULT_ERR;
+        if (prefix_len_out)
+            *prefix_len_out = s_fps_prefix;
+        if (gw_be_out) {
+            if (s_fps_gw[0] && !fl_net_ipv4_parse_literal(s_fps_gw, gw_be_out))
+                *gw_be_out = 0u;
+        }
+        return FL_RESULT_OK;
+    }
     return read_iface_ipv4_route(addr_be_out, prefix_len_out, gw_be_out);
 #endif
 }
