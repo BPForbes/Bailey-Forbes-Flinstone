@@ -834,9 +834,13 @@ static void parse_flinstone_ps_scan(const char *text, uint8_t band_filter) {
  * ---------------------------------------------------------------------- */
 
 static void probe_host_backend_once(void) {
+    static int s_backend_probed = 0;
     int mode;
 
     load_env_once();
+    if (s_backend_probed)
+        return;
+    s_backend_probed = 1;
     if (s_host_kind != FL_WIFI_HOST_NONE)
         return;
 
