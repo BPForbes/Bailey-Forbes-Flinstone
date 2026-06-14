@@ -23,7 +23,7 @@ ARM64_LINUX_HOST := $(and $(filter Linux,$(UNAME_S)),$(filter aarch64 arm64,$(UN
 # Compiler and flags
 CC = gcc
 AS = as
-CFLAGS = -Wall -Wextra -pthread -I. -Icontracts/foundations -Icontracts/runtime -Icontracts/identity -Icontracts/networking -Icontracts/drivers -Icontracts/storage -Icontracts/observability -Icontracts/operations -Icontracts/virtualization -Icontracts/hardening -Ikernel/include -Ikernel/core/vfs -Ikernel/core/mm -Ikernel/core/memory -Ikernel/core/time -Ikernel/core/net -Ikernel/core/identity -Ikernel/core/sched -Ikernel/core/sys -Iuserland/shell -Iuserland/command -Ikernel/arch/x86_64 -Ikernel/arch/aarch64
+CFLAGS = -Wall -Wextra -pthread -I. -Icontracts/foundations -Icontracts/runtime -Icontracts/identity -Icontracts/networking -Icontracts/drivers -Icontracts/storage -Icontracts/observability -Icontracts/operations -Icontracts/virtualization -Icontracts/hardening -Ikernel/include -Ikernel/core/vfs -Ikernel/core/mm -Ikernel/core/memory -Ikernel/core/time -Ikernel/core/net -Ikernel/core/identity -Ikernel/core/sched -Ikernel/core/sys -Ikernel/core/platform -Iuserland/shell -Iuserland/command -Ikernel/arch/x86_64 -Ikernel/arch/aarch64
 OPENSSL_LIBS = -lssl -lcrypto
 LDFLAGS = -Wl,-z,noexecstack -lsqlite3 -lstdc++ $(OPENSSL_LIBS)
 # Cross ARM on x86: prefer deps/install-aarch64 (./deps/fetch-sqlite-aarch64.sh); optional system libsqlite3-dev:arm64.
@@ -176,6 +176,7 @@ CORE_SRCS = kernel/core/vfs/disk.c kernel/core/vfs/fat32_host.c kernel/core/vfs/
             $(NET_CORE_SRCS) \
             kernel/core/identity/user_db.c kernel/core/identity/elevation.c kernel/core/identity/path_property.c \
             kernel/core/identity/session.c \
+            kernel/core/platform/fl_platform.c \
             kernel/core/sys/vrt.c kernel/core/sys/ipc.c kernel/core/sys/syscall.c kernel/core/vfs/vfs.c
 COMMAND_SRCS := $(wildcard userland/command/cmd_*.c) userland/command/server_file_expire.c
 SHELL_SRCS = userland/shell/common.c userland/shell/util.c userland/shell/history_record.c userland/shell/audit_log.c userland/shell/authz_subsystem.c userland/shell/contract_log_dispatch.c userland/shell/session_sync.c userland/shell/session_login_env.c userland/shell/terminal.c userland/shell/interpreter.c userland/shell/sh.c userland/shell/shell_io.c $(COMMAND_SRCS)
@@ -325,6 +326,25 @@ deps-sqlite-aarch64:
 deps-openssl-aarch64:
 	@chmod +x deps/fetch-openssl-aarch64.sh 2>/dev/null || true
 	@./deps/fetch-openssl-aarch64.sh
+
+# FlinstonePowershell — WSL ↔ Windows Wi-Fi bridge.
+# Linux/WSL development build (uses netsh.exe via WSL interop at runtime):
+.PHONY: flinstone-ps
+flinstone-ps:
+	$(CXX) -std=c++17 -Wall -Wextra -o tools/FlinstonePowershell/FlinstonePowershell \
+	    tools/FlinstonePowershell/FlinstonePowershell.cpp
+	@echo "Built tools/FlinstonePowershell/FlinstonePowershell (Linux dev build)"
+	@echo "To build the Windows .exe: make flinstone-ps-windows"
+
+# Cross-compile for Windows (requires mingw-w64: apt install mingw-w64).
+# Link with -lwlanapi when replacing netsh stubs with native WlanAPI calls.
+.PHONY: flinstone-ps-windows
+flinstone-ps-windows:
+	x86_64-w64-mingw32-g++ -std=c++17 -Wall -Wextra \
+	    -o tools/FlinstonePowershell/FlinstonePowershell.exe \
+	    tools/FlinstonePowershell/FlinstonePowershell.cpp
+	@echo "Built tools/FlinstonePowershell/FlinstonePowershell.exe (Windows)"
+	@echo "Copy to a directory on your Windows PATH so WSL interop can find it."
 
 $(OPENSSL_ARM_LIB):
 	@chmod +x deps/fetch-openssl-aarch64.sh 2>/dev/null || true
