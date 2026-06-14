@@ -343,12 +343,15 @@ flinstone-ps:
 
 # Cross-compile for Windows (requires mingw-w64: sudo ./scripts/install_deps.sh).
 # Included in the default `all` target automatically when x86_64-w64-mingw32-g++ is found.
+# -static-libgcc -static-libstdc++: embed the MinGW runtime so the .exe runs
+# on Windows without libgcc_s_seh-1.dll or libstdc++-6.dll installed.
 $(FLINSTONE_PS_EXE_OUT): tools/FlinstonePowershell/FlinstonePowershell.cpp
 	$(MINGW_CXX) -std=c++17 -Wall -Wextra \
+	    -static-libgcc -static-libstdc++ \
 	    -o $(FLINSTONE_PS_EXE_OUT) \
 	    tools/FlinstonePowershell/FlinstonePowershell.cpp \
 	    -lwlanapi -lole32
-	@echo "Built $(FLINSTONE_PS_EXE_OUT) (Windows/WlanAPI)"
+	@echo "Built $(FLINSTONE_PS_EXE_OUT) (Windows/WlanAPI, self-contained)"
 	@echo "Copy to a directory on your Windows PATH so WSL interop can find it."
 
 .PHONY: flinstone-ps-windows
