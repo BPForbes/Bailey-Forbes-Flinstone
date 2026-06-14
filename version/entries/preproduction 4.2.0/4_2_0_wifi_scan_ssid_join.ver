@@ -15,3 +15,5 @@ PRE 4.2.0: Wi-Fi scan home SSID + SSID-based join
 - wifi join usage: clarified as `wifi join <ssid> [password]`; BSSID option
   shown on its own line as an advanced pin-to-AP flag, no longer top-billed
 VER_END
+
+RELEASE_DATE=2026-06-14
