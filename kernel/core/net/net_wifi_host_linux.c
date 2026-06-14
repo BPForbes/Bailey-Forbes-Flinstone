@@ -842,7 +842,12 @@ static void probe_host_backend_once(void) {
 
     /* On WSL, Windows owns the Wi-Fi radio — route through FlinstonePowershell. */
     if (fl_platform_detect() == FL_PLATFORM_WSL) {
-        (void)probe_flinstone_ps();
+        if (!probe_flinstone_ps())
+            fprintf(stderr,
+                    "wifi: WSL detected but FlinstonePowershell.exe not found.\n"
+                    "  Build: make flinstone-ps-windows\n"
+                    "  Install: copy FlinstonePowershell.exe to a directory on your Windows PATH\n"
+                    "  Override: set FL_NET_WIFI_FLINSTONE_PS=/path/to/FlinstonePowershell.exe\n");
         return;
     }
 
