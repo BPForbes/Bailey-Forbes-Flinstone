@@ -21,6 +21,7 @@
 #include "server_shared_db.h"
 #include "session.h"
 #include "shell_io.h"
+#include "net_wifi_host_linux.h"
 
 #include <errno.h>
 #include <pthread.h>
@@ -552,6 +553,24 @@ static int verb_host(int argc, char **argv) {
             if (fl_net_iface_suggest_ipv4(NULL, suggest, sizeof(suggest)))
                 fl_color_success("peers on LAN can: server join %s:%u", suggest,
                                  (unsigned)ep.port_host);
+        }
+        /* On WSL/FlinstonePowershell: set up Windows portproxy so LAN peers
+         * can reach the server at the Windows Wi-Fi IP. */
+        {
+            const char *win_ip = fl_net_wifi_host_linux_windows_ipv4();
+            if (win_ip && ep.family == FL_NET_ADDR_FAMILY_V4 && ep.port_host > 0u) {
+                char bind_ip[32];
+                fl_net_ipv4_format_addr(ep.addr.v4_be, bind_ip, sizeof(bind_ip));
+                /* Bind IP 0.0.0.0 means all interfaces; use loopback as proxy target
+                 * since Windows portproxy can reach WSL via loopback forwarding. */
+                const char *proxy_target = (ep.addr.v4_be == 0u) ? "127.0.0.1" : bind_ip;
+                if (fl_net_wifi_host_linux_server_proxy(proxy_target, ep.port_host) == 0)
+                    fl_color_success("LAN peers: server join %s:%u (portproxy active)",
+                                     win_ip, (unsigned)ep.port_host);
+                else
+                    fl_color_success("LAN peers: server join %s:%u (run FlinstonePowershell as admin for portproxy)",
+                                     win_ip, (unsigned)ep.port_host);
+            }
         }
     }
     return 0;

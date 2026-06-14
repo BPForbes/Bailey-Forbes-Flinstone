@@ -284,6 +284,11 @@ static int cmd_wifi_join(int argc, char **argv) {
         fputs(", wlan0 netdev UP", stdout);
     }
     puts(")");
+    {
+        const char *win_ip = fl_net_wifi_host_linux_windows_ipv4();
+        if (win_ip)
+            printf("wifi join: Windows Wi-Fi IP %s — LAN peers use this (requires port forwarding via server host -all <port>)\n", win_ip);
+    }
     fl_wifi_db_close();
     return 0;
 }
@@ -344,9 +349,12 @@ static int cmd_wifi_status(int argc, char **argv) {
             char ip6[64];
             uint8_t addr6[16];
             uint8_t p6 = 0u;
+            const char *win_ip = fl_net_wifi_host_linux_windows_ipv4();
             fl_net_ipv4_format_addr(ip_be, ip, sizeof(ip));
             printf("Interface %s IPv4: %s (server host %s:<port> or server host -all <port>)\n",
                    ifname, ip, ip);
+            if (win_ip)
+                printf("Windows Wi-Fi IP: %s (router-assigned; LAN peers use this after port forward)\n", win_ip);
             if (fl_net_wifi_netdev_ipv6(addr6, &p6) == FL_RESULT_OK &&
                 fl_net_ipv6_format_addr(addr6, ip6, sizeof(ip6)))
                 printf("Interface %s IPv6: %s/%u\n", ifname, ip6, (unsigned)p6);

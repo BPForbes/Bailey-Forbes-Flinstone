@@ -36,9 +36,10 @@ static size_t s_wpa_scan_count;
 static char s_wpa_joined_ssid[FL_WIFI_SSID_MAX];
 static int s_host_probed;
 static fl_wifi_host_kind_t s_host_kind = FL_WIFI_HOST_NONE;
-static char s_fps_ipv4[16] = "";   /* IPv4 cached from FlinstonePowershell wifi-status */
+static char s_fps_ipv4[16] = "";   /* Windows Wi-Fi adapter IP from FlinstonePowershell */
 static uint8_t s_fps_prefix = 24u;
 static char s_fps_gw[16] = "";
+static char s_wsl_bind_ipv4[16] = ""; /* WSL eth0 IP — bindable in Linux for server host */
 
 
 /*
@@ -76,6 +77,46 @@ static int parse_fps_field(const char *text, const char *key, char *out,
         }
     }
     return 0;
+}
+
+/*
+ * Find the first non-loopback, non-APIPA, non-tap IPv4 on the Linux host
+ * (WSL2 eth0 or similar).  That address is bindable in Linux, unlike the
+ * Windows adapter IP reported by FlinstonePowershell.
+ */
+static void read_any_nonlo_ipv4(char *out, size_t cap) {
+#if defined(FL_NET_WIFI_HOST_LINUX)
+    struct ifaddrs *ifa = NULL;
+    struct ifaddrs *cur;
+
+    out[0] = '\0';
+    if (cap == 0u || getifaddrs(&ifa) != 0)
+        return;
+    for (cur = ifa; cur; cur = cur->ifa_next) {
+        struct sockaddr_in *sin;
+        uint32_t addr;
+
+        if (!cur->ifa_addr || !cur->ifa_name)
+            continue;
+        if (cur->ifa_addr->sa_family != AF_INET)
+            continue;
+        /* Skip tap* interfaces (Flinstone virtual adapters) */
+        if (strncmp(cur->ifa_name, "tap", 3) == 0)
+            continue;
+        sin = (struct sockaddr_in *)cur->ifa_addr;
+        addr = sin->sin_addr.s_addr;
+        if (fl_net_ipv4_is_loopback(addr) || fl_net_ipv4_is_apipa(addr))
+            continue;
+        if (addr == 0u)
+            continue;
+        fl_net_ipv4_format_addr(addr, out, cap);
+        break;
+    }
+    freeifaddrs(ifa);
+#else
+    (void)cap;
+    out[0] = '\0';
+#endif
 }
 
 static int env_truthy(const char *v) {
@@ -1045,6 +1086,8 @@ fl_result_t fl_net_wifi_host_linux_connect(const fl_net_wifi_cred_t *cred,
                 if (parse_fps_field(st_out, "prefix", plen_s, sizeof(plen_s)) && plen_s[0])
                     s_fps_prefix = (uint8_t)atoi(plen_s);
             }
+            /* Cache the WSL Linux-side IP (eth0); this is what server host binds to. */
+            read_any_nonlo_ipv4(s_wsl_bind_ipv4, sizeof(s_wsl_bind_ipv4));
         }
         (void)timeout_ms;
         return FL_RESULT_OK;
@@ -1156,9 +1199,10 @@ fl_result_t fl_net_wifi_host_linux_disconnect(void) {
     if (!fl_net_wifi_host_linux_available())
         return FL_RESULT_NOSYS;
     if (s_host_kind == FL_WIFI_HOST_FLINSTONE_PS) {
-        s_fps_ipv4[0] = '\0';
-        s_fps_gw[0]   = '\0';
-        s_fps_prefix  = 24u;
+        s_fps_ipv4[0]     = '\0';
+        s_fps_gw[0]       = '\0';
+        s_fps_prefix      = 24u;
+        s_wsl_bind_ipv4[0] = '\0';
         (void)run_flinstone_ps("wifi-leave", NULL, 0);
         return FL_RESULT_OK;
     }
@@ -1187,12 +1231,16 @@ fl_result_t fl_net_wifi_host_linux_ipv4(uint32_t *addr_be_out, char *buf, size_t
 
     load_env_once();
     if (s_host_kind == FL_WIFI_HOST_FLINSTONE_PS) {
-        if (!s_fps_ipv4[0])
+        /* Return the WSL Linux-side IP (eth0) — it is actually bindable in
+         * Linux.  s_fps_ipv4 holds the Windows adapter IP which Linux cannot
+         * bind to; use fl_net_wifi_host_linux_windows_ipv4() for that. */
+        const char *bind_ip = s_wsl_bind_ipv4[0] ? s_wsl_bind_ipv4 : s_fps_ipv4;
+        if (!bind_ip[0])
             return FL_RESULT_NOENT;
-        if (addr_be_out && !fl_net_ipv4_parse_literal(s_fps_ipv4, addr_be_out))
+        if (addr_be_out && !fl_net_ipv4_parse_literal(bind_ip, addr_be_out))
             return FL_RESULT_ERR;
         if (buf && buf_len > 0u)
-            strncpy(buf, s_fps_ipv4, buf_len - 1u);
+            strncpy(buf, bind_ip, buf_len - 1u);
         return FL_RESULT_OK;
     }
     rc = read_iface_ipv4_route(&addr, NULL, NULL);
@@ -1263,5 +1311,63 @@ fl_result_t fl_net_wifi_host_linux_ipv4_route(uint32_t *addr_be_out, uint8_t *pr
         return FL_RESULT_OK;
     }
     return read_iface_ipv4_route(addr_be_out, prefix_len_out, gw_be_out);
+#endif
+}
+
+/*
+ * Return the real Windows Wi-Fi adapter IP reported by FlinstonePowershell
+ * (e.g. 192.168.1.235).  This IP cannot be bound in Linux/WSL directly; it
+ * is exposed for display and peer-connection hints only.
+ * Returns NULL when not on the FlinstonePowershell backend or not connected.
+ */
+const char *fl_net_wifi_host_linux_windows_ipv4(void) {
+#if !defined(FL_NET_WIFI_HOST_LINUX)
+    return NULL;
+#else
+    if (s_host_kind != FL_WIFI_HOST_FLINSTONE_PS || !s_fps_ipv4[0])
+        return NULL;
+    return s_fps_ipv4;
+#endif
+}
+
+/*
+ * Ask FlinstonePowershell to add a Windows portproxy rule so LAN peers can
+ * reach the server at the Windows Wi-Fi IP:<port>.  Requires the Windows
+ * process to be running with administrator rights; returns 0 on success,
+ * -1 on failure or wrong backend.
+ */
+int fl_net_wifi_host_linux_server_proxy(const char *wsl_ip, uint16_t port) {
+#if !defined(FL_NET_WIFI_HOST_LINUX)
+    (void)wsl_ip;
+    (void)port;
+    return -1;
+#else
+    char args[256];
+    char out[256];
+
+    if (s_host_kind != FL_WIFI_HOST_FLINSTONE_PS || !wsl_ip || !wsl_ip[0])
+        return -1;
+    snprintf(args, sizeof(args), "server-proxy %s %u", wsl_ip, (unsigned)port);
+    if (!run_flinstone_ps(args, out, sizeof(out)))
+        return -1;
+    return strstr(out, "result=ok") ? 0 : -1;
+#endif
+}
+
+/* Remove a previously added portproxy rule for port.  Returns 0 on success. */
+int fl_net_wifi_host_linux_server_proxy_del(uint16_t port) {
+#if !defined(FL_NET_WIFI_HOST_LINUX)
+    (void)port;
+    return -1;
+#else
+    char args[64];
+    char out[256];
+
+    if (s_host_kind != FL_WIFI_HOST_FLINSTONE_PS)
+        return -1;
+    snprintf(args, sizeof(args), "server-proxy-del %u", (unsigned)port);
+    if (!run_flinstone_ps(args, out, sizeof(out)))
+        return -1;
+    return strstr(out, "result=ok") ? 0 : -1;
 #endif
 }

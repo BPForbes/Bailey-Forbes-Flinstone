@@ -583,6 +583,50 @@ static void cmd_platform(void) {
 }
 
 /* -------------------------------------------------------------------------
+ * server-proxy / server-proxy-del
+ * Use Windows netsh portproxy to forward <win-ip>:<port> → <wsl-ip>:<port>
+ * so LAN peers can reach a server running inside WSL.
+ * Requires the process to run with Windows administrator rights.
+ * ---------------------------------------------------------------------- */
+
+static void cmd_server_proxy(const char *wsl_ip, const char *port_s) {
+#if defined(_WIN32)
+    char cmd[512];
+    snprintf(cmd, sizeof(cmd),
+             "netsh interface portproxy add v4tov4"
+             " listenaddress=0.0.0.0 listenport=%s"
+             " connectaddress=%s connectport=%s",
+             port_s, wsl_ip, port_s);
+    int rc = system(cmd);
+    if (rc == 0)
+        printf("result=ok\tport=%s\twsl_ip=%s\n", port_s, wsl_ip);
+    else
+        printf("result=err\tmsg=netsh portproxy failed (rc=%d, run as admin)\n", rc);
+#else
+    (void)wsl_ip; (void)port_s;
+    puts("result=err\tmsg=server-proxy only available on Windows");
+#endif
+}
+
+static void cmd_server_proxy_del(const char *port_s) {
+#if defined(_WIN32)
+    char cmd[256];
+    snprintf(cmd, sizeof(cmd),
+             "netsh interface portproxy delete v4tov4"
+             " listenaddress=0.0.0.0 listenport=%s",
+             port_s);
+    int rc = system(cmd);
+    if (rc == 0)
+        printf("result=ok\tport=%s\n", port_s);
+    else
+        printf("result=err\tmsg=netsh portproxy delete failed (rc=%d)\n", rc);
+#else
+    (void)port_s;
+    puts("result=err\tmsg=server-proxy-del only available on Windows");
+#endif
+}
+
+/* -------------------------------------------------------------------------
  * Entry point
  * ---------------------------------------------------------------------- */
 
@@ -594,11 +638,13 @@ int main(int argc, char **argv) {
                 "Usage: FlinstonePowershell <command> [args...]\n"
                 "\n"
                 "Commands:\n"
-                "  platform                    Print the host platform tag\n"
-                "  wifi-scan                   List visible Wi-Fi networks\n"
-                "  wifi-join <ssid> [password] Connect to a network\n"
-                "  wifi-leave                  Disconnect from current network\n"
-                "  wifi-status                 Show connection state\n");
+                "  platform                          Print the host platform tag\n"
+                "  wifi-scan                         List visible Wi-Fi networks\n"
+                "  wifi-join <ssid> [password]       Connect to a network\n"
+                "  wifi-leave                        Disconnect from current network\n"
+                "  wifi-status                       Show connection state\n"
+                "  server-proxy <wsl_ip> <port>      Forward Windows IP:<port> → WSL (admin)\n"
+                "  server-proxy-del <port>           Remove portproxy rule (admin)\n");
         return 1;
     }
 
@@ -618,6 +664,18 @@ int main(int argc, char **argv) {
         cmd_wifi_leave();
     } else if (strcmp(cmd, "wifi-status") == 0) {
         cmd_wifi_status();
+    } else if (strcmp(cmd, "server-proxy") == 0) {
+        if (argc < 4) {
+            fprintf(stderr, "server-proxy: requires <wsl_ip> <port>\n");
+            return 1;
+        }
+        cmd_server_proxy(argv[2], argv[3]);
+    } else if (strcmp(cmd, "server-proxy-del") == 0) {
+        if (argc < 3) {
+            fprintf(stderr, "server-proxy-del: requires <port>\n");
+            return 1;
+        }
+        cmd_server_proxy_del(argv[2]);
     } else {
         fprintf(stderr, "FlinstonePowershell: unknown command '%s'\n", cmd);
         return 1;

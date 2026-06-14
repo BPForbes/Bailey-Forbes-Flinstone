@@ -28,9 +28,20 @@ PRE 4.2.0: Wi-Fi scan home SSID + SSID-based join; WSL detection; FlinstonePower
   connect/disconnect call wifi-join/wifi-leave subcommands; after a successful
   connect the backend immediately queries wifi-status to cache the real Windows
   Wi-Fi IP (ipv4=, prefix=, gateway= fields from GetAdaptersAddresses via
-  iphlpapi); fl_net_wifi_host_linux_ipv4() and _ipv4_route() return the cached
-  values so wifi status shows the actual adapter address instead of the QEMU
-  NAT fallback 10.0.2.15; cache is cleared on disconnect
+  iphlpapi); a separate read_any_nonlo_ipv4() scan of getifaddrs() picks the
+  WSL2 eth0 IP (e.g. 172.28.x.x) and caches it in s_wsl_bind_ipv4 —
+  fl_net_wifi_host_linux_ipv4() returns this WSL IP so fl_net_wifi_netdev_up_
+  with_ipv4() registers a real bindable Linux address; server host <wsl-ip>:
+  <port> now succeeds instead of failing with EADDRNOTAVAIL; the Windows
+  adapter IP (s_fps_ipv4, e.g. 192.168.1.235) is exposed via the new
+  fl_net_wifi_host_linux_windows_ipv4() API for display only; wifi status and
+  wifi join now print a separate "Windows Wi-Fi IP: ..." line showing the
+  router-assigned address; server host automatically calls
+  fl_net_wifi_host_linux_server_proxy() which runs FlinstonePowershell server-
+  proxy <wsl_ip> <port> — a new subcommand that adds a Windows netsh portproxy
+  rule forwarding the Windows IP:<port> to WSL, enabling LAN-wide access
+  (requires FlinstonePowershell.exe run as admin); server-proxy-del <port>
+  removes the rule; cache is cleared on disconnect
 - wifi scan (lab backend): reads FL_NET_WIFI_HOME_SSID env var and includes the
   user's home network in scan results; FL_NET_WIFI_HOME_AUTH (open/wpa2/wpa3)
   and FL_NET_WIFI_HOME_BAND (2/5/6) are optional — defaults are wpa2 and 2.4 GHz

@@ -48,4 +48,21 @@ fl_result_t fl_net_wifi_host_linux_ipv6_route(uint8_t addr6[16], uint8_t *prefix
 
 const char *fl_net_wifi_host_linux_iface(void);
 
+/**
+ * Windows Wi-Fi adapter IP from FlinstonePowershell (e.g. "192.168.1.235").
+ * Not bindable in Linux; use for display and peer-connection hints only.
+ * Returns NULL when not on the FlinstonePowershell backend or not connected.
+ */
+const char *fl_net_wifi_host_linux_windows_ipv4(void);
+
+/**
+ * Add a Windows portproxy rule so LAN peers can reach the server at the
+ * Windows Wi-Fi IP.  Requires FlinstonePowershell.exe to have admin rights.
+ * Returns 0 on success, -1 on failure or wrong backend.
+ */
+int fl_net_wifi_host_linux_server_proxy(const char *wsl_ip, uint16_t port);
+
+/** Remove a portproxy rule added by fl_net_wifi_host_linux_server_proxy(). */
+int fl_net_wifi_host_linux_server_proxy_del(uint16_t port);
+
 #endif /* NET_WIFI_HOST_LINUX_H */
