@@ -381,7 +381,7 @@ int main(int argc, char *argv[]) {
             disk_ensure_default_fat32(current_disk_file, 32, 512);
         }
         read_disk_header();
-        if (!g_disk_host_fat32 && g_total_clusters == 0) {
+        if (!g_disk_host_fat32) {
             /* File exists but has no recognizable content — overwrite with default image. */
             disk_reinit_default_fat32(current_disk_file, 32, 512);
             read_disk_header();
