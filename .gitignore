@@ -5,6 +5,8 @@
 *.o
 BPForbes_Flinstone_Shell
 BPForbes_Flinstone_Tests
+tools/FlinstonePowershell/FlinstonePowershell
+tools/FlinstonePowershell/FlinstonePowershell.exe
 
 # Shell history (user-specific)
 shell_history.txt
