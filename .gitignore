@@ -3,10 +3,20 @@
 
 # Build artifacts
 *.o
+*.exe
+*.dll
 BPForbes_Flinstone_Shell
 BPForbes_Flinstone_Tests
+build/
+bin/
+obj/
+out/
+
+# Local Windows tool staging (created by install_deps.sh on WSL)
+/mnt/
+
+# FlinstonePowershell dev/cross-compile binaries
 tools/FlinstonePowershell/FlinstonePowershell
-tools/FlinstonePowershell/FlinstonePowershell.exe
 
 # Shell history (user-specific)
 shell_history.txt
