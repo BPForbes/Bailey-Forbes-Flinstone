@@ -373,12 +373,19 @@ int main(int argc, char *argv[]) {
     fl_net_netdev_set_authz_hook(fl_authz_subsystem_check, NULL);
     atexit(shell_netdev_cleanup_at_exit);
 
-    /* Default host volume: ensure drive.img exists before block driver probes it. */
+    /* Default host volume: ensure drive.img is a valid FAT32 image before probing.
+     * If the file is missing or exists but is blank/unrecognized (all-zero, truncated,
+     * etc.), create a fresh FAT32 image in place so setdisk/vm startup never stalls. */
     if (strcmp(current_disk_file, "drive.img") == 0) {
         if (access(current_disk_file, F_OK) != 0) {
             disk_ensure_default_fat32(current_disk_file, 32, 512);
         }
         read_disk_header();
+        if (!g_disk_host_fat32) {
+            /* File exists but has no recognizable content — overwrite with default image. */
+            disk_reinit_default_fat32(current_disk_file, 32, 512);
+            read_disk_header();
+        }
     }
 
     /* Initialize file manager service, path log, and drivers */
