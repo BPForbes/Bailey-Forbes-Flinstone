@@ -33,7 +33,9 @@ apt-get install -y \
     libsdl2-dev \
     iproute2 \
     tcpdump \
-    tmux
+    tmux \
+    wpasupplicant \
+    network-manager
 
 echo ""
 echo "All dependencies installed."

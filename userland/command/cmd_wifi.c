@@ -1,6 +1,8 @@
 #include "cmd_decl.h"
 #include "cmd_batch.h"
+#include "cmd_authutil.h"
 #include "fl/authz_subsystem.h"
+#include "fl/session.h"
 #include "contract_p2_authz.h"
 #include "net_wifi_db.h"
 #include "net_ipv4.h"
@@ -45,9 +47,9 @@ static const char *band_name(uint8_t band) {
 static int wifi_usage(void) {
     fputs("Usage:\n"
           "  wifi scan [-band any|2|5|6]\n"
-          "  wifi join <ssid> [password]              Join by network name and password\n"
-          "  wifi join -b <bssid> <ssid> [password]  Pin to a specific AP by MAC address\n"
-          "  wifi leave                               Disconnect and drop WLAN addresses\n"
+          "  wifi join <ssid>              Join by network name (prompts for WiFi password)\n"
+          "  wifi join -b <bssid> <ssid>  Pin to a specific AP by MAC address\n"
+          "  wifi leave                   Disconnect and drop WLAN addresses\n"
           "  wifi known\n"
           "  wifi status\n"
           "  Lab scan: set FL_NET_WIFI_HOME_SSID to include your home network in scan results.\n"
@@ -149,14 +151,16 @@ static int cmd_wifi_scan(int argc, char **argv) {
 
 static int cmd_wifi_join(int argc, char **argv) {
     const char *name = NULL;
-    const char *password = "";
     const char *bssid_arg = NULL;
+    char wifi_pw[64];
     fl_net_wifi_cred_t cred;
     fl_net_wifi_scan_entry_t entries[16];
     size_t count = 0;
     size_t i;
     int a;
     fl_result_t rc;
+
+    memset(wifi_pw, 0, sizeof(wifi_pw));
 
     for (a = 2; a < argc; a++) {
         if (!strcmp(argv[a], "-b") && a + 1 < argc) {
@@ -167,8 +171,8 @@ static int cmd_wifi_join(int argc, char **argv) {
             name = argv[a];
             continue;
         }
-        if (!password[0])
-            password = argv[a];
+        fprintf(stderr, "wifi join: unexpected argument '%s'\n", argv[a]);
+        return wifi_usage();
     }
     if (!name) {
         fputs("wifi join: missing network name\n", stderr);
@@ -186,28 +190,56 @@ static int cmd_wifi_join(int argc, char **argv) {
     (void)fl_net_wifi_station_init();
     (void)fl_net_wifi_scan(FL_WIFI_BAND_ANY, 3000u);
     (void)fl_net_wifi_scan_result(entries, 16, &count);
-    memset(&cred, 0, sizeof(cred));
-    strncpy(cred.ssid, name, sizeof(cred.ssid) - 1u);
-    if (bssid_arg && !parse_bssid_arg(bssid_arg, cred.bssid)) {
-        fprintf(stderr, "wifi join: invalid BSSID '%s' (use aa:bb:cc:dd:ee:ff)\n", bssid_arg);
-        fl_wifi_db_close();
-        return 1;
-    }
-    if (password[0]) {
-        strncpy(cred.passphrase, password, sizeof(cred.passphrase) - 1u);
-        if (fl_wifi_db_set_password(name, password) != FL_RESULT_OK) {
-            fputs("wifi join: could not store credential hash\n", stderr);
+
+    /* If the session carries sudo elevation, re-authenticate before joining. */
+    if (fl_session_has_elevation() && !fl_session_is_elevated_account()) {
+        char sudo_pw[128];
+        int auth_ok;
+        memset(sudo_pw, 0, sizeof(sudo_pw));
+        if (cmd_read_password("Sudo Password: ", sudo_pw, sizeof(sudo_pw)) != 0) {
+            fputs("wifi join: sudo password read failed\n", stderr);
+            fl_wifi_db_close();
+            return 1;
+        }
+        auth_ok = fl_session_verify_password(sudo_pw);
+        cmd_wipe_password(sudo_pw, sizeof(sudo_pw));
+        if (!auth_ok) {
+            fputs("wifi join: sudo authentication failed\n", stderr);
             fl_wifi_db_close();
             return 1;
         }
     }
+
+    if (cmd_read_password("WiFi Password: ", wifi_pw, sizeof(wifi_pw)) != 0) {
+        fputs("wifi join: password read failed\n", stderr);
+        fl_wifi_db_close();
+        return 1;
+    }
+
+    memset(&cred, 0, sizeof(cred));
+    strncpy(cred.ssid, name, sizeof(cred.ssid) - 1u);
+    if (bssid_arg && !parse_bssid_arg(bssid_arg, cred.bssid)) {
+        fprintf(stderr, "wifi join: invalid BSSID '%s' (use aa:bb:cc:dd:ee:ff)\n", bssid_arg);
+        cmd_wipe_password(wifi_pw, sizeof(wifi_pw));
+        fl_wifi_db_close();
+        return 1;
+    }
+    if (wifi_pw[0]) {
+        strncpy(cred.passphrase, wifi_pw, sizeof(cred.passphrase) - 1u);
+        if (fl_wifi_db_set_password(name, wifi_pw) != FL_RESULT_OK) {
+            fputs("wifi join: could not store credential hash\n", stderr);
+            cmd_wipe_password(wifi_pw, sizeof(wifi_pw));
+            fl_wifi_db_close();
+            return 1;
+        }
+    }
+    cmd_wipe_password(wifi_pw, sizeof(wifi_pw));
+
     for (i = 0; i < count; i++) {
         if (strcmp(entries[i].ssid, name))
             continue;
-        if (bssid_arg) {
-            if (memcmp(entries[i].bssid, cred.bssid, 6) != 0)
-                continue;
-        }
+        if (bssid_arg && memcmp(entries[i].bssid, cred.bssid, 6) != 0)
+            continue;
         cred.auth_mode = entries[i].auth_mode;
         cred.band_hint = entries[i].band;
         if (!bssid_arg)
@@ -215,7 +247,7 @@ static int cmd_wifi_join(int argc, char **argv) {
         (void)fl_wifi_db_apply_scan_entry(name, &entries[i]);
         break;
     }
-    if (cred.auth_mode == 0 && password[0])
+    if (cred.auth_mode == 0 && cred.passphrase[0])
         cred.auth_mode = FL_WIFI_AUTH_WPA3_SAE;
     rc = fl_net_wifi_connect(&cred, 15000u);
     if (rc == FL_RESULT_NOSYS) {
@@ -399,8 +431,7 @@ int cmd_wifi_batch_tokens_count(int argc, char **argv, int i) {
         }
         if (k < argc)
             used += (k - j);
-        if (k + 1 < argc && argv[k + 1][0] != '-')
-            used++;
+        /* password is now prompted interactively, not a batch token */
         return used;
     }
     if (!strcmp(argv[j], "known"))

@@ -4,16 +4,21 @@ RELEASE_VERSION=0
 PRERELEASE=1
 DEV_VERSION=14
 DESCRIPTION<<VER_END
-PRE 4.2.0: Wi-Fi scan home SSID + SSID-based join; Codex security fixes
+PRE 4.2.0: Wi-Fi scan home SSID + SSID-based join; Codex security fixes; interactive Wi-Fi password prompt
 
 - wifi scan (lab backend): reads FL_NET_WIFI_HOME_SSID env var and includes the
   user's home network in scan results; FL_NET_WIFI_HOME_AUTH (open/wpa2/wpa3)
   and FL_NET_WIFI_HOME_BAND (2/5/6) are optional — defaults are wpa2 and 2.4 GHz
 - wifi join: lab backend no longer requires the target SSID to appear in the last
   scan; if the network is absent a synthetic scan entry is built from the supplied
-  SSID + password so home and hidden networks can be joined directly by name
-- wifi join usage: clarified as `wifi join <ssid> [password]`; BSSID option
-  shown on its own line as an advanced pin-to-AP flag, no longer top-billed
+  SSID so home and hidden networks can be joined directly by name
+- wifi join: password is now prompted interactively (no-echo) after the command is
+  entered, similar to sudo; usage is `wifi join <ssid>` or `wifi join -b <bssid> <ssid>`
+- wifi join: when the session carries sudo elevation, prompts "Sudo Password: " first
+  to re-authenticate, then "WiFi Password: " — distinguishing the two credentials
+- scripts/install_deps.sh: added wpasupplicant and network-manager as runtime deps
+  for the Linux Wi-Fi host backend (wpa_cli / nmcli)
+- README.md: added sudo ./scripts/install_deps.sh instruction under Prerequisites
 - security: shell-escape SSID and passphrase before popen nmcli/wpa_cli calls
   (shell injection via crafted SSID or passphrase — net_wifi_host_linux.c)
 - security: reject sparse file-transfer chunks whose file_offset != bytes already
