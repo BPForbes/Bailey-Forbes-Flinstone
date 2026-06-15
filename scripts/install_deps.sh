@@ -71,6 +71,11 @@ if [ "$IS_WSL" = "1" ]; then
     }
 
     FPS_EXE="$REPO_ROOT/tools/FlinstonePowershell/FlinstonePowershell.exe"
+    WIFI_ENV="$REPO_ROOT/tools/fl-wifi.env"
+    if [ -f "$FPS_EXE" ]; then
+        printf 'export FL_NET_WIFI_FLINSTONE_PS="%s"\n' "$FPS_EXE" >"$WIFI_ENV"
+        echo "Wrote $WIFI_ENV (source it or add to ~/.bashrc for auto Wi-Fi discovery)"
+    fi
     if [ -f "$FPS_EXE" ]; then
         # Resolve the Windows user home directory.
         # Strategy 1: run cmd.exe as the invoking user (not as root) so that

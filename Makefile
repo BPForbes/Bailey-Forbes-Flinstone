@@ -248,7 +248,7 @@ $(VERSION_ENTRIES_VER_SUM): FORCE
 $(VERSION_DEF): scripts/gen_version_def.sh $(VER_LOCKED_FILES) $(VERSION_ENTRIES_VER_SUM)
 	@./scripts/gen_version_def.sh
 
-all: $(TARGET) $(FLINSTONE_PS_EXE)
+all: $(TARGET) $(FLINSTONE_PS_EXE) $(FLINSTONE_LINUX_NET_OUT)
 
 # Bare-metal: use port I/O and VGA (for kernel build, not userspace)
 baremetal: CFLAGS += -DDRIVERS_BAREMETAL=1
@@ -360,6 +360,7 @@ $(FLINSTONE_PS_EXE_OUT): tools/FlinstonePowershell/FlinstonePowershell.cpp
 	    -o $(FLINSTONE_PS_EXE_OUT) \
 	    tools/FlinstonePowershell/FlinstonePowershell.cpp \
 	    -lwlanapi -lole32 -liphlpapi -lws2_32
+	@echo "export FL_NET_WIFI_FLINSTONE_PS=\"$$(cd '$$(dirname $(FLINSTONE_PS_EXE_OUT))' && pwd)/$$(basename $(FLINSTONE_PS_EXE_OUT))\"" > tools/fl-wifi.env
 	@echo "Built $(FLINSTONE_PS_EXE_OUT) (Windows/WlanAPI, self-contained)"
 	@echo "Copy to a directory on your Windows PATH so WSL interop can find it."
 
@@ -928,6 +929,7 @@ debug: $(TARGET)
 
 clean:
 	rm -f $(OBJS) $(TEST_OBJS) $(TEST_ASMOBJS) $(TARGET) $(TEST_TARGET)
+	rm -f $(FLINSTONE_LINUX_NET_OUT)
 	rm -f $(VERSION_ENTRIES_VER_SUM)
 	rm -f kernel/arch/*/drivers/*.o kernel/arch/*/hal/*.o kernel/drivers/*.o kernel/drivers/block/*.o VM/devices/*.o
 	rm -f arch/*/*/*.o arch/*/*/alloc/*.o

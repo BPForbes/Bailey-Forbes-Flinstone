@@ -43,7 +43,11 @@ PRE 4.2.0: Wi-Fi scan home SSID + SSID-based join; WSL detection; FlinstonePower
   rule forwarding the Windows IP:<port> to WSL, enabling LAN-wide access
   (requires FlinstonePowershell.exe run as admin); server-proxy-del <port>
   removes the rule; cache is cleared on disconnect; MinGW cross-compile includes
-  winsock2.h before iphlpapi.h so GetAdaptersAddresses and GAA types resolve
+  winsock2.h before iphlpapi.h so GetAdaptersAddresses and GAA types resolve;
+  auto-discover tools/FlinstonePowershell/FlinstonePowershell.exe next to the
+  shell binary (no Windows PATH required); tools/network_bridge.py pairs with
+  FlinstonePowershell for WSL Wi-Fi + LAN server hints (discover, bridge-status,
+  server-proxy); install_deps.sh writes tools/fl-wifi.env with FL_NET_WIFI_FLINSTONE_PS
 - wifi scan (lab backend): reads FL_NET_WIFI_HOME_SSID env var and includes the
   user's home network in scan results; FL_NET_WIFI_HOME_AUTH (open/wpa2/wpa3)
   and FL_NET_WIFI_HOME_BAND (2/5/6) are optional — defaults are wpa2 and 2.4 GHz
@@ -96,5 +100,3 @@ PRE 4.2.0: Wi-Fi scan home SSID + SSID-based join; WSL detection; FlinstonePower
   server-bridge command protocol as the Windows helper; Linux Wi-Fi commands use
   nmcli and server-bridge uses POSIX sockets for LAN-to-target relays
 VER_END
-
-RELEASE_DATE=2026-06-15
