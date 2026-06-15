@@ -53,7 +53,9 @@ static int wifi_usage(void) {
           "  wifi known\n"
           "  wifi status\n"
           "  Lab scan: set FL_NET_WIFI_HOME_SSID to include your home network in scan results.\n"
-          "  Real Wi-Fi (Linux): wpa_cli or nmcli on FL_NET_WIFI_IFACE (auto-detect when unset).\n",
+          "  Real Wi-Fi (Linux): wpa_cli or nmcli on FL_NET_WIFI_IFACE (auto-detect when unset).\n"
+          "  WSL: FlinstonePowershell.exe (make flinstone-ps-windows); source tools/fl-wifi.env\n"
+          "       or: python3 tools/network_bridge.py discover\n",
           stderr);
     return 1;
 }

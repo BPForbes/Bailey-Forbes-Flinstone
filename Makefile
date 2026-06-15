@@ -351,6 +351,7 @@ $(FLINSTONE_PS_EXE_OUT): tools/FlinstonePowershell/FlinstonePowershell.cpp
 	    -o $(FLINSTONE_PS_EXE_OUT) \
 	    tools/FlinstonePowershell/FlinstonePowershell.cpp \
 	    -lwlanapi -lole32 -liphlpapi -lws2_32
+	@echo "export FL_NET_WIFI_FLINSTONE_PS=\"$$(cd '$$(dirname $(FLINSTONE_PS_EXE_OUT))' && pwd)/$$(basename $(FLINSTONE_PS_EXE_OUT))\"" > tools/fl-wifi.env
 	@echo "Built $(FLINSTONE_PS_EXE_OUT) (Windows/WlanAPI, self-contained)"
 	@echo "Copy to a directory on your Windows PATH so WSL interop can find it."
 

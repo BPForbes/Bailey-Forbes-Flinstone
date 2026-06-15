@@ -17,6 +17,7 @@ out/
 
 # FlinstonePowershell dev/cross-compile binaries
 tools/FlinstonePowershell/FlinstonePowershell
+tools/fl-wifi.env
 
 # Shell history (user-specific)
 shell_history.txt

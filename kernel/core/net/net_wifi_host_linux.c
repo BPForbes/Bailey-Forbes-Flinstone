@@ -12,6 +12,11 @@
 #include <unistd.h>
 
 #if defined(__linux__)
+#include <limits.h>
+#include <libgen.h>
+#endif
+
+#if defined(__linux__)
 #define FL_NET_WIFI_HOST_LINUX 1
 #include <ifaddrs.h>
 #include <netinet/in.h>
@@ -776,15 +781,42 @@ static fl_result_t wait_for_wpa_completed(unsigned timeout_ms) {
 
 /*
  * Locate FlinstonePowershell.exe: check FL_NET_WIFI_FLINSTONE_PS env var
- * first, then search PATH (WSL inherits the Windows PATH via interop).
+ * first, then search PATH (WSL inherits the Windows PATH via interop),
+ * then common repo-local paths (make flinstone-ps-windows output).
  */
+static int flinstone_ps_path_usable(const char *path) {
+    return path && path[0] && access(path, F_OK) == 0;
+}
+
+static int remember_flinstone_ps_path(const char *path) {
+    if (!flinstone_ps_path_usable(path))
+        return 0;
+    strncpy(s_flinstone_ps, path, sizeof(s_flinstone_ps) - 1u);
+    s_flinstone_ps[sizeof(s_flinstone_ps) - 1u] = '\0';
+    return 1;
+}
+
+static int try_flinstone_ps_relative(const char *base_dir) {
+    char path[640];
+
+    if (!base_dir || !base_dir[0])
+        return 0;
+    snprintf(path, sizeof(path), "%s/tools/FlinstonePowershell/FlinstonePowershell.exe",
+             base_dir);
+    return remember_flinstone_ps_path(path);
+}
+
 static int find_flinstone_ps_exe(void) {
-    const char *env_path = getenv("FL_NET_WIFI_FLINSTONE_PS");
-    if (env_path && env_path[0]) {
-        strncpy(s_flinstone_ps, env_path, sizeof(s_flinstone_ps) - 1u);
+    const char *env_path;
+    const char *root;
+
+    s_flinstone_ps[0] = '\0';
+
+    env_path = getenv("FL_NET_WIFI_FLINSTONE_PS");
+    if (env_path && env_path[0] && remember_flinstone_ps_path(env_path))
         return 1;
-    }
-    /* `command -v` resolves the exe through the merged PATH (WSL inherits Windows PATH) */
+
+    /* `command -v` resolves the exe through the merged Windows+Linux PATH. */
     {
         FILE *fp = popen("command -v FlinstonePowershell.exe 2>/dev/null", "r");
         if (fp) {
@@ -796,51 +828,43 @@ static int find_flinstone_ps_exe(void) {
                     found[--n] = '\0';
                 if (n > 0) {
                     pclose(fp);
-                    strncpy(s_flinstone_ps, found, sizeof(s_flinstone_ps) - 1u);
-                    return 1;
+                    if (remember_flinstone_ps_path(found))
+                        return 1;
                 }
             }
             pclose(fp);
         }
     }
-    /* Repo-local fallback: look in tools/FlinstonePowershell/ next to the
-     * running binary, then relative to CWD.  Covers the common case where the
-     * user ran `make` but has not yet added the .exe to the Windows PATH. */
+
+    root = getenv("FL_ROOT");
+    if (root && root[0] && try_flinstone_ps_relative(root))
+        return 1;
+
+    if (remember_flinstone_ps_path("tools/FlinstonePowershell/FlinstonePowershell.exe"))
+        return 1;
+
+#if defined(__linux__)
     {
-        char candidate[640];
-        char self_dir[512];
-        ssize_t len = readlink("/proc/self/exe", self_dir, sizeof(self_dir) - 1u);
-        if (len > 0) {
-            char *slash;
-            self_dir[len] = '\0';
-            slash = strrchr(self_dir, '/');
-            if (slash) {
-                *slash = '\0';
-                snprintf(candidate, sizeof(candidate),
-                         "%s/tools/FlinstonePowershell/FlinstonePowershell.exe",
-                         self_dir);
-                if (access(candidate, F_OK) == 0) {
-                    strncpy(s_flinstone_ps, candidate, sizeof(s_flinstone_ps) - 1u);
-                    return 1;
-                }
-            }
-        }
-        /* CWD fallback (shell launched from repo root) */
-        if (access("tools/FlinstonePowershell/FlinstonePowershell.exe", F_OK) == 0) {
-            char *rp = realpath("tools/FlinstonePowershell/FlinstonePowershell.exe",
-                                candidate);
-            strncpy(s_flinstone_ps,
-                    rp ? candidate : "tools/FlinstonePowershell/FlinstonePowershell.exe",
-                    sizeof(s_flinstone_ps) - 1u);
-            return 1;
+        char self[PATH_MAX];
+        ssize_t n = readlink("/proc/self/exe", self, sizeof(self) - 1u);
+        if (n > 0) {
+            char dirbuf[PATH_MAX];
+            self[n] = '\0';
+            strncpy(dirbuf, self, sizeof(dirbuf) - 1u);
+            dirbuf[sizeof(dirbuf) - 1u] = '\0';
+            if (try_flinstone_ps_relative(dirname(dirbuf)))
+                return 1;
         }
     }
+#endif
+
     return 0;
 }
 
 static int probe_flinstone_ps(void) {
     if (!find_flinstone_ps_exe())
         return 0;
+    read_any_nonlo_ipv4(s_wsl_bind_ipv4, sizeof(s_wsl_bind_ipv4));
     s_host_kind = FL_WIFI_HOST_FLINSTONE_PS;
     return 1;
 }
@@ -973,10 +997,11 @@ static void probe_host_backend_once(void) {
         if (!probe_flinstone_ps())
             fprintf(stderr,
                     "wifi: WSL detected but FlinstonePowershell.exe not found.\n"
-                    "  Build:   make flinstone-ps-windows\n"
-                    "  (The .exe is searched next to this binary and in the CWD;\n"
-                    "   install to Windows PATH for system-wide use.)\n"
-                    "  Override: FL_NET_WIFI_FLINSTONE_PS=/path/to/FlinstonePowershell.exe\n");
+                    "  Build: make flinstone-ps-windows\n"
+                    "  Local: tools/FlinstonePowershell/FlinstonePowershell.exe (auto-detected next to binary/CWD)\n"
+                    "  Install: copy FlinstonePowershell.exe to a directory on your Windows PATH\n"
+                    "  Override: export FL_NET_WIFI_FLINSTONE_PS=/path/to/FlinstonePowershell.exe\n"
+                    "  Helper: python3 tools/network_bridge.py discover\n");
         return;
     }
 
