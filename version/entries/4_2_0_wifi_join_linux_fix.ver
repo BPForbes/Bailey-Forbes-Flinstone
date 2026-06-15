@@ -1,0 +1,45 @@
+MAJOR_VERSION=4
+STANDARD_VERSION=2
+RELEASE_VERSION=0
+PRERELEASE=1
+DEV_VERSION=15
+DESCRIPTION<<VER_END
+PRE 4.2.0: Fix wifi join -110 timeout on native Linux and hardcoded IP display
+
+- wifi join timeout (-110 / ETIMEDOUT on Raspberry Pi and other native Linux):
+  replaced wpa_cli `enable_network N + save_config + reconnect` sequence with
+  `select_network N` which atomically enables the network, disables all others,
+  and triggers immediate association in one wpa_supplicant command; this avoids
+  a race where `reconnect` re-attached to a previously active network instead of
+  the newly added one; save_config is now non-fatal (the config file is read-only
+  on stock Raspberry Pi OS — failure no longer aborts the join)
+- wifi join timeout window doubled from 15 s to 30 s (cmd_wifi.c) to accommodate
+  Raspberry Pi 2.4 GHz scans that can take 10–20 s before 4-way handshake starts
+- wifi join error message for -110: new specific branch prints
+  "timed out waiting for association on <iface>" with actionable hints:
+  `wpa_cli -i <iface> status`, `nmcli device status`, and a note about
+  wpa_supplicant vs NetworkManager on Raspberry Pi (previously the generic
+  "failed (-110)" message gave no diagnostic guidance)
+- prefix_from_netmask() endianness fix (net_wifi_host_linux.c): sin_addr.s_addr
+  from getifaddrs() is in network byte order; on little-endian hosts (x86, ARM-LE)
+  255.255.255.0 is stored as 0x00FFFFFF so MSB counting returned 0 (defaulting to
+  /24 for every mask); now calls ntohl() before counting so /8, /16, /24, and other
+  prefix lengths are read correctly from the kernel
+- gateway derivation fix (read_iface_ipv4_route): old formula
+  `(addr & 0xffffff00) | 1` used a big-endian bit mask against the codebase's
+  little-endian addr_be format, zeroing the first octet and setting bit 0; for
+  192.168.1.100 this produced 1.168.1.100 instead of 192.168.1.1; fixed to
+  `(addr & net_mask) | htonl(1u)` consistent with the WSL Flinstone path
+- fl_net_wifi_host_linux_ipv4_route() gateway fallback: when FlinstonePowershell
+  reports an IP (s_fps_ipv4) but no gateway (s_fps_gw empty), derive the .1
+  gateway from s_fps_ipv4 + s_fps_prefix instead of leaving gw_be_out at 0
+  (which caused "0.0.0.0" to be passed as gateway to fl_net_wifi_netdev_up_with_ipv4)
+- WSL netdev IP fix (net_wifi_station.c host_linux_connect): previously the
+  fl_net_wifi_netdev was configured with the WSL2 eth0 IP (e.g. 10.255.255.254
+  from the Hyper-V virtual switch) so "wlan0" in wifi join output showed an
+  internal address rather than the real router-assigned Wi-Fi address; now checks
+  fl_net_wifi_host_linux_windows_ipv4() first and, when the Windows Wi-Fi adapter
+  IP is known (e.g. 192.168.1.x), uses that for the netdev so the displayed IP
+  matches what LAN peers connect to; the bindable Linux-side address remains
+  available via fl_net_wifi_host_linux_ipv4() for server bind operations
+VER_END

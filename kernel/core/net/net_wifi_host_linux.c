@@ -610,7 +610,10 @@ static int wpa_state_completed(void) {
 }
 
 static unsigned prefix_from_netmask(uint32_t mask_be) {
-    uint32_t m = mask_be;
+    /* mask_be is sin_addr.s_addr which is in network byte order.  On
+     * little-endian hosts (x86, ARM-LE) 255.255.255.0 is stored as
+     * 0x00FFFFFF, so we must convert to host order before counting MSBs. */
+    uint32_t m = ntohl(mask_be);
     unsigned n = 0;
     while (m & 0x80000000u) {
         n++;
@@ -688,11 +691,19 @@ static fl_result_t read_iface_ipv4_route(uint32_t *addr_be_out, uint8_t *prefix_
         return FL_RESULT_NOENT;
     if (addr_be_out)
         *addr_be_out = best_addr;
-    if (prefix_len_out)
-        *prefix_len_out = (uint8_t)prefix_from_netmask(best_mask);
-    if (gw_be_out) {
-        uint32_t gw = (best_addr & 0xffffff00u) | 1u;
-        *gw_be_out = gw;
+    {
+        unsigned pfx = prefix_from_netmask(best_mask);
+        if (prefix_len_out)
+            *prefix_len_out = (uint8_t)pfx;
+        if (gw_be_out) {
+            /* In the codebase's addr_be format the first octet sits in the
+             * lowest byte, so the network portion covers the low pfx bits and
+             * the host portion is in the high (32-pfx) bits.  Default gateway
+             * = network base with last octet = 1.  htonl(1u) places the 1 in
+             * the highest byte, matching the last-octet position. */
+            uint32_t net_mask = pfx < 32u ? (1u << pfx) - 1u : 0xFFFFFFFFu;
+            *gw_be_out = (best_addr & net_mask) | htonl(1u);
+        }
     }
     return FL_RESULT_OK;
 }
@@ -1327,13 +1338,15 @@ fl_result_t fl_net_wifi_host_linux_connect(const fl_net_wifi_cred_t *cred,
         if (!run_wpa_cli(cmd, NULL, 0))
             return FL_RESULT_ERR;
     }
-    snprintf(cmd, sizeof(cmd), "enable_network %d", net_id);
+    /* select_network atomically enables this network, disables all others,
+     * and triggers immediate association — more reliable than enable_network
+     * + reconnect on native Linux (e.g. Raspberry Pi wpa_supplicant). */
+    snprintf(cmd, sizeof(cmd), "select_network %d", net_id);
     if (!run_wpa_cli(cmd, NULL, 0))
         return FL_RESULT_ERR;
-    if (!run_wpa_cli("save_config", NULL, 0))
-        return FL_RESULT_ERR;
-    if (!run_wpa_cli("reconnect", NULL, 0))
-        return FL_RESULT_ERR;
+    /* save_config is best-effort: the config file may be read-only on some
+     * systems (Raspberry Pi default).  Failure here is non-fatal. */
+    (void)run_wpa_cli("save_config", NULL, 0);
 
     rc = wait_for_wpa_completed(timeout_ms > 0u ? timeout_ms : 15000u);
     if (rc != FL_RESULT_OK)
@@ -1474,8 +1487,18 @@ fl_result_t fl_net_wifi_host_linux_ipv4_route(uint32_t *addr_be_out, uint8_t *pr
             if (prefix_len_out)
                 *prefix_len_out = s_fps_prefix;
             if (gw_be_out) {
-                if (s_fps_gw[0] && !fl_net_ipv4_parse_literal(s_fps_gw, gw_be_out))
-                    *gw_be_out = 0u;
+                if (s_fps_gw[0]) {
+                    if (!fl_net_ipv4_parse_literal(s_fps_gw, gw_be_out))
+                        *gw_be_out = 0u;
+                } else {
+                    /* No gateway from helper: derive .1 from the adapter IP. */
+                    uint32_t ip = 0u;
+                    unsigned pfx = s_fps_prefix < 32u ? s_fps_prefix : 24u;
+                    uint32_t net_mask = pfx < 32u ? (1u << pfx) - 1u : 0xFFFFFFFFu;
+                    *gw_be_out = (fl_net_ipv4_parse_literal(s_fps_ipv4, &ip) ? ip : 0u)
+                                 & net_mask;
+                    *gw_be_out |= htonl(1u);
+                }
             }
             return FL_RESULT_OK;
         }

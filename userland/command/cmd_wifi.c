@@ -251,7 +251,7 @@ static int cmd_wifi_join(int argc, char **argv) {
     }
     if (cred.auth_mode == 0 && cred.passphrase[0])
         cred.auth_mode = FL_WIFI_AUTH_WPA3_SAE;
-    rc = fl_net_wifi_connect(&cred, 15000u);
+    rc = fl_net_wifi_connect(&cred, 30000u);
     if (rc == FL_RESULT_NOSYS) {
         fputs("wifi join: no Wi-Fi backend (need wpa_supplicant on FL_NET_WIFI_IFACE or lab mode)\n", stderr);
         fl_wifi_db_close();
@@ -264,6 +264,19 @@ static int cmd_wifi_join(int argc, char **argv) {
     }
     if (rc == FL_RESULT_INVAL) {
         fputs("wifi join: password required for secured network\n", stderr);
+        fl_wifi_db_close();
+        return 1;
+    }
+    if (rc == FL_RESULT_TIMEDOUT) {
+        const char *iface = fl_net_wifi_host_linux_iface();
+        if (!iface || !iface[0])
+            iface = "wlan0";
+        fprintf(stderr,
+                "wifi join: timed out waiting for association on %s\n"
+                "  Diagnose: wpa_cli -i %s status   or   nmcli device status\n"
+                "  On Raspberry Pi: ensure wpa_supplicant is running for %s,\n"
+                "  or use NetworkManager (nmcli) instead.\n",
+                iface, iface, iface);
         fl_wifi_db_close();
         return 1;
     }
