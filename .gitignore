@@ -16,7 +16,7 @@ out/
 # Local Windows tool staging (created by install_deps.sh on WSL)
 /mnt/
 
-# FlinstonePowershell dev/cross-compile binaries
+# FlinstonePowershell / FlinstoneLinuxNet dev binaries (built by make)
 tools/FlinstonePowershell/FlinstonePowershell
 tools/fl-wifi.env
 

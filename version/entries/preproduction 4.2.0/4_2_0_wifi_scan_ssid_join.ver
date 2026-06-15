@@ -99,6 +99,30 @@ PRE 4.2.0: Wi-Fi scan home SSID + SSID-based join; WSL detection; FlinstonePower
   as an ELF with the same platform/wifi-scan/wifi-join/wifi-leave/wifi-status/
   server-bridge command protocol as the Windows helper; Linux Wi-Fi commands use
   nmcli and server-bridge uses POSIX sockets for LAN-to-target relays
+- wifi join -110 / ETIMEDOUT fix on native Linux (Raspberry Pi): wpa_cli
+  `enable_network N + save_config + reconnect` replaced with `select_network N`
+  which atomically enables the network, disables all others, and triggers
+  immediate association; save_config is now non-fatal (read-only on stock Pi OS);
+  join timeout doubled 15 s → 30 s; -110 error now prints a specific message with
+  `wpa_cli -i <iface> status` / `nmcli device status` hints and a note about
+  wpa_supplicant vs NetworkManager (net_wifi_host_linux.c, cmd_wifi.c)
+- prefix_from_netmask() endianness fix: sin_addr.s_addr is network byte order;
+  on little-endian hosts 255.255.255.0 is stored as 0x00FFFFFF so MSB counting
+  returned 0 (always defaulted to /24); now calls ntohl() so /8, /16, and other
+  prefix lengths are derived correctly (net_wifi_host_linux.c)
+- gateway derivation fix: read_iface_ipv4_route() formula `(addr & 0xffffff00)|1`
+  used a big-endian mask against the codebase's little-endian addr_be format,
+  producing 1.168.x.x for 192.168.x.x; fixed to `(addr & net_mask) | htonl(1u)`
+  consistent with the WSL Flinstone path; fl_net_wifi_host_linux_ipv4_route()
+  also derives the .1 gateway from fps_ipv4+fps_prefix when fps_gw is empty
+  instead of silently leaving gw_be_out as 0 (net_wifi_host_linux.c)
+- WSL netdev IP fix: host_linux_connect() now checks
+  fl_net_wifi_host_linux_windows_ipv4() first; when the Windows Wi-Fi adapter IP
+  is known (e.g. 192.168.x.x from FlinstonePowershell), it is used for the wlan0
+  netdev so the displayed IP matches the router-assigned address rather than the
+  WSL2 eth0 internal address (e.g. 10.255.255.254 from Hyper-V virtual switch);
+  fl_net_wifi_host_linux_ipv4() continues to return the bindable Linux-side
+  address for server bind operations (net_wifi_station.c)
 VER_END
 
 RELEASE_DATE=2026-06-15
