@@ -87,10 +87,8 @@ PRE 4.2.0: Wi-Fi scan home SSID + SSID-based join; WSL detection; FlinstonePower
   support server-bridge bind_ip/port/target_ip relays for WSL loopback or VM
   targets, add Python network_bridge.py target parity, and cover helper
   discovery plus bridge relay tests
-- Raspberry Pi ARM build fix: net_file_delivery.h now includes the P3 packet
-  contract so FILE_ACCEPT, FILE_DECLINE, and FILE_REVOKE encoder prototypes
-  are visible to cmd_server_file.c under ARM compilers that treat implicit
-  function declarations as fatal
+- Raspberry Pi ARM build fix: net_file_delivery.h now directly declares the
+  FILE_ACCEPT, FILE_DECLINE, and FILE_REVOKE encoder prototypes used by
+  cmd_server_file.c, avoiding transitive contract-header assumptions on ARM
+  compilers that treat implicit function declarations as fatal
 VER_END
-
-RELEASE_DATE=2026-06-15
