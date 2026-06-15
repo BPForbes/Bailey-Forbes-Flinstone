@@ -40,6 +40,7 @@ static char s_fps_ipv4[16] = "";   /* Windows Wi-Fi adapter IP from FlinstonePow
 static uint8_t s_fps_prefix = 24u;
 static char s_fps_gw[16] = "";
 static char s_wsl_bind_ipv4[16] = ""; /* WSL eth0 IP — bindable in Linux for server host */
+static uint8_t s_wsl_bind_prefix = 24u;
 
 
 /*
@@ -79,17 +80,21 @@ static int parse_fps_field(const char *text, const char *key, char *out,
     return 0;
 }
 
+static unsigned prefix_from_netmask(uint32_t mask_be); /* defined below */
+
 /*
  * Find the first non-loopback, non-APIPA, non-tap IPv4 on the Linux host
  * (WSL2 eth0 or similar).  That address is bindable in Linux, unlike the
  * Windows adapter IP reported by FlinstonePowershell.
  */
-static void read_any_nonlo_ipv4(char *out, size_t cap) {
+static void read_any_nonlo_ipv4(char *out, size_t cap, uint8_t *prefix_out) {
 #if defined(FL_NET_WIFI_HOST_LINUX)
     struct ifaddrs *ifa = NULL;
     struct ifaddrs *cur;
 
     out[0] = '\0';
+    if (prefix_out)
+        *prefix_out = 24u;
     if (cap == 0u || getifaddrs(&ifa) != 0)
         return;
     for (cur = ifa; cur; cur = cur->ifa_next) {
@@ -110,11 +115,17 @@ static void read_any_nonlo_ipv4(char *out, size_t cap) {
         if (addr == 0u)
             continue;
         fl_net_ipv4_format_addr(addr, out, cap);
+        if (prefix_out && cur->ifa_netmask &&
+            cur->ifa_netmask->sa_family == AF_INET) {
+            struct sockaddr_in *nm = (struct sockaddr_in *)cur->ifa_netmask;
+            *prefix_out = (uint8_t)prefix_from_netmask(nm->sin_addr.s_addr);
+        }
         break;
     }
     freeifaddrs(ifa);
 #else
     (void)cap;
+    (void)prefix_out;
     out[0] = '\0';
 #endif
 }
@@ -1087,7 +1098,8 @@ fl_result_t fl_net_wifi_host_linux_connect(const fl_net_wifi_cred_t *cred,
                     s_fps_prefix = (uint8_t)atoi(plen_s);
             }
             /* Cache the WSL Linux-side IP (eth0); this is what server host binds to. */
-            read_any_nonlo_ipv4(s_wsl_bind_ipv4, sizeof(s_wsl_bind_ipv4));
+            read_any_nonlo_ipv4(s_wsl_bind_ipv4, sizeof(s_wsl_bind_ipv4),
+                                &s_wsl_bind_prefix);
         }
         (void)timeout_ms;
         return FL_RESULT_OK;
@@ -1199,10 +1211,11 @@ fl_result_t fl_net_wifi_host_linux_disconnect(void) {
     if (!fl_net_wifi_host_linux_available())
         return FL_RESULT_NOSYS;
     if (s_host_kind == FL_WIFI_HOST_FLINSTONE_PS) {
-        s_fps_ipv4[0]     = '\0';
-        s_fps_gw[0]       = '\0';
-        s_fps_prefix      = 24u;
+        s_fps_ipv4[0]      = '\0';
+        s_fps_gw[0]        = '\0';
+        s_fps_prefix       = 24u;
         s_wsl_bind_ipv4[0] = '\0';
+        s_wsl_bind_prefix  = 24u;
         (void)run_flinstone_ps("wifi-leave", NULL, 0);
         return FL_RESULT_OK;
     }
@@ -1298,17 +1311,35 @@ fl_result_t fl_net_wifi_host_linux_ipv4_route(uint32_t *addr_be_out, uint8_t *pr
 #else
     load_env_once();
     if (s_host_kind == FL_WIFI_HOST_FLINSTONE_PS) {
-        if (!s_fps_ipv4[0])
-            return FL_RESULT_NOENT;
-        if (addr_be_out && !fl_net_ipv4_parse_literal(s_fps_ipv4, addr_be_out))
-            return FL_RESULT_ERR;
-        if (prefix_len_out)
-            *prefix_len_out = s_fps_prefix;
-        if (gw_be_out) {
-            if (s_fps_gw[0] && !fl_net_ipv4_parse_literal(s_fps_gw, gw_be_out))
-                *gw_be_out = 0u;
+        /* Prefer the Windows adapter IP (with gateway from FlinstonePowershell). */
+        if (s_fps_ipv4[0]) {
+            if (addr_be_out && !fl_net_ipv4_parse_literal(s_fps_ipv4, addr_be_out))
+                return FL_RESULT_ERR;
+            if (prefix_len_out)
+                *prefix_len_out = s_fps_prefix;
+            if (gw_be_out) {
+                if (s_fps_gw[0] && !fl_net_ipv4_parse_literal(s_fps_gw, gw_be_out))
+                    *gw_be_out = 0u;
+            }
+            return FL_RESULT_OK;
         }
-        return FL_RESULT_OK;
+        /* Fall back to the WSL Linux-side IP (eth0) with a derived gateway.
+         * This path is taken when FlinstonePowershell.exe is not yet rebuilt
+         * or not yet installed — s_wsl_bind_ipv4 is populated from getifaddrs()
+         * on the Linux side so it is always available after wifi join. */
+        if (s_wsl_bind_ipv4[0]) {
+            uint32_t addr = 0u;
+            if (!fl_net_ipv4_parse_literal(s_wsl_bind_ipv4, &addr))
+                return FL_RESULT_ERR;
+            if (addr_be_out)
+                *addr_be_out = addr;
+            if (prefix_len_out)
+                *prefix_len_out = s_wsl_bind_prefix;
+            if (gw_be_out)
+                *gw_be_out = (addr & htonl(~0u << (32 - s_wsl_bind_prefix))) | htonl(1u);
+            return FL_RESULT_OK;
+        }
+        return FL_RESULT_NOENT;
     }
     return read_iface_ipv4_route(addr_be_out, prefix_len_out, gw_be_out);
 #endif
