@@ -72,37 +72,68 @@ if [ "$IS_WSL" = "1" ]; then
 
     FPS_EXE="$REPO_ROOT/tools/FlinstonePowershell/FlinstonePowershell.exe"
     if [ -f "$FPS_EXE" ]; then
-        # Resolve the Windows user home directory. cmd.exe is always available in WSL
-        # and returns the correct path even when this script runs under sudo.
+        # Resolve the Windows user home directory.
+        # Strategy 1: run cmd.exe as the invoking user (not as root) so that
+        # %USERPROFILE% reflects the correct Windows home even under sudo.
         WIN_HOME=""
         if command -v cmd.exe >/dev/null 2>&1 && command -v wslpath >/dev/null 2>&1; then
-            _wp=$(cmd.exe /c "echo %USERPROFILE%" 2>/dev/null | tr -d '\r\n')
-            WIN_HOME=$(wslpath "$_wp" 2>/dev/null)
+            if [ -n "$SUDO_USER" ]; then
+                _wp=$(sudo -u "$SUDO_USER" cmd.exe /c "echo %USERPROFILE%" 2>/dev/null | tr -d '\r\n')
+            else
+                _wp=$(cmd.exe /c "echo %USERPROFILE%" 2>/dev/null | tr -d '\r\n')
+            fi
+            [ -n "$_wp" ] && WIN_HOME=$(wslpath "$_wp" 2>/dev/null)
         fi
-        # Fallback: use the invoking user's name to construct the path.
+        # Strategy 2: wslvar (available in some WSL2 setups).
+        if [ -z "$WIN_HOME" ] || [ ! -d "$WIN_HOME" ]; then
+            if command -v wslvar >/dev/null 2>&1; then
+                _wp=$(wslvar USERPROFILE 2>/dev/null | tr -d '\r\n')
+                [ -n "$_wp" ] && WIN_HOME=$(wslpath "$_wp" 2>/dev/null)
+            fi
+        fi
+        # Strategy 3: guess from Linux username — works when Windows and Linux
+        # usernames match (common WSL2 default setup).
         if [ -z "$WIN_HOME" ] || [ ! -d "$WIN_HOME" ]; then
             WIN_HOME="/mnt/c/Users/${SUDO_USER:-$(id -un)}"
         fi
 
         WIN_BIN="$WIN_HOME/bin"
-        mkdir -p "$WIN_BIN"
-        cp "$FPS_EXE" "$WIN_BIN/"
+        if [ -d "$WIN_HOME" ]; then
+            mkdir -p "$WIN_BIN"
+            cp "$FPS_EXE" "$WIN_BIN/"
 
-        # Convert to Windows path for the PATH instructions.
-        if command -v wslpath >/dev/null 2>&1; then
-            WIN_BIN_W=$(wslpath -w "$WIN_BIN" 2>/dev/null)
+            # Convert to Windows path for the PATH instructions.
+            if command -v wslpath >/dev/null 2>&1; then
+                WIN_BIN_W=$(wslpath -w "$WIN_BIN" 2>/dev/null)
+            else
+                WIN_BIN_W="$(echo "$WIN_BIN" | sed 's|/mnt/c|C:|; s|/|\\|g')"
+            fi
+
+            echo "FlinstonePowershell.exe installed to: $WIN_BIN"
+            echo ""
+            echo "ACTION REQUIRED — add to Windows PATH (one-time):"
+            echo "  $WIN_BIN_W"
+            echo "  System Properties → Environment Variables → User PATH → New"
+            echo ""
+            echo "Then open a new WSL terminal and verify:"
+            echo "  which FlinstonePowershell.exe"
         else
-            WIN_BIN_W="$(echo "$WIN_BIN" | sed 's|/mnt/c|C:|; s|/|\\|g')"
+            # Home directory could not be determined — show manual instructions.
+            echo ""
+            echo "FlinstonePowershell.exe built at:"
+            echo "  $FPS_EXE"
+            echo ""
+            echo "Could not auto-detect your Windows home (tried %USERPROFILE%,"
+            echo "wslvar, and /mnt/c/Users/${SUDO_USER:-$(id -un)})."
+            echo ""
+            echo "Copy manually (run in WSL as yourself, not sudo):"
+            echo "  WIN_HOME=\$(wslpath \"\$(cmd.exe /c 'echo %USERPROFILE%' | tr -d '\\r\\n')\")"
+            echo "  mkdir -p \"\$WIN_HOME/bin\""
+            echo "  cp '$FPS_EXE' \"\$WIN_HOME/bin/\""
+            echo ""
+            echo "Then add \$WIN_HOME\\bin to your Windows PATH and verify:"
+            echo "  which FlinstonePowershell.exe"
         fi
-
-        echo "FlinstonePowershell.exe installed to: $WIN_BIN"
-        echo ""
-        echo "ACTION REQUIRED — add to Windows PATH (one-time):"
-        echo "  $WIN_BIN_W"
-        echo "  System Properties → Environment Variables → User PATH → New"
-        echo ""
-        echo "Then open a new WSL terminal and verify:"
-        echo "  which FlinstonePowershell.exe"
     fi
 fi
 
