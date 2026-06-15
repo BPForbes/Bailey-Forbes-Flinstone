@@ -350,7 +350,7 @@ $(FLINSTONE_PS_EXE_OUT): tools/FlinstonePowershell/FlinstonePowershell.cpp
 	    -static-libgcc -static-libstdc++ \
 	    -o $(FLINSTONE_PS_EXE_OUT) \
 	    tools/FlinstonePowershell/FlinstonePowershell.cpp \
-	    -lwlanapi -lole32 -liphlpapi
+	    -lwlanapi -lole32 -liphlpapi -lws2_32
 	@echo "Built $(FLINSTONE_PS_EXE_OUT) (Windows/WlanAPI, self-contained)"
 	@echo "Copy to a directory on your Windows PATH so WSL interop can find it."
 

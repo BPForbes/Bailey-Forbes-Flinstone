@@ -10,7 +10,7 @@
  * -------------
  * Windows / mingw32 cross-compile (full WlanAPI support):
  *   x86_64-w64-mingw32-g++ -std=c++17 -o FlinstonePowershell.exe \
- *       FlinstonePowershell.cpp -lwlanapi -lole32
+ *       FlinstonePowershell.cpp -lwlanapi -lole32 -liphlpapi
  *
  * Linux / WSL (development build, uses dev stubs):
  *   g++ -std=c++17 -o FlinstonePowershell FlinstonePowershell.cpp
@@ -38,16 +38,18 @@
 
 #if defined(_WIN32)
 #ifndef _WIN32_WINNT
-#  define _WIN32_WINNT 0x0600  /* Vista: enables GAA_FLAG_INCLUDE_GATEWAYS, IP_ADAPTER_GATEWAY_ADDRESS_LH, etc. */
+#  define _WIN32_WINNT 0x0600  /* Vista: GAA_FLAG_INCLUDE_GATEWAYS, gateway fields */
 #endif
+#include <winsock2.h>
+#include <ws2tcpip.h>
 #define WIN32_LEAN_AND_MEAN
 #include <windows.h>
 #include <wlanapi.h>
 #include <iphlpapi.h>
-#include <ws2tcpip.h>
 #pragma comment(lib, "wlanapi.lib")
 #pragma comment(lib, "ole32.lib")
 #pragma comment(lib, "iphlpapi.lib")
+#pragma comment(lib, "ws2_32.lib")
 #endif
 
 #include <cstdio>

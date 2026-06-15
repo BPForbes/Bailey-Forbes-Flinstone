@@ -12,7 +12,8 @@ PRE 4.2.0: Wi-Fi scan home SSID + SSID-based join; WSL detection; FlinstonePower
 - FlinstonePowershell (tools/FlinstonePowershell/FlinstonePowershell.cpp):
   C++ bridge program for the WSL ↔ Windows Wi-Fi path; commands:
   wifi-scan, wifi-join, wifi-leave, wifi-status, platform; Windows build
-  (make flinstone-ps-windows, links -lwlanapi -lole32) uses native WlanAPI:
+  (make flinstone-ps-windows, links -lwlanapi -lole32 -liphlpapi -lws2_32)
+  uses native WlanAPI:
   WlanOpenHandle/WlanCloseHandle (RAII), WlanEnumInterfaces, WlanScan +
   Sleep(1500) + WlanGetNetworkBssList for scanning (raw BSS IE parsing for
   auth mode: RSN IE tag 0x30 with AKM 00:0F:AC:08=SAE→wpa3, else wpa2;
@@ -41,7 +42,8 @@ PRE 4.2.0: Wi-Fi scan home SSID + SSID-based join; WSL detection; FlinstonePower
   proxy <wsl_ip> <port> — a new subcommand that adds a Windows netsh portproxy
   rule forwarding the Windows IP:<port> to WSL, enabling LAN-wide access
   (requires FlinstonePowershell.exe run as admin); server-proxy-del <port>
-  removes the rule; cache is cleared on disconnect
+  removes the rule; cache is cleared on disconnect; MinGW cross-compile includes
+  winsock2.h before iphlpapi.h so GetAdaptersAddresses and GAA types resolve
 - wifi scan (lab backend): reads FL_NET_WIFI_HOME_SSID env var and includes the
   user's home network in scan results; FL_NET_WIFI_HOME_AUTH (open/wpa2/wpa3)
   and FL_NET_WIFI_HOME_BAND (2/5/6) are optional — defaults are wpa2 and 2.4 GHz
