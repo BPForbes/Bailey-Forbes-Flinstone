@@ -81,6 +81,14 @@ PRE 4.2.0: Wi-Fi scan home SSID + SSID-based join; WSL detection; FlinstonePower
 - tools/server_bridge.py: Python asyncio alternative to FlinstonePowershell
   server-bridge; same 0.0.0.0:<port>→127.0.0.1:<port> relay in ~70 lines;
   run with `python3 tools/server_bridge.py <port>` on Windows or via WSL interop
+- Wi-Fi LAN server bridge: discover in-tree FlinstonePowershell.exe for WSL
+  Wi-Fi scan/join, safely quote helper paths and credentials, refresh the
+  router-assigned Windows Wi-Fi IP from wifi-status for server host hints,
+  support server-bridge bind_ip/port/target_ip relays for WSL loopback or VM
+  targets, add Python network_bridge.py target parity, and cover helper
+  discovery plus bridge relay tests
+- Raspberry Pi ARM build fix: net_file_delivery.h now includes the P3 packet
+  contract so FILE_ACCEPT, FILE_DECLINE, and FILE_REVOKE encoder prototypes
+  are visible to cmd_server_file.c under ARM compilers that treat implicit
+  function declarations as fatal
 VER_END
-
-RELEASE_DATE=2026-06-14
