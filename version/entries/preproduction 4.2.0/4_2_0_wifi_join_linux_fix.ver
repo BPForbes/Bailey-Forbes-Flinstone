@@ -43,3 +43,5 @@ PRE 4.2.0: Fix wifi join -110 timeout on native Linux and hardcoded IP display
   matches what LAN peers connect to; the bindable Linux-side address remains
   available via fl_net_wifi_host_linux_ipv4() for server bind operations
 VER_END
+
+RELEASE_DATE=2026-06-15
