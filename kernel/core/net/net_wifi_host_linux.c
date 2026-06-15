@@ -1403,10 +1403,17 @@ int fl_net_wifi_host_linux_server_bridge(uint16_t port) {
     if (s_host_kind != FL_WIFI_HOST_FLINSTONE_PS || !s_flinstone_ps[0])
         return -1;
     /* Spawn as a background Windows process; stdout/stderr discarded so it
-     * doesn't block or pollute the Flinstone shell output. */
-    snprintf(cmd, sizeof(cmd),
-             "\"%s\" server-bridge %u </dev/null >/dev/null 2>&1 &",
-             s_flinstone_ps, (unsigned)port);
+     * doesn't block or pollute the Flinstone shell output.
+     * Bind to the specific Windows Wi-Fi IP (s_fps_ipv4) so the bridge
+     * listens only on the router-assigned address, not all interfaces. */
+    if (s_fps_ipv4[0])
+        snprintf(cmd, sizeof(cmd),
+                 "\"%s\" server-bridge %s %u </dev/null >/dev/null 2>&1 &",
+                 s_flinstone_ps, s_fps_ipv4, (unsigned)port);
+    else
+        snprintf(cmd, sizeof(cmd),
+                 "\"%s\" server-bridge %u </dev/null >/dev/null 2>&1 &",
+                 s_flinstone_ps, (unsigned)port);
     (void)system(cmd);
     return 0;
 #endif

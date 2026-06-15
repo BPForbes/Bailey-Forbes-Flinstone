@@ -637,7 +637,7 @@ done:
 }
 #endif /* _WIN32 */
 
-static void cmd_server_bridge(const char *port_s) {
+static void cmd_server_bridge(const char *bind_ip, const char *port_s) {
 #if defined(_WIN32)
     int port = atoi(port_s);
     if (port <= 0 || port > 65535) {
@@ -662,9 +662,20 @@ static void cmd_server_bridge(const char *port_s) {
 
     struct sockaddr_in addr;
     memset(&addr, 0, sizeof(addr));
-    addr.sin_family      = AF_INET;
-    addr.sin_addr.s_addr = INADDR_ANY;
-    addr.sin_port        = htons((USHORT)port);
+    addr.sin_family = AF_INET;
+    /* Bind to specific IP when given; INADDR_ANY (0.0.0.0) otherwise. */
+    if (bind_ip && bind_ip[0] && strcmp(bind_ip, "0.0.0.0") != 0) {
+        addr.sin_addr.s_addr = inet_addr(bind_ip);
+        if (addr.sin_addr.s_addr == INADDR_NONE) {
+            printf("result=err\tmsg=invalid bind address '%s'\n", bind_ip);
+            closesocket(lsock);
+            WSACleanup();
+            return;
+        }
+    } else {
+        addr.sin_addr.s_addr = INADDR_ANY;
+    }
+    addr.sin_port = htons((USHORT)port);
 
     if (bind(lsock, (struct sockaddr *)&addr, sizeof(addr)) == SOCKET_ERROR) {
         printf("result=err\tmsg=bind failed (%d)\n", WSAGetLastError());
@@ -761,7 +772,7 @@ static void cmd_server_bridge(const char *port_s) {
     closesocket(lsock);
     WSACleanup();
 #else
-    (void)port_s;
+    (void)bind_ip; (void)port_s;
     puts("result=err\tmsg=server-bridge only available on Windows");
 #endif
 }
@@ -827,7 +838,7 @@ int main(int argc, char **argv) {
                 "  wifi-join <ssid> [password]       Connect to a network\n"
                 "  wifi-leave                        Disconnect from current network\n"
                 "  wifi-status                       Show connection state\n"
-                "  server-bridge <port>              Relay LAN:<port> → WSL:<port> (no admin)\n"
+                "  server-bridge [<network>] <port>   Relay <network>:<port> → WSL (no admin)\n"
                 "  server-proxy <wsl_ip> <port>      Forward Windows IP:<port> → WSL (admin)\n"
                 "  server-proxy-del <port>           Remove portproxy rule (admin)\n");
         return 1;
@@ -851,10 +862,14 @@ int main(int argc, char **argv) {
         cmd_wifi_status();
     } else if (strcmp(cmd, "server-bridge") == 0) {
         if (argc < 3) {
-            fprintf(stderr, "server-bridge: requires <port>\n");
+            fprintf(stderr, "server-bridge: requires [<network>] <port>\n");
             return 1;
         }
-        cmd_server_bridge(argv[2]);
+        /* server-bridge <port>  or  server-bridge <bind_ip> <port> */
+        if (argc >= 4)
+            cmd_server_bridge(argv[2], argv[3]);
+        else
+            cmd_server_bridge(NULL, argv[2]);
     } else if (strcmp(cmd, "server-proxy") == 0) {
         if (argc < 4) {
             fprintf(stderr, "server-proxy: requires <wsl_ip> <port>\n");
