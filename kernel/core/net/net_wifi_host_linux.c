@@ -28,7 +28,8 @@ typedef enum {
     FL_WIFI_HOST_NONE = 0,
     FL_WIFI_HOST_WPA_CLI,
     FL_WIFI_HOST_NMCLI,
-    FL_WIFI_HOST_FLINSTONE_PS  /* WSL: bridge via FlinstonePowershell.exe */
+    FL_WIFI_HOST_FLINSTONE_PS,     /* WSL: bridge via FlinstonePowershell.exe */
+    FL_WIFI_HOST_FLINSTONE_LINUX   /* Native Linux ELF helper */
 } fl_wifi_host_kind_t;
 
 static char s_wifi_iface[FL_NET_IFACE_NAME_MAX] = "";
@@ -36,6 +37,8 @@ static char s_wpa_cli[128] = "wpa_cli";
 static char s_nmcli[128] = "nmcli";
 static char s_wpa_ctrl_dir[256] = "";
 static char s_flinstone_ps[512] = ""; /* path to FlinstonePowershell.exe */
+static char s_flinstone_linux[512] = ""; /* path to FlinstoneLinuxNet ELF */
+static char s_network_bridge_py[512] = ""; /* optional Python bridge helper */
 static fl_net_wifi_scan_entry_t s_wpa_scan[32];
 static size_t s_wpa_scan_count;
 static char s_wpa_joined_ssid[FL_WIFI_SSID_MAX];
@@ -326,6 +329,16 @@ static int probe_nmcli(void) {
     if (!strstr(out, "yes"))
         return 0;
     s_host_kind = FL_WIFI_HOST_NMCLI;
+    return 1;
+}
+
+static int copy_existing_path(const char *path, char *out, size_t out_cap) {
+    if (!path || !path[0] || !out || out_cap == 0u)
+        return 0;
+    if (access(path, F_OK) != 0)
+        return 0;
+    strncpy(out, path, out_cap - 1u);
+    out[out_cap - 1u] = '\0';
     return 1;
 }
 
@@ -861,6 +874,41 @@ static int find_flinstone_ps_exe(void) {
     return 0;
 }
 
+static int find_flinstone_linux_helper(void) {
+    const char *env_path = getenv("FL_NET_WIFI_FLINSTONE_LINUX");
+    if (env_path && env_path[0]) {
+        strncpy(s_flinstone_linux, env_path, sizeof(s_flinstone_linux) - 1u);
+        s_flinstone_linux[sizeof(s_flinstone_linux) - 1u] = '\0';
+        return 1;
+    }
+    if (copy_existing_path("tools/FlinstoneLinuxNet/FlinstoneLinuxNet",
+                           s_flinstone_linux, sizeof(s_flinstone_linux)))
+        return 1;
+    if (copy_existing_path("./tools/FlinstoneLinuxNet/FlinstoneLinuxNet",
+                           s_flinstone_linux, sizeof(s_flinstone_linux)))
+        return 1;
+    {
+        FILE *fp = popen("command -v FlinstoneLinuxNet 2>/dev/null", "r");
+        if (fp) {
+            char found[512];
+            found[0] = '\0';
+            if (fgets(found, sizeof(found), fp) != NULL) {
+                size_t n = strlen(found);
+                while (n > 0 && (found[n - 1] == '\n' || found[n - 1] == '\r'))
+                    found[--n] = '\0';
+                if (n > 0) {
+                    pclose(fp);
+                    strncpy(s_flinstone_linux, found, sizeof(s_flinstone_linux) - 1u);
+                    s_flinstone_linux[sizeof(s_flinstone_linux) - 1u] = '\0';
+                    return 1;
+                }
+            }
+            pclose(fp);
+        }
+    }
+    return 0;
+}
+
 static int probe_flinstone_ps(void) {
     if (!find_flinstone_ps_exe())
         return 0;
@@ -869,13 +917,29 @@ static int probe_flinstone_ps(void) {
     return 1;
 }
 
-static int run_flinstone_ps(const char *args, char *out, size_t out_cap) {
-    char cmd[768];
+static int probe_flinstone_linux(void) {
+    if (!find_flinstone_linux_helper())
+        return 0;
+    s_host_kind = FL_WIFI_HOST_FLINSTONE_LINUX;
+    return 1;
+}
+
+static const char *flinstone_helper_path(void) {
+    if (s_host_kind == FL_WIFI_HOST_FLINSTONE_LINUX)
+        return s_flinstone_linux;
+    return s_flinstone_ps;
+}
+
+static int run_flinstone_helper(const char *args, char *out, size_t out_cap) {
+    char cmd[4096];
+    char exe_q[512 * 5 + 4];
+    const char *helper = flinstone_helper_path();
     FILE *fp;
 
-    if (!args || s_flinstone_ps[0] == '\0')
+    if (!args || !helper || helper[0] == '\0')
         return 0;
-    snprintf(cmd, sizeof(cmd), "%s %s 2>/dev/null", s_flinstone_ps, args);
+    shell_single_quote(helper, exe_q, sizeof(exe_q));
+    snprintf(cmd, sizeof(cmd), "%s %s 2>/dev/null", exe_q, args);
     fp = popen(cmd, "r");
     if (!fp)
         return 0;
@@ -888,6 +952,33 @@ static int run_flinstone_ps(const char *args, char *out, size_t out_cap) {
             ;
     }
     return pclose(fp) == 0;
+}
+
+static int run_flinstone_ps(const char *args, char *out, size_t out_cap) {
+    return run_flinstone_helper(args, out, out_cap);
+}
+
+static int refresh_flinstone_helper_status(void) {
+    char st_out[512];
+    char plen_s[8] = "";
+
+    if (s_host_kind != FL_WIFI_HOST_FLINSTONE_PS &&
+        s_host_kind != FL_WIFI_HOST_FLINSTONE_LINUX)
+        return 0;
+    s_fps_ipv4[0] = '\0';
+    s_fps_prefix = 24u;
+    s_fps_gw[0] = '\0';
+    if (!run_flinstone_helper("wifi-status", st_out, sizeof(st_out)))
+        return 0;
+    if (!strstr(st_out, "state=connected"))
+        return 0;
+    parse_fps_field(st_out, "ipv4", s_fps_ipv4, sizeof(s_fps_ipv4));
+    parse_fps_field(st_out, "gateway", s_fps_gw, sizeof(s_fps_gw));
+    if (parse_fps_field(st_out, "prefix", plen_s, sizeof(plen_s)) && plen_s[0])
+        s_fps_prefix = (uint8_t)atoi(plen_s);
+    read_any_nonlo_ipv4(s_wsl_bind_ipv4, sizeof(s_wsl_bind_ipv4),
+                        &s_wsl_bind_prefix);
+    return s_fps_ipv4[0] != '\0';
 }
 
 /* Parse tab-separated key=value lines emitted by FlinstonePowershell wifi-scan. */
@@ -992,6 +1083,13 @@ static void probe_host_backend_once(void) {
     if (s_host_kind != FL_WIFI_HOST_NONE)
         return;
 
+    /* An explicit helper path is authoritative; useful for WSL, tests, and
+     * non-standard installs where the Windows helper is not on PATH. */
+    if (getenv("FL_NET_WIFI_FLINSTONE_PS") && probe_flinstone_ps())
+        return;
+    if (getenv("FL_NET_WIFI_FLINSTONE_LINUX") && probe_flinstone_linux())
+        return;
+
     /* On WSL, Windows owns the Wi-Fi radio — route through FlinstonePowershell. */
     if (fl_platform_detect() == FL_PLATFORM_WSL) {
         if (!probe_flinstone_ps())
@@ -1007,6 +1105,8 @@ static void probe_host_backend_once(void) {
 
     mode = wpa_use_requested();
     if (mode == 0)
+        return;
+    if (mode != 1 && probe_flinstone_linux())
         return;
     if (mode == 1) {
         if (probe_wpa_cli())
@@ -1038,6 +1138,8 @@ const char *fl_net_wifi_host_linux_backend_name(void) {
         return "nmcli";
     if (s_host_kind == FL_WIFI_HOST_FLINSTONE_PS)
         return "FlinstonePowershell";
+    if (s_host_kind == FL_WIFI_HOST_FLINSTONE_LINUX)
+        return "FlinstoneLinuxNet";
     return NULL;
 #endif
 }
@@ -1062,8 +1164,9 @@ fl_result_t fl_net_wifi_host_linux_scan(uint8_t band, unsigned timeout_ms) {
     (void)timeout_ms;
     if (!fl_net_wifi_host_linux_available())
         return FL_RESULT_NOSYS;
-    if (s_host_kind == FL_WIFI_HOST_FLINSTONE_PS) {
-        if (!run_flinstone_ps("wifi-scan", out, sizeof(out)))
+    if (s_host_kind == FL_WIFI_HOST_FLINSTONE_PS ||
+        s_host_kind == FL_WIFI_HOST_FLINSTONE_LINUX) {
+        if (!run_flinstone_helper("wifi-scan", out, sizeof(out)))
             return FL_RESULT_ERR;
         parse_flinstone_ps_scan(out, band);
         return FL_RESULT_OK;
@@ -1125,7 +1228,8 @@ fl_result_t fl_net_wifi_host_linux_connect(const fl_net_wifi_cred_t *cred,
     if (!fl_net_wifi_host_linux_available())
         return FL_RESULT_NOSYS;
 
-    if (s_host_kind == FL_WIFI_HOST_FLINSTONE_PS) {
+    if (s_host_kind == FL_WIFI_HOST_FLINSTONE_PS ||
+        s_host_kind == FL_WIFI_HOST_FLINSTONE_LINUX) {
         char args[FL_WIFI_SSID_MAX * 6 + sizeof(cred->passphrase) * 6 + 32];
         char join_out[256];
         char ssid_q[FL_WIFI_SSID_MAX * 5 + 4];
@@ -1137,28 +1241,13 @@ fl_result_t fl_net_wifi_host_linux_connect(const fl_net_wifi_cred_t *cred,
         } else {
             snprintf(args, sizeof(args), "wifi-join %s", ssid_q);
         }
-        if (!run_flinstone_ps(args, join_out, sizeof(join_out)))
+        if (!run_flinstone_helper(args, join_out, sizeof(join_out)))
             return FL_RESULT_ERR;
         if (!strstr(join_out, "result=ok"))
             return FL_RESULT_ERR;
         strncpy(s_wpa_joined_ssid, cred->ssid, sizeof(s_wpa_joined_ssid) - 1u);
-        /* Query real Windows Wi-Fi IP via wifi-status */
-        {
-            char st_out[512];
-            s_fps_ipv4[0] = '\0';
-            s_fps_prefix  = 24u;
-            s_fps_gw[0]   = '\0';
-            if (run_flinstone_ps("wifi-status", st_out, sizeof(st_out))) {
-                char plen_s[8] = "";
-                parse_fps_field(st_out, "ipv4",    s_fps_ipv4, sizeof(s_fps_ipv4));
-                parse_fps_field(st_out, "gateway", s_fps_gw,   sizeof(s_fps_gw));
-                if (parse_fps_field(st_out, "prefix", plen_s, sizeof(plen_s)) && plen_s[0])
-                    s_fps_prefix = (uint8_t)atoi(plen_s);
-            }
-            /* Cache the WSL Linux-side IP (eth0); this is what server host binds to. */
-            read_any_nonlo_ipv4(s_wsl_bind_ipv4, sizeof(s_wsl_bind_ipv4),
-                                &s_wsl_bind_prefix);
-        }
+        /* Query real Windows Wi-Fi IP via wifi-status; this is what LAN peers use. */
+        (void)refresh_flinstone_helper_status();
         (void)timeout_ms;
         return FL_RESULT_OK;
     }
@@ -1268,13 +1357,14 @@ fl_result_t fl_net_wifi_host_linux_disconnect(void) {
     s_wpa_joined_ssid[0] = '\0';
     if (!fl_net_wifi_host_linux_available())
         return FL_RESULT_NOSYS;
-    if (s_host_kind == FL_WIFI_HOST_FLINSTONE_PS) {
+    if (s_host_kind == FL_WIFI_HOST_FLINSTONE_PS ||
+        s_host_kind == FL_WIFI_HOST_FLINSTONE_LINUX) {
         s_fps_ipv4[0]      = '\0';
         s_fps_gw[0]        = '\0';
         s_fps_prefix       = 24u;
         s_wsl_bind_ipv4[0] = '\0';
         s_wsl_bind_prefix  = 24u;
-        (void)run_flinstone_ps("wifi-leave", NULL, 0);
+        (void)run_flinstone_helper("wifi-leave", NULL, 0);
         return FL_RESULT_OK;
     }
     if (s_host_kind == FL_WIFI_HOST_NMCLI) {
@@ -1301,11 +1391,16 @@ fl_result_t fl_net_wifi_host_linux_ipv4(uint32_t *addr_be_out, char *buf, size_t
     fl_result_t rc;
 
     load_env_once();
-    if (s_host_kind == FL_WIFI_HOST_FLINSTONE_PS) {
+    if (s_host_kind == FL_WIFI_HOST_FLINSTONE_PS ||
+        s_host_kind == FL_WIFI_HOST_FLINSTONE_LINUX) {
+        if (!s_wsl_bind_ipv4[0])
+            (void)refresh_flinstone_helper_status();
         /* Return the WSL Linux-side IP (eth0) — it is actually bindable in
          * Linux.  s_fps_ipv4 holds the Windows adapter IP which Linux cannot
          * bind to; use fl_net_wifi_host_linux_windows_ipv4() for that. */
-        const char *bind_ip = s_wsl_bind_ipv4[0] ? s_wsl_bind_ipv4 : s_fps_ipv4;
+        const char *bind_ip = (s_host_kind == FL_WIFI_HOST_FLINSTONE_LINUX && s_fps_ipv4[0])
+                                  ? s_fps_ipv4
+                                  : (s_wsl_bind_ipv4[0] ? s_wsl_bind_ipv4 : s_fps_ipv4);
         if (!bind_ip[0])
             return FL_RESULT_NOENT;
         if (addr_be_out && !fl_net_ipv4_parse_literal(bind_ip, addr_be_out))
@@ -1368,8 +1463,11 @@ fl_result_t fl_net_wifi_host_linux_ipv4_route(uint32_t *addr_be_out, uint8_t *pr
     return FL_RESULT_NOSYS;
 #else
     load_env_once();
-    if (s_host_kind == FL_WIFI_HOST_FLINSTONE_PS) {
-        /* Prefer the Windows adapter IP (with gateway from FlinstonePowershell). */
+    if (s_host_kind == FL_WIFI_HOST_FLINSTONE_PS ||
+        s_host_kind == FL_WIFI_HOST_FLINSTONE_LINUX) {
+        if (!s_fps_ipv4[0] && !s_wsl_bind_ipv4[0])
+            (void)refresh_flinstone_helper_status();
+        /* Prefer the helper-reported adapter IP with gateway. */
         if (s_fps_ipv4[0]) {
             if (addr_be_out && !fl_net_ipv4_parse_literal(s_fps_ipv4, addr_be_out))
                 return FL_RESULT_ERR;
@@ -1413,7 +1511,13 @@ const char *fl_net_wifi_host_linux_windows_ipv4(void) {
 #if !defined(FL_NET_WIFI_HOST_LINUX)
     return NULL;
 #else
-    if (s_host_kind != FL_WIFI_HOST_FLINSTONE_PS || !s_fps_ipv4[0])
+    if (s_host_kind == FL_WIFI_HOST_NONE)
+        (void)fl_net_wifi_host_linux_available();
+    if (s_host_kind != FL_WIFI_HOST_FLINSTONE_PS)
+        return NULL;
+    if (!s_fps_ipv4[0])
+        (void)refresh_flinstone_helper_status();
+    if (!s_fps_ipv4[0])
         return NULL;
     return s_fps_ipv4;
 #endif
@@ -1443,79 +1547,93 @@ int fl_net_wifi_host_linux_server_proxy(const char *wsl_ip, uint16_t port) {
 #endif
 }
 
+static int find_network_bridge_py(void) {
+    const char *env_path = getenv("FL_NET_WIFI_BRIDGE_PY");
+
+    if (env_path && env_path[0]) {
+        strncpy(s_network_bridge_py, env_path, sizeof(s_network_bridge_py) - 1u);
+        s_network_bridge_py[sizeof(s_network_bridge_py) - 1u] = '\0';
+        return 1;
+    }
+    if (copy_existing_path("tools/network_bridge.py",
+                           s_network_bridge_py, sizeof(s_network_bridge_py)))
+        return 1;
+    if (copy_existing_path("./tools/network_bridge.py",
+                           s_network_bridge_py, sizeof(s_network_bridge_py)))
+        return 1;
+    return 0;
+}
+
+static const char *bridge_target_or_default(const char *target_ip) {
+    const char *env_target = getenv("FL_NET_WIFI_BRIDGE_TARGET");
+    if (target_ip && target_ip[0])
+        return target_ip;
+    if (env_target && env_target[0])
+        return env_target;
+    return "127.0.0.1";
+}
+
 /*
- * Spawn FlinstonePowershell server-bridge <port> in the background.
- * The bridge listens on 0.0.0.0:<port> on Windows (all adapters including
- * Wi-Fi) and relays each connection to 127.0.0.1:<port>, which WSL2 routes
- * to the Flinstone server.  No Windows admin rights required for port >= 1024.
- * Returns 0 when the process was spawned (optimistic), -1 on wrong backend or
- * missing exe.
+ * Spawn a userspace server bridge in the background.  The Windows helper is
+ * preferred because it can bind the router-assigned Windows Wi-Fi IP from WSL.
+ * The Python bridge is a parity fallback for environments that launch it on a
+ * host where the requested bind IP is local.
  */
-int fl_net_wifi_host_linux_server_bridge(uint16_t port) {
+int fl_net_wifi_host_linux_server_bridge_to(const char *bind_ip,
+                                           const char *target_ip,
+                                           uint16_t port) {
 #if !defined(FL_NET_WIFI_HOST_LINUX)
+    (void)bind_ip;
+    (void)target_ip;
     (void)port;
     return -1;
 #else
-    char cmd[1024];
-    const char *bind_ip = s_fps_ipv4[0] ? s_fps_ipv4 : "";
+    char cmd[4096];
+    char bind_q[128];
+    char target_q[128];
+    const char *chosen_bind = (bind_ip && bind_ip[0]) ? bind_ip : s_fps_ipv4;
+    const char *chosen_target = bridge_target_or_default(target_ip);
 
-    /* Primary: FlinstonePowershell server-bridge (C++ Windows relay).
-     * Binds to the router-assigned IP so only the LAN adapter is exposed. */
-    if (s_host_kind == FL_WIFI_HOST_FLINSTONE_PS && s_flinstone_ps[0]) {
-        if (bind_ip[0])
-            snprintf(cmd, sizeof(cmd),
-                     "\"%s\" server-bridge %s %u </dev/null >/dev/null 2>&1 &",
-                     s_flinstone_ps, bind_ip, (unsigned)port);
-        else
-            snprintf(cmd, sizeof(cmd),
-                     "\"%s\" server-bridge %u </dev/null >/dev/null 2>&1 &",
-                     s_flinstone_ps, (unsigned)port);
+    if (!chosen_bind || !chosen_bind[0])
+        chosen_bind = "0.0.0.0";
+    shell_single_quote(chosen_bind, bind_q, sizeof(bind_q));
+    shell_single_quote(chosen_target, target_q, sizeof(target_q));
+
+    if (s_host_kind == FL_WIFI_HOST_NONE)
+        (void)fl_net_wifi_host_linux_available();
+    if ((s_host_kind == FL_WIFI_HOST_FLINSTONE_PS && s_flinstone_ps[0]) ||
+        (s_host_kind == FL_WIFI_HOST_FLINSTONE_LINUX && s_flinstone_linux[0])) {
+        char exe_q[512 * 5 + 4];
+        const char *helper = flinstone_helper_path();
+        shell_single_quote(helper, exe_q, sizeof(exe_q));
+        snprintf(cmd, sizeof(cmd),
+                 "%s server-bridge %s %u %s </dev/null >/dev/null 2>&1 &",
+                 exe_q, bind_q, (unsigned)port, target_q);
         (void)system(cmd);
         return 0;
     }
 
-    /* Fallback: tools/network_bridge.py via Windows Python (python.exe).
-     * python.exe is invoked via WSL interop so it runs on the Windows network
-     * stack and can bind to the router-assigned address.
-     * wslpath -w converts the Linux script path to a Windows path inline. */
-    {
-        char script[640] = "";
-        char self_dir[512];
-        ssize_t len = readlink("/proc/self/exe", self_dir, sizeof(self_dir) - 1u);
-        if (len > 0) {
-            char *slash;
-            self_dir[len] = '\0';
-            slash = strrchr(self_dir, '/');
-            if (slash) {
-                *slash = '\0';
-                snprintf(script, sizeof(script),
-                         "%s/tools/network_bridge.py", self_dir);
-                if (access(script, F_OK) != 0)
-                    script[0] = '\0';
-            }
-        }
-        if (!script[0] && access("tools/network_bridge.py", F_OK) == 0) {
-            char *rp = realpath("tools/network_bridge.py", script);
-            if (!rp)
-                strncpy(script, "tools/network_bridge.py", sizeof(script) - 1u);
-        }
-        if (script[0]) {
-            if (bind_ip[0])
-                snprintf(cmd, sizeof(cmd),
-                         "python.exe \"$(wslpath -w '%s')\" %s %u"
-                         " </dev/null >/dev/null 2>&1 &",
-                         script, bind_ip, (unsigned)port);
-            else
-                snprintf(cmd, sizeof(cmd),
-                         "python.exe \"$(wslpath -w '%s')\" %u"
-                         " </dev/null >/dev/null 2>&1 &",
-                         script, (unsigned)port);
-            (void)system(cmd);
-            return 0;
-        }
+    if (find_network_bridge_py()) {
+        char py_q[sizeof(s_network_bridge_py) * 5 + 4];
+        shell_single_quote(s_network_bridge_py, py_q, sizeof(py_q));
+        snprintf(cmd, sizeof(cmd),
+                 "python3 %s %s %u %s </dev/null >/dev/null 2>&1 &",
+                 py_q, bind_q, (unsigned)port, target_q);
+        (void)system(cmd);
+        return 0;
     }
     return -1;
 #endif
+}
+
+/*
+ * Spawn FlinstonePowershell server-bridge <port> in the background.
+ * The bridge relays LAN connections to the configured target (default
+ * 127.0.0.1:<port>, WSL2 loopback).  No Windows admin rights required for
+ * port >= 1024.  Returns 0 when spawned (optimistic), -1 when no helper exists.
+ */
+int fl_net_wifi_host_linux_server_bridge(uint16_t port) {
+    return fl_net_wifi_host_linux_server_bridge_to(NULL, NULL, port);
 }
 
 /* Remove a previously added portproxy rule for port.  Returns 0 on success. */

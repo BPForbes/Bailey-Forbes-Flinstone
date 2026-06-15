@@ -16,8 +16,11 @@
  *   **FL_NET_WIFI_IFACE** — interface name (auto-detect first Wi-Fi netdev when unset)
  *   **FL_NET_WIFI_WPA_CLI** — path to wpa_cli (default `wpa_cli`)
  *   **FL_NET_WIFI_NMCLI** — path to nmcli (default `nmcli`)
+ *   **FL_NET_WIFI_FLINSTONE_LINUX** — native Linux helper path
  *   **FL_NET_WIFI_USE_WPA=1** — force wpa_cli path
  *   **FL_NET_WIFI_USE_WPA=0** — force in-tree lab simulation
+ *   **FL_NET_WIFI_BRIDGE_TARGET** — bridge target IP (default 127.0.0.1)
+ *   **FL_NET_WIFI_BRIDGE_PY** — optional path to tools/network_bridge.py
  *   (unset) — auto: wpa_cli when `ping` succeeds, else NetworkManager **nmcli**
  */
 
@@ -62,6 +65,15 @@ const char *fl_net_wifi_host_linux_windows_ipv4(void);
  * Returns 0 when spawned (optimistic), -1 on wrong backend or missing exe.
  */
 int fl_net_wifi_host_linux_server_bridge(uint16_t port);
+
+/**
+ * Spawn a server bridge bound to a Windows/LAN address and forwarding to
+ * target_ip:port.  bind_ip may be NULL/empty for helper auto-detect/all-ifaces;
+ * target_ip may be NULL/empty to use FL_NET_WIFI_BRIDGE_TARGET or 127.0.0.1.
+ */
+int fl_net_wifi_host_linux_server_bridge_to(const char *bind_ip,
+                                           const char *target_ip,
+                                           uint16_t port);
 
 /**
  * Add a Windows portproxy rule so LAN peers can reach the server at the

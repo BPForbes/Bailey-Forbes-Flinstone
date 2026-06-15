@@ -567,12 +567,13 @@ static int verb_host(int argc, char **argv) {
          * authoritative address even though WSL bound to 0.0.0.0. */
         fl_color_success("hosting as '%s' on %s:%u",
                          current_principal(), win_ip_display, (unsigned)ep.port_host);
-        if (fl_net_wifi_host_linux_server_bridge(ep.port_host) == 0)
+        if (fl_net_wifi_host_linux_server_bridge_to(win_ip_display, NULL,
+                                                    ep.port_host) == 0)
             fl_color_success("LAN peers: server join %s:%u (bridge active, no admin needed)",
                              win_ip_display, (unsigned)ep.port_host);
         else
             fl_color_success("LAN peers: server join %s:%u  "
-                             "(run: FlinstonePowershell.exe server-bridge %s %u)",
+                             "(run: FlinstonePowershell.exe server-bridge %s %u [target])",
                              win_ip_display, (unsigned)ep.port_host,
                              win_ip_display, (unsigned)ep.port_host);
     } else {
@@ -594,10 +595,12 @@ static int verb_host(int argc, char **argv) {
                 char bip[32];
                 fl_net_ipv4_format_addr(bind_ep.addr.v4_be, bip, sizeof(bip));
                 const char *proxy_target = (bind_ep.addr.v4_be == 0u) ? "127.0.0.1" : bip;
+                const char *bridge_target = (bind_ep.addr.v4_be == 0u) ? NULL : bip;
                 if (fl_net_wifi_host_linux_server_proxy(proxy_target, bind_ep.port_host) == 0)
                     fl_color_success("LAN peers: server join %s:%u (portproxy active)",
                                      wip, (unsigned)bind_ep.port_host);
-                else if (fl_net_wifi_host_linux_server_bridge(bind_ep.port_host) == 0)
+                else if (fl_net_wifi_host_linux_server_bridge_to(wip, bridge_target,
+                                                                 bind_ep.port_host) == 0)
                     fl_color_success("LAN peers: server join %s:%u (bridge active, no admin needed)",
                                      wip, (unsigned)bind_ep.port_host);
                 else
