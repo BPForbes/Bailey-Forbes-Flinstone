@@ -590,8 +590,8 @@ static void cmd_platform(void) {
 /* -------------------------------------------------------------------------
  * server-bridge
  * Userspace TCP relay: listens on 0.0.0.0:<port> (all Windows adapters,
- * including Wi-Fi) and forwards each accepted connection to
- * 127.0.0.1:<port> (WSL2 loopback → Flinstone server).
+ * including Wi-Fi) or a specific router-assigned IP and forwards each accepted
+ * connection to <target_ip>:<port> (default 127.0.0.1, WSL2 loopback).
  * No administrator rights required for ports >= 1024.
  * Runs in the foreground until killed; spawn with & from WSL.
  * ---------------------------------------------------------------------- */
@@ -637,9 +637,11 @@ done:
 }
 #endif /* _WIN32 */
 
-static void cmd_server_bridge(const char *bind_ip, const char *port_s) {
+static void cmd_server_bridge(const char *bind_ip, const char *port_s,
+                              const char *target_ip) {
 #if defined(_WIN32)
     int port = atoi(port_s);
+    const char *target = (target_ip && target_ip[0]) ? target_ip : "127.0.0.1";
     if (port <= 0 || port > 65535) {
         printf("result=err\tmsg=invalid port\n");
         return;
@@ -698,7 +700,8 @@ static void cmd_server_bridge(const char *bind_ip, const char *port_s) {
         if (csock == INVALID_SOCKET)
             break;
 
-        /* Connect to WSL server via Windows→WSL2 loopback forwarding */
+        /* Connect to the Flinstone server through Windows→WSL2 loopback or
+         * an explicit VM/guest target. */
         SOCKET wsock = socket(AF_INET, SOCK_STREAM, IPPROTO_TCP);
         if (wsock == INVALID_SOCKET) {
             closesocket(csock);
@@ -707,7 +710,12 @@ static void cmd_server_bridge(const char *bind_ip, const char *port_s) {
         struct sockaddr_in wsl_addr;
         memset(&wsl_addr, 0, sizeof(wsl_addr));
         wsl_addr.sin_family      = AF_INET;
-        wsl_addr.sin_addr.s_addr = htonl(INADDR_LOOPBACK);
+        wsl_addr.sin_addr.s_addr = inet_addr(target);
+        if (wsl_addr.sin_addr.s_addr == INADDR_NONE) {
+            closesocket(wsock);
+            closesocket(csock);
+            continue;
+        }
         wsl_addr.sin_port        = htons((USHORT)port);
         if (connect(wsock, (struct sockaddr *)&wsl_addr, sizeof(wsl_addr)) == SOCKET_ERROR) {
             closesocket(wsock);
@@ -772,7 +780,7 @@ static void cmd_server_bridge(const char *bind_ip, const char *port_s) {
     closesocket(lsock);
     WSACleanup();
 #else
-    (void)bind_ip; (void)port_s;
+    (void)bind_ip; (void)port_s; (void)target_ip;
     puts("result=err\tmsg=server-bridge only available on Windows");
 #endif
 }
@@ -838,7 +846,7 @@ int main(int argc, char **argv) {
                 "  wifi-join <ssid> [password]       Connect to a network\n"
                 "  wifi-leave                        Disconnect from current network\n"
                 "  wifi-status                       Show connection state\n"
-                "  server-bridge [<network>] <port>   Relay <network>:<port> → WSL (no admin)\n"
+                "  server-bridge [<network>] <port> [target]  Relay LAN:<port> → target:<port>\n"
                 "  server-proxy <wsl_ip> <port>      Forward Windows IP:<port> → WSL (admin)\n"
                 "  server-proxy-del <port>           Remove portproxy rule (admin)\n");
         return 1;
@@ -865,11 +873,14 @@ int main(int argc, char **argv) {
             fprintf(stderr, "server-bridge: requires [<network>] <port>\n");
             return 1;
         }
-        /* server-bridge <port>  or  server-bridge <bind_ip> <port> */
-        if (argc >= 4)
-            cmd_server_bridge(argv[2], argv[3]);
+        /* server-bridge <port>, server-bridge <bind_ip> <port>,
+         * or server-bridge <bind_ip> <port> <target_ip>. */
+        if (argc >= 5)
+            cmd_server_bridge(argv[2], argv[3], argv[4]);
+        else if (argc >= 4)
+            cmd_server_bridge(argv[2], argv[3], NULL);
         else
-            cmd_server_bridge(NULL, argv[2]);
+            cmd_server_bridge(NULL, argv[2], NULL);
     } else if (strcmp(cmd, "server-proxy") == 0) {
         if (argc < 4) {
             fprintf(stderr, "server-proxy: requires <wsl_ip> <port>\n");

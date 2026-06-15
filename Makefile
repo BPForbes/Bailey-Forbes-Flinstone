@@ -775,7 +775,7 @@ test_p3_udp_cmds: $(NET_ASM_OBJ) $(MEM_ASM_OBJ) $(NET_TEST_SHELL_OBJS) $(NET_TES
 # (issue #239 internal-only audit). Drives cmd_net_tools.c entry points
 # in-process against the in-tree fl_net_arp / fl_net_route / fl_net_udp /
 # fl_net_resolve_ipv4 APIs; no arpa/inet.h, no libc DNS.
-.PHONY: test_p3_wifi test_wifi_db
+.PHONY: test_p3_wifi test_wifi_db test_wifi_flinstone_helper test_network_bridge_py
 WIFI_TEST_NET_OBJS = kernel/core/net/net_checksum.c kernel/core/net/net_wire.c \
 	kernel/core/net/net_eth.c kernel/core/net/net_ipv4.c kernel/core/net/net_ipv6.c \
 	kernel/core/net/net_icmpv6.c kernel/core/net/net_ndp.c kernel/core/net/net_udp.c \
@@ -791,9 +791,25 @@ test_p3_wifi: $(NET_ASM_OBJ) $(MEM_ASM_OBJ) priority_queue.o kernel/core/time/ti
 	  kernel/core/net/net_wifi_wpa.c kernel/core/net/net_wifi_twt.c \
 	  kernel/core/net/net_wifi_crypto.c \
 	  $(WIFI_TEST_NET_OBJS) \
+	  kernel/core/platform/fl_platform.c \
 	  kernel/core/sched/workqueue.c kernel/core/sys/ipc.o kernel/core/time/timekeeping.o priority_queue.o \
 	  $(MEM_ASM_OBJ) $(NET_ASM_OBJ) $(OPENSSL_LIBS) -Wl,-z,noexecstack
 	./tests/test_p3_wifi
+
+test_wifi_flinstone_helper: $(NET_ASM_OBJ) $(MEM_ASM_OBJ) priority_queue.o kernel/core/time/timekeeping.o kernel/core/sys/ipc.o
+	$(CC) $(CFLAGS) $(TEST_SANITIZE) -o tests/test_wifi_flinstone_helper tests/test_wifi_flinstone_helper.c \
+	  kernel/core/net/net_wifi_he.c kernel/core/net/net_wifi_station.c kernel/core/net/net_wifi_host_linux.c \
+	  kernel/core/net/net_wifi_mgmt.c kernel/core/net/net_wifi_sae.c \
+	  kernel/core/net/net_wifi_wpa.c kernel/core/net/net_wifi_twt.c \
+	  kernel/core/net/net_wifi_crypto.c \
+	  $(WIFI_TEST_NET_OBJS) \
+	  kernel/core/platform/fl_platform.c \
+	  kernel/core/sched/workqueue.c kernel/core/sys/ipc.o kernel/core/time/timekeeping.o priority_queue.o \
+	  $(MEM_ASM_OBJ) $(NET_ASM_OBJ) $(OPENSSL_LIBS) -Wl,-z,noexecstack
+	./tests/test_wifi_flinstone_helper
+
+test_network_bridge_py:
+	python3 tests/test_network_bridge.py
 
 test_wifi_db: userland/identity/password_hash.o kernel/core/net/net_wifi_db.o kernel/core/time/timekeeping.o
 	$(CC) $(CFLAGS) $(TEST_SANITIZE) -Iuserland/identity -c tests/test_wifi_db.c -o tests/test_wifi_db_main.o
@@ -891,7 +907,7 @@ clean:
 	rm -f kernel/arch/*/drivers/*.o kernel/arch/*/hal/*.o kernel/drivers/*.o kernel/drivers/block/*.o VM/devices/*.o
 	rm -f arch/*/*/*.o arch/*/*/alloc/*.o
 	rm -f tests/test_mem_asm tests/test_alloc tests/test_priority_queue tests/test_drivers tests/test_vm_mem tests/test_replay tests/test_invariants tests/test_userspace_connection tests/test_vm_syscall_bridge tests/test_vm_arch_readiness
-	rm -f tests/test_p3_network tests/test_p3_server tests/test_p3_server_lan tests/test_p3_udp_cmds tests/test_p3_net_tools
+	rm -f tests/test_p3_network tests/test_p3_server tests/test_p3_server_lan tests/test_p3_udp_cmds tests/test_p3_net_tools tests/test_wifi_flinstone_helper
 	rm -f tests/test_batch_argv_issue220 tests/test_threadpool_issue222 tests/test_disk_hex_issue222
 	rm -rf tests/obj/issue220 tests/obj/issue222
 	find . -name '*.o' -type f ! -path './deps/*' ! -path './.git/*' -exec rm -f {} +
