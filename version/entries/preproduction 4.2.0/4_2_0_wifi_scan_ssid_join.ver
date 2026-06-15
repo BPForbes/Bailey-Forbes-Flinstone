@@ -92,3 +92,5 @@ PRE 4.2.0: Wi-Fi scan home SSID + SSID-based join; WSL detection; FlinstonePower
   are visible to cmd_server_file.c under ARM compilers that treat implicit
   function declarations as fatal
 VER_END
+
+RELEASE_DATE=2026-06-15
