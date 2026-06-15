@@ -11,6 +11,7 @@
 #include "net_wifi_crypto.h"
 
 #include <stdio.h>
+#include <stdlib.h>
 #include <string.h>
 
 #define ASSERT(c)                                                              \
@@ -237,6 +238,8 @@ static int test_mgmt_hdr_probe(void) {
 }
 
 int main(void) {
+    ASSERT(setenv("FL_NET_WIFI_USE_WPA", "0", 1) == 0);
+
     if (test_he_capabilities_parse() != 0)
         return 1;
     if (test_scan_result_he_fields() != 0)

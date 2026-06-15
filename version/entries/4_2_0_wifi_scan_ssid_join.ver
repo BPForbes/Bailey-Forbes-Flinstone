@@ -91,6 +91,8 @@ PRE 4.2.0: Wi-Fi scan home SSID + SSID-based join; WSL detection; FlinstonePower
   FILE_ACCEPT, FILE_DECLINE, and FILE_REVOKE encoder prototypes used by
   cmd_server_file.c, avoiding transitive contract-header assumptions on ARM
   compilers that treat implicit function declarations as fatal
+- Native Linux network helper: tools/FlinstoneLinuxNet/FlinstoneLinuxNet builds
+  as an ELF with the same platform/wifi-scan/wifi-join/wifi-leave/wifi-status/
+  server-bridge command protocol as the Windows helper; Linux Wi-Fi commands use
+  nmcli and server-bridge uses POSIX sockets for LAN-to-target relays
 VER_END
-
-RELEASE_DATE=2026-06-15

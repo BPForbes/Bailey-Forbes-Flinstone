@@ -16,6 +16,7 @@
  *   **FL_NET_WIFI_IFACE** — interface name (auto-detect first Wi-Fi netdev when unset)
  *   **FL_NET_WIFI_WPA_CLI** — path to wpa_cli (default `wpa_cli`)
  *   **FL_NET_WIFI_NMCLI** — path to nmcli (default `nmcli`)
+ *   **FL_NET_WIFI_FLINSTONE_LINUX** — native Linux helper path
  *   **FL_NET_WIFI_USE_WPA=1** — force wpa_cli path
  *   **FL_NET_WIFI_USE_WPA=0** — force in-tree lab simulation
  *   **FL_NET_WIFI_BRIDGE_TARGET** — bridge target IP (default 127.0.0.1)

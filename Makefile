@@ -230,6 +230,7 @@ OBJS = $(SRCS:.c=.o) $(ASMOBJS) $(IDENTITY_OBJS)
 TARGET = BPForbes_Flinstone_Shell
 MINGW_CXX = x86_64-w64-mingw32-g++
 FLINSTONE_PS_EXE_OUT = tools/FlinstonePowershell/FlinstonePowershell.exe
+FLINSTONE_LINUX_NET_OUT = tools/FlinstoneLinuxNet/FlinstoneLinuxNet
 ifneq ($(shell command -v $(MINGW_CXX) 2>/dev/null),)
 FLINSTONE_PS_EXE = $(FLINSTONE_PS_EXE_OUT)
 endif
@@ -340,6 +341,14 @@ flinstone-ps:
 	    tools/FlinstonePowershell/FlinstonePowershell.cpp
 	@echo "Built tools/FlinstonePowershell/FlinstonePowershell (Linux dev build)"
 	@echo "To build the Windows .exe: make flinstone-ps-windows"
+
+.PHONY: flinstone-linux-net
+flinstone-linux-net: $(FLINSTONE_LINUX_NET_OUT)
+
+$(FLINSTONE_LINUX_NET_OUT): tools/FlinstoneLinuxNet/FlinstoneLinuxNet.cpp
+	$(CXX) -std=c++17 -Wall -Wextra -o $(FLINSTONE_LINUX_NET_OUT) \
+	    tools/FlinstoneLinuxNet/FlinstoneLinuxNet.cpp
+	@echo "Built $(FLINSTONE_LINUX_NET_OUT) (native Linux Wi-Fi/server helper)"
 
 # Cross-compile for Windows (requires mingw-w64: sudo ./scripts/install_deps.sh).
 # Included in the default `all` target automatically when x86_64-w64-mingw32-g++ is found.
@@ -775,7 +784,7 @@ test_p3_udp_cmds: $(NET_ASM_OBJ) $(MEM_ASM_OBJ) $(NET_TEST_SHELL_OBJS) $(NET_TES
 # (issue #239 internal-only audit). Drives cmd_net_tools.c entry points
 # in-process against the in-tree fl_net_arp / fl_net_route / fl_net_udp /
 # fl_net_resolve_ipv4 APIs; no arpa/inet.h, no libc DNS.
-.PHONY: test_p3_wifi test_wifi_db test_wifi_flinstone_helper test_network_bridge_py
+.PHONY: test_p3_wifi test_wifi_db test_wifi_flinstone_helper test_wifi_flinstone_linux_helper test_network_bridge_py
 WIFI_TEST_NET_OBJS = kernel/core/net/net_checksum.c kernel/core/net/net_wire.c \
 	kernel/core/net/net_eth.c kernel/core/net/net_ipv4.c kernel/core/net/net_ipv6.c \
 	kernel/core/net/net_icmpv6.c kernel/core/net/net_ndp.c kernel/core/net/net_udp.c \
@@ -808,8 +817,24 @@ test_wifi_flinstone_helper: $(NET_ASM_OBJ) $(MEM_ASM_OBJ) priority_queue.o kerne
 	  $(MEM_ASM_OBJ) $(NET_ASM_OBJ) $(OPENSSL_LIBS) -Wl,-z,noexecstack
 	./tests/test_wifi_flinstone_helper
 
+test_wifi_flinstone_linux_helper: $(NET_ASM_OBJ) $(MEM_ASM_OBJ) priority_queue.o kernel/core/time/timekeeping.o kernel/core/sys/ipc.o
+	$(CC) $(CFLAGS) $(TEST_SANITIZE) -o tests/test_wifi_flinstone_linux_helper tests/test_wifi_flinstone_linux_helper.c \
+	  kernel/core/net/net_wifi_he.c kernel/core/net/net_wifi_station.c kernel/core/net/net_wifi_host_linux.c \
+	  kernel/core/net/net_wifi_mgmt.c kernel/core/net/net_wifi_sae.c \
+	  kernel/core/net/net_wifi_wpa.c kernel/core/net/net_wifi_twt.c \
+	  kernel/core/net/net_wifi_crypto.c \
+	  $(WIFI_TEST_NET_OBJS) \
+	  kernel/core/platform/fl_platform.c \
+	  kernel/core/sched/workqueue.c kernel/core/sys/ipc.o kernel/core/time/timekeeping.o priority_queue.o \
+	  $(MEM_ASM_OBJ) $(NET_ASM_OBJ) $(OPENSSL_LIBS) -Wl,-z,noexecstack
+	./tests/test_wifi_flinstone_linux_helper
+
 test_network_bridge_py:
 	python3 tests/test_network_bridge.py
+
+.PHONY: test_flinstone_linux_net
+test_flinstone_linux_net: flinstone-linux-net
+	python3 tests/test_flinstone_linux_net.py
 
 test_wifi_db: userland/identity/password_hash.o kernel/core/net/net_wifi_db.o kernel/core/time/timekeeping.o
 	$(CC) $(CFLAGS) $(TEST_SANITIZE) -Iuserland/identity -c tests/test_wifi_db.c -o tests/test_wifi_db_main.o
@@ -907,7 +932,7 @@ clean:
 	rm -f kernel/arch/*/drivers/*.o kernel/arch/*/hal/*.o kernel/drivers/*.o kernel/drivers/block/*.o VM/devices/*.o
 	rm -f arch/*/*/*.o arch/*/*/alloc/*.o
 	rm -f tests/test_mem_asm tests/test_alloc tests/test_priority_queue tests/test_drivers tests/test_vm_mem tests/test_replay tests/test_invariants tests/test_userspace_connection tests/test_vm_syscall_bridge tests/test_vm_arch_readiness
-	rm -f tests/test_p3_network tests/test_p3_server tests/test_p3_server_lan tests/test_p3_udp_cmds tests/test_p3_net_tools tests/test_wifi_flinstone_helper
+	rm -f tests/test_p3_network tests/test_p3_server tests/test_p3_server_lan tests/test_p3_udp_cmds tests/test_p3_net_tools tests/test_wifi_flinstone_helper tests/test_wifi_flinstone_linux_helper
 	rm -f tests/test_batch_argv_issue220 tests/test_threadpool_issue222 tests/test_disk_hex_issue222
 	rm -rf tests/obj/issue220 tests/obj/issue222
 	find . -name '*.o' -type f ! -path './deps/*' ! -path './.git/*' -exec rm -f {} +
