@@ -784,7 +784,7 @@ static int find_flinstone_ps_exe(void) {
         strncpy(s_flinstone_ps, env_path, sizeof(s_flinstone_ps) - 1u);
         return 1;
     }
-    /* `command -v` resolves the exe through the merged PATH */
+    /* `command -v` resolves the exe through the merged PATH (WSL inherits Windows PATH) */
     {
         FILE *fp = popen("command -v FlinstonePowershell.exe 2>/dev/null", "r");
         if (fp) {
@@ -801,6 +801,38 @@ static int find_flinstone_ps_exe(void) {
                 }
             }
             pclose(fp);
+        }
+    }
+    /* Repo-local fallback: look in tools/FlinstonePowershell/ next to the
+     * running binary, then relative to CWD.  Covers the common case where the
+     * user ran `make` but has not yet added the .exe to the Windows PATH. */
+    {
+        char candidate[640];
+        char self_dir[512];
+        ssize_t len = readlink("/proc/self/exe", self_dir, sizeof(self_dir) - 1u);
+        if (len > 0) {
+            char *slash;
+            self_dir[len] = '\0';
+            slash = strrchr(self_dir, '/');
+            if (slash) {
+                *slash = '\0';
+                snprintf(candidate, sizeof(candidate),
+                         "%s/tools/FlinstonePowershell/FlinstonePowershell.exe",
+                         self_dir);
+                if (access(candidate, F_OK) == 0) {
+                    strncpy(s_flinstone_ps, candidate, sizeof(s_flinstone_ps) - 1u);
+                    return 1;
+                }
+            }
+        }
+        /* CWD fallback (shell launched from repo root) */
+        if (access("tools/FlinstonePowershell/FlinstonePowershell.exe", F_OK) == 0) {
+            char *rp = realpath("tools/FlinstonePowershell/FlinstonePowershell.exe",
+                                candidate);
+            strncpy(s_flinstone_ps,
+                    rp ? candidate : "tools/FlinstonePowershell/FlinstonePowershell.exe",
+                    sizeof(s_flinstone_ps) - 1u);
+            return 1;
         }
     }
     return 0;
@@ -941,9 +973,10 @@ static void probe_host_backend_once(void) {
         if (!probe_flinstone_ps())
             fprintf(stderr,
                     "wifi: WSL detected but FlinstonePowershell.exe not found.\n"
-                    "  Build: make flinstone-ps-windows\n"
-                    "  Install: copy FlinstonePowershell.exe to a directory on your Windows PATH\n"
-                    "  Override: set FL_NET_WIFI_FLINSTONE_PS=/path/to/FlinstonePowershell.exe\n");
+                    "  Build:   make flinstone-ps-windows\n"
+                    "  (The .exe is searched next to this binary and in the CWD;\n"
+                    "   install to Windows PATH for system-wide use.)\n"
+                    "  Override: FL_NET_WIFI_FLINSTONE_PS=/path/to/FlinstonePowershell.exe\n");
         return;
     }
 
@@ -1398,24 +1431,65 @@ int fl_net_wifi_host_linux_server_bridge(uint16_t port) {
     (void)port;
     return -1;
 #else
-    char cmd[768];
+    char cmd[1024];
+    const char *bind_ip = s_fps_ipv4[0] ? s_fps_ipv4 : "";
 
-    if (s_host_kind != FL_WIFI_HOST_FLINSTONE_PS || !s_flinstone_ps[0])
-        return -1;
-    /* Spawn as a background Windows process; stdout/stderr discarded so it
-     * doesn't block or pollute the Flinstone shell output.
-     * Bind to the specific Windows Wi-Fi IP (s_fps_ipv4) so the bridge
-     * listens only on the router-assigned address, not all interfaces. */
-    if (s_fps_ipv4[0])
-        snprintf(cmd, sizeof(cmd),
-                 "\"%s\" server-bridge %s %u </dev/null >/dev/null 2>&1 &",
-                 s_flinstone_ps, s_fps_ipv4, (unsigned)port);
-    else
-        snprintf(cmd, sizeof(cmd),
-                 "\"%s\" server-bridge %u </dev/null >/dev/null 2>&1 &",
-                 s_flinstone_ps, (unsigned)port);
-    (void)system(cmd);
-    return 0;
+    /* Primary: FlinstonePowershell server-bridge (C++ Windows relay).
+     * Binds to the router-assigned IP so only the LAN adapter is exposed. */
+    if (s_host_kind == FL_WIFI_HOST_FLINSTONE_PS && s_flinstone_ps[0]) {
+        if (bind_ip[0])
+            snprintf(cmd, sizeof(cmd),
+                     "\"%s\" server-bridge %s %u </dev/null >/dev/null 2>&1 &",
+                     s_flinstone_ps, bind_ip, (unsigned)port);
+        else
+            snprintf(cmd, sizeof(cmd),
+                     "\"%s\" server-bridge %u </dev/null >/dev/null 2>&1 &",
+                     s_flinstone_ps, (unsigned)port);
+        (void)system(cmd);
+        return 0;
+    }
+
+    /* Fallback: tools/network_bridge.py via Windows Python (python.exe).
+     * python.exe is invoked via WSL interop so it runs on the Windows network
+     * stack and can bind to the router-assigned address.
+     * wslpath -w converts the Linux script path to a Windows path inline. */
+    {
+        char script[640] = "";
+        char self_dir[512];
+        ssize_t len = readlink("/proc/self/exe", self_dir, sizeof(self_dir) - 1u);
+        if (len > 0) {
+            char *slash;
+            self_dir[len] = '\0';
+            slash = strrchr(self_dir, '/');
+            if (slash) {
+                *slash = '\0';
+                snprintf(script, sizeof(script),
+                         "%s/tools/network_bridge.py", self_dir);
+                if (access(script, F_OK) != 0)
+                    script[0] = '\0';
+            }
+        }
+        if (!script[0] && access("tools/network_bridge.py", F_OK) == 0) {
+            char *rp = realpath("tools/network_bridge.py", script);
+            if (!rp)
+                strncpy(script, "tools/network_bridge.py", sizeof(script) - 1u);
+        }
+        if (script[0]) {
+            if (bind_ip[0])
+                snprintf(cmd, sizeof(cmd),
+                         "python.exe \"$(wslpath -w '%s')\" %s %u"
+                         " </dev/null >/dev/null 2>&1 &",
+                         script, bind_ip, (unsigned)port);
+            else
+                snprintf(cmd, sizeof(cmd),
+                         "python.exe \"$(wslpath -w '%s')\" %u"
+                         " </dev/null >/dev/null 2>&1 &",
+                         script, (unsigned)port);
+            (void)system(cmd);
+            return 0;
+        }
+    }
+    return -1;
 #endif
 }
 
