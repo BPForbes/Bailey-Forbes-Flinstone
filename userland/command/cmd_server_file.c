@@ -1,6 +1,7 @@
 #include "cmd_server_file.h"
 
 #include "fl_colors.h"
+#include "contract_p3_packet.h"
 #include "net_file_delivery.h"
 #include "server_file_expire.h"
 #include "server_shared_db.h"

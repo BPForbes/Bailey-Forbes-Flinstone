@@ -1,0 +1,6 @@
+MAJOR_VERSION=4
+STANDARD_VERSION=2
+RELEASE_VERSION=0
+PRERELEASE=1
+DEV_VERSION=16
+DESCRIPTION=PRE 4.2.0 Raspberry Pi ARM build fix: include the P3 packet contract in cmd_server_file.c so FILE_ACCEPT, FILE_DECLINE, and FILE_REVOKE encoder prototypes are visible under ARM compilers that treat implicit function declarations as fatal.
