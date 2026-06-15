@@ -151,3 +151,5 @@ PRE 4.2.0: Wi-Fi scan home SSID + SSID-based join; WSL detection; FlinstonePower
   prompting for the password and re-adds the credential; nmcli already handles
   empty-passphrase re-join via device wifi connect without a password argument
 VER_END
+
+RELEASE_DATE=2026-06-15
