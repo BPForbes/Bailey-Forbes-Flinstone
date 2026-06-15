@@ -1385,6 +1385,33 @@ int fl_net_wifi_host_linux_server_proxy(const char *wsl_ip, uint16_t port) {
 #endif
 }
 
+/*
+ * Spawn FlinstonePowershell server-bridge <port> in the background.
+ * The bridge listens on 0.0.0.0:<port> on Windows (all adapters including
+ * Wi-Fi) and relays each connection to 127.0.0.1:<port>, which WSL2 routes
+ * to the Flinstone server.  No Windows admin rights required for port >= 1024.
+ * Returns 0 when the process was spawned (optimistic), -1 on wrong backend or
+ * missing exe.
+ */
+int fl_net_wifi_host_linux_server_bridge(uint16_t port) {
+#if !defined(FL_NET_WIFI_HOST_LINUX)
+    (void)port;
+    return -1;
+#else
+    char cmd[768];
+
+    if (s_host_kind != FL_WIFI_HOST_FLINSTONE_PS || !s_flinstone_ps[0])
+        return -1;
+    /* Spawn as a background Windows process; stdout/stderr discarded so it
+     * doesn't block or pollute the Flinstone shell output. */
+    snprintf(cmd, sizeof(cmd),
+             "\"%s\" server-bridge %u </dev/null >/dev/null 2>&1 &",
+             s_flinstone_ps, (unsigned)port);
+    (void)system(cmd);
+    return 0;
+#endif
+}
+
 /* Remove a previously added portproxy rule for port.  Returns 0 on success. */
 int fl_net_wifi_host_linux_server_proxy_del(uint16_t port) {
 #if !defined(FL_NET_WIFI_HOST_LINUX)

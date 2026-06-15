@@ -588,6 +588,185 @@ static void cmd_platform(void) {
 }
 
 /* -------------------------------------------------------------------------
+ * server-bridge
+ * Userspace TCP relay: listens on 0.0.0.0:<port> (all Windows adapters,
+ * including Wi-Fi) and forwards each accepted connection to
+ * 127.0.0.1:<port> (WSL2 loopback → Flinstone server).
+ * No administrator rights required for ports >= 1024.
+ * Runs in the foreground until killed; spawn with & from WSL.
+ * ---------------------------------------------------------------------- */
+
+#if defined(_WIN32)
+struct relay_pair {
+    SOCKET a, b;  /* a = LAN client, b = WSL loopback */
+    LONG   refs;  /* starts 2; last thread to exit closes both sockets */
+};
+
+struct relay_task {
+    SOCKET      src;
+    SOCKET      dst;
+    relay_pair *pair;
+};
+
+static DWORD WINAPI relay_thread(LPVOID arg) {
+    relay_task *task = reinterpret_cast<relay_task *>(arg);
+    SOCKET      src  = task->src;
+    SOCKET      dst  = task->dst;
+    relay_pair *pair = task->pair;
+    free(task);
+
+    char buf[4096];
+    int  n;
+    while ((n = recv(src, buf, (int)sizeof(buf), 0)) > 0) {
+        int off = 0;
+        while (off < n) {
+            int s = send(dst, buf + off, n - off, 0);
+            if (s == SOCKET_ERROR)
+                goto done;
+            off += s;
+        }
+    }
+done:
+    shutdown(dst, SD_SEND);
+    if (InterlockedDecrement(&pair->refs) == 0) {
+        closesocket(pair->a);
+        closesocket(pair->b);
+        free(pair);
+    }
+    return 0;
+}
+#endif /* _WIN32 */
+
+static void cmd_server_bridge(const char *port_s) {
+#if defined(_WIN32)
+    int port = atoi(port_s);
+    if (port <= 0 || port > 65535) {
+        printf("result=err\tmsg=invalid port\n");
+        return;
+    }
+
+    WSADATA wsa;
+    if (WSAStartup(MAKEWORD(2, 2), &wsa) != 0) {
+        printf("result=err\tmsg=WSAStartup failed (%d)\n", WSAGetLastError());
+        return;
+    }
+
+    SOCKET lsock = socket(AF_INET, SOCK_STREAM, IPPROTO_TCP);
+    if (lsock == INVALID_SOCKET) {
+        printf("result=err\tmsg=socket failed (%d)\n", WSAGetLastError());
+        WSACleanup();
+        return;
+    }
+    int yes = 1;
+    setsockopt(lsock, SOL_SOCKET, SO_REUSEADDR, (const char *)&yes, sizeof(yes));
+
+    struct sockaddr_in addr;
+    memset(&addr, 0, sizeof(addr));
+    addr.sin_family      = AF_INET;
+    addr.sin_addr.s_addr = INADDR_ANY;
+    addr.sin_port        = htons((USHORT)port);
+
+    if (bind(lsock, (struct sockaddr *)&addr, sizeof(addr)) == SOCKET_ERROR) {
+        printf("result=err\tmsg=bind failed (%d)\n", WSAGetLastError());
+        closesocket(lsock);
+        WSACleanup();
+        return;
+    }
+    if (listen(lsock, SOMAXCONN) == SOCKET_ERROR) {
+        printf("result=err\tmsg=listen failed (%d)\n", WSAGetLastError());
+        closesocket(lsock);
+        WSACleanup();
+        return;
+    }
+
+    printf("result=ok\tport=%s\n", port_s);
+    fflush(stdout);
+
+    while (1) {
+        SOCKET csock = accept(lsock, NULL, NULL);
+        if (csock == INVALID_SOCKET)
+            break;
+
+        /* Connect to WSL server via Windows→WSL2 loopback forwarding */
+        SOCKET wsock = socket(AF_INET, SOCK_STREAM, IPPROTO_TCP);
+        if (wsock == INVALID_SOCKET) {
+            closesocket(csock);
+            continue;
+        }
+        struct sockaddr_in wsl_addr;
+        memset(&wsl_addr, 0, sizeof(wsl_addr));
+        wsl_addr.sin_family      = AF_INET;
+        wsl_addr.sin_addr.s_addr = htonl(INADDR_LOOPBACK);
+        wsl_addr.sin_port        = htons((USHORT)port);
+        if (connect(wsock, (struct sockaddr *)&wsl_addr, sizeof(wsl_addr)) == SOCKET_ERROR) {
+            closesocket(wsock);
+            closesocket(csock);
+            continue;
+        }
+
+        relay_pair *pair = reinterpret_cast<relay_pair *>(malloc(sizeof(relay_pair)));
+        if (!pair) {
+            closesocket(wsock);
+            closesocket(csock);
+            continue;
+        }
+        pair->a    = csock;
+        pair->b    = wsock;
+        pair->refs = 2;
+
+        relay_task *t1 = reinterpret_cast<relay_task *>(malloc(sizeof(relay_task)));
+        if (!t1) {
+            free(pair);
+            closesocket(wsock);
+            closesocket(csock);
+            continue;
+        }
+        t1->src = csock; t1->dst = wsock; t1->pair = pair;
+
+        HANDLE h1 = CreateThread(NULL, 0, relay_thread, t1, 0, NULL);
+        if (!h1) {
+            free(t1);
+            free(pair);
+            closesocket(csock);
+            closesocket(wsock);
+            continue;
+        }
+        CloseHandle(h1); /* detach — relay_thread manages lifetime via refs */
+
+        relay_task *t2 = reinterpret_cast<relay_task *>(malloc(sizeof(relay_task)));
+        if (!t2) {
+            /* t1 thread is running; let it finish its half; manually complete cleanup */
+            if (InterlockedDecrement(&pair->refs) == 0) {
+                closesocket(pair->a);
+                closesocket(pair->b);
+                free(pair);
+            }
+            continue;
+        }
+        t2->src = wsock; t2->dst = csock; t2->pair = pair;
+
+        HANDLE h2 = CreateThread(NULL, 0, relay_thread, t2, 0, NULL);
+        if (!h2) {
+            free(t2);
+            if (InterlockedDecrement(&pair->refs) == 0) {
+                closesocket(pair->a);
+                closesocket(pair->b);
+                free(pair);
+            }
+            continue;
+        }
+        CloseHandle(h2);
+    }
+
+    closesocket(lsock);
+    WSACleanup();
+#else
+    (void)port_s;
+    puts("result=err\tmsg=server-bridge only available on Windows");
+#endif
+}
+
+/* -------------------------------------------------------------------------
  * server-proxy / server-proxy-del
  * Use Windows netsh portproxy to forward <win-ip>:<port> → <wsl-ip>:<port>
  * so LAN peers can reach a server running inside WSL.
@@ -648,6 +827,7 @@ int main(int argc, char **argv) {
                 "  wifi-join <ssid> [password]       Connect to a network\n"
                 "  wifi-leave                        Disconnect from current network\n"
                 "  wifi-status                       Show connection state\n"
+                "  server-bridge <port>              Relay LAN:<port> → WSL:<port> (no admin)\n"
                 "  server-proxy <wsl_ip> <port>      Forward Windows IP:<port> → WSL (admin)\n"
                 "  server-proxy-del <port>           Remove portproxy rule (admin)\n");
         return 1;
@@ -669,6 +849,12 @@ int main(int argc, char **argv) {
         cmd_wifi_leave();
     } else if (strcmp(cmd, "wifi-status") == 0) {
         cmd_wifi_status();
+    } else if (strcmp(cmd, "server-bridge") == 0) {
+        if (argc < 3) {
+            fprintf(stderr, "server-bridge: requires <port>\n");
+            return 1;
+        }
+        cmd_server_bridge(argv[2]);
     } else if (strcmp(cmd, "server-proxy") == 0) {
         if (argc < 4) {
             fprintf(stderr, "server-proxy: requires <wsl_ip> <port>\n");

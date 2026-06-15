@@ -56,6 +56,14 @@ const char *fl_net_wifi_host_linux_iface(void);
 const char *fl_net_wifi_host_linux_windows_ipv4(void);
 
 /**
+ * Spawn FlinstonePowershell server-bridge <port> in the background.
+ * The bridge relays LAN connections to 127.0.0.1:<port> (WSL2 loopback).
+ * No Windows admin rights needed for ports >= 1024.
+ * Returns 0 when spawned (optimistic), -1 on wrong backend or missing exe.
+ */
+int fl_net_wifi_host_linux_server_bridge(uint16_t port);
+
+/**
  * Add a Windows portproxy rule so LAN peers can reach the server at the
  * Windows Wi-Fi IP.  Requires FlinstonePowershell.exe to have admin rights.
  * Returns 0 on success, -1 on failure or wrong backend.

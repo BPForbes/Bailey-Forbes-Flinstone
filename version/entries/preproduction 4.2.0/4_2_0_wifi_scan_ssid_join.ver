@@ -68,6 +68,19 @@ PRE 4.2.0: Wi-Fi scan home SSID + SSID-based join; WSL detection; FlinstonePower
   total_chunks is not always zero (cmd_server_file.c)
 - fix: add missing braces in fl_net_sock_native_close so listener sockets do not
   close tcp_conn_id 0 or call stack_unlock without a matching lock (net_sock_native.c)
+- server-bridge (FlinstonePowershell + net_wifi_host_linux.c): userspace TCP relay
+  for LAN→WSL server access without Windows admin rights; FlinstonePowershell
+  server-bridge <port> listens on 0.0.0.0:<port> (all Windows adapters including
+  Wi-Fi) and forwards each accepted connection to 127.0.0.1:<port> via WSL2
+  loopback forwarding — no netsh portproxy / no admin needed for ports >= 1024;
+  implemented with two-thread-per-connection WinSock relay (relay_pair + relay_task,
+  InterlockedDecrement ref counting for clean socket teardown); spawned in the
+  background from Linux via fl_net_wifi_host_linux_server_bridge() using system()
+  with &; verb_host() in cmd_server.c tries portproxy first then falls back to
+  bridge so non-admin users get automatic LAN access
+- tools/server_bridge.py: Python asyncio alternative to FlinstonePowershell
+  server-bridge; same 0.0.0.0:<port>→127.0.0.1:<port> relay in ~70 lines;
+  run with `python3 tools/server_bridge.py <port>` on Windows or via WSL interop
 VER_END
 
 RELEASE_DATE=2026-06-14
