@@ -864,7 +864,7 @@ static int find_flinstone_ps_exe(void) {
 static int probe_flinstone_ps(void) {
     if (!find_flinstone_ps_exe())
         return 0;
-    read_any_nonlo_ipv4(s_wsl_bind_ipv4, sizeof(s_wsl_bind_ipv4));
+    read_any_nonlo_ipv4(s_wsl_bind_ipv4, sizeof(s_wsl_bind_ipv4), &s_wsl_bind_prefix);
     s_host_kind = FL_WIFI_HOST_FLINSTONE_PS;
     return 1;
 }
