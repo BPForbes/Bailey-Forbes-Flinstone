@@ -14,7 +14,7 @@ Human-readable guide: **`docs/versioning.md`**.
 When combining agent branches (for example **`cursor/*`**, **`claude/*`**, **`codex/*`**) so one pull request carries all related work:
 
 - Use **`git merge --no-ff <other-agent-branch>`** when folding a side branch into the main feature branch so the merge commit is explicit (avoid silent fast-forward across unrelated agent work).
-- After the merge, **delete** duplicate **`.ver`** files from the merged-in branch. **Do not edit** immutable **`.ver`** paths from the merge base. Fold combined release prose into the **newest** **`.ver`** the combined PR adds, or add **one new** root **`.ver`** with the next **`DEV_VERSION`**.
+- After the merge, **delete** duplicate **`.ver`** files from the merged-in branch. **Do not edit** immutable **`.ver`** paths from the merge base. Fold combined release prose into the single PR-owned **`.ver`**; only add a new root **`.ver`** with the next **`DEV_VERSION`** when the combined PR does not already have one.
 - Re-run **`./scripts/check_version_entries_semver_dev_unique.sh`** before push.
 - Contributor-facing prose also lives in **AGENTS.md** § *AI feature-branch workflow*. CodeRabbit review hints: **`.coderabbit.yaml`** (*Merging multiple AI-authored feature branches*).
 
@@ -36,7 +36,8 @@ When combining agent branches (for example **`cursor/*`**, **`claude/*`**, **`co
 ## Immutable `.ver` rows — always add new files
 
 - Any **`version/entries/**/*.ver`** path on the **merge base** is **immutable**: do **not** edit **`DESCRIPTION`**, **`DEV_VERSION`**, **`GM`**, **`PRERELEASE`**, or semver fields in those files.
-- Each PR scope, iteration, or go-to-main step: **add exactly one new** **`version/entries/A_B_C_slug.ver`** at the **entries root** (non-GM `PRERELEASE=1` rows relocate into **`preproduction A.B.C/`**).
+- Before adding a **`.ver`**, inspect the current submitted PR/branch for an existing PR-owned **`.ver`** (including rows CI relocated under **`version/entries/preproduction */`**). If one exists, update that file's **`DESCRIPTION`** only; do **not** add another. If the PR-owned row was already relocated under **`preproduction */`** and its **`DESCRIPTION`** changes, move that same file back to the **`version/entries/`** root and remove any stamped **`RELEASE_DATE`** so the version job can relocate and stamp it again.
+- Each PR scope, iteration, or go-to-main step: **add exactly one new** **`version/entries/A_B_C_slug.ver`** at the **entries root** only when the submitted PR does not already have a PR-owned **`.ver`** (non-GM `PRERELEASE=1` rows relocate into **`preproduction A.B.C/`**).
 - The **new** **`.ver`** your branch introduces may update **`DESCRIPTION` only** (no **`DEV_VERSION`** re-bump) until merge; after merge to **`develop`**, that path is immutable too.
 
 ## `GM=1` go-to-main DESCRIPTION
@@ -58,7 +59,7 @@ When combining agent branches (for example **`cursor/*`**, **`claude/*`**, **`co
 
 ## Agent workflow — preproduction version (directories), iteration, and no semver backtracking
 
-- On the **first** substantive code change for a pull request, **add** **`version/entries/*.ver`** at the **`version/entries/`** root if the branch does not already have an entry that covers **that** PR (for **`PRERELEASE=1`**, **do not** hand-add new **`.ver`** under **`preproduction A.B.C/`** on same-repo branches—CI relocates from the root). **AI:** new **`.ver`** files go in **`version/entries/`**, not in **`preproduction <A>.<B>.<C>/`** one level lower; not under **`version/locked/`**; omit **`RELEASE_DATE=`** (Actions dates on relocate / Version lock); Actions moves root **`PRERELEASE=1`** rows into **`preproduction <A>.<B>.<C>/`**. Do not edit **`RELEASE_DATE`** on existing preproduction rows. **Unique iteration key:** **`(MAJOR_VERSION, STANDARD_VERSION, RELEASE_VERSION, DEV_VERSION)`** must be unique across **`version/entries/**/*.ver`**; if **`DEV_VERSION=`** is absent, treat **`DEV_VERSION`** as **0**. Scan **`version/entries/`** and **`preproduction <A>.<B>.<C>/`** for that **A.B.C** and pick the **smallest unused** non-negative **`DEV_VERSION`**. CI runs **`check_version_entries_semver_dev_unique.sh`**.
+- On the **first** substantive code change for a pull request, check the submitted branch for a PR-owned **`.ver`** first (for example **`git diff --name-only <merge-base>...HEAD -- version/entries`**, plus CI-relocated **`version/entries/preproduction */`** rows). If it exists, extend that row's **`DESCRIPTION`** only; if the row is under **`preproduction */`**, move it back to the **`version/entries/`** root and remove **`RELEASE_DATE`** before submission. If it does not, **add exactly one** **`version/entries/*.ver`** at the **`version/entries/`** root (for **`PRERELEASE=1`**, **do not** hand-add new **`.ver`** under **`preproduction A.B.C/`** on same-repo branches—CI relocates from the root). **AI:** new **`.ver`** files go in **`version/entries/`**, not in **`preproduction <A>.<B>.<C>/`** one level lower; not under **`version/locked/`**; omit **`RELEASE_DATE=`** (Actions dates on relocate / Version lock); Actions moves root **`PRERELEASE=1`** rows into **`preproduction <A>.<B>.<C>/`**. Do not edit **`RELEASE_DATE`** on existing preproduction rows. **Unique iteration key:** **`(MAJOR_VERSION, STANDARD_VERSION, RELEASE_VERSION, DEV_VERSION)`** must be unique across **`version/entries/**/*.ver`**; if **`DEV_VERSION=`** is absent, treat **`DEV_VERSION`** as **0**. Scan **`version/entries/`** and **`preproduction <A>.<B>.<C>/`** for that **A.B.C** and pick the **smallest unused** non-negative **`DEV_VERSION`**. CI runs **`check_version_entries_semver_dev_unique.sh`**.
 - **Do not backtrack shipped semver for AI-authored work:** the **preproduction version** is **A.B.C** from the directory **`version/entries/preproduction <A>.<B>.<C>/`** (**`PRERELEASE=1`** rows land there **after** relocate). Do **not** add a **new root** **`version/entries/*.ver`** whose **A.B.C** is **numerically below** that **A.B.C** unless a **human maintainer** explicitly requests that separate GA release. **Default (AI / same-repo PRs):** add **another** root **`PRERELEASE=1`** **`*.ver`** with the same semver for a **new** PR train; **never** set **`GM=1`** without **explicit human maintainer** permission. Relocate moves each new non-GM root row into that folder; **`promote_preproduction_for_main.sh`** (after **`GM=1`**) writes one GA root **`.ver`** using **only** the selected **`GM=1`** file’s **`A.B.C:`** **`DESCRIPTION`** and semver, then deletes the whole **`preproduction */`** tree from **`version/entries`**.
 - For **one** conventional GA feature at **`version/entries/`** root (no **`preproduction */`**), add **one new** **`.ver`** per PR—do not edit merge-base rows.
 
@@ -95,6 +96,14 @@ When combining agent branches (for example **`cursor/*`**, **`claude/*`**, **`co
 So a **minor** bump from **`2.2.4`** is **`2.3.0`**: **`A`** stays `2`, **`B`** becomes `3`, **`C`** resets to **`0`** (not `2.3.4`). A **major** bump from **`2.3.7`** is **`3.0.0`**. A **patch** bump from **`2.3.0`** is **`2.3.1`** (only **`C`** moves; there is no component to the right of **`C`** to zero).
 
 If a single release mixes major, minor, and patch-style work, still apply **only** the **highest** applicable bump once (e.g. milestone + architecture → **`A`** only → **`3.0.0`** after **`2.x.y`**); do not stack multiple component bumps for the same release.
+
+## PR target branch from `.ver` state (mandatory)
+
+The `.ver` file your PR adds determines which branch to target. Using the wrong base causes CI to fail:
+
+- **`PRERELEASE=1` + `DEV_VERSION=<N>`** → PR must target **`develop`**. All prerelease trains merge to `develop`. `check_version_main_prerelease_policy.sh` rejects `PRERELEASE=1` or `DEV_VERSION=` rows on any PR targeting `main`.
+- **`GM=1`** → PR targets **`main`** — only after a human maintainer explicitly authorizes `GM=1`. Agents must never self-authorize.
+- **Never open a PR against `main` while the branch `.ver` has `PRERELEASE=1` or `DEV_VERSION=`.** These two states are mutually exclusive merge targets.
 
 ## Merge / PR checks
 

@@ -21,6 +21,7 @@
 #include "server_shared_db.h"
 #include "session.h"
 #include "shell_io.h"
+#include "net_wifi_host_linux.h"
 
 #include <errno.h>
 #include <pthread.h>
@@ -499,7 +500,9 @@ static void maybe_handle_nick_prompt_sync(void) {
  * if hosted sockets are unavailable on this build (FL_RESULT_NOSYS). */
 static int verb_host(int argc, char **argv) {
     fl_net_endpoint_t ep;
+    fl_net_endpoint_t bind_ep;   /* actual WSL bind address (may differ from ep) */
     fl_result_t rc;
+    const char *win_ip_display = NULL; /* set when user specified Windows Wi-Fi IP */
 
     if (argc < 3) {
         fl_color_error("usage: server host <ip:port> | server host -all <port> | server host :<port>");
@@ -521,7 +524,24 @@ static int verb_host(int argc, char **argv) {
         pthread_mutex_unlock(&session_mutex);
         return 1;
     }
-    rc = fl_net_server_host_start_ep(&g_server, &ep, current_principal());
+    bind_ep = ep;
+
+    /* If the user specified the Windows Wi-Fi IP (e.g. 192.168.1.235), Linux
+     * cannot bind() to it — that address lives on the Windows network stack.
+     * Transparently rebind the WSL server to 0.0.0.0 and start the Windows
+     * bridge on the requested IP so LAN peers connect to the right address. */
+    {
+        const char *wip = fl_net_wifi_host_linux_windows_ipv4();
+        if (wip && ep.family == FL_NET_ADDR_FAMILY_V4 && ep.addr.v4_be != 0u) {
+            uint32_t win_be = 0u;
+            if (fl_net_ipv4_parse_literal(wip, &win_be) && win_be == ep.addr.v4_be) {
+                win_ip_display = wip;
+                bind_ep.addr.v4_be = 0u; /* 0.0.0.0 in WSL */
+            }
+        }
+    }
+
+    rc = fl_net_server_host_start_ep(&g_server, &bind_ep, current_principal());
     if (rc == FL_RESULT_NOSYS) {
         pthread_mutex_unlock(&session_mutex);
         fl_color_error("hosted sockets unavailable; cannot host");
@@ -541,17 +561,53 @@ static int verb_host(int argc, char **argv) {
     }
     g_server_running = 1;
     pthread_mutex_unlock(&session_mutex);
-    {
+
+    if (win_ip_display) {
+        /* User specified the Windows Wi-Fi IP directly — show it as the
+         * authoritative address even though WSL bound to 0.0.0.0. */
+        fl_color_success("hosting as '%s' on %s:%u",
+                         current_principal(), win_ip_display, (unsigned)ep.port_host);
+        if (fl_net_wifi_host_linux_server_bridge_to(win_ip_display, NULL,
+                                                    ep.port_host) == 0)
+            fl_color_success("LAN peers: server join %s:%u (bridge active, no admin needed)",
+                             win_ip_display, (unsigned)ep.port_host);
+        else
+            fl_color_success("LAN peers: server join %s:%u  "
+                             "(run: FlinstonePowershell.exe server-bridge %s %u [target])",
+                             win_ip_display, (unsigned)ep.port_host,
+                             win_ip_display, (unsigned)ep.port_host);
+    } else {
         char bind_txt[128];
-        if (fl_net_endpoint_format(&ep, bind_txt, sizeof(bind_txt)))
+        if (fl_net_endpoint_format(&bind_ep, bind_txt, sizeof(bind_txt)))
             fl_color_success("hosting as '%s' on %s", current_principal(), bind_txt);
         else
             fl_color_success("hosting as '%s' on %s", current_principal(), argv[2]);
-        if (ep.family == FL_NET_ADDR_FAMILY_V4 && ep.addr.v4_be == 0u) {
+        if (bind_ep.family == FL_NET_ADDR_FAMILY_V4 && bind_ep.addr.v4_be == 0u) {
             char suggest[32];
             if (fl_net_iface_suggest_ipv4(NULL, suggest, sizeof(suggest)))
                 fl_color_success("peers on LAN can: server join %s:%u", suggest,
-                                 (unsigned)ep.port_host);
+                                 (unsigned)bind_ep.port_host);
+        }
+        /* On WSL without an explicit Windows IP: try portproxy then bridge. */
+        {
+            const char *wip = fl_net_wifi_host_linux_windows_ipv4();
+            if (wip && bind_ep.family == FL_NET_ADDR_FAMILY_V4 && bind_ep.port_host > 0u) {
+                char bip[32];
+                fl_net_ipv4_format_addr(bind_ep.addr.v4_be, bip, sizeof(bip));
+                const char *proxy_target = (bind_ep.addr.v4_be == 0u) ? "127.0.0.1" : bip;
+                const char *bridge_target = (bind_ep.addr.v4_be == 0u) ? NULL : bip;
+                if (fl_net_wifi_host_linux_server_proxy(proxy_target, bind_ep.port_host) == 0)
+                    fl_color_success("LAN peers: server join %s:%u (portproxy active)",
+                                     wip, (unsigned)bind_ep.port_host);
+                else if (fl_net_wifi_host_linux_server_bridge_to(wip, bridge_target,
+                                                                 bind_ep.port_host) == 0)
+                    fl_color_success("LAN peers: server join %s:%u (bridge active, no admin needed)",
+                                     wip, (unsigned)bind_ep.port_host);
+                else
+                    fl_color_success("LAN peers: server join %s:%u "
+                                     "(run FlinstonePowershell as admin for portproxy)",
+                                     wip, (unsigned)bind_ep.port_host);
+            }
         }
     }
     return 0;

@@ -1,10 +1,22 @@
 # Visual Studio
 .vs/
 
-# Build artifacts
+# Build artifacts (make intermediate object files)
 *.o
+*.exe
+*.dll
 BPForbes_Flinstone_Shell
 BPForbes_Flinstone_Tests
+build/
+bin/
+obj/
+out/
+
+# Local Windows tool staging (created by install_deps.sh on WSL)
+/mnt/
+
+# FlinstonePowershell dev/cross-compile binaries
+tools/FlinstonePowershell/FlinstonePowershell
 
 # Shell history (user-specific)
 shell_history.txt

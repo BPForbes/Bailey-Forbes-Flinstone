@@ -1,0 +1,94 @@
+MAJOR_VERSION=4
+STANDARD_VERSION=2
+RELEASE_VERSION=0
+PRERELEASE=1
+DEV_VERSION=14
+DESCRIPTION<<VER_END
+PRE 4.2.0: Wi-Fi scan home SSID + SSID-based join; WSL detection; FlinstonePowershell bridge; Codex security fixes
+
+- platform detection (kernel/core/platform/fl_platform.c): runtime tag of
+  FL_PLATFORM_WSL / FL_PLATFORM_LINUX / FL_PLATFORM_MACOS; checks /proc/version
+  and WSL_DISTRO_NAME so WSL1 and WSL2 are both detected; result cached
+- FlinstonePowershell (tools/FlinstonePowershell/FlinstonePowershell.cpp):
+  C++ bridge program for the WSL ↔ Windows Wi-Fi path; commands:
+  wifi-scan, wifi-join, wifi-leave, wifi-status, platform; Windows build
+  (make flinstone-ps-windows, links -lwlanapi -lole32 -liphlpapi -lws2_32)
+  uses native WlanAPI:
+  WlanOpenHandle/WlanCloseHandle (RAII), WlanEnumInterfaces, WlanScan +
+  Sleep(1500) + WlanGetNetworkBssList for scanning (raw BSS IE parsing for
+  auth mode: RSN IE tag 0x30 with AKM 00:0F:AC:08=SAE→wpa3, else wpa2;
+  vendor IE 0xDD OUI 00:50:F2:01=WPA1), centre-frequency-to-band/channel
+  conversion (2.4/5/6 GHz), WlanSetProfile (WPA2-PSK or open WLANProfile
+  XML built in memory) + WlanConnect for wifi-join, WlanDisconnect for
+  wifi-leave, WlanQueryInterface(wlan_intf_opcode_current_connection) for
+  wifi-status; Linux dev build (make flinstone-ps) uses hardcoded stubs
+- wifi host backend (net_wifi_host_linux.c): on WSL, probe_host_backend_once()
+  routes through FlinstonePowershell instead of wpa_cli/nmcli; FL_WIFI_HOST_FLINSTONE_PS
+  backend kind; exe located via FL_NET_WIFI_FLINSTONE_PS env var or PATH search;
+  tab-separated key=value scan output parsed into fl_net_wifi_scan_entry_t;
+  connect/disconnect call wifi-join/wifi-leave subcommands; after a successful
+  connect the backend immediately queries wifi-status to cache the real Windows
+  Wi-Fi IP (ipv4=, prefix=, gateway= fields from GetAdaptersAddresses via
+  iphlpapi); a separate read_any_nonlo_ipv4() scan of getifaddrs() picks the
+  WSL2 eth0 IP (e.g. 172.28.x.x) and caches it in s_wsl_bind_ipv4 —
+  fl_net_wifi_host_linux_ipv4() returns this WSL IP so fl_net_wifi_netdev_up_
+  with_ipv4() registers a real bindable Linux address; server host <wsl-ip>:
+  <port> now succeeds instead of failing with EADDRNOTAVAIL; the Windows
+  adapter IP (s_fps_ipv4, e.g. 192.168.1.235) is exposed via the new
+  fl_net_wifi_host_linux_windows_ipv4() API for display only; wifi status and
+  wifi join now print a separate "Windows Wi-Fi IP: ..." line showing the
+  router-assigned address; server host automatically calls
+  fl_net_wifi_host_linux_server_proxy() which runs FlinstonePowershell server-
+  proxy <wsl_ip> <port> — a new subcommand that adds a Windows netsh portproxy
+  rule forwarding the Windows IP:<port> to WSL, enabling LAN-wide access
+  (requires FlinstonePowershell.exe run as admin); server-proxy-del <port>
+  removes the rule; cache is cleared on disconnect; MinGW cross-compile includes
+  winsock2.h before iphlpapi.h so GetAdaptersAddresses and GAA types resolve
+- wifi scan (lab backend): reads FL_NET_WIFI_HOME_SSID env var and includes the
+  user's home network in scan results; FL_NET_WIFI_HOME_AUTH (open/wpa2/wpa3)
+  and FL_NET_WIFI_HOME_BAND (2/5/6) are optional — defaults are wpa2 and 2.4 GHz
+- wifi join: lab backend no longer requires the target SSID to appear in the last
+  scan; if the network is absent a synthetic scan entry is built from the supplied
+  SSID so home and hidden networks can be joined directly by name
+- wifi join: password is now prompted interactively (no-echo) after the command is
+  entered, similar to sudo; usage is `wifi join <ssid>` or `wifi join -b <bssid> <ssid>`
+- wifi join: when the session carries sudo elevation, prompts "Sudo Password: " first
+  to re-authenticate, then "WiFi Password: " — distinguishing the two credentials
+- scripts/install_deps.sh: added wpasupplicant and network-manager as runtime deps
+  for the Linux Wi-Fi host backend (wpa_cli / nmcli); mingw-w64 installed only on
+  WSL (detected via /proc/version or WSL_DISTRO_NAME) since it is only needed for
+  the FlinstonePowershell.exe Windows cross-compile path
+- README.md: added sudo ./scripts/install_deps.sh instruction under Prerequisites
+- security: shell-escape SSID and passphrase before popen nmcli/wpa_cli calls
+  (shell injection via crafted SSID or passphrase — net_wifi_host_linux.c)
+- security: reject sparse file-transfer chunks whose file_offset != bytes already
+  received; also reject chunks that exceed the advertised file size
+  (uninitialized-memory write to disk via out-of-order chunks — net_file_delivery.c)
+- fix: preserve statted file_size across fl_server_file_offer_create memset so
+  total_chunks is not always zero (cmd_server_file.c)
+- fix: add missing braces in fl_net_sock_native_close so listener sockets do not
+  close tcp_conn_id 0 or call stack_unlock without a matching lock (net_sock_native.c)
+- server-bridge (FlinstonePowershell + net_wifi_host_linux.c): userspace TCP relay
+  for LAN→WSL server access without Windows admin rights; FlinstonePowershell
+  server-bridge <port> listens on 0.0.0.0:<port> (all Windows adapters including
+  Wi-Fi) and forwards each accepted connection to 127.0.0.1:<port> via WSL2
+  loopback forwarding — no netsh portproxy / no admin needed for ports >= 1024;
+  implemented with two-thread-per-connection WinSock relay (relay_pair + relay_task,
+  InterlockedDecrement ref counting for clean socket teardown); spawned in the
+  background from Linux via fl_net_wifi_host_linux_server_bridge() using system()
+  with &; verb_host() in cmd_server.c tries portproxy first then falls back to
+  bridge so non-admin users get automatic LAN access
+- tools/server_bridge.py: Python asyncio alternative to FlinstonePowershell
+  server-bridge; same 0.0.0.0:<port>→127.0.0.1:<port> relay in ~70 lines;
+  run with `python3 tools/server_bridge.py <port>` on Windows or via WSL interop
+- Wi-Fi LAN server bridge: discover in-tree FlinstonePowershell.exe for WSL
+  Wi-Fi scan/join, safely quote helper paths and credentials, refresh the
+  router-assigned Windows Wi-Fi IP from wifi-status for server host hints,
+  support server-bridge bind_ip/port/target_ip relays for WSL loopback or VM
+  targets, add Python network_bridge.py target parity, and cover helper
+  discovery plus bridge relay tests
+- Raspberry Pi ARM build fix: net_file_delivery.h now includes the P3 packet
+  contract so FILE_ACCEPT, FILE_DECLINE, and FILE_REVOKE encoder prototypes
+  are visible to cmd_server_file.c under ARM compilers that treat implicit
+  function declarations as fatal
+VER_END

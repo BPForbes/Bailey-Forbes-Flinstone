@@ -1,6 +1,7 @@
 #ifndef NET_FILE_DELIVERY_H
 #define NET_FILE_DELIVERY_H
 
+#include "contract_p3_packet.h"
 #include "contract_p3_session_wire.h"
 #include "contract_p5_file_delivery.h"
 #include "net_client.h"

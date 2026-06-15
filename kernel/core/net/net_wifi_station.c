@@ -14,6 +14,7 @@
 #include "net_wifi_wpa.h"
 #include "net_wire.h"
 
+#include <stdlib.h>
 #include <string.h>
 
 #define FL_NET_WIFI_HOSTED_LAB 1
@@ -79,6 +80,49 @@ static void lab_seed_scan(uint8_t band) {
         e->auth_mode = FL_WIFI_AUTH_OPEN;
         e->band = FL_WIFI_BAND_2GHZ;
         e->channel_width_mhz = 20;
+    }
+    /* User-configured home network: set FL_NET_WIFI_HOME_SSID to make it visible
+     * in lab scans.  FL_NET_WIFI_HOME_AUTH (open/wpa2/wpa3) and
+     * FL_NET_WIFI_HOME_BAND (2/5/6) are optional; defaults are wpa2 and 2.4 GHz. */
+    {
+        const char *home_ssid = getenv("FL_NET_WIFI_HOME_SSID");
+        if (home_ssid && home_ssid[0] && s_lab_scan_count < 8u) {
+            const char *home_auth = getenv("FL_NET_WIFI_HOME_AUTH");
+            const char *home_band_env = getenv("FL_NET_WIFI_HOME_BAND");
+            uint8_t home_band;
+            uint8_t home_channel;
+
+            if (home_band_env &&
+                (!strcmp(home_band_env, "5") || !strcmp(home_band_env, "5ghz"))) {
+                home_band = FL_WIFI_BAND_5GHZ;
+                home_channel = 36;
+            } else if (home_band_env &&
+                       (!strcmp(home_band_env, "6") || !strcmp(home_band_env, "6ghz"))) {
+                home_band = FL_WIFI_BAND_6GHZ;
+                home_channel = 6;
+            } else {
+                home_band = FL_WIFI_BAND_2GHZ;
+                home_channel = 6;
+            }
+            if (band == FL_WIFI_BAND_ANY || band == home_band) {
+                fl_net_wifi_scan_entry_t *e = &s_lab_scan[s_lab_scan_count++];
+                memset(e, 0, sizeof(*e));
+                strncpy(e->ssid, home_ssid, sizeof(e->ssid) - 1u);
+                e->bssid[0] = 0x02;
+                e->bssid[5] = 0xfe;
+                e->rssi_dbm = -55;
+                e->channel = home_channel;
+                e->channel_width_mhz = 20;
+                e->band = home_band;
+                if (home_auth &&
+                    (!strcmp(home_auth, "wpa3") || !strcmp(home_auth, "sae")))
+                    e->auth_mode = FL_WIFI_AUTH_WPA3_SAE;
+                else if (home_auth && !strcmp(home_auth, "open"))
+                    e->auth_mode = FL_WIFI_AUTH_OPEN;
+                else
+                    e->auth_mode = FL_WIFI_AUTH_WPA2_PSK;
+            }
+        }
     }
 }
 #endif
@@ -276,8 +320,22 @@ fl_result_t fl_net_wifi_connect(const fl_net_wifi_cred_t *cred, unsigned timeout
         fl_net_driver_t *drv;
 
         if (!ap) {
-            s_wifi_state = FL_WIFI_STATE_ERROR;
-            return FL_RESULT_NOENT;
+            /* Network not seen in last scan — synthesise a minimal entry so the
+             * user can join by SSID + password without requiring a prior scan
+             * match (handles home Wi-Fi, hidden networks, and networks visible
+             * only via FL_NET_WIFI_HOME_SSID). */
+            static fl_net_wifi_scan_entry_t s_synth_ap;
+            memset(&s_synth_ap, 0, sizeof(s_synth_ap));
+            strncpy(s_synth_ap.ssid, cred->ssid, sizeof(s_synth_ap.ssid) - 1u);
+            memcpy(s_synth_ap.bssid, cred->bssid, 6u);
+            s_synth_ap.auth_mode = cred->auth_mode ? cred->auth_mode :
+                                   (cred->passphrase[0] ? FL_WIFI_AUTH_WPA2_PSK
+                                                        : FL_WIFI_AUTH_OPEN);
+            s_synth_ap.band = cred->band_hint ? cred->band_hint : FL_WIFI_BAND_2GHZ;
+            s_synth_ap.channel = 6;
+            s_synth_ap.channel_width_mhz = 20;
+            s_synth_ap.rssi_dbm = -70;
+            ap = &s_synth_ap;
         }
         if (ap->auth_mode != FL_WIFI_AUTH_OPEN && cred->passphrase[0] == '\0') {
             s_wifi_state = FL_WIFI_STATE_ERROR;
