@@ -37,6 +37,9 @@
  */
 
 #if defined(_WIN32)
+#ifndef _WIN32_WINNT
+#  define _WIN32_WINNT 0x0600  /* Vista: enables GAA_FLAG_INCLUDE_GATEWAYS, IP_ADAPTER_GATEWAY_ADDRESS_LH, etc. */
+#endif
 #define WIN32_LEAN_AND_MEAN
 #include <windows.h>
 #include <wlanapi.h>
