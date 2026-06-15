@@ -91,14 +91,8 @@ if [ "$IS_WSL" = "1" ]; then
                 [ -n "$_wp" ] && WIN_HOME=$(wslpath "$_wp" 2>/dev/null)
             fi
         fi
-        # Strategy 3: guess from Linux username — works when Windows and Linux
-        # usernames match (common WSL2 default setup).
-        if [ -z "$WIN_HOME" ] || [ ! -d "$WIN_HOME" ]; then
-            WIN_HOME="/mnt/c/Users/${SUDO_USER:-$(id -un)}"
-        fi
-
-        WIN_BIN="$WIN_HOME/bin"
-        if [ -d "$WIN_HOME" ]; then
+        WIN_BIN="${WIN_HOME:+$WIN_HOME/bin}"
+        if [ -n "$WIN_HOME" ] && [ -d "$WIN_HOME" ]; then
             mkdir -p "$WIN_BIN"
             cp "$FPS_EXE" "$WIN_BIN/"
 
