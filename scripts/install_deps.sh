@@ -117,15 +117,14 @@ if [ "$IS_WSL" = "1" ]; then
             echo "FlinstonePowershell.exe built at:"
             echo "  $FPS_EXE"
             echo ""
-            echo "Could not auto-detect your Windows home (tried %USERPROFILE%,"
-            echo "wslvar, and /mnt/c/Users/${SUDO_USER:-$(id -un)})."
+            echo "Could not auto-detect your Windows home via %USERPROFILE% or wslvar."
+            echo "Copy manually (open a new WSL terminal as yourself, not sudo):"
             echo ""
-            echo "Copy manually (run in WSL as yourself, not sudo):"
-            echo "  WIN_HOME=\$(wslpath \"\$(cmd.exe /c 'echo %USERPROFILE%' | tr -d '\\r\\n')\")"
-            echo "  mkdir -p \"\$WIN_HOME/bin\""
+            echo '  WIN_HOME=$(cmd.exe /c "echo %USERPROFILE%" | tr -d "\r\n" | xargs wslpath)'
+            echo '  mkdir -p "$WIN_HOME/bin"'
             echo "  cp '$FPS_EXE' \"\$WIN_HOME/bin/\""
             echo ""
-            echo "Then add \$WIN_HOME\\bin to your Windows PATH and verify:"
+            echo 'Then add %USERPROFILE%\bin to your Windows PATH and verify:'
             echo "  which FlinstonePowershell.exe"
         fi
     fi
