@@ -112,19 +112,18 @@ if [ "$IS_WSL" = "1" ]; then
             echo "Then open a new WSL terminal and verify:"
             echo "  which FlinstonePowershell.exe"
         else
-            # Home directory could not be determined — show manual instructions.
+            # Home directory could not be determined (common when script runs as
+            # root under sudo — cmd.exe loses Windows env context).  Direct the
+            # user to the dedicated make target which runs as themselves.
             echo ""
-            echo "FlinstonePowershell.exe built at:"
-            echo "  $FPS_EXE"
+            echo "FlinstonePowershell.exe built successfully."
             echo ""
-            echo "Could not auto-detect your Windows home via %USERPROFILE% or wslvar."
-            echo "Copy manually (open a new WSL terminal as yourself, not sudo):"
+            echo "Auto-install failed (sudo loses Windows env vars)."
+            echo "Run this once as yourself (no sudo) to install it:"
             echo ""
-            echo '  WIN_HOME=$(cmd.exe /c "echo %USERPROFILE%" | tr -d "\r\n" | xargs wslpath)'
-            echo '  mkdir -p "$WIN_HOME/bin"'
-            echo "  cp '$FPS_EXE' \"\$WIN_HOME/bin/\""
+            echo "  make -C '$REPO_ROOT' install-fps-windows"
             echo ""
-            echo 'Then add %USERPROFILE%\bin to your Windows PATH and verify:'
+            echo "Then open a new WSL terminal and verify:"
             echo "  which FlinstonePowershell.exe"
         fi
     fi

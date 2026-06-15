@@ -357,6 +357,30 @@ $(FLINSTONE_PS_EXE_OUT): tools/FlinstonePowershell/FlinstonePowershell.cpp
 .PHONY: flinstone-ps-windows
 flinstone-ps-windows: $(FLINSTONE_PS_EXE_OUT)
 
+# Install FlinstonePowershell.exe into the Windows user's bin directory.
+# Run WITHOUT sudo so that cmd.exe can read %USERPROFILE% correctly.
+.PHONY: install-fps-windows
+install-fps-windows: $(FLINSTONE_PS_EXE_OUT)
+	@if ! command -v cmd.exe >/dev/null 2>&1; then \
+	    echo "install-fps-windows: cmd.exe not found (not running in WSL?)"; exit 1; fi
+	@_wp=$$(cmd.exe /c "echo %USERPROFILE%" 2>/dev/null | tr -d '\r\n'); \
+	 WIN_HOME=$$(wslpath "$$_wp" 2>/dev/null); \
+	 if [ -z "$$WIN_HOME" ] || [ ! -d "$$WIN_HOME" ]; then \
+	     echo "install-fps-windows: could not resolve %USERPROFILE% ($$_wp)"; \
+	     echo "  Run without sudo so Windows env vars are available."; exit 1; fi; \
+	 WIN_BIN="$$WIN_HOME/bin"; \
+	 mkdir -p "$$WIN_BIN"; \
+	 cp $(FLINSTONE_PS_EXE_OUT) "$$WIN_BIN/"; \
+	 WIN_BIN_W=$$(wslpath -w "$$WIN_BIN" 2>/dev/null); \
+	 echo "Installed to: $$WIN_BIN"; \
+	 echo ""; \
+	 echo "Add to Windows PATH (one-time):"; \
+	 echo "  $$WIN_BIN_W"; \
+	 echo "  System Properties -> Environment Variables -> User PATH -> New"; \
+	 echo ""; \
+	 echo "Then open a new WSL terminal and verify:"; \
+	 echo "  which FlinstonePowershell.exe"
+
 $(OPENSSL_ARM_LIB):
 	@chmod +x deps/fetch-openssl-aarch64.sh 2>/dev/null || true
 	@./deps/fetch-openssl-aarch64.sh
