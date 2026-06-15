@@ -100,3 +100,5 @@ PRE 4.2.0: Wi-Fi scan home SSID + SSID-based join; WSL detection; FlinstonePower
   server-bridge command protocol as the Windows helper; Linux Wi-Fi commands use
   nmcli and server-bridge uses POSIX sockets for LAN-to-target relays
 VER_END
+
+RELEASE_DATE=2026-06-15
