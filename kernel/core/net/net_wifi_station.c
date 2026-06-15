@@ -99,7 +99,7 @@ static void lab_seed_scan(uint8_t band) {
             } else if (home_band_env &&
                        (!strcmp(home_band_env, "6") || !strcmp(home_band_env, "6ghz"))) {
                 home_band = FL_WIFI_BAND_6GHZ;
-                home_channel = 6;
+                home_channel = 37; /* 6 GHz PSC channel (6135 MHz); ch 6 is 2.4 GHz */
             } else {
                 home_band = FL_WIFI_BAND_2GHZ;
                 home_channel = 6;

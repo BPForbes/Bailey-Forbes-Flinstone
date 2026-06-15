@@ -249,16 +249,22 @@ static int cmd_wifi_join(int argc, char **argv) {
         (void)fl_wifi_db_apply_scan_entry(name, &entries[i]);
         break;
     }
+    /* Default to WPA2-PSK when auth mode is unknown — most home routers are
+     * WPA2.  On the host path (nmcli/wpa_supplicant) this is overridden by the
+     * AP's actual capabilities; on the lab path it sets the synthetic AP mode. */
     if (cred.auth_mode == 0 && cred.passphrase[0])
-        cred.auth_mode = FL_WIFI_AUTH_WPA3_SAE;
+        cred.auth_mode = FL_WIFI_AUTH_WPA2_PSK;
     rc = fl_net_wifi_connect(&cred, 30000u);
     if (rc == FL_RESULT_NOSYS) {
         fputs("wifi join: no Wi-Fi backend (need wpa_supplicant on FL_NET_WIFI_IFACE or lab mode)\n", stderr);
         fl_wifi_db_close();
         return 1;
     }
+    /* NOENT is structurally unreachable today: the lab path synthesises an AP
+     * entry so connect never returns NOENT, and the host path returns ERR on
+     * nmcli/wpa_cli failure.  Kept as a safety net for future backends. */
     if (rc == FL_RESULT_NOENT) {
-        fprintf(stderr, "wifi join: network '%s' not found in last scan\n", name);
+        fprintf(stderr, "wifi join: network '%s' not found\n", name);
         fl_wifi_db_close();
         return 1;
     }
