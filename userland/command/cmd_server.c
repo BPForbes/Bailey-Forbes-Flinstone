@@ -582,31 +582,32 @@ static int verb_host(int argc, char **argv) {
             fl_color_success("hosting as '%s' on %s", current_principal(), bind_txt);
         else
             fl_color_success("hosting as '%s' on %s", current_principal(), argv[2]);
-        if (bind_ep.family == FL_NET_ADDR_FAMILY_V4 && bind_ep.addr.v4_be == 0u) {
-            char suggest[32];
-            if (fl_net_iface_suggest_ipv4(NULL, suggest, sizeof(suggest)))
-                fl_color_success("peers on LAN can: server join %s:%u", suggest,
-                                 (unsigned)bind_ep.port_host);
-        }
-        /* On WSL without an explicit Windows IP: try portproxy then bridge. */
-        {
+        /* On WSL: prefer the real Windows Wi-Fi IP as the LAN join hint and
+         * start a bridge so LAN peers can reach the WSL-bound server.
+         * On native Linux: fall back to the iface_suggest address. */
+        if (bind_ep.family == FL_NET_ADDR_FAMILY_V4 && bind_ep.port_host > 0u) {
             const char *wip = fl_net_wifi_host_linux_windows_ipv4();
-            if (wip && bind_ep.family == FL_NET_ADDR_FAMILY_V4 && bind_ep.port_host > 0u) {
+            if (wip) {
                 char bip[32];
                 fl_net_ipv4_format_addr(bind_ep.addr.v4_be, bip, sizeof(bip));
                 const char *proxy_target = (bind_ep.addr.v4_be == 0u) ? "127.0.0.1" : bip;
                 const char *bridge_target = (bind_ep.addr.v4_be == 0u) ? NULL : bip;
                 if (fl_net_wifi_host_linux_server_proxy(proxy_target, bind_ep.port_host) == 0)
-                    fl_color_success("LAN peers: server join %s:%u (portproxy active)",
+                    fl_color_success("peers on LAN can: server join %s:%u (portproxy active)",
                                      wip, (unsigned)bind_ep.port_host);
                 else if (fl_net_wifi_host_linux_server_bridge_to(wip, bridge_target,
                                                                  bind_ep.port_host) == 0)
-                    fl_color_success("LAN peers: server join %s:%u (bridge active, no admin needed)",
+                    fl_color_success("peers on LAN can: server join %s:%u (bridge active)",
                                      wip, (unsigned)bind_ep.port_host);
                 else
-                    fl_color_success("LAN peers: server join %s:%u "
-                                     "(run FlinstonePowershell as admin for portproxy)",
+                    fl_color_success("peers on LAN can: server join %s:%u "
+                                     "(WSL: run FlinstonePowershell.exe or set up portproxy)",
                                      wip, (unsigned)bind_ep.port_host);
+            } else if (bind_ep.addr.v4_be == 0u) {
+                char suggest[32];
+                if (fl_net_iface_suggest_ipv4(NULL, suggest, sizeof(suggest)))
+                    fl_color_success("peers on LAN can: server join %s:%u", suggest,
+                                     (unsigned)bind_ep.port_host);
             }
         }
     }

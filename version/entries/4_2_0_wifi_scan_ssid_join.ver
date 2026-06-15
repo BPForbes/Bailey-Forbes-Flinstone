@@ -123,6 +123,31 @@ PRE 4.2.0: Wi-Fi scan home SSID + SSID-based join; WSL detection; FlinstonePower
   WSL2 eth0 internal address (e.g. 10.255.255.254 from Hyper-V virtual switch);
   fl_net_wifi_host_linux_ipv4() continues to return the bindable Linux-side
   address for server bind operations (net_wifi_station.c)
+- WSL PowerShell interop IP probe (net_wifi_host_linux.c): when FlinstonePowershell
+  is not the active backend (e.g. lab backend used for wifi join while Windows Wi-Fi
+  is managed by Windows itself), fl_net_wifi_host_linux_windows_ipv4() now falls
+  back to querying powershell.exe -NoProfile via WSL2 interop to obtain the first
+  DHCP-assigned IPv4 that is not in the 10.*/172.*/127.* ranges; result cached in
+  s_interop_ipv4; this enables the correct LAN-reachable IP (192.168.x.x) to be
+  returned for server host hints and wifi join display even when FPS is absent
+- server host WSL join hint fix (cmd_server.c): verb_host() now queries
+  fl_net_wifi_host_linux_windows_ipv4() before fl_net_iface_suggest_ipv4(); when a
+  Windows IP is available (FPS or interop), only the LAN-reachable address is shown
+  as the join hint — the misleading 10.255.255.254 WSL-internal address is suppressed;
+  portproxy and bridge are still attempted in the same order; if no Windows IP is
+  known (native Linux/macOS) the iface_suggest path runs as before
+- server-bridge WSL interop fallback (net_wifi_host_linux.c): when FPS binary and
+  Python bridge are both absent, fl_net_wifi_host_linux_server_bridge_to() on WSL
+  tries FlinstonePowershell.exe via Windows PATH (accessible via WSL2 interop
+  even when not on the Linux PATH), enabling the bridge relay without any extra
+  configuration
+- wifi known networks / skip password prompt (cmd_wifi.c, net_wifi_host_linux.c):
+  wifi join now checks fl_wifi_db for a prior credential record before prompting;
+  if the SSID was previously joined, the password prompt is skipped and the OS
+  backend (nmcli / wpa_supplicant) is asked to use its saved profile; on the
+  wpa_cli path, list_networks is queried for the SSID and select_network <id> is
+  called directly instead of remove_network all + add_network + set_network psk;
+  if the OS profile has been cleared (FL_RESULT_INVAL), wifi join falls back to
+  prompting for the password and re-adds the credential; nmcli already handles
+  empty-passphrase re-join via device wifi connect without a password argument
 VER_END
-
-RELEASE_DATE=2026-06-15

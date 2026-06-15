@@ -212,10 +212,24 @@ static int cmd_wifi_join(int argc, char **argv) {
         }
     }
 
-    if (cmd_read_password("WiFi Password: ", wifi_pw, sizeof(wifi_pw)) != 0) {
-        fputs("wifi join: password read failed\n", stderr);
-        fl_wifi_db_close();
-        return 1;
+    /* Skip the password prompt for networks previously joined — the OS backend
+     * (wpa_supplicant / nmcli / FlinstonePowershell) already has the credential
+     * saved.  If the saved profile has expired or been cleared the connect call
+     * returns FL_RESULT_INVAL and we fall back to prompting. */
+    {
+        fl_wifi_db_router_t known_row;
+        int is_known = (fl_wifi_db_find(name, &known_row) == FL_RESULT_OK &&
+                        known_row.password_hash[0] &&
+                        strcmp(known_row.password_hash, "-") != 0);
+        if (!is_known) {
+            if (cmd_read_password("WiFi Password: ", wifi_pw, sizeof(wifi_pw)) != 0) {
+                fputs("wifi join: password read failed\n", stderr);
+                fl_wifi_db_close();
+                return 1;
+            }
+        } else {
+            printf("wifi join: '%s' is a known network\n", name);
+        }
     }
 
     memset(&cred, 0, sizeof(cred));
@@ -255,6 +269,23 @@ static int cmd_wifi_join(int argc, char **argv) {
     if (cred.auth_mode == 0 && cred.passphrase[0])
         cred.auth_mode = FL_WIFI_AUTH_WPA2_PSK;
     rc = fl_net_wifi_connect(&cred, 30000u);
+    /* If the OS backend no longer has saved credentials (profile cleared or
+     * first join on a new machine), fall back to prompting for the password. */
+    if (rc == FL_RESULT_INVAL && !cred.passphrase[0]) {
+        fputs("wifi join: saved profile not found — enter password:\n", stderr);
+        if (cmd_read_password("WiFi Password: ", wifi_pw, sizeof(wifi_pw)) != 0 ||
+                !wifi_pw[0]) {
+            cmd_wipe_password(wifi_pw, sizeof(wifi_pw));
+            fl_wifi_db_close();
+            return 1;
+        }
+        strncpy(cred.passphrase, wifi_pw, sizeof(cred.passphrase) - 1u);
+        if (cred.auth_mode == 0)
+            cred.auth_mode = FL_WIFI_AUTH_WPA3_SAE;
+        (void)fl_wifi_db_set_password(name, wifi_pw);
+        cmd_wipe_password(wifi_pw, sizeof(wifi_pw));
+        rc = fl_net_wifi_connect(&cred, 30000u);
+    }
     if (rc == FL_RESULT_NOSYS) {
         fputs("wifi join: no Wi-Fi backend (need wpa_supplicant on FL_NET_WIFI_IFACE or lab mode)\n", stderr);
         fl_wifi_db_close();

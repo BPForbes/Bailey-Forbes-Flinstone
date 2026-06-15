@@ -49,6 +49,7 @@ static uint8_t s_fps_prefix = 24u;
 static char s_fps_gw[16] = "";
 static char s_wsl_bind_ipv4[16] = ""; /* WSL eth0 IP — bindable in Linux for server host */
 static uint8_t s_wsl_bind_prefix = 24u;
+static char s_interop_ipv4[16] = ""; /* Windows Wi-Fi IP from PowerShell interop (WSL fallback) */
 
 
 /*
@@ -1083,6 +1084,48 @@ static void parse_flinstone_ps_scan(const char *text, uint8_t band_filter) {
  * End FlinstonePowershell helpers
  * ---------------------------------------------------------------------- */
 
+/* Query Windows PowerShell via WSL interop for the first DHCP-assigned IPv4
+ * address that is not in the WSL2 Hyper-V or loopback ranges (10.*, 172.*,
+ * 127.*).  On a typical home setup this returns the Wi-Fi adapter address
+ * (192.168.x.x).  Called at most once; result cached in s_interop_ipv4.
+ */
+static void probe_windows_ipv4_via_powershell(void) {
+    FILE *f;
+    char buf[64];
+    size_t n;
+
+    if (fl_platform_detect() != FL_PLATFORM_WSL || s_interop_ipv4[0])
+        return;
+    f = popen("powershell.exe -NoProfile -Command \""
+              "try { (Get-NetIPAddress -AddressFamily IPv4 -PrefixOrigin Dhcp"
+              " | Where-Object {$_.IPAddress -notlike '10.*'"
+              " -and $_.IPAddress -notlike '172.*'"
+              " -and $_.IPAddress -notlike '127.*'}"
+              " | Select-Object -First 1 -ExpandProperty IPAddress) }"
+              " catch {}\" 2>/dev/null",
+              "r");
+    if (!f)
+        return;
+    buf[0] = '\0';
+    if (fgets(buf, sizeof(buf), f) == NULL) {
+        pclose(f);
+        return;
+    }
+    pclose(f);
+    n = strlen(buf);
+    while (n > 0u && (buf[n - 1u] == '\n' || buf[n - 1u] == '\r' ||
+                      buf[n - 1u] == ' '  || buf[n - 1u] == '\t'))
+        buf[--n] = '\0';
+    if (!buf[0])
+        return;
+    {
+        uint32_t test = 0u;
+        if (!fl_net_ipv4_parse_literal(buf, &test) || test == 0u)
+            return;
+    }
+    strncpy(s_interop_ipv4, buf, sizeof(s_interop_ipv4) - 1u);
+}
+
 static void probe_host_backend_once(void) {
     static int s_backend_probed = 0;
     int mode;
@@ -1294,6 +1337,52 @@ fl_result_t fl_net_wifi_host_linux_connect(const fl_net_wifi_cred_t *cred,
             if (rc != FL_RESULT_OK)
                 return rc;
         }
+        rc = wait_for_ipv4(timeout_ms > 0u ? timeout_ms : 15000u, NULL, NULL, NULL);
+        if (rc != FL_RESULT_OK && rc != FL_RESULT_TIMEDOUT)
+            return rc;
+        (void)wait_for_ipv6(timeout_ms > 0u ? timeout_ms : 15000u, NULL, NULL);
+        strncpy(s_wpa_joined_ssid, cred->ssid, sizeof(s_wpa_joined_ssid) - 1u);
+        return FL_RESULT_OK;
+    }
+
+    /* Empty passphrase: try to select an already-saved profile rather than
+     * wiping all networks and re-adding.  This supports "wifi join <ssid>"
+     * on a known network without re-entering the password; wpa_supplicant
+     * already holds the PSK from the previous join.
+     * Returns FL_RESULT_INVAL when the SSID is not in the saved config so
+     * the caller (cmd_wifi.c) can fall back to prompting for the password. */
+    if (!cred->passphrase[0]) {
+        char list_out[4096];
+        char *line;
+        int known_id = -1;
+
+        if (run_wpa_cli("list_networks", list_out, sizeof(list_out))) {
+            line = strtok(list_out, "\n");
+            while (line) {
+                char *tab1 = strchr(line, '\t');
+                if (tab1) {
+                    int nid = atoi(line);
+                    char *tab2 = strchr(tab1 + 1, '\t');
+                    size_t ssid_len = tab2 ? (size_t)(tab2 - (tab1 + 1))
+                                           : strlen(tab1 + 1);
+                    if (strncmp(tab1 + 1, cred->ssid, ssid_len) == 0 &&
+                            cred->ssid[ssid_len] == '\0') {
+                        known_id = nid;
+                        break;
+                    }
+                }
+                line = strtok(NULL, "\n");
+            }
+        }
+        if (known_id < 0)
+            return FL_RESULT_INVAL; /* not in saved config; caller should prompt */
+        snprintf(cmd, sizeof(cmd), "select_network %d", known_id);
+        if (!run_wpa_cli(cmd, NULL, 0))
+            return FL_RESULT_ERR;
+        (void)run_wpa_cli("save_config", NULL, 0);
+        rc = wait_for_wpa_completed(timeout_ms > 0u ? timeout_ms : 30000u);
+        if (rc != FL_RESULT_OK)
+            return rc;
         rc = wait_for_ipv4(timeout_ms > 0u ? timeout_ms : 15000u, NULL, NULL, NULL);
         if (rc != FL_RESULT_OK && rc != FL_RESULT_TIMEDOUT)
             return rc;
@@ -1536,8 +1625,16 @@ const char *fl_net_wifi_host_linux_windows_ipv4(void) {
 #else
     if (s_host_kind == FL_WIFI_HOST_NONE)
         (void)fl_net_wifi_host_linux_available();
-    if (s_host_kind != FL_WIFI_HOST_FLINSTONE_PS)
+    if (s_host_kind != FL_WIFI_HOST_FLINSTONE_PS) {
+        /* FPS not active: on WSL try PowerShell interop to get the Windows
+         * Wi-Fi adapter IP (e.g. when the lab backend handles wifi join). */
+        if (fl_platform_detect() == FL_PLATFORM_WSL) {
+            if (!s_interop_ipv4[0])
+                probe_windows_ipv4_via_powershell();
+            return s_interop_ipv4[0] ? s_interop_ipv4 : NULL;
+        }
         return NULL;
+    }
     if (!s_fps_ipv4[0])
         (void)refresh_flinstone_helper_status();
     if (!s_fps_ipv4[0])
@@ -1642,6 +1739,18 @@ int fl_net_wifi_host_linux_server_bridge_to(const char *bind_ip,
         snprintf(cmd, sizeof(cmd),
                  "python3 %s %s %u %s </dev/null >/dev/null 2>&1 &",
                  py_q, bind_q, (unsigned)port, target_q);
+        (void)system(cmd);
+        return 0;
+    }
+    /* WSL interop fallback: try FlinstonePowershell.exe on the Windows PATH
+     * (accessible via WSL2 interop even if not on the Linux PATH) or the
+     * server_bridge.py via Windows python3.exe.  No admin rights required
+     * for ports >= 1024 with the bridge relay approach. */
+    if (fl_platform_detect() == FL_PLATFORM_WSL) {
+        snprintf(cmd, sizeof(cmd),
+                 "FlinstonePowershell.exe server-bridge %s %u %s"
+                 " </dev/null >/dev/null 2>&1 &",
+                 bind_q, (unsigned)port, target_q);
         (void)system(cmd);
         return 0;
     }
