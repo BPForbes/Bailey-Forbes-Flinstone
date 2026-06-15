@@ -361,9 +361,12 @@ flinstone-ps-windows: $(FLINSTONE_PS_EXE_OUT)
 # Run WITHOUT sudo so that cmd.exe can read %USERPROFILE% correctly.
 .PHONY: install-fps-windows
 install-fps-windows: $(FLINSTONE_PS_EXE_OUT)
-	@if ! command -v cmd.exe >/dev/null 2>&1; then \
-	    echo "install-fps-windows: cmd.exe not found (not running in WSL?)"; exit 1; fi
-	@_wp=$$(cmd.exe /c "echo %USERPROFILE%" 2>/dev/null | tr -d '\r\n'); \
+	@CMD_EXE=$$(command -v cmd.exe 2>/dev/null); \
+	 if [ -z "$$CMD_EXE" ] && [ -x /mnt/c/Windows/System32/cmd.exe ]; then \
+	     CMD_EXE=/mnt/c/Windows/System32/cmd.exe; fi; \
+	 if [ -z "$$CMD_EXE" ]; then \
+	     echo "install-fps-windows: cmd.exe not found (not running in WSL?)"; exit 1; fi; \
+	 _wp=$$($$CMD_EXE /c "echo %USERPROFILE%" 2>/dev/null | tr -d '\r\n'); \
 	 WIN_HOME=$$(wslpath "$$_wp" 2>/dev/null); \
 	 if [ -z "$$WIN_HOME" ] || [ ! -d "$$WIN_HOME" ]; then \
 	     echo "install-fps-windows: could not resolve %USERPROFILE% ($$_wp)"; \
