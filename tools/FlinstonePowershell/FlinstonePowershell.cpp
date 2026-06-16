@@ -427,8 +427,50 @@ static void cmd_wifi_join(const char *ssid, const char *password) {
         return;
     }
 
-    /* Build and install the profile on the first interface. */
     GUID *guid = &iface_list->InterfaceInfo[0].InterfaceGuid;
+    std::wstring wssid = to_wide(ssid);
+
+    /* Already on this SSID — do not reinstall a profile (avoids "SSID 2"). */
+    {
+        PWLAN_CONNECTION_ATTRIBUTES attrs = nullptr;
+        DWORD attr_size = sizeof(WLAN_CONNECTION_ATTRIBUTES);
+        if (WlanQueryInterface(wlan.h, guid, wlan_intf_opcode_current_connection,
+                               nullptr, &attr_size,
+                               reinterpret_cast<PVOID *>(&attrs),
+                               nullptr) == ERROR_SUCCESS && attrs) {
+            if (attrs->isState == wlan_interface_state_connected) {
+                std::string cur = ssid_to_str(
+                    attrs->wlanAssociationAttributes.dot11Ssid);
+                WlanFreeMemory(attrs);
+                if (cur == ssid) {
+                    printf("result=ok\tssid=%s\n", ssid);
+                    WlanFreeMemory(iface_list);
+                    return;
+                }
+            } else {
+                WlanFreeMemory(attrs);
+            }
+        }
+    }
+
+    /* Prefer the saved Windows profile — avoids duplicate "ForbesHoltgrave 2". */
+    {
+        WLAN_CONNECTION_PARAMETERS params = {};
+        params.wlanConnectionMode = wlan_connection_mode_profile;
+        params.strProfile         = wssid.c_str();
+        params.pDot11Ssid         = nullptr;
+        params.pDesiredBssidList  = nullptr;
+        params.dot11BssType       = dot11_BSS_type_infrastructure;
+        params.dwFlags            = 0;
+        DWORD rc = WlanConnect(wlan.h, guid, &params, nullptr);
+        if (rc == ERROR_SUCCESS) {
+            printf("result=ok\tssid=%s\n", ssid);
+            WlanFreeMemory(iface_list);
+            return;
+        }
+    }
+
+    /* Profile missing or password changed: install/update then connect. */
     std::string xml = build_profile_xml(ssid, password ? password : "");
     std::wstring wxml = to_wide(xml);
 
@@ -443,8 +485,6 @@ static void cmd_wifi_join(const char *ssid, const char *password) {
         return;
     }
 
-    /* Connect using the newly installed profile. */
-    std::wstring wssid = to_wide(ssid);
     WLAN_CONNECTION_PARAMETERS params = {};
     params.wlanConnectionMode = wlan_connection_mode_profile;
     params.strProfile         = wssid.c_str();

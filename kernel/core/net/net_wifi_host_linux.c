@@ -1047,6 +1047,50 @@ static int refresh_flinstone_helper_status(void) {
     return s_fps_ipv4[0] != '\0';
 }
 
+/*
+ * Poll wifi-status until the helper reports connected (and Windows IPv4 when
+ * available).  WlanConnect is asynchronous — a single refresh right after
+ * wifi-join often runs before DHCP, leaving s_fps_ipv4 empty and causing the
+ * shell to fall back to the WSL eth0 address (172.x).
+ */
+static fl_result_t wait_for_flinstone_helper_connected(unsigned timeout_ms) {
+    unsigned elapsed = 0u;
+    const unsigned step_ms = 250u;
+    const unsigned limit = timeout_ms > 0u ? timeout_ms : 15000u;
+
+    while (elapsed <= limit) {
+        if (refresh_flinstone_helper_status())
+            return FL_RESULT_OK;
+        usleep((useconds_t)step_ms * 1000u);
+        elapsed += step_ms;
+    }
+    /* Association without DHCP yet: still accept connected state. */
+    {
+        char st_out[512];
+        if (run_flinstone_helper("wifi-status", st_out, sizeof(st_out)) &&
+            strstr(st_out, "state=connected")) {
+            char plen_s[8] = "";
+            if (!s_fps_ipv4[0])
+                parse_fps_field(st_out, "ipv4", s_fps_ipv4, sizeof(s_fps_ipv4));
+            if (!s_fps_gw[0])
+                parse_fps_field(st_out, "gateway", s_fps_gw, sizeof(s_fps_gw));
+            if (parse_fps_field(st_out, "prefix", plen_s, sizeof(plen_s)) &&
+                plen_s[0]) {
+                int plen = atoi(plen_s);
+                if (plen < 0)
+                    plen = 0;
+                if (plen > 32)
+                    plen = 32;
+                s_fps_prefix = (uint8_t)plen;
+            }
+            read_any_nonlo_ipv4(s_wsl_bind_ipv4, sizeof(s_wsl_bind_ipv4),
+                                &s_wsl_bind_prefix);
+            return FL_RESULT_OK;
+        }
+    }
+    return FL_RESULT_TIMEDOUT;
+}
+
 /* Parse tab-separated key=value lines emitted by FlinstonePowershell wifi-scan. */
 static void parse_flinstone_ps_scan(const char *text, uint8_t band_filter) {
     const char *p = text;
@@ -1354,9 +1398,10 @@ fl_result_t fl_net_wifi_host_linux_connect(const fl_net_wifi_cred_t *cred,
         if (!strstr(join_out, "result=ok"))
             return FL_RESULT_ERR;
         strncpy(s_wpa_joined_ssid, cred->ssid, sizeof(s_wpa_joined_ssid) - 1u);
-        /* Query real Windows Wi-Fi IP via wifi-status; this is what LAN peers use. */
-        (void)refresh_flinstone_helper_status();
-        (void)timeout_ms;
+        /* Wait for Windows association + router DHCP (async after WlanConnect). */
+        rc = wait_for_flinstone_helper_connected(timeout_ms);
+        if (rc != FL_RESULT_OK)
+            return rc;
         return FL_RESULT_OK;
     }
 

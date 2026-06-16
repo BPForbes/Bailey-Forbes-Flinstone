@@ -154,6 +154,12 @@ PRE 4.2.0: Wi-Fi scan home SSID + SSID-based join; WSL detection; FlinstonePower
   prefers eth0 / 172.16–31.x.x over docker br-* 10.x addresses (e.g.
   10.255.255.254); fl_net_iface_suggest_ipv4() returns Windows Wi-Fi IP for LAN
   hints; ipv4_route on WSL uses eth0 for netdev bind while keeping Windows gateway
+- fix (WSL wifi join IP + duplicate SSID): wait_for_flinstone_helper_connected()
+  polls wifi-status until Windows DHCP completes so join shows 192.168.x.x not
+  172.x; cmd_wifi join/status prefer Windows Wi-Fi IP for peer hints; WSL eth0
+  shown separately as internal NAT; FlinstonePowershell wifi-join connects to
+  existing Windows profile first (skips WlanSetProfile when saved) to avoid
+  duplicate "ForbesHoltgrave 2" network entries in Windows Wi-Fi settings
 VER_END
 
 RELEASE_DATE=2026-06-15
