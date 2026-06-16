@@ -90,6 +90,7 @@ static int parse_fps_field(const char *text, const char *key, char *out,
 }
 
 static unsigned prefix_from_netmask(uint32_t mask_be); /* defined below */
+static void refresh_wsl_windows_wifi_ipv4(void);
 
 /* Score interface names: prefer WSL eth0 over docker/vpn bridges. */
 static int iface_name_score(const char *name) {
@@ -1059,12 +1060,16 @@ static fl_result_t wait_for_flinstone_helper_connected(unsigned timeout_ms) {
     const unsigned limit = timeout_ms > 0u ? timeout_ms : 15000u;
 
     while (elapsed <= limit) {
-        if (refresh_flinstone_helper_status())
+        refresh_wsl_windows_wifi_ipv4();
+        if (s_fps_ipv4[0])
             return FL_RESULT_OK;
         usleep((useconds_t)step_ms * 1000u);
         elapsed += step_ms;
     }
     /* Association without DHCP yet: still accept connected state. */
+    refresh_wsl_windows_wifi_ipv4();
+    if (s_fps_ipv4[0])
+        return FL_RESULT_OK;
     {
         char st_out[512];
         if (run_flinstone_helper("wifi-status", st_out, sizeof(st_out)) &&
@@ -1185,22 +1190,29 @@ static void parse_flinstone_ps_scan(const char *text, uint8_t band_filter) {
 /* Query Windows PowerShell via WSL interop for the first DHCP-assigned IPv4
  * address that is not in the WSL2 Hyper-V or loopback ranges (10.*, 172.*,
  * 127.*).  On a typical home setup this returns the Wi-Fi adapter address
- * (192.168.x.x).  Called at most once; result cached in s_interop_ipv4.
+ * (192.168.x.x).
  */
 static void probe_windows_ipv4_via_powershell(void) {
     FILE *f;
     char buf[64];
     size_t n;
 
-    if (fl_platform_detect() != FL_PLATFORM_WSL || s_interop_ipv4[0])
+    if (fl_platform_detect() != FL_PLATFORM_WSL)
         return;
+    s_interop_ipv4[0] = '\0';
     f = popen("powershell.exe -NoProfile -Command \""
-              "try { (Get-NetIPAddress -AddressFamily IPv4 -PrefixOrigin Dhcp"
-              " | Where-Object {$_.IPAddress -notlike '10.*'"
+              "try { $ip = (Get-NetIPConfiguration | Where-Object {"
+              " $_.NetAdapter.Status -eq 'Up'"
+              " -and ($_.InterfaceAlias -match 'Wi-?Fi|Wireless|WLAN')"
+              " -and $_.IPv4Address} | Select-Object -First 1"
+              " -ExpandProperty IPv4Address).IPAddress;"
+              " if (-not $ip) { $ip = (Get-NetIPAddress -AddressFamily IPv4"
+              " -PrefixOrigin Dhcp | Where-Object {"
+              " $_.IPAddress -notlike '10.*'"
               " -and $_.IPAddress -notlike '172.*'"
               " -and $_.IPAddress -notlike '127.*'}"
               " | Select-Object -First 1 -ExpandProperty IPAddress) }"
-              " catch {}\" 2>/dev/null",
+              " if ($ip) { $ip } } catch {}\" 2>/dev/null",
               "r");
     if (!f)
         return;
@@ -1222,6 +1234,25 @@ static void probe_windows_ipv4_via_powershell(void) {
             return;
     }
     strncpy(s_interop_ipv4, buf, sizeof(s_interop_ipv4) - 1u);
+    s_interop_ipv4[sizeof(s_interop_ipv4) - 1u] = '\0';
+}
+
+/*
+ * On WSL, fill s_fps_ipv4 from FlinstonePowershell wifi-status and fall back
+ * to PowerShell interop when GetAdaptersAddresses GUID matching fails.
+ */
+static void refresh_wsl_windows_wifi_ipv4(void) {
+    if (s_host_kind != FL_WIFI_HOST_FLINSTONE_PS ||
+        fl_platform_detect() != FL_PLATFORM_WSL)
+        return;
+    (void)refresh_flinstone_helper_status();
+    if (s_fps_ipv4[0])
+        return;
+    probe_windows_ipv4_via_powershell();
+    if (s_interop_ipv4[0]) {
+        strncpy(s_fps_ipv4, s_interop_ipv4, sizeof(s_fps_ipv4) - 1u);
+        s_fps_ipv4[sizeof(s_fps_ipv4) - 1u] = '\0';
+    }
 }
 
 static void probe_host_backend_once(void) {
@@ -1755,7 +1786,7 @@ const char *fl_net_wifi_host_linux_windows_ipv4(void) {
         return NULL;
     }
     if (!s_fps_ipv4[0])
-        (void)refresh_flinstone_helper_status();
+        refresh_wsl_windows_wifi_ipv4();
     if (!s_fps_ipv4[0])
         return NULL;
     return s_fps_ipv4;

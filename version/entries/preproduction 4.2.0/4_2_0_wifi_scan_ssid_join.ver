@@ -163,6 +163,12 @@ PRE 4.2.0: Wi-Fi scan home SSID + SSID-based join; WSL detection; FlinstonePower
 - fix (cmd_wifi.c): wifi join password-retry path defaulted auth mode to
   WPA3-SAE when the SSID was not in the last scan; changed to WPA2-PSK
   (matches home router default and the synthetic AP heuristic in station.c)
+- fix (WSL IP + SSID 2, follow-up): GetAdaptersAddresses GUID match accepts
+  braced AdapterName and falls back to IF_TYPE_IEEE80211; refresh_wsl_windows_
+  wifi_ipv4() fills s_fps_ipv4 via PowerShell when wifi-status omits ipv4;
+  wifi-join uses wlan_connection_mode_temporary_profile (never WlanSetProfile);
+  saved-profile connect matches SSID inside profile XML; wlan0 netdev on WSL
+  skips eth0 172.x registration
 VER_END
 
 RELEASE_DATE=2026-06-16

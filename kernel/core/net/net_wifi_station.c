@@ -7,6 +7,7 @@
 #include "net_wifi_crypto.h"
 #include "net_wifi_he.h"
 #include "net_wifi_host_linux.h"
+#include "fl/platform.h"
 #include "net_ipv4.h"
 #include "net_wifi_mgmt.h"
 #include "net_wifi_sae.h"
@@ -281,11 +282,13 @@ static fl_result_t host_linux_connect(const fl_net_wifi_cred_t *cred, unsigned t
             if (fl_net_wifi_host_linux_ipv4_route(NULL, &prefix, &gw_be) == FL_RESULT_OK
                     && gw_be)
                 fl_net_ipv4_format_addr(gw_be, gw_buf, sizeof(gw_buf));
-        } else if (fl_net_wifi_host_linux_ipv4_route(NULL, &prefix, &gw_be) == FL_RESULT_OK
+        } else if (fl_platform_detect() != FL_PLATFORM_WSL &&
+                   fl_net_wifi_host_linux_ipv4_route(NULL, &prefix, &gw_be) == FL_RESULT_OK
                    && fl_net_wifi_host_linux_ipv4(NULL, ip_buf, sizeof(ip_buf)) == FL_RESULT_OK
                    && ip_buf[0]) {
             fl_net_ipv4_format_addr(gw_be, gw_buf, sizeof(gw_buf));
         }
+        /* WSL: do not put eth0 172.x on wlan0 — it is not LAN-reachable. */
     }
     if (ip_buf[0])
         rc = fl_net_wifi_netdev_up_with_ipv4(&ap, sta_mac, ip_buf, prefix, gw_buf);

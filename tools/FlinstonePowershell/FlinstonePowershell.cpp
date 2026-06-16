@@ -274,6 +274,42 @@ static std::string build_profile_xml(const std::string &ssid,
 }
 
 /*
+ * Copy the first unicast IPv4 (+ gateway) from an IP_ADAPTER_ADDRESSES row.
+ */
+static bool fill_ipv4_from_adapter(IP_ADAPTER_ADDRESSES *a, char *ipv4, size_t ip_len,
+                                 UINT8 *prefix, char *gw, size_t gw_len) {
+    IP_ADAPTER_UNICAST_ADDRESS *ua;
+
+    if (!a)
+        return false;
+    for (ua = a->FirstUnicastAddress; ua; ua = ua->Next) {
+        struct sockaddr_in *sin;
+
+        if (!ua->Address.lpSockaddr ||
+            ua->Address.lpSockaddr->sa_family != AF_INET)
+            continue;
+        sin = reinterpret_cast<struct sockaddr_in *>(ua->Address.lpSockaddr);
+        if (!inet_ntop(AF_INET, &sin->sin_addr, ipv4, (socklen_t)ip_len))
+            continue;
+        if (prefix)
+            *prefix = ua->OnLinkPrefixLength;
+        if (gw && gw_len > 0) {
+            IP_ADAPTER_GATEWAY_ADDRESS_LH *gwaddr = a->FirstGatewayAddress;
+            gw[0] = '\0';
+            if (gwaddr && gwaddr->Address.lpSockaddr &&
+                gwaddr->Address.lpSockaddr->sa_family == AF_INET) {
+                struct sockaddr_in *gsin =
+                    reinterpret_cast<struct sockaddr_in *>(
+                        gwaddr->Address.lpSockaddr);
+                inet_ntop(AF_INET, &gsin->sin_addr, gw, (socklen_t)gw_len);
+            }
+        }
+        return true;
+    }
+    return false;
+}
+
+/*
  * Look up the IPv4 address, prefix length, and default gateway for the
  * Windows adapter identified by a GUID.  Fills ipv4 (dotted-decimal),
  * *prefix (prefix length in bits), and gw (gateway dotted-decimal).
@@ -284,6 +320,12 @@ static bool get_iface_addr(const GUID *guid, char *ipv4, size_t ip_len,
                            UINT8 *prefix, char *gw, size_t gw_len) {
     /* Build lowercase dashed GUID string without braces. */
     char guid_str[37];
+    char guid_braced[39];
+    ULONG size = 0;
+    IP_ADAPTER_ADDRESSES *list;
+    IP_ADAPTER_ADDRESSES *a;
+    IP_ADAPTER_ADDRESSES *wifi_up = nullptr;
+
     snprintf(guid_str, sizeof(guid_str),
              "%08x-%04x-%04x-%02x%02x-%02x%02x%02x%02x%02x%02x",
              (unsigned)guid->Data1,
@@ -293,50 +335,92 @@ static bool get_iface_addr(const GUID *guid, char *ipv4, size_t ip_len,
              (unsigned)guid->Data4[2], (unsigned)guid->Data4[3],
              (unsigned)guid->Data4[4], (unsigned)guid->Data4[5],
              (unsigned)guid->Data4[6], (unsigned)guid->Data4[7]);
+    snprintf(guid_braced, sizeof(guid_braced), "{%s}", guid_str);
 
-    /* Query buffer size then allocate. */
-    ULONG size = 0;
     GetAdaptersAddresses(AF_INET, GAA_FLAG_INCLUDE_GATEWAYS, NULL, NULL, &size);
     if (size == 0)
         return false;
 
     std::vector<BYTE> buf(size);
-    IP_ADAPTER_ADDRESSES *list =
-        reinterpret_cast<IP_ADAPTER_ADDRESSES *>(buf.data());
+    list = reinterpret_cast<IP_ADAPTER_ADDRESSES *>(buf.data());
     if (GetAdaptersAddresses(AF_INET, GAA_FLAG_INCLUDE_GATEWAYS, NULL, list,
                              &size) != ERROR_SUCCESS)
         return false;
 
-    for (IP_ADAPTER_ADDRESSES *a = list; a; a = a->Next) {
-        /* AdapterName is the GUID string without braces. */
-        if (_stricmp(a->AdapterName, guid_str) != 0)
-            continue;
-
-        /* First unicast IPv4 address. */
-        IP_ADAPTER_UNICAST_ADDRESS *ua = a->FirstUnicastAddress;
-        if (!ua || !ua->Address.lpSockaddr)
-            return false;
-        struct sockaddr_in *sin =
-            reinterpret_cast<struct sockaddr_in *>(ua->Address.lpSockaddr);
-        if (!inet_ntop(AF_INET, &sin->sin_addr, ipv4, (socklen_t)ip_len))
-            return false;
-        if (prefix)
-            *prefix = ua->OnLinkPrefixLength;
-
-        /* First gateway. */
-        if (gw && gw_len > 0) {
-            gw[0] = '\0';
-            IP_ADAPTER_GATEWAY_ADDRESS_LH *gwaddr = a->FirstGatewayAddress;
-            if (gwaddr && gwaddr->Address.lpSockaddr) {
-                struct sockaddr_in *gsin =
-                    reinterpret_cast<struct sockaddr_in *>(
-                        gwaddr->Address.lpSockaddr);
-                inet_ntop(AF_INET, &gsin->sin_addr, gw, (socklen_t)gw_len);
-            }
-        }
-        return true;
+    for (a = list; a; a = a->Next) {
+        bool guid_match = (_stricmp(a->AdapterName, guid_str) == 0 ||
+                           _stricmp(a->AdapterName, guid_braced) == 0);
+        if (guid_match)
+            return fill_ipv4_from_adapter(a, ipv4, ip_len, prefix, gw, gw_len);
+        /* IF_TYPE_IEEE80211 == 71 — fallback when GUID string form differs. */
+        if (a->IfType == 71u && a->OperStatus == IfOperStatusUp)
+            wifi_up = a;
     }
+    if (wifi_up)
+        return fill_ipv4_from_adapter(wifi_up, ipv4, ip_len, prefix, gw, gw_len);
     return false;
+}
+
+/* Return true when a saved Windows profile's XML contains this SSID. */
+static bool profile_xml_has_ssid(const WCHAR *xml, const std::wstring &ssid) {
+    const WCHAR *needle;
+    if (!xml || ssid.empty())
+        return false;
+    needle = wcsstr(xml, ssid.c_str());
+    return needle != nullptr;
+}
+
+/* Connect using an already-saved profile whose XML references the SSID. */
+static bool try_connect_saved_profile(HANDLE wlan, GUID *guid,
+                                      const std::string &ssid) {
+    PWLAN_PROFILE_INFO_LIST profiles = nullptr;
+    std::wstring wssid = to_wide(ssid);
+    bool connected = false;
+
+    if (WlanGetProfileList(wlan, guid, nullptr, &profiles) != ERROR_SUCCESS ||
+        !profiles)
+        return false;
+
+    for (DWORD i = 0; i < profiles->dwNumberOfItems; i++) {
+        WCHAR *xml = nullptr;
+        DWORD flags = 0;
+        DWORD reason = 0;
+        const WCHAR *pname = profiles->ProfileInfo[i].strProfileName;
+        WLAN_CONNECTION_PARAMETERS params = {};
+
+        if (WlanGetProfile(wlan, guid, pname, nullptr, &xml, &flags,
+                           &reason) != ERROR_SUCCESS || !xml)
+            continue;
+        if (!profile_xml_has_ssid(xml, wssid)) {
+            WlanFreeMemory(xml);
+            continue;
+        }
+        WlanFreeMemory(xml);
+
+        params.wlanConnectionMode = wlan_connection_mode_profile;
+        params.strProfile         = pname;
+        params.dot11BssType       = dot11_BSS_type_infrastructure;
+        if (WlanConnect(wlan, guid, &params, nullptr) == ERROR_SUCCESS) {
+            connected = true;
+            break;
+        }
+    }
+    WlanFreeMemory(profiles);
+    return connected;
+}
+
+/* Connect with in-memory XML — never persisted (no "SSID 2" duplicates). */
+static bool connect_temporary_profile(HANDLE wlan, GUID *guid,
+                                      const std::string &ssid,
+                                      const char *password) {
+    std::string xml = build_profile_xml(ssid, password ? password : "");
+    std::wstring wxml = to_wide(xml);
+    WLAN_CONNECTION_PARAMETERS params = {};
+
+    params.wlanConnectionMode = wlan_connection_mode_temporary_profile;
+    params.strProfile         = wxml.c_str();
+    params.dot11BssType       = dot11_BSS_type_infrastructure;
+    return WlanConnect(wlan, guid, &params, nullptr) == ERROR_SUCCESS;
 }
 
 #endif /* _WIN32 */
@@ -428,9 +512,8 @@ static void cmd_wifi_join(const char *ssid, const char *password) {
     }
 
     GUID *guid = &iface_list->InterfaceInfo[0].InterfaceGuid;
-    std::wstring wssid = to_wide(ssid);
 
-    /* Already on this SSID — do not reinstall a profile (avoids "SSID 2"). */
+    /* Already on this SSID — do not touch saved profiles. */
     {
         PWLAN_CONNECTION_ATTRIBUTES attrs = nullptr;
         DWORD attr_size = sizeof(WLAN_CONNECTION_ATTRIBUTES);
@@ -453,56 +536,24 @@ static void cmd_wifi_join(const char *ssid, const char *password) {
         }
     }
 
-    /* Prefer the saved Windows profile — avoids duplicate "ForbesHoltgrave 2". */
-    {
-        WLAN_CONNECTION_PARAMETERS params = {};
-        params.wlanConnectionMode = wlan_connection_mode_profile;
-        params.strProfile         = wssid.c_str();
-        params.pDot11Ssid         = nullptr;
-        params.pDesiredBssidList  = nullptr;
-        params.dot11BssType       = dot11_BSS_type_infrastructure;
-        params.dwFlags            = 0;
-        DWORD rc = WlanConnect(wlan.h, guid, &params, nullptr);
-        if (rc == ERROR_SUCCESS) {
+    /* Passwordless re-join: use any saved profile that references this SSID
+     * (profile name may be "ForbesHoltgrave 2" while SSID is ForbesHoltgrave). */
+    if (!password || !password[0]) {
+        if (try_connect_saved_profile(wlan.h, guid, ssid)) {
             printf("result=ok\tssid=%s\n", ssid);
             WlanFreeMemory(iface_list);
             return;
         }
     }
 
-    /* Profile missing or password changed: install/update then connect. */
-    std::string xml = build_profile_xml(ssid, password ? password : "");
-    std::wstring wxml = to_wide(xml);
-
-    DWORD reason = 0;
-    DWORD rc = WlanSetProfile(wlan.h, guid, 0, wxml.c_str(),
-                              nullptr, TRUE, nullptr, &reason);
-    if (rc != ERROR_SUCCESS) {
-        WlanFreeMemory(iface_list);
-        char msg[128];
-        snprintf(msg, sizeof(msg), "WlanSetProfile failed (rc=%lu reason=%lu)", rc, reason);
-        printf("result=error\tmsg=%s\n", msg);
-        return;
-    }
-
-    WLAN_CONNECTION_PARAMETERS params = {};
-    params.wlanConnectionMode = wlan_connection_mode_profile;
-    params.strProfile         = wssid.c_str();
-    params.pDot11Ssid         = nullptr;
-    params.pDesiredBssidList  = nullptr;
-    params.dot11BssType       = dot11_BSS_type_infrastructure;
-    params.dwFlags            = 0;
-
-    rc = WlanConnect(wlan.h, guid, &params, nullptr);
-    WlanFreeMemory(iface_list);
-
-    if (rc == ERROR_SUCCESS) {
+    /* Credential join: temporary in-memory profile only — never WlanSetProfile
+     * (persisted profiles are what create duplicate "SSID 2" entries). */
+    if (connect_temporary_profile(wlan.h, guid, ssid, password)) {
         printf("result=ok\tssid=%s\n", ssid);
     } else {
-        char msg[128];
-        snprintf(msg, sizeof(msg), "WlanConnect failed (rc=%lu)", rc);
-        printf("result=error\tmsg=%s\n", msg);
+        puts("result=error\tmsg=WlanConnect temporary profile failed");
     }
+    WlanFreeMemory(iface_list);
 #else
     /* Stub for Linux dev builds */
     (void)password;
