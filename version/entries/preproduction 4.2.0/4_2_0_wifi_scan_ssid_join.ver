@@ -150,6 +150,10 @@ PRE 4.2.0: Wi-Fi scan home SSID + SSID-based join; WSL detection; FlinstonePower
   if the OS profile has been cleared (FL_RESULT_INVAL), wifi join falls back to
   prompting for the password and re-adds the credential; nmcli already handles
   empty-passphrase re-join via device wifi connect without a password argument
+- fix (WSL server host IP): read_any_nonlo_ipv4() scores getifaddrs() results and
+  prefers eth0 / 172.16–31.x.x over docker br-* 10.x addresses (e.g.
+  10.255.255.254); fl_net_iface_suggest_ipv4() returns Windows Wi-Fi IP for LAN
+  hints; ipv4_route on WSL uses eth0 for netdev bind while keeping Windows gateway
 VER_END
 
 RELEASE_DATE=2026-06-15

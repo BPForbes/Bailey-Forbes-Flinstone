@@ -91,15 +91,58 @@ static int parse_fps_field(const char *text, const char *key, char *out,
 
 static unsigned prefix_from_netmask(uint32_t mask_be); /* defined below */
 
+/* Score interface names: prefer WSL eth0 over docker/vpn bridges. */
+static int iface_name_score(const char *name) {
+    if (!name || !name[0])
+        return -100;
+    if (!strcmp(name, "lo"))
+        return -100;
+    if (strncmp(name, "tap", 3) == 0)
+        return -100;
+    if (strncmp(name, "docker", 6) == 0)
+        return -50;
+    if (strncmp(name, "br-", 3) == 0)
+        return -40;
+    if (strncmp(name, "veth", 4) == 0)
+        return -35;
+    if (strncmp(name, "virbr", 5) == 0)
+        return -35;
+    if (!strcmp(name, "eth0"))
+        return 100;
+    if (strncmp(name, "eth", 3) == 0)
+        return 80;
+    return 0;
+}
+
+/* Prefer WSL2 172.16–31.x.x; deprioritize 10.x docker bridges. */
+static int iface_addr_score(uint32_t addr) {
+    unsigned o0 = (unsigned)(addr & 0xffu);
+    unsigned o1 = (unsigned)((addr >> 8) & 0xffu);
+
+    if (addr == 0u || fl_net_ipv4_is_loopback(addr) || fl_net_ipv4_is_apipa(addr))
+        return -100;
+    if (o0 == 172u && o1 >= 16u && o1 <= 31u)
+        return 90;
+    if (o0 == 192u && o1 == 168u)
+        return 70;
+    if (o0 == 10u)
+        return 15;
+    return 40;
+}
+
 /*
- * Find the first non-loopback, non-APIPA, non-tap IPv4 on the Linux host
- * (WSL2 eth0 or similar).  That address is bindable in Linux, unlike the
- * Windows adapter IP reported by FlinstonePowershell.
+ * Pick the best non-loopback IPv4 on the Linux host (WSL2 eth0 or similar).
+ * That address is bindable in Linux, unlike the Windows adapter IP reported
+ * by FlinstonePowershell.  Avoids docker0 / br-* / 10.x bridges that often
+ * appear before eth0 in getifaddrs() order.
  */
 static void read_any_nonlo_ipv4(char *out, size_t cap, uint8_t *prefix_out) {
 #if defined(FL_NET_WIFI_HOST_LINUX)
     struct ifaddrs *ifa = NULL;
     struct ifaddrs *cur;
+    int best_score = -1;
+    uint32_t best_addr = 0u;
+    uint32_t best_mask = 0u;
 
     out[0] = '\0';
     if (prefix_out)
@@ -109,29 +152,34 @@ static void read_any_nonlo_ipv4(char *out, size_t cap, uint8_t *prefix_out) {
     for (cur = ifa; cur; cur = cur->ifa_next) {
         struct sockaddr_in *sin;
         uint32_t addr;
+        uint32_t mask = 0u;
+        int score;
 
         if (!cur->ifa_addr || !cur->ifa_name)
             continue;
         if (cur->ifa_addr->sa_family != AF_INET)
             continue;
-        /* Skip tap* interfaces (Flinstone virtual adapters) */
-        if (strncmp(cur->ifa_name, "tap", 3) == 0)
-            continue;
         sin = (struct sockaddr_in *)cur->ifa_addr;
         addr = sin->sin_addr.s_addr;
-        if (fl_net_ipv4_is_loopback(addr) || fl_net_ipv4_is_apipa(addr))
+        score = iface_name_score(cur->ifa_name) + iface_addr_score(addr);
+        if (score <= 0)
             continue;
-        if (addr == 0u)
-            continue;
-        fl_net_ipv4_format_addr(addr, out, cap);
-        if (prefix_out && cur->ifa_netmask &&
-            cur->ifa_netmask->sa_family == AF_INET) {
+        if (cur->ifa_netmask && cur->ifa_netmask->sa_family == AF_INET) {
             struct sockaddr_in *nm = (struct sockaddr_in *)cur->ifa_netmask;
-            *prefix_out = (uint8_t)prefix_from_netmask(nm->sin_addr.s_addr);
+            mask = nm->sin_addr.s_addr;
         }
-        break;
+        if (score > best_score) {
+            best_score = score;
+            best_addr = addr;
+            best_mask = mask;
+        }
     }
     freeifaddrs(ifa);
+    if (best_score <= 0 || best_addr == 0u)
+        return;
+    fl_net_ipv4_format_addr(best_addr, out, cap);
+    if (prefix_out)
+        *prefix_out = (uint8_t)prefix_from_netmask(best_mask);
 #else
     (void)cap;
     (void)prefix_out;
@@ -616,10 +664,11 @@ static unsigned prefix_from_netmask(uint32_t mask_be) {
      * 0x00FFFFFF, so we must convert to host order before counting MSBs. */
     uint32_t m = ntohl(mask_be);
     unsigned n = 0;
-    while (m & 0x80000000u) {
+
+    if (m == 0u)
+        return 24u;
+    while (n < 32u && (m & (1u << (31u - n))))
         n++;
-        m <<= 1;
-    }
     return n > 0u ? n : 24u;
 }
 
@@ -986,8 +1035,14 @@ static int refresh_flinstone_helper_status(void) {
         return 0;
     parse_fps_field(st_out, "ipv4", s_fps_ipv4, sizeof(s_fps_ipv4));
     parse_fps_field(st_out, "gateway", s_fps_gw, sizeof(s_fps_gw));
-    if (parse_fps_field(st_out, "prefix", plen_s, sizeof(plen_s)) && plen_s[0])
-        s_fps_prefix = (uint8_t)atoi(plen_s);
+    if (parse_fps_field(st_out, "prefix", plen_s, sizeof(plen_s)) && plen_s[0]) {
+        int plen = atoi(plen_s);
+        if (plen < 0)
+            plen = 0;
+        if (plen > 32)
+            plen = 32;
+        s_fps_prefix = (uint8_t)plen;
+    }
     read_any_nonlo_ipv4(s_wsl_bind_ipv4, sizeof(s_wsl_bind_ipv4),
                         &s_wsl_bind_prefix);
     return s_fps_ipv4[0] != '\0';
@@ -1569,8 +1624,9 @@ fl_result_t fl_net_wifi_host_linux_ipv4_route(uint32_t *addr_be_out, uint8_t *pr
         s_host_kind == FL_WIFI_HOST_FLINSTONE_LINUX) {
         if (!s_fps_ipv4[0] && !s_wsl_bind_ipv4[0])
             (void)refresh_flinstone_helper_status();
-        /* Prefer the helper-reported adapter IP with gateway. */
-        if (s_fps_ipv4[0]) {
+
+        /* Native Linux helper: wlan IP is bindable on the host directly. */
+        if (s_host_kind == FL_WIFI_HOST_FLINSTONE_LINUX && s_fps_ipv4[0]) {
             if (addr_be_out && !fl_net_ipv4_parse_literal(s_fps_ipv4, addr_be_out))
                 return FL_RESULT_ERR;
             if (prefix_len_out)
@@ -1580,7 +1636,6 @@ fl_result_t fl_net_wifi_host_linux_ipv4_route(uint32_t *addr_be_out, uint8_t *pr
                     if (!fl_net_ipv4_parse_literal(s_fps_gw, gw_be_out))
                         *gw_be_out = 0u;
                 } else {
-                    /* No gateway from helper: derive .1 from the adapter IP. */
                     uint32_t ip = 0u;
                     unsigned pfx = s_fps_prefix < 32u ? s_fps_prefix : 24u;
                     uint32_t net_mask = pfx < 32u ? (1u << pfx) - 1u : 0xFFFFFFFFu;
@@ -1591,10 +1646,11 @@ fl_result_t fl_net_wifi_host_linux_ipv4_route(uint32_t *addr_be_out, uint8_t *pr
             }
             return FL_RESULT_OK;
         }
-        /* Fall back to the WSL Linux-side IP (eth0) with a derived gateway.
-         * This path is taken when FlinstonePowershell.exe is not yet rebuilt
-         * or not yet installed — s_wsl_bind_ipv4 is populated from getifaddrs()
-         * on the Linux side so it is always available after wifi join. */
+
+        /*
+         * WSL FlinstonePowershell: netdev/bind uses eth0 (Linux-bindable).
+         * Windows Wi-Fi IP is display-only — fl_net_wifi_host_linux_windows_ipv4().
+         */
         if (s_wsl_bind_ipv4[0]) {
             uint32_t addr = 0u;
             if (!fl_net_ipv4_parse_literal(s_wsl_bind_ipv4, &addr))
@@ -1603,8 +1659,27 @@ fl_result_t fl_net_wifi_host_linux_ipv4_route(uint32_t *addr_be_out, uint8_t *pr
                 *addr_be_out = addr;
             if (prefix_len_out)
                 *prefix_len_out = s_wsl_bind_prefix;
-            if (gw_be_out)
-                *gw_be_out = (addr & htonl(~0u << (32 - s_wsl_bind_prefix))) | htonl(1u);
+            if (gw_be_out) {
+                if (s_fps_gw[0] && fl_net_ipv4_parse_literal(s_fps_gw, gw_be_out))
+                    ;
+                else if (s_fps_prefix > 0u && s_fps_prefix <= 32u)
+                    *gw_be_out = (addr & htonl(~0u << (32 - s_fps_prefix))) |
+                                 htonl(1u);
+                else
+                    *gw_be_out = (addr & htonl(~0u << (32 - s_wsl_bind_prefix))) |
+                                 htonl(1u);
+            }
+            return FL_RESULT_OK;
+        }
+        /* Before wifi join: no cached eth0 yet. */
+        if (s_fps_ipv4[0]) {
+            if (addr_be_out && !fl_net_ipv4_parse_literal(s_fps_ipv4, addr_be_out))
+                return FL_RESULT_ERR;
+            if (prefix_len_out)
+                *prefix_len_out = s_fps_prefix;
+            if (gw_be_out && s_fps_gw[0] &&
+                !fl_net_ipv4_parse_literal(s_fps_gw, gw_be_out))
+                *gw_be_out = 0u;
             return FL_RESULT_OK;
         }
         return FL_RESULT_NOENT;
