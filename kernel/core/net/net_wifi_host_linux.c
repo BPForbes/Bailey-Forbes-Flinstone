@@ -746,13 +746,12 @@ static fl_result_t read_iface_ipv4_route(uint32_t *addr_be_out, uint8_t *prefix_
         if (prefix_len_out)
             *prefix_len_out = (uint8_t)pfx;
         if (gw_be_out) {
-            /* In the codebase's addr_be format the first octet sits in the
-             * lowest byte, so the network portion covers the low pfx bits and
-             * the host portion is in the high (32-pfx) bits.  Default gateway
-             * = network base with last octet = 1.  htonl(1u) places the 1 in
-             * the highest byte, matching the last-octet position. */
-            uint32_t net_mask = pfx < 32u ? (1u << pfx) - 1u : 0xFFFFFFFFu;
-            *gw_be_out = (best_addr & net_mask) | htonl(1u);
+            /* addr_be stores first octet in bits[7:0], so the correct
+             * network mask is best_mask (sin_addr.s_addr), not a bit-shifted
+             * integer.  Fall back to htonl for the /0 edge case. */
+            uint32_t nm = best_mask != 0u ? best_mask
+                         : htonl(pfx < 32u ? ~0u << (32u - pfx) : ~0u);
+            *gw_be_out = (best_addr & nm) | htonl(1u);
         }
     }
     return FL_RESULT_OK;
@@ -1638,9 +1637,9 @@ fl_result_t fl_net_wifi_host_linux_ipv4_route(uint32_t *addr_be_out, uint8_t *pr
                 } else {
                     uint32_t ip = 0u;
                     unsigned pfx = s_fps_prefix < 32u ? s_fps_prefix : 24u;
-                    uint32_t net_mask = pfx < 32u ? (1u << pfx) - 1u : 0xFFFFFFFFu;
+                    uint32_t nm = htonl(pfx < 32u ? ~0u << (32u - pfx) : ~0u);
                     *gw_be_out = (fl_net_ipv4_parse_literal(s_fps_ipv4, &ip) ? ip : 0u)
-                                 & net_mask;
+                                 & nm;
                     *gw_be_out |= htonl(1u);
                 }
             }
