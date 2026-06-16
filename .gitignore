@@ -77,6 +77,8 @@ userland/shell/version_changelog.c
 
 # Makefile: aggregate checksum of version/entries/**/*.ver for version_def.h freshness
 .version_entries_ver.sum
+# Makefile: build-mode sentinel (VM_ENABLE/VM_SDL tracking)
+.build_mode
 tests/test_p3_network
 tests/test_p3_server
 tests/test_p3_udp_cmds

@@ -234,6 +234,22 @@ FLINSTONE_LINUX_NET_OUT = tools/FlinstoneLinuxNet/FlinstoneLinuxNet
 ifneq ($(shell command -v $(MINGW_CXX) 2>/dev/null),)
 FLINSTONE_PS_EXE = $(FLINSTONE_PS_EXE_OUT)
 endif
+
+# Build-mode sentinel: detect when VM_ENABLE or VM_SDL changes between runs
+# so stale object files compiled under the old flags get removed before make
+# re-evaluates dependencies.  Without this, switching from `make` to `make vm`
+# (or back) leaves the old binary in place and make considers it up-to-date.
+BUILD_MODE_FILE := .build_mode
+BUILD_MODE_NOW  := VM=$(VM_ENABLE)_SDL=$(VM_SDL)
+_bmode_prev     := $(shell cat $(BUILD_MODE_FILE) 2>/dev/null)
+ifneq ($(_bmode_prev),)
+ifneq ($(_bmode_prev),$(BUILD_MODE_NOW))
+$(info [make] Build mode changed ($(_bmode_prev) -> $(BUILD_MODE_NOW)): removing stale objects)
+$(shell rm -f $(OBJS) $(TARGET) 2>/dev/null)
+endif
+endif
+$(shell printf '%s' '$(BUILD_MODE_NOW)' > $(BUILD_MODE_FILE))
+
 .DEFAULT_GOAL := all
 
 # version_def.h is generated from version/locked/**/*.ver (shipped A.B.C) plus

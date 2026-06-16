@@ -101,21 +101,43 @@ if [ "$IS_WSL" = "1" ]; then
             mkdir -p "$WIN_BIN"
             cp "$FPS_EXE" "$WIN_BIN/"
 
-            # Convert to Windows path for the PATH instructions.
+            # Convert to Windows path for PATH and PowerShell operations.
             if command -v wslpath >/dev/null 2>&1; then
                 WIN_BIN_W=$(wslpath -w "$WIN_BIN" 2>/dev/null)
             else
-                WIN_BIN_W="$(echo "$WIN_BIN" | sed 's|/mnt/c|C:|; s|/|\\|g')"
+                WIN_BIN_W="$(echo "$WIN_BIN" | sed 's|/mnt/c|C:|; s|/|\\\\|g')"
             fi
 
             echo "FlinstonePowershell.exe installed to: $WIN_BIN"
-            echo ""
-            echo "ACTION REQUIRED — add to Windows PATH (one-time):"
-            echo "  $WIN_BIN_W"
-            echo "  System Properties → Environment Variables → User PATH → New"
-            echo ""
-            echo "Then open a new WSL terminal and verify:"
-            echo "  which FlinstonePowershell.exe"
+
+            # Auto-add to Windows user PATH via PowerShell interop so no manual
+            # Environment Variables dialog is needed.
+            if command -v powershell.exe >/dev/null 2>&1 && [ -n "$WIN_BIN_W" ]; then
+                _ps_out=$(powershell.exe -NoProfile -Command "
+\$b = '$WIN_BIN_W'
+\$p = [Environment]::GetEnvironmentVariable('PATH', 'User')
+if ((\$p -split ';') -notcontains \$b) {
+    [Environment]::SetEnvironmentVariable('PATH', (\$p + ';' + \$b), 'User')
+    Write-Output 'added'
+} else {
+    Write-Output 'already'
+}" 2>/dev/null | tr -d '\r\n')
+                if [ "$_ps_out" = "added" ]; then
+                    echo "Added $WIN_BIN_W to Windows user PATH (open a new WSL terminal to pick it up)"
+                elif [ "$_ps_out" = "already" ]; then
+                    echo "$WIN_BIN_W is already on Windows user PATH"
+                else
+                    echo ""
+                    echo "ACTION REQUIRED — add to Windows PATH manually:"
+                    echo "  $WIN_BIN_W"
+                    echo "  System Properties → Environment Variables → User PATH → New"
+                fi
+            else
+                echo ""
+                echo "ACTION REQUIRED — add to Windows PATH manually:"
+                echo "  $WIN_BIN_W"
+                echo "  System Properties → Environment Variables → User PATH → New"
+            fi
         else
             # Home directory could not be determined (common when script runs as
             # root under sudo — cmd.exe loses Windows env context).  Direct the
@@ -131,6 +153,22 @@ if [ "$IS_WSL" = "1" ]; then
             echo "Then open a new WSL terminal and verify:"
             echo "  which FlinstonePowershell.exe"
         fi
+
+    # Auto-source fl-wifi.env in the real user's .bashrc so FL_NET_WIFI_FLINSTONE_PS
+    # is set in every future WSL session without any manual step.
+    if [ -f "$WIFI_ENV" ]; then
+        if [ -n "$SUDO_USER" ]; then
+            REAL_HOME=$(getent passwd "$SUDO_USER" 2>/dev/null | cut -d: -f6)
+        else
+            REAL_HOME="$HOME"
+        fi
+        BASHRC="${REAL_HOME}/.bashrc"
+        ENV_LINE="[ -f \"$WIFI_ENV\" ] && . \"$WIFI_ENV\""
+        if [ -f "$BASHRC" ] && ! grep -qF "fl-wifi.env" "$BASHRC" 2>/dev/null; then
+            printf '\n# Flinstone Wi-Fi / FlinstonePowershell.exe path\n%s\n' "$ENV_LINE" >> "$BASHRC"
+            echo "Added fl-wifi.env auto-source to $BASHRC (active in new shells)"
+        fi
+    fi
     fi
 fi
 
