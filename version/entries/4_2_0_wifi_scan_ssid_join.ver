@@ -160,6 +160,7 @@ PRE 4.2.0: Wi-Fi scan home SSID + SSID-based join; WSL detection; FlinstonePower
   shown separately as internal NAT; FlinstonePowershell wifi-join connects to
   existing Windows profile first (skips WlanSetProfile when saved) to avoid
   duplicate "ForbesHoltgrave 2" network entries in Windows Wi-Fi settings
+- fix (cmd_wifi.c): wifi join password-retry path defaulted auth mode to
+  WPA3-SAE when the SSID was not in the last scan; changed to WPA2-PSK
+  (matches home router default and the synthetic AP heuristic in station.c)
 VER_END
-
-RELEASE_DATE=2026-06-15

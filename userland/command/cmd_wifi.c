@@ -310,7 +310,7 @@ static int cmd_wifi_join(int argc, char **argv) {
         }
         strncpy(cred.passphrase, wifi_pw, sizeof(cred.passphrase) - 1u);
         if (cred.auth_mode == 0)
-            cred.auth_mode = FL_WIFI_AUTH_WPA3_SAE;
+            cred.auth_mode = FL_WIFI_AUTH_WPA2_PSK;
         (void)fl_wifi_db_set_password(name, wifi_pw);
         cmd_wipe_password(wifi_pw, sizeof(wifi_pw));
         rc = fl_net_wifi_connect(&cred, 30000u);
