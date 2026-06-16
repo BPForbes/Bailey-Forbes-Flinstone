@@ -169,6 +169,12 @@ PRE 4.2.0: Wi-Fi scan home SSID + SSID-based join; WSL detection; FlinstonePower
   wifi-join uses wlan_connection_mode_temporary_profile (never WlanSetProfile);
   saved-profile connect matches SSID inside profile XML; wlan0 netdev on WSL
   skips eth0 172.x registration
+- WSL server host portproxy lifecycle: server host on WSL adds a Windows netsh
+  portproxy rule (listenaddress=<local-ip> connectaddress=<wsl-ip>) plus an
+  inbound firewall rule "Flinstone Server <port>" via FlinstonePowershell
+  server-proxy with UAC elevation when needed; server kill / leave / exit
+  remove both rules through server-proxy-del; server join unchanged; bridge
+  relay remains a non-admin fallback when portproxy is declined or fails
 VER_END
 
 RELEASE_DATE=2026-06-16

@@ -76,13 +76,21 @@ int fl_net_wifi_host_linux_server_bridge_to(const char *bind_ip,
                                            uint16_t port);
 
 /**
- * Add a Windows portproxy rule so LAN peers can reach the server at the
- * Windows Wi-Fi IP.  Requires FlinstonePowershell.exe to have admin rights.
+ * WSL eth0 / Linux-bindable IPv4 (e.g. 172.27.x.x).  Fills buf on success.
+ * Returns 0 on success, -1 when unavailable.
+ */
+int fl_net_wifi_host_linux_wsl_ipv4(char *buf, size_t buf_len);
+
+/**
+ * Add a Windows portproxy + inbound firewall rule so LAN peers can reach a
+ * server at listen_ip:<port> inside WSL (connectaddress=wsl_ip).  Requires
+ * FlinstonePowershell.exe; may prompt for UAC elevation on Windows.
  * Returns 0 on success, -1 on failure or wrong backend.
  */
-int fl_net_wifi_host_linux_server_proxy(const char *wsl_ip, uint16_t port);
+int fl_net_wifi_host_linux_server_proxy(const char *listen_ip, const char *wsl_ip,
+                                        uint16_t port);
 
-/** Remove a portproxy rule added by fl_net_wifi_host_linux_server_proxy(). */
-int fl_net_wifi_host_linux_server_proxy_del(uint16_t port);
+/** Remove portproxy + firewall rules added for listen_ip:<port>. */
+int fl_net_wifi_host_linux_server_proxy_del(const char *listen_ip, uint16_t port);
 
 #endif /* NET_WIFI_HOST_LINUX_H */

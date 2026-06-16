@@ -1794,26 +1794,89 @@ const char *fl_net_wifi_host_linux_windows_ipv4(void) {
 }
 
 /*
- * Ask FlinstonePowershell to add a Windows portproxy rule so LAN peers can
- * reach the server at the Windows Wi-Fi IP:<port>.  Requires the Windows
- * process to be running with administrator rights; returns 0 on success,
- * -1 on failure or wrong backend.
+ * Ask FlinstonePowershell to add a Windows portproxy + firewall rule so LAN
+ * peers can reach listen_ip:<port> with traffic forwarded to wsl_ip:<port>.
  */
-int fl_net_wifi_host_linux_server_proxy(const char *wsl_ip, uint16_t port) {
+int fl_net_wifi_host_linux_server_proxy(const char *listen_ip, const char *wsl_ip,
+                                        uint16_t port) {
 #if !defined(FL_NET_WIFI_HOST_LINUX)
+    (void)listen_ip;
     (void)wsl_ip;
     (void)port;
     return -1;
 #else
-    char args[256];
-    char out[256];
+    char args[384];
+    char out[384];
+    const char *listen = (listen_ip && listen_ip[0]) ? listen_ip : "0.0.0.0";
 
-    if (s_host_kind != FL_WIFI_HOST_FLINSTONE_PS || !wsl_ip || !wsl_ip[0])
+    if (s_host_kind == FL_WIFI_HOST_NONE)
+        (void)fl_net_wifi_host_linux_available();
+    if (s_host_kind != FL_WIFI_HOST_FLINSTONE_PS || !wsl_ip || !wsl_ip[0]) {
+#if defined(__linux__)
+        if (fl_platform_detect() == FL_PLATFORM_WSL) {
+            char  cmd[384];
+            FILE *fp;
+
+            snprintf(cmd, sizeof(cmd),
+                     "FlinstonePowershell.exe server-proxy %s %s %u 2>/dev/null",
+                     listen, wsl_ip, (unsigned)port);
+            fp = popen(cmd, "r");
+            if (!fp)
+                return -1;
+            {
+                size_t n = fread(out, 1u, sizeof(out) - 1u, fp);
+                out[n] = '\0';
+            }
+            return (pclose(fp) == 0 && strstr(out, "result=ok")) ? 0 : -1;
+        }
+#endif
         return -1;
-    snprintf(args, sizeof(args), "server-proxy %s %u", wsl_ip, (unsigned)port);
+    }
+    snprintf(args, sizeof(args), "server-proxy %s %s %u", listen, wsl_ip,
+             (unsigned)port);
     if (!run_flinstone_ps(args, out, sizeof(out)))
         return -1;
     return strstr(out, "result=ok") ? 0 : -1;
+#endif
+}
+
+int fl_net_wifi_host_linux_wsl_ipv4(char *buf, size_t buf_len) {
+#if !defined(FL_NET_WIFI_HOST_LINUX)
+    (void)buf;
+    (void)buf_len;
+    return -1;
+#else
+    FILE *fp;
+    char  line[256];
+    char *tok;
+
+    if (!buf || buf_len < 8u)
+        return -1;
+    buf[0] = '\0';
+    if (!s_wsl_bind_ipv4[0])
+        read_any_nonlo_ipv4(s_wsl_bind_ipv4, sizeof(s_wsl_bind_ipv4),
+                            &s_wsl_bind_prefix);
+    if (s_wsl_bind_ipv4[0]) {
+        strncpy(buf, s_wsl_bind_ipv4, buf_len - 1u);
+        buf[buf_len - 1u] = '\0';
+        return 0;
+    }
+    fp = popen("hostname -I 2>/dev/null", "r");
+    if (!fp)
+        return -1;
+    if (!fgets(line, sizeof(line), fp)) {
+        pclose(fp);
+        return -1;
+    }
+    pclose(fp);
+    tok = strtok(line, " \t\r\n");
+    if (!tok || !tok[0])
+        return -1;
+    strncpy(buf, tok, buf_len - 1u);
+    buf[buf_len - 1u] = '\0';
+    strncpy(s_wsl_bind_ipv4, buf, sizeof(s_wsl_bind_ipv4) - 1u);
+    s_wsl_bind_ipv4[sizeof(s_wsl_bind_ipv4) - 1u] = '\0';
+    return 0;
 #endif
 }
 
@@ -1918,18 +1981,29 @@ int fl_net_wifi_host_linux_server_bridge(uint16_t port) {
     return fl_net_wifi_host_linux_server_bridge_to(NULL, NULL, port);
 }
 
-/* Remove a previously added portproxy rule for port.  Returns 0 on success. */
-int fl_net_wifi_host_linux_server_proxy_del(uint16_t port) {
+/* Remove portproxy + firewall rules for listen_ip:<port>. */
+int fl_net_wifi_host_linux_server_proxy_del(const char *listen_ip, uint16_t port) {
 #if !defined(FL_NET_WIFI_HOST_LINUX)
+    (void)listen_ip;
     (void)port;
     return -1;
 #else
-    char args[64];
+    char args[128];
     char out[256];
+    const char *listen = (listen_ip && listen_ip[0]) ? listen_ip : "0.0.0.0";
 
-    if (s_host_kind != FL_WIFI_HOST_FLINSTONE_PS)
+    if (s_host_kind != FL_WIFI_HOST_FLINSTONE_PS) {
+        if (fl_platform_detect() == FL_PLATFORM_WSL) {
+            char cmd[256];
+            snprintf(cmd, sizeof(cmd),
+                     "FlinstonePowershell.exe server-proxy-del %s %u 2>/dev/null",
+                     listen, (unsigned)port);
+            if (system(cmd) == 0)
+                return 0;
+        }
         return -1;
-    snprintf(args, sizeof(args), "server-proxy-del %u", (unsigned)port);
+    }
+    snprintf(args, sizeof(args), "server-proxy-del %s %u", listen, (unsigned)port);
     if (!run_flinstone_ps(args, out, sizeof(out)))
         return -1;
     return strstr(out, "result=ok") ? 0 : -1;

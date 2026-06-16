@@ -878,43 +878,115 @@ static void cmd_server_bridge(const char *bind_ip, const char *port_s,
 
 /* -------------------------------------------------------------------------
  * server-proxy / server-proxy-del
- * Use Windows netsh portproxy to forward <win-ip>:<port> → <wsl-ip>:<port>
- * so LAN peers can reach a server running inside WSL.
- * Requires the process to run with Windows administrator rights.
+ * Windows netsh portproxy + inbound firewall rule so LAN peers can reach a
+ * TCP server bound inside WSL.  listen_ip is the address the user passed to
+ * `server host <local-ip>:<port>` (often the Windows Wi-Fi IP); wsl_ip is
+ * the WSL eth0 address from `hostname -I`.  Elevates via PowerShell RunAs
+ * when the current process is not already administrator.
  * ---------------------------------------------------------------------- */
 
-static void cmd_server_proxy(const char *wsl_ip, const char *port_s) {
 #if defined(_WIN32)
-    char cmd[512];
-    snprintf(cmd, sizeof(cmd),
-             "netsh interface portproxy add v4tov4"
-             " listenaddress=0.0.0.0 listenport=%s"
-             " connectaddress=%s connectport=%s",
-             port_s, wsl_ip, port_s);
-    int rc = system(cmd);
+static bool process_is_elevated(void) {
+    BOOL        elevated = FALSE;
+    HANDLE      token    = NULL;
+    TOKEN_ELEVATION te;
+    DWORD       sz       = sizeof(te);
+
+    if (!OpenProcessToken(GetCurrentProcess(), TOKEN_QUERY, &token))
+        return false;
+    if (GetTokenInformation(token, TokenElevation, &te, sizeof(te), &sz))
+        elevated = te.TokenIsElevated;
+    CloseHandle(token);
+    return elevated != FALSE;
+}
+
+static int run_powershell_script_file(const char *script_path, bool elevate) {
+    char cmd[2048];
+
+    if (elevate) {
+        snprintf(cmd, sizeof(cmd),
+                 "powershell.exe -NoProfile -Command \""
+                 "Start-Process powershell.exe -Verb RunAs -Wait "
+                 "-ArgumentList '-NoProfile','-ExecutionPolicy','Bypass','-File','%s'\"",
+                 script_path);
+    } else {
+        snprintf(cmd, sizeof(cmd),
+                 "powershell.exe -NoProfile -ExecutionPolicy Bypass -File \"%s\"",
+                 script_path);
+    }
+    return system(cmd);
+}
+
+static int run_proxy_ps_script(const char *body) {
+    char temp_dir[MAX_PATH];
+    char temp_path[MAX_PATH];
+    FILE *fp;
+    int   rc;
+
+    if (!GetTempPathA(sizeof(temp_dir), temp_dir))
+        return -1;
+    snprintf(temp_path, sizeof(temp_path), "%sflinstone_proxy_%lu.ps1",
+             temp_dir, (unsigned long)GetTickCount());
+
+    fp = fopen(temp_path, "w");
+    if (!fp)
+        return -1;
+    fputs(body, fp);
+    fclose(fp);
+
+    rc = run_powershell_script_file(temp_path, !process_is_elevated());
+    DeleteFileA(temp_path);
+    return rc;
+}
+#endif /* _WIN32 */
+
+static void cmd_server_proxy(const char *listen_ip, const char *wsl_ip,
+                             const char *port_s) {
+#if defined(_WIN32)
+    const char *listen = (listen_ip && listen_ip[0]) ? listen_ip : "0.0.0.0";
+    char        script[1024];
+    int         rc;
+
+    snprintf(script, sizeof(script),
+             "netsh interface portproxy add v4tov4 "
+             "listenaddress=%s listenport=%s connectaddress=%s connectport=%s\r\n"
+             "New-NetFirewallRule -DisplayName 'Flinstone Server %s' "
+             "-Direction Inbound -Protocol TCP -LocalPort %s -Action Allow "
+             "-ErrorAction SilentlyContinue\r\n",
+             listen, port_s, wsl_ip, port_s, port_s, port_s);
+    rc = run_proxy_ps_script(script);
     if (rc == 0)
-        printf("result=ok\tport=%s\twsl_ip=%s\n", port_s, wsl_ip);
+        printf("result=ok\tlisten=%s\tport=%s\twsl_ip=%s\n", listen, port_s, wsl_ip);
     else
-        printf("result=err\tmsg=netsh portproxy failed (rc=%d, run as admin)\n", rc);
+        printf("result=err\tmsg=portproxy/firewall failed (rc=%d, approve UAC if prompted)\n",
+               rc);
 #else
-    (void)wsl_ip; (void)port_s;
+    (void)listen_ip;
+    (void)wsl_ip;
+    (void)port_s;
     puts("result=err\tmsg=server-proxy only available on Windows");
 #endif
 }
 
-static void cmd_server_proxy_del(const char *port_s) {
+static void cmd_server_proxy_del(const char *listen_ip, const char *port_s) {
 #if defined(_WIN32)
-    char cmd[256];
-    snprintf(cmd, sizeof(cmd),
-             "netsh interface portproxy delete v4tov4"
-             " listenaddress=0.0.0.0 listenport=%s",
-             port_s);
-    int rc = system(cmd);
+    const char *listen = (listen_ip && listen_ip[0]) ? listen_ip : "0.0.0.0";
+    char        script[768];
+    int         rc;
+
+    snprintf(script, sizeof(script),
+             "netsh interface portproxy delete v4tov4 "
+             "listenaddress=%s listenport=%s\r\n"
+             "Remove-NetFirewallRule -DisplayName 'Flinstone Server %s' "
+             "-ErrorAction SilentlyContinue\r\n",
+             listen, port_s, port_s);
+    rc = run_proxy_ps_script(script);
     if (rc == 0)
-        printf("result=ok\tport=%s\n", port_s);
+        printf("result=ok\tlisten=%s\tport=%s\n", listen, port_s);
     else
-        printf("result=err\tmsg=netsh portproxy delete failed (rc=%d)\n", rc);
+        printf("result=err\tmsg=portproxy/firewall delete failed (rc=%d)\n", rc);
 #else
+    (void)listen_ip;
     (void)port_s;
     puts("result=err\tmsg=server-proxy-del only available on Windows");
 #endif
@@ -938,8 +1010,8 @@ int main(int argc, char **argv) {
                 "  wifi-leave                        Disconnect from current network\n"
                 "  wifi-status                       Show connection state\n"
                 "  server-bridge [<network>] <port> [target]  Relay LAN:<port> → target:<port>\n"
-                "  server-proxy <wsl_ip> <port>      Forward Windows IP:<port> → WSL (admin)\n"
-                "  server-proxy-del <port>           Remove portproxy rule (admin)\n");
+                "  server-proxy [<listen_ip>] <wsl_ip> <port>  Portproxy + firewall (UAC)\n"
+                "  server-proxy-del [<listen_ip>] <port>       Remove portproxy + firewall\n");
         return 1;
     }
 
@@ -973,17 +1045,23 @@ int main(int argc, char **argv) {
         else
             cmd_server_bridge(NULL, argv[2], NULL);
     } else if (strcmp(cmd, "server-proxy") == 0) {
-        if (argc < 4) {
-            fprintf(stderr, "server-proxy: requires <wsl_ip> <port>\n");
+        if (argc >= 5)
+            cmd_server_proxy(argv[2], argv[3], argv[4]);
+        else if (argc >= 4)
+            cmd_server_proxy("0.0.0.0", argv[2], argv[3]);
+        else {
+            fprintf(stderr, "server-proxy: requires [<listen_ip>] <wsl_ip> <port>\n");
             return 1;
         }
-        cmd_server_proxy(argv[2], argv[3]);
     } else if (strcmp(cmd, "server-proxy-del") == 0) {
-        if (argc < 3) {
-            fprintf(stderr, "server-proxy-del: requires <port>\n");
+        if (argc >= 4)
+            cmd_server_proxy_del(argv[2], argv[3]);
+        else if (argc >= 3)
+            cmd_server_proxy_del("0.0.0.0", argv[2]);
+        else {
+            fprintf(stderr, "server-proxy-del: requires [<listen_ip>] <port>\n");
             return 1;
         }
-        cmd_server_proxy_del(argv[2]);
     } else {
         fprintf(stderr, "FlinstonePowershell: unknown command '%s'\n", cmd);
         return 1;
