@@ -38,6 +38,8 @@ void queue_job(job_node *job);
 int queue_job_priority(job_node *job, int priority);
 void submit_single_command(const char *line);
 void submit_single_command_priority(const char *line, int priority);
+/** Interactive shell: Ctrl+C (^C) cancels the in-flight worker job. */
+void submit_single_command_interruptible(const char *line);
 void *worker_thread(void *arg);
 
 #endif /* THREADPOOL_H */

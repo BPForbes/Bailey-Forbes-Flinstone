@@ -81,9 +81,24 @@ static void print_sock_error(const char *verb, fl_result_t rc) {
         fl_color_error("%s failed (rc=%d)", verb, (int)rc);
 }
 
+static void wsl_portproxy_notice_setup(void) {
+    fl_color_warn("NOTICE: Flinstone needs elevated permissions to expose this port "
+                  "to the LAN and will modify Windows port mapping and firewall rules. "
+                  "This is temporary and will be reverted when the server is killed.");
+    fflush(stdout);
+}
+
+static void wsl_portproxy_notice_teardown(void) {
+    fl_color_warn("NOTICE: Flinstone will remove the temporary Windows port mapping "
+                  "and firewall rules (UAC may prompt).");
+    fflush(stdout);
+}
+
 static void wsl_portproxy_teardown(void) {
     if (!g_wsl_portproxy_active)
         return;
+    if (fl_platform_detect() == FL_PLATFORM_WSL)
+        wsl_portproxy_notice_teardown();
     (void)fl_net_wifi_host_linux_server_proxy_del(g_wsl_portproxy_listen,
                                                   g_wsl_portproxy_port);
     g_wsl_portproxy_active = 0;
@@ -101,6 +116,7 @@ static int wsl_portproxy_setup(const char *listen_ip, uint16_t port) {
         return -1;
     if (fl_net_wifi_host_linux_wsl_ipv4(wsl_ip, sizeof(wsl_ip)) != 0)
         return -1;
+    wsl_portproxy_notice_setup();
     if (fl_net_wifi_host_linux_server_proxy(listen_ip, wsl_ip, port) != 0)
         return -1;
     strncpy(g_wsl_portproxy_listen, listen_ip, sizeof(g_wsl_portproxy_listen) - 1u);
