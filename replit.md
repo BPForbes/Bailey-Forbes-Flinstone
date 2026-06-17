@@ -98,7 +98,18 @@ Examples: **`2.2.4` → `2.3.0`** (minor); **`2.3.7` → `3.0.0`** (major); **`2
 
 - On the **first** substantive code change for a pull request, **add** a **new** **`version/entries/A_B_C_slug.ver`** at the **entries root** if the branch has no entry covering **that** PR’s work.
 
-#### 3.9 Merge version checks (incoming → base)
+#### 3.9 PR target branch from `.ver` state (mandatory)
+
+The `.ver` file added by your PR determines which branch to target — using the wrong base causes CI to fail:
+
+| `.ver` state | PR targets | Enforcement |
+|---|---|---|
+| `PRERELEASE=1` + `DEV_VERSION=<N>` | **`develop`** | `check_version_main_prerelease_policy.sh` rejects `PRERELEASE=1` or `DEV_VERSION=` on any `main`-targeted PR |
+| `GM=1` | **`main`** | Only with explicit human-maintainer authorization; Replit Agent must never self-authorize `GM=1` |
+
+**Never open a PR against `main` while the branch `.ver` has `PRERELEASE=1` or `DEV_VERSION=`.** These two states are mutually exclusive merge targets.
+
+#### 3.10 Merge version checks (incoming → base)
 
 Before merging (e.g. **`bug/*` → `develop`**, **`develop` → `main`**):
 

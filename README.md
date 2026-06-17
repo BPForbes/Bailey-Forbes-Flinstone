@@ -117,8 +117,12 @@ flowchart LR
 
 - GCC compiler
 - POSIX-compliant OS (Linux/macOS)
+- Install all external dependencies (build tools, OpenSSL, SQLite, SDL2, tmux, wpa_supplicant, NetworkManager, cross-compiler toolchain, and more) with:
+  ```bash
+  sudo ./scripts/install_deps.sh
+  ```
 - (Optional) CUnit for tests: `apt install libcunit1-dev` or `make deps-cunit`
-- Full package list (including `cmake`, SDL2, cross tools): see [docs/dependencies.md](docs/dependencies.md) and [AGENTS.md](AGENTS.md).
+- Full package list: see [docs/dependencies.md](docs/dependencies.md) and [AGENTS.md](AGENTS.md).
 
 ### Build
 

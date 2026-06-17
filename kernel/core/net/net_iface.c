@@ -167,6 +167,26 @@ int fl_net_iface_suggest_ipv4(uint32_t *addr_be_out, char *buf, size_t buf_len) 
     unsigned i;
     uint32_t pick = 0u;
 
+    /*
+     * On WSL with FlinstonePowershell, LAN peers must use the Windows Wi-Fi
+     * adapter IP (e.g. 192.168.1.236), not the internal eth0 172.x address.
+     */
+    {
+        const char *wip = fl_net_wifi_host_linux_windows_ipv4();
+        if (wip && wip[0]) {
+            uint32_t win_be = 0u;
+            if (fl_net_ipv4_parse_literal(wip, &win_be)) {
+                if (addr_be_out)
+                    *addr_be_out = win_be;
+                if (buf && buf_len > 0u) {
+                    strncpy(buf, wip, buf_len - 1u);
+                    buf[buf_len - 1u] = '\0';
+                }
+                return 1;
+            }
+        }
+    }
+
     count = fl_net_iface_list(entries, FL_NET_IFACE_TABLE_MAX);
     for (i = 0; i < count; i++) {
         if (!(entries[i].flags & FL_NET_IFF_UP))
