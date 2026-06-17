@@ -11,6 +11,9 @@ PRE 4.2.0: WSL server host UAC gate — press any key and deferred hosting line
   portproxy setup succeeds (or bridge fallback succeeds)
 - server kill / leave / exit: same press-any-key gate before portproxy teardown UAC
 - interactive shell: Ctrl+C on an empty input line returns to a fresh shell> prompt
+- review fixes: keypress waits release session_mutex first; tcsetattr failure and
+  non-TTY stdin no longer bypass or block the gate; WSL-local hosting survives LAN
+  exposure failure when defer_hosting defers the success line
 VER_END
 
 RELEASE_DATE=2026-06-17

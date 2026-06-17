@@ -88,42 +88,43 @@ static void wsl_portproxy_press_any_key(void) {
 #if defined(__unix__) || defined(__APPLE__)
     struct termios old_tty;
     struct termios new_tty;
-    unsigned char key = 0u;
+    unsigned char discard;
+
+    if (!isatty(STDIN_FILENO))
+        return;
 #endif
 
     fputs(" Press any key to continue...", stdout);
     fflush(stdout);
 #if defined(__unix__) || defined(__APPLE__)
-    if (isatty(STDIN_FILENO) &&
-        tcgetattr(STDIN_FILENO, &old_tty) == 0) {
+    if (tcgetattr(STDIN_FILENO, &old_tty) == 0) {
         new_tty = old_tty;
         new_tty.c_lflag &= (tcflag_t)~(ICANON | ECHO);
         new_tty.c_cc[VMIN]  = 1;
         new_tty.c_cc[VTIME] = 0;
         if (tcsetattr(STDIN_FILENO, TCSAFLUSH, &new_tty) == 0) {
-            (void)read(STDIN_FILENO, &key, 1);
+            (void)read(STDIN_FILENO, &discard, 1);
             (void)tcsetattr(STDIN_FILENO, TCSAFLUSH, &old_tty);
+        } else {
+            (void)fgetc(stdin);
         }
-    } else
-#endif
-    {
+    } else {
         (void)fgetc(stdin);
     }
+#endif
     fputc('\n', stdout);
     fflush(stdout);
 }
 
-static void wsl_portproxy_notice_setup(void) {
+static void wsl_portproxy_notice_setup_message(void) {
     fl_color_warn("NOTICE: Flinstone needs elevated permissions to expose this port "
                   "to the LAN and will modify Windows port mapping and firewall rules. "
                   "This is temporary and will be reverted when the server is killed.");
-    wsl_portproxy_press_any_key();
 }
 
-static void wsl_portproxy_notice_teardown(void) {
+static void wsl_portproxy_notice_teardown_message(void) {
     fl_color_warn("NOTICE: Flinstone will remove the temporary Windows port mapping "
                   "and firewall rules (UAC may prompt).");
-    wsl_portproxy_press_any_key();
 }
 
 static void host_abort_started_listener(void) {
@@ -137,11 +138,13 @@ static void host_abort_started_listener(void) {
     pthread_mutex_unlock(&session_mutex);
 }
 
-static void wsl_portproxy_teardown(void) {
+static int wsl_portproxy_teardown_wants_notice(void) {
+    return g_wsl_portproxy_active && fl_platform_detect() == FL_PLATFORM_WSL;
+}
+
+static void wsl_portproxy_teardown_apply(void) {
     if (!g_wsl_portproxy_active)
         return;
-    if (fl_platform_detect() == FL_PLATFORM_WSL)
-        wsl_portproxy_notice_teardown();
     (void)fl_net_wifi_host_linux_server_proxy_del(g_wsl_portproxy_listen,
                                                   g_wsl_portproxy_port);
     g_wsl_portproxy_active = 0;
@@ -150,8 +153,9 @@ static void wsl_portproxy_teardown(void) {
 }
 
 /* On WSL, add Windows portproxy + firewall for listen_ip:port → wsl_ip:port.
- * Caller must print wsl_portproxy_notice_setup() (and collect the keypress)
- * before invoking this when UAC elevation is required. */
+ * Caller must print wsl_portproxy_notice_setup_message() and collect the
+ * keypress via wsl_portproxy_press_any_key() before invoking this when UAC
+ * elevation is required. */
 static int wsl_portproxy_apply(const char *listen_ip, uint16_t port) {
     char wsl_ip[32];
 
@@ -688,9 +692,29 @@ static int verb_host(int argc, char **argv) {
                                                     listen_ip, sizeof(listen_ip));
         int defer_hosting = wsl_portproxy_will_try(&bind_ep, win_ip_display);
 
+        /* Show NOTICE before unlock; collect keypress after unlock so other
+         * session paths are not blocked on session_mutex during user input. */
         if (defer_hosting)
-            wsl_portproxy_notice_setup();
+            wsl_portproxy_notice_setup_message();
+        pthread_mutex_unlock(&session_mutex);
 
+        if (defer_hosting)
+            wsl_portproxy_press_any_key();
+
+        pthread_mutex_lock(&session_mutex);
+        if (g_server_running) {
+            pthread_mutex_unlock(&session_mutex);
+            fl_color_error("server already hosting");
+            return 1;
+        }
+        if (fl_net_client_state(&g_client) == FL_NET_CLIENT_STATE_CONNECTED) {
+            pthread_mutex_unlock(&session_mutex);
+            fl_color_error("already joined a server; leave first");
+            return 1;
+        }
+
+        /* Keypress precedes bind so the user can read NOTICE before UAC; if
+         * bind fails afterward, no elevation was attempted (known trade-off). */
         rc = fl_net_server_host_start_ep(&g_server, &bind_ep, current_principal());
         if (rc == FL_RESULT_NOSYS) {
             pthread_mutex_unlock(&session_mutex);
@@ -779,11 +803,13 @@ static int verb_host(int argc, char **argv) {
                                          wip, (unsigned)bind_ep.port_host);
                     } else {
                         if (defer_hosting) {
-                            fl_color_error("server host failed: could not expose port %u to "
-                                           "the LAN (portproxy and bridge both failed)",
-                                           (unsigned)bind_ep.port_host);
-                            host_abort_started_listener();
-                            return 1;
+                            char bind_txt[128];
+                            if (fl_net_endpoint_format(&bind_ep, bind_txt, sizeof(bind_txt)))
+                                fl_color_success("hosting as '%s' on %s",
+                                                 current_principal(), bind_txt);
+                            else
+                                fl_color_success("hosting as '%s' on %s",
+                                                 current_principal(), argv[2]);
                         }
                         fl_color_error("server running WSL-local only (LAN unreachable): "
                                        "portproxy and bridge both failed");
@@ -900,8 +926,15 @@ static int verb_leave(void) {
         }
         (void)fl_net_server_transfer_and_stop(&g_server, &new_host);
         g_server_running = 0;
-        wsl_portproxy_teardown();
-        pthread_mutex_unlock(&session_mutex);
+        {
+            int needs_key = wsl_portproxy_teardown_wants_notice();
+            if (needs_key)
+                wsl_portproxy_notice_teardown_message();
+            pthread_mutex_unlock(&session_mutex);
+            if (needs_key)
+                wsl_portproxy_press_any_key();
+            wsl_portproxy_teardown_apply();
+        }
         if (new_host == FL_NET_SERVER_MEMBER_ID_NONE) {
             fl_color_success("session terminated (no remaining members)");
         }
@@ -938,8 +971,15 @@ static int verb_kill(void) {
     }
     fl_net_server_host_stop(&g_server);
     g_server_running = 0;
-    wsl_portproxy_teardown();
-    pthread_mutex_unlock(&session_mutex);
+    {
+        int needs_key = wsl_portproxy_teardown_wants_notice();
+        if (needs_key)
+            wsl_portproxy_notice_teardown_message();
+        pthread_mutex_unlock(&session_mutex);
+        if (needs_key)
+            wsl_portproxy_press_any_key();
+        wsl_portproxy_teardown_apply();
+    }
     fl_color_success("session terminated");
     return 0;
 }
@@ -1258,8 +1298,15 @@ void cmd_server_atexit(void) {
         }
         (void)fl_net_server_transfer_and_stop(&g_server, &new_host);
         g_server_running = 0;
-        wsl_portproxy_teardown();
-        pthread_mutex_unlock(&session_mutex);
+        {
+            int needs_key = wsl_portproxy_teardown_wants_notice();
+            if (needs_key)
+                wsl_portproxy_notice_teardown_message();
+            pthread_mutex_unlock(&session_mutex);
+            if (needs_key)
+                wsl_portproxy_press_any_key();
+            wsl_portproxy_teardown_apply();
+        }
         return;
     }
     if (fl_net_client_state(&g_client) == FL_NET_CLIENT_STATE_CONNECTED) {
