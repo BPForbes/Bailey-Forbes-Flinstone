@@ -544,7 +544,8 @@ void interactive_shell(void) {
                 }
             }
         }
-        enable_raw_mode();
+        if (shell_running)
+            enable_raw_mode();
     }
     disable_raw_mode();
     free_history(g_interactive_history, g_interactive_history_count);

@@ -1,0 +1,14 @@
+MAJOR_VERSION=4
+STANDARD_VERSION=2
+RELEASE_VERSION=0
+PRERELEASE=1
+DEV_VERSION=15
+DESCRIPTION<<VER_END
+PRE 4.2.0: WSL server host UAC gate — press any key and deferred hosting line
+
+- server host on WSL: yellow elevation NOTICE plus "Press any key to continue..."
+  before the Windows UAC prompt; "[Server] hosting as ..." prints only after
+  portproxy setup succeeds (or bridge fallback succeeds)
+- server kill / leave / exit: same press-any-key gate before portproxy teardown UAC
+- interactive shell: Ctrl+C on an empty input line returns to a fresh shell> prompt
+VER_END
