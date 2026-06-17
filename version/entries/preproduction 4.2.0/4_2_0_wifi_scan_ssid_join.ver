@@ -36,11 +36,13 @@ Security and correctness fixes
 - threadpool: switch async pthread_cancel to deferred cancellation; move pthread_cancel out
   of signal handler (not async-signal-safe) into main-thread context; add _POSIX_C_SOURCE
 - cmd_wifi: scrub cred.passphrase on all early-return failure paths after passphrase copy
+  (goto cleanup pattern covers NOSYS/NOENT/INVAL/TIMEDOUT/generic failure)
 - net_wifi_host_linux: shell_single_quote listen_ip/wsl_ip in portproxy popen/run_flinstone_ps
   calls; explicit null-termination after strncpy for scan fields and IPv4 buffer; FLINSTONE_LINUX
   backend now calls refresh_flinstone_helper_status in connection wait loop
 - FlinstonePowershell: fix RSN IE pairwise count offset (body[6..7] not body[4..5]); fix
-  6 GHz channel formula (remove erroneous +1); validate IPv4/port before elevated portproxy script
+  6 GHz channel formula (remove erroneous +1; lower bound 5935→5955 avoids ULONG underflow);
+  validate IPv4/port before elevated portproxy script
 - FlinstoneLinuxNet: fix "disconnected" false positive in state substring match
 - network_bridge.py: shlex.quote fps path in env-export to handle spaces/special chars
 

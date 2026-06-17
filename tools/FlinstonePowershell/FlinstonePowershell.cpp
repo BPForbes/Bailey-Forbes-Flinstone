@@ -236,8 +236,9 @@ static int chan_from_khz(ULONG freq_khz) {
     if (mhz >= 5160 && mhz <= 5885)
         return (int)((mhz - 5000) / 5);
 
-    /* 6 GHz band: 5955 MHz = ch1, 5 MHz steps (no +1: (5955-5950)/5 = 1) */
-    if (mhz >= 5935 && mhz <= 7115)
+    /* 6 GHz band: 5955 MHz = ch1, 5 MHz steps; lower bound >=5955 avoids
+     * unsigned underflow (ULONG): (5935-5950) wraps on unsigned arithmetic. */
+    if (mhz >= 5955 && mhz <= 7115)
         return (int)((mhz - 5950) / 5);
 
     return 0;

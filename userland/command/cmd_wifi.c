@@ -318,21 +318,18 @@ static int cmd_wifi_join(int argc, char **argv) {
     }
     if (rc == FL_RESULT_NOSYS) {
         fputs("wifi join: no Wi-Fi backend (need wpa_supplicant on FL_NET_WIFI_IFACE or lab mode)\n", stderr);
-        fl_wifi_db_close();
-        return 1;
+        goto cleanup;
     }
     /* NOENT is structurally unreachable today: the lab path synthesises an AP
      * entry so connect never returns NOENT, and the host path returns ERR on
      * nmcli/wpa_cli failure.  Kept as a safety net for future backends. */
     if (rc == FL_RESULT_NOENT) {
         fprintf(stderr, "wifi join: network '%s' not found\n", name);
-        fl_wifi_db_close();
-        return 1;
+        goto cleanup;
     }
     if (rc == FL_RESULT_INVAL) {
         fputs("wifi join: password required for secured network\n", stderr);
-        fl_wifi_db_close();
-        return 1;
+        goto cleanup;
     }
     if (rc == FL_RESULT_TIMEDOUT) {
         const char *iface = fl_net_wifi_host_linux_iface();
@@ -344,13 +341,11 @@ static int cmd_wifi_join(int argc, char **argv) {
                 "  On Raspberry Pi: ensure wpa_supplicant is running for %s,\n"
                 "  or use NetworkManager (nmcli) instead.\n",
                 iface, iface, iface);
-        fl_wifi_db_close();
-        return 1;
+        goto cleanup;
     }
     if (rc != FL_RESULT_OK) {
         fprintf(stderr, "wifi join: failed (%d)\n", (int)rc);
-        fl_wifi_db_close();
-        return 1;
+        goto cleanup;
     }
     (void)fl_wifi_db_mark_joined(name, 1);
     fl_net_wifi_cred_scrub_passphrase(&cred);
@@ -383,6 +378,10 @@ static int cmd_wifi_join(int argc, char **argv) {
     }
     fl_wifi_db_close();
     return 0;
+cleanup:
+    fl_net_wifi_cred_scrub_passphrase(&cred);
+    fl_wifi_db_close();
+    return 1;
 }
 
 
