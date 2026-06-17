@@ -698,8 +698,10 @@ static int verb_host(int argc, char **argv) {
                                                               bind_ep.port_host);
             if (port_free == 0) {
                 pthread_mutex_unlock(&session_mutex);
-                fl_color_error("server host failed: Windows port %u on %s is already "
-                               "in use (choose another port or run server kill)",
+                fl_color_error("server host failed: Windows portproxy or firewall "
+                               "for port %u is already configured on %s "
+                               "(run server kill to remove stale rules, or choose "
+                               "another port)",
                                (unsigned)bind_ep.port_host, listen);
                 return 1;
             }

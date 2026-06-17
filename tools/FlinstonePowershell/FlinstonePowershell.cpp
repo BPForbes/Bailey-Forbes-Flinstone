@@ -973,54 +973,44 @@ static int run_proxy_ps_script(const char *body) {
 static void cmd_server_proxy_check(const char *listen_ip, const char *port_s) {
 #if defined(_WIN32)
     const char *listen = (listen_ip && listen_ip[0]) ? listen_ip : "0.0.0.0";
+    char        cmd[2048];
+    char        line[64];
+    FILE       *fp;
 
     if (!is_valid_ipv4(listen) || !is_valid_port(port_s)) {
         puts("result=err\tmsg=invalid IP address or port number");
         return;
     }
 
-    WSADATA wsa;
-    if (WSAStartup(MAKEWORD(2, 2), &wsa) != 0) {
-        printf("result=err\tmsg=WSAStartup failed (%d)\n", WSAGetLastError());
+    /* Match the manual WSL check: stale Flinstone portproxy rows or the
+     * inbound firewall rule — not a TCP bind probe (WSL mirroring and other
+     * listeners can make bind() look busy even when portproxy is absent). */
+    snprintf(cmd, sizeof(cmd),
+             "powershell.exe -NoProfile -Command "
+             "\"if ((netsh interface portproxy show v4tov4 | findstr %s) -or "
+             "(Get-NetFirewallRule -DisplayName 'Flinstone Server %s' "
+             "-ErrorAction SilentlyContinue)) { 'exists' } else { 'missing' }\"",
+             port_s, port_s);
+
+    fp = _popen(cmd, "r");
+    if (!fp) {
+        puts("result=err\tmsg=portproxy check spawn failed");
         return;
     }
-
-    SOCKET lsock = socket(AF_INET, SOCK_STREAM, IPPROTO_TCP);
-    if (lsock == INVALID_SOCKET) {
-        printf("result=err\tmsg=socket failed (%d)\n", WSAGetLastError());
-        WSACleanup();
+    line[0] = '\0';
+    if (!fgets(line, sizeof(line), fp)) {
+        (void)_pclose(fp);
+        puts("result=err\tmsg=portproxy check produced no output");
         return;
     }
+    (void)_pclose(fp);
 
-    struct sockaddr_in addr;
-    memset(&addr, 0, sizeof(addr));
-    addr.sin_family = AF_INET;
-    if (strcmp(listen, "0.0.0.0") == 0) {
-        addr.sin_addr.s_addr = INADDR_ANY;
-    } else {
-        addr.sin_addr.s_addr = inet_addr(listen);
-        if (addr.sin_addr.s_addr == INADDR_NONE) {
-            printf("result=err\tmsg=invalid listen address '%s'\n", listen);
-            closesocket(lsock);
-            WSACleanup();
-            return;
-        }
-    }
-    addr.sin_port = htons((USHORT)atoi(port_s));
-
-    if (bind(lsock, (struct sockaddr *)&addr, sizeof(addr)) == SOCKET_ERROR) {
-        int err = WSAGetLastError();
-        closesocket(lsock);
-        WSACleanup();
-        if (err == WSAEADDRINUSE)
-            printf("result=busy\tlisten=%s\tport=%s\n", listen, port_s);
-        else
-            printf("result=err\tmsg=bind probe failed (%d)\n", err);
-        return;
-    }
-    closesocket(lsock);
-    WSACleanup();
-    printf("result=ok\tlisten=%s\tport=%s\n", listen, port_s);
+    if (strstr(line, "exists") != NULL)
+        printf("result=busy\tlisten=%s\tport=%s\n", listen, port_s);
+    else if (strstr(line, "missing") != NULL)
+        printf("result=ok\tlisten=%s\tport=%s\n", listen, port_s);
+    else
+        puts("result=err\tmsg=portproxy check unrecognized output");
 #else
     (void)listen_ip;
     (void)port_s;
@@ -1104,7 +1094,7 @@ int main(int argc, char **argv) {
                 "  wifi-status                       Show connection state\n"
                 "  server-bridge [<network>] <port> [target]  Relay LAN:<port> → target:<port>\n"
                 "  server-proxy [<listen_ip>] <wsl_ip> <port>  Portproxy + firewall (UAC)\n"
-                "  server-proxy-check [<listen_ip>] <port>     Probe Windows listen port\n"
+                "  server-proxy-check [<listen_ip>] <port>     Probe portproxy/firewall\n"
                 "  server-proxy-del [<listen_ip>] <port>       Remove portproxy + firewall\n");
         return 1;
     }

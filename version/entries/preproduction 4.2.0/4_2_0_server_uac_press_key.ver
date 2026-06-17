@@ -14,8 +14,8 @@ PRE 4.2.0: WSL server host UAC gate — press any key and deferred hosting line
 - review fixes: keypress waits release session_mutex first; tcsetattr failure and
   non-TTY stdin no longer bypass or block the gate; WSL-local hosting survives LAN
   exposure failure when defer_hosting defers the success line
-- server host on WSL: probe Windows listen port via server-proxy-check before
-  NOTICE/UAC when portproxy elevation is required
+- server host on WSL: probe Windows portproxy/firewall via server-proxy-check
+  before NOTICE/UAC when portproxy elevation is required (not a TCP bind probe)
 VER_END
 
 RELEASE_DATE=2026-06-17

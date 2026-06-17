@@ -91,9 +91,9 @@ int fl_net_wifi_host_linux_server_proxy(const char *listen_ip, const char *wsl_i
                                         uint16_t port);
 
 /**
- * Probe whether listen_ip:<port> is free on the Windows host for portproxy.
- * Returns 1 when free (result=ok), 0 when busy (result=busy), -1 when the
- * check could not be run (wrong backend, missing helper, probe error).
+ * Probe whether Flinstone portproxy / firewall rules already exist for
+ * listen_ip:<port> on the Windows host. Returns 1 when clear (result=ok),
+ * 0 when configured (result=busy), -1 when the check could not be run.
  */
 int fl_net_wifi_host_linux_server_proxy_port_free(const char *listen_ip, uint16_t port);
 
