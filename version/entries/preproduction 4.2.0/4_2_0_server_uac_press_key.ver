@@ -16,6 +16,8 @@ PRE 4.2.0: WSL server host UAC gate — press any key and deferred hosting line
   exposure failure when defer_hosting defers the success line
 - server host on WSL: probe Windows portproxy/firewall via server-proxy-check
   before NOTICE/UAC when portproxy elevation is required (not a TCP bind probe)
+- FlinstonePowershell server-proxy: netsh-only via elevated cmd.exe (no temp
+  PowerShell scripts or New-NetFirewallRule module load) for faster UAC apply
 VER_END
 
 RELEASE_DATE=2026-06-17

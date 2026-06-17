@@ -44,8 +44,10 @@
 #include <ws2tcpip.h>
 #define WIN32_LEAN_AND_MEAN
 #include <windows.h>
+#include <shellapi.h>
 #include <wlanapi.h>
 #include <iphlpapi.h>
+#pragma comment(lib, "shell32.lib")
 #pragma comment(lib, "wlanapi.lib")
 #pragma comment(lib, "ole32.lib")
 #pragma comment(lib, "iphlpapi.lib")
@@ -911,7 +913,7 @@ static void cmd_server_bridge(const char *bind_ip, const char *port_s,
  * Windows netsh portproxy + inbound firewall rule so LAN peers can reach a
  * TCP server bound inside WSL.  listen_ip is the address the user passed to
  * `server host <local-ip>:<port>` (often the Windows Wi-Fi IP); wsl_ip is
- * the WSL eth0 address from `hostname -I`.  Elevates via PowerShell RunAs
+ * the WSL eth0 address from `hostname -I`.  Elevates via cmd.exe RunAs
  * when the current process is not already administrator.
  * ---------------------------------------------------------------------- */
 
@@ -930,87 +932,89 @@ static bool process_is_elevated(void) {
     return elevated != FALSE;
 }
 
-static int run_powershell_script_file(const char *script_path, bool elevate) {
-    char cmd[2048];
+static int run_cmd_batch(const char *batch) {
+    char cmdline[2304];
 
-    if (elevate) {
-        snprintf(cmd, sizeof(cmd),
-                 "powershell.exe -NoProfile -Command \""
-                 "Start-Process powershell.exe -Verb RunAs -Wait "
-                 "-ArgumentList '-NoProfile','-ExecutionPolicy','Bypass','-File','%s'\"",
-                 script_path);
-    } else {
-        snprintf(cmd, sizeof(cmd),
-                 "powershell.exe -NoProfile -ExecutionPolicy Bypass -File \"%s\"",
-                 script_path);
+    if (process_is_elevated()) {
+        snprintf(cmdline, sizeof(cmdline), "cmd.exe /c \"%s\"", batch);
+        return system(cmdline);
     }
-    return system(cmd);
+    {
+        SHELLEXECUTEINFOA sei = {};
+        char             params[2304];
+        DWORD            exit_code = 1;
+
+        snprintf(params, sizeof(params), "/c \"%s\"", batch);
+        sei.cbSize       = sizeof(sei);
+        sei.fMask        = SEE_MASK_NOCLOSEPROCESS | SEE_MASK_FLAG_NO_UI;
+        sei.lpVerb       = "runas";
+        sei.lpFile       = "cmd.exe";
+        sei.lpParameters = params;
+        sei.nShow        = SW_HIDE;
+        if (!ShellExecuteExA(&sei))
+            return -1;
+        if (!sei.hProcess)
+            return -1;
+        WaitForSingleObject(sei.hProcess, INFINITE);
+        if (!GetExitCodeProcess(sei.hProcess, &exit_code))
+            exit_code = 1;
+        CloseHandle(sei.hProcess);
+        return (int)exit_code;
+    }
 }
 
-static int run_proxy_ps_script(const char *body) {
-    char temp_dir[MAX_PATH];
-    char temp_path[MAX_PATH];
-    FILE *fp;
-    int   rc;
+static int portproxy_table_has_port(const char *port_s) {
+    FILE *fp = _popen("netsh interface portproxy show v4tov4", "r");
+    char  line[256];
 
-    if (!GetTempPathA(sizeof(temp_dir), temp_dir))
-        return -1;
-    snprintf(temp_path, sizeof(temp_path), "%sflinstone_proxy_%lu.ps1",
-             temp_dir, (unsigned long)GetTickCount());
-
-    fp = fopen(temp_path, "w");
     if (!fp)
-        return -1;
-    fputs(body, fp);
-    fclose(fp);
+        return 0;
+    while (fgets(line, sizeof(line), fp)) {
+        if (strstr(line, port_s) != NULL) {
+            (void)_pclose(fp);
+            return 1;
+        }
+    }
+    (void)_pclose(fp);
+    return 0;
+}
 
-    rc = run_powershell_script_file(temp_path, !process_is_elevated());
-    DeleteFileA(temp_path);
-    return rc;
+static int flinstone_firewall_rule_exists(const char *port_s) {
+    char  cmd[384];
+    char  line[512];
+    FILE *fp;
+    int   found = 0;
+
+    snprintf(cmd, sizeof(cmd),
+             "netsh advfirewall firewall show rule name=\"Flinstone Server %s\"",
+             port_s);
+    fp = _popen(cmd, "r");
+    if (!fp)
+        return 0;
+    while (fgets(line, sizeof(line), fp)) {
+        if (strstr(line, "No rules match") != NULL)
+            break;
+        if (strstr(line, "Flinstone Server") != NULL)
+            found = 1;
+    }
+    (void)_pclose(fp);
+    return found;
 }
 #endif /* _WIN32 */
 
 static void cmd_server_proxy_check(const char *listen_ip, const char *port_s) {
 #if defined(_WIN32)
     const char *listen = (listen_ip && listen_ip[0]) ? listen_ip : "0.0.0.0";
-    char        cmd[2048];
-    char        line[64];
-    FILE       *fp;
 
     if (!is_valid_ipv4(listen) || !is_valid_port(port_s)) {
         puts("result=err\tmsg=invalid IP address or port number");
         return;
     }
 
-    /* Match the manual WSL check: stale Flinstone portproxy rows or the
-     * inbound firewall rule — not a TCP bind probe (WSL mirroring and other
-     * listeners can make bind() look busy even when portproxy is absent). */
-    snprintf(cmd, sizeof(cmd),
-             "powershell.exe -NoProfile -Command "
-             "\"if ((netsh interface portproxy show v4tov4 | findstr %s) -or "
-             "(Get-NetFirewallRule -DisplayName 'Flinstone Server %s' "
-             "-ErrorAction SilentlyContinue)) { 'exists' } else { 'missing' }\"",
-             port_s, port_s);
-
-    fp = _popen(cmd, "r");
-    if (!fp) {
-        puts("result=err\tmsg=portproxy check spawn failed");
-        return;
-    }
-    line[0] = '\0';
-    if (!fgets(line, sizeof(line), fp)) {
-        (void)_pclose(fp);
-        puts("result=err\tmsg=portproxy check produced no output");
-        return;
-    }
-    (void)_pclose(fp);
-
-    if (strstr(line, "exists") != NULL)
+    if (portproxy_table_has_port(port_s) || flinstone_firewall_rule_exists(port_s))
         printf("result=busy\tlisten=%s\tport=%s\n", listen, port_s);
-    else if (strstr(line, "missing") != NULL)
-        printf("result=ok\tlisten=%s\tport=%s\n", listen, port_s);
     else
-        puts("result=err\tmsg=portproxy check unrecognized output");
+        printf("result=ok\tlisten=%s\tport=%s\n", listen, port_s);
 #else
     (void)listen_ip;
     (void)port_s;
@@ -1022,7 +1026,7 @@ static void cmd_server_proxy(const char *listen_ip, const char *wsl_ip,
                              const char *port_s) {
 #if defined(_WIN32)
     const char *listen = (listen_ip && listen_ip[0]) ? listen_ip : "0.0.0.0";
-    char        script[1024];
+    char        batch[1024];
     int         rc;
 
     if (!is_valid_ipv4(listen) || !is_valid_ipv4(wsl_ip) || !is_valid_port(port_s)) {
@@ -1030,14 +1034,14 @@ static void cmd_server_proxy(const char *listen_ip, const char *wsl_ip,
         return;
     }
 
-    snprintf(script, sizeof(script),
+    /* netsh only — avoids slow PowerShell module load (New-NetFirewallRule). */
+    snprintf(batch, sizeof(batch),
              "netsh interface portproxy add v4tov4 "
-             "listenaddress=%s listenport=%s connectaddress=%s connectport=%s\r\n"
-             "New-NetFirewallRule -DisplayName 'Flinstone Server %s' "
-             "-Direction Inbound -Protocol TCP -LocalPort %s -Action Allow "
-             "-ErrorAction SilentlyContinue\r\n",
+             "listenaddress=%s listenport=%s connectaddress=%s connectport=%s && "
+             "netsh advfirewall firewall add rule name=\"Flinstone Server %s\" "
+             "dir=in action=allow protocol=TCP localport=%s",
              listen, port_s, wsl_ip, port_s, port_s, port_s);
-    rc = run_proxy_ps_script(script);
+    rc = run_cmd_batch(batch);
     if (rc == 0)
         printf("result=ok\tlisten=%s\tport=%s\twsl_ip=%s\n", listen, port_s, wsl_ip);
     else
@@ -1054,16 +1058,15 @@ static void cmd_server_proxy(const char *listen_ip, const char *wsl_ip,
 static void cmd_server_proxy_del(const char *listen_ip, const char *port_s) {
 #if defined(_WIN32)
     const char *listen = (listen_ip && listen_ip[0]) ? listen_ip : "0.0.0.0";
-    char        script[768];
+    char        batch[768];
     int         rc;
 
-    snprintf(script, sizeof(script),
+    snprintf(batch, sizeof(batch),
              "netsh interface portproxy delete v4tov4 "
-             "listenaddress=%s listenport=%s\r\n"
-             "Remove-NetFirewallRule -DisplayName 'Flinstone Server %s' "
-             "-ErrorAction SilentlyContinue\r\n",
+             "listenaddress=%s listenport=%s & "
+             "netsh advfirewall firewall delete rule name=\"Flinstone Server %s\"",
              listen, port_s, port_s);
-    rc = run_proxy_ps_script(script);
+    rc = run_cmd_batch(batch);
     if (rc == 0)
         printf("result=ok\tlisten=%s\tport=%s\n", listen, port_s);
     else
