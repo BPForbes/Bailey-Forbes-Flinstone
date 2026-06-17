@@ -321,7 +321,10 @@ async def _relay(reader: asyncio.StreamReader, writer: asyncio.StreamWriter) -> 
         pass
     finally:
         try:
+            if writer.can_write_eof():
+                writer.write_eof()
             writer.close()
+            await writer.wait_closed()
         except OSError:
             pass
 

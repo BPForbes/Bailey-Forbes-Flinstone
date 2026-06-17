@@ -300,7 +300,7 @@ static int bridge_relay(int a, int b)
     return 0;
 }
 
-static void handle_client(int client, const char *target, uint16_t port)
+[[noreturn]] static void handle_client(int client, const char *target, uint16_t port)
 {
     int upstream = socket(AF_INET, SOCK_STREAM, 0);
     if (upstream < 0) {
