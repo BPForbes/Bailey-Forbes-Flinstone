@@ -26,6 +26,8 @@ WSL LAN server (portproxy + firewall)
 - server host binds in WSL (0.0.0.0 when user passes Windows Wi-Fi IP); peers use the
   router-assigned Windows address (e.g. 192.168.1.x), not the internal 172.x eth0 NAT
 - explicit WSL-local-only error when portproxy and bridge both fail
+- server host surfaces Windows Wi-Fi IP and LAN peer-join hints; wifi join now prints
+  only SSID, state, and wlan0 IP (hosting guidance moved to server host context)
 
 Interactive shell
 - Ctrl+C (^C) at the prompt clears the current input line; during command execution ^C
@@ -51,5 +53,3 @@ Server / networking (P3-13)
   net_iface IPv4/IPv6; Linux P4 Wi-Fi driver backend; security fixes (shell-escape SSID,
   sparse file-transfer chunks); net_sock_native brace fix; ARM net_file_delivery.h prototypes
 VER_END
-
-RELEASE_DATE=2026-06-17

@@ -352,30 +352,13 @@ static int cmd_wifi_join(int argc, char **argv) {
     printf("wifi join: associated with '%s' (state %d", name, (int)fl_net_wifi_state());
     if (fl_net_wifi_netdev_is_up()) {
         char peer_ip[32];
-        char wsl_ip[32];
         uint32_t peer_be = 0u;
-        uint32_t wsl_be = 0u;
-        if (wifi_peer_ipv4(peer_ip, sizeof(peer_ip), &peer_be)) {
-            const char *wip = fl_net_wifi_host_linux_windows_ipv4();
-            printf(", wlan0 %s — peers: server join %s:<port>", peer_ip, peer_ip);
-            if (wip && fl_net_wifi_netdev_ipv4(&wsl_be) == FL_RESULT_OK &&
-                wsl_be != 0u && wip[0]) {
-                fl_net_ipv4_format_addr(wsl_be, wsl_ip, sizeof(wsl_ip));
-                if (strcmp(wsl_ip, peer_ip) != 0)
-                    printf("\nwifi join: WSL eth0 %s (internal; LAN uses %s above)",
-                           wsl_ip, peer_ip);
-            }
-        }
+        if (wifi_peer_ipv4(peer_ip, sizeof(peer_ip), &peer_be))
+            printf(", wlan0 %s", peer_ip);
     } else if (fl_net_wifi_station_netdev() != NULL) {
         fputs(", wlan0 netdev UP", stdout);
     }
     puts(")");
-    {
-        const char *win_ip = fl_net_wifi_host_linux_windows_ipv4();
-        if (win_ip)
-            printf("wifi join: Windows Wi-Fi IP %s — use server host :<port> for LAN access\n",
-                   win_ip);
-    }
     fl_wifi_db_close();
     return 0;
 cleanup:
