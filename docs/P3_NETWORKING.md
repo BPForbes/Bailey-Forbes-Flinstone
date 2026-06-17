@@ -331,9 +331,17 @@ Shell verbs live in **`userland/command/cmd_wifi.c`**. Saved router profiles use
 | **`FL_NET_WIFI_WPA_CLI`** | `wpa_cli` | Path to **`wpa_cli`** when **`wpa_supplicant`** owns the interface. |
 | **`FL_NET_WIFI_NMCLI`** | `nmcli` | Path to **`nmcli`** when NetworkManager manages Wi‑Fi. |
 | **`FL_NET_WIFI_USE_WPA`** | unset | **`1`** — force **`wpa_cli`** only; **`0`** — force in-tree lab simulation; unset — try **`wpa_cli`**, then **`nmcli`**. |
+| **`FL_NET_WIFI_FLINSTONE_PS`** | auto | WSL/Windows helper path. Auto-discovery checks **`tools/FlinstonePowershell/FlinstonePowershell.exe`** and then **`PATH`**. |
+| **`FL_NET_WIFI_FLINSTONE_LINUX`** | auto | Native Linux helper path. Auto-discovery checks **`tools/FlinstoneLinuxNet/FlinstoneLinuxNet`** and then **`PATH`**. Build with **`make flinstone-linux-net`**. |
+| **`FL_NET_WIFI_BRIDGE_TARGET`** | `127.0.0.1` | Target IP for **`server-bridge`** relays. Use a VM guest address such as **`10.0.2.15`** when the Flinstone server is inside a VM. |
+| **`FL_NET_WIFI_BRIDGE_PY`** | `tools/network_bridge.py` | Optional Python bridge companion used when the compiled helper is not active. |
 | **`FL_WIFI_DB_PATH`** | see below | Override SQLite profile DB location. |
 
 **Profile database:** tries **`FL_WIFI_DB_PATH`**, then repo-relative **`userland/shell/fl_wifi.db`**, then **`~/.local/share/BPForbes_Flinstone_Shell/fl_wifi.db`**, then **`/tmp/fl_wifi.db`**.
+
+**WSL/LAN server bridge:** build the Windows helper with **`make flinstone-ps-windows`**. From WSL, **`server host -all 7777`** advertises the router-assigned Windows Wi-Fi IP when **`wifi-status`** reports it, and starts **`FlinstonePowershell.exe server-bridge <windows-ip> 7777 127.0.0.1`**. For an embedded VM target, set **`FL_NET_WIFI_BRIDGE_TARGET=10.0.2.15`** before hosting, or run **`FlinstonePowershell.exe server-bridge 192.168.1.235 7777 10.0.2.15`** directly. The Python companion accepts the same shape: **`python3 tools/network_bridge.py 192.168.1.235 7777 10.0.2.15`**.
+
+**Native Linux helper:** build **`tools/FlinstoneLinuxNet/FlinstoneLinuxNet`** with **`make flinstone-linux-net`**. It provides the same helper commands as the Windows bridge for Linux hosts: **`wifi-scan`**, **`wifi-join`**, **`wifi-leave`**, **`wifi-status`**, and **`server-bridge [bind_ip] <port> [target_ip]`**. Wi-Fi uses **`nmcli`**; override with **`FL_NET_WIFI_NMCLI`** and **`FL_NET_WIFI_IFACE`**. The shell auto-detects the in-tree ELF when present unless **`FL_NET_WIFI_USE_WPA=0`** forces lab mode or **`FL_NET_WIFI_USE_WPA=1`** forces direct **`wpa_cli`**.
 
 **Prerequisites (Linux, real scan):** install **`network-manager`** and/or **`wpasupplicant`** so **`nmcli`** or **`wpa_cli`** is on **`PATH`**. Requires **`FL_AUTHZ_OP_NETDEV_IO`** (shell grants this on hosted builds). **macOS/Windows** and container/CI environments without a Wi‑Fi netdev always use the lab list.
 

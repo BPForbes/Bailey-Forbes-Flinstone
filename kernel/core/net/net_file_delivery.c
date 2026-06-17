@@ -1292,16 +1292,19 @@ fl_result_t fl_net_file_store_chunk(const uint8_t *payload, uint16_t plen)
         return FL_RESULT_NOENT;
     if (share_access_ok(&slot->offer, (uint64_t)time(NULL)) != FL_RESULT_OK)
         return FL_RESULT_ACCES;
+    if (chunk.file_offset != (uint64_t)slot->file_len)
+        return FL_RESULT_INVAL;
     end = (size_t)chunk.file_offset + (size_t)data.len;
     if (end > FL_SERVER_FILE_MAX_BYTES)
         return FL_RESULT_NOMEM;
+    if (slot->offer.file_size > 0u && end > (size_t)slot->offer.file_size)
+        return FL_RESULT_INVAL;
     rc = share_slot_ensure_cap(slot, end);
     if (rc != FL_RESULT_OK)
         return rc;
     if (data.len > 0u && data.data)
         memcpy(slot->file_data + chunk.file_offset, data.data, data.len);
-    if (end > slot->file_len)
-        slot->file_len = end;
+    slot->file_len = end;
     return FL_RESULT_OK;
 }
 

@@ -59,6 +59,25 @@ fl_result_t fl_net_file_send_meta(fl_net_server_t *srv,
 
 fl_result_t fl_net_file_store_meta(const uint8_t *payload, uint16_t plen);
 
+fl_result_t fl_file_packet_encode_accept(const char *share_id,
+                                         uint16_t receiver_member_id,
+                                         fl_server_file_disposition_t disposition,
+                                         uint8_t *out,
+                                         uint16_t out_cap,
+                                         uint16_t *out_len);
+
+fl_result_t fl_file_packet_encode_decline(const char *share_id,
+                                          uint16_t receiver_member_id,
+                                          uint8_t *out,
+                                          uint16_t out_cap,
+                                          uint16_t *out_len);
+
+fl_result_t fl_file_packet_encode_revoke(const char *share_id,
+                                         uint16_t owner_member_id,
+                                         uint8_t *out,
+                                         uint16_t out_cap,
+                                         uint16_t *out_len);
+
 /** Host: validate and retain in-flight MSG_META (not forwarded to peers). */
 fl_result_t fl_net_msg_host_handle_meta(fl_net_server_member_id_t sender_id,
                                         const uint8_t *payload,

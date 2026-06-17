@@ -125,6 +125,7 @@ static int verb_file_send(const cmd_server_ctx_t *ctx, int argc, char **argv)
     const char *path = NULL;
     fl_file_perms_t perms = FL_FILE_PERM_VIEW;
     uint64_t expires_at = 0u;
+    uint64_t file_size = 0u;
     fl_server_file_offer_t offer;
     fl_result_t rc;
     int i;
@@ -162,7 +163,7 @@ static int verb_file_send(const cmd_server_ctx_t *ctx, int argc, char **argv)
         fl_color_error("server file: -all is mutually exclusive with -user/-id");
         return 1;
     }
-    if (stat_local_file(path, &offer.file_size) != 0) {
+    if (stat_local_file(path, &file_size) != 0) {
         fl_color_error("cannot read file '%s'", path);
         return 1;
     }
@@ -206,6 +207,7 @@ static int verb_file_send(const cmd_server_ctx_t *ctx, int argc, char **argv)
     strncpy(offer.sender_principal, current_principal(),
             sizeof(offer.sender_principal) - 1u);
     offer.sender_principal[sizeof(offer.sender_principal) - 1u] = '\0';
+    offer.file_size = file_size;
     offer.chunk_size = FL_SERVER_FILE_CHUNK_MAX;
     offer.total_chunks = offer.file_size == 0u ? 0u :
         (uint32_t)((offer.file_size + offer.chunk_size - 1u) / offer.chunk_size);

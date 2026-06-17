@@ -23,7 +23,7 @@ ARM64_LINUX_HOST := $(and $(filter Linux,$(UNAME_S)),$(filter aarch64 arm64,$(UN
 # Compiler and flags
 CC = gcc
 AS = as
-CFLAGS = -Wall -Wextra -pthread -I. -Icontracts/foundations -Icontracts/runtime -Icontracts/identity -Icontracts/networking -Icontracts/drivers -Icontracts/storage -Icontracts/observability -Icontracts/operations -Icontracts/virtualization -Icontracts/hardening -Ikernel/include -Ikernel/core/vfs -Ikernel/core/mm -Ikernel/core/memory -Ikernel/core/time -Ikernel/core/net -Ikernel/core/identity -Ikernel/core/sched -Ikernel/core/sys -Iuserland/shell -Iuserland/command -Ikernel/arch/x86_64 -Ikernel/arch/aarch64
+CFLAGS = -Wall -Wextra -pthread -I. -Icontracts/foundations -Icontracts/runtime -Icontracts/identity -Icontracts/networking -Icontracts/drivers -Icontracts/storage -Icontracts/observability -Icontracts/operations -Icontracts/virtualization -Icontracts/hardening -Ikernel/include -Ikernel/core/vfs -Ikernel/core/mm -Ikernel/core/memory -Ikernel/core/time -Ikernel/core/net -Ikernel/core/identity -Ikernel/core/sched -Ikernel/core/sys -Ikernel/core/platform -Iuserland/shell -Iuserland/command -Ikernel/arch/x86_64 -Ikernel/arch/aarch64
 OPENSSL_LIBS = -lssl -lcrypto
 LDFLAGS = -Wl,-z,noexecstack -lsqlite3 -lstdc++ $(OPENSSL_LIBS)
 # Cross ARM on x86: prefer deps/install-aarch64 (./deps/fetch-sqlite-aarch64.sh); optional system libsqlite3-dev:arm64.
@@ -159,6 +159,7 @@ NET_CORE_SRCS = kernel/core/net/net_checksum.c kernel/core/net/net_wire.c kernel
                 kernel/core/net/net_wifi_mgmt.c kernel/core/net/net_wifi_sae.c \
                 kernel/core/net/net_wifi_wpa.c kernel/core/net/net_wifi_twt.c \
                 kernel/core/net/net_wifi_crypto.c \
+                kernel/core/platform/fl_platform.c \
                 kernel/core/net/net_requirements.c \
                 kernel/core/net/net_server.c kernel/core/net/net_client.c kernel/core/net/net_file_delivery.c kernel/core/net/net_pkt_channel_meta.c kernel/core/net/net_channel_sidecar.c kernel/core/net/server_bg.c \
                 kernel/core/vfs/server_shared_fs.c kernel/core/vfs/server_shared_db.c \
@@ -227,6 +228,28 @@ ASMOBJS = $(patsubst %.s,%.o,$(patsubst %.asm,%.o,$(ASMSRCS)))
 IDENTITY_OBJS = userland/identity/password_hash.o
 OBJS = $(SRCS:.c=.o) $(ASMOBJS) $(IDENTITY_OBJS)
 TARGET = BPForbes_Flinstone_Shell
+MINGW_CXX = x86_64-w64-mingw32-g++
+FLINSTONE_PS_EXE_OUT = tools/FlinstonePowershell/FlinstonePowershell.exe
+FLINSTONE_LINUX_NET_OUT = tools/FlinstoneLinuxNet/FlinstoneLinuxNet
+ifneq ($(shell command -v $(MINGW_CXX) 2>/dev/null),)
+FLINSTONE_PS_EXE = $(FLINSTONE_PS_EXE_OUT)
+endif
+
+# Build-mode sentinel: detect when VM_ENABLE or VM_SDL changes between runs
+# so stale object files compiled under the old flags get removed before make
+# re-evaluates dependencies.  Without this, switching from `make` to `make vm`
+# (or back) leaves the old binary in place and make considers it up-to-date.
+BUILD_MODE_FILE := .build_mode
+BUILD_MODE_NOW  := VM=$(VM_ENABLE)_SDL=$(VM_SDL)
+_bmode_prev     := $(shell cat $(BUILD_MODE_FILE) 2>/dev/null)
+ifneq ($(_bmode_prev),)
+ifneq ($(_bmode_prev),$(BUILD_MODE_NOW))
+$(info [make] Build mode changed ($(_bmode_prev) -> $(BUILD_MODE_NOW)): removing stale objects)
+$(shell rm -f $(OBJS) $(TARGET) 2>/dev/null)
+endif
+endif
+$(shell printf '%s' '$(BUILD_MODE_NOW)' > $(BUILD_MODE_FILE))
+
 .DEFAULT_GOAL := all
 
 # version_def.h is generated from version/locked/**/*.ver (shipped A.B.C) plus
@@ -241,7 +264,7 @@ $(VERSION_ENTRIES_VER_SUM): FORCE
 $(VERSION_DEF): scripts/gen_version_def.sh $(VER_LOCKED_FILES) $(VERSION_ENTRIES_VER_SUM)
 	@./scripts/gen_version_def.sh
 
-all: $(TARGET)
+all: $(TARGET) $(FLINSTONE_PS_EXE) $(FLINSTONE_LINUX_NET_OUT)
 
 # Bare-metal: use port I/O and VGA (for kernel build, not userspace)
 baremetal: CFLAGS += -DDRIVERS_BAREMETAL=1
@@ -249,7 +272,7 @@ baremetal: LDFLAGS += -no-pie
 baremetal: $(TARGET)
 
 # With embedded x86 VM: make vm && ./shell -Virtualization -y -vm
-.PHONY: version-record gen-version-def FORCE
+.PHONY: all version-record gen-version-def FORCE
 version-record: $(VERSION_DEF)
 	@./scripts/export_version_record.sh
 
@@ -325,6 +348,67 @@ deps-sqlite-aarch64:
 deps-openssl-aarch64:
 	@chmod +x deps/fetch-openssl-aarch64.sh 2>/dev/null || true
 	@./deps/fetch-openssl-aarch64.sh
+
+# FlinstonePowershell — WSL ↔ Windows Wi-Fi bridge.
+# Linux/WSL development build (uses netsh.exe via WSL interop at runtime):
+.PHONY: flinstone-ps
+flinstone-ps:
+	$(CXX) -std=c++17 -Wall -Wextra -o tools/FlinstonePowershell/FlinstonePowershell \
+	    tools/FlinstonePowershell/FlinstonePowershell.cpp
+	@echo "Built tools/FlinstonePowershell/FlinstonePowershell (Linux dev build)"
+	@echo "To build the Windows .exe: make flinstone-ps-windows"
+
+.PHONY: flinstone-linux-net
+flinstone-linux-net: $(FLINSTONE_LINUX_NET_OUT)
+
+$(FLINSTONE_LINUX_NET_OUT): tools/FlinstoneLinuxNet/FlinstoneLinuxNet.cpp
+	$(CXX) -std=c++17 -Wall -Wextra -o $(FLINSTONE_LINUX_NET_OUT) \
+	    tools/FlinstoneLinuxNet/FlinstoneLinuxNet.cpp
+	@echo "Built $(FLINSTONE_LINUX_NET_OUT) (native Linux Wi-Fi/server helper)"
+
+# Cross-compile for Windows (requires mingw-w64: sudo ./scripts/install_deps.sh).
+# Included in the default `all` target automatically when x86_64-w64-mingw32-g++ is found.
+# -static-libgcc -static-libstdc++: embed the MinGW runtime so the .exe runs
+# on Windows without libgcc_s_seh-1.dll or libstdc++-6.dll installed.
+$(FLINSTONE_PS_EXE_OUT): tools/FlinstonePowershell/FlinstonePowershell.cpp
+	$(MINGW_CXX) -std=c++17 -Wall -Wextra \
+	    -static-libgcc -static-libstdc++ \
+	    -o $(FLINSTONE_PS_EXE_OUT) \
+	    tools/FlinstonePowershell/FlinstonePowershell.cpp \
+	    -lwlanapi -lole32 -liphlpapi -lws2_32
+	@echo "export FL_NET_WIFI_FLINSTONE_PS=\"$$(cd '$$(dirname $(FLINSTONE_PS_EXE_OUT))' && pwd)/$$(basename $(FLINSTONE_PS_EXE_OUT))\"" > tools/fl-wifi.env
+	@echo "Built $(FLINSTONE_PS_EXE_OUT) (Windows/WlanAPI, self-contained)"
+	@echo "Copy to a directory on your Windows PATH so WSL interop can find it."
+
+.PHONY: flinstone-ps-windows
+flinstone-ps-windows: $(FLINSTONE_PS_EXE_OUT)
+
+# Install FlinstonePowershell.exe into the Windows user's bin directory.
+# Run WITHOUT sudo so that cmd.exe can read %USERPROFILE% correctly.
+.PHONY: install-fps-windows
+install-fps-windows: $(FLINSTONE_PS_EXE_OUT)
+	@CMD_EXE=$$(command -v cmd.exe 2>/dev/null); \
+	 if [ -z "$$CMD_EXE" ] && [ -x /mnt/c/Windows/System32/cmd.exe ]; then \
+	     CMD_EXE=/mnt/c/Windows/System32/cmd.exe; fi; \
+	 if [ -z "$$CMD_EXE" ]; then \
+	     echo "install-fps-windows: cmd.exe not found (not running in WSL?)"; exit 1; fi; \
+	 _wp=$$($$CMD_EXE /c "echo %USERPROFILE%" 2>/dev/null | tr -d '\r\n'); \
+	 WIN_HOME=$$(wslpath "$$_wp" 2>/dev/null); \
+	 if [ -z "$$WIN_HOME" ] || [ ! -d "$$WIN_HOME" ]; then \
+	     echo "install-fps-windows: could not resolve %USERPROFILE% ($$_wp)"; \
+	     echo "  Run without sudo so Windows env vars are available."; exit 1; fi; \
+	 WIN_BIN="$$WIN_HOME/bin"; \
+	 mkdir -p "$$WIN_BIN"; \
+	 cp $(FLINSTONE_PS_EXE_OUT) "$$WIN_BIN/"; \
+	 WIN_BIN_W=$$(wslpath -w "$$WIN_BIN" 2>/dev/null); \
+	 echo "Installed to: $$WIN_BIN"; \
+	 echo ""; \
+	 echo "Add to Windows PATH (one-time):"; \
+	 echo "  $$WIN_BIN_W"; \
+	 echo "  System Properties -> Environment Variables -> User PATH -> New"; \
+	 echo ""; \
+	 echo "Then open a new WSL terminal and verify:"; \
+	 echo "  which FlinstonePowershell.exe"
 
 $(OPENSSL_ARM_LIB):
 	@chmod +x deps/fetch-openssl-aarch64.sh 2>/dev/null || true
@@ -717,7 +801,7 @@ test_p3_udp_cmds: $(NET_ASM_OBJ) $(MEM_ASM_OBJ) $(NET_TEST_SHELL_OBJS) $(NET_TES
 # (issue #239 internal-only audit). Drives cmd_net_tools.c entry points
 # in-process against the in-tree fl_net_arp / fl_net_route / fl_net_udp /
 # fl_net_resolve_ipv4 APIs; no arpa/inet.h, no libc DNS.
-.PHONY: test_p3_wifi test_wifi_db
+.PHONY: test_p3_wifi test_wifi_db test_wifi_flinstone_helper test_wifi_flinstone_linux_helper test_network_bridge_py
 WIFI_TEST_NET_OBJS = kernel/core/net/net_checksum.c kernel/core/net/net_wire.c \
 	kernel/core/net/net_eth.c kernel/core/net/net_ipv4.c kernel/core/net/net_ipv6.c \
 	kernel/core/net/net_icmpv6.c kernel/core/net/net_ndp.c kernel/core/net/net_udp.c \
@@ -733,9 +817,41 @@ test_p3_wifi: $(NET_ASM_OBJ) $(MEM_ASM_OBJ) priority_queue.o kernel/core/time/ti
 	  kernel/core/net/net_wifi_wpa.c kernel/core/net/net_wifi_twt.c \
 	  kernel/core/net/net_wifi_crypto.c \
 	  $(WIFI_TEST_NET_OBJS) \
+	  kernel/core/platform/fl_platform.c \
 	  kernel/core/sched/workqueue.c kernel/core/sys/ipc.o kernel/core/time/timekeeping.o priority_queue.o \
 	  $(MEM_ASM_OBJ) $(NET_ASM_OBJ) $(OPENSSL_LIBS) -Wl,-z,noexecstack
 	./tests/test_p3_wifi
+
+test_wifi_flinstone_helper: $(NET_ASM_OBJ) $(MEM_ASM_OBJ) priority_queue.o kernel/core/time/timekeeping.o kernel/core/sys/ipc.o
+	$(CC) $(CFLAGS) $(TEST_SANITIZE) -o tests/test_wifi_flinstone_helper tests/test_wifi_flinstone_helper.c \
+	  kernel/core/net/net_wifi_he.c kernel/core/net/net_wifi_station.c kernel/core/net/net_wifi_host_linux.c \
+	  kernel/core/net/net_wifi_mgmt.c kernel/core/net/net_wifi_sae.c \
+	  kernel/core/net/net_wifi_wpa.c kernel/core/net/net_wifi_twt.c \
+	  kernel/core/net/net_wifi_crypto.c \
+	  $(WIFI_TEST_NET_OBJS) \
+	  kernel/core/platform/fl_platform.c \
+	  kernel/core/sched/workqueue.c kernel/core/sys/ipc.o kernel/core/time/timekeeping.o priority_queue.o \
+	  $(MEM_ASM_OBJ) $(NET_ASM_OBJ) $(OPENSSL_LIBS) -Wl,-z,noexecstack
+	./tests/test_wifi_flinstone_helper
+
+test_wifi_flinstone_linux_helper: $(NET_ASM_OBJ) $(MEM_ASM_OBJ) priority_queue.o kernel/core/time/timekeeping.o kernel/core/sys/ipc.o
+	$(CC) $(CFLAGS) $(TEST_SANITIZE) -o tests/test_wifi_flinstone_linux_helper tests/test_wifi_flinstone_linux_helper.c \
+	  kernel/core/net/net_wifi_he.c kernel/core/net/net_wifi_station.c kernel/core/net/net_wifi_host_linux.c \
+	  kernel/core/net/net_wifi_mgmt.c kernel/core/net/net_wifi_sae.c \
+	  kernel/core/net/net_wifi_wpa.c kernel/core/net/net_wifi_twt.c \
+	  kernel/core/net/net_wifi_crypto.c \
+	  $(WIFI_TEST_NET_OBJS) \
+	  kernel/core/platform/fl_platform.c \
+	  kernel/core/sched/workqueue.c kernel/core/sys/ipc.o kernel/core/time/timekeeping.o priority_queue.o \
+	  $(MEM_ASM_OBJ) $(NET_ASM_OBJ) $(OPENSSL_LIBS) -Wl,-z,noexecstack
+	./tests/test_wifi_flinstone_linux_helper
+
+test_network_bridge_py:
+	python3 tests/test_network_bridge.py
+
+.PHONY: test_flinstone_linux_net
+test_flinstone_linux_net: flinstone-linux-net
+	python3 tests/test_flinstone_linux_net.py
 
 test_wifi_db: userland/identity/password_hash.o kernel/core/net/net_wifi_db.o kernel/core/time/timekeeping.o
 	$(CC) $(CFLAGS) $(TEST_SANITIZE) -Iuserland/identity -c tests/test_wifi_db.c -o tests/test_wifi_db_main.o
@@ -829,13 +945,15 @@ debug: $(TARGET)
 
 clean:
 	rm -f $(OBJS) $(TEST_OBJS) $(TEST_ASMOBJS) $(TARGET) $(TEST_TARGET)
+	rm -f $(FLINSTONE_LINUX_NET_OUT)
 	rm -f $(VERSION_ENTRIES_VER_SUM)
 	rm -f kernel/arch/*/drivers/*.o kernel/arch/*/hal/*.o kernel/drivers/*.o kernel/drivers/block/*.o VM/devices/*.o
 	rm -f arch/*/*/*.o arch/*/*/alloc/*.o
 	rm -f tests/test_mem_asm tests/test_alloc tests/test_priority_queue tests/test_drivers tests/test_vm_mem tests/test_replay tests/test_invariants tests/test_userspace_connection tests/test_vm_syscall_bridge tests/test_vm_arch_readiness
-	rm -f tests/test_p3_network tests/test_p3_server tests/test_p3_server_lan tests/test_p3_udp_cmds tests/test_p3_net_tools
+	rm -f tests/test_p3_network tests/test_p3_server tests/test_p3_server_lan tests/test_p3_udp_cmds tests/test_p3_net_tools tests/test_wifi_flinstone_helper tests/test_wifi_flinstone_linux_helper
 	rm -f tests/test_batch_argv_issue220 tests/test_threadpool_issue222 tests/test_disk_hex_issue222
 	rm -rf tests/obj/issue220 tests/obj/issue222
+	find . -name '*.o' -type f ! -path './deps/*' ! -path './.git/*' -exec rm -f {} +
 
 # Architecture-specific build targets
 .PHONY: arm x86-64-nasm x86_64_nasm parity
