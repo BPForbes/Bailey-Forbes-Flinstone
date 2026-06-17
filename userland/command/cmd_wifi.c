@@ -273,6 +273,7 @@ static int cmd_wifi_join(int argc, char **argv) {
         strncpy(cred.passphrase, wifi_pw, sizeof(cred.passphrase) - 1u);
         if (fl_wifi_db_set_password(name, wifi_pw) != FL_RESULT_OK) {
             fputs("wifi join: could not store credential hash\n", stderr);
+            fl_net_wifi_cred_scrub_passphrase(&cred);
             cmd_wipe_password(wifi_pw, sizeof(wifi_pw));
             fl_wifi_db_close();
             return 1;

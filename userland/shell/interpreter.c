@@ -543,8 +543,8 @@ void interactive_shell(void) {
                     g_interactive_history_count++;
                 }
             }
-            enable_raw_mode();
         }
+        enable_raw_mode();
     }
     disable_raw_mode();
     free_history(g_interactive_history, g_interactive_history_count);

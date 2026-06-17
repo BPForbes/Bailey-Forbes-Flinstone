@@ -341,6 +341,8 @@ fl_result_t fl_net_wifi_connect(const fl_net_wifi_cred_t *cred, unsigned timeout
              * user can join by SSID + password without requiring a prior scan
              * match (handles home Wi-Fi, hidden networks, and networks visible
              * only via FL_NET_WIFI_HOME_SSID). */
+            /* Single-threaded path: fl_net_wifi_connect is serialised by the
+             * caller; s_synth_ap is safe without a lock. */
             static fl_net_wifi_scan_entry_t s_synth_ap;
             memset(&s_synth_ap, 0, sizeof(s_synth_ap));
             strncpy(s_synth_ap.ssid, cred->ssid, sizeof(s_synth_ap.ssid) - 1u);

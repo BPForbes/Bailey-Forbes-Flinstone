@@ -60,6 +60,34 @@
 #include <vector>
 
 /* -------------------------------------------------------------------------
+ * Input validation helpers
+ * ---------------------------------------------------------------------- */
+
+static bool is_valid_ipv4(const char *s) {
+    if (!s || !*s)
+        return false;
+    size_t len = strlen(s);
+    if (len > 15)
+        return false;
+    for (size_t i = 0; i < len; i++) {
+        if (s[i] != '.' && (s[i] < '0' || s[i] > '9'))
+            return false;
+    }
+    return true;
+}
+
+static bool is_valid_port(const char *s) {
+    if (!s || !*s)
+        return false;
+    for (size_t i = 0; s[i]; i++) {
+        if (s[i] < '0' || s[i] > '9')
+            return false;
+    }
+    int p = atoi(s);
+    return p > 0 && p <= 65535;
+}
+
+/* -------------------------------------------------------------------------
  * Windows-only helpers
  * ---------------------------------------------------------------------- */
 
@@ -155,11 +183,12 @@ static std::string auth_from_ies(const UCHAR *ies, ULONG ie_len) {
             break;
 
         if (tag == 0x30 && len >= 2) {
-            /* RSN IE: skip version (2) + group cipher (4) */
+            /* RSN IE: version(2) + group cipher(4) + pairwise count(2) + suites */
             has_rsn = true;
             if (len >= 8) {
-                UINT16 pairwise_cnt = (UINT16)(body[4] | ((UINT16)body[5] << 8));
-                const UCHAR *akm_start = body + 6 + pairwise_cnt * 4;
+                /* pairwise count is at body[6..7], after version(2) + group cipher(4) */
+                UINT16 pairwise_cnt = (UINT16)(body[6] | ((UINT16)body[7] << 8));
+                const UCHAR *akm_start = body + 8 + pairwise_cnt * 4;
                 if (akm_start + 2 <= body + len) {
                     UINT16 akm_cnt = (UINT16)(akm_start[0] | ((UINT16)akm_start[1] << 8));
                     const UCHAR *akm = akm_start + 2;
@@ -207,9 +236,9 @@ static int chan_from_khz(ULONG freq_khz) {
     if (mhz >= 5160 && mhz <= 5885)
         return (int)((mhz - 5000) / 5);
 
-    /* 6 GHz band: 5955 MHz = ch1, 5 MHz steps */
+    /* 6 GHz band: 5955 MHz = ch1, 5 MHz steps (no +1: (5955-5950)/5 = 1) */
     if (mhz >= 5935 && mhz <= 7115)
-        return (int)((mhz - 5950) / 5 + 1);
+        return (int)((mhz - 5950) / 5);
 
     return 0;
 }
@@ -946,6 +975,11 @@ static void cmd_server_proxy(const char *listen_ip, const char *wsl_ip,
     const char *listen = (listen_ip && listen_ip[0]) ? listen_ip : "0.0.0.0";
     char        script[1024];
     int         rc;
+
+    if (!is_valid_ipv4(listen) || !is_valid_ipv4(wsl_ip) || !is_valid_port(port_s)) {
+        puts("result=err\tmsg=invalid IP address or port number");
+        return;
+    }
 
     snprintf(script, sizeof(script),
              "netsh interface portproxy add v4tov4 "

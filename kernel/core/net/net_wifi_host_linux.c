@@ -1060,14 +1060,20 @@ static fl_result_t wait_for_flinstone_helper_connected(unsigned timeout_ms) {
     const unsigned limit = timeout_ms > 0u ? timeout_ms : 15000u;
 
     while (elapsed <= limit) {
-        refresh_wsl_windows_wifi_ipv4();
+        if (s_host_kind == FL_WIFI_HOST_FLINSTONE_LINUX)
+            (void)refresh_flinstone_helper_status();
+        else
+            refresh_wsl_windows_wifi_ipv4();
         if (s_fps_ipv4[0])
             return FL_RESULT_OK;
         usleep((useconds_t)step_ms * 1000u);
         elapsed += step_ms;
     }
     /* Association without DHCP yet: still accept connected state. */
-    refresh_wsl_windows_wifi_ipv4();
+    if (s_host_kind == FL_WIFI_HOST_FLINSTONE_LINUX)
+        (void)refresh_flinstone_helper_status();
+    else
+        refresh_wsl_windows_wifi_ipv4();
     if (s_fps_ipv4[0])
         return FL_RESULT_OK;
     {
@@ -1137,16 +1143,21 @@ static void parse_flinstone_ps_scan(const char *text, uint8_t band_filter) {
             char *tab = strchr(tok, '\t');
             if (tab)
                 *tab = '\0';
-            if (strncmp(tok, "ssid=", 5) == 0)
+            if (strncmp(tok, "ssid=", 5) == 0) {
                 strncpy(ssid, tok + 5, sizeof(ssid) - 1u);
-            else if (strncmp(tok, "bssid=", 6) == 0)
+                ssid[sizeof(ssid) - 1u] = '\0';
+            } else if (strncmp(tok, "bssid=", 6) == 0) {
                 strncpy(bssid_txt, tok + 6, sizeof(bssid_txt) - 1u);
-            else if (strncmp(tok, "rssi=", 5) == 0)
+                bssid_txt[sizeof(bssid_txt) - 1u] = '\0';
+            } else if (strncmp(tok, "rssi=", 5) == 0)
                 rssi = atoi(tok + 5);
-            else if (strncmp(tok, "auth=", 5) == 0)
+            else if (strncmp(tok, "auth=", 5) == 0) {
                 strncpy(auth, tok + 5, sizeof(auth) - 1u);
-            else if (strncmp(tok, "band=", 5) == 0)
+                auth[sizeof(auth) - 1u] = '\0';
+            } else if (strncmp(tok, "band=", 5) == 0) {
                 strncpy(band_txt, tok + 5, sizeof(band_txt) - 1u);
+                band_txt[sizeof(band_txt) - 1u] = '\0';
+            }
             else if (strncmp(tok, "chan=", 5) == 0)
                 chan = atoi(tok + 5);
             tok = tab ? tab + 1 : tok + strlen(tok);
@@ -1637,8 +1648,10 @@ fl_result_t fl_net_wifi_host_linux_ipv4(uint32_t *addr_be_out, char *buf, size_t
             return FL_RESULT_NOENT;
         if (addr_be_out && !fl_net_ipv4_parse_literal(bind_ip, addr_be_out))
             return FL_RESULT_ERR;
-        if (buf && buf_len > 0u)
+        if (buf && buf_len > 0u) {
             strncpy(buf, bind_ip, buf_len - 1u);
+            buf[buf_len - 1u] = '\0';
+        }
         return FL_RESULT_OK;
     }
     rc = read_iface_ipv4_route(&addr, NULL, NULL);
@@ -1814,12 +1827,15 @@ int fl_net_wifi_host_linux_server_proxy(const char *listen_ip, const char *wsl_i
     if (s_host_kind != FL_WIFI_HOST_FLINSTONE_PS || !wsl_ip || !wsl_ip[0]) {
 #if defined(__linux__)
         if (fl_platform_detect() == FL_PLATFORM_WSL) {
-            char  cmd[384];
+            char  listen_q[64], wsl_q[64];
+            char  cmd[512];
             FILE *fp;
 
+            shell_single_quote(listen, listen_q, sizeof(listen_q));
+            shell_single_quote(wsl_ip  ? wsl_ip : "", wsl_q, sizeof(wsl_q));
             snprintf(cmd, sizeof(cmd),
                      "FlinstonePowershell.exe server-proxy %s %s %u 2>/dev/null",
-                     listen, wsl_ip, (unsigned)port);
+                     listen_q, wsl_q, (unsigned)port);
             fp = popen(cmd, "r");
             if (!fp)
                 return -1;
@@ -1832,8 +1848,13 @@ int fl_net_wifi_host_linux_server_proxy(const char *listen_ip, const char *wsl_i
 #endif
         return -1;
     }
-    snprintf(args, sizeof(args), "server-proxy %s %s %u", listen, wsl_ip,
-             (unsigned)port);
+    {
+        char listen_q[64], wsl_q[64];
+        shell_single_quote(listen,  listen_q, sizeof(listen_q));
+        shell_single_quote(wsl_ip,  wsl_q,   sizeof(wsl_q));
+        snprintf(args, sizeof(args), "server-proxy %s %s %u",
+                 listen_q, wsl_q, (unsigned)port);
+    }
     if (!run_flinstone_ps(args, out, sizeof(out)))
         return -1;
     return strstr(out, "result=ok") ? 0 : -1;

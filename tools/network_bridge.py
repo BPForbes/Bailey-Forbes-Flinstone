@@ -38,6 +38,7 @@ import argparse
 import asyncio
 import os
 import re
+import shlex
 import subprocess
 import sys
 from pathlib import Path
@@ -162,7 +163,7 @@ def cmd_env_export(_: argparse.Namespace) -> int:
     fps = discover_fps()
     if not fps:
         return 1
-    print(f'export FL_NET_WIFI_FLINSTONE_PS="{fps}"')
+    print(f'export FL_NET_WIFI_FLINSTONE_PS={shlex.quote(str(fps))}')
     return 0
 
 

@@ -667,8 +667,9 @@ static int verb_host(int argc, char **argv) {
                 fl_color_success("LAN peers: server join %s:%u (bridge active, no admin)",
                                  win_ip_display, (unsigned)ep.port_host);
             } else {
-                host_print_wsl_lan_hint(listen, ep.port_host);
-                fl_color_error("WSL portproxy failed; approve UAC or run "
+                fl_color_error("server running WSL-local only (LAN unreachable): "
+                               "portproxy and bridge both failed — "
+                               "approve UAC or run: "
                                "FlinstonePowershell.exe server-proxy %s <wsl-ip> %u",
                                listen, (unsigned)ep.port_host);
             }
@@ -697,8 +698,11 @@ static int verb_host(int argc, char **argv) {
                             wip, bridge_target, bind_ep.port_host) == 0)
                         fl_color_success("peers on LAN can: server join %s:%u (bridge active)",
                                          wip, (unsigned)bind_ep.port_host);
-                    else
+                    else {
+                        fl_color_error("server running WSL-local only (LAN unreachable): "
+                                       "portproxy and bridge both failed");
                         host_print_wsl_lan_hint(listen, bind_ep.port_host);
+                    }
                 }
             }
         }

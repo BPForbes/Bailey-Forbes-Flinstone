@@ -254,7 +254,11 @@ static void cmd_wifi_status()
         return;
     }
     std::string state = field_value(out, "GENERAL.STATE");
-    if (state.find("connected") == std::string::npos) {
+    /* Match exact "connected" substring but exclude "disconnected": nmcli
+     * GENERAL.STATE for a connected interface reads something like
+     * "100 (connected)" while a disconnecting state reads "20 (disconnected)". */
+    if (state.find("connected") == std::string::npos ||
+        state.find("disconnected") != std::string::npos) {
         puts("state=disconnected");
         return;
     }

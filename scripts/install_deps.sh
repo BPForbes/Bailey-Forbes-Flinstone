@@ -57,7 +57,7 @@ if [ -d /usr/include/SDL2 ]; then
     for f in /usr/include/SDL2/*.h; do
         ln -sf "$f" "$REPO_ROOT/deps/install/include/$(basename "$f")"
     done
-    echo "SDL2 headers linked into deps/install/include/ ($(ls /usr/include/SDL2/*.h | wc -l) files)"
+    echo "SDL2 headers linked into deps/install/include/ ($(find /usr/include/SDL2 -maxdepth 1 -name '*.h' | wc -l) files)"
 fi
 
 if [ "$IS_WSL" = "1" ]; then

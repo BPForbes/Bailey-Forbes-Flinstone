@@ -272,7 +272,7 @@ baremetal: LDFLAGS += -no-pie
 baremetal: $(TARGET)
 
 # With embedded x86 VM: make vm && ./shell -Virtualization -y -vm
-.PHONY: version-record gen-version-def FORCE
+.PHONY: all version-record gen-version-def FORCE
 version-record: $(VERSION_DEF)
 	@./scripts/export_version_record.sh
 

@@ -1,3 +1,4 @@
+#define _POSIX_C_SOURCE 200809L
 #include "threadpool.h"
 #include "interpreter.h"
 #include "common.h"
@@ -19,6 +20,8 @@ static int threadpool_sem_wait_done(sem_t *done_sem) {
             perror("threadpool: sem_wait");
             return -1;
         }
+        if (s_pool_interrupt_req)
+            return -1;
     }
     return 0;
 }
@@ -41,8 +44,9 @@ static void run_job_task(void *arg) {
     job_node *job = (job_node *)arg;
 
     pthread_cleanup_push(job_task_cleanup, job);
-    pthread_setcancelstate(PTHREAD_CANCEL_ENABLE, NULL);
-    pthread_setcanceltype(PTHREAD_CANCEL_ASYNCHRONOUS, NULL);
+    /* Deferred cancellation (the default): cancel is delivered only at safe
+     * cancellation points inside execute_command_str, never while holding
+     * g_pool.mutex or job->mutex. */
     pthread_mutex_lock(&g_pool.mutex);
     s_pool_active_worker     = pthread_self();
     s_pool_active_worker_set = 1;
@@ -64,8 +68,8 @@ static void pool_sigint_handler(int sig) {
     (void)sig;
     s_pool_interrupt_req = 1;
     (void)write(STDERR_FILENO, "^C\n", 3);
-    if (s_pool_active_worker_set)
-        (void)pthread_cancel(s_pool_active_worker);
+    /* pthread_cancel is not async-signal-safe; the main thread performs
+     * worker cancellation after detecting s_pool_interrupt_req. */
 }
 
 job_node *create_job(const char *line) {
@@ -129,20 +133,63 @@ void submit_single_command_interruptible(const char *line) {
     submit_single_command(line);
 #else
     struct sigaction sa_new, sa_old;
+    job_node *job;
+    sem_t done_sem;
 
     memset(&sa_new, 0, sizeof(sa_new));
     sa_new.sa_handler = pool_sigint_handler;
     sigemptyset(&sa_new.sa_mask);
-    sa_new.sa_flags   = 0;
+    sa_new.sa_flags = 0;
     s_pool_interrupt_req = 0;
     if (sigaction(SIGINT, &sa_new, &sa_old) != 0) {
         submit_single_command(line);
         return;
     }
-    submit_single_command(line);
+
+    job = create_job(line);
+    if (!job) {
+        (void)sigaction(SIGINT, &sa_old, NULL);
+        return;
+    }
+    if (sem_init(&done_sem, 0, 0) != 0) {
+        free_job(job);
+        (void)sigaction(SIGINT, &sa_old, NULL);
+        return;
+    }
+    job->done_sem = &done_sem;
+    if (queue_job_priority(job, PRIORITY_IMMEDIATE) != 0) {
+        job->done_sem = NULL;
+        sem_destroy(&done_sem);
+        free_job(job);
+        (void)sigaction(SIGINT, &sa_old, NULL);
+        return;
+    }
+
+    /* Wait for completion; break early on user interrupt (SIGINT). */
+    while (sem_wait(&done_sem) != 0) {
+        if (errno != EINTR)
+            break;
+        if (s_pool_interrupt_req) {
+            /* Cancel the worker from main-thread context — pthread_cancel is
+             * not async-signal-safe and must not be called from a handler. */
+            pthread_t worker = (pthread_t)0;
+            pthread_mutex_lock(&g_pool.mutex);
+            if (s_pool_active_worker_set)
+                worker = s_pool_active_worker;
+            pthread_mutex_unlock(&g_pool.mutex);
+            if (worker)
+                (void)pthread_cancel(worker);
+            /* Drain the sem_post from the cleanup handler. */
+            while (sem_wait(&done_sem) != 0 && errno == EINTR)
+                ;
+            break;
+        }
+    }
+
     (void)sigaction(SIGINT, &sa_old, NULL);
-    signal(SIGINT, SIG_IGN);
-    (void)s_pool_interrupt_req;
+    job->done_sem = NULL;
+    sem_destroy(&done_sem);
+    free_job(job);
 #endif
 }
 
