@@ -53,3 +53,5 @@ Server / networking (P3-13)
   net_iface IPv4/IPv6; Linux P4 Wi-Fi driver backend; security fixes (shell-escape SSID,
   sparse file-transfer chunks); net_sock_native brace fix; ARM net_file_delivery.h prototypes
 VER_END
+
+RELEASE_DATE=2026-06-17
