@@ -1861,6 +1861,58 @@ int fl_net_wifi_host_linux_server_proxy(const char *listen_ip, const char *wsl_i
 #endif
 }
 
+int fl_net_wifi_host_linux_server_proxy_port_free(const char *listen_ip, uint16_t port) {
+#if !defined(FL_NET_WIFI_HOST_LINUX)
+    (void)listen_ip;
+    (void)port;
+    return -1;
+#else
+    char args[128];
+    char out[256];
+    const char *listen = (listen_ip && listen_ip[0]) ? listen_ip : "0.0.0.0";
+
+    if (s_host_kind == FL_WIFI_HOST_NONE)
+        (void)fl_net_wifi_host_linux_available();
+    if (s_host_kind != FL_WIFI_HOST_FLINSTONE_PS) {
+#if defined(__linux__)
+        if (fl_platform_detect() == FL_PLATFORM_WSL) {
+            char  listen_q[64];
+            char  cmd[256];
+            FILE *fp;
+
+            shell_single_quote(listen, listen_q, sizeof(listen_q));
+            snprintf(cmd, sizeof(cmd),
+                     "FlinstonePowershell.exe server-proxy-check %s %u 2>/dev/null",
+                     listen_q, (unsigned)port);
+            fp = popen(cmd, "r");
+            if (!fp)
+                return -1;
+            {
+                size_t n = fread(out, 1u, sizeof(out) - 1u, fp);
+                out[n] = '\0';
+            }
+            if (pclose(fp) != 0)
+                return -1;
+            if (strstr(out, "result=ok"))
+                return 1;
+            if (strstr(out, "result=busy"))
+                return 0;
+            return -1;
+        }
+#endif
+        return -1;
+    }
+    snprintf(args, sizeof(args), "server-proxy-check %s %u", listen, (unsigned)port);
+    if (!run_flinstone_ps(args, out, sizeof(out)))
+        return -1;
+    if (strstr(out, "result=ok"))
+        return 1;
+    if (strstr(out, "result=busy"))
+        return 0;
+    return -1;
+#endif
+}
+
 int fl_net_wifi_host_linux_wsl_ipv4(char *buf, size_t buf_len) {
 #if !defined(FL_NET_WIFI_HOST_LINUX)
     (void)buf;

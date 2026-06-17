@@ -692,6 +692,19 @@ static int verb_host(int argc, char **argv) {
                                                     listen_ip, sizeof(listen_ip));
         int defer_hosting = wsl_portproxy_will_try(&bind_ep, win_ip_display);
 
+        if (defer_hosting) {
+            int port_free =
+                fl_net_wifi_host_linux_server_proxy_port_free(listen,
+                                                              bind_ep.port_host);
+            if (port_free == 0) {
+                pthread_mutex_unlock(&session_mutex);
+                fl_color_error("server host failed: Windows port %u on %s is already "
+                               "in use (choose another port or run server kill)",
+                               (unsigned)bind_ep.port_host, listen);
+                return 1;
+            }
+        }
+
         /* Show NOTICE before unlock; collect keypress after unlock so other
          * session paths are not blocked on session_mutex during user input. */
         if (defer_hosting)

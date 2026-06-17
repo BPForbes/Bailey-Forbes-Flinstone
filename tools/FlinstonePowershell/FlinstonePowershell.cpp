@@ -970,6 +970,64 @@ static int run_proxy_ps_script(const char *body) {
 }
 #endif /* _WIN32 */
 
+static void cmd_server_proxy_check(const char *listen_ip, const char *port_s) {
+#if defined(_WIN32)
+    const char *listen = (listen_ip && listen_ip[0]) ? listen_ip : "0.0.0.0";
+
+    if (!is_valid_ipv4(listen) || !is_valid_port(port_s)) {
+        puts("result=err\tmsg=invalid IP address or port number");
+        return;
+    }
+
+    WSADATA wsa;
+    if (WSAStartup(MAKEWORD(2, 2), &wsa) != 0) {
+        printf("result=err\tmsg=WSAStartup failed (%d)\n", WSAGetLastError());
+        return;
+    }
+
+    SOCKET lsock = socket(AF_INET, SOCK_STREAM, IPPROTO_TCP);
+    if (lsock == INVALID_SOCKET) {
+        printf("result=err\tmsg=socket failed (%d)\n", WSAGetLastError());
+        WSACleanup();
+        return;
+    }
+
+    struct sockaddr_in addr;
+    memset(&addr, 0, sizeof(addr));
+    addr.sin_family = AF_INET;
+    if (strcmp(listen, "0.0.0.0") == 0) {
+        addr.sin_addr.s_addr = INADDR_ANY;
+    } else {
+        addr.sin_addr.s_addr = inet_addr(listen);
+        if (addr.sin_addr.s_addr == INADDR_NONE) {
+            printf("result=err\tmsg=invalid listen address '%s'\n", listen);
+            closesocket(lsock);
+            WSACleanup();
+            return;
+        }
+    }
+    addr.sin_port = htons((USHORT)atoi(port_s));
+
+    if (bind(lsock, (struct sockaddr *)&addr, sizeof(addr)) == SOCKET_ERROR) {
+        int err = WSAGetLastError();
+        closesocket(lsock);
+        WSACleanup();
+        if (err == WSAEADDRINUSE)
+            printf("result=busy\tlisten=%s\tport=%s\n", listen, port_s);
+        else
+            printf("result=err\tmsg=bind probe failed (%d)\n", err);
+        return;
+    }
+    closesocket(lsock);
+    WSACleanup();
+    printf("result=ok\tlisten=%s\tport=%s\n", listen, port_s);
+#else
+    (void)listen_ip;
+    (void)port_s;
+    puts("result=err\tmsg=server-proxy-check only available on Windows");
+#endif
+}
+
 static void cmd_server_proxy(const char *listen_ip, const char *wsl_ip,
                              const char *port_s) {
 #if defined(_WIN32)
@@ -1046,6 +1104,7 @@ int main(int argc, char **argv) {
                 "  wifi-status                       Show connection state\n"
                 "  server-bridge [<network>] <port> [target]  Relay LAN:<port> → target:<port>\n"
                 "  server-proxy [<listen_ip>] <wsl_ip> <port>  Portproxy + firewall (UAC)\n"
+                "  server-proxy-check [<listen_ip>] <port>     Probe Windows listen port\n"
                 "  server-proxy-del [<listen_ip>] <port>       Remove portproxy + firewall\n");
         return 1;
     }
@@ -1079,6 +1138,15 @@ int main(int argc, char **argv) {
             cmd_server_bridge(argv[2], argv[3], NULL);
         else
             cmd_server_bridge(NULL, argv[2], NULL);
+    } else if (strcmp(cmd, "server-proxy-check") == 0) {
+        if (argc >= 4)
+            cmd_server_proxy_check(argv[2], argv[3]);
+        else if (argc >= 3)
+            cmd_server_proxy_check("0.0.0.0", argv[2]);
+        else {
+            fprintf(stderr, "server-proxy-check: requires [<listen_ip>] <port>\n");
+            return 1;
+        }
     } else if (strcmp(cmd, "server-proxy") == 0) {
         if (argc >= 5)
             cmd_server_proxy(argv[2], argv[3], argv[4]);
