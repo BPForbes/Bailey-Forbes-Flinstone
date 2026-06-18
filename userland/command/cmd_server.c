@@ -23,6 +23,7 @@
 #include "shell_io.h"
 #include "net_wifi_host_linux.h"
 #include "fl_platform.h"
+#include "threadpool.h"
 
 #include <errno.h>
 #include <pthread.h>
@@ -32,7 +33,6 @@
 #include <time.h>
 #include <unistd.h>
 #if defined(__unix__) || defined(__APPLE__)
-#include <signal.h>
 #include <termios.h>
 #endif
 
@@ -87,27 +87,23 @@ static void print_sock_error(const char *verb, fl_result_t rc) {
 
 static int wsl_portproxy_press_any_key(void) {
 #if defined(__unix__) || defined(__APPLE__)
-    struct sigaction sa_old;
-    struct sigaction sa_ign;
     struct termios old_tty;
     struct termios new_tty;
     unsigned char c;
     int           use_raw = 0;
+    int           rc      = -1;
 
     if (!isatty(STDIN_FILENO))
         return 0;
 
-    memset(&sa_ign, 0, sizeof(sa_ign));
-    sa_ign.sa_handler = SIG_IGN;
-    sigemptyset(&sa_ign.sa_mask);
-    (void)sigaction(SIGINT, &sa_ign, &sa_old);
+    fl_shell_press_any_key_gate_enter();
 
     fputs(" Press any key to continue...", stdout);
     fflush(stdout);
 
     if (tcgetattr(STDIN_FILENO, &old_tty) == 0) {
         new_tty = old_tty;
-        new_tty.c_lflag &= (tcflag_t)~(ICANON | ECHO);
+        new_tty.c_lflag &= (tcflag_t)~(ICANON | ECHO | ISIG);
         new_tty.c_cc[VMIN]  = 1;
         new_tty.c_cc[VTIME] = 0;
         if (tcsetattr(STDIN_FILENO, TCSAFLUSH, &new_tty) == 0)
@@ -118,8 +114,12 @@ static int wsl_portproxy_press_any_key(void) {
         if (use_raw) {
             ssize_t n = read(STDIN_FILENO, &c, 1);
             if (n < 0) {
-                if (errno == EINTR)
+                if (errno == EINTR) {
+                    (void)write(STDOUT_FILENO, "^C\n", 3);
+                    fputs(" Press any key to continue...", stdout);
+                    fflush(stdout);
                     continue;
+                }
                 break;
             }
             if (n == 0)
@@ -133,29 +133,37 @@ static int wsl_portproxy_press_any_key(void) {
             (void)tcsetattr(STDIN_FILENO, TCSAFLUSH, &old_tty);
             fputc('\n', stdout);
             fflush(stdout);
-            (void)sigaction(SIGINT, &sa_old, NULL);
-            return 0;
+            rc = 0;
+            break;
         }
         {
             int ch = fgetc(stdin);
-            if (ch == EOF)
+            if (ch == EOF) {
+                if (errno == EINTR) {
+                    (void)write(STDOUT_FILENO, "^C\n", 3);
+                    fputs(" Press any key to continue...", stdout);
+                    fflush(stdout);
+                    continue;
+                }
                 break;
+            }
             if (ch == 3) {
-                fputs("^C\n Press any key to continue...", stdout);
+                (void)write(STDOUT_FILENO, "^C\n", 3);
+                fputs(" Press any key to continue...", stdout);
                 fflush(stdout);
                 continue;
             }
             fputc('\n', stdout);
             fflush(stdout);
-            (void)sigaction(SIGINT, &sa_old, NULL);
-            return 0;
+            rc = 0;
+            break;
         }
     }
 
     if (use_raw)
         (void)tcsetattr(STDIN_FILENO, TCSAFLUSH, &old_tty);
-    (void)sigaction(SIGINT, &sa_old, NULL);
-    return -1;
+    fl_shell_press_any_key_gate_leave();
+    return rc;
 #else
     return 0;
 #endif
@@ -188,13 +196,36 @@ static int wsl_portproxy_teardown_wants_notice(void) {
 }
 
 static void wsl_portproxy_teardown_apply(void) {
+    char listen[32];
+    uint16_t port;
+
     if (!g_wsl_portproxy_active)
         return;
-    (void)fl_net_wifi_host_linux_server_proxy_del(g_wsl_portproxy_listen,
-                                                  g_wsl_portproxy_port);
+    strncpy(listen, g_wsl_portproxy_listen, sizeof(listen) - 1u);
+    listen[sizeof(listen) - 1u] = '\0';
+    port = g_wsl_portproxy_port;
     g_wsl_portproxy_active = 0;
     g_wsl_portproxy_listen[0] = '\0';
     g_wsl_portproxy_port = 0;
+    if (fl_net_wifi_host_linux_server_proxy_del(listen, port) != 0) {
+        fl_color_error("failed to remove Windows portproxy/firewall for %s:%u "
+                       "(approve UAC or run server kill)",
+                       listen, (unsigned)port);
+    }
+}
+
+/* NOTICE/keypress/UAC gate + netsh delete. Caller must not hold session_mutex. */
+static void wsl_portproxy_teardown_interactive(void) {
+    int needs_key;
+
+    if (!g_wsl_portproxy_active)
+        return;
+    needs_key = wsl_portproxy_teardown_wants_notice();
+    if (needs_key)
+        wsl_portproxy_notice_teardown_message();
+    if (needs_key)
+        (void)wsl_portproxy_press_any_key();
+    wsl_portproxy_teardown_apply();
 }
 
 /* On WSL, add Windows portproxy + firewall for listen_ip:port → wsl_ip:port.
@@ -986,15 +1017,8 @@ static int verb_leave(void) {
         }
         (void)fl_net_server_transfer_and_stop(&g_server, &new_host);
         g_server_running = 0;
-        {
-            int needs_key = wsl_portproxy_teardown_wants_notice();
-            if (needs_key)
-                wsl_portproxy_notice_teardown_message();
-            pthread_mutex_unlock(&session_mutex);
-            if (needs_key)
-                (void)wsl_portproxy_press_any_key();
-            wsl_portproxy_teardown_apply();
-        }
+        pthread_mutex_unlock(&session_mutex);
+        wsl_portproxy_teardown_interactive();
         if (new_host == FL_NET_SERVER_MEMBER_ID_NONE) {
             fl_color_success("session terminated (no remaining members)");
         }
@@ -1031,15 +1055,8 @@ static int verb_kill(void) {
     }
     fl_net_server_host_stop(&g_server);
     g_server_running = 0;
-    {
-        int needs_key = wsl_portproxy_teardown_wants_notice();
-        if (needs_key)
-            wsl_portproxy_notice_teardown_message();
-        pthread_mutex_unlock(&session_mutex);
-        if (needs_key)
-            (void)wsl_portproxy_press_any_key();
-        wsl_portproxy_teardown_apply();
-    }
+    pthread_mutex_unlock(&session_mutex);
+    wsl_portproxy_teardown_interactive();
     fl_color_success("session terminated");
     return 0;
 }
@@ -1349,6 +1366,12 @@ static int verb_connected(void) {
 /* ------------------------------------------------------------------------- */
 
 void cmd_server_atexit(void) {
+    static int done;
+
+    if (done)
+        return;
+    done = 1;
+
     pthread_mutex_lock(&session_mutex);
     if (g_server_running) {
         fl_net_server_member_id_t new_host = FL_NET_SERVER_MEMBER_ID_NONE;
@@ -1358,18 +1381,7 @@ void cmd_server_atexit(void) {
         }
         (void)fl_net_server_transfer_and_stop(&g_server, &new_host);
         g_server_running = 0;
-        {
-            int needs_key = wsl_portproxy_teardown_wants_notice();
-            if (needs_key)
-                wsl_portproxy_notice_teardown_message();
-            pthread_mutex_unlock(&session_mutex);
-            if (needs_key)
-                (void)wsl_portproxy_press_any_key();
-            wsl_portproxy_teardown_apply();
-        }
-        return;
-    }
-    if (fl_net_client_state(&g_client) == FL_NET_CLIENT_STATE_CONNECTED) {
+    } else if (fl_net_client_state(&g_client) == FL_NET_CLIENT_STATE_CONNECTED) {
         if (g_client_bg) {
             fl_server_bg_stop_client(g_client_bg);
             g_client_bg = NULL;
@@ -1377,6 +1389,9 @@ void cmd_server_atexit(void) {
         fl_net_client_disconnect(&g_client);
     }
     pthread_mutex_unlock(&session_mutex);
+
+    /* Always drop Windows portproxy/firewall when this shell exits hosting. */
+    wsl_portproxy_teardown_interactive();
 }
 
 /* ------------------------------------------------------------------------- */

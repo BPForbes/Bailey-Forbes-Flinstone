@@ -10,6 +10,7 @@
 #include <unistd.h>
 
 static volatile sig_atomic_t s_pool_interrupt_req;
+static volatile sig_atomic_t s_press_any_key_gate;
 static pthread_t            s_pool_active_worker;
 static int                  s_pool_active_worker_set;
 
@@ -64,8 +65,18 @@ static void run_job_task(void *arg) {
     pthread_cleanup_pop(1);
 }
 
+void fl_shell_press_any_key_gate_enter(void) {
+    s_press_any_key_gate = 1;
+}
+
+void fl_shell_press_any_key_gate_leave(void) {
+    s_press_any_key_gate = 0;
+}
+
 static void pool_sigint_handler(int sig) {
     (void)sig;
+    if (s_press_any_key_gate)
+        return;
     s_pool_interrupt_req = 1;
     (void)write(STDERR_FILENO, "^C\n", 3);
     /* pthread_cancel is not async-signal-safe; the main thread performs
@@ -87,6 +98,7 @@ static void interruptible_job_cleanup(void *arg) {
 static void *interruptible_job_runner(void *arg) {
     job_node *job = (job_node *)arg;
 
+    (void)pthread_setcancelstate(PTHREAD_CANCEL_ENABLE, NULL);
     pthread_cleanup_push(interruptible_job_cleanup, job);
     if (job && job->command_str)
         (void)execute_command_str(job->command_str);
@@ -100,7 +112,7 @@ static void submit_single_command_interruptible_wait(sem_t *done_sem,
     while (sem_wait(done_sem) != 0) {
         if (errno != EINTR)
             break;
-        if (s_pool_interrupt_req) {
+        if (s_pool_interrupt_req && !s_press_any_key_gate) {
             pthread_t worker = known_worker;
 
             if (!worker) {

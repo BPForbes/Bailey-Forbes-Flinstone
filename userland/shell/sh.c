@@ -71,6 +71,8 @@
 #include "util.h"
 #include "cmd_batch.h"
 
+void cmd_server_atexit(void);
+
 #ifndef PATH_MAX
 #define PATH_MAX 4096
 #endif
@@ -425,6 +427,7 @@ int main(int argc, char *argv[]) {
     g_pool_workers_started = 1;
 #endif
     atexit(shell_pool_cleanup);
+    atexit(cmd_server_atexit);
     if (original_stdout_fd < 0) {
         original_stdout_fd = dup(fileno(stdout));
         original_stdout_file = fdopen(original_stdout_fd, "w");
