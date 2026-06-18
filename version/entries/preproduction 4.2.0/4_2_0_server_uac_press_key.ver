@@ -11,8 +11,10 @@ PRE 4.2.0: WSL server host UAC gate — press any key and deferred hosting line
   portproxy setup succeeds (or bridge fallback succeeds)
 - server kill / leave / exit: same press-any-key gate before portproxy teardown UAC
 - interactive shell: Ctrl+C on an empty input line returns to a fresh shell> prompt
-- interactive shell: Ctrl+C cancels in-flight commands (BATCH_SINGLE_THREAD too) and
-  press-any-key gates; empty-line ^C no longer toggles raw mode off/on
+- interactive shell: Ctrl+C cancels in-flight commands (BATCH_SINGLE_THREAD too); empty-line
+  ^C no longer toggles raw mode off/on
+- press-any-key NOTICE gate: ^C prints a new line and re-prompts without aborting host,
+  kill, or portproxy teardown; SIGINT is ignored for the gate so ^C does not cancel UAC
 - review fixes: keypress waits release session_mutex first; tcsetattr failure and
   non-TTY stdin no longer bypass or block the gate; WSL-local hosting survives LAN
   exposure failure when defer_hosting defers the success line

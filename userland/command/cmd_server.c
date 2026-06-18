@@ -32,6 +32,7 @@
 #include <time.h>
 #include <unistd.h>
 #if defined(__unix__) || defined(__APPLE__)
+#include <signal.h>
 #include <termios.h>
 #endif
 
@@ -86,41 +87,78 @@ static void print_sock_error(const char *verb, fl_result_t rc) {
 
 static int wsl_portproxy_press_any_key(void) {
 #if defined(__unix__) || defined(__APPLE__)
+    struct sigaction sa_old;
+    struct sigaction sa_ign;
     struct termios old_tty;
     struct termios new_tty;
-    unsigned char discard;
+    unsigned char c;
+    int           use_raw = 0;
 
     if (!isatty(STDIN_FILENO))
         return 0;
-#endif
+
+    memset(&sa_ign, 0, sizeof(sa_ign));
+    sa_ign.sa_handler = SIG_IGN;
+    sigemptyset(&sa_ign.sa_mask);
+    (void)sigaction(SIGINT, &sa_ign, &sa_old);
 
     fputs(" Press any key to continue...", stdout);
     fflush(stdout);
-#if defined(__unix__) || defined(__APPLE__)
+
     if (tcgetattr(STDIN_FILENO, &old_tty) == 0) {
         new_tty = old_tty;
         new_tty.c_lflag &= (tcflag_t)~(ICANON | ECHO);
         new_tty.c_cc[VMIN]  = 1;
         new_tty.c_cc[VTIME] = 0;
-        if (tcsetattr(STDIN_FILENO, TCSAFLUSH, &new_tty) == 0) {
-            ssize_t n = read(STDIN_FILENO, &discard, 1);
-            (void)tcsetattr(STDIN_FILENO, TCSAFLUSH, &old_tty);
-            if (n <= 0)
-                return -1;
-            if (discard == 3u) {
-                (void)write(STDOUT_FILENO, "^C\n", 3);
-                return -1;
-            }
-        } else if (fgetc(stdin) == EOF) {
-            return -1;
-        }
-    } else if (fgetc(stdin) == EOF) {
-        return -1;
+        if (tcsetattr(STDIN_FILENO, TCSAFLUSH, &new_tty) == 0)
+            use_raw = 1;
     }
-#endif
-    fputc('\n', stdout);
-    fflush(stdout);
+
+    for (;;) {
+        if (use_raw) {
+            ssize_t n = read(STDIN_FILENO, &c, 1);
+            if (n < 0) {
+                if (errno == EINTR)
+                    continue;
+                break;
+            }
+            if (n == 0)
+                break;
+            if (c == 3u) {
+                (void)write(STDOUT_FILENO, "^C\n", 3);
+                fputs(" Press any key to continue...", stdout);
+                fflush(stdout);
+                continue;
+            }
+            (void)tcsetattr(STDIN_FILENO, TCSAFLUSH, &old_tty);
+            fputc('\n', stdout);
+            fflush(stdout);
+            (void)sigaction(SIGINT, &sa_old, NULL);
+            return 0;
+        }
+        {
+            int ch = fgetc(stdin);
+            if (ch == EOF)
+                break;
+            if (ch == 3) {
+                fputs("^C\n Press any key to continue...", stdout);
+                fflush(stdout);
+                continue;
+            }
+            fputc('\n', stdout);
+            fflush(stdout);
+            (void)sigaction(SIGINT, &sa_old, NULL);
+            return 0;
+        }
+    }
+
+    if (use_raw)
+        (void)tcsetattr(STDIN_FILENO, TCSAFLUSH, &old_tty);
+    (void)sigaction(SIGINT, &sa_old, NULL);
+    return -1;
+#else
     return 0;
+#endif
 }
 
 static void wsl_portproxy_notice_setup_message(void) {
@@ -721,7 +759,7 @@ static int verb_host(int argc, char **argv) {
         pthread_mutex_unlock(&session_mutex);
 
         if (defer_hosting && wsl_portproxy_press_any_key() != 0)
-            return 0;
+            return 1;
 
         pthread_mutex_lock(&session_mutex);
         if (g_server_running) {
@@ -953,8 +991,9 @@ static int verb_leave(void) {
             if (needs_key)
                 wsl_portproxy_notice_teardown_message();
             pthread_mutex_unlock(&session_mutex);
-            if (!needs_key || wsl_portproxy_press_any_key() == 0)
-                wsl_portproxy_teardown_apply();
+            if (needs_key)
+                (void)wsl_portproxy_press_any_key();
+            wsl_portproxy_teardown_apply();
         }
         if (new_host == FL_NET_SERVER_MEMBER_ID_NONE) {
             fl_color_success("session terminated (no remaining members)");
@@ -997,8 +1036,9 @@ static int verb_kill(void) {
         if (needs_key)
             wsl_portproxy_notice_teardown_message();
         pthread_mutex_unlock(&session_mutex);
-        if (!needs_key || wsl_portproxy_press_any_key() == 0)
-            wsl_portproxy_teardown_apply();
+        if (needs_key)
+            (void)wsl_portproxy_press_any_key();
+        wsl_portproxy_teardown_apply();
     }
     fl_color_success("session terminated");
     return 0;
@@ -1323,8 +1363,9 @@ void cmd_server_atexit(void) {
             if (needs_key)
                 wsl_portproxy_notice_teardown_message();
             pthread_mutex_unlock(&session_mutex);
-            if (!needs_key || wsl_portproxy_press_any_key() == 0)
-                wsl_portproxy_teardown_apply();
+            if (needs_key)
+                (void)wsl_portproxy_press_any_key();
+            wsl_portproxy_teardown_apply();
         }
         return;
     }
