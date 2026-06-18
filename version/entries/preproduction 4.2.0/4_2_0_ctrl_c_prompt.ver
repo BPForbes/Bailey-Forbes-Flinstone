@@ -4,3 +4,5 @@ RELEASE_VERSION=0
 PRERELEASE=1
 DEV_VERSION=16
 DESCRIPTION=Interactive shell raw mode now lets Ctrl+C reach the line editor, so pressing ^C clears the current input and redraws a fresh shell> prompt instead of leaving stale text to execute; adds a pty regression test for the prompt behavior.
+
+RELEASE_DATE=2026-06-18
