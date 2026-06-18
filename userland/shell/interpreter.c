@@ -531,8 +531,8 @@ void interactive_shell(void) {
              * prints (background server / client events). */
             fl_shell_io_set_prompt_active(1, line, len, pos);
         }
-        disable_raw_mode();
         if (len > 0) {
+            disable_raw_mode();
             submit_single_command_interruptible(line);
             char **tmp_hist = realloc(g_interactive_history, sizeof(char *) * (g_interactive_history_count + 2));
             if (tmp_hist) {
