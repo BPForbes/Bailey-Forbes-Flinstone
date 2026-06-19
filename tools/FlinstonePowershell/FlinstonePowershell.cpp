@@ -963,6 +963,25 @@ static int run_cmd_batch(const char *batch) {
     }
 }
 
+/* Returns 1 if needle appears in haystack as a standalone port token
+   (not preceded or followed by another digit). */
+static int line_has_port_token(const char *haystack, const char *needle) {
+    const char *p = haystack;
+    size_t      len = strlen(needle);
+
+    if (len == 0)
+        return 0;
+    while ((p = strstr(p, needle)) != NULL) {
+        char before = (p > haystack) ? p[-1] : ' ';
+        char after  = p[len];
+        if (!std::isdigit(static_cast<unsigned char>(before)) &&
+            !std::isdigit(static_cast<unsigned char>(after)))
+            return 1;
+        p += len;
+    }
+    return 0;
+}
+
 static int portproxy_table_has_port(const char *port_s) {
     FILE *fp = _popen("netsh interface portproxy show v4tov4", "r");
     char  line[256];
@@ -970,7 +989,7 @@ static int portproxy_table_has_port(const char *port_s) {
     if (!fp)
         return 0;
     while (fgets(line, sizeof(line), fp)) {
-        if (strstr(line, port_s) != NULL) {
+        if (line_has_port_token(line, port_s)) {
             (void)_pclose(fp);
             return 1;
         }

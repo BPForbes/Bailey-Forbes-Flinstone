@@ -1,0 +1,42 @@
+MAJOR_VERSION=4
+STANDARD_VERSION=2
+RELEASE_VERSION=0
+DESCRIPTION<<PROMOTE_DESC_END
+4.2.0: Go-to-main (GM=1) — P3 networking milestone, WSL and native Linux integration, server foundations, and develop train closure.
+
+P3 networking (contracts/networking/ + kernel/core/net/):
+- P3-1 netdev registry with P2-3 authz hook; P3-2 software loopback (Ethernet+IPv4 frame path)
+- P3-3 Linux TAP (net_tap.c); P3-4 ARP cache, exchange, fl_net_arp_tick, gratuitous ARP
+- P3-5 IPv4 LPM routing, fl_net_route_configure_static, ICMP echo; P3-6 UDP datagram build + hosted wire egress
+- P3-7 TCP SYN probe + fl_net_tcp_stream_* hosted listen/connect/accept shim
+- P3-8 DNS A-record + AAAA stub via /etc/resolv.conf; P3-11 IPv6/ICMPv6/NDP loopback foundation
+- P3-10 Wi-Fi station contract + hosted lab scan/connect (wifi_router DB, shell wifi verbs)
+- P3-12 DHCP BOOTP codec; P3-14 background hub (ARP tick + socket task backend on MLQ)
+- Layered fl_net_packet_t / RX-TX pipeline (contract_p3_packet.h); net_wire_egress blended ARP+socket model
+- ASM-backed checksum/endian/syscall hot paths (arch/*/net_asm.*, net_wire_host_asm.*)
+- Shell ping/ping6, check requirements; make test_p3_network, make check-network-requirements
+- Bare-metal lab 802.3 netdev (net_baremetal.c); unified channel sidecar (PR #301)
+
+P3-13 server + messaging:
+- server host/join/msg/announce/nick/connected/leave/kill; udpsend/udplisten helpers
+- Multi-device LAN hosting, real Wi-Fi scan, home-SSID join without prior scan match
+- Native Linux hosted path: pthread recv loop, fl_net_task_backend hub relay, TCP/UDP socket shim
+- docs/P3_NETWORKING.md, docs/P3_13_CHAT_SERVER.md, docs/SERVER.md
+
+WSL integration (tools/FlinstonePowershell/ + net_wifi_host_linux.c):
+- FlinstonePowershell.exe: wifi-scan/join/leave/status, server-proxy/server-proxy-del/server-proxy-check
+- WSL server host exposes LAN via Windows netsh portproxy + advfirewall (elevated cmd.exe, no temp PS scripts)
+- UAC press-any-key gate + deferred "[Server] hosting as ..." line; teardown on kill/leave/exit + atexit
+- server-proxy-check preflight before UAC; server-bridge fallback for non-admin; make flinstone-ps-windows
+- Fix #317: portproxy_table_has_port() digit-boundary token match (80 no longer matches 8080/8000)
+
+Native Linux integration:
+- Hosted wire I/O via net_wire_host_syscall.c + arch ASM (sendto/recvfrom/bind) on x86_64 and AArch64
+- Linux TAP netdev, ip netns pcap test recipe (make test_netns_pcap), SKIP_TAP=1 CI escape hatch
+- Wi-Fi lab backend: wpa_cli/nmcli path when FL_NET_WIFI_HOSTED_LAB; FlinstonePowershell auto-discovery on WSL
+- install_deps.sh for apt toolchain bootstrap; drive.img blank auto-recovery (PR #312)
+
+Cross-cutting: umbrella GitHub issues #238–#267 (excl. #239 server); docs sync #234/#255/#261; SFTP adapter
+contracts; Replit agent rules; develop/main alignment after 4.1.1 GM=1 BUILD 3.
+VER_END
+PROMOTE_DESC_END
