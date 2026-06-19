@@ -24,6 +24,8 @@ PRE 4.2.0: WSL server host UAC gate — press any key and deferred hosting line
   before NOTICE/UAC when portproxy elevation is required (not a TCP bind probe)
 - FlinstonePowershell server-proxy: netsh-only via elevated cmd.exe (no temp
   PowerShell scripts or New-NetFirewallRule module load) for faster UAC apply
+- docs/ROADMAP.md and docs/P3_NETWORKING.md: P3 snapshot (~✅ all rows, P3→P4
+  gate met), PR #315 WSL hosting UX, implementation map pointers
 VER_END
 
 RELEASE_DATE=2026-06-17
