@@ -963,23 +963,24 @@ static int run_cmd_batch(const char *batch) {
     }
 }
 
-/* Returns 1 if needle appears in haystack as a standalone port token
-   (not preceded or followed by another digit). */
-static int line_has_port_token(const char *haystack, const char *needle) {
-    const char *p = haystack;
-    size_t      len = strlen(needle);
+/* Parse one netsh portproxy v4tov4 data row; compare listen/connect port columns only
+   (avoids false positives from IP octets like 192.168.1.80 matching port "80"). */
+static int portproxy_line_has_port(const char *line, const char *port_s) {
+    char listen_addr[64];
+    char listen_port[16];
+    char connect_addr[64];
+    char connect_port[16];
 
-    if (len == 0)
+    if (sscanf(line, " %63s %15s %63s %15s",
+               listen_addr, listen_port, connect_addr, connect_port) != 4)
         return 0;
-    while ((p = strstr(p, needle)) != NULL) {
-        char before = (p > haystack) ? p[-1] : ' ';
-        char after  = p[len];
-        if (!std::isdigit(static_cast<unsigned char>(before)) &&
-            !std::isdigit(static_cast<unsigned char>(after)))
-            return 1;
-        p += len;
-    }
-    return 0;
+    if (strcmp(listen_addr, "Address") == 0)
+        return 0;
+    if (strchr(listen_addr, '-') != NULL)
+        return 0;
+    if (!is_valid_port(listen_port) || !is_valid_port(connect_port))
+        return 0;
+    return (strcmp(listen_port, port_s) == 0 || strcmp(connect_port, port_s) == 0);
 }
 
 static int portproxy_table_has_port(const char *port_s) {
@@ -989,7 +990,7 @@ static int portproxy_table_has_port(const char *port_s) {
     if (!fp)
         return 0;
     while (fgets(line, sizeof(line), fp)) {
-        if (line_has_port_token(line, port_s)) {
+        if (portproxy_line_has_port(line, port_s)) {
             (void)_pclose(fp);
             return 1;
         }

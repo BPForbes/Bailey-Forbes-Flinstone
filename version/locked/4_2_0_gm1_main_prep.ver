@@ -28,7 +28,8 @@ WSL integration (tools/FlinstonePowershell/ + net_wifi_host_linux.c):
 - WSL server host exposes LAN via Windows netsh portproxy + advfirewall (elevated cmd.exe, no temp PS scripts)
 - UAC press-any-key gate + deferred "[Server] hosting as ..." line; teardown on kill/leave/exit + atexit
 - server-proxy-check preflight before UAC; server-bridge fallback for non-admin; make flinstone-ps-windows
-- Fix #317: portproxy_table_has_port() digit-boundary token match (80 no longer matches 8080/8000)
+- Fix #317: portproxy_table_has_port() parses netsh listen/connect port columns
+  (80 no longer matches 8080/8000 or IP octets like 192.168.1.80)
 
 Native Linux integration:
 - Hosted wire I/O via net_wire_host_syscall.c + arch ASM (sendto/recvfrom/bind) on x86_64 and AArch64
