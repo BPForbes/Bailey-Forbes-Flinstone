@@ -15,6 +15,7 @@ This document is the **single platform roadmap** for Flinstone: phased goals (**
 | **Phase 0–9** | Feature IDs, goals, acceptance |
 | [QEMU lab bring-up](qemu-lab.md) | Phase **8** external **QEMU** recipes (**`-M`**, virtio, TAP, **`-icount`**) |
 | [Module contracts](#module-contracts-abstraction-and-p0-p9-coverage) | **Data-distribution contracts**: abstraction + **P0–P9** ❌/⚠️/✅ snapshot (see table). |
+| [Background jobs](#background-jobs-kernel-workqueues) | **P1-8** framework + domain jobs (kswapd, writeback, kworker, net, RCU, watchdog). Detail: **`docs/BACKGROUND_JOBS.md`**. |
 | [Platform credibility (extended)](#platform-credibility--extended-sections-11-and-12) | **§11–§12** + staffing note only |
 | [Appendix A–D](#appendix-a--standards-map-non-exhaustive) | Standards index, DoD template, first vertical slice, bare-metal checklist |
 
@@ -43,7 +44,7 @@ Unless stated otherwise, **start at H**, prove APIs and tests, then **lift** the
 
 ## Module contracts (abstraction and P0-P9 coverage)
 
-This section is **normative for terminology** in this repo: what we mean by a **module contract**, how it differs from **functionality**, and a **snapshot** of how far **`develop`** has explicit **data-distribution** models for each **`P*-*` roadmap row**. For **P0-1** and **P0-2**, the snapshot also tracks the **normative C bundle** under **`contracts/foundations/`**; for **P1-1** … **P1-7**, it tracks the **P1 runtime bundle** under **`contracts/runtime/`**; for **P2-1** … **P2-4**, it tracks the **P2 identity bundle** under **`contracts/identity/`**; for **P3-1** … **P3-12**, it tracks the **P3 networking bundle** under **`contracts/networking/`**; for **P4-1** … **P4-7**, it tracks the **P4 driver / hardware-facing bundle** under **`contracts/drivers/`**; for **P5-1** … **P5-3**, it tracks the **P5 storage / VFS bundle** under **`contracts/storage/`**; for **P6-1** … **P6-5**, it tracks the **P6 observability bundle** under **`contracts/observability/`**; for **P7-1** … **P7-3**, it tracks the **P7 operations bundle** under **`contracts/operations/`**; for **P8-1** … **P8-3**, it tracks the **P8 virtualization bundle** under **`contracts/virtualization/`**; for **P9-1** … **P9-3**, it tracks the **P9 hardening bundle** under **`contracts/hardening/`** (see the table notes below).
+This section is **normative for terminology** in this repo: what we mean by a **module contract**, how it differs from **functionality**, and a **snapshot** of how far **`develop`** has explicit **data-distribution** models for each **`P*-*` roadmap row**. For **P0-1** and **P0-2**, the snapshot also tracks the **normative C bundle** under **`contracts/foundations/`**; for **P1-1** … **P1-7**, it tracks the **P1 runtime bundle** under **`contracts/runtime/`**; for **P2-1** … **P2-4**, it tracks the **P2 identity bundle** under **`contracts/identity/`**; for **P3-1** … **P3-12**, it tracks the **P3 networking bundle** under **`contracts/networking/`**; for **P4-1** … **P4-7**, it tracks the **P4 driver / hardware-facing bundle** under **`contracts/drivers/`**; for **P5-1** … **P5-7**, it tracks the **P5 storage / VFS bundle** under **`contracts/storage/`**; for **P6-1** … **P6-5**, it tracks the **P6 observability bundle** under **`contracts/observability/`**; for **P7-1** … **P7-3**, it tracks the **P7 operations bundle** under **`contracts/operations/`**; for **P8-1** … **P8-3**, it tracks the **P8 virtualization bundle** under **`contracts/virtualization/`**; for **P9-1** … **P9-3**, it tracks the **P9 hardening bundle** under **`contracts/hardening/`** (see the table notes below).
 
 **P2 is not a second copy of P0.** **P0** freezes **cross-cutting outcomes and surfaces** (`fl_result_t`, logging and auth wiring, arch CI slices). **P2** freezes **who may act and under what proof** (principal, credentials, authorization, elevation). P2 headers **inherit** P0 and P1 so identity policy uses the same **error and authz vocabulary**; that is **reuse**, not the same roadmap phase. Phase **2** product goals (service-layer principals, hosted credential layout, enforcement depth, elevation UX) remain in the **Phase 2** table and in **TODO** callouts (notably **TODO: P2-3** later in this file).
 
@@ -88,15 +89,15 @@ Two columns track different concerns:
 
 **P0 row criterion (aligned with `contracts/foundations/`):** **P0-1** through **P0-8** are **✅** when the normative **C contract bundle** under **`contracts/foundations/`** defines that row: **P0-1**/**P0-2** via **`contract_foundations.h`**, **`contract_result.h`**, log/auth/driver wiring, **`contract_extend.h`**, and **`contract_compile_ext.h`**; **P0-3**–**P0-8** via **`contract_p0_ci.h`**, **`contract_p0_arm_gic.h`**, **`contract_p0_x86_idt.h`**, **`contract_p0_x86_gdt.h`**, **`contract_p0_fdt.h`**, and **`contract_p0_uart.h`** (obligations as comments + **`FL_CONTRACT_P0_*_CONTRACT_DEFINED`** markers). **Implementation completion** for IRQ/DTB/UART/CI still follows phase gates and **Appendix D**; this snapshot tracks **contract definition**, not “all silicon paths verified.”
 
-**P1 row criterion (aligned with `contracts/runtime/`):** **P1-1** through **P1-7** are **✅** when the normative **C contract bundle** under **`contracts/runtime/`** defines that row via **`contract_runtime.h`** (umbrella) and the **`contract_p1_*.h`** shards (**`FL_CONTRACT_P1_*_CONTRACT_DEFINED`** markers). **Kernel / scheduler / MM implementation** still follows phase gates (e.g. **P1 → P2**); this snapshot tracks **contract definition**, not full **B**-path validation of PMM or arenas.
+**P1 row criterion (aligned with `contracts/runtime/`):** **P1-1** through **P1-7** are **✅** when the normative **C contract bundle** under **`contracts/runtime/`** defines that row via **`contract_runtime.h`** (umbrella) and the **`contract_p1_*.h`** shards (**`FL_CONTRACT_P1_*_CONTRACT_DEFINED`** markers). **P1-8**–**P1-10** are **✅** for **contract completion** (**`contract_p1_workqueue.h`**, **`contract_p1_reclaim.h`**, **`contract_p1_watchdog.h`** in **`contract_runtime.h`**); **P1-8** module integration **~✅** (**`make test_workqueue_p18`**, **#242**). **P1-9**/**P1-10** integration **❌** (stub handlers). **P3-14** contract **✅** (**`contract_p3_background.h`**); integration **~✅** (ARP sweep on workqueue; TCP timer wheel / RX dequeue TODO). **P4-8**, **P5-4**, **P9-4** contract shards exist; integration **❌**—see **[Background jobs](#background-jobs-kernel-workqueues)**. **Kernel / scheduler / MM implementation** still follows phase gates (e.g. **P1 → P2**); this snapshot tracks **contract definition**, not full **B**-path validation of PMM or arenas.
 
 **P2 row criterion (aligned with `contracts/identity/`):** **P2-1** through **P2-4** are **✅** when the normative **C contract bundle** under **`contracts/identity/`** defines that row via **`contract_identity.h`** (umbrella, inheriting **`contract_runtime.h`**) and the matching **`contract_p2_*.h`** shards (**`FL_CONTRACT_P2_*_CONTRACT_DEFINED`** markers). **Phase 2** implementation (principal wiring, lab credential files, central **`can_*`** enforcement, elevation UX) still follows phase gates and **TODO: P2-3** below; this snapshot tracks **contract definition**, not “middleware fully enforced” or “Phase **2** shipped.”
 
-**P3 row criterion (aligned with `contracts/networking/`):** **P3-1** through **P3-12** are **✅** here when the normative **C contract bundle** under **`contracts/networking/`** defines that row via **`contract_networking.h`** (umbrella: **`contract_extend.h`** + **`contract_p3_wire.h`** + **`contract_p3_trust.h`**, then **`contract_p3_*.h`** shards with **`FL_CONTRACT_P3_*_CONTRACT_DEFINED`** markers). **`contract_p3_trust.h`** composes the **P2-3** `fl_authz_operation_t` slice only so **P3** is **not** an include-graph clone of **`contract_identity.h`**. **P3-10** / **P3-11** shards record explicit **`[DEFERRED]`** scope at the **contract-definition** layer. **Phase 3** implementation (stack, drivers, CI interop) still follows phase gates below; this snapshot tracks **contract definition**, not “UDP/TCP/TLS shipped.”
+**P3 row criterion (aligned with `contracts/networking/`):** **P3-1** through **P3-14** are **✅** here when the normative **C contract bundle** under **`contracts/networking/`** defines that row via **`contract_networking.h`** (umbrella: **`contract_extend.h`** + **`contract_p3_wire.h`** + **`contract_p3_packet.h`** (layered packet/pipeline vocabulary, not a **P3-*** row) + **`contract_p3_trust.h`**, then **`contract_p3_*.h`** shards with **`FL_CONTRACT_P3_*_CONTRACT_DEFINED`** markers). **`contract_p3_trust.h`** composes the **P2-3** `fl_authz_operation_t` slice only so **P3** is **not** an include-graph clone of **`contract_identity.h`**. **P3-10** / **P3-11** shards record explicit **`[DEFERRED]`** scope at the **contract-definition** layer. **Phase 3** implementation (stack, drivers, CI interop) still follows phase gates below; the **Module integration** column tracks **`kernel/core/net/`**, **`userland/command/`** (shell verbs), **`tools/FlinstonePowershell/`** (WSL→Windows bridge), and hosted shims on **`develop`** / **PRE 4.2.0** trains — file-level map: **`docs/P3_NETWORKING.md`**. **Snapshot (PRE 4.2.0):** every **P3-*** row is **contract ✅** and **integration ~✅** (no **❌**); **~✅** = usable **H-track** lab subset, not bare-metal/native-NIC production. The **P3 → P4** gate (**P3-2** loopback + **P3-6** UDP stable; **P3-3** TAP CI policy) is **met**; remaining tails (**#238**, **#279**, **#280**, native **`fl_socket`**, **P5** file delivery) are documented deferrals, not missing rows. Legend: **✅** shipped to phase acceptance; **~✅** usable lab subset (shell **`ping`** / **`check requirements`**, CUnit, documented skips); **⚠️** started but below row goals; **❌** no in-tree implementation.
 
 **P4 row criterion (aligned with `contracts/drivers/`):** **P4-1** through **P4-7** are **✅** for **contract completion** when the normative **C contract bundle** under **`contracts/drivers/`** defines that row via **`contract_drivers.h`** (umbrella: **`contract_extend.h`**, then **`contract_p4_*.h`** shards with **`FL_CONTRACT_P4_*_CONTRACT_DEFINED`** markers). **Module integration** is tracked separately: lab helpers under **`kernel/drivers/p4_*.c`** and **`fl/driver/p4_*.h`** (driver lock self-test, IRQ hardirq/BH, PCIe BAR/MSI, virtio golden-vector, xHCI MMIO/TRB, FDT walk, PSCI status mapping). A **full USB hub tree**, production virtio on metal, and bare-metal PSCI SMC remain **P4→P5** gates—not required for contract **✅**.
 
-**P5 row criterion (aligned with `contracts/storage/`):** **P5-1** through **P5-3** are **✅** for **contract completion** when the normative **C contract bundle** under **`contracts/storage/`** defines that row via **`contract_storage.h`** (**`FL_CONTRACT_P5_STORAGE_REV` 2**; umbrella: **`contract_extend.h`**, then **`contract_p5_*.h`** shards with **`FL_CONTRACT_P5_*_CONTRACT_DEFINED`** markers). **Module integration** (mount tables wired to real roots, pluggable backends beyond lab FAT32, unified buffer cache with net/block) still follows Phase **5** gates; this snapshot tracks **contract definition**, not “full root filesystem on **B**.”
+**P5 row criterion (aligned with `contracts/storage/`):** **P5-1** through **P5-7** are **✅** for **contract completion** when the normative **C contract bundle** under **`contracts/storage/`** defines that row via **`contract_storage.h`** (**`FL_CONTRACT_P5_STORAGE_REV` 4**; umbrella: **`contract_extend.h`**, then **`contract_p5_*.h`** shards with **`FL_CONTRACT_P5_*_CONTRACT_DEFINED`** markers). **P5-5**–**P5-7** freeze **server_share** staging, cross-user **file delivery** metadata, and **member identity** disambiguation for the **P3-13** server product (**`docs/SERVER.md`**). **Module integration** (mount tables wired to real roots, pluggable backends beyond lab FAT32, unified buffer cache with net/block, **`server_share/`** on disk) still follows Phase **5** gates; this snapshot tracks **contract definition**, not “full root filesystem on **B**.”
 
 **P6 row criterion (aligned with `contracts/observability/`):** **P6-1** through **P6-5** are **✅** for **contract completion** when the normative **C contract bundle** under **`contracts/observability/`** defines that row via **`contract_observability.h`** (**`FL_CONTRACT_P6_OBSERVABILITY_REV` 2**; umbrella: **`contract_extend.h`**, then **`contract_p6_*.h`** shards with **`FL_CONTRACT_P6_*_CONTRACT_DEFINED`** markers). **P6-1** composes **`contract_log.h`** from foundations rather than redefining sink types. **Module integration** (hosted rotation/fsync policy, tamper-evident segments, trace emitters on hot paths) still follows Phase **6** gates and **TODO: P6-*** callouts below; this snapshot tracks **contract definition**, not “full **RFC 5424** export” or “signed audit segments shipped.”
 
@@ -104,7 +105,7 @@ Two columns track different concerns:
 
 **P8 row criterion (aligned with `contracts/virtualization/`):** **P8-1** through **P8-3** are **✅** for **contract completion** when the normative **C contract bundle** under **`contracts/virtualization/`** defines those rows via **`contract_virtualization.h`** (**`FL_CONTRACT_P8_VIRTUALIZATION_REV` 1**; umbrella: **`contract_extend.h`**, then **`contract_p8_timing.h`**, **`contract_p8_virtio_guest.h`**, and **`contract_p8_qemu_lab.h`** with **`FL_CONTRACT_P8_*_CONTRACT_DEFINED`** markers). **P4-4** virtio queue mechanics remain **`contracts/drivers/`**; include **`contract_drivers.h`** only where a translation unit programs rings. **Module integration** stays **❌** in this snapshot until **Phase 8** gates land (e.g. **NIC** replay in **`make test_replay`**, inter-VM automation beyond static docs, **VM** parity on metal where claimed). **`docs/qemu-lab.md`**, **`contracts json`** (**`p8_virtualization_rev`**), **`make test_invariants`**, and **`scripts/baseline_tests.sh`** are **contract-packaging / verification** aids—they do **not** finalize the integration column.
 
-**P9 row criterion (aligned with `contracts/hardening/`):** **P9-1** through **P9-3** are **✅** for **contract completion** when the normative **C contract bundle** under **`contracts/hardening/`** defines those rows via **`contract_hardening.h`** (**`FL_CONTRACT_P9_HARDENING_REV` 1**; umbrella: **`contract_extend.h`**, then **`contract_p9_fuzz.h`**, **`contract_p9_static_analysis.h`**, and **`contract_p9_smp.h`** with **`FL_CONTRACT_P9_*_CONTRACT_DEFINED`** markers). **Lock ordering** and **PSCI** mechanics remain **`contracts/runtime/`** and **`contracts/drivers/`**; include those umbrellas where bring-up code is implemented. **Module integration** stays **❌** in this snapshot until **Phase 9** gates land (production fuzz harnesses in CI, Coverity/static-analysis upload baselines, bare-metal secondaries online). **P9** headers plus **`contracts json`** (**`p9_hardening_rev`**), **`make test_invariants`**, and **`scripts/baseline_tests.sh`** record vocabulary and wiring checks—they do **not** finalize the integration column.
+**P9 row criterion (aligned with `contracts/hardening/`):** **P9-1** through **P9-4** are **✅** for **contract completion** when the normative **C contract bundle** under **`contracts/hardening/`** defines those rows via **`contract_hardening.h`** (**`FL_CONTRACT_P9_HARDENING_REV` 2**; umbrella: **`contract_extend.h`**, then **`contract_p9_fuzz.h`**, **`contract_p9_static_analysis.h`**, **`contract_p9_smp.h`**, and **`contract_p9_rcu.h`** with **`FL_CONTRACT_P9_*_CONTRACT_DEFINED`** markers). **Lock ordering** and **PSCI** mechanics remain **`contracts/runtime/`** and **`contracts/drivers/`**; include those umbrellas where bring-up code is implemented. **Module integration** stays **❌** in this snapshot until **Phase 9** gates land (production fuzz harnesses in CI, Coverity/static-analysis upload baselines, bare-metal secondaries online). **P9** headers plus **`contracts json`** (**`p9_hardening_rev`**), **`make test_invariants`**, and **`scripts/baseline_tests.sh`** record vocabulary and wiring checks—they do **not** finalize the integration column.
 
 | ID | Topic | Contract completion | Module integration |
 |----|--------|---------------------|-------------------|
@@ -123,22 +124,27 @@ Two columns track different concerns:
 | **P1-5** | Memory domain arenas | ✅ | ~✅ |
 | **P1-6** | Driver model reentrancy | ✅ | ~✅ |
 | **P1-7** | Timekeeping | ✅ | ~✅ |
+| **P1-8** | Background jobs (workqueues) | ✅ | ~✅ |
+| **P1-9** | Memory reclaim job (`kswapd`) | ✅ | ❌ |
+| **P1-10** | Watchdog / health monitor | ✅ | ❌ |
 | **P2-1** | Principal model | ✅ | ✅ |
 | **P2-2** | Credential store (hosted) | ✅ | ✅ |
 | **P2-3** | Authorization middleware | ✅ | ~✅ |
 | **P2-4** | Sudo-like elevation (hosted) | ✅ | ✅ |
-| **P3-1** | Device abstraction (`netdev`) | ✅ | ⚠️ |
-| **P3-2** | Loopback (software) | ✅ | ⚠️ |
-| **P3-3** | TAP backend (hosted only) | ✅ | ⚠️ |
-| **P3-4** | ARP | ✅ | ⚠️ |
-| **P3-5** | IPv4 | ✅ | ⚠️ |
-| **P3-6** | UDP | ✅ | ⚠️ |
-| **P3-12** | DHCP client (IPv4) | ✅ | ⚠️ |
-| **P3-7** | TCP (large) | ✅ | ⚠️ |
-| **P3-8** | DNS client | ✅ | ⚠️ |
-| **P3-9** | TLS (hosted) | ✅ | ⚠️ |
-| **P3-10** | Wi‑Fi station path `[DEFERRED]` | ✅ | ❌ |
-| **P3-11** | IPv6 + ICMPv6 `[DEFERRED]` | ✅ | ❌ |
+| **P3-1** | Device abstraction (`netdev`) | ✅ | ~✅ |
+| **P3-2** | Loopback (software) | ✅ | ~✅ |
+| **P3-3** | TAP backend (hosted only) | ✅ | ~✅ |
+| **P3-4** | ARP | ✅ | ~✅ |
+| **P3-5** | IPv4 | ✅ | ~✅ |
+| **P3-6** | UDP | ✅ | ~✅ |
+| **P3-12** | DHCP client (IPv4) | ✅ | ~✅ |
+| **P3-13** | Chat room (`server`) | ✅ | ~✅ |
+| **P3-14** | Net stack background jobs | ✅ | ~✅ |
+| **P3-7** | TCP (large) | ✅ | ~✅ |
+| **P3-8** | DNS client | ✅ | ~✅ |
+| **P3-9** | TLS (hosted) | ✅ | ~✅ |
+| **P3-10** | Wi‑Fi station path `[DEFERRED]` | ✅ | ~✅ |
+| **P3-11** | IPv6 + ICMPv6 | ✅ | ~✅ |
 | **P4-1** | Driver model v2 | ✅ | ✅ |
 | **P4-2** | IRQ lifecycle | ✅ | ✅ |
 | **P4-3** | PCIe config space access (lab) | ✅ | ⚠️ |
@@ -146,9 +152,14 @@ Two columns track different concerns:
 | **P4-5** | USB stack | ✅ | ⚠️ |
 | **P4-6** | FDT-driven machine discovery (lab) | ✅ | ⚠️ |
 | **P4-7** | PSCI client (AArch64) | ✅ | ⚠️ |
+| **P4-8** | Deferred IRQ work (`kworker`) | ✅ | ❌ |
 | **P5-1** | VFS layer | ✅ | ❌ |
 | **P5-2** | Pluggable FS | ✅ | ❌ |
 | **P5-3** | Page cache | ✅ | ❌ |
+| **P5-4** | Dirty page writeback job | ✅ | ❌ |
+| **P5-5** | Server share staging (`server_share/`) | ✅ | ❌ |
+| **P5-6** | Cross-user file delivery (server send -file) | ✅ | ❌ |
+| **P5-7** | Server member identity (principal + member_id) | ✅ | ❌ |
 | **P6-1** | Structured log API (sink / line path) | ✅ | ⚠️ |
 | **P6-2** | Ring buffer sink | ✅ | ⚠️ |
 | **P6-3** | Persistent log (hosted) | ✅ | ❌ |
@@ -164,8 +175,9 @@ Two columns track different concerns:
 | **P9-1** | Fuzzing | ✅ | ❌ |
 | **P9-2** | Coverity / static analysis | ✅ | ❌ |
 | **P9-3** | SMP bring-up (B) | ✅ | ❌ |
+| **P9-4** | RCU grace-period jobs | ✅ | ❌ |
 
-**Summary:** **Contract completion** — **P0-1**–**P0-8**, **P1-1**–**P1-7**, **P2-1**–**P2-4**, **P3-1**–**P3-12** (including **`[DEFERRED]`** shards), **P4-1**–**P4-7**, **P5-1**–**P5-3**, **P6-1**–**P6-5**, **P7-1**–**P7-3**, **P7 (batch)**, **P8-1**–**P8-3**, and **P9-1**–**P9-3** are **✅** under their **`contracts/*`** bundles. **Module integration (P0–P2)** — **✅:** **P0-1**–**P0-3**, **P0-6**–**P0-8**, **P1-1**, **P2-1**, **P2-2**, **P2-4** (hosted/lab wired and tested on **4.1.0**). **~✅:** **P1-7** (hosted POSIX `clock_gettime` only; **B** Generic Timer / **P0-5** tick follow-up). **~✅:** **P0-4**, **P0-5** (arch **B** evidence TODOs), **P1-2**–**P1-6** (**B** PMM/arena/NASM), **P2-3** (netdev/mount/FileManager gates). See **`docs/p0_p2_pr_coverage.md`**. **P3** onward unchanged (**⚠️**/**❌**). **P4-1**/**P4-2** **✅**; **P8**/**P9** integration **❌** here.
+**Summary:** **Contract completion** — **P0-1**–**P0-8**, **P1-1**–**P1-7**, **P2-1**–**P2-4**, **P3-1**–**P3-14** (including **`[DEFERRED]`** shards), **P4-1**–**P4-7**, **P5-1**–**P5-7**, **P6-1**–**P6-5**, **P7-1**–**P7-3**, **P7 (batch)**, **P8-1**–**P8-3**, and **P9-1**–**P9-3** are **✅** under their **`contracts/*`** bundles. **Module integration (P0–P2)** — **✅:** **P0-1**–**P0-3**, **P0-6**–**P0-8**, **P1-1**, **P2-1**, **P2-2**, **P2-4** (hosted/lab wired and tested on **4.1.0**). **~✅:** **P1-7** (hosted POSIX `clock_gettime` only; **B** Generic Timer / **P0-5** tick follow-up). **~✅:** **P0-4**, **P0-5** (arch **B** evidence TODOs), **P1-2**–**P1-6** (**B** PMM/arena/NASM), **P2-3** (guest deny suite + shell gates; netdev hook on **PRE 4.2.0** **`ping`** path—see **TODO: P2-3**). See **`docs/p0_p2_pr_coverage.md`**. **Module integration (P3, PRE 4.2.0)** — **~✅:** **P3-1**–**P3-14** (in-tree stack under **`kernel/core/net/`** + **`fl_net_packet_t`** layering, hosted socket/TCP stream shim, DHCP codec/lab client, ARP sweep on workqueue, TLS sizing hook, **server** foundations from `#239` / PR `#282` — `server host/join/leave/kill/announce/msg/nick` + `udpsend` / `udplisten` + `arp` / `ifconfig` / `route` / `netstat` / `nslookup` / `netsh` distro-style verbs; **PR #315** WSL LAN portproxy/firewall UX via **`FlinstonePowershell.exe`** + **`net_wifi_host_linux.c`**, UAC press-any-key gate, exit teardown, faster netsh apply; **`make test_p3_network`** / `make test_p3_server` / `make test_p3_udp_cmds` / `make test_p3_net_tools`; TAP/interop skips documented). Deferred siblings tracked: `#283` (`OP_CTRL_HOST_PROMOTE6`), `#280` (IPv6 wire/TCPv6), `#279` (Wi‑Fi production NIC), native non-hosted `fl_socket` (gated on **P3-7**) — see **`docs/P3_13_FOLLOWUP.md`**. **P3-10** / **P3-11** module integration **~✅** foundation (**#279** PR #306, **#280** PR #301); production Wi‑Fi NIC/WPA/TWT tail on **#279** / **P4**. Detail: **`docs/P3_NETWORKING.md`**, **`docs/GITHUB_ISSUE_SYNC_279.md`**. **P4-1**/**P4-2** **✅**; **P8**/**P9** integration **❌** here.
 
 ---
 
@@ -176,7 +188,7 @@ Use this table when asking what “**the next A release**” means in terms of p
 | Release | Phases / artifacts targeted (summary) | Example gate criteria |
 |---------|----------------------------------------|------------------------|
 | **A1** | **P0** + **Appendix D** execution rows **1–7** (through spinlocks / driver reentrancy) | Default CI green; **P0-1** subsystem headers stable; bare-metal IRQ + table races not blocking K/B bring-up |
-| **A2** | **P1** + **P2** + **P3** through **P3-6** (UDP) with loopback + TAP path | **P1-4**/**P1-5** PMM/arenas validated on **B** where applicable; **P2-3** authz tests deny guest on privileged ops; UDP/loopback interop tests in CI or documented skip |
+| **A2** | **P1** + **P2** + **P3** through **P3-6** (UDP) with loopback + TAP path | **P1-4**/**P1-5** PMM/arenas validated on **B** where applicable; **P2-3** authz tests deny guest on privileged ops; UDP/loopback interop tests in CI or documented skip. **PRE 4.2.0** progress: loopback + ARP + LPM + hosted UDP/ICMP/DNS + DHCP codec (**~✅**); **P3-13** **`server`** app **~✅** (PR #282 foundations + #239 `udpsend`/`udplisten` + PR #315 WSL portproxy/UAC hosting UX) |
 | **A3** | **P4** (virtio **P4-4** + IRQ model) + **P6-1**/**P6-2** logging | Virtio ring / golden vectors; **no sleep in hardirq** asserts in debug builds; structured log + ring buffer under test |
 | **A4** | **P5**–**P9** as needed (VFS, VM fidelity, hardening) | **P9-1** fuzz triage workflow; **P9-3** SMP bring-up documented with arch memory-model refs + **PSCI** (**P4-7**) where AArch64 applies |
 
@@ -189,7 +201,7 @@ Use this table when asking what “**the next A release**” means in terms of p
 | **P0 → P1** | CI green on default matrix; **P0-2** result type merged; **P0-4** GIC EOI fixed on aarch64 bare-metal **or** issue-linked waiver; **P0-5**/**P0-6** on critical x86_64 paths per **Appendix D**; for **B**/**AArch64** beyond fixed QEMU hacks: **P0-7** DTB handoff **or** documented waiver |
 | **P1 → P2** | **P1-3** lock-ordering graph committed; **P1-4** PMM **P1-5** arenas behave in **DRIVERS_BAREMETAL** builds; **P1-6** `s_model_lock` guards driver tables |
 | **P2 → P3** | **P2-3** unit tests deny guest for **≥3** privileged operations; audit hook stub or **P6** path records denies |
-| **P3 → P4** | **P3-2** loopback + **P3-6** UDP stable; TAP (**P3-3**) policy documented for CI |
+| **P3 → P4** | **P3-2** loopback + **P3-6** UDP stable; TAP (**P3-3**) policy documented for CI — **satisfied on PRE 4.2.0 / develop** (native NIC / production Wi‑Fi / bare-metal wire proof remain **P4**-class) |
 | **P4 → P5** | **P4-2** IRQ lifecycle + **P4-4** virtio-blk proof on VM track **if** native block-backed VFS is in scope |
 | **P5 → P6** | VFS mount semantics + one RO FS story documented alongside `version/entries` |
 
@@ -222,6 +234,13 @@ flowchart TD
   P0_7[P0-7 DTB metadata] --> P4_6[P4-6 FDT discovery]
   P4_7[P4-7 PSCI client] --> P9_3[P9-3 SMP]
   P1_7[P1-7 arch time] --> P3_7[P3-7 TCP]
+  P1_8[P1-8 workqueues] --> P1_9[P1-9 kswapd]
+  P1_8 --> P4_8[P4-8 kworker]
+  P1_8 --> P3_14[P3-14 net background]
+  P1_8 --> P5_4[P5-4 writeback]
+  P1_3 --> P9_4[P9-4 RCU jobs]
+  P9_3[P9-3 SMP] --> P9_4
+  P1_8 --> P1_10[P1-10 watchdog]
 ```
 
 ---
@@ -240,6 +259,27 @@ Phases and **A** milestones are **dependency-ordered**, but real releases often 
 | **PSCI ↔ SMP** | **P4-7** (`CPU_ON`, **DEN0022**) + **`cpus` / `psci` nodes** in DT | **P9-3** secondary cores on AArch64; coordinates with **P1-3**/**P1-6** locking |
 | **Time** (**P1-7**) | Arch **Generic Timer** (AArch64) or **P0-5** tick path (x86) | **P3-7** TCP RTOs; **P3-9** cert validity windows; **P6** **RFC 5424** timestamps; optional **RFC 5905** NTP on **H** |
 | **IPv6** (**P3-11** when promoted) | **P3-1** L2 + neighbor discovery | Dual-stack next to **P3-5**; **P3-8** **AAAA** already anticipates records |
+| **Background jobs** | **P1-8** workqueue + **P1-7** timers | **P3-14** net timers/RX; **P4-8** IRQ bottom halves; **P5-4** writeback; **P1-9** reclaim; **P9-4** RCU (**P9-3**); **P1-10** watchdog |
+
+---
+
+## Background jobs (kernel workqueues)
+
+Real kernels run much of their work **asynchronously**—outside the interrupt handler and outside the user’s interactive path—via **kernel threads**, **workqueues**, and periodic **daemons**. Flinstone maps those roles to explicit roadmap rows so subsystems do not grow ad-hoc **`pthread`** or polling loops.
+
+**Implementation guide:** **`docs/BACKGROUND_JOBS.md`**.
+
+| Linux-style role | Flinstone row | Depends on |
+|------------------|---------------|------------|
+| **Workqueue / `kthread` framework** | **P1-8** | **P1-3**, **P1-1** |
+| **`kswapd` (memory reclaim)** | **P1-9** | **P1-8**, **P1-4**, **P1-5** |
+| **`flush` / writeback (dirty pages)** | **P5-4** | **P1-8**, **P5-3**, **P4-4** |
+| **`kworker` (deferred IRQ work)** | **P4-8** | **P1-8**, **P4-2** |
+| **Net stack background (RX queue, TCP timers, ARP sweep)** | **P3-14** | **P1-8**, **P3-1**, **P3-7**, **P1-7** |
+| **`rcuop` / `rcuc` (RCU grace)** | **P9-4** | **P1-8**, **P9-3**, **P1-3** |
+| **Watchdog / health monitor** | **P1-10** | **P1-8**, **P1-7**, **P0-5** |
+
+**Userland note:** **P3-13** **`server`** chat uses a **hosted shell background thread** (**`docs/P3_13_CHAT_SERVER.md`**). That is intentional for **H** labs; kernel **P1-8** still owns supervisor-side async work (net timers, reclaim, writeback).
 
 ---
 
@@ -273,8 +313,11 @@ These items unblock almost everything else.
 | **P1-5** | **Memory domain arenas** | Domains backed by **fixed arenas** (libc-free on **DRIVERS_BAREMETAL**), not discarded `malloc` wrappers. | **Appendix D** §2.1 / execution row **6**; exhaustion visible; sizes documented per domain. |
 | **P1-6** | **Driver model reentrancy** | `s_model_lock` (and related) guard static registration / IRQ dispatch tables. | **Appendix D** §2.4 / execution row **7**; concurrent probe/remove stress test or static review checklist until HW CI exists. |
 | **P1-7** | **Timekeeping (arch timers + POSIX view on H)** | **AArch64:** **ARM Generic Timer** (`CNTPCT_EL0` / `CNTVCT_EL0`, control regs per **ARM ARM** §D11). **x86_64:** align **P0-5** PIT/APIC/HPET story in one doc. **H:** **POSIX.1** `clock_gettime(CLOCK_MONOTONIC)` as reference clock. | Single doc names **which counter** backs **TCP** timeouts (**P3-7**), **TLS** time checks (**P3-9**), and **RFC 5424** timestamps (**P6**). Optional **RFC 5905** (NTP) on **H** for wall-clock labs—not an **A2** gate. |
+| **P1-8** | **Background jobs framework (workqueues)** | Kernel **workqueues** / **kernel threads**: enqueue bounded deferred work outside hardirq and outside the interactive shell path. | MLQ **`priority_queue_t`**; **`make test_workqueue_p18`** (**#242**); **`contract_p1_workqueue.h`** layers + single-writer policy. See **`docs/BACKGROUND_JOBS.md`**. |
+| **P1-9** | **Memory reclaim job (`kswapd` analog)** | Periodic or pressure-driven reclaim of physical frames; reduce OOM before **P1-4** alloc fails. | Runs on **P1-8**; uses **P1-4**/**P1-5**; **RFC 1122**-style pressure behavior (subset). |
+| **P1-10** | **Watchdog / health monitor** | Detect stuck subsystems; enforce timeouts; optional panic in lab builds. | **P1-7**/**P0-5** timebase; coordinates with **P1-8** job heartbeats; policy in **`docs/BACKGROUND_JOBS.md`**. |
 
-**References:** POSIX.1 threads; Linux *Understanding the Linux Kernel* (scheduler/MM chapters) as conceptual guide only.
+**References:** POSIX.1 threads; Linux *Understanding the Linux Kernel* (scheduler/MM, workqueue, RCU chapters) as conceptual guides only.
 
 ---
 
@@ -308,13 +351,38 @@ Implement **bottom-up**: **L2 (link layer)** → IPv4/UDP → TCP → sockets fa
 | **P3-5** | **IPv4** | Addresses, netmask, routing table (default route), ICMP echo (ping). | **RFC 791** + **RFC 792**; **checksum offload** optional; **path MTU** stub documented. |
 | **P3-6** | **UDP** | Demux by port; checksum; basic socket buffer caps. | **RFC 768**; **bounded queues**; drop policy under pressure documented. |
 | **P3-12** | **DHCP client (IPv4)** | Minimal **DISCOVER → OFFER → REQUEST → ACK** client for lab addressing and **PX-12** netboot paths. | **RFC 2131**; **RFC 2132** (options subset); finite state machine with **timeouts**; builds on **P3-6**; document interaction with **P3-5** static routes. |
+| **P3-13** | **Chat room (`server`)** | **Multi-user chat** and **`server send`** (messages/files): **`server host/join`**, **`server connected`** (member ids + nicknames), **`server send`** with optional **`-id`**, local vs host-global **`server nick`**, **`server leave`**, **`server kill`**; hub relay over TCP; ANSI colours (**`docs/SERVER.md`**). | **RFC 793** + **RFC 768**; **P2-3** on **`kill`** and jail-crossing **`-file`**; **`docs/P3_13_CHAT_SERVER.md`**, **`docs/SERVER.md`**; prep: sockets, session wire, UDP demux; **#239**, **#238**. |
 | **P3-7** | **TCP (large)** | Reliable stream for one client/server pair first. | **RFC 793** + selective **RFC 5681** congestion basics later; **interop test** against Linux `nc` or `socat`. |
 | **P3-8** | **DNS client** | Resolver for A/AAAA records (AAAA optional). | **RFC 1035** semantics subset; **timeouts** and **retry caps**. |
 | **P3-9** | **TLS (hosted)** | Prefer **userland** TLS (e.g. mbedTLS/OpenSSL) behind shell command or libc. | **No TLS in “kernel” layer** until stable memory and time APIs exist on K/B. |
 | **P3-10** | **Wi‑Fi station path** `[DEFERRED]` | Do **not** silently drop the gap: either promote to active work or keep this row as the **explicit deferral**. | **IEEE 802.11** / **802.11i** / **802.1X** / **EAP** (informative stack); **P3-12** DHCP after L2; **not** an A1–A2 gate. When un-deferred, expect **P4**-class firmware/driver work plus reuse of **P3** IPv4/UDP/TCP. |
-| **P3-11** | **IPv6 + ICMPv6** `[DEFERRED]` | Keep dual-stack as an **explicit** later step, not an accidental omission. | **RFC 8200** (IPv6); **RFC 4291** (addressing); **RFC 4443** (ICMPv6); **RFC 4861** (ND); ties to **P3-1** L2 and **P3-8** **AAAA** when promoted. |
+| **P3-11** | **IPv6 + ICMPv6** | Contract **✅**; module integration **~✅** on loopback (**PR #301** / **#280**). Epic tail: TAP/wire egress, TCPv6, SLAAC/DHCPv6. | **RFC 8200**; **RFC 4291**; **RFC 4443**; **RFC 4861**; **P3-8** **AAAA** stub in **`net_dns.c`**. See **`docs/P3_NETWORKING_DEFERRED.md`**. |
+| **P3-14** | **Network stack background jobs** | Async RX dequeuing, TCP timer wheel / delayed ACK (**RFC 793**), ARP cache TTL sweep; avoids one-off polling in drivers. | Scheduled on **P1-8**; **P3-1**/**P3-7**/**P1-7**; ties to **#240** ARP TTL. |
 
 **Security standards:** default **no promisc**; **no raw TX** from shell without principal + audit; rate-limit outgoing ARP/ICMP in lab builds.
+
+#### Implementation snapshot (PRE 4.2.0 — `kernel/core/net/`)
+
+Shipped on the **PRE 4.2.0** train (**PR #231** class work). This is the **module integration** view for the [P0–P9 snapshot](#p0p9-module-contract-snapshot-develop) **Module integration** column—not a claim that every Phase 3 acceptance bullet is closed.
+
+| ID | Integration | Notes |
+|----|-------------|--------|
+| **P3-1** | ~✅ | **`net_netdev.c`**: driver registry, timeouts, **P2-3** authz hook; loopback + TAP backends |
+| **P3-2** | ~✅ | **`net_loopback.c`**: Ethernet+IPv4 frame path; ICMP echo reply; TCP RST+ACK on SYN |
+| **P3-3** | ~✅ | **`net_tap.c`**: Linux TAP; **`SKIP_TAP=1`** / capability skips in CI |
+| **P3-4** | ✅ | **`net_arp.c`**: **RFC 826** cache (**ASM**), **`fl_net_arp_tick`**, gratuitous ARP; hosted workqueue + bare-metal PIT bottom-half |
+| **P3-5** | ✅ | **`net_route.c`** LPM + static/TAP configure; **`net_wire_egress.c`**; no **0.0.0.0/0** in-table (**#267**); egress-only ICMP/UDP when unrouted (**#262**); PMTU/offload policy in **`net_ipv4.h`** |
+| **P3-6** | ✅ | **`net_udp.c`**: build/parse/xmit/echo; demux queues; loopback + egress wire send |
+| **P3-7** | ~✅ | **`net_tcp_fsm.c`** loopback **RFC 793** subset + **`net_tcp.c`** stream/SYN probe; production timers/retransmit remain **#238** follow-up |
+| **P3-8** | ✅ | **`net_dns.c`**: **A** queries; up to three nameservers, retries, rotating TXIDs (**#251**) |
+| **P3-9** | ~✅ | **`net_tls_hosted.c`**: record cap + optional OpenSSL client bridge when **libssl** present (**#252**) |
+| **P3-12** | ~✅ | **`net_dhcp.c`**: codec + **`fl_net_dhcp_acquire`** over egress (**#247**) |
+| **P3-13** | ~✅ | Server foundations (**#239** / PR #282) plus PR #301: channel sidecar, host catalog, **#283** PROMOTE6 + `host_addr` callback, **#280** IPv6 loopback foundation, **#284** endian norm. **#279** Wi‑Fi **~✅** foundation (PR #306). **PR #315:** WSL LAN exposure via **`net_wifi_host_linux_server_proxy*`** + **`FlinstonePowershell.exe`** (`server-proxy`, `server-proxy-del`, `server-proxy-check`); UAC press-any-key gate + deferred hosting line in **`cmd_server.c`**; portproxy teardown on **`server kill`/`leave`/`exit`** + **`atexit(cmd_server_atexit)`**; interactive Ctrl+C. Native `fl_socket` gated on **P3-7** TCP. **`docs/P3_13_FOLLOWUP.md`**, **`docs/SERVER.md`**. |
+| **P3-14** | ~✅ | **`net_background.c`**: **`fl_net_arp_tick`**; RX dequeue / TCP timer wheel remain future |
+| **P3-10** | ~✅ | **`contract_p3_wifi.h`**, **`net_wifi_he`**, hosted lab scan/connect (**`FL_NET_WIFI_HOSTED_LAB`**), **`wifi_router`** DB + shell **`wifi`** verbs (**PR #306** / **#279**); WSL/Windows path via **`net_wifi_host_linux.c`** + **`tools/FlinstonePowershell/FlinstonePowershell.cpp`**; **`fl_net_wifi_station_netdev()`** NULL; SAE/WPA/mgmt frames + P4 NIC block production |
+| **P3-11** | ~✅ | **`contract_p3_ipv6.h`**, **`net_ipv6`/`net_icmpv6`/`net_ndp`**, loopback ICMPv6 + NDP; TAP/wire egress IPv6 stretch remains |
+
+**Shell / CI:** **`ping`**, **`check requirements`**; **`make test_p3_network`**, **`make test_p3_server`**, **`make baremetal`**, **`make test_invariants`**, **`make test_core`**, **`make check-network-requirements`**. **WSL helper:** **`make flinstone-ps-windows`** builds **`tools/FlinstonePowershell/FlinstonePowershell.exe`**. **ASM:** **`arch/*/net_asm.*`**, **`arch/*/net_wire_host_asm.*`**. **Implementation map:** contracts **`contracts/networking/`**; stack **`kernel/core/net/`**; shell verbs **`userland/command/cmd_{ping,ping6,udp,wifi,server}*.c`**; tests **`tests/test_p3_*.c`**. **PRE 4.2.0 (this train):** lab bare-metal **802.3** path (**`net_baremetal.c`**, **#237** / **#241** / **#240**); umbrella **#238–#267** (excl. **#239** **`server`**) on PR **#275**; production virtio NIC is **P4**-class follow-up.
 
 ---
 
@@ -331,6 +399,7 @@ Implement **bottom-up**: **L2 (link layer)** → IPv4/UDP → TCP → sockets fa
 | **P4-5** | **USB stack** | **xHCI** host-controller **lab subset** (one **PCIe** function, **QEMU**-class); **command**, **event**, and **transfer** ring ownership; **MMIO** ordering via **`fl_usb_xhci_mmio_*`** glue and **arch** **`.s`**. | **Intel xHCI** spec (register model + TRBs); **USB 3.2** informative for packet layers later; **hub** enumeration and **xHCI compliance** suites **out-of-tree** until promoted. |
 | **P4-6** | **FDT-driven machine discovery (lab)** | Walk **DTB** from **P0-7** to enumerate **memory**, **`cpus`**, and **`compatible`** for driver match—QEMU **`-dtb`** / virt DTS in docs. | Devicetree.org **FDT** spec; clarify how much parsing lives in loader vs kernel. |
 | **P4-7** | **PSCI client (AArch64)** | **SMC**-based **ARM PSCI** so **P9-3** can bring up secondaries via **`CPU_ON`**; document `CPU_OFF`/`CPU_SUSPEND` as later. | **ARM DEN0022** (PSCI); DT **`psci`** node (`arm,psci-1.0` bindings); **TF-A** as firmware provider on QEMU (informative). |
+| **P4-8** | **Deferred IRQ work (`kworker` analog)** | Queue bottom-half work from **P4-2** hardirq onto **P1-8** threads; no heavy work in true hardirq. | **Appendix D** hardirq rules; stress test with synthetic IRQ load; see **`docs/BACKGROUND_JOBS.md`**. |
 
 **Hardware policy:** each driver ships with **QEMU command line** + **known-good hardware ID** table.
 
@@ -340,13 +409,17 @@ Implement **bottom-up**: **L2 (link layer)** → IPv4/UDP → TCP → sockets fa
 
 **Dependencies:** **P5-2** on a **B** or VM guest root disk assumes **P4-4** virtio-block (or another committed block transport). Hosted-only VFS bridges may ship earlier on **H**.
 
-**Module-contract snapshot:** **P5-1**–**P5-3** are **✅** for **contract completion** (**`contracts/storage/`**, **`FL_CONTRACT_P5_STORAGE_REV` 2**). See the [P0–P9 snapshot](#p0p9-module-contract-snapshot-develop).
+**Module-contract snapshot:** **P5-1**–**P5-7** are **✅** for **contract completion** (**`contracts/storage/`**, **`FL_CONTRACT_P5_STORAGE_REV` 4**). See the [P0–P9 snapshot](#p0p9-module-contract-snapshot-develop).
 
 | ID | Feature | Goal | Standards & acceptance |
 |----|---------|------|---------------------------|
 | **P5-1** | **VFS layer** | Mount table, vnode/inode abstraction, path walk cache limits. | **POSIX pathconf** subset where relevant; **ELOOP** detection on symlinks if added. |
 | **P5-2** | **Pluggable FS** | ext4 read-only or FUSE-hosted bridge on H before native ext4 on B. | **fsck** story documented; **journalling** requirements tabled. |
 | **P5-3** | **Page cache** | Unified buffer cache between net and block (long-term). | **POSIX fadvise** semantics optional; **coherency rules** documented. |
+| **P5-4** | **Dirty page writeback job (`flush` / `bdi-writeback` analog)** | Periodic write of dirty **P5-3** buffers to block storage for crash consistency. | Runs on **P1-8**; bounded bandwidth; **P4-4** block path required on **B**. |
+| **P5-5** | **Server share staging** | Default **`server_share/`** directory for inbound files when the recipient has no file at the captured path. | **`contract_p5_server_share.h`**; **`docs/SERVER.md`**; VFS mkdir/write on server PR. |
+| **P5-6** | **Cross-user file delivery** | **`server send -file`** metadata: sender path, disposition flags (overwrite / share / decline). | **`contract_p5_file_delivery.h`**; wire **`FILE_*`** opcodes in **`contract_p3_session_wire.h`**. |
+| **P5-7** | **Server member identity** | Principal = logged-in user; **`member_id`** when principals collide. | **`contract_p5_member_identity.h`**; **`HELLO`** / **`HELLO_ACK`** in server PR. |
 
 ---
 
@@ -370,12 +443,20 @@ The **3.3.0 contracts** workstream landed FL1 history, hosted **`.fl_audit.log`*
 
 | TODO tag | Recommendation (review / tool source) |
 |----------|---------------------------------------|
-| **TODO: P2-3** | **Partial (hosted):** **`fl/authz_subsystem.h`** gates **`FL_AUTHZ_OP_***` for guest principals; shell builtins + foreign **exec** use **`fl/shell_authz.h`** with **audit on allow and deny**; CUnit guest deny suite + **`test_invariants`** subsystem denies (**≥3** ops). **Still open:** wire **`fl_authz_subsystem_check`** at FileManager / netdev / mount entry points in kernel paths as those surfaces land. |
+| **TODO: P2-3** | **Partial (hosted):** **`fl/authz_subsystem.h`** gates **`FL_AUTHZ_OP_***` for guest principals; shell builtins + foreign **exec** use **`fl/shell_authz.h`** with **audit on allow and deny**; CUnit guest deny suite + **`test_invariants`** subsystem denies (**≥3** ops). **PRE 4.2.0:** **`fl_net_netdev_set_authz_hook`** + **`ping`** checks **`FL_AUTHZ_OP_NETDEV_IO`** before wire/DNS I/O (**~✅** netdev gate for that command). **Still open:** FileManager / mount kernel entry points. **Hosted ~✅:** **`fl_net_netdev_shutdown()`** + shell **atexit** (**#232**); netdev authz adapter (**#233**). |
 | ~~**TODO: P0-2**~~ | **Done:** **`FL_RESULT_MIN` / `FL_RESULT_MAX`** alias **`FL_RESULT_JSON_RC_*`**; **`fl_history_record_unpack_cmd`** rejects out-of-range **`rc`**; **P1**–**P4** contract shards cross-reference **P0-2** where fallible. |
 | **TODO: P6-4** | **`audit show N` contract:** document any **residual limits** (memory growth for very large **N** on huge logs) or add hard caps / streaming so operator expectations stay aligned with implementation. |
 | **TODO: P7 (shell batch)** | Add an **automated regression** that batch argv **`contracts audit show 5`** runs **`contracts`** (default), then **`audit`**, not a merged `contracts audit` token (Codex). |
 | **TODO: P6-2** | In-memory **ring-buffer** log sink (`dmesg`-style, drop counters) per phase table (CodeRabbit roadmap gap). |
 | **TODO: P6-4** | **Signed / tamper-evident** log segments (optional later per phase table). |
+| **TODO: P3-13 (#283)** | ✅ **Foundation shipped (PR #301):** `OP_CTRL_HOST_PROMOTE6`, `fl_net_addr_t` / `peer_addr`, `host_addr` event callback, `contract_p3_host_promote6.h`. NDP-backed successor on production wire remains **#280** epic tail. |
+| **TODO: P3-13 (PR #315)** | ✅ **Shipped:** WSL LAN portproxy + firewall via **`FlinstonePowershell.exe`** / **`net_wifi_host_linux_server_proxy*`**; UAC press-any-key gate + deferred **`hosting as`** line; netsh-only elevated **`cmd.exe`** apply/delete; **`server-proxy-check`** preflight; portproxy teardown on **`server kill`/`leave`/`exit`** + **`atexit(cmd_server_atexit)`**; interactive Ctrl+C (NOTICE gate re-prompt). See **`docs/SERVER.md`**, **`docs/P3_NETWORKING.md`**. |
+| **TODO: P3-13 (#280)** | ✅ **Foundation shipped (PR #301):** `net_ipv6` / `net_icmpv6` / `net_ndp`, IPv6 FIB, loopback ethertype dispatch, AAAA stub, bracket `fl_net_endpoint_parse`. TAP/wire egress IPv6 + production TCPv6 + SLAAC/DHCPv6 remain open on **#280**. |
+| **TODO: P3-13 (#279)** | Wi‑Fi 802.11ax station **production** tail (**P3-10**): **~✅** foundation on PR #306 (`contract_p3_wifi.h`, HE IE parser, lab scan/connect, **`wifi`** shell + **`wifi_router`** DB). Remaining: **P4** NIC shim, **`net_wifi_mgmt`/`sae`/`wpa`/`twt`**, **`fl_net_wifi_station_netdev()`** + post-assoc **`fl_net_dhcp_acquire`**. See **`docs/GITHUB_ISSUE_SYNC_279.md`**. |
+| **TODO: P3-13** | Native (non-hosted) **`fl_socket`** path — `net_socket.c::fl_net_sock_open` currently always delegates to POSIX. The switch-to-in-tree predicate (loopback / configured TAP route) is gated on **P3-7** TCP state machine + **P3-6** UDP demux promoting from "lab helpers" to "the native path the shim auto-selects". Acceptance criterion ("No Linux kernel socket required for loopback or TAP destinations") is documented in **`docs/SERVER.md` §4.1.2**. |
+| **TODO: P3-13 (#238)** | TCP timer wheel + RX dequeue on the **net background MLQ** (**`priority_queue.h`** + **`net_background.c`**). `fl_net_arp_tick` already runs there; the remaining slots are wire-RX dispatch (`TODO: P3-13` at `net_background.c:107`, `:453`) and the loopback-recv carve-out (`TODO: P3-14` at `net_background.c:103`). |
+| **TODO: P3-13 (single-device WAN demo)** | Mininet + `tc netem` recipe for single-machine WAN emulation (latency / loss / bw cap) — CR recommendation from PR #282 review. Cursor sandbox lacks the `openvswitch` kernel module, so the existing `ip netns` + `bridge` + `veth` recipe in **`tests/manual_demo_netns_pcap.sh`** stays the CI default; the Mininet recipe is the upgrade for dev-machine work. |
+| **TODO: P3-13 (promote-mutex)** | **Partial (PR #315):** **`session_mutex`** in **`cmd_server.c`** serializes host/kill/leave/atexit and releases before UAC keypress waits. **`promote_thread_main`** and full verb audit still open — avoid deadlocks against **`shell_io_lock`** and blocking I/O; see **`docs/P3_13_FOLLOWUP.md` → Deferred items**. |
 
 ---
 
@@ -410,6 +491,7 @@ The **3.3.0 contracts** workstream landed FL1 history, hosted **`.fl_audit.log`*
 | **P9-1** | **Fuzzing** | syscall / netdev / FS parsers under AFL++ or libFuzzer (hosted shims). | **Crash = bug**; corpus checked in CI cache optional. Caps: **`contract_p9_fuzz.h`** (**`FL_CONTRACT_P9_FUZZ_INPUT_MAX_BYTES`**, corpus path max). |
 | **P9-2** | **Coverity / static analysis** | Clean critical triage. | **Zero** new high-severity defects per release gate. Use **SEI CERT C Coding Standard** (https://www.sei.cmu.edu/downloads/sei-cert-c-coding-standard.pdf) as the primary **human-readable** ruleset for new C; **MISRA C** optional for driver subsets where maintainers adopt a profile. Severity ladder: **`contract_p9_static_analysis.h`**. |
 | **P9-3** | **SMP bring-up (B)** | IPIs, per-CPU variables, barrier rules. | **Memory model** doc for AArch64/x86 per **ARM ARM** / Intel SDM. **AArch64:** secondary CPUs via **PSCI `CPU_ON`** (**ARM DEN0022**) per **P4-7** + DT **`cpus`**; **x86_64:** AP entry per **Intel SDM**. Builds on **P1-3** / **P1-6**; expect driver audits, not a greenfield lock story. Vocabulary: **`contract_p9_smp.h`**. |
+| **P9-4** | **RCU grace-period jobs (`rcuop` / `rcuc` analog)** | Defer freeing shared structures until read-side critical sections end; enables lock-free readers on **P9-3**. | Runs on **P1-8**; **P1-3** memory ordering; see **`docs/BACKGROUND_JOBS.md`**. |
 
 **Module-contract snapshot:** **P9-1**–**P9-3** are **✅** for **contract completion** (**`contracts/hardening/`**, **`FL_CONTRACT_P9_HARDENING_REV` 1**). See the [P0–P9 snapshot](#p0p9-module-contract-snapshot-develop).
 
@@ -476,8 +558,8 @@ Promote a **PX-** row into numbered phases when it becomes a **merge-sized** com
 |--------|----------------------------------|
 | C ABI / hosted behavior | ISO C11; POSIX.1-2008 where hosted. |
 | Networking | **IEEE 802.3** (Ethernet L2/MAC & framing); **RFC 894** (IPv4 over Ethernet); **RFC 826** (ARP); **RFC 791**, **792**, **768**, **793**, **1035**; **RFC 2131**, **2132** (DHCP, **P3-12**); later TLS **RFC 5246** / **8446** via library. |
-| IPv6 (defer) | **RFC 8200**, **4291**, **4443**, **4861** (ND). See **P3-11** `[DEFERRED]`. |
-| Wi‑Fi | **IEEE 802.11**, **802.11i**; **802.1X** / **EAP**; **RFC 2131** (DHCP after link). See **P3-10** `[DEFERRED]`. |
+| IPv6 (**P3-11**) | **RFC 8200**, **4291**, **4443**, **4861** (ND). Loopback foundation **~✅** (**PR #301**); production wire/TCPv6 on **#280** tail. |
+| Wi‑Fi | **IEEE 802.11ax-2021** / **802.11i**; **WPA3-SAE**; **RFC 2131** (DHCP after link). **P3-10** contract **✅**; module **~✅** foundation (**#279**); production blocked on **P4** + NIC — **`docs/GITHUB_ISSUE_SYNC_279.md`**. |
 | HTTP / packages | **RFC 9110**, **9112**; **RFC 8446**, **5280**; **RFC 4880** (OpenPGP); Debian archive conventions (informative). |
 | Boot / firmware | **UEFI**; **GNU Multiboot2** (QEMU **`-kernel`** / GRUB); **RFC 2131**, **2132**, **1350** (PXE path); **PKCS #7** (Secure Boot). See **§12**. |
 | Reproducible builds / semver | [reproducible-builds.org](https://reproducible-builds.org/docs/); [semver.org](https://semver.org/). See **P7-2**. |
@@ -528,7 +610,7 @@ Rollout:
 ## Appendix C — Suggested first vertical slice (complexity-ordered, technical only)
 
 1. **P3-1 + P3-2 + P6-1 + P6-2** — `netdev` + loopback IPv4/UDP + structured logging to ring buffer.  
-2. **P3-3 + P3-4 + P3-5 + P3-6** — **802.3** TAP + ARP + IPv4 + UDP with shell builtins (`ping`, `udpsend`, `udplisten`).  
+2. **P3-3 + P3-4 + P3-5 + P3-6** — **802.3** TAP + ARP + IPv4 + UDP with shell builtins (`ping`, `udpsend`, `udplisten`); **P3-13** chat room (`server`) per **`docs/P3_13_CHAT_SERVER.md`**.  
 3. **P2-3 + P6-4** — authz middleware + audit for those builtins.  
 
 Adjust ordering if **bare metal** becomes the primary track (move **P4*** earlier, defer **P3-3** TAP).

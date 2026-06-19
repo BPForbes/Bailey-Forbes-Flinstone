@@ -7,6 +7,11 @@
 #include <string.h>
 #include <unistd.h>
 
+/* Leave / transfer any live server session before the shell dies. Defined
+ * in cmd_server.c; declared here so we do not need a public header file
+ * just for the exit hook. */
+void cmd_server_atexit(void);
+
 int cmd_exit_maybe(char *trimmed) {
     if (strncmp(trimmed, "exit", 4) != 0 ||
         (trimmed[4] != '\0' && trimmed[4] != ' ' && trimmed[4] != '\t'))
@@ -31,6 +36,7 @@ int cmd_exit_maybe(char *trimmed) {
             return 1;
         }
         printf("Exiting shell...\n");
+        cmd_server_atexit();
         shell_running = 0;
         exit(0);
     } else {
@@ -53,6 +59,7 @@ int cmd_exit_maybe(char *trimmed) {
             }
         }
         printf("Exiting shell...\n");
+        cmd_server_atexit();
         shell_running = 0;
         exit(0);
     }

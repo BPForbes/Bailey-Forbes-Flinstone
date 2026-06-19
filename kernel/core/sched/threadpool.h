@@ -38,6 +38,11 @@ void queue_job(job_node *job);
 int queue_job_priority(job_node *job, int priority);
 void submit_single_command(const char *line);
 void submit_single_command_priority(const char *line, int priority);
+/** Interactive shell: Ctrl+C (^C) cancels the in-flight worker job. */
+void submit_single_command_interruptible(const char *line);
+/** Block Ctrl+C command cancellation while a press-any-key gate is active. */
+void fl_shell_press_any_key_gate_enter(void);
+void fl_shell_press_any_key_gate_leave(void);
 void *worker_thread(void *arg);
 
 #endif /* THREADPOOL_H */

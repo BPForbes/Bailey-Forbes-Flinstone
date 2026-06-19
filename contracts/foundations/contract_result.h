@@ -37,6 +37,9 @@ typedef int fl_result_t;
 /** Operation timed out (errno **ETIMEDOUT** shape). */
 #define FL_RESULT_TIMEDOUT (-110)
 
+/** End-of-file / connection closed by peer (no more data available). */
+#define FL_RESULT_EOF (-104)
+
 /**
  * **Driver probe** (`fl_driver_ops_t::probe`): return **`FL_RESULT_OK`** when this
  * driver claims the device and **`attach`** may run. Return **`FL_RESULT_NOSYS`**

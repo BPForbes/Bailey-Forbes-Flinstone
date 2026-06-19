@@ -5,17 +5,20 @@
  * sizes and **non-owning buffer views** that cross **P3** boundaries. Authorization
  * and principal proof stay in **P2**; see **contract_p3_trust.h** for the narrow
  * **P2-3** hook surface used by privileged netdev operations.
+ *
+ * **Implementation:** **kernel/core/net/net_wire.c** (**net_wire.h**) enforces
+ * **fl_net_frame_view_t** / **fl_net_frame_mut_t** bounds and DIX Ethernet helpers.
  */
 #ifndef FL_CONTRACT_P3_WIRE_H
 #define FL_CONTRACT_P3_WIRE_H
 
-#include "contract_extend.h"
+#include "contract_result.h"
 
 #include <stddef.h>
 #include <stdint.h>
 
 /** Bump when wire caps or public typedef layout changes (P3 umbrella may _Static_assert). */
-#define FL_CONTRACT_P3_WIRE_REV 2
+#define FL_CONTRACT_P3_WIRE_REV 4
 
 /** IEEE 802.3 address length (octets). */
 #define FL_NET_ETH_ADDR_LEN 6u
@@ -24,6 +27,9 @@
 #define FL_NET_ETH_MTU_DEFAULT 1500u
 
 #define FL_NET_ETH_FCS_LEN 4u
+
+/** DIX Ethernet header length (dst + src + ethertype); **FCS** is driver policy (**P3-1**). */
+#define FL_NET_ETH_FRAME_HDR_LEN (FL_NET_ETH_ADDR_LEN + FL_NET_ETH_ADDR_LEN + 2u)
 
 /** Common DIX ethertypes (network byte order constants as **uint16_t** values). */
 #define FL_ETHERTYPE_IPV4 0x0800u
@@ -64,6 +70,24 @@ typedef uint32_t fl_ipv4_be32_t;
 
 /** Transport port in **network** byte order. */
 typedef uint16_t fl_port_be16_t;
+
+/** Internal IP-version tags (4 / 6), not POSIX AF_INET / AF_INET6 socket constants. */
+#define FL_NET_ADDR_FAMILY_V4 4u
+#define FL_NET_ADDR_FAMILY_V6 6u
+
+/**
+ * Dual-stack socket endpoint (#280 / #283). Shared by server member registry
+ * (**fl_net_server_addr_t** alias in **contract_p3_server.h**) and kernel
+ * **net_endpoint.c** parse/bind helpers.
+ */
+typedef struct fl_net_endpoint {
+    uint8_t family;
+    uint16_t port_host;
+    union {
+        uint32_t v4_be;
+        uint8_t v6_be[16];
+    } addr;
+} fl_net_endpoint_t;
 
 /** Non-owning view of octets (L2 frame, IP packet, or UDP payload) crossing a **P3** API. */
 typedef struct {

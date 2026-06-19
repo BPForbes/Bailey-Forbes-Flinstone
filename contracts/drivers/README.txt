@@ -1,4 +1,4 @@
-P4 (*contracts/drivers*) — roadmap **P4-1** … **P4-7** (driver model v2, IRQ lifecycle,
+P4 (*contracts/drivers*) — roadmap **P4-1** … **P4-8** (driver model v2, IRQ lifecycle,
 PCIe lab config, virtio net/block, USB xHCI subset, FDT discovery lab, PSCI client).
 
 **Umbrella header:** *contract_drivers.h* — includes **contract_extend.h** (P0–P1),
@@ -15,6 +15,7 @@ PCIe lab config, virtio net/block, USB xHCI subset, FDT discovery lab, PSCI clie
 | *contract_p4_usb.h* | P4-5 (xHCI subset + ASM MMIO glue) |
 | *contract_p4_fdt_discovery.h* | P4-6 |
 | *contract_p4_psci.h* | P4-7 |
+| *contract_p4_kworker.h* | P4-8 |
 
 **Networking:** **P3-1** netdev framing and **P2-3** netdev authz ops remain under
 **contracts/networking/**; **P4** covers **hardware bring-up**, **IRQ**, **PCIe**, **virtio**,

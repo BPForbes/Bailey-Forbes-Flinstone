@@ -16,11 +16,12 @@
 
 #include "contract_extend.h"
 
-#define FL_CONTRACT_P9_HARDENING_REV 1
+#define FL_CONTRACT_P9_HARDENING_REV 2
 
 #include "contract_p9_fuzz.h"
 #include "contract_p9_static_analysis.h"
 #include "contract_p9_smp.h"
+#include "contract_p9_rcu.h"
 
 #define FL_CONTRACT_P9_VOCABULARY_LOCK 1
 

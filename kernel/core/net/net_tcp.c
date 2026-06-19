@@ -1,0 +1,126 @@
+#include "net_tcp.h"
+
+#include "contract_p3_wire.h"
+#include "fl/net_asm.h"
+#include "net_packet.h"
+#include "net_socket.h"
+#include "net_wire_host.h"
+
+#include <string.h>
+
+size_t fl_net_tcp_build_syn(uint8_t *buf, size_t cap, uint16_t sport, uint16_t dport,
+                            uint32_t seq_be) {
+    if (!buf || cap < FL_NET_TCP_HDR_LEN_MIN)
+        return 0;
+
+#if defined(FL_NET_ASM_AVAILABLE)
+    return asm_net_tcp_build_syn(buf, cap, sport, dport, seq_be);
+#else
+    memset(buf, 0, FL_NET_TCP_HDR_LEN_MIN);
+    buf[0] = (uint8_t)(sport >> 8);
+    buf[1] = (uint8_t)(sport & 0xff);
+    buf[2] = (uint8_t)(dport >> 8);
+    buf[3] = (uint8_t)(dport & 0xff);
+    buf[4] = (uint8_t)(seq_be >> 24);
+    buf[5] = (uint8_t)(seq_be >> 16);
+    buf[6] = (uint8_t)(seq_be >> 8);
+    buf[7] = (uint8_t)(seq_be);
+    buf[12] = (uint8_t)(5u << 4);
+    buf[13] = FL_NET_TCP_FLAG_SYN;
+    buf[14] = 0x20;
+    buf[15] = 0x00;
+    return FL_NET_TCP_HDR_LEN_MIN;
+#endif
+}
+
+fl_result_t fl_net_tcp_build_syn_pkt(fl_net_packet_t *pkt, uint8_t *backing, size_t cap,
+                                     uint16_t sport, uint16_t dport, uint32_t seq_be) {
+    size_t len;
+
+    if (!pkt || !backing)
+        return FL_RESULT_INVAL;
+
+    len = fl_net_tcp_build_syn(backing, cap, sport, dport, seq_be);
+    if (len == 0)
+        return FL_RESULT_ERR;
+    return fl_net_packet_bind_l4(pkt, backing, cap, 0u, len);
+}
+
+fl_result_t fl_net_tcp_syn_probe(uint32_t dst_be, uint16_t dport, unsigned timeout_ms,
+                                 double *out_rtt_ms, char *note, size_t note_len) {
+    uint8_t tcp[FL_NET_TCP_HDR_LEN_MIN];
+    size_t tcp_len;
+    uint16_t sport = (uint16_t)(40000u + (dport & 0xffu));
+
+    {
+        fl_net_packet_t syn_pkt;
+
+        if (fl_net_tcp_build_syn_pkt(&syn_pkt, tcp, sizeof(tcp), sport, dport, 1u) !=
+            FL_RESULT_OK)
+            return FL_RESULT_ERR;
+        tcp_len = syn_pkt.l4.len;
+    }
+
+    return fl_net_wire_send_tcp_syn(dst_be, sport, dport, tcp, tcp_len, timeout_ms,
+                                    out_rtt_ms, note, note_len);
+}
+
+fl_result_t fl_net_tcp_stream_listen(uint32_t bind_be, uint16_t port_host,
+                                     fl_net_sock_handle_t *listen_out) {
+    fl_net_sock_handle_t h;
+    fl_result_t rc;
+
+    if (!listen_out)
+        return FL_RESULT_INVAL;
+
+    rc = fl_net_sock_init();
+    if (rc != FL_RESULT_OK && rc != FL_RESULT_NOSYS)
+        return rc;
+
+    rc = fl_net_sock_open(FL_NET_SOCK_TYPE_STREAM, &h);
+    if (rc != FL_RESULT_OK)
+        return rc;
+    rc = fl_net_sock_bind(h, bind_be, port_host);
+    if (rc != FL_RESULT_OK) {
+        fl_net_sock_close(h);
+        return rc;
+    }
+    rc = fl_net_sock_listen(h, FL_NET_SOCK_DEFAULT_LISTEN_BACKLOG);
+    if (rc != FL_RESULT_OK) {
+        fl_net_sock_close(h);
+        return rc;
+    }
+    *listen_out = h;
+    return FL_RESULT_OK;
+}
+
+fl_result_t fl_net_tcp_stream_accept(fl_net_sock_handle_t listen_h,
+                                     fl_net_sock_handle_t *client_out) {
+    if (!client_out)
+        return FL_RESULT_INVAL;
+    return fl_net_sock_accept(listen_h, client_out);
+}
+
+fl_result_t fl_net_tcp_stream_connect(uint32_t peer_be, uint16_t port_host,
+                                      fl_net_sock_handle_t *out) {
+    fl_net_sock_handle_t h;
+    fl_result_t rc;
+
+    if (!out)
+        return FL_RESULT_INVAL;
+
+    rc = fl_net_sock_init();
+    if (rc != FL_RESULT_OK && rc != FL_RESULT_NOSYS)
+        return rc;
+
+    rc = fl_net_sock_open(FL_NET_SOCK_TYPE_STREAM, &h);
+    if (rc != FL_RESULT_OK)
+        return rc;
+    rc = fl_net_sock_connect(h, peer_be, port_host);
+    if (rc != FL_RESULT_OK) {
+        fl_net_sock_close(h);
+        return rc;
+    }
+    *out = h;
+    return FL_RESULT_OK;
+}

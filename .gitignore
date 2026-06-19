@@ -1,10 +1,24 @@
 # Visual Studio
 .vs/
 
-# Build artifacts
+# Build artifacts (make intermediate object files)
 *.o
+*.exe
+*.dll
 BPForbes_Flinstone_Shell
 BPForbes_Flinstone_Tests
+tools/FlinstoneLinuxNet/FlinstoneLinuxNet
+build/
+bin/
+obj/
+out/
+
+# Local Windows tool staging (created by install_deps.sh on WSL)
+/mnt/
+
+# FlinstonePowershell / FlinstoneLinuxNet dev binaries (built by make)
+tools/FlinstonePowershell/FlinstonePowershell
+tools/fl-wifi.env
 
 # Shell history (user-specific)
 shell_history.txt
@@ -63,3 +77,10 @@ userland/shell/version_changelog.c
 
 # Makefile: aggregate checksum of version/entries/**/*.ver for version_def.h freshness
 .version_entries_ver.sum
+# Makefile: build-mode sentinel (VM_ENABLE/VM_SDL tracking)
+.build_mode
+tests/test_p3_network
+tests/test_p3_server
+tests/test_p3_udp_cmds
+tests/test_p3_net_tools
+tests/test_workqueue_*

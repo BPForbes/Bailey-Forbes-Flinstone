@@ -2,8 +2,9 @@
  * **P3-5 — IPv4** (module contract, normative).
  *
  * **Distribution:** **IPv4** headers and payloads appear as **fl_net_frame_view_t** slices
- * with **fl_ipv4_be32_t** addresses in **network byte order**. **ICMP echo** payloads
- * are bounded slices over the same type vocabulary.
+ * with **fl_ipv4_be32_t** addresses in **network byte order**. Prefer **fl_net_packet_t**
+ * (**contract_p3_packet.h**) for multi-layer parse/build pipelines; **ICMP echo** payloads
+ * are bounded **l4** slices over the same vocabulary.
  *
  * **Checksums:** software checksum is the default contract; offload bits live in
  * **fl_net_drv_caps_t** (**P3-1**).

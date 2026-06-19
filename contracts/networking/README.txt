@@ -19,6 +19,8 @@ shards below, and **FL_CONTRACT_P3_VOCABULARY_LOCK**.
 | File | Roadmap |
 |------|---------|
 | *contract_p3_wire.h* | Shared wire vocabulary (not a **P3-**`*` row) |
+| *contract_p3_packet.h* | Layered packet + pipeline stages; FILE_* session payload encode/decode |
+| *contract_p3_socket.h* | Socket four-tuple endpoint (cross-cutting; full **P3-13** shim TODO) |
 | *contract_p3_trust.h* | Narrow **P2-3** include (not a **P3-**`*` row) |
 | *contract_p3_netdev.h* | P3-1 |
 | *contract_p3_loopback.h* | P3-2 |
@@ -30,8 +32,13 @@ shards below, and **FL_CONTRACT_P3_VOCABULARY_LOCK**.
 | *contract_p3_tcp.h* | P3-7 |
 | *contract_p3_dns.h* | P3-8 |
 | *contract_p3_tls_hosted.h* | P3-9 |
-| *contract_p3_wifi_deferred.h* | P3-10 |
-| *contract_p3_ipv6_deferred.h* | P3-11 |
+| *contract_p3_wifi.h* | P3-10 (promoted; *contract_p3_wifi_deferred.h* forwards) |
+| *contract_p3_ipv6.h* | P3-11 (promoted; *contract_p3_ipv6_deferred.h* forwards) |
+| *contract_p3_host_promote6.h* | P3-13 / P3-11 host-transfer v6 wire (#283) |
+| *contract_p3_background.h* | P3-14 |
+| *contract_p3_sockets.h* | P3-13a (socket shim vocabulary) |
+| *contract_p3_session_wire.h* | P3-13 session frame opcodes, file routing, and channel validation |
+| *contract_p3_sftp_adapter.h* | SFTP compatibility adapter over native server file |
 
 Most shards include **contract_p3_wire.h** (which pulls **contract_extend.h**). **P3-1** and
 **P3-3** also include **contract_p3_trust.h** for netdev **authz** op references.
@@ -42,3 +49,7 @@ networking or **fl/driver/net.h**.
 
 **Driver API:** **kernel/include/fl/driver/net.h** uses **fl_net_frame_view_t** /
 **fl_net_frame_mut_t** and **fl_result_t** for **P3-1** interchange.
+
+**Implementation (PRE 4.2.0):** **kernel/core/net/** — see **docs/P3_NETWORKING.md** and
+**kernel/core/net/README.md**. Hosted wire I/O uses **arch/*/net_asm.*** (checksum) and
+**arch/*/net_wire_host_asm.*** (Linux socket syscalls on x86_64 and AArch64).

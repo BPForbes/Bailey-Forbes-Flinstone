@@ -13,8 +13,10 @@
 #include "contract_operations.h"
 #include "contract_virtualization.h"
 #include "contract_hardening.h"
+#include "contract_networking.h"
 #include "fl/authz_subsystem.h"
 #include "fl/session.h"
+#include "elevation.h"
 #include "contract_p7_shell_batch.h"
 #include <stdio.h>
 #include <stdlib.h>
@@ -29,10 +31,11 @@ _Static_assert(FL_CONTRACT_P8_1_TIMING_CONTRACT_DEFINED == 1, "P8-1 shard must s
 _Static_assert(FL_CONTRACT_P8_2_VIRTIO_GUEST_CONTRACT_DEFINED == 1, "P8-2 shard must stay defined");
 _Static_assert(FL_CONTRACT_P8_3_QEMU_LAB_CONTRACT_DEFINED == 1, "P8-3 shard must stay defined");
 
-_Static_assert(FL_CONTRACT_P9_HARDENING_REV == 1, "tests track P9 umbrella rev");
+_Static_assert(FL_CONTRACT_P9_HARDENING_REV == 2, "tests track P9 umbrella rev");
 _Static_assert(FL_CONTRACT_P9_1_FUZZ_CONTRACT_DEFINED == 1, "P9-1 shard must stay defined");
 _Static_assert(FL_CONTRACT_P9_2_STATIC_ANALYSIS_CONTRACT_DEFINED == 1, "P9-2 shard must stay defined");
 _Static_assert(FL_CONTRACT_P9_3_SMP_CONTRACT_DEFINED == 1, "P9-3 shard must stay defined");
+_Static_assert(FL_CONTRACT_P9_4_RCU_CONTRACT_DEFINED == 1, "P9-4 shard must stay defined");
 
 static int test_path_dot(void) {
     strncpy(g_cwd, "/tmp/foo", sizeof(g_cwd) - 1);
@@ -404,7 +407,7 @@ static int test_contract_constants(void) {
            FL_CONTRACT_P0_SURFACE_CONCURRENCY_LOCK_GUARDED);
     ASSERT(FL_CONTRACT_COMPILE_EXTENSIONS == 0);
 
-    ASSERT(FL_CONTRACT_P1_RUNTIME_REV == 1);
+    ASSERT(FL_CONTRACT_P1_RUNTIME_REV == 2);
     ASSERT(FL_CONTRACT_P1_VOCABULARY_LOCK == 1);
     ASSERT(FL_CONTRACT_P1_1_EXECUTION_CONTRACT_DEFINED == 1);
     ASSERT(FL_CONTRACT_P1_2_ADDRESS_SPACE_CONTRACT_DEFINED == 1);
@@ -413,6 +416,11 @@ static int test_contract_constants(void) {
     ASSERT(FL_CONTRACT_P1_5_ARENAS_CONTRACT_DEFINED == 1);
     ASSERT(FL_CONTRACT_P1_6_DRIVER_REENTRANCY_CONTRACT_DEFINED == 1);
     ASSERT(FL_CONTRACT_P1_7_TIMEKEEPING_CONTRACT_DEFINED == 1);
+    ASSERT(FL_CONTRACT_P1_WORKQUEUE_CONTRACT_DEFINED == 1);
+    ASSERT(FL_CONTRACT_P1_9_RECLAIM_CONTRACT_DEFINED == 1);
+    ASSERT(FL_CONTRACT_P1_10_WATCHDOG_CONTRACT_DEFINED == 1);
+    ASSERT(FL_WQ_LAYER_URGENT == 0);
+    ASSERT(FL_WQ_PENDING_MAX == 64u);
 
     ASSERT(FL_CONTRACT_P2_IDENTITY_REV == 3);
     ASSERT(strcmp(FL_CREDENTIAL_STORE_LAB_SQLITE_REL, "userland/shell/fl_users.db") == 0);
@@ -432,16 +440,49 @@ static int test_contract_constants(void) {
     ASSERT(FL_RESULT_WIRE_MIN == FL_RESULT_JSON_RC_MIN);
     ASSERT(FL_RESULT_WIRE_MAX == FL_RESULT_JSON_RC_MAX);
 
-    ASSERT(FL_CONTRACT_P4_DRIVERS_REV == 3);
+    ASSERT(FL_CONTRACT_P4_DRIVERS_REV == 4);
     ASSERT(FL_CONTRACT_P4_2_HARDIRQ_NO_SLEEP == 1);
     ASSERT(FL_CONTRACT_P4_3_LAB_IOMMU_BYPASS_ASSUMED == 1);
     ASSERT(FL_CONTRACT_P4_4_DESC_PUBLISH_BARRIER_REQUIRED == 1);
+    ASSERT(FL_CONTRACT_P4_8_KWORKER_CONTRACT_DEFINED == 1);
 
-    ASSERT(FL_CONTRACT_P5_STORAGE_REV == 2);
+    ASSERT(FL_CONTRACT_P5_STORAGE_REV == 6);
     ASSERT(FL_CONTRACT_P5_VOCABULARY_LOCK == 1);
     ASSERT(FL_CONTRACT_P5_1_VFS_CONTRACT_DEFINED == 1);
     ASSERT(FL_CONTRACT_P5_2_PLUGGABLE_FS_CONTRACT_DEFINED == 1);
     ASSERT(FL_CONTRACT_P5_3_PAGE_CACHE_CONTRACT_DEFINED == 1);
+    ASSERT(FL_CONTRACT_P5_4_WRITEBACK_CONTRACT_DEFINED == 1);
+    ASSERT(FL_CONTRACT_P5_5_SERVER_SHARE_CONTRACT_DEFINED == 1);
+    ASSERT(FL_CONTRACT_P5_6_FILE_DELIVERY_CONTRACT_DEFINED == 1);
+    ASSERT(FL_CONTRACT_P5_7_SERVER_CATALOG_CONTRACT_DEFINED == 1);
+    ASSERT((int)FL_SERVER_CATALOG_HASH_HEX_MAX == 65);
+    ASSERT(FL_CONTRACT_P5_FILE_PERMS_CONTRACT_DEFINED == 1);
+    ASSERT(strcmp(FL_SERVER_SHARED_DIR_NAME, "server_shared") == 0);
+    ASSERT(strcmp(FL_SERVER_SHARE_DIR_NAME, "server_shared") == 0);
+    ASSERT((int)FL_SERVER_FILE_SAVE_TO_SERVER_SHARE == 1);
+    ASSERT((int)FL_SERVER_FILE_OVERWRITE_LOCAL == 2);
+    ASSERT(FL_FILE_PERM_EDIT == 0x0004u);
+    ASSERT((fl_file_perms_normalize(FL_FILE_PERM_EDIT) & FL_FILE_PERM_VIEW) != 0);
+    ASSERT(fl_file_perms_has(FL_FILE_PERM_EDIT | FL_FILE_PERM_VIEW, FL_FILE_PERM_VIEW) == 1);
+    ASSERT(fl_file_share_validate_access(FL_FILE_FLAG_REVOKED, 0, 0) == FL_RESULT_ACCES);
+    ASSERT(fl_file_perms8_to_16(FL_FILE8_PERM_ACCEPT) == FL_FILE_PERM_ACCEPT);
+    ASSERT(fl_file_perms8_to_16(FL_FILE8_FLAG_REVOKED) == FL_FILE_FLAG_REVOKED);
+    ASSERT(fl_file_msb_denied(FL_FILE_FLAG_REVOKED) == 1);
+    ASSERT(fl_file_msb_denied(FL_FILE_FLAG_LOCKED | FL_FILE_FLAG_PUBLIC) == 0);
+    ASSERT(fl_file_msb_denied(FL_FILE_PERM_VIEW) == 0);
+    {
+        uint8_t bytes_writer_buf[4] = {0};
+        fl_bytes_writer_t writer;
+        fl_bytes_writer_init(&writer, bytes_writer_buf, (uint16_t)sizeof(bytes_writer_buf));
+        ASSERT(writer.buf == bytes_writer_buf);
+        ASSERT(writer.cap == sizeof(bytes_writer_buf));
+        ASSERT(writer.len == 0u);
+    }
+    {
+        const uint8_t revoked_offer[] = {0, 0, 0, 0, 0x80, 0x01};
+        ASSERT(fl_file_offer_wire_payload_revoked(revoked_offer,
+                                                  (uint16_t)sizeof(revoked_offer)) == 1);
+    }
     ASSERT(FL_VFS_SYMLOOP_MAX == 40);
     ASSERT(FL_VFS_OPEN_FD_MAX == 256u);
     ASSERT(FL_VFS_DIRENT_NAME_MAX_CHARS == 255u);
@@ -466,6 +507,33 @@ static int test_contract_constants(void) {
     ASSERT(FL_CONTRACT_P7_VERSION_COMPONENT_MAX == 65535u);
     ASSERT(FL_CONTRACT_P7_BATCH_AUDIT_SHOW_MAX_TOKENS == 3u);
     ASSERT(FL_CONTRACT_P7_BATCH_MAX_TOKENS_TOTAL == 16u);
+
+    ASSERT(FL_CONTRACT_P3_NETWORKING_REV == 18);
+    ASSERT(FL_CONTRACT_P3_11_IPV6_CONTRACT_DEFINED == 1);
+    ASSERT(FL_CONTRACT_P3_HOST_PROMOTE6_DEFINED == 1);
+    ASSERT(FL_CONTRACT_P3_CHANNEL_SIDECAR_DEFINED == 1);
+    ASSERT(FL_CHANNEL_SIDECAR_WIRE_REV == 1u);
+    ASSERT((int)FL_NET_SESSION_OP_MSG_META == 0x14);
+    ASSERT((int)FL_NET_SESSION_OP_CTRL_HOST_PROMOTE6 == 0x24);
+    ASSERT(FL_NET_SESSION_CTRL_HOST_PROMOTE_PAYLOAD_LEN == 8u);
+    ASSERT(FL_NET_SESSION_CTRL_HOST_PROMOTE6_PAYLOAD_LEN == 20u);
+    ASSERT(FL_CONTRACT_P3_PACKET_CONTRACT_DEFINED == 1);
+    ASSERT(FL_CONTRACT_P3_13_SESSION_WIRE_CONTRACT_DEFINED == 1);
+    ASSERT(FL_CONTRACT_P3_SFTP_ADAPTER_CONTRACT_DEFINED == 1);
+    ASSERT(FL_NET_PKT_VALID_L2 == (unsigned)(1u << 0));
+    ASSERT((int)FL_NET_PIPE_STAGE_DELIVER == 6);
+    ASSERT(FL_CONTRACT_P3_14_BACKGROUND_CONTRACT_DEFINED == 1);
+    ASSERT(FL_NET_BG_TAG_ARP_TICK == 0x0314u);
+    ASSERT((int)FL_NET_SESSION_OP_FILE_OFFER == 0x30);
+    ASSERT((int)FL_NET_SESSION_OP_FILE_STATUS == 0x37);
+    ASSERT((int)FL_NET_SESSION_OP_FILE_META == 0x38);
+    ASSERT(fl_net_session_is_file_opcode(FL_NET_SESSION_OP_FILE_OFFER) == 1);
+    ASSERT(fl_net_session_is_file_opcode(FL_NET_SESSION_OP_FILE_STATUS) == 1);
+    ASSERT(fl_net_session_is_file_opcode(FL_NET_SESSION_OP_FILE_META) == 1);
+    ASSERT(fl_net_session_is_file_opcode(0x2fu) == 0);
+    ASSERT(fl_net_session_is_file_opcode(0x39u) == 0);
+    ASSERT(FL_SERVER_FILE_STATUS_QUEUED == 1u);
+    ASSERT(strcmp(FL_SFTP_VPATH_HOME, "/sftp/home") == 0);
 
     /* Surface enum ordering */
     ASSERT((int)FL_CONTRACT_SURFACE_DRIVER_OPS == 0);

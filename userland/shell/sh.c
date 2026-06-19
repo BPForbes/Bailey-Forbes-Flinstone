@@ -43,6 +43,8 @@
  *****************************************************************************/
 
 #include "common.h"
+#include "cmd_decl.h"
+#include "shell_io.h"
 #include <stdint.h>
 #include "threadpool.h"
 #include "interpreter.h"
@@ -53,6 +55,8 @@
 #include "drivers/drivers.h"
 #include "fs_jail.h"
 #include "fl/session.h"
+#include "fl/authz_subsystem.h"
+#include "net_netdev.h"
 #include "VM/vm.h"
 #include <stdio.h>
 #include <stdlib.h>
@@ -66,6 +70,8 @@
 #include <limits.h>
 #include "util.h"
 #include "cmd_batch.h"
+
+void cmd_server_atexit(void);
 
 #ifndef PATH_MAX
 #define PATH_MAX 4096
@@ -95,6 +101,10 @@ static void vm_cleanup_at_exit(void) {
     if (!g_vm_mode || !g_vm_cleanup || !g_vm_root[0]) return;
     if (chdir("/tmp") != 0) return;
     rmrf(g_vm_root);
+}
+
+static void shell_netdev_cleanup_at_exit(void) {
+    fl_net_netdev_shutdown();
 }
 
 #ifndef BATCH_SINGLE_THREAD
@@ -221,6 +231,10 @@ int main(int argc, char *argv[]) {
     /* Lab weak seeds are opt-in; set FL_USERS_LAB_DEFAULTS=1 to enable. */
     if (!getenv("FL_USERS_LAB_DEFAULTS"))
         (void)setenv("FL_USERS_LAB_DEFAULTS", "0", 0);
+    /* Register the prompt-aware async print hooks so server / client
+     * background threads can interleave colour-tagged output with the
+     * interactive readline without gluing onto "shell> ". */
+    fl_shell_io_init();
     /* Seed the random number generator */
     srand((unsigned) time(NULL));
 
@@ -306,16 +320,25 @@ int main(int argc, char *argv[]) {
        treat as createdisk shortcut.
     */
     if ((argc == 4 || argc == 5) && argv[1] && argv[1][0] != '-') {
-        /* Must include every builtin name so batch mode does not treat them as createdisk shortcut */
-        static const char *skip[] = {"help","cd","dir","make","write","cat","type","mkdir","rmdir",
-            "rmtree","mv","version","contracts","audit","exit","bios","clear","history","his","cc","listclusters","listdirs",
-            "setdisk","createdisk","format","search","writecluster","delcluster","update","redirect",
-            "initdisk","rerun","import","du","printdisk","addcluster","where","loc",
-            "diskput","diskget","diskfiles","diskdel","diskmkdir","sudo","su","login",
-            "logout","useradd","userdel","passwd","whoami",NULL};
-        int is_cmd = 0;
-        for (int k = 0; skip[k]; k++)
-            if (!strcmp(argv[1], skip[k])) { is_cmd = 1; break; }
+        /* Replaces the legacy hard-coded skip[] list. The central command
+         * registry (cmd_registry.c, fl_shell_cmd_lookup) covers every
+         * registered builtin, so new commands no longer need a sync
+         * update here. A small fixed list still covers the *line-mode*
+         * builtins (help / exit / clear / history / cc / make / bios)
+         * that aren't in the numeric dispatch table. */
+        static const char *line_mode_builtins[] = {
+            "help", "exit", "clear", "history", "his", "cc", "make", "bios", "version",
+            NULL
+        };
+        int is_cmd = (fl_shell_cmd_lookup(argv[1]) != FL_SCMD_UNKNOWN);
+        if (!is_cmd) {
+            for (int k = 0; line_mode_builtins[k]; k++) {
+                if (!strcmp(argv[1], line_mode_builtins[k])) {
+                    is_cmd = 1;
+                    break;
+                }
+            }
+        }
         if (!is_cmd) {
         int rowCount = atoi(argv[2]);
         int nibbleCount = atoi(argv[3]);
@@ -348,13 +371,23 @@ int main(int argc, char *argv[]) {
         fprintf(stderr, "[VM] 5-layer driver config warning: layer 4 shell/VM root is not configured\n");
     fs_jail_init();
     fl_session_init();
+    fl_net_netdev_init();
+    fl_net_netdev_set_authz_hook(fl_authz_subsystem_check, NULL);
+    atexit(shell_netdev_cleanup_at_exit);
 
-    /* Default host volume: ensure drive.img exists before block driver probes it. */
+    /* Default host volume: ensure drive.img is a valid FAT32 image before probing.
+     * If the file is missing or exists but is blank/unrecognized (all-zero, truncated,
+     * etc.), create a fresh FAT32 image in place so setdisk/vm startup never stalls. */
     if (strcmp(current_disk_file, "drive.img") == 0) {
         if (access(current_disk_file, F_OK) != 0) {
             disk_ensure_default_fat32(current_disk_file, 32, 512);
         }
         read_disk_header();
+        if (!g_disk_host_fat32) {
+            /* File exists but has no recognizable content — overwrite with default image. */
+            disk_reinit_default_fat32(current_disk_file, 32, 512);
+            read_disk_header();
+        }
     }
 
     /* Initialize file manager service, path log, and drivers */
@@ -394,6 +427,7 @@ int main(int argc, char *argv[]) {
     g_pool_workers_started = 1;
 #endif
     atexit(shell_pool_cleanup);
+    atexit(cmd_server_atexit);
     if (original_stdout_fd < 0) {
         original_stdout_fd = dup(fileno(stdout));
         original_stdout_file = fdopen(original_stdout_fd, "w");

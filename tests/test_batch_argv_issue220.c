@@ -1,7 +1,8 @@
 /**
- * Issue #219 / #220: batch token arity helpers and sh.c clamp integration.
+ * Issue #219 / #220 / #234: batch token arity helpers and sh.c clamp integration.
  * Each cmd_*.c object is built with -ffunction-sections so only *_batch_tokens_count
- * is linked (not cmd_*_run).
+ * is linked (not cmd_*_run). Ping/check helpers are dispatched only from
+ * fl_shell_cmd_batch_tokens_count() in cmd_batch_dispatch.c (see cmd_decl.h).
  */
 #include "cmd_decl.h"
 #include "cmd_batch.h"
@@ -33,7 +34,6 @@ static int test_issue220_2_createdisk(void) {
     ASSERT(cmd_createdisk_batch_tokens_count(7, cd, 1) == 5);
     char *cd2[] = {"p", "createdisk", "vol", "8", "16"};
     ASSERT(cmd_createdisk_batch_tokens_count(5, cd2, 1) == 4);
-    /* Incomplete: return all trailing tokens so sh.c insufficient-args path skips them. */
     char *short_cd[] = {"p", "createdisk", "vol"};
     ASSERT(cmd_createdisk_batch_tokens_count(3, short_cd, 1) == 2);
     char *only_cd[] = {"p", "createdisk"};
@@ -89,7 +89,17 @@ static int test_issue220_7_useracct_helpers(void) {
     return 0;
 }
 
-/* Issue #204: login/sudo/su spans must not exceed argc-i after sh.c clamp. */
+static int test_issue234_ping_check_batch_tokens(void) {
+    ASSERT(cmd_ping_batch_tokens_count(3, (char*[]){"p", "ping", "host", NULL}, 1) == 2);
+    ASSERT(cmd_ping_batch_tokens_count(5, (char*[]){"p", "ping", "-c", "3", "host", NULL}, 1) == 4);
+    ASSERT(cmd_ping_batch_tokens_count(4, (char*[]){"p", "ping", "host", "80", NULL}, 1) == 3);
+    ASSERT(cmd_ping6_batch_tokens_count(7, (char*[]){"p", "ping6", "-c", "2", "-W", "500", "::1", NULL},
+                                         1) == 6);
+    ASSERT(cmd_check_batch_tokens_count(4, (char*[]){"p", "check", "requirements", "host", NULL}, 1) == 3);
+    ASSERT(cmd_check_batch_tokens_count(5, (char*[]){"p", "check", "requirements", "host", "443", NULL}, 1) == 4);
+    return 0;
+}
+
 static int test_issue204_batch_clamp_login_sudo_su(void) {
     int tc;
     char *login_short[] = {"p", "login"};
@@ -148,6 +158,10 @@ int main(void) {
 
     printf("test_issue204_batch_clamp_login_sudo_su... ");
     if (test_issue204_batch_clamp_login_sudo_su() != 0) return 1;
+    printf("OK\n");
+
+    printf("test_issue234_ping_check_batch_tokens... ");
+    if (test_issue234_ping_check_batch_tokens() != 0) return 1;
     printf("OK\n");
 
     printf("All batch argv issue #220 tests passed.\n");

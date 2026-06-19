@@ -2,7 +2,7 @@
  * P3 networking contract bundle (contracts/networking).
  *
  * Include this header (or individual contract_p3_*.h after contract_p3_wire.h) when
- * implementing or reviewing P3-1 through P3-12 work.
+ * implementing or reviewing P3-1 through P3-14 work.
  * Build with -Icontracts/networking alongside -Icontracts/identity, -Icontracts/runtime,
  * and -Icontracts/foundations.
  *
@@ -19,9 +19,11 @@
 
 #include "contract_extend.h"
 #include "contract_p3_wire.h"
+#include "contract_p3_packet.h"
+#include "contract_p3_socket.h"
 #include "contract_p3_trust.h"
 
-#define FL_CONTRACT_P3_NETWORKING_REV 4
+#define FL_CONTRACT_P3_NETWORKING_REV 18
 
 #ifndef FL_CONTRACT_P3_WIRE_REV
 #error "FL_CONTRACT_P3_WIRE_REV must be defined by contract_p3_wire.h"
@@ -29,7 +31,7 @@
 _Static_assert(FL_CONTRACT_P3_WIRE_REV >= 1, "Unexpected P3 wire revision");
 
 /** Keep in lockstep with **FL_CONTRACT_P3_WIRE_REV** in **contract_p3_wire.h**. */
-#define FL_CONTRACT_P3_NETWORKING_EXPECT_WIRE_REV 2
+#define FL_CONTRACT_P3_NETWORKING_EXPECT_WIRE_REV 4
 _Static_assert(FL_CONTRACT_P3_WIRE_REV == FL_CONTRACT_P3_NETWORKING_EXPECT_WIRE_REV,
                "Bump FL_CONTRACT_P3_NETWORKING_REV when contract_p3_wire.h FL_CONTRACT_P3_WIRE_REV changes");
 
@@ -43,8 +45,15 @@ _Static_assert(FL_CONTRACT_P3_WIRE_REV == FL_CONTRACT_P3_NETWORKING_EXPECT_WIRE_
 #include "contract_p3_tcp.h"
 #include "contract_p3_dns.h"
 #include "contract_p3_tls_hosted.h"
-#include "contract_p3_wifi_deferred.h"
-#include "contract_p3_ipv6_deferred.h"
+#include "contract_p3_wifi.h"
+#include "contract_p3_ipv6.h"
+#include "contract_p3_background.h"
+#include "contract_p3_sockets.h"
+#include "contract_p3_session_wire.h"
+#include "contract_p3_channel_sidecar.h"
+#include "contract_p3_sftp_adapter.h"
+#include "contract_p3_host_promote6.h"
+#include "contract_p3_server.h"
 
 #define FL_CONTRACT_P3_VOCABULARY_LOCK 1
 

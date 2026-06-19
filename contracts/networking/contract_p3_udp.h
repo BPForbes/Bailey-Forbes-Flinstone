@@ -28,6 +28,16 @@
 #define FL_NET_UDP_DEFAULT_RX_QUEUE_DATAGRAMS 64u
 #endif
 
+/** Lab implementation caps per-datagram stored payload (MTU-shaped; not 64 KiB). */
+#ifndef FL_NET_UDP_LAB_RX_PAYLOAD_MAX
+#define FL_NET_UDP_LAB_RX_PAYLOAD_MAX 1472u
+#endif
+
+/** Max distinct destination ports with an active RX queue in lab builds. */
+#ifndef FL_NET_UDP_BIND_SLOTS_MAX
+#define FL_NET_UDP_BIND_SLOTS_MAX 16u
+#endif
+
 /** **IANA** ephemeral **UDP** port range (**RFC 6335** dynamic range lower bound). */
 #define FL_NET_UDP_EPHEMERAL_PORT_MIN 49152u
 #define FL_NET_UDP_EPHEMERAL_PORT_MAX 65535u

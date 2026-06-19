@@ -5,6 +5,9 @@
  * wire. **P2** still owns **who may act** (principals, credentials, elevation) and the
  * central **fl_authz_check_fn** story.
  *
+ * **fl_net_netdev_set_authz_hook** uses the same contract as **fl_authz_check_fn**; avoid
+ * casting unrelated function pointers (**#233**).
+ *
  * This header pulls **only** **P2-3** (**contract_p2_authz.h**) so **P3** implementations
  * can reference **FL_AUTHZ_OP_NETDEV_REGISTER** and **FL_AUTHZ_OP_NETDEV_IO** without
  * including the full **contract_identity.h** bundle. Code that needs **FL_PRINCIPAL_***
@@ -17,5 +20,12 @@
 #include "contract_p2_authz.h"
 
 #define FL_CONTRACT_P3_COMPOSES_P2_AUTHZ_ONLY 1
+
+/**
+ * **P3-10 Wi-Fi:** scan/connect require the same netdev I/O gate as **ping** / TAP.
+ * Long-term SSID credentials belong in P2/P5 stores (**wifi_router**), not in
+ * **fl_net_wifi_cred_t** beyond ephemeral association.
+ */
+#define FL_NET_WIFI_AUTHZ_OP_SCAN_CONNECT FL_AUTHZ_OP_NETDEV_IO
 
 #endif /* FL_CONTRACT_P3_TRUST_H */
