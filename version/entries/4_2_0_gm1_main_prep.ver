@@ -40,3 +40,5 @@ Cross-cutting: umbrella GitHub issues #238–#267 (excl. #239 server); docs sync
 contracts; Replit agent rules; develop/main alignment after 4.1.1 GM=1 BUILD 3.
 VER_END
 PROMOTE_DESC_END
+
+RELEASE_DATE=2026-06-19
