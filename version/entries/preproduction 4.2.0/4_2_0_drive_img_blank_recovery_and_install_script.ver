@@ -1,8 +1,0 @@
-MAJOR_VERSION=4
-STANDARD_VERSION=2
-RELEASE_VERSION=0
-PRERELEASE=1
-DEV_VERSION=13
-DESCRIPTION=Auto-recover blank or all-zero drive.img on startup by overwriting it with a fresh FAT32 default image (disk_reinit_default_fat32); adds scripts/install_deps.sh for one-shot apt install of gcc, GAS, AArch64 cross toolchain, OpenSSL, SQLite, SDL2, and test tools.
-
-RELEASE_DATE=2026-06-14

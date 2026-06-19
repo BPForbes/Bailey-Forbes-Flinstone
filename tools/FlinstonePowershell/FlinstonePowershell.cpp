@@ -963,6 +963,26 @@ static int run_cmd_batch(const char *batch) {
     }
 }
 
+/* Parse one netsh portproxy v4tov4 data row; compare listen/connect port columns only
+   (avoids false positives from IP octets like 192.168.1.80 matching port "80"). */
+static int portproxy_line_has_port(const char *line, const char *port_s) {
+    char listen_addr[64];
+    char listen_port[16];
+    char connect_addr[64];
+    char connect_port[16];
+
+    if (sscanf(line, " %63s %15s %63s %15s",
+               listen_addr, listen_port, connect_addr, connect_port) != 4)
+        return 0;
+    if (strcmp(listen_addr, "Address") == 0)
+        return 0;
+    if (strchr(listen_addr, '-') != NULL)
+        return 0;
+    if (!is_valid_port(listen_port) || !is_valid_port(connect_port))
+        return 0;
+    return (strcmp(listen_port, port_s) == 0 || strcmp(connect_port, port_s) == 0);
+}
+
 static int portproxy_table_has_port(const char *port_s) {
     FILE *fp = _popen("netsh interface portproxy show v4tov4", "r");
     char  line[256];
@@ -970,7 +990,7 @@ static int portproxy_table_has_port(const char *port_s) {
     if (!fp)
         return 0;
     while (fgets(line, sizeof(line), fp)) {
-        if (strstr(line, port_s) != NULL) {
+        if (portproxy_line_has_port(line, port_s)) {
             (void)_pclose(fp);
             return 1;
         }
