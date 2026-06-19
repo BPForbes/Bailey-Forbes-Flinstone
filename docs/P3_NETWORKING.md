@@ -234,7 +234,7 @@ Legend matches **`docs/ROADMAP.md`**: **✅** complete; **~✅** usable lab subs
 | **P3-9** TLS | ✅ | ~✅ — **`net_tls_hosted.c`** record-size boundary (no mbedtls yet) |
 | **P3-12** DHCP | ✅ | ~✅ — BOOTP codec + **`fl_net_dhcp_*_pkt`** over **`fl_net_packet_t`** |
 | **P3-14** background | ✅ | ~✅ — **`fl_net_arp_tick`** on workqueue; TCP timer wheel / RX dequeue still **#238** |
-| **P3-13** `server` + messaging | ✅ | ~✅ — `server host/join/msg/announce/nick/connected/leave/kill` shipped (PR #282); `udpsend` / `udplisten` (#239); **#283** PROMOTE6 + `host_addr` callback; **#280** IPv6 loopback/NDP foundation (PR #301); **#279** Wi‑Fi **~✅** foundation (PR #306); native `fl_socket` waits on **P3-7** TCP state machine. **`docs/P3_13_FOLLOWUP.md`** |
+| **P3-13** `server` + messaging | ✅ | ~✅ — `server host/join/msg/announce/nick/connected/leave/kill` shipped (PR #282); `udpsend` / `udplisten` (#239); **#283** PROMOTE6 + `host_addr` callback; **#280** IPv6 loopback/NDP foundation (PR #301); **#279** Wi‑Fi **~✅** foundation (PR #306); **PR #315** WSL portproxy/UAC hosting UX (`net_wifi_host_linux.c`, **`FlinstonePowershell.exe`**, **`cmd_server.c`**); native `fl_socket` waits on **P3-7** TCP state machine. **`docs/P3_13_FOLLOWUP.md`** |
 
 ## Standards map (integration targets)
 
@@ -249,7 +249,7 @@ Legend matches **`docs/ROADMAP.md`**: **✅** complete; **~✅** usable lab subs
 | DNS (**P3-8**) | **RFC 1035** (subset) | ~✅ A record |
 | DHCP (**P3-12**) | **RFC 2131**, **RFC 2132** | ~✅ codec + lab client (not production lease manager) |
 | Wi‑Fi station (**P3-10**) | **IEEE 802.11ax-2021**; **802.11i**; **WPA3-SAE** (RFC 7664) | ~✅ contract + HE IE parser + hosted lab scan/connect (**#279**); production assoc/DHCP blocked on P4 NIC + SAE/WPA wire |
-| `server` + messaging (**P3-13**) | **RFC 793** (TCP session); **RFC 768** (UDP helpers) | ~✅ — hosted-socket implementation (PR #282 + #239); native non-hosted path queued behind **P3-7** TCP state machine |
+| `server` + messaging (**P3-13**) | **RFC 793** (TCP session); **RFC 768** (UDP helpers) | ~✅ — hosted-socket implementation (PR #282 + #239); WSL LAN portproxy (PR #315); native non-hosted path queued behind **P3-7** TCP state machine |
 
 ## Application-layer and common Internet protocols
 
@@ -339,7 +339,7 @@ Shell verbs live in **`userland/command/cmd_wifi.c`**. Saved router profiles use
 
 **Profile database:** tries **`FL_WIFI_DB_PATH`**, then repo-relative **`userland/shell/fl_wifi.db`**, then **`~/.local/share/BPForbes_Flinstone_Shell/fl_wifi.db`**, then **`/tmp/fl_wifi.db`**.
 
-**WSL/LAN server bridge:** build the Windows helper with **`make flinstone-ps-windows`**. From WSL, **`server host -all 7777`** advertises the router-assigned Windows Wi-Fi IP when **`wifi-status`** reports it, and starts **`FlinstonePowershell.exe server-bridge <windows-ip> 7777 127.0.0.1`**. For an embedded VM target, set **`FL_NET_WIFI_BRIDGE_TARGET=10.0.2.15`** before hosting, or run **`FlinstonePowershell.exe server-bridge 192.168.1.235 7777 10.0.2.15`** directly. The Python companion accepts the same shape: **`python3 tools/network_bridge.py 192.168.1.235 7777 10.0.2.15`**.
+**WSL/LAN server bridge:** build the Windows helper with **`make flinstone-ps-windows`**. From WSL, **`server host <windows-wifi-ip>:<port>`** (or **`server host -all <port>`** when **`wifi-status`** reports the Windows Wi‑Fi IP) uses **`FlinstonePowershell.exe server-proxy`** to add Windows portproxy + firewall rules (UAC press-any-key gate in **`cmd_server.c`**, PR **#315**). Teardown runs on **`server kill`**, **`server leave`**, and shell **`exit`** via **`server-proxy-del`**. Preflight: **`server-proxy-check`** queries netsh for stale rules before UAC. Non-admin fallback: **`server-bridge`**. For an embedded VM target, set **`FL_NET_WIFI_BRIDGE_TARGET=10.0.2.15`** before hosting, or run **`FlinstonePowershell.exe server-bridge 192.168.1.235 7777 10.0.2.15`** directly. The Python companion accepts the same shape: **`python3 tools/network_bridge.py 192.168.1.235 7777 10.0.2.15`**.
 
 **Native Linux helper:** build **`tools/FlinstoneLinuxNet/FlinstoneLinuxNet`** with **`make flinstone-linux-net`**. It provides the same helper commands as the Windows bridge for Linux hosts: **`wifi-scan`**, **`wifi-join`**, **`wifi-leave`**, **`wifi-status`**, and **`server-bridge [bind_ip] <port> [target_ip]`**. Wi-Fi uses **`nmcli`**; override with **`FL_NET_WIFI_NMCLI`** and **`FL_NET_WIFI_IFACE`**. The shell auto-detects the in-tree ELF when present unless **`FL_NET_WIFI_USE_WPA=0`** forces lab mode or **`FL_NET_WIFI_USE_WPA=1`** forces direct **`wpa_cli`**.
 
@@ -399,7 +399,7 @@ make check-network-requirements
 |----------|------|--------|
 | **P3-12** | DHCP renew/rebind FSM | Lease DB and renew/rebind after **`fl_net_dhcp_acquire`** |
 | **P3-10** | Wi‑Fi 802.11ax station | **~✅** foundation (PR #306): contract, HE parser, lab scan/connect, **`wifi`** shell; tail: P4 NIC, SAE/WPA/TWT, netdev + DHCP composition |
-| **P3-13** | Chat room | Foundations shipped (PR #282 + #239 `udpsend`/`udplisten`); **#283** PROMOTE6 foundation; **#280** IPv6 loopback/NDP foundation (PR #301); **#279** Wi‑Fi foundation; native non-hosted `fl_socket` gated on **P3-7** TCP state machine |
+| **P3-13** | Chat room | Foundations shipped (PR #282 + #239); **PR #315** WSL portproxy/UAC hosting; **#283** PROMOTE6; **#280** IPv6 loopback/NDP (PR #301); **#279** Wi‑Fi foundation; native non-hosted `fl_socket` gated on **P3-7** TCP state machine |
 | ~~Patch~~ | ~~ARP cache TTL / loopback dedup~~ | Done (**#237**, **#240**): **`fl_net_arp_tick`**, **`fl_net_loopback_exchange`**, PIT BH on **B** |
 | ~~P3-5~~ | ~~Drop Linux ICMP fallback~~ | Done (**#262**): egress-only ICMP/UDP when unrouted |
 | **P3-7** | Production TCP timers | Loopback **RFC 793** FSM landed (**#238**); TAP retransmit/TIME_WAIT remain |

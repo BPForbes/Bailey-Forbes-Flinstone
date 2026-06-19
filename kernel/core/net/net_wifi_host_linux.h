@@ -90,6 +90,13 @@ int fl_net_wifi_host_linux_wsl_ipv4(char *buf, size_t buf_len);
 int fl_net_wifi_host_linux_server_proxy(const char *listen_ip, const char *wsl_ip,
                                         uint16_t port);
 
+/**
+ * Probe whether Flinstone portproxy / firewall rules already exist for
+ * listen_ip:<port> on the Windows host. Returns 1 when clear (result=ok),
+ * 0 when configured (result=busy), -1 when the check could not be run.
+ */
+int fl_net_wifi_host_linux_server_proxy_port_free(const char *listen_ip, uint16_t port);
+
 /** Remove portproxy + firewall rules added for listen_ip:<port>. */
 int fl_net_wifi_host_linux_server_proxy_del(const char *listen_ip, uint16_t port);
 

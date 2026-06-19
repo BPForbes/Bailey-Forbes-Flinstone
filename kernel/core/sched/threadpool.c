@@ -10,6 +10,7 @@
 #include <unistd.h>
 
 static volatile sig_atomic_t s_pool_interrupt_req;
+static volatile sig_atomic_t s_press_any_key_gate;
 static pthread_t            s_pool_active_worker;
 static int                  s_pool_active_worker_set;
 
@@ -64,12 +65,69 @@ static void run_job_task(void *arg) {
     pthread_cleanup_pop(1);
 }
 
+void fl_shell_press_any_key_gate_enter(void) {
+    s_press_any_key_gate = 1;
+}
+
+void fl_shell_press_any_key_gate_leave(void) {
+    s_press_any_key_gate = 0;
+}
+
 static void pool_sigint_handler(int sig) {
     (void)sig;
+    if (s_press_any_key_gate)
+        return;
     s_pool_interrupt_req = 1;
     (void)write(STDERR_FILENO, "^C\n", 3);
     /* pthread_cancel is not async-signal-safe; the main thread performs
      * worker cancellation after detecting s_pool_interrupt_req. */
+}
+
+#ifdef BATCH_SINGLE_THREAD
+static void interruptible_job_cleanup(void *arg) {
+    job_node *job = (job_node *)arg;
+
+    pthread_mutex_lock(&g_pool.mutex);
+    s_pool_active_worker_set = 0;
+    s_pool_active_worker     = (pthread_t)0;
+    pthread_mutex_unlock(&g_pool.mutex);
+    if (job && job->done_sem)
+        sem_post(job->done_sem);
+}
+
+static void *interruptible_job_runner(void *arg) {
+    job_node *job = (job_node *)arg;
+
+    (void)pthread_setcancelstate(PTHREAD_CANCEL_ENABLE, NULL);
+    pthread_cleanup_push(interruptible_job_cleanup, job);
+    if (job && job->command_str)
+        (void)execute_command_str(job->command_str);
+    pthread_cleanup_pop(1);
+    return NULL;
+}
+#endif
+
+static void submit_single_command_interruptible_wait(sem_t *done_sem,
+                                                     pthread_t known_worker) {
+    while (sem_wait(done_sem) != 0) {
+        if (errno != EINTR)
+            break;
+        if (s_pool_interrupt_req && !s_press_any_key_gate) {
+            pthread_t worker = known_worker;
+
+            if (!worker) {
+                pthread_mutex_lock(&g_pool.mutex);
+                if (s_pool_active_worker_set)
+                    worker = s_pool_active_worker;
+                pthread_mutex_unlock(&g_pool.mutex);
+            }
+            if (worker)
+                (void)pthread_cancel(worker);
+            while (sem_wait(done_sem) != 0 && errno == EINTR)
+                ;
+            break;
+        }
+    }
 }
 
 job_node *create_job(const char *line) {
@@ -129,12 +187,13 @@ void submit_single_command(const char *line) {
 }
 
 void submit_single_command_interruptible(const char *line) {
-#ifdef BATCH_SINGLE_THREAD
-    submit_single_command(line);
-#else
     struct sigaction sa_new, sa_old;
     job_node *job;
     sem_t done_sem;
+#ifdef BATCH_SINGLE_THREAD
+    pthread_t worker = (pthread_t)0;
+    int       worker_started = 0;
+#endif
 
     memset(&sa_new, 0, sizeof(sa_new));
     sa_new.sa_handler = pool_sigint_handler;
@@ -157,6 +216,8 @@ void submit_single_command_interruptible(const char *line) {
         return;
     }
     job->done_sem = &done_sem;
+
+#ifndef BATCH_SINGLE_THREAD
     if (queue_job_priority(job, PRIORITY_IMMEDIATE) != 0) {
         job->done_sem = NULL;
         sem_destroy(&done_sem);
@@ -164,33 +225,29 @@ void submit_single_command_interruptible(const char *line) {
         (void)sigaction(SIGINT, &sa_old, NULL);
         return;
     }
-
-    /* Wait for completion; break early on user interrupt (SIGINT). */
-    while (sem_wait(&done_sem) != 0) {
-        if (errno != EINTR)
-            break;
-        if (s_pool_interrupt_req) {
-            /* Cancel the worker from main-thread context — pthread_cancel is
-             * not async-signal-safe and must not be called from a handler. */
-            pthread_t worker = (pthread_t)0;
-            pthread_mutex_lock(&g_pool.mutex);
-            if (s_pool_active_worker_set)
-                worker = s_pool_active_worker;
-            pthread_mutex_unlock(&g_pool.mutex);
-            if (worker)
-                (void)pthread_cancel(worker);
-            /* Drain the sem_post from the cleanup handler. */
-            while (sem_wait(&done_sem) != 0 && errno == EINTR)
-                ;
-            break;
-        }
+    submit_single_command_interruptible_wait(&done_sem, (pthread_t)0);
+#else
+    if (pthread_create(&worker, NULL, interruptible_job_runner, job) != 0) {
+        job->done_sem = NULL;
+        sem_destroy(&done_sem);
+        free_job(job);
+        (void)sigaction(SIGINT, &sa_old, NULL);
+        return;
     }
+    worker_started = 1;
+    pthread_mutex_lock(&g_pool.mutex);
+    s_pool_active_worker     = worker;
+    s_pool_active_worker_set = 1;
+    pthread_mutex_unlock(&g_pool.mutex);
+    submit_single_command_interruptible_wait(&done_sem, worker);
+    if (worker_started)
+        (void)pthread_join(worker, NULL);
+#endif
 
     (void)sigaction(SIGINT, &sa_old, NULL);
     job->done_sem = NULL;
     sem_destroy(&done_sem);
     free_job(job);
-#endif
 }
 
 void submit_single_command_priority(const char *line, int priority) {

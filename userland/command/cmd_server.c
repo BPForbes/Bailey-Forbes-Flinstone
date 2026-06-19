@@ -23,6 +23,7 @@
 #include "shell_io.h"
 #include "net_wifi_host_linux.h"
 #include "fl_platform.h"
+#include "threadpool.h"
 
 #include <errno.h>
 #include <pthread.h>
@@ -31,6 +32,9 @@
 #include <string.h>
 #include <time.h>
 #include <unistd.h>
+#if defined(__unix__) || defined(__APPLE__)
+#include <termios.h>
+#endif
 
 /* ------------------------------------------------------------------------- */
 /* Process-wide session state                                                */
@@ -81,33 +85,154 @@ static void print_sock_error(const char *verb, fl_result_t rc) {
         fl_color_error("%s failed (rc=%d)", verb, (int)rc);
 }
 
-static void wsl_portproxy_notice_setup(void) {
+static int wsl_portproxy_press_any_key(void) {
+#if defined(__unix__) || defined(__APPLE__)
+    struct termios old_tty;
+    struct termios new_tty;
+    unsigned char c;
+    int           use_raw = 0;
+    int           rc      = -1;
+
+    if (!isatty(STDIN_FILENO))
+        return 0;
+
+    fl_shell_press_any_key_gate_enter();
+
+    fputs(" Press any key to continue...", stdout);
+    fflush(stdout);
+
+    if (tcgetattr(STDIN_FILENO, &old_tty) == 0) {
+        new_tty = old_tty;
+        new_tty.c_lflag &= (tcflag_t)~(ICANON | ECHO | ISIG);
+        new_tty.c_cc[VMIN]  = 1;
+        new_tty.c_cc[VTIME] = 0;
+        if (tcsetattr(STDIN_FILENO, TCSAFLUSH, &new_tty) == 0)
+            use_raw = 1;
+    }
+
+    for (;;) {
+        if (use_raw) {
+            ssize_t n = read(STDIN_FILENO, &c, 1);
+            if (n < 0) {
+                if (errno == EINTR) {
+                    (void)write(STDOUT_FILENO, "^C\n", 3);
+                    fputs(" Press any key to continue...", stdout);
+                    fflush(stdout);
+                    continue;
+                }
+                break;
+            }
+            if (n == 0)
+                break;
+            if (c == 3u) {
+                (void)write(STDOUT_FILENO, "^C\n", 3);
+                fputs(" Press any key to continue...", stdout);
+                fflush(stdout);
+                continue;
+            }
+            (void)tcsetattr(STDIN_FILENO, TCSAFLUSH, &old_tty);
+            fputc('\n', stdout);
+            fflush(stdout);
+            rc = 0;
+            break;
+        }
+        {
+            int ch = fgetc(stdin);
+            if (ch == EOF) {
+                if (errno == EINTR) {
+                    (void)write(STDOUT_FILENO, "^C\n", 3);
+                    fputs(" Press any key to continue...", stdout);
+                    fflush(stdout);
+                    continue;
+                }
+                break;
+            }
+            if (ch == 3) {
+                (void)write(STDOUT_FILENO, "^C\n", 3);
+                fputs(" Press any key to continue...", stdout);
+                fflush(stdout);
+                continue;
+            }
+            fputc('\n', stdout);
+            fflush(stdout);
+            rc = 0;
+            break;
+        }
+    }
+
+    if (use_raw)
+        (void)tcsetattr(STDIN_FILENO, TCSAFLUSH, &old_tty);
+    fl_shell_press_any_key_gate_leave();
+    return rc;
+#else
+    return 0;
+#endif
+}
+
+static void wsl_portproxy_notice_setup_message(void) {
     fl_color_warn("NOTICE: Flinstone needs elevated permissions to expose this port "
                   "to the LAN and will modify Windows port mapping and firewall rules. "
                   "This is temporary and will be reverted when the server is killed.");
-    fflush(stdout);
 }
 
-static void wsl_portproxy_notice_teardown(void) {
+static void wsl_portproxy_notice_teardown_message(void) {
     fl_color_warn("NOTICE: Flinstone will remove the temporary Windows port mapping "
                   "and firewall rules (UAC may prompt).");
-    fflush(stdout);
 }
 
-static void wsl_portproxy_teardown(void) {
+static void host_abort_started_listener(void) {
+    pthread_mutex_lock(&session_mutex);
+    if (g_server_bg) {
+        fl_server_bg_stop_server(g_server_bg);
+        g_server_bg = NULL;
+    }
+    fl_net_server_host_stop(&g_server);
+    g_server_running = 0;
+    pthread_mutex_unlock(&session_mutex);
+}
+
+static int wsl_portproxy_teardown_wants_notice(void) {
+    return g_wsl_portproxy_active && fl_platform_detect() == FL_PLATFORM_WSL;
+}
+
+static void wsl_portproxy_teardown_apply(void) {
+    char listen[32];
+    uint16_t port;
+
     if (!g_wsl_portproxy_active)
         return;
-    if (fl_platform_detect() == FL_PLATFORM_WSL)
-        wsl_portproxy_notice_teardown();
-    (void)fl_net_wifi_host_linux_server_proxy_del(g_wsl_portproxy_listen,
-                                                  g_wsl_portproxy_port);
+    strncpy(listen, g_wsl_portproxy_listen, sizeof(listen) - 1u);
+    listen[sizeof(listen) - 1u] = '\0';
+    port = g_wsl_portproxy_port;
     g_wsl_portproxy_active = 0;
     g_wsl_portproxy_listen[0] = '\0';
     g_wsl_portproxy_port = 0;
+    if (fl_net_wifi_host_linux_server_proxy_del(listen, port) != 0) {
+        fl_color_error("failed to remove Windows portproxy/firewall for %s:%u "
+                       "(approve UAC or run server kill)",
+                       listen, (unsigned)port);
+    }
 }
 
-/* On WSL, add Windows portproxy + firewall for listen_ip:port → wsl_ip:port. */
-static int wsl_portproxy_setup(const char *listen_ip, uint16_t port) {
+/* NOTICE/keypress/UAC gate + netsh delete. Caller must not hold session_mutex. */
+static void wsl_portproxy_teardown_interactive(void) {
+    int needs_key;
+
+    if (!g_wsl_portproxy_active)
+        return;
+    needs_key = wsl_portproxy_teardown_wants_notice();
+    if (needs_key)
+        wsl_portproxy_notice_teardown_message();
+    if (needs_key)
+        (void)wsl_portproxy_press_any_key();
+    wsl_portproxy_teardown_apply();
+}
+
+/* On WSL, add Windows portproxy + firewall for listen_ip:port → wsl_ip:port.
+ * Caller must print wsl_portproxy_notice_setup_message() and collect the
+ * keypress via wsl_portproxy_press_any_key() before invoking this when UAC
+ * elevation is required. */
+static int wsl_portproxy_apply(const char *listen_ip, uint16_t port) {
     char wsl_ip[32];
 
     if (fl_platform_detect() != FL_PLATFORM_WSL)
@@ -116,7 +241,6 @@ static int wsl_portproxy_setup(const char *listen_ip, uint16_t port) {
         return -1;
     if (fl_net_wifi_host_linux_wsl_ipv4(wsl_ip, sizeof(wsl_ip)) != 0)
         return -1;
-    wsl_portproxy_notice_setup();
     if (fl_net_wifi_host_linux_server_proxy(listen_ip, wsl_ip, port) != 0)
         return -1;
     strncpy(g_wsl_portproxy_listen, listen_ip, sizeof(g_wsl_portproxy_listen) - 1u);
@@ -124,6 +248,16 @@ static int wsl_portproxy_setup(const char *listen_ip, uint16_t port) {
     g_wsl_portproxy_port = port;
     g_wsl_portproxy_active = 1;
     return 0;
+}
+
+static int wsl_portproxy_will_try(const fl_net_endpoint_t *bind_ep,
+                                  const char *win_ip_display) {
+    if (fl_platform_detect() != FL_PLATFORM_WSL)
+        return 0;
+    if (win_ip_display && win_ip_display[0])
+        return 1;
+    return bind_ep && bind_ep->family == FL_NET_ADDR_FAMILY_V4 &&
+           bind_ep->port_host > 0u;
 }
 
 static const char *host_listen_ip_for_wsl(const fl_net_endpoint_t *ep,
@@ -628,82 +762,157 @@ static int verb_host(int argc, char **argv) {
         }
     }
 
-    rc = fl_net_server_host_start_ep(&g_server, &bind_ep, current_principal());
-    if (rc == FL_RESULT_NOSYS) {
-        pthread_mutex_unlock(&session_mutex);
-        fl_color_error("hosted sockets unavailable; cannot host");
-        return 1;
-    }
-    if (rc != FL_RESULT_OK) {
-        pthread_mutex_unlock(&session_mutex);
-        print_sock_error("server host", rc);
-        return 1;
-    }
-    rc = fl_server_bg_start_server(&g_server, &g_server_bg);
-    if (rc != FL_RESULT_OK) {
-        fl_net_server_host_stop(&g_server);
-        pthread_mutex_unlock(&session_mutex);
-        fl_color_error("server background start failed (rc=%d)", (int)rc);
-        return 1;
-    }
-    g_server_running = 1;
-    pthread_mutex_unlock(&session_mutex);
-
     {
         char listen_ip[32];
         const char *listen = host_listen_ip_for_wsl(&ep, win_ip_display,
                                                     listen_ip, sizeof(listen_ip));
+        int defer_hosting = wsl_portproxy_will_try(&bind_ep, win_ip_display);
+
+        if (defer_hosting) {
+            int port_free =
+                fl_net_wifi_host_linux_server_proxy_port_free(listen,
+                                                              bind_ep.port_host);
+            if (port_free == 0) {
+                pthread_mutex_unlock(&session_mutex);
+                fl_color_error("server host failed: Windows portproxy or firewall "
+                               "for port %u is already configured on %s "
+                               "(run server kill to remove stale rules, or choose "
+                               "another port)",
+                               (unsigned)bind_ep.port_host, listen);
+                return 1;
+            }
+        }
+
+        /* Show NOTICE before unlock; collect keypress after unlock so other
+         * session paths are not blocked on session_mutex during user input. */
+        if (defer_hosting)
+            wsl_portproxy_notice_setup_message();
+        pthread_mutex_unlock(&session_mutex);
+
+        if (defer_hosting && wsl_portproxy_press_any_key() != 0)
+            return 1;
+
+        pthread_mutex_lock(&session_mutex);
+        if (g_server_running) {
+            pthread_mutex_unlock(&session_mutex);
+            fl_color_error("server already hosting");
+            return 1;
+        }
+        if (fl_net_client_state(&g_client) == FL_NET_CLIENT_STATE_CONNECTED) {
+            pthread_mutex_unlock(&session_mutex);
+            fl_color_error("already joined a server; leave first");
+            return 1;
+        }
+
+        /* Keypress precedes bind so the user can read NOTICE before UAC; if
+         * bind fails afterward, no elevation was attempted (known trade-off). */
+        rc = fl_net_server_host_start_ep(&g_server, &bind_ep, current_principal());
+        if (rc == FL_RESULT_NOSYS) {
+            pthread_mutex_unlock(&session_mutex);
+            fl_color_error("hosted sockets unavailable; cannot host");
+            return 1;
+        }
+        if (rc != FL_RESULT_OK) {
+            pthread_mutex_unlock(&session_mutex);
+            print_sock_error("server host", rc);
+            return 1;
+        }
+        rc = fl_server_bg_start_server(&g_server, &g_server_bg);
+        if (rc != FL_RESULT_OK) {
+            fl_net_server_host_stop(&g_server);
+            pthread_mutex_unlock(&session_mutex);
+            fl_color_error("server background start failed (rc=%d)", (int)rc);
+            return 1;
+        }
+        g_server_running = 1;
+        pthread_mutex_unlock(&session_mutex);
 
         if (win_ip_display) {
-            fl_color_success("hosting as '%s' on %s:%u",
-                             current_principal(), win_ip_display,
-                             (unsigned)ep.port_host);
-            if (wsl_portproxy_setup(listen, ep.port_host) == 0) {
-                fl_color_success("WSL portproxy active (%s → WSL, approve UAC if prompted)",
-                                 listen);
+            if (wsl_portproxy_apply(listen, ep.port_host) == 0) {
+                fl_color_success("hosting as '%s' on %s:%u",
+                                 current_principal(), win_ip_display,
+                                 (unsigned)ep.port_host);
+                fl_color_success("WSL portproxy active (%s → WSL)", listen);
                 host_print_wsl_lan_hint(listen, ep.port_host);
             } else if (fl_net_wifi_host_linux_server_bridge_to(win_ip_display, NULL,
                                                                ep.port_host) == 0) {
+                fl_color_success("hosting as '%s' on %s:%u",
+                                 current_principal(), win_ip_display,
+                                 (unsigned)ep.port_host);
                 fl_color_success("LAN peers: server join %s:%u (bridge active, no admin)",
                                  win_ip_display, (unsigned)ep.port_host);
             } else {
-                fl_color_error("server running WSL-local only (LAN unreachable): "
-                               "portproxy and bridge both failed — "
-                               "approve UAC or run: "
-                               "FlinstonePowershell.exe server-proxy %s <wsl-ip> %u",
-                               listen, (unsigned)ep.port_host);
+                fl_color_error("server host failed: could not expose %s:%u to the LAN "
+                               "(portproxy and bridge both failed — approve UAC or run "
+                               "FlinstonePowershell.exe server-proxy %s <wsl-ip> %u)",
+                               win_ip_display, (unsigned)ep.port_host, listen,
+                               (unsigned)ep.port_host);
+                host_abort_started_listener();
+                return 1;
             }
         } else {
-            char bind_txt[128];
-            if (fl_net_endpoint_format(&bind_ep, bind_txt, sizeof(bind_txt)))
-                fl_color_success("hosting as '%s' on %s", current_principal(), bind_txt);
-            else
-                fl_color_success("hosting as '%s' on %s", current_principal(), argv[2]);
+            if (!defer_hosting) {
+                char bind_txt[128];
+                if (fl_net_endpoint_format(&bind_ep, bind_txt, sizeof(bind_txt)))
+                    fl_color_success("hosting as '%s' on %s", current_principal(), bind_txt);
+                else
+                    fl_color_success("hosting as '%s' on %s", current_principal(), argv[2]);
+            }
             if (bind_ep.family == FL_NET_ADDR_FAMILY_V4 && bind_ep.port_host > 0u) {
-                if (wsl_portproxy_setup(listen, bind_ep.port_host) == 0) {
-                    fl_color_success("WSL portproxy active (%s → WSL, approve UAC if prompted)",
-                                     listen);
+                if (wsl_portproxy_apply(listen, bind_ep.port_host) == 0) {
+                    if (defer_hosting) {
+                        char bind_txt[128];
+                        if (fl_net_endpoint_format(&bind_ep, bind_txt, sizeof(bind_txt)))
+                            fl_color_success("hosting as '%s' on %s",
+                                             current_principal(), bind_txt);
+                        else
+                            fl_color_success("hosting as '%s' on %s",
+                                             current_principal(), argv[2]);
+                    }
+                    fl_color_success("WSL portproxy active (%s → WSL)", listen);
                     host_print_wsl_lan_hint(listen, bind_ep.port_host);
                 } else {
                     const char *wip = fl_net_wifi_host_linux_windows_ipv4();
                     char        bip[32];
-                    const char *proxy_target =
-                        (bind_ep.addr.v4_be == 0u) ? "127.0.0.1" : NULL;
                     const char *bridge_target =
                         (bind_ep.addr.v4_be == 0u) ? NULL : bip;
 
                     if (bind_ep.addr.v4_be != 0u)
                         fl_net_ipv4_format_addr(bind_ep.addr.v4_be, bip, sizeof(bip));
                     if (wip && fl_net_wifi_host_linux_server_bridge_to(
-                            wip, bridge_target, bind_ep.port_host) == 0)
+                            wip, bridge_target, bind_ep.port_host) == 0) {
+                        if (defer_hosting) {
+                            char bind_txt[128];
+                            if (fl_net_endpoint_format(&bind_ep, bind_txt, sizeof(bind_txt)))
+                                fl_color_success("hosting as '%s' on %s",
+                                                 current_principal(), bind_txt);
+                            else
+                                fl_color_success("hosting as '%s' on %s",
+                                                 current_principal(), argv[2]);
+                        }
                         fl_color_success("peers on LAN can: server join %s:%u (bridge active)",
                                          wip, (unsigned)bind_ep.port_host);
-                    else {
+                    } else {
+                        if (defer_hosting) {
+                            char bind_txt[128];
+                            if (fl_net_endpoint_format(&bind_ep, bind_txt, sizeof(bind_txt)))
+                                fl_color_success("hosting as '%s' on %s",
+                                                 current_principal(), bind_txt);
+                            else
+                                fl_color_success("hosting as '%s' on %s",
+                                                 current_principal(), argv[2]);
+                        }
                         fl_color_error("server running WSL-local only (LAN unreachable): "
                                        "portproxy and bridge both failed");
                         host_print_wsl_lan_hint(listen, bind_ep.port_host);
                     }
                 }
+            } else if (defer_hosting) {
+                char bind_txt[128];
+                if (fl_net_endpoint_format(&bind_ep, bind_txt, sizeof(bind_txt)))
+                    fl_color_success("hosting as '%s' on %s", current_principal(), bind_txt);
+                else
+                    fl_color_success("hosting as '%s' on %s", current_principal(), argv[2]);
             }
         }
     }
@@ -808,8 +1017,8 @@ static int verb_leave(void) {
         }
         (void)fl_net_server_transfer_and_stop(&g_server, &new_host);
         g_server_running = 0;
-        wsl_portproxy_teardown();
         pthread_mutex_unlock(&session_mutex);
+        wsl_portproxy_teardown_interactive();
         if (new_host == FL_NET_SERVER_MEMBER_ID_NONE) {
             fl_color_success("session terminated (no remaining members)");
         }
@@ -846,8 +1055,8 @@ static int verb_kill(void) {
     }
     fl_net_server_host_stop(&g_server);
     g_server_running = 0;
-    wsl_portproxy_teardown();
     pthread_mutex_unlock(&session_mutex);
+    wsl_portproxy_teardown_interactive();
     fl_color_success("session terminated");
     return 0;
 }
@@ -1157,6 +1366,12 @@ static int verb_connected(void) {
 /* ------------------------------------------------------------------------- */
 
 void cmd_server_atexit(void) {
+    static int done;
+
+    if (done)
+        return;
+    done = 1;
+
     pthread_mutex_lock(&session_mutex);
     if (g_server_running) {
         fl_net_server_member_id_t new_host = FL_NET_SERVER_MEMBER_ID_NONE;
@@ -1166,11 +1381,7 @@ void cmd_server_atexit(void) {
         }
         (void)fl_net_server_transfer_and_stop(&g_server, &new_host);
         g_server_running = 0;
-        wsl_portproxy_teardown();
-        pthread_mutex_unlock(&session_mutex);
-        return;
-    }
-    if (fl_net_client_state(&g_client) == FL_NET_CLIENT_STATE_CONNECTED) {
+    } else if (fl_net_client_state(&g_client) == FL_NET_CLIENT_STATE_CONNECTED) {
         if (g_client_bg) {
             fl_server_bg_stop_client(g_client_bg);
             g_client_bg = NULL;
@@ -1178,6 +1389,9 @@ void cmd_server_atexit(void) {
         fl_net_client_disconnect(&g_client);
     }
     pthread_mutex_unlock(&session_mutex);
+
+    /* Always drop Windows portproxy/firewall when this shell exits hosting. */
+    wsl_portproxy_teardown_interactive();
 }
 
 /* ------------------------------------------------------------------------- */
