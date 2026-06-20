@@ -564,6 +564,15 @@ VM/devices/%.o: VM/devices/%.c
 # --- ASM + Alloc + PQ unit tests (no CUnit) ---
 # Use -fsanitize when NOT using ASM allocator (libc tests only)
 TEST_SANITIZE = -fsanitize=address,undefined -fno-omit-frame-pointer
+# TEST_QUIET=1 (or: make -s test_wifi) — hide long link lines; show test program output only.
+# run-test_wifi — run existing binaries without linking (build first with make test_wifi).
+ifeq ($(TEST_QUIET),1)
+WIFI_TEST_LINK_PRE = @echo "  LINK $@";
+WIFI_TEST_LINK_AT = @
+else
+WIFI_TEST_LINK_PRE =
+WIFI_TEST_LINK_AT =
+endif
 .PHONY: test_mem_asm test_alloc test_priority_queue test_shell_ctrl_c test_drivers test_core test_invariants test_audit_log test_p3_network test_p3_udp_cmds test_p3_net_tools test_vm_layer_warning check-layers check-network-requirements
 test_mem_asm: $(MEM_ASM_OBJ)
 	$(CC) $(CFLAGS) $(TEST_SANITIZE) -I. -o tests/test_mem_asm tests/test_mem_asm.c $(MEM_ASM_OBJ)
@@ -815,7 +824,7 @@ test_p3_udp_cmds: $(NET_ASM_OBJ) $(MEM_ASM_OBJ) $(NET_TEST_MM_OBJS) $(NET_TEST_S
 # (issue #239 internal-only audit). Drives cmd_net_tools.c entry points
 # in-process against the in-tree fl_net_arp / fl_net_route / fl_net_udp /
 # fl_net_resolve_ipv4 APIs; no arpa/inet.h, no libc DNS.
-.PHONY: test_p3_wifi test_wifi_db test_wifi_flinstone_helper test_wifi_flinstone_linux_helper test_network_bridge_py
+.PHONY: test_p3_wifi test_wifi_db test_wifi_flinstone_helper test_wifi_flinstone_linux_helper test_network_bridge_py test_wifi test_wifi-quiet run-test_wifi
 WIFI_TEST_NET_OBJS = kernel/core/net/net_checksum.c kernel/core/net/net_wire.c \
 	kernel/core/net/net_eth.c kernel/core/net/net_ipv4.c kernel/core/net/net_ipv6.c \
 	kernel/core/net/net_icmpv6.c kernel/core/net/net_ndp.c kernel/core/net/net_udp.c \
@@ -826,8 +835,11 @@ WIFI_TEST_NET_OBJS = kernel/core/net/net_checksum.c kernel/core/net/net_wire.c \
 	kernel/core/net/net_netdev.c kernel/core/net/net_arp.c kernel/core/net/net_dhcp.c \
 	kernel/core/net/net_stack_sync.c kernel/core/net/net_wifi_netdev.c kernel/core/net/net_iface.c
 
-test_p3_wifi: $(NET_ASM_OBJ) $(MEM_ASM_OBJ) priority_queue.o kernel/core/time/timekeeping.o kernel/core/sys/ipc.o
-	$(CC) $(CFLAGS) $(TEST_SANITIZE) -o tests/test_p3_wifi tests/test_p3_wifi.c \
+WIFI_TEST_COMMON_DEPS = $(NET_ASM_OBJ) $(MEM_ASM_OBJ) priority_queue.o kernel/core/time/timekeeping.o kernel/core/sys/ipc.o
+
+tests/test_p3_wifi: $(WIFI_TEST_COMMON_DEPS)
+	$(WIFI_TEST_LINK_PRE)
+	$(WIFI_TEST_LINK_AT)$(CC) $(CFLAGS) $(TEST_SANITIZE) -o tests/test_p3_wifi tests/test_p3_wifi.c \
 	  kernel/core/net/net_wifi_he.c kernel/core/net/net_wifi_station.c kernel/core/net/net_wifi_host_linux.c \
 	  kernel/core/net/net_wifi_mgmt.c kernel/core/net/net_wifi_sae.c \
 	  kernel/core/net/net_wifi_wpa.c kernel/core/net/net_wifi_twt.c \
@@ -841,7 +853,75 @@ test_p3_wifi: $(NET_ASM_OBJ) $(MEM_ASM_OBJ) priority_queue.o kernel/core/time/ti
 	  kernel/core/platform/fl_platform.c \
 	  kernel/core/sched/workqueue.c kernel/core/sys/ipc.o kernel/core/time/timekeeping.o priority_queue.o \
 	  $(MEM_ASM_OBJ) $(NET_ASM_OBJ) $(OPENSSL_LIBS) -Wl,-z,noexecstack
-	./tests/test_p3_wifi
+
+test_p3_wifi: tests/test_p3_wifi
+	@./tests/test_p3_wifi
+
+tests/test_wifi_coprocessor: kernel/drivers/wifi_coprocessor.o kernel/drivers/wifi_uart_transport.o \
+	kernel/drivers/wifi_driver_packet.o kernel/core/net/net_packet.o kernel/core/net/net_wire.o \
+	kernel/core/net/net_ipv6.o kernel/core/net/net_checksum.o \
+	kernel/core/mm/kmalloc.o kernel/core/mm/mem_domain.o $(MEM_ASM_OBJ) $(NET_ASM_OBJ) \
+	$(WIFI_PLATFORM_SRC:.c=.o) kernel/core/platform/fl_platform.o kernel/core/time/timekeeping.o
+	$(WIFI_TEST_LINK_PRE)
+	$(WIFI_TEST_LINK_AT)$(CC) $(CFLAGS) $(TEST_SANITIZE) -o tests/test_wifi_coprocessor kernel/drivers/wifi_coprocessor_test.c \
+	  kernel/drivers/wifi_coprocessor.o kernel/drivers/wifi_uart_transport.o \
+	  kernel/drivers/wifi_driver_packet.o kernel/core/net/net_packet.o kernel/core/net/net_wire.o \
+	  kernel/core/net/net_ipv6.o kernel/core/net/net_checksum.o \
+	  kernel/core/mm/kmalloc.o kernel/core/mm/mem_domain.o $(MEM_ASM_OBJ) $(NET_ASM_OBJ) \
+	  $(WIFI_PLATFORM_SRC:.c=.o) kernel/core/platform/fl_platform.o kernel/core/time/timekeeping.o \
+	  -Wl,-z,noexecstack
+
+test_wifi_coprocessor: tests/test_wifi_coprocessor
+	@./tests/test_wifi_coprocessor
+
+tests/test_wifi_80211ax_mock_279: $(WIFI_TEST_COMMON_DEPS)
+	$(WIFI_TEST_LINK_PRE)
+	$(WIFI_TEST_LINK_AT)$(CC) $(CFLAGS) $(TEST_SANITIZE) -o tests/test_wifi_80211ax_mock_279 tests/test_wifi_80211ax_mock_279.c \
+	  kernel/core/net/net_wifi_he.c kernel/core/net/net_wifi_station.c kernel/core/net/net_wifi_host_linux.c \
+	  kernel/core/net/net_wifi_mgmt.c kernel/core/net/net_wifi_sae.c \
+	  kernel/core/net/net_wifi_wpa.c kernel/core/net/net_wifi_twt.c \
+	  kernel/core/net/net_wifi_crypto.c \
+	  kernel/drivers/wifi_driver_backend.c kernel/drivers/wifi_coprocessor.c \
+	  kernel/drivers/wifi_uart_transport.c kernel/drivers/wifi_driver_packet.c \
+	  kernel/drivers/wifi_80211ax_mock.c kernel/drivers/wifi_supplicant.c \
+	  kernel/core/mm/kmalloc.o kernel/core/mm/mem_domain.o \
+	  $(WIFI_PLATFORM_SRC:.c=.o) \
+	  $(WIFI_TEST_NET_OBJS) \
+	  kernel/core/platform/fl_platform.c \
+	  kernel/core/sched/workqueue.c kernel/core/sys/ipc.o kernel/core/time/timekeeping.o priority_queue.o \
+	  $(MEM_ASM_OBJ) $(NET_ASM_OBJ) $(OPENSSL_LIBS) -Wl,-z,noexecstack
+
+test_wifi_80211ax_mock_279: tests/test_wifi_80211ax_mock_279
+	@./tests/test_wifi_80211ax_mock_279
+
+tests/test_wifi_ax_server_ota: $(NET_ASM_OBJ) $(MEM_ASM_OBJ) $(NET_TEST_MM_OBJS) $(NET_TEST_EXTRA_OBJS) userland/shell/common.o priority_queue.o kernel/core/time/timekeeping.o kernel/core/sys/ipc.o
+	$(WIFI_TEST_LINK_PRE)
+	$(WIFI_TEST_LINK_AT)$(CC) $(CFLAGS) $(TEST_SANITIZE) -o tests/test_wifi_ax_server_ota tests/test_wifi_ax_server_ota.c \
+	  userland/shell/common.o \
+	  $(NET_CORE_SRCS) kernel/core/sched/workqueue.c kernel/core/sys/ipc.o kernel/core/time/timekeeping.o priority_queue.o \
+	  $(NET_TEST_MM_OBJS) $(MEM_ASM_OBJ) $(NET_ASM_OBJ) \
+	  $(NET_TEST_EXTRA_OBJS) $(NET_TEST_LIBS) -pthread -Wl,-z,noexecstack
+
+test_wifi_ax_server_ota: tests/test_wifi_ax_server_ota
+	@./tests/test_wifi_ax_server_ota
+
+# PR #320 WiFi validation bundle (build when stale, then run all four).
+test_wifi: test_wifi_coprocessor test_p3_wifi test_wifi_80211ax_mock_279 test_wifi_ax_server_ota
+
+# Same bundle; suppress make recipe echo (link lines + ./tests/... wrappers).
+test_wifi-quiet:
+	@$(MAKE) -s TEST_QUIET=1 test_wifi
+
+# Run only — no link step (fail fast if a binary is missing).
+run-test_wifi:
+	@test -x tests/test_wifi_coprocessor || { echo "missing tests/test_wifi_coprocessor (run: make test_wifi_coprocessor)" >&2; exit 1; }
+	@test -x tests/test_p3_wifi || { echo "missing tests/test_p3_wifi (run: make test_p3_wifi)" >&2; exit 1; }
+	@test -x tests/test_wifi_80211ax_mock_279 || { echo "missing tests/test_wifi_80211ax_mock_279 (run: make test_wifi_80211ax_mock_279)" >&2; exit 1; }
+	@test -x tests/test_wifi_ax_server_ota || { echo "missing tests/test_wifi_ax_server_ota (run: make test_wifi_ax_server_ota)" >&2; exit 1; }
+	@./tests/test_wifi_coprocessor
+	@./tests/test_p3_wifi
+	@./tests/test_wifi_80211ax_mock_279
+	@./tests/test_wifi_ax_server_ota
 
 test_wifi_flinstone_helper: $(NET_ASM_OBJ) $(MEM_ASM_OBJ) priority_queue.o kernel/core/time/timekeeping.o kernel/core/sys/ipc.o
 	$(CC) $(CFLAGS) $(TEST_SANITIZE) -o tests/test_wifi_flinstone_helper tests/test_wifi_flinstone_helper.c \
@@ -880,49 +960,6 @@ test_wifi_db: userland/identity/password_hash.o kernel/core/net/net_wifi_db.o ke
 	  kernel/core/net/net_wifi_db.o userland/identity/password_hash.o \
 	  kernel/core/time/timekeeping.o -lsqlite3 $(OPENSSL_LIBS) -Wl,-z,noexecstack
 	FL_WIFI_DB_PATH=/tmp/fl_test_wifi.db rm -f /tmp/fl_test_wifi.db; ./tests/test_wifi_db
-
-# Phase 1 WiFi coprocessor unit tests (v4.3.0 first-principles drivers)
-.PHONY: test_wifi_coprocessor
-test_wifi_coprocessor: kernel/drivers/wifi_coprocessor.o kernel/drivers/wifi_uart_transport.o \
-	kernel/drivers/wifi_driver_packet.o kernel/core/net/net_packet.o kernel/core/net/net_wire.o \
-	kernel/core/net/net_ipv6.o kernel/core/net/net_checksum.o \
-	kernel/core/mm/kmalloc.o kernel/core/mm/mem_domain.o $(MEM_ASM_OBJ) $(NET_ASM_OBJ) \
-	$(WIFI_PLATFORM_SRC:.c=.o) kernel/core/platform/fl_platform.o kernel/core/time/timekeeping.o
-	$(CC) $(CFLAGS) $(TEST_SANITIZE) -o tests/test_wifi_coprocessor kernel/drivers/wifi_coprocessor_test.c \
-	  kernel/drivers/wifi_coprocessor.o kernel/drivers/wifi_uart_transport.o \
-	  kernel/drivers/wifi_driver_packet.o kernel/core/net/net_packet.o kernel/core/net/net_wire.o \
-	  kernel/core/net/net_ipv6.o kernel/core/net/net_checksum.o \
-	  kernel/core/mm/kmalloc.o kernel/core/mm/mem_domain.o $(MEM_ASM_OBJ) $(NET_ASM_OBJ) \
-	  $(WIFI_PLATFORM_SRC:.c=.o) kernel/core/platform/fl_platform.o kernel/core/time/timekeeping.o \
-	  -Wl,-z,noexecstack
-	./tests/test_wifi_coprocessor
-
-.PHONY: test_wifi_80211ax_mock_279
-test_wifi_80211ax_mock_279: $(NET_ASM_OBJ) $(MEM_ASM_OBJ) priority_queue.o kernel/core/time/timekeeping.o kernel/core/sys/ipc.o
-	$(CC) $(CFLAGS) $(TEST_SANITIZE) -o tests/test_wifi_80211ax_mock_279 tests/test_wifi_80211ax_mock_279.c \
-	  kernel/core/net/net_wifi_he.c kernel/core/net/net_wifi_station.c kernel/core/net/net_wifi_host_linux.c \
-	  kernel/core/net/net_wifi_mgmt.c kernel/core/net/net_wifi_sae.c \
-	  kernel/core/net/net_wifi_wpa.c kernel/core/net/net_wifi_twt.c \
-	  kernel/core/net/net_wifi_crypto.c \
-	  kernel/drivers/wifi_driver_backend.c kernel/drivers/wifi_coprocessor.c \
-	  kernel/drivers/wifi_uart_transport.c kernel/drivers/wifi_driver_packet.c \
-	  kernel/drivers/wifi_80211ax_mock.c kernel/drivers/wifi_supplicant.c \
-	  kernel/core/mm/kmalloc.o kernel/core/mm/mem_domain.o \
-	  $(WIFI_PLATFORM_SRC:.c=.o) \
-	  $(WIFI_TEST_NET_OBJS) \
-	  kernel/core/platform/fl_platform.c \
-	  kernel/core/sched/workqueue.c kernel/core/sys/ipc.o kernel/core/time/timekeeping.o priority_queue.o \
-	  $(MEM_ASM_OBJ) $(NET_ASM_OBJ) $(OPENSSL_LIBS) -Wl,-z,noexecstack
-	./tests/test_wifi_80211ax_mock_279
-
-.PHONY: test_wifi_ax_server_ota
-test_wifi_ax_server_ota: $(NET_ASM_OBJ) $(MEM_ASM_OBJ) $(NET_TEST_MM_OBJS) $(NET_TEST_EXTRA_OBJS) userland/shell/common.o priority_queue.o kernel/core/time/timekeeping.o kernel/core/sys/ipc.o
-	$(CC) $(CFLAGS) $(TEST_SANITIZE) -o tests/test_wifi_ax_server_ota tests/test_wifi_ax_server_ota.c \
-	  userland/shell/common.o \
-	  $(NET_CORE_SRCS) kernel/core/sched/workqueue.c kernel/core/sys/ipc.o kernel/core/time/timekeeping.o priority_queue.o \
-	  $(NET_TEST_MM_OBJS) $(MEM_ASM_OBJ) $(NET_ASM_OBJ) \
-	  $(NET_TEST_EXTRA_OBJS) $(NET_TEST_LIBS) -pthread -Wl,-z,noexecstack
-	./tests/test_wifi_ax_server_ota
 
 .PHONY: test_p3_net_tools
 test_p3_net_tools: $(NET_ASM_OBJ) $(MEM_ASM_OBJ) $(NET_TEST_MM_OBJS) $(NET_TEST_SHELL_OBJS) $(NET_TEST_EXTRA_OBJS) priority_queue.o kernel/core/time/timekeeping.o kernel/core/sys/ipc.o
@@ -1014,7 +1051,7 @@ clean:
 	rm -f kernel/arch/*/drivers/*.o kernel/arch/*/hal/*.o kernel/drivers/*.o kernel/drivers/block/*.o VM/devices/*.o
 	rm -f arch/*/*/*.o arch/*/*/alloc/*.o
 	rm -f tests/test_mem_asm tests/test_alloc tests/test_priority_queue tests/test_drivers tests/test_vm_mem tests/test_replay tests/test_invariants tests/test_userspace_connection tests/test_vm_syscall_bridge tests/test_vm_arch_readiness
-	rm -f tests/test_p3_network tests/test_p3_server tests/test_p3_server_lan tests/test_p3_udp_cmds tests/test_p3_net_tools tests/test_wifi_flinstone_helper tests/test_wifi_flinstone_linux_helper tests/test_wifi_coprocessor tests/test_wifi_80211ax_mock_279 tests/test_wifi_ax_server_ota
+	rm -f tests/test_p3_network tests/test_p3_server tests/test_p3_server_lan tests/test_p3_udp_cmds tests/test_p3_net_tools tests/test_wifi_flinstone_helper tests/test_wifi_flinstone_linux_helper tests/test_p3_wifi tests/test_wifi_coprocessor tests/test_wifi_80211ax_mock_279 tests/test_wifi_ax_server_ota
 	rm -f tests/test_batch_argv_issue220 tests/test_threadpool_issue222 tests/test_disk_hex_issue222
 	rm -rf tests/obj/issue220 tests/obj/issue222
 	find . -name '*.o' -type f ! -path './deps/*' ! -path './.git/*' -exec rm -f {} +
