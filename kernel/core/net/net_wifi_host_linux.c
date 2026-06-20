@@ -204,6 +204,26 @@ static int iface_is_wireless(const char *name) {
     return access(path, F_OK) == 0;
 }
 
+/** Copy one IFNAMSIZ-length token into out (Linux iface names are at most 15 chars). */
+static int copy_iface_name_token(const char *start, const char *end, char *out, size_t out_cap) {
+    size_t n;
+
+    if (!start || !out || out_cap == 0u)
+        return 0;
+    if (!end)
+        end = start + strlen(start);
+    while (start < end && isspace((unsigned char)*start))
+        start++;
+    while (end > start && isspace((unsigned char)end[-1]))
+        end--;
+    n = (size_t)(end - start);
+    if (n == 0u || n >= out_cap)
+        return 0;
+    memcpy(out, start, n);
+    out[n] = '\0';
+    return 1;
+}
+
 static int pick_wireless_iface(char *out, size_t out_cap) {
     FILE *fp;
     char line[256];
@@ -222,12 +242,25 @@ static int pick_wireless_iface(char *out, size_t out_cap) {
         while (fgets(line, sizeof(line), fp) != NULL) {
             char dev[FL_NET_IFACE_NAME_MAX];
             char kind[32];
-            if (sscanf(line, "%31[^:]:%31s", dev, kind) == 2 && !strcmp(kind, "wifi")) {
-                pclose(fp);
-                strncpy(out, dev, out_cap - 1u);
-                out[out_cap - 1u] = '\0';
-                return 1;
-            }
+            char *colon;
+            char *nl;
+
+            nl = strchr(line, '\n');
+            if (nl)
+                *nl = '\0';
+            colon = strchr(line, ':');
+            if (!colon)
+                continue;
+            if (!copy_iface_name_token(line, colon, dev, sizeof(dev)))
+                continue;
+            if (!copy_iface_name_token(colon + 1, NULL, kind, sizeof(kind)))
+                continue;
+            if (strcmp(kind, "wifi") != 0)
+                continue;
+            pclose(fp);
+            strncpy(out, dev, out_cap - 1u);
+            out[out_cap - 1u] = '\0';
+            return 1;
         }
         pclose(fp);
     }
@@ -237,12 +270,20 @@ static int pick_wireless_iface(char *out, size_t out_cap) {
         (void)fgets(line, sizeof(line), fp);
         while (fgets(line, sizeof(line), fp) != NULL) {
             char dev[FL_NET_IFACE_NAME_MAX];
-            if (sscanf(line, " %31s", dev) == 1 && dev[0] != ':') {
-                fclose(fp);
-                strncpy(out, dev, out_cap - 1u);
-                out[out_cap - 1u] = '\0';
-                return 1;
-            }
+            const char *p = line;
+            const char *e;
+
+            while (*p && isspace((unsigned char)*p))
+                p++;
+            e = p;
+            while (*e && !isspace((unsigned char)*e) && *e != ':')
+                e++;
+            if (!copy_iface_name_token(p, e, dev, sizeof(dev)))
+                continue;
+            fclose(fp);
+            strncpy(out, dev, out_cap - 1u);
+            out[out_cap - 1u] = '\0';
+            return 1;
         }
         fclose(fp);
     }
