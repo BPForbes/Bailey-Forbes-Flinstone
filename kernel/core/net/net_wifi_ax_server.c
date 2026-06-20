@@ -19,6 +19,13 @@ typedef struct {
     int enabled;
 } ax_ap_slot_t;
 
+/*
+ * AP slot table: no mutex — callers must follow the server threading contract.
+ * fl_net_wifi_ax_ap_enable() / fl_net_wifi_ax_ap_disable() run on the thread that
+ * owns server setup/teardown (before fl_server_bg_start_server, after it stops).
+ * fl_net_wifi_ax_ap_dispatch() runs only from the server poll thread for that
+ * same fl_net_server_t instance. Do not enable/disable concurrently with dispatch.
+ */
 static ax_ap_slot_t s_ax_ap[AX_AP_CFG_MAX];
 
 static ax_ap_slot_t *ax_ap_for_server(fl_net_server_t *srv)
@@ -137,15 +144,6 @@ int fl_net_wifi_ax_ap_dispatch(fl_net_server_t *srv, fl_net_server_member_id_t f
             return 1;
         (void)ax_send(peer, FL_NET_SESSION_OP_WIFI_ASSOC_RESP, reply,
                       (uint16_t)reply_len);
-        {
-            const uint8_t *ies = NULL;
-            size_t ies_len = 0;
-            if (fl_net_wifi_mgmt_parse_mgmt_ies(reply, reply_len, &ies, &ies_len) ==
-                FL_RESULT_OK) {
-                (void)ies;
-                (void)ies_len;
-            }
-        }
         (void)ax_send(peer, FL_NET_SESSION_OP_WIFI_AUTH_DONE, (const uint8_t *)"ok", 2u);
         return 1;
 

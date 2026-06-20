@@ -181,9 +181,13 @@ static void wifi_uart_parse_ipd_from_staging(wifi_uart_context_t *uart)
 			size_t len_field_len = colon - (hdr + sizeof(marker) - 1u);
 			const char *comma;
 			const char *len_start;
+			char *endptr = NULL;
 
-			if (len_field_len == 0 || len_field_len >= sizeof(len_field))
-				return;
+			if (len_field_len == 0 || len_field_len >= sizeof(len_field)) {
+				uart->error_count++;
+				wifi_uart_shift_staging(uart, hdr + 1u);
+				continue;
+			}
 
 			memcpy(len_field, uart->rx_staging + hdr + sizeof(marker) - 1u,
 			       len_field_len);
@@ -191,11 +195,19 @@ static void wifi_uart_parse_ipd_from_staging(wifi_uart_context_t *uart)
 
 			comma = strchr(len_field, ',');
 			len_start = comma ? comma + 1 : len_field;
-			payload_len = strtoul(len_start, NULL, 10);
+			payload_len = strtoul(len_start, &endptr, 10);
+			if (endptr == len_start || (endptr && *endptr != '\0')) {
+				uart->error_count++;
+				wifi_uart_shift_staging(uart, hdr + 1u);
+				continue;
+			}
 		}
 
-		if (payload_len == 0 || payload_len > sizeof(uart->rx_payload))
-			return;
+		if (payload_len == 0 || payload_len > sizeof(uart->rx_payload)) {
+			uart->error_count++;
+			wifi_uart_shift_staging(uart, hdr + 1u);
+			continue;
+		}
 
 		payload_off = colon + 1u;
 		if (uart->rx_staging_len < payload_off + payload_len)

@@ -483,8 +483,10 @@ fl_result_t fl_net_wifi_connect(const fl_net_wifi_cred_t *cred, unsigned timeout
         const char *use_wpa = getenv("FL_NET_WIFI_USE_WPA");
         if ((!use_wpa || strcmp(use_wpa, "0") != 0) && fl_net_wifi_host_linux_available()) {
             fl_result_t hrc = host_linux_connect(cred, timeout_ms);
-            if (hrc == FL_RESULT_OK)
+            if (hrc == FL_RESULT_OK) {
+                s_lab_backend = 0;
                 return FL_RESULT_OK;
+            }
             if (hrc != FL_RESULT_NOSYS) {
                 s_wifi_state = FL_WIFI_STATE_ERROR;
                 return hrc;
@@ -647,13 +649,8 @@ fl_result_t fl_net_wifi_twt_setup(const fl_net_wifi_twt_params_t *req,
 
     if (s_driver_backend) {
         fl_result_t rc = wifi_driver_twt_setup(req, agreed_out);
-        if (rc == FL_RESULT_OK) {
-            fl_net_wifi_twt_params_t tracked;
-
-            if (fl_net_wifi_twt_negotiate(req, &tracked) == FL_RESULT_OK)
-                agreed_out->flow_id = tracked.flow_id;
+        if (rc == FL_RESULT_OK)
             return FL_RESULT_OK;
-        }
         if (rc != FL_RESULT_NOSYS)
             return rc;
     }
@@ -662,6 +659,23 @@ fl_result_t fl_net_wifi_twt_setup(const fl_net_wifi_twt_params_t *req,
     /* Lab simulation fallback */
     return fl_net_wifi_twt_negotiate(req, agreed_out);
 #else
+    return FL_RESULT_NOSYS;
+#endif
+}
+
+fl_result_t fl_net_wifi_twt_teardown(uint8_t flow_id) {
+    if (s_driver_backend) {
+        fl_result_t rc = wifi_driver_twt_teardown(flow_id);
+        if (rc == FL_RESULT_OK)
+            return FL_RESULT_OK;
+        if (rc != FL_RESULT_NOSYS)
+            return rc;
+    }
+
+#if defined(FL_NET_WIFI_HOSTED_LAB)
+    return fl_net_wifi_twt_lab_teardown(flow_id);
+#else
+    (void)flow_id;
     return FL_RESULT_NOSYS;
 #endif
 }

@@ -16,6 +16,7 @@
 #include "wifi_driver_backend.h"
 #include "wifi_80211ax_mock.h"
 #include "wifi_supplicant.h"
+#include "net_endian.h"
 
 #include <stdio.h>
 #include <stdlib.h>
@@ -121,7 +122,12 @@ static int prereq04_egress(void)
         FAIL279("prereq-4", "connect");
     if (fl_net_wifi_netdev_ipv4(&ip_be) != FL_RESULT_OK)
         FAIL279("prereq-4", "no ipv4");
-    gw_be = (ip_be & ~UINT32_C(0xff000000)) | (UINT32_C(2) << 24);
+    {
+        uint32_t ip_host = fl_net_ntohl(ip_be);
+        uint32_t gw_host = (ip_host & UINT32_C(0xFFFFFF00)) | UINT32_C(0x02);
+
+        gw_be = fl_net_htonl(gw_host);
+    }
     if (fl_net_udp_echo_exchange(gw_be, 48079u, 48080u, (const uint8_t *)payload,
                                  strlen(payload), rx, sizeof(rx), &rx_len, 3000u) !=
         FL_RESULT_OK)

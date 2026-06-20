@@ -131,6 +131,10 @@ static fl_result_t wifi_backend_try_ax_mock(void)
 
 fl_result_t wifi_driver_backend_init(void)
 {
+	if (s_backend_type == WIFI_BACKEND_COPROCESSOR && s_coprocessor) {
+		wifi_coproc_destroy(s_coprocessor);
+		s_coprocessor = NULL;
+	}
 	if (s_fullmac && s_backend_type == WIFI_BACKEND_QEMU)
 		wifi_80211ax_mock_detach(s_fullmac);
 

@@ -69,10 +69,13 @@ static void test_wifi_coprocessor_register_ops(void)
 	printf("\n=== Test: Register Operations ===\n");
 
 	wifi_coproc_t *coproc = NULL;
-	wifi_coproc_create("test", &coproc);
+	int ret = wifi_coproc_create("test", &coproc);
+
+	TEST_ASSERT(ret == 0, "Create coprocessor");
+	TEST_ASSERT(coproc != NULL, "Coprocessor pointer valid");
 
 	wifi_coproc_ops_t dummy_ops = {0};
-	int ret = wifi_coproc_register_ops(coproc, &dummy_ops);
+	ret = wifi_coproc_register_ops(coproc, &dummy_ops);
 
 	TEST_ASSERT(ret == 0, "Register operations");
 	TEST_ASSERT(coproc->ops == &dummy_ops, "Operations pointer set");
@@ -86,10 +89,13 @@ static void test_wifi_coprocessor_register_transport(void)
 	printf("\n=== Test: Register Transport ===\n");
 
 	wifi_coproc_t *coproc = NULL;
-	void *dummy_transport = (void *)0xDEADBEEF;
-	wifi_coproc_create("test", &coproc);
+	int ret = wifi_coproc_create("test", &coproc);
 
-	int ret = wifi_coproc_register_transport(coproc, dummy_transport);
+	TEST_ASSERT(ret == 0, "Create coprocessor");
+	TEST_ASSERT(coproc != NULL, "Coprocessor pointer valid");
+
+	void *dummy_transport = (void *)0xDEADBEEF;
+	ret = wifi_coproc_register_transport(coproc, dummy_transport);
 
 	TEST_ASSERT(ret == 0, "Register transport");
 	TEST_ASSERT(coproc->transport_data == dummy_transport, "Transport pointer set");
@@ -120,10 +126,12 @@ static void test_wifi_uart_at_commands(void)
 	printf("\n=== Test: AT Commands ===\n");
 
 	wifi_uart_context_t ctx;
-	wifi_uart_init(&ctx, 3, WIFI_UART_BAUD_115200);
+	int ret = wifi_uart_init(&ctx, 3, WIFI_UART_BAUD_115200);
+
+	TEST_ASSERT(ret == 0, "UART init");
 
 	/* Test command sending */
-	int ret = wifi_uart_send_command(&ctx, "AT\r\n");
+	ret = wifi_uart_send_command(&ctx, "AT\r\n");
 	TEST_ASSERT(ret >= 0, "Send AT command");
 
 	ret = wifi_uart_send_command(&ctx, "AT+CWMODE=1\r\n");
@@ -187,7 +195,10 @@ static void test_wifi_statistics_tracking(void)
 	printf("\n=== Test: Statistics ===\n");
 
 	wifi_coproc_t *coproc = NULL;
-	wifi_coproc_create("stats_test", &coproc);
+	int ret = wifi_coproc_create("stats_test", &coproc);
+
+	TEST_ASSERT(ret == 0, "Create coprocessor");
+	TEST_ASSERT(coproc != NULL, "Coprocessor pointer valid");
 
 	TEST_ASSERT(coproc->frames_tx == 0, "TX frames initially 0");
 	TEST_ASSERT(coproc->frames_rx == 0, "RX frames initially 0");
@@ -210,15 +221,17 @@ static void test_wifi_uart_stats(void)
 	printf("\n=== Test: UART Stats ===\n");
 
 	wifi_uart_context_t ctx;
-	wifi_uart_init(&ctx, 3, WIFI_UART_BAUD_115200);
+	int ret = wifi_uart_init(&ctx, 3, WIFI_UART_BAUD_115200);
+
+	TEST_ASSERT(ret == 0, "UART init");
 
 	uint32_t rx = 0, tx = 0, err = 0;
-	int ret = wifi_uart_get_stats(&ctx, &rx, &tx, &err);
+	ret = wifi_uart_get_stats(&ctx, &rx, &tx, &err);
 
 	TEST_ASSERT(ret == 0, "Get UART stats");
-	TEST_ASSERT(rx >= 0, "RX count retrieved");
-	TEST_ASSERT(tx >= 0, "TX count retrieved");
-	TEST_ASSERT(err >= 0, "Error count retrieved");
+	TEST_ASSERT(rx == 0u, "RX count starts at 0");
+	TEST_ASSERT(tx == 0u, "TX count starts at 0");
+	TEST_ASSERT(err == 0u, "Error count starts at 0");
 
 	wifi_uart_deinit(&ctx);
 }
