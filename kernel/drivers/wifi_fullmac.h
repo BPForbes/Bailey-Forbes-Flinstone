@@ -169,7 +169,7 @@ struct wifi_fullmac {
 	wifi_fullmac_he_cap_t he_cap;
 
 	/* Backing netdev */
-	netdev_t *netdev;
+	fl_net_driver_t *netdev;
 
 	/* Operations */
 	const wifi_fullmac_ops_t *ops;

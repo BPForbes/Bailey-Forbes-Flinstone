@@ -104,7 +104,7 @@ typedef struct wifi_coproc {
 	const wifi_coproc_ops_t *ops;
 
 	/* Backing netdev */
-	netdev_t *netdev;
+	fl_net_driver_t *netdev;
 
 	/* Statistics */
 	uint64_t frames_tx;

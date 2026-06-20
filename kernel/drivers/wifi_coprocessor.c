@@ -7,7 +7,7 @@
 #include <stdlib.h>
 
 #include "kernel/drivers/wifi_coprocessor.h"
-#include "kernel/core/net/net_netdev.h"
+#include "kernel/core/net/net_wire.h"
 
 /* Debug logging (disable in production) */
 #define WIFI_COPROC_DEBUG 0
@@ -19,44 +19,85 @@
 #define WIFI_COPROC_LOG(fmt, ...) ((void)0)
 #endif
 
-/* Forward declarations */
-static int wifi_coproc_netdev_open(netdev_t *dev);
-static int wifi_coproc_netdev_close(netdev_t *dev);
-static int wifi_coproc_netdev_transmit(netdev_t *dev, const uint8_t *data,
-				       size_t length);
-static void wifi_coproc_netdev_poll(netdev_t *dev);
+static wifi_coproc_t *wifi_coproc_from_driver(const fl_net_driver_t *drv)
+{
+	if (!drv)
+		return NULL;
+	return (wifi_coproc_t *)drv->impl;
+}
 
-static const netdev_ops_t wifi_coproc_netdev_ops = {
-	.open = wifi_coproc_netdev_open,
-	.close = wifi_coproc_netdev_close,
-	.transmit = wifi_coproc_netdev_transmit,
-	.poll = wifi_coproc_netdev_poll,
-};
+static fl_result_t wifi_coproc_driver_send(fl_net_driver_t *drv,
+					   const fl_net_frame_view_t *frame)
+{
+	wifi_coproc_t *coproc;
+	int ret;
+
+	if (!drv || !frame)
+		return FL_RESULT_INVAL;
+	coproc = wifi_coproc_from_driver(drv);
+	if (!coproc || !coproc->ops || !coproc->ops->send_packet)
+		return FL_RESULT_NOSYS;
+	if (fl_net_wire_check_view(frame, 0u) != FL_RESULT_OK)
+		return FL_RESULT_INVAL;
+
+	ret = coproc->ops->send_packet(coproc, frame->data, frame->len);
+	if (ret == 0) {
+		coproc->frames_tx++;
+		return FL_RESULT_OK;
+	}
+	coproc->errors++;
+	return FL_RESULT_ERR;
+}
+
+static fl_result_t wifi_coproc_driver_recv(fl_net_driver_t *drv,
+					   fl_net_frame_mut_t *out)
+{
+	wifi_coproc_t *coproc;
+	size_t out_len = 0;
+	int ret;
+
+	if (!drv || !out)
+		return FL_RESULT_INVAL;
+	coproc = wifi_coproc_from_driver(drv);
+	if (!coproc || !coproc->ops || !coproc->ops->receive_packet)
+		return FL_RESULT_NOSYS;
+
+	ret = coproc->ops->receive_packet(coproc, out->data, out->cap, &out_len);
+	if (ret != 0)
+		return FL_RESULT_TIMEDOUT;
+	out->len = out_len;
+	(void)fl_net_wire_check_rx_fill(out, out->len);
+	coproc->frames_rx++;
+	return FL_RESULT_OK;
+}
 
 int wifi_coproc_create(const char *name, wifi_coproc_t **out_coproc)
 {
-	if (!name || !out_coproc) {
+	fl_net_driver_t *netdev;
+
+	if (!name || !out_coproc)
 		return -1;
-	}
 
 	wifi_coproc_t *coproc = (wifi_coproc_t *)malloc(sizeof(wifi_coproc_t));
-	if (!coproc) {
+	if (!coproc)
 		return -1;
-	}
 
 	memset(coproc, 0, sizeof(wifi_coproc_t));
 	strncpy(coproc->name, name, WIFI_COPROC_NAME_MAX - 1);
 	coproc->name[WIFI_COPROC_NAME_MAX - 1] = '\0';
 	coproc->status = WIFI_STATUS_DOWN;
 
-	/* Create backing netdev */
-	coproc->netdev =
-		netdev_create(name, NETDEV_TYPE_WIFI, &wifi_coproc_netdev_ops);
-	if (!coproc->netdev) {
+	netdev = (fl_net_driver_t *)malloc(sizeof(fl_net_driver_t));
+	if (!netdev) {
 		free(coproc);
 		return -1;
 	}
-	coproc->netdev->driver_data = coproc;
+	memset(netdev, 0, sizeof(*netdev));
+	netdev->send = wifi_coproc_driver_send;
+	netdev->recv = wifi_coproc_driver_recv;
+	netdev->mtu = FL_NET_ETH_MTU_DEFAULT;
+	netdev->impl = coproc;
+	coproc->netdev = netdev;
 
 	*out_coproc = coproc;
 	return 0;
@@ -64,12 +105,12 @@ int wifi_coproc_create(const char *name, wifi_coproc_t **out_coproc)
 
 int wifi_coproc_destroy(wifi_coproc_t *coproc)
 {
-	if (!coproc) {
+	if (!coproc)
 		return -1;
-	}
 
 	if (coproc->netdev) {
-		netdev_destroy(coproc->netdev);
+		free(coproc->netdev);
+		coproc->netdev = NULL;
 	}
 
 	free(coproc);
@@ -78,18 +119,16 @@ int wifi_coproc_destroy(wifi_coproc_t *coproc)
 
 int wifi_coproc_register_ops(wifi_coproc_t *coproc, const wifi_coproc_ops_t *ops)
 {
-	if (!coproc || !ops) {
+	if (!coproc || !ops)
 		return -1;
-	}
 	coproc->ops = ops;
 	return 0;
 }
 
 int wifi_coproc_register_transport(wifi_coproc_t *coproc, void *transport_data)
 {
-	if (!coproc) {
+	if (!coproc)
 		return -1;
-	}
 	coproc->transport_data = transport_data;
 	return 0;
 }
@@ -119,40 +158,34 @@ int wifi_coproc_init(wifi_coproc_t *coproc)
 
 int wifi_coproc_deinit(wifi_coproc_t *coproc)
 {
-	if (!coproc || !coproc->ops || !coproc->ops->deinit) {
+	if (!coproc || !coproc->ops || !coproc->ops->deinit)
 		return -1;
-	}
 
 	int ret = coproc->ops->deinit(coproc);
-	if (ret == 0) {
+	if (ret == 0)
 		coproc->status = WIFI_STATUS_DOWN;
-	}
 	return ret;
 }
 
 int wifi_coproc_scan(wifi_coproc_t *coproc)
 {
-	if (!coproc || !coproc->ops || !coproc->ops->start_scan) {
+	if (!coproc || !coproc->ops || !coproc->ops->start_scan)
 		return -1;
-	}
 	return coproc->ops->start_scan(coproc);
 }
 
 int wifi_coproc_join(wifi_coproc_t *coproc, const char *ssid, const char *password,
 		     wifi_auth_mode_t auth)
 {
-	if (!coproc || !coproc->ops || !coproc->ops->join_network) {
+	if (!coproc || !coproc->ops || !coproc->ops->join_network)
 		return -1;
-	}
 
 	wifi_join_params_t params;
 	memset(&params, 0, sizeof(params));
-	if (ssid) {
+	if (ssid)
 		strncpy(params.ssid, ssid, WIFI_SSID_MAX);
-	}
-	if (password) {
+	if (password)
 		strncpy(params.password, password, WIFI_PASSWORD_MAX);
-	}
 	params.auth_mode = auth;
 	params.channel = 0; /* Auto */
 
@@ -161,20 +194,17 @@ int wifi_coproc_join(wifi_coproc_t *coproc, const char *ssid, const char *passwo
 
 int wifi_coproc_disconnect(wifi_coproc_t *coproc)
 {
-	if (!coproc || !coproc->ops || !coproc->ops->leave_network) {
+	if (!coproc || !coproc->ops || !coproc->ops->leave_network)
 		return -1;
-	}
 	return coproc->ops->leave_network(coproc);
 }
 
 wifi_coproc_status_t wifi_coproc_get_status(wifi_coproc_t *coproc)
 {
-	if (!coproc) {
+	if (!coproc)
 		return WIFI_STATUS_ERROR;
-	}
-	if (coproc->ops && coproc->ops->get_status) {
+	if (coproc->ops && coproc->ops->get_status)
 		return coproc->ops->get_status(coproc);
-	}
 	return coproc->status;
 }
 
@@ -205,63 +235,5 @@ const char *wifi_coproc_status_str(wifi_coproc_status_t status)
 		return "ERROR";
 	default:
 		return "UNKNOWN";
-	}
-}
-
-/* ============================================================================
- * netdev integration
- * ============================================================================
- */
-
-static int wifi_coproc_netdev_open(netdev_t *dev)
-{
-	if (!dev || !dev->driver_data) {
-		return -1;
-	}
-
-	wifi_coproc_t *coproc = (wifi_coproc_t *)dev->driver_data;
-	return wifi_coproc_init(coproc);
-}
-
-static int wifi_coproc_netdev_close(netdev_t *dev)
-{
-	if (!dev || !dev->driver_data) {
-		return -1;
-	}
-
-	wifi_coproc_t *coproc = (wifi_coproc_t *)dev->driver_data;
-	return wifi_coproc_deinit(coproc);
-}
-
-static int wifi_coproc_netdev_transmit(netdev_t *dev, const uint8_t *data,
-				       size_t length)
-{
-	if (!dev || !dev->driver_data || !data) {
-		return -1;
-	}
-
-	wifi_coproc_t *coproc = (wifi_coproc_t *)dev->driver_data;
-
-	if (!coproc->ops || !coproc->ops->send_packet) {
-		return -1;
-	}
-
-	int ret = coproc->ops->send_packet(coproc, data, length);
-	if (ret == 0) {
-		coproc->frames_tx++;
-	}
-	return ret;
-}
-
-static void wifi_coproc_netdev_poll(netdev_t *dev)
-{
-	if (!dev || !dev->driver_data) {
-		return;
-	}
-
-	wifi_coproc_t *coproc = (wifi_coproc_t *)dev->driver_data;
-
-	if (coproc->ops && coproc->ops->poll) {
-		coproc->ops->poll(coproc);
 	}
 }

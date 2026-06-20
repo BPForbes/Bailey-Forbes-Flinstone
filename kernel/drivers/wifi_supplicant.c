@@ -63,7 +63,7 @@ int wifi_supplicant_derive_pmk_psk(wifi_supplicant_t *supp, const char *ssid,
 	 *   int net_wifi_crypto_pmk_from_passphrase(
 	 *       const char *ssid, size_t ssid_len,
 	 *       const char *passphrase, size_t phrase_len,
-	 *       uint8_t *pmk_out /* 32 bytes */
+	 *       uint8_t *pmk_out (32 bytes)
 	 *   );
 	 */
 

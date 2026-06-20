@@ -321,7 +321,6 @@ fl_result_t fl_net_wifi_connect(const fl_net_wifi_cred_t *cred, unsigned timeout
 #if defined(FL_NET_WIFI_HOSTED_LAB)
     /* Fall back to lab simulation */
     (void)timeout_ms;
-#if defined(FL_NET_WIFI_HOSTED_LAB)
     {
         const fl_net_wifi_scan_entry_t *ap = lab_find_ssid(cred->ssid);
         uint8_t pmk[FL_NET_WIFI_PMK_LEN];

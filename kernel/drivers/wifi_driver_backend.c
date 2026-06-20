@@ -17,24 +17,41 @@ static wifi_backend_type_t s_backend_type = WIFI_BACKEND_NONE;
 static wifi_coproc_t *s_coprocessor = NULL;
 static wifi_fullmac_t *s_fullmac = NULL;
 
+static fl_result_t wifi_int_to_result(int rc)
+{
+	if (rc == 0)
+		return FL_RESULT_OK;
+	return FL_RESULT_ERR;
+}
+
+static wifi_auth_mode_t wifi_auth_from_cred(const fl_net_wifi_cred_t *cred)
+{
+	uint8_t auth_mode = cred->auth_mode ? cred->auth_mode : FL_WIFI_AUTH_WPA2_PSK;
+
+	if (auth_mode == FL_WIFI_AUTH_OPEN || cred->passphrase[0] == '\0')
+		return WIFI_AUTH_OPEN;
+	if (auth_mode == FL_WIFI_AUTH_WPA3_SAE)
+		return WIFI_AUTH_WPA3_SAE;
+	return WIFI_AUTH_WPA2_PSK;
+}
+
 /* Initialize driver backend */
 fl_result_t wifi_driver_backend_init(void)
 {
 	/* Phase 1: Try coprocessor first (ESP32/ESP8266 over UART) */
 	if (wifi_coproc_create("wlan0", &s_coprocessor) == 0) {
-		s_backend_type = WIFI_BACKEND_COPROCESSOR;
-		return FL_RESULT_OK;
+		/* Only enable when transport ops are registered and init succeeds. */
+		if (s_coprocessor->ops && wifi_coproc_init(s_coprocessor) == 0) {
+			s_backend_type = WIFI_BACKEND_COPROCESSOR;
+			return FL_RESULT_OK;
+		}
+		wifi_coproc_destroy(s_coprocessor);
+		s_coprocessor = NULL;
 	}
 
 	/* Phase 4: Try real FullMAC WiFi 6 hardware (when available) */
 	/* TODO: Implement phase 4 PCIe device enumeration */
-	/* if (wifi_fullmac_pcie_create(vendor_id, device_id, &s_fullmac) == 0) {
-	 *     s_backend_type = WIFI_BACKEND_FULLMAC;
-	 *     return FL_RESULT_OK;
-	 * }
-	 */
 
-	/* No hardware backend available */
 	s_backend_type = WIFI_BACKEND_NONE;
 	return FL_RESULT_NOSYS;
 }
@@ -46,17 +63,14 @@ wifi_backend_type_t wifi_driver_backend_active(void)
 
 fl_result_t wifi_driver_scan(uint8_t band, unsigned timeout_ms)
 {
-	if (s_backend_type == WIFI_BACKEND_COPROCESSOR && s_coprocessor) {
-		/* Phase 1: ESP32 coprocessor scan via AT commands */
-		/* AT+CWLAP returns list of available networks */
-		return wifi_coproc_scan(s_coprocessor);
-	}
+	(void)band;
+	(void)timeout_ms;
 
-	if (s_backend_type == WIFI_BACKEND_FULLMAC && s_fullmac) {
-		/* Phase 4: Real WiFi 6 driver scan */
-		/* Uses management frame scanning via firmware */
-		return s_fullmac->ops->start_scan(s_fullmac, NULL);
-	}
+	if (s_backend_type == WIFI_BACKEND_COPROCESSOR && s_coprocessor)
+		return wifi_int_to_result(wifi_coproc_scan(s_coprocessor));
+
+	if (s_backend_type == WIFI_BACKEND_FULLMAC && s_fullmac)
+		return wifi_int_to_result(s_fullmac->ops->start_scan(s_fullmac, NULL));
 
 	return FL_RESULT_NOSYS;
 }
@@ -68,16 +82,35 @@ fl_result_t wifi_driver_scan_result(fl_net_wifi_scan_entry_t *entries,
 		return FL_RESULT_INVAL;
 
 	if (s_backend_type == WIFI_BACKEND_COPROCESSOR && s_coprocessor) {
-		/* Phase 1: Parse scan results from coprocessor */
-		/* TODO: Retrieve scan results from AT+CWLAP response buffer */
+		/* TODO: Parse AT+CWLAP results into fl_net_wifi_scan_entry_t. */
+		(void)s_coprocessor;
 		*count_out = 0;
-		return FL_RESULT_OK;
+		return FL_RESULT_NOSYS;
 	}
 
 	if (s_backend_type == WIFI_BACKEND_FULLMAC && s_fullmac) {
-		/* Phase 4: Get scan results from firmware */
-		uint16_t count = (uint16_t)cap;
-		return s_fullmac->ops->get_scan_results(s_fullmac, entries, &count);
+		wifi_network_t networks[32];
+		uint16_t count = (uint16_t)(cap < 32u ? cap : 32u);
+		fl_result_t rc;
+		size_t i;
+
+		rc = wifi_int_to_result(
+			s_fullmac->ops->get_scan_results(s_fullmac, networks, &count));
+		if (rc != FL_RESULT_OK)
+			return rc;
+		*count_out = 0;
+		for (i = 0; i < (size_t)count && i < cap; i++) {
+			fl_net_wifi_scan_entry_t *e = &entries[i];
+			memset(e, 0, sizeof(*e));
+			strncpy(e->ssid, networks[i].ssid, sizeof(e->ssid) - 1u);
+			memcpy(e->bssid, networks[i].bssid, sizeof(e->bssid));
+			e->rssi_dbm = networks[i].rssi;
+			e->channel = networks[i].channel;
+			e->band = FL_WIFI_BAND_ANY;
+			e->channel_width_mhz = 20;
+			(*count_out)++;
+		}
+		return FL_RESULT_OK;
 	}
 
 	*count_out = 0;
@@ -87,41 +120,20 @@ fl_result_t wifi_driver_scan_result(fl_net_wifi_scan_entry_t *entries,
 fl_result_t wifi_driver_connect(const fl_net_wifi_cred_t *cred,
 				unsigned timeout_ms)
 {
+	(void)timeout_ms;
+
 	if (!cred || !cred->ssid[0])
 		return FL_RESULT_INVAL;
 
 	if (s_backend_type == WIFI_BACKEND_COPROCESSOR && s_coprocessor) {
-		/* Phase 1-3: ESP32 coprocessor + supplicant
-		 * Steps:
-		 * 1. Send SSID/auth mode to coprocessor
-		 * 2. Coprocessor performs scanning
-		 * 3. Coprocessor handles 4-way handshake (WPA2) or SAE (WPA3)
-		 * 4. Supplicant bridges to P3 crypto for key derivation
-		 */
-		uint8_t auth_mode = cred->auth_mode ?
-				    cred->auth_mode : FL_WIFI_AUTH_WPA2_PSK;
-
-		wifi_network_t net = {0};
-		strncpy(net.ssid, cred->ssid, sizeof(net.ssid) - 1);
-		net.auth_type = (cred->passphrase[0] || auth_mode == FL_WIFI_AUTH_WPA2_PSK ||
-				  auth_mode == FL_WIFI_AUTH_WPA3_SAE) ?
-				 WIFI_AUTH_WPA2_PSK : WIFI_AUTH_OPEN;
-
-		wifi_join_params_t params = {0};
-		params.network = net;
-		strncpy(params.password, cred->passphrase,
-			sizeof(params.password) - 1);
-		params.timeout_ms = timeout_ms;
-
-		return wifi_coproc_join(s_coprocessor, &params);
+		return wifi_int_to_result(wifi_coproc_join(s_coprocessor, cred->ssid,
+							   cred->passphrase,
+							   wifi_auth_from_cred(cred)));
 	}
 
 	if (s_backend_type == WIFI_BACKEND_FULLMAC && s_fullmac) {
-		/* Phase 4: Real WiFi 6 driver
-		 * Firmware handles scanning, auth, association, key exchange
-		 * Driver bridge coordinates with supplicant for crypto
-		 */
 		/* TODO: Coordinate with Phase 3 supplicant for 4-way/SAE */
+		(void)s_fullmac;
 		return FL_RESULT_NOSYS;
 	}
 
@@ -130,13 +142,11 @@ fl_result_t wifi_driver_connect(const fl_net_wifi_cred_t *cred,
 
 fl_result_t wifi_driver_disconnect(void)
 {
-	if (s_backend_type == WIFI_BACKEND_COPROCESSOR && s_coprocessor) {
-		return wifi_coproc_disconnect(s_coprocessor);
-	}
+	if (s_backend_type == WIFI_BACKEND_COPROCESSOR && s_coprocessor)
+		return wifi_int_to_result(wifi_coproc_disconnect(s_coprocessor));
 
-	if (s_backend_type == WIFI_BACKEND_FULLMAC && s_fullmac) {
-		return s_fullmac->ops->deauthenticate(s_fullmac, 1);
-	}
+	if (s_backend_type == WIFI_BACKEND_FULLMAC && s_fullmac)
+		return wifi_int_to_result(s_fullmac->ops->deauthenticate(s_fullmac, 1));
 
 	return FL_RESULT_NOSYS;
 }
@@ -144,23 +154,23 @@ fl_result_t wifi_driver_disconnect(void)
 fl_net_wifi_state_t wifi_driver_state(void)
 {
 	if (s_backend_type == WIFI_BACKEND_COPROCESSOR && s_coprocessor) {
-		wifi_coproc_status_t status = wifi_coproc_status(s_coprocessor);
+		wifi_coproc_status_t status = wifi_coproc_get_status(s_coprocessor);
 		switch (status) {
-		case WIFI_COPROC_STATUS_DOWN:
+		case WIFI_STATUS_DOWN:
+		case WIFI_STATUS_INITIALIZING:
+		case WIFI_STATUS_FIRMWARE_READY:
 			return FL_WIFI_STATE_IDLE;
-		case WIFI_COPROC_STATUS_INITIALIZING:
-			return FL_WIFI_STATE_IDLE;
-		case WIFI_COPROC_STATUS_FIRMWARE_READY:
-			return FL_WIFI_STATE_IDLE;
-		case WIFI_COPROC_STATUS_SCANNING:
+		case WIFI_STATUS_SCANNING:
+		case WIFI_STATUS_SCAN_COMPLETE:
 			return FL_WIFI_STATE_SCANNING;
-		case WIFI_COPROC_STATUS_AUTHENTICATING:
+		case WIFI_STATUS_AUTHENTICATING:
 			return FL_WIFI_STATE_AUTHING;
-		case WIFI_COPROC_STATUS_ASSOCIATING:
+		case WIFI_STATUS_ASSOCIATING:
+		case WIFI_STATUS_ASSOCIATED:
 			return FL_WIFI_STATE_ASSOC;
-		case WIFI_COPROC_STATUS_CONNECTED:
+		case WIFI_STATUS_CONNECTED:
 			return FL_WIFI_STATE_CONNECTED;
-		case WIFI_COPROC_STATUS_ERROR:
+		case WIFI_STATUS_ERROR:
 			return FL_WIFI_STATE_ERROR;
 		default:
 			return FL_WIFI_STATE_ERROR;
@@ -191,24 +201,20 @@ fl_result_t wifi_driver_he_cap(fl_net_wifi_he_cap_t *cap_out)
 	memset(cap_out, 0, sizeof(*cap_out));
 
 	if (s_backend_type == WIFI_BACKEND_COPROCESSOR && s_coprocessor) {
-		/* Phase 1: Coprocessor may not support full HE capabilities query
-		 * Set basic values for 802.11ax compatibility */
 		cap_out->max_nss_rx = 2;
 		cap_out->max_nss_tx = 2;
-		cap_out->supports_ofdma = 0; /* ESP32 typically does not */
+		cap_out->supports_ofdma = 0;
 		cap_out->supports_mu_mimo = 0;
 		cap_out->supports_twt = 0;
 		cap_out->supports_6ghz = 0;
-		cap_out->channel_width_mhz = 20; /* Default */
+		cap_out->channel_width_mhz = 20;
 		return FL_RESULT_OK;
 	}
 
 	if (s_backend_type == WIFI_BACKEND_FULLMAC && s_fullmac) {
-		/* Phase 4: Real WiFi 6 driver provides full HE capabilities */
 		if (s_fullmac->ops->get_he_capabilities) {
 			wifi_fullmac_he_cap_t fw_cap;
-			if (s_fullmac->ops->get_he_capabilities(s_fullmac, &fw_cap)
-			    == 0) {
+			if (s_fullmac->ops->get_he_capabilities(s_fullmac, &fw_cap) == 0) {
 				cap_out->max_nss_rx = (fw_cap.mcs_nss[0] >> 4) & 0x0F;
 				cap_out->max_nss_tx = (fw_cap.mcs_nss[1] >> 4) & 0x0F;
 				cap_out->supports_ofdma =
@@ -216,9 +222,9 @@ fl_result_t wifi_driver_he_cap(fl_net_wifi_he_cap_t *cap_out)
 					 fw_cap.ofdma_ul_supported) ? 1 : 0;
 				cap_out->supports_mu_mimo = 1;
 				cap_out->supports_twt = 1;
-				cap_out->supports_6ghz = 0; /* Check PHY cap */
+				cap_out->supports_6ghz = 0;
 				cap_out->bss_color = 0;
-				cap_out->channel_width_mhz = 80; /* Typical 802.11ax */
+				cap_out->channel_width_mhz = 80;
 				return FL_RESULT_OK;
 			}
 		}
@@ -234,7 +240,6 @@ fl_result_t wifi_driver_twt_setup(const fl_net_wifi_twt_params_t *req,
 		return FL_RESULT_INVAL;
 
 	if (s_backend_type == WIFI_BACKEND_FULLMAC && s_fullmac) {
-		/* Phase 4: Real WiFi 6 driver TWT negotiation */
 		wifi_fullmac_twt_setup_t fw_req = {
 			.flow_id = req->flow_id,
 			.wake_interval_ms = req->wake_interval_us / 1000,
@@ -248,30 +253,24 @@ fl_result_t wifi_driver_twt_setup(const fl_net_wifi_twt_params_t *req,
 		}
 	}
 
-	/* Phase 1: Coprocessor TWT not supported */
 	return FL_RESULT_NOSYS;
 }
 
 fl_result_t wifi_driver_twt_teardown(uint8_t flow_id)
 {
-	if (s_backend_type == WIFI_BACKEND_FULLMAC && s_fullmac) {
-		return s_fullmac->ops->teardown_twt(s_fullmac, flow_id);
-	}
+	if (s_backend_type == WIFI_BACKEND_FULLMAC && s_fullmac)
+		return wifi_int_to_result(s_fullmac->ops->teardown_twt(s_fullmac, flow_id));
 
 	return FL_RESULT_NOSYS;
 }
 
 fl_net_driver_t *wifi_driver_netdev(void)
 {
-	if (s_backend_type == WIFI_BACKEND_COPROCESSOR && s_coprocessor) {
-		/* Phase 1: Return coprocessor's netdev (registered on init) */
+	if (s_backend_type == WIFI_BACKEND_COPROCESSOR && s_coprocessor)
 		return s_coprocessor->netdev;
-	}
 
-	if (s_backend_type == WIFI_BACKEND_FULLMAC && s_fullmac) {
-		/* Phase 4: Return FullMAC driver's netdev */
+	if (s_backend_type == WIFI_BACKEND_FULLMAC && s_fullmac)
 		return s_fullmac->netdev;
-	}
 
 	return NULL;
 }
