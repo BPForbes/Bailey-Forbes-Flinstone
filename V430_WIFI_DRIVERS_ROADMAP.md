@@ -10,14 +10,44 @@
 
 ## Executive Summary
 
-v4.3.0 focuses on building native WiFi driver support within Flinstone, transitioning from external WiFi libraries to self-contained driver implementations. This release prioritizes a phased approach starting with platform abstraction, moving through chipset-specific drivers, and ultimately building toward PCIe WiFi support.
+v4.3.0 focuses on building native WiFi driver support within Flinstone, transitioning from external WiFi libraries to self-contained driver implementations. This release prioritizes a phased approach starting with platform abstraction, moving through chipset-specific drivers, and ultimately building toward PCIe WiFi 6 (802.11ax) support.
 
 **Key Goals:**
 - Establish unified network device abstraction (already have `netdev.h`)
-- Implement modular WiFi coprocessor support (ESP32/ESP8266 over UART/SPI)
+- Implement modular WiFi coprocessor support (ESP32/ESP8266 over UART/SPI) with 802.11ax-ready interface
 - Reduce external library dependencies in WiFi path
-- Build foundation for future FullMAC and SoftMAC drivers
+- Build foundation for future FullMAC and SoftMAC drivers with HE (High Efficiency) capability
 - Create clean driver/firmware loading interfaces
+- **Align with P3-10 / issue #279:** WiFi 802.11ax station support; unblock production association & DHCP
+
+**Standards Compliance:**
+- **IEEE 802.11ax-2021** (WiFi 6 / HE)
+- **IEEE 802.11i** (WPA/WPA2/WPA3)
+- **RFC 7664** (WPA3-SAE Dragonfly)
+- **TWT** (Target Wake Time) for power-efficient operation
+
+---
+
+## Alignment with Issue #279 (P3-10 WiFi)
+
+This roadmap directly addresses the blocking prerequisites for [issue #279](https://github.com/BPForbes/Bailey-Forbes-Flinstone/issues/279) and [PR #306](https://github.com/BPForbes/Bailey-Forbes-Flinstone/pull/306):
+
+| Prerequisite | Current Status | v4.3.0 Resolution |
+|--------------|----------------|-------------------|
+| **P4 firmware / driver** | ❌ Blocked | ✅ Phases 1-4 deliver driver stack |
+| **QEMU 802.11ax or real WiFi 6 NIC** | ❌ Blocked | ⚠️ Phase 4: Real PCIe WiFi 6 support |
+| **P3-12 DHCP** | ✅ Complete | ✅ Reuse existing `net_dhcp.c` |
+| **P3-5 routing / egress** | ✅ Complete | ✅ Integrate with `net_wire_egress.c` |
+
+**Production unblock:** Phase 3 (WPA2/WPA3) + Phase 4 (FullMAC) will unblock:
+- Criterion 20: WPA3-SAE connect on QEMU/real NIC
+- Criterion 21: WPA2-PSK on non-ax AP
+- Criterion 25: DHCP + UDP on WiFi netdev (production)
+- Production `fl_net_wifi_station_netdev()` → fully active netdev
+
+**Deferred to future releases (after v4.3.0):**
+- Criterion 2 (QEMU 802.11ax simulator) — coordinate with QEMU maintainers
+- Criterion 20/21 (live RF testing) — requires physical WiFi 6 hardware + certified coexistence testing
 
 ---
 
@@ -91,21 +121,25 @@ kernel/core/net/
 
 ---
 
-### Phase 2: Open Network Support & DHCP Integration
-**Rationale:** Validate full end-to-end path before adding security  
+### Phase 2: Open Network Support & DHCP Integration (Lab Proof-of-Concept)
+**Rationale:** Validate full end-to-end path before adding security; mirrors P3-10 lab testing  
 **Est. Effort:** 2-3 weeks
 
 **Deliverables:**
 - Support open (no encryption) network scanning
 - Join flow without WPA
-- DHCP handshake over WiFi
-- Ping & UDP communication
+- DHCP handshake over WiFi netdev
+- Ping & UDP communication (matches P3-10 criterion 25 lab)
 - Network diagnostics tools
+- **Bonus:** Scan result includes HE fields (from `net_wifi_he.c` IE parser)
 
 **Integration Points:**
 - `net_dhcp.c` - already exists, integrate with WiFi netdev
 - `net_ping_host.c` - test over WiFi interface
 - `net_socket.c` - validate socket operations over WiFi
+- `net_wifi_he.c` - enrich scan results with 802.11ax HE capabilities
+
+**Lab vs. Production note:** This phase delivers P3-10 criterion 25 (DHCP + UDP on WiFi netdev) in lab configuration (simulated). Production criteria 20-21 require Phase 3+.
 
 **Milestones:**
 1. WiFi scan → SSID discovery
@@ -115,51 +149,63 @@ kernel/core/net/
 
 ---
 
-### Phase 3: WPA2/WPA3 & Encryption Support
-**Rationale:** Security required for real-world usage  
+### Phase 3: WPA2/WPA3 & Encryption Support (Unblocks Issue #279 Production)
+**Rationale:** Security required for real-world usage; **unblocks P3-10 criteria 20-21**  
 **Est. Effort:** 3-4 weeks
 
-**Existing Components (leverage):**
-- `net_wifi_crypto.c` - AES-CCMP/GCMP
-- `net_wifi_wpa.c` - WPA handshake
-- `net_wifi_sae.c` - SAE (WPA3)
+**Existing Components (leverage from P3-10):**
+- `net_wifi_crypto.c` - AES-CCMP/GCMP (already unit-tested in PR #306)
+- `net_wifi_wpa.c` - WPA/WPA2 4-way handshake (lab; wire-blocked)
+- `net_wifi_sae.c` - SAE (WPA3) Dragonfly KDF (RFC 7664; lab; wire-blocked)
+- `contracts/networking/contract_p3_wifi.h` - frozen contract types
 
 **Deliverables:**
-- 4-way handshake state machine
-- Key derivation (PMK → PTK → GTK)
-- Replay counter validation
-- Re-keying support
-- Integration with coprocessor or native MAC
+- Connect `net_wifi_wpa.c` 4-way handshake to real hardware
+  - ✅ RFC 7748 PMK derivation exists (from IEEE test vectors in PR #306)
+  - ✅ PTK derivation & key install logic exists
+  - 🔧 Wire the handshake state machine to driver RX/TX
+- Connect `net_wifi_sae.c` Dragonfly to real hardware
+  - ✅ RFC 7664 KDF exists + unit-tested
+  - 🔧 Connect Dragonfly exchange to coprocessor/FullMAC
+- Replay counter validation (IEEE 802.11i)
+- Re-keying support (GTK/PTK renewal)
 
 **New Files:**
 ```
 kernel/drivers/
-├─ wifi_supplicant.h        (new - local supplicant)
+├─ wifi_supplicant.h        (new - local supplicant state)
 ├─ wifi_supplicant.c        (new - handshake orchestration)
-└─ wifi_key_mgmt.c          (new - key material handling)
+└─ wifi_key_mgmt.c          (new - key material handling & install)
 ```
 
-**Milestones:**
-1. WPA2-PSK (Pre-Shared Key) support
-2. WPA3-SAE (Simultaneous Authentication of Equals)
-3. Key rotation & replay protection
-4. Real-world network testing
+**Milestones (unblocking P3-10):**
+1. WPA2-PSK (Pre-Shared Key) on real AP (criterion 21)
+2. WPA3-SAE (Simultaneous Authentication of Equals) on real WiFi 6 AP (criterion 20)
+3. Key rotation & replay protection (IEEE 802.11i compliance)
+4. Production DHCP after association (criterion 25 production)
 
 ---
 
-### Phase 4: FullMAC WiFi Chipset (e.g., Broadcom, Qualcomm)
-**Rationale:** More sophisticated hardware with better performance  
+### Phase 4: FullMAC WiFi 6 (802.11ax) Chipset (e.g., Broadcom BCM6437xx, Qualcomm QCA6x9x)
+**Rationale:** Native WiFi 6 hardware with HE support; unblocks criterion 2 (real NIC)  
 **Est. Effort:** 6-8 weeks
 
-**Example Target: Broadcom BCM43xx (PCIe) or BCM4330 (SDIO)**
+**Example Targets:** 
+- **Broadcom BCM6437xx** (PCIe) — WiFi 6, OFDMA, TWT support
+- **Qualcomm QCA639x** (PCIe/SDIO) — WiFi 6, WPA3, multi-user features
+- **Intel AX210** (PCIe) — WiFi 6E-capable
 
 **Deliverables:**
-- `kernel/drivers/wifi_fullmac_pcie.c` - PCIe transport
-- `kernel/drivers/wifi_fullmac_sdio.c` - SDIO transport (optional)
-- Firmware loading mechanism
+- `kernel/drivers/wifi_fullmac_pcie.c` - PCIe transport for WiFi 6 chipsets
+- `kernel/drivers/wifi_fullmac_he.c` - 802.11ax HE (High Efficiency) feature support
+  - OFDMA (Orthogonal Frequency Division Multiple Access)
+  - TWT (Target Wake Time) integration
+  - Multi-user capabilities
+- Firmware loading mechanism (secure blob verification per regulatory requirements)
 - Command/response queue management
 - Interrupt handling & DMA descriptor rings
-- Channel management & regulatory compliance
+- Channel management & regulatory compliance (802.11d/h)
+- HE capability advertisement & negotiation
 
 **Architecture:**
 ```
@@ -243,18 +289,22 @@ grep -r "CONFIG_EXTERNAL" kernel/drivers/wifi_*.c
 
 ## Integration with Existing Infrastructure
 
-### Leverage These Existing Modules
-| Module | Purpose | Status |
-|--------|---------|--------|
-| `net_netdev.h` | Network device abstraction | Use as-is |
-| `net_iface.c` | Interface management | Integrate with |
-| `net_wifi_crypto.c` | AES-CCMP/GCMP | Reuse for Phase 3+ |
-| `net_wifi_wpa.c` | WPA handshake skeleton | Extend |
-| `net_wifi_sae.c` | SAE (WPA3) | Extend |
-| `net_wifi_station.c` | Station state machine | Hook driver into |
-| `net_wifi_mgmt.c` | Management frames | Integrate with driver |
-| `net_dhcp.c` | DHCP client | Use over WiFi netdev |
-| `net_socket.c` | Socket layer | Validate over WiFi |
+### Leverage These Existing P3 Modules (Issue #279 / PR #306)
+| Module | Purpose | Status | 802.11ax Relevance |
+|--------|---------|--------|-------------------|
+| `contract_p3_wifi.h` | WiFi contract types (frozen) | ✅ Complete | Defines `fl_net_wifi_he_cap_t`, TWT params |
+| `net_wifi_he.c` | HE (High Efficiency) IE parsing | ✅ Complete | Decodes HE Capabilities/Operation from 802.11ax beacons |
+| `net_netdev.h` | Network device abstraction | Use as-is | Backing for WiFi netdev |
+| `net_iface.c` | Interface management | Integrate with | Register WiFi iface |
+| `net_wifi_crypto.c` | AES-CCMP/GCMP encryption | Reuse for Phase 3+ | RFC 7748 key wrapping for WPA3 |
+| `net_wifi_wpa.c` | WPA/WPA2 4-way handshake | Extend (lab) | Bridge to real hardware in Phase 3+ |
+| `net_wifi_sae.c` | SAE (WPA3) Dragonfly KDF | Extend (lab) | RFC 7664 implementation; Phase 3 connects to driver |
+| `net_wifi_twt.c` | Target Wake Time negotiation | Extend (lab) | 802.11ax power-save feature |
+| `net_wifi_station.c` | Station FSM | Hook driver into | Driver implements low-level state ops |
+| `net_wifi_mgmt.c` | 802.11 mgmt frame handling | Integrate with driver | Probe/Auth/Assoc frame building |
+| `net_dhcp.c` | DHCP client | Use over WiFi netdev | Existing; works on any netdev (Phase 2+) |
+| `net_socket.c` | Socket layer | Validate over WiFi | Verify UDP/TCP over WiFi (Phase 2+) |
+| `net_wifi_db.c` | WiFi credentials DB | Already exists | Shell `wifi` command storage |
 
 ### Driver-to-Network Glue
 ```c
@@ -346,11 +396,16 @@ kernel/include/fl/
 - [ ] Encrypted traffic flows
 - [ ] Real-world network tested
 
-### Full v4.3.0 Release
+### Full v4.3.0 Release (Issue #279 Unblocked)
 - [ ] Phases 1-3 complete & tested
 - [ ] No external WiFi library dependencies (except optional firmware blobs)
 - [ ] Documentation of driver architecture
 - [ ] Migration guide for existing WiFi code
+- [ ] **802.11ax (WiFi 6) ready:** HE capability discovery & negotiation
+  - HE Capabilities IE parsing (reuse `net_wifi_he.c`)
+  - TWT setup/teardown over driver (integrate `net_wifi_twt.c`)
+- [ ] **P3-10 criteria 20-21 unblocked:** WPA3-SAE & WPA2-PSK production-ready
+- [ ] **P3-10 criterion 25 production-ready:** DHCP + UDP over WiFi netdev
 
 ---
 
@@ -366,10 +421,29 @@ kernel/include/fl/
 ---
 
 ## Related Documentation
+
+### Flinstone Project
 - `CLAUDE.md` — Project-wide conventions
+- `docs/ROADMAP.md` — P0-P9 phased work tracking
+- `docs/P3_NETWORKING.md` — P3 networking foundation (IPv4, DHCP, DNS)
+- `docs/P3_NETWORKING_DEFERRED.md` — P3-10 WiFi deferred items (lab vs. production)
+- `docs/GITHUB_ISSUE_SYNC_279.md` — Issue #279 (P3-10 WiFi station) prerequisites & criteria
+- `docs/GITHUB_ISSUE_SYNC_PR301.md` — PR #306 / commit history for WiFi lab work
 - `kernel/core/net/README.md` — Existing network stack
+- `contracts/networking/contract_p3_wifi.h` — P3 WiFi contract (frozen, v4.2.0)
 - `Makefile` — Build configuration
-- Linux Wireless Docs: https://wireless.docs.kernel.org
+
+### External References
+- **IEEE Standards:**
+  - 802.11ax-2021 (WiFi 6 / HE specification)
+  - 802.11i (WPA/WPA2/WPA3 security)
+  - 802.11ac (802.11ac for reference; Phase 4 targets 802.11ax)
+- **RFCs:**
+  - RFC 7664 (WPA3-SAE Dragonfly)
+  - RFC 7748 (Elliptic Curves for Security)
+- **Linux Wireless:** https://wireless.docs.kernel.org
+- **ESP32 AT Command Set:** https://docs.espressif.com/projects/esp-at/en/latest/
+- **QEMU 802.11 support:** (coordinate with QEMU maintainers for real 802.11ax simulation)
 
 ---
 
