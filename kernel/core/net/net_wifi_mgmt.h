@@ -35,4 +35,8 @@ fl_result_t fl_net_wifi_mgmt_build_auth_req(const uint8_t sta_mac[6], const uint
 fl_result_t fl_net_wifi_mgmt_build_rsne_ie(uint8_t auth_mode, uint8_t *out, size_t out_cap,
                                            size_t *out_len);
 
+/** Build Association Response with HE Capabilities + HE Operation IEs. */
+fl_result_t fl_net_wifi_mgmt_build_assoc_resp(const uint8_t bssid[6], const uint8_t sta_mac[6],
+                                              uint8_t *out, size_t out_cap, size_t *out_len);
+
 #endif /* NET_WIFI_MGMT_H */

@@ -2,9 +2,9 @@
 
 Align **[#279](https://github.com/BPForbes/Bailey-Forbes-Flinstone/issues/279)** / **#257** with branch **`v4.3.0-wifi-drivers`** (PR [#320](https://github.com/BPForbes/Bailey-Forbes-Flinstone/pull/320)).
 
-**Legend:** **Lab** = hosted `FL_NET_WIFI_HOSTED_LAB` (loopback `fl_net_driver_t`, no RF). **Mock ax** = `FL_WIFI_80211AX_MOCK=1` software FullMAC (`wifi_80211ax_mock.c`) — exercises 802.11ax + OTA auth on Wi‑Fi 5-only hardware without RF. **RF** = real 802.11ax NIC / QEMU passthrough still required to **close** #279.
+**Legend:** **Lab** = hosted `FL_NET_WIFI_HOSTED_LAB` (loopback `fl_net_driver_t`, no RF). **Mock ax** = `FL_WIFI_80211AX_MOCK=1` software FullMAC (`wifi_80211ax_mock.c`) — exercises 802.11ax + OTA auth on Wi‑Fi 5-only hardware without RF. **Server OTA** = P3 **`server host`** + **`server join`** with `net_wifi_ax_server.c` relaying SAE commit/confirm, EAPOL 4-way, and Assoc Req/Resp (HE IEs) on session opcodes `0x40`–`0x45` — L2 over TCP, not RF. **RF** = real 802.11ax NIC / QEMU passthrough still required to **close** #279.
 
-**33 tracked items** = 4 prerequisites + 19 scope + 10 acceptance. Automated matrix: **`make test_wifi_80211ax_mock_279`**.
+**33 tracked items** = 4 prerequisites + 19 scope + 10 acceptance. Automated matrix: **`make test_wifi_80211ax_mock_279`**. L2 session-wire OTA (the three items CodeRabbit flagged as non-mockable without hardware): **`make test_wifi_ax_server_ota`**.
 
 ## Promotion prerequisites (4)
 
@@ -22,10 +22,10 @@ Align **[#279](https://github.com/BPForbes/Bailey-Forbes-Flinstone/issues/279)**
 | 1 | Promote `contract_p3_wifi.h`; wire umbrella REV 18 | **[x]** | `contracts/networking/contract_p3_wifi.h` |
 | 2 | `fl_net_wifi_he_cap_t`, TWT params, scan HE/band fields | **[x]** | Contract types |
 | 3 | `net_wifi_station` FSM IDLE→UP, band scan | **[x] Mock** | `test_wifi_80211ax_mock_279` scope-3 |
-| 4 | `net_wifi_mgmt` Probe/Auth/Assoc + HE IE | **[x] Mock** | scope-4; RF OTA still open |
+| 4 | `net_wifi_mgmt` Probe/Auth/Assoc + HE IE | **[x] Mock + Server OTA** | scope-4; Assoc Req/Resp HE via `test_wifi_ax_server_ota`; RF **open** |
 | 5 | `net_wifi_he` HE Cap/Op decode | **[x]** | scope-5 / accept-28 |
-| 6 | `net_wifi_sae` WPA3-SAE | **[x] Mock** | scope-6; Dragonfly RF **open** |
-| 7 | `net_wifi_wpa` WPA2 4-way | **[x] Mock** | scope-7; RF wire **open** |
+| 6 | `net_wifi_sae` WPA3-SAE | **[x] Mock + Server OTA** | scope-6; Dragonfly over session wire in `test_wifi_ax_server_ota`; RF **open** |
+| 7 | `net_wifi_wpa` WPA2 4-way | **[x] Mock + Server OTA** | scope-7; EAPOL over session wire; RF **open** |
 | 8 | `net_wifi_twt` setup/teardown | **[x] Mock** | scope-8 / accept-24 |
 | 9 | `fl_net_wifi_scan` / `_connect` / `_disconnect` | **[x] Mock** | scope-9 via mock backend |
 | 10 | `fl_net_wifi_he_cap()` | **[x] Mock** | scope-10 / accept-23 |
@@ -43,8 +43,8 @@ Align **[#279](https://github.com/BPForbes/Bailey-Forbes-Flinstone/issues/279)**
 
 | # | Criterion | Check? | Notes |
 |---|-----------|--------|-------|
-| 20 | WPA3-SAE connect on QEMU/real NIC | **[x] Mock** | accept-20 supplicant + mock connect; **RF open** |
-| 21 | WPA2-PSK on non-ax AP | **[x] Mock** | accept-21 LegacyAC mock AP; **RF open** |
+| 20 | WPA3-SAE connect on QEMU/real NIC | **[x] Mock + Server OTA** | accept-20 + `test_wifi_ax_server_ota`; **RF open** |
+| 21 | WPA2-PSK on non-ax AP | **[x] Mock + Server OTA** | accept-21 + server EAPOL path; **RF open** |
 | 22 | `scan_result` HE fields on real ax AP | **[x] Mock** | accept-22 MockAx6 6 GHz HE enrich |
 | 23 | `he_cap()` NSS/OFDMA/TWT | **[x] Mock** | accept-23 |
 | 24 | TWT negotiated `flow_id` | **[x] Mock** | accept-24 |
@@ -61,6 +61,7 @@ Align **[#279](https://github.com/BPForbes/Bailey-Forbes-Flinstone/issues/279)**
 
 ```bash
 make test_wifi_80211ax_mock_279   # all 33 #279 items (mock ax)
+make test_wifi_ax_server_ota      # SAE + EAPOL + HE Assoc via server host/join
 make test_p3_wifi test_wifi_coprocessor test_p3_network test_invariants
 ./scripts/check_version_entries_semver_dev_unique.sh
 ```

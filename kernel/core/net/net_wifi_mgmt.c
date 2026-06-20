@@ -37,14 +37,35 @@ fl_result_t fl_net_wifi_mgmt_build_probe_req(const char *ssid, uint8_t *out, siz
 
 fl_result_t fl_net_wifi_mgmt_parse_mgmt_ies(const uint8_t *frame, size_t len,
                                             const uint8_t **ies_out, size_t *ies_len) {
+    size_t fixed = 12u;
+    uint8_t subtype;
+
     if (!frame || !ies_out || !ies_len)
         return FL_RESULT_INVAL;
     if (!fl_net_wifi_mgmt_hdr_valid(frame, len))
         return FL_RESULT_INVAL;
-    if (len < FL_WIFI_MGMT_HDR_LEN + 12u)
+
+    subtype = (uint8_t)(frame[0] & 0xfcu);
+    switch (subtype) {
+    case 0x00u: /* Association Request */
+    case 0x40u: /* Probe Request */
+        fixed = 0u;
+        break;
+    case 0x10u: /* Association Response */
+    case 0xb0u: /* Authentication */
+        fixed = 6u;
+        break;
+    case 0x50u: /* Probe Response */
+    case 0x80u: /* Beacon */
+    default:
+        fixed = 12u;
+        break;
+    }
+
+    if (len < FL_WIFI_MGMT_HDR_LEN + fixed)
         return FL_RESULT_INVAL;
-    *ies_out = frame + FL_WIFI_MGMT_HDR_LEN + 12u;
-    *ies_len = len - (FL_WIFI_MGMT_HDR_LEN + 12u);
+    *ies_out = frame + FL_WIFI_MGMT_HDR_LEN + fixed;
+    *ies_len = len - (FL_WIFI_MGMT_HDR_LEN + fixed);
     return FL_RESULT_OK;
 }
 
@@ -140,6 +161,44 @@ fl_result_t fl_net_wifi_mgmt_build_assoc_req(const char *ssid, const uint8_t bss
     }
     memcpy(out + pos, he_cap_stub, sizeof(he_cap_stub));
     pos += sizeof(he_cap_stub);
+    *out_len = pos;
+    return FL_RESULT_OK;
+}
+
+fl_result_t fl_net_wifi_mgmt_build_assoc_resp(const uint8_t bssid[6], const uint8_t sta_mac[6],
+                                              uint8_t *out, size_t out_cap, size_t *out_len) {
+    static const uint8_t he_cap_ie[] = {
+        FL_WIFI_ELEM_ID_EXTENSION, 18u, FL_WIFI_EXT_HE_CAPABILITIES,
+        0x00, 0x80, 0x00, 0x06, 0x00, 0x00,
+        0x44, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00
+    };
+    static const uint8_t he_op_ie[] = {
+        FL_WIFI_ELEM_ID_EXTENSION, 5u, FL_WIFI_EXT_HE_OPERATION, 0x02, 0x00, 0x00, 0x05
+    };
+    size_t pos;
+
+    if (!bssid || !sta_mac || !out || !out_len)
+        return FL_RESULT_INVAL;
+    pos = FL_WIFI_MGMT_HDR_LEN + 6u;
+    if (out_cap < pos + sizeof(he_cap_ie) + sizeof(he_op_ie))
+        return FL_RESULT_INVAL;
+
+    memset(out, 0, FL_WIFI_MGMT_HDR_LEN);
+    out[0] = 0x10u; /* Association Response */
+    memcpy(out + 4, bssid, 6u);
+    memcpy(out + 10, sta_mac, 6u);
+    memcpy(out + 16, bssid, 6u);
+    out[FL_WIFI_MGMT_HDR_LEN] = 0x00u;
+    out[FL_WIFI_MGMT_HDR_LEN + 1u] = 0x00u;
+    out[FL_WIFI_MGMT_HDR_LEN + 2u] = 0x00u;
+    out[FL_WIFI_MGMT_HDR_LEN + 3u] = 0x00u; /* Status 0 */
+    out[FL_WIFI_MGMT_HDR_LEN + 4u] = 0x00u;
+    out[FL_WIFI_MGMT_HDR_LEN + 5u] = 0x01u; /* AID */
+    pos = FL_WIFI_MGMT_HDR_LEN + 6u;
+    memcpy(out + pos, he_cap_ie, sizeof(he_cap_ie));
+    pos += sizeof(he_cap_ie);
+    memcpy(out + pos, he_op_ie, sizeof(he_op_ie));
+    pos += sizeof(he_op_ie);
     *out_len = pos;
     return FL_RESULT_OK;
 }
