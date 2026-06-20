@@ -13,6 +13,8 @@
 #include <stdlib.h>
 #include <string.h>
 #include <stdio.h>
+#include <errno.h>
+#include <limits.h>
 
 static wifi_backend_type_t s_backend_type = WIFI_BACKEND_NONE;
 static wifi_coproc_t *s_coprocessor = NULL;
@@ -59,23 +61,45 @@ static void wifi_network_to_scan_entry(const wifi_network_t *src,
 	}
 }
 
+static fl_result_t wifi_env_parse_int(const char *env, int *out)
+{
+	char *end = NULL;
+	long v;
+
+	if (!env || !env[0] || !out)
+		return FL_RESULT_INVAL;
+
+	errno = 0;
+	v = strtol(env, &end, 10);
+	if (errno != 0 || end == env || (end && *end != '\0') || v < 0 || v > INT_MAX)
+		return FL_RESULT_INVAL;
+
+	*out = (int)v;
+	return FL_RESULT_OK;
+}
+
 static fl_result_t wifi_backend_try_uart_coprocessor(void)
 {
 	const char *uart_fd_env = getenv("FL_WIFI_UART_FD");
 	const char *baud_env;
 	int uart_fd;
 	wifi_uart_baud_t baud = WIFI_UART_BAUD_115200;
+	fl_result_t parse_rc;
 
 	if (!uart_fd_env || !uart_fd_env[0])
 		return FL_RESULT_NOSYS;
 
-	uart_fd = atoi(uart_fd_env);
-	if (uart_fd < 0)
+	parse_rc = wifi_env_parse_int(uart_fd_env, &uart_fd);
+	if (parse_rc != FL_RESULT_OK || uart_fd < 0)
 		return FL_RESULT_NOSYS;
 
 	baud_env = getenv("FL_WIFI_UART_BAUD");
-	if (baud_env && baud_env[0])
-		baud = (wifi_uart_baud_t)atoi(baud_env);
+	if (baud_env && baud_env[0]) {
+		int baud_val;
+
+		if (wifi_env_parse_int(baud_env, &baud_val) == FL_RESULT_OK)
+			baud = (wifi_uart_baud_t)baud_val;
+	}
 
 	if (wifi_uart_coproc_create("wlan0", uart_fd, baud, &s_coprocessor) != 0)
 		return FL_RESULT_NOSYS;
@@ -116,7 +140,7 @@ fl_result_t wifi_driver_scan(uint8_t band, unsigned timeout_ms)
 	if (s_backend_type == WIFI_BACKEND_COPROCESSOR && s_coprocessor)
 		return wifi_int_to_result(wifi_coproc_scan(s_coprocessor));
 
-	if (s_backend_type == WIFI_BACKEND_FULLMAC && s_fullmac)
+	if (s_backend_type == WIFI_BACKEND_FULLMAC && s_fullmac && s_fullmac->ops)
 		return wifi_int_to_result(s_fullmac->ops->start_scan(s_fullmac, NULL));
 
 	return FL_RESULT_NOSYS;
@@ -143,10 +167,10 @@ fl_result_t wifi_driver_scan_result(fl_net_wifi_scan_entry_t *entries,
 			wifi_network_to_scan_entry(&networks[i], &entries[i]);
 			(*count_out)++;
 		}
-		return *count_out > 0 ? FL_RESULT_OK : FL_RESULT_NOSYS;
+		return FL_RESULT_OK;
 	}
 
-	if (s_backend_type == WIFI_BACKEND_FULLMAC && s_fullmac) {
+	if (s_backend_type == WIFI_BACKEND_FULLMAC && s_fullmac && s_fullmac->ops) {
 		wifi_network_t networks[32];
 		uint16_t count = (uint16_t)(cap < 32u ? cap : 32u);
 		fl_result_t rc;
@@ -193,7 +217,7 @@ fl_result_t wifi_driver_disconnect(void)
 	if (s_backend_type == WIFI_BACKEND_COPROCESSOR && s_coprocessor)
 		return wifi_int_to_result(wifi_coproc_disconnect(s_coprocessor));
 
-	if (s_backend_type == WIFI_BACKEND_FULLMAC && s_fullmac)
+	if (s_backend_type == WIFI_BACKEND_FULLMAC && s_fullmac && s_fullmac->ops)
 		return wifi_int_to_result(s_fullmac->ops->deauthenticate(s_fullmac, 1));
 
 	return FL_RESULT_NOSYS;
@@ -225,7 +249,7 @@ fl_net_wifi_state_t wifi_driver_state(void)
 		}
 	}
 
-	if (s_backend_type == WIFI_BACKEND_FULLMAC && s_fullmac) {
+	if (s_backend_type == WIFI_BACKEND_FULLMAC && s_fullmac && s_fullmac->ops) {
 		switch (s_fullmac->state) {
 		case WIFI_FULLMAC_STATE_IDLE:
 			return FL_WIFI_STATE_IDLE;
@@ -259,7 +283,7 @@ fl_result_t wifi_driver_he_cap(fl_net_wifi_he_cap_t *cap_out)
 		return FL_RESULT_OK;
 	}
 
-	if (s_backend_type == WIFI_BACKEND_FULLMAC && s_fullmac) {
+	if (s_backend_type == WIFI_BACKEND_FULLMAC && s_fullmac && s_fullmac->ops) {
 		if (s_fullmac->ops->get_he_capabilities) {
 			wifi_fullmac_he_cap_t fw_cap;
 			if (s_fullmac->ops->get_he_capabilities(s_fullmac, &fw_cap) == 0) {
@@ -287,7 +311,7 @@ fl_result_t wifi_driver_twt_setup(const fl_net_wifi_twt_params_t *req,
 	if (!req || !agreed_out)
 		return FL_RESULT_INVAL;
 
-	if (s_backend_type == WIFI_BACKEND_FULLMAC && s_fullmac) {
+	if (s_backend_type == WIFI_BACKEND_FULLMAC && s_fullmac && s_fullmac->ops) {
 		wifi_fullmac_twt_setup_t fw_req = {
 			.flow_id = req->flow_id,
 			.wake_interval_ms = req->wake_interval_us / 1000,
@@ -306,7 +330,7 @@ fl_result_t wifi_driver_twt_setup(const fl_net_wifi_twt_params_t *req,
 
 fl_result_t wifi_driver_twt_teardown(uint8_t flow_id)
 {
-	if (s_backend_type == WIFI_BACKEND_FULLMAC && s_fullmac)
+	if (s_backend_type == WIFI_BACKEND_FULLMAC && s_fullmac && s_fullmac->ops)
 		return wifi_int_to_result(s_fullmac->ops->teardown_twt(s_fullmac, flow_id));
 
 	return FL_RESULT_NOSYS;

@@ -36,6 +36,7 @@ typedef struct {
 typedef struct {
 	wifi_supplicant_state_t state;
 	wifi_supplicant_keys_t keys;
+	uint8_t sta_addr[6];
 
 	/* Handshake state */
 	uint32_t msg_num;	/* Current message in 4-way handshake (1-4) */
@@ -57,6 +58,7 @@ typedef struct {
 int wifi_supplicant_init(wifi_supplicant_t *supp, const uint8_t *bssid);
 int wifi_supplicant_set_credentials(wifi_supplicant_t *supp, const char *ssid,
 				    const char *password);
+int wifi_supplicant_set_sta_addr(wifi_supplicant_t *supp, const uint8_t sta_addr[6]);
 int wifi_supplicant_deinit(wifi_supplicant_t *supp);
 
 /* Key derivation (leverages existing net_wifi_crypto.c) */

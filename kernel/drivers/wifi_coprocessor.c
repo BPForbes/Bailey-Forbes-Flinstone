@@ -7,9 +7,9 @@
 
 #include "kernel/drivers/wifi_coprocessor.h"
 #include "kernel/drivers/wifi_driver_packet.h"
+#include "kernel/drivers/wifi_platform.h"
 #include "kernel/core/net/net_wire.h"
 
-#include "fl/mm.h"
 #include "fl/mem_asm.h"
 
 /* Debug logging (disable in production) */
@@ -66,12 +66,19 @@ static fl_result_t wifi_coproc_driver_recv(fl_net_driver_t *drv,
 	if (!coproc || !coproc->ops || !coproc->ops->receive_packet)
 		return FL_RESULT_NOSYS;
 
+	fl_result_t wire_rc;
+	fl_result_t ingest_rc;
+
 	ret = coproc->ops->receive_packet(coproc, out->data, out->cap, &out_len);
 	if (ret != 0)
 		return FL_RESULT_TIMEDOUT;
 	out->len = out_len;
-	(void)fl_net_wire_check_rx_fill(out, out->len);
-	(void)wifi_driver_packet_ingest_rx(out->data, out->len, &pipe);
+	wire_rc = fl_net_wire_check_rx_fill(out, out->len);
+	ingest_rc = wifi_driver_packet_ingest_rx(out->data, out->len, &pipe);
+	if (wire_rc != FL_RESULT_OK || ingest_rc != FL_RESULT_OK) {
+		coproc->errors++;
+		return wire_rc != FL_RESULT_OK ? wire_rc : ingest_rc;
+	}
 	coproc->frames_rx++;
 	return FL_RESULT_OK;
 }
@@ -84,7 +91,7 @@ int wifi_coproc_create(const char *name, wifi_coproc_t **out_coproc)
 	if (!name || !out_coproc)
 		return -1;
 
-	coproc = (wifi_coproc_t *)kmalloc(sizeof(wifi_coproc_t));
+	coproc = (wifi_coproc_t *)wifi_platform_malloc(sizeof(wifi_coproc_t));
 	if (!coproc)
 		return -1;
 
@@ -93,9 +100,9 @@ int wifi_coproc_create(const char *name, wifi_coproc_t **out_coproc)
 	coproc->name[WIFI_COPROC_NAME_MAX - 1] = '\0';
 	coproc->status = WIFI_STATUS_DOWN;
 
-	netdev = (fl_net_driver_t *)kmalloc(sizeof(fl_net_driver_t));
+	netdev = (fl_net_driver_t *)wifi_platform_malloc(sizeof(fl_net_driver_t));
 	if (!netdev) {
-		kfree(coproc);
+		wifi_platform_free(coproc);
 		return -1;
 	}
 	asm_mem_zero(netdev, sizeof(*netdev));
@@ -114,12 +121,21 @@ int wifi_coproc_destroy(wifi_coproc_t *coproc)
 	if (!coproc)
 		return -1;
 
+	if (coproc->ops && coproc->ops->deinit)
+		(void)coproc->ops->deinit(coproc);
+
+	if (coproc->transport_owned && coproc->transport_data) {
+		wifi_platform_free(coproc->transport_data);
+		coproc->transport_data = NULL;
+		coproc->transport_owned = false;
+	}
+
 	if (coproc->netdev) {
-		kfree(coproc->netdev);
+		wifi_platform_free(coproc->netdev);
 		coproc->netdev = NULL;
 	}
 
-	kfree(coproc);
+	wifi_platform_free(coproc);
 	return 0;
 }
 
@@ -136,6 +152,7 @@ int wifi_coproc_register_transport(wifi_coproc_t *coproc, void *transport_data)
 	if (!coproc)
 		return -1;
 	coproc->transport_data = transport_data;
+	coproc->transport_owned = false;
 	return 0;
 }
 

@@ -99,6 +99,7 @@ typedef struct wifi_coproc {
 	char name[WIFI_COPROC_NAME_MAX];
 	wifi_coproc_status_t status;
 	void *transport_data;           /* UART, SPI, USB context */
+	bool transport_owned;           /* true when destroy should free transport_data */
 	void *driver_data;              /* Chip-specific state */
 
 	const wifi_coproc_ops_t *ops;

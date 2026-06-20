@@ -818,9 +818,11 @@ WIFI_TEST_NET_OBJS = kernel/core/net/net_checksum.c kernel/core/net/net_wire.c \
 	kernel/core/net/net_eth.c kernel/core/net/net_ipv4.c kernel/core/net/net_ipv6.c \
 	kernel/core/net/net_icmpv6.c kernel/core/net/net_ndp.c kernel/core/net/net_udp.c \
 	kernel/core/net/net_tcp_fsm.c kernel/core/net/net_packet.c kernel/core/net/net_tap.c \
+	kernel/core/net/net_wire_host.c kernel/core/net/net_wire_host_syscall.c \
 	kernel/core/net/net_wire_egress.c \
 	kernel/core/net/net_route.c kernel/core/net/net_loopback.c \
-	kernel/core/net/net_netdev.c kernel/core/net/net_arp.c kernel/core/net/net_stack_sync.c kernel/core/net/net_wifi_netdev.c kernel/core/net/net_iface.c
+	kernel/core/net/net_netdev.c kernel/core/net/net_arp.c kernel/core/net/net_dhcp.c \
+	kernel/core/net/net_stack_sync.c kernel/core/net/net_wifi_netdev.c kernel/core/net/net_iface.c
 
 test_p3_wifi: $(NET_ASM_OBJ) $(MEM_ASM_OBJ) priority_queue.o kernel/core/time/timekeeping.o kernel/core/sys/ipc.o
 	$(CC) $(CFLAGS) $(TEST_SANITIZE) -o tests/test_p3_wifi tests/test_p3_wifi.c \
@@ -881,7 +883,7 @@ test_wifi_db: userland/identity/password_hash.o kernel/core/net/net_wifi_db.o ke
 test_wifi_coprocessor: kernel/drivers/wifi_coprocessor.o kernel/drivers/wifi_uart_transport.o \
 	kernel/drivers/wifi_driver_packet.o kernel/core/net/net_packet.o kernel/core/net/net_wire.o \
 	kernel/core/net/net_ipv6.o kernel/core/net/net_checksum.o \
-	kernel/core/mm/kmalloc.o kernel/core/mm/mem_domain.o $(MEM_ASM_OBJ) \
+	kernel/core/mm/kmalloc.o kernel/core/mm/mem_domain.o $(MEM_ASM_OBJ) $(NET_ASM_OBJ) \
 	$(WIFI_PLATFORM_SRC:.c=.o) kernel/core/platform/fl_platform.o kernel/core/time/timekeeping.o
 	$(CC) $(CFLAGS) $(TEST_SANITIZE) -o tests/test_wifi_coprocessor kernel/drivers/wifi_coprocessor_test.c \
 	  kernel/drivers/wifi_coprocessor.o kernel/drivers/wifi_uart_transport.o \

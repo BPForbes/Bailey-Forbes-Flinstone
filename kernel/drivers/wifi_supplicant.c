@@ -67,10 +67,22 @@ int wifi_supplicant_set_credentials(wifi_supplicant_t *supp, const char *ssid,
 		return -1;
 	supp->ssid[0] = '\0';
 	supp->password[0] = '\0';
-	if (ssid)
+	if (ssid) {
 		strncpy(supp->ssid, ssid, WIFI_SSID_MAX);
-	if (password)
+		supp->ssid[WIFI_SSID_MAX] = '\0';
+	}
+	if (password) {
 		strncpy(supp->password, password, WIFI_PASSWORD_MAX);
+		supp->password[WIFI_PASSWORD_MAX] = '\0';
+	}
+	return 0;
+}
+
+int wifi_supplicant_set_sta_addr(wifi_supplicant_t *supp, const uint8_t sta_addr[6])
+{
+	if (!supp || !sta_addr)
+		return -1;
+	memcpy(supp->sta_addr, sta_addr, 6);
 	return 0;
 }
 
@@ -152,10 +164,18 @@ int wifi_supplicant_process_msg1(wifi_supplicant_t *supp, const uint8_t *msg1,
 				 size_t len)
 {
 	uint8_t snonce[32];
-	static const uint8_t s_sta_mac[6] = {0x02, 0x00, 0x00, 0x00, 0x00, 0x01};
+	const uint8_t *sta_mac;
 
 	if (!supp || !msg1 || len == 0)
 		return -1;
+
+	sta_mac = supp->sta_addr;
+	if (!sta_mac[0] && !sta_mac[1] && !sta_mac[2] && !sta_mac[3] && !sta_mac[4] &&
+	    !sta_mac[5]) {
+		supp->state = WIFI_SUPP_STATE_ERROR;
+		supp->handshake_errors++;
+		return -1;
+	}
 
 	SUPPLICANT_LOG("Processing 4-way Msg 1 (AP → STA) [%zu bytes]", len);
 
@@ -169,7 +189,7 @@ int wifi_supplicant_process_msg1(wifi_supplicant_t *supp, const uint8_t *msg1,
 	{
 		const uint8_t *anonce = &msg1[8];
 		supplicant_fill_snonce(snonce, anonce);
-		if (wifi_supplicant_derive_ptk(supp, anonce, snonce, s_sta_mac) != 0) {
+		if (wifi_supplicant_derive_ptk(supp, anonce, snonce, sta_mac) != 0) {
 			fl_net_wifi_crypto_memzero(snonce, sizeof(snonce));
 			supp->state = WIFI_SUPP_STATE_ERROR;
 			supp->handshake_errors++;
@@ -198,8 +218,11 @@ int wifi_supplicant_process_msg3(wifi_supplicant_t *supp, const uint8_t *msg3,
 		return -1;
 	}
 
-	if (len > 38u)
-		(void)wifi_supplicant_derive_gtk(supp, &msg3[38]);
+	if (len > 38u && wifi_supplicant_derive_gtk(supp, &msg3[38]) != 0) {
+		supp->state = WIFI_SUPP_STATE_ERROR;
+		supp->handshake_errors++;
+		return -1;
+	}
 
 	supp->msg_num = 3;
 	supp->state = WIFI_SUPP_STATE_AUTHENTICATED;
@@ -246,13 +269,17 @@ int wifi_supplicant_process_sae_confirm(wifi_supplicant_t *supp, const uint8_t *
 
 	SUPPLICANT_LOG("Processing SAE Confirm frame [%zu bytes]", len);
 
-	if (supp->ssid[0] && supp->password[0]) {
-		if (fl_net_wifi_sae_derive_pmk(supp->ssid, supp->password, supp->keys.pmk,
-					       FL_NET_WIFI_PMK_LEN) != FL_RESULT_OK) {
-			supp->state = WIFI_SUPP_STATE_ERROR;
-			supp->handshake_errors++;
-			return -1;
-		}
+	if (!supp->ssid[0] || !supp->password[0]) {
+		supp->state = WIFI_SUPP_STATE_ERROR;
+		supp->handshake_errors++;
+		return -1;
+	}
+
+	if (fl_net_wifi_sae_derive_pmk(supp->ssid, supp->password, supp->keys.pmk,
+				       FL_NET_WIFI_PMK_LEN) != FL_RESULT_OK) {
+		supp->state = WIFI_SUPP_STATE_ERROR;
+		supp->handshake_errors++;
+		return -1;
 	}
 
 	supp->state = WIFI_SUPP_STATE_AUTHENTICATED;

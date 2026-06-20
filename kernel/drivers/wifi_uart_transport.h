@@ -58,6 +58,10 @@ typedef struct {
 	/* Staged raw RX frame from UART poll (+IPD / transparent mode) */
 	uint8_t rx_staging[1518];
 	size_t rx_staging_len;
+
+	/* Parsed Ethernet payload extracted from +IPD framing */
+	uint8_t rx_payload[1518];
+	size_t rx_payload_len;
 } wifi_uart_context_t;
 
 /* Initialization */

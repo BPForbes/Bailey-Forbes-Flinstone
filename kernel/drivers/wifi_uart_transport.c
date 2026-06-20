@@ -14,7 +14,6 @@
 #include "kernel/drivers/wifi_driver_packet.h"
 #include "kernel/core/net/net_wire.h"
 
-#include "fl/mm.h"
 #include "fl/mem_asm.h"
 
 /* AT Command strings for ESP32/ESP8266 */
@@ -114,7 +113,100 @@ static int wifi_uart_parse_scan_response(wifi_uart_context_t *uart, const char *
 	}
 
 	uart->scan_count = (uint16_t)count;
-	return count > 0 ? 0 : -1;
+	return 0;
+}
+
+static int wifi_uart_at_param_safe(const char *value)
+{
+	if (!value)
+		return -1;
+
+	for (; *value; value++) {
+		if (*value == '"' || *value == '\r' || *value == '\n' || *value == '\\')
+			return -1;
+	}
+	return 0;
+}
+
+static void wifi_uart_shift_staging(wifi_uart_context_t *uart, size_t drop)
+{
+	if (!uart || drop == 0)
+		return;
+	if (drop >= uart->rx_staging_len) {
+		uart->rx_staging_len = 0;
+		return;
+	}
+	asm_mem_copy(uart->rx_staging, uart->rx_staging + drop,
+		     uart->rx_staging_len - drop);
+	uart->rx_staging_len -= drop;
+}
+
+static void wifi_uart_parse_ipd_from_staging(wifi_uart_context_t *uart)
+{
+	static const char marker[] = "+IPD,";
+
+	if (!uart || uart->rx_payload_len > 0)
+		return;
+
+	while (uart->rx_staging_len > 0) {
+		size_t i;
+		size_t hdr = (size_t)-1;
+		size_t colon = (size_t)-1;
+		unsigned long payload_len = 0;
+		size_t payload_off;
+
+		for (i = 0; i + sizeof(marker) - 1u <= uart->rx_staging_len; i++) {
+			if (memcmp(uart->rx_staging + i, marker, sizeof(marker) - 1u) == 0) {
+				hdr = i;
+				break;
+			}
+		}
+		if (hdr == (size_t)-1) {
+			if (uart->rx_staging_len > sizeof(uart->rx_staging) / 2u)
+				uart->rx_staging_len = 0;
+			return;
+		}
+
+		for (i = hdr + sizeof(marker) - 1u; i < uart->rx_staging_len; i++) {
+			if (uart->rx_staging[i] == ':') {
+				colon = i;
+				break;
+			}
+		}
+		if (colon == (size_t)-1)
+			return;
+
+		{
+			char len_field[32];
+			size_t len_field_len = colon - (hdr + sizeof(marker) - 1u);
+			const char *comma;
+			const char *len_start;
+
+			if (len_field_len == 0 || len_field_len >= sizeof(len_field))
+				return;
+
+			memcpy(len_field, uart->rx_staging + hdr + sizeof(marker) - 1u,
+			       len_field_len);
+			len_field[len_field_len] = '\0';
+
+			comma = strchr(len_field, ',');
+			len_start = comma ? comma + 1 : len_field;
+			payload_len = strtoul(len_start, NULL, 10);
+		}
+
+		if (payload_len == 0 || payload_len > sizeof(uart->rx_payload))
+			return;
+
+		payload_off = colon + 1u;
+		if (uart->rx_staging_len < payload_off + payload_len)
+			return;
+
+		asm_mem_copy(uart->rx_payload, uart->rx_staging + payload_off,
+			     (size_t)payload_len);
+		uart->rx_payload_len = (size_t)payload_len;
+		wifi_uart_shift_staging(uart, payload_off + (size_t)payload_len);
+		return;
+	}
 }
 
 int wifi_uart_init(wifi_uart_context_t *ctx, int uart_fd, wifi_uart_baud_t baud)
@@ -277,6 +369,8 @@ int wifi_uart_poll(wifi_uart_context_t *ctx)
 		}
 	}
 
+	wifi_uart_parse_ipd_from_staging(ctx);
+
 	return 0;
 }
 
@@ -370,7 +464,11 @@ static int wifi_uart_coproc_start_scan(wifi_coproc_t *coproc)
 		return -1;
 	}
 
-	(void)wifi_uart_parse_scan_response(uart, response);
+	if (wifi_uart_parse_scan_response(uart, response) != 0) {
+		coproc->status = WIFI_STATUS_ERROR;
+		uart->error_count++;
+		return -1;
+	}
 	coproc->status = WIFI_STATUS_SCAN_COMPLETE;
 	return 0;
 }
@@ -407,6 +505,13 @@ static int wifi_uart_coproc_join_network(wifi_coproc_t *coproc,
 
 	uart = (wifi_uart_context_t *)coproc->transport_data;
 	coproc->status = WIFI_STATUS_AUTHENTICATING;
+
+	if (wifi_uart_at_param_safe(params->ssid) != 0 ||
+	    wifi_uart_at_param_safe(params->password) != 0) {
+		coproc->status = WIFI_STATUS_ERROR;
+		uart->error_count++;
+		return -1;
+	}
 
 	snprintf(cmd, sizeof(cmd), AT_CMD_CONNECT, params->ssid, params->password);
 	if (wifi_uart_send_command(uart, cmd) != 0) {
@@ -494,23 +599,16 @@ static int wifi_uart_coproc_receive_packet(wifi_coproc_t *coproc, uint8_t *buffe
 	uart = (wifi_uart_context_t *)coproc->transport_data;
 	(void)wifi_uart_poll(uart);
 
-	if (uart->rx_staging_len == 0)
+	if (uart->rx_payload_len == 0)
 		return -1;
 
-	n = uart->rx_staging_len;
+	n = uart->rx_payload_len;
 	if (n > buf_len)
 		n = buf_len;
 
-	asm_mem_copy(buffer, uart->rx_staging, n);
+	asm_mem_copy(buffer, uart->rx_payload, n);
 	*out_len = n;
-
-	if (wifi_driver_packet_validate_tx(buffer, n) != FL_RESULT_OK) {
-		uart->error_count++;
-		uart->rx_staging_len = 0;
-		return -1;
-	}
-
-	uart->rx_staging_len = 0;
+	uart->rx_payload_len = 0;
 	return 0;
 }
 
@@ -551,21 +649,22 @@ int wifi_uart_coproc_create(const char *name, int uart_fd, wifi_uart_baud_t baud
 	if (!name || uart_fd < 0 || !out_coproc)
 		return -1;
 
-	uart_ctx = (wifi_uart_context_t *)kmalloc(sizeof(wifi_uart_context_t));
+	uart_ctx = (wifi_uart_context_t *)wifi_platform_malloc(sizeof(wifi_uart_context_t));
 	if (!uart_ctx)
 		return -1;
 
 	if (wifi_uart_init(uart_ctx, uart_fd, baud) != 0) {
-		kfree(uart_ctx);
+		wifi_platform_free(uart_ctx);
 		return -1;
 	}
 
 	if (wifi_coproc_create(name, &coproc) != 0) {
-		kfree(uart_ctx);
+		wifi_platform_free(uart_ctx);
 		return -1;
 	}
 
 	wifi_coproc_register_transport(coproc, uart_ctx);
+	coproc->transport_owned = true;
 	wifi_coproc_register_ops(coproc, &wifi_uart_coproc_ops);
 
 	*out_coproc = coproc;

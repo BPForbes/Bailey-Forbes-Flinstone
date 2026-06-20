@@ -29,7 +29,7 @@ static int tests_failed = 0;
 	} while (0)
 
 /* Test 1: Device creation and destruction */
-void test_wifi_coprocessor_create_destroy(void)
+static void test_wifi_coprocessor_create_destroy(void)
 {
 	printf("\n=== Test: Create/Destroy ===\n");
 
@@ -47,7 +47,7 @@ void test_wifi_coprocessor_create_destroy(void)
 }
 
 /* Test 2: Status string conversion */
-void test_wifi_coprocessor_status_strings(void)
+static void test_wifi_coprocessor_status_strings(void)
 {
 	printf("\n=== Test: Status Strings ===\n");
 
@@ -64,7 +64,7 @@ void test_wifi_coprocessor_status_strings(void)
 }
 
 /* Test 3: Operations registration */
-void test_wifi_coprocessor_register_ops(void)
+static void test_wifi_coprocessor_register_ops(void)
 {
 	printf("\n=== Test: Register Operations ===\n");
 
@@ -81,14 +81,14 @@ void test_wifi_coprocessor_register_ops(void)
 }
 
 /* Test 4: Transport registration */
-void test_wifi_coprocessor_register_transport(void)
+static void test_wifi_coprocessor_register_transport(void)
 {
 	printf("\n=== Test: Register Transport ===\n");
 
 	wifi_coproc_t *coproc = NULL;
+	void *dummy_transport = (void *)0xDEADBEEF;
 	wifi_coproc_create("test", &coproc);
 
-	void *dummy_transport = (void *)0xDEADBEEF;
 	int ret = wifi_coproc_register_transport(coproc, dummy_transport);
 
 	TEST_ASSERT(ret == 0, "Register transport");
@@ -98,7 +98,7 @@ void test_wifi_coprocessor_register_transport(void)
 }
 
 /* Test 5: UART init/deinit */
-void test_wifi_uart_init_deinit(void)
+static void test_wifi_uart_init_deinit(void)
 {
 	printf("\n=== Test: UART Init/Deinit ===\n");
 
@@ -115,7 +115,7 @@ void test_wifi_uart_init_deinit(void)
 }
 
 /* Test 6: UART AT command building */
-void test_wifi_uart_at_commands(void)
+static void test_wifi_uart_at_commands(void)
 {
 	printf("\n=== Test: AT Commands ===\n");
 
@@ -132,7 +132,7 @@ void test_wifi_uart_at_commands(void)
 	char ssid[] = "TestNetwork";
 	char psk[] = "TestPassword";
 	char cmd[256];
-	snprintf(cmd, sizeof(cmd), "AT+CWJAP=\"%s\",\"%%s\"\r\n", ssid, psk);
+	snprintf(cmd, sizeof(cmd), "AT+CWJAP=\"%s\",\"%s\"\r\n", ssid, psk);
 	ret = wifi_uart_send_command(&ctx, cmd);
 	TEST_ASSERT(ret >= 0, "Build connection command");
 
@@ -140,14 +140,15 @@ void test_wifi_uart_at_commands(void)
 }
 
 /* Test 7: WiFi network structure validation */
-void test_wifi_network_structure(void)
+static void test_wifi_network_structure(void)
 {
 	printf("\n=== Test: Network Structure ===\n");
 
 	wifi_network_t net;
 	memset(&net, 0, sizeof(net));
 
-	strcpy(net.ssid, "TestSSID");
+	strncpy(net.ssid, "TestSSID", sizeof(net.ssid) - 1u);
+	net.ssid[sizeof(net.ssid) - 1u] = '\0';
 	net.channel = 6;
 	net.rssi = -50;
 	net.auth_mode = WIFI_AUTH_WPA2_PSK;
@@ -159,15 +160,17 @@ void test_wifi_network_structure(void)
 }
 
 /* Test 8: Join parameters */
-void test_wifi_join_params(void)
+static void test_wifi_join_params(void)
 {
 	printf("\n=== Test: Join Parameters ===\n");
 
 	wifi_join_params_t params;
 	memset(&params, 0, sizeof(params));
 
-	strcpy(params.ssid, "HomeNetwork");
-	strcpy(params.password, "SecurePassword123");
+	strncpy(params.ssid, "HomeNetwork", sizeof(params.ssid) - 1u);
+	params.ssid[sizeof(params.ssid) - 1u] = '\0';
+	strncpy(params.password, "SecurePassword123", sizeof(params.password) - 1u);
+	params.password[sizeof(params.password) - 1u] = '\0';
 	params.auth_mode = WIFI_AUTH_WPA2_PSK;
 	params.channel = 0; /* Auto */
 
@@ -179,7 +182,7 @@ void test_wifi_join_params(void)
 }
 
 /* Test 9: Statistics tracking */
-void test_wifi_statistics_tracking(void)
+static void test_wifi_statistics_tracking(void)
 {
 	printf("\n=== Test: Statistics ===\n");
 
@@ -202,7 +205,7 @@ void test_wifi_statistics_tracking(void)
 }
 
 /* Test 10: UART stats retrieval */
-void test_wifi_uart_stats(void)
+static void test_wifi_uart_stats(void)
 {
 	printf("\n=== Test: UART Stats ===\n");
 

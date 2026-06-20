@@ -41,6 +41,8 @@ fl_result_t wifi_driver_packet_ingest_rx(const uint8_t *frame, size_t len,
 
 	if (!pipe_out)
 		return FL_RESULT_INVAL;
+	if (!frame || len == 0)
+		return FL_RESULT_INVAL;
 
 	fl_net_pipeline_rx_reset(pipe_out);
 
