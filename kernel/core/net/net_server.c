@@ -15,6 +15,7 @@
  * s_member_rx[] so a partial TCP segment never desyncs the parser.
  */
 #include "net_server.h"
+#include "net_wifi_ax_server.h"
 #include "net_file_delivery.h"
 #include "server_shared_db.h"
 
@@ -1302,6 +1303,9 @@ static int dispatch_member_frame(fl_net_server_t *srv, fl_net_server_member_t *m
          * to them via fl_net_server_host_stop. */
         return 0;
     default:
+        if (fl_net_wifi_ax_ap_dispatch(srv, m->member_id, m->peer_handle, opcode, payload,
+                                       plen))
+            return 0;
         if (fl_net_session_is_file_opcode(opcode)) {
             (void)fl_net_file_host_relay(srv, m->member_id, opcode, payload, plen);
             return 0;

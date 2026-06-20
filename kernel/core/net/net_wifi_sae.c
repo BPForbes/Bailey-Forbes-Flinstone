@@ -1,5 +1,6 @@
 #include "net_wifi_sae.h"
 
+#include "contract_p3_wifi.h"
 #include "net_wifi_crypto.h"
 
 #include <string.h>
@@ -11,7 +12,7 @@
  */
 fl_result_t fl_net_wifi_sae_derive_pmk(const char *ssid, const char *passphrase,
                                        uint8_t *pmk_out, size_t pmk_cap) {
-    uint8_t key[64];
+    uint8_t key[FL_WIFI_PASSPHRASE_MAX + FL_WIFI_SSID_MAX];
     size_t pass_len;
     size_t ssid_len;
 
@@ -19,7 +20,11 @@ fl_result_t fl_net_wifi_sae_derive_pmk(const char *ssid, const char *passphrase,
         return FL_RESULT_INVAL;
     pass_len = strlen(passphrase);
     ssid_len = strlen(ssid);
-    if (pass_len < 1u || ssid_len < 1u || ssid_len > 32u)
+    if (pass_len < 1u || ssid_len < 1u || ssid_len > FL_WIFI_SSID_MAX)
+        return FL_RESULT_INVAL;
+    if (pass_len >= FL_WIFI_PASSPHRASE_MAX)
+        return FL_RESULT_INVAL;
+    if (pass_len + ssid_len > sizeof(key))
         return FL_RESULT_INVAL;
 
     memcpy(key, passphrase, pass_len);
