@@ -12,6 +12,7 @@
 #include "net_wifi_wpa.h"
 #include "net_wifi_crypto.h"
 #include "net_endian.h"
+#include "contract_p3_wifi.h"
 
 #include <stdio.h>
 #include <stdlib.h>
@@ -108,10 +109,16 @@ static int test_sae_kdf_selftest(void) {
 static int test_sae_derive_pmk(void) {
     uint8_t pmk[32];
     uint8_t pmk2[32];
+    char long_pass[FL_WIFI_PASSPHRASE_MAX];
 
     ASSERT(fl_net_wifi_sae_derive_pmk("LabAxHome", "secret", pmk, sizeof(pmk)) == FL_RESULT_OK);
     ASSERT(fl_net_wifi_sae_derive_pmk("LabAxHome", "secret", pmk2, sizeof(pmk2)) == FL_RESULT_OK);
     ASSERT(memcmp(pmk, pmk2, 32) == 0);
+    fl_net_wifi_crypto_memzero(pmk, sizeof(pmk));
+
+    memset(long_pass, 'A', sizeof(long_pass) - 1u);
+    long_pass[sizeof(long_pass) - 1u] = '\0';
+    ASSERT(fl_net_wifi_sae_derive_pmk("LabAxHome", long_pass, pmk, sizeof(pmk)) == FL_RESULT_OK);
     fl_net_wifi_crypto_memzero(pmk, sizeof(pmk));
     return 0;
 }
@@ -294,6 +301,8 @@ static int test_wifi_lab_dhcp_udp(void) {
 
 int main(void) {
     ASSERT(setenv("FL_NET_WIFI_USE_WPA", "0", 1) == 0);
+    (void)unsetenv("FL_WIFI_80211AX_MOCK");
+    (void)unsetenv("FL_WIFI_UART_FD");
 
     if (test_he_capabilities_parse() != 0)
         return 1;
