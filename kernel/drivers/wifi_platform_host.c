@@ -6,7 +6,8 @@
 #include "kernel/drivers/wifi_platform.h"
 #include "kernel/core/time/timekeeping.h"
 
-#include "fl/mm.h"
+#include <stdlib.h>
+#include <unistd.h>
 
 static int wifi_platform_host_uart_read_byte(uint8_t *byte, uint32_t timeout_ms)
 {
@@ -56,31 +57,36 @@ const wifi_platform_uart_ops_t *wifi_platform_get_uart_ops(void)
 	return &wifi_platform_host_uart_ops;
 }
 
-uint32_t wifi_platform_get_ms(void)
+fl_result_t wifi_platform_get_ms(uint32_t *ms_out)
 {
 	int64_t ns = 0;
 
+	if (!ms_out)
+		return FL_RESULT_INVAL;
 	if (fl_time_monotonic_ns(&ns) != FL_RESULT_OK)
-		return 0;
-	return (uint32_t)((ns > 0) ? (ns / 1000000) : 0);
+		return FL_RESULT_ERR;
+	*ms_out = (uint32_t)((ns > 0) ? (ns / 1000000) : 0);
+	return FL_RESULT_OK;
 }
 
 void wifi_platform_sleep_ms(uint32_t ms)
 {
-	(void)ms;
+	if (ms == 0u)
+		return;
+	(void)usleep((useconds_t)ms * 1000u);
 }
 
 void *wifi_platform_malloc(size_t size)
 {
-	return kmalloc(size);
+	return malloc(size);
 }
 
 void *wifi_platform_realloc(void *ptr, size_t size)
 {
-	return krealloc(ptr, size);
+	return realloc(ptr, size);
 }
 
 void wifi_platform_free(void *ptr)
 {
-	kfree(ptr);
+	free(ptr);
 }

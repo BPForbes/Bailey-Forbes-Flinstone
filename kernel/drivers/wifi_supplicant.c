@@ -33,16 +33,10 @@ static uint32_t supplicant_now_ms(void)
 	return (uint32_t)((ns > 0) ? (ns / 1000000) : 0);
 }
 
-static void supplicant_fill_snonce(uint8_t snonce[32], const uint8_t *anonce)
+static int supplicant_fill_snonce(uint8_t snonce[32], const uint8_t *anonce)
 {
-	int64_t ns = 0;
-	size_t i;
-
-	(void)fl_time_monotonic_ns(&ns);
-	for (i = 0; i < 32u; i++) {
-		uint8_t mix = (uint8_t)((ns >> ((i & 7u) * 8)) & 0xffu);
-		snonce[i] = (uint8_t)(mix ^ (uint8_t)i ^ (anonce ? anonce[i] : 0u));
-	}
+	(void)anonce;
+	return fl_net_wifi_crypto_random(snonce, 32u) == FL_RESULT_OK ? 0 : -1;
 }
 
 int wifi_supplicant_init(wifi_supplicant_t *supp, const uint8_t *bssid)
@@ -188,7 +182,12 @@ int wifi_supplicant_process_msg1(wifi_supplicant_t *supp, const uint8_t *msg1,
 
 	{
 		const uint8_t *anonce = &msg1[8];
-		supplicant_fill_snonce(snonce, anonce);
+
+		if (supplicant_fill_snonce(snonce, anonce) != 0) {
+			supp->state = WIFI_SUPP_STATE_ERROR;
+			supp->handshake_errors++;
+			return -1;
+		}
 		if (wifi_supplicant_derive_ptk(supp, anonce, snonce, sta_mac) != 0) {
 			fl_net_wifi_crypto_memzero(snonce, sizeof(snonce));
 			supp->state = WIFI_SUPP_STATE_ERROR;

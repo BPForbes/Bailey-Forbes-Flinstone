@@ -263,7 +263,12 @@ int wifi_uart_send_raw(wifi_uart_context_t *ctx, const uint8_t *data, size_t len
 		uart_ops->flush();
 
 	ctx->tx_head += len;
-	ctx->last_command_ms = wifi_platform_get_ms();
+	{
+		uint32_t now_ms = 0;
+
+		if (wifi_platform_get_ms(&now_ms) == FL_RESULT_OK)
+			ctx->last_command_ms = now_ms;
+	}
 	return (int)len;
 }
 
@@ -283,8 +288,11 @@ int wifi_uart_receive_raw(wifi_uart_context_t *ctx, uint8_t *buffer, size_t buf_
 	ret = uart_ops->read_bytes(buffer, buf_len, out_len, timeout_ms);
 
 	if (*out_len > 0) {
+		uint32_t now_ms = 0;
+
 		ctx->rx_head += *out_len;
-		ctx->last_response_ms = wifi_platform_get_ms();
+		if (wifi_platform_get_ms(&now_ms) == FL_RESULT_OK)
+			ctx->last_response_ms = now_ms;
 	} else if (ret != 0) {
 		ctx->error_count++;
 	}
@@ -303,19 +311,24 @@ int wifi_uart_read_response(wifi_uart_context_t *ctx, char *buffer, size_t buf_l
 			    uint32_t timeout_ms)
 {
 	size_t total_read = 0;
-	uint32_t start_time;
+	uint32_t start_time = 0;
 
 	if (!ctx || !buffer || buf_len == 0)
 		return -1;
 
-	start_time = wifi_platform_get_ms();
+	if (wifi_platform_get_ms(&start_time) != FL_RESULT_OK)
+		return -1;
 
 	while (total_read < buf_len - 1) {
 		size_t chunk_len = 0;
-		uint32_t elapsed = wifi_platform_get_ms() - start_time;
+		uint32_t now_ms = 0;
+		uint32_t elapsed;
 		uint32_t remaining_timeout;
 		int ret;
 
+		if (wifi_platform_get_ms(&now_ms) != FL_RESULT_OK)
+			return -1;
+		elapsed = now_ms - start_time;
 		if (elapsed >= timeout_ms)
 			break;
 
