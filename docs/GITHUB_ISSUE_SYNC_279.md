@@ -27,9 +27,9 @@ Align **[#279](https://github.com/BPForbes/Bailey-Forbes-Flinstone/issues/279)**
 | 8 | `net_wifi_twt` setup/teardown | **[x] Lab** | Mock negotiation + flow_id |
 | 9 | `fl_net_wifi_scan` / `_connect` / `_disconnect` | **[x] Lab** | Public API |
 | 10 | `fl_net_wifi_he_cap()` | **[x] Lab** | Post-assoc |
-| 11 | Post-assoc `fl_net_dhcp_acquire` | **[x] Lab** | Static route on loopback netdev (not live DHCP server) |
+| 11 | Post-assoc `fl_net_dhcp_acquire` | **[x] Lab** | Lab DHCP server on Wi-Fi netdev + route refresh |
 | 12 | Register `fl_net_driver_t` | **[x] Lab** | `fl_net_wifi_station_netdev()` → loopback |
-| 13 | E2E scan→SAE→DHCP→UDP | **[x] Lab** | `make test_p3_wifi` FSM + netdev; no RF UDP echo |
+| 13 | E2E scan→SAE→DHCP→UDP | **[x] Lab** | `make test_p3_wifi` FSM + netdev + `test_wifi_lab_dhcp_udp` |
 | 14 | WPA3-SAE unit test (RFC 7664 KDF) | **[x]** | `fl_net_wifi_sae_rfc7664_kdf_selftest` |
 | 15 | WPA2 4-way unit test | **[x]** | PMK vector + PTK derive in `test_p3_wifi` |
 | 16 | TWT mock test | **[x]** | `test_twt_mock` |
@@ -46,7 +46,7 @@ Align **[#279](https://github.com/BPForbes/Bailey-Forbes-Flinstone/issues/279)**
 | 22 | `scan_result` HE fields on real ax AP | **[x] Lab** | IE-enriched lab beacon |
 | 23 | `he_cap()` NSS/OFDMA/TWT | **[x] Lab** | `test_station_fsm_netdev` |
 | 24 | TWT negotiated `flow_id` | **[x] Lab** | `test_twt_mock` |
-| 25 | DHCP + UDP on Wi‑Fi netdev | **[ ]** / **Lab** | Loopback route UP; live DHCP/UDP **blocked** |
+| 25 | DHCP + UDP on Wi‑Fi netdev | **[x] Lab** | `test_wifi_lab_dhcp_udp` (lab DHCP + UDP echo); RF **blocked** |
 | 26 | SAE RFC 7664 / 802.11 vectors | **[x]** | KDF selftest + PMK derive tests |
 | 27 | WPA2 reference vectors | **[x]** | IEEE/passphrase PMK test |
 | 28 | HE IE decoder reference bytes | **[x]** | `test_he_capabilities_parse` |

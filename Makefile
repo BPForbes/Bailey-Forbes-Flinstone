@@ -833,6 +833,7 @@ test_p3_wifi: $(NET_ASM_OBJ) $(MEM_ASM_OBJ) priority_queue.o kernel/core/time/ti
 	  kernel/core/net/net_wifi_crypto.c \
 	  kernel/drivers/wifi_driver_backend.c kernel/drivers/wifi_coprocessor.c \
 	  kernel/drivers/wifi_uart_transport.c kernel/drivers/wifi_driver_packet.c \
+	  kernel/drivers/wifi_supplicant.c \
 	  kernel/core/mm/kmalloc.o kernel/core/mm/mem_domain.o \
 	  $(WIFI_PLATFORM_SRC:.c=.o) \
 	  $(WIFI_TEST_NET_OBJS) \

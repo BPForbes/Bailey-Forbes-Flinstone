@@ -7,12 +7,15 @@
 #include "net_wifi_station.h"
 #include "net_iface.h"
 #include "net_route.h"
+#include "net_udp.h"
+#include "net_wifi_netdev.h"
 #include "net_wifi_wpa.h"
 #include "net_wifi_crypto.h"
 
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <stdint.h>
 
 #define ASSERT(c)                                                              \
     do {                                                                       \
@@ -125,8 +128,8 @@ static int test_mgmt_probe_assoc(void) {
     ASSERT(len > FL_WIFI_MGMT_HDR_LEN);
     ASSERT(fl_net_wifi_mgmt_hdr_valid(frame, len));
     memset(frame, 0, sizeof(frame));
-    ASSERT(fl_net_wifi_mgmt_build_assoc_req("LabAxHome", bssid, sta, frame, sizeof(frame),
-                                            &len) == FL_RESULT_OK);
+    ASSERT(fl_net_wifi_mgmt_build_assoc_req("LabAxHome", bssid, sta, FL_WIFI_AUTH_WPA3_SAE, frame,
+                                            sizeof(frame), &len) == FL_RESULT_OK);
     ASSERT(fl_net_wifi_mgmt_parse_mgmt_ies(frame, len, &ies, &ies_len) == FL_RESULT_OK);
     ASSERT(ies_len > 0u);
     return 0;
@@ -231,9 +234,55 @@ static int test_wpa2_connect_lab(void) {
 
 static int test_mgmt_hdr_probe(void) {
     uint8_t probe[24] = {0x40, 0x00};
+    uint8_t auth[40];
+    uint8_t rsne[32];
+    static const uint8_t sta[6] = {0x02, 0x00, 0x00, 0x00, 0x00, 0x01};
+    static const uint8_t bssid[6] = {0x02, 0x11, 0x22, 0x33, 0x44, 0x55};
+    size_t len = 0;
+
     ASSERT(fl_net_wifi_mgmt_hdr_valid(probe, sizeof(probe)));
     probe[0] = 0x08;
     ASSERT(!fl_net_wifi_mgmt_hdr_valid(probe, sizeof(probe)));
+    ASSERT(fl_net_wifi_mgmt_build_auth_req(sta, bssid, auth, sizeof(auth), &len) == FL_RESULT_OK);
+    ASSERT(len == FL_WIFI_MGMT_HDR_LEN + 6u);
+    ASSERT(fl_net_wifi_mgmt_build_rsne_ie(FL_WIFI_AUTH_WPA2_PSK, rsne, sizeof(rsne), &len) ==
+           FL_RESULT_OK);
+    ASSERT(len > 0u);
+    return 0;
+}
+
+static int test_wifi_lab_dhcp_udp(void) {
+    static const uint8_t bssid[6] = {0x02, 0x11, 0x22, 0x33, 0x44, 0x55};
+    fl_net_wifi_cred_t cred;
+    uint32_t ip_be = 0u;
+    uint32_t gw_be;
+    const char payload[] = "wifi-lab-udp-echo";
+    uint8_t rx[128];
+    size_t rx_len = 0;
+    fl_result_t rc;
+
+    fl_net_route_init();
+    fl_net_udp_demux_reset();
+    ASSERT(fl_net_udp_bind_port(48077u) == FL_RESULT_OK);
+    ASSERT(fl_net_wifi_station_init() == FL_RESULT_OK);
+    ASSERT(fl_net_wifi_scan(FL_WIFI_BAND_ANY, 1000u) == FL_RESULT_OK);
+    memset(&cred, 0, sizeof(cred));
+    strncpy(cred.ssid, "LabAxHome", sizeof(cred.ssid) - 1u);
+    strncpy(cred.passphrase, "secret", sizeof(cred.passphrase) - 1u);
+    cred.auth_mode = FL_WIFI_AUTH_WPA3_SAE;
+    ASSERT(fl_net_wifi_connect(&cred, 5000u) == FL_RESULT_OK);
+    ASSERT(fl_net_wifi_state() == FL_WIFI_STATE_UP);
+    ASSERT(fl_net_wifi_station_netdev() != NULL);
+    ASSERT(fl_net_wifi_netdev_ipv4(&ip_be) == FL_RESULT_OK);
+    ASSERT(ip_be != 0u);
+    gw_be = (ip_be & ~UINT32_C(0xff000000)) | (UINT32_C(2) << 24);
+    rc = fl_net_udp_echo_exchange(gw_be, 48077u, 48078u, (const uint8_t *)payload,
+                                  strlen(payload), rx, sizeof(rx), &rx_len, 3000u);
+    ASSERT(rc == FL_RESULT_OK);
+    ASSERT(rx_len == strlen(payload));
+    ASSERT(memcmp(rx, payload, rx_len) == 0);
+    (void)bssid;
+    ASSERT(fl_net_wifi_disconnect() == FL_RESULT_OK);
     return 0;
 }
 
@@ -263,6 +312,8 @@ int main(void) {
     if (test_disconnect_clears_wlan_iface() != 0)
         return 1;
     if (test_mgmt_hdr_probe() != 0)
+        return 1;
+    if (test_wifi_lab_dhcp_udp() != 0)
         return 1;
     puts("test_p3_wifi: all passed");
     return 0;

@@ -22,9 +22,17 @@ fl_result_t fl_net_wifi_mgmt_build_probe_req(const char *ssid, uint8_t *out, siz
 fl_result_t fl_net_wifi_mgmt_parse_mgmt_ies(const uint8_t *frame, size_t len,
                                             const uint8_t **ies_out, size_t *ies_len);
 
-/** Build Association Request (header + SSID + RSNE placeholder + HE cap stub). */
+/** Build Association Request (header + SSID + optional RSNE + HE cap stub). */
 fl_result_t fl_net_wifi_mgmt_build_assoc_req(const char *ssid, const uint8_t bssid[6],
-                                             const uint8_t sta_mac[6], uint8_t *out,
-                                             size_t out_cap, size_t *out_len);
+                                             const uint8_t sta_mac[6], uint8_t auth_mode,
+                                             uint8_t *out, size_t out_cap, size_t *out_len);
+
+/** Build Open-System Authentication Request (802.11 management). */
+fl_result_t fl_net_wifi_mgmt_build_auth_req(const uint8_t sta_mac[6], const uint8_t bssid[6],
+                                            uint8_t *out, size_t out_cap, size_t *out_len);
+
+/** Build RSNE (WPA2/WPA3) information element bytes. */
+fl_result_t fl_net_wifi_mgmt_build_rsne_ie(uint8_t auth_mode, uint8_t *out, size_t out_cap,
+                                           size_t *out_len);
 
 #endif /* NET_WIFI_MGMT_H */
