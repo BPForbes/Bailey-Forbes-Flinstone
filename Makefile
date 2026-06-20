@@ -573,7 +573,7 @@ else
 WIFI_TEST_LINK_PRE =
 WIFI_TEST_LINK_AT =
 endif
-.PHONY: test_mem_asm test_alloc test_priority_queue test_shell_ctrl_c test_drivers test_core test_invariants test_audit_log test_p3_network test_p3_udp_cmds test_p3_net_tools test_vm_layer_warning check-layers check-network-requirements
+.PHONY: test_mem_asm test_alloc test_priority_queue test_shell_ctrl_c test_drivers test_core test_invariants test_audit_log test_p3_network test_p3_udp_cmds test_p3_net_tools test_vm_layer_warning check-layers check-network-requirements test_all test_all-quiet run_cunit_tests
 test_mem_asm: $(MEM_ASM_OBJ)
 	$(CC) $(CFLAGS) $(TEST_SANITIZE) -I. -o tests/test_mem_asm tests/test_mem_asm.c $(MEM_ASM_OBJ)
 	./tests/test_mem_asm
@@ -911,6 +911,17 @@ test_wifi: test_wifi_coprocessor test_p3_wifi test_wifi_80211ax_mock_279 test_wi
 # Same bundle; suppress make recipe echo (link lines + ./tests/... wrappers).
 test_wifi-quiet:
 	@$(MAKE) -s TEST_QUIET=1 test_wifi
+
+# Unified test matrix — every standard make test_* target (see scripts/run_all_tests.sh).
+.PHONY: test_all test_all-quiet run_cunit_tests
+test_all:
+	@TEST_QUIET=0 ./scripts/run_all_tests.sh
+
+test_all-quiet:
+	@TEST_QUIET=1 ./scripts/run_all_tests.sh
+
+run_cunit_tests: BPForbes_Flinstone_Tests
+	@./BPForbes_Flinstone_Tests
 
 # Run only — no link step (fail fast if a binary is missing).
 run-test_wifi:
