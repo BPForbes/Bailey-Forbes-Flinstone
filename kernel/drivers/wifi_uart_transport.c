@@ -1,6 +1,7 @@
 /*
  * WiFi Coprocessor UART Transport Implementation
  * Handles serial communication with ESP32/ESP8266 WiFi modules
+ * Integrates with platform UART abstraction for cross-platform support
  */
 
 #include <string.h>
@@ -9,6 +10,7 @@
 #include <ctype.h>
 
 #include "kernel/drivers/wifi_uart_transport.h"
+#include "kernel/drivers/wifi_platform.h"
 
 /* AT Command strings for ESP32/ESP8266 */
 #define AT_CMD_TEST          "AT\r\n"
@@ -78,19 +80,24 @@ int wifi_uart_send_raw(wifi_uart_context_t *ctx, const uint8_t *data, size_t len
 		return -1;
 	}
 
-	/* TODO: Platform-specific write to UART
-	 * Should copy data into TX buffer and initiate transmission
-	 * For now, stub implementation
-	 */
-
-	/* If TX buffer has space, queue the data */
-	size_t space = WIFI_UART_BUFFER_SIZE - (ctx->tx_head - ctx->tx_tail);
-	if (space < len) {
-		return -1; /* Buffer full */
+	const wifi_platform_uart_ops_t *uart_ops = wifi_platform_get_uart_ops();
+	if (!uart_ops || !uart_ops->write_bytes) {
+		return -1;
 	}
 
-	memcpy(&ctx->tx_buffer[ctx->tx_head % WIFI_UART_BUFFER_SIZE], data, len);
+	/* Send data directly via platform UART */
+	int ret = uart_ops->write_bytes(data, len);
+	if (ret != 0) {
+		return -1;
+	}
+
+	/* Flush to ensure transmission */
+	if (uart_ops->flush) {
+		uart_ops->flush();
+	}
+
 	ctx->tx_head += len;
+	ctx->last_command_ms = wifi_platform_get_ms();
 
 	return (int)len;
 }
@@ -102,22 +109,20 @@ int wifi_uart_receive_raw(wifi_uart_context_t *ctx, uint8_t *buffer, size_t buf_
 		return -1;
 	}
 
-	/* TODO: Platform-specific read from UART with timeout
-	 * Should read available data from RX buffer
-	 * For now, stub implementation
-	 */
-
-	size_t available = ctx->rx_head - ctx->rx_tail;
-	size_t to_copy = available < buf_len ? available : buf_len;
-
-	if (to_copy > 0) {
-		memcpy(buffer, &ctx->rx_buffer[ctx->rx_tail % WIFI_UART_BUFFER_SIZE],
-		       to_copy);
-		ctx->rx_tail += to_copy;
+	const wifi_platform_uart_ops_t *uart_ops = wifi_platform_get_uart_ops();
+	if (!uart_ops || !uart_ops->read_bytes) {
+		return -1;
 	}
 
-	*out_len = to_copy;
-	return to_copy > 0 ? 0 : -1;
+	/* Read from platform UART with timeout */
+	int ret = uart_ops->read_bytes(buffer, buf_len, out_len, timeout_ms);
+
+	if (*out_len > 0) {
+		ctx->rx_head += *out_len;
+		ctx->last_response_ms = wifi_platform_get_ms();
+	}
+
+	return ret;
 }
 
 int wifi_uart_send_command(wifi_uart_context_t *ctx, const char *cmd)
@@ -137,19 +142,41 @@ int wifi_uart_read_response(wifi_uart_context_t *ctx, char *buffer, size_t buf_l
 		return -1;
 	}
 
-	/* TODO: Read from UART until OK/ERROR/FAIL with timeout
-	 * Stub: just mark as OK for testing
-	 */
+	/* Read from UART, collecting response until timeout or buffer full */
+	size_t total_read = 0;
+	uint32_t start_time = wifi_platform_get_ms();
 
-	size_t out_len = 0;
-	int ret = wifi_uart_receive_raw(ctx, (uint8_t *)buffer, buf_len - 1, &out_len,
-				       timeout_ms);
+	while (total_read < buf_len - 1) {
+		size_t chunk_len = 0;
+		uint32_t elapsed = wifi_platform_get_ms() - start_time;
 
-	if (out_len > 0) {
-		buffer[out_len] = '\0';
+		if (elapsed >= timeout_ms) {
+			break;
+		}
+
+		uint32_t remaining_timeout = timeout_ms - elapsed;
+		int ret = wifi_uart_receive_raw(ctx, (uint8_t *)&buffer[total_read],
+					       buf_len - 1 - total_read, &chunk_len,
+					       remaining_timeout);
+
+		if (chunk_len > 0) {
+			total_read += chunk_len;
+
+			/* Check for response terminators */
+			if (strstr(&buffer[total_read > 10 ? total_read - 10 : 0], "\r\nOK\r\n") ||
+			    strstr(&buffer[total_read > 10 ? total_read - 10 : 0],
+				   "\r\nERROR\r\n") ||
+			    strstr(&buffer[total_read > 10 ? total_read - 10 : 0],
+				   "\r\nFAIL\r\n")) {
+				break;
+			}
+		} else {
+			wifi_platform_sleep_ms(10); /* Small delay before retry */
+		}
 	}
 
-	return ret;
+	buffer[total_read] = '\0';
+	return total_read > 0 ? 0 : -1;
 }
 
 int wifi_uart_expect_response(wifi_uart_context_t *ctx, const char *expected,
@@ -169,6 +196,9 @@ int wifi_uart_expect_response(wifi_uart_context_t *ctx, const char *expected,
 	if (strstr(response, expected)) {
 		return 0;
 	}
+
+	/* Log unexpected response for debugging */
+	/* DEBUG: printf("Expected: %s\nGot: %s\n", expected, response); */
 
 	return -1;
 }

@@ -1,5 +1,6 @@
 /*
  * WiFi Coprocessor Abstraction Layer Implementation
+ * Platform-agnostic WiFi device management for 802.11ax support
  */
 
 #include <string.h>
@@ -7,6 +8,16 @@
 
 #include "kernel/drivers/wifi_coprocessor.h"
 #include "kernel/core/net/net_netdev.h"
+
+/* Debug logging (disable in production) */
+#define WIFI_COPROC_DEBUG 0
+
+#if WIFI_COPROC_DEBUG
+#include <stdio.h>
+#define WIFI_COPROC_LOG(fmt, ...) printf("[WIFI] " fmt "\n", ##__VA_ARGS__)
+#else
+#define WIFI_COPROC_LOG(fmt, ...) ((void)0)
+#endif
 
 /* Forward declarations */
 static int wifi_coproc_netdev_open(netdev_t *dev);
@@ -86,14 +97,24 @@ int wifi_coproc_register_transport(wifi_coproc_t *coproc, void *transport_data)
 int wifi_coproc_init(wifi_coproc_t *coproc)
 {
 	if (!coproc || !coproc->ops || !coproc->ops->init) {
+		WIFI_COPROC_LOG("ERROR: invalid coprocessor or ops");
 		return -1;
 	}
 
+	WIFI_COPROC_LOG("Initializing coprocessor: %s", coproc->name);
+
+	coproc->status = WIFI_STATUS_INITIALIZING;
 	int ret = coproc->ops->init(coproc);
-	if (ret == 0) {
-		coproc->status = WIFI_STATUS_INITIALIZING;
+
+	if (ret != 0) {
+		WIFI_COPROC_LOG("ERROR: init failed with code %d", ret);
+		coproc->status = WIFI_STATUS_ERROR;
+		coproc->errors++;
+		return ret;
 	}
-	return ret;
+
+	WIFI_COPROC_LOG("Coprocessor initialized successfully");
+	return 0;
 }
 
 int wifi_coproc_deinit(wifi_coproc_t *coproc)
