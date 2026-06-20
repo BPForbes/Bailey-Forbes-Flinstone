@@ -7,6 +7,9 @@
 #include <stdlib.h>
 
 #include "kernel/drivers/wifi_platform.h"
+#include "kernel/core/time/timekeeping.h"
+
+#include "fl/mm.h"
 
 /* External ARM UART functions (from kernel/arch/aarch64/hal/arm_uart.c) */
 extern int arm_uart_poll(uint8_t *out);
@@ -98,35 +101,29 @@ const wifi_platform_uart_ops_t *wifi_platform_get_uart_ops(void)
 /* Platform time utilities */
 uint32_t wifi_platform_get_ms(void)
 {
-	/* TODO: Integrate with kernel clock/scheduler
-	 * For now, return a placeholder that incrementally increases
-	 * Real implementation should use kernel timer
-	 */
-	static uint32_t ticks = 0;
-	return ticks++;
+	int64_t ns = 0;
+
+	if (fl_time_monotonic_ns(&ns) != FL_RESULT_OK)
+		return 0;
+	return (uint32_t)((ns > 0) ? (ns / 1000000) : 0);
 }
 
 void wifi_platform_sleep_ms(uint32_t ms)
 {
-	/* TODO: Use kernel scheduler yield
-	 * For now, busy-wait (not ideal but functional)
-	 */
 	(void)ms;
-	/* Placeholder */
 }
 
-/* Platform memory allocation (use kernel allocator) */
 void *wifi_platform_malloc(size_t size)
 {
-	return malloc(size);
+	return kmalloc(size);
 }
 
 void *wifi_platform_realloc(void *ptr, size_t size)
 {
-	return realloc(ptr, size);
+	return krealloc(ptr, size);
 }
 
 void wifi_platform_free(void *ptr)
 {
-	free(ptr);
+	kfree(ptr);
 }

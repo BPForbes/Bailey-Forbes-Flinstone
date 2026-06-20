@@ -162,7 +162,7 @@ NET_CORE_SRCS = kernel/core/net/net_checksum.c kernel/core/net/net_wire.c kernel
                 kernel/core/net/net_wifi_crypto.c \
                 kernel/drivers/wifi_coprocessor.c kernel/drivers/wifi_uart_transport.c \
                 kernel/drivers/wifi_supplicant.c \
-                kernel/drivers/wifi_driver_backend.c \
+                kernel/drivers/wifi_driver_backend.c kernel/drivers/wifi_driver_packet.c \
                 kernel/core/platform/fl_platform.c \
                 kernel/core/net/net_requirements.c \
                 kernel/core/net/net_server.c kernel/core/net/net_client.c kernel/core/net/net_file_delivery.c kernel/core/net/net_pkt_channel_meta.c kernel/core/net/net_channel_sidecar.c kernel/core/net/server_bg.c \
@@ -829,7 +829,9 @@ test_p3_wifi: $(NET_ASM_OBJ) $(MEM_ASM_OBJ) priority_queue.o kernel/core/time/ti
 	  kernel/core/net/net_wifi_wpa.c kernel/core/net/net_wifi_twt.c \
 	  kernel/core/net/net_wifi_crypto.c \
 	  kernel/drivers/wifi_driver_backend.c kernel/drivers/wifi_coprocessor.c \
-	  kernel/drivers/wifi_uart_transport.c $(WIFI_PLATFORM_SRC:.c=.o) \
+	  kernel/drivers/wifi_uart_transport.c kernel/drivers/wifi_driver_packet.c \
+	  kernel/core/mm/kmalloc.o kernel/core/mm/mem_domain.o \
+	  $(WIFI_PLATFORM_SRC:.c=.o) \
 	  $(WIFI_TEST_NET_OBJS) \
 	  kernel/core/platform/fl_platform.c \
 	  kernel/core/sched/workqueue.c kernel/core/sys/ipc.o kernel/core/time/timekeeping.o priority_queue.o \
@@ -876,10 +878,18 @@ test_wifi_db: userland/identity/password_hash.o kernel/core/net/net_wifi_db.o ke
 
 # Phase 1 WiFi coprocessor unit tests (v4.3.0 first-principles drivers)
 .PHONY: test_wifi_coprocessor
-test_wifi_coprocessor: kernel/drivers/wifi_coprocessor.o kernel/drivers/wifi_uart_transport.o $(WIFI_PLATFORM_SRC:.c=.o) kernel/core/platform/fl_platform.o
+test_wifi_coprocessor: kernel/drivers/wifi_coprocessor.o kernel/drivers/wifi_uart_transport.o \
+	kernel/drivers/wifi_driver_packet.o kernel/core/net/net_packet.o kernel/core/net/net_wire.o \
+	kernel/core/net/net_ipv6.o kernel/core/net/net_checksum.o \
+	kernel/core/mm/kmalloc.o kernel/core/mm/mem_domain.o $(MEM_ASM_OBJ) \
+	$(WIFI_PLATFORM_SRC:.c=.o) kernel/core/platform/fl_platform.o kernel/core/time/timekeeping.o
 	$(CC) $(CFLAGS) $(TEST_SANITIZE) -o tests/test_wifi_coprocessor kernel/drivers/wifi_coprocessor_test.c \
-	  kernel/drivers/wifi_coprocessor.o kernel/drivers/wifi_uart_transport.o $(WIFI_PLATFORM_SRC:.c=.o) \
-	  kernel/core/platform/fl_platform.o -Wl,-z,noexecstack
+	  kernel/drivers/wifi_coprocessor.o kernel/drivers/wifi_uart_transport.o \
+	  kernel/drivers/wifi_driver_packet.o kernel/core/net/net_packet.o kernel/core/net/net_wire.o \
+	  kernel/core/net/net_ipv6.o kernel/core/net/net_checksum.o \
+	  kernel/core/mm/kmalloc.o kernel/core/mm/mem_domain.o $(MEM_ASM_OBJ) $(NET_ASM_OBJ) \
+	  $(WIFI_PLATFORM_SRC:.c=.o) kernel/core/platform/fl_platform.o kernel/core/time/timekeeping.o \
+	  -Wl,-z,noexecstack
 	./tests/test_wifi_coprocessor
 
 .PHONY: test_p3_net_tools

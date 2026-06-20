@@ -49,6 +49,15 @@ typedef struct {
 	bool connected;
 	uint32_t last_command_ms;
 	uint32_t last_response_ms;
+	uint32_t error_count;
+
+	/* Cached AT+CWLAP scan results */
+	wifi_network_t scan_results[WIFI_MAX_NETWORKS];
+	uint16_t scan_count;
+
+	/* Staged raw RX frame from UART poll (+IPD / transparent mode) */
+	uint8_t rx_staging[1518];
+	size_t rx_staging_len;
 } wifi_uart_context_t;
 
 /* Initialization */

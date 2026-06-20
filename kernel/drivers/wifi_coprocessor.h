@@ -125,6 +125,8 @@ int wifi_coproc_deinit(wifi_coproc_t *coproc);
 
 /* Network operations */
 int wifi_coproc_scan(wifi_coproc_t *coproc);
+int wifi_coproc_get_scan_results(wifi_coproc_t *coproc, wifi_network_t *networks,
+				uint16_t *count);
 int wifi_coproc_join(wifi_coproc_t *coproc, const char *ssid, const char *password,
 		     wifi_auth_mode_t auth);
 int wifi_coproc_disconnect(wifi_coproc_t *coproc);

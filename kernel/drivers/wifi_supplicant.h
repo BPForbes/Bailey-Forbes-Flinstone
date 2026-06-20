@@ -47,10 +47,16 @@ typedef struct {
 
 	/* Error tracking */
 	uint32_t handshake_errors;
+
+	/* Credentials for SAE / PSK derivation (ephemeral; scrub on deinit) */
+	char ssid[WIFI_SSID_MAX + 1];
+	char password[WIFI_PASSWORD_MAX + 1];
 } wifi_supplicant_t;
 
 /* Lifecycle */
 int wifi_supplicant_init(wifi_supplicant_t *supp, const uint8_t *bssid);
+int wifi_supplicant_set_credentials(wifi_supplicant_t *supp, const char *ssid,
+				    const char *password);
 int wifi_supplicant_deinit(wifi_supplicant_t *supp);
 
 /* Key derivation (leverages existing net_wifi_crypto.c) */

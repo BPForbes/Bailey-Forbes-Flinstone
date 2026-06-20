@@ -109,6 +109,8 @@ Testing Ready:
 ✅ Full build: make clean && make -j4
 ✅ No regressions: All existing tests maintain compatibility
 
+Build/integration follow-up: P3 packet-module bridge (wifi_driver_packet), AT+CWLAP scan cache + AT+CIPSEND TX path, supplicant wired to net_wifi_crypto/wpa/sae, kmalloc/asm_mem_zero in driver layer, FL_WIFI_UART_FD coprocessor probe, lab fallback preserved when no UART hardware.
+
 VER_END
 PROMOTE_DESC_END
 

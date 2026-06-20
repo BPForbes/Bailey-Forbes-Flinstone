@@ -4,10 +4,13 @@
  */
 
 #include <string.h>
-#include <stdlib.h>
 
 #include "kernel/drivers/wifi_coprocessor.h"
+#include "kernel/drivers/wifi_driver_packet.h"
 #include "kernel/core/net/net_wire.h"
+
+#include "fl/mm.h"
+#include "fl/mem_asm.h"
 
 /* Debug logging (disable in production) */
 #define WIFI_COPROC_DEBUG 0
@@ -37,7 +40,7 @@ static fl_result_t wifi_coproc_driver_send(fl_net_driver_t *drv,
 	coproc = wifi_coproc_from_driver(drv);
 	if (!coproc || !coproc->ops || !coproc->ops->send_packet)
 		return FL_RESULT_NOSYS;
-	if (fl_net_wire_check_view(frame, 0u) != FL_RESULT_OK)
+	if (wifi_driver_packet_validate_tx(frame->data, frame->len) != FL_RESULT_OK)
 		return FL_RESULT_INVAL;
 
 	ret = coproc->ops->send_packet(coproc, frame->data, frame->len);
@@ -55,6 +58,7 @@ static fl_result_t wifi_coproc_driver_recv(fl_net_driver_t *drv,
 	wifi_coproc_t *coproc;
 	size_t out_len = 0;
 	int ret;
+	fl_net_pipeline_rx_t pipe;
 
 	if (!drv || !out)
 		return FL_RESULT_INVAL;
@@ -67,6 +71,7 @@ static fl_result_t wifi_coproc_driver_recv(fl_net_driver_t *drv,
 		return FL_RESULT_TIMEDOUT;
 	out->len = out_len;
 	(void)fl_net_wire_check_rx_fill(out, out->len);
+	(void)wifi_driver_packet_ingest_rx(out->data, out->len, &pipe);
 	coproc->frames_rx++;
 	return FL_RESULT_OK;
 }
@@ -74,25 +79,26 @@ static fl_result_t wifi_coproc_driver_recv(fl_net_driver_t *drv,
 int wifi_coproc_create(const char *name, wifi_coproc_t **out_coproc)
 {
 	fl_net_driver_t *netdev;
+	wifi_coproc_t *coproc;
 
 	if (!name || !out_coproc)
 		return -1;
 
-	wifi_coproc_t *coproc = (wifi_coproc_t *)malloc(sizeof(wifi_coproc_t));
+	coproc = (wifi_coproc_t *)kmalloc(sizeof(wifi_coproc_t));
 	if (!coproc)
 		return -1;
 
-	memset(coproc, 0, sizeof(wifi_coproc_t));
+	asm_mem_zero(coproc, sizeof(*coproc));
 	strncpy(coproc->name, name, WIFI_COPROC_NAME_MAX - 1);
 	coproc->name[WIFI_COPROC_NAME_MAX - 1] = '\0';
 	coproc->status = WIFI_STATUS_DOWN;
 
-	netdev = (fl_net_driver_t *)malloc(sizeof(fl_net_driver_t));
+	netdev = (fl_net_driver_t *)kmalloc(sizeof(fl_net_driver_t));
 	if (!netdev) {
-		free(coproc);
+		kfree(coproc);
 		return -1;
 	}
-	memset(netdev, 0, sizeof(*netdev));
+	asm_mem_zero(netdev, sizeof(*netdev));
 	netdev->send = wifi_coproc_driver_send;
 	netdev->recv = wifi_coproc_driver_recv;
 	netdev->mtu = FL_NET_ETH_MTU_DEFAULT;
@@ -109,11 +115,11 @@ int wifi_coproc_destroy(wifi_coproc_t *coproc)
 		return -1;
 
 	if (coproc->netdev) {
-		free(coproc->netdev);
+		kfree(coproc->netdev);
 		coproc->netdev = NULL;
 	}
 
-	free(coproc);
+	kfree(coproc);
 	return 0;
 }
 
@@ -135,6 +141,8 @@ int wifi_coproc_register_transport(wifi_coproc_t *coproc, void *transport_data)
 
 int wifi_coproc_init(wifi_coproc_t *coproc)
 {
+	int ret;
+
 	if (!coproc || !coproc->ops || !coproc->ops->init) {
 		WIFI_COPROC_LOG("ERROR: invalid coprocessor or ops");
 		return -1;
@@ -143,7 +151,7 @@ int wifi_coproc_init(wifi_coproc_t *coproc)
 	WIFI_COPROC_LOG("Initializing coprocessor: %s", coproc->name);
 
 	coproc->status = WIFI_STATUS_INITIALIZING;
-	int ret = coproc->ops->init(coproc);
+	ret = coproc->ops->init(coproc);
 
 	if (ret != 0) {
 		WIFI_COPROC_LOG("ERROR: init failed with code %d", ret);
@@ -158,10 +166,12 @@ int wifi_coproc_init(wifi_coproc_t *coproc)
 
 int wifi_coproc_deinit(wifi_coproc_t *coproc)
 {
+	int ret;
+
 	if (!coproc || !coproc->ops || !coproc->ops->deinit)
 		return -1;
 
-	int ret = coproc->ops->deinit(coproc);
+	ret = coproc->ops->deinit(coproc);
 	if (ret == 0)
 		coproc->status = WIFI_STATUS_DOWN;
 	return ret;
@@ -174,20 +184,29 @@ int wifi_coproc_scan(wifi_coproc_t *coproc)
 	return coproc->ops->start_scan(coproc);
 }
 
+int wifi_coproc_get_scan_results(wifi_coproc_t *coproc, wifi_network_t *networks,
+				 uint16_t *count)
+{
+	if (!coproc || !coproc->ops || !coproc->ops->get_scan_results)
+		return -1;
+	return coproc->ops->get_scan_results(coproc, networks, count);
+}
+
 int wifi_coproc_join(wifi_coproc_t *coproc, const char *ssid, const char *password,
 		     wifi_auth_mode_t auth)
 {
+	wifi_join_params_t params;
+
 	if (!coproc || !coproc->ops || !coproc->ops->join_network)
 		return -1;
 
-	wifi_join_params_t params;
-	memset(&params, 0, sizeof(params));
+	asm_mem_zero(&params, sizeof(params));
 	if (ssid)
 		strncpy(params.ssid, ssid, WIFI_SSID_MAX);
 	if (password)
 		strncpy(params.password, password, WIFI_PASSWORD_MAX);
 	params.auth_mode = auth;
-	params.channel = 0; /* Auto */
+	params.channel = 0;
 
 	return coproc->ops->join_network(coproc, &params);
 }
