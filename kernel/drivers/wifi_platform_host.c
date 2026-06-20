@@ -3,10 +3,10 @@
  * Stub UART ops for CI and desktop builds without ARM PL011 hardware.
  */
 
-#include <stdlib.h>
-
 #include "kernel/drivers/wifi_platform.h"
 #include "kernel/core/time/timekeeping.h"
+
+#include "fl/mm.h"
 
 static int wifi_platform_host_uart_read_byte(uint8_t *byte, uint32_t timeout_ms)
 {
@@ -72,15 +72,15 @@ void wifi_platform_sleep_ms(uint32_t ms)
 
 void *wifi_platform_malloc(size_t size)
 {
-	return malloc(size);
+	return kmalloc(size);
 }
 
 void *wifi_platform_realloc(void *ptr, size_t size)
 {
-	return realloc(ptr, size);
+	return krealloc(ptr, size);
 }
 
 void wifi_platform_free(void *ptr)
 {
-	free(ptr);
+	kfree(ptr);
 }

@@ -109,7 +109,7 @@ Testing Ready:
 ✅ Full build: make clean && make -j4
 ✅ No regressions: All existing tests maintain compatibility
 
-Build/integration follow-up: P3 packet-module bridge (wifi_driver_packet), AT+CWLAP scan cache + AT+CIPSEND TX path, supplicant wired to net_wifi_crypto/wpa/sae, platform malloc on host CI, +IPD UART RX framing, post-connect fl_net_dhcp_acquire composition in net_wifi_station, CodeRabbit review fixes (disconnect netdev teardown, lab backend fallback sync, scan/SAE/GTK auth guards).
+Build/integration follow-up: P3 packet-module bridge (wifi_driver_packet), AT+CWLAP scan cache + AT+CIPSEND TX path, supplicant wired to net_wifi_crypto/wpa/sae, kmalloc/wifi_platform alloc on host and ARM (no libc malloc in WiFi drivers), +IPD UART RX framing, post-connect fl_net_dhcp_acquire composition in net_wifi_station, NET_TEST_MM_OBJS for P3 test links.
 
 VER_END
 PROMOTE_DESC_END
