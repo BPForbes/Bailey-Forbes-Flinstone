@@ -1839,8 +1839,12 @@ const char *fl_net_wifi_host_linux_windows_ipv4(void) {
         }
         return NULL;
     }
-    if (!s_fps_ipv4[0])
-        refresh_wsl_windows_wifi_ipv4();
+    if (!s_fps_ipv4[0]) {
+        if (fl_platform_detect() == FL_PLATFORM_WSL)
+            refresh_wsl_windows_wifi_ipv4();
+        else
+            (void)refresh_flinstone_helper_status();
+    }
     if (!s_fps_ipv4[0])
         return NULL;
     return s_fps_ipv4;

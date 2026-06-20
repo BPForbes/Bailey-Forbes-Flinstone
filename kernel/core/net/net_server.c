@@ -1014,6 +1014,7 @@ fl_result_t fl_net_server_host_stop(fl_net_server_t *srv) {
         srv->listen_handle = FL_NET_SOCK_INVALID;
     }
     srv->running = 0u;
+    (void)fl_server_catalog_close();
     return FL_RESULT_OK;
 }
 
