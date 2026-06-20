@@ -6,7 +6,6 @@
 #include "net_route.h"
 #include "net_wifi_crypto.h"
 #include "net_wifi_he.h"
-#include "net_wifi_host_linux.h"
 #include "fl/platform.h"
 #include "net_ipv4.h"
 #include "net_wifi_mgmt.h"
@@ -14,6 +13,9 @@
 #include "net_wifi_twt.h"
 #include "net_wifi_wpa.h"
 #include "net_wire.h"
+
+/* v4.3.0 First-principles WiFi driver backend (replaces external Linux dependency) */
+#include "../../drivers/wifi_driver_backend.h"
 
 #include <stdlib.h>
 #include <string.h>
@@ -132,7 +134,14 @@ fl_result_t fl_net_wifi_station_init(void) {
     memset(&s_negotiated_he, 0, sizeof(s_negotiated_he));
     s_wifi_state = FL_WIFI_STATE_IDLE;
     s_netdev_ready = 0;
+    s_host_backend = 0;
     s_lab_backend = 0;
+
+    /* Initialize v4.3.0 first-principles driver backend (Phase 1-4) */
+    if (wifi_driver_backend_init() == FL_RESULT_OK) {
+        s_host_backend = 1; /* Mark that a hardware backend is active */
+    }
+
 #if defined(FL_NET_WIFI_HOSTED_LAB)
     s_lab_scan_count = 0;
     s_lab_joined_ssid[0] = '\0';
@@ -143,14 +152,19 @@ fl_result_t fl_net_wifi_station_init(void) {
 }
 
 fl_net_driver_t *fl_net_wifi_station_netdev(void) {
+    /* Try driver backend first (Phase 1-4 hardware) */
+    if (s_host_backend) {
+        fl_net_driver_t *drv = wifi_driver_netdev();
+        if (drv)
+            return drv;
+    }
+
 #if defined(FL_NET_WIFI_HOSTED_LAB)
     if (s_wifi_state == FL_WIFI_STATE_UP || s_wifi_state == FL_WIFI_STATE_DHCP ||
         s_wifi_state == FL_WIFI_STATE_CONNECTED) {
-        {
-            fl_net_driver_t *wlan = fl_net_wifi_netdev_driver();
-            if (wlan)
-                return wlan;
-        }
+        fl_net_driver_t *wlan = fl_net_wifi_netdev_driver();
+        if (wlan)
+            return wlan;
     }
 #endif
     return NULL;
@@ -165,10 +179,11 @@ int fl_net_wifi_station_lab_backend(void) {
 }
 
 fl_result_t fl_net_wifi_scan(uint8_t band, unsigned timeout_ms) {
-#if defined(FL_NET_WIFI_HOSTED_LAB)
     s_lab_backend = 0;
-    if (fl_net_wifi_host_linux_available()) {
-        fl_result_t rc = fl_net_wifi_host_linux_scan(band, timeout_ms);
+
+    /* Try v4.3.0 driver backend first (Phase 1-4 hardware) */
+    if (s_host_backend) {
+        fl_result_t rc = wifi_driver_scan(band, timeout_ms);
         if (rc == FL_RESULT_OK) {
             s_wifi_state = FL_WIFI_STATE_SCANNING;
             return FL_RESULT_OK;
@@ -176,6 +191,9 @@ fl_result_t fl_net_wifi_scan(uint8_t band, unsigned timeout_ms) {
         if (rc != FL_RESULT_NOSYS)
             return rc;
     }
+
+#if defined(FL_NET_WIFI_HOSTED_LAB)
+    /* Fall back to lab simulation */
     s_lab_backend = 1;
     lab_seed_scan(band);
     s_wifi_state = FL_WIFI_STATE_SCANNING;
@@ -193,12 +211,16 @@ fl_result_t fl_net_wifi_scan_result(fl_net_wifi_scan_entry_t *entries, size_t ca
 
     if (!entries || !count_out || cap == 0u)
         return FL_RESULT_INVAL;
-#if defined(FL_NET_WIFI_HOSTED_LAB)
-    if (fl_net_wifi_host_linux_available()) {
-        fl_result_t rc = fl_net_wifi_host_linux_scan_result(entries, cap, count_out);
+
+    /* Try driver backend first (Phase 1-4 hardware) */
+    if (s_host_backend && !s_lab_backend) {
+        fl_result_t rc = wifi_driver_scan_result(entries, cap, count_out);
         s_wifi_state = FL_WIFI_STATE_IDLE;
         return rc;
     }
+
+#if defined(FL_NET_WIFI_HOSTED_LAB)
+    /* Lab simulation fallback */
     *count_out = 0;
     for (i = 0; i < s_lab_scan_count && i < cap; i++) {
         entries[i] = s_lab_scan[i];
@@ -236,75 +258,46 @@ static fl_result_t lab_derive_pmk(const fl_net_wifi_cred_t *cred, uint8_t pmk[FL
 }
 #endif
 
-static fl_result_t host_linux_connect(const fl_net_wifi_cred_t *cred, unsigned timeout_ms) {
+/* Connect via v4.3.0 driver backend (Phase 1-4) */
+static fl_result_t driver_backend_connect(const fl_net_wifi_cred_t *cred, unsigned timeout_ms) {
     fl_result_t rc;
     fl_net_wifi_scan_entry_t ap;
     uint8_t sta_mac[6];
-    char ip_buf[32];
-    char gw_buf[32];
-    uint8_t prefix = 24u;
-    uint32_t gw_be = 0u;
     size_t i;
 
-    rc = fl_net_wifi_host_linux_connect(cred, timeout_ms);
+    /* Initiate connection via hardware backend */
+    rc = wifi_driver_connect(cred, timeout_ms);
     if (rc != FL_RESULT_OK)
         return rc;
 
+    /* Populate AP info for netdev */
     memset(&ap, 0, sizeof(ap));
     strncpy(ap.ssid, cred->ssid, sizeof(ap.ssid) - 1u);
     if (cred->bssid[0] | cred->bssid[1] | cred->bssid[2] | cred->bssid[3] |
         cred->bssid[4] | cred->bssid[5]) {
         memcpy(ap.bssid, cred->bssid, 6);
     } else {
+        /* Try to get BSSID from recent scan */
         fl_net_wifi_scan_entry_t scan[32];
         size_t n = 0;
-        (void)fl_net_wifi_host_linux_scan_result(scan, 32, &n);
-        for (i = 0; i < n; i++) {
-            if (!strcmp(scan[i].ssid, cred->ssid)) {
-                ap = scan[i];
-                break;
+        if (wifi_driver_scan_result(scan, 32, &n) == FL_RESULT_OK) {
+            for (i = 0; i < n; i++) {
+                if (!strcmp(scan[i].ssid, cred->ssid)) {
+                    ap = scan[i];
+                    break;
+                }
             }
         }
     }
 
+    /* Register netdev with driver backend */
     fl_net_loopback_mac_host(sta_mac);
-    ip_buf[0] = '\0';
-    gw_buf[0] = '\0';
-    {
-        /* On WSL with FlinstonePowershell, the Windows Wi-Fi adapter IP is the
-         * real router-assigned address (e.g. 192.168.x.x).  Prefer it for the
-         * netdev so "wlan0" shows the address peers actually reach us at.
-         * The bindable Linux-side IP is separate and used by server commands. */
-        const char *win_ip = fl_net_wifi_host_linux_windows_ipv4();
-        if (win_ip && win_ip[0]) {
-            strncpy(ip_buf, win_ip, sizeof(ip_buf) - 1u);
-            ip_buf[sizeof(ip_buf) - 1u] = '\0';
-            if (fl_net_wifi_host_linux_ipv4_route(NULL, &prefix, &gw_be) == FL_RESULT_OK
-                    && gw_be)
-                fl_net_ipv4_format_addr(gw_be, gw_buf, sizeof(gw_buf));
-        } else if (fl_platform_detect() != FL_PLATFORM_WSL &&
-                   fl_net_wifi_host_linux_ipv4_route(NULL, &prefix, &gw_be) == FL_RESULT_OK
-                   && fl_net_wifi_host_linux_ipv4(NULL, ip_buf, sizeof(ip_buf)) == FL_RESULT_OK
-                   && ip_buf[0]) {
-            fl_net_ipv4_format_addr(gw_be, gw_buf, sizeof(gw_buf));
-        }
-        /* WSL: do not put eth0 172.x on wlan0 — it is not LAN-reachable. */
-    }
-    if (ip_buf[0])
-        rc = fl_net_wifi_netdev_up_with_ipv4(&ap, sta_mac, ip_buf, prefix, gw_buf);
-    else
-        rc = fl_net_wifi_netdev_up(&ap, sta_mac);
-    if (rc == FL_RESULT_OK) {
-        uint8_t ip6[16];
-        uint8_t p6 = 0u;
-        if (fl_net_wifi_host_linux_ipv6_route(ip6, &p6) == FL_RESULT_OK)
-            (void)fl_net_wifi_netdev_add_ipv6(ip6, p6);
-    }
+    rc = fl_net_wifi_netdev_up(&ap, sta_mac);
     if (rc != FL_RESULT_OK) {
-        (void)fl_net_wifi_host_linux_disconnect();
+        wifi_driver_disconnect();
         return rc;
     }
-    s_host_backend = 1;
+
     s_wifi_state = FL_WIFI_STATE_UP;
     strncpy(s_lab_joined_ssid, cred->ssid, sizeof(s_lab_joined_ssid) - 1u);
     return FL_RESULT_OK;
@@ -313,17 +306,20 @@ static fl_result_t host_linux_connect(const fl_net_wifi_cred_t *cred, unsigned t
 fl_result_t fl_net_wifi_connect(const fl_net_wifi_cred_t *cred, unsigned timeout_ms) {
     if (!cred || !cred->ssid[0])
         return FL_RESULT_INVAL;
-#if defined(FL_NET_WIFI_HOSTED_LAB)
-    if (fl_net_wifi_host_linux_available()) {
-        fl_result_t hrc = host_linux_connect(cred, timeout_ms);
-        if (hrc == FL_RESULT_OK)
+
+    /* Try v4.3.0 driver backend first (Phase 1-4 hardware) */
+    if (s_host_backend) {
+        fl_result_t rc = driver_backend_connect(cred, timeout_ms);
+        if (rc == FL_RESULT_OK)
             return FL_RESULT_OK;
-        if (hrc != FL_RESULT_NOSYS) {
+        if (rc != FL_RESULT_NOSYS) {
             s_wifi_state = FL_WIFI_STATE_ERROR;
-            return hrc;
+            return rc;
         }
     }
-#endif
+
+#if defined(FL_NET_WIFI_HOSTED_LAB)
+    /* Fall back to lab simulation */
     (void)timeout_ms;
 #if defined(FL_NET_WIFI_HOSTED_LAB)
     {
@@ -432,17 +428,20 @@ fl_result_t fl_net_wifi_connect(const fl_net_wifi_cred_t *cred, unsigned timeout
 
 fl_result_t fl_net_wifi_disconnect(void) {
     memset(&s_negotiated_he, 0, sizeof(s_negotiated_he));
-#if defined(FL_NET_WIFI_HOSTED_LAB)
+
+    /* Disconnect via driver backend if active */
     if (s_host_backend) {
-        (void)fl_net_wifi_host_linux_disconnect();
-        s_host_backend = 0;
+        wifi_driver_disconnect();
     }
+
+#if defined(FL_NET_WIFI_HOSTED_LAB)
     s_lab_joined_ssid[0] = '\0';
     fl_net_wifi_wpa_lab_reset();
     fl_net_wifi_twt_lab_reset();
     fl_net_wifi_netdev_down();
     fl_net_iface_refresh();
 #endif
+
     s_wifi_state = FL_WIFI_STATE_IDLE;
     return FL_RESULT_OK;
 }
@@ -453,14 +452,21 @@ fl_net_wifi_state_t fl_net_wifi_state(void) {
 
 fl_result_t fl_net_wifi_twt_setup(const fl_net_wifi_twt_params_t *req,
                                   fl_net_wifi_twt_params_t *agreed_out) {
-#if defined(FL_NET_WIFI_HOSTED_LAB)
     if (s_wifi_state != FL_WIFI_STATE_CONNECTED && s_wifi_state != FL_WIFI_STATE_UP &&
         s_wifi_state != FL_WIFI_STATE_DHCP)
         return FL_RESULT_ERR;
+
+    /* Try driver backend first (Phase 4: real WiFi 6 hardware) */
+    if (s_host_backend) {
+        fl_result_t rc = wifi_driver_twt_setup(req, agreed_out);
+        if (rc != FL_RESULT_NOSYS)
+            return rc;
+    }
+
+#if defined(FL_NET_WIFI_HOSTED_LAB)
+    /* Lab simulation fallback */
     return fl_net_wifi_twt_negotiate(req, agreed_out);
 #else
-    (void)req;
-    (void)agreed_out;
     return FL_RESULT_NOSYS;
 #endif
 }
@@ -471,6 +477,15 @@ fl_result_t fl_net_wifi_he_cap(fl_net_wifi_he_cap_t *cap_out) {
     if (s_wifi_state != FL_WIFI_STATE_CONNECTED && s_wifi_state != FL_WIFI_STATE_UP &&
         s_wifi_state != FL_WIFI_STATE_DHCP)
         return FL_RESULT_ERR;
+
+    /* Try driver backend first (Phase 4: real WiFi 6 hardware) */
+    if (s_host_backend) {
+        fl_result_t rc = wifi_driver_he_cap(cap_out);
+        if (rc != FL_RESULT_NOSYS)
+            return rc;
+    }
+
+    /* Use negotiated HE from lab or driver */
     *cap_out = s_negotiated_he;
     return FL_RESULT_OK;
 }

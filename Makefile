@@ -153,12 +153,15 @@ NET_CORE_SRCS = kernel/core/net/net_checksum.c kernel/core/net/net_wire.c kernel
                 kernel/core/net/net_dns.c kernel/core/net/net_dhcp.c kernel/core/net/net_tls_hosted.c \
                 kernel/core/net/net_http.c kernel/core/net/net_tftp.c \
                 kernel/core/net/net_ping_host.c kernel/core/net/net_ping6_host.c \
-                kernel/core/net/net_wifi_he.c kernel/core/net/net_wifi_station.c kernel/core/net/net_wifi_host_linux.c \
+                kernel/core/net/net_wifi_he.c kernel/core/net/net_wifi_station.c \
                 kernel/core/net/net_wifi_netdev.c \
                 kernel/core/net/net_wifi_db.c \
                 kernel/core/net/net_wifi_mgmt.c kernel/core/net/net_wifi_sae.c \
                 kernel/core/net/net_wifi_wpa.c kernel/core/net/net_wifi_twt.c \
                 kernel/core/net/net_wifi_crypto.c \
+                kernel/drivers/wifi_coprocessor.c kernel/drivers/wifi_uart_transport.c \
+                kernel/drivers/wifi_platform_arm.c kernel/drivers/wifi_supplicant.c \
+                kernel/drivers/wifi_driver_backend.c \
                 kernel/core/platform/fl_platform.c \
                 kernel/core/net/net_requirements.c \
                 kernel/core/net/net_server.c kernel/core/net/net_client.c kernel/core/net/net_file_delivery.c kernel/core/net/net_pkt_channel_meta.c kernel/core/net/net_channel_sidecar.c kernel/core/net/server_bg.c \
@@ -188,7 +191,7 @@ SHELL_SRCS += $(CHANGELOG_C)
 endif
 SRCS = $(SHELL_SRCS) $(CORE_SRCS) disk_asm.c dir_asm.c
 SRCS += $(DRIVER_SRCS) $(HAL_SRCS)
-CFLAGS += -I$(ASM_SRC_DIR) -I$(KERNEL_DRIVERS) -Ikernel -Ikernel/drivers -Iuserland/identity
+CFLAGS += -I$(ASM_SRC_DIR) -I$(KERNEL_DRIVERS) -Ikernel -Ikernel/drivers -Ikernel/core/net -Iuserland/identity
 ifeq ($(ARCH),arm)
 CFLAGS += -Ikernel/arch/aarch64
 endif
@@ -862,6 +865,14 @@ test_wifi_db: userland/identity/password_hash.o kernel/core/net/net_wifi_db.o ke
 	  kernel/core/net/net_wifi_db.o userland/identity/password_hash.o \
 	  kernel/core/time/timekeeping.o -lsqlite3 $(OPENSSL_LIBS) -Wl,-z,noexecstack
 	FL_WIFI_DB_PATH=/tmp/fl_test_wifi.db rm -f /tmp/fl_test_wifi.db; ./tests/test_wifi_db
+
+# Phase 1 WiFi coprocessor unit tests (v4.3.0 first-principles drivers)
+.PHONY: test_wifi_coprocessor
+test_wifi_coprocessor: kernel/drivers/wifi_coprocessor.o kernel/drivers/wifi_uart_transport.o kernel/drivers/wifi_platform_arm.o kernel/core/platform/fl_platform.o
+	$(CC) $(CFLAGS) $(TEST_SANITIZE) -o tests/test_wifi_coprocessor kernel/drivers/wifi_coprocessor_test.c \
+	  kernel/drivers/wifi_coprocessor.o kernel/drivers/wifi_uart_transport.o kernel/drivers/wifi_platform_arm.o \
+	  kernel/core/platform/fl_platform.o -Wl,-z,noexecstack
+	./tests/test_wifi_coprocessor
 
 .PHONY: test_p3_net_tools
 test_p3_net_tools: $(NET_ASM_OBJ) $(MEM_ASM_OBJ) $(NET_TEST_SHELL_OBJS) $(NET_TEST_EXTRA_OBJS) priority_queue.o kernel/core/time/timekeeping.o kernel/core/sys/ipc.o
