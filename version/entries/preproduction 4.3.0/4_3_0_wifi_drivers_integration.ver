@@ -113,3 +113,5 @@ Build/integration follow-up: P3 packet-module bridge (wifi_driver_packet), AT+CW
 
 VER_END
 PROMOTE_DESC_END
+
+RELEASE_DATE=2026-06-20
