@@ -162,14 +162,14 @@ static uint16_t tcp_ephemeral_port_pick(void) {
     static uint32_t s_next = FL_NET_UDP_EPHEMERAL_PORT_MIN;
 
     for (unsigned t = 0; t < 4096u; t++) {
-        uint16_t p = (uint16_t)(s_next & 0xffffu);
+        uint16_t p;
 
-        s_next++;
-        if (p < (uint16_t)FL_NET_UDP_EPHEMERAL_PORT_MIN ||
-            p > (uint16_t)FL_NET_UDP_EPHEMERAL_PORT_MAX) {
+        if (s_next < FL_NET_UDP_EPHEMERAL_PORT_MIN ||
+            s_next > FL_NET_UDP_EPHEMERAL_PORT_MAX) {
             s_next = FL_NET_UDP_EPHEMERAL_PORT_MIN;
-            p = (uint16_t)FL_NET_UDP_EPHEMERAL_PORT_MIN;
         }
+        p = (uint16_t)s_next;
+        s_next++;
         if (!tcp_local_port_in_use(p))
             return p;
     }

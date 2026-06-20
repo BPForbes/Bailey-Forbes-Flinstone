@@ -39,4 +39,12 @@ fl_result_t fl_net_dhcp_parse_reply_pkt(const fl_net_packet_t *pkt, uint32_t *xi
  */
 fl_result_t fl_net_dhcp_lab_acquire(uint32_t *leased_addr_be, unsigned timeout_ms);
 
+/**
+ * Production DHCP client over **drv** (discover/request). When **subnet_addr_s** and **gw_s**
+ * are set, installs a static route on success.
+ */
+fl_result_t fl_net_dhcp_acquire(fl_net_driver_t *drv, const uint8_t mac[FL_NET_ETH_ADDR_LEN],
+                                const char *subnet_addr_s, unsigned prefix_len, const char *gw_s,
+                                uint32_t *leased_addr_be, unsigned timeout_ms);
+
 #endif /* NET_DHCP_H */
