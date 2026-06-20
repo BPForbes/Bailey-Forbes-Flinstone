@@ -13,7 +13,7 @@
 #ifndef KERNEL_DRIVERS_WIFI_DRIVER_BACKEND_H
 #define KERNEL_DRIVERS_WIFI_DRIVER_BACKEND_H
 
-#include "../core/net/contract_p3_wifi.h"
+#include "contract_p3_wifi.h"
 #include "fl/result.h"
 
 #include <stdint.h>
