@@ -109,7 +109,7 @@ Testing Ready:
 ✅ Full build: make clean && make -j4
 ✅ No regressions: All existing tests maintain compatibility
 
-Build/integration follow-up: P3 packet-module bridge (wifi_driver_packet), AT+CWLAP scan cache + AT+CIPSEND TX path, supplicant wired to net_wifi_crypto/wpa/sae, kmalloc/wifi_platform alloc on host and ARM (no libc malloc in WiFi drivers), +IPD UART RX framing, post-connect fl_net_dhcp_acquire composition in net_wifi_station, NET_TEST_MM_OBJS for P3 test links. Lab Wi-Fi netdev DHCP server (fl_net_dhcp_wifi_netdev_exchange), UDP echo via net_wire_egress Wi-Fi path, host_linux tier restored in net_wifi_station, mgmt auth/RSNE builders, test_wifi_lab_dhcp_udp (#279 acceptance 25 lab).
+Build/integration follow-up: P3 packet-module bridge (wifi_driver_packet), AT+CWLAP scan cache + AT+CIPSEND TX path, supplicant wired to net_wifi_crypto/wpa/sae, kmalloc/wifi_platform alloc on host and ARM (no libc malloc in WiFi drivers), +IPD UART RX framing, post-connect fl_net_dhcp_acquire composition in net_wifi_station, NET_TEST_MM_OBJS for P3 test links. Lab Wi-Fi netdev DHCP server (fl_net_dhcp_wifi_netdev_exchange), UDP echo via net_wire_egress Wi-Fi path, host_linux tier restored in net_wifi_station, mgmt auth/RSNE builders, test_wifi_lab_dhcp_udp (#279 acceptance 25 lab). 802.11ax FullMAC mock (wifi_80211ax_mock.c, FL_WIFI_80211AX_MOCK=1) + make test_wifi_80211ax_mock_279 covers all 33 #279 checklist items on Wi-Fi 5-only hardware (mock OTA auth + ax scan/HE; production RF still open).
 
 VER_END
 PROMOTE_DESC_END

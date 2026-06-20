@@ -647,6 +647,13 @@ fl_result_t fl_net_wifi_twt_setup(const fl_net_wifi_twt_params_t *req,
 
     if (s_driver_backend) {
         fl_result_t rc = wifi_driver_twt_setup(req, agreed_out);
+        if (rc == FL_RESULT_OK) {
+            fl_net_wifi_twt_params_t tracked;
+
+            if (fl_net_wifi_twt_negotiate(req, &tracked) == FL_RESULT_OK)
+                agreed_out->flow_id = tracked.flow_id;
+            return FL_RESULT_OK;
+        }
         if (rc != FL_RESULT_NOSYS)
             return rc;
     }
@@ -666,8 +673,8 @@ fl_result_t fl_net_wifi_he_cap(fl_net_wifi_he_cap_t *cap_out) {
         s_wifi_state != FL_WIFI_STATE_DHCP)
         return FL_RESULT_ERR;
 
-    /* Try driver backend first (Phase 4: real WiFi 6 hardware) */
-    if (s_host_backend) {
+    /* Try driver backend first (Phase 4 / mock ax) */
+    if (s_driver_backend) {
         fl_result_t rc = wifi_driver_he_cap(cap_out);
         if (rc != FL_RESULT_NOSYS)
             return rc;

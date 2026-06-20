@@ -163,6 +163,7 @@ NET_CORE_SRCS = kernel/core/net/net_checksum.c kernel/core/net/net_wire.c kernel
                 kernel/drivers/wifi_coprocessor.c kernel/drivers/wifi_uart_transport.c \
                 kernel/drivers/wifi_supplicant.c \
                 kernel/drivers/wifi_driver_backend.c kernel/drivers/wifi_driver_packet.c \
+                kernel/drivers/wifi_80211ax_mock.c \
                 kernel/core/platform/fl_platform.c \
                 kernel/core/net/net_requirements.c \
                 kernel/core/net/net_server.c kernel/core/net/net_client.c kernel/core/net/net_file_delivery.c kernel/core/net/net_pkt_channel_meta.c kernel/core/net/net_channel_sidecar.c kernel/core/net/server_bg.c \
@@ -833,7 +834,7 @@ test_p3_wifi: $(NET_ASM_OBJ) $(MEM_ASM_OBJ) priority_queue.o kernel/core/time/ti
 	  kernel/core/net/net_wifi_crypto.c \
 	  kernel/drivers/wifi_driver_backend.c kernel/drivers/wifi_coprocessor.c \
 	  kernel/drivers/wifi_uart_transport.c kernel/drivers/wifi_driver_packet.c \
-	  kernel/drivers/wifi_supplicant.c \
+	  kernel/drivers/wifi_80211ax_mock.c kernel/drivers/wifi_supplicant.c \
 	  kernel/core/mm/kmalloc.o kernel/core/mm/mem_domain.o \
 	  $(WIFI_PLATFORM_SRC:.c=.o) \
 	  $(WIFI_TEST_NET_OBJS) \
@@ -895,6 +896,24 @@ test_wifi_coprocessor: kernel/drivers/wifi_coprocessor.o kernel/drivers/wifi_uar
 	  $(WIFI_PLATFORM_SRC:.c=.o) kernel/core/platform/fl_platform.o kernel/core/time/timekeeping.o \
 	  -Wl,-z,noexecstack
 	./tests/test_wifi_coprocessor
+
+.PHONY: test_wifi_80211ax_mock_279
+test_wifi_80211ax_mock_279: $(NET_ASM_OBJ) $(MEM_ASM_OBJ) priority_queue.o kernel/core/time/timekeeping.o kernel/core/sys/ipc.o
+	$(CC) $(CFLAGS) $(TEST_SANITIZE) -o tests/test_wifi_80211ax_mock_279 tests/test_wifi_80211ax_mock_279.c \
+	  kernel/core/net/net_wifi_he.c kernel/core/net/net_wifi_station.c kernel/core/net/net_wifi_host_linux.c \
+	  kernel/core/net/net_wifi_mgmt.c kernel/core/net/net_wifi_sae.c \
+	  kernel/core/net/net_wifi_wpa.c kernel/core/net/net_wifi_twt.c \
+	  kernel/core/net/net_wifi_crypto.c \
+	  kernel/drivers/wifi_driver_backend.c kernel/drivers/wifi_coprocessor.c \
+	  kernel/drivers/wifi_uart_transport.c kernel/drivers/wifi_driver_packet.c \
+	  kernel/drivers/wifi_80211ax_mock.c kernel/drivers/wifi_supplicant.c \
+	  kernel/core/mm/kmalloc.o kernel/core/mm/mem_domain.o \
+	  $(WIFI_PLATFORM_SRC:.c=.o) \
+	  $(WIFI_TEST_NET_OBJS) \
+	  kernel/core/platform/fl_platform.c \
+	  kernel/core/sched/workqueue.c kernel/core/sys/ipc.o kernel/core/time/timekeeping.o priority_queue.o \
+	  $(MEM_ASM_OBJ) $(NET_ASM_OBJ) $(OPENSSL_LIBS) -Wl,-z,noexecstack
+	./tests/test_wifi_80211ax_mock_279
 
 .PHONY: test_p3_net_tools
 test_p3_net_tools: $(NET_ASM_OBJ) $(MEM_ASM_OBJ) $(NET_TEST_MM_OBJS) $(NET_TEST_SHELL_OBJS) $(NET_TEST_EXTRA_OBJS) priority_queue.o kernel/core/time/timekeeping.o kernel/core/sys/ipc.o
