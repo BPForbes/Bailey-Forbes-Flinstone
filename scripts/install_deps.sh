@@ -170,6 +170,46 @@ if ((\$p -split ';') -notcontains \$b) {
         fi
     fi
     fi
+
+    # Configure WSL2 mirrored networking via .wslconfig — pure Linux file I/O,
+    # no cmd.exe / powershell.exe / Windows API calls required.
+    # In mirrored mode WSL's eth0 gets the same IP as the Windows Wi-Fi adapter
+    # (e.g. 192.168.1.x), so 'server host :<port>' binds directly to the LAN
+    # and Pi peers can join without any portproxy or firewall rules.
+    _wsl_win_home=""
+    # Strategy 1: wslvar (available in many WSL2 distros, no Windows interop).
+    if command -v wslvar >/dev/null 2>&1 && command -v wslpath >/dev/null 2>&1; then
+        _wp=$(wslvar USERPROFILE 2>/dev/null | tr -d '\r\n')
+        [ -n "$_wp" ] && _wsl_win_home=$(wslpath "$_wp" 2>/dev/null)
+    fi
+    # Strategy 2: glob /mnt/c/Users/ — first non-system directory (no Windows call).
+    if [ -z "$_wsl_win_home" ] || [ ! -d "$_wsl_win_home" ]; then
+        for _d in /mnt/c/Users/*/; do
+            _n=$(basename "$_d")
+            case "$_n" in Public|Default*|"All Users") continue ;; esac
+            [ -d "$_d" ] && { _wsl_win_home="$_d"; break; }
+        done
+    fi
+    if [ -n "$_wsl_win_home" ] && [ -d "$_wsl_win_home" ]; then
+        _wslcfg="${_wsl_win_home}/.wslconfig"
+        if ! grep -qi 'networkingMode' "$_wslcfg" 2>/dev/null; then
+            printf '\n[wsl2]\nnetworkingMode=mirrored\n' >> "$_wslcfg"
+            echo ""
+            echo "WSL2 mirrored networking configured in $_wslcfg"
+            echo "ACTION REQUIRED: run 'wsl --shutdown' in Windows, then reopen WSL."
+            echo "After restart 'server host :<port>' will bind directly to your LAN IP"
+            echo "and Pi peers can join without any Windows portproxy or firewall rules."
+        else
+            echo ".wslconfig already has networkingMode — skipping mirrored networking setup."
+        fi
+    else
+        echo ""
+        echo "Could not locate Windows user home for .wslconfig (sudo context?)."
+        echo "To enable WSL2 mirrored networking manually, add to %USERPROFILE%\\.wslconfig:"
+        echo "  [wsl2]"
+        echo "  networkingMode=mirrored"
+        echo "Then run 'wsl --shutdown' and reopen WSL."
+    fi
 fi
 
 echo ""

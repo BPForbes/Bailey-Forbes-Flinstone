@@ -24,6 +24,10 @@
  *   **FL_NET_WIFI_BRIDGE_PY** — optional path to tools/network_bridge.py
  */
 
+/** 1 when WSL2 mirrored networking is active (eth0 has a 192.168.x.x LAN IP).
+ *  When true, the server binds directly to the LAN IP — no relay needed. */
+int fl_net_wifi_host_linux_wsl_mirrored(void);
+
 /** 1 when an external host helper path was explicitly requested via env. */
 int fl_net_wifi_host_linux_opted_in(void);
 

@@ -50,6 +50,7 @@ static char s_fps_gw[16] = "";
 static char s_wsl_bind_ipv4[16] = ""; /* WSL eth0 IP — bindable in Linux for server host */
 static uint8_t s_wsl_bind_prefix = 24u;
 static char s_interop_ipv4[16] = ""; /* Windows Wi-Fi IP from PowerShell interop (WSL fallback) */
+static int  s_wsl_mirrored = -1;     /* -1=unchecked, 0=NAT mode, 1=mirrored */
 
 
 /*
@@ -1319,6 +1320,44 @@ int fl_net_wifi_host_linux_opted_in(void) {
     if (env_truthy(use_wpa))
         return 1;
     return 0;
+}
+
+/* Returns 1 if WSL2 mirrored networking is active.
+ * In mirrored mode WSL interfaces share Windows adapter IPs (192.168.x.x).
+ * In default NAT mode only Hyper-V ranges (172.x, 10.x) appear on eth0. */
+static int wsl_mirrored_networking_active(void) {
+#if !defined(FL_NET_WIFI_HOST_LINUX)
+    return 0;
+#else
+    struct ifaddrs *list, *ifa;
+    uint32_t ip;
+    if (s_wsl_mirrored >= 0)
+        return s_wsl_mirrored;
+    if (fl_platform_detect() != FL_PLATFORM_WSL) {
+        s_wsl_mirrored = 0;
+        return 0;
+    }
+    if (getifaddrs(&list) != 0) {
+        s_wsl_mirrored = 0;
+        return 0;
+    }
+    s_wsl_mirrored = 0;
+    for (ifa = list; ifa; ifa = ifa->ifa_next) {
+        if (!ifa->ifa_addr || ifa->ifa_addr->sa_family != AF_INET)
+            continue;
+        ip = ntohl(((struct sockaddr_in *)ifa->ifa_addr)->sin_addr.s_addr);
+        if ((ip >> 16) == 0xC0A8u) { /* 192.168.0.0/16 */
+            s_wsl_mirrored = 1;
+            break;
+        }
+    }
+    freeifaddrs(list);
+    return s_wsl_mirrored;
+#endif
+}
+
+int fl_net_wifi_host_linux_wsl_mirrored(void) {
+    return wsl_mirrored_networking_active();
 }
 
 static void probe_host_backend_once(void) {
