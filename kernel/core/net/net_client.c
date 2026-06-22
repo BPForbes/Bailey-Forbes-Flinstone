@@ -219,7 +219,6 @@ static uint32_t s_client_msg_serial;
 fl_result_t fl_net_client_send_msg(fl_net_client_t *client, const char *text) {
     size_t n;
     char transfer_id[FL_SERVER_SHARE_ID_MAX];
-    fl_result_t rc;
 
     if (!client || !text)
         return FL_RESULT_INVAL;

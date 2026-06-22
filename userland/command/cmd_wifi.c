@@ -11,6 +11,7 @@
 #include "net_wifi_host_linux.h"
 #include "net_wifi_station.h"
 
+#include <arpa/inet.h>
 #include <stdio.h>
 #include <string.h>
 
@@ -44,22 +45,8 @@ static const char *band_name(uint8_t band) {
     }
 }
 
-/*
- * LAN-reachable IPv4 for peer hints: Windows Wi-Fi on WSL, else netdev wlan0.
- * Returns 1 when an address was written.
- */
+/* In-tree station IPv4 for peer hints (lab netdev or host bind address). */
 static int wifi_peer_ipv4(char *buf, size_t cap, uint32_t *be_out) {
-    const char *wip = fl_net_wifi_host_linux_windows_ipv4();
-
-    if (wip && wip[0]) {
-        if (buf && cap > 0u) {
-            strncpy(buf, wip, cap - 1u);
-            buf[cap - 1u] = '\0';
-        }
-        if (be_out)
-            (void)fl_net_ipv4_parse_literal(wip, be_out);
-        return 1;
-    }
     if (fl_net_wifi_netdev_is_up()) {
         uint32_t nd = 0u;
         if (fl_net_wifi_netdev_ipv4(&nd) == FL_RESULT_OK && nd != 0u) {
@@ -82,9 +69,9 @@ static int wifi_usage(void) {
           "  wifi known\n"
           "  wifi status\n"
           "  Lab scan: set FL_NET_WIFI_HOME_SSID to include your home network in scan results.\n"
-          "  Real Wi-Fi (Linux): wpa_cli or nmcli on FL_NET_WIFI_IFACE (auto-detect when unset).\n"
-          "  WSL: FlinstonePowershell.exe (make flinstone-ps-windows); source tools/fl-wifi.env\n"
-          "       or: python3 tools/network_bridge.py discover\n",
+          "  Default: in-tree 802.11 lab (LabAxHome/GuestOpen; DHCP on wlan-lab).\n"
+          "  Real Wi-Fi (opt-in): set FL_NET_WIFI_FLINSTONE_PS on WSL, or FL_NET_WIFI_USE_WPA=1\n"
+          "    on native Linux with wpa_cli/nmcli. See README.md and docs/P3_NETWORKING.md.\n",
           stderr);
     return 1;
 }
@@ -155,16 +142,15 @@ static int cmd_wifi_scan(int argc, char **argv) {
         fl_wifi_db_close();
         return 1;
     }
-    if (fl_net_wifi_station_lab_backend()) {
-        fputs("wifi scan: using in-tree lab simulation (install wpa_cli/nmcli or set "
-              "FL_NET_WIFI_IFACE)\n",
-              stderr);
-    } else {
+    if (fl_net_wifi_station_lab_backend())
+        fputs("wifi scan: in-tree lab simulation (802.11ax APs)\n", stderr);
+    else if (fl_net_wifi_host_linux_opted_in() && fl_net_wifi_host_linux_available()) {
         const char *backend = fl_net_wifi_host_linux_backend_name();
-        if (backend)
-            fprintf(stderr, "wifi scan: host backend %s on %s\n", backend,
-                    fl_net_wifi_host_linux_iface());
-    }
+        const char *iface = fl_net_wifi_host_linux_iface();
+        fprintf(stderr, "wifi scan: host backend %s on %s\n",
+                backend ? backend : "host", iface ? iface : "?");
+    } else
+        fputs("wifi scan: hardware Wi-Fi driver backend\n", stderr);
     printf("SSID            BSSID          RSSI  CH  BW  Band  Auth  HE  Color\n");
     for (i = 0; i < count; i++) {
         const fl_net_wifi_scan_entry_t *e = &entries[i];
@@ -332,15 +318,8 @@ static int cmd_wifi_join(int argc, char **argv) {
         goto cleanup;
     }
     if (rc == FL_RESULT_TIMEDOUT) {
-        const char *iface = fl_net_wifi_host_linux_iface();
-        if (!iface || !iface[0])
-            iface = "wlan0";
-        fprintf(stderr,
-                "wifi join: timed out waiting for association on %s\n"
-                "  Diagnose: wpa_cli -i %s status   or   nmcli device status\n"
-                "  On Raspberry Pi: ensure wpa_supplicant is running for %s,\n"
-                "  or use NetworkManager (nmcli) instead.\n",
-                iface, iface, iface);
+        const char *iface = fl_net_wifi_netdev_iface();
+        fprintf(stderr, "wifi join: timed out waiting for association on %s\n", iface);
         goto cleanup;
     }
     if (rc != FL_RESULT_OK) {
@@ -354,9 +333,9 @@ static int cmd_wifi_join(int argc, char **argv) {
         char peer_ip[32];
         uint32_t peer_be = 0u;
         if (wifi_peer_ipv4(peer_ip, sizeof(peer_ip), &peer_be))
-            printf(", wlan0 %s", peer_ip);
+            printf(", %s %s", fl_net_wifi_netdev_iface(), peer_ip);
     } else if (fl_net_wifi_station_netdev() != NULL) {
-        fputs(", wlan0 netdev UP", stdout);
+        printf(", %s netdev UP", fl_net_wifi_netdev_iface());
     }
     puts(")");
     fl_wifi_db_close();
@@ -405,43 +384,83 @@ static int cmd_wifi_status(int argc, char **argv) {
     (void)argc;
     (void)argv;
     printf("Wi-Fi state: %d\n", (int)fl_net_wifi_state());
-    if (fl_net_wifi_station_host_backend()) {
+    if (fl_net_wifi_station_lab_backend())
+        puts("Backend: in-tree 802.11 lab (wlan-lab DHCP)");
+    else if (fl_net_wifi_station_host_backend()) {
         const char *backend = fl_net_wifi_host_linux_backend_name();
-        printf("Backend: %s (%s)\n", backend ? backend : "host", fl_net_wifi_host_linux_iface());
-    } else if (fl_net_wifi_host_linux_available()) {
+        char bind_ip[32];
+        uint32_t bind_be = 0u;
+        uint8_t prefix = 24u;
+
+        printf("Backend: %s (%s)\n", backend ? backend : "host",
+               fl_net_wifi_host_linux_iface());
+        if (fl_net_wifi_host_linux_ipv4_route(&bind_be, &prefix, NULL) == FL_RESULT_OK &&
+            bind_be != 0u) {
+            fl_net_ipv4_format_addr(bind_be, bind_ip, sizeof(bind_ip));
+            printf("Station L3 (host bind): %s/%u\n", bind_ip, (unsigned)prefix);
+            printf("Server host: server host :<port> (WSL portproxy) or server host %s:<port>\n",
+                   bind_ip);
+            {
+                const char *win = fl_net_wifi_host_linux_windows_ipv4();
+                if (win && win[0])
+                    printf("LAN peers join: %s:<port> after server host sets portproxy\n", win);
+            }
+        } else {
+            puts("Station L3: waiting for host DHCP (wifi status again in a moment)");
+        }
+    } else if (fl_net_wifi_host_linux_opted_in() && fl_net_wifi_host_linux_available()) {
         const char *backend = fl_net_wifi_host_linux_backend_name();
         printf("Backend: %s available on %s (not associated)\n",
                backend ? backend : "host", fl_net_wifi_host_linux_iface());
     } else
-        puts("Backend: in-tree 802.11 lab (net_wifi_netdev + MLME/WPA)");
+        puts("Backend: in-tree 802.11 lab (not associated)");
     {
-        const char *ifname = fl_net_wifi_host_linux_iface();
-        if (!ifname || !ifname[0])
-            ifname = "wlan0";
+        const char *ifname = fl_net_wifi_netdev_iface();
         if (fl_net_wifi_netdev_is_up() &&
             fl_net_wifi_netdev_ipv4(&ip_be) == FL_RESULT_OK) {
             char ip6[64];
             char peer_ip[32];
+            char gw_ip[32];
+            char dns_ip[32];
+            char mask_ip[32];
+            fl_net_wifi_l3_profile_t l3;
             uint8_t addr6[16];
             uint8_t p6 = 0u;
-            const char *win_ip = fl_net_wifi_host_linux_windows_ipv4();
+            unsigned prefix = 24u;
+
+            fl_net_ipv4_format_addr(ip_be, ip, sizeof(ip));
+            if (fl_net_wifi_netdev_l3_profile(&l3)) {
+                if (l3.netmask != 0u) {
+                    unsigned bits = 0u;
+                    uint32_t m = ntohl(l3.netmask);
+                    while (m & 0x80000000u) {
+                        bits++;
+                        m <<= 1;
+                    }
+                    prefix = bits > 0u ? bits : 24u;
+                }
+                printf("Station L3 (%s): %s/%u", ifname, ip, prefix);
+                if (l3.gateway != 0u) {
+                    fl_net_ipv4_format_addr(l3.gateway, gw_ip, sizeof(gw_ip));
+                    printf("  gateway %s", gw_ip);
+                }
+                if (l3.dns != 0u) {
+                    fl_net_ipv4_format_addr(l3.dns, dns_ip, sizeof(dns_ip));
+                    printf("  dns %s", dns_ip);
+                }
+                if (l3.netmask != 0u) {
+                    fl_net_ipv4_format_addr(l3.netmask, mask_ip, sizeof(mask_ip));
+                    printf("  mask %s", mask_ip);
+                }
+                putchar('\n');
+            } else {
+                printf("Station L3 (%s): %s\n", ifname, ip);
+            }
             if (wifi_peer_ipv4(peer_ip, sizeof(peer_ip), NULL))
-                printf("Interface %s IPv4: %s (server host %s:<port> or server host -all <port>)\n",
-                       ifname, peer_ip, peer_ip);
-            else {
-                fl_net_ipv4_format_addr(ip_be, ip, sizeof(ip));
-                printf("Interface %s IPv4: %s (server host %s:<port> or server host -all <port>)\n",
-                       ifname, ip, ip);
-            }
-            if (win_ip) {
-                fl_net_ipv4_format_addr(ip_be, ip, sizeof(ip));
-                if (strcmp(ip, win_ip) != 0)
-                    printf("WSL eth0: %s (internal NAT; not reachable from LAN)\n", ip);
-                printf("Windows Wi-Fi IP: %s (router-assigned; LAN peers use this)\n", win_ip);
-            }
+                printf("Server host/join: %s:<port> or server host :<port>\n", peer_ip);
             if (fl_net_wifi_netdev_ipv6(addr6, &p6) == FL_RESULT_OK &&
                 fl_net_ipv6_format_addr(addr6, ip6, sizeof(ip6)))
-                printf("Interface %s IPv6: %s/%u\n", ifname, ip6, (unsigned)p6);
+                printf("Station IPv6: %s/%u\n", ip6, (unsigned)p6);
         } else if (fl_net_wifi_station_netdev() != NULL) {
             printf("Interface %s: associating…\n", ifname);
         } else {

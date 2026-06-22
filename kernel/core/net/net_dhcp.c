@@ -5,7 +5,9 @@
 #include "net_packet.h"
 #include "net_route.h"
 #include "net_udp.h"
+#include "net_wifi_netdev.h"
 #include "net_wire_host.h"
+#include "wifi_lab_router.h"
 
 #include <string.h>
 
@@ -139,9 +141,89 @@ fl_result_t fl_net_dhcp_parse_reply_pkt(const fl_net_packet_t *pkt, uint32_t *xi
     return fl_net_dhcp_parse_reply(buf, len, xid_out, yiaddr_be_out, dhcp_msg_type_out);
 }
 
-static fl_result_t dhcp_exchange(const fl_net_packet_t *req_pkt, fl_net_packet_t *reply_pkt,
+static uint8_t dhcp_mask_be_to_prefix(uint32_t mask_be) {
+    uint32_t m = ((uint32_t)mask_be >> 24) & 0xffu;
+    m |= ((uint32_t)mask_be >> 8) & 0xff00u;
+    m |= ((uint32_t)mask_be << 8) & 0xff0000u;
+    m |= ((uint32_t)mask_be << 24) & 0xff000000u;
+    uint8_t p = 0;
+    while (p < 32u && (m & (UINT32_C(1) << (31u - p))))
+        p++;
+    return p;
+}
+
+fl_result_t fl_net_dhcp_parse_lease(const uint8_t *buf, size_t len,
+                                    fl_net_dhcp_lease_info_t *lease_out) {
+    const uint8_t *opts;
+    size_t opts_len;
+    uint8_t msg_type = 0;
+    uint8_t mask_buf[4];
+    uint8_t gw_buf[4];
+    uint8_t dns_buf[4];
+
+    if (!lease_out)
+        return FL_RESULT_INVAL;
+    memset(lease_out, 0, sizeof(*lease_out));
+
+    if (fl_net_dhcp_parse_reply(buf, len, NULL, &lease_out->yiaddr_be, &msg_type) != FL_RESULT_OK)
+        return FL_RESULT_ERR;
+    if (msg_type != FL_NET_DHCP_MSG_OFFER && msg_type != FL_NET_DHCP_MSG_ACK)
+        return FL_RESULT_ERR;
+
+    opts = buf + FL_NET_BOOTP_FIXED_LEN;
+    opts_len = len - FL_NET_BOOTP_FIXED_LEN;
+    if (opts_len < 4u || dhcp_load_be32(opts) != FL_NET_DHCP_MAGIC_COOKIE_BE32)
+        return FL_RESULT_ERR;
+    opts += 4;
+    opts_len -= 4;
+
+    if (dhcp_find_option(opts, opts_len, FL_NET_DHCP_OPT_SUBNET_MASK, mask_buf, 4) == 4) {
+        lease_out->prefix_len = dhcp_mask_be_to_prefix(dhcp_load_be32(mask_buf));
+        lease_out->has_prefix = 1;
+    }
+    if (dhcp_find_option(opts, opts_len, FL_NET_DHCP_OPT_ROUTER, gw_buf, 4) == 4) {
+        lease_out->gateway_be = dhcp_load_be32(gw_buf);
+        lease_out->has_gateway = 1;
+    }
+    if (dhcp_find_option(opts, opts_len, FL_NET_DHCP_OPT_DOMAIN_NAME_SERVER, dns_buf, 4) == 4) {
+        lease_out->dns_be = dhcp_load_be32(dns_buf);
+        lease_out->has_dns = 1;
+    }
+    return FL_RESULT_OK;
+}
+
+fl_result_t fl_net_dhcp_parse_lease_pkt(const fl_net_packet_t *pkt,
+                                        fl_net_dhcp_lease_info_t *lease_out) {
+    const uint8_t *buf;
+    size_t len;
+    fl_result_t rc;
+
+    rc = fl_net_packet_l4_view(pkt, &buf, &len);
+    if (rc != FL_RESULT_OK)
+        return rc;
+    return fl_net_dhcp_parse_lease(buf, len, lease_out);
+}
+
+static fl_result_t dhcp_exchange(fl_net_driver_t *drv, const uint8_t mac[FL_NET_ETH_ADDR_LEN],
+                                 const fl_net_packet_t *req_pkt, fl_net_packet_t *reply_pkt,
                                  uint8_t *reply_backing, size_t reply_cap, size_t *reply_len,
                                  unsigned timeout_ms) {
+    const uint8_t *req;
+    size_t req_len;
+    fl_result_t rc;
+
+    (void)timeout_ms;
+    if (drv && fl_net_wifi_netdev_is_up() && drv == fl_net_wifi_netdev_driver()) {
+        rc = fl_net_packet_l4_view(req_pkt, &req, &req_len);
+        if (rc != FL_RESULT_OK)
+            return rc;
+        rc = wifi_lab_router_dhcp_exchange(mac, req, req_len, reply_backing, reply_cap,
+                                           reply_len);
+        if (rc != FL_RESULT_OK)
+            return rc;
+        return fl_net_packet_bind_l4(reply_pkt, reply_backing, reply_cap, 0u, *reply_len);
+    }
+
     return fl_net_wire_send_udp_pkt(FL_NET_DHCP_BROADCAST_BE32, FL_NET_DHCP_CLIENT_PORT,
                                     FL_NET_DHCP_SERVER_PORT, req_pkt, reply_pkt, reply_backing,
                                     reply_cap, reply_len, timeout_ms);
@@ -149,17 +231,20 @@ static fl_result_t dhcp_exchange(const fl_net_packet_t *req_pkt, fl_net_packet_t
 
 fl_result_t fl_net_dhcp_acquire(fl_net_driver_t *drv, const uint8_t mac[FL_NET_ETH_ADDR_LEN],
                                 const char *subnet_addr_s, unsigned prefix_len, const char *gw_s,
-                                uint32_t *leased_addr_be, unsigned timeout_ms) {
+                                uint32_t *leased_addr_be, fl_net_dhcp_lease_info_t *lease_out,
+                                unsigned timeout_ms) {
     uint8_t discover[300];
     uint8_t reply[576];
     size_t rlen = 0;
     uint32_t xid = 0x44584350u;
     uint32_t yiaddr = 0;
     uint8_t msg_type = 0;
+    fl_net_dhcp_lease_info_t ack_lease;
     fl_net_packet_t discover_pkt;
     fl_net_packet_t reply_pkt;
     fl_result_t rc;
     char addr_buf[32];
+    char gw_buf[32];
 
     if (!mac || !leased_addr_be)
         return FL_RESULT_INVAL;
@@ -168,7 +253,8 @@ fl_result_t fl_net_dhcp_acquire(fl_net_driver_t *drv, const uint8_t mac[FL_NET_E
                                        FL_NET_DHCP_MSG_DISCOVER, xid, mac);
     if (rc != FL_RESULT_OK)
         return rc;
-    rc = dhcp_exchange(&discover_pkt, &reply_pkt, reply, sizeof(reply), &rlen, timeout_ms);
+    rc = dhcp_exchange(drv, mac, &discover_pkt, &reply_pkt, reply, sizeof(reply), &rlen,
+                       timeout_ms);
     if (rc != FL_RESULT_OK)
         return rc;
 
@@ -182,23 +268,41 @@ fl_result_t fl_net_dhcp_acquire(fl_net_driver_t *drv, const uint8_t mac[FL_NET_E
         return rc;
 
     rlen = 0;
-    rc = dhcp_exchange(&discover_pkt, &reply_pkt, reply, sizeof(reply), &rlen, timeout_ms);
+    rc = dhcp_exchange(drv, mac, &discover_pkt, &reply_pkt, reply, sizeof(reply), &rlen,
+                       timeout_ms);
     if (rc != FL_RESULT_OK)
         return rc;
 
-    rc = fl_net_dhcp_parse_reply_pkt(&reply_pkt, NULL, &yiaddr, &msg_type);
+    memset(&ack_lease, 0, sizeof(ack_lease));
+    rc = fl_net_dhcp_parse_lease_pkt(&reply_pkt, &ack_lease);
+    if (rc != FL_RESULT_OK || ack_lease.yiaddr_be == 0u)
+        return FL_RESULT_ERR;
+    rc = fl_net_dhcp_parse_reply_pkt(&reply_pkt, NULL, NULL, &msg_type);
     if (rc != FL_RESULT_OK || msg_type != FL_NET_DHCP_MSG_ACK)
         return FL_RESULT_ERR;
 
-    *leased_addr_be = yiaddr;
+    *leased_addr_be = ack_lease.yiaddr_be;
+    if (lease_out)
+        *lease_out = ack_lease;
 
-    if (drv && subnet_addr_s && subnet_addr_s[0] && gw_s && gw_s[0] && prefix_len > 0u &&
-        prefix_len <= 32u) {
-        fl_net_ipv4_format_addr(yiaddr, addr_buf, sizeof(addr_buf));
-        (void)subnet_addr_s;
-        rc = fl_net_route_configure_static(drv, mac, addr_buf, prefix_len, gw_s);
-        if (rc != FL_RESULT_OK)
-            return rc;
+    if (drv) {
+        uint8_t plen = ack_lease.has_prefix ? ack_lease.prefix_len : 24u;
+        const char *gw_use = gw_s;
+
+        fl_net_ipv4_format_addr(ack_lease.yiaddr_be, addr_buf, sizeof(addr_buf));
+        if (!gw_use || !gw_use[0]) {
+            if (ack_lease.has_gateway) {
+                fl_net_ipv4_format_addr(ack_lease.gateway_be, gw_buf, sizeof(gw_buf));
+                gw_use = gw_buf;
+            }
+        }
+        if (subnet_addr_s && subnet_addr_s[0] && gw_use && gw_use[0] && prefix_len > 0u)
+            plen = (uint8_t)prefix_len;
+        if (gw_use && gw_use[0]) {
+            rc = fl_net_route_configure_static(drv, mac, addr_buf, plen, gw_use);
+            if (rc != FL_RESULT_OK)
+                return rc;
+        }
     }
 
     return FL_RESULT_OK;
@@ -207,5 +311,5 @@ fl_result_t fl_net_dhcp_acquire(fl_net_driver_t *drv, const uint8_t mac[FL_NET_E
 fl_result_t fl_net_dhcp_lab_acquire(uint32_t *leased_addr_be, unsigned timeout_ms) {
     uint8_t mac[FL_NET_ETH_ADDR_LEN] = {0x02, 0x42, 0x00, 0x00, 0x01, 0x02};
 
-    return fl_net_dhcp_acquire(NULL, mac, NULL, 0u, NULL, leased_addr_be, timeout_ms);
+    return fl_net_dhcp_acquire(NULL, mac, NULL, 0u, NULL, leased_addr_be, NULL, timeout_ms);
 }

@@ -181,6 +181,12 @@ Detailed wording also appears in **CLAUDE.md**, **`docs/versioning.md`**, **`.co
 - When adding core memory behavior, prefer extending the existing ASM-backed primitives and C wrappers instead of introducing parallel libc-only paths.
 - Host-only fallbacks are acceptable for tests and non-baremetal builds, but preserve the ASM-backed contract for kernel, driver, and baremetal paths.
 
+### Kernel vs driver execution (AI)
+
+When you propose new drivers for a module, ensure that the kernel functions solely as an orchestrator for those drivers. The kernel should delegate all module-specific behavior to the drivers rather than executing functionality on behalf of the module. This separation preserves a clean driver boundary, keeps execution logic where it belongs, and prevents the kernel from accumulating responsibilities that should remain in the driver layer.
+
+**Scope note:** `kernel/core/net/` still executes cross-cutting protocol policy above the netdev boundary (routing, TCP/UDP, DHCP composition, session wire). Module-specific hardware or NIC behavior (scan, associate, frame TX/RX, firmware rings, UART AT, register pokes) belongs in `kernel/drivers/` and surfaces through narrow ops (`fl_net_driver_t`, backend routers such as `wifi_driver_backend`).
+
 ## Running executables
 
 Build before running:
