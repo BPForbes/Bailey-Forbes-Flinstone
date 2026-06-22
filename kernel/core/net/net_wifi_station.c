@@ -9,7 +9,6 @@
 #include "fl/platform.h"
 #include "net_ipv4.h"
 #include "net_wifi_mgmt.h"
-#include "net_wifi_sae.h"
 #include "net_wifi_twt.h"
 #include "net_wifi_wpa.h"
 #include "net_wifi_host_linux.h"
@@ -18,7 +17,6 @@
 
 /* v4.3.0 First-principles WiFi driver backend (replaces external Linux dependency) */
 #include "../../drivers/wifi_driver_backend.h"
-#include "../../drivers/wifi_supplicant.h"
 
 #include <stdlib.h>
 #include <string.h>
@@ -265,16 +263,6 @@ static const fl_net_wifi_scan_entry_t *lab_find_ssid(const char *ssid) {
     return NULL;
 }
 
-static fl_result_t lab_derive_pmk(const fl_net_wifi_cred_t *cred, uint8_t pmk[FL_NET_WIFI_PMK_LEN]) {
-    if (cred->auth_mode == FL_WIFI_AUTH_OPEN || cred->auth_mode == FL_WIFI_AUTH_OWE)
-        return FL_RESULT_OK;
-    if (cred->auth_mode == FL_WIFI_AUTH_WPA3_SAE)
-        return fl_net_wifi_sae_derive_pmk(cred->ssid, cred->passphrase, pmk,
-                                          FL_NET_WIFI_PMK_LEN);
-    if (cred->auth_mode == FL_WIFI_AUTH_WPA2_PSK)
-        return fl_net_wifi_wpa_psk_pmk(cred->ssid, cred->passphrase, pmk);
-    return FL_RESULT_NOSYS;
-}
 #endif
 
 static fl_result_t wifi_station_compose_dhcp(const fl_net_wifi_scan_entry_t *ap,
@@ -376,37 +364,6 @@ static fl_result_t host_linux_connect(const fl_net_wifi_cred_t *cred, unsigned t
     s_wifi_state = FL_WIFI_STATE_UP;
     strncpy(s_lab_joined_ssid, cred->ssid, sizeof(s_lab_joined_ssid) - 1u);
     fl_net_iface_refresh();
-    return FL_RESULT_OK;
-}
-
-static fl_result_t lab_supplicant_auth(const fl_net_wifi_cred_t *cred,
-                                       const fl_net_wifi_scan_entry_t *ap,
-                                       const uint8_t sta_mac[6], uint8_t pmk[FL_NET_WIFI_PMK_LEN]) {
-    wifi_supplicant_t supp;
-
-    if (ap->auth_mode == FL_WIFI_AUTH_OPEN || ap->auth_mode == FL_WIFI_AUTH_OWE)
-        return FL_RESULT_OK;
-    if (wifi_supplicant_init(&supp, ap->bssid) != 0)
-        return FL_RESULT_ERR;
-    if (wifi_supplicant_set_credentials(&supp, cred->ssid, cred->passphrase) != 0 ||
-        wifi_supplicant_set_sta_addr(&supp, sta_mac) != 0) {
-        (void)wifi_supplicant_deinit(&supp);
-        return FL_RESULT_ERR;
-    }
-    if (ap->auth_mode == FL_WIFI_AUTH_WPA3_SAE) {
-        if (wifi_supplicant_start_sae_handshake(&supp) != 0 ||
-            fl_net_wifi_sae_derive_pmk(cred->ssid, cred->passphrase, supp.keys.pmk,
-                                       FL_NET_WIFI_PMK_LEN) != FL_RESULT_OK) {
-            (void)wifi_supplicant_deinit(&supp);
-            return FL_RESULT_ERR;
-        }
-    } else if (wifi_supplicant_derive_pmk_psk(&supp, cred->ssid, cred->passphrase) != 0 ||
-               wifi_supplicant_start_4way_handshake(&supp) != 0) {
-        (void)wifi_supplicant_deinit(&supp);
-        return FL_RESULT_ERR;
-    }
-    memcpy(pmk, supp.keys.pmk, FL_NET_WIFI_PMK_LEN);
-    (void)wifi_supplicant_deinit(&supp);
     return FL_RESULT_OK;
 }
 #endif
@@ -536,9 +493,9 @@ fl_result_t fl_net_wifi_connect(const fl_net_wifi_cred_t *cred, unsigned timeout
         s_wifi_state = FL_WIFI_STATE_AUTHING;
         fl_net_loopback_mac_host(sta_mac);
         memset(pmk, 0, sizeof(pmk));
-        rc = lab_supplicant_auth(cred, ap, sta_mac, pmk);
+        rc = wifi_driver_lab_supplicant_auth(cred, ap, sta_mac, pmk);
         if (rc != FL_RESULT_OK)
-            rc = lab_derive_pmk(cred, pmk);
+            rc = wifi_driver_lab_derive_pmk(cred, pmk);
         if (rc != FL_RESULT_OK) {
             fl_net_wifi_crypto_memzero(pmk, sizeof(pmk));
             s_wifi_state = FL_WIFI_STATE_ERROR;

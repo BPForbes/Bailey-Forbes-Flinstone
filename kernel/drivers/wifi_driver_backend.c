@@ -10,6 +10,10 @@
 #include "wifi_coprocessor.h"
 #include "wifi_fullmac.h"
 #include "wifi_uart_transport.h"
+#include "wifi_supplicant.h"
+
+#include "net_wifi_sae.h"
+#include "net_wifi_wpa.h"
 
 #include <stdlib.h>
 #include <string.h>
@@ -389,4 +393,55 @@ fl_net_driver_t *wifi_driver_netdev(void)
 		return s_fullmac->netdev;
 
 	return NULL;
+}
+
+fl_result_t wifi_driver_lab_derive_pmk(const fl_net_wifi_cred_t *cred,
+				       uint8_t pmk[FL_NET_WIFI_PMK_LEN])
+{
+	if (!cred || !pmk)
+		return FL_RESULT_INVAL;
+	if (cred->auth_mode == FL_WIFI_AUTH_OPEN || cred->auth_mode == FL_WIFI_AUTH_OWE)
+		return FL_RESULT_OK;
+	if (cred->auth_mode == FL_WIFI_AUTH_WPA3_SAE)
+		return fl_net_wifi_sae_derive_pmk(cred->ssid, cred->passphrase, pmk,
+						  FL_NET_WIFI_PMK_LEN);
+	if (cred->auth_mode == FL_WIFI_AUTH_WPA2_PSK)
+		return fl_net_wifi_wpa_psk_pmk(cred->ssid, cred->passphrase, pmk);
+	return FL_RESULT_NOSYS;
+}
+
+fl_result_t wifi_driver_lab_supplicant_auth(const fl_net_wifi_cred_t *cred,
+					    const fl_net_wifi_scan_entry_t *ap,
+					    const uint8_t sta_mac[6],
+					    uint8_t pmk[FL_NET_WIFI_PMK_LEN])
+{
+	wifi_supplicant_t supp;
+
+	if (!cred || !ap || !sta_mac || !pmk)
+		return FL_RESULT_INVAL;
+	if (ap->auth_mode == FL_WIFI_AUTH_OPEN || ap->auth_mode == FL_WIFI_AUTH_OWE)
+		return FL_RESULT_OK;
+
+	if (wifi_supplicant_init(&supp, ap->bssid) != 0)
+		return FL_RESULT_ERR;
+	if (wifi_supplicant_set_credentials(&supp, cred->ssid, cred->passphrase) != 0 ||
+	    wifi_supplicant_set_sta_addr(&supp, sta_mac) != 0) {
+		(void)wifi_supplicant_deinit(&supp);
+		return FL_RESULT_ERR;
+	}
+	if (ap->auth_mode == FL_WIFI_AUTH_WPA3_SAE) {
+		if (wifi_supplicant_start_sae_handshake(&supp) != 0 ||
+		    fl_net_wifi_sae_derive_pmk(cred->ssid, cred->passphrase, supp.keys.pmk,
+					       FL_NET_WIFI_PMK_LEN) != FL_RESULT_OK) {
+			(void)wifi_supplicant_deinit(&supp);
+			return FL_RESULT_ERR;
+		}
+	} else if (wifi_supplicant_derive_pmk_psk(&supp, cred->ssid, cred->passphrase) != 0 ||
+		   wifi_supplicant_start_4way_handshake(&supp) != 0) {
+		(void)wifi_supplicant_deinit(&supp);
+		return FL_RESULT_ERR;
+	}
+	memcpy(pmk, supp.keys.pmk, FL_NET_WIFI_PMK_LEN);
+	(void)wifi_supplicant_deinit(&supp);
+	return FL_RESULT_OK;
 }

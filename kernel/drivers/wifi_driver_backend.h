@@ -16,6 +16,7 @@
 #include "contract_p3_wifi.h"
 #include "contract_result.h"
 #include "fl/driver/net.h"
+#include "net_wifi_crypto.h"
 
 #include <stdint.h>
 #include <stddef.h>
@@ -49,5 +50,16 @@ fl_result_t wifi_driver_twt_teardown(uint8_t flow_id);
 
 /* Get netdev for routing/DHCP composition */
 fl_net_driver_t *wifi_driver_netdev(void);
+
+/*
+ * Lab simulation backend (no UART/mock/fullmac active): supplicant + PMK
+ * execution lives in the driver layer; net_wifi_station orchestrates only.
+ */
+fl_result_t wifi_driver_lab_derive_pmk(const fl_net_wifi_cred_t *cred,
+				       uint8_t pmk[FL_NET_WIFI_PMK_LEN]);
+fl_result_t wifi_driver_lab_supplicant_auth(const fl_net_wifi_cred_t *cred,
+					    const fl_net_wifi_scan_entry_t *ap,
+					    const uint8_t sta_mac[6],
+					    uint8_t pmk[FL_NET_WIFI_PMK_LEN]);
 
 #endif /* KERNEL_DRIVERS_WIFI_DRIVER_BACKEND_H */
