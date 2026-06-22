@@ -176,6 +176,11 @@ static fl_result_t host_linux_connect(const fl_net_wifi_cred_t *cred, unsigned t
 {
     fl_result_t rc;
     fl_net_wifi_scan_entry_t ap;
+    uint8_t sta_mac[6];
+    char ip_buf[32];
+    char gw_buf[32];
+    uint8_t prefix = 24u;
+    uint32_t gw_be = 0u;
     size_t i;
 
     (void)timeout_ms;
@@ -200,11 +205,47 @@ static fl_result_t host_linux_connect(const fl_net_wifi_cred_t *cred, unsigned t
         }
     }
 
+    fl_net_loopback_mac_host(sta_mac);
+    ip_buf[0] = '\0';
+    gw_buf[0] = '\0';
+    {
+        /* On WSL with FlinstonePowershell, the Windows Wi-Fi adapter IP is the
+         * real router-assigned address (e.g. 192.168.x.x).  Prefer it for the
+         * netdev so "wlan0" shows the address peers actually reach us at.
+         * The bindable Linux-side IP is separate and used by server commands. */
+        const char *win_ip = fl_net_wifi_host_linux_windows_ipv4();
+        if (win_ip && win_ip[0]) {
+            strncpy(ip_buf, win_ip, sizeof(ip_buf) - 1u);
+            ip_buf[sizeof(ip_buf) - 1u] = '\0';
+            if (fl_net_wifi_host_linux_ipv4_route(NULL, &prefix, &gw_be) == FL_RESULT_OK &&
+                gw_be)
+                fl_net_ipv4_format_addr(gw_be, gw_buf, sizeof(gw_buf));
+        } else if (fl_platform_detect() != FL_PLATFORM_WSL &&
+                   fl_net_wifi_host_linux_ipv4_route(NULL, &prefix, &gw_be) == FL_RESULT_OK &&
+                   fl_net_wifi_host_linux_ipv4(NULL, ip_buf, sizeof(ip_buf)) == FL_RESULT_OK &&
+                   ip_buf[0]) {
+            fl_net_ipv4_format_addr(gw_be, gw_buf, sizeof(gw_buf));
+        }
+        /* WSL: do not put eth0 172.x on wlan0 — it is not LAN-reachable. */
+    }
+    if (ip_buf[0])
+        rc = fl_net_wifi_netdev_up_with_ipv4(&ap, sta_mac, ip_buf, prefix, gw_buf);
+    else
+        rc = fl_net_wifi_netdev_up(&ap, sta_mac);
+    if (rc == FL_RESULT_OK) {
+        uint8_t ip6[16];
+        uint8_t p6 = 0u;
+        if (fl_net_wifi_host_linux_ipv6_route(ip6, &p6) == FL_RESULT_OK)
+            (void)fl_net_wifi_netdev_add_ipv6(ip6, p6);
+    }
+    if (rc != FL_RESULT_OK) {
+        (void)fl_net_wifi_host_linux_disconnect();
+        return rc;
+    }
     s_host_backend = 1;
     s_lab_backend = 0;
     s_wifi_state = FL_WIFI_STATE_UP;
     strncpy(s_lab_joined_ssid, cred->ssid, sizeof(s_lab_joined_ssid) - 1u);
-    (void)fl_net_wifi_host_linux_ipv4_route(NULL, NULL, NULL);
     fl_net_iface_refresh();
     return FL_RESULT_OK;
 }

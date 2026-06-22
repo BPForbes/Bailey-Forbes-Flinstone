@@ -100,6 +100,9 @@ static void print_sock_error(const char *verb, fl_result_t rc) {
             fprintf(stderr,
                     "      or: %s %s:<port>  (rewrites to 0.0.0.0 in WSL + portproxy to %s)\n",
                     verb, win, win);
+    } else if (e == EACCES || rc == FL_RESULT_ACCES) {
+        fputs("hint: on Linux/WSL ports below 1024 need root; try server host :8888 or another port >= 1024\n",
+              stderr);
     }
 }
 
@@ -270,20 +273,12 @@ static int wsl_portproxy_apply(const char *listen_ip, uint16_t port) {
 
 static int wsl_portproxy_will_try(const fl_net_endpoint_t *bind_ep,
                                   const char *win_ip_display) {
-    if (!fl_net_wifi_host_linux_opted_in())
-        return 0;
     if (fl_platform_detect() != FL_PLATFORM_WSL)
         return 0;
-    if (!win_ip_display || !win_ip_display[0])
-        return 0;
-    if (!bind_ep || bind_ep->family != FL_NET_ADDR_FAMILY_V4 || bind_ep->port_host == 0u)
-        return 0;
-    /* In-tree lab/TAP netdev addresses are not reachable via Windows portproxy. */
-    if (bind_ep->addr.v4_be != 0u &&
-        (fl_net_ipv4_is_loopback(bind_ep->addr.v4_be) ||
-         fl_net_sock_native_eligible_bind_v4(bind_ep->addr.v4_be)))
-        return 0;
-    return 1;
+    if (win_ip_display && win_ip_display[0])
+        return 1;
+    return bind_ep && bind_ep->family == FL_NET_ADDR_FAMILY_V4 &&
+           bind_ep->port_host > 0u;
 }
 
 /* Lab/TAP IPv4 exists only in the in-tree route table — not on the Windows
@@ -326,24 +321,15 @@ static const char *host_listen_ip_for_wsl(const fl_net_endpoint_t *ep,
 }
 
 static void host_print_wsl_lan_hint(const char *listen_ip, uint16_t port) {
-    char peer[32];
+    const char *wip = fl_net_wifi_host_linux_windows_ipv4();
+    char        peer[32];
 
     if (listen_ip && strcmp(listen_ip, "0.0.0.0") != 0) {
         strncpy(peer, listen_ip, sizeof(peer) - 1u);
         peer[sizeof(peer) - 1u] = '\0';
-    } else if (fl_net_wifi_netdev_is_up()) {
-        uint32_t nd = 0u;
-        if (fl_net_wifi_netdev_ipv4(&nd) == FL_RESULT_OK && nd != 0u)
-            fl_net_ipv4_format_addr(nd, peer, sizeof(peer));
-        else if (!fl_net_iface_suggest_ipv4(NULL, peer, sizeof(peer)))
-            return;
-    } else if (fl_net_wifi_host_linux_opted_in()) {
-        const char *wip = fl_net_wifi_host_linux_windows_ipv4();
-        if (wip && wip[0]) {
-            strncpy(peer, wip, sizeof(peer) - 1u);
-            peer[sizeof(peer) - 1u] = '\0';
-        } else if (!fl_net_iface_suggest_ipv4(NULL, peer, sizeof(peer)))
-            return;
+    } else if (wip && wip[0]) {
+        strncpy(peer, wip, sizeof(peer) - 1u);
+        peer[sizeof(peer) - 1u] = '\0';
     } else if (!fl_net_iface_suggest_ipv4(NULL, peer, sizeof(peer))) {
         return;
     }
@@ -820,9 +806,7 @@ static int verb_host(int argc, char **argv) {
      * Transparently rebind the WSL server to 0.0.0.0 and start the Windows
      * bridge on the requested IP so LAN peers connect to the right address. */
     {
-        const char *wip = fl_net_wifi_host_linux_opted_in()
-                              ? fl_net_wifi_host_linux_windows_ipv4()
-                              : NULL;
+        const char *wip = fl_net_wifi_host_linux_windows_ipv4();
         if (wip && ep.family == FL_NET_ADDR_FAMILY_V4 && ep.addr.v4_be != 0u) {
             uint32_t win_be = 0u;
             if (fl_net_ipv4_parse_literal(wip, &win_be) && win_be == ep.addr.v4_be) {

@@ -99,6 +99,8 @@ int fl_net_sock_native_eligible_bind_v4(uint32_t addr_be) {
             return driver_is_in_tree(route.drv);
         return 0;
     }
+    if (addr_be == 0u)
+        return fl_net_wifi_netdev_is_up();
     return route_is_in_tree_non_loopback(addr_be);
 }
 
