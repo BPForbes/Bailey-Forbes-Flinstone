@@ -37,6 +37,13 @@
 #if defined(__unix__) || defined(__APPLE__)
 #include <termios.h>
 #endif
+#if defined(__linux__) || defined(__APPLE__) || defined(__FreeBSD__)
+#include <arpa/inet.h>
+#include <netinet/in.h>
+#include <sys/select.h>
+#include <sys/socket.h>
+#define FL_SERVER_UDP_HOSTED 1
+#endif
 
 /* ------------------------------------------------------------------------- */
 /* Process-wide session state                                                */
@@ -55,6 +62,14 @@ static fl_server_bg_t *g_client_bg;
 static int      g_wsl_portproxy_active;
 static char     g_wsl_portproxy_listen[32];
 static uint16_t g_wsl_portproxy_port;
+
+/* UDP beacon + reverse-dial listener — started on server host, stopped on kill/exit. */
+static volatile int g_server_udp_stop;
+static pthread_t    g_beacon_thread;
+static int          g_beacon_thread_started;
+static pthread_t    g_udp_listener_thread;
+static int          g_udp_listener_thread_started;
+static int          g_udp_listen_sock = -1; /* raw fd; closed to unblock recvfrom */
 
 static const char *current_principal(void) {
     const char *u = fl_session_current_user();
@@ -763,6 +778,251 @@ static void maybe_handle_nick_prompt_sync(void) {
 }
 
 /* ------------------------------------------------------------------------- */
+/* UDP beacon + reverse-dial listener (server-side LAN discovery / NAT bypass) */
+/* ------------------------------------------------------------------------- */
+
+#if defined(FL_SERVER_UDP_HOSTED)
+
+/* Broadcasts a Flinstone discovery beacon to LAN every 2 s so joining
+ * clients can find this server without knowing its IP in advance.        */
+static void *server_beacon_thread_func(void *arg)
+{
+    uint16_t port = (uint16_t)(uintptr_t)arg;
+    uint8_t  frame[16];
+    struct sockaddr_in dst;
+    int sock, one = 1;
+
+    sock = socket(AF_INET, SOCK_DGRAM, 0);
+    if (sock < 0)
+        return NULL;
+    setsockopt(sock, SOL_SOCKET, SO_BROADCAST, &one, sizeof(one));
+
+    frame[0] = (uint8_t)FL_NET_DISCOVERY_MAGIC_0;
+    frame[1] = (uint8_t)FL_NET_DISCOVERY_MAGIC_1;
+    frame[2] = (uint8_t)FL_NET_DISCOVERY_MAGIC_2;
+    frame[3] = (uint8_t)FL_NET_DISCOVERY_MAGIC_3;
+    frame[4] = (uint8_t)FL_NET_DISCOVERY_OP_BEACON;
+    frame[5] = (uint8_t)((port >> 8) & 0xFFu);
+    frame[6] = (uint8_t)(port & 0xFFu);
+    memset(frame + 7, 0, sizeof(frame) - 7u);
+
+    memset(&dst, 0, sizeof(dst));
+    dst.sin_family      = AF_INET;
+    dst.sin_addr.s_addr = htonl(INADDR_BROADCAST);
+    dst.sin_port        = htons(FL_NET_SERVER_DISCOVERY_PORT);
+
+    while (!g_server_udp_stop) {
+        sendto(sock, frame, sizeof(frame), 0,
+               (const struct sockaddr *)&dst, sizeof(dst));
+        sleep(2);
+    }
+    close(sock);
+    return NULL;
+}
+
+/* Listens for UDP join-requests from clients that cannot connect via TCP
+ * (e.g. the server is behind NAT). On receipt, dials TCP back to the
+ * client's callback address and hands the socket to the server session. */
+static void *server_udp_listener_thread_func(void *arg)
+{
+    uint8_t buf[16];
+    struct sockaddr_in from;
+    socklen_t fromlen;
+    ssize_t n;
+    (void)arg;
+
+    while (!g_server_udp_stop) {
+        fromlen = sizeof(from);
+        n = recvfrom(g_udp_listen_sock, buf, sizeof(buf), 0,
+                     (struct sockaddr *)&from, &fromlen);
+        if (n < 0)
+            break;
+        if ((size_t)n < 11u)
+            continue;
+        if (buf[0] != (uint8_t)FL_NET_DISCOVERY_MAGIC_0 ||
+            buf[1] != (uint8_t)FL_NET_DISCOVERY_MAGIC_1 ||
+            buf[2] != (uint8_t)FL_NET_DISCOVERY_MAGIC_2 ||
+            buf[3] != (uint8_t)FL_NET_DISCOVERY_MAGIC_3)
+            continue;
+        if (buf[4] != (uint8_t)FL_NET_DISCOVERY_OP_JOIN_REQ)
+            continue;
+
+        /* buf[5..8] = callback IPv4 BE, buf[9..10] = callback port BE */
+        uint32_t cb_ip_be;
+        uint16_t cb_port_be;
+        memcpy(&cb_ip_be,   buf + 5, 4);
+        memcpy(&cb_port_be, buf + 9, 2);
+
+        fl_net_endpoint_t cb_ep;
+        fl_net_endpoint_from_v4(cb_ip_be, ntohs(cb_port_be), &cb_ep);
+
+        fl_net_sock_handle_t dial_h = FL_NET_SOCK_INVALID;
+        fl_result_t rc = fl_net_sock_open_for(&cb_ep, FL_NET_SOCK_TYPE_STREAM, &dial_h);
+        if (rc == FL_RESULT_OK)
+            rc = fl_net_sock_connect_from_ep(dial_h, NULL, &cb_ep);
+        if (rc == FL_RESULT_OK) {
+            pthread_mutex_lock(&session_mutex);
+            if (g_server_running)
+                (void)fl_net_server_accept_handle(&g_server, dial_h, NULL, 0u);
+            else
+                fl_net_sock_close(dial_h);
+            pthread_mutex_unlock(&session_mutex);
+        } else {
+            if (dial_h != FL_NET_SOCK_INVALID)
+                fl_net_sock_close(dial_h);
+        }
+    }
+    return NULL;
+}
+
+static void server_udp_start(uint16_t port)
+{
+    struct sockaddr_in sin;
+    int sock, one = 1;
+
+    g_server_udp_stop = 0;
+
+    /* UDP listener on the discovery port for incoming join-requests. */
+    sock = socket(AF_INET, SOCK_DGRAM, 0);
+    if (sock >= 0) {
+        setsockopt(sock, SOL_SOCKET, SO_REUSEADDR, &one, sizeof(one));
+        memset(&sin, 0, sizeof(sin));
+        sin.sin_family      = AF_INET;
+        sin.sin_addr.s_addr = INADDR_ANY;
+        sin.sin_port        = htons(FL_NET_SERVER_DISCOVERY_PORT);
+        if (bind(sock, (struct sockaddr *)&sin, sizeof(sin)) == 0) {
+            g_udp_listen_sock = sock;
+            if (pthread_create(&g_udp_listener_thread, NULL,
+                               server_udp_listener_thread_func, NULL) == 0)
+                g_udp_listener_thread_started = 1;
+        } else {
+            close(sock);
+        }
+    }
+
+    /* Beacon thread — broadcasts server presence. */
+    if (pthread_create(&g_beacon_thread, NULL, server_beacon_thread_func,
+                       (void *)(uintptr_t)port) == 0)
+        g_beacon_thread_started = 1;
+}
+
+static void server_udp_stop(void)
+{
+    g_server_udp_stop = 1;
+
+    if (g_udp_listen_sock >= 0) {
+        close(g_udp_listen_sock);
+        g_udp_listen_sock = -1;
+    }
+    if (g_udp_listener_thread_started) {
+        pthread_join(g_udp_listener_thread, NULL);
+        g_udp_listener_thread_started = 0;
+    }
+    if (g_beacon_thread_started) {
+        pthread_join(g_beacon_thread, NULL);
+        g_beacon_thread_started = 0;
+    }
+}
+
+/* Client-side: when direct TCP connect failed, open a local TCP listener,
+ * send a UDP join-request to the server's discovery port, then wait for the
+ * server to dial back. Works through server-side NAT (server dials outbound
+ * to a client with a reachable IP). */
+static fl_result_t server_join_reverse_dial(fl_net_client_t *client,
+                                            const fl_net_endpoint_t *server_ep,
+                                            const char *principal,
+                                            unsigned timeout_ms)
+{
+    struct sockaddr_in sin;
+    socklen_t slen;
+    struct timeval tv;
+    fd_set rfds;
+    int listen_fd, peer_fd, ufd, one = 1;
+    uint16_t listen_port;
+    char own_ip_str[32];
+    uint32_t own_ip_be = 0u;
+    fl_net_sock_handle_t h;
+    fl_result_t rc;
+
+    if (server_ep->family != FL_NET_ADDR_FAMILY_V4)
+        return FL_RESULT_NOSYS;
+
+    /* Open TCP listener on an ephemeral port. */
+    listen_fd = socket(AF_INET, SOCK_STREAM, 0);
+    if (listen_fd < 0)
+        return FL_RESULT_ERR;
+    setsockopt(listen_fd, SOL_SOCKET, SO_REUSEADDR, &one, sizeof(one));
+    memset(&sin, 0, sizeof(sin));
+    sin.sin_family      = AF_INET;
+    sin.sin_addr.s_addr = INADDR_ANY;
+    sin.sin_port        = 0; /* ephemeral */
+    if (bind(listen_fd, (struct sockaddr *)&sin, sizeof(sin)) < 0 ||
+        listen(listen_fd, 1) < 0) {
+        close(listen_fd);
+        return FL_RESULT_ERR;
+    }
+    slen = sizeof(sin);
+    getsockname(listen_fd, (struct sockaddr *)&sin, &slen);
+    listen_port = ntohs(sin.sin_port);
+
+    /* Get own LAN IP so the server knows where to dial back. */
+    if (!fl_net_iface_suggest_ipv4(NULL, own_ip_str, sizeof(own_ip_str)) ||
+        !fl_net_ipv4_parse_literal(own_ip_str, &own_ip_be)) {
+        close(listen_fd);
+        return FL_RESULT_NOSYS;
+    }
+
+    /* Send UDP join-request: magic(4) + op(1) + own_ip_be(4) + port_be(2) */
+    ufd = socket(AF_INET, SOCK_DGRAM, 0);
+    if (ufd >= 0) {
+        uint8_t req[11];
+        struct sockaddr_in dst;
+        uint16_t port_be = htons(listen_port);
+        req[0] = (uint8_t)FL_NET_DISCOVERY_MAGIC_0;
+        req[1] = (uint8_t)FL_NET_DISCOVERY_MAGIC_1;
+        req[2] = (uint8_t)FL_NET_DISCOVERY_MAGIC_2;
+        req[3] = (uint8_t)FL_NET_DISCOVERY_MAGIC_3;
+        req[4] = (uint8_t)FL_NET_DISCOVERY_OP_JOIN_REQ;
+        memcpy(req + 5, &own_ip_be, 4);
+        memcpy(req + 9, &port_be,   2);
+        memset(&dst, 0, sizeof(dst));
+        dst.sin_family      = AF_INET;
+        dst.sin_addr.s_addr = server_ep->addr.v4_be;
+        dst.sin_port        = htons(FL_NET_SERVER_DISCOVERY_PORT);
+        sendto(ufd, req, sizeof(req), 0, (const struct sockaddr *)&dst, sizeof(dst));
+        close(ufd);
+    }
+
+    /* Wait for the server's TCP callback. */
+    tv.tv_sec  = (long)(timeout_ms / 1000u);
+    tv.tv_usec = (long)((timeout_ms % 1000u) * 1000L);
+    FD_ZERO(&rfds);
+    FD_SET(listen_fd, &rfds);
+    if (select(listen_fd + 1, &rfds, NULL, NULL, &tv) <= 0) {
+        close(listen_fd);
+        return FL_RESULT_TIMEDOUT;
+    }
+
+    peer_fd = accept(listen_fd, NULL, NULL);
+    close(listen_fd);
+    if (peer_fd < 0)
+        return FL_RESULT_ERR;
+
+    /* Adopt the fd and run the HELLO handshake. */
+    rc = fl_net_sock_from_fd(peer_fd, &h);
+    if (rc != FL_RESULT_OK) {
+        close(peer_fd);
+        return rc;
+    }
+    rc = fl_net_client_adopt_handle(client, h, principal, timeout_ms);
+    if (rc != FL_RESULT_OK)
+        fl_net_sock_close(h);
+    return rc;
+}
+
+#endif /* FL_SERVER_UDP_HOSTED */
+
+/* ------------------------------------------------------------------------- */
 /* Verb handlers                                                             */
 /* ------------------------------------------------------------------------- */
 
@@ -881,6 +1141,11 @@ static int verb_host(int argc, char **argv) {
         g_server_running = 1;
         pthread_mutex_unlock(&session_mutex);
 
+#if defined(FL_SERVER_UDP_HOSTED)
+        /* Start UDP beacon (LAN discovery) + join-request listener. */
+        server_udp_start(bind_ep.port_host);
+#endif
+
         if (win_ip_display) {
             if (wsl_portproxy_apply(listen, ep.port_host) == 0) {
                 fl_color_success("hosting as '%s' on %s:%u",
@@ -912,7 +1177,18 @@ static int verb_host(int argc, char **argv) {
                 else
                     fl_color_success("hosting as '%s' on %s", current_principal(), argv[2]);
             }
+            /* WSL2 mirrored networking: eth0 has a real LAN IP — server is
+             * directly reachable from LAN peers. No portproxy/relay needed. */
             if (fl_platform_detect() == FL_PLATFORM_WSL &&
+                fl_net_wifi_host_linux_wsl_mirrored() &&
+                bind_ep.family == FL_NET_ADDR_FAMILY_V4 &&
+                bind_ep.port_host > 0u) {
+                char suggest[32];
+                if (fl_net_iface_suggest_ipv4(NULL, suggest, sizeof(suggest)))
+                    fl_color_success(
+                        "peers on LAN can: server join %s:%u  (WSL mirrored — direct, no relay)",
+                        suggest, (unsigned)bind_ep.port_host);
+            } else if (fl_platform_detect() == FL_PLATFORM_WSL &&
                 bind_ep.family == FL_NET_ADDR_FAMILY_V4 && bind_ep.port_host > 0u &&
                 !wsl_portproxy_should_skip(&bind_ep)) {
                 if (wsl_portproxy_apply(listen, bind_ep.port_host) == 0) {
@@ -1026,6 +1302,16 @@ static int verb_join(int argc, char **argv) {
         fl_color_error("hosted sockets unavailable; cannot join");
         return 1;
     }
+#if defined(FL_SERVER_UDP_HOSTED)
+    if (rc != FL_RESULT_OK && peer.family == FL_NET_ADDR_FAMILY_V4) {
+        /* Direct TCP connect failed — try reverse-dial NAT bypass.
+         * We open a local TCP listener and ask the server to dial back. */
+        fl_result_t rdr = server_join_reverse_dial(&g_client, &peer,
+                                                   current_principal(), 5000u);
+        if (rdr == FL_RESULT_OK)
+            rc = FL_RESULT_OK;
+    }
+#endif
     if (rc != FL_RESULT_OK) {
         pthread_mutex_unlock(&session_mutex);
         print_sock_error("server join", rc);
@@ -1112,6 +1398,9 @@ static int verb_kill(void) {
     g_server_running = 0;
     pthread_mutex_unlock(&session_mutex);
     wsl_portproxy_teardown_interactive();
+#if defined(FL_SERVER_UDP_HOSTED)
+    server_udp_stop();
+#endif
     fl_color_success("session terminated");
     return 0;
 }
@@ -1447,6 +1736,9 @@ void cmd_server_atexit(void) {
 
     /* Always drop Windows portproxy/firewall when this shell exits hosting. */
     wsl_portproxy_teardown_interactive();
+#if defined(FL_SERVER_UDP_HOSTED)
+    server_udp_stop();
+#endif
 }
 
 /* ------------------------------------------------------------------------- */

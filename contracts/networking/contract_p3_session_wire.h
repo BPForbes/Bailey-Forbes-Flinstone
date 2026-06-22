@@ -29,6 +29,19 @@
 /** Frame header size: magic, version, opcode, flags, length_be (2). */
 #define FL_NET_SESSION_HDR_LEN 6u
 
+/** UDP LAN discovery port — server beacon and reverse-dial join-requests. */
+#define FL_NET_SERVER_DISCOVERY_PORT 7779u
+
+/** Magic bytes for the discovery UDP frame (4 bytes: 'F','L','B','C'). */
+#define FL_NET_DISCOVERY_MAGIC_0 0x46u
+#define FL_NET_DISCOVERY_MAGIC_1 0x4Cu
+#define FL_NET_DISCOVERY_MAGIC_2 0x42u
+#define FL_NET_DISCOVERY_MAGIC_3 0x43u
+
+/** Discovery opcodes (byte 4 of the UDP frame). */
+#define FL_NET_DISCOVERY_OP_BEACON    0x01u  /* server → LAN broadcast */
+#define FL_NET_DISCOVERY_OP_JOIN_REQ  0x02u  /* client → server: please dial back */
+
 #ifndef FL_NET_SESSION_MAX_MEMBERS
 #define FL_NET_SESSION_MAX_MEMBERS 16u
 #endif
