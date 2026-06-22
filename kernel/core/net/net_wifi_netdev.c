@@ -1,12 +1,17 @@
 #include "net_wifi_netdev.h"
 
+#include "contract_p3_dhcp.h"
 #include "contract_p3_ipv4.h"
+#include "contract_p3_wire.h"
+#include "net_dhcp.h"
 #include "net_endian.h"
 #include "net_iface.h"
 #include "net_ipv4.h"
 #include "net_loopback.h"
 #include "net_netdev.h"
+#include "net_packet.h"
 #include "net_route.h"
+#include "net_udp.h"
 #include "net_wire.h"
 #include "net_checksum.h"
 #include "net_ipv6.h"
@@ -76,14 +81,12 @@ static fl_result_t wifi_build_eth_ipv4_reply(const uint8_t *req_ip, size_t req_i
     memcpy(out_ip, req_ip, hdr_len);
     if (payload_len > 0u && payload)
         memcpy(out_ip + hdr_len, payload, payload_len);
-    out_ip[8] = req_ip[12];
-    out_ip[9] = req_ip[13];
-    out_ip[10] = req_ip[14];
-    out_ip[11] = req_ip[15];
-    out_ip[12] = req_ip[8];
-    out_ip[13] = req_ip[9];
-    out_ip[14] = req_ip[10];
-    out_ip[15] = req_ip[11];
+    {
+        uint8_t tmp[4];
+        memcpy(tmp, out_ip + 12, 4);
+        memcpy(out_ip + 12, out_ip + 16, 4);
+        memcpy(out_ip + 16, tmp, 4);
+    }
     {
         uint16_t total = (uint16_t)(hdr_len + payload_len);
         out_ip[2] = (uint8_t)(total >> 8);
@@ -95,6 +98,142 @@ static fl_result_t wifi_build_eth_ipv4_reply(const uint8_t *req_ip, size_t req_i
     out_ip[10] = (uint8_t)(csum >> 8);
     out_ip[11] = (uint8_t)(csum & 0xff);
     return FL_RESULT_OK;
+}
+
+static fl_result_t wifi_try_udp_echo(const uint8_t *ip, size_t ip_len, uint8_t *ip_reply,
+                                     size_t ip_reply_cap, size_t *ip_reply_len) {
+    size_t ihl;
+    const uint8_t *udp;
+    uint16_t sport;
+    uint16_t dport;
+    uint16_t udp_total;
+    size_t payload_len;
+    uint8_t udp_buf[FL_NET_UDP_HDR_LEN + FL_NET_UDP_LAB_RX_PAYLOAD_MAX];
+    size_t udp_len;
+    uint32_t src_be;
+    uint32_t dst_be;
+
+    if (!ip || ip_len < FL_NET_IPV4_HDR_LEN_MIN || !ip_reply || !ip_reply_len)
+        return FL_RESULT_ERR;
+    if (ip[9] != FL_NET_IP_PROTO_UDP)
+        return FL_RESULT_ERR;
+
+    ihl = (size_t)((ip[0] & 0x0fu) * 4u);
+    if (ip_len < ihl + FL_NET_UDP_HDR_LEN)
+        return FL_RESULT_ERR;
+    udp = ip + ihl;
+    sport = (uint16_t)(((uint16_t)udp[0] << 8) | (uint16_t)udp[1]);
+    dport = (uint16_t)(((uint16_t)udp[2] << 8) | (uint16_t)udp[3]);
+    udp_total = (uint16_t)(((uint16_t)udp[4] << 8) | (uint16_t)udp[5]);
+    if (udp_total < FL_NET_UDP_HDR_LEN || ihl + udp_total > ip_len)
+        return FL_RESULT_ERR;
+    payload_len = (size_t)udp_total - FL_NET_UDP_HDR_LEN;
+
+    src_be = (uint32_t)ip[12] | ((uint32_t)ip[13] << 8) | ((uint32_t)ip[14] << 16) |
+             ((uint32_t)ip[15] << 24);
+    dst_be = (uint32_t)ip[16] | ((uint32_t)ip[17] << 8) | ((uint32_t)ip[18] << 16) |
+             ((uint32_t)ip[19] << 24);
+
+    udp_len = fl_net_udp_build_datagram(udp_buf, sizeof(udp_buf), dst_be, src_be, dport, sport,
+                                        udp + FL_NET_UDP_HDR_LEN, payload_len);
+    if (udp_len == 0)
+        return FL_RESULT_ERR;
+    if (wifi_build_eth_ipv4_reply(ip, ip_len, udp_buf, udp_len, ip_reply, ip_reply_cap) !=
+        FL_RESULT_OK)
+        return FL_RESULT_ERR;
+    *ip_reply_len =
+        (size_t)(((ip_reply[2] & 0xffu) << 8) | (ip_reply[3] & 0xffu));
+    return FL_RESULT_OK;
+}
+
+static void wifi_dhcp_store_be32(uint8_t *p, uint32_t v) {
+    p[0] = (uint8_t)((v >> 24) & 0xffu);
+    p[1] = (uint8_t)((v >> 16) & 0xffu);
+    p[2] = (uint8_t)((v >> 8) & 0xffu);
+    p[3] = (uint8_t)(v & 0xffu);
+}
+
+static uint32_t wifi_dhcp_load_be32(const uint8_t *p) {
+    return ((uint32_t)p[0] << 24) | ((uint32_t)p[1] << 16) | ((uint32_t)p[2] << 8) |
+           (uint32_t)p[3];
+}
+
+static int wifi_dhcp_req_msg_type(const uint8_t *buf, size_t len, uint8_t *msg_out) {
+    const uint8_t *opts;
+    size_t opts_len;
+    size_t i;
+
+    if (!buf || len < FL_NET_BOOTP_FIXED_LEN + 4u || !msg_out)
+        return 0;
+    if (buf[0] != 1u)
+        return 0;
+    opts = buf + FL_NET_BOOTP_FIXED_LEN;
+    opts_len = len - FL_NET_BOOTP_FIXED_LEN;
+    if (opts_len < 4u || wifi_dhcp_load_be32(opts) != FL_NET_DHCP_MAGIC_COOKIE_BE32)
+        return 0;
+    opts += 4;
+    opts_len -= 4;
+    for (i = 0; i < opts_len;) {
+        uint8_t code = opts[i++];
+        if (code == FL_NET_DHCP_OPT_PAD)
+            continue;
+        if (code == FL_NET_DHCP_OPT_END)
+            break;
+        if (i >= opts_len)
+            break;
+        {
+            uint8_t olen = opts[i++];
+            if (i + olen > opts_len)
+                break;
+            if (code == FL_NET_DHCP_OPT_MESSAGE_TYPE && olen >= 1u) {
+                *msg_out = opts[i];
+                return 1;
+            }
+            i += olen;
+        }
+    }
+    return 0;
+}
+
+static fl_result_t wifi_dhcp_build_reply(uint8_t reply_msg, uint32_t xid,
+                                         const uint8_t mac[FL_NET_ETH_ADDR_LEN],
+                                         uint32_t yiaddr_be, uint8_t *out, size_t cap,
+                                         size_t *out_len) {
+    size_t pos;
+
+    if (!mac || !out || !out_len || cap < FL_NET_BOOTP_FIXED_LEN + 8u)
+        return FL_RESULT_INVAL;
+
+    memset(out, 0, FL_NET_BOOTP_FIXED_LEN);
+    out[0] = 2u;
+    out[1] = 1u;
+    out[2] = FL_NET_ETH_ADDR_LEN;
+    wifi_dhcp_store_be32(out + 4, xid);
+    wifi_dhcp_store_be32(out + 16, yiaddr_be);
+    out[10] = 0x80u;
+    memcpy(out + 28, mac, FL_NET_ETH_ADDR_LEN);
+
+    wifi_dhcp_store_be32(out + 236, FL_NET_DHCP_MAGIC_COOKIE_BE32);
+    pos = FL_NET_BOOTP_FIXED_LEN + 4u;
+    if (pos + 4u > cap)
+        return FL_RESULT_ERR;
+    out[pos++] = FL_NET_DHCP_OPT_MESSAGE_TYPE;
+    out[pos++] = 1u;
+    out[pos++] = reply_msg;
+    out[pos++] = FL_NET_DHCP_OPT_END;
+    *out_len = pos;
+    return FL_RESULT_OK;
+}
+
+static uint32_t wifi_lab_dhcp_yiaddr(void) {
+    if (s_wifi_ip_be)
+        return s_wifi_ip_be;
+    {
+        uint32_t v = 0u;
+        if (fl_net_ipv4_parse_literal("10.0.2.15", &v))
+            return v;
+    }
+    return UINT32_C(0x0f02000a);
 }
 
 static fl_result_t wifi_driver_send(fl_net_driver_t *drv, const fl_net_frame_view_t *frame) {
@@ -127,6 +266,10 @@ static fl_result_t wifi_driver_send(fl_net_driver_t *drv, const fl_net_frame_vie
                 ip_reply[(size_t)((ip_reply[0] & 0x0fu) * 4u)] =
                     (uint8_t)FL_NET_ICMPV4_TYPE_ECHO_REPLY;
             }
+        } else if (ip[9] == FL_NET_IP_PROTO_UDP) {
+            if (wifi_try_udp_echo(ip, ip_len, ip_reply, sizeof(ip_reply), &ip_reply_len) !=
+                FL_RESULT_OK)
+                ip_reply_len = 0u;
         }
         if (ip_reply_len > 0u) {
             eth_len = fl_net_wire_build_eth_ipv4(eth_reply, sizeof(eth_reply), s_sta_mac,
@@ -260,4 +403,53 @@ fl_result_t fl_net_wifi_netdev_ipv6(uint8_t addr6[16], uint8_t *prefix_len_out) 
     if (prefix_len_out)
         *prefix_len_out = s_wifi_prefix6;
     return FL_RESULT_OK;
+}
+
+int fl_net_wifi_netdev_peer_mac(uint8_t mac[6]) {
+    if (!s_wifi_up || !mac)
+        return 0;
+    memcpy(mac, s_ap_bssid, 6);
+    return 1;
+}
+
+int fl_net_wifi_netdev_sta_mac(uint8_t mac[6]) {
+    if (!s_wifi_up || !mac)
+        return 0;
+    memcpy(mac, s_sta_mac, 6);
+    return 1;
+}
+
+fl_result_t fl_net_dhcp_wifi_netdev_exchange(fl_net_driver_t *drv,
+                                            const uint8_t cli_mac[FL_NET_ETH_ADDR_LEN],
+                                            const fl_net_packet_t *req_pkt, uint8_t *reply_l4,
+                                            size_t reply_cap, size_t *reply_len,
+                                            unsigned timeout_ms) {
+    const uint8_t *req;
+    size_t req_len;
+    uint8_t req_msg = 0;
+    uint32_t xid = 0;
+    uint8_t reply_msg;
+    fl_result_t rc;
+
+    (void)timeout_ms;
+    if (!drv || drv != &s_wifi_drv || !s_wifi_up || !cli_mac || !req_pkt || !reply_l4 ||
+        !reply_len)
+        return FL_RESULT_INVAL;
+
+    rc = fl_net_packet_l4_view(req_pkt, &req, &req_len);
+    if (rc != FL_RESULT_OK)
+        return rc;
+    if (!wifi_dhcp_req_msg_type(req, req_len, &req_msg))
+        return FL_RESULT_ERR;
+
+    xid = wifi_dhcp_load_be32(req + 4);
+    if (req_msg == FL_NET_DHCP_MSG_DISCOVER)
+        reply_msg = FL_NET_DHCP_MSG_OFFER;
+    else if (req_msg == FL_NET_DHCP_MSG_REQUEST)
+        reply_msg = FL_NET_DHCP_MSG_ACK;
+    else
+        return FL_RESULT_ERR;
+
+    return wifi_dhcp_build_reply(reply_msg, xid, cli_mac, wifi_lab_dhcp_yiaddr(), reply_l4,
+                                 reply_cap, reply_len);
 }

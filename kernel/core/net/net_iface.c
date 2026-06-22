@@ -168,10 +168,20 @@ int fl_net_iface_suggest_ipv4(uint32_t *addr_be_out, char *buf, size_t buf_len) 
     uint32_t pick = 0u;
 
     /*
-     * On WSL with FlinstonePowershell, LAN peers must use the Windows Wi-Fi
-     * adapter IP (e.g. 192.168.1.236), not the internal eth0 172.x address.
+     * In-tree WiFi netdev (lab/driver) is the default peer hint on WSL/Linux.
+     * Windows Wi-Fi IP applies only when FlinstonePowershell was opted in.
      */
-    {
+    if (fl_net_wifi_netdev_is_up()) {
+        uint32_t nd = 0u;
+        if (fl_net_wifi_netdev_ipv4(&nd) == FL_RESULT_OK && nd != 0u) {
+            if (addr_be_out)
+                *addr_be_out = nd;
+            if (buf && buf_len > 0u)
+                fl_net_ipv4_format_addr(nd, buf, buf_len);
+            return 1;
+        }
+    }
+    if (fl_net_wifi_host_linux_opted_in()) {
         const char *wip = fl_net_wifi_host_linux_windows_ipv4();
         if (wip && wip[0]) {
             uint32_t win_be = 0u;

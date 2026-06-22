@@ -204,6 +204,26 @@ static int iface_is_wireless(const char *name) {
     return access(path, F_OK) == 0;
 }
 
+/** Copy one IFNAMSIZ-length token into out (Linux iface names are at most 15 chars). */
+static int copy_iface_name_token(const char *start, const char *end, char *out, size_t out_cap) {
+    size_t n;
+
+    if (!start || !out || out_cap == 0u)
+        return 0;
+    if (!end)
+        end = start + strlen(start);
+    while (start < end && isspace((unsigned char)*start))
+        start++;
+    while (end > start && isspace((unsigned char)end[-1]))
+        end--;
+    n = (size_t)(end - start);
+    if (n == 0u || n >= out_cap)
+        return 0;
+    memcpy(out, start, n);
+    out[n] = '\0';
+    return 1;
+}
+
 static int pick_wireless_iface(char *out, size_t out_cap) {
     FILE *fp;
     char line[256];
@@ -222,12 +242,25 @@ static int pick_wireless_iface(char *out, size_t out_cap) {
         while (fgets(line, sizeof(line), fp) != NULL) {
             char dev[FL_NET_IFACE_NAME_MAX];
             char kind[32];
-            if (sscanf(line, "%31[^:]:%31s", dev, kind) == 2 && !strcmp(kind, "wifi")) {
-                pclose(fp);
-                strncpy(out, dev, out_cap - 1u);
-                out[out_cap - 1u] = '\0';
-                return 1;
-            }
+            char *colon;
+            char *nl;
+
+            nl = strchr(line, '\n');
+            if (nl)
+                *nl = '\0';
+            colon = strchr(line, ':');
+            if (!colon)
+                continue;
+            if (!copy_iface_name_token(line, colon, dev, sizeof(dev)))
+                continue;
+            if (!copy_iface_name_token(colon + 1, NULL, kind, sizeof(kind)))
+                continue;
+            if (strcmp(kind, "wifi") != 0)
+                continue;
+            pclose(fp);
+            strncpy(out, dev, out_cap - 1u);
+            out[out_cap - 1u] = '\0';
+            return 1;
         }
         pclose(fp);
     }
@@ -237,12 +270,20 @@ static int pick_wireless_iface(char *out, size_t out_cap) {
         (void)fgets(line, sizeof(line), fp);
         while (fgets(line, sizeof(line), fp) != NULL) {
             char dev[FL_NET_IFACE_NAME_MAX];
-            if (sscanf(line, " %31s", dev) == 1 && dev[0] != ':') {
-                fclose(fp);
-                strncpy(out, dev, out_cap - 1u);
-                out[out_cap - 1u] = '\0';
-                return 1;
-            }
+            const char *p = line;
+            const char *e;
+
+            while (*p && isspace((unsigned char)*p))
+                p++;
+            e = p;
+            while (*e && !isspace((unsigned char)*e) && *e != ':')
+                e++;
+            if (!copy_iface_name_token(p, e, dev, sizeof(dev)))
+                continue;
+            fclose(fp);
+            strncpy(out, dev, out_cap - 1u);
+            out[out_cap - 1u] = '\0';
+            return 1;
         }
         fclose(fp);
     }
@@ -1266,6 +1307,20 @@ static void refresh_wsl_windows_wifi_ipv4(void) {
     }
 }
 
+int fl_net_wifi_host_linux_opted_in(void) {
+    const char *use_wpa = getenv("FL_NET_WIFI_USE_WPA");
+    const char *fps = getenv("FL_NET_WIFI_FLINSTONE_PS");
+    const char *fln = getenv("FL_NET_WIFI_FLINSTONE_LINUX");
+
+    if (fps && fps[0])
+        return 1;
+    if (fln && fln[0])
+        return 1;
+    if (env_truthy(use_wpa))
+        return 1;
+    return 0;
+}
+
 static void probe_host_backend_once(void) {
     static int s_backend_probed = 0;
     int mode;
@@ -1277,25 +1332,15 @@ static void probe_host_backend_once(void) {
     if (s_host_kind != FL_WIFI_HOST_NONE)
         return;
 
+    if (!fl_net_wifi_host_linux_opted_in())
+        return;
+
     /* An explicit helper path is authoritative; useful for WSL, tests, and
      * non-standard installs where the Windows helper is not on PATH. */
     if (getenv("FL_NET_WIFI_FLINSTONE_PS") && probe_flinstone_ps())
         return;
     if (getenv("FL_NET_WIFI_FLINSTONE_LINUX") && probe_flinstone_linux())
         return;
-
-    /* On WSL, Windows owns the Wi-Fi radio — route through FlinstonePowershell. */
-    if (fl_platform_detect() == FL_PLATFORM_WSL) {
-        if (!probe_flinstone_ps())
-            fprintf(stderr,
-                    "wifi: WSL detected but FlinstonePowershell.exe not found.\n"
-                    "  Build: make flinstone-ps-windows\n"
-                    "  Local: tools/FlinstonePowershell/FlinstonePowershell.exe (auto-detected next to binary/CWD)\n"
-                    "  Install: copy FlinstonePowershell.exe to a directory on your Windows PATH\n"
-                    "  Override: export FL_NET_WIFI_FLINSTONE_PS=/path/to/FlinstonePowershell.exe\n"
-                    "  Helper: python3 tools/network_bridge.py discover\n");
-        return;
-    }
 
     mode = wpa_use_requested();
     if (mode == 0)
@@ -1788,18 +1833,14 @@ const char *fl_net_wifi_host_linux_windows_ipv4(void) {
 #else
     if (s_host_kind == FL_WIFI_HOST_NONE)
         (void)fl_net_wifi_host_linux_available();
-    if (s_host_kind != FL_WIFI_HOST_FLINSTONE_PS) {
-        /* FPS not active: on WSL try PowerShell interop to get the Windows
-         * Wi-Fi adapter IP (e.g. when the lab backend handles wifi join). */
-        if (fl_platform_detect() == FL_PLATFORM_WSL) {
-            if (!s_interop_ipv4[0])
-                probe_windows_ipv4_via_powershell();
-            return s_interop_ipv4[0] ? s_interop_ipv4 : NULL;
-        }
+    if (s_host_kind != FL_WIFI_HOST_FLINSTONE_PS)
         return NULL;
+    if (!s_fps_ipv4[0]) {
+        if (fl_platform_detect() == FL_PLATFORM_WSL)
+            refresh_wsl_windows_wifi_ipv4();
+        else
+            (void)refresh_flinstone_helper_status();
     }
-    if (!s_fps_ipv4[0])
-        refresh_wsl_windows_wifi_ipv4();
     if (!s_fps_ipv4[0])
         return NULL;
     return s_fps_ipv4;
@@ -1824,30 +1865,8 @@ int fl_net_wifi_host_linux_server_proxy(const char *listen_ip, const char *wsl_i
 
     if (s_host_kind == FL_WIFI_HOST_NONE)
         (void)fl_net_wifi_host_linux_available();
-    if (s_host_kind != FL_WIFI_HOST_FLINSTONE_PS || !wsl_ip || !wsl_ip[0]) {
-#if defined(__linux__)
-        if (fl_platform_detect() == FL_PLATFORM_WSL) {
-            char  listen_q[64], wsl_q[64];
-            char  cmd[512];
-            FILE *fp;
-
-            shell_single_quote(listen, listen_q, sizeof(listen_q));
-            shell_single_quote(wsl_ip  ? wsl_ip : "", wsl_q, sizeof(wsl_q));
-            snprintf(cmd, sizeof(cmd),
-                     "FlinstonePowershell.exe server-proxy %s %s %u 2>/dev/null",
-                     listen_q, wsl_q, (unsigned)port);
-            fp = popen(cmd, "r");
-            if (!fp)
-                return -1;
-            {
-                size_t n = fread(out, 1u, sizeof(out) - 1u, fp);
-                out[n] = '\0';
-            }
-            return (pclose(fp) == 0 && strstr(out, "result=ok")) ? 0 : -1;
-        }
-#endif
+    if (s_host_kind != FL_WIFI_HOST_FLINSTONE_PS || !wsl_ip || !wsl_ip[0])
         return -1;
-    }
     {
         char listen_q[64], wsl_q[64];
         shell_single_quote(listen,  listen_q, sizeof(listen_q));
@@ -1873,35 +1892,8 @@ int fl_net_wifi_host_linux_server_proxy_port_free(const char *listen_ip, uint16_
 
     if (s_host_kind == FL_WIFI_HOST_NONE)
         (void)fl_net_wifi_host_linux_available();
-    if (s_host_kind != FL_WIFI_HOST_FLINSTONE_PS) {
-#if defined(__linux__)
-        if (fl_platform_detect() == FL_PLATFORM_WSL) {
-            char  listen_q[64];
-            char  cmd[256];
-            FILE *fp;
-
-            shell_single_quote(listen, listen_q, sizeof(listen_q));
-            snprintf(cmd, sizeof(cmd),
-                     "FlinstonePowershell.exe server-proxy-check %s %u 2>/dev/null",
-                     listen_q, (unsigned)port);
-            fp = popen(cmd, "r");
-            if (!fp)
-                return -1;
-            {
-                size_t n = fread(out, 1u, sizeof(out) - 1u, fp);
-                out[n] = '\0';
-            }
-            if (pclose(fp) != 0)
-                return -1;
-            if (strstr(out, "result=ok"))
-                return 1;
-            if (strstr(out, "result=busy"))
-                return 0;
-            return -1;
-        }
-#endif
+    if (s_host_kind != FL_WIFI_HOST_FLINSTONE_PS)
         return -1;
-    }
     snprintf(args, sizeof(args), "server-proxy-check %s %u", listen, (unsigned)port);
     if (!run_flinstone_ps(args, out, sizeof(out)))
         return -1;
@@ -2028,18 +2020,6 @@ int fl_net_wifi_host_linux_server_bridge_to(const char *bind_ip,
         (void)system(cmd);
         return 0;
     }
-    /* WSL interop fallback: try FlinstonePowershell.exe on the Windows PATH
-     * (accessible via WSL2 interop even if not on the Linux PATH) or the
-     * server_bridge.py via Windows python3.exe.  No admin rights required
-     * for ports >= 1024 with the bridge relay approach. */
-    if (fl_platform_detect() == FL_PLATFORM_WSL) {
-        snprintf(cmd, sizeof(cmd),
-                 "FlinstonePowershell.exe server-bridge %s %u %s"
-                 " </dev/null >/dev/null 2>&1 &",
-                 bind_q, (unsigned)port, target_q);
-        (void)system(cmd);
-        return 0;
-    }
     return -1;
 #endif
 }
@@ -2065,17 +2045,8 @@ int fl_net_wifi_host_linux_server_proxy_del(const char *listen_ip, uint16_t port
     char out[256];
     const char *listen = (listen_ip && listen_ip[0]) ? listen_ip : "0.0.0.0";
 
-    if (s_host_kind != FL_WIFI_HOST_FLINSTONE_PS) {
-        if (fl_platform_detect() == FL_PLATFORM_WSL) {
-            char cmd[256];
-            snprintf(cmd, sizeof(cmd),
-                     "FlinstonePowershell.exe server-proxy-del %s %u 2>/dev/null",
-                     listen, (unsigned)port);
-            if (system(cmd) == 0)
-                return 0;
-        }
+    if (s_host_kind != FL_WIFI_HOST_FLINSTONE_PS)
         return -1;
-    }
     snprintf(args, sizeof(args), "server-proxy-del %s %u", listen, (unsigned)port);
     if (!run_flinstone_ps(args, out, sizeof(out)))
         return -1;
