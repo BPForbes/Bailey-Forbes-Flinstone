@@ -16,7 +16,7 @@
 #include "contract_p3_wifi.h"
 #include "contract_result.h"
 #include "fl/driver/net.h"
-#include "net_wifi_crypto.h"
+#include "net_wifi_he.h"
 
 #include <stdint.h>
 #include <stddef.h>
@@ -52,14 +52,15 @@ fl_result_t wifi_driver_twt_teardown(uint8_t flow_id);
 fl_net_driver_t *wifi_driver_netdev(void);
 
 /*
- * Lab simulation backend (no UART/mock/fullmac active): supplicant + PMK
- * execution lives in the driver layer; net_wifi_station orchestrates only.
+ * Lab simulation backend — scan/auth/assoc execution in wifi_lab_backend.c.
  */
-fl_result_t wifi_driver_lab_derive_pmk(const fl_net_wifi_cred_t *cred,
-				       uint8_t pmk[FL_NET_WIFI_PMK_LEN]);
-fl_result_t wifi_driver_lab_supplicant_auth(const fl_net_wifi_cred_t *cred,
-					    const fl_net_wifi_scan_entry_t *ap,
-					    const uint8_t sta_mac[6],
-					    uint8_t pmk[FL_NET_WIFI_PMK_LEN]);
+fl_result_t wifi_driver_lab_scan(uint8_t band, unsigned timeout_ms);
+fl_result_t wifi_driver_lab_scan_result(fl_net_wifi_scan_entry_t *entries, size_t cap,
+					size_t *count_out);
+fl_result_t wifi_driver_lab_connect(const fl_net_wifi_cred_t *cred,
+				    fl_net_wifi_scan_entry_t *ap_out,
+				    fl_net_wifi_he_cap_t *he_out);
+fl_result_t wifi_driver_lab_he_cap(fl_net_wifi_he_cap_t *cap_out);
+void wifi_driver_lab_reset(void);
 
 #endif /* KERNEL_DRIVERS_WIFI_DRIVER_BACKEND_H */
