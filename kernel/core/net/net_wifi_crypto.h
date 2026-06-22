@@ -29,4 +29,7 @@ fl_result_t fl_net_wifi_crypto_sae_kdf(const uint8_t *key, size_t key_len, const
 
 void fl_net_wifi_crypto_memzero(void *p, size_t n);
 
+/** Fill **out** with unpredictable bytes (getrandom on Linux, OpenSSL RAND_bytes fallback). */
+fl_result_t fl_net_wifi_crypto_random(uint8_t *out, size_t len);
+
 #endif /* NET_WIFI_CRYPTO_H */

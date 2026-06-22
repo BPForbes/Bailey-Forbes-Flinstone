@@ -1,6 +1,7 @@
 #ifndef NET_WIFI_NETDEV_H
 #define NET_WIFI_NETDEV_H
 
+#include "contract_p3_packet.h"
 #include "contract_p3_wifi.h"
 #include "contract_result.h"
 #include "fl/driver/net.h"
@@ -32,5 +33,19 @@ fl_result_t fl_net_wifi_netdev_ipv4(uint32_t *addr_be_out);
 fl_result_t fl_net_wifi_netdev_add_ipv6(const uint8_t src6[16], uint8_t prefix_len);
 
 fl_result_t fl_net_wifi_netdev_ipv6(uint8_t addr6[16], uint8_t *prefix_len_out);
+
+/** AP BSSID and STA MAC while associated (for L2 egress). */
+int fl_net_wifi_netdev_peer_mac(uint8_t mac[6]);
+int fl_net_wifi_netdev_sta_mac(uint8_t mac[6]);
+
+/**
+ * Lab DHCP exchange over the in-tree WiFi netdev (DISCOVER/REQUEST → OFFER/ACK).
+ * Used by **fl_net_dhcp_acquire** when **drv** is the WiFi station netdev.
+ */
+fl_result_t fl_net_dhcp_wifi_netdev_exchange(fl_net_driver_t *drv,
+                                            const uint8_t cli_mac[FL_NET_ETH_ADDR_LEN],
+                                            const fl_net_packet_t *req_pkt,
+                                            uint8_t *reply_l4, size_t reply_cap,
+                                            size_t *reply_len, unsigned timeout_ms);
 
 #endif /* NET_WIFI_NETDEV_H */
