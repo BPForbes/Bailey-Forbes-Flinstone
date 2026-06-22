@@ -1,0 +1,25 @@
+---
+description: Kernel orchestrates drivers; drivers execute module-specific hardware behavior
+globs:
+  - "kernel/core/**"
+  - "kernel/drivers/**"
+alwaysApply: true
+---
+
+# Kernel vs driver execution
+
+Human-readable copies also live in **AGENTS.md** § *Kernel vs driver execution*, **CLAUDE.md** § *Implementation boundaries*, **replit.md**, and **`.coderabbit.yaml`** (*Kernel vs driver execution scope*).
+
+When you propose new drivers for a module, ensure that the kernel functions solely as an orchestrator for those drivers. The kernel should delegate all module-specific behavior to the drivers rather than executing functionality on behalf of the module. This separation preserves a clean driver boundary, keeps execution logic where it belongs, and prevents the kernel from accumulating responsibilities that should remain in the driver layer.
+
+## What stays in `kernel/core/`
+
+- Orchestration: pick a backend, route calls, compose DHCP/routing after link-up, enforce contracts.
+- Cross-cutting protocol policy above the netdev boundary: routing, TCP/UDP, ICMP, DNS, session wire, egress demux.
+
+## What belongs in `kernel/drivers/`
+
+- Module-specific hardware or NIC execution: scan, associate, frame TX/RX, firmware rings, UART AT, register/MMIO, DMA.
+- Expose behavior through narrow ops (`fl_net_driver_t`, backend routers such as `wifi_driver_backend`).
+
+When changing policy text, keep **AGENTS.md**, **CLAUDE.md**, **replit.md**, **`.coderabbit.yaml`**, and this file aligned.
