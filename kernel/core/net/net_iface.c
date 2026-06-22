@@ -4,6 +4,7 @@
 #include "net_ipv4.h"
 #include "net_ipv6.h"
 #include "net_loopback.h"
+#include "net_macvlan.h"
 #include "net_netdev.h"
 #include "net_route.h"
 #include "net_wifi_netdev.h"
@@ -164,6 +165,19 @@ void fl_net_iface_refresh(void) {
 
     iface_add_host_wifi_row();
 
+    /* fl0 macvlan with DHCP lease — Flinstone's own LAN identity. */
+    {
+        uint32_t fl0_ip = 0u;
+        uint8_t  fl0_prefix = 24u;
+        if (fl_net_macvlan_get_registered(&fl0_ip, NULL, &fl0_prefix) && fl0_ip != 0u) {
+            fl_net_iface_entry_t *e = iface_alloc("fl0", fl_net_netdev_loopback(), 0u);
+            if (e) {
+                e->addr_be   = fl0_ip;
+                e->prefix_len = fl0_prefix;
+            }
+        }
+    }
+
     if (s_iface_count == 0u) {
         fl_net_route_entry_t loop;
         if (fl_net_route_lookup(fl_net_htonl(0x7F000001u), &loop) == FL_RESULT_OK)
@@ -187,6 +201,20 @@ int fl_net_iface_suggest_ipv4(uint32_t *addr_be_out, char *buf, size_t buf_len) 
     unsigned count;
     unsigned i;
     uint32_t pick = 0u;
+
+    /*
+     * fl0 macvlan (Flinstone's own LAN identity): highest priority when a
+     * DHCP lease has been obtained.
+     */
+    {
+        uint32_t fl0 = 0u;
+        if (fl_net_macvlan_get_registered(&fl0, NULL, NULL) && fl0 != 0u) {
+            if (addr_be_out) *addr_be_out = fl0;
+            if (buf && buf_len > 0u)
+                fl_net_ipv4_format_addr(fl0, buf, buf_len);
+            return 1;
+        }
+    }
 
     /*
      * Host Wi-Fi backend (wpa_cli / FlinstonePowershell): bindable IPv4 from the

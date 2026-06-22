@@ -1886,63 +1886,6 @@ const char *fl_net_wifi_host_linux_windows_ipv4(void) {
 #endif
 }
 
-/*
- * Ask FlinstonePowershell to add a Windows portproxy + firewall rule so LAN
- * peers can reach listen_ip:<port> with traffic forwarded to wsl_ip:<port>.
- */
-int fl_net_wifi_host_linux_server_proxy(const char *listen_ip, const char *wsl_ip,
-                                        uint16_t port) {
-#if !defined(FL_NET_WIFI_HOST_LINUX)
-    (void)listen_ip;
-    (void)wsl_ip;
-    (void)port;
-    return -1;
-#else
-    char args[384];
-    char out[384];
-    const char *listen = (listen_ip && listen_ip[0]) ? listen_ip : "0.0.0.0";
-
-    if (s_host_kind == FL_WIFI_HOST_NONE)
-        (void)fl_net_wifi_host_linux_available();
-    if (s_host_kind != FL_WIFI_HOST_FLINSTONE_PS || !wsl_ip || !wsl_ip[0])
-        return -1;
-    {
-        char listen_q[64], wsl_q[64];
-        shell_single_quote(listen,  listen_q, sizeof(listen_q));
-        shell_single_quote(wsl_ip,  wsl_q,   sizeof(wsl_q));
-        snprintf(args, sizeof(args), "server-proxy %s %s %u",
-                 listen_q, wsl_q, (unsigned)port);
-    }
-    if (!run_flinstone_ps(args, out, sizeof(out)))
-        return -1;
-    return strstr(out, "result=ok") ? 0 : -1;
-#endif
-}
-
-int fl_net_wifi_host_linux_server_proxy_port_free(const char *listen_ip, uint16_t port) {
-#if !defined(FL_NET_WIFI_HOST_LINUX)
-    (void)listen_ip;
-    (void)port;
-    return -1;
-#else
-    char args[128];
-    char out[256];
-    const char *listen = (listen_ip && listen_ip[0]) ? listen_ip : "0.0.0.0";
-
-    if (s_host_kind == FL_WIFI_HOST_NONE)
-        (void)fl_net_wifi_host_linux_available();
-    if (s_host_kind != FL_WIFI_HOST_FLINSTONE_PS)
-        return -1;
-    snprintf(args, sizeof(args), "server-proxy-check %s %u", listen, (unsigned)port);
-    if (!run_flinstone_ps(args, out, sizeof(out)))
-        return -1;
-    if (strstr(out, "result=ok"))
-        return 1;
-    if (strstr(out, "result=busy"))
-        return 0;
-    return -1;
-#endif
-}
 
 int fl_net_wifi_host_linux_wsl_ipv4(char *buf, size_t buf_len) {
 #if !defined(FL_NET_WIFI_HOST_LINUX)
@@ -2073,22 +2016,3 @@ int fl_net_wifi_host_linux_server_bridge(uint16_t port) {
     return fl_net_wifi_host_linux_server_bridge_to(NULL, NULL, port);
 }
 
-/* Remove portproxy + firewall rules for listen_ip:<port>. */
-int fl_net_wifi_host_linux_server_proxy_del(const char *listen_ip, uint16_t port) {
-#if !defined(FL_NET_WIFI_HOST_LINUX)
-    (void)listen_ip;
-    (void)port;
-    return -1;
-#else
-    char args[128];
-    char out[256];
-    const char *listen = (listen_ip && listen_ip[0]) ? listen_ip : "0.0.0.0";
-
-    if (s_host_kind != FL_WIFI_HOST_FLINSTONE_PS)
-        return -1;
-    snprintf(args, sizeof(args), "server-proxy-del %s %u", listen, (unsigned)port);
-    if (!run_flinstone_ps(args, out, sizeof(out)))
-        return -1;
-    return strstr(out, "result=ok") ? 0 : -1;
-#endif
-}

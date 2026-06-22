@@ -148,7 +148,7 @@ NET_CORE_SRCS = kernel/core/net/net_checksum.c kernel/core/net/net_wire.c kernel
                 kernel/core/net/net_wire_egress.c \
                 kernel/core/net/net_icmp.c kernel/core/net/net_tcp.c kernel/core/net/net_tcp_fsm.c \
                 kernel/core/net/net_loopback.c \
-                kernel/core/net/net_netdev.c kernel/core/net/net_baremetal.c kernel/core/net/net_tap.c kernel/core/net/net_wire_host.c \
+                kernel/core/net/net_netdev.c kernel/core/net/net_baremetal.c kernel/core/net/net_tap.c kernel/core/net/net_macvlan.c kernel/core/net/net_wire_host.c \
                 kernel/core/net/net_wire_host_syscall.c \
                 kernel/core/net/net_dns.c kernel/core/net/net_dhcp.c kernel/core/net/net_tls_hosted.c \
                 kernel/core/net/net_http.c kernel/core/net/net_tftp.c \
