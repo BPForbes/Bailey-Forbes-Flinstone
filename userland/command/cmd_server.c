@@ -264,7 +264,8 @@ static int wsl_portproxy_will_try(const fl_net_endpoint_t *bind_ep,
         return 0;
     /* In-tree lab/TAP netdev addresses are not reachable via Windows portproxy. */
     if (bind_ep->addr.v4_be != 0u &&
-        fl_net_sock_native_eligible_bind_v4(bind_ep->addr.v4_be))
+        (fl_net_ipv4_is_loopback(bind_ep->addr.v4_be) ||
+         fl_net_sock_native_eligible_bind_v4(bind_ep->addr.v4_be)))
         return 0;
     return 1;
 }
@@ -274,9 +275,21 @@ static int wsl_portproxy_will_try(const fl_net_endpoint_t *bind_ep,
 static int wsl_in_tree_lab_bind(const fl_net_endpoint_t *bind_ep) {
     if (!bind_ep || bind_ep->family != FL_NET_ADDR_FAMILY_V4)
         return 0;
-    if (bind_ep->addr.v4_be != 0u)
+    if (bind_ep->addr.v4_be != 0u) {
+        if (fl_net_ipv4_is_loopback(bind_ep->addr.v4_be))
+            return fl_net_wifi_netdev_is_up() && !fl_net_wifi_host_linux_opted_in();
         return fl_net_sock_native_eligible_bind_v4(bind_ep->addr.v4_be);
+    }
     return fl_net_wifi_netdev_is_up() && !fl_net_wifi_host_linux_opted_in();
+}
+
+/* Loopback is process-local; Windows portproxy cannot expose 127.0.0.1 to LAN. */
+static int wsl_portproxy_should_skip(const fl_net_endpoint_t *bind_ep) {
+    if (!bind_ep || bind_ep->family != FL_NET_ADDR_FAMILY_V4)
+        return 0;
+    if (bind_ep->addr.v4_be != 0u && fl_net_ipv4_is_loopback(bind_ep->addr.v4_be))
+        return 1;
+    return wsl_in_tree_lab_bind(bind_ep);
 }
 
 static const char *host_listen_ip_for_wsl(const fl_net_endpoint_t *ep,
@@ -887,7 +900,7 @@ static int verb_host(int argc, char **argv) {
             }
             if (fl_platform_detect() == FL_PLATFORM_WSL &&
                 bind_ep.family == FL_NET_ADDR_FAMILY_V4 && bind_ep.port_host > 0u &&
-                !wsl_in_tree_lab_bind(&bind_ep)) {
+                !wsl_portproxy_should_skip(&bind_ep)) {
                 if (wsl_portproxy_apply(listen, bind_ep.port_host) == 0) {
                     if (defer_hosting) {
                         char bind_txt[128];
