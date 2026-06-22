@@ -8,6 +8,7 @@
 #include "net_ipv4.h"
 #include "net_ipv6.h"
 #include "net_wifi_netdev.h"
+#include "net_wifi_host_linux.h"
 #include "net_wifi_station.h"
 
 #include <arpa/inet.h>
@@ -68,8 +69,9 @@ static int wifi_usage(void) {
           "  wifi known\n"
           "  wifi status\n"
           "  Lab scan: set FL_NET_WIFI_HOME_SSID to include your home network in scan results.\n"
-          "  Default: in-tree 802.11 driver + lab netdev (wlan-lab static L3, no host wlan).\n"
-          "  Optional host Wi-Fi: FL_NET_WIFI_USE_WPA=1 or FL_NET_WIFI_FLINSTONE_PS (not default).\n",
+          "  Default: in-tree 802.11 lab (LabAxHome/GuestOpen on wlan-lab static L3).\n"
+          "  Real Wi-Fi (opt-in): set FL_NET_WIFI_FLINSTONE_PS on WSL, or FL_NET_WIFI_USE_WPA=1\n"
+          "    on native Linux with wpa_cli/nmcli. See README.md and docs/P3_NETWORKING.md.\n",
           stderr);
     return 1;
 }
@@ -142,7 +144,12 @@ static int cmd_wifi_scan(int argc, char **argv) {
     }
     if (fl_net_wifi_station_lab_backend())
         fputs("wifi scan: in-tree lab simulation (802.11ax APs)\n", stderr);
-    else
+    else if (fl_net_wifi_host_linux_opted_in() && fl_net_wifi_host_linux_available()) {
+        const char *backend = fl_net_wifi_host_linux_backend_name();
+        const char *iface = fl_net_wifi_host_linux_iface();
+        fprintf(stderr, "wifi scan: host backend %s on %s\n",
+                backend ? backend : "host", iface ? iface : "?");
+    } else
         fputs("wifi scan: hardware Wi-Fi driver backend\n", stderr);
     printf("SSID            BSSID          RSSI  CH  BW  Band  Auth  HE  Color\n");
     for (i = 0; i < count; i++) {
@@ -379,9 +386,15 @@ static int cmd_wifi_status(int argc, char **argv) {
     printf("Wi-Fi state: %d\n", (int)fl_net_wifi_state());
     if (fl_net_wifi_station_lab_backend())
         puts("Backend: in-tree 802.11 lab (wlan-lab static L3)");
-    else if (fl_net_wifi_station_host_backend())
-        puts("Backend: hardware Wi-Fi driver");
-    else
+    else if (fl_net_wifi_station_host_backend()) {
+        const char *backend = fl_net_wifi_host_linux_backend_name();
+        printf("Backend: %s (%s)\n", backend ? backend : "host",
+               fl_net_wifi_host_linux_iface());
+    } else if (fl_net_wifi_host_linux_opted_in() && fl_net_wifi_host_linux_available()) {
+        const char *backend = fl_net_wifi_host_linux_backend_name();
+        printf("Backend: %s available on %s (not associated)\n",
+               backend ? backend : "host", fl_net_wifi_host_linux_iface());
+    } else
         puts("Backend: in-tree 802.11 lab (not associated)");
     {
         const char *ifname = fl_net_wifi_netdev_iface();

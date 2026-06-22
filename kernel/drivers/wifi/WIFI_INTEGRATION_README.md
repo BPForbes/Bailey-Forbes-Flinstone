@@ -92,14 +92,28 @@ make test_p3_wifi             # Run P3 WiFi integration tests (existing)
   - `kernel/drivers/wifi_platform_arm.c`
   - `kernel/drivers/wifi_supplicant.c`
   - `kernel/drivers/wifi_driver_backend.c`
-- Removed dependency on `net_wifi_host_linux.c` (external Linux WiFi backend)
+- Removed dependency on `net_wifi_host_linux.c` as the **default** path; opt-in host Wi‑Fi documented in README and **`docs/P3_NETWORKING.md`**
 - Added `-Ikernel/core/net` to compile paths for cross-module includes
 
 **kernel/core/net/net_wifi_station.c updates:**
 - Replaced `#include "net_wifi_host_linux.h"` with `#include "../../drivers/wifi_driver_backend.h"`
 - Updated `fl_net_wifi_station_init()` to call `wifi_driver_backend_init()`
-- Updated scan/connect/disconnect to route through `wifi_driver_*` functions
-- Maintained lab simulation fallback when no hardware backend is active
+- Updated scan/connect/disconnect to route through `wifi_driver_*` with **opt-in** `net_wifi_host_linux` when env flags are set, then lab fallback
+
+## Host Wi‑Fi fallback (opt-in)
+
+**`net_wifi_host_linux.c`** remains for **opt-in** real scan/join on WSL (**`FlinstonePowershell`**) and native Linux (**`wpa_cli`** / **`nmcli`**). It is **not** the default: without **`FL_NET_WIFI_FLINSTONE_PS`**, **`FL_NET_WIFI_FLINSTONE_LINUX`**, or **`FL_NET_WIFI_USE_WPA=1`**, **`net_wifi_station.c`** uses the in-tree lab + static **`wlan-lab`** L3.
+
+**WSL example:**
+
+```bash
+make flinstone-ps-windows
+export FL_NET_WIFI_FLINSTONE_PS="$PWD/tools/FlinstonePowershell/FlinstonePowershell.exe"
+./BPForbes_Flinstone_Shell
+wifi scan
+```
+
+**`kernel/core/net/net_wifi_station.c` routing:** hardware driver (UART coprocessor / mock) → host Linux (when opted in) → lab simulation.
 
 ## Usage: Station API
 

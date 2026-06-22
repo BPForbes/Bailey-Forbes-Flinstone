@@ -10,6 +10,7 @@
 #include "net_ipv4.h"
 #include "net_wifi_twt.h"
 #include "net_wifi_wpa.h"
+#include "net_wifi_host_linux.h"
 #include "net_wire.h"
 
 /* v4.3.0 WiFi driver backend — kernel orchestrates, drivers execute */
@@ -25,6 +26,7 @@ static fl_net_wifi_state_t s_wifi_state = FL_WIFI_STATE_IDLE;
 static fl_net_wifi_he_cap_t s_negotiated_he;
 static int s_netdev_ready;
 static int s_driver_backend;
+static int s_host_backend;
 static int s_lab_backend;
 
 #if defined(FL_NET_WIFI_HOSTED_LAB)
@@ -41,6 +43,7 @@ fl_result_t fl_net_wifi_station_init(void) {
     s_wifi_state = FL_WIFI_STATE_IDLE;
     s_netdev_ready = 0;
     s_driver_backend = 0;
+    s_host_backend = 0;
     s_lab_backend = 0;
 
     if (wifi_driver_backend_init() == FL_RESULT_OK &&
@@ -74,7 +77,7 @@ fl_net_driver_t *fl_net_wifi_station_netdev(void) {
 }
 
 int fl_net_wifi_station_host_backend(void) {
-    return 0;
+    return s_host_backend;
 }
 
 int fl_net_wifi_station_lab_backend(void) {
@@ -95,6 +98,17 @@ fl_result_t fl_net_wifi_scan(uint8_t band, unsigned timeout_ms) {
     }
 
 #if defined(FL_NET_WIFI_HOSTED_LAB)
+    {
+        if (fl_net_wifi_host_linux_opted_in() && fl_net_wifi_host_linux_available()) {
+            fl_result_t rc = fl_net_wifi_host_linux_scan(band, timeout_ms);
+            if (rc == FL_RESULT_OK) {
+                s_wifi_state = FL_WIFI_STATE_SCANNING;
+                return FL_RESULT_OK;
+            }
+            if (rc != FL_RESULT_NOSYS)
+                return rc;
+        }
+    }
     s_lab_backend = 1;
     if (wifi_driver_lab_scan(band, timeout_ms) == FL_RESULT_OK) {
         s_wifi_state = FL_WIFI_STATE_SCANNING;
@@ -124,11 +138,63 @@ fl_result_t fl_net_wifi_scan_result(fl_net_wifi_scan_entry_t *entries, size_t ca
         return rc;
     }
 
+#if defined(FL_NET_WIFI_HOSTED_LAB)
+    if (fl_net_wifi_host_linux_opted_in() && fl_net_wifi_host_linux_available()) {
+        fl_result_t rc = fl_net_wifi_host_linux_scan_result(entries, cap, count_out);
+        s_wifi_state = FL_WIFI_STATE_IDLE;
+        return rc;
+    }
+#endif
+
     *count_out = 0u;
     return FL_RESULT_NOSYS;
 }
 
 #if defined(FL_NET_WIFI_HOSTED_LAB)
+static fl_result_t host_linux_connect(const fl_net_wifi_cred_t *cred, unsigned timeout_ms)
+{
+    fl_result_t rc;
+    fl_net_wifi_scan_entry_t ap;
+    uint8_t sta_mac[6];
+    size_t i;
+
+    (void)timeout_ms;
+    rc = fl_net_wifi_host_linux_connect(cred, timeout_ms);
+    if (rc != FL_RESULT_OK)
+        return rc;
+
+    memset(&ap, 0, sizeof(ap));
+    strncpy(ap.ssid, cred->ssid, sizeof(ap.ssid) - 1u);
+    if (cred->bssid[0] | cred->bssid[1] | cred->bssid[2] | cred->bssid[3] |
+        cred->bssid[4] | cred->bssid[5]) {
+        memcpy(ap.bssid, cred->bssid, 6);
+    } else {
+        fl_net_wifi_scan_entry_t scan[32];
+        size_t n = 0;
+        (void)fl_net_wifi_host_linux_scan_result(scan, 32, &n);
+        for (i = 0; i < n; i++) {
+            if (!strcmp(scan[i].ssid, cred->ssid)) {
+                ap = scan[i];
+                break;
+            }
+        }
+    }
+
+    fl_net_loopback_mac_host(sta_mac);
+    rc = fl_net_wifi_netdev_up(&ap, sta_mac);
+    if (rc != FL_RESULT_OK) {
+        (void)fl_net_wifi_host_linux_disconnect();
+        return rc;
+    }
+
+    s_host_backend = 1;
+    s_lab_backend = 0;
+    s_wifi_state = FL_WIFI_STATE_UP;
+    strncpy(s_lab_joined_ssid, cred->ssid, sizeof(s_lab_joined_ssid) - 1u);
+    fl_net_iface_refresh();
+    return FL_RESULT_OK;
+}
+
 static fl_result_t lab_backend_connect(const fl_net_wifi_cred_t *cred, unsigned timeout_ms) {
     fl_net_wifi_scan_entry_t ap;
     uint8_t sta_mac[6];
@@ -217,6 +283,20 @@ fl_result_t fl_net_wifi_connect(const fl_net_wifi_cred_t *cred, unsigned timeout
     }
 
 #if defined(FL_NET_WIFI_HOSTED_LAB)
+    {
+        if (fl_net_wifi_host_linux_opted_in() && fl_net_wifi_host_linux_available()) {
+            fl_result_t hrc = host_linux_connect(cred, timeout_ms);
+            if (hrc == FL_RESULT_OK) {
+                s_lab_backend = 0;
+                return FL_RESULT_OK;
+            }
+            if (hrc != FL_RESULT_NOSYS) {
+                s_wifi_state = FL_WIFI_STATE_ERROR;
+                return hrc;
+            }
+        }
+    }
+
     s_lab_backend = 1;
     return lab_backend_connect(cred, timeout_ms);
 #else
@@ -233,6 +313,10 @@ fl_result_t fl_net_wifi_disconnect(void) {
         wifi_driver_disconnect();
 
 #if defined(FL_NET_WIFI_HOSTED_LAB)
+    if (s_host_backend) {
+        (void)fl_net_wifi_host_linux_disconnect();
+        s_host_backend = 0;
+    }
     if (s_lab_backend)
         wifi_driver_lab_reset();
     s_lab_joined_ssid[0] = '\0';
@@ -243,6 +327,7 @@ fl_result_t fl_net_wifi_disconnect(void) {
 
     s_wifi_state = FL_WIFI_STATE_IDLE;
     s_lab_backend = 0;
+    s_host_backend = 0;
     return FL_RESULT_OK;
 }
 
