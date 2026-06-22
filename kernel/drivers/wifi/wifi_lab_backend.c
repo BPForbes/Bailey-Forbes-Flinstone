@@ -30,12 +30,57 @@ static const uint8_t s_lab_probe_resp_ies[] = {
     FL_WIFI_ELEM_ID_EXTENSION, 5u, FL_WIFI_EXT_HE_OPERATION, 0x02, 0x00, 0x00, 0x05
 };
 
+/* 802.11ax on 2.4 GHz — HE present without 80/160 MHz PHY widths. */
+static const uint8_t s_lab_ax_ies_2g[] = {
+    FL_WIFI_ELEM_ID_EXTENSION, 4u, FL_WIFI_EXT_HE_CAPABILITIES, 0x00, 0x80, 0x00,
+    FL_WIFI_ELEM_ID_EXTENSION, 5u, FL_WIFI_EXT_HE_OPERATION, 0x02, 0x00, 0x00, 0x07
+};
+
+static void lab_apply_ax_ap(fl_net_wifi_scan_entry_t *e)
+{
+    const uint8_t *ies;
+    size_t ies_len;
+
+    if (!e)
+        return;
+    if (e->band == FL_WIFI_BAND_2GHZ) {
+        ies = s_lab_ax_ies_2g;
+        ies_len = sizeof(s_lab_ax_ies_2g);
+    } else {
+        ies = s_lab_probe_resp_ies;
+        ies_len = sizeof(s_lab_probe_resp_ies);
+    }
+    (void)fl_net_wifi_scan_enrich_from_ies(ies, ies_len, e);
+    if (e->band == FL_WIFI_BAND_2GHZ) {
+        if (e->channel_width_mhz == 0u || e->channel_width_mhz > 40u)
+            e->channel_width_mhz = 20u;
+    }
+}
+
 static void lab_seed_scan(uint8_t band)
 {
     s_lab_scan_count = 0;
     memset(s_lab_scan, 0, sizeof(s_lab_scan));
-    if (band == FL_WIFI_BAND_6GHZ)
+
+    if (band == FL_WIFI_BAND_6GHZ) {
+        fl_net_wifi_scan_entry_t *e = &s_lab_scan[s_lab_scan_count++];
+
+        strncpy(e->ssid, "LabAx6", sizeof(e->ssid) - 1u);
+        e->bssid[0] = 0x02;
+        e->bssid[1] = 0x66;
+        e->bssid[2] = 0x00;
+        e->bssid[3] = 0x00;
+        e->bssid[4] = 0x00;
+        e->bssid[5] = 0x01;
+        e->rssi_dbm = -48;
+        e->channel = 37;
+        e->auth_mode = FL_WIFI_AUTH_WPA3_SAE;
+        e->band = FL_WIFI_BAND_6GHZ;
+        e->channel_width_mhz = 160;
+        lab_apply_ax_ap(e);
         return;
+    }
+
     {
         fl_net_wifi_scan_entry_t *e = &s_lab_scan[s_lab_scan_count++];
 
@@ -51,8 +96,7 @@ static void lab_seed_scan(uint8_t band)
         e->auth_mode = FL_WIFI_AUTH_WPA3_SAE;
         e->band = FL_WIFI_BAND_5GHZ;
         e->channel_width_mhz = 80;
-        (void)fl_net_wifi_scan_enrich_from_ies(s_lab_probe_resp_ies,
-                                               sizeof(s_lab_probe_resp_ies), e);
+        lab_apply_ax_ap(e);
     }
     if (band == FL_WIFI_BAND_2GHZ || band == FL_WIFI_BAND_ANY) {
         fl_net_wifi_scan_entry_t *e = &s_lab_scan[s_lab_scan_count++];
@@ -69,6 +113,7 @@ static void lab_seed_scan(uint8_t band)
         e->auth_mode = FL_WIFI_AUTH_OPEN;
         e->band = FL_WIFI_BAND_2GHZ;
         e->channel_width_mhz = 20;
+        lab_apply_ax_ap(e);
     }
     {
         const char *home_ssid = getenv("FL_NET_WIFI_HOME_SSID");
@@ -109,6 +154,7 @@ static void lab_seed_scan(uint8_t band)
                     e->auth_mode = FL_WIFI_AUTH_OPEN;
                 else
                     e->auth_mode = FL_WIFI_AUTH_WPA2_PSK;
+                lab_apply_ax_ap(e);
             }
         }
     }
@@ -208,15 +254,16 @@ static fl_result_t lab_run_mgmt_assoc(const fl_net_wifi_cred_t *cred,
 static void lab_fill_he(const fl_net_wifi_scan_entry_t *ap, fl_net_wifi_he_cap_t *he_out)
 {
     memset(he_out, 0, sizeof(*he_out));
+    if (!ap->he_supported)
+        return;
     he_out->supports_ofdma = 1;
     he_out->supports_mu_mimo = 1;
     he_out->supports_twt = ap->twt_responder;
     he_out->bss_color = ap->bss_color;
-    he_out->channel_width_mhz = ap->channel_width_mhz;
+    he_out->channel_width_mhz = ap->channel_width_mhz ? ap->channel_width_mhz : 20u;
     he_out->max_nss_rx = 2;
     he_out->max_nss_tx = 2;
-    if (ap->he_supported)
-        he_out->supports_6ghz = 0;
+    he_out->supports_6ghz = (ap->band == FL_WIFI_BAND_6GHZ) ? 1u : 0u;
 }
 
 void wifi_lab_reset(void)
@@ -275,6 +322,7 @@ fl_result_t wifi_lab_connect(const fl_net_wifi_cred_t *cred,
         s_synth_ap.channel = 6;
         s_synth_ap.channel_width_mhz = 20;
         s_synth_ap.rssi_dbm = -70;
+        lab_apply_ax_ap(&s_synth_ap);
         ap = &s_synth_ap;
     }
     if (ap->auth_mode != FL_WIFI_AUTH_OPEN && cred->passphrase[0] == '\0')

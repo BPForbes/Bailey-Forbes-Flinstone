@@ -59,6 +59,10 @@ static int test_scan_result_he_fields(void) {
     ASSERT(entries[0].bss_color == 5u);
     ASSERT(entries[0].channel_width_mhz == 160u);
     ASSERT(entries[0].twt_responder == 1u);
+    if (count >= 2u) {
+        ASSERT(entries[1].he_supported == 1u);
+        ASSERT(entries[1].channel_width_mhz <= 40u);
+    }
     return 0;
 }
 
