@@ -23,12 +23,17 @@
 #include "net_background.h"
 #include "net_udp.h"
 #include "net_socket.h"
+#include "net_sock_native.h"
 #include "net_dhcp.h"
 #include "net_tcp.h"
 #include "net_tcp_fsm.h"
 #include "net_tls_hosted.h"
 #include "net_http.h"
 #include "net_tftp.h"
+#include "net_client.h"
+#include "net_server.h"
+#include "net_wifi_station.h"
+#include "net_wifi_netdev.h"
 #include "contract_p3_dhcp.h"
 #include "contract_p3_tls_hosted.h"
 #include "contract_p3_socket.h"
@@ -38,6 +43,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <unistd.h>
 
 #define ASSERT(c) \
     do { \
@@ -1192,6 +1198,36 @@ static int test_probe_endpoint(void) {
     return 0;
 }
 
+static int test_wifi_lab_server_host(void) {
+    fl_net_server_t srv;
+    fl_net_wifi_cred_t cred;
+    uint32_t host_be = 0u;
+    uint16_t port = (uint16_t)(49000u + (unsigned)(getpid() % 1000u));
+
+    (void)unsetenv("FL_NET_SOCK_NATIVE");
+    (void)setenv("FL_NET_WIFI_USE_WPA", "0", 1);
+    fl_net_route_init();
+    ASSERT(fl_net_wifi_station_init() == FL_RESULT_OK);
+    ASSERT(fl_net_wifi_scan(FL_WIFI_BAND_ANY, 1000u) == FL_RESULT_OK);
+    memset(&cred, 0, sizeof(cred));
+    strncpy(cred.ssid, "LabAxHome", sizeof(cred.ssid) - 1u);
+    strncpy(cred.passphrase, "secret", sizeof(cred.passphrase) - 1u);
+    cred.auth_mode = FL_WIFI_AUTH_WPA3_SAE;
+    ASSERT(fl_net_wifi_connect(&cred, 5000u) == FL_RESULT_OK);
+    ASSERT(fl_net_wifi_netdev_ipv4(&host_be) == FL_RESULT_OK);
+    ASSERT(host_be != 0u);
+    ASSERT(fl_net_sock_native_eligible_bind_v4(host_be));
+    if (fl_net_sock_init() == FL_RESULT_NOSYS) {
+        fprintf(stderr, "skip: hosted sockets unavailable\n");
+        (void)fl_net_wifi_disconnect();
+        return 0;
+    }
+    ASSERT(fl_net_server_host_start(&srv, host_be, port, "LabHost") == FL_RESULT_OK);
+    fl_net_server_host_stop(&srv);
+    ASSERT(fl_net_wifi_disconnect() == FL_RESULT_OK);
+    return 0;
+}
+
 int main(void) {
     fl_net_netdev_init();
 
@@ -1402,6 +1438,11 @@ int main(void) {
 
     printf("test_tap_smoke... ");
     if (test_tap_smoke() != 0)
+        return 1;
+    puts("ok");
+
+    printf("test_wifi_lab_server_host... ");
+    if (test_wifi_lab_server_host() != 0)
         return 1;
     puts("ok");
 

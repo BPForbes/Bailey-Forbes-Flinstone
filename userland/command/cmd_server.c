@@ -17,6 +17,7 @@
 #include "net_ipv4.h"
 #include "net_server.h"
 #include "net_socket.h"
+#include "net_sock_native.h"
 #include "server_bg.h"
 #include "server_shared_db.h"
 #include "session.h"
@@ -256,8 +257,13 @@ static int wsl_portproxy_will_try(const fl_net_endpoint_t *bind_ep,
         return 0;
     if (win_ip_display && win_ip_display[0])
         return 1;
-    return bind_ep && bind_ep->family == FL_NET_ADDR_FAMILY_V4 &&
-           bind_ep->port_host > 0u;
+    if (!bind_ep || bind_ep->family != FL_NET_ADDR_FAMILY_V4 || bind_ep->port_host == 0u)
+        return 0;
+    /* In-tree lab/TAP netdev addresses are not reachable via Windows portproxy. */
+    if (bind_ep->addr.v4_be != 0u &&
+        fl_net_sock_native_eligible_bind_v4(bind_ep->addr.v4_be))
+        return 0;
+    return 1;
 }
 
 static const char *host_listen_ip_for_wsl(const fl_net_endpoint_t *ep,
@@ -858,7 +864,8 @@ static int verb_host(int argc, char **argv) {
                 else
                     fl_color_success("hosting as '%s' on %s", current_principal(), argv[2]);
             }
-            if (bind_ep.family == FL_NET_ADDR_FAMILY_V4 && bind_ep.port_host > 0u) {
+            if (fl_platform_detect() == FL_PLATFORM_WSL &&
+                bind_ep.family == FL_NET_ADDR_FAMILY_V4 && bind_ep.port_host > 0u) {
                 if (wsl_portproxy_apply(listen, bind_ep.port_host) == 0) {
                     if (defer_hosting) {
                         char bind_txt[128];
