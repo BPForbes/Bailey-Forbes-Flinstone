@@ -2,6 +2,7 @@
  * 802.11ax L2 OTA emulation over P3 server host/join (#279, Wi-Fi 5-only hosts).
  * Carries SAE commit/confirm, EAPOL 4-way, and Assoc Req/Resp with HE IEs on
  * the session wire when RF / real ax NIC is unavailable.
+ * L2 execution is delegated to wifi_ax_session_driver; this header is orchestration.
  */
 
 #ifndef NET_WIFI_AX_SERVER_H

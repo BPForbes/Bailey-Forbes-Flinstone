@@ -3,7 +3,7 @@
  * Stub UART ops for CI and desktop builds without ARM PL011 hardware.
  */
 
-#include "kernel/drivers/wifi_platform.h"
+#include "wifi_platform.h"
 #include "kernel/core/time/timekeeping.h"
 
 #include <stdlib.h>

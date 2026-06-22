@@ -9,9 +9,9 @@
 #include <stdlib.h>
 #include <ctype.h>
 
-#include "kernel/drivers/wifi_uart_transport.h"
-#include "kernel/drivers/wifi_platform.h"
-#include "kernel/drivers/wifi_driver_packet.h"
+#include "wifi_uart_transport.h"
+#include "wifi_platform.h"
+#include "wifi_driver_packet.h"
 #include "kernel/core/net/net_wire.h"
 
 #include "fl/mem_asm.h"

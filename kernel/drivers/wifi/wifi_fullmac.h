@@ -12,7 +12,7 @@
 #include <stddef.h>
 #include <stdbool.h>
 
-#include "kernel/drivers/wifi_coprocessor.h"
+#include "wifi_coprocessor.h"
 
 /* WiFi 6 (802.11ax) specific features */
 #define WIFI_FULLMAC_HE_CAP_SUPPORT    1

@@ -6,7 +6,7 @@
 #include <string.h>
 #include <stdlib.h>
 
-#include "kernel/drivers/wifi_platform.h"
+#include "wifi_platform.h"
 #include "kernel/core/time/timekeeping.h"
 
 #include "fl/mm.h"

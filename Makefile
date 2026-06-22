@@ -160,20 +160,21 @@ NET_CORE_SRCS = kernel/core/net/net_checksum.c kernel/core/net/net_wire.c kernel
                 kernel/core/net/net_wifi_mgmt.c kernel/core/net/net_wifi_sae.c \
                 kernel/core/net/net_wifi_wpa.c kernel/core/net/net_wifi_twt.c \
                 kernel/core/net/net_wifi_crypto.c kernel/core/net/net_wifi_ax_server.c \
-                kernel/drivers/wifi_coprocessor.c kernel/drivers/wifi_uart_transport.c \
-                kernel/drivers/wifi_supplicant.c \
-                kernel/drivers/wifi_driver_backend.c kernel/drivers/wifi_driver_packet.c \
-                kernel/drivers/wifi_lab_backend.c \
-                kernel/drivers/wifi_80211ax_mock.c \
+                kernel/drivers/wifi/wifi_coprocessor.c kernel/drivers/wifi/wifi_uart_transport.c \
+                kernel/drivers/wifi/wifi_supplicant.c \
+                kernel/drivers/wifi/wifi_driver_backend.c kernel/drivers/wifi/wifi_driver_packet.c \
+                kernel/drivers/wifi/wifi_lab_backend.c \
+                kernel/drivers/wifi/wifi_ax_session_driver.c \
+                kernel/drivers/wifi/wifi_80211ax_mock.c \
                 kernel/core/platform/fl_platform.c \
                 kernel/core/net/net_requirements.c \
                 kernel/core/net/net_server.c kernel/core/net/net_client.c kernel/core/net/net_file_delivery.c kernel/core/net/net_pkt_channel_meta.c kernel/core/net/net_channel_sidecar.c kernel/core/net/server_bg.c \
                 kernel/core/vfs/server_shared_fs.c kernel/core/vfs/server_shared_db.c \
                 kernel/core/vfs/server_shared_digest.c \
                 userland/shell/fl_colors.c
-WIFI_PLATFORM_SRC = kernel/drivers/wifi_platform_host.c
+WIFI_PLATFORM_SRC = kernel/drivers/wifi/wifi_platform_host.c
 ifeq ($(ARCH),arm)
-WIFI_PLATFORM_SRC = kernel/drivers/wifi_platform_arm.c
+WIFI_PLATFORM_SRC = kernel/drivers/wifi/wifi_platform_arm.c
 endif
 NET_CORE_SRCS += $(WIFI_PLATFORM_SRC)
 NET_TEST_MM_OBJS = kernel/core/mm/kmalloc.o kernel/core/mm/mem_domain.o
@@ -200,7 +201,7 @@ SHELL_SRCS += $(CHANGELOG_C)
 endif
 SRCS = $(SHELL_SRCS) $(CORE_SRCS) disk_asm.c dir_asm.c
 SRCS += $(DRIVER_SRCS) $(HAL_SRCS)
-CFLAGS += -I$(ASM_SRC_DIR) -I$(KERNEL_DRIVERS) -Ikernel -Ikernel/drivers -Ikernel/core/net -Iuserland/identity
+CFLAGS += -I$(ASM_SRC_DIR) -I$(KERNEL_DRIVERS) -Ikernel -Ikernel/drivers -Ikernel/drivers/wifi -Ikernel/core/net -Iuserland/identity
 ifeq ($(ARCH),arm)
 CFLAGS += -Ikernel/arch/aarch64
 endif
@@ -616,7 +617,7 @@ test_drivers: userland/shell/common.o $(UTIL_SHELL_LINK_OBJS) kernel/core/vfs/di
 	  kernel/drivers/p4_usb_xhci_lab.o kernel/drivers/p4_fdt_discovery.o \
 	  kernel/drivers/p4_psci.o $(USB_XHCI_MMIO_ASM_OBJ) \
 	  $(KERNEL_DRIVERS)/pci.o $(TEST_DRIVER_HAL_OBJS)
-	$(CC) $(CFLAGS) $(TEST_SANITIZE) -I. -Ikernel -Ikernel/include -Ikernel/drivers -Iuserland/shell -I$(ASM_SRC_DIR) -I$(KERNEL_DRIVERS) -Ikernel/arch/aarch64 -o tests/test_drivers tests/test_drivers.c \
+	$(CC) $(CFLAGS) $(TEST_SANITIZE) -I. -Ikernel -Ikernel/include -Ikernel/drivers -Ikernel/drivers/wifi -Iuserland/shell -I$(ASM_SRC_DIR) -I$(KERNEL_DRIVERS) -Ikernel/arch/aarch64 -o tests/test_drivers tests/test_drivers.c \
 	  userland/shell/common.o $(UTIL_SHELL_LINK_OBJS) kernel/core/vfs/disk.o kernel/core/vfs/fat32_host.o kernel/core/vfs/fat32_host_files.o disk_host_io.o disk_asm.o kernel/core/mm/mem_domain.o kernel/core/mm/kmalloc.o $(MEM_ASM_OBJ) $(PORT_IO_OBJ) $(DISK_HOST_ASM_OBJ) $(HISTORY_ASM_OBJ) \
 	  kernel/drivers/bus.o kernel/drivers/driver_model.o \
 	  kernel/drivers/block/block_driver.o kernel/drivers/block/block_transport_host.o \
@@ -845,10 +846,10 @@ tests/test_p3_wifi: $(WIFI_TEST_COMMON_DEPS)
 	  kernel/core/net/net_wifi_mgmt.c kernel/core/net/net_wifi_sae.c \
 	  kernel/core/net/net_wifi_wpa.c kernel/core/net/net_wifi_twt.c \
 	  kernel/core/net/net_wifi_crypto.c \
-	  kernel/drivers/wifi_driver_backend.c kernel/drivers/wifi_coprocessor.c \
-	  kernel/drivers/wifi_lab_backend.c \
-	  kernel/drivers/wifi_uart_transport.c kernel/drivers/wifi_driver_packet.c \
-	  kernel/drivers/wifi_80211ax_mock.c kernel/drivers/wifi_supplicant.c \
+	  kernel/drivers/wifi/wifi_driver_backend.c kernel/drivers/wifi/wifi_coprocessor.c \
+	  kernel/drivers/wifi/wifi_lab_backend.c \
+	  kernel/drivers/wifi/wifi_uart_transport.c kernel/drivers/wifi/wifi_driver_packet.c \
+	  kernel/drivers/wifi/wifi_80211ax_mock.c kernel/drivers/wifi/wifi_supplicant.c \
 	  kernel/core/mm/kmalloc.o kernel/core/mm/mem_domain.o \
 	  $(WIFI_PLATFORM_SRC:.c=.o) \
 	  $(WIFI_TEST_NET_OBJS) \
@@ -859,15 +860,15 @@ tests/test_p3_wifi: $(WIFI_TEST_COMMON_DEPS)
 test_p3_wifi: tests/test_p3_wifi
 	@./tests/test_p3_wifi
 
-tests/test_wifi_coprocessor: kernel/drivers/wifi_coprocessor.o kernel/drivers/wifi_uart_transport.o \
-	kernel/drivers/wifi_driver_packet.o kernel/core/net/net_packet.o kernel/core/net/net_wire.o \
+tests/test_wifi_coprocessor: kernel/drivers/wifi/wifi_coprocessor.o kernel/drivers/wifi/wifi_uart_transport.o \
+	kernel/drivers/wifi/wifi_driver_packet.o kernel/core/net/net_packet.o kernel/core/net/net_wire.o \
 	kernel/core/net/net_ipv6.o kernel/core/net/net_checksum.o \
 	kernel/core/mm/kmalloc.o kernel/core/mm/mem_domain.o $(MEM_ASM_OBJ) $(NET_ASM_OBJ) \
 	$(WIFI_PLATFORM_SRC:.c=.o) kernel/core/platform/fl_platform.o kernel/core/time/timekeeping.o
 	$(WIFI_TEST_LINK_PRE)
-	$(WIFI_TEST_LINK_AT)$(CC) $(CFLAGS) $(TEST_SANITIZE) -o tests/test_wifi_coprocessor kernel/drivers/wifi_coprocessor_test.c \
-	  kernel/drivers/wifi_coprocessor.o kernel/drivers/wifi_uart_transport.o \
-	  kernel/drivers/wifi_driver_packet.o kernel/core/net/net_packet.o kernel/core/net/net_wire.o \
+	$(WIFI_TEST_LINK_AT)$(CC) $(CFLAGS) $(TEST_SANITIZE) -o tests/test_wifi_coprocessor kernel/drivers/wifi/wifi_coprocessor_test.c \
+	  kernel/drivers/wifi/wifi_coprocessor.o kernel/drivers/wifi/wifi_uart_transport.o \
+	  kernel/drivers/wifi/wifi_driver_packet.o kernel/core/net/net_packet.o kernel/core/net/net_wire.o \
 	  kernel/core/net/net_ipv6.o kernel/core/net/net_checksum.o \
 	  kernel/core/mm/kmalloc.o kernel/core/mm/mem_domain.o $(MEM_ASM_OBJ) $(NET_ASM_OBJ) \
 	  $(WIFI_PLATFORM_SRC:.c=.o) kernel/core/platform/fl_platform.o kernel/core/time/timekeeping.o \
@@ -883,10 +884,10 @@ tests/test_wifi_80211ax_mock_279: $(WIFI_TEST_COMMON_DEPS)
 	  kernel/core/net/net_wifi_mgmt.c kernel/core/net/net_wifi_sae.c \
 	  kernel/core/net/net_wifi_wpa.c kernel/core/net/net_wifi_twt.c \
 	  kernel/core/net/net_wifi_crypto.c \
-	  kernel/drivers/wifi_driver_backend.c kernel/drivers/wifi_coprocessor.c \
-	  kernel/drivers/wifi_lab_backend.c \
-	  kernel/drivers/wifi_uart_transport.c kernel/drivers/wifi_driver_packet.c \
-	  kernel/drivers/wifi_80211ax_mock.c kernel/drivers/wifi_supplicant.c \
+	  kernel/drivers/wifi/wifi_driver_backend.c kernel/drivers/wifi/wifi_coprocessor.c \
+	  kernel/drivers/wifi/wifi_lab_backend.c \
+	  kernel/drivers/wifi/wifi_uart_transport.c kernel/drivers/wifi/wifi_driver_packet.c \
+	  kernel/drivers/wifi/wifi_80211ax_mock.c kernel/drivers/wifi/wifi_supplicant.c \
 	  kernel/core/mm/kmalloc.o kernel/core/mm/mem_domain.o \
 	  $(WIFI_PLATFORM_SRC:.c=.o) \
 	  $(WIFI_TEST_NET_OBJS) \
@@ -937,10 +938,10 @@ run-test_wifi:
 	@./tests/test_wifi_80211ax_mock_279
 	@./tests/test_wifi_ax_server_ota
 
-WIFI_TEST_STATION_DRIVER_SRCS = kernel/drivers/wifi_driver_backend.c kernel/drivers/wifi_coprocessor.c \
-	kernel/drivers/wifi_lab_backend.c \
-	kernel/drivers/wifi_uart_transport.c kernel/drivers/wifi_driver_packet.c \
-	kernel/drivers/wifi_80211ax_mock.c kernel/drivers/wifi_supplicant.c
+WIFI_TEST_STATION_DRIVER_SRCS = kernel/drivers/wifi/wifi_driver_backend.c kernel/drivers/wifi/wifi_coprocessor.c \
+	kernel/drivers/wifi/wifi_lab_backend.c \
+	kernel/drivers/wifi/wifi_uart_transport.c kernel/drivers/wifi/wifi_driver_packet.c \
+	kernel/drivers/wifi/wifi_80211ax_mock.c kernel/drivers/wifi/wifi_supplicant.c
 
 test_wifi_flinstone_helper: $(NET_ASM_OBJ) $(MEM_ASM_OBJ) priority_queue.o kernel/core/time/timekeeping.o kernel/core/sys/ipc.o
 	$(CC) $(CFLAGS) $(TEST_SANITIZE) -o tests/test_wifi_flinstone_helper tests/test_wifi_flinstone_helper.c \
@@ -1048,7 +1049,7 @@ test_vm_layer_warning: userland/shell/common.o $(FS_JAIL_CORE_OBJS) $(FS_JAIL_SU
 test_replay:
 	$(MAKE) clean
 	$(MAKE) VM_ENABLE=1 ARCH=$(ARCH) BPForbes_Flinstone_Shell
-	$(CC) $(CFLAGS) -DVM_ENABLE=1 -I$(ASM_SRC_DIR) -I$(KERNEL_DRIVERS) -Ikernel -Ikernel/drivers -IVM -IVM/devices -o tests/test_replay tests/test_replay.c \
+	$(CC) $(CFLAGS) -DVM_ENABLE=1 -I$(ASM_SRC_DIR) -I$(KERNEL_DRIVERS) -Ikernel -Ikernel/drivers -Ikernel/drivers/wifi -IVM -IVM/devices -o tests/test_replay tests/test_replay.c \
 	  userland/shell/common.o $(UTIL_SHELL_LINK_OBJS) userland/shell/terminal.o kernel/core/vfs/disk.o kernel/core/vfs/fat32_host.o kernel/core/vfs/fat32_host_files.o disk_host_io.o disk_asm.o dir_asm.o \
 	  kernel/core/vfs/path_log.o kernel/core/vfs/cluster.o kernel/core/vfs/fs.o priority_queue.o \
 	  kernel/core/vfs/fs_provider.o kernel/core/vfs/fs_command.o kernel/core/vfs/fs_events.o kernel/core/vfs/fs_policy.o \

@@ -80,4 +80,4 @@ reviews:
 
     - path: "kernel/drivers/**"
       instructions: |
-        **Driver ownership:** Module-specific execution (hardware I/O, firmware rings, UART AT, NIC scan/connect, DMA) belongs here. Core net code should call narrow driver ops rather than duplicating driver behavior. When reviewing new drivers, confirm **`kernel/core/net/`** callers remain orchestration-only and do not re-implement the same hardware paths inline.
+        **Driver ownership:** Module-specific execution (hardware I/O, firmware rings, UART AT, NIC scan/connect, DMA) belongs here. WiFi drivers live under **`kernel/drivers/wifi/`**. Core net code should call narrow driver ops rather than duplicating driver behavior. When reviewing new drivers, confirm **`kernel/core/net/`** callers remain orchestration-only and do not re-implement the same hardware paths inline.

@@ -1,14 +1,12 @@
 /*
  * 802.11ax AP/station L2 handshake relay over P3 server session wire.
+ * Orchestrates session I/O; WiFi L2 execution lives in wifi_ax_session_driver.
  */
 
 #include "net_wifi_ax_server.h"
 
-#include "net_wifi_he.h"
-#include "net_wifi_mgmt.h"
-#include "wifi_supplicant.h"
+#include "wifi_ax_session_driver.h"
 
-#include <stdio.h>
 #include <string.h>
 
 #define AX_AP_CFG_MAX 4u
@@ -81,19 +79,33 @@ static fl_result_t ax_send(fl_net_sock_handle_t peer, uint8_t opcode,
     return fl_net_session_send_frame(peer, opcode, payload, plen);
 }
 
-static fl_result_t ax_station_recv_opcode(fl_net_sock_handle_t peer, uint8_t expect,
-                                          uint8_t *payload, uint16_t cap,
-                                          uint16_t *plen_out, unsigned timeout_ms)
+typedef struct {
+    fl_net_sock_handle_t peer;
+} ax_session_ctx_t;
+
+static fl_result_t ax_session_send(void *ctx, uint8_t opcode, const uint8_t *payload,
+                                   uint16_t plen)
 {
+    ax_session_ctx_t *sctx = (ax_session_ctx_t *)ctx;
+
+    if (!sctx)
+        return FL_RESULT_INVAL;
+    return ax_send(sctx->peer, opcode, payload, plen);
+}
+
+static fl_result_t ax_session_recv(void *ctx, uint8_t expect_opcode, uint8_t *payload,
+                                   uint16_t cap, uint16_t *plen_out, unsigned timeout_ms)
+{
+    ax_session_ctx_t *sctx = (ax_session_ctx_t *)ctx;
     uint8_t opcode = 0;
     fl_result_t rc;
     unsigned spins = timeout_ms ? timeout_ms / 10u + 1u : 500u;
 
-    if (!payload || !plen_out)
+    if (!sctx || !payload || !plen_out || sctx->peer == FL_NET_SOCK_INVALID)
         return FL_RESULT_INVAL;
     while (spins-- > 0u) {
-        rc = fl_net_session_recv_frame(peer, &opcode, payload, cap, plen_out, 10u);
-        if (rc == FL_RESULT_OK && opcode == expect)
+        rc = fl_net_session_recv_frame(sctx->peer, &opcode, payload, cap, plen_out, 10u);
+        if (rc == FL_RESULT_OK && opcode == expect_opcode)
             return FL_RESULT_OK;
         if (rc != FL_RESULT_OK && rc != FL_RESULT_TIMEDOUT)
             return rc;
@@ -110,6 +122,8 @@ int fl_net_wifi_ax_ap_dispatch(fl_net_server_t *srv, fl_net_server_member_id_t f
     size_t reply_len = 0;
     uint8_t msg1[64];
     uint8_t msg3[64];
+    uint16_t msg1_len = 0;
+    uint16_t msg3_len = 0;
 
     (void)from;
     if (!ap || !fl_net_session_is_wifi_opcode(opcode))
@@ -119,8 +133,8 @@ int fl_net_wifi_ax_ap_dispatch(fl_net_server_t *srv, fl_net_server_member_id_t f
     case FL_NET_SESSION_OP_WIFI_SAE_COMMIT:
         if (ap->cfg.auth_mode != FL_WIFI_AUTH_WPA3_SAE || plen == 0u)
             return 1;
-        (void)memcpy(reply, (const uint8_t *)"confirm", 7u);
-        reply_len = 7u;
+        if (wifi_ax_ap_sae_confirm(reply, sizeof(reply), &reply_len) != FL_RESULT_OK)
+            return 1;
         (void)ax_send(peer, FL_NET_SESSION_OP_WIFI_SAE_CONFIRM, reply,
                       (uint16_t)reply_len);
         return 1;
@@ -128,19 +142,15 @@ int fl_net_wifi_ax_ap_dispatch(fl_net_server_t *srv, fl_net_server_member_id_t f
     case FL_NET_SESSION_OP_WIFI_EAPOL:
         if (ap->cfg.auth_mode != FL_WIFI_AUTH_WPA2_PSK)
             return 1;
-        memset(msg1, 0, sizeof(msg1));
-        msg1[0] = 0x01;
-        (void)ax_send(peer, FL_NET_SESSION_OP_WIFI_EAPOL, msg1, 40);
-        memset(msg3, 0, sizeof(msg3));
-        msg3[0] = 0x03;
-        (void)ax_send(peer, FL_NET_SESSION_OP_WIFI_EAPOL, msg3, 38);
+        if (wifi_ax_ap_eapol_responses(msg1, &msg1_len, msg3, &msg3_len) != FL_RESULT_OK)
+            return 1;
+        (void)ax_send(peer, FL_NET_SESSION_OP_WIFI_EAPOL, msg1, msg1_len);
+        (void)ax_send(peer, FL_NET_SESSION_OP_WIFI_EAPOL, msg3, msg3_len);
         return 1;
 
     case FL_NET_SESSION_OP_WIFI_ASSOC_REQ:
-        if (fl_net_wifi_mgmt_build_assoc_resp(
-                ap->cfg.bssid,
-                (plen >= 16u) ? (payload + 10) : ap->cfg.bssid, reply, sizeof(reply),
-                &reply_len) != FL_RESULT_OK)
+        if (wifi_ax_ap_assoc_response(ap->cfg.bssid, payload, plen, reply, sizeof(reply),
+                                      &reply_len) != FL_RESULT_OK)
             return 1;
         (void)ax_send(peer, FL_NET_SESSION_OP_WIFI_ASSOC_RESP, reply,
                       (uint16_t)reply_len);
@@ -159,130 +169,27 @@ fl_result_t fl_net_wifi_ax_station_ota(fl_net_client_t *client,
                                        fl_net_wifi_he_cap_t *he_cap_out,
                                        unsigned timeout_ms)
 {
-    wifi_supplicant_t supp;
-    uint8_t rx[512];
-    uint16_t rx_len = 0;
-    uint8_t tx[512];
-    size_t tx_len = 0;
-    uint8_t msg1[64];
-    uint8_t msg3[64];
+    ax_session_ctx_t session_ctx;
+    wifi_ax_session_io_t io;
+    uint8_t assoc_resp[512];
+    uint16_t assoc_resp_len = 0;
     fl_result_t rc;
 
     if (!client || client->peer_handle == FL_NET_SOCK_INVALID || !cred || !sta_mac ||
         !ap_bssid)
         return FL_RESULT_INVAL;
 
-    if (wifi_supplicant_init(&supp, ap_bssid) != 0)
-        return FL_RESULT_ERR;
-    if (wifi_supplicant_set_credentials(&supp, cred->ssid, cred->passphrase) != 0 ||
-        wifi_supplicant_set_sta_addr(&supp, sta_mac) != 0) {
-        (void)wifi_supplicant_deinit(&supp);
-        return FL_RESULT_ERR;
-    }
+    session_ctx.peer = client->peer_handle;
+    io.ctx = &session_ctx;
+    io.send = ax_session_send;
+    io.recv = ax_session_recv;
 
-    if (auth_mode == FL_WIFI_AUTH_WPA3_SAE) {
-        if (wifi_supplicant_start_sae_handshake(&supp) != 0) {
-            (void)wifi_supplicant_deinit(&supp);
-            return FL_RESULT_ERR;
-        }
-        memcpy(tx, (const uint8_t *)"commit", 6u);
-        rc = ax_send(client->peer_handle, FL_NET_SESSION_OP_WIFI_SAE_COMMIT, tx, 6u);
-        if (rc != FL_RESULT_OK) {
-            (void)wifi_supplicant_deinit(&supp);
-            return rc;
-        }
-        rc = ax_station_recv_opcode(client->peer_handle,
-                                    FL_NET_SESSION_OP_WIFI_SAE_CONFIRM, rx,
-                                    sizeof(rx), &rx_len, timeout_ms);
-        if (rc != FL_RESULT_OK) {
-            (void)wifi_supplicant_deinit(&supp);
-            return rc;
-        }
-        if (wifi_supplicant_process_sae_confirm(&supp, rx, rx_len) != 0) {
-            (void)wifi_supplicant_deinit(&supp);
-            return FL_RESULT_ERR;
-        }
-    } else if (auth_mode == FL_WIFI_AUTH_WPA2_PSK) {
-        if (wifi_supplicant_derive_pmk_psk(&supp, cred->ssid, cred->passphrase) != 0 ||
-            wifi_supplicant_start_4way_handshake(&supp) != 0) {
-            (void)wifi_supplicant_deinit(&supp);
-            return FL_RESULT_ERR;
-        }
-        tx[0] = 0x02;
-        rc = ax_send(client->peer_handle, FL_NET_SESSION_OP_WIFI_EAPOL, tx, 1u);
-        if (rc != FL_RESULT_OK) {
-            (void)wifi_supplicant_deinit(&supp);
-            return rc;
-        }
-        rc = ax_station_recv_opcode(client->peer_handle, FL_NET_SESSION_OP_WIFI_EAPOL,
-                                    msg1, sizeof(msg1), &rx_len, timeout_ms);
-        if (rc != FL_RESULT_OK || rx_len < 38u) {
-            (void)wifi_supplicant_deinit(&supp);
-            return FL_RESULT_ERR;
-        }
-        if (wifi_supplicant_process_msg1(&supp, msg1, rx_len) != 0) {
-            (void)wifi_supplicant_deinit(&supp);
-            return FL_RESULT_ERR;
-        }
-        rc = ax_station_recv_opcode(client->peer_handle, FL_NET_SESSION_OP_WIFI_EAPOL,
-                                    msg3, sizeof(msg3), &rx_len, timeout_ms);
-        if (rc != FL_RESULT_OK || rx_len < 38u) {
-            (void)wifi_supplicant_deinit(&supp);
-            return FL_RESULT_ERR;
-        }
-        if (wifi_supplicant_process_msg3(&supp, msg3, rx_len) != 0) {
-            (void)wifi_supplicant_deinit(&supp);
-            return FL_RESULT_ERR;
-        }
-    }
-
-    if (auth_mode != FL_WIFI_AUTH_OPEN &&
-        wifi_supplicant_get_state(&supp) != WIFI_SUPP_STATE_AUTHENTICATED) {
-        (void)wifi_supplicant_deinit(&supp);
-        return FL_RESULT_ERR;
-    }
-    (void)wifi_supplicant_deinit(&supp);
-
-    if (fl_net_wifi_mgmt_build_assoc_req(cred->ssid, ap_bssid, sta_mac, auth_mode, tx,
-                                         sizeof(tx), &tx_len) != FL_RESULT_OK)
-        return FL_RESULT_ERR;
-    rc = ax_send(client->peer_handle, FL_NET_SESSION_OP_WIFI_ASSOC_REQ, tx,
-                 (uint16_t)tx_len);
+    rc = wifi_ax_station_session_auth(cred, auth_mode, sta_mac, ap_bssid, &io, timeout_ms,
+                                      assoc_resp, sizeof(assoc_resp), &assoc_resp_len);
     if (rc != FL_RESULT_OK)
         return rc;
 
-    rc = ax_station_recv_opcode(client->peer_handle, FL_NET_SESSION_OP_WIFI_ASSOC_RESP,
-                                rx, sizeof(rx), &rx_len, timeout_ms);
-    if (rc != FL_RESULT_OK)
-        return rc;
-
-    if (he_cap_out) {
-        const uint8_t *ies = NULL;
-        size_t ies_len = 0;
-        const uint8_t *body = NULL;
-        size_t body_len = 0;
-        fl_net_wifi_scan_entry_t entry;
-
-        memset(he_cap_out, 0, sizeof(*he_cap_out));
-        memset(&entry, 0, sizeof(entry));
-        if (fl_net_wifi_mgmt_parse_mgmt_ies(rx, rx_len, &ies, &ies_len) == FL_RESULT_OK) {
-            (void)fl_net_wifi_scan_enrich_from_ies(ies, ies_len, &entry);
-            if (fl_net_wifi_ie_find_extension(ies, ies_len, FL_WIFI_EXT_HE_CAPABILITIES,
-                                              &body, &body_len))
-                (void)fl_net_wifi_he_parse_capabilities(body, body_len, he_cap_out);
-            if (fl_net_wifi_ie_find_extension(ies, ies_len, FL_WIFI_EXT_HE_OPERATION,
-                                              &body, &body_len))
-                (void)fl_net_wifi_he_parse_operation(body, body_len, &he_cap_out->bss_color,
-                                                     NULL);
-        }
-        if (entry.he_supported && !he_cap_out->supports_ofdma)
-            he_cap_out->supports_ofdma = 1u;
-        he_cap_out->supports_6ghz = 1u;
-        if (he_cap_out->channel_width_mhz == 0u)
-            he_cap_out->channel_width_mhz = 160u;
-    }
-
-    (void)ax_station_recv_opcode(client->peer_handle, FL_NET_SESSION_OP_WIFI_AUTH_DONE,
-                                 rx, sizeof(rx), &rx_len, timeout_ms);
+    if (he_cap_out)
+        (void)wifi_ax_station_parse_he_cap(assoc_resp, assoc_resp_len, he_cap_out);
     return FL_RESULT_OK;
 }

@@ -5,9 +5,9 @@
 
 #include <string.h>
 
-#include "kernel/drivers/wifi_coprocessor.h"
-#include "kernel/drivers/wifi_driver_packet.h"
-#include "kernel/drivers/wifi_platform.h"
+#include "wifi_coprocessor.h"
+#include "wifi_driver_packet.h"
+#include "wifi_platform.h"
 #include "kernel/core/net/net_wire.h"
 
 #include "fl/mem_asm.h"

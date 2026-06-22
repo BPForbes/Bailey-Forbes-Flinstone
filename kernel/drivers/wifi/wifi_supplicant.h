@@ -12,7 +12,7 @@
 #include <stddef.h>
 #include <stdbool.h>
 
-#include "kernel/drivers/wifi_coprocessor.h"
+#include "wifi_coprocessor.h"
 
 #define WIFI_SUPPLICANT_TIMEOUT_MS 10000
 

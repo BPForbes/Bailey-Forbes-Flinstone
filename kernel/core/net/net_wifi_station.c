@@ -15,7 +15,7 @@
 #include "net_dhcp.h"
 
 /* v4.3.0 WiFi driver backend — kernel orchestrates, drivers execute */
-#include "../../drivers/wifi_driver_backend.h"
+#include "wifi_driver_backend.h"
 
 #include <stdlib.h>
 #include <string.h>

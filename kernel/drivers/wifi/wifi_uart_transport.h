@@ -11,7 +11,7 @@
 #include <stddef.h>
 #include <stdbool.h>
 
-#include "kernel/drivers/wifi_coprocessor.h"
+#include "wifi_coprocessor.h"
 
 #define WIFI_UART_BUFFER_SIZE     4096
 #define WIFI_UART_RX_TIMEOUT_MS   5000

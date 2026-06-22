@@ -7,7 +7,7 @@
 #include <string.h>
 #include <stdio.h>
 
-#include "kernel/drivers/wifi_supplicant.h"
+#include "wifi_supplicant.h"
 #include "kernel/core/net/net_wifi_crypto.h"
 #include "kernel/core/net/net_wifi_wpa.h"
 #include "kernel/core/net/net_wifi_sae.h"

@@ -8,8 +8,8 @@
 #include <string.h>
 #include <assert.h>
 
-#include "kernel/drivers/wifi_coprocessor.h"
-#include "kernel/drivers/wifi_uart_transport.h"
+#include "wifi_coprocessor.h"
+#include "wifi_uart_transport.h"
 
 /* Test fixtures */
 #define TEST_COPROC_NAME "wlan0"
