@@ -6,7 +6,7 @@
 
 /**
  * Station API for **#279** (802.11ax). Scan/connect prefer the v4.3 driver backend,
- * then Linux host WLAN (**net_wifi_host_linux**), then in-tree lab simulation.
+ * then in-tree lab simulation. Host OS wlan is not used by default.
  * **fl_net_wifi_station_netdev** returns the active Wi-Fi **fl_net_driver_t** when UP.
  */
 

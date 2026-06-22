@@ -1,25 +1,20 @@
 #include "net_wifi_netdev.h"
 
-#include "contract_p3_dhcp.h"
 #include "contract_p3_ipv4.h"
+#include "contract_p3_udp.h"
 #include "contract_p3_wire.h"
-#include "net_dhcp.h"
-#include "net_endian.h"
+#include "net_checksum.h"
 #include "net_iface.h"
 #include "net_ipv4.h"
-#include "net_loopback.h"
-#include "net_netdev.h"
-#include "net_packet.h"
+#include "net_ipv6.h"
 #include "net_route.h"
 #include "net_udp.h"
 #include "net_wire.h"
-#include "net_checksum.h"
-#include "net_ipv6.h"
 
+#include <arpa/inet.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
-#include <arpa/inet.h>
 
 #define FL_NET_WIFI_RX_SLOTS 8u
 #define FL_NET_WIFI_RX_MAX FL_NET_WIRE_FRAME_BUF_MAX
@@ -38,12 +33,17 @@ static uint8_t s_ap_bssid[6];
 static uint8_t s_sta_mac[6];
 static char s_joined_ssid[FL_WIFI_SSID_MAX];
 static uint32_t s_wifi_ip_be;
+static uint32_t s_wifi_netmask_be;
+static uint32_t s_wifi_gw_be;
+static uint32_t s_wifi_dns_be;
 static uint8_t s_wifi_ip6[16];
 static uint8_t s_wifi_prefix6;
 static int s_wifi_has_ipv6;
 
-static fl_result_t wifi_rx_enqueue(const uint8_t *frame, size_t len) {
+static fl_result_t wifi_rx_enqueue(const uint8_t *frame, size_t len)
+{
     unsigned idx;
+
     if (!frame || len == 0 || len > FL_NET_WIFI_RX_MAX)
         return FL_RESULT_INVAL;
     if (s_wifi_rx_count >= FL_NET_WIFI_RX_SLOTS)
@@ -55,7 +55,8 @@ static fl_result_t wifi_rx_enqueue(const uint8_t *frame, size_t len) {
     return FL_RESULT_OK;
 }
 
-static fl_result_t wifi_rx_dequeue(uint8_t *buf, size_t cap, size_t *len) {
+static fl_result_t wifi_rx_dequeue(uint8_t *buf, size_t cap, size_t *len)
+{
     if (!buf || !len)
         return FL_RESULT_INVAL;
     if (s_wifi_rx_count == 0)
@@ -71,9 +72,11 @@ static fl_result_t wifi_rx_dequeue(uint8_t *buf, size_t cap, size_t *len) {
 
 static fl_result_t wifi_build_eth_ipv4_reply(const uint8_t *req_ip, size_t req_ip_len,
                                              const void *payload, size_t payload_len,
-                                             uint8_t *out_ip, size_t out_cap) {
+                                             uint8_t *out_ip, size_t out_cap)
+{
     size_t hdr_len;
     uint16_t csum;
+
     if (!req_ip || req_ip_len < FL_NET_IPV4_HDR_LEN_MIN || !out_ip)
         return FL_RESULT_ERR;
     hdr_len = (size_t)((req_ip[0] & 0x0fu) * 4u);
@@ -102,7 +105,8 @@ static fl_result_t wifi_build_eth_ipv4_reply(const uint8_t *req_ip, size_t req_i
 }
 
 static fl_result_t wifi_try_udp_echo(const uint8_t *ip, size_t ip_len, uint8_t *ip_reply,
-                                     size_t ip_reply_cap, size_t *ip_reply_len) {
+                                     size_t ip_reply_cap, size_t *ip_reply_len)
+{
     size_t ihl;
     const uint8_t *udp;
     uint16_t sport;
@@ -142,67 +146,12 @@ static fl_result_t wifi_try_udp_echo(const uint8_t *ip, size_t ip_len, uint8_t *
     if (wifi_build_eth_ipv4_reply(ip, ip_len, udp_buf, udp_len, ip_reply, ip_reply_cap) !=
         FL_RESULT_OK)
         return FL_RESULT_ERR;
-    *ip_reply_len =
-        (size_t)(((ip_reply[2] & 0xffu) << 8) | (ip_reply[3] & 0xffu));
+    *ip_reply_len = (size_t)(((ip_reply[2] & 0xffu) << 8) | (ip_reply[3] & 0xffu));
     return FL_RESULT_OK;
 }
 
-static void wifi_dhcp_store_be32(uint8_t *p, uint32_t v) {
-    p[0] = (uint8_t)((v >> 24) & 0xffu);
-    p[1] = (uint8_t)((v >> 16) & 0xffu);
-    p[2] = (uint8_t)((v >> 8) & 0xffu);
-    p[3] = (uint8_t)(v & 0xffu);
-}
-
-static uint32_t wifi_dhcp_load_be32(const uint8_t *p) {
-    return ((uint32_t)p[0] << 24) | ((uint32_t)p[1] << 16) | ((uint32_t)p[2] << 8) |
-           (uint32_t)p[3];
-}
-
-static int wifi_dhcp_req_msg_type(const uint8_t *buf, size_t len, uint8_t *msg_out) {
-    const uint8_t *opts;
-    size_t opts_len;
-    size_t i;
-
-    if (!buf || len < FL_NET_BOOTP_FIXED_LEN + 4u || !msg_out)
-        return 0;
-    if (buf[0] != 1u)
-        return 0;
-    opts = buf + FL_NET_BOOTP_FIXED_LEN;
-    opts_len = len - FL_NET_BOOTP_FIXED_LEN;
-    if (opts_len < 4u || wifi_dhcp_load_be32(opts) != FL_NET_DHCP_MAGIC_COOKIE_BE32)
-        return 0;
-    opts += 4;
-    opts_len -= 4;
-    for (i = 0; i < opts_len;) {
-        uint8_t code = opts[i++];
-        if (code == FL_NET_DHCP_OPT_PAD)
-            continue;
-        if (code == FL_NET_DHCP_OPT_END)
-            break;
-        if (i >= opts_len)
-            break;
-        {
-            uint8_t olen = opts[i++];
-            if (i + olen > opts_len)
-                break;
-            if (code == FL_NET_DHCP_OPT_MESSAGE_TYPE && olen >= 1u) {
-                *msg_out = opts[i];
-                return 1;
-            }
-            i += olen;
-        }
-    }
-    return 0;
-}
-
-static uint32_t s_wifi_ip_be;
-static uint8_t s_wifi_ip6[16];
-static uint8_t s_wifi_prefix6;
-static int s_wifi_has_ipv6;
-static fl_net_dhcp_lease_info_t s_router_lease;
-
-static uint32_t ipv4_prefix_to_mask_be(uint8_t prefix) {
+static uint32_t ipv4_prefix_to_mask_be(uint8_t prefix)
+{
     if (prefix == 0u)
         return 0u;
     if (prefix >= 32u)
@@ -210,8 +159,9 @@ static uint32_t ipv4_prefix_to_mask_be(uint8_t prefix) {
     return htonl((uint32_t)(UINT32_C(0xffffffff) << (32u - prefix)));
 }
 
-static void wifi_lab_profile_from_env(uint32_t *yiaddr_be, uint8_t *prefix_len,
-                                      uint32_t *gw_be, uint32_t *dns_be) {
+static void wifi_lab_profile_from_env(uint32_t *yiaddr_be, uint8_t *prefix_len, uint32_t *gw_be,
+                                      uint32_t *dns_be)
+{
     const char *ip_s = getenv("FL_NET_WIFI_LAB_IPV4");
     const char *pfx_s = getenv("FL_NET_WIFI_LAB_PREFIX");
     const char *gw_s = getenv("FL_NET_WIFI_LAB_GW");
@@ -246,79 +196,23 @@ static void wifi_lab_profile_from_env(uint32_t *yiaddr_be, uint8_t *prefix_len,
         *dns_be = dns;
 }
 
-static void wifi_router_lease_seed(uint32_t yiaddr_be, uint8_t prefix_len, uint32_t gw_be,
-                                   uint32_t dns_be) {
-    memset(&s_router_lease, 0, sizeof(s_router_lease));
-    s_router_lease.yiaddr_be = yiaddr_be;
-    s_router_lease.prefix_len = prefix_len;
-    s_router_lease.gateway_be = gw_be;
-    s_router_lease.dns_be = dns_be;
-    s_router_lease.has_prefix = 1;
-    s_router_lease.has_gateway = 1;
-    s_router_lease.has_dns = 1;
+static void wifi_store_l3_profile(uint32_t ip_be, uint8_t prefix_len, uint32_t gw_be,
+                                  uint32_t dns_be)
+{
+    s_wifi_ip_be = ip_be;
+    s_wifi_netmask_be = ipv4_prefix_to_mask_be(prefix_len);
+    s_wifi_gw_be = gw_be;
+    s_wifi_dns_be = dns_be;
 }
 
-static size_t wifi_dhcp_append_opt_u32(uint8_t *out, size_t pos, size_t cap, uint8_t code,
-                                       uint32_t v_be) {
-    if (pos + 6u > cap)
-        return pos;
-    out[pos++] = code;
-    out[pos++] = 4u;
-    out[pos++] = (uint8_t)((v_be >> 24) & 0xffu);
-    out[pos++] = (uint8_t)((v_be >> 16) & 0xffu);
-    out[pos++] = (uint8_t)((v_be >> 8) & 0xffu);
-    out[pos++] = (uint8_t)(v_be & 0xffu);
-    return pos;
-}
-
-static fl_result_t wifi_dhcp_build_reply(uint8_t reply_msg, uint32_t xid,
-                                         const uint8_t mac[FL_NET_ETH_ADDR_LEN],
-                                         const fl_net_dhcp_lease_info_t *lease, uint8_t *out,
-                                         size_t cap, size_t *out_len) {
-    size_t pos;
-    uint32_t mask_be;
-
-    if (!mac || !lease || !out || !out_len || cap < FL_NET_BOOTP_FIXED_LEN + 24u)
-        return FL_RESULT_INVAL;
-
-    memset(out, 0, FL_NET_BOOTP_FIXED_LEN);
-    out[0] = 2u;
-    out[1] = 1u;
-    out[2] = FL_NET_ETH_ADDR_LEN;
-    wifi_dhcp_store_be32(out + 4, xid);
-    wifi_dhcp_store_be32(out + 16, lease->yiaddr_be);
-    out[10] = 0x80u;
-    memcpy(out + 28, mac, FL_NET_ETH_ADDR_LEN);
-
-    wifi_dhcp_store_be32(out + 236, FL_NET_DHCP_MAGIC_COOKIE_BE32);
-    pos = FL_NET_BOOTP_FIXED_LEN + 4u;
-    if (pos + 4u > cap)
-        return FL_RESULT_ERR;
-    out[pos++] = FL_NET_DHCP_OPT_MESSAGE_TYPE;
-    out[pos++] = 1u;
-    out[pos++] = reply_msg;
-    if (lease->has_prefix) {
-        mask_be = ipv4_prefix_to_mask_be(lease->prefix_len);
-        pos = wifi_dhcp_append_opt_u32(out, pos, cap, FL_NET_DHCP_OPT_SUBNET_MASK, mask_be);
-    }
-    if (lease->has_gateway)
-        pos = wifi_dhcp_append_opt_u32(out, pos, cap, FL_NET_DHCP_OPT_ROUTER, lease->gateway_be);
-    if (lease->has_dns)
-        pos = wifi_dhcp_append_opt_u32(out, pos, cap, FL_NET_DHCP_OPT_DOMAIN_NAME_SERVER,
-                                       lease->dns_be);
-    if (pos + 1u > cap)
-        return FL_RESULT_ERR;
-    out[pos++] = FL_NET_DHCP_OPT_END;
-    *out_len = pos;
-    return FL_RESULT_OK;
-}
-
-static fl_result_t wifi_driver_send(fl_net_driver_t *drv, const fl_net_frame_view_t *frame) {
+static fl_result_t wifi_driver_send(fl_net_driver_t *drv, const fl_net_frame_view_t *frame)
+{
     size_t ip_off;
     size_t ip_len;
     uint32_t dst_be;
     uint8_t eth_reply[FL_NET_WIFI_RX_MAX];
     size_t eth_len = 0;
+
     (void)drv;
     if (!s_wifi_up || !frame)
         return FL_RESULT_INVAL;
@@ -330,6 +224,7 @@ static fl_result_t wifi_driver_send(fl_net_driver_t *drv, const fl_net_frame_vie
         const uint8_t *ip = frame->data + ip_off;
         uint8_t ip_reply[FL_NET_WIFI_RX_MAX];
         size_t ip_reply_len = 0;
+
         if (ip_len < FL_NET_IPV4_HDR_LEN_MIN)
             return FL_RESULT_OK;
         if (ip[9] == FL_NET_IP_PROTO_ICMP && ip_len > (size_t)((ip[0] & 0x0fu) * 4u)) {
@@ -358,8 +253,10 @@ static fl_result_t wifi_driver_send(fl_net_driver_t *drv, const fl_net_frame_vie
     return FL_RESULT_OK;
 }
 
-static fl_result_t wifi_driver_recv(fl_net_driver_t *drv, fl_net_frame_mut_t *out) {
+static fl_result_t wifi_driver_recv(fl_net_driver_t *drv, fl_net_frame_mut_t *out)
+{
     fl_result_t rc;
+
     (void)drv;
     if (!out)
         return FL_RESULT_INVAL;
@@ -369,16 +266,24 @@ static fl_result_t wifi_driver_recv(fl_net_driver_t *drv, fl_net_frame_mut_t *ou
     return rc;
 }
 
-fl_net_driver_t *fl_net_wifi_netdev_driver(void) {
+fl_net_driver_t *fl_net_wifi_netdev_driver(void)
+{
     return s_wifi_up ? &s_wifi_drv : NULL;
 }
 
-int fl_net_wifi_netdev_is_up(void) {
+int fl_net_wifi_netdev_is_up(void)
+{
     return s_wifi_up;
 }
 
+const char *fl_net_wifi_netdev_iface(void)
+{
+    return FL_NET_WIFI_STATION_IFNAME;
+}
+
 static fl_result_t wifi_netdev_up_common(const fl_net_wifi_scan_entry_t *ap,
-                                           const uint8_t sta_mac[6]) {
+                                         const uint8_t sta_mac[6])
+{
     if (!ap || !sta_mac)
         return FL_RESULT_INVAL;
     memset(&s_wifi_drv, 0, sizeof(s_wifi_drv));
@@ -394,8 +299,8 @@ static fl_result_t wifi_netdev_up_common(const fl_net_wifi_scan_entry_t *ap,
     return FL_RESULT_OK;
 }
 
-fl_result_t fl_net_wifi_netdev_up(const fl_net_wifi_scan_entry_t *ap,
-                                  const uint8_t sta_mac[6]) {
+fl_result_t fl_net_wifi_netdev_up(const fl_net_wifi_scan_entry_t *ap, const uint8_t sta_mac[6])
+{
     uint32_t yi = 0u;
     uint32_t gw = 0u;
     uint32_t dns = 0u;
@@ -405,8 +310,7 @@ fl_result_t fl_net_wifi_netdev_up(const fl_net_wifi_scan_entry_t *ap,
     fl_result_t rc;
 
     wifi_lab_profile_from_env(&yi, &prefix, &gw, &dns);
-    wifi_router_lease_seed(yi, prefix, gw, dns);
-    s_wifi_ip_be = yi;
+    wifi_store_l3_profile(yi, prefix, gw, dns);
     fl_net_ipv4_format_addr(yi, addr_s, sizeof(addr_s));
     fl_net_ipv4_format_addr(gw, gw_s, sizeof(gw_s));
     rc = wifi_netdev_up_common(ap, sta_mac);
@@ -418,19 +322,20 @@ fl_result_t fl_net_wifi_netdev_up(const fl_net_wifi_scan_entry_t *ap,
 }
 
 fl_result_t fl_net_wifi_netdev_up_with_ipv4(const fl_net_wifi_scan_entry_t *ap,
-                                            const uint8_t sta_mac[6],
-                                            const char *addr_s, uint8_t prefix_len,
-                                            const char *gw_s) {
+                                            const uint8_t sta_mac[6], const char *addr_s,
+                                            uint8_t prefix_len, const char *gw_s)
+{
     fl_result_t rc;
     uint32_t ip_be = 0u;
     const char *gw = gw_s;
+    uint32_t gw_be = 0u;
+    uint32_t dns_be = 0u;
 
     rc = wifi_netdev_up_common(ap, sta_mac);
     if (rc != FL_RESULT_OK)
         return rc;
     if (!addr_s || !addr_s[0] || !fl_net_ipv4_parse_literal(addr_s, &ip_be))
         return FL_RESULT_ERR;
-    s_wifi_ip_be = ip_be;
     if (!gw || !gw[0]) {
         static char gw_buf[16];
         uint32_t host = ntohl(ip_be);
@@ -440,19 +345,17 @@ fl_result_t fl_net_wifi_netdev_up_with_ipv4(const fl_net_wifi_scan_entry_t *ap,
         gw = gw_buf;
     }
     if (prefix_len == 0u)
-        prefix_len = s_router_lease.has_prefix ? s_router_lease.prefix_len : 24u;
+        prefix_len = 24u;
+    (void)fl_net_ipv4_parse_literal(gw, &gw_be);
+    wifi_lab_profile_from_env(NULL, NULL, NULL, &dns_be);
+    wifi_store_l3_profile(ip_be, prefix_len, gw_be, dns_be);
     rc = fl_net_route_configure_static(&s_wifi_drv, sta_mac, addr_s, prefix_len, gw);
-    s_router_lease.yiaddr_be = ip_be;
-    s_router_lease.prefix_len = prefix_len;
-    s_router_lease.has_prefix = 1;
-    if (gw && gw[0] && fl_net_ipv4_parse_literal(gw, &s_router_lease.gateway_be)) {
-        s_router_lease.has_gateway = 1;
-    }
     fl_net_iface_refresh();
     return rc;
 }
 
-void fl_net_wifi_netdev_down(void) {
+void fl_net_wifi_netdev_down(void)
+{
     if (s_wifi_up)
         fl_net_route_remove_drv(&s_wifi_drv);
     s_wifi_up = 0;
@@ -460,14 +363,17 @@ void fl_net_wifi_netdev_down(void) {
     s_wifi_rx_count = 0u;
     s_joined_ssid[0] = '\0';
     s_wifi_ip_be = 0u;
+    s_wifi_netmask_be = 0u;
+    s_wifi_gw_be = 0u;
+    s_wifi_dns_be = 0u;
     memset(s_wifi_ip6, 0, sizeof(s_wifi_ip6));
     s_wifi_prefix6 = 0u;
     s_wifi_has_ipv6 = 0;
-    memset(&s_router_lease, 0, sizeof(s_router_lease));
     fl_net_iface_refresh();
 }
 
-fl_result_t fl_net_wifi_netdev_ipv4(uint32_t *addr_be_out) {
+fl_result_t fl_net_wifi_netdev_ipv4(uint32_t *addr_be_out)
+{
     if (!s_wifi_up)
         return FL_RESULT_NOENT;
     if (addr_be_out)
@@ -475,23 +381,19 @@ fl_result_t fl_net_wifi_netdev_ipv4(uint32_t *addr_be_out) {
     return FL_RESULT_OK;
 }
 
-int fl_net_wifi_netdev_router_info(fl_net_dhcp_lease_info_t *out) {
-    if (!out || !s_wifi_up || s_router_lease.yiaddr_be == 0u)
+int fl_net_wifi_netdev_l3_profile(fl_net_wifi_l3_profile_t *out)
+{
+    if (!out || !s_wifi_up || s_wifi_ip_be == 0u)
         return 0;
-    *out = s_router_lease;
-    if (!out->yiaddr_be)
-        out->yiaddr_be = s_wifi_ip_be;
+    out->ipv4 = s_wifi_ip_be;
+    out->netmask = s_wifi_netmask_be;
+    out->gateway = s_wifi_gw_be;
+    out->dns = s_wifi_dns_be;
     return 1;
 }
 
-void fl_net_wifi_netdev_apply_dhcp_lease(const fl_net_dhcp_lease_info_t *lease) {
-    if (!lease || lease->yiaddr_be == 0u)
-        return;
-    s_router_lease = *lease;
-    s_wifi_ip_be = lease->yiaddr_be;
-}
-
-fl_result_t fl_net_wifi_netdev_add_ipv6(const uint8_t src6[16], uint8_t prefix_len) {
+fl_result_t fl_net_wifi_netdev_add_ipv6(const uint8_t src6[16], uint8_t prefix_len)
+{
     uint8_t net6[16];
 
     if (!s_wifi_up || !src6 || prefix_len == 0u || prefix_len > FL_NET_IPV6_MAX_PREFIX_LEN)
@@ -506,7 +408,8 @@ fl_result_t fl_net_wifi_netdev_add_ipv6(const uint8_t src6[16], uint8_t prefix_l
     return FL_RESULT_OK;
 }
 
-fl_result_t fl_net_wifi_netdev_ipv6(uint8_t addr6[16], uint8_t *prefix_len_out) {
+fl_result_t fl_net_wifi_netdev_ipv6(uint8_t addr6[16], uint8_t *prefix_len_out)
+{
     if (!s_wifi_up || !s_wifi_has_ipv6)
         return FL_RESULT_NOENT;
     if (addr6)
@@ -516,51 +419,18 @@ fl_result_t fl_net_wifi_netdev_ipv6(uint8_t addr6[16], uint8_t *prefix_len_out) 
     return FL_RESULT_OK;
 }
 
-int fl_net_wifi_netdev_peer_mac(uint8_t mac[6]) {
+int fl_net_wifi_netdev_peer_mac(uint8_t mac[6])
+{
     if (!s_wifi_up || !mac)
         return 0;
     memcpy(mac, s_ap_bssid, 6);
     return 1;
 }
 
-int fl_net_wifi_netdev_sta_mac(uint8_t mac[6]) {
+int fl_net_wifi_netdev_sta_mac(uint8_t mac[6])
+{
     if (!s_wifi_up || !mac)
         return 0;
     memcpy(mac, s_sta_mac, 6);
     return 1;
-}
-
-fl_result_t fl_net_dhcp_wifi_netdev_exchange(fl_net_driver_t *drv,
-                                            const uint8_t cli_mac[FL_NET_ETH_ADDR_LEN],
-                                            const fl_net_packet_t *req_pkt, uint8_t *reply_l4,
-                                            size_t reply_cap, size_t *reply_len,
-                                            unsigned timeout_ms) {
-    const uint8_t *req;
-    size_t req_len;
-    uint8_t req_msg = 0;
-    uint32_t xid = 0;
-    uint8_t reply_msg;
-    fl_result_t rc;
-
-    (void)timeout_ms;
-    if (!drv || drv != &s_wifi_drv || !s_wifi_up || !cli_mac || !req_pkt || !reply_l4 ||
-        !reply_len)
-        return FL_RESULT_INVAL;
-
-    rc = fl_net_packet_l4_view(req_pkt, &req, &req_len);
-    if (rc != FL_RESULT_OK)
-        return rc;
-    if (!wifi_dhcp_req_msg_type(req, req_len, &req_msg))
-        return FL_RESULT_ERR;
-
-    xid = wifi_dhcp_load_be32(req + 4);
-    if (req_msg == FL_NET_DHCP_MSG_DISCOVER)
-        reply_msg = FL_NET_DHCP_MSG_OFFER;
-    else if (req_msg == FL_NET_DHCP_MSG_REQUEST)
-        reply_msg = FL_NET_DHCP_MSG_ACK;
-    else
-        return FL_RESULT_ERR;
-
-    return wifi_dhcp_build_reply(reply_msg, xid, cli_mac, &s_router_lease, reply_l4, reply_cap,
-                                 reply_len);
 }

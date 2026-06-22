@@ -263,7 +263,7 @@ static int test_mgmt_hdr_probe(void) {
     return 0;
 }
 
-static int test_wifi_lab_dhcp_udp(void) {
+static int test_wifi_lab_static_l3_udp(void) {
     static const uint8_t bssid[6] = {0x02, 0x11, 0x22, 0x33, 0x44, 0x55};
     fl_net_wifi_cred_t cred;
     uint32_t ip_be = 0u;
@@ -288,10 +288,10 @@ static int test_wifi_lab_dhcp_udp(void) {
     ASSERT(fl_net_wifi_netdev_ipv4(&ip_be) == FL_RESULT_OK);
     ASSERT(ip_be != 0u);
     {
-        fl_net_dhcp_lease_info_t router;
-        ASSERT(fl_net_wifi_netdev_router_info(&router));
-        ASSERT(router.has_gateway);
-        gw_be = router.gateway_be;
+        fl_net_wifi_l3_profile_t l3;
+        ASSERT(fl_net_wifi_netdev_l3_profile(&l3));
+        ASSERT(l3.gateway != 0u);
+        gw_be = l3.gateway;
     }
     rc = fl_net_udp_echo_exchange(gw_be, 48077u, 48078u, (const uint8_t *)payload,
                                   strlen(payload), rx, sizeof(rx), &rx_len, 3000u);
@@ -332,7 +332,7 @@ int main(void) {
         return 1;
     if (test_mgmt_hdr_probe() != 0)
         return 1;
-    if (test_wifi_lab_dhcp_udp() != 0)
+    if (test_wifi_lab_static_l3_udp() != 0)
         return 1;
     puts("test_p3_wifi: all passed");
     return 0;

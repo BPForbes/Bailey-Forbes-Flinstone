@@ -22,7 +22,6 @@
 #include "server_shared_db.h"
 #include "session.h"
 #include "shell_io.h"
-#include "net_wifi_host_linux.h"
 #include "net_wifi_netdev.h"
 #include "fl_platform.h"
 #include "threadpool.h"
@@ -79,19 +78,21 @@ static void print_sock_error(const char *verb, fl_result_t rc) {
         fl_color_error("%s failed (rc=%d)", verb, (int)rc);
 }
 
-/* Lab/TAP IPv4 exists only in the in-tree route table — not on the Windows stack. */
-static int wsl_in_tree_lab_bind(const fl_net_endpoint_t *bind_ep) {
+/* Lab/TAP IPv4 exists only in the in-tree route table — not on the host OS stack. */
+static int wsl_in_tree_lab_bind(const fl_net_endpoint_t *bind_ep)
+{
     if (!bind_ep || bind_ep->family != FL_NET_ADDR_FAMILY_V4)
         return 0;
     if (bind_ep->addr.v4_be != 0u) {
         if (fl_net_ipv4_is_loopback(bind_ep->addr.v4_be))
-            return fl_net_wifi_netdev_is_up() && !fl_net_wifi_host_linux_opted_in();
+            return fl_net_wifi_netdev_is_up();
         return fl_net_sock_native_eligible_bind_v4(bind_ep->addr.v4_be);
     }
-    return fl_net_wifi_netdev_is_up() && !fl_net_wifi_host_linux_opted_in();
+    return fl_net_wifi_netdev_is_up();
 }
 
-static void host_print_wsl_lan_hint(uint16_t port) {
+static void host_print_wsl_lan_hint(uint16_t port)
+{
     char peer[32];
 
     if (fl_net_wifi_netdev_is_up()) {
@@ -100,46 +101,36 @@ static void host_print_wsl_lan_hint(uint16_t port) {
             fl_net_ipv4_format_addr(nd, peer, sizeof(peer));
         else if (!fl_net_iface_suggest_ipv4(NULL, peer, sizeof(peer)))
             return;
-    } else if (fl_net_wifi_host_linux_opted_in()) {
-        const char *wip = fl_net_wifi_host_linux_windows_ipv4();
-        if (wip && wip[0]) {
-            strncpy(peer, wip, sizeof(peer) - 1u);
-            peer[sizeof(peer) - 1u] = '\0';
-        } else if (!fl_net_iface_suggest_ipv4(NULL, peer, sizeof(peer)))
-            return;
     } else if (!fl_net_iface_suggest_ipv4(NULL, peer, sizeof(peer))) {
         return;
     }
     fl_color_success("peers can: server join %s:%u", peer, (unsigned)port);
 }
 
-static void host_print_wsl_join_hints(const fl_net_endpoint_t *bind_ep, uint16_t port,
-                                      const char *win_ip_display) {
-    char wsl_ip[32];
+static void host_print_wsl_join_hints(const fl_net_endpoint_t *bind_ep, uint16_t port)
+{
+    char nd_ip[32];
 
     if (fl_platform_detect() != FL_PLATFORM_WSL)
         return;
 
     if (wsl_in_tree_lab_bind(bind_ep)) {
         host_print_wsl_lan_hint(port);
+        if (fl_net_wifi_netdev_is_up()) {
+            uint32_t nd = 0u;
+            if (fl_net_wifi_netdev_ipv4(&nd) == FL_RESULT_OK && nd != 0u) {
+                fl_net_ipv4_format_addr(nd, nd_ip, sizeof(nd_ip));
+                fl_color_success("in-tree lab: server join %s:%u or 127.0.0.1:%u",
+                                 nd_ip, (unsigned)port, (unsigned)port);
+                return;
+            }
+        }
         puts("in-tree lab host: use server join <addr>:<port> on this shell, or bind "
              ":<port> and join 127.0.0.1:<port> from another terminal.");
         return;
     }
 
-    if (win_ip_display) {
-        fl_color_warn("WSL listen is 0.0.0.0:%u (requested %s); no automatic LAN "
-                      "port forwarding.",
-                      (unsigned)port, win_ip_display);
-    }
-
-    if (fl_net_wifi_host_linux_wsl_ipv4(wsl_ip, sizeof(wsl_ip)) == 0) {
-        fl_color_success("join from another WSL shell: server join 127.0.0.1:%u or %s:%u",
-                         (unsigned)port, wsl_ip, (unsigned)port);
-    } else {
-        fl_color_success("join from another shell: server join 127.0.0.1:%u",
-                         (unsigned)port);
-    }
+    fl_color_success("join from another shell: server join 127.0.0.1:%u", (unsigned)port);
 }
 
 static int parse_host_endpoint(int argc, char **argv, fl_net_endpoint_t *ep) {
@@ -567,9 +558,8 @@ static void maybe_handle_nick_prompt_sync(void) {
  * if hosted sockets are unavailable on this build (FL_RESULT_NOSYS). */
 static int verb_host(int argc, char **argv) {
     fl_net_endpoint_t ep;
-    fl_net_endpoint_t bind_ep;   /* actual WSL bind address (may differ from ep) */
+    fl_net_endpoint_t bind_ep;
     fl_result_t rc;
-    const char *win_ip_display = NULL; /* set when user specified Windows Wi-Fi IP */
 
     if (argc < 3) {
         fl_color_error("usage: server host <ip:port> | server host -all <port> | server host :<port>");
@@ -593,20 +583,6 @@ static int verb_host(int argc, char **argv) {
     }
     bind_ep = ep;
 
-    /* Windows Wi-Fi IPv4 lives on the Windows stack; WSL binds 0.0.0.0 instead. */
-    {
-        const char *wip = fl_net_wifi_host_linux_opted_in()
-                              ? fl_net_wifi_host_linux_windows_ipv4()
-                              : NULL;
-        if (wip && ep.family == FL_NET_ADDR_FAMILY_V4 && ep.addr.v4_be != 0u) {
-            uint32_t win_be = 0u;
-            if (fl_net_ipv4_parse_literal(wip, &win_be) && win_be == ep.addr.v4_be) {
-                win_ip_display = wip;
-                bind_ep.addr.v4_be = 0u;
-            }
-        }
-    }
-
     rc = fl_net_server_host_start_ep(&g_server, &bind_ep, current_principal());
     if (rc == FL_RESULT_NOSYS) {
         pthread_mutex_unlock(&session_mutex);
@@ -628,17 +604,12 @@ static int verb_host(int argc, char **argv) {
     g_server_running = 1;
     pthread_mutex_unlock(&session_mutex);
 
-    if (win_ip_display) {
-        fl_color_success("hosting as '%s' on %s:%u",
-                         current_principal(), win_ip_display, (unsigned)ep.port_host);
-    } else {
-        char bind_txt[128];
-        if (fl_net_endpoint_format(&bind_ep, bind_txt, sizeof(bind_txt)))
-            fl_color_success("hosting as '%s' on %s", current_principal(), bind_txt);
-        else
-            fl_color_success("hosting as '%s' on %s", current_principal(), argv[2]);
-    }
-    host_print_wsl_join_hints(&bind_ep, bind_ep.port_host, win_ip_display);
+    char bind_txt[128];
+    if (fl_net_endpoint_format(&bind_ep, bind_txt, sizeof(bind_txt)))
+        fl_color_success("hosting as '%s' on %s", current_principal(), bind_txt);
+    else
+        fl_color_success("hosting as '%s' on %s", current_principal(), argv[2]);
+    host_print_wsl_join_hints(&bind_ep, bind_ep.port_host);
     return 0;
 }
 
