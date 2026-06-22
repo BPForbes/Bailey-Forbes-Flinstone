@@ -45,7 +45,7 @@ static const char *band_name(uint8_t band) {
     }
 }
 
-/* In-tree station IPv4 for peer hints (static lab profile on wlan-lab). */
+/* In-tree station IPv4 for peer hints (lab netdev or host bind address). */
 static int wifi_peer_ipv4(char *buf, size_t cap, uint32_t *be_out) {
     if (fl_net_wifi_netdev_is_up()) {
         uint32_t nd = 0u;
@@ -69,7 +69,7 @@ static int wifi_usage(void) {
           "  wifi known\n"
           "  wifi status\n"
           "  Lab scan: set FL_NET_WIFI_HOME_SSID to include your home network in scan results.\n"
-          "  Default: in-tree 802.11 lab (LabAxHome/GuestOpen on wlan-lab static L3).\n"
+          "  Default: in-tree 802.11 lab (LabAxHome/GuestOpen; DHCP on wlan-lab).\n"
           "  Real Wi-Fi (opt-in): set FL_NET_WIFI_FLINSTONE_PS on WSL, or FL_NET_WIFI_USE_WPA=1\n"
           "    on native Linux with wpa_cli/nmcli. See README.md and docs/P3_NETWORKING.md.\n",
           stderr);
@@ -385,11 +385,30 @@ static int cmd_wifi_status(int argc, char **argv) {
     (void)argv;
     printf("Wi-Fi state: %d\n", (int)fl_net_wifi_state());
     if (fl_net_wifi_station_lab_backend())
-        puts("Backend: in-tree 802.11 lab (wlan-lab static L3)");
+        puts("Backend: in-tree 802.11 lab (wlan-lab DHCP)");
     else if (fl_net_wifi_station_host_backend()) {
         const char *backend = fl_net_wifi_host_linux_backend_name();
+        char bind_ip[32];
+        uint32_t bind_be = 0u;
+        uint8_t prefix = 24u;
+
         printf("Backend: %s (%s)\n", backend ? backend : "host",
                fl_net_wifi_host_linux_iface());
+        if (fl_net_wifi_host_linux_ipv4_route(&bind_be, &prefix, NULL) == FL_RESULT_OK &&
+            bind_be != 0u) {
+            fl_net_ipv4_format_addr(bind_be, bind_ip, sizeof(bind_ip));
+            printf("Station L3 (host bind): %s/%u\n", bind_ip, (unsigned)prefix);
+            printf("Server host: server host :<port> or server host %s:<port>\n", bind_ip);
+            {
+                const char *win = fl_net_wifi_host_linux_windows_ipv4();
+                if (win && win[0])
+                    printf("LAN peer hint (Windows Wi-Fi): %s:<port> "
+                           "(not bindable in WSL; use server-proxy for LAN peers)\n",
+                           win);
+            }
+        } else {
+            puts("Station L3: waiting for host DHCP (wifi status again in a moment)");
+        }
     } else if (fl_net_wifi_host_linux_opted_in() && fl_net_wifi_host_linux_available()) {
         const char *backend = fl_net_wifi_host_linux_backend_name();
         printf("Backend: %s available on %s (not associated)\n",

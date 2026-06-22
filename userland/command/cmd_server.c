@@ -23,6 +23,7 @@
 #include "session.h"
 #include "shell_io.h"
 #include "net_wifi_netdev.h"
+#include "net_wifi_host_linux.h"
 #include "fl_platform.h"
 #include "threadpool.h"
 
@@ -76,6 +77,21 @@ static void print_sock_error(const char *verb, fl_result_t rc) {
         fl_color_error("%s failed: address in use or not available on this host", verb);
     else
         fl_color_error("%s failed (rc=%d)", verb, (int)rc);
+    if (e == EADDRNOTAVAIL) {
+        char bind_ip[32];
+        const char *win = fl_net_wifi_host_linux_windows_ipv4();
+        if (fl_net_iface_suggest_ipv4(NULL, bind_ip, sizeof(bind_ip))) {
+            fputs("hint: that IPv4 is not on this shell's bindable interfaces.\n", stderr);
+            fprintf(stderr, "      try: %s :<port>  or  %s %s:<port>\n", verb, verb, bind_ip);
+        } else {
+            fprintf(stderr, "hint: try: %s :<port>  (bind all interfaces)\n", verb);
+        }
+        if (win && win[0])
+            fprintf(stderr,
+                    "      Windows Wi-Fi LAN address %s is display-only in WSL; "
+                    "use FlinstonePowershell server-proxy for LAN peers.\n",
+                    win);
+    }
 }
 
 /* Lab/TAP IPv4 exists only in the in-tree route table — not on the host OS stack. */
@@ -167,6 +183,16 @@ static int parse_host_endpoint(int argc, char **argv, fl_net_endpoint_t *ep) {
             return -1;
         fl_net_endpoint_from_v4(any_be, (uint16_t)port, ep);
         return 0;
+    }
+    if (strchr(argv[2], ':') == NULL) {
+        errno = 0;
+        port = strtol(argv[2], &end, 10);
+        if (errno == 0 && end != argv[2] && end && *end == '\0' && port > 0 && port <= 65535) {
+            if (!fl_net_ipv4_parse_literal("0.0.0.0", &any_be))
+                return -1;
+            fl_net_endpoint_from_v4(any_be, (uint16_t)port, ep);
+            return 0;
+        }
     }
     if (parse_endpoint_full(argv[2], ep) != 0)
         return -1;
@@ -562,7 +588,11 @@ static int verb_host(int argc, char **argv) {
     fl_result_t rc;
 
     if (argc < 3) {
-        fl_color_error("usage: server host <ip:port> | server host -all <port> | server host :<port>");
+        char suggest[32];
+        fl_color_error("usage: server host <ip:port> | server host <port> | server host -all <port> | server host :<port>");
+        if (fl_net_iface_suggest_ipv4(NULL, suggest, sizeof(suggest)))
+            fprintf(stderr, "hint: after wifi join try  server host :8888  or  server host %s:8888\n",
+                    suggest);
         return 1;
     }
     pthread_mutex_lock(&session_mutex);

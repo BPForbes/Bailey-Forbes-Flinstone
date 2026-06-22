@@ -7,6 +7,8 @@
 #include "net_netdev.h"
 #include "net_route.h"
 #include "net_wifi_netdev.h"
+#include "net_wifi_host_linux.h"
+#include "net_wifi_station.h"
 
 #include <stdio.h>
 #include <string.h>
@@ -119,6 +121,28 @@ static void iface_add_route_row(const fl_net_route_entry_t *route) {
         e->prefix_len = route->prefix_len;
 }
 
+static void iface_add_host_wifi_row(void) {
+    fl_net_iface_entry_t *e;
+    uint32_t addr_be = 0u;
+    uint8_t prefix = 24u;
+    const char *name;
+
+    if (!fl_net_wifi_station_host_backend())
+        return;
+    if (fl_net_wifi_host_linux_ipv4_route(&addr_be, &prefix, NULL) != FL_RESULT_OK ||
+        addr_be == 0u)
+        return;
+    name = fl_net_wifi_host_linux_iface();
+    if (!name || !name[0])
+        name = "wlan0";
+    e = iface_alloc(name, fl_net_netdev_loopback(), 0u);
+    if (!e)
+        return;
+    e->addr_be = addr_be;
+    if (prefix > 0u)
+        e->prefix_len = prefix;
+}
+
 void fl_net_iface_refresh(void) {
     fl_net_route_entry_t routes[FL_NET_ROUTE_TABLE_MAX];
     fl_net_route6_entry_t routes6[FL_NET_ROUTE_TABLE_MAX];
@@ -137,6 +161,8 @@ void fl_net_iface_refresh(void) {
     n6 = fl_net_route_snapshot6(routes6, FL_NET_ROUTE_TABLE_MAX);
     for (i = 0; i < n6; i++)
         iface_add_route6_row(&routes6[i]);
+
+    iface_add_host_wifi_row();
 
     if (s_iface_count == 0u) {
         fl_net_route_entry_t loop;
@@ -161,6 +187,20 @@ int fl_net_iface_suggest_ipv4(uint32_t *addr_be_out, char *buf, size_t buf_len) 
     unsigned count;
     unsigned i;
     uint32_t pick = 0u;
+
+    /*
+     * Host Wi-Fi backend (wpa_cli / FlinstonePowershell): bindable IPv4 from the
+     * host stack, not the in-tree wlan-lab netdev.
+     */
+    if (fl_net_wifi_station_host_backend()) {
+        uint32_t host_be = 0u;
+        if (fl_net_wifi_host_linux_ipv4(&host_be, buf, buf_len) == FL_RESULT_OK &&
+            host_be != 0u) {
+            if (addr_be_out)
+                *addr_be_out = host_be;
+            return 1;
+        }
+    }
 
     /*
      * In-tree WiFi netdev (lab/driver) is the default peer hint.

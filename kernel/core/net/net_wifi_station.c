@@ -204,6 +204,7 @@ static fl_result_t host_linux_connect(const fl_net_wifi_cred_t *cred, unsigned t
     s_lab_backend = 0;
     s_wifi_state = FL_WIFI_STATE_UP;
     strncpy(s_lab_joined_ssid, cred->ssid, sizeof(s_lab_joined_ssid) - 1u);
+    (void)fl_net_wifi_host_linux_ipv4_route(NULL, NULL, NULL);
     fl_net_iface_refresh();
     return FL_RESULT_OK;
 }
