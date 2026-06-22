@@ -398,13 +398,12 @@ static int cmd_wifi_status(int argc, char **argv) {
             bind_be != 0u) {
             fl_net_ipv4_format_addr(bind_be, bind_ip, sizeof(bind_ip));
             printf("Station L3 (host bind): %s/%u\n", bind_ip, (unsigned)prefix);
-            printf("Server host: server host :<port> or server host %s:<port>\n", bind_ip);
+            printf("Server host: server host :<port> (WSL portproxy) or server host %s:<port>\n",
+                   bind_ip);
             {
                 const char *win = fl_net_wifi_host_linux_windows_ipv4();
                 if (win && win[0])
-                    printf("LAN peer hint (Windows Wi-Fi): %s:<port> "
-                           "(not bindable in WSL; use server-proxy for LAN peers)\n",
-                           win);
+                    printf("LAN peers join: %s:<port> after server host sets portproxy\n", win);
             }
         } else {
             puts("Station L3: waiting for host DHCP (wifi status again in a moment)");
