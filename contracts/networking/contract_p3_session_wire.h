@@ -79,6 +79,16 @@
 #define FL_NET_SESSION_OP_FILE_META     0x38u
 #define FL_NET_SESSION_OP_FILE_LAST     0x38u
 
+/** WiFi 802.11ax L2 emulation over session wire (#279 lab; server host/join). */
+#define FL_NET_SESSION_OP_WIFI_FIRST       0x40u
+#define FL_NET_SESSION_OP_WIFI_SAE_COMMIT  0x40u
+#define FL_NET_SESSION_OP_WIFI_SAE_CONFIRM 0x41u
+#define FL_NET_SESSION_OP_WIFI_EAPOL       0x42u
+#define FL_NET_SESSION_OP_WIFI_ASSOC_REQ   0x43u
+#define FL_NET_SESSION_OP_WIFI_ASSOC_RESP  0x44u
+#define FL_NET_SESSION_OP_WIFI_AUTH_DONE   0x45u
+#define FL_NET_SESSION_OP_WIFI_LAST        0x45u
+
 #define FL_NET_SESSION_OP_ERR 0x7Fu
 
 /** Local command status for outbound file offers (not a wire opcode). */
@@ -90,6 +100,12 @@ static inline int fl_net_session_is_file_opcode(uint8_t opcode)
 {
     return opcode >= FL_NET_SESSION_OP_FILE_FIRST &&
            opcode <= FL_NET_SESSION_OP_FILE_LAST;
+}
+
+static inline int fl_net_session_is_wifi_opcode(uint8_t opcode)
+{
+    return opcode >= FL_NET_SESSION_OP_WIFI_FIRST &&
+           opcode <= FL_NET_SESSION_OP_WIFI_LAST;
 }
 
 fl_result_t fl_net_session_validate_file_frame(uint8_t opcode,
