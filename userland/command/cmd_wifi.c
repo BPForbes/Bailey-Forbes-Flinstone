@@ -10,6 +10,7 @@
 #include "net_wifi_netdev.h"
 #include "net_wifi_host_linux.h"
 #include "net_wifi_station.h"
+#include "fl_platform.h"
 
 #include <stdio.h>
 #include <string.h>
@@ -45,7 +46,7 @@ static const char *band_name(uint8_t band) {
 }
 
 /*
- * LAN-reachable IPv4 for peer hints: Windows Wi-Fi on WSL, else netdev wlan0.
+ * LAN-reachable IPv4 for peer hints: router DHCP on wlan netdev (not host machine).
  * Returns 1 when an address was written.
  */
 static int wifi_peer_ipv4(char *buf, size_t cap, uint32_t *be_out) {
@@ -59,19 +60,25 @@ static int wifi_peer_ipv4(char *buf, size_t cap, uint32_t *be_out) {
             return 1;
         }
     }
-    if (fl_net_wifi_host_linux_opted_in()) {
-        const char *wip = fl_net_wifi_host_linux_windows_ipv4();
-        if (wip && wip[0]) {
-            if (buf && cap > 0u) {
-                strncpy(buf, wip, cap - 1u);
-                buf[cap - 1u] = '\0';
-            }
-            if (be_out)
-                (void)fl_net_ipv4_parse_literal(wip, be_out);
-            return 1;
-        }
-    }
     return 0;
+}
+
+static void wifi_print_machine_host_info(void) {
+    char buf[32];
+
+    if (fl_platform_detect() == FL_PLATFORM_WSL) {
+        if (fl_net_wifi_host_linux_wsl_ipv4(buf, sizeof(buf)) == 0 && buf[0])
+            printf("Machine (WSL eth0): %s\n", buf);
+        if (fl_net_wifi_host_linux_opted_in()) {
+            const char *wip = fl_net_wifi_host_linux_windows_ipv4();
+            if (wip && wip[0])
+                printf("Machine (Windows Wi-Fi): %s\n", wip);
+        }
+        return;
+    }
+    if (fl_net_wifi_host_linux_opted_in() &&
+        fl_net_wifi_host_linux_ipv4(NULL, buf, sizeof(buf)) == FL_RESULT_OK && buf[0])
+        printf("Machine (host wlan): %s\n", buf);
 }
 
 static int wifi_usage(void) {
@@ -423,28 +430,35 @@ static int cmd_wifi_status(int argc, char **argv) {
             fl_net_wifi_netdev_ipv4(&ip_be) == FL_RESULT_OK) {
             char ip6[64];
             char peer_ip[32];
+            char gw_ip[32];
+            char dns_ip[32];
+            fl_net_dhcp_lease_info_t router;
             uint8_t addr6[16];
             uint8_t p6 = 0u;
-            const char *win_ip = fl_net_wifi_host_linux_opted_in()
-                                     ? fl_net_wifi_host_linux_windows_ipv4()
-                                     : NULL;
+
+            if (fl_net_wifi_netdev_router_info(&router)) {
+                fl_net_ipv4_format_addr(router.yiaddr_be, ip, sizeof(ip));
+                printf("Router (DHCP) IPv4: %s/%u",
+                       ip, router.has_prefix ? (unsigned)router.prefix_len : 24u);
+                if (router.has_gateway) {
+                    fl_net_ipv4_format_addr(router.gateway_be, gw_ip, sizeof(gw_ip));
+                    printf("  gateway %s", gw_ip);
+                }
+                if (router.has_dns) {
+                    fl_net_ipv4_format_addr(router.dns_be, dns_ip, sizeof(dns_ip));
+                    printf("  dns %s", dns_ip);
+                }
+                putchar('\n');
+            } else {
+                fl_net_ipv4_format_addr(ip_be, ip, sizeof(ip));
+                printf("Router (DHCP) IPv4: %s\n", ip);
+            }
             if (wifi_peer_ipv4(peer_ip, sizeof(peer_ip), NULL))
-                printf("Interface %s IPv4: %s (server host %s:<port> or server host -all <port>)\n",
-                       ifname, peer_ip, peer_ip);
-            else {
-                fl_net_ipv4_format_addr(ip_be, ip, sizeof(ip));
-                printf("Interface %s IPv4: %s (server host %s:<port> or server host -all <port>)\n",
-                       ifname, ip, ip);
-            }
-            if (win_ip) {
-                fl_net_ipv4_format_addr(ip_be, ip, sizeof(ip));
-                if (strcmp(ip, win_ip) != 0)
-                    printf("WSL eth0: %s (internal NAT; not reachable from LAN)\n", ip);
-                printf("Windows Wi-Fi IP: %s (router-assigned; LAN peers use this)\n", win_ip);
-            }
+                printf("Server host/join: %s:<port> or server host :<port>\n", peer_ip);
+            wifi_print_machine_host_info();
             if (fl_net_wifi_netdev_ipv6(addr6, &p6) == FL_RESULT_OK &&
                 fl_net_ipv6_format_addr(addr6, ip6, sizeof(ip6)))
-                printf("Interface %s IPv6: %s/%u\n", ifname, ip6, (unsigned)p6);
+                printf("Router IPv6: %s/%u\n", ip6, (unsigned)p6);
         } else if (fl_net_wifi_station_netdev() != NULL) {
             printf("Interface %s: associating…\n", ifname);
         } else {

@@ -288,10 +288,10 @@ static int test_wifi_lab_dhcp_udp(void) {
     ASSERT(fl_net_wifi_netdev_ipv4(&ip_be) == FL_RESULT_OK);
     ASSERT(ip_be != 0u);
     {
-        uint32_t ip_host = fl_net_ntohl(ip_be);
-        uint32_t gw_host = (ip_host & UINT32_C(0xFFFFFF00)) | UINT32_C(0x02);
-
-        gw_be = fl_net_htonl(gw_host);
+        fl_net_dhcp_lease_info_t router;
+        ASSERT(fl_net_wifi_netdev_router_info(&router));
+        ASSERT(router.has_gateway);
+        gw_be = router.gateway_be;
     }
     rc = fl_net_udp_echo_exchange(gw_be, 48077u, 48078u, (const uint8_t *)payload,
                                   strlen(payload), rx, sizeof(rx), &rx_len, 3000u);

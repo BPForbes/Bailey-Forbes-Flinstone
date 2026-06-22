@@ -9,6 +9,17 @@
 #include <stddef.h>
 #include <stdint.h>
 
+/** Parsed DHCP lease fields from OFFER/ACK options (router-assigned L3). */
+typedef struct fl_net_dhcp_lease_info {
+    uint32_t yiaddr_be;
+    uint8_t  prefix_len;
+    uint32_t gateway_be;
+    uint32_t dns_be;
+    unsigned has_prefix  : 1;
+    unsigned has_gateway : 1;
+    unsigned has_dns     : 1;
+} fl_net_dhcp_lease_info_t;
+
 /**
  * Build a BOOTREQUEST with DHCP message type option (discover or request).
  * **mac** is six octets; **xid** is stored big-endian on the wire.
@@ -31,7 +42,14 @@ fl_result_t fl_net_dhcp_parse_reply(const uint8_t *buf, size_t len, uint32_t *xi
 
 /** Parse BOOTREPLY from **pkt** L4 slice (**fl_net_packet_bind_l4** or RX parse). */
 fl_result_t fl_net_dhcp_parse_reply_pkt(const fl_net_packet_t *pkt, uint32_t *xid_out,
-                                      uint32_t *yiaddr_be_out, uint8_t *dhcp_msg_type_out);
+                                        uint32_t *yiaddr_be_out, uint8_t *dhcp_msg_type_out);
+
+/** Parse yiaddr plus subnet mask, router, and DNS options from a BOOTREPLY. */
+fl_result_t fl_net_dhcp_parse_lease(const uint8_t *buf, size_t len,
+                                    fl_net_dhcp_lease_info_t *lease_out);
+
+fl_result_t fl_net_dhcp_parse_lease_pkt(const fl_net_packet_t *pkt,
+                                        fl_net_dhcp_lease_info_t *lease_out);
 
 /**
  * Lab client: DISCOVER then REQUEST after OFFER (hosted UDP). On success optionally installs
@@ -45,6 +63,7 @@ fl_result_t fl_net_dhcp_lab_acquire(uint32_t *leased_addr_be, unsigned timeout_m
  */
 fl_result_t fl_net_dhcp_acquire(fl_net_driver_t *drv, const uint8_t mac[FL_NET_ETH_ADDR_LEN],
                                 const char *subnet_addr_s, unsigned prefix_len, const char *gw_s,
-                                uint32_t *leased_addr_be, unsigned timeout_ms);
+                                uint32_t *leased_addr_be, fl_net_dhcp_lease_info_t *lease_out,
+                                unsigned timeout_ms);
 
 #endif /* NET_DHCP_H */
