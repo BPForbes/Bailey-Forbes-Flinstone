@@ -109,17 +109,6 @@ static void print_sock_error(const char *verb, fl_result_t rc) {
     }
 }
 
-static void host_abort_started_listener(void) {
-    pthread_mutex_lock(&session_mutex);
-    if (g_server_bg) {
-        fl_server_bg_stop_server(g_server_bg);
-        g_server_bg = NULL;
-    }
-    fl_net_server_host_stop(&g_server);
-    g_server_running = 0;
-    pthread_mutex_unlock(&session_mutex);
-}
-
 static void host_print_wsl_lan_hint(const char *listen_ip, uint16_t port) {
     const char *wip = fl_net_wifi_host_linux_windows_ipv4();
     char        peer[32];
@@ -1407,7 +1396,7 @@ static int verb_netinit(void) {
 
     rc = fl_net_macvlan_create(FL_NET_MACVLAN_NAME, parent);
     if (rc != FL_RESULT_OK) {
-        if (rc == FL_RESULT_PERM)
+        if (rc == FL_RESULT_ACCES)
             fl_color_error("fl0 setup needs elevated permissions — run with sudo or:\n"
                            "  ip link add fl0 link <parent> type macvlan mode bridge\n"
                            "  ip link set fl0 up");
