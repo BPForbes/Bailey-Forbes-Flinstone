@@ -5,6 +5,7 @@
 
 #include "wifi_lab_backend.h"
 
+#include "wifi_lab_router.h"
 #include "wifi_supplicant.h"
 
 #include "net_wifi_he.h"
@@ -272,6 +273,7 @@ void wifi_lab_reset(void)
     memset(s_lab_scan, 0, sizeof(s_lab_scan));
     memset(&s_negotiated_he, 0, sizeof(s_negotiated_he));
     s_lab_connected = 0;
+    wifi_lab_router_reset();
     fl_net_wifi_wpa_lab_reset();
 }
 

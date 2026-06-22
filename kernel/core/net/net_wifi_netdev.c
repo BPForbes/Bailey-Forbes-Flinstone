@@ -3,7 +3,9 @@
 #include "contract_p3_ipv4.h"
 #include "contract_p3_udp.h"
 #include "contract_p3_wire.h"
+#include "net_arp.h"
 #include "net_checksum.h"
+#include "net_dhcp.h"
 #include "net_iface.h"
 #include "net_ipv4.h"
 #include "net_ipv6.h"
@@ -205,6 +207,33 @@ static void wifi_store_l3_profile(uint32_t ip_be, uint8_t prefix_len, uint32_t g
     s_wifi_dns_be = dns_be;
 }
 
+static fl_result_t wifi_try_arp_reply(const uint8_t *frame, size_t len, uint8_t *eth_reply,
+                                      size_t cap, size_t *eth_len)
+{
+    uint16_t op;
+    uint32_t sender_ip;
+    uint32_t target_ip;
+    uint8_t sender_mac[6];
+    uint8_t target_mac[6];
+    size_t reply_len;
+
+    if (!frame || !eth_reply || !eth_len || s_wifi_ip_be == 0u)
+        return FL_RESULT_ERR;
+    if (!fl_net_arp_parse_eth(frame, len, &op, &sender_ip, sender_mac, &target_ip, target_mac))
+        return FL_RESULT_ERR;
+    if (op != 1u)
+        return FL_RESULT_ERR;
+    if (target_ip != s_wifi_ip_be && target_ip != s_wifi_gw_be)
+        return FL_RESULT_ERR;
+    reply_len = fl_net_arp_build_reply(eth_reply, cap, s_sta_mac,
+                                       target_ip == s_wifi_gw_be ? s_wifi_gw_be : s_wifi_ip_be,
+                                       sender_mac, sender_ip);
+    if (reply_len == 0u)
+        return FL_RESULT_ERR;
+    *eth_len = reply_len;
+    return FL_RESULT_OK;
+}
+
 static fl_result_t wifi_driver_send(fl_net_driver_t *drv, const fl_net_frame_view_t *frame)
 {
     size_t ip_off;
@@ -218,6 +247,16 @@ static fl_result_t wifi_driver_send(fl_net_driver_t *drv, const fl_net_frame_vie
         return FL_RESULT_INVAL;
     if (fl_net_wire_check_view(frame, FL_NET_ETH_FRAME_HDR_LEN) != FL_RESULT_OK)
         return FL_RESULT_INVAL;
+    {
+        uint8_t arp_reply[FL_NET_WIFI_RX_MAX];
+        size_t arp_len = 0;
+
+        if (wifi_try_arp_reply(frame->data, frame->len, arp_reply, sizeof(arp_reply),
+                               &arp_len) == FL_RESULT_OK) {
+            (void)wifi_rx_enqueue(arp_reply, arp_len);
+            return FL_RESULT_OK;
+        }
+    }
     if (!fl_net_wire_parse_eth_ipv4(frame->data, frame->len, &ip_off, &ip_len, &dst_be))
         return FL_RESULT_OK;
     {
@@ -301,24 +340,7 @@ static fl_result_t wifi_netdev_up_common(const fl_net_wifi_scan_entry_t *ap,
 
 fl_result_t fl_net_wifi_netdev_up(const fl_net_wifi_scan_entry_t *ap, const uint8_t sta_mac[6])
 {
-    uint32_t yi = 0u;
-    uint32_t gw = 0u;
-    uint32_t dns = 0u;
-    uint8_t prefix = 24u;
-    char addr_s[32];
-    char gw_s[32];
-    fl_result_t rc;
-
-    wifi_lab_profile_from_env(&yi, &prefix, &gw, &dns);
-    wifi_store_l3_profile(yi, prefix, gw, dns);
-    fl_net_ipv4_format_addr(yi, addr_s, sizeof(addr_s));
-    fl_net_ipv4_format_addr(gw, gw_s, sizeof(gw_s));
-    rc = wifi_netdev_up_common(ap, sta_mac);
-    if (rc != FL_RESULT_OK)
-        return rc;
-    rc = fl_net_route_configure_static(&s_wifi_drv, sta_mac, addr_s, prefix, gw_s);
-    fl_net_iface_refresh();
-    return rc;
+    return wifi_netdev_up_common(ap, sta_mac);
 }
 
 fl_result_t fl_net_wifi_netdev_up_with_ipv4(const fl_net_wifi_scan_entry_t *ap,
@@ -379,6 +401,32 @@ fl_result_t fl_net_wifi_netdev_ipv4(uint32_t *addr_be_out)
     if (addr_be_out)
         *addr_be_out = s_wifi_ip_be;
     return FL_RESULT_OK;
+}
+
+void fl_net_wifi_netdev_apply_dhcp_lease(const fl_net_dhcp_lease_info_t *lease)
+{
+    char addr_s[32];
+    char gw_s[32];
+    uint8_t prefix = 24u;
+    fl_result_t rc;
+
+    if (!lease || lease->yiaddr_be == 0u || !s_wifi_up)
+        return;
+    if (lease->has_prefix)
+        prefix = lease->prefix_len;
+    fl_net_ipv4_format_addr(lease->yiaddr_be, addr_s, sizeof(addr_s));
+    if (lease->has_gateway)
+        fl_net_ipv4_format_addr(lease->gateway_be, gw_s, sizeof(gw_s));
+    else if (s_wifi_gw_be != 0u)
+        fl_net_ipv4_format_addr(s_wifi_gw_be, gw_s, sizeof(gw_s));
+    else
+        strncpy(gw_s, "10.0.2.2", sizeof(gw_s) - 1u);
+    wifi_store_l3_profile(lease->yiaddr_be, prefix,
+                          lease->has_gateway ? lease->gateway_be : s_wifi_gw_be,
+                          lease->has_dns ? lease->dns_be : s_wifi_dns_be);
+    rc = fl_net_route_configure_static(&s_wifi_drv, s_sta_mac, addr_s, prefix, gw_s);
+    if (rc == FL_RESULT_OK)
+        fl_net_iface_refresh();
 }
 
 int fl_net_wifi_netdev_l3_profile(fl_net_wifi_l3_profile_t *out)

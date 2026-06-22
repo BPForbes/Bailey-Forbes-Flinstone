@@ -4,6 +4,7 @@
 #include "contract_p3_wifi.h"
 #include "contract_result.h"
 #include "fl/driver/net.h"
+#include "net_dhcp.h"
 
 #include <stddef.h>
 #include <stdint.h>
@@ -18,8 +19,8 @@ typedef struct fl_net_wifi_l3_profile {
 } fl_net_wifi_l3_profile_t;
 
 /**
- * In-tree 802.11 station netdev: L2 TX/RX and Ethernet decap once associated.
- * Station L3 is a static lab profile (env FL_NET_WIFI_LAB_*), not simulated DHCP.
+ * In-tree 802.11 station netdev: L2 TX/RX once associated.
+ * Lab station L3 comes from simulated router DHCP (wifi_lab_router driver).
  */
 
 fl_net_driver_t *fl_net_wifi_netdev_driver(void);
@@ -36,6 +37,7 @@ fl_result_t fl_net_wifi_netdev_up_with_ipv4(const fl_net_wifi_scan_entry_t *ap,
 void fl_net_wifi_netdev_down(void);
 
 fl_result_t fl_net_wifi_netdev_ipv4(uint32_t *addr_be_out);
+void fl_net_wifi_netdev_apply_dhcp_lease(const fl_net_dhcp_lease_info_t *lease);
 int fl_net_wifi_netdev_l3_profile(fl_net_wifi_l3_profile_t *out);
 
 fl_result_t fl_net_wifi_netdev_add_ipv6(const uint8_t src6[16], uint8_t prefix_len);

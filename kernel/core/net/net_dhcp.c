@@ -5,7 +5,9 @@
 #include "net_packet.h"
 #include "net_route.h"
 #include "net_udp.h"
+#include "net_wifi_netdev.h"
 #include "net_wire_host.h"
+#include "wifi_lab_router.h"
 
 #include <string.h>
 
@@ -206,8 +208,21 @@ static fl_result_t dhcp_exchange(fl_net_driver_t *drv, const uint8_t mac[FL_NET_
                                  const fl_net_packet_t *req_pkt, fl_net_packet_t *reply_pkt,
                                  uint8_t *reply_backing, size_t reply_cap, size_t *reply_len,
                                  unsigned timeout_ms) {
-    (void)drv;
-    (void)mac;
+    const uint8_t *req;
+    size_t req_len;
+    fl_result_t rc;
+
+    (void)timeout_ms;
+    if (drv && fl_net_wifi_netdev_is_up() && drv == fl_net_wifi_netdev_driver()) {
+        rc = fl_net_packet_l4_view(req_pkt, &req, &req_len);
+        if (rc != FL_RESULT_OK)
+            return rc;
+        rc = wifi_lab_router_dhcp_exchange(mac, req, req_len, reply_backing, reply_cap,
+                                           reply_len);
+        if (rc != FL_RESULT_OK)
+            return rc;
+        return fl_net_packet_bind_l4(reply_pkt, reply_backing, reply_cap, 0u, *reply_len);
+    }
 
     return fl_net_wire_send_udp_pkt(FL_NET_DHCP_BROADCAST_BE32, FL_NET_DHCP_CLIENT_PORT,
                                     FL_NET_DHCP_SERVER_PORT, req_pkt, reply_pkt, reply_backing,

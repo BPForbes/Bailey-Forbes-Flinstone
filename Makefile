@@ -164,6 +164,7 @@ NET_CORE_SRCS = kernel/core/net/net_checksum.c kernel/core/net/net_wire.c kernel
                 kernel/drivers/wifi/wifi_supplicant.c \
                 kernel/drivers/wifi/wifi_driver_backend.c kernel/drivers/wifi/wifi_driver_packet.c \
                 kernel/drivers/wifi/wifi_lab_backend.c \
+                kernel/drivers/wifi/wifi_lab_router.c \
                 kernel/drivers/wifi/wifi_ax_session_driver.c \
                 kernel/drivers/wifi/wifi_80211ax_mock.c \
                 kernel/core/platform/fl_platform.c \
@@ -848,6 +849,7 @@ tests/test_p3_wifi: $(WIFI_TEST_COMMON_DEPS)
 	  kernel/core/net/net_wifi_crypto.c \
 	  kernel/drivers/wifi/wifi_driver_backend.c kernel/drivers/wifi/wifi_coprocessor.c \
 	  kernel/drivers/wifi/wifi_lab_backend.c \
+	  kernel/drivers/wifi/wifi_lab_router.c \
 	  kernel/drivers/wifi/wifi_uart_transport.c kernel/drivers/wifi/wifi_driver_packet.c \
 	  kernel/drivers/wifi/wifi_80211ax_mock.c kernel/drivers/wifi/wifi_supplicant.c \
 	  kernel/core/mm/kmalloc.o kernel/core/mm/mem_domain.o \
@@ -886,6 +888,7 @@ tests/test_wifi_80211ax_mock_279: $(WIFI_TEST_COMMON_DEPS)
 	  kernel/core/net/net_wifi_crypto.c \
 	  kernel/drivers/wifi/wifi_driver_backend.c kernel/drivers/wifi/wifi_coprocessor.c \
 	  kernel/drivers/wifi/wifi_lab_backend.c \
+	  kernel/drivers/wifi/wifi_lab_router.c \
 	  kernel/drivers/wifi/wifi_uart_transport.c kernel/drivers/wifi/wifi_driver_packet.c \
 	  kernel/drivers/wifi/wifi_80211ax_mock.c kernel/drivers/wifi/wifi_supplicant.c \
 	  kernel/core/mm/kmalloc.o kernel/core/mm/mem_domain.o \
@@ -940,6 +943,7 @@ run-test_wifi:
 
 WIFI_TEST_STATION_DRIVER_SRCS = kernel/drivers/wifi/wifi_driver_backend.c kernel/drivers/wifi/wifi_coprocessor.c \
 	kernel/drivers/wifi/wifi_lab_backend.c \
+	kernel/drivers/wifi/wifi_lab_router.c \
 	kernel/drivers/wifi/wifi_uart_transport.c kernel/drivers/wifi/wifi_driver_packet.c \
 	kernel/drivers/wifi/wifi_80211ax_mock.c kernel/drivers/wifi/wifi_supplicant.c
 
