@@ -197,8 +197,7 @@ fl_result_t fl_net_wifi_scan(uint8_t band, unsigned timeout_ms) {
 
 #if defined(FL_NET_WIFI_HOSTED_LAB)
     {
-        const char *use_wpa = getenv("FL_NET_WIFI_USE_WPA");
-        if ((!use_wpa || strcmp(use_wpa, "0") != 0) && fl_net_wifi_host_linux_available()) {
+        if (fl_net_wifi_host_linux_opted_in() && fl_net_wifi_host_linux_available()) {
             fl_result_t rc = fl_net_wifi_host_linux_scan(band, timeout_ms);
             if (rc == FL_RESULT_OK) {
                 s_wifi_state = FL_WIFI_STATE_SCANNING;
@@ -243,7 +242,7 @@ fl_result_t fl_net_wifi_scan_result(fl_net_wifi_scan_entry_t *entries, size_t ca
     }
 
 #if defined(FL_NET_WIFI_HOSTED_LAB)
-    if (fl_net_wifi_host_linux_available()) {
+    if (fl_net_wifi_host_linux_opted_in() && fl_net_wifi_host_linux_available()) {
         fl_result_t rc = fl_net_wifi_host_linux_scan_result(entries, cap, count_out);
         s_wifi_state = FL_WIFI_STATE_IDLE;
         return rc;
@@ -480,8 +479,7 @@ fl_result_t fl_net_wifi_connect(const fl_net_wifi_cred_t *cred, unsigned timeout
 
 #if defined(FL_NET_WIFI_HOSTED_LAB)
     {
-        const char *use_wpa = getenv("FL_NET_WIFI_USE_WPA");
-        if ((!use_wpa || strcmp(use_wpa, "0") != 0) && fl_net_wifi_host_linux_available()) {
+        if (fl_net_wifi_host_linux_opted_in() && fl_net_wifi_host_linux_available()) {
             fl_result_t hrc = host_linux_connect(cred, timeout_ms);
             if (hrc == FL_RESULT_OK) {
                 s_lab_backend = 0;

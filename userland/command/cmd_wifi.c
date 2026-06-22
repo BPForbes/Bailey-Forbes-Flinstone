@@ -49,17 +49,6 @@ static const char *band_name(uint8_t band) {
  * Returns 1 when an address was written.
  */
 static int wifi_peer_ipv4(char *buf, size_t cap, uint32_t *be_out) {
-    const char *wip = fl_net_wifi_host_linux_windows_ipv4();
-
-    if (wip && wip[0]) {
-        if (buf && cap > 0u) {
-            strncpy(buf, wip, cap - 1u);
-            buf[cap - 1u] = '\0';
-        }
-        if (be_out)
-            (void)fl_net_ipv4_parse_literal(wip, be_out);
-        return 1;
-    }
     if (fl_net_wifi_netdev_is_up()) {
         uint32_t nd = 0u;
         if (fl_net_wifi_netdev_ipv4(&nd) == FL_RESULT_OK && nd != 0u) {
@@ -67,6 +56,18 @@ static int wifi_peer_ipv4(char *buf, size_t cap, uint32_t *be_out) {
                 *be_out = nd;
             if (buf && cap > 0u)
                 fl_net_ipv4_format_addr(nd, buf, cap);
+            return 1;
+        }
+    }
+    if (fl_net_wifi_host_linux_opted_in()) {
+        const char *wip = fl_net_wifi_host_linux_windows_ipv4();
+        if (wip && wip[0]) {
+            if (buf && cap > 0u) {
+                strncpy(buf, wip, cap - 1u);
+                buf[cap - 1u] = '\0';
+            }
+            if (be_out)
+                (void)fl_net_ipv4_parse_literal(wip, be_out);
             return 1;
         }
     }
@@ -82,9 +83,9 @@ static int wifi_usage(void) {
           "  wifi known\n"
           "  wifi status\n"
           "  Lab scan: set FL_NET_WIFI_HOME_SSID to include your home network in scan results.\n"
-          "  Real Wi-Fi (Linux): wpa_cli or nmcli on FL_NET_WIFI_IFACE (auto-detect when unset).\n"
-          "  WSL: FlinstonePowershell.exe (make flinstone-ps-windows); source tools/fl-wifi.env\n"
-          "       or: python3 tools/network_bridge.py discover\n",
+          "  Default: in-tree 802.11 driver + lab netdev (no PowerShell or wpa_cli).\n"
+          "  Real Wi-Fi (opt-in): FL_NET_WIFI_USE_WPA=1 with wpa_cli/nmcli on FL_NET_WIFI_IFACE.\n"
+          "  WSL helper (opt-in): FL_NET_WIFI_FLINSTONE_PS=/path/to/FlinstonePowershell.exe\n",
           stderr);
     return 1;
 }
@@ -408,7 +409,7 @@ static int cmd_wifi_status(int argc, char **argv) {
     if (fl_net_wifi_station_host_backend()) {
         const char *backend = fl_net_wifi_host_linux_backend_name();
         printf("Backend: %s (%s)\n", backend ? backend : "host", fl_net_wifi_host_linux_iface());
-    } else if (fl_net_wifi_host_linux_available()) {
+    } else if (fl_net_wifi_host_linux_opted_in() && fl_net_wifi_host_linux_available()) {
         const char *backend = fl_net_wifi_host_linux_backend_name();
         printf("Backend: %s available on %s (not associated)\n",
                backend ? backend : "host", fl_net_wifi_host_linux_iface());
@@ -424,7 +425,9 @@ static int cmd_wifi_status(int argc, char **argv) {
             char peer_ip[32];
             uint8_t addr6[16];
             uint8_t p6 = 0u;
-            const char *win_ip = fl_net_wifi_host_linux_windows_ipv4();
+            const char *win_ip = fl_net_wifi_host_linux_opted_in()
+                                     ? fl_net_wifi_host_linux_windows_ipv4()
+                                     : NULL;
             if (wifi_peer_ipv4(peer_ip, sizeof(peer_ip), NULL))
                 printf("Interface %s IPv4: %s (server host %s:<port> or server host -all <port>)\n",
                        ifname, peer_ip, peer_ip);
