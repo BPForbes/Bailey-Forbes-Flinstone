@@ -8,6 +8,7 @@
 #include "net_netdev.h"
 #include "net_route.h"
 #include "net_baremetal.h"
+#include "net_wifi_netdev.h"
 #include "net_wire.h"
 
 #include <stdint.h>
@@ -203,6 +204,111 @@ static fl_result_t egress_tap_path(const fl_net_route_entry_t *route, uint32_t d
     return FL_RESULT_TIMEDOUT;
 }
 
+static fl_result_t egress_wifi_path(const fl_net_route_entry_t *route, uint32_t dst_be,
+                                    uint8_t ip_proto, const uint8_t *l4, size_t l4_len,
+                                    uint8_t *rx_l4, size_t rx_l4_cap, size_t *rx_l4_len,
+                                    unsigned timeout_ms, double *out_rtt_ms) {
+    uint8_t ipbuf[576];
+    uint8_t tx_frame[FL_NET_WIRE_FRAME_BUF_MAX];
+    uint8_t rx_frame[FL_NET_WIRE_FRAME_BUF_MAX];
+    uint8_t dst_mac[6];
+    fl_net_ipv4_hdr_t hdr;
+    fl_net_frame_view_t view;
+    fl_net_frame_mut_t mut;
+    size_t ip_len;
+    size_t frame_len;
+    struct timeval t0, t1;
+    unsigned elapsed = 0;
+    const unsigned step_ms = 50u;
+    fl_result_t rc;
+
+    if (!route || !route->src_mac_valid)
+        return FL_RESULT_ERR;
+    if (!fl_net_wifi_netdev_peer_mac(dst_mac))
+        return FL_RESULT_ERR;
+
+    ip_len = fl_net_ipv4_build(&hdr, ipbuf, sizeof(ipbuf), ip_proto, route->src_ip_be, dst_be, l4,
+                               l4_len, 0x5254u);
+    if (ip_len == 0)
+        return FL_RESULT_ERR;
+
+    frame_len = fl_net_wire_build_eth_ipv4(tx_frame, sizeof(tx_frame), dst_mac, route->src_mac,
+                                           ipbuf, ip_len);
+    if (frame_len == 0)
+        return FL_RESULT_ERR;
+
+    view.data = tx_frame;
+    view.len = frame_len;
+    gettimeofday(&t0, NULL);
+    if (fl_net_netdev_send(route->drv, &view) != FL_RESULT_OK)
+        return FL_RESULT_ERR;
+
+    while (elapsed < timeout_ms) {
+        unsigned wait = step_ms;
+        size_t ip_off;
+        size_t ip_len_rx;
+        uint32_t rx_dst;
+
+        if (timeout_ms - elapsed < wait)
+            wait = timeout_ms - elapsed;
+
+        mut.data = rx_frame;
+        mut.cap = sizeof(rx_frame);
+        mut.len = 0;
+        rc = fl_net_netdev_recv(route->drv, &mut, wait);
+        elapsed += wait;
+        if (rc == FL_RESULT_TIMEDOUT)
+            continue;
+        if (rc != FL_RESULT_OK)
+            return rc;
+
+        if (!fl_net_wire_parse_eth_ipv4(rx_frame, mut.len, &ip_off, &ip_len_rx, &rx_dst))
+            continue;
+        if (rx_dst != route->src_ip_be)
+            continue;
+
+        rc = egress_copy_ipv4_l4(rx_frame, mut.len, ip_off, ip_len_rx, rx_l4, rx_l4_cap, rx_l4_len);
+        if (rc != FL_RESULT_OK)
+            return rc;
+        gettimeofday(&t1, NULL);
+        if (out_rtt_ms)
+            *out_rtt_ms = egress_delta_ms(&t0, &t1);
+        return FL_RESULT_OK;
+    }
+
+    return FL_RESULT_TIMEDOUT;
+}
+
+static fl_result_t egress_wifi_xmit(const fl_net_route_entry_t *route, uint32_t dst_be,
+                                    uint8_t ip_proto, const uint8_t *l4, size_t l4_len) {
+    uint8_t ipbuf[576];
+    uint8_t tx_frame[FL_NET_WIRE_FRAME_BUF_MAX];
+    uint8_t dst_mac[6];
+    fl_net_ipv4_hdr_t hdr;
+    fl_net_frame_view_t view;
+    size_t ip_len;
+    size_t frame_len;
+
+    if (!route || !route->src_mac_valid)
+        return FL_RESULT_ERR;
+    if (!fl_net_wifi_netdev_peer_mac(dst_mac))
+        return FL_RESULT_ERR;
+
+    ip_len = fl_net_ipv4_build(&hdr, ipbuf, sizeof(ipbuf), ip_proto, route->src_ip_be, dst_be, l4,
+                               l4_len, 0x5254u);
+    if (ip_len == 0)
+        return FL_RESULT_ERR;
+
+    frame_len = fl_net_wire_build_eth_ipv4(tx_frame, sizeof(tx_frame), dst_mac, route->src_mac,
+                                           ipbuf, ip_len);
+    if (frame_len == 0)
+        return FL_RESULT_ERR;
+
+    view.data = tx_frame;
+    view.len = frame_len;
+    return fl_net_netdev_send(route->drv, &view);
+}
+
 static fl_result_t egress_loopback_xmit(uint32_t dst_be, uint8_t ip_proto, const uint8_t *l4,
                                         size_t l4_len) {
     uint8_t ipbuf[576];
@@ -333,6 +439,9 @@ fl_result_t fl_net_wire_egress_l4_xmit_pkt(uint32_t dst_be, uint8_t ip_proto,
     if (route.drv == fl_net_netdev_tap() && fl_net_netdev_tap_is_open())
         return egress_tap_xmit(&route, dst_be, ip_proto, l4, l4_len, arp_timeout_ms);
 
+    if (fl_net_wifi_netdev_is_up() && route.drv == fl_net_wifi_netdev_driver())
+        return egress_wifi_xmit(&route, dst_be, ip_proto, l4, l4_len);
+
 #ifdef DRIVERS_BAREMETAL
     if (route.drv == fl_net_netdev_lab() && fl_net_baremetal_lab_is_up())
         return egress_tap_xmit(&route, dst_be, ip_proto, l4, l4_len, arp_timeout_ms);
@@ -370,6 +479,10 @@ fl_result_t fl_net_wire_egress_l4_pkt(uint32_t dst_be, uint8_t ip_proto,
     if (route.drv == fl_net_netdev_tap() && fl_net_netdev_tap_is_open())
         return egress_tap_path(&route, dst_be, ip_proto, l4, l4_len, rx_l4, rx_l4_cap, rx_l4_len,
                                timeout_ms, out_rtt_ms);
+
+    if (fl_net_wifi_netdev_is_up() && route.drv == fl_net_wifi_netdev_driver())
+        return egress_wifi_path(&route, dst_be, ip_proto, l4, l4_len, rx_l4, rx_l4_cap, rx_l4_len,
+                                timeout_ms, out_rtt_ms);
 
 #ifdef DRIVERS_BAREMETAL
     if (route.drv == fl_net_netdev_lab() && fl_net_baremetal_lab_is_up())

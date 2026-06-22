@@ -17,11 +17,13 @@
 #include "net_ipv4.h"
 #include "net_server.h"
 #include "net_socket.h"
+#include "net_sock_native.h"
 #include "server_bg.h"
 #include "server_shared_db.h"
 #include "session.h"
 #include "shell_io.h"
 #include "net_wifi_host_linux.h"
+#include "net_wifi_netdev.h"
 #include "fl_platform.h"
 #include "threadpool.h"
 
@@ -252,12 +254,29 @@ static int wsl_portproxy_apply(const char *listen_ip, uint16_t port) {
 
 static int wsl_portproxy_will_try(const fl_net_endpoint_t *bind_ep,
                                   const char *win_ip_display) {
+    if (!fl_net_wifi_host_linux_opted_in())
+        return 0;
     if (fl_platform_detect() != FL_PLATFORM_WSL)
         return 0;
-    if (win_ip_display && win_ip_display[0])
-        return 1;
-    return bind_ep && bind_ep->family == FL_NET_ADDR_FAMILY_V4 &&
-           bind_ep->port_host > 0u;
+    if (!win_ip_display || !win_ip_display[0])
+        return 0;
+    if (!bind_ep || bind_ep->family != FL_NET_ADDR_FAMILY_V4 || bind_ep->port_host == 0u)
+        return 0;
+    /* In-tree lab/TAP netdev addresses are not reachable via Windows portproxy. */
+    if (bind_ep->addr.v4_be != 0u &&
+        fl_net_sock_native_eligible_bind_v4(bind_ep->addr.v4_be))
+        return 0;
+    return 1;
+}
+
+/* Lab/TAP IPv4 exists only in the in-tree route table — not on the Windows
+ * stack — so portproxy/bridge cannot expose it and must not be attempted. */
+static int wsl_in_tree_lab_bind(const fl_net_endpoint_t *bind_ep) {
+    if (!bind_ep || bind_ep->family != FL_NET_ADDR_FAMILY_V4)
+        return 0;
+    if (bind_ep->addr.v4_be != 0u)
+        return fl_net_sock_native_eligible_bind_v4(bind_ep->addr.v4_be);
+    return fl_net_wifi_netdev_is_up() && !fl_net_wifi_host_linux_opted_in();
 }
 
 static const char *host_listen_ip_for_wsl(const fl_net_endpoint_t *ep,
@@ -278,19 +297,25 @@ static const char *host_listen_ip_for_wsl(const fl_net_endpoint_t *ep,
 }
 
 static void host_print_wsl_lan_hint(const char *listen_ip, uint16_t port) {
-    const char *wip = fl_net_wifi_host_linux_windows_ipv4();
-    char        peer[32];
+    char peer[32];
 
     if (listen_ip && strcmp(listen_ip, "0.0.0.0") != 0) {
         strncpy(peer, listen_ip, sizeof(peer) - 1u);
         peer[sizeof(peer) - 1u] = '\0';
-    } else if (wip && wip[0]) {
-        strncpy(peer, wip, sizeof(peer) - 1u);
-        peer[sizeof(peer) - 1u] = '\0';
-    } else {
-        if (fl_net_iface_suggest_ipv4(NULL, peer, sizeof(peer)))
-            fl_color_success("peers on LAN can: server join %s:%u", peer,
-                             (unsigned)port);
+    } else if (fl_net_wifi_netdev_is_up()) {
+        uint32_t nd = 0u;
+        if (fl_net_wifi_netdev_ipv4(&nd) == FL_RESULT_OK && nd != 0u)
+            fl_net_ipv4_format_addr(nd, peer, sizeof(peer));
+        else if (!fl_net_iface_suggest_ipv4(NULL, peer, sizeof(peer)))
+            return;
+    } else if (fl_net_wifi_host_linux_opted_in()) {
+        const char *wip = fl_net_wifi_host_linux_windows_ipv4();
+        if (wip && wip[0]) {
+            strncpy(peer, wip, sizeof(peer) - 1u);
+            peer[sizeof(peer) - 1u] = '\0';
+        } else if (!fl_net_iface_suggest_ipv4(NULL, peer, sizeof(peer)))
+            return;
+    } else if (!fl_net_iface_suggest_ipv4(NULL, peer, sizeof(peer))) {
         return;
     }
     fl_color_success("peers on LAN can: server join %s:%u", peer, (unsigned)port);
@@ -752,7 +777,9 @@ static int verb_host(int argc, char **argv) {
      * Transparently rebind the WSL server to 0.0.0.0 and start the Windows
      * bridge on the requested IP so LAN peers connect to the right address. */
     {
-        const char *wip = fl_net_wifi_host_linux_windows_ipv4();
+        const char *wip = fl_net_wifi_host_linux_opted_in()
+                              ? fl_net_wifi_host_linux_windows_ipv4()
+                              : NULL;
         if (wip && ep.family == FL_NET_ADDR_FAMILY_V4 && ep.addr.v4_be != 0u) {
             uint32_t win_be = 0u;
             if (fl_net_ipv4_parse_literal(wip, &win_be) && win_be == ep.addr.v4_be) {
@@ -858,7 +885,9 @@ static int verb_host(int argc, char **argv) {
                 else
                     fl_color_success("hosting as '%s' on %s", current_principal(), argv[2]);
             }
-            if (bind_ep.family == FL_NET_ADDR_FAMILY_V4 && bind_ep.port_host > 0u) {
+            if (fl_platform_detect() == FL_PLATFORM_WSL &&
+                bind_ep.family == FL_NET_ADDR_FAMILY_V4 && bind_ep.port_host > 0u &&
+                !wsl_in_tree_lab_bind(&bind_ep)) {
                 if (wsl_portproxy_apply(listen, bind_ep.port_host) == 0) {
                     if (defer_hosting) {
                         char bind_txt[128];
@@ -907,12 +936,11 @@ static int verb_host(int argc, char **argv) {
                         host_print_wsl_lan_hint(listen, bind_ep.port_host);
                     }
                 }
-            } else if (defer_hosting) {
-                char bind_txt[128];
-                if (fl_net_endpoint_format(&bind_ep, bind_txt, sizeof(bind_txt)))
-                    fl_color_success("hosting as '%s' on %s", current_principal(), bind_txt);
-                else
-                    fl_color_success("hosting as '%s' on %s", current_principal(), argv[2]);
+            } else if (wsl_in_tree_lab_bind(&bind_ep)) {
+                host_print_wsl_lan_hint(listen, bind_ep.port_host);
+                puts("in-tree lab host: no Windows portproxy (simulated Wi-Fi). "
+                     "Use server join <addr>:<port> on this shell, or bind :<port> "
+                     "and join 127.0.0.1:<port> from another terminal.");
             }
         }
     }
