@@ -12,17 +12,24 @@
  * This is the host driver boundary (cfg80211/mac80211 + supplicant); MLME/WPA in-tree
  * remain the lab path when no NIC is present.
  *
- * Env:
+ * Env (host helpers are **opt-in**; default is in-tree driver + lab netdev):
  *   **FL_NET_WIFI_IFACE** — interface name (auto-detect first Wi-Fi netdev when unset)
  *   **FL_NET_WIFI_WPA_CLI** — path to wpa_cli (default `wpa_cli`)
  *   **FL_NET_WIFI_NMCLI** — path to nmcli (default `nmcli`)
+ *   **FL_NET_WIFI_FLINSTONE_PS** — FlinstonePowershell.exe path (WSL / tests)
  *   **FL_NET_WIFI_FLINSTONE_LINUX** — native Linux helper path
- *   **FL_NET_WIFI_USE_WPA=1** — force wpa_cli path
- *   **FL_NET_WIFI_USE_WPA=0** — force in-tree lab simulation
+ *   **FL_NET_WIFI_USE_WPA=1** — enable wpa_cli / nmcli / helper backends
+ *   **FL_NET_WIFI_USE_WPA=0** — force in-tree lab simulation (default when unset)
  *   **FL_NET_WIFI_BRIDGE_TARGET** — bridge target IP (default 127.0.0.1)
  *   **FL_NET_WIFI_BRIDGE_PY** — optional path to tools/network_bridge.py
- *   (unset) — auto: wpa_cli when `ping` succeeds, else NetworkManager **nmcli**
  */
+
+/** 1 when WSL2 mirrored networking is active (eth0 has a 192.168.x.x LAN IP).
+ *  When true, the server binds directly to the LAN IP — no relay needed. */
+int fl_net_wifi_host_linux_wsl_mirrored(void);
+
+/** 1 when an external host helper path was explicitly requested via env. */
+int fl_net_wifi_host_linux_opted_in(void);
 
 int fl_net_wifi_host_linux_available(void);
 
@@ -80,24 +87,5 @@ int fl_net_wifi_host_linux_server_bridge_to(const char *bind_ip,
  * Returns 0 on success, -1 when unavailable.
  */
 int fl_net_wifi_host_linux_wsl_ipv4(char *buf, size_t buf_len);
-
-/**
- * Add a Windows portproxy + inbound firewall rule so LAN peers can reach a
- * server at listen_ip:<port> inside WSL (connectaddress=wsl_ip).  Requires
- * FlinstonePowershell.exe; may prompt for UAC elevation on Windows.
- * Returns 0 on success, -1 on failure or wrong backend.
- */
-int fl_net_wifi_host_linux_server_proxy(const char *listen_ip, const char *wsl_ip,
-                                        uint16_t port);
-
-/**
- * Probe whether Flinstone portproxy / firewall rules already exist for
- * listen_ip:<port> on the Windows host. Returns 1 when clear (result=ok),
- * 0 when configured (result=busy), -1 when the check could not be run.
- */
-int fl_net_wifi_host_linux_server_proxy_port_free(const char *listen_ip, uint16_t port);
-
-/** Remove portproxy + firewall rules added for listen_ip:<port>. */
-int fl_net_wifi_host_linux_server_proxy_del(const char *listen_ip, uint16_t port);
 
 #endif /* NET_WIFI_HOST_LINUX_H */
