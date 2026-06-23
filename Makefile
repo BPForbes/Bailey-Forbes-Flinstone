@@ -472,7 +472,7 @@ $(filter userland/shell/%.o userland/command/%.o,$(OBJS)): $(VERSION_DEF)
 # --- Test Build ---
 # interpreter.c is built as interpreter_unit.o with -DUNIT_TEST (stub interactive_shell).
 # Shell builtins live in userland/command/*.c (same as main shell link).
-TEST_SRCS = BPForbes_Flinstone_Tests.c userland/shell/common.c userland/shell/util.c userland/shell/history_record.c userland/shell/audit_log.c userland/shell/authz_subsystem.c userland/shell/contract_log_dispatch.c userland/shell/session_sync.c userland/shell/session_login_env.c userland/shell/terminal.c userland/shell/shell_io.c \
+TEST_SRCS = BPForbes_Flinstone_Tests.c userland/shell/common.c userland/shell/util.c userland/shell/shell_tokenize.c userland/shell/history_record.c userland/shell/audit_log.c userland/shell/authz_subsystem.c userland/shell/contract_log_dispatch.c userland/shell/session_sync.c userland/shell/session_login_env.c userland/shell/terminal.c userland/shell/shell_io.c \
             $(COMMAND_SRCS) \
             kernel/core/vfs/disk.c kernel/core/vfs/fat32_host.c kernel/core/vfs/fat32_host_files.c kernel/core/vfs/path_log.c kernel/core/vfs/cluster.c kernel/core/vfs/fs.c \
             disk_host_io.c \
@@ -522,7 +522,7 @@ TEST_TARGET = BPForbes_Flinstone_Tests
 DEPS_RPATH = -Wl,-rpath='$$ORIGIN/deps/install/lib'
 TEST_LDFLAGS = $(if $(DEPS_PREFIX),-L$(DEPS_PREFIX)/lib $(DEPS_RPATH),)
 # CUnit link needs session_sync, password_hash, and SQLite (same as main shell).
-TEST_EXTRA_LINK_OBJS = userland/identity/password_hash.o
+TEST_EXTRA_LINK_OBJS = userland/identity/password_hash.o $(NET_TEST_PCI_OBJ)
 
 ifeq ($(CHANGELOG_CI),1)
 $(TEST_TARGET): $(CHANGELOG_C)
