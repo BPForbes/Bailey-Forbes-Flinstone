@@ -1199,6 +1199,8 @@ static void parse_flinstone_ps_scan(const char *text, uint8_t band_filter) {
         char bssid_txt[32];
         char auth[16];
         char band_txt[8];
+        int he_flag = -1;
+        int color = -1;
         int rssi = -127;
         int chan = 0;
         const char *eol;
@@ -1243,6 +1245,10 @@ static void parse_flinstone_ps_scan(const char *text, uint8_t band_filter) {
             }
             else if (strncmp(tok, "chan=", 5) == 0)
                 chan = atoi(tok + 5);
+            else if (strncmp(tok, "he=", 3) == 0)
+                he_flag = atoi(tok + 3);
+            else if (strncmp(tok, "color=", 6) == 0)
+                color = atoi(tok + 6);
             tok = tab ? tab + 1 : tok + strlen(tok);
         }
 
@@ -1270,6 +1276,13 @@ static void parse_flinstone_ps_scan(const char *text, uint8_t band_filter) {
             e->band = FL_WIFI_BAND_6GHZ;
         else
             e->band = FL_WIFI_BAND_2GHZ;
+
+        if (he_flag >= 0)
+            e->he_supported = he_flag ? 1u : 0u;
+        else
+            fl_net_wifi_host_he_hint(e, auth, NULL);
+        if (color >= 0 && color <= 63)
+            e->bss_color = (uint8_t)color;
 
         if (band_filter != FL_WIFI_BAND_ANY && e->band != band_filter)
             continue;

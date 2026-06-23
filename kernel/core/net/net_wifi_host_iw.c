@@ -64,6 +64,9 @@ void fl_net_wifi_host_he_hint(fl_net_wifi_scan_entry_t *entry, const char *flags
     if (entry->auth_mode == FL_WIFI_AUTH_WPA3_SAE && entry->band == FL_WIFI_BAND_5GHZ)
         entry->he_supported = 1u;
 
+    if (entry->band == FL_WIFI_BAND_5GHZ && entry->channel >= 36u)
+        entry->he_supported = 1u;
+
     if (entry->he_supported && entry->channel_width_mhz == 0u)
         entry->channel_width_mhz = 20u;
 }
