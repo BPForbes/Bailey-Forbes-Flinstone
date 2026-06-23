@@ -315,13 +315,39 @@ wifi known
 
 Shell verbs live in **`userland/command/cmd_wifi.c`**. Saved router profiles use SQLite **`wifi_router`** in **`fl_wifi.db`** (**`net_wifi_db.c`**); passphrases are stored hashed, not plaintext.
 
+**Default path:** in-tree **802.11 lab** (`LabAxHome`, `GuestOpen`) with static station L3 on **`wlan-lab`** (default `10.0.2.15/24`, gateway `10.0.2.2`; override with **`FL_NET_WIFI_LAB_*`**). No simulated DHCP; no host OS Wi‑Fi unless opted in below.
+
+**Opt-in real Wi‑Fi** (scan/join on host hardware): set one of **`FL_NET_WIFI_FLINSTONE_PS`**, **`FL_NET_WIFI_FLINSTONE_LINUX`**, or **`FL_NET_WIFI_USE_WPA=1`** before starting the shell. **`net_wifi_station.c`** tries hardware driver → host backend (when opted in) → lab fallback.
+
 | Command | Purpose |
 |---------|---------|
-| **`wifi scan [-band any\|2\|5\|6]`** | Scan for APs. On **Linux**, uses **`wpa_cli`** when its control socket answers, else **NetworkManager `nmcli`**. Without a host backend, falls back to the in-tree **lab** list (`LabAxHome`, `GuestOpen`) and prints a stderr warning. |
-| **`wifi join [-b <bssid>] <ssid> [password]`** | Associate with an SSID from the last scan. **`-b`** pins a BSSID when several APs share a name. After join on Linux, copies router **DHCP IPv4** (prefers RFC1918) and **SLAAC/DHCPv6** global IPv6 into the shell netdev/FIB when available. |
-| **`wifi leave`** | Disconnect and remove WLAN IPv4/IPv6 from the in-tree iface/route view; clears joined flags in **`fl_wifi.db`**. |
-| **`wifi status`** | Prints FSM state, active backend (`wpa_cli`, `nmcli`, or lab), interface name, and assigned IPv4/IPv6 when up. |
+| **`wifi scan [-band any\|2\|5\|6]`** | Scan for APs. **Lab (default):** synthetic list + stderr note. **WSL:** set **`FL_NET_WIFI_FLINSTONE_PS`** to **`FlinstonePowershell.exe`**. **Native Linux:** **`FL_NET_WIFI_USE_WPA=1`** with **`wpa_cli`** or **`nmcli`**. |
+| **`wifi join [-b <bssid>] <ssid> [password]`** | Associate from last scan. Host path uses Windows/Linux association; in-tree **`wlan-lab`** gets static L3 for **`server`** / P3 routing. |
+| **`wifi leave`** | Disconnect and drop WLAN routes; clears joined flags in **`fl_wifi.db`**. |
+| **`wifi status`** | FSM state, backend (`FlinstonePowershell`, `wpa_cli`, `nmcli`, or lab), **`wlan-lab`** station L3. |
 | **`wifi known`** | List saved profiles (BSSID, band, auth, joined flag, last-join time). |
+
+**WSL quick start (real networks):**
+
+```bash
+cd ~/Bailey-Forbes-Flinstone
+make -j4
+make flinstone-ps-windows
+export FL_NET_WIFI_FLINSTONE_PS="$PWD/tools/FlinstonePowershell/FlinstonePowershell.exe"
+./BPForbes_Flinstone_Shell
+wifi scan
+```
+
+**In-tree lab quick start (two terminals, no host Wi‑Fi):**
+
+```bash
+./BPForbes_Flinstone_Shell
+wifi join LabAxHome          # passphrase: secret
+server host :9996
+# other terminal:
+wifi join LabAxHome
+server join 127.0.0.1:9996
+```
 
 **Linux host backend** (real hardware scan/join):
 
@@ -330,8 +356,8 @@ Shell verbs live in **`userland/command/cmd_wifi.c`**. Saved router profiles use
 | **`FL_NET_WIFI_IFACE`** | auto-detect | Wireless netdev (`wlan0`, `wlp2s0`, …). Probed via **`nmcli`**, **`/proc/net/wireless`**, then **`wlan0`**. |
 | **`FL_NET_WIFI_WPA_CLI`** | `wpa_cli` | Path to **`wpa_cli`** when **`wpa_supplicant`** owns the interface. |
 | **`FL_NET_WIFI_NMCLI`** | `nmcli` | Path to **`nmcli`** when NetworkManager manages Wi‑Fi. |
-| **`FL_NET_WIFI_USE_WPA`** | unset | **`1`** — force **`wpa_cli`** only; **`0`** — force in-tree lab simulation; unset — try **`wpa_cli`**, then **`nmcli`**. |
-| **`FL_NET_WIFI_FLINSTONE_PS`** | auto | WSL/Windows helper path. Auto-discovery checks **`tools/FlinstonePowershell/FlinstonePowershell.exe`** and then **`PATH`**. |
+| **`FL_NET_WIFI_USE_WPA`** | unset | **`1`** — opt in to **`wpa_cli`** (native Linux); **`0`** — force in-tree lab only; unset — lab unless **`FL_NET_WIFI_FLINSTONE_*`** is set. |
+| **`FL_NET_WIFI_FLINSTONE_PS`** | unset | **WSL:** path to **`FlinstonePowershell.exe`** (build: **`make flinstone-ps-windows`**). Example: **`export FL_NET_WIFI_FLINSTONE_PS="$PWD/tools/FlinstonePowershell/FlinstonePowershell.exe"`** |
 | **`FL_NET_WIFI_FLINSTONE_LINUX`** | auto | Native Linux helper path. Auto-discovery checks **`tools/FlinstoneLinuxNet/FlinstoneLinuxNet`** and then **`PATH`**. Build with **`make flinstone-linux-net`**. |
 | **`FL_NET_WIFI_BRIDGE_TARGET`** | `127.0.0.1` | Target IP for **`server-bridge`** relays. Use a VM guest address such as **`10.0.2.15`** when the Flinstone server is inside a VM. |
 | **`FL_NET_WIFI_BRIDGE_PY`** | `tools/network_bridge.py` | Optional Python bridge companion used when the compiled helper is not active. |
@@ -339,11 +365,11 @@ Shell verbs live in **`userland/command/cmd_wifi.c`**. Saved router profiles use
 
 **Profile database:** tries **`FL_WIFI_DB_PATH`**, then repo-relative **`userland/shell/fl_wifi.db`**, then **`~/.local/share/BPForbes_Flinstone_Shell/fl_wifi.db`**, then **`/tmp/fl_wifi.db`**.
 
-**WSL/LAN server bridge:** build the Windows helper with **`make flinstone-ps-windows`**. From WSL, **`server host <windows-wifi-ip>:<port>`** (or **`server host -all <port>`** when **`wifi-status`** reports the Windows Wi‑Fi IP) uses **`FlinstonePowershell.exe server-proxy`** to add Windows portproxy + firewall rules (UAC press-any-key gate in **`cmd_server.c`**, PR **#315**). Teardown runs on **`server kill`**, **`server leave`**, and shell **`exit`** via **`server-proxy-del`**. Preflight: **`server-proxy-check`** queries netsh for stale rules before UAC. Non-admin fallback: **`server-bridge`**. For an embedded VM target, set **`FL_NET_WIFI_BRIDGE_TARGET=10.0.2.15`** before hosting, or run **`FlinstonePowershell.exe server-bridge 192.168.1.235 7777 10.0.2.15`** directly. The Python companion accepts the same shape: **`python3 tools/network_bridge.py 192.168.1.235 7777 10.0.2.15`**.
+**WSL/LAN server (optional):** build **`make flinstone-ps-windows`**. Default **`server host`** binds in WSL and prints local join hints (`127.0.0.1`, in-tree **`10.0.2.15`** after lab join). For exposure on the Windows LAN, use **`FlinstonePowershell.exe server-proxy`** manually (see **`docs/SERVER.md`**). Legacy automatic portproxy from **`server host`** is not the default path on **`develop`** / v4.3 Wi‑Fi trains.
 
 **Native Linux helper:** build **`tools/FlinstoneLinuxNet/FlinstoneLinuxNet`** with **`make flinstone-linux-net`**. It provides the same helper commands as the Windows bridge for Linux hosts: **`wifi-scan`**, **`wifi-join`**, **`wifi-leave`**, **`wifi-status`**, and **`server-bridge [bind_ip] <port> [target_ip]`**. Wi-Fi uses **`nmcli`**; override with **`FL_NET_WIFI_NMCLI`** and **`FL_NET_WIFI_IFACE`**. The shell auto-detects the in-tree ELF when present unless **`FL_NET_WIFI_USE_WPA=0`** forces lab mode or **`FL_NET_WIFI_USE_WPA=1`** forces direct **`wpa_cli`**.
 
-**Prerequisites (Linux, real scan):** install **`network-manager`** and/or **`wpasupplicant`** so **`nmcli`** or **`wpa_cli`** is on **`PATH`**. Requires **`FL_AUTHZ_OP_NETDEV_IO`** (shell grants this on hosted builds). **macOS/Windows** and container/CI environments without a Wi‑Fi netdev always use the lab list.
+**Prerequisites (real scan):** **WSL:** **`FL_NET_WIFI_FLINSTONE_PS`** + built helper. **Native Linux:** **`network-manager`** and/or **`wpasupplicant`** on **`PATH`**, plus **`FL_NET_WIFI_USE_WPA=1`**. CI/containers without Wi‑Fi use lab only (**`FL_NET_WIFI_USE_WPA=0`**). **`-Virtualization -vm`:** VM guest halts before the shell prompt; **`wifi`** uses the hosted shell on the host — set env vars on that process, not inside the guest.
 
 **Examples:**
 

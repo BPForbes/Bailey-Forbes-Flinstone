@@ -39,7 +39,7 @@ fl_result_t fl_net_wifi_twt_negotiate(const fl_net_wifi_twt_params_t *req,
 #endif
 }
 
-fl_result_t fl_net_wifi_twt_teardown(uint8_t flow_id) {
+fl_result_t fl_net_wifi_twt_lab_teardown(uint8_t flow_id) {
 #if !defined(FL_NET_WIFI_HOSTED_LAB)
     (void)flow_id;
     return FL_RESULT_NOSYS;

@@ -139,6 +139,7 @@ Before merging (e.g. **`bug/*` → `develop`**, **`develop` → `main`**):
 - **Other targets:** `make clean`, `make ARCH=x86_64_nasm`, `make ARCH=arm` (cross; may need extra deps), `make USE_ASM_ALLOC=1`, `make test_alloc_asm`, `make test_drivers`, `make test_core`, `make vm`, `make vm-sdl` (SDL may need display tier), `make BPForbes_Flinstone_Tests`, `make deps` for in-tree SDL2/CUnit.
 - **Policy:** run relevant tests for the area you change; do not skip because “Replit”—document real blockers with the failing command.
 - **Implementation boundaries:** low-level memory, sync, port I/O, and hardware-facing paths use the **ASM layer**; keep C for orchestration, drivers, VM, filesystem policy. Prefer extending existing ASM-backed primitives over parallel libc-only paths for kernel/driver/baremetal.
+- **Kernel vs driver execution (AI):** When you propose new drivers for a module, ensure that the kernel functions solely as an orchestrator for those drivers. The kernel should delegate all module-specific behavior to the drivers rather than executing functionality on behalf of the module. This separation preserves a clean driver boundary, keeps execution logic where it belongs, and prevents the kernel from accumulating responsibilities that should remain in the driver layer. Cross-cutting protocol policy above the netdev boundary (routing, TCP/UDP, DHCP composition) may stay in `kernel/core/net/`; NIC/hardware execution stays in `kernel/drivers/`.
 
 ---
 
@@ -148,7 +149,7 @@ Before merging (e.g. **`bug/*` → `develop`**, **`develop` → `main`**):
 - **Do not** approve or produce edits to **`version/locked/**`** on the merge base.
 - **Do not** commit **`userland/shell/version_def.h`** on agent feature PRs (CI/GitHub Actions may commit it on automation flows—that is not agent-authored feature work).
 - Optional **CodeRabbit** / **Codex** CLI is **not** required before **`git push`**; ordinary GitHub PR review applies (**`.cursor/rules/review_tools.mdc`**).
-- When changing versioning policy text, keep **`replit.md`**, **`CLAUDE.md`**, **`AGENTS.md`**, **`.cursor/rules/versioning.mdc`**, **`.coderabbit.yaml`**, and **`docs/versioning.md`** aligned.
+- When changing versioning policy text, keep **`replit.md`**, **`CLAUDE.md`**, **`AGENTS.md`**, **`.cursor/rules/versioning.mdc`**, **`.cursor/rules/driver_orchestration.mdc`**, **`.coderabbit.yaml`**, and **`docs/versioning.md`** aligned.
 
 ---
 

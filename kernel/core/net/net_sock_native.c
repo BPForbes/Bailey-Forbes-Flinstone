@@ -44,6 +44,20 @@ static int driver_is_in_tree(const fl_net_driver_t *drv) {
     return 0;
 }
 
+/* WiFi lab / TAP addresses live only in the in-tree route table — not on the
+ * host kernel stack — so STREAM bind/connect must use the native TCP path even
+ * when FL_NET_SOCK_NATIVE is unset. */
+static int route_is_in_tree_non_loopback(uint32_t addr_be) {
+    fl_net_route_entry_t route;
+
+    if (addr_be == 0u || fl_net_ipv4_is_loopback(addr_be))
+        return 0;
+    if (fl_net_route_lookup(addr_be, &route) != FL_RESULT_OK)
+        return 0;
+    if (route.drv == fl_net_netdev_loopback())
+        return 0;
+    return driver_is_in_tree(route.drv);
+}
 
 void fl_net_sock_native_pump(unsigned max_frames) {
     if (!fl_net_sock_native_enabled())
@@ -62,28 +76,32 @@ int fl_net_sock_native_enabled(void) {
 
 int fl_net_sock_native_eligible_peer_v4(uint32_t peer_be) {
     fl_net_route_entry_t route;
-    if (!fl_net_sock_native_enabled())
+    if (fl_net_sock_native_enabled()) {
+        if (peer_be == 0u)
+            return 1;
+        if (fl_net_ipv4_is_loopback(peer_be))
+            return 1;
+        if (fl_net_route_lookup(peer_be, &route) == FL_RESULT_OK)
+            return driver_is_in_tree(route.drv);
         return 0;
-    if (peer_be == 0u)
-        return 1;
-    if (fl_net_ipv4_is_loopback(peer_be))
-        return 1;
-    if (fl_net_route_lookup(peer_be, &route) == FL_RESULT_OK)
-        return driver_is_in_tree(route.drv);
-    return 0;
+    }
+    return route_is_in_tree_non_loopback(peer_be);
 }
 
 int fl_net_sock_native_eligible_bind_v4(uint32_t addr_be) {
     fl_net_route_entry_t route;
-    if (!fl_net_sock_native_enabled())
+    if (fl_net_sock_native_enabled()) {
+        if (addr_be == 0u)
+            return 1;
+        if (fl_net_ipv4_is_loopback(addr_be))
+            return 1;
+        if (fl_net_route_lookup(addr_be, &route) == FL_RESULT_OK)
+            return driver_is_in_tree(route.drv);
         return 0;
+    }
     if (addr_be == 0u)
-        return 1;
-    if (fl_net_ipv4_is_loopback(addr_be))
-        return 1;
-    if (fl_net_route_lookup(addr_be, &route) == FL_RESULT_OK)
-        return driver_is_in_tree(route.drv);
-    return 0;
+        return fl_net_wifi_netdev_is_up();
+    return route_is_in_tree_non_loopback(addr_be);
 }
 
 void fl_net_sock_native_slot_init(fl_net_sock_handle_t handle, fl_net_sock_type_t type) {
