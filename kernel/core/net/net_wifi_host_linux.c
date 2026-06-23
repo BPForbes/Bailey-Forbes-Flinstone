@@ -287,10 +287,10 @@ static int run_wpa_cli(const char *cmd, char *out, size_t out_cap) {
     if (!cmd || s_host_kind != FL_WIFI_HOST_WPA_CLI)
         return 0;
     if (s_wpa_ctrl_dir[0])
-        snprintf(line, sizeof(line), "%s -i %s -p %s %s 2>/dev/null", s_wpa_cli,
+        snprintf(line, sizeof(line), "%s -i %s -p %s %s", s_wpa_cli,
                  s_wifi_iface, s_wpa_ctrl_dir, cmd);
     else
-        snprintf(line, sizeof(line), "%s -i %s %s 2>/dev/null", s_wpa_cli, s_wifi_iface,
+        snprintf(line, sizeof(line), "%s -i %s %s", s_wpa_cli, s_wifi_iface,
                  cmd);
     fp = popen(line, "r");
     if (!fp)
@@ -312,7 +312,7 @@ static int popen_nmcli(const char *args, char *out, size_t out_cap) {
 
     if (!args)
         return 0;
-    snprintf(line, sizeof(line), "%s %s 2>/dev/null", s_nmcli, args);
+    snprintf(line, sizeof(line), "%s %s", s_nmcli, args);
     fp = popen(line, "r");
     if (!fp)
         return 0;
@@ -339,10 +339,10 @@ static int wpa_ping_with_ctrl(const char *ctrl_dir) {
     FILE *fp;
 
     if (ctrl_dir && ctrl_dir[0])
-        snprintf(cmd, sizeof(cmd), "%s -i %s -p %s ping 2>/dev/null", s_wpa_cli,
+        snprintf(cmd, sizeof(cmd), "%s -i %s -p %s ping", s_wpa_cli,
                  s_wifi_iface, ctrl_dir);
     else
-        snprintf(cmd, sizeof(cmd), "%s -i %s ping 2>/dev/null", s_wpa_cli, s_wifi_iface);
+        snprintf(cmd, sizeof(cmd), "%s -i %s ping", s_wpa_cli, s_wifi_iface);
     fp = popen(cmd, "r");
     if (!fp)
         return 0;
@@ -1000,7 +1000,7 @@ static int run_flinstone_helper(const char *args, char *out, size_t out_cap) {
     if (!args || !helper || helper[0] == '\0')
         return 0;
     shell_single_quote(helper, exe_q, sizeof(exe_q));
-    snprintf(cmd, sizeof(cmd), "%s %s 2>/dev/null", exe_q, args);
+    snprintf(cmd, sizeof(cmd), "%s %s", exe_q, args);
     fp = popen(cmd, "r");
     if (!fp)
         return 0;

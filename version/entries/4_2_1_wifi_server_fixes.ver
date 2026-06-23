@@ -1,0 +1,18 @@
+MAJOR_VERSION=4
+STANDARD_VERSION=2
+RELEASE_VERSION=1
+PRERELEASE=1
+DESCRIPTION<<VER_END
+4.2.1: WiFi and server binding fixes for WSL
+
+WiFi scan command pipelining:
+- Remove stderr suppression (2>/dev/null) from run_flinstone_helper, run_wpa_cli, popen_nmcli, and wpa_ping_with_ctrl
+- Enables proper error diagnostics when WiFi commands fail on WSL
+
+Server binding improvements:
+- Fix server host :port to bind to detected interface IP instead of 0.0.0.0
+- Use fl_net_iface_suggest_ipv4 to find a non-loopback interface when :port format is used
+- Prevent overly permissive 0.0.0.0 binding that allows any interface
+
+Rationale: Suppress stderr redirection blocks error diagnosis and server 0.0.0.0 binding is too permissive when user selects a specific port.
+VER_END

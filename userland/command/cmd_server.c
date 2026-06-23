@@ -298,6 +298,8 @@ static void host_print_wsl_lan_hint(const char *listen_ip, uint16_t port) {
 
 static int parse_host_endpoint(int argc, char **argv, fl_net_endpoint_t *ep) {
     uint32_t any_be = 0u;
+    uint32_t iface_be = 0u;
+    char iface_ip[32];
     long port;
     char *end = NULL;
 
@@ -326,10 +328,14 @@ static int parse_host_endpoint(int argc, char **argv, fl_net_endpoint_t *ep) {
             fl_color_error("invalid port '%s'", argv[2]);
             return -1;
         }
-        if (!fl_net_ipv4_parse_literal("0.0.0.0", &any_be))
-            return -1;
-        fl_net_endpoint_from_v4(any_be, (uint16_t)port, ep);
-        return 0;
+        iface_ip[0] = '\0';
+        if (fl_net_iface_suggest_ipv4(NULL, iface_ip, sizeof(iface_ip)) &&
+            iface_ip[0] && fl_net_ipv4_parse_literal(iface_ip, &iface_be)) {
+            fl_net_endpoint_from_v4(iface_be, (uint16_t)port, ep);
+            return 0;
+        }
+        fl_color_error("usage: server host :port requires at least one non-loopback interface (use server host <ip:port> or server host -all <port>)");
+        return -1;
     }
     if (parse_endpoint_full(argv[2], ep) != 0)
         return -1;
