@@ -17,11 +17,14 @@
 #include "net_ipv4.h"
 #include "net_server.h"
 #include "net_socket.h"
+#include "net_sock_native.h"
 #include "server_bg.h"
 #include "server_shared_db.h"
 #include "session.h"
 #include "shell_io.h"
+#include "net_macvlan.h"
 #include "net_wifi_host_linux.h"
+#include "net_wifi_netdev.h"
 #include "fl_platform.h"
 #include "threadpool.h"
 
@@ -34,6 +37,13 @@
 #include <unistd.h>
 #if defined(__unix__) || defined(__APPLE__)
 #include <termios.h>
+#endif
+#if defined(__linux__) || defined(__APPLE__) || defined(__FreeBSD__)
+#include <arpa/inet.h>
+#include <netinet/in.h>
+#include <sys/select.h>
+#include <sys/socket.h>
+#define FL_SERVER_UDP_HOSTED 1
 #endif
 
 /* ------------------------------------------------------------------------- */
@@ -49,10 +59,13 @@ static int g_server_running;
 static fl_net_client_t g_client;
 static fl_server_bg_t *g_client_bg;
 
-/* WSL portproxy state — torn down on server kill / leave / exit. */
-static int      g_wsl_portproxy_active;
-static char     g_wsl_portproxy_listen[32];
-static uint16_t g_wsl_portproxy_port;
+/* UDP beacon + reverse-dial listener — started on server host, stopped on kill/exit. */
+static volatile int g_server_udp_stop;
+static pthread_t    g_beacon_thread;
+static int          g_beacon_thread_started;
+static pthread_t    g_udp_listener_thread;
+static int          g_udp_listener_thread_started;
+static int          g_udp_listen_sock = -1; /* raw fd; closed to unblock recvfrom */
 
 static const char *current_principal(void) {
     const char *u = fl_session_current_user();
@@ -83,207 +96,17 @@ static void print_sock_error(const char *verb, fl_result_t rc) {
         fl_color_error("%s failed: address in use or not available on this host", verb);
     else
         fl_color_error("%s failed (rc=%d)", verb, (int)rc);
-}
-
-static void print_host_endpoint_hint(void) {
-    char suggest[32];
-    fputs("hint: try: server host :<port>  or  ", stderr);
-    if (fl_net_iface_suggest_ipv4(NULL, suggest, sizeof(suggest)))
-        fprintf(stderr, "server host %s:<port>\n", suggest);
-    else
-        fputs("server host 0.0.0.0:<port>\n", stderr);
-}
-
-static int wsl_portproxy_press_any_key(void) {
-#if defined(__unix__) || defined(__APPLE__)
-    struct termios old_tty;
-    struct termios new_tty;
-    unsigned char c;
-    int           use_raw = 0;
-    int           rc      = -1;
-
-    if (!isatty(STDIN_FILENO))
-        return 0;
-
-    fl_shell_press_any_key_gate_enter();
-
-    fputs(" Press any key to continue...", stdout);
-    fflush(stdout);
-
-    if (tcgetattr(STDIN_FILENO, &old_tty) == 0) {
-        new_tty = old_tty;
-        new_tty.c_lflag &= (tcflag_t)~(ICANON | ECHO | ISIG);
-        new_tty.c_cc[VMIN]  = 1;
-        new_tty.c_cc[VTIME] = 0;
-        if (tcsetattr(STDIN_FILENO, TCSAFLUSH, &new_tty) == 0)
-            use_raw = 1;
+    if (e == EADDRNOTAVAIL) {
+        char bind_ip[32];
+        if (fl_net_iface_suggest_ipv4(NULL, bind_ip, sizeof(bind_ip)))
+            fprintf(stderr, "hint: that IPv4 is not bindable here — try: %s :<port>  or  %s %s:<port>\n",
+                    verb, verb, bind_ip);
+        else
+            fprintf(stderr, "hint: try: %s :<port>  (bind all interfaces)\n", verb);
+    } else if (e == EACCES || rc == FL_RESULT_ACCES) {
+        fputs("hint: on Linux/WSL ports below 1024 need root; try server host :8888 or another port >= 1024\n",
+              stderr);
     }
-
-    for (;;) {
-        if (use_raw) {
-            ssize_t n = read(STDIN_FILENO, &c, 1);
-            if (n < 0) {
-                if (errno == EINTR) {
-                    (void)write(STDOUT_FILENO, "^C\n", 3);
-                    fputs(" Press any key to continue...", stdout);
-                    fflush(stdout);
-                    continue;
-                }
-                break;
-            }
-            if (n == 0)
-                break;
-            if (c == 3u) {
-                (void)write(STDOUT_FILENO, "^C\n", 3);
-                fputs(" Press any key to continue...", stdout);
-                fflush(stdout);
-                continue;
-            }
-            (void)tcsetattr(STDIN_FILENO, TCSAFLUSH, &old_tty);
-            fputc('\n', stdout);
-            fflush(stdout);
-            rc = 0;
-            break;
-        }
-        {
-            int ch = fgetc(stdin);
-            if (ch == EOF) {
-                if (errno == EINTR) {
-                    (void)write(STDOUT_FILENO, "^C\n", 3);
-                    fputs(" Press any key to continue...", stdout);
-                    fflush(stdout);
-                    continue;
-                }
-                break;
-            }
-            if (ch == 3) {
-                (void)write(STDOUT_FILENO, "^C\n", 3);
-                fputs(" Press any key to continue...", stdout);
-                fflush(stdout);
-                continue;
-            }
-            fputc('\n', stdout);
-            fflush(stdout);
-            rc = 0;
-            break;
-        }
-    }
-
-    if (use_raw)
-        (void)tcsetattr(STDIN_FILENO, TCSAFLUSH, &old_tty);
-    fl_shell_press_any_key_gate_leave();
-    return rc;
-#else
-    return 0;
-#endif
-}
-
-static void wsl_portproxy_notice_setup_message(void) {
-    fl_color_warn("NOTICE: Flinstone needs elevated permissions to expose this port "
-                  "to the LAN and will modify Windows port mapping and firewall rules. "
-                  "This is temporary and will be reverted when the server is killed.");
-}
-
-static void wsl_portproxy_notice_teardown_message(void) {
-    fl_color_warn("NOTICE: Flinstone will remove the temporary Windows port mapping "
-                  "and firewall rules (UAC may prompt).");
-}
-
-static void host_abort_started_listener(void) {
-    pthread_mutex_lock(&session_mutex);
-    if (g_server_bg) {
-        fl_server_bg_stop_server(g_server_bg);
-        g_server_bg = NULL;
-    }
-    fl_net_server_host_stop(&g_server);
-    g_server_running = 0;
-    pthread_mutex_unlock(&session_mutex);
-}
-
-static int wsl_portproxy_teardown_wants_notice(void) {
-    return g_wsl_portproxy_active && fl_platform_detect() == FL_PLATFORM_WSL;
-}
-
-static void wsl_portproxy_teardown_apply(void) {
-    char listen[32];
-    uint16_t port;
-
-    if (!g_wsl_portproxy_active)
-        return;
-    strncpy(listen, g_wsl_portproxy_listen, sizeof(listen) - 1u);
-    listen[sizeof(listen) - 1u] = '\0';
-    port = g_wsl_portproxy_port;
-    g_wsl_portproxy_active = 0;
-    g_wsl_portproxy_listen[0] = '\0';
-    g_wsl_portproxy_port = 0;
-    if (fl_net_wifi_host_linux_server_proxy_del(listen, port) != 0) {
-        fl_color_error("failed to remove Windows portproxy/firewall for %s:%u "
-                       "(approve UAC or run server kill)",
-                       listen, (unsigned)port);
-    }
-}
-
-/* NOTICE/keypress/UAC gate + netsh delete. Caller must not hold session_mutex. */
-static void wsl_portproxy_teardown_interactive(void) {
-    int needs_key;
-
-    if (!g_wsl_portproxy_active)
-        return;
-    needs_key = wsl_portproxy_teardown_wants_notice();
-    if (needs_key)
-        wsl_portproxy_notice_teardown_message();
-    if (needs_key)
-        (void)wsl_portproxy_press_any_key();
-    wsl_portproxy_teardown_apply();
-}
-
-/* On WSL, add Windows portproxy + firewall for listen_ip:port → wsl_ip:port.
- * Caller must print wsl_portproxy_notice_setup_message() and collect the
- * keypress via wsl_portproxy_press_any_key() before invoking this when UAC
- * elevation is required. */
-static int wsl_portproxy_apply(const char *listen_ip, uint16_t port) {
-    char wsl_ip[32];
-
-    if (fl_platform_detect() != FL_PLATFORM_WSL)
-        return -1;
-    if (!listen_ip || !listen_ip[0] || port == 0u)
-        return -1;
-    if (fl_net_wifi_host_linux_wsl_ipv4(wsl_ip, sizeof(wsl_ip)) != 0)
-        return -1;
-    if (fl_net_wifi_host_linux_server_proxy(listen_ip, wsl_ip, port) != 0)
-        return -1;
-    strncpy(g_wsl_portproxy_listen, listen_ip, sizeof(g_wsl_portproxy_listen) - 1u);
-    g_wsl_portproxy_listen[sizeof(g_wsl_portproxy_listen) - 1u] = '\0';
-    g_wsl_portproxy_port = port;
-    g_wsl_portproxy_active = 1;
-    return 0;
-}
-
-static int wsl_portproxy_will_try(const fl_net_endpoint_t *bind_ep,
-                                  const char *win_ip_display) {
-    if (fl_platform_detect() != FL_PLATFORM_WSL)
-        return 0;
-    if (win_ip_display && win_ip_display[0])
-        return 1;
-    return bind_ep && bind_ep->family == FL_NET_ADDR_FAMILY_V4 &&
-           bind_ep->port_host > 0u;
-}
-
-static const char *host_listen_ip_for_wsl(const fl_net_endpoint_t *ep,
-                                          const char *win_ip_display,
-                                          char *buf, size_t cap) {
-    if (win_ip_display && win_ip_display[0]) {
-        strncpy(buf, win_ip_display, cap - 1u);
-        buf[cap - 1u] = '\0';
-        return buf;
-    }
-    if (ep && ep->family == FL_NET_ADDR_FAMILY_V4 && ep->addr.v4_be != 0u) {
-        fl_net_ipv4_format_addr(ep->addr.v4_be, buf, cap);
-        return buf;
-    }
-    strncpy(buf, "0.0.0.0", cap - 1u);
-    buf[cap - 1u] = '\0';
-    return buf;
 }
 
 static void host_print_wsl_lan_hint(const char *listen_ip, uint16_t port) {
@@ -296,10 +119,7 @@ static void host_print_wsl_lan_hint(const char *listen_ip, uint16_t port) {
     } else if (wip && wip[0]) {
         strncpy(peer, wip, sizeof(peer) - 1u);
         peer[sizeof(peer) - 1u] = '\0';
-    } else {
-        if (fl_net_iface_suggest_ipv4(NULL, peer, sizeof(peer)))
-            fl_color_success("peers on LAN can: server join %s:%u", peer,
-                             (unsigned)port);
+    } else if (!fl_net_iface_suggest_ipv4(NULL, peer, sizeof(peer))) {
         return;
     }
     fl_color_success("peers on LAN can: server join %s:%u", peer, (unsigned)port);
@@ -339,6 +159,16 @@ static int parse_host_endpoint(int argc, char **argv, fl_net_endpoint_t *ep) {
             return -1;
         fl_net_endpoint_from_v4(any_be, (uint16_t)port, ep);
         return 0;
+    }
+    if (strchr(argv[2], ':') == NULL) {
+        errno = 0;
+        port = strtol(argv[2], &end, 10);
+        if (errno == 0 && end != argv[2] && end && *end == '\0' && port > 0 && port <= 65535) {
+            if (!fl_net_ipv4_parse_literal("0.0.0.0", &any_be))
+                return -1;
+            fl_net_endpoint_from_v4(any_be, (uint16_t)port, ep);
+            return 0;
+        }
     }
     if (parse_endpoint_full(argv[2], ep) != 0)
         return -1;
@@ -722,6 +552,251 @@ static void maybe_handle_nick_prompt_sync(void) {
 }
 
 /* ------------------------------------------------------------------------- */
+/* UDP beacon + reverse-dial listener (server-side LAN discovery / NAT bypass) */
+/* ------------------------------------------------------------------------- */
+
+#if defined(FL_SERVER_UDP_HOSTED)
+
+/* Broadcasts a Flinstone discovery beacon to LAN every 2 s so joining
+ * clients can find this server without knowing its IP in advance.        */
+static void *server_beacon_thread_func(void *arg)
+{
+    uint16_t port = (uint16_t)(uintptr_t)arg;
+    uint8_t  frame[16];
+    struct sockaddr_in dst;
+    int sock, one = 1;
+
+    sock = socket(AF_INET, SOCK_DGRAM, 0);
+    if (sock < 0)
+        return NULL;
+    setsockopt(sock, SOL_SOCKET, SO_BROADCAST, &one, sizeof(one));
+
+    frame[0] = (uint8_t)FL_NET_DISCOVERY_MAGIC_0;
+    frame[1] = (uint8_t)FL_NET_DISCOVERY_MAGIC_1;
+    frame[2] = (uint8_t)FL_NET_DISCOVERY_MAGIC_2;
+    frame[3] = (uint8_t)FL_NET_DISCOVERY_MAGIC_3;
+    frame[4] = (uint8_t)FL_NET_DISCOVERY_OP_BEACON;
+    frame[5] = (uint8_t)((port >> 8) & 0xFFu);
+    frame[6] = (uint8_t)(port & 0xFFu);
+    memset(frame + 7, 0, sizeof(frame) - 7u);
+
+    memset(&dst, 0, sizeof(dst));
+    dst.sin_family      = AF_INET;
+    dst.sin_addr.s_addr = htonl(INADDR_BROADCAST);
+    dst.sin_port        = htons(FL_NET_SERVER_DISCOVERY_PORT);
+
+    while (!g_server_udp_stop) {
+        sendto(sock, frame, sizeof(frame), 0,
+               (const struct sockaddr *)&dst, sizeof(dst));
+        sleep(2);
+    }
+    close(sock);
+    return NULL;
+}
+
+/* Listens for UDP join-requests from clients that cannot connect via TCP
+ * (e.g. the server is behind NAT). On receipt, dials TCP back to the
+ * client's callback address and hands the socket to the server session. */
+static void *server_udp_listener_thread_func(void *arg)
+{
+    uint8_t buf[16];
+    struct sockaddr_in from;
+    socklen_t fromlen;
+    ssize_t n;
+    (void)arg;
+
+    while (!g_server_udp_stop) {
+        fromlen = sizeof(from);
+        n = recvfrom(g_udp_listen_sock, buf, sizeof(buf), 0,
+                     (struct sockaddr *)&from, &fromlen);
+        if (n < 0)
+            break;
+        if ((size_t)n < 11u)
+            continue;
+        if (buf[0] != (uint8_t)FL_NET_DISCOVERY_MAGIC_0 ||
+            buf[1] != (uint8_t)FL_NET_DISCOVERY_MAGIC_1 ||
+            buf[2] != (uint8_t)FL_NET_DISCOVERY_MAGIC_2 ||
+            buf[3] != (uint8_t)FL_NET_DISCOVERY_MAGIC_3)
+            continue;
+        if (buf[4] != (uint8_t)FL_NET_DISCOVERY_OP_JOIN_REQ)
+            continue;
+
+        /* buf[5..8] = callback IPv4 BE, buf[9..10] = callback port BE */
+        uint32_t cb_ip_be;
+        uint16_t cb_port_be;
+        memcpy(&cb_ip_be,   buf + 5, 4);
+        memcpy(&cb_port_be, buf + 9, 2);
+
+        fl_net_endpoint_t cb_ep;
+        fl_net_endpoint_from_v4(cb_ip_be, ntohs(cb_port_be), &cb_ep);
+
+        fl_net_sock_handle_t dial_h = FL_NET_SOCK_INVALID;
+        fl_result_t rc = fl_net_sock_open_for(&cb_ep, FL_NET_SOCK_TYPE_STREAM, &dial_h);
+        if (rc == FL_RESULT_OK)
+            rc = fl_net_sock_connect_from_ep(dial_h, NULL, &cb_ep);
+        if (rc == FL_RESULT_OK) {
+            pthread_mutex_lock(&session_mutex);
+            if (g_server_running)
+                (void)fl_net_server_accept_handle(&g_server, dial_h, NULL, 0u);
+            else
+                fl_net_sock_close(dial_h);
+            pthread_mutex_unlock(&session_mutex);
+        } else {
+            if (dial_h != FL_NET_SOCK_INVALID)
+                fl_net_sock_close(dial_h);
+        }
+    }
+    return NULL;
+}
+
+static void server_udp_start(uint16_t port)
+{
+    struct sockaddr_in sin;
+    int sock, one = 1;
+
+    g_server_udp_stop = 0;
+
+    /* UDP listener on the discovery port for incoming join-requests. */
+    sock = socket(AF_INET, SOCK_DGRAM, 0);
+    if (sock >= 0) {
+        setsockopt(sock, SOL_SOCKET, SO_REUSEADDR, &one, sizeof(one));
+        memset(&sin, 0, sizeof(sin));
+        sin.sin_family      = AF_INET;
+        sin.sin_addr.s_addr = INADDR_ANY;
+        sin.sin_port        = htons(FL_NET_SERVER_DISCOVERY_PORT);
+        if (bind(sock, (struct sockaddr *)&sin, sizeof(sin)) == 0) {
+            g_udp_listen_sock = sock;
+            if (pthread_create(&g_udp_listener_thread, NULL,
+                               server_udp_listener_thread_func, NULL) == 0)
+                g_udp_listener_thread_started = 1;
+        } else {
+            close(sock);
+        }
+    }
+
+    /* Beacon thread — broadcasts server presence. */
+    if (pthread_create(&g_beacon_thread, NULL, server_beacon_thread_func,
+                       (void *)(uintptr_t)port) == 0)
+        g_beacon_thread_started = 1;
+}
+
+static void server_udp_stop(void)
+{
+    g_server_udp_stop = 1;
+
+    if (g_udp_listen_sock >= 0) {
+        close(g_udp_listen_sock);
+        g_udp_listen_sock = -1;
+    }
+    if (g_udp_listener_thread_started) {
+        pthread_join(g_udp_listener_thread, NULL);
+        g_udp_listener_thread_started = 0;
+    }
+    if (g_beacon_thread_started) {
+        pthread_join(g_beacon_thread, NULL);
+        g_beacon_thread_started = 0;
+    }
+}
+
+/* Client-side: when direct TCP connect failed, open a local TCP listener,
+ * send a UDP join-request to the server's discovery port, then wait for the
+ * server to dial back. Works through server-side NAT (server dials outbound
+ * to a client with a reachable IP). */
+static fl_result_t server_join_reverse_dial(fl_net_client_t *client,
+                                            const fl_net_endpoint_t *server_ep,
+                                            const char *principal,
+                                            unsigned timeout_ms)
+{
+    struct sockaddr_in sin;
+    socklen_t slen;
+    struct timeval tv;
+    fd_set rfds;
+    int listen_fd, peer_fd, ufd, one = 1;
+    uint16_t listen_port;
+    char own_ip_str[32];
+    uint32_t own_ip_be = 0u;
+    fl_net_sock_handle_t h;
+    fl_result_t rc;
+
+    if (server_ep->family != FL_NET_ADDR_FAMILY_V4)
+        return FL_RESULT_NOSYS;
+
+    /* Open TCP listener on an ephemeral port. */
+    listen_fd = socket(AF_INET, SOCK_STREAM, 0);
+    if (listen_fd < 0)
+        return FL_RESULT_ERR;
+    setsockopt(listen_fd, SOL_SOCKET, SO_REUSEADDR, &one, sizeof(one));
+    memset(&sin, 0, sizeof(sin));
+    sin.sin_family      = AF_INET;
+    sin.sin_addr.s_addr = INADDR_ANY;
+    sin.sin_port        = 0; /* ephemeral */
+    if (bind(listen_fd, (struct sockaddr *)&sin, sizeof(sin)) < 0 ||
+        listen(listen_fd, 1) < 0) {
+        close(listen_fd);
+        return FL_RESULT_ERR;
+    }
+    slen = sizeof(sin);
+    getsockname(listen_fd, (struct sockaddr *)&sin, &slen);
+    listen_port = ntohs(sin.sin_port);
+
+    /* Get own LAN IP so the server knows where to dial back. */
+    if (!fl_net_iface_suggest_ipv4(NULL, own_ip_str, sizeof(own_ip_str)) ||
+        !fl_net_ipv4_parse_literal(own_ip_str, &own_ip_be)) {
+        close(listen_fd);
+        return FL_RESULT_NOSYS;
+    }
+
+    /* Send UDP join-request: magic(4) + op(1) + own_ip_be(4) + port_be(2) */
+    ufd = socket(AF_INET, SOCK_DGRAM, 0);
+    if (ufd >= 0) {
+        uint8_t req[11];
+        struct sockaddr_in dst;
+        uint16_t port_be = htons(listen_port);
+        req[0] = (uint8_t)FL_NET_DISCOVERY_MAGIC_0;
+        req[1] = (uint8_t)FL_NET_DISCOVERY_MAGIC_1;
+        req[2] = (uint8_t)FL_NET_DISCOVERY_MAGIC_2;
+        req[3] = (uint8_t)FL_NET_DISCOVERY_MAGIC_3;
+        req[4] = (uint8_t)FL_NET_DISCOVERY_OP_JOIN_REQ;
+        memcpy(req + 5, &own_ip_be, 4);
+        memcpy(req + 9, &port_be,   2);
+        memset(&dst, 0, sizeof(dst));
+        dst.sin_family      = AF_INET;
+        dst.sin_addr.s_addr = server_ep->addr.v4_be;
+        dst.sin_port        = htons(FL_NET_SERVER_DISCOVERY_PORT);
+        sendto(ufd, req, sizeof(req), 0, (const struct sockaddr *)&dst, sizeof(dst));
+        close(ufd);
+    }
+
+    /* Wait for the server's TCP callback. */
+    tv.tv_sec  = (long)(timeout_ms / 1000u);
+    tv.tv_usec = (long)((timeout_ms % 1000u) * 1000L);
+    FD_ZERO(&rfds);
+    FD_SET(listen_fd, &rfds);
+    if (select(listen_fd + 1, &rfds, NULL, NULL, &tv) <= 0) {
+        close(listen_fd);
+        return FL_RESULT_TIMEDOUT;
+    }
+
+    peer_fd = accept(listen_fd, NULL, NULL);
+    close(listen_fd);
+    if (peer_fd < 0)
+        return FL_RESULT_ERR;
+
+    /* Adopt the fd and run the HELLO handshake. */
+    rc = fl_net_sock_from_fd(peer_fd, &h);
+    if (rc != FL_RESULT_OK) {
+        close(peer_fd);
+        return rc;
+    }
+    rc = fl_net_client_adopt_handle(client, h, principal, timeout_ms);
+    if (rc != FL_RESULT_OK)
+        fl_net_sock_close(h);
+    return rc;
+}
+
+#endif /* FL_SERVER_UDP_HOSTED */
+
+/* ------------------------------------------------------------------------- */
 /* Verb handlers                                                             */
 /* ------------------------------------------------------------------------- */
 
@@ -730,12 +805,15 @@ static void maybe_handle_nick_prompt_sync(void) {
  * if hosted sockets are unavailable on this build (FL_RESULT_NOSYS). */
 static int verb_host(int argc, char **argv) {
     fl_net_endpoint_t ep;
-    fl_net_endpoint_t bind_ep;   /* actual WSL bind address (may differ from ep) */
+    fl_net_endpoint_t bind_ep;
     fl_result_t rc;
-    const char *win_ip_display = NULL; /* set when user specified Windows Wi-Fi IP */
 
     if (argc < 3) {
-        fl_color_error("usage: server host <ip:port> | server host -all <port> | server host :<port>");
+        char suggest[32];
+        fl_color_error("usage: server host <ip:port> | server host <port> | server host -all <port> | server host :<port>");
+        if (fl_net_iface_suggest_ipv4(NULL, suggest, sizeof(suggest)))
+            fprintf(stderr, "hint: after wifi join try  server host :8888  or  server host %s:8888\n",
+                    suggest);
         return 1;
     }
     pthread_mutex_lock(&session_mutex);
@@ -756,178 +834,56 @@ static int verb_host(int argc, char **argv) {
     }
     bind_ep = ep;
 
-    /* If the user specified the Windows Wi-Fi IP (e.g. 192.168.1.235), Linux
-     * cannot bind() to it — that address lives on the Windows network stack.
-     * Transparently rebind the WSL server to 0.0.0.0 and start the Windows
-     * bridge on the requested IP so LAN peers connect to the right address. */
+    /* Prefer fl0 macvlan IP (unique DHCP lease from router) as the bind address.
+     * If the user did not specify a particular IP, use fl0's IP so the server
+     * is reachable from LAN peers as a distinct device. */
     {
-        const char *wip = fl_net_wifi_host_linux_windows_ipv4();
-        if (wip && ep.family == FL_NET_ADDR_FAMILY_V4 && ep.addr.v4_be != 0u) {
-            uint32_t win_be = 0u;
-            if (fl_net_ipv4_parse_literal(wip, &win_be) && win_be == ep.addr.v4_be) {
-                win_ip_display = wip;
-                bind_ep.addr.v4_be = 0u; /* 0.0.0.0 in WSL */
-            }
-        }
+        uint32_t fl0_ip = 0u;
+        if (bind_ep.family == FL_NET_ADDR_FAMILY_V4 && bind_ep.addr.v4_be == 0u &&
+            fl_net_macvlan_get_registered(&fl0_ip, NULL, NULL) && fl0_ip != 0u)
+            bind_ep.addr.v4_be = fl0_ip;
     }
 
+    rc = fl_net_server_host_start_ep(&g_server, &bind_ep, current_principal());
+    if (rc == FL_RESULT_NOSYS) {
+        pthread_mutex_unlock(&session_mutex);
+        fl_color_error("hosted sockets unavailable; cannot host");
+        return 1;
+    }
+    if (rc != FL_RESULT_OK) {
+        pthread_mutex_unlock(&session_mutex);
+        print_sock_error("server host", rc);
+        return 1;
+    }
+    rc = fl_server_bg_start_server(&g_server, &g_server_bg);
+    if (rc != FL_RESULT_OK) {
+        fl_net_server_host_stop(&g_server);
+        pthread_mutex_unlock(&session_mutex);
+        fl_color_error("server background start failed (rc=%d)", (int)rc);
+        return 1;
+    }
+    g_server_running = 1;
+    pthread_mutex_unlock(&session_mutex);
+
+#if defined(FL_SERVER_UDP_HOSTED)
+    server_udp_start(bind_ep.port_host);
+#endif
+
     {
-        char listen_ip[32];
-        const char *listen = host_listen_ip_for_wsl(&ep, win_ip_display,
-                                                    listen_ip, sizeof(listen_ip));
-        int defer_hosting = wsl_portproxy_will_try(&bind_ep, win_ip_display);
-
-        if (defer_hosting) {
-            int port_free =
-                fl_net_wifi_host_linux_server_proxy_port_free(listen,
-                                                              bind_ep.port_host);
-            if (port_free == 0) {
-                pthread_mutex_unlock(&session_mutex);
-                fl_color_error("server host failed: Windows portproxy or firewall "
-                               "for port %u is already configured on %s "
-                               "(run server kill to remove stale rules, or choose "
-                               "another port)",
-                               (unsigned)bind_ep.port_host, listen);
-                return 1;
-            }
-        }
-
-        /* Show NOTICE before unlock; collect keypress after unlock so other
-         * session paths are not blocked on session_mutex during user input. */
-        if (defer_hosting)
-            wsl_portproxy_notice_setup_message();
-        pthread_mutex_unlock(&session_mutex);
-
-        if (defer_hosting && wsl_portproxy_press_any_key() != 0)
-            return 1;
-
-        pthread_mutex_lock(&session_mutex);
-        if (g_server_running) {
-            pthread_mutex_unlock(&session_mutex);
-            fl_color_error("server already hosting");
-            return 1;
-        }
-        if (fl_net_client_state(&g_client) == FL_NET_CLIENT_STATE_CONNECTED) {
-            pthread_mutex_unlock(&session_mutex);
-            fl_color_error("already joined a server; leave first");
-            return 1;
-        }
-
-        /* Keypress precedes bind so the user can read NOTICE before UAC; if
-         * bind fails afterward, no elevation was attempted (known trade-off). */
-        rc = fl_net_server_host_start_ep(&g_server, &bind_ep, current_principal());
-        if (rc == FL_RESULT_NOSYS) {
-            pthread_mutex_unlock(&session_mutex);
-            fl_color_error("hosted sockets unavailable; cannot host");
-            return 1;
-        }
-        if (rc != FL_RESULT_OK) {
-            pthread_mutex_unlock(&session_mutex);
-            print_sock_error("server host", rc);
-            /* If the user specified a specific IP address and bind failed, suggest
-             * alternatives like :port (all interfaces) or a locally available address. */
-            if (bind_ep.family == FL_NET_ADDR_FAMILY_V4 && bind_ep.addr.v4_be != 0u)
-                print_host_endpoint_hint();
-            return 1;
-        }
-        rc = fl_server_bg_start_server(&g_server, &g_server_bg);
-        if (rc != FL_RESULT_OK) {
-            fl_net_server_host_stop(&g_server);
-            pthread_mutex_unlock(&session_mutex);
-            fl_color_error("server background start failed (rc=%d)", (int)rc);
-            return 1;
-        }
-        g_server_running = 1;
-        pthread_mutex_unlock(&session_mutex);
-
-        if (win_ip_display) {
-            if (wsl_portproxy_apply(listen, ep.port_host) == 0) {
-                fl_color_success("hosting as '%s' on %s:%u",
-                                 current_principal(), win_ip_display,
-                                 (unsigned)ep.port_host);
-                fl_color_success("WSL portproxy active (%s → WSL)", listen);
-                host_print_wsl_lan_hint(listen, ep.port_host);
-            } else if (fl_net_wifi_host_linux_server_bridge_to(win_ip_display, NULL,
-                                                               ep.port_host) == 0) {
-                fl_color_success("hosting as '%s' on %s:%u",
-                                 current_principal(), win_ip_display,
-                                 (unsigned)ep.port_host);
-                fl_color_success("LAN peers: server join %s:%u (bridge active, no admin)",
-                                 win_ip_display, (unsigned)ep.port_host);
-            } else {
-                fl_color_error("server host failed: could not expose %s:%u to the LAN "
-                               "(portproxy and bridge both failed — approve UAC or run "
-                               "FlinstonePowershell.exe server-proxy %s <wsl-ip> %u)",
-                               win_ip_display, (unsigned)ep.port_host, listen,
-                               (unsigned)ep.port_host);
-                host_abort_started_listener();
-                return 1;
-            }
-        } else {
-            if (!defer_hosting) {
-                char bind_txt[128];
-                if (fl_net_endpoint_format(&bind_ep, bind_txt, sizeof(bind_txt)))
-                    fl_color_success("hosting as '%s' on %s", current_principal(), bind_txt);
-                else
-                    fl_color_success("hosting as '%s' on %s", current_principal(), argv[2]);
-            }
-            if (bind_ep.family == FL_NET_ADDR_FAMILY_V4 && bind_ep.port_host > 0u) {
-                if (wsl_portproxy_apply(listen, bind_ep.port_host) == 0) {
-                    if (defer_hosting) {
-                        char bind_txt[128];
-                        if (fl_net_endpoint_format(&bind_ep, bind_txt, sizeof(bind_txt)))
-                            fl_color_success("hosting as '%s' on %s",
-                                             current_principal(), bind_txt);
-                        else
-                            fl_color_success("hosting as '%s' on %s",
-                                             current_principal(), argv[2]);
-                    }
-                    fl_color_success("WSL portproxy active (%s → WSL)", listen);
-                    host_print_wsl_lan_hint(listen, bind_ep.port_host);
-                } else {
-                    const char *wip = fl_net_wifi_host_linux_windows_ipv4();
-                    char        bip[32];
-                    const char *bridge_target =
-                        (bind_ep.addr.v4_be == 0u) ? NULL : bip;
-
-                    if (bind_ep.addr.v4_be != 0u)
-                        fl_net_ipv4_format_addr(bind_ep.addr.v4_be, bip, sizeof(bip));
-                    if (wip && fl_net_wifi_host_linux_server_bridge_to(
-                            wip, bridge_target, bind_ep.port_host) == 0) {
-                        if (defer_hosting) {
-                            char bind_txt[128];
-                            if (fl_net_endpoint_format(&bind_ep, bind_txt, sizeof(bind_txt)))
-                                fl_color_success("hosting as '%s' on %s",
-                                                 current_principal(), bind_txt);
-                            else
-                                fl_color_success("hosting as '%s' on %s",
-                                                 current_principal(), argv[2]);
-                        }
-                        fl_color_success("peers on LAN can: server join %s:%u (bridge active)",
-                                         wip, (unsigned)bind_ep.port_host);
-                    } else {
-                        if (defer_hosting) {
-                            char bind_txt[128];
-                            if (fl_net_endpoint_format(&bind_ep, bind_txt, sizeof(bind_txt)))
-                                fl_color_success("hosting as '%s' on %s",
-                                                 current_principal(), bind_txt);
-                            else
-                                fl_color_success("hosting as '%s' on %s",
-                                                 current_principal(), argv[2]);
-                        }
-                        fl_color_error("server running WSL-local only (LAN unreachable): "
-                                       "portproxy and bridge both failed");
-                        host_print_wsl_lan_hint(listen, bind_ep.port_host);
-                    }
-                }
-            } else if (defer_hosting) {
-                char bind_txt[128];
-                if (fl_net_endpoint_format(&bind_ep, bind_txt, sizeof(bind_txt)))
-                    fl_color_success("hosting as '%s' on %s", current_principal(), bind_txt);
-                else
-                    fl_color_success("hosting as '%s' on %s", current_principal(), argv[2]);
-            }
-        }
+        char bind_txt[128];
+        if (fl_net_endpoint_format(&bind_ep, bind_txt, sizeof(bind_txt)))
+            fl_color_success("hosting as '%s' on %s", current_principal(), bind_txt);
+        else
+            fl_color_success("hosting as '%s' on %s", current_principal(), argv[2]);
+    }
+    if (bind_ep.family == FL_NET_ADDR_FAMILY_V4 && bind_ep.port_host > 0u &&
+        bind_ep.addr.v4_be != 0u && !fl_net_ipv4_is_loopback(bind_ep.addr.v4_be)) {
+        char peer_ip[32];
+        fl_net_ipv4_format_addr(bind_ep.addr.v4_be, peer_ip, sizeof(peer_ip));
+        fl_color_success("peers on LAN can: server join %s:%u",
+                         peer_ip, (unsigned)bind_ep.port_host);
+    } else {
+        host_print_wsl_lan_hint(NULL, bind_ep.port_host);
     }
     return 0;
 }
@@ -984,6 +940,16 @@ static int verb_join(int argc, char **argv) {
         fl_color_error("hosted sockets unavailable; cannot join");
         return 1;
     }
+#if defined(FL_SERVER_UDP_HOSTED)
+    if (rc != FL_RESULT_OK && peer.family == FL_NET_ADDR_FAMILY_V4) {
+        /* Direct TCP connect failed — try reverse-dial NAT bypass.
+         * We open a local TCP listener and ask the server to dial back. */
+        fl_result_t rdr = server_join_reverse_dial(&g_client, &peer,
+                                                   current_principal(), 5000u);
+        if (rdr == FL_RESULT_OK)
+            rc = FL_RESULT_OK;
+    }
+#endif
     if (rc != FL_RESULT_OK) {
         pthread_mutex_unlock(&session_mutex);
         print_sock_error("server join", rc);
@@ -1031,7 +997,6 @@ static int verb_leave(void) {
         (void)fl_net_server_transfer_and_stop(&g_server, &new_host);
         g_server_running = 0;
         pthread_mutex_unlock(&session_mutex);
-        wsl_portproxy_teardown_interactive();
         if (new_host == FL_NET_SERVER_MEMBER_ID_NONE) {
             fl_color_success("session terminated (no remaining members)");
         }
@@ -1069,7 +1034,9 @@ static int verb_kill(void) {
     fl_net_server_host_stop(&g_server);
     g_server_running = 0;
     pthread_mutex_unlock(&session_mutex);
-    wsl_portproxy_teardown_interactive();
+#if defined(FL_SERVER_UDP_HOSTED)
+    server_udp_stop();
+#endif
     fl_color_success("session terminated");
     return 0;
 }
@@ -1403,13 +1370,60 @@ void cmd_server_atexit(void) {
     }
     pthread_mutex_unlock(&session_mutex);
 
-    /* Always drop Windows portproxy/firewall when this shell exits hosting. */
-    wsl_portproxy_teardown_interactive();
+#if defined(FL_SERVER_UDP_HOSTED)
+    server_udp_stop();
+#endif
 }
 
 /* ------------------------------------------------------------------------- */
 /* Command surface                                                           */
 /* ------------------------------------------------------------------------- */
+
+static int verb_netinit(void) {
+    char parent[FL_NET_MACVLAN_IFNAMSIZ];
+    uint8_t mac[6];
+    uint32_t ip_be = 0u, mask_be = 0u, gw_be = 0u;
+    fl_result_t rc;
+    char ip_s[32], gw_s[32];
+    uint8_t prefix = 24u;
+    uint32_t mask_h;
+
+    if (fl_net_macvlan_get_registered(&ip_be, &mask_be, &prefix) && ip_be != 0u) {
+        fl_net_ipv4_format_addr(ip_be, ip_s, sizeof(ip_s));
+        fl_color_success("fl0 already configured: %s/%u", ip_s, (unsigned)prefix);
+        return 0;
+    }
+
+    rc = fl_net_macvlan_create(FL_NET_MACVLAN_NAME, parent);
+    if (rc != FL_RESULT_OK) {
+        if (rc == FL_RESULT_ACCES)
+            fl_color_error("fl0 setup needs elevated permissions — run with sudo or:\n"
+                           "  ip link add fl0 link <parent> type macvlan mode bridge\n"
+                           "  ip link set fl0 up");
+        else
+            fl_color_error("fl0 create failed: no suitable LAN parent interface found");
+        return 1;
+    }
+    rc = fl_net_macvlan_hwaddr(FL_NET_MACVLAN_NAME, mac);
+    if (rc != FL_RESULT_OK) {
+        fl_color_error("fl0: could not read hardware address");
+        return 1;
+    }
+    rc = fl_net_macvlan_dhcp_lease(FL_NET_MACVLAN_NAME, mac, &ip_be, &mask_be, &gw_be, 5000u);
+    if (rc != FL_RESULT_OK) {
+        fl_color_error("fl0: DHCP lease failed (no response from router within 5 s)");
+        return 1;
+    }
+
+    fl_net_ipv4_format_addr(ip_be, ip_s, sizeof(ip_s));
+    mask_h = fl_net_ntohl(mask_be);
+    prefix = 0u;
+    while (mask_h & 0x80000000u) { prefix++; mask_h <<= 1; }
+    fl_net_ipv4_format_addr(gw_be, gw_s, sizeof(gw_s));
+    fl_color_success("fl0: %s/%u via %s", ip_s, (unsigned)prefix, gw_s);
+    fl_net_iface_refresh();
+    return 0;
+}
 
 int cmd_server_run(int argc, char **argv) {
     cmd_server_ctx_t ctx = {
@@ -1422,10 +1436,11 @@ int cmd_server_run(int argc, char **argv) {
     };
 
     if (argc < 2) {
-        fl_color_error("usage: server <host|join|interfaces|msg|file|send|announce|nick|set-nick|connected|leave|kill> ...");
+        fl_color_error("usage: server <host|join|interfaces|netinit|msg|file|send|announce|nick|set-nick|connected|leave|kill> ...");
         return 1;
     }
     if (!strcmp(argv[1], "interfaces")) return verb_interfaces(argc, argv);
+    if (!strcmp(argv[1], "netinit"))   return verb_netinit();
     if (!strcmp(argv[1], "host"))      return verb_host(argc, argv);
     if (!strcmp(argv[1], "join"))      return verb_join(argc, argv);
     if (!strcmp(argv[1], "leave"))     return verb_leave();
