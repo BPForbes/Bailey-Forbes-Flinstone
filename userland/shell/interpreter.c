@@ -1,6 +1,7 @@
 #include "interpreter.h"
 #include "common.h"
 #include "util.h"
+#include "shell_tokenize.h"
 #include "terminal.h"
 #include "cmd_decl.h"
 #include "threadpool.h"
@@ -86,12 +87,7 @@ int execute_command_str(const char *line) {
     }
     char *args[64];
     int argc = 0;
-    char *t = strtok(cmdLine, " \t");
-    while (t && argc < 63) {
-        args[argc++] = t;
-        t = strtok(NULL, " \t");
-    }
-    args[argc] = NULL;
+    argc = fl_shell_tokenize_line(cmdLine, args, (int)(sizeof(args) / sizeof(args[0])));
     free(tokenBuf);
 
     if (argc == 0) {

@@ -14,6 +14,7 @@
 #include "wifi_fullmac_chipset.h"
 #include "wifi_driver_backend.h"
 #include "fl/platform.h"
+#include "shell_tokenize.h"
 
 #include <arpa/inet.h>
 #include <stdio.h>
@@ -83,6 +84,7 @@ static int wifi_usage(void) {
     fputs("Usage:\n"
           "  wifi scan [-band any|2|5|6]\n"
           "  wifi join <ssid>              Join by network name (prompts for WiFi password)\n"
+          "  wifi join \"<ssid>\"            SSID with spaces/apostrophes (e.g. \"Bailey's iPhone\")\n"
           "  wifi join -b <bssid> <ssid>  Pin to a specific AP by MAC address\n"
           "  wifi leave                   Disconnect and drop WLAN addresses\n"
           "  wifi known\n"
@@ -206,7 +208,8 @@ static int cmd_wifi_scan(int argc, char **argv) {
 }
 
 static int cmd_wifi_join(int argc, char **argv) {
-    const char *name = NULL;
+    const char *name_raw = NULL;
+    char ssid_name[FL_WIFI_SSID_MAX];
     const char *bssid_arg = NULL;
     char wifi_pw[64];
     fl_net_wifi_cred_t cred;
@@ -223,17 +226,20 @@ static int cmd_wifi_join(int argc, char **argv) {
             bssid_arg = argv[++a];
             continue;
         }
-        if (!name) {
-            name = argv[a];
+        if (!name_raw) {
+            name_raw = argv[a];
             continue;
         }
         fprintf(stderr, "wifi join: unexpected argument '%s'\n", argv[a]);
         return wifi_usage();
     }
-    if (!name) {
+    if (!name_raw) {
         fputs("wifi join: missing network name\n", stderr);
         return 1;
     }
+    strncpy(ssid_name, name_raw, sizeof(ssid_name) - 1u);
+    ssid_name[sizeof(ssid_name) - 1u] = '\0';
+    fl_shell_strip_outer_quotes(ssid_name);
     if (fl_authz_subsystem_check((unsigned)FL_AUTHZ_OP_NETDEV_IO, NULL) ==
         FL_AUTHZ_DENY) {
         fputs("wifi join: permission denied (netdev I/O)\n", stderr);
@@ -272,7 +278,7 @@ static int cmd_wifi_join(int argc, char **argv) {
      * returns FL_RESULT_INVAL and we fall back to prompting. */
     {
         fl_wifi_db_router_t known_row;
-        int is_known = (fl_wifi_db_find(name, &known_row) == FL_RESULT_OK &&
+        int is_known = (fl_wifi_db_find(ssid_name, &known_row) == FL_RESULT_OK &&
                         known_row.password_hash[0] &&
                         strcmp(known_row.password_hash, "-") != 0);
         if (!is_known) {
@@ -282,12 +288,12 @@ static int cmd_wifi_join(int argc, char **argv) {
                 return 1;
             }
         } else {
-            printf("wifi join: '%s' is a known network\n", name);
+            printf("wifi join: '%s' is a known network\n", ssid_name);
         }
     }
 
     memset(&cred, 0, sizeof(cred));
-    strncpy(cred.ssid, name, sizeof(cred.ssid) - 1u);
+    strncpy(cred.ssid, ssid_name, sizeof(cred.ssid) - 1u);
     if (bssid_arg && !parse_bssid_arg(bssid_arg, cred.bssid)) {
         fprintf(stderr, "wifi join: invalid BSSID '%s' (use aa:bb:cc:dd:ee:ff)\n", bssid_arg);
         cmd_wipe_password(wifi_pw, sizeof(wifi_pw));
@@ -296,7 +302,7 @@ static int cmd_wifi_join(int argc, char **argv) {
     }
     if (wifi_pw[0]) {
         strncpy(cred.passphrase, wifi_pw, sizeof(cred.passphrase) - 1u);
-        if (fl_wifi_db_set_password(name, wifi_pw) != FL_RESULT_OK) {
+        if (fl_wifi_db_set_password(ssid_name, wifi_pw) != FL_RESULT_OK) {
             fputs("wifi join: could not store credential hash\n", stderr);
             fl_net_wifi_cred_scrub_passphrase(&cred);
             cmd_wipe_password(wifi_pw, sizeof(wifi_pw));
@@ -307,7 +313,7 @@ static int cmd_wifi_join(int argc, char **argv) {
     cmd_wipe_password(wifi_pw, sizeof(wifi_pw));
 
     for (i = 0; i < count; i++) {
-        if (strcmp(entries[i].ssid, name))
+        if (strcmp(entries[i].ssid, ssid_name))
             continue;
         if (bssid_arg && memcmp(entries[i].bssid, cred.bssid, 6) != 0)
             continue;
@@ -315,7 +321,7 @@ static int cmd_wifi_join(int argc, char **argv) {
         cred.band_hint = entries[i].band;
         if (!bssid_arg)
             memcpy(cred.bssid, entries[i].bssid, 6);
-        (void)fl_wifi_db_apply_scan_entry(name, &entries[i]);
+        (void)fl_wifi_db_apply_scan_entry(ssid_name, &entries[i]);
         break;
     }
     /* Default to WPA2-PSK when auth mode is unknown — most home routers are
@@ -337,7 +343,7 @@ static int cmd_wifi_join(int argc, char **argv) {
         strncpy(cred.passphrase, wifi_pw, sizeof(cred.passphrase) - 1u);
         if (cred.auth_mode == 0)
             cred.auth_mode = FL_WIFI_AUTH_WPA2_PSK;
-        (void)fl_wifi_db_set_password(name, wifi_pw);
+        (void)fl_wifi_db_set_password(ssid_name, wifi_pw);
         cmd_wipe_password(wifi_pw, sizeof(wifi_pw));
         rc = fl_net_wifi_connect(&cred, 30000u);
     }
@@ -349,7 +355,7 @@ static int cmd_wifi_join(int argc, char **argv) {
      * entry so connect never returns NOENT, and the host path returns ERR on
      * nmcli/wpa_cli failure.  Kept as a safety net for future backends. */
     if (rc == FL_RESULT_NOENT) {
-        fprintf(stderr, "wifi join: network '%s' not found\n", name);
+        fprintf(stderr, "wifi join: network '%s' not found\n", ssid_name);
         goto cleanup;
     }
     if (rc == FL_RESULT_INVAL) {
@@ -381,9 +387,9 @@ static int cmd_wifi_join(int argc, char **argv) {
         }
         goto cleanup;
     }
-    (void)fl_wifi_db_mark_joined(name, 1);
+    (void)fl_wifi_db_mark_joined(ssid_name, 1);
     fl_net_wifi_cred_scrub_passphrase(&cred);
-    printf("wifi join: associated with '%s' (state %d", name, (int)fl_net_wifi_state());
+    printf("wifi join: associated with '%s' (state %d", ssid_name, (int)fl_net_wifi_state());
     if (fl_net_wifi_netdev_is_up()) {
         char peer_ip[32];
         uint32_t peer_be = 0u;

@@ -200,7 +200,7 @@ CORE_SRCS = kernel/core/vfs/disk.c kernel/core/vfs/fat32_host.c kernel/core/vfs/
             kernel/core/identity/session.c \
             kernel/core/sys/vrt.c kernel/core/sys/ipc.c kernel/core/sys/syscall.c kernel/core/vfs/vfs.c
 COMMAND_SRCS := $(wildcard userland/command/cmd_*.c) userland/command/server_file_expire.c
-SHELL_SRCS = userland/shell/common.c userland/shell/util.c userland/shell/history_record.c userland/shell/audit_log.c userland/shell/authz_subsystem.c userland/shell/contract_log_dispatch.c userland/shell/session_sync.c userland/shell/session_login_env.c userland/shell/terminal.c userland/shell/interpreter.c userland/shell/sh.c userland/shell/shell_io.c $(COMMAND_SRCS)
+SHELL_SRCS = userland/shell/common.c userland/shell/util.c userland/shell/shell_tokenize.c userland/shell/history_record.c userland/shell/audit_log.c userland/shell/authz_subsystem.c userland/shell/contract_log_dispatch.c userland/shell/session_sync.c userland/shell/session_login_env.c userland/shell/terminal.c userland/shell/interpreter.c userland/shell/sh.c userland/shell/shell_io.c $(COMMAND_SRCS)
 # GitHub Actions (or explicit opt-in) may generate userland/shell/version_changelog.c; see scripts/gen_version_changelog.c
 ifeq ($(CHANGELOG_CI),1)
 CHANGELOG_GEN = gen_version_changelog
@@ -892,6 +892,13 @@ tests/test_wifi_fullmac_probe: kernel/drivers/wifi/wifi_fullmac_chipset.c
 
 test_wifi_fullmac_probe: tests/test_wifi_fullmac_probe
 	@./tests/test_wifi_fullmac_probe
+
+tests/test_shell_tokenize: userland/shell/shell_tokenize.c
+	$(CC) $(CFLAGS) $(TEST_SANITIZE) -o tests/test_shell_tokenize tests/test_shell_tokenize.c \
+	  userland/shell/shell_tokenize.c -Wl,-z,noexecstack
+
+test_shell_tokenize: tests/test_shell_tokenize
+	@./tests/test_shell_tokenize
 
 tests/test_wifi_80211ax_mock_279: $(WIFI_TEST_COMMON_DEPS)
 	$(WIFI_TEST_LINK_PRE)
