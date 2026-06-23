@@ -85,6 +85,15 @@ static void print_sock_error(const char *verb, fl_result_t rc) {
         fl_color_error("%s failed (rc=%d)", verb, (int)rc);
 }
 
+static void print_host_endpoint_hint(void) {
+    char suggest[32];
+    fputs("hint: try: server host :<port>  or  ", stderr);
+    if (fl_net_iface_suggest_ipv4(NULL, suggest, sizeof(suggest)))
+        fprintf(stderr, "server host %s:<port>\n", suggest);
+    else
+        fputs("server host 0.0.0.0:<port>\n", stderr);
+}
+
 static int wsl_portproxy_press_any_key(void) {
 #if defined(__unix__) || defined(__APPLE__)
     struct termios old_tty;
@@ -815,6 +824,10 @@ static int verb_host(int argc, char **argv) {
         if (rc != FL_RESULT_OK) {
             pthread_mutex_unlock(&session_mutex);
             print_sock_error("server host", rc);
+            /* If the user specified a specific IP address and bind failed, suggest
+             * alternatives like :port (all interfaces) or a locally available address. */
+            if (bind_ep.family == FL_NET_ADDR_FAMILY_V4 && bind_ep.addr.v4_be != 0u)
+                print_host_endpoint_hint();
             return 1;
         }
         rc = fl_server_bg_start_server(&g_server, &g_server_bg);
