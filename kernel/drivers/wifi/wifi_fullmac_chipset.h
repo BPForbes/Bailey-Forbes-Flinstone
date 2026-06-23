@@ -17,7 +17,7 @@ typedef struct {
 const wifi_fullmac_chipset_t *wifi_fullmac_chipset_match(uint16_t vendor_id,
 							 uint16_t device_id);
 
-/** Enumerate built-in 802.11ax PCI IDs (table ends with vendor_id==0). */
+/** Enumerate built-in 802.11ax PCIe/USB IDs (table ends with vendor_id==0). */
 const wifi_fullmac_chipset_t *wifi_fullmac_chipset_table(size_t *count_out);
 
 #endif /* KERNEL_DRIVERS_WIFI_FULLMAC_CHIPSET_H */

@@ -29,7 +29,9 @@ static void test_chipset_table(void)
 	expect_true(wifi_fullmac_chipset_match(0x8086u, 0x2725u) != NULL,
 		    "Intel AX210 match");
 	expect_true(wifi_fullmac_chipset_match(0x14c3u, 0x7961u) != NULL,
-		    "MT7921 match");
+		    "MT7921 PCIe match");
+	expect_true(wifi_fullmac_chipset_match(0x0e8du, 0x7961u) != NULL,
+		    "MT7921AU USB match");
 	expect_true(wifi_fullmac_chipset_match(0xffffu, 0x0000u) == NULL,
 		    "unknown vid:did rejected");
 }

@@ -7,6 +7,7 @@ static const wifi_fullmac_chipset_t s_ax_chipsets[] = {
 	{ "Qualcomm QCA6390",    0x17cbu, 0x1101u, WIFI_FULLMAC_BUS_PCIE },
 	{ "Qualcomm WCN6855",    0x17cbu, 0x1103u, WIFI_FULLMAC_BUS_PCIE },
 	{ "MediaTek MT7921",     0x14c3u, 0x7961u, WIFI_FULLMAC_BUS_PCIE },
+	{ "MediaTek MT7921AU",   0x0e8du, 0x7961u, WIFI_FULLMAC_BUS_USB },
 	{ "MediaTek MT7922",     0x14c3u, 0x0616u, WIFI_FULLMAC_BUS_PCIE },
 	{ "Realtek RTL8852AE",   0x10ecu, 0x8852u, WIFI_FULLMAC_BUS_PCIE },
 	{ "Realtek RTL8852BE",   0x10ecu, 0xb852u, WIFI_FULLMAC_BUS_PCIE },

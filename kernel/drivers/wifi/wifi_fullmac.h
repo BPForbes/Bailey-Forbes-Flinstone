@@ -195,23 +195,26 @@ int wifi_fullmac_get_he_capabilities(wifi_fullmac_t *dev,
 				     wifi_fullmac_he_cap_t *he_cap);
 int wifi_fullmac_setup_twt(wifi_fullmac_t *dev, const wifi_fullmac_twt_setup_t *twt);
 
-/** BDF + identity from the last successful hardware probe. */
+/** Identity from the last successful hardware probe (PCIe or USB). */
 typedef struct {
-	uint8_t bus;
-	uint8_t dev;
-	uint8_t fn;
+	wifi_fullmac_bus_type_t bus;
 	uint16_t vendor_id;
 	uint16_t device_id;
-	char bdf[16];
 	char chipset[48];
-	uint32_t bar0;
+	char bdf[16];      /* PCIe BDF when bus is PCIE */
+	char usb_port[32]; /* sysfs port e.g. 1-2 when bus is USB */
+	uint32_t bar0;     /* PCIe BAR0; 0 for USB */
+	uint8_t pci_bus;
+	uint8_t pci_dev;
+	uint8_t pci_fn;
 } wifi_fullmac_probe_info_t;
 
 /**
- * Attach a real FullMAC device (PCIe). Requires one of:
+ * Attach a real FullMAC device (PCIe or USB). Requires one of:
  *   FL_WIFI_FULLMAC_PCI=0000:bb:dd.f
- *   FL_WIFI_FULLMAC_VIDPID=8086:2725
- *   FL_WIFI_FULLMAC=1 or FL_WIFI_FULLMAC_AUTO=1 (scan sysfs for known ax IDs)
+ *   FL_WIFI_FULLMAC_USB=bus-port (e.g. 1-2)
+ *   FL_WIFI_FULLMAC_VIDPID=0e8d:7961
+ *   FL_WIFI_FULLMAC=1 or FL_WIFI_FULLMAC_AUTO=1 (scan PCI then USB sysfs)
  * Optional: FL_WIFI_FULLMAC_FW=/path/to/firmware
  * Returns 0 on probe success (scan/connect may still need chipset firmware bring-up).
  */

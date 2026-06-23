@@ -168,7 +168,9 @@ NET_CORE_SRCS = kernel/core/net/net_checksum.c kernel/core/net/net_wire.c kernel
                 kernel/drivers/wifi/wifi_ax_session_driver.c \
                 kernel/drivers/wifi/wifi_80211ax_mock.c \
                 kernel/drivers/wifi/wifi_fullmac_core.c \
+                kernel/drivers/wifi/wifi_fullmac_hw.c \
                 kernel/drivers/wifi/wifi_fullmac_pcie.c \
+                kernel/drivers/wifi/wifi_fullmac_usb.c \
                 kernel/drivers/wifi/wifi_fullmac_chipset.c \
                 kernel/drivers/wifi/wifi_fullmac_fw.c \
                 kernel/drivers/wifi/wifi_fullmac_connect.c \
@@ -958,7 +960,8 @@ WIFI_TEST_STATION_DRIVER_SRCS = kernel/drivers/wifi/wifi_driver_backend.c kernel
 	kernel/drivers/wifi/wifi_lab_router.c \
 	kernel/drivers/wifi/wifi_uart_transport.c kernel/drivers/wifi/wifi_driver_packet.c \
 	kernel/drivers/wifi/wifi_80211ax_mock.c kernel/drivers/wifi/wifi_supplicant.c \
-	kernel/drivers/wifi/wifi_fullmac_core.c kernel/drivers/wifi/wifi_fullmac_pcie.c \
+	kernel/drivers/wifi/wifi_fullmac_core.c kernel/drivers/wifi/wifi_fullmac_hw.c \
+	kernel/drivers/wifi/wifi_fullmac_pcie.c kernel/drivers/wifi/wifi_fullmac_usb.c \
 	kernel/drivers/wifi/wifi_fullmac_chipset.c kernel/drivers/wifi/wifi_fullmac_fw.c \
 	kernel/drivers/wifi/wifi_fullmac_connect.c
 
