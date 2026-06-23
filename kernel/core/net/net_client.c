@@ -219,7 +219,6 @@ static uint32_t s_client_msg_serial;
 fl_result_t fl_net_client_send_msg(fl_net_client_t *client, const char *text) {
     size_t n;
     char transfer_id[FL_SERVER_SHARE_ID_MAX];
-    fl_result_t rc;
 
     if (!client || !text)
         return FL_RESULT_INVAL;
@@ -738,4 +737,69 @@ int fl_net_client_poll(fl_net_client_t *client, fl_net_client_event_cb cb,
 
 fl_net_client_state_t fl_net_client_state(const fl_net_client_t *client) {
     return client ? client->state : FL_NET_CLIENT_STATE_DISCONNECTED;
+}
+
+fl_result_t fl_net_client_adopt_handle(fl_net_client_t *client,
+                                       fl_net_sock_handle_t h,
+                                       const char *principal,
+                                       unsigned timeout_ms) {
+    fl_result_t rc;
+    uint8_t opcode = 0;
+    uint8_t payload[FL_NET_SESSION_MAX_MSG];
+    uint16_t plen = 0;
+    size_t prin_len;
+    fl_net_endpoint_t local_ep;
+
+    if (!client || h == FL_NET_SOCK_INVALID || !principal || !principal[0])
+        return FL_RESULT_INVAL;
+    if (client->state != FL_NET_CLIENT_STATE_DISCONNECTED)
+        return FL_RESULT_BUSY;
+
+    prin_len = strnlen(principal, sizeof(client->principal));
+    if (prin_len == 0u || prin_len == sizeof(client->principal))
+        return FL_RESULT_INVAL;
+
+    rc = fl_net_client_init(client);
+    if (rc != FL_RESULT_OK)
+        return rc;
+
+    client->peer_handle = h;
+    client->state = FL_NET_CLIENT_STATE_CONNECTING;
+    memcpy(client->principal, principal, prin_len);
+    client->principal[prin_len] = '\0';
+
+    rc = fl_net_session_send_frame(h, (uint8_t)FL_NET_SESSION_OP_HELLO,
+                                   (const uint8_t *)client->principal,
+                                   (uint16_t)prin_len);
+    if (rc != FL_RESULT_OK) {
+        client->peer_handle = FL_NET_SOCK_INVALID;
+        client->state = FL_NET_CLIENT_STATE_DISCONNECTED;
+        return rc;
+    }
+
+    rc = fl_net_session_recv_frame(h, &opcode, payload, sizeof(payload), &plen,
+                                   timeout_ms == 0u ? 2000u : timeout_ms);
+    if (rc != FL_RESULT_OK || opcode != (uint8_t)FL_NET_SESSION_OP_HELLO_ACK ||
+        plen < 2u) {
+        client->peer_handle = FL_NET_SOCK_INVALID;
+        client->state = FL_NET_CLIENT_STATE_DISCONNECTED;
+        return rc != FL_RESULT_OK ? rc : FL_RESULT_INVAL;
+    }
+
+    client->assigned_member_id =
+        (fl_net_server_member_id_t)(((uint16_t)payload[0] << 8) | payload[1]);
+    {
+        size_t name_len = (size_t)plen - 2u;
+        if (name_len >= sizeof(client->display_name))
+            name_len = sizeof(client->display_name) - 1u;
+        memcpy(client->display_name, payload + 2, name_len);
+        client->display_name[name_len] = '\0';
+    }
+    memset(&local_ep, 0, sizeof(local_ep));
+    if (fl_net_sock_local_endpoint(h, &local_ep) == FL_RESULT_OK)
+        client->local_ep = local_ep;
+    (void)fl_net_sock_set_nonblock(h, 1);
+    fl_net_session_rx_reset(&client->rx_state);
+    client->state = FL_NET_CLIENT_STATE_CONNECTED;
+    return FL_RESULT_OK;
 }
