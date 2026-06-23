@@ -34,4 +34,11 @@ void wifi_fullmac_hw_fill_probe_info(const wifi_fullmac_hw_ctx_t *ctx,
 int wifi_fullmac_pcie_probe_ctx(wifi_fullmac_hw_ctx_t *ctx);
 int wifi_fullmac_usb_probe_ctx(wifi_fullmac_hw_ctx_t *ctx);
 
+/**
+ * If a known ax USB device is present in sysfs, write its port (e.g. "2-2") to
+ * port_out and return 0. Does not attach or require FL_WIFI_FULLMAC*.
+ */
+int wifi_fullmac_usb_sysfs_hint(uint16_t vendor_id, uint16_t device_id,
+				char *port_out, size_t port_cap);
+
 #endif /* KERNEL_DRIVERS_WIFI_FULLMAC_HW_INTERNAL_H */

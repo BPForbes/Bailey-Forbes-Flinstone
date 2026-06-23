@@ -12,6 +12,7 @@
 #include "net_wifi_station.h"
 #include "wifi_fullmac.h"
 #include "wifi_fullmac_chipset.h"
+#include "wifi_driver_backend.h"
 #include "fl/platform.h"
 
 #include <arpa/inet.h>
@@ -432,12 +433,33 @@ static int cmd_wifi_leave(int argc, char **argv) {
     return 0;
 }
 
+static const char *wifi_backend_label(wifi_backend_type_t backend)
+{
+    switch (backend) {
+    case WIFI_BACKEND_COPROCESSOR:
+        return "UART coprocessor (Phase 1)";
+    case WIFI_BACKEND_FULLMAC:
+        return "FullMAC hardware (Phase 4)";
+    case WIFI_BACKEND_QEMU:
+        return "802.11ax mock";
+    default:
+        return "none (lab or host helper)";
+    }
+}
+
 static int cmd_wifi_status(int argc, char **argv) {
     char ip[32];
     uint32_t ip_be = 0u;
     (void)argc;
     (void)argv;
+    (void)fl_net_wifi_station_init();
     printf("Wi-Fi state: %d\n", (int)fl_net_wifi_state());
+    printf("Driver backend: %s\n", wifi_backend_label(wifi_driver_backend_active()));
+    if (wifi_driver_backend_active() == WIFI_BACKEND_FULLMAC) {
+        const char *err = wifi_fullmac_last_error();
+        if (err && err[0])
+            printf("FullMAC note: %s\n", err);
+    }
     if (fl_net_wifi_station_lab_backend())
         puts("Backend: in-tree 802.11 lab (wlan-lab DHCP)");
     else if (fl_net_wifi_station_host_backend()) {
@@ -583,7 +605,19 @@ static int cmd_wifi_probe(int argc, char **argv) {
             return 1;
         }
     } else {
-        fputs("hint: set FL_WIFI_FULLMAC=1 (auto-scan), FL_WIFI_FULLMAC_USB=1-2, "
+        char usb_port[32];
+
+        if (wifi_fullmac_usb_sysfs_hint(0x0e8du, 0x7961u, usb_port, sizeof(usb_port)) == 0)
+            fprintf(stderr,
+                    "detected MT7921AU USB dongle at sysfs port %s — try:\n"
+                    "  export FL_WIFI_FULLMAC=1 FL_WIFI_FULLMAC_USB=%s\n"
+                    "  ./BPForbes_Flinstone_Shell wifi probe\n",
+                    usb_port, usb_port);
+        else
+            fputs("note: no MT7921AU (0e8d:7961) in /sys/bus/usb/devices — "
+                  "attach USB to WSL (usbipd) or use native Linux\n",
+                  stderr);
+        fputs("hint: set FL_WIFI_FULLMAC=1 (auto-scan), FL_WIFI_FULLMAC_USB=2-2, "
               "or FL_WIFI_FULLMAC_PCI=bb:dd.f\n",
               stderr);
     }

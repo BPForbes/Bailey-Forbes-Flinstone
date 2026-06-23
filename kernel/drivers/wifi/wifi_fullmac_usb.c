@@ -175,3 +175,44 @@ int wifi_fullmac_usb_probe_ctx(wifi_fullmac_hw_ctx_t *ctx)
 	}
 	return usb_scan_sysfs(ctx);
 }
+
+int wifi_fullmac_usb_sysfs_hint(uint16_t vendor_id, uint16_t device_id,
+				char *port_out, size_t port_cap)
+{
+#if defined(__linux__)
+	DIR *d;
+	struct dirent *de;
+	char syspath[256];
+
+	if (!port_out || port_cap == 0)
+		return -1;
+	port_out[0] = '\0';
+	d = opendir("/sys/bus/usb/devices");
+	if (!d)
+		return -1;
+	while ((de = readdir(d)) != NULL) {
+		uint16_t vid = 0, pid = 0;
+
+		if (de->d_name[0] == '.')
+			continue;
+		if (usb_is_interface_name(de->d_name))
+			continue;
+		snprintf(syspath, sizeof(syspath), "/sys/bus/usb/devices/%s", de->d_name);
+		if (usb_sysfs_read_hex16(syspath, "idVendor", &vid) != 0 ||
+		    usb_sysfs_read_hex16(syspath, "idProduct", &pid) != 0)
+			continue;
+		if (vid != vendor_id || pid != device_id)
+			continue;
+		strncpy(port_out, de->d_name, port_cap - 1u);
+		port_out[port_cap - 1u] = '\0';
+		closedir(d);
+		return 0;
+	}
+	closedir(d);
+#endif
+	(void)vendor_id;
+	(void)device_id;
+	(void)port_out;
+	(void)port_cap;
+	return -1;
+}

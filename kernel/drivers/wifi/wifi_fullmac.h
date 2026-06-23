@@ -224,6 +224,13 @@ void wifi_fullmac_hw_detach(wifi_fullmac_t *dev);
 /** Last probe/init error detail for shell/tests. */
 const char *wifi_fullmac_last_error(void);
 
+/**
+ * If a USB ax dongle is visible in sysfs, write its port (e.g. "2-2") and return 0.
+ * Does not require FL_WIFI_FULLMAC* or attach hardware.
+ */
+int wifi_fullmac_usb_sysfs_hint(uint16_t vendor_id, uint16_t device_id,
+				char *port_out, size_t port_cap);
+
 /** Driver-internal error buffer (wifi_fullmac_core.c). */
 void wifi_fullmac_set_error(const char *msg);
 
