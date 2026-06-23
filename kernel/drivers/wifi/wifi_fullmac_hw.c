@@ -116,26 +116,123 @@ static int hw_stub_deauth(wifi_fullmac_t *dev, uint16_t reason)
 	return 0;
 }
 
+static int hw_stub_reset(wifi_fullmac_t *dev)
+{
+	return hw_stub_not_ready(dev);
+}
+
+static int hw_stub_load_firmware(wifi_fullmac_t *dev, const uint8_t *fw, size_t fw_len)
+{
+	(void)fw;
+	(void)fw_len;
+	return hw_stub_not_ready(dev);
+}
+
+static int hw_stub_send_command(wifi_fullmac_t *dev, const wifi_fullmac_cmd_t *cmd)
+{
+	(void)cmd;
+	return hw_stub_not_ready(dev);
+}
+
+static int hw_stub_poll_event(wifi_fullmac_t *dev, uint8_t *event_buf, size_t buf_len,
+			      size_t *out_len)
+{
+	(void)event_buf;
+	(void)buf_len;
+	(void)out_len;
+	return hw_stub_not_ready(dev);
+}
+
+static int hw_stub_authenticate(wifi_fullmac_t *dev, const uint8_t *bssid, uint16_t auth_type,
+				uint16_t auth_seq)
+{
+	(void)bssid;
+	(void)auth_type;
+	(void)auth_seq;
+	return hw_stub_not_ready(dev);
+}
+
+static int hw_stub_associate(wifi_fullmac_t *dev, const uint8_t *bssid)
+{
+	(void)bssid;
+	return hw_stub_not_ready(dev);
+}
+
+static int hw_stub_set_key(wifi_fullmac_t *dev, uint8_t key_index, const uint8_t *key,
+			   size_t key_len)
+{
+	(void)key_index;
+	(void)key;
+	(void)key_len;
+	return hw_stub_not_ready(dev);
+}
+
+static int hw_stub_delete_key(wifi_fullmac_t *dev, uint8_t key_index)
+{
+	(void)key_index;
+	return hw_stub_not_ready(dev);
+}
+
+static int hw_stub_get_he_capabilities(wifi_fullmac_t *dev, wifi_fullmac_he_cap_t *he_cap)
+{
+	(void)he_cap;
+	return hw_stub_not_ready(dev);
+}
+
+static int hw_stub_set_he_capabilities(wifi_fullmac_t *dev,
+				       const wifi_fullmac_he_cap_t *he_cap)
+{
+	(void)he_cap;
+	return hw_stub_not_ready(dev);
+}
+
+static int hw_stub_setup_twt(wifi_fullmac_t *dev, const wifi_fullmac_twt_setup_t *twt)
+{
+	(void)twt;
+	return hw_stub_not_ready(dev);
+}
+
+static int hw_stub_teardown_twt(wifi_fullmac_t *dev, uint8_t flow_id)
+{
+	(void)flow_id;
+	return hw_stub_not_ready(dev);
+}
+
+static int hw_stub_tx_packet(wifi_fullmac_t *dev, const uint8_t *data, size_t len)
+{
+	(void)data;
+	(void)len;
+	return hw_stub_not_ready(dev);
+}
+
+static int hw_stub_rx_packet(wifi_fullmac_t *dev, uint8_t *buffer, size_t buf_len, size_t *out_len)
+{
+	(void)buffer;
+	(void)buf_len;
+	(void)out_len;
+	return hw_stub_not_ready(dev);
+}
+
 static const wifi_fullmac_ops_t s_hw_stub_ops = {
 	.init = hw_stub_init,
 	.deinit = hw_stub_deinit,
-	.reset = hw_stub_not_ready,
-	.load_firmware = hw_stub_not_ready,
-	.send_command = hw_stub_not_ready,
-	.poll_event = hw_stub_not_ready,
+	.reset = hw_stub_reset,
+	.load_firmware = hw_stub_load_firmware,
+	.send_command = hw_stub_send_command,
+	.poll_event = hw_stub_poll_event,
 	.start_scan = hw_stub_start_scan,
 	.get_scan_results = hw_stub_get_scan_results,
-	.authenticate = hw_stub_not_ready,
-	.associate = hw_stub_not_ready,
+	.authenticate = hw_stub_authenticate,
+	.associate = hw_stub_associate,
 	.deauthenticate = hw_stub_deauth,
-	.set_key = hw_stub_not_ready,
-	.delete_key = hw_stub_not_ready,
-	.get_he_capabilities = hw_stub_not_ready,
-	.set_he_capabilities = hw_stub_not_ready,
-	.setup_twt = hw_stub_not_ready,
-	.teardown_twt = hw_stub_not_ready,
-	.tx_packet = hw_stub_not_ready,
-	.rx_packet = hw_stub_not_ready,
+	.set_key = hw_stub_set_key,
+	.delete_key = hw_stub_delete_key,
+	.get_he_capabilities = hw_stub_get_he_capabilities,
+	.set_he_capabilities = hw_stub_set_he_capabilities,
+	.setup_twt = hw_stub_setup_twt,
+	.teardown_twt = hw_stub_teardown_twt,
+	.tx_packet = hw_stub_tx_packet,
+	.rx_packet = hw_stub_rx_packet,
 };
 
 const wifi_fullmac_ops_t *wifi_fullmac_hw_stub_ops(void)

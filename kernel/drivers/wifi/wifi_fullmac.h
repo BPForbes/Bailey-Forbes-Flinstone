@@ -190,6 +190,9 @@ int wifi_fullmac_pcie_destroy(wifi_fullmac_t *dev);
 int wifi_fullmac_init(wifi_fullmac_t *dev);
 int wifi_fullmac_deinit(wifi_fullmac_t *dev);
 
+wifi_fullmac_t *wifi_fullmac_dev_alloc(void);
+void wifi_fullmac_dev_free(wifi_fullmac_t *dev);
+
 /* 802.11ax (WiFi 6) specific */
 int wifi_fullmac_get_he_capabilities(wifi_fullmac_t *dev,
 				     wifi_fullmac_he_cap_t *he_cap);

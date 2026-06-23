@@ -64,7 +64,7 @@ static int usb_apply_chipset(uint16_t vid, uint16_t did, wifi_fullmac_hw_ctx_t *
 
 static int usb_ctx_from_port(const char *port, wifi_fullmac_hw_ctx_t *ctx)
 {
-	char syspath[256];
+	char syspath[512];
 	uint16_t vid = 0, pid = 0;
 
 	if (!port || !port[0] || !ctx)
@@ -112,12 +112,14 @@ static int usb_scan_sysfs(wifi_fullmac_hw_ctx_t *ctx)
 		return -1;
 	}
 	while ((de = readdir(d)) != NULL) {
-		char syspath[256];
+		char syspath[512];
 		uint16_t vid = 0, pid = 0;
 
 		if (de->d_name[0] == '.')
 			continue;
 		if (usb_is_interface_name(de->d_name))
+			continue;
+		if (strlen(de->d_name) > 200u)
 			continue;
 		snprintf(syspath, sizeof(syspath), "/sys/bus/usb/devices/%s", de->d_name);
 		if (usb_sysfs_read_hex16(syspath, "idVendor", &vid) != 0 ||
@@ -182,7 +184,7 @@ int wifi_fullmac_usb_sysfs_hint(uint16_t vendor_id, uint16_t device_id,
 #if defined(__linux__)
 	DIR *d;
 	struct dirent *de;
-	char syspath[256];
+	char syspath[512];
 
 	if (!port_out || port_cap == 0)
 		return -1;
@@ -196,6 +198,8 @@ int wifi_fullmac_usb_sysfs_hint(uint16_t vendor_id, uint16_t device_id,
 		if (de->d_name[0] == '.')
 			continue;
 		if (usb_is_interface_name(de->d_name))
+			continue;
+		if (strlen(de->d_name) > 200u)
 			continue;
 		snprintf(syspath, sizeof(syspath), "/sys/bus/usb/devices/%s", de->d_name);
 		if (usb_sysfs_read_hex16(syspath, "idVendor", &vid) != 0 ||
