@@ -10,8 +10,13 @@
 #include "net_wifi_netdev.h"
 #include "net_wifi_host_linux.h"
 #include "net_wifi_station.h"
+#include "wifi_fullmac.h"
+#include "wifi_fullmac_chipset.h"
+#include "fl/platform.h"
 
+#include <arpa/inet.h>
 #include <stdio.h>
+#include <stdlib.h>
 #include <string.h>
 
 static const char *auth_mode_name(uint8_t mode) {
@@ -81,10 +86,14 @@ static int wifi_usage(void) {
           "  wifi leave                   Disconnect and drop WLAN addresses\n"
           "  wifi known\n"
           "  wifi status\n"
+          "  wifi probe                   List ax PCIe/USB IDs / probe FullMAC hardware\n"
+          "  FullMAC NIC (opt-in): FL_WIFI_FULLMAC=1, FL_WIFI_FULLMAC_PCI=bb:dd.f,\n"
+          "    FL_WIFI_FULLMAC_USB=bus-port (e.g. 1-2), FL_WIFI_FULLMAC_VIDPID=0e8d:7961\n"
+          "    optional FL_WIFI_FULLMAC_FW=/path/to/firmware; unset FL_WIFI_80211AX_MOCK\n"
           "  Lab scan: set FL_NET_WIFI_HOME_SSID to include your home network in scan results.\n"
-          "  Real Wi-Fi (Linux): wpa_cli or nmcli on FL_NET_WIFI_IFACE (auto-detect when unset).\n"
-          "  WSL: FlinstonePowershell.exe (make flinstone-ps-windows); source tools/fl-wifi.env\n"
-          "       or: python3 tools/network_bridge.py discover\n",
+          "  Default: in-tree 802.11 lab (LabAxHome/GuestOpen; DHCP on wlan-lab).\n"
+          "  Real Wi-Fi (opt-in): set FL_NET_WIFI_FLINSTONE_PS on WSL, or FL_NET_WIFI_USE_WPA=1\n"
+          "    on native Linux with wpa_cli/nmcli. See README.md and docs/P3_NETWORKING.md.\n",
           stderr);
     return 1;
 }
@@ -145,7 +154,23 @@ static int cmd_wifi_scan(int argc, char **argv) {
         return 1;
     }
     if (rc != FL_RESULT_OK) {
-        fprintf(stderr, "wifi scan: failed (%d)\n", (int)rc);
+        const char *backend = fl_net_wifi_host_linux_backend_name();
+        const char *herr = fl_net_wifi_host_linux_last_error();
+        const char *fps = getenv("FL_NET_WIFI_FLINSTONE_PS");
+        fprintf(stderr, "wifi scan: failed (%d)", (int)rc);
+        if (backend)
+            fprintf(stderr, " (%s)", backend);
+        putchar('\n');
+        if (herr && herr[0])
+            fprintf(stderr, "  %s\n", herr);
+        if (fl_net_wifi_host_linux_opted_in() &&
+            backend && !strcmp(backend, "FlinstonePowershell")) {
+            fputs("  Build: make flinstone-ps-windows\n", stderr);
+            if (fps && fps[0])
+                fprintf(stderr, "  Test: %s wifi-scan\n", fps);
+            else
+                fputs("  Set FL_NET_WIFI_FLINSTONE_PS (see tools/fl-wifi.env)\n", stderr);
+        }
         fl_wifi_db_close();
         return 1;
     }
@@ -155,16 +180,15 @@ static int cmd_wifi_scan(int argc, char **argv) {
         fl_wifi_db_close();
         return 1;
     }
-    if (fl_net_wifi_station_lab_backend()) {
-        fputs("wifi scan: using in-tree lab simulation (install wpa_cli/nmcli or set "
-              "FL_NET_WIFI_IFACE)\n",
-              stderr);
-    } else {
+    if (fl_net_wifi_station_lab_backend())
+        fputs("wifi scan: in-tree lab simulation (802.11ax APs)\n", stderr);
+    else if (fl_net_wifi_host_linux_opted_in() && fl_net_wifi_host_linux_available()) {
         const char *backend = fl_net_wifi_host_linux_backend_name();
-        if (backend)
-            fprintf(stderr, "wifi scan: host backend %s on %s\n", backend,
-                    fl_net_wifi_host_linux_iface());
-    }
+        const char *iface = fl_net_wifi_host_linux_iface();
+        fprintf(stderr, "wifi scan: host backend %s on %s\n",
+                backend ? backend : "host", iface ? iface : "?");
+    } else
+        fputs("wifi scan: hardware Wi-Fi driver backend\n", stderr);
     printf("SSID            BSSID          RSSI  CH  BW  Band  Auth  HE  Color\n");
     for (i = 0; i < count; i++) {
         const fl_net_wifi_scan_entry_t *e = &entries[i];
@@ -332,19 +356,28 @@ static int cmd_wifi_join(int argc, char **argv) {
         goto cleanup;
     }
     if (rc == FL_RESULT_TIMEDOUT) {
-        const char *iface = fl_net_wifi_host_linux_iface();
-        if (!iface || !iface[0])
-            iface = "wlan0";
-        fprintf(stderr,
-                "wifi join: timed out waiting for association on %s\n"
-                "  Diagnose: wpa_cli -i %s status   or   nmcli device status\n"
-                "  On Raspberry Pi: ensure wpa_supplicant is running for %s,\n"
-                "  or use NetworkManager (nmcli) instead.\n",
-                iface, iface, iface);
+        const char *iface = fl_net_wifi_netdev_iface();
+        fprintf(stderr, "wifi join: timed out waiting for association on %s\n", iface);
         goto cleanup;
     }
     if (rc != FL_RESULT_OK) {
-        fprintf(stderr, "wifi join: failed (%d)\n", (int)rc);
+        const char *backend = fl_net_wifi_host_linux_backend_name();
+        const char *herr = fl_net_wifi_host_linux_last_error();
+        const char *fps = getenv("FL_NET_WIFI_FLINSTONE_PS");
+        fprintf(stderr, "wifi join: failed (%d)", (int)rc);
+        if (backend)
+            fprintf(stderr, " (%s)", backend);
+        putchar('\n');
+        if (herr && herr[0])
+            fprintf(stderr, "  %s\n", herr);
+        if (fl_net_wifi_host_linux_opted_in() &&
+            backend && !strcmp(backend, "FlinstonePowershell")) {
+            fputs("  Build: make flinstone-ps-windows\n", stderr);
+            if (fps && fps[0])
+                fprintf(stderr, "  Test: %s wifi-join <ssid> <password>\n", fps);
+            else
+                fputs("  Set FL_NET_WIFI_FLINSTONE_PS (see tools/fl-wifi.env)\n", stderr);
+        }
         goto cleanup;
     }
     (void)fl_wifi_db_mark_joined(name, 1);
@@ -354,9 +387,9 @@ static int cmd_wifi_join(int argc, char **argv) {
         char peer_ip[32];
         uint32_t peer_be = 0u;
         if (wifi_peer_ipv4(peer_ip, sizeof(peer_ip), &peer_be))
-            printf(", wlan0 %s", peer_ip);
+            printf(", %s %s", fl_net_wifi_netdev_iface(), peer_ip);
     } else if (fl_net_wifi_station_netdev() != NULL) {
-        fputs(", wlan0 netdev UP", stdout);
+        printf(", %s netdev UP", fl_net_wifi_netdev_iface());
     }
     puts(")");
     fl_wifi_db_close();
@@ -405,10 +438,13 @@ static int cmd_wifi_status(int argc, char **argv) {
     (void)argc;
     (void)argv;
     printf("Wi-Fi state: %d\n", (int)fl_net_wifi_state());
-    if (fl_net_wifi_station_host_backend()) {
+    if (fl_net_wifi_station_lab_backend())
+        puts("Backend: in-tree 802.11 lab (wlan-lab DHCP)");
+    else if (fl_net_wifi_station_host_backend()) {
         const char *backend = fl_net_wifi_host_linux_backend_name();
-        printf("Backend: %s (%s)\n", backend ? backend : "host", fl_net_wifi_host_linux_iface());
-    } else if (fl_net_wifi_host_linux_available()) {
+        printf("Backend: %s (%s)\n", backend ? backend : "host",
+               fl_net_wifi_host_linux_iface());
+    } else if (fl_net_wifi_host_linux_opted_in() && fl_net_wifi_host_linux_available()) {
         const char *backend = fl_net_wifi_host_linux_backend_name();
         printf("Backend: %s available on %s (not associated)\n",
                backend ? backend : "host", fl_net_wifi_host_linux_iface());
@@ -434,10 +470,24 @@ static int cmd_wifi_status(int argc, char **argv) {
                        ifname, ip, ip);
             }
             if (win_ip) {
-                fl_net_ipv4_format_addr(ip_be, ip, sizeof(ip));
-                if (strcmp(ip, win_ip) != 0)
-                    printf("WSL eth0: %s (internal NAT; not reachable from LAN)\n", ip);
-                printf("Windows Wi-Fi IP: %s (router-assigned; LAN peers use this)\n", win_ip);
+                if (fl_net_wifi_station_host_backend() &&
+                    fl_platform_detect() == FL_PLATFORM_WSL) {
+                    char wsl_ip[32];
+                    uint32_t wsl_be = 0u;
+                    if (fl_net_wifi_host_linux_ipv4_route(&wsl_be, NULL, NULL) ==
+                            FL_RESULT_OK &&
+                        wsl_be != 0u) {
+                        fl_net_ipv4_format_addr(wsl_be, wsl_ip, sizeof(wsl_ip));
+                        printf("WSL eth0: %s (internal NAT; not reachable from LAN)\n",
+                               wsl_ip);
+                    }
+                } else {
+                    fl_net_ipv4_format_addr(ip_be, ip, sizeof(ip));
+                    if (strcmp(ip, win_ip) != 0)
+                        printf("WSL eth0: %s (internal NAT; not reachable from LAN)\n", ip);
+                }
+                printf("Windows Wi-Fi IP: %s (router-assigned; LAN peers use this)\n",
+                       win_ip);
             }
             if (fl_net_wifi_netdev_ipv6(addr6, &p6) == FL_RESULT_OK &&
                 fl_net_ipv6_format_addr(addr6, ip6, sizeof(ip6)))
@@ -482,6 +532,64 @@ static int cmd_wifi_known(int argc, char **argv) {
     return 0;
 }
 
+static const char *fullmac_bus_label(wifi_fullmac_bus_type_t bus)
+{
+    switch (bus) {
+    case WIFI_FULLMAC_BUS_PCIE:
+        return "PCIe";
+    case WIFI_FULLMAC_BUS_USB:
+        return "USB";
+    case WIFI_FULLMAC_BUS_SDIO:
+        return "SDIO";
+    default:
+        return "?";
+    }
+}
+
+static int cmd_wifi_probe(int argc, char **argv) {
+    size_t i, n = 0;
+    const wifi_fullmac_chipset_t *table;
+    wifi_fullmac_t *dev = NULL;
+    wifi_fullmac_probe_info_t info;
+
+    (void)argc;
+    (void)argv;
+    table = wifi_fullmac_chipset_table(&n);
+    printf("802.11ax chipset table (%zu entries):\n", n);
+    for (i = 0; i < n; i++)
+        printf("  %04x:%04x  %-4s  %s\n",
+               (unsigned)table[i].vendor_id, (unsigned)table[i].device_id,
+               fullmac_bus_label(table[i].bus),
+               table[i].name ? table[i].name : "?");
+    if (getenv("FL_WIFI_FULLMAC") || getenv("FL_WIFI_FULLMAC_PCI") ||
+        getenv("FL_WIFI_FULLMAC_USB") || getenv("FL_WIFI_FULLMAC_AUTO") ||
+        getenv("FL_WIFI_FULLMAC_VIDPID")) {
+        if (wifi_fullmac_hw_probe(&dev, &info) == 0) {
+            if (info.bus == WIFI_FULLMAC_BUS_USB)
+                printf("probe: ok  %s  usb=%s  state=%d\n",
+                       info.chipset, info.usb_port[0] ? info.usb_port : "?",
+                       dev ? (int)dev->state : -1);
+            else
+                printf("probe: ok  %s  bdf=%s  bar0=0x%08x  state=%d\n",
+                       info.chipset, info.bdf, (unsigned)info.bar0,
+                       dev ? (int)dev->state : -1);
+            wifi_fullmac_hw_detach(dev);
+        } else {
+            const char *err = wifi_fullmac_last_error();
+            printf("probe: failed");
+            if (err && err[0])
+                printf(" — %s", err);
+            putchar('\n');
+            return 1;
+        }
+    } else {
+        fputs("hint: set FL_WIFI_FULLMAC=1 (auto-scan), FL_WIFI_FULLMAC_USB=1-2, "
+              "or FL_WIFI_FULLMAC_PCI=bb:dd.f\n",
+              stderr);
+    }
+    return 0;
+}
+
 int cmd_wifi_run(int argc, char **argv) {
     if (argc < 2)
         return wifi_usage();
@@ -495,6 +603,8 @@ int cmd_wifi_run(int argc, char **argv) {
         return cmd_wifi_leave(argc, argv);
     if (!strcmp(argv[1], "status"))
         return cmd_wifi_status(argc, argv);
+    if (!strcmp(argv[1], "probe"))
+        return cmd_wifi_probe(argc, argv);
     fprintf(stderr, "wifi: unknown subcommand '%s'\n", argv[1]);
     return wifi_usage();
 }
