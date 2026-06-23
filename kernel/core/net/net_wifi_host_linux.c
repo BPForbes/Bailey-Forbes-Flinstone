@@ -238,7 +238,7 @@ static int pick_wireless_iface(char *out, size_t out_cap) {
         out[out_cap - 1u] = '\0';
         return 1;
     }
-    fp = popen("nmcli -t -f DEVICE,TYPE device 2>/dev/null", "r");
+    fp = popen("nmcli -t -f DEVICE,TYPE device 2>&1", "r");
     if (fp) {
         while (fgets(line, sizeof(line), fp) != NULL) {
             char dev[FL_NET_IFACE_NAME_MAX];
@@ -329,10 +329,10 @@ static int run_wpa_cli(const char *cmd, char *out, size_t out_cap) {
     if (!cmd || s_host_kind != FL_WIFI_HOST_WPA_CLI)
         return 0;
     if (s_wpa_ctrl_dir[0])
-        snprintf(line, sizeof(line), "%s -i %s -p %s %s 2>/dev/null", s_wpa_cli,
+        snprintf(line, sizeof(line), "%s -i %s -p %s %s 2>&1", s_wpa_cli,
                  s_wifi_iface, s_wpa_ctrl_dir, cmd);
     else
-        snprintf(line, sizeof(line), "%s -i %s %s 2>/dev/null", s_wpa_cli, s_wifi_iface,
+        snprintf(line, sizeof(line), "%s -i %s %s 2>&1", s_wpa_cli, s_wifi_iface,
                  cmd);
     fp = popen(line, "r");
     if (!fp)
@@ -354,7 +354,7 @@ static int popen_nmcli(const char *args, char *out, size_t out_cap) {
 
     if (!args)
         return 0;
-    snprintf(line, sizeof(line), "%s %s 2>/dev/null", s_nmcli, args);
+    snprintf(line, sizeof(line), "%s %s 2>&1", s_nmcli, args);
     fp = popen(line, "r");
     if (!fp)
         return 0;
@@ -381,10 +381,10 @@ static int wpa_ping_with_ctrl(const char *ctrl_dir) {
     FILE *fp;
 
     if (ctrl_dir && ctrl_dir[0])
-        snprintf(cmd, sizeof(cmd), "%s -i %s -p %s ping 2>/dev/null", s_wpa_cli,
+        snprintf(cmd, sizeof(cmd), "%s -i %s -p %s ping 2>&1", s_wpa_cli,
                  s_wifi_iface, ctrl_dir);
     else
-        snprintf(cmd, sizeof(cmd), "%s -i %s ping 2>/dev/null", s_wpa_cli, s_wifi_iface);
+        snprintf(cmd, sizeof(cmd), "%s -i %s ping 2>&1", s_wpa_cli, s_wifi_iface);
     fp = popen(cmd, "r");
     if (!fp)
         return 0;
@@ -934,7 +934,7 @@ static int find_flinstone_ps_exe(void) {
 
     /* `command -v` resolves the exe through the merged Windows+Linux PATH. */
     {
-        FILE *fp = popen("command -v FlinstonePowershell.exe 2>/dev/null", "r");
+        FILE *fp = popen("command -v FlinstonePowershell.exe 2>&1", "r");
         if (fp) {
             char found[512];
             found[0] = '\0';
@@ -991,7 +991,7 @@ static int find_flinstone_linux_helper(void) {
                            s_flinstone_linux, sizeof(s_flinstone_linux)))
         return 1;
     {
-        FILE *fp = popen("command -v FlinstoneLinuxNet 2>/dev/null", "r");
+        FILE *fp = popen("command -v FlinstoneLinuxNet 2>&1", "r");
         if (fp) {
             char found[512];
             found[0] = '\0';
@@ -1042,7 +1042,7 @@ static int run_flinstone_helper(const char *args, char *out, size_t out_cap) {
     if (!args || !helper || helper[0] == '\0')
         return 0;
     shell_single_quote(helper, exe_q, sizeof(exe_q));
-    snprintf(cmd, sizeof(cmd), "%s %s 2>/dev/null", exe_q, args);
+    snprintf(cmd, sizeof(cmd), "%s %s 2>&1", exe_q, args);
     fp = popen(cmd, "r");
     if (!fp)
         return 0;
@@ -1265,7 +1265,7 @@ static void probe_windows_ipv4_via_powershell(void) {
               " -and $_.IPAddress -notlike '172.*'"
               " -and $_.IPAddress -notlike '127.*'}"
               " | Select-Object -First 1 -ExpandProperty IPAddress) }"
-              " if ($ip) { $ip } } catch {}\" 2>/dev/null",
+              " if ($ip) { $ip } } catch {}\" 2>&1",
               "r");
     if (!f)
         return;
@@ -1908,7 +1908,7 @@ int fl_net_wifi_host_linux_wsl_ipv4(char *buf, size_t buf_len) {
         buf[buf_len - 1u] = '\0';
         return 0;
     }
-    fp = popen("hostname -I 2>/dev/null", "r");
+    fp = popen("hostname -I 2>&1", "r");
     if (!fp)
         return -1;
     if (!fgets(line, sizeof(line), fp)) {
