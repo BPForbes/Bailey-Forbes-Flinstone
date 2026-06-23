@@ -38,7 +38,7 @@ jobs:
     # Avoid a loop when the tip commit is already our sync squash (optional guard).
     if: "${{ github.event.head_commit == null || !startsWith(github.event.head_commit.message, 'chore(version): sync') }}"
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
         with:
           fetch-depth: 0
           token: ${{ secrets.BPFORBES_PAT || secrets.VERSION_LOCK_PAT || secrets.GITHUB_TOKEN }}

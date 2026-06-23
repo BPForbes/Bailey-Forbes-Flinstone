@@ -125,7 +125,7 @@ static const char HELP_BODY[] =
 "  resolve <host>                    Alias for nslookup (dual-stack DNS)\n"
 "  netsh <arp|ifconfig|route|...>    Windows-style umbrella over the above\n"
 "  wifi scan [-band any|2|5|6]       Scan Wi-Fi (wpa_cli/nmcli on Linux, else lab list)\n"
-"  wifi join [-b <bssid>] <name> [password]  Join router network (DHCP IPv4 + IPv6 when available)\n"
+"  wifi join [-b <bssid>] <name>  Join router network (quote SSIDs with spaces: \"Bailey's iPhone\")\n"
 "  wifi leave                        Disconnect; drop WLAN addresses from shell env\n"
 "  wifi status                       Wi-Fi backend, interface, and assigned addresses\n"
 "  wifi known                        List saved/joined router profiles\n"

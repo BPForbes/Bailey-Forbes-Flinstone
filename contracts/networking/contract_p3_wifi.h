@@ -5,8 +5,9 @@
  * **fl_net_frame_view_t** (same pipeline as Ethernet); upper stack uses
  * **fl_net_driver_t** + **P3-5** / **P3-6** / **P3-7** unchanged.
  *
- * **Integration status:** contract + parsers + API surface; NIC/P4 backend and
- * WPA3/SAE production paths return **FL_RESULT_NOSYS** until hardware scope lands.
+ * **Integration status:** contract + parsers + lab/mock/host-Linux HE enrichment;
+ * in-tree FullMAC RF bring-up returns **FL_RESULT_NOSYS** until chipset USB/PCI
+ * command rings land (host **FL_NET_WIFI_USE_WPA=1** path is production RF today).
  *
  * Standards (informative): IEEE 802.11ax-2021 / 802.11-2020 HE IEs; WPA3-SAE;
  * WPA2-PSK backward-compat; **RFC 2131** DHCP after link-up (**P3-12**).
