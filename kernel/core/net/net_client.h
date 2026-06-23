@@ -116,6 +116,17 @@ fl_result_t fl_net_client_connect_ep(fl_net_client_t *client,
                                      unsigned timeout_ms);
 
 /**
+ * Adopt an already-connected socket handle and complete the HELLO/HELLO_ACK
+ * handshake. Used by the reverse-dial NAT bypass where the server dials back
+ * to us and we accept the incoming TCP connection before registering with the
+ * Flinstone session protocol. Transitions client DISCONNECTED → CONNECTED.
+ */
+fl_result_t fl_net_client_adopt_handle(fl_net_client_t *client,
+                                       fl_net_sock_handle_t h,
+                                       const char *principal,
+                                       unsigned timeout_ms);
+
+/**
  * Send CTRL_LEAVE and close the socket. Idempotent.
  */
 fl_result_t fl_net_client_disconnect(fl_net_client_t *client);
