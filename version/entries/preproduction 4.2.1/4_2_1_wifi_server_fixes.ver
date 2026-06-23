@@ -16,3 +16,5 @@ Server binding improvements:
 
 Rationale: Suppress stderr redirection blocks error diagnosis and server 0.0.0.0 binding is too permissive when user selects a specific port.
 VER_END
+
+RELEASE_DATE=2026-06-23
