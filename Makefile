@@ -153,7 +153,7 @@ NET_CORE_SRCS = kernel/core/net/net_checksum.c kernel/core/net/net_wire.c kernel
                 kernel/core/net/net_dns.c kernel/core/net/net_dhcp.c kernel/core/net/net_tls_hosted.c \
                 kernel/core/net/net_http.c kernel/core/net/net_tftp.c \
                 kernel/core/net/net_ping_host.c kernel/core/net/net_ping6_host.c \
-                kernel/core/net/net_wifi_he.c kernel/core/net/net_wifi_station.c \
+                kernel/core/net/net_wifi_he.c kernel/core/net/net_wifi_host_iw.c kernel/core/net/net_wifi_station.c \
                 kernel/core/net/net_wifi_host_linux.c \
                 kernel/core/net/net_wifi_netdev.c \
                 kernel/core/net/net_wifi_db.c \
@@ -844,14 +844,15 @@ WIFI_TEST_NET_OBJS = kernel/core/net/net_checksum.c kernel/core/net/net_wire.c \
 	kernel/core/net/net_wire_egress.c \
 	kernel/core/net/net_route.c kernel/core/net/net_loopback.c \
 	kernel/core/net/net_netdev.c kernel/core/net/net_arp.c kernel/core/net/net_dhcp.c \
-	kernel/core/net/net_stack_sync.c kernel/core/net/net_wifi_netdev.c kernel/core/net/net_iface.c
+	kernel/core/net/net_stack_sync.c kernel/core/net/net_wifi_netdev.c kernel/core/net/net_iface.c \
+	kernel/core/net/net_macvlan.c
 
 WIFI_TEST_COMMON_DEPS = $(NET_ASM_OBJ) $(MEM_ASM_OBJ) priority_queue.o kernel/core/time/timekeeping.o kernel/core/sys/ipc.o
 
 tests/test_p3_wifi: $(WIFI_TEST_COMMON_DEPS) $(NET_TEST_PCI_OBJ)
 	$(WIFI_TEST_LINK_PRE)
 	$(WIFI_TEST_LINK_AT)$(CC) $(CFLAGS) $(TEST_SANITIZE) -o tests/test_p3_wifi tests/test_p3_wifi.c \
-	  kernel/core/net/net_wifi_he.c kernel/core/net/net_wifi_station.c kernel/core/net/net_wifi_host_linux.c \
+	  kernel/core/net/net_wifi_he.c kernel/core/net/net_wifi_host_iw.c kernel/core/net/net_wifi_station.c kernel/core/net/net_wifi_host_linux.c \
 	  kernel/core/net/net_wifi_mgmt.c kernel/core/net/net_wifi_sae.c \
 	  kernel/core/net/net_wifi_wpa.c kernel/core/net/net_wifi_twt.c \
 	  kernel/core/net/net_wifi_crypto.c \
@@ -897,10 +898,17 @@ tests/test_shell_tokenize: userland/shell/shell_tokenize.c
 test_shell_tokenize: tests/test_shell_tokenize
 	@./tests/test_shell_tokenize
 
+tests/test_net_wifi_host_he: kernel/core/net/net_wifi_host_iw.c kernel/core/net/net_wifi_he.c
+	$(CC) $(CFLAGS) $(TEST_SANITIZE) -o tests/test_net_wifi_host_he tests/test_net_wifi_host_he.c \
+	  kernel/core/net/net_wifi_host_iw.c kernel/core/net/net_wifi_he.c -Wl,-z,noexecstack
+
+test_net_wifi_host_he: tests/test_net_wifi_host_he
+	@./tests/test_net_wifi_host_he
+
 tests/test_wifi_80211ax_mock_279: $(WIFI_TEST_COMMON_DEPS)
 	$(WIFI_TEST_LINK_PRE)
 	$(WIFI_TEST_LINK_AT)$(CC) $(CFLAGS) $(TEST_SANITIZE) -o tests/test_wifi_80211ax_mock_279 tests/test_wifi_80211ax_mock_279.c \
-	  kernel/core/net/net_wifi_he.c kernel/core/net/net_wifi_station.c kernel/core/net/net_wifi_host_linux.c \
+	  kernel/core/net/net_wifi_he.c kernel/core/net/net_wifi_host_iw.c kernel/core/net/net_wifi_station.c kernel/core/net/net_wifi_host_linux.c \
 	  kernel/core/net/net_wifi_mgmt.c kernel/core/net/net_wifi_sae.c \
 	  kernel/core/net/net_wifi_wpa.c kernel/core/net/net_wifi_twt.c \
 	  kernel/core/net/net_wifi_crypto.c \
@@ -931,7 +939,7 @@ test_wifi_ax_server_ota: tests/test_wifi_ax_server_ota
 	@./tests/test_wifi_ax_server_ota
 
 # PR #320 WiFi validation bundle (build when stale, then run all four).
-test_wifi: test_wifi_coprocessor test_wifi_fullmac_probe test_p3_wifi test_wifi_80211ax_mock_279 test_wifi_ax_server_ota
+test_wifi: test_wifi_coprocessor test_wifi_fullmac_probe test_net_wifi_host_he test_p3_wifi test_wifi_80211ax_mock_279 test_wifi_ax_server_ota
 
 # Same bundle; suppress make recipe echo (link lines + ./tests/... wrappers).
 test_wifi-quiet:
@@ -971,7 +979,7 @@ WIFI_TEST_STATION_DRIVER_SRCS = kernel/drivers/wifi/wifi_driver_backend.c kernel
 
 test_wifi_flinstone_helper: $(NET_ASM_OBJ) $(MEM_ASM_OBJ) $(NET_TEST_PCI_OBJ) priority_queue.o kernel/core/time/timekeeping.o kernel/core/sys/ipc.o
 	$(CC) $(CFLAGS) $(TEST_SANITIZE) -o tests/test_wifi_flinstone_helper tests/test_wifi_flinstone_helper.c \
-	  kernel/core/net/net_wifi_he.c kernel/core/net/net_wifi_station.c kernel/core/net/net_wifi_host_linux.c \
+	  kernel/core/net/net_wifi_he.c kernel/core/net/net_wifi_host_iw.c kernel/core/net/net_wifi_station.c kernel/core/net/net_wifi_host_linux.c \
 	  kernel/core/net/net_wifi_mgmt.c kernel/core/net/net_wifi_sae.c \
 	  kernel/core/net/net_wifi_wpa.c kernel/core/net/net_wifi_twt.c \
 	  kernel/core/net/net_wifi_crypto.c \
@@ -986,7 +994,7 @@ test_wifi_flinstone_helper: $(NET_ASM_OBJ) $(MEM_ASM_OBJ) $(NET_TEST_PCI_OBJ) pr
 
 test_wifi_flinstone_linux_helper: $(NET_ASM_OBJ) $(MEM_ASM_OBJ) $(NET_TEST_PCI_OBJ) priority_queue.o kernel/core/time/timekeeping.o kernel/core/sys/ipc.o
 	$(CC) $(CFLAGS) $(TEST_SANITIZE) -o tests/test_wifi_flinstone_linux_helper tests/test_wifi_flinstone_linux_helper.c \
-	  kernel/core/net/net_wifi_he.c kernel/core/net/net_wifi_station.c kernel/core/net/net_wifi_host_linux.c \
+	  kernel/core/net/net_wifi_he.c kernel/core/net/net_wifi_host_iw.c kernel/core/net/net_wifi_station.c kernel/core/net/net_wifi_host_linux.c \
 	  kernel/core/net/net_wifi_mgmt.c kernel/core/net/net_wifi_sae.c \
 	  kernel/core/net/net_wifi_wpa.c kernel/core/net/net_wifi_twt.c \
 	  kernel/core/net/net_wifi_crypto.c \

@@ -594,13 +594,17 @@ static int cmd_wifi_probe(int argc, char **argv) {
         getenv("FL_WIFI_FULLMAC_VIDPID")) {
         if (wifi_fullmac_hw_probe(&dev, &info) == 0) {
             if (info.bus == WIFI_FULLMAC_BUS_USB)
-                printf("probe: ok  %s  usb=%s  state=%d\n",
+                printf("probe: ok  %s  usb=%s  if=%s  state=%d\n",
                        info.chipset, info.usb_port[0] ? info.usb_port : "?",
+                       info.kernel_ifname[0] ? info.kernel_ifname : "-",
                        dev ? (int)dev->state : -1);
             else
-                printf("probe: ok  %s  bdf=%s  bar0=0x%08x  state=%d\n",
+                printf("probe: ok  %s  bdf=%s  bar0=0x%08x  if=%s  state=%d\n",
                        info.chipset, info.bdf, (unsigned)info.bar0,
+                       info.kernel_ifname[0] ? info.kernel_ifname : "-",
                        dev ? (int)dev->state : -1);
+            if (info.fw_hint && info.fw_hint[0])
+                printf("  firmware hint: /lib/firmware/%s\n", info.fw_hint);
             wifi_fullmac_hw_detach(dev);
         } else {
             const char *err = wifi_fullmac_last_error();

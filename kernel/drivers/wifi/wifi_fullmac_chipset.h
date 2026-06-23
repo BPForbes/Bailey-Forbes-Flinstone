@@ -11,6 +11,8 @@ typedef struct {
 	uint16_t vendor_id;
 	uint16_t device_id;
 	wifi_fullmac_bus_type_t bus;
+	/** Informative path under `/lib/firmware/` (Linux distro packages). */
+	const char *fw_hint;
 } wifi_fullmac_chipset_t;
 
 /** Return chipset row for vid:did, or NULL if unknown. */

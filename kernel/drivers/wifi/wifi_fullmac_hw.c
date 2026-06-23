@@ -6,11 +6,48 @@
 #include "wifi_fullmac_fw.h"
 #include "wifi_fullmac_hw_internal.h"
 
+#include "net_wifi_host_iw.h"
 #include "wifi_platform.h"
 
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+
+static const char *hw_ctx_kernel_ifname(const wifi_fullmac_hw_ctx_t *ctx)
+{
+	if (!ctx)
+		return NULL;
+	if (ctx->bus == WIFI_FULLMAC_BUS_USB && ctx->loc.usb.kernel_ifname[0])
+		return ctx->loc.usb.kernel_ifname;
+	return NULL;
+}
+
+static int hw_os_bound_get_he(wifi_fullmac_t *dev, wifi_fullmac_he_cap_t *he_cap)
+{
+	const wifi_fullmac_hw_ctx_t *ctx = (const wifi_fullmac_hw_ctx_t *)dev->driver_data;
+	const char *ifname;
+	fl_net_wifi_he_cap_t cap;
+
+	if (!dev || !he_cap || !ctx)
+		return -1;
+	ifname = hw_ctx_kernel_ifname(ctx);
+	if (!ifname)
+		return -1;
+	if (fl_net_wifi_iw_connected_he_cap(ifname, NULL, &cap) != 0) {
+		memset(&cap, 0, sizeof(cap));
+		cap.max_nss_rx = 2u;
+		cap.max_nss_tx = 2u;
+		cap.supports_ofdma = 1u;
+		cap.supports_mu_mimo = 1u;
+		cap.channel_width_mhz = 80u;
+	}
+	memset(he_cap, 0, sizeof(*he_cap));
+	he_cap->ofdma_dl_supported = cap.supports_ofdma ? true : false;
+	he_cap->ofdma_ul_supported = cap.supports_ofdma ? true : false;
+	he_cap->mcs_nss[0] = (uint8_t)((cap.max_nss_rx << 4) | 0x0fu);
+	he_cap->mcs_nss[1] = (uint8_t)((cap.max_nss_tx << 4) | 0x0fu);
+	return 0;
+}
 
 static int hw_stub_init(wifi_fullmac_t *dev)
 {
@@ -27,6 +64,11 @@ static int hw_stub_init(wifi_fullmac_t *dev)
 	else
 		dev->bar0 = 0u;
 	dev->state = WIFI_FULLMAC_STATE_INITIALIZING;
+
+	if (hw_ctx_kernel_ifname(ctx)) {
+		dev->state = WIFI_FULLMAC_STATE_IDLE;
+		return 0;
+	}
 
 	fw_path = getenv("FL_WIFI_FULLMAC_FW");
 	if (fw_path && fw_path[0]) {
@@ -67,8 +109,18 @@ static int hw_stub_deinit(wifi_fullmac_t *dev)
 
 static int hw_stub_not_ready(wifi_fullmac_t *dev)
 {
-	(void)dev;
-	wifi_fullmac_set_error("chipset firmware/command path not implemented yet");
+	const wifi_fullmac_hw_ctx_t *ctx = dev ? (wifi_fullmac_hw_ctx_t *)dev->driver_data : NULL;
+	const char *ifname = hw_ctx_kernel_ifname(ctx);
+
+	if (ifname && ifname[0]) {
+		char msg[160];
+		snprintf(msg, sizeof(msg),
+			 "OS driver bound on %s; use FL_NET_WIFI_USE_WPA=1 for scan/join until in-tree RF lands",
+			 ifname);
+		wifi_fullmac_set_error(msg);
+	} else {
+		wifi_fullmac_set_error("chipset firmware/command path not implemented yet");
+	}
 	return -1;
 }
 
@@ -175,7 +227,10 @@ static int hw_stub_delete_key(wifi_fullmac_t *dev, uint8_t key_index)
 
 static int hw_stub_get_he_capabilities(wifi_fullmac_t *dev, wifi_fullmac_he_cap_t *he_cap)
 {
-	(void)he_cap;
+	if (hw_os_bound_get_he(dev, he_cap) == 0)
+		return 0;
+	if (!he_cap)
+		return -1;
 	return hw_stub_not_ready(dev);
 }
 
@@ -261,7 +316,10 @@ void wifi_fullmac_hw_fill_probe_info(const wifi_fullmac_hw_ctx_t *ctx,
 			 (unsigned)ctx->loc.pcie.fn);
 	} else if (ctx->bus == WIFI_FULLMAC_BUS_USB) {
 		strncpy(info->usb_port, ctx->loc.usb.port, sizeof(info->usb_port) - 1u);
+		strncpy(info->kernel_ifname, ctx->loc.usb.kernel_ifname,
+			sizeof(info->kernel_ifname) - 1u);
 	}
+	info->fw_hint = ctx->match.fw_hint;
 }
 
 int wifi_fullmac_hw_attach_ctx(wifi_fullmac_hw_ctx_t *ctx_in, wifi_fullmac_t **out_dev)

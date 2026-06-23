@@ -4,6 +4,7 @@
 #include "net_iface.h"
 #include "net_ipv4.h"
 #include "net_ipv6.h"
+#include "net_wifi_host_iw.h"
 
 #include <ctype.h>
 #include <errno.h>
@@ -42,6 +43,7 @@ static char s_flinstone_linux[512] = ""; /* path to FlinstoneLinuxNet ELF */
 static char s_network_bridge_py[512] = ""; /* optional Python bridge helper */
 static fl_net_wifi_scan_entry_t s_wpa_scan[32];
 static size_t s_wpa_scan_count;
+static fl_net_wifi_scan_entry_t s_wpa_join_ap;
 static char s_wpa_joined_ssid[FL_WIFI_SSID_MAX];
 static int s_host_probed;
 static fl_wifi_host_kind_t s_host_kind = FL_WIFI_HOST_NONE;
@@ -569,10 +571,22 @@ static void parse_scan_results(const char *text, uint8_t band_filter) {
         e->auth_mode = parse_auth_token(flags);
         e->band = band_from_freq(freq);
         e->channel_width_mhz = 20;
+        fl_net_wifi_host_he_hint(e, flags, NULL);
         if (band_filter != FL_WIFI_BAND_ANY && e->band != band_filter)
             continue;
         s_wpa_scan_count++;
     }
+}
+
+static void host_linux_scan_he_finish(void)
+{
+    const char *iw_env;
+
+    iw_env = getenv("FL_NET_WIFI_HOST_HE_IW");
+    if (!iw_env || !iw_env[0] || strcmp(iw_env, "0") == 0)
+        return;
+    if (s_wifi_iface[0])
+        (void)fl_net_wifi_iw_enrich_scan(s_wifi_iface, s_wpa_scan, s_wpa_scan_count);
 }
 
 static void unescape_nmcli_field(const char *in, char *out, size_t out_cap) {
@@ -629,6 +643,7 @@ static void parse_nmcli_scan_results(const char *text, uint8_t band_filter) {
         char signal_txt[16];
         char chan_txt[16];
         char freq_txt[32];
+        char rate_txt[32];
         char sec_txt[128];
         fl_net_wifi_scan_entry_t *e;
         int freq = 0;
@@ -648,6 +663,8 @@ static void parse_nmcli_scan_results(const char *text, uint8_t band_filter) {
             continue;
         if (!nmcli_next_field(&p, freq_txt, sizeof(freq_txt)))
             continue;
+        if (!nmcli_next_field(&p, rate_txt, sizeof(rate_txt)))
+            rate_txt[0] = '\0';
         if (!nmcli_next_field(&p, sec_txt, sizeof(sec_txt)))
             sec_txt[0] = '\0';
         {
@@ -670,6 +687,7 @@ static void parse_nmcli_scan_results(const char *text, uint8_t band_filter) {
         e->auth_mode = parse_auth_token(sec_txt);
         e->band = band_from_freq(freq);
         e->channel_width_mhz = 20;
+        fl_net_wifi_host_he_hint(e, sec_txt, rate_txt);
         if (band_filter != FL_WIFI_BAND_ANY && e->band != band_filter)
             continue;
         s_wpa_scan_count++;
@@ -1478,15 +1496,17 @@ fl_result_t fl_net_wifi_host_linux_scan(uint8_t band, unsigned timeout_ms) {
         if (!run_flinstone_helper("wifi-scan", out, sizeof(out)))
             return FL_RESULT_ERR;
         parse_flinstone_ps_scan(out, band);
+        host_linux_scan_he_finish();
         return FL_RESULT_OK;
     }
     if (s_host_kind == FL_WIFI_HOST_NMCLI) {
         snprintf(cmd, sizeof(cmd),
-                 "-t -f SSID,BSSID,SIGNAL,CHAN,FREQ,SECURITY device wifi list ifname %s",
+                 "-t -f SSID,BSSID,SIGNAL,CHAN,FREQ,RATE,SECURITY device wifi list ifname %s",
                  s_wifi_iface);
         if (!run_nmcli(cmd, out, sizeof(out)))
             return FL_RESULT_ERR;
         parse_nmcli_scan_results(out, band);
+        host_linux_scan_he_finish();
         return FL_RESULT_OK;
     }
     if (!run_wpa_cli("scan", NULL, 0))
@@ -1495,6 +1515,7 @@ fl_result_t fl_net_wifi_host_linux_scan(uint8_t band, unsigned timeout_ms) {
     if (!run_wpa_cli("scan_results", out, sizeof(out)))
         return FL_RESULT_ERR;
     parse_scan_results(out, band);
+    host_linux_scan_he_finish();
     return FL_RESULT_OK;
 #endif
 }
@@ -1516,6 +1537,43 @@ fl_result_t fl_net_wifi_host_linux_scan_result(fl_net_wifi_scan_entry_t *entries
         (*count_out)++;
     }
     return FL_RESULT_OK;
+#endif
+}
+
+static void host_linux_remember_join_ap(const char *ssid)
+{
+    size_t i;
+
+    memset(&s_wpa_join_ap, 0, sizeof(s_wpa_join_ap));
+    if (!ssid || !ssid[0])
+        return;
+    for (i = 0; i < s_wpa_scan_count; i++) {
+        if (!strcmp(s_wpa_scan[i].ssid, ssid)) {
+            s_wpa_join_ap = s_wpa_scan[i];
+            return;
+        }
+    }
+    strncpy(s_wpa_join_ap.ssid, ssid, sizeof(s_wpa_join_ap.ssid) - 1u);
+}
+
+fl_result_t fl_net_wifi_host_linux_he_cap(fl_net_wifi_he_cap_t *cap_out)
+{
+#if !defined(FL_NET_WIFI_HOST_LINUX)
+    (void)cap_out;
+    return FL_RESULT_NOSYS;
+#else
+    if (!cap_out)
+        return FL_RESULT_INVAL;
+    if (!fl_net_wifi_host_linux_available())
+        return FL_RESULT_NOSYS;
+    if (s_wifi_iface[0] &&
+        fl_net_wifi_iw_connected_he_cap(s_wifi_iface, &s_wpa_join_ap, cap_out) == 0)
+        return FL_RESULT_OK;
+    if (s_wpa_join_ap.he_supported) {
+        fl_net_wifi_host_he_cap_from_entry(&s_wpa_join_ap, cap_out);
+        return FL_RESULT_OK;
+    }
+    return FL_RESULT_ERR;
 #endif
 }
 
@@ -1559,6 +1617,7 @@ fl_result_t fl_net_wifi_host_linux_connect(const fl_net_wifi_cred_t *cred,
         rc = wait_for_flinstone_helper_connected(timeout_ms);
         if (rc != FL_RESULT_OK)
             return rc;
+        host_linux_remember_join_ap(cred->ssid);
         return FL_RESULT_OK;
     }
 
@@ -1598,6 +1657,7 @@ fl_result_t fl_net_wifi_host_linux_connect(const fl_net_wifi_cred_t *cred,
             return rc;
         (void)wait_for_ipv6(timeout_ms > 0u ? timeout_ms : 15000u, NULL, NULL);
         strncpy(s_wpa_joined_ssid, cred->ssid, sizeof(s_wpa_joined_ssid) - 1u);
+        host_linux_remember_join_ap(cred->ssid);
         return FL_RESULT_OK;
     }
 
@@ -1644,6 +1704,7 @@ fl_result_t fl_net_wifi_host_linux_connect(const fl_net_wifi_cred_t *cred,
             return rc;
         (void)wait_for_ipv6(timeout_ms > 0u ? timeout_ms : 15000u, NULL, NULL);
         strncpy(s_wpa_joined_ssid, cred->ssid, sizeof(s_wpa_joined_ssid) - 1u);
+        host_linux_remember_join_ap(cred->ssid);
         return FL_RESULT_OK;
     }
 
@@ -1704,6 +1765,7 @@ fl_result_t fl_net_wifi_host_linux_connect(const fl_net_wifi_cred_t *cred,
     (void)wait_for_ipv6(timeout_ms > 0u ? timeout_ms : 15000u, NULL, NULL);
 
     strncpy(s_wpa_joined_ssid, cred->ssid, sizeof(s_wpa_joined_ssid) - 1u);
+    host_linux_remember_join_ap(cred->ssid);
     return FL_RESULT_OK;
 #endif
 }
@@ -1713,6 +1775,7 @@ fl_result_t fl_net_wifi_host_linux_disconnect(void) {
     return FL_RESULT_NOSYS;
 #else
     s_wpa_joined_ssid[0] = '\0';
+    memset(&s_wpa_join_ap, 0, sizeof(s_wpa_join_ap));
     if (!fl_net_wifi_host_linux_available())
         return FL_RESULT_NOSYS;
     if (s_host_kind == FL_WIFI_HOST_FLINSTONE_PS ||

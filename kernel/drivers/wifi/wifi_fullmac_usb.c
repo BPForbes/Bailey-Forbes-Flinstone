@@ -81,6 +81,8 @@ static int usb_ctx_from_port(const char *port, wifi_fullmac_hw_ctx_t *ctx)
 	if (usb_apply_chipset(vid, pid, ctx) != 0)
 		return -1;
 	strncpy(ctx->loc.usb.port, port, sizeof(ctx->loc.usb.port) - 1u);
+	(void)wifi_fullmac_usb_resolve_net_iface(port, ctx->loc.usb.kernel_ifname,
+						 sizeof(ctx->loc.usb.kernel_ifname));
 	return 0;
 }
 
@@ -131,6 +133,8 @@ static int usb_scan_sysfs(wifi_fullmac_hw_ctx_t *ctx)
 		if (usb_apply_chipset(vid, pid, ctx) != 0)
 			continue;
 		strncpy(ctx->loc.usb.port, de->d_name, sizeof(ctx->loc.usb.port) - 1u);
+		(void)wifi_fullmac_usb_resolve_net_iface(de->d_name, ctx->loc.usb.kernel_ifname,
+							 sizeof(ctx->loc.usb.kernel_ifname));
 		closedir(d);
 		return 0;
 	}
@@ -148,6 +152,36 @@ static int usb_scan_sysfs(wifi_fullmac_hw_ctx_t *ctx)
 	return -1;
 }
 #endif
+
+int wifi_fullmac_usb_resolve_net_iface(const char *port, char *ifname_out, size_t cap)
+{
+#if defined(__linux__)
+	char path[512];
+	DIR *d;
+	struct dirent *de;
+
+	if (!port || !port[0] || !ifname_out || cap == 0u)
+		return -1;
+	ifname_out[0] = '\0';
+	snprintf(path, sizeof(path), "/sys/bus/usb/devices/%s/net", port);
+	d = opendir(path);
+	if (!d)
+		return -1;
+	while ((de = readdir(d)) != NULL) {
+		if (de->d_name[0] == '.')
+			continue;
+		strncpy(ifname_out, de->d_name, cap - 1u);
+		ifname_out[cap - 1u] = '\0';
+		closedir(d);
+		return 0;
+	}
+	closedir(d);
+#endif
+	(void)port;
+	(void)ifname_out;
+	(void)cap;
+	return -1;
+}
 
 int wifi_fullmac_usb_probe_ctx(wifi_fullmac_hw_ctx_t *ctx)
 {

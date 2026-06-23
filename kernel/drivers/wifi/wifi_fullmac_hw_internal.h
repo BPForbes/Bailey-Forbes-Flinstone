@@ -17,6 +17,7 @@ typedef struct wifi_fullmac_hw_ctx {
 		} pcie;
 		struct {
 			char port[32];
+			char kernel_ifname[16];
 		} usb;
 	} loc;
 	uint8_t *fw;
@@ -33,6 +34,9 @@ void wifi_fullmac_hw_fill_probe_info(const wifi_fullmac_hw_ctx_t *ctx,
 
 int wifi_fullmac_pcie_probe_ctx(wifi_fullmac_hw_ctx_t *ctx);
 int wifi_fullmac_usb_probe_ctx(wifi_fullmac_hw_ctx_t *ctx);
+
+/** Resolve Linux netdev (e.g. wlan1) bound to a USB sysfs port. */
+int wifi_fullmac_usb_resolve_net_iface(const char *port, char *ifname_out, size_t cap);
 
 /**
  * If a known ax USB device is present in sysfs, write its port (e.g. "2-2") to

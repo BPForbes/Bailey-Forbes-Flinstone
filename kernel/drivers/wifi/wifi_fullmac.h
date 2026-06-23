@@ -206,6 +206,8 @@ typedef struct {
 	char chipset[48];
 	char bdf[16];      /* PCIe BDF when bus is PCIE */
 	char usb_port[32]; /* sysfs port e.g. 1-2 when bus is USB */
+	char kernel_ifname[16]; /* OS netdev when kernel driver already bound */
+	const char *fw_hint;    /* informative firmware path under /lib/firmware */
 	uint32_t bar0;     /* PCIe BAR0; 0 for USB */
 	uint8_t pci_bus;
 	uint8_t pci_dev;

@@ -20,6 +20,7 @@
  *   **FL_NET_WIFI_FLINSTONE_LINUX** — native Linux helper path
  *   **FL_NET_WIFI_USE_WPA=1** — enable wpa_cli / nmcli / helper backends
  *   **FL_NET_WIFI_USE_WPA=0** — force in-tree lab simulation (default when unset)
+ *   **FL_NET_WIFI_HOST_HE_IW=1** — after scan, enrich HE fields from `iw scan dump`
  *   **FL_NET_WIFI_BRIDGE_TARGET** — bridge target IP (default 127.0.0.1)
  *   **FL_NET_WIFI_BRIDGE_PY** — optional path to tools/network_bridge.py
  */
@@ -60,6 +61,9 @@ const char *fl_net_wifi_host_linux_iface(void);
 
 /** Last FlinstonePowershell / wpa_cli helper failure detail (may be empty). */
 const char *fl_net_wifi_host_linux_last_error(void);
+
+/** Negotiated 802.11ax caps when connected via host Linux (nmcli / wpa_cli). */
+fl_result_t fl_net_wifi_host_linux_he_cap(fl_net_wifi_he_cap_t *cap_out);
 
 /**
  * Windows Wi-Fi adapter IP from FlinstonePowershell (e.g. "192.168.1.235").

@@ -7,6 +7,7 @@
 #include "net_dhcp.h"
 #include "net_wifi_crypto.h"
 #include "net_wifi_he.h"
+#include "net_wifi_host_iw.h"
 #include "fl/platform.h"
 #include "net_ipv4.h"
 #include "net_wifi_twt.h"
@@ -246,6 +247,8 @@ static fl_result_t host_linux_connect(const fl_net_wifi_cred_t *cred, unsigned t
     s_lab_backend = 0;
     s_wifi_state = FL_WIFI_STATE_UP;
     strncpy(s_lab_joined_ssid, cred->ssid, sizeof(s_lab_joined_ssid) - 1u);
+    if (fl_net_wifi_host_linux_he_cap(&s_negotiated_he) != FL_RESULT_OK)
+        fl_net_wifi_host_he_cap_from_entry(&ap, &s_negotiated_he);
     fl_net_iface_refresh();
     return FL_RESULT_OK;
 }
@@ -458,6 +461,11 @@ fl_result_t fl_net_wifi_he_cap(fl_net_wifi_he_cap_t *cap_out) {
     }
 
 #if defined(FL_NET_WIFI_HOSTED_LAB)
+    if (s_host_backend) {
+        fl_result_t rc = fl_net_wifi_host_linux_he_cap(cap_out);
+        if (rc == FL_RESULT_OK)
+            return FL_RESULT_OK;
+    }
     if (s_lab_backend) {
         fl_result_t rc = wifi_driver_lab_he_cap(cap_out);
         if (rc == FL_RESULT_OK)
