@@ -26,4 +26,44 @@ int fl_net_wifi_he_parse_operation(const uint8_t *body, size_t body_len,
 int fl_net_wifi_scan_enrich_from_ies(const uint8_t *ies, size_t ies_len,
                                      fl_net_wifi_scan_entry_t *entry);
 
+/** Host-side HE hints when RF is delegated (nmcli / FlinstonePowershell / iw). */
+void fl_net_wifi_host_he_hint(fl_net_wifi_scan_entry_t *entry, const char *flags,
+                              const char *rate_mbit);
+
+void fl_net_wifi_host_he_cap_from_entry(const fl_net_wifi_scan_entry_t *ap,
+                                        fl_net_wifi_he_cap_t *cap_out);
+
+#if defined(__linux__)
+
+size_t fl_net_wifi_iw_enrich_scan(const char *iface, fl_net_wifi_scan_entry_t *entries,
+                                  size_t count);
+
+int fl_net_wifi_iw_connected_he_cap(const char *iface,
+                                    const fl_net_wifi_scan_entry_t *join_ap,
+                                    fl_net_wifi_he_cap_t *cap_out);
+
+#else
+
+static inline size_t fl_net_wifi_iw_enrich_scan(const char *iface,
+                                                fl_net_wifi_scan_entry_t *entries,
+                                                size_t count)
+{
+    (void)iface;
+    (void)entries;
+    (void)count;
+    return 0u;
+}
+
+static inline int fl_net_wifi_iw_connected_he_cap(const char *iface,
+                                                  const fl_net_wifi_scan_entry_t *join_ap,
+                                                  fl_net_wifi_he_cap_t *cap_out)
+{
+    (void)iface;
+    (void)join_ap;
+    (void)cap_out;
+    return -1;
+}
+
+#endif
+
 #endif /* NET_WIFI_HE_H */

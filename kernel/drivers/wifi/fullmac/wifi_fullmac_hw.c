@@ -3,10 +3,9 @@
  */
 
 #include "wifi_fullmac.h"
-#include "wifi_fullmac_fw.h"
 #include "wifi_fullmac_hw_internal.h"
 
-#include "net_wifi_host_iw.h"
+#include "net_wifi_he.h"
 #include "wifi_platform.h"
 
 #include <stdio.h>

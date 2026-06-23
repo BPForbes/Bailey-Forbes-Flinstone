@@ -45,4 +45,7 @@ int wifi_fullmac_usb_resolve_net_iface(const char *port, char *ifname_out, size_
 int wifi_fullmac_usb_sysfs_hint(uint16_t vendor_id, uint16_t device_id,
 				char *port_out, size_t port_cap);
 
+/** Load firmware blob from path (caller frees via wifi_platform_free). */
+int wifi_fullmac_fw_load_file(const char *path, uint8_t **out_buf, size_t *out_len);
+
 #endif /* KERNEL_DRIVERS_WIFI_FULLMAC_HW_INTERNAL_H */

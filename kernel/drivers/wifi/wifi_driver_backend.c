@@ -6,11 +6,10 @@
  */
 
 #include "wifi_driver_backend.h"
-#include "wifi_80211ax_mock.h"
+#include "wifi_lab_backend.h"
 #include "wifi_coprocessor.h"
 #include "wifi_fullmac.h"
 #include "wifi_uart_transport.h"
-#include "wifi_lab_backend.h"
 
 #include <stdlib.h>
 #include <string.h>
@@ -123,7 +122,7 @@ static fl_result_t wifi_backend_try_ax_mock(void)
 	if (!env || !env[0] || strcmp(env, "0") == 0)
 		return FL_RESULT_NOSYS;
 
-	if (wifi_80211ax_mock_attach(&s_fullmac) != 0)
+	if (wifi_lab_mock_attach(&s_fullmac) != 0)
 		return FL_RESULT_NOSYS;
 
 	s_backend_type = WIFI_BACKEND_QEMU;
@@ -145,7 +144,7 @@ fl_result_t wifi_driver_backend_init(void)
 		s_coprocessor = NULL;
 	}
 	if (s_fullmac && s_backend_type == WIFI_BACKEND_QEMU)
-		wifi_80211ax_mock_detach(s_fullmac);
+		wifi_lab_mock_detach(s_fullmac);
 	if (s_fullmac && s_backend_type == WIFI_BACKEND_FULLMAC)
 		wifi_fullmac_hw_detach(s_fullmac);
 
@@ -225,7 +224,7 @@ fl_result_t wifi_driver_scan_result(fl_net_wifi_scan_entry_t *entries,
 		for (i = 0; i < (size_t)count && i < cap; i++) {
 			wifi_network_to_scan_entry(&networks[i], &entries[i]);
 			if (s_backend_type == WIFI_BACKEND_QEMU)
-				wifi_80211ax_mock_enrich_scan_entry(i, &entries[i]);
+				wifi_lab_mock_enrich_scan_entry(i, &entries[i]);
 			(*count_out)++;
 		}
 		return FL_RESULT_OK;
@@ -250,7 +249,7 @@ fl_result_t wifi_driver_connect(const fl_net_wifi_cred_t *cred,
 	}
 
 	if (s_backend_type == WIFI_BACKEND_QEMU && s_fullmac)
-		return wifi_int_to_result(wifi_80211ax_mock_connect(s_fullmac, cred));
+		return wifi_int_to_result(wifi_lab_mock_connect(s_fullmac, cred));
 
 	if (s_backend_type == WIFI_BACKEND_FULLMAC && s_fullmac)
 		return wifi_int_to_result(wifi_fullmac_station_connect(s_fullmac, cred));
@@ -333,7 +332,7 @@ fl_result_t wifi_driver_he_cap(fl_net_wifi_he_cap_t *cap_out)
 
 	if (s_backend_type == WIFI_BACKEND_QEMU && s_fullmac &&
 	    s_fullmac->state == WIFI_FULLMAC_STATE_CONNECTED) {
-		wifi_80211ax_mock_fill_he_cap(cap_out);
+		wifi_lab_mock_fill_he_cap(cap_out);
 		return FL_RESULT_OK;
 	}
 

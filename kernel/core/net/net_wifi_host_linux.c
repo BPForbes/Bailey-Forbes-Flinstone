@@ -1,11 +1,10 @@
 #include "net_wifi_host_linux.h"
 
+#include "net_wifi_he.h"
 #include "fl_platform.h"
 #include "net_iface.h"
 #include "net_ipv4.h"
 #include "net_ipv6.h"
-#include "net_wifi_host_iw.h"
-
 #include <ctype.h>
 #include <errno.h>
 #include <stdio.h>

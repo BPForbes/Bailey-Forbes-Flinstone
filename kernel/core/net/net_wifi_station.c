@@ -7,12 +7,11 @@
 #include "net_dhcp.h"
 #include "net_wifi_crypto.h"
 #include "net_wifi_he.h"
-#include "net_wifi_host_iw.h"
+#include "net_wifi_host_linux.h"
 #include "fl/platform.h"
 #include "net_ipv4.h"
 #include "net_wifi_twt.h"
 #include "net_wifi_wpa.h"
-#include "net_wifi_host_linux.h"
 #include "net_wire.h"
 
 /* v4.3.0 WiFi driver backend — kernel orchestrates, drivers execute */

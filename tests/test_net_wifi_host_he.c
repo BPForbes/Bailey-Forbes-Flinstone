@@ -2,7 +2,7 @@
  * Unit tests for host-side 802.11ax scan HE hints (no iw subprocess required).
  */
 
-#include "net_wifi_host_iw.h"
+#include "net_wifi_he.h"
 
 #include <stdio.h>
 #include <string.h>

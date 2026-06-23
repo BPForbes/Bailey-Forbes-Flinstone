@@ -14,7 +14,7 @@
 #include "net_wifi_wpa.h"
 #include "net_wifi_netdev.h"
 #include "wifi_driver_backend.h"
-#include "wifi_80211ax_mock.h"
+#include "wifi_lab_backend.h"
 #include "wifi_supplicant.h"
 #include "net_endian.h"
 
