@@ -13,6 +13,7 @@
 #include <stdbool.h>
 
 #include "wifi_coprocessor.h"
+#include "contract_p3_wifi.h"
 
 /* WiFi 6 (802.11ax) specific features */
 #define WIFI_FULLMAC_HE_CAP_SUPPORT    1
@@ -193,5 +194,37 @@ int wifi_fullmac_deinit(wifi_fullmac_t *dev);
 int wifi_fullmac_get_he_capabilities(wifi_fullmac_t *dev,
 				     wifi_fullmac_he_cap_t *he_cap);
 int wifi_fullmac_setup_twt(wifi_fullmac_t *dev, const wifi_fullmac_twt_setup_t *twt);
+
+/** BDF + identity from the last successful hardware probe. */
+typedef struct {
+	uint8_t bus;
+	uint8_t dev;
+	uint8_t fn;
+	uint16_t vendor_id;
+	uint16_t device_id;
+	char bdf[16];
+	char chipset[48];
+	uint32_t bar0;
+} wifi_fullmac_probe_info_t;
+
+/**
+ * Attach a real FullMAC device (PCIe). Requires one of:
+ *   FL_WIFI_FULLMAC_PCI=0000:bb:dd.f
+ *   FL_WIFI_FULLMAC_VIDPID=8086:2725
+ *   FL_WIFI_FULLMAC=1 or FL_WIFI_FULLMAC_AUTO=1 (scan sysfs for known ax IDs)
+ * Optional: FL_WIFI_FULLMAC_FW=/path/to/firmware
+ * Returns 0 on probe success (scan/connect may still need chipset firmware bring-up).
+ */
+int wifi_fullmac_hw_probe(wifi_fullmac_t **out_dev, wifi_fullmac_probe_info_t *info_out);
+void wifi_fullmac_hw_detach(wifi_fullmac_t *dev);
+
+/** Last probe/init error detail for shell/tests. */
+const char *wifi_fullmac_last_error(void);
+
+/** Driver-internal error buffer (wifi_fullmac_core.c). */
+void wifi_fullmac_set_error(const char *msg);
+
+/** Station connect via in-tree supplicant + FullMAC ops (Phase 4). */
+int wifi_fullmac_station_connect(wifi_fullmac_t *dev, const fl_net_wifi_cred_t *cred);
 
 #endif /* KERNEL_DRIVERS_WIFI_FULLMAC_H */

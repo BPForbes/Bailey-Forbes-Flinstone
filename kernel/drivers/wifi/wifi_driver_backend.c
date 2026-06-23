@@ -130,6 +130,14 @@ static fl_result_t wifi_backend_try_ax_mock(void)
 	return FL_RESULT_OK;
 }
 
+static fl_result_t wifi_backend_try_fullmac_hw(void)
+{
+	if (wifi_fullmac_hw_probe(&s_fullmac, NULL) != 0)
+		return FL_RESULT_NOSYS;
+	s_backend_type = WIFI_BACKEND_FULLMAC;
+	return FL_RESULT_OK;
+}
+
 fl_result_t wifi_driver_backend_init(void)
 {
 	if (s_backend_type == WIFI_BACKEND_COPROCESSOR && s_coprocessor) {
@@ -138,12 +146,17 @@ fl_result_t wifi_driver_backend_init(void)
 	}
 	if (s_fullmac && s_backend_type == WIFI_BACKEND_QEMU)
 		wifi_80211ax_mock_detach(s_fullmac);
+	if (s_fullmac && s_backend_type == WIFI_BACKEND_FULLMAC)
+		wifi_fullmac_hw_detach(s_fullmac);
 
 	s_backend_type = WIFI_BACKEND_NONE;
 	s_coprocessor = NULL;
 	s_fullmac = NULL;
 
 	if (wifi_backend_try_uart_coprocessor() == FL_RESULT_OK)
+		return FL_RESULT_OK;
+
+	if (wifi_backend_try_fullmac_hw() == FL_RESULT_OK)
 		return FL_RESULT_OK;
 
 	if (wifi_backend_try_ax_mock() == FL_RESULT_OK)
@@ -240,7 +253,7 @@ fl_result_t wifi_driver_connect(const fl_net_wifi_cred_t *cred,
 		return wifi_int_to_result(wifi_80211ax_mock_connect(s_fullmac, cred));
 
 	if (s_backend_type == WIFI_BACKEND_FULLMAC && s_fullmac)
-		return FL_RESULT_NOSYS;
+		return wifi_int_to_result(wifi_fullmac_station_connect(s_fullmac, cred));
 
 	return FL_RESULT_NOSYS;
 }

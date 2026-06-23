@@ -167,6 +167,11 @@ NET_CORE_SRCS = kernel/core/net/net_checksum.c kernel/core/net/net_wire.c kernel
                 kernel/drivers/wifi/wifi_lab_router.c \
                 kernel/drivers/wifi/wifi_ax_session_driver.c \
                 kernel/drivers/wifi/wifi_80211ax_mock.c \
+                kernel/drivers/wifi/wifi_fullmac_core.c \
+                kernel/drivers/wifi/wifi_fullmac_pcie.c \
+                kernel/drivers/wifi/wifi_fullmac_chipset.c \
+                kernel/drivers/wifi/wifi_fullmac_fw.c \
+                kernel/drivers/wifi/wifi_fullmac_connect.c \
                 kernel/core/platform/fl_platform.c \
                 kernel/core/net/net_requirements.c \
                 kernel/core/net/net_server.c kernel/core/net/net_client.c kernel/core/net/net_file_delivery.c kernel/core/net/net_pkt_channel_meta.c kernel/core/net/net_channel_sidecar.c kernel/core/net/server_bg.c \
@@ -879,6 +884,13 @@ tests/test_wifi_coprocessor: kernel/drivers/wifi/wifi_coprocessor.o kernel/drive
 test_wifi_coprocessor: tests/test_wifi_coprocessor
 	@./tests/test_wifi_coprocessor
 
+tests/test_wifi_fullmac_probe: kernel/drivers/wifi/wifi_fullmac_chipset.c
+	$(CC) $(CFLAGS) $(TEST_SANITIZE) -o tests/test_wifi_fullmac_probe tests/test_wifi_fullmac_probe.c \
+	  kernel/drivers/wifi/wifi_fullmac_chipset.c -Wl,-z,noexecstack
+
+test_wifi_fullmac_probe: tests/test_wifi_fullmac_probe
+	@./tests/test_wifi_fullmac_probe
+
 tests/test_wifi_80211ax_mock_279: $(WIFI_TEST_COMMON_DEPS)
 	$(WIFI_TEST_LINK_PRE)
 	$(WIFI_TEST_LINK_AT)$(CC) $(CFLAGS) $(TEST_SANITIZE) -o tests/test_wifi_80211ax_mock_279 tests/test_wifi_80211ax_mock_279.c \
@@ -913,7 +925,7 @@ test_wifi_ax_server_ota: tests/test_wifi_ax_server_ota
 	@./tests/test_wifi_ax_server_ota
 
 # PR #320 WiFi validation bundle (build when stale, then run all four).
-test_wifi: test_wifi_coprocessor test_p3_wifi test_wifi_80211ax_mock_279 test_wifi_ax_server_ota
+test_wifi: test_wifi_coprocessor test_wifi_fullmac_probe test_p3_wifi test_wifi_80211ax_mock_279 test_wifi_ax_server_ota
 
 # Same bundle; suppress make recipe echo (link lines + ./tests/... wrappers).
 test_wifi-quiet:
@@ -945,7 +957,10 @@ WIFI_TEST_STATION_DRIVER_SRCS = kernel/drivers/wifi/wifi_driver_backend.c kernel
 	kernel/drivers/wifi/wifi_lab_backend.c \
 	kernel/drivers/wifi/wifi_lab_router.c \
 	kernel/drivers/wifi/wifi_uart_transport.c kernel/drivers/wifi/wifi_driver_packet.c \
-	kernel/drivers/wifi/wifi_80211ax_mock.c kernel/drivers/wifi/wifi_supplicant.c
+	kernel/drivers/wifi/wifi_80211ax_mock.c kernel/drivers/wifi/wifi_supplicant.c \
+	kernel/drivers/wifi/wifi_fullmac_core.c kernel/drivers/wifi/wifi_fullmac_pcie.c \
+	kernel/drivers/wifi/wifi_fullmac_chipset.c kernel/drivers/wifi/wifi_fullmac_fw.c \
+	kernel/drivers/wifi/wifi_fullmac_connect.c
 
 test_wifi_flinstone_helper: $(NET_ASM_OBJ) $(MEM_ASM_OBJ) priority_queue.o kernel/core/time/timekeeping.o kernel/core/sys/ipc.o
 	$(CC) $(CFLAGS) $(TEST_SANITIZE) -o tests/test_wifi_flinstone_helper tests/test_wifi_flinstone_helper.c \
@@ -1081,7 +1096,7 @@ clean:
 	rm -f kernel/arch/*/drivers/*.o kernel/arch/*/hal/*.o kernel/drivers/*.o kernel/drivers/block/*.o VM/devices/*.o
 	rm -f arch/*/*/*.o arch/*/*/alloc/*.o
 	rm -f tests/test_mem_asm tests/test_alloc tests/test_priority_queue tests/test_drivers tests/test_vm_mem tests/test_replay tests/test_invariants tests/test_userspace_connection tests/test_vm_syscall_bridge tests/test_vm_arch_readiness
-	rm -f tests/test_p3_network tests/test_p3_server tests/test_p3_server_lan tests/test_p3_udp_cmds tests/test_p3_net_tools tests/test_wifi_flinstone_helper tests/test_wifi_flinstone_linux_helper tests/test_p3_wifi tests/test_wifi_coprocessor tests/test_wifi_80211ax_mock_279 tests/test_wifi_ax_server_ota
+	rm -f tests/test_p3_network tests/test_p3_server tests/test_p3_server_lan tests/test_p3_udp_cmds tests/test_p3_net_tools tests/test_wifi_flinstone_helper tests/test_wifi_flinstone_linux_helper tests/test_p3_wifi tests/test_wifi_coprocessor tests/test_wifi_fullmac_probe tests/test_wifi_80211ax_mock_279 tests/test_wifi_ax_server_ota
 	rm -f tests/test_batch_argv_issue220 tests/test_threadpool_issue222 tests/test_disk_hex_issue222
 	rm -rf tests/obj/issue220 tests/obj/issue222
 	find . -name '*.o' -type f ! -path './deps/*' ! -path './.git/*' -exec rm -f {} +

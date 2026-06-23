@@ -10,10 +10,13 @@
 #include "net_wifi_netdev.h"
 #include "net_wifi_host_linux.h"
 #include "net_wifi_station.h"
+#include "wifi_fullmac.h"
+#include "wifi_fullmac_chipset.h"
 #include "fl/platform.h"
 
 #include <arpa/inet.h>
 #include <stdio.h>
+#include <stdlib.h>
 #include <string.h>
 
 static const char *auth_mode_name(uint8_t mode) {
@@ -83,6 +86,9 @@ static int wifi_usage(void) {
           "  wifi leave                   Disconnect and drop WLAN addresses\n"
           "  wifi known\n"
           "  wifi status\n"
+          "  wifi probe                   List ax PCI IDs / probe FullMAC hardware\n"
+          "  FullMAC NIC (opt-in): FL_WIFI_FULLMAC=1 or FL_WIFI_FULLMAC_PCI=bb:dd.f\n"
+          "    optional FL_WIFI_FULLMAC_FW=/path/to/firmware; unset FL_WIFI_80211AX_MOCK\n"
           "  Lab scan: set FL_NET_WIFI_HOME_SSID to include your home network in scan results.\n"
           "  Default: in-tree 802.11 lab (LabAxHome/GuestOpen; DHCP on wlan-lab).\n"
           "  Real Wi-Fi (opt-in): set FL_NET_WIFI_FLINSTONE_PS on WSL, or FL_NET_WIFI_USE_WPA=1\n"
@@ -525,6 +531,42 @@ static int cmd_wifi_known(int argc, char **argv) {
     return 0;
 }
 
+static int cmd_wifi_probe(int argc, char **argv) {
+    size_t i, n = 0;
+    const wifi_fullmac_chipset_t *table;
+    wifi_fullmac_t *dev = NULL;
+    wifi_fullmac_probe_info_t info;
+
+    (void)argc;
+    (void)argv;
+    table = wifi_fullmac_chipset_table(&n);
+    printf("802.11ax PCI chipset table (%zu entries):\n", n);
+    for (i = 0; i < n; i++)
+        printf("  %04x:%04x  %s\n",
+               (unsigned)table[i].vendor_id, (unsigned)table[i].device_id,
+               table[i].name ? table[i].name : "?");
+    if (getenv("FL_WIFI_FULLMAC") || getenv("FL_WIFI_FULLMAC_PCI") ||
+        getenv("FL_WIFI_FULLMAC_AUTO") || getenv("FL_WIFI_FULLMAC_VIDPID")) {
+        if (wifi_fullmac_hw_probe(&dev, &info) == 0) {
+            printf("probe: ok  %s  bdf=%s  bar0=0x%08x  state=%d\n",
+                   info.chipset, info.bdf, (unsigned)info.bar0,
+                   dev ? (int)dev->state : -1);
+            wifi_fullmac_hw_detach(dev);
+        } else {
+            const char *err = wifi_fullmac_last_error();
+            printf("probe: failed");
+            if (err && err[0])
+                printf(" — %s", err);
+            putchar('\n');
+            return 1;
+        }
+    } else {
+        fputs("hint: set FL_WIFI_FULLMAC=1 (auto-scan) or FL_WIFI_FULLMAC_PCI=0000:bb:dd.f\n",
+              stderr);
+    }
+    return 0;
+}
+
 int cmd_wifi_run(int argc, char **argv) {
     if (argc < 2)
         return wifi_usage();
@@ -538,6 +580,8 @@ int cmd_wifi_run(int argc, char **argv) {
         return cmd_wifi_leave(argc, argv);
     if (!strcmp(argv[1], "status"))
         return cmd_wifi_status(argc, argv);
+    if (!strcmp(argv[1], "probe"))
+        return cmd_wifi_probe(argc, argv);
     fprintf(stderr, "wifi: unknown subcommand '%s'\n", argv[1]);
     return wifi_usage();
 }
