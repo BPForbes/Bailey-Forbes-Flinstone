@@ -850,6 +850,15 @@ static int verb_host(int argc, char **argv) {
         fl_color_error("hosted sockets unavailable; cannot host");
         return 1;
     }
+    /* If bind failed on a specific IPv4 with EADDRNOTAVAIL, automatically
+     * fall back to binding on all interfaces (0.0.0.0) instead. */
+    if (rc != FL_RESULT_OK && bind_ep.family == FL_NET_ADDR_FAMILY_V4 &&
+        bind_ep.addr.v4_be != 0u && fl_net_sock_last_errno() == EADDRNOTAVAIL) {
+        fl_color_warn("address %s not available on this host; binding to all interfaces instead",
+                      argv[2]);
+        bind_ep.addr.v4_be = 0u;
+        rc = fl_net_server_host_start_ep(&g_server, &bind_ep, current_principal());
+    }
     if (rc != FL_RESULT_OK) {
         pthread_mutex_unlock(&session_mutex);
         print_sock_error("server host", rc);
