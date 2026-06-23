@@ -58,6 +58,9 @@ fl_result_t fl_net_wifi_host_linux_ipv6_route(uint8_t addr6[16], uint8_t *prefix
 
 const char *fl_net_wifi_host_linux_iface(void);
 
+/** Last FlinstonePowershell / wpa_cli helper failure detail (may be empty). */
+const char *fl_net_wifi_host_linux_last_error(void);
+
 /**
  * Windows Wi-Fi adapter IP from FlinstonePowershell (e.g. "192.168.1.235").
  * Not bindable in Linux; use for display and peer-connection hints only.
@@ -87,5 +90,24 @@ int fl_net_wifi_host_linux_server_bridge_to(const char *bind_ip,
  * Returns 0 on success, -1 when unavailable.
  */
 int fl_net_wifi_host_linux_wsl_ipv4(char *buf, size_t buf_len);
+
+/**
+ * Add a Windows portproxy + inbound firewall rule so LAN peers can reach a
+ * server at listen_ip:<port> inside WSL (connectaddress=wsl_ip).  Requires
+ * FlinstonePowershell.exe; may prompt for UAC elevation on Windows.
+ * Returns 0 on success, -1 on failure or wrong backend.
+ */
+int fl_net_wifi_host_linux_server_proxy(const char *listen_ip, const char *wsl_ip,
+                                        uint16_t port);
+
+/**
+ * Probe whether Flinstone portproxy / firewall rules already exist for
+ * listen_ip:<port> on the Windows host. Returns 1 when clear (result=ok),
+ * 0 when configured (result=busy), -1 when the check could not be run.
+ */
+int fl_net_wifi_host_linux_server_proxy_port_free(const char *listen_ip, uint16_t port);
+
+/** Remove portproxy + firewall rules added for listen_ip:<port>. */
+int fl_net_wifi_host_linux_server_proxy_del(const char *listen_ip, uint16_t port);
 
 #endif /* NET_WIFI_HOST_LINUX_H */

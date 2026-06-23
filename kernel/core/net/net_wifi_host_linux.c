@@ -6,6 +6,7 @@
 #include "net_ipv6.h"
 
 #include <ctype.h>
+#include <errno.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -51,6 +52,7 @@ static char s_wsl_bind_ipv4[16] = ""; /* WSL eth0 IP — bindable in Linux for s
 static uint8_t s_wsl_bind_prefix = 24u;
 static char s_interop_ipv4[16] = ""; /* Windows Wi-Fi IP from PowerShell interop (WSL fallback) */
 static int  s_wsl_mirrored = -1;     /* -1=unchecked, 0=NAT mode, 1=mirrored */
+static char s_last_error[512] = "";  /* last helper failure (scan/join/proxy) */
 
 
 /*
@@ -1038,14 +1040,21 @@ static int run_flinstone_helper(const char *args, char *out, size_t out_cap) {
     char exe_q[512 * 5 + 4];
     const char *helper = flinstone_helper_path();
     FILE *fp;
+    int status;
 
-    if (!args || !helper || helper[0] == '\0')
+    s_last_error[0] = '\0';
+    if (!args || !helper || helper[0] == '\0') {
+        strncpy(s_last_error, "Flinstone helper path not configured", sizeof(s_last_error) - 1u);
         return 0;
+    }
     shell_single_quote(helper, exe_q, sizeof(exe_q));
     snprintf(cmd, sizeof(cmd), "%s %s 2>&1", exe_q, args);
     fp = popen(cmd, "r");
-    if (!fp)
+    if (!fp) {
+        snprintf(s_last_error, sizeof(s_last_error),
+                 "could not run %s (%s)", helper, strerror(errno));
         return 0;
+    }
     if (out && out_cap > 0u) {
         size_t n = fread(out, 1u, out_cap - 1u, fp);
         out[n] = '\0';
@@ -1054,7 +1063,21 @@ static int run_flinstone_helper(const char *args, char *out, size_t out_cap) {
         while (fgets(discard, sizeof(discard), fp) != NULL)
             ;
     }
-    return pclose(fp) == 0;
+    status = pclose(fp);
+    if (status != 0) {
+        if (out && out_cap > 0u && out[0]) {
+            size_t n = strlen(out);
+            while (n > 0u && (out[n - 1u] == '\n' || out[n - 1u] == '\r'))
+                out[--n] = '\0';
+            strncpy(s_last_error, out, sizeof(s_last_error) - 1u);
+            s_last_error[sizeof(s_last_error) - 1u] = '\0';
+        } else {
+            snprintf(s_last_error, sizeof(s_last_error),
+                     "%s %s exited with status %d", helper, args, status);
+        }
+        return 0;
+    }
+    return 1;
 }
 
 static int run_flinstone_ps(const char *args, char *out, size_t out_cap) {
@@ -1428,6 +1451,14 @@ const char *fl_net_wifi_host_linux_iface(void) {
 #else
     load_env_once();
     return s_wifi_iface;
+#endif
+}
+
+const char *fl_net_wifi_host_linux_last_error(void) {
+#if !defined(FL_NET_WIFI_HOST_LINUX)
+    return "";
+#else
+    return s_last_error[0] ? s_last_error : "";
 #endif
 }
 
@@ -1886,6 +1917,82 @@ const char *fl_net_wifi_host_linux_windows_ipv4(void) {
 #endif
 }
 
+/*
+ * Ask FlinstonePowershell to add a Windows portproxy + firewall rule so LAN
+ * peers can reach listen_ip:<port> with traffic forwarded to wsl_ip:<port>.
+ */
+int fl_net_wifi_host_linux_server_proxy(const char *listen_ip, const char *wsl_ip,
+                                        uint16_t port) {
+#if !defined(FL_NET_WIFI_HOST_LINUX)
+    (void)listen_ip;
+    (void)wsl_ip;
+    (void)port;
+    return -1;
+#else
+    char args[384];
+    char out[384];
+    const char *listen = (listen_ip && listen_ip[0]) ? listen_ip : "0.0.0.0";
+
+    if (s_host_kind == FL_WIFI_HOST_NONE)
+        (void)fl_net_wifi_host_linux_available();
+    if (s_host_kind != FL_WIFI_HOST_FLINSTONE_PS || !wsl_ip || !wsl_ip[0])
+        return -1;
+    {
+        char listen_q[64], wsl_q[64];
+        shell_single_quote(listen, listen_q, sizeof(listen_q));
+        shell_single_quote(wsl_ip, wsl_q, sizeof(wsl_q));
+        snprintf(args, sizeof(args), "server-proxy %s %s %u",
+                 listen_q, wsl_q, (unsigned)port);
+    }
+    if (!run_flinstone_ps(args, out, sizeof(out)))
+        return -1;
+    return strstr(out, "result=ok") ? 0 : -1;
+#endif
+}
+
+int fl_net_wifi_host_linux_server_proxy_port_free(const char *listen_ip, uint16_t port) {
+#if !defined(FL_NET_WIFI_HOST_LINUX)
+    (void)listen_ip;
+    (void)port;
+    return -1;
+#else
+    char args[128];
+    char out[256];
+    const char *listen = (listen_ip && listen_ip[0]) ? listen_ip : "0.0.0.0";
+
+    if (s_host_kind == FL_WIFI_HOST_NONE)
+        (void)fl_net_wifi_host_linux_available();
+    if (s_host_kind != FL_WIFI_HOST_FLINSTONE_PS)
+        return -1;
+    snprintf(args, sizeof(args), "server-proxy-check %s %u", listen, (unsigned)port);
+    if (!run_flinstone_ps(args, out, sizeof(out)))
+        return -1;
+    if (strstr(out, "result=ok"))
+        return 1;
+    if (strstr(out, "result=busy"))
+        return 0;
+    return -1;
+#endif
+}
+
+int fl_net_wifi_host_linux_server_proxy_del(const char *listen_ip, uint16_t port) {
+#if !defined(FL_NET_WIFI_HOST_LINUX)
+    (void)listen_ip;
+    (void)port;
+    return -1;
+#else
+    char args[128];
+    char out[256];
+    const char *listen = (listen_ip && listen_ip[0]) ? listen_ip : "0.0.0.0";
+
+    if (s_host_kind != FL_WIFI_HOST_FLINSTONE_PS)
+        return -1;
+    snprintf(args, sizeof(args), "server-proxy-del %s %u", listen, (unsigned)port);
+    if (!run_flinstone_ps(args, out, sizeof(out)))
+        return -1;
+    return strstr(out, "result=ok") ? 0 : -1;
+#endif
+}
 
 int fl_net_wifi_host_linux_wsl_ipv4(char *buf, size_t buf_len) {
 #if !defined(FL_NET_WIFI_HOST_LINUX)

@@ -147,7 +147,23 @@ static int cmd_wifi_scan(int argc, char **argv) {
         return 1;
     }
     if (rc != FL_RESULT_OK) {
-        fprintf(stderr, "wifi scan: failed (%d)\n", (int)rc);
+        const char *backend = fl_net_wifi_host_linux_backend_name();
+        const char *herr = fl_net_wifi_host_linux_last_error();
+        const char *fps = getenv("FL_NET_WIFI_FLINSTONE_PS");
+        fprintf(stderr, "wifi scan: failed (%d)", (int)rc);
+        if (backend)
+            fprintf(stderr, " (%s)", backend);
+        putchar('\n');
+        if (herr && herr[0])
+            fprintf(stderr, "  %s\n", herr);
+        if (fl_net_wifi_host_linux_opted_in() &&
+            backend && !strcmp(backend, "FlinstonePowershell")) {
+            fputs("  Build: make flinstone-ps-windows\n", stderr);
+            if (fps && fps[0])
+                fprintf(stderr, "  Test: %s wifi-scan\n", fps);
+            else
+                fputs("  Set FL_NET_WIFI_FLINSTONE_PS (see tools/fl-wifi.env)\n", stderr);
+        }
         fl_wifi_db_close();
         return 1;
     }
@@ -338,7 +354,23 @@ static int cmd_wifi_join(int argc, char **argv) {
         goto cleanup;
     }
     if (rc != FL_RESULT_OK) {
-        fprintf(stderr, "wifi join: failed (%d)\n", (int)rc);
+        const char *backend = fl_net_wifi_host_linux_backend_name();
+        const char *herr = fl_net_wifi_host_linux_last_error();
+        const char *fps = getenv("FL_NET_WIFI_FLINSTONE_PS");
+        fprintf(stderr, "wifi join: failed (%d)", (int)rc);
+        if (backend)
+            fprintf(stderr, " (%s)", backend);
+        putchar('\n');
+        if (herr && herr[0])
+            fprintf(stderr, "  %s\n", herr);
+        if (fl_net_wifi_host_linux_opted_in() &&
+            backend && !strcmp(backend, "FlinstonePowershell")) {
+            fputs("  Build: make flinstone-ps-windows\n", stderr);
+            if (fps && fps[0])
+                fprintf(stderr, "  Test: %s wifi-join <ssid> <password>\n", fps);
+            else
+                fputs("  Set FL_NET_WIFI_FLINSTONE_PS (see tools/fl-wifi.env)\n", stderr);
+        }
         goto cleanup;
     }
     (void)fl_wifi_db_mark_joined(name, 1);
