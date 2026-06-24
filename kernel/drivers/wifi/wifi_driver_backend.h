@@ -26,6 +26,7 @@ typedef enum {
 	WIFI_BACKEND_NONE = 0,      /* No driver active */
 	WIFI_BACKEND_COPROCESSOR,   /* Phase 1: ESP32/ESP8266 UART */
 	WIFI_BACKEND_FULLMAC,       /* Phase 4: Real WiFi 6 NIC (PCIe/SDIO) */
+	WIFI_BACKEND_NL80211,       /* Phase 4: Linux nl80211 FullMAC shim */
 	WIFI_BACKEND_QEMU,          /* QEMU emulated 802.11ax */
 } wifi_backend_type_t;
 
