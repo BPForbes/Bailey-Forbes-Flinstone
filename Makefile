@@ -861,7 +861,7 @@ tests/test_p3_wifi: $(WIFI_TEST_COMMON_DEPS) $(NET_TEST_PCI_OBJ)
 test_p3_wifi: tests/test_p3_wifi
 	@./tests/test_p3_wifi
 
-tests/test_wifi_coprocessor: kernel/drivers/wifi/wifi_coprocessor.o kernel/drivers/wifi/wifi_uart_transport.o \
+tests/test_wifi_coprocessor: tests/test_wifi_coprocessor.c kernel/drivers/wifi/wifi_coprocessor.o kernel/drivers/wifi/wifi_uart_transport.o \
 	kernel/drivers/wifi/wifi_driver_packet.o kernel/core/net/net_packet.o kernel/core/net/net_wire.o \
 	kernel/core/net/net_ipv6.o kernel/core/net/net_checksum.o \
 	kernel/core/mm/kmalloc.o kernel/core/mm/mem_domain.o $(MEM_ASM_OBJ) $(NET_ASM_OBJ) \

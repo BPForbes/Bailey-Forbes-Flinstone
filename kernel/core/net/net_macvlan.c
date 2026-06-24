@@ -20,6 +20,7 @@
 #endif
 
 #include <arpa/inet.h>
+#include <errno.h>
 #include <ifaddrs.h>
 #include <linux/if_packet.h>
 #include <net/ethernet.h>
@@ -104,11 +105,26 @@ static int macvlan_run_ip(char *const argv[])
 
     if (!argv || !argv[0])
         return -1;
-    if (posix_spawnp(&pid, argv[0], NULL, NULL, argv, environ) != 0)
+    if (posix_spawnp(&pid, argv[0], NULL, NULL, argv, environ) != 0) {
+        if (errno == EACCES || errno == EPERM)
+            return -2;
         return -1;
-    if (waitpid(pid, &status, 0) < 0)
+    }
+    for (;;) {
+        if (waitpid(pid, &status, 0) == 0)
+            break;
+        if (errno == EINTR)
+            continue;
         return -1;
-    return WIFEXITED(status) && WEXITSTATUS(status) == 0 ? 0 : -1;
+    }
+    if (!WIFEXITED(status))
+        return -1;
+    if (WEXITSTATUS(status) == 0)
+        return 0;
+    /* ip(8) uses exit 2 for RTNETLINK permission failures on many distros. */
+    if (WEXITSTATUS(status) == 2)
+        return -2;
+    return -1;
 }
 
 static int macvlan_ip_link_set_up(const char *name)
@@ -325,10 +341,11 @@ fl_result_t fl_net_macvlan_create(const char *name,
         strncpy(ifr.ifr_name, name, IFNAMSIZ - 1u);
         if (ioctl(sock, SIOCGIFFLAGS, &ifr) == 0) {
             if (!(ifr.ifr_flags & IFF_UP)) {
-                if (macvlan_ip_link_set_up(name) != 0) {
-                    close(sock);
-                    return FL_RESULT_ERR;
-                }
+                int iprc = macvlan_ip_link_set_up(name);
+                close(sock);
+                if (iprc == 0)
+                    return FL_RESULT_OK;
+                return iprc == -2 ? FL_RESULT_ACCES : FL_RESULT_ERR;
             }
             close(sock);
             return FL_RESULT_OK;
@@ -340,15 +357,20 @@ fl_result_t fl_net_macvlan_create(const char *name,
         return FL_RESULT_NOSYS;
     if (!macvlan_ifname_valid(parent))
         return FL_RESULT_ERR;
-    if (parent_out)
+    if (parent_out) {
         strncpy(parent_out, parent, FL_NET_MACVLAN_IFNAMSIZ - 1u);
+        parent_out[FL_NET_MACVLAN_IFNAMSIZ - 1u] = '\0';
+    }
 
     if (macvlan_ip_link_add(name, parent) != 0)
         return FL_RESULT_ACCES;
 
-    if (macvlan_ip_link_set_up(name) != 0) {
-        fl_net_macvlan_destroy(name);
-        return FL_RESULT_ERR;
+    {
+        int iprc = macvlan_ip_link_set_up(name);
+        if (iprc != 0) {
+            fl_net_macvlan_destroy(name);
+            return iprc == -2 ? FL_RESULT_ACCES : FL_RESULT_ERR;
+        }
     }
     return FL_RESULT_OK;
 }
