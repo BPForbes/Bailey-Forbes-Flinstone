@@ -10,6 +10,7 @@
 #include "wifi_lab_router.h"
 #include "wifi_coprocessor.h"
 #include "wifi_fullmac.h"
+#include "wifi_fullmac_hw_internal.h"
 #include "wifi_uart_transport.h"
 
 #include <stdlib.h>
@@ -379,6 +380,7 @@ fl_result_t wifi_driver_twt_setup(const fl_net_wifi_twt_params_t *req,
 		};
 		if (s_fullmac->ops->setup_twt(s_fullmac, &fw_req) == 0) {
 			memcpy(agreed_out, req, sizeof(*agreed_out));
+			agreed_out->flow_id = fw_req.flow_id;
 			return FL_RESULT_OK;
 		}
 	}
@@ -419,7 +421,17 @@ fl_result_t wifi_driver_dhcp_exchange(const uint8_t cli_mac[6], const uint8_t *r
 	if (!cli_mac || !req || !reply || !reply_len)
 		return FL_RESULT_INVAL;
 
-	if (s_backend_type != WIFI_BACKEND_QEMU && !s_lab_dhcp_route)
+	if (s_backend_type == WIFI_BACKEND_QEMU)
+		return wifi_lab_router_dhcp_exchange(cli_mac, req, req_len, reply, reply_cap,
+						     reply_len);
+
+	if (s_backend_type == WIFI_BACKEND_FULLMAC && s_fullmac &&
+	    wifi_fullmac_hw_ota_sim_active(s_fullmac) &&
+	    s_fullmac->state == WIFI_FULLMAC_STATE_CONNECTED)
+		return wifi_lab_router_dhcp_exchange(cli_mac, req, req_len, reply, reply_cap,
+						     reply_len);
+
+	if (!s_lab_dhcp_route)
 		return FL_RESULT_NOSYS;
 
 	return wifi_lab_router_dhcp_exchange(cli_mac, req, req_len, reply, reply_cap,

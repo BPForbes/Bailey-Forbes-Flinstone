@@ -162,6 +162,8 @@ NET_CORE_SRCS = kernel/core/net/net_checksum.c kernel/core/net/net_wire.c kernel
                 kernel/core/net/net_wifi_crypto.c kernel/core/net/net_wifi_ax_server.c \
                 kernel/drivers/wifi/wifi_coprocessor.c kernel/drivers/wifi/wifi_uart_transport.c \
                 kernel/drivers/wifi/wifi_supplicant.c \
+                kernel/drivers/wifi/wifi_mgmt_transport.c \
+                kernel/drivers/wifi/wifi_connect_ota.c \
                 kernel/drivers/wifi/wifi_driver_backend.c kernel/drivers/wifi/wifi_driver_packet.c \
                 kernel/drivers/wifi/wifi_lab_backend.c \
                 kernel/drivers/wifi/wifi_lab_router.c \
@@ -911,6 +913,8 @@ tests/test_wifi_80211ax_mock_279: $(WIFI_TEST_COMMON_DEPS) $(NET_TEST_PCI_OBJ)
 	  kernel/drivers/wifi/wifi_lab_router.c \
 	  kernel/drivers/wifi/wifi_uart_transport.c kernel/drivers/wifi/wifi_driver_packet.c \
 	  kernel/drivers/wifi/wifi_supplicant.c \
+	  kernel/drivers/wifi/wifi_mgmt_transport.c \
+	  kernel/drivers/wifi/wifi_connect_ota.c \
 	  kernel/drivers/wifi/fullmac/wifi_fullmac_core.c kernel/drivers/wifi/fullmac/wifi_fullmac_hw.c \
 	  kernel/drivers/wifi/fullmac/wifi_fullmac_bus.c \
 	  kernel/core/mm/kmalloc.o kernel/core/mm/mem_domain.o \
@@ -968,6 +972,8 @@ WIFI_TEST_STATION_DRIVER_SRCS = kernel/drivers/wifi/wifi_driver_backend.c kernel
 	kernel/drivers/wifi/wifi_lab_router.c \
 	kernel/drivers/wifi/wifi_uart_transport.c kernel/drivers/wifi/wifi_driver_packet.c \
 	kernel/drivers/wifi/wifi_supplicant.c \
+	kernel/drivers/wifi/wifi_mgmt_transport.c \
+	kernel/drivers/wifi/wifi_connect_ota.c \
 	kernel/drivers/wifi/fullmac/wifi_fullmac_core.c kernel/drivers/wifi/fullmac/wifi_fullmac_hw.c \
 	kernel/drivers/wifi/fullmac/wifi_fullmac_bus.c
 

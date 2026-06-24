@@ -176,6 +176,9 @@ struct wifi_fullmac {
 	const wifi_fullmac_ops_t *ops;
 	void *driver_data;
 
+	/** Stashed during wifi_fullmac_station_connect for driver OTA auth. */
+	const fl_net_wifi_cred_t *connect_cred;
+
 	/* Statistics */
 	uint64_t frames_tx;
 	uint64_t frames_rx;

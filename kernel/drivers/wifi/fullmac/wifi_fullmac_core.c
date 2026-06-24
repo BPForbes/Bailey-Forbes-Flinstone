@@ -307,11 +307,17 @@ int wifi_fullmac_station_connect(wifi_fullmac_t *dev, const fl_net_wifi_cred_t *
 		wifi_fullmac_set_error("FullMAC missing authenticate op");
 		return -1;
 	}
+	dev->connect_cred = cred;
 	if (dev->ops->authenticate &&
-	    dev->ops->authenticate(dev, ap->bssid, (uint16_t)auth, 1) != 0)
+	    dev->ops->authenticate(dev, ap->bssid, (uint16_t)auth, 1) != 0) {
+		dev->connect_cred = NULL;
 		return -1;
-	if (dev->ops->associate(dev, ap->bssid) != 0)
+	}
+	if (dev->ops->associate(dev, ap->bssid) != 0) {
+		dev->connect_cred = NULL;
 		return -1;
+	}
+	dev->connect_cred = NULL;
 	dev->state = WIFI_FULLMAC_STATE_CONNECTED;
 	return 0;
 }
