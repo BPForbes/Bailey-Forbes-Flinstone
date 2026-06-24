@@ -262,9 +262,14 @@ int wifi_fullmac_station_connect(wifi_fullmac_t *dev, const fl_net_wifi_cred_t *
 	const wifi_network_t *ap = NULL;
 	wifi_auth_mode_t auth;
 
-	if (!dev || !cred || !cred->ssid[0] || !dev->ops || !dev->ops->start_scan ||
-	    !dev->ops->get_scan_results)
+	if (!dev || !cred || !cred->ssid[0] || !dev->ops) {
+		wifi_fullmac_set_error("FullMAC connect: missing device, credentials, or ops");
 		return -1;
+	}
+	if (!dev->ops->start_scan || !dev->ops->get_scan_results || !dev->ops->associate) {
+		wifi_fullmac_set_error("FullMAC missing required connect ops");
+		return -1;
+	}
 	if (dev->state < WIFI_FULLMAC_STATE_IDLE) {
 		wifi_fullmac_set_error("FullMAC not ready for connect");
 		return -1;
@@ -298,11 +303,21 @@ int wifi_fullmac_station_connect(wifi_fullmac_t *dev, const fl_net_wifi_cred_t *
 		wifi_fullmac_set_error("passphrase required");
 		return -1;
 	}
+	if (auth != WIFI_AUTH_OPEN && !dev->ops->authenticate) {
+		wifi_fullmac_set_error("FullMAC missing authenticate op");
+		return -1;
+	}
+	dev->connect_cred = cred;
 	if (dev->ops->authenticate &&
-	    dev->ops->authenticate(dev, ap->bssid, (uint16_t)auth, 1) != 0)
+	    dev->ops->authenticate(dev, ap->bssid, (uint16_t)auth, 1) != 0) {
+		dev->connect_cred = NULL;
 		return -1;
-	if (dev->ops->associate && dev->ops->associate(dev, ap->bssid) != 0)
+	}
+	if (dev->ops->associate(dev, ap->bssid) != 0) {
+		dev->connect_cred = NULL;
 		return -1;
+	}
+	dev->connect_cred = NULL;
 	dev->state = WIFI_FULLMAC_STATE_CONNECTED;
 	return 0;
 }

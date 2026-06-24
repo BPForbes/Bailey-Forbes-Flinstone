@@ -8,6 +8,8 @@
 #include "wifi_lab_router.h"
 #include "wifi_supplicant.h"
 #include "wifi_driver_packet.h"
+#include "wifi_connect_ota.h"
+#include "wifi_mgmt_transport.h"
 
 #include "net_loopback.h"
 #include "net_wifi_he.h"
@@ -395,6 +397,14 @@ typedef struct {
 	uint8_t joined_bss_color;
 	wifi_network_t scan[3];
 	uint16_t scan_count;
+	wifi_mgmt_transport_mock_ctx_t ota_tr_storage;
+	fl_net_wifi_cred_t pending_cred;
+	wifi_network_t pending_ap;
+	int ota_auth_done;
+	uint8_t ptk[64];
+	size_t ptk_len;
+	wifi_fullmac_twt_setup_t twt_slots[8];
+	uint8_t twt_mask;
 } wifi_lab_mock_ctx_t;
 
 static wifi_lab_mock_ctx_t s_mock;
@@ -647,17 +657,207 @@ static int mock_get_he_capabilities(wifi_fullmac_t *dev, wifi_fullmac_he_cap_t *
 	return 0;
 }
 
+static const wifi_network_t *mock_find_ssid(wifi_lab_mock_ctx_t *ctx, const char *ssid)
+{
+	uint16_t i;
+
+	if (!ctx || !ssid)
+		return NULL;
+	for (i = 0; i < ctx->scan_count; i++) {
+		if (!strcmp(ctx->scan[i].ssid, ssid))
+			return &ctx->scan[i];
+	}
+	return NULL;
+}
+
+static const wifi_network_t *mock_find_bssid(wifi_lab_mock_ctx_t *ctx, const uint8_t bssid[6])
+{
+	uint16_t i;
+
+	if (!ctx || !bssid)
+		return NULL;
+	for (i = 0; i < ctx->scan_count; i++) {
+		if (!memcmp(ctx->scan[i].bssid, bssid, 6))
+			return &ctx->scan[i];
+	}
+	return NULL;
+}
+
+static int mock_ota_set_key(void *opaque, const uint8_t *key, size_t key_len)
+{
+	wifi_lab_mock_ctx_t *ctx = (wifi_lab_mock_ctx_t *)opaque;
+
+	if (!ctx || !key)
+		return -1;
+	if (key_len > sizeof(ctx->ptk))
+		key_len = sizeof(ctx->ptk);
+	memcpy(ctx->ptk, key, key_len);
+	ctx->ptk_len = key_len;
+	return 0;
+}
+
+static int mock_ota_init_transport(wifi_lab_mock_ctx_t *ctx, const wifi_network_t *ap,
+				   wifi_mgmt_transport_t *tr_out)
+{
+	wifi_mgmt_transport_mock_cfg_t cfg = {
+		.ap = ap,
+		.sta_mac = ctx->sta_mac,
+	};
+
+	if (!ctx || !ap || !tr_out)
+		return -1;
+	return wifi_mgmt_transport_mock_init(tr_out, &ctx->ota_tr_storage, &cfg);
+}
+
+static int mock_run_supplicant_ota(wifi_lab_mock_ctx_t *ctx,
+				    const fl_net_wifi_cred_t *cred,
+				    const wifi_network_t *ap)
+{
+	wifi_mgmt_transport_t tr;
+	wifi_connect_ota_hooks_t hooks = {
+		.set_key = mock_ota_set_key,
+		.ctx = ctx,
+	};
+
+	if (!ctx || !cred || !ap)
+		return -1;
+	if (mock_ota_init_transport(ctx, ap, &tr) != 0)
+		return -1;
+	return wifi_connect_ota_run(cred, ap, ctx->sta_mac, &tr, &hooks);
+}
+
 static int mock_setup_twt(wifi_fullmac_t *dev, const wifi_fullmac_twt_setup_t *twt)
 {
-	(void)dev;
-	(void)twt;
+	wifi_lab_mock_ctx_t *ctx = (wifi_lab_mock_ctx_t *)dev;
+	uint8_t id;
+
+	if (!dev || !twt)
+		return -1;
+	for (id = 0; id < 8u; id++) {
+		if ((ctx->twt_mask & (1u << id)) == 0u)
+			break;
+	}
+	if (id >= 8u)
+		return -1;
+	ctx->twt_slots[id] = *twt;
+	ctx->twt_slots[id].flow_id = id;
+	ctx->twt_mask |= (uint8_t)(1u << id);
 	return 0;
 }
 
 static int mock_teardown_twt(wifi_fullmac_t *dev, uint8_t flow_id)
 {
-	(void)dev;
-	(void)flow_id;
+	wifi_lab_mock_ctx_t *ctx = (wifi_lab_mock_ctx_t *)dev;
+
+	if (!dev || flow_id >= 8u)
+		return -1;
+	if ((ctx->twt_mask & (1u << flow_id)) == 0u)
+		return -1;
+	memset(&ctx->twt_slots[flow_id], 0, sizeof(ctx->twt_slots[flow_id]));
+	ctx->twt_mask &= (uint8_t)~(1u << flow_id);
+	return 0;
+}
+
+static int mock_authenticate(wifi_fullmac_t *dev, const uint8_t *bssid, uint16_t auth_type,
+			     uint16_t auth_seq)
+{
+	wifi_lab_mock_ctx_t *ctx = (wifi_lab_mock_ctx_t *)dev;
+	const wifi_network_t *ap;
+	wifi_mgmt_transport_t tr;
+	wifi_connect_ota_hooks_t hooks = {
+		.set_key = mock_ota_set_key,
+		.ctx = ctx,
+	};
+
+	(void)auth_type;
+	(void)auth_seq;
+	if (!dev || !bssid || !ctx->pending_cred.ssid[0])
+		return -1;
+	ap = mock_find_bssid(ctx, bssid);
+	if (!ap)
+		return -1;
+	ctx->pending_ap = *ap;
+	if (mock_ota_init_transport(ctx, ap, &tr) != 0)
+		return -1;
+	if (wifi_connect_ota_run_phase(&ctx->pending_cred, ap, ctx->sta_mac, &tr, &hooks,
+				       WIFI_CONNECT_OTA_AUTH_ONLY) != 0)
+		return -1;
+	ctx->ota_auth_done = 1;
+	return 0;
+}
+
+static int mock_associate(wifi_fullmac_t *dev, const uint8_t *bssid)
+{
+	wifi_lab_mock_ctx_t *ctx = (wifi_lab_mock_ctx_t *)dev;
+	const wifi_network_t *ap;
+	wifi_mgmt_transport_t tr;
+	wifi_connect_ota_hooks_t hooks = {
+		.set_key = mock_ota_set_key,
+		.ctx = ctx,
+	};
+
+	if (!dev || !bssid || !ctx->pending_cred.ssid[0])
+		return -1;
+	ap = mock_find_bssid(ctx, bssid);
+	if (!ap)
+		return -1;
+	if (mock_ota_init_transport(ctx, ap, &tr) != 0)
+		return -1;
+	if (!ctx->ota_auth_done &&
+	    wifi_connect_ota_run_phase(&ctx->pending_cred, ap, ctx->sta_mac, &tr, &hooks,
+				       WIFI_CONNECT_OTA_AUTH_ONLY) != 0)
+		return -1;
+	if (wifi_connect_ota_run_phase(&ctx->pending_cred, ap, ctx->sta_mac, &tr, &hooks,
+				       WIFI_CONNECT_OTA_ASSOC_ONLY) != 0)
+		return -1;
+	memcpy(ctx->ap_bssid, ap->bssid, 6);
+	strncpy(ctx->joined_ssid, ctx->pending_cred.ssid, sizeof(ctx->joined_ssid) - 1u);
+	ctx->joined_auth = ap->auth_mode;
+	ctx->joined_he = (ap->auth_mode == WIFI_AUTH_WPA3_SAE) ? 1u : 0u;
+	ctx->joined_6ghz = (ap->auth_mode == WIFI_AUTH_WPA3_SAE) ? 1u : 0u;
+	ctx->joined_bss_color = ctx->joined_he ? 5u : 0u;
+	ctx->up = 1;
+	ctx->rx_head = 0;
+	ctx->rx_count = 0;
+	ctx->ota_auth_done = 0;
+	dev->state = WIFI_FULLMAC_STATE_CONNECTED;
+	return 0;
+}
+
+static int mock_set_key(wifi_fullmac_t *dev, uint8_t key_index, const uint8_t *key,
+			size_t key_len)
+{
+	wifi_lab_mock_ctx_t *ctx = (wifi_lab_mock_ctx_t *)dev;
+
+	(void)key_index;
+	return mock_ota_set_key(ctx, key, key_len);
+}
+
+static int mock_tx_packet(wifi_fullmac_t *dev, const uint8_t *data, size_t len)
+{
+	wifi_lab_mock_ctx_t *ctx = (wifi_lab_mock_ctx_t *)dev;
+	fl_net_frame_view_t frame;
+
+	if (!dev || !data)
+		return -1;
+	frame.data = data;
+	frame.len = len;
+	return mock_netdev_send(&ctx->netdev, &frame) == FL_RESULT_OK ? 0 : -1;
+}
+
+static int mock_rx_packet(wifi_fullmac_t *dev, uint8_t *buffer, size_t buf_len, size_t *out_len)
+{
+	wifi_lab_mock_ctx_t *ctx = (wifi_lab_mock_ctx_t *)dev;
+	fl_net_frame_mut_t out;
+
+	if (!dev || !buffer || !out_len)
+		return -1;
+	out.data = buffer;
+	out.cap = buf_len;
+	out.len = 0;
+	if (mock_netdev_recv(&ctx->netdev, &out) != FL_RESULT_OK)
+		return -1;
+	*out_len = out.len;
 	return 0;
 }
 
@@ -679,107 +879,16 @@ static const wifi_fullmac_ops_t s_mock_ops = {
 	.reset = mock_reset,
 	.start_scan = mock_start_scan,
 	.get_scan_results = mock_get_scan_results,
+	.authenticate = mock_authenticate,
+	.associate = mock_associate,
 	.get_he_capabilities = mock_get_he_capabilities,
+	.set_key = mock_set_key,
 	.setup_twt = mock_setup_twt,
 	.teardown_twt = mock_teardown_twt,
 	.deauthenticate = mock_deauthenticate,
+	.tx_packet = mock_tx_packet,
+	.rx_packet = mock_rx_packet,
 };
-
-static const wifi_network_t *mock_find_ssid(wifi_lab_mock_ctx_t *ctx, const char *ssid)
-{
-	uint16_t i;
-
-	if (!ctx || !ssid)
-		return NULL;
-	for (i = 0; i < ctx->scan_count; i++) {
-		if (!strcmp(ctx->scan[i].ssid, ssid))
-			return &ctx->scan[i];
-	}
-	return NULL;
-}
-
-static int mock_run_supplicant_ota(wifi_lab_mock_ctx_t *ctx,
-				    const fl_net_wifi_cred_t *cred,
-				    const wifi_network_t *ap)
-{
-	wifi_supplicant_t supp;
-	uint8_t auth_frame[64];
-	uint8_t assoc_frame[200];
-	uint8_t msg1[64];
-	uint8_t msg3[64];
-	size_t frame_len = 0;
-	uint8_t auth_mode = FL_WIFI_AUTH_OPEN;
-
-	if (!ctx || !cred || !ap)
-		return -1;
-
-	if (wifi_supplicant_init(&supp, ap->bssid) != 0)
-		return -1;
-	if (wifi_supplicant_set_credentials(&supp, cred->ssid, cred->passphrase) != 0 ||
-	    wifi_supplicant_set_sta_addr(&supp, ctx->sta_mac) != 0) {
-		(void)wifi_supplicant_deinit(&supp);
-		return -1;
-	}
-
-	if (fl_net_wifi_mgmt_build_auth_req(ctx->sta_mac, ap->bssid, auth_frame,
-					    sizeof(auth_frame), &frame_len) != FL_RESULT_OK) {
-		(void)wifi_supplicant_deinit(&supp);
-		return -1;
-	}
-
-	switch (ap->auth_mode) {
-	case WIFI_AUTH_WPA3_SAE:
-		auth_mode = FL_WIFI_AUTH_WPA3_SAE;
-		if (wifi_supplicant_start_sae_handshake(&supp) != 0 ||
-		    wifi_supplicant_process_sae_commit(&supp, (const uint8_t *)"commit", 6) !=
-			    0 ||
-		    wifi_supplicant_process_sae_confirm(&supp, (const uint8_t *)"confirm",
-							7) != 0) {
-			(void)wifi_supplicant_deinit(&supp);
-			return -1;
-		}
-		break;
-	case WIFI_AUTH_WPA2_PSK:
-		auth_mode = FL_WIFI_AUTH_WPA2_PSK;
-		if (wifi_supplicant_derive_pmk_psk(&supp, cred->ssid, cred->passphrase) != 0 ||
-		    wifi_supplicant_start_4way_handshake(&supp) != 0) {
-			(void)wifi_supplicant_deinit(&supp);
-			return -1;
-		}
-		memset(msg1, 0, sizeof(msg1));
-		msg1[0] = 0x01;
-		if (wifi_supplicant_process_msg1(&supp, msg1, 40) != 0) {
-			(void)wifi_supplicant_deinit(&supp);
-			return -1;
-		}
-		memset(msg3, 0, sizeof(msg3));
-		msg3[0] = 0x03;
-		if (wifi_supplicant_process_msg3(&supp, msg3, 38) != 0) {
-			(void)wifi_supplicant_deinit(&supp);
-			return -1;
-		}
-		break;
-	default:
-		auth_mode = FL_WIFI_AUTH_OPEN;
-		break;
-	}
-
-	if (fl_net_wifi_mgmt_build_assoc_req(cred->ssid, ap->bssid, ctx->sta_mac, auth_mode,
-					     assoc_frame, sizeof(assoc_frame),
-					     &frame_len) != FL_RESULT_OK) {
-		(void)wifi_supplicant_deinit(&supp);
-		return -1;
-	}
-
-	if (ap->auth_mode != WIFI_AUTH_OPEN &&
-	    wifi_supplicant_get_state(&supp) != WIFI_SUPP_STATE_AUTHENTICATED) {
-		(void)wifi_supplicant_deinit(&supp);
-		return -1;
-	}
-
-	(void)wifi_supplicant_deinit(&supp);
-	return 0;
-}
 
 int wifi_lab_mock_attach(wifi_fullmac_t **out_dev)
 {
@@ -830,7 +939,8 @@ int wifi_lab_mock_connect(wifi_fullmac_t *dev, const fl_net_wifi_cred_t *cred)
 	if (ap->auth_mode != WIFI_AUTH_OPEN && cred->passphrase[0] == '\0')
 		return -1;
 
-	memcpy(ctx->ap_bssid, ap->bssid, 6);
+	memcpy(&ctx->pending_cred, cred, sizeof(ctx->pending_cred));
+	ctx->ota_auth_done = 0;
 	strncpy(ctx->joined_ssid, cred->ssid, sizeof(ctx->joined_ssid) - 1u);
 	ctx->joined_auth = ap->auth_mode;
 	ctx->joined_he = (ap->auth_mode == WIFI_AUTH_WPA3_SAE) ? 1u : 0u;
@@ -840,6 +950,7 @@ int wifi_lab_mock_connect(wifi_fullmac_t *dev, const fl_net_wifi_cred_t *cred)
 	if (mock_run_supplicant_ota(ctx, cred, ap) != 0)
 		return -1;
 
+	memcpy(ctx->ap_bssid, ap->bssid, 6);
 	ctx->up = 1;
 	ctx->rx_head = 0;
 	ctx->rx_count = 0;

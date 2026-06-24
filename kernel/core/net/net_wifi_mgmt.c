@@ -101,6 +101,13 @@ fl_result_t fl_net_wifi_mgmt_build_rsne_ie(uint8_t auth_mode, uint8_t *out, size
     return FL_RESULT_OK;
 }
 
+static void fl_net_wifi_mgmt_fill_addrs(uint8_t *out, const uint8_t bssid[6],
+                                      const uint8_t sta_mac[6]) {
+    memcpy(out + 4, bssid, 6u);
+    memcpy(out + 10, sta_mac, 6u);
+    memcpy(out + 16, bssid, 6u);
+}
+
 fl_result_t fl_net_wifi_mgmt_build_auth_req(const uint8_t sta_mac[6], const uint8_t bssid[6],
                                             uint8_t *out, size_t out_cap, size_t *out_len) {
     if (!sta_mac || !bssid || !out || !out_len)
@@ -110,9 +117,7 @@ fl_result_t fl_net_wifi_mgmt_build_auth_req(const uint8_t sta_mac[6], const uint
 
     memset(out, 0, FL_WIFI_MGMT_HDR_LEN);
     out[0] = 0xb0u; /* Authentication */
-    memcpy(out + 4, bssid, 6u);
-    memcpy(out + 10, sta_mac, 6u);
-    memcpy(out + 16, bssid, 6u);
+    fl_net_wifi_mgmt_fill_addrs(out, bssid, sta_mac);
     out[24] = 0x00u;
     out[25] = 0x00u; /* Open System */
     out[26] = 0x00u;
@@ -120,6 +125,53 @@ fl_result_t fl_net_wifi_mgmt_build_auth_req(const uint8_t sta_mac[6], const uint
     out[28] = 0x00u;
     out[29] = 0x00u; /* Status 0 */
     *out_len = FL_WIFI_MGMT_HDR_LEN + 6u;
+    return FL_RESULT_OK;
+}
+
+fl_result_t fl_net_wifi_mgmt_build_auth_resp(const uint8_t bssid[6], const uint8_t sta_mac[6],
+                                             uint16_t auth_seq, uint8_t *out, size_t out_cap,
+                                             size_t *out_len) {
+    if (!bssid || !sta_mac || !out || !out_len)
+        return FL_RESULT_INVAL;
+    if (out_cap < FL_WIFI_MGMT_HDR_LEN + 6u)
+        return FL_RESULT_INVAL;
+
+    memset(out, 0, FL_WIFI_MGMT_HDR_LEN);
+    out[0] = 0xb0u;
+    fl_net_wifi_mgmt_fill_addrs(out, bssid, sta_mac);
+    out[24] = 0x00u;
+    out[25] = 0x00u;
+    out[26] = (uint8_t)(auth_seq & 0xffu);
+    out[27] = (uint8_t)((auth_seq >> 8) & 0xffu);
+    out[28] = 0x00u;
+    out[29] = 0x00u;
+    *out_len = FL_WIFI_MGMT_HDR_LEN + 6u;
+    return FL_RESULT_OK;
+}
+
+fl_result_t fl_net_wifi_mgmt_build_sae_auth(const uint8_t sta_mac[6], const uint8_t bssid[6],
+                                            uint16_t auth_seq, const uint8_t *body, size_t body_len,
+                                            uint8_t *out, size_t out_cap, size_t *out_len) {
+    size_t need;
+
+    if (!sta_mac || !bssid || !out || !out_len)
+        return FL_RESULT_INVAL;
+    need = FL_WIFI_MGMT_HDR_LEN + 6u + body_len;
+    if (out_cap < need)
+        return FL_RESULT_INVAL;
+
+    memset(out, 0, FL_WIFI_MGMT_HDR_LEN);
+    out[0] = 0xb0u;
+    fl_net_wifi_mgmt_fill_addrs(out, bssid, sta_mac);
+    out[24] = 0x03u;
+    out[25] = 0x00u; /* SAE */
+    out[26] = (uint8_t)(auth_seq & 0xffu);
+    out[27] = (uint8_t)((auth_seq >> 8) & 0xffu);
+    out[28] = 0x00u;
+    out[29] = 0x00u;
+    if (body_len > 0u && body)
+        memcpy(out + FL_WIFI_MGMT_HDR_LEN + 6u, body, body_len);
+    *out_len = need;
     return FL_RESULT_OK;
 }
 

@@ -57,6 +57,7 @@ fl_result_t fl_net_wifi_station_init(void) {
     wifi_driver_lab_reset();
     fl_net_wifi_twt_lab_reset();
 #endif
+    wifi_driver_lab_dhcp_route_enable(0);
     return FL_RESULT_OK;
 }
 
@@ -276,7 +277,9 @@ static fl_result_t lab_backend_connect(const fl_net_wifi_cred_t *cred, unsigned 
     }
 
     s_wifi_state = FL_WIFI_STATE_DHCP;
+    wifi_driver_lab_dhcp_route_enable(1);
     rc = wifi_station_lab_dhcp(sta_mac, timeout_ms);
+    wifi_driver_lab_dhcp_route_enable(0);
     if (rc != FL_RESULT_OK) {
         fl_net_wifi_netdev_down();
         s_wifi_state = FL_WIFI_STATE_ERROR;
@@ -385,6 +388,7 @@ fl_result_t fl_net_wifi_connect(const fl_net_wifi_cred_t *cred, unsigned timeout
 
 fl_result_t fl_net_wifi_disconnect(void) {
     memset(&s_negotiated_he, 0, sizeof(s_negotiated_he));
+    wifi_driver_lab_dhcp_route_enable(0);
 
     if (s_driver_backend)
         wifi_driver_disconnect();

@@ -4,7 +4,7 @@ Explicit promotion trackers for roadmap rows marked **`[DEFERRED]`** at the **co
 
 | Issue | Roadmap | Contract header | Integration (PRE 4.2.0) |
 |-------|---------|-----------------|-------------------------|
-| [#257](https://github.com/BPForbes/Bailey-Forbes-Flinstone/issues/257) / [#279](https://github.com/BPForbes/Bailey-Forbes-Flinstone/issues/279) | **P3-10** Wi‑Fi station | **`contract_p3_wifi.h`** (`contract_p3_wifi_deferred.h` forwards) | **~✅ foundation** — contract + HE IE parser + API stubs; **❌** NIC/P4 + WPA3/SAE production |
+| [#257](https://github.com/BPForbes/Bailey-Forbes-Flinstone/issues/257) / [#279](https://github.com/BPForbes/Bailey-Forbes-Flinstone/issues/279) | **P3-10** Wi‑Fi station | **`contract_p3_wifi.h`** | **~✅ foundation** — contract + HE IE parser + API stubs; **❌** NIC/P4 + WPA3/SAE production |
 | [#258](https://github.com/BPForbes/Bailey-Forbes-Flinstone/issues/258) / [#280](https://github.com/BPForbes/Bailey-Forbes-Flinstone/issues/280) | **P3-11** IPv6 + ICMPv6 | **`contract_p3_ipv6.h`** (forward: `contract_p3_ipv6_deferred.h`) | **~✅ foundation** — see below |
 
 ## P3-10 Wi‑Fi (#257 / #279)
@@ -24,7 +24,7 @@ When promoted, **802.11** data frames still cross **`fl_net_frame_view_t`**, the
 | Tests | ✅ | **`make test_p3_wifi`**, **`make test_wifi_db`** |
 | Channel sidecar | ✅ hook | **`center_freq_hz`** in **`contract_p3_channel_sidecar.h`** |
 
-Maintainer checklist: **`docs/GITHUB_ISSUE_SYNC_279.md`**.
+Maintainer checklist: **`docs/GITHUB_ISSUE_SYNC_P4_WIFI_OTA.md`**.
 
 **Blocking (per [#279](https://github.com/BPForbes/Bailey-Forbes-Flinstone/issues/279)):** P4 firmware/driver scope and a confirmed QEMU 802.11ax or physical WiFi 6 NIC before production association/DHCP claims.
 
@@ -58,5 +58,5 @@ For the **current layer map**, tests, and standards table, use **[`docs/P3_NETWO
 - [`docs/P3_NETWORKING.md`](P3_NETWORKING.md) — active P3 map (**authoritative for implementation**)
 - [`docs/ROADMAP.md`](ROADMAP.md) — phase table (P3-11 module integration **~✅**)
 - [`docs/GITHUB_ISSUE_SYNC_PR301.md`](GITHUB_ISSUE_SYNC_PR301.md) — maintainer checklist to align **#280** / **#283** GitHub bodies with this tree (CodeRabbit sync)
-- [`docs/GITHUB_ISSUE_SYNC_279.md`](GITHUB_ISSUE_SYNC_279.md) — maintainer checklist to align **#279** / **#257** scope vs PR #306 foundation
+- [`docs/GITHUB_ISSUE_SYNC_P4_WIFI_OTA.md`](GITHUB_ISSUE_SYNC_P4_WIFI_OTA.md) — maintainer checklist to align **#279** / **#328** / **#257** scope vs PR #306 / #320 foundation
 - [`docs/GITHUB_ISSUES_238_267_TRACKER.md`](GITHUB_ISSUES_238_267_TRACKER.md) — umbrella **#238–#267** (excl. **#239**)

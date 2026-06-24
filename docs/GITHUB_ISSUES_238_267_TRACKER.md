@@ -4,7 +4,7 @@ Coordination doc for branch **`cursor/github-issues-238-267-b55d`** → PR **#27
 
 Scope: issues **#238** through **#267** inclusive, **excluding [#239](https://github.com/BPForbes/Bailey-Forbes-Flinstone/issues/239)** (P3-13 chat **`server`** — separate train; see [`docs/P3_13_CHAT_SERVER.md`](P3_13_CHAT_SERVER.md)).
 
-Primary networking map: [`docs/P3_NETWORKING.md`](P3_NETWORKING.md). **P3-10** deferral and **P3-11** promotion status: [`docs/P3_NETWORKING_DEFERRED.md`](P3_NETWORKING_DEFERRED.md). **PR #301** issue-body sync: [`docs/GITHUB_ISSUE_SYNC_PR301.md`](GITHUB_ISSUE_SYNC_PR301.md). **#279** Wi‑Fi foundation sync: [`docs/GITHUB_ISSUE_SYNC_279.md`](GITHUB_ISSUE_SYNC_279.md).
+Primary networking map: [`docs/P3_NETWORKING.md`](P3_NETWORKING.md). **P3-10** deferral and **P3-11** promotion status: [`docs/P3_NETWORKING_DEFERRED.md`](P3_NETWORKING_DEFERRED.md). **PR #301** issue-body sync: [`docs/GITHUB_ISSUE_SYNC_PR301.md`](GITHUB_ISSUE_SYNC_PR301.md). **#279** Wi‑Fi foundation sync: [`docs/GITHUB_ISSUE_SYNC_P4_WIFI_OTA.md`](GITHUB_ISSUE_SYNC_P4_WIFI_OTA.md).
 
 ## Resolved on this branch (closes in PR #275)
 

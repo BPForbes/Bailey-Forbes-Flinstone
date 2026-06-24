@@ -182,7 +182,23 @@ if ((\$p -split ';') -notcontains \$b) {
         _wp=$(wslvar USERPROFILE 2>/dev/null | tr -d '\r\n')
         [ -n "$_wp" ] && _wsl_win_home=$(wslpath "$_wp" 2>/dev/null)
     fi
-    # Strategy 2: glob /mnt/c/Users/ — first non-system directory (no Windows call).
+    # Strategy 2: invoking user's Windows profile under /mnt/c/Users/<name>.
+    if [ -z "$_wsl_win_home" ] || [ ! -d "$_wsl_win_home" ]; then
+        _invoking=""
+        for _u in "${SUDO_USER:-}" "${LOGNAME:-}" "${USER:-}"; do
+            if [ -n "$_u" ] && [ "$_u" != "root" ]; then
+                _invoking="$_u"
+                break
+            fi
+        done
+        if [ -n "$_invoking" ]; then
+            _candidate="/mnt/c/Users/$_invoking"
+            if [ -d "$_candidate" ]; then
+                _wsl_win_home="$_candidate"
+            fi
+        fi
+    fi
+    # Strategy 3: glob /mnt/c/Users/ — first non-system directory (no Windows call).
     if [ -z "$_wsl_win_home" ] || [ ! -d "$_wsl_win_home" ]; then
         for _d in /mnt/c/Users/*/; do
             _n=$(basename "$_d")

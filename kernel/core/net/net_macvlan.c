@@ -11,6 +11,7 @@
  */
 
 #include "net_macvlan.h"
+#include "net_checksum.h"
 
 #if defined(__linux__)
 
@@ -19,6 +20,7 @@
 #endif
 
 #include <arpa/inet.h>
+#include <errno.h>
 #include <ifaddrs.h>
 #include <linux/if_packet.h>
 #include <net/ethernet.h>
@@ -32,7 +34,11 @@
 #include <sys/select.h>
 #include <sys/socket.h>
 #include <time.h>
+#include <spawn.h>
+#include <sys/wait.h>
 #include <unistd.h>
+
+extern char **environ;
 
 /* ── DHCP constants ─────────────────────────────────────────────────── */
 
@@ -70,14 +76,80 @@ static uint32_t s_gw_be;
 
 /* ── Internal helpers ───────────────────────────────────────────────── */
 
-static uint16_t ip_cksum(const void *data, size_t len)
+static int macvlan_ifname_valid(const char *name)
 {
-    const uint16_t *p = (const uint16_t *)data;
-    uint32_t sum = 0u;
-    while (len > 1u) { sum += *p++; len -= 2u; }
-    if (len) sum += *(const uint8_t *)p;
-    while (sum >> 16) sum = (sum & 0xFFFFu) + (sum >> 16);
-    return (uint16_t)~sum;
+    size_t i;
+    size_t len;
+
+    if (!name || !name[0])
+        return 0;
+    len = strlen(name);
+    if (len >= FL_NET_MACVLAN_IFNAMSIZ)
+        return 0;
+    for (i = 0; i < len; i++) {
+        unsigned char c = (unsigned char)name[i];
+        if (c == ' ' || c == '\t' || c == '\n' || c == '\r')
+            return 0;
+        if ((c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z') ||
+            (c >= '0' && c <= '9') || c == '_' || c == '-' || c == '.' || c == ':')
+            continue;
+        return 0;
+    }
+    return 1;
+}
+
+static int macvlan_run_ip(char *const argv[])
+{
+    pid_t pid;
+    int status;
+
+    if (!argv || !argv[0])
+        return -1;
+    if (posix_spawnp(&pid, argv[0], NULL, NULL, argv, environ) != 0) {
+        if (errno == EACCES || errno == EPERM)
+            return -2;
+        return -1;
+    }
+    for (;;) {
+        if (waitpid(pid, &status, 0) == 0)
+            break;
+        if (errno == EINTR)
+            continue;
+        return -1;
+    }
+    if (!WIFEXITED(status))
+        return -1;
+    if (WEXITSTATUS(status) == 0)
+        return 0;
+    /* ip(8) uses exit 2 for RTNETLINK permission failures on many distros. */
+    if (WEXITSTATUS(status) == 2)
+        return -2;
+    return -1;
+}
+
+static int macvlan_ip_link_set_up(const char *name)
+{
+    char *argv[] = {"ip", "link", "set", (char *)name, "up", NULL};
+    return macvlan_run_ip(argv);
+}
+
+static int macvlan_ip_link_add(const char *name, const char *parent)
+{
+    char *argv[] = {"ip", "link", "add", (char *)name, "link", (char *)parent,
+                    "type", "macvlan", "mode", "bridge", NULL};
+    return macvlan_run_ip(argv);
+}
+
+static int macvlan_ip_link_del(const char *name)
+{
+    char *argv[] = {"ip", "link", "del", (char *)name, NULL};
+    return macvlan_run_ip(argv);
+}
+
+static int macvlan_ip_addr_add(const char *addr_pfx, const char *ifname)
+{
+    char *argv[] = {"ip", "addr", "add", (char *)addr_pfx, "dev", (char *)ifname, NULL};
+    return macvlan_run_ip(argv);
 }
 
 static int detect_parent(char *out, size_t cap)
@@ -180,7 +252,7 @@ static size_t wrap_ip_udp(uint8_t *out, size_t cap,
     ip[8] = 64u;  ip[9] = 17u;             /* TTL=64, proto=UDP */
     memset(ip + 16, 0xFFu, 4u);            /* dst = 255.255.255.255 */
     {
-        uint16_t ck = ip_cksum(ip, IP_HDR_LEN);
+        uint16_t ck = fl_net_ipv4_checksum(ip, IP_HDR_LEN);
         ip[10] = (uint8_t)(ck >> 8); ip[11] = (uint8_t)ck;
     }
 
@@ -256,9 +328,11 @@ fl_result_t fl_net_macvlan_create(const char *name,
                                   char parent_out[FL_NET_MACVLAN_IFNAMSIZ])
 {
     char parent[FL_NET_MACVLAN_IFNAMSIZ];
-    char cmd[256];
     int sock;
     struct ifreq ifr;
+
+    if (!macvlan_ifname_valid(name))
+        return FL_RESULT_INVAL;
 
     /* If interface already exists, just bring it up. */
     sock = socket(AF_INET, SOCK_DGRAM, 0);
@@ -267,9 +341,11 @@ fl_result_t fl_net_macvlan_create(const char *name,
         strncpy(ifr.ifr_name, name, IFNAMSIZ - 1u);
         if (ioctl(sock, SIOCGIFFLAGS, &ifr) == 0) {
             if (!(ifr.ifr_flags & IFF_UP)) {
-                snprintf(cmd, sizeof(cmd),
-                         "ip link set %.15s up 2>/dev/null", name);
-                (void)system(cmd);
+                int iprc = macvlan_ip_link_set_up(name);
+                close(sock);
+                if (iprc == 0)
+                    return FL_RESULT_OK;
+                return iprc == -2 ? FL_RESULT_ACCES : FL_RESULT_ERR;
             }
             close(sock);
             return FL_RESULT_OK;
@@ -279,28 +355,31 @@ fl_result_t fl_net_macvlan_create(const char *name,
 
     if (!detect_parent(parent, sizeof(parent)))
         return FL_RESULT_NOSYS;
-    if (parent_out)
+    if (!macvlan_ifname_valid(parent))
+        return FL_RESULT_ERR;
+    if (parent_out) {
         strncpy(parent_out, parent, FL_NET_MACVLAN_IFNAMSIZ - 1u);
+        parent_out[FL_NET_MACVLAN_IFNAMSIZ - 1u] = '\0';
+    }
 
-    snprintf(cmd, sizeof(cmd),
-             "ip link add %.15s link %.15s type macvlan mode bridge 2>/dev/null",
-             name, parent);
-    if (system(cmd) != 0)
+    if (macvlan_ip_link_add(name, parent) != 0)
         return FL_RESULT_ACCES;
 
-    snprintf(cmd, sizeof(cmd), "ip link set %.15s up 2>/dev/null", name);
-    if (system(cmd) != 0) {
-        fl_net_macvlan_destroy(name);
-        return FL_RESULT_ERR;
+    {
+        int iprc = macvlan_ip_link_set_up(name);
+        if (iprc != 0) {
+            fl_net_macvlan_destroy(name);
+            return iprc == -2 ? FL_RESULT_ACCES : FL_RESULT_ERR;
+        }
     }
     return FL_RESULT_OK;
 }
 
 void fl_net_macvlan_destroy(const char *name)
 {
-    char cmd[64];
-    snprintf(cmd, sizeof(cmd), "ip link del %.15s 2>/dev/null", name);
-    (void)system(cmd);
+    if (!macvlan_ifname_valid(name))
+        return;
+    (void)macvlan_ip_link_del(name);
     s_leased = 0;
 }
 
@@ -308,6 +387,9 @@ fl_result_t fl_net_macvlan_hwaddr(const char *ifname, uint8_t mac_out[6])
 {
     int sock;
     struct ifreq ifr;
+
+    if (!macvlan_ifname_valid(ifname))
+        return FL_RESULT_INVAL;
 
     sock = socket(AF_INET, SOCK_DGRAM, 0);
     if (sock < 0) return FL_RESULT_ERR;
@@ -342,9 +424,12 @@ fl_result_t fl_net_macvlan_dhcp_lease(const char *ifname,
     uint32_t xid;
     uint32_t offered_ip = 0u, server_id = 0u, offered_mask = 0u, offered_gw = 0u;
     char ip_str[INET_ADDRSTRLEN];
-    char cmd[128];
+    char addr_pfx[INET_ADDRSTRLEN + 8];
     unsigned deadline_s;
     time_t start;
+
+    if (!macvlan_ifname_valid(ifname))
+        return FL_RESULT_INVAL;
 
     ifindex = if_nametoindex(ifname);
     if (!ifindex) return FL_RESULT_NOSYS;
@@ -437,9 +522,9 @@ fl_result_t fl_net_macvlan_dhcp_lease(const char *ifname,
             prefix = p;
         }
         inet_ntop(AF_INET, &offered_ip, ip_str, sizeof(ip_str));
-        snprintf(cmd, sizeof(cmd), "ip addr add %s/%u dev %.15s 2>/dev/null",
-                 ip_str, (unsigned)prefix, ifname);
-        (void)system(cmd);
+        snprintf(addr_pfx, sizeof(addr_pfx), "%s/%u", ip_str, (unsigned)prefix);
+        if (macvlan_ip_addr_add(addr_pfx, ifname) != 0)
+            return FL_RESULT_ERR;
     }
 
     s_leased  = 1;
