@@ -7,3 +7,5 @@ DESCRIPTION<<PROMOTE_DESC_END
 4.3.0: P4 WiFi review fixes (#329) and production-tail OTA (#328) — route lab DHCP through wifi_driver_backend, macvlan review fixes, FullMAC connect guards, file consolidation; add wifi_mgmt_transport + wifi_connect_ota for mgmt/SAE/EAPOL OTA, mock FullMAC authenticate/associate/set_key/tx/rx/TWT ops, firmware-loaded FullMAC OTA sim with hardware DHCP, and net_wifi_mgmt auth_resp/SAE frame builders.
 PROMOTE_DESC_END
 
+
+RELEASE_DATE=2026-06-24
