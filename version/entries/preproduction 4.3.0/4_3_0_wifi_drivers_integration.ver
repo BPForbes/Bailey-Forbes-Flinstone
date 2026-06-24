@@ -1,0 +1,20 @@
+MAJOR_VERSION=4
+STANDARD_VERSION=3
+RELEASE_VERSION=0
+PRERELEASE=1
+DEV_VERSION=1
+DESCRIPTION<<PROMOTE_DESC_END
+4.3.0: P4 WiFi drivers — in-tree 802.11ax station path for #279 (P3-10): coprocessor UART, supplicant (WPA2/WPA3-SAE), driver backend, lab netdev, and FullMAC probe (PCI/USB; MT7921AU).
+
+Phases: (1) ESP32/ESP8266 coprocessor + AT transport; (2) open/DHCP netdev framework; (3) in-tree supplicant wired to net_wifi_crypto/wpa/sae; (4) FullMAC sysfs probe, chipset table, OS-bound HE when kernel driver owns the dongle.
+
+Lab/mock: wifi_lab_backend + FL_WIFI_80211AX_MOCK=1 software NIC; net_wifi_ax_server session-wire OTA (SAE, EAPOL, HE assoc); make test_wifi_80211ax_mock_279 (33 #279 items) and test_wifi_ax_server_ota.
+
+Host RF (optional): FL_NET_WIFI_USE_WPA=1 / FlinstonePowershell — scan/join via OS stack; HE hints and BSS color in net_wifi_he.c (iw enrich when FL_NET_WIFI_HOST_HE_IW=1). Production dongle RF still needs chipset firmware/USB rings.
+
+Tree: kernel/drivers/wifi/ with fullmac/ (core, bus, hw); mock folded into lab_backend; server OTA L2 in net_wifi_ax_server.c. Tests: test_wifi_coprocessor, test_p3_wifi, test_wifi_fullmac_probe, test_net_wifi_host_he. CI: checkout@v5; CUnit links shell_tokenize + pci.
+
+Server/LAN: fl0 macvlan + DHCP; WSL mirrored networking and UDP discovery/reverse-dial join; quote-aware wifi join (fl_shell_tokenize_line). Real 802.11ax OTA on hardware remains open after merge.
+PROMOTE_DESC_END
+
+RELEASE_DATE=2026-06-24

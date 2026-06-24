@@ -38,9 +38,10 @@ jobs:
     # Avoid a loop when the tip commit is already our sync squash (optional guard).
     if: "${{ github.event.head_commit == null || !startsWith(github.event.head_commit.message, 'chore(version): sync') }}"
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@93cb6efe18208431cddfb8368fd83d5badbf9bfd # v5
         with:
           fetch-depth: 0
+          persist-credentials: true
           token: ${{ secrets.BPFORBES_PAT || secrets.VERSION_LOCK_PAT || secrets.GITHUB_TOKEN }}
 
       - name: Relocate non-GM root PRERELEASE=1 entries into preproduction (stamp then move)
