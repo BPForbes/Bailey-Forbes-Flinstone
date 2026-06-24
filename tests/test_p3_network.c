@@ -1237,6 +1237,7 @@ static int test_wifi_lab_server_host(void) {
     ASSERT(rc == FL_RESULT_OK);
     ASSERT(fl_net_server_host_start(&srv, host_be, port, "LabHost") == FL_RESULT_OK);
     fl_net_server_host_stop(&srv);
+    fl_net_sock_shutdown();
     ASSERT(fl_net_wifi_disconnect() == FL_RESULT_OK);
     return 0;
 }

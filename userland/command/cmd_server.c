@@ -30,6 +30,7 @@
 
 #include <errno.h>
 #include <pthread.h>
+#include <stdatomic.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -60,7 +61,7 @@ static fl_net_client_t g_client;
 static fl_server_bg_t *g_client_bg;
 
 /* UDP beacon + reverse-dial listener — started on server host, stopped on kill/exit. */
-static volatile int g_server_udp_stop;
+static atomic_int g_server_udp_stop;
 static pthread_t    g_beacon_thread;
 static int          g_beacon_thread_started;
 static pthread_t    g_udp_listener_thread;
@@ -843,7 +844,7 @@ static void *server_beacon_thread_func(void *arg)
     dst.sin_addr.s_addr = htonl(INADDR_BROADCAST);
     dst.sin_port        = htons(FL_NET_SERVER_DISCOVERY_PORT);
 
-    while (!g_server_udp_stop) {
+    while (!atomic_load(&g_server_udp_stop)) {
         sendto(sock, frame, sizeof(frame), 0,
                (const struct sockaddr *)&dst, sizeof(dst));
         sleep(2);
@@ -863,7 +864,7 @@ static void *server_udp_listener_thread_func(void *arg)
     ssize_t n;
     (void)arg;
 
-    while (!g_server_udp_stop) {
+    while (!atomic_load(&g_server_udp_stop)) {
         fromlen = sizeof(from);
         n = recvfrom(g_udp_listen_sock, buf, sizeof(buf), 0,
                      (struct sockaddr *)&from, &fromlen);
@@ -879,13 +880,11 @@ static void *server_udp_listener_thread_func(void *arg)
         if (buf[4] != (uint8_t)FL_NET_DISCOVERY_OP_JOIN_REQ)
             continue;
 
-        /* buf[5..8] = callback IPv4 BE, buf[9..10] = callback port BE */
-        uint32_t cb_ip_be;
+        /* Trust sender IP from recvfrom; port comes from the join-request payload. */
+        uint32_t cb_ip_be = (uint32_t)from.sin_addr.s_addr;
         uint16_t cb_port_be;
-        memcpy(&cb_ip_be,   buf + 5, 4);
         memcpy(&cb_port_be, buf + 9, 2);
-
-        if (cb_ip_be != (uint32_t)from.sin_addr.s_addr)
+        if (cb_port_be == 0u)
             continue;
 
         fl_net_endpoint_t cb_ep;
@@ -915,7 +914,7 @@ static void server_udp_start(uint16_t port)
     struct sockaddr_in sin;
     int sock, one = 1;
 
-    g_server_udp_stop = 0;
+    atomic_store(&g_server_udp_stop, 0);
 
     /* UDP listener on the discovery port for incoming join-requests. */
     sock = socket(AF_INET, SOCK_DGRAM, 0);
@@ -943,7 +942,7 @@ static void server_udp_start(uint16_t port)
 
 static void server_udp_stop(void)
 {
-    g_server_udp_stop = 1;
+    atomic_store(&g_server_udp_stop, 1);
 
     if (g_udp_listen_sock >= 0) {
         close(g_udp_listen_sock);
@@ -1042,6 +1041,19 @@ static fl_result_t server_join_reverse_dial(fl_net_client_t *client,
     close(listen_fd);
     if (peer_fd < 0)
         return FL_RESULT_ERR;
+
+    {
+        struct sockaddr_in peer;
+        socklen_t peer_len = sizeof(peer);
+
+        memset(&peer, 0, sizeof(peer));
+        if (getpeername(peer_fd, (struct sockaddr *)&peer, &peer_len) != 0 ||
+            peer.sin_family != AF_INET ||
+            peer.sin_addr.s_addr != server_ep->addr.v4_be) {
+            close(peer_fd);
+            return FL_RESULT_INVAL;
+        }
+    }
 
     /* Adopt the fd and run the HELLO handshake. */
     rc = fl_net_sock_from_fd(peer_fd, &h);
