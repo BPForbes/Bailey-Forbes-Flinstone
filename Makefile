@@ -160,7 +160,8 @@ NET_CORE_SRCS = kernel/core/net/net_checksum.c kernel/core/net/net_wire.c kernel
                 kernel/core/net/net_wifi_mgmt.c kernel/core/net/net_wifi_sae.c \
                 kernel/core/net/net_wifi_wpa.c kernel/core/net/net_wifi_twt.c \
                 kernel/core/net/net_wifi_crypto.c kernel/core/net/net_wifi_ax_server.c \
-                kernel/core/net/net_wifi_nl80211.c kernel/core/net/net_wifi_fullmac.c \
+                kernel/core/net/net_wifi_fullmac.c \
+                kernel/drivers/wifi/wifi_nl80211.c kernel/drivers/wifi/wifi_fullmac_afpacket.c \
                 kernel/drivers/wifi/wifi_coprocessor.c kernel/drivers/wifi/wifi_uart_transport.c \
                 kernel/drivers/wifi/wifi_supplicant.c \
                 kernel/drivers/wifi/wifi_mgmt_transport.c \

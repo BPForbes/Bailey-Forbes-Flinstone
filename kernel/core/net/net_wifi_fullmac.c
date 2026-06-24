@@ -2,12 +2,12 @@
  * FullMAC Wi-Fi NIC shim (#328 Task 1.2).
  *
  * Lab: packet-validated netdev ring (no kernel L2 socket).
- * Physical: nl80211 control plane + AF_PACKET data (first-principles wire in
- * net_wifi_host_wire.h; POSIX syscalls only).
+ * Physical: nl80211 control (driver) + AF_PACKET data (driver); orchestration only.
  */
 #include "net_wifi_fullmac.h"
 
-#include "net_wifi_nl80211.h"
+#include "wifi_fullmac_afpacket.h"
+#include "wifi_nl80211.h"
 #include "net_wifi_he.h"
 #include "net_wire.h"
 #include "net_netdev.h"
@@ -17,15 +17,6 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
-
-#if defined(__linux__)
-#include <fcntl.h>
-#include <netinet/in.h>
-#include <sys/socket.h>
-#include <unistd.h>
-
-#include "net_wifi_host_wire.h"
-#endif
 
 #define FULLMAC_RX_SLOTS 8u
 #define FULLMAC_RX_MAX FL_NET_WIRE_FRAME_BUF_MAX
@@ -137,39 +128,11 @@ static fl_result_t fullmac_lab_driver_recv(fl_net_driver_t *drv, fl_net_frame_mu
 
 #if defined(__linux__)
 
-static fl_result_t fullmac_open_physical_socket(unsigned int ifindex, int *fd_out)
-{
-	struct fl_wifi_sockaddr_ll bind_addr;
-	int fd;
-	int flags;
-
-	if (!fd_out)
-		return FL_RESULT_INVAL;
-	fd = socket(FL_WIFI_WIRE_AF_PACKET, FL_WIFI_WIRE_SOCK_RAW,
-		    (int)htons(FL_WIFI_WIRE_ETH_P_ALL));
-	if (fd < 0)
-		return FL_RESULT_NOSYS;
-	memset(&bind_addr, 0, sizeof(bind_addr));
-	bind_addr.sll_family = FL_WIFI_WIRE_AF_PACKET;
-	bind_addr.sll_protocol = htons(FL_WIFI_WIRE_ETH_P_ALL);
-	bind_addr.sll_ifindex = (int)ifindex;
-	if (bind(fd, (struct sockaddr *)&bind_addr, sizeof(bind_addr)) != 0) {
-		close(fd);
-		return FL_RESULT_NOSYS;
-	}
-	flags = fcntl(fd, F_GETFL, 0);
-	if (flags >= 0)
-		(void)fcntl(fd, F_SETFL, flags | O_NONBLOCK);
-	*fd_out = fd;
-	return FL_RESULT_OK;
-}
-
 static fl_result_t fullmac_physical_driver_send(fl_net_driver_t *drv,
 						const fl_net_frame_view_t *frame)
 {
-	struct fl_wifi_sockaddr_ll dest;
-	ssize_t n;
 	uint32_t ifindex = 0;
+	fl_result_t rc;
 
 	(void)drv;
 	if (!g_fullmac.up || !frame || !frame->data || frame->len < 14u)
@@ -184,23 +147,14 @@ static fl_result_t fullmac_physical_driver_send(fl_net_driver_t *drv,
 		return FL_RESULT_ERR;
 	if (fl_net_wifi_nl80211_ifindex(g_fullmac.nl, &ifindex) != FL_RESULT_OK)
 		return FL_RESULT_ERR;
-	memset(&dest, 0, sizeof(dest));
-	dest.sll_family = FL_WIFI_WIRE_AF_PACKET;
-	dest.sll_ifindex = (int)ifindex;
-	dest.sll_halen = FL_WIFI_WIRE_ETH_ALEN;
-	memcpy(dest.sll_addr, frame->data, FL_WIFI_WIRE_ETH_ALEN);
-	n = sendto(g_fullmac.pkt_fd, frame->data, frame->len, 0, (struct sockaddr *)&dest,
-		   sizeof(dest));
-	if (n < 0)
-		return FL_RESULT_ERR;
-	if ((size_t)n != frame->len)
-		return FL_RESULT_ERR;
-	return FL_RESULT_OK;
+	rc = wifi_fullmac_afpacket_send(g_fullmac.pkt_fd, ifindex, frame->data, frame->len);
+	return rc;
 }
 
 static fl_result_t fullmac_physical_driver_recv(fl_net_driver_t *drv, fl_net_frame_mut_t *out)
 {
-	ssize_t n;
+	size_t n = 0;
+	fl_result_t rc;
 
 	(void)drv;
 	if (fl_net_wire_check_mut(out) != FL_RESULT_OK)
@@ -209,15 +163,10 @@ static fl_result_t fullmac_physical_driver_recv(fl_net_driver_t *drv, fl_net_fra
 		return FL_RESULT_ACCES;
 	if (g_fullmac.pkt_fd < 0)
 		return FL_RESULT_ERR;
-	n = recv(g_fullmac.pkt_fd, out->data, out->cap, MSG_DONTWAIT);
-	if (n < 0) {
-		if (errno == EAGAIN || errno == EWOULDBLOCK)
-			return FL_RESULT_TIMEDOUT;
-		return FL_RESULT_ERR;
-	}
-	if (n < 14)
-		return FL_RESULT_TIMEDOUT;
-	if (fl_net_wire_check_rx_fill(out, (size_t)n) != FL_RESULT_OK)
+	rc = wifi_fullmac_afpacket_recv(g_fullmac.pkt_fd, out->data, out->cap, &n);
+	if (rc != FL_RESULT_OK)
+		return rc;
+	if (fl_net_wire_check_rx_fill(out, n) != FL_RESULT_OK)
 		return FL_RESULT_ERR;
 	(void)wifi_driver_packet_ingest_rx(out->data, out->len, NULL);
 	return FL_RESULT_OK;
@@ -259,10 +208,13 @@ fl_result_t fl_net_wifi_fullmac_init(const char *ifname)
 		return FL_RESULT_OK;
 
 	memset(&g_fullmac, 0, sizeof(g_fullmac));
+#if defined(__linux__)
 	g_fullmac.pkt_fd = -1;
+#endif
 
 	if (fullmac_lab_enabled()) {
 		strncpy(g_fullmac.ifname, "wlan-lab", sizeof(g_fullmac.ifname) - 1u);
+		g_fullmac.ifname[sizeof(g_fullmac.ifname) - 1u] = '\0';
 		(void)ifname;
 		fullmac_setup_driver(FL_NET_WIFI_FULLMAC_MODE_LAB);
 		return FL_RESULT_OK;
@@ -273,6 +225,7 @@ fl_result_t fl_net_wifi_fullmac_init(const char *ifname)
 
 	iface = fullmac_resolve_ifname(ifname);
 	strncpy(g_fullmac.ifname, iface, sizeof(g_fullmac.ifname) - 1u);
+	g_fullmac.ifname[sizeof(g_fullmac.ifname) - 1u] = '\0';
 
 	r = fl_net_wifi_nl80211_init(&g_fullmac.nl, g_fullmac.ifname);
 	if (r != FL_RESULT_OK)
@@ -286,7 +239,7 @@ fl_result_t fl_net_wifi_fullmac_init(const char *ifname)
 		uint32_t ifindex = 0;
 
 		if (fl_net_wifi_nl80211_ifindex(g_fullmac.nl, &ifindex) != FL_RESULT_OK ||
-		    fullmac_open_physical_socket((unsigned int)ifindex, &g_fullmac.pkt_fd) !=
+		    wifi_fullmac_afpacket_open((unsigned int)ifindex, &g_fullmac.pkt_fd) !=
 			    FL_RESULT_OK) {
 			fl_net_wifi_nl80211_deinit(g_fullmac.nl);
 			g_fullmac.nl = NULL;
@@ -306,10 +259,7 @@ fl_result_t fl_net_wifi_fullmac_init(const char *ifname)
 void fl_net_wifi_fullmac_deinit(void)
 {
 #if defined(__linux__)
-	if (g_fullmac.pkt_fd >= 0) {
-		close(g_fullmac.pkt_fd);
-		g_fullmac.pkt_fd = -1;
-	}
+	wifi_fullmac_afpacket_close(&g_fullmac.pkt_fd);
 #endif
 	if (g_fullmac.nl) {
 		fl_net_wifi_nl80211_deinit(g_fullmac.nl);

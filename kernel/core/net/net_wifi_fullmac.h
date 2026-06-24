@@ -8,7 +8,7 @@
  * path as mock, no kernel L2 socket.
  *
  * **Physical** (`FL_NET_WIFI_NL80211=1` / `FL_NET_WIFI_IFACE`): nl80211 control plane +
- * AF_PACKET data via first-principles wire layouts in net_wifi_host_wire.h.
+ * AF_PACKET data via driver-layer wifi_host_wire.h / wifi_fullmac_afpacket.
  */
 
 #include "contract_p3_wifi.h"
@@ -17,6 +17,8 @@
 
 #include <stddef.h>
 #include <stdint.h>
+
+#define FL_NET_WIFI_IFNAME_MAX 16u
 
 typedef struct fl_net_wifi_nl80211 fl_net_wifi_nl80211_t;
 
