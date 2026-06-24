@@ -8,6 +8,17 @@ A **module contract** here means a **data-distribution contract**: a **frozen bl
 
 For a **P0–P9** row-by-row snapshot (**❌ / ⚠️ / ✅**) against **`develop`**, see **`docs/ROADMAP.md` → [Module contracts (abstraction and P0-P9 coverage)](#module-contracts-abstraction-and-p0-p9-coverage)**. Keep that table updated when contract coverage materially changes.
 
+## Implementation boundaries (AI)
+
+- Memory primitives, allocator internals, low-level synchronization, port I/O, and core hardware-facing routines should be backed by the architecture-specific ASM layer.
+- Keep C code focused on higher-order application logic, driver orchestration, VM behavior, filesystem services, and policy/business rules.
+
+### Kernel vs driver execution
+
+When you propose new drivers for a module, ensure that the kernel functions solely as an orchestrator for those drivers. The kernel should delegate all module-specific behavior to the drivers rather than executing functionality on behalf of the module. This separation preserves a clean driver boundary, keeps execution logic where it belongs, and prevents the kernel from accumulating responsibilities that should remain in the driver layer.
+
+**Scope note:** `kernel/core/net/` still executes cross-cutting protocol policy above the netdev boundary (routing, TCP/UDP, DHCP composition, session wire). Module-specific hardware or NIC behavior (scan, associate, frame TX/RX, firmware rings, UART AT, register pokes) belongs in `kernel/drivers/` and surfaces through narrow ops (`fl_net_driver_t`, backend routers such as `wifi_driver_backend`).
+
 ## Versioning (mandatory for merge-ready PRs)
 
 ### Lock system (AI assistants — mandatory)
@@ -70,5 +81,6 @@ Export current numbers without compiling: **`./scripts/export_version_record.sh`
 - **`.coderabbit.yaml`** — optional CodeRabbit integration when enabled on the repo  
 - **`.cursor/rules/versioning.mdc`** — Cursor IDE versioning rules  
 - **`.cursor/rules/review_tools.mdc`** — optional tooling notes (no CLI push gate)
+- **`.cursor/rules/driver_orchestration.mdc`** — kernel orchestrates drivers; drivers execute module-specific behavior
 
 Keep these documents aligned when changing policy.
