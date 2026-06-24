@@ -201,6 +201,8 @@ static void wifi_lab_profile_from_env(uint32_t *yiaddr_be, uint8_t *prefix_len, 
 static void wifi_store_l3_profile(uint32_t ip_be, uint8_t prefix_len, uint32_t gw_be,
                                   uint32_t dns_be)
 {
+    if (gw_be == 0u)
+        (void)fl_net_ipv4_parse_literal("10.0.2.2", &gw_be);
     s_wifi_ip_be = ip_be;
     s_wifi_netmask_be = ipv4_prefix_to_mask_be(prefix_len);
     s_wifi_gw_be = gw_be;
@@ -372,6 +374,10 @@ fl_result_t fl_net_wifi_netdev_up_with_ipv4(const fl_net_wifi_scan_entry_t *ap,
     wifi_lab_profile_from_env(NULL, NULL, NULL, &dns_be);
     wifi_store_l3_profile(ip_be, prefix_len, gw_be, dns_be);
     rc = fl_net_route_configure_static(&s_wifi_drv, sta_mac, addr_s, prefix_len, gw);
+    if (rc != FL_RESULT_OK) {
+        fl_net_wifi_netdev_down();
+        return rc;
+    }
     fl_net_iface_refresh();
     return rc;
 }

@@ -87,16 +87,16 @@ make test_p3_wifi             # Run P3 WiFi integration tests (existing)
 
 **Makefile updates:**
 - Added WiFi driver sources to `NET_CORE_SRCS`:
-  - `kernel/drivers/wifi_coprocessor.c`
-  - `kernel/drivers/wifi_uart_transport.c`
-  - `kernel/drivers/wifi_platform_arm.c`
-  - `kernel/drivers/wifi_supplicant.c`
-  - `kernel/drivers/wifi_driver_backend.c`
+  - `kernel/drivers/wifi/wifi_coprocessor.c`
+  - `kernel/drivers/wifi/wifi_uart_transport.c`
+  - `kernel/drivers/wifi/wifi_platform_arm.c`
+  - `kernel/drivers/wifi/wifi_supplicant.c`
+  - `kernel/drivers/wifi/wifi_driver_backend.c`
 - Removed dependency on `net_wifi_host_linux.c` as the **default** path; opt-in host Wi‑Fi documented in README and **`docs/P3_NETWORKING.md`**
 - Added `-Ikernel/core/net` to compile paths for cross-module includes
 
 **kernel/core/net/net_wifi_station.c updates:**
-- Replaced `#include "net_wifi_host_linux.h"` with `#include "../../drivers/wifi_driver_backend.h"`
+- Replaced `#include "net_wifi_host_linux.h"` with `#include "wifi_driver_backend.h"`
 - Updated `fl_net_wifi_station_init()` to call `wifi_driver_backend_init()`
 - Updated scan/connect/disconnect to route through `wifi_driver_*` with **opt-in** `net_wifi_host_linux` when env flags are set, then lab fallback
 

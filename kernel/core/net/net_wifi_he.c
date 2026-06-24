@@ -185,9 +185,6 @@ void fl_net_wifi_host_he_hint(fl_net_wifi_scan_entry_t *entry, const char *flags
     if (entry->auth_mode == FL_WIFI_AUTH_WPA3_SAE && entry->band == FL_WIFI_BAND_5GHZ)
         entry->he_supported = 1u;
 
-    if (entry->band == FL_WIFI_BAND_5GHZ && entry->channel >= 36u)
-        entry->he_supported = 1u;
-
     if (entry->he_supported && entry->channel_width_mhz == 0u)
         entry->channel_width_mhz = 20u;
 }
@@ -212,6 +209,26 @@ void fl_net_wifi_host_he_cap_from_entry(const fl_net_wifi_scan_entry_t *ap,
 }
 
 #if defined(__linux__)
+
+static int wifi_iface_name_safe(const char *iface)
+{
+    size_t i;
+    size_t n;
+
+    if (!iface || !iface[0])
+        return 0;
+    n = strlen(iface);
+    if (n == 0u || n >= 16u)
+        return 0;
+    for (i = 0; i < n; i++) {
+        char c = iface[i];
+        if ((c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z') ||
+            (c >= '0' && c <= '9') || c == '_' || c == '-' || c == '.')
+            continue;
+        return 0;
+    }
+    return 1;
+}
 
 static int parse_bssid_colon(const char *s, uint8_t bssid[6])
 {
@@ -306,6 +323,8 @@ static void enrich_bss_block(const char *block, size_t block_len,
         p = nl ? nl + 1 : end;
     }
 
+    hex[hex_len] = '\0';
+
     if (hex_len > 0u) {
         uint8_t ie_buf[512];
         size_t ie_len = 0;
@@ -339,7 +358,7 @@ size_t fl_net_wifi_iw_enrich_scan(const char *iface, fl_net_wifi_scan_entry_t *e
     size_t block_len = 0;
     size_t enriched = 0;
 
-    if (!iface || !iface[0] || !entries || count == 0u)
+    if (!wifi_iface_name_safe(iface) || !entries || count == 0u)
         return 0u;
 
     snprintf(cmd, sizeof(cmd), "iw dev %s scan dump 2>/dev/null", iface);
@@ -375,7 +394,7 @@ int fl_net_wifi_iw_connected_he_cap(const char *iface,
     char out[512];
     FILE *fp;
 
-    if (!iface || !iface[0] || !cap_out)
+    if (!wifi_iface_name_safe(iface) || !cap_out)
         return -1;
 
     if (join_ap && join_ap->he_supported) {
@@ -389,14 +408,21 @@ int fl_net_wifi_iw_connected_he_cap(const char *iface,
         return -1;
     out[0] = '\0';
     while (fgets(out, sizeof(out), fp)) {
-        if (strstr(out, "Connected to")) {
+        if (strstr(out, "HE capabilities:")) {
             pclose(fp);
             memset(cap_out, 0, sizeof(*cap_out));
             cap_out->max_nss_rx = 2u;
             cap_out->max_nss_tx = 2u;
-            cap_out->channel_width_mhz = 80u;
             cap_out->supports_ofdma = 1u;
             cap_out->supports_mu_mimo = 1u;
+            if (strstr(out, "160 MHz"))
+                cap_out->channel_width_mhz = 160u;
+            else if (strstr(out, "80 MHz"))
+                cap_out->channel_width_mhz = 80u;
+            else if (strstr(out, "40 MHz"))
+                cap_out->channel_width_mhz = 40u;
+            else
+                cap_out->channel_width_mhz = 80u;
             return 0;
         }
     }

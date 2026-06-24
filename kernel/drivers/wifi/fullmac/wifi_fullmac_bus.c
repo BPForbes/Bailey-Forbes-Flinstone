@@ -355,21 +355,52 @@ int wifi_fullmac_usb_resolve_net_iface(const char *port, char *ifname_out, size_
 	char path[512];
 	DIR *d;
 	struct dirent *de;
+	size_t port_len;
 
 	if (!port || !port[0] || !ifname_out || cap == 0u)
 		return -1;
 	ifname_out[0] = '\0';
 	snprintf(path, sizeof(path), "/sys/bus/usb/devices/%s/net", port);
 	d = opendir(path);
+	if (d) {
+		while ((de = readdir(d)) != NULL) {
+			if (de->d_name[0] == '.')
+				continue;
+			strncpy(ifname_out, de->d_name, cap - 1u);
+			ifname_out[cap - 1u] = '\0';
+			closedir(d);
+			return 0;
+		}
+		closedir(d);
+	}
+
+	port_len = strlen(port);
+	d = opendir("/sys/bus/usb/devices");
 	if (!d)
 		return -1;
 	while ((de = readdir(d)) != NULL) {
+		struct dirent *nde;
+
 		if (de->d_name[0] == '.')
 			continue;
-		strncpy(ifname_out, de->d_name, cap - 1u);
-		ifname_out[cap - 1u] = '\0';
-		closedir(d);
-		return 0;
+		if (strncmp(de->d_name, port, port_len) != 0 || de->d_name[port_len] != ':')
+			continue;
+		snprintf(path, sizeof(path), "/sys/bus/usb/devices/%s/net", de->d_name);
+		{
+			DIR *netd = opendir(path);
+			if (!netd)
+				continue;
+			while ((nde = readdir(netd)) != NULL) {
+				if (nde->d_name[0] == '.')
+					continue;
+				strncpy(ifname_out, nde->d_name, cap - 1u);
+				ifname_out[cap - 1u] = '\0';
+				closedir(netd);
+				closedir(d);
+				return 0;
+			}
+			closedir(netd);
+		}
 	}
 	closedir(d);
 #endif

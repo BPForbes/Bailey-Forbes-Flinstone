@@ -195,9 +195,11 @@ static fl_result_t ax_station_parse_he_cap(const uint8_t *assoc_resp, uint16_t a
 
     if (entry.he_supported && !he_cap_out->supports_ofdma)
         he_cap_out->supports_ofdma = 1u;
-    he_cap_out->supports_6ghz = 1u;
-    if (he_cap_out->channel_width_mhz == 0u)
-        he_cap_out->channel_width_mhz = 160u;
+    if (entry.he_supported) {
+        he_cap_out->supports_6ghz = 1u;
+        if (he_cap_out->channel_width_mhz == 0u)
+            he_cap_out->channel_width_mhz = 160u;
+    }
     return FL_RESULT_OK;
 }
 

@@ -2058,11 +2058,13 @@ int fl_net_wifi_host_linux_server_proxy_del(const char *listen_ip, uint16_t port
 #else
     char args[128];
     char out[256];
+    char listen_q[64];
     const char *listen = (listen_ip && listen_ip[0]) ? listen_ip : "0.0.0.0";
 
     if (s_host_kind != FL_WIFI_HOST_FLINSTONE_PS)
         return -1;
-    snprintf(args, sizeof(args), "server-proxy-del %s %u", listen, (unsigned)port);
+    shell_single_quote(listen, listen_q, sizeof(listen_q));
+    snprintf(args, sizeof(args), "server-proxy-del %s %u", listen_q, (unsigned)port);
     if (!run_flinstone_ps(args, out, sizeof(out)))
         return -1;
     return strstr(out, "result=ok") ? 0 : -1;

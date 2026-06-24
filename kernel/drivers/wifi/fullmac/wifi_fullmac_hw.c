@@ -50,11 +50,12 @@ static int hw_os_bound_get_he(wifi_fullmac_t *dev, wifi_fullmac_he_cap_t *he_cap
 
 static int hw_stub_init(wifi_fullmac_t *dev)
 {
-	wifi_fullmac_hw_ctx_t *ctx = (wifi_fullmac_hw_ctx_t *)dev->driver_data;
+	wifi_fullmac_hw_ctx_t *ctx;
 	const char *fw_path;
 
-	if (!ctx)
+	if (!dev || !dev->driver_data)
 		return -1;
+	ctx = (wifi_fullmac_hw_ctx_t *)dev->driver_data;
 	dev->vendor_id = ctx->match.vendor_id;
 	dev->device_id = ctx->match.device_id;
 	dev->bus_type = ctx->bus;
@@ -143,17 +144,25 @@ static int hw_stub_get_scan_results(wifi_fullmac_t *dev, wifi_network_t *network
 
 	if (!dev || !networks || !count)
 		return -1;
+	if (!dev->driver_data)
+		return hw_stub_not_ready(dev);
 	ctx = (wifi_fullmac_hw_ctx_t *)dev->driver_data;
-	*count = 0;
-	if (ctx && ctx->scan_count) {
-		uint16_t n = ctx->scan_count;
+	{
+		uint16_t max = *count;
+		uint16_t n;
 		uint16_t i;
 
-		for (i = 0; i < n; i++)
-			networks[i] = ctx->scan_cache[i];
-		*count = n;
-		dev->state = WIFI_FULLMAC_STATE_IDLE;
-		return 0;
+		*count = 0;
+		if (ctx && ctx->scan_count) {
+			n = ctx->scan_count;
+			if (n > max)
+				n = max;
+			for (i = 0; i < n; i++)
+				networks[i] = ctx->scan_cache[i];
+			*count = n;
+			dev->state = WIFI_FULLMAC_STATE_IDLE;
+			return 0;
+		}
 	}
 	return hw_stub_not_ready(dev);
 }

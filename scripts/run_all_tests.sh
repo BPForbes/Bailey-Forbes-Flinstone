@@ -14,7 +14,7 @@
 #   USE_ASM_ALLOC=1          use test_alloc_asm instead of test_alloc_libc
 #   SKIP_NETWORK_INTEROP=1   skip check-network-requirements
 set -uo pipefail
-cd "$(dirname "$0")/.."
+cd "$(dirname "$0")/.." || exit 1
 
 QUIET="${TEST_QUIET:-0}"
 MAKE=(make)

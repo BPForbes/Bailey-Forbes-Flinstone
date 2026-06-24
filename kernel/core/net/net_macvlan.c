@@ -14,6 +14,10 @@
 
 #if defined(__linux__)
 
+#ifndef _DEFAULT_SOURCE
+#define _DEFAULT_SOURCE
+#endif
+
 #include <arpa/inet.h>
 #include <ifaddrs.h>
 #include <linux/if_packet.h>

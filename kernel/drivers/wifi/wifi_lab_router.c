@@ -48,7 +48,7 @@ static void wifi_lab_router_load_env(void)
     if (pfx_s && pfx_s[0]) {
         char *end = NULL;
         unsigned long v = strtoul(pfx_s, &end, 10);
-        if (end != pfx_s && v > 0u && v <= 32u)
+        if (end != pfx_s && v > 0u && v <= 24u)
             pfx = v;
     }
     (void)fl_net_ipv4_parse_literal(net_s, &s_net_be);
@@ -103,7 +103,7 @@ static uint32_t ipv4_prefix_to_mask_be(uint8_t prefix)
         return 0u;
     if (prefix >= 32u)
         return UINT32_C(0xffffffff);
-    return htonl((uint32_t)(UINT32_C(0xffffffff) << (32u - prefix)));
+    return (uint32_t)(UINT32_C(0xffffffff) << (32u - prefix));
 }
 
 static int dhcp_req_msg_type(const uint8_t *buf, size_t len, uint8_t *msg_out)
@@ -218,7 +218,7 @@ static wifi_lab_dhcp_lease_t *lease_alloc(const uint8_t mac[6])
 static size_t dhcp_append_opt_u32(uint8_t *out, size_t pos, size_t cap, uint8_t code, uint32_t v_be)
 {
     if (pos + 6u > cap)
-        return pos;
+        return (size_t)-1;
     out[pos++] = code;
     out[pos++] = 4u;
     out[pos++] = (uint8_t)((v_be >> 24) & 0xffu);
@@ -255,8 +255,14 @@ static fl_result_t dhcp_build_reply(uint8_t reply_msg, uint32_t xid, const uint8
     out[pos++] = reply_msg;
     mask_be = ipv4_prefix_to_mask_be(s_prefix_len);
     pos = dhcp_append_opt_u32(out, pos, cap, FL_NET_DHCP_OPT_SUBNET_MASK, mask_be);
+    if (pos == (size_t)-1)
+        return FL_RESULT_ERR;
     pos = dhcp_append_opt_u32(out, pos, cap, FL_NET_DHCP_OPT_ROUTER, s_gw_be);
+    if (pos == (size_t)-1)
+        return FL_RESULT_ERR;
     pos = dhcp_append_opt_u32(out, pos, cap, FL_NET_DHCP_OPT_DOMAIN_NAME_SERVER, s_dns_be);
+    if (pos == (size_t)-1)
+        return FL_RESULT_ERR;
     if (pos + 1u > cap)
         return FL_RESULT_ERR;
     out[pos++] = FL_NET_DHCP_OPT_END;

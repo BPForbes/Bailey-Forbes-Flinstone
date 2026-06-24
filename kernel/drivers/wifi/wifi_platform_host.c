@@ -73,6 +73,16 @@ void wifi_platform_sleep_ms(uint32_t ms)
 {
 	if (ms == 0u)
 		return;
+#if defined(__linux__) || defined(__APPLE__)
+	if (ms >= 1000u) {
+		unsigned long sec = (unsigned long)(ms / 1000u);
+		unsigned long rem = (unsigned long)(ms % 1000u);
+		sleep(sec);
+		if (rem > 0u)
+			(void)usleep((useconds_t)rem * 1000u);
+		return;
+	}
+#endif
 	(void)usleep((useconds_t)ms * 1000u);
 }
 

@@ -173,7 +173,7 @@ int wifi_supplicant_process_msg1(wifi_supplicant_t *supp, const uint8_t *msg1,
 
 	SUPPLICANT_LOG("Processing 4-way Msg 1 (AP → STA) [%zu bytes]", len);
 
-	if (len < 38) {
+	if (len < 40) {
 		SUPPLICANT_LOG("ERROR: Msg 1 too short");
 		supp->state = WIFI_SUPP_STATE_ERROR;
 		supp->handshake_errors++;

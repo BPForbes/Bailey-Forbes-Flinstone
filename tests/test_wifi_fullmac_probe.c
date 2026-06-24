@@ -24,6 +24,7 @@ static void test_chipset_table(void)
 	size_t n = 0;
 	const wifi_fullmac_chipset_t *t = wifi_fullmac_chipset_table(&n);
 
+	expect_true(n > 0u, "chipset table non-empty");
 	expect_true(n >= 8u, "chipset table has ax entries");
 	expect_true(t != NULL && t[0].vendor_id != 0u, "first chipset row valid");
 	expect_true(wifi_fullmac_chipset_match(0x8086u, 0x2725u) != NULL,

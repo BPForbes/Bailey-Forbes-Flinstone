@@ -262,7 +262,8 @@ int wifi_fullmac_station_connect(wifi_fullmac_t *dev, const fl_net_wifi_cred_t *
 	const wifi_network_t *ap = NULL;
 	wifi_auth_mode_t auth;
 
-	if (!dev || !cred || !cred->ssid[0] || !dev->ops)
+	if (!dev || !cred || !cred->ssid[0] || !dev->ops || !dev->ops->start_scan ||
+	    !dev->ops->get_scan_results)
 		return -1;
 	if (dev->state < WIFI_FULLMAC_STATE_IDLE) {
 		wifi_fullmac_set_error("FullMAC not ready for connect");

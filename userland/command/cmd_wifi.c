@@ -163,7 +163,7 @@ static int cmd_wifi_scan(int argc, char **argv) {
         fprintf(stderr, "wifi scan: failed (%d)", (int)rc);
         if (backend)
             fprintf(stderr, " (%s)", backend);
-        putchar('\n');
+        fprintf(stderr, "\n");
         if (herr && herr[0])
             fprintf(stderr, "  %s\n", herr);
         if (fl_net_wifi_host_linux_opted_in() &&
@@ -374,7 +374,7 @@ static int cmd_wifi_join(int argc, char **argv) {
         fprintf(stderr, "wifi join: failed (%d)", (int)rc);
         if (backend)
             fprintf(stderr, " (%s)", backend);
-        putchar('\n');
+        fprintf(stderr, "\n");
         if (herr && herr[0])
             fprintf(stderr, "  %s\n", herr);
         if (fl_net_wifi_host_linux_opted_in() &&

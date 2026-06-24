@@ -885,6 +885,9 @@ static void *server_udp_listener_thread_func(void *arg)
         memcpy(&cb_ip_be,   buf + 5, 4);
         memcpy(&cb_port_be, buf + 9, 2);
 
+        if (cb_ip_be != (uint32_t)from.sin_addr.s_addr)
+            continue;
+
         fl_net_endpoint_t cb_ep;
         fl_net_endpoint_from_v4(cb_ip_be, ntohs(cb_port_be), &cb_ep);
 
@@ -1066,6 +1069,7 @@ static int verb_host(int argc, char **argv) {
     fl_net_endpoint_t bind_ep;
     fl_result_t rc;
     const char *win_ip_display = NULL;
+    char lan_display[32];
 
     if (argc < 3) {
         char suggest[32];
@@ -1104,7 +1108,6 @@ static int verb_host(int argc, char **argv) {
     /* Windows / LAN IPv4 (e.g. 192.168.1.239) is not bindable in WSL — bind
      * 0.0.0.0 locally and expose the requested IP via portproxy. */
     {
-        char lan_display[32];
         const char *rewrite = wsl_rewrite_lan_bind_ep(&ep, &bind_ep, lan_display,
                                                     sizeof(lan_display));
         if (rewrite)

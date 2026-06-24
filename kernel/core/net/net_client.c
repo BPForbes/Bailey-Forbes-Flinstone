@@ -772,6 +772,7 @@ fl_result_t fl_net_client_adopt_handle(fl_net_client_t *client,
                                    (const uint8_t *)client->principal,
                                    (uint16_t)prin_len);
     if (rc != FL_RESULT_OK) {
+        fl_net_sock_close(h);
         client->peer_handle = FL_NET_SOCK_INVALID;
         client->state = FL_NET_CLIENT_STATE_DISCONNECTED;
         return rc;
@@ -781,6 +782,7 @@ fl_result_t fl_net_client_adopt_handle(fl_net_client_t *client,
                                    timeout_ms == 0u ? 2000u : timeout_ms);
     if (rc != FL_RESULT_OK || opcode != (uint8_t)FL_NET_SESSION_OP_HELLO_ACK ||
         plen < 2u) {
+        fl_net_sock_close(h);
         client->peer_handle = FL_NET_SOCK_INVALID;
         client->state = FL_NET_CLIENT_STATE_DISCONNECTED;
         return rc != FL_RESULT_OK ? rc : FL_RESULT_INVAL;

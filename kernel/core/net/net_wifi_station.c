@@ -319,6 +319,10 @@ static fl_result_t driver_backend_connect(const fl_net_wifi_cred_t *cred, unsign
         }
     }
 
+    if (!(ap.bssid[0] | ap.bssid[1] | ap.bssid[2] | ap.bssid[3] | ap.bssid[4] |
+          ap.bssid[5]))
+        return FL_RESULT_NOSYS;
+
     wifi_lab_sta_mac(sta_mac);
     rc = fl_net_wifi_netdev_up(&ap, sta_mac);
     if (rc != FL_RESULT_OK) {

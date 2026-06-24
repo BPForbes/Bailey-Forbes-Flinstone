@@ -155,10 +155,10 @@ fl_result_t wifi_driver_backend_init(void)
 	if (wifi_backend_try_uart_coprocessor() == FL_RESULT_OK)
 		return FL_RESULT_OK;
 
-	if (wifi_backend_try_fullmac_hw() == FL_RESULT_OK)
+	if (wifi_backend_try_ax_mock() == FL_RESULT_OK)
 		return FL_RESULT_OK;
 
-	if (wifi_backend_try_ax_mock() == FL_RESULT_OK)
+	if (wifi_backend_try_fullmac_hw() == FL_RESULT_OK)
 		return FL_RESULT_OK;
 
 	/* Phase 4 FullMAC WiFi 6 hardware: probe when PCIe enumeration lands. */

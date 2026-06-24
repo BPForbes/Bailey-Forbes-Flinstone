@@ -51,6 +51,7 @@ int fl_shell_tokenize_line(char *line, char **argv, int argv_cap)
 					*dst++ = *p++;
 				}
 			}
+			*dst = '\0';
 			continue;
 		}
 		if (*p == '\'') {

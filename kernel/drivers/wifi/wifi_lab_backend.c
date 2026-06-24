@@ -247,7 +247,7 @@ static fl_result_t lab_run_mgmt_assoc(const fl_net_wifi_cred_t *cred,
                                          assoc, sizeof(assoc), &frame_len) != FL_RESULT_OK)
         return FL_RESULT_ERR;
 
-    if (ap->auth_mode != FL_WIFI_AUTH_OPEN) {
+    if (ap->auth_mode != FL_WIFI_AUTH_OPEN && ap->auth_mode != FL_WIFI_AUTH_OWE) {
         rc = fl_net_wifi_wpa4_install_ptk(pmk, FL_NET_WIFI_PMK_LEN);
         if (rc != FL_RESULT_OK)
             return rc;
@@ -333,7 +333,8 @@ fl_result_t wifi_lab_connect(const fl_net_wifi_cred_t *cred,
         lab_apply_ax_ap(&s_synth_ap);
         ap = &s_synth_ap;
     }
-    if (ap->auth_mode != FL_WIFI_AUTH_OPEN && cred->passphrase[0] == '\0')
+    if (ap->auth_mode != FL_WIFI_AUTH_OPEN && ap->auth_mode != FL_WIFI_AUTH_OWE &&
+        cred->passphrase[0] == '\0')
         return FL_RESULT_INVAL;
 
     fl_net_loopback_mac_host(sta_mac);
@@ -489,14 +490,16 @@ static fl_result_t mock_build_ip_reply(const uint8_t *req_ip, size_t req_ip_len,
 
 static fl_result_t mock_netdev_send(fl_net_driver_t *drv, const fl_net_frame_view_t *frame)
 {
-	wifi_lab_mock_ctx_t *ctx = (wifi_lab_mock_ctx_t *)((char *)drv -
-								   offsetof(wifi_lab_mock_ctx_t,
-									    netdev));
+	wifi_lab_mock_ctx_t *ctx;
 	size_t ip_off;
 	size_t ip_len;
 	uint8_t eth_reply[MOCK_RX_MAX];
 	size_t eth_len = 0;
 
+	if (!drv)
+		return FL_RESULT_INVAL;
+	ctx = (wifi_lab_mock_ctx_t *)((char *)drv -
+				      offsetof(wifi_lab_mock_ctx_t, netdev));
 	if (!ctx->up || !frame)
 		return FL_RESULT_INVAL;
 	if (fl_net_wire_check_view(frame, FL_NET_ETH_FRAME_HDR_LEN) != FL_RESULT_OK)
@@ -550,13 +553,13 @@ static fl_result_t mock_netdev_send(fl_net_driver_t *drv, const fl_net_frame_vie
 
 static fl_result_t mock_netdev_recv(fl_net_driver_t *drv, fl_net_frame_mut_t *out)
 {
-	wifi_lab_mock_ctx_t *ctx = (wifi_lab_mock_ctx_t *)((char *)drv -
-								   offsetof(wifi_lab_mock_ctx_t,
-									    netdev));
+	wifi_lab_mock_ctx_t *ctx;
 	fl_result_t rc;
 
-	if (!out)
+	if (!drv || !out)
 		return FL_RESULT_INVAL;
+	ctx = (wifi_lab_mock_ctx_t *)((char *)drv -
+				      offsetof(wifi_lab_mock_ctx_t, netdev));
 	if (ctx->rx_count == 0)
 		return FL_RESULT_TIMEDOUT;
 	if (out->cap < ctx->rx[ctx->rx_head].len)

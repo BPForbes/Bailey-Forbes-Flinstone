@@ -1,5 +1,6 @@
 #include "net_wifi_crypto.h"
 
+#include <limits.h>
 #include <openssl/evp.h>
 #include <openssl/hmac.h>
 #include <openssl/rand.h>
@@ -27,6 +28,8 @@ fl_result_t fl_net_wifi_crypto_random(uint8_t *out, size_t len) {
     if (got == (ssize_t)len)
         return FL_RESULT_OK;
 #endif
+    if (len > (size_t)INT_MAX)
+        return FL_RESULT_ERR;
     if (RAND_bytes(out, (int)len) == 1)
         return FL_RESULT_OK;
     return FL_RESULT_ERR;

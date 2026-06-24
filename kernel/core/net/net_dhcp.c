@@ -142,10 +142,7 @@ fl_result_t fl_net_dhcp_parse_reply_pkt(const fl_net_packet_t *pkt, uint32_t *xi
 }
 
 static uint8_t dhcp_mask_be_to_prefix(uint32_t mask_be) {
-    uint32_t m = ((uint32_t)mask_be >> 24) & 0xffu;
-    m |= ((uint32_t)mask_be >> 8) & 0xff00u;
-    m |= ((uint32_t)mask_be << 8) & 0xff0000u;
-    m |= ((uint32_t)mask_be << 24) & 0xff000000u;
+    uint32_t m = mask_be;
     uint8_t p = 0;
     while (p < 32u && (m & (UINT32_C(1) << (31u - p))))
         p++;

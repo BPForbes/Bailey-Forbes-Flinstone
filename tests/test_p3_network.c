@@ -796,6 +796,11 @@ static int test_net_socket_tcp_loopback(void) {
     size_t got = 0;
 
     rc = fl_net_sock_init();
+    if (rc == FL_RESULT_NOSYS) {
+        fprintf(stderr, "skip: hosted sockets unavailable\n");
+        fl_net_sock_shutdown();
+        return 0;
+    }
     ASSERT(rc == FL_RESULT_OK);
 
     rc = fl_net_sock_open(FL_NET_SOCK_TYPE_STREAM, &listen_h);
@@ -848,6 +853,11 @@ static int test_net_socket_udp_loopback(void) {
     size_t got = 0u;
 
     rc = fl_net_sock_init();
+    if (rc == FL_RESULT_NOSYS) {
+        fprintf(stderr, "skip: hosted sockets unavailable\n");
+        fl_net_sock_shutdown();
+        return 0;
+    }
     ASSERT(rc == FL_RESULT_OK);
 
     rc = fl_net_sock_open(FL_NET_SOCK_TYPE_DGRAM, &listen_h);
@@ -1201,6 +1211,7 @@ static int test_probe_endpoint(void) {
 static int test_wifi_lab_server_host(void) {
     fl_net_server_t srv;
     fl_net_wifi_cred_t cred;
+    fl_result_t rc;
     uint32_t host_be = 0u;
     uint16_t port = (uint16_t)(49000u + (unsigned)(getpid() % 1000u));
 
@@ -1217,11 +1228,13 @@ static int test_wifi_lab_server_host(void) {
     ASSERT(fl_net_wifi_netdev_ipv4(&host_be) == FL_RESULT_OK);
     ASSERT(host_be != 0u);
     ASSERT(fl_net_sock_native_eligible_bind_v4(host_be));
-    if (fl_net_sock_init() == FL_RESULT_NOSYS) {
+    rc = fl_net_sock_init();
+    if (rc == FL_RESULT_NOSYS) {
         fprintf(stderr, "skip: hosted sockets unavailable\n");
         (void)fl_net_wifi_disconnect();
         return 0;
     }
+    ASSERT(rc == FL_RESULT_OK);
     ASSERT(fl_net_server_host_start(&srv, host_be, port, "LabHost") == FL_RESULT_OK);
     fl_net_server_host_stop(&srv);
     ASSERT(fl_net_wifi_disconnect() == FL_RESULT_OK);
