@@ -1,0 +1,9 @@
+MAJOR_VERSION=4
+STANDARD_VERSION=3
+RELEASE_VERSION=0
+PRERELEASE=1
+DEV_VERSION=2
+DESCRIPTION<<PROMOTE_DESC_END
+4.3.0: P4 WiFi review fixes (#329) and production-tail OTA (#328) — route lab DHCP through wifi_driver_backend, macvlan review fixes, FullMAC connect guards, file consolidation; add wifi_mgmt_transport + wifi_connect_ota for mgmt/SAE/EAPOL OTA, mock FullMAC authenticate/associate/set_key/tx/rx/TWT ops, firmware-loaded FullMAC OTA sim with hardware DHCP, net_wifi_mgmt auth_resp/SAE frame builders; add nl80211 FullMAC Task 1 shim (net_wifi_host_wire first-principles UAPI, net_wifi_nl80211 mgmt/scan, net_wifi_fullmac lab ring vs physical AF_PACKET netdev, WIFI_BACKEND_NL80211 with lab delegation).
+PROMOTE_DESC_END
+

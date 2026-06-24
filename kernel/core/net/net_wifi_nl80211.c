@@ -10,11 +10,8 @@
 
 #if defined(__linux__)
 
-#include <linux/genetlink.h>
-#include <linux/netlink.h>
-#include <linux/nl80211.h>
+#include "net_wifi_host_wire.h"
 
-#include <net/if.h>
 #include <poll.h>
 #include <sys/socket.h>
 #include <unistd.h>
@@ -23,33 +20,12 @@
 #define NL80211_MGMT_RX_Q 8u
 #define NL80211_MGMT_REG_MAX 8u
 
-#ifndef nla_ok
-static int nl80211_nla_ok(const struct nlattr *nla, int len)
-{
-	return len >= (int)sizeof(struct nlattr) && nla->nla_len >= sizeof(struct nlattr) &&
-	       nla->nla_len <= (unsigned int)len;
-}
-#define nla_ok(nla, len) nl80211_nla_ok((nla), (len))
-#endif
-#ifndef nla_next
-static struct nlattr *nl80211_nla_next(const struct nlattr *nla, int *len)
-{
-	*len -= (int)NLA_ALIGN(nla->nla_len);
-	return (struct nlattr *)((char *)nla + NLA_ALIGN(nla->nla_len));
-}
-#define nla_next(nla, attrlen) nl80211_nla_next((nla), (attrlen))
-#endif
-
-#ifndef WLAN_CIPHER_SUITE_CCMP
-#define WLAN_CIPHER_SUITE_CCMP 0x000fac04u
-#endif
-
 struct fl_net_wifi_nl80211 {
 	int fd;
 	int nl80211_id;
 	uint32_t ifindex;
 	uint32_t wiphy;
-	char ifname[IFNAMSIZ];
+	char ifname[FL_NET_WIFI_IFNAME_MAX];
 	uint8_t sta_mac[6];
 	fl_net_wifi_he_cap_t phy_he;
 	uint8_t bands;
@@ -86,60 +62,45 @@ int fl_net_wifi_nl80211_available(void)
 
 static int nla_put_u8(void *buf, size_t cap, size_t *pos, uint16_t type, uint8_t v)
 {
-	struct nlattr *na;
-	size_t need = NLA_HDRLEN + 1u;
+	struct fl_wifi_nlattr *na;
+	size_t need = FL_WIFI_NLA_HDRLEN + 1u;
 
 	if (*pos + need > cap)
 		return -1;
-	na = (struct nlattr *)((uint8_t *)buf + *pos);
+	na = (struct fl_wifi_nlattr *)((uint8_t *)buf + *pos);
 	na->nla_type = type;
 	na->nla_len = (uint16_t)need;
-	memcpy((uint8_t *)na + NLA_HDRLEN, &v, 1u);
+	memcpy((uint8_t *)na + FL_WIFI_NLA_HDRLEN, &v, 1u);
 	*pos += need;
 	return 0;
 }
 
 static int nla_put_u16(void *buf, size_t cap, size_t *pos, uint16_t type, uint16_t v)
 {
-	struct nlattr *na;
-	size_t need = NLA_HDRLEN + 2u;
+	struct fl_wifi_nlattr *na;
+	size_t need = FL_WIFI_NLA_HDRLEN + 2u;
 
 	if (*pos + need > cap)
 		return -1;
-	na = (struct nlattr *)((uint8_t *)buf + *pos);
+	na = (struct fl_wifi_nlattr *)((uint8_t *)buf + *pos);
 	na->nla_type = type;
 	na->nla_len = (uint16_t)need;
-	memcpy((uint8_t *)na + NLA_HDRLEN, &v, 2u);
+	memcpy((uint8_t *)na + FL_WIFI_NLA_HDRLEN, &v, 2u);
 	*pos += need;
 	return 0;
 }
 
 static int nla_put_u32(void *buf, size_t cap, size_t *pos, uint16_t type, uint32_t v)
 {
-	struct nlattr *na;
-	size_t need = NLA_HDRLEN + 4u;
+	struct fl_wifi_nlattr *na;
+	size_t need = FL_WIFI_NLA_HDRLEN + 4u;
 
 	if (*pos + need > cap)
 		return -1;
-	na = (struct nlattr *)((uint8_t *)buf + *pos);
+	na = (struct fl_wifi_nlattr *)((uint8_t *)buf + *pos);
 	na->nla_type = type;
 	na->nla_len = (uint16_t)need;
-	memcpy((uint8_t *)na + NLA_HDRLEN, &v, 4u);
-	*pos += need;
-	return 0;
-}
-
-static int nla_put_u64(void *buf, size_t cap, size_t *pos, uint16_t type, uint64_t v)
-{
-	struct nlattr *na;
-	size_t need = NLA_HDRLEN + 8u;
-
-	if (*pos + need > cap)
-		return -1;
-	na = (struct nlattr *)((uint8_t *)buf + *pos);
-	na->nla_type = type;
-	na->nla_len = (uint16_t)need;
-	memcpy((uint8_t *)na + NLA_HDRLEN, &v, 8u);
+	memcpy((uint8_t *)na + FL_WIFI_NLA_HDRLEN, &v, 4u);
 	*pos += need;
 	return 0;
 }
@@ -147,19 +108,19 @@ static int nla_put_u64(void *buf, size_t cap, size_t *pos, uint16_t type, uint64
 static int nla_put_str(void *buf, size_t cap, size_t *pos, uint16_t type, const char *s)
 {
 	size_t slen;
-	struct nlattr *na;
+	struct fl_wifi_nlattr *na;
 	size_t need;
 
 	if (!s)
 		return -1;
 	slen = strlen(s) + 1u;
-	need = NLA_HDRLEN + slen;
+	need = FL_WIFI_NLA_HDRLEN + slen;
 	if (*pos + need > cap)
 		return -1;
-	na = (struct nlattr *)((uint8_t *)buf + *pos);
+	na = (struct fl_wifi_nlattr *)((uint8_t *)buf + *pos);
 	na->nla_type = type;
 	na->nla_len = (uint16_t)need;
-	memcpy((uint8_t *)na + NLA_HDRLEN, s, slen);
+	memcpy((uint8_t *)na + FL_WIFI_NLA_HDRLEN, s, slen);
 	*pos += need;
 	return 0;
 }
@@ -167,29 +128,29 @@ static int nla_put_str(void *buf, size_t cap, size_t *pos, uint16_t type, const 
 static int nla_put_data(void *buf, size_t cap, size_t *pos, uint16_t type, const void *data,
 			size_t len)
 {
-	struct nlattr *na;
-	size_t need = NLA_HDRLEN + len;
+	struct fl_wifi_nlattr *na;
+	size_t need = FL_WIFI_NLA_HDRLEN + len;
 
 	if (*pos + need > cap)
 		return -1;
-	na = (struct nlattr *)((uint8_t *)buf + *pos);
+	na = (struct fl_wifi_nlattr *)((uint8_t *)buf + *pos);
 	na->nla_type = type;
 	na->nla_len = (uint16_t)need;
-	memcpy((uint8_t *)na + NLA_HDRLEN, data, len);
+	memcpy((uint8_t *)na + FL_WIFI_NLA_HDRLEN, data, len);
 	*pos += need;
 	return 0;
 }
 
 static int nl80211_send(fl_net_wifi_nl80211_t *nl, void *buf, size_t len)
 {
-	struct sockaddr_nl sa;
+	struct fl_wifi_sockaddr_nl sa;
 	struct msghdr msg;
 	struct iovec iov;
 
 	if (!nl || nl->fd < 0)
 		return -1;
 	memset(&sa, 0, sizeof(sa));
-	sa.nl_family = AF_NETLINK;
+	sa.nl_family = FL_WIFI_WIRE_AF_NETLINK;
 	memset(&msg, 0, sizeof(msg));
 	iov.iov_base = buf;
 	iov.iov_len = len;
@@ -218,44 +179,44 @@ static int nl80211_recv(fl_net_wifi_nl80211_t *nl, void *buf, size_t cap, unsign
 static int nl80211_build_msg(void *buf, size_t cap, uint16_t nlmsg_type, uint8_t genl_cmd,
 			     uint16_t flags, uint32_t seq, size_t *attr_pos)
 {
-	struct nlmsghdr *nh;
-	struct genlmsghdr *gh;
+	struct fl_wifi_nlmsghdr *nh;
+	struct fl_wifi_genlmsghdr *gh;
 
-	if (cap < NLMSG_SPACE(GENL_HDRLEN))
+	if (cap < FL_WIFI_NLMSG_SPACE(FL_WIFI_GENL_HDRLEN))
 		return -1;
-	memset(buf, 0, NLMSG_SPACE(GENL_HDRLEN));
-	nh = (struct nlmsghdr *)buf;
+	memset(buf, 0, FL_WIFI_NLMSG_SPACE(FL_WIFI_GENL_HDRLEN));
+	nh = (struct fl_wifi_nlmsghdr *)buf;
 	nh->nlmsg_type = nlmsg_type;
-	nh->nlmsg_flags = (uint16_t)(flags | NLM_F_ACK);
+	nh->nlmsg_flags = (uint16_t)(flags | FL_WIFI_NLM_F_ACK);
 	nh->nlmsg_seq = seq;
 	nh->nlmsg_pid = 0;
-	gh = (struct genlmsghdr *)NLMSG_DATA(nh);
+	gh = (struct fl_wifi_genlmsghdr *)FL_WIFI_NLMSG_DATA(nh);
 	gh->cmd = genl_cmd;
 	gh->version = 1;
-	*attr_pos = NLMSG_LENGTH(GENL_HDRLEN);
+	*attr_pos = FL_WIFI_NLMSG_LENGTH(FL_WIFI_GENL_HDRLEN);
 	return 0;
 }
 
 static void nl80211_finish_msg(void *buf, size_t attr_pos)
 {
-	struct nlmsghdr *nh = (struct nlmsghdr *)buf;
+	struct fl_wifi_nlmsghdr *nh = (struct fl_wifi_nlmsghdr *)buf;
 
-	nh->nlmsg_len = (uint32_t)NLMSG_ALIGN(attr_pos);
+	nh->nlmsg_len = (uint32_t)FL_WIFI_NLMSG_ALIGN(attr_pos);
 }
 
 static int nl80211_resolve_family(fl_net_wifi_nl80211_t *nl)
 {
 	uint8_t buf[NL80211_MAX_MSG];
-	struct nlmsghdr *nh;
-	struct genlmsghdr *gh;
+	struct fl_wifi_nlmsghdr *nh;
+	struct fl_wifi_genlmsghdr *gh;
 	size_t pos;
 	int n;
 	uint16_t seq = 1;
 
-	if (nl80211_build_msg(buf, sizeof(buf), GENL_ID_CTRL, CTRL_CMD_GETFAMILY, NLM_F_REQUEST,
+	if (nl80211_build_msg(buf, sizeof(buf), FL_WIFI_GENL_ID_CTRL, FL_WIFI_CTRL_CMD_GETFAMILY, FL_WIFI_NLM_F_REQUEST,
 			      seq, &pos) != 0)
 		return -1;
-	if (nla_put_str(buf, sizeof(buf), &pos, CTRL_ATTR_FAMILY_NAME, "nl80211") != 0)
+	if (nla_put_str(buf, sizeof(buf), &pos, FL_WIFI_CTRL_ATTR_FAMILY_NAME, "nl80211") != 0)
 		return -1;
 	nl80211_finish_msg(buf, pos);
 	if (nl80211_send(nl, buf, pos) < 0)
@@ -263,28 +224,28 @@ static int nl80211_resolve_family(fl_net_wifi_nl80211_t *nl)
 	n = nl80211_recv(nl, buf, sizeof(buf), 2000u);
 	if (n < 0)
 		return -1;
-	nh = (struct nlmsghdr *)buf;
-	while (NLMSG_OK(nh, (unsigned int)n)) {
-		struct nlattr *attr;
+	nh = (struct fl_wifi_nlmsghdr *)buf;
+	while (FL_WIFI_NLMSG_OK(nh, (unsigned int)n)) {
+		struct fl_wifi_nlattr *attr;
 		int rem;
 
-		if (nh->nlmsg_type == NLMSG_ERROR)
+		if (nh->nlmsg_type == FL_WIFI_NLMSG_ERROR)
 			return -1;
-		gh = (struct genlmsghdr *)NLMSG_DATA(nh);
-		if (gh->cmd != CTRL_CMD_NEWFAMILY) {
-			nh = NLMSG_NEXT(nh, n);
+		gh = (struct fl_wifi_genlmsghdr *)FL_WIFI_NLMSG_DATA(nh);
+		if (gh->cmd != FL_WIFI_CTRL_CMD_NEWFAMILY) {
+			nh = FL_WIFI_NLMSG_NEXT(nh, n);
 			continue;
 		}
-		attr = (struct nlattr *)((uint8_t *)gh + GENL_HDRLEN);
-		rem = (int)(nh->nlmsg_len - NLMSG_LENGTH(GENL_HDRLEN));
-		while (nla_ok(attr, rem)) {
-			if (attr->nla_type == CTRL_ATTR_FAMILY_ID) {
-				nl->nl80211_id = *(int *)((uint8_t *)attr + NLA_HDRLEN);
+		attr = (struct fl_wifi_nlattr *)((uint8_t *)gh + FL_WIFI_GENL_HDRLEN);
+		rem = (int)(nh->nlmsg_len - FL_WIFI_NLMSG_LENGTH(FL_WIFI_GENL_HDRLEN));
+		while (fl_wifi_nla_ok(attr, rem)) {
+			if (attr->nla_type == FL_WIFI_CTRL_ATTR_FAMILY_ID) {
+				nl->nl80211_id = *(int *)((uint8_t *)attr + FL_WIFI_NLA_HDRLEN);
 				return 0;
 			}
-			attr = nla_next(attr, &rem);
+			attr = fl_wifi_nla_next(attr, &rem);
 		}
-		nh = NLMSG_NEXT(nh, n);
+		nh = FL_WIFI_NLMSG_NEXT(nh, n);
 	}
 	return -1;
 }
@@ -294,14 +255,14 @@ static int nl80211_get_interface(fl_net_wifi_nl80211_t *nl, const char *ifname)
 	uint8_t buf[NL80211_MAX_MSG];
 	size_t pos;
 	int n;
-	struct nlmsghdr *nh;
-	struct genlmsghdr *gh;
+	struct fl_wifi_nlmsghdr *nh;
+	struct fl_wifi_genlmsghdr *gh;
 	static uint32_t seq;
 
 	if (nl80211_build_msg(buf, sizeof(buf), (uint16_t)nl->nl80211_id,
-			      NL80211_CMD_GET_INTERFACE, NLM_F_REQUEST, ++seq, &pos) != 0)
+			      FL_WIFI_NL80211_CMD_GET_INTERFACE, FL_WIFI_NLM_F_REQUEST, ++seq, &pos) != 0)
 		return -1;
-	if (nla_put_str(buf, sizeof(buf), &pos, NL80211_ATTR_IFNAME, ifname) != 0)
+	if (nla_put_str(buf, sizeof(buf), &pos, FL_WIFI_NL80211_ATTR_IFNAME, ifname) != 0)
 		return -1;
 	nl80211_finish_msg(buf, pos);
 	if (nl80211_send(nl, buf, pos) < 0)
@@ -309,35 +270,35 @@ static int nl80211_get_interface(fl_net_wifi_nl80211_t *nl, const char *ifname)
 	n = nl80211_recv(nl, buf, sizeof(buf), 2000u);
 	if (n < 0)
 		return -1;
-	nh = (struct nlmsghdr *)buf;
-	while (NLMSG_OK(nh, (unsigned int)n)) {
-		struct nlattr *attr;
+	nh = (struct fl_wifi_nlmsghdr *)buf;
+	while (FL_WIFI_NLMSG_OK(nh, (unsigned int)n)) {
+		struct fl_wifi_nlattr *attr;
 		int rem;
 
-		if (nh->nlmsg_type == NLMSG_ERROR)
+		if (nh->nlmsg_type == FL_WIFI_NLMSG_ERROR)
 			return -1;
-		gh = (struct genlmsghdr *)NLMSG_DATA(nh);
-		attr = (struct nlattr *)((uint8_t *)gh + GENL_HDRLEN);
-		rem = (int)(nh->nlmsg_len - NLMSG_LENGTH(GENL_HDRLEN));
-		while (nla_ok(attr, rem)) {
-			if (attr->nla_type == NL80211_ATTR_IFINDEX)
-				nl->ifindex = *(uint32_t *)((uint8_t *)attr + NLA_HDRLEN);
-			else if (attr->nla_type == NL80211_ATTR_WIPHY)
-				nl->wiphy = *(uint32_t *)((uint8_t *)attr + NLA_HDRLEN);
-			else if (attr->nla_type == NL80211_ATTR_MAC)
-				memcpy(nl->sta_mac, (uint8_t *)attr + NLA_HDRLEN, 6u);
-			attr = nla_next(attr, &rem);
+		gh = (struct fl_wifi_genlmsghdr *)FL_WIFI_NLMSG_DATA(nh);
+		attr = (struct fl_wifi_nlattr *)((uint8_t *)gh + FL_WIFI_GENL_HDRLEN);
+		rem = (int)(nh->nlmsg_len - FL_WIFI_NLMSG_LENGTH(FL_WIFI_GENL_HDRLEN));
+		while (fl_wifi_nla_ok(attr, rem)) {
+			if (attr->nla_type == FL_WIFI_NL80211_ATTR_IFINDEX)
+				nl->ifindex = *(uint32_t *)((uint8_t *)attr + FL_WIFI_NLA_HDRLEN);
+			else if (attr->nla_type == FL_WIFI_NL80211_ATTR_WIPHY)
+				nl->wiphy = *(uint32_t *)((uint8_t *)attr + FL_WIFI_NLA_HDRLEN);
+			else if (attr->nla_type == FL_WIFI_NL80211_ATTR_MAC)
+				memcpy(nl->sta_mac, (uint8_t *)attr + FL_WIFI_NLA_HDRLEN, 6u);
+			attr = fl_wifi_nla_next(attr, &rem);
 		}
 		if (nl->ifindex)
 			return 0;
-		nh = NLMSG_NEXT(nh, n);
+		nh = FL_WIFI_NLMSG_NEXT(nh, n);
 	}
 	return -1;
 }
 
-static void nl80211_parse_band_he(struct nlattr *band, fl_net_wifi_nl80211_t *nl, unsigned band_idx)
+static void nl80211_parse_band_he(struct fl_wifi_nlattr *band, fl_net_wifi_nl80211_t *nl, unsigned band_idx)
 {
-	struct nlattr *attr;
+	struct fl_wifi_nlattr *attr;
 	int rem;
 
 	if (!band || !nl)
@@ -348,29 +309,29 @@ static void nl80211_parse_band_he(struct nlattr *band, fl_net_wifi_nl80211_t *nl
 		nl->bands |= FL_WIFI_BAND_5GHZ;
 	else
 		nl->bands |= FL_WIFI_BAND_6GHZ;
-	attr = (struct nlattr *)((uint8_t *)band + NLA_HDRLEN);
-	rem = (int)(band->nla_len - NLA_HDRLEN);
-	while (nla_ok(attr, rem)) {
-		if (attr->nla_type == NL80211_BAND_ATTR_IFTYPE_DATA) {
-			struct nlattr *ift;
+	attr = (struct fl_wifi_nlattr *)((uint8_t *)band + FL_WIFI_NLA_HDRLEN);
+	rem = (int)(band->nla_len - FL_WIFI_NLA_HDRLEN);
+	while (fl_wifi_nla_ok(attr, rem)) {
+		if (attr->nla_type == FL_WIFI_NL80211_BAND_ATTR_IFTYPE_DATA) {
+			struct fl_wifi_nlattr *ift;
 			int ift_rem;
 
-			ift = (struct nlattr *)((uint8_t *)attr + NLA_HDRLEN);
-			ift_rem = (int)(attr->nla_len - NLA_HDRLEN);
-			while (nla_ok(ift, ift_rem)) {
-				if (ift->nla_type == NL80211_BAND_IFTYPE_ATTR_HE_CAP_MAC) {
+			ift = (struct fl_wifi_nlattr *)((uint8_t *)attr + FL_WIFI_NLA_HDRLEN);
+			ift_rem = (int)(attr->nla_len - FL_WIFI_NLA_HDRLEN);
+			while (fl_wifi_nla_ok(ift, ift_rem)) {
+				if (ift->nla_type == FL_WIFI_NL80211_BAND_IFTYPE_ATTR_HE_CAP_MAC) {
 					const uint8_t *mac =
-						(const uint8_t *)ift + NLA_HDRLEN;
-					size_t mac_len = ift->nla_len - NLA_HDRLEN;
+						(const uint8_t *)ift + FL_WIFI_NLA_HDRLEN;
+					size_t mac_len = ift->nla_len - FL_WIFI_NLA_HDRLEN;
 
 					if (mac_len >= 4u)
 						nl->phy_he.supports_twt =
 							((mac[3] & 0x06u) != 0u) ? 1u : 0u;
 					nl->phy_he.supports_ofdma = 1u;
-				} else if (ift->nla_type == NL80211_BAND_IFTYPE_ATTR_HE_CAP_PHY) {
+				} else if (ift->nla_type == FL_WIFI_NL80211_BAND_IFTYPE_ATTR_HE_CAP_PHY) {
 					const uint8_t *phy =
-						(const uint8_t *)ift + NLA_HDRLEN;
-					size_t phy_len = ift->nla_len - NLA_HDRLEN;
+						(const uint8_t *)ift + FL_WIFI_NLA_HDRLEN;
+					size_t phy_len = ift->nla_len - FL_WIFI_NLA_HDRLEN;
 
 					if (phy_len >= 1u) {
 						if (phy[0] & 0x40u)
@@ -385,10 +346,10 @@ static void nl80211_parse_band_he(struct nlattr *band, fl_net_wifi_nl80211_t *nl
 							nl->phy_he.supports_6ghz = 1u;
 					}
 				}
-				ift = nla_next(ift, &ift_rem);
+				ift = fl_wifi_nla_next(ift, &ift_rem);
 			}
 		}
-		attr = nla_next(attr, &rem);
+		attr = fl_wifi_nla_next(attr, &rem);
 	}
 }
 
@@ -397,16 +358,16 @@ static int nl80211_get_wiphy(fl_net_wifi_nl80211_t *nl)
 	uint8_t buf[NL80211_MAX_MSG];
 	size_t pos;
 	int n;
-	struct nlmsghdr *nh;
-	struct genlmsghdr *gh;
+	struct fl_wifi_nlmsghdr *nh;
+	struct fl_wifi_genlmsghdr *gh;
 	static uint32_t seq;
 
 	if (!nl->wiphy)
 		return -1;
-	if (nl80211_build_msg(buf, sizeof(buf), (uint16_t)nl->nl80211_id, NL80211_CMD_GET_WIPHY,
-			      NLM_F_REQUEST, ++seq, &pos) != 0)
+	if (nl80211_build_msg(buf, sizeof(buf), (uint16_t)nl->nl80211_id, FL_WIFI_NL80211_CMD_GET_WIPHY,
+			      FL_WIFI_NLM_F_REQUEST, ++seq, &pos) != 0)
 		return -1;
-	if (nla_put_u32(buf, sizeof(buf), &pos, NL80211_ATTR_WIPHY, nl->wiphy) != 0)
+	if (nla_put_u32(buf, sizeof(buf), &pos, FL_WIFI_NL80211_ATTR_WIPHY, nl->wiphy) != 0)
 		return -1;
 	nl80211_finish_msg(buf, pos);
 	if (nl80211_send(nl, buf, pos) < 0)
@@ -414,36 +375,36 @@ static int nl80211_get_wiphy(fl_net_wifi_nl80211_t *nl)
 	n = nl80211_recv(nl, buf, sizeof(buf), 2000u);
 	if (n < 0)
 		return -1;
-	nh = (struct nlmsghdr *)buf;
-	while (NLMSG_OK(nh, (unsigned int)n)) {
-		struct nlattr *attr;
+	nh = (struct fl_wifi_nlmsghdr *)buf;
+	while (FL_WIFI_NLMSG_OK(nh, (unsigned int)n)) {
+		struct fl_wifi_nlattr *attr;
 		int rem;
 
-		if (nh->nlmsg_type == NLMSG_ERROR)
+		if (nh->nlmsg_type == FL_WIFI_NLMSG_ERROR)
 			return -1;
-		gh = (struct genlmsghdr *)NLMSG_DATA(nh);
-		attr = (struct nlattr *)((uint8_t *)gh + GENL_HDRLEN);
-		rem = (int)(nh->nlmsg_len - NLMSG_LENGTH(GENL_HDRLEN));
-		while (nla_ok(attr, rem)) {
-			if (attr->nla_type == NL80211_ATTR_WIPHY_NAME) {
-				const char *name = (const char *)((uint8_t *)attr + NLA_HDRLEN);
+		gh = (struct fl_wifi_genlmsghdr *)FL_WIFI_NLMSG_DATA(nh);
+		attr = (struct fl_wifi_nlattr *)((uint8_t *)gh + FL_WIFI_GENL_HDRLEN);
+		rem = (int)(nh->nlmsg_len - FL_WIFI_NLMSG_LENGTH(FL_WIFI_GENL_HDRLEN));
+		while (fl_wifi_nla_ok(attr, rem)) {
+			if (attr->nla_type == FL_WIFI_NL80211_ATTR_WIPHY_NAME) {
+				const char *name = (const char *)((uint8_t *)attr + FL_WIFI_NLA_HDRLEN);
 
 				if (strstr(name, "7921") != NULL)
 					nl->mt7921 = 1;
-			} else if (attr->nla_type == NL80211_ATTR_WIPHY_BANDS) {
-				struct nlattr *band;
+			} else if (attr->nla_type == FL_WIFI_NL80211_ATTR_WIPHY_BANDS) {
+				struct fl_wifi_nlattr *band;
 				int band_rem;
 				unsigned band_idx = 0;
 
-				band = (struct nlattr *)((uint8_t *)attr + NLA_HDRLEN);
-				band_rem = (int)(attr->nla_len - NLA_HDRLEN);
-				while (nla_ok(band, band_rem)) {
+				band = (struct fl_wifi_nlattr *)((uint8_t *)attr + FL_WIFI_NLA_HDRLEN);
+				band_rem = (int)(attr->nla_len - FL_WIFI_NLA_HDRLEN);
+				while (fl_wifi_nla_ok(band, band_rem)) {
 					nl80211_parse_band_he(band, nl, band_idx);
 					band_idx++;
-					band = nla_next(band, &band_rem);
+					band = fl_wifi_nla_next(band, &band_rem);
 				}
 			}
-			attr = nla_next(attr, &rem);
+			attr = fl_wifi_nla_next(attr, &rem);
 		}
 		return 0;
 	}
@@ -480,43 +441,43 @@ static void nl80211_dispatch_mgmt(fl_net_wifi_nl80211_t *nl, const uint8_t *fram
 	(void)nl80211_mgmt_enqueue(nl, frame, len);
 }
 
-static void nl80211_handle_msg(fl_net_wifi_nl80211_t *nl, struct nlmsghdr *nh)
+static void nl80211_handle_msg(fl_net_wifi_nl80211_t *nl, struct fl_wifi_nlmsghdr *nh)
 {
-	struct genlmsghdr *gh;
-	struct nlattr *attr;
+	struct fl_wifi_genlmsghdr *gh;
+	struct fl_wifi_nlattr *attr;
 	int rem;
 
 	if (!nl || !nh)
 		return;
 	if (nh->nlmsg_type != (unsigned int)nl->nl80211_id)
 		return;
-	gh = (struct genlmsghdr *)NLMSG_DATA(nh);
-	attr = (struct nlattr *)((uint8_t *)gh + GENL_HDRLEN);
-	rem = (int)(nh->nlmsg_len - NLMSG_LENGTH(GENL_HDRLEN));
-	if (gh->cmd == NL80211_CMD_FRAME) {
+	gh = (struct fl_wifi_genlmsghdr *)FL_WIFI_NLMSG_DATA(nh);
+	attr = (struct fl_wifi_nlattr *)((uint8_t *)gh + FL_WIFI_GENL_HDRLEN);
+	rem = (int)(nh->nlmsg_len - FL_WIFI_NLMSG_LENGTH(FL_WIFI_GENL_HDRLEN));
+	if (gh->cmd == FL_WIFI_NL80211_CMD_FRAME) {
 		const uint8_t *frame = NULL;
 		size_t frame_len = 0;
 
-		while (nla_ok(attr, rem)) {
-			if (attr->nla_type == NL80211_ATTR_FRAME) {
-				frame = (const uint8_t *)attr + NLA_HDRLEN;
-				frame_len = attr->nla_len - NLA_HDRLEN;
+		while (fl_wifi_nla_ok(attr, rem)) {
+			if (attr->nla_type == FL_WIFI_NL80211_ATTR_FRAME) {
+				frame = (const uint8_t *)attr + FL_WIFI_NLA_HDRLEN;
+				frame_len = attr->nla_len - FL_WIFI_NLA_HDRLEN;
 			}
-			attr = nla_next(attr, &rem);
+			attr = fl_wifi_nla_next(attr, &rem);
 		}
 		if (frame && frame_len > 0u)
 			nl80211_dispatch_mgmt(nl, frame, frame_len);
-	} else if (gh->cmd == NL80211_CMD_FRAME_TX_STATUS) {
+	} else if (gh->cmd == FL_WIFI_NL80211_CMD_FRAME_TX_STATUS) {
 		uint64_t cookie = 0;
 		int ack = 0;
 
-		while (nla_ok(attr, rem)) {
-			if (attr->nla_type == NL80211_ATTR_COOKIE)
-				memcpy(&cookie, (uint8_t *)attr + NLA_HDRLEN,
-				       attr->nla_len - NLA_HDRLEN);
-			else if (attr->nla_type == NL80211_ATTR_ACK)
+		while (fl_wifi_nla_ok(attr, rem)) {
+			if (attr->nla_type == FL_WIFI_NL80211_ATTR_COOKIE)
+				memcpy(&cookie, (uint8_t *)attr + FL_WIFI_NLA_HDRLEN,
+				       attr->nla_len - FL_WIFI_NLA_HDRLEN);
+			else if (attr->nla_type == FL_WIFI_NL80211_ATTR_ACK)
 				ack = 1;
-			attr = nla_next(attr, &rem);
+			attr = fl_wifi_nla_next(attr, &rem);
 		}
 		if (cookie == nl->last_cookie)
 			nl->last_tx_ok = ack;
@@ -527,7 +488,7 @@ fl_result_t fl_net_wifi_nl80211_init(fl_net_wifi_nl80211_t **out, const char *if
 {
 	fl_net_wifi_nl80211_t *nl;
 	const char *iface;
-	struct sockaddr_nl sa;
+	struct fl_wifi_sockaddr_nl sa;
 
 	if (!out || !ifname || !ifname[0])
 		return FL_RESULT_INVAL;
@@ -537,13 +498,13 @@ fl_result_t fl_net_wifi_nl80211_init(fl_net_wifi_nl80211_t **out, const char *if
 	nl = (fl_net_wifi_nl80211_t *)calloc(1, sizeof(*nl));
 	if (!nl)
 		return FL_RESULT_ERR;
-	nl->fd = socket(AF_NETLINK, SOCK_RAW, NETLINK_GENERIC);
+	nl->fd = socket(FL_WIFI_WIRE_AF_NETLINK, FL_WIFI_WIRE_SOCK_RAW, FL_WIFI_WIRE_NETLINK_GENERIC);
 	if (nl->fd < 0) {
 		free(nl);
 		return FL_RESULT_NOSYS;
 	}
 	memset(&sa, 0, sizeof(sa));
-	sa.nl_family = AF_NETLINK;
+	sa.nl_family = FL_WIFI_WIRE_AF_NETLINK;
 	sa.nl_groups = 0;
 	if (bind(nl->fd, (struct sockaddr *)&sa, sizeof(sa)) < 0) {
 		close(nl->fd);
@@ -600,17 +561,17 @@ fl_result_t fl_net_wifi_nl80211_mgmt_tx(fl_net_wifi_nl80211_t *nl, const uint8_t
 {
 	uint8_t buf[NL80211_MAX_MSG];
 	size_t pos;
-	struct nlmsghdr *nh;
+	struct fl_wifi_nlmsghdr *nh;
 	static uint32_t seq;
 	int n;
 
 	if (!nl || !frame || len == 0)
 		return FL_RESULT_INVAL;
-	if (nl80211_build_msg(buf, sizeof(buf), (uint16_t)nl->nl80211_id, NL80211_CMD_FRAME,
-			      NLM_F_REQUEST, ++seq, &pos) != 0)
+	if (nl80211_build_msg(buf, sizeof(buf), (uint16_t)nl->nl80211_id, FL_WIFI_NL80211_CMD_FRAME,
+			      FL_WIFI_NLM_F_REQUEST, ++seq, &pos) != 0)
 		return FL_RESULT_ERR;
-	if (nla_put_u32(buf, sizeof(buf), &pos, NL80211_ATTR_IFINDEX, nl->ifindex) != 0 ||
-	    nla_put_data(buf, sizeof(buf), &pos, NL80211_ATTR_FRAME, frame, len) != 0)
+	if (nla_put_u32(buf, sizeof(buf), &pos, FL_WIFI_NL80211_ATTR_IFINDEX, nl->ifindex) != 0 ||
+	    nla_put_data(buf, sizeof(buf), &pos, FL_WIFI_NL80211_ATTR_FRAME, frame, len) != 0)
 		return FL_RESULT_ERR;
 	nl->last_cookie = (uint64_t)seq;
 	nl->last_tx_ok = 0;
@@ -621,15 +582,15 @@ fl_result_t fl_net_wifi_nl80211_mgmt_tx(fl_net_wifi_nl80211_t *nl, const uint8_t
 		n = nl80211_recv(nl, buf, sizeof(buf), timeout_ms ? timeout_ms : 100u);
 		if (n < 0)
 			break;
-		nh = (struct nlmsghdr *)buf;
-		while (NLMSG_OK(nh, (unsigned int)n)) {
-			if (nh->nlmsg_type == NLMSG_ERROR) {
-				struct nlmsgerr *err = (struct nlmsgerr *)NLMSG_DATA(nh);
+		nh = (struct fl_wifi_nlmsghdr *)buf;
+		while (FL_WIFI_NLMSG_OK(nh, (unsigned int)n)) {
+			if (nh->nlmsg_type == FL_WIFI_NLMSG_ERROR) {
+				struct fl_wifi_nlmsgerr *err = (struct fl_wifi_nlmsgerr *)FL_WIFI_NLMSG_DATA(nh);
 
 				return err->error == 0 ? FL_RESULT_OK : FL_RESULT_ERR;
 			}
 			nl80211_handle_msg(nl, nh);
-			nh = NLMSG_NEXT(nh, n);
+			nh = FL_WIFI_NLMSG_NEXT(nh, n);
 		}
 		if (nl->last_tx_ok)
 			return FL_RESULT_OK;
@@ -649,10 +610,10 @@ fl_result_t fl_net_wifi_nl80211_register_mgmt(fl_net_wifi_nl80211_t *nl, uint16_
 	if (nl->mgmt_reg_count >= NL80211_MGMT_REG_MAX)
 		return FL_RESULT_ERR;
 	if (nl80211_build_msg(buf, sizeof(buf), (uint16_t)nl->nl80211_id,
-			      NL80211_CMD_REGISTER_FRAME, NLM_F_REQUEST, ++seq, &pos) != 0)
+			      FL_WIFI_NL80211_CMD_REGISTER_FRAME, FL_WIFI_NLM_F_REQUEST, ++seq, &pos) != 0)
 		return FL_RESULT_ERR;
-	if (nla_put_u32(buf, sizeof(buf), &pos, NL80211_ATTR_IFINDEX, nl->ifindex) != 0 ||
-	    nla_put_u16(buf, sizeof(buf), &pos, NL80211_ATTR_FRAME_TYPE, frame_type) != 0)
+	if (nla_put_u32(buf, sizeof(buf), &pos, FL_WIFI_NL80211_ATTR_IFINDEX, nl->ifindex) != 0 ||
+	    nla_put_u16(buf, sizeof(buf), &pos, FL_WIFI_NL80211_ATTR_FRAME_TYPE, frame_type) != 0)
 		return FL_RESULT_ERR;
 	nl80211_finish_msg(buf, pos);
 	if (nl80211_send(nl, buf, pos) < 0)
@@ -668,17 +629,17 @@ fl_result_t fl_net_wifi_nl80211_poll(fl_net_wifi_nl80211_t *nl, unsigned timeout
 {
 	uint8_t buf[NL80211_MAX_MSG];
 	int n;
-	struct nlmsghdr *nh;
+	struct fl_wifi_nlmsghdr *nh;
 
 	if (!nl)
 		return FL_RESULT_INVAL;
 	n = nl80211_recv(nl, buf, sizeof(buf), timeout_ms);
 	if (n < 0)
 		return FL_RESULT_TIMEDOUT;
-	nh = (struct nlmsghdr *)buf;
-	while (NLMSG_OK(nh, (unsigned int)n)) {
+	nh = (struct fl_wifi_nlmsghdr *)buf;
+	while (FL_WIFI_NLMSG_OK(nh, (unsigned int)n)) {
 		nl80211_handle_msg(nl, nh);
-		nh = NLMSG_NEXT(nh, n);
+		nh = FL_WIFI_NLMSG_NEXT(nh, n);
 	}
 	return FL_RESULT_OK;
 }
@@ -705,29 +666,29 @@ fl_result_t fl_net_wifi_nl80211_mgmt_rx(fl_net_wifi_nl80211_t *nl, uint8_t *fram
 	return FL_RESULT_OK;
 }
 
-static int nl80211_scan_bss(fl_net_wifi_scan_entry_t *entry, struct nlattr *bss)
+static int nl80211_scan_bss(fl_net_wifi_scan_entry_t *entry, struct fl_wifi_nlattr *bss)
 {
-	struct nlattr *attr;
+	struct fl_wifi_nlattr *attr;
 	int rem;
 	const uint8_t *ies = NULL;
 	size_t ies_len = 0;
 	int8_t rssi = -127;
 
 	memset(entry, 0, sizeof(*entry));
-	attr = (struct nlattr *)((uint8_t *)bss + NLA_HDRLEN);
-	rem = (int)(bss->nla_len - NLA_HDRLEN);
-	while (nla_ok(attr, rem)) {
-		if (attr->nla_type == NL80211_BSS_INFORMATION_ELEMENTS) {
-			ies = (const uint8_t *)attr + NLA_HDRLEN;
-			ies_len = attr->nla_len - NLA_HDRLEN;
-		} else if (attr->nla_type == NL80211_BSS_SIGNAL_MBM) {
-			int32_t mbm = *(int32_t *)((uint8_t *)attr + NLA_HDRLEN);
+	attr = (struct fl_wifi_nlattr *)((uint8_t *)bss + FL_WIFI_NLA_HDRLEN);
+	rem = (int)(bss->nla_len - FL_WIFI_NLA_HDRLEN);
+	while (fl_wifi_nla_ok(attr, rem)) {
+		if (attr->nla_type == FL_WIFI_NL80211_BSS_INFORMATION_ELEMENTS) {
+			ies = (const uint8_t *)attr + FL_WIFI_NLA_HDRLEN;
+			ies_len = attr->nla_len - FL_WIFI_NLA_HDRLEN;
+		} else if (attr->nla_type == FL_WIFI_NL80211_BSS_SIGNAL_MBM) {
+			int32_t mbm = *(int32_t *)((uint8_t *)attr + FL_WIFI_NLA_HDRLEN);
 
 			rssi = (int8_t)(mbm / 100);
-		} else if (attr->nla_type == NL80211_BSS_BSSID)
-			memcpy(entry->bssid, (uint8_t *)attr + NLA_HDRLEN, 6u);
-		else if (attr->nla_type == NL80211_BSS_FREQUENCY) {
-			uint32_t freq = *(uint32_t *)((uint8_t *)attr + NLA_HDRLEN);
+		} else if (attr->nla_type == FL_WIFI_NL80211_BSS_BSSID)
+			memcpy(entry->bssid, (uint8_t *)attr + FL_WIFI_NLA_HDRLEN, 6u);
+		else if (attr->nla_type == FL_WIFI_NL80211_BSS_FREQUENCY) {
+			uint32_t freq = *(uint32_t *)((uint8_t *)attr + FL_WIFI_NLA_HDRLEN);
 
 			if (freq < 3000u)
 				entry->band = FL_WIFI_BAND_2GHZ;
@@ -736,7 +697,7 @@ static int nl80211_scan_bss(fl_net_wifi_scan_entry_t *entry, struct nlattr *bss)
 			else
 				entry->band = FL_WIFI_BAND_6GHZ;
 		}
-		attr = nla_next(attr, &rem);
+		attr = fl_wifi_nla_next(attr, &rem);
 	}
 	entry->rssi_dbm = rssi;
 	if (ies && ies_len > 0u)
@@ -754,9 +715,9 @@ fl_result_t fl_net_wifi_nl80211_trigger_scan(fl_net_wifi_nl80211_t *nl, const ch
 	if (!nl)
 		return FL_RESULT_INVAL;
 	if (nl80211_build_msg(buf, sizeof(buf), (uint16_t)nl->nl80211_id,
-			      NL80211_CMD_TRIGGER_SCAN, NLM_F_REQUEST, ++seq, &pos) != 0)
+			      FL_WIFI_NL80211_CMD_TRIGGER_SCAN, FL_WIFI_NLM_F_REQUEST, ++seq, &pos) != 0)
 		return FL_RESULT_ERR;
-	if (nla_put_u32(buf, sizeof(buf), &pos, NL80211_ATTR_IFINDEX, nl->ifindex) != 0)
+	if (nla_put_u32(buf, sizeof(buf), &pos, FL_WIFI_NL80211_ATTR_IFINDEX, nl->ifindex) != 0)
 		return FL_RESULT_ERR;
 	nl80211_finish_msg(buf, pos);
 	if (nl80211_send(nl, buf, pos) < 0)
@@ -772,18 +733,18 @@ fl_result_t fl_net_wifi_nl80211_get_scan(fl_net_wifi_nl80211_t *nl,
 	uint8_t buf[NL80211_MAX_MSG];
 	size_t pos;
 	int n;
-	struct nlmsghdr *nh;
-	struct genlmsghdr *gh;
+	struct fl_wifi_nlmsghdr *nh;
+	struct fl_wifi_genlmsghdr *gh;
 	static uint32_t seq;
 	size_t count = 0;
 
 	if (!nl || !entries || !count_out || cap == 0u)
 		return FL_RESULT_INVAL;
 	*count_out = 0;
-	if (nl80211_build_msg(buf, sizeof(buf), (uint16_t)nl->nl80211_id, NL80211_CMD_GET_SCAN,
-			      NLM_F_DUMP, ++seq, &pos) != 0)
+	if (nl80211_build_msg(buf, sizeof(buf), (uint16_t)nl->nl80211_id, FL_WIFI_NL80211_CMD_GET_SCAN,
+			      FL_WIFI_NLM_F_DUMP, ++seq, &pos) != 0)
 		return FL_RESULT_ERR;
-	if (nla_put_u32(buf, sizeof(buf), &pos, NL80211_ATTR_IFINDEX, nl->ifindex) != 0)
+	if (nla_put_u32(buf, sizeof(buf), &pos, FL_WIFI_NL80211_ATTR_IFINDEX, nl->ifindex) != 0)
 		return FL_RESULT_ERR;
 	nl80211_finish_msg(buf, pos);
 	if (nl80211_send(nl, buf, pos) < 0)
@@ -792,30 +753,30 @@ fl_result_t fl_net_wifi_nl80211_get_scan(fl_net_wifi_nl80211_t *nl,
 		n = nl80211_recv(nl, buf, sizeof(buf), 500u);
 		if (n < 0)
 			break;
-		nh = (struct nlmsghdr *)buf;
-		while (NLMSG_OK(nh, (unsigned int)n)) {
-			struct nlattr *attr;
+		nh = (struct fl_wifi_nlmsghdr *)buf;
+		while (FL_WIFI_NLMSG_OK(nh, (unsigned int)n)) {
+			struct fl_wifi_nlattr *attr;
 			int rem;
 
-			if (nh->nlmsg_type == NLMSG_DONE)
+			if (nh->nlmsg_type == FL_WIFI_NLMSG_DONE)
 				goto done;
-			if (nh->nlmsg_type == NLMSG_ERROR)
+			if (nh->nlmsg_type == FL_WIFI_NLMSG_ERROR)
 				return FL_RESULT_ERR;
-			gh = (struct genlmsghdr *)NLMSG_DATA(nh);
-			if (gh->cmd != NL80211_CMD_NEW_SCAN_RESULTS &&
-			    gh->cmd != NL80211_CMD_GET_SCAN)
+			gh = (struct fl_wifi_genlmsghdr *)FL_WIFI_NLMSG_DATA(nh);
+			if (gh->cmd != FL_WIFI_NL80211_CMD_NEW_SCAN_RESULTS &&
+			    gh->cmd != FL_WIFI_NL80211_CMD_GET_SCAN)
 				goto next;
-			attr = (struct nlattr *)((uint8_t *)gh + GENL_HDRLEN);
-			rem = (int)(nh->nlmsg_len - NLMSG_LENGTH(GENL_HDRLEN));
-			while (nla_ok(attr, rem)) {
-				if (attr->nla_type == NL80211_ATTR_BSS && count < cap) {
+			attr = (struct fl_wifi_nlattr *)((uint8_t *)gh + FL_WIFI_GENL_HDRLEN);
+			rem = (int)(nh->nlmsg_len - FL_WIFI_NLMSG_LENGTH(FL_WIFI_GENL_HDRLEN));
+			while (fl_wifi_nla_ok(attr, rem)) {
+				if (attr->nla_type == FL_WIFI_NL80211_ATTR_BSS && count < cap) {
 					if (nl80211_scan_bss(&entries[count], attr))
 						count++;
 				}
-				attr = nla_next(attr, &rem);
+				attr = fl_wifi_nla_next(attr, &rem);
 			}
 		next:
-			nh = NLMSG_NEXT(nh, n);
+			nh = FL_WIFI_NLMSG_NEXT(nh, n);
 		}
 	}
 done:
@@ -843,16 +804,16 @@ fl_result_t fl_net_wifi_nl80211_install_key(fl_net_wifi_nl80211_t *nl, uint8_t k
 
 	if (!nl || !key || key_len < 16u)
 		return FL_RESULT_INVAL;
-	if (nl80211_build_msg(buf, sizeof(buf), (uint16_t)nl->nl80211_id, NL80211_CMD_NEW_KEY,
-			      NLM_F_REQUEST, ++seq, &pos) != 0)
+	if (nl80211_build_msg(buf, sizeof(buf), (uint16_t)nl->nl80211_id, FL_WIFI_NL80211_CMD_NEW_KEY,
+			      FL_WIFI_NLM_F_REQUEST, ++seq, &pos) != 0)
 		return FL_RESULT_ERR;
-	if (nla_put_u32(buf, sizeof(buf), &pos, NL80211_ATTR_IFINDEX, nl->ifindex) != 0 ||
-	    nla_put_u8(buf, sizeof(buf), &pos, NL80211_ATTR_KEY_IDX, key_index) != 0 ||
-	    nla_put_data(buf, sizeof(buf), &pos, NL80211_ATTR_KEY_DATA, key, key_len) != 0 ||
-	    nla_put_u32(buf, sizeof(buf), &pos, NL80211_ATTR_KEY_CIPHER,
-			WLAN_CIPHER_SUITE_CCMP) != 0 ||
-	    nla_put_u8(buf, sizeof(buf), &pos, NL80211_ATTR_KEY_TYPE,
-		       pairwise ? NL80211_KEYTYPE_PAIRWISE : NL80211_KEYTYPE_GROUP) != 0)
+	if (nla_put_u32(buf, sizeof(buf), &pos, FL_WIFI_NL80211_ATTR_IFINDEX, nl->ifindex) != 0 ||
+	    nla_put_u8(buf, sizeof(buf), &pos, FL_WIFI_NL80211_ATTR_KEY_IDX, key_index) != 0 ||
+	    nla_put_data(buf, sizeof(buf), &pos, FL_WIFI_NL80211_ATTR_KEY_DATA, key, key_len) != 0 ||
+	    nla_put_u32(buf, sizeof(buf), &pos, FL_WIFI_NL80211_ATTR_KEY_CIPHER,
+			FL_WIFI_WLAN_CIPHER_SUITE_CCMP) != 0 ||
+	    nla_put_u8(buf, sizeof(buf), &pos, FL_WIFI_NL80211_ATTR_KEY_TYPE,
+		       pairwise ? FL_WIFI_NL80211_KEYTYPE_PAIRWISE : FL_WIFI_NL80211_KEYTYPE_GROUP) != 0)
 		return FL_RESULT_ERR;
 	nl80211_finish_msg(buf, pos);
 	if (nl80211_send(nl, buf, pos) < 0)

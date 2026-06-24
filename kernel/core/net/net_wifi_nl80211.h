@@ -2,8 +2,8 @@
 #define NET_WIFI_NL80211_H
 
 /**
- * Linux nl80211 management-frame shim (#328 Task 1.1).
- * Hosted builds only; returns FL_RESULT_NOSYS elsewhere.
+ * Hosted Linux nl80211 management-frame shim (#328 Task 1.1).
+ * Uses first-principles wire layouts in net_wifi_host_wire.h (no Linux kernel headers).
  */
 
 #include "contract_p3_wifi.h"

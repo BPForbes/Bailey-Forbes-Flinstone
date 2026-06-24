@@ -2,8 +2,13 @@
 #define NET_WIFI_FULLMAC_H
 
 /**
- * nl80211-backed FullMAC NIC shim (#328 Task 1.2).
- * Registers **fl_net_driver_t** for L2 data; management via **net_wifi_nl80211**.
+ * FullMAC NIC shim (#328 Task 1.2).
+ *
+ * **Lab** (`FL_NET_WIFI_FULLMAC_LAB=1`): packet-validated netdev ring — same egress/channel
+ * path as mock, no kernel L2 socket.
+ *
+ * **Physical** (`FL_NET_WIFI_NL80211=1` / `FL_NET_WIFI_IFACE`): nl80211 control plane +
+ * AF_PACKET data via first-principles wire layouts in net_wifi_host_wire.h.
  */
 
 #include "contract_p3_wifi.h"
@@ -13,14 +18,34 @@
 #include <stddef.h>
 #include <stdint.h>
 
+typedef struct fl_net_wifi_nl80211 fl_net_wifi_nl80211_t;
+
+typedef enum {
+	FL_NET_WIFI_FULLMAC_MODE_NONE = 0,
+	FL_NET_WIFI_FULLMAC_MODE_LAB,
+	FL_NET_WIFI_FULLMAC_MODE_PHYSICAL,
+} fl_net_wifi_fullmac_mode_t;
+
+int fl_net_wifi_fullmac_available(void);
+
 fl_result_t fl_net_wifi_fullmac_init(const char *ifname);
 void fl_net_wifi_fullmac_deinit(void);
 
 int fl_net_wifi_fullmac_active(void);
 
+fl_net_wifi_fullmac_mode_t fl_net_wifi_fullmac_mode(void);
+int fl_net_wifi_fullmac_is_lab(void);
+int fl_net_wifi_fullmac_is_physical(void);
+
 fl_net_driver_t *fl_net_wifi_fullmac_driver(void);
 
 const char *fl_net_wifi_fullmac_ifname(void);
+
+/** Physical mode only; NULL in lab mode. */
+fl_net_wifi_nl80211_t *fl_net_wifi_fullmac_nl80211(void);
+
+/** Lab mode: enqueue one Ethernet frame for the next recv(). */
+fl_result_t fl_net_wifi_fullmac_lab_inject_rx(const uint8_t *frame, size_t len);
 
 fl_result_t fl_net_wifi_fullmac_scan(uint8_t band, unsigned timeout_ms);
 fl_result_t fl_net_wifi_fullmac_scan_result(fl_net_wifi_scan_entry_t *entries, size_t cap,
@@ -28,12 +53,10 @@ fl_result_t fl_net_wifi_fullmac_scan_result(fl_net_wifi_scan_entry_t *entries, s
 
 fl_result_t fl_net_wifi_fullmac_disconnect(void);
 
-/** PHY capabilities from GET_WIPHY; negotiated HE after association. */
 fl_result_t fl_net_wifi_fullmac_he_cap(fl_net_wifi_he_cap_t *cap_out);
 
 int fl_net_wifi_fullmac_mt7921_detected(void);
 
-/** Post-association negotiated HE (Task 3+); PHY caps until set. */
 void fl_net_wifi_fullmac_set_negotiated_he(const fl_net_wifi_he_cap_t *cap);
 
 #endif /* NET_WIFI_FULLMAC_H */
