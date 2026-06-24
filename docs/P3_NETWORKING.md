@@ -230,7 +230,7 @@ Legend matches **`docs/ROADMAP.md`**: **✅** complete; **~✅** usable lab subs
 | **P3-7** TCP | ✅ | ~✅ — SYN probe + **`fl_net_tcp_stream_*`** hosted listen/connect/accept |
 | **P3-8** DNS | ✅ | ~✅ — A record + **AAAA** stub (`fl_net_dns_resolve_aaaa`) |
 | **P3-11** IPv6 + ICMPv6 | ✅ | ~✅ — loopback ICMPv6/NDP, IPv6 FIB, ethertype dispatch; TAP/wire IPv6 stretch (**#280**) |
-| **P3-10** Wi‑Fi station | ✅ | ~✅ — **`contract_p3_wifi.h`**, **`net_wifi_he`**, hosted lab scan/connect (**#279** PR #306); shell **`wifi`** + **`wifi_router`** DB; **`fl_net_wifi_station_netdev()`** NULL; SAE/WPA/TWT/mgmt + P4 NIC block production — **`docs/GITHUB_ISSUE_SYNC_279.md`** |
+| **P3-10** Wi‑Fi station | ✅ | ~✅ — **`contract_p3_wifi.h`**, **`net_wifi_he`**, hosted lab scan/connect (**#279** PR #306); shell **`wifi`** + **`wifi_router`** DB; **`fl_net_wifi_station_netdev()`** NULL; SAE/WPA/TWT/mgmt + P4 NIC block production — **`docs/GITHUB_ISSUE_SYNC_P4_WIFI_OTA.md`** |
 | **P3-9** TLS | ✅ | ~✅ — **`net_tls_hosted.c`** record-size boundary (no mbedtls yet) |
 | **P3-12** DHCP | ✅ | ~✅ — BOOTP codec + **`fl_net_dhcp_*_pkt`** over **`fl_net_packet_t`** |
 | **P3-14** background | ✅ | ~✅ — **`fl_net_arp_tick`** on workqueue; TCP timer wheel / RX dequeue still **#238** |
@@ -407,7 +407,7 @@ make check-network-requirements
 - **`docs/ROADMAP.md`** — P3 rows and phase gates
 - **`docs/P3_NETWORKING_DEFERRED.md`** — P3-10 / P3-11 deferral vs **~✅** foundation (not “IPv4-only”)
 - **`docs/GITHUB_ISSUE_SYNC_PR301.md`** — maintainer checklist for **#280** / **#283** issue bodies
-- **`docs/GITHUB_ISSUE_SYNC_279.md`** — maintainer checklist for **#279** / **#257** P3-10 scope vs PR #306
+- **`docs/GITHUB_ISSUE_SYNC_P4_WIFI_OTA.md`** — maintainer checklist for **#279** / **#257** P3-10 scope vs PR #306
 - **`kernel/core/net/README.md`** — file index and include graph
 - **`AGENTS.md`** — build/test and versioning for this PR
 

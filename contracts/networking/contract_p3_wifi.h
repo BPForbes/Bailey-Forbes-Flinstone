@@ -1,7 +1,7 @@
 /**
  * **P3-10 — Wi-Fi 802.11ax station path** (module contract, normative).
  *
- * Promoted from **contract_p3_wifi_deferred.h** for **#279**. L2 data still crosses
+ * Promoted for **#279** / **#328** (P3-10 / P4-01). L2 data still crosses
  * **fl_net_frame_view_t** (same pipeline as Ethernet); upper stack uses
  * **fl_net_driver_t** + **P3-5** / **P3-6** / **P3-7** unchanged.
  *

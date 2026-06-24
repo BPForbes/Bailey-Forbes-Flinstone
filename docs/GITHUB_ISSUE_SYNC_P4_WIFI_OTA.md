@@ -1,16 +1,28 @@
-# GitHub issue sync — #279 P3-10 Wi‑Fi (maintainer)
+# GitHub issue sync — P4 Wi‑Fi OTA / 802.11ax production tail (maintainer)
 
-Align **[#279](https://github.com/BPForbes/Bailey-Forbes-Flinstone/issues/279)** / **#257** with branch **`v4.3.0-wifi-drivers`** (PR [#320](https://github.com/BPForbes/Bailey-Forbes-Flinstone/pull/320)).
+Align closed **[#279](https://github.com/BPForbes/Bailey-Forbes-Flinstone/issues/279)** / **#257** foundation with open **[#328](https://github.com/BPForbes/Bailey-Forbes-Flinstone/issues/328)** (P4-01 in-tree driver independence) and review follow-ups **[#329](https://github.com/BPForbes/Bailey-Forbes-Flinstone/issues/329)** on the **4.3.0** train (PR [#320](https://github.com/BPForbes/Bailey-Forbes-Flinstone/pull/320), [#333](https://github.com/BPForbes/Bailey-Forbes-Flinstone/pull/333)).
 
-**Legend:** **Lab** = hosted `FL_NET_WIFI_HOSTED_LAB` (loopback `fl_net_driver_t`, no RF). **Mock ax** = `FL_WIFI_80211AX_MOCK=1` software FullMAC (`wifi_80211ax_mock.c`) — exercises 802.11ax + OTA auth on Wi‑Fi 5-only hardware without RF. **Server OTA** = P3 **`server host`** + **`server join`** with `net_wifi_ax_server.c` relaying SAE commit/confirm, EAPOL 4-way, and Assoc Req/Resp (HE IEs) on session opcodes `0x40`–`0x45` — L2 over TCP, not RF. **RF** = real 802.11ax NIC / QEMU passthrough still required to **close** #279.
+**Legend:** **Lab** = hosted `FL_NET_WIFI_HOSTED_LAB` (loopback `fl_net_driver_t`, no RF). **Mock ax** = `FL_WIFI_80211AX_MOCK=1` software FullMAC (`wifi_lab_backend.c` / `wifi_lab_mock_*`) — exercises 802.11ax + OTA auth on Wi‑Fi 5-only hardware without RF. **Server OTA** = P3 **`server host`** + **`server join`** with `net_wifi_ax_server.c` relaying SAE commit/confirm, EAPOL 4-way, and Assoc Req/Resp (HE IEs) on session opcodes `0x40`–`0x45` — L2 over TCP, not RF. **RF** = real 802.11ax NIC / QEMU passthrough still required to **close** #328 production tail.
 
-**33 tracked items** = 4 prerequisites + 19 scope + 10 acceptance. Automated matrix: **`make test_wifi_80211ax_mock_279`**. L2 session-wire OTA (the three items CodeRabbit flagged as non-mockable without hardware): **`make test_wifi_ax_server_ota`**.
+**33 tracked items** = 4 prerequisites + 19 scope + 10 acceptance (inherited from #279 mock matrix). Automated matrix: **`make test_wifi_80211ax_mock_279`**. L2 session-wire OTA: **`make test_wifi_ax_server_ota`**.
+
+## File layout (#328)
+
+| Layer | Path | Notes |
+|-------|------|-------|
+| FSM / orchestration | `kernel/core/net/net_wifi_station.c` | Driver → host → lab dispatch |
+| Hosted fallback | `kernel/core/net/net_wifi_host_linux.c` | nmcli / wpa_cli / FlinstonePowershell |
+| Driver router | `kernel/drivers/wifi/wifi_driver_backend.c` | Phase 1/2/3/4 backend selection |
+| Coprocessor | `kernel/drivers/wifi/wifi_coprocessor.c` | Phase 1 UART AT |
+| FullMAC | `kernel/drivers/wifi/fullmac/wifi_fullmac_*.c` | Phase 4 PCIe/USB probe |
+| Lab + mock | `kernel/drivers/wifi/wifi_lab_backend.c` | `wifi_lab_mock_*` software ax NIC |
+| Contract | `contracts/networking/contract_p3_wifi.h` | Promoted; deferred stub removed |
 
 ## Promotion prerequisites (4)
 
 | # | Prerequisite | GitHub | Mock ax | RF production |
 |---|--------------|--------|---------|---------------|
-| 1 | P4 firmware / driver | **~✅ Mock** | `wifi_80211ax_mock` + backend | Real Phase 4 FullMAC still open |
+| 1 | P4 firmware / driver | **~✅ Mock** | `wifi_lab_mock_*` + backend | Real Phase 4 FullMAC still open |
 | 2 | QEMU 802.11ax or real WiFi 6 NIC | **~✅ Mock** | `FL_WIFI_80211AX_MOCK=1` | Still **❌** until NIC/QEMU |
 | 3 | P3-12 DHCP | **✅** (#247) | mock + lab netdev | **✅** |
 | 4 | P3-5 routing / egress | **✅** (#262) | mock UDP echo path | **✅** |
@@ -29,7 +41,7 @@ Align **[#279](https://github.com/BPForbes/Bailey-Forbes-Flinstone/issues/279)**
 | 8 | `net_wifi_twt` setup/teardown | **[x] Mock** | scope-8 / accept-24 |
 | 9 | `fl_net_wifi_scan` / `_connect` / `_disconnect` | **[x] Mock** | scope-9 via mock backend |
 | 10 | `fl_net_wifi_he_cap()` | **[x] Mock** | scope-10 / accept-23 |
-| 11 | Post-assoc `fl_net_dhcp_acquire` | **[x] Mock** | scope-11 + lab netdev DHCP |
+| 11 | Post-assoc `fl_net_dhcp_acquire` | **[x] Mock** | scope-11 + lab netdev DHCP via `wifi_driver_dhcp_exchange` |
 | 12 | Register `fl_net_driver_t` | **[x] Mock** | scope-12 mock netdev ops |
 | 13 | E2E scan→SAE→DHCP→UDP | **[x] Mock** | scope-13; RF **open** |
 | 14 | WPA3-SAE unit test (RFC 7664 KDF) | **[x]** | scope-14 / accept-26 |
@@ -55,7 +67,7 @@ Align **[#279](https://github.com/BPForbes/Bailey-Forbes-Flinstone/issues/279)**
 | 29 | `make test_p3_network` no regression | **[x]** | accept-29 + CI |
 | 30 | ROADMAP P3-10 ~✅ | **[x]** | accept-30 |
 
-**Total tracked items: 33** (4 + 19 + 10). Mock ax satisfies all 33 in software; **#279 remains open** until production RF OTA on a real 802.11ax path (Phase 4 FullMAC or confirmed QEMU NIC).
+**Total tracked items: 33** (4 + 19 + 10). Mock ax satisfies all 33 in software; **#328 remains open** until production RF OTA on a real 802.11ax path (Phase 4 FullMAC or confirmed QEMU NIC).
 
 ## Verify
 
@@ -68,6 +80,6 @@ make test_p3_wifi test_wifi_coprocessor test_p3_network test_invariants
 
 Set **`FL_WIFI_80211AX_MOCK=1`** (and omit **`FL_WIFI_UART_FD`**) to route `wifi_driver_backend` through the software ax NIC instead of UART coprocessor.
 
-## Do not check on #279
+## Do not check on #328 until RF lands
 
 Wi‑Fi **`server host`** production row stays **[ ]** until RF items 20–21 land on real hardware.

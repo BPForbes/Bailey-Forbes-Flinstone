@@ -1,0 +1,8 @@
+MAJOR_VERSION=4
+STANDARD_VERSION=3
+RELEASE_VERSION=0
+PRERELEASE=1
+DEV_VERSION=2
+DESCRIPTION<<PROMOTE_DESC_END
+4.3.0: P4 WiFi review fixes (#329) and file consolidation (#328) — route lab DHCP through wifi_driver_backend (not kernel/core/net), endian-safe macvlan IPv4 checksum, argv-based ip(8) for fl0 macvlan, FullMAC connect op validation (open-system auth when op present), WSL .wslconfig profile prefers invoking Windows user, remove contract_p3_wifi_deferred.h, rename docs/GITHUB_ISSUE_SYNC_P4_WIFI_OTA.md, delete stale V430 root docs, and move coprocessor tests under tests/.
+PROMOTE_DESC_END
