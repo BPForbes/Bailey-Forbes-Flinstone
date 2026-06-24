@@ -726,6 +726,24 @@ fl_result_t fl_net_wifi_nl80211_register_mgmt(fl_net_wifi_nl80211_t *nl, uint16_
 	return FL_RESULT_OK;
 }
 
+void fl_net_wifi_nl80211_unregister_mgmt_ctx(fl_net_wifi_nl80211_t *nl, void *ctx)
+{
+	unsigned i = 0;
+
+	if (!nl || !ctx)
+		return;
+	while (i < nl->mgmt_reg_count) {
+		if (nl->mgmt_reg[i].ctx != ctx) {
+			i++;
+			continue;
+		}
+		if (i + 1u < nl->mgmt_reg_count)
+			memmove(&nl->mgmt_reg[i], &nl->mgmt_reg[i + 1u],
+				(nl->mgmt_reg_count - i - 1u) * sizeof(nl->mgmt_reg[0]));
+		nl->mgmt_reg_count--;
+	}
+}
+
 fl_result_t fl_net_wifi_nl80211_poll(fl_net_wifi_nl80211_t *nl, unsigned timeout_ms)
 {
 	uint8_t buf[NL80211_MAX_MSG];
@@ -806,7 +824,12 @@ static int nl80211_scan_bss(fl_net_wifi_scan_entry_t *entry, struct fl_wifi_nlat
 	entry->rssi_dbm = rssi;
 	if (ies && ies_len > 0u)
 		(void)fl_net_wifi_mgmt_enrich_scan_from_ies(ies, ies_len, entry);
-	return entry->ssid[0] != '\0' || entry->bssid[0] != 0;
+	{
+		static const uint8_t zero_bssid[6] = {0};
+
+		return entry->ssid[0] != '\0' ||
+		       memcmp(entry->bssid, zero_bssid, sizeof(entry->bssid)) != 0;
+	}
 }
 
 fl_result_t fl_net_wifi_nl80211_trigger_scan(fl_net_wifi_nl80211_t *nl, const char *ssid)
@@ -1000,6 +1023,12 @@ fl_result_t fl_net_wifi_nl80211_register_mgmt(fl_net_wifi_nl80211_t *nl, uint16_
 	(void)cb;
 	(void)ctx;
 	return FL_RESULT_NOSYS;
+}
+
+void fl_net_wifi_nl80211_unregister_mgmt_ctx(fl_net_wifi_nl80211_t *nl, void *ctx)
+{
+	(void)nl;
+	(void)ctx;
 }
 
 fl_result_t fl_net_wifi_nl80211_mgmt_rx(fl_net_wifi_nl80211_t *nl, uint8_t *frame, size_t cap,

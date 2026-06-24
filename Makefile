@@ -965,10 +965,12 @@ run-test_wifi:
 	@test -x tests/test_wifi_coprocessor || { echo "missing tests/test_wifi_coprocessor (run: make test_wifi_coprocessor)" >&2; exit 1; }
 	@test -x tests/test_p3_wifi || { echo "missing tests/test_p3_wifi (run: make test_p3_wifi)" >&2; exit 1; }
 	@test -x tests/test_wifi_80211ax_mock_279 || { echo "missing tests/test_wifi_80211ax_mock_279 (run: make test_wifi_80211ax_mock_279)" >&2; exit 1; }
+	@test -x tests/test_wifi_mgmt_ota || { echo "missing tests/test_wifi_mgmt_ota (run: make test_wifi_mgmt_ota)" >&2; exit 1; }
 	@test -x tests/test_wifi_ax_server_ota || { echo "missing tests/test_wifi_ax_server_ota (run: make test_wifi_ax_server_ota)" >&2; exit 1; }
 	@./tests/test_wifi_coprocessor
 	@./tests/test_p3_wifi
 	@./tests/test_wifi_80211ax_mock_279
+	@./tests/test_wifi_mgmt_ota
 	@./tests/test_wifi_ax_server_ota
 
 WIFI_TEST_STATION_DRIVER_SRCS = kernel/drivers/wifi/wifi_driver_backend.c kernel/drivers/wifi/wifi_coprocessor.c \

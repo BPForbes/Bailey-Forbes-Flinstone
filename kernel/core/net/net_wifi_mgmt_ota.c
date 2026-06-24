@@ -133,6 +133,8 @@ void fl_net_wifi_mgmt_ota_destroy(fl_net_wifi_mgmt_ota_t *ota)
 {
     if (!ota)
         return;
+    if (ota->nl)
+        fl_net_wifi_nl80211_unregister_mgmt_ctx(ota->nl, ota);
     if (g_fullmac_mgmt_ota == ota)
         g_fullmac_mgmt_ota = NULL;
     free(ota);
@@ -150,10 +152,14 @@ fl_result_t fl_net_wifi_mgmt_ota_register(fl_net_wifi_mgmt_ota_t *ota)
         return rc;
     rc = fl_net_wifi_nl80211_register_mgmt(ota->nl, FL_WIFI_MGMT_FC_BEACON, mgmt_ota_on_beacon,
                                            ota);
-    if (rc != FL_RESULT_OK)
+    if (rc != FL_RESULT_OK) {
+        fl_net_wifi_nl80211_unregister_mgmt_ctx(ota->nl, ota);
         return rc;
-    return fl_net_wifi_nl80211_register_mgmt(ota->nl, FL_WIFI_MGMT_FC_AUTH, mgmt_ota_on_auth,
-                                             ota);
+    }
+    rc = fl_net_wifi_nl80211_register_mgmt(ota->nl, FL_WIFI_MGMT_FC_AUTH, mgmt_ota_on_auth, ota);
+    if (rc != FL_RESULT_OK)
+        fl_net_wifi_nl80211_unregister_mgmt_ctx(ota->nl, ota);
+    return rc;
 }
 
 fl_result_t fl_net_wifi_mgmt_ota_probe_tx(fl_net_wifi_mgmt_ota_t *ota, const char *ssid,

@@ -8,7 +8,7 @@
 static const uint8_t k_wifi_bcast[6] = {0xffu, 0xffu, 0xffu, 0xffu, 0xffu, 0xffu};
 
 static uint16_t mgmt_fc(const uint8_t *frame) {
-    return (uint16_t)frame[0] | ((uint16_t)frame[1] << 8);
+    return ((uint16_t)frame[0] | ((uint16_t)frame[1] << 8)) & 0x00fcu;
 }
 
 static void mgmt_write_hdr(uint8_t *out, uint16_t fc, const uint8_t addr1[6],
@@ -79,6 +79,8 @@ fl_result_t fl_net_wifi_mgmt_parse_mgmt_ies(const uint8_t *frame, size_t len,
     fc = mgmt_fc(frame);
     switch (fc) {
     case FL_WIFI_MGMT_FC_ASSOC_REQ:
+        fixed = 4u;
+        break;
     case FL_WIFI_MGMT_FC_PROBE_REQ:
         fixed = 0u;
         break;
@@ -309,6 +311,7 @@ void fl_net_wifi_mgmt_bss_to_scan_entry(const fl_net_wifi_mgmt_bss_info_t *bss,
         return;
     if (bss->ssid[0])
         strncpy(entry->ssid, bss->ssid, sizeof(entry->ssid) - 1u);
+    entry->ssid[sizeof(entry->ssid) - 1u] = '\0';
     if (bss->bssid[0] || bss->bssid[1] || bss->bssid[2] || bss->bssid[3] || bss->bssid[4] ||
         bss->bssid[5])
         memcpy(entry->bssid, bss->bssid, 6u);
@@ -329,6 +332,7 @@ void fl_net_wifi_scan_entry_merge(fl_net_wifi_scan_entry_t *dst,
         return;
     if (src->ssid[0] && !dst->ssid[0])
         strncpy(dst->ssid, src->ssid, sizeof(dst->ssid) - 1u);
+    dst->ssid[sizeof(dst->ssid) - 1u] = '\0';
     if ((src->bssid[0] | src->bssid[1] | src->bssid[2] | src->bssid[3] | src->bssid[4] |
          src->bssid[5]) &&
         !(dst->bssid[0] | dst->bssid[1] | dst->bssid[2] | dst->bssid[3] | dst->bssid[4] |
@@ -376,34 +380,33 @@ fl_result_t fl_net_wifi_mgmt_build_he_cap_ie(const fl_net_wifi_he_cap_t *sta_he,
 
     if (!out || !out_len)
         return FL_RESULT_INVAL;
+    if (!sta_he) {
+        *out_len = 0u;
+        return FL_RESULT_OK;
+    }
     memset(mac, 0, sizeof(mac));
     memset(phy, 0, sizeof(phy));
-    if (sta_he) {
-        if (sta_he->supports_ofdma)
-            mac[1] |= 0x80u;
-        if (sta_he->supports_twt)
-            mac[3] |= 0x06u;
-        switch (sta_he->channel_width_mhz) {
-        case 160u:
-            phy[0] |= 0x40u;
-            /* fall through */
-        case 80u:
-            phy[0] |= 0x04u;
-            break;
-        case 40u:
-            phy[0] |= 0x02u;
-            break;
-        default:
-            break;
-        }
-        if (sta_he->supports_6ghz)
-            phy[0] |= 0x20u;
-        if (sta_he->supports_mu_mimo)
-            phy[0] |= 0x01u;
-    } else {
+    if (sta_he->supports_ofdma)
         mac[1] |= 0x80u;
+    if (sta_he->supports_twt)
+        mac[3] |= 0x06u;
+    switch (sta_he->channel_width_mhz) {
+    case 160u:
+        phy[0] |= 0x40u;
+        /* fall through */
+    case 80u:
         phy[0] |= 0x04u;
+        break;
+    case 40u:
+        phy[0] |= 0x02u;
+        break;
+    default:
+        break;
     }
+    if (sta_he->supports_6ghz)
+        phy[0] |= 0x20u;
+    if (sta_he->supports_mu_mimo)
+        phy[0] |= 0x01u;
 
     need = 3u + body_len;
     if (out_cap < need)
@@ -493,6 +496,10 @@ fl_result_t fl_net_wifi_mgmt_build_sae_auth(const uint8_t sta_mac[6], const uint
 
     if (!sta_mac || !bssid || !out || !out_len)
         return FL_RESULT_INVAL;
+    if (body_len > 0u && !body)
+        return FL_RESULT_INVAL;
+    if (body_len > (size_t)-1 - (FL_WIFI_MGMT_HDR_LEN + 6u))
+        return FL_RESULT_INVAL;
     need = FL_WIFI_MGMT_HDR_LEN + 6u + body_len;
     if (out_cap < need)
         return FL_RESULT_INVAL;
@@ -547,11 +554,15 @@ fl_result_t fl_net_wifi_mgmt_build_assoc_req(const char *ssid, const uint8_t bss
         FL_RESULT_OK)
         return FL_RESULT_INVAL;
     pos = FL_WIFI_MGMT_HDR_LEN;
-    if (out_cap < pos + 2u + ssid_len + rsne_len + he_cap_len)
+    if (out_cap < pos + 4u + 2u + ssid_len + rsne_len + he_cap_len)
         return FL_RESULT_INVAL;
 
     mgmt_write_hdr(out, FL_WIFI_MGMT_FC_ASSOC_REQ, bssid, sta_mac, bssid);
 
+    out[pos++] = 0x00u;
+    out[pos++] = 0x00u;
+    out[pos++] = 0x0au;
+    out[pos++] = 0x00u;
     out[pos++] = FL_WIFI_ELEM_SSID;
     out[pos++] = (uint8_t)ssid_len;
     memcpy(out + pos, ssid, ssid_len);
@@ -560,8 +571,10 @@ fl_result_t fl_net_wifi_mgmt_build_assoc_req(const char *ssid, const uint8_t bss
         memcpy(out + pos, rsne, rsne_len);
         pos += rsne_len;
     }
-    memcpy(out + pos, he_cap, he_cap_len);
-    pos += he_cap_len;
+    if (he_cap_len > 0u) {
+        memcpy(out + pos, he_cap, he_cap_len);
+        pos += he_cap_len;
+    }
     *out_len = pos;
     return FL_RESULT_OK;
 }

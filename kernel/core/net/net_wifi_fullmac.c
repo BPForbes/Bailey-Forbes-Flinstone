@@ -245,6 +245,7 @@ fl_result_t fl_net_wifi_fullmac_init(const char *ifname)
 		if (fl_net_wifi_nl80211_ifindex(g_fullmac.nl, &ifindex) != FL_RESULT_OK ||
 		    wifi_fullmac_afpacket_open((unsigned int)ifindex, &g_fullmac.pkt_fd) !=
 			    FL_RESULT_OK) {
+			fl_net_wifi_fullmac_mgmt_ota_detach();
 			fl_net_wifi_nl80211_deinit(g_fullmac.nl);
 			g_fullmac.nl = NULL;
 			return FL_RESULT_NOSYS;

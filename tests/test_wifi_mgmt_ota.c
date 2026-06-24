@@ -203,6 +203,33 @@ static int test_scan_entry_merge(void) {
     return 0;
 }
 
+static int test_sae_null_body_reject(void) {
+    uint8_t frame[64];
+    size_t len = 0;
+
+    ASSERT(fl_net_wifi_mgmt_build_sae_auth(k_sta, k_bssid, 1u, NULL, 4u, frame, sizeof(frame),
+                                           &len) == FL_RESULT_INVAL);
+    return 0;
+}
+
+static int test_assoc_req_fixed_fields(void) {
+    uint8_t frame[256];
+    size_t len = 0;
+    const uint8_t *ies = NULL;
+    size_t ies_len = 0;
+
+    ASSERT(fl_net_wifi_mgmt_build_assoc_req("LabAxHome", k_bssid, k_sta, FL_WIFI_AUTH_OPEN, NULL,
+                                            frame, sizeof(frame), &len) == FL_RESULT_OK);
+    ASSERT(frame[24] == 0x00u);
+    ASSERT(frame[25] == 0x00u);
+    ASSERT(frame[26] == 0x0au);
+    ASSERT(frame[27] == 0x00u);
+    ASSERT(frame[28] == FL_WIFI_ELEM_SSID);
+    ASSERT(fl_net_wifi_mgmt_parse_mgmt_ies(frame, len, &ies, &ies_len) == FL_RESULT_OK);
+    ASSERT(ies_len > 0u);
+    return 0;
+}
+
 static int test_sae_auth_builders(void) {
     static const uint8_t k_commit[] = "commit";
     static const uint8_t k_confirm[] = "confirm";
@@ -243,6 +270,10 @@ int main(void) {
     if (test_assoc_req_he_from_sta() != 0)
         return 1;
     if (test_scan_entry_merge() != 0)
+        return 1;
+    if (test_sae_null_body_reject() != 0)
+        return 1;
+    if (test_assoc_req_fixed_fields() != 0)
         return 1;
     if (test_sae_auth_builders() != 0)
         return 1;

@@ -210,9 +210,10 @@ static int wifi_ota_run_assoc(const fl_net_wifi_cred_t *cred, const wifi_network
 	{
 		fl_net_wifi_mgmt_ota_t *ota = fl_net_wifi_fullmac_mgmt_ota();
 
-		if (ota)
-			(void)fl_net_wifi_mgmt_ota_store_assoc_resp(ota, rx, rx_len);
-		else {
+		if (ota) {
+			if (fl_net_wifi_mgmt_ota_store_assoc_resp(ota, rx, rx_len) != FL_RESULT_OK)
+				return -1;
+		} else {
 			uint16_t status = 0xffffu;
 			fl_net_wifi_he_cap_t he;
 
