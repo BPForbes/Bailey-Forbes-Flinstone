@@ -16,3 +16,5 @@ Tree: kernel/drivers/wifi/ with fullmac/ (core, bus, hw); mock folded into lab_b
 
 Server/LAN: fl0 macvlan + DHCP; WSL mirrored networking and UDP discovery/reverse-dial join; quote-aware wifi join (fl_shell_tokenize_line). Real 802.11ax OTA on hardware remains open after merge.
 PROMOTE_DESC_END
+
+RELEASE_DATE=2026-06-24
