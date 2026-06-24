@@ -7,7 +7,7 @@
 #include "net_udp.h"
 #include "net_wifi_netdev.h"
 #include "net_wire_host.h"
-#include "wifi_lab_router.h"
+#include "wifi_driver_backend.h"
 
 #include <string.h>
 
@@ -214,11 +214,11 @@ static fl_result_t dhcp_exchange(fl_net_driver_t *drv, const uint8_t mac[FL_NET_
         rc = fl_net_packet_l4_view(req_pkt, &req, &req_len);
         if (rc != FL_RESULT_OK)
             return rc;
-        rc = wifi_lab_router_dhcp_exchange(mac, req, req_len, reply_backing, reply_cap,
-                                           reply_len);
-        if (rc != FL_RESULT_OK)
+        rc = wifi_driver_dhcp_exchange(mac, req, req_len, reply_backing, reply_cap, reply_len);
+        if (rc == FL_RESULT_OK)
+            return fl_net_packet_bind_l4(reply_pkt, reply_backing, reply_cap, 0u, *reply_len);
+        if (rc != FL_RESULT_NOSYS)
             return rc;
-        return fl_net_packet_bind_l4(reply_pkt, reply_backing, reply_cap, 0u, *reply_len);
     }
 
     return fl_net_wire_send_udp_pkt(FL_NET_DHCP_BROADCAST_BE32, FL_NET_DHCP_CLIENT_PORT,

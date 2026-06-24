@@ -1,0 +1,8 @@
+MAJOR_VERSION=4
+STANDARD_VERSION=3
+RELEASE_VERSION=0
+PRERELEASE=1
+DEV_VERSION=2
+DESCRIPTION<<PROMOTE_DESC_END
+4.3.0: P4 WiFi review fixes (#329) and production-tail groundwork (#328) — route lab DHCP through wifi_driver_backend (not kernel/core/net), endian-safe macvlan IPv4 checksum, argv-based ip(8) for fl0 macvlan, FullMAC connect op validation, and WSL .wslconfig profile selection prefers the invoking Windows user before glob fallback.
+PROMOTE_DESC_END

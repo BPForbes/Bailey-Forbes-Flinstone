@@ -51,6 +51,17 @@ fl_result_t wifi_driver_twt_teardown(uint8_t flow_id);
 /* Get netdev for routing/DHCP composition */
 fl_net_driver_t *wifi_driver_netdev(void);
 
+/**
+ * Driver-layer DHCP exchange when the active backend owns lab/simulated DHCP.
+ * Returns FL_RESULT_NOSYS when core net should use the generic wire path.
+ */
+fl_result_t wifi_driver_dhcp_exchange(const uint8_t cli_mac[6], const uint8_t *req,
+				      size_t req_len, uint8_t *reply, size_t reply_cap,
+				      size_t *reply_len);
+
+/** Enable in-tree lab DHCP routing (set by net_wifi_station on lab backend connect). */
+void wifi_driver_lab_dhcp_route_enable(int on);
+
 /*
  * Lab simulation backend — scan/auth/assoc execution in wifi_lab_backend.c.
  */

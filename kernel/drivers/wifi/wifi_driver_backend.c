@@ -7,6 +7,7 @@
 
 #include "wifi_driver_backend.h"
 #include "wifi_lab_backend.h"
+#include "wifi_lab_router.h"
 #include "wifi_coprocessor.h"
 #include "wifi_fullmac.h"
 #include "wifi_uart_transport.h"
@@ -20,6 +21,7 @@
 static wifi_backend_type_t s_backend_type = WIFI_BACKEND_NONE;
 static wifi_coproc_t *s_coprocessor = NULL;
 static wifi_fullmac_t *s_fullmac = NULL;
+static int s_lab_dhcp_route;
 
 static fl_result_t wifi_int_to_result(int rc)
 {
@@ -151,6 +153,7 @@ fl_result_t wifi_driver_backend_init(void)
 	s_backend_type = WIFI_BACKEND_NONE;
 	s_coprocessor = NULL;
 	s_fullmac = NULL;
+	s_lab_dhcp_route = 0;
 
 	if (wifi_backend_try_uart_coprocessor() == FL_RESULT_OK)
 		return FL_RESULT_OK;
@@ -402,6 +405,25 @@ fl_net_driver_t *wifi_driver_netdev(void)
 		return s_fullmac->netdev;
 
 	return NULL;
+}
+
+void wifi_driver_lab_dhcp_route_enable(int on)
+{
+	s_lab_dhcp_route = on ? 1 : 0;
+}
+
+fl_result_t wifi_driver_dhcp_exchange(const uint8_t cli_mac[6], const uint8_t *req,
+				      size_t req_len, uint8_t *reply, size_t reply_cap,
+				      size_t *reply_len)
+{
+	if (!cli_mac || !req || !reply || !reply_len)
+		return FL_RESULT_INVAL;
+
+	if (s_backend_type != WIFI_BACKEND_QEMU && !s_lab_dhcp_route)
+		return FL_RESULT_NOSYS;
+
+	return wifi_lab_router_dhcp_exchange(cli_mac, req, req_len, reply, reply_cap,
+					     reply_len);
 }
 
 fl_result_t wifi_driver_lab_scan(uint8_t band, unsigned timeout_ms)
