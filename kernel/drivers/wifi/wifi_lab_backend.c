@@ -239,13 +239,13 @@ static fl_result_t lab_run_mgmt_assoc(const fl_net_wifi_cred_t *cred,
     size_t frame_len = 0;
     fl_result_t rc;
 
-    if (fl_net_wifi_mgmt_build_probe_req(cred->ssid, probe, sizeof(probe), &frame_len) !=
+    if (fl_net_wifi_mgmt_build_probe_req(cred->ssid, sta_mac, probe, sizeof(probe), &frame_len) !=
         FL_RESULT_OK)
         return FL_RESULT_ERR;
     if (fl_net_wifi_mgmt_build_auth_req(sta_mac, ap->bssid, auth, sizeof(auth), &frame_len) !=
         FL_RESULT_OK)
         return FL_RESULT_ERR;
-    if (fl_net_wifi_mgmt_build_assoc_req(cred->ssid, ap->bssid, sta_mac, ap->auth_mode,
+    if (fl_net_wifi_mgmt_build_assoc_req(cred->ssid, ap->bssid, sta_mac, ap->auth_mode, NULL,
                                          assoc, sizeof(assoc), &frame_len) != FL_RESULT_OK)
         return FL_RESULT_ERR;
 

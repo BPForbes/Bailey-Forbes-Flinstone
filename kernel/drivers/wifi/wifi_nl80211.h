@@ -23,6 +23,8 @@ int fl_net_wifi_nl80211_available(void);
 
 fl_result_t fl_net_wifi_nl80211_ifindex(const fl_net_wifi_nl80211_t *nl, uint32_t *ifindex_out);
 
+fl_result_t fl_net_wifi_nl80211_sta_mac(const fl_net_wifi_nl80211_t *nl, uint8_t mac_out[6]);
+
 fl_result_t fl_net_wifi_nl80211_mgmt_tx(fl_net_wifi_nl80211_t *nl, const uint8_t *frame,
                                         size_t len, unsigned timeout_ms);
 

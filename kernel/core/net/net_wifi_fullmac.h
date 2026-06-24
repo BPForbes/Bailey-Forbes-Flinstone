@@ -21,6 +21,7 @@
 #define FL_NET_WIFI_IFNAME_MAX 16u
 
 typedef struct fl_net_wifi_nl80211 fl_net_wifi_nl80211_t;
+typedef struct fl_net_wifi_mgmt_ota fl_net_wifi_mgmt_ota_t;
 
 typedef enum {
 	FL_NET_WIFI_FULLMAC_MODE_NONE = 0,
@@ -49,9 +50,16 @@ fl_net_wifi_nl80211_t *fl_net_wifi_fullmac_nl80211(void);
 /** Lab mode: enqueue one Ethernet frame for the next recv(). */
 fl_result_t fl_net_wifi_fullmac_lab_inject_rx(const uint8_t *frame, size_t len);
 
-fl_result_t fl_net_wifi_fullmac_scan(uint8_t band, unsigned timeout_ms);
+/** **ssid** NULL = wildcard scan; non-NULL = directed scan (1–32 byte SSID). */
+fl_result_t fl_net_wifi_fullmac_scan(uint8_t band, const char *ssid, unsigned timeout_ms);
 fl_result_t fl_net_wifi_fullmac_scan_result(fl_net_wifi_scan_entry_t *entries, size_t cap,
                                             size_t *count_out);
+
+fl_result_t fl_net_wifi_fullmac_mgmt_ota_attach(fl_net_wifi_nl80211_t *nl,
+                                                const uint8_t sta_mac[6],
+                                                const fl_net_wifi_he_cap_t *phy_he);
+void fl_net_wifi_fullmac_mgmt_ota_detach(void);
+fl_net_wifi_mgmt_ota_t *fl_net_wifi_fullmac_mgmt_ota(void);
 
 fl_result_t fl_net_wifi_fullmac_disconnect(void);
 

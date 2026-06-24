@@ -1,0 +1,8 @@
+MAJOR_VERSION=4
+STANDARD_VERSION=3
+RELEASE_VERSION=0
+PRERELEASE=1
+DEV_VERSION=3
+DESCRIPTION<<PROMOTE_DESC_END
+4.3.0: Wi-Fi management-frame OTA Phase 2 (#328 Tasks 2.1–2.5) — extend net_wifi_mgmt with probe/beacon/auth/assoc IE construction and parsing, HE scan enrichment, nl80211 mgmt TX/RX wiring via net_wifi_mgmt_ota, directed NL80211_ATTR_SCAN_SSIDS scans, and test_wifi_mgmt_ota coverage.
+PROMOTE_DESC_END

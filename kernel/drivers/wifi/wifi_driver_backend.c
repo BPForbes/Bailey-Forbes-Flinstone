@@ -202,7 +202,7 @@ fl_result_t wifi_driver_scan(uint8_t band, unsigned timeout_ms)
 	if (s_backend_type == WIFI_BACKEND_NL80211) {
 		if (fl_net_wifi_fullmac_is_lab())
 			return wifi_driver_lab_scan(band, timeout_ms);
-		return fl_net_wifi_fullmac_scan(band, timeout_ms);
+		return fl_net_wifi_fullmac_scan(band, NULL, timeout_ms);
 	}
 
 	if ((s_backend_type == WIFI_BACKEND_FULLMAC || s_backend_type == WIFI_BACKEND_QEMU) &&

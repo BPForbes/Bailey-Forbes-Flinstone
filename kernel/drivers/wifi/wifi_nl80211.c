@@ -154,6 +154,28 @@ static int nla_put_data(void *buf, size_t cap, size_t *pos, uint16_t type, const
 	return 0;
 }
 
+static int nla_put_nested_begin(void *buf, size_t cap, size_t *pos, uint16_t type, size_t *nest_pos)
+{
+	struct fl_wifi_nlattr *na;
+
+	if (*pos + (size_t)FL_WIFI_NLA_ALIGN(FL_WIFI_NLA_HDRLEN) > cap)
+		return -1;
+	*nest_pos = *pos;
+	na = (struct fl_wifi_nlattr *)((uint8_t *)buf + *pos);
+	na->nla_type = type;
+	na->nla_len = (uint16_t)FL_WIFI_NLA_HDRLEN;
+	*pos += (size_t)FL_WIFI_NLA_ALIGN(FL_WIFI_NLA_HDRLEN);
+	return 0;
+}
+
+static void nla_put_nested_end(void *buf, size_t *pos, size_t nest_pos)
+{
+	struct fl_wifi_nlattr *na = (struct fl_wifi_nlattr *)((uint8_t *)buf + nest_pos);
+
+	(void)buf;
+	na->nla_len = (uint16_t)(*pos - nest_pos);
+}
+
 static int nla_get_u32(const struct fl_wifi_nlattr *attr, uint32_t *out)
 {
 	if (!attr || !out || attr->nla_len < FL_WIFI_NLA_HDRLEN + (int)sizeof(uint32_t))
@@ -624,6 +646,14 @@ fl_result_t fl_net_wifi_nl80211_ifindex(const fl_net_wifi_nl80211_t *nl, uint32_
 	return FL_RESULT_OK;
 }
 
+fl_result_t fl_net_wifi_nl80211_sta_mac(const fl_net_wifi_nl80211_t *nl, uint8_t mac_out[6])
+{
+	if (!nl || !mac_out)
+		return FL_RESULT_INVAL;
+	memcpy(mac_out, nl->sta_mac, 6u);
+	return FL_RESULT_OK;
+}
+
 fl_result_t fl_net_wifi_nl80211_mgmt_tx(fl_net_wifi_nl80211_t *nl, const uint8_t *frame,
 					size_t len, unsigned timeout_ms)
 {
@@ -775,7 +805,7 @@ static int nl80211_scan_bss(fl_net_wifi_scan_entry_t *entry, struct fl_wifi_nlat
 	}
 	entry->rssi_dbm = rssi;
 	if (ies && ies_len > 0u)
-		(void)fl_net_wifi_scan_enrich_from_ies(ies, ies_len, entry);
+		(void)fl_net_wifi_mgmt_enrich_scan_from_ies(ies, ies_len, entry);
 	return entry->ssid[0] != '\0' || entry->bssid[0] != 0;
 }
 
@@ -783,16 +813,30 @@ fl_result_t fl_net_wifi_nl80211_trigger_scan(fl_net_wifi_nl80211_t *nl, const ch
 {
 	uint8_t buf[NL80211_MAX_MSG];
 	size_t pos;
+	size_t ssid_len = 0;
 	static uint32_t seq;
 
-	(void)ssid;
 	if (!nl)
 		return FL_RESULT_INVAL;
+	if (ssid) {
+		if (fl_net_wifi_scan_ssid_validate(ssid, &ssid_len) != FL_RESULT_OK)
+			return FL_RESULT_INVAL;
+	}
 	if (nl80211_build_msg(buf, sizeof(buf), (uint16_t)nl->nl80211_id,
 			      FL_WIFI_NL80211_CMD_TRIGGER_SCAN, FL_WIFI_NLM_F_REQUEST, ++seq, &pos) != 0)
 		return FL_RESULT_ERR;
 	if (nla_put_u32(buf, sizeof(buf), &pos, FL_WIFI_NL80211_ATTR_IFINDEX, nl->ifindex) != 0)
 		return FL_RESULT_ERR;
+	if (ssid && ssid_len > 0u) {
+		size_t nest_pos = 0;
+
+		if (nla_put_nested_begin(buf, sizeof(buf), &pos, FL_WIFI_NL80211_ATTR_SCAN_SSIDS,
+					 &nest_pos) != 0)
+			return FL_RESULT_ERR;
+		if (nla_put_data(buf, sizeof(buf), &pos, 1u, ssid, ssid_len) != 0)
+			return FL_RESULT_ERR;
+		nla_put_nested_end(buf, &pos, nest_pos);
+	}
 	nl80211_finish_msg(buf, pos);
 	if (nl80211_send_and_ack(nl, buf, pos, 3000u) != FL_RESULT_OK)
 		return FL_RESULT_ERR;
@@ -928,6 +972,13 @@ fl_result_t fl_net_wifi_nl80211_ifindex(const fl_net_wifi_nl80211_t *nl, uint32_
 {
 	(void)nl;
 	(void)ifindex_out;
+	return FL_RESULT_NOSYS;
+}
+
+fl_result_t fl_net_wifi_nl80211_sta_mac(const fl_net_wifi_nl80211_t *nl, uint8_t mac_out[6])
+{
+	(void)nl;
+	(void)mac_out;
 	return FL_RESULT_NOSYS;
 }
 

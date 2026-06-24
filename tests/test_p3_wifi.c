@@ -135,13 +135,13 @@ static int test_mgmt_probe_assoc(void) {
     static const uint8_t sta[6] = {0x02, 0x00, 0x00, 0x00, 0x00, 0x01};
     static const uint8_t bssid[6] = {0x02, 0x11, 0x22, 0x33, 0x44, 0x55};
 
-    ASSERT(fl_net_wifi_mgmt_build_probe_req("LabAxHome", frame, sizeof(frame), &len) ==
+    ASSERT(fl_net_wifi_mgmt_build_probe_req("LabAxHome", sta, frame, sizeof(frame), &len) ==
            FL_RESULT_OK);
     ASSERT(len > FL_WIFI_MGMT_HDR_LEN);
     ASSERT(fl_net_wifi_mgmt_hdr_valid(frame, len));
     memset(frame, 0, sizeof(frame));
-    ASSERT(fl_net_wifi_mgmt_build_assoc_req("LabAxHome", bssid, sta, FL_WIFI_AUTH_WPA3_SAE, frame,
-                                            sizeof(frame), &len) == FL_RESULT_OK);
+    ASSERT(fl_net_wifi_mgmt_build_assoc_req("LabAxHome", bssid, sta, FL_WIFI_AUTH_WPA3_SAE, NULL,
+                                            frame, sizeof(frame), &len) == FL_RESULT_OK);
     ASSERT(fl_net_wifi_mgmt_parse_mgmt_ies(frame, len, &ies, &ies_len) == FL_RESULT_OK);
     ASSERT(ies_len > 0u);
     return 0;

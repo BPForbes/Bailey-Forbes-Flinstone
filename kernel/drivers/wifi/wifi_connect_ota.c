@@ -7,6 +7,8 @@
 #include "wifi_supplicant.h"
 
 #include "kernel/core/net/net_wifi_mgmt.h"
+#include "kernel/core/net/net_wifi_mgmt_ota.h"
+#include "kernel/core/net/net_wifi_fullmac.h"
 #include "kernel/core/net/net_wifi_wpa.h"
 #include "kernel/core/net/net_wire.h"
 
@@ -89,26 +91,32 @@ static int wifi_ota_run_sae(const fl_net_wifi_cred_t *cred, const wifi_network_t
 	uint8_t rx[WIFI_OTA_FRAME_MAX];
 	size_t tx_len = 0;
 	size_t rx_len = 0;
-	const uint8_t *body;
-	size_t body_len;
 
 	(void)cred;
 	if (wifi_supplicant_start_sae_handshake(supp) != 0)
 		return -1;
-	if (fl_net_wifi_mgmt_build_sae_auth(sta_mac, ap->bssid, 1u, k_commit,
-					    sizeof(k_commit) - 1u, tx, sizeof(tx),
-					    &tx_len) != FL_RESULT_OK)
+	if (fl_net_wifi_mgmt_build_auth_sae_commit(sta_mac, ap->bssid, k_commit,
+						    sizeof(k_commit) - 1u, tx, sizeof(tx),
+						    &tx_len) != FL_RESULT_OK)
 		return -1;
 	if (wifi_ota_tx_mgmt(tr, tx, tx_len) != 0)
 		return -1;
 	if (wifi_ota_rx_mgmt(tr, rx, sizeof(rx), &rx_len) != 0)
 		return -1;
-	if (rx_len < FL_WIFI_MGMT_HDR_LEN + 6u)
-		return -1;
-	body = rx + FL_WIFI_MGMT_HDR_LEN + 6u;
-	body_len = rx_len - (FL_WIFI_MGMT_HDR_LEN + 6u);
-	if (wifi_supplicant_process_sae_confirm(supp, body, body_len) != 0)
-		return -1;
+	{
+		uint16_t auth_alg = 0;
+		uint16_t auth_seq = 0;
+		uint16_t status = 0xffffu;
+		const uint8_t *body = NULL;
+		size_t body_len = 0;
+
+		if (fl_net_wifi_mgmt_parse_auth_resp(rx, rx_len, &auth_alg, &auth_seq, &status, &body,
+						   &body_len) != FL_RESULT_OK ||
+		    auth_alg != FL_WIFI_AUTH_ALG_SAE || auth_seq != 2u || status != 0u)
+			return -1;
+		if (wifi_supplicant_process_sae_confirm(supp, body, body_len) != 0)
+			return -1;
+	}
 	return 0;
 }
 
@@ -170,6 +178,16 @@ static int wifi_ota_run_open_auth(const uint8_t sta_mac[6], const uint8_t bssid[
 		return -1;
 	if (wifi_ota_rx_mgmt(tr, rx, sizeof(rx), &rx_len) != 0)
 		return -1;
+	{
+		uint16_t auth_alg = 0;
+		uint16_t auth_seq = 0;
+		uint16_t status = 0xffffu;
+
+		if (fl_net_wifi_mgmt_parse_auth_resp(rx, rx_len, &auth_alg, &auth_seq, &status, NULL,
+						   NULL) != FL_RESULT_OK ||
+		    auth_alg != FL_WIFI_AUTH_ALG_OPEN || auth_seq != 2u || status != 0u)
+			return -1;
+	}
 	return 0;
 }
 
@@ -182,13 +200,29 @@ static int wifi_ota_run_assoc(const fl_net_wifi_cred_t *cred, const wifi_network
 	size_t tx_len = 0;
 	size_t rx_len = 0;
 
-	if (fl_net_wifi_mgmt_build_assoc_req(cred->ssid, ap->bssid, sta_mac, auth_mode, tx,
+	if (fl_net_wifi_mgmt_build_assoc_req(cred->ssid, ap->bssid, sta_mac, auth_mode, NULL, tx,
 					     sizeof(tx), &tx_len) != FL_RESULT_OK)
 		return -1;
 	if (wifi_ota_tx_mgmt(tr, tx, tx_len) != 0)
 		return -1;
 	if (wifi_ota_rx_mgmt(tr, rx, sizeof(rx), &rx_len) != 0)
 		return -1;
+	{
+		fl_net_wifi_mgmt_ota_t *ota = fl_net_wifi_fullmac_mgmt_ota();
+
+		if (ota)
+			(void)fl_net_wifi_mgmt_ota_store_assoc_resp(ota, rx, rx_len);
+		else {
+			uint16_t status = 0xffffu;
+			fl_net_wifi_he_cap_t he;
+
+			if (fl_net_wifi_mgmt_parse_assoc_resp(rx, rx_len, &status, NULL, &he) !=
+				FL_RESULT_OK ||
+			    status != 0u)
+				return -1;
+			fl_net_wifi_fullmac_set_negotiated_he(&he);
+		}
+	}
 	return 0;
 }
 
