@@ -309,6 +309,20 @@ const char *fl_net_wifi_fullmac_ifname(void)
 	return g_fullmac.up ? g_fullmac.ifname : NULL;
 }
 
+fl_result_t fl_net_wifi_fullmac_sta_mac(uint8_t mac_out[6])
+{
+	static const uint8_t zero[6] = {0};
+
+	if (!mac_out)
+		return FL_RESULT_INVAL;
+	if (!g_fullmac.up)
+		return FL_RESULT_NOENT;
+	memcpy(mac_out, g_fullmac.sta_mac, 6u);
+	if (!memcmp(mac_out, zero, 6u))
+		return FL_RESULT_NOENT;
+	return FL_RESULT_OK;
+}
+
 fl_net_wifi_nl80211_t *fl_net_wifi_fullmac_nl80211(void)
 {
 	return g_fullmac.nl;

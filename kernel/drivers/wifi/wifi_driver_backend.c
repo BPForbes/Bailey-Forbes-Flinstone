@@ -14,6 +14,8 @@
 #include "net_wifi_fullmac.h"
 #include "net_wifi_nl80211.h"
 #include "wifi_uart_transport.h"
+#include "wifi_mgmt_transport_nl80211.h"
+#include "wifi_connect_ota.h"
 
 #include <stdlib.h>
 #include <string.h>
@@ -49,6 +51,7 @@ static void wifi_network_to_scan_entry(const wifi_network_t *src,
 {
 	memset(dst, 0, sizeof(*dst));
 	strncpy(dst->ssid, src->ssid, sizeof(dst->ssid) - 1u);
+	dst->ssid[sizeof(dst->ssid) - 1u] = '\0';
 	memcpy(dst->bssid, src->bssid, sizeof(dst->bssid));
 	dst->rssi_dbm = src->rssi;
 	dst->channel = src->channel;
@@ -65,6 +68,32 @@ static void wifi_network_to_scan_entry(const wifi_network_t *src,
 		dst->auth_mode = FL_WIFI_AUTH_WPA2_PSK;
 		break;
 	}
+}
+
+static void wifi_scan_entry_to_network(const fl_net_wifi_scan_entry_t *src, wifi_network_t *dst)
+{
+	memset(dst, 0, sizeof(*dst));
+	strncpy(dst->ssid, src->ssid, sizeof(dst->ssid) - 1u);
+	dst->ssid[sizeof(dst->ssid) - 1u] = '\0';
+	memcpy(dst->bssid, src->bssid, sizeof(dst->bssid));
+	dst->rssi = (int8_t)src->rssi_dbm;
+	dst->channel = src->channel;
+	switch (src->auth_mode) {
+	case FL_WIFI_AUTH_OPEN:
+		dst->auth_mode = WIFI_AUTH_OPEN;
+		break;
+	case FL_WIFI_AUTH_WPA3_SAE:
+		dst->auth_mode = WIFI_AUTH_WPA3_SAE;
+		break;
+	default:
+		dst->auth_mode = WIFI_AUTH_WPA2_PSK;
+		break;
+	}
+}
+
+static int wifi_env_truthy(const char *env)
+{
+	return env && env[0] && strcmp(env, "0") != 0;
 }
 
 static fl_result_t wifi_env_parse_int(const char *env, int *out)
@@ -173,10 +202,10 @@ fl_result_t wifi_driver_backend_init(void)
 	if (wifi_backend_try_uart_coprocessor() == FL_RESULT_OK)
 		return FL_RESULT_OK;
 
-	if (wifi_backend_try_ax_mock() == FL_RESULT_OK)
+	if (wifi_backend_try_nl80211_fullmac() == FL_RESULT_OK)
 		return FL_RESULT_OK;
 
-	if (wifi_backend_try_nl80211_fullmac() == FL_RESULT_OK)
+	if (wifi_backend_try_ax_mock() == FL_RESULT_OK)
 		return FL_RESULT_OK;
 
 	if (wifi_backend_try_fullmac_hw() == FL_RESULT_OK)
@@ -189,6 +218,70 @@ fl_result_t wifi_driver_backend_init(void)
 wifi_backend_type_t wifi_driver_backend_active(void)
 {
 	return s_backend_type;
+}
+
+int wifi_driver_backend_is_physical(void)
+{
+	return s_backend_type == WIFI_BACKEND_NL80211 && fl_net_wifi_fullmac_is_physical();
+}
+
+int wifi_driver_lab_sim_enabled(void)
+{
+	return wifi_env_truthy(getenv("FL_NET_WIFI_LAB")) ||
+	       wifi_env_truthy(getenv("FL_NET_WIFI_FULLMAC_LAB"));
+}
+
+static fl_result_t wifi_driver_nl80211_connect(const fl_net_wifi_cred_t *cred,
+					       unsigned timeout_ms)
+{
+	fl_net_wifi_nl80211_t *nl;
+	fl_net_wifi_scan_entry_t scan[32];
+	size_t n = 0;
+	wifi_network_t ap;
+	wifi_mgmt_transport_t tr;
+	uint8_t sta_mac[6];
+	size_t i;
+	fl_result_t rc;
+
+	(void)timeout_ms;
+	if (!cred || !cred->ssid[0])
+		return FL_RESULT_INVAL;
+	if (!fl_net_wifi_fullmac_is_physical())
+		return FL_RESULT_NOSYS;
+
+	nl = fl_net_wifi_fullmac_nl80211();
+	if (!nl)
+		return FL_RESULT_NOSYS;
+	if (fl_net_wifi_fullmac_sta_mac(sta_mac) != FL_RESULT_OK)
+		return FL_RESULT_ERR;
+
+	rc = fl_net_wifi_fullmac_scan(FL_WIFI_BAND_ANY, cred->ssid, 5000u);
+	if (rc != FL_RESULT_OK)
+		return rc;
+	rc = fl_net_wifi_fullmac_scan_result(scan, 32, &n);
+	if (rc != FL_RESULT_OK || n == 0u)
+		return FL_RESULT_ERR;
+
+	memset(&ap, 0, sizeof(ap));
+	for (i = 0; i < n; i++) {
+		if (strcmp(scan[i].ssid, cred->ssid) != 0)
+			continue;
+		if (cred->bssid[0] | cred->bssid[1] | cred->bssid[2] | cred->bssid[3] |
+		    cred->bssid[4] | cred->bssid[5]) {
+			if (memcmp(scan[i].bssid, cred->bssid, 6) != 0)
+				continue;
+		}
+		wifi_scan_entry_to_network(&scan[i], &ap);
+		break;
+	}
+	if (!ap.ssid[0])
+		return FL_RESULT_ERR;
+
+	if (wifi_mgmt_transport_nl80211_init(&tr, nl) != 0)
+		return FL_RESULT_ERR;
+	if (wifi_connect_ota_run(cred, &ap, sta_mac, &tr, NULL) != 0)
+		return FL_RESULT_ERR;
+	return FL_RESULT_OK;
 }
 
 fl_result_t wifi_driver_scan(uint8_t band, unsigned timeout_ms)
@@ -287,8 +380,11 @@ fl_result_t wifi_driver_connect(const fl_net_wifi_cred_t *cred,
 	if (s_backend_type == WIFI_BACKEND_FULLMAC && s_fullmac)
 		return wifi_int_to_result(wifi_fullmac_station_connect(s_fullmac, cred));
 
-	if (s_backend_type == WIFI_BACKEND_NL80211)
-		return FL_RESULT_NOSYS;
+	if (s_backend_type == WIFI_BACKEND_NL80211) {
+		if (fl_net_wifi_fullmac_is_lab())
+			return wifi_driver_lab_connect(cred, NULL, NULL);
+		return wifi_driver_nl80211_connect(cred, timeout_ms);
+	}
 
 	return FL_RESULT_NOSYS;
 }

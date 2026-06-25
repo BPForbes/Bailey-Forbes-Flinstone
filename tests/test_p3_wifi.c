@@ -305,6 +305,7 @@ static int test_wifi_lab_static_l3_udp(void) {
 
 int main(void) {
     ASSERT(setenv("FL_NET_WIFI_USE_WPA", "0", 1) == 0);
+    ASSERT(setenv("FL_NET_WIFI_LAB", "1", 1) == 0);
     (void)unsetenv("FL_WIFI_80211AX_MOCK");
     (void)unsetenv("FL_WIFI_UART_FD");
 

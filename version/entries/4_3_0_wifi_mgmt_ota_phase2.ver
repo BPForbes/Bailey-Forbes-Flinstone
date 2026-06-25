@@ -1,0 +1,8 @@
+MAJOR_VERSION=4
+STANDARD_VERSION=3
+RELEASE_VERSION=0
+PRERELEASE=1
+DEV_VERSION=3
+DESCRIPTION<<PROMOTE_DESC_END
+4.3.0: Wi-Fi management-frame OTA Phase 2 (#328 Tasks 2.1–2.5) — probe/beacon/auth/assoc IE build/parse, nl80211 mgmt OTA, directed scans, review fixes; physical nl80211 connect/DHCP on FullMAC netdev; lab simulation gated behind FL_NET_WIFI_LAB/FL_NET_WIFI_FULLMAC_LAB; server host prefers a single LAN IPv4 over 0.0.0.0 on WSL.
+PROMOTE_DESC_END

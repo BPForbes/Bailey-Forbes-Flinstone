@@ -166,6 +166,7 @@ NET_CORE_SRCS = kernel/core/net/net_checksum.c kernel/core/net/net_wire.c kernel
                 kernel/drivers/wifi/wifi_coprocessor.c kernel/drivers/wifi/wifi_uart_transport.c \
                 kernel/drivers/wifi/wifi_supplicant.c \
                 kernel/drivers/wifi/wifi_mgmt_transport.c \
+                kernel/drivers/wifi/wifi_mgmt_transport_nl80211.c \
                 kernel/drivers/wifi/wifi_connect_ota.c \
                 kernel/drivers/wifi/wifi_driver_backend.c kernel/drivers/wifi/wifi_driver_packet.c \
                 kernel/drivers/wifi/wifi_lab_backend.c \
@@ -979,6 +980,7 @@ WIFI_TEST_STATION_DRIVER_SRCS = kernel/drivers/wifi/wifi_driver_backend.c kernel
 	kernel/drivers/wifi/wifi_uart_transport.c kernel/drivers/wifi/wifi_driver_packet.c \
 	kernel/drivers/wifi/wifi_supplicant.c \
 	kernel/drivers/wifi/wifi_mgmt_transport.c \
+	kernel/drivers/wifi/wifi_mgmt_transport_nl80211.c \
 	kernel/drivers/wifi/wifi_connect_ota.c \
 	kernel/core/net/net_wifi_fullmac.c kernel/core/net/net_wifi_mgmt_ota.c \
 	kernel/drivers/wifi/wifi_nl80211.c kernel/drivers/wifi/wifi_fullmac_afpacket.c \

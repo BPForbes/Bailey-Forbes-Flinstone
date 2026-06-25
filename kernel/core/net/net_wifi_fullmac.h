@@ -44,6 +44,9 @@ fl_net_driver_t *fl_net_wifi_fullmac_driver(void);
 
 const char *fl_net_wifi_fullmac_ifname(void);
 
+/** Station MAC from nl80211 (physical) or lab shim; zero when inactive. */
+fl_result_t fl_net_wifi_fullmac_sta_mac(uint8_t mac_out[6]);
+
 /** Physical mode only; NULL in lab mode. */
 fl_net_wifi_nl80211_t *fl_net_wifi_fullmac_nl80211(void);
 
