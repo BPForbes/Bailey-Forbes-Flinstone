@@ -1217,6 +1217,7 @@ static int test_wifi_lab_server_host(void) {
 
     (void)unsetenv("FL_NET_SOCK_NATIVE");
     (void)setenv("FL_NET_WIFI_USE_WPA", "0", 1);
+    (void)setenv("FL_NET_WIFI_LAB", "1", 1);
     fl_net_route_init();
     ASSERT(fl_net_wifi_station_init() == FL_RESULT_OK);
     ASSERT(fl_net_wifi_scan(FL_WIFI_BAND_ANY, 1000u) == FL_RESULT_OK);
