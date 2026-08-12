@@ -595,6 +595,7 @@ never_check_roadmap() {
 
 update_issue() {
 	local body="$ARTIFACTS/issue_comment.md"
+	local patched="$ARTIFACTS/issue_body_patched.md"
 	if [[ "$UPDATE_ISSUE" != "1" ]]; then
 		return 0
 	fi
@@ -603,7 +604,7 @@ update_issue() {
 		return 0
 	fi
 	if [[ "$DRY_RUN" == "1" ]]; then
-		log "DRY-RUN: gh issue comment 328 --body-file $body"
+		log "DRY-RUN: gh issue comment 328; check boxes only for PASS rows (never ROADMAP, never close)"
 		record PASS update-issue "dry-run"
 		return 0
 	fi
@@ -625,6 +626,41 @@ update_issue() {
 		record PASS update-issue "commented on GitHub issue #328"
 	else
 		record SKIP update-issue "gh issue comment failed (auth/permissions)"
+		return 0
+	fi
+	# Check only boxes that this run proved. Never ROADMAP, never close the issue.
+	if gh issue view 328 --json body -q .body >"$ARTIFACTS/issue_body.md" 2>/dev/null; then
+		python3 - "$ARTIFACTS/results.tsv" "$ARTIFACTS/issue_body.md" "$patched" <<'PY' || true
+import pathlib, sys
+tsv, src, dst = pathlib.Path(sys.argv[1]), pathlib.Path(sys.argv[2]), pathlib.Path(sys.argv[3])
+passed = {line.split("\t")[1] for line in tsv.read_text().splitlines() if line.startswith("PASS\t")}
+markers = []
+if "hwsim-sae" in passed:
+    markers += ["Full SAE OTA exchange against", "succeeds with WPA3-SAE against", "SAE Dragonfly exchange passes"]
+if "hwsim-wpa2" in passed:
+    markers += ["4-way exchange against `mac80211_hwsim`", "succeeds with WPA2-PSK", "WPA2 EAPOL 4-way handshake passes"]
+if "hwsim-twt" in passed:
+    markers += ["TWT exchange against `mac80211_hwsim`"]
+if "physical-ota" in passed:
+    markers += ["succeeds with WPA3-SAE against", "succeeds with WPA2-PSK"]
+if "test_p3_network" in passed:
+    markers += ["make test_p3_network"]
+never = ("ROADMAP", "P3-10 / P4-01", "updated to `✅`", "updated to ✅")
+out = []
+for line in src.read_text().splitlines(True):
+    if line.lstrip().startswith("- [ ]") and any(m in line for m in markers) and not any(n in line for n in never):
+        line = line.replace("- [ ]", "- [x]", 1)
+    out.append(line)
+dst.write_text("".join(out))
+print("patched" if "".join(out) != src.read_text() else "no-checkbox-changes")
+PY
+		if [[ -f "$patched" ]] && ! cmp -s "$ARTIFACTS/issue_body.md" "$patched"; then
+			if gh issue edit 328 --body-file "$patched" >/dev/null; then
+				record PASS update-issue-boxes "checked GitHub boxes that this run proved (ROADMAP left unchecked)"
+			else
+				record SKIP update-issue-boxes "gh issue edit failed; comment still posted"
+			fi
+		fi
 	fi
 }
 
