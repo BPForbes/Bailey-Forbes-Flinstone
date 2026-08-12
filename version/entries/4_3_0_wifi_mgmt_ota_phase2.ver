@@ -6,5 +6,3 @@ DEV_VERSION=3
 DESCRIPTION<<PROMOTE_DESC_END
 4.3.0: Wi-Fi #328 production tail — RFC 7664 Dragonfly SAE (group 19 hunt-and-peck PWE, commit/confirm, PMK/KCK) wired through connect OTA and mock AP using existing net_wifi_sae / net_endian / net_asm surfaces (802.11 LSB-first group and send-confirm via asm_net_store_le16; no new contract files); mgmt OTA Phase 2 (Tasks 2.1–2.5), SAE anti-clogging token retry, SAE/EAPOL connect OTA unit tests (test_wifi_connect_ota), TWT Individual Setup/Teardown Action frames OTA (wifi_twt_ota), in-tree fl_net_dhcp_acquire post-association on physical/lab netdev, lab gated behind FL_NET_WIFI_LAB, mac80211_hwsim optional CI (FL_NET_WIFI_HWSIM_OK), physical nl80211 connect/DHCP, server single-IP bind on WSL.
 PROMOTE_DESC_END
-
-RELEASE_DATE=2026-08-12
