@@ -222,7 +222,7 @@ jobs:
         run: |
           sudo apt-get update -y
           sudo apt-get install -y gcc g++ make binutils iproute2 iw hostapd tcpdump kmod \
-            python3 libssl-dev libsqlite3-dev dnsmasq-base || true
+            python3 libssl-dev libsqlite3-dev dnsmasq-base tshark || true
           sudo apt-get install -y "linux-modules-extra-$(uname -r)" || true
 
       - name: Run #328 validation (software required; hwsim soft-fail on hosted runners)

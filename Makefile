@@ -884,7 +884,10 @@ tests/test_p3_wifi_ota: $(WIFI_TEST_COMMON_DEPS) $(NET_TEST_PCI_OBJ)
 	  $(NET_TEST_PCI_OBJ) $(MEM_ASM_OBJ) $(NET_ASM_OBJ) $(OPENSSL_LIBS) -Wl,-z,noexecstack
 
 test_p3_wifi_ota: tests/test_p3_wifi_ota
-	@./tests/test_p3_wifi_ota
+	@FL_NET_WIFI_IFACE="$(if $(FL_NET_WIFI_IFACE),$(FL_NET_WIFI_IFACE),$(IFACE))" \
+	 SSID="$(SSID)" PSK="$(PSK)" AUTH="$(AUTH)" TWT="$(TWT)" \
+	 DHCP="$(DHCP)" UDP_ECHO="$(UDP_ECHO)" UDP_ECHO_DST="$(UDP_ECHO_DST)" \
+	 ./tests/test_p3_wifi_ota
 
 .PHONY: validate-issue-328
 validate-issue-328:
