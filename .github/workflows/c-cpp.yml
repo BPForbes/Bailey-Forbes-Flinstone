@@ -222,8 +222,11 @@ jobs:
         run: |
           sudo apt-get update -y
           sudo apt-get install -y gcc g++ make binutils iproute2 iw hostapd tcpdump kmod \
-            python3 libssl-dev libsqlite3-dev dnsmasq-base tshark || true
-          sudo apt-get install -y "linux-modules-extra-$(uname -r)" || true
+            python3 libssl-dev libsqlite3-dev dnsmasq-base tshark iptables nftables || true
+          # Host kernels only — Microsoft WSL kernels do not ship this apt package.
+          if ! uname -r | grep -qiE 'microsoft|wsl'; then
+            sudo apt-get install -y "linux-modules-extra-$(uname -r)" || true
+          fi
 
       - name: Run #328 validation (software required; hwsim soft-fail on hosted runners)
         run: |

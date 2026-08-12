@@ -1,0 +1,8 @@
+MAJOR_VERSION=4
+STANDARD_VERSION=3
+RELEASE_VERSION=0
+PRERELEASE=1
+DEV_VERSION=4
+DESCRIPTION<<DESC_END
+WSL #328 validator: bring TAP IFF_UP after TUNSETIFF so test_tap_smoke can TX (Linux write() is EIO while down); default TAP name fltap%d so it does not collide with macvlan fl0; skip linux-modules-extra on Microsoft WSL kernels (package is not in Ubuntu apt); install iptables/nftables when missing; find powershell.exe under /mnt/c/Windows when PATH is root-only; document expected hwsim/physical-ota/uart-hw SKIPs on WSL without USB Wi-Fi or ESP32.
+DESC_END

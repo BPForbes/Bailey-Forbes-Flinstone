@@ -42,6 +42,10 @@ Non-interactive GitHub issue #328 validation for WSL and native Linux.
 Required gate: make test_p3_network. Hardware steps skip with a reason when
 the kernel module, sudo, or UART device is missing.
 
+On WSL, SKIP for hwsim / physical-ota / uart-hw / roadmap is expected unless
+you attach USB Wi-Fi (usbipd) or an ESP32. linux-modules-extra-$(uname -r) is
+not an Ubuntu package for Microsoft WSL kernels; the script will not apt-get it.
+
 Options:
   --help                 Show this help
   --dry-run              Print planned apt/sysctl/iptables/hostapd steps; do not apply
@@ -98,6 +102,29 @@ run() {
 }
 
 have_cmd() { command -v "$1" >/dev/null 2>&1; }
+
+# WSL as root often drops Windows from PATH. Prefer PATH, then the System32 mount.
+find_powershell() {
+	local cand
+	if have_cmd powershell.exe; then
+		command -v powershell.exe
+		return 0
+	fi
+	for cand in \
+		/mnt/c/Windows/System32/WindowsPowerShell/v1.0/powershell.exe \
+		/mnt/c/Windows/Sysnative/WindowsPowerShell/v1.0/powershell.exe
+	do
+		if [[ -x "$cand" ]]; then
+			printf '%s\n' "$cand"
+			return 0
+		fi
+	done
+	return 1
+}
+
+microsoft_wsl_kernel() {
+	[[ "$IS_WSL" == "1" ]] || [[ "$(uname -r)" == *microsoft* ]] || [[ "$(uname -r)" == *WSL* ]]
+}
 
 detect_wsl() {
 	if grep -qiE 'microsoft|wsl' /proc/version 2>/dev/null || [[ -n "${WSL_DISTRO_NAME:-}" ]]; then
@@ -177,8 +204,19 @@ install_deps() {
 	if [[ "$SKIP_UART" != "1" ]]; then
 		ensure_pkg picocom || true
 	fi
-	extra="linux-modules-extra-$(uname -r)"
-	ensure_pkg "$extra" || true
+	# Firewall tools are optional; without them firewall-linux records SKIP.
+	ensure_pkg iptables || true
+	ensure_pkg nftables || true
+	if microsoft_wsl_kernel; then
+		log "WSL/Microsoft kernel: skip linux-modules-extra-$(uname -r) (not in Ubuntu apt; mac80211_hwsim is usually absent)"
+	else
+		extra="linux-modules-extra-$(uname -r)"
+		if apt-cache show "$extra" >/dev/null 2>&1; then
+			ensure_pkg "$extra" || true
+		else
+			log "skip $extra: package not in apt cache"
+		fi
+	fi
 	if [[ "$extra_ok" == "1" ]]; then
 		record PASS deps "toolchain + iw/hostapd/tcpdump present"
 	else
@@ -231,6 +269,7 @@ apply_linux_sysctl_firewall() {
 apply_wsl_windows_firewall() {
 	local ps1="$ARTIFACTS/wsl_firewall.ps1"
 	local winpath
+	local ps_exe
 	if [[ "$IS_WSL" != "1" ]]; then
 		return 0
 	fi
@@ -238,8 +277,8 @@ apply_wsl_windows_firewall() {
 		record SKIP firewall-wsl "--skip-firewall"
 		return 0
 	fi
-	if ! have_cmd powershell.exe; then
-		record SKIP firewall-wsl "powershell.exe not on PATH (Windows firewall unchanged)"
+	if ! ps_exe="$(find_powershell)"; then
+		record SKIP firewall-wsl "powershell.exe not found (add Windows to PATH or /mnt/c/Windows; firewall unchanged)"
 		log "WSL: USB Wi-Fi attach (elevated PowerShell on Windows), if no STA iface:"
 		log "  usbipd list"
 		log "  usbipd bind --busid <BUSID>"
@@ -269,7 +308,7 @@ PS
 	else
 		winpath="$ps1"
 	fi
-	if powershell.exe -NoProfile -NonInteractive -ExecutionPolicy Bypass -File "$winpath" \
+	if "$ps_exe" -NoProfile -NonInteractive -ExecutionPolicy Bypass -File "$winpath" \
 		>"$ARTIFACTS/wsl_firewall.log" 2>&1; then
 		record PASS firewall-wsl "Windows/Hyper-V UDP 67/68/echo rules ensured"
 	else
@@ -879,6 +918,9 @@ main() {
 	{
 		echo "PASS=$PASS_N FAIL=$FAIL_N SKIP=$SKIP_N REQUIRED_FAIL=$REQUIRED_FAIL HWSIM_FAIL=$HWSIM_FAIL"
 		echo "results: $ARTIFACTS/results.tsv"
+		if [[ "$IS_WSL" == "1" ]]; then
+			echo "WSL: SKIP for hwsim / physical-ota / uart-hw / roadmap is expected without USB Wi-Fi (usbipd), --iface/--ssid, or an ESP32. The required gate is make test_p3_network."
+		fi
 	} | tee "$SUMMARY_FILE"
 
 	if [[ "$REQUIRED_FAIL" != "0" ]]; then
