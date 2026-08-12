@@ -29,6 +29,8 @@ typedef struct {
 	size_t data_rx_len[WIFI_OTA_DATA_Q];
 	unsigned data_rx_count;
 	uint8_t eapol_rx_pending;
+	uint8_t sae_clog_sent;
+	uint8_t twt_flow_next;
 } wifi_mgmt_transport_mock_ctx_t;
 
 typedef struct wifi_mgmt_transport wifi_mgmt_transport_t;

@@ -18,9 +18,19 @@
 #define FL_WIFI_MGMT_FC_PROBE_RESP 0x0050u
 #define FL_WIFI_MGMT_FC_BEACON 0x0080u
 #define FL_WIFI_MGMT_FC_AUTH 0x00b0u
+#define FL_WIFI_MGMT_FC_ACTION 0x00d0u
 
 #define FL_WIFI_AUTH_ALG_OPEN 0u
 #define FL_WIFI_AUTH_ALG_SAE 3u
+
+#define FL_WIFI_ACTION_CAT_S1G 126u
+#define FL_WIFI_ACTION_TWT_SETUP 6u
+#define FL_WIFI_ACTION_TWT_SETUP_RESP 7u
+#define FL_WIFI_ACTION_TWT_TEARDOWN 8u
+#define FL_WIFI_ELEM_TWT 216u
+
+/** IEEE 802.11 status: anti-clogging token required (SAE). */
+#define FL_WIFI_SAE_STATUS_ANTICLOGGING 78u
 
 #define FL_WIFI_SCAN_SSID_MAX_LEN 32u
 
@@ -130,5 +140,26 @@ fl_result_t fl_net_wifi_mgmt_build_rsne_ie(uint8_t auth_mode, uint8_t *out, size
 /** Build Association Response with HE Capabilities + HE Operation IEs. */
 fl_result_t fl_net_wifi_mgmt_build_assoc_resp(const uint8_t bssid[6], const uint8_t sta_mac[6],
                                               uint8_t *out, size_t out_cap, size_t *out_len);
+
+/** Build S1G TWT Individual Setup Action frame (category 126, action 6). */
+fl_result_t fl_net_wifi_mgmt_build_twt_setup_req(const uint8_t sta_mac[6], const uint8_t bssid[6],
+                                                 uint8_t dialog_token,
+                                                 const fl_net_wifi_twt_params_t *req,
+                                                 uint8_t *out, size_t out_cap, size_t *out_len);
+
+/** Build S1G TWT Individual Setup Response Action frame (action 7). */
+fl_result_t fl_net_wifi_mgmt_build_twt_setup_resp(const uint8_t bssid[6], const uint8_t sta_mac[6],
+                                                  uint8_t dialog_token, uint8_t flow_id,
+                                                  const fl_net_wifi_twt_params_t *agreed,
+                                                  uint8_t *out, size_t out_cap, size_t *out_len);
+
+/** Build S1G TWT Individual Teardown Action frame (action 8). */
+fl_result_t fl_net_wifi_mgmt_build_twt_teardown(const uint8_t sta_mac[6], const uint8_t bssid[6],
+                                                uint8_t dialog_token, uint8_t flow_id,
+                                                uint8_t *out, size_t out_cap, size_t *out_len);
+
+/** Parse TWT Setup Response; fills **agreed_out** when present. */
+fl_result_t fl_net_wifi_mgmt_parse_twt_setup_resp(const uint8_t *frame, size_t len,
+                                                  fl_net_wifi_twt_params_t *agreed_out);
 
 #endif /* NET_WIFI_MGMT_H */

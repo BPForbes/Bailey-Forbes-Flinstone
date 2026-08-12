@@ -99,20 +99,69 @@ static void mock_ap_handle_mgmt(wifi_mgmt_transport_mock_ctx_t *ctx, const uint8
 	size_t resp_len = 0;
 	uint8_t subtype;
 	uint16_t auth_alg;
+	uint16_t auth_seq;
 
 	if (!ap || !sta || len < FL_WIFI_MGMT_HDR_LEN)
 		return;
 
 	subtype = (uint8_t)(frame[0] & 0xfcu);
+	if (subtype == 0xd0u && len >= FL_WIFI_MGMT_HDR_LEN + 3u) {
+		uint8_t action = frame[25];
+		uint8_t flow_id;
+
+		if (frame[24] == FL_WIFI_ACTION_CAT_S1G && action == FL_WIFI_ACTION_TWT_SETUP) {
+			fl_net_wifi_twt_params_t agreed = {
+				.wake_duration_us = 8000u,
+				.wake_interval_us = 100000u,
+			};
+
+			flow_id = ctx->twt_flow_next++;
+			agreed.flow_id = flow_id;
+			if (fl_net_wifi_mgmt_build_twt_setup_resp(ap->bssid, sta, frame[26], flow_id,
+								  &agreed, resp, sizeof(resp),
+								  &resp_len) == FL_RESULT_OK)
+				(void)mock_enqueue(ctx->mgmt_rx, ctx->mgmt_rx_len,
+						   &ctx->mgmt_rx_count, WIFI_OTA_MGMT_Q, resp,
+						   resp_len);
+		}
+		return;
+	}
+
 	if (subtype == 0xb0u && len >= FL_WIFI_MGMT_HDR_LEN + 6u) {
 		auth_alg = (uint16_t)frame[24] | ((uint16_t)frame[25] << 8);
+		auth_seq = (uint16_t)frame[26] | ((uint16_t)frame[27] << 8);
 		if (auth_alg == 3u && ap->auth_mode == WIFI_AUTH_WPA3_SAE) {
 			static const uint8_t k_confirm[] = "confirm";
+			static const uint8_t k_clog_token[] = "clog";
+			const uint8_t *body = frame + FL_WIFI_MGMT_HDR_LEN + 6u;
+			size_t body_len = len - (FL_WIFI_MGMT_HDR_LEN + 6u);
+			int has_clog = 0;
+
+			if (body_len >= sizeof(k_clog_token) &&
+			    memcmp(body + body_len - sizeof(k_clog_token), k_clog_token,
+				   sizeof(k_clog_token)) == 0)
+				has_clog = 1;
+
+			if (auth_seq == 1u && !has_clog && !ctx->sae_clog_sent) {
+				ctx->sae_clog_sent = 1u;
+				if (fl_net_wifi_mgmt_build_sae_auth(ap->bssid, sta, 2u, k_clog_token,
+								    sizeof(k_clog_token) - 1u,
+								    resp, sizeof(resp),
+								    &resp_len) == FL_RESULT_OK) {
+					resp[28] = (uint8_t)(FL_WIFI_SAE_STATUS_ANTICLOGGING & 0xffu);
+					resp[29] =
+						(uint8_t)((FL_WIFI_SAE_STATUS_ANTICLOGGING >> 8) &
+							  0xffu);
+					(void)mock_enqueue(ctx->mgmt_rx, ctx->mgmt_rx_len,
+							   &ctx->mgmt_rx_count, WIFI_OTA_MGMT_Q,
+							   resp, resp_len);
+				}
+				return;
+			}
 
 			if (fl_net_wifi_mgmt_build_sae_auth(ap->bssid, sta, 2u, k_confirm,
 							    sizeof(k_confirm) - 1u, resp,
-							    sizeof(resp),
-							    &resp_len) == FL_RESULT_OK)
+							    sizeof(resp), &resp_len) == FL_RESULT_OK)
 				(void)mock_enqueue(ctx->mgmt_rx, ctx->mgmt_rx_len,
 						   &ctx->mgmt_rx_count, WIFI_OTA_MGMT_Q, resp,
 						   resp_len);
@@ -223,6 +272,8 @@ void wifi_mgmt_transport_mock_reset(wifi_mgmt_transport_t *tr)
 	ctx->mgmt_rx_count = 0;
 	ctx->data_rx_count = 0;
 	ctx->eapol_rx_pending = 0;
+	ctx->sae_clog_sent = 0;
+	ctx->twt_flow_next = 0;
 }
 
 size_t wifi_mgmt_transport_mock_ctx_size(void)

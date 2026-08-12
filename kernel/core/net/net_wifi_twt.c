@@ -6,6 +6,7 @@
 
 static fl_net_wifi_twt_params_t s_active_twt[8];
 static uint8_t s_active_mask;
+static uint64_t s_next_wake_us;
 
 fl_result_t fl_net_wifi_twt_negotiate(const fl_net_wifi_twt_params_t *req,
                                       fl_net_wifi_twt_params_t *agreed_out) {
@@ -35,6 +36,7 @@ fl_result_t fl_net_wifi_twt_negotiate(const fl_net_wifi_twt_params_t *req,
         agreed_out->wake_interval_us = agreed_out->wake_duration_us * 2u;
     s_active_twt[id] = *agreed_out;
     s_active_mask |= (1u << id);
+    fl_net_wifi_twt_power_schedule(agreed_out);
     return FL_RESULT_OK;
 #endif
 }
@@ -57,4 +59,15 @@ fl_result_t fl_net_wifi_twt_lab_teardown(uint8_t flow_id) {
 void fl_net_wifi_twt_lab_reset(void) {
     memset(s_active_twt, 0, sizeof(s_active_twt));
     s_active_mask = 0u;
+    s_next_wake_us = 0u;
+}
+
+uint64_t fl_net_wifi_twt_next_wake_us(void) {
+    return s_next_wake_us;
+}
+
+void fl_net_wifi_twt_power_schedule(const fl_net_wifi_twt_params_t *agreed) {
+    if (!agreed || agreed->wake_interval_us == 0u)
+        return;
+    s_next_wake_us = (uint64_t)agreed->wake_interval_us;
 }

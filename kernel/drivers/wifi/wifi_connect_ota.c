@@ -89,35 +89,53 @@ static int wifi_ota_run_sae(const fl_net_wifi_cred_t *cred, const wifi_network_t
 	static const uint8_t k_commit[] = "commit";
 	uint8_t tx[WIFI_OTA_FRAME_MAX];
 	uint8_t rx[WIFI_OTA_FRAME_MAX];
+	uint8_t commit_body[64];
+	size_t commit_len = sizeof(k_commit) - 1u;
 	size_t tx_len = 0;
 	size_t rx_len = 0;
+	unsigned attempt;
 
 	(void)cred;
 	if (wifi_supplicant_start_sae_handshake(supp) != 0)
 		return -1;
-	if (fl_net_wifi_mgmt_build_auth_sae_commit(sta_mac, ap->bssid, k_commit,
-						    sizeof(k_commit) - 1u, tx, sizeof(tx),
-						    &tx_len) != FL_RESULT_OK)
-		return -1;
-	if (wifi_ota_tx_mgmt(tr, tx, tx_len) != 0)
-		return -1;
-	if (wifi_ota_rx_mgmt(tr, rx, sizeof(rx), &rx_len) != 0)
-		return -1;
-	{
-		uint16_t auth_alg = 0;
-		uint16_t auth_seq = 0;
-		uint16_t status = 0xffffu;
-		const uint8_t *body = NULL;
-		size_t body_len = 0;
+	memcpy(commit_body, k_commit, commit_len);
 
-		if (fl_net_wifi_mgmt_parse_auth_resp(rx, rx_len, &auth_alg, &auth_seq, &status, &body,
-						   &body_len) != FL_RESULT_OK ||
-		    auth_alg != FL_WIFI_AUTH_ALG_SAE || auth_seq != 2u || status != 0u)
+	for (attempt = 0; attempt < 3u; attempt++) {
+		if (fl_net_wifi_mgmt_build_auth_sae_commit(sta_mac, ap->bssid, commit_body,
+							    commit_len, tx, sizeof(tx),
+							    &tx_len) != FL_RESULT_OK)
 			return -1;
-		if (wifi_supplicant_process_sae_confirm(supp, body, body_len) != 0)
+		if (wifi_ota_tx_mgmt(tr, tx, tx_len) != 0)
 			return -1;
+		if (wifi_ota_rx_mgmt(tr, rx, sizeof(rx), &rx_len) != 0)
+			return -1;
+		{
+			uint16_t auth_alg = 0;
+			uint16_t auth_seq = 0;
+			uint16_t status = 0xffffu;
+			const uint8_t *body = NULL;
+			size_t body_len = 0;
+
+			if (fl_net_wifi_mgmt_parse_auth_resp(rx, rx_len, &auth_alg, &auth_seq,
+							     &status, &body, &body_len) !=
+				    FL_RESULT_OK ||
+			    auth_alg != FL_WIFI_AUTH_ALG_SAE)
+				return -1;
+			if (status == FL_WIFI_SAE_STATUS_ANTICLOGGING && body_len > 0u) {
+				if (commit_len + body_len > sizeof(commit_body))
+					return -1;
+				memcpy(commit_body + commit_len, body, body_len);
+				commit_len += body_len;
+				continue;
+			}
+			if (auth_seq != 2u || status != 0u)
+				return -1;
+			if (wifi_supplicant_process_sae_confirm(supp, body, body_len) != 0)
+				return -1;
+			return 0;
+		}
 	}
-	return 0;
+	return -1;
 }
 
 static int wifi_ota_run_eapol(const fl_net_wifi_cred_t *cred, const wifi_network_t *ap,

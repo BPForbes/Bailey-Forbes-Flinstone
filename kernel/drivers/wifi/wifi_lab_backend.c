@@ -10,6 +10,7 @@
 #include "wifi_driver_packet.h"
 #include "wifi_connect_ota.h"
 #include "wifi_mgmt_transport.h"
+#include "wifi_twt_ota.h"
 
 #include "net_loopback.h"
 #include "net_wifi_he.h"
@@ -17,6 +18,7 @@
 #include "net_wire.h"
 #include "net_wifi_mgmt.h"
 #include "net_wifi_sae.h"
+#include "net_wifi_twt.h"
 #include "net_wifi_wpa.h"
 #include "net_checksum.h"
 #include "net_udp.h"
@@ -729,30 +731,47 @@ static int mock_run_supplicant_ota(wifi_lab_mock_ctx_t *ctx,
 static int mock_setup_twt(wifi_fullmac_t *dev, const wifi_fullmac_twt_setup_t *twt)
 {
 	wifi_lab_mock_ctx_t *ctx = (wifi_lab_mock_ctx_t *)dev;
-	uint8_t id;
+	const wifi_network_t *ap;
+	wifi_mgmt_transport_t tr;
+	fl_net_wifi_twt_params_t req;
+	fl_net_wifi_twt_params_t agreed;
 
-	if (!dev || !twt)
+	if (!dev || !twt || !ctx->up)
 		return -1;
-	for (id = 0; id < 8u; id++) {
-		if ((ctx->twt_mask & (1u << id)) == 0u)
-			break;
-	}
-	if (id >= 8u)
+	ap = mock_find_bssid(ctx, ctx->ap_bssid);
+	if (!ap)
 		return -1;
-	ctx->twt_slots[id] = *twt;
-	ctx->twt_slots[id].flow_id = id;
-	ctx->twt_mask |= (uint8_t)(1u << id);
+
+	memset(&req, 0, sizeof(req));
+	req.wake_duration_us = twt->wake_duration_us ? twt->wake_duration_us : 8000u;
+	req.wake_interval_us = twt->wake_interval_ms ? (twt->wake_interval_ms * 1000u) : 100000u;
+	if (mock_ota_init_transport(ctx, ap, &tr) != 0)
+		return -1;
+	if (wifi_twt_ota_setup(ctx->sta_mac, ctx->ap_bssid, &req, &agreed, &tr) != 0)
+		return -1;
+
+	ctx->twt_slots[agreed.flow_id] = *twt;
+	ctx->twt_slots[agreed.flow_id].flow_id = agreed.flow_id;
+	ctx->twt_slots[agreed.flow_id].wake_duration_us = agreed.wake_duration_us;
+	ctx->twt_slots[agreed.flow_id].wake_interval_ms = agreed.wake_interval_us / 1000u;
+	ctx->twt_mask |= (uint8_t)(1u << agreed.flow_id);
+	fl_net_wifi_twt_power_schedule(&agreed);
 	return 0;
 }
 
 static int mock_teardown_twt(wifi_fullmac_t *dev, uint8_t flow_id)
 {
 	wifi_lab_mock_ctx_t *ctx = (wifi_lab_mock_ctx_t *)dev;
+	const wifi_network_t *ap;
+	wifi_mgmt_transport_t tr;
 
 	if (!dev || flow_id >= 8u)
 		return -1;
 	if ((ctx->twt_mask & (1u << flow_id)) == 0u)
 		return -1;
+	ap = mock_find_bssid(ctx, ctx->ap_bssid);
+	if (ap && mock_ota_init_transport(ctx, ap, &tr) == 0)
+		(void)wifi_twt_ota_teardown(ctx->sta_mac, ctx->ap_bssid, flow_id, &tr);
 	memset(&ctx->twt_slots[flow_id], 0, sizeof(ctx->twt_slots[flow_id]));
 	ctx->twt_mask &= (uint8_t)~(1u << flow_id);
 	return 0;
