@@ -15,6 +15,8 @@
 #include <stdio.h>
 #include <string.h>
 
+#include <openssl/crypto.h>
+
 #define ASSERT(c)                                                              \
     do {                                                                       \
         if (!(c)) {                                                            \
@@ -58,8 +60,8 @@ static wifi_network_t mock_ap_wpa2(void) {
 }
 
 static int init_transport(wifi_network_t *ap, wifi_mgmt_transport_t *tr,
-                          wifi_mgmt_transport_mock_ctx_t *storage) {
-    wifi_mgmt_transport_mock_cfg_t cfg = {.ap = ap, .sta_mac = k_sta};
+                          wifi_mgmt_transport_mock_ctx_t *storage, const char *passphrase) {
+    wifi_mgmt_transport_mock_cfg_t cfg = {.ap = ap, .sta_mac = k_sta, .passphrase = passphrase};
 
     return wifi_mgmt_transport_mock_init(tr, storage, &cfg);
 }
@@ -70,12 +72,13 @@ static int test_sae_ota_exchange(void) {
     wifi_mgmt_transport_t tr;
     fl_net_wifi_cred_t cred;
 
-    ASSERT(init_transport(&ap, &tr, &storage) == 0);
     memset(&cred, 0, sizeof(cred));
     strncpy(cred.ssid, ap.ssid, sizeof(cred.ssid) - 1u);
     strncpy(cred.passphrase, "mock-secret", sizeof(cred.passphrase) - 1u);
     cred.auth_mode = FL_WIFI_AUTH_WPA3_SAE;
+    ASSERT(init_transport(&ap, &tr, &storage, cred.passphrase) == 0);
     ASSERT(wifi_connect_ota_run(&cred, &ap, k_sta, &tr, NULL) == 0);
+    wifi_mgmt_transport_mock_deinit(&tr);
     printf("ok #328 sae-ota-exchange\n");
     return 0;
 }
@@ -86,13 +89,14 @@ static int test_sae_anticlogging_retry(void) {
     wifi_mgmt_transport_t tr;
     fl_net_wifi_cred_t cred;
 
-    ASSERT(init_transport(&ap, &tr, &storage) == 0);
     memset(&cred, 0, sizeof(cred));
     strncpy(cred.ssid, ap.ssid, sizeof(cred.ssid) - 1u);
     strncpy(cred.passphrase, "mock-secret", sizeof(cred.passphrase) - 1u);
     cred.auth_mode = FL_WIFI_AUTH_WPA3_SAE;
+    ASSERT(init_transport(&ap, &tr, &storage, cred.passphrase) == 0);
     ASSERT(wifi_connect_ota_run_phase(&cred, &ap, k_sta, &tr, NULL,
                                       WIFI_CONNECT_OTA_AUTH_ONLY) == 0);
+    wifi_mgmt_transport_mock_deinit(&tr);
     printf("ok #328 sae-anticlogging-token\n");
     return 0;
 }
@@ -103,12 +107,13 @@ static int test_eapol_ota_exchange(void) {
     wifi_mgmt_transport_t tr;
     fl_net_wifi_cred_t cred;
 
-    ASSERT(init_transport(&ap, &tr, &storage) == 0);
     memset(&cred, 0, sizeof(cred));
     strncpy(cred.ssid, ap.ssid, sizeof(cred.ssid) - 1u);
     strncpy(cred.passphrase, "mock-secret", sizeof(cred.passphrase) - 1u);
     cred.auth_mode = FL_WIFI_AUTH_WPA2_PSK;
+    ASSERT(init_transport(&ap, &tr, &storage, cred.passphrase) == 0);
     ASSERT(wifi_connect_ota_run(&cred, &ap, k_sta, &tr, NULL) == 0);
+    wifi_mgmt_transport_mock_deinit(&tr);
     printf("ok #328 eapol-4way-ota\n");
     return 0;
 }
@@ -120,11 +125,12 @@ static int test_twt_ota_setup_teardown(void) {
     fl_net_wifi_twt_params_t req = {.wake_duration_us = 8000u, .wake_interval_us = 100000u};
     fl_net_wifi_twt_params_t agreed = {0};
 
-    ASSERT(init_transport(&ap, &tr, &storage) == 0);
+    ASSERT(init_transport(&ap, &tr, &storage, "mock-secret") == 0);
     ASSERT(wifi_twt_ota_setup(k_sta, k_bssid, &req, &agreed, &tr) == 0);
     ASSERT(agreed.flow_id < 8u);
     ASSERT(agreed.wake_duration_us == 8000u);
     ASSERT(wifi_twt_ota_teardown(k_sta, k_bssid, agreed.flow_id, &tr) == 0);
+    wifi_mgmt_transport_mock_deinit(&tr);
     printf("ok #328 twt-ota-setup-teardown\n");
     return 0;
 }
@@ -140,5 +146,6 @@ int main(void) {
         rc = 1;
     if (test_twt_ota_setup_teardown() != 0)
         rc = 1;
+    OPENSSL_cleanup();
     return rc;
 }

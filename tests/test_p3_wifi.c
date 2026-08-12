@@ -127,6 +127,11 @@ static int test_sae_derive_pmk(void) {
     return 0;
 }
 
+static int test_sae_dragonfly_selftest(void) {
+    ASSERT(fl_net_wifi_sae_dragonfly_selftest() == FL_RESULT_OK);
+    return 0;
+}
+
 static int test_mgmt_probe_assoc(void) {
     uint8_t frame[200];
     size_t len = 0;
@@ -320,6 +325,8 @@ int main(void) {
     if (test_sae_kdf_selftest() != 0)
         return 1;
     if (test_sae_derive_pmk() != 0)
+        return 1;
+    if (test_sae_dragonfly_selftest() != 0)
         return 1;
     if (test_mgmt_probe_assoc() != 0)
         return 1;
