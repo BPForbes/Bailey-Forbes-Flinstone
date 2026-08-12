@@ -684,7 +684,6 @@ step_hwsim() {
 step_physical() {
 	local sta="${IFACE:-${FL_NET_WIFI_IFACE:-}}"
 	local ssid="${SSID:-}"
-	local extra=()
 	if [[ -z "$sta" || -z "$ssid" ]]; then
 		record SKIP physical-ota "set --iface and --ssid (or FL_NET_WIFI_IFACE + SSID) for a real AP"
 		return 0
@@ -707,13 +706,21 @@ step_physical() {
 	start_tcpdump "$sta" "$ARTIFACTS/wifi-dhcp-eapol.pcap" port 67 or port 68 or ether proto 0x888e
 	# UDP echo to 192.168.50.1 is hwsim-only. Physical APs do not run that lab listener
 	# unless the caller sets UDP_ECHO_DST to a host that does.
+	# Pass optional UDP_* through env(1) so they are assignments, not a command name.
+	local -a ota_env=(
+		env
+		FL_NET_WIFI_IFACE="$sta"
+		SSID="$ssid"
+		PSK="$PSK"
+		AUTH="$AUTH"
+		FL_NET_WIFI_NL80211=1
+		FL_NET_WIFI_OTA_REQUIRE=1
+		DHCP=in-tree
+	)
 	if [[ -n "${UDP_ECHO_DST:-}" ]]; then
-		extra+=(UDP_ECHO=1 UDP_ECHO_DST="$UDP_ECHO_DST")
+		ota_env+=(UDP_ECHO=1 UDP_ECHO_DST="$UDP_ECHO_DST")
 	fi
-	if FL_NET_WIFI_IFACE="$sta" SSID="$ssid" PSK="$PSK" AUTH="$AUTH" \
-		FL_NET_WIFI_NL80211=1 FL_NET_WIFI_OTA_REQUIRE=1 DHCP=in-tree \
-		"${extra[@]}" \
-		"$ROOT/tests/test_p3_wifi_ota" >"$ARTIFACTS/wifi-dhcp-udp.log" 2>&1; then
+	if "${ota_env[@]}" "$ROOT/tests/test_p3_wifi_ota" >"$ARTIFACTS/wifi-dhcp-udp.log" 2>&1; then
 		record PASS physical-ota "fl_net_wifi_connect on $sta ssid=$ssid (in-tree nl80211)"
 	else
 		record FAIL physical-ota "see $ARTIFACTS/wifi-dhcp-udp.log"

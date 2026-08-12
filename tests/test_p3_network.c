@@ -575,12 +575,12 @@ static int test_tap_smoke(void) {
     view.data = frame;
     view.len = sizeof(frame);
     rc = fl_net_netdev_send(fl_net_netdev_tap(), &view);
-    if (rc != FL_RESULT_OK) {
-        fprintf(stderr, "skip: TAP send rc=%d (%s)\n", (int)rc,
-                fl_net_netdev_tap_last_error());
+    if (rc == FL_RESULT_ACCES) {
+        fprintf(stderr, "skip: TAP send denied (netdev I/O authz)\n");
         fl_net_netdev_tap_close();
         return 0;
     }
+    ASSERT(rc == FL_RESULT_OK);
 
     mut.data = frame;
     mut.cap = sizeof(frame);
