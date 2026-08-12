@@ -72,25 +72,6 @@ fl_result_t fl_net_wifi_sae_dragonfly_verify_confirm(fl_net_wifi_sae_dragonfly_c
                                                      const uint8_t *body, size_t body_len,
                                                      uint8_t pmk_out[FL_NET_WIFI_PMK_LEN]);
 
-/** Copy derived PMK (valid after rx_commit or verify_confirm). */
-fl_result_t fl_net_wifi_sae_dragonfly_pmk(const fl_net_wifi_sae_dragonfly_ctx_t *ctx,
-                                          uint8_t pmk_out[FL_NET_WIFI_PMK_LEN]);
-
-/**
- * AP-side: process STA Commit, optionally emit anticlogging token once,
- * then build AP Commit (seq 1) or AP Confirm (seq 2) response body.
- * Returns FL_RESULT_OK; *out_is_confirm=1 when confirm body is ready.
- */
-fl_result_t fl_net_wifi_sae_dragonfly_ap_rx_sta_commit(
-    fl_net_wifi_sae_dragonfly_ctx_t *ctx, const uint8_t *sta_commit, size_t sta_commit_len,
-    int emit_anticlogging, uint8_t *token_out, size_t token_cap, size_t *token_len_out,
-    uint8_t *resp_body, size_t resp_cap, size_t *resp_len_out, int *out_is_confirm);
-
-/** AP-side: verify STA Confirm. */
-fl_result_t fl_net_wifi_sae_dragonfly_ap_verify_sta_confirm(fl_net_wifi_sae_dragonfly_ctx_t *ctx,
-                                                            const uint8_t *confirm,
-                                                            size_t confirm_len);
-
 /** Round-trip STA+AP Dragonfly exchange self-test (RFC 7664 group 19). */
 fl_result_t fl_net_wifi_sae_dragonfly_selftest(void);
 

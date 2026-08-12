@@ -143,8 +143,13 @@ distro-style verbs ride on for hot writes.
        byte writes                                                asm_net_htonl_be32
        via fl_net_put_u16_be /                                    asm_net_ntohs_be16
        fl_net_put_u32_nbo                                         asm_net_ntohl_be32
-       (memcpy-clean on every                                    (single `bswap` / `rev`)
-       host endianness)                       --no--> portable bit-shift fallback
+       fl_net_put_u16_le /                                        asm_net_store_le16
+       fl_net_put_u32_le (802.11)                                 asm_net_load_le16
+                                                                  asm_net_store_be16
+                                                                  asm_net_load_be16
+                                                                  (LSB/MSB store; `bswap` / `rev`)
+       (memcpy-clean on every                                    --no--> portable bit-shift fallback
+       host endianness)
 
        v
        net_packet.c               fl_net_packet_parse_eth_ipv4 / _bind_l4 / _l4_view

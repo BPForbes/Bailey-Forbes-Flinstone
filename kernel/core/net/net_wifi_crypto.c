@@ -1,5 +1,7 @@
 #include "net_wifi_crypto.h"
 
+#include "fl/mem_asm.h"
+
 #include <limits.h>
 #include <openssl/evp.h>
 #include <openssl/hmac.h>
@@ -11,9 +13,9 @@
 #endif
 
 void fl_net_wifi_crypto_memzero(void *p, size_t n) {
-    volatile uint8_t *b = (volatile uint8_t *)p;
-    while (n-- > 0u)
-        *b++ = 0u;
+    if (!p || n == 0u)
+        return;
+    asm_mem_zero(p, n);
 }
 
 fl_result_t fl_net_wifi_crypto_random(uint8_t *out, size_t len) {

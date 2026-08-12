@@ -178,11 +178,12 @@ static void mock_ap_handle_sae_auth(wifi_mgmt_transport_mock_ctx_t *ctx, const u
 
 	if (auth_seq == 2u && body_len >= FL_NET_WIFI_SAE_CONFIRM_BODY_LEN) {
 		uint8_t confirm_body[64];
+		uint8_t pmk[FL_NET_WIFI_PMK_LEN];
 		size_t confirm_len = 0;
 
 		if (!ctx->sae_ap || !ctx->sae_ap_commit_sent)
 			return;
-		if (fl_net_wifi_sae_dragonfly_ap_verify_sta_confirm(ctx->sae_ap, body, body_len) !=
+		if (fl_net_wifi_sae_dragonfly_verify_confirm(ctx->sae_ap, body, body_len, pmk) !=
 		    FL_RESULT_OK)
 			return;
 		if (fl_net_wifi_sae_dragonfly_build_confirm(ctx->sae_ap, confirm_body,

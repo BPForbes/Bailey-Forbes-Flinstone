@@ -2,26 +2,25 @@
 
 #include "net_wifi_he.h"
 #include "contract_result.h"
+#include "fl/mem_asm.h"
+#include "net_endian.h"
 
 #include <string.h>
 
 static const uint8_t k_wifi_bcast[6] = {0xffu, 0xffu, 0xffu, 0xffu, 0xffu, 0xffu};
 
 static uint16_t mgmt_fc(const uint8_t *frame) {
-    return ((uint16_t)frame[0] | ((uint16_t)frame[1] << 8)) & 0x00fcu;
+    return fl_net_get_u16_le(frame) & 0x00fcu;
 }
 
 static void mgmt_write_hdr(uint8_t *out, uint16_t fc, const uint8_t addr1[6],
                            const uint8_t addr2[6], const uint8_t addr3[6]) {
-    out[0] = (uint8_t)(fc & 0xffu);
-    out[1] = (uint8_t)((fc >> 8) & 0xffu);
-    out[2] = 0u;
-    out[3] = 0u;
-    memcpy(out + 4, addr1, 6u);
-    memcpy(out + 10, addr2, 6u);
-    memcpy(out + 16, addr3, 6u);
-    out[22] = 0u;
-    out[23] = 0u;
+    fl_net_put_u16_le(out, fc);
+    fl_net_put_u16_le(out + 2, 0u);
+    asm_mem_copy(out + 4, addr1, 6u);
+    asm_mem_copy(out + 10, addr2, 6u);
+    asm_mem_copy(out + 16, addr3, 6u);
+    fl_net_put_u16_le(out + 22, 0u);
 }
 
 int fl_net_wifi_mgmt_hdr_valid(const uint8_t *frame, size_t len) {
@@ -240,11 +239,11 @@ fl_result_t fl_net_wifi_mgmt_parse_auth_resp(const uint8_t *frame, size_t len,
         return FL_RESULT_INVAL;
 
     if (auth_alg_out)
-        *auth_alg_out = (uint16_t)frame[24] | ((uint16_t)frame[25] << 8);
+        *auth_alg_out = fl_net_get_u16_le(frame + 24);
     if (auth_seq_out)
-        *auth_seq_out = (uint16_t)frame[26] | ((uint16_t)frame[27] << 8);
+        *auth_seq_out = fl_net_get_u16_le(frame + 26);
     if (status_out)
-        *status_out = (uint16_t)frame[28] | ((uint16_t)frame[29] << 8);
+        *status_out = fl_net_get_u16_le(frame + 28);
     if (body_out)
         *body_out = frame + FL_WIFI_MGMT_HDR_LEN + 6u;
     if (body_len_out)
@@ -460,12 +459,9 @@ fl_result_t fl_net_wifi_mgmt_build_auth_req(const uint8_t sta_mac[6], const uint
         return FL_RESULT_INVAL;
 
     mgmt_write_hdr(out, FL_WIFI_MGMT_FC_AUTH, bssid, sta_mac, bssid);
-    out[24] = 0x00u;
-    out[25] = 0x00u;
-    out[26] = 0x01u;
-    out[27] = 0x00u;
-    out[28] = 0x00u;
-    out[29] = 0x00u;
+    fl_net_put_u16_le(out + 24, 0u);
+    fl_net_put_u16_le(out + 26, 1u);
+    fl_net_put_u16_le(out + 28, 0u);
     *out_len = FL_WIFI_MGMT_HDR_LEN + 6u;
     return FL_RESULT_OK;
 }
@@ -479,12 +475,9 @@ fl_result_t fl_net_wifi_mgmt_build_auth_resp(const uint8_t bssid[6], const uint8
         return FL_RESULT_INVAL;
 
     mgmt_write_hdr(out, FL_WIFI_MGMT_FC_AUTH, sta_mac, bssid, bssid);
-    out[24] = 0x00u;
-    out[25] = 0x00u;
-    out[26] = (uint8_t)(auth_seq & 0xffu);
-    out[27] = (uint8_t)((auth_seq >> 8) & 0xffu);
-    out[28] = 0x00u;
-    out[29] = 0x00u;
+    fl_net_put_u16_le(out + 24, 0u);
+    fl_net_put_u16_le(out + 26, auth_seq);
+    fl_net_put_u16_le(out + 28, 0u);
     *out_len = FL_WIFI_MGMT_HDR_LEN + 6u;
     return FL_RESULT_OK;
 }
@@ -505,12 +498,9 @@ fl_result_t fl_net_wifi_mgmt_build_sae_auth(const uint8_t sta_mac[6], const uint
         return FL_RESULT_INVAL;
 
     mgmt_write_hdr(out, FL_WIFI_MGMT_FC_AUTH, bssid, sta_mac, bssid);
-    out[24] = 0x03u;
-    out[25] = 0x00u;
-    out[26] = (uint8_t)(auth_seq & 0xffu);
-    out[27] = (uint8_t)((auth_seq >> 8) & 0xffu);
-    out[28] = 0x00u;
-    out[29] = 0x00u;
+    fl_net_put_u16_le(out + 24, 3u);
+    fl_net_put_u16_le(out + 26, auth_seq);
+    fl_net_put_u16_le(out + 28, 0u);
     if (body_len > 0u && body)
         memcpy(out + FL_WIFI_MGMT_HDR_LEN + 6u, body, body_len);
     *out_len = need;
@@ -614,15 +604,11 @@ fl_result_t fl_net_wifi_mgmt_build_assoc_resp(const uint8_t bssid[6], const uint
 }
 
 static void twt_write_u32_le(uint8_t *p, uint32_t v) {
-    p[0] = (uint8_t)(v & 0xffu);
-    p[1] = (uint8_t)((v >> 8) & 0xffu);
-    p[2] = (uint8_t)((v >> 16) & 0xffu);
-    p[3] = (uint8_t)((v >> 24) & 0xffu);
+    fl_net_put_u32_le(p, v);
 }
 
 static uint32_t twt_read_u32_le(const uint8_t *p) {
-    return (uint32_t)p[0] | ((uint32_t)p[1] << 8) | ((uint32_t)p[2] << 16) |
-           ((uint32_t)p[3] << 24);
+    return fl_net_get_u32_le(p);
 }
 
 fl_result_t fl_net_wifi_mgmt_build_twt_setup_req(const uint8_t sta_mac[6], const uint8_t bssid[6],

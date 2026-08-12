@@ -872,7 +872,7 @@ tests/test_wifi_mgmt_ota: $(WIFI_TEST_COMMON_DEPS)
 	$(WIFI_TEST_LINK_PRE)
 	$(WIFI_TEST_LINK_AT)$(CC) $(CFLAGS) $(TEST_SANITIZE) -o tests/test_wifi_mgmt_ota tests/test_wifi_mgmt_ota.c \
 	  kernel/core/net/net_wifi_he.c kernel/core/net/net_wifi_mgmt.c \
-	  -Wl,-z,noexecstack
+	  $(MEM_ASM_OBJ) $(NET_ASM_OBJ) -Wl,-z,noexecstack
 
 test_wifi_mgmt_ota: tests/test_wifi_mgmt_ota
 	@./tests/test_wifi_mgmt_ota
@@ -885,7 +885,7 @@ tests/test_wifi_connect_ota: $(WIFI_TEST_COMMON_DEPS)
 	  kernel/core/net/net_wifi_crypto.c kernel/drivers/wifi/wifi_supplicant.c \
 	  kernel/drivers/wifi/wifi_mgmt_transport.c kernel/drivers/wifi/wifi_connect_ota.c \
 	  kernel/drivers/wifi/wifi_twt_ota.c \
-	  kernel/core/time/timekeeping.o $(MEM_ASM_OBJ) \
+	  kernel/core/time/timekeeping.o $(MEM_ASM_OBJ) $(NET_ASM_OBJ) \
 	  $(OPENSSL_LIBS) -Wl,-z,noexecstack
 
 test_wifi_connect_ota: tests/test_wifi_connect_ota

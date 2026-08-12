@@ -24,6 +24,16 @@ uint32_t asm_net_ntohl_be32(uint32_t net);
 uint64_t asm_net_htonll_be64(uint64_t host);
 uint64_t asm_net_ntohll_be64(uint64_t net);
 
+/** Store/load host integers as little-endian (LSB first) or big-endian (MSB first) octets. */
+void asm_net_store_le16(uint8_t *out, uint16_t host);
+uint16_t asm_net_load_le16(const uint8_t *in);
+void asm_net_store_be16(uint8_t *out, uint16_t host);
+uint16_t asm_net_load_be16(const uint8_t *in);
+void asm_net_store_le32(uint8_t *out, uint32_t host);
+uint32_t asm_net_load_le32(const uint8_t *in);
+void asm_net_store_be32(uint8_t *out, uint32_t host);
+uint32_t asm_net_load_be32(const uint8_t *in);
+
 size_t asm_net_tcp_build_syn(uint8_t *buf, size_t cap, uint16_t sport, uint16_t dport,
                               uint32_t seq);
 size_t asm_net_tcp_build_rst_ack(const uint8_t *syn, size_t syn_len, uint8_t *reply,
