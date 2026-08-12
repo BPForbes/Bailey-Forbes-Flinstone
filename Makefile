@@ -848,7 +848,12 @@ WIFI_TEST_NET_OBJS = kernel/core/net/net_checksum.c kernel/core/net/net_wire.c \
 	kernel/core/net/net_stack_sync.c kernel/core/net/net_wifi_netdev.c kernel/core/net/net_iface.c \
 	kernel/core/net/net_macvlan.c
 
-WIFI_TEST_COMMON_DEPS = $(NET_ASM_OBJ) $(MEM_ASM_OBJ) priority_queue.o kernel/core/time/timekeeping.o kernel/core/sys/ipc.o
+# kmalloc/mem_domain and wifi_platform_*.o are linked as .o (not compiled in the
+# recipe). List them as prerequisites so `make test_p3_wifi` works without a
+# prior full `make` (CI Issue job: validate_issue_328.sh after test_p3_network).
+WIFI_TEST_COMMON_DEPS = $(NET_ASM_OBJ) $(MEM_ASM_OBJ) $(NET_TEST_MM_OBJS) \
+	$(WIFI_PLATFORM_SRC:.c=.o) priority_queue.o kernel/core/time/timekeeping.o \
+	kernel/core/sys/ipc.o
 
 tests/test_p3_wifi: $(WIFI_TEST_COMMON_DEPS) $(NET_TEST_PCI_OBJ)
 	$(WIFI_TEST_LINK_PRE)
@@ -1034,7 +1039,7 @@ WIFI_TEST_STATION_DRIVER_SRCS = kernel/drivers/wifi/wifi_driver_backend.c kernel
 	kernel/drivers/wifi/fullmac/wifi_fullmac_core.c kernel/drivers/wifi/fullmac/wifi_fullmac_hw.c \
 	kernel/drivers/wifi/fullmac/wifi_fullmac_bus.c
 
-test_wifi_flinstone_helper: $(NET_ASM_OBJ) $(MEM_ASM_OBJ) $(NET_TEST_PCI_OBJ) priority_queue.o kernel/core/time/timekeeping.o kernel/core/sys/ipc.o
+test_wifi_flinstone_helper: $(WIFI_TEST_COMMON_DEPS) $(NET_TEST_PCI_OBJ)
 	$(CC) $(CFLAGS) $(TEST_SANITIZE) -o tests/test_wifi_flinstone_helper tests/test_wifi_flinstone_helper.c \
 	  kernel/core/net/net_wifi_he.c kernel/core/net/net_wifi_station.c kernel/core/net/net_wifi_host_linux.c \
 	  kernel/core/net/net_wifi_mgmt.c kernel/core/net/net_wifi_sae.c \
@@ -1049,7 +1054,7 @@ test_wifi_flinstone_helper: $(NET_ASM_OBJ) $(MEM_ASM_OBJ) $(NET_TEST_PCI_OBJ) pr
 	  $(NET_TEST_PCI_OBJ) $(MEM_ASM_OBJ) $(NET_ASM_OBJ) $(OPENSSL_LIBS) -Wl,-z,noexecstack
 	./tests/test_wifi_flinstone_helper
 
-test_wifi_flinstone_linux_helper: $(NET_ASM_OBJ) $(MEM_ASM_OBJ) $(NET_TEST_PCI_OBJ) priority_queue.o kernel/core/time/timekeeping.o kernel/core/sys/ipc.o
+test_wifi_flinstone_linux_helper: $(WIFI_TEST_COMMON_DEPS) $(NET_TEST_PCI_OBJ)
 	$(CC) $(CFLAGS) $(TEST_SANITIZE) -o tests/test_wifi_flinstone_linux_helper tests/test_wifi_flinstone_linux_helper.c \
 	  kernel/core/net/net_wifi_he.c kernel/core/net/net_wifi_station.c kernel/core/net/net_wifi_host_linux.c \
 	  kernel/core/net/net_wifi_mgmt.c kernel/core/net/net_wifi_sae.c \

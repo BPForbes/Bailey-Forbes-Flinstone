@@ -157,7 +157,11 @@ install_deps() {
 		return 0
 	fi
 	if [[ "$DRY_RUN" == "1" ]]; then
-		log "DRY-RUN: apt-get update && apt-get install -y ${pkgs[*]} tshark picocom"
+		if [[ "$SKIP_UART" == "1" ]]; then
+			log "DRY-RUN: apt-get update && apt-get install -y ${pkgs[*]} tshark"
+		else
+			log "DRY-RUN: apt-get update && apt-get install -y ${pkgs[*]} tshark picocom"
+		fi
 		record PASS deps "dry-run package list printed"
 		return 0
 	fi
@@ -170,7 +174,9 @@ install_deps() {
 		fi
 	done
 	ensure_pkg tshark || ensure_pkg wireshark-common || true
-	ensure_pkg picocom || true
+	if [[ "$SKIP_UART" != "1" ]]; then
+		ensure_pkg picocom || true
+	fi
 	extra="linux-modules-extra-$(uname -r)"
 	ensure_pkg "$extra" || true
 	if [[ "$extra_ok" == "1" ]]; then
@@ -273,8 +279,30 @@ PS
 	log "  usbipd list && usbipd bind --busid <BUSID> && usbipd attach --wsl --busid <BUSID>"
 }
 
+dump_log() {
+	local logf="$1"
+	if [[ -f "$logf" ]]; then
+		log "---- $logf ----"
+		cat "$logf" || true
+		log "---- end $logf ----"
+	fi
+}
+
+run_make_gate() {
+	local name="$1"
+	local note="$2"
+	local logf="$ARTIFACTS/${name}.log"
+	if make "$name" >"$logf" 2>&1; then
+		record PASS "$name" "$note"
+		return 0
+	fi
+	record FAIL "$name" "see $logf"
+	REQUIRED_FAIL=1
+	dump_log "$logf"
+	return 0
+}
+
 step_software() {
-	local logf
 	if [[ "$SKIP_SOFTWARE" == "1" ]]; then
 		record SKIP software "--skip-software"
 		return 0
@@ -284,28 +312,12 @@ step_software() {
 		record PASS software "dry-run make targets"
 		return 0
 	fi
-	logf="$ARTIFACTS/test_p3_network.log"
-	if make test_p3_network >"$logf" 2>&1; then
-		record PASS test_p3_network "required regression gate"
-	else
-		record FAIL test_p3_network "see $logf"
-		REQUIRED_FAIL=1
+	run_make_gate test_p3_network "required regression gate"
+	if [[ "$REQUIRED_FAIL" == "1" ]]; then
 		return 0
 	fi
-	logf="$ARTIFACTS/test_p3_wifi.log"
-	if make test_p3_wifi >"$logf" 2>&1; then
-		record PASS test_p3_wifi "lab SAE/EAPOL/TWT power-manager unit tests"
-	else
-		record FAIL test_p3_wifi "see $logf"
-		REQUIRED_FAIL=1
-	fi
-	logf="$ARTIFACTS/test_wifi_connect_ota.log"
-	if make test_wifi_connect_ota >"$logf" 2>&1; then
-		record PASS test_wifi_connect_ota "mock SAE/EAPOL/TWT OTA"
-	else
-		record FAIL test_wifi_connect_ota "see $logf"
-		REQUIRED_FAIL=1
-	fi
+	run_make_gate test_p3_wifi "lab SAE/EAPOL/TWT power-manager unit tests"
+	run_make_gate test_wifi_connect_ota "mock SAE/EAPOL/TWT OTA"
 }
 
 hwsim_ifaces() {
