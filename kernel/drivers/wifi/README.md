@@ -49,4 +49,7 @@ export FL_WIFI_FULLMAC=1
 export FL_WIFI_FULLMAC_USB=2-1
 ```
 
-Tests: `make test_wifi`, `make test_wifi_80211ax_mock_279`, `make test_wifi_fullmac_probe`.
+Tests: `make test_wifi`, `make test_wifi_80211ax_mock_279`, `make test_wifi_fullmac_probe`, `make test_p3_wifi_ota` (physical/hwsim; skips without `FL_NET_WIFI_IFACE` + `SSID`).
+
+Issue **#328** end-to-end (WSL and native Linux): `./scripts/validate_issue_328.sh --help` then `./scripts/validate_issue_328.sh --yes`. The script installs missing packages, applies idempotent DHCP/echo firewall rules (Linux sysctl/iptables/nft plus Windows/Hyper-V via `powershell.exe` on WSL), runs `make test_p3_network` (required), lab/TWT unit tests, and optional `mac80211_hwsim` + in-tree `fl_net_wifi_connect` (not nmcli/wpa_cli).
+

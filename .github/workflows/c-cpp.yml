@@ -135,6 +135,9 @@ jobs:
       - name: Test — P3 network (ping / check requirements)
         run: make check-network-requirements
 
+      - name: Test — P3 Wi-Fi (lab + TWT power manager)
+        run: make test_p3_wifi
+
       - name: Build CUnit suite
         run: make BPForbes_Flinstone_Tests CHANGELOG_CI=1
 
@@ -202,3 +205,36 @@ jobs:
 
       - name: Test — vm_layer_warning
         run: make test_vm_layer_warning
+
+  wifi-issue-328:
+    name: Issue #328 Wi-Fi validation (hwsim optional)
+    needs: version-requirements
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@93cb6efe18208431cddfb8368fd83d5badbf9bfd # v5
+        with:
+          fetch-depth: 0
+
+      - name: Sync version checkout for build
+        uses: ./.github/actions/sync-version-checkout
+
+      - name: Install Wi-Fi validation packages
+        run: |
+          sudo apt-get update -y
+          sudo apt-get install -y gcc g++ make binutils iproute2 iw hostapd tcpdump kmod \
+            python3 libssl-dev libsqlite3-dev dnsmasq-base || true
+          sudo apt-get install -y "linux-modules-extra-$(uname -r)" || true
+
+      - name: Run #328 validation (software required; hwsim soft-fail on hosted runners)
+        run: |
+          ./scripts/validate_issue_328.sh --yes --skip-uart --hwsim-soft-fail \
+            --artifacts-dir artifacts/issue-328
+
+      - name: Upload #328 artifacts (pcap/logs)
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: issue-328-wifi-validation
+          path: artifacts/issue-328
+          if-no-files-found: ignore
+

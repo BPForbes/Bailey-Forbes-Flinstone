@@ -11,6 +11,7 @@
 #include "net_wifi_netdev.h"
 #include "net_wifi_wpa.h"
 #include "net_wifi_crypto.h"
+#include "net_wifi_twt.h"
 #include "net_endian.h"
 #include "contract_p3_wifi.h"
 
@@ -190,8 +191,60 @@ static int test_twt_mock(void) {
     ASSERT(fl_net_wifi_state() == FL_WIFI_STATE_UP);
     ASSERT(fl_net_wifi_twt_setup(&req, &agreed) == FL_RESULT_OK);
     ASSERT(agreed.flow_id < 8u);
+    ASSERT(fl_net_wifi_twt_next_wake_us() > 0u);
+    ASSERT(fl_net_wifi_twt_should_sleep() != 0);
     ASSERT(fl_net_wifi_twt_teardown(agreed.flow_id) == FL_RESULT_OK);
+    ASSERT(fl_net_wifi_twt_next_wake_us() == 0u);
     ASSERT(fl_net_wifi_disconnect() == FL_RESULT_OK);
+    return 0;
+}
+
+static int test_twt_power_manager(void) {
+    fl_net_wifi_twt_params_t req = {.wake_duration_us = 400u,
+                                    .wake_interval_us = 2000u,
+                                    .implicit = 1};
+    fl_net_wifi_twt_params_t a = {0};
+    fl_net_wifi_twt_params_t b = {0};
+    uint64_t rem;
+    uint64_t rem_after_b;
+
+    fl_net_wifi_twt_lab_reset();
+    ASSERT(fl_net_wifi_twt_negotiate(&req, &a) == FL_RESULT_OK);
+    rem = fl_net_wifi_twt_next_wake_us();
+    ASSERT(rem > 0u);
+    ASSERT(rem <= 2000u);
+    ASSERT(fl_net_wifi_twt_should_sleep() != 0);
+    ASSERT(fl_net_wifi_twt_power_sleep() == FL_RESULT_OK);
+    /* Woke at (or past) the SP boundary; remaining is 0 while in the SP. */
+    rem = fl_net_wifi_twt_next_wake_us();
+    ASSERT(rem == 0u || rem <= 2000u);
+
+    ASSERT(fl_net_wifi_twt_lab_teardown(a.flow_id) == FL_RESULT_OK);
+    ASSERT(fl_net_wifi_twt_next_wake_us() == 0u);
+    ASSERT(fl_net_wifi_twt_should_sleep() == 0);
+
+    /* Stale flow_id must not clear a live schedule. */
+    fl_net_wifi_twt_lab_reset();
+    ASSERT(fl_net_wifi_twt_negotiate(&req, &a) == FL_RESULT_OK);
+    req.wake_interval_us = 8000u;
+    ASSERT(fl_net_wifi_twt_negotiate(&req, &b) == FL_RESULT_OK);
+    ASSERT(a.flow_id != b.flow_id);
+    rem = fl_net_wifi_twt_next_wake_us();
+    ASSERT(rem > 0u);
+    ASSERT(fl_net_wifi_twt_lab_teardown(7u) == FL_RESULT_NOENT);
+    rem_after_b = fl_net_wifi_twt_next_wake_us();
+    ASSERT(rem_after_b > 0u);
+    ASSERT(fl_net_wifi_twt_lab_teardown(a.flow_id) == FL_RESULT_OK);
+    ASSERT(fl_net_wifi_twt_next_wake_us() > 0u);
+    ASSERT(fl_net_wifi_twt_lab_teardown(b.flow_id) == FL_RESULT_OK);
+    ASSERT(fl_net_wifi_twt_next_wake_us() == 0u);
+
+    /* Connect-failure / reset must drop the schedule (no stale flow_id). */
+    ASSERT(fl_net_wifi_twt_negotiate(&req, &a) == FL_RESULT_OK);
+    ASSERT(fl_net_wifi_twt_next_wake_us() > 0u);
+    fl_net_wifi_twt_lab_reset();
+    ASSERT(fl_net_wifi_twt_next_wake_us() == 0u);
+    ASSERT(fl_net_wifi_twt_lab_teardown(a.flow_id) == FL_RESULT_NOENT);
     return 0;
 }
 
@@ -354,6 +407,8 @@ int main(void) {
     if (test_mgmt_probe_assoc() != 0)
         return 1;
     if (test_twt_mock() != 0)
+        return 1;
+    if (test_twt_power_manager() != 0)
         return 1;
     if (test_station_fsm_netdev() != 0)
         return 1;

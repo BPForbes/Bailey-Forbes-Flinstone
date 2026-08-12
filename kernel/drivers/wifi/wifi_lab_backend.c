@@ -775,6 +775,7 @@ static int mock_teardown_twt(wifi_fullmac_t *dev, uint8_t flow_id)
 		(void)wifi_twt_ota_teardown(ctx->sta_mac, ctx->ap_bssid, flow_id, &tr);
 	memset(&ctx->twt_slots[flow_id], 0, sizeof(ctx->twt_slots[flow_id]));
 	ctx->twt_mask &= (uint8_t)~(1u << flow_id);
+	(void)fl_net_wifi_twt_lab_teardown(flow_id);
 	return 0;
 }
 
