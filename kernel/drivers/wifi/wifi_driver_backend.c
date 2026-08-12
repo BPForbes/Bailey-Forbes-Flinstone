@@ -46,6 +46,21 @@ static wifi_auth_mode_t wifi_auth_from_cred(const fl_net_wifi_cred_t *cred)
 	return WIFI_AUTH_WPA2_PSK;
 }
 
+static uint32_t wifi_channel_to_freq_mhz(uint8_t channel, uint8_t band)
+{
+	if (channel == 0u)
+		return 0u;
+	if (band == FL_WIFI_BAND_6GHZ)
+		return 5955u + 5u * (uint32_t)(channel >= 1u ? (channel - 1u) : 0u);
+	if (band == FL_WIFI_BAND_5GHZ || channel >= 32u)
+		return 5000u + 5u * (uint32_t)channel;
+	if (channel == 14u)
+		return 2484u;
+	if (channel <= 13u)
+		return 2407u + 5u * (uint32_t)channel;
+	return 0u;
+}
+
 static void wifi_network_to_scan_entry(const wifi_network_t *src,
 				       fl_net_wifi_scan_entry_t *dst)
 {
@@ -78,6 +93,7 @@ static void wifi_scan_entry_to_network(const fl_net_wifi_scan_entry_t *src, wifi
 	memcpy(dst->bssid, src->bssid, sizeof(dst->bssid));
 	dst->rssi = (int8_t)src->rssi_dbm;
 	dst->channel = src->channel;
+	dst->freq = src->channel ? wifi_channel_to_freq_mhz(src->channel, src->band) : 0u;
 	switch (src->auth_mode) {
 	case FL_WIFI_AUTH_OPEN:
 		dst->auth_mode = WIFI_AUTH_OPEN;
@@ -279,6 +295,13 @@ static fl_result_t wifi_driver_nl80211_connect(const fl_net_wifi_cred_t *cred,
 
 	if (wifi_mgmt_transport_nl80211_init(&tr, nl) != 0)
 		return FL_RESULT_ERR;
+	{
+		uint32_t freq = ap.freq;
+
+		if (freq == 0u)
+			freq = wifi_channel_to_freq_mhz(ap.channel, FL_WIFI_BAND_ANY);
+		(void)fl_net_wifi_nl80211_set_mgmt_freq(nl, freq);
+	}
 	if (wifi_connect_ota_run(cred, &ap, sta_mac, &tr, NULL) != 0)
 		return FL_RESULT_ERR;
 	return FL_RESULT_OK;

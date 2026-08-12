@@ -83,7 +83,8 @@ static fl_result_t sae_kdf_hash(const uint8_t *key, size_t key_len, const char *
                                 const uint8_t *context, size_t context_len, uint8_t *out,
                                 size_t out_len)
 {
-    return fl_net_wifi_crypto_sae_kdf(key, key_len, label, context, context_len, out, out_len);
+    return fl_net_wifi_crypto_ieee80211_kdf_sha256(key, key_len, label, context, context_len,
+                                                   out, out_len);
 }
 
 static fl_result_t sae_hkdf_extract(const uint8_t *salt, size_t salt_len, const uint8_t *ikm,
@@ -147,15 +148,14 @@ done:
 
 static fl_result_t sae_derive_pwe_ecc(fl_net_wifi_sae_dragonfly_ctx_t *ctx)
 {
-    uint8_t addr1[6];
-    uint8_t addr2[6];
+    uint8_t addr_key[12];
     uint8_t pwd_seed[SHA256_DIGEST_LENGTH];
     uint8_t pwd_value_buf[SAE_PRIME_LEN];
-    uint8_t counter = 0u;
+    uint8_t prime_bin[SAE_PRIME_LEN];
+    uint8_t hash_data[FL_WIFI_PASSPHRASE_MAX + 1u];
+    uint8_t counter;
     size_t pass_len;
-    size_t ssid_len;
-    EVP_MD_CTX *md = NULL;
-    unsigned int md_len = 0u;
+    unsigned int mac_len = 0u;
     BIGNUM *x = NULL;
     BIGNUM *y2 = NULL;
     BIGNUM *y = NULL;
@@ -166,16 +166,21 @@ static fl_result_t sae_derive_pwe_ecc(fl_net_wifi_sae_dragonfly_ctx_t *ctx)
         return FL_RESULT_INVAL;
 
     pass_len = strlen(ctx->password);
-    ssid_len = strlen(ctx->ssid);
-    if (pass_len < 1u || ssid_len < 1u)
+    if (pass_len < 1u || pass_len > FL_WIFI_PASSPHRASE_MAX)
         return FL_RESULT_INVAL;
 
+    /* pwd-seed key = MAX(MAC) || MIN(MAC) (IEEE 802.11-2020 12.4.4.2.2). */
     if (sae_mac_cmp(ctx->own_addr, ctx->peer_addr) > 0) {
-        asm_mem_copy(addr1, ctx->own_addr, 6u);
-        asm_mem_copy(addr2, ctx->peer_addr, 6u);
+        asm_mem_copy(addr_key, ctx->own_addr, 6u);
+        asm_mem_copy(addr_key + 6u, ctx->peer_addr, 6u);
     } else {
-        asm_mem_copy(addr1, ctx->peer_addr, 6u);
-        asm_mem_copy(addr2, ctx->own_addr, 6u);
+        asm_mem_copy(addr_key, ctx->peer_addr, 6u);
+        asm_mem_copy(addr_key + 6u, ctx->own_addr, 6u);
+    }
+
+    if (sae_bn_to_bin_be(ctx->prime, prime_bin, sizeof(prime_bin)) != FL_RESULT_OK) {
+        fl_net_wifi_crypto_memzero(addr_key, sizeof(addr_key));
+        return FL_RESULT_ERR;
     }
 
     bnctx = BN_CTX_new();
@@ -185,25 +190,20 @@ static fl_result_t sae_derive_pwe_ecc(fl_net_wifi_sae_dragonfly_ctx_t *ctx)
     if (!bnctx || !x || !y2 || !y)
         goto done;
 
-    for (counter = 0u; counter < SAE_PWE_MAX_LOOP; counter++) {
-        md = EVP_MD_CTX_new();
-        if (!md)
-            goto done;
-        if (EVP_DigestInit_ex(md, EVP_sha256(), NULL) != 1 ||
-            EVP_DigestUpdate(md, addr1, 6u) != 1 ||
-            EVP_DigestUpdate(md, addr2, 6u) != 1 ||
-            EVP_DigestUpdate(md, ctx->password, pass_len) != 1 ||
-            EVP_DigestUpdate(md, &counter, 1u) != 1 ||
-            EVP_DigestFinal_ex(md, pwd_seed, &md_len) != 1) {
-            EVP_MD_CTX_free(md);
-            md = NULL;
-            goto done;
-        }
-        EVP_MD_CTX_free(md);
-        md = NULL;
+    asm_mem_copy(hash_data, ctx->password, pass_len);
 
-        if (sae_kdf_hash(pwd_seed, sizeof(pwd_seed), "saepw", (const uint8_t *)ctx->ssid,
-                         ssid_len, pwd_value_buf, sizeof(pwd_value_buf)) != FL_RESULT_OK)
+    /* Counter starts at 1. First valid point is the PWE. */
+    for (counter = 1u; counter <= SAE_PWE_MAX_LOOP; counter++) {
+        hash_data[pass_len] = counter;
+        mac_len = 0u;
+        if (HMAC(EVP_sha256(), addr_key, (int)sizeof(addr_key), hash_data, pass_len + 1u,
+                 pwd_seed, &mac_len) == NULL ||
+            mac_len != SHA256_DIGEST_LENGTH)
+            goto done;
+
+        if (sae_kdf_hash(pwd_seed, sizeof(pwd_seed), "SAE Hunting and Pecking", prime_bin,
+                         sizeof(prime_bin), pwd_value_buf, sizeof(pwd_value_buf)) !=
+            FL_RESULT_OK)
             goto done;
 
         if (sae_bin_to_bn_be(x, pwd_value_buf, sizeof(pwd_value_buf)) != FL_RESULT_OK)
@@ -223,7 +223,8 @@ static fl_result_t sae_derive_pwe_ecc(fl_net_wifi_sae_dragonfly_ctx_t *ctx)
         if (BN_mod_sqrt(y, y2, ctx->prime, bnctx) == NULL)
             continue;
 
-        if ((BN_is_odd(x) != 0) != (BN_is_odd(y) != 0)) {
+        /* y LSB must match LSB of pwd-seed (not of x). */
+        if ((BN_is_odd(y) != 0) != ((pwd_seed[SHA256_DIGEST_LENGTH - 1u] & 1u) != 0u)) {
             if (!BN_sub(y, ctx->prime, y))
                 goto done;
         }
@@ -237,14 +238,15 @@ static fl_result_t sae_derive_pwe_ecc(fl_net_wifi_sae_dragonfly_ctx_t *ctx)
     }
 
 done:
-    if (md)
-        EVP_MD_CTX_free(md);
     BN_clear_free(x);
     BN_clear_free(y2);
     BN_clear_free(y);
     BN_CTX_free(bnctx);
     fl_net_wifi_crypto_memzero(pwd_seed, sizeof(pwd_seed));
     fl_net_wifi_crypto_memzero(pwd_value_buf, sizeof(pwd_value_buf));
+    fl_net_wifi_crypto_memzero(prime_bin, sizeof(prime_bin));
+    fl_net_wifi_crypto_memzero(hash_data, sizeof(hash_data));
+    fl_net_wifi_crypto_memzero(addr_key, sizeof(addr_key));
     return rc;
 }
 
@@ -331,21 +333,22 @@ static fl_result_t sae_write_commit_body(fl_net_wifi_sae_dragonfly_ctx_t *ctx,
 
     if (sae_bn_to_bin_be(ctx->own_scalar, scalar_be, SAE_SCALAR_WIRE_LEN) != FL_RESULT_OK)
         goto done;
-    asm_mem_copy(body + 2u, scalar_be, SAE_SCALAR_WIRE_LEN);
 
     if (!EC_POINT_get_affine_coordinates(ctx->group, ctx->own_element, x, y, bnctx))
         goto done;
     if (sae_bn_to_bin_be(x, element_be, SAE_PRIME_LEN) != FL_RESULT_OK ||
         sae_bn_to_bin_be(y, element_be + SAE_PRIME_LEN, SAE_PRIME_LEN) != FL_RESULT_OK)
         goto done;
-    asm_mem_copy(body + 2u + SAE_SCALAR_WIRE_LEN, element_be, SAE_ELEMENT_WIRE_LEN);
 
+    /* IEEE 802.11-2020 9.3.3.2 / 12.4.7.4: group || token || scalar || element. */
     if (anticlogging_len > 0u) {
         if (!anticlogging_token)
             goto done;
-        asm_mem_copy(body + 2u + SAE_SCALAR_WIRE_LEN + SAE_ELEMENT_WIRE_LEN, anticlogging_token,
-               anticlogging_len);
+        asm_mem_copy(body + 2u, anticlogging_token, anticlogging_len);
     }
+    asm_mem_copy(body + 2u + anticlogging_len, scalar_be, SAE_SCALAR_WIRE_LEN);
+    asm_mem_copy(body + 2u + anticlogging_len + SAE_SCALAR_WIRE_LEN, element_be,
+                 SAE_ELEMENT_WIRE_LEN);
 
     *body_len_out = need;
     rc = FL_RESULT_OK;
@@ -366,6 +369,7 @@ static fl_result_t sae_parse_commit_body(fl_net_wifi_sae_dragonfly_ctx_t *ctx, c
     const uint8_t *scalar_be;
     const uint8_t *element_be;
     size_t min_len = 2u + SAE_SCALAR_WIRE_LEN + SAE_ELEMENT_WIRE_LEN;
+    size_t token_len;
 
     if (!ctx || !body || body_len < min_len)
         return FL_RESULT_INVAL;
@@ -374,8 +378,9 @@ static fl_result_t sae_parse_commit_body(fl_net_wifi_sae_dragonfly_ctx_t *ctx, c
     if (group != FL_NET_WIFI_SAE_GROUP_19)
         return FL_RESULT_ERR;
 
-    scalar_be = body + 2u;
-    element_be = body + 2u + SAE_SCALAR_WIRE_LEN;
+    token_len = body_len - min_len;
+    scalar_be = body + 2u + token_len;
+    element_be = scalar_be + SAE_SCALAR_WIRE_LEN;
 
     BN_clear(ctx->peer_scalar);
     if (sae_bin_to_bn_be(ctx->peer_scalar, scalar_be, SAE_SCALAR_WIRE_LEN) != FL_RESULT_OK)
@@ -406,7 +411,7 @@ static fl_result_t sae_parse_commit_body(fl_net_wifi_sae_dragonfly_ctx_t *ctx, c
     }
 
     if (commit_len_out)
-        *commit_len_out = min_len;
+        *commit_len_out = body_len;
     ctx->peer_commit_seen = 1;
     return FL_RESULT_OK;
 }

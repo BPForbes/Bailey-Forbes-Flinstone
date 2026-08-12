@@ -50,8 +50,9 @@ fl_result_t fl_net_wifi_sae_dragonfly_init_ap(fl_net_wifi_sae_dragonfly_ctx_t *c
                                               const uint8_t sta_mac[6]);
 
 /**
- * Build SAE Commit body (group 19). Optional anticlogging token is appended
- * per 802.11-2020 §12.4.6.2 after the element field.
+ * Build SAE Commit body (group 19). Optional anti-clogging token is placed
+ * immediately after the group identifier and before the scalar (802.11-2020
+ * 12.4.7.4).
  */
 fl_result_t fl_net_wifi_sae_dragonfly_build_commit(fl_net_wifi_sae_dragonfly_ctx_t *ctx,
                                                    const uint8_t *anticlogging_token,

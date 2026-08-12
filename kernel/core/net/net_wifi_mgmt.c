@@ -9,6 +9,9 @@
 
 static const uint8_t k_wifi_bcast[6] = {0xffu, 0xffu, 0xffu, 0xffu, 0xffu, 0xffu};
 
+/* 6/9/12/18/24/36/48/54 Mbps; 6, 12, 24 marked basic (802.11g/a OFDM). */
+static const uint8_t k_supported_rates[] = {0x8cu, 0x12u, 0x98u, 0x24u, 0xb0u, 0x48u, 0x60u, 0x6cu};
+
 static uint16_t mgmt_fc(const uint8_t *frame) {
     return fl_net_get_u16_le(frame) & 0x00fcu;
 }
@@ -544,19 +547,31 @@ fl_result_t fl_net_wifi_mgmt_build_assoc_req(const char *ssid, const uint8_t bss
         FL_RESULT_OK)
         return FL_RESULT_INVAL;
     pos = FL_WIFI_MGMT_HDR_LEN;
-    if (out_cap < pos + 4u + 2u + ssid_len + rsne_len + he_cap_len)
+    if (out_cap < pos + 4u + 2u + ssid_len + 2u + sizeof(k_supported_rates) + rsne_len +
+                      he_cap_len)
         return FL_RESULT_INVAL;
 
     mgmt_write_hdr(out, FL_WIFI_MGMT_FC_ASSOC_REQ, bssid, sta_mac, bssid);
 
-    out[pos++] = 0x00u;
-    out[pos++] = 0x00u;
-    out[pos++] = 0x0au;
-    out[pos++] = 0x00u;
+    {
+        uint16_t cap = (uint16_t)(FL_WIFI_CAP_ESS | FL_WIFI_CAP_SHORT_PREAMBLE |
+                                  FL_WIFI_CAP_SHORT_SLOT);
+
+        if (auth_mode != FL_WIFI_AUTH_OPEN)
+            cap |= (uint16_t)FL_WIFI_CAP_PRIVACY;
+        fl_net_put_u16_le(out + pos, cap);
+        pos += 2u;
+    }
+    fl_net_put_u16_le(out + pos, 10u);
+    pos += 2u;
     out[pos++] = FL_WIFI_ELEM_SSID;
     out[pos++] = (uint8_t)ssid_len;
     memcpy(out + pos, ssid, ssid_len);
     pos += ssid_len;
+    out[pos++] = FL_WIFI_ELEM_SUPPORTED_RATES;
+    out[pos++] = (uint8_t)sizeof(k_supported_rates);
+    memcpy(out + pos, k_supported_rates, sizeof(k_supported_rates));
+    pos += sizeof(k_supported_rates);
     if (rsne_len > 0u) {
         memcpy(out + pos, rsne, rsne_len);
         pos += rsne_len;

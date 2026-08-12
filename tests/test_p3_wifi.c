@@ -132,6 +132,27 @@ static int test_sae_dragonfly_selftest(void) {
     return 0;
 }
 
+static int test_sae_commit_token_before_scalar(void) {
+    static const uint8_t sta_mac[6] = {0x02, 0x11, 0x22, 0x33, 0x44, 0x55};
+    static const uint8_t ap_mac[6] = {0x02, 0xaa, 0xbb, 0xcc, 0xdd, 0x01};
+    static const uint8_t token[] = { 'c', 'l', 'o', 'g' };
+    fl_net_wifi_sae_dragonfly_ctx_t *sta = NULL;
+    uint8_t body[128];
+    size_t len = 0;
+
+    ASSERT(fl_net_wifi_sae_dragonfly_ctx_create(&sta) == FL_RESULT_OK);
+    ASSERT(fl_net_wifi_sae_dragonfly_init_sta(sta, "DragonTest", "secret-psk", sta_mac, ap_mac) ==
+           FL_RESULT_OK);
+    ASSERT(fl_net_wifi_sae_dragonfly_build_commit(sta, token, sizeof(token), body, sizeof(body),
+                                                 &len) == FL_RESULT_OK);
+    ASSERT(len == FL_NET_WIFI_SAE_COMMIT_BODY_LEN + sizeof(token));
+    ASSERT(body[0] == (uint8_t)FL_NET_WIFI_SAE_GROUP_19);
+    ASSERT(body[1] == 0u);
+    ASSERT(memcmp(body + 2, token, sizeof(token)) == 0);
+    fl_net_wifi_sae_dragonfly_ctx_destroy(sta);
+    return 0;
+}
+
 static int test_mgmt_probe_assoc(void) {
     uint8_t frame[200];
     size_t len = 0;
@@ -327,6 +348,8 @@ int main(void) {
     if (test_sae_derive_pmk() != 0)
         return 1;
     if (test_sae_dragonfly_selftest() != 0)
+        return 1;
+    if (test_sae_commit_token_before_scalar() != 0)
         return 1;
     if (test_mgmt_probe_assoc() != 0)
         return 1;

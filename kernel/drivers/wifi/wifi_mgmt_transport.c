@@ -130,7 +130,7 @@ static void mock_ap_handle_sae_auth(wifi_mgmt_transport_mock_ctx_t *ctx, const u
 	const uint8_t *sta = ctx->cfg.sta_mac;
 	uint8_t resp[WIFI_OTA_FRAME_MAX];
 	size_t resp_len = 0;
-	static const uint8_t k_clog_token[] = "clog";
+	static const uint8_t k_clog_token[] = { 'c', 'l', 'o', 'g' };
 	int has_clog = 0;
 
 	(void)frame;
@@ -138,14 +138,14 @@ static void mock_ap_handle_sae_auth(wifi_mgmt_transport_mock_ctx_t *ctx, const u
 	if (!ap || !sta)
 		return;
 
-	if (body_len >= sizeof(k_clog_token) &&
-	    memcmp(body + body_len - sizeof(k_clog_token), k_clog_token, sizeof(k_clog_token)) == 0)
+	if (body_len >= FL_NET_WIFI_SAE_COMMIT_BODY_LEN + sizeof(k_clog_token) &&
+	    memcmp(body + 2u, k_clog_token, sizeof(k_clog_token)) == 0)
 		has_clog = 1;
 
 	if (auth_seq == 1u && !has_clog && !ctx->sae_clog_sent) {
 		ctx->sae_clog_sent = 1u;
 		if (fl_net_wifi_mgmt_build_sae_auth(ap->bssid, sta, 2u, k_clog_token,
-						    sizeof(k_clog_token) - 1u, resp, sizeof(resp),
+						    sizeof(k_clog_token), resp, sizeof(resp),
 						    &resp_len) == FL_RESULT_OK) {
 			resp[28] = (uint8_t)(FL_WIFI_SAE_STATUS_ANTICLOGGING & 0xffu);
 			resp[29] = (uint8_t)((FL_WIFI_SAE_STATUS_ANTICLOGGING >> 8) & 0xffu);
@@ -154,6 +154,9 @@ static void mock_ap_handle_sae_auth(wifi_mgmt_transport_mock_ctx_t *ctx, const u
 		}
 		return;
 	}
+
+	if (auth_seq == 1u && !has_clog)
+		return;
 
 	if (auth_seq == 1u) {
 		uint8_t commit_body[128];
