@@ -46,7 +46,7 @@ Full spec: **[`docs/P3_13_CHAT_SERVER.md`](P3_13_CHAT_SERVER.md)**.
 | **`net_dns.c`** | P3-8 (minimal) | DNS-over-UDP **A** + **`fl_net_dns_resolve_aaaa`** (localhost stub + UDP AAAA) via `/etc/resolv.conf` |
 | **`net_loopback.c`** | P3-2 | In-memory netdev: ICMP echo reply, TCP RST+ACK on SYN |
 | **`net_netdev.c`** | P3-1 | Driver registry, send/recv, timeouts, P2-3 authz hook |
-| **`net_tap.c`** | P3-3 | Linux TAP (`IFF_TAP \| IFF_NO_PI`), `SKIP_TAP=1` |
+| **`net_tap.c`** | P3-3 | Linux TAP (`IFF_TAP \| IFF_NO_PI`), bring **IFF_UP** after **TUNSETIFF**, default name **`fltap%d`** (not macvlan **`fl0`**), `SKIP_TAP=1` |
 | **`net_wire_host.c`** | Hosted edge | **`fl_net_wire_send_icmp_pkt`** / **`send_udp_pkt`**; off-loopback syscalls; loopback via netdev |
 | **`net_wire_host_syscall.c`** | Hosted shim | C errno bridge to **`net_host_*_asm`** |
 | **`net_ping_host.c`** | Shell API | `fl_net_ping` / format helpers |
@@ -143,8 +143,13 @@ distro-style verbs ride on for hot writes.
        byte writes                                                asm_net_htonl_be32
        via fl_net_put_u16_be /                                    asm_net_ntohs_be16
        fl_net_put_u32_nbo                                         asm_net_ntohl_be32
-       (memcpy-clean on every                                    (single `bswap` / `rev`)
-       host endianness)                       --no--> portable bit-shift fallback
+       fl_net_put_u16_le /                                        asm_net_store_le16
+       fl_net_put_u32_le (802.11)                                 asm_net_load_le16
+                                                                  asm_net_store_be16
+                                                                  asm_net_load_be16
+                                                                  (LSB/MSB store; `bswap` / `rev`)
+       (memcpy-clean on every                                    --no--> portable bit-shift fallback
+       host endianness)
 
        v
        net_packet.c               fl_net_packet_parse_eth_ipv4 / _bind_l4 / _l4_view

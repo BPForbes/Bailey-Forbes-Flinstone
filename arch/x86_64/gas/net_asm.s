@@ -8,6 +8,14 @@
 .globl asm_net_ntohl_be32
 .globl asm_net_htonll_be64
 .globl asm_net_ntohll_be64
+.globl asm_net_store_le16
+.globl asm_net_load_le16
+.globl asm_net_store_be16
+.globl asm_net_load_be16
+.globl asm_net_store_le32
+.globl asm_net_load_le32
+.globl asm_net_store_be32
+.globl asm_net_load_be32
 .globl asm_net_tcp_build_syn
 .globl asm_net_tcp_build_rst_ack
 .globl asm_net_icmp_echo_request_build
@@ -107,6 +115,52 @@ asm_net_htonll_be64:
 asm_net_ntohll_be64:
     movq    %rdi, %rax
     bswapq  %rax
+    ret
+
+/* void asm_net_store_le16(uint8_t *out, uint16_t host); LSB then MSB. */
+asm_net_store_le16:
+    movw    %si, (%rdi)
+    ret
+
+/* uint16_t asm_net_load_le16(const uint8_t *in); */
+asm_net_load_le16:
+    movzwl  (%rdi), %eax
+    ret
+
+/* void asm_net_store_be16(uint8_t *out, uint16_t host); MSB then LSB. */
+asm_net_store_be16:
+    movzwl  %si, %eax
+    rolw    $8, %ax
+    movw    %ax, (%rdi)
+    ret
+
+/* uint16_t asm_net_load_be16(const uint8_t *in); */
+asm_net_load_be16:
+    movzwl  (%rdi), %eax
+    rolw    $8, %ax
+    ret
+
+/* void asm_net_store_le32(uint8_t *out, uint32_t host); */
+asm_net_store_le32:
+    movl    %esi, (%rdi)
+    ret
+
+/* uint32_t asm_net_load_le32(const uint8_t *in); */
+asm_net_load_le32:
+    movl    (%rdi), %eax
+    ret
+
+/* void asm_net_store_be32(uint8_t *out, uint32_t host); */
+asm_net_store_be32:
+    movl    %esi, %eax
+    bswapl  %eax
+    movl    %eax, (%rdi)
+    ret
+
+/* uint32_t asm_net_load_be32(const uint8_t *in); */
+asm_net_load_be32:
+    movl    (%rdi), %eax
+    bswapl  %eax
     ret
 
 /* size_t asm_net_tcp_build_syn(uint8_t *buf, size_t cap, uint16_t sport,

@@ -5,13 +5,12 @@
  *
  *   1. ASM-backed (preferred): when `FL_NET_ASM_AVAILABLE` is defined the
  *      helpers route through `asm_net_htons_be16` / `asm_net_htonl_be32`
- *      / `asm_net_ntohs_be16` / `asm_net_ntohl_be32` in
- *      arch/x86_64/{gas,nasm}/net_asm.* and arch/arm/gas/net_asm.s, which
- *      compile to a single `bswap` (x86) / `rev` (AArch64) instruction.
- *      That's the "endian-extended packets" path the packet module
- *      (net_packet.c, net_wire*.c) and the P3-14 net background MLQ
- *      (kernel/core/sched/workqueue + priority_queue.h) call into when
- *      packets are framed for send.
+ *      / `asm_net_ntohs_be16` / `asm_net_ntohl_be32` and the LSB/MSB
+ *      store/load primitives (`asm_net_store_le16` / `asm_net_store_be16`
+ *      and 32-bit twins) in arch/x86_64/{gas,nasm}/net_asm.* and
+ *      arch/arm/gas/net_asm.s (`bswap` / `rev` / native store).
+ *      IP/UDP/TCP use big-endian (MSB first); IEEE 802.11 SAE/mgmt use
+ *      little-endian (LSB first) via `fl_net_put_u16_le`.
  *
  *   2. Pure C fallback (K/B without ASM, or hosts where the project is
  *      compiled without -DFL_NET_ASM_AVAILABLE): in-tree bit-shift forms
@@ -150,15 +149,43 @@ static inline uint64_t fl_net_ntohll(uint64_t v) {
 #endif
 }
 
+/* Write a uint16 host-value as 2 little-endian bytes (LSB then MSB).
+ * IEEE 802.11 mgmt/SAE group and send-confirm use this layout. */
+static inline void fl_net_put_u16_le(uint8_t *out, uint16_t host_value) {
+#if defined(FL_NET_ASM_AVAILABLE)
+    asm_net_store_le16(out, host_value);
+#else
+    out[0] = (uint8_t)(host_value & 0xFFu);
+    out[1] = (uint8_t)((host_value >> 8) & 0xFFu);
+#endif
+}
+
+/* Read a uint16 host-value from 2 little-endian bytes (LSB then MSB). */
+static inline uint16_t fl_net_get_u16_le(const uint8_t *in) {
+#if defined(FL_NET_ASM_AVAILABLE)
+    return asm_net_load_le16(in);
+#else
+    return (uint16_t)((uint16_t)in[0] | ((uint16_t)in[1] << 8));
+#endif
+}
+
 /* Write a uint16 host-value as 2 network-byte-order bytes at out[0..1]. */
 static inline void fl_net_put_u16_be(uint8_t *out, uint16_t host_value) {
+#if defined(FL_NET_ASM_AVAILABLE)
+    asm_net_store_be16(out, host_value);
+#else
     out[0] = (uint8_t)((host_value >> 8) & 0xFFu);
     out[1] = (uint8_t)(host_value & 0xFFu);
+#endif
 }
 
 /* Read a uint16 host-value from 2 network-byte-order bytes at in[0..1]. */
 static inline uint16_t fl_net_get_u16_be(const uint8_t *in) {
+#if defined(FL_NET_ASM_AVAILABLE)
+    return asm_net_load_be16(in);
+#else
     return (uint16_t)(((uint16_t)in[0] << 8) | (uint16_t)in[1]);
+#endif
 }
 
 /* Copy the 4 raw bytes of a network-byte-order uint32 (e.g. an IPv4 address
@@ -176,20 +203,50 @@ static inline uint32_t fl_net_get_u32_nbo(const uint8_t *in) {
     return value_nbo;
 }
 
+/* Write a uint32 host-value as 4 little-endian bytes (LSB first). */
+static inline void fl_net_put_u32_le(uint8_t *out, uint32_t host_value) {
+#if defined(FL_NET_ASM_AVAILABLE)
+    asm_net_store_le32(out, host_value);
+#else
+    out[0] = (uint8_t)(host_value & 0xFFu);
+    out[1] = (uint8_t)((host_value >> 8) & 0xFFu);
+    out[2] = (uint8_t)((host_value >> 16) & 0xFFu);
+    out[3] = (uint8_t)((host_value >> 24) & 0xFFu);
+#endif
+}
+
+/* Read a uint32 host-value from 4 little-endian bytes (LSB first). */
+static inline uint32_t fl_net_get_u32_le(const uint8_t *in) {
+#if defined(FL_NET_ASM_AVAILABLE)
+    return asm_net_load_le32(in);
+#else
+    return (uint32_t)in[0] | ((uint32_t)in[1] << 8) | ((uint32_t)in[2] << 16) |
+           ((uint32_t)in[3] << 24);
+#endif
+}
+
 /* Write a uint32 host-value as 4 network-byte-order bytes at out[0..3]. */
 static inline void fl_net_put_u32_be(uint8_t *out, uint32_t host_value) {
+#if defined(FL_NET_ASM_AVAILABLE)
+    asm_net_store_be32(out, host_value);
+#else
     out[0] = (uint8_t)((host_value >> 24) & 0xFFu);
     out[1] = (uint8_t)((host_value >> 16) & 0xFFu);
     out[2] = (uint8_t)((host_value >> 8) & 0xFFu);
     out[3] = (uint8_t)(host_value & 0xFFu);
+#endif
 }
 
 /* Read a uint32 host-value from 4 network-byte-order bytes at in[0..3]. */
 static inline uint32_t fl_net_get_u32_be(const uint8_t *in) {
+#if defined(FL_NET_ASM_AVAILABLE)
+    return asm_net_load_be32(in);
+#else
     return ((uint32_t)in[0] << 24) |
            ((uint32_t)in[1] << 16) |
            ((uint32_t)in[2] << 8)  |
            (uint32_t)in[3];
+#endif
 }
 
 /* Write a uint64 host-value as 8 network-byte-order bytes at out[0..7]. */

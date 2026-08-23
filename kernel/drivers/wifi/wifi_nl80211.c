@@ -34,6 +34,12 @@ struct fl_net_wifi_nl80211 {
 	int mt7921;
 	uint64_t last_cookie;
 	int last_tx_ok;
+	uint32_t mgmt_freq_mhz;
+	struct {
+		uint8_t bssid[6];
+		uint32_t freq_mhz;
+	} bss_freq[32];
+	unsigned bss_freq_count;
 	struct {
 		uint16_t frame_type;
 		fl_net_wifi_nl80211_mgmt_cb_t cb;
@@ -191,6 +197,8 @@ static int nla_get_s32(const struct fl_wifi_nlattr *attr, int32_t *out)
 	memcpy(out, (const uint8_t *)attr + FL_WIFI_NLA_HDRLEN, sizeof(*out));
 	return 0;
 }
+
+static uint32_t nl80211_lookup_bss_freq(const fl_net_wifi_nl80211_t *nl, const uint8_t bssid[6]);
 
 static int nl80211_send(fl_net_wifi_nl80211_t *nl, void *buf, size_t len)
 {
@@ -668,9 +676,25 @@ fl_result_t fl_net_wifi_nl80211_mgmt_tx(fl_net_wifi_nl80211_t *nl, const uint8_t
 	if (nl80211_build_msg(buf, sizeof(buf), (uint16_t)nl->nl80211_id, FL_WIFI_NL80211_CMD_FRAME,
 			      FL_WIFI_NLM_F_REQUEST, ++seq, &pos) != 0)
 		return FL_RESULT_ERR;
-	if (nla_put_u32(buf, sizeof(buf), &pos, FL_WIFI_NL80211_ATTR_IFINDEX, nl->ifindex) != 0 ||
-	    nla_put_data(buf, sizeof(buf), &pos, FL_WIFI_NL80211_ATTR_FRAME, frame, len) != 0)
-		return FL_RESULT_ERR;
+	{
+		uint32_t freq = nl->mgmt_freq_mhz;
+
+		if (len >= FL_WIFI_MGMT_HDR_LEN) {
+			uint32_t looked = nl80211_lookup_bss_freq(nl, frame + 16);
+			if (!looked)
+				looked = nl80211_lookup_bss_freq(nl, frame + 4);
+			if (looked)
+				freq = looked;
+		}
+		if (nla_put_u32(buf, sizeof(buf), &pos, FL_WIFI_NL80211_ATTR_IFINDEX, nl->ifindex) !=
+			    0 ||
+		    nla_put_data(buf, sizeof(buf), &pos, FL_WIFI_NL80211_ATTR_FRAME, frame, len) !=
+			    0)
+			return FL_RESULT_ERR;
+		if (freq != 0u &&
+		    nla_put_u32(buf, sizeof(buf), &pos, FL_WIFI_NL80211_ATTR_WIPHY_FREQ, freq) != 0)
+			return FL_RESULT_ERR;
+	}
 	nl->last_cookie = (uint64_t)seq;
 	nl->last_tx_ok = 0;
 	nl80211_finish_msg(buf, pos);
@@ -697,6 +721,14 @@ fl_result_t fl_net_wifi_nl80211_mgmt_tx(fl_net_wifi_nl80211_t *nl, const uint8_t
 			return FL_RESULT_OK;
 	}
 	return FL_RESULT_TIMEDOUT;
+}
+
+fl_result_t fl_net_wifi_nl80211_set_mgmt_freq(fl_net_wifi_nl80211_t *nl, uint32_t freq_mhz)
+{
+	if (!nl)
+		return FL_RESULT_INVAL;
+	nl->mgmt_freq_mhz = freq_mhz;
+	return FL_RESULT_OK;
 }
 
 fl_result_t fl_net_wifi_nl80211_register_mgmt(fl_net_wifi_nl80211_t *nl, uint16_t frame_type,
@@ -785,13 +817,66 @@ fl_result_t fl_net_wifi_nl80211_mgmt_rx(fl_net_wifi_nl80211_t *nl, uint8_t *fram
 	return FL_RESULT_OK;
 }
 
-static int nl80211_scan_bss(fl_net_wifi_scan_entry_t *entry, struct fl_wifi_nlattr *bss)
+static uint8_t nl80211_freq_to_channel(uint32_t freq)
+{
+	if (freq == 2484u)
+		return 14u;
+	if (freq >= 2412u && freq <= 2472u)
+		return (uint8_t)((freq - 2407u) / 5u);
+	if (freq >= 5000u && freq < 5900u)
+		return (uint8_t)((freq - 5000u) / 5u);
+	if (freq >= 5955u)
+		return (uint8_t)(((freq - 5955u) / 5u) + 1u);
+	return 0u;
+}
+
+static void nl80211_remember_bss_freq(fl_net_wifi_nl80211_t *nl, const uint8_t bssid[6],
+				      uint32_t freq)
+{
+	unsigned i;
+	static const uint8_t zero_bssid[6] = {0};
+
+	if (!nl || !bssid || freq == 0u)
+		return;
+	if (memcmp(bssid, zero_bssid, 6u) == 0)
+		return;
+	nl->mgmt_freq_mhz = freq;
+	for (i = 0; i < nl->bss_freq_count; i++) {
+		if (memcmp(nl->bss_freq[i].bssid, bssid, 6u) == 0) {
+			nl->bss_freq[i].freq_mhz = freq;
+			return;
+		}
+	}
+	if (nl->bss_freq_count >= (unsigned)(sizeof(nl->bss_freq) / sizeof(nl->bss_freq[0])))
+		return;
+	memcpy(nl->bss_freq[nl->bss_freq_count].bssid, bssid, 6u);
+	nl->bss_freq[nl->bss_freq_count].freq_mhz = freq;
+	nl->bss_freq_count++;
+}
+
+static uint32_t nl80211_lookup_bss_freq(const fl_net_wifi_nl80211_t *nl, const uint8_t bssid[6])
+{
+	unsigned i;
+	static const uint8_t zero_bssid[6] = {0};
+
+	if (!nl || !bssid || memcmp(bssid, zero_bssid, 6u) == 0)
+		return 0u;
+	for (i = 0; i < nl->bss_freq_count; i++) {
+		if (memcmp(nl->bss_freq[i].bssid, bssid, 6u) == 0)
+			return nl->bss_freq[i].freq_mhz;
+	}
+	return 0u;
+}
+
+static int nl80211_scan_bss(fl_net_wifi_nl80211_t *nl, fl_net_wifi_scan_entry_t *entry,
+			    struct fl_wifi_nlattr *bss)
 {
 	struct fl_wifi_nlattr *attr;
 	int rem;
 	const uint8_t *ies = NULL;
 	size_t ies_len = 0;
 	int8_t rssi = -127;
+	uint32_t freq = 0;
 
 	memset(entry, 0, sizeof(*entry));
 	attr = (struct fl_wifi_nlattr *)((uint8_t *)bss + FL_WIFI_NLA_HDRLEN);
@@ -808,9 +893,7 @@ static int nl80211_scan_bss(fl_net_wifi_scan_entry_t *entry, struct fl_wifi_nlat
 		} else if (attr->nla_type == FL_WIFI_NL80211_BSS_BSSID)
 			memcpy(entry->bssid, (uint8_t *)attr + FL_WIFI_NLA_HDRLEN, 6u);
 		else if (attr->nla_type == FL_WIFI_NL80211_BSS_FREQUENCY) {
-			uint32_t freq = 0;
-
-			if (nla_get_u32(attr, &freq) == 0) {
+			if (nla_get_u32(attr, &freq) == 0 && freq != 0u) {
 				if (freq < 3000u)
 					entry->band = FL_WIFI_BAND_2GHZ;
 				else if (freq < 5925u)
@@ -824,6 +907,9 @@ static int nl80211_scan_bss(fl_net_wifi_scan_entry_t *entry, struct fl_wifi_nlat
 	entry->rssi_dbm = rssi;
 	if (ies && ies_len > 0u)
 		(void)fl_net_wifi_mgmt_enrich_scan_from_ies(ies, ies_len, entry);
+	if (entry->channel == 0u && freq != 0u)
+		entry->channel = nl80211_freq_to_channel(freq);
+	nl80211_remember_bss_freq(nl, entry->bssid, freq);
 	{
 		static const uint8_t zero_bssid[6] = {0};
 
@@ -911,7 +997,7 @@ fl_result_t fl_net_wifi_nl80211_get_scan(fl_net_wifi_nl80211_t *nl,
 			rem = (int)(nh->nlmsg_len - FL_WIFI_NLMSG_LENGTH(FL_WIFI_GENL_HDRLEN));
 			while (fl_wifi_nla_ok(attr, rem)) {
 				if (attr->nla_type == FL_WIFI_NL80211_ATTR_BSS && count < cap) {
-					if (nl80211_scan_bss(&entries[count], attr))
+					if (nl80211_scan_bss(nl, &entries[count], attr))
 						count++;
 				}
 				attr = fl_wifi_nla_next(attr, &rem);
@@ -1012,6 +1098,13 @@ fl_result_t fl_net_wifi_nl80211_mgmt_tx(fl_net_wifi_nl80211_t *nl, const uint8_t
 	(void)frame;
 	(void)len;
 	(void)timeout_ms;
+	return FL_RESULT_NOSYS;
+}
+
+fl_result_t fl_net_wifi_nl80211_set_mgmt_freq(fl_net_wifi_nl80211_t *nl, uint32_t freq_mhz)
+{
+	(void)nl;
+	(void)freq_mhz;
 	return FL_RESULT_NOSYS;
 }
 

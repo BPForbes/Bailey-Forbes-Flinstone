@@ -38,3 +38,4 @@ make -s test_wifi_connect_ota
 
 echo "[hwsim] mock OTA connect tests passed; hwsim radios present for manual nl80211 OTA"
 echo "  export FL_NET_WIFI_IFACE=${WLAN_STA} FL_NET_WIFI_NL80211=1 for physical-path probes"
+echo "  full #328 playbook (hostapd SAE/WPA2, firewall, UART): ./scripts/validate_issue_328.sh --yes"

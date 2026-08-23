@@ -343,8 +343,10 @@ static fl_result_t driver_backend_connect(const fl_net_wifi_cred_t *cred, unsign
     int physical = wifi_driver_backend_is_physical();
 
     rc = wifi_driver_connect(cred, timeout_ms);
-    if (rc != FL_RESULT_OK)
+    if (rc != FL_RESULT_OK) {
+        fl_net_wifi_twt_lab_reset();
         return rc;
+    }
 
     memset(&ap, 0, sizeof(ap));
     strncpy(ap.ssid, cred->ssid, sizeof(ap.ssid) - 1u);
@@ -365,8 +367,11 @@ static fl_result_t driver_backend_connect(const fl_net_wifi_cred_t *cred, unsign
     }
 
     if (!(ap.bssid[0] | ap.bssid[1] | ap.bssid[2] | ap.bssid[3] | ap.bssid[4] |
-          ap.bssid[5]))
+          ap.bssid[5])) {
+        wifi_driver_disconnect();
+        fl_net_wifi_twt_lab_reset();
         return FL_RESULT_NOSYS;
+    }
 
     if (physical) {
         fl_net_driver_t *drv = wifi_driver_netdev();

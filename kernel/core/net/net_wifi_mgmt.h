@@ -23,7 +23,13 @@
 #define FL_WIFI_AUTH_ALG_OPEN 0u
 #define FL_WIFI_AUTH_ALG_SAE 3u
 
-#define FL_WIFI_ACTION_CAT_S1G 126u
+#define FL_WIFI_CAP_ESS 0x0001u
+#define FL_WIFI_CAP_PRIVACY 0x0010u
+#define FL_WIFI_CAP_SHORT_PREAMBLE 0x0020u
+#define FL_WIFI_CAP_SHORT_SLOT 0x0400u
+
+/** IEEE 802.11 S1G action category (not vendor-specific protected / 126). */
+#define FL_WIFI_ACTION_CAT_S1G 22u
 #define FL_WIFI_ACTION_TWT_SETUP 6u
 #define FL_WIFI_ACTION_TWT_SETUP_RESP 7u
 #define FL_WIFI_ACTION_TWT_TEARDOWN 8u
@@ -141,7 +147,7 @@ fl_result_t fl_net_wifi_mgmt_build_rsne_ie(uint8_t auth_mode, uint8_t *out, size
 fl_result_t fl_net_wifi_mgmt_build_assoc_resp(const uint8_t bssid[6], const uint8_t sta_mac[6],
                                               uint8_t *out, size_t out_cap, size_t *out_len);
 
-/** Build S1G TWT Individual Setup Action frame (category 126, action 6). */
+/** Build S1G TWT Individual Setup Action frame (category 22, action 6). */
 fl_result_t fl_net_wifi_mgmt_build_twt_setup_req(const uint8_t sta_mac[6], const uint8_t bssid[6],
                                                  uint8_t dialog_token,
                                                  const fl_net_wifi_twt_params_t *req,

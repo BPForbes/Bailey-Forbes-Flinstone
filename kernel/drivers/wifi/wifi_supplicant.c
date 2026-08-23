@@ -85,6 +85,10 @@ int wifi_supplicant_deinit(wifi_supplicant_t *supp)
 	if (!supp)
 		return -1;
 
+	if (supp->sae_dragonfly) {
+		fl_net_wifi_sae_dragonfly_ctx_destroy(supp->sae_dragonfly);
+		supp->sae_dragonfly = NULL;
+	}
 	supp->state = WIFI_SUPP_STATE_IDLE;
 	fl_net_wifi_crypto_memzero(&supp->keys, sizeof(supp->keys));
 	fl_net_wifi_crypto_memzero(supp->password, sizeof(supp->password));
@@ -237,6 +241,22 @@ int wifi_supplicant_start_sae_handshake(wifi_supplicant_t *supp)
 	if (!supp)
 		return -1;
 
+	if (supp->sae_dragonfly) {
+		fl_net_wifi_sae_dragonfly_ctx_destroy(supp->sae_dragonfly);
+		supp->sae_dragonfly = NULL;
+	}
+	if (!supp->ssid[0] || !supp->password[0] || supp->sta_addr[0] == 0u)
+		return -1;
+
+	if (fl_net_wifi_sae_dragonfly_ctx_create(&supp->sae_dragonfly) != FL_RESULT_OK)
+		return -1;
+	if (fl_net_wifi_sae_dragonfly_init_sta(supp->sae_dragonfly, supp->ssid, supp->password,
+					       supp->sta_addr, supp->keys.bssid) != FL_RESULT_OK) {
+		fl_net_wifi_sae_dragonfly_ctx_destroy(supp->sae_dragonfly);
+		supp->sae_dragonfly = NULL;
+		return -1;
+	}
+
 	supp->state = WIFI_SUPP_STATE_AUTHENTICATING;
 	supp->start_time_ms = supplicant_now_ms();
 
@@ -245,37 +265,72 @@ int wifi_supplicant_start_sae_handshake(wifi_supplicant_t *supp)
 	return 0;
 }
 
-int wifi_supplicant_process_sae_commit(wifi_supplicant_t *supp, const uint8_t *commit,
-				       size_t len)
+int wifi_supplicant_build_sae_commit(wifi_supplicant_t *supp, const uint8_t *anticlogging_token,
+				     size_t anticlogging_len, uint8_t *body, size_t body_cap,
+				     size_t *body_len_out)
 {
-	(void)commit;
-
-	if (!supp || !commit || len == 0)
+	if (!supp || !body || !body_len_out || !supp->sae_dragonfly)
 		return -1;
 
-	SUPPLICANT_LOG("Processing SAE Commit frame [%zu bytes]", len);
+	if (fl_net_wifi_sae_dragonfly_build_commit(supp->sae_dragonfly, anticlogging_token,
+						   anticlogging_len, body, body_cap,
+						   body_len_out) != FL_RESULT_OK)
+		return -1;
+
+	SUPPLICANT_LOG("Built SAE Commit [%zu bytes]", *body_len_out);
 	supp->last_update_ms = supplicant_now_ms();
 	return 0;
 }
 
-int wifi_supplicant_process_sae_confirm(wifi_supplicant_t *supp, const uint8_t *confirm,
-					size_t len)
+int wifi_supplicant_rx_sae_peer_commit(wifi_supplicant_t *supp, const uint8_t *commit, size_t len)
 {
-	(void)confirm;
-
-	if (!supp || !confirm || len == 0)
+	if (!supp || !commit || len == 0 || !supp->sae_dragonfly)
 		return -1;
 
-	SUPPLICANT_LOG("Processing SAE Confirm frame [%zu bytes]", len);
+	SUPPLICANT_LOG("Processing peer SAE Commit [%zu bytes]", len);
+	if (fl_net_wifi_sae_dragonfly_rx_commit(supp->sae_dragonfly, commit, len) != FL_RESULT_OK) {
+		supp->state = WIFI_SUPP_STATE_ERROR;
+		supp->handshake_errors++;
+		return -1;
+	}
+	supp->last_update_ms = supplicant_now_ms();
+	return 0;
+}
 
-	if (!supp->ssid[0] || !supp->password[0]) {
+int wifi_supplicant_build_sae_confirm(wifi_supplicant_t *supp, uint8_t *body, size_t body_cap,
+				      size_t *body_len_out)
+{
+	if (!supp || !body || !body_len_out || !supp->sae_dragonfly)
+		return -1;
+
+	if (fl_net_wifi_sae_dragonfly_build_confirm(supp->sae_dragonfly, body, body_cap,
+						    body_len_out) != FL_RESULT_OK) {
 		supp->state = WIFI_SUPP_STATE_ERROR;
 		supp->handshake_errors++;
 		return -1;
 	}
 
-	if (fl_net_wifi_sae_derive_pmk(supp->ssid, supp->password, supp->keys.pmk,
-				       FL_NET_WIFI_PMK_LEN) != FL_RESULT_OK) {
+	SUPPLICANT_LOG("Built SAE Confirm [%zu bytes]", *body_len_out);
+	supp->last_update_ms = supplicant_now_ms();
+	return 0;
+}
+
+int wifi_supplicant_process_sae_commit(wifi_supplicant_t *supp, const uint8_t *commit,
+				       size_t len)
+{
+	return wifi_supplicant_rx_sae_peer_commit(supp, commit, len);
+}
+
+int wifi_supplicant_process_sae_confirm(wifi_supplicant_t *supp, const uint8_t *confirm,
+					size_t len)
+{
+	if (!supp || !confirm || len < FL_NET_WIFI_SAE_CONFIRM_BODY_LEN || !supp->sae_dragonfly)
+		return -1;
+
+	SUPPLICANT_LOG("Verifying peer SAE Confirm [%zu bytes]", len);
+
+	if (fl_net_wifi_sae_dragonfly_verify_confirm(supp->sae_dragonfly, confirm, len,
+						     supp->keys.pmk) != FL_RESULT_OK) {
 		supp->state = WIFI_SUPP_STATE_ERROR;
 		supp->handshake_errors++;
 		return -1;
@@ -284,7 +339,7 @@ int wifi_supplicant_process_sae_confirm(wifi_supplicant_t *supp, const uint8_t *
 	supp->state = WIFI_SUPP_STATE_AUTHENTICATED;
 	supp->last_update_ms = supplicant_now_ms();
 
-	SUPPLICANT_LOG("WPA3-SAE authentication complete");
+	SUPPLICANT_LOG("WPA3-SAE Dragonfly authentication complete");
 
 	return 0;
 }

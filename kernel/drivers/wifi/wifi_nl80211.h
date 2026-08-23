@@ -28,6 +28,9 @@ fl_result_t fl_net_wifi_nl80211_sta_mac(const fl_net_wifi_nl80211_t *nl, uint8_t
 fl_result_t fl_net_wifi_nl80211_mgmt_tx(fl_net_wifi_nl80211_t *nl, const uint8_t *frame,
                                         size_t len, unsigned timeout_ms);
 
+/** Frequency (MHz) for unassociated NL80211_CMD_FRAME (NL80211_ATTR_WIPHY_FREQ). */
+fl_result_t fl_net_wifi_nl80211_set_mgmt_freq(fl_net_wifi_nl80211_t *nl, uint32_t freq_mhz);
+
 fl_result_t fl_net_wifi_nl80211_register_mgmt(fl_net_wifi_nl80211_t *nl, uint16_t frame_type,
                                               fl_net_wifi_nl80211_mgmt_cb_t cb, void *ctx);
 

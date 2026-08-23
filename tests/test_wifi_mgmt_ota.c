@@ -220,13 +220,21 @@ static int test_assoc_req_fixed_fields(void) {
 
     ASSERT(fl_net_wifi_mgmt_build_assoc_req("LabAxHome", k_bssid, k_sta, FL_WIFI_AUTH_OPEN, NULL,
                                             frame, sizeof(frame), &len) == FL_RESULT_OK);
-    ASSERT(frame[24] == 0x00u);
-    ASSERT(frame[25] == 0x00u);
+    ASSERT(frame[24] == (uint8_t)(FL_WIFI_CAP_ESS | FL_WIFI_CAP_SHORT_PREAMBLE));
+    ASSERT(frame[25] == (uint8_t)(FL_WIFI_CAP_SHORT_SLOT >> 8));
     ASSERT(frame[26] == 0x0au);
     ASSERT(frame[27] == 0x00u);
     ASSERT(frame[28] == FL_WIFI_ELEM_SSID);
     ASSERT(fl_net_wifi_mgmt_parse_mgmt_ies(frame, len, &ies, &ies_len) == FL_RESULT_OK);
     ASSERT(ies_len > 0u);
+    ASSERT(ies[0] == FL_WIFI_ELEM_SSID);
+    {
+        size_t ssid_ie = 2u + (size_t)ies[1];
+
+        ASSERT(ssid_ie + 2u <= ies_len);
+        ASSERT(ies[ssid_ie] == FL_WIFI_ELEM_SUPPORTED_RATES);
+        ASSERT(ies[ssid_ie + 1u] >= 1u);
+    }
     return 0;
 }
 
