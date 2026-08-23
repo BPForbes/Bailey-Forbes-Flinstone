@@ -1,0 +1,10 @@
+MAJOR_VERSION=4
+STANDARD_VERSION=3
+RELEASE_VERSION=0
+PRERELEASE=1
+DEV_VERSION=5
+DESCRIPTION<<DESC_END
+WSL #328 physical-ota: preflight iw STA iface and SKIP with usbipd hint when Windows Wi-Fi is not nl80211; dump wifi-dhcp-udp.log on FAIL; pass optional UDP_ECHO_DST through env(1); keep TAP send failures fatal after IFF_UP except FL_RESULT_ACCES authz skip.
+DESC_END
+
+RELEASE_DATE=2026-08-12

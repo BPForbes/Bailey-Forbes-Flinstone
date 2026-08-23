@@ -42,9 +42,10 @@ Non-interactive GitHub issue #328 validation for WSL and native Linux.
 Required gate: make test_p3_network. Hardware steps skip with a reason when
 the kernel module, sudo, or UART device is missing.
 
-On WSL, SKIP for hwsim / physical-ota / uart-hw / roadmap is expected unless
-you attach USB Wi-Fi (usbipd) or an ESP32. linux-modules-extra-$(uname -r) is
-not an Ubuntu package for Microsoft WSL kernels; the script will not apt-get it.
+On WSL, SKIP for hwsim / uart-hw / roadmap is expected without mac80211_hwsim,
+a USB Wi-Fi dongle (usbipd), or an ESP32. Windows Wi-Fi is not wlan0 in WSL;
+physical-ota needs an nl80211 STA from `iw dev`. linux-modules-extra-$(uname -r)
+is not an Ubuntu package for Microsoft WSL kernels; the script will not apt-get it.
 
 Options:
   --help                 Show this help
@@ -364,6 +365,20 @@ hwsim_ifaces() {
 	iw dev 2>/dev/null | awk '/Interface/{print $2}'
 }
 
+wifi_sta_iface_present() {
+	local name="$1"
+	if [[ -z "$name" ]]; then
+		return 1
+	fi
+	if have_cmd iw && hwsim_ifaces | grep -qx "$name"; then
+		return 0
+	fi
+	if have_cmd iw && iw dev "$name" info >/dev/null 2>&1; then
+		return 0
+	fi
+	return 1
+}
+
 write_hostapd_sae() {
 	local iface="$1"
 	local conf="$2"
@@ -678,20 +693,44 @@ step_physical() {
 		record PASS physical-ota "dry-run"
 		return 0
 	fi
+	iw dev >"$ARTIFACTS/iw-dev-physical.txt" 2>/dev/null || true
+	ip link >"$ARTIFACTS/ip-link-physical.txt" 2>/dev/null || true
+	if ! wifi_sta_iface_present "$sta"; then
+		record SKIP physical-ota "nl80211 STA $sta not present (iw: ${ARTIFACTS}/iw-dev-physical.txt). WSL does not expose the Windows Wi-Fi NIC as wlan0 — attach a USB adapter: usbipd list && usbipd bind --busid <BUSID> && usbipd attach --wsl --busid <BUSID>, then iw dev"
+		if [[ "$IS_WSL" == "1" ]]; then
+			log "WSL: the Windows Wi-Fi adapter is not an nl80211 STA inside Linux. Attach a USB Wi-Fi dongle with usbipd, or run physical OTA on a real Linux host."
+		fi
+		return 0
+	fi
 	make tests/test_p3_wifi_ota >/dev/null
 	start_tcpdump "$sta" "$ARTIFACTS/wifi-dhcp-eapol.pcap" port 67 or port 68 or ether proto 0x888e
-	if FL_NET_WIFI_IFACE="$sta" SSID="$ssid" PSK="$PSK" AUTH="$AUTH" \
-		FL_NET_WIFI_OTA_REQUIRE=1 DHCP=in-tree UDP_ECHO=1 \
-		"$ROOT/tests/test_p3_wifi_ota" >"$ARTIFACTS/wifi-dhcp-udp.log" 2>&1; then
-		record PASS physical-ota "fl_net_wifi_connect on $sta ssid=$ssid (in-tree DHCP)"
+	# UDP echo to 192.168.50.1 is hwsim-only. Physical APs do not run that lab listener
+	# unless the caller sets UDP_ECHO_DST to a host that does.
+	# Pass optional UDP_* through env(1) so they are assignments, not a command name.
+	local -a ota_env=(
+		env
+		FL_NET_WIFI_IFACE="$sta"
+		SSID="$ssid"
+		PSK="$PSK"
+		AUTH="$AUTH"
+		FL_NET_WIFI_NL80211=1
+		FL_NET_WIFI_OTA_REQUIRE=1
+		DHCP=in-tree
+	)
+	if [[ -n "${UDP_ECHO_DST:-}" ]]; then
+		ota_env+=(UDP_ECHO=1 UDP_ECHO_DST="$UDP_ECHO_DST")
+	fi
+	if "${ota_env[@]}" "$ROOT/tests/test_p3_wifi_ota" >"$ARTIFACTS/wifi-dhcp-udp.log" 2>&1; then
+		record PASS physical-ota "fl_net_wifi_connect on $sta ssid=$ssid (in-tree nl80211)"
 	else
-		record FAIL physical-ota "see wifi-dhcp-udp.log"
+		record FAIL physical-ota "see $ARTIFACTS/wifi-dhcp-udp.log"
 		HWSIM_FAIL=1
+		dump_log "$ARTIFACTS/wifi-dhcp-udp.log"
 	fi
 	kill_pidfile "$ARTIFACTS/tcpdump.pid" || true
 	decode_pcap "$ARTIFACTS/wifi-dhcp-eapol.pcap" 'bootp or dhcp' "$ARTIFACTS/dhcp-frames.txt"
 	grep_evidence "$ARTIFACTS/wifi-dhcp-udp.log" "$ARTIFACTS/wifi-dhcp-udp-grep.txt" \
-		'DHCP.*(DISCOVER|OFFER|REQUEST|ACK)|UDP.*echo|FL_WIFI_STATE_UP|success|passed'
+		'DHCP.*(DISCOVER|OFFER|REQUEST|ACK)|UDP.*echo|FL_WIFI_STATE_UP|success|passed|FAIL|connect'
 }
 
 step_uart() {
@@ -919,7 +958,7 @@ main() {
 		echo "PASS=$PASS_N FAIL=$FAIL_N SKIP=$SKIP_N REQUIRED_FAIL=$REQUIRED_FAIL HWSIM_FAIL=$HWSIM_FAIL"
 		echo "results: $ARTIFACTS/results.tsv"
 		if [[ "$IS_WSL" == "1" ]]; then
-			echo "WSL: SKIP for hwsim / physical-ota / uart-hw / roadmap is expected without USB Wi-Fi (usbipd), --iface/--ssid, or an ESP32. The required gate is make test_p3_network."
+			echo "WSL: SKIP for hwsim / uart-hw / roadmap is expected without mac80211_hwsim, USB Wi-Fi (usbipd), or an ESP32. Windows Wi-Fi is not wlan0 in WSL. The required gate is make test_p3_network."
 		fi
 	} | tee "$SUMMARY_FILE"
 
