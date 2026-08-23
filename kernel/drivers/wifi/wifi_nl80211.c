@@ -34,6 +34,12 @@ struct fl_net_wifi_nl80211 {
 	int mt7921;
 	uint64_t last_cookie;
 	int last_tx_ok;
+	uint32_t mgmt_freq_mhz;
+	struct {
+		uint8_t bssid[6];
+		uint32_t freq_mhz;
+	} bss_freq[32];
+	unsigned bss_freq_count;
 	struct {
 		uint16_t frame_type;
 		fl_net_wifi_nl80211_mgmt_cb_t cb;
@@ -154,6 +160,28 @@ static int nla_put_data(void *buf, size_t cap, size_t *pos, uint16_t type, const
 	return 0;
 }
 
+static int nla_put_nested_begin(void *buf, size_t cap, size_t *pos, uint16_t type, size_t *nest_pos)
+{
+	struct fl_wifi_nlattr *na;
+
+	if (*pos + (size_t)FL_WIFI_NLA_ALIGN(FL_WIFI_NLA_HDRLEN) > cap)
+		return -1;
+	*nest_pos = *pos;
+	na = (struct fl_wifi_nlattr *)((uint8_t *)buf + *pos);
+	na->nla_type = type;
+	na->nla_len = (uint16_t)FL_WIFI_NLA_HDRLEN;
+	*pos += (size_t)FL_WIFI_NLA_ALIGN(FL_WIFI_NLA_HDRLEN);
+	return 0;
+}
+
+static void nla_put_nested_end(void *buf, size_t *pos, size_t nest_pos)
+{
+	struct fl_wifi_nlattr *na = (struct fl_wifi_nlattr *)((uint8_t *)buf + nest_pos);
+
+	(void)buf;
+	na->nla_len = (uint16_t)(*pos - nest_pos);
+}
+
 static int nla_get_u32(const struct fl_wifi_nlattr *attr, uint32_t *out)
 {
 	if (!attr || !out || attr->nla_len < FL_WIFI_NLA_HDRLEN + (int)sizeof(uint32_t))
@@ -169,6 +197,8 @@ static int nla_get_s32(const struct fl_wifi_nlattr *attr, int32_t *out)
 	memcpy(out, (const uint8_t *)attr + FL_WIFI_NLA_HDRLEN, sizeof(*out));
 	return 0;
 }
+
+static uint32_t nl80211_lookup_bss_freq(const fl_net_wifi_nl80211_t *nl, const uint8_t bssid[6]);
 
 static int nl80211_send(fl_net_wifi_nl80211_t *nl, void *buf, size_t len)
 {
@@ -624,6 +654,14 @@ fl_result_t fl_net_wifi_nl80211_ifindex(const fl_net_wifi_nl80211_t *nl, uint32_
 	return FL_RESULT_OK;
 }
 
+fl_result_t fl_net_wifi_nl80211_sta_mac(const fl_net_wifi_nl80211_t *nl, uint8_t mac_out[6])
+{
+	if (!nl || !mac_out)
+		return FL_RESULT_INVAL;
+	memcpy(mac_out, nl->sta_mac, 6u);
+	return FL_RESULT_OK;
+}
+
 fl_result_t fl_net_wifi_nl80211_mgmt_tx(fl_net_wifi_nl80211_t *nl, const uint8_t *frame,
 					size_t len, unsigned timeout_ms)
 {
@@ -638,9 +676,25 @@ fl_result_t fl_net_wifi_nl80211_mgmt_tx(fl_net_wifi_nl80211_t *nl, const uint8_t
 	if (nl80211_build_msg(buf, sizeof(buf), (uint16_t)nl->nl80211_id, FL_WIFI_NL80211_CMD_FRAME,
 			      FL_WIFI_NLM_F_REQUEST, ++seq, &pos) != 0)
 		return FL_RESULT_ERR;
-	if (nla_put_u32(buf, sizeof(buf), &pos, FL_WIFI_NL80211_ATTR_IFINDEX, nl->ifindex) != 0 ||
-	    nla_put_data(buf, sizeof(buf), &pos, FL_WIFI_NL80211_ATTR_FRAME, frame, len) != 0)
-		return FL_RESULT_ERR;
+	{
+		uint32_t freq = nl->mgmt_freq_mhz;
+
+		if (len >= FL_WIFI_MGMT_HDR_LEN) {
+			uint32_t looked = nl80211_lookup_bss_freq(nl, frame + 16);
+			if (!looked)
+				looked = nl80211_lookup_bss_freq(nl, frame + 4);
+			if (looked)
+				freq = looked;
+		}
+		if (nla_put_u32(buf, sizeof(buf), &pos, FL_WIFI_NL80211_ATTR_IFINDEX, nl->ifindex) !=
+			    0 ||
+		    nla_put_data(buf, sizeof(buf), &pos, FL_WIFI_NL80211_ATTR_FRAME, frame, len) !=
+			    0)
+			return FL_RESULT_ERR;
+		if (freq != 0u &&
+		    nla_put_u32(buf, sizeof(buf), &pos, FL_WIFI_NL80211_ATTR_WIPHY_FREQ, freq) != 0)
+			return FL_RESULT_ERR;
+	}
 	nl->last_cookie = (uint64_t)seq;
 	nl->last_tx_ok = 0;
 	nl80211_finish_msg(buf, pos);
@@ -669,6 +723,14 @@ fl_result_t fl_net_wifi_nl80211_mgmt_tx(fl_net_wifi_nl80211_t *nl, const uint8_t
 	return FL_RESULT_TIMEDOUT;
 }
 
+fl_result_t fl_net_wifi_nl80211_set_mgmt_freq(fl_net_wifi_nl80211_t *nl, uint32_t freq_mhz)
+{
+	if (!nl)
+		return FL_RESULT_INVAL;
+	nl->mgmt_freq_mhz = freq_mhz;
+	return FL_RESULT_OK;
+}
+
 fl_result_t fl_net_wifi_nl80211_register_mgmt(fl_net_wifi_nl80211_t *nl, uint16_t frame_type,
 					     fl_net_wifi_nl80211_mgmt_cb_t cb, void *ctx)
 {
@@ -694,6 +756,24 @@ fl_result_t fl_net_wifi_nl80211_register_mgmt(fl_net_wifi_nl80211_t *nl, uint16_
 	nl->mgmt_reg[nl->mgmt_reg_count].ctx = ctx;
 	nl->mgmt_reg_count++;
 	return FL_RESULT_OK;
+}
+
+void fl_net_wifi_nl80211_unregister_mgmt_ctx(fl_net_wifi_nl80211_t *nl, void *ctx)
+{
+	unsigned i = 0;
+
+	if (!nl || !ctx)
+		return;
+	while (i < nl->mgmt_reg_count) {
+		if (nl->mgmt_reg[i].ctx != ctx) {
+			i++;
+			continue;
+		}
+		if (i + 1u < nl->mgmt_reg_count)
+			memmove(&nl->mgmt_reg[i], &nl->mgmt_reg[i + 1u],
+				(nl->mgmt_reg_count - i - 1u) * sizeof(nl->mgmt_reg[0]));
+		nl->mgmt_reg_count--;
+	}
 }
 
 fl_result_t fl_net_wifi_nl80211_poll(fl_net_wifi_nl80211_t *nl, unsigned timeout_ms)
@@ -737,13 +817,66 @@ fl_result_t fl_net_wifi_nl80211_mgmt_rx(fl_net_wifi_nl80211_t *nl, uint8_t *fram
 	return FL_RESULT_OK;
 }
 
-static int nl80211_scan_bss(fl_net_wifi_scan_entry_t *entry, struct fl_wifi_nlattr *bss)
+static uint8_t nl80211_freq_to_channel(uint32_t freq)
+{
+	if (freq == 2484u)
+		return 14u;
+	if (freq >= 2412u && freq <= 2472u)
+		return (uint8_t)((freq - 2407u) / 5u);
+	if (freq >= 5000u && freq < 5900u)
+		return (uint8_t)((freq - 5000u) / 5u);
+	if (freq >= 5955u)
+		return (uint8_t)(((freq - 5955u) / 5u) + 1u);
+	return 0u;
+}
+
+static void nl80211_remember_bss_freq(fl_net_wifi_nl80211_t *nl, const uint8_t bssid[6],
+				      uint32_t freq)
+{
+	unsigned i;
+	static const uint8_t zero_bssid[6] = {0};
+
+	if (!nl || !bssid || freq == 0u)
+		return;
+	if (memcmp(bssid, zero_bssid, 6u) == 0)
+		return;
+	nl->mgmt_freq_mhz = freq;
+	for (i = 0; i < nl->bss_freq_count; i++) {
+		if (memcmp(nl->bss_freq[i].bssid, bssid, 6u) == 0) {
+			nl->bss_freq[i].freq_mhz = freq;
+			return;
+		}
+	}
+	if (nl->bss_freq_count >= (unsigned)(sizeof(nl->bss_freq) / sizeof(nl->bss_freq[0])))
+		return;
+	memcpy(nl->bss_freq[nl->bss_freq_count].bssid, bssid, 6u);
+	nl->bss_freq[nl->bss_freq_count].freq_mhz = freq;
+	nl->bss_freq_count++;
+}
+
+static uint32_t nl80211_lookup_bss_freq(const fl_net_wifi_nl80211_t *nl, const uint8_t bssid[6])
+{
+	unsigned i;
+	static const uint8_t zero_bssid[6] = {0};
+
+	if (!nl || !bssid || memcmp(bssid, zero_bssid, 6u) == 0)
+		return 0u;
+	for (i = 0; i < nl->bss_freq_count; i++) {
+		if (memcmp(nl->bss_freq[i].bssid, bssid, 6u) == 0)
+			return nl->bss_freq[i].freq_mhz;
+	}
+	return 0u;
+}
+
+static int nl80211_scan_bss(fl_net_wifi_nl80211_t *nl, fl_net_wifi_scan_entry_t *entry,
+			    struct fl_wifi_nlattr *bss)
 {
 	struct fl_wifi_nlattr *attr;
 	int rem;
 	const uint8_t *ies = NULL;
 	size_t ies_len = 0;
 	int8_t rssi = -127;
+	uint32_t freq = 0;
 
 	memset(entry, 0, sizeof(*entry));
 	attr = (struct fl_wifi_nlattr *)((uint8_t *)bss + FL_WIFI_NLA_HDRLEN);
@@ -760,9 +893,7 @@ static int nl80211_scan_bss(fl_net_wifi_scan_entry_t *entry, struct fl_wifi_nlat
 		} else if (attr->nla_type == FL_WIFI_NL80211_BSS_BSSID)
 			memcpy(entry->bssid, (uint8_t *)attr + FL_WIFI_NLA_HDRLEN, 6u);
 		else if (attr->nla_type == FL_WIFI_NL80211_BSS_FREQUENCY) {
-			uint32_t freq = 0;
-
-			if (nla_get_u32(attr, &freq) == 0) {
+			if (nla_get_u32(attr, &freq) == 0 && freq != 0u) {
 				if (freq < 3000u)
 					entry->band = FL_WIFI_BAND_2GHZ;
 				else if (freq < 5925u)
@@ -775,24 +906,46 @@ static int nl80211_scan_bss(fl_net_wifi_scan_entry_t *entry, struct fl_wifi_nlat
 	}
 	entry->rssi_dbm = rssi;
 	if (ies && ies_len > 0u)
-		(void)fl_net_wifi_scan_enrich_from_ies(ies, ies_len, entry);
-	return entry->ssid[0] != '\0' || entry->bssid[0] != 0;
+		(void)fl_net_wifi_mgmt_enrich_scan_from_ies(ies, ies_len, entry);
+	if (entry->channel == 0u && freq != 0u)
+		entry->channel = nl80211_freq_to_channel(freq);
+	nl80211_remember_bss_freq(nl, entry->bssid, freq);
+	{
+		static const uint8_t zero_bssid[6] = {0};
+
+		return entry->ssid[0] != '\0' ||
+		       memcmp(entry->bssid, zero_bssid, sizeof(entry->bssid)) != 0;
+	}
 }
 
 fl_result_t fl_net_wifi_nl80211_trigger_scan(fl_net_wifi_nl80211_t *nl, const char *ssid)
 {
 	uint8_t buf[NL80211_MAX_MSG];
 	size_t pos;
+	size_t ssid_len = 0;
 	static uint32_t seq;
 
-	(void)ssid;
 	if (!nl)
 		return FL_RESULT_INVAL;
+	if (ssid) {
+		if (fl_net_wifi_scan_ssid_validate(ssid, &ssid_len) != FL_RESULT_OK)
+			return FL_RESULT_INVAL;
+	}
 	if (nl80211_build_msg(buf, sizeof(buf), (uint16_t)nl->nl80211_id,
 			      FL_WIFI_NL80211_CMD_TRIGGER_SCAN, FL_WIFI_NLM_F_REQUEST, ++seq, &pos) != 0)
 		return FL_RESULT_ERR;
 	if (nla_put_u32(buf, sizeof(buf), &pos, FL_WIFI_NL80211_ATTR_IFINDEX, nl->ifindex) != 0)
 		return FL_RESULT_ERR;
+	if (ssid && ssid_len > 0u) {
+		size_t nest_pos = 0;
+
+		if (nla_put_nested_begin(buf, sizeof(buf), &pos, FL_WIFI_NL80211_ATTR_SCAN_SSIDS,
+					 &nest_pos) != 0)
+			return FL_RESULT_ERR;
+		if (nla_put_data(buf, sizeof(buf), &pos, 1u, ssid, ssid_len) != 0)
+			return FL_RESULT_ERR;
+		nla_put_nested_end(buf, &pos, nest_pos);
+	}
 	nl80211_finish_msg(buf, pos);
 	if (nl80211_send_and_ack(nl, buf, pos, 3000u) != FL_RESULT_OK)
 		return FL_RESULT_ERR;
@@ -844,7 +997,7 @@ fl_result_t fl_net_wifi_nl80211_get_scan(fl_net_wifi_nl80211_t *nl,
 			rem = (int)(nh->nlmsg_len - FL_WIFI_NLMSG_LENGTH(FL_WIFI_GENL_HDRLEN));
 			while (fl_wifi_nla_ok(attr, rem)) {
 				if (attr->nla_type == FL_WIFI_NL80211_ATTR_BSS && count < cap) {
-					if (nl80211_scan_bss(&entries[count], attr))
+					if (nl80211_scan_bss(nl, &entries[count], attr))
 						count++;
 				}
 				attr = fl_wifi_nla_next(attr, &rem);
@@ -931,6 +1084,13 @@ fl_result_t fl_net_wifi_nl80211_ifindex(const fl_net_wifi_nl80211_t *nl, uint32_
 	return FL_RESULT_NOSYS;
 }
 
+fl_result_t fl_net_wifi_nl80211_sta_mac(const fl_net_wifi_nl80211_t *nl, uint8_t mac_out[6])
+{
+	(void)nl;
+	(void)mac_out;
+	return FL_RESULT_NOSYS;
+}
+
 fl_result_t fl_net_wifi_nl80211_mgmt_tx(fl_net_wifi_nl80211_t *nl, const uint8_t *frame,
 					size_t len, unsigned timeout_ms)
 {
@@ -938,6 +1098,13 @@ fl_result_t fl_net_wifi_nl80211_mgmt_tx(fl_net_wifi_nl80211_t *nl, const uint8_t
 	(void)frame;
 	(void)len;
 	(void)timeout_ms;
+	return FL_RESULT_NOSYS;
+}
+
+fl_result_t fl_net_wifi_nl80211_set_mgmt_freq(fl_net_wifi_nl80211_t *nl, uint32_t freq_mhz)
+{
+	(void)nl;
+	(void)freq_mhz;
 	return FL_RESULT_NOSYS;
 }
 
@@ -949,6 +1116,12 @@ fl_result_t fl_net_wifi_nl80211_register_mgmt(fl_net_wifi_nl80211_t *nl, uint16_
 	(void)cb;
 	(void)ctx;
 	return FL_RESULT_NOSYS;
+}
+
+void fl_net_wifi_nl80211_unregister_mgmt_ctx(fl_net_wifi_nl80211_t *nl, void *ctx)
+{
+	(void)nl;
+	(void)ctx;
 }
 
 fl_result_t fl_net_wifi_nl80211_mgmt_rx(fl_net_wifi_nl80211_t *nl, uint8_t *frame, size_t cap,

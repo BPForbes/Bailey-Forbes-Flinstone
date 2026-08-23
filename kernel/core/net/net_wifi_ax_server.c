@@ -150,7 +150,7 @@ static fl_result_t ax_station_session_auth(const fl_net_wifi_cred_t *cred, uint8
     }
     (void)wifi_supplicant_deinit(&supp);
 
-    if (fl_net_wifi_mgmt_build_assoc_req(cred->ssid, ap_bssid, sta_mac, auth_mode, tx,
+    if (fl_net_wifi_mgmt_build_assoc_req(cred->ssid, ap_bssid, sta_mac, auth_mode, NULL, tx,
                                          sizeof(tx), &tx_len) != FL_RESULT_OK)
         return FL_RESULT_ERR;
     rc = io->send(io->ctx, FL_NET_SESSION_OP_WIFI_ASSOC_REQ, tx, (uint16_t)tx_len);

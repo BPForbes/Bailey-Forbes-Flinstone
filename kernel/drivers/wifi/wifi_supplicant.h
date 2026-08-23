@@ -14,6 +14,8 @@
 
 #include "wifi_coprocessor.h"
 
+#include "kernel/core/net/net_wifi_sae.h"
+
 #define WIFI_SUPPLICANT_TIMEOUT_MS 10000
 
 typedef enum {
@@ -52,6 +54,9 @@ typedef struct {
 	/* Credentials for SAE / PSK derivation (ephemeral; scrub on deinit) */
 	char ssid[WIFI_SSID_MAX + 1];
 	char password[WIFI_PASSWORD_MAX + 1];
+
+	/** RFC 7664 Dragonfly SAE state (WPA3); NULL when idle. */
+	fl_net_wifi_sae_dragonfly_ctx_t *sae_dragonfly;
 } wifi_supplicant_t;
 
 /* Lifecycle */
@@ -75,8 +80,14 @@ int wifi_supplicant_process_msg1(wifi_supplicant_t *supp, const uint8_t *msg1,
 int wifi_supplicant_process_msg3(wifi_supplicant_t *supp, const uint8_t *msg3,
 				 size_t len);
 
-/* WPA3-SAE */
+/* WPA3-SAE (RFC 7664 Dragonfly group 19) */
 int wifi_supplicant_start_sae_handshake(wifi_supplicant_t *supp);
+int wifi_supplicant_build_sae_commit(wifi_supplicant_t *supp, const uint8_t *anticlogging_token,
+				     size_t anticlogging_len, uint8_t *body, size_t body_cap,
+				     size_t *body_len_out);
+int wifi_supplicant_rx_sae_peer_commit(wifi_supplicant_t *supp, const uint8_t *commit, size_t len);
+int wifi_supplicant_build_sae_confirm(wifi_supplicant_t *supp, uint8_t *body, size_t body_cap,
+				      size_t *body_len_out);
 int wifi_supplicant_process_sae_commit(wifi_supplicant_t *supp, const uint8_t *commit,
 				       size_t len);
 int wifi_supplicant_process_sae_confirm(wifi_supplicant_t *supp, const uint8_t *confirm,

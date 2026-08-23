@@ -19,6 +19,7 @@
 #include "net_packet.h"
 #include "net_ping_host.h"
 #include "net_requirements.h"
+#include "net_tap.h"
 #include "net_wire_host.h"
 #include "net_background.h"
 #include "net_udp.h"
@@ -543,7 +544,8 @@ static int test_dns_resolve_aaaa_localhost(void) {
 
 static int test_tap_smoke(void) {
     const char *skip;
-    uint8_t frame[FL_NET_ETH_HDR_LEN + 4];
+    /* IEEE 802.3 min without FCS; short TAP writes fail with EINVAL on some kernels. */
+    uint8_t frame[60];
     fl_net_frame_view_t view;
     fl_net_frame_mut_t mut;
     fl_result_t rc;
@@ -554,6 +556,8 @@ static int test_tap_smoke(void) {
         return 0;
     }
 
+    ASSERT(strcmp(FL_NET_TAP_IFNAME_PATTERN, "fl0") != 0);
+
     fl_net_netdev_init();
     rc = fl_net_netdev_tap_open(NULL);
     if (rc != FL_RESULT_OK) {
@@ -561,6 +565,7 @@ static int test_tap_smoke(void) {
         return 0;
     }
 
+    memset(frame, 0, sizeof(frame));
     memset(frame, 0xff, 6);
     memset(frame + 6, 0x02, 6);
     frame[12] = 0x08;
@@ -1217,6 +1222,7 @@ static int test_wifi_lab_server_host(void) {
 
     (void)unsetenv("FL_NET_SOCK_NATIVE");
     (void)setenv("FL_NET_WIFI_USE_WPA", "0", 1);
+    (void)setenv("FL_NET_WIFI_LAB", "1", 1);
     fl_net_route_init();
     ASSERT(fl_net_wifi_station_init() == FL_RESULT_OK);
     ASSERT(fl_net_wifi_scan(FL_WIFI_BAND_ANY, 1000u) == FL_RESULT_OK);

@@ -22,10 +22,20 @@ fl_result_t fl_net_wifi_crypto_ptk(const uint8_t pmk[FL_NET_WIFI_PMK_LEN],
                                    const uint8_t bssid[6], const uint8_t sta[6],
                                    uint8_t ptk_out[FL_NET_WIFI_PTK_LEN]);
 
-/** SAE KDF (802.11-2020 12.4.2): HMAC-SHA256(key, 0 || label || context || len). */
+/** Lab SAE fingerprint KDF: HMAC-SHA256(key, iter || label || context || len). */
 fl_result_t fl_net_wifi_crypto_sae_kdf(const uint8_t *key, size_t key_len, const char *label,
                                        const uint8_t *context, size_t context_len,
                                        uint8_t *out, size_t out_len);
+
+/**
+ * IEEE 802.11-2020 12.7.1.7.2 KDF-Hash (SHA-256): HMAC-SHA256(K,
+ * counter_le16 || Label || 0x00 || Context || length_bits_le16), counter from 1.
+ * Used for SAE hunting-and-pecking and KCK/PMK.
+ */
+fl_result_t fl_net_wifi_crypto_ieee80211_kdf_sha256(const uint8_t *key, size_t key_len,
+                                                    const char *label, const uint8_t *context,
+                                                    size_t context_len, uint8_t *out,
+                                                    size_t out_len);
 
 void fl_net_wifi_crypto_memzero(void *p, size_t n);
 

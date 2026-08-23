@@ -8,6 +8,7 @@
 #include "net_wifi_crypto.h"
 #include "net_wifi_he.h"
 #include "net_wifi_host_linux.h"
+#include "net_wifi_fullmac.h"
 #include "fl/platform.h"
 #include "net_ipv4.h"
 #include "net_wifi_twt.h"
@@ -30,6 +31,7 @@ static int s_netdev_ready;
 static int s_driver_backend;
 static int s_host_backend;
 static int s_lab_backend;
+static int s_physical_backend;
 
 #if defined(FL_NET_WIFI_HOSTED_LAB)
 static char s_lab_joined_ssid[FL_WIFI_SSID_MAX];
@@ -47,6 +49,7 @@ fl_result_t fl_net_wifi_station_init(void) {
     s_driver_backend = 0;
     s_host_backend = 0;
     s_lab_backend = 0;
+    s_physical_backend = 0;
 
     if (wifi_driver_backend_init() == FL_RESULT_OK &&
         wifi_driver_backend_active() != WIFI_BACKEND_NONE)
@@ -87,12 +90,19 @@ int fl_net_wifi_station_lab_backend(void) {
     return s_lab_backend;
 }
 
+int fl_net_wifi_station_physical_backend(void) {
+    return s_physical_backend;
+}
+
 fl_result_t fl_net_wifi_scan(uint8_t band, unsigned timeout_ms) {
     s_lab_backend = 0;
+    s_physical_backend = 0;
 
     if (s_driver_backend) {
         fl_result_t rc = wifi_driver_scan(band, timeout_ms);
         if (rc == FL_RESULT_OK) {
+            if (wifi_driver_backend_is_physical())
+                s_physical_backend = 1;
             s_wifi_state = FL_WIFI_STATE_SCANNING;
             return FL_RESULT_OK;
         }
@@ -112,10 +122,12 @@ fl_result_t fl_net_wifi_scan(uint8_t band, unsigned timeout_ms) {
                 return rc;
         }
     }
-    s_lab_backend = 1;
-    if (wifi_driver_lab_scan(band, timeout_ms) == FL_RESULT_OK) {
-        s_wifi_state = FL_WIFI_STATE_SCANNING;
-        return FL_RESULT_OK;
+    if (wifi_driver_lab_sim_enabled()) {
+        s_lab_backend = 1;
+        if (wifi_driver_lab_scan(band, timeout_ms) == FL_RESULT_OK) {
+            s_wifi_state = FL_WIFI_STATE_SCANNING;
+            return FL_RESULT_OK;
+        }
     }
 #else
     (void)band;
@@ -171,6 +183,36 @@ static fl_result_t wifi_station_lab_dhcp(const uint8_t sta_mac[6], unsigned time
         return rc;
     fl_net_wifi_netdev_apply_dhcp_lease(&lease);
     return FL_RESULT_OK;
+}
+
+static fl_result_t wifi_station_driver_dhcp(fl_net_driver_t *drv, const uint8_t sta_mac[6],
+                                            unsigned timeout_ms)
+{
+    uint32_t leased_be = 0u;
+    fl_net_dhcp_lease_info_t lease;
+    char addr_s[32];
+    char gw_s[32];
+    uint8_t prefix = 24u;
+    fl_result_t rc;
+    unsigned tmo = timeout_ms ? timeout_ms : 5000u;
+
+    if (!drv || !sta_mac)
+        return FL_RESULT_INVAL;
+    memset(&lease, 0, sizeof(lease));
+    rc = fl_net_dhcp_acquire(drv, sta_mac, NULL, 0, NULL, &leased_be, &lease, tmo);
+    if (rc != FL_RESULT_OK)
+        return rc;
+    if (lease.has_prefix)
+        prefix = lease.prefix_len;
+    fl_net_ipv4_format_addr(lease.yiaddr_be, addr_s, sizeof(addr_s));
+    if (lease.has_gateway)
+        fl_net_ipv4_format_addr(lease.gateway_be, gw_s, sizeof(gw_s));
+    else
+        strncpy(gw_s, "0.0.0.0", sizeof(gw_s) - 1u);
+    rc = fl_net_route_configure_static(drv, sta_mac, addr_s, prefix, gw_s);
+    if (rc == FL_RESULT_OK)
+        fl_net_iface_refresh();
+    return rc;
 }
 
 static fl_result_t host_linux_connect(const fl_net_wifi_cred_t *cred, unsigned timeout_ms)
@@ -298,11 +340,13 @@ static fl_result_t driver_backend_connect(const fl_net_wifi_cred_t *cred, unsign
     fl_net_wifi_scan_entry_t ap;
     uint8_t sta_mac[6];
     size_t i;
+    int physical = wifi_driver_backend_is_physical();
 
-    (void)timeout_ms;
     rc = wifi_driver_connect(cred, timeout_ms);
-    if (rc != FL_RESULT_OK)
+    if (rc != FL_RESULT_OK) {
+        fl_net_wifi_twt_lab_reset();
         return rc;
+    }
 
     memset(&ap, 0, sizeof(ap));
     strncpy(ap.ssid, cred->ssid, sizeof(ap.ssid) - 1u);
@@ -323,8 +367,31 @@ static fl_result_t driver_backend_connect(const fl_net_wifi_cred_t *cred, unsign
     }
 
     if (!(ap.bssid[0] | ap.bssid[1] | ap.bssid[2] | ap.bssid[3] | ap.bssid[4] |
-          ap.bssid[5]))
+          ap.bssid[5])) {
+        wifi_driver_disconnect();
+        fl_net_wifi_twt_lab_reset();
         return FL_RESULT_NOSYS;
+    }
+
+    if (physical) {
+        fl_net_driver_t *drv = wifi_driver_netdev();
+
+        if (fl_net_wifi_fullmac_sta_mac(sta_mac) != FL_RESULT_OK || !drv)
+            return FL_RESULT_ERR;
+        s_physical_backend = 1;
+        s_lab_backend = 0;
+        s_wifi_state = FL_WIFI_STATE_DHCP;
+        rc = wifi_station_driver_dhcp(drv, sta_mac, timeout_ms);
+        if (rc != FL_RESULT_OK) {
+            wifi_driver_disconnect();
+            return rc;
+        }
+        if (wifi_driver_he_cap(&s_negotiated_he) != FL_RESULT_OK)
+            memset(&s_negotiated_he, 0, sizeof(s_negotiated_he));
+        s_wifi_state = FL_WIFI_STATE_UP;
+        fl_net_iface_refresh();
+        return FL_RESULT_OK;
+    }
 
     wifi_lab_sta_mac(sta_mac);
     rc = fl_net_wifi_netdev_up(&ap, sta_mac);
@@ -334,7 +401,9 @@ static fl_result_t driver_backend_connect(const fl_net_wifi_cred_t *cred, unsign
     }
 
     s_wifi_state = FL_WIFI_STATE_DHCP;
+    wifi_driver_lab_dhcp_route_enable(1);
     rc = wifi_station_lab_dhcp(sta_mac, timeout_ms);
+    wifi_driver_lab_dhcp_route_enable(0);
     if (rc != FL_RESULT_OK) {
         fl_net_wifi_netdev_down();
         wifi_driver_disconnect();
@@ -351,6 +420,8 @@ fl_result_t fl_net_wifi_connect(const fl_net_wifi_cred_t *cred, unsigned timeout
     if (!cred || !cred->ssid[0])
         return FL_RESULT_INVAL;
 
+    s_physical_backend = 0;
+
     if (s_driver_backend) {
         fl_result_t rc = driver_backend_connect(cred, timeout_ms);
         if (rc == FL_RESULT_OK)
@@ -359,6 +430,8 @@ fl_result_t fl_net_wifi_connect(const fl_net_wifi_cred_t *cred, unsigned timeout
             s_wifi_state = FL_WIFI_STATE_ERROR;
             return rc;
         }
+        if (!wifi_driver_lab_sim_enabled())
+            return FL_RESULT_NOSYS;
         s_lab_backend = 1;
     }
 
@@ -376,6 +449,9 @@ fl_result_t fl_net_wifi_connect(const fl_net_wifi_cred_t *cred, unsigned timeout
             }
         }
     }
+
+    if (!wifi_driver_lab_sim_enabled() && !s_lab_backend)
+        return FL_RESULT_NOSYS;
 
     s_lab_backend = 1;
     return lab_backend_connect(cred, timeout_ms);
@@ -409,6 +485,7 @@ fl_result_t fl_net_wifi_disconnect(void) {
     s_wifi_state = FL_WIFI_STATE_IDLE;
     s_lab_backend = 0;
     s_host_backend = 0;
+    s_physical_backend = 0;
     return FL_RESULT_OK;
 }
 

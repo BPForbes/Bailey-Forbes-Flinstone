@@ -174,13 +174,13 @@ static int scope04_mgmt(void)
     static const uint8_t sta[6] = {0x02, 0, 0, 0, 0, 0x01};
     static const uint8_t bssid[6] = {0x02, 0xaa, 0, 0, 0, 0x01};
 
-    if (fl_net_wifi_mgmt_build_probe_req("MockAx6", frame, sizeof(frame), &len) !=
+    if (fl_net_wifi_mgmt_build_probe_req("MockAx6", sta, frame, sizeof(frame), &len) !=
         FL_RESULT_OK)
         FAIL279("scope-4", "probe");
     if (fl_net_wifi_mgmt_build_auth_req(sta, bssid, frame, sizeof(frame), &len) !=
         FL_RESULT_OK)
         FAIL279("scope-4", "auth");
-    if (fl_net_wifi_mgmt_build_assoc_req("MockAx6", bssid, sta, FL_WIFI_AUTH_WPA3_SAE,
+    if (fl_net_wifi_mgmt_build_assoc_req("MockAx6", bssid, sta, FL_WIFI_AUTH_WPA3_SAE, NULL,
                                          frame, sizeof(frame), &len) != FL_RESULT_OK)
         FAIL279("scope-4", "assoc");
     OK279("scope-4 net_wifi_mgmt Probe/Auth/Assoc + HE IE");

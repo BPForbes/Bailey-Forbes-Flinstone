@@ -99,11 +99,12 @@ static int hw_ota_set_key(void *opaque, const uint8_t *key, size_t key_len)
 }
 
 static int hw_ota_init_transport(wifi_fullmac_hw_ctx_t *ctx, const wifi_network_t *ap,
-				 wifi_mgmt_transport_t *tr_out)
+				 const char *passphrase, wifi_mgmt_transport_t *tr_out)
 {
 	wifi_mgmt_transport_mock_cfg_t cfg = {
 		.ap = ap,
 		.sta_mac = ctx->sta_mac,
+		.passphrase = passphrase,
 	};
 
 	if (!ctx || !ap || !tr_out)
@@ -399,7 +400,7 @@ static int hw_stub_authenticate(wifi_fullmac_t *dev, const uint8_t *bssid, uint1
 		return -1;
 	hooks.set_key = hw_ota_set_key;
 	hooks.ctx = ctx;
-	if (hw_ota_init_transport(ctx, ap, &tr) != 0)
+	if (hw_ota_init_transport(ctx, ap, cred->passphrase, &tr) != 0)
 		return -1;
 	if (wifi_connect_ota_run_phase(cred, ap, ctx->sta_mac, &tr, &hooks,
 				       WIFI_CONNECT_OTA_AUTH_ONLY) != 0)
@@ -427,7 +428,7 @@ static int hw_stub_associate(wifi_fullmac_t *dev, const uint8_t *bssid)
 		return -1;
 	hooks.set_key = hw_ota_set_key;
 	hooks.ctx = ctx;
-	if (hw_ota_init_transport(ctx, ap, &tr) != 0)
+	if (hw_ota_init_transport(ctx, ap, cred->passphrase, &tr) != 0)
 		return -1;
 	if (!ctx->ota_auth_done &&
 	    wifi_connect_ota_run_phase(cred, ap, ctx->sta_mac, &tr, &hooks,

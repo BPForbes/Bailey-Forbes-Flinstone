@@ -85,7 +85,10 @@ fl_result_t fl_net_netdev_send(fl_net_driver_t *drv, const fl_net_frame_view_t *
     if (rc != FL_RESULT_OK)
         return rc;
 
-    return drv->send(drv, frame);
+    rc = drv->send(drv, frame);
+    if (drv == &s_tap_drv && rc != FL_RESULT_OK && s_tap_error[0] == '\0')
+        snprintf(s_tap_error, sizeof(s_tap_error), "TAP send rc=%d", (int)rc);
+    return rc;
 }
 
 static fl_result_t netdev_recv_once(fl_net_driver_t *drv, fl_net_frame_mut_t *out) {

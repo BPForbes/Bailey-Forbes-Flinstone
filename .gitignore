@@ -84,8 +84,13 @@ tests/test_p3_server
 tests/test_p3_udp_cmds
 tests/test_p3_net_tools
 tests/test_p3_server_lan
+tests/test_p3_wifi
+tests/test_p3_wifi_ota
+tests/test_wifi_connect_ota
+tests/test_wifi_mgmt_ota
 tests/test_wifi_flinstone_helper
 tests/test_wifi_flinstone_linux_helper
 tests/test_wifi_80211ax_mock_279
 tests/test_workqueue_*
 server_shared/
+artifacts/

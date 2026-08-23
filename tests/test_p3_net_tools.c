@@ -263,9 +263,45 @@ static int test_endian_loopback_constant(void) {
         ASSERT(fl_net_htons(h16) == asm_net_htons_be16(h16));
         ASSERT(fl_net_htonl(h32) == asm_net_htonl_be32(h32));
         ASSERT(fl_net_htonll(h64) == asm_net_htonll_be64(h64));
+        {
+            uint8_t le16[2] = {0};
+            uint8_t be16[2] = {0};
+            uint8_t le32[4] = {0};
+            uint8_t be32[4] = {0};
+
+            asm_net_store_le16(le16, h16);
+            ASSERT(le16[0] == 0xCDu && le16[1] == 0xABu);
+            ASSERT(asm_net_load_le16(le16) == h16);
+            ASSERT(fl_net_get_u16_le(le16) == h16);
+            asm_net_store_be16(be16, h16);
+            ASSERT(be16[0] == 0xABu && be16[1] == 0xCDu);
+            ASSERT(asm_net_load_be16(be16) == h16);
+            ASSERT(fl_net_get_u16_be(be16) == h16);
+            asm_net_store_le32(le32, h32);
+            ASSERT(le32[0] == 0xEFu && le32[1] == 0xBEu &&
+                   le32[2] == 0xADu && le32[3] == 0xDEu);
+            ASSERT(asm_net_load_le32(le32) == h32);
+            ASSERT(fl_net_get_u32_le(le32) == h32);
+            asm_net_store_be32(be32, h32);
+            ASSERT(be32[0] == 0xDEu && be32[1] == 0xADu &&
+                   be32[2] == 0xBEu && be32[3] == 0xEFu);
+            ASSERT(asm_net_load_be32(be32) == h32);
+            ASSERT(fl_net_get_u32_be(be32) == h32);
+        }
     }
 #endif
 
+    /* fl_net_put_u16_le / fl_net_put_u16_be: 802.11 LSB-first vs IP MSB-first. */
+    {
+        uint8_t le[2] = {0};
+        uint8_t be[2] = {0};
+        fl_net_put_u16_le(le, 19u);
+        ASSERT(le[0] == 19u && le[1] == 0u);
+        ASSERT(fl_net_get_u16_le(le) == 19u);
+        fl_net_put_u16_be(be, 19u);
+        ASSERT(be[0] == 0u && be[1] == 19u);
+        ASSERT(fl_net_get_u16_be(be) == 19u);
+    }
     /* fl_net_put_u32_be / fl_net_put_u64_be byte sequences must match the
      * wire layout of the IPv4 / 64-bit timestamp values they represent. */
     {

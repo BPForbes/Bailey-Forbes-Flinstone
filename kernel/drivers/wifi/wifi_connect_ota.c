@@ -7,6 +7,9 @@
 #include "wifi_supplicant.h"
 
 #include "kernel/core/net/net_wifi_mgmt.h"
+#include "kernel/core/net/net_wifi_mgmt_ota.h"
+#include "kernel/core/net/net_wifi_fullmac.h"
+#include "kernel/core/net/net_wifi_sae.h"
 #include "kernel/core/net/net_wifi_wpa.h"
 #include "kernel/core/net/net_wire.h"
 
@@ -80,36 +83,124 @@ static int wifi_ota_eapol_payload(const uint8_t *eth, size_t eth_len, const uint
 	return 0;
 }
 
+static int wifi_ota_sae_body_is_commit(const uint8_t *body, size_t body_len)
+{
+	uint16_t group;
+
+	if (!body || body_len < FL_NET_WIFI_SAE_COMMIT_BODY_LEN)
+		return 0;
+	group = (uint16_t)body[0] | ((uint16_t)body[1] << 8);
+	return group == FL_NET_WIFI_SAE_GROUP_19;
+}
+
+static int wifi_ota_sae_body_is_confirm(const uint8_t *body, size_t body_len)
+{
+	return body && body_len >= FL_NET_WIFI_SAE_CONFIRM_BODY_LEN;
+}
+
 static int wifi_ota_run_sae(const fl_net_wifi_cred_t *cred, const wifi_network_t *ap,
 			    const uint8_t sta_mac[6], wifi_mgmt_transport_t *tr,
 			    wifi_supplicant_t *supp)
 {
-	static const uint8_t k_commit[] = "commit";
 	uint8_t tx[WIFI_OTA_FRAME_MAX];
 	uint8_t rx[WIFI_OTA_FRAME_MAX];
+	uint8_t commit_body[128];
+	uint8_t confirm_body[64];
+	uint8_t anticlogging[32];
+	size_t anticlogging_len = 0;
+	size_t commit_len = 0;
+	size_t confirm_len = 0;
 	size_t tx_len = 0;
 	size_t rx_len = 0;
-	const uint8_t *body;
-	size_t body_len;
+	unsigned attempt;
+	int got_peer_commit = 0;
+	int sent_confirm = 0;
+	int need_send_commit = 1;
 
 	(void)cred;
 	if (wifi_supplicant_start_sae_handshake(supp) != 0)
 		return -1;
-	if (fl_net_wifi_mgmt_build_sae_auth(sta_mac, ap->bssid, 1u, k_commit,
-					    sizeof(k_commit) - 1u, tx, sizeof(tx),
-					    &tx_len) != FL_RESULT_OK)
-		return -1;
-	if (wifi_ota_tx_mgmt(tr, tx, tx_len) != 0)
-		return -1;
-	if (wifi_ota_rx_mgmt(tr, rx, sizeof(rx), &rx_len) != 0)
-		return -1;
-	if (rx_len < FL_WIFI_MGMT_HDR_LEN + 6u)
-		return -1;
-	body = rx + FL_WIFI_MGMT_HDR_LEN + 6u;
-	body_len = rx_len - (FL_WIFI_MGMT_HDR_LEN + 6u);
-	if (wifi_supplicant_process_sae_confirm(supp, body, body_len) != 0)
-		return -1;
-	return 0;
+
+	for (attempt = 0; attempt < 8u; attempt++) {
+		if (need_send_commit) {
+			if (wifi_supplicant_build_sae_commit(supp,
+							     anticlogging_len > 0u ? anticlogging
+										   : NULL,
+							     anticlogging_len, commit_body,
+							     sizeof(commit_body),
+							     &commit_len) != 0)
+				return -1;
+			if (fl_net_wifi_mgmt_build_auth_sae_commit(sta_mac, ap->bssid, commit_body,
+								    commit_len, tx, sizeof(tx),
+								    &tx_len) != FL_RESULT_OK)
+				return -1;
+			if (wifi_ota_tx_mgmt(tr, tx, tx_len) != 0)
+				return -1;
+			need_send_commit = 0;
+		}
+
+		if (wifi_ota_rx_mgmt(tr, rx, sizeof(rx), &rx_len) != 0)
+			return -1;
+		{
+			uint16_t auth_alg = 0;
+			uint16_t auth_seq = 0;
+			uint16_t status = 0xffffu;
+			const uint8_t *body = NULL;
+			size_t body_len = 0;
+
+			(void)auth_seq;
+			if (fl_net_wifi_mgmt_parse_auth_resp(rx, rx_len, &auth_alg, &auth_seq,
+							     &status, &body, &body_len) !=
+				    FL_RESULT_OK ||
+			    auth_alg != FL_WIFI_AUTH_ALG_SAE)
+				return -1;
+
+			if (status == FL_WIFI_SAE_STATUS_ANTICLOGGING && body_len > 0u) {
+				if (body_len > sizeof(anticlogging))
+					return -1;
+				memcpy(anticlogging, body, body_len);
+				anticlogging_len = body_len;
+				need_send_commit = 1;
+				continue;
+			}
+			if (status != 0u)
+				return -1;
+
+			if (!got_peer_commit && wifi_ota_sae_body_is_commit(body, body_len)) {
+				if (wifi_supplicant_rx_sae_peer_commit(supp, body, body_len) != 0)
+					return -1;
+				got_peer_commit = 1;
+			}
+
+			if (got_peer_commit && !sent_confirm) {
+				if (wifi_supplicant_build_sae_confirm(supp, confirm_body,
+								      sizeof(confirm_body),
+								      &confirm_len) != 0)
+					return -1;
+				if (fl_net_wifi_mgmt_build_auth_sae_confirm(
+					    sta_mac, ap->bssid, confirm_body, confirm_len, tx,
+					    sizeof(tx), &tx_len) != FL_RESULT_OK)
+					return -1;
+				if (wifi_ota_tx_mgmt(tr, tx, tx_len) != 0)
+					return -1;
+				sent_confirm = 1;
+				if (wifi_ota_rx_mgmt(tr, rx, sizeof(rx), &rx_len) != 0)
+					return -1;
+				if (fl_net_wifi_mgmt_parse_auth_resp(rx, rx_len, &auth_alg,
+								     &auth_seq, &status, &body,
+								     &body_len) != FL_RESULT_OK ||
+				    auth_alg != FL_WIFI_AUTH_ALG_SAE || status != 0u)
+					return -1;
+			}
+
+			if (wifi_ota_sae_body_is_confirm(body, body_len)) {
+				if (wifi_supplicant_process_sae_confirm(supp, body, body_len) != 0)
+					return -1;
+				return 0;
+			}
+		}
+	}
+	return -1;
 }
 
 static int wifi_ota_run_eapol(const fl_net_wifi_cred_t *cred, const wifi_network_t *ap,
@@ -170,6 +261,16 @@ static int wifi_ota_run_open_auth(const uint8_t sta_mac[6], const uint8_t bssid[
 		return -1;
 	if (wifi_ota_rx_mgmt(tr, rx, sizeof(rx), &rx_len) != 0)
 		return -1;
+	{
+		uint16_t auth_alg = 0;
+		uint16_t auth_seq = 0;
+		uint16_t status = 0xffffu;
+
+		if (fl_net_wifi_mgmt_parse_auth_resp(rx, rx_len, &auth_alg, &auth_seq, &status, NULL,
+						   NULL) != FL_RESULT_OK ||
+		    auth_alg != FL_WIFI_AUTH_ALG_OPEN || auth_seq != 2u || status != 0u)
+			return -1;
+	}
 	return 0;
 }
 
@@ -182,13 +283,30 @@ static int wifi_ota_run_assoc(const fl_net_wifi_cred_t *cred, const wifi_network
 	size_t tx_len = 0;
 	size_t rx_len = 0;
 
-	if (fl_net_wifi_mgmt_build_assoc_req(cred->ssid, ap->bssid, sta_mac, auth_mode, tx,
+	if (fl_net_wifi_mgmt_build_assoc_req(cred->ssid, ap->bssid, sta_mac, auth_mode, NULL, tx,
 					     sizeof(tx), &tx_len) != FL_RESULT_OK)
 		return -1;
 	if (wifi_ota_tx_mgmt(tr, tx, tx_len) != 0)
 		return -1;
 	if (wifi_ota_rx_mgmt(tr, rx, sizeof(rx), &rx_len) != 0)
 		return -1;
+	{
+		fl_net_wifi_mgmt_ota_t *ota = fl_net_wifi_fullmac_mgmt_ota();
+
+		if (ota) {
+			if (fl_net_wifi_mgmt_ota_store_assoc_resp(ota, rx, rx_len) != FL_RESULT_OK)
+				return -1;
+		} else {
+			uint16_t status = 0xffffu;
+			fl_net_wifi_he_cap_t he;
+
+			if (fl_net_wifi_mgmt_parse_assoc_resp(rx, rx_len, &status, NULL, &he) !=
+				FL_RESULT_OK ||
+			    status != 0u)
+				return -1;
+			fl_net_wifi_fullmac_set_negotiated_he(&he);
+		}
+	}
 	return 0;
 }
 

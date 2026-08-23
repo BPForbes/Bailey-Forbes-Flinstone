@@ -36,6 +36,15 @@ fl_result_t wifi_driver_backend_init(void);
 /* Query which backend is active */
 wifi_backend_type_t wifi_driver_backend_active(void);
 
+/** Non-zero when the active backend is physical nl80211 FullMAC (real NIC scan/connect). */
+int wifi_driver_backend_is_physical(void);
+
+/**
+ * Non-zero when in-tree lab simulation is explicitly requested
+ * (FL_NET_WIFI_LAB=1 or FL_NET_WIFI_FULLMAC_LAB=1).
+ */
+int wifi_driver_lab_sim_enabled(void);
+
 /* Public API: routes to active backend */
 fl_result_t wifi_driver_scan(uint8_t band, unsigned timeout_ms);
 fl_result_t wifi_driver_scan_result(fl_net_wifi_scan_entry_t *entries,

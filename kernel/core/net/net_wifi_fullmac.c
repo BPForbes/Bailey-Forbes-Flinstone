@@ -9,6 +9,7 @@
 #include "wifi_fullmac_afpacket.h"
 #include "wifi_nl80211.h"
 #include "net_wifi_he.h"
+#include "net_wifi_mgmt_ota.h"
 #include "net_wire.h"
 #include "net_netdev.h"
 #include "wifi_driver_packet.h"
@@ -233,6 +234,9 @@ fl_result_t fl_net_wifi_fullmac_init(const char *ifname)
 
 	(void)fl_net_wifi_nl80211_get_wiphy_caps(g_fullmac.nl, &g_fullmac.phy_he,
 						 &g_fullmac.bands);
+	(void)fl_net_wifi_nl80211_sta_mac(g_fullmac.nl, g_fullmac.sta_mac);
+	(void)fl_net_wifi_fullmac_mgmt_ota_attach(g_fullmac.nl, g_fullmac.sta_mac,
+						  &g_fullmac.phy_he);
 
 #if defined(__linux__)
 	{
@@ -241,6 +245,7 @@ fl_result_t fl_net_wifi_fullmac_init(const char *ifname)
 		if (fl_net_wifi_nl80211_ifindex(g_fullmac.nl, &ifindex) != FL_RESULT_OK ||
 		    wifi_fullmac_afpacket_open((unsigned int)ifindex, &g_fullmac.pkt_fd) !=
 			    FL_RESULT_OK) {
+			fl_net_wifi_fullmac_mgmt_ota_detach();
 			fl_net_wifi_nl80211_deinit(g_fullmac.nl);
 			g_fullmac.nl = NULL;
 			return FL_RESULT_NOSYS;
@@ -258,6 +263,7 @@ fl_result_t fl_net_wifi_fullmac_init(const char *ifname)
 
 void fl_net_wifi_fullmac_deinit(void)
 {
+	fl_net_wifi_fullmac_mgmt_ota_detach();
 #if defined(__linux__)
 	wifi_fullmac_afpacket_close(&g_fullmac.pkt_fd);
 #endif
@@ -303,6 +309,20 @@ const char *fl_net_wifi_fullmac_ifname(void)
 	return g_fullmac.up ? g_fullmac.ifname : NULL;
 }
 
+fl_result_t fl_net_wifi_fullmac_sta_mac(uint8_t mac_out[6])
+{
+	static const uint8_t zero[6] = {0};
+
+	if (!mac_out)
+		return FL_RESULT_INVAL;
+	if (!g_fullmac.up)
+		return FL_RESULT_NOENT;
+	memcpy(mac_out, g_fullmac.sta_mac, 6u);
+	if (!memcmp(mac_out, zero, 6u))
+		return FL_RESULT_NOENT;
+	return FL_RESULT_OK;
+}
+
 fl_net_wifi_nl80211_t *fl_net_wifi_fullmac_nl80211(void)
 {
 	return g_fullmac.nl;
@@ -315,7 +335,7 @@ fl_result_t fl_net_wifi_fullmac_lab_inject_rx(const uint8_t *frame, size_t len)
 	return fullmac_rx_enqueue(frame, len);
 }
 
-fl_result_t fl_net_wifi_fullmac_scan(uint8_t band, unsigned timeout_ms)
+fl_result_t fl_net_wifi_fullmac_scan(uint8_t band, const char *ssid, unsigned timeout_ms)
 {
 	(void)band;
 	if (!g_fullmac.up)
@@ -325,7 +345,7 @@ fl_result_t fl_net_wifi_fullmac_scan(uint8_t band, unsigned timeout_ms)
 	if (!g_fullmac.nl)
 		return FL_RESULT_NOSYS;
 	{
-		fl_result_t r = fl_net_wifi_nl80211_trigger_scan(g_fullmac.nl, NULL);
+		fl_result_t r = fl_net_wifi_nl80211_trigger_scan(g_fullmac.nl, ssid);
 
 		if (r != FL_RESULT_OK)
 			return r;
@@ -356,6 +376,8 @@ fl_result_t fl_net_wifi_fullmac_scan_result(fl_net_wifi_scan_entry_t *entries, s
 		entries[*count_out] = tmp[i];
 		(*count_out)++;
 	}
+	if (fl_net_wifi_fullmac_mgmt_ota())
+		fl_net_wifi_mgmt_ota_merge_scan(fl_net_wifi_fullmac_mgmt_ota(), entries, *count_out);
 	return *count_out > 0u ? FL_RESULT_OK : FL_RESULT_ERR;
 }
 
