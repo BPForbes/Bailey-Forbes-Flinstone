@@ -235,7 +235,7 @@ Legend matches **`docs/ROADMAP.md`**: **✅** complete; **~✅** usable lab subs
 | **P3-7** TCP | ✅ | ~✅ — SYN probe + **`fl_net_tcp_stream_*`** hosted listen/connect/accept |
 | **P3-8** DNS | ✅ | ~✅ — A record + **AAAA** stub (`fl_net_dns_resolve_aaaa`) |
 | **P3-11** IPv6 + ICMPv6 | ✅ | ~✅ — loopback ICMPv6/NDP, IPv6 FIB, ethertype dispatch; TAP/wire IPv6 stretch (**#280**) |
-| **P3-10** Wi‑Fi station | ✅ | ~✅ — **`contract_p3_wifi.h`**, **`net_wifi_he`**, hosted lab scan/connect (**#279** PR #306); shell **`wifi`** + **`wifi_router`** DB; **`fl_net_wifi_station_netdev()`** NULL; SAE/WPA/TWT/mgmt + P4 NIC block production — **`docs/GITHUB_ISSUE_SYNC_P4_WIFI_OTA.md`** |
+| **P3-10** Wi‑Fi station | ✅ | ~✅ — **`contract_p3_wifi.h`**, in-tree SAE/EAPOL/TWT OTA, WPA2-PSK lab connect without OS supplicant, ESP AT PTY scan/join, **`fl_net_dhcp_acquire`** + UDP echo on the Wi‑Fi **`fl_net_driver_t`**, **`make test_wifi_hwsim`** CI job — **`docs/GITHUB_ISSUE_SYNC_P4_WIFI_OTA.md`** |
 | **P3-9** TLS | ✅ | ~✅ — **`net_tls_hosted.c`** record-size boundary (no mbedtls yet) |
 | **P3-12** DHCP | ✅ | ~✅ — BOOTP codec + **`fl_net_dhcp_*_pkt`** over **`fl_net_packet_t`** |
 | **P3-14** background | ✅ | ~✅ — **`fl_net_arp_tick`** on workqueue; TCP timer wheel / RX dequeue still **#238** |
@@ -253,7 +253,7 @@ Legend matches **`docs/ROADMAP.md`**: **✅** complete; **~✅** usable lab subs
 | TCP (**P3-7**) | **RFC 793** | ~✅ SYN probe + hosted stream shim (in-tree FSM TODO) |
 | DNS (**P3-8**) | **RFC 1035** (subset) | ~✅ A record |
 | DHCP (**P3-12**) | **RFC 2131**, **RFC 2132** | ~✅ codec + lab client (not production lease manager) |
-| Wi‑Fi station (**P3-10**) | **IEEE 802.11ax-2021**; **802.11i**; **WPA3-SAE** (RFC 7664) | ~✅ contract + HE IE parser + hosted lab scan/connect (**#279**); production assoc/DHCP blocked on P4 NIC + SAE/WPA wire |
+| Wi‑Fi station (**P3-10**) | **IEEE 802.11ax-2021**; **802.11i**; **WPA3-SAE** (RFC 7664) | ~✅ contract + in-tree SAE/WPA2/TWT/DHCP/UDP lab + hwsim CI; production RF on a physical NIC remains the #328 tail |
 | `server` + messaging (**P3-13**) | **RFC 793** (TCP session); **RFC 768** (UDP helpers) | ~✅ — hosted-socket implementation (PR #282 + #239); WSL LAN portproxy (PR #315); native non-hosted path queued behind **P3-7** TCP state machine |
 
 ## Application-layer and common Internet protocols
@@ -400,7 +400,8 @@ Environment (general networking):
 
 ```bash
 make test_p3_network
-make test_p3_wifi test_wifi_db
+make test_p3_wifi test_wifi_db test_wifi_uart_at_scan_join
+make test_wifi_hwsim          # CI / opt-in: FL_NET_WIFI_HWSIM_OK=1
 make check-network-requirements
 ```
 
@@ -429,7 +430,7 @@ make check-network-requirements
 | Priority | Item | Notes |
 |----------|------|--------|
 | **P3-12** | DHCP renew/rebind FSM | Lease DB and renew/rebind after **`fl_net_dhcp_acquire`** |
-| **P3-10** | Wi‑Fi 802.11ax station | **~✅** foundation (PR #306): contract, HE parser, lab scan/connect, **`wifi`** shell; tail: P4 NIC, SAE/WPA/TWT, netdev + DHCP composition |
+| **P3-10** | Wi‑Fi 802.11ax station | **~✅** in-tree OTA + #328 eight-task CI/lab evidence; physical NIC RF remains open |
 | **P3-13** | Chat room | Foundations shipped (PR #282 + #239); **PR #315** WSL portproxy/UAC hosting; **#283** PROMOTE6; **#280** IPv6 loopback/NDP (PR #301); **#279** Wi‑Fi foundation; native non-hosted `fl_socket` gated on **P3-7** TCP state machine |
 | ~~Patch~~ | ~~ARP cache TTL / loopback dedup~~ | Done (**#237**, **#240**): **`fl_net_arp_tick`**, **`fl_net_loopback_exchange`**, PIT BH on **B** |
 | ~~P3-5~~ | ~~Drop Linux ICMP fallback~~ | Done (**#262**): egress-only ICMP/UDP when unrouted |

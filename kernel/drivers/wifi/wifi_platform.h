@@ -25,6 +25,13 @@ typedef struct {
 /* Get platform UART ops for WiFi drivers */
 const wifi_platform_uart_ops_t *wifi_platform_get_uart_ops(void);
 
+/*
+ * Bind hosted POSIX UART I/O to a file descriptor (PTY, socketpair, or
+ * /dev/ttyUSB*). Pass -1 to unbind. ARM / bare-metal builds return -1.
+ */
+int wifi_platform_host_uart_bind(int fd);
+int wifi_platform_host_uart_fd(void);
+
 /* Platform time utilities (fail closed when monotonic time is unavailable). */
 fl_result_t wifi_platform_get_ms(uint32_t *ms_out);
 void wifi_platform_sleep_ms(uint32_t ms);

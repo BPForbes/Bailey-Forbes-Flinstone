@@ -1,42 +1,130 @@
 /*
  * WiFi Platform Implementation (hosted x86/x64)
- * Stub UART ops for CI and desktop builds without ARM PL011 hardware.
+ * POSIX UART bind for ESP AT PTY / socketpair tests; stub I/O when unbound.
  */
 
 #include "wifi_platform.h"
 #include "kernel/core/time/timekeeping.h"
 
+#include <errno.h>
+#include <poll.h>
 #include <stdlib.h>
 #include <unistd.h>
 
+static int s_host_uart_fd = -1;
+
+int wifi_platform_host_uart_bind(int fd)
+{
+	s_host_uart_fd = fd;
+	return 0;
+}
+
+int wifi_platform_host_uart_fd(void)
+{
+	return s_host_uart_fd;
+}
+
+static int host_uart_poll_in(uint32_t timeout_ms)
+{
+	struct pollfd pfd;
+	int rc;
+
+	if (s_host_uart_fd < 0)
+		return -1;
+	pfd.fd = s_host_uart_fd;
+	pfd.events = POLLIN;
+	pfd.revents = 0;
+	rc = poll(&pfd, 1, (int)timeout_ms);
+	if (rc <= 0)
+		return -1;
+	if (pfd.revents & (POLLERR | POLLHUP | POLLNVAL))
+		return -1;
+	return (pfd.revents & POLLIN) ? 0 : -1;
+}
+
 static int wifi_platform_host_uart_read_byte(uint8_t *byte, uint32_t timeout_ms)
 {
-	(void)byte;
-	(void)timeout_ms;
-	return -1;
+	ssize_t n;
+
+	if (!byte)
+		return -1;
+	if (s_host_uart_fd < 0)
+		return -1;
+	if (host_uart_poll_in(timeout_ms) != 0)
+		return -1;
+	n = read(s_host_uart_fd, byte, 1);
+	return (n == 1) ? 0 : -1;
 }
 
 static int wifi_platform_host_uart_write_byte(uint8_t byte)
 {
-	(void)byte;
-	return 0;
+	if (s_host_uart_fd < 0)
+		return 0;
+	return write(s_host_uart_fd, &byte, 1) == 1 ? 0 : -1;
 }
 
 static int wifi_platform_host_uart_read_bytes(uint8_t *buffer, size_t len,
 					      size_t *out_len, uint32_t timeout_ms)
 {
-	(void)buffer;
-	(void)len;
-	(void)timeout_ms;
+	size_t got = 0;
+
 	if (out_len)
 		*out_len = 0;
-	return -1;
+	if (!buffer || len == 0)
+		return -1;
+	if (s_host_uart_fd < 0)
+		return -1;
+
+	while (got < len) {
+		ssize_t n;
+		uint32_t slice = timeout_ms;
+
+		if (got > 0u)
+			slice = 20u;
+		if (host_uart_poll_in(slice) != 0)
+			break;
+		n = read(s_host_uart_fd, buffer + got, len - got);
+		if (n < 0) {
+			if (errno == EINTR)
+				continue;
+			if (errno == EAGAIN || errno == EWOULDBLOCK)
+				break;
+			return -1;
+		}
+		if (n == 0)
+			break;
+		got += (size_t)n;
+	}
+	if (out_len)
+		*out_len = got;
+	return got > 0 ? 0 : -1;
 }
 
 static int wifi_platform_host_uart_write_bytes(const uint8_t *buffer, size_t len)
 {
-	(void)buffer;
-	return len > 0 ? 0 : -1;
+	size_t sent = 0;
+
+	if (!buffer)
+		return -1;
+	if (len == 0)
+		return 0;
+	/* Unbound: keep historical stub success so unit tests that only TX pass. */
+	if (s_host_uart_fd < 0)
+		return 0;
+
+	while (sent < len) {
+		ssize_t n = write(s_host_uart_fd, buffer + sent, len - sent);
+
+		if (n < 0) {
+			if (errno == EINTR)
+				continue;
+			return -1;
+		}
+		if (n == 0)
+			return -1;
+		sent += (size_t)n;
+	}
+	return 0;
 }
 
 static int wifi_platform_host_uart_flush(void)

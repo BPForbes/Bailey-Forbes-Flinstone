@@ -67,19 +67,31 @@ Align closed **[#279](https://github.com/BPForbes/Bailey-Forbes-Flinstone/issues
 | 29 | `make test_p3_network` no regression | **[x]** | accept-29 + CI |
 | 30 | ROADMAP P3-10 ~✅ | **[x]** | accept-30 |
 
-**Total tracked items: 33** (4 + 19 + 10). Mock ax satisfies all 33 in software; **#328 remains open** until production RF OTA on a real 802.11ax path (Phase 4 FullMAC or confirmed QEMU NIC).
+**Total tracked items: 33** (4 + 19 + 10). Mock ax satisfies all 33 in software.
+
+## #328 remaining eight tasks
+
+| # | Task | Evidence in this train |
+|---|------|------------------------|
+| 1 | `mac80211_hwsim` CI | **`make test_wifi_hwsim`** / CI job **Issue #328 Wi-Fi (software + hwsim OTA)**; artifacts under `artifacts/issue-328-hwsim/` |
+| 2 | ESP UART `wifi scan` / `wifi join` | **`make test_wifi_uart_at_scan_join`** (PTY AT simulator); optional `/dev/ttyUSB*` in `validate_issue_328.sh` |
+| 3 | WPA2-PSK without OS supplicant | **`test_p3_wifi`** `LabWpa2` + hwsim `flinstone_wpa2_test`; asserts `!fl_net_wifi_station_host_backend()` |
+| 4 | TWT Individual Setup/Teardown `flow_id` | Lab record in **`test_p3_wifi`**; optional hwsim ax AP (`he_twt_responder=1`) |
+| 5 | In-tree DHCP on Wi-Fi `fl_net_driver_t` | Post-assoc **`fl_net_dhcp_acquire`** in lab + hwsim `DHCP=in-tree` |
+| 6 | UDP echo on that netdev | **`fl_net_udp_echo_exchange`** after WPA2 lab connect; hwsim UDP echo listener |
+| 7 | WPA2 EAPOL 1–4 + key install | **`test_wifi_connect_ota`** + hwsim pcap decode (`wpa2-eapol.pcap`) |
+| 8 | ROADMAP P3-10 / P4-01 | Updated to document this evidence; rows stay **~✅** until a real-AP RF run |
+
+**#328 stays open** for physical NIC RF (real-AP TWT / DHCP / UDP when hwsim is not the DUT).
 
 ## Verify
 
 ```bash
 make test_wifi_80211ax_mock_279   # all 33 #279 items (mock ax)
 make test_wifi_ax_server_ota      # SAE + EAPOL + HE Assoc via server host/join
-make test_p3_wifi test_wifi_coprocessor test_p3_network test_invariants
+make test_p3_wifi test_wifi_coprocessor test_wifi_uart_at_scan_join test_p3_network
+make test_wifi_hwsim              # CI / FL_NET_WIFI_HWSIM_OK=1
 ./scripts/check_version_entries_semver_dev_unique.sh
 ```
 
 Set **`FL_WIFI_80211AX_MOCK=1`** (and omit **`FL_WIFI_UART_FD`**) to route `wifi_driver_backend` through the software ax NIC instead of UART coprocessor.
-
-## Do not check on #328 until RF lands
-
-Wi‑Fi **`server host`** production row stays **[ ]** until RF items 20–21 land on real hardware.

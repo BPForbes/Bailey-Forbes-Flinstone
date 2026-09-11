@@ -691,6 +691,8 @@ int wifi_uart_coproc_create(const char *name, int uart_fd, wifi_uart_baud_t baud
 	wifi_coproc_register_transport(coproc, uart_ctx);
 	coproc->transport_owned = true;
 	wifi_coproc_register_ops(coproc, &wifi_uart_coproc_ops);
+	/* Hosted builds: POSIX I/O on this fd (PTY / socketpair / ttyUSB). */
+	(void)wifi_platform_host_uart_bind(uart_fd);
 
 	*out_coproc = coproc;
 	return 0;

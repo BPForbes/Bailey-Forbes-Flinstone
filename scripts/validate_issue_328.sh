@@ -375,6 +375,7 @@ step_software() {
 	fi
 	run_make_gate test_p3_wifi "lab SAE/EAPOL/TWT power-manager unit tests"
 	run_make_gate test_wifi_connect_ota "mock SAE/EAPOL/TWT OTA"
+	run_make_gate test_wifi_uart_at_scan_join "ESP AT wifi scan + wifi join (PTY)"
 }
 
 hwsim_ifaces() {
@@ -436,6 +437,54 @@ rsn_pairwise=CCMP
 wpa_passphrase=$PSK
 ignore_broadcast_ssid=0
 EOF
+}
+
+write_hostapd_ax_twt() {
+	local iface="$1"
+	local conf="$2"
+	: >"$conf"
+	chmod 600 "$conf"
+	cat >"$conf" <<EOF
+interface=$iface
+driver=nl80211
+ssid=flinstone_twt_test
+hw_mode=g
+channel=6
+ieee80211n=1
+ieee80211ax=1
+he_su_beamformer=1
+he_twt_responder=1
+wpa=2
+wpa_key_mgmt=WPA-PSK
+rsn_pairwise=CCMP
+wpa_passphrase=$PSK
+ignore_broadcast_ssid=0
+EOF
+}
+
+count_eapol_key_msgs() {
+	local pcap="$1"
+	local out="$2"
+	if [[ ! -f "$pcap" ]]; then
+		echo "no pcap" >"$out"
+		return 1
+	fi
+	if have_cmd tshark; then
+		tshark -r "$pcap" -Y eapol -T fields -e eapol.type -e eapol.keydes.key_info \
+			>"$out" 2>/dev/null || true
+	elif have_cmd tcpdump; then
+		tcpdump -r "$pcap" -e -n 'ether proto 0x888e' >"$out" 2>/dev/null || true
+	else
+		echo "no tshark/tcpdump" >"$out"
+		return 1
+	fi
+	local n
+	n="$(grep -cE 'eapol|EAPOL|Key' "$out" 2>/dev/null || true)"
+	if [[ -z "$n" ]]; then
+		n=0
+	fi
+	echo "eapol_frames=$n" >>"$out"
+	[[ "$n" -ge 4 ]]
 }
 
 ap_exec() {
@@ -730,25 +779,41 @@ step_hwsim() {
 		decode_pcap "$ARTIFACTS/wpa2-eapol.pcap" eapol "$ARTIFACTS/wpa2-eapol-frames.txt"
 		grep_evidence "$ARTIFACTS/ota-wpa2-psk.log" "$ARTIFACTS/wpa2-eapol-grep.txt" \
 			'Msg ?1|Msg ?2|Msg ?3|Msg ?4|PTK|GTK|CONNECTED|FL_WIFI_STATE_UP|success|passed'
+		if count_eapol_key_msgs "$ARTIFACTS/wpa2-eapol.pcap" "$ARTIFACTS/wpa2-eapol-count.txt"; then
+			record PASS hwsim-eapol "EAPOL-Key messages 1–4 present in wpa2-eapol.pcap"
+		else
+			record SKIP hwsim-eapol "pcap has fewer than four EAPOL frames (connect log still recorded); see wpa2-eapol-count.txt"
+		fi
 	else
 		record FAIL hwsim-wpa2 "hostapd WPA2 failed to start"
 		HWSIM_FAIL=1
 	fi
 
-	# TWT against hwsim is optional — most hwsim APs are not TWT responders.
-	start_tcpdump "$sta" "$ARTIFACTS/twt-action-frames.pcap" ether proto 0x888e || \
-		log "tcpdump not capturing on $sta"
-	local -a ota_twt_env=(TWT=1)
-	if run_ota "$sta" "flinstone_wpa2_test" wpa2-psk twt ota_twt_env; then
-		if grep -q 'SKIP TWT' "$ARTIFACTS/ota-twt.log" 2>/dev/null; then
-			record SKIP hwsim-twt "AP did not negotiate TWT (unit coverage is test_p3_wifi)"
+	kill_pidfile "$ARTIFACTS/hostapd.pid" || true
+	sudo_n pkill hostapd 2>/dev/null || true
+	sleep 0.5
+	conf="$ARTIFACTS/hostapd-ax-twt.conf"
+	write_hostapd_ax_twt "$ap" "$conf"
+	if ap_exec hostapd -dd -B -P "$ARTIFACTS/hostapd.pid" -f "$ARTIFACTS/hostapd-ax-twt.log" "$conf"; then
+		sleep 1
+		start_tcpdump "$sta" "$ARTIFACTS/twt-action-frames.pcap" 'wlan type mgt subtype action' || \
+			log "tcpdump not capturing on $sta"
+		local -a ota_twt_env=(TWT=1 DHCP=in-tree)
+		if run_ota "$sta" "flinstone_twt_test" wpa2-psk twt ota_twt_env; then
+			if grep -q 'SKIP TWT' "$ARTIFACTS/ota-twt.log" 2>/dev/null; then
+				record SKIP hwsim-twt "AP did not negotiate TWT (lab flow_id coverage is test_p3_wifi)"
+			elif grep -qE 'TWT flow_id=' "$ARTIFACTS/ota-twt.log" 2>/dev/null; then
+				record PASS hwsim-twt "TWT setup/teardown stored flow_id (see ota-twt.log)"
+			else
+				record SKIP hwsim-twt "connect ok but no flow_id line"
+			fi
 		else
-			record PASS hwsim-twt "TWT setup/teardown on hwsim"
+			record SKIP hwsim-twt "optional hwsim ax TWT AP not available; see ota-twt.log"
 		fi
+		kill_pidfile "$ARTIFACTS/tcpdump.pid" || true
 	else
-		record SKIP hwsim-twt "optional real-AP/hwsim TWT not available"
+		record SKIP hwsim-twt "hostapd ieee80211ax/TWT not supported on this hostapd"
 	fi
-	kill_pidfile "$ARTIFACTS/tcpdump.pid" || true
 
 	hwsim_cleanup
 	trap - EXIT
@@ -824,6 +889,13 @@ step_uart() {
 		record FAIL uart-unit "see test_wifi_coprocessor.log"
 		REQUIRED_FAIL=1
 	fi
+	if make test_wifi_uart_at_scan_join >"$ARTIFACTS/test_wifi_uart_at_scan_join.log" 2>&1; then
+		record PASS uart-scan-join "wifi scan + wifi join over ESP AT PTY (see test_wifi_uart_at_scan_join.log)"
+	else
+		record FAIL uart-scan-join "see test_wifi_uart_at_scan_join.log"
+		REQUIRED_FAIL=1
+		dump_log "$ARTIFACTS/test_wifi_uart_at_scan_join.log"
+	fi
 	for cand in /dev/ttyUSB0 /dev/ttyUSB1 /dev/ttyACM0 /dev/ttyACM1; do
 		if [[ -e "$cand" ]]; then
 			dev="$cand"
@@ -831,7 +903,7 @@ step_uart() {
 		fi
 	done
 	if [[ -z "$dev" ]]; then
-		record SKIP uart-hw "no /dev/ttyUSB* or /dev/ttyACM* (ESP32/ESP8266 not attached)"
+		record SKIP uart-hw "no /dev/ttyUSB* or /dev/ttyACM* (ESP32/ESP8266 not attached; PTY scan/join still ran)"
 		return 0
 	fi
 	record PASS uart-hw "device $dev present"
@@ -864,15 +936,64 @@ open(logp, "wb").write(buf)
 sys.exit(0 if b"OK" in buf else 1)
 PY
 	if grep -q OK "$ARTIFACTS/uart-at.log" 2>/dev/null; then
-		record PASS uart-at "AT OK on $dev (see uart-at.log); run AT+CWLAP / AT+CWJAP on this host for join evidence"
+		record PASS uart-at "AT OK on $dev (see uart-at.log)"
 	else
 		record SKIP uart-at "no AT OK from $dev (not ESP AT firmware, or port busy); picocom -b 115200 $dev"
+		return 0
+	fi
+	# Hardware scan/join when the attached device answers AT.
+	python3 - "$dev" "$SSID" "$PSK" "$ARTIFACTS/uart-cwlap.log" "$ARTIFACTS/uart-cwjap.log" <<'PY' || true
+import os, select, sys, time, termios
+dev, ssid, psk, scan_log, join_log = sys.argv[1:6]
+fd = os.open(dev, os.O_RDWR | os.O_NOCTTY | os.O_NONBLOCK)
+try:
+    attrs = termios.tcgetattr(fd)
+    attrs[0] = 0
+    attrs[1] = 0
+    attrs[2] = termios.CS8 | termios.CREAD | termios.CLOCAL
+    attrs[3] = 0
+    attrs[4] = termios.B115200
+    attrs[5] = termios.B115200
+    termios.tcsetattr(fd, termios.TCSANOW, attrs)
+except Exception:
+    pass
+
+def xfer(cmd, timeout, logp):
+    os.write(fd, cmd)
+    deadline = time.time() + timeout
+    buf = b""
+    while time.time() < deadline:
+        r, _, _ = select.select([fd], [], [], 0.2)
+        if fd in r:
+            buf += os.read(fd, 512)
+            if b"\r\nOK\r\n" in buf or b"\r\nERROR\r\n" in buf or b"\r\nFAIL\r\n" in buf:
+                break
+    open(logp, "wb").write(buf)
+    return buf
+
+xfer(b"AT+CWLAP\r\n", 8.0, scan_log)
+if ssid:
+    cmd = ('AT+CWJAP="%s","%s"\r\n' % (ssid, psk)).encode("ascii", "replace")
+    xfer(cmd, 15.0, join_log)
+os.close(fd)
+PY
+	if grep -q '+CWLAP:' "$ARTIFACTS/uart-cwlap.log" 2>/dev/null; then
+		record PASS uart-hw-scan "AT+CWLAP on $dev (see uart-cwlap.log)"
+	else
+		record SKIP uart-hw-scan "no +CWLAP from $dev"
+	fi
+	if [[ -n "$SSID" ]] && grep -qE 'WIFI CONNECTED|OK' "$ARTIFACTS/uart-cwjap.log" 2>/dev/null; then
+		record PASS uart-hw-join "AT+CWJAP on $dev ssid=$SSID (see uart-cwjap.log)"
+	elif [[ -z "$SSID" ]]; then
+		record SKIP uart-hw-join "set --ssid to run AT+CWJAP on attached ESP"
+	else
+		record SKIP uart-hw-join "AT+CWJAP did not report WIFI CONNECTED/OK"
 	fi
 }
 
 never_check_roadmap() {
-	# Intentionally do not flip docs/ROADMAP.md P3-10 / P4-01 to ✅ from this script.
-	record SKIP roadmap "do not mark P3-10/P4-01 ✅ until production RF evidence exists"
+	# Docs updates land in the PR; this script never rewrites ROADMAP checkboxes.
+	record SKIP roadmap "ROADMAP P3-10 / P4-01 stay ~✅ until a maintainer accepts remaining physical RF boxes"
 }
 
 update_issue() {

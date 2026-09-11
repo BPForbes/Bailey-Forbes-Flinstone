@@ -836,7 +836,7 @@ test_p3_udp_cmds: $(NET_ASM_OBJ) $(MEM_ASM_OBJ) $(NET_TEST_MM_OBJS) $(NET_TEST_P
 # (issue #239 internal-only audit). Drives cmd_net_tools.c entry points
 # in-process against the in-tree fl_net_arp / fl_net_route / fl_net_udp /
 # fl_net_resolve_ipv4 APIs; no arpa/inet.h, no libc DNS.
-.PHONY: test_p3_wifi test_p3_wifi_ota test_wifi_db test_wifi_flinstone_helper test_wifi_flinstone_linux_helper test_network_bridge_py test_wifi test_wifi-quiet run-test_wifi test_wifi_mgmt_ota test_wifi_connect_ota test_wifi_hwsim validate-issue-328
+.PHONY: test_p3_wifi test_p3_wifi_ota test_wifi_db test_wifi_flinstone_helper test_wifi_flinstone_linux_helper test_network_bridge_py test_wifi test_wifi-quiet run-test_wifi test_wifi_mgmt_ota test_wifi_connect_ota test_wifi_hwsim test_wifi_uart_at_scan_join validate-issue-328
 WIFI_TEST_NET_OBJS = kernel/core/net/net_checksum.c kernel/core/net/net_wire.c \
 	kernel/core/net/net_eth.c kernel/core/net/net_ipv4.c kernel/core/net/net_ipv6.c \
 	kernel/core/net/net_icmpv6.c kernel/core/net/net_ndp.c kernel/core/net/net_udp.c \
@@ -942,6 +942,23 @@ tests/test_wifi_coprocessor: tests/test_wifi_coprocessor.c kernel/drivers/wifi/w
 test_wifi_coprocessor: tests/test_wifi_coprocessor
 	@./tests/test_wifi_coprocessor
 
+tests/test_wifi_uart_at_scan_join: tests/test_wifi_uart_at_scan_join.c kernel/drivers/wifi/wifi_coprocessor.o kernel/drivers/wifi/wifi_uart_transport.o \
+	kernel/drivers/wifi/wifi_driver_packet.o kernel/core/net/net_packet.o kernel/core/net/net_wire.o \
+	kernel/core/net/net_ipv6.o kernel/core/net/net_checksum.o \
+	kernel/core/mm/kmalloc.o kernel/core/mm/mem_domain.o $(MEM_ASM_OBJ) $(NET_ASM_OBJ) \
+	$(WIFI_PLATFORM_SRC:.c=.o) kernel/core/platform/fl_platform.o kernel/core/time/timekeeping.o
+	$(WIFI_TEST_LINK_PRE)
+	$(WIFI_TEST_LINK_AT)$(CC) $(CFLAGS) $(TEST_SANITIZE) -o tests/test_wifi_uart_at_scan_join tests/test_wifi_uart_at_scan_join.c \
+	  kernel/drivers/wifi/wifi_coprocessor.o kernel/drivers/wifi/wifi_uart_transport.o \
+	  kernel/drivers/wifi/wifi_driver_packet.o kernel/core/net/net_packet.o kernel/core/net/net_wire.o \
+	  kernel/core/net/net_ipv6.o kernel/core/net/net_checksum.o \
+	  kernel/core/mm/kmalloc.o kernel/core/mm/mem_domain.o $(MEM_ASM_OBJ) $(NET_ASM_OBJ) \
+	  $(WIFI_PLATFORM_SRC:.c=.o) kernel/core/platform/fl_platform.o kernel/core/time/timekeeping.o \
+	  -pthread -Wl,-z,noexecstack
+
+test_wifi_uart_at_scan_join: tests/test_wifi_uart_at_scan_join
+	@./tests/test_wifi_uart_at_scan_join
+
 tests/test_wifi_fullmac_probe: kernel/drivers/wifi/fullmac/wifi_fullmac_core.c
 	$(CC) $(CFLAGS) -DFL_FULLMAC_CHIPSET_ONLY $(TEST_SANITIZE) -o tests/test_wifi_fullmac_probe tests/test_wifi_fullmac_probe.c \
 	  kernel/drivers/wifi/fullmac/wifi_fullmac_core.c -Wl,-z,noexecstack
@@ -993,7 +1010,7 @@ test_wifi_ax_server_ota: tests/test_wifi_ax_server_ota
 	@./tests/test_wifi_ax_server_ota
 
 # PR #320 WiFi validation bundle (build when stale, then run all four).
-test_wifi: test_wifi_coprocessor test_wifi_fullmac_probe test_net_wifi_host_he test_p3_wifi test_wifi_mgmt_ota test_wifi_connect_ota test_wifi_80211ax_mock_279 test_wifi_ax_server_ota
+test_wifi: test_wifi_coprocessor test_wifi_uart_at_scan_join test_wifi_fullmac_probe test_net_wifi_host_he test_p3_wifi test_wifi_mgmt_ota test_wifi_connect_ota test_wifi_80211ax_mock_279 test_wifi_ax_server_ota
 
 # Same bundle; suppress make recipe echo (link lines + ./tests/... wrappers).
 test_wifi-quiet:
@@ -1013,12 +1030,14 @@ run_cunit_tests: BPForbes_Flinstone_Tests
 # Run only — no link step (fail fast if a binary is missing).
 run-test_wifi:
 	@test -x tests/test_wifi_coprocessor || { echo "missing tests/test_wifi_coprocessor (run: make test_wifi_coprocessor)" >&2; exit 1; }
+	@test -x tests/test_wifi_uart_at_scan_join || { echo "missing tests/test_wifi_uart_at_scan_join (run: make test_wifi_uart_at_scan_join)" >&2; exit 1; }
 	@test -x tests/test_p3_wifi || { echo "missing tests/test_p3_wifi (run: make test_p3_wifi)" >&2; exit 1; }
 	@test -x tests/test_wifi_80211ax_mock_279 || { echo "missing tests/test_wifi_80211ax_mock_279 (run: make test_wifi_80211ax_mock_279)" >&2; exit 1; }
 	@test -x tests/test_wifi_mgmt_ota || { echo "missing tests/test_wifi_mgmt_ota (run: make test_wifi_mgmt_ota)" >&2; exit 1; }
 	@test -x tests/test_wifi_connect_ota || { echo "missing tests/test_wifi_connect_ota (run: make test_wifi_connect_ota)" >&2; exit 1; }
 	@test -x tests/test_wifi_ax_server_ota || { echo "missing tests/test_wifi_ax_server_ota (run: make test_wifi_ax_server_ota)" >&2; exit 1; }
 	@./tests/test_wifi_coprocessor
+	@./tests/test_wifi_uart_at_scan_join
 	@./tests/test_p3_wifi
 	@./tests/test_wifi_80211ax_mock_279
 	@./tests/test_wifi_mgmt_ota
@@ -1173,7 +1192,7 @@ clean:
 	rm -f kernel/arch/*/drivers/*.o kernel/arch/*/hal/*.o kernel/drivers/*.o kernel/drivers/block/*.o VM/devices/*.o
 	rm -f arch/*/*/*.o arch/*/*/alloc/*.o
 	rm -f tests/test_mem_asm tests/test_alloc tests/test_priority_queue tests/test_drivers tests/test_vm_mem tests/test_replay tests/test_invariants tests/test_userspace_connection tests/test_vm_syscall_bridge tests/test_vm_arch_readiness
-	rm -f tests/test_p3_network tests/test_p3_server tests/test_p3_server_lan tests/test_p3_udp_cmds tests/test_p3_net_tools tests/test_wifi_flinstone_helper tests/test_wifi_flinstone_linux_helper tests/test_p3_wifi tests/test_p3_wifi_ota tests/test_wifi_mgmt_ota tests/test_wifi_connect_ota tests/test_wifi_coprocessor tests/test_wifi_fullmac_probe tests/test_wifi_80211ax_mock_279 tests/test_wifi_ax_server_ota
+	rm -f tests/test_p3_network tests/test_p3_server tests/test_p3_server_lan tests/test_p3_udp_cmds tests/test_p3_net_tools tests/test_wifi_flinstone_helper tests/test_wifi_flinstone_linux_helper tests/test_p3_wifi tests/test_p3_wifi_ota tests/test_wifi_mgmt_ota tests/test_wifi_connect_ota tests/test_wifi_coprocessor tests/test_wifi_uart_at_scan_join tests/test_wifi_fullmac_probe tests/test_wifi_80211ax_mock_279 tests/test_wifi_ax_server_ota
 	rm -f tests/test_batch_argv_issue220 tests/test_threadpool_issue222 tests/test_disk_hex_issue222
 	rm -rf tests/obj/issue220 tests/obj/issue222
 	find . -name '*.o' -type f ! -path './deps/*' ! -path './.git/*' -exec rm -f {} +
