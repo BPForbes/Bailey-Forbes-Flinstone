@@ -161,6 +161,7 @@ static void mock_ap_handle_sae_auth(wifi_mgmt_transport_mock_ctx_t *ctx, const u
 	if (auth_seq == 1u) {
 		uint8_t commit_body[128];
 		size_t commit_len = 0;
+		size_t token_len = has_clog ? sizeof(k_clog_token) : 0u;
 
 		if (mock_sae_init_ap(ctx) != 0)
 			return;
@@ -168,8 +169,7 @@ static void mock_ap_handle_sae_auth(wifi_mgmt_transport_mock_ctx_t *ctx, const u
 							   sizeof(commit_body),
 							   &commit_len) != FL_RESULT_OK)
 			return;
-		if (fl_net_wifi_sae_dragonfly_rx_commit(ctx->sae_ap, body, body_len,
-							has_clog ? sizeof(k_clog_token) : 0u) !=
+		if (fl_net_wifi_sae_dragonfly_rx_commit(ctx->sae_ap, body, body_len, token_len) !=
 		    FL_RESULT_OK)
 			return;
 		if (fl_net_wifi_mgmt_build_sae_auth(ap->bssid, sta, 1u, commit_body, commit_len, resp,

@@ -712,21 +712,30 @@ static int mock_ota_init_transport(wifi_lab_mock_ctx_t *ctx, const wifi_network_
 	return wifi_mgmt_transport_mock_init(tr_out, &ctx->ota_tr_storage, &cfg);
 }
 
-static int mock_run_supplicant_ota(wifi_lab_mock_ctx_t *ctx,
-				    const fl_net_wifi_cred_t *cred,
-				    const wifi_network_t *ap)
+static int mock_run_ota_phase(wifi_lab_mock_ctx_t *ctx, const fl_net_wifi_cred_t *cred,
+			      const wifi_network_t *ap, wifi_connect_ota_phase_t phase)
 {
 	wifi_mgmt_transport_t tr;
 	wifi_connect_ota_hooks_t hooks = {
 		.set_key = mock_ota_set_key,
 		.ctx = ctx,
 	};
+	int rc;
 
 	if (!ctx || !cred || !ap)
 		return -1;
 	if (mock_ota_init_transport(ctx, ap, cred->passphrase, &tr) != 0)
 		return -1;
-	return wifi_connect_ota_run(cred, ap, ctx->sta_mac, &tr, &hooks);
+	rc = wifi_connect_ota_run_phase(cred, ap, ctx->sta_mac, &tr, &hooks, phase);
+	wifi_mgmt_transport_mock_deinit(&tr);
+	return rc;
+}
+
+static int mock_run_supplicant_ota(wifi_lab_mock_ctx_t *ctx,
+				    const fl_net_wifi_cred_t *cred,
+				    const wifi_network_t *ap)
+{
+	return mock_run_ota_phase(ctx, cred, ap, WIFI_CONNECT_OTA_ALL);
 }
 
 static int mock_setup_twt(wifi_fullmac_t *dev, const wifi_fullmac_twt_setup_t *twt)
@@ -748,8 +757,11 @@ static int mock_setup_twt(wifi_fullmac_t *dev, const wifi_fullmac_twt_setup_t *t
 	req.wake_interval_us = twt->wake_interval_ms ? (twt->wake_interval_ms * 1000u) : 100000u;
 	if (mock_ota_init_transport(ctx, ap, ctx->pending_cred.passphrase, &tr) != 0)
 		return -1;
-	if (wifi_twt_ota_setup(ctx->sta_mac, ctx->ap_bssid, &req, &agreed, &tr) != 0)
+	if (wifi_twt_ota_setup(ctx->sta_mac, ctx->ap_bssid, &req, &agreed, &tr) != 0) {
+		wifi_mgmt_transport_mock_deinit(&tr);
 		return -1;
+	}
+	wifi_mgmt_transport_mock_deinit(&tr);
 	if (agreed.flow_id >= 8u)
 		return -1;
 
@@ -773,8 +785,10 @@ static int mock_teardown_twt(wifi_fullmac_t *dev, uint8_t flow_id)
 	if ((ctx->twt_mask & (1u << flow_id)) == 0u)
 		return -1;
 	ap = mock_find_bssid(ctx, ctx->ap_bssid);
-	if (ap && mock_ota_init_transport(ctx, ap, ctx->pending_cred.passphrase, &tr) == 0)
+	if (ap && mock_ota_init_transport(ctx, ap, ctx->pending_cred.passphrase, &tr) == 0) {
 		(void)wifi_twt_ota_teardown(ctx->sta_mac, ctx->ap_bssid, flow_id, &tr);
+		wifi_mgmt_transport_mock_deinit(&tr);
+	}
 	memset(&ctx->twt_slots[flow_id], 0, sizeof(ctx->twt_slots[flow_id]));
 	ctx->twt_mask &= (uint8_t)~(1u << flow_id);
 	(void)fl_net_wifi_twt_lab_teardown(flow_id);
@@ -786,11 +800,6 @@ static int mock_authenticate(wifi_fullmac_t *dev, const uint8_t *bssid, uint16_t
 {
 	wifi_lab_mock_ctx_t *ctx = (wifi_lab_mock_ctx_t *)dev;
 	const wifi_network_t *ap;
-	wifi_mgmt_transport_t tr;
-	wifi_connect_ota_hooks_t hooks = {
-		.set_key = mock_ota_set_key,
-		.ctx = ctx,
-	};
 
 	(void)auth_type;
 	(void)auth_seq;
@@ -800,10 +809,7 @@ static int mock_authenticate(wifi_fullmac_t *dev, const uint8_t *bssid, uint16_t
 	if (!ap)
 		return -1;
 	ctx->pending_ap = *ap;
-	if (mock_ota_init_transport(ctx, ap, ctx->pending_cred.passphrase, &tr) != 0)
-		return -1;
-	if (wifi_connect_ota_run_phase(&ctx->pending_cred, ap, ctx->sta_mac, &tr, &hooks,
-				       WIFI_CONNECT_OTA_AUTH_ONLY) != 0)
+	if (mock_run_ota_phase(ctx, &ctx->pending_cred, ap, WIFI_CONNECT_OTA_AUTH_ONLY) != 0)
 		return -1;
 	ctx->ota_auth_done = 1;
 	return 0;
@@ -813,25 +819,16 @@ static int mock_associate(wifi_fullmac_t *dev, const uint8_t *bssid)
 {
 	wifi_lab_mock_ctx_t *ctx = (wifi_lab_mock_ctx_t *)dev;
 	const wifi_network_t *ap;
-	wifi_mgmt_transport_t tr;
-	wifi_connect_ota_hooks_t hooks = {
-		.set_key = mock_ota_set_key,
-		.ctx = ctx,
-	};
 
 	if (!dev || !bssid || !ctx->pending_cred.ssid[0])
 		return -1;
 	ap = mock_find_bssid(ctx, bssid);
 	if (!ap)
 		return -1;
-	if (mock_ota_init_transport(ctx, ap, ctx->pending_cred.passphrase, &tr) != 0)
-		return -1;
 	if (!ctx->ota_auth_done &&
-	    wifi_connect_ota_run_phase(&ctx->pending_cred, ap, ctx->sta_mac, &tr, &hooks,
-				       WIFI_CONNECT_OTA_AUTH_ONLY) != 0)
+	    mock_run_ota_phase(ctx, &ctx->pending_cred, ap, WIFI_CONNECT_OTA_AUTH_ONLY) != 0)
 		return -1;
-	if (wifi_connect_ota_run_phase(&ctx->pending_cred, ap, ctx->sta_mac, &tr, &hooks,
-				       WIFI_CONNECT_OTA_ASSOC_ONLY) != 0)
+	if (mock_run_ota_phase(ctx, &ctx->pending_cred, ap, WIFI_CONNECT_OTA_ASSOC_ONLY) != 0)
 		return -1;
 	memcpy(ctx->ap_bssid, ap->bssid, 6);
 	strncpy(ctx->joined_ssid, ctx->pending_cred.ssid, sizeof(ctx->joined_ssid) - 1u);
