@@ -6,3 +6,5 @@ DEV_VERSION=4
 DESCRIPTION<<PROMOTE_DESC_END
 4.3.0: #328 remaining eight-task train — mac80211_hwsim CI job runs the OTA suite and keeps pcap/logs (item 1); ESP AT UART scan/join over a PTY simulator plus optional /dev/ttyUSB* hardware probe (item 2); fl_net_wifi_connect(WPA2-PSK) reaches UP on the in-tree lab/hwsim path without wpa_cli/nmcli/NetworkManager (item 3); TWT Individual Setup/Teardown records negotiated flow_id (lab + optional hwsim ax AP) (item 4); in-tree fl_net_dhcp_acquire on the Wi-Fi fl_net_driver_t after association (item 5); in-tree UDP echo on that same netdev (item 6); WPA2 EAPOL-Key 1–4 + key install evidence from mock OTA and hwsim pcap decode (item 7); ROADMAP P3-10 / P4-01 notes updated for this evidence — rows stay ~✅ until a real-AP RF run supplies the remaining physical boxes (item 8).
 PROMOTE_DESC_END
+
+RELEASE_DATE=2026-09-11
