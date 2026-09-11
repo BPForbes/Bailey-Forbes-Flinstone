@@ -462,29 +462,91 @@ ignore_broadcast_ssid=0
 EOF
 }
 
+# Classify IEEE 802.11i Key Information bits into EAPOL-Key message 1–4.
+# bit6=Install, bit7=Ack, bit8=MIC, bit9=Secure. Retransmits of one message
+# do not satisfy the check — all four distinct messages are required.
+classify_eapol_key_info_msgs() {
+	# Heredoc is the program; the field dump is argv[1] (not stdin).
+	python3 - "$1" <<'PY'
+import re, sys
+
+def parse_ki(token):
+    token = token.strip().lower().rstrip(",")
+    if token.startswith("0x"):
+        return int(token, 16)
+    return int(token, 10)
+
+def msg_id(ki):
+    ack = bool(ki & (1 << 7))
+    mic = bool(ki & (1 << 8))
+    secure = bool(ki & (1 << 9))
+    if ack and not mic:
+        return 1
+    if mic and not ack and not secure:
+        return 2
+    if ack and mic:
+        return 3
+    if mic and secure and not ack:
+        return 4
+    return 0
+
+seen = set()
+raw_count = 0
+with open(sys.argv[1], encoding="utf-8", errors="replace") as fh:
+    for line in fh:
+        line = line.strip()
+        if not line:
+            continue
+        tokens = re.findall(r"0x[0-9a-fA-F]+|(?<![A-Za-z])\d+", line)
+        if not tokens:
+            parts = line.split()
+            if len(parts) >= 2:
+                tokens = [parts[-1]]
+            else:
+                continue
+        try:
+            ki = parse_ki(tokens[-1])
+        except ValueError:
+            continue
+        raw_count += 1
+        mid = msg_id(ki)
+        if mid:
+            seen.add(mid)
+
+print("eapol_key_frames=%d" % raw_count)
+print("eapol_msgs=%s" % (",".join(str(m) for m in sorted(seen)) if seen else "none"))
+sys.exit(0 if seen >= {1, 2, 3, 4} else 1)
+PY
+}
+
 count_eapol_key_msgs() {
 	local pcap="$1"
 	local out="$2"
+	local fields="$out.fields"
 	if [[ ! -f "$pcap" ]]; then
 		echo "no pcap" >"$out"
 		return 1
 	fi
 	if have_cmd tshark; then
-		tshark -r "$pcap" -Y eapol -T fields -e eapol.type -e eapol.keydes.key_info \
-			>"$out" 2>/dev/null || true
+		tshark -r "$pcap" -Y 'eapol.type == 3' -T fields -e eapol.type -e eapol.keydes.key_info \
+			>"$fields" 2>/dev/null || true
 	elif have_cmd tcpdump; then
-		tcpdump -r "$pcap" -e -n 'ether proto 0x888e' >"$out" 2>/dev/null || true
+		tcpdump -r "$pcap" -n -vv 'ether proto 0x888e' >"$fields" 2>/dev/null || true
 	else
 		echo "no tshark/tcpdump" >"$out"
 		return 1
 	fi
-	local n
-	n="$(grep -cE 'eapol|EAPOL|Key' "$out" 2>/dev/null || true)"
-	if [[ -z "$n" ]]; then
-		n=0
+	if [[ ! -s "$fields" ]]; then
+		echo "eapol_key_frames=0" >"$out"
+		echo "eapol_msgs=none" >>"$out"
+		return 1
 	fi
-	echo "eapol_frames=$n" >>"$out"
-	[[ "$n" -ge 4 ]]
+	# Keep the raw field dump, then append the classified summary.
+	cp "$fields" "$out"
+	if classify_eapol_key_info_msgs "$fields" >>"$out"; then
+		return 0
+	fi
+	return 1
 }
 
 ap_exec() {

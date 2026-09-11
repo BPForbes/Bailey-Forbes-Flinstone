@@ -28,8 +28,10 @@ const wifi_platform_uart_ops_t *wifi_platform_get_uart_ops(void);
 /*
  * Bind hosted POSIX UART I/O to a file descriptor (PTY, socketpair, or
  * /dev/ttyUSB*). Pass -1 to unbind. ARM / bare-metal builds return -1.
+ * configure() applies raw 8N1 + baud on ttys; socketpairs are left unchanged.
  */
 int wifi_platform_host_uart_bind(int fd);
+int wifi_platform_host_uart_configure(unsigned baud);
 int wifi_platform_host_uart_fd(void);
 
 /* Platform time utilities (fail closed when monotonic time is unavailable). */

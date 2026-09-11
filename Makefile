@@ -855,6 +855,21 @@ WIFI_TEST_COMMON_DEPS = $(NET_ASM_OBJ) $(MEM_ASM_OBJ) $(NET_TEST_MM_OBJS) \
 	$(WIFI_PLATFORM_SRC:.c=.o) priority_queue.o kernel/core/time/timekeeping.o \
 	kernel/core/sys/ipc.o
 
+# Immediate-expansion prerequisite lists need this defined *before* test_p3_wifi.
+WIFI_TEST_STATION_DRIVER_SRCS = kernel/drivers/wifi/wifi_driver_backend.c kernel/drivers/wifi/wifi_coprocessor.c \
+	kernel/drivers/wifi/wifi_lab_backend.c \
+	kernel/drivers/wifi/wifi_lab_router.c \
+	kernel/drivers/wifi/wifi_uart_transport.c kernel/drivers/wifi/wifi_driver_packet.c \
+	kernel/drivers/wifi/wifi_supplicant.c \
+	kernel/drivers/wifi/wifi_mgmt_transport.c \
+	kernel/drivers/wifi/wifi_mgmt_transport_nl80211.c \
+	kernel/drivers/wifi/wifi_connect_ota.c \
+	kernel/drivers/wifi/wifi_twt_ota.c \
+	kernel/core/net/net_wifi_fullmac.c kernel/core/net/net_wifi_mgmt_ota.c \
+	kernel/drivers/wifi/wifi_nl80211.c kernel/drivers/wifi/wifi_fullmac_afpacket.c \
+	kernel/drivers/wifi/fullmac/wifi_fullmac_core.c kernel/drivers/wifi/fullmac/wifi_fullmac_hw.c \
+	kernel/drivers/wifi/fullmac/wifi_fullmac_bus.c
+
 tests/test_p3_wifi: tests/test_p3_wifi.c $(WIFI_TEST_COMMON_DEPS) $(NET_TEST_PCI_OBJ) $(WIFI_TEST_STATION_DRIVER_SRCS)
 	$(WIFI_TEST_LINK_PRE)
 	$(WIFI_TEST_LINK_AT)$(CC) $(CFLAGS) $(TEST_SANITIZE) -o tests/test_p3_wifi tests/test_p3_wifi.c \
@@ -1043,20 +1058,6 @@ run-test_wifi:
 	@./tests/test_wifi_mgmt_ota
 	@./tests/test_wifi_connect_ota
 	@./tests/test_wifi_ax_server_ota
-
-WIFI_TEST_STATION_DRIVER_SRCS = kernel/drivers/wifi/wifi_driver_backend.c kernel/drivers/wifi/wifi_coprocessor.c \
-	kernel/drivers/wifi/wifi_lab_backend.c \
-	kernel/drivers/wifi/wifi_lab_router.c \
-	kernel/drivers/wifi/wifi_uart_transport.c kernel/drivers/wifi/wifi_driver_packet.c \
-	kernel/drivers/wifi/wifi_supplicant.c \
-	kernel/drivers/wifi/wifi_mgmt_transport.c \
-	kernel/drivers/wifi/wifi_mgmt_transport_nl80211.c \
-	kernel/drivers/wifi/wifi_connect_ota.c \
-	kernel/drivers/wifi/wifi_twt_ota.c \
-	kernel/core/net/net_wifi_fullmac.c kernel/core/net/net_wifi_mgmt_ota.c \
-	kernel/drivers/wifi/wifi_nl80211.c kernel/drivers/wifi/wifi_fullmac_afpacket.c \
-	kernel/drivers/wifi/fullmac/wifi_fullmac_core.c kernel/drivers/wifi/fullmac/wifi_fullmac_hw.c \
-	kernel/drivers/wifi/fullmac/wifi_fullmac_bus.c
 
 test_wifi_flinstone_helper: $(WIFI_TEST_COMMON_DEPS) $(NET_TEST_PCI_OBJ)
 	$(CC) $(CFLAGS) $(TEST_SANITIZE) -o tests/test_wifi_flinstone_helper tests/test_wifi_flinstone_helper.c \

@@ -108,6 +108,12 @@ int wifi_platform_host_uart_bind(int fd)
 	return -1;
 }
 
+int wifi_platform_host_uart_configure(unsigned baud)
+{
+	(void)baud;
+	return 0;
+}
+
 int wifi_platform_host_uart_fd(void)
 {
 	return -1;

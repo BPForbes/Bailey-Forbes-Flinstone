@@ -9,14 +9,81 @@
 #include <errno.h>
 #include <poll.h>
 #include <stdlib.h>
+#include <termios.h>
 #include <unistd.h>
 
 static int s_host_uart_fd = -1;
+
+static speed_t host_uart_baud_to_speed(unsigned baud)
+{
+	switch (baud) {
+	case 9600u:
+		return B9600;
+	case 19200u:
+		return B19200;
+	case 38400u:
+		return B38400;
+	case 57600u:
+		return B57600;
+	case 230400u:
+		return B230400;
+#ifdef B460800
+	case 460800u:
+		return B460800;
+#endif
+#ifdef B921600
+	case 921600u:
+		return B921600;
+#endif
+	case 115200u:
+	default:
+		return B115200;
+	}
+}
+
+/*
+ * Raw 8N1 on real ttys and PTYs so AT framing is not cooked/echoed.
+ * Socketpairs are not ttys — leave them unchanged for unit tests.
+ */
+static int host_uart_configure_tty(int fd, unsigned baud)
+{
+	struct termios tio;
+	speed_t speed;
+
+	if (fd < 0 || !isatty(fd))
+		return 0;
+	if (tcgetattr(fd, &tio) != 0)
+		return -1;
+
+	cfmakeraw(&tio);
+	tio.c_cflag |= (tcflag_t)(CLOCAL | CREAD);
+	tio.c_cflag &= ~(tcflag_t)(PARENB | CSTOPB | CSIZE);
+	tio.c_cflag |= (tcflag_t)CS8;
+	tio.c_cc[VMIN] = 0;
+	tio.c_cc[VTIME] = 0;
+
+	if (baud == 0u)
+		baud = 115200u;
+	speed = host_uart_baud_to_speed(baud);
+	if (cfsetispeed(&tio, speed) != 0 || cfsetospeed(&tio, speed) != 0)
+		return -1;
+	if (tcsetattr(fd, TCSANOW, &tio) != 0)
+		return -1;
+	(void)tcflush(fd, TCIOFLUSH);
+	return 0;
+}
 
 int wifi_platform_host_uart_bind(int fd)
 {
 	s_host_uart_fd = fd;
 	return 0;
+}
+
+int wifi_platform_host_uart_configure(unsigned baud)
+{
+	if (s_host_uart_fd < 0)
+		return 0;
+	return host_uart_configure_tty(s_host_uart_fd, baud);
 }
 
 int wifi_platform_host_uart_fd(void)
