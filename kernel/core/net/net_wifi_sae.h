@@ -59,9 +59,10 @@ fl_result_t fl_net_wifi_sae_dragonfly_build_commit(fl_net_wifi_sae_dragonfly_ctx
                                                    size_t anticlogging_len, uint8_t *body,
                                                    size_t body_cap, size_t *body_len_out);
 
-/** Parse and process peer Commit; derive KCK/PMK (peer commit must be complete). */
+/** Parse and process peer Commit; **anticlogging_len** is the token after the group id. */
 fl_result_t fl_net_wifi_sae_dragonfly_rx_commit(fl_net_wifi_sae_dragonfly_ctx_t *ctx,
-                                                const uint8_t *body, size_t body_len);
+                                                const uint8_t *body, size_t body_len,
+                                                size_t anticlogging_len);
 
 /** Build SAE Confirm body after peer Commit was processed. */
 fl_result_t fl_net_wifi_sae_dragonfly_build_confirm(fl_net_wifi_sae_dragonfly_ctx_t *ctx,

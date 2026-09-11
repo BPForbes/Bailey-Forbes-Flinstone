@@ -95,7 +95,10 @@ static int wifi_ota_sae_body_is_commit(const uint8_t *body, size_t body_len)
 
 static int wifi_ota_sae_body_is_confirm(const uint8_t *body, size_t body_len)
 {
-	return body && body_len >= FL_NET_WIFI_SAE_CONFIRM_BODY_LEN;
+	/* Confirm is send-confirm || confirm (34 bytes). A Commit body is longer
+	 * and also matches the confirm minimum — do not treat it as Confirm. */
+	return body && body_len >= FL_NET_WIFI_SAE_CONFIRM_BODY_LEN &&
+	       !wifi_ota_sae_body_is_commit(body, body_len);
 }
 
 static int wifi_ota_run_sae(const fl_net_wifi_cred_t *cred, const wifi_network_t *ap,
@@ -148,7 +151,6 @@ static int wifi_ota_run_sae(const fl_net_wifi_cred_t *cred, const wifi_network_t
 			const uint8_t *body = NULL;
 			size_t body_len = 0;
 
-			(void)auth_seq;
 			if (fl_net_wifi_mgmt_parse_auth_resp(rx, rx_len, &auth_alg, &auth_seq,
 							     &status, &body, &body_len) !=
 				    FL_RESULT_OK ||
@@ -166,7 +168,8 @@ static int wifi_ota_run_sae(const fl_net_wifi_cred_t *cred, const wifi_network_t
 			if (status != 0u)
 				return -1;
 
-			if (!got_peer_commit && wifi_ota_sae_body_is_commit(body, body_len)) {
+			if (!got_peer_commit && auth_seq == 1u &&
+			    wifi_ota_sae_body_is_commit(body, body_len)) {
 				if (wifi_supplicant_rx_sae_peer_commit(supp, body, body_len) != 0)
 					return -1;
 				got_peer_commit = 1;
@@ -193,7 +196,7 @@ static int wifi_ota_run_sae(const fl_net_wifi_cred_t *cred, const wifi_network_t
 					return -1;
 			}
 
-			if (wifi_ota_sae_body_is_confirm(body, body_len)) {
+			if (auth_seq == 2u && wifi_ota_sae_body_is_confirm(body, body_len)) {
 				if (wifi_supplicant_process_sae_confirm(supp, body, body_len) != 0)
 					return -1;
 				return 0;

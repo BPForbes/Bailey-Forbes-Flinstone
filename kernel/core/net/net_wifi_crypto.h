@@ -29,7 +29,7 @@ fl_result_t fl_net_wifi_crypto_sae_kdf(const uint8_t *key, size_t key_len, const
 
 /**
  * IEEE 802.11-2020 12.7.1.7.2 KDF-Hash (SHA-256): HMAC-SHA256(K,
- * counter_le16 || Label || 0x00 || Context || length_bits_le16), counter from 1.
+ * counter_le16 || Label || Context || length_bits_le16), counter from 1.
  * Used for SAE hunting-and-pecking and KCK/PMK.
  */
 fl_result_t fl_net_wifi_crypto_ieee80211_kdf_sha256(const uint8_t *key, size_t key_len,

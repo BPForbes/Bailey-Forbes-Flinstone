@@ -376,14 +376,19 @@ static fl_result_t driver_backend_connect(const fl_net_wifi_cred_t *cred, unsign
     if (physical) {
         fl_net_driver_t *drv = wifi_driver_netdev();
 
-        if (fl_net_wifi_fullmac_sta_mac(sta_mac) != FL_RESULT_OK || !drv)
+        if (fl_net_wifi_fullmac_sta_mac(sta_mac) != FL_RESULT_OK || !drv) {
+            wifi_driver_disconnect();
+            fl_net_wifi_twt_lab_reset();
             return FL_RESULT_ERR;
+        }
         s_physical_backend = 1;
         s_lab_backend = 0;
         s_wifi_state = FL_WIFI_STATE_DHCP;
         rc = wifi_station_driver_dhcp(drv, sta_mac, timeout_ms);
         if (rc != FL_RESULT_OK) {
+            s_wifi_state = FL_WIFI_STATE_IDLE;
             wifi_driver_disconnect();
+            fl_net_wifi_twt_lab_reset();
             return rc;
         }
         if (wifi_driver_he_cap(&s_negotiated_he) != FL_RESULT_OK)

@@ -33,6 +33,7 @@ REQUIRED_FAIL=0
 HWSIM_FAIL=0
 IS_WSL=0
 HAVE_SUDO_N=0
+HWSIM_AP_IFACE=""
 
 usage() {
 	cat <<'EOF'
@@ -80,7 +81,6 @@ EOF
 }
 
 log() { printf '%s\n' "$*"; }
-logf() { printf '%s\n' "$*" | tee -a "$SUMMARY_FILE" >/dev/null; }
 
 record() {
 	local status="$1"
@@ -92,14 +92,6 @@ record() {
 	FAIL) FAIL_N=$((FAIL_N + 1)); log "FAIL  $id — $detail" ;;
 	SKIP) SKIP_N=$((SKIP_N + 1)); log "SKIP  $id — $detail" ;;
 	esac
-}
-
-run() {
-	if [[ "$DRY_RUN" == "1" ]]; then
-		log "DRY-RUN: $*"
-		return 0
-	fi
-	"$@"
 }
 
 have_cmd() { command -v "$1" >/dev/null 2>&1; }
@@ -254,7 +246,7 @@ apply_linux_sysctl_firewall() {
 	elif have_cmd iptables; then
 		for port in 67 68 48077 48078; do
 			sudo -n iptables -C INPUT -p udp --dport "$port" -j ACCEPT 2>/dev/null || \
-				sudo -n iptables -I INPUT -p udp --dport "$port" -j ACCEPT
+				sudo -n iptables -I INPUT -p udp --dport "$port" -j ACCEPT || true
 			sudo -n iptables -C OUTPUT -p udp --sport "$port" -j ACCEPT 2>/dev/null || \
 				sudo -n iptables -I OUTPUT -p udp --sport "$port" -j ACCEPT || true
 		done
@@ -382,6 +374,8 @@ wifi_sta_iface_present() {
 write_hostapd_sae() {
 	local iface="$1"
 	local conf="$2"
+	: >"$conf"
+	chmod 600 "$conf"
 	cat >"$conf" <<EOF
 interface=$iface
 driver=nl80211
@@ -402,6 +396,8 @@ EOF
 write_hostapd_wpa2() {
 	local iface="$1"
 	local conf="$2"
+	: >"$conf"
+	chmod 600 "$conf"
 	cat >"$conf" <<EOF
 interface=$iface
 driver=nl80211
@@ -433,31 +429,21 @@ start_udp_echo() {
 		log "DRY-RUN: UDP echo $addr:$port"
 		return 0
 	fi
+	local -a pfx=()
 	if [[ -n "${HWSIM_NS_AP:-}" ]]; then
-		sudo_n ip netns exec "$HWSIM_NS_AP" python3 - "$addr" "$port" "$pidfile" <<'PY' &
-import os, socket, sys
-addr, port, pidfile = sys.argv[1], int(sys.argv[2]), sys.argv[3]
-open(pidfile, "w").write(str(os.getpid()))
-sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
-sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
-sock.bind((addr, port))
-while True:
-    data, src = sock.recvfrom(2048)
-    sock.sendto(data, src)
-PY
-	else
-		python3 - "$addr" "$port" "$pidfile" <<'PY' &
-import os, socket, sys
-addr, port, pidfile = sys.argv[1], int(sys.argv[2]), sys.argv[3]
-open(pidfile, "w").write(str(os.getpid()))
-sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
-sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
-sock.bind((addr, port))
-while True:
-    data, src = sock.recvfrom(2048)
-    sock.sendto(data, src)
-PY
+		pfx=(sudo -n ip netns exec "$HWSIM_NS_AP")
 	fi
+	"${pfx[@]}" python3 - "$addr" "$port" "$pidfile" <<'PY' &
+import os, socket, sys
+addr, port, pidfile = sys.argv[1], int(sys.argv[2]), sys.argv[3]
+open(pidfile, "w").write(str(os.getpid()))
+sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+sock.bind((addr, port))
+while True:
+    data, src = sock.recvfrom(2048)
+    sock.sendto(data, src)
+PY
 	sleep 0.2
 }
 
@@ -480,8 +466,10 @@ start_tcpdump() {
 	if ! have_cmd tcpdump; then
 		return 0
 	fi
-	sudo -n tcpdump -i "$iface" -U -e -vvv -w "$pcap" "$@" >/dev/null 2>&1 &
-	echo $! >"$ARTIFACTS/tcpdump.pid"
+	sudo -n tcpdump -i "$iface" -U -e -vvv -w "$pcap" "$@" \
+		>"$ARTIFACTS/tcpdump.log" 2>&1 &
+	sudo -n pgrep -n -f "tcpdump -i $iface" >"$ARTIFACTS/tcpdump.pid" 2>/dev/null || \
+		echo $! >"$ARTIFACTS/tcpdump.pid"
 }
 
 decode_pcap() {
@@ -518,6 +506,9 @@ hwsim_cleanup() {
 	kill_pidfile "$ARTIFACTS/hostapd.pid" || true
 	sudo_n pkill hostapd 2>/dev/null || true
 	kill_pidfile "$ARTIFACTS/dnsmasq.pid" || true
+	if [[ -n "${HWSIM_AP_IFACE:-}" ]]; then
+		sudo_n pkill -f "dnsmasq.*$HWSIM_AP_IFACE" 2>/dev/null || true
+	fi
 	kill_pidfile "$ARTIFACTS/tcpdump.pid" || true
 	kill_pidfile "$ARTIFACTS/udp_echo.pid" || true
 	if [[ -n "${HWSIM_NS_AP:-}" ]]; then
@@ -533,9 +524,12 @@ run_ota() {
 	local ssid="$2"
 	local auth="$3"
 	local extra="${4:-}"
-	local logf="$ARTIFACTS/ota-${auth}.log"
+	local tag="${5:-$auth}"
+	local logf="$ARTIFACTS/ota-${tag}.log"
+	local -a extra_env=()
+	read -r -a extra_env <<<"$extra"
 	if [[ "$DRY_RUN" == "1" ]]; then
-		log "DRY-RUN: make test_p3_wifi_ota IFACE=$sta SSID=$ssid AUTH=$auth $extra"
+		log "DRY-RUN: make test_p3_wifi_ota IFACE=$sta SSID=$ssid AUTH=$auth ${extra_env[*]}"
 		return 0
 	fi
 	make tests/test_p3_wifi_ota >/dev/null
@@ -544,7 +538,7 @@ run_ota() {
 		env FL_NET_WIFI_IFACE="$sta" FL_NET_WIFI_NL80211=1 \
 		SSID="$ssid" PSK="$PSK" AUTH="$auth" \
 		FL_NET_WIFI_OTA_REQUIRE=1 UDP_ECHO_DST=192.168.50.1 \
-		$extra \
+		"${extra_env[@]}" \
 		"$ROOT/tests/test_p3_wifi_ota" >"$logf" 2>&1
 	local rc=$?
 	set -e
@@ -588,6 +582,7 @@ step_hwsim() {
 	fi
 	ap="${radios[0]}"
 	sta="${radios[1]}"
+	HWSIM_AP_IFACE="$ap"
 	log "[hwsim] AP=$ap STA=$sta"
 	trap hwsim_cleanup EXIT
 
@@ -600,10 +595,10 @@ step_hwsim() {
 		sudo_n ip netns add "$HWSIM_NS_AP"
 		sudo_n ip link set "$ap" netns "$HWSIM_NS_AP"
 		ap_exec ip link set lo up
-		ap_exec ip addr add 192.168.50.1/24 dev "$ap"
+		ap_exec ip addr add 192.168.50.1/24 dev "$ap" || true
 		ap_exec ip link set "$ap" up
 	else
-		sudo -n ip addr add 192.168.50.1/24 dev "$ap"
+		sudo -n ip addr add 192.168.50.1/24 dev "$ap" || true
 		sudo -n ip link set "$ap" up
 	fi
 	sudo -n ip link set "$sta" up
@@ -622,13 +617,13 @@ step_hwsim() {
 			--listen-address=192.168.50.1 --port=0 \
 			--dhcp-range=192.168.50.10,192.168.50.80,12h \
 			--dhcp-option=3,192.168.50.1 \
-			--pid-file="$ARTIFACTS/dnsmasq.pid" \
 			--dhcp-leasefile="$ARTIFACTS/dnsmasq.leases" \
 			>"$ARTIFACTS/dnsmasq.log" 2>&1 &
+		echo $! >"$ARTIFACTS/dnsmasq.pid"
 		sleep 0.3
 	fi
 	start_udp_echo 192.168.50.1 48078 "$ARTIFACTS/udp_echo.pid"
-	start_tcpdump "$sta" "$ARTIFACTS/sae-ota.pcap" ether proto 0x888e or type mgt
+	start_tcpdump "$sta" "$ARTIFACTS/sae-ota.pcap" ether proto 0x888e
 	sleep 1
 	if run_ota "$sta" "flinstone_sae_test" sae "DHCP=in-tree UDP_ECHO=1"; then
 		record PASS hwsim-sae "in-tree fl_net_wifi_connect WPA3-SAE (no OS supplicant)"
@@ -665,9 +660,9 @@ step_hwsim() {
 	fi
 
 	# TWT against hwsim is optional — most hwsim APs are not TWT responders.
-	start_tcpdump "$sta" "$ARTIFACTS/twt-action-frames.pcap" type mgt
-	if run_ota "$sta" "flinstone_wpa2_test" wpa2-psk "TWT=1"; then
-		if grep -q 'SKIP TWT' "$ARTIFACTS/ota-wpa2-psk.log" 2>/dev/null; then
+	start_tcpdump "$sta" "$ARTIFACTS/twt-action-frames.pcap" ether proto 0x888e
+	if run_ota "$sta" "flinstone_wpa2_test" wpa2-psk "TWT=1" twt; then
+		if grep -q 'SKIP TWT' "$ARTIFACTS/ota-twt.log" 2>/dev/null; then
 			record SKIP hwsim-twt "AP did not negotiate TWT (unit coverage is test_p3_wifi)"
 		else
 			record PASS hwsim-twt "TWT setup/teardown on hwsim"

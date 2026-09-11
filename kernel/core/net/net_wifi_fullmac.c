@@ -234,9 +234,9 @@ fl_result_t fl_net_wifi_fullmac_init(const char *ifname)
 
 	(void)fl_net_wifi_nl80211_get_wiphy_caps(g_fullmac.nl, &g_fullmac.phy_he,
 						 &g_fullmac.bands);
-	(void)fl_net_wifi_nl80211_sta_mac(g_fullmac.nl, g_fullmac.sta_mac);
-	(void)fl_net_wifi_fullmac_mgmt_ota_attach(g_fullmac.nl, g_fullmac.sta_mac,
-						  &g_fullmac.phy_he);
+	if (fl_net_wifi_nl80211_sta_mac(g_fullmac.nl, g_fullmac.sta_mac) == FL_RESULT_OK)
+		(void)fl_net_wifi_fullmac_mgmt_ota_attach(g_fullmac.nl, g_fullmac.sta_mac,
+							  &g_fullmac.phy_he);
 
 #if defined(__linux__)
 	{
@@ -315,6 +315,7 @@ fl_result_t fl_net_wifi_fullmac_sta_mac(uint8_t mac_out[6])
 
 	if (!mac_out)
 		return FL_RESULT_INVAL;
+	memset(mac_out, 0, 6u);
 	if (!g_fullmac.up)
 		return FL_RESULT_NOENT;
 	memcpy(mac_out, g_fullmac.sta_mac, 6u);

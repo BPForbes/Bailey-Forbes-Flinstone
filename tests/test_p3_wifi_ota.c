@@ -14,6 +14,7 @@
  * Does not call nmcli, wpa_cli, NetworkManager, or FlinstonePowershell.
  */
 #include "net_wifi_station.h"
+#include "net_wifi_netdev.h"
 #include "net_iface.h"
 #include "net_route.h"
 #include "net_udp.h"
@@ -137,6 +138,15 @@ int main(void)
 		fprintf(stderr, "FAIL test_p3_wifi_ota: state not UP\n");
 		(void)fl_net_wifi_disconnect();
 		return 1;
+	}
+	{
+		uint32_t ip_be = 0;
+
+		if (fl_net_wifi_netdev_ipv4(&ip_be) != FL_RESULT_OK || ip_be == 0u) {
+			fprintf(stderr, "FAIL test_p3_wifi_ota: no DHCP IPv4 on Wi-Fi netdev\n");
+			(void)fl_net_wifi_disconnect();
+			return 1;
+		}
 	}
 	printf("ok #328 fl_net_wifi_connect physical nl80211 (no OS supplicant)\n");
 

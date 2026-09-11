@@ -626,11 +626,29 @@ static uint32_t twt_read_u32_le(const uint8_t *p) {
     return fl_net_get_u32_le(p);
 }
 
+static uint16_t twt_request_type(uint8_t flow_id) {
+    return (uint16_t)(((unsigned)(flow_id & 7u)) << 7);
+}
+
+static uint8_t twt_flow_from_request_type(uint16_t rt) {
+    return (uint8_t)((rt >> 7) & 7u);
+}
+
+static void twt_write_elem(uint8_t *ie, uint8_t flow_id, uint32_t duration_us, uint32_t interval_us)
+{
+    ie[0] = FL_WIFI_ELEM_TWT;
+    ie[1] = FL_WIFI_TWT_ELEM_LEN;
+    ie[2] = 0u; /* Control */
+    fl_net_put_u16_le(ie + 3, twt_request_type(flow_id));
+    twt_write_u32_le(ie + 5, duration_us);
+    twt_write_u32_le(ie + 9, interval_us);
+}
+
 fl_result_t fl_net_wifi_mgmt_build_twt_setup_req(const uint8_t sta_mac[6], const uint8_t bssid[6],
                                                  uint8_t dialog_token,
                                                  const fl_net_wifi_twt_params_t *req,
                                                  uint8_t *out, size_t out_cap, size_t *out_len) {
-    size_t need = FL_WIFI_MGMT_HDR_LEN + 15u;
+    size_t need = FL_WIFI_MGMT_HDR_LEN + 3u + 2u + FL_WIFI_TWT_ELEM_LEN;
 
     if (!sta_mac || !bssid || !req || !out || !out_len)
         return FL_RESULT_INVAL;
@@ -643,12 +661,7 @@ fl_result_t fl_net_wifi_mgmt_build_twt_setup_req(const uint8_t sta_mac[6], const
     out[24] = FL_WIFI_ACTION_CAT_S1G;
     out[25] = FL_WIFI_ACTION_TWT_SETUP;
     out[26] = dialog_token;
-    out[27] = FL_WIFI_ELEM_TWT;
-    out[28] = 8u;
-    out[29] = 0u;
-    out[30] = 0u;
-    twt_write_u32_le(out + 31, req->wake_duration_us);
-    twt_write_u32_le(out + 35, req->wake_interval_us);
+    twt_write_elem(out + 27, req->flow_id, req->wake_duration_us, req->wake_interval_us);
     *out_len = need;
     return FL_RESULT_OK;
 }
@@ -657,7 +670,7 @@ fl_result_t fl_net_wifi_mgmt_build_twt_setup_resp(const uint8_t bssid[6], const 
                                                   uint8_t dialog_token, uint8_t flow_id,
                                                   const fl_net_wifi_twt_params_t *agreed,
                                                   uint8_t *out, size_t out_cap, size_t *out_len) {
-    size_t need = FL_WIFI_MGMT_HDR_LEN + 16u;
+    size_t need = FL_WIFI_MGMT_HDR_LEN + 3u + 2u + FL_WIFI_TWT_ELEM_LEN;
 
     if (!bssid || !sta_mac || !agreed || !out || !out_len)
         return FL_RESULT_INVAL;
@@ -666,14 +679,9 @@ fl_result_t fl_net_wifi_mgmt_build_twt_setup_resp(const uint8_t bssid[6], const 
 
     mgmt_write_hdr(out, FL_WIFI_MGMT_FC_ACTION, sta_mac, bssid, bssid);
     out[24] = FL_WIFI_ACTION_CAT_S1G;
-    out[25] = FL_WIFI_ACTION_TWT_SETUP_RESP;
+    out[25] = FL_WIFI_ACTION_TWT_SETUP;
     out[26] = dialog_token;
-    out[27] = FL_WIFI_ELEM_TWT;
-    out[28] = 9u;
-    out[29] = 0u;
-    out[30] = flow_id;
-    twt_write_u32_le(out + 31, agreed->wake_duration_us);
-    twt_write_u32_le(out + 35, agreed->wake_interval_us);
+    twt_write_elem(out + 27, flow_id, agreed->wake_duration_us, agreed->wake_interval_us);
     *out_len = need;
     return FL_RESULT_OK;
 }
@@ -705,16 +713,16 @@ fl_result_t fl_net_wifi_mgmt_parse_twt_setup_resp(const uint8_t *frame, size_t l
         return FL_RESULT_INVAL;
     if (mgmt_fc(frame) != FL_WIFI_MGMT_FC_ACTION)
         return FL_RESULT_INVAL;
-    if (len < FL_WIFI_MGMT_HDR_LEN + 16u)
+    if (len < FL_WIFI_MGMT_HDR_LEN + 3u + 2u + FL_WIFI_TWT_ELEM_LEN)
         return FL_RESULT_INVAL;
-    if (frame[24] != FL_WIFI_ACTION_CAT_S1G || frame[25] != FL_WIFI_ACTION_TWT_SETUP_RESP)
+    if (frame[24] != FL_WIFI_ACTION_CAT_S1G || frame[25] != FL_WIFI_ACTION_TWT_SETUP)
         return FL_RESULT_INVAL;
-    if (frame[27] != FL_WIFI_ELEM_TWT)
+    if (frame[27] != FL_WIFI_ELEM_TWT || frame[28] != FL_WIFI_TWT_ELEM_LEN)
         return FL_RESULT_INVAL;
 
     memset(agreed_out, 0, sizeof(*agreed_out));
-    agreed_out->flow_id = frame[30];
-    agreed_out->wake_duration_us = twt_read_u32_le(frame + 31);
-    agreed_out->wake_interval_us = twt_read_u32_le(frame + 35);
+    agreed_out->flow_id = twt_flow_from_request_type(fl_net_get_u16_le(frame + 30));
+    agreed_out->wake_duration_us = twt_read_u32_le(frame + 32);
+    agreed_out->wake_interval_us = twt_read_u32_le(frame + 36);
     return FL_RESULT_OK;
 }

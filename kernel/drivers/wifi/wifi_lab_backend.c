@@ -750,6 +750,8 @@ static int mock_setup_twt(wifi_fullmac_t *dev, const wifi_fullmac_twt_setup_t *t
 		return -1;
 	if (wifi_twt_ota_setup(ctx->sta_mac, ctx->ap_bssid, &req, &agreed, &tr) != 0)
 		return -1;
+	if (agreed.flow_id >= 8u)
+		return -1;
 
 	ctx->twt_slots[agreed.flow_id] = *twt;
 	ctx->twt_slots[agreed.flow_id].flow_id = agreed.flow_id;

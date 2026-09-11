@@ -31,9 +31,12 @@
 /** IEEE 802.11 S1G action category (not vendor-specific protected / 126). */
 #define FL_WIFI_ACTION_CAT_S1G 22u
 #define FL_WIFI_ACTION_TWT_SETUP 6u
-#define FL_WIFI_ACTION_TWT_SETUP_RESP 7u
-#define FL_WIFI_ACTION_TWT_TEARDOWN 8u
+/** Same S1G action as setup; TWT element Request Type distinguishes request vs response. */
+#define FL_WIFI_ACTION_TWT_SETUP_RESP 6u
+#define FL_WIFI_ACTION_TWT_TEARDOWN 7u
 #define FL_WIFI_ELEM_TWT 216u
+/** Lab TWT element: Control (1) + Request Type (2) + duration_us (4) + interval_us (4). */
+#define FL_WIFI_TWT_ELEM_LEN 11u
 
 /** IEEE 802.11 status: anti-clogging token required (SAE). */
 #define FL_WIFI_SAE_STATUS_ANTICLOGGING 78u
@@ -147,19 +150,19 @@ fl_result_t fl_net_wifi_mgmt_build_rsne_ie(uint8_t auth_mode, uint8_t *out, size
 fl_result_t fl_net_wifi_mgmt_build_assoc_resp(const uint8_t bssid[6], const uint8_t sta_mac[6],
                                               uint8_t *out, size_t out_cap, size_t *out_len);
 
-/** Build S1G TWT Individual Setup Action frame (category 22, action 6). */
+/** Build S1G TWT Individual Setup Action frame (category 22, action 6 / teardown 7). */
 fl_result_t fl_net_wifi_mgmt_build_twt_setup_req(const uint8_t sta_mac[6], const uint8_t bssid[6],
                                                  uint8_t dialog_token,
                                                  const fl_net_wifi_twt_params_t *req,
                                                  uint8_t *out, size_t out_cap, size_t *out_len);
 
-/** Build S1G TWT Individual Setup Response Action frame (action 7). */
+/** Build S1G TWT Individual Setup Response Action frame (action 6). */
 fl_result_t fl_net_wifi_mgmt_build_twt_setup_resp(const uint8_t bssid[6], const uint8_t sta_mac[6],
                                                   uint8_t dialog_token, uint8_t flow_id,
                                                   const fl_net_wifi_twt_params_t *agreed,
                                                   uint8_t *out, size_t out_cap, size_t *out_len);
 
-/** Build S1G TWT Individual Teardown Action frame (action 8). */
+/** Build S1G TWT Individual Teardown Action frame (action 7). */
 fl_result_t fl_net_wifi_mgmt_build_twt_teardown(const uint8_t sta_mac[6], const uint8_t bssid[6],
                                                 uint8_t dialog_token, uint8_t flow_id,
                                                 uint8_t *out, size_t out_cap, size_t *out_len);

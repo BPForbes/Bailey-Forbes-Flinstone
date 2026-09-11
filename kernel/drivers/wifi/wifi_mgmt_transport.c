@@ -168,9 +168,11 @@ static void mock_ap_handle_sae_auth(wifi_mgmt_transport_mock_ctx_t *ctx, const u
 							   sizeof(commit_body),
 							   &commit_len) != FL_RESULT_OK)
 			return;
-		if (fl_net_wifi_sae_dragonfly_rx_commit(ctx->sae_ap, body, body_len) != FL_RESULT_OK)
+		if (fl_net_wifi_sae_dragonfly_rx_commit(ctx->sae_ap, body, body_len,
+							has_clog ? sizeof(k_clog_token) : 0u) !=
+		    FL_RESULT_OK)
 			return;
-		if (fl_net_wifi_mgmt_build_sae_auth(ap->bssid, sta, 2u, commit_body, commit_len, resp,
+		if (fl_net_wifi_mgmt_build_sae_auth(ap->bssid, sta, 1u, commit_body, commit_len, resp,
 						    sizeof(resp), &resp_len) != FL_RESULT_OK)
 			return;
 		ctx->sae_ap_commit_sent = 1u;
@@ -226,7 +228,7 @@ static void mock_ap_handle_mgmt(wifi_mgmt_transport_mock_ctx_t *ctx, const uint8
 				.wake_interval_us = 100000u,
 			};
 
-			flow_id = ctx->twt_flow_next++;
+			flow_id = (uint8_t)(ctx->twt_flow_next++ & 7u);
 			agreed.flow_id = flow_id;
 			if (fl_net_wifi_mgmt_build_twt_setup_resp(ap->bssid, sta, frame[26], flow_id,
 								  &agreed, resp, sizeof(resp),
@@ -334,7 +336,6 @@ int wifi_mgmt_transport_mock_init(wifi_mgmt_transport_t *tr, void *ctx_storage,
 	if (!tr || !ctx_storage || !cfg || !cfg->ap || !cfg->sta_mac)
 		return -1;
 	ctx = (wifi_mgmt_transport_mock_ctx_t *)ctx_storage;
-	mock_sae_reset(ctx);
 	memset(ctx, 0, sizeof(*ctx));
 	ctx->cfg = *cfg;
 	tr->ctx = ctx;

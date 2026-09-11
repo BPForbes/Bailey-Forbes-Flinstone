@@ -840,7 +840,6 @@ static void nl80211_remember_bss_freq(fl_net_wifi_nl80211_t *nl, const uint8_t b
 		return;
 	if (memcmp(bssid, zero_bssid, 6u) == 0)
 		return;
-	nl->mgmt_freq_mhz = freq;
 	for (i = 0; i < nl->bss_freq_count; i++) {
 		if (memcmp(nl->bss_freq[i].bssid, bssid, 6u) == 0) {
 			nl->bss_freq[i].freq_mhz = freq;

@@ -214,6 +214,7 @@ jobs:
       - uses: actions/checkout@93cb6efe18208431cddfb8368fd83d5badbf9bfd # v5
         with:
           fetch-depth: 0
+          persist-credentials: false
 
       - name: Sync version checkout for build
         uses: ./.github/actions/sync-version-checkout
@@ -235,9 +236,12 @@ jobs:
 
       - name: Upload #328 artifacts (pcap/logs)
         if: always()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         with:
           name: issue-328-wifi-validation
-          path: artifacts/issue-328
+          path: |
+            artifacts/issue-328/**
+            !artifacts/issue-328/**/*.conf
+            !artifacts/issue-328/**/hostapd-*.log
           if-no-files-found: ignore
 

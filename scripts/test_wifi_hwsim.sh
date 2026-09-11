@@ -17,7 +17,7 @@ if ! sudo -n true 2>/dev/null; then
 	exit 0
 fi
 
-if ! lsmod | grep -q mac80211_hwsim; then
+if ! lsmod | awk '$1 == "mac80211_hwsim" { found=1 } END { exit !found }'; then
 	if ! sudo modprobe mac80211_hwsim radios=2 2>/dev/null; then
 		echo "test_wifi_hwsim: skipped (mac80211_hwsim module unavailable)" >&2
 		exit 0
@@ -32,10 +32,5 @@ if [[ -z "${WLAN_STA:-}" ]]; then
 fi
 
 echo "[hwsim] AP iface=${WLAN_AP:-none} STA iface=${WLAN_STA}"
-
-make -s test_wifi_connect_ota
-./tests/test_wifi_connect_ota
-
-echo "[hwsim] mock OTA connect tests passed; hwsim radios present for manual nl80211 OTA"
-echo "  export FL_NET_WIFI_IFACE=${WLAN_STA} FL_NET_WIFI_NL80211=1 for physical-path probes"
-echo "  full #328 playbook (hostapd SAE/WPA2, firewall, UART): ./scripts/validate_issue_328.sh --yes"
+echo "[hwsim] running #328 hostapd SAE/WPA2 playbook (validate_issue_328 step_hwsim)"
+exec "$ROOT/scripts/validate_issue_328.sh" --yes --skip-uart --skip-software "$@"

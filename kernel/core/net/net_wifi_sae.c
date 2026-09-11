@@ -8,6 +8,7 @@
 #include <stdlib.h>
 
 #include <openssl/bn.h>
+#include <openssl/crypto.h>
 #include <openssl/ec.h>
 #include <openssl/evp.h>
 #include <openssl/hmac.h>
@@ -21,6 +22,9 @@
 #define SAE_KCK_LEN   32u
 #define SAE_PMK_LEN   32u
 #define SAE_CONFIRM_LEN 32u
+/* k=40 per 802.11-2020. The loop always runs to completion and keeps the first
+ * valid PWE; BN_mod_sqrt success still affects per-iteration work. SAE-H2E is
+ * the constant-time follow-up. */
 #define SAE_PWE_MAX_LOOP 40u
 
 struct fl_net_wifi_sae_dragonfly_ctx {
@@ -159,7 +163,10 @@ static fl_result_t sae_derive_pwe_ecc(fl_net_wifi_sae_dragonfly_ctx_t *ctx)
     BIGNUM *x = NULL;
     BIGNUM *y2 = NULL;
     BIGNUM *y = NULL;
+    BIGNUM *first_x = NULL;
+    BIGNUM *first_y = NULL;
     BN_CTX *bnctx = NULL;
+    int have_pwe = 0;
     fl_result_t rc = FL_RESULT_ERR;
 
     if (!ctx || !ctx->group || !ctx->prime || !ctx->a || !ctx->b || !ctx->pwe)
@@ -187,13 +194,17 @@ static fl_result_t sae_derive_pwe_ecc(fl_net_wifi_sae_dragonfly_ctx_t *ctx)
     x = BN_new();
     y2 = BN_new();
     y = BN_new();
-    if (!bnctx || !x || !y2 || !y)
+    first_x = BN_new();
+    first_y = BN_new();
+    if (!bnctx || !x || !y2 || !y || !first_x || !first_y)
         goto done;
 
     asm_mem_copy(hash_data, ctx->password, pass_len);
 
-    /* Counter starts at 1. First valid point is the PWE. */
+    /* Always run k iterations; retain the first valid PWE. */
     for (counter = 1u; counter <= SAE_PWE_MAX_LOOP; counter++) {
+        int point_ok = 0;
+
         hash_data[pass_len] = counter;
         mac_len = 0u;
         if (HMAC(EVP_sha256(), addr_key, (int)sizeof(addr_key), hash_data, pass_len + 1u,
@@ -229,18 +240,26 @@ static fl_result_t sae_derive_pwe_ecc(fl_net_wifi_sae_dragonfly_ctx_t *ctx)
                 goto done;
         }
 
-        if (!EC_POINT_set_affine_coordinates(ctx->group, ctx->pwe, x, y, bnctx))
-            continue;
-        if (EC_POINT_is_on_curve(ctx->group, ctx->pwe, bnctx) != 1)
-            continue;
-        rc = FL_RESULT_OK;
-        goto done;
+        if (EC_POINT_set_affine_coordinates(ctx->group, ctx->pwe, x, y, bnctx) &&
+            EC_POINT_is_on_curve(ctx->group, ctx->pwe, bnctx) == 1)
+            point_ok = 1;
+        if (point_ok && !have_pwe) {
+            if (!BN_copy(first_x, x) || !BN_copy(first_y, y))
+                goto done;
+            have_pwe = 1;
+        }
     }
+    if (have_pwe &&
+        EC_POINT_set_affine_coordinates(ctx->group, ctx->pwe, first_x, first_y, bnctx) &&
+        EC_POINT_is_on_curve(ctx->group, ctx->pwe, bnctx) == 1)
+        rc = FL_RESULT_OK;
 
 done:
     BN_clear_free(x);
     BN_clear_free(y2);
     BN_clear_free(y);
+    BN_clear_free(first_x);
+    BN_clear_free(first_y);
     BN_CTX_free(bnctx);
     fl_net_wifi_crypto_memzero(pwd_seed, sizeof(pwd_seed));
     fl_net_wifi_crypto_memzero(pwd_value_buf, sizeof(pwd_value_buf));
@@ -254,7 +273,6 @@ static fl_result_t sae_prepare_commit(fl_net_wifi_sae_dragonfly_ctx_t *ctx)
 {
     uint8_t rand_buf[SAE_ORDER_LEN];
     uint8_t mask_buf[SAE_ORDER_LEN];
-    BIGNUM *tmp = NULL;
     EC_POINT *masked = NULL;
     BN_CTX *bnctx = NULL;
     fl_result_t rc = FL_RESULT_ERR;
@@ -264,9 +282,8 @@ static fl_result_t sae_prepare_commit(fl_net_wifi_sae_dragonfly_ctx_t *ctx)
         return FL_RESULT_INVAL;
 
     bnctx = BN_CTX_new();
-    tmp = BN_new();
     masked = EC_POINT_new(ctx->group);
-    if (!bnctx || !tmp || !masked)
+    if (!bnctx || !masked)
         goto done;
 
     if (fl_net_wifi_crypto_random(rand_buf, sizeof(rand_buf)) != FL_RESULT_OK ||
@@ -277,9 +294,11 @@ static fl_result_t sae_prepare_commit(fl_net_wifi_sae_dragonfly_ctx_t *ctx)
         sae_bin_to_bn_be(ctx->own_mask, mask_buf, sizeof(mask_buf)) != FL_RESULT_OK)
         goto done;
 
-    BN_mod(ctx->own_rand, ctx->own_rand, ctx->order, bnctx);
-    BN_mod(ctx->own_mask, ctx->own_mask, ctx->order, bnctx);
-    if (BN_is_zero(ctx->own_rand) || BN_is_zero(ctx->own_mask))
+    if (!BN_mod(ctx->own_rand, ctx->own_rand, ctx->order, bnctx) ||
+        !BN_mod(ctx->own_mask, ctx->own_mask, ctx->order, bnctx))
+        goto done;
+    if (BN_is_zero(ctx->own_rand) || BN_is_one(ctx->own_rand) ||
+        BN_is_zero(ctx->own_mask) || BN_is_one(ctx->own_mask))
         goto done;
 
     if (!BN_mod_add(ctx->own_scalar, ctx->own_rand, ctx->own_mask, ctx->order, bnctx))
@@ -297,7 +316,6 @@ static fl_result_t sae_prepare_commit(fl_net_wifi_sae_dragonfly_ctx_t *ctx)
 done:
     fl_net_wifi_crypto_memzero(rand_buf, sizeof(rand_buf));
     fl_net_wifi_crypto_memzero(mask_buf, sizeof(mask_buf));
-    BN_clear_free(tmp);
     EC_POINT_clear_free(masked);
     BN_CTX_free(bnctx);
     return rc;
@@ -363,27 +381,29 @@ done:
 }
 
 static fl_result_t sae_parse_commit_body(fl_net_wifi_sae_dragonfly_ctx_t *ctx, const uint8_t *body,
-                                         size_t body_len, size_t *commit_len_out)
+                                         size_t body_len, size_t anticlogging_len,
+                                         size_t *commit_len_out)
 {
     uint16_t group;
     const uint8_t *scalar_be;
     const uint8_t *element_be;
-    size_t min_len = 2u + SAE_SCALAR_WIRE_LEN + SAE_ELEMENT_WIRE_LEN;
-    size_t token_len;
+    size_t need = 2u + anticlogging_len + SAE_SCALAR_WIRE_LEN + SAE_ELEMENT_WIRE_LEN;
 
-    if (!ctx || !body || body_len < min_len)
+    if (!ctx || !body || body_len < need)
         return FL_RESULT_INVAL;
 
     group = fl_net_get_u16_le(body);
     if (group != FL_NET_WIFI_SAE_GROUP_19)
         return FL_RESULT_ERR;
 
-    token_len = body_len - min_len;
-    scalar_be = body + 2u + token_len;
+    scalar_be = body + 2u + anticlogging_len;
     element_be = scalar_be + SAE_SCALAR_WIRE_LEN;
 
     BN_clear(ctx->peer_scalar);
     if (sae_bin_to_bn_be(ctx->peer_scalar, scalar_be, SAE_SCALAR_WIRE_LEN) != FL_RESULT_OK)
+        return FL_RESULT_ERR;
+    if (BN_is_zero(ctx->peer_scalar) || BN_is_one(ctx->peer_scalar) ||
+        BN_cmp(ctx->peer_scalar, ctx->order) >= 0)
         return FL_RESULT_ERR;
 
     {
@@ -399,7 +419,8 @@ static fl_result_t sae_parse_commit_body(fl_net_wifi_sae_dragonfly_ctx_t *ctx, c
         }
         if (sae_bin_to_bn_be(x, element_be, SAE_PRIME_LEN) != FL_RESULT_OK ||
             sae_bin_to_bn_be(y, element_be + SAE_PRIME_LEN, SAE_PRIME_LEN) != FL_RESULT_OK ||
-            !EC_POINT_set_affine_coordinates(ctx->group, ctx->peer_element, x, y, bnctx)) {
+            !EC_POINT_set_affine_coordinates(ctx->group, ctx->peer_element, x, y, bnctx) ||
+            EC_POINT_is_at_infinity(ctx->group, ctx->peer_element)) {
             BN_clear_free(x);
             BN_clear_free(y);
             BN_CTX_free(bnctx);
@@ -411,7 +432,7 @@ static fl_result_t sae_parse_commit_body(fl_net_wifi_sae_dragonfly_ctx_t *ctx, c
     }
 
     if (commit_len_out)
-        *commit_len_out = body_len;
+        *commit_len_out = need;
     ctx->peer_commit_seen = 1;
     return FL_RESULT_OK;
 }
@@ -667,18 +688,19 @@ fl_result_t fl_net_wifi_sae_dragonfly_build_commit(fl_net_wifi_sae_dragonfly_ctx
 }
 
 fl_result_t fl_net_wifi_sae_dragonfly_rx_commit(fl_net_wifi_sae_dragonfly_ctx_t *ctx,
-                                              const uint8_t *body, size_t body_len)
+                                              const uint8_t *body, size_t body_len,
+                                              size_t anticlogging_len)
 {
     uint8_t k_buf[32];
+    fl_result_t rc;
 
     if (!ctx || !body)
         return FL_RESULT_INVAL;
-    if (sae_parse_commit_body(ctx, body, body_len, NULL) != FL_RESULT_OK)
+    if (sae_parse_commit_body(ctx, body, body_len, anticlogging_len, NULL) != FL_RESULT_OK)
         return FL_RESULT_ERR;
-    if (sae_derive_k(ctx, k_buf) != FL_RESULT_OK)
-        return FL_RESULT_ERR;
+    rc = sae_derive_k(ctx, k_buf);
     fl_net_wifi_crypto_memzero(k_buf, sizeof(k_buf));
-    return FL_RESULT_OK;
+    return rc;
 }
 
 fl_result_t fl_net_wifi_sae_dragonfly_build_confirm(fl_net_wifi_sae_dragonfly_ctx_t *ctx,
@@ -735,7 +757,7 @@ fl_result_t fl_net_wifi_sae_dragonfly_verify_confirm(fl_net_wifi_sae_dragonfly_c
     if (sae_build_confirm_value_for_peer(ctx, peer_send, scalar_peer, scalar_own, element_peer,
                                          element_own, expected) != FL_RESULT_OK)
         goto done;
-    if (memcmp(expected, body + 2u, SAE_CONFIRM_LEN) != 0)
+    if (CRYPTO_memcmp(expected, body + 2u, SAE_CONFIRM_LEN) != 0)
         goto done;
 
     asm_mem_copy(pmk_out, ctx->pmk, SAE_PMK_LEN);
@@ -768,6 +790,33 @@ fl_result_t fl_net_wifi_sae_dragonfly_selftest(void)
     size_t ap_confirm_len = 0;
     fl_result_t rc = FL_RESULT_ERR;
 
+    {
+        static const uint8_t kdf_key[32] = {
+            0x00, 0x01, 0x02, 0x03, 0x04, 0x05, 0x06, 0x07, 0x08, 0x09, 0x0a, 0x0b,
+            0x0c, 0x0d, 0x0e, 0x0f, 0x10, 0x11, 0x12, 0x13, 0x14, 0x15, 0x16, 0x17,
+            0x18, 0x19, 0x1a, 0x1b, 0x1c, 0x1d, 0x1e, 0x1f
+        };
+        static const uint8_t kdf_ctx[32] = {
+            0x11, 0x11, 0x11, 0x11, 0x11, 0x11, 0x11, 0x11, 0x11, 0x11, 0x11, 0x11,
+            0x11, 0x11, 0x11, 0x11, 0x11, 0x11, 0x11, 0x11, 0x11, 0x11, 0x11, 0x11,
+            0x11, 0x11, 0x11, 0x11, 0x11, 0x11, 0x11, 0x11
+        };
+        static const uint8_t kdf_expect[32] = {
+            0x90, 0xc5, 0xe2, 0xd5, 0x5f, 0x70, 0x2b, 0xb5, 0x62, 0x13, 0x03, 0x30,
+            0xa3, 0x2c, 0x7d, 0xf6, 0x6f, 0x8e, 0x3e, 0x1c, 0x9d, 0x45, 0xb1, 0x19,
+            0xd3, 0x7f, 0xc5, 0x87, 0xaa, 0x41, 0x0f, 0x39
+        };
+        uint8_t kdf_out[32];
+
+        if (fl_net_wifi_crypto_ieee80211_kdf_sha256(kdf_key, sizeof(kdf_key),
+                                                    "SAE Hunting and Pecking", kdf_ctx,
+                                                    sizeof(kdf_ctx), kdf_out,
+                                                    sizeof(kdf_out)) != FL_RESULT_OK ||
+            CRYPTO_memcmp(kdf_out, kdf_expect, sizeof(kdf_expect)) != 0)
+            goto done;
+        fl_net_wifi_crypto_memzero(kdf_out, sizeof(kdf_out));
+    }
+
     if (fl_net_wifi_sae_dragonfly_ctx_create(&sta) != FL_RESULT_OK ||
         fl_net_wifi_sae_dragonfly_ctx_create(&ap) != FL_RESULT_OK)
         goto done;
@@ -784,9 +833,26 @@ fl_result_t fl_net_wifi_sae_dragonfly_selftest(void)
     if (fl_net_wifi_sae_dragonfly_build_commit(ap, NULL, 0u, ap_commit, sizeof(ap_commit),
                                                &ap_commit_len) != FL_RESULT_OK)
         goto done;
+    if (sta_commit_len != FL_NET_WIFI_SAE_COMMIT_BODY_LEN ||
+        ap_commit_len != FL_NET_WIFI_SAE_COMMIT_BODY_LEN ||
+        fl_net_get_u16_le(sta_commit) != FL_NET_WIFI_SAE_GROUP_19 ||
+        fl_net_get_u16_le(ap_commit) != FL_NET_WIFI_SAE_GROUP_19)
+        goto done;
+    {
+        static const uint8_t tok[4] = { 't', 'o', 'k', 'n' };
+        uint8_t with_tok[128];
+        size_t with_tok_len = 0;
 
-    if (fl_net_wifi_sae_dragonfly_rx_commit(sta, ap_commit, ap_commit_len) != FL_RESULT_OK ||
-        fl_net_wifi_sae_dragonfly_rx_commit(ap, sta_commit, sta_commit_len) != FL_RESULT_OK)
+        if (fl_net_wifi_sae_dragonfly_build_commit(sta, tok, sizeof(tok), with_tok,
+                                                   sizeof(with_tok), &with_tok_len) !=
+                FL_RESULT_OK ||
+            with_tok_len != FL_NET_WIFI_SAE_COMMIT_BODY_LEN + sizeof(tok) ||
+            memcmp(with_tok + 2u, tok, sizeof(tok)) != 0)
+            goto done;
+    }
+
+    if (fl_net_wifi_sae_dragonfly_rx_commit(sta, ap_commit, ap_commit_len, 0u) != FL_RESULT_OK ||
+        fl_net_wifi_sae_dragonfly_rx_commit(ap, sta_commit, sta_commit_len, 0u) != FL_RESULT_OK)
         goto done;
 
     if (fl_net_wifi_sae_dragonfly_build_confirm(sta, sta_confirm, sizeof(sta_confirm),

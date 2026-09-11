@@ -63,6 +63,7 @@ static int init_transport(wifi_network_t *ap, wifi_mgmt_transport_t *tr,
                           wifi_mgmt_transport_mock_ctx_t *storage, const char *passphrase) {
     wifi_mgmt_transport_mock_cfg_t cfg = {.ap = ap, .sta_mac = k_sta, .passphrase = passphrase};
 
+    memset(storage, 0, sizeof(*storage));
     return wifi_mgmt_transport_mock_init(tr, storage, &cfg);
 }
 

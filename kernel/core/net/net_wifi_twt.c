@@ -62,6 +62,7 @@ static void twt_recompute_next_wake(void)
     uint64_t now = twt_now_us();
     uint64_t soonest = 0u;
     int have = 0;
+    int in_sp = 0;
 
     for (id = 0; id < 8u; id++) {
         uint64_t next;
@@ -69,14 +70,16 @@ static void twt_recompute_next_wake(void)
         if ((s_active_mask & (1u << id)) == 0u)
             continue;
         next = twt_flow_next_sp_abs(&s_active_twt[id], now);
-        if (next == 0u)
+        if (next == 0u) {
+            in_sp = 1;
             continue;
+        }
         if (!have || next < soonest) {
             soonest = next;
             have = 1;
         }
     }
-    s_next_wake_abs_us = have ? soonest : 0u;
+    s_next_wake_abs_us = in_sp ? now : (have ? soonest : 0u);
 }
 
 fl_result_t fl_net_wifi_twt_negotiate(const fl_net_wifi_twt_params_t *req,

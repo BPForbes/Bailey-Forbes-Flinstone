@@ -218,11 +218,17 @@ fl_result_t wifi_driver_backend_init(void)
 	if (wifi_backend_try_uart_coprocessor() == FL_RESULT_OK)
 		return FL_RESULT_OK;
 
-	if (wifi_backend_try_nl80211_fullmac() == FL_RESULT_OK)
-		return FL_RESULT_OK;
+	{
+		const char *mock = getenv("FL_WIFI_80211AX_MOCK");
+		int want_mock = mock && mock[0] && strcmp(mock, "0") != 0;
 
-	if (wifi_backend_try_ax_mock() == FL_RESULT_OK)
-		return FL_RESULT_OK;
+		if (!want_mock && wifi_backend_try_nl80211_fullmac() == FL_RESULT_OK)
+			return FL_RESULT_OK;
+		if (wifi_backend_try_ax_mock() == FL_RESULT_OK)
+			return FL_RESULT_OK;
+		if (want_mock && wifi_backend_try_nl80211_fullmac() == FL_RESULT_OK)
+			return FL_RESULT_OK;
+	}
 
 	if (wifi_backend_try_fullmac_hw() == FL_RESULT_OK)
 		return FL_RESULT_OK;

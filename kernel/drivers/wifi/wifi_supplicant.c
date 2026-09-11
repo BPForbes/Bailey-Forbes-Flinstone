@@ -245,8 +245,13 @@ int wifi_supplicant_start_sae_handshake(wifi_supplicant_t *supp)
 		fl_net_wifi_sae_dragonfly_ctx_destroy(supp->sae_dragonfly);
 		supp->sae_dragonfly = NULL;
 	}
-	if (!supp->ssid[0] || !supp->password[0] || supp->sta_addr[0] == 0u)
-		return -1;
+	{
+		static const uint8_t zero_mac[6] = {0};
+
+		if (!supp->ssid[0] || !supp->password[0] ||
+		    memcmp(supp->sta_addr, zero_mac, 6u) == 0)
+			return -1;
+	}
 
 	if (fl_net_wifi_sae_dragonfly_ctx_create(&supp->sae_dragonfly) != FL_RESULT_OK)
 		return -1;
@@ -288,7 +293,8 @@ int wifi_supplicant_rx_sae_peer_commit(wifi_supplicant_t *supp, const uint8_t *c
 		return -1;
 
 	SUPPLICANT_LOG("Processing peer SAE Commit [%zu bytes]", len);
-	if (fl_net_wifi_sae_dragonfly_rx_commit(supp->sae_dragonfly, commit, len) != FL_RESULT_OK) {
+	if (fl_net_wifi_sae_dragonfly_rx_commit(supp->sae_dragonfly, commit, len, 0u) !=
+	    FL_RESULT_OK) {
 		supp->state = WIFI_SUPP_STATE_ERROR;
 		supp->handshake_errors++;
 		return -1;

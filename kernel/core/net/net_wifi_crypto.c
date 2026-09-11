@@ -204,14 +204,13 @@ fl_result_t fl_net_wifi_crypto_ieee80211_kdf_sha256(const uint8_t *key, size_t k
         return FL_RESULT_INVAL;
 
     label_len = strlen(label);
-    if (2u + label_len + 1u + context_len + 2u > sizeof(buf))
+    if (2u + label_len + context_len + 2u > sizeof(buf))
         return FL_RESULT_INVAL;
 
     bits = (uint16_t)(out_len * 8u);
     pos = 2u;
     memcpy(buf + pos, label, label_len);
     pos += label_len;
-    buf[pos++] = 0u;
     if (context_len > 0u) {
         memcpy(buf + pos, context, context_len);
         pos += context_len;

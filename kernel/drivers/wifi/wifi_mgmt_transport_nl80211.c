@@ -7,6 +7,9 @@
 
 #include "net_wifi_fullmac.h"
 #include "wifi_nl80211.h"
+#include "wifi_platform.h"
+
+#define WIFI_OTA_ETH_P_EAPOL 0x888eu
 
 typedef struct {
 	fl_net_wifi_nl80211_t *nl;
@@ -56,19 +59,34 @@ static int nl80211_tr_rx_data(wifi_mgmt_transport_t *tr, uint8_t *frame, size_t 
 {
 	fl_net_driver_t *drv;
 	fl_net_frame_mut_t out;
+	uint32_t start_ms = 0;
+	uint32_t now_ms = 0;
+	uint32_t deadline;
 
 	(void)tr;
-	(void)timeout_ms;
 	drv = fl_net_wifi_fullmac_driver();
 	if (!drv || !drv->recv || !frame || !len_out)
 		return -1;
-	out.data = frame;
-	out.cap = cap;
-	out.len = 0u;
-	if (drv->recv(drv, &out) != FL_RESULT_OK)
+	if (wifi_platform_get_ms(&start_ms) != FL_RESULT_OK)
 		return -1;
-	*len_out = out.len;
-	return 0;
+	deadline = start_ms + (timeout_ms ? timeout_ms : 5000u);
+	for (;;) {
+		uint16_t ethertype;
+
+		out.data = frame;
+		out.cap = cap;
+		out.len = 0u;
+		if (drv->recv(drv, &out) == FL_RESULT_OK && out.len >= 14u) {
+			ethertype = (uint16_t)(((uint16_t)frame[12] << 8) | (uint16_t)frame[13]);
+			if (ethertype == WIFI_OTA_ETH_P_EAPOL) {
+				*len_out = out.len;
+				return 0;
+			}
+		}
+		if (wifi_platform_get_ms(&now_ms) != FL_RESULT_OK || now_ms >= deadline)
+			return -1;
+		wifi_platform_sleep_ms(1);
+	}
 }
 
 int wifi_mgmt_transport_nl80211_init(wifi_mgmt_transport_t *tr, fl_net_wifi_nl80211_t *nl)
