@@ -20,6 +20,7 @@
 #if defined(__linux__)
 #include <linux/if.h>
 #include <linux/if_tun.h>
+#include <linux/sockios.h>
 #endif
 
 static uint64_t s_tap_tx;
@@ -27,9 +28,47 @@ static uint64_t s_tap_rx;
 
 #if defined(__linux__)
 
+static int tap_errno_acces(int err) {
+    return err == EACCES || err == EPERM;
+}
+
+/* Linux TAP write() returns EIO until IFF_UP (WSL and recent host kernels). */
+static fl_result_t fl_net_tap_if_up(const char *ifname) {
+    struct ifreq ifr;
+    int sock;
+
+    if (!ifname || !ifname[0])
+        return FL_RESULT_INVAL;
+
+    sock = socket(AF_INET, SOCK_DGRAM, 0);
+    if (sock < 0)
+        return tap_errno_acces(errno) ? FL_RESULT_ACCES : FL_RESULT_ERR;
+
+    memset(&ifr, 0, sizeof(ifr));
+    snprintf(ifr.ifr_name, IFNAMSIZ, "%s", ifname);
+    if (ioctl(sock, SIOCGIFFLAGS, &ifr) < 0) {
+        int err = errno;
+        close(sock);
+        return tap_errno_acces(err) ? FL_RESULT_ACCES : FL_RESULT_ERR;
+    }
+    if (ifr.ifr_flags & IFF_UP) {
+        close(sock);
+        return FL_RESULT_OK;
+    }
+    ifr.ifr_flags = (short)(ifr.ifr_flags | IFF_UP);
+    if (ioctl(sock, SIOCSIFFLAGS, &ifr) < 0) {
+        int err = errno;
+        close(sock);
+        return tap_errno_acces(err) ? FL_RESULT_ACCES : FL_RESULT_ERR;
+    }
+    close(sock);
+    return FL_RESULT_OK;
+}
+
 fl_result_t fl_net_tap_open(const char *ifname_hint, int *out_fd, char ifname_out[16]) {
     struct ifreq ifr;
     int fd;
+    fl_result_t up_rc;
 
     if (!out_fd || !ifname_out)
         return FL_RESULT_INVAL;
@@ -39,18 +78,25 @@ fl_result_t fl_net_tap_open(const char *ifname_hint, int *out_fd, char ifname_ou
 
     fd = open("/dev/net/tun", O_RDWR | O_CLOEXEC);
     if (fd < 0)
-        return (errno == EACCES || errno == EPERM) ? FL_RESULT_ACCES : FL_RESULT_ERR;
+        return tap_errno_acces(errno) ? FL_RESULT_ACCES : FL_RESULT_ERR;
 
     memset(&ifr, 0, sizeof(ifr));
     ifr.ifr_flags = (short)(IFF_TAP | IFF_NO_PI);
     if (ifname_hint && ifname_hint[0])
         snprintf(ifr.ifr_name, IFNAMSIZ, "%s", ifname_hint);
     else
-        snprintf(ifr.ifr_name, IFNAMSIZ, "fl%d", 0);
+        snprintf(ifr.ifr_name, IFNAMSIZ, "%s", FL_NET_TAP_IFNAME_PATTERN);
 
     if (ioctl(fd, TUNSETIFF, &ifr) < 0) {
+        int err = errno;
         close(fd);
-        return FL_RESULT_ERR;
+        return tap_errno_acces(err) ? FL_RESULT_ACCES : FL_RESULT_ERR;
+    }
+
+    up_rc = fl_net_tap_if_up(ifr.ifr_name);
+    if (up_rc != FL_RESULT_OK) {
+        close(fd);
+        return up_rc;
     }
 
     snprintf(ifname_out, 16, "%s", ifr.ifr_name);
@@ -82,7 +128,7 @@ fl_result_t fl_net_tap_driver_send(fl_net_driver_t *drv, const fl_net_frame_view
 
     n = write(fd, frame->data, frame->len);
     if (n < 0)
-        return FL_RESULT_ERR;
+        return tap_errno_acces(errno) ? FL_RESULT_ACCES : FL_RESULT_ERR;
     if ((size_t)n != frame->len)
         return FL_RESULT_ERR;
 

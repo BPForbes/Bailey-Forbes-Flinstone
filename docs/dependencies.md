@@ -23,6 +23,10 @@ Import the repo as a Replit App with **`.replit`** and **`replit.nix`** (see [do
 |----------------|---------|
 | **`dosfstools`** (`dosfsck`, `mkfs.fat`) | **Not linked at build time.** Useful to validate or compare host FAT32 super-floppy images produced by the shell (same layout expectations as common FAT32 tools). Example: `dosfsck -n drive.img` |
 | `file(1)` | Quick magic-string checks on disk images |
+| `iproute2`, `tcpdump`, `tmux` | `make test_netns_pcap` and server demos |
+| `iw`, `hostapd`, `kmod`, `dnsmasq-base` | Optional #328 `mac80211_hwsim` OTA (`./scripts/validate_issue_328.sh --yes`) |
+| `iptables` / `nftables` | Optional #328 Linux firewall rules (UDP 67/68/echo). WSL images often omit them. |
+| `linux-modules-extra-$(uname -r)` | Optional `mac80211_hwsim` on Ubuntu/Debian **host** kernels. **Not** published for Microsoft WSL kernels (`*-microsoft-standard-WSL2`); the #328 validator skips that apt package on WSL. |
 
 ## In-repo dependency shortcut
 

@@ -15,6 +15,8 @@
 #include "net_wifi_netdev.h"
 #include "wifi_driver_backend.h"
 #include "wifi_lab_backend.h"
+#include "wifi_connect_ota.h"
+#include "wifi_mgmt_transport.h"
 #include "wifi_supplicant.h"
 #include "net_endian.h"
 
@@ -174,13 +176,13 @@ static int scope04_mgmt(void)
     static const uint8_t sta[6] = {0x02, 0, 0, 0, 0, 0x01};
     static const uint8_t bssid[6] = {0x02, 0xaa, 0, 0, 0, 0x01};
 
-    if (fl_net_wifi_mgmt_build_probe_req("MockAx6", frame, sizeof(frame), &len) !=
+    if (fl_net_wifi_mgmt_build_probe_req("MockAx6", sta, frame, sizeof(frame), &len) !=
         FL_RESULT_OK)
         FAIL279("scope-4", "probe");
     if (fl_net_wifi_mgmt_build_auth_req(sta, bssid, frame, sizeof(frame), &len) !=
         FL_RESULT_OK)
         FAIL279("scope-4", "auth");
-    if (fl_net_wifi_mgmt_build_assoc_req("MockAx6", bssid, sta, FL_WIFI_AUTH_WPA3_SAE,
+    if (fl_net_wifi_mgmt_build_assoc_req("MockAx6", bssid, sta, FL_WIFI_AUTH_WPA3_SAE, NULL,
                                          frame, sizeof(frame), &len) != FL_RESULT_OK)
         FAIL279("scope-4", "assoc");
     OK279("scope-4 net_wifi_mgmt Probe/Auth/Assoc + HE IE");
@@ -404,23 +406,34 @@ static int scope19_authz(void)
 
 static int accept20_wpa3_mock_ota(void)
 {
-    wifi_supplicant_t supp;
+    wifi_mgmt_transport_t tr;
+    wifi_mgmt_transport_mock_ctx_t storage;
+    wifi_mgmt_transport_mock_cfg_t cfg;
+    wifi_network_t ap;
     static const uint8_t bssid[6] = {0x02, 0xaa, 0, 0, 0, 0x01};
     static const uint8_t sta[6] = {0x02, 0, 0, 0, 0, 0x55};
     fl_net_wifi_cred_t cred;
 
-    if (wifi_supplicant_init(&supp, bssid) != 0)
+    memset(&ap, 0, sizeof(ap));
+    memcpy(ap.bssid, bssid, 6);
+    ap.auth_mode = WIFI_AUTH_WPA3_SAE;
+    strncpy(ap.ssid, "MockAx6", sizeof(ap.ssid) - 1u);
+    memset(&cred, 0, sizeof(cred));
+    strncpy(cred.ssid, ap.ssid, sizeof(cred.ssid) - 1u);
+    strncpy(cred.passphrase, MOCK_PASS, sizeof(cred.passphrase) - 1u);
+    cred.auth_mode = FL_WIFI_AUTH_WPA3_SAE;
+    memset(&cfg, 0, sizeof(cfg));
+    cfg.ap = &ap;
+    cfg.sta_mac = sta;
+    cfg.passphrase = MOCK_PASS;
+    memset(&storage, 0, sizeof(storage));
+    if (wifi_mgmt_transport_mock_init(&tr, &storage, &cfg) != 0)
         FAIL279("accept-20", "supplicant init");
-    if (wifi_supplicant_set_credentials(&supp, "MockAx6", MOCK_PASS) != 0 ||
-        wifi_supplicant_set_sta_addr(&supp, sta) != 0)
-        FAIL279("accept-20", "supplicant creds");
-    if (wifi_supplicant_start_sae_handshake(&supp) != 0 ||
-        wifi_supplicant_process_sae_commit(&supp, (const uint8_t *)"commit", 6) != 0 ||
-        wifi_supplicant_process_sae_confirm(&supp, (const uint8_t *)"confirm", 7) != 0)
+    if (wifi_connect_ota_run(&cred, &ap, sta, &tr, NULL) != 0) {
+        wifi_mgmt_transport_mock_deinit(&tr);
         FAIL279("accept-20", "SAE OTA mock");
-    if (wifi_supplicant_get_state(&supp) != WIFI_SUPP_STATE_AUTHENTICATED)
-        FAIL279("accept-20", "SAE state");
-    (void)wifi_supplicant_deinit(&supp);
+    }
+    wifi_mgmt_transport_mock_deinit(&tr);
 
     mock279_env();
     STATION_INIT();

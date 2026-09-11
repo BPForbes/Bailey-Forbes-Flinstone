@@ -25,6 +25,7 @@
 #include "net_macvlan.h"
 #include "net_wifi_host_linux.h"
 #include "net_wifi_netdev.h"
+#include "net_wifi_station.h"
 #include "fl_platform.h"
 #include "threadpool.h"
 
@@ -335,6 +336,8 @@ static int wsl_portproxy_will_try(const fl_net_endpoint_t *bind_ep,
 static int wsl_in_tree_lab_bind(const fl_net_endpoint_t *bind_ep) {
     if (!bind_ep || bind_ep->family != FL_NET_ADDR_FAMILY_V4)
         return 0;
+    if (fl_net_wifi_station_physical_backend())
+        return 0;
     if (bind_ep->addr.v4_be != 0u) {
         if (fl_net_ipv4_is_loopback(bind_ep->addr.v4_be))
             return fl_net_wifi_netdev_is_up() && !fl_net_wifi_host_linux_opted_in();
@@ -363,9 +366,38 @@ static const char *host_listen_ip_for_wsl(const fl_net_endpoint_t *ep,
         fl_net_ipv4_format_addr(ep->addr.v4_be, buf, cap);
         return buf;
     }
+    {
+        const char *wip = fl_net_wifi_host_linux_windows_ipv4();
+        if (wip && wip[0]) {
+            strncpy(buf, wip, cap - 1u);
+            buf[cap - 1u] = '\0';
+            return buf;
+        }
+    }
+    if (fl_net_iface_suggest_ipv4(NULL, buf, cap))
+        return buf;
     strncpy(buf, "0.0.0.0", cap - 1u);
     buf[cap - 1u] = '\0';
     return buf;
+}
+
+static void host_prefer_single_wifi_ep(fl_net_endpoint_t *ep) {
+    const char *wip;
+    uint32_t win_be = 0u;
+    char display[32];
+
+    if (!ep || ep->family != FL_NET_ADDR_FAMILY_V4 || ep->addr.v4_be != 0u ||
+        ep->port_host == 0u)
+        return;
+    wip = fl_net_wifi_host_linux_windows_ipv4();
+    if (wip && wip[0] && fl_net_ipv4_parse_literal(wip, &win_be) && win_be != 0u) {
+        ep->addr.v4_be = win_be;
+        return;
+    }
+    if (fl_net_iface_suggest_ipv4(NULL, display, sizeof(display))) {
+        if (fl_net_ipv4_parse_literal(display, &win_be) && win_be != 0u)
+            ep->addr.v4_be = win_be;
+    }
 }
 
 static void host_print_wsl_lan_hint(const char *listen_ip, uint16_t port) {
@@ -1107,6 +1139,8 @@ static int verb_host(int argc, char **argv) {
         pthread_mutex_unlock(&session_mutex);
         return 1;
     }
+    if (!(argc >= 3 && argv[2] && strcmp(argv[2], "-all") == 0))
+        host_prefer_single_wifi_ep(&ep);
     bind_ep = ep;
 
     /* Prefer fl0 macvlan IP when user did not specify a particular IP. */

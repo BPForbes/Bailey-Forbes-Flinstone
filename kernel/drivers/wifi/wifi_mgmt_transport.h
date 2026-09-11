@@ -18,6 +18,7 @@
 typedef struct {
 	const wifi_network_t *ap;
 	const uint8_t *sta_mac;
+	const char *passphrase;
 } wifi_mgmt_transport_mock_cfg_t;
 
 typedef struct {
@@ -29,6 +30,10 @@ typedef struct {
 	size_t data_rx_len[WIFI_OTA_DATA_Q];
 	unsigned data_rx_count;
 	uint8_t eapol_rx_pending;
+	uint8_t sae_clog_sent;
+	uint8_t sae_ap_commit_sent;
+	uint8_t twt_flow_next;
+	struct fl_net_wifi_sae_dragonfly_ctx *sae_ap;
 } wifi_mgmt_transport_mock_ctx_t;
 
 typedef struct wifi_mgmt_transport wifi_mgmt_transport_t;
@@ -45,6 +50,7 @@ struct wifi_mgmt_transport {
 
 int wifi_mgmt_transport_mock_init(wifi_mgmt_transport_t *tr, void *ctx_storage,
 				  const wifi_mgmt_transport_mock_cfg_t *cfg);
+void wifi_mgmt_transport_mock_deinit(wifi_mgmt_transport_t *tr);
 void wifi_mgmt_transport_mock_reset(wifi_mgmt_transport_t *tr);
 
 /** Size of caller-provided storage for wifi_mgmt_transport_mock_init. */

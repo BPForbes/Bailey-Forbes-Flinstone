@@ -19,6 +19,14 @@ global asm_net_htonl_be32
 global asm_net_ntohl_be32
 global asm_net_htonll_be64
 global asm_net_ntohll_be64
+global asm_net_store_le16
+global asm_net_load_le16
+global asm_net_store_be16
+global asm_net_load_be16
+global asm_net_store_le32
+global asm_net_load_le32
+global asm_net_store_be32
+global asm_net_load_be32
 global asm_net_tcp_build_syn
 global asm_net_tcp_build_rst_ack
 global asm_net_icmp_echo_request_build
@@ -101,6 +109,44 @@ asm_net_htonll_be64:
 asm_net_ntohll_be64:
     mov rax, rdi
     bswap rax
+    ret
+
+asm_net_store_le16:
+    mov [rdi], si
+    ret
+
+asm_net_load_le16:
+    movzx eax, word [rdi]
+    ret
+
+asm_net_store_be16:
+    movzx eax, si
+    rol ax, 8
+    mov [rdi], ax
+    ret
+
+asm_net_load_be16:
+    movzx eax, word [rdi]
+    rol ax, 8
+    ret
+
+asm_net_store_le32:
+    mov [rdi], esi
+    ret
+
+asm_net_load_le32:
+    mov eax, [rdi]
+    ret
+
+asm_net_store_be32:
+    mov eax, esi
+    bswap eax
+    mov [rdi], eax
+    ret
+
+asm_net_load_be32:
+    mov eax, [rdi]
+    bswap eax
     ret
 
 asm_net_tcp_build_syn:

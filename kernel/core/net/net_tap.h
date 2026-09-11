@@ -8,6 +8,15 @@
 extern "C" {
 #endif
 
+/**
+ * Default TAP name pattern for **TUNSETIFF** when **ifname_hint** is empty.
+ * Kernel expands **%d**. Do not use **fl0** — that name is the macvlan LAN iface.
+ */
+#define FL_NET_TAP_IFNAME_PATTERN "fltap%d"
+
+_Static_assert(sizeof(FL_NET_TAP_IFNAME_PATTERN) <= 16,
+               "TAP name pattern must fit IFNAMSIZ");
+
 /** **P3-3** TAP **send** / **recv** driver ops (requires open TAP fd in **impl**). */
 fl_result_t fl_net_tap_driver_send(fl_net_driver_t *drv, const fl_net_frame_view_t *frame);
 fl_result_t fl_net_tap_driver_recv(fl_net_driver_t *drv, fl_net_frame_mut_t *out);
