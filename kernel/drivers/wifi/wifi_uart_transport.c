@@ -304,7 +304,10 @@ int wifi_uart_send_command(wifi_uart_context_t *ctx, const char *cmd)
 {
 	if (!ctx || !cmd)
 		return -1;
-	return wifi_uart_send_raw(ctx, (const uint8_t *)cmd, strlen(cmd));
+	/* 0 on success: callers (init/scan/join) treat any non-zero as failure.
+	 * wifi_uart_send_raw returns the byte count, which must not leak through.
+	 */
+	return wifi_uart_send_raw(ctx, (const uint8_t *)cmd, strlen(cmd)) < 0 ? -1 : 0;
 }
 
 int wifi_uart_read_response(wifi_uart_context_t *ctx, char *buffer, size_t buf_len,
@@ -339,11 +342,10 @@ int wifi_uart_read_response(wifi_uart_context_t *ctx, char *buffer, size_t buf_l
 
 		if (chunk_len > 0) {
 			total_read += chunk_len;
-			if (strstr(&buffer[total_read > 10 ? total_read - 10 : 0], "\r\nOK\r\n") ||
-			    strstr(&buffer[total_read > 10 ? total_read - 10 : 0],
-				   "\r\nERROR\r\n") ||
-			    strstr(&buffer[total_read > 10 ? total_read - 10 : 0],
-				   "\r\nFAIL\r\n"))
+			buffer[total_read] = '\0';
+			if (strstr(buffer, "\r\nOK\r\n") || strstr(buffer, "\r\nERROR\r\n") ||
+			    strstr(buffer, "\r\nFAIL\r\n") || strstr(buffer, "OK\r\n") ||
+			    strstr(buffer, "ERROR\r\n"))
 				break;
 		} else if (ret != 0) {
 			wifi_platform_sleep_ms(10);

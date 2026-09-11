@@ -74,7 +74,7 @@ int wifi_uart_receive_raw(wifi_uart_context_t *ctx, uint8_t *buffer, size_t buf_
 			  size_t *out_len, uint32_t timeout_ms);
 
 /* AT Command interface */
-int wifi_uart_send_command(wifi_uart_context_t *ctx, const char *cmd);
+int wifi_uart_send_command(wifi_uart_context_t *ctx, const char *cmd); /* 0 ok, -1 fail */
 int wifi_uart_read_response(wifi_uart_context_t *ctx, char *buffer, size_t buf_len,
 			    uint32_t timeout_ms);
 int wifi_uart_expect_response(wifi_uart_context_t *ctx, const char *expected,
