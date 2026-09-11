@@ -367,7 +367,7 @@ static int test_wpa2_connect_lab(void) {
     ASSERT(saw_wpa2);
     memset(&cred, 0, sizeof(cred));
     strncpy(cred.ssid, "LabWpa2", sizeof(cred.ssid) - 1u);
-    strncpy(cred.passphrase, "secret", sizeof(cred.passphrase) - 1u);
+    strncpy(cred.passphrase, "labwpa2-secret", sizeof(cred.passphrase) - 1u);
     cred.auth_mode = FL_WIFI_AUTH_WPA2_PSK;
     ASSERT(fl_net_wifi_connect(&cred, 0u) == FL_RESULT_OK);
     ASSERT(fl_net_wifi_state() == FL_WIFI_STATE_UP);
@@ -402,7 +402,7 @@ static int test_wpa2_dhcp_udp_twt_in_tree(void) {
     ASSERT(fl_net_wifi_scan(FL_WIFI_BAND_ANY, 1000u) == FL_RESULT_OK);
     memset(&cred, 0, sizeof(cred));
     strncpy(cred.ssid, "LabWpa2", sizeof(cred.ssid) - 1u);
-    strncpy(cred.passphrase, "secret", sizeof(cred.passphrase) - 1u);
+    strncpy(cred.passphrase, "labwpa2-secret", sizeof(cred.passphrase) - 1u);
     cred.auth_mode = FL_WIFI_AUTH_WPA2_PSK;
     ASSERT(fl_net_wifi_connect(&cred, 5000u) == FL_RESULT_OK);
     ASSERT(fl_net_wifi_state() == FL_WIFI_STATE_UP);

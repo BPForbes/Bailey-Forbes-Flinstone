@@ -410,8 +410,13 @@ fl_result_t wifi_driver_connect(const fl_net_wifi_cred_t *cred,
 		return wifi_int_to_result(wifi_fullmac_station_connect(s_fullmac, cred));
 
 	if (s_backend_type == WIFI_BACKEND_NL80211) {
-		if (fl_net_wifi_fullmac_is_lab())
-			return wifi_driver_lab_connect(cred, NULL, NULL);
+		if (fl_net_wifi_fullmac_is_lab()) {
+			fl_net_wifi_scan_entry_t ap;
+			fl_net_wifi_he_cap_t he;
+
+			/* wifi_lab_connect requires non-NULL AP/HE out-params. */
+			return wifi_driver_lab_connect(cred, &ap, &he);
+		}
 		return wifi_driver_nl80211_connect(cred, timeout_ms);
 	}
 
