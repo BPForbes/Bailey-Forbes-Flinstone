@@ -618,30 +618,70 @@ fl_result_t fl_net_wifi_mgmt_build_assoc_resp(const uint8_t bssid[6], const uint
     return FL_RESULT_OK;
 }
 
-static void twt_write_u32_le(uint8_t *p, uint32_t v) {
-    fl_net_put_u32_le(p, v);
-}
+#define FL_WIFI_TWT_SETUP_CMD_REQUEST 0u
+#define FL_WIFI_TWT_SETUP_CMD_ACCEPT 4u
 
-static uint32_t twt_read_u32_le(const uint8_t *p) {
-    return fl_net_get_u32_le(p);
-}
-
-static uint16_t twt_request_type(uint8_t flow_id) {
-    return (uint16_t)(((unsigned)(flow_id & 7u)) << 7);
-}
-
-static uint8_t twt_flow_from_request_type(uint16_t rt) {
-    return (uint8_t)((rt >> 7) & 7u);
-}
-
-static void twt_write_elem(uint8_t *ie, uint8_t flow_id, uint32_t duration_us, uint32_t interval_us)
+static uint8_t twt_duration_units(uint32_t duration_us)
 {
+    uint32_t units =
+        (duration_us + (FL_WIFI_TWT_WAKE_DUR_UNIT_US / 2u)) / FL_WIFI_TWT_WAKE_DUR_UNIT_US;
+    if (units < 1u)
+        units = 1u;
+    if (units > 255u)
+        units = 255u;
+    return (uint8_t)units;
+}
+
+static void twt_interval_to_mant_exp(uint32_t interval_us, uint16_t *mant, uint8_t *exp)
+{
+    uint64_t v = interval_us;
+    uint8_t e = 0u;
+
+    while (v > 0xFFFFu && e < 31u) {
+        v >>= 1;
+        e++;
+    }
+    if (v < 1u)
+        v = 1u;
+    *mant = (uint16_t)v;
+    *exp = e;
+}
+
+static uint16_t twt_encode_request_type(const fl_net_wifi_twt_params_t *p, int is_request,
+                                        uint8_t exp)
+{
+    uint16_t rt = 0u;
+    uint8_t cmd = is_request ? (uint8_t)FL_WIFI_TWT_SETUP_CMD_REQUEST
+                             : (uint8_t)FL_WIFI_TWT_SETUP_CMD_ACCEPT;
+
+    if (is_request)
+        rt |= 1u;
+    rt |= (uint16_t)((cmd & 7u) << 1);
+    if (p->trigger_enabled)
+        rt |= (uint16_t)(1u << 4);
+    if (p->implicit)
+        rt |= (uint16_t)(1u << 5);
+    if (!p->announced)
+        rt |= (uint16_t)(1u << 6);
+    rt |= (uint16_t)((p->flow_id & 7u) << 7);
+    rt |= (uint16_t)((exp & 0x1fu) << 10);
+    return rt;
+}
+
+static void twt_write_elem(uint8_t *ie, const fl_net_wifi_twt_params_t *p, int is_request)
+{
+    uint16_t mant;
+    uint8_t exp;
+
+    twt_interval_to_mant_exp(p->wake_interval_us, &mant, &exp);
     ie[0] = FL_WIFI_ELEM_TWT;
     ie[1] = FL_WIFI_TWT_ELEM_LEN;
-    ie[2] = 0u; /* Control */
-    fl_net_put_u16_le(ie + 3, twt_request_type(flow_id));
-    twt_write_u32_le(ie + 5, duration_us);
-    twt_write_u32_le(ie + 9, interval_us);
+    ie[2] = 0u; /* Individual negotiation, 256 µs wake-duration unit */
+    fl_net_put_u16_le(ie + 3, twt_encode_request_type(p, is_request, exp));
+    fl_net_put_u64_le(ie + 5, p->twt_target_us);
+    ie[13] = twt_duration_units(p->wake_duration_us);
+    fl_net_put_u16_le(ie + 14, mant);
+    ie[16] = 0u; /* TWT Channel */
 }
 
 fl_result_t fl_net_wifi_mgmt_build_twt_setup_req(const uint8_t sta_mac[6], const uint8_t bssid[6],
@@ -661,7 +701,7 @@ fl_result_t fl_net_wifi_mgmt_build_twt_setup_req(const uint8_t sta_mac[6], const
     out[24] = FL_WIFI_ACTION_CAT_S1G;
     out[25] = FL_WIFI_ACTION_TWT_SETUP;
     out[26] = dialog_token;
-    twt_write_elem(out + 27, req->flow_id, req->wake_duration_us, req->wake_interval_us);
+    twt_write_elem(out + 27, req, 1);
     *out_len = need;
     return FL_RESULT_OK;
 }
@@ -681,7 +721,12 @@ fl_result_t fl_net_wifi_mgmt_build_twt_setup_resp(const uint8_t bssid[6], const 
     out[24] = FL_WIFI_ACTION_CAT_S1G;
     out[25] = FL_WIFI_ACTION_TWT_SETUP;
     out[26] = dialog_token;
-    twt_write_elem(out + 27, flow_id, agreed->wake_duration_us, agreed->wake_interval_us);
+    {
+        fl_net_wifi_twt_params_t wire = *agreed;
+
+        wire.flow_id = flow_id;
+        twt_write_elem(out + 27, &wire, 0);
+    }
     *out_len = need;
     return FL_RESULT_OK;
 }
@@ -719,10 +764,27 @@ fl_result_t fl_net_wifi_mgmt_parse_twt_setup_resp(const uint8_t *frame, size_t l
         return FL_RESULT_INVAL;
     if (frame[27] != FL_WIFI_ELEM_TWT || frame[28] != FL_WIFI_TWT_ELEM_LEN)
         return FL_RESULT_INVAL;
+    /* Control B2–B3: Negotiation Type must be Individual (0). */
+    if (((frame[29] >> 2) & 0x03u) != 0u)
+        return FL_RESULT_INVAL;
 
-    memset(agreed_out, 0, sizeof(*agreed_out));
-    agreed_out->flow_id = twt_flow_from_request_type(fl_net_get_u16_le(frame + 30));
-    agreed_out->wake_duration_us = twt_read_u32_le(frame + 32);
-    agreed_out->wake_interval_us = twt_read_u32_le(frame + 36);
+    {
+        uint16_t rt = fl_net_get_u16_le(frame + 30);
+        uint8_t exp = (uint8_t)((rt >> 10) & 0x1fu);
+        uint16_t mant = fl_net_get_u16_le(frame + 41);
+        uint32_t unit_us =
+            (frame[29] & 0x20u) != 0u ? 1024u : (uint32_t)FL_WIFI_TWT_WAKE_DUR_UNIT_US;
+        uint64_t interval;
+
+        memset(agreed_out, 0, sizeof(*agreed_out));
+        agreed_out->flow_id = (uint8_t)((rt >> 7) & 7u);
+        agreed_out->trigger_enabled = (uint8_t)((rt >> 4) & 1u);
+        agreed_out->implicit = (uint8_t)((rt >> 5) & 1u);
+        agreed_out->announced = (uint8_t)(((rt >> 6) & 1u) == 0u);
+        agreed_out->twt_target_us = fl_net_get_u64_le(frame + 32);
+        agreed_out->wake_duration_us = (uint32_t)frame[40] * unit_us;
+        interval = (uint64_t)mant << exp;
+        agreed_out->wake_interval_us = interval > 0xffffffffull ? 0xffffffffu : (uint32_t)interval;
+    }
     return FL_RESULT_OK;
 }

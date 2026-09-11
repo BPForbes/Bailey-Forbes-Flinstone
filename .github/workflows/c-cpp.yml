@@ -244,4 +244,3 @@ jobs:
             !artifacts/issue-328/**/*.conf
             !artifacts/issue-328/**/hostapd-*.log
           if-no-files-found: ignore
-

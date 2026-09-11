@@ -174,6 +174,41 @@ static int test_mgmt_probe_assoc(void) {
     return 0;
 }
 
+static int test_twt_ieee_individual_element(void) {
+    uint8_t frame[128];
+    size_t len = 0;
+    fl_net_wifi_twt_params_t req = {
+        .twt_target_us = 0x0102030405060708ull,
+        .wake_duration_us = 8192u,
+        .wake_interval_us = 100000u,
+        .flow_id = 3u,
+        .implicit = 1u,
+        .announced = 1u,
+        .trigger_enabled = 1u,
+    };
+    fl_net_wifi_twt_params_t got = {0};
+    static const uint8_t sta[6] = {0x02, 0x00, 0x00, 0x00, 0x00, 0x01};
+    static const uint8_t bssid[6] = {0x02, 0x11, 0x22, 0x33, 0x44, 0x55};
+
+    ASSERT(fl_net_wifi_mgmt_build_twt_setup_req(sta, bssid, 1u, &req, frame, sizeof(frame),
+                                                &len) == FL_RESULT_OK);
+    ASSERT(len == FL_WIFI_MGMT_HDR_LEN + 3u + 2u + FL_WIFI_TWT_ELEM_LEN);
+    ASSERT(frame[27] == FL_WIFI_ELEM_TWT);
+    ASSERT(frame[28] == FL_WIFI_TWT_ELEM_LEN);
+    ASSERT(frame[29] == 0u);
+    ASSERT(frame[40] == 32u);
+    ASSERT(frame[43] == 0u);
+    ASSERT(fl_net_wifi_mgmt_parse_twt_setup_resp(frame, len, &got) == FL_RESULT_OK);
+    ASSERT(got.flow_id == 3u);
+    ASSERT(got.wake_duration_us == 8192u);
+    ASSERT(got.wake_interval_us == 100000u);
+    ASSERT(got.twt_target_us == 0x0102030405060708ull);
+    ASSERT(got.implicit == 1u);
+    ASSERT(got.announced == 1u);
+    ASSERT(got.trigger_enabled == 1u);
+    return 0;
+}
+
 static int test_twt_mock(void) {
     fl_net_wifi_twt_params_t req = {.wake_duration_us = 8000,
                                     .wake_interval_us = 100000,
@@ -405,6 +440,8 @@ int main(void) {
     if (test_sae_commit_token_before_scalar() != 0)
         return 1;
     if (test_mgmt_probe_assoc() != 0)
+        return 1;
+    if (test_twt_ieee_individual_element() != 0)
         return 1;
     if (test_twt_mock() != 0)
         return 1;

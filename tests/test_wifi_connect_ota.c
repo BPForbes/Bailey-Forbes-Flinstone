@@ -129,7 +129,8 @@ static int test_twt_ota_setup_teardown(void) {
     ASSERT(init_transport(&ap, &tr, &storage, "mock-secret") == 0);
     ASSERT(wifi_twt_ota_setup(k_sta, k_bssid, &req, &agreed, &tr) == 0);
     ASSERT(agreed.flow_id < 8u);
-    ASSERT(agreed.wake_duration_us == 8000u);
+    /* 8000 µs encodes as 31 × 256 µs IEEE wake-duration units. */
+    ASSERT(agreed.wake_duration_us == 31u * 256u);
     ASSERT(wifi_twt_ota_teardown(k_sta, k_bssid, agreed.flow_id, &tr) == 0);
     wifi_mgmt_transport_mock_deinit(&tr);
     printf("ok #328 twt-ota-setup-teardown\n");

@@ -74,6 +74,14 @@ fl_result_t fl_net_wifi_sae_dragonfly_verify_confirm(fl_net_wifi_sae_dragonfly_c
                                                      const uint8_t *body, size_t body_len,
                                                      uint8_t pmk_out[FL_NET_WIFI_PMK_LEN]);
 
+/**
+ * Test helper: prepare Commit from caller-supplied rand/mask (big-endian
+ * 32-byte integers in (2, r-1)). Used for independent wire-format KATs.
+ */
+fl_result_t fl_net_wifi_sae_dragonfly_prepare_commit_with_secrets(
+    fl_net_wifi_sae_dragonfly_ctx_t *ctx, const uint8_t rand_be[32],
+    const uint8_t mask_be[32]);
+
 /** Round-trip STA+AP Dragonfly exchange self-test (RFC 7664 group 19). */
 fl_result_t fl_net_wifi_sae_dragonfly_selftest(void);
 

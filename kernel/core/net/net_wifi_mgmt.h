@@ -35,8 +35,12 @@
 #define FL_WIFI_ACTION_TWT_SETUP_RESP 6u
 #define FL_WIFI_ACTION_TWT_TEARDOWN 7u
 #define FL_WIFI_ELEM_TWT 216u
-/** Lab TWT element: Control (1) + Request Type (2) + duration_us (4) + interval_us (4). */
-#define FL_WIFI_TWT_ELEM_LEN 11u
+/** IEEE 802.11 Individual TWT Parameter Set (no grouping, no NDP paging):
+ *  Control (1) + Request Type (2) + Target Wake Time (8) +
+ *  Nominal Minimum TWT Wake Duration (1) + TWT Wake Interval Mantissa (2) +
+ *  TWT Channel (1). Lab/mock OTA uses this layout; production RF is unverified. */
+#define FL_WIFI_TWT_ELEM_LEN 15u
+#define FL_WIFI_TWT_WAKE_DUR_UNIT_US 256u
 
 /** IEEE 802.11 status: anti-clogging token required (SAE). */
 #define FL_WIFI_SAE_STATUS_ANTICLOGGING 78u

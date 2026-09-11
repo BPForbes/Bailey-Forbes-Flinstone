@@ -224,10 +224,11 @@ static void mock_ap_handle_mgmt(wifi_mgmt_transport_mock_ctx_t *ctx, const uint8
 
 		if (frame[24] == FL_WIFI_ACTION_CAT_S1G && action == FL_WIFI_ACTION_TWT_SETUP) {
 			fl_net_wifi_twt_params_t agreed = {
-				.wake_duration_us = 8000u,
+				.wake_duration_us = 8192u,
 				.wake_interval_us = 100000u,
 			};
 
+			(void)fl_net_wifi_mgmt_parse_twt_setup_resp(frame, len, &agreed);
 			flow_id = (uint8_t)(ctx->twt_flow_next++ & 7u);
 			agreed.flow_id = flow_id;
 			if (fl_net_wifi_mgmt_build_twt_setup_resp(ap->bssid, sta, frame[26], flow_id,

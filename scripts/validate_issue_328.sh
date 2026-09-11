@@ -219,7 +219,8 @@ install_deps() {
 }
 
 apply_linux_sysctl_firewall() {
-	local applied=0
+	local fw_fail=0
+	local have_fw=0
 	if [[ "$SKIP_FIREWALL" == "1" ]]; then
 		record SKIP firewall-linux "--skip-firewall"
 		return 0
@@ -234,29 +235,53 @@ apply_linux_sysctl_firewall() {
 		record SKIP firewall-linux "passwordless sudo required to apply sysctl/iptables"
 		return 0
 	fi
+	# bridge-nf keys are optional on some hosts; ip_forward is required.
 	sudo -n sysctl -w net.bridge.bridge-nf-call-iptables=0 >/dev/null 2>&1 || true
 	sudo -n sysctl -w net.bridge.bridge-nf-call-ip6tables=0 >/dev/null 2>&1 || true
-	sudo -n sysctl -w net.ipv4.ip_forward=1 >/dev/null 2>&1 || true
+	if ! sudo -n sysctl -w net.ipv4.ip_forward=1 >/dev/null 2>&1; then
+		if ! sysctl -n net.ipv4.ip_forward 2>/dev/null | grep -qx '1'; then
+			fw_fail=1
+		fi
+	fi
 	if have_cmd nft; then
-		sudo -n nft list table inet flinstone328 >/dev/null 2>&1 || \
-			sudo -n nft add table inet flinstone328 2>/dev/null || true
-		sudo -n nft add chain inet flinstone328 input '{ type filter hook input priority -50; policy accept; }' 2>/dev/null || true
-		sudo -n nft add rule inet flinstone328 input udp dport '{ 67, 68, 48077, 48078 }' accept 2>/dev/null || true
-		applied=1
+		have_fw=1
+		if ! sudo -n nft list table inet flinstone328 >/dev/null 2>&1; then
+			sudo -n nft add table inet flinstone328 || fw_fail=1
+		fi
+		if [[ "$fw_fail" == "0" ]]; then
+			sudo -n nft add chain inet flinstone328 input \
+				'{ type filter hook input priority -50; policy accept; }' \
+				2>/dev/null || true
+			if ! sudo -n nft list chain inet flinstone328 input 2>/dev/null | \
+				grep -q 'udp dport'; then
+				sudo -n nft add rule inet flinstone328 input \
+					udp dport '{ 67, 68, 48077, 48078 }' accept || fw_fail=1
+			fi
+			if ! sudo -n nft list chain inet flinstone328 input 2>/dev/null | \
+				grep -q 'udp dport'; then
+				fw_fail=1
+			fi
+		fi
 	elif have_cmd iptables; then
+		have_fw=1
 		for port in 67 68 48077 48078; do
-			sudo -n iptables -C INPUT -p udp --dport "$port" -j ACCEPT 2>/dev/null || \
-				sudo -n iptables -I INPUT -p udp --dport "$port" -j ACCEPT || true
-			sudo -n iptables -C OUTPUT -p udp --sport "$port" -j ACCEPT 2>/dev/null || \
-				sudo -n iptables -I OUTPUT -p udp --sport "$port" -j ACCEPT || true
+			if ! sudo -n iptables -C INPUT -p udp --dport "$port" -j ACCEPT 2>/dev/null; then
+				sudo -n iptables -I INPUT -p udp --dport "$port" -j ACCEPT || fw_fail=1
+			fi
+			if ! sudo -n iptables -C OUTPUT -p udp --sport "$port" -j ACCEPT 2>/dev/null; then
+				sudo -n iptables -I OUTPUT -p udp --sport "$port" -j ACCEPT || fw_fail=1
+			fi
 		done
-		applied=1
 	fi
-	if [[ "$applied" == "1" ]]; then
-		record PASS firewall-linux "sysctl + UDP 67/68/echo accept (idempotent)"
-	else
+	if [[ "$have_fw" != "1" ]]; then
 		record SKIP firewall-linux "no nft/iptables available"
+		return 0
 	fi
+	if [[ "$fw_fail" != "0" ]]; then
+		record FAIL firewall-linux "sysctl or nft/iptables apply failed"
+		return 0
+	fi
+	record PASS firewall-linux "sysctl + UDP 67/68/echo accept (idempotent)"
 }
 
 apply_wsl_windows_firewall() {
@@ -462,14 +487,57 @@ kill_pidfile() {
 start_tcpdump() {
 	local iface="$1"
 	local pcap="$2"
+	local pidfile="$ARTIFACTS/tcpdump.pid"
+	local logfile="$ARTIFACTS/tcpdump.log"
 	shift 2
 	if ! have_cmd tcpdump; then
 		return 0
 	fi
-	sudo -n tcpdump -i "$iface" -U -e -vvv -w "$pcap" "$@" \
-		>"$ARTIFACTS/tcpdump.log" 2>&1 &
-	sudo -n pgrep -n -f "tcpdump -i $iface" >"$ARTIFACTS/tcpdump.pid" 2>/dev/null || \
-		echo $! >"$ARTIFACTS/tcpdump.pid"
+	# Launch tcpdump inside a root shell so $! is the capture process, not sudo.
+	sudo -n env IFACE="$iface" PCAP="$pcap" PIDFILE="$pidfile" LOGFILE="$logfile" \
+		bash -c 'tcpdump -i "$IFACE" -U -e -vvv -w "$PCAP" "$@" >"$LOGFILE" 2>&1 & echo $! >"$PIDFILE"' \
+		bash "$@"
+	if [[ ! -s "$pidfile" ]]; then
+		return 1
+	fi
+	if ! sudo -n kill -0 "$(cat "$pidfile")" 2>/dev/null && \
+		! kill -0 "$(cat "$pidfile")" 2>/dev/null; then
+		return 1
+	fi
+	return 0
+}
+
+start_dnsmasq() {
+	local ap="$1"
+	local pidfile="$ARTIFACTS/dnsmasq.pid"
+	local logfile="$ARTIFACTS/dnsmasq.log"
+	local leasefile="$ARTIFACTS/dnsmasq.leases"
+	# Same-shell $! is dnsmasq. --pid-file is the fallback if the daemon rewrites it.
+	ap_exec env AP="$ap" PIDFILE="$pidfile" LOGFILE="$logfile" LEASEFILE="$leasefile" bash -c '
+		dnsmasq --no-daemon --pid-file="$PIDFILE" --interface="$AP" --bind-interfaces \
+			--listen-address=192.168.50.1 --port=0 \
+			--dhcp-range=192.168.50.10,192.168.50.80,12h \
+			--dhcp-option=3,192.168.50.1 \
+			--dhcp-leasefile="$LEASEFILE" \
+			>"$LOGFILE" 2>&1 &
+		child=$!
+		sleep 0.15
+		if [[ ! -s "$PIDFILE" ]]; then
+			echo "$child" >"$PIDFILE"
+		fi
+		kill -0 "$(cat "$PIDFILE")" 2>/dev/null
+	'
+}
+
+assign_ap_ipv4() {
+	local ap="$1"
+	if ap_exec ip addr add 192.168.50.1/24 dev "$ap"; then
+		return 0
+	fi
+	if ap_exec ip -4 addr show dev "$ap" | grep -q 'inet 192.168.50.1/24'; then
+		return 0
+	fi
+	return 1
 }
 
 decode_pcap() {
@@ -519,15 +587,18 @@ hwsim_cleanup() {
 	fi
 }
 
+# run_ota <sta> <ssid> <auth> <tag> <nameref-to-caller-built-env-array>
 run_ota() {
 	local sta="$1"
 	local ssid="$2"
 	local auth="$3"
-	local extra="${4:-}"
-	local tag="${5:-$auth}"
+	local tag="${4:-$auth}"
 	local logf="$ARTIFACTS/ota-${tag}.log"
 	local -a extra_env=()
-	read -r -a extra_env <<<"$extra"
+	if [[ -n "${5:-}" ]]; then
+		local -n _ota_extra_env=$5
+		extra_env=("${_ota_extra_env[@]}")
+	fi
 	if [[ "$DRY_RUN" == "1" ]]; then
 		log "DRY-RUN: make test_p3_wifi_ota IFACE=$sta SSID=$ssid AUTH=$auth ${extra_env[*]}"
 		return 0
@@ -595,11 +666,16 @@ step_hwsim() {
 		sudo_n ip netns add "$HWSIM_NS_AP"
 		sudo_n ip link set "$ap" netns "$HWSIM_NS_AP"
 		ap_exec ip link set lo up
-		ap_exec ip addr add 192.168.50.1/24 dev "$ap" || true
 		ap_exec ip link set "$ap" up
 	else
-		sudo -n ip addr add 192.168.50.1/24 dev "$ap" || true
 		sudo -n ip link set "$ap" up
+	fi
+	if ! assign_ap_ipv4 "$ap"; then
+		record FAIL hwsim-ap-addr "failed to assign 192.168.50.1/24 on $ap"
+		HWSIM_FAIL=1
+		hwsim_cleanup
+		trap - EXIT
+		return 0
 	fi
 	sudo -n ip link set "$sta" up
 
@@ -613,19 +689,17 @@ step_hwsim() {
 		return 0
 	fi
 	if have_cmd dnsmasq; then
-		ap_exec dnsmasq --no-daemon --interface="$ap" --bind-interfaces \
-			--listen-address=192.168.50.1 --port=0 \
-			--dhcp-range=192.168.50.10,192.168.50.80,12h \
-			--dhcp-option=3,192.168.50.1 \
-			--dhcp-leasefile="$ARTIFACTS/dnsmasq.leases" \
-			>"$ARTIFACTS/dnsmasq.log" 2>&1 &
-		echo $! >"$ARTIFACTS/dnsmasq.pid"
-		sleep 0.3
+		if ! start_dnsmasq "$ap"; then
+			record FAIL hwsim-dnsmasq "failed to start dnsmasq on $ap (see dnsmasq.log)"
+			HWSIM_FAIL=1
+		fi
 	fi
 	start_udp_echo 192.168.50.1 48078 "$ARTIFACTS/udp_echo.pid"
-	start_tcpdump "$sta" "$ARTIFACTS/sae-ota.pcap" ether proto 0x888e
+	start_tcpdump "$sta" "$ARTIFACTS/sae-ota.pcap" ether proto 0x888e || \
+		log "tcpdump not capturing on $sta"
 	sleep 1
-	if run_ota "$sta" "flinstone_sae_test" sae "DHCP=in-tree UDP_ECHO=1"; then
+	local -a ota_sae_env=(DHCP=in-tree UDP_ECHO=1)
+	if run_ota "$sta" "flinstone_sae_test" sae sae ota_sae_env; then
 		record PASS hwsim-sae "in-tree fl_net_wifi_connect WPA3-SAE (no OS supplicant)"
 	else
 		record FAIL hwsim-sae "see ota-sae.log and sae-ota.pcap"
@@ -643,8 +717,10 @@ step_hwsim() {
 	write_hostapd_wpa2 "$ap" "$conf"
 	if ap_exec hostapd -dd -B -P "$ARTIFACTS/hostapd.pid" -f "$ARTIFACTS/hostapd-wpa2.log" "$conf"; then
 		sleep 1
-		start_tcpdump "$sta" "$ARTIFACTS/wpa2-eapol.pcap" ether proto 0x888e
-		if run_ota "$sta" "flinstone_wpa2_test" wpa2-psk "DHCP=in-tree"; then
+		start_tcpdump "$sta" "$ARTIFACTS/wpa2-eapol.pcap" ether proto 0x888e || \
+			log "tcpdump not capturing on $sta"
+		local -a ota_wpa2_env=(DHCP=in-tree)
+		if run_ota "$sta" "flinstone_wpa2_test" wpa2-psk wpa2-psk ota_wpa2_env; then
 			record PASS hwsim-wpa2 "in-tree fl_net_wifi_connect WPA2-PSK (no OS supplicant)"
 		else
 			record FAIL hwsim-wpa2 "see ota-wpa2-psk.log and wpa2-eapol.pcap"
@@ -660,8 +736,10 @@ step_hwsim() {
 	fi
 
 	# TWT against hwsim is optional — most hwsim APs are not TWT responders.
-	start_tcpdump "$sta" "$ARTIFACTS/twt-action-frames.pcap" ether proto 0x888e
-	if run_ota "$sta" "flinstone_wpa2_test" wpa2-psk "TWT=1" twt; then
+	start_tcpdump "$sta" "$ARTIFACTS/twt-action-frames.pcap" ether proto 0x888e || \
+		log "tcpdump not capturing on $sta"
+	local -a ota_twt_env=(TWT=1)
+	if run_ota "$sta" "flinstone_wpa2_test" wpa2-psk twt ota_twt_env; then
 		if grep -q 'SKIP TWT' "$ARTIFACTS/ota-twt.log" 2>/dev/null; then
 			record SKIP hwsim-twt "AP did not negotiate TWT (unit coverage is test_p3_wifi)"
 		else
@@ -698,7 +776,8 @@ step_physical() {
 		return 0
 	fi
 	make tests/test_p3_wifi_ota >/dev/null
-	start_tcpdump "$sta" "$ARTIFACTS/wifi-dhcp-eapol.pcap" port 67 or port 68 or ether proto 0x888e
+	start_tcpdump "$sta" "$ARTIFACTS/wifi-dhcp-eapol.pcap" port 67 or port 68 or ether proto 0x888e || \
+		log "tcpdump not capturing on $sta"
 	# UDP echo to 192.168.50.1 is hwsim-only. Physical APs do not run that lab listener
 	# unless the caller sets UDP_ECHO_DST to a host that does.
 	# Pass optional UDP_* through env(1) so they are assignments, not a command name.

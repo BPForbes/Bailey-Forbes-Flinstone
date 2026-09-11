@@ -249,6 +249,17 @@ static inline uint32_t fl_net_get_u32_be(const uint8_t *in) {
 #endif
 }
 
+/* Write a uint64 host-value as 8 little-endian bytes (LSB first). */
+static inline void fl_net_put_u64_le(uint8_t *out, uint64_t host_value) {
+    fl_net_put_u32_le(out, (uint32_t)host_value);
+    fl_net_put_u32_le(out + 4u, (uint32_t)(host_value >> 32));
+}
+
+/* Read a uint64 host-value from 8 little-endian bytes (LSB first). */
+static inline uint64_t fl_net_get_u64_le(const uint8_t *in) {
+    return (uint64_t)fl_net_get_u32_le(in) | ((uint64_t)fl_net_get_u32_le(in + 4u) << 32);
+}
+
 /* Write a uint64 host-value as 8 network-byte-order bytes at out[0..7]. */
 static inline void fl_net_put_u64_be(uint8_t *out, uint64_t host_value) {
     out[0] = (uint8_t)((host_value >> 56) & 0xFFu);
