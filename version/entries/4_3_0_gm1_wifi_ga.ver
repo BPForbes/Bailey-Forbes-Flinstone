@@ -1,0 +1,8 @@
+MAJOR_VERSION=4
+STANDARD_VERSION=3
+RELEASE_VERSION=0
+DESCRIPTION<<PROMOTE_DESC_END
+4.3.0: Production Wi-Fi milestone — complete the P3-10 and P4-01 station path with in-tree 802.11ax drivers, WPA2 and WPA3-SAE supplication, management-frame and EAPOL OTA transport, FullMAC and nl80211 backends, ESP AT UART support, TWT negotiation, post-association DHCP and UDP networking, and multi-device server integration.
+
+The release includes mock, lab, mac80211_hwsim, and physical-adapter validation; IEEE SAE, association, EAPOL-Key, and TWT frame handling; hardware and hosted platform shims; macvlan and WSL networking support; and the review fixes required to close #328 and #329. P3-10 and P4-01 are marked complete for the validated production scope.
+PROMOTE_DESC_END
