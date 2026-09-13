@@ -583,6 +583,6 @@ int main(void)
             return 1;
     }
 
-    puts("test_wifi_80211ax_mock_279: all 33 #279 items passed (802.11ax mock; production RF open)");
+    puts("test_wifi_80211ax_mock_279: all 33 #279 items passed (802.11ax mock; #328 / P3-10 production tail closed)");
     return 0;
 }
