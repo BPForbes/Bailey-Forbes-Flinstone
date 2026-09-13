@@ -37,8 +37,9 @@
  *   Unit tests are defined in BPForbes_Flinstone_Tests.c.
  *
  * Usage:
- *   - Interactive mode: simply run "./BPForbes_Flinstone_Shell" to enter the shell.
- *   - Batch mode: supply commands as arguments (e.g., "./BPForbes_Flinstone_Shell -v").
+ *   - Interactive mode: run "./BPForbes_Flinstone_Shell" on a TTY (no command args).
+ *   - Batch mode: supply commands as arguments; the shell exits after they finish
+ *     (e.g., "./BPForbes_Flinstone_Shell ping 127.0.0.1 9").
  *
  *****************************************************************************/
 
@@ -360,10 +361,13 @@ int main(int argc, char *argv[]) {
         }
     }
 
-    /* No args: help and exit, unless -Virtualization -y -vm (then run shell after guest VM) */
+    /* No args: non-tty prints help; tty continues to interactive init below.
+     * Exception: -Virtualization -y -vm with no other args runs guest then shell. */
     if (argc < 2 && !(g_vm_mode && g_vm_run_embedded)) {
-        fl_print_help_message();
-        exit(0);
+        if (!isatty(STDIN_FILENO)) {
+            fl_print_help_message();
+            exit(0);
+        }
     }
 
     /* VM mode: confine host file I/O to vm_hostfs/ under the launch directory (or temp VM sandbox). */
@@ -504,12 +508,13 @@ int main(int argc, char *argv[]) {
             free(commandStr);
             i += tokensCount;
         }
+        goto shell_shutdown;
     }
     if (!isatty(STDIN_FILENO))
-        exit(0);
-    else
-        interactive_shell();
+        goto shell_shutdown;
+    interactive_shell();
 
+shell_shutdown:
     shell_pool_cleanup();
     drivers_shutdown();
     path_log_shutdown();

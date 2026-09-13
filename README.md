@@ -180,6 +180,50 @@ make vm-sdl      # Uses deps/install if present, else pkg-config
 ./scripts/run_vm_wsl.sh  # Run only (requires prior build)
 ```
 
+### Wi‑Fi (`wifi`) — lab vs real networks
+
+**Default (no env vars):** `wifi scan` shows in-tree lab APs (`LabAxHome`, `GuestOpen`). Station L3 uses static **`wlan-lab`** addressing (default `10.0.2.15/24`). Use this for two-terminal `server host` / `server join` on the same machine (`127.0.0.1:<port>`).
+
+**WSL on Windows (real home Wi‑Fi):** Wi‑Fi is owned by Windows, not Linux `wlan0`. Build the helper and point the shell at it **before** starting:
+
+```bash
+cd ~/Bailey-Forbes-Flinstone
+make -j4
+make flinstone-ps-windows    # once: builds FlinstonePowershell.exe
+export FL_NET_WIFI_FLINSTONE_PS="$PWD/tools/FlinstonePowershell/FlinstonePowershell.exe"
+./BPForbes_Flinstone_Shell
+```
+
+Inside the shell:
+
+```text
+wifi scan
+wifi join "YourSSID"
+wifi status
+```
+
+You should see `wifi scan: host backend FlinstonePowershell on …` and your real SSIDs (not only `LabAxHome`).
+
+**Native Linux (real Wi‑Fi):** install `wpasupplicant` and/or NetworkManager, then:
+
+```bash
+export FL_NET_WIFI_USE_WPA=1
+export FL_NET_WIFI_IFACE=wlp2s0    # optional; auto-detect when unset
+./BPForbes_Flinstone_Shell
+wifi scan
+```
+
+**Embedded VM (`-Virtualization -vm`):** the guest VM halts before the interactive shell; `wifi` runs on the **host** shell. VM mode does not bridge host Wi‑Fi into the guest. For real scans, run **without** `-vm` and use the env vars above.
+
+| Variable | When to set |
+|----------|-------------|
+| **`FL_NET_WIFI_FLINSTONE_PS`** | WSL — path to `FlinstonePowershell.exe` |
+| **`FL_NET_WIFI_USE_WPA=1`** | Native Linux — `wpa_cli` / `nmcli` |
+| **`FL_NET_WIFI_USE_WPA=0`** | Force in-tree lab only |
+| **`FL_NET_WIFI_IFACE`** | Override wireless interface name |
+
+Full detail: **[docs/P3_NETWORKING.md](docs/P3_NETWORKING.md)** (Wi‑Fi section) and **`docs/SERVER.md`** (multiplayer hosting).
+
 **Replit** ([replit.com/~](https://replit.com/~)): import from GitHub with `.replit` and `replit.nix`; use **Run** or `make` in the Shell. See [docs/replit.md](docs/replit.md).
 
 ### Run

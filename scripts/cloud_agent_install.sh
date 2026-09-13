@@ -4,6 +4,7 @@
 set -euo pipefail
 
 REPO_ROOT="$(cd "$(dirname "$0")/.." && pwd)"
+BUILD_USER="${SUDO_USER:-}"
 
 mkdir -p /var/lib/apt/lists/partial
 
@@ -24,6 +25,13 @@ test -f /usr/include/openssl/ssl.h || {
     exit 1
 }
 
-cd "$REPO_ROOT"
-make clean
-make
+# apt/install_deps run as root; verification build must not leave root-owned artifacts
+# in a checkout owned by the cloud-agent user.
+if [ -n "$BUILD_USER" ] && [ "$(id -un)" = "root" ] && [ "$BUILD_USER" != "root" ]; then
+    chown -R "$BUILD_USER:$BUILD_USER" "$REPO_ROOT"
+    sudo -u "$BUILD_USER" -H bash -lc "cd \"$REPO_ROOT\" && make clean && make"
+else
+    cd "$REPO_ROOT"
+    make clean
+    make
+fi

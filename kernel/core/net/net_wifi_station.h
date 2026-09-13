@@ -5,9 +5,10 @@
 #include "fl/driver/net.h"
 
 /**
- * Station API for **#279** (802.11ax). Without a registered P4/NIC backend, scan,
- * connect, and TWT calls return **FL_RESULT_NOSYS**; **fl_net_wifi_station_netdev**
- * returns NULL.
+ * Station API for **#279** (802.11ax). Scan/connect prefer the v4.3 driver backend,
+ * then in-tree lab simulation. Opt-in host Wi-Fi uses net_wifi_host_linux when
+ * FL_NET_WIFI_USE_WPA=1, FL_NET_WIFI_FLINSTONE_PS, or FL_NET_WIFI_FLINSTONE_LINUX is set.
+ * **fl_net_wifi_station_netdev** returns the active Wi-Fi **fl_net_driver_t** when UP.
  */
 
 fl_result_t fl_net_wifi_station_init(void);
@@ -17,6 +18,9 @@ int fl_net_wifi_station_host_backend(void);
 
 /** Non-zero when the last scan/connect path used in-tree lab data (no host NIC). */
 int fl_net_wifi_station_lab_backend(void);
+
+/** Non-zero when the active path is physical nl80211 FullMAC (real NIC, not lab). */
+int fl_net_wifi_station_physical_backend(void);
 
 fl_result_t fl_net_wifi_scan(uint8_t band, unsigned timeout_ms);
 fl_result_t fl_net_wifi_scan_result(fl_net_wifi_scan_entry_t *entries, size_t cap,

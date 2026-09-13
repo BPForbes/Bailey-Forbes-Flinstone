@@ -704,3 +704,30 @@ int fl_net_sock_last_errno(void) {
 void fl_net_sock_clear_errno(void) {
     s_last_sock_errno = 0;
 }
+
+fl_result_t fl_net_sock_from_fd(int fd, fl_net_sock_handle_t *out_handle) {
+#if !defined(FL_NET_SOCK_HOSTED)
+    (void)fd;
+    (void)out_handle;
+    return FL_RESULT_NOSYS;
+#else
+    unsigned i;
+    if (fd < 0 || !out_handle)
+        return FL_RESULT_INVAL;
+    if (!s_sock_inited)
+        fl_net_sock_init();
+    for (i = 0; i < FL_NET_SOCK_TABLE_MAX; i++) {
+        if (!s_socks[i].in_use)
+            break;
+    }
+    if (i >= FL_NET_SOCK_TABLE_MAX)
+        return FL_RESULT_BUSY;
+    s_socks[i].fd = fd;
+    s_socks[i].type = FL_NET_SOCK_TYPE_STREAM;
+    s_socks[i].af = AF_INET;
+    s_socks[i].in_use = 1u;
+    s_socks[i].native = 0u;
+    *out_handle = (fl_net_sock_handle_t)(i + 1);
+    return FL_RESULT_OK;
+#endif
+}

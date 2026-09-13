@@ -20,7 +20,7 @@ jobs:
     permissions:
       contents: write
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@93cb6efe18208431cddfb8368fd83d5badbf9bfd # v5
         with:
           fetch-depth: 0
           token: ${{ secrets.BPFORBES_PAT || secrets.VERSION_LOCK_PAT || secrets.GITHUB_TOKEN }}
@@ -93,7 +93,7 @@ jobs:
     needs: version-requirements
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@93cb6efe18208431cddfb8368fd83d5badbf9bfd # v5
         with:
           fetch-depth: 0
 
@@ -135,6 +135,9 @@ jobs:
       - name: Test — P3 network (ping / check requirements)
         run: make check-network-requirements
 
+      - name: Test — P3 Wi-Fi (lab + TWT power manager)
+        run: make test_p3_wifi
+
       - name: Build CUnit suite
         run: make BPForbes_Flinstone_Tests CHANGELOG_CI=1
 
@@ -153,7 +156,7 @@ jobs:
     needs: version-requirements
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@93cb6efe18208431cddfb8368fd83d5badbf9bfd # v5
         with:
           fetch-depth: 0
 
@@ -182,7 +185,7 @@ jobs:
     needs: version-requirements
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@93cb6efe18208431cddfb8368fd83d5badbf9bfd # v5
         with:
           fetch-depth: 0
 

@@ -15,6 +15,7 @@
  * s_member_rx[] so a partial TCP segment never desyncs the parser.
  */
 #include "net_server.h"
+#include "net_wifi_ax_server.h"
 #include "net_file_delivery.h"
 #include "server_shared_db.h"
 
@@ -1013,6 +1014,7 @@ fl_result_t fl_net_server_host_stop(fl_net_server_t *srv) {
         srv->listen_handle = FL_NET_SOCK_INVALID;
     }
     srv->running = 0u;
+    (void)fl_server_catalog_close();
     return FL_RESULT_OK;
 }
 
@@ -1039,10 +1041,10 @@ static void maybe_send_nick_prompt(fl_net_server_t *srv,
                                                 (int)sizeof(text) - 1 : n));
 }
 
-fl_result_t fl_net_server_accept_pending(fl_net_server_t *srv,
-                                         char *display_out, size_t display_cap) {
+fl_result_t fl_net_server_accept_handle(fl_net_server_t *srv,
+                                        fl_net_sock_handle_t client_h,
+                                        char *display_out, size_t display_cap) {
     fl_result_t rc;
-    fl_net_sock_handle_t client_h = FL_NET_SOCK_INVALID;
     fl_net_server_member_t *m;
     uint8_t opcode = 0;
     uint8_t payload[FL_NET_SESSION_MAX_MSG];
@@ -1051,19 +1053,10 @@ fl_result_t fl_net_server_accept_pending(fl_net_server_t *srv,
     size_t ack_len;
     char disp[FL_NET_SERVER_DISPLAY_NAME_MAX];
 
-    if (!srv)
+    if (!srv || client_h == FL_NET_SOCK_INVALID)
         return FL_RESULT_INVAL;
     if (!srv->running)
         return FL_RESULT_INVAL;
-
-    rc = fl_net_sock_accept(srv->listen_handle, &client_h);
-    if (rc != FL_RESULT_OK) {
-        /* Preserve the real error from the shim (NOSYS on non-hosted
-         * builds, TIMEDOUT for "nothing pending", anything else is a
-         * genuine failure the caller should see). Masking everything as
-         * TIMEDOUT hid socket-table corruption and FD limit errors. */
-        return rc;
-    }
 
     /* Read HELLO from new peer. */
     rc = fl_net_session_recv_frame(client_h, &opcode, payload, sizeof(payload),
@@ -1160,6 +1153,23 @@ fl_result_t fl_net_server_accept_pending(fl_net_server_t *srv,
         display_out[dn] = '\0';
     }
     return FL_RESULT_OK;
+}
+
+fl_result_t fl_net_server_accept_pending(fl_net_server_t *srv,
+                                         char *display_out, size_t display_cap) {
+    fl_result_t rc;
+    fl_net_sock_handle_t client_h = FL_NET_SOCK_INVALID;
+
+    if (!srv)
+        return FL_RESULT_INVAL;
+    if (!srv->running)
+        return FL_RESULT_INVAL;
+
+    rc = fl_net_sock_accept(srv->listen_handle, &client_h);
+    if (rc != FL_RESULT_OK)
+        return rc;
+
+    return fl_net_server_accept_handle(srv, client_h, display_out, display_cap);
 }
 
 /* ------------------------------------------------------------------------- */
@@ -1302,6 +1312,9 @@ static int dispatch_member_frame(fl_net_server_t *srv, fl_net_server_member_t *m
          * to them via fl_net_server_host_stop. */
         return 0;
     default:
+        if (fl_net_wifi_ax_ap_dispatch(srv, m->member_id, m->peer_handle, opcode, payload,
+                                       plen))
+            return 0;
         if (fl_net_session_is_file_opcode(opcode)) {
             (void)fl_net_file_host_relay(srv, m->member_id, opcode, payload, plen);
             return 0;

@@ -15,6 +15,14 @@ uint32_t asm_net_htonl_be32(uint32_t host);
 uint32_t asm_net_ntohl_be32(uint32_t net);
 uint64_t asm_net_htonll_be64(uint64_t host);
 uint64_t asm_net_ntohll_be64(uint64_t net);
+void asm_net_store_le16(uint8_t *out, uint16_t host);
+uint16_t asm_net_load_le16(const uint8_t *in);
+void asm_net_store_be16(uint8_t *out, uint16_t host);
+uint16_t asm_net_load_be16(const uint8_t *in);
+void asm_net_store_le32(uint8_t *out, uint32_t host);
+uint32_t asm_net_load_le32(const uint8_t *in);
+void asm_net_store_be32(uint8_t *out, uint32_t host);
+uint32_t asm_net_load_be32(const uint8_t *in);
 #endif
 
 #endif /* FL_NET_ASM_H */

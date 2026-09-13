@@ -63,4 +63,12 @@ void fl_net_sock_clear_errno(void);
 /** Hosted BSD socket fd, or **-1** when unavailable (**#252** TLS bridge). */
 int fl_net_sock_host_fd(fl_net_sock_handle_t handle);
 
+/**
+ * Adopt an already-open host file descriptor into the socket table as a
+ * STREAM handle. Ownership transfers — fl_net_sock_close will close fd.
+ * Only available on hosted (Linux / macOS / FreeBSD) builds; returns
+ * FL_RESULT_NOSYS on bare-metal.
+ */
+fl_result_t fl_net_sock_from_fd(int fd, fl_net_sock_handle_t *out_handle);
+
 #endif /* NET_SOCKET_H */

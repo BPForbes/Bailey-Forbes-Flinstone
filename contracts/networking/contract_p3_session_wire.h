@@ -29,6 +29,19 @@
 /** Frame header size: magic, version, opcode, flags, length_be (2). */
 #define FL_NET_SESSION_HDR_LEN 6u
 
+/** UDP LAN discovery port — server beacon and reverse-dial join-requests. */
+#define FL_NET_SERVER_DISCOVERY_PORT 7779u
+
+/** Magic bytes for the discovery UDP frame (4 bytes: 'F','L','B','C'). */
+#define FL_NET_DISCOVERY_MAGIC_0 0x46u
+#define FL_NET_DISCOVERY_MAGIC_1 0x4Cu
+#define FL_NET_DISCOVERY_MAGIC_2 0x42u
+#define FL_NET_DISCOVERY_MAGIC_3 0x43u
+
+/** Discovery opcodes (byte 4 of the UDP frame). */
+#define FL_NET_DISCOVERY_OP_BEACON    0x01u  /* server → LAN broadcast */
+#define FL_NET_DISCOVERY_OP_JOIN_REQ  0x02u  /* client → server: please dial back */
+
 #ifndef FL_NET_SESSION_MAX_MEMBERS
 #define FL_NET_SESSION_MAX_MEMBERS 16u
 #endif
@@ -79,6 +92,16 @@
 #define FL_NET_SESSION_OP_FILE_META     0x38u
 #define FL_NET_SESSION_OP_FILE_LAST     0x38u
 
+/** WiFi 802.11ax L2 emulation over session wire (#279 lab; server host/join). */
+#define FL_NET_SESSION_OP_WIFI_FIRST       0x40u
+#define FL_NET_SESSION_OP_WIFI_SAE_COMMIT  0x40u
+#define FL_NET_SESSION_OP_WIFI_SAE_CONFIRM 0x41u
+#define FL_NET_SESSION_OP_WIFI_EAPOL       0x42u
+#define FL_NET_SESSION_OP_WIFI_ASSOC_REQ   0x43u
+#define FL_NET_SESSION_OP_WIFI_ASSOC_RESP  0x44u
+#define FL_NET_SESSION_OP_WIFI_AUTH_DONE   0x45u
+#define FL_NET_SESSION_OP_WIFI_LAST        0x45u
+
 #define FL_NET_SESSION_OP_ERR 0x7Fu
 
 /** Local command status for outbound file offers (not a wire opcode). */
@@ -90,6 +113,12 @@ static inline int fl_net_session_is_file_opcode(uint8_t opcode)
 {
     return opcode >= FL_NET_SESSION_OP_FILE_FIRST &&
            opcode <= FL_NET_SESSION_OP_FILE_LAST;
+}
+
+static inline int fl_net_session_is_wifi_opcode(uint8_t opcode)
+{
+    return opcode >= FL_NET_SESSION_OP_WIFI_FIRST &&
+           opcode <= FL_NET_SESSION_OP_WIFI_LAST;
 }
 
 fl_result_t fl_net_session_validate_file_frame(uint8_t opcode,

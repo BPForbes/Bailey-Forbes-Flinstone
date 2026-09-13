@@ -47,7 +47,7 @@ Check these; leave issue **open** only if tracking epic tail (TAP egress, TCPv6,
 
 ## #279 — use PR #306 sync doc
 
-Wi‑Fi **P3-10** foundation landed on **`cursor/p3-issues-279-302-303-790d`** (PR **#306**). For checklist alignment use **`docs/GITHUB_ISSUE_SYNC_279.md`** — do **not** mirror that checklist here.
+Wi‑Fi **P3-10** foundation landed on **`cursor/p3-issues-279-302-303-790d`** (PR **#306**). For checklist alignment use **`docs/GITHUB_ISSUE_SYNC_P4_WIFI_OTA.md`** — do **not** mirror that checklist here.
 
 ## Already closed
 

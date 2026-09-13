@@ -18,7 +18,7 @@
  * stdout protocol (consumed by parse_flinstone_ps_scan in net_wifi_host_linux.c)
  * -------------------------------------------------------------------------------
  * wifi-scan  : one line per network, fields tab-separated:
- *   ssid=<name>\tbssid=<aa:bb:cc:dd:ee:ff>\trssi=<dBm>\tauth=<open|wpa2|wpa3>\tband=<2.4|5|6>\tchan=<n>
+ *   ssid=<name>\tbssid=<aa:bb:cc:dd:ee:ff>\trssi=<dBm>\tauth=<open|wpa2|wpa3>\tband=<2.4|5|6>\tchan=<n>\the=<0|1>[\tcolor=<0-63>]
  *
  * wifi-join  : single line:
  *   result=ok\tssid=<name>          on success
@@ -221,6 +221,46 @@ static std::string auth_from_ies(const UCHAR *ies, ULONG ie_len) {
     if (has_wpa)
         return "wpa2"; /* WPA1 — treat as wpa2 for display */
     return "open";
+}
+
+/* Extension IE 255 / HE Capabilities (ext 35) → 802.11ax. */
+static int he_from_ies(const UCHAR *ies, ULONG ie_len) {
+    const UCHAR *p   = ies;
+    const UCHAR *end = ies + ie_len;
+
+    while (p + 2 <= end) {
+        UCHAR tag = p[0];
+        UCHAR len = p[1];
+        const UCHAR *body = p + 2;
+
+        if (body + len > end)
+            break;
+        if (tag == 0xFF && len >= 1 && body[0] == 0x23) /* HE Capabilities */
+            return 1;
+        p += 2 + len;
+    }
+    return 0;
+}
+
+/* HE Operation (ext 36): BSS Color in byte 4 bits 0-5 after ext id. */
+static int he_bss_color_from_ies(const UCHAR *ies, ULONG ie_len) {
+    const UCHAR *p   = ies;
+    const UCHAR *end = ies + ie_len;
+
+    while (p + 2 <= end) {
+        UCHAR tag = p[0];
+        UCHAR len = p[1];
+        const UCHAR *body = p + 2;
+
+        if (body + len > end)
+            break;
+        if (tag == 0xFF && len >= 5 && body[0] == 0x24) {
+            int color = (int)(body[4] & 0x3Fu);
+            return (color >= 0 && color <= 63) ? color : -1;
+        }
+        p += 2 + len;
+    }
+    return -1;
 }
 
 /* Convert centre frequency in kHz to 802.11 channel number. */
@@ -511,10 +551,17 @@ static void cmd_wifi_scan(void) {
             std::string  auth   = auth_from_ies(ies, ie_len);
             const char  *band   = band_from_khz(e.ulChCenterFrequency);
             int          chan   = chan_from_khz(e.ulChCenterFrequency);
+            int          he     = he_from_ies(ies, ie_len);
+            int          color  = he_bss_color_from_ies(ies, ie_len);
 
-            printf("ssid=%s\tbssid=%s\trssi=%d\tauth=%s\tband=%s\tchan=%d\n",
-                   ssid.c_str(), bssid.c_str(), rssi,
-                   auth.c_str(), band, chan);
+            if (color >= 0)
+                printf("ssid=%s\tbssid=%s\trssi=%d\tauth=%s\tband=%s\tchan=%d\the=%d\tcolor=%d\n",
+                       ssid.c_str(), bssid.c_str(), rssi,
+                       auth.c_str(), band, chan, he, color);
+            else
+                printf("ssid=%s\tbssid=%s\trssi=%d\tauth=%s\tband=%s\tchan=%d\the=%d\n",
+                       ssid.c_str(), bssid.c_str(), rssi,
+                       auth.c_str(), band, chan, he);
         }
         WlanFreeMemory(bss_list);
     }

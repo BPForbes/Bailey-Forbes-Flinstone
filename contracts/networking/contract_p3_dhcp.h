@@ -35,6 +35,9 @@ typedef enum {
 
 /** Option codes used by the lab client subset. */
 #define FL_NET_DHCP_OPT_PAD 0u
+#define FL_NET_DHCP_OPT_SUBNET_MASK 1u
+#define FL_NET_DHCP_OPT_ROUTER 3u
+#define FL_NET_DHCP_OPT_DOMAIN_NAME_SERVER 6u
 #define FL_NET_DHCP_OPT_MESSAGE_TYPE 53u
 #define FL_NET_DHCP_OPT_END 255u
 

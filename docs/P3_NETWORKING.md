@@ -46,7 +46,7 @@ Full spec: **[`docs/P3_13_CHAT_SERVER.md`](P3_13_CHAT_SERVER.md)**.
 | **`net_dns.c`** | P3-8 (minimal) | DNS-over-UDP **A** + **`fl_net_dns_resolve_aaaa`** (localhost stub + UDP AAAA) via `/etc/resolv.conf` |
 | **`net_loopback.c`** | P3-2 | In-memory netdev: ICMP echo reply, TCP RST+ACK on SYN |
 | **`net_netdev.c`** | P3-1 | Driver registry, send/recv, timeouts, P2-3 authz hook |
-| **`net_tap.c`** | P3-3 | Linux TAP (`IFF_TAP \| IFF_NO_PI`), `SKIP_TAP=1` |
+| **`net_tap.c`** | P3-3 | Linux TAP (`IFF_TAP \| IFF_NO_PI`), bring **IFF_UP** after **TUNSETIFF**, default name **`fltap%d`** (not macvlan **`fl0`**), `SKIP_TAP=1` |
 | **`net_wire_host.c`** | Hosted edge | **`fl_net_wire_send_icmp_pkt`** / **`send_udp_pkt`**; off-loopback syscalls; loopback via netdev |
 | **`net_wire_host_syscall.c`** | Hosted shim | C errno bridge to **`net_host_*_asm`** |
 | **`net_ping_host.c`** | Shell API | `fl_net_ping` / format helpers |
@@ -143,8 +143,13 @@ distro-style verbs ride on for hot writes.
        byte writes                                                asm_net_htonl_be32
        via fl_net_put_u16_be /                                    asm_net_ntohs_be16
        fl_net_put_u32_nbo                                         asm_net_ntohl_be32
-       (memcpy-clean on every                                    (single `bswap` / `rev`)
-       host endianness)                       --no--> portable bit-shift fallback
+       fl_net_put_u16_le /                                        asm_net_store_le16
+       fl_net_put_u32_le (802.11)                                 asm_net_load_le16
+                                                                  asm_net_store_be16
+                                                                  asm_net_load_be16
+                                                                  (LSB/MSB store; `bswap` / `rev`)
+       (memcpy-clean on every                                    --no--> portable bit-shift fallback
+       host endianness)
 
        v
        net_packet.c               fl_net_packet_parse_eth_ipv4 / _bind_l4 / _l4_view
@@ -230,7 +235,7 @@ Legend matches **`docs/ROADMAP.md`**: **✅** complete; **~✅** usable lab subs
 | **P3-7** TCP | ✅ | ~✅ — SYN probe + **`fl_net_tcp_stream_*`** hosted listen/connect/accept |
 | **P3-8** DNS | ✅ | ~✅ — A record + **AAAA** stub (`fl_net_dns_resolve_aaaa`) |
 | **P3-11** IPv6 + ICMPv6 | ✅ | ~✅ — loopback ICMPv6/NDP, IPv6 FIB, ethertype dispatch; TAP/wire IPv6 stretch (**#280**) |
-| **P3-10** Wi‑Fi station | ✅ | ~✅ — **`contract_p3_wifi.h`**, **`net_wifi_he`**, hosted lab scan/connect (**#279** PR #306); shell **`wifi`** + **`wifi_router`** DB; **`fl_net_wifi_station_netdev()`** NULL; SAE/WPA/TWT/mgmt + P4 NIC block production — **`docs/GITHUB_ISSUE_SYNC_279.md`** |
+| **P3-10** Wi‑Fi station | ✅ | ✅ — **`contract_p3_wifi.h`**, in-tree SAE/EAPOL/TWT OTA, WPA2-PSK without OS supplicant, ESP AT scan/join (PTY + physical UART), **`fl_net_dhcp_acquire`** + UDP echo on the Wi‑Fi **`fl_net_driver_t`**, real-AP TWT `flow_id` on Linux 802.11ax FullMAC — **#328** / **P4-01** closed — **`docs/GITHUB_ISSUE_SYNC_P4_WIFI_OTA.md`** |
 | **P3-9** TLS | ✅ | ~✅ — **`net_tls_hosted.c`** record-size boundary (no mbedtls yet) |
 | **P3-12** DHCP | ✅ | ~✅ — BOOTP codec + **`fl_net_dhcp_*_pkt`** over **`fl_net_packet_t`** |
 | **P3-14** background | ✅ | ~✅ — **`fl_net_arp_tick`** on workqueue; TCP timer wheel / RX dequeue still **#238** |
@@ -248,7 +253,7 @@ Legend matches **`docs/ROADMAP.md`**: **✅** complete; **~✅** usable lab subs
 | TCP (**P3-7**) | **RFC 793** | ~✅ SYN probe + hosted stream shim (in-tree FSM TODO) |
 | DNS (**P3-8**) | **RFC 1035** (subset) | ~✅ A record |
 | DHCP (**P3-12**) | **RFC 2131**, **RFC 2132** | ~✅ codec + lab client (not production lease manager) |
-| Wi‑Fi station (**P3-10**) | **IEEE 802.11ax-2021**; **802.11i**; **WPA3-SAE** (RFC 7664) | ~✅ contract + HE IE parser + hosted lab scan/connect (**#279**); production assoc/DHCP blocked on P4 NIC + SAE/WPA wire |
+| Wi‑Fi station (**P3-10**) | **IEEE 802.11ax-2021**; **802.11i**; **WPA3-SAE** (RFC 7664) | ✅ in-tree SAE/WPA2/TWT/DHCP/UDP plus maintainer-confirmed physical UART / real-AP TWT / FullMAC DHCP+UDP — **#328** / **P4-01** closed |
 | `server` + messaging (**P3-13**) | **RFC 793** (TCP session); **RFC 768** (UDP helpers) | ~✅ — hosted-socket implementation (PR #282 + #239); WSL LAN portproxy (PR #315); native non-hosted path queued behind **P3-7** TCP state machine |
 
 ## Application-layer and common Internet protocols
@@ -315,13 +320,39 @@ wifi known
 
 Shell verbs live in **`userland/command/cmd_wifi.c`**. Saved router profiles use SQLite **`wifi_router`** in **`fl_wifi.db`** (**`net_wifi_db.c`**); passphrases are stored hashed, not plaintext.
 
+**Default path:** in-tree **802.11 lab** (`LabAxHome`, `GuestOpen`) with static station L3 on **`wlan-lab`** (default `10.0.2.15/24`, gateway `10.0.2.2`; override with **`FL_NET_WIFI_LAB_*`**). No simulated DHCP; no host OS Wi‑Fi unless opted in below.
+
+**Opt-in real Wi‑Fi** (scan/join on host hardware): set one of **`FL_NET_WIFI_FLINSTONE_PS`**, **`FL_NET_WIFI_FLINSTONE_LINUX`**, or **`FL_NET_WIFI_USE_WPA=1`** before starting the shell. **`net_wifi_station.c`** tries hardware driver → host backend (when opted in) → lab fallback.
+
 | Command | Purpose |
 |---------|---------|
-| **`wifi scan [-band any\|2\|5\|6]`** | Scan for APs. On **Linux**, uses **`wpa_cli`** when its control socket answers, else **NetworkManager `nmcli`**. Without a host backend, falls back to the in-tree **lab** list (`LabAxHome`, `GuestOpen`) and prints a stderr warning. |
-| **`wifi join [-b <bssid>] <ssid> [password]`** | Associate with an SSID from the last scan. **`-b`** pins a BSSID when several APs share a name. After join on Linux, copies router **DHCP IPv4** (prefers RFC1918) and **SLAAC/DHCPv6** global IPv6 into the shell netdev/FIB when available. |
-| **`wifi leave`** | Disconnect and remove WLAN IPv4/IPv6 from the in-tree iface/route view; clears joined flags in **`fl_wifi.db`**. |
-| **`wifi status`** | Prints FSM state, active backend (`wpa_cli`, `nmcli`, or lab), interface name, and assigned IPv4/IPv6 when up. |
+| **`wifi scan [-band any\|2\|5\|6]`** | Scan for APs. **Lab (default):** synthetic list + stderr note. **WSL:** set **`FL_NET_WIFI_FLINSTONE_PS`** to **`FlinstonePowershell.exe`**. **Native Linux:** **`FL_NET_WIFI_USE_WPA=1`** with **`wpa_cli`** or **`nmcli`**. |
+| **`wifi join [-b <bssid>] <ssid> [password]`** | Associate from last scan. Host path uses Windows/Linux association; in-tree **`wlan-lab`** gets static L3 for **`server`** / P3 routing. |
+| **`wifi leave`** | Disconnect and drop WLAN routes; clears joined flags in **`fl_wifi.db`**. |
+| **`wifi status`** | FSM state, backend (`FlinstonePowershell`, `wpa_cli`, `nmcli`, or lab), **`wlan-lab`** station L3. |
 | **`wifi known`** | List saved profiles (BSSID, band, auth, joined flag, last-join time). |
+
+**WSL quick start (real networks):**
+
+```bash
+cd ~/Bailey-Forbes-Flinstone
+make -j4
+make flinstone-ps-windows
+export FL_NET_WIFI_FLINSTONE_PS="$PWD/tools/FlinstonePowershell/FlinstonePowershell.exe"
+./BPForbes_Flinstone_Shell
+wifi scan
+```
+
+**In-tree lab quick start (two terminals, no host Wi‑Fi):**
+
+```bash
+./BPForbes_Flinstone_Shell
+wifi join LabAxHome          # passphrase: secret
+server host :9996
+# other terminal:
+wifi join LabAxHome
+server join 127.0.0.1:9996
+```
 
 **Linux host backend** (real hardware scan/join):
 
@@ -330,8 +361,8 @@ Shell verbs live in **`userland/command/cmd_wifi.c`**. Saved router profiles use
 | **`FL_NET_WIFI_IFACE`** | auto-detect | Wireless netdev (`wlan0`, `wlp2s0`, …). Probed via **`nmcli`**, **`/proc/net/wireless`**, then **`wlan0`**. |
 | **`FL_NET_WIFI_WPA_CLI`** | `wpa_cli` | Path to **`wpa_cli`** when **`wpa_supplicant`** owns the interface. |
 | **`FL_NET_WIFI_NMCLI`** | `nmcli` | Path to **`nmcli`** when NetworkManager manages Wi‑Fi. |
-| **`FL_NET_WIFI_USE_WPA`** | unset | **`1`** — force **`wpa_cli`** only; **`0`** — force in-tree lab simulation; unset — try **`wpa_cli`**, then **`nmcli`**. |
-| **`FL_NET_WIFI_FLINSTONE_PS`** | auto | WSL/Windows helper path. Auto-discovery checks **`tools/FlinstonePowershell/FlinstonePowershell.exe`** and then **`PATH`**. |
+| **`FL_NET_WIFI_USE_WPA`** | unset | **`1`** — opt in to **`wpa_cli`** (native Linux); **`0`** — force in-tree lab only; unset — lab unless **`FL_NET_WIFI_FLINSTONE_*`** is set. |
+| **`FL_NET_WIFI_FLINSTONE_PS`** | unset | **WSL:** path to **`FlinstonePowershell.exe`** (build: **`make flinstone-ps-windows`**). Example: **`export FL_NET_WIFI_FLINSTONE_PS="$PWD/tools/FlinstonePowershell/FlinstonePowershell.exe"`** |
 | **`FL_NET_WIFI_FLINSTONE_LINUX`** | auto | Native Linux helper path. Auto-discovery checks **`tools/FlinstoneLinuxNet/FlinstoneLinuxNet`** and then **`PATH`**. Build with **`make flinstone-linux-net`**. |
 | **`FL_NET_WIFI_BRIDGE_TARGET`** | `127.0.0.1` | Target IP for **`server-bridge`** relays. Use a VM guest address such as **`10.0.2.15`** when the Flinstone server is inside a VM. |
 | **`FL_NET_WIFI_BRIDGE_PY`** | `tools/network_bridge.py` | Optional Python bridge companion used when the compiled helper is not active. |
@@ -339,11 +370,11 @@ Shell verbs live in **`userland/command/cmd_wifi.c`**. Saved router profiles use
 
 **Profile database:** tries **`FL_WIFI_DB_PATH`**, then repo-relative **`userland/shell/fl_wifi.db`**, then **`~/.local/share/BPForbes_Flinstone_Shell/fl_wifi.db`**, then **`/tmp/fl_wifi.db`**.
 
-**WSL/LAN server bridge:** build the Windows helper with **`make flinstone-ps-windows`**. From WSL, **`server host <windows-wifi-ip>:<port>`** (or **`server host -all <port>`** when **`wifi-status`** reports the Windows Wi‑Fi IP) uses **`FlinstonePowershell.exe server-proxy`** to add Windows portproxy + firewall rules (UAC press-any-key gate in **`cmd_server.c`**, PR **#315**). Teardown runs on **`server kill`**, **`server leave`**, and shell **`exit`** via **`server-proxy-del`**. Preflight: **`server-proxy-check`** queries netsh for stale rules before UAC. Non-admin fallback: **`server-bridge`**. For an embedded VM target, set **`FL_NET_WIFI_BRIDGE_TARGET=10.0.2.15`** before hosting, or run **`FlinstonePowershell.exe server-bridge 192.168.1.235 7777 10.0.2.15`** directly. The Python companion accepts the same shape: **`python3 tools/network_bridge.py 192.168.1.235 7777 10.0.2.15`**.
+**WSL/LAN server (optional):** build **`make flinstone-ps-windows`**. Default **`server host`** binds in WSL and prints local join hints (`127.0.0.1`, in-tree **`10.0.2.15`** after lab join). For exposure on the Windows LAN, use **`FlinstonePowershell.exe server-proxy`** manually (see **`docs/SERVER.md`**). Legacy automatic portproxy from **`server host`** is not the default path on **`develop`** / v4.3 Wi‑Fi trains.
 
 **Native Linux helper:** build **`tools/FlinstoneLinuxNet/FlinstoneLinuxNet`** with **`make flinstone-linux-net`**. It provides the same helper commands as the Windows bridge for Linux hosts: **`wifi-scan`**, **`wifi-join`**, **`wifi-leave`**, **`wifi-status`**, and **`server-bridge [bind_ip] <port> [target_ip]`**. Wi-Fi uses **`nmcli`**; override with **`FL_NET_WIFI_NMCLI`** and **`FL_NET_WIFI_IFACE`**. The shell auto-detects the in-tree ELF when present unless **`FL_NET_WIFI_USE_WPA=0`** forces lab mode or **`FL_NET_WIFI_USE_WPA=1`** forces direct **`wpa_cli`**.
 
-**Prerequisites (Linux, real scan):** install **`network-manager`** and/or **`wpasupplicant`** so **`nmcli`** or **`wpa_cli`** is on **`PATH`**. Requires **`FL_AUTHZ_OP_NETDEV_IO`** (shell grants this on hosted builds). **macOS/Windows** and container/CI environments without a Wi‑Fi netdev always use the lab list.
+**Prerequisites (real scan):** **WSL:** **`FL_NET_WIFI_FLINSTONE_PS`** + built helper. **Native Linux:** **`network-manager`** and/or **`wpasupplicant`** on **`PATH`**, plus **`FL_NET_WIFI_USE_WPA=1`**. CI/containers without Wi‑Fi use lab only (**`FL_NET_WIFI_USE_WPA=0`**). **`-Virtualization -vm`:** VM guest halts before the shell prompt; **`wifi`** uses the hosted shell on the host — set env vars on that process, not inside the guest.
 
 **Examples:**
 
@@ -369,7 +400,7 @@ Environment (general networking):
 
 ```bash
 make test_p3_network
-make test_p3_wifi test_wifi_db
+make test_p3_wifi test_wifi_db test_wifi_uart_at_scan_join test_wifi_connect_ota
 make check-network-requirements
 ```
 
@@ -381,7 +412,7 @@ make check-network-requirements
 - **`docs/ROADMAP.md`** — P3 rows and phase gates
 - **`docs/P3_NETWORKING_DEFERRED.md`** — P3-10 / P3-11 deferral vs **~✅** foundation (not “IPv4-only”)
 - **`docs/GITHUB_ISSUE_SYNC_PR301.md`** — maintainer checklist for **#280** / **#283** issue bodies
-- **`docs/GITHUB_ISSUE_SYNC_279.md`** — maintainer checklist for **#279** / **#257** P3-10 scope vs PR #306
+- **`docs/GITHUB_ISSUE_SYNC_P4_WIFI_OTA.md`** — maintainer checklist for **#279** / **#257** P3-10 scope vs PR #306
 - **`kernel/core/net/README.md`** — file index and include graph
 - **`AGENTS.md`** — build/test and versioning for this PR
 
@@ -398,7 +429,7 @@ make check-network-requirements
 | Priority | Item | Notes |
 |----------|------|--------|
 | **P3-12** | DHCP renew/rebind FSM | Lease DB and renew/rebind after **`fl_net_dhcp_acquire`** |
-| **P3-10** | Wi‑Fi 802.11ax station | **~✅** foundation (PR #306): contract, HE parser, lab scan/connect, **`wifi`** shell; tail: P4 NIC, SAE/WPA/TWT, netdev + DHCP composition |
+| ~~**P3-10**~~ | ~~Wi‑Fi 802.11ax station~~ | ✅ **#328** / **P4-01** closed: physical UART scan/join, real-AP TWT `flow_id`, in-tree DHCP/UDP on Linux 802.11ax FullMAC |
 | **P3-13** | Chat room | Foundations shipped (PR #282 + #239); **PR #315** WSL portproxy/UAC hosting; **#283** PROMOTE6; **#280** IPv6 loopback/NDP (PR #301); **#279** Wi‑Fi foundation; native non-hosted `fl_socket` gated on **P3-7** TCP state machine |
 | ~~Patch~~ | ~~ARP cache TTL / loopback dedup~~ | Done (**#237**, **#240**): **`fl_net_arp_tick`**, **`fl_net_loopback_exchange`**, PIT BH on **B** |
 | ~~P3-5~~ | ~~Drop Linux ICMP fallback~~ | Done (**#262**): egress-only ICMP/UDP when unrouted |

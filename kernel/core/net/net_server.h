@@ -79,6 +79,16 @@ fl_result_t fl_net_server_accept_pending(fl_net_server_t *srv,
                                          char *display_out, size_t display_cap);
 
 /**
+ * Register an already-connected socket handle as a new server member and
+ * complete the HELLO/HELLO_ACK handshake. Used by the reverse-dial NAT
+ * bypass where the server dials out to a joining client and hands the
+ * resulting connected socket directly to the session layer.
+ */
+fl_result_t fl_net_server_accept_handle(fl_net_server_t *srv,
+                                        fl_net_sock_handle_t handle,
+                                        char *display_out, size_t display_cap);
+
+/**
  * Drain at most one inbound frame per member. Dispatches:
  *   - OP_MSG          → fan out OP_MSG_BROADCAST prefixed with sender display
  *   - OP_HOST_NICK_SET (from a client) → validate and apply, emit

@@ -1,13 +1,41 @@
 #include "net_wifi_crypto.h"
 
+#include "fl/mem_asm.h"
+#include "net_endian.h"
+
+#include <limits.h>
 #include <openssl/evp.h>
 #include <openssl/hmac.h>
+#include <openssl/rand.h>
 #include <string.h>
 
+#if defined(__linux__)
+#include <sys/random.h>
+#endif
+
 void fl_net_wifi_crypto_memzero(void *p, size_t n) {
-    volatile uint8_t *b = (volatile uint8_t *)p;
-    while (n-- > 0u)
-        *b++ = 0u;
+    if (!p || n == 0u)
+        return;
+    asm_mem_zero(p, n);
+}
+
+fl_result_t fl_net_wifi_crypto_random(uint8_t *out, size_t len) {
+#if defined(__linux__)
+    ssize_t got;
+#endif
+
+    if (!out || len == 0u)
+        return FL_RESULT_INVAL;
+#if defined(__linux__)
+    got = getrandom(out, len, 0);
+    if (got == (ssize_t)len)
+        return FL_RESULT_OK;
+#endif
+    if (len > (size_t)INT_MAX)
+        return FL_RESULT_ERR;
+    if (RAND_bytes(out, (int)len) == 1)
+        return FL_RESULT_OK;
+    return FL_RESULT_ERR;
 }
 
 fl_result_t fl_net_wifi_crypto_psk_pmk(const char *ssid, const char *passphrase,
@@ -153,6 +181,60 @@ fl_result_t fl_net_wifi_crypto_sae_kdf(const uint8_t *key, size_t key_len, const
             }
             iter++;
         }
+    }
+    return FL_RESULT_OK;
+}
+
+fl_result_t fl_net_wifi_crypto_ieee80211_kdf_sha256(const uint8_t *key, size_t key_len,
+                                                    const char *label, const uint8_t *context,
+                                                    size_t context_len, uint8_t *out,
+                                                    size_t out_len) {
+    uint8_t buf[256];
+    size_t label_len;
+    size_t pos;
+    size_t written = 0u;
+    uint16_t counter = 1u;
+    uint16_t bits;
+
+    if (!key || key_len == 0u || !label || !out || out_len == 0u)
+        return FL_RESULT_INVAL;
+    if (out_len > (65535u / 8u))
+        return FL_RESULT_INVAL;
+    if (context_len > 0u && !context)
+        return FL_RESULT_INVAL;
+
+    label_len = strlen(label);
+    if (2u + label_len + context_len + 2u > sizeof(buf))
+        return FL_RESULT_INVAL;
+
+    bits = (uint16_t)(out_len * 8u);
+    pos = 2u;
+    memcpy(buf + pos, label, label_len);
+    pos += label_len;
+    if (context_len > 0u) {
+        memcpy(buf + pos, context, context_len);
+        pos += context_len;
+    }
+    fl_net_put_u16_le(buf + pos, bits);
+    pos += 2u;
+
+    while (written < out_len) {
+        uint8_t mac[32];
+        unsigned int mac_len = 0u;
+        size_t chunk;
+
+        fl_net_put_u16_le(buf, counter);
+        if (HMAC(EVP_sha256(), key, (int)key_len, buf, pos, mac, &mac_len) == NULL ||
+            mac_len != 32u)
+            return FL_RESULT_ERR;
+        chunk = out_len - written;
+        if (chunk > 32u)
+            chunk = 32u;
+        memcpy(out + written, mac, chunk);
+        written += chunk;
+        if (counter == 0xffffu)
+            return FL_RESULT_ERR;
+        counter++;
     }
     return FL_RESULT_OK;
 }

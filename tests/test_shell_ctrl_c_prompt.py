@@ -35,7 +35,7 @@ def main():
     binary = "./BPForbes_Flinstone_Shell"
     pid, fd = pty.fork()
     if pid == 0:
-        os.execl(binary, binary, "whoami")
+        os.execl(binary, binary)
 
     output = bytearray()
     try:

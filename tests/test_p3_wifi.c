@@ -7,12 +7,18 @@
 #include "net_wifi_station.h"
 #include "net_iface.h"
 #include "net_route.h"
+#include "net_udp.h"
+#include "net_wifi_netdev.h"
 #include "net_wifi_wpa.h"
 #include "net_wifi_crypto.h"
+#include "net_wifi_twt.h"
+#include "net_endian.h"
+#include "contract_p3_wifi.h"
 
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <stdint.h>
 
 #define ASSERT(c)                                                              \
     do {                                                                       \
@@ -54,6 +60,10 @@ static int test_scan_result_he_fields(void) {
     ASSERT(entries[0].bss_color == 5u);
     ASSERT(entries[0].channel_width_mhz == 160u);
     ASSERT(entries[0].twt_responder == 1u);
+    if (count >= 2u) {
+        ASSERT(entries[1].he_supported == 1u);
+        ASSERT(entries[1].channel_width_mhz <= 40u);
+    }
     return 0;
 }
 
@@ -104,11 +114,43 @@ static int test_sae_kdf_selftest(void) {
 static int test_sae_derive_pmk(void) {
     uint8_t pmk[32];
     uint8_t pmk2[32];
+    char long_pass[FL_WIFI_PASSPHRASE_MAX];
 
     ASSERT(fl_net_wifi_sae_derive_pmk("LabAxHome", "secret", pmk, sizeof(pmk)) == FL_RESULT_OK);
     ASSERT(fl_net_wifi_sae_derive_pmk("LabAxHome", "secret", pmk2, sizeof(pmk2)) == FL_RESULT_OK);
     ASSERT(memcmp(pmk, pmk2, 32) == 0);
     fl_net_wifi_crypto_memzero(pmk, sizeof(pmk));
+
+    memset(long_pass, 'A', sizeof(long_pass) - 1u);
+    long_pass[sizeof(long_pass) - 1u] = '\0';
+    ASSERT(fl_net_wifi_sae_derive_pmk("LabAxHome", long_pass, pmk, sizeof(pmk)) == FL_RESULT_OK);
+    fl_net_wifi_crypto_memzero(pmk, sizeof(pmk));
+    return 0;
+}
+
+static int test_sae_dragonfly_selftest(void) {
+    ASSERT(fl_net_wifi_sae_dragonfly_selftest() == FL_RESULT_OK);
+    return 0;
+}
+
+static int test_sae_commit_token_before_scalar(void) {
+    static const uint8_t sta_mac[6] = {0x02, 0x11, 0x22, 0x33, 0x44, 0x55};
+    static const uint8_t ap_mac[6] = {0x02, 0xaa, 0xbb, 0xcc, 0xdd, 0x01};
+    static const uint8_t token[] = { 'c', 'l', 'o', 'g' };
+    fl_net_wifi_sae_dragonfly_ctx_t *sta = NULL;
+    uint8_t body[128];
+    size_t len = 0;
+
+    ASSERT(fl_net_wifi_sae_dragonfly_ctx_create(&sta) == FL_RESULT_OK);
+    ASSERT(fl_net_wifi_sae_dragonfly_init_sta(sta, "DragonTest", "secret-psk", sta_mac, ap_mac) ==
+           FL_RESULT_OK);
+    ASSERT(fl_net_wifi_sae_dragonfly_build_commit(sta, token, sizeof(token), body, sizeof(body),
+                                                 &len) == FL_RESULT_OK);
+    ASSERT(len == FL_NET_WIFI_SAE_COMMIT_BODY_LEN + sizeof(token));
+    ASSERT(body[0] == (uint8_t)FL_NET_WIFI_SAE_GROUP_19);
+    ASSERT(body[1] == 0u);
+    ASSERT(memcmp(body + 2, token, sizeof(token)) == 0);
+    fl_net_wifi_sae_dragonfly_ctx_destroy(sta);
     return 0;
 }
 
@@ -120,15 +162,50 @@ static int test_mgmt_probe_assoc(void) {
     static const uint8_t sta[6] = {0x02, 0x00, 0x00, 0x00, 0x00, 0x01};
     static const uint8_t bssid[6] = {0x02, 0x11, 0x22, 0x33, 0x44, 0x55};
 
-    ASSERT(fl_net_wifi_mgmt_build_probe_req("LabAxHome", frame, sizeof(frame), &len) ==
+    ASSERT(fl_net_wifi_mgmt_build_probe_req("LabAxHome", sta, frame, sizeof(frame), &len) ==
            FL_RESULT_OK);
     ASSERT(len > FL_WIFI_MGMT_HDR_LEN);
     ASSERT(fl_net_wifi_mgmt_hdr_valid(frame, len));
     memset(frame, 0, sizeof(frame));
-    ASSERT(fl_net_wifi_mgmt_build_assoc_req("LabAxHome", bssid, sta, frame, sizeof(frame),
-                                            &len) == FL_RESULT_OK);
+    ASSERT(fl_net_wifi_mgmt_build_assoc_req("LabAxHome", bssid, sta, FL_WIFI_AUTH_WPA3_SAE, NULL,
+                                            frame, sizeof(frame), &len) == FL_RESULT_OK);
     ASSERT(fl_net_wifi_mgmt_parse_mgmt_ies(frame, len, &ies, &ies_len) == FL_RESULT_OK);
     ASSERT(ies_len > 0u);
+    return 0;
+}
+
+static int test_twt_ieee_individual_element(void) {
+    uint8_t frame[128];
+    size_t len = 0;
+    fl_net_wifi_twt_params_t req = {
+        .twt_target_us = 0x0102030405060708ull,
+        .wake_duration_us = 8192u,
+        .wake_interval_us = 100000u,
+        .flow_id = 3u,
+        .implicit = 1u,
+        .announced = 1u,
+        .trigger_enabled = 1u,
+    };
+    fl_net_wifi_twt_params_t got = {0};
+    static const uint8_t sta[6] = {0x02, 0x00, 0x00, 0x00, 0x00, 0x01};
+    static const uint8_t bssid[6] = {0x02, 0x11, 0x22, 0x33, 0x44, 0x55};
+
+    ASSERT(fl_net_wifi_mgmt_build_twt_setup_req(sta, bssid, 1u, &req, frame, sizeof(frame),
+                                                &len) == FL_RESULT_OK);
+    ASSERT(len == FL_WIFI_MGMT_HDR_LEN + 3u + 2u + FL_WIFI_TWT_ELEM_LEN);
+    ASSERT(frame[27] == FL_WIFI_ELEM_TWT);
+    ASSERT(frame[28] == FL_WIFI_TWT_ELEM_LEN);
+    ASSERT(frame[29] == 0u);
+    ASSERT(frame[40] == 32u);
+    ASSERT(frame[43] == 0u);
+    ASSERT(fl_net_wifi_mgmt_parse_twt_setup_resp(frame, len, &got) == FL_RESULT_OK);
+    ASSERT(got.flow_id == 3u);
+    ASSERT(got.wake_duration_us == 8192u);
+    ASSERT(got.wake_interval_us == 100000u);
+    ASSERT(got.twt_target_us == 0x0102030405060708ull);
+    ASSERT(got.implicit == 1u);
+    ASSERT(got.announced == 1u);
+    ASSERT(got.trigger_enabled == 1u);
     return 0;
 }
 
@@ -149,8 +226,60 @@ static int test_twt_mock(void) {
     ASSERT(fl_net_wifi_state() == FL_WIFI_STATE_UP);
     ASSERT(fl_net_wifi_twt_setup(&req, &agreed) == FL_RESULT_OK);
     ASSERT(agreed.flow_id < 8u);
+    ASSERT(fl_net_wifi_twt_next_wake_us() > 0u);
+    ASSERT(fl_net_wifi_twt_should_sleep() != 0);
     ASSERT(fl_net_wifi_twt_teardown(agreed.flow_id) == FL_RESULT_OK);
+    ASSERT(fl_net_wifi_twt_next_wake_us() == 0u);
     ASSERT(fl_net_wifi_disconnect() == FL_RESULT_OK);
+    return 0;
+}
+
+static int test_twt_power_manager(void) {
+    fl_net_wifi_twt_params_t req = {.wake_duration_us = 400u,
+                                    .wake_interval_us = 2000u,
+                                    .implicit = 1};
+    fl_net_wifi_twt_params_t a = {0};
+    fl_net_wifi_twt_params_t b = {0};
+    uint64_t rem;
+    uint64_t rem_after_b;
+
+    fl_net_wifi_twt_lab_reset();
+    ASSERT(fl_net_wifi_twt_negotiate(&req, &a) == FL_RESULT_OK);
+    rem = fl_net_wifi_twt_next_wake_us();
+    ASSERT(rem > 0u);
+    ASSERT(rem <= 2000u);
+    ASSERT(fl_net_wifi_twt_should_sleep() != 0);
+    ASSERT(fl_net_wifi_twt_power_sleep() == FL_RESULT_OK);
+    /* Woke at (or past) the SP boundary; remaining is 0 while in the SP. */
+    rem = fl_net_wifi_twt_next_wake_us();
+    ASSERT(rem == 0u || rem <= 2000u);
+
+    ASSERT(fl_net_wifi_twt_lab_teardown(a.flow_id) == FL_RESULT_OK);
+    ASSERT(fl_net_wifi_twt_next_wake_us() == 0u);
+    ASSERT(fl_net_wifi_twt_should_sleep() == 0);
+
+    /* Stale flow_id must not clear a live schedule. */
+    fl_net_wifi_twt_lab_reset();
+    ASSERT(fl_net_wifi_twt_negotiate(&req, &a) == FL_RESULT_OK);
+    req.wake_interval_us = 8000u;
+    ASSERT(fl_net_wifi_twt_negotiate(&req, &b) == FL_RESULT_OK);
+    ASSERT(a.flow_id != b.flow_id);
+    rem = fl_net_wifi_twt_next_wake_us();
+    ASSERT(rem > 0u);
+    ASSERT(fl_net_wifi_twt_lab_teardown(7u) == FL_RESULT_NOENT);
+    rem_after_b = fl_net_wifi_twt_next_wake_us();
+    ASSERT(rem_after_b > 0u);
+    ASSERT(fl_net_wifi_twt_lab_teardown(a.flow_id) == FL_RESULT_OK);
+    ASSERT(fl_net_wifi_twt_next_wake_us() > 0u);
+    ASSERT(fl_net_wifi_twt_lab_teardown(b.flow_id) == FL_RESULT_OK);
+    ASSERT(fl_net_wifi_twt_next_wake_us() == 0u);
+
+    /* Connect-failure / reset must drop the schedule (no stale flow_id). */
+    ASSERT(fl_net_wifi_twt_negotiate(&req, &a) == FL_RESULT_OK);
+    ASSERT(fl_net_wifi_twt_next_wake_us() > 0u);
+    fl_net_wifi_twt_lab_reset();
+    ASSERT(fl_net_wifi_twt_next_wake_us() == 0u);
+    ASSERT(fl_net_wifi_twt_lab_teardown(a.flow_id) == FL_RESULT_NOENT);
     return 0;
 }
 
@@ -217,28 +346,157 @@ static int test_disconnect_clears_wlan_iface(void) {
 
 static int test_wpa2_connect_lab(void) {
     fl_net_wifi_cred_t cred;
+    fl_net_wifi_scan_entry_t entries[8];
+    size_t count = 0;
+    size_t i;
+    int saw_wpa2 = 0;
 
+    ASSERT(setenv("FL_NET_WIFI_USE_WPA", "0", 1) == 0);
+    ASSERT(unsetenv("FL_NET_WIFI_FLINSTONE_PS") == 0 || getenv("FL_NET_WIFI_FLINSTONE_PS") == NULL);
+    ASSERT(unsetenv("FL_NET_WIFI_FLINSTONE_LINUX") == 0 ||
+           getenv("FL_NET_WIFI_FLINSTONE_LINUX") == NULL);
+    fl_net_wifi_wpa_lab_reset();
     ASSERT(fl_net_wifi_station_init() == FL_RESULT_OK);
-    (void)fl_net_wifi_scan(FL_WIFI_BAND_2GHZ, 1000u);
+    ASSERT(fl_net_wifi_scan(FL_WIFI_BAND_2GHZ, 1000u) == FL_RESULT_OK);
+    ASSERT(fl_net_wifi_scan_result(entries, 8, &count) == FL_RESULT_OK);
+    for (i = 0; i < count; i++) {
+        if (!strcmp(entries[i].ssid, "LabWpa2") &&
+            entries[i].auth_mode == FL_WIFI_AUTH_WPA2_PSK)
+            saw_wpa2 = 1;
+    }
+    ASSERT(saw_wpa2);
     memset(&cred, 0, sizeof(cred));
-    strncpy(cred.ssid, "GuestOpen", sizeof(cred.ssid) - 1u);
-    cred.auth_mode = FL_WIFI_AUTH_OPEN;
+    strncpy(cred.ssid, "LabWpa2", sizeof(cred.ssid) - 1u);
+    strncpy(cred.passphrase, "labwpa2-secret", sizeof(cred.passphrase) - 1u);
+    cred.auth_mode = FL_WIFI_AUTH_WPA2_PSK;
     ASSERT(fl_net_wifi_connect(&cred, 0u) == FL_RESULT_OK);
     ASSERT(fl_net_wifi_state() == FL_WIFI_STATE_UP);
+    ASSERT(!fl_net_wifi_station_host_backend());
+    ASSERT(fl_net_wifi_wpa_lab_ptk_installed());
+    fl_net_wifi_cred_scrub_passphrase(&cred);
+    ASSERT(fl_net_wifi_disconnect() == FL_RESULT_OK);
+    printf("ok #328 WPA2-PSK fl_net_wifi_connect (no OS supplicant)\n");
+    return 0;
+}
+
+static int test_wpa2_dhcp_udp_twt_in_tree(void) {
+    fl_net_wifi_cred_t cred;
+    fl_net_wifi_twt_params_t req = {.wake_duration_us = 8000u,
+                                    .wake_interval_us = 100000u,
+                                    .implicit = 1};
+    fl_net_wifi_twt_params_t agreed = {0};
+    uint32_t ip_be = 0u;
+    uint32_t gw_be = 0u;
+    const char payload[] = "issue-328-wpa2-udp";
+    uint8_t rx[128];
+    size_t rx_len = 0;
+    fl_net_wifi_l3_profile_t l3;
+    fl_result_t rc;
+
+    ASSERT(setenv("FL_NET_WIFI_USE_WPA", "0", 1) == 0);
+    fl_net_route_init();
+    fl_net_udp_demux_reset();
+    ASSERT(fl_net_udp_bind_port(48077u) == FL_RESULT_OK);
+    fl_net_wifi_wpa_lab_reset();
+    ASSERT(fl_net_wifi_station_init() == FL_RESULT_OK);
+    ASSERT(fl_net_wifi_scan(FL_WIFI_BAND_ANY, 1000u) == FL_RESULT_OK);
+    memset(&cred, 0, sizeof(cred));
+    strncpy(cred.ssid, "LabWpa2", sizeof(cred.ssid) - 1u);
+    strncpy(cred.passphrase, "labwpa2-secret", sizeof(cred.passphrase) - 1u);
+    cred.auth_mode = FL_WIFI_AUTH_WPA2_PSK;
+    ASSERT(fl_net_wifi_connect(&cred, 5000u) == FL_RESULT_OK);
+    ASSERT(fl_net_wifi_state() == FL_WIFI_STATE_UP);
+    ASSERT(!fl_net_wifi_station_host_backend());
+    ASSERT(fl_net_wifi_station_netdev() != NULL);
+    ASSERT(fl_net_wifi_netdev_ipv4(&ip_be) == FL_RESULT_OK);
+    ASSERT(ip_be != 0u);
+    ASSERT(fl_net_wifi_netdev_l3_profile(&l3));
+    ASSERT(l3.gateway != 0u);
+    gw_be = l3.gateway;
+    printf("ok #328 in-tree DHCP on Wi-Fi fl_net_driver_t ip=0x%08x (no OS DHCP)\n",
+           (unsigned)ip_be);
+
+    ASSERT(fl_net_wifi_twt_setup(&req, &agreed) == FL_RESULT_OK);
+    ASSERT(agreed.flow_id < 8u);
+    printf("ok #328 TWT Individual Setup flow_id=%u\n", (unsigned)agreed.flow_id);
+    ASSERT(fl_net_wifi_twt_teardown(agreed.flow_id) == FL_RESULT_OK);
+    ASSERT(fl_net_wifi_twt_next_wake_us() == 0u);
+    printf("ok #328 TWT Individual Teardown flow_id=%u\n", (unsigned)agreed.flow_id);
+
+    rc = fl_net_udp_echo_exchange(gw_be, 48077u, 48078u, (const uint8_t *)payload,
+                                  strlen(payload), rx, sizeof(rx), &rx_len, 3000u);
+    ASSERT(rc == FL_RESULT_OK);
+    ASSERT(rx_len == strlen(payload));
+    ASSERT(memcmp(rx, payload, rx_len) == 0);
+    printf("ok #328 UDP echo via in-tree Wi-Fi fl_net_driver_t\n");
     ASSERT(fl_net_wifi_disconnect() == FL_RESULT_OK);
     return 0;
 }
 
 static int test_mgmt_hdr_probe(void) {
     uint8_t probe[24] = {0x40, 0x00};
+    uint8_t auth[40];
+    uint8_t rsne[32];
+    static const uint8_t sta[6] = {0x02, 0x00, 0x00, 0x00, 0x00, 0x01};
+    static const uint8_t bssid[6] = {0x02, 0x11, 0x22, 0x33, 0x44, 0x55};
+    size_t len = 0;
+
     ASSERT(fl_net_wifi_mgmt_hdr_valid(probe, sizeof(probe)));
     probe[0] = 0x08;
     ASSERT(!fl_net_wifi_mgmt_hdr_valid(probe, sizeof(probe)));
+    ASSERT(fl_net_wifi_mgmt_build_auth_req(sta, bssid, auth, sizeof(auth), &len) == FL_RESULT_OK);
+    ASSERT(len == FL_WIFI_MGMT_HDR_LEN + 6u);
+    ASSERT(fl_net_wifi_mgmt_build_rsne_ie(FL_WIFI_AUTH_WPA2_PSK, rsne, sizeof(rsne), &len) ==
+           FL_RESULT_OK);
+    ASSERT(len > 0u);
+    return 0;
+}
+
+static int test_wifi_lab_static_l3_udp(void) {
+    static const uint8_t bssid[6] = {0x02, 0x11, 0x22, 0x33, 0x44, 0x55};
+    fl_net_wifi_cred_t cred;
+    uint32_t ip_be = 0u;
+    uint32_t gw_be;
+    const char payload[] = "wifi-lab-udp-echo";
+    uint8_t rx[128];
+    size_t rx_len = 0;
+    fl_result_t rc;
+
+    fl_net_route_init();
+    fl_net_udp_demux_reset();
+    ASSERT(fl_net_udp_bind_port(48077u) == FL_RESULT_OK);
+    ASSERT(fl_net_wifi_station_init() == FL_RESULT_OK);
+    ASSERT(fl_net_wifi_scan(FL_WIFI_BAND_ANY, 1000u) == FL_RESULT_OK);
+    memset(&cred, 0, sizeof(cred));
+    strncpy(cred.ssid, "LabAxHome", sizeof(cred.ssid) - 1u);
+    strncpy(cred.passphrase, "secret", sizeof(cred.passphrase) - 1u);
+    cred.auth_mode = FL_WIFI_AUTH_WPA3_SAE;
+    ASSERT(fl_net_wifi_connect(&cred, 5000u) == FL_RESULT_OK);
+    ASSERT(fl_net_wifi_state() == FL_WIFI_STATE_UP);
+    ASSERT(fl_net_wifi_station_netdev() != NULL);
+    ASSERT(fl_net_wifi_netdev_ipv4(&ip_be) == FL_RESULT_OK);
+    ASSERT(ip_be != 0u);
+    {
+        fl_net_wifi_l3_profile_t l3;
+        ASSERT(fl_net_wifi_netdev_l3_profile(&l3));
+        ASSERT(l3.gateway != 0u);
+        gw_be = l3.gateway;
+    }
+    rc = fl_net_udp_echo_exchange(gw_be, 48077u, 48078u, (const uint8_t *)payload,
+                                  strlen(payload), rx, sizeof(rx), &rx_len, 3000u);
+    ASSERT(rc == FL_RESULT_OK);
+    ASSERT(rx_len == strlen(payload));
+    ASSERT(memcmp(rx, payload, rx_len) == 0);
+    (void)bssid;
+    ASSERT(fl_net_wifi_disconnect() == FL_RESULT_OK);
     return 0;
 }
 
 int main(void) {
     ASSERT(setenv("FL_NET_WIFI_USE_WPA", "0", 1) == 0);
+    ASSERT(setenv("FL_NET_WIFI_LAB", "1", 1) == 0);
+    (void)unsetenv("FL_WIFI_80211AX_MOCK");
+    (void)unsetenv("FL_WIFI_UART_FD");
 
     if (test_he_capabilities_parse() != 0)
         return 1;
@@ -252,17 +510,29 @@ int main(void) {
         return 1;
     if (test_sae_derive_pmk() != 0)
         return 1;
+    if (test_sae_dragonfly_selftest() != 0)
+        return 1;
+    if (test_sae_commit_token_before_scalar() != 0)
+        return 1;
     if (test_mgmt_probe_assoc() != 0)
         return 1;
+    if (test_twt_ieee_individual_element() != 0)
+        return 1;
     if (test_twt_mock() != 0)
+        return 1;
+    if (test_twt_power_manager() != 0)
         return 1;
     if (test_station_fsm_netdev() != 0)
         return 1;
     if (test_wpa2_connect_lab() != 0)
         return 1;
+    if (test_wpa2_dhcp_udp_twt_in_tree() != 0)
+        return 1;
     if (test_disconnect_clears_wlan_iface() != 0)
         return 1;
     if (test_mgmt_hdr_probe() != 0)
+        return 1;
+    if (test_wifi_lab_static_l3_udp() != 0)
         return 1;
     puts("test_p3_wifi: all passed");
     return 0;

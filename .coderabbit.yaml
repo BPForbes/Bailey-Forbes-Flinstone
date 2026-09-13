@@ -51,6 +51,12 @@ reviews:
 
     Prefer a rough balance of **about 15% comments to 85% code** in new or heavily touched areas: enough comments to explain non-obvious intent, invariants, and public contracts—avoid redundant narration of what the code already states line-by-line.
 
+    ## Kernel vs driver execution scope
+
+    When drivers are proposed to be added for a module (e.g., networking) through a pull request, the kernel's role should remain that of an orchestrator or instructor for those drivers. The kernel should delegate execution to the drivers rather than performing both the issuance and execution of instructions itself. This separation ensures cleaner layering, clearer ownership of responsibilities, and a more maintainable driver model.
+
+    **Review heuristics:** Flag new module-specific hardware/NIC logic added under **`kernel/core/net/`** (or other core policy trees) when it should live in **`kernel/drivers/`** behind **`fl_net_driver_t`** or an equivalent backend router. Cross-cutting protocol policy above the netdev boundary (routing, TCP/UDP, DHCP composition, session wire) may remain in core net code. Authoritative AI copy: **AGENTS.md** § *Kernel vs driver execution*, **CLAUDE.md** § *Implementation boundaries*, **`.cursor/rules/driver_orchestration.mdc`**.
+
   path_instructions:
     - path: "version/**/*.ver"
       instructions: |
@@ -62,8 +68,16 @@ reviews:
 
     - path: "AGENTS.md"
       instructions: |
-        Keep versioning rules in sync with `.coderabbit.yaml`, `.cursor/rules/versioning.mdc`, CLAUDE.md, and **replit.md** (Replit Agent policy).
+        Keep versioning rules in sync with `.coderabbit.yaml`, `.cursor/rules/versioning.mdc`, CLAUDE.md, and **replit.md** (Replit Agent policy). Keep **kernel vs driver execution** policy in sync with **`.cursor/rules/driver_orchestration.mdc`** and the global **Kernel vs driver execution scope** section in this file.
 
     - path: "replit.md"
       instructions: |
-        **Replit Agent** instructions must stay aligned with **CLAUDE.md**, **AGENTS.md**, **`.cursor/rules/versioning.mdc`**, **`.cursor/rules/review_tools.mdc`**, and the global **`reviews.instructions`** in this file. Do not document a separate or weaker policy for Replit-only agents. Update the policy table when any of those sources change.
+        **Replit Agent** instructions must stay aligned with **CLAUDE.md**, **AGENTS.md**, **`.cursor/rules/versioning.mdc`**, **`.cursor/rules/review_tools.mdc`**, **`.cursor/rules/driver_orchestration.mdc`**, and the global **`reviews.instructions`** in this file. Do not document a separate or weaker policy for Replit-only agents. Update the policy table when any of those sources change.
+
+    - path: "kernel/core/net/**"
+      instructions: |
+        **Kernel vs driver execution:** `kernel/core/net/` should orchestrate drivers and execute cross-cutting protocol policy (routing, TCP/UDP, DHCP composition, session wire). Do **not** add module-specific hardware/NIC execution here when a driver backend exists or is proposed—delegate scan, associate, frame TX/RX, firmware/UART/register work to **`kernel/drivers/`** via **`fl_net_driver_t`** or a backend router (e.g. **`wifi_driver_backend`**). Request moves when a PR implements driver-layer behavior in core net files.
+
+    - path: "kernel/drivers/**"
+      instructions: |
+        **Driver ownership:** Module-specific execution (hardware I/O, firmware rings, UART AT, NIC scan/connect, DMA) belongs here. WiFi drivers live under **`kernel/drivers/wifi/`**. Core net code should call narrow driver ops rather than duplicating driver behavior. When reviewing new drivers, confirm **`kernel/core/net/`** callers remain orchestration-only and do not re-implement the same hardware paths inline.
