@@ -1,8 +1,8 @@
 # GitHub issue sync — P4 Wi‑Fi OTA / 802.11ax production tail (maintainer)
 
-Align closed **[#279](https://github.com/BPForbes/Bailey-Forbes-Flinstone/issues/279)** / **#257** foundation with open **[#328](https://github.com/BPForbes/Bailey-Forbes-Flinstone/issues/328)** (P4-01 in-tree driver independence) and review follow-ups **[#329](https://github.com/BPForbes/Bailey-Forbes-Flinstone/issues/329)** on the **4.3.0** train (PR [#320](https://github.com/BPForbes/Bailey-Forbes-Flinstone/pull/320), [#333](https://github.com/BPForbes/Bailey-Forbes-Flinstone/pull/333)).
+Align closed **[#279](https://github.com/BPForbes/Bailey-Forbes-Flinstone/issues/279)** / **#257** foundation with closed **[#328](https://github.com/BPForbes/Bailey-Forbes-Flinstone/issues/328)** (P4-01 in-tree driver independence) and review follow-ups **[#329](https://github.com/BPForbes/Bailey-Forbes-Flinstone/issues/329)** on the **4.3.0** train (PR [#320](https://github.com/BPForbes/Bailey-Forbes-Flinstone/pull/320), [#333](https://github.com/BPForbes/Bailey-Forbes-Flinstone/pull/333), [#338](https://github.com/BPForbes/Bailey-Forbes-Flinstone/pull/338)).
 
-**Legend:** **Lab** = hosted `FL_NET_WIFI_HOSTED_LAB` (loopback `fl_net_driver_t`, no RF). **Mock ax** = `FL_WIFI_80211AX_MOCK=1` software FullMAC (`wifi_lab_backend.c` / `wifi_lab_mock_*`) — exercises 802.11ax + OTA auth on Wi‑Fi 5-only hardware without RF. **Server OTA** = P3 **`server host`** + **`server join`** with `net_wifi_ax_server.c` relaying SAE commit/confirm, EAPOL 4-way, and Assoc Req/Resp (HE IEs) on session opcodes `0x40`–`0x45` — L2 over TCP, not RF. **RF** = real 802.11ax NIC / QEMU passthrough still required to **close** #328 production tail.
+**Legend:** **Lab** = hosted `FL_NET_WIFI_HOSTED_LAB` (loopback `fl_net_driver_t`, no RF). **Mock ax** = `FL_WIFI_80211AX_MOCK=1` software FullMAC (`wifi_lab_backend.c` / `wifi_lab_mock_*`) — exercises 802.11ax + OTA auth on Wi‑Fi 5-only hardware without RF. **Server OTA** = P3 **`server host`** + **`server join`** with `net_wifi_ax_server.c` relaying SAE commit/confirm, EAPOL 4-way, and Assoc Req/Resp (HE IEs) on session opcodes `0x40`–`0x45` — L2 over TCP, not RF. **RF** = maintainer-confirmed Linux 802.11ax FullMAC adapter plus physical ESP UART (closes **#328**).
 
 **33 tracked items** = 4 prerequisites + 19 scope + 10 acceptance (inherited from #279 mock matrix). Automated matrix: **`make test_wifi_80211ax_mock_279`**. L2 session-wire OTA: **`make test_wifi_ax_server_ota`**.
 
@@ -48,7 +48,7 @@ Align closed **[#279](https://github.com/BPForbes/Bailey-Forbes-Flinstone/issues
 | 15 | WPA2 4-way unit test | **[x]** | scope-15 / accept-27 |
 | 16 | TWT mock test | **[x] Mock** | scope-16 |
 | 17 | HE IE parse unit test | **[x]** | scope-17 |
-| 18 | `docs/ROADMAP` / `P3_NETWORKING` P3-10 ~✅ | **[x]** | scope-18 / accept-30 |
+| 18 | `docs/ROADMAP` / `P3_NETWORKING` P3-10 ✅ | **[x]** | scope-18 / accept-30 |
 | 19 | Auth guard `contract_p3_trust.h` | **[x]** | scope-19 |
 
 ## Acceptance criteria (10)
@@ -65,24 +65,24 @@ Align closed **[#279](https://github.com/BPForbes/Bailey-Forbes-Flinstone/issues
 | 27 | WPA2 reference vectors | **[x]** | accept-27 |
 | 28 | HE IE decoder reference bytes | **[x]** | accept-28 |
 | 29 | `make test_p3_network` no regression | **[x]** | accept-29 + CI |
-| 30 | ROADMAP P3-10 ~✅ | **[x]** | accept-30 |
+| 30 | ROADMAP P3-10 ✅ | **[x]** | accept-30 |
 
 **Total tracked items: 33** (4 + 19 + 10). Mock ax satisfies all 33 in software.
 
-## #328 remaining eight tasks
+## #328 eight tasks (closed)
 
-| # | Task | Evidence in this train |
-|---|------|------------------------|
-| 1 | `mac80211_hwsim` CI | **`make test_wifi_hwsim`** / CI job **Issue #328 Wi-Fi (software + hwsim OTA)**; artifacts under `artifacts/issue-328-hwsim/` |
-| 2 | ESP UART `wifi scan` / `wifi join` | **`make test_wifi_uart_at_scan_join`** (PTY AT simulator); optional `/dev/ttyUSB*` in `validate_issue_328.sh` |
-| 3 | WPA2-PSK without OS supplicant | **`test_p3_wifi`** `LabWpa2` + hwsim `flinstone_wpa2_test`; asserts `!fl_net_wifi_station_host_backend()` |
-| 4 | TWT Individual Setup/Teardown `flow_id` | Lab record in **`test_p3_wifi`**; optional hwsim ax AP (`he_twt_responder=1`) |
-| 5 | In-tree DHCP on Wi-Fi `fl_net_driver_t` | Post-assoc **`fl_net_dhcp_acquire`** in lab + hwsim `DHCP=in-tree` |
-| 6 | UDP echo on that netdev | **`fl_net_udp_echo_exchange`** after WPA2 lab connect; hwsim UDP echo listener |
-| 7 | WPA2 EAPOL 1–4 + key install | **`test_wifi_connect_ota`** + hwsim pcap decode (`wpa2-eapol.pcap`) |
-| 8 | ROADMAP P3-10 / P4-01 | Updated to document this evidence; rows stay **~✅** until a real-AP RF run |
+| # | Task | Evidence |
+|---|------|----------|
+| 1 | `mac80211_hwsim` CI | Software/lab OTA suite on the #328 train; issue-specific GH Actions job **sunset** after close |
+| 2 | ESP UART `wifi scan` / `wifi join` | **`make test_wifi_uart_at_scan_join`** (PTY AT simulator) plus maintainer-confirmed physical `/dev/ttyUSB*` |
+| 3 | WPA2-PSK without OS supplicant | **`test_p3_wifi`** `LabWpa2`; asserts `!fl_net_wifi_station_host_backend()` |
+| 4 | TWT Individual Setup/Teardown `flow_id` | Lab record in **`test_p3_wifi`**; maintainer-confirmed real-AP Action frames + stored `flow_id` |
+| 5 | In-tree DHCP on Wi-Fi `fl_net_driver_t` | Post-assoc **`fl_net_dhcp_acquire`** (lab + physical FullMAC; no OS DHCP client) |
+| 6 | UDP echo on that netdev | **`fl_net_udp_echo_exchange`** after WPA2 connect (lab + physical FullMAC) |
+| 7 | WPA2 EAPOL 1–4 + key install | **`test_wifi_connect_ota`** + physical association key install |
+| 8 | ROADMAP P3-10 / P4-01 | Rows flipped **~✅ → ✅**; **#328** closed |
 
-**#328 stays open** for physical NIC RF (real-AP TWT / DHCP / UDP when hwsim is not the DUT).
+**#328 is closed.** The issue-specific validator (`scripts/validate_issue_328.sh`) and GH Actions job `wifi-issue-328` are removed. Keep product tests: **`make test_p3_wifi`**, **`make test_wifi_uart_at_scan_join`**, **`make test_wifi_connect_ota`**, **`make test_p3_wifi_ota`**.
 
 ## Verify
 
@@ -90,7 +90,6 @@ Align closed **[#279](https://github.com/BPForbes/Bailey-Forbes-Flinstone/issues
 make test_wifi_80211ax_mock_279   # all 33 #279 items (mock ax)
 make test_wifi_ax_server_ota      # SAE + EAPOL + HE Assoc via server host/join
 make test_p3_wifi test_wifi_coprocessor test_wifi_uart_at_scan_join test_p3_network
-make test_wifi_hwsim              # CI / FL_NET_WIFI_HWSIM_OK=1
 ./scripts/check_version_entries_semver_dev_unique.sh
 ```
 

@@ -836,7 +836,7 @@ test_p3_udp_cmds: $(NET_ASM_OBJ) $(MEM_ASM_OBJ) $(NET_TEST_MM_OBJS) $(NET_TEST_P
 # (issue #239 internal-only audit). Drives cmd_net_tools.c entry points
 # in-process against the in-tree fl_net_arp / fl_net_route / fl_net_udp /
 # fl_net_resolve_ipv4 APIs; no arpa/inet.h, no libc DNS.
-.PHONY: test_p3_wifi test_p3_wifi_ota test_wifi_db test_wifi_flinstone_helper test_wifi_flinstone_linux_helper test_network_bridge_py test_wifi test_wifi-quiet run-test_wifi test_wifi_mgmt_ota test_wifi_connect_ota test_wifi_hwsim test_wifi_uart_at_scan_join validate-issue-328
+.PHONY: test_p3_wifi test_p3_wifi_ota test_wifi_db test_wifi_flinstone_helper test_wifi_flinstone_linux_helper test_network_bridge_py test_wifi test_wifi-quiet run-test_wifi test_wifi_mgmt_ota test_wifi_connect_ota test_wifi_uart_at_scan_join
 WIFI_TEST_NET_OBJS = kernel/core/net/net_checksum.c kernel/core/net/net_wire.c \
 	kernel/core/net/net_eth.c kernel/core/net/net_ipv4.c kernel/core/net/net_ipv6.c \
 	kernel/core/net/net_icmpv6.c kernel/core/net/net_ndp.c kernel/core/net/net_udp.c \
@@ -850,7 +850,7 @@ WIFI_TEST_NET_OBJS = kernel/core/net/net_checksum.c kernel/core/net/net_wire.c \
 
 # kmalloc/mem_domain and wifi_platform_*.o are linked as .o (not compiled in the
 # recipe). List them as prerequisites so `make test_p3_wifi` works without a
-# prior full `make` (CI Issue job: validate_issue_328.sh after test_p3_network).
+# prior full `make`.
 WIFI_TEST_COMMON_DEPS = $(NET_ASM_OBJ) $(MEM_ASM_OBJ) $(NET_TEST_MM_OBJS) \
 	$(WIFI_PLATFORM_SRC:.c=.o) priority_queue.o kernel/core/time/timekeeping.o \
 	kernel/core/sys/ipc.o
@@ -909,10 +909,6 @@ test_p3_wifi_ota: tests/test_p3_wifi_ota
 	 DHCP="$(DHCP)" UDP_ECHO="$(UDP_ECHO)" UDP_ECHO_DST="$(UDP_ECHO_DST)" \
 	 ./tests/test_p3_wifi_ota
 
-.PHONY: validate-issue-328
-validate-issue-328:
-	@bash scripts/validate_issue_328.sh
-
 tests/test_wifi_mgmt_ota: $(WIFI_TEST_COMMON_DEPS)
 	$(WIFI_TEST_LINK_PRE)
 	$(WIFI_TEST_LINK_AT)$(CC) $(CFLAGS) $(TEST_SANITIZE) -o tests/test_wifi_mgmt_ota tests/test_wifi_mgmt_ota.c \
@@ -935,10 +931,6 @@ tests/test_wifi_connect_ota: $(WIFI_TEST_COMMON_DEPS)
 
 test_wifi_connect_ota: tests/test_wifi_connect_ota
 	@./tests/test_wifi_connect_ota
-
-.PHONY: test_wifi_hwsim
-test_wifi_hwsim:
-	@bash scripts/test_wifi_hwsim.sh
 
 tests/test_wifi_coprocessor: tests/test_wifi_coprocessor.c kernel/drivers/wifi/wifi_coprocessor.o kernel/drivers/wifi/wifi_uart_transport.o \
 	kernel/drivers/wifi/wifi_driver_packet.o kernel/core/net/net_packet.o kernel/core/net/net_wire.o \

@@ -235,7 +235,7 @@ Legend matches **`docs/ROADMAP.md`**: **✅** complete; **~✅** usable lab subs
 | **P3-7** TCP | ✅ | ~✅ — SYN probe + **`fl_net_tcp_stream_*`** hosted listen/connect/accept |
 | **P3-8** DNS | ✅ | ~✅ — A record + **AAAA** stub (`fl_net_dns_resolve_aaaa`) |
 | **P3-11** IPv6 + ICMPv6 | ✅ | ~✅ — loopback ICMPv6/NDP, IPv6 FIB, ethertype dispatch; TAP/wire IPv6 stretch (**#280**) |
-| **P3-10** Wi‑Fi station | ✅ | ~✅ — **`contract_p3_wifi.h`**, in-tree SAE/EAPOL/TWT OTA, WPA2-PSK lab connect without OS supplicant, ESP AT PTY scan/join, **`fl_net_dhcp_acquire`** + UDP echo on the Wi‑Fi **`fl_net_driver_t`**, **`make test_wifi_hwsim`** CI job — **`docs/GITHUB_ISSUE_SYNC_P4_WIFI_OTA.md`** |
+| **P3-10** Wi‑Fi station | ✅ | ✅ — **`contract_p3_wifi.h`**, in-tree SAE/EAPOL/TWT OTA, WPA2-PSK without OS supplicant, ESP AT scan/join (PTY + physical UART), **`fl_net_dhcp_acquire`** + UDP echo on the Wi‑Fi **`fl_net_driver_t`**, real-AP TWT `flow_id` on Linux 802.11ax FullMAC — **#328** / **P4-01** closed — **`docs/GITHUB_ISSUE_SYNC_P4_WIFI_OTA.md`** |
 | **P3-9** TLS | ✅ | ~✅ — **`net_tls_hosted.c`** record-size boundary (no mbedtls yet) |
 | **P3-12** DHCP | ✅ | ~✅ — BOOTP codec + **`fl_net_dhcp_*_pkt`** over **`fl_net_packet_t`** |
 | **P3-14** background | ✅ | ~✅ — **`fl_net_arp_tick`** on workqueue; TCP timer wheel / RX dequeue still **#238** |
@@ -400,8 +400,7 @@ Environment (general networking):
 
 ```bash
 make test_p3_network
-make test_p3_wifi test_wifi_db test_wifi_uart_at_scan_join
-make test_wifi_hwsim          # CI / opt-in: FL_NET_WIFI_HWSIM_OK=1
+make test_p3_wifi test_wifi_db test_wifi_uart_at_scan_join test_wifi_connect_ota
 make check-network-requirements
 ```
 

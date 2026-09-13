@@ -4,7 +4,7 @@ Explicit promotion trackers for roadmap rows marked **`[DEFERRED]`** at the **co
 
 | Issue | Roadmap | Contract header | Integration (PRE 4.2.0) |
 |-------|---------|-----------------|-------------------------|
-| [#257](https://github.com/BPForbes/Bailey-Forbes-Flinstone/issues/257) / [#279](https://github.com/BPForbes/Bailey-Forbes-Flinstone/issues/279) | **P3-10** Wi‑Fi station | **`contract_p3_wifi.h`** | **~✅ foundation** — contract + HE IE parser + API stubs; **❌** NIC/P4 + WPA3/SAE production |
+| [#257](https://github.com/BPForbes/Bailey-Forbes-Flinstone/issues/257) / [#279](https://github.com/BPForbes/Bailey-Forbes-Flinstone/issues/279) / [#328](https://github.com/BPForbes/Bailey-Forbes-Flinstone/issues/328) | **P3-10** Wi‑Fi station | **`contract_p3_wifi.h`** | **✅** — foundation (**#279**) plus production tail (**#328** / **P4-01**) closed |
 | [#258](https://github.com/BPForbes/Bailey-Forbes-Flinstone/issues/258) / [#280](https://github.com/BPForbes/Bailey-Forbes-Flinstone/issues/280) | **P3-11** IPv6 + ICMPv6 | **`contract_p3_ipv6.h`** (forward: `contract_p3_ipv6_deferred.h`) | **~✅ foundation** — see below |
 
 ## P3-10 Wi‑Fi (#257 / #279)
@@ -26,7 +26,7 @@ When promoted, **802.11** data frames still cross **`fl_net_frame_view_t`**, the
 
 Maintainer checklist: **`docs/GITHUB_ISSUE_SYNC_P4_WIFI_OTA.md`**.
 
-**Blocking (per [#279](https://github.com/BPForbes/Bailey-Forbes-Flinstone/issues/279)):** P4 firmware/driver scope and a confirmed QEMU 802.11ax or physical WiFi 6 NIC before production association/DHCP claims.
+**Closed (per [#328](https://github.com/BPForbes/Bailey-Forbes-Flinstone/issues/328)):** maintainer-confirmed physical ESP UART scan/join, real-AP TWT Individual Setup/Teardown with negotiated `flow_id`, and in-tree DHCP + UDP echo on a Linux 802.11ax FullMAC adapter. ROADMAP **P3-10** / **P4-01** are **✅**. The table above is the historical **#279** foundation snapshot; current status is in **`docs/ROADMAP.md`** and **`docs/P3_NETWORKING.md`**.
 
 ## P3-11 IPv6 (#258 / #280)
 
@@ -58,5 +58,5 @@ For the **current layer map**, tests, and standards table, use **[`docs/P3_NETWO
 - [`docs/P3_NETWORKING.md`](P3_NETWORKING.md) — active P3 map (**authoritative for implementation**)
 - [`docs/ROADMAP.md`](ROADMAP.md) — phase table (P3-11 module integration **~✅**)
 - [`docs/GITHUB_ISSUE_SYNC_PR301.md`](GITHUB_ISSUE_SYNC_PR301.md) — maintainer checklist to align **#280** / **#283** GitHub bodies with this tree (CodeRabbit sync)
-- [`docs/GITHUB_ISSUE_SYNC_P4_WIFI_OTA.md`](GITHUB_ISSUE_SYNC_P4_WIFI_OTA.md) — maintainer checklist to align **#279** / **#328** / **#257** scope vs PR #306 / #320 foundation
+- [`docs/GITHUB_ISSUE_SYNC_P4_WIFI_OTA.md`](GITHUB_ISSUE_SYNC_P4_WIFI_OTA.md) — **#279** / **#328** / **#257** closure record (P3-10 / P4-01 **✅**)
 - [`docs/GITHUB_ISSUES_238_267_TRACKER.md`](GITHUB_ISSUES_238_267_TRACKER.md) — umbrella **#238–#267** (excl. **#239**)
