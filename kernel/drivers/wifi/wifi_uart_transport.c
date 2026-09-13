@@ -304,7 +304,10 @@ int wifi_uart_send_command(wifi_uart_context_t *ctx, const char *cmd)
 {
 	if (!ctx || !cmd)
 		return -1;
-	return wifi_uart_send_raw(ctx, (const uint8_t *)cmd, strlen(cmd));
+	/* 0 on success: callers (init/scan/join) treat any non-zero as failure.
+	 * wifi_uart_send_raw returns the byte count, which must not leak through.
+	 */
+	return wifi_uart_send_raw(ctx, (const uint8_t *)cmd, strlen(cmd)) < 0 ? -1 : 0;
 }
 
 int wifi_uart_read_response(wifi_uart_context_t *ctx, char *buffer, size_t buf_len,
@@ -339,11 +342,10 @@ int wifi_uart_read_response(wifi_uart_context_t *ctx, char *buffer, size_t buf_l
 
 		if (chunk_len > 0) {
 			total_read += chunk_len;
-			if (strstr(&buffer[total_read > 10 ? total_read - 10 : 0], "\r\nOK\r\n") ||
-			    strstr(&buffer[total_read > 10 ? total_read - 10 : 0],
-				   "\r\nERROR\r\n") ||
-			    strstr(&buffer[total_read > 10 ? total_read - 10 : 0],
-				   "\r\nFAIL\r\n"))
+			buffer[total_read] = '\0';
+			if (strstr(buffer, "\r\nOK\r\n") || strstr(buffer, "\r\nERROR\r\n") ||
+			    strstr(buffer, "\r\nFAIL\r\n") || strstr(buffer, "OK\r\n") ||
+			    strstr(buffer, "ERROR\r\n"))
 				break;
 		} else if (ret != 0) {
 			wifi_platform_sleep_ms(10);
@@ -691,6 +693,12 @@ int wifi_uart_coproc_create(const char *name, int uart_fd, wifi_uart_baud_t baud
 	wifi_coproc_register_transport(coproc, uart_ctx);
 	coproc->transport_owned = true;
 	wifi_coproc_register_ops(coproc, &wifi_uart_coproc_ops);
+	/* Hosted builds: POSIX I/O on this fd (PTY / socketpair / ttyUSB). */
+	(void)wifi_platform_host_uart_bind(uart_fd);
+	if (wifi_platform_host_uart_configure((unsigned)baud) != 0) {
+		wifi_coproc_destroy(coproc);
+		return -1;
+	}
 
 	*out_coproc = coproc;
 	return 0;

@@ -126,6 +126,23 @@ static void lab_seed_scan(uint8_t band)
         e->channel_width_mhz = 20;
         lab_apply_ax_ap(e);
     }
+    if (band == FL_WIFI_BAND_2GHZ || band == FL_WIFI_BAND_ANY) {
+        fl_net_wifi_scan_entry_t *e = &s_lab_scan[s_lab_scan_count++];
+
+        strncpy(e->ssid, "LabWpa2", sizeof(e->ssid) - 1u);
+        e->bssid[0] = 0x02;
+        e->bssid[1] = 0x22;
+        e->bssid[2] = 0x00;
+        e->bssid[3] = 0x00;
+        e->bssid[4] = 0x00;
+        e->bssid[5] = 0x02;
+        e->rssi_dbm = -50;
+        e->channel = 11;
+        e->auth_mode = FL_WIFI_AUTH_WPA2_PSK;
+        e->band = FL_WIFI_BAND_2GHZ;
+        e->channel_width_mhz = 20;
+        lab_apply_ax_ap(e);
+    }
     {
         const char *home_ssid = getenv("FL_NET_WIFI_HOME_SSID");
 

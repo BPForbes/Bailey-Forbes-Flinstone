@@ -374,19 +374,24 @@ static int scope18_roadmap(void)
 {
     FILE *f = fopen("docs/ROADMAP.md", "r");
     char buf[512];
-    int found = 0;
+    int found_done = 0;
+    int found_partial = 0;
     if (!f)
         FAIL279("scope-18", "ROADMAP.md");
     while (fgets(buf, sizeof(buf), f)) {
-        if (strstr(buf, "P3-10") && strstr(buf, "~✅")) {
-            found = 1;
-            break;
-        }
+        if (!strstr(buf, "| **P3-10** |"))
+            continue;
+        if (strstr(buf, "~✅"))
+            found_partial = 1;
+        else if (strstr(buf, "✅"))
+            found_done = 1;
     }
     fclose(f);
-    if (!found)
-        FAIL279("scope-18", "P3-10 ~✅");
-    OK279("scope-18 ROADMAP/P3_NETWORKING ~✅ (accept-30)");
+    if (found_partial)
+        FAIL279("scope-18", "P3-10 still ~✅");
+    if (!found_done)
+        FAIL279("scope-18", "P3-10 ✅");
+    OK279("scope-18 ROADMAP P3-10 ✅ (accept-30)");
     return 0;
 }
 
@@ -578,6 +583,6 @@ int main(void)
             return 1;
     }
 
-    puts("test_wifi_80211ax_mock_279: all 33 #279 items passed (802.11ax mock; production RF open)");
+    puts("test_wifi_80211ax_mock_279: all 33 #279 items passed (802.11ax mock; #328 / P3-10 production tail closed)");
     return 0;
 }

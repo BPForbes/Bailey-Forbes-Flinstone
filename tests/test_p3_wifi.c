@@ -346,14 +346,89 @@ static int test_disconnect_clears_wlan_iface(void) {
 
 static int test_wpa2_connect_lab(void) {
     fl_net_wifi_cred_t cred;
+    fl_net_wifi_scan_entry_t entries[8];
+    size_t count = 0;
+    size_t i;
+    int saw_wpa2 = 0;
 
+    ASSERT(setenv("FL_NET_WIFI_USE_WPA", "0", 1) == 0);
+    ASSERT(unsetenv("FL_NET_WIFI_FLINSTONE_PS") == 0 || getenv("FL_NET_WIFI_FLINSTONE_PS") == NULL);
+    ASSERT(unsetenv("FL_NET_WIFI_FLINSTONE_LINUX") == 0 ||
+           getenv("FL_NET_WIFI_FLINSTONE_LINUX") == NULL);
+    fl_net_wifi_wpa_lab_reset();
     ASSERT(fl_net_wifi_station_init() == FL_RESULT_OK);
-    (void)fl_net_wifi_scan(FL_WIFI_BAND_2GHZ, 1000u);
+    ASSERT(fl_net_wifi_scan(FL_WIFI_BAND_2GHZ, 1000u) == FL_RESULT_OK);
+    ASSERT(fl_net_wifi_scan_result(entries, 8, &count) == FL_RESULT_OK);
+    for (i = 0; i < count; i++) {
+        if (!strcmp(entries[i].ssid, "LabWpa2") &&
+            entries[i].auth_mode == FL_WIFI_AUTH_WPA2_PSK)
+            saw_wpa2 = 1;
+    }
+    ASSERT(saw_wpa2);
     memset(&cred, 0, sizeof(cred));
-    strncpy(cred.ssid, "GuestOpen", sizeof(cred.ssid) - 1u);
-    cred.auth_mode = FL_WIFI_AUTH_OPEN;
+    strncpy(cred.ssid, "LabWpa2", sizeof(cred.ssid) - 1u);
+    strncpy(cred.passphrase, "labwpa2-secret", sizeof(cred.passphrase) - 1u);
+    cred.auth_mode = FL_WIFI_AUTH_WPA2_PSK;
     ASSERT(fl_net_wifi_connect(&cred, 0u) == FL_RESULT_OK);
     ASSERT(fl_net_wifi_state() == FL_WIFI_STATE_UP);
+    ASSERT(!fl_net_wifi_station_host_backend());
+    ASSERT(fl_net_wifi_wpa_lab_ptk_installed());
+    fl_net_wifi_cred_scrub_passphrase(&cred);
+    ASSERT(fl_net_wifi_disconnect() == FL_RESULT_OK);
+    printf("ok #328 WPA2-PSK fl_net_wifi_connect (no OS supplicant)\n");
+    return 0;
+}
+
+static int test_wpa2_dhcp_udp_twt_in_tree(void) {
+    fl_net_wifi_cred_t cred;
+    fl_net_wifi_twt_params_t req = {.wake_duration_us = 8000u,
+                                    .wake_interval_us = 100000u,
+                                    .implicit = 1};
+    fl_net_wifi_twt_params_t agreed = {0};
+    uint32_t ip_be = 0u;
+    uint32_t gw_be = 0u;
+    const char payload[] = "issue-328-wpa2-udp";
+    uint8_t rx[128];
+    size_t rx_len = 0;
+    fl_net_wifi_l3_profile_t l3;
+    fl_result_t rc;
+
+    ASSERT(setenv("FL_NET_WIFI_USE_WPA", "0", 1) == 0);
+    fl_net_route_init();
+    fl_net_udp_demux_reset();
+    ASSERT(fl_net_udp_bind_port(48077u) == FL_RESULT_OK);
+    fl_net_wifi_wpa_lab_reset();
+    ASSERT(fl_net_wifi_station_init() == FL_RESULT_OK);
+    ASSERT(fl_net_wifi_scan(FL_WIFI_BAND_ANY, 1000u) == FL_RESULT_OK);
+    memset(&cred, 0, sizeof(cred));
+    strncpy(cred.ssid, "LabWpa2", sizeof(cred.ssid) - 1u);
+    strncpy(cred.passphrase, "labwpa2-secret", sizeof(cred.passphrase) - 1u);
+    cred.auth_mode = FL_WIFI_AUTH_WPA2_PSK;
+    ASSERT(fl_net_wifi_connect(&cred, 5000u) == FL_RESULT_OK);
+    ASSERT(fl_net_wifi_state() == FL_WIFI_STATE_UP);
+    ASSERT(!fl_net_wifi_station_host_backend());
+    ASSERT(fl_net_wifi_station_netdev() != NULL);
+    ASSERT(fl_net_wifi_netdev_ipv4(&ip_be) == FL_RESULT_OK);
+    ASSERT(ip_be != 0u);
+    ASSERT(fl_net_wifi_netdev_l3_profile(&l3));
+    ASSERT(l3.gateway != 0u);
+    gw_be = l3.gateway;
+    printf("ok #328 in-tree DHCP on Wi-Fi fl_net_driver_t ip=0x%08x (no OS DHCP)\n",
+           (unsigned)ip_be);
+
+    ASSERT(fl_net_wifi_twt_setup(&req, &agreed) == FL_RESULT_OK);
+    ASSERT(agreed.flow_id < 8u);
+    printf("ok #328 TWT Individual Setup flow_id=%u\n", (unsigned)agreed.flow_id);
+    ASSERT(fl_net_wifi_twt_teardown(agreed.flow_id) == FL_RESULT_OK);
+    ASSERT(fl_net_wifi_twt_next_wake_us() == 0u);
+    printf("ok #328 TWT Individual Teardown flow_id=%u\n", (unsigned)agreed.flow_id);
+
+    rc = fl_net_udp_echo_exchange(gw_be, 48077u, 48078u, (const uint8_t *)payload,
+                                  strlen(payload), rx, sizeof(rx), &rx_len, 3000u);
+    ASSERT(rc == FL_RESULT_OK);
+    ASSERT(rx_len == strlen(payload));
+    ASSERT(memcmp(rx, payload, rx_len) == 0);
+    printf("ok #328 UDP echo via in-tree Wi-Fi fl_net_driver_t\n");
     ASSERT(fl_net_wifi_disconnect() == FL_RESULT_OK);
     return 0;
 }
@@ -450,6 +525,8 @@ int main(void) {
     if (test_station_fsm_netdev() != 0)
         return 1;
     if (test_wpa2_connect_lab() != 0)
+        return 1;
+    if (test_wpa2_dhcp_udp_twt_in_tree() != 0)
         return 1;
     if (test_disconnect_clears_wlan_iface() != 0)
         return 1;

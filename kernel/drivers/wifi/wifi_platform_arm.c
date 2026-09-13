@@ -102,6 +102,23 @@ const wifi_platform_uart_ops_t *wifi_platform_get_uart_ops(void)
 	return &wifi_platform_uart_ops;
 }
 
+int wifi_platform_host_uart_bind(int fd)
+{
+	(void)fd;
+	return -1;
+}
+
+int wifi_platform_host_uart_configure(unsigned baud)
+{
+	(void)baud;
+	return 0;
+}
+
+int wifi_platform_host_uart_fd(void)
+{
+	return -1;
+}
+
 /* Platform time utilities */
 fl_result_t wifi_platform_get_ms(uint32_t *ms_out)
 {

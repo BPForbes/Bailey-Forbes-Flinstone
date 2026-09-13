@@ -1,0 +1,10 @@
+MAJOR_VERSION=4
+STANDARD_VERSION=3
+RELEASE_VERSION=0
+PRERELEASE=1
+DEV_VERSION=4
+DESCRIPTION<<PROMOTE_DESC_END
+4.3.0: #328 remaining eight-task train — mac80211_hwsim CI job ran the OTA suite and kept pcap/logs (item 1); ESP AT UART scan/join over a PTY simulator plus physical /dev/ttyUSB* (item 2); fl_net_wifi_connect(WPA2-PSK) reaches UP on the in-tree lab/physical path without wpa_cli/nmcli/NetworkManager (item 3); TWT Individual Setup/Teardown records negotiated flow_id (lab + real-AP Action frames) (item 4); in-tree fl_net_dhcp_acquire on the Wi-Fi fl_net_driver_t after association (item 5); in-tree UDP echo on that same netdev (item 6); WPA2 EAPOL-Key 1–4 + key install evidence from mock OTA and physical association (item 7); ROADMAP P3-10 / P4-01 flipped ~✅ to ✅ after maintainer-confirmed physical UART / real-AP TWT flow_id / in-tree DHCP+UDP on a Linux 802.11ax FullMAC adapter (item 8). Sunset GitHub Actions job wifi-issue-328 and scripts/validate_issue_328.sh (plus the test_wifi_hwsim wrapper) now that #328 is closed. Review follow-up: tty raw/baud on hosted UART bind, distinct EAPOL-Key msg 1–4 pcap classify, and WIFI_TEST_STATION_DRIVER_SRCS defined before test_p3_wifi prerequisites. Cleared the two leftover P3_NETWORKING.md rows that still called P3-10 ~✅ (standards map + future-work table).
+PROMOTE_DESC_END
+
+RELEASE_DATE=2026-09-13
