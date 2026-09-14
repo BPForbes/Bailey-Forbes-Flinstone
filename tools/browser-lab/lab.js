@@ -1,93 +1,272 @@
 (() => {
   "use strict";
-
+  const core = window.FlintstoneLabCore;
+  const allowedParents = origin => {
+    if (origin === "https://bailey-forbes.com") return true;
+    try {
+      const url = new URL(origin);
+      return url.protocol === "http:" && (url.hostname === "127.0.0.1" || url.hostname === "127.0.0.2");
+    } catch (_) {
+      return false;
+    }
+  };
   const config = Object.assign({
-    metadataUrl: "../../dist/build-info.json",
-    artifactBaseUrl: "../../dist",
-    v86ScriptUrl: "./vendor/libv86.js",
-    v86WasmUrl: "./vendor/v86.wasm",
-    biosUrl: "./vendor/seabios.bin",
-    vgaBiosUrl: "./vendor/vgabios.bin",
+    metadataUrl: "../../dist/build-info.json", artifactBaseUrl: "../../dist",
+    parentOrigin: "https://bailey-forbes.com",
+    createEmulator: window.createFlintstoneQemu,
+    relayPort: 8767,
+    relayRoom: "lab",
   }, window.FLINTSTONE_LAB_CONFIG || {});
-
-  const text = (id, value) => {
-    document.getElementById(id).textContent = value;
+  if (!allowedParents(config.parentOrigin)) config.parentOrigin = "https://bailey-forbes.com";
+  const text = (id, value) => { const node = document.getElementById(id); if (node) node.textContent = value; };
+  const resetDisplayProbe = () => {
+    document.documentElement.dataset.vgaCell = "";
+    const placeholder = document.getElementById("display-placeholder");
+    if (placeholder) placeholder.hidden = false;
   };
-
-  const loadScript = (url) => new Promise((resolve, reject) => {
-    const script = document.createElement("script");
-    script.src = url;
-    script.onload = resolve;
-    script.onerror = () => reject(new Error(`Unable to load emulator runtime: ${url}`));
-    document.head.appendChild(script);
-  });
-
-  const validateManifest = (info) => {
-    const stringFields = [
-      "shortCommit", "architecture", "browserEmulator", "artifact",
-      "sha256", "bootSuccessMarker", "validationOutcome",
+  const setState = (state, detail) => {
+    const node = document.getElementById("status");
+    node.className = [core.STATES.BLOCKED, core.STATES.FAILED].includes(state) ? "blocked" : "";
+    node.textContent = detail ? `${state}: ${detail}` : state;
+    document.documentElement.dataset.labState = String(state).toLowerCase().replace(/\s+/g, "-");
+    if (state === core.STATES.BOOTING || state === core.STATES.OFF) resetDisplayProbe();
+  };
+  let info;
+  let busy = false;
+  let emulator = null;
+  let sessions = { 1: "flinstone" };
+  let activeSession = 1;
+  let relay = null;
+  const validation = new URLSearchParams(location.search).get("validate") === "1";
+  const usesBrowserRelay = () => info && info.serverPath === "relay";
+  const principal = () => sessions[activeSession] || "flinstone";
+  const serial = document.getElementById("serial");
+  const canvas = document.querySelector("#screen canvas");
+  const screen = document.getElementById("screen");
+  function renderCaps(capabilities) {
+    const node = document.getElementById("capabilities");
+    if (!node) return;
+    const rows = [
+      ["identity", "Identity / switch user"],
+      ["hostedLabSessions", "Multiple sessions"],
+      ["keyboard", "Keyboard"],
+      ["filesystem", "Filesystem"],
+      ["network", "Networking"],
+      ["server", "Server host/join"],
     ];
-    if (!info || info.schemaVersion !== 1) {
-      throw new Error("Unsupported browser artifact manifest schema");
+    node.replaceChildren();
+    for (const [key, label] of rows) {
+      const item = document.createElement("div");
+      let on = Boolean(capabilities && capabilities[key]);
+      let detail = on ? "available" : "unavailable";
+      if (key === "server" && usesBrowserRelay()) {
+        on = true;
+        detail = "relay (browser-hosted)";
+      } else if (key === "network" && usesBrowserRelay()) {
+        detail = "unavailable (guest); relay for chat";
+      }
+      item.className = on ? "cap-on" : "cap-off";
+      item.textContent = `${label}: ${detail}`;
+      node.appendChild(item);
     }
-    if (stringFields.some((field) => typeof info[field] !== "string" || !info[field])) {
-      throw new Error("Browser artifact manifest is missing required string fields");
+  }
+  function renderRuntimeMode() {
+    const node = document.getElementById("runtime-mode");
+    if (!node || !info) return;
+    if (info.runtimeMode === "browser-hosted" || usesBrowserRelay()) {
+      node.textContent = "Runtime: browser-hosted online — server chat via JS relay (same wire as net_server.c). Local VM/bare-metal uses native C/ASM.";
+    } else {
+      node.textContent = "Runtime: native local — use server host/join in the shell (kernel/core/net).";
     }
-    if (typeof info.bootable !== "boolean" || typeof info.v86Compatible !== "boolean" ||
-        typeof info.bootSuccessMarkerImplemented !== "boolean") {
-      throw new Error("Browser artifact manifest has invalid promotion flags");
-    }
-    if (!Array.isArray(info.blockers) ||
-        !Number.isSafeInteger(info.recommendedRamBytes) || info.recommendedRamBytes <= 0) {
-      throw new Error("Browser artifact manifest has invalid runtime requirements");
-    }
-  };
-
-  async function start() {
-    const response = await fetch(config.metadataUrl, { cache: "no-store" });
-    if (!response.ok) {
-      throw new Error(`Metadata request failed: HTTP ${response.status}`);
-    }
-    const info = await response.json();
-    validateManifest(info);
-
-    text("commit", info.shortCommit);
-    text("architecture", info.architecture);
-    text("emulator", info.browserEmulator);
-    text("artifact", info.artifact);
-
-    if (!info.bootable || !info.v86Compatible) {
-      const reason = (info.blockers || []).join("; ");
-      const status = document.getElementById("status");
-      status.className = "blocked";
-      status.textContent = `Blocked by architecture contract: ${reason}`;
+  }
+  function appendChat(line) {
+    const node = document.getElementById("server-chat");
+    if (!node) return;
+    node.textContent = (node.textContent + line + "\n").slice(-65536);
+    node.scrollTop = node.scrollHeight;
+  }
+  function renderRelayStatus(text) {
+    const node = document.getElementById("server-status");
+    if (node) node.textContent = text;
+  }
+  function renderRoster(members) {
+    const node = document.getElementById("server-roster");
+    if (!node) return;
+    if (!members || !members.length) {
+      node.textContent = "Members: —";
       return;
     }
-
-    if (!window.V86) {
-      await loadScript(config.v86ScriptUrl);
-    }
-    if (!window.V86) {
-      throw new Error("The configured emulator runtime did not expose window.V86");
-    }
-
-    const artifactUrl = new URL(`${config.artifactBaseUrl}/${info.artifact}`, location.href);
-    artifactUrl.searchParams.set("v", info.shortCommit);
-    window.flintstoneEmulator = new window.V86({
-      wasm_path: config.v86WasmUrl,
-      screen_container: document.getElementById("screen"),
-      bios: { url: config.biosUrl },
-      vga_bios: { url: config.vgaBiosUrl },
-      hda: { url: artifactUrl.href },
-      memory_size: info.recommendedRamBytes,
-      autostart: true,
-    });
-    text("status", "Booting");
+    node.textContent = members.map(m => `#${m.memberId} ${m.principal}${m.isHost ? " (host)" : ""}`).join("\n");
   }
-
-  start().catch((error) => {
-    const status = document.getElementById("status");
-    status.className = "blocked";
-    status.textContent = error.message;
+  function setupRelay() {
+    const panel = document.getElementById("server-panel");
+    if (!usesBrowserRelay() || !window.FlintstoneServerRelayClient) {
+      if (panel) panel.hidden = true;
+      return;
+    }
+    if (panel) panel.hidden = false;
+    relay = window.FlintstoneServerRelayClient.createRelayClient(config);
+    relay.on(event => {
+      if (event.type === "hello") {
+        renderRelayStatus(`Connected as ${event.display} (#${event.memberId})`);
+        appendChat(`[relay] joined as ${event.display}`);
+      } else if (event.type === "announcement") {
+        appendChat(`[announce] ${event.text}`);
+      } else if (event.type === "message") {
+        appendChat(event.text);
+      } else if (event.type === "roster") {
+        renderRoster(event.members);
+      } else if (event.type === "error") {
+        appendChat(`[error] ${event.text}`);
+      } else if (event.type === "closed") {
+        renderRelayStatus("Disconnected");
+      }
+    });
+    const connect = async () => {
+      try {
+        renderRelayStatus("Connecting…");
+        await relay.connect(principal());
+      } catch (error) {
+        renderRelayStatus(error.message || "Connection failed");
+      }
+    };
+    document.getElementById("server-host")?.addEventListener("click", connect);
+    document.getElementById("server-join")?.addEventListener("click", connect);
+    document.getElementById("server-leave")?.addEventListener("click", () => {
+      relay?.leave();
+      renderRelayStatus("Disconnected");
+      renderRoster([]);
+    });
+    document.getElementById("server-msg-form")?.addEventListener("submit", async event => {
+      event.preventDefault();
+      const input = document.getElementById("server-msg");
+      const text = input?.value.trim();
+      if (!text) return;
+      if (!relay?.connected) await connect();
+      if (relay?.sendMessage(text)) {
+        appendChat(`${relay.display}: ${text}`);
+        input.value = "";
+      }
+    });
+  }
+  function renderSessions() {
+    const node = document.getElementById("session-tabs");
+    if (!node) return;
+    node.replaceChildren();
+    Object.keys(sessions).sort((a, b) => Number(a) - Number(b)).forEach(id => {
+      const button = document.createElement("button");
+      button.type = "button";
+      button.dataset.session = id;
+      button.textContent = `Session ${id}: ${sessions[id]}`;
+      if (Number(id) === activeSession) button.setAttribute("aria-current", "true");
+      button.onclick = async () => { await sendGuest(`session ${id}\n`); };
+      node.appendChild(button);
+    });
+    text("account-status", `Active session ${activeSession}: ${sessions[activeSession] || "—"}`);
+  }
+  function noteSerial(value) {
+    const sessionMatch = /SESSION (\d+) user=(\S+)/.exec(value);
+    const switchMatch = /SWITCHUSER user=(\S+)/.exec(value);
+    if (sessionMatch) {
+      activeSession = Number(sessionMatch[1]);
+      sessions[activeSession] = sessionMatch[2];
+      renderSessions();
+    } else if (switchMatch) {
+      sessions[activeSession] = switchMatch[1];
+      renderSessions();
+    }
+  }
+  function renderScreen(bytes) {
+    // Render the guest-owned 80x25 VGA text buffer at physical 0xb8000.
+    // This is a text-mode display, not a graphics-mode VGA implementation.
+    // Latch the diagnostic cell: SeaBIOS/empty dumps must not clear a later
+    // kernel frame, and they must not hide the placeholder on a fresh boot.
+    if (!core.validDiagnosticVga(bytes)) return;
+    document.documentElement.dataset.vgaCell = "F";
+    const colors = ["#000", "#00a", "#0a0", "#0aa", "#a00", "#a0a", "#a50", "#aaa", "#555", "#55f", "#5f5", "#5ff", "#f55", "#f5f", "#ff5", "#fff"];
+    canvas.width = 800; canvas.height = 400;
+    const ctx = canvas.getContext("2d");
+    ctx.font = "16px monospace"; ctx.textBaseline = "top";
+    for (let i = 0; i < 2000; i++) {
+      const ch = bytes[i * 2], attr = bytes[i * 2 + 1], x = (i % 80) * 10, y = Math.floor(i / 80) * 16;
+      ctx.fillStyle = colors[(attr >> 4) & 7]; ctx.fillRect(x, y, 10, 16);
+      ctx.fillStyle = colors[attr & 15];
+      if (ch >= 32 && ch <= 126) ctx.fillText(String.fromCharCode(ch), x, y);
+    }
+    document.getElementById("display-placeholder").hidden = true;
+  }
+  const options = () => ({
+    artifactUrl: new URL(`${config.artifactBaseUrl}/${info.artifact}?v=${info.shortCommit}`, location.href).href,
+    memorySize: info.recommendedRamBytes,
+    sha256: info.sha256,
+    onScreen: renderScreen, onDiagnostic: text => console.warn(text),
   });
+  async function sendGuest(value) {
+    if (!emulator || typeof emulator.sendText !== "function") return;
+    await emulator.sendText(value);
+  }
+  const controller = core.createController({
+    marker: "FLINTSTONE_KERNEL_BOOT_OK", setState,
+    postReady: () => window.parent.postMessage({ source: "flinstone-guest", type: "ready", schemaVersion: 1, commit: info.shortCommit }, config.parentOrigin),
+    createEmulator: async (settings) => {
+      if (typeof config.createEmulator !== "function") throw new Error("No validated x86-64 browser emulator is configured");
+      serial.textContent = "";
+      activeSession = 1;
+      sessions = { 1: "flinstone" };
+      renderSessions();
+      emulator = await config.createEmulator({ ...settings, serialByte: byte => {
+        serial.textContent = (serial.textContent + String.fromCharCode(byte)).slice(-65536);
+        noteSerial(serial.textContent.slice(-80));
+        settings.serialByte(byte);
+      } });
+      return emulator;
+    },
+  });
+  async function load() {
+    setState(core.STATES.LOADING);
+    const response = await fetch(config.metadataUrl, { cache: "no-store" });
+    if (!response.ok) throw new Error(`Metadata request failed: HTTP ${response.status}`);
+    info = core.validateManifest(await response.json());
+    if (info.serverRelayPort) config.relayPort = info.serverRelayPort;
+    text("commit", info.shortCommit); text("architecture", info.architecture);
+    text("emulator", info.browserEmulator); text("artifact", info.artifact);
+    renderRuntimeMode();
+    renderCaps(info.capabilities);
+    renderSessions();
+    setupRelay();
+    if (!canBoot()) {
+      setState(core.STATES.BLOCKED, info.blockers.join("; "));
+      return;
+    }
+    await controller.boot(options());
+  }
+  function canBoot() { return info && info.bootable && (info.browserCompatible || (validation && info.bootableCandidate)); }
+  for (const [id, action] of Object.entries({ boot: () => controller.boot(options()), pause: () => controller.pause(), resume: () => controller.resume(), reset: () => controller.reset(options()), poweroff: () => controller.powerOff() })) {
+    document.getElementById(id).onclick = async () => {
+      if (busy || ((id === "boot" || id === "reset") && !canBoot())) return;
+      busy = true;
+      try { await action(); } catch (error) { controller.fail(error); } finally { busy = false; }
+    };
+  }
+  screen.addEventListener("keydown", event => {
+    if (!emulator || typeof emulator.sendKey !== "function") return;
+    const codes = window.FlintstoneQemuKeys && window.FlintstoneQemuKeys.qcodesForEvent(event);
+    if (!codes) return;
+    event.preventDefault();
+    emulator.sendKey(codes).catch(error => controller.fail(error));
+  });
+  const form = document.getElementById("switch-user");
+  if (form) {
+    form.addEventListener("submit", async event => {
+      event.preventDefault();
+      const name = document.getElementById("account-name").value.trim();
+      if (!name) return;
+      await sendGuest(`switchuser ${name}\n`);
+    });
+    document.getElementById("account-new-session").onclick = async () => {
+      const name = document.getElementById("account-name").value.trim() || "flinstone";
+      await sendGuest(`session new\nswitchuser ${name}\n`);
+    };
+  }
+  load().catch((error) => controller.fail(error));
 })();

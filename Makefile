@@ -342,7 +342,7 @@ deploy:
 	@gcc -std=c11 -Wall -Wextra -O2 -o gen_version_changelog scripts/gen_version_changelog.c && ./gen_version_changelog
 	@$(MAKE) CHANGELOG_CI=1 all
 
-.PHONY: vm baremetal browser-kernel test-browser-kernel test-browser-kernel-gate
+.PHONY: vm baremetal browser-kernel test-browser-kernel test-browser-kernel-gate test-browser-lab test-browser-boot test-browser-boot-packaged test-browser-iframe test-freestanding-entry test-freestanding-shell browser-lab-runtime browser-lab-release
 vm:
 	$(MAKE) VM_ENABLE=1 $(TARGET)
 
@@ -351,19 +351,46 @@ vm:
 vm-sdl:
 	$(MAKE) VM_ENABLE=1 VM_SDL=1 $(TARGET)
 
-# Browser-lab contract.  The current output is an audited x86_64 hosted ELF
-# candidate, not a boot disk: scripts/package_browser_kernel_artifact.sh records
-# that fact in build-info.json so a lab cannot accidentally pass it to v86.
+# Browser-lab boot boundary. This produces a BIOS raw disk with a lab identity
+# shell and concurrent sessions. Hosted filesystem, networking, and server remain
+# unavailable and are reported explicitly in the manifest.
 browser-kernel:
-	$(MAKE) clean
-	$(MAKE) ARCH=x86_64_gas baremetal
-	@./scripts/package_browser_kernel_artifact.sh
+	@./scripts/build_freestanding_browser_kernel.sh
 
 test-browser-kernel: browser-kernel
 	@./scripts/test_browser_kernel_artifact.sh
 
 test-browser-kernel-gate:
 	@bash ./tests/test_browser_kernel_promotion_gate.sh
+
+test-freestanding-entry:
+	@bash ./tests/test_freestanding_entry.sh
+
+test-freestanding-shell: test-browser-kernel
+	@python3 ./scripts/test_freestanding_shell.py
+
+gen-session-wire-js:
+	@python3 ./scripts/gen_session_wire_js.py
+
+test-browser-lab: gen-session-wire-js
+	@node ./tests/test_browser_lab.js
+	@node ./tests/test_server_relay.js
+	@PYTHONDONTWRITEBYTECODE=1 python3 ./tests/test_package_browser_lab_release.py
+
+browser-lab-runtime:
+	@python3 ./scripts/fetch_browser_runtime.py
+
+test-browser-boot: test-browser-kernel browser-lab-runtime
+	@node ./scripts/test_browser_boot.cjs
+
+browser-lab-release: test-browser-boot
+	@python3 ./scripts/package_browser_lab_release.py
+
+test-browser-boot-packaged: browser-lab-release
+	@FL_BROWSER_TEST_PACKAGED=1 node ./scripts/test_browser_boot.cjs
+
+test-browser-iframe: browser-lab-release
+	@node ./scripts/test_browser_iframe.cjs
 
 # Fetch and build external libs (SDL2, CUnit) into deps/install.
 .PHONY: deps deps-sdl2 deps-cunit

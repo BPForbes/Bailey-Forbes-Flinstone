@@ -95,3 +95,5 @@ tests/test_wifi_80211ax_mock_279
 tests/test_workqueue_*
 server_shared/
 artifacts/
+/tools/browser-lab/vendor/qemu/
+/tools/browser-lab/node_modules/
