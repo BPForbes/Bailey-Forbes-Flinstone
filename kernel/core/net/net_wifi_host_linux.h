@@ -37,6 +37,13 @@ int fl_net_wifi_host_linux_available(void);
 /** `"wpa_cli"`, `"nmcli"`, or NULL when no host backend is active. */
 const char *fl_net_wifi_host_linux_backend_name(void);
 
+/**
+ * Parse one tab-separated `wpa_cli scan_results` row. SSIDs longer than the
+ * IEEE maximum are safely truncated to **FL_WIFI_SSID_MAX** bytes.
+ */
+fl_result_t fl_net_wifi_host_linux_parse_scan_line(const char *line,
+                                                   fl_net_wifi_scan_entry_t *entry);
+
 fl_result_t fl_net_wifi_host_linux_scan(uint8_t band, unsigned timeout_ms);
 fl_result_t fl_net_wifi_host_linux_scan_result(fl_net_wifi_scan_entry_t *entries, size_t cap,
                                                size_t *count_out);

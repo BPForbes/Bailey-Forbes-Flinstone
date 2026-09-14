@@ -34,6 +34,10 @@ fl_result_t fl_net_tcp_accept(uint16_t listen_port_host, unsigned *conn_id_out);
 
 fl_result_t fl_net_tcp_send(unsigned conn_id, const uint8_t *data, size_t len);
 
+/**
+ * Receive up to **cap** queued bytes, retaining any unread suffix for the next call.
+ * A zero-capacity read is invalid and consumes nothing; an empty queue times out.
+ */
 fl_result_t fl_net_tcp_recv(unsigned conn_id, uint8_t *buf, size_t cap, size_t *out_len);
 
 fl_result_t fl_net_tcp_close(unsigned conn_id);

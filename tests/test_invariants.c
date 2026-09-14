@@ -26,10 +26,12 @@
 
 #define ASSERT(c) do { if (!(c)) { fprintf(stderr, "FAIL: %s\n", #c); return 1; } } while(0)
 
-_Static_assert(FL_CONTRACT_P8_VIRTUALIZATION_REV == 1, "tests track P8 umbrella rev");
+_Static_assert(FL_CONTRACT_P8_VIRTUALIZATION_REV == 2, "tests track P8 umbrella rev");
 _Static_assert(FL_CONTRACT_P8_1_TIMING_CONTRACT_DEFINED == 1, "P8-1 shard must stay defined");
 _Static_assert(FL_CONTRACT_P8_2_VIRTIO_GUEST_CONTRACT_DEFINED == 1, "P8-2 shard must stay defined");
 _Static_assert(FL_CONTRACT_P8_3_QEMU_LAB_CONTRACT_DEFINED == 1, "P8-3 shard must stay defined");
+_Static_assert(FL_CONTRACT_P8_BROWSER_ARTIFACT_CONTRACT_DEFINED == 1,
+               "P8-3 browser artifact shard must stay defined");
 
 _Static_assert(FL_CONTRACT_P9_HARDENING_REV == 2, "tests track P9 umbrella rev");
 _Static_assert(FL_CONTRACT_P9_1_FUZZ_CONTRACT_DEFINED == 1, "P9-1 shard must stay defined");
@@ -200,6 +202,7 @@ static int test_history_unpack_all_surfaces(void) {
         FL_CONTRACT_SURFACE_LOG_SINK,
         FL_CONTRACT_SURFACE_AUTHZ,
         FL_CONTRACT_SURFACE_FS_JAIL,
+        FL_CONTRACT_SURFACE_BROWSER_ARTIFACT,
     };
     const size_t nsurfaces = sizeof(surfaces) / sizeof(surfaces[0]);
     for (size_t i = 0; i < nsurfaces; i++) {
@@ -374,7 +377,7 @@ static int test_contract_constants(void) {
     ASSERT(FL_RESULT_BUSY == -16);
     ASSERT(FL_RESULT_TIMEDOUT == -110);
 
-    ASSERT(FL_CONTRACT_P0_FOUNDATIONS_REV == 4);
+    ASSERT(FL_CONTRACT_P0_FOUNDATIONS_REV == 5);
     ASSERT(FL_CONTRACT_P0_3_CI_CONTRACT_DEFINED == 1);
     ASSERT(FL_CONTRACT_P0_CI_INTERCHANGE_REV == 2);
     ASSERT((int)fl_contract_p0_ci_surface_default_gate ==
@@ -405,6 +408,11 @@ static int test_contract_constants(void) {
     ASSERT(FL_CONTRACT_SURFACE_LOG_SINK_LIFETIME_CALLER_STACK == 0);
     ASSERT(FL_CONTRACT_SURFACE_LOG_SINK_CONCURRENCY ==
            FL_CONTRACT_P0_SURFACE_CONCURRENCY_LOCK_GUARDED);
+    ASSERT(FL_CONTRACT_P8_BROWSER_ARTIFACT_INTERCHANGE_REV == 1);
+    ASSERT(FL_CONTRACT_P8_BROWSER_ARTIFACT_SCHEMA_VERSION == 1);
+    ASSERT(strcmp(FL_CONTRACT_P8_BROWSER_ARTIFACT_BOOT_MARKER,
+                  "FLINTSTONE_KERNEL_BOOT_OK") == 0);
+    ASSERT(FL_CONTRACT_P8_BROWSER_ARTIFACT_PROMOTION_REQUIRES_QEMU_OBSERVATION == 1);
     ASSERT(FL_CONTRACT_COMPILE_EXTENSIONS == 0);
 
     ASSERT(FL_CONTRACT_P1_RUNTIME_REV == 2);
@@ -541,7 +549,8 @@ static int test_contract_constants(void) {
     ASSERT((int)FL_CONTRACT_SURFACE_LOG_SINK == 2);
     ASSERT((int)FL_CONTRACT_SURFACE_AUTHZ == 3);
     ASSERT((int)FL_CONTRACT_SURFACE_FS_JAIL == 4);
-    ASSERT((int)FL_CONTRACT_SURFACE_COUNT == 5);
+    ASSERT((int)FL_CONTRACT_SURFACE_BROWSER_ARTIFACT == 5);
+    ASSERT((int)FL_CONTRACT_SURFACE_COUNT == 6);
 
     /* Authz decisions */
     ASSERT((int)FL_AUTHZ_DENY == 0);

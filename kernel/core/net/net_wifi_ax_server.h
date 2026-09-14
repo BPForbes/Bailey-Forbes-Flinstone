@@ -18,8 +18,10 @@
 
 typedef struct {
     uint8_t bssid[6];
+    uint8_t sta_mac[6]; /* expected station for the lab SAE exchange */
     uint8_t auth_mode; /* FL_WIFI_AUTH_* */
     char ssid[FL_WIFI_SSID_MAX + 1u];
+    char passphrase[FL_WIFI_PASSPHRASE_MAX + 1u];
 } fl_net_wifi_ax_ap_config_t;
 
 /** Enable mock 802.11ax AP handling on an active server host. */

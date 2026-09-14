@@ -342,7 +342,7 @@ deploy:
 	@gcc -std=c11 -Wall -Wextra -O2 -o gen_version_changelog scripts/gen_version_changelog.c && ./gen_version_changelog
 	@$(MAKE) CHANGELOG_CI=1 all
 
-.PHONY: vm baremetal
+.PHONY: vm baremetal browser-kernel test-browser-kernel test-browser-kernel-gate
 vm:
 	$(MAKE) VM_ENABLE=1 $(TARGET)
 
@@ -350,6 +350,20 @@ vm:
 .PHONY: vm-sdl
 vm-sdl:
 	$(MAKE) VM_ENABLE=1 VM_SDL=1 $(TARGET)
+
+# Browser-lab contract.  The current output is an audited x86_64 hosted ELF
+# candidate, not a boot disk: scripts/package_browser_kernel_artifact.sh records
+# that fact in build-info.json so a lab cannot accidentally pass it to v86.
+browser-kernel:
+	$(MAKE) clean
+	$(MAKE) ARCH=x86_64_gas baremetal
+	@./scripts/package_browser_kernel_artifact.sh
+
+test-browser-kernel: browser-kernel
+	@./scripts/test_browser_kernel_artifact.sh
+
+test-browser-kernel-gate:
+	@bash ./tests/test_browser_kernel_promotion_gate.sh
 
 # Fetch and build external libs (SDL2, CUnit) into deps/install.
 .PHONY: deps deps-sdl2 deps-cunit
@@ -758,10 +772,11 @@ test_server_shared_purge: kernel/core/vfs/server_shared_fs.o kernel/core/vfs/ser
 	./tests/test_server_shared_purge
 
 .PHONY: test_server_file_accept_path
-test_server_file_accept_path: kernel/core/net/net_channel_sidecar.o kernel/core/net/net_pkt_channel_meta.o kernel/core/net/net_file_delivery.o kernel/core/vfs/server_shared_fs.o kernel/core/vfs/server_shared_db.o kernel/core/vfs/server_shared_digest.o userland/shell/common.o
+test_server_file_accept_path: $(NET_ASM_OBJ) kernel/core/net/net_channel_sidecar.o kernel/core/net/net_pkt_channel_meta.o kernel/core/net/net_file_delivery.o kernel/core/vfs/server_shared_fs.o kernel/core/vfs/server_shared_db.o kernel/core/vfs/server_shared_digest.o userland/shell/common.o
 	$(CC) $(CFLAGS) $(TEST_SANITIZE) -o tests/test_server_file_accept_path tests/test_server_file_accept_path.c tests/stubs_file_delivery_net.c \
 	  kernel/core/net/net_channel_sidecar.o kernel/core/net/net_pkt_channel_meta.o \
-	  kernel/core/net/net_file_delivery.o kernel/core/vfs/server_shared_fs.o kernel/core/vfs/server_shared_db.o kernel/core/vfs/server_shared_digest.o userland/shell/common.o -lsqlite3 $(OPENSSL_LIBS) -Wl,-z,noexecstack
+	  kernel/core/net/net_file_delivery.o kernel/core/vfs/server_shared_fs.o kernel/core/vfs/server_shared_db.o kernel/core/vfs/server_shared_digest.o userland/shell/common.o \
+	  $(NET_ASM_OBJ) -lsqlite3 $(OPENSSL_LIBS) -Wl,-z,noexecstack
 	./tests/test_server_file_accept_path
 
 .PHONY: test_channel_sidecar
@@ -1158,20 +1173,20 @@ test_replay:
 	$(MAKE) clean
 	$(MAKE) VM_ENABLE=1 ARCH=$(ARCH) BPForbes_Flinstone_Shell
 	$(CC) $(CFLAGS) -DVM_ENABLE=1 -I$(ASM_SRC_DIR) -I$(KERNEL_DRIVERS) -Ikernel -Ikernel/drivers -Ikernel/drivers/wifi -IVM -IVM/devices -o tests/test_replay tests/test_replay.c \
-	  userland/shell/common.o $(UTIL_SHELL_LINK_OBJS) userland/shell/terminal.o kernel/core/vfs/disk.o kernel/core/vfs/fat32_host.o kernel/core/vfs/fat32_host_files.o disk_host_io.o disk_asm.o dir_asm.o \
+	  userland/shell/common.o userland/shell/authz_subsystem.o $(UTIL_SHELL_LINK_OBJS) userland/shell/terminal.o kernel/core/vfs/disk.o kernel/core/vfs/fat32_host.o kernel/core/vfs/fat32_host_files.o disk_host_io.o disk_asm.o dir_asm.o \
 	  kernel/core/vfs/path_log.o kernel/core/vfs/cluster.o kernel/core/vfs/fs.o priority_queue.o \
 	  kernel/core/vfs/fs_provider.o kernel/core/vfs/fs_command.o kernel/core/vfs/fs_events.o kernel/core/vfs/fs_policy.o \
-	  kernel/core/vfs/fs_chain.o kernel/core/vfs/fs_facade.o kernel/core/vfs/fs_service_glue.o $(FS_JAIL_CORE_OBJS) kernel/core/mm/mem_domain.o kernel/core/mm/kmalloc.o \
+	  kernel/core/vfs/fs_chain.o kernel/core/vfs/fs_facade.o kernel/core/vfs/fs_service_glue.o $(FS_JAIL_CORE_OBJS) $(FS_JAIL_SUPPORT_OBJS) kernel/core/mm/mem_domain.o kernel/core/mm/kmalloc.o \
 	  kernel/core/sys/vrt.o kernel/core/sys/ipc.o kernel/core/sys/syscall.o kernel/core/vfs/vfs.o \
 	  kernel/drivers/bus.o kernel/drivers/driver_model.o \
 	  kernel/drivers/block/block_driver.o kernel/drivers/block/block_transport_host.o kernel/drivers/keyboard_driver.o kernel/drivers/display_driver.o \
-	  kernel/drivers/timer_driver.o kernel/drivers/pic_driver.o kernel/drivers/drivers.o \
+	  kernel/drivers/timer_driver.o kernel/drivers/pic_driver.o kernel/drivers/drivers.o kernel/drivers/p4_irq_lifecycle.o \
 	  $(KERNEL_DRIVERS)/../hal/ioport.o \
 	  $(KERNEL_DRIVERS)/pci.o \
 	  VM/devices/vm.o VM/devices/vm_cpu.o VM/devices/vm_mem.o VM/devices/vm_decode.o VM/devices/vm_io.o VM/devices/vm_loader.o \
 		  VM/devices/vm_display.o VM/devices/vm_host.o VM/devices/vm_font.o VM/devices/vm_disk.o VM/devices/vm_snapshot.o \
 		  VM/devices/vm_arch.o \
-		  $(MEM_ASM_OBJ) $(PORT_IO_OBJ) $(HISTORY_ASM_OBJ) -Wl,-z,noexecstack
+		  $(MEM_ASM_OBJ) $(PORT_IO_OBJ) $(DISK_HOST_ASM_OBJ) $(HISTORY_ASM_OBJ) $(FS_JAIL_TEST_LIBS) -Wl,-z,noexecstack
 	./tests/test_replay
 
 # Debug build: ASM contract asserts enabled

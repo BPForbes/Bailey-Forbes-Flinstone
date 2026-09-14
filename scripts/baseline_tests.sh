@@ -12,6 +12,9 @@ out="$(./BPForbes_Flinstone_Shell contracts json 2>/dev/null)" || true
 if ! echo "$out" | grep -q 'p8_virtualization_rev'; then
   echo "  contracts json: missing p8_virtualization_rev"; exit 1
 fi
+if ! echo "$out" | grep -q 'p8_browser_artifact_rev'; then
+  echo "  contracts json: missing p8_browser_artifact_rev"; exit 1
+fi
 if ! echo "$out" | grep -q 'p9_hardening_rev'; then
   echo "  contracts json: missing p9_hardening_rev"; exit 1
 fi

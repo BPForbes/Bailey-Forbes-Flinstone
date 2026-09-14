@@ -96,6 +96,7 @@ typedef struct fl_server_file_offer {
     char sender_nick_snapshot[FL_SERVER_NICK_MAX];
     char receiver_nick_snapshot[FL_SERVER_NICK_MAX];
 
+    /** Raw SHA-256 digest; all-zero means the offer does not declare a checksum. */
     uint8_t checksum[FL_SERVER_FILE_HASH_MAX];
 } fl_server_file_offer_t;
 
@@ -110,6 +111,7 @@ typedef struct fl_server_file_done {
     char share_id[FL_SERVER_SHARE_ID_MAX];
     uint64_t total_bytes;
     uint32_t total_chunks;
+    /** Raw SHA-256 digest; all-zero means the completion omits a checksum. */
     uint8_t checksum[FL_SERVER_FILE_HASH_MAX];
     uint8_t status;
 } fl_server_file_done_t;

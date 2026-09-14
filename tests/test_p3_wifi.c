@@ -2,6 +2,7 @@
  * P3-10 Wi-Fi (#279) — HE IE parser, crypto vectors, lab station FSM, netdev composition.
  */
 #include "net_wifi_he.h"
+#include "net_wifi_host_linux.h"
 #include "net_wifi_mgmt.h"
 #include "net_wifi_sae.h"
 #include "net_wifi_station.h"
@@ -64,6 +65,34 @@ static int test_scan_result_he_fields(void) {
         ASSERT(entries[1].he_supported == 1u);
         ASSERT(entries[1].channel_width_mhz <= 40u);
     }
+    return 0;
+}
+
+static int test_wpa_scan_ssid_bounds(void) {
+    fl_net_wifi_scan_entry_t entry;
+    char line[256];
+    char exact[FL_WIFI_SSID_MAX + 1u];
+    char longer[FL_WIFI_SSID_MAX + 17u];
+
+    memset(exact, 'A', FL_WIFI_SSID_MAX);
+    exact[FL_WIFI_SSID_MAX] = '\0';
+    snprintf(line, sizeof(line), "02:00:00:00:00:01\t5955\t-35\t[SAE]\t%s", exact);
+    ASSERT(fl_net_wifi_host_linux_parse_scan_line(line, &entry) == FL_RESULT_OK);
+    ASSERT(strlen(entry.ssid) == FL_WIFI_SSID_MAX);
+    ASSERT(memcmp(entry.ssid, exact, FL_WIFI_SSID_MAX) == 0);
+
+    memset(longer, 'B', sizeof(longer) - 1u);
+    longer[sizeof(longer) - 1u] = '\0';
+    snprintf(line, sizeof(line), "02:00:00:00:00:02\t2412\t-42\t[WPA2]\t%s", longer);
+    ASSERT(fl_net_wifi_host_linux_parse_scan_line(line, &entry) == FL_RESULT_OK);
+    ASSERT(strlen(entry.ssid) == FL_WIFI_SSID_MAX);
+    ASSERT(memcmp(entry.ssid, longer, FL_WIFI_SSID_MAX) == 0);
+    ASSERT(entry.ssid[FL_WIFI_SSID_MAX] == '\0');
+
+    snprintf(line, sizeof(line),
+             "02:00:00:00:00:03\t5180\t-51\t[WPA2]\tCafe WiFi");
+    ASSERT(fl_net_wifi_host_linux_parse_scan_line(line, &entry) == FL_RESULT_OK);
+    ASSERT(strcmp(entry.ssid, "Cafe WiFi") == 0);
     return 0;
 }
 
@@ -501,6 +530,8 @@ int main(void) {
     if (test_he_capabilities_parse() != 0)
         return 1;
     if (test_scan_result_he_fields() != 0)
+        return 1;
+    if (test_wpa_scan_ssid_bounds() != 0)
         return 1;
     if (test_wpa2_psk_pmk_vector() != 0)
         return 1;

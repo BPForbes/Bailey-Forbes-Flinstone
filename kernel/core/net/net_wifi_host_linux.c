@@ -521,6 +521,45 @@ static uint8_t band_from_freq(int freq) {
     return FL_WIFI_BAND_ANY;
 }
 
+fl_result_t fl_net_wifi_host_linux_parse_scan_line(const char *line,
+                                                   fl_net_wifi_scan_entry_t *entry) {
+    char bssid_txt[32];
+    int freq = 0;
+    int signal = -127;
+    char flags[128];
+    int ssid_offset = 0;
+    const char *ssid;
+    size_t ssid_len;
+
+    if (!line || !entry)
+        return FL_RESULT_INVAL;
+    flags[0] = '\0';
+    bssid_txt[0] = '\0';
+    if (sscanf(line, "%31s %d %d %127[^\t]%n", bssid_txt, &freq, &signal, flags,
+               &ssid_offset) < 4)
+        return FL_RESULT_INVAL;
+
+    ssid = line + ssid_offset;
+    while (*ssid == '\t' || *ssid == ' ')
+        ssid++;
+    ssid_len = strcspn(ssid, "\r\n");
+    if (ssid_len == 0u || !bssid_txt[0])
+        return FL_RESULT_INVAL;
+    if (ssid_len > FL_WIFI_SSID_MAX)
+        ssid_len = FL_WIFI_SSID_MAX;
+
+    memset(entry, 0, sizeof(*entry));
+    (void)parse_bssid(bssid_txt, entry->bssid);
+    memcpy(entry->ssid, ssid, ssid_len);
+    entry->ssid[ssid_len] = '\0';
+    entry->rssi_dbm = signal;
+    entry->auth_mode = parse_auth_token(flags);
+    entry->band = band_from_freq(freq);
+    entry->channel_width_mhz = 20;
+    fl_net_wifi_host_he_hint(entry, flags, NULL);
+    return FL_RESULT_OK;
+}
+
 static void parse_scan_results(const char *text, uint8_t band_filter) {
     const char *p = text;
     char line[512];
@@ -531,11 +570,6 @@ static void parse_scan_results(const char *text, uint8_t band_filter) {
     while (*p && s_wpa_scan_count < 32u) {
         size_t len = 0;
         fl_net_wifi_scan_entry_t *e;
-        char bssid_txt[32];
-        int freq = 0;
-        int signal = -127;
-        char flags[128];
-        char ssid[FL_WIFI_SSID_MAX];
 
         while (*p == '\n' || *p == '\r')
             p++;
@@ -554,23 +588,9 @@ static void parse_scan_results(const char *text, uint8_t band_filter) {
         }
         if (!strncmp(line, "bssid", 5))
             continue;
-        flags[0] = '\0';
-        ssid[0] = '\0';
-        bssid_txt[0] = '\0';
-        if (sscanf(line, "%31s %d %d %127[^\t] %63[^\n]", bssid_txt, &freq, &signal, flags,
-                   ssid) < 4)
-            continue;
-        if (!bssid_txt[0] || !ssid[0])
-            continue;
         e = &s_wpa_scan[s_wpa_scan_count];
-        memset(e, 0, sizeof(*e));
-        (void)parse_bssid(bssid_txt, e->bssid);
-        strncpy(e->ssid, ssid, sizeof(e->ssid) - 1u);
-        e->rssi_dbm = signal;
-        e->auth_mode = parse_auth_token(flags);
-        e->band = band_from_freq(freq);
-        e->channel_width_mhz = 20;
-        fl_net_wifi_host_he_hint(e, flags, NULL);
+        if (fl_net_wifi_host_linux_parse_scan_line(line, e) != FL_RESULT_OK)
+            continue;
         if (band_filter != FL_WIFI_BAND_ANY && e->band != band_filter)
             continue;
         s_wpa_scan_count++;

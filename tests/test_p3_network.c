@@ -340,9 +340,10 @@ static int test_tcp_fsm_loopback(void) {
     unsigned server_id = 0;
     unsigned client_id = 0;
     uint32_t loopback = fl_net_htonl(0x7F000001u);
-    const char msg[] = "fsm-data";
+    const char msg[] = "HEADERpayload";
+    const char later[] = "++";
     char rx[32];
-    size_t rx_len = 0;
+    size_t rx_len = 99u;
     fl_result_t rc;
 
     fl_net_tcp_fsm_reset();
@@ -354,10 +355,28 @@ static int test_tcp_fsm_loopback(void) {
     ASSERT(rc == FL_RESULT_OK);
     rc = fl_net_tcp_send(client_id, (const uint8_t *)msg, sizeof(msg) - 1u);
     ASSERT(rc == FL_RESULT_OK);
+    rc = fl_net_tcp_recv(server_id, (uint8_t *)rx, 0u, &rx_len);
+    ASSERT(rc == FL_RESULT_INVAL);
+    ASSERT(rx_len == 99u);
+    rc = fl_net_tcp_recv(server_id, (uint8_t *)rx, 6u, &rx_len);
+    ASSERT(rc == FL_RESULT_OK);
+    ASSERT(rx_len == 6u);
+    ASSERT(memcmp(rx, msg, 6u) == 0);
+
+    rc = fl_net_tcp_send(client_id, (const uint8_t *)later, sizeof(later) - 1u);
+    ASSERT(rc == FL_RESULT_OK);
+    rc = fl_net_tcp_recv(server_id, (uint8_t *)rx, 3u, &rx_len);
+    ASSERT(rc == FL_RESULT_OK);
+    ASSERT(rx_len == 3u);
+    ASSERT(memcmp(rx, "pay", 3u) == 0);
     rc = fl_net_tcp_recv(server_id, (uint8_t *)rx, sizeof(rx), &rx_len);
     ASSERT(rc == FL_RESULT_OK);
-    ASSERT(rx_len == sizeof(msg) - 1u);
-    ASSERT(memcmp(rx, msg, rx_len) == 0);
+    ASSERT(rx_len == 6u);
+    ASSERT(memcmp(rx, "load++", 6u) == 0);
+    rx_len = 77u;
+    ASSERT(fl_net_tcp_recv(server_id, (uint8_t *)rx, sizeof(rx), &rx_len) ==
+           FL_RESULT_TIMEDOUT);
+    ASSERT(rx_len == 77u);
     (void)fl_net_tcp_close(client_id);
     (void)fl_net_tcp_close(server_id);
     return 0;

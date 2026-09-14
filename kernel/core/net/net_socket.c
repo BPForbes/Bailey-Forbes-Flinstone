@@ -421,7 +421,7 @@ fl_result_t fl_net_sock_recv(fl_net_sock_handle_t handle, void *buf, size_t cap,
     fl_net_sock_slot_t *s = sock_lookup(handle);
     ssize_t n;
 
-    if (!s || !buf || !got)
+    if (!s || !buf || !got || cap == 0u)
         return FL_RESULT_INVAL;
     if (s->native)
         return fl_net_sock_native_recv(handle, buf, cap, got, timeout_ms);

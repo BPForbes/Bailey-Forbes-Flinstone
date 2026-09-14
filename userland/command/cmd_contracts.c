@@ -18,7 +18,7 @@ static void print_contract_help(void) {
         "\n"
         "Options:\n"
         "  summary   Human-readable listing (default)\n"
-        "  json      Single-line JSON: bundle rev, P0 rev, p3_networking_rev, p3_wire_rev, p4_drivers_rev, p8_virtualization_rev, p9_hardening_rev, result codes, surfaces\n"
+        "  json      Single-line JSON: bundle/Px revs, browser artifact schema, result codes, surfaces\n"
         "  --help    Show this message\n"
         "\n"
         "Examples:\n"
@@ -34,7 +34,7 @@ static fl_authz_decision_t demo_authz_always_allow(unsigned op, void *ctx) {
 }
 
 static const char *const CONTRACT_SURFACE_NAMES[] = {
-    "DRIVER_OPS", "NETDEV", "LOG_SINK", "AUTHZ", "FS_JAIL",
+    "DRIVER_OPS", "NETDEV", "LOG_SINK", "AUTHZ", "FS_JAIL", "BROWSER_ARTIFACT",
 };
 
 _Static_assert(sizeof(CONTRACT_SURFACE_NAMES) / sizeof(CONTRACT_SURFACE_NAMES[0]) ==
@@ -49,6 +49,10 @@ static int print_summary(void) {
     printf("  P4 drivers: umbrella rev %d (extends P0-P1; no P3 include)\n", FL_CONTRACT_P4_DRIVERS_REV);
     printf("  P8 virtualization: umbrella rev %d (extends P0 only; no P4 include)\n",
            FL_CONTRACT_P8_VIRTUALIZATION_REV);
+    printf("    browser artifact: interchange rev %d, JSON schema %d, marker %s\n",
+           FL_CONTRACT_P8_BROWSER_ARTIFACT_INTERCHANGE_REV,
+           FL_CONTRACT_P8_BROWSER_ARTIFACT_SCHEMA_VERSION,
+           FL_CONTRACT_P8_BROWSER_ARTIFACT_BOOT_MARKER);
     printf("  P9 hardening: umbrella rev %d (extends P0 only; no P8 include)\n",
            FL_CONTRACT_P9_HARDENING_REV);
     printf("  fl_result_t: OK=%d ERR=%d INVAL=%d NOSYS=%d\n",
@@ -75,21 +79,28 @@ static int print_summary(void) {
 static int print_json(void) {
     printf("{\"bundle_rev\":%d,\"p0_foundations_rev\":%d,"
            "\"p3_networking_rev\":%d,\"p3_wire_rev\":%d,\"p4_drivers_rev\":%d,"
-           "\"p8_virtualization_rev\":%d,\"p9_hardening_rev\":%d,"
+           "\"p8_virtualization_rev\":%d,\"p8_browser_artifact_rev\":%d,"
+           "\"p8_browser_artifact_schema\":%d,\"p9_hardening_rev\":%d,"
            "\"fl_result_ok\":%d,\"fl_result_err\":%d,"
            "\"fl_result_json_rc_min\":%d,\"fl_result_json_rc_max\":%d,"
            "\"fl_result_wire_min\":%d,\"fl_result_wire_max\":%d,"
            "\"log_rl_max_per_sec\":%d,"
-           "\"surfaces\":[\"DRIVER_OPS\",\"NETDEV\",\"LOG_SINK\",\"AUTHZ\",\"FS_JAIL\"],"
+           "\"surfaces\":[\"DRIVER_OPS\",\"NETDEV\",\"LOG_SINK\",\"AUTHZ\",\"FS_JAIL\","
+           "\"BROWSER_ARTIFACT\"],"
+           "\"browser_boot_marker\":\"%s\","
            "\"history_record_tag\":\"%s\","
            "\"audit_env\":\"%s\",\"audit_log_relative\":\"%s\","
            "\"vfs_include\":\"fl/vfs.h (separate)\"}\n",
            FL_CONTRACT_BUNDLE_REV, FL_CONTRACT_P0_FOUNDATIONS_REV,
            FL_CONTRACT_P3_NETWORKING_REV, FL_CONTRACT_P3_WIRE_REV, FL_CONTRACT_P4_DRIVERS_REV,
-           FL_CONTRACT_P8_VIRTUALIZATION_REV, FL_CONTRACT_P9_HARDENING_REV,
+           FL_CONTRACT_P8_VIRTUALIZATION_REV,
+           FL_CONTRACT_P8_BROWSER_ARTIFACT_INTERCHANGE_REV,
+           FL_CONTRACT_P8_BROWSER_ARTIFACT_SCHEMA_VERSION,
+           FL_CONTRACT_P9_HARDENING_REV,
            (int)FL_RESULT_OK, (int)FL_RESULT_ERR,
            FL_RESULT_JSON_RC_MIN, FL_RESULT_JSON_RC_MAX, FL_RESULT_WIRE_MIN, FL_RESULT_WIRE_MAX,
            FL_LOG_RL_MAX_PER_SEC,
+           FL_CONTRACT_P8_BROWSER_ARTIFACT_BOOT_MARKER,
            FL_HISTORY_RECORD_TAG, FL_AUDIT_ENV, FL_AUDIT_REL_DEFAULT);
     return 0;
 }
