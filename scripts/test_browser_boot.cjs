@@ -21,6 +21,7 @@ const diskPath = packaged
 const manifest = JSON.parse(fs.readFileSync(manifestPath));
 const lock = JSON.parse(fs.readFileSync(path.join(root, "tools/browser-lab/runtime-lock.json")));
 const port = Number(process.env.FL_BROWSER_TEST_PORT || (packaged ? 8770 : 8768));
+const relayPort = Number(process.env.FL_BROWSER_TEST_RELAY_PORT || 8767);
 const bind = process.env.FL_BROWSER_TEST_BIND || "127.0.0.1";
 const base = `http://${bind}:${port}`;
 let server, browser;
@@ -35,7 +36,7 @@ async function main() {
   for (const [name, sha] of Object.entries(lock.files)) {
     assert(digest(fs.readFileSync(path.join(runtimeDir, name))) === sha, `Runtime digest mismatch: ${name}`);
   }
-  const serverArgs = [path.join(root, "scripts/serve_browser_lab.py"), "--port", String(port), "--bind", bind, "--directory", labRoot];
+  const serverArgs = [path.join(root, "scripts/serve_browser_lab.py"), "--port", String(port), "--bind", bind, "--directory", labRoot, "--relay-port", String(relayPort)];
   server = spawn(process.env.FL_PYTHON || (process.platform === "win32" ? "python" : "python3"),
     serverArgs, { stdio: ["ignore", "pipe", "pipe"] });
   await new Promise((resolve, reject) => {
@@ -97,8 +98,15 @@ async function main() {
   await page.locator("#account-new-session").click();
   await page.locator("#serial").filter({ hasText: /SESSION 2 user=flinstone/ }).waitFor({ timeout: 20000 });
   await page.locator("#serial").filter({ hasText: /SWITCHUSER user=root/ }).waitFor({ timeout: 20000 });
-  await page.getByRole("button", { name: /Session 1: root/ }).click();
+  await page.locator("#screen").click();
+  await page.keyboard.type("session 1\n");
   await page.locator("#serial").filter({ hasText: /SESSION 1 user=root/ }).waitFor({ timeout: 45000 });
+  await page.locator("#server-panel").waitFor({ state: "visible", timeout: 5000 });
+  await page.getByRole("button", { name: "Host", exact: true }).click();
+  await page.locator("#server-status").filter({ hasText: /Connected as/ }).waitFor({ timeout: 15000 });
+  await page.locator("#server-msg").fill("hello relay");
+  await page.locator("#server-msg-form").getByRole("button", { name: "Send" }).click();
+  await page.locator("#server-chat").filter({ hasText: /hello relay/ }).waitFor({ timeout: 10000 });
   assert(errors.length === 0, `Browser errors: ${errors.join("; ")}`);
   await page.screenshot({ path: path.join(root, packaged ? "dist/browser-boot-packaged.png" : "dist/browser-boot.png"), fullPage: true });
   if (packaged) {
@@ -109,7 +117,7 @@ async function main() {
     commit: manifest.commit, artifactSha256: manifest.sha256,
     runtime: lock.runtime, runtimeCommit: lock.distributionCommit, runtimeFiles: lock.files,
     testedAt: new Date().toISOString(), browser: browser.version(),
-    serial, checks: ["exact-marker", "vga-text-memory", "pause-resume-twice", "reset", "power-off-worker-cleanup", "reboot", "blocked-button", "corrupt-digest", "switchuser-perspectives"],
+    serial, checks: ["exact-marker", "vga-text-memory", "pause-resume-twice", "reset", "power-off-worker-cleanup", "reboot", "blocked-button", "corrupt-digest", "switchuser-perspectives", "server-relay-chat"],
   };
   const current = JSON.parse(fs.readFileSync(manifestPath));
   assert(current.commit === manifest.commit && current.sha256 === manifest.sha256, "Manifest changed during validation");

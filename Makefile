@@ -369,8 +369,12 @@ test-freestanding-entry:
 test-freestanding-shell: test-browser-kernel
 	@python3 ./scripts/test_freestanding_shell.py
 
-test-browser-lab:
+gen-session-wire-js:
+	@python3 ./scripts/gen_session_wire_js.py
+
+test-browser-lab: gen-session-wire-js
 	@node ./tests/test_browser_lab.js
+	@node ./tests/test_server_relay.js
 	@PYTHONDONTWRITEBYTECODE=1 python3 ./tests/test_package_browser_lab_release.py
 
 browser-lab-runtime:
