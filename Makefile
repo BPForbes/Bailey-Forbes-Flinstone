@@ -342,7 +342,7 @@ deploy:
 	@gcc -std=c11 -Wall -Wextra -O2 -o gen_version_changelog scripts/gen_version_changelog.c && ./gen_version_changelog
 	@$(MAKE) CHANGELOG_CI=1 all
 
-.PHONY: vm baremetal
+.PHONY: vm baremetal browser-kernel test-browser-kernel
 vm:
 	$(MAKE) VM_ENABLE=1 $(TARGET)
 
@@ -350,6 +350,17 @@ vm:
 .PHONY: vm-sdl
 vm-sdl:
 	$(MAKE) VM_ENABLE=1 VM_SDL=1 $(TARGET)
+
+# Browser-lab contract.  The current output is an audited x86_64 hosted ELF
+# candidate, not a boot disk: scripts/package_browser_kernel_artifact.sh records
+# that fact in build-info.json so a lab cannot accidentally pass it to v86.
+browser-kernel:
+	$(MAKE) clean
+	$(MAKE) ARCH=x86_64_gas baremetal
+	@./scripts/package_browser_kernel_artifact.sh
+
+test-browser-kernel: browser-kernel
+	@./scripts/test_browser_kernel_artifact.sh
 
 # Fetch and build external libs (SDL2, CUnit) into deps/install.
 .PHONY: deps deps-sdl2 deps-cunit

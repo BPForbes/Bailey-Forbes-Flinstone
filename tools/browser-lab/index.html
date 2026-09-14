@@ -1,0 +1,32 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Flintstone browser artifact probe</title>
+  <style>
+    body { margin: 2rem auto; max-width: 70rem; padding: 0 1rem; font: 16px/1.5 system-ui, sans-serif; }
+    dt { font-weight: 700; }
+    dd { margin: 0 0 .75rem; }
+    #screen { outline: 1px solid #777; min-height: 25rem; }
+    #screen > div { white-space: pre; font: 14px monospace; }
+    .blocked { color: #9b1c1c; }
+  </style>
+</head>
+<body>
+  <h1>Flintstone browser artifact probe</h1>
+  <p>This isolated harness consumes kernel metadata before loading an emulator.</p>
+  <dl>
+    <dt>Status</dt><dd id="status">Reading build metadata…</dd>
+    <dt>Commit</dt><dd id="commit">—</dd>
+    <dt>Architecture</dt><dd id="architecture">—</dd>
+    <dt>Emulator</dt><dd id="emulator">—</dd>
+    <dt>Artifact</dt><dd id="artifact">—</dd>
+  </dl>
+  <div id="screen" tabindex="0" aria-label="Virtual machine display">
+    <div>VM display is not initialized.</div>
+    <canvas></canvas>
+  </div>
+  <script src="lab.js"></script>
+</body>
+</html>

@@ -12,6 +12,7 @@ build/
 bin/
 obj/
 out/
+dist/
 
 # Local Windows tool staging (created by install_deps.sh on WSL)
 /mnt/
