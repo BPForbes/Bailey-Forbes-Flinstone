@@ -5,3 +5,5 @@ DESCRIPTION=Add a fail-closed x86-64 freestanding BIOS boot candidate with long-
 PRERELEASE=1
 DEV_VERSION=1
 GM=0
+
+RELEASE_DATE=2026-09-14
