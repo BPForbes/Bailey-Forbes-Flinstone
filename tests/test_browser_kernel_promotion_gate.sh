@@ -77,7 +77,7 @@ if grep -q '^boot_smoke_passed=true$' "${fixture}/outputs"; then
 fi
 
 write_manifest false
-if FL_BROWSER_KERNEL_DIST_DIR="${fixture}" \
+if FL_REQUIRE_BROWSER_COMPATIBLE=1 FL_BROWSER_KERNEL_DIST_DIR="${fixture}" \
    FL_BROWSER_KERNEL_QEMU="${fixture}/qemu-marker" \
        "${repo_root}/scripts/test_browser_kernel_artifact.sh" >/dev/null 2>&1; then
     echo "promotion gate accepted a v86-incompatible candidate" >&2

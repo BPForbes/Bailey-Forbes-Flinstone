@@ -1,0 +1,7 @@
+MAJOR_VERSION=4
+STANDARD_VERSION=5
+RELEASE_VERSION=0
+DESCRIPTION=Add a fail-closed x86-64 freestanding BIOS boot candidate with long-mode entry, BSS/stack setup, early IDT diagnostics, initialized COM1 marker, truthful subsystem capabilities, schema-v2 browser compatibility metadata, and a tested browser lifecycle/readiness controller that cannot signal ready before the exact serial marker. Add pinned QEMU WebAssembly browser boot with verified disk hashes, native QMP lifecycle control, guest VGA text-memory rendering, independent browser validation, and reproducible runtime installation.
+PRERELEASE=1
+DEV_VERSION=1
+GM=0

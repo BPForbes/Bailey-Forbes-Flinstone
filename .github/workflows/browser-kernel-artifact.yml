@@ -22,7 +22,7 @@ jobs:
       - name: Install build and virtual-boot dependencies
         run: |
           sudo apt-get update -y
-          sudo apt-get install -y gcc g++ binutils make libsqlite3-dev libssl-dev qemu-system-x86
+          sudo apt-get install -y gcc g++ binutils make nasm libsqlite3-dev libssl-dev qemu-system-x86
 
       - name: Test hardware-driver contracts
         run: make test_drivers
@@ -45,6 +45,18 @@ jobs:
         id: boot_probe
         run: ./scripts/test_browser_kernel_artifact.sh
 
+      - name: Install browser validation tools
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+
+      - name: Validate browser boot independently
+        run: |
+          python3 ./scripts/fetch_browser_runtime.py
+          npm ci --prefix tools/browser-lab
+          npx --prefix tools/browser-lab playwright install --with-deps chromium
+          node ./scripts/test_browser_boot.cjs
+
       - name: Read promotion state
         id: metadata
         run: |
@@ -53,45 +65,52 @@ jobs:
           with open("dist/build-info.json", encoding="utf-8") as handle:
               info = json.load(handle)
           print(f"bootable={str(info['bootable']).lower()}")
-          print(f"v86_compatible={str(info['v86Compatible']).lower()}")
+          print(f"browser_compatible={str(info.get('browserCompatible', info['v86Compatible'])).lower()}")
           PY
 
-      - name: Record Outcome B
-        if: steps.metadata.outputs.bootable != 'true'
+      - name: Record blocked browser outcome
+        if: steps.metadata.outputs.browser_compatible != 'true'
         run: |
           {
             echo "## Browser-kernel compatibility result"
             echo
-            echo "The current candidate is x86-64 hosted ELF, not a firmware-bootable image."
-            echo "v86 has no x86-64 long mode. No public lab artifact was promoted."
+            echo "The raw x86-64 candidate was not independently validated in a browser emulator."
+            echo "No public lab artifact was promoted."
           } >>"$GITHUB_STEP_SUMMARY"
 
-      - name: Upload audited Outcome B package
-        if: steps.metadata.outputs.bootable != 'true'
+      - name: Upload blocked compatibility package
+        if: steps.metadata.outputs.browser_compatible != 'true'
         uses: actions/upload-artifact@v4
         with:
-          name: flintstone-browser-kernel-compatibility-audit-${{ github.sha }}
+          name: flintstone-browser-kernel-browser-blocked-${{ github.sha }}
           path: |
-            dist/flintstone-kernel-x86_64.elf
+            dist/flintstone.img
             dist/build-info.json
+            dist/browser-validation.json
           if-no-files-found: error
           retention-days: 14
 
       - name: Reject candidate that did not satisfy every promotion gate
         if: >-
           steps.metadata.outputs.bootable == 'true' &&
-          (steps.metadata.outputs.v86_compatible != 'true' ||
-          steps.boot_probe.outputs.boot_smoke_passed != 'true')
+          steps.boot_probe.outputs.boot_smoke_passed != 'true'
         run: |
-          echo "Bootable metadata cannot promote without v86 compatibility and an observed QEMU serial marker." >&2
+          echo "Bootable metadata cannot promote without an observed QEMU serial marker." >&2
           exit 1
+
+      - name: Package validated static browser lab
+        if: >-
+          steps.metadata.outputs.bootable == 'true' &&
+          steps.metadata.outputs.browser_compatible == 'true' &&
+          steps.boot_probe.outputs.boot_smoke_passed == 'true'
+        run: python3 ./scripts/package_browser_lab_release.py
 
       # This name is the deployment contract consumed by a future lab workflow.
       # Metadata cannot self-attest the independent QEMU marker observation.
       - name: Upload validated browser kernel
         if: >-
           steps.metadata.outputs.bootable == 'true' &&
-          steps.metadata.outputs.v86_compatible == 'true' &&
+          steps.metadata.outputs.browser_compatible == 'true' &&
           steps.boot_probe.outputs.boot_smoke_passed == 'true'
         uses: actions/upload-artifact@v4
         with:
@@ -99,4 +118,16 @@ jobs:
           path: |
             dist/flintstone.img
             dist/build-info.json
+            dist/browser-validation.json
+          if-no-files-found: error
+
+      - name: Upload validated static browser lab
+        if: >-
+          steps.metadata.outputs.bootable == 'true' &&
+          steps.metadata.outputs.browser_compatible == 'true' &&
+          steps.boot_probe.outputs.boot_smoke_passed == 'true'
+        uses: actions/upload-artifact@v4
+        with:
+          name: flintstone-browser-lab
+          path: dist/browser-lab
           if-no-files-found: error

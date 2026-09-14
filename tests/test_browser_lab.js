@@ -1,0 +1,32 @@
+"use strict";
+const assert = require("assert");
+const { STATES, validateManifest, isTrustedReadyEvent, createController } = require("../tools/browser-lab/lab-core.js");
+const manifest = { schemaVersion: 2, shortCommit: "1234567", architecture: "x86_64", browserEmulator: "test", artifact: "flintstone.img", sha256: "a".repeat(64), bootSuccessMarker: "FLINTSTONE_KERNEL_BOOT_OK", validationOutcome: "browser-bootable", bootable: true, v86Compatible: false, browserCompatible: true, bootSuccessMarkerImplemented: true, recommendedRamBytes: 64, blockers: [], capabilities: {}, browserValidation: { artifactSha256: "a".repeat(64), checks: ["exact-marker"] } };
+assert.strictEqual(validateManifest(manifest), manifest);
+for (const bad of [{ ...manifest, schemaVersion: 3 }, { ...manifest, artifact: "../bad" }, { ...manifest, sha256: "bad" }, { ...manifest, browserCompatible: "true" }, { ...manifest, browserValidation: {} }]) assert.throws(() => validateManifest(bad));
+const guestWindow = {};
+const ready = { origin: "https://lab.example", source: guestWindow, data: { source: "flinstone-guest", type: "ready", schemaVersion: 1, commit: "1234567" } };
+const trust = { allowedOrigin: "https://lab.example", guestWindow, commit: "1234567" };
+assert(isTrustedReadyEvent(ready, trust));
+assert(!isTrustedReadyEvent({ ...ready, origin: "https://evil.example" }, trust));
+assert(!isTrustedReadyEvent({ ...ready, source: {} }, trust));
+assert(!isTrustedReadyEvent({ ...ready, data: { ...ready.data, schemaVersion: 2 } }, trust));
+assert(!isTrustedReadyEvent({ ...ready, data: { ...ready.data, type: "loading" } }, trust));
+
+(async () => {
+  const states = []; let ready = 0; let created = 0; let destroyed = 0;
+  const emulator = { stop() {}, run() {}, async destroy() { destroyed++; } };
+  const controller = createController({ marker: manifest.bootSuccessMarker, setState: (s) => states.push(s), postReady: () => ready++, createEmulator: async ({ serialByte }) => { created++; emulator.serialByte = serialByte; return emulator; } });
+  await controller.boot({});
+  "premature FLINTSTONE_KERNEL_BOOT_OK suffix\n".split("").forEach(emulator.serialByte);
+  assert.strictEqual(ready, 0);
+  "FLINTSTONE_KERNEL_BOOT_OK\r\n".split("").forEach(emulator.serialByte);
+  assert.strictEqual(ready, 1); assert.strictEqual(states.at(-1), STATES.READY);
+  assert(await controller.pause()); assert.strictEqual(states.at(-1), STATES.PAUSED);
+  assert(await controller.resume()); assert.strictEqual(states.at(-1), STATES.READY);
+  await controller.reset({}); assert.strictEqual(created, 2); assert.strictEqual(destroyed, 1); assert.strictEqual(states.at(-1), STATES.BOOTING);
+  await controller.powerOff(); assert.strictEqual(states.at(-1), STATES.OFF);
+  const failing = createController({ marker: "x", setState: (s) => states.push(s), postReady() {}, createEmulator: async () => { throw new Error("corrupt image"); } });
+  await assert.rejects(() => failing.boot({}), /corrupt image/); assert.strictEqual(states.at(-1), STATES.FAILED);
+  console.log("test_browser_lab: PASS");
+})().catch((error) => { console.error(error); process.exitCode = 1; });
