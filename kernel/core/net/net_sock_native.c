@@ -229,7 +229,7 @@ fl_result_t fl_net_sock_native_recv(fl_net_sock_handle_t handle, void *buf, size
     unsigned max_spins = timeout_ms > 0u ? (timeout_ms / 10u) + 1u : 1u;
     if (!n || !n->in_use || n->is_listen)
         return FL_RESULT_INVAL;
-    if (!buf || !got)
+    if (!buf || !got || cap == 0u)
         return FL_RESULT_INVAL;
     for (;;) {
         (void)fl_net_rx_demux_poll(8u);
