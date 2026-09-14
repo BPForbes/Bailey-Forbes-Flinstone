@@ -110,6 +110,11 @@ dist/
 The ELF is the actual current `DRIVERS_BAREMETAL` build output, preserved as an
 audit candidate. It is intentionally marked `bootable: false` and
 `v86Compatible: false`; it must not be renamed to `.img` or promoted to a lab.
+`contracts/virtualization/contract_p8_browser_artifact.h` defines the normative
+`build-info.json` field names, JSON types, ownership, digest, QEMU boot-mode,
+validation-outcome, and fail-closed promotion rules. The current manifest uses
+schema version `1` and `qemuBootMode: null`; a future raw IDE image uses
+`qemuBootMode: "ide-drive"`.
 Test the contract and QEMU rejection with:
 
 ```sh
@@ -211,14 +216,17 @@ dispatch. Today it:
 2. packages the real x86-64 hardware-driver ELF;
 3. runs a bounded QEMU direct-kernel probe and verifies loader rejection or
    failure to reach the serial boot marker;
-4. validates that metadata says Outcome B;
+4. validates schema-versioned metadata, artifact SHA-256, and Outcome B;
 5. uploads a clearly named compatibility-audit package, never a public
    “validated boot image.”
 
-The workflow contains a promotion gate. Only metadata with both
-`bootable: true` and a successful serial-marker smoke test may be uploaded as
-`flintstone-browser-kernel` for lab deployment. Current metadata cannot pass
-that gate, so a main push cannot replace a working public lab with this ELF.
+The workflow contains a fail-closed promotion gate. Upload as
+`flintstone-browser-kernel` requires all three independent signals:
+`bootable: true`, `v86Compatible: true`, and a QEMU smoke-test step that actually
+observes `FLINTSTONE_KERNEL_BOOT_OK` on serial. The manifest's
+`bootSuccessMarkerImplemented` declaration is validated but cannot self-attest
+the QEMU observation. Current metadata cannot pass that gate, so a main push
+cannot replace a working public lab with this ELF.
 
 The future lab deployment workflow should download only that validated artifact,
 copy the image and JSON to its static `/artifacts/` directory, and deploy Pages:

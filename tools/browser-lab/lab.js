@@ -22,12 +22,34 @@
     document.head.appendChild(script);
   });
 
+  const validateManifest = (info) => {
+    const stringFields = [
+      "shortCommit", "architecture", "browserEmulator", "artifact",
+      "sha256", "bootSuccessMarker", "validationOutcome",
+    ];
+    if (!info || info.schemaVersion !== 1) {
+      throw new Error("Unsupported browser artifact manifest schema");
+    }
+    if (stringFields.some((field) => typeof info[field] !== "string" || !info[field])) {
+      throw new Error("Browser artifact manifest is missing required string fields");
+    }
+    if (typeof info.bootable !== "boolean" || typeof info.v86Compatible !== "boolean" ||
+        typeof info.bootSuccessMarkerImplemented !== "boolean") {
+      throw new Error("Browser artifact manifest has invalid promotion flags");
+    }
+    if (!Array.isArray(info.blockers) ||
+        !Number.isSafeInteger(info.recommendedRamBytes) || info.recommendedRamBytes <= 0) {
+      throw new Error("Browser artifact manifest has invalid runtime requirements");
+    }
+  };
+
   async function start() {
     const response = await fetch(config.metadataUrl, { cache: "no-store" });
     if (!response.ok) {
       throw new Error(`Metadata request failed: HTTP ${response.status}`);
     }
     const info = await response.json();
+    validateManifest(info);
 
     text("commit", info.shortCommit);
     text("architecture", info.architecture);

@@ -39,6 +39,7 @@ jobs:
         run: make browser-kernel
 
       - name: Probe virtual boot and verify compatibility metadata
+        id: boot_probe
         run: ./scripts/test_browser_kernel_artifact.sh
 
       - name: Read promotion state
@@ -73,11 +74,22 @@ jobs:
           if-no-files-found: error
           retention-days: 14
 
+      - name: Reject candidate that did not satisfy every promotion gate
+        if: >-
+          steps.metadata.outputs.bootable == 'true' &&
+          (steps.metadata.outputs.v86_compatible != 'true' ||
+          steps.boot_probe.outputs.boot_smoke_passed != 'true')
+        run: |
+          echo "Bootable metadata cannot promote without v86 compatibility and an observed QEMU serial marker." >&2
+          exit 1
+
       # This name is the deployment contract consumed by a future lab workflow.
-      # A bootable implementation must add a preceding QEMU serial-marker check;
-      # upload remains unreachable while current metadata truthfully says false.
+      # Metadata cannot self-attest the independent QEMU marker observation.
       - name: Upload validated browser kernel
-        if: steps.metadata.outputs.bootable == 'true'
+        if: >-
+          steps.metadata.outputs.bootable == 'true' &&
+          steps.metadata.outputs.v86_compatible == 'true' &&
+          steps.boot_probe.outputs.boot_smoke_passed == 'true'
         uses: actions/upload-artifact@v4
         with:
           name: flintstone-browser-kernel

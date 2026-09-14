@@ -51,6 +51,7 @@ import sys
 
 output, artifact, commit, short_commit, built_at, sha256 = sys.argv[1:]
 metadata = {
+    "schemaVersion": 1,
     "project": "Flintstone Kernel",
     "repository": "BPForbes/Bailey-Forbes-Flinstone",
     "commit": commit,
@@ -66,6 +67,7 @@ metadata = {
     "bootable": False,
     "bootloader": None,
     "requiredBios": None,
+    "qemuBootMode": None,
     "minimumRamBytes": None,
     "recommendedRamBytes": 64 * 1024 * 1024,
     "bootSuccessMarker": "FLINTSTONE_KERNEL_BOOT_OK",

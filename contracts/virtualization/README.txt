@@ -1,5 +1,6 @@
 P8 (*contracts/virtualization*) — roadmap **Phase 8** (**P8-1** device timing fidelity, **P8-2**
-guest virtio, **P8-3** QEMU lab machine profiles). See **docs/ROADMAP.md** Phase **8** table.
+guest virtio, **P8-3** QEMU lab machine profiles and browser-artifact interchange). See
+**docs/ROADMAP.md** Phase **8** table.
 
 **Umbrella header:** *contract_virtualization.h* — includes **contract_extend.h** (P0),
 **FL_CONTRACT_P8_VIRTUALIZATION_REV**, and shards below with **`FL_CONTRACT_P8_*_CONTRACT_DEFINED`**
@@ -12,6 +13,7 @@ markers.
 | *contract_p8_timing.h* | **P8-1** — replay-forward event order, documented lab timing jitter |
 | *contract_p8_virtio_guest.h* | **P8-2** — guest RAM ownership vs **P4-4** ring programming |
 | *contract_p8_qemu_lab.h* | **P8-3** — QEMU `-M` profile strings, fixture path caps, accel class enum |
+| *contract_p8_browser_artifact.h* | **P8-3** — schema-versioned static artifact manifest and fail-closed promotion |
 
 **Build:** **-Icontracts/virtualization** is already in the root **Makefile** **CFLAGS** and
 **CMakeLists.txt** **include_directories**.

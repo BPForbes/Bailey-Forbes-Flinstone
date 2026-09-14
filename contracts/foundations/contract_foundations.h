@@ -17,7 +17,8 @@
  *     (audit/history metadata); bump **version/entries** when it changes.
  *
  * **Surfaces (P0-1)** — interchange loci covered by this bundle; see **fl/jail_contract.h**
- * for FS jail behaviour wired as **FL_CONTRACT_SURFACE_FS_JAIL**.
+ * for FS jail behaviour wired as **FL_CONTRACT_SURFACE_FS_JAIL** and
+ * **contract_p8_browser_artifact.h** for static artifact publication.
  *
  * Related: **fl/history_record.h**, **fl/audit_log.h**, **fl/jail_contract.h**; VFS: **fl/vfs.h**.
  *
@@ -27,7 +28,7 @@
 #define FL_CONTRACT_FOUNDATIONS_H
 
 /** Bump when P0 aggregate layout or required Px prelude changes (Px may _Static_assert). */
-#define FL_CONTRACT_P0_FOUNDATIONS_REV 4
+#define FL_CONTRACT_P0_FOUNDATIONS_REV 5
 
 /*
  * Include order: result + auth (no deps) → imm + asm (caps, mem) → log + dispatch
@@ -51,7 +52,7 @@
 #include "contract_p0_fs_jail.h"
 
 /** Shipped subsystem contract bundle revision (audit / CLI / packed metadata). */
-#define FL_CONTRACT_BUNDLE_REV 8
+#define FL_CONTRACT_BUNDLE_REV 9
 
 typedef enum {
     FL_CONTRACT_SURFACE_DRIVER_OPS = 0,
@@ -59,12 +60,13 @@ typedef enum {
     FL_CONTRACT_SURFACE_LOG_SINK,
     FL_CONTRACT_SURFACE_AUTHZ,
     FL_CONTRACT_SURFACE_FS_JAIL,
+    FL_CONTRACT_SURFACE_BROWSER_ARTIFACT,
     /** One past the last real surface; use for bounds checks / table sizes. */
     FL_CONTRACT_SURFACE_COUNT
 } fl_contract_surface_t;
 
-_Static_assert((int)FL_CONTRACT_SURFACE_COUNT == 5,
-               "fl_contract_surface_t ABI: expected five surfaces before COUNT");
+_Static_assert((int)FL_CONTRACT_SURFACE_COUNT == 6,
+               "fl_contract_surface_t ABI: expected six surfaces before COUNT");
 
 /*
  * P0-1 per-surface interchange metadata (lifetime + concurrency + error channel).
@@ -75,6 +77,7 @@ _Static_assert((int)FL_CONTRACT_SURFACE_COUNT == 5,
 #define FL_CONTRACT_SURFACE_LOG_SINK_LIFETIME_CALLER_STACK 0
 #define FL_CONTRACT_SURFACE_AUTHZ_LIFETIME_EVENT_TRANSIENT 0
 #define FL_CONTRACT_SURFACE_FS_JAIL_LIFETIME_POLICY_STATIC 0
+#define FL_CONTRACT_SURFACE_BROWSER_ARTIFACT_LIFETIME_PUBLISHED_IMMUTABLE 0
 
 #define FL_CONTRACT_P0_SURFACE_CONCURRENCY_SINGLE_CALLER 0
 #define FL_CONTRACT_P0_SURFACE_CONCURRENCY_LOCK_GUARDED 1
@@ -90,6 +93,8 @@ _Static_assert((int)FL_CONTRACT_SURFACE_COUNT == 5,
     FL_CONTRACT_P0_SURFACE_CONCURRENCY_SINGLE_CALLER
 #define FL_CONTRACT_SURFACE_FS_JAIL_CONCURRENCY \
     FL_CONTRACT_P0_SURFACE_CONCURRENCY_LOCK_GUARDED
+#define FL_CONTRACT_SURFACE_BROWSER_ARTIFACT_CONCURRENCY \
+    FL_CONTRACT_P0_SURFACE_CONCURRENCY_LOCK_FREE
 
 /** Primary status path: fallible **fl_result_t** (see **contract_result.h**). */
 #define FL_CONTRACT_SURFACE_ERROR_FL_RESULT 0
@@ -99,6 +104,7 @@ _Static_assert((int)FL_CONTRACT_SURFACE_COUNT == 5,
 #define FL_CONTRACT_SURFACE_LOG_SINK_ERROR FL_CONTRACT_SURFACE_ERROR_FL_RESULT
 #define FL_CONTRACT_SURFACE_AUTHZ_ERROR FL_CONTRACT_SURFACE_ERROR_FL_RESULT
 #define FL_CONTRACT_SURFACE_FS_JAIL_ERROR FL_CONTRACT_SURFACE_ERROR_FL_RESULT
+#define FL_CONTRACT_SURFACE_BROWSER_ARTIFACT_ERROR FL_CONTRACT_SURFACE_ERROR_FL_RESULT
 
 /** Set after full P0 vocabulary is visible; Px optional guards may `#if FL_CONTRACT_P0_LOCK`. */
 #define FL_CONTRACT_P0_VOCABULARY_LOCK 1
