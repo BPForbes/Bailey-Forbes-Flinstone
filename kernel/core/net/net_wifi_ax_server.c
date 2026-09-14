@@ -10,7 +10,18 @@
 #include "net_wifi_he.h"
 #include "net_wifi_mgmt.h"
 
+#include <stdio.h>
 #include <string.h>
+#include <time.h>
+
+#define AX_DEBUG_LOG(json_fmt, ...)                                                       \
+    do {                                                                                  \
+        FILE *ax_debug_fp = fopen("/opt/cursor/logs/debug.log", "a");                    \
+        if (ax_debug_fp) {                                                                \
+            fprintf(ax_debug_fp, json_fmt "\n", __VA_ARGS__);                            \
+            fclose(ax_debug_fp);                                                          \
+        }                                                                                 \
+    } while (0)
 
 typedef struct {
     void *ctx;
@@ -75,6 +86,7 @@ static fl_result_t ax_station_session_auth(const fl_net_wifi_cred_t *cred, uint8
     uint8_t msg1[64];
     uint8_t msg3[64];
     fl_result_t rc;
+    int sae_rc;
 
     if (!cred || !sta_mac || !ap_bssid || !io || !io->send || !io->recv ||
         !assoc_resp_out || !assoc_resp_len_out)
@@ -93,7 +105,21 @@ static fl_result_t ax_station_session_auth(const fl_net_wifi_cred_t *cred, uint8
             (void)wifi_supplicant_deinit(&supp);
             return FL_RESULT_ERR;
         }
+        // #region agent log
+        AX_DEBUG_LOG("{\"hypothesisId\":\"B\",\"location\":\"net_wifi_ax_server.c:SAE-start\","
+                     "\"message\":\"station SAE context started\",\"data\":{\"state\":%d},"
+                     "\"timestamp\":%lld}",
+                     (int)wifi_supplicant_get_state(&supp), (long long)time(NULL) * 1000LL);
+        // #endregion
         memcpy(tx, (const uint8_t *)"commit", 6u);
+        // #region agent log
+        AX_DEBUG_LOG("{\"hypothesisId\":\"A\",\"location\":\"net_wifi_ax_server.c:SAE-send\","
+                     "\"message\":\"station sending SAE commit payload\","
+                     "\"data\":{\"payloadLen\":%u,\"requiredCommitLen\":%u},"
+                     "\"timestamp\":%lld}",
+                     6u, (unsigned)FL_NET_WIFI_SAE_COMMIT_BODY_LEN,
+                     (long long)time(NULL) * 1000LL);
+        // #endregion
         rc = io->send(io->ctx, FL_NET_SESSION_OP_WIFI_SAE_COMMIT, tx, 6u);
         if (rc != FL_RESULT_OK) {
             (void)wifi_supplicant_deinit(&supp);
@@ -101,11 +127,30 @@ static fl_result_t ax_station_session_auth(const fl_net_wifi_cred_t *cred, uint8
         }
         rc = io->recv(io->ctx, FL_NET_SESSION_OP_WIFI_SAE_CONFIRM, rx, sizeof(rx), &rx_len,
                       timeout_ms);
+        // #region agent log
+        AX_DEBUG_LOG("{\"hypothesisId\":\"A,D\","
+                     "\"location\":\"net_wifi_ax_server.c:SAE-confirm-recv\","
+                     "\"message\":\"station confirm receive completed\","
+                     "\"data\":{\"rc\":%d,\"payloadLen\":%u,\"requiredConfirmLen\":%u},"
+                     "\"timestamp\":%lld}",
+                     (int)rc, (unsigned)rx_len, (unsigned)FL_NET_WIFI_SAE_CONFIRM_BODY_LEN,
+                     (long long)time(NULL) * 1000LL);
+        // #endregion
         if (rc != FL_RESULT_OK) {
             (void)wifi_supplicant_deinit(&supp);
             return rc;
         }
-        if (wifi_supplicant_process_sae_confirm(&supp, rx, rx_len) != 0) {
+        sae_rc = wifi_supplicant_process_sae_confirm(&supp, rx, rx_len);
+        // #region agent log
+        AX_DEBUG_LOG("{\"hypothesisId\":\"A,B\","
+                     "\"location\":\"net_wifi_ax_server.c:SAE-confirm-process\","
+                     "\"message\":\"station processed SAE confirm\","
+                     "\"data\":{\"supplicantRc\":%d,\"state\":%d,\"errors\":%u},"
+                     "\"timestamp\":%lld}",
+                     sae_rc, (int)wifi_supplicant_get_state(&supp),
+                     (unsigned)supp.handshake_errors, (long long)time(NULL) * 1000LL);
+        // #endregion
+        if (sae_rc != 0) {
             (void)wifi_supplicant_deinit(&supp);
             return FL_RESULT_ERR;
         }
@@ -292,6 +337,17 @@ static fl_result_t ax_session_recv(void *ctx, uint8_t expect_opcode, uint8_t *pa
         return FL_RESULT_INVAL;
     while (spins-- > 0u) {
         rc = fl_net_session_recv_frame(sctx->peer, &opcode, payload, cap, plen_out, 10u);
+        if (rc == FL_RESULT_OK) {
+            // #region agent log
+            AX_DEBUG_LOG("{\"hypothesisId\":\"D\","
+                         "\"location\":\"net_wifi_ax_server.c:session-recv\","
+                         "\"message\":\"session frame received\","
+                         "\"data\":{\"expectedOpcode\":%u,\"actualOpcode\":%u,"
+                         "\"payloadLen\":%u},\"timestamp\":%lld}",
+                         (unsigned)expect_opcode, (unsigned)opcode, (unsigned)*plen_out,
+                         (long long)time(NULL) * 1000LL);
+            // #endregion
+        }
         if (rc == FL_RESULT_OK && opcode == expect_opcode)
             return FL_RESULT_OK;
         if (rc != FL_RESULT_OK && rc != FL_RESULT_TIMEDOUT)
@@ -316,12 +372,31 @@ int fl_net_wifi_ax_ap_dispatch(fl_net_server_t *srv, fl_net_server_member_id_t f
     if (!ap || !fl_net_session_is_wifi_opcode(opcode))
         return 0;
 
+    // #region agent log
+    AX_DEBUG_LOG("{\"hypothesisId\":\"C\","
+                 "\"location\":\"net_wifi_ax_server.c:AP-dispatch\","
+                 "\"message\":\"AP dispatch received WiFi frame\","
+                 "\"data\":{\"opcode\":%u,\"payloadLen\":%u,\"authMode\":%u},"
+                 "\"timestamp\":%lld}",
+                 (unsigned)opcode, (unsigned)plen, (unsigned)ap->cfg.auth_mode,
+                 (long long)time(NULL) * 1000LL);
+    // #endregion
+
     switch (opcode) {
     case FL_NET_SESSION_OP_WIFI_SAE_COMMIT:
         if (ap->cfg.auth_mode != FL_WIFI_AUTH_WPA3_SAE || plen == 0u)
             return 1;
         if (ax_ap_sae_confirm(reply, sizeof(reply), &reply_len) != FL_RESULT_OK)
             return 1;
+        // #region agent log
+        AX_DEBUG_LOG("{\"hypothesisId\":\"A,C\","
+                     "\"location\":\"net_wifi_ax_server.c:AP-confirm\","
+                     "\"message\":\"AP generated SAE confirm response\","
+                     "\"data\":{\"payloadLen\":%u,\"requiredConfirmLen\":%u},"
+                     "\"timestamp\":%lld}",
+                     (unsigned)reply_len, (unsigned)FL_NET_WIFI_SAE_CONFIRM_BODY_LEN,
+                     (long long)time(NULL) * 1000LL);
+        // #endregion
         (void)ax_send(peer, FL_NET_SESSION_OP_WIFI_SAE_CONFIRM, reply,
                       (uint16_t)reply_len);
         return 1;
@@ -373,6 +448,15 @@ fl_result_t fl_net_wifi_ax_station_ota(fl_net_client_t *client,
 
     rc = ax_station_session_auth(cred, auth_mode, sta_mac, ap_bssid, &io, timeout_ms,
                                       assoc_resp, sizeof(assoc_resp), &assoc_resp_len);
+    // #region agent log
+    AX_DEBUG_LOG("{\"hypothesisId\":\"B,C\","
+                 "\"location\":\"net_wifi_ax_server.c:station-auth-exit\","
+                 "\"message\":\"station session authentication returned\","
+                 "\"data\":{\"rc\":%d,\"authMode\":%u,\"assocRespLen\":%u},"
+                 "\"timestamp\":%lld}",
+                 (int)rc, (unsigned)auth_mode, (unsigned)assoc_resp_len,
+                 (long long)time(NULL) * 1000LL);
+    // #endregion
     if (rc != FL_RESULT_OK)
         return rc;
 
