@@ -114,6 +114,8 @@ async function main() {
   const top = await fresh.newPage();
   await top.goto(swLabOrigin + "/", { waitUntil: "domcontentloaded" });
   await waitReady(top);
+  await top.getByRole("button", { name: "Power Off", exact: true }).click();
+  await top.locator("#status").filter({ hasText: /^Powered off$/ }).waitFor();
   await top.close();
   const swPage = await fresh.newPage();
   await swPage.goto(swParentOrigin + "/", { waitUntil: "domcontentloaded" });
