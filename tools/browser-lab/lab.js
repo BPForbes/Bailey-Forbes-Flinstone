@@ -11,6 +11,7 @@
     const node = document.getElementById("status");
     node.className = [core.STATES.BLOCKED, core.STATES.FAILED].includes(state) ? "blocked" : "";
     node.textContent = detail ? `${state}: ${detail}` : state;
+    document.documentElement.dataset.labState = String(state).toLowerCase().replace(/\s+/g, "-");
   };
   let info;
   let busy = false;

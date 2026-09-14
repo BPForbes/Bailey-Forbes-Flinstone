@@ -5,39 +5,242 @@
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>Flintstone browser artifact probe</title>
   <style>
-    body { margin: 2rem auto; max-width: 70rem; padding: 0 1rem; font: 16px/1.5 system-ui, sans-serif; }
-    dt { font-weight: 700; }
-    dd { margin: 0 0 .75rem; }
-    #screen { outline: 1px solid #777; min-height: 25rem; }
-    #screen > div, pre { white-space: pre-wrap; font: 14px monospace; }
-    canvas { width: 100%; image-rendering: pixelated; }
-    #serial { background: #15191f; color: #d5f7dd; padding: 1rem; min-height: 5rem; }
-    .blocked { color: #9b1c1c; }
+    :root {
+      --ink: #140c08;
+      --panel: rgba(28, 18, 12, 0.86);
+      --line: #6a3d1c;
+      --ember: #e0872f;
+      --amber: #f4c56d;
+      --phosphor: #7dff9a;
+      --danger: #ff6b4a;
+      --muted: #c7b39a;
+    }
+    * { box-sizing: border-box; }
+    html, body { min-height: 100%; }
+    body {
+      margin: 0;
+      color: #f7ead6;
+      font: 15px/1.45 "Segoe UI", system-ui, sans-serif;
+      background:
+        radial-gradient(1200px 500px at 10% -10%, rgba(224, 135, 47, 0.22), transparent 55%),
+        radial-gradient(900px 420px at 100% 0%, rgba(80, 28, 8, 0.45), transparent 50%),
+        linear-gradient(180deg, #24150d 0%, var(--ink) 42%, #0b0705 100%);
+    }
+    body::before {
+      content: "";
+      position: fixed;
+      inset: 0;
+      pointer-events: none;
+      background-image: linear-gradient(rgba(255, 210, 140, 0.03) 1px, transparent 1px);
+      background-size: 100% 4px;
+      opacity: 0.35;
+    }
+    .lab-shell {
+      position: relative;
+      z-index: 1;
+      width: min(72rem, calc(100% - 1.5rem));
+      margin: 1.25rem auto 2rem;
+      display: grid;
+      gap: 1rem;
+    }
+    .masthead, .deck, .crt, .console {
+      border: 1px solid var(--line);
+      background: var(--panel);
+      box-shadow: 0 18px 50px rgba(0, 0, 0, 0.35), inset 0 1px 0 rgba(255, 214, 160, 0.08);
+    }
+    .masthead {
+      display: grid;
+      grid-template-columns: auto 1fr auto;
+      gap: 1rem;
+      align-items: center;
+      padding: 1rem 1.15rem;
+    }
+    .mark {
+      width: 3.1rem;
+      height: 3.1rem;
+      display: grid;
+      place-items: center;
+      border-radius: 0.85rem;
+      background: linear-gradient(180deg, #f0b25a, #b45309);
+      color: #2a1406;
+      font: 800 1.4rem/1 "Palatino Linotype", "Times New Roman", serif;
+      box-shadow: inset 0 -6px 0 rgba(0, 0, 0, 0.18);
+    }
+    .masthead h1 {
+      margin: 0;
+      font-size: clamp(1.35rem, 3vw, 2rem);
+      letter-spacing: 0.02em;
+    }
+    .lede {
+      margin: 0.2rem 0 0;
+      color: var(--muted);
+      max-width: 42rem;
+    }
+    .status-badge {
+      min-width: 11rem;
+      padding: 0.65rem 0.85rem;
+      border: 1px solid #8a5424;
+      background: #20140d;
+      display: grid;
+      gap: 0.15rem;
+    }
+    .status-badge span:first-child {
+      color: var(--amber);
+      font-size: 0.7rem;
+      letter-spacing: 0.16em;
+      text-transform: uppercase;
+    }
+    #status { margin: 0; font-weight: 700; color: var(--amber); }
+    #status.blocked, :root[data-lab-state="blocked"] #status, :root[data-lab-state="failed"] #status { color: var(--danger); }
+    :root[data-lab-state="ready"] #status { color: var(--phosphor); }
+    :root[data-lab-state="booting"] #status { color: #7ec8ff; }
+    .deck {
+      display: grid;
+      grid-template-columns: 1fr auto;
+      gap: 1rem;
+      padding: 0.9rem 1.1rem;
+      align-items: center;
+    }
+    .meta {
+      display: grid;
+      grid-template-columns: repeat(4, minmax(0, 1fr));
+      gap: 0.65rem;
+      margin: 0;
+    }
+    .meta div {
+      padding: 0.55rem 0.7rem;
+      background: rgba(0, 0, 0, 0.22);
+      border: 1px solid rgba(224, 135, 47, 0.18);
+    }
+    .meta dt {
+      margin: 0;
+      color: var(--amber);
+      font-size: 0.68rem;
+      letter-spacing: 0.14em;
+      text-transform: uppercase;
+    }
+    .meta dd { margin: 0.2rem 0 0; word-break: break-word; }
+    #controls { display: flex; flex-wrap: wrap; gap: 0.45rem; margin: 0; }
+    #controls button {
+      appearance: none;
+      border: 1px solid #9a5a22;
+      background: linear-gradient(180deg, #5a3014, #31180a);
+      color: #f8e2c0;
+      padding: 0.55rem 0.8rem;
+      font: inherit;
+      font-weight: 700;
+      cursor: pointer;
+      box-shadow: inset 0 1px 0 rgba(255, 220, 170, 0.2);
+    }
+    #controls button:hover { filter: brightness(1.12); }
+    #controls button:active { transform: translateY(1px); }
+    .crt { padding: 0.85rem; }
+    .bezel-bar,     .console-head {
+      display: flex;
+      justify-content: space-between;
+      align-items: baseline;
+      gap: 1rem;
+      color: var(--amber);
+      font-size: 0.72rem;
+      letter-spacing: 0.16em;
+      text-transform: uppercase;
+      margin-bottom: 0.55rem;
+    }
+    .console-head h2 { margin: 0; font: inherit; color: inherit; }
+    #screen {
+      position: relative;
+      min-height: 25rem;
+      background: #05080c;
+      overflow: hidden;
+      outline: 3px solid #2b1a10;
+      box-shadow: inset 0 0 80px rgba(80, 180, 90, 0.08), 0 0 0 1px #7a4a24;
+    }
+    #screen::after {
+      content: "";
+      position: absolute;
+      inset: 0;
+      pointer-events: none;
+      background:
+        linear-gradient(rgba(255, 255, 255, 0.035), transparent 30%, transparent 70%, rgba(0, 0, 0, 0.28)),
+        repeating-linear-gradient(180deg, rgba(0, 0, 0, 0.18) 0 1px, transparent 1px 3px);
+    }
+    #display-placeholder {
+      position: absolute;
+      inset: 0;
+      display: grid;
+      place-items: center;
+      margin: 0;
+      color: #7d8a80;
+      font: 14px/1.5 ui-monospace, monospace;
+      text-align: center;
+      padding: 2rem;
+    }
+    #display-placeholder[hidden] { display: none; }
+    canvas { display: block; width: 100%; image-rendering: pixelated; }
+    .console { padding: 0.85rem 0.95rem 1rem; }
+    #serial {
+      margin: 0;
+      min-height: 7rem;
+      padding: 0.9rem 1rem;
+      background: #07110c;
+      color: var(--phosphor);
+      border: 1px solid #1f4a32;
+      white-space: pre-wrap;
+      font: 14px/1.45 ui-monospace, "Cascadia Mono", monospace;
+      text-shadow: 0 0 8px rgba(125, 255, 154, 0.25);
+    }
+    @media (max-width: 900px) {
+      .masthead, .deck, .meta { grid-template-columns: 1fr; }
+      .status-badge { min-width: 0; }
+    }
   </style>
 </head>
 <body>
-  <h1>Flintstone browser artifact probe</h1>
-  <p>This isolated harness consumes kernel metadata before loading an emulator.</p>
-  <dl>
-    <dt>Status</dt><dd id="status">Reading build metadata…</dd>
-    <dt>Commit</dt><dd id="commit">—</dd>
-    <dt>Architecture</dt><dd id="architecture">—</dd>
-    <dt>Emulator</dt><dd id="emulator">—</dd>
-    <dt>Artifact</dt><dd id="artifact">—</dd>
-  </dl>
-  <p id="controls">
-    <button id="boot" type="button">Boot</button>
-    <button id="pause" type="button">Pause</button>
-    <button id="resume" type="button">Resume</button>
-    <button id="reset" type="button">Reset</button>
-    <button id="poweroff" type="button">Power Off</button>
-  </p>
-  <div id="screen" tabindex="0" aria-label="Virtual machine display">
-    <div id="display-placeholder">VM display is not initialized.</div>
-    <canvas></canvas>
+  <div class="lab-shell">
+    <header class="masthead">
+      <div class="mark" aria-hidden="true">F</div>
+      <div>
+        <h1>Flintstone browser artifact probe</h1>
+        <p class="lede">This isolated harness consumes kernel metadata before loading an emulator.</p>
+      </div>
+      <p class="status-badge">
+        <span>Guest state</span>
+        <span id="status">Reading build metadata…</span>
+      </p>
+    </header>
+    <section class="deck">
+      <dl class="meta">
+        <div><dt>Commit</dt><dd id="commit">—</dd></div>
+        <div><dt>Architecture</dt><dd id="architecture">—</dd></div>
+        <div><dt>Emulator</dt><dd id="emulator">—</dd></div>
+        <div><dt>Artifact</dt><dd id="artifact">—</dd></div>
+      </dl>
+      <p id="controls">
+        <button id="boot" type="button">Boot</button>
+        <button id="pause" type="button">Pause</button>
+        <button id="resume" type="button">Resume</button>
+        <button id="reset" type="button">Reset</button>
+        <button id="poweroff" type="button">Power Off</button>
+      </p>
+    </section>
+    <section class="crt" aria-labelledby="display-label">
+      <div class="bezel-bar">
+        <span id="display-label">VGA text 80×25</span>
+        <span>SeaBIOS · QEMU Wasm</span>
+      </div>
+      <div id="screen" tabindex="0" aria-label="Virtual machine display">
+        <div id="display-placeholder">VM display is not initialized.</div>
+        <canvas></canvas>
+      </div>
+    </section>
+    <section class="console">
+      <div class="console-head">
+        <h2>Kernel serial output</h2>
+        <span>COM1 0x3F8</span>
+      </div>
+      <pre id="serial" aria-label="Kernel serial output"></pre>
+    </section>
   </div>
-  <h2>Kernel serial output</h2>
-  <pre id="serial" aria-label="Kernel serial output"></pre>
   <script src="coi-serviceworker.js"></script>
   <script src="lab-core.js"></script>
   <script src="qemu-adapter.js"></script>
