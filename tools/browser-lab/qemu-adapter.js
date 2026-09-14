@@ -15,7 +15,7 @@
   function qcodesForChar(ch) {
     if (ch >= "a" && ch <= "z") return [ch];
     if (ch >= "A" && ch <= "Z") return ["shift", ch.toLowerCase()];
-    if (ch >= "0" && ch <= "9") return ["digit" + ch];
+    if (ch >= "0" && ch <= "9") return [ch];
     if (shifted[ch]) return ["shift", shifted[ch]];
     if (plain[ch]) return [plain[ch]];
     return null;

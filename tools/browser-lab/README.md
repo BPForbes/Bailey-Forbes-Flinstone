@@ -9,7 +9,8 @@ VGA cell `F` with attribute `0x07`.
 After that marker the guest is an interactive lab shell, not the hosted ELF:
 
 - keyboard (click the VGA bezel, then type)
-- `login` / `su` / `logout` / `whoami` / `useradd` / `session`
+- `switchuser` / `login` / `su` / `logout` / `whoami` / `history` / `useradd` / `session`
+- per-user command history and VGA scrollback when switching users on the website
 - up to four concurrent sessions so one operator can keep multiple registered
   accounts active (for example host as `flinstone` and admin as `root`)
 - lab seeds `flinstone`/`flinstone` and `root`/`root`

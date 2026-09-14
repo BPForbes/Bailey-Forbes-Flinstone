@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Drive the freestanding serial shell: whoami, concurrent sessions, switch user."""
+"""Drive the freestanding serial shell: whoami, switchuser perspectives, sessions."""
 import os
 import select
 import subprocess
@@ -53,17 +53,27 @@ try:
     read_until("flinstone@flintstone>", 4)
     send("whoami\n")
     read_until("WHOAMI flinstone", 4)
-    send("session new\n")
-    read_until("SESSION 2 user=flinstone", 4)
-    send("login root\nroot\n")
-    read_until("SESSION 2 user=root", 4)
+    send("switchuser root\n")
+    read_until("SWITCHUSER user=root", 4)
     send("whoami\n")
     read_until("WHOAMI root elevated", 4)
+    send("history\n")
+    read_until("1: whoami", 4)
+    send("switchuser flinstone\n")
+    read_until("SWITCHUSER user=flinstone", 4)
+    send("whoami\n")
+    read_until("WHOAMI flinstone", 4)
+    send("history\n")
+    read_until("1: whoami", 4)
+    send("session new\n")
+    read_until("SESSION 2 user=flinstone", 4)
+    send("switchuser root\n")
+    read_until("SWITCHUSER user=root", 4)
     send("session 1\n")
     read_until("SESSION 1 user=flinstone", 4)
     send("whoami\n")
     read_until("WHOAMI flinstone", 4)
-    print("test-freestanding-shell: PASS (whoami, concurrent sessions, switch user)")
+    print("test-freestanding-shell: PASS (whoami, switchuser perspectives/history, sessions)")
 finally:
     proc.kill()
     proc.wait()

@@ -32,7 +32,7 @@
   let info;
   let busy = false;
   let emulator = null;
-  const sessions = { 1: "flinstone" };
+  let sessions = { 1: "flinstone" };
   let activeSession = 1;
   const validation = new URLSearchParams(location.search).get("validate") === "1";
   const serial = document.getElementById("serial");
@@ -68,16 +68,20 @@
       button.dataset.session = id;
       button.textContent = `Session ${id}: ${sessions[id]}`;
       if (Number(id) === activeSession) button.setAttribute("aria-current", "true");
-      button.onclick = () => sendGuest(`session ${id}\n`);
+      button.onclick = async () => { await sendGuest(`session ${id}\n`); };
       node.appendChild(button);
     });
     text("account-status", `Active session ${activeSession}: ${sessions[activeSession] || "—"}`);
   }
   function noteSerial(value) {
-    const match = /SESSION (\d+) user=(\S+)/.exec(value);
-    if (match) {
-      activeSession = Number(match[1]);
-      sessions[activeSession] = match[2];
+    const sessionMatch = /SESSION (\d+) user=(\S+)/.exec(value);
+    const switchMatch = /SWITCHUSER user=(\S+)/.exec(value);
+    if (sessionMatch) {
+      activeSession = Number(sessionMatch[1]);
+      sessions[activeSession] = sessionMatch[2];
+      renderSessions();
+    } else if (switchMatch) {
+      sessions[activeSession] = switchMatch[1];
       renderSessions();
     }
   }
@@ -116,6 +120,9 @@
     createEmulator: async (settings) => {
       if (typeof config.createEmulator !== "function") throw new Error("No validated x86-64 browser emulator is configured");
       serial.textContent = "";
+      activeSession = 1;
+      sessions = { 1: "flinstone" };
+      renderSessions();
       emulator = await config.createEmulator({ ...settings, serialByte: byte => {
         serial.textContent = (serial.textContent + String.fromCharCode(byte)).slice(-65536);
         noteSerial(serial.textContent.slice(-80));
@@ -159,14 +166,12 @@
     form.addEventListener("submit", async event => {
       event.preventDefault();
       const name = document.getElementById("account-name").value.trim();
-      const password = document.getElementById("account-password").value;
       if (!name) return;
-      await sendGuest(`login ${name}\n${password}\n`);
+      await sendGuest(`switchuser ${name}\n`);
     });
     document.getElementById("account-new-session").onclick = async () => {
       const name = document.getElementById("account-name").value.trim() || "flinstone";
-      const password = document.getElementById("account-password").value || name;
-      await sendGuest(`session new\nlogin ${name}\n${password}\n`);
+      await sendGuest(`session new\nswitchuser ${name}\n`);
     };
   }
   load().catch((error) => controller.fail(error));

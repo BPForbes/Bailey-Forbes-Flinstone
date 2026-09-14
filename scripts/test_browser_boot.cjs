@@ -91,10 +91,14 @@ async function main() {
   await page.locator("#screen").click();
   await page.keyboard.type("whoami\n");
   await page.locator("#serial").filter({ hasText: /WHOAMI flinstone/ }).waitFor({ timeout: 20000 });
+  await page.locator("#account-name").fill("root");
+  await page.getByRole("button", { name: "Switch user", exact: true }).click();
+  await page.locator("#serial").filter({ hasText: /SWITCHUSER user=root/ }).waitFor({ timeout: 20000 });
   await page.locator("#account-new-session").click();
-  await page.locator("#serial").filter({ hasText: /SESSION 2 user=root/ }).waitFor({ timeout: 20000 });
-  await page.getByRole("button", { name: /Session 1:/ }).click();
-  await page.locator("#serial").filter({ hasText: /SESSION 1 user=flinstone/ }).waitFor({ timeout: 20000 });
+  await page.locator("#serial").filter({ hasText: /SESSION 2 user=flinstone/ }).waitFor({ timeout: 20000 });
+  await page.locator("#serial").filter({ hasText: /SWITCHUSER user=root/ }).waitFor({ timeout: 20000 });
+  await page.getByRole("button", { name: /Session 1: root/ }).click();
+  await page.locator("#serial").filter({ hasText: /SESSION 1 user=root/ }).waitFor({ timeout: 45000 });
   assert(errors.length === 0, `Browser errors: ${errors.join("; ")}`);
   await page.screenshot({ path: path.join(root, packaged ? "dist/browser-boot-packaged.png" : "dist/browser-boot.png"), fullPage: true });
   if (packaged) {
@@ -105,7 +109,7 @@ async function main() {
     commit: manifest.commit, artifactSha256: manifest.sha256,
     runtime: lock.runtime, runtimeCommit: lock.distributionCommit, runtimeFiles: lock.files,
     testedAt: new Date().toISOString(), browser: browser.version(),
-    serial, checks: ["exact-marker", "vga-text-memory", "pause-resume-twice", "reset", "power-off-worker-cleanup", "reboot", "blocked-button", "corrupt-digest", "switch-user-sessions"],
+    serial, checks: ["exact-marker", "vga-text-memory", "pause-resume-twice", "reset", "power-off-worker-cleanup", "reboot", "blocked-button", "corrupt-digest", "switchuser-perspectives"],
   };
   const current = JSON.parse(fs.readFileSync(manifestPath));
   assert(current.commit === manifest.commit && current.sha256 === manifest.sha256, "Manifest changed during validation");

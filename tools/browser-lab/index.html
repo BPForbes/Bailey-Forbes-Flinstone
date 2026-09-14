@@ -252,11 +252,10 @@
     <section id="capabilities" aria-label="Guest capabilities"></section>
     <section class="accounts" aria-label="Switch user">
       <h2>Switch user</h2>
-      <p>Each session keeps its own registered account so one operator can host as one user and work as another without logging the first out.</p>
+      <p>Type <code>switchuser &lt;name&gt;</code> in the VGA terminal or use the controls below. Each lab user keeps its own command history and terminal scrollback when you switch back.</p>
       <div id="session-tabs"></div>
       <form id="switch-user">
-        <label>Account <input id="account-name" name="account" autocomplete="username" value="root"></label>
-        <label>Password <input id="account-password" name="password" type="password" autocomplete="current-password" value="root"></label>
+        <label>User <input id="account-name" name="account" autocomplete="username" value="root"></label>
         <button id="account-login" type="submit">Switch user</button>
         <button id="account-new-session" type="button">New session</button>
       </form>
