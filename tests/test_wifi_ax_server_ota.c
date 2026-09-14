@@ -51,8 +51,10 @@ static int test_wpa3_sae_server_ota(void)
 
     memset(&ap_cfg, 0, sizeof(ap_cfg));
     memcpy(ap_cfg.bssid, ap_bssid, 6);
+    memcpy(ap_cfg.sta_mac, sta_mac, 6);
     ap_cfg.auth_mode = FL_WIFI_AUTH_WPA3_SAE;
     strncpy(ap_cfg.ssid, "MockAx6", sizeof(ap_cfg.ssid) - 1u);
+    strncpy(ap_cfg.passphrase, "mock-secret", sizeof(ap_cfg.passphrase) - 1u);
     ASSERT(fl_net_wifi_ax_ap_enable(&srv, &ap_cfg) == FL_RESULT_OK);
     ASSERT(fl_server_bg_start_server(&srv, &bg) == FL_RESULT_OK);
 
@@ -132,6 +134,6 @@ int main(void)
         return 1;
     if (test_wpa2_eapol_server_ota() != 0)
         return 1;
-    puts("test_wifi_ax_server_ota: SAE + EAPOL + HE assoc via server host/join passed");
+    puts("test_wifi_ax_server_ota: bidirectional SAE commit/confirm + EAPOL + HE assoc passed");
     return 0;
 }
