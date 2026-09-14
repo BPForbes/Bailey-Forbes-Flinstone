@@ -209,8 +209,8 @@ dispatch. Today it:
 
 1. builds and tests the hosted and in-process VM paths;
 2. packages the real x86-64 hardware-driver ELF;
-3. runs a QEMU direct-kernel probe and verifies the expected boot-protocol
-   rejection;
+3. runs a bounded QEMU direct-kernel probe and verifies loader rejection or
+   failure to reach the serial boot marker;
 4. validates that metadata says Outcome B;
 5. uploads a clearly named compatibility-audit package, never a public
    “validated boot image.”

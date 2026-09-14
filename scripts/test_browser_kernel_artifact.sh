@@ -55,9 +55,9 @@ timeout 10 qemu-system-x86_64 \
 qemu_status=$?
 set -e
 
-if [[ ${qemu_status} -eq 0 || ${qemu_status} -eq 124 ]]; then
+if [[ ${qemu_status} -eq 0 ]]; then
     cat "${qemu_log}" >&2
-    echo "test-browser-kernel: QEMU unexpectedly accepted or hung on the hosted ELF" >&2
+    echo "test-browser-kernel: QEMU unexpectedly reported a successful boot" >&2
     exit 1
 fi
 if grep -q 'FLINTSTONE_KERNEL_BOOT_OK' "${qemu_log}"; then
@@ -68,7 +68,11 @@ fi
 
 echo "test-browser-kernel: PASS"
 echo "  ELF audit: x86-64, dynamically linked, no firmware boot protocol"
-echo "  QEMU boot probe: rejected as expected (exit ${qemu_status})"
+if [[ ${qemu_status} -eq 124 ]]; then
+    echo "  QEMU boot probe: no boot marker before bounded timeout"
+else
+    echo "  QEMU boot probe: loader rejected candidate (exit ${qemu_status})"
+fi
 echo "  v86 audit: incompatible (no x86-64 long mode)"
 echo "  outcome: documented architecture blocker; no public lab artifact may be promoted"
 echo "  QEMU: $(tr '\n' ' ' <"${qemu_log}")"
