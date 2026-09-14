@@ -16,9 +16,9 @@ assert image[:512]==boot and len(image)%512==0
 assert info['schemaVersion']==2 and info['bootableCandidate'] is True
 # A build is never allowed to self-certify an independent boot observation.
 assert info['bootable'] is False and info['validationOutcome']=='qemu-unvalidated'
-for name in ('identity','filesystem','network','server','hostedLabSessions'):
+for name in ('filesystem','network','server'):
     assert info['capabilities'][name] is False
-for name in ('longMode','gdt','idt','serial','vga','pic','pit','ps2Probe','biosBlockLoad'):
+for name in ('longMode','gdt','idt','serial','vga','pic','pit','ps2Probe','keyboard','biosBlockLoad','identity','hostedLabSessions'):
     assert info['capabilities'][name] is True
 print('test_freestanding_entry: PASS')
 PY

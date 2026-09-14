@@ -32,7 +32,7 @@ evidence = {
     "testedAt": "2026-09-14T00:00:00.000Z",
     "browser": "Chromium 140",
     "serial": "booting\r\nFLINTSTONE_KERNEL_BOOT_OK\r\n",
-    "checks": ["exact-marker"],
+    "checks": ["exact-marker", "vga-text-memory"],
 }
 manifest = {
     "schemaVersion": 2,

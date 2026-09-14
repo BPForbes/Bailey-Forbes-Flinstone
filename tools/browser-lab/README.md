@@ -1,9 +1,20 @@
 # Flintstone browser lab
 
-The lab runs the freestanding x86_64 BIOS disk in a pinned QEMU WebAssembly
+The lab boots the freestanding x86_64 BIOS disk in a pinned QEMU WebAssembly
 runtime. It verifies the disk SHA-256 before creating the worker and declares
 the guest ready only after COM1 supplies the complete
-`FLINTSTONE_KERNEL_BOOT_OK` line.
+`FLINTSTONE_KERNEL_BOOT_OK` line. Display validation requires the diagnostic
+VGA cell `F` with attribute `0x07`.
+
+After that marker the guest is an interactive lab shell, not the hosted ELF:
+
+- keyboard (click the VGA bezel, then type)
+- `login` / `su` / `logout` / `whoami` / `useradd` / `session`
+- up to four concurrent sessions so one operator can keep multiple registered
+  accounts active (for example host as `flinstone` and admin as `root`)
+- lab seeds `flinstone`/`flinstone` and `root`/`root`
+
+Filesystem, networking, and `server host/join` are **not** in this image.
 
 The runtime files are intentionally generated assets. Fetch the exact pinned
 release and verify its digests before local use:
@@ -15,10 +26,10 @@ make test-browser-boot
 
 `test-browser-boot` first performs the native QEMU smoke test, then drives a
 real Chromium browser through the browser VM. It verifies the exact serial
-marker, VGA text memory, pause/resume, reset, power-off cleanup, clean reboot,
-blocked metadata, and a corrupt disk. The test records browser evidence in
-`dist/browser-validation.json` and sets `browserCompatible: true` only after
-all checks pass.
+marker, VGA first cell, pause/resume, reset, power-off cleanup, clean reboot,
+blocked metadata, a corrupt disk, and switch-user sessions. The test records
+browser evidence in `dist/browser-validation.json` and sets
+`browserCompatible: true` only after all checks pass.
 
 For interactive local use, serve with the required cross-origin isolation
 headers:
@@ -37,5 +48,5 @@ records browser compatibility only after the real browser test succeeds.
 
 Use `make browser-lab-release` to build `dist/browser-lab/`: a self-contained
 static package containing the verified runtime, lab UI, disk, manifest, and
-browser-validation evidence. The portfolio can embed that published directory
-after it is deployed.
+browser-validation evidence. Portfolio embedding is documented in
+`docs/portfolio-iframe-integration.md`.

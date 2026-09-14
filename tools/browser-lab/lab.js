@@ -1,12 +1,22 @@
 (() => {
   "use strict";
   const core = window.FlintstoneLabCore;
+  const allowedParents = origin => {
+    if (origin === "https://bailey-forbes.com") return true;
+    try {
+      const url = new URL(origin);
+      return url.protocol === "http:" && (url.hostname === "127.0.0.1" || url.hostname === "127.0.0.2");
+    } catch (_) {
+      return false;
+    }
+  };
   const config = Object.assign({
     metadataUrl: "../../dist/build-info.json", artifactBaseUrl: "../../dist",
     parentOrigin: "https://bailey-forbes.com",
     createEmulator: window.createFlintstoneQemu,
   }, window.FLINTSTONE_LAB_CONFIG || {});
-  const text = (id, value) => { document.getElementById(id).textContent = value; };
+  if (!allowedParents(config.parentOrigin)) config.parentOrigin = "https://bailey-forbes.com";
+  const text = (id, value) => { const node = document.getElementById(id); if (node) node.textContent = value; };
   const setState = (state, detail) => {
     const node = document.getElementById("status");
     node.className = [core.STATES.BLOCKED, core.STATES.FAILED].includes(state) ? "blocked" : "";
@@ -15,13 +25,62 @@
   };
   let info;
   let busy = false;
+  let emulator = null;
+  const sessions = { 1: "flinstone" };
+  let activeSession = 1;
   const validation = new URLSearchParams(location.search).get("validate") === "1";
   const serial = document.getElementById("serial");
   const canvas = document.querySelector("#screen canvas");
+  const screen = document.getElementById("screen");
+  function renderCaps(capabilities) {
+    const node = document.getElementById("capabilities");
+    if (!node) return;
+    const rows = [
+      ["identity", "Identity / switch user"],
+      ["hostedLabSessions", "Multiple sessions"],
+      ["keyboard", "Keyboard"],
+      ["filesystem", "Filesystem"],
+      ["network", "Networking"],
+      ["server", "Server host/join"],
+    ];
+    node.replaceChildren();
+    for (const [key, label] of rows) {
+      const item = document.createElement("div");
+      const on = Boolean(capabilities && capabilities[key]);
+      item.className = on ? "cap-on" : "cap-off";
+      item.textContent = `${label}: ${on ? "available" : "unavailable"}`;
+      node.appendChild(item);
+    }
+  }
+  function renderSessions() {
+    const node = document.getElementById("session-tabs");
+    if (!node) return;
+    node.replaceChildren();
+    Object.keys(sessions).sort((a, b) => Number(a) - Number(b)).forEach(id => {
+      const button = document.createElement("button");
+      button.type = "button";
+      button.dataset.session = id;
+      button.textContent = `Session ${id}: ${sessions[id]}`;
+      if (Number(id) === activeSession) button.setAttribute("aria-current", "true");
+      button.onclick = () => sendGuest(`session ${id}\n`);
+      node.appendChild(button);
+    });
+    text("account-status", `Active session ${activeSession}: ${sessions[activeSession] || "—"}`);
+  }
+  function noteSerial(value) {
+    const match = /SESSION (\d+) user=(\S+)/.exec(value);
+    if (match) {
+      activeSession = Number(match[1]);
+      sessions[activeSession] = match[2];
+      renderSessions();
+    }
+  }
   function renderScreen(bytes) {
     // Render the guest-owned 80x25 VGA text buffer at physical 0xb8000.
     // This is a text-mode display, not a graphics-mode VGA implementation.
-    if (bytes.length !== 4000) return;
+    const valid = core.validDiagnosticVga(bytes);
+    document.documentElement.dataset.vgaCell = valid ? "F" : "";
+    if (!valid) return;
     const colors = ["#000", "#00a", "#0a0", "#0aa", "#a00", "#a0a", "#a50", "#aaa", "#555", "#55f", "#5f5", "#5ff", "#f55", "#f5f", "#ff5", "#fff"];
     canvas.width = 800; canvas.height = 400;
     const ctx = canvas.getContext("2d");
@@ -40,16 +99,22 @@
     sha256: info.sha256,
     onScreen: renderScreen, onDiagnostic: text => console.warn(text),
   });
+  async function sendGuest(value) {
+    if (!emulator || typeof emulator.sendText !== "function") return;
+    await emulator.sendText(value);
+  }
   const controller = core.createController({
     marker: "FLINTSTONE_KERNEL_BOOT_OK", setState,
     postReady: () => window.parent.postMessage({ source: "flinstone-guest", type: "ready", schemaVersion: 1, commit: info.shortCommit }, config.parentOrigin),
     createEmulator: async (settings) => {
       if (typeof config.createEmulator !== "function") throw new Error("No validated x86-64 browser emulator is configured");
       serial.textContent = "";
-      return config.createEmulator({ ...settings, serialByte: byte => {
+      emulator = await config.createEmulator({ ...settings, serialByte: byte => {
         serial.textContent = (serial.textContent + String.fromCharCode(byte)).slice(-65536);
+        noteSerial(serial.textContent.slice(-80));
         settings.serialByte(byte);
       } });
+      return emulator;
     },
   });
   async function load() {
@@ -59,6 +124,8 @@
     info = core.validateManifest(await response.json());
     text("commit", info.shortCommit); text("architecture", info.architecture);
     text("emulator", info.browserEmulator); text("artifact", info.artifact);
+    renderCaps(info.capabilities);
+    renderSessions();
     if (!canBoot()) {
       setState(core.STATES.BLOCKED, info.blockers.join("; "));
       return;
@@ -71,6 +138,28 @@
       if (busy || ((id === "boot" || id === "reset") && !canBoot())) return;
       busy = true;
       try { await action(); } catch (error) { controller.fail(error); } finally { busy = false; }
+    };
+  }
+  screen.addEventListener("keydown", event => {
+    if (!emulator || typeof emulator.sendKey !== "function") return;
+    const codes = window.FlintstoneQemuKeys && window.FlintstoneQemuKeys.qcodesForEvent(event);
+    if (!codes) return;
+    event.preventDefault();
+    emulator.sendKey(codes).catch(error => controller.fail(error));
+  });
+  const form = document.getElementById("switch-user");
+  if (form) {
+    form.addEventListener("submit", async event => {
+      event.preventDefault();
+      const name = document.getElementById("account-name").value.trim();
+      const password = document.getElementById("account-password").value;
+      if (!name) return;
+      await sendGuest(`login ${name}\n${password}\n`);
+    });
+    document.getElementById("account-new-session").onclick = async () => {
+      const name = document.getElementById("account-name").value.trim() || "flinstone";
+      const password = document.getElementById("account-password").value || name;
+      await sendGuest(`session new\nlogin ${name}\n${password}\n`);
     };
   }
   load().catch((error) => controller.fail(error));

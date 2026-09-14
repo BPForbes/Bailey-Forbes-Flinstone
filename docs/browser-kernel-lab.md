@@ -1,8 +1,8 @@
 # Flintstone browser-kernel contract
 
-This document covers only `BPForbes/Bailey-Forbes-Flinstone`. It defines the
-kernel/artifact side of a future static browser lab; the emulator UI and the
-portfolio iframe remain separate projects.
+This document covers `BPForbes/Bailey-Forbes-Flinstone` kernel artifacts and
+the static browser lab. Portfolio iframe markup and parent headers are
+specified in [`docs/portfolio-iframe-integration.md`](./portfolio-iframe-integration.md).
 
 ## Compatibility decision
 
@@ -11,10 +11,12 @@ portfolio iframe remain separate projects.
 `make browser-kernel` now builds `dist/flintstone.img`: a raw BIOS disk whose
 MBR loads a freestanding payload, constructs identity-mapped long-mode page
 tables, installs a 64-bit GDT, and enters `kernel_entry`. The entry owns its
-stack, clears `.bss`, installs an early IDT, initializes COM1, and only then
-emits the boot marker. The image is intentionally a **boot-boundary increment**,
-not yet the hosted shell port: its serial capability line reports identity,
-filesystem, networking, server, and hosted sessions as unavailable.
+stack, clears `.bss`, installs an early IDT, initializes COM1, writes the
+diagnostic VGA cell `F`, and only then emits the boot marker. After the marker
+it runs a serial/PS/2 lab shell with in-memory identity and up to four
+concurrent sessions (`login`, `su`, `logout`, `whoami`, `session`). That is
+still not the hosted ELF port: filesystem, P3 networking, and `server host/join`
+remain unavailable, and lab accounts are not the SQLite `fl_users.db` store.
 
 The build emits schema 2 metadata with `bootableCandidate: true` but
 `bootable: false`. Only `scripts/test_browser_kernel_artifact.sh`, after an
@@ -155,8 +157,8 @@ SeaBIOS-compatible PC BIOS -> Flintstone MBR loader
 
 ## Boot-success contract
 
-After memory, GDT, IDT, PIC, PIT, VGA, keyboard, and block-driver initialization
-succeeds, the kernel emits exactly:
+After IDT, PIC, PIT, VGA, and keyboard initialization succeed, the kernel emits
+exactly:
 
 ```text
 FLINTSTONE_KERNEL_BOOT_OK
@@ -179,18 +181,18 @@ as an independent boot observation.
 Keyboard focus belongs to layer 3 and the emulator:
 
 ```text
-keyboard -> browser event -> emulator PS/2 -> Flintstone PS/2 driver
+keyboard -> browser event -> QEMU send-key -> PS/2 -> Flintstone keyboard driver
 ```
 
-Display and disk remain virtual hardware paths:
+Display remains a virtual hardware path:
 
 ```text
-Flintstone VGA writes -> virtual VGA -> emulator screen container
-Flintstone filesystem -> block driver -> ATA PIO -> virtual IDE -> raw image
+Flintstone VGA writes -> virtual VGA text memory -> emulator canvas
 ```
 
-Persistence, snapshots, Boot/Pause/Resume/Reset/Power-off, and VM recreation are
-lab/emulator lifecycle features. They require no browser API in Flintstone.
+The hosted filesystem, block driver, and `server` path are **not** present in
+the freestanding browser image. Persistence, snapshots, Boot/Pause/Resume/
+Reset/Power-off, and VM recreation are lab/emulator lifecycle features.
 
 ## Static lab consumption contract
 
@@ -205,7 +207,8 @@ implemented **Path B** QEMU WebAssembly adapter offers:
 - 8042 PS/2, 8254 PIT, dual 8259 PIC, primary IDE ATA PIO, and COM1;
 - at least 64 MiB guest RAM;
 - raw disk loading by relative/configurable URL;
-- keyboard focus, lifecycle controls, and serial-byte capture;
+- keyboard focus, lifecycle controls, serial-byte capture, and lab identity
+  with concurrent sessions;
 - operation on a static host without a server runtime.
 
 Do not select an emulator merely because it runs x86-64 user programs; it must
@@ -213,18 +216,20 @@ boot a virtual PC and expose these devices.
 
 ## CI and deployment
 
-`.github/workflows/browser-kernel-artifact.yml` runs on `main` pushes and manual
-dispatch. Today it:
+`.github/workflows/browser-kernel-artifact.yml` runs on pull requests, `main`
+pushes, and manual dispatch. Pull requests validate only; they never replace
+the published lab. On `main` it:
 
 1. builds and tests the hosted and in-process VM paths;
 2. builds the freestanding raw disk candidate;
 3. runs a bounded native-QEMU IDE boot probe and requires the serial marker;
-4. runs the pinned QEMU WebAssembly runtime in Chromium and requires the same
-   complete serial marker, verified disk digest, VGA text capture, and lifecycle
-   checks;
-5. validates schema-versioned metadata and artifact SHA-256;
-6. packages the browser runtime, image, manifest, and validation evidence only
-   after both independent boot observations succeed.
+4. drives the serial lab shell for `whoami`, concurrent sessions, and switch user;
+5. runs the pinned QEMU WebAssembly runtime in Chromium and requires the same
+   complete serial marker, verified disk digest, VGA first-cell `F`/`0x07`,
+   lifecycle checks, and switch-user sessions;
+6. packages the browser runtime, image, manifest, and validation evidence;
+7. re-runs Chromium against the packaged `./artifacts/` tree and a second origin
+   that iframes the lab.
 
 The workflow contains a fail-closed promotion gate. Upload as
 `flintstone-browser-kernel` requires all three independent signals:
@@ -233,26 +238,10 @@ a browser-QEMU-Wasm test that both actually observe `FLINTSTONE_KERNEL_BOOT_OK`
 on serial. The manifest's `bootSuccessMarkerImplemented` declaration is
 validated but cannot self-attest either observation.
 
-The future lab deployment workflow should download only that validated artifact,
-copy the image and JSON to its static `/artifacts/` directory, and deploy Pages:
-
-```text
-validated workflow artifact -> static lab /artifacts/
-  -> GitHub Pages -> permanent iframe on bailey-forbes.com
-```
-
-The lab fetches `/artifacts/build-info.json`, then loads
-`/artifacts/<artifact>?v=<shortCommit>`. Stable paths simplify deployment; the
-commit query busts browser/CDN caches. Asset roots are configurable or relative,
-so the lab may live at `bpforbes.github.io/<lab>/` and be embedded cross-origin:
-
-```html
-<iframe src="https://bpforbes.github.io/<lab>/" title="Flintstone Kernel Lab"></iframe>
-```
-
-The lab host must permit framing by `bailey-forbes.com` through its effective
-`Content-Security-Policy frame-ancestors` policy. The portfolio keeps a permanent
-iframe URL and needs no routine update. With the freestanding boot path and
-compatible emulator now delivered, normal Flintstone pushes can compile, test,
-boot-smoke, and atomically publish the newest successful image; failed commits
-leave the previously deployed image untouched.
+On `main` only, the same workflow deploys that packaged tree to GitHub Pages.
+Pull requests never publish. The configured permanent URL is
+`https://bpforbes.github.io/Bailey-Forbes-Flinstone/`. GitHub Pages cannot set
+COOP/COEP/CSP; see [`docs/portfolio-iframe-integration.md`](./portfolio-iframe-integration.md).
+The lab fetches `./artifacts/build-info.json`, then
+`./artifacts/<artifact>?v=<shortCommit>`. Failed commits leave the previously
+deployed image untouched.

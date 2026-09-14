@@ -19,7 +19,7 @@
  *     40-character `runtimeCommit`, and non-empty `runtimeFiles` basename-to-
  *     SHA-256 map matching the pinned emulator; parseable `testedAt`, non-empty
  *     `browser`, `serial` containing the exact boot-marker line, and `checks`
- *     containing `exact-marker`
+ *     containing `exact-marker` and `vga-text-memory`
  *   - `bootloader`, `requiredBios`, `qemuBootMode` (string or null)
  *   - `minimumRamBytes` (non-negative integer or null)
  *   - `recommendedRamBytes` (positive integer)
@@ -40,7 +40,7 @@
 
 #include "contract_extend.h"
 
-#define FL_CONTRACT_P8_BROWSER_ARTIFACT_INTERCHANGE_REV 3
+#define FL_CONTRACT_P8_BROWSER_ARTIFACT_INTERCHANGE_REV 4
 #define FL_CONTRACT_P8_BROWSER_ARTIFACT_SCHEMA_VERSION 2
 #define FL_CONTRACT_P8_BROWSER_ARTIFACT_CONTRACT_DEFINED 1
 

@@ -132,8 +132,34 @@
       cursor: pointer;
       box-shadow: inset 0 1px 0 rgba(255, 220, 170, 0.2);
     }
-    #controls button:hover { filter: brightness(1.12); }
+    #controls button:hover, #session-tabs button:hover, .accounts button:hover { filter: brightness(1.12); }
     #controls button:active { transform: translateY(1px); }
+    #capabilities, #session-tabs, .accounts form {
+      display: flex; flex-wrap: wrap; gap: 0.45rem; margin: 0;
+    }
+    #capabilities { margin: 0; }
+    #capabilities div, .accounts {
+      border: 1px solid var(--line);
+      background: var(--panel);
+      padding: 0.75rem 0.9rem;
+    }
+    #capabilities .cap-on { color: var(--phosphor); }
+    #capabilities .cap-off { color: var(--muted); }
+    .accounts {
+      display: grid;
+      gap: 0.65rem;
+    }
+    .accounts h2 { margin: 0; font-size: 0.95rem; color: var(--amber); }
+    .accounts p, .accounts label { margin: 0; color: var(--muted); }
+    #session-tabs button, .accounts button, .accounts input {
+      appearance: none;
+      border: 1px solid #9a5a22;
+      background: #20140d;
+      color: #f8e2c0;
+      padding: 0.45rem 0.7rem;
+      font: inherit;
+    }
+    #session-tabs button[aria-current="true"] { border-color: var(--phosphor); color: var(--phosphor); }
     .crt { padding: 0.85rem; }
     .bezel-bar,     .console-head {
       display: flex;
@@ -200,8 +226,8 @@
     <header class="masthead">
       <div class="mark" aria-hidden="true">F</div>
       <div>
-        <h1>Flintstone browser artifact probe</h1>
-        <p class="lede">This isolated harness consumes kernel metadata before loading an emulator.</p>
+        <h1>Flintstone browser lab</h1>
+        <p class="lede">Freestanding x86-64 guest with lab identity and concurrent sessions. Hosted filesystem, networking, and <code>server</code> are not in this image.</p>
       </div>
       <p class="status-badge">
         <span>Guest state</span>
@@ -222,6 +248,19 @@
         <button id="reset" type="button">Reset</button>
         <button id="poweroff" type="button">Power Off</button>
       </p>
+    </section>
+    <section id="capabilities" aria-label="Guest capabilities"></section>
+    <section class="accounts" aria-label="Switch user">
+      <h2>Switch user</h2>
+      <p>Each session keeps its own registered account so one operator can host as one user and work as another without logging the first out.</p>
+      <div id="session-tabs"></div>
+      <form id="switch-user">
+        <label>Account <input id="account-name" name="account" autocomplete="username" value="root"></label>
+        <label>Password <input id="account-password" name="password" type="password" autocomplete="current-password" value="root"></label>
+        <button id="account-login" type="submit">Switch user</button>
+        <button id="account-new-session" type="button">New session</button>
+      </form>
+      <p id="account-status">Active session 1: flinstone</p>
     </section>
     <section class="crt" aria-labelledby="display-label">
       <div class="bezel-bar">

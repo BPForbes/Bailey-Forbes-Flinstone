@@ -15,6 +15,8 @@
   const nonemptyString = value => typeof value === "string" && value.length > 0;
   const exactSerialLine = (serial, marker) =>
     nonemptyString(serial) && serial.split(/\r?\n/).includes(marker);
+  const validDiagnosticVga = bytes =>
+    Boolean(bytes && bytes.length === 4000 && bytes[0] === 0x46 && bytes[1] === 0x07);
 
   function validRuntimeDigests(files) {
     return files && typeof files === "object" && !Array.isArray(files) &&
@@ -34,7 +36,8 @@
       nonemptyString(evidence.testedAt) && !Number.isNaN(Date.parse(evidence.testedAt)) &&
       nonemptyString(evidence.browser) &&
       exactSerialLine(evidence.serial, info.bootSuccessMarker) &&
-      Array.isArray(evidence.checks) && evidence.checks.includes("exact-marker");
+      Array.isArray(evidence.checks) && evidence.checks.includes("exact-marker") &&
+      evidence.checks.includes("vga-text-memory");
   }
 
   function validateManifest(info) {
@@ -114,5 +117,5 @@
       serialByte,
     };
   }
-  return { STATES, validateManifest, isTrustedReadyEvent, createController };
+  return { STATES, validateManifest, isTrustedReadyEvent, createController, validDiagnosticVga, exactSerialLine };
 });

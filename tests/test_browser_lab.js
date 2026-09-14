@@ -2,13 +2,13 @@
 const assert = require("assert");
 const fs = require("fs");
 const vm = require("vm");
-const { STATES, validateManifest, isTrustedReadyEvent, createController } = require("../tools/browser-lab/lab-core.js");
+const { STATES, validateManifest, isTrustedReadyEvent, createController, validDiagnosticVga } = require("../tools/browser-lab/lab-core.js");
 const commit = "1".repeat(40);
 const evidence = {
   commit, artifactSha256: "a".repeat(64), runtime: "ktock/qemu-wasm",
   runtimeCommit: "2".repeat(40), runtimeFiles: { "qemu.wasm": "b".repeat(64) },
   testedAt: "2026-09-14T00:00:00.000Z", browser: "Chromium 140",
-  serial: "booting\r\nFLINTSTONE_KERNEL_BOOT_OK\r\n", checks: ["exact-marker"],
+  serial: "booting\r\nFLINTSTONE_KERNEL_BOOT_OK\r\n", checks: ["exact-marker", "vga-text-memory"],
 };
 const manifest = { schemaVersion: 2, commit, shortCommit: "1234567", architecture: "x86_64", browserEmulator: "test", artifact: "flintstone.img", sha256: "a".repeat(64), bootSuccessMarker: "FLINTSTONE_KERNEL_BOOT_OK", validationOutcome: "browser-bootable", bootableCandidate: true, bootable: true, v86Compatible: false, browserCompatible: true, bootSuccessMarkerImplemented: true, recommendedRamBytes: 64, blockers: [], capabilities: {}, browserValidation: evidence };
 assert.strictEqual(validateManifest(manifest), manifest);
@@ -22,9 +22,20 @@ for (const bad of [
   }),
   { ...manifest, browserValidation: { ...evidence, artifactSha256: "c".repeat(64) } },
   { ...manifest, browserValidation: { ...evidence, runtimeFiles: { "../qemu.wasm": "b".repeat(64) } } },
+  { ...manifest, browserValidation: { ...evidence, checks: ["exact-marker"] } },
   { ...manifest, browserValidation: { ...evidence, serial: "FLINTSTONE_KERNEL_BOOT_OK suffix\n" } },
 ]) assert.throws(() => validateManifest(bad));
 assert.strictEqual(validateManifest({ ...manifest, browserCompatible: false, browserValidation: undefined }).browserCompatible, false);
+
+const vga = new Uint8Array(4000);
+vga[0] = 0x46; vga[1] = 0x07;
+assert(validDiagnosticVga(vga));
+assert(!validDiagnosticVga(new Uint8Array(0)));
+assert(!validDiagnosticVga(new Uint8Array(4000)));
+const wrongGlyph = new Uint8Array(4000); wrongGlyph[0] = 0x58; wrongGlyph[1] = 0x07;
+assert(!validDiagnosticVga(wrongGlyph));
+const wrongAttr = new Uint8Array(4000); wrongAttr[0] = 0x46; wrongAttr[1] = 0x1f;
+assert(!validDiagnosticVga(wrongAttr));
 
 let controllerChange;
 let controllerOptions;

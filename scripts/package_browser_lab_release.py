@@ -64,6 +64,7 @@ def validate_browser_release(manifest, evidence_file, runtime_lock):
         and marker in evidence["serial"].splitlines()
         and isinstance(evidence.get("checks"), list)
         and "exact-marker" in evidence["checks"]
+        and "vga-text-memory" in evidence["checks"]
     ):
         raise ValueError("Refusing to package an unvalidated browser artifact")
     return artifact

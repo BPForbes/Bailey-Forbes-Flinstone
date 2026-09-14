@@ -342,7 +342,7 @@ deploy:
 	@gcc -std=c11 -Wall -Wextra -O2 -o gen_version_changelog scripts/gen_version_changelog.c && ./gen_version_changelog
 	@$(MAKE) CHANGELOG_CI=1 all
 
-.PHONY: vm baremetal browser-kernel test-browser-kernel test-browser-kernel-gate test-browser-lab test-browser-boot test-freestanding-entry browser-lab-runtime browser-lab-release
+.PHONY: vm baremetal browser-kernel test-browser-kernel test-browser-kernel-gate test-browser-lab test-browser-boot test-browser-boot-packaged test-browser-iframe test-freestanding-entry test-freestanding-shell browser-lab-runtime browser-lab-release
 vm:
 	$(MAKE) VM_ENABLE=1 $(TARGET)
 
@@ -351,9 +351,9 @@ vm:
 vm-sdl:
 	$(MAKE) VM_ENABLE=1 VM_SDL=1 $(TARGET)
 
-# Browser-lab boot boundary. This produces a BIOS raw disk containing only the
-# independently bootable freestanding core; unavailable hosted subsystems are
-# reported explicitly in the manifest and are not promoted to the public lab.
+# Browser-lab boot boundary. This produces a BIOS raw disk with a lab identity
+# shell and concurrent sessions. Hosted filesystem, networking, and server remain
+# unavailable and are reported explicitly in the manifest.
 browser-kernel:
 	@./scripts/build_freestanding_browser_kernel.sh
 
@@ -365,6 +365,9 @@ test-browser-kernel-gate:
 
 test-freestanding-entry:
 	@bash ./tests/test_freestanding_entry.sh
+
+test-freestanding-shell: test-browser-kernel
+	@python3 ./scripts/test_freestanding_shell.py
 
 test-browser-lab:
 	@node ./tests/test_browser_lab.js
@@ -378,6 +381,12 @@ test-browser-boot: test-browser-kernel browser-lab-runtime
 
 browser-lab-release: test-browser-boot
 	@python3 ./scripts/package_browser_lab_release.py
+
+test-browser-boot-packaged: browser-lab-release
+	@FL_BROWSER_TEST_PACKAGED=1 node ./scripts/test_browser_boot.cjs
+
+test-browser-iframe: browser-lab-release
+	@node ./scripts/test_browser_iframe.cjs
 
 # Fetch and build external libs (SDL2, CUnit) into deps/install.
 .PHONY: deps deps-sdl2 deps-cunit
