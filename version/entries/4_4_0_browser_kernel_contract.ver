@@ -1,6 +1,4 @@
 MAJOR_VERSION=4
 STANDARD_VERSION=4
 RELEASE_VERSION=0
-DESCRIPTION=Add the browser-kernel artifact contract, architecture compatibility audit, minimal static lab harness, CI validation gate, and repaired VM replay linkage without claiming v86 compatibility before a freestanding boot path exists.
-
-RELEASE_DATE=2026-09-14
+DESCRIPTION=Add the browser-kernel artifact contract, architecture compatibility audit, minimal static lab harness, CI validation gate, and repaired VM replay linkage without claiming v86 compatibility before a freestanding boot path exists; fix bounded host SSID parsing, native TCP partial reads, file-transfer completion integrity, and protocol-valid bidirectional WPA3-SAE OTA authentication.
