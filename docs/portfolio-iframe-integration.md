@@ -56,14 +56,20 @@ Flintstone change.
 GitHub Pages cannot set COOP, COEP, CSP, or Permissions-Policy. The packaged
 lab therefore:
 
-- ships `coi-serviceworker.js` so a first visit reloads once the worker
-  controls the lab origin. Top-level visits receive COEP and COOP. Framed
-  visits receive COEP only: adding `COOP: same-origin` on an iframe reload
-  makes Chromium replace the child with `chrome-error://chromewebdata/`.
+- ships `coi-serviceworker.js` so a **top-level** first visit reloads once the
+  worker controls the lab origin. Top-level visits receive COEP and COOP.
+  Framed visits receive COEP only: adding `COOP: same-origin` on an iframe
+  reload makes Chromium replace the child with `chrome-error://chromewebdata/`.
+- A parent that is already cross-origin isolated (`COEP: credentialless` or
+  `require-corp`) refuses the first headerless document with
+  `net::ERR_BLOCKED_BY_RESPONSE`. The service worker therefore cannot install
+  on a first-visit iframe from `bailey-forbes.com`. After a top-level Pages
+  visit in the same browser, the worker injects COEP and the iframe can boot.
   Nested `SharedArrayBuffer` still needs the parent headers below plus
   `allow="cross-origin-isolated"`. The worker cannot isolate the parent.
 - ships `_headers` for Cloudflare/Netlify if the lab is later placed behind a
-  host that honors them. Prefer those native child headers when available.
+  host that honors them. Prefer those native child headers when the portfolio
+  iframe must boot on the visitor's first load with no prior Pages visit.
 
 When headers are available, use:
 
@@ -134,4 +140,7 @@ function isTrustedReady(event, { labOrigin, iframe, commit }) {
 3. Listen for `message` and accept only the trusted ready payload above.
 4. Do not rely on the lab service worker to isolate the parent origin.
    The parent must send COOP/COEP (`credentialless` is the documented
-   portfolio COEP) and delegate `cross-origin-isolated`.
+   portfolio COEP) and delegate `cross-origin-isolated`. A first-visit
+   iframe of the GitHub Pages lab will not boot until the visitor has
+   opened the Pages URL top-level once, or until the lab is served with
+   native child COOP/COEP.

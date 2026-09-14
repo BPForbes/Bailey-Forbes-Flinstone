@@ -104,12 +104,20 @@ async function main() {
     "--permissions-policy", `cross-origin-isolated=(self "${swLabOrigin}")`, "--corp", "cross-origin"]);
   const fresh = await browser.newContext({ viewport: { width: 1200, height: 1100 } });
   await fresh.addInitScript({ content: `window.FLINTSTONE_LAB_CONFIG = { parentOrigin: ${JSON.stringify(swParentOrigin)} };` });
+  // A COEP parent blocks the first headerless document (ERR_BLOCKED_BY_RESPONSE),
+  // so the service worker never installs inside a first-visit iframe. GitHub Pages
+  // therefore warms isolation with a top-level visit; the worker then injects COEP
+  // on the subsequent framed navigation.
+  const top = await fresh.newPage();
+  await top.goto(swLabOrigin + "/", { waitUntil: "domcontentloaded" });
+  await waitReady(top);
+  await top.close();
   const swPage = await fresh.newPage();
   await swPage.goto(swParentOrigin + "/", { waitUntil: "domcontentloaded" });
   await waitReady(swPage.frameLocator("#lab"));
   await swPage.waitForFunction(() => window.trustedReady === true, null, { timeout: 20000 });
   await fresh.close();
-  console.log("test-browser-iframe: PASS (parent COOP/COEP, headered child, first-visit SW child, ready origin/source/schema/commit)");
+  console.log("test-browser-iframe: PASS (parent COOP/COEP, headered child, top-level first-visit SW then iframe, ready origin/source/schema/commit)");
 }
 main().catch(error => { console.error(error); process.exitCode = 1; }).finally(async () => {
   if (browser) await browser.close();
