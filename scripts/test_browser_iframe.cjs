@@ -92,6 +92,9 @@ async function main() {
   await frame.locator("#serial").filter({ hasText: /SESSION 2 user=root/ }).waitFor({ timeout: 20000 });
   assert(errors.length === 0, `iframe errors: ${errors.join("; ")}`);
   await page.screenshot({ path: path.join(root, "dist/browser-iframe.png"), fullPage: true });
+  await frame.getByRole("button", { name: "Power Off", exact: true }).click();
+  await frame.locator("#status").filter({ hasText: /^Powered off$/ }).waitFor();
+  await page.close();
 
   const swParentDir = fs.mkdtempSync(path.join(os.tmpdir(), "flintstone-iframe-sw-parent-"));
   const swLabOrigin = `http://127.0.0.1:${swLabPort}`;
