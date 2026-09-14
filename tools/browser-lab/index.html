@@ -9,7 +9,9 @@
     dt { font-weight: 700; }
     dd { margin: 0 0 .75rem; }
     #screen { outline: 1px solid #777; min-height: 25rem; }
-    #screen > div { white-space: pre; font: 14px monospace; }
+    #screen > div, pre { white-space: pre-wrap; font: 14px monospace; }
+    canvas { width: 100%; image-rendering: pixelated; }
+    #serial { background: #15191f; color: #d5f7dd; padding: 1rem; min-height: 5rem; }
     .blocked { color: #9b1c1c; }
   </style>
 </head>
@@ -31,10 +33,14 @@
     <button id="poweroff" type="button">Power Off</button>
   </p>
   <div id="screen" tabindex="0" aria-label="Virtual machine display">
-    <div>VM display is not initialized.</div>
+    <div id="display-placeholder">VM display is not initialized.</div>
     <canvas></canvas>
   </div>
+  <h2>Kernel serial output</h2>
+  <pre id="serial" aria-label="Kernel serial output"></pre>
+  <script src="coi-serviceworker.js"></script>
   <script src="lab-core.js"></script>
+  <script src="qemu-adapter.js"></script>
   <script src="lab.js"></script>
 </body>
 </html>

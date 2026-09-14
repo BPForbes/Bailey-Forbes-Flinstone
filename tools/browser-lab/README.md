@@ -1,42 +1,41 @@
-# Browser artifact probe
+# Flintstone browser lab
 
-This is a static proof-of-consumption harness, not the portfolio UI and not a
-copy of v86. Serve the repository root after generating metadata:
+The lab runs the freestanding x86_64 BIOS disk in a pinned QEMU WebAssembly
+runtime. It verifies the disk SHA-256 before creating the worker and declares
+the guest ready only after COM1 supplies the complete
+`FLINTSTONE_KERNEL_BOOT_OK` line.
+
+The runtime files are intentionally generated assets. Fetch the exact pinned
+release and verify its digests before local use:
+
+```sh
+make browser-lab-runtime
+make test-browser-boot
+```
+
+`test-browser-boot` first performs the native QEMU smoke test, then drives a
+real Chromium browser through the browser VM. It verifies the exact serial
+marker, VGA text memory, pause/resume, reset, power-off cleanup, clean reboot,
+blocked metadata, and a corrupt disk. The test records browser evidence in
+`dist/browser-validation.json` and sets `browserCompatible: true` only after
+all checks pass.
+
+For interactive local use, serve with the required cross-origin isolation
+headers:
 
 ```sh
 make browser-kernel
-python3 -m http.server 8000
+./scripts/test_browser_kernel_artifact.sh
+python3 ./scripts/serve_browser_lab.py
 ```
 
-Open `http://localhost:8000/tools/browser-lab/`. The current metadata reports
-the browser-runtime validation blocker, so the page must show **Blocked** and
-must not instantiate an emulator.
+Open `http://127.0.0.1:8766/tools/browser-lab/?validate=1` while validating a
+fresh candidate. The ordinary page refuses to boot until a manifest has a
+recorded browser validation. `?validate=1` is available only to the local and
+CI validation path; it still requires a native-QEMU-validated disk hash and
+records browser compatibility only after the real browser test succeeds.
 
-The harness reads defaults from the repository's `dist/`. A separately hosted
-lab can configure relative or cross-origin static assets before `lab.js`:
-
-```html
-<script>
-window.FLINTSTONE_LAB_CONFIG = {
-  metadataUrl: "./artifacts/build-info.json",
-  artifactBaseUrl: "./artifacts",
-  parentOrigin: "https://bailey-forbes.com",
-  createEmulator: async ({ artifactUrl, memorySize, serialByte }) => {
-    // Return a validated x86-64 PC emulator adapter with stop(), run(), and
-    // destroy(). Feed each captured COM1 byte to serialByte.
-  }
-};
-</script>
-```
-
-No emulator source, BIOS, or generated kernel artifact is committed here.
-Those are lab infrastructure and CI output. The harness requires both
-`bootable` and schema-v2 `browserCompatible`, appends `?v=<shortCommit>` for
-cache busting, and uses metadata's recommended RAM. It posts readiness only
-after the adapter supplies the exact serial marker as a complete line.
-
-Keep keyboard handling in the emulator. Focus the `#screen` element so browser
-events flow through the emulator's PS/2 path to the Flintstone keyboard driver.
-Boot, pause, resume, reset, and power-off/recreate are exposed by the lab.
-Persistence remains unavailable until an emulator and versioned disk format are
-selected and tested.
+Use `make browser-lab-release` to build `dist/browser-lab/`: a self-contained
+static package containing the verified runtime, lab UI, disk, manifest, and
+browser-validation evidence. The portfolio can embed that published directory
+after it is deployed.

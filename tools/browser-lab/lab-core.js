@@ -24,6 +24,11 @@
     if (info.schemaVersion === 2 && (typeof info.browserCompatible !== "boolean" || typeof info.capabilities !== "object" || !info.capabilities)) {
       throw new Error("Schema 2 browser compatibility fields are invalid");
     }
+    if (info.browserCompatible && (!info.browserValidation || typeof info.browserValidation !== "object" ||
+      info.browserValidation.artifactSha256 !== info.sha256 ||
+      !Array.isArray(info.browserValidation.checks) || !info.browserValidation.checks.includes("exact-marker"))) {
+      throw new Error("Browser-compatible manifest lacks independent validation evidence");
+    }
     if (!Number.isSafeInteger(info.recommendedRamBytes) || info.recommendedRamBytes <= 0 || !Array.isArray(info.blockers)) {
       throw new Error("Manifest runtime requirements are invalid");
     }
@@ -41,12 +46,15 @@
     let emulator = null;
     let line = "";
     let readySent = false;
+    let generation = 0;
+    let timer;
     const state = (value, detail = "") => setState(value, detail);
     const serialByte = (value) => {
       const char = typeof value === "number" ? String.fromCharCode(value) : value;
       if (char === "\n") {
         if (line.replace(/\r$/, "") === marker && !readySent) {
           readySent = true;
+          clearTimeout(timer);
           state(STATES.READY);
           postReady();
         }
@@ -58,15 +66,24 @@
     return {
       async boot(options) {
         if (emulator) await this.powerOff();
+        clearTimeout(timer); const current = ++generation;
         readySent = false; line = ""; state(STATES.BOOTING);
-        try { emulator = await createEmulator({ ...options, serialByte }); }
-        catch (error) { emulator = null; state(STATES.FAILED, error.message); throw error; }
+        timer = setTimeout(() => { if (current === generation && !readySent) this.fail(new Error("Kernel boot marker was not observed within 90 seconds")); }, 90000);
+        try {
+          const instance = await createEmulator({ ...options,
+            serialByte: value => { if (current === generation) serialByte(value); },
+            onError: error => { if (current === generation) this.fail(error); },
+          });
+          if (current !== generation) { await instance.destroy(); return; }
+          emulator = instance;
+        }
+        catch (error) { if (current === generation) this.fail(error); throw error; }
       },
-      pause() { if (!emulator || readySent === false) return false; emulator.stop(); state(STATES.PAUSED); return true; },
-      resume() { if (!emulator) return false; emulator.run(); state(readySent ? STATES.READY : STATES.BOOTING); return true; },
+      async pause() { if (!emulator || readySent === false) return false; await emulator.stop(); state(STATES.PAUSED); return true; },
+      async resume() { if (!emulator) return false; await emulator.run(); state(readySent ? STATES.READY : STATES.BOOTING); return true; },
       async reset(options) { await this.powerOff(); await this.boot(options); },
-      async powerOff() { if (emulator) { if (emulator.destroy) await emulator.destroy(); else emulator.stop(); } emulator = null; readySent = false; line = ""; state(STATES.OFF); },
-      fail(error) { state(STATES.FAILED, error.message || String(error)); },
+      async powerOff() { generation++; clearTimeout(timer); if (emulator) { if (emulator.destroy) await emulator.destroy(); else await emulator.stop(); } emulator = null; readySent = false; line = ""; state(STATES.OFF); },
+      fail(error) { generation++; clearTimeout(timer); if (emulator) emulator.destroy(); emulator = null; state(STATES.FAILED, error.message || String(error)); },
       serialByte,
     };
   }

@@ -342,7 +342,7 @@ deploy:
 	@gcc -std=c11 -Wall -Wextra -O2 -o gen_version_changelog scripts/gen_version_changelog.c && ./gen_version_changelog
 	@$(MAKE) CHANGELOG_CI=1 all
 
-.PHONY: vm baremetal browser-kernel test-browser-kernel test-browser-kernel-gate test-browser-lab test-freestanding-entry
+.PHONY: vm baremetal browser-kernel test-browser-kernel test-browser-kernel-gate test-browser-lab test-browser-boot test-freestanding-entry browser-lab-runtime browser-lab-release
 vm:
 	$(MAKE) VM_ENABLE=1 $(TARGET)
 
@@ -368,6 +368,15 @@ test-freestanding-entry:
 
 test-browser-lab:
 	@node ./tests/test_browser_lab.js
+
+browser-lab-runtime:
+	@python3 ./scripts/fetch_browser_runtime.py
+
+test-browser-boot: test-browser-kernel browser-lab-runtime
+	@node ./scripts/test_browser_boot.cjs
+
+browser-lab-release: test-browser-boot
+	@python3 ./scripts/package_browser_lab_release.py
 
 # Fetch and build external libs (SDL2, CUnit) into deps/install.
 .PHONY: deps deps-sdl2 deps-cunit

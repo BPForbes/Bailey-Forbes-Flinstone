@@ -22,7 +22,7 @@ jobs:
       - name: Install build and virtual-boot dependencies
         run: |
           sudo apt-get update -y
-          sudo apt-get install -y gcc g++ binutils make libsqlite3-dev libssl-dev qemu-system-x86
+          sudo apt-get install -y gcc g++ binutils make nasm libsqlite3-dev libssl-dev qemu-system-x86
 
       - name: Test hardware-driver contracts
         run: make test_drivers
@@ -44,6 +44,18 @@ jobs:
       - name: Probe virtual boot and verify compatibility metadata
         id: boot_probe
         run: ./scripts/test_browser_kernel_artifact.sh
+
+      - name: Install browser validation tools
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+
+      - name: Validate browser boot independently
+        run: |
+          python3 ./scripts/fetch_browser_runtime.py
+          npm ci --prefix tools/browser-lab
+          npx --prefix tools/browser-lab playwright install --with-deps chromium
+          node ./scripts/test_browser_boot.cjs
 
       - name: Read promotion state
         id: metadata
@@ -74,6 +86,7 @@ jobs:
           path: |
             dist/flintstone.img
             dist/build-info.json
+            dist/browser-validation.json
           if-no-files-found: error
           retention-days: 14
 
@@ -84,6 +97,13 @@ jobs:
         run: |
           echo "Bootable metadata cannot promote without an observed QEMU serial marker." >&2
           exit 1
+
+      - name: Package validated static browser lab
+        if: >-
+          steps.metadata.outputs.bootable == 'true' &&
+          steps.metadata.outputs.browser_compatible == 'true' &&
+          steps.boot_probe.outputs.boot_smoke_passed == 'true'
+        run: python3 ./scripts/package_browser_lab_release.py
 
       # This name is the deployment contract consumed by a future lab workflow.
       # Metadata cannot self-attest the independent QEMU marker observation.
@@ -98,4 +118,16 @@ jobs:
           path: |
             dist/flintstone.img
             dist/build-info.json
+            dist/browser-validation.json
+          if-no-files-found: error
+
+      - name: Upload validated static browser lab
+        if: >-
+          steps.metadata.outputs.bootable == 'true' &&
+          steps.metadata.outputs.browser_compatible == 'true' &&
+          steps.boot_probe.outputs.boot_smoke_passed == 'true'
+        uses: actions/upload-artifact@v4
+        with:
+          name: flintstone-browser-lab
+          path: dist/browser-lab
           if-no-files-found: error

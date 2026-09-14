@@ -19,9 +19,11 @@ filesystem, networking, server, and hosted sessions as unavailable.
 The build emits schema 2 metadata with `bootableCandidate: true` but
 `bootable: false`. Only `scripts/test_browser_kernel_artifact.sh`, after an
 independent QEMU process observes the exact serial marker, may change that copy
-of the manifest to `bootable: true`. Browser promotion remains blocked by
-`browserCompatible: false` until an x86-64 browser PC emulator is vendored and
-passes its own marker test. In particular, `v86Compatible` remains false.
+of the manifest to `bootable: true`. The pinned QEMU WebAssembly runtime then
+boots the same hashed IDE disk in a real browser. Its browser regression test
+must observe the same complete marker before it records `browserCompatible:
+true`. `v86Compatible` remains false because v86 does not implement x86-64
+long mode.
 
 Build/support checks:
 
@@ -29,6 +31,7 @@ Build/support checks:
 make test-freestanding-entry
 make browser-kernel
 ./scripts/test_browser_kernel_artifact.sh # requires qemu-system-x86_64
+make test-browser-boot
 ```
 
 **Can current Flintstone boot unchanged in v86? NO.**
@@ -231,18 +234,20 @@ dispatch. Today it:
 
 1. builds and tests the hosted and in-process VM paths;
 2. builds the freestanding raw disk candidate;
-3. runs a bounded QEMU IDE boot probe and requires the serial marker;
-4. validates schema-versioned metadata and artifact SHA-256;
-5. keeps public promotion blocked until browser compatibility is independently
-   established.
+3. runs a bounded native-QEMU IDE boot probe and requires the serial marker;
+4. runs the pinned QEMU WebAssembly runtime in Chromium and requires the same
+   complete serial marker, verified disk digest, VGA text capture, and lifecycle
+   checks;
+5. validates schema-versioned metadata and artifact SHA-256;
+6. packages the browser runtime, image, manifest, and validation evidence only
+   after both independent boot observations succeed.
 
 The workflow contains a fail-closed promotion gate. Upload as
 `flintstone-browser-kernel` requires all three independent signals:
-`bootable: true`, `browserCompatible: true`, and a QEMU smoke-test step that actually
-observes `FLINTSTONE_KERNEL_BOOT_OK` on serial. The manifest's
-`bootSuccessMarkerImplemented` declaration is validated but cannot self-attest
-the QEMU observation. Current metadata cannot pass the browser half of that
-gate, so a main push cannot replace a working public lab with this candidate.
+`bootable: true`, `browserCompatible: true`, a native-QEMU smoke-test step, and
+a browser-QEMU-Wasm test that both actually observe `FLINTSTONE_KERNEL_BOOT_OK`
+on serial. The manifest's `bootSuccessMarkerImplemented` declaration is
+validated but cannot self-attest either observation.
 
 The future lab deployment workflow should download only that validated artifact,
 copy the image and JSON to its static `/artifacts/` directory, and deploy Pages:

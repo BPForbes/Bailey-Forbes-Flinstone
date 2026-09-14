@@ -13,7 +13,9 @@
  *     `browserEmulator`, `bootSuccessMarker`, `validationOutcome` (strings)
  *   - `v86Compatible`, `bootable`, `bootSuccessMarkerImplemented` (booleans)
  *   - schema 2: `browserCompatible` (boolean), `capabilities` (object of
- *     subsystem-name to boolean availability)
+ *     subsystem-name to boolean availability), and, when browser-compatible,
+ *     `browserValidation` (object recording the immutable guest digest, pinned
+ *     emulator runtime digest set, exact observed serial line, and test run)
  *   - `bootloader`, `requiredBios`, `qemuBootMode` (string or null)
  *   - `minimumRamBytes` (non-negative integer or null)
  *   - `recommendedRamBytes` (positive integer)
@@ -25,16 +27,16 @@
  *
  * **Fail-closed promotion:** metadata is necessary but not sufficient. CI may
  * publish `flintstone-browser-kernel` only when `bootable`, `browserCompatible`, and
- * `bootSuccessMarkerImplemented` are true **and** an independent QEMU serial
- * smoke test observes `FLINTSTONE_KERNEL_BOOT_OK`. A manifest cannot self-attest
- * that observation.
+ * `bootSuccessMarkerImplemented` are true **and** independent native-QEMU and
+ * browser-QEMU-Wasm serial smoke tests both observe `FLINTSTONE_KERNEL_BOOT_OK`.
+ * A manifest cannot self-attest either observation.
  */
 #ifndef FL_CONTRACT_P8_BROWSER_ARTIFACT_H
 #define FL_CONTRACT_P8_BROWSER_ARTIFACT_H
 
 #include "contract_extend.h"
 
-#define FL_CONTRACT_P8_BROWSER_ARTIFACT_INTERCHANGE_REV 2
+#define FL_CONTRACT_P8_BROWSER_ARTIFACT_INTERCHANGE_REV 3
 #define FL_CONTRACT_P8_BROWSER_ARTIFACT_SCHEMA_VERSION 2
 #define FL_CONTRACT_P8_BROWSER_ARTIFACT_CONTRACT_DEFINED 1
 
@@ -51,6 +53,7 @@
 #define FL_CONTRACT_P8_BROWSER_ARTIFACT_PROMOTION_REQUIRES_BROWSER_COMPATIBILITY 1
 #define FL_CONTRACT_P8_BROWSER_ARTIFACT_PROMOTION_REQUIRES_MARKER_DECLARATION 1
 #define FL_CONTRACT_P8_BROWSER_ARTIFACT_PROMOTION_REQUIRES_QEMU_OBSERVATION 1
+#define FL_CONTRACT_P8_BROWSER_ARTIFACT_PROMOTION_REQUIRES_BROWSER_OBSERVATION 1
 
 _Static_assert(FL_CONTRACT_SURFACE_BROWSER_ARTIFACT == 5,
                "browser artifact surface must remain append-only in the P0 ABI");
