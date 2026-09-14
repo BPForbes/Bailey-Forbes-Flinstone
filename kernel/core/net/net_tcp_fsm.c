@@ -376,6 +376,7 @@ fl_result_t fl_net_tcp_send(unsigned conn_id, const uint8_t *data, size_t len) {
 
 fl_result_t fl_net_tcp_recv(unsigned conn_id, uint8_t *buf, size_t cap, size_t *out_len) {
     fl_net_tcp_fsm_conn_t *c = conn_find(conn_id);
+    size_t copied;
 
     if (!buf || !out_len)
         return FL_RESULT_INVAL;
@@ -383,11 +384,17 @@ fl_result_t fl_net_tcp_recv(unsigned conn_id, uint8_t *buf, size_t cap, size_t *
         return FL_RESULT_INVAL;
     if (c->rx_len == 0)
         return FL_RESULT_TIMEDOUT;
-    if (cap < c->rx_len)
-        return FL_RESULT_ERR;
-    memcpy(buf, c->rx_buf, c->rx_len);
-    *out_len = c->rx_len;
-    c->rx_len = 0;
+    if (cap == 0u) {
+        *out_len = 0u;
+        return FL_RESULT_OK;
+    }
+
+    copied = cap < c->rx_len ? cap : c->rx_len;
+    memcpy(buf, c->rx_buf, copied);
+    c->rx_len -= copied;
+    if (c->rx_len > 0u)
+        memmove(c->rx_buf, c->rx_buf + copied, c->rx_len);
+    *out_len = copied;
     return FL_RESULT_OK;
 }
 

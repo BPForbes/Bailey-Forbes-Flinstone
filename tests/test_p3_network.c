@@ -354,10 +354,19 @@ static int test_tcp_fsm_loopback(void) {
     ASSERT(rc == FL_RESULT_OK);
     rc = fl_net_tcp_send(client_id, (const uint8_t *)msg, sizeof(msg) - 1u);
     ASSERT(rc == FL_RESULT_OK);
+    rc = fl_net_tcp_recv(server_id, (uint8_t *)rx, 0u, &rx_len);
+    ASSERT(rc == FL_RESULT_OK);
+    ASSERT(rx_len == 0u);
+    rc = fl_net_tcp_recv(server_id, (uint8_t *)rx, 6u, &rx_len);
+    ASSERT(rc == FL_RESULT_OK);
+    ASSERT(rx_len == 6u);
+    ASSERT(memcmp(rx, msg, 6u) == 0);
     rc = fl_net_tcp_recv(server_id, (uint8_t *)rx, sizeof(rx), &rx_len);
     ASSERT(rc == FL_RESULT_OK);
-    ASSERT(rx_len == sizeof(msg) - 1u);
-    ASSERT(memcmp(rx, msg, rx_len) == 0);
+    ASSERT(rx_len == sizeof(msg) - 1u - 6u);
+    ASSERT(memcmp(rx, msg + 6u, rx_len) == 0);
+    ASSERT(fl_net_tcp_recv(server_id, (uint8_t *)rx, sizeof(rx), &rx_len) ==
+           FL_RESULT_TIMEDOUT);
     (void)fl_net_tcp_close(client_id);
     (void)fl_net_tcp_close(server_id);
     return 0;
