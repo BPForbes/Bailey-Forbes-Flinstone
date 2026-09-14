@@ -19,7 +19,14 @@ if (typeof window === "undefined") {
     }));
   });
 } else if (window.crossOriginIsolated === false && window.isSecureContext && navigator.serviceWorker) {
+  let reloading = false;
+  const reloadOnce = () => {
+    if (reloading) return;
+    reloading = true;
+    window.location.reload();
+  };
+  navigator.serviceWorker.addEventListener("controllerchange", reloadOnce, { once: true });
   navigator.serviceWorker.register(document.currentScript.src).then(registration => {
-    if (registration.active && !navigator.serviceWorker.controller) window.location.reload();
+    if (registration.active && !navigator.serviceWorker.controller) reloadOnce();
   }).catch(error => console.error("COOP/COEP service worker failed", error));
 }

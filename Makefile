@@ -368,6 +368,7 @@ test-freestanding-entry:
 
 test-browser-lab:
 	@node ./tests/test_browser_lab.js
+	@python3 ./tests/test_package_browser_lab_release.py
 
 browser-lab-runtime:
 	@python3 ./scripts/fetch_browser_runtime.py

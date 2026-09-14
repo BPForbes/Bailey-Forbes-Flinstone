@@ -12,10 +12,14 @@
  *     `architecture`, `cpuMode`, `artifact`, `artifactFormat`, `sha256`,
  *     `browserEmulator`, `bootSuccessMarker`, `validationOutcome` (strings)
  *   - `v86Compatible`, `bootable`, `bootSuccessMarkerImplemented` (booleans)
- *   - schema 2: `browserCompatible` (boolean), `capabilities` (object of
- *     subsystem-name to boolean availability), and, when browser-compatible,
- *     `browserValidation` (object recording the immutable guest digest, pinned
- *     emulator runtime digest set, exact observed serial line, and test run)
+ *   - schema 2: `browserCompatible`, `bootableCandidate` (booleans),
+ *     `capabilities` (object of subsystem-name to boolean availability), and,
+ *     when browser-compatible, `browserValidation` containing: `commit` and
+ *     `artifactSha256` matching the immutable guest; non-empty `runtime`,
+ *     40-character `runtimeCommit`, and non-empty `runtimeFiles` basename-to-
+ *     SHA-256 map matching the pinned emulator; parseable `testedAt`, non-empty
+ *     `browser`, `serial` containing the exact boot-marker line, and `checks`
+ *     containing `exact-marker`
  *   - `bootloader`, `requiredBios`, `qemuBootMode` (string or null)
  *   - `minimumRamBytes` (non-negative integer or null)
  *   - `recommendedRamBytes` (positive integer)

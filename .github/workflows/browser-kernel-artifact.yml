@@ -46,7 +46,7 @@ jobs:
         run: ./scripts/test_browser_kernel_artifact.sh
 
       - name: Install browser validation tools
-        uses: actions/setup-node@v4
+        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
         with:
           node-version: 22
 
@@ -80,7 +80,7 @@ jobs:
 
       - name: Upload blocked compatibility package
         if: steps.metadata.outputs.browser_compatible != 'true'
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
         with:
           name: flintstone-browser-kernel-browser-blocked-${{ github.sha }}
           path: |
@@ -112,7 +112,7 @@ jobs:
           steps.metadata.outputs.bootable == 'true' &&
           steps.metadata.outputs.browser_compatible == 'true' &&
           steps.boot_probe.outputs.boot_smoke_passed == 'true'
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
         with:
           name: flintstone-browser-kernel
           path: |
@@ -126,7 +126,7 @@ jobs:
           steps.metadata.outputs.bootable == 'true' &&
           steps.metadata.outputs.browser_compatible == 'true' &&
           steps.boot_probe.outputs.boot_smoke_passed == 'true'
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
         with:
           name: flintstone-browser-lab
           path: dist/browser-lab

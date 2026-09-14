@@ -2,6 +2,7 @@ BITS 16
 ORG 0x7c00
 start:
     cli
+    cld
     xor ax, ax
     mov ds, ax
     mov es, ax

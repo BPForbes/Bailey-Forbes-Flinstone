@@ -7,6 +7,7 @@ EXTERN __bss_end
 SECTION .text
 kernel_entry:
     cli
+    cld
     mov ax, 0x10
     mov ds, ax
     mov es, ax

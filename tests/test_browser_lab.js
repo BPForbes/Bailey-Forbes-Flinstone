@@ -1,9 +1,53 @@
 "use strict";
 const assert = require("assert");
+const fs = require("fs");
+const vm = require("vm");
 const { STATES, validateManifest, isTrustedReadyEvent, createController } = require("../tools/browser-lab/lab-core.js");
-const manifest = { schemaVersion: 2, shortCommit: "1234567", architecture: "x86_64", browserEmulator: "test", artifact: "flintstone.img", sha256: "a".repeat(64), bootSuccessMarker: "FLINTSTONE_KERNEL_BOOT_OK", validationOutcome: "browser-bootable", bootable: true, v86Compatible: false, browserCompatible: true, bootSuccessMarkerImplemented: true, recommendedRamBytes: 64, blockers: [], capabilities: {}, browserValidation: { artifactSha256: "a".repeat(64), checks: ["exact-marker"] } };
+const commit = "1".repeat(40);
+const evidence = {
+  commit, artifactSha256: "a".repeat(64), runtime: "ktock/qemu-wasm",
+  runtimeCommit: "2".repeat(40), runtimeFiles: { "qemu.wasm": "b".repeat(64) },
+  testedAt: "2026-09-14T00:00:00.000Z", browser: "Chromium 140",
+  serial: "booting\r\nFLINTSTONE_KERNEL_BOOT_OK\r\n", checks: ["exact-marker"],
+};
+const manifest = { schemaVersion: 2, commit, shortCommit: "1234567", architecture: "x86_64", browserEmulator: "test", artifact: "flintstone.img", sha256: "a".repeat(64), bootSuccessMarker: "FLINTSTONE_KERNEL_BOOT_OK", validationOutcome: "browser-bootable", bootableCandidate: true, bootable: true, v86Compatible: false, browserCompatible: true, bootSuccessMarkerImplemented: true, recommendedRamBytes: 64, blockers: [], capabilities: {}, browserValidation: evidence };
 assert.strictEqual(validateManifest(manifest), manifest);
-for (const bad of [{ ...manifest, schemaVersion: 3 }, { ...manifest, artifact: "../bad" }, { ...manifest, sha256: "bad" }, { ...manifest, browserCompatible: "true" }, { ...manifest, browserValidation: {} }]) assert.throws(() => validateManifest(bad));
+for (const bad of [
+  { ...manifest, schemaVersion: 3 }, { ...manifest, artifact: "../bad" },
+  { ...manifest, sha256: "bad" }, { ...manifest, browserCompatible: "true" },
+  { ...manifest, bootableCandidate: "false" }, { ...manifest, browserValidation: {} },
+  ...Object.keys(evidence).map(field => {
+    const browserValidation = { ...evidence }; delete browserValidation[field];
+    return { ...manifest, browserValidation };
+  }),
+  { ...manifest, browserValidation: { ...evidence, artifactSha256: "c".repeat(64) } },
+  { ...manifest, browserValidation: { ...evidence, runtimeFiles: { "../qemu.wasm": "b".repeat(64) } } },
+  { ...manifest, browserValidation: { ...evidence, serial: "FLINTSTONE_KERNEL_BOOT_OK suffix\n" } },
+]) assert.throws(() => validateManifest(bad));
+assert.strictEqual(validateManifest({ ...manifest, browserCompatible: false, browserValidation: undefined }).browserCompatible, false);
+
+let controllerChange;
+let controllerOptions;
+let reloads = 0;
+vm.runInNewContext(fs.readFileSync("tools/browser-lab/coi-serviceworker.js", "utf8"), {
+  window: { crossOriginIsolated: false, isSecureContext: true, location: { reload: () => reloads++ } },
+  document: { currentScript: { src: "https://lab.example/coi-serviceworker.js" } },
+  navigator: { serviceWorker: {
+    controller: null,
+    addEventListener: (name, listener, options) => {
+      assert.strictEqual(name, "controllerchange");
+      controllerChange = listener;
+      controllerOptions = options;
+    },
+    register: async () => ({ active: null }),
+  } },
+  console,
+});
+assert.strictEqual(controllerOptions.once, true);
+controllerChange();
+controllerChange();
+assert.strictEqual(reloads, 1);
+
 const guestWindow = {};
 const ready = { origin: "https://lab.example", source: guestWindow, data: { source: "flinstone-guest", type: "ready", schemaVersion: 1, commit: "1234567" } };
 const trust = { allowedOrigin: "https://lab.example", guestWindow, commit: "1234567" };

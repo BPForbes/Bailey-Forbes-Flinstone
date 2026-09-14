@@ -10,23 +10,50 @@
     PAUSED: "Paused", FAILED: "Failed", BLOCKED: "Blocked", OFF: "Powered off",
   });
 
+  const SHA256 = /^[0-9a-f]{64}$/;
+  const COMMIT = /^[0-9a-f]{40}$/;
+  const nonemptyString = value => typeof value === "string" && value.length > 0;
+  const exactSerialLine = (serial, marker) =>
+    nonemptyString(serial) && serial.split(/\r?\n/).includes(marker);
+
+  function validRuntimeDigests(files) {
+    return files && typeof files === "object" && !Array.isArray(files) &&
+      Object.keys(files).length > 0 && Object.entries(files).every(([name, digest]) =>
+        nonemptyString(name) && !name.includes("/") && !name.includes("\\") &&
+        ![".", ".."].includes(name) && SHA256.test(digest));
+  }
+
+  function validBrowserEvidence(info) {
+    const evidence = info.browserValidation;
+    return evidence && typeof evidence === "object" && !Array.isArray(evidence) &&
+      evidence.commit === info.commit &&
+      evidence.artifactSha256 === info.sha256 &&
+      nonemptyString(evidence.runtime) &&
+      COMMIT.test(evidence.runtimeCommit) &&
+      validRuntimeDigests(evidence.runtimeFiles) &&
+      nonemptyString(evidence.testedAt) && !Number.isNaN(Date.parse(evidence.testedAt)) &&
+      nonemptyString(evidence.browser) &&
+      exactSerialLine(evidence.serial, info.bootSuccessMarker) &&
+      Array.isArray(evidence.checks) && evidence.checks.includes("exact-marker");
+  }
+
   function validateManifest(info) {
     if (!info || ![1, 2].includes(info.schemaVersion)) throw new Error("Unsupported browser artifact manifest schema");
-    for (const field of ["shortCommit", "architecture", "browserEmulator", "artifact", "sha256", "bootSuccessMarker", "validationOutcome"]) {
+    for (const field of ["commit", "shortCommit", "architecture", "browserEmulator", "artifact", "sha256", "bootSuccessMarker", "validationOutcome"]) {
       if (typeof info[field] !== "string" || !info[field]) throw new Error(`Manifest field ${field} is invalid`);
     }
-    if (!/^[0-9a-f]{64}$/.test(info.sha256) || info.artifact.includes("/") || [".", ".."].includes(info.artifact)) {
+    if (!SHA256.test(info.sha256) || info.artifact.includes("/") || [".", ".."].includes(info.artifact)) {
       throw new Error("Manifest artifact identity is invalid");
     }
     for (const field of ["bootable", "v86Compatible", "bootSuccessMarkerImplemented"]) {
       if (typeof info[field] !== "boolean") throw new Error(`Manifest field ${field} is invalid`);
     }
-    if (info.schemaVersion === 2 && (typeof info.browserCompatible !== "boolean" || typeof info.capabilities !== "object" || !info.capabilities)) {
+    if (info.schemaVersion === 2 && (typeof info.browserCompatible !== "boolean" ||
+      typeof info.bootableCandidate !== "boolean" ||
+      typeof info.capabilities !== "object" || !info.capabilities || Array.isArray(info.capabilities))) {
       throw new Error("Schema 2 browser compatibility fields are invalid");
     }
-    if (info.browserCompatible && (!info.browserValidation || typeof info.browserValidation !== "object" ||
-      info.browserValidation.artifactSha256 !== info.sha256 ||
-      !Array.isArray(info.browserValidation.checks) || !info.browserValidation.checks.includes("exact-marker"))) {
+    if (info.schemaVersion === 2 && info.browserCompatible && !validBrowserEvidence(info)) {
       throw new Error("Browser-compatible manifest lacks independent validation evidence");
     }
     if (!Number.isSafeInteger(info.recommendedRamBytes) || info.recommendedRamBytes <= 0 || !Array.isArray(info.blockers)) {
