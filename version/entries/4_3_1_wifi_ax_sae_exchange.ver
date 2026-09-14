@@ -1,6 +1,0 @@
-MAJOR_VERSION=4
-STANDARD_VERSION=3
-RELEASE_VERSION=1
-DESCRIPTION=Fix Wi-Fi AX server OTA WPA3-SAE to exchange and verify protocol-valid bidirectional Commit and Confirm bodies while preserving WPA2.
-
-RELEASE_DATE=2026-09-14
