@@ -54,6 +54,7 @@ async function main() {
     const serial = await page.locator("#serial").innerText();
     assert(serial.split(/\r?\n/).includes("FLINTSTONE_KERNEL_BOOT_OK"), "Missing exact serial marker");
     await page.locator("#display-placeholder").waitFor({ state: "hidden", timeout: 20000 });
+    await page.locator(":root[data-vga-cell='F']").waitFor({ timeout: 20000 });
     assert(await page.locator(":root").getAttribute("data-vga-cell") === "F", "VGA diagnostic cell was not F/0x07");
     return serial;
   };

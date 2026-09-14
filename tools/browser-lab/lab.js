@@ -17,11 +17,17 @@
   }, window.FLINTSTONE_LAB_CONFIG || {});
   if (!allowedParents(config.parentOrigin)) config.parentOrigin = "https://bailey-forbes.com";
   const text = (id, value) => { const node = document.getElementById(id); if (node) node.textContent = value; };
+  const resetDisplayProbe = () => {
+    document.documentElement.dataset.vgaCell = "";
+    const placeholder = document.getElementById("display-placeholder");
+    if (placeholder) placeholder.hidden = false;
+  };
   const setState = (state, detail) => {
     const node = document.getElementById("status");
     node.className = [core.STATES.BLOCKED, core.STATES.FAILED].includes(state) ? "blocked" : "";
     node.textContent = detail ? `${state}: ${detail}` : state;
     document.documentElement.dataset.labState = String(state).toLowerCase().replace(/\s+/g, "-");
+    if (state === core.STATES.BOOTING || state === core.STATES.OFF) resetDisplayProbe();
   };
   let info;
   let busy = false;
@@ -78,9 +84,10 @@
   function renderScreen(bytes) {
     // Render the guest-owned 80x25 VGA text buffer at physical 0xb8000.
     // This is a text-mode display, not a graphics-mode VGA implementation.
-    const valid = core.validDiagnosticVga(bytes);
-    document.documentElement.dataset.vgaCell = valid ? "F" : "";
-    if (!valid) return;
+    // Latch the diagnostic cell: SeaBIOS/empty dumps must not clear a later
+    // kernel frame, and they must not hide the placeholder on a fresh boot.
+    if (!core.validDiagnosticVga(bytes)) return;
+    document.documentElement.dataset.vgaCell = "F";
     const colors = ["#000", "#00a", "#0a0", "#0aa", "#a00", "#a0a", "#a50", "#aaa", "#555", "#55f", "#5f5", "#5ff", "#f55", "#f5f", "#ff5", "#fff"];
     canvas.width = 800; canvas.height = 400;
     const ctx = canvas.getContext("2d");

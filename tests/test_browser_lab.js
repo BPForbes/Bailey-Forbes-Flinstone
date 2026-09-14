@@ -30,6 +30,10 @@ assert.strictEqual(validateManifest({ ...manifest, browserCompatible: false, bro
 const vga = new Uint8Array(4000);
 vga[0] = 0x46; vga[1] = 0x07;
 assert(validDiagnosticVga(vga));
+const statusBar = new Uint8Array(4000);
+statusBar[0] = 0x46; statusBar[1] = 0x07;
+statusBar[2] = 0x20; statusBar[3] = 0x0e;
+assert(validDiagnosticVga(statusBar));
 assert(!validDiagnosticVga(new Uint8Array(0)));
 assert(!validDiagnosticVga(new Uint8Array(4000)));
 const wrongGlyph = new Uint8Array(4000); wrongGlyph[0] = 0x58; wrongGlyph[1] = 0x07;
