@@ -54,6 +54,7 @@ async function waitReady(frame) {
   const serial = await frame.locator("#serial").innerText();
   assert(serial.split(/\r?\n/).includes("FLINTSTONE_KERNEL_BOOT_OK"), "iframe missing exact serial marker");
   await frame.locator("#display-placeholder").waitFor({ state: "hidden", timeout: 20000 });
+  await frame.locator(":root[data-vga-cell='F']").waitFor({ timeout: 20000 });
   assert(await frame.locator(":root").getAttribute("data-vga-cell") === "F", "iframe VGA cell was not F/0x07");
 }
 

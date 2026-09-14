@@ -46,7 +46,7 @@
     const hash = Array.from(new Uint8Array(await crypto.subtle.digest("SHA-256", image)), x => x.toString(16).padStart(2, "0")).join("");
     if (hash !== sha256) throw new Error("Disk SHA-256 does not match its manifest");
     const worker = new Worker(new URL("qemu-worker.js", scriptBase), { type: "module" });
-    let nextId = 0, disposed = false, screenTimer, pending = new Map();
+    let nextId = 0, disposed = false, screenTimer, screenBusy = false, pending = new Map();
     function command(execute, args) {
       return new Promise((resolve, reject) => {
         const id = ++nextId;
@@ -63,18 +63,20 @@
       if (disposed) return;
       if (data.type === "serial") serialByte(data.byte);
       if (data.type === "diagnostic") onDiagnostic?.(data.text);
-      if (data.type === "error") onError?.(new Error(data.text));
-      if (data.type === "screen") onScreen?.(data.bytes);
+      if (data.type === "error") { screenBusy = false; onError?.(new Error(data.text)); }
+      if (data.type === "screen") { screenBusy = false; onScreen?.(data.bytes); }
       if (data.type !== "qmp") return;
       if (data.data.QMP) {
         try {
           await command("qmp_capabilities");
           screenTimer = setInterval(async () => {
-            if (disposed) return;
+            if (disposed || screenBusy) return;
+            screenBusy = true;
             try {
               await command("pmemsave", { val: 753664, size: 4000, filename: "/screen.bin" });
               if (!disposed) worker.postMessage({ type: "screen" });
-            } catch (error) { onDiagnostic?.(error.message); }
+              else screenBusy = false;
+            } catch (error) { screenBusy = false; onDiagnostic?.(error.message); }
           }, 250);
         } catch (error) { onError?.(error); }
       }
