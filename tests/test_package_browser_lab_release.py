@@ -3,8 +3,11 @@
 import copy
 import hashlib
 import json
+import sys
 import tempfile
 from pathlib import Path
+
+sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 from scripts.package_browser_lab_release import (
     package_browser_lab,
