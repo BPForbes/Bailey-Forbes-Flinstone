@@ -119,6 +119,7 @@ Test the contract and QEMU rejection with:
 
 ```sh
 make test-browser-kernel
+make test-browser-kernel-gate
 ```
 
 The future validated artifact should be a raw IDE HDD image such as

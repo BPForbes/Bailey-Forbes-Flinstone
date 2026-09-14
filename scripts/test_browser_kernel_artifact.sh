@@ -2,9 +2,11 @@
 set -euo pipefail
 
 repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
-metadata="${repo_root}/dist/build-info.json"
+dist_dir="${FL_BROWSER_KERNEL_DIST_DIR:-${repo_root}/dist}"
+qemu_bin="${FL_BROWSER_KERNEL_QEMU:-qemu-system-x86_64}"
+metadata="${dist_dir}/build-info.json"
 
-for tool in file readelf python3 qemu-system-x86_64 sha256sum timeout; do
+for tool in file readelf python3 sha256sum timeout "${qemu_bin}"; do
     command -v "${tool}" >/dev/null 2>&1 || {
         echo "test-browser-kernel: required tool not found: ${tool}" >&2
         exit 1
@@ -86,7 +88,7 @@ PY
     exit 1
 }
 
-artifact="${repo_root}/dist/${manifest[0]}"
+artifact="${dist_dir}/${manifest[0]}"
 bootable="${manifest[1]}"
 v86_compatible="${manifest[2]}"
 marker_implemented="${manifest[3]}"
@@ -138,7 +140,7 @@ else
 fi
 
 set +e
-timeout 10 qemu-system-x86_64 "${qemu_args[@]}" >"${qemu_log}" 2>&1
+timeout 10 "${qemu_bin}" "${qemu_args[@]}" >"${qemu_log}" 2>&1
 qemu_status=$?
 set -e
 

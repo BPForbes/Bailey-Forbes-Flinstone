@@ -33,6 +33,9 @@ jobs:
           make test_vm_mem
           make test_replay
 
+      - name: Test fail-closed promotion gate
+        run: make test-browser-kernel-gate
+
       - name: Build browser-kernel candidate
         env:
           GITHUB_SHA: ${{ github.sha }}

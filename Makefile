@@ -342,7 +342,7 @@ deploy:
 	@gcc -std=c11 -Wall -Wextra -O2 -o gen_version_changelog scripts/gen_version_changelog.c && ./gen_version_changelog
 	@$(MAKE) CHANGELOG_CI=1 all
 
-.PHONY: vm baremetal browser-kernel test-browser-kernel
+.PHONY: vm baremetal browser-kernel test-browser-kernel test-browser-kernel-gate
 vm:
 	$(MAKE) VM_ENABLE=1 $(TARGET)
 
@@ -361,6 +361,9 @@ browser-kernel:
 
 test-browser-kernel: browser-kernel
 	@./scripts/test_browser_kernel_artifact.sh
+
+test-browser-kernel-gate:
+	@bash ./tests/test_browser_kernel_promotion_gate.sh
 
 # Fetch and build external libs (SDL2, CUnit) into deps/install.
 .PHONY: deps deps-sdl2 deps-cunit
