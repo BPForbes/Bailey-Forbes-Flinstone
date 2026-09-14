@@ -149,8 +149,38 @@
       display: grid;
       gap: 0.65rem;
     }
-    .accounts h2 { margin: 0; font-size: 0.95rem; color: var(--amber); }
-    .accounts p, .accounts label { margin: 0; color: var(--muted); }
+    .accounts h2, .server-panel h2 { margin: 0; font-size: 0.95rem; color: var(--amber); }
+    .accounts p, .accounts label, .server-panel p, .server-panel label { margin: 0; color: var(--muted); }
+    .server-panel {
+      border: 1px solid var(--line);
+      background: var(--panel);
+      padding: 0.75rem 0.9rem;
+      display: grid;
+      gap: 0.65rem;
+    }
+    .server-panel[hidden] { display: none; }
+    .server-panel form, .server-actions { display: flex; flex-wrap: wrap; gap: 0.45rem; align-items: center; }
+    .server-panel button, .server-panel input {
+      appearance: none;
+      border: 1px solid #9a5a22;
+      background: #20140d;
+      color: #f8e2c0;
+      padding: 0.45rem 0.7rem;
+      font: inherit;
+    }
+    #server-chat {
+      margin: 0;
+      min-height: 5rem;
+      max-height: 10rem;
+      overflow: auto;
+      background: #05080c;
+      border: 1px solid #2b1a10;
+      padding: 0.55rem 0.65rem;
+      font: 13px/1.45 ui-monospace, monospace;
+      color: var(--phosphor);
+      white-space: pre-wrap;
+    }
+    #runtime-mode { margin: 0; color: var(--muted); font-size: 0.85rem; }
     #session-tabs button, .accounts button, .accounts input {
       appearance: none;
       border: 1px solid #9a5a22;
@@ -249,7 +279,24 @@
         <button id="poweroff" type="button">Power Off</button>
       </p>
     </section>
+    <p id="runtime-mode">Runtime: loading…</p>
     <section id="capabilities" aria-label="Guest capabilities"></section>
+    <section id="server-panel" class="server-panel" aria-label="Server chat relay" hidden>
+      <h2>Server chat (browser relay)</h2>
+      <p>Online lab uses a JS relay that speaks the same P3 session wire as <code>net_server.c</code>. Local VM and bare-metal runs use the native C/ASM stack instead — no relay.</p>
+      <div class="server-actions">
+        <button id="server-host" type="button">Host</button>
+        <button id="server-join" type="button">Join</button>
+        <button id="server-leave" type="button">Leave</button>
+        <span id="server-status">Disconnected</span>
+      </div>
+      <form id="server-msg-form">
+        <label>Message <input id="server-msg" name="message" autocomplete="off" placeholder="server msg text"></label>
+        <button type="submit">Send</button>
+      </form>
+      <pre id="server-chat" aria-label="Relay chat log"></pre>
+      <pre id="server-roster" aria-label="Connected members"></pre>
+    </section>
     <section class="accounts" aria-label="Switch user">
       <h2>Switch user</h2>
       <p>Type <code>switchuser &lt;name&gt;</code> in the VGA terminal or use the controls below. Each lab user keeps its own command history and terminal scrollback when you switch back.</p>
@@ -281,6 +328,9 @@
   </div>
   <script src="coi-serviceworker.js"></script>
   <script src="lab-core.js"></script>
+  <script src="session-wire-const.js"></script>
+  <script src="session-wire.js"></script>
+  <script src="server-relay-client.js"></script>
   <script src="qemu-adapter.js"></script>
   <script src="lab.js"></script>
 </body>

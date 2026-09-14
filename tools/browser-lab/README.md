@@ -2,6 +2,18 @@
 
 The lab boots the freestanding x86_64 BIOS disk in a pinned QEMU WebAssembly
 runtime. It verifies the disk SHA-256 before creating the worker and declares
+
+## Runtime modes (server chat)
+
+| Mode | Where | Server path |
+|------|-------|-------------|
+| **browser-hosted** | Website lab (QEMU Wasm) | JS relay (`server-relay-hub.mjs`) speaking the same P3 session wire as `net_server.c` |
+| **native local** | Hosted shell, VM, bare metal | Original C/ASM in `kernel/core/net/` — no relay |
+
+Wire constants in `session-wire-const.js` are generated from `contracts/networking/contract_p3_session_wire.h` via `scripts/gen_session_wire_js.py`.
+
+Start the lab with relay: `python3 scripts/serve_browser_lab.py --port 8768 --relay-port 8767`
+
 the guest ready only after COM1 supplies the complete
 `FLINTSTONE_KERNEL_BOOT_OK` line. Display validation requires the diagnostic
 VGA cell `F` with attribute `0x07`.

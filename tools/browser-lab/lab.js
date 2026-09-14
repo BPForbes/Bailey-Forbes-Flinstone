@@ -14,6 +14,8 @@
     metadataUrl: "../../dist/build-info.json", artifactBaseUrl: "../../dist",
     parentOrigin: "https://bailey-forbes.com",
     createEmulator: window.createFlintstoneQemu,
+    relayPort: 8767,
+    relayRoom: "lab",
   }, window.FLINTSTONE_LAB_CONFIG || {});
   if (!allowedParents(config.parentOrigin)) config.parentOrigin = "https://bailey-forbes.com";
   const text = (id, value) => { const node = document.getElementById(id); if (node) node.textContent = value; };
@@ -34,7 +36,10 @@
   let emulator = null;
   let sessions = { 1: "flinstone" };
   let activeSession = 1;
+  let relay = null;
   const validation = new URLSearchParams(location.search).get("validate") === "1";
+  const usesBrowserRelay = () => info && info.serverPath === "relay";
+  const principal = () => sessions[activeSession] || "flinstone";
   const serial = document.getElementById("serial");
   const canvas = document.querySelector("#screen canvas");
   const screen = document.getElementById("screen");
@@ -52,11 +57,97 @@
     node.replaceChildren();
     for (const [key, label] of rows) {
       const item = document.createElement("div");
-      const on = Boolean(capabilities && capabilities[key]);
+      let on = Boolean(capabilities && capabilities[key]);
+      let detail = on ? "available" : "unavailable";
+      if (key === "server" && usesBrowserRelay()) {
+        on = true;
+        detail = "relay (browser-hosted)";
+      } else if (key === "network" && usesBrowserRelay()) {
+        detail = "unavailable (guest); relay for chat";
+      }
       item.className = on ? "cap-on" : "cap-off";
-      item.textContent = `${label}: ${on ? "available" : "unavailable"}`;
+      item.textContent = `${label}: ${detail}`;
       node.appendChild(item);
     }
+  }
+  function renderRuntimeMode() {
+    const node = document.getElementById("runtime-mode");
+    if (!node || !info) return;
+    if (info.runtimeMode === "browser-hosted" || usesBrowserRelay()) {
+      node.textContent = "Runtime: browser-hosted online — server chat via JS relay (same wire as net_server.c). Local VM/bare-metal uses native C/ASM.";
+    } else {
+      node.textContent = "Runtime: native local — use server host/join in the shell (kernel/core/net).";
+    }
+  }
+  function appendChat(line) {
+    const node = document.getElementById("server-chat");
+    if (!node) return;
+    node.textContent = (node.textContent + line + "\n").slice(-65536);
+    node.scrollTop = node.scrollHeight;
+  }
+  function renderRelayStatus(text) {
+    const node = document.getElementById("server-status");
+    if (node) node.textContent = text;
+  }
+  function renderRoster(members) {
+    const node = document.getElementById("server-roster");
+    if (!node) return;
+    if (!members || !members.length) {
+      node.textContent = "Members: —";
+      return;
+    }
+    node.textContent = members.map(m => `#${m.memberId} ${m.principal}${m.isHost ? " (host)" : ""}`).join("\n");
+  }
+  function setupRelay() {
+    const panel = document.getElementById("server-panel");
+    if (!usesBrowserRelay() || !window.FlintstoneServerRelayClient) {
+      if (panel) panel.hidden = true;
+      return;
+    }
+    if (panel) panel.hidden = false;
+    relay = window.FlintstoneServerRelayClient.createRelayClient(config);
+    relay.on(event => {
+      if (event.type === "hello") {
+        renderRelayStatus(`Connected as ${event.display} (#${event.memberId})`);
+        appendChat(`[relay] joined as ${event.display}`);
+      } else if (event.type === "announcement") {
+        appendChat(`[announce] ${event.text}`);
+      } else if (event.type === "message") {
+        appendChat(event.text);
+      } else if (event.type === "roster") {
+        renderRoster(event.members);
+      } else if (event.type === "error") {
+        appendChat(`[error] ${event.text}`);
+      } else if (event.type === "closed") {
+        renderRelayStatus("Disconnected");
+      }
+    });
+    const connect = async () => {
+      try {
+        renderRelayStatus("Connecting…");
+        await relay.connect(principal());
+      } catch (error) {
+        renderRelayStatus(error.message || "Connection failed");
+      }
+    };
+    document.getElementById("server-host")?.addEventListener("click", connect);
+    document.getElementById("server-join")?.addEventListener("click", connect);
+    document.getElementById("server-leave")?.addEventListener("click", () => {
+      relay?.leave();
+      renderRelayStatus("Disconnected");
+      renderRoster([]);
+    });
+    document.getElementById("server-msg-form")?.addEventListener("submit", async event => {
+      event.preventDefault();
+      const input = document.getElementById("server-msg");
+      const text = input?.value.trim();
+      if (!text) return;
+      if (!relay?.connected) await connect();
+      if (relay?.sendMessage(text)) {
+        appendChat(`${relay.display}: ${text}`);
+        input.value = "";
+      }
+    });
   }
   function renderSessions() {
     const node = document.getElementById("session-tabs");
@@ -136,10 +227,13 @@
     const response = await fetch(config.metadataUrl, { cache: "no-store" });
     if (!response.ok) throw new Error(`Metadata request failed: HTTP ${response.status}`);
     info = core.validateManifest(await response.json());
+    if (info.serverRelayPort) config.relayPort = info.serverRelayPort;
     text("commit", info.shortCommit); text("architecture", info.architecture);
     text("emulator", info.browserEmulator); text("artifact", info.artifact);
+    renderRuntimeMode();
     renderCaps(info.capabilities);
     renderSessions();
+    setupRelay();
     if (!canBoot()) {
       setState(core.STATES.BLOCKED, info.blockers.join("; "));
       return;
