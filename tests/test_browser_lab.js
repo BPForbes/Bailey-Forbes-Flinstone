@@ -63,7 +63,8 @@ controllerChange();
 controllerChange();
 assert.strictEqual(reloads, 1);
 const coiSrc = fs.readFileSync("tools/browser-lab/coi-serviceworker.js", "utf8");
-assert(coiSrc.includes('request.destination === "document"'), "SW must set COOP only on top-level documents");
+assert(coiSrc.includes('request.headers.get("Sec-Fetch-Dest") === "document"'), "SW must set COOP only on top-level Sec-Fetch-Dest document navigations");
+assert(!coiSrc.includes('request.destination === "document"'), "SW must not key COOP on request.destination; Chromium iframe reloads can report document");
 assert(!/headers\.set\("Cross-Origin-Opener-Policy", "same-origin"\);\s*return new Response/.test(coiSrc),
   "SW must not set COOP on every fetch, including iframe navigations");
 
