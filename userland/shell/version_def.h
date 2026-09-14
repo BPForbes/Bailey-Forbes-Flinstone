@@ -21,7 +21,7 @@
  * version/locked/, then run make or ./scripts/gen_version_def.sh.
  */
 #define VERSION_MAJOR    4
-#define VERSION_STANDARD 4
+#define VERSION_STANDARD 5
 #define VERSION_PATCH    0
 
 #define VERSION_STR_(x) #x
@@ -30,6 +30,6 @@
 #define VERSION \
     VERSION_STR(VERSION_MAJOR) "." VERSION_STR(VERSION_STANDARD) "." VERSION_STR(VERSION_PATCH)
 
-#define VERSION_LINE "PRE 4.5.0, BUILD 1"
+#define VERSION_LINE "4.5.0"
 
 #endif /* VERSION_DEF_H */
