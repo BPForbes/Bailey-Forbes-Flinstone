@@ -56,7 +56,9 @@ jobs:
           node-version: 22
 
       - name: Test browser-lab unit contracts
-        run: make test-browser-lab
+        run: |
+          npm ci --prefix tools/browser-lab
+          make test-browser-lab
 
       - name: Probe serial identity and concurrent sessions
         run: python3 ./scripts/test_freestanding_shell.py
