@@ -6,12 +6,13 @@ from pathlib import Path
 import argparse
 
 
-def make_handler(directory, coop_coep, frame_ancestors, permissions_policy, corp):
+def make_handler(directory, coop, coep, frame_ancestors, permissions_policy, corp):
     class Handler(SimpleHTTPRequestHandler):
         def end_headers(self):
-            if coop_coep:
-                self.send_header("Cross-Origin-Opener-Policy", "same-origin")
-                self.send_header("Cross-Origin-Embedder-Policy", "require-corp")
+            if coop:
+                self.send_header("Cross-Origin-Opener-Policy", coop)
+            if coep:
+                self.send_header("Cross-Origin-Embedder-Policy", coep)
             if corp:
                 self.send_header("Cross-Origin-Resource-Policy", corp)
             if frame_ancestors:
@@ -30,12 +31,16 @@ if __name__ == "__main__":
     parser.add_argument("--bind", default="127.0.0.1")
     parser.add_argument("--directory", default="")
     parser.add_argument("--no-coop-coep", action="store_true")
+    parser.add_argument("--coep-credentialless", action="store_true",
+                        help="Send COEP: credentialless instead of require-corp (portfolio parent)")
     parser.add_argument("--frame-ancestors", default="")
     parser.add_argument("--permissions-policy", default="")
     parser.add_argument("--corp", default="cross-origin")
     args = parser.parse_args()
     root = Path(args.directory).resolve() if args.directory else Path(__file__).resolve().parents[1]
-    handler = make_handler(root, not args.no_coop_coep, args.frame_ancestors,
+    coop = None if args.no_coop_coep else "same-origin"
+    coep = None if args.no_coop_coep else ("credentialless" if args.coep_credentialless else "require-corp")
+    handler = make_handler(root, coop, coep, args.frame_ancestors,
                            args.permissions_policy, args.corp)
     server = ThreadingHTTPServer((args.bind, args.port), handler)
     print(f"Browser lab: http://{args.bind}:{args.port}/", flush=True)

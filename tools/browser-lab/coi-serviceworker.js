@@ -14,7 +14,14 @@ if (typeof window === "undefined") {
       if (response.status === 0) return response;
       const headers = new Headers(response.headers);
       headers.set("Cross-Origin-Embedder-Policy", coepCredentialless ? "credentialless" : "require-corp");
-      headers.set("Cross-Origin-Opener-Policy", "same-origin");
+      // Top-level documents need COOP to become isolated. Framed documents must
+      // not receive it: a first-visit reload that adds same-origin COOP moves the
+      // iframe into a new browsing context group and Chromium replaces it with
+      // chrome-error://chromewebdata/. Nested isolation comes from COEP plus the
+      // parent's COOP/COEP and Permissions-Policy delegation.
+      if (request.destination === "document") {
+        headers.set("Cross-Origin-Opener-Policy", "same-origin");
+      }
       return new Response(response.body, { status: response.status, statusText: response.statusText, headers });
     }));
   });

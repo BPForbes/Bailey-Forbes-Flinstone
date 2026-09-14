@@ -99,6 +99,7 @@ async function main() {
   await serve(["--bind", "127.0.0.1", "--port", String(swLabPort), "--directory", labRoot,
     "--no-coop-coep", "--corp", "cross-origin", "--frame-ancestors", swParentOrigin]);
   await serve(["--bind", "127.0.0.2", "--port", String(swParentPort), "--directory", swParentDir,
+    "--coep-credentialless",
     "--permissions-policy", `cross-origin-isolated=(self "${swLabOrigin}")`, "--corp", "cross-origin"]);
   const fresh = await browser.newContext({ viewport: { width: 1200, height: 1100 } });
   await fresh.addInitScript({ content: `window.FLINTSTONE_LAB_CONFIG = { parentOrigin: ${JSON.stringify(swParentOrigin)} };` });

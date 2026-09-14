@@ -229,7 +229,9 @@ the published lab. On `main` it:
    lifecycle checks, and switch-user sessions;
 6. packages the browser runtime, image, manifest, and validation evidence;
 7. re-runs Chromium against the packaged `./artifacts/` tree and a second origin
-   that iframes the lab.
+   that iframes the lab. That iframe check covers a headered child (native
+   COOP/COEP) and a first-visit service-worker child on a parent that sends
+   `COEP: credentialless` plus `Permissions-Policy` for `cross-origin-isolated`.
 
 The workflow contains a fail-closed promotion gate. Upload as
 `flintstone-browser-kernel` requires all three independent signals:

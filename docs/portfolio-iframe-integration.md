@@ -56,10 +56,14 @@ Flintstone change.
 GitHub Pages cannot set COOP, COEP, CSP, or Permissions-Policy. The packaged
 lab therefore:
 
-- ships `coi-serviceworker.js` so a first visit reloads the iframe once the
-  worker controls the lab origin;
+- ships `coi-serviceworker.js` so a first visit reloads once the worker
+  controls the lab origin. Top-level visits receive COEP and COOP. Framed
+  visits receive COEP only: adding `COOP: same-origin` on an iframe reload
+  makes Chromium replace the child with `chrome-error://chromewebdata/`.
+  Nested `SharedArrayBuffer` still needs the parent headers below plus
+  `allow="cross-origin-isolated"`. The worker cannot isolate the parent.
 - ships `_headers` for Cloudflare/Netlify if the lab is later placed behind a
-  host that honors them.
+  host that honors them. Prefer those native child headers when available.
 
 When headers are available, use:
 
@@ -129,3 +133,5 @@ function isTrustedReady(event, { labOrigin, iframe, commit }) {
 2. Emit the parent COOP/COEP/Permissions-Policy headers.
 3. Listen for `message` and accept only the trusted ready payload above.
 4. Do not rely on the lab service worker to isolate the parent origin.
+   The parent must send COOP/COEP (`credentialless` is the documented
+   portfolio COEP) and delegate `cross-origin-isolated`.
