@@ -9,8 +9,8 @@ python3 -m http.server 8000
 ```
 
 Open `http://localhost:8000/tools/browser-lab/`. The current metadata reports
-the x86-64/boot-protocol blocker, so the page must show **Blocked** and must not
-download or instantiate v86.
+the browser-runtime validation blocker, so the page must show **Blocked** and
+must not instantiate an emulator.
 
 The harness reads defaults from the repository's `dist/`. A separately hosted
 lab can configure relative or cross-origin static assets before `lab.js`:
@@ -20,21 +20,23 @@ lab can configure relative or cross-origin static assets before `lab.js`:
 window.FLINTSTONE_LAB_CONFIG = {
   metadataUrl: "./artifacts/build-info.json",
   artifactBaseUrl: "./artifacts",
-  v86ScriptUrl: "./v86/libv86.js",
-  v86WasmUrl: "./v86/v86.wasm",
-  biosUrl: "./v86/seabios.bin",
-  vgaBiosUrl: "./v86/vgabios.bin"
+  parentOrigin: "https://bailey-forbes.com",
+  createEmulator: async ({ artifactUrl, memorySize, serialByte }) => {
+    // Return a validated x86-64 PC emulator adapter with stop(), run(), and
+    // destroy(). Feed each captured COM1 byte to serialByte.
+  }
 };
 </script>
 ```
 
 No emulator source, BIOS, or generated kernel artifact is committed here.
-Those are lab infrastructure and CI output. If a future bootable i386 image
-makes `bootable` and `v86Compatible` true, the harness uses the current v86
-`V86` constructor with `hda`, appends `?v=<shortCommit>` for cache busting, and
-uses metadata's recommended RAM.
+Those are lab infrastructure and CI output. The harness requires both
+`bootable` and schema-v2 `browserCompatible`, appends `?v=<shortCommit>` for
+cache busting, and uses metadata's recommended RAM. It posts readiness only
+after the adapter supplies the exact serial marker as a complete line.
 
 Keep keyboard handling in the emulator. Focus the `#screen` element so browser
-events flow through v86's PS/2 emulation to the Flintstone keyboard driver.
-Boot, pause, resume, reset, power-off/recreate, persistence, and snapshots are
-also emulator/lab responsibilities.
+events flow through the emulator's PS/2 path to the Flintstone keyboard driver.
+Boot, pause, resume, reset, and power-off/recreate are exposed by the lab.
+Persistence remains unavailable until an emulator and versioned disk format are
+selected and tested.

@@ -342,7 +342,7 @@ deploy:
 	@gcc -std=c11 -Wall -Wextra -O2 -o gen_version_changelog scripts/gen_version_changelog.c && ./gen_version_changelog
 	@$(MAKE) CHANGELOG_CI=1 all
 
-.PHONY: vm baremetal browser-kernel test-browser-kernel test-browser-kernel-gate
+.PHONY: vm baremetal browser-kernel test-browser-kernel test-browser-kernel-gate test-browser-lab test-freestanding-entry
 vm:
 	$(MAKE) VM_ENABLE=1 $(TARGET)
 
@@ -351,19 +351,23 @@ vm:
 vm-sdl:
 	$(MAKE) VM_ENABLE=1 VM_SDL=1 $(TARGET)
 
-# Browser-lab contract.  The current output is an audited x86_64 hosted ELF
-# candidate, not a boot disk: scripts/package_browser_kernel_artifact.sh records
-# that fact in build-info.json so a lab cannot accidentally pass it to v86.
+# Browser-lab boot boundary. This produces a BIOS raw disk containing only the
+# independently bootable freestanding core; unavailable hosted subsystems are
+# reported explicitly in the manifest and are not promoted to the public lab.
 browser-kernel:
-	$(MAKE) clean
-	$(MAKE) ARCH=x86_64_gas baremetal
-	@./scripts/package_browser_kernel_artifact.sh
+	@./scripts/build_freestanding_browser_kernel.sh
 
 test-browser-kernel: browser-kernel
 	@./scripts/test_browser_kernel_artifact.sh
 
 test-browser-kernel-gate:
 	@bash ./tests/test_browser_kernel_promotion_gate.sh
+
+test-freestanding-entry:
+	@bash ./tests/test_freestanding_entry.sh
+
+test-browser-lab:
+	@node ./tests/test_browser_lab.js
 
 # Fetch and build external libs (SDL2, CUnit) into deps/install.
 .PHONY: deps deps-sdl2 deps-cunit

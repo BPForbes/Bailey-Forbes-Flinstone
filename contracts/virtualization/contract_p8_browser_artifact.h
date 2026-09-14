@@ -7,11 +7,13 @@
  * immutable and validate the declared SHA-256 before booting.
  *
  * **Required `build-info.json` fields and JSON types**
- *   - `schemaVersion` (integer, exactly 1)
+ *   - `schemaVersion` (integer, 1 or 2; producers emit 2)
  *   - `project`, `repository`, `commit`, `shortCommit`, `builtAt`,
  *     `architecture`, `cpuMode`, `artifact`, `artifactFormat`, `sha256`,
  *     `browserEmulator`, `bootSuccessMarker`, `validationOutcome` (strings)
  *   - `v86Compatible`, `bootable`, `bootSuccessMarkerImplemented` (booleans)
+ *   - schema 2: `browserCompatible` (boolean), `capabilities` (object of
+ *     subsystem-name to boolean availability)
  *   - `bootloader`, `requiredBios`, `qemuBootMode` (string or null)
  *   - `minimumRamBytes` (non-negative integer or null)
  *   - `recommendedRamBytes` (positive integer)
@@ -22,7 +24,7 @@
  * `-kernel` loading or `ide-drive` for a raw IDE disk image.
  *
  * **Fail-closed promotion:** metadata is necessary but not sufficient. CI may
- * publish `flintstone-browser-kernel` only when `bootable`, `v86Compatible`, and
+ * publish `flintstone-browser-kernel` only when `bootable`, `browserCompatible`, and
  * `bootSuccessMarkerImplemented` are true **and** an independent QEMU serial
  * smoke test observes `FLINTSTONE_KERNEL_BOOT_OK`. A manifest cannot self-attest
  * that observation.
@@ -32,8 +34,8 @@
 
 #include "contract_extend.h"
 
-#define FL_CONTRACT_P8_BROWSER_ARTIFACT_INTERCHANGE_REV 1
-#define FL_CONTRACT_P8_BROWSER_ARTIFACT_SCHEMA_VERSION 1
+#define FL_CONTRACT_P8_BROWSER_ARTIFACT_INTERCHANGE_REV 2
+#define FL_CONTRACT_P8_BROWSER_ARTIFACT_SCHEMA_VERSION 2
 #define FL_CONTRACT_P8_BROWSER_ARTIFACT_CONTRACT_DEFINED 1
 
 #define FL_CONTRACT_P8_BROWSER_ARTIFACT_BOOT_MARKER "FLINTSTONE_KERNEL_BOOT_OK"
@@ -46,7 +48,7 @@
 #define FL_CONTRACT_P8_BROWSER_ARTIFACT_OUTCOME_BLOCKED "architecture-blocked"
 
 #define FL_CONTRACT_P8_BROWSER_ARTIFACT_PROMOTION_REQUIRES_BOOTABLE 1
-#define FL_CONTRACT_P8_BROWSER_ARTIFACT_PROMOTION_REQUIRES_V86 1
+#define FL_CONTRACT_P8_BROWSER_ARTIFACT_PROMOTION_REQUIRES_BROWSER_COMPATIBILITY 1
 #define FL_CONTRACT_P8_BROWSER_ARTIFACT_PROMOTION_REQUIRES_MARKER_DECLARATION 1
 #define FL_CONTRACT_P8_BROWSER_ARTIFACT_PROMOTION_REQUIRES_QEMU_OBSERVATION 1
 

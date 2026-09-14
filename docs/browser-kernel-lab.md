@@ -6,6 +6,31 @@ portfolio iframe remain separate projects.
 
 ## Compatibility decision
 
+### Current freestanding boundary
+
+`make browser-kernel` now builds `dist/flintstone.img`: a raw BIOS disk whose
+MBR loads a freestanding payload, constructs identity-mapped long-mode page
+tables, installs a 64-bit GDT, and enters `kernel_entry`. The entry owns its
+stack, clears `.bss`, installs an early IDT, initializes COM1, and only then
+emits the boot marker. The image is intentionally a **boot-boundary increment**,
+not yet the hosted shell port: its serial capability line reports identity,
+filesystem, networking, server, and hosted sessions as unavailable.
+
+The build emits schema 2 metadata with `bootableCandidate: true` but
+`bootable: false`. Only `scripts/test_browser_kernel_artifact.sh`, after an
+independent QEMU process observes the exact serial marker, may change that copy
+of the manifest to `bootable: true`. Browser promotion remains blocked by
+`browserCompatible: false` until an x86-64 browser PC emulator is vendored and
+passes its own marker test. In particular, `v86Compatible` remains false.
+
+Build/support checks:
+
+```sh
+make test-freestanding-entry
+make browser-kernel
+./scripts/test_browser_kernel_artifact.sh # requires qemu-system-x86_64
+```
+
 **Can current Flintstone boot unchanged in v86? NO.**
 
 There are two independent blockers:
@@ -86,10 +111,9 @@ control-register/MSR transition required to enter that mode.
 ## RAM, BIOS, and artifact
 
 `VM/devices/vm_mem.h` gives the synthetic in-process guest 16 MiB. That is not
-evidence for the real kernel's minimum because the real kernel has never
-completed a firmware boot. The honest values are:
+evidence for the freestanding kernel's minimum. The honest values are:
 
-- Current real-kernel minimum: **undetermined until a freestanding boot exists**.
+- Current boot-boundary allocation: **64 MiB** (not yet minimized).
 - Initial x86-64 lab recommendation: **64 MiB**, then measure and reduce.
 - Existing synthetic VM allocation: **16 MiB**.
 
@@ -103,43 +127,35 @@ It creates:
 
 ```text
 dist/
-├── flintstone-kernel-x86_64.elf
+├── flintstone.img
 └── build-info.json
 ```
 
-The ELF is the actual current `DRIVERS_BAREMETAL` build output, preserved as an
-audit candidate. It is intentionally marked `bootable: false` and
-`v86Compatible: false`; it must not be renamed to `.img` or promoted to a lab.
+The image contains the new freestanding boot boundary. A fresh build is
+intentionally marked `bootable: false` and `v86Compatible: false`; only the
+QEMU probe may assert bootability for that manifest.
 `contracts/virtualization/contract_p8_browser_artifact.h` defines the normative
 `build-info.json` field names, JSON types, ownership, digest, QEMU boot-mode,
 validation-outcome, and fail-closed promotion rules. The current manifest uses
-schema version `1` and `qemuBootMode: null`; a future raw IDE image uses
-`qemuBootMode: "ide-drive"`.
-Test the contract and QEMU rejection with:
+schema version `2` and `qemuBootMode: "ide-drive"`.
+Test the contract and bounded QEMU boot with:
 
 ```sh
 make test-browser-kernel
 make test-browser-kernel-gate
 ```
 
-The future validated artifact should be a raw IDE HDD image such as
-`flintstone.img`, containing a conventional BIOS-capable x86-64 bootloader and
-the freestanding Flintstone kernel. A Multiboot2-capable GRUB image is a
-reasonable packaging contract once Flintstone has a Multiboot2 entry and
-handoff. QEMU and the browser emulator should consume the same raw image; only
-packaging may differ if an emulator requires ISO instead.
-
-Required future BIOS/boot chain:
+The implemented BIOS/boot chain is:
 
 ```text
-SeaBIOS-compatible PC BIOS -> MBR/GRUB (or equivalent x86-64 loader)
+SeaBIOS-compatible PC BIOS -> Flintstone MBR loader
   -> establish x86-64 long mode -> Flintstone freestanding entry
 ```
 
 ## Boot-success contract
 
 After memory, GDT, IDT, PIC, PIT, VGA, keyboard, and block-driver initialization
-succeeds, the future kernel must emit exactly:
+succeeds, the kernel emits exactly:
 
 ```text
 FLINTSTONE_KERNEL_BOOT_OK
@@ -147,8 +163,8 @@ FLINTSTONE_KERNEL_BOOT_OK
 
 over initialized NS16550-compatible COM1. VGA remains independent kernel output.
 QEMU CI captures `-serial stdio`; a browser emulator captures its serial event.
-The marker is reserved in current metadata but is not falsely reported as
-implemented.
+The marker is declared implemented, but the build never treats that declaration
+as an independent boot observation.
 
 ## Three separate layers
 
@@ -214,20 +230,19 @@ boot a virtual PC and expose these devices.
 dispatch. Today it:
 
 1. builds and tests the hosted and in-process VM paths;
-2. packages the real x86-64 hardware-driver ELF;
-3. runs a bounded QEMU direct-kernel probe and verifies loader rejection or
-   failure to reach the serial boot marker;
-4. validates schema-versioned metadata, artifact SHA-256, and Outcome B;
-5. uploads a clearly named compatibility-audit package, never a public
-   “validated boot image.”
+2. builds the freestanding raw disk candidate;
+3. runs a bounded QEMU IDE boot probe and requires the serial marker;
+4. validates schema-versioned metadata and artifact SHA-256;
+5. keeps public promotion blocked until browser compatibility is independently
+   established.
 
 The workflow contains a fail-closed promotion gate. Upload as
 `flintstone-browser-kernel` requires all three independent signals:
-`bootable: true`, `v86Compatible: true`, and a QEMU smoke-test step that actually
+`bootable: true`, `browserCompatible: true`, and a QEMU smoke-test step that actually
 observes `FLINTSTONE_KERNEL_BOOT_OK` on serial. The manifest's
 `bootSuccessMarkerImplemented` declaration is validated but cannot self-attest
-the QEMU observation. Current metadata cannot pass that gate, so a main push
-cannot replace a working public lab with this ELF.
+the QEMU observation. Current metadata cannot pass the browser half of that
+gate, so a main push cannot replace a working public lab with this candidate.
 
 The future lab deployment workflow should download only that validated artifact,
 copy the image and JSON to its static `/artifacts/` directory, and deploy Pages:
