@@ -9,6 +9,8 @@ const char *fl_fs_identity_user(int session);
 int fl_fs_identity_elevated(int session);
 int fl_fs_identity_login(int session, const char *name, const char *password);
 int fl_fs_identity_su(int session, const char *name, const char *password);
+int fl_fs_identity_switchuser(int session, const char *name);
+int fl_fs_identity_user_index(int session);
 void fl_fs_identity_logout(int session);
 int fl_fs_identity_useradd(int session, const char *name, const char *password);
 void fl_fs_identity_each_user(void (*visit)(const char *name, int elevated, void *ctx), void *ctx);

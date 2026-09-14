@@ -96,3 +96,53 @@ void fl_fs_vga_puts(const char *s)
     while (*s)
         fl_fs_vga_putc(*s++);
 }
+
+void fl_fs_vga_snapshot_shell(uint16_t *cells, unsigned count)
+{
+    if (!cells || count < FL_FS_VGA_SHELL_CELLS)
+        return;
+    for (int row = 1; row < VGA_ROWS; ++row) {
+        for (int col = 0; col < VGA_COLS; ++col)
+            cells[(unsigned)(row - 1) * VGA_COLS + (unsigned)col] = s_vga[row * VGA_COLS + col];
+    }
+}
+
+void fl_fs_vga_restore_shell(const uint16_t *cells, unsigned count)
+{
+    if (!cells || count < FL_FS_VGA_SHELL_CELLS)
+        return;
+    for (int row = 1; row < VGA_ROWS; ++row) {
+        for (int col = 0; col < VGA_COLS; ++col)
+            s_vga[row * VGA_COLS + col] = cells[(unsigned)(row - 1) * VGA_COLS + (unsigned)col];
+    }
+}
+
+void fl_fs_vga_clear_shell(void)
+{
+    for (int row = 1; row < VGA_ROWS; ++row)
+        clear_row(row, 0x07);
+    s_row = 1;
+    s_col = 0;
+}
+
+void fl_fs_vga_get_cursor(int *row, int *col)
+{
+    if (row)
+        *row = s_row;
+    if (col)
+        *col = s_col;
+}
+
+void fl_fs_vga_set_cursor(int row, int col)
+{
+    if (row < 1)
+        row = 1;
+    if (row >= VGA_ROWS)
+        row = VGA_ROWS - 1;
+    if (col < 0)
+        col = 0;
+    if (col >= VGA_COLS)
+        col = VGA_COLS - 1;
+    s_row = row;
+    s_col = col;
+}

@@ -1,3 +1,4 @@
+#include <stdint.h>
 #include "shell.h"
 #include "identity.h"
 #include "keyboard.h"
@@ -5,15 +6,30 @@
 #include "vga.h"
 
 #define LINE 96
+#define HIST_MAX 16
 #define MODE_CMD 0
 #define MODE_LOGIN 1
 #define MODE_SU 2
 #define MODE_USERADD 3
 
+struct perspective {
+    int valid;
+    uint16_t cells[FL_FS_VGA_SHELL_CELLS];
+    int row;
+    int col;
+    char line[LINE];
+    unsigned len;
+    int mode;
+    char pending[16];
+    char history[HIST_MAX][LINE];
+    unsigned history_count;
+};
+
 static char s_line[FL_FS_MAX_SESSIONS][LINE];
 static unsigned s_len[FL_FS_MAX_SESSIONS];
 static int s_mode[FL_FS_MAX_SESSIONS];
 static char s_pending[FL_FS_MAX_SESSIONS][16];
+static struct perspective s_perspectives[FL_FS_MAX_USERS];
 
 static int str_eq(const char *a, const char *b)
 {
@@ -64,16 +80,26 @@ static void emit_uint(unsigned value)
         emit_char(buf[n]);
 }
 
+static int active_session(void)
+{
+    return fl_fs_session_active();
+}
+
+static int active_user_index(void)
+{
+    return fl_fs_identity_user_index(active_session());
+}
+
 static void refresh_status(void)
 {
-    int session = fl_fs_session_active();
+    int session = active_session();
     fl_fs_vga_status(fl_fs_identity_user(session), (unsigned)session + 1,
                      (unsigned)fl_fs_session_count());
 }
 
 static void announce_session(void)
 {
-    int session = fl_fs_session_active();
+    int session = active_session();
     emit("SESSION ");
     emit_uint((unsigned)session + 1);
     emit(" user=");
@@ -82,9 +108,18 @@ static void announce_session(void)
     refresh_status();
 }
 
+static void announce_switchuser(void)
+{
+    int session = active_session();
+    emit("SWITCHUSER user=");
+    emit(fl_fs_identity_user(session));
+    emit("\r\n");
+    refresh_status();
+}
+
 static void prompt(void)
 {
-    int session = fl_fs_session_active();
+    int session = active_session();
     if (s_mode[session] != MODE_CMD) {
         emit("Password: ");
         return;
@@ -119,10 +154,121 @@ static void visit_user(const char *name, int elevated, void *ctx)
     emit(elevated ? " elevated\r\n" : "\r\n");
 }
 
+static void history_append(int user_idx, const char *line)
+{
+    struct perspective *view;
+    unsigned slot;
+    if (user_idx < 0 || user_idx >= FL_FS_MAX_USERS || !line || !line[0])
+        return;
+    view = &s_perspectives[user_idx];
+    if (view->history_count >= HIST_MAX) {
+        for (unsigned i = 1; i < HIST_MAX; ++i)
+            str_copy(view->history[i - 1], view->history[i], LINE);
+        slot = HIST_MAX - 1;
+    } else {
+        slot = view->history_count++;
+    }
+    str_copy(view->history[slot], line, LINE);
+}
+
+static void history_show(int user_idx)
+{
+    const struct perspective *view;
+    if (user_idx < 0 || user_idx >= FL_FS_MAX_USERS)
+        return;
+    view = &s_perspectives[user_idx];
+    if (view->history_count == 0) {
+        emit("history empty\r\n");
+        return;
+    }
+    for (unsigned i = 0; i < view->history_count; ++i) {
+        emit_uint(i + 1);
+        emit(": ");
+        emit(view->history[i]);
+        emit("\r\n");
+    }
+}
+
+static void perspective_save(int user_idx, int session)
+{
+    struct perspective *view;
+    if (user_idx < 0 || user_idx >= FL_FS_MAX_USERS || session < 0 || session >= FL_FS_MAX_SESSIONS)
+        return;
+    view = &s_perspectives[user_idx];
+    view->valid = 1;
+    fl_fs_vga_snapshot_shell(view->cells, FL_FS_VGA_SHELL_CELLS);
+    fl_fs_vga_get_cursor(&view->row, &view->col);
+    str_copy(view->line, s_line[session], LINE);
+    view->len = s_len[session];
+    view->mode = s_mode[session];
+    str_copy(view->pending, s_pending[session], sizeof(view->pending));
+}
+
+static void perspective_load(int user_idx, int session)
+{
+    struct perspective *view;
+    if (user_idx < 0 || user_idx >= FL_FS_MAX_USERS || session < 0 || session >= FL_FS_MAX_SESSIONS)
+        return;
+    view = &s_perspectives[user_idx];
+    if (!view->valid) {
+        fl_fs_vga_clear_shell();
+        s_len[session] = 0;
+        s_mode[session] = MODE_CMD;
+        s_pending[session][0] = 0;
+        s_line[session][0] = 0;
+        return;
+    }
+    fl_fs_vga_restore_shell(view->cells, FL_FS_VGA_SHELL_CELLS);
+    fl_fs_vga_set_cursor(view->row, view->col);
+    str_copy(s_line[session], view->line, LINE);
+    s_len[session] = view->len;
+    s_mode[session] = view->mode;
+    str_copy(s_pending[session], view->pending, sizeof(s_pending[session]));
+}
+
+static void perspective_switch_user(int user_idx, int session)
+{
+    int current = active_user_index();
+    if (current >= 0)
+        perspective_save(current, session);
+    perspective_load(user_idx, session);
+}
+
+static void perspective_save_session(int session)
+{
+    int user_idx = fl_fs_identity_user_index(session);
+    if (user_idx >= 0)
+        perspective_save(user_idx, session);
+}
+
+static void perspective_load_session(int session)
+{
+    int user_idx = fl_fs_identity_user_index(session);
+    if (user_idx >= 0)
+        perspective_load(user_idx, session);
+}
+
+static void session_go(int session)
+{
+    perspective_load_session(session);
+}
+
+static int switchuser_to(int session, const char *name)
+{
+    int target;
+    if (!fl_fs_identity_switchuser(session, name))
+        return 0;
+    target = fl_fs_identity_user_index(session);
+    perspective_switch_user(target, session);
+    announce_switchuser();
+    return 1;
+}
+
 static void finish_password(int session, const char *password)
 {
     int ok = 0;
     int mode = s_mode[session];
+    int before = fl_fs_identity_user_index(session);
     s_mode[session] = MODE_CMD;
     if (mode == MODE_LOGIN)
         ok = fl_fs_identity_login(session, s_pending[session], password);
@@ -131,6 +277,8 @@ static void finish_password(int session, const char *password)
     else if (mode == MODE_USERADD)
         ok = fl_fs_identity_useradd(session, s_pending[session], password);
     emit(ok ? "ok\r\n" : "authentication failed\r\n");
+    if (ok && fl_fs_identity_user_index(session) != before)
+        perspective_switch_user(fl_fs_identity_user_index(session), session);
     announce_session();
 }
 
@@ -138,10 +286,14 @@ static void run_command(int session, char *line)
 {
     char verb[16];
     const char *cursor = line;
+    int user_idx = active_user_index();
     if (!take_word(&cursor, verb, sizeof(verb)))
         return;
+    if (user_idx >= 0 && line[0])
+        history_append(user_idx, line);
     if (str_eq(verb, "help")) {
-        emit("help whoami users login su logout useradd session\r\n");
+        emit("help whoami users history switchuser login su logout useradd session\r\n");
+        emit("switchuser saves terminal + history per lab user on the website\r\n");
         emit("filesystem, network, and server remain hosted-only\r\n");
         return;
     }
@@ -151,13 +303,30 @@ static void run_command(int session, char *line)
         emit(fl_fs_identity_elevated(session) ? " elevated\r\n" : "\r\n");
         return;
     }
+    if (str_eq(verb, "history")) {
+        history_show(user_idx);
+        return;
+    }
     if (str_eq(verb, "users")) {
         fl_fs_identity_each_user(visit_user, 0);
         return;
     }
     if (str_eq(verb, "logout")) {
+        int before = fl_fs_identity_user_index(session);
         fl_fs_identity_logout(session);
+        if (fl_fs_identity_user_index(session) != before)
+            perspective_switch_user(fl_fs_identity_user_index(session), session);
         announce_session();
+        return;
+    }
+    if (str_eq(verb, "switchuser")) {
+        char name[16];
+        if (!take_word(&cursor, name, sizeof(name))) {
+            emit("usage: switchuser <user>\r\n");
+            return;
+        }
+        if (!switchuser_to(session, name))
+            emit("unknown user\r\n");
         return;
     }
     if (str_eq(verb, "login") || str_eq(verb, "su") || str_eq(verb, "useradd")) {
@@ -187,11 +356,15 @@ static void run_command(int session, char *line)
             return;
         }
         if (str_eq(arg, "new")) {
+            int current = active_session();
             int created = fl_fs_session_new();
             if (created < 0) {
                 emit("session table full\r\n");
                 return;
             }
+            if (current >= 0 && current != created)
+                perspective_save_session(current);
+            session_go(created);
             announce_session();
             return;
         }
@@ -199,11 +372,22 @@ static void run_command(int session, char *line)
         const char *p = arg;
         while (*p >= '0' && *p <= '9')
             id = id * 10u + (unsigned)(*p++ - '0');
-        if (id == 0 || !fl_fs_session_switch((int)id - 1)) {
+        if (id == 0) {
             emit("no such session\r\n");
             return;
         }
-        announce_session();
+        {
+            int current = active_session();
+            int target = (int)id - 1;
+            if (current >= 0 && current != target)
+                perspective_save_session(current);
+            if (!fl_fs_session_switch(target)) {
+                emit("no such session\r\n");
+                return;
+            }
+            session_go(target);
+            announce_session();
+        }
         return;
     }
     emit("unknown command; try help\r\n");
@@ -217,14 +401,16 @@ void fl_fs_shell_init(void)
         s_pending[i][0] = 0;
         s_line[i][0] = 0;
     }
-    emit("lab identity: login/su/logout/whoami/session (lab seeds flinstone/root)\r\n");
+    for (int i = 0; i < FL_FS_MAX_USERS; ++i)
+        s_perspectives[i].valid = 0;
+    emit("lab identity: switchuser/login/su/whoami/history/session\r\n");
     announce_session();
     prompt();
 }
 
 void fl_fs_shell_input(char c)
 {
-    int session = fl_fs_session_active();
+    int session = active_session();
     if (c == '\r')
         c = '\n';
     if (c == '\n') {

@@ -114,6 +114,25 @@ int fl_fs_identity_su(int session, const char *name, const char *password)
     return fl_fs_identity_login(session, name, password);
 }
 
+int fl_fs_identity_switchuser(int session, const char *name)
+{
+    int idx;
+    if (session < 0 || session >= FL_FS_MAX_SESSIONS || !s_session_used[session])
+        return 0;
+    idx = find_user(name);
+    if (idx < 0)
+        return 0;
+    s_session_user[session] = idx;
+    return 1;
+}
+
+int fl_fs_identity_user_index(int session)
+{
+    if (session < 0 || session >= FL_FS_MAX_SESSIONS || !s_session_used[session])
+        return -1;
+    return s_session_user[session];
+}
+
 void fl_fs_identity_logout(int session)
 {
     if (session < 0 || session >= FL_FS_MAX_SESSIONS || !s_session_used[session])
