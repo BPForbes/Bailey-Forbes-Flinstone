@@ -53,6 +53,7 @@ Run builds from the repository root.
 - VM-enabled host build: `make vm`
 - VM with SDL2 window: `make vm-sdl`
 - Build local third-party dependencies into `deps/install`: `make deps`
+- WebAssembly lab shell: `make wasm` (host binary always; `flintstone.js` when `emcc` is installed)
 
 ## Test targets
 
@@ -65,6 +66,7 @@ Run builds from the repository root.
 - VM memory tests: `make test_vm_mem`
 - VM replay test: `make test_replay`
 - Full architecture parity check: `make parity`
+- WASM lab shell smoke: `make test-wasm-shell`
 
 ## Development testing policy
 

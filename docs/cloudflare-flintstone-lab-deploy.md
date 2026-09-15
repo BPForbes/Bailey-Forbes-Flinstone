@@ -163,15 +163,28 @@ node ./scripts/test_browser_iframe.cjs
 - **`coi-serviceworker.js`** may still register; native COEP from the Worker makes the
   SW reload path unnecessary but harmless.
 
-## 6. Server chat relay (optional, separate)
+## 6. Server chat relay (multi-visitor)
 
-Multi-user chat uses a WebSocket hub (`tools/browser-lab/server-relay-hub.mjs`), not
-this Worker. Deploy relay elsewhere and set on the portfolio or lab page:
+Visitors on GitHub Pages and `flintstone.bailey-forbes.com` share one chat room
+through this Worker: Durable Object `LabRelayRoom` on `/ws?room=lab`, plus
+`GET /relay-health` for a CORS probe. The lab client auto-joins on Ready.
+
+After changing relay code, redeploy the Worker:
+
+```bash
+cd infra/cloudflare
+npx wrangler deploy
+```
+
+The Node hub (`tools/browser-lab/server-relay-hub.mjs`) remains the local
+dev path: `python3 scripts/serve_browser_lab.py --port 8768 --relay-port 8767`.
+
+Override the public URL from a portfolio wrapper if needed:
 
 ```html
 <script>
   window.FLINTSTONE_LAB_CONFIG = {
-    relayUrl: "wss://your-relay.example/room"
+    relayUrl: "wss://flintstone.bailey-forbes.com/ws?room=lab"
   };
 </script>
 ```

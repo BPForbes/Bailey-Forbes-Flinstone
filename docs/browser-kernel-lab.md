@@ -197,8 +197,10 @@ The hosted FAT32 volume, block driver, and `kernel/core/net` server path are
 **not** present in the freestanding browser image. The guest instead exposes
 lab analogs for every hosted/baremetal shell verb: volatile ramfs, an in-memory
 cluster disk, a loopback/lab0 network table, and `server` verbs that the lab JS
-bridges onto the P3 relay (or a same-origin BroadcastChannel room on static
-Pages). Persistence, snapshots, Boot/Pause/Resume/
+bridges onto a shared WebSocket room (Cloudflare Durable Object on
+`flintstone.bailey-forbes.com`, Node hub locally) so multiple visitors can talk.
+If that hub is down, the page falls back to a same-origin BroadcastChannel
+(tabs on one machine only). Persistence, snapshots, Boot/Pause/Resume/
 Reset/Power-off, and VM recreation are lab/emulator lifecycle features. Resume
 is enabled only after Pause so QMP `cont` cannot race SeaBIOS/TCG boot or an
 in-flight VGA `pmemsave` and fail Guest State with `QEMU command timed out: cont`.
@@ -232,12 +234,13 @@ the published lab. On `main` it:
 1. builds and tests the hosted and in-process VM paths;
 2. builds the freestanding raw disk candidate;
 3. runs a bounded native-QEMU IDE boot probe and requires the serial marker;
-4. drives the serial lab shell for `whoami`, concurrent sessions, and switch user;
-5. runs the pinned QEMU WebAssembly runtime in Chromium and requires the same
+4. compiles the same identity shell with Emscripten (`make wasm`) for the default sandboxed `shell>` page;
+5. drives the serial lab shell for `whoami`, concurrent sessions, and switch user;
+6. runs the pinned QEMU WebAssembly runtime in Chromium (`?validate=1`) and requires the same
    complete serial marker, verified disk digest, VGA first-cell `F`/`0x07`,
-   lifecycle checks, and switch-user sessions;
-6. packages the browser runtime, image, manifest, and validation evidence;
-7. re-runs Chromium against the packaged `./artifacts/` tree and a second origin
+   lifecycle checks, and switch-user sessions, then boots the ordinary URL as WASM when the module is present;
+7. packages the browser runtime, image, WASM module, manifest, and validation evidence;
+8. re-runs Chromium against the packaged `./artifacts/` tree and a second origin
    that iframes the lab. That iframe check covers a headered child (native
    COOP/COEP on first framed visit) and a GitHub Pages-style child: top-level
    first-visit service worker, then the same origin framed by a parent that

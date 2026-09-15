@@ -48,9 +48,23 @@ async function main() {
   const errors = [];
   page.on("pageerror", error => errors.push(error.message));
   const status = async value => page.locator("#status").filter({ hasText: new RegExp(`^${value}$`) }).waitFor({ timeout: 90000 });
+  const guestText = async () => {
+    const term = (await page.locator("#wasm-term").textContent().catch(() => "")) || "";
+    const serial = (await page.locator("#serial").textContent().catch(() => "")) || "";
+    return `${term}\n${serial}`;
+  };
+  const waitGuest = async (re, timeout = 20000) => {
+    const source = re instanceof RegExp ? re.source : String(re);
+    await page.waitForFunction(src => {
+      const rx = new RegExp(src);
+      const term = document.getElementById("wasm-term");
+      const serial = document.getElementById("serial");
+      return rx.test(`${term ? term.textContent : ""}\n${serial ? serial.textContent : ""}`);
+    }, source, { timeout });
+  };
   const ready = async () => {
     await status("Ready");
-    const serial = await page.locator("#serial").innerText();
+    const serial = await guestText();
     assert(serial.split(/\r?\n/).includes("FLINTSTONE_KERNEL_BOOT_OK"), "Missing exact serial marker");
     await page.locator("#display-placeholder").waitFor({ state: "hidden", timeout: 45000 });
     await page.locator(":root[data-vga-cell='F']").waitFor({ timeout: 20000 });
@@ -61,7 +75,7 @@ async function main() {
   if (!packaged) {
     // An unvalidated manifest cannot boot via the ordinary page or its Boot button.
     await page.route("**/build-info.json", route => route.fulfill({ json: { ...manifest, browserCompatible: false } }));
-    await page.goto(`${base}${labPath}`);
+    await page.goto(`${base}${labPath}?qemu=1`);
     await page.locator("#status").filter({ hasText: /^Blocked/ }).waitFor();
     await page.getByRole("button", { name: "Boot", exact: true }).click();
     assert((await page.locator("#status").innerText()).startsWith("Blocked"), "Boot bypassed compatibility gate");
@@ -91,13 +105,13 @@ async function main() {
   }
   await page.locator("#screen").click();
   await page.keyboard.type("dir\n", { delay: 40 });
-  await page.locator("#serial").filter({ hasText: /readme.txt/ }).waitFor({ timeout: 20000 });
+  await waitGuest(/readme.txt/);
   await page.keyboard.type("write hello.txt lab-fs\n", { delay: 40 });
-  await page.locator("#serial").filter({ hasText: /wrote hello.txt/ }).waitFor({ timeout: 30000 });
+  await waitGuest(/wrote hello.txt/, 30000);
   await page.keyboard.type("cat hello.txt\n", { delay: 40 });
-  await page.locator("#serial").filter({ hasText: /lab-fs/ }).waitFor({ timeout: 20000 });
+  await waitGuest(/lab-fs/);
   await page.keyboard.type("whoami\n", { delay: 40 });
-  await page.locator("#serial").filter({ hasText: /WHOAMI flinstone/ }).waitFor({ timeout: 20000 });
+  await waitGuest(/WHOAMI flinstone/);
   await page.locator("#account-name").fill("root");
   await page.getByRole("button", { name: "Switch user", exact: true }).click();
   await page.locator("#account-status").filter({ hasText: /Active session 1: root/ }).waitFor({ timeout: 20000 });
@@ -109,9 +123,9 @@ async function main() {
   await sessionOne.click();
   try {
     await page.locator("#account-status").filter({ hasText: /Active session 1: root/ }).waitFor({ timeout: 20000 });
-    await page.locator("#serial").filter({ hasText: /SESSION 1 user=root/ }).waitFor({ timeout: 20000 });
+    await waitGuest(/SESSION 1 user=root/);
   } catch (error) {
-    throw new Error(`session 1 switch: ${await page.locator("#serial").innerText()}\n${error}`);
+    throw new Error(`session 1 switch: ${await guestText()}\n${error}`);
   }
   await page.locator("#server-panel").waitFor({ state: "visible", timeout: 5000 });
   await page.getByRole("button", { name: "Host", exact: true }).click();
@@ -123,12 +137,29 @@ async function main() {
   await page.locator("#server-msg").fill("hello relay");
   await page.locator("#server-msg-form").getByRole("button", { name: "Send" }).click();
   await page.locator("#server-chat").filter({ hasText: /hello relay/ }).waitFor({ timeout: 10000 });
-  await page.locator("#screen").click();
-  await page.keyboard.type("server msg from-guest\n", { delay: 40 });
-  await page.locator("#serial").filter({ hasText: /SERVER_RELAY msg from-guest/ }).waitFor({ timeout: 20000 });
+  await page.locator("#guest-cmd").fill("server msg from-guest");
+  await page.getByRole("button", { name: "Run", exact: true }).click();
+  await waitGuest(/SERVER_RELAY msg from-guest/, 30000);
   await page.locator("#server-chat").filter({ hasText: /from-guest/ }).waitFor({ timeout: 10000 });
   assert(errors.length === 0, `Browser errors: ${errors.join("; ")}`);
   await page.screenshot({ path: path.join(root, packaged ? "dist/browser-boot-packaged.png" : "dist/browser-boot.png"), fullPage: true });
+  const wasmJs = packaged
+    ? path.join(labRoot, "wasm/flintstone.js")
+    : path.join(root, "tools/browser-lab/wasm/flintstone.js");
+  if (!packaged && fs.existsSync(wasmJs)) {
+    await page.getByRole("button", { name: "Power Off", exact: true }).click();
+    await status("Powered off");
+    await page.goto(`${base}${labPath}`);
+    await ready();
+    await page.locator("#wasm-term").waitFor({ timeout: 10000 });
+    await waitGuest(/shell>/);
+    await page.locator("#screen").click();
+    await page.keyboard.type("whoami\n");
+    await waitGuest(/WHOAMI flinstone/);
+    await page.locator("#account-name").fill("root");
+    await page.getByRole("button", { name: "Switch user", exact: true }).click();
+    await page.locator("#account-status").filter({ hasText: /Active session 1: root/ }).waitFor({ timeout: 20000 });
+  }
   await page.getByRole("button", { name: "Power Off", exact: true }).click();
   await status("Powered off");
   if (packaged) {

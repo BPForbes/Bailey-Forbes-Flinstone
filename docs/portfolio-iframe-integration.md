@@ -32,9 +32,11 @@ Repository setting required once: **Pages → Source = GitHub Actions**, and the
 </iframe>
 ```
 
-Adding an iframe tag is not enough. QEMU WebAssembly needs
+Adding an iframe tag is not enough for **QEMU** WebAssembly: it needs
 `SharedArrayBuffer`, which requires cross-origin isolation in the **child**
-and a parent that delegates `cross-origin-isolated`. The lab service worker
+and a parent that delegates `cross-origin-isolated`. The default published lab
+is the Emscripten `shell>` module and does not need `SharedArrayBuffer`. Use
+`?qemu=1` when the parent must exercise the BIOS disk path. The lab service worker
 cannot isolate `bailey-forbes.com`.
 
 ## Hosting headers
