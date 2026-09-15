@@ -104,12 +104,16 @@ assert(!isTrustedReadyEvent({ ...ready, data: { ...ready.data, type: "loading" }
     skipWaiting: () => {},
     clients: { claim: () => {} },
   };
+  const hrefOf = value => typeof value === "string" ? value : (value && value.url) || String(value);
   vm.runInNewContext(coiSrc, {
     window: undefined,
     self: swSelf,
     fetch: async (url) => {
-      fetchCalls.push(String(url));
-      const type = String(url).includes("type=AAAA") ? 28 : 1;
+      const href = hrefOf(url);
+      fetchCalls.push(href);
+      if (href.includes("/lab-dns"))
+        return { ok: false, status: 404, headers: new Headers(), json: async () => ({ ok: false }) };
+      const type = href.includes("type=AAAA") ? 28 : 1;
       return {
         ok: true,
         json: async () => ({ Answer: type === 1 ? [{ type: 1, data: "93.184.216.34" }] : [] }),
@@ -119,14 +123,46 @@ assert(!isTrustedReadyEvent({ ...ready, data: { ...ready.data, type: "loading" }
   });
   let answered;
   fetchHandler({
-    request: { url: "https://lab.example/tools/browser-lab/lab-dns?name=example.com", cache: "default", mode: "cors" },
+    request: new Request("https://lab.example/tools/browser-lab/lab-dns?name=example.com"),
     respondWith: (p) => { answered = p; },
   });
   const dnsResp = await answered;
   assert.strictEqual(dnsResp.status, 200);
   const dnsBody = await dnsResp.json();
   assert.deepStrictEqual(dnsBody, { ok: true, name: "example.com", ip: "93.184.216.34", ipv6: "" });
+  assert(fetchCalls.some(u => u.includes("/lab-dns")));
   assert(fetchCalls.some(u => u.includes("cloudflare-dns.com") && u.includes("type=A")));
+
+  const directCalls = [];
+  let directHandler;
+  vm.runInNewContext(coiSrc, {
+    window: undefined,
+    self: {
+      location: { origin: "https://lab.example" },
+      addEventListener: (name, listener) => { if (name === "fetch") directHandler = listener; },
+      skipWaiting: () => {},
+      clients: { claim: () => {} },
+    },
+    fetch: async (url) => {
+      const href = hrefOf(url);
+      directCalls.push(href);
+      if (href.includes("/lab-dns"))
+        return new Response(JSON.stringify({ ok: true, name: "example.com", ip: "93.184.216.34", ipv6: "" }), {
+          status: 200, headers: { "Content-Type": "application/json" },
+        });
+      throw new Error("DoH should not run when same-origin /lab-dns succeeds: " + href);
+    },
+    Headers, Request, Response, URL, URLSearchParams, console, Promise,
+  });
+  let directAnswered;
+  directHandler({
+    request: new Request("https://lab.example/tools/browser-lab/lab-dns?name=example.com"),
+    respondWith: (p) => { directAnswered = p; },
+  });
+  const directResp = await directAnswered;
+  assert.strictEqual(directResp.status, 200);
+  assert.deepStrictEqual(await directResp.json(), { ok: true, name: "example.com", ip: "93.184.216.34", ipv6: "" });
+  assert(directCalls.every(u => !u.includes("cloudflare-dns.com")));
 
   const sent = [];
   const qmp = createQmpClient({ send: cmd => sent.push(cmd), timeoutMs: 30 });

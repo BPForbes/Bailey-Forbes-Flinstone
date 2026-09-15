@@ -1,0 +1,4 @@
+MAJOR_VERSION=4
+STANDARD_VERSION=5
+RELEASE_VERSION=3
+DESCRIPTION=Lab guest DNS prefers same-origin /lab-dns (local getaddrinfo) and only falls back to Cloudflare DoH when that path is missing, so ping works both in the Python lab server and on GitHub Pages behind the COI service worker.
