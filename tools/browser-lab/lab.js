@@ -315,7 +315,7 @@
     const codes = window.FlintstoneQemuKeys && window.FlintstoneQemuKeys.qcodesForEvent(event);
     if (!codes) return;
     event.preventDefault();
-    enqueueGuest(() => emulator.sendKey(codes)).catch(error => controller.fail(error));
+    enqueueGuest(() => emulator.sendKey(codes)).catch(error => console.warn(error));
   });
   const form = document.getElementById("switch-user");
   if (form) {
