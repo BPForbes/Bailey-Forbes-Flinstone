@@ -73,6 +73,22 @@ jobs:
           npm ci --prefix tools/browser-lab
           make test-browser-lab
 
+      - name: Cache Emscripten SDK
+        uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830 # v4.3.0
+        with:
+          path: .emsdk-local
+          key: emsdk-3.1.74
+
+      - name: Compile sandboxed WebAssembly lab shell
+        env:
+          EMSDK_ROOT: ${{ github.workspace }}/.emsdk-local
+        run: |
+          chmod +x scripts/fetch_emsdk.sh scripts/build_wasm_lab.sh
+          ENV_SCRIPT="$(EMSDK_ROOT="$EMSDK_ROOT" ./scripts/fetch_emsdk.sh)"
+          # shellcheck disable=SC1090
+          . "$ENV_SCRIPT"
+          EMCC_REQUIRED=1 make wasm
+
       - name: Probe serial identity and concurrent sessions
         run: python3 ./scripts/test_freestanding_shell.py
 

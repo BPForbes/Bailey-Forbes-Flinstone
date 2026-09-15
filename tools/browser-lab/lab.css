@@ -424,6 +424,21 @@ input:focus, #screen:focus {
 
 #display-placeholder[hidden] { display: none !important; }
 
+#wasm-term {
+  margin: 0;
+  min-height: 25rem;
+  padding: 0.7rem 0.85rem;
+  color: #d2d2d7;
+  background: transparent;
+  font: 16px/1.35 var(--font-mono);
+  white-space: pre-wrap;
+  overflow: auto;
+  outline: none;
+}
+
+body.lab-qemu #wasm-term { display: none; }
+body.lab-wasm #screen canvas { display: none; }
+
 canvas {
   display: block;
   width: 100%;

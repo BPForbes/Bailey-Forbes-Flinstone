@@ -97,3 +97,6 @@ server_shared/
 artifacts/
 /tools/browser-lab/vendor/qemu/
 /tools/browser-lab/node_modules/
+/tools/browser-lab/wasm/flintstone.js
+/tools/browser-lab/wasm/flintstone.wasm
+.emsdk-local/

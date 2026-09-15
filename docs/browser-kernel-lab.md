@@ -232,12 +232,13 @@ the published lab. On `main` it:
 1. builds and tests the hosted and in-process VM paths;
 2. builds the freestanding raw disk candidate;
 3. runs a bounded native-QEMU IDE boot probe and requires the serial marker;
-4. drives the serial lab shell for `whoami`, concurrent sessions, and switch user;
-5. runs the pinned QEMU WebAssembly runtime in Chromium and requires the same
+4. compiles the same identity shell with Emscripten (`make wasm`) for the default sandboxed `shell>` page;
+5. drives the serial lab shell for `whoami`, concurrent sessions, and switch user;
+6. runs the pinned QEMU WebAssembly runtime in Chromium (`?validate=1`) and requires the same
    complete serial marker, verified disk digest, VGA first-cell `F`/`0x07`,
-   lifecycle checks, and switch-user sessions;
-6. packages the browser runtime, image, manifest, and validation evidence;
-7. re-runs Chromium against the packaged `./artifacts/` tree and a second origin
+   lifecycle checks, and switch-user sessions, then boots the ordinary URL as WASM when the module is present;
+7. packages the browser runtime, image, WASM module, manifest, and validation evidence;
+8. re-runs Chromium against the packaged `./artifacts/` tree and a second origin
    that iframes the lab. That iframe check covers a headered child (native
    COOP/COEP on first framed visit) and a GitHub Pages-style child: top-level
    first-visit service worker, then the same origin framed by a parent that

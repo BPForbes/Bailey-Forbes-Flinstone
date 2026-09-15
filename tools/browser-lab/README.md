@@ -1,26 +1,43 @@
 # Flintstone browser lab
 
-The lab boots the freestanding x86_64 BIOS disk in a pinned QEMU WebAssembly
-runtime. It verifies the disk SHA-256 before creating the worker and declares
+The default lab page sandboxes the freestanding identity shell as an
+**Emscripten WebAssembly** module. Type directly at `shell>` in the terminal.
+Switch user, register, sessions, and `server` verbs use the same guest serial
+protocol and JS relay as before.
+
+`make wasm` builds a host smoke binary (`dist/flintstone_wasm_host`) and, when
+`emcc` is on `PATH`, `tools/browser-lab/wasm/flintstone.js` plus
+`flintstone.wasm`. GitHub Actions installs a pinned Emscripten SDK and uploads
+those modules; they are not committed.
+
+QEMU WebAssembly still boots the hashed x86-64 BIOS disk for independent
+hardware validation:
+
+| URL | Runtime |
+|-----|---------|
+| `/tools/browser-lab/` (default) | Emscripten WASM shell when `flintstone.js` is present; otherwise QEMU if the manifest is browser-compatible |
+| `?qemu=1` | Force the pinned QEMU Wasm PC |
+| `?validate=1` | CI / local candidate validation (QEMU + disk SHA-256) |
+
+The QEMU path verifies the disk SHA-256 before creating the worker and declares
+the guest ready only after COM1 supplies the complete
+`FLINTSTONE_KERNEL_BOOT_OK` line. Display validation requires the diagnostic
+VGA cell `F` with attribute `0x07`.
 
 ## Runtime modes (server chat)
 
 | Mode | Where | Server path |
 |------|-------|-------------|
-| **browser-hosted** | Website lab (QEMU Wasm) | JS relay (`server-relay-hub.mjs`) speaking the same P3 session wire as `net_server.c` |
+| **browser-hosted** | Website lab (WASM `shell>` by default; QEMU Wasm on `?qemu=1`) | JS relay (`server-relay-hub.mjs`) speaking the same P3 session wire as `net_server.c` |
 | **native local** | Hosted shell, VM, bare metal | Original C/ASM in `kernel/core/net/` — no relay |
 
 Wire constants in `session-wire-const.js` are generated from `contracts/networking/contract_p3_session_wire.h` via `scripts/gen_session_wire_js.py`.
 
 Start the lab with relay: `python3 scripts/serve_browser_lab.py --port 8768 --relay-port 8767`
 
-the guest ready only after COM1 supplies the complete
-`FLINTSTONE_KERNEL_BOOT_OK` line. Display validation requires the diagnostic
-VGA cell `F` with attribute `0x07`.
-
 After that marker the guest is an interactive lab shell, not the hosted ELF:
 
-- keyboard (click the VGA bezel, then type)
+- keyboard (click the terminal / VGA bezel, then type at `shell>` in WASM mode)
 - `switchuser` / `login` / `su` / `sudo` / `logout` / `whoami` / `history` / `useradd` / `session`
 - lab ramfs: `dir` / `ls` / `cat` / `write` / `mkdir` / `rm` / `pwd` / `cd` and the other hosted file verbs
 - lab cluster disk (`createdisk` / `writecluster` / `diskput` / …) and lab net (`ping` / `ifconfig` / `wifi` / …)
@@ -42,6 +59,8 @@ The runtime files are intentionally generated assets. Fetch the exact pinned
 release and verify its digests before local use:
 
 ```sh
+make wasm
+make test-wasm-shell
 make browser-lab-runtime
 make test-browser-boot
 ```
@@ -62,7 +81,9 @@ make browser-kernel
 python3 ./scripts/serve_browser_lab.py
 ```
 
-Open `http://127.0.0.1:8766/tools/browser-lab/?validate=1` while validating a
+Open `http://127.0.0.1:8766/tools/browser-lab/` for the WASM `shell>` lab (after
+`make wasm` with `emcc`). Open `http://127.0.0.1:8766/tools/browser-lab/?validate=1`
+while validating a
 fresh candidate. The ordinary page refuses to boot until a manifest has a
 recorded browser validation. `?validate=1` is available only to the local and
 CI validation path; it still requires a native-QEMU-validated disk hash and
@@ -71,7 +92,8 @@ records browser compatibility only after the real browser test succeeds.
 The page chrome is a **macOS Liquid Glass** analog: frosted window, traffic
 lights, blurred side panels, JetBrains Mono + Nerd Powerline glyphs (self-hosted
 under `fonts/` so COEP `require-corp` still loads them), and a 24-bit sRGB
-palette for the 80×25 VGA canvas. The guest itself stays classic VGA text mode.
+palette for the 80×25 VGA canvas. The default WASM terminal is a text `shell>`
+prompt; QEMU mode still paints classic VGA text.
 
 Use `make browser-lab-release` to build `dist/browser-lab/`: a self-contained
 static package containing the verified runtime, lab UI, disk, manifest, and

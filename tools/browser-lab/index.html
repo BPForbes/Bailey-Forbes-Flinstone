@@ -39,12 +39,12 @@
       </section>
       <div class="workspace">
         <aside class="sidebar">
-          <p class="lede">Freestanding x86-64 guest. Type in <strong>Guest commands</strong> or click the display. Hosted FAT32 and <code>kernel/core/net</code> stay on the ELF shell.</p>
+          <p class="lede">Sandboxed WebAssembly lab shell. Type at <code>shell&gt;</code> in the terminal. Switch user, register, and server chat map to the same identity and relay as the hosted lab. Use <code>?qemu=1</code> for the x86-64 BIOS disk.</p>
           <p id="runtime-mode">Runtime: loading…</p>
           <section id="capabilities" class="glass-card" aria-label="Guest capabilities"></section>
           <section class="guest-cmd glass-card" aria-label="Guest commands">
             <h2>Guest commands</h2>
-            <p>Sends a line to the VGA shell (<code>ping</code>, <code>dir</code>, <code>whoami</code>, <code>help</code>). Click the display to type. Server chat is only the browser relay.</p>
+            <p>Sends a line to the <code>shell&gt;</code> prompt (<code>ping</code>, <code>dir</code>, <code>whoami</code>, <code>help</code>). Click the terminal to type. Server chat is only the browser relay.</p>
             <form id="guest-cmd-form">
               <label>Command <input id="guest-cmd" name="command" autocomplete="off" spellcheck="false" placeholder="whoami" disabled></label>
               <button id="guest-cmd-run" type="submit" disabled>Run</button>
@@ -68,11 +68,12 @@
         <div class="term-stack">
           <section class="crt glass-card" aria-labelledby="display-label">
             <div class="bezel-bar">
-              <span id="display-label">VGA text 80×25 · click here to type</span>
-              <span>SeaBIOS · QEMU Wasm</span>
+              <span id="display-label">WASM shell · click here to type at shell&gt;</span>
+              <span id="bezel-runtime">Emscripten · sandboxed</span>
             </div>
-            <div id="screen" tabindex="0" aria-label="Virtual machine display">
-              <div id="display-placeholder">VM display is not initialized.</div>
+            <div id="screen" tabindex="0" aria-label="Lab shell display">
+              <div id="display-placeholder">Lab display is not initialized.</div>
+              <pre id="wasm-term" aria-label="WebAssembly shell"></pre>
               <canvas></canvas>
             </div>
             <div id="powerline" class="powerline" aria-label="Session status">
@@ -92,7 +93,7 @@
           </section>
           <section id="server-panel" class="server-panel glass-card" aria-label="Server chat relay" hidden>
             <h2>Server chat (browser relay)</h2>
-            <p>Relay messages only — each Send shows the line once. Guest shell commands belong in <strong>Guest commands</strong> or the VGA display. Type <code>server host</code> / <code>server join</code> in the guest, or use the buttons. On static Pages the lab uses a same-origin BroadcastChannel room (no extra WebSocket).</p>
+            <p>Relay messages only — each Send shows the line once. Shell commands belong in the <code>shell&gt;</code> terminal or <strong>Guest commands</strong>. Type <code>server host</code> / <code>server join</code> in the shell, or use the buttons. On static Pages the lab uses a same-origin BroadcastChannel room (no extra WebSocket).</p>
             <div class="server-actions">
               <button id="server-host" type="button">Host</button>
               <button id="server-join" type="button">Join</button>
@@ -117,6 +118,7 @@
   <script src="session-wire.js"></script>
   <script src="server-relay-client.js"></script>
   <script src="qemu-adapter.js"></script>
+  <script src="wasm-adapter.js"></script>
   <script src="lab.js"></script>
 </body>
 </html>

@@ -61,7 +61,7 @@ async function main() {
   if (!packaged) {
     // An unvalidated manifest cannot boot via the ordinary page or its Boot button.
     await page.route("**/build-info.json", route => route.fulfill({ json: { ...manifest, browserCompatible: false } }));
-    await page.goto(`${base}${labPath}`);
+    await page.goto(`${base}${labPath}?qemu=1`);
     await page.locator("#status").filter({ hasText: /^Blocked/ }).waitFor();
     await page.getByRole("button", { name: "Boot", exact: true }).click();
     assert((await page.locator("#status").innerText()).startsWith("Blocked"), "Boot bypassed compatibility gate");
@@ -129,6 +129,23 @@ async function main() {
   await page.locator("#server-chat").filter({ hasText: /from-guest/ }).waitFor({ timeout: 10000 });
   assert(errors.length === 0, `Browser errors: ${errors.join("; ")}`);
   await page.screenshot({ path: path.join(root, packaged ? "dist/browser-boot-packaged.png" : "dist/browser-boot.png"), fullPage: true });
+  const wasmJs = packaged
+    ? path.join(labRoot, "wasm/flintstone.js")
+    : path.join(root, "tools/browser-lab/wasm/flintstone.js");
+  if (!packaged && fs.existsSync(wasmJs)) {
+    await page.getByRole("button", { name: "Power Off", exact: true }).click();
+    await status("Powered off");
+    await page.goto(`${base}${labPath}`);
+    await ready();
+    await page.locator("#wasm-term").waitFor({ timeout: 10000 });
+    await page.locator("#serial").filter({ hasText: /shell>/ }).waitFor({ timeout: 10000 });
+    await page.locator("#screen").click();
+    await page.keyboard.type("whoami\n");
+    await page.locator("#serial").filter({ hasText: /WHOAMI flinstone/ }).waitFor({ timeout: 20000 });
+    await page.locator("#account-name").fill("root");
+    await page.getByRole("button", { name: "Switch user", exact: true }).click();
+    await page.locator("#account-status").filter({ hasText: /Active session 1: root/ }).waitFor({ timeout: 20000 });
+  }
   await page.getByRole("button", { name: "Power Off", exact: true }).click();
   await status("Powered off");
   if (packaged) {

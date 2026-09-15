@@ -1,6 +1,7 @@
 (() => {
   "use strict";
   const core = window.FlintstoneLabCore;
+  const labBase = document.currentScript ? new URL(".", document.currentScript.src) : new URL("./", location.href);
   const allowedParents = origin => {
     if (origin === "https://bailey-forbes.com") return true;
     try {
@@ -23,6 +24,8 @@
     document.documentElement.dataset.vgaCell = "";
     const placeholder = document.getElementById("display-placeholder");
     if (placeholder) placeholder.hidden = false;
+    const term = document.getElementById("wasm-term");
+    if (term) term.textContent = "";
   };
   const setState = (state, detail) => {
     const node = document.getElementById("status");
@@ -39,7 +42,7 @@
     const run = document.getElementById("guest-cmd-run");
     if (cmd) cmd.disabled = !ready;
     if (run) run.disabled = !ready;
-    for (const id of ["account-login", "account-new-session", "account-register", "account-name", "account-secret"]) {
+    for (const id of ["account-login", "account-new-session", "account-register"]) {
       const node = document.getElementById(id);
       if (node) node.disabled = !ready;
     }
@@ -54,7 +57,10 @@
   let activeSession = 1;
   let relay = null;
   let serialLine = "";
-  const validation = new URLSearchParams(location.search).get("validate") === "1";
+  const search = new URLSearchParams(location.search);
+  const validation = search.get("validate") === "1";
+  const qemuMode = validation || search.get("qemu") === "1";
+  let useWasm = false;
   const usesBrowserRelay = () => info && info.serverPath === "relay";
   const principal = () => sessions[activeSession] || "flinstone";
   const serial = document.getElementById("serial");
@@ -111,7 +117,9 @@
   function renderRuntimeMode() {
     const node = document.getElementById("runtime-mode");
     if (!node || !info) return;
-    if (info.runtimeMode === "browser-hosted" || usesBrowserRelay()) {
+    if (useWasm) {
+      node.textContent = "Runtime: Emscripten WebAssembly sandbox — type at shell>. Switch user, register, and server chat use the same identity and JS relay as the hosted lab.";
+    } else if (info.runtimeMode === "browser-hosted" || usesBrowserRelay()) {
       node.textContent = "Runtime: browser-hosted online — server chat via JS relay (same wire as net_server.c). Local VM/bare-metal uses native C/ASM.";
     } else {
       node.textContent = "Runtime: native local — use server host/join in the shell (kernel/core/net).";
@@ -210,7 +218,10 @@
       button.dataset.session = id;
       button.textContent = `Session ${id}: ${sessions[id]}`;
       if (Number(id) === activeSession) button.setAttribute("aria-current", "true");
-      button.onclick = async () => { await sendGuest(`session ${id}\n`); };
+      button.onclick = async () => {
+        await sendGuestLines(`session ${id}\n`, [/SESSION \d+ user=/]);
+        screen.focus();
+      };
       node.appendChild(button);
     });
     text("account-status", `Active session ${activeSession}: ${sessions[activeSession] || "—"}`);
@@ -389,7 +400,7 @@
     for (let i = 0; i < lines.length; i++) {
       const from = serialTail.length;
       if (!await sendGuest(`${lines[i]}\n`)) return false;
-      const pattern = (patterns && patterns[i]) || /SWITCHUSER user=|SESSION \d+ user=|Password:|unknown user|authentication failed|\bok\b|WHOAMI |@flintstone>/;
+      const pattern = (patterns && patterns[i]) || /SWITCHUSER user=|SESSION \d+ user=|Password:|unknown user|authentication failed|\bok\b|WHOAMI |@flintstone>|shell>/;
       await waitSerial(pattern, 4000, from);
     }
     return true;
@@ -421,16 +432,71 @@
       return emulator;
     },
   });
+  function wasmFallbackInfo() {
+    return core.validateManifest({
+      schemaVersion: 2,
+      commit: "0".repeat(40),
+      shortCommit: "wasm-lab",
+      architecture: "wasm32",
+      browserEmulator: "Emscripten",
+      artifact: "flintstone.wasm",
+      sha256: "0".repeat(64),
+      bootSuccessMarker: "FLINTSTONE_KERNEL_BOOT_OK",
+      validationOutcome: "wasm-shell",
+      bootableCandidate: true,
+      bootable: true,
+      v86Compatible: false,
+      browserCompatible: false,
+      bootSuccessMarkerImplemented: true,
+      recommendedRamBytes: 16,
+      blockers: [],
+      capabilities: {
+        identity: true, hostedLabSessions: true, keyboard: true,
+        filesystem: true, network: true, server: true,
+      },
+      serverPath: "relay",
+    });
+  }
+  async function wasmModulePresent() {
+    try {
+      const response = await fetch(new URL("wasm/flintstone.js", labBase), { cache: "no-store" });
+      return response.ok;
+    } catch (_) {
+      return false;
+    }
+  }
+  function applyRuntimeChrome() {
+    document.body.classList.toggle("lab-wasm", useWasm);
+    document.body.classList.toggle("lab-qemu", !useWasm);
+    const displayLabel = document.getElementById("display-label");
+    const bezelRuntime = document.getElementById("bezel-runtime");
+    if (displayLabel) {
+      displayLabel.textContent = useWasm
+        ? "WASM shell · click here to type at shell>"
+        : "VGA text 80×25 · click here to type";
+    }
+    if (bezelRuntime) {
+      bezelRuntime.textContent = useWasm ? "Emscripten · sandboxed" : "SeaBIOS · QEMU Wasm";
+    }
+  }
   async function load() {
     setState(core.STATES.LOADING);
-    const response = await fetch(config.metadataUrl, { cache: "no-store" });
-    if (!response.ok) throw new Error(`Metadata request failed: HTTP ${response.status}`);
-    info = core.validateManifest(await response.json());
+    useWasm = !qemuMode && await wasmModulePresent() && typeof window.createFlintstoneWasm === "function";
+    if (useWasm) config.createEmulator = window.createFlintstoneWasm;
+    applyRuntimeChrome();
+    try {
+      const response = await fetch(config.metadataUrl, { cache: "no-store" });
+      if (!response.ok) throw new Error(`Metadata request failed: HTTP ${response.status}`);
+      info = core.validateManifest(await response.json());
+    } catch (error) {
+      if (!useWasm) throw error;
+      info = wasmFallbackInfo();
+    }
     if (info.serverRelayPort && !(window.FLINTSTONE_LAB_CONFIG && Object.prototype.hasOwnProperty.call(window.FLINTSTONE_LAB_CONFIG, "relayPort"))) {
       config.relayPort = info.serverRelayPort;
     }
-    text("commit", info.shortCommit); text("architecture", info.architecture);
-    text("emulator", info.browserEmulator); text("artifact", info.artifact);
+    text("commit", info.shortCommit); text("architecture", useWasm ? "wasm32" : info.architecture);
+    text("emulator", useWasm ? "Emscripten" : info.browserEmulator); text("artifact", useWasm ? "flintstone.wasm" : info.artifact);
     renderRuntimeMode();
     renderCaps(info.capabilities);
     renderSessions();
@@ -441,7 +507,10 @@
     }
     await controller.boot(options());
   }
-  function canBoot() { return info && info.bootable && (info.browserCompatible || (validation && info.bootableCandidate)); }
+  function canBoot() {
+    if (useWasm) return typeof config.createEmulator === "function";
+    return info && info.bootable && (info.browserCompatible || (validation && info.bootableCandidate));
+  }
   for (const [id, action] of Object.entries({ boot: () => controller.boot(options()), pause: () => controller.pause(), resume: () => controller.resume(), reset: () => controller.reset(options()), poweroff: () => controller.powerOff() })) {
     document.getElementById(id).onclick = async () => {
       if (busy || ((id === "boot" || id === "reset") && !canBoot())) return;
@@ -461,6 +530,16 @@
   }
   screen.addEventListener("click", () => screen.focus());
   function sendKeyEventToGuest(event) {
+    if (emulator && typeof emulator.typeChar === "function") {
+      let ch = "";
+      if (event.key === "Enter") ch = "\n";
+      else if (event.key === "Backspace") ch = "\b";
+      else if (event.key.length === 1 && !event.ctrlKey && !event.altKey && !event.metaKey) ch = event.key;
+      if (!ch) return false;
+      event.preventDefault();
+      enqueueGuest(() => emulator.typeChar(ch)).catch(error => console.warn(error));
+      return true;
+    }
     if (!emulator || typeof emulator.sendKey !== "function") return false;
     const codes = window.FlintstoneQemuKeys && window.FlintstoneQemuKeys.qcodesForEvent(event);
     if (!codes) return false;
@@ -491,6 +570,7 @@
       const script = core.guestSwitchLines(name);
       if (!script) return;
       await sendGuestLines(script, [/SWITCHUSER user=|unknown user/]);
+      screen.focus();
     });
     document.getElementById("account-new-session").onclick = async () => {
       const name = document.getElementById("account-name").value.trim();
@@ -498,6 +578,7 @@
         /SESSION \d+ user=/,
         /SWITCHUSER user=|unknown user/,
       ]);
+      screen.focus();
     };
     document.getElementById("account-register")?.addEventListener("click", async () => {
       const name = document.getElementById("account-name").value.trim();
@@ -514,6 +595,7 @@
       if (sent && /\bok\b/.test(chunk) && !/authentication failed/.test(chunk))
         rememberUser(name);
       renderSessions();
+      screen.focus();
     });
   }
   load().catch((error) => controller.fail(error));

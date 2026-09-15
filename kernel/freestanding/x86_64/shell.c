@@ -129,8 +129,12 @@ static void prompt(void)
         emit("Password: ");
         return;
     }
+#ifdef FL_WASM_SHELL_PROMPT
+    emit("shell> ");
+#else
     emit(fl_fs_identity_user(session));
     emit("@flintstone> ");
+#endif
 }
 
 static void skip_spaces(const char **cursor)
@@ -546,10 +550,18 @@ void fl_fs_shell_run(void)
 {
     char c;
     for (;;) {
+#if defined(__EMSCRIPTEN__) || defined(FL_WASM_SHELL_PROMPT)
+        while (fl_fs_kbd_getc(&c))
+            fl_fs_shell_input(c);
+        while (fl_fs_serial_getc(&c))
+            fl_fs_shell_input(c);
+        return;
+#else
         __asm__ volatile("hlt");
         while (fl_fs_kbd_getc(&c))
             fl_fs_shell_input(c);
         while (fl_fs_serial_getc(&c))
             fl_fs_shell_input(c);
+#endif
     }
 }

@@ -63,6 +63,11 @@ const labJsSrc = fs.readFileSync("tools/browser-lab/lab.js", "utf8");
 assert(!labJsSrc.includes("appendChat(`${relay.display}: ${text}`)"), "chat form must not locally echo; sendMessage emits once");
 assert(!labJsSrc.includes("appendChat(`${relay.display || principal()}: ${event.text || \"\"}`)"), "guest SERVER_RELAY msg must not double-append");
 assert(labJsSrc.includes("sendGuestLines"), "identity and commands must send guest lines one at a time");
+assert(labJsSrc.includes("sendGuestLines(`session ${id}\\n`"), "session tabs must wait for SESSION serial");
+assert(labJsSrc.includes("createFlintstoneWasm"), "default lab must sandboxed-boot the Emscripten module");
+assert(labJsSrc.includes("shell>"), "guest-line waits must accept the WASM shell> prompt");
+assert(!/account-login", "account-new-session", "account-register", "account-name", "account-secret"/.test(labJsSrc),
+  "account name/password fields must stay enabled so Playwright and operators can type before Ready");
 assert(labJsSrc.includes("syncRelayPrincipal"), "switchuser must reconnect the relay seat");
 assert(labJsSrc.includes("sendingMsg"), "chat submit must ignore a second submit while sending");
 assert.strictEqual(
@@ -75,11 +80,17 @@ assert(labHtml.includes('href="lab.css"'), "lab chrome stylesheet must be linked
 assert(labHtml.includes('id="powerline"'), "Liquid Glass chrome must include a Powerline status line");
 assert(labHtml.includes('id="guest-cmd"'), "guest command box must exist");
 assert(labHtml.includes('id="account-register"'), "user registrar must exist");
+assert(labHtml.includes('id="wasm-term"'), "WASM terminal must exist");
+assert(labHtml.includes("wasm-adapter.js"), "WASM adapter must be loaded");
+assert(labHtml.includes("shell&gt;"), "default chrome must describe the shell> prompt");
 const labCss = fs.readFileSync("tools/browser-lab/lab.css", "utf8");
 assert(labCss.includes("backdrop-filter"), "panels must use a glass blur");
 assert(labCss.includes("JetBrains Mono"), "terminal chrome must request a Powerline-capable mono");
 assert(labCss.includes("display-p3"), "24-bit / Display P3 accents must be declared");
 assert(labCss.includes("clip-path"), "Powerline separators must be geometric, not overlapping glyphs");
+assert(labCss.includes("#wasm-term"), "WASM terminal must be styled");
+assert(fs.existsSync("tools/browser-lab/wasm-adapter.js"));
+assert(fs.readFileSync("tools/browser-lab/wasm-adapter.js", "utf8").includes("createFlintstoneWasm"));
 assert(fs.existsSync("tools/browser-lab/fonts/nerd-symbols-powerline.woff2"));
 assert(fs.existsSync("tools/browser-lab/fonts/jetbrains-mono-latin-wght-normal.woff2"));
 const labJs = fs.readFileSync("tools/browser-lab/lab.js", "utf8");

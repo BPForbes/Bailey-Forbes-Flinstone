@@ -1,6 +1,0 @@
-MAJOR_VERSION=4
-STANDARD_VERSION=5
-RELEASE_VERSION=4
-DESCRIPTION=Browser lab chat no longer duplicates messages: BroadcastChannel connect is single-flight, Pages skips the missing :8767 WebSocket, and the sender's line is appended once. Switch user, register user, and Guest commands send paced QMP keys one shell line at a time (waiting for SWITCHUSER / Password / ok) and a connected relay seat follows the new principal after switchuser.
-
-RELEASE_DATE=2026-09-15
