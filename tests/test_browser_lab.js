@@ -72,6 +72,7 @@ const labCss = fs.readFileSync("tools/browser-lab/lab.css", "utf8");
 assert(labCss.includes("backdrop-filter"), "panels must use a glass blur");
 assert(labCss.includes("JetBrains Mono"), "terminal chrome must request a Powerline-capable mono");
 assert(labCss.includes("display-p3"), "24-bit / Display P3 accents must be declared");
+assert(labCss.includes("clip-path"), "Powerline separators must be geometric, not overlapping glyphs");
 assert(fs.existsSync("tools/browser-lab/fonts/nerd-symbols-powerline.woff2"));
 assert(fs.existsSync("tools/browser-lab/fonts/jetbrains-mono-latin-wght-normal.woff2"));
 const labJs = fs.readFileSync("tools/browser-lab/lab.js", "utf8");
