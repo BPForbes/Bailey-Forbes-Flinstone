@@ -17,6 +17,7 @@ jobs:
   validate:
     name: Build, test, and audit browser candidate
     runs-on: ubuntu-latest
+    timeout-minutes: 25
     outputs:
       bootable: ${{ steps.metadata.outputs.bootable }}
       browser_compatible: ${{ steps.metadata.outputs.browser_compatible }}
@@ -55,6 +56,18 @@ jobs:
         with:
           node-version: 22
 
+      - name: Cache Playwright browsers
+        uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830 # v4.3.0
+        with:
+          path: ~/.cache/ms-playwright
+          key: playwright-${{ runner.os }}-${{ hashFiles('tools/browser-lab/package-lock.json') }}
+
+      - name: Cache QEMU Wasm runtime
+        uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830 # v4.3.0
+        with:
+          path: tools/browser-lab/vendor/qemu
+          key: qemu-wasm-${{ hashFiles('tools/browser-lab/runtime-lock.json') }}
+
       - name: Test browser-lab unit contracts
         run: |
           npm ci --prefix tools/browser-lab
@@ -63,20 +76,25 @@ jobs:
       - name: Probe serial identity and concurrent sessions
         run: python3 ./scripts/test_freestanding_shell.py
 
+      - name: Fetch pinned QEMU Wasm runtime
+        run: python3 ./scripts/fetch_browser_runtime.py
+
+      - name: Install Playwright Chromium
+        run: npx --prefix tools/browser-lab playwright install chromium
+
       - name: Validate browser boot independently
-        run: |
-          python3 ./scripts/fetch_browser_runtime.py
-          npm ci --prefix tools/browser-lab
-          npx --prefix tools/browser-lab playwright install --with-deps chromium
-          node ./scripts/test_browser_boot.cjs
+        timeout-minutes: 8
+        run: node ./scripts/test_browser_boot.cjs
 
       - name: Package validated static browser lab
         run: python3 ./scripts/package_browser_lab_release.py
 
       - name: Validate packaged lab asset paths
+        timeout-minutes: 8
         run: FL_BROWSER_TEST_PACKAGED=1 node ./scripts/test_browser_boot.cjs
 
       - name: Validate portfolio iframe isolation
+        timeout-minutes: 10
         run: node ./scripts/test_browser_iframe.cjs
 
       - name: Read promotion state

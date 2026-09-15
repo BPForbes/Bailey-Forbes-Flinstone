@@ -133,11 +133,28 @@ function isTrustedReady(event, { labOrigin, iframe, commit }) {
 4. The iframe `src` stays the same. The portfolio does not need a routine
    URL change.
 
-## One-time portfolio repository changes
+## Portfolio repository implementation
 
-1. Insert the iframe with `allow="cross-origin-isolated"`.
-2. Emit the parent COOP/COEP/Permissions-Policy headers.
-3. Listen for `message` and accept only the trusted ready payload above.
+The portfolio site (`Bailey-Forbes-Portfolio-Site.github.io`) implements this
+contract in `src/guestWindow.ts` and `src/apps.ts`:
+
+- **Guest URL:** `https://bpforbes.github.io/Bailey-Forbes-Flinstone/`
+- **Page:** `/projects/flinstone/` (`data-guest-window data-guest="flinstone"`)
+- **iframe:** `allow="cross-origin-isolated; fullscreen; clipboard-write"`,
+  `referrerpolicy="strict-origin"`
+- **Ready handler:** accepts only `flinstone-guest` / `ready` / `schemaVersion: 1`
+  from the iframe's `contentWindow` at `https://bpforbes.github.io`
+
+GitHub Pages serves the portfolio at `bailey-forbes.com` but cannot emit parent
+COOP/COEP. For reliable first-visit iframe boot, put the portfolio origin behind
+Cloudflare (or similar) with the parent headers below. Until then, the Flinstone
+project page links a top-level lab visit as a one-time warm-up.
+
+## One-time portfolio hosting changes
+
+1. Insert the iframe with `allow="cross-origin-isolated"` (done in guest window).
+2. Emit the parent COOP/COEP/Permissions-Policy headers on `bailey-forbes.com`.
+3. Listen for `message` and accept only the trusted ready payload above (done).
 4. Do not rely on the lab service worker to isolate the parent origin.
    The parent must send COOP/COEP (`credentialless` is the documented
    portfolio COEP) and delegate `cross-origin-isolated`. A first-visit
