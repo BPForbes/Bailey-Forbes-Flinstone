@@ -118,7 +118,7 @@
     const node = document.getElementById("runtime-mode");
     if (!node || !info) return;
     if (useWasm) {
-      node.textContent = "Runtime: Emscripten WebAssembly sandbox — type at shell>. Switch user, register, and server chat use the same identity and JS relay as the hosted lab.";
+      node.textContent = "Runtime: Flinstone Shell (Emscripten sandbox) — type at shell>. Switch user, register, and server chat use the same identity and JS relay as the hosted lab.";
     } else if (info.runtimeMode === "browser-hosted" || usesBrowserRelay()) {
       node.textContent = "Runtime: browser-hosted online — server chat via JS relay (same wire as net_server.c). Local VM/bare-metal uses native C/ASM.";
     } else {
@@ -472,11 +472,11 @@
     const bezelRuntime = document.getElementById("bezel-runtime");
     if (displayLabel) {
       displayLabel.textContent = useWasm
-        ? "WASM shell · click here to type at shell>"
+        ? "Flinstone Shell · click here to type at shell>"
         : "VGA text 80×25 · click here to type";
     }
     if (bezelRuntime) {
-      bezelRuntime.textContent = useWasm ? "Emscripten · sandboxed" : "SeaBIOS · QEMU Wasm";
+      bezelRuntime.textContent = useWasm ? "Flinstone Shell" : "SeaBIOS · QEMU Wasm";
     }
   }
   async function load() {

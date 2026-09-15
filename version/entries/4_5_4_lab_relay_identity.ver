@@ -1,6 +1,4 @@
 MAJOR_VERSION=4
 STANDARD_VERSION=5
 RELEASE_VERSION=4
-DESCRIPTION=Browser lab chat no longer duplicates messages: BroadcastChannel connect is single-flight, Pages skips the missing :8767 WebSocket, and the sender's line is appended once. Switch user, register user, and Guest commands send paced QMP keys one shell line at a time (waiting for SWITCHUSER / Password / ok) and a connected relay seat follows the new principal after switchuser. The default lab boots a sandboxed Emscripten WebAssembly shell (make wasm / GitHub Action) so operators type at shell>; su, useradd, sessions, and server chat map onto the same identity and relay. QEMU Wasm remains on ?qemu=1 and ?validate=1.
-
-RELEASE_DATE=2026-09-15
+DESCRIPTION=Browser lab chat no longer duplicates messages: BroadcastChannel connect is single-flight, Pages skips the missing :8767 WebSocket, and the sender's line is appended once. Switch user, register user, and Guest commands send paced QMP keys one shell line at a time (waiting for SWITCHUSER / Password / ok) and a connected relay seat follows the new principal after switchuser. The default lab boots a sandboxed Emscripten Flinstone Shell (make wasm / GitHub Action) so operators type at shell>; su, useradd, sessions, and server chat map onto the same identity and relay. The WASM page shows Flinstone Shell only (no duplicate kernel serial panel). QEMU Wasm remains on ?qemu=1 and ?validate=1.

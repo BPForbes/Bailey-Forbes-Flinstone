@@ -426,7 +426,7 @@ input:focus, #screen:focus {
 
 #wasm-term {
   margin: 0;
-  min-height: 25rem;
+  min-height: 32rem;
   padding: 0.7rem 0.85rem;
   color: #d2d2d7;
   background: transparent;
@@ -438,6 +438,7 @@ input:focus, #screen:focus {
 
 body.lab-qemu #wasm-term { display: none; }
 body.lab-wasm #screen canvas { display: none; }
+body.lab-wasm .console { display: none; }
 
 canvas {
   display: block;

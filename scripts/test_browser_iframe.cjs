@@ -44,9 +44,15 @@ window.addEventListener("message", event => {
 `;
 }
 
+async function guestOutput(frame) {
+  const term = frame.locator("#wasm-term");
+  if (await term.isVisible()) return term;
+  return frame.locator("#serial");
+}
+
 async function waitReady(frame) {
   await frame.locator("#status").filter({ hasText: /^Ready$/ }).waitFor({ timeout: 120000 });
-  const serial = await frame.locator("#serial").innerText();
+  const serial = (await (await guestOutput(frame)).textContent()) || "";
   assert(serial.split(/\r?\n/).includes("FLINTSTONE_KERNEL_BOOT_OK"), "iframe missing exact serial marker");
   await frame.locator("#display-placeholder").waitFor({ state: "hidden", timeout: 45000 });
   await frame.locator(":root[data-vga-cell='F']").waitFor({ timeout: 20000 });
@@ -82,7 +88,7 @@ async function main() {
     await frame.locator("#session-tabs [data-session='2']").filter({ hasText: /Session 2: root/ }).waitFor({ timeout: 20000 });
     await frame.locator("#account-status").filter({ hasText: /Active session 2: root/ }).waitFor({ timeout: 5000 });
   } catch (error) {
-    throw new Error(`iframe new session: ${await frame.locator("#serial").innerText()}\n${error}`);
+    throw new Error(`iframe new session: ${await (await guestOutput(frame)).textContent()}\n${error}`);
   }
   assert(errors.length === 0, `iframe errors: ${errors.join("; ")}`);
   await page.screenshot({ path: path.join(root, "dist/browser-iframe.png"), fullPage: true });
