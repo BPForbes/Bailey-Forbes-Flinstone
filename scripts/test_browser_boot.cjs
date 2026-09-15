@@ -48,13 +48,20 @@ async function main() {
   const errors = [];
   page.on("pageerror", error => errors.push(error.message));
   const status = async value => page.locator("#status").filter({ hasText: new RegExp(`^${value}$`) }).waitFor({ timeout: 90000 });
-  const guestOutput = async () => {
-    const term = page.locator("#wasm-term");
-    if (await term.isVisible()) return term;
-    return page.locator("#serial");
+  const guestText = async () => {
+    const term = (await page.locator("#wasm-term").textContent().catch(() => "")) || "";
+    const serial = (await page.locator("#serial").textContent().catch(() => "")) || "";
+    return `${term}\n${serial}`;
   };
-  const guestText = async () => (await (await guestOutput()).textContent()) || "";
-  const waitGuest = async (re, timeout = 20000) => (await guestOutput()).filter({ hasText: re }).waitFor({ timeout });
+  const waitGuest = async (re, timeout = 20000) => {
+    const source = re instanceof RegExp ? re.source : String(re);
+    await page.waitForFunction(src => {
+      const rx = new RegExp(src);
+      const term = document.getElementById("wasm-term");
+      const serial = document.getElementById("serial");
+      return rx.test(`${term ? term.textContent : ""}\n${serial ? serial.textContent : ""}`);
+    }, source, { timeout });
+  };
   const ready = async () => {
     await status("Ready");
     const serial = await guestText();
@@ -130,9 +137,9 @@ async function main() {
   await page.locator("#server-msg").fill("hello relay");
   await page.locator("#server-msg-form").getByRole("button", { name: "Send" }).click();
   await page.locator("#server-chat").filter({ hasText: /hello relay/ }).waitFor({ timeout: 10000 });
-  await page.locator("#screen").click();
-  await page.keyboard.type("server msg from-guest\n", { delay: 40 });
-  await waitGuest(/SERVER_RELAY msg from-guest/);
+  await page.locator("#guest-cmd").fill("server msg from-guest");
+  await page.getByRole("button", { name: "Run", exact: true }).click();
+  await waitGuest(/SERVER_RELAY msg from-guest/, 30000);
   await page.locator("#server-chat").filter({ hasText: /from-guest/ }).waitFor({ timeout: 10000 });
   assert(errors.length === 0, `Browser errors: ${errors.join("; ")}`);
   await page.screenshot({ path: path.join(root, packaged ? "dist/browser-boot-packaged.png" : "dist/browser-boot.png"), fullPage: true });

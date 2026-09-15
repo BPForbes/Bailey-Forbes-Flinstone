@@ -49,7 +49,7 @@
     renderPowerline(state);
     if (ready) {
       screen.focus();
-      void connectRelay();
+      if (!relay || !relay.connected) void connectRelay();
     }
   };
   let info;
@@ -160,6 +160,7 @@
       if (event.type === "hello") {
         renderRelayStatus(`Connected as ${event.display} (#${event.memberId})`);
         appendChat(`[relay] joined as ${event.display}`);
+        if (!core.isFormTypingTarget(document.activeElement)) screen.focus();
       } else if (event.type === "announcement") {
         appendChat(`[announce] ${event.text}`);
       } else if (event.type === "message") {
