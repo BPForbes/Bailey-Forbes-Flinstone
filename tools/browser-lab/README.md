@@ -90,11 +90,12 @@ recorded browser validation. `?validate=1` is available only to the local and
 CI validation path; it still requires a native-QEMU-validated disk hash and
 records browser compatibility only after the real browser test succeeds.
 
-The page chrome is a **macOS Liquid Glass** analog: frosted window, traffic
-lights, blurred side panels, JetBrains Mono + Nerd Powerline glyphs (self-hosted
-under `fonts/` so COEP `require-corp` still loads them), and a 24-bit sRGB
-palette for the 80×25 VGA canvas. The default terminal is **Flinstone Shell**
-(`shell>`). QEMU mode still paints classic VGA text and shows kernel serial.
+The page chrome is a **macOS Liquid Glass** analog: frosted window, blurred
+side panels, JetBrains Mono + Nerd Powerline glyphs (self-hosted under `fonts/`
+so COEP `require-corp` still loads them), and a 24-bit sRGB palette for the
+80×25 VGA canvas. There are no decorative traffic-light close/minimize/zoom
+controls. The default terminal is **Flinstone Shell** (`shell>`). QEMU mode
+still paints classic VGA text and shows kernel serial.
 
 Use `make browser-lab-release` to build `dist/browser-lab/`: a self-contained
 static package containing the verified runtime, lab UI, disk, manifest, and
