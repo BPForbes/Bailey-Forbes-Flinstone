@@ -84,9 +84,9 @@ jobs:
           EMSDK_ROOT: ${{ github.workspace }}/.emsdk-local
         run: |
           chmod +x scripts/fetch_emsdk.sh scripts/build_wasm_lab.sh
-          ENV_SCRIPT="$(EMSDK_ROOT="$EMSDK_ROOT" ./scripts/fetch_emsdk.sh)"
-          # shellcheck disable=SC1090
-          . "$ENV_SCRIPT"
+          ./scripts/fetch_emsdk.sh
+          # shellcheck disable=SC1091
+          . "$EMSDK_ROOT/emsdk_env.sh"
           EMCC_REQUIRED=1 make wasm
 
       - name: Probe serial identity and concurrent sessions
