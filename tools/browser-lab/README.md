@@ -24,7 +24,13 @@ After that marker the guest is an interactive lab shell, not the hosted ELF:
 - `switchuser` / `login` / `su` / `sudo` / `logout` / `whoami` / `history` / `useradd` / `session`
 - lab ramfs: `dir` / `ls` / `cat` / `write` / `mkdir` / `rm` / `pwd` / `cd` and the other hosted file verbs
 - lab cluster disk (`createdisk` / `writecluster` / `diskput` / …) and lab net (`ping` / `ifconfig` / `wifi` / …)
-- `server host|join|leave|msg|…` through the browser relay (BroadcastChannel fallback on static Pages)
+- `server host|join|leave|msg|…` through the browser relay. Local lab uses the
+  WebSocket hub; GitHub Pages skips the missing `:8767` socket and uses a
+  same-origin BroadcastChannel room. Sending a chat line emits it once (the
+  sender's local echo is the same event path as peer delivery).
+- Switch user / Register user / Guest commands send one shell line at a time
+  and wait for serial (`SWITCHUSER`, `Password:`, `ok`) so `useradd` can prompt.
+  A connected relay seat reconnects as the new principal after `switchuser`.
 - per-user command history and VGA scrollback when switching users on the website
 - up to four concurrent sessions so one operator can keep multiple registered
   accounts active (for example host as `flinstone` and admin as `root`)

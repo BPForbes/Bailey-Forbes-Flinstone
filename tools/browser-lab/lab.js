@@ -39,6 +39,10 @@
     const run = document.getElementById("guest-cmd-run");
     if (cmd) cmd.disabled = !ready;
     if (run) run.disabled = !ready;
+    for (const id of ["account-login", "account-new-session", "account-register", "account-name", "account-secret"]) {
+      const node = document.getElementById(id);
+      if (node) node.disabled = !ready;
+    }
     renderPowerline(state);
     if (ready) screen.focus();
   };
@@ -156,30 +160,43 @@
         renderRelayStatus("Disconnected");
       }
     });
-    const connect = async () => {
-      try {
-        renderRelayStatus("Connecting…");
-        await relay.connect(principal());
-      } catch (error) {
-        renderRelayStatus(error.message || "Connection failed");
-      }
+    let connecting = null;
+    const connect = () => {
+      if (connecting) return connecting;
+      connecting = (async () => {
+        try {
+          if (!relay.connected) renderRelayStatus("Connecting…");
+          await relay.connect(principal());
+          if (relay.connected)
+            renderRelayStatus(`Connected as ${relay.display} (#${relay.memberId})`);
+        } catch (error) {
+          renderRelayStatus(error.message || "Connection failed");
+        } finally {
+          connecting = null;
+        }
+      })();
+      return connecting;
     };
-    document.getElementById("server-host")?.addEventListener("click", connect);
-    document.getElementById("server-join")?.addEventListener("click", connect);
+    document.getElementById("server-host")?.addEventListener("click", () => { void connect(); });
+    document.getElementById("server-join")?.addEventListener("click", () => { void connect(); });
     document.getElementById("server-leave")?.addEventListener("click", () => {
       relay?.leave();
       renderRelayStatus("Disconnected");
       renderRoster([]);
     });
+    let sendingMsg = false;
     document.getElementById("server-msg-form")?.addEventListener("submit", async event => {
       event.preventDefault();
+      if (sendingMsg) return;
       const input = document.getElementById("server-msg");
-      const text = input?.value.trim();
-      if (!text) return;
-      if (!relay?.connected) await connect();
-      if (relay?.sendMessage(text)) {
-        appendChat(`${relay.display}: ${text}`);
-        input.value = "";
+      const body = input?.value.trim();
+      if (!body) return;
+      sendingMsg = true;
+      try {
+        if (!relay?.connected) await connect();
+        if (relay?.sendMessage(body)) input.value = "";
+      } finally {
+        sendingMsg = false;
       }
     });
   }
@@ -226,12 +243,15 @@
     if (event.type === "session") {
       activeSession = event.session;
       sessions[activeSession] = event.user;
+      rememberUser(event.user);
       renderSessions();
       return;
     }
     if (event.type === "switchuser") {
       sessions[activeSession] = event.user;
+      rememberUser(event.user);
       renderSessions();
+      void syncRelayPrincipal();
       return;
     }
     if (event.type === "dns") {
@@ -254,8 +274,7 @@
       }
       if (event.op === "msg" || event.op === "announce") {
         if (!relay.connected) await relay.connect(principal());
-        if (relay.sendMessage(event.text || ""))
-          appendChat(`${relay.display || principal()}: ${event.text || ""}`);
+        relay.sendMessage(event.text || "");
         return;
       }
       if (event.op === "connected") {
@@ -300,15 +319,80 @@
     sha256: info.sha256,
     onScreen: renderScreen, onDiagnostic: text => console.warn(text),
   });
+  let serialTail = "";
+  const serialWaiters = [];
+  function noteSerialChar(ch) {
+    serialTail = (serialTail + ch).slice(-8192);
+    for (let i = serialWaiters.length - 1; i >= 0; i--) {
+      const slice = serialTail.slice(serialWaiters[i].from);
+      if (serialWaiters[i].re.test(slice)) {
+        const waiter = serialWaiters.splice(i, 1)[0];
+        clearTimeout(waiter.timer);
+        waiter.resolve(true);
+      }
+    }
+  }
+  function waitSerial(re, timeoutMs, from) {
+    const start = from == null ? 0 : from;
+    if (re.test(serialTail.slice(start))) return Promise.resolve(true);
+    return new Promise(resolve => {
+      const waiter = {
+        re,
+        from: start,
+        resolve,
+        timer: setTimeout(() => {
+          const idx = serialWaiters.indexOf(waiter);
+          if (idx >= 0) serialWaiters.splice(idx, 1);
+          resolve(false);
+        }, timeoutMs),
+      };
+      serialWaiters.push(waiter);
+    });
+  }
+  function rememberUser(name) {
+    if (!name || name === "flinstone" || name === "root") return;
+    if (!extraUsers.includes(name)) extraUsers.push(name);
+  }
+  async function syncRelayPrincipal() {
+    if (!relay || !relay.connected) return;
+    if (relay.principal === principal()) return;
+    try {
+      if (!relay.connected) renderRelayStatus("Connecting…");
+      await relay.connect(principal());
+      if (relay.connected)
+        renderRelayStatus(`Connected as ${relay.display} (#${relay.memberId})`);
+    } catch (error) {
+      renderRelayStatus(error.message || "Connection failed");
+    }
+  }
   let guestInput = Promise.resolve();
   function enqueueGuest(work) {
     const run = guestInput.then(work, work);
     guestInput = run.catch(() => {});
     return run;
   }
+  function guestReady() {
+    return emulator && typeof emulator.sendText === "function";
+  }
   async function sendGuest(value) {
-    if (!emulator || typeof emulator.sendText !== "function") return;
+    if (!guestReady()) return false;
     await enqueueGuest(() => emulator.sendText(value));
+    return true;
+  }
+  async function sendGuestLines(script, patterns) {
+    if (!guestReady()) {
+      text("account-status", "Guest is not ready — wait for Ready, then retry.");
+      return false;
+    }
+    const lines = String(script || "").split("\n");
+    if (lines[lines.length - 1] === "") lines.pop();
+    for (let i = 0; i < lines.length; i++) {
+      const from = serialTail.length;
+      if (!await sendGuest(`${lines[i]}\n`)) return false;
+      const pattern = (patterns && patterns[i]) || /SWITCHUSER user=|SESSION \d+ user=|Password:|unknown user|authentication failed|\bok\b|WHOAMI |@flintstone>/;
+      await waitSerial(pattern, 4000, from);
+    }
+    return true;
   }
   const controller = core.createController({
     marker: "FLINTSTONE_KERNEL_BOOT_OK", setState,
@@ -316,6 +400,7 @@
     createEmulator: async (settings) => {
       if (typeof config.createEmulator !== "function") throw new Error("No validated x86-64 browser emulator is configured");
       serial.textContent = "";
+      serialTail = "";
       activeSession = 1;
       sessions = { 1: "flinstone" };
       extraUsers = [];
@@ -323,6 +408,7 @@
       emulator = await config.createEmulator({ ...settings, serialByte: byte => {
         const ch = String.fromCharCode(byte);
         serial.textContent = (serial.textContent + ch).slice(-65536);
+        noteSerialChar(ch);
         if (ch === "\n") {
           const line = serialLine.replace(/\r$/, "");
           serialLine = "";
@@ -393,7 +479,7 @@
     const input = document.getElementById("guest-cmd");
     const line = input?.value.trim();
     if (!line) return;
-    await sendGuest(`${line}\n`);
+    if (!await sendGuestLines(line)) return;
     input.value = "";
     screen.focus();
   });
@@ -404,19 +490,29 @@
       const name = document.getElementById("account-name").value.trim();
       const script = core.guestSwitchLines(name);
       if (!script) return;
-      await sendGuest(script);
+      await sendGuestLines(script, [/SWITCHUSER user=|unknown user/]);
     });
     document.getElementById("account-new-session").onclick = async () => {
       const name = document.getElementById("account-name").value.trim();
-      await sendGuest(core.guestNewSessionLines(name));
+      await sendGuestLines(core.guestNewSessionLines(name), [
+        /SESSION \d+ user=/,
+        /SWITCHUSER user=|unknown user/,
+      ]);
     };
     document.getElementById("account-register")?.addEventListener("click", async () => {
       const name = document.getElementById("account-name").value.trim();
       const secret = document.getElementById("account-secret")?.value || name;
       const script = core.guestRegisterLines(name, secret);
       if (!script) return;
-      await sendGuest(script);
-      if (!extraUsers.includes(name)) extraUsers.push(name);
+      const from = serialTail.length;
+      const sent = await sendGuestLines(script, [
+        /SWITCHUSER user=root|unknown user/,
+        /Password:|unknown command|need elevation|usage:/,
+        /\bok\b|authentication failed/,
+      ]);
+      const chunk = serialTail.slice(from);
+      if (sent && /\bok\b/.test(chunk) && !/authentication failed/.test(chunk))
+        rememberUser(name);
       renderSessions();
     });
   }

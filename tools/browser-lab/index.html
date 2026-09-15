@@ -92,7 +92,7 @@
           </section>
           <section id="server-panel" class="server-panel glass-card" aria-label="Server chat relay" hidden>
             <h2>Server chat (browser relay)</h2>
-            <p>Relay messages only. Guest shell commands belong in <strong>Guest commands</strong> or the VGA display. Type <code>server host</code> / <code>server join</code> in the guest, or use the buttons. On static Pages the lab falls back to a same-origin BroadcastChannel room.</p>
+            <p>Relay messages only — each Send shows the line once. Guest shell commands belong in <strong>Guest commands</strong> or the VGA display. Type <code>server host</code> / <code>server join</code> in the guest, or use the buttons. On static Pages the lab uses a same-origin BroadcastChannel room (no extra WebSocket).</p>
             <div class="server-actions">
               <button id="server-host" type="button">Host</button>
               <button id="server-join" type="button">Join</button>

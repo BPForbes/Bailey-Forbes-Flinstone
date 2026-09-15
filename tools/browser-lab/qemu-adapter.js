@@ -125,7 +125,10 @@
           await withScreenHeld(async () => {
             for (const ch of text) {
               const codes = qcodesForChar(ch);
-              if (codes) await sendKey(codes);
+              if (!codes) continue;
+              await sendKey(codes);
+              // Yield so the guest can drain the 8042 between QMP send-key bursts.
+              await new Promise(resolve => setTimeout(resolve, ch === "\n" || ch === "\r" ? 80 : 20));
             }
           });
         } finally { pulseInputHold(); }

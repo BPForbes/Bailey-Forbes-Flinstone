@@ -4,12 +4,37 @@
   if (!wire) throw new Error("FlintstoneSessionWire is not loaded");
 
   const { OP, encodeFrame, FrameParser, payloadText, memberIdFromPayload } = wire;
+  const LOCAL_HOSTS = new Set(["127.0.0.1", "127.0.0.2", "localhost", "::1"]);
 
   function wsUrl(config) {
     if (config.relayUrl) return config.relayUrl;
     const port = config.relayPort || 8767;
-    const proto = location.protocol === "https:" ? "wss:" : "ws:";
-    return `${proto}//${location.hostname}:${port}/ws?room=${encodeURIComponent(config.relayRoom || "lab")}`;
+    const proto = (typeof location !== "undefined" && location.protocol === "https:") ? "wss:" : "ws:";
+    const host = config.hostname || (typeof location !== "undefined" ? location.hostname : "127.0.0.1");
+    return `${proto}//${host}:${port}/ws?room=${encodeURIComponent(config.relayRoom || "lab")}`;
+  }
+
+  function hostnameOf(config) {
+    if (config && config.hostname) return config.hostname;
+    try {
+      if (typeof location !== "undefined" && location.hostname) return location.hostname;
+    } catch (_) { /* ignore */ }
+    return "";
+  }
+
+  function shouldTryWebSocket(config) {
+    if (!config) return false;
+    if (config.forceBroadcast) return false;
+    if (config.relayUrl) return true;
+    return LOCAL_HOSTS.has(hostnameOf(config));
+  }
+
+  function formatChatLine(display, text) {
+    return `${display || "flinstone"}: ${text || ""}`;
+  }
+
+  function randomMemberId() {
+    return 2 + Math.floor(Math.random() * 253);
   }
 
   function createRelayClient(config) {
@@ -17,7 +42,9 @@
     let parser = new FrameParser();
     let memberId = null;
     let display = "";
+    let principalName = "";
     let members = [];
+    let connectGate = Promise.resolve();
     const listeners = new Set();
     const emit = event => listeners.forEach(fn => { try { fn(event); } catch (_) { /* ignore */ } });
 
@@ -63,85 +90,134 @@
       }
     }
 
-    return {
-      get connected() { return socket && socket.readyState === WebSocket.OPEN; },
+    function closeSocket() {
+      if (!socket) return;
+      try { socket.close(); } catch (_) { /* ignore */ }
+      socket = null;
+    }
+
+    function openBroadcast(name) {
+      if (typeof BroadcastChannel === "undefined")
+        throw new Error("Session relay connection failed");
+      closeSocket();
+      const room = config.relayRoom || "lab";
+      const tabId = `${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`;
+      const channel = new BroadcastChannel(`flintstone-relay-${room}`);
+      memberId = randomMemberId();
+      display = name;
+      principalName = name;
+      members = [{ memberId, principal: name, nick: "", isHost: true }];
+      channel.onmessage = ({ data }) => {
+        if (!data || data.v !== 1 || data.tabId === tabId) return;
+        if (data.kind === "hello") {
+          members = members.filter(m => m.memberId !== data.memberId);
+          members.push({ memberId: data.memberId, principal: data.principal, nick: "", isHost: false });
+          if (members.length && members.every(m => m.memberId >= memberId))
+            members.forEach(m => { if (m.memberId === memberId) m.isHost = true; });
+          channel.postMessage({ v: 1, kind: "hello-ack", tabId, memberId, principal: display });
+          emit({ type: "roster", members: members.slice() });
+        } else if (data.kind === "hello-ack") {
+          members = members.filter(m => m.memberId !== data.memberId);
+          members.push({ memberId: data.memberId, principal: data.principal, nick: "", isHost: data.memberId < memberId });
+          if (data.memberId < memberId)
+            members.forEach(m => { if (m.memberId === memberId) m.isHost = false; });
+          emit({ type: "roster", members: members.slice() });
+        } else if (data.kind === "msg") {
+          emit({ type: "message", text: data.text, broadcast: true });
+        } else if (data.kind === "leave") {
+          members = members.filter(m => m.memberId !== data.memberId);
+          emit({ type: "roster", members: members.slice() });
+        }
+      };
+      channel.postMessage({ v: 1, kind: "hello", tabId, memberId, principal: name });
+      socket = { readyState: 1, send() {}, close() { channel.close(); }, channel, tabId };
+      emit({ type: "hello", memberId, display });
+      emit({ type: "announcement", text: "using same-origin BroadcastChannel relay" });
+    }
+
+    function connectWebSocket(name) {
+      return new Promise((resolve, reject) => {
+        let settled = false;
+        const finish = (err) => {
+          if (settled) return;
+          settled = true;
+          clearTimeout(timer);
+          if (err) reject(err);
+          else resolve();
+        };
+        const timer = setTimeout(() => finish(new Error("Session relay connection timed out")), 2500);
+        const ws = new WebSocket(wsUrl(config));
+        socket = ws;
+        ws.binaryType = "arraybuffer";
+        ws.onopen = () => {
+          const hello = encodeFrame(OP.FL_NET_SESSION_OP_HELLO, name);
+          ws.send(hello);
+          finish();
+        };
+        ws.onerror = () => finish(new Error("Session relay connection failed"));
+        ws.onclose = () => {
+          if (socket === ws) emit({ type: "closed" });
+        };
+        ws.onmessage = ({ data }) => {
+          const chunk = new Uint8Array(data);
+          for (const frame of parser.push(chunk)) handleFrame(frame);
+        };
+      });
+    }
+
+    async function connectOnce(principal) {
+      const name = principal || "flinstone";
+      if (socket && socket.readyState === 1 && principalName === name) return;
+      if (socket && socket.readyState === 1) {
+        if (socket.channel)
+          socket.channel.postMessage({ v: 1, kind: "leave", tabId: socket.tabId, memberId });
+        else {
+          const frame = encodeFrame(OP.FL_NET_SESSION_OP_CTRL_LEAVE, new Uint8Array(0));
+          if (frame) socket.send(frame);
+        }
+        closeSocket();
+      }
+      parser = new FrameParser();
+      memberId = null;
+      display = "";
+      principalName = name;
+      members = [];
+      if (shouldTryWebSocket(config)) {
+        try {
+          await connectWebSocket(name);
+          return;
+        } catch (error) {
+          closeSocket();
+          if (typeof BroadcastChannel === "undefined") throw error;
+        }
+      }
+      openBroadcast(name);
+    }
+
+    const client = {
+      get connected() { return socket && socket.readyState === 1; },
       get memberId() { return memberId; },
       get display() { return display; },
+      get principal() { return principalName; },
       get members() { return members.slice(); },
       on(listener) { listeners.add(listener); return () => listeners.delete(listener); },
-      async connect(principal) {
-        const name = principal || "flinstone";
-        if (this.connected) {
-          if (display === name) return;
-          this.leave();
-        }
-        parser = new FrameParser();
-        memberId = null;
-        display = "";
-        try {
-          await new Promise((resolve, reject) => {
-            const timer = setTimeout(() => reject(new Error("Session relay connection timed out")), 2500);
-            socket = new WebSocket(wsUrl(config));
-            socket.binaryType = "arraybuffer";
-            socket.onopen = () => {
-              clearTimeout(timer);
-              const hello = encodeFrame(OP.FL_NET_SESSION_OP_HELLO, name);
-              socket.send(hello);
-              resolve();
-            };
-            socket.onerror = () => {
-              clearTimeout(timer);
-              reject(new Error("Session relay connection failed"));
-            };
-            socket.onclose = () => emit({ type: "closed" });
-            socket.onmessage = ({ data }) => {
-              const chunk = new Uint8Array(data);
-              for (const frame of parser.push(chunk)) handleFrame(frame);
-            };
-          });
-        } catch (error) {
-          socket = null;
-          if (typeof BroadcastChannel === "undefined") throw error;
-          const room = config.relayRoom || "lab";
-          const tabId = `${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`;
-          const channel = new BroadcastChannel(`flintstone-relay-${room}`);
-          memberId = 1;
-          display = name;
-          members = [{ memberId, principal: name, nick: "", isHost: true }];
-          channel.onmessage = ({ data }) => {
-            if (!data || data.v !== 1 || data.tabId === tabId) return;
-            if (data.kind === "hello") {
-              members = members.filter(m => m.memberId !== data.memberId);
-              members.push({ memberId: data.memberId, principal: data.principal, nick: "", isHost: false });
-              channel.postMessage({ v: 1, kind: "hello-ack", tabId, memberId, principal: display });
-              emit({ type: "roster", members: members.slice() });
-            } else if (data.kind === "hello-ack") {
-              members = members.filter(m => m.memberId !== data.memberId);
-              members.push({ memberId: data.memberId, principal: data.principal, nick: "", isHost: data.memberId === 1 });
-              emit({ type: "roster", members: members.slice() });
-            } else if (data.kind === "msg") {
-              emit({ type: "message", text: data.text, broadcast: true });
-            } else if (data.kind === "leave") {
-              members = members.filter(m => m.memberId !== data.memberId);
-              emit({ type: "roster", members: members.slice() });
-            }
-          };
-          channel.postMessage({ v: 1, kind: "hello", tabId, memberId, principal: name });
-          socket = { readyState: 1, send() {}, close() { channel.close(); }, channel, tabId };
-          emit({ type: "hello", memberId, display });
-          emit({ type: "announcement", text: "using same-origin BroadcastChannel relay" });
-        }
+      connect(principal) {
+        const run = connectGate.then(() => connectOnce(principal), () => connectOnce(principal));
+        connectGate = run.catch(() => {});
+        return run;
       },
       sendMessage(text) {
         if (!this.connected) return false;
+        const line = formatChatLine(display, text);
         if (socket.channel) {
-          const line = `${display}: ${text}`;
           socket.channel.postMessage({ v: 1, kind: "msg", tabId: socket.tabId, text: line, memberId });
+          emit({ type: "message", text: line, local: true });
           return true;
         }
         const frame = encodeFrame(OP.FL_NET_SESSION_OP_MSG, text);
         if (!frame) return false;
         socket.send(frame);
+        emit({ type: "message", text: line, local: true });
         return true;
       },
       leave() {
@@ -152,14 +228,17 @@
           const frame = encodeFrame(OP.FL_NET_SESSION_OP_CTRL_LEAVE, new Uint8Array(0));
           if (frame) socket.send(frame);
         }
-        socket.close();
-        socket = null;
+        closeSocket();
         memberId = null;
         display = "";
+        principalName = "";
         members = [];
       },
     };
+    return client;
   }
 
-  globalThis.FlintstoneServerRelayClient = { createRelayClient, wsUrl };
+  const api = { createRelayClient, wsUrl, shouldTryWebSocket, formatChatLine };
+  globalThis.FlintstoneServerRelayClient = api;
+  if (typeof module === "object" && module.exports) module.exports = api;
 })();

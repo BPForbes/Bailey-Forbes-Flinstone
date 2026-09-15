@@ -59,6 +59,12 @@ assert.strictEqual(guestNewSessionLines(""), "session new\nswitchuser flinstone\
 assert(!guestUserNameOk("bad user"));
 assert(isFormTypingTarget({ nodeType: 1, tagName: "INPUT", isContentEditable: false }));
 assert(!isFormTypingTarget({ nodeType: 1, tagName: "DIV", isContentEditable: false }));
+const labJsSrc = fs.readFileSync("tools/browser-lab/lab.js", "utf8");
+assert(!labJsSrc.includes("appendChat(`${relay.display}: ${text}`)"), "chat form must not locally echo; sendMessage emits once");
+assert(!labJsSrc.includes("appendChat(`${relay.display || principal()}: ${event.text || \"\"}`)"), "guest SERVER_RELAY msg must not double-append");
+assert(labJsSrc.includes("sendGuestLines"), "identity and commands must send guest lines one at a time");
+assert(labJsSrc.includes("syncRelayPrincipal"), "switchuser must reconnect the relay seat");
+assert(labJsSrc.includes("sendingMsg"), "chat submit must ignore a second submit while sending");
 assert.strictEqual(
   labDnsRequestUrl("http://127.0.0.1:8766/tools/browser-lab/?validate=1", "example.com").href,
   "http://127.0.0.1:8766/tools/browser-lab/lab-dns?name=example.com"
@@ -67,7 +73,8 @@ assert.strictEqual(
 const labHtml = fs.readFileSync("tools/browser-lab/index.html", "utf8");
 assert(labHtml.includes('href="lab.css"'), "lab chrome stylesheet must be linked");
 assert(labHtml.includes('id="powerline"'), "Liquid Glass chrome must include a Powerline status line");
-assert(labHtml.includes("traffic-lights"), "window chrome must include macOS traffic lights");
+assert(labHtml.includes('id="guest-cmd"'), "guest command box must exist");
+assert(labHtml.includes('id="account-register"'), "user registrar must exist");
 const labCss = fs.readFileSync("tools/browser-lab/lab.css", "utf8");
 assert(labCss.includes("backdrop-filter"), "panels must use a glass blur");
 assert(labCss.includes("JetBrains Mono"), "terminal chrome must request a Powerline-capable mono");
@@ -225,6 +232,7 @@ assert(!isTrustedReadyEvent({ ...ready, data: { ...ready.data, type: "loading" }
   const adapterSrc = fs.readFileSync("tools/browser-lab/qemu-adapter.js", "utf8");
   assert(adapterSrc.includes("withScreenHeld(() => sendKey(qcodes))"), "send-key must hold VGA pmemsave");
   assert(adapterSrc.includes("pulseInputHold"), "key bursts must debounce VGA pmemsave");
+  assert(adapterSrc.includes("setTimeout(resolve, ch === \"\\n\" || ch === \"\\r\" ? 80 : 20)"), "sendText must pace keys so the 8042 can drain");
   assert(adapterSrc.includes('filename: "/screen.bin" }, 3000)'), "pmemsave must use a short QMP timeout");
   const labSrc = fs.readFileSync("tools/browser-lab/lab.js", "utf8");
   assert(!/sendKey\(codes\)\)\.catch\(error => controller\.fail/.test(labSrc), "a send-key timeout must not fail Guest State");
