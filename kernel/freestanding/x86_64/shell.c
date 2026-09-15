@@ -453,6 +453,12 @@ static void run_command(int session, char *line)
             if (current >= 0 && current != created)
                 perspective_save_session(current);
             session_go(created);
+            /* A brand-new slot must not inherit the previous session's
+             * just-executed command line (e.g. "session new" + "switchuser"). */
+            s_len[created] = 0;
+            s_line[created][0] = 0;
+            s_mode[created] = MODE_CMD;
+            s_pending[created][0] = 0;
             announce_session();
             return;
         }
@@ -505,13 +511,18 @@ void fl_fs_shell_input(char c)
     if (c == '\r')
         c = '\n';
     if (c == '\n') {
+        char line[LINE];
         emit("\r\n");
         s_line[session][s_len[session]] = 0;
-        if (s_mode[session] != MODE_CMD)
-            finish_password(session, s_line[session]);
-        else
-            run_command(session, s_line[session]);
+        str_copy(line, s_line[session], LINE);
+        /* Clear before dispatch so session new / switchuser cannot snapshot
+         * the completed command into the next session's line buffer. */
         s_len[session] = 0;
+        s_line[session][0] = 0;
+        if (s_mode[session] != MODE_CMD)
+            finish_password(session, line);
+        else
+            run_command(session, line);
         prompt();
         return;
     }

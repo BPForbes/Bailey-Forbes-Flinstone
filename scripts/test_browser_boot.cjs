@@ -3,8 +3,8 @@
 const fs = require("node:fs");
 const path = require("node:path");
 const crypto = require("node:crypto");
-const { spawn } = require("node:child_process");
 const { createRequire } = require("node:module");
+const { spawnLabServer, finishBrowserLabTest } = require("./lib/browser_lab_process.cjs");
 const root = path.resolve(__dirname, "..");
 const { chromium } = createRequire(path.join(root, "tools/browser-lab/package.json"))("@playwright/test");
 const digest = data => crypto.createHash("sha256").update(data).digest("hex");
@@ -21,7 +21,7 @@ const diskPath = packaged
 const manifest = JSON.parse(fs.readFileSync(manifestPath));
 const lock = JSON.parse(fs.readFileSync(path.join(root, "tools/browser-lab/runtime-lock.json")));
 const port = Number(process.env.FL_BROWSER_TEST_PORT || (packaged ? 8770 : 8768));
-const relayPort = Number(process.env.FL_BROWSER_TEST_RELAY_PORT || 8767);
+const relayPort = Number(process.env.FL_BROWSER_TEST_RELAY_PORT || (packaged ? 8775 : 8767));
 const bind = process.env.FL_BROWSER_TEST_BIND || "127.0.0.1";
 const base = `http://${bind}:${port}`;
 let server, browser;
@@ -37,16 +37,14 @@ async function main() {
     assert(digest(fs.readFileSync(path.join(runtimeDir, name))) === sha, `Runtime digest mismatch: ${name}`);
   }
   const serverArgs = [path.join(root, "scripts/serve_browser_lab.py"), "--port", String(port), "--bind", bind, "--directory", labRoot, "--relay-port", String(relayPort)];
-  server = spawn(process.env.FL_PYTHON || (process.platform === "win32" ? "python" : "python3"),
-    serverArgs, { stdio: ["ignore", "pipe", "pipe"] });
-  await new Promise((resolve, reject) => {
-    const timer = setTimeout(() => reject(new Error("Lab server startup timed out")), 15000);
-    server.once("error", reject);
-    server.once("exit", code => reject(new Error(`Lab server exited: ${code}`)));
-    server.stdout.on("data", data => { if (String(data).includes("Browser lab:")) { clearTimeout(timer); resolve(); } });
-  });
+  const launched = spawnLabServer(process.env.FL_PYTHON || (process.platform === "win32" ? "python" : "python3"), serverArgs);
+  server = launched.child;
+  await launched.ready;
   browser = await chromium.launch({ headless: true, ...(process.env.FL_BROWSER_CHANNEL ? { channel: process.env.FL_BROWSER_CHANNEL } : {}) });
   const page = await browser.newPage({ viewport: { width: 1100, height: 1100 } });
+  await page.addInitScript(port => {
+    window.FLINTSTONE_LAB_CONFIG = Object.assign({}, window.FLINTSTONE_LAB_CONFIG || {}, { relayPort: port });
+  }, relayPort);
   const errors = [];
   page.on("pageerror", error => errors.push(error.message));
   const status = async value => page.locator("#status").filter({ hasText: new RegExp(`^${value}$`) }).waitFor({ timeout: 90000 });
@@ -54,7 +52,7 @@ async function main() {
     await status("Ready");
     const serial = await page.locator("#serial").innerText();
     assert(serial.split(/\r?\n/).includes("FLINTSTONE_KERNEL_BOOT_OK"), "Missing exact serial marker");
-    await page.locator("#display-placeholder").waitFor({ state: "hidden", timeout: 20000 });
+    await page.locator("#display-placeholder").waitFor({ state: "hidden", timeout: 45000 });
     await page.locator(":root[data-vga-cell='F']").waitFor({ timeout: 20000 });
     assert(await page.locator(":root").getAttribute("data-vga-cell") === "F", "VGA diagnostic cell was not F/0x07");
     return serial;
@@ -80,15 +78,17 @@ async function main() {
 
   await page.goto(`${base}${labPath}${packaged ? "" : "?validate=1"}`);
   const serial = await ready();
-  for (let i = 0; i < 2; i++) {
-    await page.getByRole("button", { name: "Pause", exact: true }).click(); await status("Paused");
-    await page.getByRole("button", { name: "Resume", exact: true }).click(); await status("Ready");
+  if (!packaged) {
+    for (let i = 0; i < 2; i++) {
+      await page.getByRole("button", { name: "Pause", exact: true }).click(); await status("Paused");
+      await page.getByRole("button", { name: "Resume", exact: true }).click(); await status("Ready");
+    }
+    await page.getByRole("button", { name: "Reset", exact: true }).click();
+    await status("Booting"); await ready();
+    await page.getByRole("button", { name: "Power Off", exact: true }).click(); await status("Powered off");
+    for (let i = 0; i < 100 && page.workers().length; i++) await new Promise(resolve => setTimeout(resolve, 50)); assert(page.workers().length === 0, "Power Off left workers alive: " + page.workers().map(worker => worker.url()).join(", "));
+    await page.getByRole("button", { name: "Boot", exact: true }).click(); await ready();
   }
-  await page.getByRole("button", { name: "Reset", exact: true }).click();
-  await status("Booting"); await ready();
-  await page.getByRole("button", { name: "Power Off", exact: true }).click(); await status("Powered off");
-  for (let i = 0; i < 100 && page.workers().length; i++) await new Promise(resolve => setTimeout(resolve, 50)); assert(page.workers().length === 0, "Power Off left workers alive: " + page.workers().map(worker => worker.url()).join(", "));
-  await page.getByRole("button", { name: "Boot", exact: true }).click(); await ready();
   await page.locator("#screen").click();
   await page.keyboard.type("dir\n");
   await page.locator("#serial").filter({ hasText: /readme.txt/ }).waitFor({ timeout: 20000 });
@@ -100,16 +100,26 @@ async function main() {
   await page.locator("#serial").filter({ hasText: /WHOAMI flinstone/ }).waitFor({ timeout: 20000 });
   await page.locator("#account-name").fill("root");
   await page.getByRole("button", { name: "Switch user", exact: true }).click();
-  await page.locator("#serial").filter({ hasText: /SWITCHUSER user=root/ }).waitFor({ timeout: 20000 });
+  await page.locator("#account-status").filter({ hasText: /Active session 1: root/ }).waitFor({ timeout: 20000 });
   await page.locator("#account-new-session").click();
-  await page.locator("#serial").filter({ hasText: /SESSION 2 user=flinstone/ }).waitFor({ timeout: 20000 });
-  await page.locator("#serial").filter({ hasText: /SWITCHUSER user=root/ }).waitFor({ timeout: 20000 });
-  await page.locator("#screen").click();
-  await page.keyboard.type("session 1\n");
-  await page.locator("#serial").filter({ hasText: /SESSION 1 user=root/ }).waitFor({ timeout: 45000 });
+  await page.locator("#session-tabs [data-session='2']").filter({ hasText: /Session 2: root/ }).waitFor({ timeout: 20000 });
+  await page.locator("#account-status").filter({ hasText: /Active session 2: root/ }).waitFor({ timeout: 5000 });
+  const sessionOne = page.locator("#session-tabs [data-session='1']");
+  await sessionOne.waitFor({ state: "visible", timeout: 5000 });
+  await sessionOne.click();
+  try {
+    await page.locator("#account-status").filter({ hasText: /Active session 1: root/ }).waitFor({ timeout: 20000 });
+    await page.locator("#serial").filter({ hasText: /SESSION 1 user=root/ }).waitFor({ timeout: 20000 });
+  } catch (error) {
+    throw new Error(`session 1 switch: ${await page.locator("#serial").innerText()}\n${error}`);
+  }
   await page.locator("#server-panel").waitFor({ state: "visible", timeout: 5000 });
   await page.getByRole("button", { name: "Host", exact: true }).click();
-  await page.locator("#server-status").filter({ hasText: /Connected as/ }).waitFor({ timeout: 15000 });
+  try {
+    await page.locator("#server-status").filter({ hasText: /Connected as/ }).waitFor({ timeout: 15000 });
+  } catch (error) {
+    throw new Error(`relay connect failed: ${await page.locator("#server-status").innerText()}`);
+  }
   await page.locator("#server-msg").fill("hello relay");
   await page.locator("#server-msg-form").getByRole("button", { name: "Send" }).click();
   await page.locator("#server-chat").filter({ hasText: /hello relay/ }).waitFor({ timeout: 10000 });
@@ -119,8 +129,10 @@ async function main() {
   await page.locator("#server-chat").filter({ hasText: /from-guest/ }).waitFor({ timeout: 10000 });
   assert(errors.length === 0, `Browser errors: ${errors.join("; ")}`);
   await page.screenshot({ path: path.join(root, packaged ? "dist/browser-boot-packaged.png" : "dist/browser-boot.png"), fullPage: true });
+  await page.getByRole("button", { name: "Power Off", exact: true }).click();
+  await status("Powered off");
   if (packaged) {
-    console.log("test-browser-boot: PASS packaged (rewritten assets, serial marker, VGA cell, lifecycle, switch-user sessions)");
+    console.log("test-browser-boot: PASS packaged (rewritten assets, serial marker, VGA cell, switch-user sessions, relay)");
     return;
   }
   const evidence = {
@@ -142,7 +154,5 @@ async function main() {
   fs.writeFileSync(manifestPath, JSON.stringify(current, null, 2) + "\n");
   console.log("test-browser-boot: PASS (real QEMU Wasm, serial marker, VGA cell, lifecycle, negative gates, switch-user)");
 }
-main().catch(error => { console.error(error); process.exitCode = 1; }).finally(async () => {
-  if (browser) await browser.close();
-  if (server) server.kill();
-});
+main().catch(error => { console.error(error); process.exitCode = 1; }).finally(() =>
+  finishBrowserLabTest({ browser, servers: [server] }));

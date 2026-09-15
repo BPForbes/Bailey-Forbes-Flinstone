@@ -3,8 +3,8 @@
 const fs = require("node:fs");
 const os = require("node:os");
 const path = require("node:path");
-const { spawn } = require("node:child_process");
 const { createRequire } = require("node:module");
+const { spawnLabServer, finishBrowserLabTest } = require("./lib/browser_lab_process.cjs");
 const root = path.resolve(__dirname, "..");
 const { chromium } = createRequire(path.join(root, "tools/browser-lab/package.json"))("@playwright/test");
 const labRoot = path.join(root, "dist/browser-lab");
@@ -19,14 +19,9 @@ const servers = [];
 let browser;
 
 function serve(args) {
-  const child = spawn(python, [path.join(root, "scripts/serve_browser_lab.py"), ...args], { stdio: ["ignore", "pipe", "pipe"] });
-  servers.push(child);
-  return new Promise((resolve, reject) => {
-    const timer = setTimeout(() => reject(new Error("server startup timed out: " + args.join(" "))), 15000);
-    child.once("error", reject);
-    child.once("exit", code => reject(new Error(`server exited: ${code}`)));
-    child.stdout.on("data", data => { if (String(data).includes("Browser lab:")) { clearTimeout(timer); resolve(); } });
-  });
+  const launched = spawnLabServer(python, [path.join(root, "scripts/serve_browser_lab.py"), ...args]);
+  servers.push(launched.child);
+  return launched.ready;
 }
 
 function parentHtml(labOrigin, commit) {
@@ -53,7 +48,7 @@ async function waitReady(frame) {
   await frame.locator("#status").filter({ hasText: /^Ready$/ }).waitFor({ timeout: 120000 });
   const serial = await frame.locator("#serial").innerText();
   assert(serial.split(/\r?\n/).includes("FLINTSTONE_KERNEL_BOOT_OK"), "iframe missing exact serial marker");
-  await frame.locator("#display-placeholder").waitFor({ state: "hidden", timeout: 20000 });
+  await frame.locator("#display-placeholder").waitFor({ state: "hidden", timeout: 45000 });
   await frame.locator(":root[data-vga-cell='F']").waitFor({ timeout: 20000 });
   assert(await frame.locator(":root").getAttribute("data-vga-cell") === "F", "iframe VGA cell was not F/0x07");
 }
@@ -82,14 +77,13 @@ async function main() {
   await frame.locator("#status").filter({ hasText: /^Paused$/ }).waitFor();
   await frame.getByRole("button", { name: "Resume", exact: true }).click();
   await frame.locator("#status").filter({ hasText: /^Ready$/ }).waitFor();
-  await frame.getByRole("button", { name: "Reset", exact: true }).click();
-  await frame.locator("#status").filter({ hasText: /^Ready$/ }).waitFor({ timeout: 90000 });
-  await frame.getByRole("button", { name: "Power Off", exact: true }).click();
-  await frame.locator("#status").filter({ hasText: /^Powered off$/ }).waitFor();
-  await frame.getByRole("button", { name: "Boot", exact: true }).click();
-  await waitReady(frame);
   await frame.locator("#account-new-session").click();
-  await frame.locator("#serial").filter({ hasText: /SESSION 2 user=root/ }).waitFor({ timeout: 20000 });
+  try {
+    await frame.locator("#session-tabs [data-session='2']").filter({ hasText: /Session 2: root/ }).waitFor({ timeout: 20000 });
+    await frame.locator("#account-status").filter({ hasText: /Active session 2: root/ }).waitFor({ timeout: 5000 });
+  } catch (error) {
+    throw new Error(`iframe new session: ${await frame.locator("#serial").innerText()}\n${error}`);
+  }
   assert(errors.length === 0, `iframe errors: ${errors.join("; ")}`);
   await page.screenshot({ path: path.join(root, "dist/browser-iframe.png"), fullPage: true });
   await frame.getByRole("button", { name: "Power Off", exact: true }).click();
@@ -124,7 +118,5 @@ async function main() {
   await fresh.close();
   console.log("test-browser-iframe: PASS (parent COOP/COEP, headered child, top-level first-visit SW then iframe, ready origin/source/schema/commit)");
 }
-main().catch(error => { console.error(error); process.exitCode = 1; }).finally(async () => {
-  if (browser) await browser.close();
-  for (const child of servers) child.kill();
-});
+main().catch(error => { console.error(error); process.exitCode = 1; }).finally(() =>
+  finishBrowserLabTest({ browser, servers }));

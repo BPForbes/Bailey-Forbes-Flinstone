@@ -5,6 +5,7 @@ from http.server import SimpleHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 import argparse
 import atexit
+import signal
 import subprocess
 import sys
 
@@ -42,16 +43,22 @@ if __name__ == "__main__":
     parser.add_argument("--relay-port", type=int, default=0,
                         help="Start the JS session relay on this port (browser-hosted online lab only)")
     args = parser.parse_args()
-    root = Path(args.directory).resolve() if args.directory else Path(__file__).resolve().parents[1]
+    repo = Path(__file__).resolve().parents[1]
+    root = Path(args.directory).resolve() if args.directory else repo
     relay_proc = None
     if args.relay_port:
-        relay_script = root / "tools/browser-lab/server-relay-hub.mjs"
-        if not relay_script.is_file():
-            print(f"Missing relay hub: {relay_script}", file=sys.stderr)
+        candidates = [
+            repo / "tools/browser-lab/server-relay-hub.mjs",
+            root / "server-relay-hub.mjs",
+            root / "tools/browser-lab/server-relay-hub.mjs",
+        ]
+        relay_script = next((path for path in candidates if path.is_file()), None)
+        if relay_script is None:
+            print("Missing relay hub (looked in repo tools/browser-lab and the served directory)", file=sys.stderr)
             sys.exit(1)
         relay_proc = subprocess.Popen(
             ["node", str(relay_script), "--bind", args.bind, "--port", str(args.relay_port)],
-            cwd=str(root),
+            cwd=str(relay_script.parent),
         )
 
         def _stop_relay():
@@ -68,5 +75,18 @@ if __name__ == "__main__":
     handler = make_handler(root, coop, coep, args.frame_ancestors,
                            args.permissions_policy, args.corp)
     server = ThreadingHTTPServer((args.bind, args.port), handler)
+
+    def _stop(*_):
+        if relay_proc and relay_proc.poll() is None:
+            relay_proc.terminate()
+            try:
+                relay_proc.wait(timeout=3)
+            except subprocess.TimeoutExpired:
+                relay_proc.kill()
+        server.shutdown()
+        sys.exit(0)
+
+    signal.signal(signal.SIGTERM, _stop)
+    signal.signal(signal.SIGINT, _stop)
     print(f"Browser lab: http://{args.bind}:{args.port}/", flush=True)
     server.serve_forever()
