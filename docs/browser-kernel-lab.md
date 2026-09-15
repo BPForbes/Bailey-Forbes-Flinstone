@@ -13,10 +13,11 @@ MBR loads a freestanding payload, constructs identity-mapped long-mode page
 tables, installs a 64-bit GDT, and enters `kernel_entry`. The entry owns its
 stack, clears `.bss`, installs an early IDT, initializes COM1, writes the
 diagnostic VGA cell `F`, and only then emits the boot marker. After the marker
-it runs a serial/PS/2 lab shell with in-memory identity and up to four
-concurrent sessions (`login`, `su`, `logout`, `whoami`, `session`). That is
-still not the hosted ELF port: filesystem, P3 networking, and `server host/join`
-remain unavailable, and lab accounts are not the SQLite `fl_users.db` store.
+it runs a serial/PS/2 lab shell with in-memory identity, a ramfs (`dir`,
+`cat`, `write`, `mkdir`), and `server host|join|msg` markers for the browser
+relay. That is still not the hosted ELF port: FAT32, P3 sockets, and
+`kernel/core/net` `server host/join` remain unavailable, and lab accounts are
+not the SQLite `fl_users.db` store.
 
 The build emits schema 2 metadata with `bootableCandidate: true` but
 `bootable: false`. Only `scripts/test_browser_kernel_artifact.sh`, after an
@@ -190,8 +191,10 @@ Display remains a virtual hardware path:
 Flintstone VGA writes -> virtual VGA text memory -> emulator canvas
 ```
 
-The hosted filesystem, block driver, and `server` path are **not** present in
-the freestanding browser image. Persistence, snapshots, Boot/Pause/Resume/
+The hosted FAT32 volume, block driver, and `kernel/core/net` server path are
+**not** present in the freestanding browser image. The guest instead exposes a
+volatile ramfs and `server` verbs that the lab JS bridges onto the P3 relay
+(or a same-origin BroadcastChannel room on static Pages). Persistence, snapshots, Boot/Pause/Resume/
 Reset/Power-off, and VM recreation are lab/emulator lifecycle features. Resume
 is enabled only after Pause so QMP `cont` cannot race SeaBIOS/TCG boot or an
 in-flight VGA `pmemsave` and fail Guest State with `QEMU command timed out: cont`.

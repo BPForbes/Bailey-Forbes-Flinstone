@@ -130,5 +130,18 @@
       serialByte,
     };
   }
-  return { STATES, validateManifest, isTrustedReadyEvent, createController, validDiagnosticVga, exactSerialLine };
+  function parseGuestLine(line) {
+    const text = String(line || "").replace(/\r$/, "");
+    let match = /^SESSION (\d+) user=(\S+)$/.exec(text);
+    if (match) return { type: "session", session: Number(match[1]), user: match[2] };
+    match = /^SWITCHUSER user=(\S+)$/.exec(text);
+    if (match) return { type: "switchuser", user: match[1] };
+    match = /^SERVER_RELAY (host|join|leave)$/.exec(text);
+    if (match) return { type: "server", op: match[1] };
+    match = /^SERVER_RELAY msg (.*)$/.exec(text);
+    if (match) return { type: "server", op: "msg", text: match[1] };
+    return null;
+  }
+
+  return { STATES, validateManifest, isTrustedReadyEvent, createController, validDiagnosticVga, exactSerialLine, parseGuestLine };
 });

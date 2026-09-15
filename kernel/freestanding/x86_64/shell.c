@@ -2,10 +2,11 @@
 #include "shell.h"
 #include "identity.h"
 #include "keyboard.h"
+#include "ramfs.h"
 #include "serial.h"
 #include "vga.h"
 
-#define LINE 96
+#define LINE 128
 #define HIST_MAX 16
 #define MODE_CMD 0
 #define MODE_LOGIN 1
@@ -264,6 +265,151 @@ static int switchuser_to(int session, const char *name)
     return 1;
 }
 
+static void fs_status(int rc)
+{
+    if (rc == 0)
+        return;
+    if (rc == -1)
+        emit("not found\r\n");
+    else if (rc == -2)
+        emit("not a directory\r\n");
+    else if (rc == -3)
+        emit("already exists\r\n");
+    else if (rc == -4)
+        emit("ramfs full\r\n");
+    else if (rc == -5)
+        emit("not a file\r\n");
+    else if (rc == -7)
+        emit("directory not empty\r\n");
+    else
+        emit("bad path\r\n");
+}
+
+static void dir_visit(const char *name, int is_dir, unsigned size, void *ctx)
+{
+    (void)ctx;
+    emit(is_dir ? "d " : "f ");
+    emit(name);
+    if (!is_dir) {
+        emit(" ");
+        emit_uint(size);
+    }
+    emit("\r\n");
+}
+
+static int run_fs(int session, const char *verb, const char **cursor)
+{
+    char path[FL_FS_RAMFS_PATH];
+    if (str_eq(verb, "pwd")) {
+        fl_fs_ramfs_pwd(session, path, sizeof(path));
+        emit(path);
+        emit("\r\n");
+        return 1;
+    }
+    if (str_eq(verb, "cd")) {
+        if (!take_word(cursor, path, sizeof(path)))
+            str_copy(path, "/", sizeof(path));
+        fs_status(fl_fs_ramfs_cd(session, path));
+        return 1;
+    }
+    if (str_eq(verb, "dir") || str_eq(verb, "ls")) {
+        int rc;
+        if (!take_word(cursor, path, sizeof(path)))
+            path[0] = 0;
+        rc = fl_fs_ramfs_dir(session, path, dir_visit, 0);
+        if (rc == 0 && !path[0])
+            return 1;
+        fs_status(rc);
+        return 1;
+    }
+    if (str_eq(verb, "mkdir")) {
+        if (!take_word(cursor, path, sizeof(path))) {
+            emit("usage: mkdir <dir>\r\n");
+            return 1;
+        }
+        fs_status(fl_fs_ramfs_mkdir(session, path));
+        return 1;
+    }
+    if (str_eq(verb, "rm")) {
+        if (!take_word(cursor, path, sizeof(path))) {
+            emit("usage: rm <path>\r\n");
+            return 1;
+        }
+        fs_status(fl_fs_ramfs_rm(session, path));
+        return 1;
+    }
+    if (str_eq(verb, "cat")) {
+        char data[FL_FS_RAMFS_DATA];
+        int rc;
+        if (!take_word(cursor, path, sizeof(path))) {
+            emit("usage: cat <file>\r\n");
+            return 1;
+        }
+        rc = fl_fs_ramfs_cat(session, path, data, sizeof(data));
+        if (rc != 0) {
+            fs_status(rc);
+            return 1;
+        }
+        emit(data);
+        emit("\r\n");
+        return 1;
+    }
+    if (str_eq(verb, "write")) {
+        if (!take_word(cursor, path, sizeof(path))) {
+            emit("usage: write <file> <text>\r\n");
+            return 1;
+        }
+        skip_spaces(cursor);
+        if (!**cursor) {
+            emit("usage: write <file> <text>\r\n");
+            return 1;
+        }
+        {
+            int rc = fl_fs_ramfs_write(session, path, *cursor);
+            if (rc == 0) {
+                emit("wrote ");
+                emit(path);
+                emit("\r\n");
+            } else {
+                fs_status(rc);
+            }
+        }
+        return 1;
+    }
+    return 0;
+}
+
+static int run_server(const char *verb, const char **cursor)
+{
+    char sub[16];
+    if (!str_eq(verb, "server"))
+        return 0;
+    if (!take_word(cursor, sub, sizeof(sub))) {
+        emit("server host|join|leave|msg <text>\r\n");
+        emit("browser relay (same P3 session wire as net_server.c)\r\n");
+        return 1;
+    }
+    if (str_eq(sub, "host") || str_eq(sub, "join") || str_eq(sub, "leave")) {
+        emit("SERVER_RELAY ");
+        emit(sub);
+        emit("\r\n");
+        return 1;
+    }
+    if (str_eq(sub, "msg")) {
+        skip_spaces(cursor);
+        if (!**cursor) {
+            emit("usage: server msg <text>\r\n");
+            return 1;
+        }
+        emit("SERVER_RELAY msg ");
+        emit(*cursor);
+        emit("\r\n");
+        return 1;
+    }
+    emit("unknown server verb; try server\r\n");
+    return 1;
+}
+
 static void finish_password(int session, const char *password)
 {
     int ok = 0;
@@ -293,10 +439,13 @@ static void run_command(int session, char *line)
         history_append(user_idx, line);
     if (str_eq(verb, "help")) {
         emit("help whoami users history switchuser login su logout useradd session\r\n");
-        emit("switchuser saves terminal + history per lab user on the website\r\n");
-        emit("filesystem, network, and server remain hosted-only\r\n");
+        emit("dir ls cat write mkdir rm pwd cd  (lab ramfs)\r\n");
+        emit("server host|join|leave|msg  (browser relay)\r\n");
+        emit("hosted FAT32 and kernel/core/net server stay on the ELF shell\r\n");
         return;
     }
+    if (run_fs(session, verb, &cursor) || run_server(verb, &cursor))
+        return;
     if (str_eq(verb, "whoami")) {
         emit("WHOAMI ");
         emit(fl_fs_identity_user(session));
@@ -403,7 +552,7 @@ void fl_fs_shell_init(void)
     }
     for (int i = 0; i < FL_FS_MAX_USERS; ++i)
         s_perspectives[i].valid = 0;
-    emit("lab identity: switchuser/login/su/whoami/history/session\r\n");
+    emit("lab shell: identity, ramfs, server relay\r\n");
     announce_session();
     prompt();
 }

@@ -90,6 +90,12 @@ async function main() {
   for (let i = 0; i < 100 && page.workers().length; i++) await new Promise(resolve => setTimeout(resolve, 50)); assert(page.workers().length === 0, "Power Off left workers alive: " + page.workers().map(worker => worker.url()).join(", "));
   await page.getByRole("button", { name: "Boot", exact: true }).click(); await ready();
   await page.locator("#screen").click();
+  await page.keyboard.type("dir\n");
+  await page.locator("#serial").filter({ hasText: /readme.txt/ }).waitFor({ timeout: 20000 });
+  await page.keyboard.type("write hello.txt lab-fs\n");
+  await page.locator("#serial").filter({ hasText: /wrote hello.txt/ }).waitFor({ timeout: 20000 });
+  await page.keyboard.type("cat hello.txt\n");
+  await page.locator("#serial").filter({ hasText: /lab-fs/ }).waitFor({ timeout: 20000 });
   await page.keyboard.type("whoami\n");
   await page.locator("#serial").filter({ hasText: /WHOAMI flinstone/ }).waitFor({ timeout: 20000 });
   await page.locator("#account-name").fill("root");
@@ -107,6 +113,10 @@ async function main() {
   await page.locator("#server-msg").fill("hello relay");
   await page.locator("#server-msg-form").getByRole("button", { name: "Send" }).click();
   await page.locator("#server-chat").filter({ hasText: /hello relay/ }).waitFor({ timeout: 10000 });
+  await page.locator("#screen").click();
+  await page.keyboard.type("server msg from-guest\n");
+  await page.locator("#serial").filter({ hasText: /SERVER_RELAY msg from-guest/ }).waitFor({ timeout: 20000 });
+  await page.locator("#server-chat").filter({ hasText: /from-guest/ }).waitFor({ timeout: 10000 });
   assert(errors.length === 0, `Browser errors: ${errors.join("; ")}`);
   await page.screenshot({ path: path.join(root, packaged ? "dist/browser-boot-packaged.png" : "dist/browser-boot.png"), fullPage: true });
   if (packaged) {
@@ -117,7 +127,7 @@ async function main() {
     commit: manifest.commit, artifactSha256: manifest.sha256,
     runtime: lock.runtime, runtimeCommit: lock.distributionCommit, runtimeFiles: lock.files,
     testedAt: new Date().toISOString(), browser: browser.version(),
-    serial, checks: ["exact-marker", "vga-text-memory", "pause-resume-twice", "reset", "power-off-worker-cleanup", "reboot", "blocked-button", "corrupt-digest", "switchuser-perspectives", "server-relay-chat"],
+    serial, checks: ["exact-marker", "vga-text-memory", "pause-resume-twice", "reset", "power-off-worker-cleanup", "reboot", "blocked-button", "corrupt-digest", "switchuser-perspectives", "server-relay-chat", "lab-ramfs", "guest-server-relay"],
   };
   const current = JSON.parse(fs.readFileSync(manifestPath));
   assert(current.commit === manifest.commit && current.sha256 === manifest.sha256, "Manifest changed during validation");

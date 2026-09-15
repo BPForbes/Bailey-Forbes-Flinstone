@@ -2,7 +2,7 @@
 const assert = require("assert");
 const fs = require("fs");
 const vm = require("vm");
-const { STATES, validateManifest, isTrustedReadyEvent, createController, validDiagnosticVga } = require("../tools/browser-lab/lab-core.js");
+const { STATES, validateManifest, isTrustedReadyEvent, createController, validDiagnosticVga, parseGuestLine } = require("../tools/browser-lab/lab-core.js");
 const { createQmpClient } = require("../tools/browser-lab/qmp-client.js");
 const commit = "1".repeat(40);
 const evidence = {
@@ -41,6 +41,11 @@ const wrongGlyph = new Uint8Array(4000); wrongGlyph[0] = 0x58; wrongGlyph[1] = 0
 assert(!validDiagnosticVga(wrongGlyph));
 const wrongAttr = new Uint8Array(4000); wrongAttr[0] = 0x46; wrongAttr[1] = 0x1f;
 assert(!validDiagnosticVga(wrongAttr));
+assert.deepStrictEqual(parseGuestLine("SESSION 2 user=root\r"), { type: "session", session: 2, user: "root" });
+assert.deepStrictEqual(parseGuestLine("SWITCHUSER user=flinstone"), { type: "switchuser", user: "flinstone" });
+assert.deepStrictEqual(parseGuestLine("SERVER_RELAY host"), { type: "server", op: "host" });
+assert.deepStrictEqual(parseGuestLine("SERVER_RELAY msg hello room"), { type: "server", op: "msg", text: "hello room" });
+assert.strictEqual(parseGuestLine("WHOAMI flinstone"), null);
 
 let controllerChange;
 let controllerOptions;

@@ -117,12 +117,13 @@ function isTrustedReady(event, { labOrigin, iframe, commit }) {
 
 - Chromium-family browser, HTTPS (or localhost), `SharedArrayBuffer`
 - Guest: long-mode boot marker, VGA diagnostic cell `F`, PS/2 keyboard, lab
-  identity (`login` / `su` / `logout` / `whoami` / `useradd`), up to four
-  concurrent sessions
+  identity (`login` / `su` / `logout` / `whoami` / `useradd`), ramfs
+  (`dir` / `cat` / `write` / `mkdir`), `server` via the browser relay, up to
+  four concurrent sessions
 - Lab seeds: `flinstone` / `flinstone` and `root` / `root` (lab-only, not the
   hosted SQLite store)
-- **Not** in this image: hosted filesystem, P3 networking, `server host/join`,
-  SQLite accounts, or the hosted ELF shell
+- **Not** in this image: hosted FAT32, P3 sockets / `kernel/core/net`
+  `server host/join`, SQLite accounts, or the hosted ELF shell
 
 ## How `main` updates reach the lab
 

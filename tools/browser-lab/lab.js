@@ -41,6 +41,7 @@
   let sessions = { 1: "flinstone" };
   let activeSession = 1;
   let relay = null;
+  let serialLine = "";
   const validation = new URLSearchParams(location.search).get("validate") === "1";
   const usesBrowserRelay = () => info && info.serverPath === "relay";
   const principal = () => sessions[activeSession] || "flinstone";
@@ -168,16 +169,42 @@
     });
     text("account-status", `Active session ${activeSession}: ${sessions[activeSession] || "—"}`);
   }
-  function noteSerial(value) {
-    const sessionMatch = /SESSION (\d+) user=(\S+)/.exec(value);
-    const switchMatch = /SWITCHUSER user=(\S+)/.exec(value);
-    if (sessionMatch) {
-      activeSession = Number(sessionMatch[1]);
-      sessions[activeSession] = sessionMatch[2];
+  async function applyGuestLine(line) {
+    const event = core.parseGuestLine(line);
+    if (!event) return;
+    if (event.type === "session") {
+      activeSession = event.session;
+      sessions[activeSession] = event.user;
       renderSessions();
-    } else if (switchMatch) {
-      sessions[activeSession] = switchMatch[1];
+      return;
+    }
+    if (event.type === "switchuser") {
+      sessions[activeSession] = event.user;
       renderSessions();
+      return;
+    }
+    if (event.type !== "server" || !relay) return;
+    try {
+      if (event.op === "leave") {
+        relay.leave();
+        renderRelayStatus("Disconnected");
+        renderRoster([]);
+        appendChat("[relay] leave");
+        return;
+      }
+      if (event.op === "host" || event.op === "join") {
+        renderRelayStatus("Connecting…");
+        await relay.connect(principal());
+        return;
+      }
+      if (event.op === "msg") {
+        if (!relay.connected) await relay.connect(principal());
+        if (relay.sendMessage(event.text))
+          appendChat(`${relay.display || principal()}: ${event.text}`);
+      }
+    } catch (error) {
+      renderRelayStatus(error.message || "Relay failed");
+      appendChat(`[error] ${error.message || "Relay failed"}`);
     }
   }
   function renderScreen(bytes) {
@@ -219,8 +246,15 @@
       sessions = { 1: "flinstone" };
       renderSessions();
       emulator = await config.createEmulator({ ...settings, serialByte: byte => {
-        serial.textContent = (serial.textContent + String.fromCharCode(byte)).slice(-65536);
-        noteSerial(serial.textContent.slice(-80));
+        const ch = String.fromCharCode(byte);
+        serial.textContent = (serial.textContent + ch).slice(-65536);
+        if (ch === "\n") {
+          const line = serialLine.replace(/\r$/, "");
+          serialLine = "";
+          applyGuestLine(line);
+        } else {
+          serialLine = (serialLine + ch).slice(-4096);
+        }
         settings.serialByte(byte);
       } });
       return emulator;
