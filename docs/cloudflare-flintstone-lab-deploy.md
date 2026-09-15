@@ -156,8 +156,9 @@ node ./scripts/test_browser_iframe.cjs
 
 - **Proxies** `https://bpforbes.github.io/Bailey-Forbes-Flinstone/` — GitHub Actions
   Pages deploy on `main` remains the artifact source; the Worker tracks it automatically.
-- **Omits child COOP** on `Sec-Fetch-Dest: iframe` (and document loads use COEP only)
-  per `docs/portfolio-iframe-integration.md`.
+- **Omits child COOP** on `Sec-Fetch-Dest: iframe`; top-level `document`
+  navigations get `COOP: same-origin` plus COEP, per
+  `docs/portfolio-iframe-integration.md`.
 - **Strips** upstream COEP/CSP/X-Frame-Options from Pages before applying lab headers.
 - **`coi-serviceworker.js`** may still register; native COEP from the Worker makes the
   SW reload path unnecessary but harmless.

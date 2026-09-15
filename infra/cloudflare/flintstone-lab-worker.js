@@ -43,7 +43,7 @@ function isNoStorePath(pathname) {
   );
 }
 
-function applyChildHeaders(response, { pathname, fetchDest }) {
+export function applyChildHeaders(response, { pathname, fetchDest }) {
   const headers = new Headers(response.headers);
   for (const name of STRIP_RESPONSE_HEADERS) {
     headers.delete(name);
@@ -51,10 +51,12 @@ function applyChildHeaders(response, { pathname, fetchDest }) {
   for (const [name, value] of Object.entries(CHILD_HEADERS)) {
     headers.set(name, value);
   }
-  if (fetchDest === "document" || fetchDest === "iframe") {
+  if (fetchDest === "iframe") {
     headers.delete("Cross-Origin-Opener-Policy");
   } else if (fetchDest === "document") {
     headers.set("Cross-Origin-Opener-Policy", "same-origin");
+  } else {
+    headers.delete("Cross-Origin-Opener-Policy");
   }
   if (isNoStorePath(pathname)) {
     headers.set("Cache-Control", "no-store");
