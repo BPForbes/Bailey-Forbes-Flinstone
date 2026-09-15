@@ -49,7 +49,7 @@
     const hash = Array.from(new Uint8Array(await crypto.subtle.digest("SHA-256", image)), x => x.toString(16).padStart(2, "0")).join("");
     if (hash !== sha256) throw new Error("Disk SHA-256 does not match its manifest");
     const worker = new Worker(new URL("qemu-worker.js", scriptBase), { type: "module" });
-    let disposed = false, screenTimer, screenBusy = false, holdScreen = 0;
+    let disposed = false, screenTimer, screenBusy = false, holdScreen = 0, inputHold = 0, inputHoldTimer = 0;
     const qmp = window.FlintstoneQmp.createQmpClient({
       send: data => worker.postMessage({ type: "qmp", data }),
       timeoutMs: 30000,
@@ -66,6 +66,11 @@
       try { return await fn(); }
       finally { holdScreen -= 1; }
     }
+    function pulseInputHold() {
+      inputHold = 1;
+      if (inputHoldTimer) clearTimeout(inputHoldTimer);
+      inputHoldTimer = setTimeout(() => { inputHold = 0; inputHoldTimer = 0; }, 250);
+    }
     worker.onmessage = async ({ data }) => {
       if (disposed) return;
       if (data.type === "serial") serialByte(data.byte);
@@ -78,7 +83,7 @@
         await command("qmp_capabilities");
         qmp.allowWork();
         screenTimer = setInterval(async () => {
-          if (disposed || screenBusy || holdScreen) return;
+          if (disposed || screenBusy || holdScreen || inputHold) return;
           screenBusy = true;
           try {
             await command("pmemsave", { val: 753664, size: 4000, filename: "/screen.bin" }, 3000);
@@ -109,17 +114,26 @@
           if (!after.running) throw new Error("QEMU did not resume");
         });
       },
-      async sendKey(qcodes) { await withScreenHeld(() => sendKey(qcodes)); },
+      async sendKey(qcodes) {
+        pulseInputHold();
+        try { await withScreenHeld(() => sendKey(qcodes)); }
+        finally { pulseInputHold(); }
+      },
       async sendText(text) {
-        await withScreenHeld(async () => {
-          for (const ch of text) {
-            const codes = qcodesForChar(ch);
-            if (codes) await sendKey(codes);
-          }
-        });
+        pulseInputHold();
+        try {
+          await withScreenHeld(async () => {
+            for (const ch of text) {
+              const codes = qcodesForChar(ch);
+              if (codes) await sendKey(codes);
+            }
+          });
+        } finally { pulseInputHold(); }
       },
       async destroy() {
-        disposed = true; holdScreen += 1; clearInterval(screenTimer);
+        disposed = true; holdScreen += 1; inputHold = 1;
+        if (inputHoldTimer) clearTimeout(inputHoldTimer);
+        clearInterval(screenTimer);
         qmp.failAll(new Error("QEMU powered off"));
         await new Promise(resolve => {
           const timeout = setTimeout(resolve, 1000);

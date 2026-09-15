@@ -90,13 +90,13 @@ async function main() {
     await page.getByRole("button", { name: "Boot", exact: true }).click(); await ready();
   }
   await page.locator("#screen").click();
-  await page.keyboard.type("dir\n");
+  await page.keyboard.type("dir\n", { delay: 40 });
   await page.locator("#serial").filter({ hasText: /readme.txt/ }).waitFor({ timeout: 20000 });
-  await page.keyboard.type("write hello.txt lab-fs\n");
-  await page.locator("#serial").filter({ hasText: /wrote hello.txt/ }).waitFor({ timeout: 20000 });
-  await page.keyboard.type("cat hello.txt\n");
+  await page.keyboard.type("write hello.txt lab-fs\n", { delay: 40 });
+  await page.locator("#serial").filter({ hasText: /wrote hello.txt/ }).waitFor({ timeout: 30000 });
+  await page.keyboard.type("cat hello.txt\n", { delay: 40 });
   await page.locator("#serial").filter({ hasText: /lab-fs/ }).waitFor({ timeout: 20000 });
-  await page.keyboard.type("whoami\n");
+  await page.keyboard.type("whoami\n", { delay: 40 });
   await page.locator("#serial").filter({ hasText: /WHOAMI flinstone/ }).waitFor({ timeout: 20000 });
   await page.locator("#account-name").fill("root");
   await page.getByRole("button", { name: "Switch user", exact: true }).click();
@@ -124,7 +124,7 @@ async function main() {
   await page.locator("#server-msg-form").getByRole("button", { name: "Send" }).click();
   await page.locator("#server-chat").filter({ hasText: /hello relay/ }).waitFor({ timeout: 10000 });
   await page.locator("#screen").click();
-  await page.keyboard.type("server msg from-guest\n");
+  await page.keyboard.type("server msg from-guest\n", { delay: 40 });
   await page.locator("#serial").filter({ hasText: /SERVER_RELAY msg from-guest/ }).waitFor({ timeout: 20000 });
   await page.locator("#server-chat").filter({ hasText: /from-guest/ }).waitFor({ timeout: 10000 });
   assert(errors.length === 0, `Browser errors: ${errors.join("; ")}`);

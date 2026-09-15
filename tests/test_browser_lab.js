@@ -123,6 +123,7 @@ assert(!isTrustedReadyEvent({ ...ready, data: { ...ready.data, type: "loading" }
   await sendKey;
   const adapterSrc = fs.readFileSync("tools/browser-lab/qemu-adapter.js", "utf8");
   assert(adapterSrc.includes("withScreenHeld(() => sendKey(qcodes))"), "send-key must hold VGA pmemsave");
+  assert(adapterSrc.includes("pulseInputHold"), "key bursts must debounce VGA pmemsave");
   assert(adapterSrc.includes('filename: "/screen.bin" }, 3000)'), "pmemsave must use a short QMP timeout");
   const labSrc = fs.readFileSync("tools/browser-lab/lab.js", "utf8");
   assert(!/sendKey\(codes\)\)\.catch\(error => controller\.fail/.test(labSrc), "a send-key timeout must not fail Guest State");
