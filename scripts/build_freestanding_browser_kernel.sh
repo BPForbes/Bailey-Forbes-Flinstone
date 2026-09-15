@@ -16,6 +16,9 @@ for src in \
     "${root}/kernel/drivers/freestanding_x86_64/keyboard.c" \
     "${root}/kernel/freestanding/x86_64/identity.c" \
     "${root}/kernel/freestanding/x86_64/ramfs.c" \
+    "${root}/kernel/freestanding/x86_64/labdisk.c" \
+    "${root}/kernel/freestanding/x86_64/labnet.c" \
+    "${root}/kernel/freestanding/x86_64/commands.c" \
     "${root}/kernel/freestanding/x86_64/shell.c" \
     "${root}/kernel/freestanding/x86_64/kernel.c"
 do
@@ -42,7 +45,7 @@ sha="$(sha256sum "${image}" | awk '{print $1}')"; built="${BUILD_TIMESTAMP:-$(da
 python3 - "${dist}/build-info.json" "$commit" "$short" "$built" "$sha" <<'PY'
 import json, sys
 out, commit, short, built, sha = sys.argv[1:]
-info={"schemaVersion":2,"project":"Flintstone Kernel","repository":"BPForbes/Bailey-Forbes-Flinstone","commit":commit,"shortCommit":short,"builtAt":built,"architecture":"x86_64","cpuMode":"64-bit long mode, freestanding","artifact":"flintstone.img","artifactFormat":"raw BIOS disk image","sha256":sha,"browserEmulator":"QEMU Wasm x86_64 (b7c549b5e6f4)","browserCompatible":False,"v86Compatible":False,"bootableCandidate":True,"bootable":False,"bootloader":"BIOS MBR long-mode loader","requiredBios":"SeaBIOS-compatible","qemuBootMode":"ide-drive","minimumRamBytes":64*1024*1024,"recommendedRamBytes":64*1024*1024,"bootSuccessMarker":"FLINTSTONE_KERNEL_BOOT_OK","bootSuccessMarkerImplemented":True,"validationOutcome":"qemu-unvalidated","runtimeMode":"browser-hosted","serverPath":"relay","serverRelayPort":8767,"capabilities":{"longMode":True,"gdt":True,"idt":True,"serial":True,"vga":True,"pic":True,"pit":True,"ps2Probe":True,"keyboard":True,"biosBlockLoad":True,"identity":True,"hostedLabSessions":True,"filesystem":True,"network":False,"server":True},"blockers":["QEMU has not independently observed the serial marker","Browser has not independently observed the serial marker for this image"]}
+info={"schemaVersion":2,"project":"Flintstone Kernel","repository":"BPForbes/Bailey-Forbes-Flinstone","commit":commit,"shortCommit":short,"builtAt":built,"architecture":"x86_64","cpuMode":"64-bit long mode, freestanding","artifact":"flintstone.img","artifactFormat":"raw BIOS disk image","sha256":sha,"browserEmulator":"QEMU Wasm x86_64 (b7c549b5e6f4)","browserCompatible":False,"v86Compatible":False,"bootableCandidate":True,"bootable":False,"bootloader":"BIOS MBR long-mode loader","requiredBios":"SeaBIOS-compatible","qemuBootMode":"ide-drive","minimumRamBytes":64*1024*1024,"recommendedRamBytes":64*1024*1024,"bootSuccessMarker":"FLINTSTONE_KERNEL_BOOT_OK","bootSuccessMarkerImplemented":True,"validationOutcome":"qemu-unvalidated","runtimeMode":"browser-hosted","serverPath":"relay","serverRelayPort":8767,"capabilities":{"longMode":True,"gdt":True,"idt":True,"serial":True,"vga":True,"pic":True,"pit":True,"ps2Probe":True,"keyboard":True,"biosBlockLoad":True,"identity":True,"hostedLabSessions":True,"filesystem":True,"network":True,"server":True},"blockers":["QEMU has not independently observed the serial marker","Browser has not independently observed the serial marker for this image"]}
 with open(out,'w',encoding='utf-8') as f: json.dump(info,f,indent=2); f.write('\n')
 PY
 echo "browser-kernel: wrote ${image} (${sectors} payload sectors)"

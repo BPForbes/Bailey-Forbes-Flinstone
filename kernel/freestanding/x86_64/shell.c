@@ -1,8 +1,8 @@
 #include <stdint.h>
 #include "shell.h"
+#include "commands.h"
 #include "identity.h"
 #include "keyboard.h"
-#include "ramfs.h"
 #include "serial.h"
 #include "vga.h"
 
@@ -12,6 +12,10 @@
 #define MODE_LOGIN 1
 #define MODE_SU 2
 #define MODE_USERADD 3
+#define MODE_SUDO 4
+#define MODE_SUDO_CMD 5
+#define MODE_SUDO_I 6
+#define MODE_PASSWD 7
 
 struct perspective {
     int valid;
@@ -21,7 +25,7 @@ struct perspective {
     char line[LINE];
     unsigned len;
     int mode;
-    char pending[16];
+    char pending[LINE];
     char history[HIST_MAX][LINE];
     unsigned history_count;
 };
@@ -29,7 +33,7 @@ struct perspective {
 static char s_line[FL_FS_MAX_SESSIONS][LINE];
 static unsigned s_len[FL_FS_MAX_SESSIONS];
 static int s_mode[FL_FS_MAX_SESSIONS];
-static char s_pending[FL_FS_MAX_SESSIONS][16];
+static char s_pending[FL_FS_MAX_SESSIONS][LINE];
 static struct perspective s_perspectives[FL_FS_MAX_USERS];
 
 static int str_eq(const char *a, const char *b)
@@ -148,13 +152,6 @@ static int take_word(const char **cursor, char *out, unsigned cap)
     return 1;
 }
 
-static void visit_user(const char *name, int elevated, void *ctx)
-{
-    (void)ctx;
-    emit(name);
-    emit(elevated ? " elevated\r\n" : "\r\n");
-}
-
 static void history_append(int user_idx, const char *line)
 {
     struct perspective *view;
@@ -170,6 +167,25 @@ static void history_append(int user_idx, const char *line)
         slot = view->history_count++;
     }
     str_copy(view->history[slot], line, LINE);
+}
+
+static void history_clear(int user_idx)
+{
+    if (user_idx < 0 || user_idx >= FL_FS_MAX_USERS)
+        return;
+    s_perspectives[user_idx].history_count = 0;
+}
+
+static int history_nth(int user_idx, unsigned n, char *out, unsigned cap)
+{
+    const struct perspective *view;
+    if (user_idx < 0 || user_idx >= FL_FS_MAX_USERS || !out || cap == 0 || n == 0)
+        return 0;
+    view = &s_perspectives[user_idx];
+    if (n > view->history_count)
+        return 0;
+    str_copy(out, view->history[n - 1], cap);
+    return 1;
 }
 
 static void history_show(int user_idx)
@@ -265,150 +281,7 @@ static int switchuser_to(int session, const char *name)
     return 1;
 }
 
-static void fs_status(int rc)
-{
-    if (rc == 0)
-        return;
-    if (rc == -1)
-        emit("not found\r\n");
-    else if (rc == -2)
-        emit("not a directory\r\n");
-    else if (rc == -3)
-        emit("already exists\r\n");
-    else if (rc == -4)
-        emit("ramfs full\r\n");
-    else if (rc == -5)
-        emit("not a file\r\n");
-    else if (rc == -7)
-        emit("directory not empty\r\n");
-    else
-        emit("bad path\r\n");
-}
-
-static void dir_visit(const char *name, int is_dir, unsigned size, void *ctx)
-{
-    (void)ctx;
-    emit(is_dir ? "d " : "f ");
-    emit(name);
-    if (!is_dir) {
-        emit(" ");
-        emit_uint(size);
-    }
-    emit("\r\n");
-}
-
-static int run_fs(int session, const char *verb, const char **cursor)
-{
-    char path[FL_FS_RAMFS_PATH];
-    if (str_eq(verb, "pwd")) {
-        fl_fs_ramfs_pwd(session, path, sizeof(path));
-        emit(path);
-        emit("\r\n");
-        return 1;
-    }
-    if (str_eq(verb, "cd")) {
-        if (!take_word(cursor, path, sizeof(path)))
-            str_copy(path, "/", sizeof(path));
-        fs_status(fl_fs_ramfs_cd(session, path));
-        return 1;
-    }
-    if (str_eq(verb, "dir") || str_eq(verb, "ls")) {
-        int rc;
-        if (!take_word(cursor, path, sizeof(path)))
-            path[0] = 0;
-        rc = fl_fs_ramfs_dir(session, path, dir_visit, 0);
-        if (rc == 0 && !path[0])
-            return 1;
-        fs_status(rc);
-        return 1;
-    }
-    if (str_eq(verb, "mkdir")) {
-        if (!take_word(cursor, path, sizeof(path))) {
-            emit("usage: mkdir <dir>\r\n");
-            return 1;
-        }
-        fs_status(fl_fs_ramfs_mkdir(session, path));
-        return 1;
-    }
-    if (str_eq(verb, "rm")) {
-        if (!take_word(cursor, path, sizeof(path))) {
-            emit("usage: rm <path>\r\n");
-            return 1;
-        }
-        fs_status(fl_fs_ramfs_rm(session, path));
-        return 1;
-    }
-    if (str_eq(verb, "cat")) {
-        char data[FL_FS_RAMFS_DATA];
-        int rc;
-        if (!take_word(cursor, path, sizeof(path))) {
-            emit("usage: cat <file>\r\n");
-            return 1;
-        }
-        rc = fl_fs_ramfs_cat(session, path, data, sizeof(data));
-        if (rc != 0) {
-            fs_status(rc);
-            return 1;
-        }
-        emit(data);
-        emit("\r\n");
-        return 1;
-    }
-    if (str_eq(verb, "write")) {
-        if (!take_word(cursor, path, sizeof(path))) {
-            emit("usage: write <file> <text>\r\n");
-            return 1;
-        }
-        skip_spaces(cursor);
-        if (!**cursor) {
-            emit("usage: write <file> <text>\r\n");
-            return 1;
-        }
-        {
-            int rc = fl_fs_ramfs_write(session, path, *cursor);
-            if (rc == 0) {
-                emit("wrote ");
-                emit(path);
-                emit("\r\n");
-            } else {
-                fs_status(rc);
-            }
-        }
-        return 1;
-    }
-    return 0;
-}
-
-static int run_server(const char *verb, const char **cursor)
-{
-    char sub[16];
-    if (!str_eq(verb, "server"))
-        return 0;
-    if (!take_word(cursor, sub, sizeof(sub))) {
-        emit("server host|join|leave|msg <text>\r\n");
-        emit("browser relay (same P3 session wire as net_server.c)\r\n");
-        return 1;
-    }
-    if (str_eq(sub, "host") || str_eq(sub, "join") || str_eq(sub, "leave")) {
-        emit("SERVER_RELAY ");
-        emit(sub);
-        emit("\r\n");
-        return 1;
-    }
-    if (str_eq(sub, "msg")) {
-        skip_spaces(cursor);
-        if (!**cursor) {
-            emit("usage: server msg <text>\r\n");
-            return 1;
-        }
-        emit("SERVER_RELAY msg ");
-        emit(*cursor);
-        emit("\r\n");
-        return 1;
-    }
-    emit("unknown server verb; try server\r\n");
-    return 1;
-}
+static void run_command(int session, char *line);
 
 static void finish_password(int session, const char *password)
 {
@@ -422,9 +295,22 @@ static void finish_password(int session, const char *password)
         ok = fl_fs_identity_su(session, s_pending[session], password);
     else if (mode == MODE_USERADD)
         ok = fl_fs_identity_useradd(session, s_pending[session], password);
+    else if (mode == MODE_SUDO || mode == MODE_SUDO_CMD || mode == MODE_SUDO_I)
+        ok = fl_fs_identity_sudo(session, password);
+    else if (mode == MODE_PASSWD)
+        ok = fl_fs_identity_passwd(session, s_pending[session], password);
+    if (ok && mode == MODE_SUDO_I)
+        ok = fl_fs_identity_switchuser(session, "root");
     emit(ok ? "ok\r\n" : "authentication failed\r\n");
     if (ok && fl_fs_identity_user_index(session) != before)
         perspective_switch_user(fl_fs_identity_user_index(session), session);
+    if (ok && mode == MODE_SUDO_CMD && s_pending[session][0]) {
+        char held[LINE];
+        str_copy(held, s_pending[session], sizeof(held));
+        s_pending[session][0] = 0;
+        run_command(session, held);
+        return;
+    }
     announce_session();
 }
 
@@ -433,31 +319,45 @@ static void run_command(int session, char *line)
     char verb[16];
     const char *cursor = line;
     int user_idx = active_user_index();
+    static int rerunning;
     if (!take_word(&cursor, verb, sizeof(verb)))
         return;
     if (user_idx >= 0 && line[0])
         history_append(user_idx, line);
-    if (str_eq(verb, "help")) {
-        emit("help whoami users history switchuser login su logout useradd session\r\n");
-        emit("dir ls cat write mkdir rm pwd cd  (lab ramfs)\r\n");
-        emit("server host|join|leave|msg  (browser relay)\r\n");
-        emit("hosted FAT32 and kernel/core/net server stay on the ELF shell\r\n");
-        return;
-    }
-    if (run_fs(session, verb, &cursor) || run_server(verb, &cursor))
-        return;
-    if (str_eq(verb, "whoami")) {
-        emit("WHOAMI ");
-        emit(fl_fs_identity_user(session));
-        emit(fl_fs_identity_elevated(session) ? " elevated\r\n" : "\r\n");
-        return;
-    }
-    if (str_eq(verb, "history")) {
+    if (str_eq(verb, "history") || str_eq(verb, "his")) {
         history_show(user_idx);
         return;
     }
-    if (str_eq(verb, "users")) {
-        fl_fs_identity_each_user(visit_user, 0);
+    if (str_eq(verb, "cc")) {
+        history_clear(user_idx);
+        emit("history cleared\r\n");
+        return;
+    }
+    if (str_eq(verb, "rerun")) {
+        char arg[8];
+        char held[LINE];
+        unsigned n;
+        if (!take_word(&cursor, arg, sizeof(arg))) {
+            emit("usage: rerun <N>\r\n");
+            return;
+        }
+        n = 0;
+        {
+            const char *p = arg;
+            while (*p >= '0' && *p <= '9')
+                n = n * 10u + (unsigned)(*p++ - '0');
+        }
+        if (rerunning) {
+            emit("rerun nested\r\n");
+            return;
+        }
+        if (!history_nth(user_idx, n, held, sizeof(held))) {
+            emit("no such history entry\r\n");
+            return;
+        }
+        rerunning = 1;
+        run_command(session, held);
+        rerunning = 0;
         return;
     }
     if (str_eq(verb, "logout")) {
@@ -492,6 +392,45 @@ static void run_command(int session, char *line)
         }
         str_copy(s_pending[session], name, sizeof(s_pending[session]));
         s_mode[session] = str_eq(verb, "login") ? MODE_LOGIN : (str_eq(verb, "su") ? MODE_SU : MODE_USERADD);
+        return;
+    }
+    if (str_eq(verb, "sudo")) {
+        char arg[LINE];
+        if (!take_word(&cursor, arg, sizeof(arg))) {
+            s_mode[session] = MODE_SUDO;
+            return;
+        }
+        if (str_eq(arg, "-k")) {
+            fl_fs_identity_sudo_k(session);
+            emit("sudo revoked\r\n");
+            return;
+        }
+        if (str_eq(arg, "-i")) {
+            s_mode[session] = MODE_SUDO_I;
+            return;
+        }
+        skip_spaces(&cursor);
+        {
+            unsigned n = 0;
+            while (arg[n] && n + 1 < LINE) {
+                s_pending[session][n] = arg[n];
+                ++n;
+            }
+            if (*cursor && n + 1 < LINE)
+                s_pending[session][n++] = ' ';
+            while (*cursor && n + 1 < LINE)
+                s_pending[session][n++] = *cursor++;
+            s_pending[session][n] = 0;
+        }
+        s_mode[session] = MODE_SUDO_CMD;
+        return;
+    }
+    if (str_eq(verb, "passwd")) {
+        char name[16];
+        if (!take_word(&cursor, name, sizeof(name)))
+            str_copy(name, fl_fs_identity_user(session), sizeof(name));
+        str_copy(s_pending[session], name, sizeof(s_pending[session]));
+        s_mode[session] = MODE_PASSWD;
         return;
     }
     if (str_eq(verb, "session")) {
@@ -539,6 +478,8 @@ static void run_command(int session, char *line)
         }
         return;
     }
+    if (fl_fs_commands_run(session, verb, &cursor))
+        return;
     emit("unknown command; try help\r\n");
 }
 
@@ -552,7 +493,8 @@ void fl_fs_shell_init(void)
     }
     for (int i = 0; i < FL_FS_MAX_USERS; ++i)
         s_perspectives[i].valid = 0;
-    emit("lab shell: identity, ramfs, server relay\r\n");
+    fl_fs_commands_init();
+    emit("lab shell: identity, ramfs, labdisk, labnet, server relay\r\n");
     announce_session();
     prompt();
 }

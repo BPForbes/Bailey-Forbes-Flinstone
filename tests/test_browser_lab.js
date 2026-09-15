@@ -45,6 +45,8 @@ assert.deepStrictEqual(parseGuestLine("SESSION 2 user=root\r"), { type: "session
 assert.deepStrictEqual(parseGuestLine("SWITCHUSER user=flinstone"), { type: "switchuser", user: "flinstone" });
 assert.deepStrictEqual(parseGuestLine("SERVER_RELAY host"), { type: "server", op: "host" });
 assert.deepStrictEqual(parseGuestLine("SERVER_RELAY msg hello room"), { type: "server", op: "msg", text: "hello room" });
+assert.deepStrictEqual(parseGuestLine("SERVER_RELAY announce hi"), { type: "server", op: "announce", text: "hi" });
+assert.deepStrictEqual(parseGuestLine("SERVER_RELAY kill"), { type: "server", op: "kill" });
 assert.strictEqual(parseGuestLine("WHOAMI flinstone"), null);
 
 let controllerChange;

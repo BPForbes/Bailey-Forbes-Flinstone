@@ -67,8 +67,8 @@
       if (key === "server" && usesBrowserRelay()) {
         on = true;
         detail = "relay (browser-hosted)";
-      } else if (key === "network" && usesBrowserRelay()) {
-        detail = "unavailable (guest); relay for chat";
+      } else if (key === "network") {
+        detail = on ? "lab analog" : "unavailable";
       }
       item.className = on ? "cap-on" : "cap-off";
       item.textContent = `${label}: ${detail}`;
@@ -185,7 +185,7 @@
     }
     if (event.type !== "server" || !relay) return;
     try {
-      if (event.op === "leave") {
+      if (event.op === "leave" || event.op === "kill") {
         relay.leave();
         renderRelayStatus("Disconnected");
         renderRoster([]);
@@ -197,11 +197,17 @@
         await relay.connect(principal());
         return;
       }
-      if (event.op === "msg") {
+      if (event.op === "msg" || event.op === "announce") {
         if (!relay.connected) await relay.connect(principal());
-        if (relay.sendMessage(event.text))
-          appendChat(`${relay.display || principal()}: ${event.text}`);
+        if (relay.sendMessage(event.text || ""))
+          appendChat(`${relay.display || principal()}: ${event.text || ""}`);
+        return;
       }
+      if (event.op === "connected") {
+        renderRoster(relay.members || []);
+        return;
+      }
+      appendChat(`[guest] ${event.op}${event.text ? " " + event.text : ""}`);
     } catch (error) {
       renderRelayStatus(error.message || "Relay failed");
       appendChat(`[error] ${error.message || "Relay failed"}`);

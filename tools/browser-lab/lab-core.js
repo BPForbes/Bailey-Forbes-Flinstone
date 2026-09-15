@@ -136,10 +136,12 @@
     if (match) return { type: "session", session: Number(match[1]), user: match[2] };
     match = /^SWITCHUSER user=(\S+)$/.exec(text);
     if (match) return { type: "switchuser", user: match[1] };
-    match = /^SERVER_RELAY (host|join|leave)$/.exec(text);
-    if (match) return { type: "server", op: match[1] };
-    match = /^SERVER_RELAY msg (.*)$/.exec(text);
-    if (match) return { type: "server", op: "msg", text: match[1] };
+    match = /^SERVER_RELAY (\S+)(?: (.*))?$/.exec(text);
+    if (match) {
+      const event = { type: "server", op: match[1] };
+      if (match[2]) event.text = match[2];
+      return event;
+    }
     return null;
   }
 

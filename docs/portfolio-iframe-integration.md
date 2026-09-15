@@ -117,13 +117,16 @@ function isTrustedReady(event, { labOrigin, iframe, commit }) {
 
 - Chromium-family browser, HTTPS (or localhost), `SharedArrayBuffer`
 - Guest: long-mode boot marker, VGA diagnostic cell `F`, PS/2 keyboard, lab
-  identity (`login` / `su` / `logout` / `whoami` / `useradd`), ramfs
-  (`dir` / `cat` / `write` / `mkdir`), `server` via the browser relay, up to
-  four concurrent sessions
+  identity (`login` / `su` / `sudo` / `logout` / `whoami` / `useradd`), ramfs,
+  lab cluster disk, lab net (`ping` / `ifconfig` / `wifi`), `server` via the
+  browser relay, up to four concurrent sessions. Every hosted/baremetal shell
+  verb runs as a lab analog (not `unknown command`).
 - Lab seeds: `flinstone` / `flinstone` and `root` / `root` (lab-only, not the
   hosted SQLite store)
 - **Not** in this image: hosted FAT32, P3 sockets / `kernel/core/net`
-  `server host/join`, SQLite accounts, or the hosted ELF shell
+  `server host/join`, SQLite accounts, or the hosted ELF shell. The website
+  guest still implements those surfaces in-memory so the same command names
+  work.
 
 ## How `main` updates reach the lab
 
