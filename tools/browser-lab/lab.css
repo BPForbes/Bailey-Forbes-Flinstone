@@ -422,7 +422,7 @@ input:focus, #screen:focus {
   padding: 2rem;
 }
 
-#display-placeholder[hidden] { display: none; }
+#display-placeholder[hidden] { display: none !important; }
 
 canvas {
   display: block;
