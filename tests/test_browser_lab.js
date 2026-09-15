@@ -2,7 +2,7 @@
 const assert = require("assert");
 const fs = require("fs");
 const vm = require("vm");
-const { STATES, validateManifest, isTrustedReadyEvent, createController, validDiagnosticVga, parseGuestLine, labDnsNameOk, labDnsRequestUrl } = require("../tools/browser-lab/lab-core.js");
+const { STATES, validateManifest, isTrustedReadyEvent, createController, validDiagnosticVga, parseGuestLine, labDnsNameOk, labDnsRequestUrl, isFormTypingTarget, guestUserNameOk, guestRegisterLines, guestSwitchLines, guestNewSessionLines } = require("../tools/browser-lab/lab-core.js");
 const { createQmpClient } = require("../tools/browser-lab/qmp-client.js");
 const commit = "1".repeat(40);
 const evidence = {
@@ -52,6 +52,13 @@ assert.strictEqual(parseGuestLine("WHOAMI flinstone"), null);
 assert(labDnsNameOk("example.com"));
 assert(labDnsNameOk("bailey-forbes.com"));
 assert(!labDnsNameOk("bad host"));
+assert.strictEqual(guestRegisterLines("alice", "secret"), "switchuser root\nuseradd alice\nsecret\n");
+assert.strictEqual(guestSwitchLines("alice"), "switchuser alice\n");
+assert.strictEqual(guestNewSessionLines("alice"), "session new\nswitchuser alice\n");
+assert.strictEqual(guestNewSessionLines(""), "session new\nswitchuser flinstone\n");
+assert(!guestUserNameOk("bad user"));
+assert(isFormTypingTarget({ nodeType: 1, tagName: "INPUT", isContentEditable: false }));
+assert(!isFormTypingTarget({ nodeType: 1, tagName: "DIV", isContentEditable: false }));
 assert.strictEqual(
   labDnsRequestUrl("http://127.0.0.1:8766/tools/browser-lab/?validate=1", "example.com").href,
   "http://127.0.0.1:8766/tools/browser-lab/lab-dns?name=example.com"

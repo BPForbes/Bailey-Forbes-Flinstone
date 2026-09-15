@@ -138,7 +138,7 @@
       display: flex; flex-wrap: wrap; gap: 0.45rem; margin: 0;
     }
     #capabilities { margin: 0; }
-    #capabilities div, .accounts {
+    #capabilities div, .accounts, .guest-cmd {
       border: 1px solid var(--line);
       background: var(--panel);
       padding: 0.75rem 0.9rem;
@@ -149,8 +149,22 @@
       display: grid;
       gap: 0.65rem;
     }
-    .accounts h2, .server-panel h2 { margin: 0; font-size: 0.95rem; color: var(--amber); }
-    .accounts p, .accounts label, .server-panel p, .server-panel label { margin: 0; color: var(--muted); }
+    .accounts h2, .server-panel h2, .guest-cmd h2 { margin: 0; font-size: 0.95rem; color: var(--amber); }
+    .accounts p, .accounts label, .server-panel p, .server-panel label, .guest-cmd p, .guest-cmd label { margin: 0; color: var(--muted); }
+    .guest-cmd {
+      display: grid;
+      gap: 0.65rem;
+    }
+    .guest-cmd form { display: flex; flex-wrap: wrap; gap: 0.45rem; align-items: center; }
+    .guest-cmd input, .guest-cmd button {
+      appearance: none;
+      border: 1px solid #9a5a22;
+      background: #20140d;
+      color: #f8e2c0;
+      padding: 0.45rem 0.7rem;
+      font: inherit;
+    }
+    .guest-cmd input { min-width: min(28rem, 100%); flex: 1; }
     .server-panel {
       border: 1px solid var(--line);
       background: var(--panel);
@@ -257,7 +271,7 @@
       <div class="mark" aria-hidden="true">F</div>
       <div>
         <h1>Flintstone browser lab</h1>
-        <p class="lede">Freestanding x86-64 guest with lab identity, an in-memory ramfs, and <code>server</code> via the browser relay. Hosted FAT32 and <code>kernel/core/net</code> stay on the ELF shell.</p>
+        <p class="lede">Freestanding x86-64 guest. Type shell commands in the <strong>Guest commands</strong> box or click the VGA display. Hosted FAT32 and <code>kernel/core/net</code> stay on the ELF shell.</p>
       </div>
       <p class="status-badge">
         <span>Guest state</span>
@@ -281,36 +295,31 @@
     </section>
     <p id="runtime-mode">Runtime: loading…</p>
     <section id="capabilities" aria-label="Guest capabilities"></section>
-    <section id="server-panel" class="server-panel" aria-label="Server chat relay" hidden>
-      <h2>Server chat (browser relay)</h2>
-      <p>Type <code>server host</code>, <code>server join</code>, or <code>server msg text</code> in the VGA terminal, or use the buttons. The lab prefers the P3 JS relay; on static Pages it falls back to a same-origin BroadcastChannel room. Local VM and bare-metal ELF shells keep the native C/ASM stack.</p>
-      <div class="server-actions">
-        <button id="server-host" type="button">Host</button>
-        <button id="server-join" type="button">Join</button>
-        <button id="server-leave" type="button">Leave</button>
-        <span id="server-status">Disconnected</span>
-      </div>
-      <form id="server-msg-form">
-        <label>Message <input id="server-msg" name="message" autocomplete="off" placeholder="server msg text"></label>
-        <button type="submit">Send</button>
+    <section class="guest-cmd" aria-label="Guest commands">
+      <h2>Guest commands</h2>
+      <p>This sends a line to the VGA shell (<code>ping</code>, <code>dir</code>, <code>whoami</code>, <code>help</code>, …). You can also click the display and type. The server chat box below is only for the browser relay, not guest commands.</p>
+      <form id="guest-cmd-form">
+        <label>Command <input id="guest-cmd" name="command" autocomplete="off" spellcheck="false" placeholder="whoami" disabled></label>
+        <button id="guest-cmd-run" type="submit" disabled>Run</button>
       </form>
-      <pre id="server-chat" aria-label="Relay chat log"></pre>
-      <pre id="server-roster" aria-label="Connected members"></pre>
     </section>
-    <section class="accounts" aria-label="Switch user">
-      <h2>Switch user</h2>
-      <p>Type <code>switchuser &lt;name&gt;</code> in the VGA terminal or use the controls below. Each lab user keeps its own command history and terminal scrollback when you switch back.</p>
+    <section class="accounts" aria-label="Users and sessions">
+      <h2>Users and sessions</h2>
+      <p>Built-in accounts are <code>flinstone</code> and <code>root</code>. Register a lab user (as root), then switch to it or open a new session as that user.</p>
       <div id="session-tabs"></div>
       <form id="switch-user">
         <label>User <input id="account-name" name="account" autocomplete="username" value="root"></label>
+        <label>Password <input id="account-secret" name="secret" type="password" autocomplete="new-password" value="root"></label>
         <button id="account-login" type="submit">Switch user</button>
-        <button id="account-new-session" type="button">New session</button>
+        <button id="account-new-session" type="button">New session as user</button>
+        <button id="account-register" type="button">Register user</button>
       </form>
       <p id="account-status">Active session 1: flinstone</p>
+      <p id="account-users">Users: flinstone, root</p>
     </section>
     <section class="crt" aria-labelledby="display-label">
       <div class="bezel-bar">
-        <span id="display-label">VGA text 80×25</span>
+        <span id="display-label">VGA text 80×25 · click here to type</span>
         <span>SeaBIOS · QEMU Wasm</span>
       </div>
       <div id="screen" tabindex="0" aria-label="Virtual machine display">
@@ -324,6 +333,22 @@
         <span>COM1 0x3F8</span>
       </div>
       <pre id="serial" aria-label="Kernel serial output"></pre>
+    </section>
+    <section id="server-panel" class="server-panel" aria-label="Server chat relay" hidden>
+      <h2>Server chat (browser relay)</h2>
+      <p>Relay messages only. Guest shell commands belong in <strong>Guest commands</strong> or the VGA display. Type <code>server host</code> / <code>server join</code> in the guest, or use the buttons. On static Pages the lab falls back to a same-origin BroadcastChannel room.</p>
+      <div class="server-actions">
+        <button id="server-host" type="button">Host</button>
+        <button id="server-join" type="button">Join</button>
+        <button id="server-leave" type="button">Leave</button>
+        <span id="server-status">Disconnected</span>
+      </div>
+      <form id="server-msg-form">
+        <label>Message <input id="server-msg" name="message" autocomplete="off" placeholder="server msg text"></label>
+        <button type="submit">Send</button>
+      </form>
+      <pre id="server-chat" aria-label="Relay chat log"></pre>
+      <pre id="server-roster" aria-label="Connected members"></pre>
     </section>
   </div>
   <script src="coi-serviceworker.js"></script>

@@ -34,10 +34,17 @@
     if (pauseBtn) pauseBtn.disabled = state !== core.STATES.READY;
     if (resumeBtn) resumeBtn.disabled = state !== core.STATES.PAUSED;
     if (state === core.STATES.BOOTING || state === core.STATES.OFF) resetDisplayProbe();
+    const ready = state === core.STATES.READY;
+    const cmd = document.getElementById("guest-cmd");
+    const run = document.getElementById("guest-cmd-run");
+    if (cmd) cmd.disabled = !ready;
+    if (run) run.disabled = !ready;
+    if (ready) screen.focus();
   };
   let info;
   let busy = false;
   let emulator = null;
+  let extraUsers = [];
   let sessions = { 1: "flinstone" };
   let activeSession = 1;
   let relay = null;
@@ -168,6 +175,8 @@
       node.appendChild(button);
     });
     text("account-status", `Active session ${activeSession}: ${sessions[activeSession] || "—"}`);
+    const names = ["flinstone", "root", ...extraUsers.filter(name => name !== "flinstone" && name !== "root")];
+    text("account-users", `Users: ${names.join(", ")}`);
   }
   async function resolveLabDns(host) {
     if (!core.labDnsNameOk(host)) {
@@ -279,6 +288,7 @@
       serial.textContent = "";
       activeSession = 1;
       sessions = { 1: "flinstone" };
+      extraUsers = [];
       renderSessions();
       emulator = await config.createEmulator({ ...settings, serialByte: byte => {
         const ch = String.fromCharCode(byte);
@@ -333,25 +343,52 @@
       } finally { busy = false; }
     };
   }
-  screen.addEventListener("keydown", event => {
-    if (!emulator || typeof emulator.sendKey !== "function") return;
+  screen.addEventListener("click", () => screen.focus());
+  function sendKeyEventToGuest(event) {
+    if (!emulator || typeof emulator.sendKey !== "function") return false;
     const codes = window.FlintstoneQemuKeys && window.FlintstoneQemuKeys.qcodesForEvent(event);
-    if (!codes) return;
+    if (!codes) return false;
     event.preventDefault();
     enqueueGuest(() => emulator.sendKey(codes)).catch(error => console.warn(error));
+    return true;
+  }
+  screen.addEventListener("keydown", event => { sendKeyEventToGuest(event); });
+  document.addEventListener("keydown", event => {
+    if (event.defaultPrevented) return;
+    if (core.isFormTypingTarget(event.target)) return;
+    sendKeyEventToGuest(event);
+  });
+  document.getElementById("guest-cmd-form")?.addEventListener("submit", async event => {
+    event.preventDefault();
+    const input = document.getElementById("guest-cmd");
+    const line = input?.value.trim();
+    if (!line) return;
+    await sendGuest(`${line}\n`);
+    input.value = "";
+    screen.focus();
   });
   const form = document.getElementById("switch-user");
   if (form) {
     form.addEventListener("submit", async event => {
       event.preventDefault();
       const name = document.getElementById("account-name").value.trim();
-      if (!name) return;
-      await sendGuest(`switchuser ${name}\n`);
+      const script = core.guestSwitchLines(name);
+      if (!script) return;
+      await sendGuest(script);
     });
     document.getElementById("account-new-session").onclick = async () => {
-      const name = document.getElementById("account-name").value.trim() || "flinstone";
-      await sendGuest(`session new\nswitchuser ${name}\n`);
+      const name = document.getElementById("account-name").value.trim();
+      await sendGuest(core.guestNewSessionLines(name));
     };
+    document.getElementById("account-register")?.addEventListener("click", async () => {
+      const name = document.getElementById("account-name").value.trim();
+      const secret = document.getElementById("account-secret")?.value || name;
+      const script = core.guestRegisterLines(name, secret);
+      if (!script) return;
+      await sendGuest(script);
+      if (!extraUsers.includes(name)) extraUsers.push(name);
+      renderSessions();
+    });
   }
   load().catch((error) => controller.fail(error));
 })();
