@@ -70,7 +70,11 @@
       get members() { return members.slice(); },
       on(listener) { listeners.add(listener); return () => listeners.delete(listener); },
       async connect(principal) {
-        if (this.connected) return;
+        const name = principal || "flinstone";
+        if (this.connected) {
+          if (display === name) return;
+          this.leave();
+        }
         parser = new FrameParser();
         memberId = null;
         display = "";
@@ -81,7 +85,7 @@
             socket.binaryType = "arraybuffer";
             socket.onopen = () => {
               clearTimeout(timer);
-              const hello = encodeFrame(OP.FL_NET_SESSION_OP_HELLO, principal);
+              const hello = encodeFrame(OP.FL_NET_SESSION_OP_HELLO, name);
               socket.send(hello);
               resolve();
             };
@@ -102,8 +106,8 @@
           const tabId = `${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`;
           const channel = new BroadcastChannel(`flintstone-relay-${room}`);
           memberId = 1;
-          display = principal;
-          members = [{ memberId, principal, nick: "", isHost: true }];
+          display = name;
+          members = [{ memberId, principal: name, nick: "", isHost: true }];
           channel.onmessage = ({ data }) => {
             if (!data || data.v !== 1 || data.tabId === tabId) return;
             if (data.kind === "hello") {
@@ -122,7 +126,7 @@
               emit({ type: "roster", members: members.slice() });
             }
           };
-          channel.postMessage({ v: 1, kind: "hello", tabId, memberId, principal });
+          channel.postMessage({ v: 1, kind: "hello", tabId, memberId, principal: name });
           socket = { readyState: 1, send() {}, close() { channel.close(); }, channel, tabId };
           emit({ type: "hello", memberId, display });
           emit({ type: "announcement", text: "using same-origin BroadcastChannel relay" });
@@ -144,16 +148,15 @@
         if (!this.connected) return;
         if (socket.channel) {
           socket.channel.postMessage({ v: 1, kind: "leave", tabId: socket.tabId, memberId });
-          socket.close();
-          socket = null;
-          memberId = null;
-          return;
+        } else {
+          const frame = encodeFrame(OP.FL_NET_SESSION_OP_CTRL_LEAVE, new Uint8Array(0));
+          if (frame) socket.send(frame);
         }
-        const frame = encodeFrame(OP.FL_NET_SESSION_OP_CTRL_LEAVE, new Uint8Array(0));
-        if (frame) socket.send(frame);
         socket.close();
         socket = null;
         memberId = null;
+        display = "";
+        members = [];
       },
     };
   }

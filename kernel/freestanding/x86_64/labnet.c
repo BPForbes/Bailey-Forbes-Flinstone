@@ -177,6 +177,13 @@ int fl_fs_labnet_resolve(const char *host, char *v4, unsigned v4cap, char *v6, u
             str_copy(v6, "fe80::1", v6cap);
         return 0;
     }
+    if (str_eq(host, "bailey-forbes.com") || str_eq(host, "www.bailey-forbes.com")) {
+        if (v4)
+            str_copy(v4, "10.0.0.80", v4cap);
+        if (v6)
+            str_copy(v6, "fe80::80", v6cap);
+        return 0;
+    }
     return -1;
 }
 

@@ -157,6 +157,7 @@ try:
     cmd("rmdir tmpd")
     cmd("rmtree tmpd")
     cmd("ping 127.0.0.1", expect="PING")
+    cmd("ping bailey-forbes.com", expect="10.0.0.80")
     cmd("ping6 localhost", expect="PING6")
     cmd("ifconfig", expect="lo UP")
     cmd("nslookup localhost", expect="127.0.0.1")
