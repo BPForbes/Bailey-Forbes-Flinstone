@@ -29,6 +29,10 @@
     node.className = [core.STATES.BLOCKED, core.STATES.FAILED].includes(state) ? "blocked" : "";
     node.textContent = detail ? `${state}: ${detail}` : state;
     document.documentElement.dataset.labState = String(state).toLowerCase().replace(/\s+/g, "-");
+    const pauseBtn = document.getElementById("pause");
+    const resumeBtn = document.getElementById("resume");
+    if (pauseBtn) pauseBtn.disabled = state !== core.STATES.READY;
+    if (resumeBtn) resumeBtn.disabled = state !== core.STATES.PAUSED;
     if (state === core.STATES.BOOTING || state === core.STATES.OFF) resetDisplayProbe();
   };
   let info;
@@ -245,7 +249,17 @@
     document.getElementById(id).onclick = async () => {
       if (busy || ((id === "boot" || id === "reset") && !canBoot())) return;
       busy = true;
-      try { await action(); } catch (error) { controller.fail(error); } finally { busy = false; }
+      try { await action(); } catch (error) {
+        if (id === "pause" || id === "resume") {
+          const node = document.getElementById("status");
+          if (node) {
+            node.className = "blocked";
+            node.textContent = `Failed: ${error.message || String(error)}`;
+          }
+        } else {
+          controller.fail(error);
+        }
+      } finally { busy = false; }
     };
   }
   screen.addEventListener("keydown", event => {
@@ -253,7 +267,7 @@
     const codes = window.FlintstoneQemuKeys && window.FlintstoneQemuKeys.qcodesForEvent(event);
     if (!codes) return;
     event.preventDefault();
-    emulator.sendKey(codes).catch(error => controller.fail(error));
+    emulator.sendKey(codes).catch(error => console.warn(error));
   });
   const form = document.getElementById("switch-user");
   if (form) {

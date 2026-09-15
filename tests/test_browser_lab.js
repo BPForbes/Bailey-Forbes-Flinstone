@@ -3,6 +3,7 @@ const assert = require("assert");
 const fs = require("fs");
 const vm = require("vm");
 const { STATES, validateManifest, isTrustedReadyEvent, createController, validDiagnosticVga } = require("../tools/browser-lab/lab-core.js");
+const { createQmpClient } = require("../tools/browser-lab/qmp-client.js");
 const commit = "1".repeat(40);
 const evidence = {
   commit, artifactSha256: "a".repeat(64), runtime: "ktock/qemu-wasm",
@@ -77,16 +78,59 @@ assert(!isTrustedReadyEvent({ ...ready, data: { ...ready.data, schemaVersion: 2 
 assert(!isTrustedReadyEvent({ ...ready, data: { ...ready.data, type: "loading" } }, trust));
 
 (async () => {
+  const sent = [];
+  const qmp = createQmpClient({ send: cmd => sent.push(cmd), timeoutMs: 30 });
+  const earlyCont = qmp.command("cont");
+  const capabilities = qmp.command("qmp_capabilities");
+  const dump = qmp.command("pmemsave", { val: 1, size: 2, filename: "/screen.bin" });
+  const resume = qmp.command("cont");
+  assert.deepStrictEqual(sent, []);
+  assert.strictEqual(qmp.accept({ QMP: { version: {} } }), "greeting");
+  assert.strictEqual(sent.length, 1);
+  assert.strictEqual(sent[0].execute, "qmp_capabilities");
+  qmp.accept({ return: {}, id: sent[0].id });
+  await capabilities;
+  qmp.allowWork();
+  assert.strictEqual(sent[1].execute, "cont");
+  assert.strictEqual(sent.length, 2);
+  qmp.accept({ return: {}, id: sent[1].id });
+  await earlyCont;
+  assert.strictEqual(sent[2].execute, "pmemsave");
+  qmp.accept({ return: {}, id: sent[2].id });
+  await dump;
+  assert.strictEqual(sent[3].execute, "cont");
+  qmp.accept({ return: {}, id: sent[3].id });
+  await resume;
+  const timed = createQmpClient({ send() {}, timeoutMs: 20 });
+  timed.accept({ QMP: { version: {} } });
+  timed.allowWork();
+  await assert.rejects(() => timed.command("cont"), /QEMU command timed out: cont/);
+  const cancelled = createQmpClient({ send() {}, timeoutMs: 5000 });
+  const pending = cancelled.command("qmp_capabilities");
+  cancelled.failAll(new Error("QEMU powered off"));
+  await assert.rejects(pending, /QEMU powered off/);
+
   const states = []; let ready = 0; let created = 0; let destroyed = 0;
-  const emulator = { stop() {}, run() {}, async destroy() { destroyed++; } };
+  let stopCalls = 0; let runCalls = 0;
+  const emulator = { stop() { stopCalls++; }, run() { runCalls++; }, async destroy() { destroyed++; } };
   const controller = createController({ marker: manifest.bootSuccessMarker, setState: (s) => states.push(s), postReady: () => ready++, createEmulator: async ({ serialByte }) => { created++; emulator.serialByte = serialByte; return emulator; } });
   await controller.boot({});
+  assert.strictEqual(await controller.resume(), false);
+  assert.strictEqual(runCalls, 0);
+  assert.strictEqual(await controller.pause(), false);
+  assert.strictEqual(stopCalls, 0);
   "premature FLINTSTONE_KERNEL_BOOT_OK suffix\n".split("").forEach(emulator.serialByte);
   assert.strictEqual(ready, 0);
   "FLINTSTONE_KERNEL_BOOT_OK\r\n".split("").forEach(emulator.serialByte);
   assert.strictEqual(ready, 1); assert.strictEqual(states.at(-1), STATES.READY);
   assert(await controller.pause()); assert.strictEqual(states.at(-1), STATES.PAUSED);
+  assert.strictEqual(stopCalls, 1);
+  assert.strictEqual(await controller.pause(), false);
+  assert.strictEqual(stopCalls, 1);
   assert(await controller.resume()); assert.strictEqual(states.at(-1), STATES.READY);
+  assert.strictEqual(runCalls, 1);
+  assert.strictEqual(await controller.resume(), false);
+  assert.strictEqual(runCalls, 1);
   await controller.reset({}); assert.strictEqual(created, 2); assert.strictEqual(destroyed, 1); assert.strictEqual(states.at(-1), STATES.BOOTING);
   await controller.powerOff(); assert.strictEqual(states.at(-1), STATES.OFF);
   const failing = createController({ marker: "x", setState: (s) => states.push(s), postReady() {}, createEmulator: async () => { throw new Error("corrupt image"); } });

@@ -40,24 +40,31 @@
     if (!crossOriginIsolated || typeof SharedArrayBuffer === "undefined") {
       throw new Error("Browser boot requires cross-origin isolation. Use the lab server or configure COOP/COEP headers.");
     }
+    if (!window.FlintstoneQmp || typeof window.FlintstoneQmp.createQmpClient !== "function") {
+      throw new Error("QMP client is not loaded");
+    }
     const response = await fetch(artifactUrl, { cache: "no-store" });
     if (!response.ok) throw new Error(`Disk download failed: HTTP ${response.status}`);
     const image = await response.arrayBuffer();
     const hash = Array.from(new Uint8Array(await crypto.subtle.digest("SHA-256", image)), x => x.toString(16).padStart(2, "0")).join("");
     if (hash !== sha256) throw new Error("Disk SHA-256 does not match its manifest");
     const worker = new Worker(new URL("qemu-worker.js", scriptBase), { type: "module" });
-    let nextId = 0, disposed = false, screenTimer, screenBusy = false, pending = new Map();
+    let disposed = false, screenTimer, screenBusy = false, holdScreen = false;
+    const qmp = window.FlintstoneQmp.createQmpClient({
+      send: data => worker.postMessage({ type: "qmp", data }),
+      timeoutMs: 30000,
+    });
     function command(execute, args) {
-      return new Promise((resolve, reject) => {
-        const id = ++nextId;
-        const timeout = setTimeout(() => { pending.delete(id); reject(new Error(`QEMU command timed out: ${execute}`)); }, 15000);
-        pending.set(id, { resolve, reject, timeout });
-        worker.postMessage({ type: "qmp", data: { execute, ...(args ? { arguments: args } : {}), id } });
-      });
+      return qmp.command(execute, args);
     }
     async function sendKey(qcodes) {
       if (!qcodes || !qcodes.length) return;
       await command("send-key", { keys: qcodes.map(data => ({ type: "qcode", data })) });
+    }
+    async function withScreenHeld(fn) {
+      holdScreen = true;
+      try { return await fn(); }
+      finally { holdScreen = false; }
     }
     worker.onmessage = async ({ data }) => {
       if (disposed) return;
@@ -66,31 +73,42 @@
       if (data.type === "error") { screenBusy = false; onError?.(new Error(data.text)); }
       if (data.type === "screen") { screenBusy = false; onScreen?.(data.bytes); }
       if (data.type !== "qmp") return;
-      if (data.data.QMP) {
-        try {
-          await command("qmp_capabilities");
-          screenTimer = setInterval(async () => {
-            if (disposed || screenBusy) return;
-            screenBusy = true;
-            try {
-              await command("pmemsave", { val: 753664, size: 4000, filename: "/screen.bin" });
-              if (!disposed) worker.postMessage({ type: "screen" });
-              else screenBusy = false;
-            } catch (error) { screenBusy = false; onDiagnostic?.(error.message); }
-          }, 250);
-        } catch (error) { onError?.(error); }
-      }
-      const result = pending.get(data.data.id);
-      if (result) {
-        clearTimeout(result.timeout); pending.delete(data.data.id);
-        if (data.data.error) result.reject(new Error(data.data.error.desc)); else result.resolve(data.data.return);
-      }
+      if (qmp.accept(data.data) !== "greeting") return;
+      try {
+        await command("qmp_capabilities");
+        qmp.allowWork();
+        screenTimer = setInterval(async () => {
+          if (disposed || screenBusy || holdScreen) return;
+          screenBusy = true;
+          try {
+            await command("pmemsave", { val: 753664, size: 4000, filename: "/screen.bin" });
+            if (!disposed) worker.postMessage({ type: "screen" });
+            else screenBusy = false;
+          } catch (error) { screenBusy = false; onDiagnostic?.(error.message); }
+        }, 250);
+      } catch (error) { onError?.(error); }
     };
     worker.onerror = event => onError?.(new Error(event.message || "QEMU worker failed"));
     worker.postMessage({ type: "boot", image, memorySize }, [image]);
     return {
-      async stop() { await command("stop"); const s = await command("query-status"); if (s.running) throw new Error("QEMU did not pause"); },
-      async run() { await command("cont"); const s = await command("query-status"); if (!s.running) throw new Error("QEMU did not resume"); },
+      async stop() {
+        await withScreenHeld(async () => {
+          const s = await command("query-status");
+          if (s && !s.running) return;
+          await command("stop");
+          const after = await command("query-status");
+          if (after.running) throw new Error("QEMU did not pause");
+        });
+      },
+      async run() {
+        await withScreenHeld(async () => {
+          const s = await command("query-status");
+          if (s && s.running) return;
+          await command("cont");
+          const after = await command("query-status");
+          if (!after.running) throw new Error("QEMU did not resume");
+        });
+      },
       async sendKey(qcodes) { await sendKey(qcodes); },
       async sendText(text) {
         for (const ch of text) {
@@ -99,9 +117,8 @@
         }
       },
       async destroy() {
-        disposed = true; clearInterval(screenTimer);
-        for (const p of pending.values()) { clearTimeout(p.timeout); p.reject(new Error("QEMU powered off")); }
-        pending.clear();
+        disposed = true; holdScreen = true; clearInterval(screenTimer);
+        qmp.failAll(new Error("QEMU powered off"));
         await new Promise(resolve => {
           const timeout = setTimeout(resolve, 1000);
           worker.onmessage = ({ data }) => { if (data.type === "destroyed") { clearTimeout(timeout); resolve(); } };

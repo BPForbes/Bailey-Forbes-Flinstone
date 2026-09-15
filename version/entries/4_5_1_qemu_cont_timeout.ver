@@ -1,0 +1,4 @@
+MAJOR_VERSION=4
+STANDARD_VERSION=5
+RELEASE_VERSION=1
+DESCRIPTION=Fix the published QEMU Wasm lab Guest State failure "QEMU command timed out: cont". Resume is ignored unless the guest is paused, QMP commands are serialized so cont cannot race an in-flight VGA pmemsave, and the worker wakes QMP readers that attach after commands were queued. The browser relay prints ready only after the WebSocket port is listening so lab tests do not connect to a still-bound socket.

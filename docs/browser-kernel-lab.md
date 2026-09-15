@@ -192,7 +192,9 @@ Flintstone VGA writes -> virtual VGA text memory -> emulator canvas
 
 The hosted filesystem, block driver, and `server` path are **not** present in
 the freestanding browser image. Persistence, snapshots, Boot/Pause/Resume/
-Reset/Power-off, and VM recreation are lab/emulator lifecycle features.
+Reset/Power-off, and VM recreation are lab/emulator lifecycle features. Resume
+is enabled only after Pause so QMP `cont` cannot race SeaBIOS/TCG boot or an
+in-flight VGA `pmemsave` and fail Guest State with `QEMU command timed out: cont`.
 
 ## Static lab consumption contract
 
