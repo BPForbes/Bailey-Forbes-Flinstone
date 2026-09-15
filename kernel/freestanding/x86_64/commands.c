@@ -771,7 +771,7 @@ static int run_meta(int session, const char *verb, const char **cursor)
         return 1;
     }
     if (str_eq(verb, "version")) {
-        emit("4.6.0 lab\r\n");
+        emit("4.5.2 lab\r\n");
         return 1;
     }
     if (str_eq(verb, "contracts")) {

@@ -165,7 +165,7 @@ try:
     cmd("createdisk labvol 4 8", expect="created disk")
     cmd("writecluster 0 -t payload", expect="cluster written")
     cmd("listclusters", expect="payload")
-    cmd("version", expect="4.6.0")
+    cmd("version", expect="4.5.2")
     cmd("contracts json", expect="labdisk")
     cmd("type hello.txt", expect="lab-fs")
 
