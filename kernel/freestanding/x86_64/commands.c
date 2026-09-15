@@ -589,27 +589,13 @@ static int run_disk(int session, const char *verb, const char **cursor)
 
 static void lookup_host(const char *host)
 {
-    char v4[16];
-    char v6[16];
-    if (fl_fs_labnet_resolve(host, v4, sizeof(v4), v6, sizeof(v6)) != 0) {
-        emit("nxdomain ");
-        emit(host);
-        emit("\r\n");
-        return;
-    }
-    emit("Name: ");
-    emit(host);
-    emit("\r\nA ");
-    emit(v4);
-    emit("\r\nAAAA ");
-    emit(v6);
-    emit("\r\n");
+    fl_fs_labnet_nslookup(host, emit);
 }
 
 static int run_net(const char *verb, const char **cursor)
 {
-    char a[32];
-    char b[32];
+    char a[64];
+    char b[40];
     char mac[20];
     if (str_eq(verb, "ifconfig")) {
         fl_fs_labnet_ifconfig(emit, emit_uint);
@@ -638,6 +624,19 @@ static int run_net(const char *verb, const char **cursor)
             return 1;
         }
         lookup_host(a);
+        return 1;
+    }
+    if (str_eq(verb, "dnsack")) {
+        char v6[40];
+        if (!take_word(cursor, a, sizeof(a))) {
+            emit("usage: dnsack <host> <ip> [ipv6]\r\n");
+            return 1;
+        }
+        if (!take_word(cursor, b, sizeof(b)))
+            str_copy(b, "fail", sizeof(b));
+        if (!take_word(cursor, v6, sizeof(v6)))
+            v6[0] = 0;
+        (void)fl_fs_labnet_dnsack(a, b, v6[0] ? v6 : 0, emit, emit_uint);
         return 1;
     }
     if (str_eq(verb, "ping") || str_eq(verb, "ping6")) {

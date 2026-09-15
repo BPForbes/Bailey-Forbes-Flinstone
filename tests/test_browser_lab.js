@@ -2,7 +2,7 @@
 const assert = require("assert");
 const fs = require("fs");
 const vm = require("vm");
-const { STATES, validateManifest, isTrustedReadyEvent, createController, validDiagnosticVga, parseGuestLine } = require("../tools/browser-lab/lab-core.js");
+const { STATES, validateManifest, isTrustedReadyEvent, createController, validDiagnosticVga, parseGuestLine, labDnsNameOk, labDnsRequestUrl } = require("../tools/browser-lab/lab-core.js");
 const { createQmpClient } = require("../tools/browser-lab/qmp-client.js");
 const commit = "1".repeat(40);
 const evidence = {
@@ -47,7 +47,15 @@ assert.deepStrictEqual(parseGuestLine("SERVER_RELAY host"), { type: "server", op
 assert.deepStrictEqual(parseGuestLine("SERVER_RELAY msg hello room"), { type: "server", op: "msg", text: "hello room" });
 assert.deepStrictEqual(parseGuestLine("SERVER_RELAY announce hi"), { type: "server", op: "announce", text: "hi" });
 assert.deepStrictEqual(parseGuestLine("SERVER_RELAY kill"), { type: "server", op: "kill" });
+assert.deepStrictEqual(parseGuestLine("SERVER_RELAY dns example.com"), { type: "dns", host: "example.com" });
 assert.strictEqual(parseGuestLine("WHOAMI flinstone"), null);
+assert(labDnsNameOk("example.com"));
+assert(labDnsNameOk("bailey-forbes.com"));
+assert(!labDnsNameOk("bad host"));
+assert.strictEqual(
+  labDnsRequestUrl("http://127.0.0.1:8766/tools/browser-lab/?validate=1", "example.com").href,
+  "http://127.0.0.1:8766/tools/browser-lab/lab-dns?name=example.com"
+);
 
 let controllerChange;
 let controllerOptions;
@@ -72,6 +80,7 @@ controllerChange();
 assert.strictEqual(reloads, 1);
 const coiSrc = fs.readFileSync("tools/browser-lab/coi-serviceworker.js", "utf8");
 assert(coiSrc.includes('request.destination === "document"'), "SW must set COOP only on top-level documents");
+assert(coiSrc.includes('pathname.endsWith("/lab-dns")'), "SW must answer same-origin /lab-dns");
 assert(!/headers\.set\("Cross-Origin-Opener-Policy", "same-origin"\);\s*return new Response/.test(coiSrc),
   "SW must not set COOP on every fetch, including iframe navigations");
 
@@ -85,6 +94,40 @@ assert(!isTrustedReadyEvent({ ...ready, data: { ...ready.data, schemaVersion: 2 
 assert(!isTrustedReadyEvent({ ...ready, data: { ...ready.data, type: "loading" } }, trust));
 
 (async () => {
+  const fetchCalls = [];
+  let fetchHandler;
+  const swSelf = {
+    location: { origin: "https://lab.example" },
+    addEventListener: (name, listener) => {
+      if (name === "fetch") fetchHandler = listener;
+    },
+    skipWaiting: () => {},
+    clients: { claim: () => {} },
+  };
+  vm.runInNewContext(coiSrc, {
+    window: undefined,
+    self: swSelf,
+    fetch: async (url) => {
+      fetchCalls.push(String(url));
+      const type = String(url).includes("type=AAAA") ? 28 : 1;
+      return {
+        ok: true,
+        json: async () => ({ Answer: type === 1 ? [{ type: 1, data: "93.184.216.34" }] : [] }),
+      };
+    },
+    Headers, Request, Response, URL, URLSearchParams, console, Promise,
+  });
+  let answered;
+  fetchHandler({
+    request: { url: "https://lab.example/tools/browser-lab/lab-dns?name=example.com", cache: "default", mode: "cors" },
+    respondWith: (p) => { answered = p; },
+  });
+  const dnsResp = await answered;
+  assert.strictEqual(dnsResp.status, 200);
+  const dnsBody = await dnsResp.json();
+  assert.deepStrictEqual(dnsBody, { ok: true, name: "example.com", ip: "93.184.216.34", ipv6: "" });
+  assert(fetchCalls.some(u => u.includes("cloudflare-dns.com") && u.includes("type=A")));
+
   const sent = [];
   const qmp = createQmpClient({ send: cmd => sent.push(cmd), timeoutMs: 30 });
   const earlyCont = qmp.command("cont");

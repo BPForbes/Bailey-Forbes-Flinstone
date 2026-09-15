@@ -68,7 +68,7 @@
         on = true;
         detail = "relay (browser-hosted)";
       } else if (key === "network") {
-        detail = on ? "lab analog" : "unavailable";
+        detail = on ? "lab analog + DNS" : "unavailable";
       }
       item.className = on ? "cap-on" : "cap-off";
       item.textContent = `${label}: ${detail}`;
@@ -169,6 +169,25 @@
     });
     text("account-status", `Active session ${activeSession}: ${sessions[activeSession] || "—"}`);
   }
+  async function resolveLabDns(host) {
+    if (!core.labDnsNameOk(host)) {
+      await sendGuest(`dnsack ${host} fail\n`);
+      return;
+    }
+    let ip = "fail";
+    let ipv6 = "";
+    try {
+      const response = await fetch(core.labDnsRequestUrl(location.href, host));
+      const body = await response.json();
+      if (body && body.ok) {
+        if (body.ip) ip = body.ip;
+        if (body.ipv6) ipv6 = body.ipv6;
+      }
+    } catch (_) {
+      /* guest prints unknown host */
+    }
+    await sendGuest(ipv6 ? `dnsack ${host} ${ip} ${ipv6}\n` : `dnsack ${host} ${ip}\n`);
+  }
   async function applyGuestLine(line) {
     const event = core.parseGuestLine(line);
     if (!event) return;
@@ -181,6 +200,10 @@
     if (event.type === "switchuser") {
       sessions[activeSession] = event.user;
       renderSessions();
+      return;
+    }
+    if (event.type === "dns") {
+      if (event.host) await resolveLabDns(event.host);
       return;
     }
     if (event.type !== "server" || !relay) return;
@@ -263,7 +286,7 @@
         if (ch === "\n") {
           const line = serialLine.replace(/\r$/, "");
           serialLine = "";
-          applyGuestLine(line);
+          void applyGuestLine(line);
         } else {
           serialLine = (serialLine + ch).slice(-4096);
         }

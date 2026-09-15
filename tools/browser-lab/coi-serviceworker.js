@@ -1,6 +1,33 @@
 /*! coi-serviceworker v0.1.6 - Guido Zuidhof, licensed under MIT */
 let coepCredentialless = false;
 if (typeof window === "undefined") {
+  async function labDnsLookup(name) {
+    const headers = new Headers({
+      "Content-Type": "application/json",
+      "Cross-Origin-Resource-Policy": "same-origin",
+      "Cross-Origin-Embedder-Policy": "require-corp",
+      "Cache-Control": "no-store",
+    });
+    const json = (status, body) => new Response(JSON.stringify(body), { status, headers });
+    if (!name || name.length > 253 || /[^A-Za-z0-9.-]/.test(name))
+      return json(400, { ok: false, error: "bad name" });
+    const query = async type => {
+      const response = await fetch("https://cloudflare-dns.com/dns-query?name=" + encodeURIComponent(name) + "&type=" + type, {
+        headers: { Accept: "application/dns-json" },
+      });
+      if (!response.ok) return "";
+      const body = await response.json();
+      const rec = (body.Answer || []).find(row => row.type === (type === "A" ? 1 : 28));
+      return rec && rec.data ? rec.data : "";
+    };
+    try {
+      const [ip, ipv6] = await Promise.all([query("A"), query("AAAA")]);
+      const ok = Boolean(ip || ipv6);
+      return json(ok ? 200 : 404, { ok, name, ip: ip || "", ipv6: ipv6 || "" });
+    } catch (_) {
+      return json(502, { ok: false, error: "lookup failed" });
+    }
+  }
   self.addEventListener("install", () => self.skipWaiting());
   self.addEventListener("activate", event => event.waitUntil(self.clients.claim()));
   self.addEventListener("message", event => {
@@ -8,6 +35,11 @@ if (typeof window === "undefined") {
   });
   self.addEventListener("fetch", event => {
     const request = event.request;
+    const reqUrl = new URL(request.url);
+    if (reqUrl.origin === self.location.origin && reqUrl.pathname.endsWith("/lab-dns")) {
+      event.respondWith(labDnsLookup(reqUrl.searchParams.get("name") || ""));
+      return;
+    }
     if (request.cache === "only-if-cached" && request.mode !== "same-origin") return;
     event.respondWith(fetch(coepCredentialless && request.mode === "no-cors"
       ? new Request(request, { credentials: "omit" }) : request).then(response => {

@@ -138,12 +138,27 @@
     if (match) return { type: "switchuser", user: match[1] };
     match = /^SERVER_RELAY (\S+)(?: (.*))?$/.exec(text);
     if (match) {
+      if (match[1] === "dns")
+        return { type: "dns", host: (match[2] || "").trim() };
       const event = { type: "server", op: match[1] };
       if (match[2]) event.text = match[2];
       return event;
     }
     return null;
   }
+  function labDnsNameOk(name) {
+    return typeof name === "string" && name.length > 0 && name.length <= 253 &&
+      /^[A-Za-z0-9](?:[A-Za-z0-9.-]{0,251}[A-Za-z0-9])?$|^[A-Za-z0-9]$/.test(name);
+  }
+  function labDnsRequestUrl(pageHref, name) {
+    const page = new URL(pageHref);
+    let dir = page.pathname;
+    if (!dir.endsWith("/"))
+      dir = dir.slice(0, dir.lastIndexOf("/") + 1);
+    const url = new URL(`${dir}lab-dns`, page.origin);
+    url.searchParams.set("name", name);
+    return url;
+  }
 
-  return { STATES, validateManifest, isTrustedReadyEvent, createController, validDiagnosticVga, exactSerialLine, parseGuestLine };
+  return { STATES, validateManifest, isTrustedReadyEvent, createController, validDiagnosticVga, exactSerialLine, parseGuestLine, labDnsNameOk, labDnsRequestUrl };
 });
