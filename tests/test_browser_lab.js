@@ -64,6 +64,20 @@ assert.strictEqual(
   "http://127.0.0.1:8766/tools/browser-lab/lab-dns?name=example.com"
 );
 
+const labHtml = fs.readFileSync("tools/browser-lab/index.html", "utf8");
+assert(labHtml.includes('href="lab.css"'), "lab chrome stylesheet must be linked");
+assert(labHtml.includes('id="powerline"'), "Liquid Glass chrome must include a Powerline status line");
+assert(labHtml.includes("traffic-lights"), "window chrome must include macOS traffic lights");
+const labCss = fs.readFileSync("tools/browser-lab/lab.css", "utf8");
+assert(labCss.includes("backdrop-filter"), "panels must use a glass blur");
+assert(labCss.includes("JetBrains Mono"), "terminal chrome must request a Powerline-capable mono");
+assert(labCss.includes("display-p3"), "24-bit / Display P3 accents must be declared");
+assert(fs.existsSync("tools/browser-lab/fonts/nerd-symbols-powerline.woff2"));
+assert(fs.existsSync("tools/browser-lab/fonts/jetbrains-mono-latin-wght-normal.woff2"));
+const labJs = fs.readFileSync("tools/browser-lab/lab.js", "utf8");
+assert(labJs.includes("VGA_TRUECOLOR"), "VGA renderer must use a 24-bit palette");
+assert((labJs.match(/#[0-9a-fA-F]{6}/g) || []).length >= 16, "truecolor palette needs 16 hex slots");
+
 let controllerChange;
 let controllerOptions;
 let reloads = 0;
