@@ -155,7 +155,9 @@ function roomFor(id) {
 function main() {
   const args = parseArgs(process.argv);
   const wss = new WebSocketServer({ host: args.bind, port: args.port, path: "/ws" });
-  console.log(`Session relay: ws://${args.bind}:${args.port}/ws (room=${args.room})`);
+  wss.on("listening", () => {
+    console.log(`Session relay: ws://${args.bind}:${args.port}/ws (room=${args.room})`);
+  });
   wss.on("connection", (socket, req) => {
     const url = new URL(req.url || "/ws", "http://localhost");
     const roomId = url.searchParams.get("room") || args.room;

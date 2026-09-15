@@ -10,6 +10,7 @@ struct user {
 static struct user s_users[FL_FS_MAX_USERS];
 static int s_session_user[FL_FS_MAX_SESSIONS];
 static int s_session_used[FL_FS_MAX_SESSIONS];
+static int s_session_sudo[FL_FS_MAX_SESSIONS];
 static int s_active;
 static int s_sessions;
 
@@ -66,6 +67,7 @@ void fl_fs_identity_init(void)
     for (int i = 0; i < FL_FS_MAX_SESSIONS; ++i) {
         s_session_used[i] = 0;
         s_session_user[i] = 0;
+        s_session_sudo[i] = 0;
     }
     add_user("flinstone", "flinstone", 0);
     add_user("root", "root", 1);
@@ -89,6 +91,8 @@ int fl_fs_identity_elevated(int session)
 {
     if (session < 0 || session >= FL_FS_MAX_SESSIONS || !s_session_used[session])
         return 0;
+    if (s_session_sudo[session])
+        return 1;
     int idx = s_session_user[session];
     return idx >= 0 && s_users[idx].elevated;
 }
@@ -137,6 +141,7 @@ void fl_fs_identity_logout(int session)
 {
     if (session < 0 || session >= FL_FS_MAX_SESSIONS || !s_session_used[session])
         return;
+    s_session_sudo[session] = 0;
     s_session_user[session] = find_user("flinstone");
 }
 
@@ -145,6 +150,59 @@ int fl_fs_identity_useradd(int session, const char *name, const char *password)
     if (!fl_fs_identity_elevated(session))
         return 0;
     return add_user(name, password, 0) >= 0;
+}
+
+int fl_fs_identity_userdel(int session, const char *name)
+{
+    int idx;
+    int guest;
+    if (!fl_fs_identity_elevated(session) || !name || !name[0])
+        return 0;
+    if (str_eq(name, "flinstone") || str_eq(name, "root"))
+        return 0;
+    idx = find_user(name);
+    if (idx < 0)
+        return 0;
+    guest = find_user("flinstone");
+    for (int i = 0; i < FL_FS_MAX_SESSIONS; ++i) {
+        if (s_session_used[i] && s_session_user[i] == idx)
+            s_session_user[i] = guest;
+    }
+    s_users[idx].used = 0;
+    return 1;
+}
+
+int fl_fs_identity_passwd(int session, const char *name, const char *password)
+{
+    int idx;
+    if (session < 0 || session >= FL_FS_MAX_SESSIONS || !s_session_used[session] || !password || !password[0])
+        return 0;
+    idx = (name && name[0]) ? find_user(name) : s_session_user[session];
+    if (idx < 0)
+        return 0;
+    if (idx != s_session_user[session] && !fl_fs_identity_elevated(session))
+        return 0;
+    str_copy(s_users[idx].secret, password, sizeof(s_users[idx].secret));
+    return 1;
+}
+
+int fl_fs_identity_sudo(int session, const char *password)
+{
+    int idx;
+    if (session < 0 || session >= FL_FS_MAX_SESSIONS || !s_session_used[session] || !password)
+        return 0;
+    idx = s_session_user[session];
+    if (idx < 0 || !str_eq(s_users[idx].secret, password))
+        return 0;
+    s_session_sudo[session] = 1;
+    return 1;
+}
+
+void fl_fs_identity_sudo_k(int session)
+{
+    if (session < 0 || session >= FL_FS_MAX_SESSIONS)
+        return;
+    s_session_sudo[session] = 0;
 }
 
 void fl_fs_identity_each_user(void (*visit)(const char *name, int elevated, void *ctx), void *ctx)
@@ -172,6 +230,7 @@ int fl_fs_session_new(void)
             continue;
         s_session_used[i] = 1;
         s_session_user[i] = find_user("flinstone");
+        s_session_sudo[i] = 0;
         s_sessions++;
         s_active = i;
         return i;

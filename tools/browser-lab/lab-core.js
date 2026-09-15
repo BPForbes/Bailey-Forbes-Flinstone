@@ -76,6 +76,7 @@
     let emulator = null;
     let line = "";
     let readySent = false;
+    let paused = false;
     let generation = 0;
     let timer;
     const state = (value, detail = "") => setState(value, detail);
@@ -97,7 +98,7 @@
       async boot(options) {
         if (emulator) await this.powerOff();
         clearTimeout(timer); const current = ++generation;
-        readySent = false; line = ""; state(STATES.BOOTING);
+        readySent = false; paused = false; line = ""; state(STATES.BOOTING);
         timer = setTimeout(() => { if (current === generation && !readySent) this.fail(new Error("Kernel boot marker was not observed within 90 seconds")); }, 90000);
         try {
           const instance = await createEmulator({ ...options,
@@ -109,13 +110,55 @@
         }
         catch (error) { if (current === generation) this.fail(error); throw error; }
       },
-      async pause() { if (!emulator || readySent === false) return false; await emulator.stop(); state(STATES.PAUSED); return true; },
-      async resume() { if (!emulator) return false; await emulator.run(); state(readySent ? STATES.READY : STATES.BOOTING); return true; },
+      async pause() {
+        if (!emulator || readySent === false || paused) return false;
+        await emulator.stop();
+        paused = true;
+        state(STATES.PAUSED);
+        return true;
+      },
+      async resume() {
+        if (!emulator || !paused) return false;
+        await emulator.run();
+        paused = false;
+        state(readySent ? STATES.READY : STATES.BOOTING);
+        return true;
+      },
       async reset(options) { await this.powerOff(); await this.boot(options); },
-      async powerOff() { generation++; clearTimeout(timer); if (emulator) { if (emulator.destroy) await emulator.destroy(); else await emulator.stop(); } emulator = null; readySent = false; line = ""; state(STATES.OFF); },
-      fail(error) { generation++; clearTimeout(timer); if (emulator) emulator.destroy(); emulator = null; state(STATES.FAILED, error.message || String(error)); },
+      async powerOff() { generation++; clearTimeout(timer); if (emulator) { if (emulator.destroy) await emulator.destroy(); else await emulator.stop(); } emulator = null; readySent = false; paused = false; line = ""; state(STATES.OFF); },
+      fail(error) { generation++; clearTimeout(timer); if (emulator) emulator.destroy(); emulator = null; readySent = false; paused = false; state(STATES.FAILED, error.message || String(error)); },
       serialByte,
     };
   }
-  return { STATES, validateManifest, isTrustedReadyEvent, createController, validDiagnosticVga, exactSerialLine };
+  function parseGuestLine(line) {
+    const text = String(line || "").replace(/\r$/, "");
+    let match = /^SESSION (\d+) user=(\S+)$/.exec(text);
+    if (match) return { type: "session", session: Number(match[1]), user: match[2] };
+    match = /^SWITCHUSER user=(\S+)$/.exec(text);
+    if (match) return { type: "switchuser", user: match[1] };
+    match = /^SERVER_RELAY (\S+)(?: (.*))?$/.exec(text);
+    if (match) {
+      if (match[1] === "dns")
+        return { type: "dns", host: (match[2] || "").trim() };
+      const event = { type: "server", op: match[1] };
+      if (match[2]) event.text = match[2];
+      return event;
+    }
+    return null;
+  }
+  function labDnsNameOk(name) {
+    return typeof name === "string" && name.length > 0 && name.length <= 253 &&
+      /^[A-Za-z0-9](?:[A-Za-z0-9.-]{0,251}[A-Za-z0-9])?$|^[A-Za-z0-9]$/.test(name);
+  }
+  function labDnsRequestUrl(pageHref, name) {
+    const page = new URL(pageHref);
+    let dir = page.pathname;
+    if (!dir.endsWith("/"))
+      dir = dir.slice(0, dir.lastIndexOf("/") + 1);
+    const url = new URL(`${dir}lab-dns`, page.origin);
+    url.searchParams.set("name", name);
+    return url;
+  }
+
+  return { STATES, validateManifest, isTrustedReadyEvent, createController, validDiagnosticVga, exactSerialLine, parseGuestLine, labDnsNameOk, labDnsRequestUrl };
 });

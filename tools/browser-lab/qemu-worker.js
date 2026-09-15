@@ -19,7 +19,13 @@ const pty = {
       } else if (byte !== 13) qmpLine += String.fromCharCode(byte);
     }
   },
-  onReadable(fn) { readable.add(fn); return { dispose() { readable.delete(fn); } }; },
+  onReadable(fn) {
+    readable.add(fn);
+    // Commands queued before QEMU attaches the QMP pty must wake the reader
+    // once it registers; otherwise the first QMP line sits unread.
+    if (input.length) queueMicrotask(fn);
+    return { dispose() { readable.delete(fn); } };
+  },
   onSignal() { return { dispose() {} }; },
   ioctl(op, value) {
     if (op === "TCGETS") return termios;

@@ -21,13 +21,16 @@ VGA cell `F` with attribute `0x07`.
 After that marker the guest is an interactive lab shell, not the hosted ELF:
 
 - keyboard (click the VGA bezel, then type)
-- `switchuser` / `login` / `su` / `logout` / `whoami` / `history` / `useradd` / `session`
+- `switchuser` / `login` / `su` / `sudo` / `logout` / `whoami` / `history` / `useradd` / `session`
+- lab ramfs: `dir` / `ls` / `cat` / `write` / `mkdir` / `rm` / `pwd` / `cd` and the other hosted file verbs
+- lab cluster disk (`createdisk` / `writecluster` / `diskput` / …) and lab net (`ping` / `ifconfig` / `wifi` / …)
+- `server host|join|leave|msg|…` through the browser relay (BroadcastChannel fallback on static Pages)
 - per-user command history and VGA scrollback when switching users on the website
 - up to four concurrent sessions so one operator can keep multiple registered
   accounts active (for example host as `flinstone` and admin as `root`)
 - lab seeds `flinstone`/`flinstone` and `root`/`root`
 
-Filesystem, networking, and `server host/join` are **not** in this image.
+Hosted FAT32, P3 sockets, and `kernel/core/net` `server host/join` are **not** in this image; the guest still runs those command names as lab analogs.
 
 The runtime files are intentionally generated assets. Fetch the exact pinned
 release and verify its digests before local use:

@@ -257,7 +257,7 @@
       <div class="mark" aria-hidden="true">F</div>
       <div>
         <h1>Flintstone browser lab</h1>
-        <p class="lede">Freestanding x86-64 guest with lab identity and concurrent sessions. Hosted filesystem, networking, and <code>server</code> are not in this image.</p>
+        <p class="lede">Freestanding x86-64 guest with lab identity, an in-memory ramfs, and <code>server</code> via the browser relay. Hosted FAT32 and <code>kernel/core/net</code> stay on the ELF shell.</p>
       </div>
       <p class="status-badge">
         <span>Guest state</span>
@@ -273,8 +273,8 @@
       </dl>
       <p id="controls">
         <button id="boot" type="button">Boot</button>
-        <button id="pause" type="button">Pause</button>
-        <button id="resume" type="button">Resume</button>
+        <button id="pause" type="button" disabled>Pause</button>
+        <button id="resume" type="button" disabled>Resume</button>
         <button id="reset" type="button">Reset</button>
         <button id="poweroff" type="button">Power Off</button>
       </p>
@@ -283,7 +283,7 @@
     <section id="capabilities" aria-label="Guest capabilities"></section>
     <section id="server-panel" class="server-panel" aria-label="Server chat relay" hidden>
       <h2>Server chat (browser relay)</h2>
-      <p>Online lab uses a JS relay that speaks the same P3 session wire as <code>net_server.c</code>. Local VM and bare-metal runs use the native C/ASM stack instead — no relay.</p>
+      <p>Type <code>server host</code>, <code>server join</code>, or <code>server msg text</code> in the VGA terminal, or use the buttons. The lab prefers the P3 JS relay; on static Pages it falls back to a same-origin BroadcastChannel room. Local VM and bare-metal ELF shells keep the native C/ASM stack.</p>
       <div class="server-actions">
         <button id="server-host" type="button">Host</button>
         <button id="server-join" type="button">Join</button>
@@ -328,6 +328,7 @@
   </div>
   <script src="coi-serviceworker.js"></script>
   <script src="lab-core.js"></script>
+  <script src="qmp-client.js"></script>
   <script src="session-wire-const.js"></script>
   <script src="session-wire.js"></script>
   <script src="server-relay-client.js"></script>

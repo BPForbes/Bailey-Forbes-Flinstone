@@ -3,11 +3,41 @@
 from functools import partial
 from http.server import SimpleHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
+from urllib.parse import parse_qs, urlparse
 import argparse
 import atexit
+import json
 import signal
+import socket
 import subprocess
 import sys
+
+
+def lab_dns_name_ok(name):
+    if not name or len(name) > 253:
+        return False
+    return all(ch.isalnum() or ch in ".-" for ch in name)
+
+
+def lab_dns_resolve(name):
+    """Return (ipv4, ipv6) strings; missing records are empty strings."""
+    if not lab_dns_name_ok(name):
+        return "", ""
+    v4 = ""
+    v6 = ""
+    try:
+        infos = socket.getaddrinfo(name, None, type=socket.SOCK_STREAM)
+    except OSError:
+        return "", ""
+    for family, _, _, _, sockaddr in infos:
+        if family == socket.AF_INET and not v4:
+            v4 = sockaddr[0]
+        elif family == socket.AF_INET6 and not v6:
+            ip = sockaddr[0]
+            if ip.startswith("fe80:") or ip.startswith("::ffff:"):
+                continue
+            v6 = ip
+    return v4, v6
 
 
 def make_handler(directory, coop, coep, frame_ancestors, permissions_policy, corp):
@@ -25,6 +55,22 @@ def make_handler(directory, coop, coep, frame_ancestors, permissions_policy, cor
                 self.send_header("Permissions-Policy", permissions_policy)
             self.send_header("Cache-Control", "no-store")
             super().end_headers()
+
+        def do_GET(self):
+            parsed = urlparse(self.path)
+            path = parsed.path.rstrip("/") or "/"
+            if path.endswith("/lab-dns") or path == "/lab-dns":
+                name = (parse_qs(parsed.query).get("name") or [""])[0]
+                v4, v6 = lab_dns_resolve(name)
+                ok = bool(v4 or v6)
+                body = json.dumps({"ok": ok, "name": name, "ip": v4, "ipv6": v6}).encode()
+                self.send_response(200 if ok else (400 if not lab_dns_name_ok(name) else 404))
+                self.send_header("Content-Type", "application/json")
+                self.send_header("Content-Length", str(len(body)))
+                self.end_headers()
+                self.wfile.write(body)
+                return
+            return super().do_GET()
 
     return partial(Handler, directory=str(directory))
 

@@ -1,5 +1,8 @@
 #include <stdint.h>
 #include "identity.h"
+#include "labdisk.h"
+#include "labnet.h"
+#include "ramfs.h"
 #include "keyboard.h"
 #include "pic.h"
 #include "pit.h"
@@ -87,10 +90,13 @@ void fl_kernel_main(void)
     fl_fs_pit_init();
     fl_fs_kbd_init();
     fl_fs_identity_init();
+    fl_fs_ramfs_init();
+    fl_fs_labdisk_init();
+    fl_fs_labnet_init();
     fl_fs_pic_unmask(0);
     fl_fs_pic_unmask(1);
     fl_fs_serial_puts("Flintstone freestanding x86_64\r\n");
-    fl_fs_serial_puts("CAP identity=available filesystem=unavailable network=unavailable server=unavailable hosted_sessions=available\r\n");
+    fl_fs_serial_puts("CAP identity=available filesystem=ramfs network=lab server=relay hosted_sessions=available\r\n");
     fl_fs_serial_puts("FLINTSTONE_KERNEL_BOOT_OK\r\n");
     __asm__ volatile("sti");
     fl_fs_shell_init();

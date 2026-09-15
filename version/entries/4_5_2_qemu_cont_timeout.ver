@@ -1,0 +1,6 @@
+MAJOR_VERSION=4
+STANDARD_VERSION=5
+RELEASE_VERSION=2
+DESCRIPTION=Fix the published QEMU Wasm lab Guest State failure "QEMU command timed out: cont". Resume is ignored unless the guest is paused, QMP commands are serialized so cont cannot race an in-flight VGA pmemsave, and the worker wakes QMP readers that attach after commands were queued. The guest lab shell runs every hosted/baremetal verb as a lab analog: identity (including sudo/userdel/passwd), ramfs, an in-memory cluster disk, lab IPv4/IPv6/wifi tables, and server host|join|msg via the browser P3 relay (BroadcastChannel fallback on static Pages). Guest ping/nslookup/check resolve names outside the lab table through same-origin /lab-dns (local getaddrinfo; GitHub Pages DoH via the COI service worker) and complete with dnsack; IPv4 literals ping without DNS. Hosted ping/ping6 already use UDP DNS A/AAAA. Hosted FAT32 and kernel/core/net sockets stay off this BIOS image. The relay prints ready only after the WebSocket port is listening.
+
+RELEASE_DATE=2026-09-15

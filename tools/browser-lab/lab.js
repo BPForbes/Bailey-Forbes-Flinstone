@@ -29,6 +29,10 @@
     node.className = [core.STATES.BLOCKED, core.STATES.FAILED].includes(state) ? "blocked" : "";
     node.textContent = detail ? `${state}: ${detail}` : state;
     document.documentElement.dataset.labState = String(state).toLowerCase().replace(/\s+/g, "-");
+    const pauseBtn = document.getElementById("pause");
+    const resumeBtn = document.getElementById("resume");
+    if (pauseBtn) pauseBtn.disabled = state !== core.STATES.READY;
+    if (resumeBtn) resumeBtn.disabled = state !== core.STATES.PAUSED;
     if (state === core.STATES.BOOTING || state === core.STATES.OFF) resetDisplayProbe();
   };
   let info;
@@ -37,6 +41,7 @@
   let sessions = { 1: "flinstone" };
   let activeSession = 1;
   let relay = null;
+  let serialLine = "";
   const validation = new URLSearchParams(location.search).get("validate") === "1";
   const usesBrowserRelay = () => info && info.serverPath === "relay";
   const principal = () => sessions[activeSession] || "flinstone";
@@ -62,8 +67,8 @@
       if (key === "server" && usesBrowserRelay()) {
         on = true;
         detail = "relay (browser-hosted)";
-      } else if (key === "network" && usesBrowserRelay()) {
-        detail = "unavailable (guest); relay for chat";
+      } else if (key === "network") {
+        detail = on ? "lab analog + DNS" : "unavailable";
       }
       item.className = on ? "cap-on" : "cap-off";
       item.textContent = `${label}: ${detail}`;
@@ -164,16 +169,71 @@
     });
     text("account-status", `Active session ${activeSession}: ${sessions[activeSession] || "—"}`);
   }
-  function noteSerial(value) {
-    const sessionMatch = /SESSION (\d+) user=(\S+)/.exec(value);
-    const switchMatch = /SWITCHUSER user=(\S+)/.exec(value);
-    if (sessionMatch) {
-      activeSession = Number(sessionMatch[1]);
-      sessions[activeSession] = sessionMatch[2];
+  async function resolveLabDns(host) {
+    if (!core.labDnsNameOk(host)) {
+      await sendGuest(`dnsack ${host} fail\n`);
+      return;
+    }
+    let ip = "fail";
+    let ipv6 = "";
+    try {
+      const response = await fetch(core.labDnsRequestUrl(location.href, host));
+      const body = await response.json();
+      if (body && body.ok) {
+        if (body.ip) ip = body.ip;
+        if (body.ipv6) ipv6 = body.ipv6;
+      }
+    } catch (_) {
+      /* guest prints unknown host */
+    }
+    await sendGuest(ipv6 ? `dnsack ${host} ${ip} ${ipv6}\n` : `dnsack ${host} ${ip}\n`);
+  }
+  async function applyGuestLine(line) {
+    const event = core.parseGuestLine(line);
+    if (!event) return;
+    if (event.type === "session") {
+      activeSession = event.session;
+      sessions[activeSession] = event.user;
       renderSessions();
-    } else if (switchMatch) {
-      sessions[activeSession] = switchMatch[1];
+      return;
+    }
+    if (event.type === "switchuser") {
+      sessions[activeSession] = event.user;
       renderSessions();
+      return;
+    }
+    if (event.type === "dns") {
+      if (event.host) await resolveLabDns(event.host);
+      return;
+    }
+    if (event.type !== "server" || !relay) return;
+    try {
+      if (event.op === "leave" || event.op === "kill") {
+        relay.leave();
+        renderRelayStatus("Disconnected");
+        renderRoster([]);
+        appendChat("[relay] leave");
+        return;
+      }
+      if (event.op === "host" || event.op === "join") {
+        renderRelayStatus("Connecting…");
+        await relay.connect(principal());
+        return;
+      }
+      if (event.op === "msg" || event.op === "announce") {
+        if (!relay.connected) await relay.connect(principal());
+        if (relay.sendMessage(event.text || ""))
+          appendChat(`${relay.display || principal()}: ${event.text || ""}`);
+        return;
+      }
+      if (event.op === "connected") {
+        renderRoster(relay.members || []);
+        return;
+      }
+      appendChat(`[guest] ${event.op}${event.text ? " " + event.text : ""}`);
+    } catch (error) {
+      renderRelayStatus(error.message || "Relay failed");
+      appendChat(`[error] ${error.message || "Relay failed"}`);
     }
   }
   function renderScreen(bytes) {
@@ -221,8 +281,15 @@
       sessions = { 1: "flinstone" };
       renderSessions();
       emulator = await config.createEmulator({ ...settings, serialByte: byte => {
-        serial.textContent = (serial.textContent + String.fromCharCode(byte)).slice(-65536);
-        noteSerial(serial.textContent.slice(-80));
+        const ch = String.fromCharCode(byte);
+        serial.textContent = (serial.textContent + ch).slice(-65536);
+        if (ch === "\n") {
+          const line = serialLine.replace(/\r$/, "");
+          serialLine = "";
+          void applyGuestLine(line);
+        } else {
+          serialLine = (serialLine + ch).slice(-4096);
+        }
         settings.serialByte(byte);
       } });
       return emulator;
@@ -253,7 +320,17 @@
     document.getElementById(id).onclick = async () => {
       if (busy || ((id === "boot" || id === "reset") && !canBoot())) return;
       busy = true;
-      try { await action(); } catch (error) { controller.fail(error); } finally { busy = false; }
+      try { await action(); } catch (error) {
+        if (id === "pause" || id === "resume") {
+          const node = document.getElementById("status");
+          if (node) {
+            node.className = "blocked";
+            node.textContent = `Failed: ${error.message || String(error)}`;
+          }
+        } else {
+          controller.fail(error);
+        }
+      } finally { busy = false; }
     };
   }
   screen.addEventListener("keydown", event => {
@@ -261,7 +338,7 @@
     const codes = window.FlintstoneQemuKeys && window.FlintstoneQemuKeys.qcodesForEvent(event);
     if (!codes) return;
     event.preventDefault();
-    enqueueGuest(() => emulator.sendKey(codes)).catch(error => controller.fail(error));
+    enqueueGuest(() => emulator.sendKey(codes)).catch(error => console.warn(error));
   });
   const form = document.getElementById("switch-user");
   if (form) {
