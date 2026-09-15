@@ -2,7 +2,7 @@
 const assert = require("assert");
 const fs = require("fs");
 const vm = require("vm");
-const { STATES, validateManifest, isTrustedReadyEvent, createController, validDiagnosticVga, parseGuestLine, labDnsNameOk, labDnsRequestUrl } = require("../tools/browser-lab/lab-core.js");
+const { STATES, validateManifest, isTrustedReadyEvent, createController, validDiagnosticVga, parseGuestLine, labDnsNameOk, labDnsRequestUrl, isFormTypingTarget, guestUserNameOk, guestRegisterLines, guestSwitchLines, guestNewSessionLines } = require("../tools/browser-lab/lab-core.js");
 const { createQmpClient } = require("../tools/browser-lab/qmp-client.js");
 const commit = "1".repeat(40);
 const evidence = {
@@ -52,10 +52,32 @@ assert.strictEqual(parseGuestLine("WHOAMI flinstone"), null);
 assert(labDnsNameOk("example.com"));
 assert(labDnsNameOk("bailey-forbes.com"));
 assert(!labDnsNameOk("bad host"));
+assert.strictEqual(guestRegisterLines("alice", "secret"), "switchuser root\nuseradd alice\nsecret\n");
+assert.strictEqual(guestSwitchLines("alice"), "switchuser alice\n");
+assert.strictEqual(guestNewSessionLines("alice"), "session new\nswitchuser alice\n");
+assert.strictEqual(guestNewSessionLines(""), "session new\nswitchuser flinstone\n");
+assert(!guestUserNameOk("bad user"));
+assert(isFormTypingTarget({ nodeType: 1, tagName: "INPUT", isContentEditable: false }));
+assert(!isFormTypingTarget({ nodeType: 1, tagName: "DIV", isContentEditable: false }));
 assert.strictEqual(
   labDnsRequestUrl("http://127.0.0.1:8766/tools/browser-lab/?validate=1", "example.com").href,
   "http://127.0.0.1:8766/tools/browser-lab/lab-dns?name=example.com"
 );
+
+const labHtml = fs.readFileSync("tools/browser-lab/index.html", "utf8");
+assert(labHtml.includes('href="lab.css"'), "lab chrome stylesheet must be linked");
+assert(labHtml.includes('id="powerline"'), "Liquid Glass chrome must include a Powerline status line");
+assert(labHtml.includes("traffic-lights"), "window chrome must include macOS traffic lights");
+const labCss = fs.readFileSync("tools/browser-lab/lab.css", "utf8");
+assert(labCss.includes("backdrop-filter"), "panels must use a glass blur");
+assert(labCss.includes("JetBrains Mono"), "terminal chrome must request a Powerline-capable mono");
+assert(labCss.includes("display-p3"), "24-bit / Display P3 accents must be declared");
+assert(labCss.includes("clip-path"), "Powerline separators must be geometric, not overlapping glyphs");
+assert(fs.existsSync("tools/browser-lab/fonts/nerd-symbols-powerline.woff2"));
+assert(fs.existsSync("tools/browser-lab/fonts/jetbrains-mono-latin-wght-normal.woff2"));
+const labJs = fs.readFileSync("tools/browser-lab/lab.js", "utf8");
+assert(labJs.includes("VGA_TRUECOLOR"), "VGA renderer must use a 24-bit palette");
+assert((labJs.match(/#[0-9a-fA-F]{6}/g) || []).length >= 16, "truecolor palette needs 16 hex slots");
 
 let controllerChange;
 let controllerOptions;
@@ -104,12 +126,16 @@ assert(!isTrustedReadyEvent({ ...ready, data: { ...ready.data, type: "loading" }
     skipWaiting: () => {},
     clients: { claim: () => {} },
   };
+  const hrefOf = value => typeof value === "string" ? value : (value && value.url) || String(value);
   vm.runInNewContext(coiSrc, {
     window: undefined,
     self: swSelf,
     fetch: async (url) => {
-      fetchCalls.push(String(url));
-      const type = String(url).includes("type=AAAA") ? 28 : 1;
+      const href = hrefOf(url);
+      fetchCalls.push(href);
+      if (href.includes("/lab-dns"))
+        return { ok: false, status: 404, headers: new Headers(), json: async () => ({ ok: false }) };
+      const type = href.includes("type=AAAA") ? 28 : 1;
       return {
         ok: true,
         json: async () => ({ Answer: type === 1 ? [{ type: 1, data: "93.184.216.34" }] : [] }),
@@ -119,14 +145,46 @@ assert(!isTrustedReadyEvent({ ...ready, data: { ...ready.data, type: "loading" }
   });
   let answered;
   fetchHandler({
-    request: { url: "https://lab.example/tools/browser-lab/lab-dns?name=example.com", cache: "default", mode: "cors" },
+    request: new Request("https://lab.example/tools/browser-lab/lab-dns?name=example.com"),
     respondWith: (p) => { answered = p; },
   });
   const dnsResp = await answered;
   assert.strictEqual(dnsResp.status, 200);
   const dnsBody = await dnsResp.json();
   assert.deepStrictEqual(dnsBody, { ok: true, name: "example.com", ip: "93.184.216.34", ipv6: "" });
+  assert(fetchCalls.some(u => u.includes("/lab-dns")));
   assert(fetchCalls.some(u => u.includes("cloudflare-dns.com") && u.includes("type=A")));
+
+  const directCalls = [];
+  let directHandler;
+  vm.runInNewContext(coiSrc, {
+    window: undefined,
+    self: {
+      location: { origin: "https://lab.example" },
+      addEventListener: (name, listener) => { if (name === "fetch") directHandler = listener; },
+      skipWaiting: () => {},
+      clients: { claim: () => {} },
+    },
+    fetch: async (url) => {
+      const href = hrefOf(url);
+      directCalls.push(href);
+      if (href.includes("/lab-dns"))
+        return new Response(JSON.stringify({ ok: true, name: "example.com", ip: "93.184.216.34", ipv6: "" }), {
+          status: 200, headers: { "Content-Type": "application/json" },
+        });
+      throw new Error("DoH should not run when same-origin /lab-dns succeeds: " + href);
+    },
+    Headers, Request, Response, URL, URLSearchParams, console, Promise,
+  });
+  let directAnswered;
+  directHandler({
+    request: new Request("https://lab.example/tools/browser-lab/lab-dns?name=example.com"),
+    respondWith: (p) => { directAnswered = p; },
+  });
+  const directResp = await directAnswered;
+  assert.strictEqual(directResp.status, 200);
+  assert.deepStrictEqual(await directResp.json(), { ok: true, name: "example.com", ip: "93.184.216.34", ipv6: "" });
+  assert(directCalls.every(u => !u.includes("cloudflare-dns.com")));
 
   const sent = [];
   const qmp = createQmpClient({ send: cmd => sent.push(cmd), timeoutMs: 30 });

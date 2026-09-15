@@ -159,6 +159,28 @@
     url.searchParams.set("name", name);
     return url;
   }
+  function isFormTypingTarget(node) {
+    if (!node || node.nodeType !== 1) return false;
+    const tag = node.tagName;
+    if (tag === "INPUT" || tag === "TEXTAREA" || tag === "SELECT" || tag === "BUTTON") return true;
+    return Boolean(node.isContentEditable);
+  }
+  function guestUserNameOk(name) {
+    return typeof name === "string" && /^[A-Za-z][A-Za-z0-9_-]{0,14}$/.test(name);
+  }
+  function guestRegisterLines(name, password) {
+    if (!guestUserNameOk(name)) return "";
+    const secret = String(password || name).trim() || name;
+    return `switchuser root\nuseradd ${name}\n${secret}\n`;
+  }
+  function guestSwitchLines(name) {
+    if (!guestUserNameOk(name)) return "";
+    return `switchuser ${name}\n`;
+  }
+  function guestNewSessionLines(name) {
+    const user = guestUserNameOk(name) ? name : "flinstone";
+    return `session new\nswitchuser ${user}\n`;
+  }
 
-  return { STATES, validateManifest, isTrustedReadyEvent, createController, validDiagnosticVga, exactSerialLine, parseGuestLine, labDnsNameOk, labDnsRequestUrl };
+  return { STATES, validateManifest, isTrustedReadyEvent, createController, validDiagnosticVga, exactSerialLine, parseGuestLine, labDnsNameOk, labDnsRequestUrl, isFormTypingTarget, guestUserNameOk, guestRegisterLines, guestSwitchLines, guestNewSessionLines };
 });

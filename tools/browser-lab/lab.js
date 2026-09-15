@@ -34,10 +34,18 @@
     if (pauseBtn) pauseBtn.disabled = state !== core.STATES.READY;
     if (resumeBtn) resumeBtn.disabled = state !== core.STATES.PAUSED;
     if (state === core.STATES.BOOTING || state === core.STATES.OFF) resetDisplayProbe();
+    const ready = state === core.STATES.READY;
+    const cmd = document.getElementById("guest-cmd");
+    const run = document.getElementById("guest-cmd-run");
+    if (cmd) cmd.disabled = !ready;
+    if (run) run.disabled = !ready;
+    renderPowerline(state);
+    if (ready) screen.focus();
   };
   let info;
   let busy = false;
   let emulator = null;
+  let extraUsers = [];
   let sessions = { 1: "flinstone" };
   let activeSession = 1;
   let relay = null;
@@ -48,6 +56,27 @@
   const serial = document.getElementById("serial");
   const canvas = document.querySelector("#screen canvas");
   const screen = document.getElementById("screen");
+  // Classic VGA is 16 indexed slots; each slot is a 24-bit (sRGB) color so the
+  // JS terminal can use truecolor while the guest still writes 4-bit attributes.
+  const VGA_TRUECOLOR = [
+    "#1c1c1e", "#0a84ff", "#30d158", "#64d2ff",
+    "#ff453a", "#bf5af2", "#ff9f0a", "#d2d2d7",
+    "#636366", "#409cff", "#32d74b", "#70d7ff",
+    "#ff6961", "#da8fff", "#ffd60a", "#f5f5f7",
+  ];
+  const VGA_CELL_W = 11;
+  const VGA_CELL_H = 18;
+  const VGA_FONT = '16px "JetBrains Mono", "SF Mono", ui-monospace, monospace';
+  let lastScreenBytes = null;
+  function renderPowerline(state) {
+    const user = document.getElementById("pl-user");
+    const sess = document.getElementById("pl-sess");
+    const st = document.getElementById("pl-state");
+    const count = Object.keys(sessions).length;
+    if (user) user.textContent = `\uf007 ${sessions[activeSession] || "flinstone"}`;
+    if (sess) sess.textContent = `${activeSession}/${count}`;
+    if (st) st.textContent = state || document.getElementById("status")?.textContent || "…";
+  }
   function renderCaps(capabilities) {
     const node = document.getElementById("capabilities");
     if (!node) return;
@@ -168,6 +197,9 @@
       node.appendChild(button);
     });
     text("account-status", `Active session ${activeSession}: ${sessions[activeSession] || "—"}`);
+    const names = ["flinstone", "root", ...extraUsers.filter(name => name !== "flinstone" && name !== "root")];
+    text("account-users", `Users: ${names.join(", ")}`);
+    renderPowerline(document.getElementById("status")?.textContent);
   }
   async function resolveLabDns(host) {
     if (!core.labDnsNameOk(host)) {
@@ -242,18 +274,25 @@
     // Latch the diagnostic cell: SeaBIOS/empty dumps must not clear a later
     // kernel frame, and they must not hide the placeholder on a fresh boot.
     if (!core.validDiagnosticVga(bytes)) return;
+    lastScreenBytes = bytes;
     document.documentElement.dataset.vgaCell = "F";
-    const colors = ["#000", "#00a", "#0a0", "#0aa", "#a00", "#a0a", "#a50", "#aaa", "#555", "#55f", "#5f5", "#5ff", "#f55", "#f5f", "#ff5", "#fff"];
-    canvas.width = 800; canvas.height = 400;
+    canvas.width = 80 * VGA_CELL_W;
+    canvas.height = 25 * VGA_CELL_H;
     const ctx = canvas.getContext("2d");
-    ctx.font = "16px monospace"; ctx.textBaseline = "top";
+    ctx.font = VGA_FONT;
+    ctx.textBaseline = "top";
     for (let i = 0; i < 2000; i++) {
-      const ch = bytes[i * 2], attr = bytes[i * 2 + 1], x = (i % 80) * 10, y = Math.floor(i / 80) * 16;
-      ctx.fillStyle = colors[(attr >> 4) & 7]; ctx.fillRect(x, y, 10, 16);
-      ctx.fillStyle = colors[attr & 15];
-      if (ch >= 32 && ch <= 126) ctx.fillText(String.fromCharCode(ch), x, y);
+      const ch = bytes[i * 2], attr = bytes[i * 2 + 1];
+      const x = (i % 80) * VGA_CELL_W, y = Math.floor(i / 80) * VGA_CELL_H;
+      ctx.fillStyle = VGA_TRUECOLOR[(attr >> 4) & 7];
+      ctx.fillRect(x, y, VGA_CELL_W, VGA_CELL_H);
+      ctx.fillStyle = VGA_TRUECOLOR[attr & 15];
+      if (ch >= 32 && ch <= 126) ctx.fillText(String.fromCharCode(ch), x, y + 1);
     }
     document.getElementById("display-placeholder").hidden = true;
+  }
+  if (document.fonts && document.fonts.ready) {
+    document.fonts.ready.then(() => { if (lastScreenBytes) renderScreen(lastScreenBytes); });
   }
   const options = () => ({
     artifactUrl: new URL(`${config.artifactBaseUrl}/${info.artifact}?v=${info.shortCommit}`, location.href).href,
@@ -279,6 +318,7 @@
       serial.textContent = "";
       activeSession = 1;
       sessions = { 1: "flinstone" };
+      extraUsers = [];
       renderSessions();
       emulator = await config.createEmulator({ ...settings, serialByte: byte => {
         const ch = String.fromCharCode(byte);
@@ -333,25 +373,52 @@
       } finally { busy = false; }
     };
   }
-  screen.addEventListener("keydown", event => {
-    if (!emulator || typeof emulator.sendKey !== "function") return;
+  screen.addEventListener("click", () => screen.focus());
+  function sendKeyEventToGuest(event) {
+    if (!emulator || typeof emulator.sendKey !== "function") return false;
     const codes = window.FlintstoneQemuKeys && window.FlintstoneQemuKeys.qcodesForEvent(event);
-    if (!codes) return;
+    if (!codes) return false;
     event.preventDefault();
     enqueueGuest(() => emulator.sendKey(codes)).catch(error => console.warn(error));
+    return true;
+  }
+  screen.addEventListener("keydown", event => { sendKeyEventToGuest(event); });
+  document.addEventListener("keydown", event => {
+    if (event.defaultPrevented) return;
+    if (core.isFormTypingTarget(event.target)) return;
+    sendKeyEventToGuest(event);
+  });
+  document.getElementById("guest-cmd-form")?.addEventListener("submit", async event => {
+    event.preventDefault();
+    const input = document.getElementById("guest-cmd");
+    const line = input?.value.trim();
+    if (!line) return;
+    await sendGuest(`${line}\n`);
+    input.value = "";
+    screen.focus();
   });
   const form = document.getElementById("switch-user");
   if (form) {
     form.addEventListener("submit", async event => {
       event.preventDefault();
       const name = document.getElementById("account-name").value.trim();
-      if (!name) return;
-      await sendGuest(`switchuser ${name}\n`);
+      const script = core.guestSwitchLines(name);
+      if (!script) return;
+      await sendGuest(script);
     });
     document.getElementById("account-new-session").onclick = async () => {
-      const name = document.getElementById("account-name").value.trim() || "flinstone";
-      await sendGuest(`session new\nswitchuser ${name}\n`);
+      const name = document.getElementById("account-name").value.trim();
+      await sendGuest(core.guestNewSessionLines(name));
     };
+    document.getElementById("account-register")?.addEventListener("click", async () => {
+      const name = document.getElementById("account-name").value.trim();
+      const secret = document.getElementById("account-secret")?.value || name;
+      const script = core.guestRegisterLines(name, secret);
+      if (!script) return;
+      await sendGuest(script);
+      if (!extraUsers.includes(name)) extraUsers.push(name);
+      renderSessions();
+    });
   }
   load().catch((error) => controller.fail(error));
 })();

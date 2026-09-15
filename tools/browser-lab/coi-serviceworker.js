@@ -36,8 +36,22 @@ if (typeof window === "undefined") {
   self.addEventListener("fetch", event => {
     const request = event.request;
     const reqUrl = new URL(request.url);
-    if (reqUrl.origin === self.location.origin && reqUrl.pathname.endsWith("/lab-dns")) {
-      event.respondWith(labDnsLookup(reqUrl.searchParams.get("name") || ""));
+    if (reqUrl.origin === self.location.origin && reqUrl.pathname.endsWith("/lab-dns") &&
+        request.headers.get("X-Lab-Dns") !== "direct") {
+      event.respondWith((async () => {
+        try {
+          const direct = await fetch(new Request(request, { headers: { "X-Lab-Dns": "direct" } }));
+          if (direct.ok) {
+            const headers = new Headers(direct.headers);
+            headers.set("Cross-Origin-Embedder-Policy", coepCredentialless ? "credentialless" : "require-corp");
+            headers.set("Cross-Origin-Resource-Policy", "same-origin");
+            return new Response(direct.body, { status: direct.status, statusText: direct.statusText, headers });
+          }
+        } catch (_) {
+          /* Pages has no Python /lab-dns; use DoH below */
+        }
+        return labDnsLookup(reqUrl.searchParams.get("name") || "");
+      })());
       return;
     }
     if (request.cache === "only-if-cached" && request.mode !== "same-origin") return;
