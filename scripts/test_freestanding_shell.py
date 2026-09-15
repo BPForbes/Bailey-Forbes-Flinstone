@@ -65,10 +65,15 @@ try:
     read_until("WHOAMI flinstone", 4)
     send("history\n")
     read_until("1: whoami", 4)
-    send("session new\n")
+    # Lab "New session" sends both lines in one burst, matching the iframe UI.
+    send("session new\nswitchuser root\n")
     read_until("SESSION 2 user=flinstone", 4)
-    send("switchuser root\n")
     read_until("SWITCHUSER user=root", 4)
+    if b"no such session" in buf.replace(b"\r", b""):
+        raise SystemExit(
+            "test-freestanding-shell: leftover session new poisoned switchuser\n"
+            + buf.decode("latin1", "replace")
+        )
     send("session 1\n")
     read_until("SESSION 1 user=flinstone", 4)
     send("whoami\n")

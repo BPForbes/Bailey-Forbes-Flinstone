@@ -201,9 +201,15 @@
     sha256: info.sha256,
     onScreen: renderScreen, onDiagnostic: text => console.warn(text),
   });
+  let guestInput = Promise.resolve();
+  function enqueueGuest(work) {
+    const run = guestInput.then(work, work);
+    guestInput = run.catch(() => {});
+    return run;
+  }
   async function sendGuest(value) {
     if (!emulator || typeof emulator.sendText !== "function") return;
-    await emulator.sendText(value);
+    await enqueueGuest(() => emulator.sendText(value));
   }
   const controller = core.createController({
     marker: "FLINTSTONE_KERNEL_BOOT_OK", setState,
@@ -227,7 +233,9 @@
     const response = await fetch(config.metadataUrl, { cache: "no-store" });
     if (!response.ok) throw new Error(`Metadata request failed: HTTP ${response.status}`);
     info = core.validateManifest(await response.json());
-    if (info.serverRelayPort) config.relayPort = info.serverRelayPort;
+    if (info.serverRelayPort && !(window.FLINTSTONE_LAB_CONFIG && Object.prototype.hasOwnProperty.call(window.FLINTSTONE_LAB_CONFIG, "relayPort"))) {
+      config.relayPort = info.serverRelayPort;
+    }
     text("commit", info.shortCommit); text("architecture", info.architecture);
     text("emulator", info.browserEmulator); text("artifact", info.artifact);
     renderRuntimeMode();
@@ -253,7 +261,7 @@
     const codes = window.FlintstoneQemuKeys && window.FlintstoneQemuKeys.qcodesForEvent(event);
     if (!codes) return;
     event.preventDefault();
-    emulator.sendKey(codes).catch(error => controller.fail(error));
+    enqueueGuest(() => emulator.sendKey(codes)).catch(error => controller.fail(error));
   });
   const form = document.getElementById("switch-user");
   if (form) {

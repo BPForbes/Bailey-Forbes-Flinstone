@@ -375,6 +375,7 @@ gen-session-wire-js:
 test-browser-lab: gen-session-wire-js
 	@node ./tests/test_browser_lab.js
 	@node ./tests/test_server_relay.js
+	@node ./tests/test_browser_lab_process.js
 	@PYTHONDONTWRITEBYTECODE=1 python3 ./tests/test_package_browser_lab_release.py
 
 browser-lab-runtime:

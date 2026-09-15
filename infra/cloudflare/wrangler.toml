@@ -1,0 +1,14 @@
+# Deploy: npx wrangler deploy
+# Requires: Cloudflare account + bailey-forbes.com zone on the same account.
+name = "flintstone-lab"
+main = "flintstone-lab-worker.js"
+compatibility_date = "2024-09-01"
+
+# Attach to custom subdomain (recommended).
+[[routes]]
+pattern = "flintstone.bailey-forbes.com/*"
+zone_name = "bailey-forbes.com"
+
+# Optional workers.dev smoke test before attaching the route:
+# wrangler deploy --name flintstone-lab
+# Then open https://flintstone-lab.<account>.workers.dev/ (update portfolio src temporarily).
