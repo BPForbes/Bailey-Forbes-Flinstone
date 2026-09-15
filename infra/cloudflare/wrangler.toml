@@ -12,3 +12,11 @@ zone_name = "bailey-forbes.com"
 # Optional workers.dev smoke test before attaching the route:
 # wrangler deploy --name flintstone-lab
 # Then open https://flintstone-lab.<account>.workers.dev/ (update portfolio src temporarily).
+
+# One Durable Object per chat room (`/ws?room=`).
+[durable_objects]
+bindings = [{ name = "LAB_RELAY", class_name = "LabRelayRoom" }]
+
+[[migrations]]
+tag = "v1"
+new_classes = ["LabRelayRoom"]

@@ -88,7 +88,7 @@
           </section>
           <section id="server-panel" class="server-panel glass-card" aria-label="Server chat relay" hidden>
             <h2>Server chat (browser relay)</h2>
-            <p>Relay messages only — each Send shows the line once. Shell commands belong in <strong>Flinstone Shell</strong> or <strong>Guest commands</strong>. Type <code>server host</code> / <code>server join</code> in the shell, or use the buttons. On static Pages the lab uses a same-origin BroadcastChannel room (no extra WebSocket).</p>
+            <p>Relay messages only — each Send shows the line once. Shell commands belong in <strong>Flinstone Shell</strong> or <strong>Guest commands</strong>. The lab auto-joins a shared WebSocket room when it reaches Ready so visitors on this site can talk. Host / Join reconnect; Leave disconnects. If the public hub is down, this browser falls back to a same-origin BroadcastChannel (tabs on one machine only).</p>
             <div class="server-actions">
               <button id="server-host" type="button">Host</button>
               <button id="server-join" type="button">Join</button>

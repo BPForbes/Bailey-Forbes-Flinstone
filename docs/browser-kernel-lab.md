@@ -197,8 +197,10 @@ The hosted FAT32 volume, block driver, and `kernel/core/net` server path are
 **not** present in the freestanding browser image. The guest instead exposes
 lab analogs for every hosted/baremetal shell verb: volatile ramfs, an in-memory
 cluster disk, a loopback/lab0 network table, and `server` verbs that the lab JS
-bridges onto the P3 relay (or a same-origin BroadcastChannel room on static
-Pages). Persistence, snapshots, Boot/Pause/Resume/
+bridges onto a shared WebSocket room (Cloudflare Durable Object on
+`flintstone.bailey-forbes.com`, Node hub locally) so multiple visitors can talk.
+If that hub is down, the page falls back to a same-origin BroadcastChannel
+(tabs on one machine only). Persistence, snapshots, Boot/Pause/Resume/
 Reset/Power-off, and VM recreation are lab/emulator lifecycle features. Resume
 is enabled only after Pause so QMP `cont` cannot race SeaBIOS/TCG boot or an
 in-flight VGA `pmemsave` and fail Guest State with `QEMU command timed out: cont`.

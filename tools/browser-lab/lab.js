@@ -47,7 +47,10 @@
       if (node) node.disabled = !ready;
     }
     renderPowerline(state);
-    if (ready) screen.focus();
+    if (ready) {
+      screen.focus();
+      void connectRelay();
+    }
   };
   let info;
   let busy = false;
@@ -56,6 +59,7 @@
   let sessions = { 1: "flinstone" };
   let activeSession = 1;
   let relay = null;
+  let connectRelay = async () => {};
   let serialLine = "";
   const search = new URLSearchParams(location.search);
   const validation = search.get("validate") === "1";
@@ -185,6 +189,7 @@
       })();
       return connecting;
     };
+    connectRelay = connect;
     document.getElementById("server-host")?.addEventListener("click", () => { void connect(); });
     document.getElementById("server-join")?.addEventListener("click", () => { void connect(); });
     document.getElementById("server-leave")?.addEventListener("click", () => {

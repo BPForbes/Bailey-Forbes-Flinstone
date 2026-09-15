@@ -42,10 +42,13 @@ After that marker the guest is an interactive lab shell, not the hosted ELF:
 - `switchuser` / `login` / `su` / `sudo` / `logout` / `whoami` / `history` / `useradd` / `session`
 - lab ramfs: `dir` / `ls` / `cat` / `write` / `mkdir` / `rm` / `pwd` / `cd` and the other hosted file verbs
 - lab cluster disk (`createdisk` / `writecluster` / `diskput` / …) and lab net (`ping` / `ifconfig` / `wifi` / …)
-- `server host|join|leave|msg|…` through the browser relay. Local lab uses the
-  WebSocket hub; GitHub Pages skips the missing `:8767` socket and uses a
-  same-origin BroadcastChannel room. Sending a chat line emits it once (the
-  sender's local echo is the same event path as peer delivery).
+- `server host|join|leave|msg|…` through the browser relay. The lab auto-joins a
+  shared WebSocket room on Ready so visitors on the published site can talk
+  (`wss://flintstone.bailey-forbes.com/ws?room=lab`, served by the Cloudflare
+  Durable Object in `infra/cloudflare/`). Local `serve_browser_lab.py --relay-port
+  8767` uses the Node hub. If the hub is down, the page falls back to a
+  same-origin BroadcastChannel (tabs on one machine only). Sending a chat line
+  emits it once (the sender's local echo is the same event path as peer delivery).
 - Switch user / Register user / Guest commands send one shell line at a time
   and wait for serial (`SWITCHUSER`, `Password:`, `ok`) so `useradd` can prompt.
   A connected relay seat reconnects as the new principal after `switchuser`.

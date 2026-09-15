@@ -5,13 +5,15 @@
 
   const { OP, encodeFrame, FrameParser, payloadText, memberIdFromPayload } = wire;
   const LOCAL_HOSTS = new Set(["127.0.0.1", "127.0.0.2", "localhost", "::1"]);
+  const DEFAULT_PUBLIC_RELAY_HOST = "flintstone.bailey-forbes.com";
 
-  function wsUrl(config) {
-    if (config.relayUrl) return config.relayUrl;
-    const port = config.relayPort || 8767;
-    const proto = (typeof location !== "undefined" && location.protocol === "https:") ? "wss:" : "ws:";
-    const host = config.hostname || (typeof location !== "undefined" ? location.hostname : "127.0.0.1");
-    return `${proto}//${host}:${port}/ws?room=${encodeURIComponent(config.relayRoom || "lab")}`;
+  function roomName(config) {
+    return (config && config.relayRoom) || "lab";
+  }
+
+  function publicRelayUrl(config) {
+    if (config && config.publicRelayUrl) return config.publicRelayUrl;
+    return `wss://${DEFAULT_PUBLIC_RELAY_HOST}/ws?room=${encodeURIComponent(roomName(config))}`;
   }
 
   function hostnameOf(config) {
@@ -22,11 +24,65 @@
     return "";
   }
 
+  function wsUrl(config) {
+    if (config.relayUrl) return config.relayUrl;
+    const room = encodeURIComponent(roomName(config));
+    const host = hostnameOf(config);
+    if (LOCAL_HOSTS.has(host)) {
+      const port = config.relayPort || 8767;
+      const proto = (typeof location !== "undefined" && location.protocol === "https:") ? "wss:" : "ws:";
+      return `${proto}//${host}:${port}/ws?room=${room}`;
+    }
+    if (host === DEFAULT_PUBLIC_RELAY_HOST || (host.endsWith(".workers.dev") && host.includes("flintstone"))) {
+      return `wss://${host}/ws?room=${room}`;
+    }
+    return publicRelayUrl(config);
+  }
+
+  function healthUrl(ws) {
+    try {
+      const url = new URL(ws);
+      url.protocol = url.protocol === "wss:" ? "https:" : "http:";
+      url.pathname = "/relay-health";
+      url.search = "";
+      url.hash = "";
+      return url.href;
+    } catch (_) {
+      return "";
+    }
+  }
+
   function shouldTryWebSocket(config) {
     if (!config) return false;
     if (config.forceBroadcast) return false;
     if (config.relayUrl) return true;
-    return LOCAL_HOSTS.has(hostnameOf(config));
+    if (config.skipPublicRelay && !LOCAL_HOSTS.has(hostnameOf(config))) return false;
+    return true;
+  }
+
+  async function relayEndpointReady(ws, config) {
+    if (config && config.skipRelayHealth) return true;
+    let host = "";
+    try { host = new URL(ws).hostname; } catch (_) { return true; }
+    if (LOCAL_HOSTS.has(host)) return true;
+    if (typeof fetch !== "function") return true;
+    const probe = healthUrl(ws);
+    if (!probe) return true;
+    const ctrl = typeof AbortController === "function" ? new AbortController() : null;
+    const timer = setTimeout(() => { try { ctrl && ctrl.abort(); } catch (_) { /* ignore */ } }, 900);
+    try {
+      const response = await fetch(probe, {
+        method: "GET",
+        cache: "no-store",
+        mode: "cors",
+        signal: ctrl ? ctrl.signal : undefined,
+      });
+      return response.ok;
+    } catch (_) {
+      return false;
+    } finally {
+      clearTimeout(timer);
+    }
   }
 
   function formatChatLine(display, text) {
@@ -184,6 +240,8 @@
       members = [];
       if (shouldTryWebSocket(config)) {
         try {
+          const url = wsUrl(config);
+          if (!(await relayEndpointReady(url, config))) throw new Error("Session relay unavailable");
           await connectWebSocket(name);
           return;
         } catch (error) {
@@ -238,7 +296,10 @@
     return client;
   }
 
-  const api = { createRelayClient, wsUrl, shouldTryWebSocket, formatChatLine };
+  const api = {
+    createRelayClient, wsUrl, shouldTryWebSocket, formatChatLine,
+    healthUrl, publicRelayUrl, DEFAULT_PUBLIC_RELAY_HOST,
+  };
   globalThis.FlintstoneServerRelayClient = api;
   if (typeof module === "object" && module.exports) module.exports = api;
 })();

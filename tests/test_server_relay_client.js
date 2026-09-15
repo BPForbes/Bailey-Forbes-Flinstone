@@ -3,15 +3,19 @@ const assert = require("assert");
 
 globalThis.FlintstoneSessionWire = require("../tools/browser-lab/session-wire.js");
 const {
-  createRelayClient, shouldTryWebSocket, formatChatLine,
+  createRelayClient, shouldTryWebSocket, formatChatLine, wsUrl, healthUrl,
 } = require("../tools/browser-lab/server-relay-client.js");
 
 assert.strictEqual(formatChatLine("flinstone", "Hi"), "flinstone: Hi");
 assert.strictEqual(shouldTryWebSocket({ hostname: "127.0.0.1" }), true);
-assert.strictEqual(shouldTryWebSocket({ hostname: "bpforbes.github.io" }), false);
-assert.strictEqual(shouldTryWebSocket({ hostname: "bailey-forbes.com" }), false);
+assert.strictEqual(shouldTryWebSocket({ hostname: "bpforbes.github.io" }), true);
+assert.strictEqual(shouldTryWebSocket({ hostname: "bailey-forbes.com" }), true);
+assert.strictEqual(shouldTryWebSocket({ hostname: "bpforbes.github.io", skipPublicRelay: true }), false);
 assert.strictEqual(shouldTryWebSocket({ forceBroadcast: true, hostname: "127.0.0.1" }), false);
 assert.strictEqual(shouldTryWebSocket({ relayUrl: "ws://127.0.0.1:9/ws", hostname: "example.com" }), true);
+assert.strictEqual(wsUrl({ hostname: "bpforbes.github.io" }), "wss://flintstone.bailey-forbes.com/ws?room=lab");
+assert.strictEqual(wsUrl({ hostname: "flintstone.bailey-forbes.com", relayRoom: "lab" }), "wss://flintstone.bailey-forbes.com/ws?room=lab");
+assert.strictEqual(healthUrl("wss://flintstone.bailey-forbes.com/ws?room=lab"), "https://flintstone.bailey-forbes.com/relay-health");
 
 class MockBroadcastChannel {
   static rooms = new Map();

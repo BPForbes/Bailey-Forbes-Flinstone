@@ -71,6 +71,7 @@ assert(!/account-login", "account-new-session", "account-register", "account-nam
   "account name/password fields must stay enabled so Playwright and operators can type before Ready");
 assert(labJsSrc.includes("syncRelayPrincipal"), "switchuser must reconnect the relay seat");
 assert(labJsSrc.includes("sendingMsg"), "chat submit must ignore a second submit while sending");
+assert(labJsSrc.includes("void connectRelay()"), "Ready must auto-join the shared chat room");
 assert.strictEqual(
   labDnsRequestUrl("http://127.0.0.1:8766/tools/browser-lab/?validate=1", "example.com").href,
   "http://127.0.0.1:8766/tools/browser-lab/lab-dns?name=example.com"
@@ -86,6 +87,7 @@ assert(labHtml.includes("wasm-adapter.js"), "WASM adapter must be loaded");
 assert(labHtml.includes("Flinstone Shell"), "default chrome must name Flinstone Shell");
 assert(labHtml.includes("shell&gt;"), "default chrome must describe the shell> prompt");
 assert(labHtml.includes("Kernel serial output"), "QEMU mode still keeps a serial console in the DOM");
+assert(labHtml.includes("auto-joins a shared WebSocket"), "chat copy must describe multi-visitor join");
 assert(!labHtml.includes("traffic-lights"), "chrome must not include non-interactive window traffic lights");
 assert(!labHtml.includes("tl-close"), "chrome must not include a close traffic light");
 assert(!labHtml.includes("tl-min"), "chrome must not include a minimize traffic light");
