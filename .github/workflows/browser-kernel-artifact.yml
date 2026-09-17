@@ -18,6 +18,11 @@ jobs:
     name: Build, test, and audit browser candidate
     runs-on: ubuntu-latest
     timeout-minutes: 25
+    # Least privilege: repository, language, release, and commit reads come with
+    # contents:read; the metadata timeline additionally needs merged pull requests.
+    permissions:
+      contents: read
+      pull-requests: read
     outputs:
       bootable: ${{ steps.metadata.outputs.bootable }}
       browser_compatible: ${{ steps.metadata.outputs.browser_compatible }}
@@ -112,6 +117,43 @@ jobs:
       - name: Validate portfolio iframe isolation
         timeout-minutes: 10
         run: node ./scripts/test_browser_iframe.cjs
+
+      - name: Generate public project metadata
+        env:
+          # GITHUB_TOKEN only; no PAT is required for these read-only endpoints.
+          GITHUB_TOKEN: ${{ github.token }}
+          GITHUB_REPOSITORY: ${{ github.repository }}
+          GITHUB_SHA: ${{ github.sha }}
+          # The existing QEMU boot smoke result stays authoritative.
+          FL_BOOT_SMOKE_PASSED: ${{ steps.boot_probe.outputs.boot_smoke_passed }}
+          FL_PUBLISH_CONTEXT: ${{ github.event_name == 'push' && github.ref == 'refs/heads/main' }}
+        run: |
+          publish=()
+          if [ "${FL_PUBLISH_CONTEXT}" = "true" ]; then
+            publish=(--publish-context)
+          fi
+          python3 ./scripts/generate_project_metadata.py "${publish[@]}"
+
+      - name: Verify metadata is inside the Pages payload
+        env:
+          GITHUB_SHA: ${{ github.sha }}
+        run: |
+          python3 - <<'PY'
+          import json
+          import os
+
+          path = "dist/browser-lab/project-metadata.json"
+          with open(path, encoding="utf-8") as handle:
+              metadata = json.load(handle)
+          assert metadata["schemaVersion"] == 1, "schemaVersion must be 1"
+          assert metadata["sourceCommit"] == os.environ["GITHUB_SHA"], (
+              "project-metadata.json must point at the deployed build commit"
+          )
+          assert metadata["languages"], "Linguist language breakdown must not be empty"
+          print(f"{path}: schemaVersion={metadata['schemaVersion']} "
+                f"languages={len(metadata['languages'])} "
+                f"timeline={len(metadata['timeline'])}")
+          PY
 
       - name: Read promotion state
         id: metadata

@@ -66,7 +66,8 @@ function upstreamUrl(requestUrl) {
 function isNoStorePath(pathname) {
   return (
     pathname.endsWith("/build-info.json") ||
-    pathname.endsWith("/browser-validation.json")
+    pathname.endsWith("/browser-validation.json") ||
+    pathname.endsWith("/project-metadata.json")
   );
 }
 
