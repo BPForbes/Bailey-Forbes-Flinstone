@@ -172,6 +172,66 @@ check("a human merge actor keeps a bot-authored dependency chore",
           {**bot_dep, "merged_by": {"login": "BPForbes", "type": "User"}},
           "dependabot[bot]", []) is False)
 
+# GitHub's "List pull requests" response omits merged_by, so the merge actor has
+# to be hydrated from "Get a pull request" before a chore is dropped. The list
+# payloads below deliberately carry no merged_by, exactly like production.
+hydrated = []
+
+
+def hydrate_human(number):
+    hydrated.append(number)
+    return {"merged_by": {"login": "BPForbes", "type": "User"}}
+
+
+def hydrate_bot(number):
+    hydrated.append(number)
+    return {"merged_by": {"login": "dependabot[bot]", "type": "Bot"}}
+
+
+hydrated.clear()
+rescued = build_pull_request_events([bot_dep], lambda number: [], hydrate=hydrate_human)
+check("a human-merged dependency chore is rescued by hydrating merged_by",
+      [entry["number"] for entry in rescued] == [200])
+check("hydration is only requested for a candidate about to be dropped",
+      hydrated == [200])
+
+hydrated.clear()
+check("a bot-merged dependency chore still drops after hydration",
+      build_pull_request_events([bot_dep], lambda number: [], hydrate=hydrate_bot) == [])
+check("the bot-merged chore was hydrated before being dropped", hydrated == [200])
+
+hydrated.clear()
+build_pull_request_events([merged], lambda number: [], hydrate=hydrate_human)
+check("eligible work never costs a hydration call", hydrated == [])
+
+# A burst of filtered bot maintenance must not starve the timeline: older
+# eligible work has to be walked into instead of stopping at a fixed buffer.
+burst = [
+    pull(900 - index, merged_at=f"2026-08-{28 - index:02d}T00:00:00Z",
+         title="build(deps): bump left-pad from 1.0.0 to 1.0.1",
+         login="dependabot[bot]", user_type="Bot")
+    for index in range(15)
+]
+human_tail = [
+    pull(800 - index, merged_at=f"2026-07-{28 - index:02d}T00:00:00Z",
+         title=f"Real work {index}")
+    for index in range(5)
+]
+filled = build_pull_request_events(burst + human_tail, lambda number: [], limit=3)
+check("a bot-maintenance burst does not starve the timeline", len(filled) == 3)
+check("the timeline fills from older eligible work",
+      [entry["number"] for entry in filled] == [800, 799, 798])
+check("the walk stops once the limit is reached",
+      build_pull_request_events(human_tail, lambda number: [], limit=2) ==
+      build_pull_request_events(human_tail, lambda number: [])[:2])
+
+lookup_calls = []
+capped = build_pull_request_events(
+    burst + human_tail, lambda number: lookup_calls.append(number) or [],
+    limit=5, max_lookups=4)
+check("max_lookups caps per-pull API calls", len(lookup_calls) <= 4)
+check("a capped walk returns only what it could verify", capped == [])
+
 
 # ---------------------------------------------------------------------------
 # Releases: optional, published-only, tolerant of zero
@@ -382,6 +442,10 @@ fake_github = FakeTransport({
     "/repos/BPForbes/Bailey-Forbes-Flinstone/languages": ok({"C": 800, "Python": 200}),
     "/repos/BPForbes/Bailey-Forbes-Flinstone/pulls/360/commits": ok(agent_commits),
     "/repos/BPForbes/Bailey-Forbes-Flinstone/pulls/354/commits": ok([]),
+    "/repos/BPForbes/Bailey-Forbes-Flinstone/pulls/200/commits": ok([]),
+    # Get a pull request: the only place merged_by is available.
+    "/repos/BPForbes/Bailey-Forbes-Flinstone/pulls/200": ok(
+        {**bot_dep, "merged_by": {"login": "dependabot[bot]", "type": "Bot"}}),
     "/repos/BPForbes/Bailey-Forbes-Flinstone/pulls": ok([merged, unmerged, agent_pull, bot_dep]),
     "/repos/BPForbes/Bailey-Forbes-Flinstone/releases": ok([]),
     "/repos/BPForbes/Bailey-Forbes-Flinstone": ok(repo_payload),
@@ -401,6 +465,7 @@ with tempfile.TemporaryDirectory() as tmp:
         output=str(root / "browser-lab" / "project-metadata.json"),
         max_timeline=25,
         max_pull_pages=1,
+        max_pull_lookups=100,
         skip_commit_authors=False,
         api_base="https://api.invalid",
         token=None,
@@ -419,6 +484,8 @@ with tempfile.TemporaryDirectory() as tmp:
     check("end-to-end timeline keeps merged work", numbers == [354, 360])
     check("end-to-end timeline drops unmerged and bot-only chores",
           353 not in numbers and 200 not in numbers)
+    check("end-to-end hydrates merged_by from the single-pull endpoint",
+          any(call.endswith("/pulls/200") for call in fake_github.calls))
     check("end-to-end timeline keeps agent/human co-authorship",
           produced["timeline"][1]["coAuthors"] == ["BPForbes", "Ada Lovelace"])
     check("end-to-end tolerates zero releases",

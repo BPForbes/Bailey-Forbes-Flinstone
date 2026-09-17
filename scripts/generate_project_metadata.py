@@ -282,22 +282,49 @@ def is_routine_bot_maintenance(pull, author, co_authors):
     return login in DEPENDENCY_BOTS or bool(DEPENDENCY_TITLE_RE.search(title))
 
 
-def build_pull_request_events(pulls, commits_for=None):
-    """Select merged pull requests and project them onto timeline entries."""
+def build_pull_request_events(pulls, commits_for=None, *, limit=None, hydrate=None,
+                              max_lookups=None):
+    """Select merged pull requests and project them onto timeline entries.
+
+    ``pulls`` is walked newest-first and the walk continues until ``limit``
+    eligible entries exist, so a burst of filtered bot maintenance cannot leave
+    the timeline short while older eligible work is still available.
+
+    ``hydrate(number)`` is consulted only for a candidate that would otherwise
+    be dropped as routine bot maintenance: GitHub's *List pull requests*
+    response omits ``merged_by``, so the merge actor has to come from *Get a
+    pull request* before a human-merged chore is discarded.
+    """
     events = []
+    lookups = 0
     for pull in pulls:
         if not isinstance(pull, dict):
             raise MetadataError("Expected pull request objects from the REST API")
+        if limit is not None and len(events) >= limit:
+            break
         merged_at = pull.get("merged_at")
         if not merged_at:  # closed-but-unmerged and open PRs never appear
             continue
         number = pull.get("number")
         if not isinstance(number, int) or isinstance(number, bool):
             raise MetadataError("Pull request numbers must be integers")
-        commits = commits_for(number) if commits_for else []
+        if max_lookups is not None and lookups >= max_lookups:
+            break
+        commits = []
+        if commits_for:
+            commits = commits_for(number)
+            lookups += 1
         author, co_authors = extract_contributors(pull, commits)
         if is_routine_bot_maintenance(pull, author, co_authors):
-            continue
+            detail = None
+            if hydrate and "merged_by" not in pull:
+                detail = hydrate(number)
+                lookups += 1
+            if not isinstance(detail, dict):
+                continue
+            pull = {**pull, "merged_by": detail.get("merged_by")}
+            if is_routine_bot_maintenance(pull, author, co_authors):
+                continue
         date = normalize_timestamp(merged_at, f"pull #{number} merged_at")
         entry = {
             "type": "pull_request",
@@ -581,8 +608,12 @@ def _parse_bool(value, field):
     raise MetadataError(f"{field} must be stated explicitly as true or false, got {value!r}")
 
 
-def collect(client, owner, repo, *, max_timeline, max_pull_pages, include_commits=True):
-    """Fetch every REST input the contract needs."""
+def collect(client, owner, repo, *, max_pull_pages):
+    """Fetch the REST inputs that are needed in full, newest-merged first.
+
+    Per-pull commit and detail lookups stay lazy: the timeline walk decides how
+    far down this list it actually has to go.
+    """
     repository = client.get(f"/repos/{owner}/{repo}")
     languages = client.get(f"/repos/{owner}/{repo}/languages")
     default_branch = repository.get("default_branch") if isinstance(repository, dict) else None
@@ -594,17 +625,8 @@ def collect(client, owner, repo, *, max_timeline, max_pull_pages, include_commit
     )
     merged = [pull for pull in pulls if isinstance(pull, dict) and pull.get("merged_at")]
     merged.sort(key=lambda pull: (_sort_key(pull["merged_at"]), pull.get("number") or 0), reverse=True)
-    # Only the candidates that can reach the timeline are worth a commits round-trip.
-    candidates = merged[: max_timeline + 10]
-    commit_cache = {}
-    if include_commits:
-        for pull in candidates:
-            number = pull.get("number")
-            commit_cache[number] = client.paginate(
-                f"/repos/{owner}/{repo}/pulls/{number}/commits", max_pages=1
-            )
     releases = client.paginate(f"/repos/{owner}/{repo}/releases", max_pages=3)
-    return repository, languages, candidates, commit_cache, releases
+    return repository, languages, merged, releases
 
 
 def generate(args, client=None, now=None):
@@ -623,14 +645,24 @@ def generate(args, client=None, now=None):
     boot_smoke_passed = _parse_bool(args.boot_smoke_passed, "--boot-smoke-passed")
 
     client = client or GitHubClient(api_base=args.api_base, token=args.token)
-    repository, languages, pulls, commit_cache, releases = collect(
-        client, owner, repo,
-        max_timeline=args.max_timeline,
-        max_pull_pages=args.max_pull_pages,
-        include_commits=not args.skip_commit_authors,
+    repository, languages, merged, releases = collect(
+        client, owner, repo, max_pull_pages=args.max_pull_pages
     )
 
-    events = build_pull_request_events(pulls, lambda number: commit_cache.get(number, []))
+    def commits_for(number):
+        return client.paginate(f"/repos/{owner}/{repo}/pulls/{number}/commits", max_pages=1)
+
+    def hydrate(number):
+        # "Get a pull request" carries merged_by, which the list response omits.
+        return client.get(f"/repos/{owner}/{repo}/pulls/{number}")
+
+    events = build_pull_request_events(
+        merged,
+        None if args.skip_commit_authors else commits_for,
+        limit=args.max_timeline,
+        hydrate=hydrate,
+        max_lookups=args.max_pull_lookups,
+    )
     events.extend(build_release_events(releases))
     timeline = order_timeline(events, limit=args.max_timeline)
 
@@ -665,6 +697,9 @@ def parse_args(argv=None):
     parser.add_argument("--output", default="dist/browser-lab/project-metadata.json")
     parser.add_argument("--max-timeline", type=int, default=25)
     parser.add_argument("--max-pull-pages", type=int, default=10)
+    parser.add_argument("--max-pull-lookups", type=int, default=100,
+                        help="Safety cap on per-pull commit/detail API calls while "
+                             "filling the timeline")
     parser.add_argument("--skip-commit-authors", action="store_true",
                         help="Skip per-PR commit lookups (co-author trailers are then unavailable)")
     parser.add_argument("--api-base", default=os.environ.get("GITHUB_API_URL", DEFAULT_API_BASE))
