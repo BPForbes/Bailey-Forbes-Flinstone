@@ -16,6 +16,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 from scripts.generate_project_metadata import (  # noqa: E402
     GitHubClient,
     MetadataError,
+    TransportError,
     build_languages,
     build_build_section,
     build_lab_section,
@@ -78,6 +79,9 @@ repo_payload = {
     "html_url": "https://github.com/BPForbes/Bailey-Forbes-Flinstone",
     "description": "Educational OS/shell codebase",
 }
+check("an upstream email in the description is redacted, not fatal",
+      build_repository({**repo_payload, "description": "ping ops@example.com"})["description"]
+      == "ping [redacted]")
 check("repository projection", build_repository(repo_payload) == {
     "owner": "BPForbes",
     "name": "Bailey-Forbes-Flinstone",
@@ -122,6 +126,21 @@ check("pull entry shape", events[0] == {
     "url": "https://github.com/BPForbes/Bailey-Forbes-Flinstone/pull/354",
     "author": "BPForbes",
 })
+
+emailed = pull(361, merged_at="2026-09-16T10:00:00Z",
+               title="fix: alert ops@example.com when the relay drops")
+redacted = build_pull_request_events([emailed], lambda number: [])
+check("an upstream email in a PR title is redacted, not fatal",
+      redacted[0]["title"] == "fix: alert [redacted] when the relay drops")
+check("a redacted title still validates as publishable",
+      "@" not in json.dumps(redacted))
+
+emailed_release = build_release_events([
+    {"tag_name": "v1.0.0", "name": "thanks ops@example.com", "draft": False,
+     "published_at": "2026-01-01T00:00:00Z", "html_url": "https://example.invalid/r"},
+])
+check("an upstream email in a release title is redacted",
+      emailed_release[0]["title"] == "thanks [redacted]")
 
 agent_pull = pull(360, merged_at="2026-09-16T09:30:00Z", title="Publish project metadata",
                   login="claude[bot]", user_type="Bot")
@@ -229,7 +248,7 @@ lookup_calls = []
 capped = build_pull_request_events(
     burst + human_tail, lambda number: lookup_calls.append(number) or [],
     limit=5, max_lookups=4)
-check("max_lookups caps per-pull API calls", len(lookup_calls) <= 4)
+check("max_lookups caps per-pull API calls", len(lookup_calls) == 4)
 check("a capped walk returns only what it could verify", capped == [])
 
 
@@ -420,6 +439,80 @@ def flaky(url, headers, timeout=30):
 
 retrying = GitHubClient(api_base="https://api.invalid", transport=flaky, sleep=lambda _: None)
 check("transient 5xx responses are retried", retrying.get("/repos/x/y") == {"ok": True})
+
+# Transport-level failures (DNS, reset, timeout) must retry, not kill the deploy.
+transport_calls = []
+
+
+def flaky_transport(url, headers, timeout=30):
+    transport_calls.append(url)
+    if len(transport_calls) < 3:
+        raise TransportError("temporary failure in name resolution")
+    return ok({"ok": True})
+
+
+recovered = GitHubClient(api_base="https://api.invalid", transport=flaky_transport,
+                         sleep=lambda _: None)
+check("a transient transport failure is retried", recovered.get("/repos/x/y") == {"ok": True})
+check("the transport retry stays inside the attempt budget", len(transport_calls) == 3)
+
+always_down = GitHubClient(
+    api_base="https://api.invalid", sleep=lambda _: None,
+    transport=lambda url, headers, timeout=30: (_ for _ in ()).throw(TransportError("down")))
+expect_error("a persistent transport failure is still fatal", always_down.get, "/repos/x/y")
+
+# A secondary rate limit answers 403/429 with Retry-After and an untouched budget.
+secondary = []
+
+
+def secondary_limited(url, headers, timeout=30):
+    secondary.append(url)
+    if len(secondary) < 2:
+        return 403, {"Retry-After": "1", "X-RateLimit-Remaining": "4999"}, b"{}"
+    return ok({"ok": True})
+
+
+slept = []
+retrying_403 = GitHubClient(api_base="https://api.invalid", transport=secondary_limited,
+                            sleep=slept.append)
+check("a 403 secondary rate limit is retried", retrying_403.get("/repos/x/y") == {"ok": True})
+check("Retry-After drives the delay", slept == [1])
+
+slept.clear()
+retry_after_429 = GitHubClient(api_base="https://api.invalid", sleep=slept.append,
+                               transport=FakeTransport({
+                                   "/a": (429, {"Retry-After": "2",
+                                                "X-RateLimit-Remaining": "10"}, b"{}"),
+                               }))
+expect_error("a persistent 429 is still fatal", retry_after_429.get, "/a")
+check("Retry-After is honoured for 429 too", slept == [2, 2])
+
+expect_error("an over-long Retry-After fails clearly rather than hanging",
+             GitHubClient(api_base="https://api.invalid", sleep=lambda _: None,
+                          max_retry_after=30,
+                          transport=FakeTransport({
+                              "/a": (403, {"Retry-After": "600",
+                                           "X-RateLimit-Remaining": "10"}, b"{}"),
+                          })).get, "/a")
+
+# Primary exhaustion still fails immediately rather than waiting out the window.
+slept.clear()
+exhausted = GitHubClient(api_base="https://api.invalid", sleep=slept.append,
+                         transport=FakeTransport({
+                             "/a": (403, {"Retry-After": "1",
+                                          "X-RateLimit-Remaining": "0",
+                                          "X-RateLimit-Reset": "1780000000"}, b"{}"),
+                         }))
+expect_error("primary exhaustion is not retried", exhausted.get, "/a")
+check("primary exhaustion never sleeps", slept == [])
+
+# Token handling: never over cleartext, never across a redirect.
+expect_error("a non-HTTP(S) api base is rejected",
+             GitHubClient, api_base="file:///etc/passwd")
+expect_error("a token is refused over plain HTTP",
+             GitHubClient, api_base="http://api.invalid", token="secret")
+check("an unauthenticated HTTP base is still allowed",
+      GitHubClient(api_base="http://api.invalid").token is None)
 
 failing = GitHubClient(api_base="https://api.invalid", sleep=lambda _: None, transport=FakeTransport({}))
 expect_error("a required request failure is fatal", failing.get, "/repos/x/y")

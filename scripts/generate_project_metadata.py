@@ -44,32 +44,66 @@ class MetadataError(RuntimeError):
     """Raised when metadata cannot be generated truthfully."""
 
 
+class TransportError(MetadataError):
+    """A network-level failure that is worth retrying before giving up."""
+
+
 # --------------------------------------------------------------------------
 # GitHub REST transport
 # --------------------------------------------------------------------------
 
 def urllib_transport(url, headers, timeout=30):
     """Return ``(status, headers, body)`` for one GET request."""
-    request = urllib.request.Request(url, headers=headers, method="GET")
+    # Authorization must not survive a cross-host redirect. urllib still forwards
+    # ordinary headers on redirects (cpython#77842), so the token is attached as
+    # an unredirected header and is therefore sent only to the original host.
+    safe = {name: value for name, value in headers.items() if name.lower() != "authorization"}
+    authorization = next(
+        (value for name, value in headers.items() if name.lower() == "authorization"), None
+    )
+    request = urllib.request.Request(url, headers=safe, method="GET")
+    if authorization:
+        request.add_unredirected_header("Authorization", authorization)
     try:
         with urllib.request.urlopen(request, timeout=timeout) as response:
             return response.status, dict(response.headers), response.read()
     except urllib.error.HTTPError as error:  # still carries status/headers/body
         return error.code, dict(error.headers or {}), error.read()
     except urllib.error.URLError as error:
-        raise MetadataError(f"GitHub request failed for {url}: {error.reason}") from error
+        # Transient: DNS failure, connection reset, timeout. Retryable upstream.
+        raise TransportError(f"GitHub request failed for {url}: {error.reason}") from error
 
 
 class GitHubClient:
     """A very small, fail-loud REST client with pagination and rate-limit awareness."""
 
     def __init__(self, api_base=DEFAULT_API_BASE, token=None, transport=urllib_transport,
-                 attempts=3, sleep=time.sleep):
+                 attempts=3, sleep=time.sleep, max_retry_after=60):
         self.api_base = api_base.rstrip("/")
+        scheme = urllib.parse.urlsplit(self.api_base).scheme.lower()
+        if scheme not in ("http", "https"):
+            raise MetadataError(f"API base must be an HTTP(S) URL, got {self.api_base!r}")
+        if token and scheme != "https":
+            raise MetadataError(
+                f"Refusing to send a GitHub token to a non-HTTPS API base: {self.api_base!r}"
+            )
         self.token = token
         self.transport = transport
         self.attempts = max(1, int(attempts))
         self.sleep = sleep
+        self.max_retry_after = max_retry_after
+
+    @staticmethod
+    def _retry_after(lowered):
+        """Seconds requested by a ``Retry-After`` header, or None when absent/odd."""
+        raw = lowered.get("retry-after")
+        if raw is None:
+            return None
+        try:
+            delay = int(float(raw.strip()))
+        except (AttributeError, ValueError):
+            return None  # HTTP-date form: fall back to ordinary backoff
+        return max(0, delay)
 
     def _headers(self):
         headers = {
@@ -88,23 +122,39 @@ class GitHubClient:
             url = f"{url}?{urllib.parse.urlencode(params)}"
         last = None
         for attempt in range(1, self.attempts + 1):
-            status, headers, body = self.transport(url, self._headers())
+            try:
+                status, headers, body = self.transport(url, self._headers())
+            except TransportError as error:
+                last = str(error)
+                if attempt < self.attempts:
+                    self.sleep(min(2 ** attempt, 8))
+                    continue
+                raise MetadataError(f"GitHub request failed: {last}") from error
             if status == 200:
                 try:
                     return json.loads(body.decode("utf-8"))
                 except (UnicodeDecodeError, json.JSONDecodeError) as error:
                     raise MetadataError(f"GitHub returned non-JSON for {path}: {error}") from error
             lowered = {str(key).lower(): str(value) for key, value in headers.items()}
+            # Primary exhaustion: the window can be an hour away, so fail clearly.
             if status in (403, 429) and lowered.get("x-ratelimit-remaining") == "0":
                 reset = lowered.get("x-ratelimit-reset", "unknown")
                 raise MetadataError(
                     f"GitHub rate limit exhausted for {path} (HTTP {status}); resets at {reset}."
                 )
             last = f"HTTP {status} for {path}"
-            if status in (429,) or 500 <= status < 600:
-                if attempt < self.attempts:
-                    self.sleep(min(2 ** attempt, 8))
-                    continue
+            # A secondary rate limit answers 403 or 429 with Retry-After while the
+            # primary budget is untouched; GitHub asks callers to honour that delay.
+            retry_after = self._retry_after(lowered) if status in (403, 429) else None
+            if retry_after is not None and retry_after > self.max_retry_after:
+                raise MetadataError(
+                    f"GitHub asked for a {retry_after}s Retry-After on {path}, "
+                    f"beyond the {self.max_retry_after}s this run will wait."
+                )
+            retryable = retry_after is not None or status == 429 or 500 <= status < 600
+            if retryable and attempt < self.attempts:
+                self.sleep(retry_after if retry_after is not None else min(2 ** attempt, 8))
+                continue
             break
         raise MetadataError(f"GitHub request failed: {last}")
 
@@ -139,6 +189,17 @@ def _require_mapping(value, field):
     return value
 
 
+def _publishable_text(value, field):
+    """Republish upstream free text with any email address removed.
+
+    Titles and descriptions are written by other people. Refusing to publish the
+    whole document because one of them contains an address would wedge the Pages
+    deployment until that upstream text changed, so redact here and keep the
+    document-wide scan in ``validate_metadata`` as the final guard.
+    """
+    return EMAIL_RE.sub("[redacted]", _require_str(value, field))
+
+
 def normalize_timestamp(value, field):
     """Accept any ISO-8601 instant GitHub emits and return a ``Z`` timestamp."""
     _require_str(value, field)
@@ -167,7 +228,7 @@ def build_repository(repo_payload):
     }
     description = payload.get("description")
     if isinstance(description, str) and description:
-        section["description"] = description
+        section["description"] = EMAIL_RE.sub("[redacted]", description)
     return section
 
 
@@ -330,7 +391,7 @@ def build_pull_request_events(pulls, commits_for=None, *, limit=None, hydrate=No
             "type": "pull_request",
             "date": date,
             "number": number,
-            "title": _require_str(pull.get("title"), f"pull #{number} title"),
+            "title": _publishable_text(pull.get("title"), f"pull #{number} title"),
             "mergedAt": date,
             "url": _require_str(pull.get("html_url"), f"pull #{number} html_url"),
         }
@@ -356,11 +417,12 @@ def build_release_events(releases):
         tag = _require_str(release.get("tag_name"), "release tag_name")
         date = normalize_timestamp(published_at, f"release {tag} published_at")
         title = release.get("name")
+        title = title if isinstance(title, str) and title else tag
         events.append({
             "type": "release",
             "date": date,
             "tag": tag,
-            "title": title if isinstance(title, str) and title else tag,
+            "title": _publishable_text(title, f"release {tag} title"),
             "publishedAt": date,
             "url": _require_str(release.get("html_url"), f"release {tag} html_url"),
             "prerelease": bool(release.get("prerelease")),
