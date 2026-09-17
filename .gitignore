@@ -100,3 +100,7 @@ artifacts/
 /tools/browser-lab/wasm/flintstone.js
 /tools/browser-lab/wasm/flintstone.wasm
 .emsdk-local/
+
+# Python bytecode from scripts/ and tests/
+__pycache__/
+*.pyc

@@ -19,6 +19,19 @@ build leaves the previously published Pages tree in place.
 Repository setting required once: **Pages → Source = GitHub Actions**, and the
 `github-pages` environment must allow the workflow.
 
+## Project metadata endpoint
+
+The same validated deployment publishes a machine-readable description of the
+repository at:
+
+`https://bpforbes.github.io/Bailey-Forbes-Flinstone/project-metadata.json`
+
+The portfolio should read language percentages, the development timeline,
+release history, the deployed source commit, and browser-validation state from
+that file rather than duplicating them. See
+[`docs/project-metadata.md`](./project-metadata.md) for the schema and the
+consumption contract.
+
 ## iframe markup
 
 ```html

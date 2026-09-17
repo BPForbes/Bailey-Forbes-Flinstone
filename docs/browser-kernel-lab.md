@@ -2,7 +2,9 @@
 
 This document covers `BPForbes/Bailey-Forbes-Flinstone` kernel artifacts and
 the static browser lab. Portfolio iframe markup and parent headers are
-specified in [`docs/portfolio-iframe-integration.md`](./portfolio-iframe-integration.md).
+specified in [`docs/portfolio-iframe-integration.md`](./portfolio-iframe-integration.md). The public
+`project-metadata.json` contract published alongside the lab is specified in
+[`docs/project-metadata.md`](./project-metadata.md).
 
 ## Compatibility decision
 

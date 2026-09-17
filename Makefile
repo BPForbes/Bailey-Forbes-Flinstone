@@ -342,7 +342,7 @@ deploy:
 	@gcc -std=c11 -Wall -Wextra -O2 -o gen_version_changelog scripts/gen_version_changelog.c && ./gen_version_changelog
 	@$(MAKE) CHANGELOG_CI=1 all
 
-.PHONY: vm baremetal browser-kernel test-browser-kernel test-browser-kernel-gate test-browser-lab test-browser-boot test-browser-boot-packaged test-browser-iframe test-freestanding-entry test-freestanding-shell browser-lab-runtime browser-lab-release wasm test-wasm-shell
+.PHONY: vm baremetal browser-kernel test-browser-kernel test-browser-kernel-gate test-browser-lab test-browser-boot test-browser-boot-packaged test-browser-iframe test-freestanding-entry test-freestanding-shell browser-lab-runtime browser-lab-release wasm test-wasm-shell project-metadata test-project-metadata
 vm:
 	$(MAKE) VM_ENABLE=1 $(TARGET)
 
@@ -382,6 +382,7 @@ test-browser-lab: gen-session-wire-js
 	@node ./tests/test_flintstone_lab_worker.mjs
 	@PYTHONDONTWRITEBYTECODE=1 python3 ./tests/test_lab_dns.py
 	@PYTHONDONTWRITEBYTECODE=1 python3 ./tests/test_package_browser_lab_release.py
+	@PYTHONDONTWRITEBYTECODE=1 python3 ./tests/test_generate_project_metadata.py
 	@$(MAKE) test-wasm-shell
 
 wasm:
@@ -405,6 +406,19 @@ test-browser-boot-packaged: browser-lab-release
 
 test-browser-iframe: browser-lab-release
 	@node ./scripts/test_browser_iframe.cjs
+
+# Public project metadata for bailey-forbes.com. This reads GitHub (Linguist
+# languages, merged PRs, releases) and the validated build outputs, then writes
+# dist/browser-lab/project-metadata.json into the Pages payload. CI supplies
+# GITHUB_SHA / GITHUB_REPOSITORY / GITHUB_TOKEN and the boot-smoke result; run it
+# locally with, for example:
+#   FL_BOOT_SMOKE_PASSED=true GITHUB_REPOSITORY=BPForbes/Bailey-Forbes-Flinstone \
+#   GITHUB_SHA=$$(git rev-parse HEAD) make project-metadata
+project-metadata:
+	@python3 ./scripts/generate_project_metadata.py
+
+test-project-metadata:
+	@PYTHONDONTWRITEBYTECODE=1 python3 ./tests/test_generate_project_metadata.py
 
 # Fetch and build external libs (SDL2, CUnit) into deps/install.
 .PHONY: deps deps-sdl2 deps-cunit

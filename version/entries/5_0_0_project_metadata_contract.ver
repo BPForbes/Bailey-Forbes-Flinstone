@@ -1,0 +1,14 @@
+MAJOR_VERSION=5
+STANDARD_VERSION=0
+RELEASE_VERSION=0
+DESCRIPTION<<PROJECT_METADATA_DESC_END
+5.0.0: Flintstone becomes the machine-readable source of truth for its own public project metadata.
+
+Every validated push to main now publishes dist/browser-lab/project-metadata.json as part of the same atomic GitHub Pages deployment the browser lab already uses. scripts/generate_project_metadata.py builds the document from GitHub itself: the REST Languages endpoint supplies the Linguist-derived byte counts (percentages are computed dynamically, raw bytes preserved, sorted largest-to-smallest, no language whitelist), merged pull requests supply the development timeline, and published GitHub Releases become release milestones when they exist. Repository facts, authorship, and the deployed source commit (GITHUB_SHA) come from the same run, so metadata and artifact always describe one revision.
+
+Kernel and browser state is republished rather than re-derived: bootable, browserCompatible, bootSmokePassed, validationOutcome, and a compact browser-validation subset are read back from dist/build-info.json, dist/browser-validation.json, and the existing QEMU boot-probe step. The generator refuses to run when the build manifest was produced from a different commit, and lab.published can only be true when every promotion gate passed on the main deployment path. The lab is described honestly as an emulated demonstration with no physical hardware-driver execution.
+
+Timeline selection keeps agent-assisted work: PRs pushed by Cursor, Claude, Codex, Copilot, or Actions remain eligible when a human is meaningfully associated, with Co-authored-by trailers resolved to public GitHub logins. Only bot-authored routine dependency chores with no human association are dropped, and closed-but-unmerged PRs never appear. Contributor email addresses and credentials are structurally refused: the generator validates the document, re-parses the exact bytes it will write, and swaps the file into place atomically so malformed metadata can never replace a valid publication.
+
+Integration is confined to the existing browser-kernel-artifact.yml workflow. No second Pages deployment, no workflow-generated commits, no recursive triggers, and no weakening of the fail-closed promotion gates. The validate job adds only pull-requests: read on top of contents: read and authenticates with GITHUB_TOKEN. Adds docs/project-metadata.md, hermetic unit tests in tests/test_generate_project_metadata.py wired into make test-browser-lab, a make project-metadata target, and project-metadata.json to the Cloudflare lab Worker's no-store set.
+PROJECT_METADATA_DESC_END
