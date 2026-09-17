@@ -20,9 +20,9 @@
  * To bump shipped semver: add new .ver files under version/entries/, finalize to
  * version/locked/, then run make or ./scripts/gen_version_def.sh.
  */
-#define VERSION_MAJOR    4
-#define VERSION_STANDARD 5
-#define VERSION_PATCH    4
+#define VERSION_MAJOR    5
+#define VERSION_STANDARD 0
+#define VERSION_PATCH    0
 
 #define VERSION_STR_(x) #x
 #define VERSION_STR(x) VERSION_STR_(x)
@@ -30,6 +30,6 @@
 #define VERSION \
     VERSION_STR(VERSION_MAJOR) "." VERSION_STR(VERSION_STANDARD) "." VERSION_STR(VERSION_PATCH)
 
-#define VERSION_LINE "4.5.4"
+#define VERSION_LINE "5.0.0"
 
 #endif /* VERSION_DEF_H */
