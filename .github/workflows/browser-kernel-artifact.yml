@@ -28,7 +28,7 @@ jobs:
       browser_compatible: ${{ steps.metadata.outputs.browser_compatible }}
       boot_smoke_passed: ${{ steps.boot_probe.outputs.boot_smoke_passed }}
     steps:
-      - uses: actions/checkout@93cb6efe18208431cddfb8368fd83d5badbf9bfd # v5
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v5
 
       - name: Install build and virtual-boot dependencies
         run: |
@@ -57,18 +57,18 @@ jobs:
         run: ./scripts/test_browser_kernel_artifact.sh
 
       - name: Install browser validation tools
-        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
         with:
           node-version: 22
 
       - name: Cache Playwright browsers
-        uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830 # v4.3.0
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
           path: ~/.cache/ms-playwright
           key: playwright-${{ runner.os }}-${{ hashFiles('tools/browser-lab/package-lock.json') }}
 
       - name: Cache QEMU Wasm runtime
-        uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830 # v4.3.0
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
           path: tools/browser-lab/vendor/qemu
           key: qemu-wasm-${{ hashFiles('tools/browser-lab/runtime-lock.json') }}
@@ -79,7 +79,7 @@ jobs:
           make test-browser-lab
 
       - name: Cache Emscripten SDK
-        uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830 # v4.3.0
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
           path: .emsdk-local
           key: emsdk-3.1.74
@@ -180,7 +180,7 @@ jobs:
 
       - name: Upload blocked compatibility package
         if: steps.metadata.outputs.browser_compatible != 'true'
-        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
           name: flintstone-browser-kernel-browser-blocked-${{ github.sha }}
           path: |
@@ -203,7 +203,7 @@ jobs:
           steps.metadata.outputs.bootable == 'true' &&
           steps.metadata.outputs.browser_compatible == 'true' &&
           steps.boot_probe.outputs.boot_smoke_passed == 'true'
-        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
           name: flintstone-browser-kernel
           path: |
@@ -217,7 +217,7 @@ jobs:
           steps.metadata.outputs.bootable == 'true' &&
           steps.metadata.outputs.browser_compatible == 'true' &&
           steps.boot_probe.outputs.boot_smoke_passed == 'true'
-        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
           name: flintstone-browser-lab
           path: dist/browser-lab
