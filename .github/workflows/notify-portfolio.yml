@@ -1,0 +1,101 @@
+# Tells bailey-forbes.com that Flintstone changed, so it refreshes the metadata
+# it displays and redeploys.
+#
+# Timing is the whole point of this file. The portfolio embeds the published
+# browser lab and prints Flintstone's version and repository statistics, so it
+# must not move until the lab a visitor can actually open has moved with it.
+#
+# "Browser kernel artifact" succeeding is not on its own enough. Its `deploy`
+# job is conditional on the promotion gates:
+#
+#     needs.validate.outputs.bootable == 'true' &&
+#     needs.validate.outputs.browser_compatible == 'true' &&
+#     needs.validate.outputs.boot_smoke_passed == 'true'
+#
+# A candidate that builds and tests cleanly but does not clear those gates
+# records a blocked outcome, leaves `validate` green, and simply skips `deploy`
+# — the run's overall conclusion is still `success` while nothing was published.
+# So the gate job below asks the API what the Pages publish job actually did,
+# and the portfolio is notified only when that job succeeded. This is the
+# fail-closed reading: anything other than an observed successful publish stops
+# the notification.
+#
+# The other Flintstone workflows are deliberately not wired here:
+#
+#   * CI (c-cpp.yml)          — runs on develop and feature branches, and
+#                               validates versioning rather than publishing.
+#   * Version lock on merge   — pushes to develop, publishes no artifact.
+#   * Deploy                  — workflow_dispatch only, produces no Pages state.
+#
+# The dispatch itself lives in the portfolio repository so all projects share
+# one implementation — see
+# BPForbes/Bailey-Forbes-Portfolio-Site.github.io/docs/project-metadata.md.
+
+name: Notify portfolio
+
+on:
+  workflow_run:
+    workflows: ["Browser kernel artifact"]
+    types: [completed]
+    branches: [main]
+
+permissions: {}
+
+concurrency:
+  group: notify-portfolio
+  cancel-in-progress: false
+
+jobs:
+  gate:
+    name: Confirm the lab was published
+    if: github.event.workflow_run.conclusion == 'success'
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      actions: read
+    outputs:
+      published: ${{ steps.check.outputs.published }}
+    steps:
+      - name: Read the Pages publish job outcome
+        id: check
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          RUN_ID: ${{ github.event.workflow_run.id }}
+          REPOSITORY: ${{ github.repository }}
+          # Must match the `name:` of the deploy job in browser-kernel-artifact.yml.
+          DEPLOY_JOB: Publish validated lab to GitHub Pages
+        run: |
+          set -euo pipefail
+
+          conclusion="$(gh api \
+            --paginate \
+            "repos/${REPOSITORY}/actions/runs/${RUN_ID}/jobs" \
+            --jq ".jobs[] | select(.name == \"${DEPLOY_JOB}\") | .conclusion" \
+            | head -n1)"
+
+          if [ -z "${conclusion}" ]; then
+            # The job did not run at all, which is what a skipped deploy looks
+            # like from here.
+            echo "Pages publish job did not run for run ${RUN_ID}; the lab was not republished."
+            echo "published=false" >> "${GITHUB_OUTPUT}"
+            exit 0
+          fi
+
+          echo "Pages publish job concluded: ${conclusion}"
+          if [ "${conclusion}" = "success" ]; then
+            echo "published=true" >> "${GITHUB_OUTPUT}"
+          else
+            echo "published=false" >> "${GITHUB_OUTPUT}"
+          fi
+
+  notify:
+    needs: gate
+    if: needs.gate.outputs.published == 'true'
+    uses: BPForbes/Bailey-Forbes-Portfolio-Site.github.io/.github/workflows/notify-portfolio.yml@main
+    with:
+      project: flinstone
+      sha: ${{ github.event.workflow_run.head_sha }}
+      ref: ${{ github.event.workflow_run.head_branch }}
+      source-workflow: ${{ github.event.workflow_run.name }}
+    secrets:
+      PORTFOLIO_DISPATCH_TOKEN: ${{ secrets.PORTFOLIO_DISPATCH_TOKEN }}
