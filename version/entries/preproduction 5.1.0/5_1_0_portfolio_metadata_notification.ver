@@ -14,3 +14,5 @@ The other workflows are deliberately not wired: CI runs on develop and feature b
 
 Least privilege throughout. The gate job takes actions: read and nothing else; the notify job calls a reusable workflow in the portfolio repository that declares permissions {} because the dispatch is an outbound call. Authentication is a new repository secret, PORTFOLIO_DISPATCH_TOKEN, holding a fine-grained token scoped to the single portfolio repository with Contents write, which is the narrowest permission the dispatch endpoint accepts. It is read from the environment rather than interpolated into a command line, is never echoed, and reaches no other repository. The dispatch implementation is shared rather than copied per project, so the Flintstone-side configuration is the trigger, the gate, and the call.
 PORTFOLIO_NOTIFY_DESC_END
+
+RELEASE_DATE=2026-09-18
