@@ -86,6 +86,32 @@ The **`GM=1`** row is the final prerelease record before **`main`**. Its **`DESC
 
 **`main`** must have **no** **`preproduction *`** directories and **no** **`PRERELEASE=1`**, **`GM=1`**, or **`DEV_VERSION=`** lines — CI runs **`scripts/check_version_main_prerelease_policy.sh`**.
 
+### **`PUBLISHED_DESCRIPTION`** — the portfolio-facing summary for a **`GM=1`** row
+
+Optional, single line only (no heredoc), and it may **only** be present on a row that also has **`GM=1`**  — CI runs **`scripts/check_version_published_description_requires_gm.sh`** and rejects **`PUBLISHED_DESCRIPTION`** on any row where **`GM`** is **`0`** or absent (which includes every root **`.ver`**, since **`GM=1`** is already forbidden there). **`DESCRIPTION`** stays the canonical, internal changelog prose; **`PUBLISHED_DESCRIPTION`** is a short, compact line written for a stranger reading **bailey-forbes.com**, not for the changelog:
+
+```
+MAJOR_VERSION=4
+STANDARD_VERSION=2
+RELEASE_VERSION=0
+GM=1
+DESCRIPTION=Adds inheritable system contracts, IPC/VFS hardening, shell validation improvements, and expanded kernel/runtime infrastructure.
+PUBLISHED_DESCRIPTION=Inheritable contracts · IPC/VFS hardening · shell improvements
+```
+
+When **`promote_preproduction_for_main.sh`** promotes that row, it resolves what the portfolio will show as its collapsed-row summary — **`PUBLISHED_DESCRIPTION`** when present and non-empty, **`DESCRIPTION`** otherwise — and **upserts** (matches by **`A.B.C`**, replacing any existing row for that version) an entry into **`metadata/releases.json`**: `{version, startDate: RELEASE_DATE (or that run's date if the row has none yet), endDate: null, summary: <resolved>, description: DESCRIPTION}`. This is the **same curated file** a maintainer can hand-edit (see **`docs/project-metadata.md`**); a **`GM=1`** promotion is itself the maintainer's "this is portfolio-worthy" decision, so this is not a second, separate approval step. **`PUBLISHED_DESCRIPTION`** itself is **not** copied onto the promoted root **`.ver`** — only **`metadata/releases.json`** carries it forward, so the promoted **`.ver`** stays exactly the plain **`MAJOR_VERSION`/`STANDARD_VERSION`/`RELEASE_VERSION`/`RELEASE_DATE`/`DESCRIPTION`** shape it always was.
+
+Valid/invalid combinations:
+
+| Row | Result |
+|-----|--------|
+| **`GM=1`** + **`PUBLISHED_DESCRIPTION`** | valid |
+| **`GM=1`**, no **`PUBLISHED_DESCRIPTION`** | valid; **`metadata/releases.json`**'s **`summary`** falls back to **`DESCRIPTION`** |
+| **`PUBLISHED_DESCRIPTION`** + **`GM=0`** | invalid (CI rejects) |
+| **`PUBLISHED_DESCRIPTION`**, no **`GM`** key | invalid (CI rejects) |
+
+**`GM=1`** + **`PRERELEASE=1`** on the same row is expected, not a conflict: every row under **`preproduction <A>.<B>.<C>/`** — the only place **`GM=1`** may ever appear — is already required to carry **`PRERELEASE=1`**. What **`check_version_main_prerelease_policy.sh`** guarantees is that **`GM`**, **`PRERELEASE`**, and **`DEV_VERSION`** never survive promotion onto **`main`**, not that they cannot coexist on the staging row a maintainer is actively promoting.
+
 **Layout CI:** **`scripts/check_version_prerelease_layout.sh`** validates **`version/entries`** on every run. **`scripts/check_version_entries_semver_dev_unique.sh`** rejects duplicate **`(MAJOR, STANDARD, RELEASE, DEV_VERSION)`** keys and enforces binary **`PRERELEASE`** / **`GM`** values (**`0`** or **`1`** only).
 
 ## `RELEASE_DATE` — usually omit in entries

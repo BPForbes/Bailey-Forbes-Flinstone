@@ -130,6 +130,19 @@ zero named releases — that is a supported state, not an error. `version`,
 `startDate`, `endDate` (nullable), `summary`, and `description` are the only
 fields a curator writes; the generator computes the rest:
 
+`metadata/releases.json` also gets a row written for you: promoting a `GM=1`
+`.ver` row (see `docs/versioning.md` → **`PUBLISHED_DESCRIPTION`**) upserts an
+entry here automatically, keyed by version, with `summary` resolved from that
+row's `PUBLISHED_DESCRIPTION` (falling back to its `DESCRIPTION` when no
+public-facing line was written) and `description` from the same `DESCRIPTION`
+used for the internal changelog. A `GM=1` promotion is a maintainer decision
+already, so this is not a separate approval — it just spares hand-editing this
+file for the release most likely to need an entry. Hand-editing it directly
+for any other release (a past milestone, one that never went through the
+`GM=1` flow) still works exactly as before, and an automated row can be
+edited afterward like any other — the next `GM=1` promotion for a different
+version will not touch it.
+
 - **`id`** — a stable slug derived from `version` (`"4.0.0 / 4.0.1"` →
   `"4-0-0-4-0-1"`), so nothing but the version string itself has to be kept in
   sync when a release is renamed.
