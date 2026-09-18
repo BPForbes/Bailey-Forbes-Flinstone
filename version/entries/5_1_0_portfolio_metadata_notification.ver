@@ -1,10 +1,8 @@
 MAJOR_VERSION=5
 STANDARD_VERSION=1
 RELEASE_VERSION=0
-PRERELEASE=1
-DEV_VERSION=1
 DESCRIPTION<<PORTFOLIO_NOTIFY_DESC_END
-Flintstone now tells the portfolio when it has published, instead of the portfolio having to be told by hand.
+5.1.0: Flintstone now tells the portfolio when it has published, instead of the portfolio having to be told by hand.
 
 Adds .github/workflows/notify-portfolio.yml, which sends a repository_dispatch event of type project-updated to BPForbes/Bailey-Forbes-Portfolio-Site.github.io so bailey-forbes.com re-queries GitHub, regenerates the Flintstone metadata it displays (version, commit and pull request counts, Linguist language balance, and release milestones read from version/locked/*.ver), and redeploys. No Flintstone state is sent in the payload: the event carries only the repository, commit, ref, workflow name, and project id, and the portfolio remains responsible for deriving every number it prints. Nothing about the kernel, the build, or the promotion gates changes.
 
@@ -14,5 +12,3 @@ The other workflows are deliberately not wired: CI runs on develop and feature b
 
 Least privilege throughout. The gate job takes actions: read and nothing else; the notify job calls a reusable workflow in the portfolio repository that declares permissions {} because the dispatch is an outbound call. Authentication is a new repository secret, PORTFOLIO_DISPATCH_TOKEN, holding a fine-grained token scoped to the single portfolio repository with Contents write, which is the narrowest permission the dispatch endpoint accepts. It is read from the environment rather than interpolated into a command line, is never echoed, and reaches no other repository. The dispatch implementation is shared rather than copied per project, so the Flintstone-side configuration is the trigger, the gate, and the call.
 PORTFOLIO_NOTIFY_DESC_END
-
-RELEASE_DATE=2026-09-18
