@@ -89,6 +89,89 @@ sys.stdout.write(desc)
 PY
 }
 
+# PUBLISHED_DESCRIPTION is deliberately single-line only (no heredoc form): its
+# whole purpose is the compact summary a curator wants named-releases to show
+# collapsed, not another place to paste the multi-paragraph internal changelog
+# prose that DESCRIPTION already carries.
+extract_published_description() {
+  python3 - "$1" <<'PY'
+import sys
+path = sys.argv[1]
+text = open(path, "r", encoding="utf-8", errors="replace").read().splitlines()
+value = ""
+for raw in text:
+    t = raw.rstrip("\r").strip()
+    if not t or t.startswith("#"):
+        continue
+    sk = t
+    if sk.startswith("int "):
+        sk = sk[4:].strip()
+    if sk.startswith("PUBLISHED_DESCRIPTION="):
+        value = sk.split("=", 1)[1].strip()
+        if len(value) >= 2 and value[0] == '"' and value[-1] == '"':
+            value = value[1:-1]
+        break
+sys.stdout.write(value)
+PY
+}
+
+# Upsert (by version) the resolved release into metadata/releases.json, the
+# same curated file a human maintains by hand. A GM=1 promotion is itself a
+# maintainer-authorized "this is portfolio-worthy" decision, so this is not
+# bypassing curation -- it is the curation, expressed through the .ver file
+# a maintainer already had to write rather than a second hand-edit of a JSON
+# file for the same release. Resolution: PUBLISHED_DESCRIPTION becomes the
+# collapsed-row summary when a curator wrote one and it is non-empty,
+# otherwise the summary falls back to the same canonical DESCRIPTION used for
+# the expanded body -- redundant, but never blank, and never invented.
+sync_named_release_metadata() {
+  local root="$1" version="$2" release_date="$3" published="$4" canonical="$5"
+  python3 - "$root" "$version" "$release_date" "$published" "$canonical" <<'PY'
+import json
+import os
+import sys
+import tempfile
+
+root, version, release_date, published, canonical = sys.argv[1:6]
+
+path = os.path.join(root, "metadata", "releases.json")
+if os.path.exists(path):
+    with open(path, "r", encoding="utf-8") as fh:
+        doc = json.load(fh)
+else:
+    doc = {"releases": []}
+
+releases = doc.setdefault("releases", [])
+summary = published if published.strip() != "" else canonical
+entry = {
+    "version": version,
+    "startDate": release_date,
+    "endDate": None,
+    "summary": summary,
+    "description": canonical,
+}
+
+for i, existing in enumerate(releases):
+    if isinstance(existing, dict) and existing.get("version") == version:
+        releases[i] = entry
+        break
+else:
+    releases.append(entry)
+
+dirname = os.path.dirname(path)
+os.makedirs(dirname, exist_ok=True)
+fd, tmp = tempfile.mkstemp(prefix=".releases-", dir=dirname)
+try:
+    with os.fdopen(fd, "w", encoding="utf-8") as fh:
+        json.dump(doc, fh, indent=2, ensure_ascii=False)
+        fh.write("\n")
+    os.replace(tmp, path)
+finally:
+    if os.path.exists(tmp):
+        os.unlink(tmp)
+PY
+}
+
 write_gm_zero() {
   python3 - "$1" <<'PY'
 import os, re, sys, tempfile
@@ -181,6 +264,10 @@ promote_root() {
     agg=$(extract_description "$gm_file")
     agg=${agg//$'\r'/}
 
+    local published
+    published=$(extract_published_description "$gm_file")
+    published=${published//$'\r'/}
+
     local dest="$BASE/$(basename "$gm_file")"
     if [[ -e "$dest" ]]; then
       echo "promote_preproduction_for_main: refuse to overwrite existing $dest" >&2
@@ -203,10 +290,20 @@ promote_root() {
       demote_lower_gm_files "$gm_file" "${lower_gm_files[@]}"
       echo "promote_preproduction_for_main: [dry-run] would write $dest from $gm_file (GA, DESCRIPTION from GM=1 file only)"
       echo "promote_preproduction_for_main: [dry-run] would remove $dir/*.ver and delete $dir"
+      if [[ "$BASE" == "$ROOT/version/entries" ]]; then
+        echo "promote_preproduction_for_main: [dry-run] would sync metadata/releases.json entry for ${m}.${s}.${r}"
+      fi
       continue
     fi
 
     demote_lower_gm_files "$gm_file" "${lower_gm_files[@]}"
+
+    local release_date=""
+    if grep -qE '^[[:space:]]*(int[[:space:]]+)?RELEASE_DATE=' "$gm_file"; then
+      release_date=$(grep -E '^[[:space:]]*(int[[:space:]]+)?RELEASE_DATE=' "$gm_file" | head -1 |
+        sed -E 's/^[[:space:]]*(int[[:space:]]+)?RELEASE_DATE=[[:space:]]*//')
+    fi
+    [[ -n "$release_date" ]] || release_date="$(date +%Y-%m-%d)"
 
     {
       printf 'MAJOR_VERSION=%s\n' "$m"
@@ -225,6 +322,16 @@ promote_root() {
       echo "promote_preproduction_for_main: could not remove $dir (non-.ver files present?)" >&2
       exit 1
     fi
+
+    # metadata/releases.json is not versioned under version/ at all, so it is
+    # exempt from the immutable-.ver-row rules above; syncing it once, keyed
+    # off version/entries (not the version/locked mirror), avoids doing this
+    # write twice for the same release.
+    if [[ "$BASE" == "$ROOT/version/entries" ]]; then
+      sync_named_release_metadata "$ROOT" "${m}.${s}.${r}" "$release_date" "$published" "$agg"
+      echo "promote_preproduction_for_main: synced metadata/releases.json entry for ${m}.${s}.${r}"
+    fi
+
     echo "promote_preproduction_for_main: promoted $(basename "$gm_file") from $dir → $(basename "$dest") (GA, DESCRIPTION from GM=1 file only)"
   done < <(find "$BASE" -mindepth 1 -maxdepth 1 -type d -name 'preproduction *' -print0 2>/dev/null)
 }

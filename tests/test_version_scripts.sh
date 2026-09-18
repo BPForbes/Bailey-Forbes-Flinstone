@@ -8,6 +8,8 @@
 #   scripts/lib/ver_release_date_stamp.sh
 #   scripts/relocate_root_prerelease_ver_to_preproduction.sh
 #   scripts/stamp_version_entries_release_date.sh
+#   scripts/check_version_published_description_requires_gm.sh
+#   scripts/promote_preproduction_for_main.sh (PUBLISHED_DESCRIPTION -> metadata/releases.json)
 #
 # Run from repository root: bash tests/test_version_scripts.sh
 # Exit 0 on all pass, exit 1 on any failure.
@@ -1830,6 +1832,328 @@ VER
   cleanup "$d"
 }
 
+test_promote_published_description_upserts_metadata_releases() {
+  require_proc_sub "promote: PUBLISHED_DESCRIPTION upserts metadata/releases.json" || return 0
+  local d
+  d="$(make_fake_repo promote_preproduction_for_main.sh)"
+  mkdir -p "$d/version/entries/preproduction 4.2.0" "$d/metadata"
+  cat >"$d/version/entries/preproduction 4.2.0/ga.ver" <<'VER'
+MAJOR_VERSION=4
+STANDARD_VERSION=2
+RELEASE_VERSION=0
+PRERELEASE=1
+GM=1
+DEV_VERSION=1
+RELEASE_DATE=2026-05-18
+DESCRIPTION=Adds inheritable system contracts, IPC/VFS hardening, and expanded runtime infrastructure.
+PUBLISHED_DESCRIPTION=Inheritable contracts (c) IPC/VFS hardening
+VER
+  if ! bash "$(promote_script "$d")" >/dev/null 2>&1; then
+    fail "promote published-description: promotion should succeed"
+  elif [[ ! -f "$d/metadata/releases.json" ]]; then
+    fail "promote published-description: metadata/releases.json should be written"
+  elif ! python3 -c "
+import json, sys
+doc = json.load(open('$d/metadata/releases.json'))
+r = doc['releases'][0]
+assert r['version'] == '4.2.0', r
+assert r['startDate'] == '2026-05-18', r
+assert r['endDate'] is None, r
+assert r['summary'] == 'Inheritable contracts (c) IPC/VFS hardening', r
+assert 'inheritable system contracts' in r['description'], r
+" 2>/tmp/promote_pd_err; then
+    fail "promote published-description: entry shape mismatch: $(cat /tmp/promote_pd_err)"
+  else
+    ok "promote: PUBLISHED_DESCRIPTION upserts metadata/releases.json summary"
+  fi
+  cleanup "$d"
+}
+
+test_promote_no_published_description_falls_back_to_description() {
+  require_proc_sub "promote: no PUBLISHED_DESCRIPTION falls back to DESCRIPTION" || return 0
+  local d
+  d="$(make_fake_repo promote_preproduction_for_main.sh)"
+  mkdir -p "$d/version/entries/preproduction 4.3.0"
+  cat >"$d/version/entries/preproduction 4.3.0/ga.ver" <<'VER'
+MAJOR_VERSION=4
+STANDARD_VERSION=3
+RELEASE_VERSION=0
+PRERELEASE=1
+GM=1
+DEV_VERSION=1
+RELEASE_DATE=2026-09-13
+DESCRIPTION=Production Wi-Fi support.
+VER
+  if ! bash "$(promote_script "$d")" >/dev/null 2>&1; then
+    fail "promote no-published-description: promotion should succeed"
+  elif ! python3 -c "
+import json
+doc = json.load(open('$d/metadata/releases.json'))
+r = doc['releases'][0]
+assert r['summary'] == 'Production Wi-Fi support.', r
+assert r['description'] == 'Production Wi-Fi support.', r
+" 2>/tmp/promote_pd_err2; then
+    fail "promote no-published-description: summary should fall back to DESCRIPTION: $(cat /tmp/promote_pd_err2)"
+  else
+    ok "promote: missing PUBLISHED_DESCRIPTION falls back to DESCRIPTION for summary"
+  fi
+  cleanup "$d"
+}
+
+test_promote_metadata_releases_upsert_replaces_existing_version() {
+  require_proc_sub "promote: metadata/releases.json upsert replaces same version" || return 0
+  local d
+  d="$(make_fake_repo promote_preproduction_for_main.sh)"
+  mkdir -p "$d/version/entries/preproduction 4.4.0" "$d/metadata"
+  cat >"$d/metadata/releases.json" <<'JSON'
+{"releases": [{"version": "4.4.0", "startDate": "2020-01-01", "endDate": null, "summary": "stale", "description": "stale"}]}
+JSON
+  cat >"$d/version/entries/preproduction 4.4.0/ga.ver" <<'VER'
+MAJOR_VERSION=4
+STANDARD_VERSION=4
+RELEASE_VERSION=0
+PRERELEASE=1
+GM=1
+DEV_VERSION=1
+RELEASE_DATE=2026-09-14
+DESCRIPTION=Browser-kernel contract and CI gate.
+PUBLISHED_DESCRIPTION=Browser-kernel contract
+VER
+  if ! bash "$(promote_script "$d")" >/dev/null 2>&1; then
+    fail "promote upsert: promotion should succeed"
+  elif ! python3 -c "
+import json
+doc = json.load(open('$d/metadata/releases.json'))
+assert len(doc['releases']) == 1, doc['releases']
+r = doc['releases'][0]
+assert r['startDate'] == '2026-09-14', r
+assert r['summary'] == 'Browser-kernel contract', r
+" 2>/tmp/promote_pd_err3; then
+    fail "promote upsert: existing row for the same version should be replaced, not duplicated: $(cat /tmp/promote_pd_err3)"
+  else
+    ok "promote: metadata/releases.json upsert replaces an existing row for the same version"
+  fi
+  cleanup "$d"
+}
+
+test_promote_published_description_not_copied_to_root_ver() {
+  require_proc_sub "promote: PUBLISHED_DESCRIPTION is not copied onto the promoted root .ver" || return 0
+  local d
+  d="$(make_fake_repo promote_preproduction_for_main.sh)"
+  mkdir -p "$d/version/entries/preproduction 4.5.0"
+  cat >"$d/version/entries/preproduction 4.5.0/ga.ver" <<'VER'
+MAJOR_VERSION=4
+STANDARD_VERSION=5
+RELEASE_VERSION=0
+PRERELEASE=1
+GM=1
+DEV_VERSION=1
+RELEASE_DATE=2026-09-14
+DESCRIPTION=Freestanding boot boundary.
+PUBLISHED_DESCRIPTION=Freestanding boot
+VER
+  bash "$(promote_script "$d")" >/dev/null 2>&1 || true
+  if [[ ! -f "$d/version/entries/ga.ver" ]]; then
+    fail "promote root shape: promoted root .ver should exist"
+  elif grep -q '^PUBLISHED_DESCRIPTION=' "$d/version/entries/ga.ver"; then
+    fail "promote root shape: promoted root .ver must not carry PUBLISHED_DESCRIPTION"
+  else
+    ok "promote: promoted root .ver never carries PUBLISHED_DESCRIPTION"
+  fi
+  cleanup "$d"
+}
+
+test_promote_metadata_releases_defaults_release_date_when_missing() {
+  require_proc_sub "promote: metadata/releases.json startDate defaults to today when RELEASE_DATE is absent" || return 0
+  local d today
+  d="$(make_fake_repo promote_preproduction_for_main.sh)"
+  today="$(date +%Y-%m-%d)"
+  mkdir -p "$d/version/entries/preproduction 4.6.0"
+  cat >"$d/version/entries/preproduction 4.6.0/ga.ver" <<'VER'
+MAJOR_VERSION=4
+STANDARD_VERSION=6
+RELEASE_VERSION=0
+PRERELEASE=1
+GM=1
+DEV_VERSION=1
+DESCRIPTION=No release date yet.
+PUBLISHED_DESCRIPTION=No date yet
+VER
+  if ! bash "$(promote_script "$d")" >/dev/null 2>&1; then
+    fail "promote default date: promotion should succeed"
+  elif ! python3 -c "
+import json
+doc = json.load(open('$d/metadata/releases.json'))
+r = doc['releases'][0]
+assert r['startDate'] == '$today', r
+"; then
+    fail "promote default date: startDate should default to today ($today) when RELEASE_DATE is absent"
+  else
+    ok "promote: metadata/releases.json startDate defaults to today when RELEASE_DATE is absent"
+  fi
+  cleanup "$d"
+}
+
+published_description_check_script() {
+  local fake_root="$1"
+  echo "$fake_root/scripts/check_version_published_description_requires_gm.sh"
+}
+
+test_published_description_check_ok_with_gm1() {
+  require_proc_sub "published_description: PUBLISHED_DESCRIPTION with GM=1 passes" || return 0
+  local d
+  d="$(make_fake_repo check_version_published_description_requires_gm.sh)"
+  mkdir -p "$d/version/entries/preproduction 1.0.0"
+  cat >"$d/version/entries/preproduction 1.0.0/a.ver" <<'VER'
+MAJOR_VERSION=1
+STANDARD_VERSION=0
+RELEASE_VERSION=0
+PRERELEASE=1
+GM=1
+DEV_VERSION=1
+DESCRIPTION=full
+PUBLISHED_DESCRIPTION=short
+VER
+  if bash "$(published_description_check_script "$d")" >/dev/null 2>&1; then
+    ok "published_description: PUBLISHED_DESCRIPTION with GM=1 passes"
+  else
+    fail "published_description: PUBLISHED_DESCRIPTION with GM=1 should pass"
+  fi
+  cleanup "$d"
+}
+
+test_published_description_check_ok_gm1_without_published() {
+  require_proc_sub "published_description: GM=1 without PUBLISHED_DESCRIPTION passes" || return 0
+  local d
+  d="$(make_fake_repo check_version_published_description_requires_gm.sh)"
+  mkdir -p "$d/version/entries/preproduction 1.0.0"
+  cat >"$d/version/entries/preproduction 1.0.0/a.ver" <<'VER'
+MAJOR_VERSION=1
+STANDARD_VERSION=0
+RELEASE_VERSION=0
+PRERELEASE=1
+GM=1
+DEV_VERSION=1
+DESCRIPTION=full
+VER
+  if bash "$(published_description_check_script "$d")" >/dev/null 2>&1; then
+    ok "published_description: GM=1 without PUBLISHED_DESCRIPTION passes"
+  else
+    fail "published_description: GM=1 without PUBLISHED_DESCRIPTION should pass"
+  fi
+  cleanup "$d"
+}
+
+test_published_description_check_rejects_gm0() {
+  require_proc_sub "published_description: PUBLISHED_DESCRIPTION with GM=0 is rejected" || return 0
+  local d
+  d="$(make_fake_repo check_version_published_description_requires_gm.sh)"
+  write_ver_ga "$d/version/entries/1_0_0_base.ver" 1 0 0
+  cat >>"$d/version/entries/1_0_0_base.ver" <<'VER'
+GM=0
+PUBLISHED_DESCRIPTION=short
+VER
+  if bash "$(published_description_check_script "$d")" >/dev/null 2>&1; then
+    fail "published_description: PUBLISHED_DESCRIPTION with GM=0 should be rejected"
+  else
+    ok "published_description: PUBLISHED_DESCRIPTION with GM=0 is rejected"
+  fi
+  cleanup "$d"
+}
+
+test_published_description_check_rejects_missing_gm() {
+  require_proc_sub "published_description: PUBLISHED_DESCRIPTION with no GM key is rejected" || return 0
+  local d
+  d="$(make_fake_repo check_version_published_description_requires_gm.sh)"
+  write_ver_ga "$d/version/entries/1_0_0_base.ver" 1 0 0
+  cat >>"$d/version/entries/1_0_0_base.ver" <<'VER'
+PUBLISHED_DESCRIPTION=short
+VER
+  if bash "$(published_description_check_script "$d")" >/dev/null 2>&1; then
+    fail "published_description: PUBLISHED_DESCRIPTION with no GM key should be rejected"
+  else
+    ok "published_description: PUBLISHED_DESCRIPTION with no GM key is rejected"
+  fi
+  cleanup "$d"
+}
+
+test_published_description_check_accepts_exactly_100_chars() {
+  require_proc_sub "published_description: exactly 100 characters passes" || return 0
+  local d value
+  d="$(make_fake_repo check_version_published_description_requires_gm.sh)"
+  mkdir -p "$d/version/entries/preproduction 1.0.0"
+  value=$(python3 -c "print('x' * 100, end='')")
+  {
+    cat <<'VER'
+MAJOR_VERSION=1
+STANDARD_VERSION=0
+RELEASE_VERSION=0
+PRERELEASE=1
+GM=1
+DEV_VERSION=1
+DESCRIPTION=full
+VER
+    printf 'PUBLISHED_DESCRIPTION=%s\n' "$value"
+  } >"$d/version/entries/preproduction 1.0.0/a.ver"
+  if bash "$(published_description_check_script "$d")" >/dev/null 2>&1; then
+    ok "published_description: exactly 100 characters passes"
+  else
+    fail "published_description: exactly 100 characters should pass"
+  fi
+  cleanup "$d"
+}
+
+test_published_description_check_rejects_101_chars() {
+  require_proc_sub "published_description: 101 characters is rejected" || return 0
+  local d value
+  d="$(make_fake_repo check_version_published_description_requires_gm.sh)"
+  mkdir -p "$d/version/entries/preproduction 1.0.0"
+  value=$(python3 -c "print('x' * 101, end='')")
+  {
+    cat <<'VER'
+MAJOR_VERSION=1
+STANDARD_VERSION=0
+RELEASE_VERSION=0
+PRERELEASE=1
+GM=1
+DEV_VERSION=1
+DESCRIPTION=full
+VER
+    printf 'PUBLISHED_DESCRIPTION=%s\n' "$value"
+  } >"$d/version/entries/preproduction 1.0.0/a.ver"
+  if bash "$(published_description_check_script "$d")" >/dev/null 2>&1; then
+    fail "published_description: 101 characters should be rejected"
+  else
+    ok "published_description: 101 characters is rejected"
+  fi
+  cleanup "$d"
+}
+
+test_published_description_check_counts_characters_not_bytes() {
+  require_proc_sub "published_description: multi-byte UTF-8 is counted as characters, not bytes" || return 0
+  local d
+  d="$(make_fake_repo check_version_published_description_requires_gm.sh)"
+  mkdir -p "$d/version/entries/preproduction 1.0.0"
+  # 64 real characters (several are multi-byte "·" / "–"), which a
+  # byte count under a non-UTF-8 locale would over-count past a naive check.
+  cat >"$d/version/entries/preproduction 1.0.0/a.ver" <<'VER'
+MAJOR_VERSION=1
+STANDARD_VERSION=0
+RELEASE_VERSION=0
+PRERELEASE=1
+GM=1
+DEV_VERSION=1
+DESCRIPTION=full
+PUBLISHED_DESCRIPTION=Inheritable contracts · IPC/VFS hardening · shell improvements
+VER
+  if LC_ALL=C LANG=C bash "$(published_description_check_script "$d")" >/dev/null 2>&1; then
+    ok "published_description: multi-byte UTF-8 is counted as characters, not bytes"
+  else
+    fail "published_description: a 64-character UTF-8 summary should pass under any locale"
+  fi
+  cleanup "$d"
+}
+
 test_gen_def_malformed_gm_zero_suffix_rejected() {
   require_proc_sub "gen_def: GM=0abc rejected" || return 0
   local d
@@ -1894,6 +2218,20 @@ test_promote_normalize_gm_only_demotes_lower_dev_version
 test_promote_multiple_gm_uses_highest_dev_version
 test_promote_multiple_gm_then_main_policy_passes
 test_promote_malformed_gm_suffix_aborts
+test_promote_published_description_upserts_metadata_releases
+test_promote_no_published_description_falls_back_to_description
+test_promote_metadata_releases_upsert_replaces_existing_version
+test_promote_published_description_not_copied_to_root_ver
+test_promote_metadata_releases_defaults_release_date_when_missing
+
+# check_version_published_description_requires_gm.sh
+test_published_description_check_ok_with_gm1
+test_published_description_check_ok_gm1_without_published
+test_published_description_check_rejects_gm0
+test_published_description_check_rejects_missing_gm
+test_published_description_check_accepts_exactly_100_chars
+test_published_description_check_rejects_101_chars
+test_published_description_check_counts_characters_not_bytes
 
 # version_merge_sim_status.sh
 test_merge_sim_ref_lists_preproduction

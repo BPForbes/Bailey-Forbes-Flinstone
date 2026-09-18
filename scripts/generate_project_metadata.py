@@ -29,6 +29,7 @@ SCHEMA_VERSION = 1
 DEFAULT_API_BASE = "https://api.github.com"
 USER_AGENT = "flintstone-project-metadata/1"
 COMMIT_RE = re.compile(r"^[0-9a-f]{40}$")
+DATE_ONLY_RE = re.compile(r"^\d{4}-\d{2}-\d{2}$")
 #  "Co-authored-by: Name <mail@example.com>" (RFC-ish trailer, case-insensitive).
 COAUTHOR_RE = re.compile(r"^\s*co-authored-by:\s*(?P<name>.*?)\s*<(?P<email>[^>]*)>\s*$", re.IGNORECASE)
 # GitHub's public no-reply forms: "12345+login@users.noreply.github.com".
@@ -444,6 +445,97 @@ def order_timeline(events, limit=None):
     return ordered[:limit] if limit else ordered
 
 
+def _require_date(value, field):
+    """A plain YYYY-MM-DD, not a full ISO-8601 instant.
+
+    Named releases are curated by a person in calendar days, not the
+    second-precision timestamps GitHub's REST API returns for commits and pull
+    requests, so this is a distinct check from ``normalize_timestamp``.
+    """
+    text = _require_str(value, field)
+    if not DATE_ONLY_RE.match(text):
+        raise MetadataError(f"{field} must be YYYY-MM-DD, got {text!r}")
+    try:
+        datetime.strptime(text, "%Y-%m-%d")
+    except ValueError as error:
+        raise MetadataError(f"{field} is not a real calendar date: {text!r}") from error
+    return text
+
+
+def _slugify_version(version):
+    """A stable, URL-safe identity for a named release, derived from its own
+    version string so curators never have to hand-maintain a separate key."""
+    slug = re.sub(r"[^a-z0-9]+", "-", version.lower()).strip("-")
+    if not slug:
+        raise MetadataError(f"version {version!r} has no usable characters for an id")
+    return slug
+
+
+def build_named_releases(curated_payload, *, repository_url, source_commit):
+    """Project a human-curated ``metadata/releases.json`` onto the contract.
+
+    This is explicitly editorial, not re-derived: the generator makes no
+    attempt to infer "named releases" from commits, tags, or the
+    ``version/*.ver`` train. A repository publishes zero named releases until a
+    person curates the first one, and adding one here is the only way a release
+    appears on the portfolio's compact timeline — Git history stays too
+    granular and inconsistent for that presentation, which is the point of
+    keeping this list separate from the ``timeline`` section above.
+
+    A release's ``url`` defaults to the exact validated commit's
+    ``version/locked`` directory, so "View release" always points at real,
+    reviewable source rather than a guess about where release notes might live;
+    a curator may override it per release when something more specific exists.
+    """
+    if curated_payload is None:
+        return []
+    payload = _require_mapping(curated_payload, "metadata/releases.json")
+    entries = payload.get("releases")
+    if not isinstance(entries, list):
+        raise MetadataError("metadata/releases.json .releases must be a JSON array")
+
+    default_url = f"{repository_url}/tree/{source_commit}/version/locked"
+    seen_versions = set()
+    releases = []
+    for index, entry in enumerate(entries):
+        item = _require_mapping(entry, f"releases[{index}]")
+        version = _require_str(item.get("version"), f"releases[{index}].version")
+        if version in seen_versions:
+            raise MetadataError(f"releases[{index}].version {version!r} is duplicated")
+        seen_versions.add(version)
+
+        start_date = _require_date(item.get("startDate"), f"releases[{index}].startDate")
+        end_date_raw = item.get("endDate")
+        end_date = None
+        if end_date_raw is not None:
+            end_date = _require_date(end_date_raw, f"releases[{index}].endDate")
+            if end_date < start_date:
+                raise MetadataError(f"releases[{index}].endDate is before its startDate")
+
+        summary = _publishable_text(item.get("summary"), f"releases[{index}].summary")
+        description = _publishable_text(item.get("description"), f"releases[{index}].description")
+
+        url = item.get("url")
+        if url is not None:
+            url = _require_str(url, f"releases[{index}].url")
+            if not url.startswith("https://github.com/"):
+                raise MetadataError(f"releases[{index}].url must be a github.com URL")
+
+        releases.append({
+            "id": _slugify_version(version),
+            "version": version,
+            "startDate": start_date,
+            "endDate": end_date,
+            "summary": summary,
+            "description": description,
+            "url": url or default_url,
+        })
+
+    # Newest-first, matching every other list this document publishes.
+    releases.sort(key=lambda entry: (entry["startDate"], entry["version"]), reverse=True)
+    return releases
+
+
 def build_build_section(build_info, browser_validation, boot_smoke_passed, source_commit):
     """Expose a compact subset of the *existing* validation outputs.
 
@@ -509,7 +601,7 @@ def build_lab_section(build_info, gates_passed, publish_context):
     }
 
 
-def build_metadata(*, repository, languages, timeline, build, lab, source_commit, generated_at):
+def build_metadata(*, repository, languages, timeline, build, lab, releases, source_commit, generated_at):
     return {
         "schemaVersion": SCHEMA_VERSION,
         "generatedAt": generated_at,
@@ -519,6 +611,7 @@ def build_metadata(*, repository, languages, timeline, build, lab, source_commit
         "build": build,
         "lab": lab,
         "timeline": timeline,
+        "releases": releases,
     }
 
 
@@ -614,6 +707,37 @@ def validate_metadata(document):
             raise MetadataError("timeline must be ordered newest-first")
         last_date = date
 
+    releases = doc.get("releases")
+    if not isinstance(releases, list):
+        raise MetadataError("releases must be a JSON array")
+    seen_release_ids = set()
+    last_start_date = None
+    for index, release in enumerate(releases):
+        entry = _require_mapping(release, f"releases[{index}]")
+        release_id = _require_str(entry.get("id"), f"releases[{index}].id")
+        if release_id in seen_release_ids:
+            raise MetadataError(f"releases[{index}].id {release_id!r} is duplicated")
+        seen_release_ids.add(release_id)
+        _require_str(entry.get("version"), f"releases[{index}].version")
+        start_date = entry.get("startDate")
+        if not isinstance(start_date, str) or not DATE_ONLY_RE.match(start_date):
+            raise MetadataError(f"releases[{index}].startDate must be YYYY-MM-DD")
+        end_date = entry.get("endDate")
+        if end_date is not None and (
+            not isinstance(end_date, str) or not DATE_ONLY_RE.match(end_date)
+        ):
+            raise MetadataError(f"releases[{index}].endDate must be YYYY-MM-DD or null")
+        if end_date is not None and end_date < start_date:
+            raise MetadataError(f"releases[{index}].endDate is before its startDate")
+        _require_str(entry.get("summary"), f"releases[{index}].summary")
+        _require_str(entry.get("description"), f"releases[{index}].description")
+        url = _require_str(entry.get("url"), f"releases[{index}].url")
+        if not url.startswith("https://github.com/"):
+            raise MetadataError(f"releases[{index}].url must be a github.com URL")
+        if last_start_date is not None and start_date > last_start_date:
+            raise MetadataError("releases must be ordered newest-first")
+        last_start_date = start_date
+
     for text in _walk_strings(doc):
         if EMAIL_RE.search(text):
             raise MetadataError("Refusing to publish metadata containing an email address")
@@ -705,9 +829,10 @@ def generate(args, client=None, now=None):
     build_info = _read_json(args.build_info)
     browser_validation = _read_json(args.browser_validation, required=False)
     boot_smoke_passed = _parse_bool(args.boot_smoke_passed, "--boot-smoke-passed")
+    curated_releases = _read_json(args.releases, required=False)
 
     client = client or GitHubClient(api_base=args.api_base, token=args.token)
-    repository, languages, merged, releases = collect(
+    repository, languages, merged, gh_releases = collect(
         client, owner, repo, max_pull_pages=args.max_pull_pages
     )
 
@@ -725,20 +850,28 @@ def generate(args, client=None, now=None):
         hydrate=hydrate,
         max_lookups=args.max_pull_lookups,
     )
-    events.extend(build_release_events(releases))
+    events.extend(build_release_events(gh_releases))
     timeline = order_timeline(events, limit=args.max_timeline)
 
     build = build_build_section(build_info, browser_validation, boot_smoke_passed, source_commit)
     gates_passed = build["bootable"] and build["browserCompatible"] and build["bootSmokePassed"]
     lab = build_lab_section(build_info, gates_passed, args.publish_context)
 
+    repository_section = build_repository(repository)
+    named_releases = build_named_releases(
+        curated_releases,
+        repository_url=repository_section["url"],
+        source_commit=source_commit,
+    )
+
     generated_at = (now or datetime.now(timezone.utc)).strftime("%Y-%m-%dT%H:%M:%SZ")
     return build_metadata(
-        repository=build_repository(repository),
+        repository=repository_section,
         languages=build_languages(languages),
         timeline=timeline,
         build=build,
         lab=lab,
+        releases=named_releases,
         source_commit=source_commit,
         generated_at=generated_at,
     )
@@ -756,6 +889,8 @@ def parse_args(argv=None):
                         help="Result of the existing QEMU boot smoke step (true/false)")
     parser.add_argument("--publish-context", action="store_true",
                         help="Set when this payload is the one being deployed to GitHub Pages")
+    parser.add_argument("--releases", default="metadata/releases.json",
+                        help="Curated named-release metadata (optional; a missing file publishes zero)")
     parser.add_argument("--output", default="dist/browser-lab/project-metadata.json")
     parser.add_argument("--max-timeline", type=int, default=25)
     parser.add_argument("--max-pull-pages", type=int, default=10)
@@ -778,7 +913,8 @@ def main(argv=None):
         print(f"generate_project_metadata: {error}", file=sys.stderr)
         return 1
     print(f"generate_project_metadata: wrote {output}")
-    print(f"  languages: {len(document['languages'])}, timeline: {len(document['timeline'])}")
+    print(f"  languages: {len(document['languages'])}, timeline: {len(document['timeline'])}, "
+          f"releases: {len(document['releases'])}")
     print(f"  sourceCommit: {document['sourceCommit']}")
     return 0
 

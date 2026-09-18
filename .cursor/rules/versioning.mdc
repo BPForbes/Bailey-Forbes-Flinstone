@@ -45,6 +45,12 @@ When combining agent branches (for example **`cursor/*`**, **`claude/*`**, **`co
 - Set **`GM=1` only on a new `.ver`** row under **`version/entries/preproduction <A>.<B>.<C>/`** (next **`DEV_VERSION`**; **never** on a root **`*.ver`** file), never by editing older train files.
 - **`DESCRIPTION`** on the selected **`GM=1`** row must start with **`A.B.C:`** (e.g. **`4.0.1:`**) followed by the **overall release summary** for that version. **`promote_preproduction_for_main.sh`** selects the highest **`DEV_VERSION`** GM row when duplicates exist, rewrites lower **`DEV_VERSION`** GM rows to **`GM=0`**, and copies **only** the selected text to the GA root **`.ver`**. Use **`--normalize-gm-only`** to demote duplicate lower GM rows without promoting.
 
+## `PUBLISHED_DESCRIPTION` (portfolio summary, optional)
+
+- Legal **only** on a row that also has **`GM=1`** — never a root **`.ver`**, never a **`PRERELEASE=1`** row that is not the **`GM=1`** candidate. CI: **`scripts/check_version_published_description_requires_gm.sh`**.
+- **100-character hard cap** (characters, not bytes — a **`·`** or **`–`** counts as one). Real examples run 30–70 characters; near the cap is a sign to compress harder, not a target.
+- Must faithfully **summarize** that row's **`DESCRIPTION`**, never assert a claim **`DESCRIPTION`** does not support. CodeRabbit checks this on every diff touching the field (**`.coderabbit.yaml`** → `version/**/*.ver`) and comments naming which rule failed. Full ruleset: **AGENTS.md** § *`PUBLISHED_DESCRIPTION` (portfolio summary)*; mechanics: **`docs/versioning.md`**.
+
 ## CI prepare-version-entries (date stamp + `version_def.h`)
 
 - **`.github/actions/prepare-version-entries`:** **`relocate_root_prerelease_ver_to_preproduction.sh`**, **`promote_preproduction_for_main.sh --normalize-gm-only`**, **`promote_preproduction_for_main.sh`** (GA promote when **`GM=1`** is present), then **`stamp_version_entries_release_date.sh`** (entries root **`*.ver`** and every **`preproduction <A>.<B>.<C>/`** tree), then **`gen_version_def.sh`** reads **`version/entries/**/*.ver`** (including **`preproduction */`**).

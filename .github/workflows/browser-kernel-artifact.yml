@@ -150,9 +150,11 @@ jobs:
               "project-metadata.json must point at the deployed build commit"
           )
           assert metadata["languages"], "Linguist language breakdown must not be empty"
+          assert isinstance(metadata.get("releases"), list), "releases must be present as an array"
           print(f"{path}: schemaVersion={metadata['schemaVersion']} "
                 f"languages={len(metadata['languages'])} "
-                f"timeline={len(metadata['timeline'])}")
+                f"timeline={len(metadata['timeline'])} "
+                f"releases={len(metadata['releases'])}")
           PY
 
       - name: Read promotion state
