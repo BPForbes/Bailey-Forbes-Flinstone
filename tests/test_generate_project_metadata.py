@@ -20,6 +20,7 @@ from scripts.generate_project_metadata import (  # noqa: E402
     build_languages,
     build_build_section,
     build_lab_section,
+    build_named_releases,
     build_pull_request_events,
     build_release_events,
     build_repository,
@@ -277,6 +278,78 @@ check("timeline honours the limit", len(order_timeline(ordered, limit=2)) == 2)
 
 
 # ---------------------------------------------------------------------------
+# Named releases: curated, not derived, and never fabricated
+# ---------------------------------------------------------------------------
+REPO_URL = "https://github.com/BPForbes/Bailey-Forbes-Flinstone"
+
+check("no curated file publishes zero named releases",
+      build_named_releases(None, repository_url=REPO_URL, source_commit=COMMIT) == [])
+
+curated = {
+    "releases": [
+        {
+            "version": "4.0.0 / 4.0.1",
+            "startDate": "2026-05-18",
+            "endDate": "2026-05-19",
+            "summary": "Contracts · IPC/VFS · serial-j1",
+            "description": "Inheritable system contracts; then IPC/VFS/shell hardening.",
+        },
+        {
+            "version": "3.3.0",
+            "startDate": "2026-05-12",
+            "endDate": None,
+            "summary": "fs_jail · audit · FL1 history",
+            "description": "Contract surfaces for fs_jail and audit.",
+        },
+    ],
+}
+named = build_named_releases(curated, repository_url=REPO_URL, source_commit=COMMIT)
+check("named releases carry a stable slug id", [entry["id"] for entry in named] == ["4-0-0-4-0-1", "3-3-0"])
+check("named releases are ordered newest-first by startDate",
+      [entry["version"] for entry in named] == ["4.0.0 / 4.0.1", "3.3.0"])
+check("a curated release with no endDate publishes null",
+      named[1]["endDate"] is None)
+check("a curated release defaults its url to the deployed commit's version/locked",
+      named[0]["url"] == f"{REPO_URL}/tree/{COMMIT}/version/locked")
+check("summary and description are republished verbatim",
+      named[0]["summary"] == "Contracts · IPC/VFS · serial-j1"
+      and named[0]["description"].startswith("Inheritable system contracts"))
+
+check("a curator-supplied url overrides the default", build_named_releases(
+    {"releases": [{**curated["releases"][0],
+                   "url": f"{REPO_URL}/blob/{COMMIT}/version/locked/4_0_0.ver"}]},
+    repository_url=REPO_URL, source_commit=COMMIT,
+)[0]["url"] == f"{REPO_URL}/blob/{COMMIT}/version/locked/4_0_0.ver")
+
+expect_error("a non-github release url is rejected", build_named_releases,
+             {"releases": [{**curated["releases"][0], "url": "https://example.com/x"}]},
+             repository_url=REPO_URL, source_commit=COMMIT)
+expect_error("a duplicated version is rejected", build_named_releases,
+             {"releases": [curated["releases"][0], curated["releases"][0]]},
+             repository_url=REPO_URL, source_commit=COMMIT)
+expect_error("a malformed startDate is rejected", build_named_releases,
+             {"releases": [{**curated["releases"][0], "startDate": "18 May 2026"}]},
+             repository_url=REPO_URL, source_commit=COMMIT)
+expect_error("a calendar-invalid date is rejected", build_named_releases,
+             {"releases": [{**curated["releases"][0], "startDate": "2026-02-30"}]},
+             repository_url=REPO_URL, source_commit=COMMIT)
+expect_error("an endDate before startDate is rejected", build_named_releases,
+             {"releases": [{**curated["releases"][0], "startDate": "2026-05-19",
+                            "endDate": "2026-05-18"}]},
+             repository_url=REPO_URL, source_commit=COMMIT)
+expect_error("a missing summary is rejected", build_named_releases,
+             {"releases": [{k: v for k, v in curated["releases"][0].items() if k != "summary"}]},
+             repository_url=REPO_URL, source_commit=COMMIT)
+expect_error("releases must be a JSON array", build_named_releases,
+             {"releases": "not a list"}, repository_url=REPO_URL, source_commit=COMMIT)
+check("an email in a curated description is redacted, not fatal",
+      build_named_releases(
+          {"releases": [{**curated["releases"][0], "description": "ping ops@example.com"}]},
+          repository_url=REPO_URL, source_commit=COMMIT,
+      )[0]["description"] == "ping [redacted]")
+
+
+# ---------------------------------------------------------------------------
 # Build section: reuse existing validation, never re-derive it
 # ---------------------------------------------------------------------------
 build_info = {
@@ -342,6 +415,7 @@ document = {
     "build": build,
     "lab": lab,
     "timeline": ordered,
+    "releases": named,
 }
 check("a well-formed document validates", validate_metadata(document) is document)
 expect_error("wrong schemaVersion rejected", validate_metadata, {**document, "schemaVersion": 2})
@@ -369,6 +443,23 @@ expect_error("leaked credential rejected", validate_metadata, {
 expect_error("unknown timeline type rejected", validate_metadata, {
     **document,
     "timeline": [{**ordered[0], "type": "commit"}],
+})
+expect_error("non-array releases rejected", validate_metadata, {**document, "releases": "nope"})
+expect_error("duplicated release id rejected", validate_metadata, {
+    **document,
+    "releases": [named[0], {**named[0]}],
+})
+expect_error("malformed release startDate rejected", validate_metadata, {
+    **document,
+    "releases": [{**named[0], "startDate": "May 2026"}],
+})
+expect_error("newest-first release ordering enforced", validate_metadata, {
+    **document,
+    "releases": list(reversed(named)),
+})
+expect_error("a non-github release url is rejected at the document level", validate_metadata, {
+    **document,
+    "releases": [{**named[0], "url": "https://example.com/x"}],
 })
 
 
@@ -548,6 +639,7 @@ with tempfile.TemporaryDirectory() as tmp:
     root = Path(tmp)
     (root / "build-info.json").write_text(json.dumps(build_info), encoding="utf-8")
     (root / "browser-validation.json").write_text(json.dumps(evidence), encoding="utf-8")
+    (root / "releases.json").write_text(json.dumps(curated), encoding="utf-8")
     args = argparse.Namespace(
         repository="BPForbes/Bailey-Forbes-Flinstone",
         source_commit=COMMIT,
@@ -555,6 +647,7 @@ with tempfile.TemporaryDirectory() as tmp:
         browser_validation=str(root / "browser-validation.json"),
         boot_smoke_passed="true",
         publish_context=True,
+        releases=str(root / "releases.json"),
         output=str(root / "browser-lab" / "project-metadata.json"),
         max_timeline=25,
         max_pull_pages=1,
@@ -591,6 +684,18 @@ with tempfile.TemporaryDirectory() as tmp:
     check("end-to-end output lands in the payload directory",
           Path(args.output).name == "project-metadata.json")
     check("end-to-end document has no email addresses", "@users.noreply" not in json.dumps(produced))
+    check("end-to-end publishes the curated named releases",
+          [entry["version"] for entry in produced["releases"]] == ["4.0.0 / 4.0.1", "3.3.0"])
+    check("end-to-end release url defaults to the deployed commit's version/locked",
+          produced["releases"][0]["url"]
+          == "https://github.com/BPForbes/Bailey-Forbes-Flinstone/tree/"
+             f"{COMMIT}/version/locked")
+
+    args.releases = str(root / "missing-releases.json")
+    no_curation = generate(args, client=client, now=datetime(2026, 9, 17, 12, tzinfo=timezone.utc))
+    check("a missing curated-releases file publishes zero, not an error",
+          no_curation["releases"] == [])
+    args.releases = str(root / "releases.json")
 
     args.boot_smoke_passed = ""
     expect_error("an unstated boot smoke result is fatal", generate, args, client=client)

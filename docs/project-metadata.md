@@ -3,10 +3,11 @@
 Flintstone publishes a small, machine-readable description of itself alongside
 the validated browser lab. The portfolio at **bailey-forbes.com** consumes that
 file instead of maintaining duplicate static values, so **this repository stays
-the source of truth** for language percentages, development timeline, release
-history, build state, and the deployed source revision.
+the source of truth** for language percentages, development timeline, named
+releases, build state, and the deployed source revision.
 
 - Generator: [`scripts/generate_project_metadata.py`](../scripts/generate_project_metadata.py)
+- Curated named releases: [`metadata/releases.json`](../metadata/releases.json)
 - Tests: [`tests/test_generate_project_metadata.py`](../tests/test_generate_project_metadata.py)
 - Integration point: [`.github/workflows/browser-kernel-artifact.yml`](../.github/workflows/browser-kernel-artifact.yml)
 - Published path: `dist/browser-lab/project-metadata.json`
@@ -71,6 +72,7 @@ valid file untouched.
 | authorship | PR author, PR commits, and standard `Co-authored-by:` trailers |
 | `sourceCommit` | `GITHUB_SHA` — the commit the deployed kernel/lab was built from |
 | `build` | `dist/build-info.json`, `dist/browser-validation.json`, and the workflow's boot-smoke step result |
+| `releases` | [`metadata/releases.json`](../metadata/releases.json) — curated, not derived |
 
 Nothing is hard-coded. A new language appearing in the repository shows up
 without any generator change, because no whitelist is applied.
@@ -95,6 +97,53 @@ sorted largest-to-smallest, with ties broken by name for determinism.
 - Releases become `release` entries when actual GitHub Releases exist. Zero
   releases is a supported state — release entries are simply omitted, and
   nothing is fabricated from `version/*.ver` files.
+
+### Named releases (`releases`)
+
+`timeline` above is comprehensive and automatic: every merged pull request and
+every published GitHub Release, in full. That is the right shape for "what
+changed lately" but the wrong shape for a portfolio, which wants a handful of
+milestones a visitor can actually read — and Git history is too granular and
+too inconsistent for a stranger to guess which of a few hundred merges matter.
+
+So `releases` is the opposite of `timeline` in one respect: **it is curated,
+not derived.** The generator does not infer a named release from commits,
+tags, or the `version/*.ver` train under `version/locked/` — it only ever
+republishes what a human wrote in [`metadata/releases.json`](../metadata/releases.json):
+
+```json
+{
+  "releases": [
+    {
+      "version": "4.0.0 / 4.0.1",
+      "startDate": "2026-05-18",
+      "endDate": "2026-05-19",
+      "summary": "Contracts · IPC/VFS · serial-j1",
+      "description": "Inheritable system contracts; then IPC/VFS/shell hardening and serial -j1 default builds."
+    }
+  ]
+}
+```
+
+A repository with no such file, or an empty `releases` array in it, publishes
+zero named releases — that is a supported state, not an error. `version`,
+`startDate`, `endDate` (nullable), `summary`, and `description` are the only
+fields a curator writes; the generator computes the rest:
+
+- **`id`** — a stable slug derived from `version` (`"4.0.0 / 4.0.1"` →
+  `"4-0-0-4-0-1"`), so nothing but the version string itself has to be kept in
+  sync when a release is renamed.
+- **`url`** — defaults to `{repository.url}/tree/{sourceCommit}/version/locked`,
+  the exact validated commit's locked-version directory, so "View release"
+  always points at real, reviewable source. A curator may set `url` on a
+  specific entry to link somewhere more precise instead.
+
+`releases` is ordered newest-first by `startDate` and validated the same way
+`timeline` is: malformed dates, an `endDate` before its `startDate`, a
+duplicated `version`, or a non-`github.com` `url` all fail the generator
+outright — nothing partial is published. An email address or credential
+anywhere in a curated `summary` or `description` is redacted the same way an
+upstream pull request title would be.
 
 ### Bot-assisted and co-authored work
 
@@ -208,6 +257,17 @@ carries a common `date` field so one consumer can render mixed entry types.
       "url": "https://github.com/BPForbes/Bailey-Forbes-Flinstone/releases/tag/v4.5.4",
       "prerelease": false
     }
+  ],
+  "releases": [
+    {
+      "id": "4-0-0-4-0-1",
+      "version": "4.0.0 / 4.0.1",
+      "startDate": "2026-05-18",
+      "endDate": "2026-05-19",
+      "summary": "Contracts · IPC/VFS · serial-j1",
+      "description": "Inheritable system contracts; then IPC/VFS/shell hardening and serial -j1 default builds.",
+      "url": "https://github.com/BPForbes/Bailey-Forbes-Flinstone/tree/<sourceCommit>/version/locked"
+    }
   ]
 }
 ```
@@ -235,8 +295,12 @@ const milestones = metadata.timeline.filter(
 ```
 
 The portfolio should **not** independently maintain language percentages, PR
-history, release history, source-commit information, or browser-validation
-state.
+history, named-release copy, source-commit information, or browser-validation
+state. `releases` is presentation-ready: a consumer formats `startDate`/
+`endDate` into whatever date string its design calls for and renders
+`summary`/`description`/`url` as given, but it should not decide *which*
+releases are portfolio-worthy — that editorial judgment belongs here, in
+`metadata/releases.json`, not in the portfolio's own code.
 
 ## Permissions
 
