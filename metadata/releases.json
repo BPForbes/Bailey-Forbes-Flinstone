@@ -69,6 +69,13 @@
       "endDate": null,
       "summary": "Emscripten shell · shared relay",
       "description": "Sandboxed Emscripten Flinstone Shell as the default lab, and a shared relay room on a Cloudflare Durable Object with BroadcastChannel fallback. Latest GM promote on main."
+    },
+    {
+      "version": "5.0.0",
+      "startDate": "2026-09-17",
+      "endDate": null,
+      "summary": "Project-metadata contract · Pages",
+      "description": "Flintstone publishes project-metadata.json alongside its validated browser lab on every promoted deploy: GitHub-derived languages, a merged-pull-request timeline, and release milestones, gated by the same fail-closed promotion checks as the lab itself. Latest GA on main."
     }
   ]
 }
