@@ -2077,6 +2077,83 @@ VER
   cleanup "$d"
 }
 
+test_published_description_check_accepts_exactly_100_chars() {
+  require_proc_sub "published_description: exactly 100 characters passes" || return 0
+  local d value
+  d="$(make_fake_repo check_version_published_description_requires_gm.sh)"
+  mkdir -p "$d/version/entries/preproduction 1.0.0"
+  value=$(python3 -c "print('x' * 100, end='')")
+  {
+    cat <<'VER'
+MAJOR_VERSION=1
+STANDARD_VERSION=0
+RELEASE_VERSION=0
+PRERELEASE=1
+GM=1
+DEV_VERSION=1
+DESCRIPTION=full
+VER
+    printf 'PUBLISHED_DESCRIPTION=%s\n' "$value"
+  } >"$d/version/entries/preproduction 1.0.0/a.ver"
+  if bash "$(published_description_check_script "$d")" >/dev/null 2>&1; then
+    ok "published_description: exactly 100 characters passes"
+  else
+    fail "published_description: exactly 100 characters should pass"
+  fi
+  cleanup "$d"
+}
+
+test_published_description_check_rejects_101_chars() {
+  require_proc_sub "published_description: 101 characters is rejected" || return 0
+  local d value
+  d="$(make_fake_repo check_version_published_description_requires_gm.sh)"
+  mkdir -p "$d/version/entries/preproduction 1.0.0"
+  value=$(python3 -c "print('x' * 101, end='')")
+  {
+    cat <<'VER'
+MAJOR_VERSION=1
+STANDARD_VERSION=0
+RELEASE_VERSION=0
+PRERELEASE=1
+GM=1
+DEV_VERSION=1
+DESCRIPTION=full
+VER
+    printf 'PUBLISHED_DESCRIPTION=%s\n' "$value"
+  } >"$d/version/entries/preproduction 1.0.0/a.ver"
+  if bash "$(published_description_check_script "$d")" >/dev/null 2>&1; then
+    fail "published_description: 101 characters should be rejected"
+  else
+    ok "published_description: 101 characters is rejected"
+  fi
+  cleanup "$d"
+}
+
+test_published_description_check_counts_characters_not_bytes() {
+  require_proc_sub "published_description: multi-byte UTF-8 is counted as characters, not bytes" || return 0
+  local d
+  d="$(make_fake_repo check_version_published_description_requires_gm.sh)"
+  mkdir -p "$d/version/entries/preproduction 1.0.0"
+  # 64 real characters (several are multi-byte "·" / "–"), which a
+  # byte count under a non-UTF-8 locale would over-count past a naive check.
+  cat >"$d/version/entries/preproduction 1.0.0/a.ver" <<'VER'
+MAJOR_VERSION=1
+STANDARD_VERSION=0
+RELEASE_VERSION=0
+PRERELEASE=1
+GM=1
+DEV_VERSION=1
+DESCRIPTION=full
+PUBLISHED_DESCRIPTION=Inheritable contracts · IPC/VFS hardening · shell improvements
+VER
+  if LC_ALL=C LANG=C bash "$(published_description_check_script "$d")" >/dev/null 2>&1; then
+    ok "published_description: multi-byte UTF-8 is counted as characters, not bytes"
+  else
+    fail "published_description: a 64-character UTF-8 summary should pass under any locale"
+  fi
+  cleanup "$d"
+}
+
 test_gen_def_malformed_gm_zero_suffix_rejected() {
   require_proc_sub "gen_def: GM=0abc rejected" || return 0
   local d
@@ -2152,6 +2229,9 @@ test_published_description_check_ok_with_gm1
 test_published_description_check_ok_gm1_without_published
 test_published_description_check_rejects_gm0
 test_published_description_check_rejects_missing_gm
+test_published_description_check_accepts_exactly_100_chars
+test_published_description_check_rejects_101_chars
+test_published_description_check_counts_characters_not_bytes
 
 # version_merge_sim_status.sh
 test_merge_sim_ref_lists_preproduction

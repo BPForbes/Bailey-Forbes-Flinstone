@@ -35,7 +35,7 @@ jobs:
       - name: GM=1 preproduction rows must be promoted (not left for header-only sync)
         run: ./scripts/check_version_gm1_preproduction_promoted.sh
 
-      - name: PUBLISHED_DESCRIPTION may only accompany GM=1
+      - name: PUBLISHED_DESCRIPTION must accompany GM=1 and stay within the length limit
         run: ./scripts/check_version_published_description_requires_gm.sh
 
       - name: Regenerate userland/shell/version_def.h from .ver trees (entries + preproduction)
