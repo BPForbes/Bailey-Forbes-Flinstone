@@ -46,8 +46,16 @@ self.onmessage = async ({ data }) => {
     }
     if (data.type === "qmp") { sendInput(data.data); return; }
     if (data.type === "screen") {
-      stage = "screen read"; const bytes = mod.FS.readFile("/screen.bin");
-      self.postMessage({ type: "screen", bytes }, [bytes.buffer]); return;
+      stage = "screen read";
+      try {
+        const raw = mod.FS.readFile("/screen.bin");
+        const bytes = new Uint8Array(raw);
+        self.postMessage({ type: "screen", bytes });
+      } catch (error) {
+        self.postMessage({ type: "diagnostic", text: "screen read: " + error.message });
+        self.postMessage({ type: "screen", bytes: null });
+      }
+      return;
     }
     if (data.type !== "boot") return;
     const base = new URL("./vendor/qemu/", import.meta.url);

@@ -49,7 +49,7 @@
     const hash = Array.from(new Uint8Array(await crypto.subtle.digest("SHA-256", image)), x => x.toString(16).padStart(2, "0")).join("");
     if (hash !== sha256) throw new Error("Disk SHA-256 does not match its manifest");
     const worker = new Worker(new URL("qemu-worker.js", scriptBase), { type: "module" });
-    let disposed = false, screenTimer, screenBusy = false, holdScreen = 0, inputHold = 0, inputHoldTimer = 0;
+    let disposed = false, screenTimer, screenBusy = false, holdScreen = 0, inputHold = 0, inputHoldTimer = 0, qmpStarted = false;
     const qmp = window.FlintstoneQmp.createQmpClient({
       send: data => worker.postMessage({ type: "qmp", data }),
       timeoutMs: 30000,
@@ -76,22 +76,29 @@
       if (data.type === "serial") serialByte(data.byte);
       if (data.type === "diagnostic") onDiagnostic?.(data.text);
       if (data.type === "error") { screenBusy = false; onError?.(new Error(data.text)); }
-      if (data.type === "screen") { screenBusy = false; onScreen?.(data.bytes); }
+      if (data.type === "screen") { screenBusy = false; if (data.bytes) onScreen?.(data.bytes); }
       if (data.type !== "qmp") return;
       if (qmp.accept(data.data) !== "greeting") return;
+      if (qmpStarted) return;
+      qmpStarted = true;
+      const dumpScreen = async () => {
+        if (disposed || screenBusy || holdScreen || inputHold) return;
+        screenBusy = true;
+        try {
+          await command("pmemsave", { val: 753664, size: 4000, filename: "/screen.bin" }, 3000);
+          if (!disposed) worker.postMessage({ type: "screen" });
+          else screenBusy = false;
+        } catch (error) { screenBusy = false; onDiagnostic?.(error.message); }
+      };
       try {
         await command("qmp_capabilities");
         qmp.allowWork();
-        screenTimer = setInterval(async () => {
-          if (disposed || screenBusy || holdScreen || inputHold) return;
-          screenBusy = true;
-          try {
-            await command("pmemsave", { val: 753664, size: 4000, filename: "/screen.bin" }, 3000);
-            if (!disposed) worker.postMessage({ type: "screen" });
-            else screenBusy = false;
-          } catch (error) { screenBusy = false; onDiagnostic?.(error.message); }
-        }, 250);
-      } catch (error) { onError?.(error); }
+        await dumpScreen();
+        screenTimer = setInterval(dumpScreen, 250);
+      } catch (error) {
+        qmpStarted = false;
+        onError?.(error);
+      }
     };
     worker.onerror = event => onError?.(new Error(event.message || "QEMU worker failed"));
     worker.postMessage({ type: "boot", image, memorySize }, [image]);
@@ -132,6 +139,9 @@
             }
           });
         } finally { pulseInputHold(); }
+      },
+      async reset() {
+        await withScreenHeld(() => command("system_reset"));
       },
       async destroy() {
         disposed = true; holdScreen += 1; inputHold = 1;

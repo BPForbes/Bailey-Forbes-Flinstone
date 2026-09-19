@@ -124,7 +124,24 @@
         state(readySent ? STATES.READY : STATES.BOOTING);
         return true;
       },
-      async reset(options) { await this.powerOff(); await this.boot(options); },
+      async reset(options) {
+        if (emulator && typeof emulator.reset === "function") {
+          readySent = false;
+          paused = false;
+          line = "";
+          clearTimeout(timer);
+          const current = generation;
+          state(STATES.BOOTING);
+          timer = setTimeout(() => {
+            if (current === generation && !readySent)
+              this.fail(new Error("Kernel boot marker was not observed within 90 seconds"));
+          }, 90000);
+          await emulator.reset();
+          return;
+        }
+        await this.powerOff();
+        await this.boot(options);
+      },
       async powerOff() { generation++; clearTimeout(timer); if (emulator) { if (emulator.destroy) await emulator.destroy(); else await emulator.stop(); } emulator = null; readySent = false; paused = false; line = ""; state(STATES.OFF); },
       fail(error) { generation++; clearTimeout(timer); if (emulator) emulator.destroy(); emulator = null; readySent = false; paused = false; state(STATES.FAILED, error.message || String(error)); },
       serialByte,

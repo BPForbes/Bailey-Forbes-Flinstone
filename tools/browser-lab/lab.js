@@ -20,8 +20,10 @@
   }, window.FLINTSTONE_LAB_CONFIG || {});
   if (!allowedParents(config.parentOrigin)) config.parentOrigin = "https://bailey-forbes.com";
   const text = (id, value) => { const node = document.getElementById(id); if (node) node.textContent = value; };
+  let lastScreenBytes = null;
   const resetDisplayProbe = () => {
     document.documentElement.dataset.vgaCell = "";
+    lastScreenBytes = null;
     const placeholder = document.getElementById("display-placeholder");
     if (placeholder) placeholder.hidden = false;
     const term = document.getElementById("wasm-term");
@@ -81,7 +83,6 @@
   const VGA_CELL_W = 11;
   const VGA_CELL_H = 18;
   const VGA_FONT = '16px "JetBrains Mono", "SF Mono", ui-monospace, monospace';
-  let lastScreenBytes = null;
   function renderPowerline(state) {
     const user = document.getElementById("pl-user");
     const sess = document.getElementById("pl-sess");
@@ -312,9 +313,13 @@
     if (!core.validDiagnosticVga(bytes)) return;
     lastScreenBytes = bytes;
     document.documentElement.dataset.vgaCell = "F";
+    const placeholder = document.getElementById("display-placeholder");
+    if (placeholder) placeholder.hidden = true;
+    if (!canvas) return;
     canvas.width = 80 * VGA_CELL_W;
     canvas.height = 25 * VGA_CELL_H;
     const ctx = canvas.getContext("2d");
+    if (!ctx) return;
     ctx.font = VGA_FONT;
     ctx.textBaseline = "top";
     for (let i = 0; i < 2000; i++) {
@@ -325,7 +330,6 @@
       ctx.fillStyle = VGA_TRUECOLOR[attr & 15];
       if (ch >= 32 && ch <= 126) ctx.fillText(String.fromCharCode(ch), x, y + 1);
     }
-    document.getElementById("display-placeholder").hidden = true;
   }
   if (document.fonts && document.fonts.ready) {
     document.fonts.ready.then(() => { if (lastScreenBytes) renderScreen(lastScreenBytes); });
