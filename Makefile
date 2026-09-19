@@ -148,7 +148,7 @@ NET_CORE_SRCS = kernel/core/net/net_checksum.c kernel/core/net/net_wire.c kernel
                 kernel/core/net/net_wire_egress.c \
                 kernel/core/net/net_icmp.c kernel/core/net/net_tcp.c kernel/core/net/net_tcp_fsm.c \
                 kernel/core/net/net_loopback.c \
-                kernel/core/net/net_netdev.c kernel/core/net/net_baremetal.c kernel/core/net/net_tap.c kernel/core/net/net_macvlan.c kernel/core/net/net_wire_host.c \
+                kernel/core/net/net_netdev.c kernel/core/net/net_baremetal.c kernel/core/net/net_tap.c kernel/core/net/net_macvlan.c kernel/core/net/net_macvlan_waitpid.c kernel/core/net/net_wire_host.c \
                 kernel/core/net/net_wire_host_syscall.c \
                 kernel/core/net/net_dns.c kernel/core/net/net_dhcp.c kernel/core/net/net_tls_hosted.c \
                 kernel/core/net/net_http.c kernel/core/net/net_tftp.c \
@@ -844,9 +844,9 @@ test_channel_sidecar: $(NET_ASM_OBJ) kernel/core/net/net_channel_sidecar.o kerne
 	./tests/test_channel_sidecar
 
 .PHONY: test_macvlan_waitpid
-test_macvlan_waitpid: kernel/core/net/net_macvlan.o
+test_macvlan_waitpid: kernel/core/net/net_macvlan_waitpid.o
 	$(CC) $(CFLAGS) $(TEST_SANITIZE) -o tests/test_macvlan_waitpid tests/test_macvlan_waitpid.c \
-	  kernel/core/net/net_macvlan.o -Wl,-z,noexecstack
+	  kernel/core/net/net_macvlan_waitpid.o -Wl,-z,noexecstack
 	./tests/test_macvlan_waitpid
 
 .PHONY: server_shared_quarantine_harness
@@ -924,7 +924,7 @@ WIFI_TEST_NET_OBJS = kernel/core/net/net_checksum.c kernel/core/net/net_wire.c \
 	kernel/core/net/net_route.c kernel/core/net/net_loopback.c \
 	kernel/core/net/net_netdev.c kernel/core/net/net_arp.c kernel/core/net/net_dhcp.c \
 	kernel/core/net/net_stack_sync.c kernel/core/net/net_wifi_netdev.c kernel/core/net/net_iface.c \
-	kernel/core/net/net_macvlan.c
+	kernel/core/net/net_macvlan.c kernel/core/net/net_macvlan_waitpid.c
 
 # kmalloc/mem_domain and wifi_platform_*.o are linked as .o (not compiled in the
 # recipe). List them as prerequisites so `make test_p3_wifi` works without a
