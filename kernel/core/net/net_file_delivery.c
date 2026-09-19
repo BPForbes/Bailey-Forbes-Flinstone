@@ -7,6 +7,7 @@
 #include "server_shared_db.h"
 #include "server_shared_fs.h"
 
+#include <openssl/sha.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -39,6 +40,17 @@ typedef struct {
 } fl_msg_meta_pending_t;
 
 static fl_msg_meta_pending_t s_msg_meta_pending[FL_MSG_META_PENDING_MAX];
+
+static int file_checksum_present(const uint8_t checksum[FL_SERVER_FILE_HASH_MAX])
+{
+    size_t i;
+
+    for (i = 0; i < FL_SERVER_FILE_HASH_MAX; i++) {
+        if (checksum[i] != 0u)
+            return 1;
+    }
+    return 0;
+}
 
 static fl_result_t put_u16(fl_bytes_writer_t *w, uint16_t v)
 {
@@ -1312,6 +1324,8 @@ fl_result_t fl_net_file_store_done(const uint8_t *payload, uint16_t plen)
 {
     fl_server_file_done_t done;
     fl_server_file_share_slot_t *slot;
+    uint8_t checksum[FL_SERVER_FILE_HASH_MAX];
+
     if (!payload)
         return FL_RESULT_INVAL;
     if (fl_file_packet_decode_done(payload, plen, &done) != FL_RESULT_OK)
@@ -1322,11 +1336,26 @@ fl_result_t fl_net_file_store_done(const uint8_t *payload, uint16_t plen)
     if (share_access_ok(&slot->offer, (uint64_t)time(NULL)) != FL_RESULT_OK)
         return FL_RESULT_ACCES;
     if (done.total_bytes > slot->file_cap ||
-        done.total_bytes > (uint64_t)slot->file_len)
+        done.total_bytes != (uint64_t)slot->file_len)
+        return FL_RESULT_INVAL;
+    if (slot->offer.file_size != 0u &&
+        done.total_bytes != slot->offer.file_size)
         return FL_RESULT_INVAL;
     if (slot->offer.total_chunks != 0u &&
         done.total_chunks != slot->offer.total_chunks)
         return FL_RESULT_INVAL;
+
+    if (file_checksum_present(slot->offer.checksum) ||
+        file_checksum_present(done.checksum)) {
+        if (!SHA256(slot->file_data, slot->file_len, checksum))
+            return FL_RESULT_ERR;
+        if ((file_checksum_present(slot->offer.checksum) &&
+             memcmp(checksum, slot->offer.checksum, sizeof(checksum)) != 0) ||
+            (file_checksum_present(done.checksum) &&
+             memcmp(checksum, done.checksum, sizeof(checksum)) != 0))
+            return FL_RESULT_INVAL;
+    }
+
     slot->file_len = (size_t)done.total_bytes;
     slot->transfer_complete = 1u;
     if (!slot->meta_received)

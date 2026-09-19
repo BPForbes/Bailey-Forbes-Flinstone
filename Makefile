@@ -148,7 +148,7 @@ NET_CORE_SRCS = kernel/core/net/net_checksum.c kernel/core/net/net_wire.c kernel
                 kernel/core/net/net_wire_egress.c \
                 kernel/core/net/net_icmp.c kernel/core/net/net_tcp.c kernel/core/net/net_tcp_fsm.c \
                 kernel/core/net/net_loopback.c \
-                kernel/core/net/net_netdev.c kernel/core/net/net_baremetal.c kernel/core/net/net_tap.c kernel/core/net/net_macvlan.c kernel/core/net/net_wire_host.c \
+                kernel/core/net/net_netdev.c kernel/core/net/net_baremetal.c kernel/core/net/net_tap.c kernel/core/net/net_macvlan.c kernel/core/net/net_macvlan_waitpid.c kernel/core/net/net_wire_host.c \
                 kernel/core/net/net_wire_host_syscall.c \
                 kernel/core/net/net_dns.c kernel/core/net/net_dhcp.c kernel/core/net/net_tls_hosted.c \
                 kernel/core/net/net_http.c kernel/core/net/net_tftp.c \
@@ -342,7 +342,7 @@ deploy:
 	@gcc -std=c11 -Wall -Wextra -O2 -o gen_version_changelog scripts/gen_version_changelog.c && ./gen_version_changelog
 	@$(MAKE) CHANGELOG_CI=1 all
 
-.PHONY: vm baremetal
+.PHONY: vm baremetal browser-kernel test-browser-kernel test-browser-kernel-gate test-browser-lab test-browser-boot test-browser-boot-packaged test-browser-iframe test-freestanding-entry test-freestanding-shell browser-lab-runtime browser-lab-release wasm test-wasm-shell project-metadata test-project-metadata
 vm:
 	$(MAKE) VM_ENABLE=1 $(TARGET)
 
@@ -350,6 +350,75 @@ vm:
 .PHONY: vm-sdl
 vm-sdl:
 	$(MAKE) VM_ENABLE=1 VM_SDL=1 $(TARGET)
+
+# Browser-lab boot boundary. This produces a BIOS raw disk with a lab identity
+# shell and concurrent sessions. Hosted filesystem, networking, and server remain
+# unavailable and are reported explicitly in the manifest.
+browser-kernel:
+	@./scripts/build_freestanding_browser_kernel.sh
+
+test-browser-kernel: browser-kernel
+	@./scripts/test_browser_kernel_artifact.sh
+
+test-browser-kernel-gate:
+	@bash ./tests/test_browser_kernel_promotion_gate.sh
+
+test-freestanding-entry:
+	@bash ./tests/test_freestanding_entry.sh
+
+test-freestanding-shell: test-browser-kernel
+	@python3 ./scripts/test_freestanding_shell.py
+
+gen-session-wire-js:
+	@python3 ./scripts/gen_session_wire_js.py
+
+test-browser-lab: gen-session-wire-js
+	@node ./tests/test_browser_lab.js
+	@node ./tests/test_server_relay.js
+	@node ./tests/test_server_relay_client.js
+	@node ./tests/test_lab_relay_room.js
+	@node ./tests/test_server_relay_clients_ws.js
+	@node ./tests/test_browser_lab_process.js
+	@node ./tests/test_flintstone_lab_worker.mjs
+	@PYTHONDONTWRITEBYTECODE=1 python3 ./tests/test_lab_dns.py
+	@PYTHONDONTWRITEBYTECODE=1 python3 ./tests/test_package_browser_lab_release.py
+	@PYTHONDONTWRITEBYTECODE=1 python3 ./tests/test_generate_project_metadata.py
+	@$(MAKE) test-wasm-shell
+
+wasm:
+	@chmod +x scripts/build_wasm_lab.sh
+	@./scripts/build_wasm_lab.sh
+
+test-wasm-shell: wasm
+	@python3 ./scripts/test_wasm_shell.py
+
+browser-lab-runtime:
+	@python3 ./scripts/fetch_browser_runtime.py
+
+test-browser-boot: test-browser-kernel browser-lab-runtime wasm
+	@node ./scripts/test_browser_boot.cjs
+
+browser-lab-release: test-browser-boot
+	@python3 ./scripts/package_browser_lab_release.py
+
+test-browser-boot-packaged: browser-lab-release
+	@FL_BROWSER_TEST_PACKAGED=1 node ./scripts/test_browser_boot.cjs
+
+test-browser-iframe: browser-lab-release
+	@node ./scripts/test_browser_iframe.cjs
+
+# Public project metadata for bailey-forbes.com. This reads GitHub (Linguist
+# languages, merged PRs, releases) and the validated build outputs, then writes
+# dist/browser-lab/project-metadata.json into the Pages payload. CI supplies
+# GITHUB_SHA / GITHUB_REPOSITORY / GITHUB_TOKEN and the boot-smoke result; run it
+# locally with, for example:
+#   FL_BOOT_SMOKE_PASSED=true GITHUB_REPOSITORY=BPForbes/Bailey-Forbes-Flinstone \
+#   GITHUB_SHA=$$(git rev-parse HEAD) make project-metadata
+project-metadata:
+	@python3 ./scripts/generate_project_metadata.py
+
+test-project-metadata:
+	@PYTHONDONTWRITEBYTECODE=1 python3 ./tests/test_generate_project_metadata.py
 
 # Fetch and build external libs (SDL2, CUnit) into deps/install.
 .PHONY: deps deps-sdl2 deps-cunit
@@ -732,10 +801,11 @@ test_server_file_expire:
 	./tests/test_server_file_expire
 
 .PHONY: test_server_file_meta
-test_server_file_meta: kernel/core/net/net_channel_sidecar.o kernel/core/net/net_pkt_channel_meta.o kernel/core/net/net_file_delivery.o kernel/core/vfs/server_shared_fs.o kernel/core/vfs/server_shared_db.o kernel/core/vfs/server_shared_digest.o userland/shell/common.o
+test_server_file_meta: $(NET_ASM_OBJ) kernel/core/net/net_channel_sidecar.o kernel/core/net/net_pkt_channel_meta.o kernel/core/net/net_file_delivery.o kernel/core/vfs/server_shared_fs.o kernel/core/vfs/server_shared_db.o kernel/core/vfs/server_shared_digest.o userland/shell/common.o
 	$(CC) $(CFLAGS) $(TEST_SANITIZE) -o tests/test_server_file_meta tests/test_server_file_meta.c tests/stubs_file_delivery_net.c \
 	  kernel/core/net/net_channel_sidecar.o kernel/core/net/net_pkt_channel_meta.o \
-	  kernel/core/net/net_file_delivery.o kernel/core/vfs/server_shared_fs.o kernel/core/vfs/server_shared_db.o kernel/core/vfs/server_shared_digest.o userland/shell/common.o -lsqlite3 $(OPENSSL_LIBS) -Wl,-z,noexecstack
+	  kernel/core/net/net_file_delivery.o kernel/core/vfs/server_shared_fs.o kernel/core/vfs/server_shared_db.o kernel/core/vfs/server_shared_digest.o userland/shell/common.o \
+	  $(NET_ASM_OBJ) -lsqlite3 $(OPENSSL_LIBS) -Wl,-z,noexecstack
 	./tests/test_server_file_meta
 
 .PHONY: test_server_shared_catalog
@@ -758,18 +828,26 @@ test_server_shared_purge: kernel/core/vfs/server_shared_fs.o kernel/core/vfs/ser
 	./tests/test_server_shared_purge
 
 .PHONY: test_server_file_accept_path
-test_server_file_accept_path: kernel/core/net/net_channel_sidecar.o kernel/core/net/net_pkt_channel_meta.o kernel/core/net/net_file_delivery.o kernel/core/vfs/server_shared_fs.o kernel/core/vfs/server_shared_db.o kernel/core/vfs/server_shared_digest.o userland/shell/common.o
+test_server_file_accept_path: $(NET_ASM_OBJ) kernel/core/net/net_channel_sidecar.o kernel/core/net/net_pkt_channel_meta.o kernel/core/net/net_file_delivery.o kernel/core/vfs/server_shared_fs.o kernel/core/vfs/server_shared_db.o kernel/core/vfs/server_shared_digest.o userland/shell/common.o
 	$(CC) $(CFLAGS) $(TEST_SANITIZE) -o tests/test_server_file_accept_path tests/test_server_file_accept_path.c tests/stubs_file_delivery_net.c \
 	  kernel/core/net/net_channel_sidecar.o kernel/core/net/net_pkt_channel_meta.o \
-	  kernel/core/net/net_file_delivery.o kernel/core/vfs/server_shared_fs.o kernel/core/vfs/server_shared_db.o kernel/core/vfs/server_shared_digest.o userland/shell/common.o -lsqlite3 $(OPENSSL_LIBS) -Wl,-z,noexecstack
+	  kernel/core/net/net_file_delivery.o kernel/core/vfs/server_shared_fs.o kernel/core/vfs/server_shared_db.o kernel/core/vfs/server_shared_digest.o userland/shell/common.o \
+	  $(NET_ASM_OBJ) -lsqlite3 $(OPENSSL_LIBS) -Wl,-z,noexecstack
 	./tests/test_server_file_accept_path
 
 .PHONY: test_channel_sidecar
-test_channel_sidecar: kernel/core/net/net_channel_sidecar.o kernel/core/net/net_pkt_channel_meta.o kernel/core/net/net_file_delivery.o kernel/core/vfs/server_shared_fs.o kernel/core/vfs/server_shared_db.o kernel/core/vfs/server_shared_digest.o userland/shell/common.o tests/stubs_file_delivery_net.c
+test_channel_sidecar: $(NET_ASM_OBJ) kernel/core/net/net_channel_sidecar.o kernel/core/net/net_pkt_channel_meta.o kernel/core/net/net_file_delivery.o kernel/core/vfs/server_shared_fs.o kernel/core/vfs/server_shared_db.o kernel/core/vfs/server_shared_digest.o userland/shell/common.o tests/stubs_file_delivery_net.c
 	$(CC) $(CFLAGS) $(TEST_SANITIZE) -o tests/test_channel_sidecar tests/test_channel_sidecar.c \
 	  kernel/core/net/net_channel_sidecar.o kernel/core/net/net_pkt_channel_meta.o \
-	  kernel/core/net/net_file_delivery.o kernel/core/vfs/server_shared_fs.o kernel/core/vfs/server_shared_db.o kernel/core/vfs/server_shared_digest.o userland/shell/common.o tests/stubs_file_delivery_net.c -lsqlite3 $(OPENSSL_LIBS) -Wl,-z,noexecstack
+	  kernel/core/net/net_file_delivery.o kernel/core/vfs/server_shared_fs.o kernel/core/vfs/server_shared_db.o kernel/core/vfs/server_shared_digest.o userland/shell/common.o tests/stubs_file_delivery_net.c \
+	  $(NET_ASM_OBJ) -lsqlite3 $(OPENSSL_LIBS) -Wl,-z,noexecstack
 	./tests/test_channel_sidecar
+
+.PHONY: test_macvlan_waitpid
+test_macvlan_waitpid: kernel/core/net/net_macvlan_waitpid.o
+	$(CC) $(CFLAGS) $(TEST_SANITIZE) -o tests/test_macvlan_waitpid tests/test_macvlan_waitpid.c \
+	  kernel/core/net/net_macvlan_waitpid.o -Wl,-z,noexecstack
+	./tests/test_macvlan_waitpid
 
 .PHONY: server_shared_quarantine_harness
 server_shared_quarantine_harness: kernel/core/vfs/server_shared_fs.o kernel/core/vfs/server_shared_db.o kernel/core/vfs/server_shared_digest.o userland/shell/common.o
@@ -846,7 +924,7 @@ WIFI_TEST_NET_OBJS = kernel/core/net/net_checksum.c kernel/core/net/net_wire.c \
 	kernel/core/net/net_route.c kernel/core/net/net_loopback.c \
 	kernel/core/net/net_netdev.c kernel/core/net/net_arp.c kernel/core/net/net_dhcp.c \
 	kernel/core/net/net_stack_sync.c kernel/core/net/net_wifi_netdev.c kernel/core/net/net_iface.c \
-	kernel/core/net/net_macvlan.c
+	kernel/core/net/net_macvlan.c kernel/core/net/net_macvlan_waitpid.c
 
 # kmalloc/mem_domain and wifi_platform_*.o are linked as .o (not compiled in the
 # recipe). List them as prerequisites so `make test_p3_wifi` works without a
@@ -1158,20 +1236,20 @@ test_replay:
 	$(MAKE) clean
 	$(MAKE) VM_ENABLE=1 ARCH=$(ARCH) BPForbes_Flinstone_Shell
 	$(CC) $(CFLAGS) -DVM_ENABLE=1 -I$(ASM_SRC_DIR) -I$(KERNEL_DRIVERS) -Ikernel -Ikernel/drivers -Ikernel/drivers/wifi -IVM -IVM/devices -o tests/test_replay tests/test_replay.c \
-	  userland/shell/common.o $(UTIL_SHELL_LINK_OBJS) userland/shell/terminal.o kernel/core/vfs/disk.o kernel/core/vfs/fat32_host.o kernel/core/vfs/fat32_host_files.o disk_host_io.o disk_asm.o dir_asm.o \
+	  userland/shell/common.o userland/shell/authz_subsystem.o $(UTIL_SHELL_LINK_OBJS) userland/shell/terminal.o kernel/core/vfs/disk.o kernel/core/vfs/fat32_host.o kernel/core/vfs/fat32_host_files.o disk_host_io.o disk_asm.o dir_asm.o \
 	  kernel/core/vfs/path_log.o kernel/core/vfs/cluster.o kernel/core/vfs/fs.o priority_queue.o \
 	  kernel/core/vfs/fs_provider.o kernel/core/vfs/fs_command.o kernel/core/vfs/fs_events.o kernel/core/vfs/fs_policy.o \
-	  kernel/core/vfs/fs_chain.o kernel/core/vfs/fs_facade.o kernel/core/vfs/fs_service_glue.o $(FS_JAIL_CORE_OBJS) kernel/core/mm/mem_domain.o kernel/core/mm/kmalloc.o \
+	  kernel/core/vfs/fs_chain.o kernel/core/vfs/fs_facade.o kernel/core/vfs/fs_service_glue.o $(FS_JAIL_CORE_OBJS) $(FS_JAIL_SUPPORT_OBJS) kernel/core/mm/mem_domain.o kernel/core/mm/kmalloc.o \
 	  kernel/core/sys/vrt.o kernel/core/sys/ipc.o kernel/core/sys/syscall.o kernel/core/vfs/vfs.o \
 	  kernel/drivers/bus.o kernel/drivers/driver_model.o \
 	  kernel/drivers/block/block_driver.o kernel/drivers/block/block_transport_host.o kernel/drivers/keyboard_driver.o kernel/drivers/display_driver.o \
-	  kernel/drivers/timer_driver.o kernel/drivers/pic_driver.o kernel/drivers/drivers.o \
+	  kernel/drivers/timer_driver.o kernel/drivers/pic_driver.o kernel/drivers/drivers.o kernel/drivers/p4_irq_lifecycle.o \
 	  $(KERNEL_DRIVERS)/../hal/ioport.o \
 	  $(KERNEL_DRIVERS)/pci.o \
 	  VM/devices/vm.o VM/devices/vm_cpu.o VM/devices/vm_mem.o VM/devices/vm_decode.o VM/devices/vm_io.o VM/devices/vm_loader.o \
 		  VM/devices/vm_display.o VM/devices/vm_host.o VM/devices/vm_font.o VM/devices/vm_disk.o VM/devices/vm_snapshot.o \
 		  VM/devices/vm_arch.o \
-		  $(MEM_ASM_OBJ) $(PORT_IO_OBJ) $(HISTORY_ASM_OBJ) -Wl,-z,noexecstack
+		  $(MEM_ASM_OBJ) $(PORT_IO_OBJ) $(DISK_HOST_ASM_OBJ) $(HISTORY_ASM_OBJ) $(FS_JAIL_TEST_LIBS) -Wl,-z,noexecstack
 	./tests/test_replay
 
 # Debug build: ASM contract asserts enabled
@@ -1185,7 +1263,7 @@ clean:
 	rm -f kernel/arch/*/drivers/*.o kernel/arch/*/hal/*.o kernel/drivers/*.o kernel/drivers/block/*.o VM/devices/*.o
 	rm -f arch/*/*/*.o arch/*/*/alloc/*.o
 	rm -f tests/test_mem_asm tests/test_alloc tests/test_priority_queue tests/test_drivers tests/test_vm_mem tests/test_replay tests/test_invariants tests/test_userspace_connection tests/test_vm_syscall_bridge tests/test_vm_arch_readiness
-	rm -f tests/test_p3_network tests/test_p3_server tests/test_p3_server_lan tests/test_p3_udp_cmds tests/test_p3_net_tools tests/test_wifi_flinstone_helper tests/test_wifi_flinstone_linux_helper tests/test_p3_wifi tests/test_p3_wifi_ota tests/test_wifi_mgmt_ota tests/test_wifi_connect_ota tests/test_wifi_coprocessor tests/test_wifi_uart_at_scan_join tests/test_wifi_fullmac_probe tests/test_wifi_80211ax_mock_279 tests/test_wifi_ax_server_ota
+	rm -f tests/test_p3_network tests/test_p3_server tests/test_p3_server_lan tests/test_p3_udp_cmds tests/test_p3_net_tools tests/test_wifi_flinstone_helper tests/test_wifi_flinstone_linux_helper tests/test_p3_wifi tests/test_p3_wifi_ota tests/test_wifi_mgmt_ota tests/test_wifi_connect_ota tests/test_wifi_coprocessor tests/test_wifi_uart_at_scan_join tests/test_wifi_fullmac_probe tests/test_wifi_80211ax_mock_279 tests/test_wifi_ax_server_ota tests/test_macvlan_waitpid
 	rm -f tests/test_batch_argv_issue220 tests/test_threadpool_issue222 tests/test_disk_hex_issue222
 	rm -rf tests/obj/issue220 tests/obj/issue222
 	find . -name '*.o' -type f ! -path './deps/*' ! -path './.git/*' -exec rm -f {} +

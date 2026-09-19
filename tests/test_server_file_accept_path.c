@@ -2,6 +2,7 @@
 #include "net_file_delivery.h"
 #include "server_shared_fs.h"
 
+#include <openssl/sha.h>
 #include <stdio.h>
 #include <string.h>
 #include <unistd.h>
@@ -27,6 +28,7 @@ static int test_accept_after_session_meta(void)
     offer.file_perms = FL_FILE_PERM_VIEW | FL_FILE_PERM_SERVER_SHARE;
     offer.file_size = sizeof(payload) - 1u;
     offer.total_chunks = 1u;
+    ASSERT(SHA256((const uint8_t *)payload, sizeof(payload) - 1u, offer.checksum) != NULL);
 
     ASSERT(fl_server_file_store_offer(&offer) == FL_RESULT_OK);
     ASSERT(fl_server_file_meta_from_offer(&offer, &meta) == FL_RESULT_OK);
@@ -49,9 +51,28 @@ static int test_accept_after_session_meta(void)
         fl_server_file_done_t done;
         memset(&done, 0, sizeof(done));
         strncpy(done.share_id, offer.share_id, sizeof(done.share_id) - 1u);
-        done.total_bytes = sizeof(payload) - 1u;
+        memcpy(done.checksum, offer.checksum, sizeof(done.checksum));
         done.total_chunks = 1u;
         done.status = 1u;
+
+        done.total_bytes = sizeof(payload) - 2u;
+        ASSERT(fl_file_packet_encode_done(&done, done_wire, sizeof(done_wire),
+                                          &done_len) == FL_RESULT_OK);
+        ASSERT(fl_net_file_store_done(done_wire, done_len) == FL_RESULT_INVAL);
+        ASSERT(fl_server_share_accept(offer.share_id, 3u,
+                                      FL_SERVER_FILE_SAVE_TO_SERVER_SHARE) ==
+               FL_RESULT_BUSY);
+
+        done.total_bytes = sizeof(payload) - 1u;
+        done.checksum[0] ^= 0xffu;
+        ASSERT(fl_file_packet_encode_done(&done, done_wire, sizeof(done_wire),
+                                          &done_len) == FL_RESULT_OK);
+        ASSERT(fl_net_file_store_done(done_wire, done_len) == FL_RESULT_INVAL);
+        ASSERT(fl_server_share_accept(offer.share_id, 3u,
+                                      FL_SERVER_FILE_SAVE_TO_SERVER_SHARE) ==
+               FL_RESULT_BUSY);
+
+        memcpy(done.checksum, offer.checksum, sizeof(done.checksum));
         ASSERT(fl_file_packet_encode_done(&done, done_wire, sizeof(done_wire),
                                           &done_len) == FL_RESULT_OK);
         ASSERT(fl_net_file_store_done(done_wire, done_len) == FL_RESULT_OK);

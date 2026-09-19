@@ -8,6 +8,7 @@
 #include "wifi_supplicant.h"
 
 #include "net_wifi_he.h"
+#include "net_wifi_crypto.h"
 #include "net_wifi_mgmt.h"
 
 #include <string.h>
@@ -18,18 +19,6 @@ typedef struct {
     fl_result_t (*recv)(void *ctx, uint8_t expect_opcode, uint8_t *payload, uint16_t cap,
                         uint16_t *plen_out, unsigned timeout_ms);
 } ax_session_io_t;
-
-static fl_result_t ax_ap_sae_confirm(uint8_t *confirm_out, size_t confirm_cap,
-				     size_t *confirm_len_out)
-{
-    static const uint8_t k_confirm[] = "confirm";
-
-    if (!confirm_out || !confirm_len_out || confirm_cap < sizeof(k_confirm) - 1u)
-        return FL_RESULT_INVAL;
-    memcpy(confirm_out, k_confirm, sizeof(k_confirm) - 1u);
-    *confirm_len_out = sizeof(k_confirm) - 1u;
-    return FL_RESULT_OK;
-}
 
 static fl_result_t ax_ap_eapol_responses(uint8_t *msg1_out, uint16_t *msg1_len_out,
 				       uint8_t *msg3_out, uint16_t *msg3_len_out)
@@ -93,8 +82,24 @@ static fl_result_t ax_station_session_auth(const fl_net_wifi_cred_t *cred, uint8
             (void)wifi_supplicant_deinit(&supp);
             return FL_RESULT_ERR;
         }
-        memcpy(tx, (const uint8_t *)"commit", 6u);
-        rc = io->send(io->ctx, FL_NET_SESSION_OP_WIFI_SAE_COMMIT, tx, 6u);
+        if (wifi_supplicant_build_sae_commit(&supp, NULL, 0u, tx, sizeof(tx), &tx_len) != 0) {
+            (void)wifi_supplicant_deinit(&supp);
+            return FL_RESULT_ERR;
+        }
+        rc = io->send(io->ctx, FL_NET_SESSION_OP_WIFI_SAE_COMMIT, tx, (uint16_t)tx_len);
+        if (rc != FL_RESULT_OK) {
+            (void)wifi_supplicant_deinit(&supp);
+            return rc;
+        }
+        rc = io->recv(io->ctx, FL_NET_SESSION_OP_WIFI_SAE_COMMIT, rx, sizeof(rx), &rx_len,
+                      timeout_ms);
+        if (rc != FL_RESULT_OK ||
+            wifi_supplicant_process_sae_commit(&supp, rx, rx_len) != 0 ||
+            wifi_supplicant_build_sae_confirm(&supp, tx, sizeof(tx), &tx_len) != 0) {
+            (void)wifi_supplicant_deinit(&supp);
+            return FL_RESULT_ERR;
+        }
+        rc = io->send(io->ctx, FL_NET_SESSION_OP_WIFI_SAE_CONFIRM, tx, (uint16_t)tx_len);
         if (rc != FL_RESULT_OK) {
             (void)wifi_supplicant_deinit(&supp);
             return rc;
@@ -204,10 +209,17 @@ static fl_result_t ax_station_parse_he_cap(const uint8_t *assoc_resp, uint16_t a
 }
 
 #define AX_AP_CFG_MAX 4u
+#define AX_AP_SAE_SESSION_MAX 8u
+
+typedef struct {
+    fl_net_sock_handle_t peer;
+    fl_net_wifi_sae_dragonfly_ctx_t *ctx;
+} ax_ap_sae_session_t;
 
 typedef struct {
     fl_net_server_t *srv;
     fl_net_wifi_ax_ap_config_t cfg;
+    ax_ap_sae_session_t sae_sessions[AX_AP_SAE_SESSION_MAX];
     int enabled;
 } ax_ap_slot_t;
 
@@ -223,6 +235,69 @@ static ax_ap_slot_t *ax_ap_for_server(fl_net_server_t *srv)
     return NULL;
 }
 
+static void ax_ap_sae_session_reset(ax_ap_sae_session_t *session)
+{
+    if (!session)
+        return;
+    fl_net_wifi_sae_dragonfly_ctx_destroy(session->ctx);
+    session->ctx = NULL;
+    session->peer = FL_NET_SOCK_INVALID;
+}
+
+static void ax_ap_sae_sessions_reset(ax_ap_slot_t *ap)
+{
+    size_t i;
+
+    if (!ap)
+        return;
+    for (i = 0; i < AX_AP_SAE_SESSION_MAX; i++)
+        ax_ap_sae_session_reset(&ap->sae_sessions[i]);
+}
+
+static ax_ap_sae_session_t *ax_ap_sae_session_find(ax_ap_slot_t *ap,
+                                                   fl_net_sock_handle_t peer)
+{
+    size_t i;
+
+    if (!ap || peer == FL_NET_SOCK_INVALID)
+        return NULL;
+    for (i = 0; i < AX_AP_SAE_SESSION_MAX; i++) {
+        if (ap->sae_sessions[i].ctx && ap->sae_sessions[i].peer == peer)
+            return &ap->sae_sessions[i];
+    }
+    return NULL;
+}
+
+static ax_ap_sae_session_t *ax_ap_sae_session_start(ax_ap_slot_t *ap,
+                                                    fl_net_sock_handle_t peer)
+{
+    ax_ap_sae_session_t *session;
+    size_t i;
+
+    session = ax_ap_sae_session_find(ap, peer);
+    if (!session) {
+        for (i = 0; i < AX_AP_SAE_SESSION_MAX; i++) {
+            if (!ap->sae_sessions[i].ctx) {
+                session = &ap->sae_sessions[i];
+                break;
+            }
+        }
+    }
+    if (!session)
+        return NULL;
+
+    ax_ap_sae_session_reset(session);
+    if (fl_net_wifi_sae_dragonfly_ctx_create(&session->ctx) != FL_RESULT_OK)
+        return NULL;
+    if (fl_net_wifi_sae_dragonfly_init_ap(session->ctx, ap->cfg.ssid, ap->cfg.passphrase,
+                                          ap->cfg.bssid, ap->cfg.sta_mac) != FL_RESULT_OK) {
+        ax_ap_sae_session_reset(session);
+        return NULL;
+    }
+    session->peer = peer;
+    return session;
+}
+
 fl_result_t fl_net_wifi_ax_ap_enable(fl_net_server_t *srv,
                                      const fl_net_wifi_ax_ap_config_t *cfg)
 {
@@ -231,8 +306,12 @@ fl_result_t fl_net_wifi_ax_ap_enable(fl_net_server_t *srv,
 
     if (!srv || !cfg)
         return FL_RESULT_INVAL;
+    if (cfg->auth_mode == FL_WIFI_AUTH_WPA3_SAE &&
+        (!cfg->ssid[0] || !cfg->passphrase[0]))
+        return FL_RESULT_INVAL;
     for (i = 0; i < AX_AP_CFG_MAX; i++) {
         if (s_ax_ap[i].enabled && s_ax_ap[i].srv == srv) {
+            ax_ap_sae_sessions_reset(&s_ax_ap[i]);
             s_ax_ap[i].cfg = *cfg;
             return FL_RESULT_OK;
         }
@@ -252,6 +331,8 @@ void fl_net_wifi_ax_ap_disable(fl_net_server_t *srv)
     size_t i;
     for (i = 0; i < AX_AP_CFG_MAX; i++) {
         if (s_ax_ap[i].enabled && s_ax_ap[i].srv == srv) {
+            ax_ap_sae_sessions_reset(&s_ax_ap[i]);
+            fl_net_wifi_crypto_memzero(&s_ax_ap[i].cfg, sizeof(s_ax_ap[i].cfg));
             memset(&s_ax_ap[i], 0, sizeof(s_ax_ap[i]));
             return;
         }
@@ -305,7 +386,9 @@ int fl_net_wifi_ax_ap_dispatch(fl_net_server_t *srv, fl_net_server_member_id_t f
                                const uint8_t *payload, uint16_t plen)
 {
     ax_ap_slot_t *ap = ax_ap_for_server(srv);
+    ax_ap_sae_session_t *sae_session;
     uint8_t reply[512];
+    uint8_t pmk[FL_NET_WIFI_PMK_LEN];
     size_t reply_len = 0;
     uint8_t msg1[64];
     uint8_t msg3[64];
@@ -318,12 +401,41 @@ int fl_net_wifi_ax_ap_dispatch(fl_net_server_t *srv, fl_net_server_member_id_t f
 
     switch (opcode) {
     case FL_NET_SESSION_OP_WIFI_SAE_COMMIT:
-        if (ap->cfg.auth_mode != FL_WIFI_AUTH_WPA3_SAE || plen == 0u)
+        if (ap->cfg.auth_mode != FL_WIFI_AUTH_WPA3_SAE ||
+            plen != FL_NET_WIFI_SAE_COMMIT_BODY_LEN)
             return 1;
-        if (ax_ap_sae_confirm(reply, sizeof(reply), &reply_len) != FL_RESULT_OK)
+        sae_session = ax_ap_sae_session_start(ap, peer);
+        if (!sae_session)
             return 1;
-        (void)ax_send(peer, FL_NET_SESSION_OP_WIFI_SAE_CONFIRM, reply,
+        if (fl_net_wifi_sae_dragonfly_build_commit(sae_session->ctx, NULL, 0u, reply,
+                                                    sizeof(reply), &reply_len) != FL_RESULT_OK ||
+            fl_net_wifi_sae_dragonfly_rx_commit(sae_session->ctx, payload, plen, 0u) !=
+                FL_RESULT_OK) {
+            ax_ap_sae_session_reset(sae_session);
+            return 1;
+        }
+        (void)ax_send(peer, FL_NET_SESSION_OP_WIFI_SAE_COMMIT, reply,
                       (uint16_t)reply_len);
+        return 1;
+
+    case FL_NET_SESSION_OP_WIFI_SAE_CONFIRM:
+        if (ap->cfg.auth_mode != FL_WIFI_AUTH_WPA3_SAE ||
+            plen != FL_NET_WIFI_SAE_CONFIRM_BODY_LEN)
+            return 1;
+        sae_session = ax_ap_sae_session_find(ap, peer);
+        if (!sae_session)
+            return 1;
+        if (fl_net_wifi_sae_dragonfly_verify_confirm(sae_session->ctx, payload, plen, pmk) !=
+                FL_RESULT_OK ||
+            fl_net_wifi_sae_dragonfly_build_confirm(sae_session->ctx, reply, sizeof(reply),
+                                                     &reply_len) != FL_RESULT_OK) {
+            fl_net_wifi_crypto_memzero(pmk, sizeof(pmk));
+            ax_ap_sae_session_reset(sae_session);
+            return 1;
+        }
+        fl_net_wifi_crypto_memzero(pmk, sizeof(pmk));
+        (void)ax_send(peer, FL_NET_SESSION_OP_WIFI_SAE_CONFIRM, reply, (uint16_t)reply_len);
+        ax_ap_sae_session_reset(sae_session);
         return 1;
 
     case FL_NET_SESSION_OP_WIFI_EAPOL:

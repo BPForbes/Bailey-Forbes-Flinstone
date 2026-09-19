@@ -1,0 +1,256 @@
+name: Browser kernel artifact
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+concurrency:
+  group: browser-kernel-${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  validate:
+    name: Build, test, and audit browser candidate
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    # Least privilege: repository, language, release, and commit reads come with
+    # contents:read; the metadata timeline additionally needs merged pull requests.
+    permissions:
+      contents: read
+      pull-requests: read
+    outputs:
+      bootable: ${{ steps.metadata.outputs.bootable }}
+      browser_compatible: ${{ steps.metadata.outputs.browser_compatible }}
+      boot_smoke_passed: ${{ steps.boot_probe.outputs.boot_smoke_passed }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v5
+
+      - name: Install build and virtual-boot dependencies
+        run: |
+          sudo apt-get update -y
+          sudo apt-get install -y gcc g++ binutils make nasm libsqlite3-dev libssl-dev qemu-system-x86
+
+      - name: Test hardware-driver contracts
+        run: make test_drivers
+
+      - name: Test in-process VM memory and replay
+        run: |
+          make clean
+          make test_vm_mem
+          make test_replay
+
+      - name: Test fail-closed promotion gate
+        run: make test-browser-kernel-gate
+
+      - name: Build browser-kernel candidate
+        env:
+          GITHUB_SHA: ${{ github.sha }}
+        run: make browser-kernel
+
+      - name: Probe virtual boot and verify compatibility metadata
+        id: boot_probe
+        run: ./scripts/test_browser_kernel_artifact.sh
+
+      - name: Install browser validation tools
+        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: 22
+
+      - name: Cache Playwright browsers
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: ~/.cache/ms-playwright
+          key: playwright-${{ runner.os }}-${{ hashFiles('tools/browser-lab/package-lock.json') }}
+
+      - name: Cache QEMU Wasm runtime
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: tools/browser-lab/vendor/qemu
+          key: qemu-wasm-${{ hashFiles('tools/browser-lab/runtime-lock.json') }}
+
+      - name: Test browser-lab unit contracts
+        run: |
+          npm ci --prefix tools/browser-lab
+          make test-browser-lab
+
+      - name: Cache Emscripten SDK
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: .emsdk-local
+          key: emsdk-3.1.74
+
+      - name: Compile sandboxed WebAssembly lab shell
+        env:
+          EMSDK_ROOT: ${{ github.workspace }}/.emsdk-local
+        run: |
+          chmod +x scripts/fetch_emsdk.sh scripts/build_wasm_lab.sh
+          ./scripts/fetch_emsdk.sh
+          # shellcheck disable=SC1091
+          . "$EMSDK_ROOT/emsdk_env.sh"
+          EMCC_REQUIRED=1 make wasm
+
+      - name: Probe serial identity and concurrent sessions
+        run: python3 ./scripts/test_freestanding_shell.py
+
+      - name: Fetch pinned QEMU Wasm runtime
+        run: python3 ./scripts/fetch_browser_runtime.py
+
+      - name: Install Playwright Chromium
+        run: npx --prefix tools/browser-lab playwright install chromium
+
+      - name: Validate browser boot independently
+        timeout-minutes: 8
+        run: node ./scripts/test_browser_boot.cjs
+
+      - name: Package validated static browser lab
+        run: python3 ./scripts/package_browser_lab_release.py
+
+      - name: Validate packaged lab asset paths
+        timeout-minutes: 8
+        run: FL_BROWSER_TEST_PACKAGED=1 node ./scripts/test_browser_boot.cjs
+
+      - name: Validate portfolio iframe isolation
+        timeout-minutes: 10
+        run: node ./scripts/test_browser_iframe.cjs
+
+      - name: Generate public project metadata
+        env:
+          # GITHUB_TOKEN only; no PAT is required for these read-only endpoints.
+          GITHUB_TOKEN: ${{ github.token }}
+          GITHUB_REPOSITORY: ${{ github.repository }}
+          GITHUB_SHA: ${{ github.sha }}
+          # The existing QEMU boot smoke result stays authoritative.
+          FL_BOOT_SMOKE_PASSED: ${{ steps.boot_probe.outputs.boot_smoke_passed }}
+          FL_PUBLISH_CONTEXT: ${{ github.event_name == 'push' && github.ref == 'refs/heads/main' }}
+        run: |
+          publish=()
+          if [ "${FL_PUBLISH_CONTEXT}" = "true" ]; then
+            publish=(--publish-context)
+          fi
+          python3 ./scripts/generate_project_metadata.py "${publish[@]}"
+
+      - name: Verify metadata is inside the Pages payload
+        env:
+          GITHUB_SHA: ${{ github.sha }}
+        run: |
+          python3 - <<'PY'
+          import json
+          import os
+
+          path = "dist/browser-lab/project-metadata.json"
+          with open(path, encoding="utf-8") as handle:
+              metadata = json.load(handle)
+          assert metadata["schemaVersion"] == 1, "schemaVersion must be 1"
+          assert metadata["sourceCommit"] == os.environ["GITHUB_SHA"], (
+              "project-metadata.json must point at the deployed build commit"
+          )
+          assert metadata["languages"], "Linguist language breakdown must not be empty"
+          assert isinstance(metadata.get("releases"), list), "releases must be present as an array"
+          print(f"{path}: schemaVersion={metadata['schemaVersion']} "
+                f"languages={len(metadata['languages'])} "
+                f"timeline={len(metadata['timeline'])} "
+                f"releases={len(metadata['releases'])}")
+          PY
+
+      - name: Read promotion state
+        id: metadata
+        run: |
+          python3 - <<'PY' >>"$GITHUB_OUTPUT"
+          import json
+          with open("dist/build-info.json", encoding="utf-8") as handle:
+              info = json.load(handle)
+          print(f"bootable={str(info['bootable']).lower()}")
+          print(f"browser_compatible={str(info.get('browserCompatible', info['v86Compatible'])).lower()}")
+          PY
+
+      - name: Record blocked browser outcome
+        if: steps.metadata.outputs.browser_compatible != 'true'
+        run: |
+          {
+            echo "## Browser-kernel compatibility result"
+            echo
+            echo "The raw x86-64 candidate was not independently validated in a browser emulator."
+            echo "No public lab artifact was promoted."
+          } >>"$GITHUB_STEP_SUMMARY"
+
+      - name: Upload blocked compatibility package
+        if: steps.metadata.outputs.browser_compatible != 'true'
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: flintstone-browser-kernel-browser-blocked-${{ github.sha }}
+          path: |
+            dist/flintstone.img
+            dist/build-info.json
+            dist/browser-validation.json
+          if-no-files-found: error
+          retention-days: 14
+
+      - name: Reject candidate that did not satisfy every promotion gate
+        if: >-
+          steps.metadata.outputs.bootable == 'true' &&
+          steps.boot_probe.outputs.boot_smoke_passed != 'true'
+        run: |
+          echo "Bootable metadata cannot promote without an observed QEMU serial marker." >&2
+          exit 1
+
+      - name: Upload validated browser kernel
+        if: >-
+          steps.metadata.outputs.bootable == 'true' &&
+          steps.metadata.outputs.browser_compatible == 'true' &&
+          steps.boot_probe.outputs.boot_smoke_passed == 'true'
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: flintstone-browser-kernel
+          path: |
+            dist/flintstone.img
+            dist/build-info.json
+            dist/browser-validation.json
+          if-no-files-found: error
+
+      - name: Upload validated static browser lab
+        if: >-
+          steps.metadata.outputs.bootable == 'true' &&
+          steps.metadata.outputs.browser_compatible == 'true' &&
+          steps.boot_probe.outputs.boot_smoke_passed == 'true'
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: flintstone-browser-lab
+          path: dist/browser-lab
+          if-no-files-found: error
+
+      - name: Stage Pages payload
+        if: >-
+          github.event_name == 'push' && github.ref == 'refs/heads/main' &&
+          steps.metadata.outputs.bootable == 'true' &&
+          steps.metadata.outputs.browser_compatible == 'true' &&
+          steps.boot_probe.outputs.boot_smoke_passed == 'true'
+        uses: actions/upload-pages-artifact@fc324d3547104276b827a68afc52ff2a11cc49c9 # v5.0.0
+        with:
+          path: dist/browser-lab
+
+  deploy:
+    name: Publish validated lab to GitHub Pages
+    needs: validate
+    if: >-
+      github.event_name == 'push' && github.ref == 'refs/heads/main' &&
+      needs.validate.outputs.bootable == 'true' &&
+      needs.validate.outputs.browser_compatible == 'true' &&
+      needs.validate.outputs.boot_smoke_passed == 'true'
+    runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    permissions:
+      pages: write
+      id-token: write
+    steps:
+      - name: Configure Pages
+        uses: actions/configure-pages@45bfe0192ca1faeb007ade9deae92b16b8254a0d # v6.0.0
+      - name: Deploy Pages
+        id: deployment
+        uses: actions/deploy-pages@368f82528645a54fb793d4d04e342629a3f51346 # v5.0.1

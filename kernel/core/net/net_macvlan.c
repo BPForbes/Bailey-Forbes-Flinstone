@@ -111,9 +111,12 @@ static int macvlan_run_ip(char *const argv[])
         return -1;
     }
     for (;;) {
-        if (waitpid(pid, &status, 0) == 0)
+        pid_t waited = waitpid(pid, &status, 0);
+        int cls = fl_net_macvlan_waitpid_classify((long)pid, (long)waited, errno);
+
+        if (cls > 0)
             break;
-        if (errno == EINTR)
+        if (cls == 0)
             continue;
         return -1;
     }

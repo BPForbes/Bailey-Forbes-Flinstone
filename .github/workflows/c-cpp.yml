@@ -20,7 +20,7 @@ jobs:
     permissions:
       contents: write
     steps:
-      - uses: actions/checkout@93cb6efe18208431cddfb8368fd83d5badbf9bfd # v5
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v5
         with:
           fetch-depth: 0
           token: ${{ secrets.BPFORBES_PAT || secrets.VERSION_LOCK_PAT || secrets.GITHUB_TOKEN }}
@@ -35,10 +35,13 @@ jobs:
       - name: GM=1 preproduction rows must be promoted (not left for header-only sync)
         run: ./scripts/check_version_gm1_preproduction_promoted.sh
 
+      - name: PUBLISHED_DESCRIPTION must accompany GM=1 and stay within the length limit
+        run: ./scripts/check_version_published_description_requires_gm.sh
+
       - name: Regenerate userland/shell/version_def.h from .ver trees (entries + preproduction)
         run: ./scripts/gen_version_def.sh
 
-      - name: Publish version/entries, version/locked, and version_def.h (same-repo only)
+      - name: Publish version/entries, version/locked, version_def.h, and any GM=1 named release (same-repo only)
         if: github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository
         env:
           BOT_NAME: github-actions[bot]
@@ -46,8 +49,8 @@ jobs:
           GIT_HEAD_REF: ${{ github.head_ref }}
         run: |
           set -euo pipefail
-          if git diff --quiet -- version/entries version/locked userland/shell/version_def.h; then
-            echo "No version/entries, version/locked, or version_def.h changes after prepare-version-entries + gen_version_def.sh."
+          if git diff --quiet -- version/entries version/locked userland/shell/version_def.h metadata/releases.json; then
+            echo "No version/entries, version/locked, version_def.h, or metadata/releases.json changes after prepare-version-entries + gen_version_def.sh."
             exit 0
           fi
           if [[ "${GITHUB_REF}" == "refs/heads/develop" || "${GITHUB_REF}" == "refs/heads/main" ]]; then
@@ -56,8 +59,8 @@ jobs:
           fi
           git config user.name "$BOT_NAME"
           git config user.email "$BOT_EMAIL"
-          git add -A -- version/entries version/locked userland/shell/version_def.h
-          git commit -m "chore(version): sync entries promote, finalize locked, and version_def.h (automated)"
+          git add -A -- version/entries version/locked userland/shell/version_def.h metadata/releases.json
+          git commit -m "chore(version): sync entries promote, finalize locked, version_def.h, and named releases (automated)"
           if [[ "${GITHUB_EVENT_NAME}" == "pull_request" ]]; then
             git push origin "HEAD:${GIT_HEAD_REF}"
           else
@@ -93,7 +96,7 @@ jobs:
     needs: version-requirements
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@93cb6efe18208431cddfb8368fd83d5badbf9bfd # v5
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v5
         with:
           fetch-depth: 0
 
@@ -156,7 +159,7 @@ jobs:
     needs: version-requirements
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@93cb6efe18208431cddfb8368fd83d5badbf9bfd # v5
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v5
         with:
           fetch-depth: 0
 
@@ -185,7 +188,7 @@ jobs:
     needs: version-requirements
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@93cb6efe18208431cddfb8368fd83d5badbf9bfd # v5
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v5
         with:
           fetch-depth: 0
 
@@ -205,3 +208,45 @@ jobs:
 
       - name: Test — vm_layer_warning
         run: make test_vm_layer_warning
+
+  build-wasm-lab:
+    name: Build WebAssembly lab
+    needs: version-requirements
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v5
+        with:
+          fetch-depth: 0
+
+      - name: Sync version checkout for build
+        uses: ./.github/actions/sync-version-checkout
+
+      - name: Install host compiler
+        run: sudo apt-get update -y && sudo apt-get install -y gcc make git python3
+
+      - name: Cache Emscripten SDK
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: .emsdk-local
+          key: emsdk-3.1.74
+
+      - name: Install Emscripten and compile the lab shell
+        env:
+          EMSDK_ROOT: ${{ github.workspace }}/.emsdk-local
+        run: |
+          chmod +x scripts/fetch_emsdk.sh scripts/build_wasm_lab.sh
+          ./scripts/fetch_emsdk.sh
+          # shellcheck disable=SC1091
+          . "$EMSDK_ROOT/emsdk_env.sh"
+          EMCC_REQUIRED=1 make wasm
+          make test-wasm-shell
+
+      - name: Upload WebAssembly lab module
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: flintstone-wasm-lab
+          path: |
+            tools/browser-lab/wasm/flintstone.js
+            tools/browser-lab/wasm/flintstone.wasm
+          if-no-files-found: error
+          retention-days: 14

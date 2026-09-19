@@ -12,6 +12,7 @@ build/
 bin/
 obj/
 out/
+dist/
 
 # Local Windows tool staging (created by install_deps.sh on WSL)
 /mnt/
@@ -94,3 +95,12 @@ tests/test_wifi_80211ax_mock_279
 tests/test_workqueue_*
 server_shared/
 artifacts/
+/tools/browser-lab/vendor/qemu/
+/tools/browser-lab/node_modules/
+/tools/browser-lab/wasm/flintstone.js
+/tools/browser-lab/wasm/flintstone.wasm
+.emsdk-local/
+
+# Python bytecode from scripts/ and tests/
+__pycache__/
+*.pyc

@@ -1,0 +1,6 @@
+MAJOR_VERSION=4
+STANDARD_VERSION=5
+RELEASE_VERSION=3
+DESCRIPTION=Lab guest DNS prefers same-origin /lab-dns (local getaddrinfo) and only falls back to Cloudflare DoH when that path is missing, so ping works both in the Python lab server and on GitHub Pages behind the COI service worker. The lab page runs guest shell commands from a dedicated command box (not the server-chat input), registers lab users as root, and can open a new session as that user. Browser-lab chrome uses a macOS Liquid Glass window (frosted blur, traffic lights, 24-bit VGA palette, JetBrains Mono + Powerline status).
+
+RELEASE_DATE=2026-09-15
