@@ -140,9 +140,12 @@
           });
         } finally { pulseInputHold(); }
       },
-      async reset() {
-        await withScreenHeld(() => command("system_reset"));
-      },
+      // No in-place reset. QEMU runs with -no-reboot, and under that flag
+      // qemu_system_reset_request() converts any cause other than a subsystem
+      // reset into a shutdown request, so a QMP system_reset exits the VM
+      // instead of rebooting it: the guest never reprints the boot marker and
+      // the lab sits in Booting forever. Exposing no reset() makes the
+      // controller fall back to powering off and booting a fresh worker.
       async destroy() {
         disposed = true; holdScreen += 1; inputHold = 1;
         if (inputHoldTimer) clearTimeout(inputHoldTimer);

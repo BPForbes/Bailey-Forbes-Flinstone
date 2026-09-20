@@ -1,0 +1,8 @@
+MAJOR_VERSION=5
+STANDARD_VERSION=1
+RELEASE_VERSION=2
+PRERELEASE=1
+DEV_VERSION=1
+DESCRIPTION=Stop the browser lab hanging in Booting after Reset. QEMU runs with -no-reboot, and under that flag qemu_system_reset_request() converts any cause other than a subsystem reset into a shutdown request, so the QMP system_reset issued by the in-place reset path exited the VM instead of rebooting it; the guest never reprinted FLINTSTONE_KERNEL_BOOT_OK and test_browser_boot timed out after 90 seconds waiting for Ready. The QEMU adapter no longer exposes reset(), so the controller falls back to powering off and booting a fresh worker, the shape that last passed this job. The controller keeps its generic in-place branch for adapters that can honor one, and test_browser_lab now pins the invariant: the worker keeps -no-reboot and the adapter never calls system_reset. The placeholder and screen-read fixes that shipped alongside the broken reset are unchanged. Also records main as a merge parent of develop so main-into-develop stops re-raising the same thirteen conflicts, which PR #365 left behind by landing main's content as a squash that kept main outside develop's ancestry.
+
+RELEASE_DATE=2026-09-20

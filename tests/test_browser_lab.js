@@ -261,7 +261,8 @@ assert(!isTrustedReadyEvent({ ...ready, data: { ...ready.data, type: "loading" }
   assert(adapterSrc.includes("pulseInputHold"), "key bursts must debounce VGA pmemsave");
   assert(adapterSrc.includes("setTimeout(resolve, ch === \"\\n\" || ch === \"\\r\" ? 80 : 20)"), "sendText must pace keys so the 8042 can drain");
   assert(adapterSrc.includes('filename: "/screen.bin" }, 3000)'), "pmemsave must use a short QMP timeout");
-  assert(adapterSrc.includes("system_reset"), "Reset must reuse the QEMU worker via QMP system_reset");
+  assert(workerSrc.includes("-no-reboot"), "QEMU must exit rather than loop when the guest reboots itself");
+  assert(!adapterSrc.includes('command("system_reset")'), "QMP system_reset is a shutdown request under -no-reboot, so Reset must power off and boot a fresh worker");
   assert(adapterSrc.includes("if (data.bytes)"), "empty screen dumps must not be rendered");
   assert(workerSrc.includes("screen read:"), "a missing /screen.bin must be diagnostic, not a guest failure");
   assert(coreSrc.includes("emulator.reset"), "controller reset must prefer an in-place emulator reset");

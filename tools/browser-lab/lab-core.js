@@ -124,6 +124,10 @@
         state(readySent ? STATES.READY : STATES.BOOTING);
         return true;
       },
+      // An adapter may reset in place by exposing reset(); that keeps its VGA
+      // probe alive across a reset. The QEMU adapter deliberately does not,
+      // because it runs with -no-reboot (see qemu-adapter.js), so this falls
+      // through to a full power-off and boot there.
       async reset(options) {
         if (emulator && typeof emulator.reset === "function") {
           readySent = false;
