@@ -801,10 +801,11 @@ test_server_file_expire:
 	./tests/test_server_file_expire
 
 .PHONY: test_server_file_meta
-test_server_file_meta: kernel/core/net/net_channel_sidecar.o kernel/core/net/net_pkt_channel_meta.o kernel/core/net/net_file_delivery.o kernel/core/vfs/server_shared_fs.o kernel/core/vfs/server_shared_db.o kernel/core/vfs/server_shared_digest.o userland/shell/common.o
+test_server_file_meta: $(NET_ASM_OBJ) kernel/core/net/net_channel_sidecar.o kernel/core/net/net_pkt_channel_meta.o kernel/core/net/net_file_delivery.o kernel/core/vfs/server_shared_fs.o kernel/core/vfs/server_shared_db.o kernel/core/vfs/server_shared_digest.o userland/shell/common.o
 	$(CC) $(CFLAGS) $(TEST_SANITIZE) -o tests/test_server_file_meta tests/test_server_file_meta.c tests/stubs_file_delivery_net.c \
 	  kernel/core/net/net_channel_sidecar.o kernel/core/net/net_pkt_channel_meta.o \
-	  kernel/core/net/net_file_delivery.o kernel/core/vfs/server_shared_fs.o kernel/core/vfs/server_shared_db.o kernel/core/vfs/server_shared_digest.o userland/shell/common.o -lsqlite3 $(OPENSSL_LIBS) -Wl,-z,noexecstack
+	  kernel/core/net/net_file_delivery.o kernel/core/vfs/server_shared_fs.o kernel/core/vfs/server_shared_db.o kernel/core/vfs/server_shared_digest.o userland/shell/common.o \
+	  $(NET_ASM_OBJ) -lsqlite3 $(OPENSSL_LIBS) -Wl,-z,noexecstack
 	./tests/test_server_file_meta
 
 .PHONY: test_server_shared_catalog
@@ -835,11 +836,18 @@ test_server_file_accept_path: $(NET_ASM_OBJ) kernel/core/net/net_channel_sidecar
 	./tests/test_server_file_accept_path
 
 .PHONY: test_channel_sidecar
-test_channel_sidecar: kernel/core/net/net_channel_sidecar.o kernel/core/net/net_pkt_channel_meta.o kernel/core/net/net_file_delivery.o kernel/core/vfs/server_shared_fs.o kernel/core/vfs/server_shared_db.o kernel/core/vfs/server_shared_digest.o userland/shell/common.o tests/stubs_file_delivery_net.c
+test_channel_sidecar: $(NET_ASM_OBJ) kernel/core/net/net_channel_sidecar.o kernel/core/net/net_pkt_channel_meta.o kernel/core/net/net_file_delivery.o kernel/core/vfs/server_shared_fs.o kernel/core/vfs/server_shared_db.o kernel/core/vfs/server_shared_digest.o userland/shell/common.o tests/stubs_file_delivery_net.c
 	$(CC) $(CFLAGS) $(TEST_SANITIZE) -o tests/test_channel_sidecar tests/test_channel_sidecar.c \
 	  kernel/core/net/net_channel_sidecar.o kernel/core/net/net_pkt_channel_meta.o \
-	  kernel/core/net/net_file_delivery.o kernel/core/vfs/server_shared_fs.o kernel/core/vfs/server_shared_db.o kernel/core/vfs/server_shared_digest.o userland/shell/common.o tests/stubs_file_delivery_net.c -lsqlite3 $(OPENSSL_LIBS) -Wl,-z,noexecstack
+	  kernel/core/net/net_file_delivery.o kernel/core/vfs/server_shared_fs.o kernel/core/vfs/server_shared_db.o kernel/core/vfs/server_shared_digest.o userland/shell/common.o tests/stubs_file_delivery_net.c \
+	  $(NET_ASM_OBJ) -lsqlite3 $(OPENSSL_LIBS) -Wl,-z,noexecstack
 	./tests/test_channel_sidecar
+
+.PHONY: test_macvlan_waitpid
+test_macvlan_waitpid: kernel/core/net/net_macvlan_waitpid.o
+	$(CC) $(CFLAGS) $(TEST_SANITIZE) -o tests/test_macvlan_waitpid tests/test_macvlan_waitpid.c \
+	  kernel/core/net/net_macvlan_waitpid.o -Wl,-z,noexecstack
+	./tests/test_macvlan_waitpid
 
 .PHONY: server_shared_quarantine_harness
 server_shared_quarantine_harness: kernel/core/vfs/server_shared_fs.o kernel/core/vfs/server_shared_db.o kernel/core/vfs/server_shared_digest.o userland/shell/common.o

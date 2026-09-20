@@ -1,0 +1,8 @@
+MAJOR_VERSION=5
+STANDARD_VERSION=1
+RELEASE_VERSION=1
+PRERELEASE=1
+DEV_VERSION=1
+DESCRIPTION=Treat a successful waitpid() as the child PID so server netinit can finish fl0 macvlan create; link NET_ASM_OBJ into test_server_file_meta and test_channel_sidecar so FL_NET_ASM_AVAILABLE builds resolve asm_net_store/load_be16. Keep the 4.5.1 .ver free of leftover stash markers. Recover the browser-lab VGA probe after Reset by issuing QMP system_reset in the same worker so pmemsave keeps running, and treat a missing /screen.bin as diagnostic instead of failing a Ready guest.
+
+RELEASE_DATE=2026-09-19

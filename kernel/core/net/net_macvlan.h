@@ -50,6 +50,13 @@ int fl_net_macvlan_get_registered(uint32_t *ip_be,
                                    uint32_t *mask_be,
                                    uint8_t  *prefix_len);
 
+/**
+ * Classify a waitpid() result for a specific child.
+ * Returns 1 when waited == expected (reaped), 0 to retry on EINTR,
+ * and -1 on any other outcome (including expected <= 0).
+ */
+int fl_net_macvlan_waitpid_classify(long expected, long waited, int wait_errno);
+
 #ifdef __cplusplus
 }
 #endif
