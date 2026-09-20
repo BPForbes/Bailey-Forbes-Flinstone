@@ -253,6 +253,9 @@ assert(!isTrustedReadyEvent({ ...ready, data: { ...ready.data, type: "loading" }
   recovered.accept({ return: {}, id: afterTimeout.at(-1).id });
   await sendKey;
   const adapterSrc = fs.readFileSync("tools/browser-lab/qemu-adapter.js", "utf8");
+  const workerSrc = fs.readFileSync("tools/browser-lab/qemu-worker.js", "utf8");
+  assert(workerSrc.includes("screen read:"), "a missing /screen.bin must be diagnostic, not a guest failure");
+  assert(adapterSrc.includes("if (data.bytes)"), "empty screen dumps must not be rendered");
   assert(adapterSrc.includes("withScreenHeld(() => sendKey(qcodes))"), "send-key must hold VGA pmemsave");
   assert(adapterSrc.includes("pulseInputHold"), "key bursts must debounce VGA pmemsave");
   assert(adapterSrc.includes("setTimeout(resolve, ch === \"\\n\" || ch === \"\\r\" ? 80 : 20)"), "sendText must pace keys so the 8042 can drain");
