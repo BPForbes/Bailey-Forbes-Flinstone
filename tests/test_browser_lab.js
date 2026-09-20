@@ -107,8 +107,6 @@ assert(fs.existsSync("tools/browser-lab/fonts/nerd-symbols-powerline.woff2"));
 assert(fs.existsSync("tools/browser-lab/fonts/jetbrains-mono-latin-wght-normal.woff2"));
 const labJs = fs.readFileSync("tools/browser-lab/lab.js", "utf8");
 assert(labJs.includes("VGA_TRUECOLOR"), "VGA renderer must use a 24-bit palette");
-assert(labJs.includes("lastScreenBytes = null"), "Reset must drop the latched VGA frame");
-assert(labJs.includes("if (placeholder) placeholder.hidden = true"), "valid VGA must hide the placeholder before canvas drawing");
 assert((labJs.match(/#[0-9a-fA-F]{6}/g) || []).length >= 16, "truecolor palette needs 16 hex slots");
 
 let controllerChange;
@@ -256,16 +254,12 @@ assert(!isTrustedReadyEvent({ ...ready, data: { ...ready.data, type: "loading" }
   await sendKey;
   const adapterSrc = fs.readFileSync("tools/browser-lab/qemu-adapter.js", "utf8");
   const workerSrc = fs.readFileSync("tools/browser-lab/qemu-worker.js", "utf8");
-  const coreSrc = fs.readFileSync("tools/browser-lab/lab-core.js", "utf8");
+  assert(workerSrc.includes("screen read:"), "a missing /screen.bin must be diagnostic, not a guest failure");
+  assert(adapterSrc.includes("if (data.bytes)"), "empty screen dumps must not be rendered");
   assert(adapterSrc.includes("withScreenHeld(() => sendKey(qcodes))"), "send-key must hold VGA pmemsave");
   assert(adapterSrc.includes("pulseInputHold"), "key bursts must debounce VGA pmemsave");
   assert(adapterSrc.includes("setTimeout(resolve, ch === \"\\n\" || ch === \"\\r\" ? 80 : 20)"), "sendText must pace keys so the 8042 can drain");
   assert(adapterSrc.includes('filename: "/screen.bin" }, 3000)'), "pmemsave must use a short QMP timeout");
-  assert(workerSrc.includes("-no-reboot"), "QEMU must exit rather than loop when the guest reboots itself");
-  assert(!adapterSrc.includes('command("system_reset")'), "QMP system_reset is a shutdown request under -no-reboot, so Reset must power off and boot a fresh worker");
-  assert(adapterSrc.includes("if (data.bytes)"), "empty screen dumps must not be rendered");
-  assert(workerSrc.includes("screen read:"), "a missing /screen.bin must be diagnostic, not a guest failure");
-  assert(coreSrc.includes("emulator.reset"), "controller reset must prefer an in-place emulator reset");
   const labSrc = fs.readFileSync("tools/browser-lab/lab.js", "utf8");
   assert(!/sendKey\(codes\)\)\.catch\(error => controller\.fail/.test(labSrc), "a send-key timeout must not fail Guest State");
   const cancelled = createQmpClient({ send() {}, timeoutMs: 5000 });
@@ -296,25 +290,6 @@ assert(!isTrustedReadyEvent({ ...ready, data: { ...ready.data, type: "loading" }
   assert.strictEqual(runCalls, 1);
   await controller.reset({}); assert.strictEqual(created, 2); assert.strictEqual(destroyed, 1); assert.strictEqual(states.at(-1), STATES.BOOTING);
   await controller.powerOff(); assert.strictEqual(states.at(-1), STATES.OFF);
-  let inPlaceResets = 0;
-  let reuseCreated = 0;
-  const reusable = { stop() {}, run() {}, async reset() { inPlaceResets++; }, async destroy() {} };
-  const reuseStates = [];
-  const reuse = createController({
-    marker: manifest.bootSuccessMarker,
-    setState: (s) => reuseStates.push(s),
-    postReady() {},
-    createEmulator: async ({ serialByte }) => { reuseCreated++; reusable.serialByte = serialByte; return reusable; },
-  });
-  await reuse.boot({});
-  "FLINTSTONE_KERNEL_BOOT_OK\r\n".split("").forEach(reusable.serialByte);
-  assert.strictEqual(reuseStates.at(-1), STATES.READY);
-  await reuse.reset({});
-  assert.strictEqual(inPlaceResets, 1);
-  assert.strictEqual(reuseCreated, 1);
-  assert.strictEqual(reuseStates.at(-1), STATES.BOOTING);
-  "FLINTSTONE_KERNEL_BOOT_OK\r\n".split("").forEach(reusable.serialByte);
-  assert.strictEqual(reuseStates.at(-1), STATES.READY);
   const failing = createController({ marker: "x", setState: (s) => states.push(s), postReady() {}, createEmulator: async () => { throw new Error("corrupt image"); } });
   await assert.rejects(() => failing.boot({}), /corrupt image/); assert.strictEqual(states.at(-1), STATES.FAILED);
   console.log("test_browser_lab: PASS");

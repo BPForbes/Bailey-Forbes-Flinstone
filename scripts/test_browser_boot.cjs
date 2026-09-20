@@ -66,13 +66,7 @@ async function main() {
     await status("Ready");
     const serial = await guestText();
     assert(serial.split(/\r?\n/).includes("FLINTSTONE_KERNEL_BOOT_OK"), "Missing exact serial marker");
-    try {
-      await page.locator("#display-placeholder").waitFor({ state: "hidden", timeout: 45000 });
-    } catch (error) {
-      const statusText = await page.locator("#status").innerText().catch(() => "?");
-      const vga = await page.locator(":root").getAttribute("data-vga-cell");
-      throw new Error(`display-placeholder still visible (status=${statusText} vga=${vga || ""} errors=${errors.join("; ") || "none"}): ${error}`);
-    }
+    await page.locator("#display-placeholder").waitFor({ state: "hidden", timeout: 45000 });
     await page.locator(":root[data-vga-cell='F']").waitFor({ timeout: 20000 });
     assert(await page.locator(":root").getAttribute("data-vga-cell") === "F", "VGA diagnostic cell was not F/0x07");
     return serial;
@@ -104,8 +98,7 @@ async function main() {
       await page.getByRole("button", { name: "Resume", exact: true }).click(); await status("Ready");
     }
     await page.getByRole("button", { name: "Reset", exact: true }).click();
-    await Promise.race([status("Booting"), status("Ready")]);
-    await ready();
+    await status("Booting"); await ready();
     await page.getByRole("button", { name: "Power Off", exact: true }).click(); await status("Powered off");
     for (let i = 0; i < 100 && page.workers().length; i++) await new Promise(resolve => setTimeout(resolve, 50)); assert(page.workers().length === 0, "Power Off left workers alive: " + page.workers().map(worker => worker.url()).join(", "));
     await page.getByRole("button", { name: "Boot", exact: true }).click(); await ready();

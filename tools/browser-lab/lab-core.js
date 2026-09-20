@@ -124,28 +124,7 @@
         state(readySent ? STATES.READY : STATES.BOOTING);
         return true;
       },
-      // An adapter may reset in place by exposing reset(); that keeps its VGA
-      // probe alive across a reset. The QEMU adapter deliberately does not,
-      // because it runs with -no-reboot (see qemu-adapter.js), so this falls
-      // through to a full power-off and boot there.
-      async reset(options) {
-        if (emulator && typeof emulator.reset === "function") {
-          readySent = false;
-          paused = false;
-          line = "";
-          clearTimeout(timer);
-          const current = generation;
-          state(STATES.BOOTING);
-          timer = setTimeout(() => {
-            if (current === generation && !readySent)
-              this.fail(new Error("Kernel boot marker was not observed within 90 seconds"));
-          }, 90000);
-          await emulator.reset();
-          return;
-        }
-        await this.powerOff();
-        await this.boot(options);
-      },
+      async reset(options) { await this.powerOff(); await this.boot(options); },
       async powerOff() { generation++; clearTimeout(timer); if (emulator) { if (emulator.destroy) await emulator.destroy(); else await emulator.stop(); } emulator = null; readySent = false; paused = false; line = ""; state(STATES.OFF); },
       fail(error) { generation++; clearTimeout(timer); if (emulator) emulator.destroy(); emulator = null; readySent = false; paused = false; state(STATES.FAILED, error.message || String(error)); },
       serialByte,
