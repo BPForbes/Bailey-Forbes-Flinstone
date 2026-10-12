@@ -16,6 +16,15 @@ static unsigned s_audit_n;
 static char s_loc[LOC_MAX][FL_FS_RAMFS_PATH];
 static unsigned s_loc_n;
 
+/*
+ * Lab network mode. 0 = live: the browser relay (the real external network)
+ * is allowed. 1 = lab-isolated: a netlab MitM+RS session is running, so the
+ * real network is dropped — `server` relay verbs refuse here, and the glue in
+ * tools/browser-lab/lab.js disconnects the relay on the LAB_NETMODE token.
+ * `netlab start` enters it; `netlab stop` restores live and the server resumes.
+ */
+static int s_lab_netmode; /* 0 live/real, 1 lab-isolated */
+
 static int str_eq(const char *a, const char *b)
 {
     while (*a && *b) {
@@ -739,6 +748,12 @@ static int run_server(const char *verb, const char **cursor)
         fl_fs_labnet_ifconfig(emit, emit_uint);
         return 1;
     }
+    if (s_lab_netmode) {
+        /* Real network dropped for an active netlab session: refuse to reach
+         * the relay so nothing leaves while the MitM+RS demo runs. */
+        emit("server paused: lab isolated (netlab MitM+RS active) — run `netlab stop` to resume the real network\r\n");
+        return 1;
+    }
     skip_spaces(cursor);
     emit("SERVER_RELAY ");
     emit(sub);
@@ -747,6 +762,324 @@ static int run_server(const char *verb, const char **cursor)
         emit(*cursor);
     }
     emit("\r\n");
+    return 1;
+}
+
+/* ------------------------------------------------------------------------- */
+/* netlab — contained network-security teaching lab (freestanding analog of   */
+/* the hosted `netlab`). Simulation only: fabricated pods, no sockets, no real */
+/* interface, no interception of anyone, no terminal injection, no capture     */
+/* forgery. The one new power here is the lab/live network switch: `start`     */
+/* drops the real network (relay) for the demo, `stop` resumes it.             */
+/* ------------------------------------------------------------------------- */
+
+struct nl_host {
+    const char *name;
+    const char *ip;
+    const char *mac;
+    const char *role;
+};
+
+struct nl_pod {
+    const char *name;
+    const char *ssid;
+    const struct nl_host *hosts;
+    unsigned host_count;
+    /* roles pre-resolved for the walkthrough and capture summary */
+    const char *gw_ip;
+    const char *gw_mac;
+    const char *obs_mac;
+    const char *st_name;
+    const char *st_ip;
+};
+
+static const struct nl_host NL_POD1_HOSTS[] = {
+    { "gateway",  "192.168.56.1",  "02:00:00:00:56:01", "gateway"  },
+    { "alice",    "192.168.56.50", "02:00:00:00:56:32", "station"  },
+    { "bob",      "192.168.56.60", "02:00:00:00:56:3c", "station"  },
+    { "observer", "192.168.56.76", "02:00:00:00:56:4c", "observer" },
+};
+
+static const struct nl_host NL_POD2_HOSTS[] = {
+    { "gateway", "10.10.0.1",  "02:00:00:00:0a:01", "gateway"  },
+    { "carol",   "10.10.0.20", "02:00:00:00:0a:14", "station"  },
+    { "ids",     "10.10.0.9",  "02:00:00:00:0a:09", "observer" },
+};
+
+static const struct nl_pod NL_PODS[] = {
+    { "redteam-lab",  "FLINT-LAB-AP",  NL_POD1_HOSTS, 4,
+      "192.168.56.1", "02:00:00:00:56:01", "02:00:00:00:56:4c", "alice", "192.168.56.50" },
+    { "blueteam-lab", "FLINT-BLUE-AP", NL_POD2_HOSTS, 3,
+      "10.10.0.1", "02:00:00:00:0a:01", "02:00:00:00:0a:09", "carol", "10.10.0.20" },
+};
+#define NL_POD_COUNT (sizeof(NL_PODS) / sizeof(NL_PODS[0]))
+
+static const struct nl_pod *nl_find_pod(const char *name)
+{
+    unsigned i;
+    if (!name || !name[0])
+        return 0;
+    for (i = 0; i < NL_POD_COUNT; ++i) {
+        if (str_eq(name, NL_PODS[i].name))
+            return &NL_PODS[i];
+    }
+    /* accept "1"/"2" as pod ids too */
+    if (str_eq(name, "1"))
+        return &NL_PODS[0];
+    if (str_eq(name, "2"))
+        return &NL_PODS[1];
+    return 0;
+}
+
+static void nl_boundary(void)
+{
+    emit("  [simulation] fabricated topology in memory only; no real network,\r\n");
+    emit("  [simulation] no interception of anyone, no terminal injection.\r\n");
+}
+
+static void nl_usage(void)
+{
+    emit("netlab — contained net-security teaching lab (simulation only)\r\n");
+    emit("  netlab consent | pods | defend | rs-explain\r\n");
+    emit("  netlab hosts <pod> | topology <pod> | traceroute <pod> <dst>\r\n");
+    emit("  netlab monitor <pod> | arp-demo <pod> | capture <pod>\r\n");
+    emit("  netlab start | stop | status   (lab-isolate: drop/resume real network)\r\n");
+}
+
+static void nl_set_mode(int lab)
+{
+    s_lab_netmode = lab ? 1 : 0;
+    /* Control token for tools/browser-lab/lab.js to drop/resume the relay. */
+    emit(lab ? "LAB_NETMODE lab\r\n" : "LAB_NETMODE live\r\n");
+    if (lab) {
+        emit("netlab: lab-isolated — real network (server relay) dropped for the demo.\r\n");
+        nl_boundary();
+    } else {
+        emit("netlab: live — real network restored; server relay may resume.\r\n");
+    }
+}
+
+static int run_netlab(const char *verb, const char **cursor)
+{
+    char sub[24];
+    char pod[24];
+    char dst[24];
+    const struct nl_pod *p;
+    unsigned i;
+
+    if (!str_eq(verb, "netlab"))
+        return 0;
+
+    if (!take_word(cursor, sub, sizeof(sub))) {
+        nl_usage();
+        return 1;
+    }
+
+    if (str_eq(sub, "help")) {
+        nl_usage();
+        return 1;
+    }
+    if (str_eq(sub, "consent")) {
+        emit("netlab runs on a FABRICATED topology inside this lab only.\r\n");
+        emit("It does not touch a real network, intercept anyone, inject into a\r\n");
+        emit("terminal, or forge a capture. `netlab start` drops the real network\r\n");
+        emit("(the server relay) for the demo; `netlab stop` resumes it.\r\n");
+        return 1;
+    }
+    if (str_eq(sub, "pods")) {
+        emit("simulated pods:\r\n");
+        for (i = 0; i < NL_POD_COUNT; ++i) {
+            emit("  ");
+            emit(NL_PODS[i].name);
+            emit("  ssid=");
+            emit(NL_PODS[i].ssid);
+            emit("  hosts=");
+            emit_uint(NL_PODS[i].host_count);
+            emit("  consent=all-agreed\r\n");
+        }
+        return 1;
+    }
+    if (str_eq(sub, "status")) {
+        emit(s_lab_netmode ? "netlab: lab-isolated (real network dropped)\r\n"
+                           : "netlab: live (real network available)\r\n");
+        return 1;
+    }
+    if (str_eq(sub, "start")) {
+        nl_set_mode(1);
+        return 1;
+    }
+    if (str_eq(sub, "stop")) {
+        nl_set_mode(0);
+        return 1;
+    }
+    if (str_eq(sub, "rs-explain")) {
+        emit("reverse shell: the target dials OUT to a listener and wires its\r\n");
+        emit("shell to that socket, so inbound firewalls are bypassed. netlab does\r\n");
+        emit("NOT implement one (that is remote control of a victim). Defenders\r\n");
+        emit("watch outbound to odd ports (4444), shells that own sockets, and use\r\n");
+        emit("default-deny egress.\r\n");
+        return 1;
+    }
+    if (str_eq(sub, "defend")) {
+        emit("defend — detection & prevention:\r\n");
+        emit("  ARP/MiTM: dynamic ARP inspection, static gateway ARP, alert on two\r\n");
+        emit("    MACs claiming one IP, encrypt+authenticate, WPA2/WPA3, segment.\r\n");
+        emit("  reverse shell: default-deny egress, watch odd outbound ports,\r\n");
+        emit("    EDR/IDS for listener/beacon patterns, key-based SSH, fail2ban.\r\n");
+        emit("  DNS: DNSSEC; capture and review traffic routinely.\r\n");
+        return 1;
+    }
+
+    /* verbs that take a pod */
+    if (str_eq(sub, "hosts") || str_eq(sub, "topology") ||
+        str_eq(sub, "monitor") || str_eq(sub, "arp-demo") ||
+        str_eq(sub, "capture") || str_eq(sub, "traceroute")) {
+        if (!take_word(cursor, pod, sizeof(pod))) {
+            emit("usage: netlab ");
+            emit(sub);
+            emit(" <pod>  (try `netlab pods`)\r\n");
+            return 1;
+        }
+        p = nl_find_pod(pod);
+        if (!p) {
+            emit("netlab: no pod '");
+            emit(pod);
+            emit("' (try `netlab pods`)\r\n");
+            return 1;
+        }
+        if (str_eq(sub, "hosts")) {
+            emit("pod ");
+            emit(p->name);
+            emit(" ssid=");
+            emit(p->ssid);
+            emit("\r\n");
+            for (i = 0; i < p->host_count; ++i) {
+                emit("  ");
+                emit(p->hosts[i].name);
+                emit("  ");
+                emit(p->hosts[i].ip);
+                emit("  ");
+                emit(p->hosts[i].mac);
+                emit("  ");
+                emit(p->hosts[i].role);
+                emit("\r\n");
+            }
+            return 1;
+        }
+        if (str_eq(sub, "topology")) {
+            emit("pod ");
+            emit(p->name);
+            emit(" (ssid ");
+            emit(p->ssid);
+            emit(")\r\n");
+            emit("   [gateway ");
+            emit(p->gw_ip);
+            emit("]\r\n        |\r\n");
+            for (i = 0; i < p->host_count; ++i) {
+                if (str_eq(p->hosts[i].role, "gateway"))
+                    continue;
+                emit("   +-- ");
+                emit(p->hosts[i].name);
+                emit(" ");
+                emit(p->hosts[i].ip);
+                if (str_eq(p->hosts[i].role, "observer"))
+                    emit("  (observer vantage)");
+                emit("\r\n");
+            }
+            return 1;
+        }
+        if (str_eq(sub, "traceroute")) {
+            const struct nl_host *h = 0;
+            if (!take_word(cursor, dst, sizeof(dst))) {
+                emit("usage: netlab traceroute <pod> <dst>\r\n");
+                return 1;
+            }
+            for (i = 0; i < p->host_count; ++i) {
+                if (str_eq(dst, p->hosts[i].name)) {
+                    h = &p->hosts[i];
+                    break;
+                }
+            }
+            if (!h) {
+                emit("netlab: no host '");
+                emit(dst);
+                emit("' in pod ");
+                emit(p->name);
+                emit("\r\n");
+                return 1;
+            }
+            emit("traceroute (simulated) to ");
+            emit(h->name);
+            emit(":\r\n");
+            if (!str_eq(h->role, "gateway")) {
+                emit("  1  gateway   ");
+                emit(p->gw_ip);
+                emit("\r\n  2  ");
+                emit(h->name);
+                emit("   ");
+                emit(h->ip);
+                emit("\r\n");
+            } else {
+                emit("  1  gateway   ");
+                emit(p->gw_ip);
+                emit("\r\n");
+            }
+            return 1;
+        }
+        /* monitor / capture / arp-demo share the scripted-frame story */
+        emit(str_eq(sub, "capture") ? "capture (simulated frames) pod " :
+             str_eq(sub, "arp-demo") ? "arp-demo (how ARP-spoof MiTM works) pod " :
+                                       "monitor (simulated) pod ");
+        emit(p->name);
+        emit(":\r\n");
+        emit("  #1 ARP  who-has ");
+        emit(p->gw_ip);
+        emit("? (request, ");
+        emit(p->st_name);
+        emit("->broadcast)\r\n");
+        emit("  #2 ARP  ");
+        emit(p->gw_ip);
+        emit(" is-at ");
+        emit(p->gw_mac);
+        emit(" (truthful reply)\r\n");
+        emit("  #3 ARP  ");
+        emit(p->gw_ip);
+        emit(" is-at ");
+        emit(p->obs_mac);
+        emit("  <-- SPOOF (observer claims gateway)\r\n");
+        emit("  #4 ARP  ");
+        emit(p->st_ip);
+        emit(" is-at ");
+        emit(p->obs_mac);
+        emit("  <-- SPOOF (observer claims station to gateway)\r\n");
+        emit("  #5 UDP  ");
+        emit(p->st_ip);
+        emit("->");
+        emit(p->gw_ip);
+        emit(" over the poisoned path\r\n");
+        if (str_eq(sub, "capture")) {
+            emit("  [ALERT] ARP conflict: ");
+            emit(p->gw_ip);
+            emit(" claimed by ");
+            emit(p->gw_mac);
+            emit(" and ");
+            emit(p->obs_mac);
+            emit(" (ARP-spoofing signature)\r\n");
+            emit("  verdict: duplicate IP->MAC binding — consistent with a MiTM capture.\r\n");
+        }
+        if (str_eq(sub, "arp-demo")) {
+            emit("  detection: two MACs claiming ");
+            emit(p->gw_ip);
+            emit(" is the giveaway — `netlab capture ");
+            emit(p->name);
+            emit("` raises the alert; `netlab defend` lists fixes.\r\n");
+        }
+        return 1;
+    }
+
+    emit("netlab: unknown verb '");
+    emit(sub);
+    emit("' (try `netlab help`)\r\n");
     return 1;
 }
 
@@ -759,6 +1092,7 @@ static int run_meta(int session, const char *verb, const char **cursor)
         emit("createdisk format initdisk setdisk printdisk listclusters writecluster delcluster addcluster update import\r\n");
         emit("diskput diskget diskfiles diskmkdir diskdel\r\n");
         emit("ping ping6 check ifconfig arp route netstat nslookup resolve netsh wifi udpsend udplisten\r\n");
+        emit("netlab (pods|hosts|topology|traceroute|monitor|arp-demo|capture|start|stop|status|defend)\r\n");
         emit("server version contracts audit redirect rerun help history his cc clear exit bios\r\n");
         emit("lab analogs: ramfs, cluster disk, lab net, P3 relay. Hosted FAT32/sockets stay on the ELF shell.\r\n");
         return 1;
@@ -862,6 +1196,7 @@ void fl_fs_commands_init(void)
     s_redir[0] = 0;
     s_audit_n = 0;
     s_loc_n = 0;
+    s_lab_netmode = 0;
 }
 
 int fl_fs_commands_run(int session, const char *verb, const char **cursor)
@@ -877,7 +1212,8 @@ int fl_fs_commands_run(int session, const char *verb, const char **cursor)
     if (rc == 1)
         return 1;
     if (run_fs(session, verb, cursor) || run_disk(session, verb, cursor) ||
-        run_net(verb, cursor) || run_server(verb, cursor))
+        run_net(verb, cursor) || run_netlab(verb, cursor) ||
+        run_server(verb, cursor))
         return 1;
     return 0;
 }

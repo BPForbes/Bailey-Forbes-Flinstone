@@ -45,6 +45,28 @@
               <button id="guest-cmd-run" type="submit" disabled>Run</button>
             </form>
           </section>
+          <section class="netlab-panel glass-card" aria-label="MitM and reverse-shell teaching lab">
+            <h2>MitM + RS lab</h2>
+            <p>Drives <code>netlab</code> in the shell — no typing needed. Everything is
+            a simulation on fabricated hosts. <strong>Start demo</strong> isolates the lab and
+            drops the real network (the chat relay); <strong>Stop demo</strong> restores it.</p>
+            <p id="netmode-status" data-mode="live">Live — real network available</p>
+            <label>Pod
+              <select id="netlab-pod">
+                <option value="redteam-lab">redteam-lab</option>
+                <option value="blueteam-lab">blueteam-lab</option>
+              </select>
+            </label>
+            <div class="netlab-actions">
+              <button id="netlab-start" type="button" disabled>Start demo (isolate)</button>
+              <button id="netlab-hosts" type="button" disabled>Hosts</button>
+              <button id="netlab-topology" type="button" disabled>Topology</button>
+              <button id="netlab-arpdemo" type="button" disabled>ARP-spoof demo</button>
+              <button id="netlab-capture" type="button" disabled>Capture + analyze</button>
+              <button id="netlab-defend" type="button" disabled>Defend</button>
+              <button id="netlab-stop" type="button" disabled>Stop demo (resume real net)</button>
+            </div>
+          </section>
           <section class="accounts glass-card" aria-label="Users and sessions">
             <h2>Users and sessions</h2>
             <p>Built-in accounts are <code>flinstone</code> and <code>root</code>. Register a lab user (as root), then switch or open a new session as that user.</p>

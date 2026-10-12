@@ -42,14 +42,16 @@
     const run = document.getElementById("guest-cmd-run");
     if (cmd) cmd.disabled = !ready;
     if (run) run.disabled = !ready;
-    for (const id of ["account-login", "account-new-session", "account-register"]) {
+    for (const id of ["account-login", "account-new-session", "account-register",
+                      "netlab-pod", "netlab-start", "netlab-hosts", "netlab-topology",
+                      "netlab-arpdemo", "netlab-capture", "netlab-defend", "netlab-stop"]) {
       const node = document.getElementById(id);
       if (node) node.disabled = !ready;
     }
     renderPowerline(state);
     if (ready) {
       screen.focus();
-      if (!relay || !relay.connected) void connectRelay();
+      if (!labIsolated && (!relay || !relay.connected)) void connectRelay();
     }
   };
   let info;
@@ -61,6 +63,10 @@
   let relay = null;
   let connectRelay = async () => {};
   let serialLine = "";
+  // Lab network mode: when a netlab MitM+RS session is active the guest emits
+  // `LAB_NETMODE lab` and we drop the real network (the relay); `LAB_NETMODE
+  // live` restores it. While isolated we also suppress auto-reconnect.
+  let labIsolated = false;
   const search = new URLSearchParams(location.search);
   const validation = search.get("validate") === "1";
   const qemuMode = validation || search.get("qemu") === "1";
@@ -139,6 +145,32 @@
     const node = document.getElementById("server-status");
     if (node) node.textContent = text;
   }
+  function renderNetmode(mode) {
+    const node = document.getElementById("netmode-status");
+    if (!node) return;
+    const isolated = mode === "lab";
+    node.textContent = isolated
+      ? "Lab-isolated — real network dropped"
+      : "Live — real network available";
+    node.dataset.mode = isolated ? "lab" : "live";
+  }
+  // React to the guest's LAB_NETMODE token: drop the relay (real network) for
+  // the duration of a netlab MitM+RS session, restore it when the demo ends.
+  function applyNetmode(mode) {
+    labIsolated = mode === "lab";
+    renderNetmode(mode);
+    if (labIsolated) {
+      if (relay) {
+        relay.leave();
+        renderRoster([]);
+      }
+      renderRelayStatus("Lab-isolated — real network dropped");
+      appendChat("[netlab] lab-isolated: real network (relay) dropped for the demo");
+    } else {
+      appendChat("[netlab] live: real network restored");
+      if (relay) void connectRelay();
+    }
+  }
   function renderRoster(members) {
     const node = document.getElementById("server-roster");
     if (!node) return;
@@ -175,6 +207,10 @@
     });
     let connecting = null;
     const connect = () => {
+      if (labIsolated) {
+        renderRelayStatus("Lab-isolated — real network dropped");
+        return Promise.resolve();
+      }
       if (connecting) return connecting;
       connecting = (async () => {
         try {
@@ -273,6 +309,10 @@
     }
     if (event.type === "dns") {
       if (event.host) await resolveLabDns(event.host);
+      return;
+    }
+    if (event.type === "netmode") {
+      applyNetmode(event.mode);
       return;
     }
     if (event.type !== "server" || !relay) return;
@@ -568,6 +608,28 @@
     input.value = "";
     screen.focus();
   });
+
+  // MitM + RS lab panel: each button sends a `netlab ...` line to the shell,
+  // so the network system is driven without the CLI. The lab/live network
+  // switch rides the LAB_NETMODE token the guest emits (see applyNetmode).
+  function netlabPod() {
+    const sel = document.getElementById("netlab-pod");
+    return (sel && sel.value) || "redteam-lab";
+  }
+  function wireNetlab(id, build) {
+    document.getElementById(id)?.addEventListener("click", () => {
+      void sendGuestLines(`${build(netlabPod())}\n`);
+      screen.focus();
+    });
+  }
+  wireNetlab("netlab-start", () => "netlab start");
+  wireNetlab("netlab-hosts", pod => `netlab hosts ${pod}`);
+  wireNetlab("netlab-topology", pod => `netlab topology ${pod}`);
+  wireNetlab("netlab-arpdemo", pod => `netlab arp-demo ${pod}`);
+  wireNetlab("netlab-capture", pod => `netlab capture ${pod}`);
+  wireNetlab("netlab-defend", () => "netlab defend");
+  wireNetlab("netlab-stop", () => "netlab stop");
+
   const form = document.getElementById("switch-user");
   if (form) {
     form.addEventListener("submit", async event => {

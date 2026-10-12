@@ -86,8 +86,48 @@ netlab pcap analyze /tmp/demo.pcap     # raises the ARP-conflict alert
 netlab defend
 ```
 
+## In the browser lab (freestanding) and the non-CLI controls
+
+The portfolio embeds the freestanding browser kernel, not the hosted ELF
+shell, so `netlab` also ships as a freestanding analog in
+`kernel/freestanding/x86_64/commands.c`. It has no libc and no file I/O, so it
+drops the binary pcap file verbs and instead offers `netlab capture <pod>`,
+which prints the simulated frames and raises the same ARP-conflict alert
+in-line. The other verbs (`pods`, `hosts`, `topology`, `traceroute`,
+`monitor`, `arp-demo`, `rs-explain`, `defend`, `consent`) match the hosted
+command. It remains simulation-only: fabricated hosts, no sockets, no real
+interface, no interception, no injection.
+
+### Lab vs live: dropping the real network for a demo
+
+The freestanding lab adds a network-mode switch:
+
+- `netlab start` enters **lab-isolated** mode. It emits a `LAB_NETMODE lab`
+  control line on the serial port, and while isolated the freestanding
+  `server` relay verbs refuse — so nothing leaves the lab during the MitM+RS
+  demo.
+- `netlab stop` returns to **live** mode (`LAB_NETMODE live`); the server
+  relay works again.
+- `netlab status` reports the current mode.
+
+In the browser, the "real network" is the chat relay (a Cloudflare Durable
+Object WebSocket hub, with a same-origin BroadcastChannel fallback). The glue
+in `tools/browser-lab/lab.js` watches for the `LAB_NETMODE` token (parsed by
+`lab-core.js`): on `lab` it disconnects the relay and suppresses
+auto-reconnect; on `live` it reconnects. This scopes "drop the real network"
+to the lab's own relay connection — it never touches the host's actual Wi-Fi.
+
+### Driving it without the CLI
+
+`tools/browser-lab/index.html` has a **MitM + RS lab** control panel: a pod
+selector, a live/lab status badge, and buttons (Start demo, Hosts, Topology,
+ARP-spoof demo, Capture + analyze, Defend, Stop demo). Each button sends the
+matching `netlab …` line into the shell, so the whole flow — including the
+network switch — runs by clicking, no typing required.
+
 ## Related
 
+- `docs/browser-kernel-lab.md` — the freestanding browser kernel and its lab shell.
 - `docs/P3_NETWORKING.md` — the real networking stack (sockets, ARP, routing).
 - `docs/P3_13_CHAT_SERVER.md` / `docs/SERVER.md` — the real multi-party server.
 - The analyzer accepts classic libpcap in either byte order and microsecond or

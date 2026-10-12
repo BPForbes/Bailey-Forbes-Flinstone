@@ -102,7 +102,7 @@ HOSTED_VERBS = [
     "setdisk", "sudo -k", "userdel", "ping", "ping6", "whoami", "type", "udplisten",
     "udpsend", "update", "version", "where", "write", "writecluster",
     "help", "history", "his", "cc", "exit", "bios", "clear", "make", "session",
-    "switchuser", "login", "useradd", "users", "ls", "pwd", "rm",
+    "switchuser", "login", "useradd", "users", "ls", "pwd", "rm", "netlab",
 ]
 
 
@@ -175,6 +175,21 @@ try:
     cmd("version", expect="4.5.2")
     cmd("contracts json", expect="labdisk")
     cmd("type hello.txt", expect="lab-fs")
+
+    # netlab teaching lab (simulation) + lab/live network switch.
+    cmd("netlab pods", expect="redteam-lab")
+    cmd("netlab hosts redteam-lab", expect="192.168.56.1")
+    cmd("netlab topology redteam-lab", expect="observer vantage")
+    cmd("netlab arp-demo redteam-lab", expect="SPOOF")
+    cmd("netlab capture redteam-lab", expect="ALERT")
+    cmd("netlab traceroute redteam-lab bob", expect="bob")
+    # Starting the demo drops the real network: the server relay refuses while
+    # isolated, then resumes once the demo stops.
+    cmd("netlab start", expect="LAB_NETMODE lab")
+    cmd("netlab status", expect="lab-isolated")
+    cmd("server host", expect="lab isolated")
+    cmd("netlab stop", expect="LAB_NETMODE live")
+    cmd("server host", expect="SERVER_RELAY host")
 
     for verb in HOSTED_VERBS:
         cmd(verb)

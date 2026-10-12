@@ -144,6 +144,8 @@
       if (match[2]) event.text = match[2];
       return event;
     }
+    match = /^LAB_NETMODE (lab|live)$/.exec(text);
+    if (match) return { type: "netmode", mode: match[1] };
     return null;
   }
   function labDnsNameOk(name) {
