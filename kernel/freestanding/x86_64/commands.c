@@ -791,6 +791,9 @@ struct nl_pod {
     const char *obs_mac;
     const char *st_name;
     const char *st_ip;
+    const char *subnet;  /* e.g. "192.168.56.0/24" for the scan header   */
+    const char *ap_sec;  /* simulated AP key-mgmt                         */
+    const char *ap_psk;  /* FABRICATED lab-only pre-shared key            */
 };
 
 static const struct nl_host NL_POD1_HOSTS[] = {
@@ -808,9 +811,11 @@ static const struct nl_host NL_POD2_HOSTS[] = {
 
 static const struct nl_pod NL_PODS[] = {
     { "redteam-lab",  "FLINT-LAB-AP",  NL_POD1_HOSTS, 4,
-      "192.168.56.1", "02:00:00:00:56:01", "02:00:00:00:56:4c", "alice", "192.168.56.50" },
+      "192.168.56.1", "02:00:00:00:56:01", "02:00:00:00:56:4c", "alice", "192.168.56.50",
+      "192.168.56.0/24", "WPA2-PSK (CCMP)", "flint-lab-RED-9t4w-demo" },
     { "blueteam-lab", "FLINT-BLUE-AP", NL_POD2_HOSTS, 3,
-      "10.10.0.1", "02:00:00:00:0a:01", "02:00:00:00:0a:09", "carol", "10.10.0.20" },
+      "10.10.0.1", "02:00:00:00:0a:01", "02:00:00:00:0a:09", "carol", "10.10.0.20",
+      "10.10.0.0/24", "WPA3-SAE", "flint-lab-BLUE-2k8p-demo" },
 };
 #define NL_POD_COUNT (sizeof(NL_PODS) / sizeof(NL_PODS[0]))
 
@@ -841,8 +846,8 @@ static void nl_usage(void)
 {
     emit("netlab — contained net-security teaching lab (simulation only)\r\n");
     emit("  netlab consent | pods | defend | rs-explain\r\n");
-    emit("  netlab hosts <pod> | topology <pod> | traceroute <pod> <dst>\r\n");
-    emit("  netlab monitor <pod> | arp-demo <pod> | capture <pod>\r\n");
+    emit("  netlab hosts <pod> | scan <pod> | wpa <pod> | topology <pod>\r\n");
+    emit("  netlab traceroute <pod> <dst> | monitor <pod> | arp-demo <pod> | capture <pod>\r\n");
     emit("  netlab start | stop | status   (lab-isolate: drop/resume real network)\r\n");
 }
 
@@ -933,7 +938,8 @@ static int run_netlab(const char *verb, const char **cursor)
     /* verbs that take a pod */
     if (str_eq(sub, "hosts") || str_eq(sub, "topology") ||
         str_eq(sub, "monitor") || str_eq(sub, "arp-demo") ||
-        str_eq(sub, "capture") || str_eq(sub, "traceroute")) {
+        str_eq(sub, "capture") || str_eq(sub, "traceroute") ||
+        str_eq(sub, "scan") || str_eq(sub, "wpa")) {
         if (!take_word(cursor, pod, sizeof(pod))) {
             emit("usage: netlab ");
             emit(sub);
@@ -945,6 +951,39 @@ static int run_netlab(const char *verb, const char **cursor)
             emit("netlab: no pod '");
             emit(pod);
             emit("' (try `netlab pods`)\r\n");
+            return 1;
+        }
+        if (str_eq(sub, "scan")) {
+            emit("netlab scan (simulated host discovery) pod ");
+            emit(p->name);
+            emit(" — ");
+            emit(p->subnet);
+            emit("\r\n");
+            for (i = 0; i < p->host_count; ++i) {
+                emit("  host up   ");
+                emit(p->hosts[i].ip);
+                emit("  MAC ");
+                emit(p->hosts[i].mac);
+                emit("  (");
+                emit(p->hosts[i].role);
+                emit(" ");
+                emit(p->hosts[i].name);
+                emit(")\r\n");
+            }
+            emit("  hosts up (simulated). No real network was scanned.\r\n");
+            return 1;
+        }
+        if (str_eq(sub, "wpa")) {
+            emit("netlab wpa (simulated AP credentials) pod ");
+            emit(p->name);
+            emit("\r\n  ssid:     ");
+            emit(p->ssid);
+            emit("\r\n  key-mgmt: ");
+            emit(p->ap_sec);
+            emit("\r\n  psk:      ");
+            emit(p->ap_psk);
+            emit("\r\n  note: fabricated lab value. netlab reads no real saved\r\n");
+            emit("        networks and cracks no key. `netlab defend` for fixes.\r\n");
             return 1;
         }
         if (str_eq(sub, "hosts")) {
@@ -1092,7 +1131,7 @@ static int run_meta(int session, const char *verb, const char **cursor)
         emit("createdisk format initdisk setdisk printdisk listclusters writecluster delcluster addcluster update import\r\n");
         emit("diskput diskget diskfiles diskmkdir diskdel\r\n");
         emit("ping ping6 check ifconfig arp route netstat nslookup resolve netsh wifi udpsend udplisten\r\n");
-        emit("netlab (pods|hosts|topology|traceroute|monitor|arp-demo|capture|start|stop|status|defend)\r\n");
+        emit("netlab (pods|hosts|scan|wpa|topology|traceroute|monitor|arp-demo|capture|start|stop|status|defend)\r\n");
         emit("server version contracts audit redirect rerun help history his cc clear exit bios\r\n");
         emit("lab analogs: ramfs, cluster disk, lab net, P3 relay. Hosted FAT32/sockets stay on the ELF shell.\r\n");
         return 1;

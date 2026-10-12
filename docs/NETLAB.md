@@ -54,6 +54,8 @@ occupy; it is where the simulated spoof originates in the frame script.
 netlab consent                 Show the lab-only boundary this tool enforces
 netlab pods                    List simulated pods
 netlab hosts <pod>             List a pod's simulated hosts (SSID/IP/MAC/role)
+netlab scan <pod>              Host discovery (nmap -sn style): up hosts + MACs
+netlab wpa <pod>               Show the pod AP's simulated security + PSK
 netlab topology <pod>          ASCII map of a pod
 netlab traceroute <pod> <dst>  Simulated hop path to a host in the pod
 netlab monitor <pod> [-c N]    Replay the pod's simulated frame script
@@ -86,6 +88,31 @@ netlab pcap analyze /tmp/demo.pcap     # raises the ARP-conflict alert
 netlab defend
 ```
 
+## Reproduction coverage (CSCI C 437 report)
+
+The report's "Commands and Operations for Reproduction" section maps onto
+netlab as follows. Every row runs on the fabricated pod topology — no real
+host, network, or saved credential is touched.
+
+| Report step | netlab |
+|---|---|
+| Check permissions / elevate (`whoami`, `sudo su`) | the shell's own `whoami`, `sudo`, `su` |
+| Get WPA key (`grep psk= …NetworkManager…`) + SSID security | `netlab wpa <pod>` — fabricated PSK + key-mgmt for the pod AP |
+| Show network connections / security settings | `netlab wpa <pod>`, `netlab hosts <pod>` |
+| Local wireless info (`ifconfig`) | shell `ifconfig` / `netlab hosts` |
+| Traceroute + IP details | `netlab traceroute <pod> <dst>` |
+| `nmap -sn` host discovery → MAC + IP of devices | `netlab scan <pod>` |
+| Network topology | `netlab topology <pod>` |
+| MiTM via Ettercap + tcpdump → pcap | `netlab arp-demo` / `monitor` / `capture`; hosted `pcap write` |
+| Reverse shell (`ncat -e /bin/bash`) | `netlab rs-explain` — mechanics only, **no working shell** |
+| pcap analysis in Wireshark | hosted `netlab pcap analyze <file>`; freestanding `netlab capture` |
+| Prevention strategies | `netlab defend` |
+
+The `wpa` PSK and the `scan` results are fabricated values in the pod
+definitions. netlab does not read `/etc/NetworkManager`, capture a handshake,
+or crack anything, and it does not implement a working reverse shell — those
+are live-attack steps and stay out of scope by design.
+
 ## In the browser lab (freestanding) and the non-CLI controls
 
 The portfolio embeds the freestanding browser kernel, not the hosted ELF
@@ -93,8 +120,8 @@ shell, so `netlab` also ships as a freestanding analog in
 `kernel/freestanding/x86_64/commands.c`. It has no libc and no file I/O, so it
 drops the binary pcap file verbs and instead offers `netlab capture <pod>`,
 which prints the simulated frames and raises the same ARP-conflict alert
-in-line. The other verbs (`pods`, `hosts`, `topology`, `traceroute`,
-`monitor`, `arp-demo`, `rs-explain`, `defend`, `consent`) match the hosted
+in-line. The other verbs (`pods`, `hosts`, `scan`, `wpa`, `topology`,
+`traceroute`, `monitor`, `arp-demo`, `rs-explain`, `defend`, `consent`) match the hosted
 command. It remains simulation-only: fabricated hosts, no sockets, no real
 interface, no interception, no injection.
 

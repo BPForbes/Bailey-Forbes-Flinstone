@@ -100,6 +100,25 @@ int main(void) {
         CHECK(run_capture(av, 3, buf, sizeof(buf)) != 0, "unknown pod fails");
     }
 
+    /* scan (nmap -sn style host discovery -> MAC addresses) */
+    {
+        char *av[] = { "netlab", "scan", "redteam-lab" };
+        rc = run_capture(av, 3, buf, sizeof(buf));
+        CHECK(rc == 0, "`netlab scan redteam-lab` ok");
+        CHECK(strstr(buf, "02:00:00:00:56:01") != NULL, "scan reports a MAC address");
+        CHECK(strstr(buf, "host up") != NULL, "scan reports hosts up");
+    }
+
+    /* wpa (simulated AP credentials; fabricated, no real config) */
+    {
+        char *av[] = { "netlab", "wpa", "redteam-lab" };
+        rc = run_capture(av, 3, buf, sizeof(buf));
+        CHECK(rc == 0, "`netlab wpa redteam-lab` ok");
+        CHECK(strstr(buf, "FLINT-LAB-AP") != NULL, "wpa shows the ssid");
+        CHECK(strstr(buf, "fabricated") != NULL, "wpa marks the psk as fabricated");
+        CHECK(strstr(buf, "crack") != NULL, "wpa states it cracks nothing");
+    }
+
     /* 3. traceroute over the simulated topology */
     {
         char *av[] = { "netlab", "traceroute", "redteam-lab", "bob" };

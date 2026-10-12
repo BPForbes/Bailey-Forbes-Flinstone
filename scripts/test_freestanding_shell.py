@@ -179,6 +179,8 @@ try:
     # netlab teaching lab (simulation) + lab/live network switch.
     cmd("netlab pods", expect="redteam-lab")
     cmd("netlab hosts redteam-lab", expect="192.168.56.1")
+    cmd("netlab scan redteam-lab", expect="02:00:00:00:56:01")
+    cmd("netlab wpa redteam-lab", expect="fabricated")
     cmd("netlab topology redteam-lab", expect="observer vantage")
     cmd("netlab arp-demo redteam-lab", expect="SPOOF")
     cmd("netlab capture redteam-lab", expect="ALERT")

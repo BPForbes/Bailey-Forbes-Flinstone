@@ -63,6 +63,8 @@ typedef struct {
     int             consent; /* every seat in the pod has agreed (lab-only) */
     const nl_host_t *hosts;
     size_t          host_count;
+    const char     *ap_sec;  /* simulated AP key-mgmt, e.g. "WPA2-PSK (CCMP)" */
+    const char     *ap_psk;  /* FABRICATED lab-only pre-shared key           */
 } nl_pod_t;
 
 #define NL_MK_MAC(a, b, c, d, e, f)                                            \
@@ -86,8 +88,10 @@ static const nl_host_t POD2_HOSTS[] = {
 };
 
 static const nl_pod_t PODS[] = {
-    { 1, "redteam-lab",  "FLINT-LAB-AP",  1, POD1_HOSTS, sizeof(POD1_HOSTS)/sizeof(POD1_HOSTS[0]) },
-    { 2, "blueteam-lab", "FLINT-BLUE-AP", 1, POD2_HOSTS, sizeof(POD2_HOSTS)/sizeof(POD2_HOSTS[0]) },
+    { 1, "redteam-lab",  "FLINT-LAB-AP",  1, POD1_HOSTS, sizeof(POD1_HOSTS)/sizeof(POD1_HOSTS[0]),
+      "WPA2-PSK (CCMP)", "flint-lab-RED-9t4w-demo" },
+    { 2, "blueteam-lab", "FLINT-BLUE-AP", 1, POD2_HOSTS, sizeof(POD2_HOSTS)/sizeof(POD2_HOSTS[0]),
+      "WPA3-SAE", "flint-lab-BLUE-2k8p-demo" },
 };
 static const size_t POD_COUNT = sizeof(PODS) / sizeof(PODS[0]);
 
@@ -446,6 +450,8 @@ static void print_usage(void) {
 "  netlab consent                 Show the lab-only boundary this tool enforces\n"
 "  netlab pods                    List simulated pods (private, isolated groups)\n"
 "  netlab hosts <pod>             List a pod's simulated hosts (SSID/IP/MAC/role)\n"
+"  netlab scan <pod>              Host discovery (nmap -sn style): up hosts + MACs\n"
+"  netlab wpa <pod>               Show the pod AP's simulated security + PSK\n"
 "  netlab topology <pod>          ASCII map of a pod\n"
 "  netlab traceroute <pod> <dst>  Simulated hop path to a host in the pod\n"
 "  netlab monitor <pod> [-c N]    Replay the pod's simulated frame script\n"
@@ -499,6 +505,39 @@ static int verb_hosts(const nl_pod_t *p) {
         printf("  %-10s %-16s %-18s %s\n", p->hosts[i].name, ip, mac,
                role_str(p->hosts[i].role));
     }
+    return 0;
+}
+
+/* nmap -sn style host discovery: every simulated host is "up", with its MAC.
+ * This is the reproduction report's `nmap -sn 192.168.x.0/24` step, which the
+ * report uses to find MAC + local IP of devices — here on fabricated hosts. */
+static int verb_scan(const nl_pod_t *p) {
+    char ip[16], mac[18];
+    uint32_t base = p->host_count ? (p->hosts[0].ip_be & 0xffffff00u) : 0;
+    printf("netlab scan (simulated host discovery) pod %s — %u.%u.%u.0/24\n",
+           p->name, (unsigned)((base >> 24) & 0xff), (unsigned)((base >> 16) & 0xff),
+           (unsigned)((base >> 8) & 0xff));
+    for (size_t i = 0; i < p->host_count; i++) {
+        fmt_ip(p->hosts[i].ip_be, ip);
+        fmt_mac(p->hosts[i].mac, mac);
+        printf("  host up   %-16s MAC %-18s (%s %s)\n", ip, mac,
+               role_str(p->hosts[i].role), p->hosts[i].name);
+    }
+    printf("  %zu hosts up (simulated). No real network was scanned.\n", p->host_count);
+    return 0;
+}
+
+/* Reproduction report's "Get WPA Key" + "security settings for SSID" steps.
+ * The PSK here is a FABRICATED lab value stored in the pod definition — netlab
+ * reads no real NetworkManager config and recovers no real key. */
+static int verb_wpa(const nl_pod_t *p) {
+    printf("netlab wpa (simulated AP credentials) pod %s\n", p->name);
+    printf("  ssid:     %s\n", p->ssid);
+    printf("  key-mgmt: %s\n", p->ap_sec ? p->ap_sec : "(unknown)");
+    printf("  psk:      %s\n", p->ap_psk ? p->ap_psk : "(none)");
+    printf("  note: fabricated lab value. netlab does not read real saved\n");
+    printf("        networks (/etc/NetworkManager/...) or crack any key.\n");
+    printf("  defend: use a long random passphrase and WPA3-SAE; see `netlab defend`.\n");
     return 0;
 }
 
@@ -659,7 +698,8 @@ int cmd_netlab_run(int argc, char **argv) {
         return verb_defend();
 
     if (!strcmp(verb, "hosts") || !strcmp(verb, "topology") ||
-        !strcmp(verb, "arp-demo") || !strcmp(verb, "monitor")) {
+        !strcmp(verb, "arp-demo") || !strcmp(verb, "monitor") ||
+        !strcmp(verb, "scan") || !strcmp(verb, "wpa")) {
         const nl_pod_t *p;
         if (argc < 3) {
             fprintf(stderr, "netlab: %s needs a pod (name or id). Try `netlab pods`.\n", verb);
@@ -671,6 +711,8 @@ int cmd_netlab_run(int argc, char **argv) {
             return 1;
         }
         if (!strcmp(verb, "hosts"))    return verb_hosts(p);
+        if (!strcmp(verb, "scan"))     return verb_scan(p);
+        if (!strcmp(verb, "wpa"))      return verb_wpa(p);
         if (!strcmp(verb, "topology")) return verb_topology(p);
         if (!strcmp(verb, "arp-demo")) return verb_arp_demo(p);
         /* monitor [-c N] */
@@ -730,7 +772,8 @@ int cmd_netlab_batch_tokens_count(int argc, char **argv, int i) {
         !strcmp(v, "consent") || !strcmp(v, "pods") || !strcmp(v, "defend") ||
         !strcmp(v, "rs-explain"))
         return 2;
-    if (!strcmp(v, "hosts") || !strcmp(v, "topology") || !strcmp(v, "arp-demo"))
+    if (!strcmp(v, "hosts") || !strcmp(v, "topology") || !strcmp(v, "arp-demo") ||
+        !strcmp(v, "scan") || !strcmp(v, "wpa"))
         return rem < 3 ? rem : 3;
     if (!strcmp(v, "traceroute"))
         return rem < 4 ? rem : 4;
