@@ -23,7 +23,12 @@ tools/browser-lab/wasm/platform_wasm.c
 tools/browser-lab/wasm/wasm_main.c
 "
 
-OUT_DIR="$ROOT/tools/browser-lab/wasm"
+# The security variant's module goes to build/ so the tracked lab wasm stays lab-free.
+if [ "${SECFEAT:-0}" = "1" ]; then
+  OUT_DIR="$ROOT/build/wasm-secfeat"
+else
+  OUT_DIR="$ROOT/tools/browser-lab/wasm"
+fi
 mkdir -p "$OUT_DIR" "$ROOT/dist"
 
 HOST_BIN="$ROOT/dist/flintstone_wasm_host"
