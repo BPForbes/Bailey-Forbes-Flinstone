@@ -1074,6 +1074,15 @@ int cmd_netlab_run(int argc, char **argv) {
         print_usage();
         return (argc < 2) ? 0 : 0;
     }
+    /* Refresh the pod host against the current real-server state on the main
+     * thread before any command reads it. Server-running flips on the detached
+     * promotion thread and the listener-abort path don't call the netlab hook
+     * (they can't touch this static state safely), so re-electing here keeps
+     * `status`/`pod host`/`pod members` honest after those paths. */
+    if (s_pod[0]) {
+        fl_session_init();
+        nl_pick_host();
+    }
     verb = argv[1];
 
     if (!strcmp(verb, "pod"))    return verb_pod(argc, argv);
