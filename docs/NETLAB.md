@@ -143,25 +143,37 @@ the hosted shell, the real per-terminal session in the freestanding shell), so
 adding a second member means a second real account joining — in the browser
 lab, a second session opened as another account.
 
-**Host-collision avoidance.** The pod host is a member that is **not** also
-hosting the real `server` session, so one identity is never asked to relay both
-lab traffic and real-server traffic at once. If every current member is the real
-server host, the pod host stays **pending** until another account can hold it.
-This is re-resolved at pod create/join/leave and, crucially, again at
-`accept` time — the moment the lab network is switched on.
+**Host-collision avoidance.** Think of a pod as a sub-server of the main
+server: the pod host is the relay point between the pod and the real server, so
+it must be a **different relay point** from the server host — if one point were
+both, there would be nothing to relay pod→server and server→pod across. The pod
+host is therefore always a member that is not that same relay point, and if none
+is available the pod host stays **pending** until one is.
 
-In the freestanding shell, which has a real per-terminal session table, two
-sessions logged into the same account are disambiguated for display as
-`name` and `name {2}`. The hosted ELF shell has a single process-global
-identity (no concurrent session table), so it keys membership on whichever
-real account is logged in at the moment each verb runs; this is a weaker
-concurrency model and is documented as such rather than overclaimed.
+This is enforced at every moment the pairing could change: pod
+create/join/leave, `accept` (the moment the lab network switches on), **and the
+instant someone becomes or stops being the server host** (`server host` /
+`server leave` / `server kill`). So the two roles are never held by one relay
+point even transiently.
+
+A single **person** can still be both server host and pod host — they just need
+two relay points to do it. In the freestanding shell a relay point is a real
+terminal **session**, so an account hosting the server in session 1 can hold the
+pod host in session 2 (shown as `name {2}`): two sessions, two relay points, one
+person. The exclusion is keyed on the session (the relay point), not the
+account. The hosted ELF shell has a single process-global identity — one relay
+point per person — so there a person genuinely cannot hold both at once; this is
+the documented single-identity limitation, not a different rule.
 
 **Server lifecycle coupling.** The real `server` and netlab pods interact
-through two lifecycle events, mirroring the distinction between the server's
-own `leave` (host steps down, the server continues) and `kill` (the server is
-torn down):
+through three lifecycle events, mirroring the server's own `host` / `leave`
+(host steps down, the server continues) / `kill` (the server is torn down):
 
+- **`server host` → re-elect the pod host off the new server-host relay point.**
+  The instant a session becomes the server host, the pod host moves to another
+  relay point (another session, same or different account) or goes pending.
+  (Hosted: `verb_host` → `cmd_netlab_on_server_host`. Freestanding: `nl_pick_host`
+  from the `server host` path.)
 - **`server kill` by the server host → the pods under it are killed.** Killing
   the server dissolves the pod and any open binding and restores the real
   network. (Hosted: `cmd_server_run` → `cmd_netlab_on_server_kill`. Freestanding:

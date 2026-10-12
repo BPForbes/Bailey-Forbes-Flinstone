@@ -782,6 +782,7 @@ static int run_net(const char *verb, const char **cursor)
 static void nl_pick_host(void);
 static void nl_pod_dissolve(void);
 static void nl_display_name(int session, char *out, unsigned cap);
+static int  nl_session_idx(int session);
 
 static int run_server(int session, const char *verb, const char **cursor)
 {
@@ -807,6 +808,25 @@ static int run_server(int session, const char *verb, const char **cursor)
      * request, and clear it when this session leaves/kills its own server. */
     if (str_eq(sub, "host")) {
         s_nl_acting_host_session = session;
+        /* A pod host and the server host are two distinct relay points, so one
+         * session cannot hold both; re-elect the pod host off this session
+         * (another session of the same or a different account can take it, or
+         * it stays pending until one can). */
+        if (s_nl_pod[0] && nl_session_idx(session) >= 0) {
+            int before = s_nl_hostidx;
+            nl_pick_host();
+            if (s_nl_hostidx != before) {
+                if (s_nl_hostidx >= 0) {
+                    char dn2[40];
+                    nl_display_name(s_nl_members[s_nl_hostidx], dn2, sizeof(dn2));
+                    emit("netlab: you are now the server host — new pod host: ");
+                    emit(dn2); emit("\r\n");
+                } else {
+                    emit("netlab: you are now the server host — pod host pending "
+                         "(no other session can hold it yet).\r\n");
+                }
+            }
+        }
     } else if (str_eq(sub, "kill")) {
         if (s_nl_acting_host_session == session) {
             s_nl_acting_host_session = -1;

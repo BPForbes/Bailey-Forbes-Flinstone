@@ -261,6 +261,12 @@ try:
     read_until("SESSION 1 user=flinstone", 4)
     cmd("server leave", expect="new pod host")
     cmd("netlab pod host", expect="flinstone")
+    # Gap closure: becoming the server host also re-elects the pod host on the
+    # spot. flinstone (session 1) is the pod host; running `server host` makes
+    # session 1 the server host (a separate relay point), so the pod host moves
+    # to session 2 (root) immediately -- not only at accept time.
+    cmd("server host", expect="new pod host: root")
+    cmd("netlab pod host", expect="root")
 
     for verb in HOSTED_VERBS:
         cmd(verb)

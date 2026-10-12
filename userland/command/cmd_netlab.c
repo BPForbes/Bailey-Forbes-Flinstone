@@ -794,6 +794,15 @@ void cmd_netlab_on_server_leave(void) {
     nl_pick_host();
 }
 
+/* Called when THIS process starts hosting the real server. A pod host and the
+ * server host are two distinct relay points, so a single identity cannot hold
+ * both at once; re-elect the pod host immediately so becoming the server host
+ * hands the pod host role to someone else (or leaves it pending). */
+void cmd_netlab_on_server_host(void) {
+    if (!s_pod[0]) return;
+    nl_pick_host();
+}
+
 void cmd_netlab_on_server_kill(void) {
     if (!s_pod[0]) return;
     s_pod[0] = 0; s_memcount = 0; s_hostidx = -1;

@@ -1225,6 +1225,9 @@ static int verb_host(int argc, char **argv) {
         }
         g_server_running = 1;
         pthread_mutex_unlock(&session_mutex);
+        /* Became the server host: the pod host is a separate relay point, so
+         * re-elect it off this identity (or leave it pending). */
+        cmd_netlab_on_server_host();
 
 #if defined(FL_SERVER_UDP_HOSTED)
         server_udp_start(bind_ep.port_host);

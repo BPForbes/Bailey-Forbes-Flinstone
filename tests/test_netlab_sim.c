@@ -278,12 +278,23 @@ int main(void) {
         g_test_server_running = 0;
         as_user("flinstone");
         run_capture(create, 4, buf, sizeof(buf));   /* flinstone: pod host     */
+
+        /* `server host`: flinstone (sole member) becomes the server host, which
+         * is a separate relay point, so the pod host must move off flinstone --
+         * with no other member it goes pending. */
+        g_test_server_running = 1;
+        cmd_netlab_on_server_host();
+        run_capture(members, 3, buf, sizeof(buf));
+        CHECK(strstr(buf, "flinstone  (host)") == NULL,
+              "becoming the server host drops the pod host off that identity");
+
         as_user("root");
         run_capture(join, 3, buf, sizeof(buf));     /* root joins              */
 
-        /* `server leave` by the host: re-run pod election. With the server
-         * stopped (running=0) the first member by join order holds the host;
-         * the call must leave a valid host and not crash. */
+        /* `server leave` by the host: the real verb_leave sets the server flag
+         * off before calling the hook, so mirror that. Pod election then re-runs
+         * and the first member by join order holds the host. */
+        g_test_server_running = 0;
         cmd_netlab_on_server_leave();
         run_capture(members, 3, buf, sizeof(buf));
         CHECK(strstr(buf, "(host)") != NULL, "server leave re-elects a valid pod host");
