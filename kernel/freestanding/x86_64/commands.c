@@ -1295,6 +1295,7 @@ static int run_netlab(int session, const char *verb, const char **cursor)
                 s_nl_atk_session = -1;
                 s_nl_victim_session = -1;
                 nl_sb_reset();
+                if (s_lab_netmode) nl_set_mode(0);  /* never leave the net paused */
                 return 1;
             }
             nl_pick_host();

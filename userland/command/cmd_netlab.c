@@ -925,6 +925,7 @@ static int verb_pod(int argc, char **argv) {
             s_pod[0] = 0; s_hostidx = -1;
             s_listen_name[0] = 0; s_atk_name[0] = 0; s_victim_name[0] = 0;
             nl_sb_reset();
+            s_isolated = 0;   /* no pod, no binding: never leave the net paused */
             return 0;
         }
         nl_pick_host();
