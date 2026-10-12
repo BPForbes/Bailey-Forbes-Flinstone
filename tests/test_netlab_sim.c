@@ -16,6 +16,26 @@
 #include <string.h>
 #include <unistd.h>
 
+/*
+ * Test doubles. cmd_netlab.c keys pod membership on the real logged-in account
+ * (fl_session_current_user) and asks whether this process hosts the real
+ * `server` session (cmd_server_is_running). Those live in session.o / cmd_server.o,
+ * which this lightweight unit test does not link. Stubbing them here lets the
+ * test drive identity and the server-host flag directly -- which is exactly how
+ * we exercise two distinct participants on the hosted single-identity model.
+ */
+static char g_test_user[64] = "flinstone";
+static int  g_test_server_running = 0;
+
+void        fl_session_init(void) {}
+const char *fl_session_current_user(void) { return g_test_user; }
+int         cmd_server_is_running(void) { return g_test_server_running; }
+
+static void as_user(const char *u) {
+    strncpy(g_test_user, u, sizeof(g_test_user) - 1);
+    g_test_user[sizeof(g_test_user) - 1] = '\0';
+}
+
 static int failures = 0;
 
 #define CHECK(cond, msg)                                                       \
@@ -119,59 +139,135 @@ int main(void) {
         CHECK(strstr(buf, "crack") != NULL, "wpa states it cracks nothing");
     }
 
-    /* pods: membership, preserved identity, host succession */
+    /* pods: real-account membership, host-collision avoidance, succession.
+     * Membership is keyed on fl_session_current_user() (stubbed above), never
+     * on a free-typed name argument. */
+    g_test_server_running = 0;
+    as_user("flinstone");
     {
-        char *av[] = { "netlab", "pod", "create", "redcell", "jenny" };
-        rc = run_capture(av, 5, buf, sizeof(buf));
-        CHECK(rc == 0, "`netlab pod create redcell jenny` ok");
-        CHECK(strstr(buf, "host is jenny") != NULL, "pod creator becomes host");
+        char *av[] = { "netlab", "pod", "create", "redcell" };
+        rc = run_capture(av, 4, buf, sizeof(buf));
+        CHECK(rc == 0, "`netlab pod create redcell` ok");
+        CHECK(strstr(buf, "host is flinstone") != NULL,
+              "pod creator (real account) becomes host when not the server host");
     }
     {
-        char *av[] = { "netlab", "pod", "join", "flinstone" };
-        rc = run_capture(av, 4, buf, sizeof(buf));
-        CHECK(rc == 0, "`netlab pod join flinstone` ok");
-        CHECK(strstr(buf, "identity preserved") != NULL, "join preserves identity");
+        /* Second real participant joins by switching identity, not by name. */
+        char *av[] = { "netlab", "pod", "join" };
+        as_user("root");
+        rc = run_capture(av, 3, buf, sizeof(buf));
+        CHECK(rc == 0, "`netlab pod join` ok (as root)");
+        CHECK(strstr(buf, "identity preserved") != NULL, "join preserves real identity");
     }
     {
         char *av[] = { "netlab", "pod", "members" };
         rc = run_capture(av, 3, buf, sizeof(buf));
-        CHECK(strstr(buf, "jenny") != NULL && strstr(buf, "(host)") != NULL,
-              "members lists the host");
+        CHECK(strstr(buf, "flinstone") != NULL && strstr(buf, "root") != NULL,
+              "members lists both real accounts");
+        CHECK(strstr(buf, "(host)") != NULL, "members marks a host");
     }
 
-    /* reverse shell: netlab <cmd> runs as the mock victim; netlab end closes */
+    /* Host-collision: if the current identity is also hosting the real server,
+     * it must not also hold the pod host role (host pending until someone else
+     * can hold it). */
     {
-        char *av[] = { "netlab", "rs", "bob" };
-        rc = run_capture(av, 3, buf, sizeof(buf));
-        CHECK(rc == 0, "`netlab rs bob` opens a reverse shell");
-        CHECK(strstr(buf, "SIMULATED") != NULL, "rs marks the victim simulated");
+        char *leave_root[] = { "netlab", "pod", "leave" };  /* root leaves   */
+        char *leave_fl[]   = { "netlab", "pod", "leave" };  /* flinstone too */
+        as_user("root");    run_capture(leave_root, 3, buf, sizeof(buf));
+        as_user("flinstone"); run_capture(leave_fl, 3, buf, sizeof(buf));
     }
     {
-        char *av[] = { "netlab", "whoami" };
-        rc = run_capture(av, 2, buf, sizeof(buf));
-        CHECK(rc == 0 && strstr(buf, "bob") != NULL,
-              "`netlab whoami` returns the victim's mock name while RS open");
-    }
-    {
-        char *av[] = { "netlab", "hostname" };
-        run_capture(av, 2, buf, sizeof(buf));
-        CHECK(strstr(buf, "bob-box") != NULL, "`netlab hostname` returns victim hostname");
-    }
-    {
-        char *av[] = { "netlab", "end" };
-        rc = run_capture(av, 2, buf, sizeof(buf));
-        CHECK(rc == 0 && strstr(buf, "closed") != NULL, "`netlab end` closes the RS");
-    }
-    {
-        char *av[] = { "netlab", "whoami" };
-        CHECK(run_capture(av, 2, buf, sizeof(buf)) != 0,
-              "`netlab whoami` is unknown once the RS is closed");
-    }
-    {
-        char *av[] = { "netlab", "pod", "leave", "jenny" };
+        char *av[] = { "netlab", "pod", "create", "redcell" };
+        g_test_server_running = 1;   /* flinstone is now the real server host */
+        as_user("flinstone");
         rc = run_capture(av, 4, buf, sizeof(buf));
-        CHECK(rc == 0 && strstr(buf, "new host is flinstone") != NULL,
-              "host succession when the host leaves");
+        CHECK(rc == 0, "`netlab pod create` ok while hosting server");
+        CHECK(strstr(buf, "host pending") != NULL,
+              "server host does not also become the pod host (host pending)");
+    }
+    g_test_server_running = 0;
+
+    /* Reverse shell: listener = attacker, acceptor = victim. The attacker's
+     * `netlab <cmd>` runs against a disposable sandbox labeled for the victim,
+     * never the victim's real account. */
+    {
+        char *join[]   = { "netlab", "pod", "join" };
+        char *listen[] = { "netlab", "listen" };
+        as_user("root");                                  /* second member    */
+        run_capture(join, 3, buf, sizeof(buf));
+        as_user("flinstone");                             /* flinstone listens */
+        rc = run_capture(listen, 2, buf, sizeof(buf));
+        CHECK(rc == 0 && strstr(buf, "is listening") != NULL,
+              "`netlab listen` opens a listener (attacker side)");
+    }
+    {
+        char *self[] = { "netlab", "accept" };
+        rc = run_capture(self, 2, buf, sizeof(buf));      /* flinstone again   */
+        CHECK(rc != 0, "self-accept of your own listener is rejected");
+    }
+    {
+        char *av[] = { "netlab", "accept" };
+        as_user("root");                                  /* root accepts      */
+        rc = run_capture(av, 2, buf, sizeof(buf));
+        CHECK(rc == 0 && strstr(buf, "SANDBOX") != NULL,
+              "`netlab accept` binds the acceptor as the victim sandbox side");
+        CHECK(cmd_netlab_is_isolated() == 1,
+              "the real network is isolated while a binding is open");
+    }
+    {
+        /* The bound attacker (flinstone) runs real sandbox commands. */
+        char *who[]   = { "netlab", "whoami" };
+        char *wr[]    = { "netlab", "write", "loot.txt", "exfil" };
+        char *rd[]    = { "netlab", "cat", "loot.txt" };
+        as_user("flinstone");
+        rc = run_capture(who, 2, buf, sizeof(buf));
+        CHECK(rc == 0 && strstr(buf, "root") != NULL,
+              "attacker `netlab whoami` reports the victim identity (sandbox)");
+        run_capture(wr, 4, buf, sizeof(buf));
+        rc = run_capture(rd, 3, buf, sizeof(buf));
+        CHECK(rc == 0 && strstr(buf, "exfil") != NULL,
+              "sandbox write/cat execute for real against isolated state");
+    }
+    {
+        /* The non-bound member's own netlab verbs are NOT redirected. */
+        char *who[] = { "netlab", "whoami" };
+        as_user("root");   /* root is the victim, not the attacker */
+        CHECK(run_capture(who, 2, buf, sizeof(buf)) != 0,
+              "the victim's own `netlab whoami` is not hijacked (unknown verb)");
+    }
+    {
+        /* The accepting victim can end the binding unilaterally. */
+        char *end[] = { "netlab", "end" };
+        as_user("root");
+        rc = run_capture(end, 2, buf, sizeof(buf));
+        CHECK(rc == 0 && strstr(buf, "closed") != NULL,
+              "the victim can `netlab end` the binding unilaterally");
+        CHECK(cmd_netlab_is_isolated() == 0, "ending the binding restores the real network");
+    }
+    {
+        char *who[] = { "netlab", "whoami" };
+        as_user("flinstone");
+        CHECK(run_capture(who, 2, buf, sizeof(buf)) != 0,
+              "`netlab whoami` is unknown once the binding is closed");
+    }
+    {
+        /* Host succession: with flinstone gone as server host, root remains and
+         * becomes the pod host. */
+        char *leave[] = { "netlab", "pod", "leave" };
+        char *members[] = { "netlab", "pod", "members" };
+        as_user("flinstone");
+        rc = run_capture(leave, 3, buf, sizeof(buf));
+        CHECK(rc == 0, "host leaves the pod");
+        as_user("root");
+        run_capture(members, 3, buf, sizeof(buf));
+        CHECK(strstr(buf, "root") != NULL && strstr(buf, "(host)") != NULL,
+              "the remaining real member becomes the pod host");
+    }
+    /* Reset to a clean, single-member state for the remaining verb checks. */
+    {
+        char *leave[] = { "netlab", "pod", "leave" };
+        as_user("root");
+        run_capture(leave, 3, buf, sizeof(buf));
     }
 
     /* 3. traceroute over the simulated topology */

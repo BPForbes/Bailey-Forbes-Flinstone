@@ -70,34 +70,32 @@
             </div>
 
             <h3>Pod (private group)</h3>
-            <p class="netlab-sub">A pod is a private, named group for one MitM + RS exercise. Each
-            member keeps their own identity; the creator is the host, and the next member becomes
-            host if they leave.</p>
+            <p class="netlab-sub">A pod is a private, named group for one MitM + RS exercise.
+            Membership is keyed on your <strong>real logged-in account</strong> (the Users and
+            sessions panel below) — open a second session as another account to add a second
+            member. The pod host is a member that is not also hosting the real
+            <code>server</code> session, so one identity never relays both lab and server traffic.</p>
             <label>Pod name
               <input id="netlab-session-pod" type="text" value="redcell" autocomplete="off" spellcheck="false">
             </label>
-            <label>Your name
-              <input id="netlab-your-name" type="text" value="flinstone" autocomplete="off" spellcheck="false">
-            </label>
             <div class="netlab-actions">
-              <button id="netlab-pod-create" type="button" disabled>Create pod (become host)</button>
-              <button id="netlab-pod-join" type="button" disabled>Join pod</button>
+              <button id="netlab-pod-create" type="button" disabled>Create pod</button>
+              <button id="netlab-pod-join" type="button" disabled>Join pod (as me)</button>
               <button id="netlab-pod-members" type="button" disabled>Members</button>
               <button id="netlab-pod-leave" type="button" disabled>Leave pod</button>
             </div>
 
             <h3>Reverse shell (simulated)</h3>
-            <p class="netlab-sub">Opens a <strong>simulated</strong> reverse shell to a mock victim.
-            While open, <code>netlab &lt;cmd&gt;</code> in the terminal runs as that victim (e.g.
-            <code>netlab whoami</code> returns the victim's name); your own <code>whoami</code> is
-            unchanged. Opening it isolates the lab from the real network, the same as Start demo
-            below; closing it restores the network.</p>
-            <label>Mock victim
-              <input id="netlab-victim" type="text" value="bob" autocomplete="off" spellcheck="false">
-            </label>
+            <p class="netlab-sub"><strong>Listen</strong> makes you the attacker; another pod member's
+            <strong>Accept</strong> makes them the victim. Once bound, the attacker's
+            <code>netlab &lt;cmd&gt;</code> in the terminal runs in a fresh, isolated
+            <strong>sandbox</strong> labeled for the victim — never the victim's real account, files,
+            or terminal. Either side can <strong>End</strong> it. Accepting isolates the lab from the
+            real network, the same as Start demo below; ending restores it.</p>
             <div class="netlab-actions">
-              <button id="netlab-rs-open" type="button" disabled>Open reverse shell</button>
-              <button id="netlab-rs-end" type="button" disabled>Close reverse shell</button>
+              <button id="netlab-rs-listen" type="button" disabled>Listen (attacker)</button>
+              <button id="netlab-rs-accept" type="button" disabled>Accept (victim)</button>
+              <button id="netlab-rs-end" type="button" disabled>End binding</button>
               <button id="netlab-status" type="button" disabled>Status</button>
             </div>
 

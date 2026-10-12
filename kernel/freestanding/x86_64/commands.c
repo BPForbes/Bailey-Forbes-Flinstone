@@ -26,19 +26,47 @@ static unsigned s_loc_n;
 static int s_lab_netmode; /* 0 live/real, 1 lab-isolated */
 
 /*
- * netlab session state (simulation, this lab seat): a pod with members and a
- * host, and a SIMULATED reverse shell against a mock victim. `netlab <cmd>`
- * with a reverse shell open returns the mock victim's output; no real
- * participant is controlled.
+ * netlab session state (this lab seat). Pods are keyed on REAL session
+ * identity (fl_fs_identity_user(session)) rather than a free-typed name, so
+ * "Flinstone" in a pod really is whichever real account is logged into that
+ * session; a second concurrent session logged into the same account displays
+ * as "flinstone {2}". The reverse shell is still a SIMULATION: accepting a
+ * listener binds the attacker session to a fresh, isolated, disposable
+ * sandbox labeled with the accepting session's identity — never that
+ * session's real terminal, real ramfs, or real files. The accepting party
+ * can end the binding at any time.
  */
 #define NL_NAMELEN 24
-#define NL_MAXMEM  6
+#define NL_MAXMEM  FL_FS_MAX_SESSIONS /* one pod seat per real session */
 static char s_nl_pod[NL_NAMELEN];
-static char s_nl_members[NL_MAXMEM][NL_NAMELEN];
+static int  s_nl_members[NL_MAXMEM];  /* real session numbers, join order    */
 static int  s_nl_memcount;
-static int  s_nl_hostidx;
-static int  s_nl_rs_active;
-static char s_nl_rs_victim[NL_NAMELEN];
+static int  s_nl_hostidx;             /* index into s_nl_members, -1=pending */
+
+/*
+ * Best-effort local signal: the session that most recently had US actually
+ * forward `server host` to the real relay (i.e. the isolation check passed
+ * and SERVER_RELAY host was sent). This cannot see the relay's live roster,
+ * so it assumes the common case — the first host request is granted — and
+ * is cleared on this session's own `server leave`/`kill`. It is used only to
+ * keep one identity from being asked to relay both the pod's lab traffic and
+ * the real server's traffic at once.
+ */
+static int  s_nl_acting_host_session = -1;
+
+static int  s_nl_listen_session = -1; /* open listener owner, -1 = none      */
+static int  s_nl_atk_session = -1;    /* bound attacker session, -1 = unbound */
+static int  s_nl_victim_session = -1; /* bound accepting session             */
+
+/* Disposable per-binding sandbox: a tiny isolated file table. Reset on every
+ * new accept() and on end(). Never backed by the real ramfs. */
+#define NL_SB_FILES 8
+#define NL_SB_NAMELEN 24
+#define NL_SB_CONTENTLEN 48
+static char s_nl_sb_name[NL_SB_FILES][NL_SB_NAMELEN];
+static char s_nl_sb_content[NL_SB_FILES][NL_SB_CONTENTLEN];
+static int  s_nl_sb_used[NL_SB_FILES];
+static int  s_nl_sb_count;
 
 static int str_eq(const char *a, const char *b)
 {
@@ -750,7 +778,7 @@ static int run_net(const char *verb, const char **cursor)
     return 0;
 }
 
-static int run_server(const char *verb, const char **cursor)
+static int run_server(int session, const char *verb, const char **cursor)
 {
     char sub[16];
     if (!str_eq(verb, "server"))
@@ -768,6 +796,15 @@ static int run_server(const char *verb, const char **cursor)
          * the relay so nothing leaves while the MitM+RS demo runs. */
         emit("server paused: lab isolated (netlab MitM+RS active) — run `netlab stop` to resume the real network\r\n");
         return 1;
+    }
+    /* Best-effort local signal for netlab's pod/host-collision check (see
+     * s_nl_acting_host_session): record that THIS session forwarded a host
+     * request, and clear it when this session leaves/kills its own server. */
+    if (str_eq(sub, "host")) {
+        s_nl_acting_host_session = session;
+    } else if (str_eq(sub, "leave") || str_eq(sub, "kill")) {
+        if (s_nl_acting_host_session == session)
+            s_nl_acting_host_session = -1;
     }
     skip_spaces(cursor);
     emit("SERVER_RELAY ");
@@ -863,8 +900,11 @@ static void nl_usage(void)
     emit("  netlab consent | pods | defend | rs-explain\r\n");
     emit("  netlab hosts <pod> | scan <pod> | wpa <pod> | topology <pod>\r\n");
     emit("  netlab traceroute <pod> <dst> | monitor <pod> | arp-demo <pod> | capture <pod>\r\n");
-    emit("  netlab pod create <pod> [name] | join <name> | members | host | leave <name>\r\n");
-    emit("  netlab rs <victim> | <cmd> (runs as victim) | end | status\r\n");
+    emit("  netlab pod create <pod> | join | members | host | leave   (your real account)\r\n");
+    emit("  netlab listen | listen cancel      (open/cancel a listener as the attacker)\r\n");
+    emit("  netlab accept                      (bind as the accepting side; victim-side consent)\r\n");
+    emit("  netlab <cmd>                       (attacker only: runs in the isolated sandbox)\r\n");
+    emit("  netlab end | status\r\n");
     emit("  netlab start | stop   (lab-isolate: drop/resume real network)\r\n");
 }
 
@@ -881,13 +921,58 @@ static void nl_set_mode(int lab)
     }
 }
 
-static int nl_member_idx(const char *name)
+static int nl_session_idx(int session)
 {
     int i;
     for (i = 0; i < s_nl_memcount; ++i)
-        if (str_eq(s_nl_members[i], name))
+        if (s_nl_members[i] == session)
             return i;
     return -1;
+}
+
+/* Reassign the pod host: the first member (by join order) that is not the
+ * locally-tracked real server host. Leaves s_nl_hostidx at -1 ("pending") if
+ * every current member is that acting host. */
+static void nl_pick_host(void)
+{
+    int i;
+    s_nl_hostidx = -1;
+    for (i = 0; i < s_nl_memcount; ++i) {
+        if (s_nl_members[i] == s_nl_acting_host_session)
+            continue;
+        s_nl_hostidx = i;
+        break;
+    }
+}
+
+/* Real account name for `session`, with a " {N}" suffix when an earlier pod
+ * member (by join order) is logged into the same account — e.g. a second
+ * concurrent session logged in as "flinstone" displays as "flinstone {2}". */
+static void nl_display_name(int session, char *out, unsigned cap)
+{
+    const char *base = fl_fs_identity_user(session);
+    int idx = nl_session_idx(session);
+    int dup = 1, i;
+    unsigned n;
+    if (idx >= 0) {
+        for (i = 0; i < idx; ++i)
+            if (str_eq(fl_fs_identity_user(s_nl_members[i]), base))
+                ++dup;
+    }
+    if (dup <= 1) {
+        str_copy(out, base, cap);
+        return;
+    }
+    n = 0;
+    while (base[n] && n + 1 < cap) { out[n] = base[n]; ++n; }
+    if (n + 5 < cap) {
+        out[n++] = ' '; out[n++] = '{';
+        if (dup >= 10)
+            out[n++] = (char)('0' + (dup / 10) % 10);
+        out[n++] = (char)('0' + dup % 10);
+        out[n++] = '}';
+    }
+    out[n] = 0;
 }
 
 static int nl_is_mgmt(const char *s)
@@ -895,7 +980,7 @@ static int nl_is_mgmt(const char *s)
     static const char *m[] = {
         "help", "consent", "pods", "status", "start", "stop", "rs-explain",
         "defend", "hosts", "topology", "monitor", "arp-demo", "capture",
-        "traceroute", "scan", "wpa", "pod", "rs", "end", 0
+        "traceroute", "scan", "wpa", "pod", "listen", "accept", "end", 0
     };
     int i;
     for (i = 0; m[i]; ++i)
@@ -904,31 +989,104 @@ static int nl_is_mgmt(const char *s)
     return 0;
 }
 
-/* One line of simulated victim output for an arbitrary command. */
-static void nl_victim_emit(const char *v, const char *cmd)
+static void nl_sb_reset(void)
 {
-    if (str_eq(cmd, "whoami")) {
-        emit(v); emit("\r\n");
-    } else if (str_eq(cmd, "hostname")) {
-        emit(v); emit("-box\r\n");
-    } else if (str_eq(cmd, "id")) {
-        emit("uid=1000("); emit(v); emit(") gid=1000("); emit(v); emit(")\r\n");
-    } else if (str_eq(cmd, "uname")) {
-        emit("FlinstoneLab x86_64 (simulated victim)\r\n");
-    } else if (str_eq(cmd, "pwd")) {
-        emit("/home/"); emit(v); emit("\r\n");
-    } else if (str_eq(cmd, "ifconfig")) {
-        emit("eth0  inet 192.168.56.76  ether 02:00:00:00:56:4c  (simulated)\r\n");
-    } else if (str_eq(cmd, "ls")) {
-        emit("Desktop  Documents  notes.txt  (simulated)\r\n");
-    } else if (str_eq(cmd, "netstat")) {
-        emit("tcp 192.168.56.76:4444 ESTABLISHED (simulated reverse-shell socket)\r\n");
-    } else {
-        emit(cmd); emit(": ran on "); emit(v); emit("'s simulated shell\r\n");
-    }
+    int i;
+    for (i = 0; i < NL_SB_FILES; ++i)
+        s_nl_sb_used[i] = 0;
+    s_nl_sb_count = 0;
 }
 
-static int run_netlab(const char *verb, const char **cursor)
+static int nl_sb_find(const char *name)
+{
+    int i;
+    for (i = 0; i < NL_SB_FILES; ++i)
+        if (s_nl_sb_used[i] && str_eq(s_nl_sb_name[i], name))
+            return i;
+    return -1;
+}
+
+/* Real execution against the disposable sandbox's own isolated state — not
+ * canned text, but never the accepting session's real files either. */
+static void nl_sb_run(const char *cmd, const char **cursor)
+{
+    char vdn[40];
+    nl_display_name(s_nl_victim_session, vdn, sizeof(vdn));
+    if (str_eq(cmd, "whoami")) { emit(vdn); emit("\r\n"); return; }
+    if (str_eq(cmd, "hostname")) { emit(vdn); emit("-sandbox\r\n"); return; }
+    if (str_eq(cmd, "id")) {
+        emit("uid=1000("); emit(vdn); emit(") gid=1000("); emit(vdn); emit(")\r\n");
+        return;
+    }
+    if (str_eq(cmd, "uname")) { emit("FlinstoneLab x86_64 (isolated sandbox)\r\n"); return; }
+    if (str_eq(cmd, "pwd")) { emit("/sandbox/"); emit(vdn); emit("\r\n"); return; }
+    if (str_eq(cmd, "ifconfig")) {
+        emit("eth0  inet 192.168.56.76  ether 02:00:00:00:56:4c  (simulated)\r\n");
+        return;
+    }
+    if (str_eq(cmd, "netstat")) {
+        emit("tcp 192.168.56.76:4444 ESTABLISHED (simulated reverse-shell socket)\r\n");
+        return;
+    }
+    if (str_eq(cmd, "ls")) {
+        int i, any = 0;
+        for (i = 0; i < NL_SB_FILES; ++i) {
+            if (!s_nl_sb_used[i])
+                continue;
+            emit(s_nl_sb_name[i]);
+            emit("  ");
+            any = 1;
+        }
+        if (!any)
+            emit("(empty sandbox)");
+        emit("\r\n");
+        return;
+    }
+    if (str_eq(cmd, "write")) {
+        char fname[NL_SB_NAMELEN];
+        int idx, slot;
+        if (!take_word(cursor, fname, sizeof(fname))) {
+            emit("usage: write <file> <content>\r\n");
+            return;
+        }
+        skip_spaces(cursor);
+        idx = nl_sb_find(fname);
+        if (idx < 0) {
+            for (slot = 0; slot < NL_SB_FILES && s_nl_sb_used[slot]; ++slot) { }
+            if (slot >= NL_SB_FILES) { emit("sandbox full\r\n"); return; }
+            str_copy(s_nl_sb_name[slot], fname, NL_SB_NAMELEN);
+            s_nl_sb_used[slot] = 1;
+            if (slot >= s_nl_sb_count)
+                s_nl_sb_count = slot + 1;
+            idx = slot;
+        }
+        str_copy(s_nl_sb_content[idx], *cursor, NL_SB_CONTENTLEN);
+        emit("wrote "); emit(fname); emit(" (sandbox)\r\n");
+        return;
+    }
+    if (str_eq(cmd, "cat")) {
+        char fname[NL_SB_NAMELEN];
+        int idx;
+        if (!take_word(cursor, fname, sizeof(fname))) { emit("usage: cat <file>\r\n"); return; }
+        idx = nl_sb_find(fname);
+        if (idx < 0) { emit("cat: "); emit(fname); emit(": not found\r\n"); return; }
+        emit(s_nl_sb_content[idx]); emit("\r\n");
+        return;
+    }
+    if (str_eq(cmd, "rm")) {
+        char fname[NL_SB_NAMELEN];
+        int idx;
+        if (!take_word(cursor, fname, sizeof(fname))) { emit("usage: rm <file>\r\n"); return; }
+        idx = nl_sb_find(fname);
+        if (idx < 0) { emit("rm: "); emit(fname); emit(": not found\r\n"); return; }
+        s_nl_sb_used[idx] = 0;
+        emit("removed "); emit(fname); emit(" (sandbox)\r\n");
+        return;
+    }
+    emit(cmd); emit(": ran in the isolated sandbox (output not modeled)\r\n");
+}
+
+static int run_netlab(int session, const char *verb, const char **cursor)
 {
     char sub[24];
     char pod[24];
@@ -977,17 +1135,31 @@ static int run_netlab(const char *verb, const char **cursor)
         emit("  pod: ");
         if (s_nl_pod[0]) {
             emit(s_nl_pod);
-            emit("  host=");
-            emit(s_nl_members[s_nl_hostidx]);
+            if (s_nl_hostidx >= 0) {
+                char dn[40];
+                nl_display_name(s_nl_members[s_nl_hostidx], dn, sizeof(dn));
+                emit("  host="); emit(dn);
+            } else {
+                emit("  host=(pending)");
+            }
             emit("\r\n");
         } else {
             emit("(none)\r\n");
         }
+        emit("  listener: ");
+        if (s_nl_listen_session >= 0) {
+            char dn[40];
+            nl_display_name(s_nl_listen_session, dn, sizeof(dn));
+            emit(dn); emit(" (open)\r\n");
+        } else {
+            emit("(none)\r\n");
+        }
         emit("  reverse shell: ");
-        if (s_nl_rs_active) {
-            emit("OPEN -> ");
-            emit(s_nl_rs_victim);
-            emit(" (simulated)\r\n");
+        if (s_nl_atk_session >= 0) {
+            char adn[40], vdn[40];
+            nl_display_name(s_nl_atk_session, adn, sizeof(adn));
+            nl_display_name(s_nl_victim_session, vdn, sizeof(vdn));
+            emit("OPEN  "); emit(adn); emit(" -> sandbox("); emit(vdn); emit(") [simulated]\r\n");
         } else {
             emit("closed\r\n");
         }
@@ -1003,53 +1175,62 @@ static int run_netlab(const char *verb, const char **cursor)
     }
     if (str_eq(sub, "pod")) {
         if (!take_word(cursor, sub, sizeof(sub))) {
-            emit("usage: netlab pod create|join|members|host|leave ...\r\n");
+            emit("usage: netlab pod create|join|members|host|leave\r\n");
             return 1;
         }
         if (str_eq(sub, "create")) {
             if (!take_word(cursor, pod, sizeof(pod))) {
-                emit("usage: netlab pod create <pod> [your-name]\r\n");
+                emit("usage: netlab pod create <pod>\r\n");
                 return 1;
             }
             str_copy(s_nl_pod, pod, NL_NAMELEN);
-            if (!take_word(cursor, nm, sizeof(nm)))
-                str_copy(nm, "flinstone", sizeof(nm));
             s_nl_memcount = 0;
-            s_nl_hostidx = 0;
-            str_copy(s_nl_members[s_nl_memcount++], nm, NL_NAMELEN);
+            s_nl_members[s_nl_memcount++] = session;
+            nl_pick_host();
             emit("netlab: pod '");
             emit(s_nl_pod);
-            emit("' created. host is ");
-            emit(nm);
-            emit(" (simulated, lab networks by default)\r\n");
+            emit("' created.\r\n");
+            if (s_nl_hostidx >= 0) {
+                char dn[40];
+                nl_display_name(s_nl_members[s_nl_hostidx], dn, sizeof(dn));
+                emit("  host is "); emit(dn); emit(" (simulated, lab networks by default)\r\n");
+            } else {
+                emit("  host pending: you are currently the real server host, so this pod\r\n");
+                emit("  has no pod host yet. Have another real session join, or `server kill`\r\n");
+                emit("  your own real hosting, to free up a pod host.\r\n");
+            }
             return 1;
         }
         if (str_eq(sub, "join")) {
             if (!s_nl_pod[0]) {
-                emit("netlab: no pod yet. `netlab pod create <pod> <name>` first.\r\n");
+                emit("netlab: no pod yet. `netlab pod create <pod>` first.\r\n");
                 return 1;
             }
-            if (!take_word(cursor, nm, sizeof(nm))) {
-                emit("usage: netlab pod join <your-name>\r\n");
+            if (nl_session_idx(session) >= 0) {
+                emit("netlab: you are already in pod ");
+                emit(s_nl_pod);
+                emit(".\r\n");
                 return 1;
             }
             if (s_nl_memcount >= NL_MAXMEM) {
                 emit("netlab: pod is full.\r\n");
                 return 1;
             }
-            if (nl_member_idx(nm) >= 0) {
-                emit(nm);
-                emit(" is already in the pod.\r\n");
-                return 1;
+            s_nl_members[s_nl_memcount++] = session;
+            nl_pick_host();
+            {
+                char dn[40];
+                nl_display_name(session, dn, sizeof(dn));
+                emit("netlab: "); emit(dn); emit(" joined pod "); emit(s_nl_pod);
+                emit(" (identity preserved).\r\n");
             }
-            str_copy(s_nl_members[s_nl_memcount++], nm, NL_NAMELEN);
-            emit("netlab: ");
-            emit(nm);
-            emit(" joined pod ");
-            emit(s_nl_pod);
-            emit(" (identity preserved). host remains ");
-            emit(s_nl_members[s_nl_hostidx]);
-            emit("\r\n");
+            if (s_nl_hostidx >= 0) {
+                char dn2[40];
+                nl_display_name(s_nl_members[s_nl_hostidx], dn2, sizeof(dn2));
+                emit("  host: "); emit(dn2); emit("\r\n");
+            } else {
+                emit("  host pending: every current member is the real server host.\r\n");
+            }
             return 1;
         }
         if (str_eq(sub, "members")) {
@@ -1061,10 +1242,13 @@ static int run_netlab(const char *verb, const char **cursor)
             emit(s_nl_pod);
             emit(" members:\r\n");
             for (i = 0; i < (unsigned)s_nl_memcount; ++i) {
-                emit("  ");
-                emit(s_nl_members[i]);
+                char dn[40];
+                nl_display_name(s_nl_members[i], dn, sizeof(dn));
+                emit("  "); emit(dn);
                 if ((int)i == s_nl_hostidx)
                     emit("  (host)");
+                if (s_nl_members[i] == s_nl_acting_host_session)
+                    emit("  (real server host)");
                 emit("\r\n");
             }
             return 1;
@@ -1077,85 +1261,155 @@ static int run_netlab(const char *verb, const char **cursor)
             emit("pod ");
             emit(s_nl_pod);
             emit(" host: ");
-            emit(s_nl_members[s_nl_hostidx]);
-            emit("\r\n");
+            if (s_nl_hostidx >= 0) {
+                char dn[40];
+                nl_display_name(s_nl_members[s_nl_hostidx], dn, sizeof(dn));
+                emit(dn); emit("\r\n");
+            } else {
+                emit("(none - pending)\r\n");
+            }
             return 1;
         }
         if (str_eq(sub, "leave")) {
             int idx, was_host, j;
+            char dn[40];
             if (!s_nl_pod[0]) {
                 emit("netlab: not in a pod.\r\n");
                 return 1;
             }
-            if (!take_word(cursor, nm, sizeof(nm))) {
-                emit("usage: netlab pod leave <name>\r\n");
-                return 1;
-            }
-            idx = nl_member_idx(nm);
+            idx = nl_session_idx(session);
             if (idx < 0) {
-                emit(nm);
-                emit(" is not in the pod.\r\n");
+                emit("netlab: you are not in this pod.\r\n");
                 return 1;
             }
-            was_host = (idx == s_nl_hostidx);
+            was_host = ((int)idx == s_nl_hostidx);
+            nl_display_name(session, dn, sizeof(dn));
             for (j = idx; j < s_nl_memcount - 1; ++j)
-                str_copy(s_nl_members[j], s_nl_members[j + 1], NL_NAMELEN);
+                s_nl_members[j] = s_nl_members[j + 1];
             s_nl_memcount--;
             if (s_nl_memcount == 0) {
-                emit("netlab: ");
-                emit(nm);
-                emit(" left; pod dissolved.\r\n");
+                emit("netlab: "); emit(dn); emit(" left; pod dissolved.\r\n");
                 s_nl_pod[0] = 0;
-                s_nl_hostidx = 0;
+                s_nl_hostidx = -1;
+                s_nl_listen_session = -1;
+                s_nl_atk_session = -1;
+                s_nl_victim_session = -1;
+                nl_sb_reset();
                 return 1;
             }
-            if (was_host) {
-                s_nl_hostidx = 0;
-                emit("netlab: host ");
-                emit(nm);
-                emit(" left; new host is ");
-                emit(s_nl_members[0]);
-                emit(" (succession)\r\n");
+            nl_pick_host();
+            emit("netlab: "); emit(dn); emit(" left.\r\n");
+            if (s_nl_hostidx >= 0) {
+                char dn2[40];
+                nl_display_name(s_nl_members[s_nl_hostidx], dn2, sizeof(dn2));
+                emit("  host "); emit(was_host ? "succession: " : "remains: ");
+                emit(dn2); emit("\r\n");
             } else {
-                if (idx < s_nl_hostidx)
-                    s_nl_hostidx--;
-                emit("netlab: ");
-                emit(nm);
-                emit(" left; host remains ");
-                emit(s_nl_members[s_nl_hostidx]);
-                emit("\r\n");
+                emit("  host pending: every remaining member is the real server host.\r\n");
             }
+            if (session == s_nl_atk_session || session == s_nl_victim_session) {
+                s_nl_atk_session = -1;
+                s_nl_victim_session = -1;
+                nl_sb_reset();
+                nl_set_mode(0);
+                emit("netlab: your reverse-shell binding ended because you left the pod.\r\n");
+            }
+            if (session == s_nl_listen_session)
+                s_nl_listen_session = -1;
             return 1;
         }
-        emit("usage: netlab pod create|join|members|host|leave ...\r\n");
+        emit("usage: netlab pod create|join|members|host|leave\r\n");
         return 1;
     }
-    if (str_eq(sub, "rs")) {
-        if (!take_word(cursor, nm, sizeof(nm))) {
-            emit("usage: netlab rs <victim>  (mock victim / pod member)\r\n");
+    if (str_eq(sub, "listen")) {
+        if (!s_nl_pod[0] || nl_session_idx(session) < 0) {
+            emit("netlab: join a pod first (`netlab pod create` or `netlab pod join`).\r\n");
             return 1;
         }
-        str_copy(s_nl_rs_victim, nm, NL_NAMELEN);
-        s_nl_rs_active = 1;
-        nl_set_mode(1); /* reverse shell drops the real network for the session */
-        emit("netlab: reverse shell opened to ");
-        emit(s_nl_rs_victim);
-        emit(" (SIMULATED mock victim). `netlab <cmd>` now runs as ");
-        emit(s_nl_rs_victim);
-        emit("; your own shell is unchanged. `netlab end` closes it.\r\n");
+        if (take_word(cursor, nm, sizeof(nm)) && str_eq(nm, "cancel")) {
+            if (s_nl_listen_session != session) {
+                emit("netlab: you have no open listener to cancel.\r\n");
+                return 1;
+            }
+            s_nl_listen_session = -1;
+            emit("netlab: listener cancelled.\r\n");
+            return 1;
+        }
+        if (s_nl_atk_session >= 0) {
+            emit("netlab: a reverse shell is already bound in this pod; `netlab end` it first.\r\n");
+            return 1;
+        }
+        if (s_nl_listen_session >= 0) {
+            emit("netlab: a listener is already open in this pod. `netlab accept` it, or its\r\n");
+            emit("  owner can `netlab listen cancel`.\r\n");
+            return 1;
+        }
+        s_nl_listen_session = session;
+        {
+            char dn[40];
+            nl_display_name(session, dn, sizeof(dn));
+            emit("netlab: "); emit(dn); emit(" is listening in pod "); emit(s_nl_pod);
+            emit(".\r\n  Another pod member can `netlab accept` to bind as the victim side\r\n");
+            emit("  (SIMULATED — a disposable isolated sandbox, never their real session).\r\n");
+        }
+        return 1;
+    }
+    if (str_eq(sub, "accept")) {
+        if (!s_nl_pod[0] || nl_session_idx(session) < 0) {
+            emit("netlab: join a pod first.\r\n");
+            return 1;
+        }
+        if (s_nl_listen_session < 0) {
+            emit("netlab: no open listener in this pod. Someone runs `netlab listen` first.\r\n");
+            return 1;
+        }
+        if (s_nl_listen_session == session) {
+            emit("netlab: you cannot accept your own listener.\r\n");
+            return 1;
+        }
+        if (s_nl_atk_session >= 0) {
+            emit("netlab: already bound; `netlab end` it first.\r\n");
+            return 1;
+        }
+        /* "when we switch to lab network": re-resolve the pod host here, since
+         * this is the actual isolation moment and the real server host may
+         * have changed since the pod was created or last joined. */
+        nl_pick_host();
+        s_nl_atk_session = s_nl_listen_session;
+        s_nl_victim_session = session;
+        s_nl_listen_session = -1;
+        nl_sb_reset();
+        nl_set_mode(1);
+        {
+            char adn[40], vdn[40];
+            nl_display_name(s_nl_atk_session, adn, sizeof(adn));
+            nl_display_name(s_nl_victim_session, vdn, sizeof(vdn));
+            emit("netlab: "); emit(vdn); emit(" accepted. "); emit(adn);
+            emit(" is bound as attacker against a fresh, isolated SANDBOX\r\n");
+            emit("  labeled for "); emit(vdn); emit(" — not "); emit(vdn);
+            emit("'s real session or real files.\r\n  ");
+            emit(adn);
+            emit(": run `netlab <cmd>` to execute in the sandbox. Either side can\r\n");
+            emit("  `netlab end` it at any time.\r\n");
+        }
         return 1;
     }
     if (str_eq(sub, "end")) {
-        if (!s_nl_rs_active) {
-            emit("netlab: no reverse shell is open.\r\n");
+        if (session != s_nl_atk_session && session != s_nl_victim_session) {
+            emit("netlab: no reverse shell bound to you.\r\n");
             return 1;
         }
-        emit("netlab: reverse shell to ");
-        emit(s_nl_rs_victim);
-        emit(" closed; back to your own shell.\r\n");
-        s_nl_rs_active = 0;
-        s_nl_rs_victim[0] = 0;
-        nl_set_mode(0); /* real network restored */
+        {
+            char adn[40], vdn[40];
+            nl_display_name(s_nl_atk_session, adn, sizeof(adn));
+            nl_display_name(s_nl_victim_session, vdn, sizeof(vdn));
+            emit("netlab: reverse shell between "); emit(adn); emit(" and "); emit(vdn);
+            emit(" closed.\r\n");
+        }
+        s_nl_atk_session = -1;
+        s_nl_victim_session = -1;
+        nl_sb_reset();
+        nl_set_mode(0);
         return 1;
     }
     if (str_eq(sub, "rs-explain")) {
@@ -1357,10 +1611,12 @@ static int run_netlab(const char *verb, const char **cursor)
         return 1;
     }
 
-    /* reverse-shell redirection: with an RS open, a non-management verb runs
-     * as the simulated victim (`netlab whoami` -> the victim's name). */
-    if (s_nl_rs_active && !nl_is_mgmt(sub)) {
-        nl_victim_emit(s_nl_rs_victim, sub);
+    /* reverse-shell redirection: only the BOUND ATTACKER session's
+     * non-management verbs run against the sandbox. Any other session,
+     * including the accepting victim typing in their own terminal, is
+     * completely unaffected — their real shell behaves normally. */
+    if (session == s_nl_atk_session && !nl_is_mgmt(sub)) {
+        nl_sb_run(sub, cursor);
         return 1;
     }
 
@@ -1380,7 +1636,7 @@ static int run_meta(int session, const char *verb, const char **cursor)
         emit("diskput diskget diskfiles diskmkdir diskdel\r\n");
         emit("ping ping6 check ifconfig arp route netstat nslookup resolve netsh wifi udpsend udplisten\r\n");
         emit("netlab (pods|hosts|scan|wpa|topology|traceroute|monitor|arp-demo|capture|start|stop|status|defend)\r\n");
-        emit("netlab pod create|join|members|host|leave ... | netlab rs <victim> | end  (`netlab help` for all)\r\n");
+        emit("netlab pod create|join|members|host|leave (real account) | listen|accept|end  (`netlab help` for all)\r\n");
         emit("server version contracts audit redirect rerun help history his cc clear exit bios\r\n");
         emit("lab analogs: ramfs, cluster disk, lab net, P3 relay. Hosted FAT32/sockets stay on the ELF shell.\r\n");
         return 1;
@@ -1487,9 +1743,12 @@ void fl_fs_commands_init(void)
     s_lab_netmode = 0;
     s_nl_pod[0] = 0;
     s_nl_memcount = 0;
-    s_nl_hostidx = 0;
-    s_nl_rs_active = 0;
-    s_nl_rs_victim[0] = 0;
+    s_nl_hostidx = -1;
+    s_nl_acting_host_session = -1;
+    s_nl_listen_session = -1;
+    s_nl_atk_session = -1;
+    s_nl_victim_session = -1;
+    nl_sb_reset();
 }
 
 int fl_fs_commands_run(int session, const char *verb, const char **cursor)
@@ -1505,8 +1764,8 @@ int fl_fs_commands_run(int session, const char *verb, const char **cursor)
     if (rc == 1)
         return 1;
     if (run_fs(session, verb, cursor) || run_disk(session, verb, cursor) ||
-        run_net(verb, cursor) || run_netlab(verb, cursor) ||
-        run_server(verb, cursor))
+        run_net(verb, cursor) || run_netlab(session, verb, cursor) ||
+        run_server(session, verb, cursor))
         return 1;
     return 0;
 }

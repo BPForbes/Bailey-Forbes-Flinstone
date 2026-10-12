@@ -45,9 +45,9 @@
     for (const id of ["account-login", "account-new-session", "account-register",
                       "netlab-pod", "netlab-start", "netlab-hosts", "netlab-scan", "netlab-wpa",
                       "netlab-topology", "netlab-arpdemo", "netlab-capture", "netlab-defend",
-                      "netlab-stop", "netlab-session-pod", "netlab-your-name",
+                      "netlab-stop", "netlab-session-pod",
                       "netlab-pod-create", "netlab-pod-join", "netlab-pod-members",
-                      "netlab-pod-leave", "netlab-victim", "netlab-rs-open", "netlab-rs-end",
+                      "netlab-pod-leave", "netlab-rs-listen", "netlab-rs-accept", "netlab-rs-end",
                       "netlab-status", "netlab-consent", "netlab-rsexplain"]) {
       const node = document.getElementById(id);
       if (node) node.disabled = !ready;
@@ -660,15 +660,14 @@
 
   // Pod (private group): membership and host succession.
   wireNetlabPlain("netlab-pod-create", () =>
-    `netlab pod create ${netlabToken("netlab-session-pod", "redcell")} ${netlabToken("netlab-your-name", "flinstone")}`);
-  wireNetlabPlain("netlab-pod-join", () =>
-    `netlab pod join ${netlabToken("netlab-your-name", "flinstone")}`);
+    `netlab pod create ${netlabToken("netlab-session-pod", "redcell")}`);
+  wireNetlabPlain("netlab-pod-join", () => "netlab pod join");
   wireNetlabPlain("netlab-pod-members", () => "netlab pod members");
-  wireNetlabPlain("netlab-pod-leave", () =>
-    `netlab pod leave ${netlabToken("netlab-your-name", "flinstone")}`);
+  wireNetlabPlain("netlab-pod-leave", () => "netlab pod leave");
 
   // Reverse shell (simulated): open/close against a named mock victim.
-  wireNetlabPlain("netlab-rs-open", () => `netlab rs ${netlabToken("netlab-victim", "bob")}`);
+  wireNetlabPlain("netlab-rs-listen", () => "netlab listen");
+  wireNetlabPlain("netlab-rs-accept", () => "netlab accept");
   wireNetlabPlain("netlab-rs-end", () => "netlab end");
   wireNetlabPlain("netlab-status", () => "netlab status");
 

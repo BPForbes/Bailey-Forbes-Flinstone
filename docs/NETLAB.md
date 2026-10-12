@@ -17,8 +17,10 @@ discouraged from it:
 - It is **libc-only** and pulls in no kernel net headers. It opens no sockets
   and reads no real interface.
 - It never intercepts, relays, or alters another host's real traffic.
-- It never sends input into another person's terminal — there is **no reverse
-  shell into a victim**, only an explainer of how the technique works.
+- It never sends input into another person's terminal. The listen/accept
+  reverse-shell binding always drives a **disposable, in-memory sandbox**
+  labeled for the accepting account — never that account's real session, real
+  files, or real terminal. The accepting party can end the binding at any time.
 - It never rewrites a real capture to fabricate evidence of a MiTM.
 
 The only real I/O is files: `pcap write` serializes the **simulated** frame
@@ -28,11 +30,13 @@ capture — including raising the duplicate-MAC alert that reveals ARP spoofing 
 is ordinary defensive forensics.
 
 This is a deliberate scoping decision. A working MiTM interceptor, a reverse
-shell that executes an operator's commands on someone else's machine, live
-reconnaissance of other users, and capture forgery are live-attack
-capabilities whose code is identical whoever the target is; restricting their
-*use* to a lab does not change what the code *is*, so they are out of scope
-here. The lab teaches the mechanism and, just as importantly, the detection
+shell that executes an operator's commands on someone else's **real** machine
+or session, live reconnaissance of other users, and capture forgery are
+live-attack capabilities whose code is identical whoever the target is;
+restricting their *use* to a lab does not change what the code *is*, so they
+are out of scope here. The listen/accept binding deliberately targets a
+throwaway sandbox instead, so the attacker's workflow is demonstrated without
+any real session ever being the victim. The lab teaches the mechanism and, just as importantly, the detection
 and prevention half of the source report — the part that generalizes.
 
 ## Pods
@@ -64,8 +68,8 @@ netlab rs-explain              Explain reverse-shell mechanics (no injection)
 netlab pcap write <pod> <file> Emit a real .pcap of the SIMULATED frames
 netlab pcap analyze <file>     Parse a real .pcap; flag ARP-spoof signatures
 netlab defend                  Detection & prevention checklist
-netlab pod create|join|members|host|leave   Pod membership (see Pods below)
-netlab rs <victim> / <cmd> / end            Simulated reverse shell (see below)
+netlab pod create|join|members|host|leave   Pod membership, keyed on your real account (see Pods below)
+netlab listen|accept|end                    Simulated reverse shell: listener=attacker, acceptor=victim (see below)
 netlab status                  Show pod / host / reverse-shell state
 ```
 
@@ -77,7 +81,7 @@ netlab status                  Show pod / host / reverse-shell state
 | Monitor traffic into a pcap | `monitor` replays the simulated frame script; `pcap write` serializes it to a real libpcap file (clearly simulated data). |
 | Device/network info for others | `hosts` shows each pod's **fabricated** host table (SSID/IP/MAC/role). No real device is probed. |
 | Traceroute | `traceroute` walks the simulated pod topology hop by hop. |
-| Send commands to another's terminal (reverse shell) | `netlab rs <victim>` + `netlab <cmd>` run against a **mock victim** (simulation); `rs-explain` covers the mechanism. No real participant is controlled. |
+| Send commands to another's terminal (reverse shell) | `netlab listen` (attacker) + another member's `netlab accept` (victim) bind a session; the attacker's `netlab <cmd>` then runs against a **disposable sandbox** labeled for the victim (simulation); `rs-explain` covers the mechanism. No real participant's session is controlled. |
 | Analysis of a pcap file | `pcap analyze` parses a real capture, counts frames, and flags duplicate IP->MAC bindings (the ARP-spoof signature). |
 | Alter router state to show MiTM in a pcap | Not implemented — fabricating capture evidence is out of scope. The analyzer teaches how such tampering is *detected*. |
 
@@ -107,64 +111,99 @@ host, network, or saved credential is touched.
 | `nmap -sn` host discovery → MAC + IP of devices | `netlab scan <pod>` |
 | Network topology | `netlab topology <pod>` |
 | MiTM via Ettercap + tcpdump → pcap | `netlab arp-demo` / `monitor` / `capture`; hosted `pcap write` |
-| Reverse shell (`ncat -e /bin/bash`) | `netlab rs <victim>` → mock-victim shell (`netlab <cmd>`), `netlab end`; `rs-explain` for the mechanism. No real victim. |
+| Reverse shell (`ncat -e /bin/bash`) | `netlab listen` / `netlab accept` bind attacker↔victim; the attacker's `netlab <cmd>` runs in a disposable sandbox, `netlab end` closes it; `rs-explain` for the mechanism. No real victim session. |
 | pcap analysis in Wireshark | hosted `netlab pcap analyze <file>`; freestanding `netlab capture` |
 | Prevention strategies | `netlab defend` |
 
 The `wpa` PSK and the `scan` results are fabricated values in the pod
 definitions. netlab does not read `/etc/NetworkManager`, capture a handshake,
-or crack anything, and it does not implement a working reverse shell — those
-are live-attack steps and stay out of scope by design.
+or crack anything, and it does not implement a reverse shell into a real
+session — those are live-attack steps and stay out of scope by design.
 
 ## Pods and the simulated reverse-shell session
 
 netlab keeps a small amount of session state so a pod and a reverse shell can
-be modeled the way the course project describes. It is all in-memory
-simulation for one lab seat — pods are not a real multi-machine relay, and the
-reverse shell drives a mock victim, never a real participant.
+be modeled the way the course project describes. Pod membership is keyed on
+your **real logged-in account**, not a free-typed name. The reverse shell
+binds two real accounts but drives a disposable in-memory sandbox, never a
+real participant's session.
 
 ### Pods
 
 ```
-netlab pod create <pod> [your-name]   create a pod; the creator is the host
-netlab pod join <your-name>           join the pod, keeping your identity
-netlab pod members                    list members; the host is marked
-netlab pod host                       show the current host
-netlab pod leave <name>               leave; host succeeds if the host leaves
+netlab pod create <pod>   create a pod; you (your real account) are the first member
+netlab pod join           join the pod as your real account
+netlab pod members        list members (real accounts); the host is marked
+netlab pod host           show the current pod host
+netlab pod leave          leave the pod; host succeeds if the host leaves
 ```
 
-A pod preserves each member's identity (Jenny stays Jenny; Flinstone joins as
-Flinstone). The creator is the host, and when the host leaves, the next member
-becomes host — the same succession the overall server uses. Pods default to
-lab networks; opting a pod onto real networks would be an explicit choice.
+Membership reflects the real logged-in account (`fl_session_current_user()` in
+the hosted shell, the real per-terminal session in the freestanding shell), so
+adding a second member means a second real account joining — in the browser
+lab, a second session opened as another account.
 
-### Reverse shell (simulated)
+**Host-collision avoidance.** The pod host is a member that is **not** also
+hosting the real `server` session, so one identity is never asked to relay both
+lab traffic and real-server traffic at once. If every current member is the real
+server host, the pod host stays **pending** until another account can hold it.
+This is re-resolved at pod create/join/leave and, crucially, again at
+`accept` time — the moment the lab network is switched on.
+
+In the freestanding shell, which has a real per-terminal session table, two
+sessions logged into the same account are disambiguated for display as
+`name` and `name {2}`. The hosted ELF shell has a single process-global
+identity (no concurrent session table), so it keys membership on whichever
+real account is logged in at the moment each verb runs; this is a weaker
+concurrency model and is documented as such rather than overclaimed.
+
+### Reverse shell (simulated): listen / accept
 
 ```
-netlab rs <victim>    open a reverse shell to a mock victim
-netlab <cmd>          with an RS open, runs as the victim
-netlab end            close the reverse shell
-netlab status         show pod / host / RS / network state
+netlab listen          open a listener; you become the attacker
+netlab listen cancel   withdraw your own open listener
+netlab accept          accept the open listener; you become the victim
+netlab <cmd>           while bound, the ATTACKER's non-mgmt verbs run in the sandbox
+netlab end             close the binding (either side, any time)
+netlab status          show pod / host / reverse-shell / network state
 ```
 
-With a reverse shell open, `netlab <cmd>` returns the victim's fabricated
-output and your own shell is untouched. Worked example — Sarah's seat, Bob the
-mock victim:
+Whoever runs `netlab listen` is the **attacker**; whoever runs `netlab accept`
+is the **victim**. You cannot accept your own listener. Once bound, the
+attacker's non-management `netlab <cmd>` is redirected into a fresh, isolated
+**sandbox** labeled for the victim — the sandbox runs real commands
+(`whoami`, `hostname`, `id`, `uname`, `pwd`, `ifconfig`, `netstat`, `ls`,
+`write`, `cat`, `rm`) against its own throwaway state, never the victim's real
+account, files, or terminal. The victim keeps using their own real shell
+normally; only the attacker's `netlab` verbs are redirected.
+
+Worked example — Flinstone listens, root accepts:
 
 ```
-whoami            -> sarah           (your real identity, unchanged)
-netlab rs bob     -> reverse shell opened to bob (SIMULATED)
-netlab whoami     -> bob             (the victim's mock identity)
-netlab hostname   -> bob-box
-netlab end        -> reverse shell closed
+# session A (flinstone)
+netlab pod create redcell
+netlab listen               -> flinstone is listening (attacker)
+
+# session B (root)
+netlab pod join
+netlab accept               -> root bound as the victim SANDBOX side
+
+# session A (flinstone, the attacker)
+netlab whoami               -> root               (the sandbox's labeled identity)
+netlab write loot.txt data  -> wrote loot.txt (sandbox)
+netlab cat loot.txt         -> data
+
+# session B (root, the victim) — its own shell is untouched
+whoami                      -> root
+netlab end                  -> binding closed; real network restored
 ```
 
-Opening the reverse shell drops the real network for the session (the
-freestanding `server` relay refuses while it is open, and the browser glue
-disconnects the relay on the `LAB_NETMODE lab` token); `netlab end` restores
-it. "Bob" is a mock profile defined by the victim name, so this demonstrates
-the attacker's experience of a reverse shell without controlling any real
-person's machine or session.
+Accepting the listener drops the real network for the duration (the hosted
+`server` command refuses while isolated via `cmd_netlab_is_isolated()`, the
+freestanding `server` relay refuses, and the browser glue disconnects the relay
+on the `LAB_NETMODE lab` token); `netlab end` — which either side may run —
+restores it. This demonstrates the attacker's experience of a reverse shell
+without controlling any real person's machine or session.
 
 ## In the browser lab (freestanding) and the non-CLI controls
 
@@ -199,11 +238,16 @@ to the lab's own relay connection — it never touches the host's actual Wi-Fi.
 
 ### Driving it without the CLI
 
-`tools/browser-lab/index.html` has a **MitM + RS lab** control panel: a pod
-selector, a live/lab status badge, and buttons (Start demo, Hosts, Topology,
-ARP-spoof demo, Capture + analyze, Defend, Stop demo). Each button sends the
-matching `netlab …` line into the shell, so the whole flow — including the
-network switch — runs by clicking, no typing required.
+`tools/browser-lab/index.html` has a **MitM + RS lab** control panel: a segment
+selector, a live/lab status badge, recon buttons (Hosts, Scan, WPA, Topology,
+ARP-spoof demo, Capture + analyze), pod buttons (Create pod, Join pod as me,
+Members, Leave pod), reverse-shell buttons (Listen as attacker, Accept as
+victim, End binding, Status), and the network/reference buttons (Start demo,
+Stop demo, Consent, RS mechanics, Defend). The pod and reverse-shell buttons
+carry no free-typed name — membership follows the session's real account, so a
+second participant is a second session opened as another account in the Users
+and sessions panel. Each button sends the matching `netlab …` line into the
+shell, so the whole flow runs by clicking, no typing required.
 
 ## Related
 

@@ -193,19 +193,49 @@ try:
     cmd("netlab stop", expect="LAB_NETMODE live")
     cmd("server host", expect="SERVER_RELAY host")
 
-    # Pods: membership, preserved identity, and host succession.
-    cmd("netlab pod create redcell jenny", expect="host is jenny")
-    cmd("netlab pod join flinstone", expect="identity preserved")
+    # Pods: real-account membership, host-collision resolution, and a
+    # listener/accept reverse shell bound to a real second session (not a
+    # free-typed name). Session 1 (flinstone) just ran `server host` above,
+    # so it is netlab's locally-tracked real server host: creating a pod
+    # from here must NOT hand that same identity the pod host role too.
+    cmd("netlab pod create redcell", expect="host pending")
+    cmd("netlab pod members", expect="real server host")
+    # Session 2 already exists (created earlier, logged in as root) and is
+    # not the real server host, so joining it must resolve the pending host.
+    send("session 2\n")
+    read_until("SESSION 2 user=root", 4)
+    cmd("netlab pod join", expect="identity preserved")
     cmd("netlab pod members", expect="(host)")
-    # Reverse shell: netlab <cmd> runs as the mock victim; it drops the real
-    # network while open; netlab end restores it.
-    cmd("netlab rs bob", expect="LAB_NETMODE lab")
-    cmd("netlab whoami", expect="bob")
-    cmd("netlab hostname", expect="bob-box")
+    # root calls `listen` -> root is the attacker. flinstone will `accept` ->
+    # flinstone is the victim side (listener = attacker, acceptor = victim).
+    cmd("netlab listen", expect="is listening")
+    send("session 1\n")
+    read_until("SESSION 1 user=flinstone", 4)
+    cmd("netlab accept", expect="LAB_NETMODE lab")
+    # flinstone (the victim) keeps using its own real session normally while
+    # bound -- the binding never touches it.
+    cmd("whoami", expect="WHOAMI flinstone")
     cmd("server host", expect="lab isolated")
+    # root is the bound attacker: only root's non-management `netlab <cmd>`
+    # calls are redirected into the sandbox, and they execute for real
+    # against isolated state, not canned text.
+    send("session 2\n")
+    read_until("SESSION 2 user=root", 4)
+    cmd("netlab whoami", expect="flinstone")
+    cmd("netlab hostname", expect="flinstone-sandbox")
+    cmd("netlab write test.txt hello-from-sandbox", expect="wrote test.txt")
+    cmd("netlab cat test.txt", expect="hello-from-sandbox")
+    # The accepting victim (session 1) can end the binding unilaterally.
+    send("session 1\n")
+    read_until("SESSION 1 user=flinstone", 4)
     cmd("netlab end", expect="LAB_NETMODE live")
     cmd("server host", expect="SERVER_RELAY host")
-    cmd("netlab pod leave jenny", expect="new host is flinstone")
+    # Now that the binding is cleanly closed, root leaving the pod (its only
+    # other member) must re-open "host pending": the sole remaining member
+    # (flinstone) is still netlab's locally-tracked real server host.
+    send("session 2\n")
+    read_until("SESSION 2 user=root", 4)
+    cmd("netlab pod leave", expect="host pending")
 
     for verb in HOSTED_VERBS:
         cmd(verb)

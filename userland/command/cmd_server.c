@@ -58,6 +58,11 @@ static fl_net_server_t g_server;
 static fl_server_bg_t *g_server_bg;
 static int g_server_running;
 
+/* Accessor for other commands (netlab's pod/host-collision check) that need
+ * to know, without owning any server state themselves, whether this process
+ * is currently hosting the real `server` session. */
+int cmd_server_is_running(void) { return g_server_running; }
+
 static fl_net_client_t g_client;
 static fl_server_bg_t *g_client_bg;
 
@@ -1892,6 +1897,13 @@ int cmd_server_run(int argc, char **argv) {
         return 1;
     }
     if (!strcmp(argv[1], "interfaces")) return verb_interfaces(argc, argv);
+    if (cmd_netlab_is_isolated()) {
+        /* A netlab reverse-shell binding is open: the real network is dropped
+         * for the duration so nothing leaves while the MitM+RS demo runs.
+         * `netlab end` (either side) resumes the real relay. */
+        fl_color_error("server paused: lab isolated (netlab MitM+RS active) — `netlab end` to resume the real network");
+        return 1;
+    }
     if (!strcmp(argv[1], "netinit"))   return verb_netinit();
     if (!strcmp(argv[1], "host"))      return verb_host(argc, argv);
     if (!strcmp(argv[1], "join"))      return verb_join(argc, argv);
