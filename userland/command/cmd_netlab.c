@@ -461,6 +461,19 @@ static void print_usage(void) {
 "  netlab pcap analyze <file>     Parse a real .pcap; flag ARP-spoof signatures\n"
 "  netlab defend                  Detection & prevention checklist\n"
 "\n"
+"Pods (simulated membership, lab networks by default):\n"
+"  netlab pod create <pod> [name] Create a pod; creator is the host\n"
+"  netlab pod join <name>         Join the current pod (identity preserved)\n"
+"  netlab pod members | host      List members / show the host\n"
+"  netlab pod leave <name>        Leave; host succession if the host leaves\n"
+"\n"
+"Reverse shell (SIMULATED, against a mock victim — not a real person):\n"
+"  netlab rs <victim>             Open a reverse shell to a mock victim\n"
+"  netlab <cmd>                   With an RS open, runs as the victim\n"
+"                                 (e.g. `netlab whoami` -> the victim's name)\n"
+"  netlab end                     Close the reverse shell\n"
+"  netlab status                  Show pod / host / reverse-shell state\n"
+"\n"
 "Pods are private, isolated groups: a pod's hosts and frames never cross into\n"
 "another pod. Everything is fabricated in memory — see `netlab consent`.\n",
         stdout);
@@ -679,6 +692,149 @@ static int verb_defend(void) {
 /* Entry point                                                               */
 /* ------------------------------------------------------------------------- */
 
+/* ------------------------------------------------------------------------- */
+/* Stateful session: pods (membership + host succession) and a SIMULATED      */
+/* reverse shell. All state is in-memory for this one lab seat. The reverse   */
+/* shell runs against a MOCK victim profile — `netlab <cmd>` returns the       */
+/* victim's fabricated output. No real participant's session is controlled.   */
+/* ------------------------------------------------------------------------- */
+
+#define NL_NAMELEN 32
+#define NL_MAXMEM  8
+
+static char s_pod[NL_NAMELEN];                 /* current pod, "" = none       */
+static char s_members[NL_MAXMEM][NL_NAMELEN];  /* pod members (identities)     */
+static int  s_memcount;
+static int  s_hostidx;                         /* index of the pod host        */
+static int  s_rs_active;                       /* reverse shell open?          */
+static char s_rs_victim[NL_NAMELEN];           /* mock victim name             */
+
+static void nl_cpy(char *d, const char *s, size_t n) {
+    size_t i = 0;
+    if (!n) return;
+    for (; s[i] && i + 1 < n; i++) d[i] = s[i];
+    d[i] = 0;
+}
+
+static int nl_member_idx(const char *name) {
+    for (int i = 0; i < s_memcount; i++)
+        if (!strcmp(s_members[i], name)) return i;
+    return -1;
+}
+
+/* Deterministic pseudo-octet so a victim's mock iface is stable per name. */
+static unsigned nl_name_octet(const char *v) {
+    unsigned h = 0;
+    for (const char *p = v; *p; p++) h = (h * 31u + (unsigned char)*p) & 0xffu;
+    return 50u + (h % 180u);
+}
+
+/* One line of simulated victim output for an arbitrary command. */
+static void nl_victim_out(const char *v, const char *cmd) {
+    unsigned o = nl_name_octet(v);
+    if (!strcmp(cmd, "whoami"))        printf("%s\n", v);
+    else if (!strcmp(cmd, "hostname")) printf("%s-box\n", v);
+    else if (!strcmp(cmd, "id"))       printf("uid=1000(%s) gid=1000(%s) groups=1000(%s)\n", v, v, v);
+    else if (!strcmp(cmd, "uname"))    printf("FlinstoneLab 5.2 x86_64 (simulated victim)\n");
+    else if (!strcmp(cmd, "pwd"))      printf("/home/%s\n", v);
+    else if (!strcmp(cmd, "ls"))       printf("Desktop  Documents  Downloads  notes.txt  (simulated)\n");
+    else if (!strcmp(cmd, "ifconfig")) printf("eth0  inet 192.168.56.%u  ether 02:00:00:00:56:%02x  (simulated)\n", o, o & 0xffu);
+    else if (!strcmp(cmd, "netstat"))  printf("tcp  192.168.56.%u:4444  ESTABLISHED  (simulated reverse-shell socket)\n", o);
+    else printf("%s: ran on %s's simulated shell (output not modeled)\n", cmd, v);
+}
+
+static int nl_is_mgmt_verb(const char *v) {
+    static const char *m[] = {
+        "help","-h","--help","consent","pods","rs-explain","defend","hosts",
+        "topology","arp-demo","monitor","scan","wpa","traceroute","pcap",
+        "pod","rs","end","status", NULL
+    };
+    for (int i = 0; m[i]; i++) if (!strcmp(v, m[i])) return 1;
+    return 0;
+}
+
+static int verb_pod(int argc, char **argv) {
+    const char *sub = (argc >= 3) ? argv[2] : "";
+    if (!strcmp(sub, "create")) {
+        const char *me;
+        if (argc < 4) { fprintf(stderr, "usage: netlab pod create <pod> [your-name]\n"); return 1; }
+        nl_cpy(s_pod, argv[3], NL_NAMELEN);
+        me = (argc >= 5) ? argv[4] : "flinstone";
+        s_memcount = 0; s_hostidx = 0;
+        nl_cpy(s_members[s_memcount++], me, NL_NAMELEN);
+        printf("netlab: pod '%s' created. host is %s. (simulated, lab networks by default)\n", s_pod, me);
+        printf("  pod host relays to the overall server host as needed; `--real` would be an explicit opt-in.\n");
+        return 0;
+    }
+    if (!strcmp(sub, "join")) {
+        if (!s_pod[0]) { fprintf(stderr, "netlab: no pod yet. `netlab pod create <pod> <name>` first.\n"); return 1; }
+        if (argc < 4) { fprintf(stderr, "usage: netlab pod join <your-name>\n"); return 1; }
+        if (s_memcount >= NL_MAXMEM) { fprintf(stderr, "netlab: pod '%s' is full.\n", s_pod); return 1; }
+        if (nl_member_idx(argv[3]) >= 0) { printf("netlab: %s is already in pod %s.\n", argv[3], s_pod); return 0; }
+        nl_cpy(s_members[s_memcount++], argv[3], NL_NAMELEN);
+        printf("netlab: %s joined pod %s (identity preserved). host remains %s.\n",
+               argv[3], s_pod, s_members[s_hostidx]);
+        return 0;
+    }
+    if (!strcmp(sub, "members")) {
+        if (!s_pod[0]) { printf("netlab: no pod. `netlab pod create <pod> <name>`.\n"); return 0; }
+        printf("pod %s members (%d):\n", s_pod, s_memcount);
+        for (int i = 0; i < s_memcount; i++)
+            printf("  %s%s\n", s_members[i], i == s_hostidx ? "  (host)" : "");
+        return 0;
+    }
+    if (!strcmp(sub, "host")) {
+        if (!s_pod[0]) { printf("netlab: no pod.\n"); return 0; }
+        printf("pod %s host: %s\n", s_pod, s_members[s_hostidx]);
+        return 0;
+    }
+    if (!strcmp(sub, "leave")) {
+        int idx, was_host;
+        if (!s_pod[0]) { fprintf(stderr, "netlab: not in a pod.\n"); return 1; }
+        if (argc < 4) { fprintf(stderr, "usage: netlab pod leave <name>\n"); return 1; }
+        idx = nl_member_idx(argv[3]);
+        if (idx < 0) { fprintf(stderr, "netlab: %s is not in pod %s.\n", argv[3], s_pod); return 1; }
+        was_host = (idx == s_hostidx);
+        for (int i = idx; i < s_memcount - 1; i++) nl_cpy(s_members[i], s_members[i + 1], NL_NAMELEN);
+        s_memcount--;
+        if (s_memcount == 0) {
+            printf("netlab: %s left; pod %s dissolved (no members).\n", argv[3], s_pod);
+            s_pod[0] = 0; s_hostidx = 0; return 0;
+        }
+        if (was_host) { s_hostidx = 0; printf("netlab: host %s left pod %s; new host is %s (succession).\n", argv[3], s_pod, s_members[0]); }
+        else { if (idx < s_hostidx) s_hostidx--; printf("netlab: %s left pod %s; host remains %s.\n", argv[3], s_pod, s_members[s_hostidx]); }
+        return 0;
+    }
+    fprintf(stderr, "netlab: usage: netlab pod create|join|members|host|leave ...\n");
+    return 1;
+}
+
+static int verb_rs(int argc, char **argv) {
+    if (argc < 3) { fprintf(stderr, "usage: netlab rs <victim>  (victim is a mock profile / pod member)\n"); return 1; }
+    nl_cpy(s_rs_victim, argv[2], NL_NAMELEN);
+    s_rs_active = 1;
+    printf("netlab: reverse shell opened to %s (SIMULATED mock victim).\n", s_rs_victim);
+    printf("  `netlab <cmd>` now runs as %s; your own shell (e.g. `whoami`) is unchanged.\n", s_rs_victim);
+    printf("  lab-isolated for the session; `netlab end` closes it.\n");
+    return 0;
+}
+
+static int verb_end(void) {
+    if (!s_rs_active) { printf("netlab: no reverse shell is open.\n"); return 0; }
+    printf("netlab: reverse shell to %s closed. back to your own shell; real network restored.\n", s_rs_victim);
+    s_rs_active = 0; s_rs_victim[0] = 0;
+    return 0;
+}
+
+static int verb_status(void) {
+    printf("netlab status:\n");
+    printf("  pod:  %s\n", s_pod[0] ? s_pod : "(none)");
+    if (s_pod[0]) printf("  host: %s   members: %d\n", s_members[s_hostidx], s_memcount);
+    if (s_rs_active) printf("  reverse shell: OPEN -> %s (simulated victim)\n", s_rs_victim);
+    else             printf("  reverse shell: closed\n");
+    return 0;
+}
+
 int cmd_netlab_run(int argc, char **argv) {
     const char *verb;
     if (argc < 2 || !strcmp(argv[1], "help") || !strcmp(argv[1], "-h") ||
@@ -687,6 +843,11 @@ int cmd_netlab_run(int argc, char **argv) {
         return (argc < 2) ? 0 : 0;
     }
     verb = argv[1];
+
+    if (!strcmp(verb, "pod"))    return verb_pod(argc, argv);
+    if (!strcmp(verb, "rs"))     return verb_rs(argc, argv);
+    if (!strcmp(verb, "end"))    return verb_end();
+    if (!strcmp(verb, "status")) return verb_status();
 
     if (!strcmp(verb, "consent"))
         return verb_consent();
@@ -753,7 +914,15 @@ int cmd_netlab_run(int argc, char **argv) {
         return 1;
     }
 
-    fprintf(stderr, "netlab: unknown verb '%s'. Try `netlab help`.\n", verb);
+    /* Reverse-shell redirection: with an RS open, any non-management verb runs
+     * as the simulated victim (this is `netlab whoami` -> the victim's name). */
+    if (s_rs_active && !nl_is_mgmt_verb(verb)) {
+        nl_victim_out(s_rs_victim, verb);
+        return 0;
+    }
+
+    fprintf(stderr, "netlab: unknown verb '%s'. Try `netlab help`.%s\n", verb,
+            s_rs_active ? "" : " (reverse shell: `netlab rs <victim>`)");
     return 1;
 }
 
@@ -770,13 +939,21 @@ int cmd_netlab_batch_tokens_count(int argc, char **argv, int i) {
     v = argv[i + 1];
     if (!strcmp(v, "help") || !strcmp(v, "-h") || !strcmp(v, "--help") ||
         !strcmp(v, "consent") || !strcmp(v, "pods") || !strcmp(v, "defend") ||
-        !strcmp(v, "rs-explain"))
+        !strcmp(v, "rs-explain") || !strcmp(v, "end") || !strcmp(v, "status"))
         return 2;
     if (!strcmp(v, "hosts") || !strcmp(v, "topology") || !strcmp(v, "arp-demo") ||
-        !strcmp(v, "scan") || !strcmp(v, "wpa"))
+        !strcmp(v, "scan") || !strcmp(v, "wpa") || !strcmp(v, "rs"))
         return rem < 3 ? rem : 3;
     if (!strcmp(v, "traceroute"))
         return rem < 4 ? rem : 4;
+    if (!strcmp(v, "pod")) {
+        const char *sub = (rem >= 3) ? argv[i + 2] : NULL;
+        if (sub && !strcmp(sub, "create"))
+            return rem < 5 ? rem : 5;   /* pod create <pod> [name] */
+        if (sub && (!strcmp(sub, "join") || !strcmp(sub, "leave")))
+            return rem < 4 ? rem : 4;   /* pod join|leave <name> */
+        return rem < 3 ? rem : 3;       /* pod members|host */
+    }
     if (!strcmp(v, "monitor")) {
         if (rem >= 5 && !strcmp(argv[i + 3], "-c"))
             return 5;                   /* monitor <pod> -c N */

@@ -193,6 +193,20 @@ try:
     cmd("netlab stop", expect="LAB_NETMODE live")
     cmd("server host", expect="SERVER_RELAY host")
 
+    # Pods: membership, preserved identity, and host succession.
+    cmd("netlab pod create redcell jenny", expect="host is jenny")
+    cmd("netlab pod join flinstone", expect="identity preserved")
+    cmd("netlab pod members", expect="(host)")
+    # Reverse shell: netlab <cmd> runs as the mock victim; it drops the real
+    # network while open; netlab end restores it.
+    cmd("netlab rs bob", expect="LAB_NETMODE lab")
+    cmd("netlab whoami", expect="bob")
+    cmd("netlab hostname", expect="bob-box")
+    cmd("server host", expect="lab isolated")
+    cmd("netlab end", expect="LAB_NETMODE live")
+    cmd("server host", expect="SERVER_RELAY host")
+    cmd("netlab pod leave jenny", expect="new host is flinstone")
+
     for verb in HOSTED_VERBS:
         cmd(verb)
 

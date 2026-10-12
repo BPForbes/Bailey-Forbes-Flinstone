@@ -64,6 +64,9 @@ netlab rs-explain              Explain reverse-shell mechanics (no injection)
 netlab pcap write <pod> <file> Emit a real .pcap of the SIMULATED frames
 netlab pcap analyze <file>     Parse a real .pcap; flag ARP-spoof signatures
 netlab defend                  Detection & prevention checklist
+netlab pod create|join|members|host|leave   Pod membership (see Pods below)
+netlab rs <victim> / <cmd> / end            Simulated reverse shell (see below)
+netlab status                  Show pod / host / reverse-shell state
 ```
 
 ## How it maps to the seven asks in the report
@@ -74,7 +77,7 @@ netlab defend                  Detection & prevention checklist
 | Monitor traffic into a pcap | `monitor` replays the simulated frame script; `pcap write` serializes it to a real libpcap file (clearly simulated data). |
 | Device/network info for others | `hosts` shows each pod's **fabricated** host table (SSID/IP/MAC/role). No real device is probed. |
 | Traceroute | `traceroute` walks the simulated pod topology hop by hop. |
-| Send commands to another's terminal (reverse shell) | Not implemented — that is remote control of a victim. `rs-explain` covers the mechanism and the defender's view instead. |
+| Send commands to another's terminal (reverse shell) | `netlab rs <victim>` + `netlab <cmd>` run against a **mock victim** (simulation); `rs-explain` covers the mechanism. No real participant is controlled. |
 | Analysis of a pcap file | `pcap analyze` parses a real capture, counts frames, and flags duplicate IP->MAC bindings (the ARP-spoof signature). |
 | Alter router state to show MiTM in a pcap | Not implemented — fabricating capture evidence is out of scope. The analyzer teaches how such tampering is *detected*. |
 
@@ -104,7 +107,7 @@ host, network, or saved credential is touched.
 | `nmap -sn` host discovery → MAC + IP of devices | `netlab scan <pod>` |
 | Network topology | `netlab topology <pod>` |
 | MiTM via Ettercap + tcpdump → pcap | `netlab arp-demo` / `monitor` / `capture`; hosted `pcap write` |
-| Reverse shell (`ncat -e /bin/bash`) | `netlab rs-explain` — mechanics only, **no working shell** |
+| Reverse shell (`ncat -e /bin/bash`) | `netlab rs <victim>` → mock-victim shell (`netlab <cmd>`), `netlab end`; `rs-explain` for the mechanism. No real victim. |
 | pcap analysis in Wireshark | hosted `netlab pcap analyze <file>`; freestanding `netlab capture` |
 | Prevention strategies | `netlab defend` |
 
@@ -112,6 +115,56 @@ The `wpa` PSK and the `scan` results are fabricated values in the pod
 definitions. netlab does not read `/etc/NetworkManager`, capture a handshake,
 or crack anything, and it does not implement a working reverse shell — those
 are live-attack steps and stay out of scope by design.
+
+## Pods and the simulated reverse-shell session
+
+netlab keeps a small amount of session state so a pod and a reverse shell can
+be modeled the way the course project describes. It is all in-memory
+simulation for one lab seat — pods are not a real multi-machine relay, and the
+reverse shell drives a mock victim, never a real participant.
+
+### Pods
+
+```
+netlab pod create <pod> [your-name]   create a pod; the creator is the host
+netlab pod join <your-name>           join the pod, keeping your identity
+netlab pod members                    list members; the host is marked
+netlab pod host                       show the current host
+netlab pod leave <name>               leave; host succeeds if the host leaves
+```
+
+A pod preserves each member's identity (Jenny stays Jenny; Flinstone joins as
+Flinstone). The creator is the host, and when the host leaves, the next member
+becomes host — the same succession the overall server uses. Pods default to
+lab networks; opting a pod onto real networks would be an explicit choice.
+
+### Reverse shell (simulated)
+
+```
+netlab rs <victim>    open a reverse shell to a mock victim
+netlab <cmd>          with an RS open, runs as the victim
+netlab end            close the reverse shell
+netlab status         show pod / host / RS / network state
+```
+
+With a reverse shell open, `netlab <cmd>` returns the victim's fabricated
+output and your own shell is untouched. Worked example — Sarah's seat, Bob the
+mock victim:
+
+```
+whoami            -> sarah           (your real identity, unchanged)
+netlab rs bob     -> reverse shell opened to bob (SIMULATED)
+netlab whoami     -> bob             (the victim's mock identity)
+netlab hostname   -> bob-box
+netlab end        -> reverse shell closed
+```
+
+Opening the reverse shell drops the real network for the session (the
+freestanding `server` relay refuses while it is open, and the browser glue
+disconnects the relay on the `LAB_NETMODE lab` token); `netlab end` restores
+it. "Bob" is a mock profile defined by the victim name, so this demonstrates
+the attacker's experience of a reverse shell without controlling any real
+person's machine or session.
 
 ## In the browser lab (freestanding) and the non-CLI controls
 

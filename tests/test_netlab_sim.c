@@ -119,6 +119,61 @@ int main(void) {
         CHECK(strstr(buf, "crack") != NULL, "wpa states it cracks nothing");
     }
 
+    /* pods: membership, preserved identity, host succession */
+    {
+        char *av[] = { "netlab", "pod", "create", "redcell", "jenny" };
+        rc = run_capture(av, 5, buf, sizeof(buf));
+        CHECK(rc == 0, "`netlab pod create redcell jenny` ok");
+        CHECK(strstr(buf, "host is jenny") != NULL, "pod creator becomes host");
+    }
+    {
+        char *av[] = { "netlab", "pod", "join", "flinstone" };
+        rc = run_capture(av, 4, buf, sizeof(buf));
+        CHECK(rc == 0, "`netlab pod join flinstone` ok");
+        CHECK(strstr(buf, "identity preserved") != NULL, "join preserves identity");
+    }
+    {
+        char *av[] = { "netlab", "pod", "members" };
+        rc = run_capture(av, 3, buf, sizeof(buf));
+        CHECK(strstr(buf, "jenny") != NULL && strstr(buf, "(host)") != NULL,
+              "members lists the host");
+    }
+
+    /* reverse shell: netlab <cmd> runs as the mock victim; netlab end closes */
+    {
+        char *av[] = { "netlab", "rs", "bob" };
+        rc = run_capture(av, 3, buf, sizeof(buf));
+        CHECK(rc == 0, "`netlab rs bob` opens a reverse shell");
+        CHECK(strstr(buf, "SIMULATED") != NULL, "rs marks the victim simulated");
+    }
+    {
+        char *av[] = { "netlab", "whoami" };
+        rc = run_capture(av, 2, buf, sizeof(buf));
+        CHECK(rc == 0 && strstr(buf, "bob") != NULL,
+              "`netlab whoami` returns the victim's mock name while RS open");
+    }
+    {
+        char *av[] = { "netlab", "hostname" };
+        run_capture(av, 2, buf, sizeof(buf));
+        CHECK(strstr(buf, "bob-box") != NULL, "`netlab hostname` returns victim hostname");
+    }
+    {
+        char *av[] = { "netlab", "end" };
+        rc = run_capture(av, 2, buf, sizeof(buf));
+        CHECK(rc == 0 && strstr(buf, "closed") != NULL, "`netlab end` closes the RS");
+    }
+    {
+        char *av[] = { "netlab", "whoami" };
+        CHECK(run_capture(av, 2, buf, sizeof(buf)) != 0,
+              "`netlab whoami` is unknown once the RS is closed");
+    }
+    {
+        char *av[] = { "netlab", "pod", "leave", "jenny" };
+        rc = run_capture(av, 4, buf, sizeof(buf));
+        CHECK(rc == 0 && strstr(buf, "new host is flinstone") != NULL,
+              "host succession when the host leaves");
+    }
+
     /* 3. traceroute over the simulated topology */
     {
         char *av[] = { "netlab", "traceroute", "redteam-lab", "bob" };
