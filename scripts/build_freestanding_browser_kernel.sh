@@ -28,12 +28,19 @@ do
 done
 ld -m elf_x86_64 -nostdlib -T "${root}/kernel/freestanding/x86_64/linker.ld" "${objects[@]}" -o "${build}/kernel.elf"
 objcopy -O binary "${build}/kernel.elf" "${build}/kernel.bin"
+# Chunked BIOS load (see boot.asm): the MBR reads the payload in <=127-sector
+# pieces, advancing the destination segment each time, so it is no longer a
+# single-transfer loader. The ceiling here is not that mechanism's limit; it
+# keeps the loaded payload's end address (0x10000 + sectors*512) safely below
+# 0xa0000, the start of VGA memory and the universal top of real-mode
+# conventional memory, with 128 sectors of margin to spare (1024 sectors =
+# 512 KiB payload ends at 0x90000; the boundary itself is at 1152 sectors).
 sectors=$(( ($(stat -c%s "${build}/kernel.bin") + 511) / 512 ))
-(( sectors > 0 && sectors <= 127 )) || { echo "payload is outside one bounded BIOS transfer: ${sectors} sectors" >&2; exit 1; }
+(( sectors > 0 && sectors <= 1024 )) || { echo "payload is outside the chunked BIOS load budget (max 1024 sectors / 512 KiB): ${sectors} sectors" >&2; exit 1; }
 python3 - "${build}/boot.bin" "$sectors" <<'PY'
 import pathlib, struct, sys
 p = pathlib.Path(sys.argv[1]); data = bytearray(p.read_bytes())
-needle = bytes((0x10, 0, 0, 0, 0, 0, 0, 0x10))
+needle = bytes((0xef, 0xbe, 0, 0, 0x0d, 0xf0))
 off = data.index(needle) + 2
 data[off:off+2] = struct.pack('<H', int(sys.argv[2]))
 p.write_bytes(data)
