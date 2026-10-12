@@ -375,6 +375,7 @@ gen-session-wire-js:
 test-browser-lab: gen-session-wire-js
 	@node ./tests/test_browser_lab.js
 	@node ./tests/test_netlab_lab_core.js
+	@node ./tests/test_browser_lab_utf8.js
 	@node ./tests/test_server_relay.js
 	@node ./tests/test_server_relay_client.js
 	@node ./tests/test_lab_relay_room.js

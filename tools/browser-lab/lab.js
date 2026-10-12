@@ -466,8 +466,16 @@
       sessions = { 1: "flinstone" };
       extraUsers = [];
       renderSessions();
+      // The guest streams raw bytes one at a time, including multi-byte
+      // UTF-8 sequences (e.g. an em dash is 3 bytes). String.fromCharCode
+      // on each raw byte mangles those into mojibake; a streaming
+      // TextDecoder buffers an incomplete sequence across calls and only
+      // yields a character once it is complete, with no added delay for
+      // the ASCII bytes that make up most guest output.
+      const serialDecoder = new TextDecoder("utf-8", { fatal: false });
       emulator = await config.createEmulator({ ...settings, serialByte: byte => {
-        const ch = String.fromCharCode(byte);
+        const ch = serialDecoder.decode(new Uint8Array([byte]), { stream: true });
+        if (!ch) { settings.serialByte(byte); return; }
         serial.textContent = (serial.textContent + ch).slice(-65536);
         noteSerialChar(ch);
         if (ch === "\n") {
