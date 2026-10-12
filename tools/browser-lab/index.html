@@ -47,24 +47,67 @@
           </section>
           <section class="netlab-panel glass-card" aria-label="MitM and reverse-shell teaching lab">
             <h2>MitM + RS lab</h2>
-            <p>Drives <code>netlab</code> in the shell — no typing needed. Everything is
-            a simulation on fabricated hosts. <strong>Start demo</strong> isolates the lab and
-            drops the real network (the chat relay); <strong>Stop demo</strong> restores it.</p>
+            <p>Drives <code>netlab</code> in the shell — no typing needed. Everything below runs
+            against fabricated hosts and a mock victim; nothing here touches a real network or
+            another visitor's session. <code>netlab help</code> in the terminal lists every verb.</p>
             <p id="netmode-status" data-mode="live">Live — real network available</p>
-            <label>Pod
+
+            <h3>Network segment</h3>
+            <p class="netlab-sub">Picks which fabricated network the recon and MitM buttons below act on.</p>
+            <label>Segment
               <select id="netlab-pod">
                 <option value="redteam-lab">redteam-lab</option>
                 <option value="blueteam-lab">blueteam-lab</option>
               </select>
             </label>
             <div class="netlab-actions">
-              <button id="netlab-start" type="button" disabled>Start demo (isolate)</button>
               <button id="netlab-hosts" type="button" disabled>Hosts</button>
+              <button id="netlab-scan" type="button" disabled>Scan (MACs)</button>
+              <button id="netlab-wpa" type="button" disabled>WPA info</button>
               <button id="netlab-topology" type="button" disabled>Topology</button>
               <button id="netlab-arpdemo" type="button" disabled>ARP-spoof demo</button>
               <button id="netlab-capture" type="button" disabled>Capture + analyze</button>
-              <button id="netlab-defend" type="button" disabled>Defend</button>
+            </div>
+
+            <h3>Pod (private group)</h3>
+            <p class="netlab-sub">A pod is a private, named group for one MitM + RS exercise. Each
+            member keeps their own identity; the creator is the host, and the next member becomes
+            host if they leave.</p>
+            <label>Pod name
+              <input id="netlab-session-pod" type="text" value="redcell" autocomplete="off" spellcheck="false">
+            </label>
+            <label>Your name
+              <input id="netlab-your-name" type="text" value="flinstone" autocomplete="off" spellcheck="false">
+            </label>
+            <div class="netlab-actions">
+              <button id="netlab-pod-create" type="button" disabled>Create pod (become host)</button>
+              <button id="netlab-pod-join" type="button" disabled>Join pod</button>
+              <button id="netlab-pod-members" type="button" disabled>Members</button>
+              <button id="netlab-pod-leave" type="button" disabled>Leave pod</button>
+            </div>
+
+            <h3>Reverse shell (simulated)</h3>
+            <p class="netlab-sub">Opens a <strong>simulated</strong> reverse shell to a mock victim.
+            While open, <code>netlab &lt;cmd&gt;</code> in the terminal runs as that victim (e.g.
+            <code>netlab whoami</code> returns the victim's name); your own <code>whoami</code> is
+            unchanged. Opening it isolates the lab from the real network, the same as Start demo
+            below; closing it restores the network.</p>
+            <label>Mock victim
+              <input id="netlab-victim" type="text" value="bob" autocomplete="off" spellcheck="false">
+            </label>
+            <div class="netlab-actions">
+              <button id="netlab-rs-open" type="button" disabled>Open reverse shell</button>
+              <button id="netlab-rs-end" type="button" disabled>Close reverse shell</button>
+              <button id="netlab-status" type="button" disabled>Status</button>
+            </div>
+
+            <h3>Network isolation &amp; reference</h3>
+            <div class="netlab-actions">
+              <button id="netlab-start" type="button" disabled>Start demo (isolate)</button>
               <button id="netlab-stop" type="button" disabled>Stop demo (resume real net)</button>
+              <button id="netlab-consent" type="button" disabled>Consent / boundary</button>
+              <button id="netlab-rsexplain" type="button" disabled>RS mechanics</button>
+              <button id="netlab-defend" type="button" disabled>Defend</button>
             </div>
           </section>
           <section class="accounts glass-card" aria-label="Users and sessions">

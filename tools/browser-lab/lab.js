@@ -43,8 +43,12 @@
     if (cmd) cmd.disabled = !ready;
     if (run) run.disabled = !ready;
     for (const id of ["account-login", "account-new-session", "account-register",
-                      "netlab-pod", "netlab-start", "netlab-hosts", "netlab-topology",
-                      "netlab-arpdemo", "netlab-capture", "netlab-defend", "netlab-stop"]) {
+                      "netlab-pod", "netlab-start", "netlab-hosts", "netlab-scan", "netlab-wpa",
+                      "netlab-topology", "netlab-arpdemo", "netlab-capture", "netlab-defend",
+                      "netlab-stop", "netlab-session-pod", "netlab-your-name",
+                      "netlab-pod-create", "netlab-pod-join", "netlab-pod-members",
+                      "netlab-pod-leave", "netlab-victim", "netlab-rs-open", "netlab-rs-end",
+                      "netlab-status", "netlab-consent", "netlab-rsexplain"]) {
       const node = document.getElementById(id);
       if (node) node.disabled = !ready;
     }
@@ -616,19 +620,56 @@
     const sel = document.getElementById("netlab-pod");
     return (sel && sel.value) || "redteam-lab";
   }
+  // Reads a text field, trims it, and keeps only its first whitespace-
+  // delimited token (names/pods/victims are single shell words), falling
+  // back to a sane default so a blank field never sends a bare command.
+  function netlabToken(id, fallback) {
+    const el = document.getElementById(id);
+    const first = (el && el.value || "").trim().split(/\s+/)[0];
+    return first || fallback;
+  }
   function wireNetlab(id, build) {
     document.getElementById(id)?.addEventListener("click", () => {
       void sendGuestLines(`${build(netlabPod())}\n`);
       screen.focus();
     });
   }
-  wireNetlab("netlab-start", () => "netlab start");
+  // Like wireNetlab, but the command doesn't depend on the segment selector.
+  function wireNetlabPlain(id, build) {
+    document.getElementById(id)?.addEventListener("click", () => {
+      void sendGuestLines(`${build()}\n`);
+      screen.focus();
+    });
+  }
+
+  // Network segment: recon + MitM on the fabricated hosts.
   wireNetlab("netlab-hosts", pod => `netlab hosts ${pod}`);
+  wireNetlab("netlab-scan", pod => `netlab scan ${pod}`);
+  wireNetlab("netlab-wpa", pod => `netlab wpa ${pod}`);
   wireNetlab("netlab-topology", pod => `netlab topology ${pod}`);
   wireNetlab("netlab-arpdemo", pod => `netlab arp-demo ${pod}`);
   wireNetlab("netlab-capture", pod => `netlab capture ${pod}`);
-  wireNetlab("netlab-defend", () => "netlab defend");
-  wireNetlab("netlab-stop", () => "netlab stop");
+
+  // Pod (private group): membership and host succession.
+  wireNetlabPlain("netlab-pod-create", () =>
+    `netlab pod create ${netlabToken("netlab-session-pod", "redcell")} ${netlabToken("netlab-your-name", "flinstone")}`);
+  wireNetlabPlain("netlab-pod-join", () =>
+    `netlab pod join ${netlabToken("netlab-your-name", "flinstone")}`);
+  wireNetlabPlain("netlab-pod-members", () => "netlab pod members");
+  wireNetlabPlain("netlab-pod-leave", () =>
+    `netlab pod leave ${netlabToken("netlab-your-name", "flinstone")}`);
+
+  // Reverse shell (simulated): open/close against a named mock victim.
+  wireNetlabPlain("netlab-rs-open", () => `netlab rs ${netlabToken("netlab-victim", "bob")}`);
+  wireNetlabPlain("netlab-rs-end", () => "netlab end");
+  wireNetlabPlain("netlab-status", () => "netlab status");
+
+  // Network isolation and reference text.
+  wireNetlabPlain("netlab-start", () => "netlab start");
+  wireNetlabPlain("netlab-stop", () => "netlab stop");
+  wireNetlabPlain("netlab-consent", () => "netlab consent");
+  wireNetlabPlain("netlab-rsexplain", () => "netlab rs-explain");
+  wireNetlabPlain("netlab-defend", () => "netlab defend");
 
   const form = document.getElementById("switch-user");
   if (form) {
