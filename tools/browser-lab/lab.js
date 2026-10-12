@@ -220,7 +220,11 @@
         try {
           if (!relay.connected) renderRelayStatus("Connecting…");
           await relay.connect(principal());
-          if (relay.connected)
+          if (labIsolated) {
+            // Isolation began mid-connect: drop the relay we just opened.
+            relay.leave();
+            renderRelayStatus("Lab-isolated — real network dropped");
+          } else if (relay.connected)
             renderRelayStatus(`Connected as ${relay.display} (#${relay.memberId})`);
         } catch (error) {
           renderRelayStatus(error.message || "Connection failed");
@@ -326,6 +330,13 @@
         renderRelayStatus("Disconnected");
         renderRoster([]);
         appendChat("[relay] leave");
+        return;
+      }
+      // While lab-isolated the relay stays down: reconnecting here would bypass
+      // the isolation boundary the guest enforces.
+      if (labIsolated && (event.op === "host" || event.op === "join" ||
+                          event.op === "msg" || event.op === "announce")) {
+        renderRelayStatus("Lab-isolated — real network dropped");
         return;
       }
       if (event.op === "host" || event.op === "join") {

@@ -40,6 +40,7 @@ static int s_lab_netmode; /* 0 live/real, 1 lab-isolated */
 #define NL_MAXMEM  FL_FS_MAX_SESSIONS /* one pod seat per real session */
 static char s_nl_pod[NL_NAMELEN];
 static int  s_nl_members[NL_MAXMEM];  /* real session numbers, join order    */
+static char s_nl_member_acct[NL_MAXMEM][NL_NAMELEN]; /* account held at join  */
 static int  s_nl_memcount;
 static int  s_nl_hostidx;             /* index into s_nl_members, -1=pending */
 
@@ -781,6 +782,7 @@ static int run_net(const char *verb, const char **cursor)
 /* netlab helpers defined further below; run_server reacts to server lifecycle. */
 static void nl_pick_host(void);
 static void nl_pod_dissolve(void);
+static void nl_reconcile_accounts(void);
 static void nl_display_name(int session, char *out, unsigned cap);
 static int  nl_session_idx(int session);
 
@@ -1061,6 +1063,47 @@ static void nl_pod_dissolve(void)
         nl_set_mode(0);
 }
 
+/* A pod seat belongs to the account that joined it. If a session's current
+ * account differs from the one captured at join (logout/login/switchuser), that
+ * person has left: vacate the seat and tear down anything they owned, so the
+ * replacement account inherits no membership, listener, or binding authority.
+ * Runs over every seat on each netlab command, so one session's command
+ * reconciles seats abandoned by any session. */
+static void nl_reconcile_accounts(void)
+{
+    int i = 0;
+    while (i < s_nl_memcount) {
+        int sess = s_nl_members[i];
+        int j;
+        if (str_eq(s_nl_member_acct[i], fl_fs_identity_user(sess))) {
+            ++i;
+            continue;
+        }
+        if (sess == s_nl_atk_session || sess == s_nl_victim_session) {
+            s_nl_atk_session = -1;
+            s_nl_victim_session = -1;
+            nl_sb_reset();
+            if (s_lab_netmode)
+                nl_set_mode(0);
+        }
+        if (sess == s_nl_listen_session)
+            s_nl_listen_session = -1;
+        for (j = i; j < s_nl_memcount - 1; ++j) {
+            s_nl_members[j] = s_nl_members[j + 1];
+            str_copy(s_nl_member_acct[j], s_nl_member_acct[j + 1], NL_NAMELEN);
+        }
+        s_nl_memcount--;
+        if (s_nl_memcount == 0) {
+            s_nl_pod[0] = 0;
+            s_nl_hostidx = -1;
+            s_nl_listen_session = -1;
+            return;
+        }
+        nl_pick_host();
+        /* do not advance i: the next seat shifted into slot i */
+    }
+}
+
 static int nl_sb_find(const char *name)
 {
     int i;
@@ -1162,6 +1205,9 @@ static int run_netlab(int session, const char *verb, const char **cursor)
     if (!str_eq(verb, "netlab"))
         return 0;
 
+    /* Drop any seat whose account changed since joining (logout/switchuser). */
+    nl_reconcile_accounts();
+
     if (!take_word(cursor, sub, sizeof(sub))) {
         nl_usage();
         return 1;
@@ -1234,6 +1280,10 @@ static int run_netlab(int session, const char *verb, const char **cursor)
         return 1;
     }
     if (str_eq(sub, "stop")) {
+        if (s_nl_atk_session >= 0) {
+            emit("netlab: a reverse-shell binding is open; `netlab end` it first.\r\n");
+            return 1;
+        }
         nl_set_mode(0);
         return 1;
     }
@@ -1247,8 +1297,15 @@ static int run_netlab(int session, const char *verb, const char **cursor)
                 emit("usage: netlab pod create <pod>\r\n");
                 return 1;
             }
+            if (s_nl_pod[0]) {
+                emit("netlab: pod '");
+                emit(s_nl_pod);
+                emit("' already exists; `netlab pod leave` first.\r\n");
+                return 1;
+            }
             str_copy(s_nl_pod, pod, NL_NAMELEN);
             s_nl_memcount = 0;
+            str_copy(s_nl_member_acct[s_nl_memcount], fl_fs_identity_user(session), NL_NAMELEN);
             s_nl_members[s_nl_memcount++] = session;
             nl_pick_host();
             emit("netlab: pod '");
@@ -1280,6 +1337,7 @@ static int run_netlab(int session, const char *verb, const char **cursor)
                 emit("netlab: pod is full.\r\n");
                 return 1;
             }
+            str_copy(s_nl_member_acct[s_nl_memcount], fl_fs_identity_user(session), NL_NAMELEN);
             s_nl_members[s_nl_memcount++] = session;
             nl_pick_host();
             {
@@ -1348,8 +1406,10 @@ static int run_netlab(int session, const char *verb, const char **cursor)
             }
             was_host = ((int)idx == s_nl_hostidx);
             nl_display_name(session, dn, sizeof(dn));
-            for (j = idx; j < s_nl_memcount - 1; ++j)
+            for (j = idx; j < s_nl_memcount - 1; ++j) {
                 s_nl_members[j] = s_nl_members[j + 1];
+                str_copy(s_nl_member_acct[j], s_nl_member_acct[j + 1], NL_NAMELEN);
+            }
             s_nl_memcount--;
             if (s_nl_memcount == 0) {
                 emit("netlab: "); emit(dn); emit(" left; pod dissolved.\r\n");

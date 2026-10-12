@@ -72,22 +72,31 @@ function decodeByteStream(bytes) {
 // not a bare String.fromCharCode(byte) on the raw byte.
 const root = path.join(__dirname, "..");
 
+// Strip // line comments and /* */ block comments so the structural checks
+// below test executable code, not the explanatory comments that spell the
+// broken pattern out on purpose.
+function stripComments(src) {
+  return src.replace(/\/\*[\s\S]*?\*\//g, "").replace(/\/\/[^\n]*/g, "");
+}
+
 {
   const src = fs.readFileSync(path.join(root, "tools/browser-lab/wasm-adapter.js"), "utf8");
-  assert.ok(/new TextDecoder\(/.test(src),
+  const code = stripComments(src);
+  assert.ok(/new TextDecoder\(/.test(code),
     "wasm-adapter.js must decode onShellChar's byte stream with a TextDecoder");
-  assert.ok(/stream:\s*true/.test(src),
+  assert.ok(/stream:\s*true/.test(code),
     "wasm-adapter.js's decoder must use { stream: true } so multi-byte sequences buffer across calls");
-  assert.ok(!/const ch = String\.fromCharCode\(code\);/.test(src),
-    "wasm-adapter.js must not go back to decoding each raw onShellChar byte with String.fromCharCode");
+  assert.ok(!/String\.fromCharCode\s*\(\s*(code|byte|b)\s*\)/.test(code),
+    "wasm-adapter.js must not go back to decoding each raw onShellChar byte with String.fromCharCode (any single-byte var)");
 }
 
 {
   const src = fs.readFileSync(path.join(root, "tools/browser-lab/lab.js"), "utf8");
-  assert.ok(/new TextDecoder\(/.test(src),
+  const code = stripComments(src);
+  assert.ok(/new TextDecoder\(/.test(code),
     "lab.js must decode the emulator's serialByte stream with a TextDecoder");
-  assert.ok(!/const ch = String\.fromCharCode\(byte\);/.test(src),
-    "lab.js must not go back to decoding each raw serialByte with String.fromCharCode");
+  assert.ok(!/String\.fromCharCode\s*\(\s*(byte|code|b)\s*\)/.test(code),
+    "lab.js must not go back to decoding each raw serialByte with String.fromCharCode (any single-byte var)");
 }
 
 console.log("test_browser_lab_utf8: PASS");

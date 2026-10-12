@@ -767,13 +767,17 @@ static int nl_member_idx(const char *name) {
     return -1;
 }
 
-/* Reassign the pod host: first member (join order) that is not currently
- * hosting the real `server` session. Leaves s_hostidx at -1 ("pending") if
- * every member is that real host. */
+/* Reassign the pod host: first member (join order) that is not the account
+ * hosting the real `server` session. The server host is the account captured
+ * when hosting began (cmd_server_host_user()), not the live process identity,
+ * so a later `switchuser`/login cannot let the real server host slip into the
+ * pod host role. Leaves s_hostidx at -1 ("pending") if every member is that
+ * real host. */
 static void nl_pick_host(void) {
+    const char *shost = cmd_server_is_running() ? cmd_server_host_user() : "";
     s_hostidx = -1;
     for (int i = 0; i < s_memcount; i++) {
-        if (cmd_server_is_running() && !strcmp(s_members[i], fl_session_current_user()))
+        if (shost[0] && !strcmp(s_members[i], shost))
             continue;
         s_hostidx = i;
         break;
@@ -898,6 +902,10 @@ static int verb_pod(int argc, char **argv) {
     if (!strcmp(sub, "create")) {
         const char *me = fl_session_current_user();
         if (argc < 4) { fprintf(stderr, "usage: netlab pod create <pod>\n"); return 1; }
+        if (s_pod[0]) {
+            fprintf(stderr, "netlab: pod '%s' already exists; `netlab pod leave` first.\n", s_pod);
+            return 1;
+        }
         nl_cpy(s_pod, argv[3], NL_NAMELEN);
         s_memcount = 0;
         nl_cpy(s_members[s_memcount++], me, NL_NAMELEN);
@@ -928,9 +936,9 @@ static int verb_pod(int argc, char **argv) {
         if (!s_pod[0]) { printf("netlab: no pod. `netlab pod create <pod>`.\n"); return 0; }
         printf("pod %s members (%d):\n", s_pod, s_memcount);
         for (int i = 0; i < s_memcount; i++) {
+            const char *shost = cmd_server_is_running() ? cmd_server_host_user() : "";
             printf("  %s%s%s\n", s_members[i], i == s_hostidx ? "  (host)" : "",
-                   (cmd_server_is_running() && !strcmp(s_members[i], fl_session_current_user()))
-                       ? "  (real server host)" : "");
+                   (shost[0] && !strcmp(s_members[i], shost)) ? "  (real server host)" : "");
         }
         return 0;
     }
@@ -1008,6 +1016,15 @@ static int verb_accept(void) {
     if (!s_listen_name[0]) { fprintf(stderr, "netlab: no open listener in this pod. Someone runs `netlab listen` first.\n"); return 1; }
     if (!strcmp(s_listen_name, me)) { fprintf(stderr, "netlab: you cannot accept your own listener.\n"); return 1; }
     if (s_atk_name[0]) { fprintf(stderr, "netlab: already bound; `netlab end` it first.\n"); return 1; }
+    /* A binding isolates the real network, but this process's own server
+     * background threads (hosting or joined) would keep relaying. Refuse to
+     * bind while either is live so the isolation guarantee actually holds;
+     * tear the real server down first. */
+    if (cmd_server_is_running() || cmd_server_is_connected()) {
+        fprintf(stderr, "netlab: this process is on the real server (`server kill`/`leave` first)\n");
+        fprintf(stderr, "  so the binding can isolate the network.\n");
+        return 1;
+    }
     /* "when we switch to lab network": re-resolve the pod host here, the
      * real isolation moment, since the real server host may have changed
      * since the pod was created or last joined. */

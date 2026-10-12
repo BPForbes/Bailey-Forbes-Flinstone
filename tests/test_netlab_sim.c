@@ -25,15 +25,24 @@
  * we exercise two distinct participants on the hosted single-identity model.
  */
 static char g_test_user[64] = "flinstone";
-static int  g_test_server_running = 0;
+static char g_test_server_host[64] = "";   /* account hosting the server; "" = none */
 
 void        fl_session_init(void) {}
 const char *fl_session_current_user(void) { return g_test_user; }
-int         cmd_server_is_running(void) { return g_test_server_running; }
+int         cmd_server_is_running(void) { return g_test_server_host[0] != '\0'; }
+int         cmd_server_is_connected(void) { return 0; }
+const char *cmd_server_host_user(void) { return g_test_server_host; }
 
 static void as_user(const char *u) {
     strncpy(g_test_user, u, sizeof(g_test_user) - 1);
     g_test_user[sizeof(g_test_user) - 1] = '\0';
+}
+
+/* Model `server host`/`kill`: record the account that owns the running server
+ * (the real cmd_server.c captures this via set_server_running). "" clears it. */
+static void set_server_host(const char *u) {
+    strncpy(g_test_server_host, u, sizeof(g_test_server_host) - 1);
+    g_test_server_host[sizeof(g_test_server_host) - 1] = '\0';
 }
 
 static int failures = 0;
@@ -142,7 +151,7 @@ int main(void) {
     /* pods: real-account membership, host-collision avoidance, succession.
      * Membership is keyed on fl_session_current_user() (stubbed above), never
      * on a free-typed name argument. */
-    g_test_server_running = 0;
+    set_server_host("");
     as_user("flinstone");
     {
         char *av[] = { "netlab", "pod", "create", "redcell" };
@@ -178,14 +187,14 @@ int main(void) {
     }
     {
         char *av[] = { "netlab", "pod", "create", "redcell" };
-        g_test_server_running = 1;   /* flinstone is now the real server host */
+        set_server_host("flinstone");   /* flinstone is now the real server host */
         as_user("flinstone");
         rc = run_capture(av, 4, buf, sizeof(buf));
         CHECK(rc == 0, "`netlab pod create` ok while hosting server");
         CHECK(strstr(buf, "host pending") != NULL,
               "server host does not also become the pod host (host pending)");
     }
-    g_test_server_running = 0;
+    set_server_host("");
 
     /* Reverse shell: listener = attacker, acceptor = victim. The attacker's
      * `netlab <cmd>` runs against a disposable sandbox labeled for the victim,
@@ -275,26 +284,32 @@ int main(void) {
         char *create[]  = { "netlab", "pod", "create", "redcell" };
         char *join[]    = { "netlab", "pod", "join" };
         char *members[] = { "netlab", "pod", "members" };
-        g_test_server_running = 0;
+        set_server_host("");
         as_user("flinstone");
         run_capture(create, 4, buf, sizeof(buf));   /* flinstone: pod host     */
 
         /* `server host`: flinstone (sole member) becomes the server host, which
          * is a separate relay point, so the pod host must move off flinstone --
          * with no other member it goes pending. */
-        g_test_server_running = 1;
+        set_server_host("flinstone");
         cmd_netlab_on_server_host();
         run_capture(members, 3, buf, sizeof(buf));
         CHECK(strstr(buf, "flinstone  (host)") == NULL,
               "becoming the server host drops the pod host off that identity");
 
+        /* root joins while flinstone is the server host. Election must exclude
+         * flinstone (the captured server-host account) even though the current
+         * identity is now root -- so root takes the pod host. */
         as_user("root");
-        run_capture(join, 3, buf, sizeof(buf));     /* root joins              */
+        run_capture(join, 3, buf, sizeof(buf));
+        run_capture(members, 3, buf, sizeof(buf));
+        CHECK(strstr(buf, "root  (host)") != NULL,
+              "server host account is excluded from pod host regardless of current identity");
 
         /* `server leave` by the host: the real verb_leave sets the server flag
          * off before calling the hook, so mirror that. Pod election then re-runs
          * and the first member by join order holds the host. */
-        g_test_server_running = 0;
+        set_server_host("");
         cmd_netlab_on_server_leave();
         run_capture(members, 3, buf, sizeof(buf));
         CHECK(strstr(buf, "(host)") != NULL, "server leave re-elects a valid pod host");

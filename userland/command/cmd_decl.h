@@ -64,6 +64,8 @@ int cmd_ping6_batch_tokens_count(int argc, char **argv, int i);
 int cmd_check_run(int argc, char **argv);
 int cmd_server_run(int argc, char **argv);
 int cmd_server_is_running(void);
+int cmd_server_is_connected(void);
+const char *cmd_server_host_user(void);
 int cmd_udpsend_run(int argc, char **argv);
 int cmd_udplisten_run(int argc, char **argv);
 int cmd_arp_run(int argc, char **argv);
