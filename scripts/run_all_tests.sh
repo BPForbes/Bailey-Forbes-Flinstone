@@ -120,6 +120,9 @@ else
   run_make "test_p3_net_tools" test_p3_net_tools
 fi
 
+# netlab teaching lab is network-free; always run it.
+run_make "test_netlab_sim" test_netlab_sim
+
 if [[ "$QUIET" == "1" ]]; then
   run_make "test_wifi (quiet bundle)" TEST_QUIET=1 test_wifi
 else

@@ -654,7 +654,7 @@ else
 WIFI_TEST_LINK_PRE =
 WIFI_TEST_LINK_AT =
 endif
-.PHONY: test_mem_asm test_alloc test_priority_queue test_shell_ctrl_c test_drivers test_core test_invariants test_audit_log test_p3_network test_p3_udp_cmds test_p3_net_tools test_vm_layer_warning check-layers check-network-requirements test_all test_all-quiet run_cunit_tests
+.PHONY: test_mem_asm test_alloc test_priority_queue test_shell_ctrl_c test_drivers test_core test_invariants test_audit_log test_p3_network test_p3_udp_cmds test_p3_net_tools test_netlab_sim test_vm_layer_warning check-layers check-network-requirements test_all test_all-quiet run_cunit_tests
 test_mem_asm: $(MEM_ASM_OBJ)
 	$(CC) $(CFLAGS) $(TEST_SANITIZE) -I. -o tests/test_mem_asm tests/test_mem_asm.c $(MEM_ASM_OBJ)
 	./tests/test_mem_asm
@@ -1175,6 +1175,16 @@ test_p3_net_tools: $(NET_ASM_OBJ) $(MEM_ASM_OBJ) $(NET_TEST_MM_OBJS) $(NET_TEST_
 	  $(NET_TEST_EXTRA_OBJS) $(NET_TEST_LIBS) -pthread -Wl,-z,noexecstack
 	./tests/test_p3_net_tools
 
+# netlab teaching lab (cmd_netlab.c) — pure in-memory simulation + pcap
+# round trip. No network, no asm, no kernel objects: just the command and the
+# registry, so it runs anywhere the toolchain does.
+.PHONY: test_netlab_sim
+test_netlab_sim:
+	$(CC) $(CFLAGS) $(TEST_SANITIZE) -o tests/test_netlab_sim \
+	  tests/test_netlab_sim.c userland/command/cmd_netlab.c \
+	  userland/command/cmd_registry.c -Wl,-z,noexecstack
+	./tests/test_netlab_sim
+
 # Cross-subnet (multi-network) end-to-end demo + tcpdump capture on the
 # router namespace. Requires sudo, iproute2, tcpdump, tmux, and (optional)
 # the `scapy` Python package for the per-frame decode artifact.
@@ -1255,7 +1265,7 @@ clean:
 	rm -f kernel/arch/*/drivers/*.o kernel/arch/*/hal/*.o kernel/drivers/*.o kernel/drivers/block/*.o VM/devices/*.o
 	rm -f arch/*/*/*.o arch/*/*/alloc/*.o
 	rm -f tests/test_mem_asm tests/test_alloc tests/test_priority_queue tests/test_drivers tests/test_vm_mem tests/test_replay tests/test_invariants tests/test_userspace_connection tests/test_vm_syscall_bridge tests/test_vm_arch_readiness
-	rm -f tests/test_p3_network tests/test_p3_server tests/test_p3_server_lan tests/test_p3_udp_cmds tests/test_p3_net_tools tests/test_wifi_flinstone_helper tests/test_wifi_flinstone_linux_helper tests/test_p3_wifi tests/test_p3_wifi_ota tests/test_wifi_mgmt_ota tests/test_wifi_connect_ota tests/test_wifi_coprocessor tests/test_wifi_uart_at_scan_join tests/test_wifi_fullmac_probe tests/test_wifi_80211ax_mock_279 tests/test_wifi_ax_server_ota
+	rm -f tests/test_p3_network tests/test_p3_server tests/test_p3_server_lan tests/test_p3_udp_cmds tests/test_p3_net_tools tests/test_netlab_sim tests/test_wifi_flinstone_helper tests/test_wifi_flinstone_linux_helper tests/test_p3_wifi tests/test_p3_wifi_ota tests/test_wifi_mgmt_ota tests/test_wifi_connect_ota tests/test_wifi_coprocessor tests/test_wifi_uart_at_scan_join tests/test_wifi_fullmac_probe tests/test_wifi_80211ax_mock_279 tests/test_wifi_ax_server_ota
 	rm -f tests/test_batch_argv_issue220 tests/test_threadpool_issue222 tests/test_disk_hex_issue222
 	rm -rf tests/obj/issue220 tests/obj/issue222
 	find . -name '*.o' -type f ! -path './deps/*' ! -path './.git/*' -exec rm -f {} +

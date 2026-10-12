@@ -73,7 +73,9 @@ int cmd_nslookup_run(int argc, char **argv);
 int cmd_resolve_run(int argc, char **argv);
 int cmd_netsh_run(int argc, char **argv);
 int cmd_wifi_run(int argc, char **argv);
+int cmd_netlab_run(int argc, char **argv);
 int cmd_wifi_batch_tokens_count(int argc, char **argv, int i);
+int cmd_netlab_batch_tokens_count(int argc, char **argv, int i);
 
 /*
  * Batch argv token counts (see cmd_batch.h).

@@ -1,0 +1,6 @@
+MAJOR_VERSION=5
+STANDARD_VERSION=2
+RELEASE_VERSION=0
+DESCRIPTION=Add `netlab`, a self-contained network-security teaching lab exposed as a userland shell command (userland/command/cmd_netlab.c): simulated "pods" of fabricated hosts (SSID/IP/MAC/role), ASCII topology, a simulated traceroute and frame-monitor, an ARP-spoof/MiTM walkthrough, a reverse-shell explainer, a classic libpcap writer that serializes the simulated frame script, and a defensive pcap analyzer that parses a real capture and flags duplicate IP->MAC bindings as an ARP-spoofing signature. The module is deliberately incapable of live-attack behavior: it is libc-only, opens no sockets, reads no real interface, intercepts no one else's traffic, injects into no one else's terminal, and forges no real capture; it teaches the concepts and the detection/prevention half of the source material instead. Wiring: FL_SCMD_NETLAB in fl_shell_cmd.h, registry/dispatch/batch-dispatch entries, cmd_decl.h declarations, a help block in userland/shell/common.c, a libc-only unit test (tests/test_netlab_sim.c) covering the verbs and the simulated->pcap->analyze round trip, and a `make test_netlab_sim` target wired into test_all via scripts/run_all_tests.sh. Docs in docs/NETLAB.md.
+
+RELEASE_DATE=2026-10-12
