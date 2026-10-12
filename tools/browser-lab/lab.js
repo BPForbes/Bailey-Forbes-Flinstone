@@ -101,6 +101,22 @@
     if (sess) sess.textContent = `${activeSession}/${count}`;
     if (st) st.textContent = state || document.getElementById("status")?.textContent || "…";
   }
+  // The MitM + RS panel drives netlab, which only the security build compiles
+  // in. Show it only when this build's manifest says so; a lab-free build would
+  // otherwise offer buttons that answer "unknown command".
+  function applySecurityPanel(manifest) {
+    const panel = document.querySelector(".netlab-panel");
+    if (!panel) return;
+    panel.hidden = !(manifest && manifest.capabilities && manifest.capabilities.securityLab === true);
+  }
+  // A freshly booted or reset guest starts in live mode. Clear the isolation
+  // flag with the guest, so the relay is not suppressed for a guest that has
+  // no netlab binding.
+  function clearLabIsolation() {
+    if (!labIsolated) return;
+    labIsolated = false;
+    renderNetmode("live");
+  }
   function renderCaps(capabilities) {
     const node = document.getElementById("capabilities");
     if (!node) return;
@@ -568,6 +584,7 @@
     text("emulator", useWasm ? "Emscripten" : info.browserEmulator); text("artifact", useWasm ? "flintstone.wasm" : info.artifact);
     renderRuntimeMode();
     renderCaps(info.capabilities);
+    applySecurityPanel(info);
     renderSessions();
     setupRelay();
     if (!canBoot()) {
@@ -584,6 +601,7 @@
     document.getElementById(id).onclick = async () => {
       if (busy || ((id === "boot" || id === "reset") && !canBoot())) return;
       busy = true;
+      if (id === "boot" || id === "reset" || id === "poweroff") clearLabIsolation();
       try { await action(); } catch (error) {
         if (id === "pause" || id === "resume") {
           const node = document.getElementById("status");
