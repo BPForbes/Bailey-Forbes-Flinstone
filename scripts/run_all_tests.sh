@@ -101,6 +101,7 @@ run_make "test_server_shared_landed_name" test_server_shared_landed_name
 run_make "test_server_shared_purge" test_server_shared_purge
 run_make "test_server_file_accept_path" test_server_file_accept_path
 run_make "test_channel_sidecar" test_channel_sidecar
+run_make "test_macvlan_waitpid" test_macvlan_waitpid
 run_make "server_shared_quarantine_harness (build)" server_shared_quarantine_harness
 run_cmd "server_shared_quarantine_harness (run)" ./tests/server_shared_quarantine_harness
 
