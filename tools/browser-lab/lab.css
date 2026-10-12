@@ -554,6 +554,7 @@ code {
 }
 .netlab-panel button:hover:not(:disabled) { background: rgba(255, 255, 255, 0.12); }
 .netlab-panel button:disabled { opacity: 0.5; cursor: not-allowed; }
+.netlab-panel[hidden] { display: none; }
 #netmode-status {
   display: inline-block;
   padding: 0.15rem 0.5rem;
