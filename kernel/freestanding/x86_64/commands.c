@@ -1771,8 +1771,10 @@ static int run_meta(int session, const char *verb, const char **cursor)
         emit("createdisk format initdisk setdisk printdisk listclusters writecluster delcluster addcluster update import\r\n");
         emit("diskput diskget diskfiles diskmkdir diskdel\r\n");
         emit("ping ping6 check ifconfig arp route netstat nslookup resolve netsh wifi udpsend udplisten\r\n");
+#ifdef FL_SECFEAT
         emit("netlab (pods|hosts|scan|wpa|topology|traceroute|monitor|arp-demo|capture|start|stop|status|defend)\r\n");
         emit("netlab pod create|join|members|host|leave (real account) | listen|accept|end  (`netlab help` for all)\r\n");
+#endif
         emit("server version contracts audit redirect rerun help history his cc clear exit bios\r\n");
         emit("lab analogs: ramfs, cluster disk, lab net, P3 relay. Hosted FAT32/sockets stay on the ELF shell.\r\n");
         return 1;
