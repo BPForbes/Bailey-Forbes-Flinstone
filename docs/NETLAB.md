@@ -9,6 +9,36 @@ that lives only in process memory.
 Source: `userland/command/cmd_netlab.c`. Test: `tests/test_netlab_sim.c`
 (`make test_netlab_sim`, also run by `scripts/run_all_tests.sh`).
 
+## Build flag: `SECFEAT` (off by default)
+
+netlab is a **security feature**, gated behind the `SECFEAT` build flag so it is
+compiled out of the default build entirely. A plain `make` (and therefore `main`
+and the Flinstone project page) ship a shell with **no** security lab; the
+`netlab` command is not registered, dispatched, or listed in help, and
+`cmd_netlab.c` is not even linked. `SECFEAT=1` includes it:
+
+```
+make                         # hosted shell, no security lab (default / main)
+make SECFEAT=1               # hosted shell with netlab
+
+make browser-kernel          # dist/flintstone.img — lab-free (Flinstone page)
+make browser-kernel-secfeat  # dist/flintstone-secfeat.img — netlab in (MitM+RS page)
+make wasm                    # lab-free wasm shell
+SECFEAT=1 make wasm          # wasm shell with netlab
+```
+
+The flag defines `FL_SECFEAT`, which guards the registration/dispatch/batch/help
+call sites in the hosted shell (`cmd_registry.c`, `cmd_dispatch.c`,
+`cmd_batch_dispatch.c`, `cmd_server.c`, `userland/shell/common.c`) and the whole
+netlab region in the freestanding kernel (`kernel/freestanding/x86_64/commands.c`).
+`SECFEAT` is deliberately generic so future security labs can live behind the
+same switch. `make test-freestanding-shell` builds and exercises the SECFEAT
+image; the plain boot gate still validates the lab-free default image.
+
+Portfolio wiring (which embedded kernel each page loads) lives in the portfolio
+repo: the Flinstone page embeds the default image, the MitM+RS page the SECFEAT
+image.
+
 ## Design boundary (why this is safe to ship)
 
 `netlab` is built to be incapable of live-attack behavior, not merely

@@ -1255,7 +1255,9 @@ static int verb_host(int argc, char **argv) {
         pthread_mutex_unlock(&session_mutex);
         /* Became the server host: the pod host is a separate relay point, so
          * re-elect it off this identity (or leave it pending). */
+#ifdef FL_SECFEAT
         cmd_netlab_on_server_host();
+#endif
 
 #if defined(FL_SERVER_UDP_HOSTED)
         server_udp_start(bind_ep.port_host);
@@ -1484,7 +1486,9 @@ static int verb_leave(void) {
         pthread_mutex_unlock(&session_mutex);
         /* Host stepped down: re-elect any netlab pod host independently of the
          * server's own succession (the two may differ). */
+#ifdef FL_SECFEAT
         cmd_netlab_on_server_leave();
+#endif
         wsl_portproxy_teardown_interactive();
         if (new_host == FL_NET_SERVER_MEMBER_ID_NONE) {
             fl_color_success("session terminated (no remaining members)");
@@ -1524,7 +1528,9 @@ static int verb_kill(void) {
     set_server_running(0);
     pthread_mutex_unlock(&session_mutex);
     /* Server torn down by its host: the netlab pods under it are killed too. */
+#ifdef FL_SECFEAT
     cmd_netlab_on_server_kill();
+#endif
     wsl_portproxy_teardown_interactive();
 #if defined(FL_SERVER_UDP_HOSTED)
     server_udp_stop();
@@ -1933,6 +1939,7 @@ int cmd_server_run(int argc, char **argv) {
         return 1;
     }
     if (!strcmp(argv[1], "interfaces")) return verb_interfaces(argc, argv);
+#ifdef FL_SECFEAT
     if (cmd_netlab_is_isolated() &&
         strcmp(argv[1], "kill") != 0 && strcmp(argv[1], "leave") != 0) {
         /* A netlab reverse-shell binding is open: the real network is dropped
@@ -1942,6 +1949,7 @@ int cmd_server_run(int argc, char **argv) {
         fl_color_error("server paused: lab isolated (netlab MitM+RS active) — `netlab end` to resume the real network");
         return 1;
     }
+#endif
     if (!strcmp(argv[1], "netinit"))   return verb_netinit();
     if (!strcmp(argv[1], "host"))      return verb_host(argc, argv);
     if (!strcmp(argv[1], "join"))      return verb_join(argc, argv);

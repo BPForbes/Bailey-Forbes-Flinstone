@@ -202,6 +202,15 @@ CORE_SRCS = kernel/core/vfs/disk.c kernel/core/vfs/fat32_host.c kernel/core/vfs/
             kernel/core/identity/session.c \
             kernel/core/sys/vrt.c kernel/core/sys/ipc.c kernel/core/sys/syscall.c kernel/core/vfs/vfs.c
 COMMAND_SRCS := $(wildcard userland/command/cmd_*.c) userland/command/server_file_expire.c
+# Security-features gate (SECFEAT). Default off: the netlab teaching lab and any
+# future security labs are compiled out entirely, so a plain `make` (and main)
+# ship a shell with no security lab. `make SECFEAT=1` includes them and defines
+# FL_SECFEAT, which gates the registration/dispatch/help call sites.
+ifeq ($(SECFEAT),1)
+CFLAGS += -DFL_SECFEAT
+else
+COMMAND_SRCS := $(filter-out userland/command/cmd_netlab.c,$(COMMAND_SRCS))
+endif
 SHELL_SRCS = userland/shell/common.c userland/shell/util.c userland/shell/shell_tokenize.c userland/shell/history_record.c userland/shell/audit_log.c userland/shell/authz_subsystem.c userland/shell/contract_log_dispatch.c userland/shell/session_sync.c userland/shell/session_login_env.c userland/shell/terminal.c userland/shell/interpreter.c userland/shell/sh.c userland/shell/shell_io.c $(COMMAND_SRCS)
 # GitHub Actions (or explicit opt-in) may generate userland/shell/version_changelog.c; see scripts/gen_version_changelog.c
 ifeq ($(CHANGELOG_CI),1)
@@ -357,6 +366,11 @@ vm-sdl:
 browser-kernel:
 	@./scripts/build_freestanding_browser_kernel.sh
 
+# Security-features variant (netlab teaching lab compiled in). The default
+# browser-kernel image stays lab-free (what main/the Flinstone page ship).
+browser-kernel-secfeat:
+	@SECFEAT=1 ./scripts/build_freestanding_browser_kernel.sh
+
 test-browser-kernel: browser-kernel
 	@./scripts/test_browser_kernel_artifact.sh
 
@@ -366,8 +380,10 @@ test-browser-kernel-gate:
 test-freestanding-entry:
 	@bash ./tests/test_freestanding_entry.sh
 
-test-freestanding-shell: test-browser-kernel
-	@python3 ./scripts/test_freestanding_shell.py
+# The netlab suite needs the SECFEAT image; the plain boot gate (test-browser-kernel)
+# still validates the lab-free default image.
+test-freestanding-shell: test-browser-kernel browser-kernel-secfeat
+	@FL_BROWSER_KERNEL_IMAGE=dist/flintstone-secfeat.img python3 ./scripts/test_freestanding_shell.py
 
 gen-session-wire-js:
 	@python3 ./scripts/gen_session_wire_js.py
@@ -1189,8 +1205,10 @@ test_p3_net_tools: $(NET_ASM_OBJ) $(MEM_ASM_OBJ) $(NET_TEST_MM_OBJS) $(NET_TEST_
 # round trip. No network, no asm, no kernel objects: just the command and the
 # registry, so it runs anywhere the toolchain does.
 .PHONY: test_netlab_sim
+# The lab is gated behind SECFEAT; build the test with the flag so the registry
+# entry and dispatch are present.
 test_netlab_sim:
-	$(CC) $(CFLAGS) $(TEST_SANITIZE) -o tests/test_netlab_sim \
+	$(CC) $(CFLAGS) -DFL_SECFEAT $(TEST_SANITIZE) -o tests/test_netlab_sim \
 	  tests/test_netlab_sim.c userland/command/cmd_netlab.c \
 	  userland/command/cmd_registry.c -Wl,-z,noexecstack
 	./tests/test_netlab_sim

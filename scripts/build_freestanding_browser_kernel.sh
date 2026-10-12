@@ -1,12 +1,22 @@
 #!/usr/bin/env bash
 set -euo pipefail
 root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
-build="${root}/build/freestanding-x86_64"; dist="${root}/dist"
+# SECFEAT=1 builds the security-features variant (the netlab teaching lab
+# compiled in) to a separate image; default is the lab-free image that the
+# Flinstone page embeds and that main ships.
+secfeat="${SECFEAT:-0}"
+if [ "${secfeat}" = "1" ]; then
+    build="${root}/build/freestanding-x86_64-secfeat"; imgname="flintstone-secfeat.img"; infoname="build-info-secfeat.json"
+else
+    build="${root}/build/freestanding-x86_64"; imgname="flintstone.img"; infoname="build-info.json"
+fi
+dist="${root}/dist"
 mkdir -p "${build}" "${dist}"
 for tool in nasm gcc ld objcopy python3 sha256sum git; do command -v "$tool" >/dev/null || { echo "missing tool: $tool" >&2; exit 1; }; done
 nasm -f bin "${root}/kernel/freestanding/x86_64/boot.asm" -o "${build}/boot.bin"
 nasm -f elf64 "${root}/kernel/freestanding/x86_64/entry.asm" -o "${build}/entry.o"
 cflags=(-c -std=c11 -m64 -march=x86-64 -mno-red-zone -mgeneral-regs-only -ffreestanding -fno-stack-protector -fno-pic -fno-asynchronous-unwind-tables -Wall -Wextra -Werror -I"${root}/kernel/drivers/freestanding_x86_64" -I"${root}/kernel/freestanding/x86_64")
+[ "${secfeat}" = "1" ] && cflags+=(-DFL_SECFEAT)
 objects=("${build}/entry.o")
 for src in \
     "${root}/kernel/drivers/freestanding_x86_64/serial.c" \
@@ -45,14 +55,14 @@ off = data.index(needle) + 2
 data[off:off+2] = struct.pack('<H', int(sys.argv[2]))
 p.write_bytes(data)
 PY
-image="${dist}/flintstone.img"; cat "${build}/boot.bin" "${build}/kernel.bin" >"${image}"
+image="${dist}/${imgname}"; cat "${build}/boot.bin" "${build}/kernel.bin" >"${image}"
 truncate -s $(( (sectors + 1) * 512 )) "${image}"
 commit="${GITHUB_SHA:-$(git -C "${root}" rev-parse HEAD)}"; short="${commit:0:7}"
 sha="$(sha256sum "${image}" | awk '{print $1}')"; built="${BUILD_TIMESTAMP:-$(date -u +'%Y-%m-%dT%H:%M:%SZ')}"
-python3 - "${dist}/build-info.json" "$commit" "$short" "$built" "$sha" <<'PY'
+python3 - "${dist}/${infoname}" "$commit" "$short" "$built" "$sha" "$imgname" "$secfeat" <<'PY'
 import json, sys
-out, commit, short, built, sha = sys.argv[1:]
-info={"schemaVersion":2,"project":"Flintstone Kernel","repository":"BPForbes/Bailey-Forbes-Flinstone","commit":commit,"shortCommit":short,"builtAt":built,"architecture":"x86_64","cpuMode":"64-bit long mode, freestanding","artifact":"flintstone.img","artifactFormat":"raw BIOS disk image","sha256":sha,"browserEmulator":"QEMU Wasm x86_64 (b7c549b5e6f4)","browserCompatible":False,"v86Compatible":False,"bootableCandidate":True,"bootable":False,"bootloader":"BIOS MBR long-mode loader","requiredBios":"SeaBIOS-compatible","qemuBootMode":"ide-drive","minimumRamBytes":64*1024*1024,"recommendedRamBytes":64*1024*1024,"bootSuccessMarker":"FLINTSTONE_KERNEL_BOOT_OK","bootSuccessMarkerImplemented":True,"validationOutcome":"qemu-unvalidated","runtimeMode":"browser-hosted","serverPath":"relay","serverRelayPort":8767,"capabilities":{"longMode":True,"gdt":True,"idt":True,"serial":True,"vga":True,"pic":True,"pit":True,"ps2Probe":True,"keyboard":True,"biosBlockLoad":True,"identity":True,"hostedLabSessions":True,"filesystem":True,"network":True,"server":True},"blockers":["QEMU has not independently observed the serial marker","Browser has not independently observed the serial marker for this image"]}
+out, commit, short, built, sha, artifact, secfeat = sys.argv[1:]
+info={"schemaVersion":2,"project":"Flintstone Kernel","repository":"BPForbes/Bailey-Forbes-Flinstone","commit":commit,"shortCommit":short,"builtAt":built,"architecture":"x86_64","cpuMode":"64-bit long mode, freestanding","artifact":artifact,"artifactFormat":"raw BIOS disk image","securityFeatures":secfeat=="1","sha256":sha,"browserEmulator":"QEMU Wasm x86_64 (b7c549b5e6f4)","browserCompatible":False,"v86Compatible":False,"bootableCandidate":True,"bootable":False,"bootloader":"BIOS MBR long-mode loader","requiredBios":"SeaBIOS-compatible","qemuBootMode":"ide-drive","minimumRamBytes":64*1024*1024,"recommendedRamBytes":64*1024*1024,"bootSuccessMarker":"FLINTSTONE_KERNEL_BOOT_OK","bootSuccessMarkerImplemented":True,"validationOutcome":"qemu-unvalidated","runtimeMode":"browser-hosted","serverPath":"relay","serverRelayPort":8767,"capabilities":{"longMode":True,"gdt":True,"idt":True,"serial":True,"vga":True,"pic":True,"pit":True,"ps2Probe":True,"keyboard":True,"biosBlockLoad":True,"identity":True,"hostedLabSessions":True,"filesystem":True,"network":True,"server":True,"securityLab":secfeat=="1"},"blockers":["QEMU has not independently observed the serial marker","Browser has not independently observed the serial marker for this image"]}
 with open(out,'w',encoding='utf-8') as f: json.dump(info,f,indent=2); f.write('\n')
 PY
-echo "browser-kernel: wrote ${image} (${sectors} payload sectors)"
+echo "browser-kernel: wrote ${image} (${sectors} payload sectors, SECFEAT=${secfeat})"

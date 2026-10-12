@@ -16,6 +16,7 @@ static unsigned s_audit_n;
 static char s_loc[LOC_MAX][FL_FS_RAMFS_PATH];
 static unsigned s_loc_n;
 
+#ifdef FL_SECFEAT  /* security-features gate: the netlab teaching lab */
 /*
  * Lab network mode. 0 = live: the browser relay (the real external network)
  * is allowed. 1 = lab-isolated: a netlab MitM+RS session is running, so the
@@ -68,6 +69,7 @@ static char s_nl_sb_name[NL_SB_FILES][NL_SB_NAMELEN];
 static char s_nl_sb_content[NL_SB_FILES][NL_SB_CONTENTLEN];
 static int  s_nl_sb_used[NL_SB_FILES];
 static int  s_nl_sb_count;
+#endif /* FL_SECFEAT */
 
 static int str_eq(const char *a, const char *b)
 {
@@ -779,16 +781,21 @@ static int run_net(const char *verb, const char **cursor)
     return 0;
 }
 
+#ifdef FL_SECFEAT
 /* netlab helpers defined further below; run_server reacts to server lifecycle. */
 static void nl_pick_host(void);
 static void nl_pod_dissolve(void);
 static void nl_reconcile_accounts(void);
 static void nl_display_name(int session, char *out, unsigned cap);
 static int  nl_session_idx(int session);
+#endif /* FL_SECFEAT */
 
 static int run_server(int session, const char *verb, const char **cursor)
 {
     char sub[16];
+#ifndef FL_SECFEAT
+    (void)session; /* netlab lifecycle hooks (the only users) are compiled out */
+#endif
     if (!str_eq(verb, "server"))
         return 0;
     if (!take_word(cursor, sub, sizeof(sub))) {
@@ -799,6 +806,7 @@ static int run_server(int session, const char *verb, const char **cursor)
         fl_fs_labnet_ifconfig(emit, emit_uint);
         return 1;
     }
+#ifdef FL_SECFEAT
     if (s_lab_netmode) {
         /* Real network dropped for an active netlab session: refuse to reach
          * the relay so nothing leaves while the MitM+RS demo runs. */
@@ -857,6 +865,7 @@ static int run_server(int session, const char *verb, const char **cursor)
             }
         }
     }
+#endif /* FL_SECFEAT */
     skip_spaces(cursor);
     emit("SERVER_RELAY ");
     emit(sub);
@@ -868,6 +877,7 @@ static int run_server(int session, const char *verb, const char **cursor)
     return 1;
 }
 
+#ifdef FL_SECFEAT
 /* ------------------------------------------------------------------------- */
 /* netlab — contained network-security teaching lab (freestanding analog of   */
 /* the hosted `netlab`). Simulation only: fabricated pods, no sockets, no real */
@@ -1750,6 +1760,7 @@ static int run_netlab(int session, const char *verb, const char **cursor)
     emit("' (try `netlab help`)\r\n");
     return 1;
 }
+#endif /* FL_SECFEAT */
 
 static int run_meta(int session, const char *verb, const char **cursor)
 {
@@ -1865,6 +1876,7 @@ void fl_fs_commands_init(void)
     s_redir[0] = 0;
     s_audit_n = 0;
     s_loc_n = 0;
+#ifdef FL_SECFEAT
     s_lab_netmode = 0;
     s_nl_pod[0] = 0;
     s_nl_memcount = 0;
@@ -1874,6 +1886,7 @@ void fl_fs_commands_init(void)
     s_nl_atk_session = -1;
     s_nl_victim_session = -1;
     nl_sb_reset();
+#endif
 }
 
 int fl_fs_commands_run(int session, const char *verb, const char **cursor)
@@ -1889,7 +1902,10 @@ int fl_fs_commands_run(int session, const char *verb, const char **cursor)
     if (rc == 1)
         return 1;
     if (run_fs(session, verb, cursor) || run_disk(session, verb, cursor) ||
-        run_net(verb, cursor) || run_netlab(session, verb, cursor) ||
+        run_net(verb, cursor) ||
+#ifdef FL_SECFEAT
+        run_netlab(session, verb, cursor) ||
+#endif
         run_server(session, verb, cursor))
         return 1;
     return 0;

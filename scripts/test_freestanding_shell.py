@@ -8,9 +8,12 @@ import time
 from pathlib import Path
 
 root = Path(__file__).resolve().parents[1]
-image = root / "dist" / "flintstone.img"
+# The netlab suite below needs the security-features (SECFEAT) image; the
+# Makefile builds dist/flintstone-secfeat.img and points us at it. Default to
+# the plain image for a manual run.
+image = Path(os.environ.get("FL_BROWSER_KERNEL_IMAGE", str(root / "dist" / "flintstone.img")))
 if not image.is_file():
-    sys.exit("test-freestanding-shell: missing dist/flintstone.img")
+    sys.exit(f"test-freestanding-shell: missing {image}")
 
 proc = subprocess.Popen(
     [

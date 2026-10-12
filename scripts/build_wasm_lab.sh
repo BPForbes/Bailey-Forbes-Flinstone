@@ -6,6 +6,9 @@ cd "$ROOT"
 
 INC="-Ikernel/drivers/freestanding_x86_64 -Ikernel/freestanding/x86_64"
 DEFS="-DFL_WASM_SHELL_PROMPT=1"
+# SECFEAT=1 compiles the netlab security lab into the wasm shell (for the
+# MitM + RS page); default is lab-free (the Flinstone page).
+[ "${SECFEAT:-0}" = "1" ] && DEFS="$DEFS -DFL_SECFEAT"
 CFLAGS="-std=gnu11 -Wall -Wextra -Wno-unused-parameter -O2 $DEFS $INC"
 
 # shellcheck disable=SC2086
