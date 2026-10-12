@@ -1451,6 +1451,9 @@ static int verb_leave(void) {
         (void)fl_net_server_transfer_and_stop(&g_server, &new_host);
         g_server_running = 0;
         pthread_mutex_unlock(&session_mutex);
+        /* Host stepped down: re-elect any netlab pod host independently of the
+         * server's own succession (the two may differ). */
+        cmd_netlab_on_server_leave();
         wsl_portproxy_teardown_interactive();
         if (new_host == FL_NET_SERVER_MEMBER_ID_NONE) {
             fl_color_success("session terminated (no remaining members)");
@@ -1489,6 +1492,8 @@ static int verb_kill(void) {
     fl_net_server_host_stop(&g_server);
     g_server_running = 0;
     pthread_mutex_unlock(&session_mutex);
+    /* Server torn down by its host: the netlab pods under it are killed too. */
+    cmd_netlab_on_server_kill();
     wsl_portproxy_teardown_interactive();
 #if defined(FL_SERVER_UDP_HOSTED)
     server_udp_stop();

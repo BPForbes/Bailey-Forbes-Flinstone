@@ -784,6 +784,25 @@ static void nl_sb_reset(void) {
     for (int i = 0; i < NL_SB_FILES; i++) s_sb_used[i] = 0;
 }
 
+/* Server lifecycle hooks, called by cmd_server when THIS process was hosting
+ * the real server. On leave the host steps down (the server picks a new host
+ * by its own join order); we re-elect the pod host independently by pod join
+ * order, so the two new hosts may differ. On kill the server is torn down, so
+ * the pods that lived under it are killed too. */
+void cmd_netlab_on_server_leave(void) {
+    if (!s_pod[0]) return;
+    nl_pick_host();
+}
+
+void cmd_netlab_on_server_kill(void) {
+    if (!s_pod[0]) return;
+    s_pod[0] = 0; s_memcount = 0; s_hostidx = -1;
+    s_listen_name[0] = 0; s_atk_name[0] = 0; s_victim_name[0] = 0;
+    nl_sb_reset();
+    s_isolated = 0;
+    printf("netlab: server killed by its host — pod dissolved.\n");
+}
+
 static int nl_sb_find(const char *name) {
     for (int i = 0; i < NL_SB_FILES; i++)
         if (s_sb_used[i] && !strcmp(s_sb_name[i], name)) return i;

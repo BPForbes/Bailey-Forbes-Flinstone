@@ -270,6 +270,31 @@ int main(void) {
         run_capture(leave, 3, buf, sizeof(buf));
     }
 
+    /* Server lifecycle coupling (the hooks cmd_server calls on leave/kill). */
+    {
+        char *create[]  = { "netlab", "pod", "create", "redcell" };
+        char *join[]    = { "netlab", "pod", "join" };
+        char *members[] = { "netlab", "pod", "members" };
+        g_test_server_running = 0;
+        as_user("flinstone");
+        run_capture(create, 4, buf, sizeof(buf));   /* flinstone: pod host     */
+        as_user("root");
+        run_capture(join, 3, buf, sizeof(buf));     /* root joins              */
+
+        /* `server leave` by the host: re-run pod election. With the server
+         * stopped (running=0) the first member by join order holds the host;
+         * the call must leave a valid host and not crash. */
+        cmd_netlab_on_server_leave();
+        run_capture(members, 3, buf, sizeof(buf));
+        CHECK(strstr(buf, "(host)") != NULL, "server leave re-elects a valid pod host");
+
+        /* `server kill` dissolves the pod that lived under the server. */
+        cmd_netlab_on_server_kill();
+        run_capture(members, 3, buf, sizeof(buf));
+        CHECK(strstr(buf, "no pod") != NULL, "server kill dissolves the pod");
+        CHECK(cmd_netlab_is_isolated() == 0, "server kill leaves the real network restored");
+    }
+
     /* 3. traceroute over the simulated topology */
     {
         char *av[] = { "netlab", "traceroute", "redteam-lab", "bob" };

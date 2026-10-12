@@ -778,6 +778,11 @@ static int run_net(const char *verb, const char **cursor)
     return 0;
 }
 
+/* netlab helpers defined further below; run_server reacts to server lifecycle. */
+static void nl_pick_host(void);
+static void nl_pod_dissolve(void);
+static void nl_display_name(int session, char *out, unsigned cap);
+
 static int run_server(int session, const char *verb, const char **cursor)
 {
     char sub[16];
@@ -802,9 +807,33 @@ static int run_server(int session, const char *verb, const char **cursor)
      * request, and clear it when this session leaves/kills its own server. */
     if (str_eq(sub, "host")) {
         s_nl_acting_host_session = session;
-    } else if (str_eq(sub, "leave") || str_eq(sub, "kill")) {
-        if (s_nl_acting_host_session == session)
+    } else if (str_eq(sub, "kill")) {
+        if (s_nl_acting_host_session == session) {
             s_nl_acting_host_session = -1;
+            /* The server host tore the whole server down: the pods that live
+             * under it are killed too. */
+            if (s_nl_pod[0]) {
+                nl_pod_dissolve();
+                emit("netlab: server killed by its host — pod dissolved.\r\n");
+            }
+        }
+    } else if (str_eq(sub, "leave")) {
+        if (s_nl_acting_host_session == session) {
+            s_nl_acting_host_session = -1;
+            /* Host stepped down (the relay picks a new server host by its own
+             * join order); re-elect the pod host independently by pod join
+             * order, so the two new hosts may differ. */
+            if (s_nl_pod[0]) {
+                int before = s_nl_hostidx;
+                nl_pick_host();
+                if (s_nl_hostidx != before && s_nl_hostidx >= 0) {
+                    char dn2[40];
+                    nl_display_name(s_nl_members[s_nl_hostidx], dn2, sizeof(dn2));
+                    emit("netlab: server host stepped down — new pod host: ");
+                    emit(dn2); emit("\r\n");
+                }
+            }
+        }
     }
     skip_spaces(cursor);
     emit("SERVER_RELAY ");
@@ -995,6 +1024,21 @@ static void nl_sb_reset(void)
     for (i = 0; i < NL_SB_FILES; ++i)
         s_nl_sb_used[i] = 0;
     s_nl_sb_count = 0;
+}
+
+/* Tear down all pod + reverse-shell state and restore the real network. Used
+ * when the server host kills the server (the pods under it die too). */
+static void nl_pod_dissolve(void)
+{
+    s_nl_pod[0] = 0;
+    s_nl_memcount = 0;
+    s_nl_hostidx = -1;
+    s_nl_listen_session = -1;
+    s_nl_atk_session = -1;
+    s_nl_victim_session = -1;
+    nl_sb_reset();
+    if (s_lab_netmode)
+        nl_set_mode(0);
 }
 
 static int nl_sb_find(const char *name)

@@ -237,6 +237,31 @@ try:
     read_until("SESSION 2 user=root", 4)
     cmd("netlab pod leave", expect="host pending")
 
+    # Server lifecycle coupling. Session 1 (flinstone) is still the real server
+    # host and the sole member of pod redcell (host pending).
+    send("session 1\n")
+    read_until("SESSION 1 user=flinstone", 4)
+    # `server kill` by the server host tears the server down, so the pod that
+    # lived under it is killed too.
+    cmd("server kill", expect="pod dissolved")
+    cmd("netlab pod members", expect="no pod")
+    # Rebuild a two-member pod to show `server leave` re-electing the pod host:
+    # flinstone hosts the server again (so it is blocked from the pod host),
+    # root joins and takes the pod host.
+    cmd("server host", expect="SERVER_RELAY host")
+    cmd("netlab pod create redcell2", expect="host pending")
+    send("session 2\n")
+    read_until("SESSION 2 user=root", 4)
+    cmd("netlab pod join", expect="identity preserved")
+    cmd("netlab pod host", expect="root")
+    # flinstone (server host AND pod join-order #0) leaves the server: the relay
+    # picks a new server host by its own order, and netlab independently
+    # re-elects the pod host by pod join order, so flinstone reclaims it.
+    send("session 1\n")
+    read_until("SESSION 1 user=flinstone", 4)
+    cmd("server leave", expect="new pod host")
+    cmd("netlab pod host", expect="flinstone")
+
     for verb in HOSTED_VERBS:
         cmd(verb)
 

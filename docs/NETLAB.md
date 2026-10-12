@@ -157,6 +157,28 @@ identity (no concurrent session table), so it keys membership on whichever
 real account is logged in at the moment each verb runs; this is a weaker
 concurrency model and is documented as such rather than overclaimed.
 
+**Server lifecycle coupling.** The real `server` and netlab pods interact
+through two lifecycle events, mirroring the distinction between the server's
+own `leave` (host steps down, the server continues) and `kill` (the server is
+torn down):
+
+- **`server kill` by the server host → the pods under it are killed.** Killing
+  the server dissolves the pod and any open binding and restores the real
+  network. (Hosted: `cmd_server_run` → `cmd_netlab_on_server_kill`. Freestanding:
+  `run_server` → `nl_pod_dissolve`.)
+- **`server leave` by a host that is also a pod host → both re-elect, independently.**
+  The server picks a new host by *its* join order; netlab re-elects the pod host
+  by *pod* join order. Because the two orderings differ, the new server host and
+  the new pod host can be different people — which is the intended behaviour.
+  (Hosted: `cmd_netlab_on_server_leave`. Freestanding: `nl_pick_host` from the
+  `server leave` path.)
+
+A binding pauses the real network, so `server kill`/`leave` are only reachable
+when no binding is open (otherwise `netlab end` comes first); the coupling
+therefore applies to a live pod rather than an active reverse shell. On the
+freestanding side the relay performs the server's own host succession hub-side,
+so the shell forwards `leave` and only re-elects the *pod* host locally.
+
 ### Reverse shell (simulated): listen / accept
 
 ```
