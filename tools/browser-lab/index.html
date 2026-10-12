@@ -45,6 +45,69 @@
               <button id="guest-cmd-run" type="submit" disabled>Run</button>
             </form>
           </section>
+          <section class="netlab-panel glass-card" aria-label="MitM and reverse-shell teaching lab">
+            <h2>MitM + RS lab</h2>
+            <p>Drives <code>netlab</code> in the shell — no typing needed. Everything below runs
+            against fabricated hosts and a mock victim; nothing here touches a real network or
+            another visitor's session. <code>netlab help</code> in the terminal lists every verb.</p>
+            <p id="netmode-status" data-mode="live">Live — real network available</p>
+
+            <h3>Network segment</h3>
+            <p class="netlab-sub">Picks which fabricated network the recon and MitM buttons below act on.</p>
+            <label>Segment
+              <select id="netlab-pod">
+                <option value="redteam-lab">redteam-lab</option>
+                <option value="blueteam-lab">blueteam-lab</option>
+              </select>
+            </label>
+            <div class="netlab-actions">
+              <button id="netlab-hosts" type="button" disabled>Hosts</button>
+              <button id="netlab-scan" type="button" disabled>Scan (MACs)</button>
+              <button id="netlab-wpa" type="button" disabled>WPA info</button>
+              <button id="netlab-topology" type="button" disabled>Topology</button>
+              <button id="netlab-arpdemo" type="button" disabled>ARP-spoof demo</button>
+              <button id="netlab-capture" type="button" disabled>Capture + analyze</button>
+            </div>
+
+            <h3>Pod (private group)</h3>
+            <p class="netlab-sub">A pod is a private, named group for one MitM + RS exercise.
+            Membership is keyed on your <strong>real logged-in account</strong> (the Users and
+            sessions panel below) — open a second session as another account to add a second
+            member. The pod host is a member that is not also hosting the real
+            <code>server</code> session, so one identity never relays both lab and server traffic.</p>
+            <label for="netlab-session-pod">Pod name
+              <input id="netlab-session-pod" type="text" value="redcell" autocomplete="off" spellcheck="false">
+            </label>
+            <div class="netlab-actions">
+              <button id="netlab-pod-create" type="button" disabled>Create pod</button>
+              <button id="netlab-pod-join" type="button" disabled>Join pod (as me)</button>
+              <button id="netlab-pod-members" type="button" disabled>Members</button>
+              <button id="netlab-pod-leave" type="button" disabled>Leave pod</button>
+            </div>
+
+            <h3>Reverse shell (simulated)</h3>
+            <p class="netlab-sub"><strong>Listen</strong> makes you the attacker; another pod member's
+            <strong>Accept</strong> makes them the victim. Once bound, the attacker's
+            <code>netlab &lt;cmd&gt;</code> in the terminal runs in a fresh, isolated
+            <strong>sandbox</strong> labeled for the victim — never the victim's real account, files,
+            or terminal. Either side can <strong>End</strong> it. Accepting isolates the lab from the
+            real network, the same as Start demo below; ending restores it.</p>
+            <div class="netlab-actions">
+              <button id="netlab-rs-listen" type="button" disabled>Listen (attacker)</button>
+              <button id="netlab-rs-accept" type="button" disabled>Accept (victim)</button>
+              <button id="netlab-rs-end" type="button" disabled>End binding</button>
+              <button id="netlab-status" type="button" disabled>Status</button>
+            </div>
+
+            <h3>Network isolation &amp; reference</h3>
+            <div class="netlab-actions">
+              <button id="netlab-start" type="button" disabled>Start demo (isolate)</button>
+              <button id="netlab-stop" type="button" disabled>Stop demo (resume real net)</button>
+              <button id="netlab-consent" type="button" disabled>Consent / boundary</button>
+              <button id="netlab-rsexplain" type="button" disabled>RS mechanics</button>
+              <button id="netlab-defend" type="button" disabled>Defend</button>
+            </div>
+          </section>
           <section class="accounts glass-card" aria-label="Users and sessions">
             <h2>Users and sessions</h2>
             <p>Built-in accounts are <code>flinstone</code> and <code>root</code>. Register a lab user (as root), then switch or open a new session as that user.</p>

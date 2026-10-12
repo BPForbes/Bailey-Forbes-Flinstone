@@ -42,14 +42,20 @@
     const run = document.getElementById("guest-cmd-run");
     if (cmd) cmd.disabled = !ready;
     if (run) run.disabled = !ready;
-    for (const id of ["account-login", "account-new-session", "account-register"]) {
+    for (const id of ["account-login", "account-new-session", "account-register",
+                      "netlab-pod", "netlab-start", "netlab-hosts", "netlab-scan", "netlab-wpa",
+                      "netlab-topology", "netlab-arpdemo", "netlab-capture", "netlab-defend",
+                      "netlab-stop", "netlab-session-pod",
+                      "netlab-pod-create", "netlab-pod-join", "netlab-pod-members",
+                      "netlab-pod-leave", "netlab-rs-listen", "netlab-rs-accept", "netlab-rs-end",
+                      "netlab-status", "netlab-consent", "netlab-rsexplain"]) {
       const node = document.getElementById(id);
       if (node) node.disabled = !ready;
     }
     renderPowerline(state);
     if (ready) {
       screen.focus();
-      if (!relay || !relay.connected) void connectRelay();
+      if (!labIsolated && (!relay || !relay.connected)) void connectRelay();
     }
   };
   let info;
@@ -61,6 +67,10 @@
   let relay = null;
   let connectRelay = async () => {};
   let serialLine = "";
+  // Lab network mode: when a netlab MitM+RS session is active the guest emits
+  // `LAB_NETMODE lab` and we drop the real network (the relay); `LAB_NETMODE
+  // live` restores it. While isolated we also suppress auto-reconnect.
+  let labIsolated = false;
   const search = new URLSearchParams(location.search);
   const validation = search.get("validate") === "1";
   const qemuMode = validation || search.get("qemu") === "1";
@@ -90,6 +100,22 @@
     if (user) user.textContent = `\uf007 ${sessions[activeSession] || "flinstone"}`;
     if (sess) sess.textContent = `${activeSession}/${count}`;
     if (st) st.textContent = state || document.getElementById("status")?.textContent || "…";
+  }
+  // The MitM + RS panel drives netlab, which only the security build compiles
+  // in. Show it only when this build's manifest says so; a lab-free build would
+  // otherwise offer buttons that answer "unknown command".
+  function applySecurityPanel(manifest) {
+    const panel = document.querySelector(".netlab-panel");
+    if (!panel) return;
+    panel.hidden = !(manifest && manifest.capabilities && manifest.capabilities.securityLab === true);
+  }
+  // A freshly booted or reset guest starts in live mode. Clear the isolation
+  // flag with the guest, so the relay is not suppressed for a guest that has
+  // no netlab binding.
+  function clearLabIsolation() {
+    if (!labIsolated) return;
+    labIsolated = false;
+    renderNetmode("live");
   }
   function renderCaps(capabilities) {
     const node = document.getElementById("capabilities");
@@ -139,6 +165,32 @@
     const node = document.getElementById("server-status");
     if (node) node.textContent = text;
   }
+  function renderNetmode(mode) {
+    const node = document.getElementById("netmode-status");
+    if (!node) return;
+    const isolated = mode === "lab";
+    node.textContent = isolated
+      ? "Lab-isolated — real network dropped"
+      : "Live — real network available";
+    node.dataset.mode = isolated ? "lab" : "live";
+  }
+  // React to the guest's LAB_NETMODE token: drop the relay (real network) for
+  // the duration of a netlab MitM+RS session, restore it when the demo ends.
+  function applyNetmode(mode) {
+    labIsolated = mode === "lab";
+    renderNetmode(mode);
+    if (labIsolated) {
+      if (relay) {
+        relay.leave();
+        renderRoster([]);
+      }
+      renderRelayStatus("Lab-isolated — real network dropped");
+      appendChat("[netlab] lab-isolated: real network (relay) dropped for the demo");
+    } else {
+      appendChat("[netlab] live: real network restored");
+      if (relay) void connectRelay();
+    }
+  }
   function renderRoster(members) {
     const node = document.getElementById("server-roster");
     if (!node) return;
@@ -175,12 +227,20 @@
     });
     let connecting = null;
     const connect = () => {
+      if (labIsolated) {
+        renderRelayStatus("Lab-isolated — real network dropped");
+        return Promise.resolve();
+      }
       if (connecting) return connecting;
       connecting = (async () => {
         try {
           if (!relay.connected) renderRelayStatus("Connecting…");
           await relay.connect(principal());
-          if (relay.connected)
+          if (labIsolated) {
+            // Isolation began mid-connect: drop the relay we just opened.
+            relay.leave();
+            renderRelayStatus("Lab-isolated — real network dropped");
+          } else if (relay.connected)
             renderRelayStatus(`Connected as ${relay.display} (#${relay.memberId})`);
         } catch (error) {
           renderRelayStatus(error.message || "Connection failed");
@@ -275,6 +335,10 @@
       if (event.host) await resolveLabDns(event.host);
       return;
     }
+    if (event.type === "netmode") {
+      applyNetmode(event.mode);
+      return;
+    }
     if (event.type !== "server" || !relay) return;
     try {
       if (event.op === "leave" || event.op === "kill") {
@@ -282,6 +346,13 @@
         renderRelayStatus("Disconnected");
         renderRoster([]);
         appendChat("[relay] leave");
+        return;
+      }
+      // While lab-isolated the relay stays down: reconnecting here would bypass
+      // the isolation boundary the guest enforces.
+      if (labIsolated && (event.op === "host" || event.op === "join" ||
+                          event.op === "msg" || event.op === "announce")) {
+        renderRelayStatus("Lab-isolated — real network dropped");
         return;
       }
       if (event.op === "host" || event.op === "join") {
@@ -422,8 +493,16 @@
       sessions = { 1: "flinstone" };
       extraUsers = [];
       renderSessions();
+      // The guest streams raw bytes one at a time, including multi-byte
+      // UTF-8 sequences (e.g. an em dash is 3 bytes). String.fromCharCode
+      // on each raw byte mangles those into mojibake; a streaming
+      // TextDecoder buffers an incomplete sequence across calls and only
+      // yields a character once it is complete, with no added delay for
+      // the ASCII bytes that make up most guest output.
+      const serialDecoder = new TextDecoder("utf-8", { fatal: false });
       emulator = await config.createEmulator({ ...settings, serialByte: byte => {
-        const ch = String.fromCharCode(byte);
+        const ch = serialDecoder.decode(new Uint8Array([byte]), { stream: true });
+        if (!ch) { settings.serialByte(byte); return; }
         serial.textContent = (serial.textContent + ch).slice(-65536);
         noteSerialChar(ch);
         if (ch === "\n") {
@@ -505,6 +584,7 @@
     text("emulator", useWasm ? "Emscripten" : info.browserEmulator); text("artifact", useWasm ? "flintstone.wasm" : info.artifact);
     renderRuntimeMode();
     renderCaps(info.capabilities);
+    applySecurityPanel(info);
     renderSessions();
     setupRelay();
     if (!canBoot()) {
@@ -521,6 +601,7 @@
     document.getElementById(id).onclick = async () => {
       if (busy || ((id === "boot" || id === "reset") && !canBoot())) return;
       busy = true;
+      if (id === "boot" || id === "reset" || id === "poweroff") clearLabIsolation();
       try { await action(); } catch (error) {
         if (id === "pause" || id === "resume") {
           const node = document.getElementById("status");
@@ -568,6 +649,64 @@
     input.value = "";
     screen.focus();
   });
+
+  // MitM + RS lab panel: each button sends a `netlab ...` line to the shell,
+  // so the network system is driven without the CLI. The lab/live network
+  // switch rides the LAB_NETMODE token the guest emits (see applyNetmode).
+  function netlabPod() {
+    const sel = document.getElementById("netlab-pod");
+    return (sel && sel.value) || "redteam-lab";
+  }
+  // Reads a text field, trims it, and keeps only its first whitespace-
+  // delimited token (names/pods/victims are single shell words), falling
+  // back to a sane default so a blank field never sends a bare command.
+  function netlabToken(id, fallback) {
+    const el = document.getElementById(id);
+    const first = (el && el.value || "").trim().split(/\s+/)[0];
+    return first || fallback;
+  }
+  function wireNetlab(id, build) {
+    document.getElementById(id)?.addEventListener("click", () => {
+      void sendGuestLines(`${build(netlabPod())}\n`);
+      screen.focus();
+    });
+  }
+  // Like wireNetlab, but the command doesn't depend on the segment selector.
+  function wireNetlabPlain(id, build) {
+    document.getElementById(id)?.addEventListener("click", () => {
+      void sendGuestLines(`${build()}\n`);
+      screen.focus();
+    });
+  }
+
+  // Network segment: recon + MitM on the fabricated hosts.
+  wireNetlab("netlab-hosts", pod => `netlab hosts ${pod}`);
+  wireNetlab("netlab-scan", pod => `netlab scan ${pod}`);
+  wireNetlab("netlab-wpa", pod => `netlab wpa ${pod}`);
+  wireNetlab("netlab-topology", pod => `netlab topology ${pod}`);
+  wireNetlab("netlab-arpdemo", pod => `netlab arp-demo ${pod}`);
+  wireNetlab("netlab-capture", pod => `netlab capture ${pod}`);
+
+  // Pod (private group): membership and host succession.
+  wireNetlabPlain("netlab-pod-create", () =>
+    `netlab pod create ${netlabToken("netlab-session-pod", "redcell")}`);
+  wireNetlabPlain("netlab-pod-join", () => "netlab pod join");
+  wireNetlabPlain("netlab-pod-members", () => "netlab pod members");
+  wireNetlabPlain("netlab-pod-leave", () => "netlab pod leave");
+
+  // Reverse shell (simulated): open/close against a named mock victim.
+  wireNetlabPlain("netlab-rs-listen", () => "netlab listen");
+  wireNetlabPlain("netlab-rs-accept", () => "netlab accept");
+  wireNetlabPlain("netlab-rs-end", () => "netlab end");
+  wireNetlabPlain("netlab-status", () => "netlab status");
+
+  // Network isolation and reference text.
+  wireNetlabPlain("netlab-start", () => "netlab start");
+  wireNetlabPlain("netlab-stop", () => "netlab stop");
+  wireNetlabPlain("netlab-consent", () => "netlab consent");
+  wireNetlabPlain("netlab-rsexplain", () => "netlab rs-explain");
+  wireNetlabPlain("netlab-defend", () => "netlab defend");
+
   const form = document.getElementById("switch-user");
   if (form) {
     form.addEventListener("submit", async event => {

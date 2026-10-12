@@ -6,6 +6,9 @@ cd "$ROOT"
 
 INC="-Ikernel/drivers/freestanding_x86_64 -Ikernel/freestanding/x86_64"
 DEFS="-DFL_WASM_SHELL_PROMPT=1"
+# SECFEAT=1 compiles the netlab security lab into the wasm shell (for the
+# MitM + RS page); default is lab-free (the Flinstone page).
+[ "${SECFEAT:-0}" = "1" ] && DEFS="$DEFS -DFL_SECFEAT"
 CFLAGS="-std=gnu11 -Wall -Wextra -Wno-unused-parameter -O2 $DEFS $INC"
 
 # shellcheck disable=SC2086
@@ -20,7 +23,12 @@ tools/browser-lab/wasm/platform_wasm.c
 tools/browser-lab/wasm/wasm_main.c
 "
 
-OUT_DIR="$ROOT/tools/browser-lab/wasm"
+# The security variant's module goes to build/ so the tracked lab wasm stays lab-free.
+if [ "${SECFEAT:-0}" = "1" ]; then
+  OUT_DIR="$ROOT/build/wasm-secfeat"
+else
+  OUT_DIR="$ROOT/tools/browser-lab/wasm"
+fi
 mkdir -p "$OUT_DIR" "$ROOT/dist"
 
 HOST_BIN="$ROOT/dist/flintstone_wasm_host"

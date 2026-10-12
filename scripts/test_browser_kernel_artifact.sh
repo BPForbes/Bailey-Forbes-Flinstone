@@ -4,7 +4,7 @@ set -euo pipefail
 repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 dist_dir="${FL_BROWSER_KERNEL_DIST_DIR:-${repo_root}/dist}"
 qemu_bin="${FL_BROWSER_KERNEL_QEMU:-qemu-system-x86_64}"
-metadata="${dist_dir}/build-info.json"
+metadata="${dist_dir}/${FL_BROWSER_KERNEL_MANIFEST:-build-info.json}"
 
 for tool in python3 sha256sum timeout "${qemu_bin}"; do
     command -v "${tool}" >/dev/null 2>&1 || {

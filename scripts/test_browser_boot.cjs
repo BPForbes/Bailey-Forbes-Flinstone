@@ -10,14 +10,23 @@ const { chromium } = createRequire(path.join(root, "tools/browser-lab/package.js
 const digest = data => crypto.createHash("sha256").update(data).digest("hex");
 const assert = (condition, text) => { if (!condition) throw new Error(text); };
 const packaged = process.env.FL_BROWSER_TEST_PACKAGED === "1";
-const labRoot = packaged ? path.join(root, "dist/browser-lab") : root;
+// FL_BROWSER_VARIANT=secfeat validates the security-features image that the
+// MitM+RS page serves from dist/browser-lab/security/. Default is the lab-free image.
+const secfeat = process.env.FL_BROWSER_VARIANT === "secfeat";
+const imageName = secfeat ? "flintstone-secfeat.img" : "flintstone.img";
+const devManifestName = secfeat ? "build-info-secfeat.json" : "build-info.json";
+const evidenceName = secfeat ? "browser-validation-secfeat.json" : "browser-validation.json";
+const labRoot = packaged ? path.join(root, "dist/browser-lab", secfeat ? "security" : "") : root;
 const labPath = packaged ? "/" : "/tools/browser-lab/";
 const manifestPath = packaged
   ? path.join(labRoot, "artifacts/build-info.json")
-  : path.join(root, "dist/build-info.json");
+  : path.join(root, "dist", devManifestName);
 const diskPath = packaged
-  ? path.join(labRoot, "artifacts/flintstone.img")
-  : path.join(root, "dist/flintstone.img");
+  ? path.join(labRoot, "artifacts", imageName)
+  : path.join(root, "dist", imageName);
+const variantConfig = secfeat && !packaged
+  ? { metadataUrl: `/dist/${devManifestName}`, artifactBaseUrl: "/dist" }
+  : {};
 const manifest = JSON.parse(fs.readFileSync(manifestPath));
 const lock = JSON.parse(fs.readFileSync(path.join(root, "tools/browser-lab/runtime-lock.json")));
 const port = Number(process.env.FL_BROWSER_TEST_PORT || (packaged ? 8770 : 8768));
@@ -28,7 +37,7 @@ let server, browser;
 
 async function main() {
   assert(manifest.bootable === true, "Run the independent native QEMU probe first");
-  assert(manifest.artifact === "flintstone.img", "Unexpected artifact path");
+  assert(manifest.artifact === imageName, "Unexpected artifact path");
   assert(digest(fs.readFileSync(diskPath)) === manifest.sha256, "Disk digest mismatch");
   const runtimeDir = packaged
     ? path.join(labRoot, "vendor/qemu")
@@ -42,9 +51,9 @@ async function main() {
   await launched.ready;
   browser = await chromium.launch({ headless: true, ...(process.env.FL_BROWSER_CHANNEL ? { channel: process.env.FL_BROWSER_CHANNEL } : {}) });
   const page = await browser.newPage({ viewport: { width: 1100, height: 1100 } });
-  await page.addInitScript(port => {
-    window.FLINTSTONE_LAB_CONFIG = Object.assign({}, window.FLINTSTONE_LAB_CONFIG || {}, { relayPort: port });
-  }, relayPort);
+  await page.addInitScript(config => {
+    window.FLINTSTONE_LAB_CONFIG = Object.assign({}, window.FLINTSTONE_LAB_CONFIG || {}, config);
+  }, { relayPort, ...variantConfig });
   const errors = [];
   page.on("pageerror", error => errors.push(error.message));
   const status = async value => page.locator("#status").filter({ hasText: new RegExp(`^${value}$`) }).waitFor({ timeout: 90000 });
@@ -74,20 +83,20 @@ async function main() {
 
   if (!packaged) {
     // An unvalidated manifest cannot boot via the ordinary page or its Boot button.
-    await page.route("**/build-info.json", route => route.fulfill({ json: { ...manifest, browserCompatible: false } }));
+    await page.route(`**/${devManifestName}`, route => route.fulfill({ json: { ...manifest, browserCompatible: false } }));
     await page.goto(`${base}${labPath}?qemu=1`);
     await page.locator("#status").filter({ hasText: /^Blocked/ }).waitFor();
     await page.getByRole("button", { name: "Boot", exact: true }).click();
     assert((await page.locator("#status").innerText()).startsWith("Blocked"), "Boot bypassed compatibility gate");
     assert(page.workers().length === 0, "Blocked lab created a worker");
-    await page.unroute("**/build-info.json");
+    await page.unroute(`**/${devManifestName}`);
 
     // Corrupt downloads must fail before an emulator is created.
-    await page.route("**/flintstone.img?*", route => route.fulfill({ body: Buffer.from("corrupt disk") }));
+    await page.route(`**/${imageName}?*`, route => route.fulfill({ body: Buffer.from("corrupt disk") }));
     await page.goto(`${base}${labPath}?validate=1`);
     await page.locator("#status").filter({ hasText: /Failed: Disk SHA-256/ }).waitFor();
     assert(page.workers().length === 0, "Corrupt disk created an emulator");
-    await page.unroute("**/flintstone.img?*");
+    await page.unroute(`**/${imageName}?*`);
   }
 
   await page.goto(`${base}${labPath}${packaged ? "" : "?validate=1"}`);
@@ -181,7 +190,7 @@ async function main() {
   current.blockers = current.blockers.filter(value => !/^(Browser has not|An independently tested x86-64 browser)/.test(value));
   assert(current.blockers.length === 0, "Unresolved artifact blockers prevent promotion");
   current.browserValidation = evidence;
-  fs.writeFileSync(path.join(root, "dist/browser-validation.json"), JSON.stringify(evidence, null, 2) + "\n");
+  fs.writeFileSync(path.join(root, "dist", evidenceName), JSON.stringify(evidence, null, 2) + "\n");
   fs.writeFileSync(manifestPath, JSON.stringify(current, null, 2) + "\n");
   console.log("test-browser-boot: PASS (real QEMU Wasm, serial marker, VGA cell, lifecycle, negative gates, switch-user)");
 }

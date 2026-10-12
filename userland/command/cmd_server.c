@@ -58,8 +58,28 @@ static fl_net_server_t g_server;
 static fl_server_bg_t *g_server_bg;
 static int g_server_running;
 
+/* Accessor for other commands (netlab's pod/host-collision check) that need
+ * to know, without owning any server state themselves, whether this process
+ * is currently hosting the real `server` session. */
+int cmd_server_is_running(void) { return g_server_running; }
+
+/* The account that started the running server, captured when hosting begins and
+ * cleared when it stops. netlab's pod-host election reads this (not the live
+ * process identity) so the real server host is excluded from the pod host even
+ * after a `switchuser`/login changes the current account. */
+static char g_server_host_user[64];
+const char *cmd_server_host_user(void) { return g_server_host_user; }
+
 static fl_net_client_t g_client;
 static fl_server_bg_t *g_client_bg;
+
+/* Accessor for netlab: is this process joined to a real server as a client?
+ * A netlab binding must not open while real relay threads (host or client) are
+ * live, since isolation only gates new `server` commands, not the background
+ * relay already running. */
+int cmd_server_is_connected(void) {
+    return fl_net_client_state(&g_client) == FL_NET_CLIENT_STATE_CONNECTED;
+}
 
 /* UDP beacon + reverse-dial listener — started on server host, stopped on kill/exit. */
 static atomic_int g_server_udp_stop;
@@ -79,6 +99,19 @@ static const char *current_principal(void) {
     if (u && u[0])
         return u;
     return "Flinstone";
+}
+
+/* Set g_server_running and keep the captured host principal in step. Call this
+ * at every running-state flip so netlab always sees the right server host. */
+static void set_server_running(int on) {
+    g_server_running = on;
+    if (on) {
+        strncpy(g_server_host_user, current_principal(),
+                sizeof(g_server_host_user) - 1u);
+        g_server_host_user[sizeof(g_server_host_user) - 1u] = '\0';
+    } else {
+        g_server_host_user[0] = '\0';
+    }
 }
 
 /* Public accessor so cmd_exit (and any other shell teardown path) can
@@ -221,7 +254,7 @@ static void host_abort_started_listener(void) {
         g_server_bg = NULL;
     }
     fl_net_server_host_stop(&g_server);
-    g_server_running = 0;
+    set_server_running(0);
     pthread_mutex_unlock(&session_mutex);
 #if defined(FL_SERVER_UDP_HOSTED)
     server_udp_stop();
@@ -697,7 +730,7 @@ static void *promote_thread_main(void *arg) {
             free(pa);
             return NULL;
         }
-        g_server_running = 1;
+        set_server_running(1);
         (void)fl_server_catalog_open();
         pthread_mutex_unlock(&session_mutex);
     } else {
@@ -1218,8 +1251,13 @@ static int verb_host(int argc, char **argv) {
             fl_color_error("server background start failed (rc=%d)", (int)rc);
             return 1;
         }
-        g_server_running = 1;
+        set_server_running(1);
         pthread_mutex_unlock(&session_mutex);
+        /* Became the server host: the pod host is a separate relay point, so
+         * re-elect it off this identity (or leave it pending). */
+#ifdef FL_SECFEAT
+        cmd_netlab_on_server_host();
+#endif
 
 #if defined(FL_SERVER_UDP_HOSTED)
         server_udp_start(bind_ep.port_host);
@@ -1444,8 +1482,13 @@ static int verb_leave(void) {
             g_server_bg = NULL;
         }
         (void)fl_net_server_transfer_and_stop(&g_server, &new_host);
-        g_server_running = 0;
+        set_server_running(0);
         pthread_mutex_unlock(&session_mutex);
+        /* Host stepped down: re-elect any netlab pod host independently of the
+         * server's own succession (the two may differ). */
+#ifdef FL_SECFEAT
+        cmd_netlab_on_server_leave();
+#endif
         wsl_portproxy_teardown_interactive();
         if (new_host == FL_NET_SERVER_MEMBER_ID_NONE) {
             fl_color_success("session terminated (no remaining members)");
@@ -1482,8 +1525,12 @@ static int verb_kill(void) {
         g_server_bg = NULL;
     }
     fl_net_server_host_stop(&g_server);
-    g_server_running = 0;
+    set_server_running(0);
     pthread_mutex_unlock(&session_mutex);
+    /* Server torn down by its host: the netlab pods under it are killed too. */
+#ifdef FL_SECFEAT
+    cmd_netlab_on_server_kill();
+#endif
     wsl_portproxy_teardown_interactive();
 #if defined(FL_SERVER_UDP_HOSTED)
     server_udp_stop();
@@ -1811,7 +1858,7 @@ void cmd_server_atexit(void) {
             g_server_bg = NULL;
         }
         (void)fl_net_server_transfer_and_stop(&g_server, &new_host);
-        g_server_running = 0;
+        set_server_running(0);
     } else if (fl_net_client_state(&g_client) == FL_NET_CLIENT_STATE_CONNECTED) {
         if (g_client_bg) {
             fl_server_bg_stop_client(g_client_bg);
@@ -1892,6 +1939,17 @@ int cmd_server_run(int argc, char **argv) {
         return 1;
     }
     if (!strcmp(argv[1], "interfaces")) return verb_interfaces(argc, argv);
+#ifdef FL_SECFEAT
+    if (cmd_netlab_is_isolated() &&
+        strcmp(argv[1], "kill") != 0 && strcmp(argv[1], "leave") != 0) {
+        /* A netlab reverse-shell binding is open: the real network is dropped
+         * for the duration so nothing leaves while the MitM+RS demo runs.
+         * `kill`/`leave` stay available so a real server can still be torn down;
+         * `netlab end` (either side) resumes the real relay. */
+        fl_color_error("server paused: lab isolated (netlab MitM+RS active) — `netlab end` to resume the real network");
+        return 1;
+    }
+#endif
     if (!strcmp(argv[1], "netinit"))   return verb_netinit();
     if (!strcmp(argv[1], "host"))      return verb_host(argc, argv);
     if (!strcmp(argv[1], "join"))      return verb_join(argc, argv);

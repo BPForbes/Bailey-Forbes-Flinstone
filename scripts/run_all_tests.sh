@@ -101,6 +101,7 @@ run_make "test_server_shared_landed_name" test_server_shared_landed_name
 run_make "test_server_shared_purge" test_server_shared_purge
 run_make "test_server_file_accept_path" test_server_file_accept_path
 run_make "test_channel_sidecar" test_channel_sidecar
+run_make "test_macvlan_waitpid" test_macvlan_waitpid
 run_make "server_shared_quarantine_harness (build)" server_shared_quarantine_harness
 run_cmd "server_shared_quarantine_harness (run)" ./tests/server_shared_quarantine_harness
 
@@ -119,6 +120,9 @@ else
   run_make "test_p3_udp_cmds" test_p3_udp_cmds
   run_make "test_p3_net_tools" test_p3_net_tools
 fi
+
+# netlab teaching lab is network-free; always run it.
+run_make "test_netlab_sim" test_netlab_sim
 
 if [[ "$QUIET" == "1" ]]; then
   run_make "test_wifi (quiet bundle)" TEST_QUIET=1 test_wifi

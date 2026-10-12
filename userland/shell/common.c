@@ -129,6 +129,13 @@ static const char HELP_BODY[] =
 "  wifi leave                        Disconnect; drop WLAN addresses from shell env\n"
 "  wifi status                       Wi-Fi backend, interface, and assigned addresses\n"
 "  wifi known                        List saved/joined router profiles\n"
+#ifdef FL_SECFEAT
+"  netlab <verb> ...                 Contained net-security teaching lab (simulation only)\n"
+"                                    pods|hosts|scan|wpa|topology|traceroute|monitor|\n"
+"                                    arp-demo|rs-explain|pcap write|pcap analyze|defend|consent\n"
+"                                    pod create|join|members|host|leave\n"
+"                                    listen [cancel]|accept|end|status  (simulated reverse shell)\n"
+#endif
 "  help                 Display this help\n"
 "  redirect <file>      Redirect output (use \"redirect off\" to restore)\n"
 "  rerun <N>            Re-run Nth history command\n"

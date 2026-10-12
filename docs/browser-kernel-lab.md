@@ -12,7 +12,17 @@ specified in [`docs/portfolio-iframe-integration.md`](./portfolio-iframe-integra
 
 `make browser-kernel` now builds `dist/flintstone.img`: a raw BIOS disk whose
 MBR loads a freestanding payload, constructs identity-mapped long-mode page
-tables, installs a 64-bit GDT, and enters `kernel_entry`. The entry owns its
+tables, installs a 64-bit GDT, and enters `kernel_entry`. The MBR loads the
+payload in a loop of BIOS extended-read (`INT 13h AH=42h`) transfers of at
+most 127 sectors each — one real-mode segment is 64 KiB (128 sectors), and
+127 keeps every transfer inside one segment with no destination wraparound —
+advancing the destination segment and the starting LBA between transfers.
+`scripts/build_freestanding_browser_kernel.sh` enforces a 1024-sector
+(512 KiB) payload ceiling, chosen to keep the loaded image's end address
+below `0xa0000` (the start of VGA memory and the conventional top of
+real-mode addressable memory) with 128 sectors of margin to spare.
+
+The entry owns its
 stack, clears `.bss`, installs an early IDT, initializes COM1, writes the
 diagnostic VGA cell `F`, and only then emits the boot marker. After the marker
 it runs a serial/PS/2 lab shell with in-memory identity, a ramfs (`dir`,

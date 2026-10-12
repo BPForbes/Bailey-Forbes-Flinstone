@@ -35,13 +35,24 @@
     let disposed = false;
     let paused = false;
     const term = document.getElementById("wasm-term");
+    // The guest streams raw output one byte at a time, and that stream can
+    // contain multi-byte UTF-8 sequences (e.g. an em dash is 3 bytes).
+    // String.fromCharCode(byte) treats each byte as its own Latin-1 code
+    // point, which mangles any such sequence into mojibake. A streaming
+    // TextDecoder buffers an incomplete sequence across calls and only
+    // yields output once a full code point has arrived; for the ASCII
+    // bytes that make up the overwhelming majority of guest output it
+    // still returns that same single character immediately, so this adds
+    // no delay there.
+    const shellDecoder = new TextDecoder("utf-8", { fatal: false });
     const mod = await factory({
       locateFile: name => new URL(name, wasmDir).href,
       printErr: text => onDiagnostic?.(String(text)),
     });
     mod.onShellChar = code => {
       if (disposed) return;
-      const ch = String.fromCharCode(code);
+      const ch = shellDecoder.decode(new Uint8Array([code]), { stream: true });
+      if (!ch) { serialByte(code); return; }
       appendTerm(term, ch);
       serialByte(code);
     };
