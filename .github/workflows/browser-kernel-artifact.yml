@@ -94,8 +94,15 @@ jobs:
           . "$EMSDK_ROOT/emsdk_env.sh"
           EMCC_REQUIRED=1 make wasm
 
+      - name: Build security-features kernel variant (netlab lab)
+        env:
+          GITHUB_SHA: ${{ github.sha }}
+        run: make browser-kernel-secfeat
+
       - name: Probe serial identity and concurrent sessions
-        run: python3 ./scripts/test_freestanding_shell.py
+        # The netlab suite needs the SECFEAT image; the default dist/flintstone.img
+        # (built above, boot-probed, and published) stays lab-free.
+        run: FL_BROWSER_KERNEL_IMAGE=dist/flintstone-secfeat.img python3 ./scripts/test_freestanding_shell.py
 
       - name: Fetch pinned QEMU Wasm runtime
         run: python3 ./scripts/fetch_browser_runtime.py
