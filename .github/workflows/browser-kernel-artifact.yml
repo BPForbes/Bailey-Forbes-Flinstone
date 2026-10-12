@@ -93,9 +93,17 @@ jobs:
           # shellcheck disable=SC1091
           . "$EMSDK_ROOT/emsdk_env.sh"
           EMCC_REQUIRED=1 make wasm
+          SECFEAT=1 EMCC_REQUIRED=1 make wasm
+
+      - name: Build security-features kernel variant (netlab lab)
+        env:
+          GITHUB_SHA: ${{ github.sha }}
+        run: make browser-kernel-secfeat
 
       - name: Probe serial identity and concurrent sessions
-        run: python3 ./scripts/test_freestanding_shell.py
+        # The netlab suite needs the SECFEAT image; the default dist/flintstone.img
+        # (built above, boot-probed, and published) stays lab-free.
+        run: FL_BROWSER_KERNEL_IMAGE=dist/flintstone-secfeat.img python3 ./scripts/test_freestanding_shell.py
 
       - name: Fetch pinned QEMU Wasm runtime
         run: python3 ./scripts/fetch_browser_runtime.py
@@ -107,12 +115,26 @@ jobs:
         timeout-minutes: 8
         run: node ./scripts/test_browser_boot.cjs
 
+      - name: Validate security-features browser boot independently
+        timeout-minutes: 8
+        run: |
+          FL_BROWSER_KERNEL_MANIFEST=build-info-secfeat.json ./scripts/test_browser_kernel_artifact.sh
+          FL_BROWSER_VARIANT=secfeat node ./scripts/test_browser_boot.cjs
+
       - name: Package validated static browser lab
-        run: python3 ./scripts/package_browser_lab_release.py
+        # Default first: it replaces all of dist/browser-lab. The security variant
+        # is then packaged into dist/browser-lab/security/.
+        run: |
+          python3 ./scripts/package_browser_lab_release.py
+          python3 ./scripts/package_browser_lab_release.py secfeat
 
       - name: Validate packaged lab asset paths
         timeout-minutes: 8
         run: FL_BROWSER_TEST_PACKAGED=1 node ./scripts/test_browser_boot.cjs
+
+      - name: Validate packaged security-features lab asset paths
+        timeout-minutes: 8
+        run: FL_BROWSER_TEST_PACKAGED=1 FL_BROWSER_VARIANT=secfeat node ./scripts/test_browser_boot.cjs
 
       - name: Validate portfolio iframe isolation
         timeout-minutes: 10

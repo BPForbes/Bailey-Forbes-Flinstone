@@ -8,9 +8,12 @@ import time
 from pathlib import Path
 
 root = Path(__file__).resolve().parents[1]
-image = root / "dist" / "flintstone.img"
+# The netlab suite below needs the security-features (SECFEAT) image; the
+# Makefile builds dist/flintstone-secfeat.img and points us at it. Default to
+# the plain image for a manual run.
+image = Path(os.environ.get("FL_BROWSER_KERNEL_IMAGE", str(root / "dist" / "flintstone.img")))
 if not image.is_file():
-    sys.exit("test-freestanding-shell: missing dist/flintstone.img")
+    sys.exit(f"test-freestanding-shell: missing {image}")
 
 proc = subprocess.Popen(
     [
@@ -102,7 +105,7 @@ HOSTED_VERBS = [
     "setdisk", "sudo -k", "userdel", "ping", "ping6", "whoami", "type", "udplisten",
     "udpsend", "update", "version", "where", "write", "writecluster",
     "help", "history", "his", "cc", "exit", "bios", "clear", "make", "session",
-    "switchuser", "login", "useradd", "users", "ls", "pwd", "rm",
+    "switchuser", "login", "useradd", "users", "ls", "pwd", "rm", "netlab",
 ]
 
 
@@ -175,6 +178,98 @@ try:
     cmd("version", expect="4.5.2")
     cmd("contracts json", expect="labdisk")
     cmd("type hello.txt", expect="lab-fs")
+
+    # netlab teaching lab (simulation) + lab/live network switch.
+    cmd("netlab pods", expect="redteam-lab")
+    cmd("netlab hosts redteam-lab", expect="192.168.56.1")
+    cmd("netlab scan redteam-lab", expect="02:00:00:00:56:01")
+    cmd("netlab wpa redteam-lab", expect="fabricated")
+    cmd("netlab topology redteam-lab", expect="observer vantage")
+    cmd("netlab arp-demo redteam-lab", expect="SPOOF")
+    cmd("netlab capture redteam-lab", expect="ALERT")
+    cmd("netlab traceroute redteam-lab bob", expect="bob")
+    # Starting the demo drops the real network: the server relay refuses while
+    # isolated, then resumes once the demo stops.
+    cmd("netlab start", expect="LAB_NETMODE lab")
+    cmd("netlab status", expect="lab-isolated")
+    cmd("server host", expect="lab isolated")
+    cmd("netlab stop", expect="LAB_NETMODE live")
+    cmd("server host", expect="SERVER_RELAY host")
+
+    # Pods: real-account membership, host-collision resolution, and a
+    # listener/accept reverse shell bound to a real second session (not a
+    # free-typed name). Session 1 (flinstone) just ran `server host` above,
+    # so it is netlab's locally-tracked real server host: creating a pod
+    # from here must NOT hand that same identity the pod host role too.
+    cmd("netlab pod create redcell", expect="host pending")
+    cmd("netlab pod members", expect="real server host")
+    # Session 2 already exists (created earlier, logged in as root) and is
+    # not the real server host, so joining it must resolve the pending host.
+    send("session 2\n")
+    read_until("SESSION 2 user=root", 4)
+    cmd("netlab pod join", expect="identity preserved")
+    cmd("netlab pod members", expect="(host)")
+    # root calls `listen` -> root is the attacker. flinstone will `accept` ->
+    # flinstone is the victim side (listener = attacker, acceptor = victim).
+    cmd("netlab listen", expect="is listening")
+    send("session 1\n")
+    read_until("SESSION 1 user=flinstone", 4)
+    cmd("netlab accept", expect="LAB_NETMODE lab")
+    # flinstone (the victim) keeps using its own real session normally while
+    # bound -- the binding never touches it.
+    cmd("whoami", expect="WHOAMI flinstone")
+    cmd("server host", expect="lab isolated")
+    # root is the bound attacker: only root's non-management `netlab <cmd>`
+    # calls are redirected into the sandbox, and they execute for real
+    # against isolated state, not canned text.
+    send("session 2\n")
+    read_until("SESSION 2 user=root", 4)
+    cmd("netlab whoami", expect="flinstone")
+    cmd("netlab hostname", expect="flinstone-sandbox")
+    cmd("netlab write test.txt hello-from-sandbox", expect="wrote test.txt")
+    cmd("netlab cat test.txt", expect="hello-from-sandbox")
+    # The accepting victim (session 1) can end the binding unilaterally.
+    send("session 1\n")
+    read_until("SESSION 1 user=flinstone", 4)
+    cmd("netlab end", expect="LAB_NETMODE live")
+    cmd("server host", expect="SERVER_RELAY host")
+    # Now that the binding is cleanly closed, root leaving the pod (its only
+    # other member) must re-open "host pending": the sole remaining member
+    # (flinstone) is still netlab's locally-tracked real server host.
+    send("session 2\n")
+    read_until("SESSION 2 user=root", 4)
+    cmd("netlab pod leave", expect="host pending")
+
+    # Server lifecycle coupling. Session 1 (flinstone) is still the real server
+    # host and the sole member of pod redcell (host pending).
+    send("session 1\n")
+    read_until("SESSION 1 user=flinstone", 4)
+    # `server kill` by the server host tears the server down, so the pod that
+    # lived under it is killed too.
+    cmd("server kill", expect="pod dissolved")
+    cmd("netlab pod members", expect="no pod")
+    # Rebuild a two-member pod to show `server leave` re-electing the pod host:
+    # flinstone hosts the server again (so it is blocked from the pod host),
+    # root joins and takes the pod host.
+    cmd("server host", expect="SERVER_RELAY host")
+    cmd("netlab pod create redcell2", expect="host pending")
+    send("session 2\n")
+    read_until("SESSION 2 user=root", 4)
+    cmd("netlab pod join", expect="identity preserved")
+    cmd("netlab pod host", expect="root")
+    # flinstone (server host AND pod join-order #0) leaves the server: the relay
+    # picks a new server host by its own order, and netlab independently
+    # re-elects the pod host by pod join order, so flinstone reclaims it.
+    send("session 1\n")
+    read_until("SESSION 1 user=flinstone", 4)
+    cmd("server leave", expect="new pod host")
+    cmd("netlab pod host", expect="flinstone")
+    # Gap closure: becoming the server host also re-elects the pod host on the
+    # spot. flinstone (session 1) is the pod host; running `server host` makes
+    # session 1 the server host (a separate relay point), so the pod host moves
+    # to session 2 (root) immediately -- not only at accept time.
+    cmd("server host", expect="new pod host: root")
+    cmd("netlab pod host", expect="root")
 
     for verb in HOSTED_VERBS:
         cmd(verb)

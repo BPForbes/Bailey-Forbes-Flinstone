@@ -202,6 +202,15 @@ CORE_SRCS = kernel/core/vfs/disk.c kernel/core/vfs/fat32_host.c kernel/core/vfs/
             kernel/core/identity/session.c \
             kernel/core/sys/vrt.c kernel/core/sys/ipc.c kernel/core/sys/syscall.c kernel/core/vfs/vfs.c
 COMMAND_SRCS := $(wildcard userland/command/cmd_*.c) userland/command/server_file_expire.c
+# Security-features gate (SECFEAT). Default off: the netlab teaching lab and any
+# future security labs are compiled out entirely, so a plain `make` (and main)
+# ship a shell with no security lab. `make SECFEAT=1` includes them and defines
+# FL_SECFEAT, which gates the registration/dispatch/help call sites.
+ifeq ($(SECFEAT),1)
+CFLAGS += -DFL_SECFEAT
+else
+COMMAND_SRCS := $(filter-out userland/command/cmd_netlab.c,$(COMMAND_SRCS))
+endif
 SHELL_SRCS = userland/shell/common.c userland/shell/util.c userland/shell/shell_tokenize.c userland/shell/history_record.c userland/shell/audit_log.c userland/shell/authz_subsystem.c userland/shell/contract_log_dispatch.c userland/shell/session_sync.c userland/shell/session_login_env.c userland/shell/terminal.c userland/shell/interpreter.c userland/shell/sh.c userland/shell/shell_io.c $(COMMAND_SRCS)
 # GitHub Actions (or explicit opt-in) may generate userland/shell/version_changelog.c; see scripts/gen_version_changelog.c
 ifeq ($(CHANGELOG_CI),1)
@@ -357,6 +366,11 @@ vm-sdl:
 browser-kernel:
 	@./scripts/build_freestanding_browser_kernel.sh
 
+# Security-features variant (netlab teaching lab compiled in). The default
+# browser-kernel image stays lab-free (what main/the Flinstone page ship).
+browser-kernel-secfeat:
+	@SECFEAT=1 ./scripts/build_freestanding_browser_kernel.sh
+
 test-browser-kernel: browser-kernel
 	@./scripts/test_browser_kernel_artifact.sh
 
@@ -366,14 +380,18 @@ test-browser-kernel-gate:
 test-freestanding-entry:
 	@bash ./tests/test_freestanding_entry.sh
 
-test-freestanding-shell: test-browser-kernel
-	@python3 ./scripts/test_freestanding_shell.py
+# The netlab suite needs the SECFEAT image; the plain boot gate (test-browser-kernel)
+# still validates the lab-free default image.
+test-freestanding-shell: test-browser-kernel browser-kernel-secfeat
+	@FL_BROWSER_KERNEL_IMAGE=dist/flintstone-secfeat.img python3 ./scripts/test_freestanding_shell.py
 
 gen-session-wire-js:
 	@python3 ./scripts/gen_session_wire_js.py
 
 test-browser-lab: gen-session-wire-js
 	@node ./tests/test_browser_lab.js
+	@node ./tests/test_netlab_lab_core.js
+	@node ./tests/test_browser_lab_utf8.js
 	@node ./tests/test_server_relay.js
 	@node ./tests/test_server_relay_client.js
 	@node ./tests/test_lab_relay_room.js
@@ -654,7 +672,7 @@ else
 WIFI_TEST_LINK_PRE =
 WIFI_TEST_LINK_AT =
 endif
-.PHONY: test_mem_asm test_alloc test_priority_queue test_shell_ctrl_c test_drivers test_core test_invariants test_audit_log test_p3_network test_p3_udp_cmds test_p3_net_tools test_vm_layer_warning check-layers check-network-requirements test_all test_all-quiet run_cunit_tests
+.PHONY: test_mem_asm test_alloc test_priority_queue test_shell_ctrl_c test_drivers test_core test_invariants test_audit_log test_p3_network test_p3_udp_cmds test_p3_net_tools test_netlab_sim test_vm_layer_warning check-layers check-network-requirements test_all test_all-quiet run_cunit_tests
 test_mem_asm: $(MEM_ASM_OBJ)
 	$(CC) $(CFLAGS) $(TEST_SANITIZE) -I. -o tests/test_mem_asm tests/test_mem_asm.c $(MEM_ASM_OBJ)
 	./tests/test_mem_asm
@@ -1183,6 +1201,18 @@ test_p3_net_tools: $(NET_ASM_OBJ) $(MEM_ASM_OBJ) $(NET_TEST_MM_OBJS) $(NET_TEST_
 	  $(NET_TEST_EXTRA_OBJS) $(NET_TEST_LIBS) -pthread -Wl,-z,noexecstack
 	./tests/test_p3_net_tools
 
+# netlab teaching lab (cmd_netlab.c) — pure in-memory simulation + pcap
+# round trip. No network, no asm, no kernel objects: just the command and the
+# registry, so it runs anywhere the toolchain does.
+.PHONY: test_netlab_sim
+# The lab is gated behind SECFEAT; build the test with the flag so the registry
+# entry and dispatch are present.
+test_netlab_sim:
+	$(CC) $(CFLAGS) -DFL_SECFEAT $(TEST_SANITIZE) -o tests/test_netlab_sim \
+	  tests/test_netlab_sim.c userland/command/cmd_netlab.c \
+	  userland/command/cmd_registry.c -Wl,-z,noexecstack
+	./tests/test_netlab_sim
+
 # Cross-subnet (multi-network) end-to-end demo + tcpdump capture on the
 # router namespace. Requires sudo, iproute2, tcpdump, tmux, and (optional)
 # the `scapy` Python package for the per-frame decode artifact.
@@ -1263,7 +1293,7 @@ clean:
 	rm -f kernel/arch/*/drivers/*.o kernel/arch/*/hal/*.o kernel/drivers/*.o kernel/drivers/block/*.o VM/devices/*.o
 	rm -f arch/*/*/*.o arch/*/*/alloc/*.o
 	rm -f tests/test_mem_asm tests/test_alloc tests/test_priority_queue tests/test_drivers tests/test_vm_mem tests/test_replay tests/test_invariants tests/test_userspace_connection tests/test_vm_syscall_bridge tests/test_vm_arch_readiness
-	rm -f tests/test_p3_network tests/test_p3_server tests/test_p3_server_lan tests/test_p3_udp_cmds tests/test_p3_net_tools tests/test_wifi_flinstone_helper tests/test_wifi_flinstone_linux_helper tests/test_p3_wifi tests/test_p3_wifi_ota tests/test_wifi_mgmt_ota tests/test_wifi_connect_ota tests/test_wifi_coprocessor tests/test_wifi_uart_at_scan_join tests/test_wifi_fullmac_probe tests/test_wifi_80211ax_mock_279 tests/test_wifi_ax_server_ota tests/test_macvlan_waitpid
+	rm -f tests/test_p3_network tests/test_p3_server tests/test_p3_server_lan tests/test_p3_udp_cmds tests/test_p3_net_tools tests/test_netlab_sim tests/test_wifi_flinstone_helper tests/test_wifi_flinstone_linux_helper tests/test_p3_wifi tests/test_p3_wifi_ota tests/test_wifi_mgmt_ota tests/test_wifi_connect_ota tests/test_wifi_coprocessor tests/test_wifi_uart_at_scan_join tests/test_wifi_fullmac_probe tests/test_wifi_80211ax_mock_279 tests/test_wifi_ax_server_ota tests/test_macvlan_waitpid
 	rm -f tests/test_batch_argv_issue220 tests/test_threadpool_issue222 tests/test_disk_hex_issue222
 	rm -rf tests/obj/issue220 tests/obj/issue222
 	find . -name '*.o' -type f ! -path './deps/*' ! -path './.git/*' -exec rm -f {} +

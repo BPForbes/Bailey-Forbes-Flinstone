@@ -78,23 +78,37 @@ def _sha256(path):
     return value.hexdigest()
 
 
-def package_browser_lab(root):
+def package_browser_lab(root, variant=""):
+    """Package the default lab, or the security variant under dist/browser-lab/security/.
+
+    The default must be packaged first: it replaces all of dist/browser-lab.
+    """
+    secfeat = variant == "secfeat"
     dist = root / "dist"
-    manifest = json.loads((dist / "build-info.json").read_text(encoding="utf-8"))
-    evidence = json.loads((dist / "browser-validation.json").read_text(encoding="utf-8"))
+    manifest_name = "build-info-secfeat.json" if secfeat else "build-info.json"
+    evidence_name = "browser-validation-secfeat.json" if secfeat else "browser-validation.json"
+    manifest = json.loads((dist / manifest_name).read_text(encoding="utf-8"))
+    evidence = json.loads((dist / evidence_name).read_text(encoding="utf-8"))
     runtime_lock = json.loads((root / "tools/browser-lab/runtime-lock.json").read_text(encoding="utf-8"))
     artifact = validate_browser_release(manifest, evidence, runtime_lock)
     if _sha256(dist / artifact) != manifest["sha256"]:
         raise ValueError("Refusing to package an artifact with an invalid SHA-256")
 
-    output = dist / "browser-lab"
+    output = dist / "browser-lab" / "security" if secfeat else dist / "browser-lab"
     if output.exists():
         shutil.rmtree(output)
     shutil.copytree(root / "tools/browser-lab", output,
                     ignore=shutil.ignore_patterns("node_modules", "package*.json"))
+    if secfeat:
+        wasm_src = root / "build/wasm-secfeat"
+        if not (wasm_src / "flintstone.js").is_file():
+            raise ValueError("The security variant needs the SECFEAT WebAssembly module (SECFEAT=1 make wasm)")
+        shutil.rmtree(output / "wasm")
+        shutil.copytree(wasm_src, output / "wasm")
     (output / "artifacts").mkdir()
-    for name in (artifact, "build-info.json", "browser-validation.json"):
-        shutil.copy2(dist / name, output / "artifacts" / name)
+    shutil.copy2(dist / artifact, output / "artifacts" / artifact)
+    shutil.copy2(dist / manifest_name, output / "artifacts" / "build-info.json")
+    shutil.copy2(dist / evidence_name, output / "artifacts" / "browser-validation.json")
 
     # The release has stable asset roots while development uses ../../dist.
     lab = output / "lab.js"
@@ -106,4 +120,5 @@ def package_browser_lab(root):
 
 
 if __name__ == "__main__":
-    print(package_browser_lab(Path(__file__).resolve().parents[1]))
+    import sys
+    print(package_browser_lab(Path(__file__).resolve().parents[1], *sys.argv[1:]))
