@@ -57,7 +57,7 @@ jobs:
         run: ./scripts/test_browser_kernel_artifact.sh
 
       - name: Install browser validation tools
-        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
         with:
           node-version: 22
 
@@ -202,7 +202,7 @@ jobs:
 
       - name: Upload blocked compatibility package
         if: steps.metadata.outputs.browser_compatible != 'true'
-        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: flintstone-browser-kernel-browser-blocked-${{ github.sha }}
           path: |
@@ -225,7 +225,7 @@ jobs:
           steps.metadata.outputs.bootable == 'true' &&
           steps.metadata.outputs.browser_compatible == 'true' &&
           steps.boot_probe.outputs.boot_smoke_passed == 'true'
-        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: flintstone-browser-kernel
           path: |
@@ -239,7 +239,7 @@ jobs:
           steps.metadata.outputs.bootable == 'true' &&
           steps.metadata.outputs.browser_compatible == 'true' &&
           steps.boot_probe.outputs.boot_smoke_passed == 'true'
-        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: flintstone-browser-lab
           path: dist/browser-lab
