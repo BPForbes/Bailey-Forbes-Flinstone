@@ -163,13 +163,14 @@ Each step needs its own `.ver` change under Flinstone's versioning rules.
     (offer, then sequential chunks over the TCP hub, `net_file_delivery.c`), unchanged. The
     bytes it carries are the sealed KeyQuorum letter from item 10, so the hub stays a blind
     medium without a second transport.
-12. **Gate before send.** Before the offer is sent, the sender's side checks that a permitted
-    relationship exists between sender and receiver, using the data each side already holds:
-    - **Locally:** the sender holds the file (or a tracked copy of it), and the receiver's
-      key id is known to the sender's store with an active KeyQuorum encryption key.
-    - **On the server:** the server's registry holds the receiver's active key and the
-      relationship is one the heritage rules allow: an ancestor or descendant, or an accepted
-      bridge (`kernel/core/identity/bridge.c`). A sibling or other branch needs the bridge.
+12. **Gate before send, on the sender only.** The check runs on the sender's side, before the
+    offer is sent. The server does not repeat it and does not refuse a send on its own check.
+    The sender confirms, from data it holds locally or has already fetched from the server:
+    - the sender holds the file (or a tracked copy of it);
+    - the receiver's key id is known and has an active KeyQuorum encryption key;
+    - the relationship is one the heritage rules allow: an ancestor or descendant, or an
+      accepted bridge (`kernel/core/identity/bridge.c`). A sibling or other branch needs the
+      bridge.
     If the check fails, nothing is sent. The user sees the plain reason.
 13. **The gate is a precheck, not a second authority.** It only decides whether to start a
     send. KeyQuorum still decides trust on receipt (item 3, item 8), so a passed gate does not
