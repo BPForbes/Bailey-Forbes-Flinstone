@@ -1,20 +1,30 @@
 #include "session_login_env.h"
 #include "common.h"
 #include "fs_jail.h"
+#include "session.h"
+#include "user_db.h"
 #include <stdio.h>
 #include <string.h>
+#include <strings.h>
 #include <unistd.h>
 
 static void login_home_for_user(const char *username, char *home, size_t home_sz) {
     if (!username || !username[0] || !home || home_sz == 0u)
         return;
 
+    if (fs_jail_is_active()) {
+        /* Inside the jail every account has its own home: <jail>/home/Flinstone/Bob. */
+        const fl_user_record_t *u = fl_user_db_find(fl_session_user_db(), username);
+
+        if (u && fs_jail_account_home(u->key_id, home, home_sz) == 0)
+            return;
+    }
     if (fs_jail_is_active() && g_cwd[0]) {
         strncpy(home, g_cwd, home_sz - 1u);
         home[home_sz - 1u] = '\0';
         return;
     }
-    if (!strcmp(username, "root")) {
+    if (!strcasecmp(username, "root")) {
         strncpy(home, "/", home_sz - 1u);
         home[home_sz - 1u] = '\0';
         return;

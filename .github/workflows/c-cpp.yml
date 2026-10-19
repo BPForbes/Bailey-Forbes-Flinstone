@@ -98,7 +98,13 @@ jobs:
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v5
         with:
+          submodules: true
           fetch-depth: 0
+
+      - name: Install Rust (KeyQuorum identity library)
+        uses: dtolnay/rust-toolchain@89b12181fb390509a0842a86cc55eeb8eb928c1d # stable branch
+        with:
+          toolchain: stable
 
       - name: Sync version checkout for build
         uses: ./.github/actions/sync-version-checkout
@@ -128,6 +134,9 @@ jobs:
 
       - name: Test — fs_jail
         run: make test_fs_jail
+
+      - name: Test — account heritage (key ids, bridges, jail homes)
+        run: make test_heritage
 
       - name: Test — drivers
         run: make test_drivers
@@ -161,7 +170,14 @@ jobs:
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v5
         with:
+          submodules: true
           fetch-depth: 0
+
+      - name: Install Rust (KeyQuorum identity library, AArch64)
+        uses: dtolnay/rust-toolchain@89b12181fb390509a0842a86cc55eeb8eb928c1d # stable branch
+        with:
+          toolchain: stable
+          targets: aarch64-unknown-linux-gnu
 
       - name: Sync version checkout for build
         uses: ./.github/actions/sync-version-checkout
@@ -181,6 +197,10 @@ jobs:
           ./gen_version_changelog
 
       - name: Build (ARM / AArch64)
+        env:
+          # The KeyQuorum identity library is built for AArch64 with the cross compiler.
+          CC_aarch64_unknown_linux_gnu: aarch64-linux-gnu-gcc
+          CARGO_TARGET_AARCH64_UNKNOWN_LINUX_GNU_LINKER: aarch64-linux-gnu-gcc
         run: make ARCH=arm CHANGELOG_CI=1
 
   build-vm:
@@ -190,7 +210,13 @@ jobs:
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v5
         with:
+          submodules: true
           fetch-depth: 0
+
+      - name: Install Rust (KeyQuorum identity library)
+        uses: dtolnay/rust-toolchain@89b12181fb390509a0842a86cc55eeb8eb928c1d # stable branch
+        with:
+          toolchain: stable
 
       - name: Sync version checkout for build
         uses: ./.github/actions/sync-version-checkout
@@ -216,7 +242,13 @@ jobs:
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v5
         with:
+          submodules: true
           fetch-depth: 0
+
+      - name: Install Rust (KeyQuorum identity library)
+        uses: dtolnay/rust-toolchain@89b12181fb390509a0842a86cc55eeb8eb928c1d # stable branch
+        with:
+          toolchain: stable
 
       - name: Sync version checkout for build
         uses: ./.github/actions/sync-version-checkout

@@ -51,7 +51,7 @@ static const fs_provider_vtable_t local_vtable = {
 static int local_path_ok(const char *path_for_jail) {
     if (!fs_jail_is_active())
         return 0;
-    if (fs_jail_check_path(path_for_jail) != 0) {
+    if (fs_jail_check_path(path_for_jail) != 0 || fs_jail_check_home(path_for_jail) != 0) {
         errno = EPERM;
         return -1;
     }

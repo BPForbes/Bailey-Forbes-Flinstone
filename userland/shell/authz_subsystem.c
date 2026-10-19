@@ -33,6 +33,7 @@ static fl_authz_decision_t guest_subsystem_policy(unsigned op, void *ctx) {
     case FL_AUTHZ_OP_IDENTITY_USERADD:
     case FL_AUTHZ_OP_IDENTITY_USERDEL:
     case FL_AUTHZ_OP_IDENTITY_PASSWD:
+    case FL_AUTHZ_OP_IDENTITY_BRIDGE:
         return FL_AUTHZ_DENY;
     default:
         return FL_AUTHZ_ALLOW;
@@ -60,6 +61,7 @@ fl_authz_decision_t fl_authz_guest_shell_builtin(unsigned cmd_no) {
     case FL_SCMD_USERADD:
     case FL_SCMD_USERDEL:
     case FL_SCMD_PASSWD:
+    case FL_SCMD_BRIDGE:
         return FL_AUTHZ_DENY;
     default:
         return FL_AUTHZ_ALLOW;
@@ -107,6 +109,8 @@ unsigned fl_authz_subsystem_op_for_shell_cmd(unsigned cmd_no) {
         return (unsigned)FL_AUTHZ_OP_IDENTITY_USERDEL;
     case FL_SCMD_PASSWD:
         return (unsigned)FL_AUTHZ_OP_IDENTITY_PASSWD;
+    case FL_SCMD_BRIDGE:
+        return (unsigned)FL_AUTHZ_OP_IDENTITY_BRIDGE;
     default:
         return (unsigned)FL_AUTHZ_OP_UNSPECIFIED;
     }

@@ -31,7 +31,7 @@ int cmd_login_run(int argc, char **argv) {
         return 1;
     }
     fl_session_sync_services();
-    printf("login: now %s%s\n", fl_session_current_user(),
+    printf("login: now %s [%s]%s\n", fl_session_current_user(), fl_session_current_key_id(),
            fl_session_is_elevated_account() ? " (elevated)" : "");
     return 0;
 }

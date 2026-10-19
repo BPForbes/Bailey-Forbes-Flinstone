@@ -298,7 +298,9 @@ static int test_session_hardening_issue186(void) {
     ASSERT(fl_session_jail_privileged() == 1);
 
     ASSERT(fl_session_login("flinstone", "flinstone") == FL_RESULT_OK);
-    ASSERT(strcmp(fl_session_current_user(), "flinstone") == 0);
+    /* Names match case-insensitively; the session keeps the account's own spelling. */
+    ASSERT(strcmp(fl_session_current_user(), "Flinstone") == 0);
+    ASSERT(strcmp(fl_session_current_key_id(), "Root.Flinstone") == 0);
     ASSERT(fl_session_is_elevated_account() == 0);
     ASSERT(fl_session_has_elevation() == 0);
     ASSERT(fl_session_verify_password("flinstone") == 1);
@@ -430,13 +432,14 @@ static int test_contract_constants(void) {
     ASSERT(FL_WQ_LAYER_URGENT == 0);
     ASSERT(FL_WQ_PENDING_MAX == 64u);
 
-    ASSERT(FL_CONTRACT_P2_IDENTITY_REV == 3);
+    ASSERT(FL_CONTRACT_P2_IDENTITY_REV == 4);
     ASSERT(strcmp(FL_CREDENTIAL_STORE_LAB_SQLITE_REL, "userland/shell/fl_users.db") == 0);
     ASSERT(FL_CONTRACT_P2_VOCABULARY_LOCK == 1);
     ASSERT(FL_CONTRACT_P2_1_PRINCIPAL_CONTRACT_DEFINED == 1);
     ASSERT(FL_CONTRACT_P2_2_CREDENTIAL_STORE_CONTRACT_DEFINED == 1);
     ASSERT(FL_CONTRACT_P2_3_AUTHZ_CONTRACT_DEFINED == 1);
     ASSERT(FL_CONTRACT_P2_4_ELEVATION_CONTRACT_DEFINED == 1);
+    ASSERT(FL_CONTRACT_P2_HERITAGE_CONTRACT_DEFINED == 1);
 
     ASSERT(strcmp(FL_PRINCIPAL_ENV_NAME, "FL_PRINCIPAL") == 0);
     ASSERT(strcmp(FL_PRINCIPAL_GUEST_LITERAL, "guest") == 0);

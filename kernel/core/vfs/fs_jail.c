@@ -4,6 +4,8 @@
 #include "server_shared_fs.h"
 #include "../identity/session.h"
 #include "../identity/path_property.h"
+#include "../identity/heritage.h"
+#include "../identity/bridge.h"
 #include <errno.h>
 #include <limits.h>
 #include <stdio.h>
@@ -105,6 +107,150 @@ static int under_jail(const char *canon) {
     return (canon[g_fs_jail_len] == '\0' || canon[g_fs_jail_len] == '/');
 }
 
+/* Absolute form of path (relative to g_cwd). */
+static int jail_absolute(const char *path, char *ab, size_t cap) {
+    if (path[0] == '/') {
+        if (strlen(path) >= cap)
+            return -1;
+        strncpy(ab, path, cap - 1);
+    } else {
+        int n = snprintf(ab, cap, "%s/%s", g_cwd, path);
+        if (n < 0 || (size_t)n >= cap)
+            return -1;
+    }
+    ab[cap - 1] = '\0';
+    return 0;
+}
+
+/*
+ * Canonical path: realpath when it exists, else the realpath of its deepest existing
+ * ancestor followed by the remaining components (so a file about to be created is
+ * judged by where it would land).
+ */
+static int jail_canonical(const char *path, char *out, size_t cap) {
+    char ab[JAIL_ROOT_MAX * 2];
+    char pcopy[JAIL_ROOT_MAX * 2];
+    char *dcan;
+
+    mem_domain_zero(ab, sizeof(ab));
+    if (!path || !path[0] || jail_absolute(path, ab, sizeof(ab)) != 0)
+        return -1;
+    if (realpath(ab, out) != NULL && strlen(out) < cap)
+        return 0;
+    strncpy(pcopy, ab, sizeof(pcopy) - 1);
+    pcopy[sizeof(pcopy) - 1] = '\0';
+    for (;;) {
+        char *slash = strrchr(pcopy, '/');
+        int n;
+
+        if (!slash || slash == pcopy)
+            return -1;
+        *slash = '\0';
+        dcan = realpath(pcopy, NULL);
+        if (!dcan)
+            continue;
+        n = snprintf(out, cap, "%s/%s", dcan, ab + strlen(pcopy) + 1);
+        free(dcan);
+        return (n < 0 || (size_t)n >= cap) ? -1 : 0;
+    }
+}
+
+static int path_under(const char *canon, const char *dir) {
+    size_t len = strlen(dir);
+
+    if (strncmp(canon, dir, len) != 0)
+        return 0;
+    return canon[len] == '\0' || canon[len] == '/';
+}
+
+int fs_jail_account_home(const char *key_id, char *out, size_t cap) {
+    char rel[FL_HERITAGE_KEY_ID_MAX + 8];
+    char *p;
+    int n;
+
+    if (!out || cap == 0u)
+        return -1;
+    out[0] = '\0';
+    if (!fs_jail_is_active() || fl_heritage_home_rel(key_id, rel, sizeof rel) != FL_RESULT_OK)
+        return -1;
+    n = snprintf(out, cap, "%s/%s", g_fs_jail_root, rel);
+    if (n < 0 || (size_t)n >= cap) {
+        out[0] = '\0';
+        return -1;
+    }
+    /* mkdir -p below the jail root, one component at a time. */
+    for (p = out + g_fs_jail_len + 1; ; p++) {
+        if (*p == '/' || *p == '\0') {
+            char saved = *p;
+
+            *p = '\0';
+            if (mkdir(out, 0700) != 0 && errno != EEXIST) {
+                *p = saved;
+                return -1;
+            }
+            *p = saved;
+            if (saved == '\0')
+                break;
+        }
+    }
+    return 0;
+}
+
+int fs_jail_check_home(const char *path) {
+    char canon[JAIL_ROOT_MAX * 2];
+    char home_root[JAIL_ROOT_MAX + 16];
+    char best_home[JAIL_ROOT_MAX * 2];
+    const char *owner_key = FL_HERITAGE_ROOT_KEY;
+    const char *actor_key;
+    const fl_user_db_t *db;
+    size_t i;
+    int n;
+
+    if (!fs_jail_is_active())
+        return 0;
+    n = snprintf(home_root, sizeof home_root, "%s/%s", g_fs_jail_root, FL_HERITAGE_HOME_DIR);
+    if (n < 0 || (size_t)n >= sizeof home_root)
+        return -1;
+    if (jail_canonical(path, canon, sizeof canon) != 0) {
+        /* Nothing on the path exists: judge the literal absolute path. */
+        mem_domain_zero(canon, sizeof canon);
+        if (!path || !path[0] || jail_absolute(path, canon, sizeof canon) != 0)
+            return -1;
+        return path_under(canon, home_root) ? -1 : 0;
+    }
+    if (!path_under(canon, home_root))
+        return 0;
+
+    /* The owner is the deepest account whose home holds the path; the home tree itself is Root's. */
+    fl_session_init();
+    db = fl_session_user_db();
+    best_home[0] = '\0';
+    for (i = 0; db && i < db->count; i++) {
+        char rel[FL_HERITAGE_KEY_ID_MAX + 8];
+        char home[JAIL_ROOT_MAX * 2];
+
+        if (fl_heritage_home_rel(db->users[i].key_id, rel, sizeof rel) != FL_RESULT_OK)
+            continue;
+        n = snprintf(home, sizeof home, "%s/%s", g_fs_jail_root, rel);
+        if (n < 0 || (size_t)n >= sizeof home)
+            continue;
+        if (path_under(canon, home) && strlen(home) > strlen(best_home)) {
+            strncpy(best_home, home, sizeof(best_home) - 1);
+            best_home[sizeof(best_home) - 1] = '\0';
+            owner_key = db->users[i].key_id;
+        }
+    }
+
+    actor_key = fl_session_current_key_id();
+    if (!actor_key[0])
+        return -1;
+    if (fl_heritage_is_ancestor_or_self(actor_key, owner_key))
+        return 0;
+    if (db && fl_bridge_active_between(db->path, actor_key, owner_key))
+        return 0;
+    return -1;
+}
+
 int fs_jail_check_access(const char *path) {
     fl_path_property_t prop;
     int jail_ok;
@@ -120,6 +266,9 @@ int fs_jail_check_access(const char *path) {
         jail_ok = 0;
 
     if (jail_ok != 0)
+        return -1;
+    /* Heritage is not lifted by sudo: another branch's home needs a bridge. */
+    if (fs_jail_check_home(path) != 0)
         return -1;
 
     {

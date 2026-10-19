@@ -90,6 +90,10 @@ int fl_shell_cmd_dispatch(fl_shell_cmd_no_t no, int argc, char **argv) {
         return cmd_passwd_run(argc, argv);
     case FL_SCMD_WHOAMI:
         return cmd_whoami_run(argc, argv);
+    case FL_SCMD_PROFILE:
+        return cmd_profile_run(argc, argv);
+    case FL_SCMD_BRIDGE:
+        return cmd_bridge_run(argc, argv);
     case FL_SCMD_PING:
         return cmd_ping_run(argc, argv);
     case FL_SCMD_PING6:
