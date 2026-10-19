@@ -157,6 +157,32 @@ Bridges are then signed by both sides' keys, not just recorded in SQLite.
 
 Each step needs its own `.ver` change under Flinstone's versioning rules.
 
+## Send path (decided)
+
+11. **Transport stays as Flinstone has it.** File bytes move through the existing server path
+    (offer, then sequential chunks over the TCP hub, `net_file_delivery.c`), unchanged. The
+    bytes it carries are the sealed KeyQuorum letter from item 10, so the hub stays a blind
+    medium without a second transport.
+12. **Gate before send.** Before the offer is sent, the sender's side checks that a permitted
+    relationship exists between sender and receiver, using the data each side already holds:
+    - **Locally:** the sender holds the file (or a tracked copy of it), and the receiver's
+      key id is known to the sender's store with an active KeyQuorum encryption key.
+    - **On the server:** the server's registry holds the receiver's active key and the
+      relationship is one the heritage rules allow: an ancestor or descendant, or an accepted
+      bridge (`kernel/core/identity/bridge.c`). A sibling or other branch needs the bridge.
+    If the check fails, nothing is sent. The user sees the plain reason.
+13. **The gate is a precheck, not a second authority.** It only decides whether to start a
+    send. KeyQuorum still decides trust on receipt (item 3, item 8), so a passed gate does not
+    make the content trusted.
+14. **Size and limits are unchanged.** The 16 MiB cap, the offer fields and the chunk ordering
+    apply to the sealed bytes. The sealed envelope adds a fixed overhead, so the cap is applied
+    to the envelope size, and the sender refuses a file whose envelope would exceed it.
+
+Conflict to resolve: the current hub sends a file in plain bytes. Item 10 says the host must
+never read a payload, so the sender must seal the file before the offer. Sealing happens on the
+sender's side, before the existing send call, and the server code stays unchanged apart from the
+gate.
+
 ## Wire format for file bytes
 
 Decided: **big-endian** (network byte order), for every integer in a file's bytes, whether it
