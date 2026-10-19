@@ -45,11 +45,13 @@ typedef enum {
     FL_AUTHZ_OP_IDENTITY_USERADD = 7,
     FL_AUTHZ_OP_IDENTITY_USERDEL = 8,
     FL_AUTHZ_OP_IDENTITY_PASSWD = 9,
+    /** Request, accept or revoke a heritage bridge (**contract_p2_heritage.h**). */
+    FL_AUTHZ_OP_IDENTITY_BRIDGE = 10,
     /** Foreign **execvp** / host program launch from the shell (hosted). */
     FL_AUTHZ_OP_SHELL_FOREIGN_EXEC = 100
 } fl_authz_operation_t;
 
-_Static_assert((unsigned)FL_AUTHZ_OP_IDENTITY_PASSWD < (unsigned)FL_AUTHZ_OP_SHELL_FOREIGN_EXEC,
+_Static_assert((unsigned)FL_AUTHZ_OP_IDENTITY_BRIDGE < (unsigned)FL_AUTHZ_OP_SHELL_FOREIGN_EXEC,
                "identity op codes stay below shell foreign-exec band");
 
 _Static_assert((unsigned)FL_AUTHZ_OP_SHELL_FOREIGN_EXEC > (unsigned)FL_AUTHZ_OP_DISK_LOW_LEVEL,

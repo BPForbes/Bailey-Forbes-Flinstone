@@ -129,6 +129,9 @@ jobs:
       - name: Test — fs_jail
         run: make test_fs_jail
 
+      - name: Test — account heritage (key ids, bridges, jail homes)
+        run: make test_heritage
+
       - name: Test — drivers
         run: make test_drivers
 

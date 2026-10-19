@@ -156,8 +156,10 @@ static int test_session_login(void) {
         ASSERT(fl_elevation_active(tok) == 0);
     }
     ASSERT(fl_session_login("root", "root") == FL_RESULT_OK);
+    ASSERT(strcmp(fl_session_current_user(), "Root") == 0);
+    ASSERT(strcmp(fl_session_current_key_id(), "Root") == 0);
     ASSERT(fl_session_logout() == FL_RESULT_OK);
-    ASSERT(strcmp(fl_session_current_user(), "flinstone") == 0);
+    ASSERT(strcmp(fl_session_current_user(), "Flinstone") == 0);
     ASSERT(fl_session_is_elevated_account() == 0);
     ASSERT(fl_session_has_elevation() == 0);
     fl_session_begin_sudo_scope();

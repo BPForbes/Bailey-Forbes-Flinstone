@@ -199,7 +199,7 @@ CORE_SRCS = kernel/core/vfs/disk.c kernel/core/vfs/fat32_host.c kernel/core/vfs/
             kernel/core/time/timekeeping.c \
             $(NET_CORE_SRCS) \
             kernel/core/identity/user_db.c kernel/core/identity/elevation.c kernel/core/identity/path_property.c \
-            kernel/core/identity/session.c \
+            kernel/core/identity/session.c kernel/core/identity/heritage.c kernel/core/identity/bridge.c \
             kernel/core/sys/vrt.c kernel/core/sys/ipc.c kernel/core/sys/syscall.c kernel/core/vfs/vfs.c
 COMMAND_SRCS := $(wildcard userland/command/cmd_*.c) userland/command/server_file_expire.c
 # Security-features gate (SECFEAT). Default off: the netlab teaching lab and any
@@ -572,7 +572,7 @@ TEST_SRCS = BPForbes_Flinstone_Tests.c userland/shell/common.c userland/shell/ut
             kernel/core/time/timekeeping.c \
             $(NET_CORE_SRCS) \
             kernel/core/identity/user_db.c kernel/core/identity/elevation.c kernel/core/identity/path_property.c \
-            kernel/core/identity/session.c \
+            kernel/core/identity/session.c kernel/core/identity/heritage.c kernel/core/identity/bridge.c \
             kernel/core/sys/vrt.c kernel/core/sys/ipc.c kernel/core/sys/syscall.c
 TEST_SRCS += disk_asm.c dir_asm.c
 ifeq ($(CHANGELOG_CI),1)
@@ -599,6 +599,7 @@ NET_TEST_SHELL_OBJS = userland/shell/common.o
 FS_JAIL_SUPPORT_OBJS = kernel/core/time/timekeeping.o \
                          kernel/core/identity/user_db.o kernel/core/identity/elevation.o \
                          kernel/core/identity/path_property.o kernel/core/identity/session.o \
+                         kernel/core/identity/heritage.o kernel/core/identity/bridge.o \
                          userland/identity/password_hash.o $(FL_STACK_ASM_OBJ)
 FS_JAIL_TEST_LIBS = -lsqlite3 -lstdc++ $(OPENSSL_LIBS) -pthread
 NET_TEST_EXTRA_OBJS = userland/identity/password_hash.o
@@ -741,6 +742,7 @@ test_userspace_connection: kernel/core/sys/vrt.o kernel/core/sys/ipc.o kernel/co
 TEST_INVARIANTS_CMD_OBJS = userland/command/cmd_batch_audit_tokens.o userland/command/cmd_batch_contracts_tokens.o
 TEST_INVARIANTS_SESSION_OBJS = kernel/core/time/timekeeping.o kernel/core/mm/mem_domain.o \
 	kernel/core/identity/user_db.o kernel/core/identity/elevation.o kernel/core/identity/session.o \
+	kernel/core/identity/heritage.o kernel/core/identity/bridge.o \
 	userland/identity/password_hash.o $(FL_STACK_ASM_OBJ)
 TEST_INVARIANTS_LIBS = -lsqlite3 -lstdc++ $(OPENSSL_LIBS) -pthread
 test_invariants: test_batch_argv_issue220 userland/shell/common.o userland/shell/authz_subsystem.o $(UTIL_SHELL_LINK_OBJS) $(TEST_INVARIANTS_CMD_OBJS) $(TEST_INVARIANTS_SESSION_OBJS) $(MEM_ASM_OBJ) $(HISTORY_ASM_OBJ) $(UTIL_HISTORY_HOST_OBJS)
@@ -876,15 +878,27 @@ server_shared_quarantine_harness: kernel/core/vfs/server_shared_fs.o kernel/core
 purge_shared_expired_harness: server_shared_quarantine_harness
 	@echo "purge_shared_expired_harness is deprecated; use server_shared_quarantine_harness"
 
+.PHONY: test_heritage
+# Account heritage key ids, legacy store migration, bridges and per-account jail homes.
+test_heritage: userland/shell/common.o $(UTIL_SHELL_LINK_OBJS) $(FS_JAIL_CORE_OBJS) $(FS_JAIL_SUPPORT_OBJS) kernel/core/mm/mem_domain.o $(MEM_ASM_OBJ) $(HISTORY_ASM_OBJ) $(UTIL_HISTORY_HOST_OBJS)
+	$(CC) $(CFLAGS) $(TEST_SANITIZE) -c -o tests/test_heritage.o tests/test_heritage.c
+	$(CXX) $(CXXFLAGS) $(TEST_SANITIZE) -o tests/test_heritage tests/test_heritage.o \
+	  userland/shell/common.o $(UTIL_SHELL_LINK_OBJS) $(FS_JAIL_CORE_OBJS) $(FS_JAIL_SUPPORT_OBJS) \
+	  kernel/core/mm/mem_domain.o $(MEM_ASM_OBJ) $(HISTORY_ASM_OBJ) $(UTIL_HISTORY_HOST_OBJS) \
+	  $(FS_JAIL_TEST_LIBS) -Wl,-z,noexecstack
+	./tests/test_heritage
+
 .PHONY: test_p0_p2_wiring
 test_p0_p2_wiring: kernel/core/memory/fl_stack.o kernel/core/memory/exec_context.o kernel/core/time/timekeeping.o \
 		kernel/core/identity/user_db.o kernel/core/identity/session.o kernel/core/identity/elevation.o \
+		kernel/core/identity/heritage.o kernel/core/identity/bridge.o \
 		kernel/core/identity/path_property.o kernel/core/mm/mem_domain.o kernel/core/mm/pmm.o \
 		userland/identity/password_hash.o userland/shell/authz_subsystem.o $(MEM_ASM_OBJ) $(FL_STACK_ASM_OBJ)
 	$(CC) $(CFLAGS) $(TEST_SANITIZE) -c -o tests/test_p0_p2_wiring.o tests/test_p0_p2_wiring.c
 	$(CXX) $(CXXFLAGS) $(TEST_SANITIZE) -o tests/test_p0_p2_wiring tests/test_p0_p2_wiring.o \
 	  kernel/core/memory/fl_stack.o kernel/core/memory/exec_context.o kernel/core/time/timekeeping.o \
 	  kernel/core/identity/user_db.o kernel/core/identity/session.o kernel/core/identity/elevation.o \
+		kernel/core/identity/heritage.o kernel/core/identity/bridge.o \
 	  kernel/core/identity/path_property.o kernel/core/mm/mem_domain.o kernel/core/mm/pmm.o \
 	  userland/identity/password_hash.o userland/shell/authz_subsystem.o $(MEM_ASM_OBJ) $(FL_STACK_ASM_OBJ) -lsqlite3 -lstdc++ $(OPENSSL_LIBS) -pthread -Wl,-z,noexecstack
 	./tests/test_p0_p2_wiring

@@ -13,6 +13,7 @@ Shards (normative comments plus FL_CONTRACT_P2_*_CONTRACT_DEFINED markers):
 | contract_p2_credential_store.h | P2-2 |
 | contract_p2_authz.h | P2-3 |
 | contract_p2_elevation.h | P2-4 |
+| contract_p2_heritage.h | P2-1 / P2-3 heritage key ids (Root.Flinstone.Bob), account homes, bridges |
 
 Each shard includes contract_runtime.h so standalone use inherits P0 and P1 before P2.
 
