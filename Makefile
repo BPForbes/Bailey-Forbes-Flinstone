@@ -73,9 +73,11 @@ endif
 ifneq ($(SQLITE_ARM_LIB),)
 ifneq (,$(wildcard $(SQLITE_ARM_LIB)))
 CFLAGS += -I$(SQLITE_ARM_PREFIX)/include
-LDFLAGS := -Wl,-z,noexecstack -L$(SQLITE_ARM_PREFIX)/lib $(ARM_CROSS_LIBPATH) -lsqlite3 -lstdc++ $(OPENSSL_LIBS) -ldl $(KQ_ID_LINK)
+# No -lsqlite3 here: the identity library carries its own SQLite, and a second
+# static copy from deps/ would collide with it at link time.
+LDFLAGS := -Wl,-z,noexecstack -L$(SQLITE_ARM_PREFIX)/lib $(ARM_CROSS_LIBPATH) -lstdc++ $(OPENSSL_LIBS) -ldl $(KQ_ID_LINK)
 else ifneq (,$(wildcard /usr/lib/aarch64-linux-gnu/libsqlite3.so))
-LDFLAGS := -Wl,-z,noexecstack -L/usr/lib/aarch64-linux-gnu $(ARM_CROSS_LIBPATH) -lsqlite3 -lstdc++ $(OPENSSL_LIBS) $(KQ_ID_LINK)
+LDFLAGS := -Wl,-z,noexecstack -L/usr/lib/aarch64-linux-gnu $(ARM_CROSS_LIBPATH) -lstdc++ $(OPENSSL_LIBS) $(KQ_ID_LINK)
 endif
 endif
 
