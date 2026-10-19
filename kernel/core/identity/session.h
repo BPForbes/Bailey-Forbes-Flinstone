@@ -9,6 +9,9 @@
 void        fl_session_init(void);
 const char *fl_session_current_user(void);
 
+/** Heritage key id of the logged-in account (Root.Flinstone); empty when it has none. */
+const char *fl_session_current_key_id(void);
+
 /** Logged-in account has is_elevated (root-like). */
 int         fl_session_is_elevated_account(void);
 

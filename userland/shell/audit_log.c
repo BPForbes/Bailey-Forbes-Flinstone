@@ -6,6 +6,7 @@
 #include "contract_log_dispatch.h"
 #include "timekeeping.h"
 #include "fs_jail.h"
+#include "session.h"
 #ifndef DISK_HOST_USE_LIBC_PREADV
 #include "shell_history_asm.h"
 #endif
@@ -156,11 +157,13 @@ void fl_audit_shell_completed(const char *cmd_line, int host_exit_code) {
         (host_exit_code == 0) ? FL_RESULT_OK : FL_RESULT_ERR;
 
     fl_contract_log_line_buf_t line_buf;
+    char actor[FL_HERITAGE_KEY_ID_MAX];
+    sanitize_cmd_fragment(fl_session_current_key_id(), actor, sizeof actor);
     int n = snprintf(line_buf.data, sizeof line_buf.data,
-                     "type=shell jail=%d bundle=%u host_rc=%d fl_rc=%d surface=%d cmd=%s",
+                     "type=shell jail=%d bundle=%u host_rc=%d fl_rc=%d surface=%d actor=%s cmd=%s",
                      fs_jail_is_active(), (unsigned)FL_CONTRACT_BUNDLE_REV,
                      host_exit_code, (int)mapped,
-                     (int)FL_CONTRACT_SURFACE_FS_JAIL, safe);
+                     (int)FL_CONTRACT_SURFACE_FS_JAIL, actor[0] ? actor : "-", safe);
     if (n < 0 || n >= (int)sizeof line_buf.data) {
         snprintf(line_buf.data, sizeof line_buf.data,
                  "type=shell [TRUNCATED] jail=%d bundle=%u",
@@ -413,6 +416,54 @@ void fl_audit_elevation_event(const char *principal, const char *reason, int gra
                                 line_buf.data);
 }
 
+void fl_audit_identity_event(const char *actor_key, const char *event, const char *subject_key,
+                             const char *detail) {
+    if (!fl_audit_env_enabled())
+        return;
+
+    char actor[FL_HERITAGE_KEY_ID_MAX];
+    char what[32];
+    char subject[FL_HERITAGE_KEY_ID_MAX];
+    char extra[64];
+    int64_t when_sec = 0;
+    fl_contract_log_line_buf_t line_buf;
+
+    sanitize_cmd_fragment(actor_key ? actor_key : "", actor, sizeof actor);
+    sanitize_cmd_fragment(event ? event : "", what, sizeof what);
+    sanitize_cmd_fragment(subject_key ? subject_key : "", subject, sizeof subject);
+    sanitize_cmd_fragment(detail ? detail : "", extra, sizeof extra);
+    if (fl_time_wall_sec(&when_sec) != FL_RESULT_OK)
+        when_sec = 0;
+
+    snprintf(line_buf.data, sizeof line_buf.data,
+             "type=identity actor=%s when=%lld event=%s subject=%s detail=%s",
+             actor[0] ? actor : "-", (long long)when_sec, what[0] ? what : "-",
+             subject[0] ? subject : "-", extra[0] ? extra : "-");
+
+    pthread_mutex_lock(&g_audit_mutex);
+    {
+        FILE *fp = fopen(FL_AUDIT_REL_DEFAULT, "a");
+        if (!fp)
+            fprintf(stderr, "audit: cannot open %s for identity event\n", FL_AUDIT_REL_DEFAULT);
+        else {
+            if (fprintf(fp, "%s\n", line_buf.data) < 0)
+                fprintf(stderr, "audit: write failed for identity event\n");
+            if (fclose(fp) != 0)
+                fprintf(stderr, "audit: close failed for identity event\n");
+        }
+    }
+    pthread_mutex_unlock(&g_audit_mutex);
+
+    fl_ring_log_append_line(line_buf.data);
+
+    fl_log_sink_t *sink = NULL;
+    pthread_mutex_lock(&g_audit_mutex);
+    sink = g_audit_sink;
+    pthread_mutex_unlock(&g_audit_mutex);
+    (void)fl_log_sink_emit_line(sink, (int)FL_LOG_INFO, FL_LOG_FACILITY_AUDIT,
+                                line_buf.data);
+}
+
 void fl_audit_authz_event(const char *cmd_line, unsigned cmd_no, int denied) {
     /* Ring + sink only when audit is enabled (matches PR spec: no silent ring growth). */
     if (!fl_audit_env_enabled() || !cmd_line)
@@ -422,10 +473,12 @@ void fl_audit_authz_event(const char *cmd_line, unsigned cmd_no, int denied) {
     sanitize_cmd_fragment(cmd_line, safe, sizeof safe);
 
     fl_contract_log_line_buf_t line_buf;
+    char actor[FL_HERITAGE_KEY_ID_MAX];
+    sanitize_cmd_fragment(fl_session_current_key_id(), actor, sizeof actor);
     int n = snprintf(line_buf.data, sizeof line_buf.data,
-                     "type=authz jail=%d bundle=%u cmd_no=%u denied=%d cmd=%s",
+                     "type=authz jail=%d bundle=%u cmd_no=%u denied=%d actor=%s cmd=%s",
                      fs_jail_is_active(), (unsigned)FL_CONTRACT_BUNDLE_REV, cmd_no,
-                     denied ? 1 : 0, safe);
+                     denied ? 1 : 0, actor[0] ? actor : "-", safe);
     if (n < 0 || n >= (int)sizeof line_buf.data)
         snprintf(line_buf.data, sizeof line_buf.data,
                  "type=authz denied=%d cmd_no=%u [TRUNCATED]", denied ? 1 : 0,

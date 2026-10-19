@@ -15,12 +15,13 @@
 
 #include "contract_runtime.h"
 
-#define FL_CONTRACT_P2_IDENTITY_REV 3
+#define FL_CONTRACT_P2_IDENTITY_REV 4
 
 #include "contract_p2_principal.h"
 #include "contract_p2_credential_store.h"
 #include "contract_p2_authz.h"
 #include "contract_p2_elevation.h"
+#include "contract_p2_heritage.h"
 
 #define FL_CONTRACT_P2_VOCABULARY_LOCK 1
 

@@ -65,6 +65,8 @@ typedef enum {
     FL_SCMD_NETSH,
     FL_SCMD_WIFI,
     FL_SCMD_NETLAB,
+    FL_SCMD_PROFILE,
+    FL_SCMD_BRIDGE,
 } fl_shell_cmd_no_t;
 
 #endif /* FL_SHELL_CMD_H */

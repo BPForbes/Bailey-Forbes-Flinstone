@@ -44,6 +44,22 @@ const char *fl_session_current_user(void) {
     return tls_current;
 }
 
+const char *fl_session_current_key_id(void) {
+    static _Thread_local char tls_key[FL_HERITAGE_KEY_ID_MAX];
+    const fl_user_record_t *u;
+
+    fl_session_init();
+    pthread_mutex_lock(&s_session_mu);
+    u = fl_user_db_find(&s_db, s_current);
+    if (u)
+        strncpy(tls_key, u->key_id, sizeof(tls_key) - 1);
+    else
+        tls_key[0] = '\0';
+    tls_key[sizeof(tls_key) - 1] = '\0';
+    pthread_mutex_unlock(&s_session_mu);
+    return tls_key;
+}
+
 int fl_session_is_elevated_account(void) {
     int elevated;
 
@@ -111,8 +127,11 @@ fl_result_t fl_session_login(const char *name, const char *password) {
         return FL_RESULT_INVAL;
     pthread_mutex_lock(&s_session_mu);
     if (fl_user_db_verify_password(&s_db, name, password)) {
+        const fl_user_record_t *u = fl_user_db_find(&s_db, name);
+
         fl_elevation_revoke_all();
-        strncpy(s_current, name, sizeof(s_current) - 1);
+        /* Store the account's own spelling: "login root" signs in as Root. */
+        strncpy(s_current, u ? u->name : name, sizeof(s_current) - 1);
         s_current[sizeof(s_current) - 1] = '\0';
         s_active_elev = FL_ELEVATION_TOKEN_NONE;
         s_sudo_scope_depth = 0;
@@ -145,7 +164,7 @@ fl_result_t fl_session_set_user(const char *name) {
     u = fl_user_db_find(&s_db, name);
     if (u) {
         fl_elevation_revoke_all();
-        strncpy(s_current, name, sizeof(s_current) - 1);
+        strncpy(s_current, u->name, sizeof(s_current) - 1);
         s_current[sizeof(s_current) - 1] = '\0';
         s_active_elev = FL_ELEVATION_TOKEN_NONE;
         s_sudo_scope_depth = 0;
@@ -209,7 +228,7 @@ fl_result_t fl_session_logout(void) {
     s_active_elev = FL_ELEVATION_TOKEN_NONE;
     def = s_db.default_user;
     if (!def || !def[0])
-        def = "flinstone";
+        def = "Flinstone";
     strncpy(s_current, def, sizeof(s_current) - 1);
     s_current[sizeof(s_current) - 1] = '\0';
     pthread_mutex_unlock(&s_session_mu);

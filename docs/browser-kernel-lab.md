@@ -239,8 +239,8 @@ boot a virtual PC and expose these devices.
 
 ## CI and deployment
 
-`.github/workflows/browser-kernel-artifact.yml` runs on pull requests, `main`
-pushes, and manual dispatch. Pull requests validate only; they never replace
+`.github/workflows/browser-kernel-artifact.yml` runs on pull requests, `main` and
+`develop` pushes, and manual dispatch. Pull requests validate only; they never replace
 the published lab. On `main` it:
 
 1. builds and tests the hosted and in-process VM paths;
@@ -258,6 +258,14 @@ the published lab. On `main` it:
    first-visit service worker, then the same origin framed by a parent that
    sends `COEP: credentialless` plus `Permissions-Policy` for
    `cross-origin-isolated`.
+
+Two builds run the same gates, defined once in `.github/workflows/browser-lab-build.yml`:
+`main` (the default lab, at the site root, with the security variant at `/security/`)
+and `develop` (the in-development lab, at `/develop/`). Both run on every push to
+`main` or `develop`, and the deploy job republishes the whole Pages site from both
+artifacts, because a Pages deploy replaces everything. A develop build that fails its
+gates is left out of the site, and the develop job is `continue-on-error`, so it never
+fails the `main` run that the portfolio notification waits for.
 
 The workflow contains a fail-closed promotion gate. Upload as
 `flintstone-browser-kernel` requires all three independent signals:

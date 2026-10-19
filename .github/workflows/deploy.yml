@@ -13,7 +13,13 @@ jobs:
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v5
         with:
+          submodules: true
           fetch-depth: 0
+
+      - name: Install Rust (KeyQuorum identity library)
+        uses: dtolnay/rust-toolchain@89b12181fb390509a0842a86cc55eeb8eb928c1d # stable branch
+        with:
+          toolchain: stable
 
       - name: Install dependencies
         run: sudo apt-get update -y && sudo apt-get install -y gcc binutils nasm make libcunit1-dev

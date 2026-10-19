@@ -56,6 +56,8 @@ static const cmd_name_ent_t cmd_registry[] = {
     {"useradd", FL_SCMD_USERADD},
     {"userdel", FL_SCMD_USERDEL},
     {"passwd", FL_SCMD_PASSWD},
+    {"profile", FL_SCMD_PROFILE},
+    {"bridge", FL_SCMD_BRIDGE},
     {"ping", FL_SCMD_PING},
     {"ping6", FL_SCMD_PING6},
     {"whoami", FL_SCMD_WHOAMI},
