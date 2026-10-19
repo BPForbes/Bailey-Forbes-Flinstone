@@ -1,6 +1,6 @@
 P2 identity modules:
   user_db.c        — SQLite accounts (password_hash + salt_hex, heritage key_id, created_by, created_at)
-  heritage.c       — heritage key ids (contracts/identity/contract_p2_heritage.h): validate, derive, compare
+  heritage.c       — thin C wrappers over KeyQuorum's Rust key-id rules (third_party/keyquorum/ffi/identity)
   bridge.c         — bridges between accounts on different branches (table "bridges", same SQLite file)
   path_property.c  — per-directory .flmeta/properties.json (owner, requires_elevation)
   elevation.c      — P2-4 sudo elevation tokens (TTL via timekeeping)

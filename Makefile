@@ -25,7 +25,30 @@ CC = gcc
 AS = as
 CFLAGS = -Wall -Wextra -pthread -I. -Icontracts/foundations -Icontracts/runtime -Icontracts/identity -Icontracts/networking -Icontracts/drivers -Icontracts/storage -Icontracts/observability -Icontracts/operations -Icontracts/virtualization -Icontracts/hardening -Ikernel/include -Ikernel/core/vfs -Ikernel/core/mm -Ikernel/core/memory -Ikernel/core/time -Ikernel/core/net -Ikernel/core/identity -Ikernel/core/sched -Ikernel/core/sys -Ikernel/core/platform -Iuserland/shell -Iuserland/command -Ikernel/arch/x86_64 -Ikernel/arch/aarch64
 OPENSSL_LIBS = -lssl -lcrypto
-LDFLAGS = -Wl,-z,noexecstack -lsqlite3 -lstdc++ $(OPENSSL_LIBS)
+LDFLAGS = -Wl,-z,noexecstack -lsqlite3 -lstdc++ $(OPENSSL_LIBS) $(KQ_ID_LINK)
+
+# Account heritage rules come from KeyQuorum's Rust crate, a git submodule at
+# third_party/keyquorum (ffi/identity). cargo builds it for the same target as
+# the C objects. The archive is linked after -lsqlite3 so the system SQLite
+# satisfies the C code; the crate's own bundled SQLite is never needed.
+ifeq ($(ARCH),arm)
+KQ_ID_CARGO_TARGET = --target aarch64-unknown-linux-gnu
+KQ_ID_LIB = third_party/keyquorum/ffi/identity/target/aarch64-unknown-linux-gnu/release/libkeyquorum_identity.a
+else
+KQ_ID_CARGO_TARGET =
+KQ_ID_LIB = third_party/keyquorum/ffi/identity/target/release/libkeyquorum_identity.a
+endif
+KQ_ID_LINK = $(KQ_ID_LIB) -ldl -lpthread -lm
+CFLAGS += -Ithird_party/keyquorum/ffi/identity/include
+
+.PHONY: keyquorum-identity
+keyquorum-identity:
+	@test -f third_party/keyquorum/ffi/identity/Cargo.toml || { echo "keyquorum-identity: run 'git submodule update --init third_party/keyquorum'" >&2; exit 1; }
+	@command -v cargo >/dev/null 2>&1 || { echo "keyquorum-identity: cargo is needed (install Rust with rustup)" >&2; exit 1; }
+	cargo build --release --locked --manifest-path third_party/keyquorum/ffi/identity/Cargo.toml $(KQ_ID_CARGO_TARGET)
+
+$(KQ_ID_LIB): keyquorum-identity
+kernel/core/identity/heritage.o: keyquorum-identity
 # Cross ARM on x86: prefer deps/install-aarch64 (./deps/fetch-sqlite-aarch64.sh); optional system libsqlite3-dev:arm64.
 # OpenSSL for password_hash.cpp: libssl-dev:arm64 (headers under /usr/include/aarch64-linux-gnu).
 ifeq ($(ARCH),arm)
@@ -50,9 +73,9 @@ endif
 ifneq ($(SQLITE_ARM_LIB),)
 ifneq (,$(wildcard $(SQLITE_ARM_LIB)))
 CFLAGS += -I$(SQLITE_ARM_PREFIX)/include
-LDFLAGS := -Wl,-z,noexecstack -L$(SQLITE_ARM_PREFIX)/lib $(ARM_CROSS_LIBPATH) -lsqlite3 -lstdc++ $(OPENSSL_LIBS) -ldl
+LDFLAGS := -Wl,-z,noexecstack -L$(SQLITE_ARM_PREFIX)/lib $(ARM_CROSS_LIBPATH) -lsqlite3 -lstdc++ $(OPENSSL_LIBS) -ldl $(KQ_ID_LINK)
 else ifneq (,$(wildcard /usr/lib/aarch64-linux-gnu/libsqlite3.so))
-LDFLAGS := -Wl,-z,noexecstack -L/usr/lib/aarch64-linux-gnu $(ARM_CROSS_LIBPATH) -lsqlite3 -lstdc++ $(OPENSSL_LIBS)
+LDFLAGS := -Wl,-z,noexecstack -L/usr/lib/aarch64-linux-gnu $(ARM_CROSS_LIBPATH) -lsqlite3 -lstdc++ $(OPENSSL_LIBS) $(KQ_ID_LINK)
 endif
 endif
 
@@ -601,7 +624,7 @@ FS_JAIL_SUPPORT_OBJS = kernel/core/time/timekeeping.o \
                          kernel/core/identity/path_property.o kernel/core/identity/session.o \
                          kernel/core/identity/heritage.o kernel/core/identity/bridge.o \
                          userland/identity/password_hash.o $(FL_STACK_ASM_OBJ)
-FS_JAIL_TEST_LIBS = -lsqlite3 -lstdc++ $(OPENSSL_LIBS) -pthread
+FS_JAIL_TEST_LIBS = -lsqlite3 -lstdc++ $(OPENSSL_LIBS) -pthread $(KQ_ID_LINK)
 NET_TEST_EXTRA_OBJS = userland/identity/password_hash.o
 NET_TEST_LIBS = -lsqlite3 -lstdc++ $(OPENSSL_LIBS)
 TEST_ASMOBJS = $(MEM_ASM_OBJ) $(FL_STACK_ASM_OBJ) $(PORT_IO_OBJ) $(DISK_HOST_ASM_OBJ) \
@@ -744,7 +767,7 @@ TEST_INVARIANTS_SESSION_OBJS = kernel/core/time/timekeeping.o kernel/core/mm/mem
 	kernel/core/identity/user_db.o kernel/core/identity/elevation.o kernel/core/identity/session.o \
 	kernel/core/identity/heritage.o kernel/core/identity/bridge.o \
 	userland/identity/password_hash.o $(FL_STACK_ASM_OBJ)
-TEST_INVARIANTS_LIBS = -lsqlite3 -lstdc++ $(OPENSSL_LIBS) -pthread
+TEST_INVARIANTS_LIBS = -lsqlite3 -lstdc++ $(OPENSSL_LIBS) -pthread $(KQ_ID_LINK)
 test_invariants: test_batch_argv_issue220 userland/shell/common.o userland/shell/authz_subsystem.o $(UTIL_SHELL_LINK_OBJS) $(TEST_INVARIANTS_CMD_OBJS) $(TEST_INVARIANTS_SESSION_OBJS) $(MEM_ASM_OBJ) $(HISTORY_ASM_OBJ) $(UTIL_HISTORY_HOST_OBJS)
 	$(CC) $(CFLAGS) $(TEST_SANITIZE) -c -o tests/test_invariants.o tests/test_invariants.c
 	$(CXX) $(CXXFLAGS) $(TEST_SANITIZE) -o tests/test_invariants tests/test_invariants.o \
@@ -900,7 +923,7 @@ test_p0_p2_wiring: kernel/core/memory/fl_stack.o kernel/core/memory/exec_context
 	  kernel/core/identity/user_db.o kernel/core/identity/session.o kernel/core/identity/elevation.o \
 		kernel/core/identity/heritage.o kernel/core/identity/bridge.o \
 	  kernel/core/identity/path_property.o kernel/core/mm/mem_domain.o kernel/core/mm/pmm.o \
-	  userland/identity/password_hash.o userland/shell/authz_subsystem.o $(MEM_ASM_OBJ) $(FL_STACK_ASM_OBJ) -lsqlite3 -lstdc++ $(OPENSSL_LIBS) -pthread -Wl,-z,noexecstack
+	  userland/identity/password_hash.o userland/shell/authz_subsystem.o $(MEM_ASM_OBJ) $(FL_STACK_ASM_OBJ) -lsqlite3 -lstdc++ $(OPENSSL_LIBS) $(KQ_ID_LINK) -pthread -Wl,-z,noexecstack
 	./tests/test_p0_p2_wiring
 
 .PHONY: test_p3_network

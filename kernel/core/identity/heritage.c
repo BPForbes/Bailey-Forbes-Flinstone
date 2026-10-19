@@ -1,66 +1,41 @@
+/*
+ * Account heritage key ids. The rules live in KeyQuorum's Rust crate
+ * (third_party/keyquorum/ffi/identity, libkeyquorum_identity.a); these are the
+ * thin C names the rest of the shell uses. Return codes map onto fl_result_t
+ * as before: invalid input is INVAL, too deep or too long is NOMEM, and the
+ * master account has no parent (NOENT).
+ */
 #include "heritage.h"
+#include "keyquorum_identity.h"
 #include <stdio.h>
 #include <string.h>
-#include <strings.h>
 
-static int segment_char_ok(char c) {
-    return (c >= 'A' && c <= 'Z') || (c >= 'a' && c <= 'z') || (c >= '0' && c <= '9') ||
-           c == '_' || c == '-';
-}
-
-static int segment_span_valid(const char *s, size_t len) {
-    size_t i;
-
-    if (len == 0u || len > FL_HERITAGE_SEGMENT_MAX_CHARS)
-        return 0;
-    for (i = 0; i < len; i++) {
-        if (!segment_char_ok(s[i]))
-            return 0;
+static fl_result_t kq_to_result(int rc) {
+    switch (rc) {
+    case KQ_HERITAGE_OK:
+        return FL_RESULT_OK;
+    case KQ_HERITAGE_TOO_DEEP:
+    case KQ_HERITAGE_NO_ROOM:
+        return FL_RESULT_NOMEM;
+    default:
+        return FL_RESULT_INVAL;
     }
-    return 1;
 }
 
 int fl_heritage_segment_valid(const char *name) {
-    if (!name)
-        return 0;
-    return segment_span_valid(name, strlen(name));
+    return kq_heritage_segment_valid(name) != 0;
 }
 
 int fl_heritage_name_available_shape(const char *name) {
-    return fl_heritage_segment_valid(name) && strcasecmp(name, FL_HERITAGE_ROOT_KEY) != 0;
-}
-
-size_t fl_heritage_depth(const char *key) {
-    const char *p;
-    size_t depth = 0;
-    size_t root_len = strlen(FL_HERITAGE_ROOT_KEY);
-
-    if (!key || strncmp(key, FL_HERITAGE_ROOT_KEY, root_len) != 0)
-        return 0;
-    if (key[root_len] != '\0' && key[root_len] != FL_HERITAGE_SEP)
-        return 0;
-    if (strlen(key) >= FL_HERITAGE_KEY_ID_MAX)
-        return 0;
-    depth = 1;
-    p = key + root_len;
-    while (*p == FL_HERITAGE_SEP) {
-        const char *seg = p + 1;
-        const char *end = strchr(seg, FL_HERITAGE_SEP);
-        size_t len = end ? (size_t)(end - seg) : strlen(seg);
-
-        if (!segment_span_valid(seg, len) ||
-            (len == root_len && strncasecmp(seg, FL_HERITAGE_ROOT_KEY, len) == 0))
-            return 0;
-        depth++;
-        if (depth > FL_HERITAGE_MAX_DEPTH)
-            return 0;
-        p = seg + len;
-    }
-    return *p == '\0' ? depth : 0;
+    return kq_heritage_name_available(name) != 0;
 }
 
 int fl_heritage_key_valid(const char *key) {
-    return fl_heritage_depth(key) > 0u;
+    return kq_heritage_key_valid(key) != 0;
+}
+
+size_t fl_heritage_depth(const char *key) {
+    return kq_heritage_depth(key);
 }
 
 const char *fl_heritage_leaf(const char *key) {
@@ -73,70 +48,23 @@ const char *fl_heritage_leaf(const char *key) {
 }
 
 fl_result_t fl_heritage_child(const char *parent, const char *name, char *out, size_t cap) {
-    int n;
-
-    if (!out || cap == 0u)
-        return FL_RESULT_INVAL;
-    out[0] = '\0';
-    if (!fl_heritage_key_valid(parent) || !fl_heritage_name_available_shape(name))
-        return FL_RESULT_INVAL;
-    if (fl_heritage_depth(parent) >= FL_HERITAGE_MAX_DEPTH)
-        return FL_RESULT_NOMEM;
-    n = snprintf(out, cap, "%s%c%s", parent, FL_HERITAGE_SEP, name);
-    if (n < 0 || (size_t)n >= cap || (size_t)n >= FL_HERITAGE_KEY_ID_MAX) {
-        out[0] = '\0';
-        return FL_RESULT_NOMEM;
-    }
-    return FL_RESULT_OK;
+    return kq_to_result(kq_heritage_child(parent, name, out, cap));
 }
 
 fl_result_t fl_heritage_parent(const char *key, char *out, size_t cap) {
-    const char *dot;
-    size_t len;
-
-    if (!out || cap == 0u)
-        return FL_RESULT_INVAL;
-    out[0] = '\0';
     if (!fl_heritage_key_valid(key))
         return FL_RESULT_INVAL;
-    dot = strrchr(key, FL_HERITAGE_SEP);
-    if (!dot)
+    if (!strchr(key, FL_HERITAGE_SEP))
         return FL_RESULT_NOENT;
-    len = (size_t)(dot - key);
-    if (len >= cap)
-        return FL_RESULT_NOMEM;
-    memcpy(out, key, len);
-    out[len] = '\0';
-    return FL_RESULT_OK;
+    return kq_to_result(kq_heritage_parent(key, out, cap));
 }
 
 int fl_heritage_is_ancestor_or_self(const char *a, const char *b) {
-    size_t alen;
-
-    if (!fl_heritage_key_valid(a) || !fl_heritage_key_valid(b))
-        return 0;
-    alen = strlen(a);
-    if (strncmp(a, b, alen) != 0)
-        return 0;
-    return b[alen] == '\0' || b[alen] == FL_HERITAGE_SEP;
+    return kq_heritage_is_ancestor_or_self(a, b) != 0;
 }
 
 fl_heritage_relation_t fl_heritage_relation(const char *a, const char *b) {
-    char pa[FL_HERITAGE_KEY_ID_MAX];
-    char pb[FL_HERITAGE_KEY_ID_MAX];
-
-    if (!fl_heritage_key_valid(a) || !fl_heritage_key_valid(b))
-        return FL_HERITAGE_REL_INVALID;
-    if (strcmp(a, b) == 0)
-        return FL_HERITAGE_REL_SELF;
-    if (fl_heritage_is_ancestor_or_self(a, b))
-        return FL_HERITAGE_REL_DESCENDANT;
-    if (fl_heritage_is_ancestor_or_self(b, a))
-        return FL_HERITAGE_REL_ANCESTOR;
-    if (fl_heritage_parent(a, pa, sizeof pa) == FL_RESULT_OK &&
-        fl_heritage_parent(b, pb, sizeof pb) == FL_RESULT_OK && strcmp(pa, pb) == 0)
-        return FL_HERITAGE_REL_SIBLING;
-    return FL_HERITAGE_REL_OTHER_BRANCH;
+    return (fl_heritage_relation_t)kq_heritage_relation(a, b);
 }
 
 const char *fl_heritage_relation_name(fl_heritage_relation_t rel) {
@@ -157,23 +85,5 @@ const char *fl_heritage_relation_name(fl_heritage_relation_t rel) {
 }
 
 fl_result_t fl_heritage_home_rel(const char *key, char *out, size_t cap) {
-    size_t root_len = strlen(FL_HERITAGE_ROOT_KEY);
-    size_t i;
-    int n;
-
-    if (!out || cap == 0u)
-        return FL_RESULT_INVAL;
-    out[0] = '\0';
-    if (!fl_heritage_key_valid(key))
-        return FL_RESULT_INVAL;
-    n = snprintf(out, cap, "%s%s", FL_HERITAGE_HOME_DIR, key + root_len);
-    if (n < 0 || (size_t)n >= cap) {
-        out[0] = '\0';
-        return FL_RESULT_NOMEM;
-    }
-    for (i = strlen(FL_HERITAGE_HOME_DIR); out[i]; i++) {
-        if (out[i] == FL_HERITAGE_SEP)
-            out[i] = '/';
-    }
-    return FL_RESULT_OK;
+    return kq_to_result(kq_heritage_home_rel(key, out, cap));
 }

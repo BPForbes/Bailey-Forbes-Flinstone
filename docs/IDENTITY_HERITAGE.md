@@ -9,6 +9,29 @@ track, with the same rules, so that real KeyQuorum keys and sealed letters can b
 these key ids later. The normative vocabulary is
 [`contracts/identity/contract_p2_heritage.h`](../contracts/identity/contract_p2_heritage.h).
 
+## Where the rules live
+
+The key-id and relation rules are implemented in KeyQuorum's Rust code, not in C.
+The crate `ffi/identity` in KeyQuorum builds `libkeyquorum_identity.a` with the C header
+`include/keyquorum_identity.h`. Flinstone pulls KeyQuorum in as the git submodule
+`third_party/keyquorum` (pinned to a commit), and `make` builds the library with cargo
+before linking. The topology (ancestry, parent, relation) is KeyQuorum's `authority`
+module; the crate adds only Flinstone's account policy. `kernel/core/identity/heritage.c`
+is a set of thin C wrappers with the same names as before.
+
+Building needs Rust (rustup) and a checked-out submodule:
+
+```
+git submodule update --init third_party/keyquorum
+make            # builds the library with cargo, then the shell
+make test_heritage
+```
+
+The archive bundles its own SQLite (through KeyQuorum's `rusqlite` dependency). The
+linker resolves every SQLite call in the shell to that copy rather than the system
+`libsqlite3`, so the shell uses one SQLite throughout, the bundled one. Bridges and the
+account store still use the SQLite API directly from C.
+
 ## Key ids
 
 | Account | Created by | Key id |
@@ -113,6 +136,8 @@ the migration also adds `Alternative`.
 
 ## Not yet covered
 
+- **Bridges and the account store** remain in C. Only the key-id and relation rules come from
+  Rust in this step.
 - **KeyQuorum keys.** Key ids are labels only; no signing or encryption key is bound to an
   account yet, and bridges are not signed.
 - **Server file sharing** (`server file`) does not consult bridges yet.
