@@ -56,7 +56,9 @@ the logged-in account may use it only when it is that owner, an ancestor of it, 
 to it by an active bridge. Paths are judged after resolving `..` and symlinks, and a file
 about to be created is judged by where it would land. Paths outside `<jail>/home` keep the
 existing jail rules. `sudo` still lifts the outer jail as before, but never heritage: an
-elevated session cannot reach another branch's home without a bridge. Homes are created
+elevated session cannot reach another branch's home without a bridge. `sudo -i`, which
+becomes Root, asks for Root's password, as `su root` does, and is recorded as a
+`type=identity event=sudo-i` audit line. Homes are created
 owner-only on `useradd`, `profile` and `su -`, which now starts in the account's home.
 
 When the jail is inactive (a plain hosted shell) there is no home tree to enforce, as
@@ -113,8 +115,6 @@ the migration also adds `Alternative`.
 
 - **KeyQuorum keys.** Key ids are labels only; no signing or encryption key is bound to an
   account yet, and bridges are not signed.
-- **`sudo -i`** still switches any account that knows its own password to Root, as before
-  this change, and Root reaches every home. Restricting it is a separate decision.
 - **Server file sharing** (`server file`) does not consult bridges yet.
 - **Other identity copies.** The freestanding x86_64 kernel (`kernel/freestanding/`) and the
   browser lab keep their own lowercase `flinstone` / `root` accounts.

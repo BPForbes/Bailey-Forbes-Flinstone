@@ -7,6 +7,8 @@
 #include "contract_p2_elevation.h"
 #include "session_sync.h"
 #include "session_login_env.h"
+#include "user_db.h"
+#include "heritage.h"
 #include <stdio.h>
 #include <string.h>
 
@@ -31,18 +33,48 @@ static int sudo_grant_token(const char *reason) {
     return 0;
 }
 
+/*
+ * sudo -i becomes Root, the master of the whole heritage tree, so it asks for
+ * Root's own password, as su root does, never the caller's. An elevated
+ * account is already Root or sits at its level and needs no second prompt.
+ */
 int cmd_sudo_interactive_login(void) {
+    const fl_user_db_t *db;
+    const fl_user_record_t *root;
+    char actor[FL_HERITAGE_KEY_ID_MAX];
+    char pw[128];
     fl_result_t rc;
 
-    if (cmd_sudo_require_auth() != 0)
+    fl_session_init();
+    db = fl_session_user_db();
+    root = fl_user_db_find_by_key(db, FL_HERITAGE_ROOT_KEY);
+    if (!root) {
+        fprintf(stderr, "sudo: no Root account\n");
         return 1;
-    rc = fl_session_set_user("root");
+    }
+    if (!fl_session_is_elevated_account()) {
+        if (cmd_read_password("[sudo -i] Root password: ", pw, sizeof(pw)) != 0) {
+            cmd_wipe_password(pw, sizeof(pw));
+            fprintf(stderr, "sudo: password read failed\n");
+            return 1;
+        }
+        if (!fl_user_db_verify_password(db, root->name, pw)) {
+            cmd_wipe_password(pw, sizeof(pw));
+            fprintf(stderr, "sudo: incorrect Root password\n");
+            return 1;
+        }
+        cmd_wipe_password(pw, sizeof(pw));
+    }
+    strncpy(actor, fl_session_current_key_id(), sizeof(actor) - 1);
+    actor[sizeof(actor) - 1] = '\0';
+    rc = fl_session_set_user(root->name);
     if (rc != FL_RESULT_OK) {
         fprintf(stderr, "sudo: cannot switch to root (%d)\n", (int)rc);
         return 1;
     }
+    fl_audit_identity_event(actor, "sudo-i", FL_HERITAGE_ROOT_KEY, NULL);
     fl_session_sync_services();
-    fl_session_apply_login_shell_env("root");
+    fl_session_apply_login_shell_env(root->name);
     printf("sudo: switched to root (login shell)\n");
     return 0;
 }
