@@ -1,6 +1,6 @@
 # Account heritage, homes and bridges
 
-This is the first step of integrating KeyQuorum's
+This is the first step of integrating [KeyQuorum](https://github.com/BPForbes/KeyQuorum)'s
 identity model into Flinstone, from the storage, profile and history side. Every account
 gets a **key id** shaped like a KeyQuorum label, authority follows the tree the way
 KeyQuorum's `authority` rules do, and accounts on different branches reach each other only
