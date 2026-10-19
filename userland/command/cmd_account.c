@@ -148,12 +148,24 @@ int cmd_userdel_run(int argc, char **argv) {
         fprintf(stderr, "userdel: %s (%d)\n", argv[1], (int)rc);
         return 1;
     }
-    if (fl_session_save_users() != FL_RESULT_OK) {
+    /*
+     * Bridges go before the account does. A bridge row left behind for a removed
+     * key would give the next account created under that name the old cross-branch
+     * access. If the bridges cannot be removed, the account stays; if the save then
+     * fails, the account stays too, without its bridges (fail closed).
+     */
+    if (fl_bridge_remove_for(db->path, target_key) != FL_RESULT_OK) {
         (void)account_reload_db_from_disk(db);
-        fprintf(stderr, "userdel: could not save %s\n", FL_SESSION_USERS_PATH);
+        fprintf(stderr, "userdel: could not remove the bridges of %s; %s is unchanged\n", target_key,
+                argv[1]);
         return 1;
     }
-    (void)fl_bridge_remove_for(db->path, target_key);
+    if (fl_session_save_users() != FL_RESULT_OK) {
+        (void)account_reload_db_from_disk(db);
+        fprintf(stderr, "userdel: could not save %s; %s is kept, and its bridges must be requested again\n",
+                FL_SESSION_USERS_PATH, argv[1]);
+        return 1;
+    }
     fl_audit_identity_event(actor, "userdel", target_key, NULL);
     printf("userdel: removed %s (%s)\n", argv[1], target_key);
     return 0;

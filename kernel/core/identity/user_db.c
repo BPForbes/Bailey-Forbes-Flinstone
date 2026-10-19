@@ -252,6 +252,28 @@ void fl_user_db_seed_defaults(fl_user_db_t *db) {
 }
 
 /*
+ * Two stored names that differ only by case (the old lookup and primary key were
+ * case-sensitive, so root and Root could both exist) would both become Root.
+ * The rewrite would then overwrite one record with the other, so the store is
+ * refused instead, and left unchanged.
+ */
+static int find_case_collision(const fl_user_db_t *db, size_t *first, size_t *second) {
+    size_t i;
+    size_t j;
+
+    for (i = 0; i < db->count; i++) {
+        for (j = i + 1; j < db->count; j++) {
+            if (strcasecmp(db->users[i].name, db->users[j].name) == 0) {
+                *first = i;
+                *second = j;
+                return 1;
+            }
+        }
+    }
+    return 0;
+}
+
+/*
  * Accounts stored before heritage key ids have none. root becomes the master
  * Root, flinstone becomes Flinstone (Root.Flinstone), and every other account
  * is placed directly under Root: who created it was never recorded, and a
@@ -369,6 +391,18 @@ fl_result_t fl_user_db_load(fl_user_db_t *db, const char *path) {
     if (!db->default_user[0] && db->count > 0)
         strncpy(db->default_user, db->users[0].name, sizeof(db->default_user) - 1);
 
+    if (rc == FL_RESULT_OK) {
+        size_t a = 0;
+        size_t b = 0;
+
+        if (find_case_collision(db, &a, &b)) {
+            fprintf(stderr,
+                    "user_db: accounts '%s' and '%s' differ only by case; rename one and start again "
+                    "(the store was not changed)\n",
+                    db->users[a].name, db->users[b].name);
+            rc = FL_RESULT_ERR;
+        }
+    }
     if (rc == FL_RESULT_OK) {
         changed = migrate_heritage(db);
         if (user_db_lab_defaults_enabled() && !fl_user_db_find(db, "Alternative") &&

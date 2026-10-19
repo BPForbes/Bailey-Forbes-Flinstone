@@ -243,6 +243,44 @@ static int test_legacy_migration(void) {
     return 0;
 }
 
+/* Two legacy names that differ only by case must not be rewritten onto one key id. */
+static int test_legacy_case_collision(void) {
+    char path[256];
+    sqlite3 *sql = NULL;
+    sqlite3_stmt *st = NULL;
+    fl_user_db_t db;
+    int rows = 0;
+
+    ASSERT(temp_db(path, sizeof path) == 0);
+    ASSERT(sqlite3_open(path, &sql) == SQLITE_OK);
+    ASSERT(sqlite3_exec(sql,
+                        "CREATE TABLE users (name TEXT PRIMARY KEY NOT NULL, password_hash TEXT NOT NULL,"
+                        " salt_hex TEXT NOT NULL, uid INTEGER NOT NULL, is_elevated INTEGER NOT NULL DEFAULT 0);"
+                        "CREATE TABLE meta (key TEXT PRIMARY KEY NOT NULL, value TEXT NOT NULL);"
+                        "INSERT INTO users VALUES('root','x','00',1000,1);"
+                        "INSERT INTO users VALUES('Root','y','11',2000,0);",
+                        NULL, NULL, NULL) == SQLITE_OK);
+    sqlite3_close(sql);
+
+    ASSERT(fl_user_db_load(&db, path) != FL_RESULT_OK);
+
+    /* Nothing was rewritten: both legacy rows are still there, under their own names. */
+    ASSERT(sqlite3_open(path, &sql) == SQLITE_OK);
+    ASSERT(sqlite3_prepare_v2(sql, "SELECT name, key_id FROM users ORDER BY uid;", -1, &st, NULL)
+           == SQLITE_OK);
+    while (sqlite3_step(st) == SQLITE_ROW) {
+        ASSERT(rows == 0 ? strcmp((const char *)sqlite3_column_text(st, 0), "root") == 0
+                         : strcmp((const char *)sqlite3_column_text(st, 0), "Root") == 0);
+        ASSERT(((const char *)sqlite3_column_text(st, 1))[0] == '\0');
+        rows++;
+    }
+    ASSERT(rows == 2);
+    sqlite3_finalize(st);
+    sqlite3_close(sql);
+    unlink(path);
+    return 0;
+}
+
 static unsigned g_visited;
 static void count_bridge(const fl_bridge_t *b, void *ctx) {
     (void)b;
@@ -428,6 +466,7 @@ int main(void) {
     RUN(test_relations);
     RUN(test_seed_and_accounts);
     RUN(test_legacy_migration);
+    RUN(test_legacy_case_collision);
     RUN(test_bridges);
     RUN(test_jail_homes, jail_parent);
 
