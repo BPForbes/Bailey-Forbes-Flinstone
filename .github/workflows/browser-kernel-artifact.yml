@@ -34,7 +34,8 @@ jobs:
       # builds its own merge commit, which is never deployed.
       ref: ${{ github.event_name == 'push' && 'main' || '' }}
       artifact_suffix: ""
-      publish: ${{ github.event_name == 'push' && github.ref == 'refs/heads/main' }}
+      # Every push to main or develop deploys this build at the site root.
+      publish: ${{ github.event_name == 'push' && (github.ref == 'refs/heads/main' || github.ref == 'refs/heads/develop') }}
 
   develop:
     name: Develop build
