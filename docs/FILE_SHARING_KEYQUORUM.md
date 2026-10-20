@@ -1,6 +1,10 @@
 # Server file sharing on KeyQuorum's file model
 
-Status: **design only**. Nothing in this document is implemented. It maps KeyQuorum's
+Status: **design, partly built**. Built so far: one KeyQuorum signing key per account (sealed
+under its password), signed bridges, and the sender-side gate of requirement 12 for
+`server file -user` (see `docs/IDENTITY_HERITAGE.md`). Everything else here is not built.
+
+This document maps KeyQuorum's
 file-sharing features onto Flinstone's server file sharing (`server file`, the TCP hub in
 `net_server.c` and `net_file_delivery.c`, and the server store in `server_shared_fs.c`) and
 states what each one does for confidentiality, integrity and availability (CIA). The

@@ -112,34 +112,34 @@ HOSTED_VERBS = [
 try:
     read_until("FLINTSTONE_KERNEL_BOOT_OK", 12)
     read_until("network=lab", 4)
-    read_until("flinstone@flintstone>", 4)
+    read_until("Flinstone@flintstone>", 4)
     send("whoami\n")
-    read_until("WHOAMI flinstone", 4)
+    read_until("WHOAMI Flinstone", 4)
     send("switchuser root\n")
-    read_until("SWITCHUSER user=root", 4)
+    read_until("SWITCHUSER user=Root", 4)
     send("whoami\n")
-    read_until("WHOAMI root elevated", 4)
+    read_until("WHOAMI Root elevated", 4)
     send("history\n")
     read_until("1: whoami", 4)
     send("switchuser flinstone\n")
-    read_until("SWITCHUSER user=flinstone", 4)
+    read_until("SWITCHUSER user=Flinstone", 4)
     send("whoami\n")
-    read_until("WHOAMI flinstone", 4)
+    read_until("WHOAMI Flinstone", 4)
     send("history\n")
     read_until("1: whoami", 4)
     # Lab "New session" sends both lines in one burst, matching the iframe UI.
     send("session new\nswitchuser root\n")
-    read_until("SESSION 2 user=flinstone", 4)
-    read_until("SWITCHUSER user=root", 4)
+    read_until("SESSION 2 user=Flinstone", 4)
+    read_until("SWITCHUSER user=Root", 4)
     if b"no such session" in buf.replace(b"\r", b""):
         raise SystemExit(
             "test-freestanding-shell: leftover session new poisoned switchuser\n"
             + buf.decode("latin1", "replace")
         )
     send("session 1\n")
-    read_until("SESSION 1 user=flinstone", 4)
+    read_until("SESSION 1 user=Flinstone", 4)
     send("whoami\n")
-    read_until("WHOAMI flinstone", 4)
+    read_until("WHOAMI Flinstone", 4)
     send("dir\n")
     read_until("readme.txt", 4)
     send("write hello.txt lab-fs\n")
@@ -206,44 +206,44 @@ try:
     # Session 2 already exists (created earlier, logged in as root) and is
     # not the real server host, so joining it must resolve the pending host.
     send("session 2\n")
-    read_until("SESSION 2 user=root", 4)
+    read_until("SESSION 2 user=Root", 4)
     cmd("netlab pod join", expect="identity preserved")
     cmd("netlab pod members", expect="(host)")
     # root calls `listen` -> root is the attacker. flinstone will `accept` ->
     # flinstone is the victim side (listener = attacker, acceptor = victim).
     cmd("netlab listen", expect="is listening")
     send("session 1\n")
-    read_until("SESSION 1 user=flinstone", 4)
+    read_until("SESSION 1 user=Flinstone", 4)
     cmd("netlab accept", expect="LAB_NETMODE lab")
     # flinstone (the victim) keeps using its own real session normally while
     # bound -- the binding never touches it.
-    cmd("whoami", expect="WHOAMI flinstone")
+    cmd("whoami", expect="WHOAMI Flinstone")
     cmd("server host", expect="lab isolated")
     # root is the bound attacker: only root's non-management `netlab <cmd>`
     # calls are redirected into the sandbox, and they execute for real
     # against isolated state, not canned text.
     send("session 2\n")
-    read_until("SESSION 2 user=root", 4)
-    cmd("netlab whoami", expect="flinstone")
-    cmd("netlab hostname", expect="flinstone-sandbox")
+    read_until("SESSION 2 user=Root", 4)
+    cmd("netlab whoami", expect="Flinstone")
+    cmd("netlab hostname", expect="Flinstone-sandbox")
     cmd("netlab write test.txt hello-from-sandbox", expect="wrote test.txt")
     cmd("netlab cat test.txt", expect="hello-from-sandbox")
     # The accepting victim (session 1) can end the binding unilaterally.
     send("session 1\n")
-    read_until("SESSION 1 user=flinstone", 4)
+    read_until("SESSION 1 user=Flinstone", 4)
     cmd("netlab end", expect="LAB_NETMODE live")
     cmd("server host", expect="SERVER_RELAY host")
     # Now that the binding is cleanly closed, root leaving the pod (its only
     # other member) must re-open "host pending": the sole remaining member
     # (flinstone) is still netlab's locally-tracked real server host.
     send("session 2\n")
-    read_until("SESSION 2 user=root", 4)
+    read_until("SESSION 2 user=Root", 4)
     cmd("netlab pod leave", expect="host pending")
 
     # Server lifecycle coupling. Session 1 (flinstone) is still the real server
     # host and the sole member of pod redcell (host pending).
     send("session 1\n")
-    read_until("SESSION 1 user=flinstone", 4)
+    read_until("SESSION 1 user=Flinstone", 4)
     # `server kill` by the server host tears the server down, so the pod that
     # lived under it is killed too.
     cmd("server kill", expect="pod dissolved")
@@ -254,22 +254,22 @@ try:
     cmd("server host", expect="SERVER_RELAY host")
     cmd("netlab pod create redcell2", expect="host pending")
     send("session 2\n")
-    read_until("SESSION 2 user=root", 4)
+    read_until("SESSION 2 user=Root", 4)
     cmd("netlab pod join", expect="identity preserved")
-    cmd("netlab pod host", expect="root")
+    cmd("netlab pod host", expect="Root")
     # flinstone (server host AND pod join-order #0) leaves the server: the relay
     # picks a new server host by its own order, and netlab independently
     # re-elects the pod host by pod join order, so flinstone reclaims it.
     send("session 1\n")
-    read_until("SESSION 1 user=flinstone", 4)
+    read_until("SESSION 1 user=Flinstone", 4)
     cmd("server leave", expect="new pod host")
-    cmd("netlab pod host", expect="flinstone")
+    cmd("netlab pod host", expect="Flinstone")
     # Gap closure: becoming the server host also re-elects the pod host on the
     # spot. flinstone (session 1) is the pod host; running `server host` makes
     # session 1 the server host (a separate relay point), so the pod host moves
     # to session 2 (root) immediately -- not only at accept time.
-    cmd("server host", expect="new pod host: root")
-    cmd("netlab pod host", expect="root")
+    cmd("server host", expect="new pod host: Root")
+    cmd("netlab pod host", expect="Root")
 
     for verb in HOSTED_VERBS:
         cmd(verb)
@@ -294,7 +294,7 @@ try:
     start = len(buf)
     send("root\n")
     wait_from("ok", start)
-    cmd("whoami", expect="WHOAMI root elevated")
+    cmd("whoami", expect="WHOAMI Root elevated")
     print("test-freestanding-shell: PASS (hosted verb parity, ramfs, labdisk, labnet, server relay)")
 finally:
     proc.kill()

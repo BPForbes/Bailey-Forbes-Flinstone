@@ -173,14 +173,14 @@
   function guestRegisterLines(name, password) {
     if (!guestUserNameOk(name)) return "";
     const secret = String(password || name).trim() || name;
-    return `switchuser root\nuseradd ${name}\n${secret}\n`;
+    return `switchuser Root\nuseradd ${name}\n${secret}\n`;
   }
   function guestSwitchLines(name) {
     if (!guestUserNameOk(name)) return "";
     return `switchuser ${name}\n`;
   }
   function guestNewSessionLines(name) {
-    const user = guestUserNameOk(name) ? name : "flinstone";
+    const user = guestUserNameOk(name) ? name : "Flinstone";
     return `session new\nswitchuser ${user}\n`;
   }
 

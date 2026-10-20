@@ -985,6 +985,23 @@ static int name_matches(const fl_server_file_member_ref_t *m,
     return strcmp(m->principal, target_name) == 0;
 }
 
+fl_result_t fl_server_file_member_principal(uint16_t member_id, char *out, size_t cap)
+{
+    size_t i;
+
+    if (!out || cap == 0u)
+        return FL_RESULT_INVAL;
+    out[0] = '\0';
+    for (i = 0; i < s_lookup_count; i++) {
+        if (s_lookup[i].member_id != member_id)
+            continue;
+        strncpy(out, s_lookup[i].principal, cap - 1u);
+        out[cap - 1u] = '\0';
+        return out[0] ? FL_RESULT_OK : FL_RESULT_NOENT;
+    }
+    return FL_RESULT_NOENT;
+}
+
 fl_result_t fl_server_file_resolve_receiver(const char *target_name,
                                             uint16_t explicit_member_id,
                                             uint16_t sender_member_id,

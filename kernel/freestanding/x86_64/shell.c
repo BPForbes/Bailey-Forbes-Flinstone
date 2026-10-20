@@ -304,7 +304,7 @@ static void finish_password(int session, const char *password)
     else if (mode == MODE_PASSWD)
         ok = fl_fs_identity_passwd(session, s_pending[session], password);
     if (ok && mode == MODE_SUDO_I)
-        ok = fl_fs_identity_switchuser(session, "root");
+        ok = fl_fs_identity_switchuser(session, "Root");
     emit(ok ? "ok\r\n" : "authentication failed\r\n");
     if (ok && fl_fs_identity_user_index(session) != before)
         perspective_switch_user(fl_fs_identity_user_index(session), session);
@@ -386,7 +386,7 @@ static void run_command(int session, char *line)
         char name[16];
         if (!take_word(&cursor, name, sizeof(name))) {
             if (str_eq(verb, "su"))
-                str_copy(name, "root", sizeof(name));
+                str_copy(name, "Root", sizeof(name));
             else {
                 emit("usage: ");
                 emit(verb);
