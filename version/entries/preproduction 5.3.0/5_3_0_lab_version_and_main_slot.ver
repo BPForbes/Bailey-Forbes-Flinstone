@@ -5,3 +5,5 @@ PRERELEASE=1
 DEV_VERSION=3
 DESCRIPTION=Make the portfolio's In development switch show the develop build. The lab's version command printed a hard-coded "4.5.2 lab" in every build; it now prints the build's own VERSION_LINE from userland/shell/version_def.h (for example "PRE 5.3.0, BUILD 3 lab" on develop), and the freestanding shell test reads the expected value from the same header. The browser kernel artifact workflow built the site root from the pushed commit, so a push to develop replaced the main lab with develop code; the main slot now always builds main on a push, while pull requests still build their own merge commit, and that build's metadata is marked published whenever it is deployed.
 
+
+RELEASE_DATE=2026-10-20
