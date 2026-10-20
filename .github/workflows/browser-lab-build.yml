@@ -22,6 +22,13 @@ on:
         type: boolean
         required: false
         default: false
+      allow_failure:
+        description: >-
+          Whether a failing build leaves the calling run green. A caller job
+          that uses a reusable workflow cannot set continue-on-error itself.
+        type: boolean
+        required: false
+        default: false
     outputs:
       bootable:
         value: ${{ jobs.validate.outputs.bootable }}
@@ -37,6 +44,7 @@ jobs:
   validate:
     name: Build, test, and audit browser candidate
     runs-on: ubuntu-latest
+    continue-on-error: ${{ inputs.allow_failure }}
     timeout-minutes: 25
     # Least privilege: repository, language, release, and commit reads come with
     # contents:read; the metadata timeline additionally needs merged pull requests.

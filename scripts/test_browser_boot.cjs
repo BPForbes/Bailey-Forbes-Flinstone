@@ -120,19 +120,19 @@ async function main() {
   await page.keyboard.type("cat hello.txt\n", { delay: 40 });
   await waitGuest(/lab-fs/);
   await page.keyboard.type("whoami\n", { delay: 40 });
-  await waitGuest(/WHOAMI flinstone/);
+  await waitGuest(/WHOAMI Flinstone/);
   await page.locator("#account-name").fill("root");
   await page.getByRole("button", { name: "Switch user", exact: true }).click();
-  await page.locator("#account-status").filter({ hasText: /Active session 1: root/ }).waitFor({ timeout: 20000 });
+  await page.locator("#account-status").filter({ hasText: /Active session 1: Root/ }).waitFor({ timeout: 20000 });
   await page.locator("#account-new-session").click();
-  await page.locator("#session-tabs [data-session='2']").filter({ hasText: /Session 2: root/ }).waitFor({ timeout: 20000 });
-  await page.locator("#account-status").filter({ hasText: /Active session 2: root/ }).waitFor({ timeout: 5000 });
+  await page.locator("#session-tabs [data-session='2']").filter({ hasText: /Session 2: Root/ }).waitFor({ timeout: 20000 });
+  await page.locator("#account-status").filter({ hasText: /Active session 2: Root/ }).waitFor({ timeout: 5000 });
   const sessionOne = page.locator("#session-tabs [data-session='1']");
   await sessionOne.waitFor({ state: "visible", timeout: 5000 });
   await sessionOne.click();
   try {
-    await page.locator("#account-status").filter({ hasText: /Active session 1: root/ }).waitFor({ timeout: 20000 });
-    await waitGuest(/SESSION 1 user=root/);
+    await page.locator("#account-status").filter({ hasText: /Active session 1: Root/ }).waitFor({ timeout: 20000 });
+    await waitGuest(/SESSION 1 user=Root/);
   } catch (error) {
     throw new Error(`session 1 switch: ${await guestText()}\n${error}`);
   }
@@ -164,10 +164,10 @@ async function main() {
     await waitGuest(/shell>/);
     await page.locator("#screen").click();
     await page.keyboard.type("whoami\n");
-    await waitGuest(/WHOAMI flinstone/);
+    await waitGuest(/WHOAMI Flinstone/);
     await page.locator("#account-name").fill("root");
     await page.getByRole("button", { name: "Switch user", exact: true }).click();
-    await page.locator("#account-status").filter({ hasText: /Active session 1: root/ }).waitFor({ timeout: 20000 });
+    await page.locator("#account-status").filter({ hasText: /Active session 1: Root/ }).waitFor({ timeout: 20000 });
   }
   await page.getByRole("button", { name: "Power Off", exact: true }).click();
   await status("Powered off");

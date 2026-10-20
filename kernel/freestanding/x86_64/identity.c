@@ -25,6 +25,20 @@ static int str_eq(const char *a, const char *b)
     return *a == *b;
 }
 
+/* Account names match regardless of case ("root" finds Root), as on the hosted shell. */
+static int str_eq_ci(const char *a, const char *b)
+{
+    while (*a && *b) {
+        char ca = *a >= 'A' && *a <= 'Z' ? (char)(*a + 32) : *a;
+        char cb = *b >= 'A' && *b <= 'Z' ? (char)(*b + 32) : *b;
+        if (ca != cb)
+            return 0;
+        ++a;
+        ++b;
+    }
+    return *a == *b;
+}
+
 static void str_copy(char *dst, const char *src, unsigned cap)
 {
     unsigned i = 0;
@@ -38,7 +52,7 @@ static void str_copy(char *dst, const char *src, unsigned cap)
 static int find_user(const char *name)
 {
     for (int i = 0; i < FL_FS_MAX_USERS; ++i) {
-        if (s_users[i].used && str_eq(s_users[i].name, name))
+        if (s_users[i].used && str_eq_ci(s_users[i].name, name))
             return i;
     }
     return -1;
@@ -69,10 +83,11 @@ void fl_fs_identity_init(void)
         s_session_user[i] = 0;
         s_session_sudo[i] = 0;
     }
-    add_user("flinstone", "flinstone", 0);
-    add_user("root", "root", 1);
+    /* Canonical spellings, as on the hosted shell: Root is the master, Flinstone the default user. */
+    add_user("Flinstone", "flinstone", 0);
+    add_user("Root", "root", 1);
     s_session_used[0] = 1;
-    s_session_user[0] = find_user("flinstone");
+    s_session_user[0] = find_user("Flinstone");
     s_active = 0;
     s_sessions = 1;
 }
@@ -142,7 +157,7 @@ void fl_fs_identity_logout(int session)
     if (session < 0 || session >= FL_FS_MAX_SESSIONS || !s_session_used[session])
         return;
     s_session_sudo[session] = 0;
-    s_session_user[session] = find_user("flinstone");
+    s_session_user[session] = find_user("Flinstone");
 }
 
 int fl_fs_identity_useradd(int session, const char *name, const char *password)
@@ -158,12 +173,12 @@ int fl_fs_identity_userdel(int session, const char *name)
     int guest;
     if (!fl_fs_identity_elevated(session) || !name || !name[0])
         return 0;
-    if (str_eq(name, "flinstone") || str_eq(name, "root"))
+    if (str_eq_ci(name, "Flinstone") || str_eq_ci(name, "Root"))
         return 0;
     idx = find_user(name);
     if (idx < 0)
         return 0;
-    guest = find_user("flinstone");
+    guest = find_user("Flinstone");
     for (int i = 0; i < FL_FS_MAX_SESSIONS; ++i) {
         if (s_session_used[i] && s_session_user[i] == idx)
             s_session_user[i] = guest;
@@ -229,7 +244,7 @@ int fl_fs_session_new(void)
         if (s_session_used[i])
             continue;
         s_session_used[i] = 1;
-        s_session_user[i] = find_user("flinstone");
+        s_session_user[i] = find_user("Flinstone");
         s_session_sudo[i] = 0;
         s_sessions++;
         s_active = i;

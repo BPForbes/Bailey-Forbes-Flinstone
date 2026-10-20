@@ -14,6 +14,9 @@ _Static_assert(FL_USER_NAME_MAX <= FL_CREDENTIAL_USERNAME_MAX_CHARS + 1u,
                "user_db name cap must not exceed credential contract limit");
 #define FL_PASSWORD_HASH_HEX_MAX  FL_PASSWORD_HASH_RECORD_MAX
 #define FL_PASSWORD_SALT_HEX_MAX  33u
+#define FL_USER_SIGNING_SECRET_LEN  32u
+#define FL_USER_SIGNING_PUBLIC_LEN  32u
+#define FL_USER_SIGNING_SEALED_LEN  81u
 
 typedef struct fl_user_record {
     char     name[FL_USER_NAME_MAX];
@@ -27,6 +30,14 @@ typedef struct fl_user_record {
     char     created_by[FL_HERITAGE_KEY_ID_MAX];
     /** Wall-clock seconds at creation; 0 when unknown (accounts migrated from before heritage). */
     int64_t  created_at;
+    /**
+     * The account's KeyQuorum signing key: the Ed25519 public key, and the secret
+     * sealed under the account's password (KQAK, keyquorum_identity.h). has_key is
+     * 0 for an account that has not signed in since keys were introduced.
+     */
+    int           has_key;
+    unsigned char signing_public[FL_USER_SIGNING_PUBLIC_LEN];
+    unsigned char signing_sealed[FL_USER_SIGNING_SEALED_LEN];
 } fl_user_record_t;
 
 #define FL_USER_DB_MAX_USERS 32u
@@ -71,6 +82,41 @@ int         fl_user_db_has_descendants(const fl_user_db_t *db, const char *key_i
 uint32_t    fl_user_db_next_uid(const fl_user_db_t *db);
 /** Refuses Root (ACCES) and an account that still has descendants (BUSY). */
 fl_result_t fl_user_db_remove_user(fl_user_db_t *db, const char *name);
+/**
+ * Sets a new password without the old one (an ancestor resetting it). The
+ * account gets a new signing key, so bridges it signed no longer verify and
+ * must be signed again.
+ */
 fl_result_t fl_user_db_set_password(fl_user_db_t *db, const char *name, const char *password);
+/**
+ * Changes a password with the current one: the signing key is kept and sealed
+ * again under the new password (or created, when the account had none). ACCES
+ * when the current password is wrong.
+ */
+fl_result_t fl_user_db_change_password(fl_user_db_t *db, const char *name,
+                                       const char *current, const char *password);
+
+/**
+ * Gives an account that has no signing key one, sealed under password, which
+ * must be the account's password. FL_RESULT_OK when it already had one; the
+ * caller saves the store when *created is set.
+ */
+fl_result_t fl_user_db_ensure_key(fl_user_db_t *db, const char *name, const char *password,
+                                  int *created);
+/**
+ * Drops the signing key of the account named name from memory (has_key 0).
+ * Used to undo fl_user_db_ensure_key when the store could not be saved, so no
+ * signature is ever made with a key the store does not hold.
+ */
+void        fl_user_db_forget_key(fl_user_db_t *db, const char *name);
+/**
+ * Opens the signing key of the account named name with its password into secret
+ * (FL_USER_SIGNING_SECRET_LEN bytes). ACCES for a wrong password, NOENT when the
+ * account has no key. The caller wipes secret.
+ */
+fl_result_t fl_user_db_open_key(const fl_user_db_t *db, const char *name, const char *password,
+                                unsigned char *secret);
+/** The signing public key of key_id, or NULL when the account has none. */
+const unsigned char *fl_user_db_signing_public(const fl_user_db_t *db, const char *key_id);
 
 #endif /* FL_USER_DB_H */

@@ -264,7 +264,8 @@ Two builds run the same gates, defined once in `.github/workflows/browser-lab-bu
 and `develop` (the in-development lab, at `/develop/`). Both run on every push to
 `main` or `develop`, and the deploy job republishes the whole Pages site from both
 artifacts, because a Pages deploy replaces everything. A develop build that fails its
-gates is left out of the site, and the develop job is `continue-on-error`, so it never
+gates is left out of the site, and its build runs with `allow_failure` (the reusable
+workflow sets `continue-on-error` on its own job), so it never
 fails the `main` run that the portfolio notification waits for.
 
 The workflow contains a fail-closed promotion gate. Upload as

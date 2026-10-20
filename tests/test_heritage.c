@@ -5,6 +5,8 @@
  */
 #include "heritage.h"
 #include "bridge.h"
+#include "mem_domain.h"
+#include "share_gate.h"
 #include "user_db.h"
 #include "session.h"
 #include "fs_jail.h"
@@ -233,6 +235,16 @@ static int test_legacy_migration(void) {
     ASSERT(u && !u->key_id[0]); /* not a valid segment: no key id, no authority */
     ASSERT(fl_user_db_find(&db, "Alternative")); /* lab defaults on: second default account added */
     ASSERT(strcmp(db.default_user, "Flinstone") == 0);
+    /* Migrated accounts have no signing key until they sign in. */
+    ASSERT(!fl_user_db_signing_public(&db, "Root.Flinstone"));
+    {
+        int created = 0;
+
+        ASSERT(fl_user_db_ensure_key(&db, "Flinstone", "wrong", &created) == FL_RESULT_ACCES);
+        ASSERT(fl_user_db_ensure_key(&db, "Flinstone", "flinstone", &created) == FL_RESULT_OK &&
+               created == 1);
+        ASSERT(fl_user_db_signing_public(&db, "Root.Flinstone"));
+    }
 
     /* The migration was written back: a second load changes nothing and agrees. */
     ASSERT(fl_user_db_load(&db, path) == FL_RESULT_OK);
@@ -294,39 +306,47 @@ static int test_bridges(void) {
     fl_bridge_t b;
     int64_t id = 0;
     int64_t id2 = 0;
+    unsigned char bob[FL_USER_SIGNING_SECRET_LEN];
+    unsigned char ann[FL_USER_SIGNING_SECRET_LEN];
+    unsigned char flin[FL_USER_SIGNING_SECRET_LEN];
+    unsigned char alt[FL_USER_SIGNING_SECRET_LEN];
 
     ASSERT(temp_db(path, sizeof path) == 0);
     ASSERT(fl_user_db_load(&db, path) == FL_RESULT_OK);
     ASSERT(fl_user_db_add_user_under(&db, "Root.Flinstone", "Bob", "pw", 3000, 0, 0) == FL_RESULT_OK);
     ASSERT(fl_user_db_add_user_under(&db, "Root.Alternative", "Ann", "pw", 3001, 0, 0) == FL_RESULT_OK);
     ASSERT(fl_user_db_save(&db) == FL_RESULT_OK);
+    ASSERT(fl_user_db_open_key(&db, "Bob", "pw", bob) == FL_RESULT_OK);
+    ASSERT(fl_user_db_open_key(&db, "Ann", "pw", ann) == FL_RESULT_OK);
+    ASSERT(fl_user_db_open_key(&db, "Flinstone", "flinstone", flin) == FL_RESULT_OK);
+    ASSERT(fl_user_db_open_key(&db, "Alternative", "alternative", alt) == FL_RESULT_OK);
 
     /* One line needs no bridge. */
-    ASSERT(fl_bridge_request(path, &db, "Root.Flinstone", "Root.Flinstone.Bob", 1, &id)
+    ASSERT(fl_bridge_request(path, &db, "Root.Flinstone", "Root.Flinstone.Bob", 1, flin, &id)
            == FL_RESULT_INVAL);
-    ASSERT(fl_bridge_request(path, &db, "Root.Flinstone.Bob", "Root", 1, &id) == FL_RESULT_INVAL);
-    ASSERT(fl_bridge_request(path, &db, "Root.Flinstone.Bob", "Root.Ghost", 1, &id)
+    ASSERT(fl_bridge_request(path, &db, "Root.Flinstone.Bob", "Root", 1, bob, &id) == FL_RESULT_INVAL);
+    ASSERT(fl_bridge_request(path, &db, "Root.Flinstone.Bob", "Root.Ghost", 1, bob, &id)
            == FL_RESULT_INVAL);
 
-    ASSERT(fl_bridge_request(path, &db, "Root.Flinstone.Bob", "Root.Alternative.Ann", 10, &id)
+    ASSERT(fl_bridge_request(path, &db, "Root.Flinstone.Bob", "Root.Alternative.Ann", 10, bob, &id)
            == FL_RESULT_OK && id > 0);
-    ASSERT(fl_bridge_request(path, &db, "Root.Alternative.Ann", "Root.Flinstone.Bob", 11, &id2)
+    ASSERT(fl_bridge_request(path, &db, "Root.Alternative.Ann", "Root.Flinstone.Bob", 11, ann, &id2)
            == FL_RESULT_BUSY);
     /* Pending grants nothing. */
-    ASSERT(!fl_bridge_active_between(path, "Root.Flinstone.Bob", "Root.Alternative.Ann"));
+    ASSERT(!fl_bridge_active_between(&db, "Root.Flinstone.Bob", "Root.Alternative.Ann"));
     /* The requesting side, or its ancestor, cannot accept. */
-    ASSERT(fl_bridge_accept(path, "Root.Flinstone.Bob", id, 12) == FL_RESULT_ACCES);
-    ASSERT(fl_bridge_accept(path, "Root.Flinstone", id, 12) == FL_RESULT_ACCES);
+    ASSERT(fl_bridge_accept(path, &db, "Root.Flinstone.Bob", id, 12, bob) == FL_RESULT_ACCES);
+    ASSERT(fl_bridge_accept(path, &db, "Root.Flinstone", id, 12, flin) == FL_RESULT_ACCES);
     /* Ann's ancestor may accept for her. */
-    ASSERT(fl_bridge_accept(path, "Root.Alternative", id, 13) == FL_RESULT_OK);
-    ASSERT(fl_bridge_accept(path, "Root.Alternative.Ann", id, 14) == FL_RESULT_BUSY);
+    ASSERT(fl_bridge_accept(path, &db, "Root.Alternative", id, 13, alt) == FL_RESULT_OK);
+    ASSERT(fl_bridge_accept(path, &db, "Root.Alternative.Ann", id, 14, ann) == FL_RESULT_BUSY);
     ASSERT(fl_bridge_get(path, id, &b) == FL_RESULT_OK);
     ASSERT(b.state == FL_BRIDGE_STATE_ACTIVE && strcmp(b.accepted_by, "Root.Alternative") == 0 &&
            b.accepted_at == 13);
-    ASSERT(fl_bridge_active_between(path, "Root.Alternative.Ann", "Root.Flinstone.Bob"));
+    ASSERT(fl_bridge_active_between(&db, "Root.Alternative.Ann", "Root.Flinstone.Bob"));
     /* A bridge joins exactly its two accounts: no inheritance either way. */
-    ASSERT(!fl_bridge_active_between(path, "Root.Flinstone", "Root.Alternative.Ann"));
-    ASSERT(!fl_bridge_active_between(path, "Root.Flinstone.Bob", "Root.Alternative"));
+    ASSERT(!fl_bridge_active_between(&db, "Root.Flinstone", "Root.Alternative.Ann"));
+    ASSERT(!fl_bridge_active_between(&db, "Root.Flinstone.Bob", "Root.Alternative"));
 
     g_visited = 0;
     ASSERT(fl_bridge_list_visible(path, "Root.Flinstone", count_bridge, NULL) == FL_RESULT_OK);
@@ -342,19 +362,179 @@ static int test_bridges(void) {
     /* Revocation: not a third party, yes an ancestor of either side. */
     ASSERT(fl_bridge_revoke(path, "Root.Alternative.Cy", id) == FL_RESULT_ACCES);
     ASSERT(fl_bridge_revoke(path, "Root.Flinstone", id) == FL_RESULT_OK);
-    ASSERT(!fl_bridge_active_between(path, "Root.Flinstone.Bob", "Root.Alternative.Ann"));
+    ASSERT(!fl_bridge_active_between(&db, "Root.Flinstone.Bob", "Root.Alternative.Ann"));
     ASSERT(fl_bridge_get(path, id, &b) == FL_RESULT_NOENT);
 
     /* Removing an account removes its bridges. */
-    ASSERT(fl_bridge_request(path, &db, "Root.Flinstone.Bob", "Root.Alternative.Ann", 20, &id2)
+    ASSERT(fl_bridge_request(path, &db, "Root.Flinstone.Bob", "Root.Alternative.Ann", 20, bob, &id2)
            == FL_RESULT_OK);
     ASSERT(fl_bridge_remove_for(path, "Root.Alternative.Ann") == FL_RESULT_OK);
     ASSERT(fl_bridge_get(path, id2, &b) == FL_RESULT_NOENT);
 
     /* user_db saves never touch the bridge table. */
-    ASSERT(fl_bridge_request(path, &db, "Root.Flinstone", "Root.Alternative", 30, &id) == FL_RESULT_OK);
+    ASSERT(fl_bridge_request(path, &db, "Root.Flinstone", "Root.Alternative", 30, flin, &id) == FL_RESULT_OK);
     ASSERT(fl_user_db_save(&db) == FL_RESULT_OK);
     ASSERT(fl_bridge_get(path, id, &b) == FL_RESULT_OK);
+    mem_domain_zero(bob, sizeof bob);
+    mem_domain_zero(ann, sizeof ann);
+    mem_domain_zero(flin, sizeof flin);
+    mem_domain_zero(alt, sizeof alt);
+    unlink(path);
+    return 0;
+}
+
+/* Account keys: sealed under the password, kept or replaced, and what makes a bridge count. */
+static int test_signed_bridges(void) {
+    char path[256];
+    char stmt[256];
+    fl_user_db_t db;
+    fl_user_db_t again;
+    sqlite3 *sql = NULL;
+    int64_t id = 0;
+    int created = 0;
+    unsigned char bob[FL_USER_SIGNING_SECRET_LEN];
+    unsigned char ann[FL_USER_SIGNING_SECRET_LEN];
+    unsigned char before[FL_USER_SIGNING_PUBLIC_LEN];
+    const unsigned char *pub;
+
+    ASSERT(temp_db(path, sizeof path) == 0);
+    ASSERT(fl_user_db_load(&db, path) == FL_RESULT_OK);
+    ASSERT(fl_user_db_add_user_under(&db, "Root.Flinstone", "Bob", "pw", 3000, 0, 0) == FL_RESULT_OK);
+    ASSERT(fl_user_db_add_user_under(&db, "Root.Alternative", "Ann", "pw", 3001, 0, 0) == FL_RESULT_OK);
+    ASSERT(fl_user_db_save(&db) == FL_RESULT_OK);
+
+    /* Every account has a key, and it survives a save and a load. */
+    pub = fl_user_db_signing_public(&db, "Root.Flinstone.Bob");
+    ASSERT(pub);
+    memcpy(before, pub, sizeof before);
+    ASSERT(fl_user_db_load(&again, path) == FL_RESULT_OK);
+    pub = fl_user_db_signing_public(&again, "Root.Flinstone.Bob");
+    ASSERT(pub && memcmp(pub, before, sizeof before) == 0);
+    ASSERT(fl_user_db_signing_public(&again, "Root"));
+    ASSERT(fl_user_db_open_key(&db, "Bob", "wrong", bob) == FL_RESULT_ACCES);
+    ASSERT(fl_user_db_open_key(&db, "Bob", "pw", bob) == FL_RESULT_OK);
+    ASSERT(fl_user_db_open_key(&db, "Ann", "pw", ann) == FL_RESULT_OK);
+
+    /* Signing with someone else's key is refused. */
+    ASSERT(fl_bridge_request(path, &db, "Root.Flinstone.Bob", "Root.Alternative.Ann", 1, ann, &id)
+           == FL_RESULT_ACCES);
+    ASSERT(fl_bridge_request(path, &db, "Root.Flinstone.Bob", "Root.Alternative.Ann", 1, bob, &id)
+           == FL_RESULT_OK);
+    ASSERT(fl_bridge_accept(path, &db, "Root.Alternative.Ann", id, 2, bob) == FL_RESULT_ACCES);
+    ASSERT(fl_bridge_accept(path, &db, "Root.Alternative.Ann", id, 2, ann) == FL_RESULT_OK);
+    ASSERT(fl_bridge_active_between(&db, "Root.Flinstone.Bob", "Root.Alternative.Ann"));
+
+    /* A changed signature opens nothing. */
+    ASSERT(sqlite3_open(path, &sql) == SQLITE_OK);
+    ASSERT(sqlite3_exec(sql, "UPDATE bridges SET accept_sig=request_sig;", NULL, NULL, NULL)
+           == SQLITE_OK);
+    ASSERT(!fl_bridge_active_between(&db, "Root.Flinstone.Bob", "Root.Alternative.Ann"));
+    /* Nor does an active row with no signatures (one written before bridges were signed). */
+    ASSERT(sqlite3_exec(sql, "DELETE FROM bridges;", NULL, NULL, NULL) == SQLITE_OK);
+    snprintf(stmt, sizeof stmt,
+             "INSERT INTO bridges(a_key,b_key,state,accepted_by) VALUES("
+             "'Root.Flinstone.Bob','Root.Alternative.Ann',%d,'Root.Alternative.Ann');",
+             (int)FL_BRIDGE_STATE_ACTIVE);
+    ASSERT(sqlite3_exec(sql, stmt, NULL, NULL, NULL) == SQLITE_OK);
+    ASSERT(!fl_bridge_active_between(&db, "Root.Flinstone.Bob", "Root.Alternative.Ann"));
+    ASSERT(sqlite3_exec(sql, "DELETE FROM bridges;", NULL, NULL, NULL) == SQLITE_OK);
+    sqlite3_close(sql);
+
+    /* A request with no valid requester signature cannot be accepted. */
+    ASSERT(fl_bridge_request(path, &db, "Root.Flinstone.Bob", "Root.Alternative.Ann", 3, bob, &id)
+           == FL_RESULT_OK);
+    ASSERT(sqlite3_open(path, &sql) == SQLITE_OK);
+    ASSERT(sqlite3_exec(sql, "UPDATE bridges SET request_sig='';", NULL, NULL, NULL) == SQLITE_OK);
+    sqlite3_close(sql);
+    ASSERT(fl_bridge_accept(path, &db, "Root.Alternative.Ann", id, 4, ann) == FL_RESULT_INVAL);
+    ASSERT(fl_bridge_revoke(path, "Root.Flinstone.Bob", id) == FL_RESULT_OK);
+
+    /* Changing your own password keeps the key; a reset replaces it and the bridge stops counting. */
+    ASSERT(fl_bridge_request(path, &db, "Root.Flinstone.Bob", "Root.Alternative.Ann", 5, bob, &id)
+           == FL_RESULT_OK);
+    ASSERT(fl_bridge_accept(path, &db, "Root.Alternative.Ann", id, 6, ann) == FL_RESULT_OK);
+    memcpy(before, fl_user_db_signing_public(&db, "Root.Alternative.Ann"), sizeof before);
+    ASSERT(fl_user_db_change_password(&db, "Ann", "wrong", "pw2") == FL_RESULT_ACCES);
+    ASSERT(fl_user_db_change_password(&db, "Ann", "pw", "pw2") == FL_RESULT_OK);
+    ASSERT(memcmp(fl_user_db_signing_public(&db, "Root.Alternative.Ann"), before, sizeof before) == 0);
+    ASSERT(fl_user_db_open_key(&db, "Ann", "pw2", ann) == FL_RESULT_OK);
+    ASSERT(fl_bridge_active_between(&db, "Root.Flinstone.Bob", "Root.Alternative.Ann"));
+    ASSERT(fl_user_db_set_password(&db, "Ann", "pw3") == FL_RESULT_OK);
+    ASSERT(memcmp(fl_user_db_signing_public(&db, "Root.Alternative.Ann"), before, sizeof before) != 0);
+    ASSERT(!fl_bridge_active_between(&db, "Root.Flinstone.Bob", "Root.Alternative.Ann"));
+
+    /* ensure_key leaves an existing key alone. */
+    ASSERT(fl_user_db_ensure_key(&db, "Bob", "pw", &created) == FL_RESULT_OK && created == 0);
+    /* A key that could not be saved is forgotten, and a later ensure_key makes a new one. */
+    memcpy(before, fl_user_db_signing_public(&db, "Root.Flinstone.Bob"), sizeof before);
+    fl_user_db_forget_key(&db, "Bob");
+    ASSERT(!fl_user_db_signing_public(&db, "Root.Flinstone.Bob"));
+    ASSERT(fl_user_db_open_key(&db, "Bob", "pw", bob) == FL_RESULT_NOENT);
+    ASSERT(fl_user_db_ensure_key(&db, "Bob", "pw", &created) == FL_RESULT_OK && created == 1);
+    ASSERT(memcmp(fl_user_db_signing_public(&db, "Root.Flinstone.Bob"), before, sizeof before) != 0);
+
+    mem_domain_zero(bob, sizeof bob);
+    mem_domain_zero(ann, sizeof ann);
+    unlink(path);
+    return 0;
+}
+
+
+/* The sender-side gate for server file offers (share_gate.h). */
+static int test_share_gate(void) {
+    char path[256];
+    fl_user_db_t db;
+    int64_t id = 0;
+    unsigned char bob[FL_USER_SIGNING_SECRET_LEN];
+    unsigned char ann[FL_USER_SIGNING_SECRET_LEN];
+    sqlite3 *sql = NULL;
+
+    ASSERT(temp_db(path, sizeof path) == 0);
+    ASSERT(fl_user_db_load(&db, path) == FL_RESULT_OK);
+    ASSERT(fl_user_db_add_user_under(&db, "Root.Flinstone", "Bob", "pw", 3000, 0, 0) == FL_RESULT_OK);
+    ASSERT(fl_user_db_add_user_under(&db, "Root.Alternative", "Ann", "pw", 3001, 0, 0) == FL_RESULT_OK);
+    ASSERT(fl_user_db_save(&db) == FL_RESULT_OK);
+
+    /* One line: yourself, an ancestor, a descendant. */
+    ASSERT(fl_share_gate_check(&db, "Bob", "Bob") == FL_SHARE_GATE_OK);
+    ASSERT(fl_share_gate_check(&db, "Bob", "Flinstone") == FL_SHARE_GATE_OK);
+    ASSERT(fl_share_gate_check(&db, "Flinstone", "Bob") == FL_SHARE_GATE_OK);
+    ASSERT(fl_share_gate_check(&db, "Root", "Ann") == FL_SHARE_GATE_OK);
+    /* Another branch needs a signed, active bridge. */
+    ASSERT(fl_share_gate_check(&db, "Bob", "Ann") == FL_SHARE_GATE_NO_BRIDGE);
+    ASSERT(fl_share_gate_check(&db, "Flinstone", "Alternative") == FL_SHARE_GATE_NO_BRIDGE);
+    ASSERT(fl_user_db_open_key(&db, "Bob", "pw", bob) == FL_RESULT_OK);
+    ASSERT(fl_user_db_open_key(&db, "Ann", "pw", ann) == FL_RESULT_OK);
+    ASSERT(fl_bridge_request(path, &db, "Root.Flinstone.Bob", "Root.Alternative.Ann", 1, bob, &id)
+           == FL_RESULT_OK);
+    ASSERT(fl_share_gate_check(&db, "Bob", "Ann") == FL_SHARE_GATE_NO_BRIDGE); /* pending */
+    ASSERT(fl_bridge_accept(path, &db, "Root.Alternative.Ann", id, 2, ann) == FL_RESULT_OK);
+    ASSERT(fl_share_gate_check(&db, "Bob", "Ann") == FL_SHARE_GATE_OK);
+    ASSERT(fl_share_gate_check(&db, "Ann", "Bob") == FL_SHARE_GATE_OK);
+    /* The bridge joins exactly those two: Bob's parent does not inherit it. */
+    ASSERT(fl_share_gate_check(&db, "Flinstone", "Ann") == FL_SHARE_GATE_NO_BRIDGE);
+    /* A tampered bridge stops counting. */
+    ASSERT(sqlite3_open(path, &sql) == SQLITE_OK);
+    ASSERT(sqlite3_exec(sql, "UPDATE bridges SET accept_sig=request_sig;", NULL, NULL, NULL)
+           == SQLITE_OK);
+    sqlite3_close(sql);
+    ASSERT(fl_share_gate_check(&db, "Bob", "Ann") == FL_SHARE_GATE_NO_BRIDGE);
+
+    /* Unknown accounts and accounts without a key are refused. */
+    ASSERT(fl_share_gate_check(&db, "Bob", "Ghost") == FL_SHARE_GATE_NO_RECEIVER);
+    ASSERT(fl_share_gate_check(&db, "Ghost", "Bob") == FL_SHARE_GATE_NO_SENDER);
+    {
+        size_t i;
+
+        for (i = 0; i < db.count; i++) {
+            if (!strcmp(db.users[i].name, "Bob"))
+                db.users[i].has_key = 0;
+        }
+    }
+    ASSERT(fl_share_gate_check(&db, "Flinstone", "Bob") == FL_SHARE_GATE_NO_RECEIVER_KEY);
+
+    mem_domain_zero(bob, sizeof bob);
+    mem_domain_zero(ann, sizeof ann);
     unlink(path);
     return 0;
 }
@@ -365,6 +545,8 @@ static int test_jail_homes(const char *jail_parent) {
     char p[PATH_MAX];
     fl_user_db_t *db;
     int64_t id = 0;
+    unsigned char bob[FL_USER_SIGNING_SECRET_LEN];
+    unsigned char alt[FL_USER_SIGNING_SECRET_LEN];
 
     g_vm_mode = 1;
     strncpy(g_vm_root, jail_parent, sizeof(g_vm_root) - 1);
@@ -417,10 +599,12 @@ static int test_jail_homes(const char *jail_parent) {
     fl_session_end_sudo_scope();
 
     /* An active bridge Bob <-> Alternative opens Alternative's home to Bob only. */
-    ASSERT(fl_bridge_request(db->path, db, "Root.Flinstone.Bob", "Root.Alternative", 1, &id)
+    ASSERT(fl_user_db_open_key(db, "Bob", "pw", bob) == FL_RESULT_OK);
+    ASSERT(fl_user_db_open_key(db, "Alternative", "alternative", alt) == FL_RESULT_OK);
+    ASSERT(fl_bridge_request(db->path, db, "Root.Flinstone.Bob", "Root.Alternative", 1, bob, &id)
            == FL_RESULT_OK);
     ASSERT(fs_jail_check_access(p) == -1); /* pending */
-    ASSERT(fl_bridge_accept(db->path, "Root.Alternative", id, 2) == FL_RESULT_OK);
+    ASSERT(fl_bridge_accept(db->path, db, "Root.Alternative", id, 2, alt) == FL_RESULT_OK);
     ASSERT(fs_jail_check_access(p) == 0);
     ASSERT(fl_session_set_user("Flinstone") == FL_RESULT_OK);
     ASSERT(fs_jail_check_access(p) == -1); /* Bob's ancestor does not inherit it */
@@ -468,6 +652,8 @@ int main(void) {
     RUN(test_legacy_migration);
     RUN(test_legacy_case_collision);
     RUN(test_bridges);
+    RUN(test_signed_bridges);
+    RUN(test_share_gate);
     RUN(test_jail_homes, jail_parent);
 
     if (chdir("/tmp") != 0)

@@ -36,10 +36,6 @@ jobs:
   develop:
     name: Develop build
     if: github.event_name == 'push'
-    # A failing develop build must not fail the main run: the run's success is
-    # what the portfolio notification waits for. The deploy below checks the
-    # develop outputs, so a failed develop build is left out of the site.
-    continue-on-error: true
     uses: ./.github/workflows/browser-lab-build.yml
     permissions:
       contents: read
@@ -48,6 +44,10 @@ jobs:
       ref: develop
       artifact_suffix: "-develop"
       publish: false
+      # A failing develop build must not fail the main run: the run's success is
+      # what the portfolio notification waits for. The deploy below checks the
+      # develop outputs, so a failed develop build is left out of the site.
+      allow_failure: true
 
   deploy:
     name: Publish validated lab to GitHub Pages

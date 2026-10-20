@@ -6,6 +6,7 @@
 #include "server_shared_db.h"
 #include "server_shared_fs.h"
 #include "session.h"
+#include "share_gate.h"
 
 #include <errno.h>
 #include <stdio.h>
@@ -188,6 +189,28 @@ static int verb_file_send(const cmd_server_ctx_t *ctx, int argc, char **argv)
             pthread_mutex_unlock(ctx->mutex);
             fl_color_warn("file offer failed: user not found");
             return 1;
+        }
+        /*
+         * Before anything leaves, the sender checks that the receiver's account
+         * is on its own line or joined to it by a signed, active bridge
+         * (share_gate.h). The server does not repeat this check.
+         */
+        {
+            char receiver[FL_SERVER_PRINCIPAL_MAX];
+            fl_share_gate_result_t gate;
+
+            if (fl_server_file_member_principal(receiver_id, receiver, sizeof receiver) !=
+                FL_RESULT_OK) {
+                pthread_mutex_unlock(ctx->mutex);
+                fl_color_warn("file offer refused: the receiver has no account name");
+                return 1;
+            }
+            gate = fl_share_gate_check(fl_session_user_db(), current_principal(), receiver);
+            if (gate != FL_SHARE_GATE_OK) {
+                pthread_mutex_unlock(ctx->mutex);
+                fl_color_warn("file offer to %s refused: %s", receiver, fl_share_gate_reason(gate));
+                return 1;
+            }
         }
         rc = fl_server_file_offer_create(&offer, sender_member_id(ctx, hosting),
                                          receiver_id, path, path, perms, expires_at);
