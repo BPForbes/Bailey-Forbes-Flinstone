@@ -16,7 +16,11 @@ on:
 
 concurrency:
   group: browser-kernel-${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
-  cancel-in-progress: true
+  # Only pull request runs are cancelled by a newer push. A push run may already
+  # have published to the deployment branch, and cancelling it before its deploy
+  # would leave the branch and the live site out of step; a newer push of the
+  # same branch waits for it instead.
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 permissions:
   contents: read
