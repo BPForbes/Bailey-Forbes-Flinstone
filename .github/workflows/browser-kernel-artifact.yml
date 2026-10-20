@@ -245,8 +245,8 @@ jobs:
           path: dist/browser-lab
           if-no-files-found: error
 
-  deploy:
-    name: Publish validated lab to GitHub Pages
+  publish:
+    name: Publish lab to the deployment branch
     needs: validate
     if: >-
       github.event_name == 'push' && github.ref == 'refs/heads/main' &&
@@ -254,18 +254,14 @@ jobs:
       needs.validate.outputs.browser_compatible == 'true' &&
       needs.validate.outputs.boot_smoke_passed == 'true'
     runs-on: ubuntu-latest
-    environment:
-      name: github-pages
-      url: ${{ steps.deployment.outputs.page_url }}
-    # One publish at a time across main and develop: each reads the deployment
-    # branch, replaces its own slot and pushes, and must not be cancelled half way.
+    # Queued per branch: GitHub keeps one pending job per group, so only an older
+    # main publish can be dropped, never develop's. A main and a develop publish
+    # may overlap; the script retries when the branch moved.
     concurrency:
-      group: pages-deploy
+      group: pages-publish-${{ github.ref }}
       cancel-in-progress: false
     permissions:
       contents: write   # push the deployment branch
-      pages: write
-      id-token: write
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v5
 
@@ -278,30 +274,56 @@ jobs:
       # main owns the site root; the develop lab at /develop/ is kept as the
       # publisher branch holds it (scripts/publish_pages_slot.sh).
       - name: Publish the main slot
-        id: publish
         env:
           LAB: ${{ runner.temp }}/lab
           SITE: ${{ runner.temp }}/site
         run: |
           ./scripts/publish_pages_slot.sh main "$LAB" "$SITE"
+          echo "main lab published to the publisher branch" >>"$GITHUB_STEP_SUMMARY"
+
+  deploy:
+    name: Publish validated lab to GitHub Pages
+    needs: publish
+    runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    # Deploys whatever the deployment branch holds when it runs, so a pending
+    # deploy that a newer one replaces loses nothing: the newer one deploys the
+    # newer branch. Never cancelled half way.
+    concurrency:
+      group: pages-deploy
+      cancel-in-progress: false
+    permissions:
+      contents: read
+      pages: write
+      id-token: write
+    steps:
+      - name: Check out the deployment branch
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v5
+        with:
+          ref: publisher
+          path: site
+          persist-credentials: false
+
+      - name: Report the deployed slots
+        run: |
+          test -f site/index.html
           {
-            echo "## Deployment branch"
+            echo "## Deployment branch $(git -C site rev-parse --short HEAD)"
             echo
-            echo "- main: published"
-            if [ -f "$SITE/develop/index.html" ]; then echo "- develop lab: present"; else echo "- develop lab: absent"; fi
+            echo "- main lab: present"
+            if [ -f site/develop/index.html ]; then echo "- develop lab: present"; else echo "- develop lab: absent"; fi
           } >>"$GITHUB_STEP_SUMMARY"
 
       - name: Stage Pages payload
-        if: steps.publish.outputs.deploy == 'true'
         uses: actions/upload-pages-artifact@fc324d3547104276b827a68afc52ff2a11cc49c9 # v5.0.0
         with:
-          path: ${{ runner.temp }}/site
+          path: site
 
       - name: Configure Pages
-        if: steps.publish.outputs.deploy == 'true'
         uses: actions/configure-pages@45bfe0192ca1faeb007ade9deae92b16b8254a0d # v6.0.0
 
       - name: Deploy Pages
-        if: steps.publish.outputs.deploy == 'true'
         id: deployment
         uses: actions/deploy-pages@368f82528645a54fb793d4d04e342629a3f51346 # v5.0.1

@@ -268,9 +268,11 @@ validated but cannot self-attest either observation.
 
 On `main` only, the same workflow publishes that packaged tree to the site root of the
 deployment branch `publisher` with `scripts/publish_pages_slot.sh`, which keeps the
-in-development lab that `develop` publishes at `/develop/`, force-pushes the branch as
-one parentless commit, and deploys the whole branch tree to GitHub Pages. Publishes share
-the `pages-deploy` concurrency group and push with `--force-with-lease`.
+in-development lab that `develop` publishes at `/develop/` and force-pushes the branch as
+one parentless commit (with `--force-with-lease`, retrying from the new commit if a
+`develop` publish moved the branch). Publishes queue per branch (`pages-publish-<ref>`).
+A separate deploy job then checks out `publisher` as it stands and deploys that whole
+tree to GitHub Pages in the `pages-deploy` group.
 Pull requests never publish. The configured permanent URL is
 `https://bpforbes.github.io/Bailey-Forbes-Flinstone/`. GitHub Pages cannot set
 COOP/COEP/CSP; see [`docs/portfolio-iframe-integration.md`](./portfolio-iframe-integration.md).
