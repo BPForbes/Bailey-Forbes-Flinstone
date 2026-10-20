@@ -36,8 +36,8 @@ jobs:
       # its metadata marks it published (lab.published); pull requests never do.
       publish: ${{ github.event_name == 'push' && (github.ref == 'refs/heads/main' || github.ref == 'refs/heads/develop') }}
 
-  deploy:
-    name: Publish validated lab to GitHub Pages
+  publish:
+    name: Publish lab to the deployment branch
     needs: build
     if: >-
       github.event_name == 'push' &&
@@ -46,18 +46,14 @@ jobs:
       needs.build.outputs.browser_compatible == 'true' &&
       needs.build.outputs.boot_smoke_passed == 'true'
     runs-on: ubuntu-latest
-    environment:
-      name: github-pages
-      url: ${{ steps.deployment.outputs.page_url }}
-    # One publish at a time across main and develop: each reads the deployment
-    # branch, replaces its own slot and pushes, and must not be cancelled half way.
+    # Queued per branch: GitHub keeps one pending job per group, so only an older
+    # publish of the same branch can be dropped, never the other slot's. A main
+    # and a develop publish may overlap; the script retries when the branch moved.
     concurrency:
-      group: pages-deploy
+      group: pages-publish-${{ github.ref }}
       cancel-in-progress: false
     permissions:
       contents: write   # push the deployment branch
-      pages: write
-      id-token: write
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v5
 
@@ -68,32 +64,63 @@ jobs:
           path: ${{ runner.temp }}/lab
 
       - name: Publish this branch's slot
-        id: publish
         env:
           SLOT: ${{ github.ref == 'refs/heads/main' && 'main' || 'develop' }}
           LAB: ${{ runner.temp }}/lab
           SITE: ${{ runner.temp }}/site
         run: |
           ./scripts/publish_pages_slot.sh "$SLOT" "$LAB" "$SITE"
+          echo "${SLOT} lab published to the publisher branch" >>"$GITHUB_STEP_SUMMARY"
+
+  deploy:
+    name: Publish validated lab to GitHub Pages
+    needs: publish
+    runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    # Deploys whatever the deployment branch holds when it runs, so a pending
+    # deploy that a newer one replaces loses nothing: the newer one deploys the
+    # newer branch. Never cancelled half way.
+    concurrency:
+      group: pages-deploy
+      cancel-in-progress: false
+    permissions:
+      contents: read
+      pages: write
+      id-token: write
+    steps:
+      - name: Check out the deployment branch
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v5
+        with:
+          ref: publisher
+          path: site
+          persist-credentials: false
+
+      - name: Check for the main lab
+        id: site
+        run: |
           {
-            echo "## Deployment branch"
+            echo "## Deployment branch $(git -C site rev-parse --short HEAD)"
             echo
-            echo "- ${SLOT}: published"
-            if [ -f "$SITE/develop/index.html" ]; then echo "- develop lab: present"; else echo "- develop lab: absent"; fi
-            if [ -f "$SITE/index.html" ]; then echo "- main lab: present"; else echo "- main lab: absent, Pages not deployed"; fi
+            if [ -f site/index.html ]; then echo "- main lab: present"; else echo "- main lab: absent, Pages not deployed"; fi
+            if [ -f site/develop/index.html ]; then echo "- develop lab: present"; else echo "- develop lab: absent"; fi
           } >>"$GITHUB_STEP_SUMMARY"
+          # Until main has published a lab at the root, deploying would take the
+          # site root down; leave the current site in place.
+          if [ -f site/index.html ]; then echo "deploy=true"; else echo "deploy=false"; fi >>"$GITHUB_OUTPUT"
 
       - name: Stage Pages payload
-        if: steps.publish.outputs.deploy == 'true'
+        if: steps.site.outputs.deploy == 'true'
         uses: actions/upload-pages-artifact@fc324d3547104276b827a68afc52ff2a11cc49c9 # v5.0.0
         with:
-          path: ${{ runner.temp }}/site
+          path: site
 
       - name: Configure Pages
-        if: steps.publish.outputs.deploy == 'true'
+        if: steps.site.outputs.deploy == 'true'
         uses: actions/configure-pages@45bfe0192ca1faeb007ade9deae92b16b8254a0d # v6.0.0
 
       - name: Deploy Pages
-        if: steps.publish.outputs.deploy == 'true'
+        if: steps.site.outputs.deploy == 'true'
         id: deployment
         uses: actions/deploy-pages@368f82528645a54fb793d4d04e342629a3f51346 # v5.0.1

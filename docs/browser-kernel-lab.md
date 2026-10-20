@@ -270,13 +270,20 @@ deployment branch `publisher`, which holds built labs only, never source:
 
 `scripts/publish_pages_slot.sh` reads `publisher`, replaces only its own slot, keeps
 the other slot exactly as it was, and force-pushes the result as one parentless commit,
-so built images never pile up in the branch history. The deploy job then uploads that
-whole tree to GitHub Pages. A Pages deploy replaces the entire site, but because the
-tree always holds both slots, a `main` deploy keeps the develop lab and a `develop`
-deploy keeps the main lab. Deploys share the `pages-deploy` concurrency group and the
-push uses `--force-with-lease`, so two publishes never overwrite each other. Until the
-first `main` publish puts a lab at `/`, a `develop` publish updates `publisher` but does
-not deploy Pages. A branch whose build fails its gates publishes nothing, and its slot
+so built images never pile up in the branch history. The push is guarded with
+`--force-with-lease`; when a publish of the other slot moved the branch in between, the
+script starts over from the new commit, so a `main` and a `develop` publish may overlap
+without losing either. Publishes queue per branch (`pages-publish-<ref>`), because GitHub
+keeps only one pending job per concurrency group and a shared group could drop the other
+slot's publish.
+
+A separate deploy job then checks out `publisher` as it stands and deploys that whole
+tree to GitHub Pages, in the single `pages-deploy` group. A Pages deploy replaces the
+entire site, but the tree always holds both slots, so a `main` deploy keeps the develop
+lab and a `develop` deploy keeps the main lab; a pending deploy that a newer one replaces
+loses nothing, because the newer one deploys the newer branch. Until the first `main`
+publish puts a lab at `/`, the deploy job leaves the current site in place.
+A branch whose build fails its gates publishes nothing, and its slot
 keeps the last good build.
 
 The workflow contains a fail-closed promotion gate. Upload as
