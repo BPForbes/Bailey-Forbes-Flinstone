@@ -215,6 +215,56 @@ static int test_untracked_destination_is_never_overwritten(void) {
     return 0;
 }
 
+/* A failed write leaves nothing half-installed: the first delivery retries cleanly, and an
+ * update keeps the earlier copy and its history. */
+static int test_a_failed_write_installs_nothing(void) {
+    world_t w;
+    fl_kq_encoded_t enc;
+    char src[PATH_MAX], dest[PATH_MAX], got[64];
+    char side[PATH_MAX + 16], seen[PATH_MAX + 16], block[PATH_MAX + 32];
+    uint8_t sig[64];
+    const unsigned char *mya_pub;
+
+    ASSERT(setup(&w) == 0);
+    mya_pub = fl_user_db_signing_public(&w.db, MYA);
+    path_in(src, sizeof src, "atomic.txt");
+    path_in(dest, sizeof dest, "steve-atomic.txt");
+    snprintf(side, sizeof side, "%s%s", dest, FL_KQ_CONTAINER_SUFFIX);
+    snprintf(seen, sizeof seen, "%s%s", dest, FL_KQ_SEEN_SUFFIX);
+    /* A directory where the acceptance record's staging file must go makes that write fail. */
+    snprintf(block, sizeof block, "%s.part", seen);
+    ASSERT(write_text(src, "v1\n") == 0);
+    ASSERT(fl_kq_cp_encode(&w.db, MYA, w.mya_sign, STEVE, fl_user_db_box_public(&w.db, STEVE),
+                           src, T1, &enc) == FL_KQ_CP_OK);
+    ASSERT(fl_kq_cp_cosign(&enc.offer, STEVE, w.steve_sign, sig) == FL_KQ_CP_OK);
+
+    ASSERT(mkdir(block, 0700) == 0);
+    ASSERT(fl_kq_cp_decode(&w.db, MYA, mya_pub, STEVE, w.steve_box, &enc.letter, &enc.offer, sig,
+                           dest) == FL_KQ_CP_IO);
+    ASSERT(access(dest, F_OK) != 0 && access(side, F_OK) != 0 && access(seen, F_OK) != 0);
+    ASSERT(rmdir(block) == 0);
+    ASSERT(fl_kq_cp_decode(&w.db, MYA, mya_pub, STEVE, w.steve_box, &enc.letter, &enc.offer, sig,
+                           dest) == FL_KQ_CP_OK);
+    fl_kq_encoded_free(&enc);
+
+    ASSERT(write_text(src, "v2\n") == 0);
+    ASSERT(fl_kq_cp_encode(&w.db, MYA, w.mya_sign, STEVE, fl_user_db_box_public(&w.db, STEVE),
+                           src, T2, &enc) == FL_KQ_CP_OK);
+    ASSERT(fl_kq_cp_cosign(&enc.offer, STEVE, w.steve_sign, sig) == FL_KQ_CP_OK);
+    ASSERT(mkdir(block, 0700) == 0);
+    ASSERT(fl_kq_cp_decode(&w.db, MYA, mya_pub, STEVE, w.steve_box, &enc.letter, &enc.offer, sig,
+                           dest) == FL_KQ_CP_IO);
+    ASSERT(read_text(dest, got, sizeof got) == 0 && strcmp(got, "v1\n") == 0);
+    ASSERT(rmdir(block) == 0);
+    /* The update was not recorded, so it still arrives as newer. */
+    ASSERT(fl_kq_cp_decode(&w.db, MYA, mya_pub, STEVE, w.steve_box, &enc.letter, &enc.offer, sig,
+                           dest) == FL_KQ_CP_OK);
+    ASSERT(read_text(dest, got, sizeof got) == 0 && strcmp(got, "v2\n") == 0);
+    fl_kq_encoded_free(&enc);
+    teardown(&w);
+    return 0;
+}
+
 static int test_a_damaged_history_is_refused(void) {
     world_t w;
     fl_kq_encoded_t enc;
@@ -254,6 +304,7 @@ int main(void) {
     RUN(test_driver_probe);
     RUN(test_co_signed_delivery);
     RUN(test_untracked_destination_is_never_overwritten);
+    RUN(test_a_failed_write_installs_nothing);
     RUN(test_a_damaged_history_is_refused);
     RUN(test_reasons_and_results);
     rmrf(s_dir);

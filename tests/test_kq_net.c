@@ -79,9 +79,14 @@ static void host_send(fl_net_server_t *srv, const fl_net_server_member_t *to, ui
     }
 }
 
+/* Set to send offers without their parts (a sender that goes quiet). */
+static int s_drop_parts;
+
 static void client_send(fl_net_client_t *client, uint8_t opcode, const uint8_t *payload,
                         uint16_t plen) {
     (void)client;
+    if (s_drop_parts && opcode == FL_NET_SESSION_OP_KQ_PART)
+        return;
     fl_net_kq_host_handle(s_srv, s_actor, opcode, payload, plen);
 }
 
@@ -259,6 +264,53 @@ static int test_an_unanswered_request_leaks_away(void) {
     return 0;
 }
 
+static int test_unfinished_uploads_never_hold_the_host(void) {
+    fl_kq_encoded_t quiet[10];
+    fl_kq_encoded_t enc;
+    fl_net_kq_inbox_t inbox[4];
+    char name[32];
+    int announced = s_to_steve[FL_NET_SESSION_OP_KQ_ANNOUNCE];
+
+    /* Ten offers whose parts never arrive: each replaces the member's last, so the host is
+     * never full (there are eight slots). */
+    s_actor = &s_members[1];
+    s_drop_parts = 1;
+    for (int i = 0; i < 10; i++) {
+        snprintf(name, sizeof name, "quiet-%d.txt", i);
+        ASSERT(encode_from_mya(name, "never finished\n", &quiet[i]) == 0);
+        s_last_err[0] = '\0';
+        ASSERT(fl_net_kq_send_delivery(s_srv, NULL, 0, MYA, STEVE, &quiet[i]) == FL_RESULT_OK);
+        ASSERT(!strstr(s_last_err, "busy"));
+    }
+    ASSERT(s_to_steve[FL_NET_SESSION_OP_KQ_ANNOUNCE] == announced);
+
+    /* An upload left idle past the timeout is dropped: its late parts store nothing. */
+    ASSERT(encode_from_mya("slow.txt", "too slow\n", &enc) == 0);
+    ASSERT(fl_net_kq_send_delivery(s_srv, NULL, 0, MYA, STEVE, &enc) == FL_RESULT_OK);
+    s_clock += 61;
+    s_drop_parts = 0;
+    {
+        uint8_t part[16 + 4 + 480];
+        size_t n = enc.letter.len < 480 ? enc.letter.len : 480;
+        memcpy(part, enc.delivery_id, 16);
+        memset(part + 16, 0, 4);
+        memcpy(part + 20, enc.letter.data, n);
+        fl_net_kq_host_handle(s_srv, s_actor, FL_NET_SESSION_OP_KQ_PART, part, (uint16_t)(20 + n));
+    }
+    ASSERT(s_to_steve[FL_NET_SESSION_OP_KQ_ANNOUNCE] == announced);
+    ASSERT(fl_net_kq_inbox(inbox, 4) == 0);
+
+    /* A complete delivery still goes through. */
+    ASSERT(fl_net_kq_send_delivery(s_srv, NULL, 0, MYA, STEVE, &enc) == FL_RESULT_OK);
+    ASSERT(s_to_steve[FL_NET_SESSION_OP_KQ_ANNOUNCE] == announced + 1);
+    ASSERT(fl_net_kq_inbox(inbox, 4) == 1);
+    fl_net_kq_inbox_drop(inbox[0].id);
+    for (int i = 0; i < 10; i++)
+        fl_kq_encoded_free(&quiet[i]);
+    fl_kq_encoded_free(&enc);
+    return 0;
+}
+
 int main(void) {
     char tmpl[] = "/tmp/fl_kq_netXXXXXX";
     char path[PATH_MAX];
@@ -289,6 +341,7 @@ int main(void) {
     RUN(test_keys_come_from_the_host_registry);
     RUN(test_co_signed_delivery_over_the_wire);
     RUN(test_an_unanswered_request_leaks_away);
+    RUN(test_unfinished_uploads_never_hold_the_host);
     fl_net_kq_reset();
     rmrf(s_dir);
     if (rc == 0)

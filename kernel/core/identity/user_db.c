@@ -835,11 +835,35 @@ fl_result_t fl_user_db_ensure_key(fl_user_db_t *db, const char *name, const char
     if (!fl_password_verify(password, u->salt_hex, u->password_hash))
         return FL_RESULT_ACCES;
     /* Accounts from before box keys keep their signing key and gain a box key. */
-    if ((u->has_key ? provision_box(u, password) : provision_key(u, password)) != FL_RESULT_OK)
+    if (u->has_key) {
+        if (provision_box(u, password) != FL_RESULT_OK)
+            return FL_RESULT_ERR;
+        if (created)
+            *created = FL_USER_DB_CREATED_BOX;
+        return FL_RESULT_OK;
+    }
+    if (provision_key(u, password) != FL_RESULT_OK)
         return FL_RESULT_ERR;
     if (created)
-        *created = 1;
+        *created = FL_USER_DB_CREATED_KEYS;
     return FL_RESULT_OK;
+}
+
+void fl_user_db_forget_created(fl_user_db_t *db, const char *name, int created) {
+    fl_user_record_t *u;
+
+    if (created == FL_USER_DB_CREATED_KEYS) {
+        fl_user_db_forget_key(db, name);
+        return;
+    }
+    if (created != FL_USER_DB_CREATED_BOX)
+        return;
+    u = find_mut(db, name);
+    if (!u)
+        return;
+    u->has_box = 0;
+    mem_domain_zero(u->box_public, sizeof u->box_public);
+    mem_domain_zero(u->box_sealed, sizeof u->box_sealed);
 }
 
 void fl_user_db_forget_key(fl_user_db_t *db, const char *name) {

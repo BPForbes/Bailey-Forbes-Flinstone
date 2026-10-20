@@ -104,8 +104,11 @@ static int read_all(const char *path, size_t max, fl_kq_buf_t *out) {
 }
 
 /* Write through a sibling and rename, so a reader never sees half a file. */
-static int write_atomic(const char *path, const uint8_t *data, size_t len) {
-    char tmp[4096 + 16];
+#define KQ_PATH_MAX (4096 + 16)
+
+/* Writes data to <path>.part (owner-only, synced); nothing is left behind on failure. */
+static int stage_part(const char *path, const uint8_t *data, size_t len) {
+    char tmp[KQ_PATH_MAX];
     int fd;
     size_t off = 0;
 
@@ -123,11 +126,93 @@ static int write_atomic(const char *path, const uint8_t *data, size_t len) {
         }
         off += (size_t)w;
     }
-    if (fsync(fd) != 0 || close(fd) != 0 || rename(tmp, path) != 0) {
+    if (fsync(fd) != 0 || close(fd) != 0) {
         unlink(tmp);
         return -1;
     }
     return 0;
+}
+
+static int write_atomic(const char *path, const uint8_t *data, size_t len) {
+    char tmp[KQ_PATH_MAX];
+
+    if (snprintf(tmp, sizeof tmp, "%s.part", path) >= (int)sizeof tmp ||
+        stage_part(path, data, len) != 0)
+        return -1;
+    if (rename(tmp, path) != 0) {
+        unlink(tmp);
+        return -1;
+    }
+    return 0;
+}
+
+typedef struct {
+    const char    *path;
+    const uint8_t *data;
+    size_t         len;
+} kq_out_t;
+
+/*
+ * Replaces every file in out[] or none of them. All parts are staged first; then each
+ * existing file is kept as a hard-linked <path>.kqbak and the parts are renamed into
+ * place. If a rename fails, the files already replaced are restored from their backups
+ * (or removed when they did not exist), so a failure leaves the files as they were.
+ */
+static int commit_all(const kq_out_t *out, size_t n) {
+    char part[KQ_PATH_MAX];
+    char bak[KQ_PATH_MAX];
+    int had[4] = {0};
+    size_t done = 0;
+    size_t i;
+    int rc = 0;
+
+    if (n > sizeof had / sizeof had[0])
+        return -1;
+    for (i = 0; i < n; i++) {
+        if (stage_part(out[i].path, out[i].data, out[i].len) != 0)
+            break;
+    }
+    if (i < n) {
+        while (i-- > 0) {
+            snprintf(part, sizeof part, "%s.part", out[i].path);
+            unlink(part);
+        }
+        return -1;
+    }
+    for (i = 0; i < n; i++) {
+        snprintf(bak, sizeof bak, "%s.kqbak", out[i].path);
+        unlink(bak);
+        had[i] = access(out[i].path, F_OK) == 0;
+        if (had[i] && link(out[i].path, bak) != 0) {
+            rc = -1;
+            break;
+        }
+    }
+    for (; rc == 0 && done < n; done++) {
+        snprintf(part, sizeof part, "%s.part", out[done].path);
+        if (rename(part, out[done].path) != 0)
+            rc = -1;
+    }
+    if (rc != 0) {
+        /* Put back what was replaced; a file that did not exist before is removed. */
+        size_t replaced = done ? done - 1 : 0;
+        for (i = 0; i < replaced; i++) {
+            snprintf(bak, sizeof bak, "%s.kqbak", out[i].path);
+            if (had[i])
+                (void)rename(bak, out[i].path);
+            else
+                unlink(out[i].path);
+        }
+        for (i = 0; i < n; i++) {
+            snprintf(part, sizeof part, "%s.part", out[i].path);
+            unlink(part);
+        }
+    }
+    for (i = 0; i < n; i++) {
+        snprintf(bak, sizeof bak, "%s.kqbak", out[i].path);
+        unlink(bak);
+    }
+    return rc;
 }
 
 static int sidecar(const char *path, const char *suffix, char *out, size_t cap) {
@@ -435,17 +520,14 @@ fl_kq_cp_result_t fl_kq_cp_decode(const fl_user_db_t *users, const char *sender_
         rc = FL_KQ_CP_INVALID;
         goto done;
     }
-    /* Content and history first, then the record that they were accepted. */
-    if (write_atomic(dest_path, payload.data, payload.len) != 0 ||
-        write_atomic(container_path, cosigned.data, cosigned.len) != 0) {
-        rc = FL_KQ_CP_IO;
-        goto done;
-    }
+    /* The content, its history and the record that they were accepted land together, or
+     * not at all: a later retry must not find a half-installed delivery. */
     memcpy(pair, rev, 32);
     memcpy(pair + 32, root, 32);
     {
         size_t len = (nseen + 1u) * 64u;
         uint8_t *all = (uint8_t *)malloc(len);
+        kq_out_t out[3];
 
         if (!all) {
             rc = FL_KQ_CP_IO;
@@ -454,7 +536,10 @@ fl_kq_cp_result_t fl_kq_cp_decode(const fl_user_db_t *users, const char *sender_
         if (nseen)
             memcpy(all, seen, nseen * 64u);
         memcpy(all + nseen * 64u, pair, 64u);
-        if (write_atomic(seen_path, all, len) != 0)
+        out[0] = (kq_out_t){dest_path, payload.data, payload.len};
+        out[1] = (kq_out_t){container_path, cosigned.data, cosigned.len};
+        out[2] = (kq_out_t){seen_path, all, len};
+        if (commit_all(out, 3) != 0)
             rc = FL_KQ_CP_IO;
         free(all);
     }

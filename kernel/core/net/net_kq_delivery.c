@@ -14,6 +14,9 @@
 #define KQ_INBOX_MAX 16u
 #define KQ_KEYS_MAX 16u
 #define KQ_UPLOADS_MAX 8u
+/* An upload that receives no part for this long is dropped, so a member that offers and
+ * goes quiet (or disconnects) cannot hold a slot. Parts follow the offer immediately. */
+#define KQ_UPLOAD_IDLE_SEC 60
 
 /* Recursive: the host's own user reaches the client side from inside a host handler. */
 static pthread_mutex_t s_lock;
@@ -211,6 +214,7 @@ typedef struct {
     uint8_t                  *buf;
     size_t                    len;
     size_t                    got;
+    int64_t                   last_at;
 } kq_upload_t;
 
 static kq_upload_t s_uploads[KQ_UPLOADS_MAX];
@@ -320,6 +324,13 @@ static void upload_free(kq_upload_t *u) {
     memset(u, 0, sizeof *u);
 }
 
+/* Drops uploads idle past KQ_UPLOAD_IDLE_SEC on the host clock. */
+static void upload_reclaim(int64_t now) {
+    for (size_t i = 0; i < KQ_UPLOADS_MAX; i++)
+        if (s_uploads[i].used && now - s_uploads[i].last_at > KQ_UPLOAD_IDLE_SEC)
+            upload_free(&s_uploads[i]);
+}
+
 static void host_offer(fl_net_server_t *srv, const fl_net_server_member_t *from, kq_r_t *r) {
     kq_upload_t up;
     uint32_t len;
@@ -358,6 +369,19 @@ static void host_offer(fl_net_server_t *srv, const fl_net_server_member_t *from,
         host_refuse(srv, from, "delivery", "delivery id already held");
         return;
     }
+    /* One upload per member: a new offer replaces the member's unfinished one (a retry). An id
+     * another member is still uploading is refused. */
+    upload_reclaim(now_sec());
+    for (size_t i = 0; i < KQ_UPLOADS_MAX; i++) {
+        if (!s_uploads[i].used)
+            continue;
+        if (s_uploads[i].from == from->member_id) {
+            upload_free(&s_uploads[i]);
+        } else if (memcmp(s_uploads[i].id, up.id, FL_KQ_DELIVERY_ID_LEN) == 0) {
+            host_refuse(srv, from, "delivery", "delivery id already in flight");
+            return;
+        }
+    }
     for (size_t i = 0; i < KQ_UPLOADS_MAX; i++) {
         if (s_uploads[i].used)
             continue;
@@ -367,6 +391,7 @@ static void host_offer(fl_net_server_t *srv, const fl_net_server_member_t *from,
         up.used = 1;
         up.from = from->member_id;
         up.len = len;
+        up.last_at = now_sec();
         s_uploads[i] = up;
         return;
     }
@@ -382,9 +407,11 @@ static void host_part(fl_net_server_t *srv, const fl_net_server_member_t *from, 
 
     r_bytes(r, id, sizeof id);
     off = r_u32(r);
+    upload_reclaim(now_sec());
     u = r->bad ? NULL : upload_find(from->member_id, id);
     if (!u)
         return;
+    u->last_at = now_sec();
     if (off != u->got || r->n == 0 || u->got + r->n > u->len) {
         upload_free(u);
         host_refuse(srv, from, "delivery", "letter parts out of order");

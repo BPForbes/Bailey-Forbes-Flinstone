@@ -104,13 +104,26 @@ fl_result_t fl_user_db_set_password(fl_user_db_t *db, const char *name, const ch
 fl_result_t fl_user_db_change_password(fl_user_db_t *db, const char *name,
                                        const char *current, const char *password);
 
+/* What fl_user_db_ensure_key created (0: nothing). */
+#define FL_USER_DB_CREATED_KEYS 1 /* a signing key and a box key */
+#define FL_USER_DB_CREATED_BOX  2 /* a box key beside an existing signing key */
+
 /**
- * Gives an account that has no signing key one, sealed under password, which
- * must be the account's password. FL_RESULT_OK when it already had one; the
- * caller saves the store when *created is set.
+ * Gives an account that has no signing key one (and a box key), or an account
+ * with a signing key but no box key a box key, sealed under password, which
+ * must be the account's password. FL_RESULT_OK when it already had both; the
+ * caller saves the store when *created is set, and undoes it with
+ * fl_user_db_forget_created when the save fails.
  */
 fl_result_t fl_user_db_ensure_key(fl_user_db_t *db, const char *name, const char *password,
                                   int *created);
+/**
+ * Undoes exactly what fl_user_db_ensure_key reported in created: both keys for
+ * FL_USER_DB_CREATED_KEYS, only the box key for FL_USER_DB_CREATED_BOX, so an
+ * existing signing key (and the bridges and histories it signed) survives a
+ * failed save.
+ */
+void        fl_user_db_forget_created(fl_user_db_t *db, const char *name, int created);
 /**
  * Drops the signing key of the account named name from memory (has_key 0).
  * Used to undo fl_user_db_ensure_key when the store could not be saved, so no

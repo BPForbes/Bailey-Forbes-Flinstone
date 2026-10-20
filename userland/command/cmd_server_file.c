@@ -494,7 +494,7 @@ static int kq_open_keys(const char *why, unsigned char *signing, unsigned char *
     }
     rc = fl_user_db_ensure_key(db, name, pw, &created);
     if (rc == FL_RESULT_OK && created && fl_session_save_users() != FL_RESULT_OK) {
-        fl_user_db_forget_key(db, name);
+        fl_user_db_forget_created(db, name, created);
         rc = FL_RESULT_ERR;
     }
     if (rc == FL_RESULT_OK && signing)
@@ -710,13 +710,19 @@ static int verb_kq_cosign(const cmd_server_ctx_t *ctx, int argc, char **argv)
         fl_color_warn("keyquorum: cannot co-sign: %s", fl_kq_cp_reason(cp));
         return 1;
     }
+    pthread_mutex_lock(ctx->mutex);
+    rc = fl_net_kq_send_cosign(ctx->server, ctx->client, hosting, in.id,
+                               fl_session_current_key_id(), sig) == FL_RESULT_OK ? 0 : -1;
+    pthread_mutex_unlock(ctx->mutex);
+    if (rc != 0) {
+        /* Not recorded: the request stays waiting, so cosign can simply run again. */
+        asm_mem_secure_zero(box, sizeof box);
+        fl_color_warn("keyquorum: the co-signature could not be sent to the host; run cosign again");
+        return 1;
+    }
     (void)fl_net_kq_inbox_set_cosig(in.id, sig);
     memcpy(in.sig, sig, sizeof sig);
     in.cosigned = 1;
-    pthread_mutex_lock(ctx->mutex);
-    (void)fl_net_kq_send_cosign(ctx->server, ctx->client, hosting, in.id,
-                                fl_session_current_key_id(), sig);
-    pthread_mutex_unlock(ctx->mutex);
     /* The host fires on our co-signature; decode as soon as the letter arrives. */
     if (fl_net_kq_take_letter(in.id, KQ_WAIT_RELEASE_MS, &probe) != FL_RESULT_OK) {
         char hex[2 * FL_KQ_DELIVERY_ID_LEN + 1];
@@ -752,7 +758,11 @@ static int verb_kq_open(const cmd_server_ctx_t *ctx, int argc, char **argv)
         fl_color_error("keyquorum: co-sign it first: server file cosign %s", argv[1]);
         return 1;
     }
+    /* Send the co-signature again (the host releases a fired delivery again and never fires
+     * twice), so a co-signature lost on the way still reaches it, then pull. */
     pthread_mutex_lock(ctx->mutex);
+    (void)fl_net_kq_send_cosign(ctx->server, ctx->client, hosting, in.id,
+                                fl_session_current_key_id(), in.sig);
     (void)fl_net_kq_pull(ctx->server, ctx->client, hosting);
     pthread_mutex_unlock(ctx->mutex);
     if (fl_net_kq_take_letter(in.id, KQ_WAIT_RELEASE_MS, &probe) != FL_RESULT_OK) {

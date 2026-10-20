@@ -470,7 +470,8 @@ static int test_signed_bridges(void) {
     fl_user_db_forget_key(&db, "Bob");
     ASSERT(!fl_user_db_signing_public(&db, "Root.Flinstone.Bob"));
     ASSERT(fl_user_db_open_key(&db, "Bob", "pw", bob) == FL_RESULT_NOENT);
-    ASSERT(fl_user_db_ensure_key(&db, "Bob", "pw", &created) == FL_RESULT_OK && created == 1);
+    ASSERT(fl_user_db_ensure_key(&db, "Bob", "pw", &created) == FL_RESULT_OK &&
+           created == FL_USER_DB_CREATED_KEYS);
     ASSERT(memcmp(fl_user_db_signing_public(&db, "Root.Flinstone.Bob"), before, sizeof before) != 0);
 
     mem_domain_zero(bob, sizeof bob);
@@ -525,8 +526,16 @@ static int test_box_keys(void) {
     ASSERT(fl_user_db_load(&db, path) == FL_RESULT_OK);
     ASSERT(!fl_user_db_box_public(&db, "Root.Flinstone.Mya"));
     ASSERT(fl_user_db_open_box(&db, "Mya", "pw3", box) == FL_RESULT_NOENT);
-    ASSERT(fl_user_db_ensure_key(&db, "Mya", "pw3", &created) == FL_RESULT_OK && created == 1);
+    ASSERT(fl_user_db_ensure_key(&db, "Mya", "pw3", &created) == FL_RESULT_OK &&
+           created == FL_USER_DB_CREATED_BOX);
     ASSERT(fl_user_db_box_public(&db, "Root.Flinstone.Mya"));
+    ASSERT(memcmp(fl_user_db_signing_public(&db, "Root.Flinstone.Mya"), before, sizeof before) == 0);
+    /* A save that failed undoes only the new box key: the signing key, and what it signed, stay. */
+    fl_user_db_forget_created(&db, "Mya", created);
+    ASSERT(!fl_user_db_box_public(&db, "Root.Flinstone.Mya"));
+    ASSERT(memcmp(fl_user_db_signing_public(&db, "Root.Flinstone.Mya"), before, sizeof before) == 0);
+    ASSERT(fl_user_db_ensure_key(&db, "Mya", "pw3", &created) == FL_RESULT_OK &&
+           created == FL_USER_DB_CREATED_BOX);
     ASSERT(memcmp(fl_user_db_signing_public(&db, "Root.Flinstone.Mya"), before, sizeof before) == 0);
     ASSERT(fl_user_db_ensure_key(&db, "Mya", "pw3", &created) == FL_RESULT_OK && created == 0);
 
