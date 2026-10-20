@@ -1,4 +1,4 @@
 [submodule "third_party/keyquorum"]
 	path = third_party/keyquorum
 	url = https://github.com/BPForbes/KeyQuorum
-	branch = feat/identity-heritage-ffi
+	branch = main
