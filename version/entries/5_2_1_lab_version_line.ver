@@ -1,0 +1,4 @@
+MAJOR_VERSION=5
+STANDARD_VERSION=2
+RELEASE_VERSION=1
+DESCRIPTION=The browser lab's version command reports the build's own version instead of a hard-coded "4.5.2 lab". It prints VERSION_LINE from userland/shell/version_def.h, so a main build shows "5.2.1 lab" and a develop build shows its prerelease line (for example "PRE 5.3.0, BUILD 2 lab"). The freestanding shell test reads the expected value from the same header.
