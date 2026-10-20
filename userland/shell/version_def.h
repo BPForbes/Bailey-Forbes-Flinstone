@@ -22,7 +22,7 @@
  */
 #define VERSION_MAJOR    5
 #define VERSION_STANDARD 2
-#define VERSION_PATCH    0
+#define VERSION_PATCH    1
 
 #define VERSION_STR_(x) #x
 #define VERSION_STR(x) VERSION_STR_(x)
@@ -30,6 +30,6 @@
 #define VERSION \
     VERSION_STR(VERSION_MAJOR) "." VERSION_STR(VERSION_STANDARD) "." VERSION_STR(VERSION_PATCH)
 
-#define VERSION_LINE "5.2.0"
+#define VERSION_LINE "5.2.1"
 
 #endif /* VERSION_DEF_H */
