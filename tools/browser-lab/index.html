@@ -164,6 +164,22 @@
             </form>
             <pre id="server-chat" aria-label="Relay chat log"></pre>
             <pre id="server-roster" aria-label="Connected members"></pre>
+            <h3>Files</h3>
+            <p>Send a file from the lab shell to a user on the server. With <strong>KeyQuorum co-signed</strong>, it is signed by you and sealed to them; the server host checks your signature and releases it only after they co-sign, and only they can open it (<code>server file send -t</code>). Each user publishes their public keys when they connect, and the host keeps the first keys it sees for a name, so give each person their own user.</p>
+            <form id="server-file-form">
+              <label>File <input id="server-file-path" name="path" autocomplete="off" spellcheck="false" placeholder="readme.txt"></label>
+              <label>To user <input id="server-file-user" name="user" autocomplete="off" spellcheck="false" placeholder="alice"></label>
+              <label><input id="server-file-kq" name="cosigned" type="checkbox" checked> KeyQuorum co-signed</label>
+              <button type="submit">Send file</button>
+            </form>
+            <div class="server-actions">
+              <button id="server-file-accept" type="button">Accept plain files</button>
+              <button id="server-file-decline" type="button">Decline plain files</button>
+            </div>
+            <h3>Co-sign requests</h3>
+            <ul id="kq-requests" aria-label="KeyQuorum co-sign requests"></ul>
+            <h3>KeyQuorum checkpoints</h3>
+            <pre id="kq-log" aria-label="KeyQuorum checkpoint log"></pre>
           </section>
         </div>
       </div>

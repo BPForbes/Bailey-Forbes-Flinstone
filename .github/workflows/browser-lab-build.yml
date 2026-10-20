@@ -69,6 +69,8 @@ jobs:
         uses: dtolnay/rust-toolchain@89b12181fb390509a0842a86cc55eeb8eb928c1d # stable branch
         with:
           toolchain: stable
+          # KeyQuorum co-signed delivery in the WebAssembly lab (tools/browser-lab/wasm/lab_kq.c).
+          targets: wasm32-unknown-emscripten
 
       - name: Install build and virtual-boot dependencies
         run: |
@@ -134,6 +136,8 @@ jobs:
           . "$EMSDK_ROOT/emsdk_env.sh"
           EMCC_REQUIRED=1 make wasm
           SECFEAT=1 EMCC_REQUIRED=1 make wasm
+          # Two lab shells through the relay room: encode, host, co-sign, release, decode.
+          node ./tests/test_lab_kq_wasm.js
 
       - name: Build security-features kernel variant (netlab lab)
         env:
@@ -154,6 +158,10 @@ jobs:
       - name: Validate browser boot independently
         timeout-minutes: 8
         run: node ./scripts/test_browser_boot.cjs
+
+      - name: Send KeyQuorum and plain files between two lab pages
+        timeout-minutes: 6
+        run: node ./scripts/test_browser_kq.cjs
 
       - name: Validate security-features browser boot independently
         timeout-minutes: 8

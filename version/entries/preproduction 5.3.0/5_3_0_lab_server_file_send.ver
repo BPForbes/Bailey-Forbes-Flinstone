@@ -1,0 +1,8 @@
+MAJOR_VERSION=5
+STANDARD_VERSION=3
+RELEASE_VERSION=0
+PRERELEASE=1
+DEV_VERSION=6
+DESCRIPTION=Send files between users in the browser lab while connected to the server, from the lab shell or the server panel, plainly or with KeyQuorum co-signing. A plain `server file -user <name> <path>` goes over the relay as one frame of the lab's own file opcode (recipient, name, big-endian size, bytes; the session wire's FILE_OFFER keeps its native format) only to that user's sessions, matching names regardless of case, and waits in their page until they accept or decline it; the page then types it into the guest only right after that command, never into a password prompt, and it is never saved over an existing file. `server file send -t` runs KeyQuorum co-signed delivery in the WebAssembly shell with the native checkpoints, host and driver, now built for WebAssembly with the KeyQuorum library: the sender signs and seals the file to the recipient, the session hosting the server checks the signature and releases it once only after the recipient co-signs (`server file cosign`), and the recipient verifies it again before saving. The checkpoints and the host read keys through a key directory base type, which the native user store and the lab's accounts both extend; lab keys are held in memory, published on join, and the host keeps the first keys it sees for a name. The relay routes KeyQuorum frames to the host or one member and reads only the route; the server panel has a send form, a Co-sign button per request and a checkpoint log.
+
+RELEASE_DATE=2026-10-20

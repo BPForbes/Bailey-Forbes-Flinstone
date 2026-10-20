@@ -160,6 +160,13 @@ static int test_keys_come_from_the_host_registry(void) {
     ASSERT(memcmp(k.box_public, fl_user_db_box_public(&s_db, STEVE), 32) == 0);
     ASSERT(memcmp(k.signing_public, fl_user_db_signing_public(&s_db, STEVE), 32) == 0);
     ASSERT(fl_net_kq_lookup(s_srv, NULL, 0, "Nobody", 0, &k) == FL_RESULT_NOENT);
+
+    /* A caller that cannot wait reads the answer later without asking again. */
+    memset(&k, 0, sizeof k);
+    ASSERT(fl_net_kq_keys_cached("Steve", &k) == FL_RESULT_OK);
+    ASSERT(k.found && strcmp(k.key_id, STEVE) == 0);
+    ASSERT(fl_net_kq_keys_cached("Nobody", &k) == FL_RESULT_NOENT);
+    ASSERT(fl_net_kq_keys_cached("Unasked", &k) == FL_RESULT_TIMEDOUT);
     return 0;
 }
 

@@ -95,6 +95,8 @@ part.
 | big-endian wire fields | `net_endian.h` (`asm_net_*`) | the bounds-checked reader and writer |
 | `kq_open_keys`, `bridge_open_actor_key` | `cmd_open_account_keys` (`cmd_authutil.c`) | each command's own messages |
 | the store's and checkpoint's file writes | `fl_fs_mkdir_p`, `fl_fs_stage_file`, `fl_fs_write_file_atomic` (`server_shared_fs.c`) | the all-or-nothing install of a file with its `.kqtf` and `.kqseen` |
+| `fl_user_db_keydir_t` (`kq_checkpoint_users.c`), the lab's directory (`lab_kq.c`) | `fl_kq_keydir_t` (`kq_keydir.h`): the only way the checkpoints and the host read keys | each account store's lookups: the native user store, or the lab's accounts and published keys |
+| the lab's memory primitives (`lab_kq.c`) | the same names the assembly layer provides natively | C bodies for WebAssembly, which has no assembly; secure zero is still zero plus a barrier |
 
 Contract: `contracts/drivers/contract_p4_keyquorum.h` (P4-9). Wire: `FL_NET_SESSION_OP_KQ_PART`
 0x39, `_OFFER` 0x3A, `_ANNOUNCE` 0x3B (an empty one from a client is a pull), `_COSIGN` 0x3C,
@@ -142,7 +144,39 @@ length-prefixed, every read bounds-checked.
   `.kqtf` beside it holds the revision history and proofs.
 - A request started by the recipient (`REQUEST`) is reserved in the spike vocabulary but has
   no command yet.
-- The browser lab and the QEMU kernel image do not run co-signed delivery yet.
+- The browser lab runs co-signed delivery in its WebAssembly shell (see below). The QEMU
+  kernel image cannot link KeyQuorum's Rust library, so its `server file send -t` says so.
+
+## In the browser lab
+
+The lab's WebAssembly shell builds the same code: the checkpoints (`kq_checkpoint.c`), the
+host and client (`net_kq_delivery.c`), the host's store (`kq_delivery.c`, with SQLite from the
+KeyQuorum archive) and the driver, linked with `ffi/identity` built for
+`wasm32-unknown-emscripten` (`scripts/build_wasm_lab.sh`). `tools/browser-lab/wasm/lab_kq.c`
+supplies only what the browser has instead of the native shell:
+
+- **Keys.** Each lab account gets a signing and a box key when first used. They live in the
+  page's memory, like the lab's passwords: this is a demonstration, not custody. A member
+  publishes its public keys when it joins the server, and the host keeps the first keys it
+  sees for a name and refuses different ones. The built-in accounts (`Flinstone`, `Root`) are
+  in every visitor's lab, so they publish none: register your own user.
+- **Host.** The session that hosts the server (the first one in; the next one in line when it
+  leaves) runs the host checkpoint, as `server host` does natively. Deliveries a host holds
+  are gone if it leaves. The relay only routes: a member's KeyQuorum frames to the host, the
+  host's to the member it names (`session-relay-room.js`, lab opcode `0x70`, keys `0x71`). It
+  never reads a frame.
+- **No waiting.** The browser gives the shell one thread, so the verbs are steps that move on
+  when the host's answer arrives (`fl_net_kq_keys_cached`), not calls that block.
+- **Files.** Containers, acceptance records and the host's store are in Emscripten's
+  in-memory file system under `/kq`. A delivered file is also written to the lab's ramfs, so
+  `cat` shows it, never over a ramfs file that is not its own earlier delivered copy (lab
+  files are text of at most 159 bytes).
+
+The same commands work in the lab terminal (`server file send -t <path> -user <name>`,
+`server file cosign [<id>]`, `server file open <id>`), and the server panel has a send form
+with a "KeyQuorum co-signed" box, the co-sign requests with a button each, and a log of every
+checkpoint. `tests/test_lab_kq_wasm.js` runs two copies of the module through the relay room;
+`scripts/test_browser_kq.cjs` runs two pages in Chromium.
 
 ## What exists today
 
@@ -585,6 +619,7 @@ changes that.
 
 - Co-signed delivery is built (above). Redistribution, time-bound access, public offers and
   the chained edit log are not.
-- The browser lab and the freestanding kernel do not share this model.
+- The browser lab runs co-signed delivery with in-memory keys and first-seen key publication
+  (above); the freestanding QEMU kernel does not run it.
 - The 16 MiB limit, the ring sizes and the relay TTL are KeyQuorum defaults, not measured for
   Flinstone's workload.

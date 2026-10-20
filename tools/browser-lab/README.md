@@ -49,6 +49,34 @@ After that marker the guest is an interactive lab shell, not the hosted ELF:
   8767` uses the Node hub. If the hub is down, the page falls back to a
   same-origin BroadcastChannel (tabs on one machine only). Sending a chat line
   emits it once (the sender's local echo is the same event path as peer delivery).
+- `server file -user <name> <path>` sends a ramfs file to another user on the
+  server. The guest prints `SERVER_FILE <user> <name> <hex>`; the page sends it
+  as one frame of the lab opcode `0x72` (`who_len`, `who`, `name_len`, `name`, a
+  big-endian `u16` size, then the bytes; the session wire's own `FILE_OFFER` keeps
+  its native format), and the relay delivers it only to that user's sessions (names
+  match regardless of case), never to the whole room. The chat panel says whether it
+  was sent or that the user is not connected (the relay's answer, opcode `0x73`). On the recipient's side the file waits in the
+  page (the chat panel names the sender) until that user runs `server file accept`,
+  or `server file decline` to drop it. Only then does the page type the file into the
+  guest, as `filerecv begin <from> <name>`, `filerecv data <hex>` (in parts that fit
+  the 128-character line) and `filerecv end`, the way it answers `nslookup` with
+  `dnsack`, so nothing is ever typed into a password prompt or a half-typed line.
+  The file is saved in the current directory and the shell prints `received <name>
+  from <user>`. A file is never saved over an existing one, names are a single
+  plain component, lab files are text of at most 159 bytes, and at most 16 files
+  wait at once (the oldest is dropped, with a note). Lab isolation (`netlab start`)
+  stops files as well as chat.
+- KeyQuorum co-signed files (WebAssembly shell only): `server file send -t <path> -user
+  <name>`, then the recipient's `server file cosign [<id>]` (and `server file open <id>` to
+  retry). The file is signed by its sender and sealed to the recipient; the session hosting
+  the server checks the signature, announces the request, and releases the sealed letter
+  once, only after the recipient co-signs; the recipient's shell verifies everything again
+  before it saves the file. The server panel does the same with its send form ("KeyQuorum
+  co-signed"), a Co-sign button per request and a log of every checkpoint. Each registered
+  user publishes their public keys when they connect, and the host keeps the first keys it
+  sees for a name; the built-in `Flinstone` and `Root` publish none, so register your own
+  user. Keys live in the page's memory (a demonstration), and a host that leaves takes the
+  deliveries it held with it. See `docs/FILE_SHARING_KEYQUORUM.md`, "In the browser lab".
 - Switch user / Register user / Guest commands send one shell line at a time
   and wait for serial (`SWITCHUSER`, `Password:`, `ok`) so `useradd` can prompt.
   A connected relay seat reconnects as the new principal after `switchuser`.
