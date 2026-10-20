@@ -32,7 +32,9 @@ jobs:
       # The pushed commit; a pull request builds its own merge commit.
       ref: ""
       artifact_suffix: ""
-      publish: ${{ github.event_name == 'push' && github.ref == 'refs/heads/main' }}
+      # Every push to main or develop publishes this build to its own slot, so
+      # its metadata marks it published (lab.published); pull requests never do.
+      publish: ${{ github.event_name == 'push' && (github.ref == 'refs/heads/main' || github.ref == 'refs/heads/develop') }}
 
   deploy:
     name: Publish validated lab to GitHub Pages
