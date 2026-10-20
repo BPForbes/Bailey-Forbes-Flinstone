@@ -180,6 +180,7 @@ int cmd_passwd_run(int argc, char **argv) {
     char target_key[FL_HERITAGE_KEY_ID_MAX];
     fl_heritage_relation_t rel;
     char pw[128];
+    char current[128] = "";
     const char *pass;
 
     if (ensure_privilege())
@@ -205,15 +206,35 @@ int cmd_passwd_run(int argc, char **argv) {
         fprintf(stderr, "passwd: %s (%s) is not this account or below it\n", user, target_key);
         return 1;
     }
+    /*
+     * Your own password: the current one opens your signing key, which is kept
+     * and sealed again. An ancestor resetting it cannot open that key, so the
+     * account gets a new one and its bridges must be signed again.
+     */
+    if (rel == FL_HERITAGE_REL_SELF &&
+        cmd_read_password("Current password: ", current, sizeof(current)) != 0) {
+        cmd_wipe_password(current, sizeof(current));
+        fprintf(stderr, "passwd: password read failed\n");
+        return 1;
+    }
     if (cmd_read_password("New password: ", pw, sizeof(pw)) != 0) {
         cmd_wipe_password(pw, sizeof(pw));
+        cmd_wipe_password(current, sizeof(current));
         fprintf(stderr, "passwd: password read failed\n");
         return 1;
     }
     pass = pw;
     db = fl_session_user_db_mut();
-    rc = fl_user_db_set_password(db, user, pass);
+    if (rel == FL_HERITAGE_REL_SELF)
+        rc = fl_user_db_change_password(db, user, current, pass);
+    else
+        rc = fl_user_db_set_password(db, user, pass);
     cmd_wipe_password(pw, sizeof(pw));
+    cmd_wipe_password(current, sizeof(current));
+    if (rc == FL_RESULT_ACCES) {
+        fprintf(stderr, "passwd: current password is incorrect\n");
+        return 1;
+    }
     if (rc != FL_RESULT_OK) {
         fprintf(stderr, "passwd: failed for %s (%d)\n", user, (int)rc);
         return 1;
@@ -225,6 +246,8 @@ int cmd_passwd_run(int argc, char **argv) {
     }
     fl_audit_identity_event(actor, "passwd", target_key, NULL);
     printf("passwd: password updated for %s\n", user);
+    if (rel != FL_HERITAGE_REL_SELF)
+        printf("passwd: %s has a new signing key; its bridges must be requested again\n", user);
     return 0;
 }
 

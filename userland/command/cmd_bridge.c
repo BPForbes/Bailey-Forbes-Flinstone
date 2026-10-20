@@ -3,7 +3,9 @@
 #include "fl/audit_log.h"
 #include "fl/session.h"
 #include "bridge.h"
+#include "cmd_authutil.h"
 #include "heritage.h"
+#include "mem_domain.h"
 #include "timekeeping.h"
 #include "user_db.h"
 #include <stdio.h>
@@ -16,18 +18,59 @@ static void bridge_usage(void) {
             "  Accounts on different branches of the heritage tree reach each other's\n"
             "  homes only through an active bridge: one side requests, the other side\n"
             "  (or an account above it) accepts. Either side, or an account above\n"
-            "  either, revokes.\n");
+            "  either, revokes. Requesting and accepting ask for your password: each\n"
+            "  half is signed with your account's KeyQuorum key.\n");
 }
 
-static void bridge_print(const fl_bridge_t *b, void *ctx) {
-    unsigned *shown = ctx;
+typedef struct {
+    const fl_user_db_t *db;
+    unsigned            shown;
+} bridge_list_ctx_t;
 
-    printf("#%lld  %-8s  %s <-> %s", (long long)b->id,
-           b->state == FL_BRIDGE_STATE_ACTIVE ? "active" : "pending", b->a_key, b->b_key);
+static void bridge_print(const fl_bridge_t *b, void *ctx) {
+    bridge_list_ctx_t *list = ctx;
+    const char *state = "pending";
+
+    /* An active row whose signatures do not verify opens nothing: say so. */
+    if (b->state == FL_BRIDGE_STATE_ACTIVE)
+        state = fl_bridge_verified(list->db, b) ? "active" : "unsigned";
+    printf("#%lld  %-8s  %s <-> %s", (long long)b->id, state, b->a_key, b->b_key);
     if (b->state == FL_BRIDGE_STATE_ACTIVE && b->accepted_by[0] && strcmp(b->accepted_by, b->b_key))
         printf("  (accepted by %s)", b->accepted_by);
     fputc('\n', stdout);
-    (*shown)++;
+    list->shown++;
+}
+
+/*
+ * Opens the logged-in account's signing key with its password, asked here. An
+ * account that has no key yet gets one, sealed under that password.
+ */
+static int bridge_open_actor_key(fl_user_db_t *db, unsigned char *secret) {
+    char pw[128];
+    const char *name = fl_session_current_user();
+    int created = 0;
+    fl_result_t rc;
+
+    if (cmd_read_password("Password (signs the bridge): ", pw, sizeof(pw)) != 0) {
+        cmd_wipe_password(pw, sizeof(pw));
+        fprintf(stderr, "bridge: password read failed\n");
+        return -1;
+    }
+    rc = fl_user_db_ensure_key(db, name, pw, &created);
+    if (rc == FL_RESULT_OK && created && fl_session_save_users() != FL_RESULT_OK)
+        rc = FL_RESULT_ERR;
+    if (rc == FL_RESULT_OK)
+        rc = fl_user_db_open_key(db, name, pw, secret);
+    cmd_wipe_password(pw, sizeof(pw));
+    if (rc == FL_RESULT_ACCES) {
+        fprintf(stderr, "bridge: incorrect password\n");
+        return -1;
+    }
+    if (rc != FL_RESULT_OK) {
+        fprintf(stderr, "bridge: cannot open the signing key of %s (%d)\n", name, (int)rc);
+        return -1;
+    }
+    return 0;
 }
 
 static int bridge_parse_id(const char *s, int64_t *out) {
@@ -44,14 +87,15 @@ static int bridge_parse_id(const char *s, int64_t *out) {
 }
 
 int cmd_bridge_run(int argc, char **argv) {
-    const fl_user_db_t *db;
+    fl_user_db_t *db;
     char actor[FL_HERITAGE_KEY_ID_MAX];
+    unsigned char secret[FL_USER_SIGNING_SECRET_LEN];
     int64_t now = 0;
     int64_t id = 0;
     fl_result_t rc;
 
     fl_session_init();
-    db = fl_session_user_db();
+    db = fl_session_user_db_mut();
     strncpy(actor, fl_session_current_key_id(), sizeof(actor) - 1);
     actor[sizeof(actor) - 1] = '\0';
     if (!fl_heritage_key_valid(actor)) {
@@ -62,13 +106,13 @@ int cmd_bridge_run(int argc, char **argv) {
         now = 0;
 
     if (argc < 2 || !strcmp(argv[1], "list")) {
-        unsigned shown = 0;
+        bridge_list_ctx_t list = {db, 0};
 
-        if (fl_bridge_list_visible(db->path, actor, bridge_print, &shown) != FL_RESULT_OK) {
+        if (fl_bridge_list_visible(db->path, actor, bridge_print, &list) != FL_RESULT_OK) {
             fprintf(stderr, "bridge: cannot read bridges from %s\n", db->path);
             return 1;
         }
-        if (!shown)
+        if (!list.shown)
             printf("bridge: no bridges at or below %s\n", actor);
         return 0;
     }
@@ -92,7 +136,10 @@ int cmd_bridge_run(int argc, char **argv) {
                     fl_heritage_relation_name(rel));
             return 1;
         }
-        rc = fl_bridge_request(db->path, db, actor, peer_key, now, &id);
+        if (bridge_open_actor_key(db, secret) != 0)
+            return 1;
+        rc = fl_bridge_request(db->path, db, actor, peer_key, now, secret, &id);
+        mem_domain_zero(secret, sizeof secret);
         if (rc == FL_RESULT_BUSY) {
             fprintf(stderr, "bridge: %s and %s already have a bridge (see `bridge list`)\n", actor,
                     peer_key);
@@ -122,7 +169,20 @@ int cmd_bridge_run(int argc, char **argv) {
             fprintf(stderr, "bridge: no bridge #%lld\n", (long long)id);
             return 1;
         }
-        rc = accept ? fl_bridge_accept(db->path, actor, id, now) : fl_bridge_revoke(db->path, actor, id);
+        if (accept) {
+            if (bridge_open_actor_key(db, secret) != 0)
+                return 1;
+            rc = fl_bridge_accept(db->path, db, actor, id, now, secret);
+            mem_domain_zero(secret, sizeof secret);
+        } else {
+            rc = fl_bridge_revoke(db->path, actor, id);
+        }
+        if (rc == FL_RESULT_INVAL && accept) {
+            fprintf(stderr,
+                    "bridge: #%lld has no valid signature from %s; revoke it and request again\n",
+                    (long long)id, b.a_key);
+            return 1;
+        }
         if (rc == FL_RESULT_ACCES) {
             fprintf(stderr,
                     accept ? "bridge: only %s or an account above it can accept #%lld\n"

@@ -86,7 +86,7 @@
   }
 
   function formatChatLine(display, text) {
-    return `${display || "flinstone"}: ${text || ""}`;
+    return `${display || "Flinstone"}: ${text || ""}`;
   }
 
   function randomMemberId() {
@@ -222,7 +222,7 @@
     }
 
     async function connectOnce(principal) {
-      const name = principal || "flinstone";
+      const name = principal || "Flinstone";
       if (socket && socket.readyState === 1 && principalName === name) return;
       if (socket && socket.readyState === 1) {
         if (socket.channel)

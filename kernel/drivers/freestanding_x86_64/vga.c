@@ -27,7 +27,7 @@ void fl_fs_vga_init(void)
     s_vga[0] = DIAG_GLYPH;
     s_row = 1;
     s_col = 0;
-    fl_fs_vga_status("flinstone", 1, 1);
+    fl_fs_vga_status("Flinstone", 1, 1);
 }
 
 void fl_fs_vga_status(const char *user, unsigned session, unsigned sessions)

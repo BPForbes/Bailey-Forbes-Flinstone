@@ -17,6 +17,8 @@ typedef struct {
 
 void fl_server_file_lookup_begin(void);
 fl_result_t fl_server_file_lookup_push(const fl_server_file_member_ref_t *entry);
+/** Copies the principal (account name) of member_id from the current lookup; NOENT if absent. */
+fl_result_t fl_server_file_member_principal(uint16_t member_id, char *out, size_t cap);
 
 fl_result_t fl_server_file_store_offer(const fl_server_file_offer_t *offer);
 
