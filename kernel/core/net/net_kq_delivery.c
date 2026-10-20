@@ -805,6 +805,23 @@ fl_result_t fl_net_kq_lookup(fl_net_server_t *srv, fl_net_client_t *client, int 
     }
 }
 
+fl_result_t fl_net_kq_keys_cached(const char *who, fl_net_kq_keys_t *out) {
+    fl_result_t rc = FL_RESULT_TIMEDOUT;
+
+    if (!who || !out)
+        return FL_RESULT_INVAL;
+    kq_lock();
+    for (size_t i = 0; i < KQ_KEYS_MAX; i++) {
+        if (s_keys[i].used && strcmp(s_keys[i].query, who) == 0) {
+            *out = s_keys[i].keys;
+            rc = out->found ? FL_RESULT_OK : FL_RESULT_NOENT;
+            break;
+        }
+    }
+    kq_unlock();
+    return rc;
+}
+
 fl_result_t fl_net_kq_send_delivery(fl_net_server_t *srv, fl_net_client_t *client, int hosting,
                                     const char *sender_key, const char *recipient_key,
                                     const fl_kq_encoded_t *enc) {

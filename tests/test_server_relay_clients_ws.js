@@ -87,6 +87,26 @@ function chatLines(events) {
     assert.deepStrictEqual(aliceEvents.filter(e => e.type === "file-status").map(e => e.text),
                            ["sent note.txt to bob (6 bytes)"]);
     assert.strictEqual(aliceEvents.filter(e => e.type === "file").length, 0);
+
+    // KeyQuorum frames through the hub: bob's go to the host (alice joined first), stamped
+    // with bob's member id; the host's go back to bob alone. Published keys reach the host.
+    const kq = new Uint8Array(512).fill(3);
+    assert(bob.sendKq(true, 0, 0x3a, kq));
+    assert(bob.publishKeys(new Uint8Array(64).fill(9)));
+    await new Promise(resolve => setTimeout(resolve, 80));
+    const atHost = aliceEvents.filter(e => e.type === "kq");
+    assert.strictEqual(atHost.length, 1);
+    assert.strictEqual(atHost[0].toHost, true);
+    assert.strictEqual(atHost[0].memberId, bob.memberId);
+    assert.deepStrictEqual(Array.from(atHost[0].bytes), Array.from(kq));
+    const keys = aliceEvents.filter(e => e.type === "kq-keys");
+    assert.strictEqual(keys.length, 1);
+    assert.strictEqual(keys[0].principal, "bob");
+    assert(alice.sendKq(false, bob.memberId, 0x3b, Uint8Array.of(1, 2)));
+    await new Promise(resolve => setTimeout(resolve, 80));
+    const atBob = bobEvents.filter(e => e.type === "kq");
+    assert.strictEqual(atBob.length, 1);
+    assert.strictEqual(atBob[0].memberId, alice.memberId);
     alice.leave();
     bob.leave();
     console.log("test_server_relay_clients_ws: PASS");

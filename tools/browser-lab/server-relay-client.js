@@ -4,7 +4,8 @@
   if (!wire) throw new Error("FlintstoneSessionWire is not loaded");
 
   const {
-    OP, encodeFrame, FrameParser, payloadText, memberIdFromPayload, encodeFileOffer, decodeFileOffer,
+    OP, LAB, encodeFrame, FrameParser, payloadText, memberIdFromPayload, encodeFileOffer, decodeFileOffer,
+    encodeKqRoute, decodeKqRoute,
   } = wire;
   const LOCAL_HOSTS = new Set(["127.0.0.1", "127.0.0.2", "localhost", "::1"]);
   const DEFAULT_PUBLIC_RELAY_HOST = "flintstone.bailey-forbes.com";
@@ -152,9 +153,27 @@
         emit({ type: "file-status", text: payloadText(payload) });
         return;
       }
+      if (opcode === LAB.KQ) {
+        const f = decodeKqRoute(payload);
+        if (f) emit({ type: "kq", toHost: f.toHost, memberId: f.memberId, op: f.op, bytes: f.bytes });
+        return;
+      }
+      if (opcode === LAB.KQ_KEYS && payload.length >= 3) {
+        const plen = payload[2];
+        if (payload.length === 3 + plen + 64)
+          emit({
+            type: "kq-keys", memberId: memberIdFromPayload(payload),
+            principal: payloadText(payload.slice(3, 3 + plen)), keys: payload.slice(3 + plen),
+          });
+        return;
+      }
       if (opcode === OP.FL_NET_SESSION_OP_ERR) {
         emit({ type: "error", text: payloadText(payload) });
       }
+    }
+
+    function selfIsHost() {
+      return members.some(m => m.memberId === memberId && m.isHost);
     }
 
     function closeSocket() {
@@ -194,6 +213,13 @@
         } else if (data.kind === "file") {
           if (data.to === principalName && data.bytes instanceof Uint8Array)
             emit({ type: "file", from: data.from, name: data.name, bytes: data.bytes });
+        } else if (data.kind === "kq" && data.bytes instanceof Uint8Array) {
+          // As the relay room routes: to the host tab, or to the one member the host names.
+          if (data.toHost ? selfIsHost() : data.to === memberId)
+            emit({ type: "kq", toHost: data.toHost, memberId: data.from, op: data.op, bytes: data.bytes });
+        } else if (data.kind === "kqkeys" && data.keys instanceof Uint8Array) {
+          if (selfIsHost() && data.from !== memberId)
+            emit({ type: "kq-keys", memberId: data.from, principal: data.principal, keys: data.keys });
         } else if (data.kind === "leave") {
           members = members.filter(m => m.memberId !== data.memberId);
           emit({ type: "roster", members: members.slice() });
@@ -310,6 +336,31 @@
         const frame = payload && encodeFrame(OP.FL_NET_SESSION_OP_FILE_OFFER, payload);
         if (!frame) return false;
         socket.send(frame);
+        return true;
+      },
+      /* A KeyQuorum frame from this shell: to the host, or (from the host) to one member. */
+      sendKq(toHost, toMember, op, bytes) {
+        if (!this.connected) return false;
+        if (socket.channel) {
+          socket.channel.postMessage({ v: 1, kind: "kq", tabId: socket.tabId, toHost: !!toHost, from: memberId,
+                                       to: toMember, op, bytes });
+          return true;
+        }
+        const route = encodeKqRoute(!!toHost, toHost ? 0 : toMember, op, bytes);
+        const frame = route && encodeFrame(LAB.KQ, route);
+        if (!frame) return false;
+        socket.send(frame);
+        return true;
+      },
+      /* This member's public keys (signing then box, 64 bytes), for the host's directory. */
+      publishKeys(keys) {
+        if (!this.connected || !(keys instanceof Uint8Array) || keys.length !== 64) return false;
+        if (socket.channel) {
+          socket.channel.postMessage({ v: 1, kind: "kqkeys", tabId: socket.tabId, from: memberId,
+                                       principal: principalName, keys });
+          return true;
+        }
+        socket.send(encodeFrame(LAB.KQ_KEYS, keys));
         return true;
       },
       leave() {

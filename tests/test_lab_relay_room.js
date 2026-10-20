@@ -83,6 +83,58 @@ assert.strictEqual(takeOpcode(bobSock, OP.FL_NET_SESSION_OP_FILE_OFFER).length, 
 alice.onMessage(encodeFrame(OP.FL_NET_SESSION_OP_FILE_OFFER, encodeFileOffer("alice", "self.txt", note)));
 assert.strictEqual(takeOpcode(aliceSock, OP.FL_NET_SESSION_OP_FILE_OFFER).length, 0);
 
+// KeyQuorum frames: a member's go to the host, stamped with the sender; the host's go to the
+// one member it names; nobody else reads them.
+const { LAB, encodeKqRoute, decodeKqRoute } = require("../tools/browser-lab/session-relay-room.js");
+const ids = {};
+for (const [name, sock] of [["alice", aliceSock], ["bob", bobSock], ["carol", carolSock]]) sock.inbox = [];
+for (const m of room.members) ids[m.principal] = m.memberId;
+assert(room.members.find(m => m.principal === "alice").isHost, "alice joined first and hosts");
+const kqBytes = new Uint8Array(512).fill(7); // a KQ payload may fill a whole session frame
+bob.onMessage(encodeFrame(LAB.KQ, encodeKqRoute(true, 0, 0x3a, kqBytes)));
+let atHost = takeOpcode(aliceSock, LAB.KQ).map(f => decodeKqRoute(f.payload));
+assert.strictEqual(atHost.length, 1);
+assert.strictEqual(atHost[0].toHost, true);
+assert.strictEqual(atHost[0].memberId, ids.bob, "the host learns which member sent it");
+assert.strictEqual(atHost[0].op, 0x3a);
+assert.deepStrictEqual(Array.from(atHost[0].bytes), Array.from(kqBytes));
+assert.strictEqual(takeOpcode(carolSock, LAB.KQ).length, 0);
+
+alice.onMessage(encodeFrame(LAB.KQ, encodeKqRoute(false, ids.bob, 0x3b, Uint8Array.of(1, 2, 3))));
+const toBob = takeOpcode(bobSock, LAB.KQ).map(f => decodeKqRoute(f.payload));
+assert.strictEqual(toBob.length, 1);
+assert.strictEqual(toBob[0].memberId, ids.alice);
+assert.strictEqual(takeOpcode(carolSock, LAB.KQ).length, 0, "only the member the host names");
+
+// Only the host addresses members.
+carol.onMessage(encodeFrame(LAB.KQ, encodeKqRoute(false, ids.bob, 0x3d, Uint8Array.of(9))));
+assert.strictEqual(takeOpcode(bobSock, LAB.KQ).length, 0);
+
+// Published keys reach the host under the sender's principal; the host's own are not echoed.
+const keys = new Uint8Array(64).fill(5);
+bob.onMessage(encodeFrame(LAB.KQ_KEYS, keys));
+alice.onMessage(encodeFrame(LAB.KQ_KEYS, keys));
+const published = takeOpcode(aliceSock, LAB.KQ_KEYS);
+assert.strictEqual(published.length, 1);
+const p = published[0].payload;
+assert.strictEqual((p[0] << 8) | p[1], ids.bob);
+assert.strictEqual(payloadText(p.slice(3, 3 + p[2])), "bob");
+assert.deepStrictEqual(Array.from(p.slice(3 + p[2])), Array.from(keys));
+bob.onMessage(encodeFrame(LAB.KQ_KEYS, keys.slice(0, 10)));
+assert.strictEqual(takeOpcode(aliceSock, LAB.KQ_KEYS).length, 0, "keys are exactly 64 bytes");
+
+// Other opcodes keep the session frame limit; only LAB.KQ carries its four route bytes more.
+assert.strictEqual(encodeFrame(OP.FL_NET_SESSION_OP_MSG, new Uint8Array(513)), null);
+assert.strictEqual(encodeFrame(LAB.KQ, new Uint8Array(517)), null);
+
+// The server keeps a host: when alice leaves, the earliest member left takes over.
+alice.onClose();
+assert(room.members.find(m => m.principal === "bob").isHost);
+carol.onMessage(encodeFrame(LAB.KQ, encodeKqRoute(true, 0, 0x3c, Uint8Array.of(4))));
+atHost = takeOpcode(bobSock, LAB.KQ).map(f => decodeKqRoute(f.payload));
+assert.strictEqual(atHost.length, 1);
+assert.strictEqual(atHost[0].memberId, ids.carol);
+
 carol.onClose();
 bob.onClose();
 alice.onClose();

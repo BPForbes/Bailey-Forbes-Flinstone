@@ -377,7 +377,7 @@ deploy:
 	@gcc -std=c11 -Wall -Wextra -O2 -o gen_version_changelog scripts/gen_version_changelog.c && ./gen_version_changelog
 	@$(MAKE) CHANGELOG_CI=1 all
 
-.PHONY: vm baremetal browser-kernel test-browser-kernel test-browser-kernel-gate test-browser-lab test-browser-boot test-browser-boot-packaged test-browser-iframe test-freestanding-entry test-freestanding-shell browser-lab-runtime browser-lab-release wasm test-wasm-shell project-metadata test-project-metadata
+.PHONY: vm baremetal browser-kernel test-browser-kernel test-browser-kernel-gate test-browser-lab test-browser-boot test-browser-boot-packaged test-browser-iframe test-browser-kq test-freestanding-entry test-freestanding-shell browser-lab-runtime browser-lab-release wasm test-wasm-shell project-metadata test-project-metadata
 vm:
 	$(MAKE) VM_ENABLE=1 $(TARGET)
 
@@ -424,6 +424,7 @@ test-browser-lab: gen-session-wire-js
 	@node ./tests/test_server_relay_client.js
 	@node ./tests/test_lab_relay_room.js
 	@node ./tests/test_server_relay_clients_ws.js
+	@node ./tests/test_lab_kq_wasm.js
 	@node ./tests/test_browser_lab_process.js
 	@node ./tests/test_flintstone_lab_worker.mjs
 	@PYTHONDONTWRITEBYTECODE=1 python3 ./tests/test_lab_dns.py
@@ -443,6 +444,10 @@ browser-lab-runtime:
 
 test-browser-boot: test-browser-kernel browser-lab-runtime wasm
 	@node ./scripts/test_browser_boot.cjs
+
+# Files between two lab pages in Chromium: KeyQuorum co-signed and plain (needs emcc for wasm).
+test-browser-kq: wasm
+	@node ./scripts/test_browser_kq.cjs
 
 browser-lab-release: test-browser-boot
 	@python3 ./scripts/package_browser_lab_release.py

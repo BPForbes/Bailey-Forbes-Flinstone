@@ -5,6 +5,9 @@
 #include "ramfs.h"
 #include "serial.h"
 #include "vga.h"
+#ifdef FL_LAB_KQ
+#include "lab_kq.h" /* tools/browser-lab/wasm: KeyQuorum in the WebAssembly shell */
+#endif
 /* VERSION_LINE of the build: the same header the hosted shell uses, macros only. */
 #include "../../../userland/shell/version_def.h"
 
@@ -793,6 +796,9 @@ static int run_net(const char *verb, const char **cursor)
  * content comes in hex parts. `server file decline` drops what is waiting.
  */
 #define FILE_NAME_MAX 20 /* one ramfs name, NUL included */
+/* KeyQuorum needs its Rust library, which only the WebAssembly shell links. */
+#define FILE_KQ_ELSEWHERE \
+    "server file: KeyQuorum co-signed delivery runs in the lab's WebAssembly shell\r\n"
 #define FILE_USER_MAX 16
 
 static int file_user_ok(const char *s)
@@ -844,6 +850,7 @@ static int server_file_send(int session, const char **cursor)
     const char *base;
     unsigned i;
     int rc;
+    int kq = 0;
     int more = take_word(cursor, word, sizeof(word));
 
     if (more && (str_eq(word, "accept") || str_eq(word, "decline"))) {
@@ -852,8 +859,28 @@ static int server_file_send(int session, const char **cursor)
             emit("server file: files waiting for you were declined\r\n");
         return 1;
     }
+    if (more && (str_eq(word, "cosign") || str_eq(word, "open"))) {
+        char id[40];
+        int has = take_word(cursor, id, sizeof(id));
+#ifdef FL_LAB_KQ
+        if (str_eq(word, "cosign"))
+            return fl_lab_kq_cosign(session, has ? id : "");
+        if (has)
+            return fl_lab_kq_open(session, id);
+        emit("usage: server file open <delivery>\r\n");
+#else
+        (void)has;
+        emit(FILE_KQ_ELSEWHERE);
+#endif
+        return 1;
+    }
+    /* `send` names the verb as the native shell does; `-t` asks for KeyQuorum co-signing. */
+    if (more && str_eq(word, "send"))
+        more = take_word(cursor, word, sizeof(word));
     for (; more; more = take_word(cursor, word, sizeof(word))) {
-        if (str_eq(word, "-user")) {
+        if (str_eq(word, "-t")) {
+            kq = 1;
+        } else if (str_eq(word, "-user")) {
             if (!take_word(cursor, word, sizeof(word)) || str_len(word) >= sizeof(user)) {
                 user[0] = 0;
                 break;
@@ -867,12 +894,21 @@ static int server_file_send(int session, const char **cursor)
         }
     }
     if (!user[0] || !path[0]) {
-        emit("usage: server file -user <name> <path> | accept | decline\r\n");
+        emit("usage: server file [send [-t]] -user <name> <path> | accept | decline | "
+             "cosign [<id>] | open <id>\r\n");
         return 1;
     }
     if (!file_user_ok(user)) {
         emit("server file: not a user name\r\n");
         return 1;
+    }
+    if (kq) {
+#ifdef FL_LAB_KQ
+        return fl_lab_kq_send(session, path, user);
+#else
+        emit(FILE_KQ_ELSEWHERE);
+        return 1;
+#endif
     }
     rc = fl_fs_ramfs_cat(session, path, data, sizeof(data));
     if (rc != 0) {
@@ -2005,6 +2041,7 @@ static int run_meta(int session, const char *verb, const char **cursor)
 #endif
         emit("server version contracts audit redirect rerun help history his cc clear exit bios\r\n");
         emit("server file -user <name> <path> | accept | decline  (files with users on the server)\r\n");
+        emit("server file send -t <path> -user <name> | cosign [<id>] | open <id>  (KeyQuorum co-signed)\r\n");
         emit("lab analogs: ramfs, cluster disk, lab net, P3 relay. Hosted FAT32/sockets stay on the ELF shell.\r\n");
         return 1;
     }
@@ -2104,6 +2141,9 @@ static void visit_user(const char *name, int elevated, void *ctx)
 
 void fl_fs_commands_init(void)
 {
+#ifdef FL_LAB_KQ
+    fl_lab_kq_init(emit);
+#endif
     s_redir[0] = 0;
     s_audit_n = 0;
     s_loc_n = 0;

@@ -188,6 +188,7 @@
       if (relay) {
         relay.leave();
         renderRoster([]);
+        kqSyncRoster([]);
       }
       renderRelayStatus("Lab-isolated — real network dropped");
       appendChat("[netlab] lab-isolated: real network (relay) dropped for the demo");
@@ -224,6 +225,12 @@
         appendChat(event.text);
       } else if (event.type === "roster") {
         renderRoster(event.members);
+        kqSyncRoster(event.members);
+      } else if (event.type === "kq") {
+        if (kqReady()) emulator.kqFrame(event.toHost, event.memberId, event.op, event.bytes);
+      } else if (event.type === "kq-keys") {
+        if (kqReady() && !emulator.kqLearn(event.principal, event.keys))
+          appendKqLog("host", "refused keys", `${event.principal}: that name is held by other keys`);
       } else if (event.type === "file") {
         receiveFileFromRelay(event);
       } else if (event.type === "file-status") {
@@ -266,6 +273,7 @@
       relay?.leave();
       renderRelayStatus("Disconnected");
       renderRoster([]);
+      kqSyncRoster([]);
     });
     let sendingMsg = false;
     document.getElementById("server-msg-form")?.addEventListener("submit", async event => {
@@ -341,6 +349,102 @@
       appendChat(`[error] ${error.message || "Relay failed"}`);
     }
   }
+  /* ---- KeyQuorum co-signed delivery (the WebAssembly shell, lab_kq.c) ---------------- */
+  function kqReady() {
+    return Boolean(emulator && typeof emulator.kqFrame === "function");
+  }
+  function appendKqLog(which, outcome, detail) {
+    const node = document.getElementById("kq-log");
+    if (!node) return;
+    node.textContent = (node.textContent + `${which}: ${outcome}${detail ? ` — ${detail}` : ""}\n`).slice(-16384);
+    node.scrollTop = node.scrollHeight;
+  }
+  async function sendKqToRelay(frame) {
+    // Lab isolation drops the real network; KeyQuorum frames stay home too.
+    if (!relay || labIsolated) return;
+    try {
+      if (!relay.connected) await relay.connect(principal());
+      if (!relay.sendKq(frame.toHost, frame.memberId, frame.op, frame.bytes))
+        appendKqLog("relay", "not sent", "a frame did not fit the relay");
+    } catch (error) {
+      appendChat(`[error] ${error.message || "Relay failed"}`);
+    }
+  }
+  /* The shell learns who is on the server; this member publishes its public keys to the host. */
+  let kqBuiltInNoted = false;
+  function kqSyncRoster(members) {
+    if (!kqReady() || !relay) return;
+    emulator.kqRoster(relay.connected ? relay.memberId || 0 : 0, relay.connected ? members || [] : []);
+    if (!relay.connected) return;
+    // Every visitor's lab seeds the built-in accounts, so their names can never be one
+    // person's: they publish no keys.
+    if (isBuiltInUser(principal())) {
+      if (!kqBuiltInNoted)
+        appendKqLog("keys", "not published", `${principal()} is built in; register your own user to send and receive KeyQuorum files`);
+      kqBuiltInNoted = true;
+      return;
+    }
+    const keys = emulator.kqPublic(principal());
+    if (!keys) {
+      appendKqLog("keys", "not published", `${principal()} is held by another member's keys here`);
+      return;
+    }
+    if (!(members || []).some(m => m.memberId === relay.memberId && m.isHost)) relay.publishKeys(keys);
+  }
+  function renderKqRequest(id, from, file) {
+    const list = document.getElementById("kq-requests");
+    if (!list || list.querySelector(`[data-delivery="${id}"]`)) return;
+    const item = document.createElement("li");
+    item.dataset.delivery = id;
+    const label = document.createElement("span");
+    label.textContent = `${file} from ${from}`;
+    const button = document.createElement("button");
+    button.type = "button";
+    button.textContent = "Co-sign";
+    button.onclick = async () => {
+      button.disabled = true;
+      if (await sendGuestLines(`server file cosign ${id}\n`)) button.textContent = "Co-signed";
+      else button.disabled = false;
+    };
+    item.append(label, " ", button);
+    list.appendChild(item);
+  }
+  function renderKqEvent(event) {
+    if (!event) return;
+    if (event.kind === "checkpoint") appendKqLog(event.a, event.b, event.c);
+    else if (event.kind === "request") {
+      renderKqRequest(event.a, event.b, event.c);
+      appendKqLog("request", `${event.b} asks you to co-sign ${event.c}`, "");
+    } else if (event.kind === "received") appendKqLog("saved", event.a, "in the current directory");
+  }
+  setInterval(() => { if (kqReady()) emulator.kqTick(); }, 5000);
+  function wireServerFiles() {
+    const form = document.getElementById("server-file-form");
+    form?.addEventListener("submit", async event => {
+      event.preventDefault();
+      const path = document.getElementById("server-file-path")?.value.trim() || "";
+      const user = document.getElementById("server-file-user")?.value.trim() || "";
+      const cosigned = document.getElementById("server-file-kq")?.checked;
+      // One shell line, built only from a plain path and a user name.
+      if (!/^[A-Za-z0-9._/-]{1,63}$/.test(path) || !core.guestUserNameOk(user)) {
+        appendKqLog("send", "not sent", "a file in the lab shell and a user name are needed");
+        return;
+      }
+      if (cosigned && !kqReady()) {
+        appendKqLog("send", "not sent", "KeyQuorum runs in the WebAssembly shell only");
+        return;
+      }
+      await sendGuestLines(cosigned ? `server file send -t ${path} -user ${user}\n`
+                                    : `server file -user ${user} ${path}\n`);
+    });
+    document.getElementById("server-file-accept")?.addEventListener("click", () => {
+      void sendGuestLines("server file accept\n");
+    });
+    document.getElementById("server-file-decline")?.addEventListener("click", () => {
+      void sendGuestLines("server file decline\n");
+    });
+  }
+  wireServerFiles();
   function receiveFileFromRelay(event) {
     if (!core.fileRecvLines(event.from, event.name, event.bytes)) {
       appendChat(`[file] refused a file from ${event.from}: unsafe name`);
@@ -406,6 +510,7 @@
         relay.leave();
         renderRelayStatus("Disconnected");
         renderRoster([]);
+        kqSyncRoster([]);
         appendChat("[relay] leave");
         return;
       }
@@ -467,6 +572,8 @@
     memorySize: info.recommendedRamBytes,
     sha256: info.sha256,
     onScreen: renderScreen, onDiagnostic: text => console.warn(text),
+    onKqFrame: frame => { void sendKqToRelay(frame); },
+    onKqEvent: event => renderKqEvent(event),
   });
   let serialTail = "";
   const serialWaiters = [];

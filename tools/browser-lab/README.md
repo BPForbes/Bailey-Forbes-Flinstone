@@ -65,6 +65,17 @@ After that marker the guest is an interactive lab shell, not the hosted ELF:
   plain component, lab files are text of at most 159 bytes, and at most 16 files
   wait at once (the oldest is dropped, with a note). Lab isolation (`netlab start`)
   stops files as well as chat.
+- KeyQuorum co-signed files (WebAssembly shell only): `server file send -t <path> -user
+  <name>`, then the recipient's `server file cosign [<id>]` (and `server file open <id>` to
+  retry). The file is signed by its sender and sealed to the recipient; the session hosting
+  the server checks the signature, announces the request, and releases the sealed letter
+  once, only after the recipient co-signs; the recipient's shell verifies everything again
+  before it saves the file. The server panel does the same with its send form ("KeyQuorum
+  co-signed"), a Co-sign button per request and a log of every checkpoint. Each registered
+  user publishes their public keys when they connect, and the host keeps the first keys it
+  sees for a name; the built-in `Flinstone` and `Root` publish none, so register your own
+  user. Keys live in the page's memory (a demonstration), and a host that leaves takes the
+  deliveries it held with it. See `docs/FILE_SHARING_KEYQUORUM.md`, "In the browser lab".
 - Switch user / Register user / Guest commands send one shell line at a time
   and wait for serial (`SWITCHUSER`, `Password:`, `ok`) so `useradd` can prompt.
   A connected relay seat reconnects as the new principal after `switchuser`.

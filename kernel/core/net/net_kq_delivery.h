@@ -73,6 +73,14 @@ typedef struct {
 fl_result_t fl_net_kq_lookup(fl_net_server_t *srv, fl_net_client_t *client, int hosting,
                              const char *who, unsigned wait_ms, fl_net_kq_keys_t *out);
 
+/**
+ * The keys a KEYS reply already brought for `who`, without asking again: OK, NOENT (the
+ * host holds none) or TIMEDOUT (no reply yet). For a caller that cannot block, such as the
+ * browser lab's single thread: fl_net_kq_lookup with wait_ms 0 asks, and this reads the
+ * answer once it has arrived.
+ */
+fl_result_t fl_net_kq_keys_cached(const char *who, fl_net_kq_keys_t *out);
+
 /** Send an encoded delivery: OFFER then the letter in parts. */
 fl_result_t fl_net_kq_send_delivery(fl_net_server_t *srv, fl_net_client_t *client, int hosting,
                                     const char *sender_key, const char *recipient_key,

@@ -213,7 +213,10 @@ bridges onto a shared WebSocket room (Cloudflare Durable Object on
 `flintstone.bailey-forbes.com`, Node hub locally) so multiple visitors can talk
 and send each other files (`server file -user <name> <path>`, delivered only to
 that user's sessions and saved in the recipient's ramfs after they run `server
-file accept`, never over an existing file; see `tools/browser-lab/README.md`).
+file accept`, never over an existing file; see `tools/browser-lab/README.md`). In the
+WebAssembly shell, `server file send -t` sends a KeyQuorum co-signed file through the same
+native checkpoints as the hosted shell, with the host checkpoint in the session hosting the
+server (`docs/FILE_SHARING_KEYQUORUM.md`, "In the browser lab").
 If that hub is down, the page falls back to a same-origin BroadcastChannel
 (tabs on one machine only). Persistence, snapshots, Boot/Pause/Resume/
 Reset/Power-off, and VM recreation are lab/emulator lifecycle features. Resume
