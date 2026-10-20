@@ -480,6 +480,61 @@ static int test_signed_bridges(void) {
 }
 
 
+/* Box keys (what co-signed file letters are sealed to) follow the signing key. */
+static int test_box_keys(void) {
+    char path[256];
+    fl_user_db_t db;
+    fl_user_db_t again;
+    sqlite3 *sql = NULL;
+    int created = 0;
+    unsigned char box[FL_USER_SIGNING_SECRET_LEN];
+    unsigned char before[FL_USER_SIGNING_PUBLIC_LEN];
+    const unsigned char *pub;
+
+    ASSERT(temp_db(path, sizeof path) == 0);
+    ASSERT(fl_user_db_load(&db, path) == FL_RESULT_OK);
+    ASSERT(fl_user_db_add_user_under(&db, "Root.Flinstone", "Mya", "pw", 3100, 0, 0) == FL_RESULT_OK);
+    ASSERT(fl_user_db_save(&db) == FL_RESULT_OK);
+
+    /* A new account has a box key distinct from its signing key; it survives a reload. */
+    pub = fl_user_db_box_public(&db, "Root.Flinstone.Mya");
+    ASSERT(pub);
+    ASSERT(memcmp(pub, fl_user_db_signing_public(&db, "Root.Flinstone.Mya"), 32) != 0);
+    memcpy(before, pub, sizeof before);
+    ASSERT(fl_user_db_load(&again, path) == FL_RESULT_OK);
+    pub = fl_user_db_box_public(&again, "Root.Flinstone.Mya");
+    ASSERT(pub && memcmp(pub, before, sizeof before) == 0);
+    ASSERT(fl_user_db_open_box(&again, "Mya", "wrong", box) == FL_RESULT_ACCES);
+    ASSERT(fl_user_db_open_box(&again, "Mya", "pw", box) == FL_RESULT_OK);
+
+    /* A password change re-seals it; an admin reset replaces it. */
+    ASSERT(fl_user_db_change_password(&again, "Mya", "pw", "pw2") == FL_RESULT_OK);
+    ASSERT(memcmp(fl_user_db_box_public(&again, "Root.Flinstone.Mya"), before, sizeof before) == 0);
+    ASSERT(fl_user_db_open_box(&again, "Mya", "pw", box) == FL_RESULT_ACCES);
+    ASSERT(fl_user_db_open_box(&again, "Mya", "pw2", box) == FL_RESULT_OK);
+    ASSERT(fl_user_db_set_password(&again, "Mya", "pw3") == FL_RESULT_OK);
+    ASSERT(memcmp(fl_user_db_box_public(&again, "Root.Flinstone.Mya"), before, sizeof before) != 0);
+    ASSERT(fl_user_db_save(&again) == FL_RESULT_OK);
+
+    /* An account from before box keys keeps its signing key and gains a box key. */
+    memcpy(before, fl_user_db_signing_public(&again, "Root.Flinstone.Mya"), sizeof before);
+    ASSERT(sqlite3_open(path, &sql) == SQLITE_OK);
+    ASSERT(sqlite3_exec(sql, "UPDATE users SET box_public='',box_sealed='' WHERE name='Mya';",
+                        NULL, NULL, NULL) == SQLITE_OK);
+    sqlite3_close(sql);
+    ASSERT(fl_user_db_load(&db, path) == FL_RESULT_OK);
+    ASSERT(!fl_user_db_box_public(&db, "Root.Flinstone.Mya"));
+    ASSERT(fl_user_db_open_box(&db, "Mya", "pw3", box) == FL_RESULT_NOENT);
+    ASSERT(fl_user_db_ensure_key(&db, "Mya", "pw3", &created) == FL_RESULT_OK && created == 1);
+    ASSERT(fl_user_db_box_public(&db, "Root.Flinstone.Mya"));
+    ASSERT(memcmp(fl_user_db_signing_public(&db, "Root.Flinstone.Mya"), before, sizeof before) == 0);
+    ASSERT(fl_user_db_ensure_key(&db, "Mya", "pw3", &created) == FL_RESULT_OK && created == 0);
+
+    mem_domain_zero(box, sizeof box);
+    unlink(path);
+    return 0;
+}
+
 /* The sender-side gate for server file offers (share_gate.h). */
 static int test_share_gate(void) {
     char path[256];
@@ -653,6 +708,7 @@ int main(void) {
     RUN(test_legacy_case_collision);
     RUN(test_bridges);
     RUN(test_signed_bridges);
+    RUN(test_box_keys);
     RUN(test_share_gate);
     RUN(test_jail_homes, jail_parent);
 
