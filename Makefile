@@ -935,6 +935,11 @@ test_kq_delivery: kernel/core/vfs/kq_delivery.o kernel/core/vfs/server_shared_fs
 	  -lsqlite3 $(OPENSSL_LIBS) -pthread -Wl,-z,noexecstack
 	./tests/test_kq_delivery
 
+.PHONY: test_part_buf
+test_part_buf: tests/test_part_buf.c kernel/core/net/net_part_buf.h
+	$(CC) $(CFLAGS) $(TEST_SANITIZE) -o tests/test_part_buf tests/test_part_buf.c -Wl,-z,noexecstack
+	./tests/test_part_buf
+
 .PHONY: test_kq_net
 test_kq_net: userland/shell/common.o $(UTIL_SHELL_LINK_OBJS) $(FS_JAIL_CORE_OBJS) $(FS_JAIL_SUPPORT_OBJS) kernel/core/mm/mem_domain.o $(MEM_ASM_OBJ) $(HISTORY_ASM_OBJ) $(UTIL_HISTORY_HOST_OBJS) kernel/drivers/keyquorum/kq_driver.o kernel/core/vfs/kq_checkpoint.o kernel/core/vfs/kq_delivery.o kernel/core/net/net_kq_delivery.o $(NET_ASM_OBJ)
 	$(CC) $(CFLAGS) $(TEST_SANITIZE) -c -o tests/test_kq_net.o tests/test_kq_net.c

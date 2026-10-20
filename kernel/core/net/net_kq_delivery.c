@@ -1,6 +1,7 @@
 #include "net_kq_delivery.h"
 
 #include "net_endian.h"
+#include "net_part_buf.h"
 #include "contract_p3_session_wire.h"
 #include "kq_checkpoint.h"
 #include "timekeeping.h"
@@ -209,7 +210,10 @@ void fl_net_kq_set_clock(int64_t (*now)(void)) {
 
 /* ---- host ------------------------------------------------------------------- */
 
+/* A letter being uploaded: its parts (base fl_part_buf_t, limited to the offered length) and
+ * the offer and member it belongs to. */
 typedef struct {
+    fl_part_buf_t             letter;
     int                       used;
     fl_net_server_member_id_t from;
     uint8_t                   id[FL_KQ_DELIVERY_ID_LEN];
@@ -217,9 +221,6 @@ typedef struct {
     char                      recipient[FL_HERITAGE_KEY_ID_MAX];
     char                      file_name[128];
     kq_file_offer_t           offer;
-    uint8_t                  *buf;
-    size_t                    len;
-    size_t                    got;
     int64_t                   last_at;
 } kq_upload_t;
 
@@ -326,7 +327,7 @@ static kq_upload_t *upload_find(fl_net_server_member_id_t from, const uint8_t *i
 }
 
 static void upload_free(kq_upload_t *u) {
-    free(u->buf);
+    fl_part_buf_release(&u->letter);
     memset(u, 0, sizeof *u);
 }
 
@@ -392,12 +393,11 @@ static void host_offer(fl_net_server_t *srv, const fl_net_server_member_t *from,
     for (size_t i = 0; i < KQ_UPLOADS_MAX; i++) {
         if (s_uploads[i].used)
             continue;
-        up.buf = (uint8_t *)malloc(len);
-        if (!up.buf)
+        fl_part_buf_init(&up.letter, len);
+        if (fl_part_buf_reserve(&up.letter, len) != FL_RESULT_OK)
             break;
         up.used = 1;
         up.from = from->member_id;
-        up.len = len;
         up.last_at = now_sec();
         s_uploads[i] = up;
         return;
@@ -419,19 +419,17 @@ static void host_part(fl_net_server_t *srv, const fl_net_server_member_t *from, 
     if (!u)
         return;
     u->last_at = now_sec();
-    if (off != u->got || r->n == 0 || u->got + r->n > u->len) {
+    if (r->n == 0 || fl_part_buf_append(&u->letter, off, r->p, r->n) != FL_RESULT_OK) {
         upload_free(u);
         host_refuse(srv, from, "delivery", "letter parts out of order");
         return;
     }
-    memcpy(u->buf + u->got, r->p, r->n);
-    u->got += r->n;
-    if (u->got < u->len)
+    if (!fl_part_buf_complete(&u->letter))
         return;
     /* Complete: the latent space holds it, on the host's clock, and asks the recipient. */
     fl_kq_delivery_init(&d, u->id, u->author, u->recipient, u->file_name, &u->offer, now_sec(),
                         FL_KQ_DELIVERY_TTL_SEC);
-    rc = store() ? fl_kq_store_put(store(), &d, u->buf, u->len) : FL_RESULT_ERR;
+    rc = store() ? fl_kq_store_put(store(), &d, u->letter.data, u->letter.len) : FL_RESULT_ERR;
     upload_free(u);
     if (rc != FL_RESULT_OK) {
         host_refuse(srv, from, "delivery", "host could not hold the letter");
@@ -588,12 +586,12 @@ void fl_net_kq_host_handle(fl_net_server_t *srv, const fl_net_server_member_t *f
 
 /* ---- client ----------------------------------------------------------------- */
 
+/* A co-signature request this shell holds: the released letter's parts (base fl_part_buf_t,
+ * limited to the released length) and the request shown to the user. */
 typedef struct {
+    fl_part_buf_t     letter;
     int               used;
     fl_net_kq_inbox_t pub;
-    uint8_t          *letter;
-    size_t            letter_len;
-    size_t            letter_got;
 } kq_inbox_slot_t;
 
 typedef struct {
@@ -613,7 +611,7 @@ static kq_inbox_slot_t *inbox_find(const uint8_t *id) {
 }
 
 static void inbox_free(kq_inbox_slot_t *s) {
-    free(s->letter);
+    fl_part_buf_release(&s->letter);
     memset(s, 0, sizeof *s);
 }
 
@@ -664,10 +662,11 @@ static void client_release(kq_r_t *r) {
     slot = r->bad ? NULL : inbox_find(id);
     if (!slot || len == 0 || len > FL_KQ_LETTER_MAX)
         return;
-    free(slot->letter);
-    slot->letter = (uint8_t *)malloc(len);
-    slot->letter_len = slot->letter ? len : 0;
-    slot->letter_got = 0;
+    /* A (re)release starts the letter again at offset 0. */
+    fl_part_buf_release(&slot->letter);
+    fl_part_buf_init(&slot->letter, len);
+    if (fl_part_buf_reserve(&slot->letter, len) != FL_RESULT_OK)
+        fl_part_buf_init(&slot->letter, 0);
     slot->pub.letter_ready = 0;
 }
 
@@ -679,12 +678,10 @@ static void client_part(kq_r_t *r) {
     r_bytes(r, id, sizeof id);
     off = r_u32(r);
     slot = r->bad ? NULL : inbox_find(id);
-    if (!slot || !slot->letter || off != slot->letter_got ||
-        slot->letter_got + r->n > slot->letter_len)
+    if (!slot || !slot->letter.data ||
+        fl_part_buf_append(&slot->letter, off, r->p, r->n) != FL_RESULT_OK)
         return;
-    memcpy(slot->letter + slot->letter_got, r->p, r->n);
-    slot->letter_got += r->n;
-    if (slot->letter_got == slot->letter_len)
+    if (fl_part_buf_complete(&slot->letter))
         slot->pub.letter_ready = 1;
 }
 
@@ -907,14 +904,14 @@ fl_result_t fl_net_kq_take_letter(const uint8_t id[FL_KQ_DELIVERY_ID_LEN], unsig
             kq_unlock();
             return FL_RESULT_NOENT;
         }
-        if (slot->pub.letter_ready && slot->letter) {
-            letter->data = (uint8_t *)malloc(slot->letter_len);
+        if (slot->pub.letter_ready && slot->letter.data) {
+            letter->data = (uint8_t *)malloc(slot->letter.len);
             if (!letter->data) {
                 kq_unlock();
                 return FL_RESULT_NOMEM;
             }
-            memcpy(letter->data, slot->letter, slot->letter_len);
-            letter->len = slot->letter_len;
+            memcpy(letter->data, slot->letter.data, slot->letter.len);
+            letter->len = slot->letter.len;
             kq_unlock();
             return FL_RESULT_OK;
         }
