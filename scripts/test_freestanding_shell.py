@@ -12,6 +12,14 @@ root = Path(__file__).resolve().parents[1]
 # Makefile builds dist/flintstone-secfeat.img and points us at it. Default to
 # the plain image for a manual run.
 image = Path(os.environ.get("FL_BROWSER_KERNEL_IMAGE", str(root / "dist" / "flintstone.img")))
+
+
+def version_line():
+    """VERSION_LINE the kernel was built with (userland/shell/version_def.h)."""
+    for line in (root / "userland" / "shell" / "version_def.h").read_text(encoding="utf-8").splitlines():
+        if line.startswith("#define VERSION_LINE "):
+            return line.split('"')[1]
+    raise SystemExit("version_def.h has no VERSION_LINE")
 if not image.is_file():
     sys.exit(f"test-freestanding-shell: missing {image}")
 
@@ -175,7 +183,7 @@ try:
     cmd("createdisk labvol 4 8", expect="created disk")
     cmd("writecluster 0 -t payload", expect="cluster written")
     cmd("listclusters", expect="payload")
-    cmd("version", expect="4.5.2")
+    cmd("version", expect=version_line())
     cmd("contracts json", expect="labdisk")
     cmd("type hello.txt", expect="lab-fs")
 

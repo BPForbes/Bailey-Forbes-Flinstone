@@ -5,6 +5,8 @@
 #include "ramfs.h"
 #include "serial.h"
 #include "vga.h"
+/* VERSION_LINE of the build: the same header the hosted shell uses, macros only. */
+#include "../../../userland/shell/version_def.h"
 
 #define AUDIT_MAX 8
 #define LOC_MAX 8
@@ -1786,7 +1788,7 @@ static int run_meta(int session, const char *verb, const char **cursor)
         return 1;
     }
     if (str_eq(verb, "version")) {
-        emit("4.5.2 lab\r\n");
+        emit(VERSION_LINE " lab\r\n");
         return 1;
     }
     if (str_eq(verb, "contracts")) {
