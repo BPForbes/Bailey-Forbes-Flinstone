@@ -23,16 +23,29 @@
 #include "kq_delivery.h"
 #include "net_client.h"
 #include "net_server.h"
-#include "user_db.h"
 
 #include <stdint.h>
+
+/**
+ * The host's key authority (kq_keydir.h): every signature is checked against it and KEYS is
+ * answered from it. The native shell's is its account store; the browser lab's is its
+ * account table and the keys members publish.
+ */
+typedef const fl_kq_keydir_t *(*fl_net_kq_keys_fn)(void);
+
+/**
+ * Sets the key authority and where the host keeps deliveries and held letters (opened when
+ * the host first needs it). Attaches no transport: the lab delivers frames to
+ * fl_net_kq_host_handle / fl_net_kq_client_handle itself.
+ */
+fl_result_t fl_net_kq_configure(fl_net_kq_keys_fn keys, const char *store_dir);
 
 /** The account store the host checks signatures against (the shell's session store). */
 typedef const fl_user_db_t *(*fl_net_kq_users_fn)(void);
 
 /**
- * Installs the server and client hooks. `store_dir` is where the host keeps deliveries and
- * held letters (opened when the host first needs it).
+ * Native shell (net_kq_delivery_users.c): configures over the account store and installs
+ * the server and client hooks, so session frames reach the handlers below.
  */
 fl_result_t fl_net_kq_install(fl_net_kq_users_fn users, const char *store_dir);
 
