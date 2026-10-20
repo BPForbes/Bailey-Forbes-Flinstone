@@ -858,9 +858,9 @@ test_server_file_meta: $(NET_ASM_OBJ) $(MEM_ASM_OBJ) kernel/core/net/net_channel
 	./tests/test_server_file_meta
 
 .PHONY: test_server_shared_catalog
-test_server_shared_catalog: kernel/core/vfs/server_shared_db.o kernel/core/vfs/server_shared_digest.o userland/shell/common.o
+test_server_shared_catalog: kernel/core/vfs/server_shared_db.o kernel/core/vfs/server_shared_fs.o kernel/core/vfs/server_shared_digest.o userland/shell/common.o
 	$(CC) $(CFLAGS) $(TEST_SANITIZE) -o tests/test_server_shared_catalog tests/test_server_shared_catalog.c \
-	  kernel/core/vfs/server_shared_db.o kernel/core/vfs/server_shared_digest.o userland/shell/common.o \
+	  kernel/core/vfs/server_shared_db.o kernel/core/vfs/server_shared_fs.o kernel/core/vfs/server_shared_digest.o userland/shell/common.o \
 	  -lsqlite3 $(OPENSSL_LIBS) -Wl,-z,noexecstack
 	./tests/test_server_shared_catalog
 
@@ -918,29 +918,31 @@ test_heritage: userland/shell/common.o $(UTIL_SHELL_LINK_OBJS) $(FS_JAIL_CORE_OB
 	./tests/test_heritage
 
 .PHONY: test_kq_checkpoint
-test_kq_checkpoint: userland/shell/common.o $(UTIL_SHELL_LINK_OBJS) $(FS_JAIL_CORE_OBJS) $(FS_JAIL_SUPPORT_OBJS) kernel/core/mm/mem_domain.o $(MEM_ASM_OBJ) $(HISTORY_ASM_OBJ) $(UTIL_HISTORY_HOST_OBJS) kernel/drivers/keyquorum/kq_driver.o kernel/core/vfs/kq_checkpoint.o
+test_kq_checkpoint: userland/shell/common.o $(UTIL_SHELL_LINK_OBJS) $(FS_JAIL_CORE_OBJS) $(FS_JAIL_SUPPORT_OBJS) kernel/core/mm/mem_domain.o $(MEM_ASM_OBJ) $(HISTORY_ASM_OBJ) $(UTIL_HISTORY_HOST_OBJS) kernel/drivers/keyquorum/kq_driver.o kernel/core/vfs/kq_checkpoint.o kernel/core/vfs/kq_delivery.o
 	$(CC) $(CFLAGS) $(TEST_SANITIZE) -c -o tests/test_kq_checkpoint.o tests/test_kq_checkpoint.c
 	$(CXX) $(CXXFLAGS) $(TEST_SANITIZE) -o tests/test_kq_checkpoint tests/test_kq_checkpoint.o \
-	  kernel/drivers/keyquorum/kq_driver.o kernel/core/vfs/kq_checkpoint.o \
+	  kernel/drivers/keyquorum/kq_driver.o kernel/core/vfs/kq_checkpoint.o kernel/core/vfs/kq_delivery.o \
 	  userland/shell/common.o $(UTIL_SHELL_LINK_OBJS) $(FS_JAIL_CORE_OBJS) $(FS_JAIL_SUPPORT_OBJS) \
 	  kernel/core/mm/mem_domain.o $(MEM_ASM_OBJ) $(HISTORY_ASM_OBJ) $(UTIL_HISTORY_HOST_OBJS) \
 	  $(FS_JAIL_TEST_LIBS) -Wl,-z,noexecstack
 	./tests/test_kq_checkpoint
 
 .PHONY: test_kq_delivery
-test_kq_delivery: kernel/core/vfs/kq_delivery.o
+test_kq_delivery: kernel/core/vfs/kq_delivery.o kernel/core/vfs/server_shared_fs.o kernel/core/vfs/server_shared_db.o kernel/core/vfs/server_shared_digest.o userland/shell/common.o
 	$(CC) $(CFLAGS) $(TEST_SANITIZE) -o tests/test_kq_delivery tests/test_kq_delivery.c \
-	  kernel/core/vfs/kq_delivery.o -lsqlite3 -pthread -Wl,-z,noexecstack
+	  kernel/core/vfs/kq_delivery.o kernel/core/vfs/server_shared_fs.o kernel/core/vfs/server_shared_db.o \
+	  kernel/core/vfs/server_shared_digest.o userland/shell/common.o \
+	  -lsqlite3 $(OPENSSL_LIBS) -pthread -Wl,-z,noexecstack
 	./tests/test_kq_delivery
 
 .PHONY: test_kq_net
-test_kq_net: userland/shell/common.o $(UTIL_SHELL_LINK_OBJS) $(FS_JAIL_CORE_OBJS) $(FS_JAIL_SUPPORT_OBJS) kernel/core/mm/mem_domain.o $(MEM_ASM_OBJ) $(HISTORY_ASM_OBJ) $(UTIL_HISTORY_HOST_OBJS) kernel/drivers/keyquorum/kq_driver.o kernel/core/vfs/kq_checkpoint.o kernel/core/vfs/kq_delivery.o kernel/core/net/net_kq_delivery.o
+test_kq_net: userland/shell/common.o $(UTIL_SHELL_LINK_OBJS) $(FS_JAIL_CORE_OBJS) $(FS_JAIL_SUPPORT_OBJS) kernel/core/mm/mem_domain.o $(MEM_ASM_OBJ) $(HISTORY_ASM_OBJ) $(UTIL_HISTORY_HOST_OBJS) kernel/drivers/keyquorum/kq_driver.o kernel/core/vfs/kq_checkpoint.o kernel/core/vfs/kq_delivery.o kernel/core/net/net_kq_delivery.o $(NET_ASM_OBJ)
 	$(CC) $(CFLAGS) $(TEST_SANITIZE) -c -o tests/test_kq_net.o tests/test_kq_net.c
 	$(CXX) $(CXXFLAGS) $(TEST_SANITIZE) -o tests/test_kq_net tests/test_kq_net.o \
 	  kernel/core/net/net_kq_delivery.o kernel/core/vfs/kq_delivery.o \
 	  kernel/drivers/keyquorum/kq_driver.o kernel/core/vfs/kq_checkpoint.o \
 	  userland/shell/common.o $(UTIL_SHELL_LINK_OBJS) $(FS_JAIL_CORE_OBJS) $(FS_JAIL_SUPPORT_OBJS) \
-	  kernel/core/mm/mem_domain.o $(MEM_ASM_OBJ) $(HISTORY_ASM_OBJ) $(UTIL_HISTORY_HOST_OBJS) \
+	  kernel/core/mm/mem_domain.o $(MEM_ASM_OBJ) $(NET_ASM_OBJ) $(HISTORY_ASM_OBJ) $(UTIL_HISTORY_HOST_OBJS) \
 	  $(FS_JAIL_TEST_LIBS) -Wl,-z,noexecstack
 	./tests/test_kq_net
 

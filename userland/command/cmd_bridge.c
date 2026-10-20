@@ -41,39 +41,20 @@ static void bridge_print(const fl_bridge_t *b, void *ctx) {
     list->shown++;
 }
 
-/*
- * Opens the logged-in account's signing key with its password, asked here. An
- * account that has no key yet gets one, sealed under that password.
- */
-static int bridge_open_actor_key(fl_user_db_t *db, unsigned char *secret) {
-    char pw[128];
-    const char *name = fl_session_current_user();
-    int created = 0;
-    fl_result_t rc;
+/* Opens the logged-in account's signing key (cmd_open_account_keys) with bridge's messages. */
+static int bridge_open_actor_key(unsigned char *secret) {
+    fl_result_t rc = cmd_open_account_keys("signs the bridge", secret, NULL);
 
-    if (cmd_read_password("Password (signs the bridge): ", pw, sizeof(pw)) != 0) {
-        cmd_wipe_password(pw, sizeof(pw));
-        fprintf(stderr, "bridge: password read failed\n");
-        return -1;
-    }
-    rc = fl_user_db_ensure_key(db, name, pw, &created);
-    if (rc == FL_RESULT_OK && created && fl_session_save_users() != FL_RESULT_OK) {
-        /* A key the store does not hold must not sign anything: drop it. */
-        fl_user_db_forget_created(db, name, created);
-        rc = FL_RESULT_ERR;
-    }
     if (rc == FL_RESULT_OK)
-        rc = fl_user_db_open_key(db, name, pw, secret);
-    cmd_wipe_password(pw, sizeof(pw));
-    if (rc == FL_RESULT_ACCES) {
+        return 0;
+    if (rc == FL_RESULT_EOF)
+        fprintf(stderr, "bridge: password read failed\n");
+    else if (rc == FL_RESULT_ACCES)
         fprintf(stderr, "bridge: incorrect password\n");
-        return -1;
-    }
-    if (rc != FL_RESULT_OK) {
-        fprintf(stderr, "bridge: cannot open the signing key of %s (%d)\n", name, (int)rc);
-        return -1;
-    }
-    return 0;
+    else
+        fprintf(stderr, "bridge: cannot open the signing key of %s (%d)\n",
+                fl_session_current_user(), (int)rc);
+    return -1;
 }
 
 static int bridge_parse_id(const char *s, int64_t *out) {
@@ -139,7 +120,7 @@ int cmd_bridge_run(int argc, char **argv) {
                     fl_heritage_relation_name(rel));
             return 1;
         }
-        if (bridge_open_actor_key(db, secret) != 0)
+        if (bridge_open_actor_key(secret) != 0)
             return 1;
         rc = fl_bridge_request(db->path, db, actor, peer_key, now, secret, &id);
         mem_domain_zero(secret, sizeof secret);
@@ -173,7 +154,7 @@ int cmd_bridge_run(int argc, char **argv) {
             return 1;
         }
         if (accept) {
-            if (bridge_open_actor_key(db, secret) != 0)
+            if (bridge_open_actor_key(secret) != 0)
                 return 1;
             rc = fl_bridge_accept(db->path, db, actor, id, now, secret);
             mem_domain_zero(secret, sizeof secret);

@@ -311,6 +311,62 @@ static int test_unfinished_uploads_never_hold_the_host(void) {
     return 0;
 }
 
+/* Builds an ANNOUNCE as the host would, with any sender and file name. */
+static uint16_t build_announce(uint8_t *buf, const uint8_t id[16], const char *sender,
+                               const char *file, const kq_file_offer_t *o) {
+    size_t n = 0;
+    size_t ls = strlen(sender), lf = strlen(file);
+
+    memcpy(buf + n, id, 16); n += 16;
+    memset(buf + n, 0, 8); buf[n + 7] = 1; n += 8;
+    buf[n++] = (uint8_t)ls; memcpy(buf + n, sender, ls); n += ls;
+    buf[n++] = (uint8_t)lf; memcpy(buf + n, file, lf); n += lf;
+    memcpy(buf + n, o->file_id, 16); n += 16;
+    memcpy(buf + n, o->revision_id, 32); n += 32;
+    memcpy(buf + n, o->content_commitment, 32); n += 32;
+    memcpy(buf + n, o->author_identity, 16); n += 16;
+    memcpy(buf + n, o->author_signature, 64); n += 64;
+    memset(buf + n, 0, 8); n += 8;
+    memcpy(buf + n, o->policy_hash, 32); n += 32;
+    return (uint16_t)n;
+}
+
+static int test_unsafe_names_never_reach_a_path(void) {
+    fl_kq_encoded_t enc;
+    fl_net_kq_inbox_t inbox[4];
+    uint8_t buf[512];
+    uint8_t id[16];
+    int announced = s_to_steve[FL_NET_SESSION_OP_KQ_ANNOUNCE];
+
+    ASSERT(encode_from_mya("named.txt", "x\n", &enc) == 0);
+
+    /* The host refuses an offer whose file name is not plain. */
+    snprintf(enc.file_name, sizeof enc.file_name, "%s", "../../.bashrc");
+    s_actor = &s_members[1];
+    s_last_err[0] = '\0';
+    ASSERT(fl_net_kq_send_delivery(s_srv, NULL, 0, MYA, STEVE, &enc) == FL_RESULT_OK);
+    ASSERT(strstr(s_last_err, "malformed offer"));
+    ASSERT(s_to_steve[FL_NET_SESSION_OP_KQ_ANNOUNCE] == announced);
+
+    /* A client drops an announcement (from a host that did not check) with an unsafe name or
+     * sender, so it is never listed, printed or decoded. */
+    memset(id, 0xA7, sizeof id);
+    fl_net_kq_client_handle(NULL, FL_NET_SESSION_OP_KQ_ANNOUNCE, buf,
+                            build_announce(buf, id, MYA, "../evil", &enc.offer));
+    fl_net_kq_client_handle(NULL, FL_NET_SESSION_OP_KQ_ANNOUNCE, buf,
+                            build_announce(buf, id, MYA, "x\x1b[2J", &enc.offer));
+    fl_net_kq_client_handle(NULL, FL_NET_SESSION_OP_KQ_ANNOUNCE, buf,
+                            build_announce(buf, id, "Root/../x", "ok.txt", &enc.offer));
+    ASSERT(fl_net_kq_inbox(inbox, 4) == 0);
+    /* The same frame with plain names is accepted, so the drops above were the names. */
+    fl_net_kq_client_handle(NULL, FL_NET_SESSION_OP_KQ_ANNOUNCE, buf,
+                            build_announce(buf, id, MYA, "ok.txt", &enc.offer));
+    ASSERT(fl_net_kq_inbox(inbox, 4) == 1);
+    fl_net_kq_inbox_drop(id);
+    fl_kq_encoded_free(&enc);
+    return 0;
+}
+
 int main(void) {
     char tmpl[] = "/tmp/fl_kq_netXXXXXX";
     char path[PATH_MAX];
@@ -342,6 +398,7 @@ int main(void) {
     RUN(test_co_signed_delivery_over_the_wire);
     RUN(test_an_unanswered_request_leaks_away);
     RUN(test_unfinished_uploads_never_hold_the_host);
+    RUN(test_unsafe_names_never_reach_a_path);
     fl_net_kq_reset();
     rmrf(s_dir);
     if (rc == 0)

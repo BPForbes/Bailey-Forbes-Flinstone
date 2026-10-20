@@ -538,6 +538,20 @@ static int test_box_keys(void) {
            created == FL_USER_DB_CREATED_BOX);
     ASSERT(memcmp(fl_user_db_signing_public(&db, "Root.Flinstone.Mya"), before, sizeof before) == 0);
     ASSERT(fl_user_db_ensure_key(&db, "Mya", "pw3", &created) == FL_RESULT_OK && created == 0);
+    ASSERT(fl_user_db_save(&db) == FL_RESULT_OK);
+
+    /* A damaged signing key beside a valid box key: a password change makes both keys new,
+     * and the box key it stores is one the new password opens and that matches its public. */
+    ASSERT(sqlite3_open(path, &sql) == SQLITE_OK);
+    ASSERT(sqlite3_exec(sql, "UPDATE users SET signing_public='',signing_sealed='' WHERE name='Mya';",
+                        NULL, NULL, NULL) == SQLITE_OK);
+    sqlite3_close(sql);
+    ASSERT(fl_user_db_load(&db, path) == FL_RESULT_OK);
+    ASSERT(!fl_user_db_signing_public(&db, "Root.Flinstone.Mya"));
+    ASSERT(fl_user_db_box_public(&db, "Root.Flinstone.Mya"));
+    ASSERT(fl_user_db_change_password(&db, "Mya", "pw3", "pw4") == FL_RESULT_OK);
+    ASSERT(fl_user_db_signing_public(&db, "Root.Flinstone.Mya"));
+    ASSERT(fl_user_db_open_box(&db, "Mya", "pw4", box) == FL_RESULT_OK);
 
     mem_domain_zero(box, sizeof box);
     unlink(path);

@@ -1,4 +1,5 @@
 #include "kq_delivery.h"
+#include "server_shared_fs.h"
 
 #include <errno.h>
 #include <fcntl.h>
@@ -101,32 +102,6 @@ static int letter_path(const fl_kq_store_t *s, const uint8_t id[FL_KQ_DELIVERY_I
     return snprintf(out, cap, "%s/%s/%s.kqpb", s->dir, KQ_STORE_LETTERS, hex) < (int)cap ? 0 : -1;
 }
 
-static int write_new_file(const char *path, const uint8_t *data, size_t len) {
-    char tmp[1200];
-    int fd;
-    size_t off = 0;
-
-    if (snprintf(tmp, sizeof tmp, "%s.part", path) >= (int)sizeof tmp)
-        return -1;
-    fd = open(tmp, O_WRONLY | O_CREAT | O_TRUNC, 0600);
-    if (fd < 0)
-        return -1;
-    while (off < len) {
-        ssize_t w = write(fd, data + off, len - off);
-        if (w <= 0) {
-            close(fd);
-            unlink(tmp);
-            return -1;
-        }
-        off += (size_t)w;
-    }
-    if (fsync(fd) != 0 || close(fd) != 0 || rename(tmp, path) != 0) {
-        unlink(tmp);
-        return -1;
-    }
-    return 0;
-}
-
 static fl_result_t migrate(sqlite3 *db) {
     sqlite3_stmt *st = NULL;
     int version = 0;
@@ -164,21 +139,6 @@ static fl_result_t migrate(sqlite3 *db) {
     return FL_RESULT_OK;
 }
 
-/* mkdir -p: the store may be the first thing under the share root. */
-static void make_dirs(const char *dir) {
-    char tmp[sizeof(((fl_kq_store_t *)0)->dir)];
-
-    snprintf(tmp, sizeof tmp, "%s", dir);
-    for (char *p = tmp + 1; *p; p++) {
-        if (*p != '/')
-            continue;
-        *p = '\0';
-        (void)mkdir(tmp, 0700);
-        *p = '/';
-    }
-    (void)mkdir(tmp, 0700);
-}
-
 fl_result_t fl_kq_store_open(const char *dir, fl_kq_store_t **out) {
     fl_kq_store_t *s;
     char path[1200];
@@ -190,9 +150,12 @@ fl_result_t fl_kq_store_open(const char *dir, fl_kq_store_t **out) {
     if (!s)
         return FL_RESULT_NOMEM;
     snprintf(s->dir, sizeof s->dir, "%s", dir);
-    make_dirs(dir);
-    snprintf(path, sizeof path, "%s/%s", dir, KQ_STORE_LETTERS);
-    (void)mkdir(path, 0700);
+    /* The store may be the first thing under the share root: create it and its letters dir. */
+    if (snprintf(path, sizeof path, "%s/%s", dir, KQ_STORE_LETTERS) >= (int)sizeof path ||
+        fl_fs_mkdir_p(path, 0700) != 0) {
+        free(s);
+        return FL_RESULT_ERR;
+    }
     snprintf(path, sizeof path, "%s/%s", dir, KQ_STORE_DB);
     if (sqlite3_open(path, &s->db) != SQLITE_OK || migrate(s->db) != FL_RESULT_OK) {
         sqlite3_close(s->db);
@@ -304,7 +267,7 @@ fl_result_t fl_kq_store_put(fl_kq_store_t *s, const fl_kq_delivery_t *d, const u
                                    FL_RESULT_OK)
         goto rollback;
     /* The letter is written before the row commits; a failed commit removes it. */
-    if (write_new_file(path, letter, letter_len) != 0)
+    if (fl_fs_write_file_atomic(path, letter, letter_len) != 0)
         goto rollback;
     if (sqlite3_exec(s->db, "COMMIT;", NULL, NULL, NULL) != SQLITE_OK) {
         unlink(path);
@@ -465,17 +428,42 @@ size_t fl_kq_store_leak(fl_kq_store_t *s, int64_t now) {
         }
     }
     sqlite3_finalize(st);
+    st = NULL;
+    if (n == 0)
+        goto out;
+    /* Rows first, in one transaction (the delivery and its spike log); letters only once that
+     * has committed, so a failure leaves a delivery that is still whole. */
+    if (sqlite3_exec(s->db, "BEGIN IMMEDIATE;", NULL, NULL, NULL) != SQLITE_OK) {
+        n = 0;
+        goto out;
+    }
+    for (size_t i = 0; i < n; i++) {
+        static const char *const sql[2] = {"DELETE FROM kq_spike WHERE delivery_id=?;",
+                                           "DELETE FROM kq_delivery WHERE delivery_id=?;"};
+        for (size_t q = 0; q < 2; q++) {
+            int ok;
+            if (sqlite3_prepare_v2(s->db, sql[q], -1, &st, NULL) != SQLITE_OK)
+                goto rollback;
+            sqlite3_bind_blob(st, 1, ids[i], FL_KQ_DELIVERY_ID_LEN, SQLITE_TRANSIENT);
+            ok = sqlite3_step(st) == SQLITE_DONE && (q == 0 || sqlite3_changes(s->db) == 1);
+            sqlite3_finalize(st);
+            st = NULL;
+            if (!ok)
+                goto rollback;
+        }
+    }
+    if (sqlite3_exec(s->db, "COMMIT;", NULL, NULL, NULL) != SQLITE_OK)
+        goto rollback;
     for (size_t i = 0; i < n; i++) {
         char path[1200];
         if (letter_path(s, ids[i], path, sizeof path) == 0)
             (void)unlink(path);
-        if (sqlite3_prepare_v2(s->db, "DELETE FROM kq_delivery WHERE delivery_id=?;", -1, &st,
-                               NULL) == SQLITE_OK) {
-            sqlite3_bind_blob(st, 1, ids[i], FL_KQ_DELIVERY_ID_LEN, SQLITE_TRANSIENT);
-            (void)sqlite3_step(st);
-        }
-        sqlite3_finalize(st);
     }
+    goto out;
+rollback:
+    (void)sqlite3_exec(s->db, "ROLLBACK;", NULL, NULL, NULL);
+    n = 0;
+out:
     pthread_mutex_unlock(&s->lock);
     return n;
 }

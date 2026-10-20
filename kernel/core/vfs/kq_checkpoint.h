@@ -45,6 +45,13 @@ typedef enum {
 const char *fl_kq_cp_reason(fl_kq_cp_result_t r);
 fl_result_t fl_kq_cp_to_result(fl_kq_cp_result_t r);
 
+/**
+ * True when name is a plain file name a delivery may use: not empty, not "." or "..", and
+ * free of '/', '\\' and control bytes. Every name that arrives over the wire (offer,
+ * announcement) is checked before it is stored, printed or joined to a directory.
+ */
+int fl_kq_cp_safe_name(const char *name);
+
 /** What the sender's encoder produces for one delivery. */
 typedef struct {
     kq_file_offer_t offer;

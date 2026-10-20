@@ -2,6 +2,7 @@
 #include "fl/audit_log.h"
 #include "fl/session.h"
 #include "fl/elevation.h"
+#include "fl/mem_asm.h"
 #include "user_db.h"
 #include <limits.h>
 #include <stdio.h>
@@ -16,7 +17,8 @@
 void cmd_wipe_password(char *buf, size_t buf_size) {
     if (!buf || buf_size == 0)
         return;
-    memset(buf, 0, buf_size);
+    /* The secret-wipe primitive: a plain memset of a dying buffer may be optimised away. */
+    asm_mem_secure_zero(buf, buf_size);
 }
 
 static int cmd_read_password_line(const char *prompt, char *buf, size_t buf_size) {
@@ -154,4 +156,31 @@ int cmd_su_require_auth(const char *target) {
     }
     cmd_wipe_password(pw, sizeof(pw));
     return 0;
+}
+
+fl_result_t cmd_open_account_keys(const char *why, unsigned char *signing, unsigned char *box) {
+    char pw[128];
+    char prompt[96];
+    fl_user_db_t *db = fl_session_user_db_mut();
+    const char *name = fl_session_current_user();
+    int created = 0;
+    fl_result_t rc;
+
+    snprintf(prompt, sizeof prompt, "Password (%s): ", why);
+    if (cmd_read_password(prompt, pw, sizeof(pw)) != 0) {
+        cmd_wipe_password(pw, sizeof(pw));
+        return FL_RESULT_EOF;
+    }
+    rc = fl_user_db_ensure_key(db, name, pw, &created);
+    if (rc == FL_RESULT_OK && created && fl_session_save_users() != FL_RESULT_OK) {
+        /* A key the store does not hold must not sign anything: drop what was just made. */
+        fl_user_db_forget_created(db, name, created);
+        rc = FL_RESULT_ERR;
+    }
+    if (rc == FL_RESULT_OK && signing)
+        rc = fl_user_db_open_key(db, name, pw, signing);
+    if (rc == FL_RESULT_OK && box)
+        rc = fl_user_db_open_box(db, name, pw, box);
+    cmd_wipe_password(pw, sizeof(pw));
+    return rc;
 }

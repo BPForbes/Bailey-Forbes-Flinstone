@@ -1,5 +1,6 @@
 #include "server_shared_db.h"
 #include "server_shared_digest.h"
+#include "server_shared_fs.h"
 
 #include "common.h"
 #include "contract_p5_server_share.h"
@@ -63,28 +64,10 @@ static fl_result_t catalog_blobs_root(char *out, size_t cap)
     return FL_RESULT_OK;
 }
 
+/* Missing directories are created through the share's one mkdir -p (server_shared_fs.c). */
 static fl_result_t mkdir_p_simple(const char *path)
 {
-    char tmp[512];
-    size_t len;
-    if (!path || !path[0])
-        return FL_RESULT_INVAL;
-    strncpy(tmp, path, sizeof(tmp) - 1u);
-    tmp[sizeof(tmp) - 1u] = '\0';
-    len = strlen(tmp);
-    while (len > 1 && tmp[len - 1] == '/')
-        tmp[--len] = '\0';
-    for (size_t i = 1; i < len; i++) {
-        if (tmp[i] != '/')
-            continue;
-        tmp[i] = '\0';
-        if (mkdir(tmp, 0700) != 0 && errno != EEXIST)
-            return FL_RESULT_ERR;
-        tmp[i] = '/';
-    }
-    if (mkdir(tmp, 0700) != 0 && errno != EEXIST)
-        return FL_RESULT_ERR;
-    return FL_RESULT_OK;
+    return fl_fs_mkdir_p(path, 0700) == 0 ? FL_RESULT_OK : FL_RESULT_ERR;
 }
 
 static fl_result_t db_init_schema(sqlite3 *sql)

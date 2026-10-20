@@ -93,7 +93,10 @@ fl_result_t fl_kq_store_forget_letter(fl_kq_store_t *s, const uint8_t id[FL_KQ_D
 /** Undelivered deliveries for recipient, oldest first; at most cap. */
 size_t      fl_kq_store_pending_for(fl_kq_store_t *s, const char *recipient, int64_t now,
                                     fl_kq_delivery_t *out, size_t cap);
-/** Leak: drops deliveries that expired unfired and deletes their letters. Returns how many. */
+/**
+ * Leak: removes deliveries that expired unfired, with their spike log, in one transaction, and
+ * deletes their letters once it has committed. Returns how many (0 when nothing was removed).
+ */
 size_t      fl_kq_store_leak(fl_kq_store_t *s, int64_t now);
 /** Spikes logged for a delivery (for status output and tests). */
 size_t      fl_kq_store_spike_count(fl_kq_store_t *s, const uint8_t id[FL_KQ_DELIVERY_ID_LEN]);

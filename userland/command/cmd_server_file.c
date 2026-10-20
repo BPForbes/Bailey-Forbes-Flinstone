@@ -472,45 +472,21 @@ static const fl_user_db_t *kq_users(void)
     return fl_session_user_db();
 }
 
-/*
- * Prompts once for this account's password and opens its signing key and, when box is
- * non-NULL, its box key. Keys an account lacks are created first (and saved), like a
- * bridge signature does. The caller wipes the secrets.
- */
+/* Opens this account's keys (cmd_open_account_keys) with server file's messages. */
 static int kq_open_keys(const char *why, unsigned char *signing, unsigned char *box)
 {
-    char pw[128];
-    char prompt[96];
-    fl_user_db_t *db = fl_session_user_db_mut();
-    const char *name = fl_session_current_user();
-    int created = 0;
-    fl_result_t rc;
+    fl_result_t rc = cmd_open_account_keys(why, signing, box);
 
-    snprintf(prompt, sizeof prompt, "Password (%s): ", why);
-    if (cmd_read_password(prompt, pw, sizeof(pw)) != 0) {
-        cmd_wipe_password(pw, sizeof(pw));
+    if (rc == FL_RESULT_OK)
+        return 0;
+    if (rc == FL_RESULT_EOF)
         fl_color_error("keyquorum: password read failed");
-        return -1;
-    }
-    rc = fl_user_db_ensure_key(db, name, pw, &created);
-    if (rc == FL_RESULT_OK && created && fl_session_save_users() != FL_RESULT_OK) {
-        fl_user_db_forget_created(db, name, created);
-        rc = FL_RESULT_ERR;
-    }
-    if (rc == FL_RESULT_OK && signing)
-        rc = fl_user_db_open_key(db, name, pw, signing);
-    if (rc == FL_RESULT_OK && box)
-        rc = fl_user_db_open_box(db, name, pw, box);
-    cmd_wipe_password(pw, sizeof(pw));
-    if (rc == FL_RESULT_ACCES) {
+    else if (rc == FL_RESULT_ACCES)
         fl_color_error("keyquorum: incorrect password");
-        return -1;
-    }
-    if (rc != FL_RESULT_OK) {
-        fl_color_error("keyquorum: cannot open the keys of %s (%d)", name, (int)rc);
-        return -1;
-    }
-    return 0;
+    else
+        fl_color_error("keyquorum: cannot open the keys of %s (%d)", fl_session_current_user(),
+                       (int)rc);
+    return -1;
 }
 
 static void kq_utc_now(char *out, size_t cap)
@@ -618,6 +594,11 @@ static int kq_decode_and_ack(const cmd_server_ctx_t *ctx, int hosting,
     if (rc != FL_RESULT_OK || strcmp(sender.key_id, in->sender) != 0) {
         fl_kq_buf_free(&letter);
         fl_color_warn("keyquorum: cannot get %s's key from the host", in->sender);
+        return -1;
+    }
+    if (!fl_kq_cp_safe_name(in->file_name)) {
+        fl_kq_buf_free(&letter);
+        fl_color_warn("keyquorum: refused a delivery whose file name is not a plain name");
         return -1;
     }
     snprintf(dest, sizeof dest, "%s/%s", g_cwd, in->file_name);

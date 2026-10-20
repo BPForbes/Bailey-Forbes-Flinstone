@@ -10,6 +10,15 @@
 
 #include <stdlib.h>
 
+/* The P4-9 contract copies these from keyquorum_files.h; a submodule bump that changes one
+ * must fail the build, not the wire framing (the runtime probe checks only the linked ABI). */
+_Static_assert(FL_KQ_ABI_VERSION == KQ_FILE_ABI_VERSION,
+               "KeyQuorum header ABI differs from the P4-9 contract");
+_Static_assert(FL_KQ_DELIVERY_ID_LEN == KQ_FILE_DELIVERY_ID_LEN,
+               "delivery id length differs from KeyQuorum");
+_Static_assert(sizeof(kq_file_offer_t) == FL_KQ_OFFER_WIRE_LEN,
+               "kq_file_offer_t differs from the offer's wire length");
+
 void fl_kq_buf_free(fl_kq_buf_t *buf) {
     if (!buf)
         return;
@@ -21,18 +30,24 @@ void fl_kq_buf_free(fl_kq_buf_t *buf) {
     buf->len = 0;
 }
 
-/* Fills out from a KeyQuorum call that reports its size: first==KQ_FILE_NO_ROOM with
- * *need set, then fill. Any other first status is returned as is. */
-static int take_sized(int first, size_t need, fl_kq_buf_t *out, uint8_t **data) {
+/* After a KeyQuorum call that reports its size (first==KQ_FILE_NO_ROOM with need set),
+ * allocates need bytes into *data and *cap. Any other first status is returned as is. out is
+ * not touched here: it may alias an input of the second call. */
+static int take_sized(int first, size_t need, uint8_t **data, size_t *cap) {
     if (first != KQ_FILE_NO_ROOM)
         return first;
     *data = (uint8_t *)malloc(need ? need : 1u);
     if (!*data)
         return KQ_FILE_INVALID;
-    out->len = need;
+    *cap = need;
     return KQ_FILE_NO_ROOM;
 }
 
+/*
+ * Two-pass call: size, allocate, fill. out changes only after the second call succeeds, so an
+ * out that is also an input stays intact during the call and on failure; on success the
+ * buffer it held before (callers pass a zeroed or owned buffer) is wiped and freed.
+ */
 #define SIZED_CALL(out, call_with)                                        \
     do {                                                                  \
         size_t need_ = 0;                                                 \
@@ -40,19 +55,17 @@ static int take_sized(int first, size_t need, fl_kq_buf_t *out, uint8_t **data) 
         uint8_t *outp_ = NULL;                                            \
         size_t cap_ = 0;                                                  \
         int rc_ = (call_with);                                            \
-        rc_ = take_sized(rc_, need_, (out), &data_);                      \
+        rc_ = take_sized(rc_, need_, &data_, &cap_);                      \
         if (rc_ != KQ_FILE_NO_ROOM)                                       \
             return rc_;                                                   \
         outp_ = data_;                                                    \
-        cap_ = (out)->len;                                                \
         rc_ = (call_with);                                                \
         if (rc_ != KQ_FILE_OK) {                                          \
             asm_mem_secure_zero(data_, cap_);                             \
             free(data_);                                                  \
-            (out)->data = NULL;                                           \
-            (out)->len = 0;                                               \
             return rc_;                                                   \
         }                                                                 \
+        fl_kq_buf_free(out);                                              \
         (out)->data = data_;                                              \
         (out)->len = need_;                                               \
         return KQ_FILE_OK;                                                \

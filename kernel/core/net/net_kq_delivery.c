@@ -1,4 +1,6 @@
 #include "net_kq_delivery.h"
+
+#include "net_endian.h"
 #include "contract_p3_session_wire.h"
 #include "kq_checkpoint.h"
 #include "timekeeping.h"
@@ -68,14 +70,17 @@ static void w_bytes(kq_w_t *w, const void *src, size_t len) {
     w->n += len;
 }
 
+/* Integers go big-endian through net_endian.h (the asm_net_* store/load primitives). */
 static void w_u32(kq_w_t *w, uint32_t v) {
-    uint8_t b[4] = {(uint8_t)(v >> 24), (uint8_t)(v >> 16), (uint8_t)(v >> 8), (uint8_t)v};
+    uint8_t b[4];
+    fl_net_put_u32_be(b, v);
     w_bytes(w, b, 4);
 }
 
 static void w_u64(kq_w_t *w, uint64_t v) {
-    w_u32(w, (uint32_t)(v >> 32));
-    w_u32(w, (uint32_t)v);
+    uint8_t b[8];
+    fl_net_put_u64_be(b, v);
+    w_bytes(w, b, 8);
 }
 
 static void w_str(kq_w_t *w, const char *s) {
@@ -112,12 +117,13 @@ static void r_bytes(kq_r_t *r, void *dst, size_t len) {
 static uint32_t r_u32(kq_r_t *r) {
     uint8_t b[4] = {0};
     r_bytes(r, b, 4);
-    return ((uint32_t)b[0] << 24) | ((uint32_t)b[1] << 16) | ((uint32_t)b[2] << 8) | b[3];
+    return fl_net_get_u32_be(b);
 }
 
 static uint64_t r_u64(kq_r_t *r) {
-    uint64_t hi = r_u32(r);
-    return (hi << 32) | r_u32(r);
+    uint8_t b[8] = {0};
+    r_bytes(r, b, 8);
+    return fl_net_get_u64_be(b);
 }
 
 static void r_str(kq_r_t *r, char *out, size_t cap) {
@@ -346,7 +352,8 @@ static void host_offer(fl_net_server_t *srv, const fl_net_server_member_t *from,
     r_str(r, up.recipient, sizeof up.recipient);
     r_str(r, up.file_name, sizeof up.file_name);
     r_offer(r, &up.offer);
-    if (r->bad || r->n != 0 || len == 0 || len > FL_KQ_LETTER_MAX) {
+    if (r->bad || r->n != 0 || len == 0 || len > FL_KQ_LETTER_MAX ||
+        !fl_kq_cp_safe_name(up.file_name)) {
         host_refuse(srv, from, "delivery", "malformed offer");
         return;
     }
@@ -621,7 +628,9 @@ static void client_announce(kq_r_t *r) {
     r_str(r, in.sender, sizeof in.sender);
     r_str(r, in.file_name, sizeof in.file_name);
     r_offer(r, &in.offer);
-    if (r->bad || r->n != 0)
+    /* Names come from the wire: only plain ones are kept, printed or later joined to a path. */
+    if (r->bad || r->n != 0 || !fl_kq_cp_safe_name(in.file_name) ||
+        !fl_kq_cp_safe_name(in.sender))
         return;
     slot = inbox_find(in.id);
     if (slot) {

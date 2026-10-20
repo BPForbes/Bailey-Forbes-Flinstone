@@ -6,6 +6,7 @@
 #include "kq_delivery.h"
 
 #include <dirent.h>
+#include <sqlite3.h>
 #include <limits.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -93,6 +94,7 @@ static int test_ids_round_trip(void) {
 }
 
 static int test_store_round_trip_and_leak(void) {
+    size_t logged;
     fl_kq_store_t *s = NULL;
     fl_kq_delivery_t d, got, pending[4];
     uint8_t id[FL_KQ_DELIVERY_ID_LEN], id2[FL_KQ_DELIVERY_ID_LEN];
@@ -129,10 +131,31 @@ static int test_store_round_trip_and_leak(void) {
     fl_kq_delivery_init(&d, id2, "Root.Flinstone.Mya", "Root.Flinstone.Steve", "old.txt", NULL,
                         2000, 10);
     ASSERT(fl_kq_store_put(s, &d, letter, sizeof letter) == FL_RESULT_OK);
+    ASSERT(fl_kq_store_update(s, &d, FL_KQ_SPIKE_ANNOUNCE, "Root.Flinstone.Steve", 2001) ==
+           FL_RESULT_OK);
+    logged = fl_kq_store_spike_count(s, id2);
+    ASSERT(logged >= 1);
     ASSERT(fl_kq_store_leak(s, 2005) == 0);
+    /* While the database is locked elsewhere the leak changes nothing, the letter included. */
+    {
+        char db_path[sizeof s_dir + 32];
+        sqlite3 *other = NULL;
+
+        snprintf(db_path, sizeof db_path, "%s/kq_delivery.db", s_dir);
+        ASSERT(sqlite3_open(db_path, &other) == SQLITE_OK);
+        ASSERT(sqlite3_exec(other, "BEGIN EXCLUSIVE;", NULL, NULL, NULL) == SQLITE_OK);
+        ASSERT(fl_kq_store_leak(s, 2010) == 0);
+        ASSERT(sqlite3_exec(other, "ROLLBACK;", NULL, NULL, NULL) == SQLITE_OK);
+        sqlite3_close(other);
+        ASSERT(fl_kq_store_letter(s, id2, &held, &held_len) == FL_RESULT_OK);
+        free(held);
+        ASSERT(fl_kq_store_spike_count(s, id2) == logged);
+    }
     ASSERT(fl_kq_store_leak(s, 2010) == 1);
     ASSERT(fl_kq_store_get(s, id2, &got) == FL_RESULT_NOENT);
     ASSERT(fl_kq_store_letter(s, id2, &held, &held_len) == FL_RESULT_NOENT);
+    /* Its spike log goes with it: nothing is left behind for a delivery that no longer exists. */
+    ASSERT(fl_kq_store_spike_count(s, id2) == 0);
     /* A fired delivery never leaks. */
     ASSERT(fl_kq_store_leak(s, 999999) == 0);
     ASSERT(fl_kq_store_get(s, id, &got) == FL_RESULT_OK);
@@ -164,6 +187,21 @@ static int test_store_creates_missing_parents(void) {
     fl_kq_store_close(s);
     snprintf(letters, sizeof letters, "%s/kq_letters", nested);
     ASSERT(access(letters, F_OK) == 0);
+
+    /* A directory that cannot be created is an error, not a store opened half-way. */
+    {
+        char blocker[sizeof s_dir + 16];
+        char under[sizeof blocker + 16];
+        FILE *f;
+
+        snprintf(blocker, sizeof blocker, "%s/plainfile", s_dir);
+        f = fopen(blocker, "w");
+        ASSERT(f);
+        fclose(f);
+        snprintf(under, sizeof under, "%s/kq", blocker);
+        s = NULL;
+        ASSERT(fl_kq_store_open(under, &s) == FL_RESULT_ERR && s == NULL);
+    }
     return 0;
 }
 

@@ -1,4 +1,5 @@
 #include "kq_checkpoint.h"
+#include "server_shared_fs.h"
 
 #include <errno.h>
 #include <fcntl.h>
@@ -14,7 +15,11 @@
 /* Most labels a trust table holds (authors, signers, the owner). */
 #define KQ_TRUST_MAX 32u
 /* Most (revision, root) pairs remembered per file. */
-#define KQ_SEEN_MAX 1024u
+/* Accepted (revision, history root) pairs kept in <file>.kqseen: the newest ones only. Each
+ * accepted root extends the one before it, so the newest root still refuses forks and stale
+ * histories; a revision the previously accepted container already holds is refused
+ * separately (decode), so dropping old pairs never lets an old revision back in. */
+#define KQ_SEEN_KEEP 64u
 
 const char *fl_kq_cp_reason(fl_kq_cp_result_t r) {
     switch (r) {
@@ -50,6 +55,15 @@ const char *fl_kq_cp_reason(fl_kq_cp_result_t r) {
     }
 }
 
+int fl_kq_cp_safe_name(const char *name) {
+    if (!name || !name[0] || !strcmp(name, ".") || !strcmp(name, ".."))
+        return 0;
+    for (const unsigned char *p = (const unsigned char *)name; *p; p++)
+        if (*p == '/' || *p == '\\' || *p < 0x20u || *p == 0x7Fu)
+            return 0;
+    return 1;
+}
+
 fl_result_t fl_kq_cp_to_result(fl_kq_cp_result_t r) {
     switch (r) {
     case FL_KQ_CP_OK:
@@ -81,7 +95,7 @@ void fl_kq_encoded_free(fl_kq_encoded_t *enc) {
 
 static int read_all(const char *path, size_t max, fl_kq_buf_t *out) {
     FILE *f = fopen(path, "rb");
-    long n;
+    long n = -1; /* read below even when the first seek fails */
 
     out->data = NULL;
     out->len = 0;
@@ -104,47 +118,7 @@ static int read_all(const char *path, size_t max, fl_kq_buf_t *out) {
 }
 
 /* Write through a sibling and rename, so a reader never sees half a file. */
-#define KQ_PATH_MAX (4096 + 16)
-
-/* Writes data to <path>.part (owner-only, synced); nothing is left behind on failure. */
-static int stage_part(const char *path, const uint8_t *data, size_t len) {
-    char tmp[KQ_PATH_MAX];
-    int fd;
-    size_t off = 0;
-
-    if (snprintf(tmp, sizeof tmp, "%s.part", path) >= (int)sizeof tmp)
-        return -1;
-    fd = open(tmp, O_WRONLY | O_CREAT | O_TRUNC, 0600);
-    if (fd < 0)
-        return -1;
-    while (off < len) {
-        ssize_t w = write(fd, data + off, len - off);
-        if (w <= 0) {
-            close(fd);
-            unlink(tmp);
-            return -1;
-        }
-        off += (size_t)w;
-    }
-    if (fsync(fd) != 0 || close(fd) != 0) {
-        unlink(tmp);
-        return -1;
-    }
-    return 0;
-}
-
-static int write_atomic(const char *path, const uint8_t *data, size_t len) {
-    char tmp[KQ_PATH_MAX];
-
-    if (snprintf(tmp, sizeof tmp, "%s.part", path) >= (int)sizeof tmp ||
-        stage_part(path, data, len) != 0)
-        return -1;
-    if (rename(tmp, path) != 0) {
-        unlink(tmp);
-        return -1;
-    }
-    return 0;
-}
+#define KQ_PATH_MAX FL_FS_PATH_MAX
 
 typedef struct {
     const char    *path;
@@ -169,7 +143,7 @@ static int commit_all(const kq_out_t *out, size_t n) {
     if (n > sizeof had / sizeof had[0])
         return -1;
     for (i = 0; i < n; i++) {
-        if (stage_part(out[i].path, out[i].data, out[i].len) != 0)
+        if (fl_fs_stage_file(out[i].path, out[i].data, out[i].len) != 0)
             break;
     }
     if (i < n) {
@@ -364,7 +338,7 @@ fl_kq_cp_result_t fl_kq_cp_encode(const fl_user_db_t *users, const char *sender_
         goto done;
     }
     /* The new revision is kept beside the file only once it is sealed. */
-    if (write_atomic(container_path, next.data, next.len) != 0) {
+    if (fl_fs_write_file_atomic(container_path, next.data, next.len) != 0) {
         rc = FL_KQ_CP_IO;
         goto done;
     }
@@ -425,20 +399,56 @@ fl_kq_cp_result_t fl_kq_cp_cosign(const kq_file_offer_t *offer, const char *me_k
                                                                          : FL_KQ_CP_NOT_RECIPIENT;
 }
 
+/* Loads the newest KQ_SEEN_KEEP pairs; a longer file (older builds kept more) is read from
+ * its tail. A missing file is an empty record; a damaged one (not whole pairs) is -1. */
 static int load_seen(const char *path, uint8_t (**seen)[64], size_t *n) {
-    fl_kq_buf_t raw = {0};
+    FILE *f;
+    long size;
+    size_t want;
+    uint8_t (*buf)[64];
 
     *seen = NULL;
     *n = 0;
-    if (read_all(path, KQ_SEEN_MAX * 64u, &raw) != 0)
+    f = fopen(path, "rb");
+    if (!f)
         return access(path, F_OK) == 0 ? -1 : 0;
-    if (raw.len % 64u != 0) {
-        fl_kq_buf_free(&raw);
+    if (fseek(f, 0, SEEK_END) != 0 || (size = ftell(f)) < 0 || size % 64 != 0) {
+        fclose(f);
         return -1;
     }
-    *n = raw.len / 64u;
-    *seen = (uint8_t (*)[64])raw.data;
+    want = (size_t)size / 64u;
+    if (want > KQ_SEEN_KEEP)
+        want = KQ_SEEN_KEEP;
+    if (want == 0) {
+        fclose(f);
+        return 0;
+    }
+    buf = (uint8_t (*)[64])malloc(want * 64u);
+    if (!buf || fseek(f, size - (long)(want * 64u), SEEK_SET) != 0 ||
+        fread(buf, 64u, want, f) != want) {
+        free(buf);
+        fclose(f);
+        return -1;
+    }
+    fclose(f);
+    *seen = buf;
+    *n = want;
     return 0;
+}
+
+/* True when the previously accepted container beside the file already holds rev. */
+static int local_holds(const fl_kq_driver_t *drv, const char *container_path,
+                       const uint8_t rev[32]) {
+    fl_kq_buf_t local = {0};
+    fl_kq_buf_t held = {0};
+    int holds;
+
+    if (read_all(container_path, FL_KQ_LETTER_MAX, &local) != 0)
+        return 0;
+    holds = drv->payload(&local, rev, &held) == KQ_FILE_OK;
+    fl_kq_buf_free(&held);
+    fl_kq_buf_free(&local);
+    return holds;
 }
 
 fl_kq_cp_result_t fl_kq_cp_decode(const fl_user_db_t *users, const char *sender_key,
@@ -515,6 +525,12 @@ fl_kq_cp_result_t fl_kq_cp_decode(const fl_user_db_t *users, const char *sender_
         rc = FL_KQ_CP_NOT_NEWER;
         goto done;
     }
+    /* Only the newest pairs are kept, so "adds a revision" is also checked against everything
+     * accepted before: a revision the local container holds is never newer. */
+    if (st == KQ_FILE_NEWER && local_holds(drv, container_path, rev)) {
+        rc = FL_KQ_CP_NOT_NEWER;
+        goto done;
+    }
 
     if (drv->payload(&cosigned, rev, &payload) != KQ_FILE_OK) {
         rc = FL_KQ_CP_INVALID;
@@ -525,7 +541,9 @@ fl_kq_cp_result_t fl_kq_cp_decode(const fl_user_db_t *users, const char *sender_
     memcpy(pair, rev, 32);
     memcpy(pair + 32, root, 32);
     {
-        size_t len = (nseen + 1u) * 64u;
+        /* The newest KQ_SEEN_KEEP - 1 pairs and this one: the record never grows past the cap. */
+        size_t keep = nseen < KQ_SEEN_KEEP ? nseen : KQ_SEEN_KEEP - 1u;
+        size_t len = (keep + 1u) * 64u;
         uint8_t *all = (uint8_t *)malloc(len);
         kq_out_t out[3];
 
@@ -533,9 +551,9 @@ fl_kq_cp_result_t fl_kq_cp_decode(const fl_user_db_t *users, const char *sender_
             rc = FL_KQ_CP_IO;
             goto done;
         }
-        if (nseen)
-            memcpy(all, seen, nseen * 64u);
-        memcpy(all + nseen * 64u, pair, 64u);
+        if (keep)
+            memcpy(all, seen + (nseen - keep), keep * 64u);
+        memcpy(all + keep * 64u, pair, 64u);
         out[0] = (kq_out_t){dest_path, payload.data, payload.len};
         out[1] = (kq_out_t){container_path, cosigned.data, cosigned.len};
         out[2] = (kq_out_t){seen_path, all, len};

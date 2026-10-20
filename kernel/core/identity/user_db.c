@@ -805,7 +805,9 @@ fl_result_t fl_user_db_change_password(fl_user_db_t *db, const char *name,
     /* The box key moves to the new password the same way, or is created now. */
     if (rc == FL_RESULT_OK && u->has_key && !u->has_box)
         rc = provision_box(&updated, password);
-    else if (rc == FL_RESULT_OK && u->has_box &&
+    /* Only a box key carried forward is resealed: without a signing key, provision_key above
+     * already made a new box pair, which must not be overwritten with the old secret. */
+    else if (rc == FL_RESULT_OK && u->has_key && u->has_box &&
              (kq_account_open(current, u->box_sealed, sizeof u->box_sealed, secret) !=
                   KQ_ACCOUNT_OK ||
               kq_account_seal(password, secret, updated.box_sealed, sizeof updated.box_sealed,

@@ -46,7 +46,7 @@ signatures and keeps time; it never holds a decryption key.
                                                                               not forked; freshness vs .kqseen
                                                                               write f, f.kqtf, f.kqseen
                                     ◄──────────────────────────────────── ACK → letter deleted
-  never co-signed before expiry: the neuron leaks, the letter is deleted, the log stays
+  never co-signed before expiry: the neuron leaks; its record, spike log and letter are deleted
 ```
 
 ### The VAE / SNN shape
@@ -101,15 +101,21 @@ length-prefixed, every read bounds-checked.
   refused; a file over `FL_KQ_LETTER_MAX` (4 MiB sealed) is refused.
 - **Host.** The offer comes from the member's own account (fixed at `server host` or
   `server join`; a later `su` does not change it); the recipient exists and has a box key; the
-  author signature verifies against the host's account store; the delivery id is new; only the
-  recipient may co-sign and their signature verifies; release happens once; expiry is the
-  host's clock.
+  author signature verifies against the host's account store; the delivery id is new; the file
+  name is a plain name (`fl_kq_cp_safe_name`: not empty, `.` or `..`, no `/`, `\` or control
+  bytes); each member has at most one unfinished upload, idle uploads are dropped after 60 s;
+  only the recipient may co-sign and their signature verifies; release happens once; expiry is
+  the host's clock, and an expired delivery is removed with its spike log in one transaction.
 - **Recipient.** The letter opens with their box key and is signed by the sender's registered
   key; it carries exactly the offered revision; the co-author proof attaches; the revision is
   trusted under the file's policy; the file is not forked; it is not a replay and not older
-  than the copy held (`.kqseen`). An untracked file at the destination is never overwritten:
-  that refusal keeps the delivery so it can be opened elsewhere. Any other refusal is
-  acknowledged as refused and the host deletes the letter.
+  than the copy held. `.kqseen` keeps the newest 64 accepted (revision, history root) pairs;
+  each accepted root extends the one before it, so the newest still refuses forks and stale
+  histories, and a revision the previously accepted `.kqtf` already holds is never newer.
+  An announcement whose sender or file name is not a plain name is dropped unshown. The file,
+  its `.kqtf` and `.kqseen` are written together or not at all. An untracked file at the
+  destination is never overwritten: that refusal keeps the delivery so it can be opened
+  elsewhere. Any other refusal is acknowledged as refused and the host deletes the letter.
 
 ### Limits
 

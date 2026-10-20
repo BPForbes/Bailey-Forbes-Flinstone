@@ -125,6 +125,28 @@ static int test_driver_probe(void) {
     return 0;
 }
 
+/* An output that is also the input stays intact during the call and is replaced on success. */
+static int test_driver_output_may_alias_its_input(void) {
+    const fl_kq_driver_t *drv = fl_kq_driver_get();
+    world_t w;
+    fl_kq_buf_t c = {0};
+    uint8_t file_id[16], rev[32], head[32];
+    const uint8_t text[] = "in place\n";
+
+    ASSERT(drv && setup(&w) == 0);
+    memset(file_id, 0x5A, sizeof file_id);
+    ASSERT(drv->file_new(file_id, "alias.txt", MYA, &c) == KQ_FILE_OK);
+    ASSERT(drv->check_in(&c, MYA, T1, text, sizeof text - 1, w.mya_sign, &c, rev) == KQ_FILE_OK);
+    ASSERT(drv->verify(&c, NULL) == KQ_FILE_OK);
+    ASSERT(drv->head(&c, head) == KQ_FILE_OK && memcmp(head, rev, 32) == 0);
+    /* A failed call leaves the aliased buffer as it was. */
+    ASSERT(drv->check_in(&c, "", T2, text, sizeof text - 1, w.mya_sign, &c, rev) != KQ_FILE_OK);
+    ASSERT(c.data && drv->verify(&c, NULL) == KQ_FILE_OK);
+    fl_kq_buf_free(&c);
+    teardown(&w);
+    return 0;
+}
+
 static int test_co_signed_delivery(void) {
     world_t w;
     fl_kq_encoded_t enc;
@@ -281,6 +303,102 @@ static int test_a_damaged_history_is_refused(void) {
     return 0;
 }
 
+/* More accepted revisions than the record keeps: it stays bounded, and neither an old letter
+ * nor the newest container naming an old revision (a rollback) is accepted. */
+static int test_the_seen_record_stays_bounded(void) {
+    enum { DELIVERIES = 70, KEEP = 64 };
+    const fl_kq_driver_t *drv = fl_kq_driver_get();
+    world_t w;
+    fl_kq_encoded_t first, enc;
+    char src[PATH_MAX], dest[PATH_MAX], seen[PATH_MAX + 16], side[PATH_MAX + 16];
+    char text[32], got[32], at[40];
+    uint8_t sig[64];
+    const unsigned char *mya_pub;
+    struct stat st;
+
+    ASSERT(drv && setup(&w) == 0);
+    mya_pub = fl_user_db_signing_public(&w.db, MYA);
+    path_in(src, sizeof src, "bounded.txt");
+    path_in(dest, sizeof dest, "steve-bounded.txt");
+    snprintf(seen, sizeof seen, "%s%s", dest, FL_KQ_SEEN_SUFFIX);
+    snprintf(side, sizeof side, "%s%s", src, FL_KQ_CONTAINER_SUFFIX);
+    for (int i = 0; i < DELIVERIES; i++) {
+        snprintf(text, sizeof text, "v%d\n", i);
+        snprintf(at, sizeof at, "2026-10-20T09:%02d:%02d.000Z", i / 60, i % 60);
+        ASSERT(write_text(src, text) == 0);
+        ASSERT(fl_kq_cp_encode(&w.db, MYA, w.mya_sign, STEVE, fl_user_db_box_public(&w.db, STEVE),
+                               src, at, &enc) == FL_KQ_CP_OK);
+        ASSERT(fl_kq_cp_cosign(&enc.offer, STEVE, w.steve_sign, sig) == FL_KQ_CP_OK);
+        ASSERT(fl_kq_cp_decode(&w.db, MYA, mya_pub, STEVE, w.steve_box, &enc.letter, &enc.offer,
+                               sig, dest) == FL_KQ_CP_OK);
+        if (i == 0)
+            first = enc;
+        else
+            fl_kq_encoded_free(&enc);
+    }
+    ASSERT(stat(seen, &st) == 0 && st.st_size == KEEP * 64);
+    ASSERT(read_text(dest, got, sizeof got) == 0 && strcmp(got, "v69\n") == 0);
+
+    /* The first letter again: its pair has been dropped, and it is still refused. */
+    ASSERT(fl_kq_cp_cosign(&first.offer, STEVE, w.steve_sign, sig) == FL_KQ_CP_OK);
+    ASSERT(fl_kq_cp_decode(&w.db, MYA, mya_pub, STEVE, w.steve_box, &first.letter, &first.offer,
+                           sig, dest) == FL_KQ_CP_NOT_NEWER);
+
+    /* A rollback: Mya's newest container, sealed for her first revision. Sealing carries only
+     * that revision and its ancestors, so the newest kept pairs already refuse it; decode's
+     * local_holds check also covers a crafted letter that keeps the newer revisions. */
+    {
+        FILE *f = fopen(side, "rb");
+        fl_kq_buf_t c = {0}, letter = {0};
+        kq_file_key_t key;
+        kq_file_trust_t trust;
+        kq_file_offer_t offer;
+        uint8_t id[16];
+        long n;
+
+        ASSERT(f && fseek(f, 0, SEEK_END) == 0 && (n = ftell(f)) > 0 && fseek(f, 0, SEEK_SET) == 0);
+        c.data = (uint8_t *)malloc((size_t)n);
+        ASSERT(c.data && fread(c.data, 1, (size_t)n, f) == (size_t)n);
+        fclose(f);
+        c.len = (size_t)n;
+        key.label = MYA;
+        memcpy(key.signing_public, mya_pub, 32);
+        trust.keys = &key;
+        trust.nkeys = 1;
+        ASSERT(drv->offer(&c, first.offer.revision_id, &offer) == KQ_FILE_OK);
+        ASSERT(drv->seal(&c, first.offer.revision_id, &trust, MYA, w.mya_sign,
+                         fl_user_db_box_public(&w.db, MYA), STEVE,
+                         fl_user_db_box_public(&w.db, STEVE), &letter, id) == KQ_FILE_OK);
+        ASSERT(fl_kq_cp_cosign(&offer, STEVE, w.steve_sign, sig) == FL_KQ_CP_OK);
+        ASSERT(fl_kq_cp_decode(&w.db, MYA, mya_pub, STEVE, w.steve_box, &letter, &offer, sig,
+                               dest) == FL_KQ_CP_NOT_NEWER);
+        ASSERT(read_text(dest, got, sizeof got) == 0 && strcmp(got, "v69\n") == 0);
+        fl_kq_buf_free(&letter);
+        fl_kq_buf_free(&c);
+    }
+    ASSERT(stat(seen, &st) == 0 && st.st_size == KEEP * 64);
+    fl_kq_encoded_free(&first);
+    teardown(&w);
+    return 0;
+}
+
+static int test_only_plain_file_names_are_safe(void) {
+    ASSERT(fl_kq_cp_safe_name("plan.txt"));
+    ASSERT(fl_kq_cp_safe_name("Root.Flinstone.Mya"));
+    ASSERT(!fl_kq_cp_safe_name(NULL));
+    ASSERT(!fl_kq_cp_safe_name(""));
+    ASSERT(!fl_kq_cp_safe_name("."));
+    ASSERT(!fl_kq_cp_safe_name(".."));
+    ASSERT(!fl_kq_cp_safe_name("../../.bashrc"));
+    ASSERT(!fl_kq_cp_safe_name("/etc/passwd"));
+    ASSERT(!fl_kq_cp_safe_name("dir/file"));
+    ASSERT(!fl_kq_cp_safe_name("dir\\file"));
+    ASSERT(!fl_kq_cp_safe_name("bell\a"));
+    ASSERT(!fl_kq_cp_safe_name("esc\x1b[2Jx"));
+    ASSERT(!fl_kq_cp_safe_name("del\x7f"));
+    return 0;
+}
+
 static int test_reasons_and_results(void) {
     ASSERT(strcmp(fl_kq_cp_reason(FL_KQ_CP_FORKED), "file forked; merge required") == 0);
     ASSERT(fl_kq_cp_to_result(FL_KQ_CP_OK) == FL_RESULT_OK);
@@ -302,10 +420,13 @@ int main(void) {
         else printf("%s... OK\n", #t); \
     } while (0)
     RUN(test_driver_probe);
+    RUN(test_driver_output_may_alias_its_input);
     RUN(test_co_signed_delivery);
     RUN(test_untracked_destination_is_never_overwritten);
     RUN(test_a_failed_write_installs_nothing);
     RUN(test_a_damaged_history_is_refused);
+    RUN(test_the_seen_record_stays_bounded);
+    RUN(test_only_plain_file_names_are_safe);
     RUN(test_reasons_and_results);
     rmrf(s_dir);
     if (rc == 0)
