@@ -50,6 +50,13 @@ tests/test_batch_argv_issue220
 tests/test_threadpool_issue222
 tests/test_disk_hex_issue222
 tests/test_netlab_sim
+tests/test_kq_checkpoint
+tests/test_kq_delivery
+tests/test_kq_net
+tests/test_part_buf
+tests/test_server_file_meta
+tests/test_server_file_accept_path
+tests/test_channel_sidecar
 
 # Fetched/built deps
 deps/install

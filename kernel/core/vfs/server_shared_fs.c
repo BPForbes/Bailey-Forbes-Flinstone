@@ -6,6 +6,7 @@
 
 #include <dirent.h>
 #include <errno.h>
+#include <fcntl.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -14,15 +15,21 @@
 
 #define FL_SERVER_SHARED_META_SUFFIX ".meta"
 
-static int mkdir_p(const char *path, mode_t mode)
+int fl_fs_mkdir_p(const char *path, mode_t mode)
 {
-    char tmp[512];
+    char tmp[FL_FS_PATH_MAX];
     size_t len;
-    if (!path || !path[0])
+
+    if (!path || !path[0]) {
+        errno = EINVAL;
         return -1;
-    strncpy(tmp, path, sizeof(tmp) - 1u);
-    tmp[sizeof(tmp) - 1u] = '\0';
-    len = strlen(tmp);
+    }
+    len = strlen(path);
+    if (len >= sizeof(tmp)) {
+        errno = ENAMETOOLONG;
+        return -1;
+    }
+    memcpy(tmp, path, len + 1u);
     while (len > 1 && tmp[len - 1] == '/')
         tmp[--len] = '\0';
     for (size_t i = 1; i < len; i++) {
@@ -35,6 +42,47 @@ static int mkdir_p(const char *path, mode_t mode)
     }
     if (mkdir(tmp, mode) != 0 && errno != EEXIST)
         return -1;
+    return 0;
+}
+
+int fl_fs_stage_file(const char *path, const uint8_t *data, size_t len)
+{
+    char tmp[FL_FS_PATH_MAX];
+    int fd;
+    size_t off = 0;
+
+    if (!path || (len && !data) || snprintf(tmp, sizeof tmp, "%s.part", path) >= (int)sizeof tmp)
+        return -1;
+    fd = open(tmp, O_WRONLY | O_CREAT | O_TRUNC, 0600);
+    if (fd < 0)
+        return -1;
+    while (off < len) {
+        ssize_t w = write(fd, data + off, len - off);
+        if (w <= 0) {
+            close(fd);
+            unlink(tmp);
+            return -1;
+        }
+        off += (size_t)w;
+    }
+    if (fsync(fd) != 0 || close(fd) != 0) {
+        unlink(tmp);
+        return -1;
+    }
+    return 0;
+}
+
+int fl_fs_write_file_atomic(const char *path, const uint8_t *data, size_t len)
+{
+    char tmp[FL_FS_PATH_MAX];
+
+    if (!path || snprintf(tmp, sizeof tmp, "%s.part", path) >= (int)sizeof tmp ||
+        fl_fs_stage_file(path, data, len) != 0)
+        return -1;
+    if (rename(tmp, path) != 0) {
+        unlink(tmp);
+        return -1;
+    }
     return 0;
 }
 
@@ -286,9 +334,9 @@ fl_result_t fl_server_shared_init(void)
         return FL_RESULT_ERR;
     if (join_path(expired, sizeof(expired), root, FL_SERVER_SHARED_EXPIRED_DIR_NAME) != 0)
         return FL_RESULT_ERR;
-    if (mkdir_p(root, 0700) != 0)
+    if (fl_fs_mkdir_p(root, 0700) != 0)
         return FL_RESULT_ERR;
-    if (mkdir_p(expired, 0700) != 0)
+    if (fl_fs_mkdir_p(expired, 0700) != 0)
         return FL_RESULT_ERR;
     (void)fl_server_catalog_open();
     return FL_RESULT_OK;
@@ -404,7 +452,7 @@ fl_result_t fl_server_shared_overwrite_local(const fl_server_file_offer_t *offer
     slash = strrchr(parent, '/');
     if (slash && slash != parent) {
         *slash = '\0';
-        if (mkdir_p(parent, 0700) != 0 && errno != EEXIST)
+        if (fl_fs_mkdir_p(parent, 0700) != 0 && errno != EEXIST)
             return FL_RESULT_ERR;
     }
     fp = fopen(safe_path, "wb");
@@ -435,7 +483,7 @@ fl_result_t fl_server_shared_purge_expired(uint64_t now)
     if (join_path(expired_root, sizeof(expired_root), root,
                   FL_SERVER_SHARED_EXPIRED_DIR_NAME) != 0)
         return FL_RESULT_ERR;
-    if (mkdir_p(expired_root, 0700) != 0 && errno != EEXIST)
+    if (fl_fs_mkdir_p(expired_root, 0700) != 0 && errno != EEXIST)
         return FL_RESULT_ERR;
     d = opendir(root);
     if (!d)

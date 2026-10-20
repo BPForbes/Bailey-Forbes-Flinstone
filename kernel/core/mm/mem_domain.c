@@ -198,6 +198,10 @@ void mem_domain_zero(void *ptr, size_t n) {
     asm_mem_zero(ptr, n);
 }
 
+void mem_domain_secure_zero(void *ptr, size_t n) {
+    asm_mem_secure_zero(ptr, n);
+}
+
 void mem_domain_fill(void *ptr, unsigned char byte, size_t n) {
     asm_block_fill(ptr, byte, n);
 }

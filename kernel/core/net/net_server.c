@@ -1201,6 +1201,12 @@ static void drop_member(fl_net_server_t *srv, fl_net_server_member_t *m) {
     (void)fl_net_server_broadcast_member_list(srv);
 }
 
+static fl_net_server_kq_hook_fn s_kq_hook;
+
+void fl_net_server_set_kq_hook(fl_net_server_kq_hook_fn hook) {
+    s_kq_hook = hook;
+}
+
 /* One incoming frame from member `m`. Returns 1 when the member should be
  * dropped, 0 otherwise. */
 static int dispatch_member_frame(fl_net_server_t *srv, fl_net_server_member_t *m,
@@ -1317,6 +1323,10 @@ static int dispatch_member_frame(fl_net_server_t *srv, fl_net_server_member_t *m
             return 0;
         if (fl_net_session_is_file_opcode(opcode)) {
             (void)fl_net_file_host_relay(srv, m->member_id, opcode, payload, plen);
+            return 0;
+        }
+        if (fl_net_session_is_kq_opcode(opcode) && s_kq_hook) {
+            s_kq_hook(srv, m, opcode, payload, plen);
             return 0;
         }
         return 0;

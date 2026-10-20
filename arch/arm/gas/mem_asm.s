@@ -7,6 +7,8 @@
 .globl asm_mem_copy
 .globl asm_mem_zero
 .globl asm_block_fill
+.globl asm_mem_secure_zero
+.globl asm_mem_ct_equal
 
 /* void asm_mem_copy(void *dst, const void *src, size_t n) */
 asm_mem_copy:
@@ -70,4 +72,32 @@ asm_block_fill:
     subs    x3, x3, #1
     b.ne    .L_fill_byte_loop
 .L_fill_done:
+    ret
+
+/* void asm_mem_secure_zero(void *ptr, size_t n)
+ * Wipes a secret: extends asm_mem_zero (the parent does the stores) with dmb ish.
+ * x29/x30 are saved because the call to the parent clobbers the link register. */
+asm_mem_secure_zero:
+    stp     x29, x30, [sp, #-16]!
+    mov     x29, sp
+    bl      asm_mem_zero
+    dmb     ish
+    ldp     x29, x30, [sp], #16
+    ret
+
+/* int asm_mem_ct_equal(const void *a, const void *b, size_t n)
+ * 1 when equal, else 0. Constant time in n: no early exit. */
+asm_mem_ct_equal:
+    mov     w3, #0
+    cbz     x2, .L_cteq_done
+.L_cteq_loop:
+    ldrb    w4, [x0], #1
+    ldrb    w5, [x1], #1
+    eor     w4, w4, w5
+    orr     w3, w3, w4
+    subs    x2, x2, #1
+    b.ne    .L_cteq_loop
+.L_cteq_done:
+    cmp     w3, #0
+    cset    w0, eq
     ret

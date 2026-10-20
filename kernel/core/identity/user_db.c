@@ -3,6 +3,7 @@
 #include "keyquorum_identity.h"
 #include "password_hash.h"
 #include "mem_domain.h"
+#include "fl/mem_asm.h"
 #include <limits.h>
 #include <sqlite3.h>
 #include <stdio.h>
@@ -34,7 +35,9 @@ static fl_result_t db_init_schema(sqlite3 *sql) {
         "  created_by TEXT NOT NULL DEFAULT '',"
         "  created_at INTEGER NOT NULL DEFAULT 0,"
         "  signing_public TEXT NOT NULL DEFAULT '',"
-        "  signing_sealed TEXT NOT NULL DEFAULT ''"
+        "  signing_sealed TEXT NOT NULL DEFAULT '',"
+        "  box_public TEXT NOT NULL DEFAULT '',"
+        "  box_sealed TEXT NOT NULL DEFAULT ''"
         ");"
         "CREATE TABLE IF NOT EXISTS meta ("
         "  key TEXT PRIMARY KEY NOT NULL,"
@@ -46,9 +49,12 @@ static fl_result_t db_init_schema(sqlite3 *sql) {
         "ALTER TABLE users ADD COLUMN created_at INTEGER NOT NULL DEFAULT 0;",
         "ALTER TABLE users ADD COLUMN signing_public TEXT NOT NULL DEFAULT '';",
         "ALTER TABLE users ADD COLUMN signing_sealed TEXT NOT NULL DEFAULT '';",
+        "ALTER TABLE users ADD COLUMN box_public TEXT NOT NULL DEFAULT '';",
+        "ALTER TABLE users ADD COLUMN box_sealed TEXT NOT NULL DEFAULT '';",
     };
-    static const char *const heritage_names[] = {"key_id", "created_by", "created_at",
-                                                 "signing_public", "signing_sealed"};
+    static const char *const heritage_names[] = {"key_id",         "created_by",     "created_at",
+                                                 "signing_public", "signing_sealed", "box_public",
+                                                 "box_sealed"};
     enum { N_COLUMNS = sizeof(heritage_names) / sizeof(heritage_names[0]) };
     int have[N_COLUMNS] = {0};
     sqlite3_stmt *st = NULL;
@@ -155,7 +161,30 @@ static int from_hex(const char *hex, unsigned char *out, size_t len) {
     return 0;
 }
 
-/* A new signing key for u, sealed under password. */
+/* A new box key for u (what file letters are sealed to), sealed under password. */
+static fl_result_t provision_box(fl_user_record_t *u, const char *password) {
+    unsigned char secret[FL_USER_SIGNING_SECRET_LEN];
+    unsigned char sealed[FL_USER_SIGNING_SEALED_LEN];
+    size_t sealed_len = 0;
+    fl_result_t rc = FL_RESULT_ERR;
+
+    if (kq_account_box_keygen(secret, u->box_public) == KQ_ACCOUNT_OK &&
+        kq_account_seal(password, secret, sealed, sizeof sealed, &sealed_len) == KQ_ACCOUNT_OK &&
+        sealed_len == sizeof sealed) {
+        memcpy(u->box_sealed, sealed, sizeof sealed);
+        u->has_box = 1;
+        rc = FL_RESULT_OK;
+    }
+    mem_domain_secure_zero(secret, sizeof secret);
+    if (rc != FL_RESULT_OK) {
+        u->has_box = 0;
+        mem_domain_zero(u->box_public, sizeof u->box_public);
+        mem_domain_zero(u->box_sealed, sizeof u->box_sealed);
+    }
+    return rc;
+}
+
+/* A new signing key and box key for u, both sealed under password. */
 static fl_result_t provision_key(fl_user_record_t *u, const char *password) {
     unsigned char secret[FL_USER_SIGNING_SECRET_LEN];
     unsigned char sealed[FL_USER_SIGNING_SEALED_LEN];
@@ -170,6 +199,8 @@ static fl_result_t provision_key(fl_user_record_t *u, const char *password) {
         rc = FL_RESULT_OK;
     }
     mem_domain_zero(secret, sizeof secret);
+    if (rc == FL_RESULT_OK)
+        rc = provision_box(u, password);
     if (rc != FL_RESULT_OK) {
         u->has_key = 0;
         mem_domain_zero(u->signing_public, sizeof u->signing_public);
@@ -182,17 +213,24 @@ static fl_result_t db_upsert_user(sqlite3 *sql, const fl_user_record_t *u) {
     sqlite3_stmt *st = NULL;
     char public_hex[2 * FL_USER_SIGNING_PUBLIC_LEN + 1] = "";
     char sealed_hex[2 * FL_USER_SIGNING_SEALED_LEN + 1] = "";
+    char box_public_hex[2 * FL_USER_SIGNING_PUBLIC_LEN + 1] = "";
+    char box_sealed_hex[2 * FL_USER_SIGNING_SEALED_LEN + 1] = "";
     const char *ins =
         "INSERT INTO users(name,password_hash,salt_hex,uid,is_elevated,key_id,created_by,created_at,"
-        "signing_public,signing_sealed) "
-        "VALUES(?,?,?,?,?,?,?,?,?,?) "
+        "signing_public,signing_sealed,box_public,box_sealed) "
+        "VALUES(?,?,?,?,?,?,?,?,?,?,?,?) "
         "ON CONFLICT(name) DO UPDATE SET password_hash=excluded.password_hash,"
         "salt_hex=excluded.salt_hex,uid=excluded.uid,is_elevated=excluded.is_elevated,"
         "key_id=excluded.key_id,created_by=excluded.created_by,created_at=excluded.created_at,"
-        "signing_public=excluded.signing_public,signing_sealed=excluded.signing_sealed;";
+        "signing_public=excluded.signing_public,signing_sealed=excluded.signing_sealed,"
+        "box_public=excluded.box_public,box_sealed=excluded.box_sealed;";
     if (u->has_key) {
         to_hex(u->signing_public, sizeof u->signing_public, public_hex);
         to_hex(u->signing_sealed, sizeof u->signing_sealed, sealed_hex);
+    }
+    if (u->has_box) {
+        to_hex(u->box_public, sizeof u->box_public, box_public_hex);
+        to_hex(u->box_sealed, sizeof u->box_sealed, box_sealed_hex);
     }
     if (sqlite3_prepare_v2(sql, ins, -1, &st, NULL) != SQLITE_OK)
         return FL_RESULT_ERR;
@@ -206,6 +244,8 @@ static fl_result_t db_upsert_user(sqlite3 *sql, const fl_user_record_t *u) {
     sqlite3_bind_int64(st, 8, (sqlite3_int64)u->created_at);
     sqlite3_bind_text(st, 9, public_hex, -1, SQLITE_TRANSIENT);
     sqlite3_bind_text(st, 10, sealed_hex, -1, SQLITE_TRANSIENT);
+    sqlite3_bind_text(st, 11, box_public_hex, -1, SQLITE_TRANSIENT);
+    sqlite3_bind_text(st, 12, box_sealed_hex, -1, SQLITE_TRANSIENT);
     if (sqlite3_step(st) != SQLITE_DONE) {
         sqlite3_finalize(st);
         return FL_RESULT_ERR;
@@ -217,7 +257,7 @@ static fl_result_t db_upsert_user(sqlite3 *sql, const fl_user_record_t *u) {
 static fl_result_t db_load_users(sqlite3 *sql, fl_user_db_t *db) {
     sqlite3_stmt *st = NULL;
     const char *q = "SELECT name,password_hash,salt_hex,uid,is_elevated,key_id,created_by,created_at,"
-                    "signing_public,signing_sealed FROM users ORDER BY uid;";
+                    "signing_public,signing_sealed,box_public,box_sealed FROM users ORDER BY uid;";
     if (sqlite3_prepare_v2(sql, q, -1, &st, NULL) != SQLITE_OK)
         return FL_RESULT_ERR;
     db->count = 0;
@@ -267,6 +307,14 @@ static fl_result_t db_load_users(sqlite3 *sql, fl_user_db_t *db) {
             if (!u->has_key) {
                 mem_domain_zero(u->signing_public, sizeof u->signing_public);
                 mem_domain_zero(u->signing_sealed, sizeof u->signing_sealed);
+            }
+            u->has_box = from_hex((const char *)sqlite3_column_text(st, 10), u->box_public,
+                                  sizeof u->box_public) == 0 &&
+                         from_hex((const char *)sqlite3_column_text(st, 11), u->box_sealed,
+                                  sizeof u->box_sealed) == 0;
+            if (!u->has_box) {
+                mem_domain_zero(u->box_public, sizeof u->box_public);
+                mem_domain_zero(u->box_sealed, sizeof u->box_sealed);
             }
             db->count++;
         }
@@ -753,7 +801,20 @@ fl_result_t fl_user_db_change_password(fl_user_db_t *db, const char *name,
                              &sealed_len) != KQ_ACCOUNT_OK ||
              sealed_len != sizeof updated.signing_sealed)
         rc = FL_RESULT_ERR;
-    mem_domain_zero(secret, sizeof secret);
+    mem_domain_secure_zero(secret, sizeof secret);
+    /* The box key moves to the new password the same way, or is created now. */
+    if (rc == FL_RESULT_OK && u->has_key && !u->has_box)
+        rc = provision_box(&updated, password);
+    /* Only a box key carried forward is resealed: without a signing key, provision_key above
+     * already made a new box pair, which must not be overwritten with the old secret. */
+    else if (rc == FL_RESULT_OK && u->has_key && u->has_box &&
+             (kq_account_open(current, u->box_sealed, sizeof u->box_sealed, secret) !=
+                  KQ_ACCOUNT_OK ||
+              kq_account_seal(password, secret, updated.box_sealed, sizeof updated.box_sealed,
+                              &sealed_len) != KQ_ACCOUNT_OK ||
+              sealed_len != sizeof updated.box_sealed))
+        rc = FL_RESULT_ERR;
+    mem_domain_secure_zero(secret, sizeof secret);
     if (rc == FL_RESULT_OK)
         *u = updated;
     mem_domain_zero(&updated, sizeof updated);
@@ -771,15 +832,40 @@ fl_result_t fl_user_db_ensure_key(fl_user_db_t *db, const char *name, const char
     u = find_mut(db, name);
     if (!u)
         return FL_RESULT_NOENT;
-    if (u->has_key)
+    if (u->has_key && u->has_box)
         return FL_RESULT_OK;
     if (!fl_password_verify(password, u->salt_hex, u->password_hash))
         return FL_RESULT_ACCES;
+    /* Accounts from before box keys keep their signing key and gain a box key. */
+    if (u->has_key) {
+        if (provision_box(u, password) != FL_RESULT_OK)
+            return FL_RESULT_ERR;
+        if (created)
+            *created = FL_USER_DB_CREATED_BOX;
+        return FL_RESULT_OK;
+    }
     if (provision_key(u, password) != FL_RESULT_OK)
         return FL_RESULT_ERR;
     if (created)
-        *created = 1;
+        *created = FL_USER_DB_CREATED_KEYS;
     return FL_RESULT_OK;
+}
+
+void fl_user_db_forget_created(fl_user_db_t *db, const char *name, int created) {
+    fl_user_record_t *u;
+
+    if (created == FL_USER_DB_CREATED_KEYS) {
+        fl_user_db_forget_key(db, name);
+        return;
+    }
+    if (created != FL_USER_DB_CREATED_BOX)
+        return;
+    u = find_mut(db, name);
+    if (!u)
+        return;
+    u->has_box = 0;
+    mem_domain_zero(u->box_public, sizeof u->box_public);
+    mem_domain_zero(u->box_sealed, sizeof u->box_sealed);
 }
 
 void fl_user_db_forget_key(fl_user_db_t *db, const char *name) {
@@ -790,6 +876,9 @@ void fl_user_db_forget_key(fl_user_db_t *db, const char *name) {
     u->has_key = 0;
     mem_domain_zero(u->signing_public, sizeof u->signing_public);
     mem_domain_zero(u->signing_sealed, sizeof u->signing_sealed);
+    u->has_box = 0;
+    mem_domain_zero(u->box_public, sizeof u->box_public);
+    mem_domain_zero(u->box_sealed, sizeof u->box_sealed);
 }
 
 fl_result_t fl_user_db_open_key(const fl_user_db_t *db, const char *name, const char *password,
@@ -823,4 +912,35 @@ const unsigned char *fl_user_db_signing_public(const fl_user_db_t *db, const cha
     const fl_user_record_t *u = fl_user_db_find_by_key(db, key_id);
 
     return (u && u->has_key) ? u->signing_public : NULL;
+}
+
+fl_result_t fl_user_db_open_box(const fl_user_db_t *db, const char *name, const char *password,
+                                unsigned char *secret) {
+    const fl_user_record_t *u;
+    unsigned char derived[FL_USER_SIGNING_PUBLIC_LEN];
+    int rc;
+
+    if (!db || !name || !password || !secret)
+        return FL_RESULT_INVAL;
+    u = fl_user_db_find(db, name);
+    if (!u || !u->has_box)
+        return FL_RESULT_NOENT;
+    rc = kq_account_open(password, u->box_sealed, sizeof u->box_sealed, secret);
+    if (rc == KQ_ACCOUNT_WRONG_PASSWORD)
+        return FL_RESULT_ACCES;
+    if (rc != KQ_ACCOUNT_OK)
+        return FL_RESULT_ERR;
+    /* The sealed secret must be the one the stored box public key names. */
+    if (kq_account_box_public(secret, derived) != KQ_ACCOUNT_OK ||
+        !asm_mem_ct_equal(derived, u->box_public, sizeof derived)) {
+        mem_domain_secure_zero(secret, FL_USER_SIGNING_SECRET_LEN);
+        return FL_RESULT_ERR;
+    }
+    return FL_RESULT_OK;
+}
+
+const unsigned char *fl_user_db_box_public(const fl_user_db_t *db, const char *key_id) {
+    const fl_user_record_t *u = fl_user_db_find_by_key(db, key_id);
+
+    return (u && u->has_box) ? u->box_public : NULL;
 }

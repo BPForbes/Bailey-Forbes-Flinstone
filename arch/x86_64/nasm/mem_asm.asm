@@ -5,6 +5,8 @@ section .text
 global asm_mem_copy
 global asm_mem_zero
 global asm_block_fill
+global asm_mem_secure_zero
+global asm_mem_ct_equal
 
 ; void asm_mem_copy(void *dst, const void *src, size_t n)
 asm_mem_copy:
@@ -91,4 +93,34 @@ asm_block_fill:
     dec r8
     jnz .fill_byte_loop
 .fill_done:
+    ret
+
+; void asm_mem_secure_zero(void *ptr, size_t n)
+; Wipes a secret: extends asm_mem_zero (the parent does the stores) with mfence.
+; The 8-byte adjustment keeps the stack 16-byte aligned across the call.
+asm_mem_secure_zero:
+    sub rsp, 8
+    call asm_mem_zero
+    add rsp, 8
+    mfence
+    ret
+
+; int asm_mem_ct_equal(const void *a, const void *b, size_t n)
+; 1 when equal, else 0. Constant time in n: no early exit.
+asm_mem_ct_equal:
+    xor eax, eax
+    test rdx, rdx
+    jz .cteq_done
+.cteq_loop:
+    movzx ecx, byte [rdi]
+    xor cl, byte [rsi]
+    or eax, ecx
+    inc rdi
+    inc rsi
+    dec rdx
+    jnz .cteq_loop
+.cteq_done:
+    test eax, eax
+    sete al
+    movzx eax, al
     ret

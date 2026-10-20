@@ -1,14 +1,148 @@
 # Server file sharing on KeyQuorum's file model
 
-Status: **design, partly built**. Built so far: one KeyQuorum signing key per account (sealed
-under its password), signed bridges, and the sender-side gate of requirement 12 for
-`server file -user` (see `docs/IDENTITY_HERITAGE.md`). Everything else here is not built.
+Status: **design, partly built**. Built so far: one KeyQuorum signing key and one X25519 box
+key per account (both sealed under its password), signed bridges, the sender-side gate of
+requirement 12 for `server file -user` (see `docs/IDENTITY_HERITAGE.md`), and **co-signed
+delivery** (`server file send -t`, below). The rest of this document (redistribution,
+time-bound access, public offers, the chained edit log) is not built.
 
 This document maps KeyQuorum's
 file-sharing features onto Flinstone's server file sharing (`server file`, the TCP hub in
 `net_server.c` and `net_file_delivery.c`, and the server store in `server_shared_fs.c`) and
 states what each one does for confidentiality, integrity and availability (CIA). The
 heritage and bridge rules it depends on are in [IDENTITY_HERITAGE.md](IDENTITY_HERITAGE.md).
+
+## Co-signed delivery (built)
+
+A tracked file reaches its recipient only when **both** parties have signed it. Mya signs a
+revision for Steve; the host announces the request; Steve co-signs; only then does the host
+release the sealed letter, and only Steve can open it. The host holds the letter, counts
+signatures and keeps time; it never holds a decryption key.
+
+```
+ ENCODER (sender)              LATENT SPACE (host)                     DECODER (recipient)
+ server file send -t f -user Steve
+ ① encode checkpoint
+   password opens signing key
+   check in R, author-sign
+   seal payload + KQTF to Steve's box key
+          │ OFFER + PART…  ────► ② admit offer: author sig vs host registry,
+                                    author == this member's account
+                                    neuron d: potential 1 / threshold 2
+                                    expires = host now + 24 h
+                                    ANNOUNCE  ───────────────────────────► "Root asks you to co-sign"
+                                                                            server file cosign d
+                                                                            ③ co-sign checkpoint
+                                                                              password opens signing key
+                                                                              sign the public offer
+                                    ◄──────────────────────────────────── COSIGN (sig)
+                                    ②' admit co-sign: signer is the recipient,
+                                    sig vs host registry → potential 2: FIRE
+                                    RELEASE + PART…  ────────────────────► ④ decode checkpoint
+                                                                              open letter (box key)
+                                                                              letter revision == offered
+                                                                              attach co-author proof
+                                                                              readiness: author, policy, co-author
+                                                                              not forked; freshness vs .kqseen
+                                                                              write f, f.kqtf, f.kqseen
+                                    ◄──────────────────────────────────── ACK → letter deleted
+  never co-signed before expiry: the neuron leaks; its record, spike log and letter are deleted
+```
+
+### The VAE / SNN shape
+
+The pipeline is described as a variational autoencoder joined to a spiking neuron. It is an
+analogy for the structure; nothing is trained or learned.
+
+| Part | In Flinstone |
+| --- | --- |
+| Encoder | The sender's checkpoint (`fl_kq_cp_encode`): check in, author signature, seal to the recipient |
+| Latent space | The host (`net_kq_delivery.c`, `kq_delivery.c`): holds opaque letters, posts announcements, routes parts and keys |
+| Decoder | The recipient's checkpoint (`fl_kq_cp_decode`): open, verify every signature and the policy, decrypt, save |
+| Spikes | `REQUEST 1`, `OFFER 2`, `ANNOUNCE 3`, `COSIGN 4`, `RELEASE 5`, `ACK 6` (`fl_kq_spike_t`), each logged in `kq_spike` |
+| Potential / threshold | Verified signatures held / needed: the author's counts at the offer, the recipient's co-signature at `COSIGN`; `FL_KQ_HOST_THRESHOLD` 2 |
+| Fire / refractory | At threshold the letter is released once; a later co-signature only re-sends it to the recipient |
+| Leak | `FL_KQ_DELIVERY_TTL_SEC` (24 h) on the **host's** clock; an unfired delivery expires and its letter is deleted |
+
+The recipient applies a higher threshold, `FL_KQ_RECEIVER_THRESHOLD` 3: author signature,
+the revision trusted under the file's own policy, and the recipient's co-author proof
+(KeyQuorum `delivery_readiness`). The host cannot check policy trust because it never sees
+the content, so it counts only the two signatures it can verify.
+
+### Layers
+
+```
+ L7  cmd_server_file.c verbs ── kq_checkpoint.c (encode · admit · co-sign · decode)
+                                   └─ fl_kq_driver_t : fl_driver_desc_t (kernel/drivers/keyquorum/kq_driver.c)
+                                        └─ libkeyquorum_identity.a  kq_file_* (Rust)
+ L6  sealed KeyQuorum letter (X25519 box to the recipient, Ed25519 signatures)
+ L5  session frames, opcodes 0x39-0x3F (net_kq_delivery.c through the net_server/net_client hooks)
+ L4- TCP hub, net_socket, asm_net_* — unchanged
+ ASM asm_mem_secure_zero : asm_mem_zero (wipe secrets), asm_mem_ct_equal (compare digests and ids)
+```
+
+### What it extends rather than repeats
+
+Each KeyQuorum piece is a child of something Flinstone already had, in the C sense: the
+parent is the first member (or the routine called first), and the child adds only its own
+part.
+
+| Child | Parent | What the child adds |
+| --- | --- | --- |
+| `fl_kq_driver_t` (`kq_driver.c`) | `fl_driver_desc_t` (`fl/driver/driver.h`), registered with the driver model at shell start | the KeyQuorum ops; the base's lifecycle `probe` checks the library ABI (class `FL_DRV_CLASS_SECURITY`) |
+| `asm_mem_secure_zero`, `mem_domain_secure_zero` | `asm_mem_zero`, `mem_domain_zero` | a barrier (`mfence` / `dmb ish`) after the parent's stores |
+| KeyQuorum upload and inbox slots (`net_kq_delivery.c`) | `fl_part_buf_t` (`net_part_buf.h`), also the base of the server file share slot | offers, co-signatures and release around the ordered, bounded buffer |
+| big-endian wire fields | `net_endian.h` (`asm_net_*`) | the bounds-checked reader and writer |
+| `kq_open_keys`, `bridge_open_actor_key` | `cmd_open_account_keys` (`cmd_authutil.c`) | each command's own messages |
+| the store's and checkpoint's file writes | `fl_fs_mkdir_p`, `fl_fs_stage_file`, `fl_fs_write_file_atomic` (`server_shared_fs.c`) | the all-or-nothing install of a file with its `.kqtf` and `.kqseen` |
+
+Contract: `contracts/drivers/contract_p4_keyquorum.h` (P4-9). Wire: `FL_NET_SESSION_OP_KQ_PART`
+0x39, `_OFFER` 0x3A, `_ANNOUNCE` 0x3B (an empty one from a client is a pull), `_COSIGN` 0x3C,
+`_RELEASE` 0x3D, `_ACK` 0x3E, `_KEYS` 0x3F; all integers big-endian, every string
+length-prefixed, every read bounds-checked.
+
+### Commands
+
+| Command | What it does |
+| --- | --- |
+| `server file send -t <path> -user <name>` | Runs the share gate, asks the host for the recipient's public keys, prompts for your password, checks the file in and seals it, then offers it. Plaintext never leaves your shell |
+| `server file cosign` | Asks the host to re-announce what waits for you and lists it |
+| `server file cosign <delivery>` | Prompts for your password and signs the public offer (file id, revision, commitment, author signature; the content is still sealed), then decodes the release when it arrives |
+| `server file open <delivery>` | Decodes a delivery you already co-signed (for example after changing directory) |
+
+### What each side checks
+
+- **Sender.** The share gate (same line or a signed bridge); a damaged existing `.kqtf` is
+  refused; a file over `FL_KQ_LETTER_MAX` (4 MiB sealed) is refused.
+- **Host.** The offer comes from the member's own account (fixed at `server host` or
+  `server join`; a later `su` does not change it); the recipient exists and has a box key; the
+  author signature verifies against the host's account store; the delivery id is new; the file
+  name is a plain name (`fl_kq_cp_safe_name`: not empty, `.` or `..`, no `/`, `\` or control
+  bytes); each member has at most one unfinished upload, idle uploads are dropped after 60 s;
+  only the recipient may co-sign and their signature verifies; release happens once; expiry is
+  the host's clock, and an expired delivery is removed with its spike log in one transaction.
+- **Recipient.** The letter opens with their box key and is signed by the sender's registered
+  key; it carries exactly the offered revision; the co-author proof attaches; the revision is
+  trusted under the file's policy; the file is not forked; it is not a replay and not older
+  than the copy held. `.kqseen` keeps the newest 64 accepted (revision, history root) pairs;
+  each accepted root extends the one before it, so the newest still refuses forks and stale
+  histories, and a revision the previously accepted `.kqtf` already holds is never newer.
+  An announcement whose sender or file name is not a plain name is dropped unshown. The file,
+  its `.kqtf` and `.kqseen` are written together or not at all. An untracked file at the
+  destination is never overwritten: that refusal keeps the delivery so it can be opened
+  elsewhere. Any other refusal is acknowledged as refused and the host deletes the letter.
+
+### Limits
+
+- **The host is the key authority.** Every signature is checked against the host's account
+  store, and `KEYS` answers from it. Shells that share one store (the hosted shells on one
+  machine, `userland/shell/fl_users.db`) work; a shell signing with keys the host does not hold
+  is refused. Cross-machine accounts need a shared registry or a KeyQuorum relay (D4).
+- Plaintext at rest on the recipient's side is a normal file, as any received file is. The
+  `.kqtf` beside it holds the revision history and proofs.
+- A request started by the recipient (`REQUEST`) is reserved in the spike vocabulary but has
+  no command yet.
+- The browser lab and the QEMU kernel image do not run co-signed delivery yet.
 
 ## What exists today
 
@@ -449,7 +583,8 @@ changes that.
 
 ## Not yet covered
 
-- No code, no ABI and no keys exist for any of this. The heritage key ids are labels only.
+- Co-signed delivery is built (above). Redistribution, time-bound access, public offers and
+  the chained edit log are not.
 - The browser lab and the freestanding kernel do not share this model.
 - The 16 MiB limit, the ring sizes and the relay TTL are KeyQuorum defaults, not measured for
   Flinstone's workload.

@@ -30,7 +30,8 @@ typedef enum {
     FL_DRV_CLASS_CONSOLE,   /* display + keyboard */
     FL_DRV_CLASS_TIMER,
     FL_DRV_CLASS_IRQ,
-    FL_DRV_CLASS_NET
+    FL_DRV_CLASS_NET,
+    FL_DRV_CLASS_SECURITY   /* KeyQuorum (fl/driver/keyquorum.h); appended, never renumbered */
 } fl_driver_class_t;
 
 /* Opaque device handle from bus layer (typedef in bus.h, struct in device.h) */

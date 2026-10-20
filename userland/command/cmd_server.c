@@ -7,6 +7,7 @@
 #include "cmd_decl.h"
 #include "cmd_batch.h"
 #include "cmd_server_file.h"
+#include "common.h"
 #include "contract_p3_session_wire.h"
 #include "fl_colors.h"
 #include "net_client.h"
@@ -20,6 +21,7 @@
 #include "net_sock_native.h"
 #include "server_bg.h"
 #include "server_shared_db.h"
+#include "net_kq_delivery.h"
 #include "session.h"
 #include "shell_io.h"
 #include "net_macvlan.h"
@@ -1937,6 +1939,16 @@ int cmd_server_run(int argc, char **argv) {
     if (argc < 2) {
         fl_color_error("usage: server <host|join|interfaces|netinit|msg|file|send|announce|nick|set-nick|connected|leave|kill> ...");
         return 1;
+    }
+    /* KeyQuorum co-signed delivery: install once, so requests are handled from the first
+     * frame of a session (contracts/drivers/contract_p4_keyquorum.h). */
+    {
+        static int kq_installed;
+        if (!kq_installed) {
+            char dir[CWD_MAX + 32];
+            snprintf(dir, sizeof dir, "%s/server_shared/kq", g_cwd);
+            kq_installed = fl_net_kq_install(fl_session_user_db, dir) == FL_RESULT_OK;
+        }
     }
     if (!strcmp(argv[1], "interfaces")) return verb_interfaces(argc, argv);
 #ifdef FL_SECFEAT

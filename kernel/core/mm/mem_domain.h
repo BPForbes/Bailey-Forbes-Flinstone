@@ -25,6 +25,9 @@ void mem_domain_free(mem_domain_t domain, void *ptr);
 /* Buffer ops - always use ASM for hot path */
 void mem_domain_copy(void *dst, const void *src, size_t n);
 void mem_domain_zero(void *ptr, size_t n);
+/* Extends mem_domain_zero for secrets (keys, passwords): the same zeroing, then a barrier
+ * so the stores are complete before the buffer is freed or reused (asm_mem_secure_zero). */
+void mem_domain_secure_zero(void *ptr, size_t n);
 void mem_domain_fill(void *ptr, unsigned char byte, size_t n);
 
 #endif /* MEM_DOMAIN_H */

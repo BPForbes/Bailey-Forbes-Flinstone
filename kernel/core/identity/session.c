@@ -140,7 +140,7 @@ fl_result_t fl_session_login(const char *name, const char *password) {
             fprintf(stderr, "login: could not create a signing key for %s\n", name);
         } else if (created && fl_user_db_save(&s_db) != FL_RESULT_OK) {
             /* Never keep a key the store does not hold: the next login tries again. */
-            fl_user_db_forget_key(&s_db, name);
+            fl_user_db_forget_created(&s_db, name, created);
             fprintf(stderr, "login: could not save the new signing key for %s\n", name);
         }
         fl_elevation_revoke_all();

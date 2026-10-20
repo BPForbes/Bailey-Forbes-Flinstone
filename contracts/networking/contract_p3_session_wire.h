@@ -92,6 +92,23 @@
 #define FL_NET_SESSION_OP_FILE_META     0x38u
 #define FL_NET_SESSION_OP_FILE_LAST     0x38u
 
+/**
+ * KeyQuorum co-signed delivery (contracts/drivers/contract_p4_keyquorum.h). A sealed letter
+ * travels as KQ_PART frames: [id 16][offset u32 BE][bytes]. Every other frame starts with the
+ * 16-byte delivery id. The host verifies signatures against its own account registry; a
+ * member's self-asserted principal decides nothing.
+ */
+#define FL_NET_SESSION_OP_KQ_FIRST    0x39u
+#define FL_NET_SESSION_OP_KQ_PART     0x39u /* letter bytes, either direction               */
+#define FL_NET_SESSION_OP_KQ_OFFER    0x3Au /* sender -> host: public offer, letter length   */
+#define FL_NET_SESSION_OP_KQ_ANNOUNCE 0x3Bu /* host -> recipient: co-sign request; empty
+                                               recipient -> host: send my pending ones      */
+#define FL_NET_SESSION_OP_KQ_COSIGN   0x3Cu /* recipient -> host: co-signature                */
+#define FL_NET_SESSION_OP_KQ_RELEASE  0x3Du /* host -> recipient: letter length, then parts   */
+#define FL_NET_SESSION_OP_KQ_ACK      0x3Eu /* recipient -> host: decoded (or refused)        */
+#define FL_NET_SESSION_OP_KQ_KEYS     0x3Fu /* public keys from the host registry            */
+#define FL_NET_SESSION_OP_KQ_LAST     0x3Fu
+
 /** WiFi 802.11ax L2 emulation over session wire (#279 lab; server host/join). */
 #define FL_NET_SESSION_OP_WIFI_FIRST       0x40u
 #define FL_NET_SESSION_OP_WIFI_SAE_COMMIT  0x40u
@@ -113,6 +130,11 @@ static inline int fl_net_session_is_file_opcode(uint8_t opcode)
 {
     return opcode >= FL_NET_SESSION_OP_FILE_FIRST &&
            opcode <= FL_NET_SESSION_OP_FILE_LAST;
+}
+
+static inline int fl_net_session_is_kq_opcode(uint8_t opcode)
+{
+    return opcode >= FL_NET_SESSION_OP_KQ_FIRST && opcode <= FL_NET_SESSION_OP_KQ_LAST;
 }
 
 static inline int fl_net_session_is_wifi_opcode(uint8_t opcode)
@@ -150,6 +172,9 @@ fl_result_t fl_server_file_render_offer_line(const fl_server_file_offer_t *offer
 
 _Static_assert(FL_NET_SESSION_HDR_LEN >= 6u, "session header must include length field");
 _Static_assert(FL_NET_SESSION_MAX_MSG >= 64u, "session message cap unexpectedly small");
+_Static_assert(FL_NET_SESSION_OP_FILE_LAST < FL_NET_SESSION_OP_KQ_FIRST &&
+                   FL_NET_SESSION_OP_KQ_LAST < FL_NET_SESSION_OP_WIFI_FIRST,
+               "KeyQuorum opcodes sit between the file and wifi ranges");
 _Static_assert(FL_NET_SESSION_OP_FILE_FIRST < FL_NET_SESSION_OP_FILE_LAST,
                "file opcode range must be contiguous");
 

@@ -1,4 +1,5 @@
 #include "net_file_delivery.h"
+#include "net_part_buf.h"
 
 #include "contract_p3_packet.h"
 #include "net_channel_sidecar.h"
@@ -6,6 +7,7 @@
 #include "net_pkt_channel_meta.h"
 #include "server_shared_db.h"
 #include "server_shared_fs.h"
+#include "fl/mem_asm.h"
 
 #include <openssl/sha.h>
 #include <stdio.h>
@@ -17,13 +19,13 @@
 #define FL_SERVER_FILE_SHARE_SLOTS 32u
 #define FL_SERVER_FILE_MAX_BYTES (16u * 1024u * 1024u)
 
+/* A share in flight: the received bytes (base fl_part_buf_t, limited to the share cap) and
+ * the file-delivery state around them. */
 typedef struct {
+    fl_part_buf_t file;
     uint8_t active;
     uint8_t transfer_complete;
     uint8_t meta_received;
-    uint8_t *file_data;
-    size_t file_len;
-    size_t file_cap;
     fl_server_file_offer_t offer;
 } fl_server_file_share_slot_t;
 
@@ -160,10 +162,7 @@ static void share_slot_free_data(fl_server_file_share_slot_t *slot)
 {
     if (!slot)
         return;
-    free(slot->file_data);
-    slot->file_data = NULL;
-    slot->file_len = 0u;
-    slot->file_cap = 0u;
+    fl_part_buf_release(&slot->file);
     slot->transfer_complete = 0u;
 }
 
@@ -173,23 +172,6 @@ static void share_slot_release(fl_server_file_share_slot_t *slot)
         return;
     share_slot_free_data(slot);
     slot->active = 0u;
-}
-
-static fl_result_t share_slot_ensure_cap(fl_server_file_share_slot_t *slot, size_t need)
-{
-    uint8_t *nbuf;
-    if (!slot)
-        return FL_RESULT_INVAL;
-    if (need > FL_SERVER_FILE_MAX_BYTES)
-        return FL_RESULT_NOMEM;
-    if (need <= slot->file_cap)
-        return FL_RESULT_OK;
-    nbuf = (uint8_t *)realloc(slot->file_data, need);
-    if (!nbuf)
-        return FL_RESULT_NOMEM;
-    slot->file_data = nbuf;
-    slot->file_cap = need;
-    return FL_RESULT_OK;
 }
 
 static void share_purge_expired(uint64_t now)
@@ -322,8 +304,8 @@ static void host_catalog_commit_if_done(const char *share_id)
 
     if (!slot || !slot->transfer_complete)
         return;
-    rc = fl_server_catalog_commit_file_offer(&slot->offer, slot->file_data,
-                                             slot->file_len);
+    rc = fl_server_catalog_commit_file_offer(&slot->offer, slot->file.data,
+                                             slot->file.len);
     if (rc != FL_RESULT_OK)
         fprintf(stderr, "[Server] host catalog commit failed for %s (rc=%d)\n",
                 share_id, (int)rc);
@@ -442,6 +424,7 @@ static fl_server_file_share_slot_t *share_alloc(const fl_server_file_offer_t *of
     for (i = 0; i < FL_SERVER_FILE_SHARE_SLOTS; i++) {
         if (!s_shares[i].active) {
             share_slot_free_data(&s_shares[i]);
+            fl_part_buf_init(&s_shares[i].file, FL_SERVER_FILE_MAX_BYTES);
             s_shares[i].active = 1u;
             s_shares[i].meta_received = 0u;
             s_shares[i].offer = *offer;
@@ -1208,8 +1191,8 @@ fl_result_t fl_server_share_accept(const char *share_id,
         return FL_RESULT_ACCES;
     if (disposition == FL_SERVER_FILE_SAVE_TO_SERVER_SHARE) {
         char saved[512];
-        rc = fl_server_shared_save_offer(&slot->offer, slot->file_data,
-                                         slot->file_len, saved, sizeof(saved));
+        rc = fl_server_shared_save_offer(&slot->offer, slot->file.data,
+                                         slot->file.len, saved, sizeof(saved));
         if (rc == FL_RESULT_OK) {
             const char *base = strrchr(saved, '/');
             printf("[Server] saved to server_shared/%s\n",
@@ -1218,7 +1201,7 @@ fl_result_t fl_server_share_accept(const char *share_id,
     } else if (disposition == FL_SERVER_FILE_OVERWRITE_LOCAL) {
         rc = fl_server_shared_overwrite_local(&slot->offer,
                                               slot->offer.suggested_dest_path,
-                                              slot->file_data, slot->file_len);
+                                              slot->file.data, slot->file.len);
     } else {
         rc = FL_RESULT_OK;
     }
@@ -1308,7 +1291,6 @@ fl_result_t fl_net_file_store_chunk(const uint8_t *payload, uint16_t plen)
     fl_server_file_chunk_header_t chunk;
     fl_bytes_view_t data;
     fl_server_file_share_slot_t *slot;
-    size_t end;
     fl_result_t rc;
 
     if (!payload)
@@ -1321,20 +1303,12 @@ fl_result_t fl_net_file_store_chunk(const uint8_t *payload, uint16_t plen)
         return FL_RESULT_NOENT;
     if (share_access_ok(&slot->offer, (uint64_t)time(NULL)) != FL_RESULT_OK)
         return FL_RESULT_ACCES;
-    if (chunk.file_offset != (uint64_t)slot->file_len)
+    /* File delivery's own rule on top of the base buffer's order and cap: no more than the
+     * offer said. */
+    if (slot->offer.file_size > 0u &&
+        chunk.file_offset + (uint64_t)data.len > (uint64_t)slot->offer.file_size)
         return FL_RESULT_INVAL;
-    end = (size_t)chunk.file_offset + (size_t)data.len;
-    if (end > FL_SERVER_FILE_MAX_BYTES)
-        return FL_RESULT_NOMEM;
-    if (slot->offer.file_size > 0u && end > (size_t)slot->offer.file_size)
-        return FL_RESULT_INVAL;
-    rc = share_slot_ensure_cap(slot, end);
-    if (rc != FL_RESULT_OK)
-        return rc;
-    if (data.len > 0u && data.data)
-        memcpy(slot->file_data + chunk.file_offset, data.data, data.len);
-    slot->file_len = end;
-    return FL_RESULT_OK;
+    return fl_part_buf_append(&slot->file, chunk.file_offset, data.data, data.len);
 }
 
 fl_result_t fl_net_file_store_done(const uint8_t *payload, uint16_t plen)
@@ -1352,8 +1326,8 @@ fl_result_t fl_net_file_store_done(const uint8_t *payload, uint16_t plen)
         return FL_RESULT_NOENT;
     if (share_access_ok(&slot->offer, (uint64_t)time(NULL)) != FL_RESULT_OK)
         return FL_RESULT_ACCES;
-    if (done.total_bytes > slot->file_cap ||
-        done.total_bytes != (uint64_t)slot->file_len)
+    if (done.total_bytes > slot->file.cap ||
+        done.total_bytes != (uint64_t)slot->file.len)
         return FL_RESULT_INVAL;
     if (slot->offer.file_size != 0u &&
         done.total_bytes != slot->offer.file_size)
@@ -1364,16 +1338,16 @@ fl_result_t fl_net_file_store_done(const uint8_t *payload, uint16_t plen)
 
     if (file_checksum_present(slot->offer.checksum) ||
         file_checksum_present(done.checksum)) {
-        if (!SHA256(slot->file_data, slot->file_len, checksum))
+        if (!SHA256(slot->file.data, slot->file.len, checksum))
             return FL_RESULT_ERR;
         if ((file_checksum_present(slot->offer.checksum) &&
-             memcmp(checksum, slot->offer.checksum, sizeof(checksum)) != 0) ||
+             !asm_mem_ct_equal(checksum, slot->offer.checksum, sizeof(checksum))) ||
             (file_checksum_present(done.checksum) &&
-             memcmp(checksum, done.checksum, sizeof(checksum)) != 0))
+             !asm_mem_ct_equal(checksum, done.checksum, sizeof(checksum))))
             return FL_RESULT_INVAL;
     }
 
-    slot->file_len = (size_t)done.total_bytes;
+    slot->file.len = (size_t)done.total_bytes;
     slot->transfer_complete = 1u;
     if (!slot->meta_received)
         slot->meta_received = 1u;
