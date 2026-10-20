@@ -1,0 +1,4 @@
+MAJOR_VERSION=5
+STANDARD_VERSION=2
+RELEASE_VERSION=2
+DESCRIPTION=Keep the In development lab when main deploys. A GitHub Pages deploy replaces the whole site, so main's lab deploy removed the develop lab at /develop/. Main now publishes its lab to the site root of a deployment branch, publisher, that holds built labs only (scripts/publish_pages_slot.sh), keeps the develop slot as it was, force-pushes the branch as a single commit and deploys Pages from that whole tree.

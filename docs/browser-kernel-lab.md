@@ -266,10 +266,14 @@ a browser-QEMU-Wasm test that both actually observe `FLINTSTONE_KERNEL_BOOT_OK`
 on serial. The manifest's `bootSuccessMarkerImplemented` declaration is
 validated but cannot self-attest either observation.
 
-On `main` only, the same workflow deploys that packaged tree to GitHub Pages.
+On `main` only, the same workflow publishes that packaged tree to the site root of the
+deployment branch `publisher` with `scripts/publish_pages_slot.sh`, which keeps the
+in-development lab that `develop` publishes at `/develop/`, force-pushes the branch as
+one parentless commit, and deploys the whole branch tree to GitHub Pages. Publishes share
+the `pages-deploy` concurrency group and push with `--force-with-lease`.
 Pull requests never publish. The configured permanent URL is
 `https://bpforbes.github.io/Bailey-Forbes-Flinstone/`. GitHub Pages cannot set
 COOP/COEP/CSP; see [`docs/portfolio-iframe-integration.md`](./portfolio-iframe-integration.md).
 The lab fetches `./artifacts/build-info.json`, then
 `./artifacts/<artifact>?v=<shortCommit>`. Failed commits leave the previously
-deployed image untouched.
+deployed image in their slot untouched.
