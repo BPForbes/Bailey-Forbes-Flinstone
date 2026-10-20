@@ -164,6 +164,21 @@ static fl_result_t migrate(sqlite3 *db) {
     return FL_RESULT_OK;
 }
 
+/* mkdir -p: the store may be the first thing under the share root. */
+static void make_dirs(const char *dir) {
+    char tmp[sizeof(((fl_kq_store_t *)0)->dir)];
+
+    snprintf(tmp, sizeof tmp, "%s", dir);
+    for (char *p = tmp + 1; *p; p++) {
+        if (*p != '/')
+            continue;
+        *p = '\0';
+        (void)mkdir(tmp, 0700);
+        *p = '/';
+    }
+    (void)mkdir(tmp, 0700);
+}
+
 fl_result_t fl_kq_store_open(const char *dir, fl_kq_store_t **out) {
     fl_kq_store_t *s;
     char path[1200];
@@ -175,7 +190,7 @@ fl_result_t fl_kq_store_open(const char *dir, fl_kq_store_t **out) {
     if (!s)
         return FL_RESULT_NOMEM;
     snprintf(s->dir, sizeof s->dir, "%s", dir);
-    (void)mkdir(dir, 0700);
+    make_dirs(dir);
     snprintf(path, sizeof path, "%s/%s", dir, KQ_STORE_LETTERS);
     (void)mkdir(path, 0700);
     snprintf(path, sizeof path, "%s/%s", dir, KQ_STORE_DB);

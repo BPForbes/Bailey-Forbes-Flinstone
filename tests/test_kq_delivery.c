@@ -153,6 +153,20 @@ static int test_store_round_trip_and_leak(void) {
     return 0;
 }
 
+/* The share root may not exist yet when the host first holds a letter. */
+static int test_store_creates_missing_parents(void) {
+    fl_kq_store_t *s = NULL;
+    char nested[sizeof s_dir + 32];
+    char letters[sizeof nested + 16];
+
+    snprintf(nested, sizeof nested, "%s/server_shared/kq", s_dir);
+    ASSERT(fl_kq_store_open(nested, &s) == FL_RESULT_OK);
+    fl_kq_store_close(s);
+    snprintf(letters, sizeof letters, "%s/kq_letters", nested);
+    ASSERT(access(letters, F_OK) == 0);
+    return 0;
+}
+
 int main(void) {
     char tmpl[] = "/tmp/fl_kq_deliveryXXXXXX";
     int rc = 0;
@@ -168,6 +182,7 @@ int main(void) {
     RUN(test_neuron_leaks_after_expiry);
     RUN(test_ids_round_trip);
     RUN(test_store_round_trip_and_leak);
+    RUN(test_store_creates_missing_parents);
     rmrf(s_dir);
     if (rc == 0)
         printf("All KeyQuorum delivery store tests passed.\n");
