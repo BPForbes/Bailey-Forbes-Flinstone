@@ -85,8 +85,8 @@ async function main() {
   await frame.locator("#status").filter({ hasText: /^Ready$/ }).waitFor();
   await frame.locator("#account-new-session").click();
   try {
-    await frame.locator("#session-tabs [data-session='2']").filter({ hasText: /Session 2: root/ }).waitFor({ timeout: 20000 });
-    await frame.locator("#account-status").filter({ hasText: /Active session 2: root/ }).waitFor({ timeout: 5000 });
+    await frame.locator("#session-tabs [data-session='2']").filter({ hasText: /Session 2: Root/ }).waitFor({ timeout: 20000 });
+    await frame.locator("#account-status").filter({ hasText: /Active session 2: Root/ }).waitFor({ timeout: 5000 });
   } catch (error) {
     throw new Error(`iframe new session: ${await (await guestOutput(frame)).textContent()}\n${error}`);
   }
