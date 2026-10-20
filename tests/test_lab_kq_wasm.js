@@ -196,6 +196,19 @@ function registered(t, user) {
   // The relay never carried the plaintext: only the sealed letter and public offers.
   assert(!relay.carried.some(b => b.includes(Buffer.from("hello bob"))), "plaintext crossed the relay");
 
+  // Names match regardless of case, as lab accounts do: BOB finds bob, and the delivery
+  // names the account as it is spelled.
+  alice.run("write case.txt any case");
+  alice.run("server file send -t case.txt -user BOB");
+  relay.drain();
+  const reqCase = bob.events.filter(e => e.kind === "request").pop();
+  assert.strictEqual(reqCase.c, "case.txt", "BOB reaches bob");
+  assert.match(alice.text(), /offered case\.txt to bob /);
+  bob.run(`server file cosign ${reqCase.a}`);
+  relay.drain();
+  bob.run("cat case.txt");
+  assert.match(bob.text(), /\nany case\n/);
+
   // A user the server has no keys for.
   alice.run("server file send -t note.txt -user nobody");
   relay.drain();

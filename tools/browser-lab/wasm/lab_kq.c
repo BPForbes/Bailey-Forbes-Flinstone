@@ -38,6 +38,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <strings.h>
 #include <time.h>
 
 #define LAB_KEYS_MAX 32
@@ -129,9 +130,11 @@ typedef struct {
 
 static lab_key_t s_keys[LAB_KEYS_MAX];
 
+/* Names match regardless of ASCII case, as the lab's accounts do ("root" finds Root); the
+ * label kept is the spelling first seen, and that is what signatures name. */
 static lab_key_t *key_find(const char *label) {
     for (int i = 0; i < LAB_KEYS_MAX; i++)
-        if (s_keys[i].used && strcmp(s_keys[i].label, label) == 0)
+        if (s_keys[i].used && strcasecmp(s_keys[i].label, label) == 0)
             return &s_keys[i];
     return NULL;
 }

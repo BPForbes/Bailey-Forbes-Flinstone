@@ -1,7 +1,7 @@
 "use strict";
 const {
   OP, LAB, encodeFrame, FrameParser, payloadText, encodeFileOffer, decodeFileOffer,
-  encodeKqRoute, decodeKqRoute,
+  encodeKqRoute, decodeKqRoute, sameName,
 } = require("./session-wire.js");
 
 const MAX_MEMBERS = OP.FL_NET_SESSION_MAX_MEMBERS;
@@ -108,7 +108,7 @@ class Room {
     if (frame) this.broadcast(frame, from.memberId);
   }
   sendStatus(member, text) {
-    sendBinary(member.socket, encodeFrame(OP.FL_NET_SESSION_OP_FILE_STATUS, text.slice(0, MAX_MSG)));
+    sendBinary(member.socket, encodeFrame(LAB.FILE_STATUS, text.slice(0, MAX_MSG)));
   }
   /* Delivers a file to every other live session of the named principal; never broadcast. */
   relayFile(from, payload) {
@@ -117,13 +117,12 @@ class Room {
       this.sendStatus(from, "file refused: malformed offer");
       return;
     }
-    const targets = this.live().filter(m => m !== from && m.principal === offer.who);
+    const targets = this.live().filter(m => m !== from && sameName(m.principal, offer.who));
     if (!targets.length) {
       this.sendStatus(from, `file not sent: ${offer.who} is not connected`);
       return;
     }
-    const frame = encodeFrame(OP.FL_NET_SESSION_OP_FILE_OFFER,
-                              encodeFileOffer(from.principal, offer.name, offer.bytes));
+    const frame = encodeFrame(LAB.FILE, encodeFileOffer(from.principal, offer.name, offer.bytes));
     if (!frame) {
       this.sendStatus(from, "file refused: too large for one frame");
       return;
@@ -198,7 +197,7 @@ class Room {
       this.relayMsg(member, payload);
       return;
     }
-    if (opcode === OP.FL_NET_SESSION_OP_FILE_OFFER) {
+    if (opcode === LAB.FILE) {
       this.relayFile(member, payload);
       return;
     }

@@ -15,8 +15,10 @@
    * route bytes on top of FL_NET_SESSION_MAX_MSG; every other opcode keeps that limit.
    * LAB_KQ_KEYS carries a member's published public keys (signing 32, box 32); delivered to
    * the host it is: member u16, principal_len u8, principal, keys.
+   * LAB_FILE carries a plain lab file (encodeFileOffer) and LAB_FILE_STATUS the relay's
+   * answer to its sender, as text.
    */
-  const LAB = Object.freeze({ KQ: 0x70, KQ_KEYS: 0x71, KQ_ROUTE: 4 });
+  const LAB = Object.freeze({ KQ: 0x70, KQ_KEYS: 0x71, FILE: 0x72, FILE_STATUS: 0x73, KQ_ROUTE: 4 });
 
   function maxPayload(opcode) {
     return opcode === LAB.KQ ? OP.FL_NET_SESSION_MAX_MSG + LAB.KQ_ROUTE : OP.FL_NET_SESSION_MAX_MSG;
@@ -71,14 +73,22 @@
     return new TextDecoder().decode(payload);
   }
 
+  /* Lab account names match regardless of ASCII case, as the lab's identity layer does. */
+  function sameName(a, b) {
+    const lower = s => String(s).replace(/[A-Z]/g, c => c.toLowerCase());
+    return lower(a) === lower(b);
+  }
+
   function memberIdFromPayload(payload, offset = 0) {
     return ((payload[offset] << 8) | payload[offset + 1]) >>> 0;
   }
 
   /*
-   * FILE_OFFER payload, one frame per file (lab files fit one frame):
+   * LAB.FILE payload, one frame per file (lab files fit one frame):
    *   who_len u8, who, name_len u8, name, size u16 big-endian, bytes[size]
    * Sent to the relay, `who` is the recipient; delivered by the relay, it is the sender.
+   * This is the lab's own format, so it has its own opcode: the session wire's FILE_OFFER
+   * carries the native channel metadata and offer fields instead.
    */
   function encodeFileOffer(who, name, bytes) {
     const w = new TextEncoder().encode(String(who || ""));
@@ -139,7 +149,7 @@
   }
 
   const api = {
-    OP, LAB, HDR_LEN, encodeFrame, FrameParser, payloadText, memberIdFromPayload,
+    OP, LAB, HDR_LEN, encodeFrame, FrameParser, payloadText, memberIdFromPayload, sameName,
     encodeFileOffer, decodeFileOffer, encodeKqRoute, decodeKqRoute,
   };
   if (typeof module === "object" && module.exports) module.exports = api;

@@ -5,7 +5,7 @@
 
   const {
     OP, LAB, encodeFrame, FrameParser, payloadText, memberIdFromPayload, encodeFileOffer, decodeFileOffer,
-    encodeKqRoute, decodeKqRoute,
+    encodeKqRoute, decodeKqRoute, sameName,
   } = wire;
   const LOCAL_HOSTS = new Set(["127.0.0.1", "127.0.0.2", "localhost", "::1"]);
   const DEFAULT_PUBLIC_RELAY_HOST = "flintstone.bailey-forbes.com";
@@ -144,12 +144,12 @@
         emit({ type: "roster", members: members.slice() });
         return;
       }
-      if (opcode === OP.FL_NET_SESSION_OP_FILE_OFFER) {
+      if (opcode === LAB.FILE) {
         const offer = decodeFileOffer(payload);
         if (offer) emit({ type: "file", from: offer.who, name: offer.name, bytes: offer.bytes });
         return;
       }
-      if (opcode === OP.FL_NET_SESSION_OP_FILE_STATUS) {
+      if (opcode === LAB.FILE_STATUS) {
         emit({ type: "file-status", text: payloadText(payload) });
         return;
       }
@@ -211,7 +211,7 @@
         } else if (data.kind === "msg") {
           emit({ type: "message", text: data.text, broadcast: true });
         } else if (data.kind === "file") {
-          if (data.to === principalName && data.bytes instanceof Uint8Array)
+          if (sameName(data.to, principalName) && data.bytes instanceof Uint8Array)
             emit({ type: "file", from: data.from, name: data.name, bytes: data.bytes });
         } else if (data.kind === "kq" && data.bytes instanceof Uint8Array) {
           // As the relay room routes: to the host tab, or to the one member the host names.
@@ -322,10 +322,10 @@
       sendFile(to, name, bytes) {
         if (!this.connected) return false;
         if (socket.channel) {
-          const recipient = members.some(m => m.principal === to && m.memberId !== memberId);
+          const recipient = members.some(m => sameName(m.principal, to) && m.memberId !== memberId);
           if (recipient)
             socket.channel.postMessage({ v: 1, kind: "file", tabId: socket.tabId, to, from: principalName, name, bytes });
-          // The status event reports the outcome, as the relay's FILE_STATUS does.
+          // The status event reports the outcome, as the relay's LAB.FILE_STATUS answer does.
           emit({
             type: "file-status",
             text: recipient ? `sent ${name} to ${to} (${bytes.length} bytes)` : `file not sent: ${to} is not connected`,
@@ -333,7 +333,7 @@
           return true;
         }
         const payload = encodeFileOffer(to, name, bytes);
-        const frame = payload && encodeFrame(OP.FL_NET_SESSION_OP_FILE_OFFER, payload);
+        const frame = payload && encodeFrame(LAB.FILE, payload);
         if (!frame) return false;
         socket.send(frame);
         return true;

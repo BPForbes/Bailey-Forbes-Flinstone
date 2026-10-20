@@ -51,10 +51,11 @@ After that marker the guest is an interactive lab shell, not the hosted ELF:
   emits it once (the sender's local echo is the same event path as peer delivery).
 - `server file -user <name> <path>` sends a ramfs file to another user on the
   server. The guest prints `SERVER_FILE <user> <name> <hex>`; the page sends it
-  as one `FILE_OFFER` frame (`who_len`, `who`, `name_len`, `name`, a big-endian
-  `u16` size, then the bytes), and the relay delivers it only to that user's
-  sessions, never to the whole room. The chat panel says whether it was sent or
-  that the user is not connected. On the recipient's side the file waits in the
+  as one frame of the lab opcode `0x72` (`who_len`, `who`, `name_len`, `name`, a
+  big-endian `u16` size, then the bytes; the session wire's own `FILE_OFFER` keeps
+  its native format), and the relay delivers it only to that user's sessions (names
+  match regardless of case), never to the whole room. The chat panel says whether it
+  was sent or that the user is not connected (the relay's answer, opcode `0x73`). On the recipient's side the file waits in the
   page (the chat panel names the sender) until that user runs `server file accept`,
   or `server file decline` to drop it. Only then does the page type the file into the
   guest, as `filerecv begin <from> <name>`, `filerecv data <hex>` (in parts that fit
