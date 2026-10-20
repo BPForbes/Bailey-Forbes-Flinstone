@@ -175,7 +175,7 @@ static fl_result_t provision_box(fl_user_record_t *u, const char *password) {
         u->has_box = 1;
         rc = FL_RESULT_OK;
     }
-    asm_mem_secure_zero(secret, sizeof secret);
+    mem_domain_secure_zero(secret, sizeof secret);
     if (rc != FL_RESULT_OK) {
         u->has_box = 0;
         mem_domain_zero(u->box_public, sizeof u->box_public);
@@ -801,7 +801,7 @@ fl_result_t fl_user_db_change_password(fl_user_db_t *db, const char *name,
                              &sealed_len) != KQ_ACCOUNT_OK ||
              sealed_len != sizeof updated.signing_sealed)
         rc = FL_RESULT_ERR;
-    asm_mem_secure_zero(secret, sizeof secret);
+    mem_domain_secure_zero(secret, sizeof secret);
     /* The box key moves to the new password the same way, or is created now. */
     if (rc == FL_RESULT_OK && u->has_key && !u->has_box)
         rc = provision_box(&updated, password);
@@ -814,7 +814,7 @@ fl_result_t fl_user_db_change_password(fl_user_db_t *db, const char *name,
                               &sealed_len) != KQ_ACCOUNT_OK ||
               sealed_len != sizeof updated.box_sealed))
         rc = FL_RESULT_ERR;
-    asm_mem_secure_zero(secret, sizeof secret);
+    mem_domain_secure_zero(secret, sizeof secret);
     if (rc == FL_RESULT_OK)
         *u = updated;
     mem_domain_zero(&updated, sizeof updated);
@@ -933,7 +933,7 @@ fl_result_t fl_user_db_open_box(const fl_user_db_t *db, const char *name, const 
     /* The sealed secret must be the one the stored box public key names. */
     if (kq_account_box_public(secret, derived) != KQ_ACCOUNT_OK ||
         !asm_mem_ct_equal(derived, u->box_public, sizeof derived)) {
-        asm_mem_secure_zero(secret, FL_USER_SIGNING_SECRET_LEN);
+        mem_domain_secure_zero(secret, FL_USER_SIGNING_SECRET_LEN);
         return FL_RESULT_ERR;
     }
     return FL_RESULT_OK;

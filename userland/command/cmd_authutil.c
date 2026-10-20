@@ -3,6 +3,7 @@
 #include "fl/session.h"
 #include "fl/elevation.h"
 #include "fl/mem_asm.h"
+#include "mem_domain.h"
 #include "user_db.h"
 #include <limits.h>
 #include <stdio.h>
@@ -18,7 +19,7 @@ void cmd_wipe_password(char *buf, size_t buf_size) {
     if (!buf || buf_size == 0)
         return;
     /* The secret-wipe primitive: a plain memset of a dying buffer may be optimised away. */
-    asm_mem_secure_zero(buf, buf_size);
+    mem_domain_secure_zero(buf, buf_size);
 }
 
 static int cmd_read_password_line(const char *prompt, char *buf, size_t buf_size) {

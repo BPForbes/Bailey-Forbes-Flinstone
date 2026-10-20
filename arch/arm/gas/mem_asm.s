@@ -75,15 +75,14 @@ asm_block_fill:
     ret
 
 /* void asm_mem_secure_zero(void *ptr, size_t n)
- * Wipes a secret: byte stores the compiler cannot elide, then dmb ish. */
+ * Wipes a secret: extends asm_mem_zero (the parent does the stores) with dmb ish.
+ * x29/x30 are saved because the call to the parent clobbers the link register. */
 asm_mem_secure_zero:
-    cbz     x1, .L_sz_done
-.L_sz_loop:
-    strb    wzr, [x0], #1
-    subs    x1, x1, #1
-    b.ne    .L_sz_loop
-.L_sz_done:
+    stp     x29, x30, [sp, #-16]!
+    mov     x29, sp
+    bl      asm_mem_zero
     dmb     ish
+    ldp     x29, x30, [sp], #16
     ret
 
 /* int asm_mem_ct_equal(const void *a, const void *b, size_t n)

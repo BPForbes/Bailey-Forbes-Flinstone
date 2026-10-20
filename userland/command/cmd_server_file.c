@@ -3,6 +3,7 @@
 #include "cmd_authutil.h"
 #include "common.h"
 #include "fl/mem_asm.h"
+#include "mem_domain.h"
 #include "fl_colors.h"
 #include "kq_checkpoint.h"
 #include "net_kq_delivery.h"
@@ -558,7 +559,7 @@ static int verb_kq_send(const cmd_server_ctx_t *ctx, int argc, char **argv)
     kq_utc_now(created_at, sizeof created_at);
     cp = fl_kq_cp_encode(kq_users(), me, signing, keys.key_id, keys.box_public, path, created_at,
                          &enc);
-    asm_mem_secure_zero(signing, sizeof signing);
+    mem_domain_secure_zero(signing, sizeof signing);
     if (cp != FL_KQ_CP_OK) {
         fl_color_warn("co-signed delivery refused: %s", fl_kq_cp_reason(cp));
         return 1;
@@ -685,9 +686,9 @@ static int verb_kq_cosign(const cmd_server_ctx_t *ctx, int argc, char **argv)
     if (kq_open_keys("co-signs the delivery", signing, box) != 0)
         return 1;
     cp = fl_kq_cp_cosign(&in.offer, fl_session_current_key_id(), signing, sig);
-    asm_mem_secure_zero(signing, sizeof signing);
+    mem_domain_secure_zero(signing, sizeof signing);
     if (cp != FL_KQ_CP_OK) {
-        asm_mem_secure_zero(box, sizeof box);
+        mem_domain_secure_zero(box, sizeof box);
         fl_color_warn("keyquorum: cannot co-sign: %s", fl_kq_cp_reason(cp));
         return 1;
     }
@@ -697,7 +698,7 @@ static int verb_kq_cosign(const cmd_server_ctx_t *ctx, int argc, char **argv)
     pthread_mutex_unlock(ctx->mutex);
     if (rc != 0) {
         /* Not recorded: the request stays waiting, so cosign can simply run again. */
-        asm_mem_secure_zero(box, sizeof box);
+        mem_domain_secure_zero(box, sizeof box);
         fl_color_warn("keyquorum: the co-signature could not be sent to the host; run cosign again");
         return 1;
     }
@@ -707,14 +708,14 @@ static int verb_kq_cosign(const cmd_server_ctx_t *ctx, int argc, char **argv)
     /* The host fires on our co-signature; decode as soon as the letter arrives. */
     if (fl_net_kq_take_letter(in.id, KQ_WAIT_RELEASE_MS, &probe) != FL_RESULT_OK) {
         char hex[2 * FL_KQ_DELIVERY_ID_LEN + 1];
-        asm_mem_secure_zero(box, sizeof box);
+        mem_domain_secure_zero(box, sizeof box);
         fl_kq_delivery_id_hex(in.id, hex);
         printf("co-signed; when the host releases it, run: server file open %s\n", hex);
         return 0;
     }
     fl_kq_buf_free(&probe);
     rc = kq_decode_and_ack(ctx, hosting, &in, box);
-    asm_mem_secure_zero(box, sizeof box);
+    mem_domain_secure_zero(box, sizeof box);
     return rc == 0 ? 0 : 1;
 }
 
@@ -754,7 +755,7 @@ static int verb_kq_open(const cmd_server_ctx_t *ctx, int argc, char **argv)
     if (kq_open_keys("opens the delivery", NULL, box) != 0)
         return 1;
     rc = kq_decode_and_ack(ctx, hosting, &in, box);
-    asm_mem_secure_zero(box, sizeof box);
+    mem_domain_secure_zero(box, sizeof box);
     return rc == 0 ? 0 : 1;
 }
 

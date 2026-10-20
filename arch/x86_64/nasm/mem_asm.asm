@@ -96,16 +96,12 @@ asm_block_fill:
     ret
 
 ; void asm_mem_secure_zero(void *ptr, size_t n)
-; Wipes a secret: byte stores the compiler cannot elide, then mfence.
+; Wipes a secret: extends asm_mem_zero (the parent does the stores) with mfence.
+; The 8-byte adjustment keeps the stack 16-byte aligned across the call.
 asm_mem_secure_zero:
-    test rsi, rsi
-    jz .sz_done
-.sz_loop:
-    mov byte [rdi], 0
-    inc rdi
-    dec rsi
-    jnz .sz_loop
-.sz_done:
+    sub rsp, 8
+    call asm_mem_zero
+    add rsp, 8
     mfence
     ret
 

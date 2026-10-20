@@ -8,6 +8,7 @@
  */
 #include "kq_checkpoint.h"
 #include "fl/mem_asm.h"
+#include "mem_domain.h"
 #include "user_db.h"
 
 #include <dirent.h>
@@ -121,7 +122,7 @@ static int contains(const fl_kq_buf_t *b, const char *needle) {
 static int test_driver_probe(void) {
     const fl_kq_driver_t *drv = fl_kq_driver_get();
     ASSERT(drv);
-    ASSERT(drv->wipe == asm_mem_secure_zero && drv->equal == asm_mem_ct_equal);
+    ASSERT(drv->wipe == mem_domain_secure_zero && drv->equal == asm_mem_ct_equal);
     return 0;
 }
 

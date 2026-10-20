@@ -97,18 +97,14 @@ asm_block_fill:
     ret
 
 /* void asm_mem_secure_zero(void *ptr, size_t n)
- * Wipes a secret. Byte stores the compiler cannot see or elide (it calls an
- * opaque symbol), then mfence so the stores are globally visible before the
- * caller frees or reuses the buffer. */
+ * Wipes a secret. Extends asm_mem_zero (the parent does the stores; an opaque
+ * call the compiler cannot elide) with the one thing a secret wipe adds: mfence,
+ * so the zeros are globally visible before the caller frees or reuses the buffer.
+ * The 8-byte adjustment keeps the stack 16-byte aligned across the call. */
 asm_mem_secure_zero:
-    testq %rsi, %rsi
-    jz .L_sz_done
-.L_sz_loop:
-    movb $0, (%rdi)
-    incq %rdi
-    decq %rsi
-    jnz .L_sz_loop
-.L_sz_done:
+    subq $8, %rsp
+    call asm_mem_zero
+    addq $8, %rsp
     mfence
     ret
 

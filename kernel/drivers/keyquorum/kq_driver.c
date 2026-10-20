@@ -3,10 +3,12 @@
  *
  * Thin wrappers over keyquorum_files.h: each op asks KeyQuorum for the size it needs,
  * allocates, and calls again; it returns KeyQuorum's status unchanged. Secrets are wiped
- * and digests compared by the ASM layer (asm_mem_secure_zero, asm_mem_ct_equal).
+ * through mem_domain_secure_zero (which extends mem_domain_zero) and digests compared by
+ * asm_mem_ct_equal.
  */
 #include "fl/driver/keyquorum.h"
 #include "fl/mem_asm.h"
+#include "mem_domain.h"
 
 #include <stdlib.h>
 
@@ -23,7 +25,7 @@ void fl_kq_buf_free(fl_kq_buf_t *buf) {
     if (!buf)
         return;
     if (buf->data) {
-        asm_mem_secure_zero(buf->data, buf->len);
+        mem_domain_secure_zero(buf->data, buf->len);
         free(buf->data);
     }
     buf->data = NULL;
@@ -61,7 +63,7 @@ static int take_sized(int first, size_t need, uint8_t **data, size_t *cap) {
         outp_ = data_;                                                    \
         rc_ = (call_with);                                                \
         if (rc_ != KQ_FILE_OK) {                                          \
-            asm_mem_secure_zero(data_, cap_);                             \
+            mem_domain_secure_zero(data_, cap_);                             \
             free(data_);                                                  \
             return rc_;                                                   \
         }                                                                 \
@@ -167,7 +169,7 @@ static const fl_kq_driver_t s_kq_driver = {
     drv_file_new,  drv_check_in,     drv_verify, drv_head,   drv_payload,       drv_signers,
     drv_merge,     drv_select_read,  drv_offer,  drv_seal,   drv_offer_verify,  drv_cosign,
     drv_cosign_verify, drv_open,     drv_attach, drv_readiness, drv_freshness,
-    asm_mem_secure_zero, asm_mem_ct_equal,
+    mem_domain_secure_zero, asm_mem_ct_equal,
 };
 
 const fl_kq_driver_t *fl_kq_driver_get(void) {

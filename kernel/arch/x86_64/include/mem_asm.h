@@ -24,9 +24,9 @@
  *   - Clobbered: r8, r9, r10, rsi (extended).
  *
  * asm_mem_secure_zero(ptr, n):
- *   - ptr: non-NULL, valid for n bytes. Wipes secrets (keys, passwords): the
- *     stores cannot be elided and are fenced before return.
- *   - Clobbered: rdi, rsi.
+ *   - ptr: non-NULL, valid for n bytes. Wipes secrets (keys, passwords).
+ *   - Extends asm_mem_zero: calls it for the stores, then mfence before return.
+ *   - Clobbered: those of asm_mem_zero (rdi, r8, r9, r10).
  *
  * asm_mem_ct_equal(a, b, n):
  *   - a, b: non-NULL, valid for n bytes. Returns 1 when equal, else 0.

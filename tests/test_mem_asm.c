@@ -51,14 +51,20 @@ static int test_block_fill_vs_memset(void) {
 }
 
 static int test_mem_secure_zero_vs_memset(void) {
-    char buf1[256], buf2[256];
-    for (int n = 0; n <= 128; n++) {
-        memset(buf1, 0x5C, sizeof(buf1));
-        memset(buf2, 0x5C, sizeof(buf2));
-        memset(buf1, 0, n);
-        asm_mem_secure_zero(buf2, n);
-        /* Only the first n bytes change; the rest are untouched. */
-        ASSERT(memcmp(buf1, buf2, 256) == 0);
+    char buf1[256], buf2[256], buf3[256];
+    /* Every start alignment: the child runs its parent's qword and byte paths. */
+    for (int off = 0; off < 8; off++) {
+        for (int n = 0; n <= 128; n++) {
+            memset(buf1, 0x5C, sizeof(buf1));
+            memset(buf2, 0x5C, sizeof(buf2));
+            memset(buf3, 0x5C, sizeof(buf3));
+            memset(buf1 + off, 0, n);
+            asm_mem_secure_zero(buf2 + off, n);
+            asm_mem_zero(buf3 + off, n);
+            /* Only those n bytes change, exactly as the parent asm_mem_zero changes them. */
+            ASSERT(memcmp(buf1, buf2, 256) == 0);
+            ASSERT(memcmp(buf2, buf3, 256) == 0);
+        }
     }
     return 0;
 }
