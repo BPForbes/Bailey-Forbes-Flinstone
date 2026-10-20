@@ -4,3 +4,5 @@ RELEASE_VERSION=0
 PRERELEASE=1
 DEV_VERSION=4
 DESCRIPTION=Publish the main and develop browser labs through a deployment branch, publisher, that holds built labs only. Each push builds just its own branch and replaces only its slot (main at the site root, develop at /develop/) with scripts/publish_pages_slot.sh, keeping the other slot as it was, so a main deploy no longer removes the In development lab and a develop push no longer builds main. The branch is force-pushed as a single commit so images do not accumulate in history, and Pages is deployed from that whole tree.
+
+RELEASE_DATE=2026-10-20
