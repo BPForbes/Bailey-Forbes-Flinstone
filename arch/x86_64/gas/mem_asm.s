@@ -4,6 +4,8 @@
 .globl asm_mem_copy
 .globl asm_mem_zero
 .globl asm_block_fill
+.globl asm_mem_secure_zero
+.globl asm_mem_ct_equal
 
 /* void asm_mem_copy(void *dst, const void *src, size_t n) */
 asm_mem_copy:
@@ -92,4 +94,42 @@ asm_block_fill:
     decq %r8
     jnz .L_fill_byte_loop
 .L_fill_done:
+    ret
+
+/* void asm_mem_secure_zero(void *ptr, size_t n)
+ * Wipes a secret. Byte stores the compiler cannot see or elide (it calls an
+ * opaque symbol), then mfence so the stores are globally visible before the
+ * caller frees or reuses the buffer. */
+asm_mem_secure_zero:
+    testq %rsi, %rsi
+    jz .L_sz_done
+.L_sz_loop:
+    movb $0, (%rdi)
+    incq %rdi
+    decq %rsi
+    jnz .L_sz_loop
+.L_sz_done:
+    mfence
+    ret
+
+/* int asm_mem_ct_equal(const void *a, const void *b, size_t n)
+ * 1 when the n bytes are equal, else 0. Constant time in n: every byte is
+ * read and XOR-folded into an accumulator, with no early exit, so timing
+ * says nothing about where two digests or signatures first differ. */
+asm_mem_ct_equal:
+    xorl %eax, %eax
+    testq %rdx, %rdx
+    jz .L_cteq_done
+.L_cteq_loop:
+    movzbl (%rdi), %ecx
+    xorb (%rsi), %cl
+    orl %ecx, %eax
+    incq %rdi
+    incq %rsi
+    decq %rdx
+    jnz .L_cteq_loop
+.L_cteq_done:
+    testl %eax, %eax
+    sete %al
+    movzbl %al, %eax
     ret

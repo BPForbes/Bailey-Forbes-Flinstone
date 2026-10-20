@@ -195,4 +195,12 @@ int fl_net_client_poll(fl_net_client_t *client, fl_net_client_event_cb cb,
 
 fl_net_client_state_t fl_net_client_state(const fl_net_client_t *client);
 
+/**
+ * KeyQuorum co-signed delivery frames (FL_NET_SESSION_OP_KQ_*) received by a client go to
+ * this hook (net_kq_delivery.c installs it); with none installed they are dropped.
+ */
+typedef void (*fl_net_client_kq_hook_fn)(fl_net_client_t *client, uint8_t opcode,
+                                         const uint8_t *payload, uint16_t plen);
+void fl_net_client_set_kq_hook(fl_net_client_kq_hook_fn hook);
+
 #endif /* NET_CLIENT_H */

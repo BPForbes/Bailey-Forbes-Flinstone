@@ -1,6 +1,12 @@
 #include "cmd_server_file.h"
 
+#include "cmd_authutil.h"
+#include "common.h"
+#include "fl/mem_asm.h"
 #include "fl_colors.h"
+#include "kq_checkpoint.h"
+#include "net_kq_delivery.h"
+#include "timekeeping.h"
 #include "net_file_delivery.h"
 #include "server_file_expire.h"
 #include "server_shared_db.h"
@@ -455,19 +461,325 @@ static int verb_file_fetch(const cmd_server_ctx_t *ctx, int argc, char **argv)
     return ret;
 }
 
+/* ---- KeyQuorum co-signed delivery (contracts/drivers/contract_p4_keyquorum.h) ---- */
+
+/* How long a shell waits for the host to answer a key lookup or release a letter. */
+#define KQ_WAIT_KEYS_MS 3000u
+#define KQ_WAIT_RELEASE_MS 10000u
+
+static const fl_user_db_t *kq_users(void)
+{
+    return fl_session_user_db();
+}
+
+/*
+ * Prompts once for this account's password and opens its signing key and, when box is
+ * non-NULL, its box key. Keys an account lacks are created first (and saved), like a
+ * bridge signature does. The caller wipes the secrets.
+ */
+static int kq_open_keys(const char *why, unsigned char *signing, unsigned char *box)
+{
+    char pw[128];
+    char prompt[96];
+    fl_user_db_t *db = fl_session_user_db_mut();
+    const char *name = fl_session_current_user();
+    int created = 0;
+    fl_result_t rc;
+
+    snprintf(prompt, sizeof prompt, "Password (%s): ", why);
+    if (cmd_read_password(prompt, pw, sizeof(pw)) != 0) {
+        cmd_wipe_password(pw, sizeof(pw));
+        fl_color_error("keyquorum: password read failed");
+        return -1;
+    }
+    rc = fl_user_db_ensure_key(db, name, pw, &created);
+    if (rc == FL_RESULT_OK && created && fl_session_save_users() != FL_RESULT_OK) {
+        fl_user_db_forget_key(db, name);
+        rc = FL_RESULT_ERR;
+    }
+    if (rc == FL_RESULT_OK && signing)
+        rc = fl_user_db_open_key(db, name, pw, signing);
+    if (rc == FL_RESULT_OK && box)
+        rc = fl_user_db_open_box(db, name, pw, box);
+    cmd_wipe_password(pw, sizeof(pw));
+    if (rc == FL_RESULT_ACCES) {
+        fl_color_error("keyquorum: incorrect password");
+        return -1;
+    }
+    if (rc != FL_RESULT_OK) {
+        fl_color_error("keyquorum: cannot open the keys of %s (%d)", name, (int)rc);
+        return -1;
+    }
+    return 0;
+}
+
+static void kq_utc_now(char *out, size_t cap)
+{
+    int64_t sec = 0;
+    time_t t;
+    struct tm tm;
+
+    if (fl_time_wall_sec(&sec) != FL_RESULT_OK)
+        sec = (int64_t)time(NULL);
+    t = (time_t)sec;
+    gmtime_r(&t, &tm);
+    strftime(out, cap, "%Y-%m-%dT%H:%M:%S.000Z", &tm);
+}
+
+/* server file send -t <path> -user <name>: encode checkpoint, then OFFER + parts. */
+static int verb_kq_send(const cmd_server_ctx_t *ctx, int argc, char **argv)
+{
+    int hosting = 0;
+    const char *target = NULL;
+    const char *path = NULL;
+    const char *me = fl_session_current_key_id();
+    fl_net_kq_keys_t keys;
+    unsigned char signing[32];
+    char created_at[40];
+    char hex[2 * FL_KQ_DELIVERY_ID_LEN + 1];
+    fl_kq_encoded_t enc;
+    fl_kq_cp_result_t cp;
+    fl_result_t rc;
+    int i;
+
+    if (!session_active(ctx, &hosting))
+        return 1;
+    for (i = 0; i < argc; i++) {
+        if (!strcmp(argv[i], "-t"))
+            continue;
+        if (!strcmp(argv[i], "-user") && i + 1 < argc)
+            target = argv[++i];
+        else if (argv[i][0] != '-' && !path)
+            path = argv[i];
+        else {
+            fl_color_error("server file send -t: unexpected argument '%s'", argv[i]);
+            return 1;
+        }
+    }
+    if (!path || !target || !me || !me[0]) {
+        fl_color_error("usage: server file send -t <path> -user <name>");
+        return 1;
+    }
+    /* The same sender-side gate as any offer: same line, or a signed bridge. */
+    {
+        fl_share_gate_result_t gate =
+            fl_share_gate_check(fl_session_user_db(), current_principal(), target);
+        if (gate != FL_SHARE_GATE_OK) {
+            fl_color_warn("co-signed delivery to %s refused: %s", target,
+                          fl_share_gate_reason(gate));
+            return 1;
+        }
+    }
+    rc = fl_net_kq_lookup(ctx->server, ctx->client, hosting, target, KQ_WAIT_KEYS_MS, &keys);
+    if (rc != FL_RESULT_OK) {
+        fl_color_warn("co-signed delivery to %s refused: %s", target,
+                      rc == FL_RESULT_TIMEDOUT ? "host did not answer the key lookup"
+                                               : fl_kq_cp_reason(FL_KQ_CP_NO_KEY));
+        return 1;
+    }
+    if (kq_open_keys("signs the revision", signing, NULL) != 0)
+        return 1;
+    kq_utc_now(created_at, sizeof created_at);
+    cp = fl_kq_cp_encode(kq_users(), me, signing, keys.key_id, keys.box_public, path, created_at,
+                         &enc);
+    asm_mem_secure_zero(signing, sizeof signing);
+    if (cp != FL_KQ_CP_OK) {
+        fl_color_warn("co-signed delivery refused: %s", fl_kq_cp_reason(cp));
+        return 1;
+    }
+    pthread_mutex_lock(ctx->mutex);
+    rc = fl_net_kq_send_delivery(ctx->server, ctx->client, hosting, me, keys.key_id, &enc);
+    pthread_mutex_unlock(ctx->mutex);
+    fl_kq_delivery_id_hex(enc.delivery_id, hex);
+    if (rc != FL_RESULT_OK)
+        fl_color_warn("co-signed delivery failed to send (%d)", (int)rc);
+    else
+        printf("%s signed and sealed to %s; offered to the host as delivery %s "
+               "(released once they co-sign)\n",
+               enc.file_name, keys.key_id, hex);
+    fl_kq_encoded_free(&enc);
+    return rc == FL_RESULT_OK ? 0 : 1;
+}
+
+/* Decode checkpoint for a released letter, then ACK. Returns 0 when the file was written. */
+static int kq_decode_and_ack(const cmd_server_ctx_t *ctx, int hosting,
+                             const fl_net_kq_inbox_t *in, const unsigned char *box)
+{
+    fl_net_kq_keys_t sender;
+    fl_kq_buf_t letter = {0};
+    char dest[CWD_MAX + 160];
+    fl_kq_cp_result_t cp;
+    fl_result_t rc;
+
+    rc = fl_net_kq_take_letter(in->id, 0, &letter);
+    if (rc != FL_RESULT_OK)
+        return -1;
+    rc = fl_net_kq_lookup(ctx->server, ctx->client, hosting, in->sender, KQ_WAIT_KEYS_MS, &sender);
+    if (rc != FL_RESULT_OK || strcmp(sender.key_id, in->sender) != 0) {
+        fl_kq_buf_free(&letter);
+        fl_color_warn("keyquorum: cannot get %s's key from the host", in->sender);
+        return -1;
+    }
+    snprintf(dest, sizeof dest, "%s/%s", g_cwd, in->file_name);
+    cp = fl_kq_cp_decode(kq_users(), in->sender, sender.signing_public,
+                         fl_session_current_key_id(), box, &letter, &in->offer, in->sig, dest);
+    fl_kq_buf_free(&letter);
+    if (cp == FL_KQ_CP_EXISTS || cp == FL_KQ_CP_IO) {
+        /* A local problem with the destination, not with the letter: keep it to retry. */
+        char hex[2 * FL_KQ_DELIVERY_ID_LEN + 1];
+        fl_kq_delivery_id_hex(in->id, hex);
+        fl_color_warn("keyquorum: %s not saved: %s; change directory and run: server file open %s",
+                      in->file_name, fl_kq_cp_reason(cp), hex);
+        return 1;
+    }
+    pthread_mutex_lock(ctx->mutex);
+    (void)fl_net_kq_send_ack(ctx->server, ctx->client, hosting, in->id, cp == FL_KQ_CP_OK);
+    pthread_mutex_unlock(ctx->mutex);
+    if (cp != FL_KQ_CP_OK) {
+        fl_color_warn("keyquorum: %s from %s refused: %s", in->file_name, in->sender,
+                      fl_kq_cp_reason(cp));
+        fl_net_kq_inbox_drop(in->id);
+        return 1;
+    }
+    printf("%s from %s decoded and verified; saved to %s\n", in->file_name, in->sender, dest);
+    fl_net_kq_inbox_drop(in->id);
+    return 0;
+}
+
+static int kq_find_inbox(const char *hex, fl_net_kq_inbox_t *out)
+{
+    uint8_t id[FL_KQ_DELIVERY_ID_LEN];
+    fl_net_kq_inbox_t all[16];
+    size_t n;
+
+    if (fl_kq_delivery_id_parse(hex, id) != 0) {
+        fl_color_error("keyquorum: '%s' is not a delivery id", hex);
+        return -1;
+    }
+    n = fl_net_kq_inbox(all, 16);
+    for (size_t i = 0; i < n; i++) {
+        if (memcmp(all[i].id, id, sizeof id) == 0) {
+            *out = all[i];
+            return 0;
+        }
+    }
+    fl_color_error("keyquorum: no co-signature request %s (run: server file cosign)", hex);
+    return -1;
+}
+
+/* server file cosign [<delivery>]: list requests, or co-sign one and decode its release. */
+static int verb_kq_cosign(const cmd_server_ctx_t *ctx, int argc, char **argv)
+{
+    int hosting = 0;
+    fl_net_kq_inbox_t in;
+    unsigned char signing[32];
+    unsigned char box[32];
+    uint8_t sig[64];
+    fl_kq_cp_result_t cp;
+    fl_kq_buf_t probe = {0};
+    int rc;
+
+    if (!session_active(ctx, &hosting))
+        return 1;
+    if (argc < 2) {
+        fl_net_kq_inbox_t all[16];
+        size_t n;
+        char hex[2 * FL_KQ_DELIVERY_ID_LEN + 1];
+
+        pthread_mutex_lock(ctx->mutex);
+        (void)fl_net_kq_pull(ctx->server, ctx->client, hosting);
+        pthread_mutex_unlock(ctx->mutex);
+        n = fl_net_kq_inbox(all, 16);
+        if (n == 0)
+            printf("(no co-signature requests)\n");
+        for (size_t i = 0; i < n; i++) {
+            fl_kq_delivery_id_hex(all[i].id, hex);
+            printf("%s  %s  from %s  %s\n", hex, all[i].file_name, all[i].sender,
+                   all[i].letter_ready ? "released" : all[i].cosigned ? "co-signed" : "waiting for you");
+        }
+        return 0;
+    }
+    if (kq_find_inbox(argv[1], &in) != 0)
+        return 1;
+    if (kq_open_keys("co-signs the delivery", signing, box) != 0)
+        return 1;
+    cp = fl_kq_cp_cosign(&in.offer, fl_session_current_key_id(), signing, sig);
+    asm_mem_secure_zero(signing, sizeof signing);
+    if (cp != FL_KQ_CP_OK) {
+        asm_mem_secure_zero(box, sizeof box);
+        fl_color_warn("keyquorum: cannot co-sign: %s", fl_kq_cp_reason(cp));
+        return 1;
+    }
+    (void)fl_net_kq_inbox_set_cosig(in.id, sig);
+    memcpy(in.sig, sig, sizeof sig);
+    in.cosigned = 1;
+    pthread_mutex_lock(ctx->mutex);
+    (void)fl_net_kq_send_cosign(ctx->server, ctx->client, hosting, in.id,
+                                fl_session_current_key_id(), sig);
+    pthread_mutex_unlock(ctx->mutex);
+    /* The host fires on our co-signature; decode as soon as the letter arrives. */
+    if (fl_net_kq_take_letter(in.id, KQ_WAIT_RELEASE_MS, &probe) != FL_RESULT_OK) {
+        char hex[2 * FL_KQ_DELIVERY_ID_LEN + 1];
+        asm_mem_secure_zero(box, sizeof box);
+        fl_kq_delivery_id_hex(in.id, hex);
+        printf("co-signed; when the host releases it, run: server file open %s\n", hex);
+        return 0;
+    }
+    fl_kq_buf_free(&probe);
+    rc = kq_decode_and_ack(ctx, hosting, &in, box);
+    asm_mem_secure_zero(box, sizeof box);
+    return rc == 0 ? 0 : 1;
+}
+
+/* server file open <delivery>: decode a released letter this shell already co-signed. */
+static int verb_kq_open(const cmd_server_ctx_t *ctx, int argc, char **argv)
+{
+    int hosting = 0;
+    fl_net_kq_inbox_t in;
+    unsigned char box[32];
+    fl_kq_buf_t probe = {0};
+    int rc;
+
+    if (!session_active(ctx, &hosting))
+        return 1;
+    if (argc < 2) {
+        fl_color_error("usage: server file open <delivery>");
+        return 1;
+    }
+    if (kq_find_inbox(argv[1], &in) != 0)
+        return 1;
+    if (!in.cosigned) {
+        fl_color_error("keyquorum: co-sign it first: server file cosign %s", argv[1]);
+        return 1;
+    }
+    pthread_mutex_lock(ctx->mutex);
+    (void)fl_net_kq_pull(ctx->server, ctx->client, hosting);
+    pthread_mutex_unlock(ctx->mutex);
+    if (fl_net_kq_take_letter(in.id, KQ_WAIT_RELEASE_MS, &probe) != FL_RESULT_OK) {
+        fl_color_warn("keyquorum: the host has not released %s yet", argv[1]);
+        return 1;
+    }
+    fl_kq_buf_free(&probe);
+    if (kq_open_keys("opens the delivery", NULL, box) != 0)
+        return 1;
+    rc = kq_decode_and_ack(ctx, hosting, &in, box);
+    asm_mem_secure_zero(box, sizeof box);
+    return rc == 0 ? 0 : 1;
+}
+
 int cmd_server_file_run(const cmd_server_ctx_t *ctx, int argc, char **argv)
 {
     int sub_argc;
     char **sub_argv;
 
     if (argc < 3) {
-        fl_color_error("usage: server file <send|inbox|public|sent|accept|decline|revoke|fetch> ...");
+        fl_color_error("usage: server file <send [-t]|inbox|public|sent|accept|decline|revoke|fetch|cosign|open> ...");
         return 1;
     }
     sub_argc = argc - 2;
     sub_argv = argv + 2;
     if (sub_argc <= 0) {
-        fl_color_error("usage: server file <send|inbox|public|sent|accept|decline|revoke|fetch> ...");
+        fl_color_error("usage: server file <send [-t]|inbox|public|sent|accept|decline|revoke|fetch|cosign|open> ...");
         return 1;
     }
     if (!strcmp(argv[2], "inbox"))
@@ -484,6 +796,14 @@ int cmd_server_file_run(const cmd_server_ctx_t *ctx, int argc, char **argv)
         return verb_file_revoke(ctx, sub_argc, sub_argv);
     if (!strcmp(argv[2], "fetch"))
         return verb_file_fetch(ctx, sub_argc, sub_argv);
+    if (!strcmp(argv[2], "cosign"))
+        return verb_kq_cosign(ctx, sub_argc, sub_argv);
+    if (!strcmp(argv[2], "open"))
+        return verb_kq_open(ctx, sub_argc, sub_argv);
+    for (int i = 0; i < sub_argc; i++)
+        if (!strcmp(sub_argv[i], "-t"))
+            return verb_kq_send(ctx, sub_argc - (strcmp(argv[2], "send") ? 0 : 1),
+                                sub_argv + (strcmp(argv[2], "send") ? 0 : 1));
     return verb_file_send(ctx, sub_argc, sub_argv);
 }
 

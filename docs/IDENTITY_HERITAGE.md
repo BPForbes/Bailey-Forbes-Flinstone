@@ -132,6 +132,13 @@ only for the command that signs, then wiped.
   new one, so your bridges keep working. An ancestor resetting a password below it cannot
   open the old key, so the account gets a new key and its bridges must be signed again.
 
+Every account also has an X25519 **box key** for receiving sealed letters (co-signed
+delivery, `docs/FILE_SHARING_KEYQUORUM.md`). It is sealed under the same password, in the
+same `KQAK` format, next to the signing key (`box_public`, `box_sealed`). It is created with
+the account; an account that has a signing key but no box key gets one at its next login.
+`passwd` reseals it with the signing key, and when the old key cannot be opened both are
+replaced. The host answers other shells' key lookups with the public halves only.
+
 ## Server file sharing
 
 `server file -user <name>` checks, before the offer leaves, that the receiver is an
@@ -154,7 +161,8 @@ not repeat it. Public offers (`-all`) are not gated by it.
 ## Storage and migration
 
 The account store (`userland/shell/fl_users.db`, or `FL_USERS_DB_PATH`) gains `key_id`,
-`created_by`, `created_at`, `signing_public` and `signing_sealed` columns and a `bridges`
+`created_by`, `created_at`, `signing_public`, `signing_sealed`, `box_public` and `box_sealed`
+columns and a `bridges`
 table (with `nonce`, `request_sig` and `accept_sig`), added in place. A store
 written before heritage is migrated on its first load: `root` becomes the master `Root`,
 `flinstone` becomes `Flinstone` (`Root.Flinstone`), and every other account is placed
@@ -168,8 +176,8 @@ the migration also adds `Alternative`.
 
 - **The account store and bridge table** are still SQLite code in C. The key-id rules, key
   sealing and the bridge signatures come from Rust.
-- **Encryption keys and sealed file letters.** Accounts have signing keys only. File payloads
-  still travel as they did; sealing them is the plan in `docs/FILE_SHARING_KEYQUORUM.md`.
+- **Sealed file letters** travel only through co-signed delivery (`server file send -t`).
+  Plain `server file` offers still carry the file as they did.
 - **Public offers** (`server file -all`) are not gated, and do not yet need the host's
   signature.
 - **The freestanding kernel and the browser lab** use the canonical `Flinstone` and `Root`

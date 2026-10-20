@@ -550,6 +550,12 @@ fl_result_t fl_net_client_send_private(fl_net_client_t *client,
                                      payload, (uint16_t)(4u + tlen));
 }
 
+static fl_net_client_kq_hook_fn s_kq_hook;
+
+void fl_net_client_set_kq_hook(fl_net_client_kq_hook_fn hook) {
+    s_kq_hook = hook;
+}
+
 fl_net_server_event_kind_t
 fl_net_client_dispatch_frame(fl_net_client_t *client, uint8_t opcode,
                               const uint8_t *payload, uint16_t plen,
@@ -564,6 +570,11 @@ fl_net_client_dispatch_frame(fl_net_client_t *client, uint8_t opcode,
         return FL_NET_SERVER_EVENT_NONE;
 
     kind = opcode_to_event(opcode);
+    if (fl_net_session_is_kq_opcode(opcode)) {
+        if (s_kq_hook)
+            s_kq_hook(client, opcode, payload, plen);
+        return FL_NET_SERVER_EVENT_NONE;
+    }
     if (opcode == (uint8_t)FL_NET_SESSION_OP_FILE_CHUNK) {
         (void)fl_net_file_store_chunk(payload, plen);
         return FL_NET_SERVER_EVENT_NONE;

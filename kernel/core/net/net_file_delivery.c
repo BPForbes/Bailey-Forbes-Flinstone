@@ -6,6 +6,7 @@
 #include "net_pkt_channel_meta.h"
 #include "server_shared_db.h"
 #include "server_shared_fs.h"
+#include "fl/mem_asm.h"
 
 #include <openssl/sha.h>
 #include <stdio.h>
@@ -1367,9 +1368,9 @@ fl_result_t fl_net_file_store_done(const uint8_t *payload, uint16_t plen)
         if (!SHA256(slot->file_data, slot->file_len, checksum))
             return FL_RESULT_ERR;
         if ((file_checksum_present(slot->offer.checksum) &&
-             memcmp(checksum, slot->offer.checksum, sizeof(checksum)) != 0) ||
+             !asm_mem_ct_equal(checksum, slot->offer.checksum, sizeof(checksum))) ||
             (file_checksum_present(done.checksum) &&
-             memcmp(checksum, done.checksum, sizeof(checksum)) != 0))
+             !asm_mem_ct_equal(checksum, done.checksum, sizeof(checksum))))
             return FL_RESULT_INVAL;
     }
 

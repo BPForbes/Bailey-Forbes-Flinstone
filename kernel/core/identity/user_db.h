@@ -38,6 +38,14 @@ typedef struct fl_user_record {
     int           has_key;
     unsigned char signing_public[FL_USER_SIGNING_PUBLIC_LEN];
     unsigned char signing_sealed[FL_USER_SIGNING_SEALED_LEN];
+    /**
+     * The account's box key (X25519, kq_account_box_keygen): what co-signed file
+     * letters are sealed to. Sealed under the password like the signing key and
+     * created with it; has_box is 0 until the account next signs in.
+     */
+    int           has_box;
+    unsigned char box_public[FL_USER_SIGNING_PUBLIC_LEN];
+    unsigned char box_sealed[FL_USER_SIGNING_SEALED_LEN];
 } fl_user_record_t;
 
 #define FL_USER_DB_MAX_USERS 32u
@@ -118,5 +126,14 @@ fl_result_t fl_user_db_open_key(const fl_user_db_t *db, const char *name, const 
                                 unsigned char *secret);
 /** The signing public key of key_id, or NULL when the account has none. */
 const unsigned char *fl_user_db_signing_public(const fl_user_db_t *db, const char *key_id);
+/**
+ * Opens the box key of the account named name with its password into secret
+ * (FL_USER_SIGNING_SECRET_LEN bytes). ACCES for a wrong password, NOENT when the
+ * account has no box key. The caller wipes secret.
+ */
+fl_result_t fl_user_db_open_box(const fl_user_db_t *db, const char *name, const char *password,
+                                unsigned char *secret);
+/** The box public key of key_id, or NULL when the account has none. */
+const unsigned char *fl_user_db_box_public(const fl_user_db_t *db, const char *key_id);
 
 #endif /* FL_USER_DB_H */
