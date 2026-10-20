@@ -57,8 +57,11 @@ static int bridge_open_actor_key(fl_user_db_t *db, unsigned char *secret) {
         return -1;
     }
     rc = fl_user_db_ensure_key(db, name, pw, &created);
-    if (rc == FL_RESULT_OK && created && fl_session_save_users() != FL_RESULT_OK)
+    if (rc == FL_RESULT_OK && created && fl_session_save_users() != FL_RESULT_OK) {
+        /* A key the store does not hold must not sign anything: drop it. */
+        fl_user_db_forget_key(db, name);
         rc = FL_RESULT_ERR;
+    }
     if (rc == FL_RESULT_OK)
         rc = fl_user_db_open_key(db, name, pw, secret);
     cmd_wipe_password(pw, sizeof(pw));

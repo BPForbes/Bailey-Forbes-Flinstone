@@ -465,6 +465,13 @@ static int test_signed_bridges(void) {
 
     /* ensure_key leaves an existing key alone. */
     ASSERT(fl_user_db_ensure_key(&db, "Bob", "pw", &created) == FL_RESULT_OK && created == 0);
+    /* A key that could not be saved is forgotten, and a later ensure_key makes a new one. */
+    memcpy(before, fl_user_db_signing_public(&db, "Root.Flinstone.Bob"), sizeof before);
+    fl_user_db_forget_key(&db, "Bob");
+    ASSERT(!fl_user_db_signing_public(&db, "Root.Flinstone.Bob"));
+    ASSERT(fl_user_db_open_key(&db, "Bob", "pw", bob) == FL_RESULT_NOENT);
+    ASSERT(fl_user_db_ensure_key(&db, "Bob", "pw", &created) == FL_RESULT_OK && created == 1);
+    ASSERT(memcmp(fl_user_db_signing_public(&db, "Root.Flinstone.Bob"), before, sizeof before) != 0);
 
     mem_domain_zero(bob, sizeof bob);
     mem_domain_zero(ann, sizeof ann);

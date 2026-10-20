@@ -104,6 +104,12 @@ fl_result_t fl_user_db_change_password(fl_user_db_t *db, const char *name,
 fl_result_t fl_user_db_ensure_key(fl_user_db_t *db, const char *name, const char *password,
                                   int *created);
 /**
+ * Drops the signing key of the account named name from memory (has_key 0).
+ * Used to undo fl_user_db_ensure_key when the store could not be saved, so no
+ * signature is ever made with a key the store does not hold.
+ */
+void        fl_user_db_forget_key(fl_user_db_t *db, const char *name);
+/**
  * Opens the signing key of the account named name with its password into secret
  * (FL_USER_SIGNING_SECRET_LEN bytes). ACCES for a wrong password, NOENT when the
  * account has no key. The caller wipes secret.

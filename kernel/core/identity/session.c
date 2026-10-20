@@ -136,10 +136,13 @@ fl_result_t fl_session_login(const char *name, const char *password) {
          * verified seals a new one. A failure here does not block the login; the
          * account simply cannot sign bridges until a later login succeeds.
          */
-        if (fl_user_db_ensure_key(&s_db, name, password, &created) != FL_RESULT_OK)
+        if (fl_user_db_ensure_key(&s_db, name, password, &created) != FL_RESULT_OK) {
             fprintf(stderr, "login: could not create a signing key for %s\n", name);
-        else if (created && fl_user_db_save(&s_db) != FL_RESULT_OK)
+        } else if (created && fl_user_db_save(&s_db) != FL_RESULT_OK) {
+            /* Never keep a key the store does not hold: the next login tries again. */
+            fl_user_db_forget_key(&s_db, name);
             fprintf(stderr, "login: could not save the new signing key for %s\n", name);
+        }
         fl_elevation_revoke_all();
         /* Store the account's own spelling: "login root" signs in as Root. */
         strncpy(s_current, u ? u->name : name, sizeof(s_current) - 1);

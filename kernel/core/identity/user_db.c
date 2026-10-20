@@ -782,6 +782,16 @@ fl_result_t fl_user_db_ensure_key(fl_user_db_t *db, const char *name, const char
     return FL_RESULT_OK;
 }
 
+void fl_user_db_forget_key(fl_user_db_t *db, const char *name) {
+    fl_user_record_t *u = find_mut(db, name);
+
+    if (!u)
+        return;
+    u->has_key = 0;
+    mem_domain_zero(u->signing_public, sizeof u->signing_public);
+    mem_domain_zero(u->signing_sealed, sizeof u->signing_sealed);
+}
+
 fl_result_t fl_user_db_open_key(const fl_user_db_t *db, const char *name, const char *password,
                                 unsigned char *secret) {
     const fl_user_record_t *u;
