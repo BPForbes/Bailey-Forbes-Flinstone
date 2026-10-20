@@ -136,6 +136,10 @@
     if (match) return { type: "session", session: Number(match[1]), user: match[2] };
     match = /^SWITCHUSER user=(\S+)$/.exec(text);
     if (match) return { type: "switchuser", user: match[1] };
+    if (text === "SERVER_FILE_ACCEPT") return { type: "file-accept" };
+    if (text === "SERVER_FILE_DECLINE") return { type: "file-decline" };
+    match = /^SERVER_FILE (\S+) (\S+) ((?:[0-9a-f]{2})*)$/.exec(text);
+    if (match) return { type: "file", to: match[1], name: match[2], bytes: hexToBytes(match[3]) };
     match = /^SERVER_RELAY (\S+)(?: (.*))?$/.exec(text);
     if (match) {
       if (match[1] === "dns")
@@ -147,6 +151,32 @@
     match = /^LAB_NETMODE (lab|live)$/.exec(text);
     if (match) return { type: "netmode", mode: match[1] };
     return null;
+  }
+  function hexToBytes(hex) {
+    const out = new Uint8Array(hex.length / 2);
+    for (let i = 0; i < out.length; i++) out[i] = parseInt(hex.slice(i * 2, i * 2 + 2), 16);
+    return out;
+  }
+  function bytesToHex(bytes) {
+    let hex = "";
+    for (const b of bytes) hex += b.toString(16).padStart(2, "0");
+    return hex;
+  }
+  /* The guest's line buffer is 128 characters, so a received file is typed in short parts. */
+  const FILE_RECV_HEX_PER_LINE = 96;
+  function fileRecvLines(from, name, bytes) {
+    if (!guestUserNameOk(from) || !/^[A-Za-z0-9._-]{1,19}$/.test(name) || name === "." || name === "..")
+      return "";
+    const hex = bytesToHex(bytes || new Uint8Array(0));
+    let lines = `filerecv begin ${from} ${name}\n`;
+    for (let i = 0; i < hex.length; i += FILE_RECV_HEX_PER_LINE)
+      lines += `filerecv data ${hex.slice(i, i + FILE_RECV_HEX_PER_LINE)}\n`;
+    return lines + "filerecv end\n";
+  }
+  /* The answer to `server file accept`: every waiting file in order, or a line saying there are none. */
+  function fileAcceptLines(files) {
+    const lines = (files || []).map(f => fileRecvLines(f.from, f.name, f.bytes)).join("");
+    return lines || "filerecv none\n";
   }
   function labDnsNameOk(name) {
     return typeof name === "string" && name.length > 0 && name.length <= 253 &&
@@ -184,5 +214,5 @@
     return `session new\nswitchuser ${user}\n`;
   }
 
-  return { STATES, validateManifest, isTrustedReadyEvent, createController, validDiagnosticVga, exactSerialLine, parseGuestLine, labDnsNameOk, labDnsRequestUrl, isFormTypingTarget, guestUserNameOk, guestRegisterLines, guestSwitchLines, guestNewSessionLines };
+  return { STATES, validateManifest, isTrustedReadyEvent, createController, validDiagnosticVga, exactSerialLine, parseGuestLine, labDnsNameOk, labDnsRequestUrl, isFormTypingTarget, guestUserNameOk, guestRegisterLines, guestSwitchLines, guestNewSessionLines, hexToBytes, bytesToHex, fileRecvLines, fileAcceptLines };
 });

@@ -67,6 +67,9 @@
   const isBuiltInUser = name => /^(flinstone|root)$/i.test(name);
   let activeSession = 1;
   let relay = null;
+  // Files other users sent, waiting for `server file accept` (each with the principal it was sent to).
+  const MAX_WAITING_FILES = 16;
+  let waitingFiles = [];
   let connectRelay = async () => {};
   let serialLine = "";
   // Lab network mode: when a netlab MitM+RS session is active the guest emits
@@ -221,6 +224,10 @@
         appendChat(event.text);
       } else if (event.type === "roster") {
         renderRoster(event.members);
+      } else if (event.type === "file") {
+        receiveFileFromRelay(event);
+      } else if (event.type === "file-status") {
+        appendChat(`[file] ${event.text}`);
       } else if (event.type === "error") {
         appendChat(`[error] ${event.text}`);
       } else if (event.type === "closed") {
@@ -316,6 +323,50 @@
     }
     await sendGuest(ipv6 ? `dnsack ${host} ${ip} ${ipv6}\n` : `dnsack ${host} ${ip}\n`);
   }
+  async function sendFileToRelay(event) {
+    if (!relay) {
+      appendChat("[file] not sent: no server relay in this runtime");
+      return;
+    }
+    // Lab isolation drops the real network; a file must not leave either.
+    if (labIsolated) {
+      appendChat("[file] not sent: lab-isolated — real network dropped");
+      return;
+    }
+    try {
+      if (!relay.connected) await relay.connect(principal());
+      if (!relay.sendFile(event.to, event.name, event.bytes))
+        appendChat(`[file] not sent: ${event.name}`);
+    } catch (error) {
+      appendChat(`[error] ${error.message || "Relay failed"}`);
+    }
+  }
+  function receiveFileFromRelay(event) {
+    if (!core.fileRecvLines(event.from, event.name, event.bytes)) {
+      appendChat(`[file] refused a file from ${event.from}: unsafe name`);
+      return;
+    }
+    waitingFiles.push({ to: relay.principal, from: event.from, name: event.name, bytes: event.bytes });
+    if (waitingFiles.length > MAX_WAITING_FILES) {
+      const dropped = waitingFiles.shift();
+      appendChat(`[file] too many files waiting; dropped ${dropped.name} from ${dropped.from}`);
+    }
+    appendChat(`[file] ${event.from} sent ${event.name} (${event.bytes.length} bytes) — run \`server file accept\` to save it`);
+  }
+  /* Answers `server file accept|decline` for the session's own user; others' files keep waiting. */
+  async function answerWaitingFiles(accept) {
+    const me = principal();
+    const mine = waitingFiles.filter(f => f.to === me);
+    waitingFiles = waitingFiles.filter(f => f.to !== me);
+    if (!accept) {
+      appendChat(`[file] declined ${mine.length} file(s)`);
+      return;
+    }
+    if (!(await sendGuest(core.fileAcceptLines(mine)))) {
+      waitingFiles = mine.concat(waitingFiles);
+      appendChat("[file] the guest is not ready; the files are still waiting");
+    }
+  }
   async function applyGuestLine(line) {
     const event = core.parseGuestLine(line);
     if (!event) return;
@@ -339,6 +390,14 @@
     }
     if (event.type === "netmode") {
       applyNetmode(event.mode);
+      return;
+    }
+    if (event.type === "file") {
+      await sendFileToRelay(event);
+      return;
+    }
+    if (event.type === "file-accept" || event.type === "file-decline") {
+      await answerWaitingFiles(event.type === "file-accept");
       return;
     }
     if (event.type !== "server" || !relay) return;

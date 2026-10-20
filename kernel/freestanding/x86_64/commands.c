@@ -783,6 +783,230 @@ static int run_net(const char *verb, const char **cursor)
     return 0;
 }
 
+/*
+ * Files between users on the server relay. The guest cannot reach the network itself:
+ * `server file` emits SERVER_FILE <user> <name> <hex> for the page, which sends it over
+ * the relay. A file another user sends waits in the page until `server file accept`
+ * (SERVER_FILE_ACCEPT), which the page answers by typing `filerecv begin|data|end`
+ * lines, as it answers `nslookup` with `dnsack`: only right after a command, never into
+ * a password prompt or a half-typed line. The line buffer is 128 characters, so the
+ * content comes in hex parts. `server file decline` drops what is waiting.
+ */
+#define FILE_NAME_MAX 20 /* one ramfs name, NUL included */
+#define FILE_USER_MAX 16
+
+static int file_user_ok(const char *s)
+{
+    unsigned n = 0;
+    if (!((s[0] >= 'A' && s[0] <= 'Z') || (s[0] >= 'a' && s[0] <= 'z')))
+        return 0;
+    for (; s[n]; ++n) {
+        char c = s[n];
+        if (!((c >= 'A' && c <= 'Z') || (c >= 'a' && c <= 'z') || (c >= '0' && c <= '9') ||
+              c == '_' || c == '-'))
+            return 0;
+    }
+    return n < FILE_USER_MAX;
+}
+
+/* One plain name: letters, digits, '.', '_', '-'; never "." or "..". */
+static int file_name_ok(const char *s)
+{
+    unsigned n = 0;
+    if (!s[0] || str_eq(s, ".") || str_eq(s, ".."))
+        return 0;
+    for (; s[n]; ++n) {
+        char c = s[n];
+        if (!((c >= 'A' && c <= 'Z') || (c >= 'a' && c <= 'z') || (c >= '0' && c <= '9') ||
+              c == '.' || c == '_' || c == '-'))
+            return 0;
+    }
+    return n < FILE_NAME_MAX;
+}
+
+static int hex_val(char c)
+{
+    if (c >= '0' && c <= '9')
+        return c - '0';
+    if (c >= 'a' && c <= 'f')
+        return c - 'a' + 10;
+    return -1;
+}
+
+/* server file -user <name> <path> (either order) | accept | decline */
+static int server_file_send(int session, const char **cursor)
+{
+    static const char digits[] = "0123456789abcdef";
+    char word[FL_FS_RAMFS_PATH];
+    char user[FILE_USER_MAX] = { 0 };
+    char path[FL_FS_RAMFS_PATH] = { 0 };
+    char data[FL_FS_RAMFS_DATA];
+    const char *base;
+    unsigned i;
+    int rc;
+    int more = take_word(cursor, word, sizeof(word));
+
+    if (more && (str_eq(word, "accept") || str_eq(word, "decline"))) {
+        emit(str_eq(word, "accept") ? "SERVER_FILE_ACCEPT\r\n" : "SERVER_FILE_DECLINE\r\n");
+        if (str_eq(word, "decline"))
+            emit("server file: files waiting for you were declined\r\n");
+        return 1;
+    }
+    for (; more; more = take_word(cursor, word, sizeof(word))) {
+        if (str_eq(word, "-user")) {
+            if (!take_word(cursor, word, sizeof(word)) || str_len(word) >= sizeof(user)) {
+                user[0] = 0;
+                break;
+            }
+            str_copy(user, word, sizeof(user));
+        } else if (!path[0] && word[0] != '-') {
+            str_copy(path, word, sizeof(path));
+        } else {
+            path[0] = 0;
+            break;
+        }
+    }
+    if (!user[0] || !path[0]) {
+        emit("usage: server file -user <name> <path> | accept | decline\r\n");
+        return 1;
+    }
+    if (!file_user_ok(user)) {
+        emit("server file: not a user name\r\n");
+        return 1;
+    }
+    rc = fl_fs_ramfs_cat(session, path, data, sizeof(data));
+    if (rc != 0) {
+        fs_status(rc);
+        return 1;
+    }
+    base = path;
+    for (i = 0; path[i]; ++i)
+        if (path[i] == '/')
+            base = path + i + 1;
+    if (!file_name_ok(base)) {
+        emit("server file: the file name must be letters, digits, '.', '_' or '-'\r\n");
+        return 1;
+    }
+    emit("SERVER_FILE ");
+    emit(user);
+    emit(" ");
+    emit(base);
+    emit(" ");
+    for (i = 0; data[i]; ++i) {
+        char pair[3] = { digits[((unsigned char)data[i]) >> 4], digits[((unsigned char)data[i]) & 15], 0 };
+        emit(pair);
+    }
+    emit("\r\n");
+    emit("server file: sending ");
+    emit(base);
+    emit(" to ");
+    emit(user);
+    emit(" (");
+    emit_uint(i);
+    emit(" bytes)\r\n");
+    return 1;
+}
+
+static struct {
+    int open;
+    char from[FILE_USER_MAX];
+    char name[FILE_NAME_MAX];
+    char data[FL_FS_RAMFS_DATA];
+    unsigned len;
+} s_file_rx[FL_FS_MAX_SESSIONS];
+
+/* filerecv begin <from> <name> | data <hex> | end: a file another user sent (typed by the page). */
+static int run_filerecv(int session, const char *verb, const char **cursor)
+{
+    char sub[8];
+    char a[FL_FS_RAMFS_PATH];
+    char b[FL_FS_RAMFS_PATH];
+    if (!str_eq(verb, "filerecv"))
+        return 0;
+    if (session < 0 || session >= FL_FS_MAX_SESSIONS || !take_word(cursor, sub, sizeof(sub))) {
+        emit("usage: filerecv begin <from> <name> | data <hex> | end | none\r\n");
+        return 1;
+    }
+    if (str_eq(sub, "none")) {
+        emit("server file: no files waiting\r\n");
+        return 1;
+    }
+    if (str_eq(sub, "begin")) {
+        s_file_rx[session].open = 0;
+        if (!take_word(cursor, a, sizeof(a)) || !take_word(cursor, b, sizeof(b)) ||
+            !file_user_ok(a) || !file_name_ok(b)) {
+            emit("filerecv: refused (bad sender or file name)\r\n");
+            return 1;
+        }
+        str_copy(s_file_rx[session].from, a, sizeof(s_file_rx[session].from));
+        str_copy(s_file_rx[session].name, b, sizeof(s_file_rx[session].name));
+        s_file_rx[session].len = 0;
+        s_file_rx[session].data[0] = 0;
+        s_file_rx[session].open = 1;
+        return 1;
+    }
+    if (str_eq(sub, "data")) {
+        char hex[128]; /* one typed line holds at most this much */
+        unsigned i;
+        if (!s_file_rx[session].open)
+            return 1;
+        if (!take_word(cursor, hex, sizeof(hex)))
+            hex[0] = 0;
+        skip_spaces(cursor);
+        if (**cursor) { /* a part longer than the buffer was cut: refuse, never truncate */
+            s_file_rx[session].open = 0;
+            emit("filerecv: refused (bad or oversized content)\r\n");
+            return 1;
+        }
+        for (i = 0; hex[i]; i += 2) {
+            int hi = hex_val(hex[i]);
+            int lo = hex[i + 1] ? hex_val(hex[i + 1]) : -1;
+            /* ramfs holds text: no NUL, and never more than one file holds */
+            if (hi < 0 || lo < 0 || (hi | lo) == 0 ||
+                s_file_rx[session].len + 1 >= FL_FS_RAMFS_DATA) {
+                s_file_rx[session].open = 0;
+                emit("filerecv: refused (bad or oversized content)\r\n");
+                return 1;
+            }
+            s_file_rx[session].data[s_file_rx[session].len++] = (char)((hi << 4) | lo);
+        }
+        s_file_rx[session].data[s_file_rx[session].len] = 0;
+        return 1;
+    }
+    if (str_eq(sub, "end")) {
+        int rc;
+        if (!s_file_rx[session].open)
+            return 1;
+        s_file_rx[session].open = 0;
+        /* Never replace a file: the sender cannot see what the recipient holds. */
+        rc = fl_fs_ramfs_cat(session, s_file_rx[session].name, b, sizeof(b));
+        if (rc != -1) {
+            emit("filerecv: ");
+            emit(s_file_rx[session].name);
+            emit(" from ");
+            emit(s_file_rx[session].from);
+            emit(rc == 0 ? " not saved: a file with that name exists\r\n" : " not saved\r\n");
+            return 1;
+        }
+        rc = fl_fs_ramfs_write(session, s_file_rx[session].name, s_file_rx[session].data);
+        if (rc != 0) {
+            fs_status(rc);
+            return 1;
+        }
+        loc_add(s_file_rx[session].name);
+        emit("received ");
+        emit(s_file_rx[session].name);
+        emit(" from ");
+        emit(s_file_rx[session].from);
+        emit(" (");
+        emit_uint(s_file_rx[session].len);
+        emit(" bytes)\r\n");
+        return 1;
+    }
+    emit("usage: filerecv begin <from> <name> | data <hex> | end | none\r\n");
+    return 1;
+}
+
 #ifdef FL_SECFEAT
 /* netlab helpers defined further below; run_server reacts to server lifecycle. */
 static void nl_pick_host(void);
@@ -868,6 +1092,8 @@ static int run_server(int session, const char *verb, const char **cursor)
         }
     }
 #endif /* FL_SECFEAT */
+    if (str_eq(sub, "file"))
+        return server_file_send(session, cursor);
     skip_spaces(cursor);
     emit("SERVER_RELAY ");
     emit(sub);
@@ -1778,6 +2004,7 @@ static int run_meta(int session, const char *verb, const char **cursor)
         emit("netlab pod create|join|members|host|leave (real account) | listen|accept|end  (`netlab help` for all)\r\n");
 #endif
         emit("server version contracts audit redirect rerun help history his cc clear exit bios\r\n");
+        emit("server file -user <name> <path> | accept | decline  (files with users on the server)\r\n");
         emit("lab analogs: ramfs, cluster disk, lab net, P3 relay. Hosted FAT32/sockets stay on the ELF shell.\r\n");
         return 1;
     }
@@ -1910,7 +2137,7 @@ int fl_fs_commands_run(int session, const char *verb, const char **cursor)
 #ifdef FL_SECFEAT
         run_netlab(session, verb, cursor) ||
 #endif
-        run_server(session, verb, cursor))
+        run_server(session, verb, cursor) || run_filerecv(session, verb, cursor))
         return 1;
     return 0;
 }

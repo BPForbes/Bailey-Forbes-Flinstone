@@ -49,6 +49,22 @@ After that marker the guest is an interactive lab shell, not the hosted ELF:
   8767` uses the Node hub. If the hub is down, the page falls back to a
   same-origin BroadcastChannel (tabs on one machine only). Sending a chat line
   emits it once (the sender's local echo is the same event path as peer delivery).
+- `server file -user <name> <path>` sends a ramfs file to another user on the
+  server. The guest prints `SERVER_FILE <user> <name> <hex>`; the page sends it
+  as one `FILE_OFFER` frame (`who_len`, `who`, `name_len`, `name`, a big-endian
+  `u16` size, then the bytes), and the relay delivers it only to that user's
+  sessions, never to the whole room. The chat panel says whether it was sent or
+  that the user is not connected. On the recipient's side the file waits in the
+  page (the chat panel names the sender) until that user runs `server file accept`,
+  or `server file decline` to drop it. Only then does the page type the file into the
+  guest, as `filerecv begin <from> <name>`, `filerecv data <hex>` (in parts that fit
+  the 128-character line) and `filerecv end`, the way it answers `nslookup` with
+  `dnsack`, so nothing is ever typed into a password prompt or a half-typed line.
+  The file is saved in the current directory and the shell prints `received <name>
+  from <user>`. A file is never saved over an existing one, names are a single
+  plain component, lab files are text of at most 159 bytes, and at most 16 files
+  wait at once (the oldest is dropped, with a note). Lab isolation (`netlab start`)
+  stops files as well as chat.
 - Switch user / Register user / Guest commands send one shell line at a time
   and wait for serial (`SWITCHUSER`, `Password:`, `ok`) so `useradd` can prompt.
   A connected relay seat reconnects as the new principal after `switchuser`.

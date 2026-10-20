@@ -59,7 +59,51 @@
     return ((payload[offset] << 8) | payload[offset + 1]) >>> 0;
   }
 
-  const api = { OP, HDR_LEN, encodeFrame, FrameParser, payloadText, memberIdFromPayload };
+  /*
+   * FILE_OFFER payload, one frame per file (lab files fit one frame):
+   *   who_len u8, who, name_len u8, name, size u16 big-endian, bytes[size]
+   * Sent to the relay, `who` is the recipient; delivered by the relay, it is the sender.
+   */
+  function encodeFileOffer(who, name, bytes) {
+    const w = new TextEncoder().encode(String(who || ""));
+    const n = new TextEncoder().encode(String(name || ""));
+    const data = bytes instanceof Uint8Array ? bytes : new Uint8Array(0);
+    if (!w.length || w.length > 255 || !n.length || n.length > 255 || data.length > 0xffff) return null;
+    const out = new Uint8Array(1 + w.length + 1 + n.length + 2 + data.length);
+    let off = 0;
+    out[off++] = w.length;
+    out.set(w, off);
+    off += w.length;
+    out[off++] = n.length;
+    out.set(n, off);
+    off += n.length;
+    out[off++] = (data.length >> 8) & 0xff;
+    out[off++] = data.length & 0xff;
+    out.set(data, off);
+    return out;
+  }
+
+  function decodeFileOffer(payload) {
+    if (!payload || payload.length < 1) return null;
+    let off = 0;
+    const wlen = payload[off++];
+    if (!wlen || off + wlen + 1 > payload.length) return null;
+    const who = payloadText(payload.slice(off, off + wlen));
+    off += wlen;
+    const nlen = payload[off++];
+    if (!nlen || off + nlen + 2 > payload.length) return null;
+    const name = payloadText(payload.slice(off, off + nlen));
+    off += nlen;
+    const size = (payload[off] << 8) | payload[off + 1];
+    off += 2;
+    if (off + size !== payload.length) return null;
+    return { who, name, bytes: payload.slice(off) };
+  }
+
+  const api = {
+    OP, HDR_LEN, encodeFrame, FrameParser, payloadText, memberIdFromPayload,
+    encodeFileOffer, decodeFileOffer,
+  };
   if (typeof module === "object" && module.exports) module.exports = api;
   else globalThis.FlintstoneSessionWire = api;
 })();
