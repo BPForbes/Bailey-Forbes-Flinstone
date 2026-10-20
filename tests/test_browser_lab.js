@@ -2,7 +2,7 @@
 const assert = require("assert");
 const fs = require("fs");
 const vm = require("vm");
-const { STATES, validateManifest, isTrustedReadyEvent, createController, validDiagnosticVga, parseGuestLine, labDnsNameOk, labDnsRequestUrl, isFormTypingTarget, guestUserNameOk, guestRegisterLines, guestSwitchLines, guestNewSessionLines } = require("../tools/browser-lab/lab-core.js");
+const { STATES, validateManifest, isTrustedReadyEvent, createController, validDiagnosticVga, parseGuestLine, labDnsNameOk, labDnsRequestUrl, isFormTypingTarget, guestUserNameOk, guestRegisterLines, guestSwitchLines, guestNewSessionLines, hexToBytes, bytesToHex, fileRecvLines, fileAcceptLines } = require("../tools/browser-lab/lab-core.js");
 const { createQmpClient } = require("../tools/browser-lab/qmp-client.js");
 const commit = "1".repeat(40);
 const evidence = {
@@ -49,6 +49,32 @@ assert.deepStrictEqual(parseGuestLine("SERVER_RELAY announce hi"), { type: "serv
 assert.deepStrictEqual(parseGuestLine("SERVER_RELAY kill"), { type: "server", op: "kill" });
 assert.deepStrictEqual(parseGuestLine("SERVER_RELAY dns example.com"), { type: "dns", host: "example.com" });
 assert.strictEqual(parseGuestLine("WHOAMI flinstone"), null);
+// Sending a file: the guest's SERVER_FILE line becomes a file event with its bytes.
+const fileEvent = parseGuestLine("SERVER_FILE bob note.txt 686920626f62\r");
+assert.deepStrictEqual({ ...fileEvent, bytes: Array.from(fileEvent.bytes) },
+                       { type: "file", to: "bob", name: "note.txt", bytes: Array.from(new TextEncoder().encode("hi bob")) });
+assert.strictEqual(parseGuestLine("SERVER_FILE bob note.txt 6"), null, "odd hex is not a file");
+assert.strictEqual(parseGuestLine("SERVER_FILE bob note.txt 6G"), null);
+assert.strictEqual(bytesToHex(hexToBytes("00ff10")), "00ff10");
+// Receiving one: typed into the guest in parts that fit its 128-character line.
+const big = new Uint8Array(150).fill(0x61);
+const recv = fileRecvLines("alice", "got.txt", big).split("\n").filter(Boolean);
+assert.strictEqual(recv[0], "filerecv begin alice got.txt");
+assert.strictEqual(recv[recv.length - 1], "filerecv end");
+assert(recv.every(line => line.length < 128), "every line fits the guest's buffer");
+assert.strictEqual(recv.slice(1, -1).map(l => l.slice("filerecv data ".length)).join(""), bytesToHex(big));
+assert.strictEqual(fileRecvLines("alice", "../evil", big), "", "a path is never typed into the guest");
+assert.strictEqual(fileRecvLines("a b", "got.txt", big), "");
+// Accepting: waiting files are typed only in answer to `server file accept`.
+assert.deepStrictEqual(parseGuestLine("SERVER_FILE_ACCEPT\r"), { type: "file-accept" });
+assert.deepStrictEqual(parseGuestLine("SERVER_FILE_DECLINE"), { type: "file-decline" });
+assert.strictEqual(fileAcceptLines([]), "filerecv none\n");
+const two = fileAcceptLines([
+  { from: "alice", name: "a.txt", bytes: new TextEncoder().encode("A") },
+  { from: "carol", name: "c.txt", bytes: new TextEncoder().encode("C") },
+]);
+assert.strictEqual(two, "filerecv begin alice a.txt\nfilerecv data 41\nfilerecv end\n" +
+                        "filerecv begin carol c.txt\nfilerecv data 43\nfilerecv end\n");
 assert(labDnsNameOk("example.com"));
 assert(labDnsNameOk("bailey-forbes.com"));
 assert(!labDnsNameOk("bad host"));

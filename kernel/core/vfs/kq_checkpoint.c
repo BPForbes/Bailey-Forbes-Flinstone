@@ -1,4 +1,5 @@
 #include "kq_checkpoint.h"
+#include "contract_p2_heritage.h"
 #include "server_shared_fs.h"
 
 #include <errno.h>
@@ -127,8 +128,25 @@ typedef struct {
 } kq_out_t;
 
 /*
+ * Keeps path as bak. A hard link costs nothing; a file system without links (the browser
+ * lab's in-memory one refuses them) gets a copy instead, wiped from memory after.
+ */
+static int backup_file(const char *path, const char *bak) {
+    fl_kq_buf_t copy = {0};
+    int rc;
+
+    if (link(path, bak) == 0)
+        return 0;
+    if (read_all(path, FL_KQ_LETTER_MAX, &copy) != 0)
+        return -1;
+    rc = fl_fs_write_file_atomic(bak, copy.data, copy.len);
+    fl_kq_buf_free(&copy);
+    return rc;
+}
+
+/*
  * Replaces every file in out[] or none of them. All parts are staged first; then each
- * existing file is kept as a hard-linked <path>.kqbak and the parts are renamed into
+ * existing file is kept as <path>.kqbak (backup_file) and the parts are renamed into
  * place. If a rename fails, the files already replaced are restored from their backups
  * (or removed when they did not exist), so a failure leaves the files as they were.
  */
@@ -157,7 +175,7 @@ static int commit_all(const kq_out_t *out, size_t n) {
         snprintf(bak, sizeof bak, "%s.kqbak", out[i].path);
         unlink(bak);
         had[i] = access(out[i].path, F_OK) == 0;
-        if (had[i] && link(out[i].path, bak) != 0) {
+        if (had[i] && backup_file(out[i].path, bak) != 0) {
             rc = -1;
             break;
         }
@@ -228,7 +246,7 @@ typedef struct {
 /* The signing keys this account store holds for every label the container names; a
  * label it does not know is left out (its signatures then do not count). `extra_label`
  * and `extra_key` add one key the caller vouches for (a sender's key from the host). */
-static void trust_build(const fl_kq_driver_t *drv, const fl_user_db_t *users,
+static void trust_build(const fl_kq_driver_t *drv, const fl_kq_keydir_t *keys,
                         const fl_kq_buf_t *c, const char *extra_label, const uint8_t *extra_key,
                         trust_table_t *t, kq_file_trust_t *out) {
     size_t off = 0;
@@ -245,7 +263,7 @@ static void trust_build(const fl_kq_driver_t *drv, const fl_user_db_t *users,
             if (extra_label && extra_key && strcmp(label, extra_label) == 0)
                 pub = extra_key;
             else
-                pub = fl_user_db_signing_public(users, label);
+                pub = keys->signing_public(keys, label);
             if (pub && len < FL_HERITAGE_KEY_ID_MAX) {
                 memcpy(t->labels[t->n], label, len + 1);
                 t->keys[t->n].label = t->labels[t->n];
@@ -262,11 +280,11 @@ static void trust_build(const fl_kq_driver_t *drv, const fl_user_db_t *users,
 
 /* ---- checkpoints -------------------------------------------------------- */
 
-fl_kq_cp_result_t fl_kq_cp_encode(const fl_user_db_t *users, const char *sender_key,
-                                  const uint8_t sender_signing_secret[32],
-                                  const char *recipient_key,
-                                  const uint8_t recipient_box_public[32], const char *path,
-                                  const char *created_at_utc, fl_kq_encoded_t *out) {
+fl_kq_cp_result_t fl_kq_cp_encode_with(const fl_kq_keydir_t *keys, const char *sender_key,
+                                       const uint8_t sender_signing_secret[32],
+                                       const char *recipient_key,
+                                       const uint8_t recipient_box_public[32], const char *path,
+                                       const char *created_at_utc, fl_kq_encoded_t *out) {
     const fl_kq_driver_t *drv = fl_kq_driver_get();
     const unsigned char *sender_box;
     char container_path[4096];
@@ -279,14 +297,14 @@ fl_kq_cp_result_t fl_kq_cp_encode(const fl_user_db_t *users, const char *sender_
     fl_kq_cp_result_t rc = FL_KQ_CP_OK;
     int st;
 
-    if (!out || !users || !sender_key || !sender_signing_secret || !recipient_key ||
+    if (!out || !keys || !sender_key || !sender_signing_secret || !recipient_key ||
         !recipient_box_public || !path || !created_at_utc)
         return FL_KQ_CP_INVALID;
     memset(out, 0, sizeof *out);
     if (!drv)
         return FL_KQ_CP_NO_DRIVER;
-    sender_box = fl_user_db_box_public(users, sender_key);
-    if (!sender_box || !fl_user_db_signing_public(users, sender_key))
+    sender_box = keys->box_public(keys, sender_key);
+    if (!sender_box || !keys->signing_public(keys, sender_key))
         return FL_KQ_CP_NO_KEY;
     if (sidecar(path, FL_KQ_CONTAINER_SUFFIX, container_path, sizeof container_path) != 0)
         return FL_KQ_CP_INVALID;
@@ -326,7 +344,7 @@ fl_kq_cp_result_t fl_kq_cp_encode(const fl_user_db_t *users, const char *sender_
         rc = FL_KQ_CP_BAD_SIGNATURE;
         goto done;
     }
-    trust_build(drv, users, &next, NULL, NULL, &table, &trust);
+    trust_build(drv, keys, &next, NULL, NULL, &table, &trust);
     st = drv->seal(&next, rev, &trust, sender_key, sender_signing_secret, sender_box,
                    recipient_key, recipient_box_public, &out->letter, out->delivery_id);
     if (st == KQ_FILE_UNTRUSTED) {
@@ -353,32 +371,33 @@ done:
     return rc;
 }
 
-fl_kq_cp_result_t fl_kq_cp_admit_offer(const fl_user_db_t *users, const char *author_key,
-                                       const kq_file_offer_t *offer) {
+fl_kq_cp_result_t fl_kq_cp_admit_offer_with(const fl_kq_keydir_t *keys, const char *author_key,
+                                            const kq_file_offer_t *offer) {
     const fl_kq_driver_t *drv = fl_kq_driver_get();
     const unsigned char *pub;
 
-    if (!users || !author_key || !offer)
+    if (!keys || !author_key || !offer)
         return FL_KQ_CP_INVALID;
     if (!drv)
         return FL_KQ_CP_NO_DRIVER;
-    pub = fl_user_db_signing_public(users, author_key);
+    pub = keys->signing_public(keys, author_key);
     if (!pub)
         return FL_KQ_CP_NO_KEY;
     return drv->offer_verify(offer, author_key, pub) == KQ_FILE_OK ? FL_KQ_CP_OK
                                                                     : FL_KQ_CP_BAD_SIGNATURE;
 }
 
-fl_kq_cp_result_t fl_kq_cp_admit_cosign(const fl_user_db_t *users, const char *recipient_key,
-                                        const kq_file_offer_t *offer, const uint8_t sig[64]) {
+fl_kq_cp_result_t fl_kq_cp_admit_cosign_with(const fl_kq_keydir_t *keys,
+                                             const char *recipient_key,
+                                             const kq_file_offer_t *offer, const uint8_t sig[64]) {
     const fl_kq_driver_t *drv = fl_kq_driver_get();
     const unsigned char *pub;
 
-    if (!users || !recipient_key || !offer || !sig)
+    if (!keys || !recipient_key || !offer || !sig)
         return FL_KQ_CP_INVALID;
     if (!drv)
         return FL_KQ_CP_NO_DRIVER;
-    pub = fl_user_db_signing_public(users, recipient_key);
+    pub = keys->signing_public(keys, recipient_key);
     if (!pub)
         return FL_KQ_CP_NO_KEY;
     return drv->cosign_verify(offer, recipient_key, pub, sig) == KQ_FILE_OK
@@ -463,11 +482,11 @@ static int local_holds(const fl_kq_driver_t *drv, const char *container_path,
     return rc == KQ_FILE_NO_REVISION ? 0 : -2;
 }
 
-fl_kq_cp_result_t fl_kq_cp_decode(const fl_user_db_t *users, const char *sender_key,
-                                  const uint8_t sender_signing_public[32], const char *me_key,
-                                  const uint8_t box_secret[32], const fl_kq_buf_t *letter,
-                                  const kq_file_offer_t *offer, const uint8_t my_sig[64],
-                                  const char *dest_path) {
+fl_kq_cp_result_t fl_kq_cp_decode_with(const fl_kq_keydir_t *keys, const char *sender_key,
+                                       const uint8_t sender_signing_public[32],
+                                       const char *me_key, const uint8_t box_secret[32],
+                                       const fl_kq_buf_t *letter, const kq_file_offer_t *offer,
+                                       const uint8_t my_sig[64], const char *dest_path) {
     const fl_kq_driver_t *drv = fl_kq_driver_get();
     char container_path[4096];
     char seen_path[4096];
@@ -486,7 +505,7 @@ fl_kq_cp_result_t fl_kq_cp_decode(const fl_user_db_t *users, const char *sender_
     fl_kq_cp_result_t rc = FL_KQ_CP_OK;
     int st;
 
-    if (!users || !sender_key || !sender_signing_public || !me_key || !box_secret || !letter ||
+    if (!keys || !sender_key || !sender_signing_public || !me_key || !box_secret || !letter ||
         !offer || !my_sig || !dest_path)
         return FL_KQ_CP_INVALID;
     if (!drv)
@@ -513,7 +532,7 @@ fl_kq_cp_result_t fl_kq_cp_decode(const fl_user_db_t *users, const char *sender_
         rc = FL_KQ_CP_BAD_SIGNATURE;
         goto done;
     }
-    trust_build(drv, users, &cosigned, sender_key, sender_signing_public, &table, &trust);
+    trust_build(drv, keys, &cosigned, sender_key, sender_signing_public, &table, &trust);
     st = drv->readiness(&cosigned, rev, me_key, &trust, &have, &need);
     if (st == KQ_FILE_FORKED) {
         rc = FL_KQ_CP_FORKED;

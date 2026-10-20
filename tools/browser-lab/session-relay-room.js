@@ -1,5 +1,8 @@
 "use strict";
-const { OP, encodeFrame, FrameParser, payloadText } = require("./session-wire.js");
+const {
+  OP, LAB, encodeFrame, FrameParser, payloadText, encodeFileOffer, decodeFileOffer,
+  encodeKqRoute, decodeKqRoute, sameName,
+} = require("./session-wire.js");
 
 const MAX_MEMBERS = OP.FL_NET_SESSION_MAX_MEMBERS;
 const MAX_MSG = OP.FL_NET_SESSION_MAX_MSG;
@@ -11,6 +14,16 @@ function sendBinary(socket, frame) {
   try {
     socket.send(frame);
   } catch (_) { /* ignore */ }
+}
+
+/* A file name the relay will pass on: one plain path component, printable. */
+function plainFileName(name) {
+  if (typeof name !== "string" || !name || name.length > 64 || name === "." || name === "..") return false;
+  for (const ch of name) {
+    const c = ch.codePointAt(0);
+    if (c < 0x20 || c === 0x7f || ch === "/" || ch === "\\") return false;
+  }
+  return true;
 }
 
 function renderDisplay(member, members) {
@@ -79,6 +92,9 @@ class Room {
     if (!member || !this.members.includes(member)) return;
     const display = renderDisplay(member, this.members);
     this.members = this.members.filter(m => m !== member);
+    // The server keeps a host: the earliest member left takes over (KeyQuorum deliveries the
+    // old host held are gone with it).
+    if (member.isHost && this.members.length) this.members[0].isHost = true;
     recomputeDisambig(this.members);
     const line = `${display} has left.`;
     const frame = encodeFrame(OP.FL_NET_SESSION_OP_LEAVE_ANNOUNCE, line);
@@ -90,6 +106,67 @@ class Room {
     const body = new TextEncoder().encode(line.slice(0, MAX_MSG));
     const frame = encodeFrame(OP.FL_NET_SESSION_OP_MSG_BROADCAST, body);
     if (frame) this.broadcast(frame, from.memberId);
+  }
+  sendStatus(member, text) {
+    sendBinary(member.socket, encodeFrame(LAB.FILE_STATUS, text.slice(0, MAX_MSG)));
+  }
+  /* Delivers a file to every other live session of the named principal; never broadcast. */
+  relayFile(from, payload) {
+    const offer = decodeFileOffer(payload);
+    if (!offer || !plainFileName(offer.name)) {
+      this.sendStatus(from, "file refused: malformed offer");
+      return;
+    }
+    const targets = this.live().filter(m => m !== from && sameName(m.principal, offer.who));
+    if (!targets.length) {
+      this.sendStatus(from, `file not sent: ${offer.who} is not connected`);
+      return;
+    }
+    const frame = encodeFrame(LAB.FILE, encodeFileOffer(from.principal, offer.name, offer.bytes));
+    if (!frame) {
+      this.sendStatus(from, "file refused: too large for one frame");
+      return;
+    }
+    for (const m of targets) sendBinary(m.socket, frame);
+    this.sendStatus(from, `sent ${offer.name} to ${offer.who} (${offer.bytes.length} bytes)`);
+  }
+  host() {
+    return this.live().find(m => m.isHost) || null;
+  }
+  /*
+   * KeyQuorum frames between lab shells (session-wire.js LAB.KQ): a member's go to the host,
+   * stamped with the sender; the host's go to the one member it names. The relay reads only
+   * the route, never the frame.
+   */
+  relayKq(from, payload) {
+    const f = decodeKqRoute(payload);
+    if (!f) return;
+    if (f.toHost) {
+      const host = this.host();
+      const frame = host
+        ? encodeFrame(LAB.KQ, encodeKqRoute(true, from.memberId, f.op, f.bytes))
+        : encodeFrame(LAB.KQ, encodeKqRoute(false, 0, OP.FL_NET_SESSION_OP_ERR,
+                                            new TextEncoder().encode("keyquorum: no server host is connected")));
+      if (frame) sendBinary(host ? host.socket : from.socket, frame);
+      return;
+    }
+    if (!from.isHost) return; // only the host addresses members
+    const to = this.live().find(m => m.memberId === f.memberId);
+    const frame = encodeFrame(LAB.KQ, encodeKqRoute(false, from.memberId, f.op, f.bytes));
+    if (to && frame) sendBinary(to.socket, frame);
+  }
+  /* A member's published public keys, passed to the host as that member's principal. */
+  relayKeys(from, payload) {
+    const host = this.host();
+    if (payload.length !== 64 || !host || host === from) return;
+    const principal = new TextEncoder().encode(from.principal.slice(0, PRINCIPAL_MAX - 1));
+    const body = new Uint8Array(3 + principal.length + 64);
+    body[0] = (from.memberId >> 8) & 0xff;
+    body[1] = from.memberId & 0xff;
+    body[2] = principal.length;
+    body.set(principal, 3);
+    body.set(payload, 3 + principal.length);
+    sendBinary(host.socket, encodeFrame(LAB.KQ_KEYS, body));
   }
   acceptHello(socket, principal) {
     if (this.live().length >= MAX_MEMBERS) {
@@ -118,6 +195,18 @@ class Room {
     if (opcode === OP.FL_NET_SESSION_OP_MSG) {
       if (payload.length === 0 || payload.length > MAX_MSG) return;
       this.relayMsg(member, payload);
+      return;
+    }
+    if (opcode === LAB.FILE) {
+      this.relayFile(member, payload);
+      return;
+    }
+    if (opcode === LAB.KQ) {
+      this.relayKq(member, payload);
+      return;
+    }
+    if (opcode === LAB.KQ_KEYS) {
+      this.relayKeys(member, payload);
       return;
     }
     if (opcode === OP.FL_NET_SESSION_OP_CTRL_LEAVE) {
@@ -164,4 +253,5 @@ function attachSocket(room, socket) {
 
 module.exports = {
   Room, attachSocket, renderDisplay, sendBinary, FrameParser, OP, encodeFrame, payloadText,
+  encodeFileOffer, decodeFileOffer, plainFileName, LAB, encodeKqRoute, decodeKqRoute,
 };

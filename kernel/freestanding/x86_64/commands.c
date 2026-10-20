@@ -5,6 +5,9 @@
 #include "ramfs.h"
 #include "serial.h"
 #include "vga.h"
+#ifdef FL_LAB_KQ
+#include "lab_kq.h" /* tools/browser-lab/wasm: KeyQuorum in the WebAssembly shell */
+#endif
 /* VERSION_LINE of the build: the same header the hosted shell uses, macros only. */
 #include "../../../userland/shell/version_def.h"
 
@@ -783,6 +786,263 @@ static int run_net(const char *verb, const char **cursor)
     return 0;
 }
 
+/*
+ * Files between users on the server relay. The guest cannot reach the network itself:
+ * `server file` emits SERVER_FILE <user> <name> <hex> for the page, which sends it over
+ * the relay. A file another user sends waits in the page until `server file accept`
+ * (SERVER_FILE_ACCEPT), which the page answers by typing `filerecv begin|data|end`
+ * lines, as it answers `nslookup` with `dnsack`: only right after a command, never into
+ * a password prompt or a half-typed line. The line buffer is 128 characters, so the
+ * content comes in hex parts. `server file decline` drops what is waiting.
+ */
+#define FILE_NAME_MAX 20 /* one ramfs name, NUL included */
+/* KeyQuorum needs its Rust library, which only the WebAssembly shell links. */
+#define FILE_KQ_ELSEWHERE \
+    "server file: KeyQuorum co-signed delivery runs in the lab's WebAssembly shell\r\n"
+#define FILE_USER_MAX 16
+
+static int file_user_ok(const char *s)
+{
+    unsigned n = 0;
+    if (!((s[0] >= 'A' && s[0] <= 'Z') || (s[0] >= 'a' && s[0] <= 'z')))
+        return 0;
+    for (; s[n]; ++n) {
+        char c = s[n];
+        if (!((c >= 'A' && c <= 'Z') || (c >= 'a' && c <= 'z') || (c >= '0' && c <= '9') ||
+              c == '_' || c == '-'))
+            return 0;
+    }
+    return n < FILE_USER_MAX;
+}
+
+/* One plain name: letters, digits, '.', '_', '-'; never "." or "..". */
+static int file_name_ok(const char *s)
+{
+    unsigned n = 0;
+    if (!s[0] || str_eq(s, ".") || str_eq(s, ".."))
+        return 0;
+    for (; s[n]; ++n) {
+        char c = s[n];
+        if (!((c >= 'A' && c <= 'Z') || (c >= 'a' && c <= 'z') || (c >= '0' && c <= '9') ||
+              c == '.' || c == '_' || c == '-'))
+            return 0;
+    }
+    return n < FILE_NAME_MAX;
+}
+
+static int hex_val(char c)
+{
+    if (c >= '0' && c <= '9')
+        return c - '0';
+    if (c >= 'a' && c <= 'f')
+        return c - 'a' + 10;
+    return -1;
+}
+
+/* server file -user <name> <path> (either order) | accept | decline */
+static int server_file_send(int session, const char **cursor)
+{
+    static const char digits[] = "0123456789abcdef";
+    char word[FL_FS_RAMFS_PATH];
+    char user[FILE_USER_MAX] = { 0 };
+    char path[FL_FS_RAMFS_PATH] = { 0 };
+    char data[FL_FS_RAMFS_DATA];
+    const char *base;
+    unsigned i;
+    int rc;
+    int kq = 0;
+    int more = take_word(cursor, word, sizeof(word));
+
+    if (more && (str_eq(word, "accept") || str_eq(word, "decline"))) {
+        emit(str_eq(word, "accept") ? "SERVER_FILE_ACCEPT\r\n" : "SERVER_FILE_DECLINE\r\n");
+        if (str_eq(word, "decline"))
+            emit("server file: files waiting for you were declined\r\n");
+        return 1;
+    }
+    if (more && (str_eq(word, "cosign") || str_eq(word, "open"))) {
+        char id[40];
+        int has = take_word(cursor, id, sizeof(id));
+#ifdef FL_LAB_KQ
+        if (str_eq(word, "cosign"))
+            return fl_lab_kq_cosign(session, has ? id : "");
+        if (has)
+            return fl_lab_kq_open(session, id);
+        emit("usage: server file open <delivery>\r\n");
+#else
+        (void)has;
+        emit(FILE_KQ_ELSEWHERE);
+#endif
+        return 1;
+    }
+    /* `send` names the verb as the native shell does; `-t` asks for KeyQuorum co-signing. */
+    if (more && str_eq(word, "send"))
+        more = take_word(cursor, word, sizeof(word));
+    for (; more; more = take_word(cursor, word, sizeof(word))) {
+        if (str_eq(word, "-t")) {
+            kq = 1;
+        } else if (str_eq(word, "-user")) {
+            if (!take_word(cursor, word, sizeof(word)) || str_len(word) >= sizeof(user)) {
+                user[0] = 0;
+                break;
+            }
+            str_copy(user, word, sizeof(user));
+        } else if (!path[0] && word[0] != '-') {
+            str_copy(path, word, sizeof(path));
+        } else {
+            path[0] = 0;
+            break;
+        }
+    }
+    if (!user[0] || !path[0]) {
+        emit("usage: server file [send [-t]] -user <name> <path> | accept | decline | "
+             "cosign [<id>] | open <id>\r\n");
+        return 1;
+    }
+    if (!file_user_ok(user)) {
+        emit("server file: not a user name\r\n");
+        return 1;
+    }
+    if (kq) {
+#ifdef FL_LAB_KQ
+        return fl_lab_kq_send(session, path, user);
+#else
+        emit(FILE_KQ_ELSEWHERE);
+        return 1;
+#endif
+    }
+    rc = fl_fs_ramfs_cat(session, path, data, sizeof(data));
+    if (rc != 0) {
+        fs_status(rc);
+        return 1;
+    }
+    base = path;
+    for (i = 0; path[i]; ++i)
+        if (path[i] == '/')
+            base = path + i + 1;
+    if (!file_name_ok(base)) {
+        emit("server file: the file name must be letters, digits, '.', '_' or '-'\r\n");
+        return 1;
+    }
+    emit("SERVER_FILE ");
+    emit(user);
+    emit(" ");
+    emit(base);
+    emit(" ");
+    for (i = 0; data[i]; ++i) {
+        char pair[3] = { digits[((unsigned char)data[i]) >> 4], digits[((unsigned char)data[i]) & 15], 0 };
+        emit(pair);
+    }
+    emit("\r\n");
+    emit("server file: sending ");
+    emit(base);
+    emit(" to ");
+    emit(user);
+    emit(" (");
+    emit_uint(i);
+    emit(" bytes)\r\n");
+    return 1;
+}
+
+static struct {
+    int open;
+    char from[FILE_USER_MAX];
+    char name[FILE_NAME_MAX];
+    char data[FL_FS_RAMFS_DATA];
+    unsigned len;
+} s_file_rx[FL_FS_MAX_SESSIONS];
+
+/* filerecv begin <from> <name> | data <hex> | end: a file another user sent (typed by the page). */
+static int run_filerecv(int session, const char *verb, const char **cursor)
+{
+    char sub[8];
+    char a[FL_FS_RAMFS_PATH];
+    char b[FL_FS_RAMFS_PATH];
+    if (!str_eq(verb, "filerecv"))
+        return 0;
+    if (session < 0 || session >= FL_FS_MAX_SESSIONS || !take_word(cursor, sub, sizeof(sub))) {
+        emit("usage: filerecv begin <from> <name> | data <hex> | end | none\r\n");
+        return 1;
+    }
+    if (str_eq(sub, "none")) {
+        emit("server file: no files waiting\r\n");
+        return 1;
+    }
+    if (str_eq(sub, "begin")) {
+        s_file_rx[session].open = 0;
+        if (!take_word(cursor, a, sizeof(a)) || !take_word(cursor, b, sizeof(b)) ||
+            !file_user_ok(a) || !file_name_ok(b)) {
+            emit("filerecv: refused (bad sender or file name)\r\n");
+            return 1;
+        }
+        str_copy(s_file_rx[session].from, a, sizeof(s_file_rx[session].from));
+        str_copy(s_file_rx[session].name, b, sizeof(s_file_rx[session].name));
+        s_file_rx[session].len = 0;
+        s_file_rx[session].data[0] = 0;
+        s_file_rx[session].open = 1;
+        return 1;
+    }
+    if (str_eq(sub, "data")) {
+        char hex[128]; /* one typed line holds at most this much */
+        unsigned i;
+        if (!s_file_rx[session].open)
+            return 1;
+        if (!take_word(cursor, hex, sizeof(hex)))
+            hex[0] = 0;
+        skip_spaces(cursor);
+        if (**cursor) { /* a part longer than the buffer was cut: refuse, never truncate */
+            s_file_rx[session].open = 0;
+            emit("filerecv: refused (bad or oversized content)\r\n");
+            return 1;
+        }
+        for (i = 0; hex[i]; i += 2) {
+            int hi = hex_val(hex[i]);
+            int lo = hex[i + 1] ? hex_val(hex[i + 1]) : -1;
+            /* ramfs holds text: no NUL, and never more than one file holds */
+            if (hi < 0 || lo < 0 || (hi | lo) == 0 ||
+                s_file_rx[session].len + 1 >= FL_FS_RAMFS_DATA) {
+                s_file_rx[session].open = 0;
+                emit("filerecv: refused (bad or oversized content)\r\n");
+                return 1;
+            }
+            s_file_rx[session].data[s_file_rx[session].len++] = (char)((hi << 4) | lo);
+        }
+        s_file_rx[session].data[s_file_rx[session].len] = 0;
+        return 1;
+    }
+    if (str_eq(sub, "end")) {
+        int rc;
+        if (!s_file_rx[session].open)
+            return 1;
+        s_file_rx[session].open = 0;
+        /* Never replace a file: the sender cannot see what the recipient holds. */
+        rc = fl_fs_ramfs_cat(session, s_file_rx[session].name, b, sizeof(b));
+        if (rc != -1) {
+            emit("filerecv: ");
+            emit(s_file_rx[session].name);
+            emit(" from ");
+            emit(s_file_rx[session].from);
+            emit(rc == 0 ? " not saved: a file with that name exists\r\n" : " not saved\r\n");
+            return 1;
+        }
+        rc = fl_fs_ramfs_write(session, s_file_rx[session].name, s_file_rx[session].data);
+        if (rc != 0) {
+            fs_status(rc);
+            return 1;
+        }
+        loc_add(s_file_rx[session].name);
+        emit("received ");
+        emit(s_file_rx[session].name);
+        emit(" from ");
+        emit(s_file_rx[session].from);
+        emit(" (");
+        emit_uint(s_file_rx[session].len);
+        emit(" bytes)\r\n");
+        return 1;
+    }
+    emit("usage: filerecv begin <from> <name> | data <hex> | end | none\r\n");
+    return 1;
+}
+
 #ifdef FL_SECFEAT
 /* netlab helpers defined further below; run_server reacts to server lifecycle. */
 static void nl_pick_host(void);
@@ -868,6 +1128,8 @@ static int run_server(int session, const char *verb, const char **cursor)
         }
     }
 #endif /* FL_SECFEAT */
+    if (str_eq(sub, "file"))
+        return server_file_send(session, cursor);
     skip_spaces(cursor);
     emit("SERVER_RELAY ");
     emit(sub);
@@ -1778,6 +2040,8 @@ static int run_meta(int session, const char *verb, const char **cursor)
         emit("netlab pod create|join|members|host|leave (real account) | listen|accept|end  (`netlab help` for all)\r\n");
 #endif
         emit("server version contracts audit redirect rerun help history his cc clear exit bios\r\n");
+        emit("server file -user <name> <path> | accept | decline  (files with users on the server)\r\n");
+        emit("server file send -t <path> -user <name> | cosign [<id>] | open <id>  (KeyQuorum co-signed)\r\n");
         emit("lab analogs: ramfs, cluster disk, lab net, P3 relay. Hosted FAT32/sockets stay on the ELF shell.\r\n");
         return 1;
     }
@@ -1877,6 +2141,9 @@ static void visit_user(const char *name, int elevated, void *ctx)
 
 void fl_fs_commands_init(void)
 {
+#ifdef FL_LAB_KQ
+    fl_lab_kq_init(emit);
+#endif
     s_redir[0] = 0;
     s_audit_n = 0;
     s_loc_n = 0;
@@ -1910,7 +2177,7 @@ int fl_fs_commands_run(int session, const char *verb, const char **cursor)
 #ifdef FL_SECFEAT
         run_netlab(session, verb, cursor) ||
 #endif
-        run_server(session, verb, cursor))
+        run_server(session, verb, cursor) || run_filerecv(session, verb, cursor))
         return 1;
     return 0;
 }
