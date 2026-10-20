@@ -73,13 +73,28 @@ the content, so it counts only the two signatures it can verify.
 
 ```
  L7  cmd_server_file.c verbs ── kq_checkpoint.c (encode · admit · co-sign · decode)
-                                   └─ fl_kq_driver_t (kernel/drivers/keyquorum/kq_driver.c)
+                                   └─ fl_kq_driver_t : fl_driver_desc_t (kernel/drivers/keyquorum/kq_driver.c)
                                         └─ libkeyquorum_identity.a  kq_file_* (Rust)
  L6  sealed KeyQuorum letter (X25519 box to the recipient, Ed25519 signatures)
  L5  session frames, opcodes 0x39-0x3F (net_kq_delivery.c through the net_server/net_client hooks)
  L4- TCP hub, net_socket, asm_net_* — unchanged
- ASM asm_mem_secure_zero (wipe secrets), asm_mem_ct_equal (compare digests and ids)
+ ASM asm_mem_secure_zero : asm_mem_zero (wipe secrets), asm_mem_ct_equal (compare digests and ids)
 ```
+
+### What it extends rather than repeats
+
+Each KeyQuorum piece is a child of something Flinstone already had, in the C sense: the
+parent is the first member (or the routine called first), and the child adds only its own
+part.
+
+| Child | Parent | What the child adds |
+| --- | --- | --- |
+| `fl_kq_driver_t` (`kq_driver.c`) | `fl_driver_desc_t` (`fl/driver/driver.h`), registered with the driver model at shell start | the KeyQuorum ops; the base's lifecycle `probe` checks the library ABI (class `FL_DRV_CLASS_SECURITY`) |
+| `asm_mem_secure_zero`, `mem_domain_secure_zero` | `asm_mem_zero`, `mem_domain_zero` | a barrier (`mfence` / `dmb ish`) after the parent's stores |
+| KeyQuorum upload and inbox slots (`net_kq_delivery.c`) | `fl_part_buf_t` (`net_part_buf.h`), also the base of the server file share slot | offers, co-signatures and release around the ordered, bounded buffer |
+| big-endian wire fields | `net_endian.h` (`asm_net_*`) | the bounds-checked reader and writer |
+| `kq_open_keys`, `bridge_open_actor_key` | `cmd_open_account_keys` (`cmd_authutil.c`) | each command's own messages |
+| the store's and checkpoint's file writes | `fl_fs_mkdir_p`, `fl_fs_stage_file`, `fl_fs_write_file_atomic` (`server_shared_fs.c`) | the all-or-nothing install of a file with its `.kqtf` and `.kqseen` |
 
 Contract: `contracts/drivers/contract_p4_keyquorum.h` (P4-9). Wire: `FL_NET_SESSION_OP_KQ_PART`
 0x39, `_OFFER` 0x3A, `_ANNOUNCE` 0x3B (an empty one from a client is a pull), `_COSIGN` 0x3C,

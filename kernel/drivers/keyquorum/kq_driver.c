@@ -165,14 +165,50 @@ static int drv_freshness(const uint8_t (*seen)[64], size_t nseen, const fl_kq_bu
     return kq_file_freshness(seen, nseen, c->data, c->len, rev, root);
 }
 
-static const fl_kq_driver_t s_kq_driver = {
-    drv_file_new,  drv_check_in,     drv_verify, drv_head,   drv_payload,       drv_signers,
-    drv_merge,     drv_select_read,  drv_offer,  drv_seal,   drv_offer_verify,  drv_cosign,
-    drv_cosign_verify, drv_open,     drv_attach, drv_readiness, drv_freshness,
-    mem_domain_secure_zero, asm_mem_ct_equal,
+/* Lifecycle (the base driver's ops): the probe accepts this driver only when the linked
+ * library speaks the ABI it was written for. There is no device to attach or start. */
+static fl_result_t kq_probe(fl_device_t *dev) {
+    (void)dev;
+    return kq_file_abi_version() == FL_KQ_ABI_VERSION ? FL_RESULT_OK : FL_RESULT_PROBE_SKIP;
+}
+
+static const fl_driver_ops_t s_kq_lifecycle = {
+    .probe = kq_probe,
 };
 
+static const fl_kq_driver_t s_kq_driver = {
+    .base = {
+        .class = FL_DRV_CLASS_SECURITY,
+        .name = "keyquorum",
+        .ops = &s_kq_lifecycle,
+        .synth_id = "keyquorum",
+    },
+    .file_new = drv_file_new,
+    .check_in = drv_check_in,
+    .verify = drv_verify,
+    .head = drv_head,
+    .payload = drv_payload,
+    .signers = drv_signers,
+    .merge = drv_merge,
+    .select_read = drv_select_read,
+    .offer = drv_offer,
+    .seal = drv_seal,
+    .offer_verify = drv_offer_verify,
+    .cosign = drv_cosign,
+    .cosign_verify = drv_cosign_verify,
+    .open = drv_open,
+    .attach = drv_attach,
+    .readiness = drv_readiness,
+    .freshness = drv_freshness,
+    .wipe = mem_domain_secure_zero,
+    .equal = asm_mem_ct_equal,
+};
+
+const fl_driver_desc_t *fl_kq_driver_desc(void) {
+    return &s_kq_driver.base;
+}
+
 const fl_kq_driver_t *fl_kq_driver_get(void) {
-    /* Probe: the library must speak the ABI this driver was written for. */
-    return kq_file_abi_version() == FL_KQ_ABI_VERSION ? &s_kq_driver : NULL;
+    /* Through the base: the KeyQuorum ops are usable only when the lifecycle probe accepts. */
+    return s_kq_driver.base.ops->probe(NULL) == FL_RESULT_OK ? &s_kq_driver : NULL;
 }

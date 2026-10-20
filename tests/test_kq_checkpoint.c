@@ -119,6 +119,22 @@ static int contains(const fl_kq_buf_t *b, const char *needle) {
     return 0;
 }
 
+/* The KeyQuorum driver extends the generic driver: its base is a registrable descriptor
+ * whose lifecycle probe gates the KeyQuorum ops. */
+static int test_driver_extends_the_base_driver(void) {
+    const fl_driver_desc_t *base = fl_kq_driver_desc();
+    const fl_kq_driver_t *drv = fl_kq_driver_get();
+
+    ASSERT(base && drv);
+    ASSERT(base->class == FL_DRV_CLASS_SECURITY);
+    ASSERT(strcmp(base->name, "keyquorum") == 0 && strcmp(base->synth_id, "keyquorum") == 0);
+    ASSERT(base->ops && base->ops->probe && base->ops->probe(NULL) == FL_RESULT_OK);
+    ASSERT(!base->ops->attach && !base->ops->start && !base->ops->stop && !base->ops->detach);
+    /* One object: the base is the driver's first member. */
+    ASSERT(fl_kq_driver_from_desc(base) == drv && &drv->base == base);
+    return 0;
+}
+
 static int test_driver_probe(void) {
     const fl_kq_driver_t *drv = fl_kq_driver_get();
     ASSERT(drv);
@@ -420,6 +436,7 @@ int main(void) {
         if (t() != 0) { rc = 1; fprintf(stderr, "%s failed\n", #t); } \
         else printf("%s... OK\n", #t); \
     } while (0)
+    RUN(test_driver_extends_the_base_driver);
     RUN(test_driver_probe);
     RUN(test_driver_output_may_alias_its_input);
     RUN(test_co_signed_delivery);

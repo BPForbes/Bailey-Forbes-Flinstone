@@ -14,6 +14,7 @@
  */
 
 #include "contract_p4_keyquorum.h"
+#include "fl/driver/driver.h"
 #include "keyquorum_files.h"
 
 #include <stddef.h>
@@ -30,8 +31,16 @@ typedef struct fl_kq_buf {
 
 void fl_kq_buf_free(fl_kq_buf_t *buf);
 
+/*
+ * A KeyQuorum driver is a Flinstone driver: its first member is the generic descriptor
+ * (fl/driver/driver.h: class FL_DRV_CLASS_SECURITY, name and synthetic id "keyquorum", and
+ * the lifecycle ops whose probe checks the library ABI), so the driver registry holds it like
+ * any other driver. The members after it are what this driver adds: the KeyQuorum ops.
+ */
 typedef struct fl_kq_driver fl_kq_driver_t;
 struct fl_kq_driver {
+    fl_driver_desc_t base;
+
     /* Tracked file. */
     int (*file_new)(const uint8_t file_id[16], const char *name, const char *scope_root,
                     fl_kq_buf_t *out);
@@ -84,6 +93,12 @@ struct fl_kq_driver {
  * NULL when it does not (nothing is then signed, sealed or opened).
  */
 const fl_kq_driver_t *fl_kq_driver_get(void);
+/** The driver as its base descriptor, for fl_driver_registry_register. */
+const fl_driver_desc_t *fl_kq_driver_desc(void);
+/** Back from the base descriptor to the KeyQuorum driver (base is the first member). */
+static inline const fl_kq_driver_t *fl_kq_driver_from_desc(const fl_driver_desc_t *desc) {
+    return (const fl_kq_driver_t *)desc;
+}
 
 #ifdef __cplusplus
 }

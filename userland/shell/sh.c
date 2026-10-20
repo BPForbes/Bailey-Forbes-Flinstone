@@ -54,6 +54,7 @@
 #include "fs_service_glue.h"
 #include "path_log.h"
 #include "drivers/drivers.h"
+#include "fl/driver/keyquorum.h"
 #include "fs_jail.h"
 #include "fl/session.h"
 #include "fl/authz_subsystem.h"
@@ -398,6 +399,8 @@ int main(int argc, char *argv[]) {
     fs_service_glue_init();
     path_log_init();
     drivers_init(NULL);
+    /* KeyQuorum is a driver like the others: register its base descriptor with the model. */
+    (void)fl_driver_registry_register(fl_kq_driver_desc());
     vm_warn_layer_config();
 
     /* Initialize thread pool and signals */
