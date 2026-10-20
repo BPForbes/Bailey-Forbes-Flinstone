@@ -4,9 +4,8 @@ This is the first step of integrating [KeyQuorum](https://github.com/BPForbes/Ke
 identity model into Flinstone, from the storage, profile and history side. Every account
 gets a **key id** shaped like a KeyQuorum label, authority follows the tree the way
 KeyQuorum's `authority` rules do, and accounts on different branches reach each other only
-through **bridges**. No KeyQuorum code runs yet: the model is native C on the hosted (H)
-track, with the same rules, so that real KeyQuorum keys and sealed letters can be bound to
-these key ids later. The normative vocabulary is
+through **bridges**. The key-id and relation rules, each account's signing key and the
+bridge signatures come from KeyQuorum's Rust code (see below). The normative vocabulary is
 [`contracts/identity/contract_p2_heritage.h`](../contracts/identity/contract_p2_heritage.h).
 
 ## Where the rules live
@@ -102,14 +101,44 @@ bridge revoke 1           # either side, or an ancestor of either
 ```
 
 - Pending bridges grant nothing; the requesting side cannot accept its own request.
+- Both halves are signed with the accounts' KeyQuorum keys (see Account keys):
+  `bridge request` and `bridge accept` ask for your password to open your key. The
+  signatures cover the two key ids, the signer and a random nonce for that bridge
+  (KeyQuorum's `signing::account_bridge_preimage`, domain `KQ-ACCOUNT-BRIDGE-v1`).
+- A bridge counts as active only while both signatures verify under the signers' current
+  keys. A row with no signatures (written before bridges were signed), a changed row, or one
+  whose signer has since been given a new key opens nothing; `bridge list` shows it as
+  `unsigned`. Revoke it and request again.
 - A bridge joins exactly its two accounts: neither side's ancestors nor descendants
   inherit it (Flinstone does not reach Alternative's home through Bob's bridge).
 - Bridges live in the `bridges` table of the account store; removing an account removes
   its bridges.
 
-Bridges are where server file sharing between branches will be decided (`server file` to
-an account on another branch), and the place to keep untrusted accounts out: without an
-accepted bridge, nothing crosses branches, and an ancestor can revoke any bridge below it.
+Bridges decide server file sharing between branches, and keep untrusted accounts out:
+without a signed, accepted bridge nothing crosses branches, and an ancestor can revoke any
+bridge below it.
+
+## Account keys
+
+Every account has its own KeyQuorum signing key (Ed25519). The secret is sealed under the
+account's password (KeyQuorum's `KQAK` format: Argon2id and AES-256-GCM) and kept in the
+account store with the public key. Only the account's password opens it, and it is opened
+only for the command that signs, then wiped.
+
+- `useradd` creates the key with the account. Deleting the account deletes its key.
+- An account created before keys existed gets one at its next login, sealed under the
+  password it just signed in with.
+- `passwd` for yourself asks for your current password and seals the same key under the
+  new one, so your bridges keep working. An ancestor resetting a password below it cannot
+  open the old key, so the account gets a new key and its bridges must be signed again.
+
+## Server file sharing
+
+`server file -user <name>` checks, before the offer leaves, that the receiver is an
+account in this store with a key, and that it is yourself, an ancestor or a descendant, or
+joined to you by a signed, active bridge (`kernel/core/identity/share_gate.c`). Otherwise
+the offer is refused with the reason. The check runs on the sender only; the server does
+not repeat it. Public offers (`-all`) are not gated by it.
 
 ## Profile and history
 
@@ -125,7 +154,8 @@ accepted bridge, nothing crosses branches, and an ancestor can revoke any bridge
 ## Storage and migration
 
 The account store (`userland/shell/fl_users.db`, or `FL_USERS_DB_PATH`) gains `key_id`,
-`created_by` and `created_at` columns and a `bridges` table, added in place. A store
+`created_by`, `created_at`, `signing_public` and `signing_sealed` columns and a `bridges`
+table (with `nonce`, `request_sig` and `accept_sig`), added in place. A store
 written before heritage is migrated on its first load: `root` becomes the master `Root`,
 `flinstone` becomes `Flinstone` (`Root.Flinstone`), and every other account is placed
 directly under Root, because who created it was never recorded and a child of Root
@@ -136,10 +166,12 @@ the migration also adds `Alternative`.
 
 ## Not yet covered
 
-- **Bridges and the account store** remain in C. Only the key-id and relation rules come from
-  Rust in this step.
-- **KeyQuorum keys.** Key ids are labels only; no signing or encryption key is bound to an
-  account yet, and bridges are not signed.
-- **Server file sharing** (`server file`) does not consult bridges yet.
-- **Other identity copies.** The freestanding x86_64 kernel (`kernel/freestanding/`) and the
-  browser lab keep their own lowercase `flinstone` / `root` accounts.
+- **The account store and bridge table** are still SQLite code in C. The key-id rules, key
+  sealing and the bridge signatures come from Rust.
+- **Encryption keys and sealed file letters.** Accounts have signing keys only. File payloads
+  still travel as they did; sealing them is the plan in `docs/FILE_SHARING_KEYQUORUM.md`.
+- **Public offers** (`server file -all`) are not gated, and do not yet need the host's
+  signature.
+- **The freestanding kernel and the browser lab** use the canonical `Flinstone` and `Root`
+  spellings, matched regardless of case, but have no key ids, keys or bridges: they are a
+  separate, self-contained identity.

@@ -31,7 +31,7 @@ static int s_lab_netmode; /* 0 live/real, 1 lab-isolated */
  * identity (fl_fs_identity_user(session)) rather than a free-typed name, so
  * "Flinstone" in a pod really is whichever real account is logged into that
  * session; a second concurrent session logged into the same account displays
- * as "flinstone {2}". The reverse shell is still a SIMULATION: accepting a
+ * as "Flinstone {2}". The reverse shell is still a SIMULATION: accepting a
  * listener binds the attacker session to a fresh, isolated, disposable
  * sandbox labeled with the accepting session's identity — never that
  * session's real terminal, real ramfs, or real files. The accepting party
@@ -1008,7 +1008,7 @@ static void nl_pick_host(void)
 
 /* Real account name for `session`, with a " {N}" suffix when an earlier pod
  * member (by join order) is logged into the same account — e.g. a second
- * concurrent session logged in as "flinstone" displays as "flinstone {2}". */
+ * concurrent session logged in as "Flinstone" displays as "Flinstone {2}". */
 static void nl_display_name(int session, char *out, unsigned cap)
 {
     const char *base = fl_fs_identity_user(session);

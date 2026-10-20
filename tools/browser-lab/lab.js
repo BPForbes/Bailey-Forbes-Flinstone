@@ -62,7 +62,9 @@
   let busy = false;
   let emulator = null;
   let extraUsers = [];
-  let sessions = { 1: "flinstone" };
+  let sessions = { 1: "Flinstone" };
+  // Built-in accounts, matched regardless of case like every account name.
+  const isBuiltInUser = name => /^(flinstone|root)$/i.test(name);
   let activeSession = 1;
   let relay = null;
   let connectRelay = async () => {};
@@ -76,7 +78,7 @@
   const qemuMode = validation || search.get("qemu") === "1";
   let useWasm = false;
   const usesBrowserRelay = () => info && info.serverPath === "relay";
-  const principal = () => sessions[activeSession] || "flinstone";
+  const principal = () => sessions[activeSession] || "Flinstone";
   const serial = document.getElementById("serial");
   const canvas = document.querySelector("#screen canvas");
   const screen = document.getElementById("screen");
@@ -97,7 +99,7 @@
     const sess = document.getElementById("pl-sess");
     const st = document.getElementById("pl-state");
     const count = Object.keys(sessions).length;
-    if (user) user.textContent = `\uf007 ${sessions[activeSession] || "flinstone"}`;
+    if (user) user.textContent = `\uf007 ${sessions[activeSession] || "Flinstone"}`;
     if (sess) sess.textContent = `${activeSession}/${count}`;
     if (st) st.textContent = state || document.getElementById("status")?.textContent || "…";
   }
@@ -291,7 +293,7 @@
       node.appendChild(button);
     });
     text("account-status", `Active session ${activeSession}: ${sessions[activeSession] || "—"}`);
-    const names = ["flinstone", "root", ...extraUsers.filter(name => name !== "flinstone" && name !== "root")];
+    const names = ["Flinstone", "Root", ...extraUsers.filter(name => !isBuiltInUser(name))];
     text("account-users", `Users: ${names.join(", ")}`);
     renderPowerline(document.getElementById("status")?.textContent);
   }
@@ -438,7 +440,7 @@
     });
   }
   function rememberUser(name) {
-    if (!name || name === "flinstone" || name === "root") return;
+    if (!name || isBuiltInUser(name)) return;
     if (!extraUsers.includes(name)) extraUsers.push(name);
   }
   async function syncRelayPrincipal() {
@@ -490,7 +492,7 @@
       serial.textContent = "";
       serialTail = "";
       activeSession = 1;
-      sessions = { 1: "flinstone" };
+      sessions = { 1: "Flinstone" };
       extraUsers = [];
       renderSessions();
       // The guest streams raw bytes one at a time, including multi-byte
@@ -732,7 +734,7 @@
       if (!script) return;
       const from = serialTail.length;
       const sent = await sendGuestLines(script, [
-        /SWITCHUSER user=root|unknown user/,
+        /SWITCHUSER user=Root|unknown user/,
         /Password:|unknown command|need elevation|usage:/,
         /\bok\b|authentication failed/,
       ]);

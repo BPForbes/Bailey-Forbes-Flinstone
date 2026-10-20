@@ -246,7 +246,7 @@ int fs_jail_check_home(const char *path) {
         return -1;
     if (fl_heritage_is_ancestor_or_self(actor_key, owner_key))
         return 0;
-    if (db && fl_bridge_active_between(db->path, actor_key, owner_key))
+    if (db && fl_bridge_active_between(db, actor_key, owner_key))
         return 0;
     return -1;
 }

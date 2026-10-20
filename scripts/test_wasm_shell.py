@@ -32,9 +32,9 @@ def main():
     checks = [
         "FLINTSTONE_KERNEL_BOOT_OK",
         "shell>",
-        "WHOAMI flinstone",
-        "SWITCHUSER user=root",
-        "WHOAMI root",
+        "WHOAMI Flinstone",
+        "SWITCHUSER user=Root",
+        "WHOAMI Root",
         "ok",
         "SWITCHUSER user=demo",
         "WHOAMI demo",
