@@ -1,8 +1,0 @@
-MAJOR_VERSION=5
-STANDARD_VERSION=3
-RELEASE_VERSION=0
-PRERELEASE=1
-DEV_VERSION=6
-DESCRIPTION=Send files between users in the browser lab while connected to the server. `server file -user <name> <path>` hands a ramfs file to the page, which sends it over the relay as one FILE_OFFER frame (recipient, name, big-endian size, bytes); the relay delivers it only to that user's sessions and tells the sender whether it was sent. The file waits in the recipient's page until they run `server file accept` (or `server file decline`); the page then types it into the guest as filerecv parts that fit the shell's line, never into a password prompt, and it is saved in the current directory, never over an existing file. Unsafe names, NUL bytes and oversized content are refused, and lab isolation stops files as well as chat.
-
-RELEASE_DATE=2026-10-20
