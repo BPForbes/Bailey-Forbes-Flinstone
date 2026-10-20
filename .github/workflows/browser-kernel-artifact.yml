@@ -8,7 +8,11 @@ on:
 
 concurrency:
   group: browser-kernel-${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
-  cancel-in-progress: true
+  # Only pull request runs are cancelled by a newer push. A push run may already
+  # have published to the deployment branch, and cancelling it before its deploy
+  # would leave the branch and the live site out of step; a newer push of the
+  # same branch waits for it instead.
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 permissions:
   contents: read
@@ -245,18 +249,8 @@ jobs:
           path: dist/browser-lab
           if-no-files-found: error
 
-      - name: Stage Pages payload
-        if: >-
-          github.event_name == 'push' && github.ref == 'refs/heads/main' &&
-          steps.metadata.outputs.bootable == 'true' &&
-          steps.metadata.outputs.browser_compatible == 'true' &&
-          steps.boot_probe.outputs.boot_smoke_passed == 'true'
-        uses: actions/upload-pages-artifact@fc324d3547104276b827a68afc52ff2a11cc49c9 # v5.0.0
-        with:
-          path: dist/browser-lab
-
-  deploy:
-    name: Publish validated lab to GitHub Pages
+  publish:
+    name: Publish lab to the deployment branch
     needs: validate
     if: >-
       github.event_name == 'push' && github.ref == 'refs/heads/main' &&
@@ -264,15 +258,76 @@ jobs:
       needs.validate.outputs.browser_compatible == 'true' &&
       needs.validate.outputs.boot_smoke_passed == 'true'
     runs-on: ubuntu-latest
+    # Queued per branch: GitHub keeps one pending job per group, so only an older
+    # main publish can be dropped, never develop's. A main and a develop publish
+    # may overlap; the script retries when the branch moved.
+    concurrency:
+      group: pages-publish-${{ github.ref }}
+      cancel-in-progress: false
+    permissions:
+      contents: write   # push the deployment branch
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v5
+
+      - name: Download validated lab
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          name: flintstone-browser-lab
+          path: ${{ runner.temp }}/lab
+
+      # main owns the site root; the develop lab at /develop/ is kept as the
+      # publisher branch holds it (scripts/publish_pages_slot.sh).
+      - name: Publish the main slot
+        env:
+          LAB: ${{ runner.temp }}/lab
+          SITE: ${{ runner.temp }}/site
+        run: |
+          ./scripts/publish_pages_slot.sh main "$LAB" "$SITE"
+          echo "main lab published to the publisher branch" >>"$GITHUB_STEP_SUMMARY"
+
+  deploy:
+    name: Publish validated lab to GitHub Pages
+    needs: publish
+    runs-on: ubuntu-latest
     environment:
       name: github-pages
       url: ${{ steps.deployment.outputs.page_url }}
+    # Deploys whatever the deployment branch holds when it runs, so a pending
+    # deploy that a newer one replaces loses nothing: the newer one deploys the
+    # newer branch. Never cancelled half way.
+    concurrency:
+      group: pages-deploy
+      cancel-in-progress: false
     permissions:
+      contents: read
       pages: write
       id-token: write
     steps:
+      - name: Check out the deployment branch
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v5
+        with:
+          ref: publisher
+          path: site
+          persist-credentials: false
+
+      - name: Report the deployed slots
+        run: |
+          test -f site/index.html
+          {
+            echo "## Deployment branch $(git -C site rev-parse --short HEAD)"
+            echo
+            echo "- main lab: present"
+            if [ -f site/develop/index.html ]; then echo "- develop lab: present"; else echo "- develop lab: absent"; fi
+          } >>"$GITHUB_STEP_SUMMARY"
+
+      - name: Stage Pages payload
+        uses: actions/upload-pages-artifact@fc324d3547104276b827a68afc52ff2a11cc49c9 # v5.0.0
+        with:
+          path: site
+
       - name: Configure Pages
         uses: actions/configure-pages@45bfe0192ca1faeb007ade9deae92b16b8254a0d # v6.0.0
+
       - name: Deploy Pages
         id: deployment
         uses: actions/deploy-pages@368f82528645a54fb793d4d04e342629a3f51346 # v5.0.1
