@@ -29,7 +29,10 @@ jobs:
       contents: read
       pull-requests: read
     with:
-      ref: ""
+      # The site root is always main. A push to develop must not build develop
+      # here (it would replace the main lab with develop code); a pull request
+      # builds its own merge commit, which is never deployed.
+      ref: ${{ github.event_name == 'push' && 'main' || '' }}
       artifact_suffix: ""
       publish: ${{ github.event_name == 'push' && github.ref == 'refs/heads/main' }}
 
