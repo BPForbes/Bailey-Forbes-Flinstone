@@ -436,19 +436,31 @@ static int load_seen(const char *path, uint8_t (**seen)[64], size_t *n) {
     return 0;
 }
 
-/* True when the previously accepted container beside the file already holds rev. */
+/*
+ * Whether the previously accepted container beside the file already holds rev. It must be
+ * the container that was accepted last: it verifies and its history root is the newest
+ * accepted root. Anything else fails closed, since "absent" would let an old revision back.
+ *   1 held, 0 not held, -1 unreadable or missing, -2 damaged or not the accepted copy.
+ */
 static int local_holds(const fl_kq_driver_t *drv, const char *container_path,
-                       const uint8_t rev[32]) {
+                       const uint8_t newest_root[32], const uint8_t rev[32]) {
     fl_kq_buf_t local = {0};
     fl_kq_buf_t held = {0};
-    int holds;
+    uint8_t root[32];
+    int rc;
 
     if (read_all(container_path, FL_KQ_LETTER_MAX, &local) != 0)
-        return 0;
-    holds = drv->payload(&local, rev, &held) == KQ_FILE_OK;
+        return -1;
+    if (drv->verify(&local, root) != KQ_FILE_OK || !drv->equal(root, newest_root, sizeof root)) {
+        fl_kq_buf_free(&local);
+        return -2;
+    }
+    rc = drv->payload(&local, rev, &held);
     fl_kq_buf_free(&held);
     fl_kq_buf_free(&local);
-    return holds;
+    if (rc == KQ_FILE_OK)
+        return 1;
+    return rc == KQ_FILE_NO_REVISION ? 0 : -2;
 }
 
 fl_kq_cp_result_t fl_kq_cp_decode(const fl_user_db_t *users, const char *sender_key,
@@ -527,9 +539,13 @@ fl_kq_cp_result_t fl_kq_cp_decode(const fl_user_db_t *users, const char *sender_
     }
     /* Only the newest pairs are kept, so "adds a revision" is also checked against everything
      * accepted before: a revision the local container holds is never newer. */
-    if (st == KQ_FILE_NEWER && local_holds(drv, container_path, rev)) {
-        rc = FL_KQ_CP_NOT_NEWER;
-        goto done;
+    if (st == KQ_FILE_NEWER) {
+        int held = nseen ? local_holds(drv, container_path, seen[nseen - 1] + 32, rev) : -2;
+
+        if (held != 0) {
+            rc = held > 0 ? FL_KQ_CP_NOT_NEWER : held == -1 ? FL_KQ_CP_IO : FL_KQ_CP_INVALID;
+            goto done;
+        }
     }
 
     if (drv->payload(&cosigned, rev, &payload) != KQ_FILE_OK) {

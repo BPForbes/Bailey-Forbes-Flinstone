@@ -399,6 +399,76 @@ static int test_the_seen_record_stays_bounded(void) {
     return 0;
 }
 
+/* Encodes text as Mya's next revision of src, co-signed by Steve; decode into dest is left to
+ * the caller. */
+static int prepare(world_t *w, const char *src, const char *text, const char *at,
+                   fl_kq_encoded_t *enc, uint8_t sig[64]) {
+    if (write_text(src, text) != 0 ||
+        fl_kq_cp_encode(&w->db, MYA, w->mya_sign, STEVE, fl_user_db_box_public(&w->db, STEVE),
+                        src, at, enc) != FL_KQ_CP_OK)
+        return -1;
+    if (fl_kq_cp_cosign(&enc->offer, STEVE, w->steve_sign, sig) != FL_KQ_CP_OK) {
+        fl_kq_encoded_free(enc);
+        return -1;
+    }
+    return 0;
+}
+
+/* Once a file has been accepted, a newer delivery is checked against the accepted container
+ * beside it. Without that exact container (missing, damaged, or another file's) the check
+ * cannot be made, and the delivery is refused rather than assumed new. */
+static int test_newer_needs_the_accepted_container(void) {
+    world_t w;
+    fl_kq_encoded_t enc;
+    char src[PATH_MAX], other[PATH_MAX], dest[PATH_MAX], dest2[PATH_MAX], got[64];
+    char side[PATH_MAX + 16], side2[PATH_MAX + 16], kept[PATH_MAX + 32];
+    uint8_t sig[64];
+    const unsigned char *mya_pub;
+
+    ASSERT(setup(&w) == 0);
+    mya_pub = fl_user_db_signing_public(&w.db, MYA);
+    path_in(src, sizeof src, "accepted.txt");
+    path_in(other, sizeof other, "unrelated.txt");
+    path_in(dest, sizeof dest, "steve-accepted.txt");
+    path_in(dest2, sizeof dest2, "steve-unrelated.txt");
+    snprintf(side, sizeof side, "%s%s", dest, FL_KQ_CONTAINER_SUFFIX);
+    snprintf(side2, sizeof side2, "%s%s", dest2, FL_KQ_CONTAINER_SUFFIX);
+    snprintf(kept, sizeof kept, "%s.kept", side);
+
+    ASSERT(prepare(&w, src, "v1\n", T1, &enc, sig) == 0);
+    ASSERT(fl_kq_cp_decode(&w.db, MYA, mya_pub, STEVE, w.steve_box, &enc.letter, &enc.offer, sig,
+                           dest) == FL_KQ_CP_OK);
+    fl_kq_encoded_free(&enc);
+    ASSERT(prepare(&w, other, "other\n", T1, &enc, sig) == 0);
+    ASSERT(fl_kq_cp_decode(&w.db, MYA, mya_pub, STEVE, w.steve_box, &enc.letter, &enc.offer, sig,
+                           dest2) == FL_KQ_CP_OK);
+    fl_kq_encoded_free(&enc);
+
+    ASSERT(prepare(&w, src, "v2\n", T2, &enc, sig) == 0);
+    /* Missing. */
+    ASSERT(rename(side, kept) == 0);
+    ASSERT(fl_kq_cp_decode(&w.db, MYA, mya_pub, STEVE, w.steve_box, &enc.letter, &enc.offer, sig,
+                           dest) == FL_KQ_CP_IO);
+    /* Damaged. */
+    ASSERT(write_text(side, "not a KQTF container") == 0);
+    ASSERT(fl_kq_cp_decode(&w.db, MYA, mya_pub, STEVE, w.steve_box, &enc.letter, &enc.offer, sig,
+                           dest) == FL_KQ_CP_INVALID);
+    /* A valid container, but not the one accepted for this file. */
+    ASSERT(rename(side2, side) == 0);
+    ASSERT(fl_kq_cp_decode(&w.db, MYA, mya_pub, STEVE, w.steve_box, &enc.letter, &enc.offer, sig,
+                           dest) == FL_KQ_CP_INVALID);
+    ASSERT(read_text(dest, got, sizeof got) == 0 && strcmp(got, "v1\n") == 0);
+
+    /* The accepted container back in place: the same delivery is now newer. */
+    ASSERT(rename(kept, side) == 0);
+    ASSERT(fl_kq_cp_decode(&w.db, MYA, mya_pub, STEVE, w.steve_box, &enc.letter, &enc.offer, sig,
+                           dest) == FL_KQ_CP_OK);
+    ASSERT(read_text(dest, got, sizeof got) == 0 && strcmp(got, "v2\n") == 0);
+    fl_kq_encoded_free(&enc);
+    teardown(&w);
+    return 0;
+}
+
 static int test_only_plain_file_names_are_safe(void) {
     ASSERT(fl_kq_cp_safe_name("plan.txt"));
     ASSERT(fl_kq_cp_safe_name("Root.Flinstone.Mya"));
@@ -444,6 +514,7 @@ int main(void) {
     RUN(test_a_failed_write_installs_nothing);
     RUN(test_a_damaged_history_is_refused);
     RUN(test_the_seen_record_stays_bounded);
+    RUN(test_newer_needs_the_accepted_container);
     RUN(test_only_plain_file_names_are_safe);
     RUN(test_reasons_and_results);
     rmrf(s_dir);
