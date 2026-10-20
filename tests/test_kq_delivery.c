@@ -19,7 +19,7 @@
     } \
 } while (0)
 
-static char s_dir[PATH_MAX];
+static char s_dir[256];
 
 static void rmrf(const char *path) {
     DIR *d = opendir(path);

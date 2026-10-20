@@ -225,7 +225,7 @@ CORE_SRCS = kernel/core/vfs/disk.c kernel/core/vfs/fat32_host.c kernel/core/vfs/
             $(NET_CORE_SRCS) \
             kernel/core/identity/user_db.c kernel/core/identity/elevation.c kernel/core/identity/path_property.c \
             kernel/core/identity/session.c kernel/core/identity/heritage.c kernel/core/identity/bridge.c kernel/core/identity/share_gate.c \
-            kernel/drivers/keyquorum/kq_driver.c kernel/core/vfs/kq_checkpoint.c kernel/core/vfs/kq_delivery.c \
+            kernel/drivers/keyquorum/kq_driver.c kernel/core/vfs/kq_checkpoint.c kernel/core/vfs/kq_delivery.c kernel/core/net/net_kq_delivery.c \
             kernel/core/sys/vrt.c kernel/core/sys/ipc.c kernel/core/sys/syscall.c kernel/core/vfs/vfs.c
 COMMAND_SRCS := $(wildcard userland/command/cmd_*.c) userland/command/server_file_expire.c
 # Security-features gate (SECFEAT). Default off: the netlab teaching lab and any
@@ -601,7 +601,7 @@ TEST_SRCS = BPForbes_Flinstone_Tests.c userland/shell/common.c userland/shell/ut
             $(NET_CORE_SRCS) \
             kernel/core/identity/user_db.c kernel/core/identity/elevation.c kernel/core/identity/path_property.c \
             kernel/core/identity/session.c kernel/core/identity/heritage.c kernel/core/identity/bridge.c kernel/core/identity/share_gate.c \
-            kernel/drivers/keyquorum/kq_driver.c kernel/core/vfs/kq_checkpoint.c kernel/core/vfs/kq_delivery.c \
+            kernel/drivers/keyquorum/kq_driver.c kernel/core/vfs/kq_checkpoint.c kernel/core/vfs/kq_delivery.c kernel/core/net/net_kq_delivery.c \
             kernel/core/sys/vrt.c kernel/core/sys/ipc.c kernel/core/sys/syscall.c
 TEST_SRCS += disk_asm.c dir_asm.c
 ifeq ($(CHANGELOG_CI),1)
@@ -932,6 +932,17 @@ test_kq_delivery: kernel/core/vfs/kq_delivery.o
 	$(CC) $(CFLAGS) $(TEST_SANITIZE) -o tests/test_kq_delivery tests/test_kq_delivery.c \
 	  kernel/core/vfs/kq_delivery.o -lsqlite3 -pthread -Wl,-z,noexecstack
 	./tests/test_kq_delivery
+
+.PHONY: test_kq_net
+test_kq_net: userland/shell/common.o $(UTIL_SHELL_LINK_OBJS) $(FS_JAIL_CORE_OBJS) $(FS_JAIL_SUPPORT_OBJS) kernel/core/mm/mem_domain.o $(MEM_ASM_OBJ) $(HISTORY_ASM_OBJ) $(UTIL_HISTORY_HOST_OBJS) kernel/drivers/keyquorum/kq_driver.o kernel/core/vfs/kq_checkpoint.o kernel/core/vfs/kq_delivery.o kernel/core/net/net_kq_delivery.o
+	$(CC) $(CFLAGS) $(TEST_SANITIZE) -c -o tests/test_kq_net.o tests/test_kq_net.c
+	$(CXX) $(CXXFLAGS) $(TEST_SANITIZE) -o tests/test_kq_net tests/test_kq_net.o \
+	  kernel/core/net/net_kq_delivery.o kernel/core/vfs/kq_delivery.o \
+	  kernel/drivers/keyquorum/kq_driver.o kernel/core/vfs/kq_checkpoint.o \
+	  userland/shell/common.o $(UTIL_SHELL_LINK_OBJS) $(FS_JAIL_CORE_OBJS) $(FS_JAIL_SUPPORT_OBJS) \
+	  kernel/core/mm/mem_domain.o $(MEM_ASM_OBJ) $(HISTORY_ASM_OBJ) $(UTIL_HISTORY_HOST_OBJS) \
+	  $(FS_JAIL_TEST_LIBS) -Wl,-z,noexecstack
+	./tests/test_kq_net
 
 .PHONY: test_p0_p2_wiring
 test_p0_p2_wiring: kernel/core/memory/fl_stack.o kernel/core/memory/exec_context.o kernel/core/time/timekeeping.o \

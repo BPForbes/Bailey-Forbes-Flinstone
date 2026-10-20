@@ -101,6 +101,15 @@ fl_result_t fl_net_server_accept_handle(fl_net_server_t *srv,
 fl_result_t fl_net_server_poll_members(fl_net_server_t *srv);
 
 /**
+ * KeyQuorum co-signed delivery frames (FL_NET_SESSION_OP_KQ_*) from member `m` go to this
+ * hook (net_kq_delivery.c installs it); with none installed they are dropped. A hook keeps
+ * the session layer free of KeyQuorum, so programs that never install one do not link it.
+ */
+typedef void (*fl_net_server_kq_hook_fn)(fl_net_server_t *srv, const fl_net_server_member_t *m,
+                                         uint8_t opcode, const uint8_t *payload, uint16_t plen);
+void fl_net_server_set_kq_hook(fl_net_server_kq_hook_fn hook);
+
+/**
  * Host-only: broadcast a free-form `[Server Announcement] <text>` line to
  * every member. The host also prints to its own stdout via the colour
  * helper. Returns `FL_RESULT_INVAL` when `msg` is NULL/empty.

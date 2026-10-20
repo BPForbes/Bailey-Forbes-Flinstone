@@ -31,7 +31,7 @@
 #define T1 "2026-10-20T09:00:00.000Z"
 #define T2 "2026-10-20T10:00:00.000Z"
 
-static char s_dir[PATH_MAX];
+static char s_dir[256];
 
 static void path_in(char *out, size_t cap, const char *name) {
     snprintf(out, cap, "%s/%s", s_dir, name);
