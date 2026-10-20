@@ -94,6 +94,7 @@ run_make "test_issue222" test_issue222
 run_make "test_audit_log" test_audit_log
 run_make "test_fs_jail" test_fs_jail
 run_make "test_heritage" test_heritage
+run_make "test_kq_checkpoint" test_kq_checkpoint
 
 run_make "test_server_file_expire" test_server_file_expire
 run_make "test_server_file_meta" test_server_file_meta
