@@ -41,7 +41,7 @@ static void kq_lock(void) {
 static void kq_unlock(void) {
     pthread_mutex_unlock(&s_lock);
 }
-static fl_net_kq_users_fn s_users;
+static fl_net_kq_keys_fn s_authority;
 static char s_store_dir[1024];
 static fl_kq_store_t *s_store;
 static fl_net_kq_host_send_fn s_host_send;
@@ -163,14 +163,16 @@ static int64_t now_sec(void) {
     return t;
 }
 
-static const fl_user_db_t *users(void) {
-    return s_users ? s_users() : NULL;
+/* The host's key authority: the native account store, or the lab's directory. */
+static const fl_kq_keydir_t *keys(void) {
+    return s_authority ? s_authority() : NULL;
 }
 
 /* The account a member signs in as, by the host's registry. */
 static const char *key_of_member(const fl_net_server_member_t *m) {
-    const fl_user_record_t *u = m ? fl_user_db_find(users(), m->principal) : NULL;
-    return u ? u->key_id : NULL;
+    const fl_kq_keydir_t *k = keys();
+
+    return (m && k) ? k->resolve(k, m->principal) : NULL;
 }
 
 static fl_kq_store_t *store(void) {
@@ -186,15 +188,13 @@ static void notice(const char *fmt, const char *a, const char *b) {
     fflush(stdout);
 }
 
-fl_result_t fl_net_kq_install(fl_net_kq_users_fn users_fn, const char *store_dir) {
-    if (!users_fn || !store_dir || strlen(store_dir) >= sizeof s_store_dir)
+fl_result_t fl_net_kq_configure(fl_net_kq_keys_fn keys_fn, const char *store_dir) {
+    if (!keys_fn || !store_dir || strlen(store_dir) >= sizeof s_store_dir)
         return FL_RESULT_INVAL;
     kq_lock();
-    s_users = users_fn;
+    s_authority = keys_fn;
     snprintf(s_store_dir, sizeof s_store_dir, "%s", store_dir);
     kq_unlock();
-    fl_net_server_set_kq_hook(fl_net_kq_host_handle);
-    fl_net_client_set_kq_hook(fl_net_kq_client_handle);
     return FL_RESULT_OK;
 }
 
@@ -341,7 +341,6 @@ static void upload_reclaim(int64_t now) {
 static void host_offer(fl_net_server_t *srv, const fl_net_server_member_t *from, kq_r_t *r) {
     kq_upload_t up;
     uint32_t len;
-    const fl_user_record_t *recipient;
     const char *me = key_of_member(from);
     fl_kq_cp_result_t cp;
     fl_kq_delivery_t existing;
@@ -363,12 +362,12 @@ static void host_offer(fl_net_server_t *srv, const fl_net_server_member_t *from,
         host_refuse(srv, from, "delivery", "offer is not from this member's account");
         return;
     }
-    recipient = fl_user_db_find_by_key(users(), up.recipient);
-    if (!recipient || !fl_user_db_box_public(users(), up.recipient)) {
+    /* The recipient is named by key id and must hold a box key the letter can be sealed to. */
+    if (!keys()->box_public(keys(), up.recipient)) {
         host_refuse(srv, from, "delivery", fl_kq_cp_reason(FL_KQ_CP_NO_KEY));
         return;
     }
-    cp = fl_kq_cp_admit_offer(users(), up.author, &up.offer);
+    cp = fl_kq_cp_admit_offer_with(keys(), up.author, &up.offer);
     if (cp != FL_KQ_CP_OK) {
         host_refuse(srv, from, "delivery", fl_kq_cp_reason(cp));
         return;
@@ -474,7 +473,7 @@ static void host_cosign(fl_net_server_t *srv, const fl_net_server_member_t *from
         host_refuse(srv, from, "co-signature", fl_kq_cp_reason(FL_KQ_CP_NOT_RECIPIENT));
         return;
     }
-    cp = fl_kq_cp_admit_cosign(users(), d.recipient, &d.offer, sig);
+    cp = fl_kq_cp_admit_cosign_with(keys(), d.recipient, &d.offer, sig);
     if (cp != FL_KQ_CP_OK) {
         host_refuse(srv, from, "co-signature", fl_kq_cp_reason(cp));
         return;
@@ -523,7 +522,7 @@ static void host_ack(fl_net_server_t *srv, const fl_net_server_member_t *from, k
 
 static void host_keys(fl_net_server_t *srv, const fl_net_server_member_t *from, kq_r_t *r) {
     char who[FL_HERITAGE_KEY_ID_MAX];
-    const fl_user_record_t *u;
+    const char *key;
     const unsigned char *sign = NULL;
     const unsigned char *box = NULL;
     uint8_t zero[32] = {0};
@@ -533,17 +532,15 @@ static void host_keys(fl_net_server_t *srv, const fl_net_server_member_t *from, 
     r_str(r, who, sizeof who);
     if (r->bad)
         return;
-    u = fl_user_db_find_by_key(users(), who);
-    if (!u)
-        u = fl_user_db_find(users(), who);
-    if (u) {
-        sign = fl_user_db_signing_public(users(), u->key_id);
-        box = fl_user_db_box_public(users(), u->key_id);
+    key = keys()->resolve(keys(), who);
+    if (key) {
+        sign = keys()->signing_public(keys(), key);
+        box = keys()->box_public(keys(), key);
     }
-    found = (u && sign && box) ? 1u : 0u;
+    found = (key && sign && box) ? 1u : 0u;
     w_str(&w, who);
     w_bytes(&w, &found, 1);
-    w_str(&w, found ? u->key_id : "");
+    w_str(&w, found ? key : "");
     w_bytes(&w, found ? sign : zero, 32);
     w_bytes(&w, found ? box : zero, 32);
     if (!w.bad)
@@ -554,7 +551,7 @@ void fl_net_kq_host_handle(fl_net_server_t *srv, const fl_net_server_member_t *f
                            uint8_t opcode, const uint8_t *payload, uint16_t plen) {
     kq_r_t r = {payload, plen, 0};
 
-    if (!from || !users())
+    if (!from || !keys())
         return;
     kq_lock();
     if (store())
@@ -806,6 +803,23 @@ fl_result_t fl_net_kq_lookup(fl_net_server_t *srv, fl_net_client_t *client, int 
             return FL_RESULT_TIMEDOUT;
         sleep_ms(20u);
     }
+}
+
+fl_result_t fl_net_kq_keys_cached(const char *who, fl_net_kq_keys_t *out) {
+    fl_result_t rc = FL_RESULT_TIMEDOUT;
+
+    if (!who || !out)
+        return FL_RESULT_INVAL;
+    kq_lock();
+    for (size_t i = 0; i < KQ_KEYS_MAX; i++) {
+        if (s_keys[i].used && strcmp(s_keys[i].query, who) == 0) {
+            *out = s_keys[i].keys;
+            rc = out->found ? FL_RESULT_OK : FL_RESULT_NOENT;
+            break;
+        }
+    }
+    kq_unlock();
+    return rc;
 }
 
 fl_result_t fl_net_kq_send_delivery(fl_net_server_t *srv, fl_net_client_t *client, int hosting,

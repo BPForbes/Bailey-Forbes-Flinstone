@@ -249,6 +249,8 @@ jobs:
         uses: dtolnay/rust-toolchain@89b12181fb390509a0842a86cc55eeb8eb928c1d # stable branch
         with:
           toolchain: stable
+          # KeyQuorum co-signed delivery in the WebAssembly lab (tools/browser-lab/wasm/lab_kq.c).
+          targets: wasm32-unknown-emscripten
 
       - name: Sync version checkout for build
         uses: ./.github/actions/sync-version-checkout
@@ -272,6 +274,7 @@ jobs:
           . "$EMSDK_ROOT/emsdk_env.sh"
           EMCC_REQUIRED=1 make wasm
           make test-wasm-shell
+          node ./tests/test_lab_kq_wasm.js
 
       - name: Upload WebAssembly lab module
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1

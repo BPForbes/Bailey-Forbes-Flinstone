@@ -6,8 +6,8 @@
  *
  * The kernel orchestrator for co-signed delivery: it decides which checkpoint runs and
  * what an outcome means, and calls only the KeyQuorum driver (fl/driver/keyquorum.h) and
- * the account store (user_db.h) for keys. No network here; net_kq_delivery.c carries the
- * results between parties.
+ * an account store for public keys (kq_keydir.h). No network here; net_kq_delivery.c
+ * carries the results between parties.
  *
  *   encode   (sender)    check in + sign, public offer, letter sealed to the recipient
  *   admit    (host)      sender's signature on the offer; recipient's co-signature
@@ -16,11 +16,15 @@
  *
  * Secrets are passed in by the caller (opened from user_db with the account password)
  * and stay the caller's to wipe; every buffer that held content is wiped before free.
+ *
+ * Each checkpoint takes the key directory it reads (the `_with` form). The native shell's
+ * forms without the suffix take its user store and wrap it (kq_checkpoint_users.c); the
+ * browser lab passes its own directory, so the same checkpoints run there.
  */
 
 #include "contract_result.h"
 #include "fl/driver/keyquorum.h"
-#include "user_db.h"
+#include "kq_keydir.h"
 
 #include <stddef.h>
 #include <stdint.h>
@@ -72,19 +76,20 @@ void fl_kq_encoded_free(fl_kq_encoded_t *enc);
  * first use with sender_key as owner), signs it with sender_signing_secret, and seals it
  * to recipient_box_public. FORKED when the file has two heads.
  */
-fl_kq_cp_result_t fl_kq_cp_encode(const fl_user_db_t *users, const char *sender_key,
-                                  const uint8_t sender_signing_secret[32],
-                                  const char *recipient_key,
-                                  const uint8_t recipient_box_public[32], const char *path,
-                                  const char *created_at_utc, fl_kq_encoded_t *out);
+fl_kq_cp_result_t fl_kq_cp_encode_with(const fl_kq_keydir_t *keys, const char *sender_key,
+                                       const uint8_t sender_signing_secret[32],
+                                       const char *recipient_key,
+                                       const uint8_t recipient_box_public[32], const char *path,
+                                       const char *created_at_utc, fl_kq_encoded_t *out);
 
 /** Latent checkpoint (host): the offer carries author_key's signature under the host registry. */
-fl_kq_cp_result_t fl_kq_cp_admit_offer(const fl_user_db_t *users, const char *author_key,
-                                       const kq_file_offer_t *offer);
+fl_kq_cp_result_t fl_kq_cp_admit_offer_with(const fl_kq_keydir_t *keys, const char *author_key,
+                                            const kq_file_offer_t *offer);
 
 /** Latent checkpoint (host): sig is recipient_key's co-signature on the offer. */
-fl_kq_cp_result_t fl_kq_cp_admit_cosign(const fl_user_db_t *users, const char *recipient_key,
-                                        const kq_file_offer_t *offer, const uint8_t sig[64]);
+fl_kq_cp_result_t fl_kq_cp_admit_cosign_with(const fl_kq_keydir_t *keys,
+                                             const char *recipient_key,
+                                             const kq_file_offer_t *offer, const uint8_t sig[64]);
 
 /** Co-sign checkpoint (recipient). */
 fl_kq_cp_result_t fl_kq_cp_cosign(const kq_file_offer_t *offer, const char *me_key,
@@ -97,6 +102,36 @@ fl_kq_cp_result_t fl_kq_cp_cosign(const kq_file_offer_t *offer, const char *me_k
  * head) and the copy is FIRST or NEWER than what dest_path's sidecars recorded. A file
  * already at dest_path with no sidecar is never overwritten (EXISTS).
  */
+fl_kq_cp_result_t fl_kq_cp_decode_with(const fl_kq_keydir_t *keys, const char *sender_key,
+                                       const uint8_t sender_signing_public[32],
+                                       const char *me_key, const uint8_t box_secret[32],
+                                       const fl_kq_buf_t *letter, const kq_file_offer_t *offer,
+                                       const uint8_t my_sig[64], const char *dest_path);
+
+/* ---- the native shell's account store (kq_checkpoint_users.c) --------------------- */
+
+/* user_db.h is native-only; its type is named here so the lab can use this header. */
+typedef struct fl_user_db fl_user_db_t;
+
+/** The native user store as a key directory: base first, so &dir.base is what checkpoints read. */
+typedef struct {
+    fl_kq_keydir_t      base;
+    const fl_user_db_t *db;
+} fl_user_db_keydir_t;
+
+/** Points dir at db's signing and box public keys. */
+void fl_user_db_keydir_init(fl_user_db_keydir_t *dir, const fl_user_db_t *db);
+
+/* The checkpoints above over the native user store (NULL users is INVALID, as before). */
+fl_kq_cp_result_t fl_kq_cp_encode(const fl_user_db_t *users, const char *sender_key,
+                                  const uint8_t sender_signing_secret[32],
+                                  const char *recipient_key,
+                                  const uint8_t recipient_box_public[32], const char *path,
+                                  const char *created_at_utc, fl_kq_encoded_t *out);
+fl_kq_cp_result_t fl_kq_cp_admit_offer(const fl_user_db_t *users, const char *author_key,
+                                       const kq_file_offer_t *offer);
+fl_kq_cp_result_t fl_kq_cp_admit_cosign(const fl_user_db_t *users, const char *recipient_key,
+                                        const kq_file_offer_t *offer, const uint8_t sig[64]);
 fl_kq_cp_result_t fl_kq_cp_decode(const fl_user_db_t *users, const char *sender_key,
                                   const uint8_t sender_signing_public[32], const char *me_key,
                                   const uint8_t box_secret[32], const fl_kq_buf_t *letter,
