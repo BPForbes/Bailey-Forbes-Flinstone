@@ -1,8 +1,8 @@
 name: Browser lab build
 
 # Builds, tests and boot-probes one branch of the Flintstone browser kernel and
-# lab. browser-kernel-artifact.yml calls it for main and for develop, so the
-# two builds run the same gates. Nothing is published from here.
+# lab. browser-kernel-artifact.yml calls it for whichever branch was pushed, so
+# main and develop run the same gates. Nothing is published from here.
 
 on:
   workflow_call:

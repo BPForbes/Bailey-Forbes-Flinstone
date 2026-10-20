@@ -259,14 +259,32 @@ the published lab. On `main` it:
    sends `COEP: credentialless` plus `Permissions-Policy` for
    `cross-origin-isolated`.
 
-Two builds run the same gates, defined once in `.github/workflows/browser-lab-build.yml`:
-`main` (the default lab, at the site root, with the security variant at `/security/`)
-and `develop` (the in-development lab, at `/develop/`). Both run on every push to
-`main` or `develop`, and the deploy job republishes the whole Pages site from both
-artifacts, because a Pages deploy replaces everything. A develop build that fails its
-gates is left out of the site, and its build runs with `allow_failure` (the reusable
-workflow sets `continue-on-error` on its own job), so it never
-fails the `main` run that the portfolio notification waits for.
+Each push builds only the pushed branch, with the gates defined once in
+`.github/workflows/browser-lab-build.yml`, and publishes it to its own slot on the
+deployment branch `publisher`, which holds built labs only, never source:
+
+| Slot | Written by | Serves |
+|---|---|---|
+| `/` | a `main` push | the default lab, with the security variant at `/security/` |
+| `/develop/` | a `develop` push | the in-development lab |
+
+`scripts/publish_pages_slot.sh` reads `publisher`, replaces only its own slot, keeps
+the other slot exactly as it was, and force-pushes the result as one parentless commit,
+so built images never pile up in the branch history. The push is guarded with
+`--force-with-lease`; when a publish of the other slot moved the branch in between, the
+script starts over from the new commit, so a `main` and a `develop` publish may overlap
+without losing either. Publishes queue per branch (`pages-publish-<ref>`), because GitHub
+keeps only one pending job per concurrency group and a shared group could drop the other
+slot's publish.
+
+A separate deploy job then checks out `publisher` as it stands and deploys that whole
+tree to GitHub Pages, in the single `pages-deploy` group. A Pages deploy replaces the
+entire site, but the tree always holds both slots, so a `main` deploy keeps the develop
+lab and a `develop` deploy keeps the main lab; a pending deploy that a newer one replaces
+loses nothing, because the newer one deploys the newer branch. Until the first `main`
+publish puts a lab at `/`, the deploy job leaves the current site in place.
+A branch whose build fails its gates publishes nothing, and its slot
+keeps the last good build.
 
 The workflow contains a fail-closed promotion gate. Upload as
 `flintstone-browser-kernel` requires all three independent signals:
@@ -275,10 +293,10 @@ a browser-QEMU-Wasm test that both actually observe `FLINTSTONE_KERNEL_BOOT_OK`
 on serial. The manifest's `bootSuccessMarkerImplemented` declaration is
 validated but cannot self-attest either observation.
 
-On `main` only, the same workflow deploys that packaged tree to GitHub Pages.
-Pull requests never publish. The configured permanent URL is
+On `main` and `develop` pushes, the same workflow publishes that packaged tree to its
+slot and deploys GitHub Pages. Pull requests never publish. The configured permanent URL is
 `https://bpforbes.github.io/Bailey-Forbes-Flinstone/`. GitHub Pages cannot set
 COOP/COEP/CSP; see [`docs/portfolio-iframe-integration.md`](./portfolio-iframe-integration.md).
 The lab fetches `./artifacts/build-info.json`, then
 `./artifacts/<artifact>?v=<shortCommit>`. Failed commits leave the previously
-deployed image untouched.
+deployed image in their slot untouched.

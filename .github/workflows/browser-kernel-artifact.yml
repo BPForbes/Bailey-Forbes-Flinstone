@@ -1,12 +1,12 @@
 name: Browser kernel artifact
 
-# Two builds of the browser lab, both with the same gates:
-#   main    - the default lab, at the site root (and the security variant at /security/)
+# Builds the browser lab of the pushed branch and publishes it to its own slot
+# on the deployment branch (scripts/publish_pages_slot.sh), which GitHub Pages
+# then serves whole:
+#   main    - the default lab, at the site root (and its security variant at /security/)
 #   develop - the in-development lab, at /develop/
-# Every push to main or develop rebuilds both and republishes the whole Pages
-# site, because a Pages deploy replaces everything. The develop build is left
-# out of a deploy when it fails its own gates, and the portfolio then shows
-# "In development build unavailable".
+# Each branch writes only its own slot, so a main deploy keeps the develop lab
+# and a develop deploy keeps the main lab. Pull requests build and test only.
 
 on:
   pull_request:
@@ -16,60 +16,76 @@ on:
 
 concurrency:
   group: browser-kernel-${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
-  cancel-in-progress: true
+  # Only pull request runs are cancelled by a newer push. A push run may already
+  # have published to the deployment branch, and cancelling it before its deploy
+  # would leave the branch and the live site out of step; a newer push of the
+  # same branch waits for it instead.
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 permissions:
   contents: read
 
 jobs:
-  main:
-    name: Main build
+  build:
+    name: Lab build
     uses: ./.github/workflows/browser-lab-build.yml
     permissions:
       contents: read
       pull-requests: read
     with:
-      # The site root is always main. A push to develop must not build develop
-      # here (it would replace the main lab with develop code); a pull request
-      # builds its own merge commit, which is never deployed.
-      ref: ${{ github.event_name == 'push' && 'main' || '' }}
+      # The pushed commit; a pull request builds its own merge commit.
+      ref: ""
       artifact_suffix: ""
-      # Every push to main or develop deploys this build at the site root.
+      # Every push to main or develop publishes this build to its own slot, so
+      # its metadata marks it published (lab.published); pull requests never do.
       publish: ${{ github.event_name == 'push' && (github.ref == 'refs/heads/main' || github.ref == 'refs/heads/develop') }}
 
-  develop:
-    name: Develop build
-    if: github.event_name == 'push'
-    uses: ./.github/workflows/browser-lab-build.yml
+  publish:
+    name: Publish lab to the deployment branch
+    needs: build
+    if: >-
+      github.event_name == 'push' &&
+      (github.ref == 'refs/heads/main' || github.ref == 'refs/heads/develop') &&
+      needs.build.outputs.bootable == 'true' &&
+      needs.build.outputs.browser_compatible == 'true' &&
+      needs.build.outputs.boot_smoke_passed == 'true'
+    runs-on: ubuntu-latest
+    # Queued per branch: GitHub keeps one pending job per group, so only an older
+    # publish of the same branch can be dropped, never the other slot's. A main
+    # and a develop publish may overlap; the script retries when the branch moved.
+    concurrency:
+      group: pages-publish-${{ github.ref }}
+      cancel-in-progress: false
     permissions:
-      contents: read
-      pull-requests: read
-    with:
-      ref: develop
-      artifact_suffix: "-develop"
-      publish: false
-      # A failing develop build must not fail the main run: the run's success is
-      # what the portfolio notification waits for. The deploy below checks the
-      # develop outputs, so a failed develop build is left out of the site.
-      allow_failure: true
+      contents: write   # push the deployment branch
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v5
+
+      - name: Download validated lab
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          name: flintstone-browser-lab
+          path: ${{ runner.temp }}/lab
+
+      - name: Publish this branch's slot
+        env:
+          SLOT: ${{ github.ref == 'refs/heads/main' && 'main' || 'develop' }}
+          LAB: ${{ runner.temp }}/lab
+          SITE: ${{ runner.temp }}/site
+        run: |
+          ./scripts/publish_pages_slot.sh "$SLOT" "$LAB" "$SITE"
+          echo "${SLOT} lab published to the publisher branch" >>"$GITHUB_STEP_SUMMARY"
 
   deploy:
     name: Publish validated lab to GitHub Pages
-    needs: [main, develop]
-    if: >-
-      always() &&
-      github.event_name == 'push' &&
-      (github.ref == 'refs/heads/main' || github.ref == 'refs/heads/develop') &&
-      needs.main.result == 'success' &&
-      needs.main.outputs.bootable == 'true' &&
-      needs.main.outputs.browser_compatible == 'true' &&
-      needs.main.outputs.boot_smoke_passed == 'true'
+    needs: publish
     runs-on: ubuntu-latest
     environment:
       name: github-pages
       url: ${{ steps.deployment.outputs.page_url }}
-    # One Pages deploy at a time: a main push and a develop push both rebuild
-    # the whole site, and the later deploy must not be cancelled half way.
+    # Deploys whatever the deployment branch holds when it runs, so a pending
+    # deploy that a newer one replaces loses nothing: the newer one deploys the
+    # newer branch. Never cancelled half way.
     concurrency:
       group: pages-deploy
       cancel-in-progress: false
@@ -78,39 +94,37 @@ jobs:
       pages: write
       id-token: write
     steps:
-      - name: Download validated main lab
-        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+      - name: Check out the deployment branch
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v5
         with:
-          name: flintstone-browser-lab
-          path: dist/browser-lab
+          ref: publisher
+          path: site
+          persist-credentials: false
 
-      - name: Download validated develop lab
-        if: >-
-          needs.develop.result == 'success' &&
-          needs.develop.outputs.bootable == 'true' &&
-          needs.develop.outputs.browser_compatible == 'true' &&
-          needs.develop.outputs.boot_smoke_passed == 'true'
-        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
-        with:
-          name: flintstone-browser-lab-develop
-          path: dist/browser-lab/develop
-
-      - name: Report which builds are in the payload
+      - name: Check for the main lab
+        id: site
         run: |
-          test -f dist/browser-lab/index.html
-          if [ -f dist/browser-lab/develop/index.html ]; then
-            echo "develop: included" >>"$GITHUB_STEP_SUMMARY"
-          else
-            echo "develop: not included (its gates did not pass)" >>"$GITHUB_STEP_SUMMARY"
-          fi
+          {
+            echo "## Deployment branch $(git -C site rev-parse --short HEAD)"
+            echo
+            if [ -f site/index.html ]; then echo "- main lab: present"; else echo "- main lab: absent, Pages not deployed"; fi
+            if [ -f site/develop/index.html ]; then echo "- develop lab: present"; else echo "- develop lab: absent"; fi
+          } >>"$GITHUB_STEP_SUMMARY"
+          # Until main has published a lab at the root, deploying would take the
+          # site root down; leave the current site in place.
+          if [ -f site/index.html ]; then echo "deploy=true"; else echo "deploy=false"; fi >>"$GITHUB_OUTPUT"
 
       - name: Stage Pages payload
+        if: steps.site.outputs.deploy == 'true'
         uses: actions/upload-pages-artifact@fc324d3547104276b827a68afc52ff2a11cc49c9 # v5.0.0
         with:
-          path: dist/browser-lab
+          path: site
 
       - name: Configure Pages
+        if: steps.site.outputs.deploy == 'true'
         uses: actions/configure-pages@45bfe0192ca1faeb007ade9deae92b16b8254a0d # v6.0.0
+
       - name: Deploy Pages
+        if: steps.site.outputs.deploy == 'true'
         id: deployment
         uses: actions/deploy-pages@368f82528645a54fb793d4d04e342629a3f51346 # v5.0.1
