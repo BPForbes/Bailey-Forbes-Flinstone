@@ -388,12 +388,14 @@ vm-sdl:
 # Browser-lab boot boundary. This produces a BIOS raw disk with a lab identity
 # shell and concurrent sessions. Hosted filesystem, networking, and server remain
 # unavailable and are reported explicitly in the manifest.
-browser-kernel:
+# Depends on $(VERSION_DEF): the lab's `version` command prints its VERSION_LINE,
+# and the committed header can lag version/entries until the version job syncs it.
+browser-kernel: $(VERSION_DEF)
 	@./scripts/build_freestanding_browser_kernel.sh
 
 # Security-features variant (netlab teaching lab compiled in). The default
 # browser-kernel image stays lab-free (what main/the Flinstone page ship).
-browser-kernel-secfeat:
+browser-kernel-secfeat: $(VERSION_DEF)
 	@SECFEAT=1 ./scripts/build_freestanding_browser_kernel.sh
 
 test-browser-kernel: browser-kernel
