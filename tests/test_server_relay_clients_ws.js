@@ -74,6 +74,19 @@ function chatLines(events) {
     await new Promise(resolve => setTimeout(resolve, 80));
     assert.deepStrictEqual(chatLines(aliceEvents).filter(line => line.includes("hello from alice")), ["alice: hello from alice"]);
     assert.deepStrictEqual(chatLines(bobEvents).filter(line => line.includes("hello from alice")), ["alice: hello from alice"]);
+
+    // A file from alice reaches bob through the hub, and alice hears that it was sent.
+    const note = new TextEncoder().encode("hi bob");
+    assert(alice.sendFile("bob", "note.txt", note));
+    await new Promise(resolve => setTimeout(resolve, 80));
+    const files = bobEvents.filter(e => e.type === "file");
+    assert.strictEqual(files.length, 1);
+    assert.strictEqual(files[0].from, "alice");
+    assert.strictEqual(files[0].name, "note.txt");
+    assert.deepStrictEqual(Array.from(files[0].bytes), Array.from(note));
+    assert.deepStrictEqual(aliceEvents.filter(e => e.type === "file-status").map(e => e.text),
+                           ["sent note.txt to bob (6 bytes)"]);
+    assert.strictEqual(aliceEvents.filter(e => e.type === "file").length, 0);
     alice.leave();
     bob.leave();
     console.log("test_server_relay_clients_ws: PASS");

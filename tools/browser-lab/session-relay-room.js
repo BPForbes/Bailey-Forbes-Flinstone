@@ -1,5 +1,7 @@
 "use strict";
-const { OP, encodeFrame, FrameParser, payloadText } = require("./session-wire.js");
+const {
+  OP, encodeFrame, FrameParser, payloadText, encodeFileOffer, decodeFileOffer,
+} = require("./session-wire.js");
 
 const MAX_MEMBERS = OP.FL_NET_SESSION_MAX_MEMBERS;
 const MAX_MSG = OP.FL_NET_SESSION_MAX_MSG;
@@ -11,6 +13,16 @@ function sendBinary(socket, frame) {
   try {
     socket.send(frame);
   } catch (_) { /* ignore */ }
+}
+
+/* A file name the relay will pass on: one plain path component, printable. */
+function plainFileName(name) {
+  if (typeof name !== "string" || !name || name.length > 64 || name === "." || name === "..") return false;
+  for (const ch of name) {
+    const c = ch.codePointAt(0);
+    if (c < 0x20 || c === 0x7f || ch === "/" || ch === "\\") return false;
+  }
+  return true;
 }
 
 function renderDisplay(member, members) {
@@ -91,6 +103,30 @@ class Room {
     const frame = encodeFrame(OP.FL_NET_SESSION_OP_MSG_BROADCAST, body);
     if (frame) this.broadcast(frame, from.memberId);
   }
+  sendStatus(member, text) {
+    sendBinary(member.socket, encodeFrame(OP.FL_NET_SESSION_OP_FILE_STATUS, text.slice(0, MAX_MSG)));
+  }
+  /* Delivers a file to every other live session of the named principal; never broadcast. */
+  relayFile(from, payload) {
+    const offer = decodeFileOffer(payload);
+    if (!offer || !plainFileName(offer.name)) {
+      this.sendStatus(from, "file refused: malformed offer");
+      return;
+    }
+    const targets = this.live().filter(m => m !== from && m.principal === offer.who);
+    if (!targets.length) {
+      this.sendStatus(from, `file not sent: ${offer.who} is not connected`);
+      return;
+    }
+    const frame = encodeFrame(OP.FL_NET_SESSION_OP_FILE_OFFER,
+                              encodeFileOffer(from.principal, offer.name, offer.bytes));
+    if (!frame) {
+      this.sendStatus(from, "file refused: too large for one frame");
+      return;
+    }
+    for (const m of targets) sendBinary(m.socket, frame);
+    this.sendStatus(from, `sent ${offer.name} to ${offer.who} (${offer.bytes.length} bytes)`);
+  }
   acceptHello(socket, principal) {
     if (this.live().length >= MAX_MEMBERS) {
       sendBinary(socket, encodeFrame(OP.FL_NET_SESSION_OP_ERR, "session full"));
@@ -118,6 +154,10 @@ class Room {
     if (opcode === OP.FL_NET_SESSION_OP_MSG) {
       if (payload.length === 0 || payload.length > MAX_MSG) return;
       this.relayMsg(member, payload);
+      return;
+    }
+    if (opcode === OP.FL_NET_SESSION_OP_FILE_OFFER) {
+      this.relayFile(member, payload);
       return;
     }
     if (opcode === OP.FL_NET_SESSION_OP_CTRL_LEAVE) {
@@ -164,4 +204,5 @@ function attachSocket(room, socket) {
 
 module.exports = {
   Room, attachSocket, renderDisplay, sendBinary, FrameParser, OP, encodeFrame, payloadText,
+  encodeFileOffer, decodeFileOffer, plainFileName,
 };

@@ -3,7 +3,9 @@
   const wire = globalThis.FlintstoneSessionWire;
   if (!wire) throw new Error("FlintstoneSessionWire is not loaded");
 
-  const { OP, encodeFrame, FrameParser, payloadText, memberIdFromPayload } = wire;
+  const {
+    OP, encodeFrame, FrameParser, payloadText, memberIdFromPayload, encodeFileOffer, decodeFileOffer,
+  } = wire;
   const LOCAL_HOSTS = new Set(["127.0.0.1", "127.0.0.2", "localhost", "::1"]);
   const DEFAULT_PUBLIC_RELAY_HOST = "flintstone.bailey-forbes.com";
 
@@ -141,6 +143,15 @@
         emit({ type: "roster", members: members.slice() });
         return;
       }
+      if (opcode === OP.FL_NET_SESSION_OP_FILE_OFFER) {
+        const offer = decodeFileOffer(payload);
+        if (offer) emit({ type: "file", from: offer.who, name: offer.name, bytes: offer.bytes });
+        return;
+      }
+      if (opcode === OP.FL_NET_SESSION_OP_FILE_STATUS) {
+        emit({ type: "file-status", text: payloadText(payload) });
+        return;
+      }
       if (opcode === OP.FL_NET_SESSION_OP_ERR) {
         emit({ type: "error", text: payloadText(payload) });
       }
@@ -180,6 +191,9 @@
           emit({ type: "roster", members: members.slice() });
         } else if (data.kind === "msg") {
           emit({ type: "message", text: data.text, broadcast: true });
+        } else if (data.kind === "file") {
+          if (data.to === principalName && data.bytes instanceof Uint8Array)
+            emit({ type: "file", from: data.from, name: data.name, bytes: data.bytes });
         } else if (data.kind === "leave") {
           members = members.filter(m => m.memberId !== data.memberId);
           emit({ type: "roster", members: members.slice() });
@@ -276,6 +290,26 @@
         if (!frame) return false;
         socket.send(frame);
         emit({ type: "message", text: line, local: true });
+        return true;
+      },
+      /* Sends one file to another user's sessions; the relay answers with a file-status event. */
+      sendFile(to, name, bytes) {
+        if (!this.connected) return false;
+        if (socket.channel) {
+          const recipient = members.some(m => m.principal === to && m.memberId !== memberId);
+          if (recipient)
+            socket.channel.postMessage({ v: 1, kind: "file", tabId: socket.tabId, to, from: principalName, name, bytes });
+          // The status event reports the outcome, as the relay's FILE_STATUS does.
+          emit({
+            type: "file-status",
+            text: recipient ? `sent ${name} to ${to} (${bytes.length} bytes)` : `file not sent: ${to} is not connected`,
+          });
+          return true;
+        }
+        const payload = encodeFileOffer(to, name, bytes);
+        const frame = payload && encodeFrame(OP.FL_NET_SESSION_OP_FILE_OFFER, payload);
+        if (!frame) return false;
+        socket.send(frame);
         return true;
       },
       leave() {
