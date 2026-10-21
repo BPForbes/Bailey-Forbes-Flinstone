@@ -113,3 +113,16 @@ artifacts/
 # Python bytecode from scripts/ and tests/
 __pycache__/
 *.pyc
+tests/server_shared_quarantine_harness
+tests/test_file_history
+tests/test_macvlan_waitpid
+tests/test_net_wifi_host_he
+tests/test_server_file_expire
+tests/test_server_shared_catalog
+tests/test_server_shared_landed_name
+tests/test_server_shared_purge
+tests/test_wifi_ax_server_ota
+tests/test_wifi_coprocessor
+tests/test_wifi_db
+tests/test_wifi_fullmac_probe
+tests/test_wifi_uart_at_scan_join
