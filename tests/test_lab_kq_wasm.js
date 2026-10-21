@@ -214,8 +214,9 @@ function registered(t, user) {
   relay.drain();
   assert.match(alice.text(), /the server holds no keys for nobody/);
 
-  // A second revision arrives as newer, but it needs the editor's supervisor first: root is an
-  // ancestor of alice's scope, so root permits the head, and only then does the newer copy go out.
+  // A second revision arrives as newer, but it needs the editor's permit first. The lab's accounts
+  // are flat names (no Root hierarchy), so alice, the scope owner, permits her own head here; a
+  // separate supervisor is covered by the native checkpoint tests.
   alice.run("write note.txt hello again");
   alice.run("server file send -t note.txt -user bob");
   relay.drain();
@@ -227,10 +228,8 @@ function registered(t, user) {
   bob.run("cat note.txt");
   assert.match(bob.text(), /cat note\.txt\nhello bob\n/, "bob keeps the copy he holds");
 
-  alice.run("switchuser root");
   alice.run("server file permit /kq/alice/out/note.txt"); // the tracked copy the send staged
-  assert.match(alice.text(), /permitted the head of note\.txt as Root/);
-  alice.run("switchuser alice");
+  assert.match(alice.text(), /permitted the head of note\.txt as alice/);
   alice.run("server file send -t note.txt -user bob --permitted");
   relay.drain();
   const reqPermitted = bob.events.filter(e => e.kind === "request").pop();
