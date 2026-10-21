@@ -28,6 +28,8 @@
 
 #define MYA "Root.Flinstone.Mya"
 #define STEVE "Root.Flinstone.Steve"
+/* The editor's supervisor: the lab's Flinstone account is an ancestor of Mya. */
+#define SUPERVISOR "Root.Flinstone"
 #define EVE "Root.Alternative.Eve"
 #define T1 "2026-10-20T09:00:00.000Z"
 #define T2 "2026-10-20T10:00:00.000Z"
@@ -81,6 +83,7 @@ typedef struct {
     unsigned char steve_sign[FL_USER_SIGNING_SECRET_LEN];
     unsigned char steve_box[FL_USER_SIGNING_SECRET_LEN];
     unsigned char eve_box[FL_USER_SIGNING_SECRET_LEN];
+    unsigned char flinstone_sign[FL_USER_SIGNING_SECRET_LEN];
 } world_t;
 
 static int setup(world_t *w) {
@@ -99,7 +102,8 @@ static int setup(world_t *w) {
     if (fl_user_db_open_key(&w->db, "Mya", "pw-mya", w->mya_sign) != FL_RESULT_OK ||
         fl_user_db_open_key(&w->db, "Steve", "pw-steve", w->steve_sign) != FL_RESULT_OK ||
         fl_user_db_open_box(&w->db, "Steve", "pw-steve", w->steve_box) != FL_RESULT_OK ||
-        fl_user_db_open_box(&w->db, "Eve", "pw-eve", w->eve_box) != FL_RESULT_OK)
+        fl_user_db_open_box(&w->db, "Eve", "pw-eve", w->eve_box) != FL_RESULT_OK ||
+        fl_user_db_open_key(&w->db, "Flinstone", "flinstone", w->flinstone_sign) != FL_RESULT_OK)
         return -1;
     return 0;
 }
@@ -109,6 +113,7 @@ static void teardown(world_t *w) {
     asm_mem_secure_zero(w->steve_sign, sizeof w->steve_sign);
     asm_mem_secure_zero(w->steve_box, sizeof w->steve_box);
     asm_mem_secure_zero(w->eve_box, sizeof w->eve_box);
+    asm_mem_secure_zero(w->flinstone_sign, sizeof w->flinstone_sign);
 }
 
 static int contains(const fl_kq_buf_t *b, const char *needle) {
@@ -121,6 +126,38 @@ static int contains(const fl_kq_buf_t *b, const char *needle) {
 
 /* The KeyQuorum driver extends the generic driver: its base is a registrable descriptor
  * whose lifecycle probe gates the KeyQuorum ops. */
+static int prepare(world_t *w, const char *src, const char *text, const char *at,
+                   fl_kq_encoded_t *enc, uint8_t sig[64]) {
+    if (write_text(src, text) != 0 ||
+        fl_kq_cp_encode(&w->db, MYA, w->mya_sign, STEVE, fl_user_db_box_public(&w->db, STEVE),
+                        src, at, enc) != FL_KQ_CP_OK)
+        return -1;
+    if (fl_kq_cp_cosign(&enc->offer, STEVE, w->steve_sign, sig) != FL_KQ_CP_OK) {
+        fl_kq_encoded_free(enc);
+        return -1;
+    }
+    return 0;
+}
+
+/* A newer revision, made permitted: encoded, countersigned by the supervisor in the container
+ * beside src, then sealed again (the revision and its history are unchanged). */
+static int prepare_permitted(world_t *w, const char *src, const char *text, const char *at,
+                             fl_kq_encoded_t *enc, uint8_t sig[64]) {
+    fl_kq_encoded_t first;
+    uint8_t rev[32];
+
+    if (prepare(w, src, text, at, &first, sig) != 0)
+        return -1;
+    memcpy(rev, first.offer.revision_id, sizeof rev);
+    fl_kq_encoded_free(&first);
+    if (fl_kq_cp_permit(&w->db, SUPERVISOR, w->flinstone_sign, src, rev) != FL_KQ_CP_OK)
+        return -1;
+    if (fl_kq_cp_reseal(&w->db, MYA, w->mya_sign, STEVE, fl_user_db_box_public(&w->db, STEVE),
+                        src, rev, enc) != FL_KQ_CP_OK)
+        return -1;
+    return 0;
+}
+
 static int test_driver_extends_the_base_driver(void) {
     const fl_driver_desc_t *base = fl_kq_driver_desc();
     const fl_kq_driver_t *drv = fl_kq_driver_get();
@@ -219,9 +256,7 @@ static int test_co_signed_delivery(void) {
 
     /* Mya edits; the second revision arrives as NEWER and replaces Steve's copy. */
     ASSERT(write_text(src, "quarterly plan v2\n") == 0);
-    ASSERT(fl_kq_cp_encode(&w.db, MYA, w.mya_sign, STEVE, fl_user_db_box_public(&w.db, STEVE),
-                           src, T2, &enc) == FL_KQ_CP_OK);
-    ASSERT(fl_kq_cp_cosign(&enc.offer, STEVE, w.steve_sign, sig) == FL_KQ_CP_OK);
+    ASSERT(prepare_permitted(&w, src, "quarterly plan v2\n", T2, &enc, sig) == 0);
     ASSERT(fl_kq_cp_decode(&w.db, MYA, mya_pub, STEVE, w.steve_box, &enc.letter, &enc.offer, sig,
                            dest) == FL_KQ_CP_OK);
     ASSERT(read_text(dest, got, sizeof got) == 0);
@@ -286,10 +321,7 @@ static int test_a_failed_write_installs_nothing(void) {
                            dest) == FL_KQ_CP_OK);
     fl_kq_encoded_free(&enc);
 
-    ASSERT(write_text(src, "v2\n") == 0);
-    ASSERT(fl_kq_cp_encode(&w.db, MYA, w.mya_sign, STEVE, fl_user_db_box_public(&w.db, STEVE),
-                           src, T2, &enc) == FL_KQ_CP_OK);
-    ASSERT(fl_kq_cp_cosign(&enc.offer, STEVE, w.steve_sign, sig) == FL_KQ_CP_OK);
+    ASSERT(prepare_permitted(&w, src, "v2\n", T2, &enc, sig) == 0);
     ASSERT(mkdir(block, 0700) == 0);
     ASSERT(fl_kq_cp_decode(&w.db, MYA, mya_pub, STEVE, w.steve_box, &enc.letter, &enc.offer, sig,
                            dest) == FL_KQ_CP_IO);
@@ -342,10 +374,9 @@ static int test_the_seen_record_stays_bounded(void) {
     for (int i = 0; i < DELIVERIES; i++) {
         snprintf(text, sizeof text, "v%d\n", i);
         snprintf(at, sizeof at, "2026-10-20T09:%02d:%02d.000Z", i / 60, i % 60);
-        ASSERT(write_text(src, text) == 0);
-        ASSERT(fl_kq_cp_encode(&w.db, MYA, w.mya_sign, STEVE, fl_user_db_box_public(&w.db, STEVE),
-                               src, at, &enc) == FL_KQ_CP_OK);
-        ASSERT(fl_kq_cp_cosign(&enc.offer, STEVE, w.steve_sign, sig) == FL_KQ_CP_OK);
+        /* The first revision is FIRST and needs no permit; each later one is NEWER. */
+        ASSERT((i == 0 ? prepare(&w, src, text, at, &enc, sig)
+                       : prepare_permitted(&w, src, text, at, &enc, sig)) == 0);
         ASSERT(fl_kq_cp_decode(&w.db, MYA, mya_pub, STEVE, w.steve_box, &enc.letter, &enc.offer,
                                sig, dest) == FL_KQ_CP_OK);
         if (i == 0)
@@ -401,16 +432,64 @@ static int test_the_seen_record_stays_bounded(void) {
 
 /* Encodes text as Mya's next revision of src, co-signed by Steve; decode into dest is left to
  * the caller. */
-static int prepare(world_t *w, const char *src, const char *text, const char *at,
-                   fl_kq_encoded_t *enc, uint8_t sig[64]) {
-    if (write_text(src, text) != 0 ||
-        fl_kq_cp_encode(&w->db, MYA, w->mya_sign, STEVE, fl_user_db_box_public(&w->db, STEVE),
-                        src, at, enc) != FL_KQ_CP_OK)
-        return -1;
-    if (fl_kq_cp_cosign(&enc->offer, STEVE, w->steve_sign, sig) != FL_KQ_CP_OK) {
-        fl_kq_encoded_free(enc);
-        return -1;
-    }
+/* The history is read from the local container alone, and it names what happened: a check-in and
+ * the signature on it, then the permit on the revision; the head is the permitted revision. */
+static int test_history_is_offline_and_named(void) {
+    world_t w;
+    fl_kq_encoded_t enc;
+    fl_kq_buf_t lines = {0};
+    char src[PATH_MAX];
+    uint8_t sig[64], head[32];
+
+    ASSERT(setup(&w) == 0);
+    path_in(src, sizeof src, "offline.txt");
+    ASSERT(prepare(&w, src, "v1\n", T1, &enc, sig) == 0);
+    fl_kq_encoded_free(&enc);
+
+    ASSERT(fl_kq_cp_head(src, head) == FL_KQ_CP_OK);
+    ASSERT(fl_kq_cp_history(src, &lines) == FL_KQ_CP_OK);
+    ASSERT(lines.len > 0 && lines.data[lines.len - 1] == '\n');
+    ASSERT(contains(&lines, "\t2\t") && contains(&lines, "\t3\t"));
+    ASSERT(strcmp(fl_kq_cp_event_name(2), "EditCheckedIn") == 0);
+    ASSERT(strcmp(fl_kq_cp_event_name(3), "RevisionSigned") == 0);
+    ASSERT(strcmp(fl_kq_cp_event_name(200), "?") == 0);
+    ASSERT(strcmp(fl_kq_cp_outcome_name(1), "Success") == 0);
+    fl_kq_buf_free(&lines);
+    teardown(&w);
+    return 0;
+}
+
+/* A newer copy is refused until the editor's supervisor has countersigned it: Steve keeps the copy
+ * he has, and the same revision goes through once the permit is in the container. */
+static int test_newer_without_the_permit_is_refused(void) {
+    world_t w;
+    fl_kq_encoded_t enc;
+    char src[PATH_MAX], dest[PATH_MAX], got[64];
+    uint8_t sig[64];
+    const unsigned char *mya_pub;
+
+    ASSERT(setup(&w) == 0);
+    mya_pub = fl_user_db_signing_public(&w.db, MYA);
+    path_in(src, sizeof src, "permit.txt");
+    path_in(dest, sizeof dest, "steve-permit.txt");
+
+    ASSERT(prepare(&w, src, "v1\n", T1, &enc, sig) == 0);
+    ASSERT(fl_kq_cp_decode(&w.db, MYA, mya_pub, STEVE, w.steve_box, &enc.letter, &enc.offer, sig,
+                           dest) == FL_KQ_CP_OK);
+    fl_kq_encoded_free(&enc);
+
+    ASSERT(prepare(&w, src, "v2\n", T2, &enc, sig) == 0);
+    ASSERT(fl_kq_cp_decode(&w.db, MYA, mya_pub, STEVE, w.steve_box, &enc.letter, &enc.offer, sig,
+                           dest) == FL_KQ_CP_NEEDS_EDITOR_PERMIT);
+    ASSERT(read_text(dest, got, sizeof got) == 0 && strcmp(got, "v1\n") == 0);
+    fl_kq_encoded_free(&enc);
+
+    ASSERT(prepare_permitted(&w, src, "v2\n", T2, &enc, sig) == 0);
+    ASSERT(fl_kq_cp_decode(&w.db, MYA, mya_pub, STEVE, w.steve_box, &enc.letter, &enc.offer, sig,
+                           dest) == FL_KQ_CP_OK);
+    ASSERT(read_text(dest, got, sizeof got) == 0 && strcmp(got, "v2\n") == 0);
+    fl_kq_encoded_free(&enc);
+    teardown(&w);
     return 0;
 }
 
@@ -444,7 +523,7 @@ static int test_newer_needs_the_accepted_container(void) {
                            dest2) == FL_KQ_CP_OK);
     fl_kq_encoded_free(&enc);
 
-    ASSERT(prepare(&w, src, "v2\n", T2, &enc, sig) == 0);
+    ASSERT(prepare_permitted(&w, src, "v2\n", T2, &enc, sig) == 0);
     /* Missing. */
     ASSERT(rename(side, kept) == 0);
     ASSERT(fl_kq_cp_decode(&w.db, MYA, mya_pub, STEVE, w.steve_box, &enc.letter, &enc.offer, sig,
@@ -515,6 +594,8 @@ int main(void) {
     RUN(test_a_damaged_history_is_refused);
     RUN(test_the_seen_record_stays_bounded);
     RUN(test_newer_needs_the_accepted_container);
+    RUN(test_newer_without_the_permit_is_refused);
+    RUN(test_history_is_offline_and_named);
     RUN(test_only_plain_file_names_are_safe);
     RUN(test_reasons_and_results);
     rmrf(s_dir);

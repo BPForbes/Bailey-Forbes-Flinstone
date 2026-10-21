@@ -1,8 +1,0 @@
-MAJOR_VERSION=5
-STANDARD_VERSION=3
-RELEASE_VERSION=0
-PRERELEASE=1
-DEV_VERSION=7
-DESCRIPTION=File history for server file sharing. Every share now keeps an append-only history in the host catalog (table catalog_event, same database as the share, one row per event with a per-share sequence number): offered when the sender registers it, completed with the content hash when the bytes land, accepted (with the disposition, overwrite, server-share or keep), declined, revoked by the owner, and expired when the host purges it. Events are written from the same code paths that change the share, so a change and its record cannot disagree, and a re-share no longer loses the earlier hash, because the offer's placeholder is replaced once and the history keeps it. The new shell verb server file history <share_id> prints a share's events in order. The catalog contract gains fl_server_catalog_append_event and fl_server_catalog_list_events (contracts/storage/contract_p5_server_catalog.h). Tests: new make test_file_history (offer, completion, expiry and sequence order per share) in run_all_tests.sh; test_server_shared_catalog and the accept path test still pass. Not covered yet: KeyQuorum file history (kq_file_events and related FFI) is a separate KeyQuorum change, and the lab does not show history.
-
-RELEASE_DATE=2026-10-21
