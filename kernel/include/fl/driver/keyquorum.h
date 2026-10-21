@@ -83,6 +83,16 @@ struct fl_kq_driver {
     int (*freshness)(const uint8_t (*seen)[64], size_t nseen, const fl_kq_buf_t *c,
                      const uint8_t rev[32], const uint8_t root[32]);
 
+    /* Editor's permit: a supervisor countersigned rev (KQ_FILE_OK) or did not (KQ_FILE_UNTRUSTED).
+     * The checkpoint requires it before a newer copy of a file it holds is accepted. */
+    int (*permits_newer)(const fl_kq_buf_t *c, const uint8_t rev[32],
+                         const kq_file_trust_t *trust);
+    /* A supervisor adds a countersignature over rev; out is the container with it. */
+    int (*countersign)(const fl_kq_buf_t *c, const uint8_t rev[32], const char *supervisor,
+                       const uint8_t secret[32], const kq_file_trust_t *trust, fl_kq_buf_t *out);
+    /* History, offline: one tab-separated line per event (see keyquorum_files.h). */
+    int (*events)(const fl_kq_buf_t *c, fl_kq_buf_t *out);
+
     /* ASM layer. */
     void (*wipe)(void *secret, size_t n);
     int (*equal)(const void *a, const void *b, size_t n);

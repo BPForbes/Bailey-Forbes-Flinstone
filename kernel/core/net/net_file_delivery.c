@@ -1164,6 +1164,24 @@ fl_result_t fl_server_share_sent_list(uint16_t member_id)
     return FL_RESULT_OK;
 }
 
+/* The share's history records who acted and how: the event is appended after the action
+ * succeeded, so a refused action leaves no event. */
+static void record_share_event(const char *share_id, const char *event, uint16_t actor_id,
+                               const char *detail)
+{
+    (void)fl_server_catalog_append_event(share_id, event, actor_id,
+                                         (uint64_t)time(NULL), detail ? detail : "");
+}
+
+static const char *disposition_name(fl_server_file_disposition_t disposition)
+{
+    if (disposition == FL_SERVER_FILE_OVERWRITE_LOCAL)
+        return "overwrite";
+    if (disposition == FL_SERVER_FILE_SAVE_TO_SERVER_SHARE)
+        return "server_shared";
+    return "keep";
+}
+
 fl_result_t fl_server_share_accept(const char *share_id,
                                    uint16_t receiver_id,
                                    fl_server_file_disposition_t disposition)
@@ -1173,8 +1191,12 @@ fl_result_t fl_server_share_accept(const char *share_id,
     fl_result_t rc;
     share_purge_expired(now);
     slot = share_find(share_id);
-    if (!slot)
-        return accept_from_catalog(share_id, receiver_id, disposition, now);
+    if (!slot) {
+        rc = accept_from_catalog(share_id, receiver_id, disposition, now);
+        if (rc == FL_RESULT_OK)
+            record_share_event(share_id, "accepted", receiver_id, disposition_name(disposition));
+        return rc;
+    }
     rc = share_access_ok(&slot->offer, now);
     if (rc != FL_RESULT_OK)
         return rc;
@@ -1211,6 +1233,7 @@ fl_result_t fl_server_share_accept(const char *share_id,
            disposition == FL_SERVER_FILE_OVERWRITE_LOCAL ? "overwrite" :
            disposition == FL_SERVER_FILE_SAVE_TO_SERVER_SHARE ? "server_shared" :
            "decline");
+    record_share_event(share_id, "accepted", receiver_id, disposition_name(disposition));
     share_slot_release(slot);
     return FL_RESULT_OK;
 }
@@ -1226,6 +1249,7 @@ fl_result_t fl_server_share_decline(const char *share_id,
     if (slot->offer.receiver_member_id != 0u &&
         slot->offer.receiver_member_id != receiver_id)
         return FL_RESULT_ACCES;
+    record_share_event(share_id, "declined", receiver_id, NULL);
     share_slot_release(slot);
     return FL_RESULT_OK;
 }
@@ -1241,12 +1265,14 @@ fl_result_t fl_server_share_revoke(const char *share_id,
         if (entry.sender_member_id != owner_id)
             return FL_RESULT_ACCES;
         (void)fl_server_catalog_revoke_transfer(share_id);
+        record_share_event(share_id, "revoked", owner_id, NULL);
         return FL_RESULT_OK;
     }
     if (slot->offer.sender_member_id != owner_id)
         return FL_RESULT_ACCES;
     slot->offer.file_perms |= FL_FILE_FLAG_REVOKED;
     (void)fl_server_catalog_revoke_transfer(share_id);
+    record_share_event(share_id, "revoked", owner_id, NULL);
     share_slot_release(slot);
     return FL_RESULT_OK;
 }

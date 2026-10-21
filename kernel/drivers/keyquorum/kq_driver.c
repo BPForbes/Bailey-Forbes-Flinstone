@@ -172,6 +172,22 @@ static fl_result_t kq_probe(fl_device_t *dev) {
     return kq_file_abi_version() == FL_KQ_ABI_VERSION ? FL_RESULT_OK : FL_RESULT_PROBE_SKIP;
 }
 
+static int drv_permits_newer(const fl_kq_buf_t *c, const uint8_t rev[32],
+                             const kq_file_trust_t *trust) {
+    return kq_file_permits_newer(c->data, c->len, rev, trust);
+}
+
+static int drv_countersign(const fl_kq_buf_t *c, const uint8_t rev[32], const char *supervisor,
+                           const uint8_t secret[32], const kq_file_trust_t *trust,
+                           fl_kq_buf_t *out) {
+    SIZED_CALL(out, kq_file_countersign(c->data, c->len, rev, supervisor, secret, trust, outp_,
+                                        cap_, &need_));
+}
+
+static int drv_events(const fl_kq_buf_t *c, fl_kq_buf_t *out) {
+    SIZED_CALL(out, kq_file_events(c->data, c->len, outp_, cap_, &need_));
+}
+
 static const fl_driver_ops_t s_kq_lifecycle = {
     .probe = kq_probe,
 };
@@ -198,6 +214,9 @@ static const fl_kq_driver_t s_kq_driver = {
     .cosign_verify = drv_cosign_verify,
     .open = drv_open,
     .attach = drv_attach,
+    .permits_newer = drv_permits_newer,
+    .countersign = drv_countersign,
+    .events = drv_events,
     .readiness = drv_readiness,
     .freshness = drv_freshness,
     .wipe = mem_domain_secure_zero,
