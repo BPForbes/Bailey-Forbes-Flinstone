@@ -121,6 +121,12 @@ const char *fl_kq_cp_event_name(uint8_t code);
 const char *fl_kq_cp_outcome_name(uint8_t code);
 
 /**
+ * One history line from fl_kq_cp_history as display text (names for the codes, "UNKNOWN" for
+ * an empty actor). Returns the length written to out, which never exceeds cap - 1.
+ */
+size_t fl_kq_cp_format_event(const char *line, size_t n, char *out, size_t cap);
+
+/**
  * Permit (supervisor): countersigns revision rev in the container at container_path as
  * supervisor_key, after the author's signature verifies under keys, and writes the container
  * back in place. The recipient accepts a newer copy only with this countersignature in it.

@@ -687,6 +687,37 @@ const char *fl_kq_cp_outcome_name(uint8_t code) {
     return kq_outcome_names[code - 1u];
 }
 
+/* One history line (see keyquorum_files.h) as text: sequence, time, type name, outcome name,
+ * actor, revision and details. A malformed line is copied as it is. */
+size_t fl_kq_cp_format_event(const char *line, size_t n, char *out, size_t cap) {
+    char text[512];
+    char *field[7];
+    size_t len = n < sizeof text - 1u ? n : sizeof text - 1u;
+    size_t k = 1;
+    int written;
+
+    if (!out || cap == 0u)
+        return 0u;
+    memcpy(text, line, len);
+    text[len] = '\0';
+    field[0] = text;
+    for (size_t i = 0; i < len && k < 7u; i++) {
+        if (text[i] == '\t') {
+            text[i] = '\0';
+            field[k++] = text + i + 1;
+        }
+    }
+    if (k != 7u)
+        written = snprintf(out, cap, "%s", text);
+    else
+        written = snprintf(out, cap, "%4s  %s  %-22s %-8s by %-24s rev %-12.12s %s", field[0],
+                           field[1],
+                           fl_kq_cp_event_name((uint8_t)strtoul(field[2], NULL, 10)),
+                           fl_kq_cp_outcome_name((uint8_t)strtoul(field[3], NULL, 10)),
+                           field[4][0] ? field[4] : "UNKNOWN", field[5], field[6]);
+    return written < 0 ? 0u : (size_t)written < cap ? (size_t)written : cap - 1u;
+}
+
 fl_kq_cp_result_t fl_kq_cp_history(const char *path, fl_kq_buf_t *lines) {
     const fl_kq_driver_t *drv = fl_kq_driver_get();
     char container_path[4096];

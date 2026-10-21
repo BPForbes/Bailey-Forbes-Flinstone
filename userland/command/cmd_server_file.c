@@ -539,33 +539,13 @@ static void kq_utc_now(char *out, size_t cap)
 }
 
 /* server file send -t <path> -user <name>: encode checkpoint, then OFFER + parts. */
-/* One history line (sequence, time, type, outcome, actor, revision, details) for display. The
- * codes are shown with their names; a malformed line is printed as it is. */
+/* One history line for display (see fl_kq_cp_format_event). */
 static void print_event_line(const char *line, size_t n)
 {
-    char text[512];
-    char *field[7];
-    size_t len = n < sizeof text - 1u ? n : sizeof text - 1u;
-    size_t i;
-    size_t k = 1;
+    char text[640];
 
-    memcpy(text, line, len);
-    text[len] = '\0';
-    field[0] = text;
-    for (i = 0; i < len && k < 7u; i++) {
-        if (text[i] == '\t') {
-            text[i] = '\0';
-            field[k++] = text + i + 1;
-        }
-    }
-    if (k != 7u) {
-        printf("%s\n", text);
-        return;
-    }
-    printf("%4s  %s  %-22s %-8s by %-24s rev %-12.12s %s\n", field[0], field[1],
-           fl_kq_cp_event_name((uint8_t)strtoul(field[2], NULL, 10)),
-           fl_kq_cp_outcome_name((uint8_t)strtoul(field[3], NULL, 10)),
-           field[4][0] ? field[4] : "UNKNOWN", field[5], field[6]);
+    fl_kq_cp_format_event(line, n, text, sizeof text);
+    printf("%s\n", text);
 }
 
 /* Offline: the history of a tracked file, read from its container beside the file. It needs no

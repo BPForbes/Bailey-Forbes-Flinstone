@@ -190,7 +190,7 @@ checkpoint. `tests/test_lab_kq_wasm.js` runs two copies of the module through th
 | Permissions | 16-bit file perms (`contract_p5_file_perms.h`): VIEW, WRITE, EDIT, RUN, OVERWRITE, DOWNLOAD, SERVER_SHARE, ACCEPT, plus LOCKED, EXPIRES, PUBLIC, REVOKED. `server file` takes `-v -w -e -r -o` and `--expire` | No per-recipient cryptographic check; the hub decides |
 | Transport | Plain TCP hub, file bytes up to 16 MiB (`FL_SERVER_FILE_MAX_BYTES`) | Nothing sealed in transit to the recipient beyond the channel |
 | Store | `server_shared_fs` writes files and `.meta` sidecars; `server_shared_db` holds rows | Payload is plaintext on disk |
-| History | The file's own hash-chained history in its `.kqtf` (KeyQuorum events), read offline with `server file log <path>`; shell and authorization lines in `audit_log.c`; share events in the host catalog (`catalog_event`) | The lab does not show the history yet; the `.kqtf` is plaintext at rest |
+| History | The file's own hash-chained history in its `.kqtf` (KeyQuorum events), read offline with `server file log <path>`; shell and authorization lines in `audit_log.c`; share events in the host catalog (`catalog_event`) | The lab has `server file log` and `server file permit` as commands, with no history panel yet; the `.kqtf` is plaintext at rest |
 | Expiry | `server_file_expire.c`, deletes when the time passes | Copies already delivered are not recalled |
 
 KeyQuorum already has all of the cryptographic and history pieces, in Rust:

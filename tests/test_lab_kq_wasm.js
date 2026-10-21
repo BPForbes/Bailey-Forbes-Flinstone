@@ -228,7 +228,7 @@ function registered(t, user) {
   assert.match(bob.text(), /cat note\.txt\nhello bob\n/, "bob keeps the copy he holds");
 
   alice.run("switchuser root");
-  alice.run("server file permit note.txt");
+  alice.run("server file permit /kq/alice/out/note.txt"); // the tracked copy the send staged
   assert.match(alice.text(), /permitted the head of note\.txt as Root/);
   alice.run("switchuser alice");
   alice.run("server file send -t note.txt -user bob --permitted");
