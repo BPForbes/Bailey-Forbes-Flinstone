@@ -93,6 +93,15 @@ static fl_result_t db_init_schema(sqlite3 *sql)
         "  member_id INTEGER NOT NULL,"
         "  PRIMARY KEY (transfer_id, member_id)"
         ");"
+        "CREATE TABLE IF NOT EXISTS catalog_event ("
+        "  transfer_id TEXT NOT NULL,"
+        "  seq INTEGER NOT NULL,"
+        "  event TEXT NOT NULL,"
+        "  actor_member_id INTEGER NOT NULL,"
+        "  at INTEGER NOT NULL,"
+        "  detail TEXT NOT NULL DEFAULT '',"
+        "  PRIMARY KEY (transfer_id, seq)"
+        ");"
         "CREATE INDEX IF NOT EXISTS idx_catalog_transfer ON catalog_entry(transfer_id);"
         "CREATE INDEX IF NOT EXISTS idx_catalog_hash ON catalog_entry(content_hash);"
         "CREATE INDEX IF NOT EXISTS idx_catalog_receiver ON catalog_entry(receiver_member_id);";
@@ -243,6 +252,75 @@ fl_result_t fl_server_catalog_checkpoint(void)
     return db_exec(s_catalog_db, "PRAGMA wal_checkpoint(FULL);");
 }
 
+fl_result_t fl_server_catalog_append_event(const char *transfer_id, const char *event,
+                                           uint16_t actor_member_id, uint64_t at,
+                                           const char *detail)
+{
+    /* The next seq is computed in the same statement, so one share never gets two of a number. */
+    const char *ins =
+        "INSERT INTO catalog_event(transfer_id,seq,event,actor_member_id,at,detail) "
+        "VALUES(?,(SELECT COALESCE(MAX(seq),0)+1 FROM catalog_event WHERE transfer_id=?),?,?,?,?);";
+    sqlite3_stmt *st = NULL;
+    fl_result_t rc = FL_RESULT_OK;
+
+    if (!transfer_id || !transfer_id[0] || !event || !event[0])
+        return FL_RESULT_INVAL;
+    if (fl_server_catalog_open() != FL_RESULT_OK)
+        return FL_RESULT_ERR;
+    if (sqlite3_prepare_v2(s_catalog_db, ins, -1, &st, NULL) != SQLITE_OK)
+        return FL_RESULT_ERR;
+    sqlite3_bind_text(st, 1, transfer_id, -1, SQLITE_TRANSIENT);
+    sqlite3_bind_text(st, 2, transfer_id, -1, SQLITE_TRANSIENT);
+    sqlite3_bind_text(st, 3, event, -1, SQLITE_TRANSIENT);
+    sqlite3_bind_int(st, 4, (int)actor_member_id);
+    sqlite3_bind_int64(st, 5, (sqlite3_int64)at);
+    sqlite3_bind_text(st, 6, detail ? detail : "", -1, SQLITE_TRANSIENT);
+    if (sqlite3_step(st) != SQLITE_DONE)
+        rc = FL_RESULT_ERR;
+    sqlite3_finalize(st);
+    return rc;
+}
+
+fl_result_t fl_server_catalog_list_events(const char *transfer_id,
+                                          fl_server_catalog_event_t *out, size_t out_cap,
+                                          size_t *out_count)
+{
+    const char *sel =
+        "SELECT seq,event,actor_member_id,at,detail FROM catalog_event "
+        "WHERE transfer_id=? ORDER BY seq ASC LIMIT ?;";
+    sqlite3_stmt *st = NULL;
+    size_t n = 0;
+
+    if (out_count)
+        *out_count = 0;
+    if (!transfer_id || !transfer_id[0] || !out || !out_count || out_cap == 0u)
+        return FL_RESULT_INVAL;
+    if (fl_server_catalog_open() != FL_RESULT_OK)
+        return FL_RESULT_ERR;
+    if (sqlite3_prepare_v2(s_catalog_db, sel, -1, &st, NULL) != SQLITE_OK)
+        return FL_RESULT_ERR;
+    sqlite3_bind_text(st, 1, transfer_id, -1, SQLITE_TRANSIENT);
+    sqlite3_bind_int(st, 2, (int)out_cap);
+    while (n < out_cap && sqlite3_step(st) == SQLITE_ROW) {
+        fl_server_catalog_event_t *e = &out[n];
+        const unsigned char *txt;
+        memset(e, 0, sizeof(*e));
+        e->seq = (uint32_t)sqlite3_column_int64(st, 0);
+        txt = sqlite3_column_text(st, 1);
+        if (txt)
+            snprintf(e->event, sizeof(e->event), "%s", (const char *)txt);
+        e->actor_member_id = (uint16_t)sqlite3_column_int(st, 2);
+        e->at = (uint64_t)sqlite3_column_int64(st, 3);
+        txt = sqlite3_column_text(st, 4);
+        if (txt)
+            snprintf(e->detail, sizeof(e->detail), "%s", (const char *)txt);
+        n++;
+    }
+    sqlite3_finalize(st);
+    *out_count = n;
+    return FL_RESULT_OK;
+}
+
 fl_result_t fl_server_catalog_register_file_offer(const fl_server_file_offer_t *offer)
 {
     char pending_hash[FL_SERVER_SHARE_ID_MAX + 16u];
@@ -288,6 +366,8 @@ fl_result_t fl_server_catalog_register_file_offer(const fl_server_file_offer_t *
         sqlite3_finalize(st);
         return FL_RESULT_ERR;
     }
+    (void)fl_server_catalog_append_event(offer->share_id, "offered", offer->sender_member_id,
+                                         now, offer->file_name);
     sqlite3_finalize(st);
     return FL_RESULT_OK;
 }
@@ -327,6 +407,8 @@ fl_result_t fl_server_catalog_commit_file_offer(const fl_server_file_offer_t *of
         return FL_RESULT_ERR;
     }
     sqlite3_finalize(st);
+    (void)fl_server_catalog_append_event(offer->share_id, "completed", offer->sender_member_id,
+                                         (uint64_t)time(NULL), hash_hex);
     is_public = (offer->receiver_member_id == 0u ||
                  (offer->file_perms & FL_FILE_FLAG_PUBLIC) != 0) ? 1 : 0;
     return db_set_acl(s_catalog_db, offer->share_id, offer->sender_member_id,
@@ -734,8 +816,25 @@ fl_result_t fl_server_catalog_list_for_member(uint16_t member_id,
 fl_result_t fl_server_catalog_purge_expired(uint64_t now)
 {
     sqlite3_stmt *st = NULL;
+    /* One statement records every share about to expire, before its status changes. */
+    const char *log_expired =
+        "INSERT INTO catalog_event(transfer_id,seq,event,actor_member_id,at,detail) "
+        "SELECT c.transfer_id, (SELECT COALESCE(MAX(e.seq),0)+1 FROM catalog_event e "
+        "WHERE e.transfer_id=c.transfer_id), 'expired', 0, ?, '' "
+        "FROM catalog_entry c WHERE c.status=? AND c.expires_at!=0 AND c.expires_at<?;";
     if (fl_server_catalog_open() != FL_RESULT_OK)
         return FL_RESULT_ERR;
+    if (sqlite3_prepare_v2(s_catalog_db, log_expired, -1, &st, NULL) != SQLITE_OK)
+        return FL_RESULT_ERR;
+    sqlite3_bind_int64(st, 1, (sqlite3_int64)now);
+    sqlite3_bind_int(st, 2, (int)FL_SERVER_CATALOG_COMPLETE);
+    sqlite3_bind_int64(st, 3, (sqlite3_int64)now);
+    if (sqlite3_step(st) != SQLITE_DONE) {
+        sqlite3_finalize(st);
+        return FL_RESULT_ERR;
+    }
+    sqlite3_finalize(st);
+    st = NULL;
     if (sqlite3_prepare_v2(s_catalog_db,
                            "UPDATE catalog_entry SET status=? "
                            "WHERE status=? AND expires_at!=0 AND expires_at<?;",
