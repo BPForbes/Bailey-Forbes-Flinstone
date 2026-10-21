@@ -126,7 +126,12 @@ length-prefixed, every read bounds-checked.
 - **Recipient.** The letter opens with their box key and is signed by the sender's registered
   key; it carries exactly the offered revision; the co-author proof attaches; the revision is
   trusted under the file's policy; the file is not forked; it is not a replay and not older
-  than the copy held. `.kqseen` keeps the newest 64 accepted (revision, history root) pairs;
+  than the copy held. A newer copy also needs the editor's supervisor: the scope owner or an
+  ancestor must have countersigned that revision over the author's verified signature
+  (`fl_kq_cp_permit`, `kq_file_permits_newer`); without it the copy is refused as
+  `NEEDS_EDITOR_PERMIT` and the copy held stays. The permit travels in the sealed container, so
+  a permitted revision is sent with `server file send -t <path> -user <name> --permitted`, which
+  seals the head without checking in a new revision. `.kqseen` keeps the newest 64 accepted (revision, history root) pairs;
   each accepted root extends the one before it, so the newest still refuses forks and stale
   histories, and a revision the previously accepted `.kqtf` already holds is never newer.
   An announcement whose sender or file name is not a plain name is dropped unshown. The file,
@@ -185,7 +190,7 @@ checkpoint. `tests/test_lab_kq_wasm.js` runs two copies of the module through th
 | Permissions | 16-bit file perms (`contract_p5_file_perms.h`): VIEW, WRITE, EDIT, RUN, OVERWRITE, DOWNLOAD, SERVER_SHARE, ACCEPT, plus LOCKED, EXPIRES, PUBLIC, REVOKED. `server file` takes `-v -w -e -r -o` and `--expire` | No per-recipient cryptographic check; the hub decides |
 | Transport | Plain TCP hub, file bytes up to 16 MiB (`FL_SERVER_FILE_MAX_BYTES`) | Nothing sealed in transit to the recipient beyond the channel |
 | Store | `server_shared_fs` writes files and `.meta` sidecars; `server_shared_db` holds rows | Payload is plaintext on disk |
-| History | `audit_log.c` lines (`type=shell`, `authz`, `identity`) with `actor=` | No per-file, hash-chained history; no integrity over the file's life |
+| History | The file's own hash-chained history in its `.kqtf` (KeyQuorum events), read offline with `server file log <path>`; shell and authorization lines in `audit_log.c`; share events in the host catalog (`catalog_event`) | The lab has `server file log` and `server file permit` as commands, with no history panel yet; the `.kqtf` is plaintext at rest |
 | Expiry | `server_file_expire.c`, deletes when the time passes | Copies already delivered are not recalled |
 
 KeyQuorum already has all of the cryptographic and history pieces, in Rust:
@@ -264,7 +269,12 @@ the scope owner or an ancestor may decide, and another branch needs a bridge. Ma
 ### Audit and history
 
 - Flinstone keeps `audit_log.c` for shell and authorization events. KeyQuorum's history
-  (`FILE_*`, `SHARE_*`, `POLICY_DECISION`, `CONFLICT_*`) is per file and hash-chained.
+  (`FILE_*`, `SHARE_*`, `POLICY_DECISION`, `CONFLICT_*`) is per file and hash-chained, and
+  Flinstone reads it from the local `.kqtf` with no host and no session: `server file log <path>`
+  prints each event with its name, actor, revision and details. A check-in and its signature are
+  recorded by the same events the KeyQuorum CLI records, so a check-in made in Flinstone is in
+  the history. `server file permit <path>` adds the signed-in supervisor's countersignature to
+  the head revision.
 - Rule from KeyQuorum: history never records secrets, and every detail key is in
   `event::SAFE_DETAIL_KEYS`. Flinstone must not add a detail that carries a password, a
   passphrase or a payload.

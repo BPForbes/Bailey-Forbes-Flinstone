@@ -214,13 +214,27 @@ function registered(t, user) {
   relay.drain();
   assert.match(alice.text(), /the server holds no keys for nobody/);
 
-  // A second revision arrives as newer and replaces bob's delivered copy.
+  // A second revision arrives as newer, but it needs the editor's permit first. The lab's accounts
+  // are flat names (no Root hierarchy), so alice, the scope owner, permits her own head here; a
+  // separate supervisor is covered by the native checkpoint tests.
   alice.run("write note.txt hello again");
   alice.run("server file send -t note.txt -user bob");
   relay.drain();
   const req2 = bob.events.filter(e => e.kind === "request").pop();
   assert.notStrictEqual(req2.a, req.a);
   bob.run(`server file cosign ${req2.a}`);
+  relay.drain();
+  assert.match(bob.text(), /decode checkpoint refused\n  a newer copy needs the editor's supervisor/);
+  bob.run("cat note.txt");
+  assert.match(bob.text(), /cat note\.txt\nhello bob\n/, "bob keeps the copy he holds");
+
+  alice.run("server file permit /kq/alice/out/note.txt"); // the tracked copy the send staged
+  assert.match(alice.text(), /permitted the head of note\.txt as alice/);
+  alice.run("server file send -t note.txt -user bob --permitted");
+  relay.drain();
+  const reqPermitted = bob.events.filter(e => e.kind === "request").pop();
+  assert.notStrictEqual(reqPermitted.a, req2.a);
+  bob.run(`server file cosign ${reqPermitted.a}`);
   relay.drain();
   bob.run("cat note.txt");
   assert.match(bob.text(), /\nhello again\n/);
