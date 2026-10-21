@@ -275,6 +275,41 @@ static int verb_file_list(const cmd_server_ctx_t *ctx, const char *which)
     return 0;
 }
 
+#define FILE_HISTORY_MAX 64u
+
+static int verb_file_history(const cmd_server_ctx_t *ctx, int argc, char **argv)
+{
+    int hosting = 0;
+    fl_server_catalog_event_t events[FILE_HISTORY_MAX];
+    size_t count = 0;
+    size_t i;
+    fl_result_t rc;
+
+    if (!session_active(ctx, &hosting))
+        return 1;
+    if (argc < 2) {
+        fl_color_error("usage: server file history <share_id>");
+        return 1;
+    }
+    pthread_mutex_lock(ctx->mutex);
+    rc = fl_server_catalog_list_events(argv[1], events, FILE_HISTORY_MAX, &count);
+    pthread_mutex_unlock(ctx->mutex);
+    if (rc != FL_RESULT_OK) {
+        fl_color_error("server file history: could not read the share's history");
+        return 1;
+    }
+    if (count == 0) {
+        printf("no history for %s\n", argv[1]);
+        return 0;
+    }
+    for (i = 0; i < count; i++)
+        printf("%3u  %-10s  member=%u  at=%llu  %s\n",
+               (unsigned)events[i].seq, events[i].event,
+               (unsigned)events[i].actor_member_id,
+               (unsigned long long)events[i].at, events[i].detail);
+    return 0;
+}
+
 static int verb_file_accept(const cmd_server_ctx_t *ctx, int argc, char **argv)
 {
     int hosting = 0;
@@ -771,9 +806,11 @@ int cmd_server_file_run(const cmd_server_ctx_t *ctx, int argc, char **argv)
     sub_argc = argc - 2;
     sub_argv = argv + 2;
     if (sub_argc <= 0) {
-        fl_color_error("usage: server file <send [-t]|inbox|public|sent|accept|decline|revoke|fetch|cosign|open> ...");
+        fl_color_error("usage: server file <send [-t]|inbox|public|sent|history|accept|decline|revoke|fetch|cosign|open> ...");
         return 1;
     }
+    if (!strcmp(argv[2], "history"))
+        return verb_file_history(ctx, sub_argc, sub_argv);
     if (!strcmp(argv[2], "inbox"))
         return verb_file_list(ctx, "inbox");
     if (!strcmp(argv[2], "public"))
