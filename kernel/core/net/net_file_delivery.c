@@ -1770,7 +1770,7 @@ fl_result_t fl_net_file_send_offer(fl_net_server_t *srv,
         if (!srv)
             return FL_RESULT_INVAL;
         return fl_net_file_host_relay(srv, sender_id, FL_NET_SESSION_OP_FILE_OFFER,
-                                      payload, plen);
+                                      payload, plen, 0);
     }
     if (!client)
         return FL_RESULT_INVAL;
@@ -1795,7 +1795,7 @@ fl_result_t fl_net_file_send_control(fl_net_server_t *srv,
     if (hosting) {
         if (!srv)
             return FL_RESULT_INVAL;
-        return fl_net_file_host_relay(srv, actor_id, opcode, payload, plen);
+        return fl_net_file_host_relay(srv, actor_id, opcode, payload, plen, 0);
     }
     if (!client)
         return FL_RESULT_INVAL;
@@ -1806,7 +1806,8 @@ fl_result_t fl_net_file_host_relay(fl_net_server_t *srv,
                                    fl_net_server_member_id_t sender_id,
                                    uint8_t opcode,
                                    const uint8_t *payload,
-                                   uint16_t plen)
+                                   uint16_t plen,
+                                   int record_member_action)
 {
     fl_server_file_offer_t offer;
     fl_result_t rc;
@@ -1944,16 +1945,20 @@ fl_result_t fl_net_file_host_relay(fl_net_server_t *srv,
                     (actor != 0u && actor != sender_id))
                     return FL_RESULT_ACCES;
             }
-            /* The host authorises the action, so the host records it: the share's history is
-             * kept here, not in the member's own catalog. */
-            if (opcode == FL_NET_SESSION_OP_FILE_REVOKE)
-                rc = revoke_and_record(share_id, sender_id);
-            else if (opcode == FL_NET_SESSION_OP_FILE_DECLINE)
-                rc = record_share_event(share_id, "declined", sender_id, NULL);
-            else
-                rc = record_share_event(share_id, "accepted", sender_id, disposition_name(disp));
-            if (rc != FL_RESULT_OK)
-                return rc;
+            /* Joined members are recorded here. The host's own command records in
+             * fl_server_share_* after that call succeeds, so this path must not
+             * write the same event first. */
+            if (record_member_action) {
+                if (opcode == FL_NET_SESSION_OP_FILE_REVOKE)
+                    rc = revoke_and_record(share_id, sender_id);
+                else if (opcode == FL_NET_SESSION_OP_FILE_DECLINE)
+                    rc = record_share_event(share_id, "declined", sender_id, NULL);
+                else
+                    rc = record_share_event(share_id, "accepted", sender_id,
+                                            disposition_name(disp));
+                if (rc != FL_RESULT_OK)
+                    return rc;
+            }
             return fl_net_server_send_to_member(srv, slot->offer.sender_member_id,
                                                 opcode, payload, plen);
         }
