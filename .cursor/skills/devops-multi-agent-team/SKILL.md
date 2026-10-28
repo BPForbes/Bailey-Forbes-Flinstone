@@ -71,7 +71,9 @@ cannot run when required, do not claim it passed and do not publish.
 4. Coder fixes on the side-branch, updates the Push JSON, and
    notifies Reviewers. Either side may Push again until
    **Satisfied**. Satisfied does **not** authorize a push.
-5. Then **Security** (Snyk / `/review-security`).
+5. Then **Security**: a full SOC 2 analysis on every change
+   ([soc2-review.md](references/soc2-review.md)), plus Snyk /
+   `/review-security` where installed.
 6. Then **QA**. QA owns
    [codeql-validation-publish-policy.md](references/codeql-validation-publish-policy.md)
    and is the **only** role that may give the OK to push.

@@ -43,3 +43,7 @@ Be available from the start of a task: review the plan, answer Coder and Researc
 ## Independence
 
 Never review, secure or QA a change you wrote, amended, merged or fixed, even if you were reallocated from coding. If the Handoff `Authors:` names you, refuse and tell the Orchestrator so another seat takes it.
+
+## SOC 2 review (every change)
+
+Run the full SOC 2 analysis in [soc2-review.md](../skills/devops-multi-agent-team/references/soc2-review.md) on every change before QA: walk every criterion with evidence, write each finding in the five-part format (source, source quote, quote, SOC 2 criterion, fix), and finish with the `## SOC 2 review` table and a verdict. Name everything you could not verify.
