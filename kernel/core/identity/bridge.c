@@ -1,6 +1,7 @@
 #include "bridge.h"
 #include "heritage.h"
 #include "keyquorum_identity.h"
+#include "fl/hex.h"
 #include "fl/mem_asm.h"
 #include "mem_domain.h"
 #include "password_hash.h"
@@ -73,43 +74,6 @@ static fl_result_t bridge_open(const char *db_path, sqlite3 **out) {
     return FL_RESULT_OK;
 }
 
-static void to_hex(const unsigned char *in, size_t len, char *out) {
-    static const char digits[] = "0123456789abcdef";
-    size_t i;
-
-    for (i = 0; i < len; i++) {
-        out[2 * i] = digits[in[i] >> 4];
-        out[2 * i + 1] = digits[in[i] & 0x0f];
-    }
-    out[2 * len] = '\0';
-}
-
-static int hex_digit(char c) {
-    if (c >= '0' && c <= '9')
-        return c - '0';
-    if (c >= 'a' && c <= 'f')
-        return c - 'a' + 10;
-    if (c >= 'A' && c <= 'F')
-        return c - 'A' + 10;
-    return -1;
-}
-
-static int from_hex(const char *hex, unsigned char *out, size_t len) {
-    size_t i;
-
-    if (!hex || strlen(hex) != 2 * len)
-        return -1;
-    for (i = 0; i < len; i++) {
-        int hi = hex_digit(hex[2 * i]);
-        int lo = hex_digit(hex[2 * i + 1]);
-
-        if (hi < 0 || lo < 0)
-            return -1;
-        out[i] = (unsigned char)((hi << 4) | lo);
-    }
-    return 0;
-}
-
 /* 1 when secret is the signing key users holds for key_id. */
 static int secret_is_for(const fl_user_db_t *users, const char *key_id,
                          const unsigned char *secret) {
@@ -168,9 +132,9 @@ int fl_bridge_verified(const fl_user_db_t *users, const fl_bridge_t *b) {
         return 0;
     if (!fl_heritage_is_ancestor_or_self(b->accepted_by, b->b_key))
         return 0;
-    if (from_hex(b->nonce_hex, nonce, sizeof nonce) != 0 ||
-        from_hex(b->request_sig, req, sizeof req) != 0 ||
-        from_hex(b->accept_sig, acc, sizeof acc) != 0)
+    if (fl_hex_decode(b->nonce_hex, nonce, sizeof nonce) != 0 ||
+        fl_hex_decode(b->request_sig, req, sizeof req) != 0 ||
+        fl_hex_decode(b->accept_sig, acc, sizeof acc) != 0)
         return 0;
     a_public = fl_user_db_signing_public(users, b->a_key);
     by_public = fl_user_db_signing_public(users, b->accepted_by);
@@ -242,12 +206,12 @@ fl_result_t fl_bridge_request(const char *db_path, const fl_user_db_t *users,
         return FL_RESULT_ACCES;
     /* A fresh random nonce names this bridge, so its signatures stand for it alone. */
     if (fl_password_generate_salt_hex(nonce_hex, sizeof nonce_hex) != 0 ||
-        from_hex(nonce_hex, nonce, sizeof nonce) != 0)
+        fl_hex_decode(nonce_hex, nonce, sizeof nonce) != 0)
         return FL_RESULT_ERR;
     if (kq_account_bridge_sign(KQ_ACCOUNT_BRIDGE_REQUEST, actor_key, peer_key, actor_key, nonce,
                                actor_secret, sig) != KQ_ACCOUNT_OK)
         return FL_RESULT_ERR;
-    to_hex(sig, sizeof sig, sig_hex);
+    fl_hex_encode(sig, sizeof sig, sig_hex);
     rc = bridge_open(db_path, &sql);
     if (rc != FL_RESULT_OK)
         return rc;
@@ -309,8 +273,8 @@ fl_result_t fl_bridge_accept(const char *db_path, const fl_user_db_t *users, con
         const unsigned char *a_public = fl_user_db_signing_public(users, b.a_key);
         unsigned char req[FL_BRIDGE_SIGNATURE_LEN];
 
-        if (from_hex(b.nonce_hex, nonce, sizeof nonce) != 0 ||
-            from_hex(b.request_sig, req, sizeof req) != 0 || !a_public ||
+        if (fl_hex_decode(b.nonce_hex, nonce, sizeof nonce) != 0 ||
+            fl_hex_decode(b.request_sig, req, sizeof req) != 0 || !a_public ||
             kq_account_bridge_verify(KQ_ACCOUNT_BRIDGE_REQUEST, b.a_key, b.b_key, b.a_key, nonce,
                                      a_public, req) != 1) {
             sqlite3_close(sql);
@@ -322,7 +286,7 @@ fl_result_t fl_bridge_accept(const char *db_path, const fl_user_db_t *users, con
         sqlite3_close(sql);
         return FL_RESULT_ERR;
     }
-    to_hex(sig, sizeof sig, sig_hex);
+    fl_hex_encode(sig, sizeof sig, sig_hex);
     if (sqlite3_prepare_v2(sql,
                            "UPDATE bridges SET state=?,accepted_by=?,accepted_at=?,accept_sig=? "
                            "WHERE id=? AND state=?;",

@@ -138,6 +138,9 @@ jobs:
       - name: Test — account heritage (key ids, bridges, jail homes)
         run: make test_heritage
 
+      - name: Test — shared hex codec
+        run: make test_hex
+
       - name: Test — drivers
         run: make test_drivers
 

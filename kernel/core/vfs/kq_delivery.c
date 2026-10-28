@@ -1,5 +1,6 @@
 #include "kq_delivery.h"
 #include "server_shared_fs.h"
+#include "fl/hex.h"
 
 #include <errno.h>
 #include <fcntl.h>
@@ -62,35 +63,11 @@ fl_kq_neuron_t fl_kq_delivery_integrate(fl_kq_delivery_t *d, fl_kq_spike_t spike
 
 void fl_kq_delivery_id_hex(const uint8_t id[FL_KQ_DELIVERY_ID_LEN],
                            char out[2 * FL_KQ_DELIVERY_ID_LEN + 1]) {
-    static const char hex[] = "0123456789abcdef";
-    for (size_t i = 0; i < FL_KQ_DELIVERY_ID_LEN; i++) {
-        out[2 * i] = hex[id[i] >> 4];
-        out[2 * i + 1] = hex[id[i] & 0x0f];
-    }
-    out[2 * FL_KQ_DELIVERY_ID_LEN] = '\0';
-}
-
-static int nibble(char c) {
-    if (c >= '0' && c <= '9')
-        return c - '0';
-    if (c >= 'a' && c <= 'f')
-        return c - 'a' + 10;
-    if (c >= 'A' && c <= 'F')
-        return c - 'A' + 10;
-    return -1;
+    fl_hex_encode(id, FL_KQ_DELIVERY_ID_LEN, out);
 }
 
 int fl_kq_delivery_id_parse(const char *hex, uint8_t id[FL_KQ_DELIVERY_ID_LEN]) {
-    if (!hex || strlen(hex) != 2 * FL_KQ_DELIVERY_ID_LEN)
-        return -1;
-    for (size_t i = 0; i < FL_KQ_DELIVERY_ID_LEN; i++) {
-        int hi = nibble(hex[2 * i]);
-        int lo = nibble(hex[2 * i + 1]);
-        if (hi < 0 || lo < 0)
-            return -1;
-        id[i] = (uint8_t)((hi << 4) | lo);
-    }
-    return 0;
+    return fl_hex_decode(hex, id, FL_KQ_DELIVERY_ID_LEN);
 }
 
 /* ---- the store ----------------------------------------------------------- */

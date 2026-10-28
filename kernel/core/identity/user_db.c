@@ -3,6 +3,7 @@
 #include "keyquorum_identity.h"
 #include "password_hash.h"
 #include "mem_domain.h"
+#include "fl/hex.h"
 #include "fl/mem_asm.h"
 #include <limits.h>
 #include <sqlite3.h>
@@ -123,44 +124,6 @@ static fl_result_t hash_password_fields(const char *password, char *hash_hex, si
     return FL_RESULT_OK;
 }
 
-static void to_hex(const unsigned char *in, size_t len, char *out) {
-    static const char digits[] = "0123456789abcdef";
-    size_t i;
-
-    for (i = 0; i < len; i++) {
-        out[2 * i] = digits[in[i] >> 4];
-        out[2 * i + 1] = digits[in[i] & 0x0f];
-    }
-    out[2 * len] = '\0';
-}
-
-static int hex_digit(char c) {
-    if (c >= '0' && c <= '9')
-        return c - '0';
-    if (c >= 'a' && c <= 'f')
-        return c - 'a' + 10;
-    if (c >= 'A' && c <= 'F')
-        return c - 'A' + 10;
-    return -1;
-}
-
-/* 0 when hex is exactly 2 * len hex digits, written into out. */
-static int from_hex(const char *hex, unsigned char *out, size_t len) {
-    size_t i;
-
-    if (!hex || strlen(hex) != 2 * len)
-        return -1;
-    for (i = 0; i < len; i++) {
-        int hi = hex_digit(hex[2 * i]);
-        int lo = hex_digit(hex[2 * i + 1]);
-
-        if (hi < 0 || lo < 0)
-            return -1;
-        out[i] = (unsigned char)((hi << 4) | lo);
-    }
-    return 0;
-}
-
 /* A new box key for u (what file letters are sealed to), sealed under password. */
 static fl_result_t provision_box(fl_user_record_t *u, const char *password) {
     unsigned char secret[FL_USER_SIGNING_SECRET_LEN];
@@ -225,12 +188,12 @@ static fl_result_t db_upsert_user(sqlite3 *sql, const fl_user_record_t *u) {
         "signing_public=excluded.signing_public,signing_sealed=excluded.signing_sealed,"
         "box_public=excluded.box_public,box_sealed=excluded.box_sealed;";
     if (u->has_key) {
-        to_hex(u->signing_public, sizeof u->signing_public, public_hex);
-        to_hex(u->signing_sealed, sizeof u->signing_sealed, sealed_hex);
+        fl_hex_encode(u->signing_public, sizeof u->signing_public, public_hex);
+        fl_hex_encode(u->signing_sealed, sizeof u->signing_sealed, sealed_hex);
     }
     if (u->has_box) {
-        to_hex(u->box_public, sizeof u->box_public, box_public_hex);
-        to_hex(u->box_sealed, sizeof u->box_sealed, box_sealed_hex);
+        fl_hex_encode(u->box_public, sizeof u->box_public, box_public_hex);
+        fl_hex_encode(u->box_sealed, sizeof u->box_sealed, box_sealed_hex);
     }
     if (sqlite3_prepare_v2(sql, ins, -1, &st, NULL) != SQLITE_OK)
         return FL_RESULT_ERR;
@@ -300,17 +263,17 @@ static fl_result_t db_load_users(sqlite3 *sql, fl_user_db_t *db) {
             }
             u->created_at = (int64_t)sqlite3_column_int64(st, 7);
             /* A key counts only when both halves are well formed; anything else is no key. */
-            u->has_key = from_hex((const char *)sqlite3_column_text(st, 8), u->signing_public,
+            u->has_key = fl_hex_decode((const char *)sqlite3_column_text(st, 8), u->signing_public,
                                   sizeof u->signing_public) == 0 &&
-                         from_hex((const char *)sqlite3_column_text(st, 9), u->signing_sealed,
+                         fl_hex_decode((const char *)sqlite3_column_text(st, 9), u->signing_sealed,
                                   sizeof u->signing_sealed) == 0;
             if (!u->has_key) {
                 mem_domain_zero(u->signing_public, sizeof u->signing_public);
                 mem_domain_zero(u->signing_sealed, sizeof u->signing_sealed);
             }
-            u->has_box = from_hex((const char *)sqlite3_column_text(st, 10), u->box_public,
+            u->has_box = fl_hex_decode((const char *)sqlite3_column_text(st, 10), u->box_public,
                                   sizeof u->box_public) == 0 &&
-                         from_hex((const char *)sqlite3_column_text(st, 11), u->box_sealed,
+                         fl_hex_decode((const char *)sqlite3_column_text(st, 11), u->box_sealed,
                                   sizeof u->box_sealed) == 0;
             if (!u->has_box) {
                 mem_domain_zero(u->box_public, sizeof u->box_public);
