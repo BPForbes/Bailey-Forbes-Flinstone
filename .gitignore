@@ -54,6 +54,7 @@ tests/test_kq_checkpoint
 tests/test_kq_delivery
 tests/test_fs_helpers
 tests/test_hex
+tests/test_random
 tests/test_kq_net
 tests/test_part_buf
 tests/test_server_file_meta

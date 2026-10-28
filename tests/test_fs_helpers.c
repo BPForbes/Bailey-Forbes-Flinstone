@@ -132,9 +132,11 @@ static int test_symlink_is_followed_and_device_refused(void) {
     ASSERT(fl_fs_read_file(link, 16u, &data, &len) == 0); /* user-named paths follow links */
     ASSERT(data != NULL && len == sizeof in && memcmp(data, in, len) == 0);
     free(data);
-    data = (uint8_t *)&data;
-    ASSERT(fl_fs_read_file("/dev/zero", 16u, &data, &len) == -1); /* not a regular file */
-    ASSERT(data == NULL && len == 0u);
+    if (access("/dev/zero", F_OK) == 0) { /* skip the device check where /dev/zero is absent */
+        data = (uint8_t *)&data;
+        ASSERT(fl_fs_read_file("/dev/zero", 16u, &data, &len) == -1); /* not a regular file */
+        ASSERT(data == NULL && len == 0u);
+    }
     return 0;
 }
 
@@ -156,6 +158,7 @@ static int test_basename_no_slash_is_whole_input(void) {
     ASSERT(strcmp(fl_fs_basename(""), "") == 0);
     return 0;
 }
+
 static int test_basename_takes_text_after_last_slash(void) {
     const char *p = "a/b/c.txt";
 
@@ -165,15 +168,18 @@ static int test_basename_takes_text_after_last_slash(void) {
     ASSERT(strcmp(fl_fs_basename("a//b"), "b") == 0);
     return 0;
 }
+
 static int test_basename_trailing_slash_is_empty(void) {
     ASSERT(strcmp(fl_fs_basename("a/b/"), "") == 0);
     ASSERT(strcmp(fl_fs_basename("/"), "") == 0);
     return 0;
 }
+
 static int test_basename_null_is_empty(void) {
     ASSERT(strcmp(fl_fs_basename(NULL), "") == 0);
     return 0;
 }
+
 static int test_basename_dots_and_backslash_unchanged(void) {
     ASSERT(strcmp(fl_fs_basename("a/.."), "..") == 0);
     ASSERT(strcmp(fl_fs_basename("."), ".") == 0);
@@ -182,7 +188,7 @@ static int test_basename_dots_and_backslash_unchanged(void) {
 }
 
 int main(void) {
-    static const char *const names[] = {"normal", "empty", "cap", "target", "link"};
+    static const char *const names[] = {"normal", "empty", "cap", "target", "link", "fifo"};
     int rc = 0;
     size_t i;
 

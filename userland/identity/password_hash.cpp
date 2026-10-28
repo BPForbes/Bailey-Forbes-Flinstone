@@ -1,9 +1,10 @@
 #include "password_hash.h"
 #include "fl/hex.h"
+#include "fl/random.h"
 #include <openssl/evp.h>
 #include <openssl/sha.h>
-#include <cstdio>
 #include <climits>
+#include <cstdio>
 #include <cstdint>
 #include <cstring>
 #include <vector>
@@ -92,17 +93,10 @@ extern "C" {
 
 int fl_password_generate_salt_hex(char *salt_hex, size_t salt_hex_size) {
     uint8_t raw[FL_PASSWORD_SALT_BYTES];
-    FILE *f;
     if (!salt_hex || salt_hex_size < FL_PASSWORD_SALT_HEX_CHARS + 1)
         return -1;
-    f = fopen("/dev/urandom", "rb");
-    if (!f)
+    if (fl_random_bytes(raw, sizeof(raw)) != 0)
         return -1;
-    if (fread(raw, 1, sizeof(raw), f) != sizeof(raw)) {
-        fclose(f);
-        return -1;
-    }
-    fclose(f);
     fl_hex_encode(raw, sizeof(raw), salt_hex);
     return 0;
 }

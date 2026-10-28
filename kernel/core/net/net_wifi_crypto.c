@@ -1,17 +1,12 @@
 #include "net_wifi_crypto.h"
 
 #include "fl/mem_asm.h"
+#include "fl/random.h"
 #include "net_endian.h"
 
-#include <limits.h>
 #include <openssl/evp.h>
 #include <openssl/hmac.h>
-#include <openssl/rand.h>
 #include <string.h>
-
-#if defined(__linux__)
-#include <sys/random.h>
-#endif
 
 void fl_net_wifi_crypto_memzero(void *p, size_t n) {
     if (!p || n == 0u)
@@ -20,22 +15,9 @@ void fl_net_wifi_crypto_memzero(void *p, size_t n) {
 }
 
 fl_result_t fl_net_wifi_crypto_random(uint8_t *out, size_t len) {
-#if defined(__linux__)
-    ssize_t got;
-#endif
-
     if (!out || len == 0u)
         return FL_RESULT_INVAL;
-#if defined(__linux__)
-    got = getrandom(out, len, 0);
-    if (got == (ssize_t)len)
-        return FL_RESULT_OK;
-#endif
-    if (len > (size_t)INT_MAX)
-        return FL_RESULT_ERR;
-    if (RAND_bytes(out, (int)len) == 1)
-        return FL_RESULT_OK;
-    return FL_RESULT_ERR;
+    return fl_random_bytes(out, len) == 0 ? FL_RESULT_OK : FL_RESULT_ERR;
 }
 
 fl_result_t fl_net_wifi_crypto_psk_pmk(const char *ssid, const char *passphrase,

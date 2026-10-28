@@ -3,8 +3,8 @@
 #include "keyquorum_identity.h"
 #include "fl/hex.h"
 #include "fl/mem_asm.h"
+#include "fl/random.h"
 #include "mem_domain.h"
-#include "password_hash.h"
 #include <sqlite3.h>
 #include <stdio.h>
 #include <string.h>
@@ -189,7 +189,7 @@ fl_result_t fl_bridge_request(const char *db_path, const fl_user_db_t *users,
     sqlite3 *sql = NULL;
     sqlite3_stmt *st = NULL;
     fl_result_t rc;
-    char nonce_hex[FL_PASSWORD_SALT_HEX_CHARS + 1];
+    char nonce_hex[2 * FL_BRIDGE_NONCE_LEN + 1];
     unsigned char nonce[FL_BRIDGE_NONCE_LEN];
     unsigned char sig[FL_BRIDGE_SIGNATURE_LEN];
     char sig_hex[2 * FL_BRIDGE_SIGNATURE_LEN + 1];
@@ -205,9 +205,9 @@ fl_result_t fl_bridge_request(const char *db_path, const fl_user_db_t *users,
     if (!secret_is_for(users, actor_key, actor_secret))
         return FL_RESULT_ACCES;
     /* A fresh random nonce names this bridge, so its signatures stand for it alone. */
-    if (fl_password_generate_salt_hex(nonce_hex, sizeof nonce_hex) != 0 ||
-        fl_hex_decode(nonce_hex, nonce, sizeof nonce) != 0)
+    if (fl_random_bytes(nonce, sizeof nonce) != 0)
         return FL_RESULT_ERR;
+    fl_hex_encode(nonce, sizeof nonce, nonce_hex);
     if (kq_account_bridge_sign(KQ_ACCOUNT_BRIDGE_REQUEST, actor_key, peer_key, actor_key, nonce,
                                actor_secret, sig) != KQ_ACCOUNT_OK)
         return FL_RESULT_ERR;

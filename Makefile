@@ -963,6 +963,11 @@ test_hex: kernel/core/vfs/kq_delivery.o kernel/core/vfs/server_shared_fs.o kerne
 	  -lsqlite3 $(OPENSSL_LIBS) -pthread -Wl,-z,noexecstack
 	./tests/test_hex
 
+.PHONY: test_random
+test_random: tests/test_random.c kernel/include/fl/random.h
+	$(CC) $(CFLAGS) $(TEST_SANITIZE) -o tests/test_random tests/test_random.c -Wl,-z,noexecstack
+	./tests/test_random
+
 .PHONY: test_part_buf
 test_part_buf: tests/test_part_buf.c kernel/core/net/net_part_buf.h
 	$(CC) $(CFLAGS) $(TEST_SANITIZE) -o tests/test_part_buf tests/test_part_buf.c -Wl,-z,noexecstack
@@ -1344,6 +1349,10 @@ check-layers:
 .PHONY: check-stubs
 check-stubs:
 	@bash scripts/check_no_stubs.sh
+
+.PHONY: check-weak-rng
+check-weak-rng:
+	@bash scripts/check_no_weak_rng.sh
 
 test_vm_mem: kernel/core/mm/mem_domain.o $(MEM_ASM_OBJ) VM/devices/vm_mem.o
 	$(CC) $(CFLAGS) $(TEST_SANITIZE) -IVM -IVM/devices -o tests/test_vm_mem tests/test_vm_mem.c kernel/core/mm/mem_domain.o $(MEM_ASM_OBJ) VM/devices/vm_mem.o

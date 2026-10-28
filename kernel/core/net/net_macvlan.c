@@ -19,6 +19,8 @@
 #define _DEFAULT_SOURCE
 #endif
 
+#include "fl/random.h"
+
 #include <arpa/inet.h>
 #include <errno.h>
 #include <ifaddrs.h>
@@ -437,8 +439,8 @@ fl_result_t fl_net_macvlan_dhcp_lease(const char *ifname,
     ifindex = if_nametoindex(ifname);
     if (!ifindex) return FL_RESULT_NOSYS;
 
-    srand((unsigned)time(NULL) ^ (unsigned)(uintptr_t)ifname);
-    xid = ((uint32_t)rand() << 16) ^ (uint32_t)rand();
+    if (fl_random_bytes(&xid, sizeof(xid)) != 0)
+        return FL_RESULT_ERR;
 
     sock = socket(AF_PACKET, SOCK_DGRAM, (int)htons(ETH_P_IP));
     if (sock < 0) return FL_RESULT_ERR;

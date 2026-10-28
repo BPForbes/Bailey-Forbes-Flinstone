@@ -1,8 +1,8 @@
 #include "server_shared_digest.h"
 #include "contract_p5_server_catalog.h"
+#include "fl/random.h"
 
 #include <openssl/evp.h>
-#include <openssl/rand.h>
 #include <stdio.h>
 #include <string.h>
 
@@ -46,7 +46,7 @@ fl_result_t fl_server_shared_uuid_v4_lower(char *out, size_t out_cap)
 
     if (!out || out_cap < 37u)
         return FL_RESULT_INVAL;
-    if (RAND_bytes(raw, (int)sizeof(raw)) != 1)
+    if (fl_random_bytes(raw, sizeof(raw)) != 0)
         return FL_RESULT_ERR;
     raw[6] = (uint8_t)((raw[6] & 0x0fu) | 0x40u);
     raw[8] = (uint8_t)((raw[8] & 0x3fu) | 0x80u);

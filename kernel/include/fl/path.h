@@ -2,8 +2,8 @@
 #define FL_PATH_H
 
 /**
- * Path helpers shared by every hosted target (it needs <string.h>). Header-only so the kernel, shell,
- * tests and the browser lab use one copy without linking another object.
+ * Path helpers shared by every hosted target (it needs <string.h>). Header-only so the kernel,
+ * shell, tests and the browser lab use one copy without linking another object.
  */
 
 #include <string.h>

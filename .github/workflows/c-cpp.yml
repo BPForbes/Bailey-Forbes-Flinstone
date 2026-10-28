@@ -144,6 +144,12 @@ jobs:
       - name: Test — shared hex codec
         run: make test_hex
 
+      - name: Test — shared random source
+        run: make test_random
+
+      - name: Check — no weak RNG in converted sites
+        run: make check-weak-rng
+
       - name: Test — drivers
         run: make test_drivers
 

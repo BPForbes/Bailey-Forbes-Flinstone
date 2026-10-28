@@ -2,9 +2,9 @@
 #include "contract_p2_heritage.h"
 #include "server_shared_fs.h"
 #include "fl/path.h"
+#include "fl/random.h"
 
 #include <errno.h>
-#include <fcntl.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -190,24 +190,6 @@ static int sidecar(const char *path, const char *suffix, char *out, size_t cap) 
     return snprintf(out, cap, "%s%s", path, suffix) < (int)cap ? 0 : -1;
 }
 
-static int random_bytes(uint8_t *out, size_t n) {
-    int fd = open("/dev/urandom", O_RDONLY);
-    size_t got = 0;
-
-    if (fd < 0)
-        return -1;
-    while (got < n) {
-        ssize_t r = read(fd, out + got, n - got);
-        if (r <= 0) {
-            close(fd);
-            return -1;
-        }
-        got += (size_t)r;
-    }
-    close(fd);
-    return 0;
-}
-
 /* ---- trust table --------------------------------------------------------- */
 
 typedef struct {
@@ -292,7 +274,7 @@ fl_kq_cp_result_t fl_kq_cp_encode_with(const fl_kq_keydir_t *keys, const char *s
     if (access(container_path, F_OK) != 0) {
         uint8_t file_id[16];
 
-        if (random_bytes(file_id, sizeof file_id) != 0 ||
+        if (fl_random_bytes(file_id, sizeof file_id) != 0 ||
             drv->file_new(file_id, fl_fs_basename(path), sender_key, &container) != KQ_FILE_OK) {
             rc = FL_KQ_CP_IO;
             goto done;

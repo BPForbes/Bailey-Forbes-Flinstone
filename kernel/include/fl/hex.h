@@ -37,11 +37,12 @@ static inline void fl_hex_encode(const uint8_t *in, size_t len, char *out) {
     out[2 * len] = '\0';
 }
 
-/** 0 when hex is exactly 2 * len hex digits, written into out; otherwise -1 and out is unspecified. */
+/** 0 when hex is exactly 2 * len hex digits, written into out; otherwise -1 and out is unspecified.
+ *  A len whose 2 * len would wrap is refused (-1) before any length compare. */
 static inline int fl_hex_decode(const char *hex, uint8_t *out, size_t len) {
     size_t i;
 
-    if (!hex || strlen(hex) != 2 * len)
+    if (!hex || len > SIZE_MAX / 2 || strlen(hex) != 2 * len)
         return -1;
     for (i = 0; i < len; i++) {
         int hi = fl_hex_nibble(hex[2 * i]);

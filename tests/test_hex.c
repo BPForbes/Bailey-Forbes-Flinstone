@@ -51,6 +51,18 @@ static int test_decode_refuses_bad_input(void) {
     return 0;
 }
 
+static int test_decode_refuses_wrapping_len(void) {
+    uint8_t out[4];
+
+    /* 2 * len wraps to 0 (SIZE_MAX/2 + 1) or to a small value: both must be refused,
+     * not matched against an empty string. */
+    ASSERT(fl_hex_decode("", out, SIZE_MAX / 2 + 1) == -1);
+    ASSERT(fl_hex_decode("", out, SIZE_MAX / 2) == -1);
+    ASSERT(fl_hex_decode("00", out, SIZE_MAX / 2 + 2) == -1);
+    ASSERT(fl_hex_decode("", out, 0) == 0);
+    return 0;
+}
+
 static int test_delivery_id_wrappers(void) {
     uint8_t id[FL_KQ_DELIVERY_ID_LEN];
     uint8_t back[FL_KQ_DELIVERY_ID_LEN];
@@ -68,7 +80,8 @@ static int test_delivery_id_wrappers(void) {
 
 int main(void) {
     if (test_encode_is_lower_case_and_terminated() || test_decode_round_trip_and_case() ||
-        test_decode_refuses_bad_input() || test_delivery_id_wrappers())
+        test_decode_refuses_bad_input() || test_decode_refuses_wrapping_len() ||
+        test_delivery_id_wrappers())
         return 1;
     printf("test_hex: all passed\n");
     return 0;
