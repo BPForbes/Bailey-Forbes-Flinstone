@@ -44,7 +44,6 @@ typedef enum {
     FL_KQ_CP_TOO_LARGE,
     FL_KQ_CP_IO,
     FL_KQ_CP_INVALID,
-    FL_KQ_CP_NEEDS_EDITOR_PERMIT,
 } fl_kq_cp_result_t;
 
 const char *fl_kq_cp_reason(fl_kq_cp_result_t r);
@@ -97,45 +96,6 @@ fl_kq_cp_result_t fl_kq_cp_cosign(const kq_file_offer_t *offer, const char *me_k
                                   const uint8_t signing_secret[32], uint8_t sig[64]);
 
 /**
- * Reseal (sender): the sealed letter for revision rev already in the container beside path.
- * Checks nothing in and writes nothing; a newer copy goes out this way once its supervisor has
- * countersigned the revision (fl_kq_cp_permit).
- */
-fl_kq_cp_result_t fl_kq_cp_reseal_with(const fl_kq_keydir_t *keys, const char *sender_key,
-                                       const uint8_t sender_signing_secret[32],
-                                       const char *recipient_key,
-                                       const uint8_t recipient_box_public[32], const char *path,
-                                       const uint8_t rev[32], fl_kq_encoded_t *out);
-
-/**
- * History (offline): the events of the file at path (its container beside it), one
- * tab-separated line each (see keyquorum_files.h). Needs only the local container.
- */
-fl_kq_cp_result_t fl_kq_cp_history(const char *path, fl_kq_buf_t *lines);
-
-/** The file's current head revision (its container beside path). FORKED with two heads. */
-fl_kq_cp_result_t fl_kq_cp_head(const char *path, uint8_t rev[32]);
-
-/** Display names of the history's type and outcome codes; "?" past the table. Never parsed. */
-const char *fl_kq_cp_event_name(uint8_t code);
-const char *fl_kq_cp_outcome_name(uint8_t code);
-
-/**
- * One history line from fl_kq_cp_history as display text (names for the codes, "UNKNOWN" for
- * an empty actor). Returns the length written to out, which never exceeds cap - 1.
- */
-size_t fl_kq_cp_format_event(const char *line, size_t n, char *out, size_t cap);
-
-/**
- * Permit (supervisor): countersigns revision rev in the container at container_path as
- * supervisor_key, after the author's signature verifies under keys, and writes the container
- * back in place. The recipient accepts a newer copy only with this countersignature in it.
- */
-fl_kq_cp_result_t fl_kq_cp_permit_with(const fl_kq_keydir_t *keys, const char *supervisor_key,
-                                       const uint8_t supervisor_secret[32], const char *path,
-                                       const uint8_t rev[32]);
-
-/**
  * Decode checkpoint (recipient). Opens letter with box_secret (signed by sender_key under
  * sender_signing_public, addressed to me_key), attaches my_sig, and writes dest_path only
  * when KeyQuorum reports the delivery ready (author signature, trust, co-signature, single
@@ -168,15 +128,6 @@ fl_kq_cp_result_t fl_kq_cp_encode(const fl_user_db_t *users, const char *sender_
                                   const char *recipient_key,
                                   const uint8_t recipient_box_public[32], const char *path,
                                   const char *created_at_utc, fl_kq_encoded_t *out);
-
-fl_kq_cp_result_t fl_kq_cp_reseal(const fl_user_db_t *users, const char *sender_key,
-                                  const uint8_t sender_signing_secret[32],
-                                  const char *recipient_key,
-                                  const uint8_t recipient_box_public[32], const char *path,
-                                  const uint8_t rev[32], fl_kq_encoded_t *out);
-fl_kq_cp_result_t fl_kq_cp_permit(const fl_user_db_t *users, const char *supervisor_key,
-                                  const uint8_t supervisor_secret[32], const char *path,
-                                  const uint8_t rev[32]);
 fl_kq_cp_result_t fl_kq_cp_admit_offer(const fl_user_db_t *users, const char *author_key,
                                        const kq_file_offer_t *offer);
 fl_kq_cp_result_t fl_kq_cp_admit_cosign(const fl_user_db_t *users, const char *recipient_key,

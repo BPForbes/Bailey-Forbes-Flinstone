@@ -75,23 +75,3 @@ fl_kq_cp_result_t fl_kq_cp_decode(const fl_user_db_t *users, const char *sender_
     return fl_kq_cp_decode_with(KEYS(users, dir), sender_key, sender_signing_public, me_key,
                                 box_secret, letter, offer, my_sig, dest_path);
 }
-
-fl_kq_cp_result_t fl_kq_cp_permit(const fl_user_db_t *users, const char *supervisor_key,
-                                  const uint8_t supervisor_secret[32], const char *path,
-                                  const uint8_t rev[32]) {
-    fl_user_db_keydir_t dir;
-
-    return fl_kq_cp_permit_with(KEYS(users, dir), supervisor_key, supervisor_secret, path, rev);
-}
-
-fl_kq_cp_result_t fl_kq_cp_reseal(const fl_user_db_t *users, const char *sender_key,
-                                  const uint8_t sender_signing_secret[32],
-                                  const char *recipient_key,
-                                  const uint8_t recipient_box_public[32], const char *path,
-                                  const uint8_t rev[32], fl_kq_encoded_t *out) {
-    fl_user_db_keydir_t dir;
-
-    return fl_kq_cp_reseal_with(KEYS(users, dir), sender_key, sender_signing_secret,
-                                recipient_key, recipient_box_public, path, rev, out);
-}
-

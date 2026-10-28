@@ -280,7 +280,6 @@ typedef struct {
     char    name[FL_FS_RAMFS_PATH];
     char    path[256];
     int64_t asked_at;
-    int     permitted; /* --permitted: seal the head as it is, checking nothing in */
 } pending_send_t;
 
 typedef struct {
@@ -449,19 +448,9 @@ static void encode_and_send(pending_send_t *p, const fl_net_kq_keys_t *to) {
         checkpoint("encode", "refused", "this account has no keys");
         return;
     }
-    if (p->permitted) {
-        /* A permitted newer copy: the head the supervisor countersigned, sealed as it is. */
-        uint8_t head[32];
-
-        cp = fl_kq_cp_head(p->path, head);
-        if (cp == FL_KQ_CP_OK)
-            cp = fl_kq_cp_reseal_with(lab_directory(), p->me, me->sign_sec, to->key_id,
-                                      to->box_public, p->path, head, &enc);
-    } else {
-        utc_now(when);
-        cp = fl_kq_cp_encode_with(lab_directory(), p->me, me->sign_sec, to->key_id,
-                                  to->box_public, p->path, when, &enc);
-    }
+    utc_now(when);
+    cp = fl_kq_cp_encode_with(lab_directory(), p->me, me->sign_sec, to->key_id, to->box_public,
+                              p->path, when, &enc);
     if (cp != FL_KQ_CP_OK) {
         checkpoint("encode", "refused", fl_kq_cp_reason(cp));
         return;
@@ -540,7 +529,7 @@ static const char *base_name(const char *path) {
     return slash ? slash + 1 : path;
 }
 
-int fl_lab_kq_send(int session, const char *path, const char *user, int permitted) {
+int fl_lab_kq_send(int session, const char *path, const char *user) {
     const char *me = fl_fs_identity_user(session);
     const char *name = base_name(path);
     char content[FL_FS_RAMFS_DATA];
@@ -587,66 +576,11 @@ int fl_lab_kq_send(int session, const char *path, const char *user, int permitte
     snprintf(p->to, sizeof p->to, "%s", user);
     snprintf(p->name, sizeof p->name, "%s", name);
     p->asked_at = now_sec();
-    p->permitted = permitted;
     p->used = 1;
     /* Ask the host for the recipient's keys; the answer moves the send on. */
     (void)fl_net_kq_lookup(s_srv, NULL, s_hosting, user, 0, &ignored);
     say("keyquorum: asking the server for %s's keys...", user, NULL, NULL);
     progress();
-    return 1;
-}
-
-/* server file log <path>: the history of a tracked copy, read from its container. Offline: it
- * needs no server and no key. */
-int fl_lab_kq_log(int session, const char *path) {
-    fl_kq_buf_t lines = {0};
-    fl_kq_cp_result_t cp;
-    char text[384];
-    size_t start = 0;
-
-    (void)session;
-    cp = fl_kq_cp_history(path, &lines);
-    if (cp != FL_KQ_CP_OK) {
-        say("server file log: %s", fl_kq_cp_reason(cp), NULL, NULL);
-        fl_kq_buf_free(&lines);
-        return 1;
-    }
-    for (size_t i = 0; i < lines.len; i++) {
-        if (lines.data[i] == '\n') {
-            fl_kq_cp_format_event((const char *)lines.data + start, i - start, text, sizeof text);
-            say("%s", text, NULL, NULL);
-            start = i + 1u;
-        }
-    }
-    if (start == 0u)
-        say("no history for %s", base_name(path), NULL, NULL);
-    fl_kq_buf_free(&lines);
-    return 1;
-}
-
-/* server file permit <path>: the signed-in supervisor countersigns the head of a tracked copy.
- * A recipient counts the permit only when the signer is the file's scope owner or an ancestor. */
-int fl_lab_kq_permit(int session, const char *path) {
-    const char *me = fl_fs_identity_user(session);
-    lab_key_t *keys = me ? local_keys(me) : NULL;
-    uint8_t head[32];
-    fl_kq_cp_result_t cp;
-
-    if (!keys) {
-        say("server file permit: sign in as the supervisor first", NULL, NULL, NULL);
-        return 1;
-    }
-    cp = fl_kq_cp_head(path, head);
-    if (cp != FL_KQ_CP_OK) {
-        say("server file permit: %s", fl_kq_cp_reason(cp), NULL, NULL);
-        return 1;
-    }
-    cp = fl_kq_cp_permit_with(lab_directory(), me, keys->sign_sec, path, head);
-    if (cp != FL_KQ_CP_OK) {
-        say("server file permit: %s", fl_kq_cp_reason(cp), NULL, NULL);
-        return 1;
-    }
-    say("keyquorum: permitted the head of %s as %s", base_name(path), me, NULL);
     return 1;
 }
 

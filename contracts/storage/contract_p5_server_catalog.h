@@ -124,37 +124,6 @@ fl_result_t fl_server_catalog_list_for_member(uint16_t member_id,
 
 fl_result_t fl_server_catalog_purge_expired(uint64_t now);
 
-/**
- * One recorded event on a share. The table catalog_event is append-only: each row says what
- * happened to a share (offered, completed, accepted, declined, revoked, expired) and who did
- * it. Unlike catalog_entry.status, an event is never overwritten.
- */
-typedef struct fl_server_catalog_event {
-    uint32_t seq;
-    char     event[16];
-    uint16_t actor_member_id;
-    uint64_t at;
-    char     detail[FL_SERVER_FILE_NAME_MAX]; /* a content hash (64 hex) or a file name */
-} fl_server_catalog_event_t;
-
-/**
- * One unit of work on the catalog: a state change and its event. begin/commit/rollback bracket
- * it; a failure in either step is returned, so the caller can roll back and report it.
- */
-fl_result_t fl_server_catalog_begin(void);
-fl_result_t fl_server_catalog_commit(void);
-void fl_server_catalog_rollback(void);
-
-/** Appends one event to a share's history; seq is the next number for that share. */
-fl_result_t fl_server_catalog_append_event(const char *transfer_id, const char *event,
-                                           uint16_t actor_member_id, uint64_t at,
-                                           const char *detail);
-
-/** The events of one share, oldest first, at most out_cap; out_count is what was copied. */
-fl_result_t fl_server_catalog_list_events(const char *transfer_id,
-                                          fl_server_catalog_event_t *out, size_t out_cap,
-                                          size_t *out_count);
-
 /** Copy `host_catalog.db` + `blobs/` from another `server_shared` root (handoff). */
 fl_result_t fl_server_catalog_import_handoff(const char *src_server_shared_dir);
 

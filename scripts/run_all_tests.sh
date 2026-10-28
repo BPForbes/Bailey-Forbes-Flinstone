@@ -102,7 +102,6 @@ run_make "test_part_buf" test_part_buf
 run_make "test_server_file_expire" test_server_file_expire
 run_make "test_server_file_meta" test_server_file_meta
 run_make "test_server_shared_catalog" test_server_shared_catalog
-run_make "test_file_history" test_file_history
 run_make "test_server_shared_landed_name" test_server_shared_landed_name
 run_make "test_server_shared_purge" test_server_shared_purge
 run_make "test_server_file_accept_path" test_server_file_accept_path

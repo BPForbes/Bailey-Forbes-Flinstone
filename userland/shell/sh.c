@@ -398,10 +398,9 @@ int main(int argc, char *argv[]) {
     /* Initialize file manager service, path log, and drivers */
     fs_service_glue_init();
     path_log_init();
-    /* KeyQuorum is a driver like the others: register its base descriptor before the model
-     * matches devices to drivers in drivers_init (a later registration is never matched). */
-    (void)fl_driver_registry_register(fl_kq_driver_desc());
     drivers_init(NULL);
+    /* KeyQuorum is a driver like the others: register its base descriptor with the model. */
+    (void)fl_driver_registry_register(fl_kq_driver_desc());
     vm_warn_layer_config();
 
     /* Initialize thread pool and signals */
