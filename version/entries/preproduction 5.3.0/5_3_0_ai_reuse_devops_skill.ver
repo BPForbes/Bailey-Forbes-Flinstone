@@ -4,3 +4,5 @@ RELEASE_VERSION=0
 PRERELEASE=1
 DEV_VERSION=8
 DESCRIPTION=AI tooling: reuse before you implement, plus the DevOps team skill. AGENTS.md and CLAUDE.md gain a Reuse before you implement section (research existing drivers, helpers and contracts in depth before writing new code, never two functions that do the same thing, extend instead of copying, add one shared helper and point every caller at it), mirrored for Cursor in .cursor/rules/reuse_before_implement.mdc. The devops-multi-agent-team skill from Homework Central is imported under .cursor/skills, .cursor/agents and .cursor/commands (goal, code-review, repro, triage, create-subagent), adapted to this repo: its Researcher writes a reuse map before a Coder starts, its Reviewers block duplicated new code, its CodeQL policy covers C and C++, and this repo's versioning and driver-boundary rules take precedence. .cursor/thoughts is git-ignored except its keepfile. No product code changes. Not covered: Buildkite, Linear, Sonar, Snyk, Composio and Mainframe are named by the skill but optional here, and no CodeQL workflow exists in this repo yet.
+
+RELEASE_DATE=2026-10-28
