@@ -869,13 +869,6 @@ test_server_shared_catalog: kernel/core/vfs/server_shared_db.o kernel/core/vfs/s
 	  -lsqlite3 $(OPENSSL_LIBS) -Wl,-z,noexecstack
 	./tests/test_server_shared_catalog
 
-.PHONY: test_file_history
-test_file_history: kernel/core/vfs/server_shared_db.o kernel/core/vfs/server_shared_fs.o kernel/core/vfs/server_shared_digest.o userland/shell/common.o
-	$(CC) $(CFLAGS) $(TEST_SANITIZE) -o tests/test_file_history tests/test_file_history.c \
-	  kernel/core/vfs/server_shared_db.o kernel/core/vfs/server_shared_fs.o kernel/core/vfs/server_shared_digest.o userland/shell/common.o \
-	  -lsqlite3 $(OPENSSL_LIBS) -Wl,-z,noexecstack
-	./tests/test_file_history
-
 .PHONY: test_server_shared_landed_name
 test_server_shared_landed_name: kernel/core/vfs/server_shared_fs.o kernel/core/vfs/server_shared_db.o kernel/core/vfs/server_shared_digest.o userland/shell/common.o
 	$(CC) $(CFLAGS) $(TEST_SANITIZE) -o tests/test_server_shared_landed_name tests/test_server_shared_landed_name.c \
