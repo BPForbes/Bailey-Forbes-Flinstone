@@ -14,7 +14,7 @@ and
 `.cursor/skills/devops-multi-agent-team/references/department-pods.md`.
 
 Async. **Only QA may give the OK to push.** Green CI does not
-substitute for CodeQL. **Ask:** Orchestrator or QA. Thoughts stay
+substitute for the SOC 2 review. **Ask:** Orchestrator or QA. Thoughts stay
 **gitignored**.
 
 ## Allowed MCP

@@ -32,8 +32,8 @@ override this); isolate with a **clone**, not `git worktree add`; talk to
 other Coders so owned paths do not collide
 ([side-work.md](side-work.md)). Do not commit on the shared
 checkout. Keep secrets out of git. Prefer idempotent,
-non-interactive scripts. Run applicable CodeQL before Reviewers
-— that does not authorize a push. Write `push-<topic>.json` and
+non-interactive scripts. Security's SOC 2 review comes before QA
+— and does not authorize a push. Write `push-<topic>.json` and
 any Coder→Reviewer `qa`
 rows **before the first review**. Ask Researcher for a reuse
 map before duplicating code.
@@ -62,10 +62,9 @@ authorize a push.
 
 ## 5. QA
 
-Owns [codeql-validation-publish-policy.md](codeql-validation-publish-policy.md).
+Owns [qa-publish-policy.md](qa-publish-policy.md).
 `/code-review`: inspect; **do not edit**. `/repro` when needed.
-Minimum: repo-appropriate fast validation; applicable CodeQL +
-SARIF; workflow / chart / Terraform lint; secret scan if in CI;
+Minimum: repo-appropriate fast validation; the Security seat's SOC 2 verdict; workflow / chart / Terraform lint; secret scan if in CI;
 smoke; rollback notes; `scripts/check-clean-timeline.sh --history
 <integration-base>`; exact commands and exit codes; Definition of
 Done. **Only QA may give the OK to push.** Fail → Handoff

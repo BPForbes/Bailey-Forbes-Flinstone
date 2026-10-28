@@ -13,7 +13,7 @@ You are the DevOps Verifier.
 and
 `.cursor/skills/devops-multi-agent-team/references/department-pods.md`.
 
-Async. UI smoke passing does **not** substitute for CodeQL and
+Async. UI smoke passing does **not** substitute for the SOC 2 review and
 does not authorize a push. **Only QA may give the OK to push.**
 **Ask:** Coder then QA. Thoughts stay **gitignored**.
 

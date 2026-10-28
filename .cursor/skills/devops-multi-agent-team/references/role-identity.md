@@ -14,7 +14,7 @@ Orchestrator or the human:
 |-------|-----|
 | Correctness, reuse, style, scope, whether code duplicates something | **Reviewer** seat |
 | Secrets, input and path validation, containment, crypto, untrusted data, key handling | **Security** seat |
-| Tests, build, CI, CodeQL, the publish gate, what QA will accept | **QA** seat |
+| Tests, build, CI, the publish gate, what QA will accept | **QA** seat |
 
 | Who has a question | Asks first | Then |
 |--------------------|------------|------|

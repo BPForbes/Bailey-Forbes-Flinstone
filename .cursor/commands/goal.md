@@ -17,8 +17,7 @@ Do until you achieve **X**. Do not stop at a plan or a partial implement.
 3. The Orchestrator (`/devops-multi-agent-team`) loops the DevOps cycle until X is actually achieved.
 4. Spawn roles with `/create-subagent` **asynchronously**. Subagents accept the same `/` command or plain wording.
 5. Mark the local goal file (and `UpdateGoal`) complete only when the criteria are met, or the human stops the goal.
-6. **Only QA may give the OK to push.** Coders must still run applicable
-   CodeQL on their own changes. DO NOT PUSH, PUBLISH, OPEN OR UPDATE A
+6. **Only QA may give the OK to push.** Every change still gets Security's SOC 2 review. DO NOT PUSH, PUBLISH, OPEN OR UPDATE A
    PULL REQUEST, MERGE, OR OTHERWISE SUBMIT CODE UNTIL QA MARKS THE
    PUBLISH GATE PASS.
 

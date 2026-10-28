@@ -50,7 +50,7 @@ See [thoughts-layout.md](thoughts-layout.md).
 - Verdict: Clear / Blocked
 
 ## QA handoff
-- Commands; .NET / TS / Rust validation + CodeQL; clean timeline
+- Commands; build and tests; SOC 2 verdict; clean timeline
   (`check-clean-timeline.sh --history <base>`); publish gate
   PASS / BLOCKED; VM send-back; triage ids; thoughts to finalize
 ```

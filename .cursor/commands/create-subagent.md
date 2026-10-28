@@ -15,9 +15,8 @@ Spawn specialized roles. They run **asynchronously in pods**, not a linear queue
    type is async.
 3. Do not poll a background subagent. Continue other work or end the turn; the completion notification is enough.
 4. The Orchestrator synthesizes. Subagents do not push or open PRs.
-   **Only QA may give the OK to push.** Coders / primary developers must
-   run applicable CodeQL on their own changes; that run does not
-   authorize a push. DO NOT PUSH, PUBLISH, OPEN OR UPDATE A PULL REQUEST,
+   **Only QA may give the OK to push.** Every change gets Security's SOC 2 review;
+   that review does not authorize a push. DO NOT PUSH, PUBLISH, OPEN OR UPDATE A PULL REQUEST,
    MERGE, OR OTHERWISE SUBMIT CODE UNTIL QA MARKS THE PUBLISH GATE PASS.
 5. Subagents accept any `/` command or the same words (`/goal`, `/code-review`, `/repro`, `/buildkite-*`, `/sonar-*`, and so on).
 6. Working Markdown goes in `.cursor/thoughts/non-finalized/` while open.

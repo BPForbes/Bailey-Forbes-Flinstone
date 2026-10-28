@@ -4,15 +4,14 @@ description: >-
   Orchestrates a DevOps + Platform Engineering multi-agent loop: plan,
   research (docs/ + online media fetches), implement CI/CD and IaC, pre-QA
   Markdown reviewers, Security, then QA. Only QA may give the OK to
-  push. Anyone who changes code (Coder / primary developers) must run
-  applicable CodeQL first; that run does not authorize a push. Also
-  covers observability, optimization, docs, refactor, and
+  push. Security runs a SOC 2 review on every change; that review does
+  not authorize a push. Also covers observability, optimization, docs, refactor, and
   performance — using installed Cursor MCPs and slash commands for
   Buildkite, Sonar, Snyk, Linear, browse, Composio, and Mainframe. Use
   when the user asks for CI/CD, GitHub Actions, Kubernetes, Docker,
   Terraform/Pulumi, deploy pipelines, monitoring/SLOs, runbooks, infra
   hardening, build-time or cost optimization, pre-merge
-  quality/security gates, CodeQL, or explicitly invokes
+  quality/security gates, SOC 2 review, or explicitly invokes
   /devops-multi-agent-team, /goal, /create-subagent, /code-review,
   or /repro.
 ---
@@ -51,11 +50,10 @@ Push JSON: [references/push-json.md](references/push-json.md).
 Do not `git add` `.cursor/thoughts/` except `non-finalized/.gitkeep`.
 
 **Only QA may give the OK to push.** Review Satisfied, Security Clear,
-the Orchestrator, and developer CodeQL do not authorize a push. Do not
+and the Orchestrator do not authorize a push. Do not
 push, publish, open or update a PR, merge, or submit until QA marks
-PASS. Anyone who changes product, pipeline, or infra code must run
-applicable CodeQL first; that run does not authorize a push. If CodeQL
-cannot run when required, do not claim it passed and do not publish.
+PASS. Every change gets Security's SOC 2 review first; Clear does
+not authorize a push either.
 
 ### Reviewer entrypoint (before QA)
 
@@ -75,7 +73,7 @@ cannot run when required, do not claim it passed and do not publish.
    ([soc2-review.md](references/soc2-review.md)), plus Snyk /
    `/review-security` where installed.
 6. Then **QA**. QA owns
-   [codeql-validation-publish-policy.md](references/codeql-validation-publish-policy.md)
+   [qa-publish-policy.md](references/qa-publish-policy.md)
    and is the **only** role that may give the OK to push.
 7. After PASS, the Orchestrator makes keep-commit(s) from the
    approved side-branch tree and **one push**
@@ -100,7 +98,7 @@ Do **not** invent requirements. Ask the human when scope is unclear.
 | Research | Documentation & Research | `docs/` + `WebSearch` / `WebFetch` / browser | Cited brief |
 | Pre-QA | Reviewers | `review-*.md` + `/review-*` | Improvements; no push |
 | CI | QA / CI Engineer | Buildkite + `/buildkite-*` | Failed jobs, retry |
-| Quality | QA | CodeQL CLI + SARIF; Sonar + `/sonar-*` | Publish gate; Sonar additive |
+| Quality | QA | final bug hunt; Sonar + `/sonar-*` if installed | Publish gate; Sonar additive |
 | Security | Security | Snyk + `/review-security` | SCA/SAST/IaC |
 | Externals | Integrator | Composio + `/composio-*` | Only if asked |
 | UI | Verifier | Browser + `/browser-automation` | Smoke |
@@ -108,8 +106,8 @@ Do **not** invent requirements. Ask the human when scope is unclear.
 | Handoff | Communicator | Mainframe + `/share-video` | Recap video |
 
 **Rules:** `mcp_auth` before gated tools. Sonar needs `sonar` CLI +
-`/sonar-integrate` then restart. Do not invent CI/Sonar/CodeQL
-results. Do not weaken `.github/codeql/*` to pass. Stay on the
+`/sonar-integrate` then restart. Do not invent CI/Sonar
+results. Stay on the
 current non-`main` branch; prefer the existing PR. **Never
 create a real git branch** (`git checkout -b`, `git switch -c`)
 unless The Client **named that branch in this turn**. Cloud-agent
@@ -133,15 +131,14 @@ Do not poll background subagents.
 | `devops-researcher.md` | Documentation & Research | WebSearch / WebFetch / browser |
 | `devops-reviewer.md` | Pre-QA reviewers | review thread + Sonar/review |
 | `devops-ci-engineer.md` | CI | Buildkite |
-| `devops-quality-engineer.md` | QA / publish gate | CodeQL + fast CI + Sonar |
+| `devops-quality-engineer.md` | QA / publish gate | fast CI + bug hunt + Sonar |
 | `devops-security-engineer.md` | Security | Snyk |
 | `devops-ticket-lead.md` | Tickets | Linear |
 | `devops-verifier.md` | UI smoke | Browser |
 | `devops-integrator.md` | Externals | Composio |
 | `devops-communicator.md` | Video handoff | Mainframe |
 
-**A. Pre-merge** — Ticket Lead → Research brief → Coder (CodeQL on
-own changes) → Reviewers → Security → QA (only role that may OK a push).
+**A. Pre-merge** — Ticket Lead → Research brief → Coder → Reviewers → Security → QA (only role that may OK a push).
 
 **B. Red CI** — `list_builds` → failed `list_jobs` → logs →
 `/buildkite-preflight` or `/buildkite-cli` → fix → retry.
@@ -162,7 +159,7 @@ Label every substantive reply with the active role, e.g. `[Planner]`.
   branch; no shared-checkout commits until QA PASS). Isolate with
   a **clone**, not `git worktree add`. Talk to other Coders so
   side-branches do not collide. Run the change in that clone
-  (VM / tools). CodeQL before Reviewers.
+  (VM / tools).
   Write Push JSON, Coder→Reviewer `qa` comments, and a Handoff
   **before the first review**
   ([side-work.md](references/side-work.md)).
@@ -177,8 +174,8 @@ Label every substantive reply with the active role, e.g. `[Planner]`.
   coder who picks it up
   ([department-pods.md](references/department-pods.md),
   [triage-template.md](references/triage-template.md)). Follow
-  [codeql-validation-publish-policy.md](references/codeql-validation-publish-policy.md).
-  PASS only when AC + applicable CodeQL hold
+  [qa-publish-policy.md](references/qa-publish-policy.md).
+  PASS only when AC, tests, the SOC 2 verdict and the final bug hunt hold
   ([side-work.md](references/side-work.md)). Agent:
   `.cursor/agents/devops-quality-engineer.md`.
 - **Observability / Optimization / Documentation / Refactoring /
@@ -240,8 +237,8 @@ acts. Keep work deterministic. Never invent requirements.
 ## DevOps multi-agent report
 
 **Goal:** …  **Branch / PR:** <current branch> (#<n>)
-### Blockers / CI / CodeQL (QA) / Quality / Security / Verification
-- CodeQL (C/C++ and any other language CI scans): PASS / FINDINGS / NOT RUN / NOT APPLICABLE
+### Blockers / CI / QA bug hunt / Quality / Security (SOC 2) / Verification
+- SOC 2 review: Clear / Findings (blocker n, high n) · Final bug hunt: PASS / BLOCKED
 - New unresolved findings: N · Publish gate: PASS / BLOCKED
 ### Next actions
 1. …
@@ -249,10 +246,10 @@ acts. Keep work deterministic. Never invent requirements.
 
 ## Repo alignment (Bailey-Forbes-Flinstone)
 
-**QA gate here:** this repo has no CodeQL workflow, so wherever this
-skill says CodeQL is required, QA's final bug hunt (test perspective,
-live-environment perspective, triage on any finding) replaces it. See
-[codeql-validation-publish-policy.md](references/codeql-validation-publish-policy.md).
+**QA gate here:** there is no CodeQL gate. The Security seat's SOC 2 review
+([soc2-review.md](references/soc2-review.md)) is the security analysis, and QA's
+final bug hunt (test perspective, live-environment perspective, triage on any
+finding) is the last gate. See [qa-publish-policy.md](references/qa-publish-policy.md).
 
 **Precedence:** this repo's `AGENTS.md`, `CLAUDE.md` and
 `.cursor/rules/*.mdc` win over this skill. In particular the

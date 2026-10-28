@@ -16,7 +16,7 @@ research-then-coder queue.
 
 **State:** active | closed
 **Opened by:** QA
-**Discovered during:** <command, `/repro`, VM, CodeQL, CI>
+**Discovered during:** <command, `/repro`, VM, SOC 2 review, CI>
 **Branch:** <current checkout>
 **Review thread:** `.cursor/thoughts/non-finalized/review-<topic>.md`
 
