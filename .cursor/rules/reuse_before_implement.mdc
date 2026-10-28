@@ -1,0 +1,18 @@
+---
+description: Research existing drivers and helpers before writing new code
+globs:
+  - "**/*"
+alwaysApply: true
+---
+
+# Reuse before you implement
+
+Before writing any new function, module, or driver, investigate thoroughly whether existing drivers, helpers, or code already cover the need and can be used or extended.
+
+- **Never two functions or methods that do the same thing.**
+- If an existing function is close but not enough, extend it (wrap, compose, or add an op to its driver or vtable) instead of copying it.
+- Integration code goes through the existing driver model (`fl_driver_desc_t`, the registry, `contracts/`) and the VFS and facade (`fs_provider_t`, `fm_*`), not around them.
+- If a shared helper is missing, add it once in a shared location and point every caller at it.
+- Write the reuse map (what you searched, what you found, what you reuse or extend) in the PR description or the research brief.
+
+The DevOps team skill (`.cursor/skills/devops-multi-agent-team/`) makes the Researcher produce this map before any Coder starts.

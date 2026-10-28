@@ -126,3 +126,9 @@ tests/test_wifi_coprocessor
 tests/test_wifi_db
 tests/test_wifi_fullmac_probe
 tests/test_wifi_uart_at_scan_join
+
+# Transient DevOps thoughts (review, repro, research, goals, Push JSON).
+# Never commit these; only the keepfile is tracked.
+.cursor/thoughts/**
+!.cursor/thoughts/non-finalized/
+!.cursor/thoughts/non-finalized/.gitkeep

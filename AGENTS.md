@@ -92,6 +92,16 @@ In this repository, a **module contract** is a **normative, stable model of how 
 - Keep **enforcement code** (mutexes, rate limits, drivers) clearly secondary to the **written model** when the goal is “close a contract row” in the roadmap sense.
 - Use the **❌ / ⚠️ / ✅** snapshot in **`docs/ROADMAP.md` → [Module contracts (abstraction and P0-P9 coverage)](#module-contracts-abstraction-and-p0-p9-coverage)** to see which **P0–P9** rows still lack a **data-distribution** contract on **`develop`**.
 
+## Reuse before you implement (AI)
+
+Before writing any new function, module, or driver, research the project in depth: investigate whether existing drivers, helpers, or code already cover the need and can be used or extended. This cuts down on duplicate implementations and modules and keeps the code easy to maintain.
+
+- **There should never be two functions or methods that do the same thing.**
+- When an existing function is close but not quite enough, extend it (wrap, compose, or add an op to its driver or vtable) instead of writing a parallel copy.
+- Integration code goes through the existing driver model (`fl_driver_desc_t`, the registry, `contracts/`), the VFS and facade (`fs_provider_t`, `fm_*`), and the shared helpers, not around them.
+- If a shared helper is missing, add it once in a shared location and point every caller at it.
+- Record the search (what you looked at, what you reuse or extend) in the PR description. The DevOps team skill (`.cursor/skills/devops-multi-agent-team/`, with `.cursor/agents/` and `.cursor/commands/`) has the Researcher produce this reuse map before a Coder starts; `.cursor/rules/reuse_before_implement.mdc` carries the same rule for Cursor.
+
 ## Versioning
 
 Long-form guide: **`docs/versioning.md`** (authoring **`.ver`** files, **`RELEASE_DATE`** at relocate and after merge to **`develop`**, **A / B / C** semantics, and what GitHub Actions updates).
