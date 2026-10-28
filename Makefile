@@ -947,6 +947,14 @@ test_kq_delivery: kernel/core/vfs/kq_delivery.o kernel/core/vfs/server_shared_fs
 	  -lsqlite3 $(OPENSSL_LIBS) -pthread -Wl,-z,noexecstack
 	./tests/test_kq_delivery
 
+.PHONY: test_fs_helpers
+test_fs_helpers: kernel/core/vfs/server_shared_fs.o kernel/core/vfs/server_shared_db.o kernel/core/vfs/server_shared_digest.o userland/shell/common.o
+	$(CC) $(CFLAGS) $(TEST_SANITIZE) -o tests/test_fs_helpers tests/test_fs_helpers.c \
+	  kernel/core/vfs/server_shared_fs.o kernel/core/vfs/server_shared_db.o \
+	  kernel/core/vfs/server_shared_digest.o userland/shell/common.o \
+	  -lsqlite3 $(OPENSSL_LIBS) -pthread -Wl,-z,noexecstack
+	./tests/test_fs_helpers
+
 .PHONY: test_hex
 test_hex: kernel/core/vfs/kq_delivery.o kernel/core/vfs/server_shared_fs.o kernel/core/vfs/server_shared_db.o kernel/core/vfs/server_shared_digest.o userland/shell/common.o
 	$(CC) $(CFLAGS) $(TEST_SANITIZE) -o tests/test_hex tests/test_hex.c \

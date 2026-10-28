@@ -6,16 +6,27 @@ into an agent prompt.
 
 ## Ask paths
 
-Anyone may ask anyone when blocked. Prefer:
+Anyone may ask anyone when blocked. **Questions go to the standing
+Review, Security and QA subagents first**, by topic, before the
+Orchestrator or the human:
+
+| Topic | Ask |
+|-------|-----|
+| Correctness, reuse, style, scope, whether code duplicates something | **Reviewer** seat |
+| Secrets, input and path validation, containment, crypto, untrusted data, key handling | **Security** seat |
+| Tests, build, CI, CodeQL, the publish gate, what QA will accept | **QA** seat |
 
 | Who has a question | Asks first | Then |
 |--------------------|------------|------|
-| QA | **Coder** (primary) | Reviewer |
-| Coder | **Reviewer** (review Q&A) or **Researcher** | Orchestrator |
+| Coder, Researcher | the Reviewer, Security or QA seat for that topic (SendMessage) | Orchestrator |
 | Coder (path overlap) | **the other Coder** | Orchestrator |
-| Reviewer | **Coder** (review Q&A) or **Orchestrator** | Coder |
-| Security / CI / Verifier / Ticket Lead | Orchestrator or task opener | — |
-| Orchestrator (Team Lead) | **The Client** (human) | — |
+| Reviewer, Security, QA | the **Coder** (primary), or each other | Orchestrator |
+| CI / Verifier / Ticket Lead | Orchestrator or task opener | none |
+| Orchestrator (Team Lead) | the Review, Security and QA seats, then **The Client** (human) | none |
+
+The three seats answer in writing (`## Q&A` in the review thread or a
+SendMessage reply) and say plainly when they do not know. An answer is
+advice: only QA may OK a push, and a seat's answer never authorizes one.
 
 Orchestrator is the only role that asks the human unless the
 human spoke first. Coder ↔ Reviewer use thread `## Q&A` and

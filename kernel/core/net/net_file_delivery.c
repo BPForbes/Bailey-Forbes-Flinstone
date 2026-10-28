@@ -8,6 +8,7 @@
 #include "server_shared_db.h"
 #include "server_shared_fs.h"
 #include "fl/mem_asm.h"
+#include "fl/path.h"
 
 #include <openssl/sha.h>
 #include <stdio.h>
@@ -373,9 +374,8 @@ static fl_result_t accept_from_catalog(const char *share_id,
         char saved[512];
         rc = fl_server_shared_save_offer(&offer, data, data_len, saved, sizeof(saved));
         if (rc == FL_RESULT_OK) {
-            const char *base = strrchr(saved, '/');
             printf("[Server] saved to server_shared/%s (hash %s)\n",
-                   base ? base + 1 : saved, entry.content_hash);
+                   fl_fs_basename(saved), entry.content_hash);
         }
     } else if (disposition == FL_SERVER_FILE_OVERWRITE_LOCAL) {
         rc = fl_server_shared_overwrite_local(&offer, offer.suggested_dest_path,
@@ -652,7 +652,6 @@ fl_result_t fl_server_file_offer_create(fl_server_file_offer_t *out,
                                         fl_file_perms_t file_perms,
                                         uint64_t expires_at)
 {
-    const char *base;
     if (!out || !sender_path || !sender_path[0])
         return FL_RESULT_INVAL;
     memset(out, 0, sizeof(*out));
@@ -667,9 +666,7 @@ fl_result_t fl_server_file_offer_create(fl_server_file_offer_t *out,
     copy_str_field(out->sender_path, sizeof(out->sender_path), sender_path);
     copy_str_field(out->suggested_dest_path, sizeof(out->suggested_dest_path),
                    suggested_dest ? suggested_dest : sender_path);
-    base = strrchr(sender_path, '/');
-    base = base ? base + 1 : sender_path;
-    copy_str_field(out->file_name, sizeof(out->file_name), base);
+    copy_str_field(out->file_name, sizeof(out->file_name), fl_fs_basename(sender_path));
     if (receiver_id == 0u)
         out->file_perms |= FL_FILE_FLAG_PUBLIC;
     return FL_RESULT_OK;
@@ -1236,9 +1233,8 @@ fl_result_t fl_server_share_accept(const char *share_id,
         rc = fl_server_shared_save_offer(&slot->offer, slot->file.data,
                                          slot->file.len, saved, sizeof(saved));
         if (rc == FL_RESULT_OK) {
-            const char *base = strrchr(saved, '/');
             printf("[Server] saved to server_shared/%s\n",
-                   base ? base + 1 : saved);
+                   fl_fs_basename(saved));
         }
     } else if (disposition == FL_SERVER_FILE_OVERWRITE_LOCAL) {
         rc = fl_server_shared_overwrite_local(&slot->offer,

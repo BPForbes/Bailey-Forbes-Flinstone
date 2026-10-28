@@ -52,6 +52,7 @@ tests/test_disk_hex_issue222
 tests/test_netlab_sim
 tests/test_kq_checkpoint
 tests/test_kq_delivery
+tests/test_fs_helpers
 tests/test_hex
 tests/test_kq_net
 tests/test_part_buf

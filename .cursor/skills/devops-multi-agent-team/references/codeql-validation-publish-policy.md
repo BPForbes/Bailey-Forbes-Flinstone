@@ -1,28 +1,46 @@
-# CodeQL, Validation, and Publish Policy
+# QA bug hunt, Validation, and Publish Policy
 
 This repo is C/C++ with an ASM layer (`make`; CI in
-`.github/workflows/c-cpp.yml`). It has no CodeQL workflow or
-`.github/codeql/` config yet. Run CodeQL for `c-cpp` locally when
-the CLI is available, and where CI or a reviewer requires it treat
-it as a gate before publish. If the CLI is absent, report
-CodeQL as NOT RUN (never claim PASS) and let the Orchestrator ask
-the human whether the build and tests alone suffice.
+`.github/workflows/c-cpp.yml`). It has no CodeQL workflow, so **in
+this repo QA's last gate is a final bug hunt, not CodeQL**. The
+CodeQL sections below apply only if a CodeQL workflow is added
+later; until then do not report CodeQL as a gate (report it as
+`NOT APPLICABLE`, never `PASS`).
 
 ## Core rule
 
-**Only QA may give the OK to push.** Anyone who changes product,
-pipeline, or infra code must run applicable CodeQL. That developer
-run does not authorize a push. Review Satisfied, Security Clear,
-compilation, tests, and linters do not substitute for CodeQL.
+**Only QA may give the OK to push.** Review Satisfied, Security
+Clear, compilation, tests and linters do not authorize one.
 
-“CodeQL is satisfied”: applicable database created; analysis
-completed; SARIF inspected; no unresolved finding introduced or
-materially affected by this change remains; no query, path, or
-check was weakened to obtain a pass.
+**QA final pass (required before PASS).** After the required make
+targets pass, QA looks over the change one last time from two
+angles and tries to break it:
 
-If CodeQL cannot run when required: do not claim it passed and do
-not publish. Do not weaken `.github/codeql/codeql-config.yml` /
-`.github/workflows/codeql.yml`. Fix the code.
+- **Test perspective:** read the diff and the tests together. Which
+  behaviour is changed but not asserted? Write and run throwaway
+  probes (outside the repo or deleted before reporting) for edge
+  cases: empty, NULL, oversize, boundary, error returns, repeated
+  and concurrent calls, sanitizer builds, old-vs-new differential on
+  every changed call site.
+- **Live-environment perspective:** run the real thing, not only
+  unit tests: build the shipped targets, run the shell or host
+  binary through the changed commands end to end (for example the
+  KeyQuorum delivery, send and open flow, or the browser lab where
+  it can be built), with real files, odd paths, special files and
+  failure injection (full disk, missing permissions, a file that
+  changes mid-read). Report anything that cannot be run here (for
+  example `emcc`) as `NOT RUN`, never as a pass.
+- **Bug hunt:** assume the Coder and Reviewers missed something and
+  look for it: resource leaks, wrong errno or return mapping, secrets
+  left in memory, a caller that relied on the old behaviour, docs or
+  wiring that no longer match.
+
+A finding is sent back, not fixed by QA: open
+`triage-<id>.md` ([triage-template.md](triage-template.md)) with the
+reproducer, hand it to the Coder who owns the change (Research
+joins them), and QA re-runs the final pass on the rewrite. PASS only
+when the required targets pass, the final pass finds nothing open,
+and every `NOT RUN` is named in the report.
 
 ## Fast validation (before full CodeQL)
 

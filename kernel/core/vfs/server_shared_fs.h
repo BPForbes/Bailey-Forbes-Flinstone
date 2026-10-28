@@ -25,6 +25,18 @@ int fl_fs_mkdir_p(const char *path, mode_t mode);
 int fl_fs_stage_file(const char *path, const uint8_t *data, size_t len);
 /** Replaces path atomically: stages <path>.part, then renames it over path. 0 on success. */
 int fl_fs_write_file_atomic(const char *path, const uint8_t *data, size_t len);
+/**
+ * Reads the whole regular file at path (binary; symlinks are followed). One open, size from
+ * fstat, one allocation, then an EOF probe, so a file that grew or shrank is never returned
+ * truncated. 0 on success: *data is heap memory (free() it; never NULL, an empty file gives
+ * *len 0) and *len its size. On failure *data is NULL, *len 0, any bytes already read are
+ * wiped, and the result is -1 (not a regular file (errno EINVAL; a directory, FIFO or device,
+ * none is ever blocked on), a NULL path, or a stat, read, shrink or allocation failure),
+ * -2 (larger than max, or grew while read; errno EFBIG) or -3 (could not be opened; errno from
+ * open, so ENOENT for a missing file). Applies no path validation. On success the caller wipes
+ * a secret buffer itself (fl_kq_buf_free where it holds an fl_kq_buf_t); this only wipes failures.
+ */
+int fl_fs_read_file(const char *path, size_t max, uint8_t **data, size_t *len);
 
 /** Ensure ./server_shared and ./server_shared/expired exist. */
 fl_result_t fl_server_shared_init(void);

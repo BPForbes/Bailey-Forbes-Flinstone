@@ -7,6 +7,7 @@
 #include <dirent.h>
 #include <errno.h>
 #include <fcntl.h>
+#include <stdint.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -84,6 +85,76 @@ int fl_fs_write_file_atomic(const char *path, const uint8_t *data, size_t len)
         return -1;
     }
     return 0;
+}
+
+int fl_fs_read_file(const char *path, size_t max, uint8_t **data, size_t *len)
+{
+    struct stat st;
+    uint8_t *buf = NULL;
+    uint8_t probe;
+    size_t n, got = 0;
+    ssize_t r;
+    int fd, rc = -1, saved_errno;
+
+    if (!data || !len)
+        return -1;
+    *data = NULL;
+    *len = 0;
+    if (!path) {
+        errno = EINVAL;
+        return -1;
+    }
+    /* O_NONBLOCK: a FIFO must not hang the open; it is refused by fstat below. */
+    fd = open(path, O_RDONLY | O_CLOEXEC | O_NONBLOCK);
+    if (fd < 0)
+        return -3;
+    if (fstat(fd, &st) != 0)
+        goto out;
+    if (!S_ISREG(st.st_mode)) {
+        errno = EINVAL;
+        goto out;
+    }
+    if (st.st_size < 0 || (uint64_t)st.st_size > (uint64_t)max ||
+        (uint64_t)st.st_size > (uint64_t)SIZE_MAX) {
+        errno = EFBIG;
+        rc = -2;
+        goto out;
+    }
+    n = (size_t)st.st_size;
+    buf = (uint8_t *)malloc(n ? n : 1u); /* once: no realloc copies of the content */
+    if (!buf)
+        goto out;
+    while (got < n) {
+        r = read(fd, buf + got, n - got);
+        if (r < 0 && errno == EINTR)
+            continue;
+        if (r <= 0) /* error, or the file shrank */
+            goto out;
+        got += (size_t)r;
+    }
+    do {
+        r = read(fd, &probe, 1);
+    } while (r < 0 && errno == EINTR);
+    if (r != 0) {
+        if (r > 0) { /* the file grew: never hand back a truncated read */
+            errno = EFBIG;
+            rc = -2;
+        }
+        goto out;
+    }
+    *data = buf;
+    *len = n;
+    buf = NULL;
+    rc = 0;
+out:
+    saved_errno = errno; /* the wipe, free and close must not replace the failure's errno */
+    if (buf) {
+        explicit_bzero(buf, got);
+        free(buf);
+    }
+    close(fd);
+    errno = saved_errno;
+    return rc;
 }
 
 static int join_path(char *out, size_t cap, const char *a, const char *b)

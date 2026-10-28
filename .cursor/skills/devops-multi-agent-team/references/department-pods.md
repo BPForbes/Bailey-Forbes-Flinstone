@@ -102,3 +102,13 @@ subagent (`run_in_background: true`); do not poll it.
 - Seats share the remote's two concurrent git smart-HTTP
   operations: fetch and clone one at a time, and work in local
   side clones.
+
+## Standing advisory seats
+
+Keep one Review, one Security and one QA subagent available from the
+start of a task, not only after a diff exists. Before code: they
+review the plan (design, threat model, test plan). While Coders work:
+they answer questions ([role-identity.md](role-identity.md) Ask
+paths). After a Coder hands off: they review that diff. They count
+toward the 2 to 3 seats of their function and are the first to be
+resumed (SendMessage) rather than respawned.

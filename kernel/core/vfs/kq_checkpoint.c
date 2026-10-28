@@ -1,6 +1,7 @@
 #include "kq_checkpoint.h"
 #include "contract_p2_heritage.h"
 #include "server_shared_fs.h"
+#include "fl/path.h"
 
 #include <errno.h>
 #include <fcntl.h>
@@ -96,30 +97,6 @@ void fl_kq_encoded_free(fl_kq_encoded_t *enc) {
 
 /* ---- local files -------------------------------------------------------- */
 
-static int read_all(const char *path, size_t max, fl_kq_buf_t *out) {
-    FILE *f = fopen(path, "rb");
-    long n = -1; /* read below even when the first seek fails */
-
-    out->data = NULL;
-    out->len = 0;
-    if (!f)
-        return -1;
-    if (fseek(f, 0, SEEK_END) != 0 || (n = ftell(f)) < 0 || fseek(f, 0, SEEK_SET) != 0 ||
-        (size_t)n > max) {
-        fclose(f);
-        return (n >= 0 && (size_t)n > max) ? -2 : -1;
-    }
-    out->data = (uint8_t *)malloc((size_t)n ? (size_t)n : 1u);
-    if (!out->data || fread(out->data, 1, (size_t)n, f) != (size_t)n) {
-        fclose(f);
-        fl_kq_buf_free(out);
-        return -1;
-    }
-    out->len = (size_t)n;
-    fclose(f);
-    return 0;
-}
-
 /* Write through a sibling and rename, so a reader never sees half a file. */
 #define KQ_PATH_MAX FL_FS_PATH_MAX
 
@@ -139,7 +116,7 @@ static int backup_file(const char *path, const char *bak) {
 
     if (link(path, bak) == 0)
         return 0;
-    if (read_all(path, FL_KQ_LETTER_MAX, &copy) != 0)
+    if (fl_fs_read_file(path, FL_KQ_LETTER_MAX, &copy.data, &copy.len) != 0)
         return -1;
     rc = fl_fs_write_file_atomic(bak, copy.data, copy.len);
     fl_kq_buf_free(&copy);
@@ -231,11 +208,6 @@ static int random_bytes(uint8_t *out, size_t n) {
     return 0;
 }
 
-static const char *base_name(const char *path) {
-    const char *slash = strrchr(path, '/');
-    return slash ? slash + 1 : path;
-}
-
 /* ---- trust table --------------------------------------------------------- */
 
 typedef struct {
@@ -311,7 +283,7 @@ fl_kq_cp_result_t fl_kq_cp_encode_with(const fl_kq_keydir_t *keys, const char *s
     if (sidecar(path, FL_KQ_CONTAINER_SUFFIX, container_path, sizeof container_path) != 0)
         return FL_KQ_CP_INVALID;
 
-    st = read_all(path, KQ_CONTENT_MAX, &content);
+    st = fl_fs_read_file(path, KQ_CONTENT_MAX, &content.data, &content.len);
     if (st == -2)
         return FL_KQ_CP_TOO_LARGE;
     if (st != 0)
@@ -321,11 +293,12 @@ fl_kq_cp_result_t fl_kq_cp_encode_with(const fl_kq_keydir_t *keys, const char *s
         uint8_t file_id[16];
 
         if (random_bytes(file_id, sizeof file_id) != 0 ||
-            drv->file_new(file_id, base_name(path), sender_key, &container) != KQ_FILE_OK) {
+            drv->file_new(file_id, fl_fs_basename(path), sender_key, &container) != KQ_FILE_OK) {
             rc = FL_KQ_CP_IO;
             goto done;
         }
-    } else if (read_all(container_path, FL_KQ_LETTER_MAX, &container) != 0 ||
+    } else if (fl_fs_read_file(container_path, FL_KQ_LETTER_MAX, &container.data,
+                               &container.len) != 0 ||
                drv->verify(&container, NULL) != KQ_FILE_OK) {
         /* A damaged history is refused, never silently replaced by a new one. */
         rc = FL_KQ_CP_INVALID;
@@ -362,7 +335,7 @@ fl_kq_cp_result_t fl_kq_cp_encode_with(const fl_kq_keydir_t *keys, const char *s
         rc = FL_KQ_CP_IO;
         goto done;
     }
-    snprintf(out->file_name, sizeof out->file_name, "%s", base_name(path));
+    snprintf(out->file_name, sizeof out->file_name, "%s", fl_fs_basename(path));
 
 done:
     if (rc != FL_KQ_CP_OK)
@@ -470,7 +443,7 @@ static int local_holds(const fl_kq_driver_t *drv, const char *container_path,
     uint8_t root[32];
     int rc;
 
-    if (read_all(container_path, FL_KQ_LETTER_MAX, &local) != 0)
+    if (fl_fs_read_file(container_path, FL_KQ_LETTER_MAX, &local.data, &local.len) != 0)
         return -1;
     if (drv->verify(&local, root) != KQ_FILE_OK || !drv->equal(root, newest_root, sizeof root)) {
         fl_kq_buf_free(&local);
@@ -732,7 +705,7 @@ fl_kq_cp_result_t fl_kq_cp_history(const char *path, fl_kq_buf_t *lines) {
         return FL_KQ_CP_NO_DRIVER;
     if (sidecar(path, FL_KQ_CONTAINER_SUFFIX, container_path, sizeof container_path) != 0)
         return FL_KQ_CP_INVALID;
-    rc = read_all(container_path, FL_KQ_LETTER_MAX, &c);
+    rc = fl_fs_read_file(container_path, FL_KQ_LETTER_MAX, &c.data, &c.len);
     if (rc != 0)
         return rc == -2 ? FL_KQ_CP_TOO_LARGE : FL_KQ_CP_IO;
     rc = drv->events(&c, lines);
@@ -753,7 +726,7 @@ fl_kq_cp_result_t fl_kq_cp_head(const char *path, uint8_t rev[32]) {
         return FL_KQ_CP_NO_DRIVER;
     if (sidecar(path, FL_KQ_CONTAINER_SUFFIX, container_path, sizeof container_path) != 0)
         return FL_KQ_CP_INVALID;
-    if (read_all(container_path, FL_KQ_LETTER_MAX, &c) != 0)
+    if (fl_fs_read_file(container_path, FL_KQ_LETTER_MAX, &c.data, &c.len) != 0)
         return FL_KQ_CP_IO;
     rc = drv->head(&c, rev);
     if (rc == KQ_FILE_FORKED)
@@ -792,7 +765,7 @@ fl_kq_cp_result_t fl_kq_cp_reseal_with(const fl_kq_keydir_t *keys, const char *s
         return FL_KQ_CP_NO_KEY;
     if (sidecar(path, FL_KQ_CONTAINER_SUFFIX, container_path, sizeof container_path) != 0)
         return FL_KQ_CP_INVALID;
-    if (read_all(container_path, FL_KQ_LETTER_MAX, &container) != 0)
+    if (fl_fs_read_file(container_path, FL_KQ_LETTER_MAX, &container.data, &container.len) != 0)
         return FL_KQ_CP_IO;
     if (drv->verify(&container, NULL) != KQ_FILE_OK) {
         rc = FL_KQ_CP_INVALID;
@@ -813,7 +786,7 @@ fl_kq_cp_result_t fl_kq_cp_reseal_with(const fl_kq_keydir_t *keys, const char *s
         rc = FL_KQ_CP_INVALID;
         goto done;
     }
-    snprintf(out->file_name, sizeof out->file_name, "%s", base_name(path));
+    snprintf(out->file_name, sizeof out->file_name, "%s", fl_fs_basename(path));
 
 done:
     if (rc != FL_KQ_CP_OK)
@@ -838,7 +811,7 @@ fl_kq_cp_result_t fl_kq_cp_permit_with(const fl_kq_keydir_t *keys, const char *s
         return drv ? FL_KQ_CP_INVALID : FL_KQ_CP_NO_DRIVER;
     if (sidecar(path, FL_KQ_CONTAINER_SUFFIX, container_path, sizeof container_path) != 0)
         return FL_KQ_CP_INVALID;
-    if (read_all(container_path, FL_KQ_LETTER_MAX, &c) != 0)
+    if (fl_fs_read_file(container_path, FL_KQ_LETTER_MAX, &c.data, &c.len) != 0)
         return FL_KQ_CP_IO;
     /* The author's signature must verify under the keys this registry holds before the
      * supervisor adds to it: a countersignature never backs an unverified author. */

@@ -43,3 +43,11 @@ Build and tests + C/C++ CodeQL (PASS / FAIL /
 FINDINGS / NOT RUN / NOT APPLICABLE); new unresolved N; clean
 timeline; gate PASS / BLOCKED. Never claim CodeQL-clean unless
 analysis ran and SARIF was reviewed. Never publish while BLOCKED.
+
+## Standing seat
+
+Be available from the start of a task: review the plan, answer Coder and Researcher questions by topic ([role-identity.md](../skills/devops-multi-agent-team/references/role-identity.md) Ask paths), then review the diff when handed off. Say plainly when you do not know. An answer never authorizes a push.
+
+## Final bug hunt (this repo)
+
+No CodeQL workflow exists here. Before PASS, look over the change one last time from the test perspective and the live-environment perspective, run it through, and hunt for bugs; send any finding back through `triage-<id>.md` to the Coder ([policy](../skills/devops-multi-agent-team/references/codeql-validation-publish-policy.md)). Name every `NOT RUN`.

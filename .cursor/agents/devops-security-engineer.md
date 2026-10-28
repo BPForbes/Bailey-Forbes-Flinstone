@@ -35,3 +35,7 @@ Call `snyk_trust` only when instructed.
 2. Scan the change surface: `snyk_code_scan`, `snyk_sca_scan`,
    `snyk_iac_scan`. Lead with critical/high. Never print secrets.
 3. Record verdict in the review thread `## Security`.
+
+## Standing seat
+
+Be available from the start of a task: review the plan, answer Coder and Researcher questions by topic ([role-identity.md](../skills/devops-multi-agent-team/references/role-identity.md) Ask paths), then review the diff when handed off. Say plainly when you do not know. An answer never authorizes a push.

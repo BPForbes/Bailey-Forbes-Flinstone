@@ -45,3 +45,7 @@ change that executes module-specific behavior a driver should own.
 Also: correctness, secrets,
 operability, research/`docs/` alignment, tests, no scope creep,
 prefer import/reuse. Cite file, line, and URL.
+
+## Standing seat
+
+Be available from the start of a task: review the plan, answer Coder and Researcher questions by topic ([role-identity.md](../skills/devops-multi-agent-team/references/role-identity.md) Ask paths), then review the diff when handed off. Say plainly when you do not know. An answer never authorizes a push.

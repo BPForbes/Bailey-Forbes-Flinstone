@@ -326,9 +326,7 @@ out:
 fl_result_t fl_kq_store_letter(fl_kq_store_t *s, const uint8_t id[FL_KQ_DELIVERY_ID_LEN],
                                uint8_t **letter, size_t *len) {
     char path[1200];
-    FILE *f;
-    long n;
-    uint8_t *buf;
+    int rc;
 
     if (!s || !id || !letter || !len)
         return FL_RESULT_INVAL;
@@ -336,23 +334,16 @@ fl_result_t fl_kq_store_letter(fl_kq_store_t *s, const uint8_t id[FL_KQ_DELIVERY
     *len = 0;
     if (letter_path(s, id, path, sizeof path) != 0)
         return FL_RESULT_INVAL;
-    f = fopen(path, "rb");
-    if (!f)
+    rc = fl_fs_read_file(path, FL_KQ_LETTER_MAX, letter, len);
+    if (rc == -3)
         return FL_RESULT_NOENT;
-    if (fseek(f, 0, SEEK_END) != 0 || (n = ftell(f)) <= 0 || (size_t)n > FL_KQ_LETTER_MAX ||
-        fseek(f, 0, SEEK_SET) != 0) {
-        fclose(f);
+    if (rc != 0)
+        return FL_RESULT_ERR;
+    if (*len == 0u) { /* an empty letter is not a letter */
+        free(*letter);
+        *letter = NULL;
         return FL_RESULT_ERR;
     }
-    buf = (uint8_t *)malloc((size_t)n);
-    if (!buf || fread(buf, 1, (size_t)n, f) != (size_t)n) {
-        free(buf);
-        fclose(f);
-        return FL_RESULT_ERR;
-    }
-    fclose(f);
-    *letter = buf;
-    *len = (size_t)n;
     return FL_RESULT_OK;
 }
 

@@ -214,8 +214,10 @@ from the approved side-branch tree and pushes once. Checklists:
 
 ## Questions and interrupts
 
-Ask-paths: [role-identity.md](references/role-identity.md). Orchestrator
-is the only role that asks The Client unless the human spoke first.
+Ask-paths: [role-identity.md](references/role-identity.md). Questions
+from Coders and Researchers go first to the standing Review,
+Security and QA subagents by topic. Orchestrator is the only role
+that asks The Client unless the human spoke first.
 
 Treat human instructions as a **side sprint**. Pause only conflicting
 work. Start from research, then code. Stay on the current **real**
@@ -239,6 +241,11 @@ acts. Keep work deterministic. Never invent requirements.
 ```
 
 ## Repo alignment (Bailey-Forbes-Flinstone)
+
+**QA gate here:** this repo has no CodeQL workflow, so wherever this
+skill says CodeQL is required, QA's final bug hunt (test perspective,
+live-environment perspective, triage on any finding) replaces it. See
+[codeql-validation-publish-policy.md](references/codeql-validation-publish-policy.md).
 
 **Precedence:** this repo's `AGENTS.md`, `CLAUDE.md` and
 `.cursor/rules/*.mdc` win over this skill. In particular the

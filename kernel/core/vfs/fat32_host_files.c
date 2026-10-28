@@ -6,6 +6,7 @@
 #include "common.h"
 #include "disk_host_asm.h"
 #include "mem_asm.h"
+#include "fl/path.h"
 #include <fcntl.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -284,8 +285,7 @@ static int pack_83(const char *base, const char *ext, char out11[11]) {
 }
 
 static void split_base_ext(const char *path, char *base, size_t base_sz, char *ext, size_t ext_sz) {
-    const char *s = strrchr(path, '/');
-    s = s ? s + 1 : path;
+    const char *s = fl_fs_basename(path);
     const char *dot = strrchr(s, '.');
     if (dot && dot != s) {
         size_t bl = (size_t)(dot - s);
