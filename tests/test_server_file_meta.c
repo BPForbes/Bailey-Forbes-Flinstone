@@ -142,11 +142,64 @@ static int test_host_action_recorded_once(void)
     return 0;
 }
 
+/* Offer decode treats a file name that is not plain as a bad frame (needs net_file_delivery.h). */
+static int test_offer_decode_refuses_unsafe_names(void) {
+    static const char *const bad[] = {"../x.txt", "sub/y.txt", "..", ".", "a\\b", "ctl\x01n"};
+    uint8_t buf[2048];
+    uint16_t len = 0;
+    fl_server_file_offer_t o;
+    fl_server_file_offer_t back;
+
+    for (size_t i = 0; i < sizeof bad / sizeof bad[0]; i++) {
+        memset(&o, 0, sizeof o);
+        strncpy(o.share_id, "share-d", sizeof o.share_id - 1u);
+        strncpy(o.file_name, bad[i], sizeof o.file_name - 1u);
+        ASSERT(fl_server_file_offer_encode(&o, buf, sizeof buf, &len) == FL_RESULT_OK);
+        ASSERT(fl_server_file_offer_decode(buf, len, &back) == FL_RESULT_INVAL);
+    }
+    memset(&o, 0, sizeof o);
+    strncpy(o.share_id, "share-d", sizeof o.share_id - 1u);
+    strncpy(o.file_name, "ok name.txt", sizeof o.file_name - 1u);
+    ASSERT(fl_server_file_offer_encode(&o, buf, sizeof buf, &len) == FL_RESULT_OK);
+    ASSERT(fl_server_file_offer_decode(buf, len, &back) == FL_RESULT_OK);
+    ASSERT(strcmp(back.file_name, "ok name.txt") == 0);
+    return 0;
+}
+
+/* A text field with an embedded NUL is a bad frame, not a shorter string. */
+static int test_offer_decode_refuses_embedded_nul(void) {
+    uint8_t buf[2048];
+    uint16_t len = 0;
+    fl_server_file_offer_t o;
+    fl_server_file_offer_t back;
+    uint8_t *at;
+
+    memset(&o, 0, sizeof o);
+    strncpy(o.share_id, "shXre-n", sizeof o.share_id - 1u);
+    strncpy(o.file_name, "abXcd.txt", sizeof o.file_name - 1u);
+    ASSERT(fl_server_file_offer_encode(&o, buf, sizeof buf, &len) == FL_RESULT_OK);
+    ASSERT(fl_server_file_offer_decode(buf, len, &back) == FL_RESULT_OK);
+    at = memmem(buf, len, "abXcd.txt", 9u);
+    ASSERT(at != NULL);
+    at[2] = 0;
+    ASSERT(fl_server_file_offer_decode(buf, len, &back) == FL_RESULT_INVAL);
+    at[2] = 'X';
+    at = memmem(buf, len, "shXre-n", 7u);
+    ASSERT(at != NULL);
+    at[2] = 0;
+    ASSERT(fl_server_file_offer_decode(buf, len, &back) == FL_RESULT_INVAL);
+    return 0;
+}
+
 int main(void)
 {
     if (test_meta_roundtrip() != 0)
         return 1;
     if (test_host_action_recorded_once() != 0)
+        return 1;
+    if (test_offer_decode_refuses_embedded_nul() != 0)
+        return 1;
+    if (test_offer_decode_refuses_unsafe_names() != 0)
         return 1;
     printf("All server file meta tests passed.\n");
     return 0;

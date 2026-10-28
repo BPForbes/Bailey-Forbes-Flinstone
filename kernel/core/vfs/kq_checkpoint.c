@@ -60,12 +60,8 @@ const char *fl_kq_cp_reason(fl_kq_cp_result_t r) {
 }
 
 int fl_kq_cp_safe_name(const char *name) {
-    if (!name || !name[0] || !strcmp(name, ".") || !strcmp(name, ".."))
-        return 0;
-    for (const unsigned char *p = (const unsigned char *)name; *p; p++)
-        if (*p == '/' || *p == '\\' || *p < 0x20u || *p == 0x7Fu)
-            return 0;
-    return 1;
+    /* The reserved suffixes are one list, shared with the share landing. */
+    return fl_fs_name_is_plain(name) && !fl_server_shared_name_is_reserved(name);
 }
 
 fl_result_t fl_kq_cp_to_result(fl_kq_cp_result_t r) {
@@ -101,35 +97,166 @@ void fl_kq_encoded_free(fl_kq_encoded_t *enc) {
 #define KQ_PATH_MAX FL_FS_PATH_MAX
 
 typedef struct {
-    const char    *path;
+    const char    *path; /* a plain name inside the landing directory */
     const uint8_t *data;
     size_t         len;
 } kq_out_t;
 
 /*
- * Keeps path as bak. A hard link costs nothing; a file system without links (the browser
+ * The landing directory. Where the contained calls exist it is held as an fd and every name
+ * is used inside it, so a link planted at a name is never followed; the directory's own path
+ * is trusted. Otherwise (no *at calls, or the directory cannot be opened) names are joined
+ * to the directory's path and the path-based calls are used as before.
+ */
+typedef struct {
+    int         fd;  /* -1: path-based */
+    const char *dir;
+} kq_land_t;
+
+static int land_name(const kq_land_t *l, const char *name, char *out, size_t cap) {
+    if (strcmp(l->dir, ".") == 0 || l->dir[0] == '\0')
+        return snprintf(out, cap, "%s", name) < (int)cap ? 0 : -1;
+    return snprintf(out, cap, "%s/%s", l->dir, name) < (int)cap ? 0 : -1;
+}
+
+static void land_open(kq_land_t *l, const char *dir) {
+    l->dir = dir;
+    l->fd = -1;
+    if (fl_fs_contained_available())
+        l->fd = fl_fs_dir_open(dir); /* a failure stays -1 and is refused by land_ready */
+}
+
+/* The path-based calls are for platforms without the contained ones only. */
+static int land_ready(const kq_land_t *l) {
+    return l->fd >= 0 || !fl_fs_contained_available();
+}
+
+static void land_close(kq_land_t *l) {
+    if (l->fd >= 0)
+        close(l->fd);
+    l->fd = -1;
+}
+
+/* Splits dest into its directory and last name; false when the name part is empty. */
+static int land_split(const char *dest, char *dir, size_t dcap, const char **leaf) {
+    const char *slash = strrchr(dest, '/');
+    size_t n;
+
+    if (!slash) {
+        *leaf = dest;
+        return snprintf(dir, dcap, ".") < (int)dcap && dest[0] ? 0 : -1;
+    }
+    n = (size_t)(slash - dest);
+    *leaf = slash + 1;
+    if (!(*leaf)[0] || n + 1u > dcap)
+        return -1;
+    if (n == 0u) { /* "/name": the directory is the root */
+        dir[0] = '/';
+        dir[1] = '\0';
+        return 0;
+    }
+    memcpy(dir, dest, n);
+    dir[n] = '\0';
+    return 0;
+}
+
+static int land_stage(const kq_land_t *l, const char *name, const uint8_t *d, size_t n) {
+    char p[KQ_PATH_MAX];
+
+    if (l->fd >= 0)
+        return fl_fs_stage_file_in(l->fd, name, d, n);
+    return land_name(l, name, p, sizeof p) == 0 ? fl_fs_stage_file(p, d, n) : -1;
+}
+
+static int land_write(const kq_land_t *l, const char *name, const uint8_t *d, size_t n) {
+    char p[KQ_PATH_MAX];
+
+    if (l->fd >= 0)
+        return fl_fs_write_file_atomic_in(l->fd, name, d, n);
+    return land_name(l, name, p, sizeof p) == 0 ? fl_fs_write_file_atomic(p, d, n) : -1;
+}
+
+static int land_read(const kq_land_t *l, const char *name, uint8_t **d, size_t *n) {
+    char p[KQ_PATH_MAX];
+
+    if (l->fd >= 0)
+        return fl_fs_read_file_in(l->fd, name, FL_KQ_LETTER_MAX, d, n);
+    if (land_name(l, name, p, sizeof p) != 0)
+        return -1;
+    return fl_fs_read_file(p, FL_KQ_LETTER_MAX, d, n);
+}
+
+static int land_unlink(const kq_land_t *l, const char *name) {
+    char p[KQ_PATH_MAX];
+
+    if (l->fd >= 0)
+        return fl_fs_unlink_in(l->fd, name);
+    return land_name(l, name, p, sizeof p) == 0 ? unlink(p) : -1;
+}
+
+static int land_rename(const kq_land_t *l, const char *from, const char *to) {
+    char a[KQ_PATH_MAX], b[KQ_PATH_MAX];
+
+    if (l->fd >= 0)
+        return fl_fs_rename_in(l->fd, from, to);
+    if (land_name(l, from, a, sizeof a) != 0 || land_name(l, to, b, sizeof b) != 0)
+        return -1;
+    return rename(a, b);
+}
+
+static int land_link(const kq_land_t *l, const char *from, const char *to) {
+    char a[KQ_PATH_MAX], b[KQ_PATH_MAX];
+
+    if (l->fd >= 0)
+        return fl_fs_link_in(l->fd, from, to);
+    if (land_name(l, from, a, sizeof a) != 0 || land_name(l, to, b, sizeof b) != 0)
+        return -1;
+    return link(a, b);
+}
+
+/* 1 present (a link counts), 0 absent, -1 cannot tell. */
+static int land_exists(const kq_land_t *l, const char *name) {
+    char p[KQ_PATH_MAX];
+
+    if (l->fd >= 0)
+        return fl_fs_exists_in(l->fd, name);
+    if (land_name(l, name, p, sizeof p) != 0)
+        return -1;
+    return access(p, F_OK) == 0 ? 1 : 0;
+}
+
+static int part_name(const char *name, char *out, size_t cap) {
+    return snprintf(out, cap, "%s.part", name) < (int)cap ? 0 : -1;
+}
+
+static int bak_name(const char *name, char *out, size_t cap) {
+    return snprintf(out, cap, "%s.kqbak", name) < (int)cap ? 0 : -1;
+}
+
+/*
+ * Keeps name as bak. A hard link costs nothing; a file system without links (the browser
  * lab's in-memory one refuses them) gets a copy instead, wiped from memory after.
  */
-static int backup_file(const char *path, const char *bak) {
+static int backup_file(const kq_land_t *l, const char *name, const char *bak) {
     fl_kq_buf_t copy = {0};
     int rc;
 
-    if (link(path, bak) == 0)
+    if (land_link(l, name, bak) == 0)
         return 0;
-    if (fl_fs_read_file(path, FL_KQ_LETTER_MAX, &copy.data, &copy.len) != 0)
+    if (land_read(l, name, &copy.data, &copy.len) != 0)
         return -1;
-    rc = fl_fs_write_file_atomic(bak, copy.data, copy.len);
+    rc = land_write(l, bak, copy.data, copy.len);
     fl_kq_buf_free(&copy);
     return rc;
 }
 
 /*
  * Replaces every file in out[] or none of them. All parts are staged first; then each
- * existing file is kept as <path>.kqbak (backup_file) and the parts are renamed into
+ * existing file is kept as <name>.kqbak (backup_file) and the parts are renamed into
  * place. If a rename fails, the files already replaced are restored from their backups
  * (or removed when they did not exist), so a failure leaves the files as they were.
  */
-static int commit_all(const kq_out_t *out, size_t n) {
+static int commit_all(const kq_land_t *l, const kq_out_t *out, size_t n) {
     char part[KQ_PATH_MAX];
     char bak[KQ_PATH_MAX];
     int had[4] = {0};
@@ -140,48 +267,52 @@ static int commit_all(const kq_out_t *out, size_t n) {
     if (n > sizeof had / sizeof had[0])
         return -1;
     for (i = 0; i < n; i++) {
-        if (fl_fs_stage_file(out[i].path, out[i].data, out[i].len) != 0)
+        if (land_stage(l, out[i].path, out[i].data, out[i].len) != 0)
             break;
     }
     if (i < n) {
         while (i-- > 0) {
-            snprintf(part, sizeof part, "%s.part", out[i].path);
-            unlink(part);
+            if (part_name(out[i].path, part, sizeof part) == 0)
+                land_unlink(l, part);
         }
         return -1;
     }
     for (i = 0; i < n; i++) {
-        snprintf(bak, sizeof bak, "%s.kqbak", out[i].path);
-        unlink(bak);
-        had[i] = access(out[i].path, F_OK) == 0;
-        if (had[i] && backup_file(out[i].path, bak) != 0) {
+        if (bak_name(out[i].path, bak, sizeof bak) != 0) {
+            rc = -1;
+            break;
+        }
+        land_unlink(l, bak);
+        had[i] = land_exists(l, out[i].path) == 1;
+        if (had[i] && backup_file(l, out[i].path, bak) != 0) {
             rc = -1;
             break;
         }
     }
     for (; rc == 0 && done < n; done++) {
-        snprintf(part, sizeof part, "%s.part", out[done].path);
-        if (rename(part, out[done].path) != 0)
+        if (part_name(out[done].path, part, sizeof part) != 0 ||
+            land_rename(l, part, out[done].path) != 0)
             rc = -1;
     }
     if (rc != 0) {
         /* Put back what was replaced; a file that did not exist before is removed. */
         size_t replaced = done ? done - 1 : 0;
         for (i = 0; i < replaced; i++) {
-            snprintf(bak, sizeof bak, "%s.kqbak", out[i].path);
+            if (bak_name(out[i].path, bak, sizeof bak) != 0)
+                continue;
             if (had[i])
-                (void)rename(bak, out[i].path);
+                (void)land_rename(l, bak, out[i].path);
             else
-                unlink(out[i].path);
+                land_unlink(l, out[i].path);
         }
         for (i = 0; i < n; i++) {
-            snprintf(part, sizeof part, "%s.part", out[i].path);
-            unlink(part);
+            if (part_name(out[i].path, part, sizeof part) == 0)
+                land_unlink(l, part);
         }
     }
     for (i = 0; i < n; i++) {
-        snprintf(bak, sizeof bak, "%s.kqbak", out[i].path);
-        unlink(bak);
+        if (bak_name(out[i].path, bak, sizeof bak) == 0)
+            land_unlink(l, bak);
     }
     return rc;
 }
@@ -377,7 +508,7 @@ fl_kq_cp_result_t fl_kq_cp_cosign(const kq_file_offer_t *offer, const char *me_k
 
 /* Loads the newest KQ_SEEN_KEEP pairs; a longer file (older builds kept more) is read from
  * its tail. A missing file is an empty record; a damaged one (not whole pairs) is -1. */
-static int load_seen(const char *path, uint8_t (**seen)[64], size_t *n) {
+static int load_seen(const kq_land_t *l, const char *name, uint8_t (**seen)[64], size_t *n) {
     FILE *f;
     long size;
     size_t want;
@@ -385,9 +516,25 @@ static int load_seen(const char *path, uint8_t (**seen)[64], size_t *n) {
 
     *seen = NULL;
     *n = 0;
-    f = fopen(path, "rb");
-    if (!f)
-        return access(path, F_OK) == 0 ? -1 : 0;
+    if (l->fd >= 0) {
+        int fd = fl_fs_open_read_in(l->fd, name);
+
+        if (fd < 0)
+            return errno == ENOENT ? 0 : -1;
+        f = fdopen(fd, "rb");
+        if (!f) {
+            close(fd);
+            return -1;
+        }
+    } else {
+        char path[KQ_PATH_MAX];
+
+        if (land_name(l, name, path, sizeof path) != 0)
+            return -1;
+        f = fopen(path, "rb");
+        if (!f)
+            return access(path, F_OK) == 0 ? -1 : 0;
+    }
     if (fseek(f, 0, SEEK_END) != 0 || (size = ftell(f)) < 0 || size % 64 != 0) {
         fclose(f);
         return -1;
@@ -418,14 +565,14 @@ static int load_seen(const char *path, uint8_t (**seen)[64], size_t *n) {
  * accepted root. Anything else fails closed, since "absent" would let an old revision back.
  *   1 held, 0 not held, -1 unreadable or missing, -2 damaged or not the accepted copy.
  */
-static int local_holds(const fl_kq_driver_t *drv, const char *container_path,
+static int local_holds(const fl_kq_driver_t *drv, const kq_land_t *l, const char *container_name,
                        const uint8_t newest_root[32], const uint8_t rev[32]) {
     fl_kq_buf_t local = {0};
     fl_kq_buf_t held = {0};
     uint8_t root[32];
     int rc;
 
-    if (fl_fs_read_file(container_path, FL_KQ_LETTER_MAX, &local.data, &local.len) != 0)
+    if (land_read(l, container_name, &local.data, &local.len) != 0)
         return -1;
     if (drv->verify(&local, root) != KQ_FILE_OK || !drv->equal(root, newest_root, sizeof root)) {
         fl_kq_buf_free(&local);
@@ -445,8 +592,11 @@ fl_kq_cp_result_t fl_kq_cp_decode_with(const fl_kq_keydir_t *keys, const char *s
                                        const fl_kq_buf_t *letter, const kq_file_offer_t *offer,
                                        const uint8_t my_sig[64], const char *dest_path) {
     const fl_kq_driver_t *drv = fl_kq_driver_get();
-    char container_path[4096];
-    char seen_path[4096];
+    char land_dir[KQ_PATH_MAX];
+    const char *leaf = NULL;
+    char container_name[KQ_PATH_MAX];
+    char seen_name[KQ_PATH_MAX];
+    kq_land_t land = {-1, NULL};
     fl_kq_buf_t opened = {0};
     fl_kq_buf_t cosigned = {0};
     fl_kq_buf_t payload = {0};
@@ -467,12 +617,22 @@ fl_kq_cp_result_t fl_kq_cp_decode_with(const fl_kq_keydir_t *keys, const char *s
         return FL_KQ_CP_INVALID;
     if (!drv)
         return FL_KQ_CP_NO_DRIVER;
-    if (sidecar(dest_path, FL_KQ_CONTAINER_SUFFIX, container_path, sizeof container_path) != 0 ||
-        sidecar(dest_path, FL_KQ_SEEN_SUFFIX, seen_path, sizeof seen_path) != 0)
+    if (land_split(dest_path, land_dir, sizeof land_dir, &leaf) != 0 ||
+        sidecar(leaf, FL_KQ_CONTAINER_SUFFIX, container_name, sizeof container_name) != 0 ||
+        sidecar(leaf, FL_KQ_SEEN_SUFFIX, seen_name, sizeof seen_name) != 0)
         return FL_KQ_CP_INVALID;
+    /* The quarantine gate applies here as on the share's own landings (either spelling). */
+    if (fl_server_shared_path_is_expired_quarantine(land_dir) ||
+        fl_server_shared_path_is_expired_quarantine(dest_path))
+        return FL_KQ_CP_IO;
+    land_open(&land, land_dir);
+    if (!land_ready(&land))
+        return FL_KQ_CP_IO;
     /* Never overwrite a file this store does not track. */
-    if (access(dest_path, F_OK) == 0 && access(seen_path, F_OK) != 0)
-        return FL_KQ_CP_EXISTS;
+    if (land_exists(&land, leaf) == 1 && land_exists(&land, seen_name) != 1) {
+        rc = FL_KQ_CP_EXISTS;
+        goto done;
+    }
 
     st = drv->open(letter, box_secret, sender_key, me_key, sender_signing_public, &opened, rev,
                    root);
@@ -500,7 +660,7 @@ fl_kq_cp_result_t fl_kq_cp_decode_with(const fl_kq_keydir_t *keys, const char *s
         goto done;
     }
 
-    if (load_seen(seen_path, &seen, &nseen) != 0) {
+    if (load_seen(&land, seen_name, &seen, &nseen) != 0) {
         rc = FL_KQ_CP_IO;
         goto done;
     }
@@ -516,7 +676,7 @@ fl_kq_cp_result_t fl_kq_cp_decode_with(const fl_kq_keydir_t *keys, const char *s
     /* Only the newest pairs are kept, so "adds a revision" is also checked against everything
      * accepted before: a revision the local container holds is never newer. */
     if (st == KQ_FILE_NEWER) {
-        int held = nseen ? local_holds(drv, container_path, seen[nseen - 1] + 32, rev) : -2;
+        int held = nseen ? local_holds(drv, &land, container_name, seen[nseen - 1] + 32, rev) : -2;
 
         if (held != 0) {
             rc = held > 0 ? FL_KQ_CP_NOT_NEWER : held == -1 ? FL_KQ_CP_IO : FL_KQ_CP_INVALID;
@@ -552,15 +712,16 @@ fl_kq_cp_result_t fl_kq_cp_decode_with(const fl_kq_keydir_t *keys, const char *s
         if (keep)
             memcpy(all, seen + (nseen - keep), keep * 64u);
         memcpy(all + keep * 64u, pair, 64u);
-        out[0] = (kq_out_t){dest_path, payload.data, payload.len};
-        out[1] = (kq_out_t){container_path, cosigned.data, cosigned.len};
-        out[2] = (kq_out_t){seen_path, all, len};
-        if (commit_all(out, 3) != 0)
+        out[0] = (kq_out_t){leaf, payload.data, payload.len};
+        out[1] = (kq_out_t){container_name, cosigned.data, cosigned.len};
+        out[2] = (kq_out_t){seen_name, all, len};
+        if (commit_all(&land, out, 3) != 0)
             rc = FL_KQ_CP_IO;
         free(all);
     }
 
 done:
+    land_close(&land);
     free(seen);
     fl_kq_buf_free(&opened);
     fl_kq_buf_free(&cosigned);

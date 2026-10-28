@@ -259,6 +259,8 @@ The sender's system records stable member ids, display snapshots, principal name
 
 Default landing directory name: **`server_share/`** (**`FL_SERVER_SHARE_DIR_NAME`**, **P5-5**).
 
+**Landing rules.** A delivered file name (when an offer carries one) must be a plain name: not `.` or `..`, no `/`, `\` or control bytes, under 128 bytes, and no embedded NUL (the offer decode refuses a frame with a name that is not plain); the landing also refuses a name ending in `.part`, `.meta`, `.kqtf`, `.kqseen` or `.kqbak` (ASCII case ignored), and the same rules apply to the file name of an overwrite destination. Landings and overwrites are written through the destination directory's handle and do not follow links (a link in an overwrite path is refused); new files, their `.meta` and staged parts are created `0600`, and an existing file keeps its mode. A landing directory that cannot be opened fails the landing. Platforms without the `*at` calls: the KeyQuorum landing falls back to path-based calls, while the share landing and overwrite fail.
+
 ---
 
 ## 4 — Packets over sockets

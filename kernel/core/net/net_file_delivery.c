@@ -506,6 +506,9 @@ static fl_result_t get_cstring16(const uint8_t *buf, uint16_t cap, uint16_t *off
         return rc;
     if (view.len >= dst_cap)
         return FL_RESULT_INVAL;
+    /* A text field never carries a NUL: the encoder writes the string's own length. */
+    if (view.len > 0u && memchr(view.data, '\0', view.len))
+        return FL_RESULT_INVAL;
     if (view.len > 0u)
         memcpy(dst, view.data, view.len);
     dst[view.len] = '\0';
@@ -616,6 +619,8 @@ fl_result_t fl_server_file_offer_decode(const uint8_t *payload,
     if (rc != FL_RESULT_OK) return rc;
     rc = get_cstring16(payload, payload_len, &off, out->file_name, sizeof(out->file_name));
     if (rc != FL_RESULT_OK) return rc;
+    if (out->file_name[0] && !fl_fs_name_is_plain(out->file_name))
+        return FL_RESULT_INVAL;
     rc = get_cstring16(payload, payload_len, &off, out->sender_display, sizeof(out->sender_display));
     if (rc != FL_RESULT_OK) return rc;
     rc = get_cstring16(payload, payload_len, &off, out->receiver_display,

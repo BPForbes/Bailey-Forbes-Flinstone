@@ -3,6 +3,7 @@
 #include "server_shared_fs.h"
 
 #include "common.h"
+#include "fl/path.h"
 #include "contract_p5_server_share.h"
 
 #include <errno.h>
@@ -361,6 +362,8 @@ fl_result_t fl_server_catalog_register_file_offer(const fl_server_file_offer_t *
 
     if (!offer || !offer->share_id[0])
         return FL_RESULT_INVAL;
+    if (offer->file_name[0] && !fl_fs_name_is_plain(offer->file_name))
+        return FL_RESULT_INVAL;
     if (fl_server_catalog_open() != FL_RESULT_OK)
         return FL_RESULT_ERR;
     snprintf(pending_hash, sizeof(pending_hash), "pending:%s", offer->share_id);
@@ -506,6 +509,8 @@ fl_result_t fl_server_catalog_register_message_pending(const char *transfer_id,
 
     if (!transfer_id || !transfer_id[0])
         return FL_RESULT_INVAL;
+    if (payload_name && payload_name[0] && !fl_fs_name_is_plain(payload_name))
+        return FL_RESULT_INVAL;
     if (fl_server_catalog_open() != FL_RESULT_OK)
         return FL_RESULT_ERR;
     snprintf(pending_hash, sizeof(pending_hash), "pending:%s", transfer_id);
@@ -606,6 +611,8 @@ fl_result_t fl_server_catalog_store_message(uint16_t sender_member_id,
     const char *name = payload_name ? payload_name : "message";
 
     if (!body && body_len > 0u)
+        return FL_RESULT_INVAL;
+    if (payload_name && payload_name[0] && !fl_fs_name_is_plain(payload_name))
         return FL_RESULT_INVAL;
     if (fl_server_catalog_open() != FL_RESULT_OK)
         return FL_RESULT_ERR;
