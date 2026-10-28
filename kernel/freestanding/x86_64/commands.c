@@ -851,6 +851,7 @@ static int server_file_send(int session, const char **cursor)
     unsigned i;
     int rc;
     int kq = 0;
+    int permitted = 0;
     int more = take_word(cursor, word, sizeof(word));
 
     if (more && (str_eq(word, "accept") || str_eq(word, "decline"))) {
@@ -858,6 +859,23 @@ static int server_file_send(int session, const char **cursor)
         if (str_eq(word, "decline"))
             emit("server file: files waiting for you were declined\r\n");
         return 1;
+    }
+    if (more && (str_eq(word, "permit") || str_eq(word, "log"))) {
+        char target[FL_FS_RAMFS_PATH];
+#ifdef FL_LAB_KQ
+        if (!take_word(cursor, target, sizeof(target))) {
+            emit(str_eq(word, "permit") ? "usage: server file permit <path>\r\n"
+                                        : "usage: server file log <path>\r\n");
+            return 1;
+        }
+        if (str_eq(word, "permit"))
+            return fl_lab_kq_permit(session, target);
+        return fl_lab_kq_log(session, target);
+#else
+        (void)target;
+        emit(FILE_KQ_ELSEWHERE);
+        return 1;
+#endif
     }
     if (more && (str_eq(word, "cosign") || str_eq(word, "open"))) {
         char id[40];
@@ -880,6 +898,8 @@ static int server_file_send(int session, const char **cursor)
     for (; more; more = take_word(cursor, word, sizeof(word))) {
         if (str_eq(word, "-t")) {
             kq = 1;
+        } else if (str_eq(word, "--permitted")) {
+            permitted = 1;
         } else if (str_eq(word, "-user")) {
             if (!take_word(cursor, word, sizeof(word)) || str_len(word) >= sizeof(user)) {
                 user[0] = 0;
@@ -893,9 +913,9 @@ static int server_file_send(int session, const char **cursor)
             break;
         }
     }
-    if (!user[0] || !path[0]) {
-        emit("usage: server file [send [-t]] -user <name> <path> | accept | decline | "
-             "cosign [<id>] | open <id>\r\n");
+    if (!user[0] || !path[0] || (permitted && !kq)) {
+        emit("usage: server file [send [-t [--permitted]]] -user <name> <path> | accept | "
+             "decline | cosign [<id>] | open <id> | permit <path> | log <path>\r\n");
         return 1;
     }
     if (!file_user_ok(user)) {
@@ -904,7 +924,7 @@ static int server_file_send(int session, const char **cursor)
     }
     if (kq) {
 #ifdef FL_LAB_KQ
-        return fl_lab_kq_send(session, path, user);
+        return fl_lab_kq_send(session, path, user, permitted);
 #else
         emit(FILE_KQ_ELSEWHERE);
         return 1;
@@ -2041,7 +2061,7 @@ static int run_meta(int session, const char *verb, const char **cursor)
 #endif
         emit("server version contracts audit redirect rerun help history his cc clear exit bios\r\n");
         emit("server file -user <name> <path> | accept | decline  (files with users on the server)\r\n");
-        emit("server file send -t <path> -user <name> | cosign [<id>] | open <id>  (KeyQuorum co-signed)\r\n");
+        emit("server file send -t [--permitted] <path> -user <name> | cosign [<id>] | open <id> | permit <path> | log <path>  (KeyQuorum)\r\n");
         emit("lab analogs: ramfs, cluster disk, lab net, P3 relay. Hosted FAT32/sockets stay on the ELF shell.\r\n");
         return 1;
     }

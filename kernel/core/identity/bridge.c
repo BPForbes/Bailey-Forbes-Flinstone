@@ -1,6 +1,7 @@
 #include "bridge.h"
 #include "heritage.h"
 #include "keyquorum_identity.h"
+#include "fl/mem_asm.h"
 #include "mem_domain.h"
 #include "password_hash.h"
 #include <sqlite3.h>
@@ -118,8 +119,8 @@ static int secret_is_for(const fl_user_db_t *users, const char *key_id,
 
     if (!public_key || !secret || kq_account_public(secret, derived) != KQ_ACCOUNT_OK)
         return 0;
-    ok = memcmp(derived, public_key, sizeof derived) == 0;
-    mem_domain_zero(derived, sizeof derived);
+    ok = asm_mem_ct_equal(derived, public_key, sizeof derived) != 0;
+    mem_domain_secure_zero(derived, sizeof derived);
     return ok;
 }
 

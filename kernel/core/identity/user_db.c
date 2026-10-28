@@ -901,7 +901,7 @@ fl_result_t fl_user_db_open_key(const fl_user_db_t *db, const char *name, const 
         return FL_RESULT_ERR;
     /* The sealed secret must be the one the stored public key names. */
     if (kq_account_public(secret, derived) != KQ_ACCOUNT_OK ||
-        memcmp(derived, u->signing_public, sizeof derived) != 0) {
+        !asm_mem_ct_equal(derived, u->signing_public, sizeof derived)) {
         mem_domain_zero(secret, FL_USER_SIGNING_SECRET_LEN);
         return FL_RESULT_ERR;
     }

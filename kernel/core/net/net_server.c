@@ -1322,7 +1322,7 @@ static int dispatch_member_frame(fl_net_server_t *srv, fl_net_server_member_t *m
                                        plen))
             return 0;
         if (fl_net_session_is_file_opcode(opcode)) {
-            (void)fl_net_file_host_relay(srv, m->member_id, opcode, payload, plen);
+            (void)fl_net_file_host_relay(srv, m->member_id, opcode, payload, plen, 1);
             return 0;
         }
         if (fl_net_session_is_kq_opcode(opcode) && s_kq_hook) {

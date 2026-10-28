@@ -28,11 +28,19 @@ fl_result_t fl_net_file_send_offer(fl_net_server_t *srv,
                                    fl_net_server_member_id_t sender_id,
                                    const fl_server_file_offer_t *offer);
 
+/**
+ * Relay one file frame. record_member_action is 1 when the frame arrived from a
+ * joined member: accept, decline, and revoke are written to the host catalog
+ * here. The host's own command passes 0, because fl_server_share_* records that
+ * action after it succeeds. Recording in both places duplicates the event, and
+ * recording in the relay first keeps the event when the local action fails.
+ */
 fl_result_t fl_net_file_host_relay(fl_net_server_t *srv,
                                    fl_net_server_member_id_t sender_id,
                                    uint8_t opcode,
                                    const uint8_t *payload,
-                                   uint16_t plen);
+                                   uint16_t plen,
+                                   int record_member_action);
 
 fl_result_t fl_net_file_send_control(fl_net_server_t *srv,
                                      fl_net_client_t *client,
