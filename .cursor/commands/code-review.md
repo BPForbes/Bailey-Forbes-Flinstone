@@ -37,7 +37,7 @@ Primary owner: **QA** (`.cursor/agents/devops-quality-engineer.md`). Reviewers m
    `git status --short` clean **of files you created**, and list
    anything else by path rather than removing it. Reviewer process
    output never lands on the committed timeline;
-   `scripts/check-clean-timeline.sh` enforces it in CI.
+   QA checks `git diff --stat <integration-base>...HEAD` for it.
 6. Do not push. **Only QA may give the OK to push.** Review findings
    and passing tests do not authorize a push.
 7. Use any installed `/` skill that fits (`/review-bugbot`, `/review-security`, `/sonar-analyze`).

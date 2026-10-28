@@ -42,9 +42,9 @@ Security Clear, applicable CodeQL, **and QA marks PASS**:
    `git reset --soft <integration-base>` then one commit is
    allowed **only** when there are no keep-commits. Otherwise
    replay keep-commits, then commit remaining tip-tree delta.
-3. `scripts/check-clean-timeline.sh --history <integration-base>`.
-   Use `--history`. A path added then deleted still ships its
-   blob. `git status --short` clean of files you created.
+3. `git log --stat <integration-base>..HEAD` and
+   `git diff --stat <integration-base>...HEAD`: a path added then
+   deleted still ships its blob in history. `git status --short` clean of files you created.
 
 ### Step 3a — strip a path from a keep-commit
 

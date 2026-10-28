@@ -78,8 +78,8 @@ not authorize a push either.
 7. After PASS, the Orchestrator makes keep-commit(s) from the
    approved side-branch tree and **one push**
    ([thoughts-layout.md](references/thoughts-layout.md) One push).
-   Run `check-clean-timeline.sh --history <integration-base>` after
-   any strip. Do not commit process notes.
+   Check `git diff --stat <integration-base>...HEAD` for process files
+   after any strip. Do not commit process notes.
 
 ## When to use
 
@@ -231,7 +231,9 @@ authorize a push.
 ## Output rules
 
 State the speaking role. Show plans, diffs, commands/logs as the role
-acts. Keep work deterministic. Never invent requirements.
+acts. Redact tokens, secrets and credentials from anything shown (see
+[soc2-review.md](references/soc2-review.md) and
+[thoughts-layout.md](references/thoughts-layout.md)). Keep work deterministic. Never invent requirements.
 
 ```markdown
 ## DevOps multi-agent report
@@ -253,8 +255,9 @@ finding) is the last gate. See [qa-publish-policy.md](references/qa-publish-poli
 
 **Precedence:** this repo's `AGENTS.md`, `CLAUDE.md` and
 `.cursor/rules/*.mdc` win over this skill. In particular the
-versioning and lock rules (exactly one new `version/entries/*.ver`
-per PR, never edit `version/locked/`), the kernel-as-orchestrator
+versioning and lock rules (exactly one new PR-owned `.ver` under
+`version/entries/` per PR, including a CI-relocated row under
+`version/entries/preproduction */`; never edit `version/locked/`), the kernel-as-orchestrator
 driver boundary, and the AI feature-branch workflow. Where this
 skill's "no push until QA" gate and that workflow differ, follow
 the stricter one.

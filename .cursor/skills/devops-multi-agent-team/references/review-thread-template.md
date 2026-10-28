@@ -50,7 +50,6 @@ See [thoughts-layout.md](thoughts-layout.md).
 - Verdict: Clear / Blocked
 
 ## QA handoff
-- Commands; build and tests; SOC 2 verdict; clean timeline
-  (`check-clean-timeline.sh --history <base>`); publish gate
+- Commands; build and tests; SOC 2 verdict; clean diff (`git diff --stat <base>...HEAD`); publish gate
   PASS / BLOCKED; VM send-back; triage ids; thoughts to finalize
 ```

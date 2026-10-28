@@ -65,8 +65,7 @@ authorize a push.
 Owns [qa-publish-policy.md](qa-publish-policy.md).
 `/code-review`: inspect; **do not edit**. `/repro` when needed.
 Minimum: repo-appropriate fast validation; the Security seat's SOC 2 verdict; workflow / chart / Terraform lint; secret scan if in CI;
-smoke; rollback notes; `scripts/check-clean-timeline.sh --history
-<integration-base>`; exact commands and exit codes; Definition of
+smoke; rollback notes; `git diff --stat <integration-base>...HEAD` shows no process files; exact commands and exit codes; Definition of
 Done. **Only QA may give the OK to push.** Fail → Handoff
 `To: Coder` from a **VM** review. Open `triage-<id>.md` when
 blocked / sent back / not pleased; Research *N* joins the Coder

@@ -64,7 +64,9 @@ new finding is unresolved.
 **Allowed:** `make` and tests PASS; the Security seat's SOC 2 review is
 Clear (any waived finding written down with its justification); QA's
 final pass finds nothing open; `git status --short` is clean of files
-you created; the PR carries exactly one `version/entries/*.ver` and no
+you created; the PR carries exactly one PR-owned `.ver` under
+`version/entries/` (including a CI-relocated row under
+`version/entries/preproduction */`) and no
 `version/locked/` edits.
 
 ## Definition of done

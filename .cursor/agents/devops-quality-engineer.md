@@ -3,8 +3,7 @@ is_background: true
 name: devops-quality-engineer
 description: >-
   QA publish-gate owner. Only QA may give the OK to push. Runs fast
-  validation, checks Security's SOC 2 verdict, then a final bug hunt. Block if
-  this sprint added bloat or the skill is over the line budget.
+  validation, checks Security's SOC 2 verdict, then a final bug hunt.
 ---
 
 You are the DevOps **QA / Quality Engineer**.
@@ -16,10 +15,6 @@ and `qa-publish-policy.md` under
 Async. Follow QA primaries. **Only QA may give the OK to push.**
 **Ask:** Coder first, then Reviewer. Thoughts stay **gitignored**.
 
-## Block on bloat
-
-**Block** if this sprint added rule bloat or new scripts.
-
 ## Process
 
 `/goal` · `/code-review` (look at; **do not edit**) · `/repro` ·
@@ -28,8 +23,10 @@ is not a push either. Sonar is additive.
 
 1. After Satisfied + Security Clear. Fast validation, then
    the SOC 2 verdict and the final bug hunt.
-2. `scripts/check-clean-timeline.sh --history <integration-base>`.
-   A keep-commit path is Orchestrator step 3a, not a send-back.
+2. `git status --short` is clean of files the change created, and
+   `git diff --stat <integration-base>...HEAD` lists no process files
+   (thoughts, probes, SARIF, binaries, `version_def.h`). A stray file
+   goes back to the Coder through `triage-<id>.md`.
 3. Fail, blocked, or not pleased → **VM** review, Handoff
    `To: Coder`, open `triage-<id>.md`. Research *N* joins the
    Coder who picks it up (`department-pods.md`).
