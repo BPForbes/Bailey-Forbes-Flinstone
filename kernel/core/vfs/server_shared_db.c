@@ -243,6 +243,24 @@ fl_result_t fl_server_catalog_close(void)
     return FL_RESULT_OK;
 }
 
+/* One unit of work: a state change and its event commit together or not at all. */
+fl_result_t fl_server_catalog_begin(void)
+{
+    if (fl_server_catalog_open() != FL_RESULT_OK)
+        return FL_RESULT_ERR;
+    return db_exec(s_catalog_db, "BEGIN IMMEDIATE;");
+}
+
+fl_result_t fl_server_catalog_commit(void)
+{
+    return db_exec(s_catalog_db, "COMMIT;");
+}
+
+void fl_server_catalog_rollback(void)
+{
+    (void)db_exec(s_catalog_db, "ROLLBACK;");
+}
+
 fl_result_t fl_server_catalog_checkpoint(void)
 {
     if (!s_catalog_db)
@@ -351,6 +369,10 @@ fl_result_t fl_server_catalog_register_file_offer(const fl_server_file_offer_t *
     now = (uint64_t)time(NULL);
     if (sqlite3_prepare_v2(s_catalog_db, ins, -1, &st, NULL) != SQLITE_OK)
         return FL_RESULT_ERR;
+    if (fl_server_catalog_begin() != FL_RESULT_OK) {
+        sqlite3_finalize(st);
+        return FL_RESULT_ERR;
+    }
     sqlite3_bind_text(st, 1, offer->share_id, -1, SQLITE_TRANSIENT);
     sqlite3_bind_text(st, 2, pending_hash, -1, SQLITE_TRANSIENT);
     sqlite3_bind_int(st, 3, (int)FL_CHANNEL_PAYLOAD_FILE);
@@ -364,11 +386,19 @@ fl_result_t fl_server_catalog_register_file_offer(const fl_server_file_offer_t *
     sqlite3_bind_int(st, 11, (int)FL_SERVER_CATALOG_PENDING);
     if (sqlite3_step(st) != SQLITE_DONE) {
         sqlite3_finalize(st);
+        fl_server_catalog_rollback();
         return FL_RESULT_ERR;
     }
-    (void)fl_server_catalog_append_event(offer->share_id, "offered", offer->sender_member_id,
-                                         now, offer->file_name);
     sqlite3_finalize(st);
+    if (fl_server_catalog_append_event(offer->share_id, "offered", offer->sender_member_id,
+                                       now, offer->file_name) != FL_RESULT_OK) {
+        fl_server_catalog_rollback();
+        return FL_RESULT_ERR;
+    }
+    if (fl_server_catalog_commit() != FL_RESULT_OK) {
+        fl_server_catalog_rollback();
+        return FL_RESULT_ERR;
+    }
     return FL_RESULT_OK;
 }
 
@@ -397,6 +427,10 @@ fl_result_t fl_server_catalog_commit_file_offer(const fl_server_file_offer_t *of
         return FL_RESULT_ERR;
     if (sqlite3_prepare_v2(s_catalog_db, upd, -1, &st, NULL) != SQLITE_OK)
         return FL_RESULT_ERR;
+    if (fl_server_catalog_begin() != FL_RESULT_OK) {
+        sqlite3_finalize(st);
+        return FL_RESULT_ERR;
+    }
     sqlite3_bind_text(st, 1, hash_hex, -1, SQLITE_TRANSIENT);
     sqlite3_bind_text(st, 2, storage_relpath, -1, SQLITE_TRANSIENT);
     sqlite3_bind_int(st, 3, (int)FL_SERVER_CATALOG_COMPLETE);
@@ -404,15 +438,24 @@ fl_result_t fl_server_catalog_commit_file_offer(const fl_server_file_offer_t *of
     sqlite3_bind_text(st, 5, offer->share_id, -1, SQLITE_TRANSIENT);
     if (sqlite3_step(st) != SQLITE_DONE) {
         sqlite3_finalize(st);
+        fl_server_catalog_rollback();
         return FL_RESULT_ERR;
     }
     sqlite3_finalize(st);
-    (void)fl_server_catalog_append_event(offer->share_id, "completed", offer->sender_member_id,
-                                         (uint64_t)time(NULL), hash_hex);
+    if (fl_server_catalog_append_event(offer->share_id, "completed", offer->sender_member_id,
+                                       (uint64_t)time(NULL), hash_hex) != FL_RESULT_OK) {
+        fl_server_catalog_rollback();
+        return FL_RESULT_ERR;
+    }
     is_public = (offer->receiver_member_id == 0u ||
                  (offer->file_perms & FL_FILE_FLAG_PUBLIC) != 0) ? 1 : 0;
-    return db_set_acl(s_catalog_db, offer->share_id, offer->sender_member_id,
-                      offer->receiver_member_id, is_public);
+    if (db_set_acl(s_catalog_db, offer->share_id, offer->sender_member_id,
+                   offer->receiver_member_id, is_public) != FL_RESULT_OK ||
+        fl_server_catalog_commit() != FL_RESULT_OK) {
+        fl_server_catalog_rollback();
+        return FL_RESULT_ERR;
+    }
+    return FL_RESULT_OK;
 }
 
 fl_result_t fl_server_catalog_revoke_transfer(const char *transfer_id)
@@ -822,32 +865,42 @@ fl_result_t fl_server_catalog_purge_expired(uint64_t now)
         "SELECT c.transfer_id, (SELECT COALESCE(MAX(e.seq),0)+1 FROM catalog_event e "
         "WHERE e.transfer_id=c.transfer_id), 'expired', 0, ?, '' "
         "FROM catalog_entry c WHERE c.status=? AND c.expires_at!=0 AND c.expires_at<?;";
-    if (fl_server_catalog_open() != FL_RESULT_OK)
+    const char *expire =
+        "UPDATE catalog_entry SET status=? "
+        "WHERE status=? AND expires_at!=0 AND expires_at<?;";
+    if (fl_server_catalog_begin() != FL_RESULT_OK)
         return FL_RESULT_ERR;
-    if (sqlite3_prepare_v2(s_catalog_db, log_expired, -1, &st, NULL) != SQLITE_OK)
+    if (sqlite3_prepare_v2(s_catalog_db, log_expired, -1, &st, NULL) != SQLITE_OK) {
+        fl_server_catalog_rollback();
         return FL_RESULT_ERR;
+    }
     sqlite3_bind_int64(st, 1, (sqlite3_int64)now);
     sqlite3_bind_int(st, 2, (int)FL_SERVER_CATALOG_COMPLETE);
     sqlite3_bind_int64(st, 3, (sqlite3_int64)now);
     if (sqlite3_step(st) != SQLITE_DONE) {
         sqlite3_finalize(st);
+        fl_server_catalog_rollback();
         return FL_RESULT_ERR;
     }
     sqlite3_finalize(st);
     st = NULL;
-    if (sqlite3_prepare_v2(s_catalog_db,
-                           "UPDATE catalog_entry SET status=? "
-                           "WHERE status=? AND expires_at!=0 AND expires_at<?;",
-                           -1, &st, NULL) != SQLITE_OK)
+    if (sqlite3_prepare_v2(s_catalog_db, expire, -1, &st, NULL) != SQLITE_OK) {
+        fl_server_catalog_rollback();
         return FL_RESULT_ERR;
+    }
     sqlite3_bind_int(st, 1, (int)FL_SERVER_CATALOG_EXPIRED);
     sqlite3_bind_int(st, 2, (int)FL_SERVER_CATALOG_COMPLETE);
     sqlite3_bind_int64(st, 3, (sqlite3_int64)now);
     if (sqlite3_step(st) != SQLITE_DONE) {
         sqlite3_finalize(st);
+        fl_server_catalog_rollback();
         return FL_RESULT_ERR;
     }
     sqlite3_finalize(st);
+    if (fl_server_catalog_commit() != FL_RESULT_OK) {
+        fl_server_catalog_rollback();
+        return FL_RESULT_ERR;
+    }
     return FL_RESULT_OK;
 }
 

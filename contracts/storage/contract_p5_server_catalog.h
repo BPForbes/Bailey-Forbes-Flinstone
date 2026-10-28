@@ -137,6 +137,14 @@ typedef struct fl_server_catalog_event {
     char     detail[FL_SERVER_FILE_NAME_MAX]; /* a content hash (64 hex) or a file name */
 } fl_server_catalog_event_t;
 
+/**
+ * One unit of work on the catalog: a state change and its event. begin/commit/rollback bracket
+ * it; a failure in either step is returned, so the caller can roll back and report it.
+ */
+fl_result_t fl_server_catalog_begin(void);
+fl_result_t fl_server_catalog_commit(void);
+void fl_server_catalog_rollback(void);
+
 /** Appends one event to a share's history; seq is the next number for that share. */
 fl_result_t fl_server_catalog_append_event(const char *transfer_id, const char *event,
                                            uint16_t actor_member_id, uint64_t at,

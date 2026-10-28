@@ -287,6 +287,12 @@ static int verb_file_history(const cmd_server_ctx_t *ctx, int argc, char **argv)
 
     if (!session_active(ctx, &hosting))
         return 1;
+    /* The host keeps the authoritative history; a joined member's catalog holds only its own
+     * rows, so the verb runs on the host. */
+    if (!hosting) {
+        fl_color_warn("server file history: the host keeps the share history; run it on the host");
+        return 1;
+    }
     if (argc < 2) {
         fl_color_error("usage: server file history <share_id>");
         return 1;
