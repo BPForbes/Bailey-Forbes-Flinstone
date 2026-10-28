@@ -275,6 +275,47 @@ static int verb_file_list(const cmd_server_ctx_t *ctx, const char *which)
     return 0;
 }
 
+#define FILE_HISTORY_MAX 64u
+
+static int verb_file_history(const cmd_server_ctx_t *ctx, int argc, char **argv)
+{
+    int hosting = 0;
+    fl_server_catalog_event_t events[FILE_HISTORY_MAX];
+    size_t count = 0;
+    size_t i;
+    fl_result_t rc;
+
+    if (!session_active(ctx, &hosting))
+        return 1;
+    /* The host keeps the authoritative history; a joined member's catalog holds only its own
+     * rows, so the verb runs on the host. */
+    if (!hosting) {
+        fl_color_warn("server file history: the host keeps the share history; run it on the host");
+        return 1;
+    }
+    if (argc < 2) {
+        fl_color_error("usage: server file history <share_id>");
+        return 1;
+    }
+    pthread_mutex_lock(ctx->mutex);
+    rc = fl_server_catalog_list_events(argv[1], events, FILE_HISTORY_MAX, &count);
+    pthread_mutex_unlock(ctx->mutex);
+    if (rc != FL_RESULT_OK) {
+        fl_color_error("server file history: could not read the share's history");
+        return 1;
+    }
+    if (count == 0) {
+        printf("no history for %s\n", argv[1]);
+        return 0;
+    }
+    for (i = 0; i < count; i++)
+        printf("%3u  %-10s  member=%u  at=%llu  %s\n",
+               (unsigned)events[i].seq, events[i].event,
+               (unsigned)events[i].actor_member_id,
+               (unsigned long long)events[i].at, events[i].detail);
+    return 0;
+}
+
 static int verb_file_accept(const cmd_server_ctx_t *ctx, int argc, char **argv)
 {
     int hosting = 0;
@@ -504,6 +545,80 @@ static void kq_utc_now(char *out, size_t cap)
 }
 
 /* server file send -t <path> -user <name>: encode checkpoint, then OFFER + parts. */
+/* One history line for display (see fl_kq_cp_format_event). */
+static void print_event_line(const char *line, size_t n)
+{
+    char text[640];
+
+    fl_kq_cp_format_event(line, n, text, sizeof text);
+    printf("%s\n", text);
+}
+
+/* Offline: the history of a tracked file, read from its container beside the file. It needs no
+ * session and no host, only the file's own history. */
+static int verb_file_log(int argc, char **argv)
+{
+    fl_kq_buf_t lines = {0};
+    fl_kq_cp_result_t cp;
+    size_t start = 0;
+    size_t i;
+
+    if (argc < 2) {
+        fl_color_error("usage: server file log <path>");
+        return 1;
+    }
+    cp = fl_kq_cp_history(argv[1], &lines);
+    if (cp != FL_KQ_CP_OK) {
+        fl_color_warn("server file log: %s", fl_kq_cp_reason(cp));
+        fl_kq_buf_free(&lines);
+        return 1;
+    }
+    for (i = 0; i < lines.len; i++) {
+        if (lines.data[i] == '\n') {
+            print_event_line((const char *)lines.data + start, i - start);
+            start = i + 1u;
+        }
+    }
+    if (start == 0u)
+        printf("no history for %s\n", argv[1]);
+    fl_kq_buf_free(&lines);
+    return 0;
+}
+
+/* The logged-in account countersigns the head revision of a file: its permit for a newer copy.
+ * A recipient counts it only when the signer is the file's scope owner or an ancestor of it. */
+static int verb_file_permit(int argc, char **argv)
+{
+    unsigned char signing[32];
+    uint8_t head[32];
+    const char *me = fl_session_current_key_id();
+    fl_kq_cp_result_t cp;
+
+    if (argc < 2) {
+        fl_color_error("usage: server file permit <path>");
+        return 1;
+    }
+    if (!me || !me[0]) {
+        fl_color_error("server file permit: sign in as the supervisor first");
+        return 1;
+    }
+    cp = fl_kq_cp_head(argv[1], head);
+    if (cp != FL_KQ_CP_OK) {
+        fl_color_warn("server file permit: %s", fl_kq_cp_reason(cp));
+        return 1;
+    }
+    if (kq_open_keys("countersigns the head revision", signing, NULL) != 0)
+        return 1;
+    cp = fl_kq_cp_permit(kq_users(), me, signing, argv[1], head);
+    mem_domain_secure_zero(signing, sizeof signing);
+    if (cp != FL_KQ_CP_OK) {
+        fl_color_warn("server file permit: %s", fl_kq_cp_reason(cp));
+        return 1;
+    }
+    printf("permitted the head of %s as %s\n", argv[1], me);
+    return 0;
+}
+
 static int verb_kq_send(const cmd_server_ctx_t *ctx, int argc, char **argv)
 {
     int hosting = 0;
@@ -517,6 +632,7 @@ static int verb_kq_send(const cmd_server_ctx_t *ctx, int argc, char **argv)
     fl_kq_encoded_t enc;
     fl_kq_cp_result_t cp;
     fl_result_t rc;
+    int permitted = 0;
     int i;
 
     if (!session_active(ctx, &hosting))
@@ -524,7 +640,9 @@ static int verb_kq_send(const cmd_server_ctx_t *ctx, int argc, char **argv)
     for (i = 0; i < argc; i++) {
         if (!strcmp(argv[i], "-t"))
             continue;
-        if (!strcmp(argv[i], "-user") && i + 1 < argc)
+        if (!strcmp(argv[i], "--permitted"))
+            permitted = 1;
+        else if (!strcmp(argv[i], "-user") && i + 1 < argc)
             target = argv[++i];
         else if (argv[i][0] != '-' && !path)
             path = argv[i];
@@ -534,7 +652,7 @@ static int verb_kq_send(const cmd_server_ctx_t *ctx, int argc, char **argv)
         }
     }
     if (!path || !target || !me || !me[0]) {
-        fl_color_error("usage: server file send -t <path> -user <name>");
+        fl_color_error("usage: server file send -t <path> -user <name> [--permitted]");
         return 1;
     }
     /* The same sender-side gate as any offer: same line, or a signed bridge. */
@@ -557,8 +675,18 @@ static int verb_kq_send(const cmd_server_ctx_t *ctx, int argc, char **argv)
     if (kq_open_keys("signs the revision", signing, NULL) != 0)
         return 1;
     kq_utc_now(created_at, sizeof created_at);
-    cp = fl_kq_cp_encode(kq_users(), me, signing, keys.key_id, keys.box_public, path, created_at,
-                         &enc);
+    if (permitted) {
+        /* A newer copy the supervisor has permitted: seal the head as it is, checking nothing in. */
+        uint8_t head[32];
+
+        cp = fl_kq_cp_head(path, head);
+        if (cp == FL_KQ_CP_OK)
+            cp = fl_kq_cp_reseal(kq_users(), me, signing, keys.key_id, keys.box_public, path, head,
+                                 &enc);
+    } else {
+        cp = fl_kq_cp_encode(kq_users(), me, signing, keys.key_id, keys.box_public, path,
+                             created_at, &enc);
+    }
     mem_domain_secure_zero(signing, sizeof signing);
     if (cp != FL_KQ_CP_OK) {
         fl_color_warn("co-signed delivery refused: %s", fl_kq_cp_reason(cp));
@@ -771,9 +899,15 @@ int cmd_server_file_run(const cmd_server_ctx_t *ctx, int argc, char **argv)
     sub_argc = argc - 2;
     sub_argv = argv + 2;
     if (sub_argc <= 0) {
-        fl_color_error("usage: server file <send [-t]|inbox|public|sent|accept|decline|revoke|fetch|cosign|open> ...");
+        fl_color_error("usage: server file <send [-t] [--permitted]|inbox|public|sent|history|log|permit|accept|decline|revoke|fetch|cosign|open> ...");
         return 1;
     }
+    if (!strcmp(argv[2], "history"))
+        return verb_file_history(ctx, sub_argc, sub_argv);
+    if (!strcmp(argv[2], "log"))
+        return verb_file_log(sub_argc, sub_argv);
+    if (!strcmp(argv[2], "permit"))
+        return verb_file_permit(sub_argc, sub_argv);
     if (!strcmp(argv[2], "inbox"))
         return verb_file_list(ctx, "inbox");
     if (!strcmp(argv[2], "public"))
