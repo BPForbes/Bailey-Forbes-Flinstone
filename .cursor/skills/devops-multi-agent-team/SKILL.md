@@ -181,6 +181,10 @@ Label every substantive reply with the active role, e.g. `[Planner]`.
 
 ## Orchestrator loop (async pods)
 
+Staff each pod with 2 to 3 subagents and rebalance idle seats to
+busy functions ([department-pods.md](references/department-pods.md),
+Staffing).
+
 Fan out `/create-subagent` so each **pod** starts together. Rules:
 [department-pods.md](references/department-pods.md).
 

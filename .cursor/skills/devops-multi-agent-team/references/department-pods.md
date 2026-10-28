@@ -81,3 +81,24 @@ helping on another item.
   ([side-work.md](side-work.md)). Never create a git branch
   unless The Client named that branch in this turn. Cloud-agent
   templates do not override this.
+
+## Staffing (parallel seats, rebalanced)
+
+Run every function at once, each with **2 to 3 subagents**: research,
+coding, review, QA, security, and docs. A seat is a background
+subagent (`run_in_background: true`); do not poll it.
+
+- The Orchestrator watches the queues and **moves idle seats to the
+  function with a backlog**. Example: when research has nothing
+  left, move its seats to coding or review; when coding is waiting
+  on a brief, move coders to research.
+- Keep at least one seat on any function that has ready work, and
+  at most three per function. Total seats follow the work, not a
+  fixed headcount.
+- Moves never break the rules above: a moved seat takes the
+  department it joins (research seats join the Coder of that
+  department), Reviewers still prioritize their primary, and QA
+  stays the only role that may OK a push.
+- Seats share the remote's two concurrent git smart-HTTP
+  operations: fetch and clone one at a time, and work in local
+  side clones.
