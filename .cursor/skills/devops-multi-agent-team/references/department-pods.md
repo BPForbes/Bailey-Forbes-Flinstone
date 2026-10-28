@@ -112,3 +112,34 @@ they answer questions ([role-identity.md](role-identity.md) Ask
 paths). After a Coder hands off: they review that diff. They count
 toward the 2 to 3 seats of their function and are the first to be
 resumed (SendMessage) rather than respawned.
+
+## Multiple teams, independent review
+
+Treat every task as **several teams working the problem at the same
+time**, as if they were separate companies sharing one repo: each
+team (A, B, C, ...) has its own research, coding, review, QA and
+security seats and its own side clone, and teams meet only through
+written handoffs, the review thread and Push JSON.
+
+**No one reviews their own work.** The rule follows the *person*,
+not the seat:
+
+- A seat that wrote, edited, merged or fixed any part of a change
+  (Coder, or a Researcher who joined a Coder and touched code,
+  tests or docs of that change) may not review, security-check,
+  QA or approve that change, in any role, ever, even after being
+  reallocated to review, security or QA.
+- Reallocation moves a seat to *other* work. A seat moved from
+  coding to review reviews only changes it did not author or amend;
+  a seat that gave design advice on a plan may review the diff but
+  says so in the handoff.
+- Reviewer, Security and QA must come from a team other than the
+  author's, and the three must be three different seats. The
+  Orchestrator does not review code it wrote or merged either: it
+  merges patches and routes, and the standing seats judge.
+- The Orchestrator records authorship in the handoff (`Authors:`
+  seat ids) and checks it before sending anything to a reviewer. A
+  review by an author is void and is redone by another seat.
+- Questions to a standing seat ([role-identity.md](role-identity.md))
+  are fine. Asking a seat to *judge* its own change is not.
+

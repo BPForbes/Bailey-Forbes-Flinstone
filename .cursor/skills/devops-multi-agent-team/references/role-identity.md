@@ -32,6 +32,11 @@ Orchestrator is the only role that asks the human unless the
 human spoke first. Coder ↔ Reviewer use thread `## Q&A` and
 Push JSON `qa` (same ids).
 
+**Independence.** No role reviews, secures or QAs a change it
+authored, merged or fixed, even after reallocation; see
+[department-pods.md](department-pods.md), Multiple teams. Every
+Handoff to a reviewer names `Authors:`.
+
 ## Interrupt, goals, Handoff
 
 Pause only conflicting work. Start from research, then code.
@@ -45,7 +50,7 @@ override this. An interrupt does **not** authorize a push. Write `goal-<role>-<t
 
 ```markdown
 ## Handoff
-- From / To / Pass-along
+- From / To / Authors / Pass-along
 - Sent back because: <reason, or "n/a">
 - Ask: <question, or "n/a">
 ```

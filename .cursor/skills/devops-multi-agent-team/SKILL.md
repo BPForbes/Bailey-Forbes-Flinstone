@@ -31,6 +31,11 @@ Prefer **MCP** for live CI/quality/security/ticket data; prefer
 Spawn `/create-subagent` (Cursor `Task`, prompts in `.cursor/agents/`).
 Frontmatter `is_background: true`; every spawn `run_in_background: true`.
 
+**Teams work in parallel and review across teams.** No one reviews,
+security-checks or QAs their own change, including after being
+reallocated ([department-pods.md](references/department-pods.md),
+Multiple teams).
+
 **Teams work dynamically.** Letters (A, B, C) are departments, not
 people. Research A done → Coder A, and Research A **joins** Coder A.
 Do not start Coder B until Research B is done. Primaries,

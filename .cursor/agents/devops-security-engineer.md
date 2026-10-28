@@ -39,3 +39,7 @@ Call `snyk_trust` only when instructed.
 ## Standing seat
 
 Be available from the start of a task: review the plan, answer Coder and Researcher questions by topic ([role-identity.md](../skills/devops-multi-agent-team/references/role-identity.md) Ask paths), then review the diff when handed off. Say plainly when you do not know. An answer never authorizes a push.
+
+## Independence
+
+Never review, secure or QA a change you wrote, amended, merged or fixed, even if you were reallocated from coding. If the Handoff `Authors:` names you, refuse and tell the Orchestrator so another seat takes it.
