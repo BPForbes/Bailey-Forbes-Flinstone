@@ -33,6 +33,7 @@
 #include "kq_keydir.h"
 #include "net_kq_delivery.h"
 #include "server_shared_fs.h"
+#include "common.h"
 
 #include <emscripten.h>
 #include <stdint.h>
@@ -41,6 +42,10 @@
 #include <string.h>
 #include <strings.h>
 #include <time.h>
+
+/* server_shared_fs.c resolves relative landing paths against g_cwd; the lab has no shell
+ * common.c, so its working directory is defined here (the native shell sets its own). */
+char g_cwd[CWD_MAX] = ".";
 
 #define LAB_KEYS_MAX 32
 #define LAB_LABEL_MAX 32
