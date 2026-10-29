@@ -114,7 +114,15 @@ fl_result_t fl_server_shared_resolve_local_path(const char *local_path,
                                                 char *leaf,
                                                 size_t leaf_cap);
 
-/** Overwrite a local destination path when permitted (through the contained walk; refuses links). */
+/**
+ * Overwrite a local destination path when permitted (through the contained walk; refuses
+ * links and non-regular files). The data is staged as a new owner-only (0600) file and renamed
+ * into place, so a failed write keeps the old content and the result always has mode 0600.
+ * An existing destination must also be writable by the caller (else FL_RESULT_ACCES). The
+ * replacement needs write access to the directory, and the old file's owner, ACL and extended
+ * attributes are not carried over. Staging removes any existing non-directory "<leaf>.part" in
+ * the same directory, so a file with that name is not preserved.
+ */
 fl_result_t fl_server_shared_overwrite_local(const fl_server_file_offer_t *offer,
                                              const char *local_path,
                                              const uint8_t *data,

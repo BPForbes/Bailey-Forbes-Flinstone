@@ -40,6 +40,14 @@ KQ_ID_LIB = third_party/keyquorum/ffi/identity/target/release/libkeyquorum_ident
 endif
 KQ_ID_LINK = $(KQ_ID_LIB) -ldl -lpthread -lm
 CFLAGS += -Ithird_party/keyquorum/ffi/identity/include
+# This build links kq_driver.o and the archive above, so the driver model registers the
+# KeyQuorum driver and the bus enumerates its synthetic "keyquorum" device. Any binary that
+# links driver_model.o from this build must link kq_driver.o and $(KQ_ID_LINK) (bus.o only
+# needs the flag, not the driver). After adding the flag, `make clean`: a stale bus.o or
+# driver_model.o built without it is not rebuilt.
+# Bare metal ignores it (driver_model.c and bus.c test DRIVERS_BAREMETAL); the browser lab
+# (build_wasm_lab.sh) does not build the driver model at all.
+CFLAGS += -DFL_WITH_KEYQUORUM
 
 .PHONY: keyquorum-identity
 keyquorum-identity:
@@ -740,8 +748,7 @@ ifeq ($(ARCH),arm)
 TEST_DRIVER_HAL_OBJS += kernel/arch/aarch64/hal/arm_plat.o kernel/arch/aarch64/hal/arm_uart.o \
 	kernel/arch/aarch64/hal/arm_timer.o kernel/arch/aarch64/hal/arm_gic.o
 endif
-test_drivers: userland/shell/common.o $(UTIL_SHELL_LINK_OBJS) kernel/core/vfs/disk.o kernel/core/vfs/fat32_host.o kernel/core/vfs/fat32_host_files.o disk_host_io.o disk_asm.o kernel/core/mm/mem_domain.o kernel/core/mm/kmalloc.o $(MEM_ASM_OBJ) $(PORT_IO_OBJ) $(DISK_HOST_ASM_OBJ) $(HISTORY_ASM_OBJ) \
-	  kernel/drivers/bus.o kernel/drivers/driver_model.o \
+TEST_DRIVERS_OBJS = userland/shell/common.o $(UTIL_SHELL_LINK_OBJS) kernel/core/vfs/disk.o kernel/core/vfs/fat32_host.o kernel/core/vfs/fat32_host_files.o disk_host_io.o disk_asm.o kernel/core/mm/mem_domain.o kernel/core/mm/kmalloc.o $(MEM_ASM_OBJ) $(PORT_IO_OBJ) $(DISK_HOST_ASM_OBJ) $(HISTORY_ASM_OBJ) \
 	  kernel/drivers/block/block_driver.o kernel/drivers/block/block_transport_host.o \
 	  kernel/drivers/keyboard_driver.o kernel/drivers/display_driver.o kernel/drivers/timer_driver.o kernel/drivers/pic_driver.o kernel/drivers/drivers.o \
 	  kernel/drivers/usb_xhci_mmio_glue.o kernel/drivers/p4_irq_lifecycle.o \
@@ -749,17 +756,23 @@ test_drivers: userland/shell/common.o $(UTIL_SHELL_LINK_OBJS) kernel/core/vfs/di
 	  kernel/drivers/p4_usb_xhci_lab.o kernel/drivers/p4_fdt_discovery.o \
 	  kernel/drivers/p4_psci.o $(USB_XHCI_MMIO_ASM_OBJ) \
 	  $(KERNEL_DRIVERS)/pci.o $(TEST_DRIVER_HAL_OBJS)
-	$(CC) $(CFLAGS) $(TEST_SANITIZE) -I. -Ikernel -Ikernel/include -Ikernel/drivers -Ikernel/drivers/wifi -Iuserland/shell -I$(ASM_SRC_DIR) -I$(KERNEL_DRIVERS) -Ikernel/arch/aarch64 -o tests/test_drivers tests/test_drivers.c \
-	  userland/shell/common.o $(UTIL_SHELL_LINK_OBJS) kernel/core/vfs/disk.o kernel/core/vfs/fat32_host.o kernel/core/vfs/fat32_host_files.o disk_host_io.o disk_asm.o kernel/core/mm/mem_domain.o kernel/core/mm/kmalloc.o $(MEM_ASM_OBJ) $(PORT_IO_OBJ) $(DISK_HOST_ASM_OBJ) $(HISTORY_ASM_OBJ) \
-	  kernel/drivers/bus.o kernel/drivers/driver_model.o \
-	  kernel/drivers/block/block_driver.o kernel/drivers/block/block_transport_host.o \
-	  kernel/drivers/keyboard_driver.o kernel/drivers/display_driver.o kernel/drivers/timer_driver.o kernel/drivers/pic_driver.o kernel/drivers/drivers.o \
-	  kernel/drivers/usb_xhci_mmio_glue.o kernel/drivers/p4_irq_lifecycle.o \
-	  kernel/drivers/p4_pcie_lab.o kernel/drivers/p4_virtio.o \
-	  kernel/drivers/p4_usb_xhci_lab.o kernel/drivers/p4_fdt_discovery.o \
-	  kernel/drivers/p4_psci.o $(USB_XHCI_MMIO_ASM_OBJ) \
-	  $(KERNEL_DRIVERS)/pci.o $(TEST_DRIVER_HAL_OBJS) -Wl,-z,noexecstack
+TEST_DRIVERS_CC = $(CC) $(CFLAGS) $(TEST_SANITIZE) -I. -Ikernel -Ikernel/include -Ikernel/drivers -Ikernel/drivers/wifi -Iuserland/shell -I$(ASM_SRC_DIR) -I$(KERNEL_DRIVERS) -Ikernel/arch/aarch64
+# The KeyQuorum driver is registered and bound to its synthetic device (FL_WITH_KEYQUORUM).
+test_drivers: $(TEST_DRIVERS_OBJS) kernel/drivers/bus.o kernel/drivers/driver_model.o kernel/drivers/keyquorum/kq_driver.o $(KQ_ID_LIB)
+	$(TEST_DRIVERS_CC) -o tests/test_drivers tests/test_drivers.c \
+	  $(TEST_DRIVERS_OBJS) kernel/drivers/bus.o kernel/drivers/driver_model.o \
+	  kernel/drivers/keyquorum/kq_driver.o $(FS_JAIL_TEST_LIBS) -Wl,-z,noexecstack
 	./tests/test_drivers
+
+# Same suite with the model and bus compiled without FL_WITH_KEYQUORUM and no KeyQuorum
+# objects or archive: the driver is absent and no "keyquorum" device exists. The two model
+# sources are compiled here (not as shared .o files) so the flag cannot leak into them.
+.PHONY: test_drivers_no_keyquorum
+test_drivers_no_keyquorum: check-stubs $(TEST_DRIVERS_OBJS)
+	$(TEST_DRIVERS_CC) -UFL_WITH_KEYQUORUM -o tests/test_drivers_no_keyquorum tests/test_drivers.c \
+	  kernel/drivers/bus.c kernel/drivers/driver_model.c \
+	  $(TEST_DRIVERS_OBJS) -Wl,-z,noexecstack
+	./tests/test_drivers_no_keyquorum
 
 test_core: test_mem_asm test_priority_queue test_workqueue_p18
 	@echo "Core tests done. Run 'make test_alloc_libc' or 'make test_alloc_asm' for allocator."
@@ -962,6 +975,16 @@ test_hex: kernel/core/vfs/kq_delivery.o kernel/core/vfs/server_shared_fs.o kerne
 	  kernel/core/vfs/server_shared_digest.o userland/shell/common.o \
 	  -lsqlite3 $(OPENSSL_LIBS) -pthread -Wl,-z,noexecstack
 	./tests/test_hex
+
+.PHONY: test_secret_compare
+# One secret compare / secure wipe: fl_user_db_secret_matches, open_key/open_box, fl_password_verify (#384 D10).
+test_secret_compare: userland/shell/common.o $(UTIL_SHELL_LINK_OBJS) $(FS_JAIL_CORE_OBJS) $(FS_JAIL_SUPPORT_OBJS) kernel/core/mm/mem_domain.o $(MEM_ASM_OBJ) $(HISTORY_ASM_OBJ) $(UTIL_HISTORY_HOST_OBJS)
+	$(CC) $(CFLAGS) $(TEST_SANITIZE) -c -o tests/test_secret_compare.o tests/test_secret_compare.c
+	$(CXX) $(CXXFLAGS) $(TEST_SANITIZE) -o tests/test_secret_compare tests/test_secret_compare.o \
+	  userland/shell/common.o $(UTIL_SHELL_LINK_OBJS) $(FS_JAIL_CORE_OBJS) $(FS_JAIL_SUPPORT_OBJS) \
+	  kernel/core/mm/mem_domain.o $(MEM_ASM_OBJ) $(HISTORY_ASM_OBJ) $(UTIL_HISTORY_HOST_OBJS) \
+	  $(FS_JAIL_TEST_LIBS) -Wl,--wrap=asm_mem_secure_zero -Wl,-z,noexecstack
+	./tests/test_secret_compare
 
 .PHONY: test_random
 test_random: tests/test_random.c kernel/include/fl/random.h
@@ -1294,11 +1317,11 @@ test_network_bridge_py:
 test_flinstone_linux_net: flinstone-linux-net
 	python3 tests/test_flinstone_linux_net.py
 
-test_wifi_db: userland/identity/password_hash.o kernel/core/net/net_wifi_db.o kernel/core/time/timekeeping.o
+test_wifi_db: userland/identity/password_hash.o kernel/core/net/net_wifi_db.o kernel/core/time/timekeeping.o $(MEM_ASM_OBJ)
 	$(CC) $(CFLAGS) $(TEST_SANITIZE) -Iuserland/identity -c tests/test_wifi_db.c -o tests/test_wifi_db_main.o
 	$(CXX) $(CXXFLAGS) $(TEST_SANITIZE) -o tests/test_wifi_db tests/test_wifi_db_main.o \
 	  kernel/core/net/net_wifi_db.o userland/identity/password_hash.o \
-	  kernel/core/time/timekeeping.o -lsqlite3 $(OPENSSL_LIBS) -Wl,-z,noexecstack
+	  kernel/core/time/timekeeping.o $(MEM_ASM_OBJ) -lsqlite3 $(OPENSSL_LIBS) -Wl,-z,noexecstack
 	FL_WIFI_DB_PATH=/tmp/fl_test_wifi.db rm -f /tmp/fl_test_wifi.db; ./tests/test_wifi_db
 
 .PHONY: test_p3_net_tools
@@ -1385,7 +1408,7 @@ test_replay:
 	  kernel/core/vfs/fs_provider.o kernel/core/vfs/fs_command.o kernel/core/vfs/fs_events.o kernel/core/vfs/fs_policy.o \
 	  kernel/core/vfs/fs_chain.o kernel/core/vfs/fs_facade.o kernel/core/vfs/fs_service_glue.o $(FS_JAIL_CORE_OBJS) $(FS_JAIL_SUPPORT_OBJS) kernel/core/mm/mem_domain.o kernel/core/mm/kmalloc.o \
 	  kernel/core/sys/vrt.o kernel/core/sys/ipc.o kernel/core/sys/syscall.o kernel/core/vfs/vfs.o \
-	  kernel/drivers/bus.o kernel/drivers/driver_model.o \
+	  kernel/drivers/bus.o kernel/drivers/driver_model.o kernel/drivers/keyquorum/kq_driver.o \
 	  kernel/drivers/block/block_driver.o kernel/drivers/block/block_transport_host.o kernel/drivers/keyboard_driver.o kernel/drivers/display_driver.o \
 	  kernel/drivers/timer_driver.o kernel/drivers/pic_driver.o kernel/drivers/drivers.o kernel/drivers/p4_irq_lifecycle.o \
 	  $(KERNEL_DRIVERS)/../hal/ioport.o \
@@ -1406,7 +1429,7 @@ clean:
 	rm -f $(VERSION_ENTRIES_VER_SUM)
 	rm -f kernel/arch/*/drivers/*.o kernel/arch/*/hal/*.o kernel/drivers/*.o kernel/drivers/block/*.o VM/devices/*.o
 	rm -f arch/*/*/*.o arch/*/*/alloc/*.o
-	rm -f tests/test_mem_asm tests/test_alloc tests/test_priority_queue tests/test_drivers tests/test_vm_mem tests/test_replay tests/test_invariants tests/test_userspace_connection tests/test_vm_syscall_bridge tests/test_vm_arch_readiness
+	rm -f tests/test_mem_asm tests/test_alloc tests/test_priority_queue tests/test_drivers tests/test_drivers_no_keyquorum tests/test_vm_mem tests/test_replay tests/test_invariants tests/test_userspace_connection tests/test_vm_syscall_bridge tests/test_vm_arch_readiness
 	rm -f tests/test_p3_network tests/test_p3_server tests/test_p3_server_lan tests/test_p3_udp_cmds tests/test_p3_net_tools tests/test_netlab_sim tests/test_wifi_flinstone_helper tests/test_wifi_flinstone_linux_helper tests/test_p3_wifi tests/test_p3_wifi_ota tests/test_wifi_mgmt_ota tests/test_wifi_connect_ota tests/test_wifi_coprocessor tests/test_wifi_uart_at_scan_join tests/test_wifi_fullmac_probe tests/test_wifi_80211ax_mock_279 tests/test_wifi_ax_server_ota tests/test_macvlan_waitpid
 	rm -f tests/test_batch_argv_issue220 tests/test_threadpool_issue222 tests/test_disk_hex_issue222
 	rm -rf tests/obj/issue220 tests/obj/issue222

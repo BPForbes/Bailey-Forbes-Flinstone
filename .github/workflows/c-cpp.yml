@@ -144,6 +144,9 @@ jobs:
       - name: Test — shared hex codec
         run: make test_hex
 
+      - name: Test — secret compare and wipe
+        run: make test_secret_compare
+
       - name: Test — shared random source
         run: make test_random
 
@@ -152,6 +155,9 @@ jobs:
 
       - name: Test — drivers
         run: make test_drivers
+
+      - name: Test — drivers without KeyQuorum
+        run: make test_drivers_no_keyquorum
 
       - name: Test — userspace connection
         run: make test_userspace_connection

@@ -23,6 +23,13 @@
 #include "fl/driver/pci.h"
 #include "fl/mm.h"
 #include "common.h"
+#if defined(FL_WITH_KEYQUORUM)
+#include "fl/driver/keyquorum.h"
+/* The synthetic "keyquorum" device is enumerated and bound beside host_blk. */
+#define EXPECTED_DEVICES 2
+#else
+#define EXPECTED_DEVICES 1
+#endif
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -157,11 +164,11 @@ static int test_device_model(void) {
     memset(descs, 0, sizeof(descs));
     memset(&info, 0, sizeof(info));
     memset(&res, 0, sizeof(res));
-    ASSERT(fl_bus_enumerate(descs, 4) == 1);
+    ASSERT(fl_bus_enumerate(descs, 4) == EXPECTED_DEVICES);
     ASSERT(fl_driver_registry_match(&descs[0], &matched) == FL_RESULT_OK);
     ASSERT(matched != NULL);
     ASSERT(strcmp(matched->name, "host-block") == 0);
-    ASSERT(fl_device_count() == 1);
+    ASSERT(fl_device_count() == EXPECTED_DEVICES);
     ASSERT(fl_device_get_info(0, &info) == 0);
     ASSERT(info.dev != NULL);
     ASSERT(info.desc != NULL);
@@ -180,9 +187,107 @@ static int test_device_model(void) {
     ASSERT(res.start == (uintptr_t)current_disk_file);
     ASSERT(res.size == strlen(current_disk_file) + 1);
     fl_drivers_init();
-    ASSERT(fl_device_count() == 1);
+    ASSERT(fl_device_count() == EXPECTED_DEVICES);
     ASSERT(fl_resource_claim(dev, FL_RESOURCE_SYNTH, 0) != 0);
     ASSERT(fl_resource_claim(dev, FL_RESOURCE_SYNTH, 99) != 0);
+    return 0;
+}
+
+/* The KeyQuorum driver is registered by fl_driver_registry_register_all and bound by the
+ * driver model to a synthetic device, only in a build that links it (FL_WITH_KEYQUORUM);
+ * without it the device does not exist and nothing matches. */
+static int test_keyquorum_registration(void) {
+    fl_device_desc_t descs[4];
+    fl_device_desc_t probe_desc;
+    const fl_driver_desc_t *matched = NULL;
+    fl_device_info_t info;
+    int bound = 0;
+
+    memset(descs, 0, sizeof(descs));
+    memset(&probe_desc, 0, sizeof(probe_desc));
+    probe_desc.bus_type = FL_BUS_SYNTH;
+    strcpy(probe_desc.synth_id, "keyquorum");
+    for (int i = 0; i < fl_device_count(); i++) {
+        memset(&info, 0, sizeof(info));
+        ASSERT(fl_device_get_info(i, &info) == 0);
+        if (info.driver_name && strcmp(info.driver_name, "keyquorum") == 0)
+            bound++;
+    }
+#if defined(FL_WITH_KEYQUORUM)
+    const fl_device_desc_t *desc;
+    fl_device_t *dev;
+
+    ASSERT(fl_bus_enumerate(descs, 4) == 2);
+    ASSERT(descs[1].bus_type == FL_BUS_SYNTH);
+    ASSERT(strcmp(descs[1].synth_id, "keyquorum") == 0);
+    ASSERT(descs[1].resource_count == 0);
+    /* A caller that leaves room for only one descriptor still gets just host_blk. */
+    ASSERT(fl_bus_enumerate(descs, 1) == 1);
+
+    /* The registry holds the KeyQuorum driver's base and matches the device to it. */
+    ASSERT(fl_driver_registry_match(&probe_desc, &matched) == FL_RESULT_OK);
+    ASSERT(matched == fl_kq_driver_desc());
+    ASSERT(matched->class == FL_DRV_CLASS_SECURITY);
+    ASSERT(strcmp(matched->name, "keyquorum") == 0);
+
+    /* The model bound the device: started, under that driver, with no resources. */
+    ASSERT(bound == 1);
+    dev = fl_device_find_synth("keyquorum");
+    ASSERT(dev != NULL);
+    desc = fl_device_get_desc(dev);
+    ASSERT(desc != NULL && desc->bus_type == FL_BUS_SYNTH);
+    ASSERT(fl_resource_count(dev) == 0);
+    for (int i = 0; i < fl_device_count(); i++) {
+        ASSERT(fl_device_get_info(i, &info) == 0);
+        if (info.dev != dev)
+            continue;
+        ASSERT(info.driver_class == FL_DRV_CLASS_SECURITY);
+        ASSERT(info.state == FL_DRV_STATE_STARTED);
+        ASSERT(fl_kq_driver_from_desc(matched) == fl_kq_driver_get());
+        return 0;
+    }
+    return 1;
+#else
+    ASSERT(fl_bus_enumerate(descs, 4) == 1);
+    ASSERT(fl_driver_registry_match(&probe_desc, &matched) == FL_RESULT_PROBE_SKIP);
+    ASSERT(matched == NULL);
+    ASSERT(bound == 0);
+    ASSERT(fl_device_find_synth("keyquorum") == NULL);
+    return 0;
+#endif
+}
+
+/* A shutdown empties the registry and the device table; the next init registers and binds
+ * again, so the device count is unchanged and exactly one "keyquorum" device is bound. */
+static int test_keyquorum_survives_reinit(const char *disk_path) {
+    fl_device_desc_t probe_desc;
+    const fl_driver_desc_t *matched = NULL;
+    fl_device_info_t info;
+    int before = fl_device_count();
+    int bound = 0;
+
+    memset(&probe_desc, 0, sizeof(probe_desc));
+    probe_desc.bus_type = FL_BUS_SYNTH;
+    strcpy(probe_desc.synth_id, "keyquorum");
+    drivers_shutdown();
+    ASSERT(fl_device_count() == 0);
+    drivers_init(disk_path);
+    ASSERT(fl_device_count() == before);
+    for (int i = 0; i < fl_device_count(); i++) {
+        memset(&info, 0, sizeof(info));
+        ASSERT(fl_device_get_info(i, &info) == 0);
+        if (info.driver_name && strcmp(info.driver_name, "keyquorum") == 0)
+            bound++;
+    }
+#if defined(FL_WITH_KEYQUORUM)
+    ASSERT(bound == 1);
+    ASSERT(fl_device_find_synth("keyquorum") != NULL);
+    ASSERT(fl_driver_registry_match(&probe_desc, &matched) == FL_RESULT_OK);
+    ASSERT(matched == fl_kq_driver_desc());
+#else
+    ASSERT(bound == 0);
+    ASSERT(fl_driver_registry_match(&probe_desc, &matched) == FL_RESULT_PROBE_SKIP);
+#endif
     return 0;
 }
 
@@ -367,7 +472,7 @@ static int test_bus_resource_extraction(void) {
 
     /* Get the real descriptor from bus enumeration */
     int n = fl_bus_enumerate(descs, 2);
-    ASSERT(n == 1);
+    ASSERT(n == EXPECTED_DEVICES);
 
     const fl_device_desc_t *d = &descs[0];
     ASSERT(d->resource_count == 4);
@@ -711,6 +816,10 @@ int main(void) {
     if (test_device_model() != 0) { drivers_shutdown(); unlink(path); return 1; }
     printf("OK\n");
 
+    printf("test_keyquorum_registration... ");
+    if (test_keyquorum_registration() != 0) { drivers_shutdown(); unlink(path); return 1; }
+    printf("OK\n");
+
     printf("test_devfs_block... ");
     if (test_devfs_block() != 0) { drivers_shutdown(); unlink(path); return 1; }
     printf("OK\n");
@@ -789,6 +898,10 @@ int main(void) {
     ASSERT(driver_probe_display() == 0);
     ASSERT(driver_probe_timer() == 0);
     ASSERT(driver_probe_pic() == 0);
+    printf("OK\n");
+
+    printf("test_keyquorum_survives_reinit... ");
+    if (test_keyquorum_survives_reinit(path) != 0) { drivers_shutdown(); unlink(path); return 1; }
     printf("OK\n");
 
     drivers_shutdown();

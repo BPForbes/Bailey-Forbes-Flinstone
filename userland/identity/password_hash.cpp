@@ -1,6 +1,9 @@
 #include "password_hash.h"
 #include "fl/hex.h"
 #include "fl/random.h"
+extern "C" {
+#include "fl/mem_asm.h"
+}
 #include <openssl/evp.h>
 #include <openssl/sha.h>
 #include <climits>
@@ -39,6 +42,8 @@ static int hash_legacy_bin(const std::vector<uint8_t> &salt, const char *passwor
     material.insert(material.end(), salt.begin(), salt.end());
     material.insert(material.end(), password, password + strlen(password));
     SHA256(material.data(), material.size(), out);
+    /* salt || password: wiped before the vector is freed. */
+    asm_mem_secure_zero(material.data(), material.size());
     return 0;
 }
 
@@ -75,16 +80,21 @@ static int parse_pbkdf2_record(const char *hash_hex, uint32_t *out_iter, char *d
     return 0;
 }
 
+/* 1 when the stored hex text names exactly the 32 digest bytes in computed. The stored
+ * text is public and its format is checked up front (either case of hex is accepted);
+ * the compare itself is on raw bytes, constant time (asm_mem_ct_equal), with the decoded
+ * copy wiped before returning. */
 static int hex_digest_verify(const char *expected_hex, const uint8_t computed[32]) {
-    char computed_hex[FL_PASSWORD_HASH_HEX_CHARS + 1];
-    size_t i;
-    unsigned char diff = 0;
-    if (strlen(expected_hex) != FL_PASSWORD_HASH_HEX_CHARS)
+    uint8_t expected[32];
+    int ok;
+
+    if (fl_hex_decode(expected_hex, expected, sizeof expected) != 0) {
+        asm_mem_secure_zero(expected, sizeof expected);
         return 0;
-    fl_hex_encode(computed, 32, computed_hex);
-    for (i = 0; i < FL_PASSWORD_HASH_HEX_CHARS; i++)
-        diff |= (unsigned char)(expected_hex[i] ^ computed_hex[i]);
-    return diff == 0;
+    }
+    ok = asm_mem_ct_equal(expected, computed, sizeof expected) != 0;
+    asm_mem_secure_zero(expected, sizeof expected);
+    return ok;
 }
 
 } /* namespace */
@@ -117,6 +127,7 @@ int fl_password_hash_password(const char *password, const char *salt_hex,
     if (pbkdf2_sha256(password, salt, FL_PASSWORD_PBKDF2_ITERATIONS, digest) != 0)
         return -1;
     fl_hex_encode(digest, 32, digest_hex);
+    asm_mem_secure_zero(digest, sizeof digest);
     n = snprintf(hash_hex, hash_hex_size, "%s%u$%s", FL_PASSWORD_RECORD_PREFIX,
                  (unsigned)FL_PASSWORD_PBKDF2_ITERATIONS, digest_hex);
     if (n < 0 || (size_t)n >= hash_hex_size)
@@ -127,8 +138,11 @@ int fl_password_hash_password(const char *password, const char *salt_hex,
 int fl_password_verify(const char *password, const char *salt_hex, const char *hash_hex) {
     std::vector<uint8_t> salt;
     uint8_t computed[32];
+    uint8_t stretched[32];
+    uint8_t legacy[32];
     char digest_hex[FL_PASSWORD_HASH_HEX_CHARS + 1];
     uint32_t iter = 0;
+    int ok = 0;
 
     if (!password || !salt_hex || !hash_hex)
         return 0;
@@ -140,23 +154,23 @@ int fl_password_verify(const char *password, const char *salt_hex, const char *h
     if (parse_pbkdf2_record(hash_hex, &iter, digest_hex, sizeof(digest_hex)) == 0) {
         if (pbkdf2_sha256(password, salt, iter, computed) == 0
             && hex_digest_verify(digest_hex, computed))
-            return 1;
-        return 0;
-    }
-
-    if (strlen(hash_hex) == FL_PASSWORD_HASH_HEX_CHARS) {
-        uint8_t stretched[32];
-        uint8_t legacy[32];
+            ok = 1;
+    } else if (strlen(hash_hex) == FL_PASSWORD_HASH_HEX_CHARS) {
         int ok_stretch = 0;
         int ok_legacy = 0;
 
+        /* Both variants are always evaluated: no short-circuit between them. */
         if (hash_stretched_bin(salt, password, stretched) == 0)
             ok_stretch = hex_digest_verify(hash_hex, stretched);
         if (hash_legacy_bin(salt, password, legacy) == 0)
             ok_legacy = hex_digest_verify(hash_hex, legacy);
-        return (ok_stretch | ok_legacy) ? 1 : 0;
+        ok = (ok_stretch | ok_legacy) ? 1 : 0;
     }
-    return 0;
+    /* Password-derived verifiers: wiped on every return. */
+    asm_mem_secure_zero(computed, sizeof computed);
+    asm_mem_secure_zero(stretched, sizeof stretched);
+    asm_mem_secure_zero(legacy, sizeof legacy);
+    return ok;
 }
 
 } /* extern "C" */

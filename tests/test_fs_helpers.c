@@ -4,6 +4,7 @@
  * fl_fs_basename (fl/path.h).
  */
 #define _XOPEN_SOURCE 700
+#define _DEFAULT_SOURCE
 #include "common.h"
 #include "fl/path.h"
 #include "contract_p5_file_delivery.h"
@@ -17,6 +18,8 @@
 #include <string.h>
 #include <sys/stat.h>
 #include <unistd.h>
+#include <grp.h>
+#include <sys/wait.h>
 
 #define ASSERT(c) do { \
     if (!(c)) { \
@@ -249,6 +252,13 @@ static int put_in(const char *dir, const char *name, const char *text) {
         return -1;
     fputs(text, f);
     return fclose(f);
+}
+
+static int chmod_in_land(const char *name, mode_t mode) {
+    char path[300];
+
+    snprintf(path, sizeof path, "%s/%s", g_land, name);
+    return chmod(path, mode);
 }
 
 static int test_contained_normal_write_and_replace(void) {
@@ -559,6 +569,123 @@ static int test_contained_new_file_is_owner_only(void) {
     return 0;
 }
 
+static int test_contained_overwrite_replaces_whole_file(void) {
+    const uint8_t a[] = "first body", b[] = "second";
+    char buf[64], path[300], other[300];
+    struct stat st;
+
+    ASSERT(fresh_tree() == 0);
+    /* existing regular file is replaced */
+    ASSERT(put_in(g_land, "doc.txt", "old old old old") == 0);
+    ASSERT(chmod_in_land("doc.txt", 0644) == 0);
+    ASSERT(fl_server_shared_overwrite_local(NULL, "doc.txt", b, sizeof b - 1u) == FL_RESULT_OK);
+    ASSERT(slurp(g_land, "doc.txt", buf, sizeof buf) == (int)sizeof b - 1 &&
+           strcmp(buf, "second") == 0);
+    ASSERT(!exists(g_land, "doc.txt.part"));
+    snprintf(path, sizeof path, "%s/doc.txt", g_land);
+    ASSERT(stat(path, &st) == 0 && (st.st_mode & 0777) == 0600);
+    /* a missing leaf is created owner-only */
+    ASSERT(fl_server_shared_overwrite_local(NULL, "fresh.txt", a, sizeof a - 1u) == FL_RESULT_OK);
+    snprintf(path, sizeof path, "%s/fresh.txt", g_land);
+    ASSERT(stat(path, &st) == 0 && S_ISREG(st.st_mode) && (st.st_mode & 0777) == 0600);
+    /* a leaf with a second name is replaced; the other name keeps the old content */
+    ASSERT(put_in(g_land, "two.txt", "kept content") == 0);
+    snprintf(path, sizeof path, "%s/two.txt", g_land);
+    snprintf(other, sizeof other, "%s/two_other.txt", g_land);
+    ASSERT(link(path, other) == 0);
+    ASSERT(fl_server_shared_overwrite_local(NULL, "two.txt", b, sizeof b - 1u) == FL_RESULT_OK);
+    ASSERT(slurp(g_land, "two.txt", buf, sizeof buf) > 0 && strcmp(buf, "second") == 0);
+    ASSERT(slurp(g_land, "two_other.txt", buf, sizeof buf) > 0 &&
+           strcmp(buf, "kept content") == 0);
+    return 0;
+}
+
+static int test_contained_overwrite_failure_keeps_original(void) {
+    const uint8_t b[] = "replacement";
+    char buf[64], path[300];
+
+    ASSERT(fresh_tree() == 0);
+    ASSERT(put_in(g_land, "keep.txt", "original") == 0);
+    /* the staging name is taken by a directory, so the write cannot start */
+    snprintf(path, sizeof path, "%s/keep.txt.part", g_land);
+    ASSERT(mkdir(path, 0700) == 0);
+    ASSERT(fl_server_shared_overwrite_local(NULL, "keep.txt", b, sizeof b - 1u) ==
+           FL_RESULT_ERR);
+    ASSERT(slurp(g_land, "keep.txt", buf, sizeof buf) > 0 && strcmp(buf, "original") == 0);
+    ASSERT(rmdir(path) == 0);
+    /* a link leaf and a directory leaf are refused and left alone */
+    snprintf(path, sizeof path, "%s/outside/keep", g_dir);
+    ASSERT(put_in(g_out, "keep", "outside") == 0);
+    {
+        char lk[300];
+
+        snprintf(lk, sizeof lk, "%s/lnk", g_land);
+        ASSERT(symlink(path, lk) == 0);
+        ASSERT(fl_server_shared_overwrite_local(NULL, "lnk", b, sizeof b - 1u) ==
+               FL_RESULT_ACCES);
+        ASSERT(slurp(g_out, "keep", buf, sizeof buf) > 0 && strcmp(buf, "outside") == 0);
+    }
+    snprintf(path, sizeof path, "%s/adir", g_land);
+    ASSERT(mkdir(path, 0700) == 0);
+    ASSERT(fl_server_shared_overwrite_local(NULL, "adir", b, sizeof b - 1u) == FL_RESULT_ACCES);
+    ASSERT(!exists(g_land, "lnk.part") && !exists(g_land, "adir.part"));
+    return 0;
+}
+
+/* The unwritable-leaf checks; they need a caller that is not root (W_OK always succeeds there). */
+static int unwritable_leaf_checks(void) {
+    const uint8_t b[] = "replacement";
+    char buf[64];
+
+    ASSERT(put_in(g_land, "ro.txt", "read only") == 0);
+    ASSERT(chmod_in_land("ro.txt", 0400) == 0);
+    ASSERT(fl_server_shared_overwrite_local(NULL, "ro.txt", b, sizeof b - 1u) == FL_RESULT_ACCES);
+    ASSERT(slurp(g_land, "ro.txt", buf, sizeof buf) > 0 && strcmp(buf, "read only") == 0);
+    ASSERT(!exists(g_land, "ro.txt.part"));
+    return 0;
+}
+
+/*
+ * As root the checks run in a child that first hands the landing directory to an unprivileged
+ * user and drops to it, so the case is exercised and never skipped. A child that cannot drop
+ * fails the test.
+ */
+static int run_unwritable_leaf_checks(void) {
+    pid_t pid;
+    int status = 0;
+
+    if (geteuid() != 0)
+        return unwritable_leaf_checks();
+    ASSERT(chmod(g_dir, 0711) == 0 && chown(g_land, 65534, 65534) == 0);
+    pid = fork();
+    ASSERT(pid >= 0);
+    if (pid == 0) {
+        if (setgroups(0, NULL) != 0 || setregid(65534, 65534) != 0 ||
+            setreuid(65534, 65534) != 0 || geteuid() == 0)
+            _exit(2);
+        _exit(unwritable_leaf_checks() == 0 ? 0 : 1);
+    }
+    ASSERT(waitpid(pid, &status, 0) == pid);
+    ASSERT(WIFEXITED(status) && WEXITSTATUS(status) == 0);
+    return 0;
+}
+
+static int test_contained_overwrite_refuses_unwritable_and_fifo_leaf(void) {
+    const uint8_t b[] = "replacement";
+    char path[300];
+    struct stat st;
+
+    ASSERT(fresh_tree() == 0);
+    ASSERT(run_unwritable_leaf_checks() == 0);
+    /* a named pipe is refused from its status alone; it is never opened, so this cannot block */
+    snprintf(path, sizeof path, "%s/pipe", g_land);
+    ASSERT(mkfifo(path, 0600) == 0);
+    ASSERT(fl_server_shared_overwrite_local(NULL, "pipe", b, sizeof b - 1u) == FL_RESULT_ACCES);
+    ASSERT(lstat(path, &st) == 0 && S_ISFIFO(st.st_mode));
+    ASSERT(!exists(g_land, "pipe.part"));
+    return 0;
+}
+
 static int test_contained_destination_names_follow_the_landing_rules(void) {
     static const char *const bad[] = {"x.kqseen", "x.kqtf", "x.kqbak", "x.part", "x.meta",
                                       "sub/x.KQSEEN", "server_shared/doc.txt.Meta", "./y.PART",
@@ -610,6 +737,9 @@ int main(void) {
     rc |= test_contained_equivalent_spellings_are_gated_alike();
     rc |= test_contained_name_operations_refuse_links();
     rc |= test_contained_new_file_is_owner_only();
+    rc |= test_contained_overwrite_replaces_whole_file();
+    rc |= test_contained_overwrite_failure_keeps_original();
+    rc |= test_contained_overwrite_refuses_unwritable_and_fifo_leaf();
     rc |= test_contained_destination_names_follow_the_landing_rules();
     rc |= test_plain_name_accepts_and_rejects();
     rc |= test_save_offer_refuses_unsafe_names();

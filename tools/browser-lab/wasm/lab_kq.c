@@ -574,13 +574,21 @@ int fl_lab_kq_send(int session, const char *path, const char *user, int permitte
     return 1;
 }
 
+/* One history line, formatted, for fl_kq_cp_for_each_event. */
+static int say_event_line(const char *line, size_t n, void *ctx) {
+    char text[384];
+
+    (void)ctx;
+    fl_kq_cp_format_event(line, n, text, sizeof text);
+    say("%s", text, NULL, NULL);
+    return 0;
+}
+
 /* server file log <path>: the history of a tracked copy, read from its container. Offline: it
  * needs no server and no key. */
 int fl_lab_kq_log(int session, const char *path) {
     fl_kq_buf_t lines = {0};
     fl_kq_cp_result_t cp;
-    char text[384];
-    size_t start = 0;
 
     (void)session;
     cp = fl_kq_cp_history(path, &lines);
@@ -589,14 +597,7 @@ int fl_lab_kq_log(int session, const char *path) {
         fl_kq_buf_free(&lines);
         return 1;
     }
-    for (size_t i = 0; i < lines.len; i++) {
-        if (lines.data[i] == '\n') {
-            fl_kq_cp_format_event((const char *)lines.data + start, i - start, text, sizeof text);
-            say("%s", text, NULL, NULL);
-            start = i + 1u;
-        }
-    }
-    if (start == 0u)
+    if (fl_kq_cp_for_each_event(&lines, say_event_line, NULL) == 0u)
         say("no history for %s", fl_fs_basename(path), NULL, NULL);
     fl_kq_buf_free(&lines);
     return 1;

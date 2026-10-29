@@ -89,6 +89,7 @@ else
 fi
 
 run_make "test_drivers" test_drivers
+run_make "test_drivers_no_keyquorum" test_drivers_no_keyquorum
 run_make "test_userspace_connection" test_userspace_connection
 run_make "test_invariants" test_invariants
 run_make "test_issue222" test_issue222
@@ -97,6 +98,7 @@ run_make "test_fs_jail" test_fs_jail
 run_make "test_heritage" test_heritage
 run_make "test_fs_helpers" test_fs_helpers
 run_make "test_hex" test_hex
+run_make "test_secret_compare" test_secret_compare
 run_make "test_random" test_random
 run_make "test_kq_checkpoint" test_kq_checkpoint
 run_make "test_kq_delivery" test_kq_delivery

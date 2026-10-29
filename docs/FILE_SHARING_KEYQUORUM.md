@@ -89,7 +89,7 @@ part.
 
 | Child | Parent | What the child adds |
 | --- | --- | --- |
-| `fl_kq_driver_t` (`kq_driver.c`) | `fl_driver_desc_t` (`fl/driver/driver.h`), registered with the driver model at shell start | the KeyQuorum ops; the base's lifecycle `probe` checks the library ABI (class `FL_DRV_CLASS_SECURITY`) |
+| `fl_kq_driver_t` (`kq_driver.c`) | `fl_driver_desc_t` (`fl/driver/driver.h`), registered by `fl_driver_registry_register_all` (host builds that define `FL_WITH_KEYQUORUM`) and bound by the driver model to the synthetic device `keyquorum` | the KeyQuorum ops; the base's lifecycle `probe` checks the library ABI (class `FL_DRV_CLASS_SECURITY`) |
 | `asm_mem_secure_zero`, `mem_domain_secure_zero` | `asm_mem_zero`, `mem_domain_zero` | a barrier (`mfence` / `dmb ish`) after the parent's stores |
 | KeyQuorum upload and inbox slots (`net_kq_delivery.c`) | `fl_part_buf_t` (`net_part_buf.h`), also the base of the server file share slot | offers, co-signatures and release around the ordered, bounded buffer |
 | big-endian wire fields | `net_endian.h` (`asm_net_*`) | the bounds-checked reader and writer |

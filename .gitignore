@@ -35,6 +35,7 @@ tests/test_alloc
 tests/test_mem_asm
 tests/test_priority_queue
 tests/test_drivers
+tests/test_drivers_no_keyquorum
 tests/test_vm_mem
 tests/test_invariants
 tests/test_fs_jail
@@ -54,6 +55,7 @@ tests/test_kq_checkpoint
 tests/test_kq_delivery
 tests/test_fs_helpers
 tests/test_hex
+tests/test_secret_compare
 tests/test_random
 tests/test_kq_net
 tests/test_part_buf

@@ -804,8 +804,7 @@ fl_result_t fl_server_shared_overwrite_local(const fl_server_file_offer_t *offer
 #ifdef FL_FS_HAVE_OPENAT
     char leaf[256];
     struct stat st;
-    size_t off = 0;
-    int dfd = -1, fd;
+    int dfd = -1;
     fl_result_t rc;
 
     (void)offer;
@@ -814,27 +813,35 @@ fl_result_t fl_server_shared_overwrite_local(const fl_server_file_offer_t *offer
     rc = fl_server_shared_resolve_local_path(local_path, 1, &dfd, leaf, sizeof(leaf));
     if (rc != FL_RESULT_OK)
         return rc;
-    /* No O_TRUNC at open: the file is checked first, then emptied. */
-    fd = openat(dfd, leaf, O_WRONLY | O_CREAT | O_NOFOLLOW | O_CLOEXEC | O_NONBLOCK, 0600);
-    close(dfd);
-    if (fd < 0)
-        return (errno == ELOOP || errno == EISDIR) ? FL_RESULT_ACCES : FL_RESULT_ERR;
-    if (fstat(fd, &st) != 0 || !S_ISREG(st.st_mode) || ftruncate(fd, 0) != 0) {
-        close(fd);
+    /*
+     * The write stages a new owner-only (0600) file and renames it over the leaf, so the old
+     * content stays whole if the write fails and a leaf with other names is replaced, not
+     * written through. The rename never follows the name. The checks below therefore only
+     * pick the return code and keep the old rule (a leaf the caller could not write is
+     * refused); they are not the safety gate. A missing leaf is created.
+     */
+    if (fstatat(dfd, leaf, &st, AT_SYMLINK_NOFOLLOW) == 0) {
+        if (!S_ISREG(st.st_mode)) {
+            close(dfd);
+            return FL_RESULT_ACCES;
+        }
+#ifdef AT_EACCESS
+        if (faccessat(dfd, leaf, W_OK, AT_EACCESS) != 0) {
+#else
+        /* no AT_EACCESS: the real ids are checked instead, the same where they match */
+        if (faccessat(dfd, leaf, W_OK, 0) != 0) {
+#endif
+            close(dfd);
+            return FL_RESULT_ACCES;
+        }
+    } else if (errno != ENOENT) {
+        close(dfd);
         return FL_RESULT_ERR;
     }
-    while (off < data_len) {
-        ssize_t w = write(fd, data + off, data_len - off);
-
-        if (w < 0 && errno == EINTR)
-            continue;
-        if (w <= 0) {
-            close(fd);
-            return FL_RESULT_ERR;
-        }
-        off += (size_t)w;
-    }
-    return close(fd) == 0 ? FL_RESULT_OK : FL_RESULT_ERR;
+    rc = fl_fs_write_file_atomic_in(dfd, leaf, data, data_len) == 0 ? FL_RESULT_OK
+                                                                     : FL_RESULT_ERR;
+    close(dfd);
+    return rc;
 #else
     (void)offer; (void)local_path; (void)data; (void)data_len;
     return FL_RESULT_ERR;

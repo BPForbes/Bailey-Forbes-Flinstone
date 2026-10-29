@@ -834,6 +834,23 @@ size_t fl_kq_cp_format_event(const char *line, size_t n, char *out, size_t cap) 
     return written < 0 ? 0u : (size_t)written < cap ? (size_t)written : cap - 1u;
 }
 
+size_t fl_kq_cp_for_each_event(const fl_kq_buf_t *lines, fl_kq_cp_event_fn fn, void *ctx) {
+    size_t start = 0;
+    size_t count = 0;
+
+    if (!lines || !lines->data || !fn)
+        return 0u;
+    for (size_t i = 0; i < lines->len; i++) {
+        if (lines->data[i] != '\n')
+            continue;
+        count++;
+        if (fn((const char *)lines->data + start, i - start, ctx))
+            break;
+        start = i + 1u;
+    }
+    return count;
+}
+
 fl_kq_cp_result_t fl_kq_cp_history(const char *path, fl_kq_buf_t *lines) {
     const fl_kq_driver_t *drv = fl_kq_driver_get();
     char container_path[4096];

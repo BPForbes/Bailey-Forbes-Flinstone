@@ -166,6 +166,18 @@ static int test_offer_decode_refuses_unsafe_names(void) {
     return 0;
 }
 
+/* First occurrence of pat (n bytes) inside buf (len bytes), or NULL. */
+static uint8_t *find_bytes(uint8_t *buf, size_t len, const char *pat, size_t n) {
+    size_t i;
+
+    if (n == 0u || len < n)
+        return NULL;
+    for (i = 0; i + n <= len; i++)
+        if (memcmp(buf + i, pat, n) == 0)
+            return buf + i;
+    return NULL;
+}
+
 /* A text field with an embedded NUL is a bad frame, not a shorter string. */
 static int test_offer_decode_refuses_embedded_nul(void) {
     uint8_t buf[2048];
@@ -179,12 +191,12 @@ static int test_offer_decode_refuses_embedded_nul(void) {
     strncpy(o.file_name, "abXcd.txt", sizeof o.file_name - 1u);
     ASSERT(fl_server_file_offer_encode(&o, buf, sizeof buf, &len) == FL_RESULT_OK);
     ASSERT(fl_server_file_offer_decode(buf, len, &back) == FL_RESULT_OK);
-    at = memmem(buf, len, "abXcd.txt", 9u);
+    at = find_bytes(buf, len, "abXcd.txt", 9u);
     ASSERT(at != NULL);
     at[2] = 0;
     ASSERT(fl_server_file_offer_decode(buf, len, &back) == FL_RESULT_INVAL);
     at[2] = 'X';
-    at = memmem(buf, len, "shXre-n", 7u);
+    at = find_bytes(buf, len, "shXre-n", 7u);
     ASSERT(at != NULL);
     at[2] = 0;
     ASSERT(fl_server_file_offer_decode(buf, len, &back) == FL_RESULT_INVAL);

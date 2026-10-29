@@ -12,6 +12,11 @@
 #ifndef DRIVERS_BAREMETAL
 #include <stdio.h>
 #endif
+/* KeyQuorum is an optional driver: only a build that links kq_driver.o and the KeyQuorum
+ * archive defines FL_WITH_KEYQUORUM (Makefile, next to KQ_ID_LINK), and never bare metal. */
+#if defined(FL_WITH_KEYQUORUM) && !defined(DRIVERS_BAREMETAL)
+#include "fl/driver/keyquorum.h"
+#endif
 
 #define FL_MODEL_MAX_DEVICES   32
 #define FL_MODEL_MAX_DRIVERS   32
@@ -368,6 +373,11 @@ static const fl_driver_desc_t block_model_driver = {
 
 void fl_driver_registry_register_all(void) {
     fl_driver_registry_register(&block_model_driver);
+#if defined(FL_WITH_KEYQUORUM) && !defined(DRIVERS_BAREMETAL)
+    /* Matched to the synthetic "keyquorum" device the bus enumerates (bus.c); its probe
+     * skips the device when the linked library speaks another ABI. */
+    fl_driver_registry_register(fl_kq_driver_desc());
+#endif
 }
 
 static void fl_dma_release_all(void) {

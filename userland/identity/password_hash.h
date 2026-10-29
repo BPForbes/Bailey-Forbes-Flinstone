@@ -22,7 +22,7 @@ int fl_password_generate_salt_hex(char *salt_hex, size_t salt_hex_size);
 int fl_password_hash_password(const char *password, const char *salt_hex,
                               char *hash_hex, size_t hash_hex_size);
 
-/** Constant-time verify; accepts PBKDF2 record or legacy 64-hex stretch/single SHA-256. */
+/** Constant-time verify; accepts PBKDF2 record or legacy 64-hex stretch/single SHA-256 (stored hex digits in either case). */
 int fl_password_verify(const char *password, const char *salt_hex, const char *hash_hex);
 
 #ifdef __cplusplus

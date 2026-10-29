@@ -844,10 +844,51 @@ void fl_user_db_forget_key(fl_user_db_t *db, const char *name) {
     mem_domain_zero(u->box_sealed, sizeof u->box_sealed);
 }
 
-fl_result_t fl_user_db_open_key(const fl_user_db_t *db, const char *name, const char *password,
-                                unsigned char *secret) {
+/* 1 when secret derives exactly the public key u stores for kind. The one derive-and-
+ * compare behind fl_user_db_secret_matches, open_key and open_box: constant time in the
+ * secret (asm_mem_ct_equal), and the derived public bytes are wiped on every exit. */
+static int record_secret_matches(const fl_user_record_t *u, fl_user_secret_kind_t kind,
+                                 const unsigned char *secret) {
+    unsigned char derived[FL_USER_SIGNING_PUBLIC_LEN] = {0};
+    const unsigned char *stored;
+    int derive_rc;
+    int ok;
+
+    if (!u || !secret)
+        return 0;
+    if (kind == FL_USER_SECRET_SIGNING) {
+        if (!u->has_key)
+            return 0;
+        stored = u->signing_public;
+        derive_rc = kq_account_public(secret, derived);
+    } else if (kind == FL_USER_SECRET_BOX) {
+        if (!u->has_box)
+            return 0;
+        stored = u->box_public;
+        derive_rc = kq_account_box_public(secret, derived);
+    } else {
+        return 0;
+    }
+    ok = derive_rc == KQ_ACCOUNT_OK &&
+         asm_mem_ct_equal(derived, stored, sizeof derived) != 0;
+    mem_domain_secure_zero(derived, sizeof derived);
+    return ok;
+}
+
+int fl_user_db_secret_matches(const fl_user_db_t *db, const char *key_id,
+                              fl_user_secret_kind_t kind, const unsigned char *secret) {
+    if (!db || !key_id || !secret)
+        return 0;
+    return record_secret_matches(fl_user_db_find_by_key(db, key_id), kind, secret);
+}
+
+/* Opens the sealed secret of kind for the account name. Once kq_account_open has been
+ * called, every return other than OK leaves secret securely zeroed. */
+static fl_result_t open_sealed(const fl_user_db_t *db, const char *name, const char *password,
+                               fl_user_secret_kind_t kind, unsigned char *secret) {
     const fl_user_record_t *u;
-    unsigned char derived[FL_USER_SIGNING_PUBLIC_LEN];
+    const unsigned char *sealed;
+    size_t sealed_len;
     int rc;
 
     if (!db || !name || !password || !secret)
@@ -855,20 +896,31 @@ fl_result_t fl_user_db_open_key(const fl_user_db_t *db, const char *name, const 
     u = fl_user_db_find(db, name);
     if (!u)
         return FL_RESULT_NOENT;
-    if (!u->has_key)
+    if (kind == FL_USER_SECRET_SIGNING && u->has_key) {
+        sealed = (const unsigned char *)u->signing_sealed;
+        sealed_len = sizeof u->signing_sealed;
+    } else if (kind == FL_USER_SECRET_BOX && u->has_box) {
+        sealed = (const unsigned char *)u->box_sealed;
+        sealed_len = sizeof u->box_sealed;
+    } else {
         return FL_RESULT_NOENT;
-    rc = kq_account_open(password, u->signing_sealed, sizeof u->signing_sealed, secret);
-    if (rc == KQ_ACCOUNT_WRONG_PASSWORD)
-        return FL_RESULT_ACCES;
-    if (rc != KQ_ACCOUNT_OK)
-        return FL_RESULT_ERR;
+    }
+    rc = kq_account_open(password, sealed, sealed_len, secret);
+    if (rc != KQ_ACCOUNT_OK) {
+        mem_domain_secure_zero(secret, FL_USER_SIGNING_SECRET_LEN);
+        return rc == KQ_ACCOUNT_WRONG_PASSWORD ? FL_RESULT_ACCES : FL_RESULT_ERR;
+    }
     /* The sealed secret must be the one the stored public key names. */
-    if (kq_account_public(secret, derived) != KQ_ACCOUNT_OK ||
-        !asm_mem_ct_equal(derived, u->signing_public, sizeof derived)) {
-        mem_domain_zero(secret, FL_USER_SIGNING_SECRET_LEN);
+    if (!record_secret_matches(u, kind, secret)) {
+        mem_domain_secure_zero(secret, FL_USER_SIGNING_SECRET_LEN);
         return FL_RESULT_ERR;
     }
     return FL_RESULT_OK;
+}
+
+fl_result_t fl_user_db_open_key(const fl_user_db_t *db, const char *name, const char *password,
+                                unsigned char *secret) {
+    return open_sealed(db, name, password, FL_USER_SECRET_SIGNING, secret);
 }
 
 const unsigned char *fl_user_db_signing_public(const fl_user_db_t *db, const char *key_id) {
@@ -879,27 +931,7 @@ const unsigned char *fl_user_db_signing_public(const fl_user_db_t *db, const cha
 
 fl_result_t fl_user_db_open_box(const fl_user_db_t *db, const char *name, const char *password,
                                 unsigned char *secret) {
-    const fl_user_record_t *u;
-    unsigned char derived[FL_USER_SIGNING_PUBLIC_LEN];
-    int rc;
-
-    if (!db || !name || !password || !secret)
-        return FL_RESULT_INVAL;
-    u = fl_user_db_find(db, name);
-    if (!u || !u->has_box)
-        return FL_RESULT_NOENT;
-    rc = kq_account_open(password, u->box_sealed, sizeof u->box_sealed, secret);
-    if (rc == KQ_ACCOUNT_WRONG_PASSWORD)
-        return FL_RESULT_ACCES;
-    if (rc != KQ_ACCOUNT_OK)
-        return FL_RESULT_ERR;
-    /* The sealed secret must be the one the stored box public key names. */
-    if (kq_account_box_public(secret, derived) != KQ_ACCOUNT_OK ||
-        !asm_mem_ct_equal(derived, u->box_public, sizeof derived)) {
-        mem_domain_secure_zero(secret, FL_USER_SIGNING_SECRET_LEN);
-        return FL_RESULT_ERR;
-    }
-    return FL_RESULT_OK;
+    return open_sealed(db, name, password, FL_USER_SECRET_BOX, secret);
 }
 
 const unsigned char *fl_user_db_box_public(const fl_user_db_t *db, const char *key_id) {

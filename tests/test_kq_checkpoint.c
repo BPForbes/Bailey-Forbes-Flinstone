@@ -562,6 +562,78 @@ static int test_history_is_offline_and_named(void) {
     return 0;
 }
 
+typedef struct {
+    size_t seen;
+    size_t stop_at; /* stop after this many lines; 0 never stops */
+    char first[32];
+    char last[32];
+} walk_t;
+
+static int walk_cb(const char *line, size_t n, void *ctx) {
+    walk_t *w = ctx;
+    size_t m = n < sizeof w->last - 1u ? n : sizeof w->last - 1u;
+
+    if (w->seen == 0u) {
+        memcpy(w->first, line, m);
+        w->first[m] = '\0';
+    }
+    memcpy(w->last, line, m);
+    w->last[m] = '\0';
+    w->seen++;
+    return w->stop_at != 0u && w->seen == w->stop_at;
+}
+
+/* The line walk: no lines, one line, a trailing fragment without a newline (skipped, not a
+ * line), many lines in order, and a callback that stops the walk. */
+static int test_for_each_event_walks_lines(void) {
+    static const char one[] = "a\tb\n";
+    static const char partial[] = "x\ny\nfrag";
+    static const char many[] = "l1\nl2\n\nl4\nl5\n";
+    fl_kq_buf_t b;
+    walk_t w;
+
+    memset(&w, 0, sizeof w);
+    b.data = NULL;
+    b.len = 0;
+    ASSERT(fl_kq_cp_for_each_event(&b, walk_cb, &w) == 0u && w.seen == 0u);
+    ASSERT(fl_kq_cp_for_each_event(NULL, walk_cb, &w) == 0u);
+    b.data = (uint8_t *)(void *)one;
+    b.len = 0;
+    ASSERT(fl_kq_cp_for_each_event(&b, walk_cb, &w) == 0u && w.seen == 0u);
+
+    b.len = sizeof one - 1u;
+    ASSERT(fl_kq_cp_for_each_event(&b, walk_cb, &w) == 1u);
+    ASSERT(w.seen == 1u && strcmp(w.first, "a\tb") == 0);
+
+    memset(&w, 0, sizeof w);
+    b.data = (uint8_t *)(void *)partial;
+    b.len = sizeof partial - 1u;
+    ASSERT(fl_kq_cp_for_each_event(&b, walk_cb, &w) == 2u);
+    ASSERT(strcmp(w.first, "x") == 0 && strcmp(w.last, "y") == 0);
+    b.len = 4u; /* "x\ny\n": both lines complete */
+    memset(&w, 0, sizeof w);
+    ASSERT(fl_kq_cp_for_each_event(&b, walk_cb, &w) == 2u);
+    b.len = 3u; /* "x\ny" : one line, "y" is a fragment */
+    memset(&w, 0, sizeof w);
+    ASSERT(fl_kq_cp_for_each_event(&b, walk_cb, &w) == 1u && strcmp(w.last, "x") == 0);
+    b.len = 1u; /* "x" alone: no line */
+    memset(&w, 0, sizeof w);
+    ASSERT(fl_kq_cp_for_each_event(&b, walk_cb, &w) == 0u && w.seen == 0u);
+
+    memset(&w, 0, sizeof w);
+    b.data = (uint8_t *)(void *)many;
+    b.len = sizeof many - 1u;
+    ASSERT(fl_kq_cp_for_each_event(&b, walk_cb, &w) == 5u);
+    ASSERT(strcmp(w.first, "l1") == 0 && strcmp(w.last, "l5") == 0);
+
+    memset(&w, 0, sizeof w);
+    w.stop_at = 2u;
+    ASSERT(fl_kq_cp_for_each_event(&b, walk_cb, &w) == 2u);
+    ASSERT(w.seen == 2u && strcmp(w.last, "l2") == 0);
+    ASSERT(fl_kq_cp_for_each_event(&b, NULL, &w) == 0u);
+    return 0;
+}
+
 /* A newer copy is refused until the editor's supervisor has countersigned it: Steve keeps the copy
  * he has, and the same revision goes through once the permit is in the container. */
 static int test_newer_without_the_permit_is_refused(void) {
@@ -709,6 +781,7 @@ int main(void) {
     RUN(test_newer_needs_the_accepted_container);
     RUN(test_newer_without_the_permit_is_refused);
     RUN(test_history_is_offline_and_named);
+    RUN(test_for_each_event_walks_lines);
     RUN(test_only_plain_file_names_are_safe);
     RUN(test_reasons_and_results);
     rmrf(s_dir);

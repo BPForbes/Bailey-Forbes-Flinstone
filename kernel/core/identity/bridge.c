@@ -2,7 +2,6 @@
 #include "heritage.h"
 #include "keyquorum_identity.h"
 #include "fl/hex.h"
-#include "fl/mem_asm.h"
 #include "fl/random.h"
 #include "mem_domain.h"
 #include <sqlite3.h>
@@ -72,20 +71,6 @@ static fl_result_t bridge_open(const char *db_path, sqlite3 **out) {
         }
     }
     return FL_RESULT_OK;
-}
-
-/* 1 when secret is the signing key users holds for key_id. */
-static int secret_is_for(const fl_user_db_t *users, const char *key_id,
-                         const unsigned char *secret) {
-    const unsigned char *public_key = fl_user_db_signing_public(users, key_id);
-    unsigned char derived[FL_USER_SIGNING_PUBLIC_LEN];
-    int ok;
-
-    if (!public_key || !secret || kq_account_public(secret, derived) != KQ_ACCOUNT_OK)
-        return 0;
-    ok = asm_mem_ct_equal(derived, public_key, sizeof derived) != 0;
-    mem_domain_secure_zero(derived, sizeof derived);
-    return ok;
 }
 
 static void bridge_from_row(sqlite3_stmt *st, fl_bridge_t *b) {
@@ -202,7 +187,7 @@ fl_result_t fl_bridge_request(const char *db_path, const fl_user_db_t *users,
     rel = fl_heritage_relation(actor_key, peer_key);
     if (rel != FL_HERITAGE_REL_SIBLING && rel != FL_HERITAGE_REL_OTHER_BRANCH)
         return FL_RESULT_INVAL;
-    if (!secret_is_for(users, actor_key, actor_secret))
+    if (!fl_user_db_secret_matches(users, actor_key, FL_USER_SECRET_SIGNING, actor_secret))
         return FL_RESULT_ACCES;
     /* A fresh random nonce names this bridge, so its signatures stand for it alone. */
     if (fl_random_bytes(nonce, sizeof nonce) != 0)
@@ -264,7 +249,7 @@ fl_result_t fl_bridge_accept(const char *db_path, const fl_user_db_t *users, con
     }
     /* The requesting side cannot accept its own request: consent comes from the other branch. */
     if (!fl_heritage_is_ancestor_or_self(actor_key, b.b_key) ||
-        !secret_is_for(users, actor_key, actor_secret)) {
+        !fl_user_db_secret_matches(users, actor_key, FL_USER_SECRET_SIGNING, actor_secret)) {
         sqlite3_close(sql);
         return FL_RESULT_ACCES;
     }
