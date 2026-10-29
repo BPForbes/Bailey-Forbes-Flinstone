@@ -33,7 +33,7 @@ other Coders so owned paths do not collide
 ([side-work.md](side-work.md)). Do not commit on the shared
 checkout. Keep secrets out of git. Prefer idempotent,
 non-interactive scripts. Security's SOC 2 review comes before QA
-— and does not authorize a push. Write `push-<topic>.json` and
+— and does not authorize a push. Write `push-<seat-id>.json` and
 any Coder→Reviewer `qa`
 rows **before the first review**. Ask Researcher for a reuse
 map before duplicating code.
@@ -67,8 +67,8 @@ Owns [qa-publish-policy.md](qa-publish-policy.md).
 Minimum: repo-appropriate fast validation; the Security seat's SOC 2 verdict; workflow / chart / Terraform lint; secret scan if in CI;
 smoke; rollback notes; `git diff --stat <integration-base>...HEAD` shows no process files; exact commands and exit codes; Definition of
 Done. **Only QA may give the OK to push.** Fail → Handoff
-`To: Coder` from a **VM** review. Open `triage-<id>.md` when
-blocked / sent back / not pleased; Research *N* joins the Coder
+`To: Coder` from a **VM** review. Open `triage-<seat-id>.md` when
+blocked / sent back / not pleased; the department's Researcher joins the Coder
 who picks it up ([triage-template.md](triage-template.md)). After
 PASS, list thoughts to finalize. Orchestrator keep-commit(s)
 from the approved side-branch tree, then one push.

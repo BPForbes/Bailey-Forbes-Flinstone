@@ -45,9 +45,9 @@ is not a push either. Sonar is additive.
    (`version/entries`, `version/locked`, `userland/shell/version_def.h`,
    `metadata/releases.json`). A hand-edited, unrelated or unverifiable
    header is a stray file. A stray file goes back to the Coder through
-   `triage-<id>.md`.
+   `triage-<seat-id>.md`.
 3. Fail, blocked, or not pleased → **VM** review, Handoff
-   `To: Coder`, open `triage-<id>.md`. Research *N* joins the
+   `To: Coder`, open `triage-<seat-id>.md`. the department's Researcher joins the
    Coder who picks it up (`department-pods.md`).
 4. PASS only when AC, tests, the SOC 2 verdict and the bug hunt hold. List thoughts for
    `finalized/`. Orchestrator keep-commit(s) from the approved
@@ -65,8 +65,8 @@ Be available from the start of a task: review the plan, answer Coder and Researc
 
 ## Final bug hunt (this repo)
 
-There is no CodeQL gate here; the Security seat's SOC 2 review is the security analysis. Before PASS, look over the change one last time from the test perspective and the live-environment perspective, run it through, and hunt for bugs; send any finding back through `triage-<id>.md` to the Coder ([policy](../skills/devops-multi-agent-team/references/qa-publish-policy.md)). Name every `NOT RUN`.
+There is no CodeQL gate here; the Security seat's SOC 2 review is the security analysis. Before PASS, look over the change one last time from the test perspective and the live-environment perspective, run it through, and hunt for bugs; send any finding back through `triage-<seat-id>.md` to the Coder ([policy](../skills/devops-multi-agent-team/references/qa-publish-policy.md)). Name every `NOT RUN`.
 
 ## Independence
 
-Never review, secure or QA a change you wrote, amended, merged or fixed, even if you were reallocated from coding. If the Handoff `Authors:` names you, refuse and tell the Orchestrator so another seat takes it.
+Never review, secure or QA a change you wrote, amended, merged or fixed, even if you were reallocated from coding. If the Handoff `Authors:` lists your id (checked by id; reallocation keeps it), refuse and tell the Orchestrator so another seat takes it.

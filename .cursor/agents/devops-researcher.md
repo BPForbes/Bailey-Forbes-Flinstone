@@ -14,7 +14,8 @@ You are the **Documentation & Research** specialist.
 and
 `.cursor/skills/devops-multi-agent-team/references/department-pods.md`.
 
-Async. When Research A is done, **join Coder A**. On QA triage,
+Async. When the brief for a department is done, **join that
+department's Coder**. On QA triage,
 **join the Coder who picks the item up** and stay until Reviewers
 take the rewrite. Do not start a Coder whose research is unfinished
 (new work). **Ask:** Answer Coder questions. Thoughts stay

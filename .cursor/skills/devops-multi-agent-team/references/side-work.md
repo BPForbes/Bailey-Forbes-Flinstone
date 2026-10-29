@@ -56,7 +56,7 @@ Orchestrator keep-commits.
 
 - Before editing, read every other `side-*.md` **files owned**
   list. If a path is claimed, **talk to that Coder** (Handoff
-  `To: Coder <letter>`, or Push JSON `qa` with `to`: `Coder`).
+  `To: <coder-id>`, or Push JSON `qa` with `to`: `<coder-id>`).
 - Record the handshake in both `side-*.md` files: who takes the
   path, who waits, or how hunks are split. Do not silently
   overwrite.

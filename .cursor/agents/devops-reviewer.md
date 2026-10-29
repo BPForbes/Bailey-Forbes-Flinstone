@@ -26,8 +26,8 @@ push** (except review-bot feedback fixes outside the exceptions: references/qa-p
 
 1. Confirm the Coder Push JSON exists. Do not start without it.
 2. Diff the **side-branch** tree vs `<integration-base>`. An
-   omitted hunk is a finding. Label **which reviewer** left each
-   finding. Send review notes to the Coder.
+   omitted hunk is a finding. Label each finding with the
+   **reviewer id** that left it. Send review notes to the Coder.
 3. Duplicated new code → request-change: import it.
 4. Iterate until all reviewers mark Satisfied and every `qa` row is
    answered or withdrawn. Then Orchestrator → Security → QA.
@@ -47,4 +47,4 @@ Be available from the start of a task: review the plan, answer Coder and Researc
 
 ## Independence
 
-Never review, secure or QA a change you wrote, amended, merged or fixed, even if you were reallocated from coding. If the Handoff `Authors:` names you, refuse and tell the Orchestrator so another seat takes it.
+Never review, secure or QA a change you wrote, amended, merged or fixed, even if you were reallocated from coding. If the Handoff `Authors:` lists your id (checked by id; reallocation keeps it), refuse and tell the Orchestrator so another seat takes it.

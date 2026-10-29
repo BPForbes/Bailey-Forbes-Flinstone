@@ -15,9 +15,14 @@ any other file under `.cursor/thoughts/`. `.cursor/reviews/` is
 obsolete. Push JSON lives in `non-finalized/`
 ([push-json.md](push-json.md)).
 
-**non-finalized:** `review-<topic>.md`, `goal-*.md`, research
-briefs, `repro-*.md`, handoffs, `push-*.json`, `triage-<id>.md`,
-`side-<dept>.md`, `cr-<topic>.md`
+**non-finalized:** a seat's files are named `<kind>-<seat-id>.md`
+(`.json` for Push JSON), with its own id from
+[role-identity.md](role-identity.md) (Seat ids): `handoff-`,
+`review-` (the thread, named for the Reviewer who opens it),
+`security-`, `qa-`, `triage-` (named for the QA seat that opens it;
+add `-<n>` for a second), `goal-`, `research-`, `push-` (add `-<topic>` to any of them when a seat works
+several items). Also
+`repro-<topic>.md`, `side-<dept>.md`, `cr-<topic>.md`
 ([triage-template.md](triage-template.md),
 [side-work.md](side-work.md)). **finalized** after QA PASS: move
 matching files locally; do not `git add`.

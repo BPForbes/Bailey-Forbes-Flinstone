@@ -24,8 +24,8 @@ Primary owner: **QA** (`.cursor/agents/devops-quality-engineer.md`). Reviewers m
    module or driver that repeats existing behavior is a **blocking**
    finding. Record file and line and the existing code to reuse or
    extend. Do not mark a review done while one remains.
-3. Write findings into `.cursor/thoughts/non-finalized/review-<topic>.md`.
-   Line-level feedback may also go in an uncommitted `push-<topic>.json`.
+3. Write findings into `.cursor/thoughts/non-finalized/review-<seat-id>.md`.
+   Line-level feedback may also go in an uncommitted `push-<seat-id>.json`.
 4. **Do not edit** product code, workflows, or docs to "fix" findings while acting as `/code-review`. Hand remediations to the Coder.
 5. Prefer proving a finding in a throwaway clone
    (`git clone --no-hardlinks . /tmp/probe`). A probe that must sit in

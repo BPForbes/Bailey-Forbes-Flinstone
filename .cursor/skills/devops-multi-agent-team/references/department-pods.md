@@ -1,29 +1,38 @@
 # Department pods
 
-Letters are **departments / subject matters**, not people. Teams work
+A **department** is a subject matter named by a function word, never
+a letter, and never a seat. Seats are told apart by seat id only
+([role-identity.md](role-identity.md), Seat ids). Teams work
 **dynamically**: research can run with coding; coding can run with
 review. Do not run roles as a linear 1→N queue.
 
 Read this file. Do not paste it into agent prompts.
 
-| Dept | Owns | Coder seat |
-|------|------|------------|
-| **A** | skill `SKILL.md`, `references/*`, `.cursor/agents/*` | Coder A |
-| **B** | `AGENTS.md`, `CLAUDE.md`, PR description text | Coder B |
+| Dept | Owns |
+|------|------|
+| **skill** | skill `SKILL.md`, `references/*`, `.cursor/agents/*` |
+| **rules** | `AGENTS.md`, `CLAUDE.md`, PR description text |
+
+The Orchestrator mints a Coder and a Researcher id per department
+in play (for example `coder-0a0a0a` and `researcher-0f0f0f` on
+**skill**) and records the pairing in the Handoff.
 
 ## Research → Coder
 
-- Research **A** done → Coder **A**. Research A **joins Coder A**.
-- Research **B** not done → **do not** run Coder B.
-- Same for every letter: no Coder until that department’s brief
+- The **skill** brief is done → start the **skill** Coder. Its
+  Researcher **joins that Coder**.
+- The **rules** brief is not done → **do not** run the **rules**
+  Coder.
+- Same for every department: no Coder until that department’s brief
   exists (or the Orchestrator already knows the surface).
 
 ## Reviewer primary
 
-Coder B submits → Reviewer A and Reviewer B may both review it.
-If Coder A then submits, Reviewer A **prioritizes** Coder A.
-If Coder B is still writing and Coder A has not submitted,
-Reviewer A reviews other ready code.
+The **rules** Coder submits → `reviewer-0b0b0b` and `reviewer-0c0c0c`
+may both review it. If the **skill** Coder then submits and
+`reviewer-0b0b0b` is its primary, `reviewer-0b0b0b` **prioritizes**
+it. If the **rules** Coder is still writing and the **skill** Coder
+has not submitted, `reviewer-0b0b0b` reviews other ready code.
 
 Cross-review until a coder of the **same department** submits.
 Each reviewer has a primary. If they cannot review that goal,
@@ -47,21 +56,21 @@ assessment, pass notes, then switch.
 joins other topics and **receives context + existing feedback**
 before commenting.
 
-**b.** Several reviewers in one session → **label which reviewer**
-left each finding. On send-back, priority may shift with goals.
+**b.** Several reviewers in one session → **label each finding with the
+reviewer id** that left it. On send-back, priority may shift with goals.
 
 ## Send-back (QA triage)
 
 When QA is **blocked**, **sends back**, or is **not pleased**: open
-`triage-<id>.md` from [triage-template.md](triage-template.md).
+`triage-<seat-id>.md` from [triage-template.md](triage-template.md).
 Handoff `To: Coder` from a **VM** review
 ([role-identity.md](role-identity.md)). Do not wait for a serial
 research-then-coder queue.
 
-The Coder who picks up the item owns the rewrite. Research *N* of
+The Coder who picks up the item owns the rewrite. The Researcher of
 that department **joins that Coder immediately** and stays paired
-until Reviewers take the rewrite. Same-department Research/Coder
-letter rule still applies to *new* work; triage is the exception
+until Reviewers take the rewrite. Same-department Researcher/Coder
+rule still applies to *new* work; triage is the exception
 that pairs them at once.
 
 Prioritize the assigned item when available. Pass findings when
@@ -71,7 +80,7 @@ helping on another item.
 
 - Spawn `/create-subagent` (`Task`, `run_in_background: true`) so
   pods overlap. Do not poll background subagents.
-- Do not start Coder *N* before Research *N* is done (new work).
+- Do not start a department's Coder before its Researcher is done (new work).
 - Record primaries, finish-the-line handoffs, and QA swaps.
 - Gates: no push while review is open; Security before publish;
   **only QA may give the OK to push** (review-bot feedback fixes:
@@ -118,7 +127,7 @@ resumed (SendMessage) rather than respawned.
 
 Treat every task as **several teams working the problem at the same
 time**, as if they were separate companies sharing one repo: each
-team (A, B, C, ...) has its own research, coding, review, QA and
+team (one per department in play, told apart by its seat ids) has its own research, coding, review, QA and
 security seats and its own side clone, and teams meet only through
 written handoffs, the review thread and Push JSON.
 
@@ -139,8 +148,11 @@ not the seat:
   Orchestrator does not review code it wrote or merged either: it
   merges patches and routes, and the standing seats judge.
 - The Orchestrator records authorship in the handoff (`Authors:`
-  seat ids) and checks it before sending anything to a reviewer. A
-  review by an author is void and is redone by another seat.
+  seat ids) and checks it before sending anything to a reviewer. The
+  check is by id: no seat reviews, security-checks or QAs a change
+  whose `Authors:` line lists its id, and a reallocated seat keeps
+  its id. A review by an author is void and is redone by another
+  seat.
 - Questions to a standing seat ([role-identity.md](role-identity.md))
   are fine. Asking a seat to *judge* its own change is not.
 

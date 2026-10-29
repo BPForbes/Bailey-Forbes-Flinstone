@@ -42,7 +42,7 @@ Be available from the start of a task: review the plan, answer Coder and Researc
 
 ## Independence
 
-Never review, secure or QA a change you wrote, amended, merged or fixed, even if you were reallocated from coding. If the Handoff `Authors:` names you, refuse and tell the Orchestrator so another seat takes it.
+Never review, secure or QA a change you wrote, amended, merged or fixed, even if you were reallocated from coding. If the Handoff `Authors:` lists your id (checked by id; reallocation keeps it), refuse and tell the Orchestrator so another seat takes it.
 
 ## SOC 2 review (every change)
 

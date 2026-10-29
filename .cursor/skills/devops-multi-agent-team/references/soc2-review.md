@@ -4,7 +4,7 @@ Security runs this on **every change** (except review-bot feedback
 fixes, see [qa-publish-policy.md](qa-publish-policy.md)) before QA, not only on
 "security" changes. Review as if an auditor will read it. The result
 is a `## SOC 2 review` section in the review thread (or
-`security-<topic>.md`), then Clear or Findings.
+`security-<seat-id>.md`), then Clear or Findings.
 
 ## Rules
 
@@ -79,7 +79,7 @@ and the residual risk.
 
 ```markdown
 ## SOC 2 review
-Scope: <diff, commit, files>   Authors: <seat ids>   Reviewer: <seat id>
+Scope: <diff, commit, files>   Authors: <seat ids>   Reviewer: <security seat id>
 | Criterion | Status | Evidence |
 |-----------|--------|----------|
 | CC6.1 ... | Met | file:line, test |
@@ -91,6 +91,6 @@ Verdict: Clear | Findings (blockers: n, high: n)
 ```
 
 A blocker or high finding sends the change back through
-`triage-<id>.md` to the Coder; the review is repeated on the rewrite.
+`triage-<seat-id>.md` to the Coder; the review is repeated on the rewrite.
 Clear is advice: only QA may OK a push (review-bot feedback fixes:
 see qa-publish-policy.md).

@@ -28,7 +28,7 @@ Prefer **MCP** for live CI/quality/security/ticket data; prefer
 **slash skills** for packaged workflows. Catalog:
 [references/agent-commands.md](references/agent-commands.md).
 
-Spawn `/create-subagent` (Cursor `Task`, prompts in `.cursor/agents/`).
+Spawn `/create-subagent` (Cursor `Task`, prompts in `.cursor/agents/`), naming the seat id in the spawn description.
 Frontmatter `is_background: true`; every spawn `run_in_background: true`.
 
 **Teams work in parallel and review across teams.** No one reviews,
@@ -36,10 +36,16 @@ security-checks or QAs their own change, including after being
 reallocated ([department-pods.md](references/department-pods.md),
 Multiple teams).
 
-**Teams work dynamically.** Letters (A, B, C) are departments, not
-people. Research A done → Coder A, and Research A **joins** Coder A.
-Do not start Coder B until Research B is done. Primaries,
-finish-the-line, QA A/C swap, send-backs, and QA triage pairing:
+**Seats have hash ids.** Every subagent seat is told apart by a seat
+id, `<role>-<6 hex>` (for example `coder-0a0a0a`), minted by the
+Orchestrator at spawn, never a capital letter
+([role-identity.md](references/role-identity.md), Seat ids).
+
+**Teams work dynamically.** Departments are named by function (for
+example **skill**, **rules**), not by seat. A department's brief done
+→ its Coder starts, and its Researcher **joins** that Coder. Do not
+start a department's Coder until its Researcher is done. Primaries,
+finish-the-line, QA swaps, send-backs, and QA triage pairing:
 [references/department-pods.md](references/department-pods.md).
 
 Working Markdown is under `.cursor/thoughts/` and is **gitignored**.
@@ -67,7 +73,7 @@ Security's SOC 2 review first; Clear does not authorize a push either.
    [push-json.md](references/push-json.md).
 3. Reviewers compare that JSON to the **side-branch** tree vs
    `<integration-base>` ([side-work.md](references/side-work.md))
-   in `.cursor/thoughts/non-finalized/review-<topic>.md`. An
+   in `.cursor/thoughts/non-finalized/review-<seat-id>.md`. An
    omitted or wrong hunk is a finding.
 4. Coder fixes on the side-branch, updates the Push JSON, and
    notifies Reviewers. Either side may Push again until
@@ -152,7 +158,7 @@ Do not poll background subagents.
 
 ## Team roles
 
-Label every substantive reply with the active role, e.g. `[Planner]`.
+Label every substantive reply with the active role, e.g. `[Planner]`; a spawned seat adds its id, e.g. `[Coder coder-0a0a0a]`.
 
 - **Planner** — `/goal` when the human named X. Plans in
   `.cursor/thoughts/non-finalized/`; durable docs in `docs/`.
@@ -174,7 +180,7 @@ Label every substantive reply with the active role, e.g. `[Planner]`.
 - **QA** — after Satisfied + Security Clear. `/code-review`: look;
   **do not edit**. `/repro` as needed. Fail → VM review, Handoff
   `To: Coder`. When QA is blocked, sends back, or is not pleased:
-  open `triage-<id>.md`; researchers of that department join the
+  open `triage-<seat-id>.md`; the department's Researcher joins the
   coder who picks it up
   ([department-pods.md](references/department-pods.md),
   [triage-template.md](references/triage-template.md)). Follow
@@ -212,7 +218,7 @@ push      →  NEVER until QA marks PASS
             After PASS: thoughts → finalized/ (local); one push
             that keeps approved Coder commits
 repeat    →  until PASS; QA blocked/send-back → triage;
-            Research N joins the Coder who picks it up
+            the Researcher joins the Coder who picks it up
 ```
 
 Never commit thoughts. Coders do not commit on the shared

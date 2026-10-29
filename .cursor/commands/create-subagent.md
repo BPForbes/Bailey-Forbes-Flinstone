@@ -19,7 +19,10 @@ Spawn specialized roles. They run **asynchronously in pods**, not a linear queue
    that review does not authorize a push. DO NOT PUSH, PUBLISH, OPEN OR UPDATE A PULL REQUEST,
    MERGE, OR OTHERWISE SUBMIT CODE UNTIL QA MARKS THE PUBLISH GATE PASS.
 5. Subagents accept any `/` command or the same words (`/goal`, `/code-review`, `/repro`, `/buildkite-*`, `/sonar-*`, and so on).
-6. Working Markdown goes in `.cursor/thoughts/non-finalized/` while open.
+6. Give every spawned seat a seat id (`<role>-<6 hex>`, minted by the
+   Orchestrator, see `role-identity.md` Seat ids) and put it in the
+   spawn description. Resume standing seats; do not mint a new id.
+7. Working Markdown goes in `.cursor/thoughts/non-finalized/` while open.
    Agent files set `is_background: true`. Always spawn with
    `run_in_background: true`.
 

@@ -12,7 +12,7 @@ Coder commits.
 
 ## `/goal`
 
-Write `goal-<topic>.md`. Loop until X; do not stop at a plan.
+Write `goal-<seat-id>.md`. Loop until X; do not stop at a plan.
 
 ## `/create-subagent`
 
@@ -27,7 +27,7 @@ do not push. Orchestrator pushes only after QA PASS. Agent table:
 
 **Owner: QA.** Inspect only. Confirm Coder Push JSON and
 `cr-<topic>.md`. Diff the side-branch vs `<integration-base>`
-([side-work.md](side-work.md)). Write `review-<topic>.md`.
+([side-work.md](side-work.md)). Write `review-<seat-id>.md`.
 **Do not edit** product code. Probes:
 [thoughts-layout.md](thoughts-layout.md).
 
@@ -38,7 +38,7 @@ Recreate with exact commands and exit codes. Write `repro-<topic>.md`. Repro fil
 ## `/triage`
 
 **Owner: QA.** Copy [triage-template.md](triage-template.md) to
-`triage-<id>.md`. Handoff `To: Coder`. Research *N* joins the
+`triage-<seat-id>.md`. Handoff `To: Coder`. The department's Researcher joins the
 Coder who picks it up ([department-pods.md](department-pods.md)).
 
 ## Other `/` skills
