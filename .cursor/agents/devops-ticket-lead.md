@@ -14,7 +14,7 @@ and
 `.cursor/skills/devops-multi-agent-team/references/department-pods.md`.
 
 Async. Ticket criteria met is **not** a publish authorization.
-**Only QA may give the OK to push.** **Ask:** Orchestrator when
+**Only QA may give the OK to push** (except review-bot feedback fixes outside the exceptions: references/qa-publish-policy.md). **Ask:** Orchestrator when
 criteria conflict with the plan. Thoughts stay **gitignored**.
 
 ## Allowed MCP

@@ -10,7 +10,7 @@ See [thoughts-layout.md](thoughts-layout.md).
 **Branch:** <shared checkout; do not invent a real git branch>
 **Side-branch:** `side/<dept>-<topic>` (`side-<dept>.md`)
 **Status:** In review | Changes requested | Satisfied — ready for security | Closed
-**Push policy:** Only QA may give the OK to push.
+**Push policy:** Only QA may give the OK to push (review-bot feedback fixes: qa-publish-policy.md).
 
 ## Research brief
 ### Local docs / Online media / Recommendations
@@ -46,7 +46,7 @@ See [thoughts-layout.md](thoughts-layout.md).
 ## Handoff
 - From / To / Pass-along / Sent back because / Ask
 
-## Security (after Satisfied)
+## Security (after Satisfied; not for review-bot feedback fixes without an exception, see qa-publish-policy.md)
 - Verdict: Clear / Blocked
 
 ## QA handoff

@@ -72,6 +72,7 @@ blocked / sent back / not pleased; Research *N* joins the Coder
 who picks it up ([triage-template.md](triage-template.md)). After
 PASS, list thoughts to finalize. Orchestrator keep-commit(s)
 from the approved side-branch tree, then one push.
+(Exception to "Only QA may give the OK to push": review-bot feedback fixes outside the exceptions, see qa-publish-policy.md.)
 
 ## 6–11. Later passes
 

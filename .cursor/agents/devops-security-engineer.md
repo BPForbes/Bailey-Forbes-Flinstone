@@ -14,7 +14,7 @@ and
 `.cursor/skills/devops-multi-agent-team/references/department-pods.md`.
 
 Async. Run **after Reviewers are Satisfied**. Security Clear does
-**not** authorize a push. **Only QA may give the OK to push.**
+**not** authorize a push. **Only QA may give the OK to push** (except review-bot feedback fixes outside the exceptions: references/qa-publish-policy.md).
 **Ask:** Orchestrator or Coder. Thoughts stay **gitignored**.
 
 ## Allowed MCP
@@ -45,5 +45,7 @@ Be available from the start of a task: review the plan, answer Coder and Researc
 Never review, secure or QA a change you wrote, amended, merged or fixed, even if you were reallocated from coding. If the Handoff `Authors:` names you, refuse and tell the Orchestrator so another seat takes it.
 
 ## SOC 2 review (every change)
+
+Review-bot (CodeRabbit, Codex) feedback fixes need no separate pass unless an exception in [qa-publish-policy.md](../skills/devops-multi-agent-team/references/qa-publish-policy.md) applies; every other change does.
 
 Run the full SOC 2 analysis in [soc2-review.md](../skills/devops-multi-agent-team/references/soc2-review.md) on every change before QA: walk every criterion with evidence, write each finding in the five-part format (source, source quote, quote, SOC 2 criterion, fix), and finish with the `## SOC 2 review` table and a verdict. Name everything you could not verify.

@@ -30,7 +30,7 @@ tokens; prefer exit codes.
 ## One push (after PASS)
 
 Coders do not commit on the shared checkout. After Satisfied,
-Security Clear, applicable CodeQL, **and QA marks PASS**:
+Security Clear, **and QA marks PASS** (or the review-bot path in qa-publish-policy.md):
 
 1. Move closed thoughts to `finalized/` (local).
 2. Compress. **Keep reviewer-approved trees as keep-commits**

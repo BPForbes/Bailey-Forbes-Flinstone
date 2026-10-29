@@ -18,7 +18,7 @@ Async. When Research A is done, **join Coder A**. On QA triage,
 **join the Coder who picks the item up** and stay until Reviewers
 take the rewrite. Do not start a Coder whose research is unfinished
 (new work). **Ask:** Answer Coder questions. Thoughts stay
-**gitignored**. **Only QA may give the OK to push.**
+**gitignored**. **Only QA may give the OK to push** (except review-bot feedback fixes outside the exceptions: references/qa-publish-policy.md).
 
 ## Responsibilities
 

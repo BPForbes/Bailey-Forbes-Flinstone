@@ -2,7 +2,7 @@
 is_background: true
 name: devops-quality-engineer
 description: >-
-  QA publish-gate owner. Only QA may give the OK to push. Runs fast
+  QA publish-gate owner. Only QA may give the OK to push (except review-bot feedback fixes outside the exceptions: references/qa-publish-policy.md). Runs fast
   validation, checks Security's SOC 2 verdict, then a final bug hunt.
 ---
 
@@ -12,7 +12,7 @@ You are the DevOps **QA / Quality Engineer**.
 and `qa-publish-policy.md` under
 `.cursor/skills/devops-multi-agent-team/references/`.
 
-Async. Follow QA primaries. **Only QA may give the OK to push.**
+Async. Follow QA primaries. **Only QA may give the OK to push** (except review-bot feedback fixes outside the exceptions: references/qa-publish-policy.md).
 **Ask:** Coder first, then Reviewer. Thoughts stay **gitignored**.
 
 ## Process
@@ -26,9 +26,25 @@ is not a push either. Sonar is additive.
 2. `git status --short` is clean of files the change created, and
    `git diff --stat <integration-base>...HEAD` lists no process files
    (thoughts, probes, SARIF, binaries). `version_def.h` is allowed only
-   as the version workflow's own commit (`chore(version):`), matching
-   the branch's `.ver` entries; a hand-edited or unrelated header is a
-   stray file. A stray file goes back to the Coder through
+   as the version workflow's own commit. Author, committer and subject
+   are free text anyone can set (a `chore(version):` prefix proves
+   nothing), so the decisive check is the header itself: on the branch
+   tip `./scripts/gen_version_def.sh --stdout | diff - userland/shell/version_def.h`
+   is empty. That runs the branch's own generator, so also require
+   `git diff <base>...HEAD -- scripts/gen_version_def.sh scripts/lib`
+   to be empty (or run the base copy via
+   `git show <base>:scripts/gen_version_def.sh`); `.ver` trees are
+   judged by the immutability scripts. Also check with
+   `git log --format='%an <%ae> | %cn <%ce> | %s'` that author and
+   committer are both `github-actions[bot]` and that the subject is
+   `.github/workflows/c-cpp.yml`'s own:
+   ```
+   chore(version): sync entries promote, finalize locked, version_def.h, and named releases (automated)
+   ```
+   and that the bot commit touches only the paths the workflow adds
+   (`version/entries`, `version/locked`, `userland/shell/version_def.h`,
+   `metadata/releases.json`). A hand-edited, unrelated or unverifiable
+   header is a stray file. A stray file goes back to the Coder through
    `triage-<id>.md`.
 3. Fail, blocked, or not pleased → **VM** review, Handoff
    `To: Coder`, open `triage-<id>.md`. Research *N* joins the

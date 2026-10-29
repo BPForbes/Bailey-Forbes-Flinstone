@@ -21,7 +21,7 @@ Reproduce the failure before declaring a cause.
    never `git checkout -- .` or `git stash` — the worktree is shared.
 4. Do not claim a root cause until the repro ran (or the environment cannot run it — then say so).
 5. A successful repro or fix still does **not** authorize a push.
-   **Only QA may give the OK to push.** Every change still gets Security's SOC 2 review.
+   **Only QA may give the OK to push.** Every change except review-bot feedback fixes (see qa-publish-policy.md) still gets Security's SOC 2 review.
 6. Spawn helpers with `/create-subagent` asynchronously when parallel repros help.
 7. Use any installed `/` skill that fits (`/browser-automation`, `/buildkite-*`).
 

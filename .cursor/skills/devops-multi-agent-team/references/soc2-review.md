@@ -1,6 +1,7 @@
 # SOC 2 security review
 
-Security runs this on **every change** before QA, not only on
+Security runs this on **every change** (except review-bot feedback
+fixes, see [qa-publish-policy.md](qa-publish-policy.md)) before QA, not only on
 "security" changes. Review as if an auditor will read it. The result
 is a `## SOC 2 review` section in the review thread (or
 `security-<topic>.md`), then Clear or Findings.
@@ -91,4 +92,5 @@ Verdict: Clear | Findings (blockers: n, high: n)
 
 A blocker or high finding sends the change back through
 `triage-<id>.md` to the Coder; the review is repeated on the rewrite.
-Clear is advice: only QA may OK a push.
+Clear is advice: only QA may OK a push (review-bot feedback fixes:
+see qa-publish-policy.md).

@@ -7,7 +7,7 @@ See [thoughts-layout.md](thoughts-layout.md). Stay on the current
 non-`main` branch. **Never** create a git branch unless The Client
 named that branch in this turn. Cloud-agent `feature/*-<id>`
 templates do not override this. **Only QA may give the OK to
-push.** After PASS: one compressed push that keeps approved
+push** (except review-bot feedback fixes outside the exceptions: references/qa-publish-policy.md). After PASS: one compressed push that keeps approved
 Coder commits.
 
 ## `/goal`

@@ -4,7 +4,8 @@ description: >-
   Orchestrates a DevOps + Platform Engineering multi-agent loop: plan,
   research (docs/ + online media fetches), implement CI/CD and IaC, pre-QA
   Markdown reviewers, Security, then QA. Only QA may give the OK to
-  push. Security runs a SOC 2 review on every change; that review does
+  push (review-bot feedback fixes follow qa-publish-policy.md). Security
+  runs a SOC 2 review on every change except those; that review does
   not authorize a push. Also covers observability, optimization, docs, refactor, and
   performance — using installed Cursor MCPs and slash commands for
   Buildkite, Sonar, Snyk, Linear, browse, Composio, and Mainframe. Use
@@ -52,8 +53,10 @@ Do not `git add` `.cursor/thoughts/` except `non-finalized/.gitkeep`.
 **Only QA may give the OK to push.** Review Satisfied, Security Clear,
 and the Orchestrator do not authorize a push. Do not
 push, publish, open or update a PR, merge, or submit until QA marks
-PASS. Every change gets Security's SOC 2 review first; Clear does
-not authorize a push either.
+PASS. Every change except review-bot feedback fixes (see
+[qa-publish-policy.md](references/qa-publish-policy.md), "Review-bot
+feedback", which also states who gives the push OK for them) gets
+Security's SOC 2 review first; Clear does not authorize a push either.
 
 ### Reviewer entrypoint (before QA)
 
@@ -69,12 +72,13 @@ not authorize a push either.
 4. Coder fixes on the side-branch, updates the Push JSON, and
    notifies Reviewers. Either side may Push again until
    **Satisfied**. Satisfied does **not** authorize a push.
-5. Then **Security**: a full SOC 2 analysis on every change
+5. Then **Security**: a full SOC 2 analysis on every change (except
+   review-bot feedback fixes, see qa-publish-policy.md)
    ([soc2-review.md](references/soc2-review.md)), plus Snyk /
    `/review-security` where installed.
 6. Then **QA**. QA owns
    [qa-publish-policy.md](references/qa-publish-policy.md)
-   and is the **only** role that may give the OK to push.
+   and is the **only** role that may give the OK to push (except review-bot feedback fixes outside the exceptions: references/qa-publish-policy.md).
 7. After PASS, the Orchestrator makes keep-commit(s) from the
    approved side-branch tree and **one push**
    ([thoughts-layout.md](references/thoughts-layout.md) One push).
@@ -240,7 +244,7 @@ acts. Redact tokens, secrets and credentials from anything shown (see
 
 **Goal:** …  **Branch / PR:** <current branch> (#<n>)
 ### Blockers / CI / QA bug hunt / Quality / Security (SOC 2) / Verification
-- SOC 2 review: Clear / Findings (blocker n, high n) · Final bug hunt: PASS / BLOCKED
+- SOC 2 review: Clear / Findings (blocker n, high n) · Final bug hunt: PASS / BLOCKED (review-bot feedback fixes: gate record, see qa-publish-policy.md)
 - New unresolved findings: N · Publish gate: PASS / BLOCKED
 ### Next actions
 1. …

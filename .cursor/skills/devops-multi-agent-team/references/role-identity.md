@@ -26,7 +26,7 @@ Orchestrator or the human:
 
 The three seats answer in writing (`## Q&A` in the review thread or a
 SendMessage reply) and say plainly when they do not know. An answer is
-advice: only QA may OK a push, and a seat's answer never authorizes one.
+advice: only QA may OK a push (except review-bot feedback fixes outside the exceptions: references/qa-publish-policy.md), and a seat's answer never authorizes one.
 
 Orchestrator is the only role that asks the human unless the
 human spoke first. Coder ↔ Reviewer use thread `## Q&A` and

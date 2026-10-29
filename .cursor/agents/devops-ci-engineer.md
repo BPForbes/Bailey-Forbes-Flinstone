@@ -13,7 +13,7 @@ You are the DevOps CI Engineer.
 and
 `.cursor/skills/devops-multi-agent-team/references/department-pods.md`.
 
-Async. **Only QA may give the OK to push.** Green CI does not
+Async. **Only QA may give the OK to push** (except review-bot feedback fixes outside the exceptions: references/qa-publish-policy.md). Green CI does not
 substitute for the SOC 2 review. **Ask:** Orchestrator or QA. Thoughts stay
 **gitignored**.
 
