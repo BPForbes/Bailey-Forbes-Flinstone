@@ -359,6 +359,235 @@ static int test_facade_hooks(void) {
     return 0;
 }
 
+
+/* ---- contained calls over a held directory ------------------------------ */
+
+static int read_is(fs_provider_t *prov, const fs_dir_ref_t *d, const char *name,
+                   const uint8_t *want, size_t n) {
+    uint8_t *data = NULL;
+    size_t len = 0;
+    int ok;
+
+    if (fs_provider_dir_read(prov, d, name, 4096, &data, &len) != 0)
+        return 0;
+    ok = len == n && (n == 0 || (data && memcmp(data, want, n) == 0));
+    mem_domain_free(MEM_DOMAIN_FS, data);
+    return ok;
+}
+
+static int test_dir_calls_round_trip(void) {
+    fs_provider_t *prov;
+    fs_dir_ref_t d;
+    fs_dir_file_t files[2];
+    uint8_t *data = NULL;
+    size_t len = 0;
+    uint8_t seen[3 * 8];
+
+    ASSERT(fresh_dir() == 0);
+    ASSERT((prov = fs_local_provider_create()) != NULL);
+    ASSERT(fs_provider_dir_open(prov, g_dir, &d) == 0);
+    ASSERT(d.dir && strcmp(d.dir, g_dir) == 0);
+
+    /* nothing there yet */
+    ASSERT(fs_provider_dir_exists(prov, &d, "a.bin") == 0);
+    ASSERT(fs_provider_dir_read(prov, &d, "a.bin", 64, &data, &len) != 0 && data == NULL);
+
+    /* a two-file commit lands both, byte for byte (embedded NULs kept) */
+    files[0].name = "a.bin"; files[0].data = k_blob; files[0].len = sizeof k_blob;
+    files[1].name = "b.bin"; files[1].data = k_blob; files[1].len = 4;
+    ASSERT(fs_provider_dir_commit(prov, &d, files, 2) == 0);
+    ASSERT(fs_provider_dir_exists(prov, &d, "a.bin") == 1);
+    ASSERT(read_is(prov, &d, "a.bin", k_blob, sizeof k_blob));
+    ASSERT(read_is(prov, &d, "b.bin", k_blob, 4));
+    ASSERT(count_names_with(".part") == 0 && count_names_with(".kqbak") == 0);
+
+    /* a bound smaller than the file is refused, not truncated */
+    ASSERT(fs_provider_dir_read(prov, &d, "a.bin", 2, &data, &len) == -2 && data == NULL);
+
+    /* the tail: whole 8-byte records only, the newest two of three */
+    {
+        size_t i;
+        for (i = 0; i < sizeof seen; i++) seen[i] = (uint8_t)i;
+    }
+    files[0].name = "seen.rec"; files[0].data = seen; files[0].len = sizeof seen;
+    ASSERT(fs_provider_dir_commit(prov, &d, files, 1) == 0);
+    ASSERT(fs_provider_dir_read_tail(prov, &d, "seen.rec", 8, 2, &data, &len) == 0);
+    ASSERT(len == 16 && memcmp(data, seen + 8, 16) == 0);
+    mem_domain_free(MEM_DOMAIN_FS, data);
+    ASSERT(fs_provider_dir_read_tail(prov, &d, "missing.rec", 8, 2, &data, &len) == 0
+           && data == NULL && len == 0);
+    files[0].name = "odd.rec"; files[0].data = seen; files[0].len = 9;
+    ASSERT(fs_provider_dir_commit(prov, &d, files, 1) == 0);
+    ASSERT(fs_provider_dir_read_tail(prov, &d, "odd.rec", 8, 2, &data, &len) == -1
+           && data == NULL);
+
+    /* names stay inside the held directory */
+    ASSERT(fs_provider_dir_read(prov, &d, "../x", 8, &data, &len) != 0);
+    ASSERT(fs_provider_dir_exists(prov, &d, "sub/x") == -1);
+    files[0].name = "../escape"; files[0].data = k_blob; files[0].len = 1;
+    ASSERT(fs_provider_dir_commit(prov, &d, files, 1) == -1);
+
+    fs_provider_dir_close(prov, &d);
+    ASSERT(d.fd == -1);
+    fs_provider_destroy(prov);
+    rmrf(g_dir);
+    return 0;
+}
+
+/* The held directory is what is written, not the path it was opened by: a path swapped for
+ * another directory after the open is not followed, and a link at a name is refused. */
+static int test_dir_calls_use_the_held_directory(void) {
+    fs_provider_t *prov;
+    fs_dir_ref_t d;
+    fs_dir_file_t f;
+    char land[PATH_MAX], moved[PATH_MAX], target[PATH_MAX], link[PATH_MAX], inside[PATH_MAX];
+    uint8_t *data = NULL;
+    size_t len = 0;
+
+    ASSERT(fresh_dir() == 0);
+    path_of(land, sizeof land, "land");
+    path_of(moved, sizeof moved, "moved");
+    path_of(target, sizeof target, "target.txt");
+    ASSERT(mkdir(land, 0700) == 0);
+    ASSERT((prov = fs_local_provider_create()) != NULL);
+    ASSERT(fs_provider_dir_open(prov, land, &d) == 0);
+
+    ASSERT(rename(land, moved) == 0);
+    ASSERT(mkdir(land, 0700) == 0); /* an impostor at the old path */
+    f.name = "in.bin"; f.data = k_blob; f.len = 3;
+    ASSERT(fs_provider_dir_commit(prov, &d, &f, 1) == 0);
+    ASSERT(fl_fs_join_path(inside, sizeof inside, moved, "in.bin") == 0);
+    ASSERT(exists(inside));
+    ASSERT(fl_fs_join_path(inside, sizeof inside, land, "in.bin") == 0);
+    ASSERT(!exists(inside));
+
+    /* a link planted at a name is refused for reads and for existence-by-open, not followed */
+    {
+        FILE *t = fopen(target, "wb");
+        ASSERT(t != NULL);
+        fputs("outside\n", t);
+        fclose(t);
+    }
+    ASSERT(fl_fs_join_path(link, sizeof link, moved, "ln.bin") == 0);
+    ASSERT(symlink(target, link) == 0);
+    ASSERT(fs_provider_dir_read(prov, &d, "ln.bin", 64, &data, &len) != 0 && data == NULL);
+    f.name = "ln.bin"; f.data = k_blob; f.len = 2;
+    ASSERT(fs_provider_dir_commit(prov, &d, &f, 1) == 0); /* replaces the link itself ... */
+    {
+        char got[16] = {0};
+        FILE *t = fopen(target, "rb");
+        ASSERT(t != NULL);
+        ASSERT(fread(got, 1, sizeof got - 1, t) > 0 && strcmp(got, "outside\n") == 0);
+        fclose(t); /* ... and never writes through it */
+    }
+
+    fs_provider_dir_close(prov, &d);
+    fs_provider_destroy(prov);
+    rmrf(g_dir);
+    return 0;
+}
+
+static int test_dir_calls_null_slots(void) {
+    fs_provider_t *mem = fs_memory_provider_create();
+    fs_provider_vtable_t old = { 0 };
+    fs_provider_t legacy = { &old, NULL };
+    fs_dir_ref_t d = { 7, "/x" };
+    fs_dir_file_t f = { "a", k_blob, 1 };
+    uint8_t *data = (uint8_t *)&data;
+    size_t len = 3;
+
+    ASSERT(mem);
+    ASSERT(fs_provider_dir_open(mem, "/x", &d) == -1 && d.fd == -1);
+    errno = 0;
+    ASSERT(fs_provider_dir_open(&legacy, "/x", &d) == -1 && errno == ENOSYS);
+    errno = 0;
+    ASSERT(fs_provider_dir_read(&legacy, &d, "a", 8, &data, &len) == -1 && errno == ENOSYS);
+    ASSERT(data == NULL && len == 0);
+    ASSERT(fs_provider_dir_exists(&legacy, &d, "a") == -1);
+    data = (uint8_t *)&data;
+    ASSERT(fs_provider_dir_read_tail(&legacy, &d, "a", 8, 1, &data, &len) == -1 && data == NULL);
+    ASSERT(fs_provider_dir_commit(&legacy, &d, &f, 1) == -1);
+    ASSERT(fs_provider_dir_commit(NULL, &d, &f, 1) == -1);
+    fs_provider_dir_close(&legacy, &d); /* no slot: nothing to do, no crash */
+    fs_provider_dir_close(NULL, &d);
+    fs_provider_destroy(mem);
+    return 0;
+}
+
+/* The facade: policy sees the joined display path, a denied member stops the whole commit
+ * before anything is staged, and events and the path log follow only a successful commit. */
+static int deny_one_write(fs_access_policy_t *pol, const char *u, const char *p) {
+    (void)pol; (void)u;
+    return strstr(p, "locked") == NULL;
+}
+static const fs_access_policy_vtable_t k_deny_locked_vt = { allow_all, deny_one_write, allow_all };
+
+static int test_facade_dir_calls(void) {
+    fs_provider_t *prov;
+    file_manager_service_t *svc;
+    fs_access_policy_t deny = { &k_deny_locked_vt, NULL };
+    fs_access_policy_t deny_r = { &k_deny_read_vt, NULL };
+    fs_dir_ref_t d;
+    fs_dir_file_t files[2];
+    uint8_t *data = NULL;
+    size_t len = 0;
+    char p[PATH_MAX];
+
+    ASSERT(fresh_dir() == 0);
+    path_log_init();
+    fs_events_init();
+    fs_events_subscribe(FS_EV_FILE_SAVED, on_saved, NULL);
+    ASSERT((prov = fs_local_provider_create()) != NULL);
+    ASSERT((svc = fm_service_create(prov)) != NULL);
+    fm_service_set_policy(svc, &deny);
+    ASSERT(fm_dir_open(svc, g_dir, &d) == 0);
+
+    g_saved_events = 0;
+    files[0].name = "ok.bin"; files[0].data = k_blob; files[0].len = 4;
+    files[1].name = "locked.bin"; files[1].data = k_blob; files[1].len = 4;
+    /* one member denied: neither lands, no event */
+    ASSERT(fm_dir_commit(svc, &d, files, 2) == -1);
+    path_of(p, sizeof p, "ok.bin");
+    ASSERT(!exists(p));
+    path_of(p, sizeof p, "locked.bin");
+    ASSERT(!exists(p));
+    ASSERT(g_saved_events == 0);
+    ASSERT(count_names_with(".part") == 0);
+
+    /* allowed: both land, one event each, the display path is the joined path */
+    files[1].name = "also.bin";
+    ASSERT(fm_dir_commit(svc, &d, files, 2) == 0);
+    ASSERT(g_saved_events == 2);
+    path_of(p, sizeof p, "also.bin");
+    ASSERT(exists(p) && strcmp(g_saved_path, p) == 0);
+
+    ASSERT(fm_dir_read(svc, &d, "ok.bin", 64, &data, &len) == 0 && len == 4);
+    mem_domain_free(MEM_DOMAIN_FS, data);
+    ASSERT(fm_dir_exists(svc, &d, "ok.bin") == 1);
+
+    /* read policy covers the reads and the open */
+    fm_service_set_policy(svc, &deny_r);
+    data = (uint8_t *)&data;
+    len = 3;
+    ASSERT(fm_dir_read(svc, &d, "ok.bin", 64, &data, &len) == -1 && data == NULL && len == 0);
+    ASSERT(fm_dir_exists(svc, &d, "ok.bin") == -1);
+    ASSERT(fm_dir_read_tail(svc, &d, "ok.bin", 4, 1, &data, &len) == -1);
+    {
+        fs_dir_ref_t other;
+        ASSERT(fm_dir_open(svc, g_dir, &other) == -1 && other.fd == -1);
+    }
+    ASSERT(fm_dir_commit(NULL, &d, files, 1) == -1);
+    ASSERT(fm_dir_commit(svc, &d, files, 0) == -1);
+    ASSERT(fm_dir_commit(svc, &d, files, 5) == -1);
+
+    fm_dir_close(svc, &d);
+    fm_service_destroy(svc);
+    fs_provider_destroy(prov);
+    fs_events_shutdown();
+    rmrf(g_dir);
+    return 0;
+}
+
 static int bytes_match(fs_provider_t *prov, const char *path, const uint8_t *want, size_t n) {
     uint8_t *data = NULL;
     size_t len = 0;
@@ -499,6 +728,10 @@ int main(void) {
         { "write_bytes_refuses_symlink", test_write_bytes_refuses_symlink },
         { "failed_replace_keeps_old_bytes", test_failed_replace_keeps_old_bytes },
         { "replace_keeps_mode", test_replace_keeps_mode },
+        { "dir_calls_round_trip", test_dir_calls_round_trip },
+        { "dir_calls_use_the_held_directory", test_dir_calls_use_the_held_directory },
+        { "dir_calls_null_slots", test_dir_calls_null_slots },
+        { "facade_dir_calls", test_facade_dir_calls },
     };
     int failed = 0;
     for (size_t i = 0; i < sizeof tests / sizeof tests[0]; i++) {

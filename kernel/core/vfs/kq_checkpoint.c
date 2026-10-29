@@ -1,4 +1,5 @@
 #include "kq_checkpoint.h"
+#include "kq_storage.h"
 #include "contract_p2_heritage.h"
 #include "server_shared_fs.h"
 #include "fl/path.h"
@@ -98,32 +99,126 @@ void fl_kq_encoded_free(fl_kq_encoded_t *enc) {
 #define KQ_PATH_MAX FL_FS_PATH_MAX
 
 /*
- * The landing directory. Where the contained calls exist it is held as an fd and every name
- * is used inside it, so a link planted at a name is never followed; the directory's own path
- * is trusted. Otherwise (no *at calls, or the directory cannot be opened) names are joined
- * to the directory's path and the path-based calls are used as before.
+ * Every read and write below goes through the storage table (kq_storage.h): the placement layer
+ * by default, the native shell's facade when it installs one. The checkpoints decide what a
+ * delivery means; they never open a path themselves.
  */
-typedef struct {
-    int         fd;  /* -1: path-based */
-    const char *dir;
-} kq_land_t;
-
-static void land_open(kq_land_t *l, const char *dir) {
-    l->dir = dir;
-    l->fd = -1;
-    if (fl_fs_contained_available())
-        l->fd = fl_fs_dir_open(dir); /* a failure stays -1 and is refused by land_ready */
+static int def_read_file(void *ctx, const char *path, size_t max, uint8_t **data, size_t *len) {
+    (void)ctx;
+    return fl_fs_read_file(path, max, data, len);
 }
 
-/* The path-based calls are for platforms without the contained ones only. */
-static int land_ready(const kq_land_t *l) {
-    return l->fd >= 0 || !fl_fs_contained_available();
+static int def_write_atomic(void *ctx, const char *path, const uint8_t *data, size_t len) {
+    (void)ctx;
+    return fl_fs_write_file_atomic(path, data, len);
+}
+
+/* A permission error is "cannot tell", never "absent": a container that cannot be read must
+ * not be replaced by a new one. */
+static int def_exists(void *ctx, const char *path) {
+    (void)ctx;
+    if (access(path, F_OK) == 0)
+        return 1;
+    return errno == ENOENT || errno == ENOTDIR ? 0 : -1;
+}
+
+/* Where the contained calls exist a directory that cannot be held is refused; names are then
+ * never joined to a path. Otherwise (no *at calls) the path-based calls stand in. */
+static int def_dir_open(void *ctx, const char *dir, fl_kq_dir_t *out) {
+    (void)ctx;
+    out->dir = dir;
+    out->fd = -1;
+    if (!fl_fs_contained_available())
+        return 0;
+    out->fd = fl_fs_dir_open(dir);
+    return out->fd >= 0 ? 0 : -1;
+}
+
+static void def_dir_close(void *ctx, fl_kq_dir_t *d) {
+    (void)ctx;
+    if (d->fd >= 0)
+        close(d->fd);
+    d->fd = -1;
+}
+
+static int def_dir_read(void *ctx, const fl_kq_dir_t *d, const char *name, size_t max,
+                        uint8_t **data, size_t *len) {
+    (void)ctx;
+    return fl_fs_read_file_at(d->fd, d->dir, name, max, data, len);
+}
+
+static int def_dir_exists(void *ctx, const fl_kq_dir_t *d, const char *name) {
+    (void)ctx;
+    return fl_fs_exists_at(d->fd, d->dir, name);
+}
+
+static int def_dir_read_tail(void *ctx, const fl_kq_dir_t *d, const char *name, size_t unit,
+                             size_t keep, uint8_t **data, size_t *len) {
+    (void)ctx;
+    return fl_fs_read_tail_at(d->fd, d->dir, name, unit, keep, data, len);
+}
+
+static int def_dir_commit(void *ctx, const fl_kq_dir_t *d, const fl_kq_file_out_t *files,
+                          size_t n) {
+    fl_fs_file_out_t out[FL_FS_COMMIT_FILES_MAX];
+    size_t i;
+
+    (void)ctx;
+    if (!files || n == 0 || n > FL_FS_COMMIT_FILES_MAX)
+        return -1;
+    for (i = 0; i < n; i++) {
+        out[i].name = files[i].name;
+        out[i].data = files[i].data;
+        out[i].len = files[i].len;
+    }
+    return fl_fs_commit_files(d->fd, d->dir, out, n);
+}
+
+static const fl_kq_storage_t s_default_storage = {
+    NULL,          def_read_file,     def_write_atomic,   def_exists,     def_dir_open,
+    def_dir_close, def_dir_read,      def_dir_exists,     def_dir_read_tail, def_dir_commit,
+};
+
+static const fl_kq_storage_t *s_storage = NULL;
+
+const fl_kq_storage_t *fl_kq_storage_default(void) {
+    return &s_default_storage;
+}
+
+const fl_kq_storage_t *fl_kq_cp_storage(void) {
+    return s_storage ? s_storage : &s_default_storage;
+}
+
+const fl_kq_storage_t *fl_kq_cp_set_storage(const fl_kq_storage_t *storage) {
+    const fl_kq_storage_t *was = fl_kq_cp_storage();
+
+    s_storage = storage;
+    return was;
+}
+
+/* A landing directory held for the length of one checkpoint. owned: close it at the end (a
+ * caller that passed its own held directory keeps it). */
+typedef struct {
+    const fl_kq_storage_t *st;
+    fl_kq_dir_t            dir;
+    int                    owned;
+} kq_land_t;
+
+static int land_open(kq_land_t *l, const char *dir) {
+    l->st = fl_kq_cp_storage();
+    l->dir.fd = -1;
+    l->dir.dir = dir;
+    l->owned = 0;
+    if (l->st->dir_open(l->st->ctx, dir, &l->dir) != 0)
+        return -1;
+    l->owned = 1;
+    return 0;
 }
 
 static void land_close(kq_land_t *l) {
-    if (l->fd >= 0)
-        close(l->fd);
-    l->fd = -1;
+    if (l->owned && l->st)
+        l->st->dir_close(l->st->ctx, &l->dir);
+    l->owned = 0;
 }
 
 /* Splits dest into its directory and last name; false when the name part is empty. */
@@ -150,12 +245,12 @@ static int land_split(const char *dest, char *dir, size_t dcap, const char **lea
 }
 
 static int land_read(const kq_land_t *l, const char *name, uint8_t **d, size_t *n) {
-    return fl_fs_read_file_at(l->fd, l->dir, name, FL_KQ_LETTER_MAX, d, n);
+    return l->st->dir_read(l->st->ctx, &l->dir, name, FL_KQ_LETTER_MAX, d, n);
 }
 
 /* 1 present (a link counts), 0 absent, -1 cannot tell. */
 static int land_exists(const kq_land_t *l, const char *name) {
-    return fl_fs_exists_at(l->fd, l->dir, name);
+    return l->st->dir_exists(l->st->ctx, &l->dir, name);
 }
 
 static int sidecar(const char *path, const char *suffix, char *out, size_t cap) {
@@ -223,6 +318,8 @@ fl_kq_cp_result_t fl_kq_cp_encode_with(const fl_kq_keydir_t *keys, const char *s
     kq_file_trust_t trust;
     uint8_t rev[32];
     fl_kq_cp_result_t rc = FL_KQ_CP_OK;
+    const fl_kq_storage_t *store;
+    int have_container;
     int st;
 
     if (!out || !keys || !sender_key || !sender_signing_secret || !recipient_key ||
@@ -237,13 +334,20 @@ fl_kq_cp_result_t fl_kq_cp_encode_with(const fl_kq_keydir_t *keys, const char *s
     if (sidecar(path, FL_KQ_CONTAINER_SUFFIX, container_path, sizeof container_path) != 0)
         return FL_KQ_CP_INVALID;
 
-    st = fl_fs_read_file(path, KQ_CONTENT_MAX, &content.data, &content.len);
+    store = fl_kq_cp_storage();
+    st = store->read_file(store->ctx, path, KQ_CONTENT_MAX, &content.data, &content.len);
     if (st == -2)
         return FL_KQ_CP_TOO_LARGE;
     if (st != 0)
         return FL_KQ_CP_IO;
-    /* The file's container: the one beside it, or a new one owned by the sender. */
-    if (access(container_path, F_OK) != 0) {
+    /* The file's container: the one beside it, or a new one owned by the sender. A container
+     * that cannot be looked at is an error, never a reason to start a new history over it. */
+    have_container = store->exists(store->ctx, container_path);
+    if (have_container < 0) {
+        rc = FL_KQ_CP_IO;
+        goto done;
+    }
+    if (have_container == 0) {
         uint8_t file_id[16];
 
         if (fl_random_bytes(file_id, sizeof file_id) != 0 ||
@@ -251,8 +355,8 @@ fl_kq_cp_result_t fl_kq_cp_encode_with(const fl_kq_keydir_t *keys, const char *s
             rc = FL_KQ_CP_IO;
             goto done;
         }
-    } else if (fl_fs_read_file(container_path, FL_KQ_LETTER_MAX, &container.data,
-                               &container.len) != 0 ||
+    } else if (store->read_file(store->ctx, container_path, FL_KQ_LETTER_MAX, &container.data,
+                                &container.len) != 0 ||
                drv->verify(&container, NULL) != KQ_FILE_OK) {
         /* A damaged history is refused, never silently replaced by a new one. */
         rc = FL_KQ_CP_INVALID;
@@ -285,7 +389,7 @@ fl_kq_cp_result_t fl_kq_cp_encode_with(const fl_kq_keydir_t *keys, const char *s
         goto done;
     }
     /* The new revision is kept beside the file only once it is sealed. */
-    if (fl_fs_write_file_atomic(container_path, next.data, next.len) != 0) {
+    if (store->write_atomic(store->ctx, container_path, next.data, next.len) != 0) {
         rc = FL_KQ_CP_IO;
         goto done;
     }
@@ -350,53 +454,15 @@ fl_kq_cp_result_t fl_kq_cp_cosign(const kq_file_offer_t *offer, const char *me_k
 /* Loads the newest KQ_SEEN_KEEP pairs; a longer file (older builds kept more) is read from
  * its tail. A missing file is an empty record; a damaged one (not whole pairs) is -1. */
 static int load_seen(const kq_land_t *l, const char *name, uint8_t (**seen)[64], size_t *n) {
-    FILE *f;
-    long size;
-    size_t want;
-    uint8_t (*buf)[64];
+    uint8_t *data = NULL;
+    size_t len = 0;
 
     *seen = NULL;
     *n = 0;
-    if (l->fd >= 0) {
-        int fd = fl_fs_open_read_in(l->fd, name);
-
-        if (fd < 0)
-            return errno == ENOENT ? 0 : -1;
-        f = fdopen(fd, "rb");
-        if (!f) {
-            close(fd);
-            return -1;
-        }
-    } else {
-        char path[KQ_PATH_MAX];
-
-        if (fl_fs_join_path(path, sizeof path, l->dir, name) != 0)
-            return -1;
-        f = fopen(path, "rb");
-        if (!f)
-            return access(path, F_OK) == 0 ? -1 : 0;
-    }
-    if (fseek(f, 0, SEEK_END) != 0 || (size = ftell(f)) < 0 || size % 64 != 0) {
-        fclose(f);
+    if (l->st->dir_read_tail(l->st->ctx, &l->dir, name, 64u, KQ_SEEN_KEEP, &data, &len) != 0)
         return -1;
-    }
-    want = (size_t)size / 64u;
-    if (want > KQ_SEEN_KEEP)
-        want = KQ_SEEN_KEEP;
-    if (want == 0) {
-        fclose(f);
-        return 0;
-    }
-    buf = (uint8_t (*)[64])mem_domain_alloc(MEM_DOMAIN_FS, want * 64u);
-    if (!buf || fseek(f, size - (long)(want * 64u), SEEK_SET) != 0 ||
-        fread(buf, 64u, want, f) != want) {
-        mem_domain_free(MEM_DOMAIN_FS, buf);
-        fclose(f);
-        return -1;
-    }
-    fclose(f);
-    *seen = buf;
-    *n = want;
+    *seen = (uint8_t(*)[64])data;
+    *n = len / 64u;
     return 0;
 }
 
@@ -427,17 +493,19 @@ static int local_holds(const fl_kq_driver_t *drv, const kq_land_t *l, const char
     return rc == KQ_FILE_NO_REVISION ? 0 : -2;
 }
 
-fl_kq_cp_result_t fl_kq_cp_decode_with(const fl_kq_keydir_t *keys, const char *sender_key,
-                                       const uint8_t sender_signing_public[32],
-                                       const char *me_key, const uint8_t box_secret[32],
-                                       const fl_kq_buf_t *letter, const kq_file_offer_t *offer,
-                                       const uint8_t my_sig[64], const char *dest_path) {
+/*
+ * The decode steps, over a landing directory the caller holds (landp, the leaf's name inside
+ * it). Every read and write of the delivery goes through that directory and the storage table.
+ */
+static fl_kq_cp_result_t decode_core(const fl_kq_keydir_t *keys, const char *sender_key,
+                                     const uint8_t sender_signing_public[32],
+                                     const char *me_key, const uint8_t box_secret[32],
+                                     const fl_kq_buf_t *letter, const kq_file_offer_t *offer,
+                                     const uint8_t my_sig[64], kq_land_t *landp,
+                                     const char *leaf) {
     const fl_kq_driver_t *drv = fl_kq_driver_get();
-    char land_dir[KQ_PATH_MAX];
-    const char *leaf = NULL;
     char container_name[KQ_PATH_MAX];
     char seen_name[KQ_PATH_MAX];
-    kq_land_t land = {-1, NULL};
     fl_kq_buf_t opened = {0};
     fl_kq_buf_t cosigned = {0};
     fl_kq_buf_t payload = {0};
@@ -453,24 +521,13 @@ fl_kq_cp_result_t fl_kq_cp_decode_with(const fl_kq_keydir_t *keys, const char *s
     fl_kq_cp_result_t rc = FL_KQ_CP_OK;
     int st;
 
-    if (!keys || !sender_key || !sender_signing_public || !me_key || !box_secret || !letter ||
-        !offer || !my_sig || !dest_path)
-        return FL_KQ_CP_INVALID;
     if (!drv)
         return FL_KQ_CP_NO_DRIVER;
-    if (land_split(dest_path, land_dir, sizeof land_dir, &leaf) != 0 ||
-        sidecar(leaf, FL_KQ_CONTAINER_SUFFIX, container_name, sizeof container_name) != 0 ||
+    if (sidecar(leaf, FL_KQ_CONTAINER_SUFFIX, container_name, sizeof container_name) != 0 ||
         sidecar(leaf, FL_KQ_SEEN_SUFFIX, seen_name, sizeof seen_name) != 0)
         return FL_KQ_CP_INVALID;
-    /* The quarantine gate applies here as on the share's own landings (either spelling). */
-    if (fl_server_shared_path_is_expired_quarantine(land_dir) ||
-        fl_server_shared_path_is_expired_quarantine(dest_path))
-        return FL_KQ_CP_IO;
-    land_open(&land, land_dir);
-    if (!land_ready(&land))
-        return FL_KQ_CP_IO;
     /* Never overwrite a file this store does not track. */
-    if (land_exists(&land, leaf) == 1 && land_exists(&land, seen_name) != 1) {
+    if (land_exists(landp, leaf) == 1 && land_exists(landp, seen_name) != 1) {
         rc = FL_KQ_CP_EXISTS;
         goto done;
     }
@@ -501,7 +558,7 @@ fl_kq_cp_result_t fl_kq_cp_decode_with(const fl_kq_keydir_t *keys, const char *s
         goto done;
     }
 
-    if (load_seen(&land, seen_name, &seen, &nseen) != 0) {
+    if (load_seen(landp, seen_name, &seen, &nseen) != 0) {
         rc = FL_KQ_CP_IO;
         goto done;
     }
@@ -517,7 +574,7 @@ fl_kq_cp_result_t fl_kq_cp_decode_with(const fl_kq_keydir_t *keys, const char *s
     /* Only the newest pairs are kept, so "adds a revision" is also checked against everything
      * accepted before: a revision the local container holds is never newer. */
     if (st == KQ_FILE_NEWER) {
-        int held = nseen ? local_holds(drv, &land, container_name, seen[nseen - 1] + 32, rev) : -2;
+        int held = nseen ? local_holds(drv, landp, container_name, seen[nseen - 1] + 32, rev) : -2;
 
         if (held != 0) {
             rc = held > 0 ? FL_KQ_CP_NOT_NEWER : held == -1 ? FL_KQ_CP_IO : FL_KQ_CP_INVALID;
@@ -544,7 +601,7 @@ fl_kq_cp_result_t fl_kq_cp_decode_with(const fl_kq_keydir_t *keys, const char *s
         size_t keep = nseen < KQ_SEEN_KEEP ? nseen : KQ_SEEN_KEEP - 1u;
         size_t len = (keep + 1u) * 64u;
         uint8_t *all = (uint8_t *)mem_domain_alloc(MEM_DOMAIN_FS, len);
-        fl_fs_file_out_t out[3];
+        fl_kq_file_out_t out[3];
 
         if (!all) {
             rc = FL_KQ_CP_IO;
@@ -553,21 +610,76 @@ fl_kq_cp_result_t fl_kq_cp_decode_with(const fl_kq_keydir_t *keys, const char *s
         if (keep)
             memcpy(all, seen + (nseen - keep), keep * 64u);
         memcpy(all + keep * 64u, pair, 64u);
-        out[0] = (fl_fs_file_out_t){leaf, payload.data, payload.len};
-        out[1] = (fl_fs_file_out_t){container_name, cosigned.data, cosigned.len};
-        out[2] = (fl_fs_file_out_t){seen_name, all, len};
-        if (fl_fs_commit_files(land.fd, land.dir, out, 3) != 0)
+        out[0] = (fl_kq_file_out_t){leaf, payload.data, payload.len};
+        out[1] = (fl_kq_file_out_t){container_name, cosigned.data, cosigned.len};
+        out[2] = (fl_kq_file_out_t){seen_name, all, len};
+        if (landp->st->dir_commit(landp->st->ctx, &landp->dir, out, 3) != 0)
             rc = FL_KQ_CP_IO;
         mem_domain_free(MEM_DOMAIN_FS, all);
     }
 
 done:
-    land_close(&land);
     mem_domain_free(MEM_DOMAIN_FS, seen);
     fl_kq_buf_free(&opened);
     fl_kq_buf_free(&cosigned);
     fl_kq_buf_free(&payload);
     return rc;
+}
+
+fl_kq_cp_result_t fl_kq_cp_decode_with(const fl_kq_keydir_t *keys, const char *sender_key,
+                                       const uint8_t sender_signing_public[32],
+                                       const char *me_key, const uint8_t box_secret[32],
+                                       const fl_kq_buf_t *letter, const kq_file_offer_t *offer,
+                                       const uint8_t my_sig[64], const char *dest_path) {
+    char land_dir[KQ_PATH_MAX];
+    const char *leaf = NULL;
+    kq_land_t land;
+    fl_kq_cp_result_t rc;
+
+    if (!keys || !sender_key || !sender_signing_public || !me_key || !box_secret || !letter ||
+        !offer || !my_sig || !dest_path)
+        return FL_KQ_CP_INVALID;
+    if (!fl_kq_driver_get())
+        return FL_KQ_CP_NO_DRIVER;
+    if (land_split(dest_path, land_dir, sizeof land_dir, &leaf) != 0)
+        return FL_KQ_CP_INVALID;
+    /* The quarantine gate applies here as on the share's own landings (either spelling). */
+    if (fl_server_shared_path_is_expired_quarantine(land_dir) ||
+        fl_server_shared_path_is_expired_quarantine(dest_path))
+        return FL_KQ_CP_IO;
+    if (land_open(&land, land_dir) != 0)
+        return FL_KQ_CP_IO;
+    rc = decode_core(keys, sender_key, sender_signing_public, me_key, box_secret, letter, offer,
+                     my_sig, &land, leaf);
+    land_close(&land);
+    return rc;
+}
+
+fl_kq_cp_result_t fl_kq_cp_decode_in_with(const fl_kq_keydir_t *keys, const char *sender_key,
+                                          const uint8_t sender_signing_public[32],
+                                          const char *me_key, const uint8_t box_secret[32],
+                                          const fl_kq_buf_t *letter, const kq_file_offer_t *offer,
+                                          const uint8_t my_sig[64], const fl_kq_dir_t *dir,
+                                          const char *leaf) {
+    char dest[KQ_PATH_MAX];
+    kq_land_t land;
+
+    if (!keys || !sender_key || !sender_signing_public || !me_key || !box_secret || !letter ||
+        !offer || !my_sig || !dir || !dir->dir || !leaf || !fl_fs_name_is_plain(leaf))
+        return FL_KQ_CP_INVALID;
+    if (!fl_kq_driver_get())
+        return FL_KQ_CP_NO_DRIVER;
+    if (fl_fs_join_path(dest, sizeof dest, dir->dir, leaf) != 0)
+        return FL_KQ_CP_INVALID;
+    if (fl_server_shared_path_is_expired_quarantine(dir->dir) ||
+        fl_server_shared_path_is_expired_quarantine(dest))
+        return FL_KQ_CP_IO;
+    /* The caller's own handle: used, never closed here, and never opened again by path. */
+    land.st = fl_kq_cp_storage();
+    land.dir = *dir;
+    land.owned = 0;
+    return decode_core(keys, sender_key, sender_signing_public, me_key, box_secret, letter, offer,
+                       my_sig, &land, leaf);
 }
 
 /* ---- history and the editor's permit (the local container) ------------- */
@@ -652,7 +764,8 @@ fl_kq_cp_result_t fl_kq_cp_history(const char *path, fl_kq_buf_t *lines) {
         return FL_KQ_CP_NO_DRIVER;
     if (sidecar(path, FL_KQ_CONTAINER_SUFFIX, container_path, sizeof container_path) != 0)
         return FL_KQ_CP_INVALID;
-    rc = fl_fs_read_file(container_path, FL_KQ_LETTER_MAX, &c.data, &c.len);
+    rc = fl_kq_cp_storage()->read_file(fl_kq_cp_storage()->ctx, container_path,
+                                       FL_KQ_LETTER_MAX, &c.data, &c.len);
     if (rc != 0)
         return rc == -2 ? FL_KQ_CP_TOO_LARGE : FL_KQ_CP_IO;
     rc = drv->events(&c, lines);
@@ -673,7 +786,8 @@ fl_kq_cp_result_t fl_kq_cp_head(const char *path, uint8_t rev[32]) {
         return FL_KQ_CP_NO_DRIVER;
     if (sidecar(path, FL_KQ_CONTAINER_SUFFIX, container_path, sizeof container_path) != 0)
         return FL_KQ_CP_INVALID;
-    if (fl_fs_read_file(container_path, FL_KQ_LETTER_MAX, &c.data, &c.len) != 0)
+    if (fl_kq_cp_storage()->read_file(fl_kq_cp_storage()->ctx, container_path, FL_KQ_LETTER_MAX,
+                                      &c.data, &c.len) != 0)
         return FL_KQ_CP_IO;
     rc = drv->head(&c, rev);
     if (rc == KQ_FILE_FORKED)
@@ -712,7 +826,8 @@ fl_kq_cp_result_t fl_kq_cp_reseal_with(const fl_kq_keydir_t *keys, const char *s
         return FL_KQ_CP_NO_KEY;
     if (sidecar(path, FL_KQ_CONTAINER_SUFFIX, container_path, sizeof container_path) != 0)
         return FL_KQ_CP_INVALID;
-    if (fl_fs_read_file(container_path, FL_KQ_LETTER_MAX, &container.data, &container.len) != 0)
+    if (fl_kq_cp_storage()->read_file(fl_kq_cp_storage()->ctx, container_path, FL_KQ_LETTER_MAX,
+                                      &container.data, &container.len) != 0)
         return FL_KQ_CP_IO;
     if (drv->verify(&container, NULL) != KQ_FILE_OK) {
         rc = FL_KQ_CP_INVALID;
@@ -758,7 +873,8 @@ fl_kq_cp_result_t fl_kq_cp_permit_with(const fl_kq_keydir_t *keys, const char *s
         return drv ? FL_KQ_CP_INVALID : FL_KQ_CP_NO_DRIVER;
     if (sidecar(path, FL_KQ_CONTAINER_SUFFIX, container_path, sizeof container_path) != 0)
         return FL_KQ_CP_INVALID;
-    if (fl_fs_read_file(container_path, FL_KQ_LETTER_MAX, &c.data, &c.len) != 0)
+    if (fl_kq_cp_storage()->read_file(fl_kq_cp_storage()->ctx, container_path, FL_KQ_LETTER_MAX,
+                                      &c.data, &c.len) != 0)
         return FL_KQ_CP_IO;
     /* The author's signature must verify under the keys this registry holds before the
      * supervisor adds to it: a countersignature never backs an unverified author. */
@@ -768,7 +884,8 @@ fl_kq_cp_result_t fl_kq_cp_permit_with(const fl_kq_keydir_t *keys, const char *s
         out = FL_KQ_CP_INVALID;
         goto done;
     }
-    if (fl_fs_write_file_atomic(container_path, next.data, next.len) != 0)
+    if (fl_kq_cp_storage()->write_atomic(fl_kq_cp_storage()->ctx, container_path, next.data,
+                                         next.len) != 0)
         out = FL_KQ_CP_IO;
 
 done:

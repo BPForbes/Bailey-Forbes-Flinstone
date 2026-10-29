@@ -500,6 +500,66 @@ int fl_fs_read_file_at(int dirfd, const char *dir_path, const char *name, size_t
     return fl_fs_read_file(p, max, data, len);
 }
 
+int fl_fs_read_tail_at(int dirfd, const char *dir_path, const char *name, size_t unit,
+                       size_t keep, uint8_t **data, size_t *len)
+{
+    char p[FL_FS_PATH_MAX];
+    FILE *f;
+    long size;
+    size_t want;
+    uint8_t *buf;
+
+    if (data)
+        *data = NULL;
+    if (len)
+        *len = 0;
+    if (!data || !len || !name || unit == 0 || keep == 0 || keep > SIZE_MAX / unit)
+        return -1;
+    if (dirfd >= 0) {
+        int fd = fl_fs_open_read_in(dirfd, name);
+
+        if (fd < 0)
+            return errno == ENOENT ? 0 : -1;
+        f = fdopen(fd, "rb");
+        if (!f) {
+            close(fd);
+            return -1;
+        }
+    } else {
+        if (fl_fs_contained_available()) {
+            errno = EBADF;
+            return -1;
+        }
+        if (!dir_path || fl_fs_join_path(p, sizeof p, dir_path, name) != 0)
+            return -1;
+        f = fopen(p, "rb");
+        if (!f)
+            return access(p, F_OK) == 0 ? -1 : 0;
+    }
+    if (fseek(f, 0, SEEK_END) != 0 || (size = ftell(f)) < 0 || (size_t)size % unit != 0) {
+        fclose(f);
+        return -1;
+    }
+    want = (size_t)size / unit;
+    if (want > keep)
+        want = keep;
+    if (want == 0) {
+        fclose(f);
+        return 0;
+    }
+    buf = (uint8_t *)mem_domain_alloc(MEM_DOMAIN_FS, want * unit);
+    if (!buf || fseek(f, size - (long)(want * unit), SEEK_SET) != 0 ||
+        fread(buf, unit, want, f) != want) {
+        mem_domain_free(MEM_DOMAIN_FS, buf);
+        fclose(f);
+        return -1;
+    }
+    fclose(f);
+    *data = buf;
+    *len = want * unit;
+    return 0;
+}
+
 static int land_stage(const landing_t *l, const char *name, const uint8_t *d, size_t n)
 {
     char buf[FL_FS_PATH_MAX];

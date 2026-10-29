@@ -235,7 +235,7 @@ CORE_SRCS = kernel/core/vfs/disk.c kernel/core/vfs/fat32_host.c kernel/core/vfs/
             $(NET_CORE_SRCS) \
             kernel/core/identity/user_db.c kernel/core/identity/elevation.c kernel/core/identity/path_property.c \
             kernel/core/identity/session.c kernel/core/identity/heritage.c kernel/core/identity/bridge.c kernel/core/identity/share_gate.c \
-            kernel/drivers/keyquorum/kq_driver.c kernel/core/vfs/kq_checkpoint.c kernel/core/vfs/kq_checkpoint_users.c kernel/core/vfs/kq_delivery.c kernel/core/net/net_kq_delivery.c kernel/core/net/net_kq_delivery_users.c \
+            kernel/drivers/keyquorum/kq_driver.c kernel/core/vfs/kq_checkpoint.c kernel/core/vfs/kq_checkpoint_users.c kernel/core/vfs/kq_storage_facade.c kernel/core/vfs/kq_delivery.c kernel/core/net/net_kq_delivery.c kernel/core/net/net_kq_delivery_users.c \
             kernel/core/sys/vrt.c kernel/core/sys/ipc.c kernel/core/sys/syscall.c kernel/core/vfs/vfs.c
 COMMAND_SRCS := $(wildcard userland/command/cmd_*.c) userland/command/server_file_expire.c
 # Security-features gate (SECFEAT). Default off: the netlab teaching lab and any
@@ -616,7 +616,7 @@ TEST_SRCS = BPForbes_Flinstone_Tests.c userland/shell/common.c userland/shell/ut
             $(NET_CORE_SRCS) \
             kernel/core/identity/user_db.c kernel/core/identity/elevation.c kernel/core/identity/path_property.c \
             kernel/core/identity/session.c kernel/core/identity/heritage.c kernel/core/identity/bridge.c kernel/core/identity/share_gate.c \
-            kernel/drivers/keyquorum/kq_driver.c kernel/drivers/driver_model.c kernel/core/vfs/kq_checkpoint.c kernel/core/vfs/kq_checkpoint_users.c kernel/core/vfs/kq_delivery.c kernel/core/net/net_kq_delivery.c kernel/core/net/net_kq_delivery_users.c \
+            kernel/drivers/keyquorum/kq_driver.c kernel/drivers/driver_model.c kernel/core/vfs/kq_checkpoint.c kernel/core/vfs/kq_checkpoint_users.c kernel/core/vfs/kq_storage_facade.c kernel/core/vfs/kq_delivery.c kernel/core/net/net_kq_delivery.c kernel/core/net/net_kq_delivery_users.c \
             kernel/core/sys/vrt.c kernel/core/sys/ipc.c kernel/core/sys/syscall.c
 TEST_SRCS += disk_asm.c dir_asm.c
 ifeq ($(CHANGELOG_CI),1)
@@ -970,10 +970,11 @@ test_heritage: userland/shell/common.o $(UTIL_SHELL_LINK_OBJS) $(FS_JAIL_CORE_OB
 	./tests/test_heritage
 
 .PHONY: test_kq_checkpoint
-test_kq_checkpoint: userland/shell/common.o $(UTIL_SHELL_LINK_OBJS) $(FS_JAIL_CORE_OBJS) $(FS_JAIL_SUPPORT_OBJS) kernel/core/mm/mem_domain.o $(MEM_ASM_OBJ) $(HISTORY_ASM_OBJ) $(UTIL_HISTORY_HOST_OBJS) kernel/core/vfs/kq_checkpoint.o kernel/core/vfs/kq_checkpoint_users.o kernel/core/vfs/kq_delivery.o
+test_kq_checkpoint: userland/shell/common.o $(UTIL_SHELL_LINK_OBJS) $(FS_JAIL_CORE_OBJS) $(FS_JAIL_SUPPORT_OBJS) kernel/core/mm/mem_domain.o $(MEM_ASM_OBJ) $(HISTORY_ASM_OBJ) $(UTIL_HISTORY_HOST_OBJS) kernel/core/vfs/kq_checkpoint.o kernel/core/vfs/kq_checkpoint_users.o kernel/core/vfs/kq_delivery.o kernel/core/vfs/kq_storage_facade.o userland/shell/authz_subsystem.o kernel/core/vfs/fs_provider.o kernel/core/vfs/fs_command.o kernel/core/vfs/fs_events.o kernel/core/vfs/fs_policy.o kernel/core/vfs/fs_chain.o kernel/core/vfs/fs_facade.o kernel/core/vfs/path_log.o dir_asm.o
 	$(CC) $(CFLAGS) $(TEST_SANITIZE) -c -o tests/test_kq_checkpoint.o tests/test_kq_checkpoint.c
 	$(CXX) $(CXXFLAGS) $(TEST_SANITIZE) -o tests/test_kq_checkpoint tests/test_kq_checkpoint.o \
 	  kernel/core/vfs/kq_checkpoint.o kernel/core/vfs/kq_checkpoint_users.o kernel/core/vfs/kq_delivery.o \
+	  kernel/core/vfs/kq_storage_facade.o userland/shell/authz_subsystem.o kernel/core/vfs/fs_provider.o kernel/core/vfs/fs_command.o kernel/core/vfs/fs_events.o kernel/core/vfs/fs_policy.o kernel/core/vfs/fs_chain.o kernel/core/vfs/fs_facade.o kernel/core/vfs/path_log.o dir_asm.o \
 	  userland/shell/common.o $(UTIL_SHELL_LINK_OBJS) $(FS_JAIL_CORE_OBJS) $(FS_JAIL_SUPPORT_OBJS) \
 	  kernel/core/mm/mem_domain.o $(MEM_ASM_OBJ) $(HISTORY_ASM_OBJ) $(UTIL_HISTORY_HOST_OBJS) \
 	  $(FS_JAIL_TEST_LIBS) -Wl,-z,noexecstack

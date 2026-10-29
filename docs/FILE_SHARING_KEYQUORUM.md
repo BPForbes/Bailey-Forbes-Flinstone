@@ -95,7 +95,7 @@ part.
 | KeyQuorum upload and inbox slots (`net_kq_delivery.c`) | `fl_part_buf_t` (`net_part_buf.h`), also the base of the server file share slot | offers, co-signatures and release around the ordered, bounded buffer |
 | big-endian wire fields | `net_endian.h` (`asm_net_*`, the integer helpers) | `net_codec.h`: the one bounds-checked reader and writer (`fl_codec_*`, `fl_bytes_reader_*`) |
 | `kq_open_keys`, `bridge_open_actor_key` | `cmd_open_account_keys` (`cmd_authutil.c`) | each command's own messages |
-| the store's and checkpoint's file writes | `fl_fs_mkdir_p`, `fl_fs_stage_file`, `fl_fs_write_file_atomic`, and the contained `fl_fs_dir_open` with the `fl_fs_*_in` name calls and `fl_server_shared_resolve_local_path` (`server_shared_fs.c`) | the all-or-nothing install of a file with its `.kqtf` and `.kqseen`, through one directory handle |
+| the store's and checkpoint's file writes | `fl_fs_mkdir_p`, `fl_fs_stage_file`, `fl_fs_write_file_atomic`, and the contained `fl_fs_dir_open` with the `fl_fs_*_in` name calls and `fl_server_shared_resolve_local_path` (`server_shared_fs.c`); the checkpoints reach them through the `fl_kq_storage_t` table (`kq_storage.h`), by default and over the facade (`kq_storage_facade.c`) in the native shell | the all-or-nothing install of a file with its `.kqtf` and `.kqseen`, through one directory handle |
 | `fl_user_db_keydir_t` (`kq_checkpoint_users.c`), the lab's directory (`lab_kq.c`) | `fl_kq_keydir_t` (`kq_keydir.h`): the only way the checkpoints and the host read keys | each account store's lookups: the native user store, or the lab's accounts and published keys |
 | the lab's memory primitives (`lab_kq.c`) | the same names the assembly layer provides natively | C bodies for WebAssembly, which has no assembly; secure zero is still zero plus a barrier |
 
@@ -174,11 +174,20 @@ length-prefixed, every read bounds-checked by `net_codec.h`.
 Where files go has one layer, as in KeyQuorum itself. KeyQuorum's `Storage` trait
 (`src/storage.rs`) carries the placement rules and the files ABI stores nothing; Flinstone's
 counterpart is `server_shared_fs.c` (`fl_fs_*`: staged writes, no-follow reads, the
-directory-relative landing, `fl_fs_commit_files`). The checkpoints, the delivery store, the lab and
-the local `fs_provider_t` all build on it. The provider (`read_bytes`, `write_bytes`,
-`write_atomic`, with the policy, event and path-log hooks) is the front for a user's file
-operations; the checkpoints are deliberately not routed through it, because a path argument cannot
-carry the held directory and plain leaf name that keep a landing from following a link.
+directory-relative landing, `fl_fs_commit_files`), and the checkpoints take their storage the way
+KeyQuorum's logic modules take a `Storage`. `kq_storage.h` is that table
+(`fl_kq_cp_set_storage`): a plain read, an atomic write, an existence check, and for a landing a
+held directory (`fl_kq_dir_t`, an fd with its path) with a bounded read, an existence check, a
+read of the newest records of the seen file and the all-or-nothing commit of the payload,
+container and seen record. The default table is the placement layer, which the browser lab and
+the unit tests use. The native shell installs the facade table (`kq_storage_facade.c`), so every
+checkpoint read and write is `fm_read_bytes`, `fm_write_atomic` or `fm_dir_*`: the policy asks
+before it, the write chain runs for every file of a commit before any is staged, and the save
+events and the path log follow only a commit that succeeded. Those calls are the provider's
+(`fs_provider_dir_*`, appended to the vtable; a provider without them answers ENOSYS), which is
+built on the placement layer, so a path argument is never what a landing is written through.
+`server file open` hands the decode the directory the destination resolver already holds
+(`fl_kq_cp_decode_in`), so a directory swapped after the check is not followed.
 
 The lab's WebAssembly shell builds the same code: the checkpoints (`kq_checkpoint.c`), the
 host and client (`net_kq_delivery.c`), the host's store (`kq_delivery.c`, with SQLite from the

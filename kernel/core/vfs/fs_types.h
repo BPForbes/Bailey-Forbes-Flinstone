@@ -33,6 +33,25 @@ typedef fs_node_t directory_entry_t;
  * --------------------------------------------------------------------------- */
 typedef struct fs_provider fs_provider_t;
 
+/*
+ * A held landing directory, for the contained slots at the end of the vtable below: the fd is
+ * opened once (fl_fs_dir_open) and every name is then used inside it, never joined to a path,
+ * so a link planted at a name is not followed. dir is the directory's own path, for display,
+ * policy and path logs only; no slot opens it again. fd is -1 only where the platform has no
+ * *at calls at all (fl_fs_contained_available() is 0).
+ */
+typedef struct fs_dir_ref {
+    int         fd;
+    const char *dir;
+} fs_dir_ref_t;
+
+/* One file of fs_provider_dir_commit: a plain name inside the held directory and its bytes. */
+typedef struct fs_dir_file {
+    const char    *name;
+    const uint8_t *data;
+    size_t         len;
+} fs_dir_file_t;
+
 typedef struct fs_provider_vtable {
     int (*list_entries)(fs_provider_t *p, const char *path, fs_node_t **out, int *count);
     int (*read_text)(fs_provider_t *p, const char *path, char *buf, size_t bufsiz);
@@ -52,19 +71,19 @@ typedef struct fs_provider_vtable {
      * than max), -3 (could not be opened). read_bytes hands back MEM_DOMAIN_FS memory the
      * caller wipes and releases with mem_domain_free; *data is NULL and *len 0 on failure.
      *
-     * These are path-based on purpose, and the provider sits ABOVE the placement layer, not
-     * beside it. server_shared_fs.c (fl_fs_*) is the one layer that decides how bytes land: staged
-     * writes, no-follow reads, the dirfd-relative landing (fl_fs_*_in / *_at) and the
+     * The three slots below are path-based. The provider sits ABOVE the placement layer, not
+     * beside it. server_shared_fs.c (fl_fs_*) is the one layer that decides how bytes land:
+     * staged writes, no-follow reads, the dirfd-relative landing (fl_fs_*_in / *_at) and the
      * all-or-nothing fl_fs_commit_files. The local provider is built on it (fl_fs_read_file,
-     * fl_fs_stage_file), and so are kq_checkpoint, kq_delivery, lab_kq and the server catalog.
-     * That is KeyQuorum's own split: its Storage trait (src/storage.rs) is the placement layer
-     * that carries the rules (write_new refuses to replace, rename_new never replaces), its
-     * logic modules take a Storage, and the files ABI stores nothing itself. The provider is the
-     * policy, event and path-log front for a user's file operations; a path argument cannot
-     * carry the held directory fd and plain leaf name the landing needs, so routing the
-     * checkpoints through it would only weaken them. The local provider inherits
-     * fl_fs_read_file (follows links) and fl_fs_write_file_atomic (never writes through a .part
-     * link, but rename replaces a link at the target) and claims no more.
+     * fl_fs_stage_file). That is KeyQuorum's own split: its Storage trait (src/storage.rs) is
+     * the placement layer that carries the rules (write_new refuses to replace, rename_new never
+     * replaces), its logic modules take a Storage, and the files ABI stores nothing itself. A
+     * path argument cannot carry the held directory fd and plain leaf name a landing needs, so
+     * the contained slots after write_atomic take an fs_dir_ref_t instead: the KeyQuorum
+     * checkpoints (kq_checkpoint.c) reach the provider through them, and through the facade's
+     * fm_dir_* for policy, events and path logs. The local provider inherits fl_fs_read_file
+     * (follows links) and fl_fs_write_file_atomic (never writes through a .part link, but
+     * rename replaces a link at the target) for the path-based slots and claims no more.
      */
     int (*read_bytes)(fs_provider_t *p, const char *path, size_t max, uint8_t **data, size_t *len);
     /* Binary-safe full replace (embedded NUL bytes are kept): stages <path>.part, then renames
@@ -74,6 +93,26 @@ typedef struct fs_provider_vtable {
     int (*write_bytes)(fs_provider_t *p, const char *path, const uint8_t *data, size_t len);
     /* Sibling .part file, then rename: a reader sees the old or the new file, never half. */
     int (*write_atomic)(fs_provider_t *p, const char *path, const uint8_t *data, size_t len);
+    /*
+     * Contained slots, appended after write_atomic (positional initialisers: end only; a NULL
+     * slot makes the fs_provider_dir_* wrappers answer -1, errno ENOSYS).
+     *
+     * dir_open holds dir (its own path may be a link) in *out; 0, or -1 when it cannot be held
+     * where the contained calls exist (never a silent fall back to joined paths). dir_close
+     * releases it. dir_read, dir_exists, dir_read_tail and dir_commit take one plain name (no
+     * separator, not "." or "..") inside the held directory and refuse a link at it. Returns
+     * follow fl_fs_read_file_at, fl_fs_exists_at, fl_fs_read_tail_at and fl_fs_commit_files.
+     * dir_commit replaces every file or none, 1 to 4 files.
+     */
+    int (*dir_open)(fs_provider_t *p, const char *dir, fs_dir_ref_t *out);
+    void (*dir_close)(fs_provider_t *p, fs_dir_ref_t *d);
+    int (*dir_read)(fs_provider_t *p, const fs_dir_ref_t *d, const char *name, size_t max,
+                    uint8_t **data, size_t *len);
+    int (*dir_exists)(fs_provider_t *p, const fs_dir_ref_t *d, const char *name);
+    int (*dir_read_tail)(fs_provider_t *p, const fs_dir_ref_t *d, const char *name, size_t unit,
+                         size_t keep, uint8_t **data, size_t *len);
+    int (*dir_commit)(fs_provider_t *p, const fs_dir_ref_t *d, const fs_dir_file_t *files,
+                      size_t n);
 } fs_provider_vtable_t;
 
 struct fs_provider {

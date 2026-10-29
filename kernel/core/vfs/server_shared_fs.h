@@ -17,6 +17,8 @@
  * delivery store, the lab and the local fs_provider_t all build on it; none of them writes
  * files its own way. It is the counterpart of KeyQuorum's Storage trait (src/storage.rs), which
  * likewise holds the placement rules while the logic above it only asks for a read or a write.
+ * The checkpoints ask through kq_storage.h, whose default table is this layer; the provider's
+ * contained slots (fs_provider_dir_*) and the facade's fm_dir_* are built on it as well.
  */
 
 /** Longest path the helpers below accept, including the ".part" suffix they add. */
@@ -119,6 +121,14 @@ int fl_fs_exists_at(int dirfd, const char *dir_path, const char *name);
 /** fl_fs_read_file_in for a landing directory as above (same results and ownership). */
 int fl_fs_read_file_at(int dirfd, const char *dir_path, const char *name, size_t max,
                        uint8_t **data, size_t *len);
+/**
+ * The newest keep records of a file made of whole unit-byte records, for a landing directory as
+ * above. A missing file is an empty result (0, *data NULL, *len 0); a file that is not whole
+ * records, a link at the name, or any other failure is -1. A file longer than keep records is
+ * read from its tail. *data is MEM_DOMAIN_FS memory (mem_domain_free), *len its length in bytes.
+ */
+int fl_fs_read_tail_at(int dirfd, const char *dir_path, const char *name, size_t unit,
+                       size_t keep, uint8_t **data, size_t *len);
 
 /** One file for fl_fs_commit_files: a plain name inside the landing directory and its bytes. */
 typedef struct {

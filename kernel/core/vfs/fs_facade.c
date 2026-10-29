@@ -4,6 +4,7 @@
 #include "../identity/path_property.h"
 #include "fl/authz_subsystem.h"
 #include "contract_p2_authz.h"
+#include "server_shared_fs.h"
 #include <stdlib.h>
 #include <string.h>
 #include <stdio.h>
@@ -158,6 +159,84 @@ int fm_write_atomic(file_manager_service_t *svc, const char *path, const uint8_t
         return -1;
     int r = fs_provider_write_atomic(svc->provider, path, data, len);
     if (r == 0) fm_bytes_saved(path);
+    return r;
+}
+
+/* The directory's path and a name, for the policy and the logs only. */
+static int dir_display(const fs_dir_ref_t *d, const char *name, char *out, size_t cap) {
+    if (!d || !name) return -1;
+    return fl_fs_join_path(out, cap, d->dir ? d->dir : "", name) == 0 ? 0 : -1;
+}
+
+static int can_read_path(file_manager_service_t *svc, const char *path) {
+    if (svc->policy && svc->policy->vtable && svc->policy->vtable->can_read
+        && !svc->policy->vtable->can_read(svc->policy, svc->current_user, path))
+        return 0;
+    return 1;
+}
+
+int fm_dir_open(file_manager_service_t *svc, const char *dir, fs_dir_ref_t *out) {
+    if (out) { out->fd = -1; out->dir = NULL; }
+    if (!svc || !dir || !out) return -1;
+    if (!can_read_path(svc, dir)) return -1;
+    return fs_provider_dir_open(svc->provider, dir, out);
+}
+
+void fm_dir_close(file_manager_service_t *svc, fs_dir_ref_t *d) {
+    if (svc) fs_provider_dir_close(svc->provider, d);
+}
+
+int fm_dir_read(file_manager_service_t *svc, const fs_dir_ref_t *d, const char *name, size_t max,
+                uint8_t **data, size_t *len) {
+    char shown[FL_FS_PATH_MAX];
+    int r;
+
+    if (data) *data = NULL;
+    if (len) *len = 0;
+    if (!svc || dir_display(d, name, shown, sizeof shown) != 0) return -1;
+    if (!can_read_path(svc, shown)) return -1;
+    r = fs_provider_dir_read(svc->provider, d, name, max, data, len);
+    if (r == 0) path_log_record(PATH_OP_READ, shown);
+    return r;
+}
+
+int fm_dir_exists(file_manager_service_t *svc, const fs_dir_ref_t *d, const char *name) {
+    char shown[FL_FS_PATH_MAX];
+
+    if (!svc || dir_display(d, name, shown, sizeof shown) != 0) return -1;
+    if (!can_read_path(svc, shown)) return -1;
+    return fs_provider_dir_exists(svc->provider, d, name);
+}
+
+int fm_dir_read_tail(file_manager_service_t *svc, const fs_dir_ref_t *d, const char *name,
+                     size_t unit, size_t keep, uint8_t **data, size_t *len) {
+    char shown[FL_FS_PATH_MAX];
+    int r;
+
+    if (data) *data = NULL;
+    if (len) *len = 0;
+    if (!svc || dir_display(d, name, shown, sizeof shown) != 0) return -1;
+    if (!can_read_path(svc, shown)) return -1;
+    r = fs_provider_dir_read_tail(svc->provider, d, name, unit, keep, data, len);
+    if (r == 0) path_log_record(PATH_OP_READ, shown);
+    return r;
+}
+
+int fm_dir_commit(file_manager_service_t *svc, const fs_dir_ref_t *d, const fs_dir_file_t *files,
+                  size_t n) {
+    char shown[4][FL_FS_PATH_MAX];
+    size_t i;
+    int r;
+
+    if (!svc || !d || !files || n == 0 || n > 4u) return -1;
+    /* Every member is authorised before any is staged: one denial leaves all of them alone. */
+    for (i = 0; i < n; i++) {
+        if (dir_display(d, files[i].name, shown[i], sizeof shown[i]) != 0) return -1;
+        if (fs_chain_run(&svc->write_chain, shown[i], NULL, svc) != 0) return -1;
+    }
+    r = fs_provider_dir_commit(svc->provider, d, files, n);
+    if (r == 0)
+        for (i = 0; i < n; i++) fm_bytes_saved(shown[i]);
     return r;
 }
 

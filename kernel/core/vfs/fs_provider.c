@@ -46,12 +46,23 @@ static void local_destroy(fs_provider_t *p);
 static int local_read_bytes(fs_provider_t *p, const char *path, size_t max, uint8_t **data, size_t *len);
 static int local_write_bytes(fs_provider_t *p, const char *path, const uint8_t *data, size_t len);
 static int local_write_atomic(fs_provider_t *p, const char *path, const uint8_t *data, size_t len);
+static int local_dir_open(fs_provider_t *p, const char *dir, fs_dir_ref_t *out);
+static void local_dir_close(fs_provider_t *p, fs_dir_ref_t *d);
+static int local_dir_read(fs_provider_t *p, const fs_dir_ref_t *d, const char *name, size_t max,
+                          uint8_t **data, size_t *len);
+static int local_dir_exists(fs_provider_t *p, const fs_dir_ref_t *d, const char *name);
+static int local_dir_read_tail(fs_provider_t *p, const fs_dir_ref_t *d, const char *name,
+                               size_t unit, size_t keep, uint8_t **data, size_t *len);
+static int local_dir_commit(fs_provider_t *p, const fs_dir_ref_t *d, const fs_dir_file_t *files,
+                            size_t n);
 
 static const fs_provider_vtable_t local_vtable = {
     local_list, local_read_text, local_write_text,
     local_create_file, local_create_dir, local_delete, local_move,
     local_get_metadata, local_destroy,
-    local_read_bytes, local_write_bytes, local_write_atomic
+    local_read_bytes, local_write_bytes, local_write_atomic,
+    local_dir_open, local_dir_close, local_dir_read, local_dir_exists,
+    local_dir_read_tail, local_dir_commit
 };
 
 static int local_path_ok(const char *path_for_jail) {
@@ -248,6 +259,65 @@ static int local_write_atomic(fs_provider_t *p, const char *path, const uint8_t 
     return fl_fs_write_file_atomic(path, data, len);
 }
 
+/*
+ * Contained calls: thin over the placement layer (server_shared_fs.c), which decides how a
+ * name lands. The jail is checked once, on the directory, when it is held; the names inside
+ * are plain and cannot leave it. Where the contained calls exist a directory that cannot be
+ * held is refused (the same rule as fl_fs_exists_at: never a silent path fallback).
+ */
+static int local_dir_open(fs_provider_t *p, const char *dir, fs_dir_ref_t *out) {
+    (void)p;
+    if (!dir || !out) return -1;
+    out->fd = -1;
+    out->dir = dir;
+    if (local_path_ok(dir) != 0) return -1;
+    if (!fl_fs_contained_available()) return 0;
+    out->fd = fl_fs_dir_open(dir);
+    return out->fd >= 0 ? 0 : -1;
+}
+
+static void local_dir_close(fs_provider_t *p, fs_dir_ref_t *d) {
+    (void)p;
+    if (!d) return;
+    if (d->fd >= 0) close(d->fd);
+    d->fd = -1;
+}
+
+static int local_dir_read(fs_provider_t *p, const fs_dir_ref_t *d, const char *name, size_t max,
+                          uint8_t **data, size_t *len) {
+    (void)p;
+    if (!d) return -1;
+    return fl_fs_read_file_at(d->fd, d->dir, name, max, data, len);
+}
+
+static int local_dir_exists(fs_provider_t *p, const fs_dir_ref_t *d, const char *name) {
+    (void)p;
+    if (!d) return -1;
+    return fl_fs_exists_at(d->fd, d->dir, name);
+}
+
+static int local_dir_read_tail(fs_provider_t *p, const fs_dir_ref_t *d, const char *name,
+                               size_t unit, size_t keep, uint8_t **data, size_t *len) {
+    (void)p;
+    if (!d) return -1;
+    return fl_fs_read_tail_at(d->fd, d->dir, name, unit, keep, data, len);
+}
+
+static int local_dir_commit(fs_provider_t *p, const fs_dir_ref_t *d, const fs_dir_file_t *files,
+                            size_t n) {
+    fl_fs_file_out_t out[FL_FS_COMMIT_FILES_MAX];
+    size_t i;
+
+    (void)p;
+    if (!d || !files || n == 0 || n > FL_FS_COMMIT_FILES_MAX) return -1;
+    for (i = 0; i < n; i++) {
+        out[i].name = files[i].name;
+        out[i].data = files[i].data;
+        out[i].len = files[i].len;
+    }
+    return fl_fs_commit_files(d->fd, d->dir, out, n);
+}
+
 fs_provider_t *fs_local_provider_create(void) {
     fs_provider_t *p = calloc(1, sizeof(*p));
     if (p) p->vtable = &local_vtable;
@@ -323,7 +393,9 @@ static const fs_provider_vtable_t memory_vtable = {
     memory_list, memory_read_text, memory_write_text,
     memory_create_file, memory_create_dir, memory_delete, memory_move,
     memory_get_metadata, memory_destroy,
-    memory_read_bytes, memory_write_bytes, memory_write_bytes
+    memory_read_bytes, memory_write_bytes, memory_write_bytes,
+    /* no contained slots: the memory provider has no directory to hold */
+    NULL, NULL, NULL, NULL, NULL, NULL
 };
 
 fs_provider_t *fs_memory_provider_create(void) {
@@ -369,6 +441,37 @@ int fs_provider_write_bytes(fs_provider_t *p, const char *path, const uint8_t *d
 int fs_provider_write_atomic(fs_provider_t *p, const char *path, const uint8_t *data, size_t len) {
     if (!p || !p->vtable || !p->vtable->write_atomic) { errno = ENOSYS; return -1; }
     return p->vtable->write_atomic(p, path, data, len);
+}
+int fs_provider_dir_open(fs_provider_t *p, const char *dir, fs_dir_ref_t *out) {
+    if (out) { out->fd = -1; out->dir = NULL; }
+    if (!p || !p->vtable || !p->vtable->dir_open) { errno = ENOSYS; return -1; }
+    return p->vtable->dir_open(p, dir, out);
+}
+void fs_provider_dir_close(fs_provider_t *p, fs_dir_ref_t *d) {
+    if (p && p->vtable && p->vtable->dir_close) p->vtable->dir_close(p, d);
+}
+int fs_provider_dir_read(fs_provider_t *p, const fs_dir_ref_t *d, const char *name, size_t max,
+                         uint8_t **data, size_t *len) {
+    if (data) *data = NULL;
+    if (len) *len = 0;
+    if (!p || !p->vtable || !p->vtable->dir_read) { errno = ENOSYS; return -1; }
+    return p->vtable->dir_read(p, d, name, max, data, len);
+}
+int fs_provider_dir_exists(fs_provider_t *p, const fs_dir_ref_t *d, const char *name) {
+    if (!p || !p->vtable || !p->vtable->dir_exists) { errno = ENOSYS; return -1; }
+    return p->vtable->dir_exists(p, d, name);
+}
+int fs_provider_dir_read_tail(fs_provider_t *p, const fs_dir_ref_t *d, const char *name,
+                              size_t unit, size_t keep, uint8_t **data, size_t *len) {
+    if (data) *data = NULL;
+    if (len) *len = 0;
+    if (!p || !p->vtable || !p->vtable->dir_read_tail) { errno = ENOSYS; return -1; }
+    return p->vtable->dir_read_tail(p, d, name, unit, keep, data, len);
+}
+int fs_provider_dir_commit(fs_provider_t *p, const fs_dir_ref_t *d, const fs_dir_file_t *files,
+                           size_t n) {
+    if (!p || !p->vtable || !p->vtable->dir_commit) { errno = ENOSYS; return -1; }
+    return p->vtable->dir_commit(p, d, files, n);
 }
 void fs_provider_destroy(fs_provider_t *p) {
     p->vtable->destroy(p);

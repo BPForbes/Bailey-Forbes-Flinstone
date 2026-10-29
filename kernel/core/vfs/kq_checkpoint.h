@@ -25,6 +25,7 @@
 #include "contract_result.h"
 #include "fl/driver/keyquorum.h"
 #include "kq_keydir.h"
+#include "kq_storage.h"
 
 #include <stddef.h>
 #include <stdint.h>
@@ -164,6 +165,20 @@ fl_kq_cp_result_t fl_kq_cp_decode_with(const fl_kq_keydir_t *keys, const char *s
                                        const fl_kq_buf_t *letter, const kq_file_offer_t *offer,
                                        const uint8_t my_sig[64], const char *dest_path);
 
+/**
+ * fl_kq_cp_decode_with for a landing directory the caller already holds (dir, from the
+ * storage table's dir_open or from fl_server_shared_resolve_local_path's fd) and the plain name
+ * inside it. The checkpoint uses that handle for every read and write and never opens the
+ * directory again by path, so a directory replaced after the caller checked it is not followed;
+ * the caller keeps ownership of the handle. Same results as fl_kq_cp_decode_with.
+ */
+fl_kq_cp_result_t fl_kq_cp_decode_in_with(const fl_kq_keydir_t *keys, const char *sender_key,
+                                          const uint8_t sender_signing_public[32],
+                                          const char *me_key, const uint8_t box_secret[32],
+                                          const fl_kq_buf_t *letter, const kq_file_offer_t *offer,
+                                          const uint8_t my_sig[64], const fl_kq_dir_t *dir,
+                                          const char *leaf);
+
 /* ---- the native shell's account store (kq_checkpoint_users.c) --------------------- */
 
 /* user_db.h is native-only; its type is named here so the lab can use this header. */
@@ -202,5 +217,11 @@ fl_kq_cp_result_t fl_kq_cp_decode(const fl_user_db_t *users, const char *sender_
                                   const uint8_t box_secret[32], const fl_kq_buf_t *letter,
                                   const kq_file_offer_t *offer, const uint8_t my_sig[64],
                                   const char *dest_path);
+/** fl_kq_cp_decode for a landing directory the caller holds (fl_kq_cp_decode_in_with). */
+fl_kq_cp_result_t fl_kq_cp_decode_in(const fl_user_db_t *users, const char *sender_key,
+                                     const uint8_t sender_signing_public[32], const char *me_key,
+                                     const uint8_t box_secret[32], const fl_kq_buf_t *letter,
+                                     const kq_file_offer_t *offer, const uint8_t my_sig[64],
+                                     const fl_kq_dir_t *dir, const char *leaf);
 
 #endif /* FL_KQ_CHECKPOINT_H */

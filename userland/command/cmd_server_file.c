@@ -6,6 +6,8 @@
 #include "mem_domain.h"
 #include "fl_colors.h"
 #include "kq_checkpoint.h"
+#include "kq_storage_facade.h"
+#include "fs_service_glue.h"
 #include "net_kq_delivery.h"
 #include "timekeeping.h"
 #include "net_file_delivery.h"
@@ -736,10 +738,13 @@ static int kq_decode_and_ack(const cmd_server_ctx_t *ctx, int hosting,
     }
     snprintf(dest, sizeof dest, "%s/%s", g_cwd, in->file_name);
     /* The landing is contained like every other share landing: the resolver checks the
-     * destination (no link in the path, no quarantined directory) before the decode writes. */
+     * destination (no link in the path, no quarantined directory) and hands back the held
+     * directory. The decode writes through that same handle and never opens the directory
+     * again by path, so a directory swapped after this check is not followed. */
     {
         int check_fd = -1;
         char check_leaf[256];
+        fl_kq_dir_t held;
 
         if (fl_server_shared_resolve_local_path(dest, 0, &check_fd, check_leaf,
                                                 sizeof check_leaf) != FL_RESULT_OK) {
@@ -747,10 +752,14 @@ static int kq_decode_and_ack(const cmd_server_ctx_t *ctx, int hosting,
             fl_color_warn("keyquorum: refused a delivery whose destination is not contained");
             return -1;
         }
-        close(check_fd);
+        held.fd = check_fd;
+        held.dir = g_cwd;
+        cp = fl_kq_cp_decode_in(kq_users(), in->sender, sender.signing_public,
+                                fl_session_current_key_id(), box, &letter, &in->offer, in->sig,
+                                &held, check_leaf);
+        if (check_fd >= 0)
+            close(check_fd);
     }
-    cp = fl_kq_cp_decode(kq_users(), in->sender, sender.signing_public,
-                         fl_session_current_key_id(), box, &letter, &in->offer, in->sig, dest);
     fl_kq_buf_free(&letter);
     if (cp == FL_KQ_CP_EXISTS || cp == FL_KQ_CP_IO) {
         /* A local problem with the destination, not with the letter: keep it to retry. */
@@ -930,6 +939,17 @@ static int verb_kq_open(const cmd_server_ctx_t *ctx, int argc, char **argv)
     return rc == 0 ? 0 : 1;
 }
 
+/* Every KeyQuorum checkpoint in this file reads and writes through the shell's file manager
+ * service, so its policy, events and path log see them. Without the service the checkpoints
+ * use the placement layer directly. */
+static void kq_use_storage(void)
+{
+    static fl_kq_storage_t table;
+
+    if (g_fm_service)
+        (void)fl_kq_cp_set_storage(fl_kq_storage_facade(g_fm_service, &table));
+}
+
 int cmd_server_file_run(const cmd_server_ctx_t *ctx, int argc, char **argv)
 {
     int sub_argc;
@@ -939,6 +959,7 @@ int cmd_server_file_run(const cmd_server_ctx_t *ctx, int argc, char **argv)
         fl_color_error("usage: server file <send [-t]|inbox|public|sent|accept|decline|revoke|fetch|cosign|open> ...");
         return 1;
     }
+    kq_use_storage();
     sub_argc = argc - 2;
     sub_argv = argv + 2;
     if (sub_argc <= 0) {
