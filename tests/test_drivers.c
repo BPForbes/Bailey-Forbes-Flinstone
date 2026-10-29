@@ -243,7 +243,10 @@ static int test_keyquorum_registration(void) {
             continue;
         ASSERT(info.driver_class == FL_DRV_CLASS_SECURITY);
         ASSERT(info.state == FL_DRV_STATE_STARTED);
+        /* matched is fl_kq_driver_desc(); the cast is only used after that pointer compare. */
         ASSERT(fl_kq_driver_from_desc(matched) == fl_kq_driver_get());
+        ASSERT(fl_driver_registry_contains(fl_kq_driver_desc()) == 1);
+        ASSERT(fl_kq_driver_get() != NULL);
         return 0;
     }
     return 1;
@@ -256,6 +259,58 @@ static int test_keyquorum_registration(void) {
     return 0;
 #endif
 }
+
+#if defined(FL_WITH_KEYQUORUM)
+/* The account ops are one-to-one over kq_account_*: keys, sealing, wrong password, bridge halves. */
+static int test_keyquorum_account(void) {
+    const fl_kq_driver_t *kq = fl_kq_driver_get();
+    uint8_t sec[FL_KQ_ACCOUNT_SECRET_LEN], pub[FL_KQ_ACCOUNT_PUBLIC_LEN], again[32], back[32];
+    uint8_t bsec[32], bpub[32];
+    uint8_t sealed[FL_KQ_ACCOUNT_SEALED_LEN + 8];
+    uint8_t nonce[FL_KQ_ACCOUNT_NONCE_LEN], sig[FL_KQ_ACCOUNT_SIGNATURE_LEN];
+    size_t sealed_len = 0;
+    const char *from = "Root.Flinstone.Mya", *to = "Root.Alternative.Eve";
+
+    ASSERT(kq != NULL);
+    ASSERT(kq->account_keygen && kq->account_public && kq->account_box_keygen &&
+           kq->account_box_public && kq->account_seal && kq->account_open &&
+           kq->account_bridge_sign && kq->account_bridge_verify);
+    /* Signing and box keys: the public half derives from the secret. */
+    ASSERT(kq->account_keygen(sec, pub) == FL_KQ_ACCOUNT_OK);
+    ASSERT(kq->account_public(sec, again) == FL_KQ_ACCOUNT_OK);
+    ASSERT(kq->equal(pub, again, sizeof pub) != 0);
+    ASSERT(kq->account_box_keygen(bsec, bpub) == FL_KQ_ACCOUNT_OK);
+    ASSERT(kq->account_box_public(bsec, again) == FL_KQ_ACCOUNT_OK);
+    ASSERT(kq->equal(bpub, again, sizeof bpub) != 0);
+    /* Seal and open; a wrong password is reported unchanged and yields no secret. */
+    ASSERT(kq->account_seal("pw-one", sec, sealed, sizeof sealed, &sealed_len) ==
+           FL_KQ_ACCOUNT_OK);
+    ASSERT(sealed_len == FL_KQ_ACCOUNT_SEALED_LEN);
+    ASSERT(kq->account_open("pw-one", sealed, sealed_len, back) == FL_KQ_ACCOUNT_OK);
+    ASSERT(kq->equal(sec, back, sizeof sec) != 0);
+    memset(back, 0, sizeof back);
+    ASSERT(kq->account_open("pw-two", sealed, sealed_len, back) == FL_KQ_ACCOUNT_WRONG_PASSWORD);
+    ASSERT(kq->account_seal("pw-one", sec, sealed, 4, &sealed_len) == FL_KQ_ACCOUNT_NO_ROOM);
+    /* Bridge halves: request by from, acceptance by to; a tampered signature is not valid. */
+    memset(nonce, 7, sizeof nonce);
+    ASSERT(kq->account_bridge_sign(FL_KQ_ACCOUNT_BRIDGE_REQUEST, from, to, from, nonce, sec,
+                                   sig) == FL_KQ_ACCOUNT_OK);
+    ASSERT(kq->account_bridge_verify(FL_KQ_ACCOUNT_BRIDGE_REQUEST, from, to, from, nonce, pub,
+                                     sig) == 1);
+    ASSERT(kq->account_bridge_verify(FL_KQ_ACCOUNT_BRIDGE_ACCEPT, from, to, from, nonce, pub,
+                                     sig) != 1);
+    sig[0] ^= 1u;
+    ASSERT(kq->account_bridge_verify(FL_KQ_ACCOUNT_BRIDGE_REQUEST, from, to, from, nonce, pub,
+                                     sig) == 0);
+    /* Same branch: refused. */
+    ASSERT(kq->account_bridge_sign(FL_KQ_ACCOUNT_BRIDGE_REQUEST, from, from, from, nonce, sec,
+                                   sig) == FL_KQ_ACCOUNT_INVALID);
+    kq->wipe(sec, sizeof sec);
+    kq->wipe(bsec, sizeof bsec);
+    kq->wipe(back, sizeof back);
+    return 0;
+}
+#endif
 
 /* A shutdown empties the registry and the device table; the next init registers and binds
  * again, so the device count is unchanged and exactly one "keyquorum" device is bound. */
@@ -271,6 +326,62 @@ static int test_keyquorum_survives_reinit(const char *disk_path) {
     strcpy(probe_desc.synth_id, "keyquorum");
     drivers_shutdown();
     ASSERT(fl_device_count() == 0);
+#if defined(FL_WITH_KEYQUORUM)
+    /* Empty registry: the accessor does not answer. */
+    ASSERT(fl_driver_registry_contains(NULL) == 0);
+    ASSERT(fl_driver_registry_contains(fl_kq_driver_desc()) == 0);
+    ASSERT(fl_kq_driver_get() == NULL);
+    {
+        /* Same name as the real driver, different pointer: membership is not a name match. */
+        static const fl_driver_ops_t foreign_ops;
+        static const fl_driver_desc_t foreign = {
+            FL_DRV_CLASS_SECURITY, "keyquorum", &foreign_ops, 0, 0, NULL, "keyquorum",
+        };
+
+        ASSERT(fl_driver_registry_register(&foreign) == FL_RESULT_OK);
+        ASSERT(fl_driver_registry_contains(&foreign) == 1);
+        ASSERT(fl_driver_registry_contains(fl_kq_driver_desc()) == 0);
+        ASSERT(fl_kq_driver_get() == NULL);
+        ASSERT(fl_driver_registry_register(fl_kq_driver_desc()) == FL_RESULT_OK);
+        ASSERT(fl_driver_registry_contains(fl_kq_driver_desc()) == 1);
+        ASSERT(fl_kq_driver_desc()->ops && fl_kq_driver_desc()->ops->probe);
+        ASSERT(fl_kq_driver_desc()->ops->probe(NULL) == FL_RESULT_OK);
+        ASSERT(fl_kq_driver_get() == fl_kq_driver_from_desc(fl_kq_driver_desc()));
+    }
+    drivers_shutdown();
+    ASSERT(fl_device_count() == 0);
+    ASSERT(fl_kq_driver_get() == NULL);
+    /* After a shutdown nothing re-registers the driver behind the model's back. */
+    ASSERT(fl_driver_registry_ensure(fl_kq_driver_desc()) == FL_RESULT_ERR);
+    ASSERT(fl_kq_driver_get_or_register() == NULL);
+    ASSERT(fl_driver_registry_contains(fl_kq_driver_desc()) == 0);
+    ASSERT(fl_driver_registry_count() == 0);
+    /* The resolver matches the registered pointer: a byte-for-byte copy of the descriptor,
+     * same name and ops, never resolves. */
+    {
+        static fl_kq_driver_t forged;
+
+        memcpy(&forged, fl_kq_driver_from_desc(fl_kq_driver_desc()), sizeof forged);
+        ASSERT(fl_driver_registry_register(&forged.base) == FL_RESULT_OK);
+        ASSERT(fl_driver_registry_count() == 1);
+        ASSERT(fl_kq_driver_get() == NULL);
+        drivers_shutdown();
+        ASSERT(fl_driver_registry_count() == 0);
+    }
+    /* Registered early (before drivers_init, as the session seed does), then by the model:
+     * it is in the table once, and a second register_all adds nothing. */
+    fl_driver_registry_register_all();
+    {
+        int n = fl_driver_registry_count();
+
+        ASSERT(fl_kq_driver_get_or_register() == fl_kq_driver_from_desc(fl_kq_driver_desc()));
+        ASSERT(fl_driver_registry_ensure(fl_kq_driver_desc()) == FL_RESULT_OK);
+        ASSERT(fl_driver_registry_count() == n);
+        fl_driver_registry_register_all();
+        ASSERT(fl_driver_registry_count() == n);
+    }
+    drivers_shutdown();
+#endif
     drivers_init(disk_path);
     ASSERT(fl_device_count() == before);
     for (int i = 0; i < fl_device_count(); i++) {
@@ -284,6 +395,7 @@ static int test_keyquorum_survives_reinit(const char *disk_path) {
     ASSERT(fl_device_find_synth("keyquorum") != NULL);
     ASSERT(fl_driver_registry_match(&probe_desc, &matched) == FL_RESULT_OK);
     ASSERT(matched == fl_kq_driver_desc());
+    ASSERT(fl_kq_driver_get() == fl_kq_driver_from_desc(matched));
 #else
     ASSERT(bound == 0);
     ASSERT(fl_driver_registry_match(&probe_desc, &matched) == FL_RESULT_PROBE_SKIP);
@@ -899,6 +1011,12 @@ int main(void) {
     ASSERT(driver_probe_timer() == 0);
     ASSERT(driver_probe_pic() == 0);
     printf("OK\n");
+
+#if defined(FL_WITH_KEYQUORUM)
+    printf("test_keyquorum_account... ");
+    if (test_keyquorum_account() != 0) { drivers_shutdown(); unlink(path); return 1; }
+    printf("OK\n");
+#endif
 
     printf("test_keyquorum_survives_reinit... ");
     if (test_keyquorum_survives_reinit(path) != 0) { drivers_shutdown(); unlink(path); return 1; }

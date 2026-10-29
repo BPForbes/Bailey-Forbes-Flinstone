@@ -1,8 +1,9 @@
 #include "bridge.h"
 #include "heritage.h"
-#include "keyquorum_identity.h"
+#include "fl/driver/keyquorum.h"
 #include "fl/hex.h"
 #include "fl/random.h"
+#include "fl/sqlite_schema.h"
 #include "mem_domain.h"
 #include <sqlite3.h>
 #include <stdio.h>
@@ -23,11 +24,11 @@ static fl_result_t bridge_open(const char *db_path, sqlite3 **out) {
         "  accept_sig TEXT NOT NULL DEFAULT ''"
         ");";
     /* Tables written before bridges were signed lack these: add them in place. */
-    static const char *const sig_columns[] = {"nonce", "request_sig", "accept_sig"};
-    int have[3] = {0, 0, 0};
-    sqlite3_stmt *st = NULL;
-    size_t i;
-    char *err = NULL;
+    static const fl_sqlite_column_t sig_columns[] = {
+        {"nonce", "TEXT NOT NULL DEFAULT ''"},
+        {"request_sig", "TEXT NOT NULL DEFAULT ''"},
+        {"accept_sig", "TEXT NOT NULL DEFAULT ''"},
+    };
 
     *out = NULL;
     if (!db_path || !db_path[0])
@@ -37,38 +38,12 @@ static fl_result_t bridge_open(const char *db_path, sqlite3 **out) {
         *out = NULL;
         return FL_RESULT_ERR;
     }
-    if (sqlite3_exec(*out, schema, NULL, NULL, &err) != SQLITE_OK) {
-        if (err) {
-            fprintf(stderr, "bridge: %s\n", err);
-            sqlite3_free(err);
-        }
+    if (fl_sqlite_exec(*out, "bridge", schema) != FL_RESULT_OK ||
+        fl_sqlite_ensure_columns(*out, "bridge", "bridges", sig_columns,
+                                 sizeof(sig_columns) / sizeof(sig_columns[0])) != FL_RESULT_OK) {
         sqlite3_close(*out);
         *out = NULL;
         return FL_RESULT_ERR;
-    }
-    if (sqlite3_prepare_v2(*out, "PRAGMA table_info(bridges);", -1, &st, NULL) == SQLITE_OK) {
-        while (sqlite3_step(st) == SQLITE_ROW) {
-            const char *col = (const char *)sqlite3_column_text(st, 1);
-
-            for (i = 0; col && i < 3u; i++) {
-                if (strcmp(col, sig_columns[i]) == 0)
-                    have[i] = 1;
-            }
-        }
-        sqlite3_finalize(st);
-    }
-    for (i = 0; i < 3u; i++) {
-        char alter[96];
-
-        if (have[i])
-            continue;
-        snprintf(alter, sizeof alter, "ALTER TABLE bridges ADD COLUMN %s TEXT NOT NULL DEFAULT '';",
-                 sig_columns[i]);
-        if (sqlite3_exec(*out, alter, NULL, NULL, NULL) != SQLITE_OK) {
-            sqlite3_close(*out);
-            *out = NULL;
-            return FL_RESULT_ERR;
-        }
     }
     return FL_RESULT_OK;
 }
@@ -112,6 +87,7 @@ int fl_bridge_verified(const fl_user_db_t *users, const fl_bridge_t *b) {
     unsigned char acc[FL_BRIDGE_SIGNATURE_LEN];
     const unsigned char *a_public;
     const unsigned char *by_public;
+    const fl_kq_driver_t *kq;
 
     if (!users || !b || b->state != FL_BRIDGE_STATE_ACTIVE)
         return 0;
@@ -125,10 +101,13 @@ int fl_bridge_verified(const fl_user_db_t *users, const fl_bridge_t *b) {
     by_public = fl_user_db_signing_public(users, b->accepted_by);
     if (!a_public || !by_public)
         return 0;
-    return kq_account_bridge_verify(KQ_ACCOUNT_BRIDGE_REQUEST, b->a_key, b->b_key, b->a_key, nonce,
-                                    a_public, req) == 1 &&
-           kq_account_bridge_verify(KQ_ACCOUNT_BRIDGE_ACCEPT, b->a_key, b->b_key, b->accepted_by,
-                                    nonce, by_public, acc) == 1;
+    kq = fl_kq_driver_get_or_register();
+    if (!kq)
+        return 0;
+    return kq->account_bridge_verify(FL_KQ_ACCOUNT_BRIDGE_REQUEST, b->a_key, b->b_key, b->a_key,
+                                     nonce, a_public, req) == 1 &&
+           kq->account_bridge_verify(FL_KQ_ACCOUNT_BRIDGE_ACCEPT, b->a_key, b->b_key,
+                                     b->accepted_by, nonce, by_public, acc) == 1;
 }
 
 static fl_result_t bridge_get_conn(sqlite3 *sql, int64_t id, fl_bridge_t *out) {
@@ -178,6 +157,7 @@ fl_result_t fl_bridge_request(const char *db_path, const fl_user_db_t *users,
     unsigned char nonce[FL_BRIDGE_NONCE_LEN];
     unsigned char sig[FL_BRIDGE_SIGNATURE_LEN];
     char sig_hex[2 * FL_BRIDGE_SIGNATURE_LEN + 1];
+    const fl_kq_driver_t *kq;
 
     if (id_out)
         *id_out = 0;
@@ -193,8 +173,9 @@ fl_result_t fl_bridge_request(const char *db_path, const fl_user_db_t *users,
     if (fl_random_bytes(nonce, sizeof nonce) != 0)
         return FL_RESULT_ERR;
     fl_hex_encode(nonce, sizeof nonce, nonce_hex);
-    if (kq_account_bridge_sign(KQ_ACCOUNT_BRIDGE_REQUEST, actor_key, peer_key, actor_key, nonce,
-                               actor_secret, sig) != KQ_ACCOUNT_OK)
+    kq = fl_kq_driver_get_or_register();
+    if (!kq || kq->account_bridge_sign(FL_KQ_ACCOUNT_BRIDGE_REQUEST, actor_key, peer_key,
+                                       actor_key, nonce, actor_secret, sig) != FL_KQ_ACCOUNT_OK)
         return FL_RESULT_ERR;
     fl_hex_encode(sig, sizeof sig, sig_hex);
     rc = bridge_open(db_path, &sql);
@@ -234,6 +215,7 @@ fl_result_t fl_bridge_accept(const char *db_path, const fl_user_db_t *users, con
     unsigned char nonce[FL_BRIDGE_NONCE_LEN];
     unsigned char sig[FL_BRIDGE_SIGNATURE_LEN];
     char sig_hex[2 * FL_BRIDGE_SIGNATURE_LEN + 1];
+    const fl_kq_driver_t *kq;
 
     rc = bridge_open(db_path, &sql);
     if (rc != FL_RESULT_OK)
@@ -260,14 +242,15 @@ fl_result_t fl_bridge_accept(const char *db_path, const fl_user_db_t *users, con
 
         if (fl_hex_decode(b.nonce_hex, nonce, sizeof nonce) != 0 ||
             fl_hex_decode(b.request_sig, req, sizeof req) != 0 || !a_public ||
-            kq_account_bridge_verify(KQ_ACCOUNT_BRIDGE_REQUEST, b.a_key, b.b_key, b.a_key, nonce,
-                                     a_public, req) != 1) {
+            !(kq = fl_kq_driver_get_or_register()) ||
+            kq->account_bridge_verify(FL_KQ_ACCOUNT_BRIDGE_REQUEST, b.a_key, b.b_key, b.a_key,
+                                      nonce, a_public, req) != 1) {
             sqlite3_close(sql);
             return FL_RESULT_INVAL;
         }
     }
-    if (kq_account_bridge_sign(KQ_ACCOUNT_BRIDGE_ACCEPT, b.a_key, b.b_key, actor_key, nonce,
-                               actor_secret, sig) != KQ_ACCOUNT_OK) {
+    if (kq->account_bridge_sign(FL_KQ_ACCOUNT_BRIDGE_ACCEPT, b.a_key, b.b_key, actor_key, nonce,
+                                actor_secret, sig) != FL_KQ_ACCOUNT_OK) {
         sqlite3_close(sql);
         return FL_RESULT_ERR;
     }

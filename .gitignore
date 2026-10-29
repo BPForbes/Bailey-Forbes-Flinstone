@@ -40,6 +40,7 @@ tests/test_vm_mem
 tests/test_invariants
 tests/test_fs_jail
 tests/test_heritage
+tests/test_sqlite_schema
 tests/test_audit_log
 tests/test_replay
 tests/test_userspace_connection
@@ -54,11 +55,14 @@ tests/test_netlab_sim
 tests/test_kq_checkpoint
 tests/test_kq_delivery
 tests/test_fs_helpers
+tests/test_fs_provider_bytes
 tests/test_hex
 tests/test_secret_compare
 tests/test_random
 tests/test_kq_net
 tests/test_part_buf
+tests/test_net_codec
+tests/test_kq_wire
 tests/test_server_file_meta
 tests/test_server_file_accept_path
 tests/test_channel_sidecar

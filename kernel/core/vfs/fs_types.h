@@ -2,6 +2,7 @@
 #define FS_TYPES_H
 
 #include <stddef.h>
+#include <stdint.h>
 
 #define FS_PATH_MAX 256
 #define FS_NAME_MAX 64
@@ -42,6 +43,37 @@ typedef struct fs_provider_vtable {
     int (*move_path)(fs_provider_t *p, const char *src, const char *dst);
     int (*get_metadata)(fs_provider_t *p, const char *path, fs_node_t *out);
     void (*destroy)(fs_provider_t *p);
+    /*
+     * Byte-exact slots, appended AFTER destroy: both vtables are positional initialisers, so
+     * a new slot goes at the end only. A provider that predates them leaves them NULL and the
+     * fs_provider_* wrappers answer -1 (errno ENOSYS) for a NULL slot.
+     *
+     * Return codes follow fl_fs_read_file: 0, -1 (failure, or denied by the jail), -2 (larger
+     * than max), -3 (could not be opened). read_bytes hands back MEM_DOMAIN_FS memory the
+     * caller wipes and releases with mem_domain_free; *data is NULL and *len 0 on failure.
+     *
+     * These are path-based on purpose, and the provider sits ABOVE the placement layer, not
+     * beside it. server_shared_fs.c (fl_fs_*) is the one layer that decides how bytes land: staged
+     * writes, no-follow reads, the dirfd-relative landing (fl_fs_*_in / *_at) and the
+     * all-or-nothing fl_fs_commit_files. The local provider is built on it (fl_fs_read_file,
+     * fl_fs_stage_file), and so are kq_checkpoint, kq_delivery, lab_kq and the server catalog.
+     * That is KeyQuorum's own split: its Storage trait (src/storage.rs) is the placement layer
+     * that carries the rules (write_new refuses to replace, rename_new never replaces), its
+     * logic modules take a Storage, and the files ABI stores nothing itself. The provider is the
+     * policy, event and path-log front for a user's file operations; a path argument cannot
+     * carry the held directory fd and plain leaf name the landing needs, so routing the
+     * checkpoints through it would only weaken them. The local provider inherits
+     * fl_fs_read_file (follows links) and fl_fs_write_file_atomic (never writes through a .part
+     * link, but rename replaces a link at the target) and claims no more.
+     */
+    int (*read_bytes)(fs_provider_t *p, const char *path, size_t max, uint8_t **data, size_t *len);
+    /* Binary-safe full replace (embedded NUL bytes are kept): stages <path>.part, then renames
+     * it onto path only when path is not a symlink (ELOOP). A failure leaves the old file as it
+     * was. The target gets a new inode: it keeps the old file's permission bits, but not its
+     * owner, and hard links to the old file are not updated. A new file is 0600. */
+    int (*write_bytes)(fs_provider_t *p, const char *path, const uint8_t *data, size_t len);
+    /* Sibling .part file, then rename: a reader sees the old or the new file, never half. */
+    int (*write_atomic)(fs_provider_t *p, const char *path, const uint8_t *data, size_t len);
 } fs_provider_vtable_t;
 
 struct fs_provider {

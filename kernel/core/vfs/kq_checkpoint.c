@@ -3,6 +3,7 @@
 #include "server_shared_fs.h"
 #include "fl/path.h"
 #include "fl/random.h"
+#include "mem_domain.h"
 
 #include <errno.h>
 #include <stdio.h>
@@ -386,10 +387,10 @@ static int load_seen(const kq_land_t *l, const char *name, uint8_t (**seen)[64],
         fclose(f);
         return 0;
     }
-    buf = (uint8_t (*)[64])malloc(want * 64u);
+    buf = (uint8_t (*)[64])mem_domain_alloc(MEM_DOMAIN_FS, want * 64u);
     if (!buf || fseek(f, size - (long)(want * 64u), SEEK_SET) != 0 ||
         fread(buf, 64u, want, f) != want) {
-        free(buf);
+        mem_domain_free(MEM_DOMAIN_FS, buf);
         fclose(f);
         return -1;
     }
@@ -542,7 +543,7 @@ fl_kq_cp_result_t fl_kq_cp_decode_with(const fl_kq_keydir_t *keys, const char *s
         /* The newest KQ_SEEN_KEEP - 1 pairs and this one: the record never grows past the cap. */
         size_t keep = nseen < KQ_SEEN_KEEP ? nseen : KQ_SEEN_KEEP - 1u;
         size_t len = (keep + 1u) * 64u;
-        uint8_t *all = (uint8_t *)malloc(len);
+        uint8_t *all = (uint8_t *)mem_domain_alloc(MEM_DOMAIN_FS, len);
         fl_fs_file_out_t out[3];
 
         if (!all) {
@@ -557,12 +558,12 @@ fl_kq_cp_result_t fl_kq_cp_decode_with(const fl_kq_keydir_t *keys, const char *s
         out[2] = (fl_fs_file_out_t){seen_name, all, len};
         if (fl_fs_commit_files(land.fd, land.dir, out, 3) != 0)
             rc = FL_KQ_CP_IO;
-        free(all);
+        mem_domain_free(MEM_DOMAIN_FS, all);
     }
 
 done:
     land_close(&land);
-    free(seen);
+    mem_domain_free(MEM_DOMAIN_FS, seen);
     fl_kq_buf_free(&opened);
     fl_kq_buf_free(&cosigned);
     fl_kq_buf_free(&payload);
@@ -571,76 +572,22 @@ done:
 
 /* ---- history and the editor's permit (the local container) ------------- */
 
-/* Names of the history's wire codes, for display only: a code is what the file stores and
- * what KeyQuorum reads; these strings are never parsed back. Generated from KeyQuorum's
- * src/file_history/event.rs (type and outcome codes). A code past the table prints as "?". */
-static const char *const kq_event_names[] = {
-    "TrackingStarted",
-    "EditCheckedIn",
-    "RevisionSigned",
-    "CountersignatureAdded",
-    "PolicyDecision",
-    "ShareAttempted",
-    "ShareDelivered",
-    "FileExpired",
-    "ContentDestroyed",
-    "TamperDetected",
-    "AutoMergeAttempted",
-    "AutoMergeFastForward",
-    "AutoMergeEquivalent",
-    "AutoMergeClean",
-    "AutoMergeBlocked",
-    "AutoMergeRequiresHuman",
-    "HistoryForkDetected",
-    "ContentConflictDetected",
-    "ConflictReviewAssigned",
-    "ConflictReviewEscalated",
-    "BridgeUsed",
-    "ConflictUnresolved",
-    "HistoryImported",
-    "QuorumUnlockAttempted",
-    "PasswordUnlockAttempted",
-    "ExpiredAccessAttempt",
-    "GateLinked",
-    "ShareLinkCreated",
-    "ShareLinkRedeemed",
-    "ShareLinkRevoked",
-    "ExpiryScheduled",
-    "FileRenamed",
-    "RevisionFinalized",
-    "ConflictResolved",
-    "MergeRejected",
-    "RevisionCheckedOut",
-    "VerificationRun",
-    "HistoryExported",
-    "FileRequested",
-    "ChangeRequested",
-    "RequestAnswered",
-    "LetterQueued",
-    "LetterSent",
-    "LetterDropped",
-    "LetterRefused",
-    "LetterReceived",
-    "LetterOpened",
-};
-
-static const char *const kq_outcome_names[] = {
-    "Success",
-    "Failure",
-    "Denied",
-    "Info",
-};
-
+/* Names of the history's wire codes, for display only: a code is what the file stores and what
+ * KeyQuorum reads; these strings are never parsed back. They come from KeyQuorum through the
+ * driver (kq_file_event_name / kq_file_outcome_name), so there is no table here to fall behind
+ * its enums. A code the library does not know, or no driver, prints as "?". */
 const char *fl_kq_cp_event_name(uint8_t code) {
-    if (code == 0 || code > sizeof kq_event_names / sizeof kq_event_names[0])
-        return "?";
-    return kq_event_names[code - 1u];
+    const fl_kq_driver_t *drv = fl_kq_driver_get();
+    const char *name = drv && drv->event_name ? drv->event_name(code) : NULL;
+
+    return name ? name : "?";
 }
 
 const char *fl_kq_cp_outcome_name(uint8_t code) {
-    if (code == 0 || code > sizeof kq_outcome_names / sizeof kq_outcome_names[0])
-        return "?";
-    return kq_outcome_names[code - 1u];
+    const fl_kq_driver_t *drv = fl_kq_driver_get();
+    const char *name = drv && drv->outcome_name ? drv->outcome_name(code) : NULL;
+
+    return name ? name : "?";
 }
 
 /* One history line (see keyquorum_files.h) as text: sequence, time, type name, outcome name,

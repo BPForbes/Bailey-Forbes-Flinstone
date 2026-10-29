@@ -2,6 +2,7 @@
 
 #include "password_hash.h"
 #include "timekeeping.h"
+#include "fl/sqlite_schema.h"
 
 #include <sqlite3.h>
 #include <stdio.h>
@@ -11,18 +12,6 @@
 #include <unistd.h>
 
 static sqlite3 *s_wifi_db;
-
-static fl_result_t db_exec(sqlite3 *sql, const char *stmt) {
-    char *err = NULL;
-    if (sqlite3_exec(sql, stmt, NULL, NULL, &err) != SQLITE_OK) {
-        if (err) {
-            fprintf(stderr, "wifi_db: %s\n", err);
-            sqlite3_free(err);
-        }
-        return FL_RESULT_ERR;
-    }
-    return FL_RESULT_OK;
-}
 
 static fl_result_t db_init_schema(sqlite3 *sql) {
     static const char *schema =
@@ -43,7 +32,7 @@ static fl_result_t db_init_schema(sqlite3 *sql) {
         "  last_joined_at INTEGER NOT NULL DEFAULT 0,"
         "  is_joined INTEGER NOT NULL DEFAULT 0"
         ");";
-    return db_exec(sql, schema);
+    return fl_sqlite_exec(sql, "wifi_db", schema);
 }
 
 static void bssid_to_hex(const uint8_t bssid[6], char *out, size_t out_cap) {
@@ -257,7 +246,7 @@ fl_result_t fl_wifi_db_mark_joined(const char *name, int joined) {
     if (!name || !name[0] || !s_wifi_db)
         return FL_RESULT_INVAL;
     if (joined) {
-        (void)db_exec(s_wifi_db, "UPDATE wifi_router SET is_joined=0;");
+        (void)fl_sqlite_exec(s_wifi_db, "wifi_db", "UPDATE wifi_router SET is_joined=0;");
         if (fl_wifi_db_find(name, &row) != FL_RESULT_OK) {
             memset(&row, 0, sizeof(row));
             strncpy(row.name, name, sizeof(row.name) - 1u);

@@ -15,7 +15,7 @@
 
 #include "contract_extend.h"
 
-#define FL_CONTRACT_P4_DRIVERS_REV 5
+#define FL_CONTRACT_P4_DRIVERS_REV 7
 
 #include "contract_p4_driver_model.h"
 #include "contract_p4_irq_lifecycle.h"

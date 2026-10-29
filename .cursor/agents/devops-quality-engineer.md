@@ -50,8 +50,12 @@ is not a push either. Sonar is additive.
    `To: Coder`, open `triage-<seat-id>.md`. the department's Researcher joins the
    Coder who picks it up (`department-pods.md`).
 4. PASS only when AC, tests, the SOC 2 verdict and the bug hunt hold. List thoughts for
-   `finalized/`. Orchestrator keep-commit(s) from the approved
-   side-branch tree and pushes.
+   `finalized/`. Orchestrator cherry-picks the approved
+   side-branch SHAs; a QA seat that is not an author of the integrated
+   tree re-approves it (authors: the union of the Handoff `Authors:` and the
+   Push JSON `authors` of every cherry-picked SHA, the Orchestrator's conflict
+   fixes included; refuse when your seat id or handle is in that set); the
+   Orchestrator pushes only after the human authorizes that push.
 
 ## Definition of done
 

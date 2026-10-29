@@ -17,7 +17,7 @@
 
 #include "contract_extend.h"
 
-#define FL_CONTRACT_P5_STORAGE_REV 6
+#define FL_CONTRACT_P5_STORAGE_REV 7
 
 #include "contract_p5_vfs.h"
 #include "contract_p5_pluggable_fs.h"

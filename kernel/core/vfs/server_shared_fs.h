@@ -10,7 +10,14 @@
 #define FL_SERVER_SHARED_LANDED_MAX \
     (FL_SERVER_SHARE_ID_MAX + FL_SERVER_FILE_NAME_MAX + 32u)
 
-/* ---- file helpers shared by the server share and KeyQuorum delivery ------- */
+/* ---- file helpers shared by the server share and KeyQuorum delivery -------
+ *
+ * The placement layer: how bytes land on disk (staged and renamed, never through a link, new
+ * files 0600, several files all or nothing). The server catalog, the KeyQuorum checkpoints and
+ * delivery store, the lab and the local fs_provider_t all build on it; none of them writes
+ * files its own way. It is the counterpart of KeyQuorum's Storage trait (src/storage.rs), which
+ * likewise holds the placement rules while the logic above it only asks for a read or a write.
+ */
 
 /** Longest path the helpers below accept, including the ".part" suffix they add. */
 #define FL_FS_PATH_MAX 4096u
@@ -39,8 +46,9 @@ int fl_fs_write_file_atomic(const char *path, const uint8_t *data, size_t len);
 /**
  * Reads the whole regular file at path (binary; symlinks are followed). One open, size from
  * fstat, one allocation, then an EOF probe, so a file that grew or shrank is never returned
- * truncated. 0 on success: *data is heap memory (free() it; never NULL, an empty file gives
- * *len 0) and *len its size. On failure *data is NULL, *len 0, any bytes already read are
+ * truncated. 0 on success: *data is MEM_DOMAIN_FS memory (release it with
+ * mem_domain_free(MEM_DOMAIN_FS, p), or fl_kq_buf_free where it holds an fl_kq_buf_t; never NULL,
+ * an empty file gives *len 0) and *len its size. On failure *data is NULL, *len 0, any bytes already read are
  * wiped, and the result is -1 (not a regular file (errno EINVAL; a directory, FIFO or device,
  * none is ever blocked on), a NULL path, or a stat, read, shrink or allocation failure),
  * -2 (larger than max, or grew while read; errno EFBIG) or -3 (could not be opened; errno from
@@ -57,6 +65,8 @@ int fl_fs_read_file(const char *path, size_t max, uint8_t **data, size_t *len);
 
 /** Opens dir for the calls below (its own path is trusted and may be a link). fd, or -1. */
 int fl_fs_dir_open(const char *dir);
+/** fl_fs_dir_open for a directory that must not itself be a link (ELOOP): -1 on a link. */
+int fl_fs_dir_open_nofollow(const char *dir);
 /**
  * fl_fs_read_file for one plain name inside dirfd: no separator, not "." or "..", and a link
  * at that name is refused (-3, errno ELOOP). Same results and ownership as fl_fs_read_file;

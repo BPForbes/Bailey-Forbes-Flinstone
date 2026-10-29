@@ -33,6 +33,12 @@ void fm_service_set_user(file_manager_service_t *svc, const char *user);
 int fm_list(file_manager_service_t *svc, const char *path, fs_node_t **out, int *count);
 int fm_read_text(file_manager_service_t *svc, const char *path, char *buf, size_t bufsiz);
 int fm_save_text(file_manager_service_t *svc, const char *path, const char *content);
+/* Byte-exact calls: fm_read_bytes asks the policy's can_read, the two writes run write_chain
+ * like fm_save_text, publish FS_EV_FILE_SAVED and record path_log. No undo (the undo command
+ * snapshots text only). Returns follow fs_provider_read_bytes; a denial is -1. */
+int fm_read_bytes(file_manager_service_t *svc, const char *path, size_t max, uint8_t **data, size_t *len);
+int fm_write_bytes(file_manager_service_t *svc, const char *path, const uint8_t *data, size_t len);
+int fm_write_atomic(file_manager_service_t *svc, const char *path, const uint8_t *data, size_t len);
 int fm_create_file(file_manager_service_t *svc, const char *path);
 int fm_create_dir(file_manager_service_t *svc, const char *path);
 int fm_delete(file_manager_service_t *svc, const char *path);

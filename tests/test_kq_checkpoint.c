@@ -87,11 +87,18 @@ typedef struct {
     unsigned char flinstone_sign[FL_USER_SIGNING_SECRET_LEN];
 } world_t;
 
+/* The checkpoint binary does not call drivers_init. Register the real descriptor
+ * through the registry before any fl_kq_driver_get. */
+static void register_kq_driver(void) {
+    (void)fl_kq_driver_get_or_register();
+}
+
 static int setup(world_t *w) {
     static int n;
     char name[32];
     char db_path[PATH_MAX];
 
+    register_kq_driver();
     /* A fresh store per test; the lab defaults provide Root.Flinstone and Root.Alternative. */
     snprintf(name, sizeof name, "users-%d.db", ++n);
     path_in(db_path, sizeof db_path, name);
@@ -161,9 +168,12 @@ static int prepare_permitted(world_t *w, const char *src, const char *text, cons
 
 static int test_driver_extends_the_base_driver(void) {
     const fl_driver_desc_t *base = fl_kq_driver_desc();
-    const fl_kq_driver_t *drv = fl_kq_driver_get();
+    const fl_kq_driver_t *drv;
 
+    register_kq_driver();
+    drv = fl_kq_driver_get();
     ASSERT(base && drv);
+    ASSERT(base == fl_kq_driver_desc());
     ASSERT(base->class == FL_DRV_CLASS_SECURITY);
     ASSERT(strcmp(base->name, "keyquorum") == 0 && strcmp(base->synth_id, "keyquorum") == 0);
     ASSERT(base->ops && base->ops->probe && base->ops->probe(NULL) == FL_RESULT_OK);
@@ -174,7 +184,10 @@ static int test_driver_extends_the_base_driver(void) {
 }
 
 static int test_driver_probe(void) {
-    const fl_kq_driver_t *drv = fl_kq_driver_get();
+    const fl_kq_driver_t *drv;
+
+    register_kq_driver();
+    drv = fl_kq_driver_get();
     ASSERT(drv);
     ASSERT(drv->wipe == mem_domain_secure_zero && drv->equal == asm_mem_ct_equal);
     return 0;
@@ -182,7 +195,10 @@ static int test_driver_probe(void) {
 
 /* An output that is also the input stays intact during the call and is replaced on success. */
 static int test_driver_output_may_alias_its_input(void) {
-    const fl_kq_driver_t *drv = fl_kq_driver_get();
+    const fl_kq_driver_t *drv;
+
+    register_kq_driver();
+    drv = fl_kq_driver_get();
     world_t w;
     fl_kq_buf_t c = {0};
     uint8_t file_id[16], rev[32], head[32];
@@ -459,7 +475,7 @@ static int test_a_damaged_history_is_refused(void) {
  * nor the newest container naming an old revision (a rollback) is accepted. */
 static int test_the_seen_record_stays_bounded(void) {
     enum { DELIVERIES = 70, KEEP = 64 };
-    const fl_kq_driver_t *drv = fl_kq_driver_get();
+    const fl_kq_driver_t *drv;
     world_t w;
     fl_kq_encoded_t first, enc;
     char src[PATH_MAX], dest[PATH_MAX], seen[PATH_MAX + 16], side[PATH_MAX + 16];
@@ -468,6 +484,8 @@ static int test_the_seen_record_stays_bounded(void) {
     const unsigned char *mya_pub;
     struct stat st;
 
+    register_kq_driver();
+    drv = fl_kq_driver_get();
     ASSERT(drv && setup(&w) == 0);
     mya_pub = fl_user_db_signing_public(&w.db, MYA);
     path_in(src, sizeof src, "bounded.txt");
@@ -559,6 +577,83 @@ static int test_history_is_offline_and_named(void) {
     ASSERT(strcmp(fl_kq_cp_outcome_name(1), "Success") == 0);
     fl_kq_buf_free(&lines);
     teardown(&w);
+    return 0;
+}
+
+/* Pins the names KeyQuorum exports (kq_file_event_name / kq_file_outcome_name, through the driver)
+ * to its wire codes (src/file_history/event.rs: HistoryEventType 1..=47 and HistoryOutcome 1..=4,
+ * "never renumber, only append"). The literals below are an independent expected list: a renamed
+ * or renumbered variant fails here, and a new variant is appended here. Flinstone keeps no table
+ * of its own. */
+static int test_event_and_outcome_names_pinned(void) {
+    static const char *const events[] = {
+        /*  1 */ "TrackingStarted",
+        /*  2 */ "EditCheckedIn",
+        /*  3 */ "RevisionSigned",
+        /*  4 */ "CountersignatureAdded",
+        /*  5 */ "PolicyDecision",
+        /*  6 */ "ShareAttempted",
+        /*  7 */ "ShareDelivered",
+        /*  8 */ "FileExpired",
+        /*  9 */ "ContentDestroyed",
+        /* 10 */ "TamperDetected",
+        /* 11 */ "AutoMergeAttempted",
+        /* 12 */ "AutoMergeFastForward",
+        /* 13 */ "AutoMergeEquivalent",
+        /* 14 */ "AutoMergeClean",
+        /* 15 */ "AutoMergeBlocked",
+        /* 16 */ "AutoMergeRequiresHuman",
+        /* 17 */ "HistoryForkDetected",
+        /* 18 */ "ContentConflictDetected",
+        /* 19 */ "ConflictReviewAssigned",
+        /* 20 */ "ConflictReviewEscalated",
+        /* 21 */ "BridgeUsed",
+        /* 22 */ "ConflictUnresolved",
+        /* 23 */ "HistoryImported",
+        /* 24 */ "QuorumUnlockAttempted",
+        /* 25 */ "PasswordUnlockAttempted",
+        /* 26 */ "ExpiredAccessAttempt",
+        /* 27 */ "GateLinked",
+        /* 28 */ "ShareLinkCreated",
+        /* 29 */ "ShareLinkRedeemed",
+        /* 30 */ "ShareLinkRevoked",
+        /* 31 */ "ExpiryScheduled",
+        /* 32 */ "FileRenamed",
+        /* 33 */ "RevisionFinalized",
+        /* 34 */ "ConflictResolved",
+        /* 35 */ "MergeRejected",
+        /* 36 */ "RevisionCheckedOut",
+        /* 37 */ "VerificationRun",
+        /* 38 */ "HistoryExported",
+        /* 39 */ "FileRequested",
+        /* 40 */ "ChangeRequested",
+        /* 41 */ "RequestAnswered",
+        /* 42 */ "LetterQueued",
+        /* 43 */ "LetterSent",
+        /* 44 */ "LetterDropped",
+        /* 45 */ "LetterRefused",
+        /* 46 */ "LetterReceived",
+        /* 47 */ "LetterOpened",
+    };
+    static const char *const outcomes[] = {"Success", "Failure", "Denied", "Info"};
+    const size_t n_events = sizeof events / sizeof events[0];
+    const size_t n_outcomes = sizeof outcomes / sizeof outcomes[0];
+    unsigned c;
+
+    ASSERT(n_events == 47u);
+    ASSERT(n_outcomes == 4u);
+    for (c = 1; c <= n_events; c++)
+        ASSERT(strcmp(fl_kq_cp_event_name((uint8_t)c), events[c - 1u]) == 0);
+    for (c = 1; c <= n_outcomes; c++)
+        ASSERT(strcmp(fl_kq_cp_outcome_name((uint8_t)c), outcomes[c - 1u]) == 0);
+
+    /* Every code outside the table falls back to "?" (never NULL, never an out-of-bounds read). */
+    ASSERT(strcmp(fl_kq_cp_event_name(0), "?") == 0);
+    for (c = (unsigned)n_events + 1u; c <= 255u; c++)
+        ASSERT(strcmp(fl_kq_cp_event_name((uint8_t)c), "?") == 0);
+    ASSERT(strcmp(fl_kq_cp_outcome_name(0), "?") == 0);
+    for (c = (unsigned)n_outcomes + 1u; c <= 255u; c++)
+        ASSERT(strcmp(fl_kq_cp_outcome_name((uint8_t)c), "?") == 0);
     return 0;
 }
 
@@ -781,6 +876,7 @@ int main(void) {
     RUN(test_newer_needs_the_accepted_container);
     RUN(test_newer_without_the_permit_is_refused);
     RUN(test_history_is_offline_and_named);
+    RUN(test_event_and_outcome_names_pinned);
     RUN(test_for_each_event_walks_lines);
     RUN(test_only_plain_file_names_are_safe);
     RUN(test_reasons_and_results);

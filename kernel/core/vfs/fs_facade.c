@@ -1,4 +1,5 @@
 #include "fs_facade.h"
+#include "path_log.h"
 #include "../identity/session.h"
 #include "../identity/path_property.h"
 #include "fl/authz_subsystem.h"
@@ -118,6 +119,45 @@ int fm_save_text(file_manager_service_t *svc, const char *path, const char *cont
     } else {
         fs_cmd_destroy(cmd);
     }
+    return r;
+}
+
+int fm_read_bytes(file_manager_service_t *svc, const char *path, size_t max, uint8_t **data, size_t *len) {
+    if (data) *data = NULL;
+    if (len) *len = 0;
+    if (!svc || !path) return -1;
+    if (svc->policy && svc->policy->vtable && svc->policy->vtable->can_read
+        && !svc->policy->vtable->can_read(svc->policy, svc->current_user, path))
+        return -1;
+    int r = fs_provider_read_bytes(svc->provider, path, max, data, len);
+    if (r == 0) path_log_record(PATH_OP_READ, path);
+    return r;
+}
+
+static void fm_bytes_saved(const char *path) {
+    fs_event_t ev;
+    ev.type = FS_EV_FILE_SAVED;
+    ev.path[0] = '\0';
+    strncpy(ev.path, path, sizeof(ev.path) - 1);
+    fs_events_publish(&ev);
+    path_log_record(PATH_OP_WRITE, path);
+}
+
+int fm_write_bytes(file_manager_service_t *svc, const char *path, const uint8_t *data, size_t len) {
+    if (!svc || !path) return -1;
+    if (fs_chain_run(&svc->write_chain, path, NULL, svc) != 0)
+        return -1;
+    int r = fs_provider_write_bytes(svc->provider, path, data, len);
+    if (r == 0) fm_bytes_saved(path);
+    return r;
+}
+
+int fm_write_atomic(file_manager_service_t *svc, const char *path, const uint8_t *data, size_t len) {
+    if (!svc || !path) return -1;
+    if (fs_chain_run(&svc->write_chain, path, NULL, svc) != 0)
+        return -1;
+    int r = fs_provider_write_atomic(svc->provider, path, data, len);
+    if (r == 0) fm_bytes_saved(path);
     return r;
 }
 

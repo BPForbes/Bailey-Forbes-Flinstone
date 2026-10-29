@@ -170,8 +170,21 @@ static int test_keys_come_from_the_host_registry(void) {
     return 0;
 }
 
+/* 0 when the host's sent listing for sender holds file_name in the given state. */
+static int host_sent_state(const char *sender, const char *file_name, const char *state) {
+    fl_kq_delivery_t sent[8];
+    size_t n = fl_net_kq_host_sent(sender, sent, 8);
+
+    for (size_t i = 0; i < n; i++) {
+        if (strcmp(sent[i].file_name, file_name) == 0)
+            return strcmp(fl_kq_delivery_state(&sent[i]), state) == 0 ? 0 : -1;
+    }
+    return -1;
+}
+
 static int test_co_signed_delivery_over_the_wire(void) {
     fl_kq_encoded_t enc;
+    fl_kq_delivery_t sent[4];
     fl_net_kq_inbox_t inbox[4];
     unsigned char steve_sign[FL_USER_SIGNING_SECRET_LEN];
     unsigned char steve_box[FL_USER_SIGNING_SECRET_LEN];
@@ -198,6 +211,9 @@ static int test_co_signed_delivery_over_the_wire(void) {
     ASSERT(!inbox[0].letter_ready);
     /* Nothing is released before Steve co-signs. */
     ASSERT(s_to_steve[FL_NET_SESSION_OP_KQ_RELEASE] == 0);
+    /* The host's sent listing shows it for Mya, and nothing for Steve. */
+    ASSERT(host_sent_state(MYA, "plan.txt", "waiting for co-signature") == 0);
+    ASSERT(fl_net_kq_host_sent(STEVE, sent, 4) == 0);
 
     ASSERT(fl_user_db_open_key(&s_db, "Steve", "pw-steve", steve_sign) == FL_RESULT_OK);
     ASSERT(fl_user_db_open_box(&s_db, "Steve", "pw-steve", steve_box) == FL_RESULT_OK);
@@ -217,6 +233,7 @@ static int test_co_signed_delivery_over_the_wire(void) {
     /* The real co-signature reaches threshold: the host fires and releases. */
     ASSERT(fl_net_kq_send_cosign(s_srv, NULL, 0, inbox[0].id, STEVE, sig) == FL_RESULT_OK);
     ASSERT(s_to_steve[FL_NET_SESSION_OP_KQ_RELEASE] == 1);
+    ASSERT(host_sent_state(MYA, "plan.txt", "released") == 0);
     ASSERT(fl_net_kq_inbox_set_cosig(inbox[0].id, sig) == FL_RESULT_OK);
     ASSERT(fl_net_kq_take_letter(inbox[0].id, 0, &letter) == FL_RESULT_OK);
     ASSERT(letter.len == enc.letter.len && memcmp(letter.data, enc.letter.data, letter.len) == 0);
@@ -237,6 +254,7 @@ static int test_co_signed_delivery_over_the_wire(void) {
     releases_before = s_to_steve[FL_NET_SESSION_OP_KQ_RELEASE];
     ASSERT(fl_net_kq_send_cosign(s_srv, NULL, 0, inbox[0].id, STEVE, sig) == FL_RESULT_OK);
     ASSERT(s_to_steve[FL_NET_SESSION_OP_KQ_RELEASE] == releases_before);
+    ASSERT(host_sent_state(MYA, "plan.txt", "delivered") == 0);
     fl_net_kq_inbox_drop(inbox[0].id);
 
     asm_mem_secure_zero(steve_sign, sizeof steve_sign);
@@ -265,6 +283,8 @@ static int test_an_unanswered_request_leaks_away(void) {
     ASSERT(fl_net_kq_send_cosign(s_srv, NULL, 0, inbox[0].id, STEVE, sig) == FL_RESULT_OK);
     ASSERT(strstr(s_last_err, "no such delivery") || strstr(s_last_err, "expired"));
     ASSERT(s_to_steve[FL_NET_SESSION_OP_KQ_RELEASE] == releases_before);
+    /* Ended, not forgotten: the sent listing still shows it, as expired. */
+    ASSERT(host_sent_state(MYA, "late.txt", "expired") == 0);
     fl_net_kq_inbox_drop(inbox[0].id);
     asm_mem_secure_zero(steve_sign, sizeof steve_sign);
     fl_kq_encoded_free(&enc);

@@ -31,6 +31,8 @@
 
 #define FL_CHANNEL_PAYLOAD_FILE 1u
 #define FL_CHANNEL_PAYLOAD_MSG  2u
+/** Reserved for KeyQuorum delivery rows. The ordinary share path never serves or revokes this kind. */
+#define FL_CHANNEL_PAYLOAD_KQ   3u
 
 /**
  * Complete in-flight sidecar: 5-byte scan prefix + transfer identity + policy.
@@ -43,7 +45,7 @@ typedef struct fl_channel_sidecar {
     uint16_t receiver_member_id;
     uint64_t expires_at;
     uint64_t center_freq_hz; /* 0 = unknown / wired; Wi-Fi center Hz when #279 resolves */
-    uint8_t  payload_kind;   /* FL_CHANNEL_PAYLOAD_FILE or FL_CHANNEL_PAYLOAD_MSG */
+    uint8_t  payload_kind;   /* FILE or MSG on the share path; FL_CHANNEL_PAYLOAD_KQ is reserved and refused from the wire */
     uint8_t  wire_rev;       /* FL_CHANNEL_SIDECAR_WIRE_REV on encode */
     char     transfer_id[FL_SERVER_SHARE_ID_MAX];
     char     payload_name[FL_SERVER_FILE_NAME_MAX];

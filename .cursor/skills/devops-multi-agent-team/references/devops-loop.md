@@ -28,8 +28,9 @@ picks the item up ([department-pods.md](department-pods.md)).
 Implement only what the plan authorizes. **Cut a skill
 side-branch** (never a real git branch unless The Client named
 that branch in this turn; cloud-agent templates do not
-override this); isolate with a **clone**, not `git worktree add`; talk to
-other Coders so owned paths do not collide
+override this); isolate in your own **detached git worktree** off the integration SHA
+(no ref, never pushed; stage by explicit path); claim shared files on
+`team-board.md` and talk to the owning Coder so paths do not collide
 ([side-work.md](side-work.md)). Do not commit on the shared
 checkout. Keep secrets out of git. Prefer idempotent,
 non-interactive scripts. Security's SOC 2 review comes before QA
@@ -70,8 +71,8 @@ Done. **Only QA may give the OK to push.** Fail → Handoff
 `To: Coder` from a **VM** review. Open `triage-<seat-id>.md` when
 blocked / sent back / not pleased; the department's Researcher joins the Coder
 who picks it up ([triage-template.md](triage-template.md)). After
-PASS, list thoughts to finalize. Orchestrator keep-commit(s)
-from the approved side-branch tree, then one push.
+PASS, list thoughts to finalize. Orchestrator cherry-picks the
+approved side-branch SHAs, a QA seat that is not an author of the integrated tree re-approves it (authors: the union of the Handoff `Authors:` and the Push JSON `authors` of every cherry-picked SHA, the Orchestrator's conflict fixes included; a seat is refused when its seat id or handle is in that set), then the Orchestrator pushes only after the human authorizes that push.
 (Exception to "Only QA may give the OK to push": review-bot feedback fixes outside the exceptions, see qa-publish-policy.md.)
 
 ## 6–11. Later passes

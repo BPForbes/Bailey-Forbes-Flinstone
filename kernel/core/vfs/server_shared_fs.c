@@ -4,6 +4,7 @@
 #include "contract_p5_server_share.h"
 #include "server_shared_db.h"
 #include "fl/path.h"
+#include "mem_domain.h"
 
 #include <dirent.h>
 #include <errno.h>
@@ -197,9 +198,9 @@ int fl_fs_write_file_atomic(const char *path, const uint8_t *data, size_t len)
     return write_atomic_at(FL_FS_CWDFD, path, data, len);
 }
 
-int fl_fs_dir_open(const char *dir)
+static int dir_open_flags(const char *dir, int extra)
 {
-    int flags = O_RDONLY | O_CLOEXEC;
+    int flags = O_RDONLY | O_CLOEXEC | extra;
 
     if (!dir || !dir[0]) {
         errno = EINVAL;
@@ -209,6 +210,16 @@ int fl_fs_dir_open(const char *dir)
     flags |= O_DIRECTORY;
 #endif
     return open(dir, flags);
+}
+
+int fl_fs_dir_open(const char *dir)
+{
+    return dir_open_flags(dir, 0);
+}
+
+int fl_fs_dir_open_nofollow(const char *dir)
+{
+    return dir_open_flags(dir, O_NOFOLLOW);
 }
 
 int fl_fs_write_file_atomic_in(int dirfd, const char *name, const uint8_t *data, size_t len)
@@ -310,7 +321,7 @@ static int read_fd(int fd, size_t max, uint8_t **data, size_t *len)
         goto out;
     }
     n = (size_t)st.st_size;
-    buf = (uint8_t *)malloc(n ? n : 1u); /* once: no realloc copies of the content */
+    buf = (uint8_t *)mem_domain_alloc(MEM_DOMAIN_FS, n ? n : 1u); /* once: no realloc copies */
     if (!buf)
         goto out;
     while (got < n) {
@@ -339,7 +350,7 @@ out:
     saved_errno = errno; /* the wipe, free and close must not replace the failure's errno */
     if (buf) {
         explicit_bzero(buf, got);
-        free(buf);
+        mem_domain_free(MEM_DOMAIN_FS, buf);
     }
     close(fd);
     errno = saved_errno;
@@ -561,7 +572,7 @@ static int backup_file(const landing_t *l, const char *name, const char *bak)
         return -1;
     rc = land_write(l, bak, copy, len);
     explicit_bzero(copy, len);
-    free(copy);
+    mem_domain_free(MEM_DOMAIN_FS, copy);
     return rc;
 }
 
@@ -592,6 +603,7 @@ int fl_fs_commit_files(int dirfd, const char *dir_path, const fl_fs_file_out_t *
     char part[FL_FS_NAME_MAX + 1u];
     char bak[FL_FS_NAME_MAX + 1u];
     int had[FL_FS_COMMIT_FILES_MAX] = {0};
+    int keep[FL_FS_COMMIT_FILES_MAX] = {0};
     size_t done = 0;
     size_t i, j;
     int rc = 0;
@@ -659,14 +671,19 @@ int fl_fs_commit_files(int dirfd, const char *dir_path, const fl_fs_file_out_t *
         }
     }
     if (rc != 0) {
-        /* Put back what was replaced; a file that did not exist before is removed. */
+        /* Put back what was replaced; a file that did not exist before is removed. A backup
+         * whose restore failed is the only copy of the original, so it is kept (keep[i]). */
         size_t replaced = done ? done - 1 : 0;
         for (i = 0; i < replaced; i++) {
             snprintf(bak, sizeof bak, "%s" FL_FS_BACKUP_SUFFIX, files[i].name);
-            if (had[i])
-                (void)land_rename(&l, bak, files[i].name);
-            else
+            if (had[i]) {
+                if (land_rename(&l, bak, files[i].name) != 0) {
+                    keep[i] = 1;
+                    err = errno;
+                }
+            } else {
                 land_unlink(&l, files[i].name);
+            }
         }
         for (i = 0; i < n; i++) {
             snprintf(part, sizeof part, "%s" FL_FS_PART_SUFFIX, files[i].name);
@@ -674,6 +691,8 @@ int fl_fs_commit_files(int dirfd, const char *dir_path, const fl_fs_file_out_t *
         }
     }
     for (i = 0; i < n; i++) {
+        if (keep[i])
+            continue;
         snprintf(bak, sizeof bak, "%s" FL_FS_BACKUP_SUFFIX, files[i].name);
         land_unlink(&l, bak);
     }

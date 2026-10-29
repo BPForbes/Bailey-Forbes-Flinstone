@@ -135,7 +135,7 @@ static fl_result_t client_connect_ep_impl(fl_net_client_t *client,
         return rc != FL_RESULT_OK ? rc : FL_RESULT_INVAL;
     }
     client->assigned_member_id =
-        (fl_net_server_member_id_t)(((uint16_t)payload[0] << 8) | payload[1]);
+        (fl_net_server_member_id_t)fl_net_get_u16_be(payload);
     {
         size_t name_len = (size_t)plen - 2u;
         if (name_len >= sizeof(client->display_name))
@@ -800,7 +800,7 @@ fl_result_t fl_net_client_adopt_handle(fl_net_client_t *client,
     }
 
     client->assigned_member_id =
-        (fl_net_server_member_id_t)(((uint16_t)payload[0] << 8) | payload[1]);
+        (fl_net_server_member_id_t)fl_net_get_u16_be(payload);
     {
         size_t name_len = (size_t)plen - 2u;
         if (name_len >= sizeof(client->display_name))

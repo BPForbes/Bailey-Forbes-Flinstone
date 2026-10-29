@@ -30,6 +30,8 @@ When an agent opens a pull request or branch for one task and later needs to imp
 
 If a human **does** allow a side branch for the other work, **merge** that side branch into the main feature branch **without deleting** the side branch first, so history and review stay aligned.
 
+A Coder seat of the DevOps team skill is not a side branch: it works in its own **detached** git worktree (`git worktree add --detach`, no branch or ref, handed over by commit SHA, never pushed) and the Orchestrator integrates by cherry-pick; a local-only `local/*` ref exists only if the Orchestrator creates it on request, and it is deleted after integration. Owner confirmed per-Coder detached worktrees as the rule in a session answer on 2026-10-29; throwaway probes may still use a clone, and side-work.md says how to revert. It does not allow a pushed or PR branch; see `.cursor/skills/devops-multi-agent-team/references/side-work.md`.
+
 When folding **two or more** AI-authored feature branches together (for example **`cursor/*`**, **`claude/*`**, **`codex/*`**, or other agent branches that eventually merge into **`main`** or **`develop`**), use a **non–fast-forward** merge so the combine point is visible:
 
 `git checkout <main-feature-branch> && git merge --no-ff <other-agent-branch> -m "merge: …"`

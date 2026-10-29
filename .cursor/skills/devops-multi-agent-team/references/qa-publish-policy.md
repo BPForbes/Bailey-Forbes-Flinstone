@@ -65,7 +65,7 @@ Codex, or any other the repo wires in). Other files point here.
    may be declined with a one-line reason.
 2. **Who fixes.** A valid finding goes to a Coder whose seat id is not in
    the `Authors:` line of the code under comment, never the
-   Orchestrator. That Coder fixes it in a side clone ([side-work.md](side-work.md)) and writes the
+   Orchestrator. That Coder fixes it in a side worktree ([side-work.md](side-work.md)) and writes the
    usual Push JSON and Handoff `To: Reviewer`.
 3. **Review.** An independent Reviewer (never a seat listed in `Authors:`) reviews
    the fix and records `Gate decision: exempt` or `full gate`, with its

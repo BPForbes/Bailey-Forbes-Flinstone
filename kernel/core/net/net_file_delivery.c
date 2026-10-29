@@ -3,6 +3,7 @@
 
 #include "contract_p3_packet.h"
 #include "net_channel_sidecar.h"
+#include "net_codec.h"
 #include "net_endian.h"
 #include "net_pkt_channel_meta.h"
 #include "server_shared_db.h"
@@ -53,78 +54,6 @@ static int file_checksum_present(const uint8_t checksum[FL_SERVER_FILE_HASH_MAX]
             return 1;
     }
     return 0;
-}
-
-static fl_result_t put_u16(fl_bytes_writer_t *w, uint16_t v)
-{
-    if (!w || w->len + 2u > w->cap)
-        return FL_RESULT_NOMEM;
-    w->buf[w->len++] = (uint8_t)((v >> 8) & 0xFFu);
-    w->buf[w->len++] = (uint8_t)(v & 0xFFu);
-    return FL_RESULT_OK;
-}
-
-static fl_result_t put_u32(fl_bytes_writer_t *w, uint32_t v)
-{
-    if (!w || w->len + 4u > w->cap)
-        return FL_RESULT_NOMEM;
-    w->buf[w->len++] = (uint8_t)((v >> 24) & 0xFFu);
-    w->buf[w->len++] = (uint8_t)((v >> 16) & 0xFFu);
-    w->buf[w->len++] = (uint8_t)((v >> 8) & 0xFFu);
-    w->buf[w->len++] = (uint8_t)(v & 0xFFu);
-    return FL_RESULT_OK;
-}
-
-static fl_result_t put_u64(fl_bytes_writer_t *w, uint64_t v)
-{
-    if (!w || w->len + 8u > w->cap)
-        return FL_RESULT_NOMEM;
-    w->buf[w->len++] = (uint8_t)((v >> 56) & 0xFFu);
-    w->buf[w->len++] = (uint8_t)((v >> 48) & 0xFFu);
-    w->buf[w->len++] = (uint8_t)((v >> 40) & 0xFFu);
-    w->buf[w->len++] = (uint8_t)((v >> 32) & 0xFFu);
-    w->buf[w->len++] = (uint8_t)((v >> 24) & 0xFFu);
-    w->buf[w->len++] = (uint8_t)((v >> 16) & 0xFFu);
-    w->buf[w->len++] = (uint8_t)((v >> 8) & 0xFFu);
-    w->buf[w->len++] = (uint8_t)(v & 0xFFu);
-    return FL_RESULT_OK;
-}
-
-static fl_result_t get_u16(const uint8_t *buf, uint16_t cap, uint16_t *off, uint16_t *out)
-{
-    if (!buf || !off || !out || *off + 2u > cap)
-        return FL_RESULT_INVAL;
-    *out = (uint16_t)(((uint16_t)buf[*off] << 8) | buf[*off + 1u]);
-    *off = (uint16_t)(*off + 2u);
-    return FL_RESULT_OK;
-}
-
-static fl_result_t get_u32(const uint8_t *buf, uint16_t cap, uint16_t *off, uint32_t *out)
-{
-    if (!buf || !off || !out || *off + 4u > cap)
-        return FL_RESULT_INVAL;
-    *out = ((uint32_t)buf[*off] << 24) | ((uint32_t)buf[*off + 1u] << 16) |
-           ((uint32_t)buf[*off + 2u] << 8) | (uint32_t)buf[*off + 3u];
-    *off = (uint16_t)(*off + 4u);
-    return FL_RESULT_OK;
-}
-
-static fl_result_t get_u64(const uint8_t *buf, uint16_t cap, uint16_t *off, uint64_t *out)
-{
-    uint32_t hi;
-    uint32_t lo;
-    fl_result_t rc;
-
-    if (!buf || !off || !out)
-        return FL_RESULT_INVAL;
-    rc = get_u32(buf, cap, off, &hi);
-    if (rc != FL_RESULT_OK)
-        return rc;
-    rc = get_u32(buf, cap, off, &lo);
-    if (rc != FL_RESULT_OK)
-        return rc;
-    *out = ((uint64_t)hi << 32) | (uint64_t)lo;
-    return FL_RESULT_OK;
 }
 
 static void copy_str_field(char *dst, size_t cap, const char *src)
@@ -261,6 +190,8 @@ static fl_result_t meta_matches_offer(const fl_channel_sidecar_t *meta,
 {
     if (!meta || !offer)
         return FL_RESULT_INVAL;
+    if (meta->payload_kind == FL_CHANNEL_PAYLOAD_KQ)
+        return FL_RESULT_INVAL; /* reserved kind: never an ordinary share's sidecar */
     if (meta->transfer_id[0] &&
         strcmp(meta->transfer_id, offer->share_id) != 0)
         return FL_RESULT_INVAL;
@@ -454,20 +385,22 @@ fl_result_t fl_wire_put_bytes16(fl_bytes_writer_t *w,
                                 uint16_t len)
 {
     fl_result_t rc;
-    if (!w)
+    uint16_t i;
+
+    if (!w || !w->buf)
         return FL_RESULT_INVAL;
-    rc = put_u16(w, len);
-    if (rc != FL_RESULT_OK)
+    /* Room for the prefix and the whole field is checked first, so a failure
+     * leaves w->len and every byte of the buffer as they were. */
+    if (w->len > w->cap || 2u + (size_t)len > (size_t)(w->cap - w->len))
+        return FL_RESULT_NOMEM;
+    rc = fl_codec_put_u16(w, len);
+    if (rc != FL_RESULT_OK || len == 0u)
         return rc;
-    if (len > 0u) {
-        if (w->len + len > w->cap)
-            return FL_RESULT_NOMEM;
-        if (data)
-            memcpy(w->buf + w->len, data, len);
-        else
-            memset(w->buf + w->len, 0, len);
-        w->len = (uint16_t)(w->len + len);
-    }
+    if (data)
+        return fl_codec_put_bytes(w, data, len);
+    /* No data: len zero bytes. */
+    for (i = 0u; i < len; i++)
+        (void)fl_codec_put_u8(w, 0u);
     return FL_RESULT_OK;
 }
 
@@ -477,17 +410,20 @@ fl_result_t fl_wire_get_bytes16(const uint8_t *buf,
                                 fl_bytes_view_t *out)
 {
     uint16_t len;
+    uint16_t at;
     fl_result_t rc;
+
     if (!buf || !offset || !out)
         return FL_RESULT_INVAL;
-    rc = get_u16(buf, cap, offset, &len);
+    /* Work on a copy of the offset: a short field leaves *offset where it was. */
+    at = *offset;
+    rc = fl_codec_get_u16(buf, cap, &at, &len);
     if (rc != FL_RESULT_OK)
         return rc;
-    if (*offset + len > cap)
-        return FL_RESULT_INVAL;
-    out->data = len > 0u ? buf + *offset : NULL;
-    out->len = len;
-    *offset = (uint16_t)(*offset + len);
+    rc = fl_codec_get_view(buf, cap, &at, len, out);
+    if (rc != FL_RESULT_OK)
+        return rc;
+    *offset = at;
     return FL_RESULT_OK;
 }
 
@@ -529,23 +465,23 @@ fl_result_t fl_server_file_offer_encode(const fl_server_file_offer_t *offer,
     w.cap = out_cap;
     w.len = 0u;
 
-    rc = put_u16(&w, offer->sender_member_id);
+    rc = fl_codec_put_u16(&w, offer->sender_member_id);
     if (rc != FL_RESULT_OK) goto fail;
-    rc = put_u16(&w, offer->receiver_member_id);
+    rc = fl_codec_put_u16(&w, offer->receiver_member_id);
     if (rc != FL_RESULT_OK) goto fail;
-    rc = put_u16(&w, offer->file_perms);
+    rc = fl_codec_put_u16(&w, offer->file_perms);
     if (rc != FL_RESULT_OK) goto fail;
-    rc = put_u16(&w, offer->reserved0);
+    rc = fl_codec_put_u16(&w, offer->reserved0);
     if (rc != FL_RESULT_OK) goto fail;
-    rc = put_u64(&w, offer->created_at);
+    rc = fl_codec_put_u64(&w, offer->created_at);
     if (rc != FL_RESULT_OK) goto fail;
-    rc = put_u64(&w, offer->expires_at);
+    rc = fl_codec_put_u64(&w, offer->expires_at);
     if (rc != FL_RESULT_OK) goto fail;
-    rc = put_u64(&w, offer->file_size);
+    rc = fl_codec_put_u64(&w, offer->file_size);
     if (rc != FL_RESULT_OK) goto fail;
-    rc = put_u32(&w, offer->chunk_size);
+    rc = fl_codec_put_u32(&w, offer->chunk_size);
     if (rc != FL_RESULT_OK) goto fail;
-    rc = put_u32(&w, offer->total_chunks);
+    rc = fl_codec_put_u32(&w, offer->total_chunks);
     if (rc != FL_RESULT_OK) goto fail;
     rc = put_cstring16(&w, offer->share_id);
     if (rc != FL_RESULT_OK) goto fail;
@@ -592,23 +528,23 @@ fl_result_t fl_server_file_offer_decode(const uint8_t *payload,
     if (fl_pkt_file_offer_has_meta_layout(payload, payload_len))
         off = (uint16_t)FL_PKT_CHANNEL_META_LEN;
 
-    rc = get_u16(payload, payload_len, &off, &out->sender_member_id);
+    rc = fl_codec_get_u16(payload, payload_len, &off, &out->sender_member_id);
     if (rc != FL_RESULT_OK) return rc;
-    rc = get_u16(payload, payload_len, &off, &out->receiver_member_id);
+    rc = fl_codec_get_u16(payload, payload_len, &off, &out->receiver_member_id);
     if (rc != FL_RESULT_OK) return rc;
-    rc = get_u16(payload, payload_len, &off, &out->file_perms);
+    rc = fl_codec_get_u16(payload, payload_len, &off, &out->file_perms);
     if (rc != FL_RESULT_OK) return rc;
-    rc = get_u16(payload, payload_len, &off, &out->reserved0);
+    rc = fl_codec_get_u16(payload, payload_len, &off, &out->reserved0);
     if (rc != FL_RESULT_OK) return rc;
-    rc = get_u64(payload, payload_len, &off, &out->created_at);
+    rc = fl_codec_get_u64(payload, payload_len, &off, &out->created_at);
     if (rc != FL_RESULT_OK) return rc;
-    rc = get_u64(payload, payload_len, &off, &out->expires_at);
+    rc = fl_codec_get_u64(payload, payload_len, &off, &out->expires_at);
     if (rc != FL_RESULT_OK) return rc;
-    rc = get_u64(payload, payload_len, &off, &out->file_size);
+    rc = fl_codec_get_u64(payload, payload_len, &off, &out->file_size);
     if (rc != FL_RESULT_OK) return rc;
-    rc = get_u32(payload, payload_len, &off, &out->chunk_size);
+    rc = fl_codec_get_u32(payload, payload_len, &off, &out->chunk_size);
     if (rc != FL_RESULT_OK) return rc;
-    rc = get_u32(payload, payload_len, &off, &out->total_chunks);
+    rc = fl_codec_get_u32(payload, payload_len, &off, &out->total_chunks);
     if (rc != FL_RESULT_OK) return rc;
     rc = get_cstring16(payload, payload_len, &off, out->share_id, sizeof(out->share_id));
     if (rc != FL_RESULT_OK) return rc;
@@ -705,11 +641,11 @@ fl_result_t fl_server_file_chunk_encode(const fl_server_file_chunk_header_t *chu
     w.len = 0u;
     rc = put_cstring16(&w, chunk->share_id);
     if (rc != FL_RESULT_OK) return rc;
-    rc = put_u32(&w, chunk->chunk_index);
+    rc = fl_codec_put_u32(&w, chunk->chunk_index);
     if (rc != FL_RESULT_OK) return rc;
-    rc = put_u32(&w, chunk->chunk_len);
+    rc = fl_codec_put_u32(&w, chunk->chunk_len);
     if (rc != FL_RESULT_OK) return rc;
-    rc = put_u64(&w, chunk->file_offset);
+    rc = fl_codec_put_u64(&w, chunk->file_offset);
     if (rc != FL_RESULT_OK) return rc;
     rc = fl_wire_put_bytes16(&w, data, (uint16_t)data_len);
     if (rc != FL_RESULT_OK) return rc;
@@ -729,11 +665,11 @@ fl_result_t fl_server_file_chunk_decode(const uint8_t *payload,
     memset(chunk, 0, sizeof(*chunk));
     rc = get_cstring16(payload, payload_len, &off, chunk->share_id, sizeof(chunk->share_id));
     if (rc != FL_RESULT_OK) return rc;
-    rc = get_u32(payload, payload_len, &off, &chunk->chunk_index);
+    rc = fl_codec_get_u32(payload, payload_len, &off, &chunk->chunk_index);
     if (rc != FL_RESULT_OK) return rc;
-    rc = get_u32(payload, payload_len, &off, &chunk->chunk_len);
+    rc = fl_codec_get_u32(payload, payload_len, &off, &chunk->chunk_len);
     if (rc != FL_RESULT_OK) return rc;
-    rc = get_u64(payload, payload_len, &off, &chunk->file_offset);
+    rc = fl_codec_get_u64(payload, payload_len, &off, &chunk->file_offset);
     if (rc != FL_RESULT_OK) return rc;
     return fl_wire_get_bytes16(payload, payload_len, &off, data);
 }
@@ -785,13 +721,13 @@ fl_result_t fl_file_packet_encode_done(const fl_server_file_done_t *done,
     w.len = 0u;
     rc = put_cstring16(&w, done->share_id);
     if (rc != FL_RESULT_OK) return rc;
-    rc = put_u64(&w, done->total_bytes);
+    rc = fl_codec_put_u64(&w, done->total_bytes);
     if (rc != FL_RESULT_OK) return rc;
-    rc = put_u32(&w, done->total_chunks);
+    rc = fl_codec_put_u32(&w, done->total_chunks);
     if (rc != FL_RESULT_OK) return rc;
     rc = fl_wire_put_bytes16(&w, done->checksum, FL_SERVER_FILE_HASH_MAX);
     if (rc != FL_RESULT_OK) return rc;
-    rc = put_u16(&w, done->status);
+    rc = fl_codec_put_u16(&w, done->status);
     if (rc != FL_RESULT_OK) return rc;
     *out_len = w.len;
     return FL_RESULT_OK;
@@ -809,16 +745,16 @@ fl_result_t fl_file_packet_decode_done(const uint8_t *payload,
     memset(done, 0, sizeof(*done));
     rc = get_cstring16(payload, payload_len, &off, done->share_id, sizeof(done->share_id));
     if (rc != FL_RESULT_OK) return rc;
-    rc = get_u64(payload, payload_len, &off, &done->total_bytes);
+    rc = fl_codec_get_u64(payload, payload_len, &off, &done->total_bytes);
     if (rc != FL_RESULT_OK) return rc;
-    rc = get_u32(payload, payload_len, &off, &done->total_chunks);
+    rc = fl_codec_get_u32(payload, payload_len, &off, &done->total_chunks);
     if (rc != FL_RESULT_OK) return rc;
     rc = fl_wire_get_bytes16(payload, payload_len, &off, &hash);
     if (rc != FL_RESULT_OK) return rc;
     if (hash.len != FL_SERVER_FILE_HASH_MAX)
         return FL_RESULT_INVAL;
     memcpy(done->checksum, hash.data, FL_SERVER_FILE_HASH_MAX);
-    rc = get_u16(payload, payload_len, &off, (uint16_t *)&done->status);
+    rc = fl_codec_get_u16(payload, payload_len, &off, (uint16_t *)&done->status);
     return rc;
 }
 
@@ -838,9 +774,9 @@ fl_result_t fl_file_packet_encode_accept(const char *share_id,
     w.len = 0u;
     rc = put_cstring16(&w, share_id);
     if (rc != FL_RESULT_OK) return rc;
-    rc = put_u16(&w, receiver_member_id);
+    rc = fl_codec_put_u16(&w, receiver_member_id);
     if (rc != FL_RESULT_OK) return rc;
-    rc = put_u16(&w, (uint16_t)disposition);
+    rc = fl_codec_put_u16(&w, (uint16_t)disposition);
     if (rc != FL_RESULT_OK) return rc;
     *out_len = w.len;
     return FL_RESULT_OK;
@@ -860,9 +796,9 @@ fl_result_t fl_file_packet_decode_accept(const uint8_t *payload,
         return FL_RESULT_INVAL;
     rc = get_cstring16(payload, payload_len, &off, share_id, share_id_cap);
     if (rc != FL_RESULT_OK) return rc;
-    rc = get_u16(payload, payload_len, &off, receiver_member_id);
+    rc = fl_codec_get_u16(payload, payload_len, &off, receiver_member_id);
     if (rc != FL_RESULT_OK) return rc;
-    rc = get_u16(payload, payload_len, &off, &disp);
+    rc = fl_codec_get_u16(payload, payload_len, &off, &disp);
     if (rc != FL_RESULT_OK) return rc;
     *disposition = (fl_server_file_disposition_t)disp;
     return FL_RESULT_OK;
@@ -883,7 +819,7 @@ fl_result_t fl_file_packet_encode_decline(const char *share_id,
     w.len = 0u;
     rc = put_cstring16(&w, share_id);
     if (rc != FL_RESULT_OK) return rc;
-    rc = put_u16(&w, receiver_member_id);
+    rc = fl_codec_put_u16(&w, receiver_member_id);
     if (rc != FL_RESULT_OK) return rc;
     *out_len = w.len;
     return FL_RESULT_OK;
@@ -901,7 +837,7 @@ fl_result_t fl_file_packet_decode_decline(const uint8_t *payload,
         return FL_RESULT_INVAL;
     rc = get_cstring16(payload, payload_len, &off, share_id, share_id_cap);
     if (rc != FL_RESULT_OK) return rc;
-    return get_u16(payload, payload_len, &off, receiver_member_id);
+    return fl_codec_get_u16(payload, payload_len, &off, receiver_member_id);
 }
 
 fl_result_t fl_file_packet_encode_revoke(const char *share_id,
@@ -919,7 +855,7 @@ fl_result_t fl_file_packet_encode_revoke(const char *share_id,
     w.len = 0u;
     rc = put_cstring16(&w, share_id);
     if (rc != FL_RESULT_OK) return rc;
-    rc = put_u16(&w, owner_member_id);
+    rc = fl_codec_put_u16(&w, owner_member_id);
     if (rc != FL_RESULT_OK) return rc;
     *out_len = w.len;
     return FL_RESULT_OK;
@@ -937,7 +873,7 @@ fl_result_t fl_file_packet_decode_revoke(const uint8_t *payload,
         return FL_RESULT_INVAL;
     rc = get_cstring16(payload, payload_len, &off, share_id, share_id_cap);
     if (rc != FL_RESULT_OK) return rc;
-    return get_u16(payload, payload_len, &off, owner_member_id);
+    return fl_codec_get_u16(payload, payload_len, &off, owner_member_id);
 }
 
 fl_result_t fl_net_session_validate_file_frame(uint8_t opcode,

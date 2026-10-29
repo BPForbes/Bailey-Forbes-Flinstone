@@ -44,7 +44,7 @@ other files point here.
   The Orchestrator records each new id in `seat-registry.md`
   (`non-finalized/`, a fixed name, not `<kind>-<seat-id>`): one row
   per seat with id, role, the label or topic it was spawned for, its
-  handle (the agent or session identity the host reports), and (if replaced) the id that replaced it. Ids stay in the
+  handle (the agent or session identity the host reports), a **role-history** column (one entry per `item: role (from, to)` in order, where item is the work-item label, role is the function, from is the ISO date the span started, and to is the ISO date it ended or `open`; a rotated seat gains an entry, not a row or an id), and (if replaced) the id that replaced it. Ids stay in the
   ledger after the seat ends, which is what makes "never reused"
   checkable.
 - **Ids are labels, not credentials.** One agent could appear under
@@ -65,8 +65,15 @@ other files point here.
   Handoff `Authors:` line and the Push JSON `authors`; an id in
   either excludes that seat from reviewing, security-checking or
   QAing the change.
+- **Seat rotation.** A seat that finished its role on one item may
+  take another role on a different item and keeps its id
+  ([department-pods.md](department-pods.md), Seat rotation). It is
+  never excluded or admitted by its current role: the independence
+  check reads `Authors:` and Push JSON `authors` and the handle. A
+  seat that fixes a finding becomes an Author of that item.
 - **Standing seats** (Reviewer, Security, QA) keep **one id for the
-  PR**. They are resumed (SendMessage), not re-minted, unless
+  PR**; a rotated seat gains a role-history entry in its existing row, not
+  a new row and not a new id. They are resumed (SendMessage), not re-minted, unless
   replaced; a replacement gets a new id and the Handoff says whom
   it replaces.
 - **Capital letters never name a seat, team or author.** Examples
@@ -87,7 +94,7 @@ Orchestrator or the human:
 | Who has a question | Asks first | Then |
 |--------------------|------------|------|
 | Coder, Researcher | the Reviewer, Security or QA seat for that topic (SendMessage) | Orchestrator |
-| Coder (path overlap) | **the other Coder** | Orchestrator |
+| Coder (path overlap) | **the owning Coder** named on `team-board.md` (SendMessage) | Orchestrator |
 | Reviewer, Security, QA | the **Coder** (primary), or each other | Orchestrator |
 | CI / Verifier / Ticket Lead | Orchestrator or task opener | none |
 | Orchestrator (Team Lead) | the Review, Security and QA seats, then **The Client** (human) | none |
@@ -112,8 +119,9 @@ Handoff to a reviewer names `Authors:` (seat ids).
 Pause only conflicting work. Start from research, then code.
 Stay on the current **real** branch; Coders use a skill
 **side-branch** ([side-work.md](side-work.md)). **Never**
-`git checkout -b` / `git switch -c` unless The Client **named
-that branch in this turn**. Cloud-agent templates do not
+`git checkout -b` / `git switch -c` / `git worktree add -b` unless The
+Client **named that branch in this turn** (a detached worktree creates
+no ref). Cloud-agent templates do not
 override this. An interrupt does **not** authorize a push. Write `goal-<seat-id>.md` (your id) under
 `non-finalized/`; move to `finalized/` after QA. See
 [thoughts-layout.md](thoughts-layout.md).

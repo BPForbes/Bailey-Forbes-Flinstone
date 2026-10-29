@@ -12,6 +12,7 @@
 #include "server_shared_fs.h"
 
 #include <dlfcn.h>
+#include "mem_domain.h"
 #include <errno.h>
 #include <fcntl.h>
 #include <ftw.h>
@@ -120,7 +121,7 @@ static int test_reads_whole_file(void) {
     path_in(path, sizeof path, "normal");
     ASSERT(fl_fs_read_file(path, 4096u, &data, &len) == 0);
     ASSERT(data != NULL && len == sizeof in && memcmp(data, in, len) == 0);
-    free(data);
+    mem_domain_free(MEM_DOMAIN_FS, data);
     return 0;
 }
 
@@ -133,7 +134,7 @@ static int test_empty_file_gives_non_null_data(void) {
     path_in(path, sizeof path, "empty");
     ASSERT(fl_fs_read_file(path, 16u, &data, &len) == 0);
     ASSERT(data != NULL && len == 0u);
-    free(data);
+    mem_domain_free(MEM_DOMAIN_FS, data);
     return 0;
 }
 
@@ -148,7 +149,7 @@ static int test_exact_cap_and_one_over(void) {
     path_in(path, sizeof path, "cap");
     ASSERT(fl_fs_read_file(path, sizeof in, &data, &len) == 0);
     ASSERT(data != NULL && len == sizeof in);
-    free(data);
+    mem_domain_free(MEM_DOMAIN_FS, data);
     data = NULL;
     errno = 0;
     ASSERT(fl_fs_read_file(path, sizeof in - 1u, &data, &len) == -2);
@@ -199,7 +200,7 @@ static int test_symlink_is_followed_and_device_refused(void) {
     ASSERT(symlink(real, link) == 0);
     ASSERT(fl_fs_read_file(link, 16u, &data, &len) == 0); /* user-named paths follow links */
     ASSERT(data != NULL && len == sizeof in && memcmp(data, in, len) == 0);
-    free(data);
+    mem_domain_free(MEM_DOMAIN_FS, data);
     if (access("/dev/zero", F_OK) == 0) { /* skip the device check where /dev/zero is absent */
         data = (uint8_t *)&data;
         ASSERT(fl_fs_read_file("/dev/zero", 16u, &data, &len) == -1); /* not a regular file */
@@ -343,7 +344,7 @@ static int test_contained_normal_write_and_replace(void) {
     ASSERT(stat(path, &st) == 0 && (st.st_mode & 0777) == 0600);
     ASSERT(fl_fs_read_file_in(dfd, "doc.txt", 64u, &data, &len) == 0);
     ASSERT(data != NULL && len == sizeof b - 1u && memcmp(data, b, len) == 0);
-    free(data);
+    mem_domain_free(MEM_DOMAIN_FS, data);
     close(dfd);
     return 0;
 }
@@ -916,6 +917,69 @@ static int name_length_checks(void) {
     return 0;
 }
 
+/* A sparse file of the given size whose first bytes are "old-bytes". */
+static int put_sparse(const char *name, off_t size) {
+    char path[300];
+
+    if (put_in(g_land, name, "old-bytes") != 0)
+        return -1;
+    snprintf(path, sizeof path, "%s/%s", g_land, name);
+    return truncate(path, size);
+}
+
+/* The file is still the one put_sparse made: same size, same first bytes. */
+static int sparse_is_intact(const char *name, off_t size) {
+    char path[300], head[16] = {0};
+    struct stat st;
+    FILE *f;
+    size_t got;
+
+    snprintf(path, sizeof path, "%s/%s", g_land, name);
+    f = fopen(path, "rb");
+    if (!f)
+        return 0;
+    got = fread(head, 1, 9, f);
+    fclose(f);
+    return got == 9u && memcmp(head, "old-bytes", 9u) == 0 && stat(path, &st) == 0 &&
+           st.st_size == size;
+}
+
+/*
+ * Without hard links the old file is copied into memory for its backup, up to 4 MiB (the bound
+ * FL_KQ_LETTER_MAX sets). One byte more is refused with EFBIG and nothing is changed; with
+ * links the backup is a link and no copy is read, so the size does not matter.
+ */
+static int test_commit_files_copy_backup_is_bounded(void) {
+    const off_t cap = 4 * 1024 * 1024;
+    const fl_fs_file_out_t files[] = {{"small", (const uint8_t *)"new-small", 9u},
+                                      {"big", (const uint8_t *)"new-big", 7u}};
+    int dfd;
+
+    ASSERT(fresh_tree() == 0);
+    dfd = fl_fs_dir_open(g_land);
+    ASSERT(dfd >= 0);
+    /* no links, one byte over the bound: refused, every file as it was, nothing left over */
+    g_no_hard_links = 1;
+    ASSERT(put_in(g_land, "small", "old-small") == 0 && put_sparse("big", cap + 1) == 0);
+    errno = 0;
+    ASSERT(fl_fs_commit_files(dfd, NULL, files, 2u) == -1 && errno == EFBIG);
+    ASSERT(holds("small", "old-small") && sparse_is_intact("big", cap + 1));
+    ASSERT(tidy("small") && tidy("big"));
+    /* no links, exactly at the bound: copied and replaced */
+    ASSERT(put_sparse("big", cap) == 0);
+    ASSERT(fl_fs_commit_files(dfd, NULL, files, 2u) == 0);
+    ASSERT(holds("small", "new-small") && holds("big", "new-big"));
+    ASSERT(tidy("small") && tidy("big"));
+    /* links available, one byte over the bound: the hard-link backup needs no copy */
+    g_no_hard_links = 0;
+    ASSERT(put_in(g_land, "small", "old-small") == 0 && put_sparse("big", cap + 1) == 0);
+    ASSERT(fl_fs_commit_files(dfd, NULL, files, 2u) == 0);
+    ASSERT(holds("small", "new-small") && holds("big", "new-big"));
+    ASSERT(tidy("small") && tidy("big"));
+    close(dfd);
+    return 0;
+}
+
 static int test_commit_files_name_length_leaves_room_for_every_sibling(void) {
     ASSERT(FL_FS_COMMIT_NAME_MAX == 244u);
     ASSERT(name_length_checks() == 0);
@@ -1065,7 +1129,7 @@ static int test_landing_directory_helpers(void) {
     ASSERT(fl_fs_exists_at(dfd, NULL, "here") == 1 && fl_fs_exists_at(dfd, NULL, "gone") == 0);
     ASSERT(fl_fs_read_file_at(dfd, NULL, "here", 64u, &data, &len) == 0 && len == 5u &&
            memcmp(data, "bytes", 5u) == 0);
-    free(data);
+    mem_domain_free(MEM_DOMAIN_FS, data);
     errno = 0;
     ASSERT(fl_fs_exists_at(-1, g_land, "here") == -1 && errno == EBADF);
     ASSERT(fl_fs_read_file_at(-1, g_land, "here", 64u, &data, &len) == -1 && data == NULL);
@@ -1117,6 +1181,7 @@ int main(void) {
     rc |= test_commit_files_failed_rename_puts_everything_back();
     rc |= test_commit_files_unknown_existence_fails_closed();
     rc |= test_commit_files_copy_fallback_where_links_are_missing();
+    rc |= test_commit_files_copy_backup_is_bounded();
     rc |= test_commit_files_name_length_leaves_room_for_every_sibling();
     rc |= test_commit_files_failed_staging_leaves_nothing();
     rc |= test_commit_files_drops_a_stale_backup();
