@@ -147,10 +147,10 @@ static fl_result_t catalog_prepare_file(const char *path)
         close(fd);
         return FL_RESULT_ERR;
     }
-    /* As KeyQuorum's database open does (src/db/mod.rs, restrict_owner_only): a file with bits
-     * for group or others is tightened to owner-only, and an open fails when that cannot be done,
-     * rather than reading a catalog other users can read. */
-    if ((sb.st_mode & 077) != 0 && fchmod(fd, FL_SERVER_CATALOG_FILE_MODE) != 0) {
+    /* As KeyQuorum's database open does (src/db/mod.rs, restrict_owner_only): the file is set to
+     * owner-only (0600) on every open, and an open fails when that cannot be done, rather than
+     * reading a catalog other users can read or keeping a looser mode. */
+    if (fchmod(fd, FL_SERVER_CATALOG_FILE_MODE) != 0) {
         fprintf(stderr, "server_catalog: the catalog file is accessible to others and cannot be "
                         "made owner-only\n");
         close(fd);

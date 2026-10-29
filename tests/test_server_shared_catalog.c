@@ -1081,6 +1081,7 @@ static int test_unwritable_catalog_is_read_only_or_refused(void)
         } else {
             ASSERT(chmod(db, 0400) == 0);
             ASSERT(run_unprivileged(child_open_and_read) == 0);
+            ASSERT(stat(db, &sb) == 0 && (sb.st_mode & 0777) == 0600);
             ASSERT(user_version_of(tmp) == 0);
             ASSERT(file_digest_of(tmp) == d);
         }
