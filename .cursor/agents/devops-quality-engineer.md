@@ -25,8 +25,11 @@ is not a push either. Sonar is additive.
    the SOC 2 verdict and the final bug hunt.
 2. `git status --short` is clean of files the change created, and
    `git diff --stat <integration-base>...HEAD` lists no process files
-   (thoughts, probes, SARIF, binaries, `version_def.h`). A stray file
-   goes back to the Coder through `triage-<id>.md`.
+   (thoughts, probes, SARIF, binaries). `version_def.h` is allowed only
+   as the version workflow's own commit (`chore(version):`), matching
+   the branch's `.ver` entries; a hand-edited or unrelated header is a
+   stray file. A stray file goes back to the Coder through
+   `triage-<id>.md`.
 3. Fail, blocked, or not pleased → **VM** review, Handoff
    `To: Coder`, open `triage-<id>.md`. Research *N* joins the
    Coder who picks it up (`department-pods.md`).
