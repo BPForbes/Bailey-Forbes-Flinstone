@@ -9,6 +9,7 @@
 #include "kq_checkpoint.h"
 #include "fl/mem_asm.h"
 #include "mem_domain.h"
+#include "server_shared_fs.h"
 #include "user_db.h"
 
 #include <dirent.h>
@@ -336,6 +337,108 @@ static int test_a_failed_write_installs_nothing(void) {
     return 0;
 }
 
+/* Links planted at the landing names are refused or replaced, never followed, and nothing is
+ * written outside the landing directory. */
+static int test_landing_names_that_are_links_are_not_followed(void) {
+    world_t w;
+    fl_kq_encoded_t enc;
+    char src[PATH_MAX], dest[PATH_MAX], out[PATH_MAX], seen[PATH_MAX + 16], side[PATH_MAX + 16];
+    char part[PATH_MAX + 32], got[64];
+    uint8_t sig[64];
+    const unsigned char *mya_pub;
+
+    ASSERT(setup(&w) == 0);
+    mya_pub = fl_user_db_signing_public(&w.db, MYA);
+    path_in(src, sizeof src, "linked.txt");
+    path_in(dest, sizeof dest, "steve-linked.txt");
+    path_in(out, sizeof out, "outside-target");
+    snprintf(seen, sizeof seen, "%s%s", dest, FL_KQ_SEEN_SUFFIX);
+    snprintf(side, sizeof side, "%s%s", dest, FL_KQ_CONTAINER_SUFFIX);
+    snprintf(part, sizeof part, "%s.part", side);
+    ASSERT(write_text(src, "v1\n") == 0);
+    ASSERT(fl_kq_cp_encode(&w.db, MYA, w.mya_sign, STEVE, fl_user_db_box_public(&w.db, STEVE),
+                           src, T1, &enc) == FL_KQ_CP_OK);
+    ASSERT(fl_kq_cp_cosign(&enc.offer, STEVE, w.steve_sign, sig) == FL_KQ_CP_OK);
+
+    /* A dangling link at the file's own name: not a free name, and not created through. */
+    ASSERT(symlink(out, dest) == 0);
+    ASSERT(fl_kq_cp_decode(&w.db, MYA, mya_pub, STEVE, w.steve_box, &enc.letter, &enc.offer, sig,
+                           dest) == FL_KQ_CP_EXISTS);
+    ASSERT(access(out, F_OK) != 0);
+    ASSERT(unlink(dest) == 0);
+
+    /* A link at the acceptance record's name is refused, not read through. */
+    ASSERT(write_text(out, "outside\n") == 0);
+    ASSERT(symlink(out, seen) == 0);
+    ASSERT(fl_kq_cp_decode(&w.db, MYA, mya_pub, STEVE, w.steve_box, &enc.letter, &enc.offer, sig,
+                           dest) == FL_KQ_CP_IO);
+    ASSERT(access(dest, F_OK) != 0);
+    ASSERT(read_text(out, got, sizeof got) == 0 && strcmp(got, "outside\n") == 0);
+    ASSERT(unlink(seen) == 0);
+
+    /* A link planted at a staging name is not written through, and the landing completes. */
+    ASSERT(symlink(out, part) == 0);
+    ASSERT(fl_kq_cp_decode(&w.db, MYA, mya_pub, STEVE, w.steve_box, &enc.letter, &enc.offer, sig,
+                           dest) == FL_KQ_CP_OK);
+    ASSERT(read_text(out, got, sizeof got) == 0 && strcmp(got, "outside\n") == 0);
+    ASSERT(read_text(dest, got, sizeof got) == 0 && strcmp(got, "v1\n") == 0);
+    fl_kq_encoded_free(&enc);
+    teardown(&w);
+    return 0;
+}
+
+/* The quarantine gate applies to a landing, whichever way its directory is spelled. */
+static int test_landing_into_the_quarantine_is_refused(void) {
+    world_t w;
+    fl_kq_encoded_t enc;
+    char src[PATH_MAX], base[PATH_MAX], dir[PATH_MAX + 64], dest[PATH_MAX + 128], ok[PATH_MAX + 64];
+    uint8_t sig[64];
+    const unsigned char *mya_pub;
+    static const char *const forms[] = {"%s/server_shared/expired/q.txt",
+                                        "%s/server_shared/./expired/q.txt",
+                                        "%s/server_shared//expired/q.txt"};
+    size_t i;
+
+    ASSERT(setup(&w) == 0);
+    mya_pub = fl_user_db_signing_public(&w.db, MYA);
+    path_in(src, sizeof src, "gate.txt");
+    path_in(base, sizeof base, "gate");
+    snprintf(dir, sizeof dir, "%s/server_shared", base);
+    ASSERT(mkdir(base, 0700) == 0 && mkdir(dir, 0700) == 0);
+    snprintf(dir, sizeof dir, "%s/server_shared/expired", base);
+    ASSERT(mkdir(dir, 0700) == 0);
+    ASSERT(write_text(src, "v1\n") == 0);
+    ASSERT(fl_kq_cp_encode(&w.db, MYA, w.mya_sign, STEVE, fl_user_db_box_public(&w.db, STEVE),
+                           src, T1, &enc) == FL_KQ_CP_OK);
+    ASSERT(fl_kq_cp_cosign(&enc.offer, STEVE, w.steve_sign, sig) == FL_KQ_CP_OK);
+    for (i = 0; i < sizeof forms / sizeof *forms; i++) {
+        snprintf(dest, sizeof dest, forms[i], base);
+        ASSERT(fl_kq_cp_decode(&w.db, MYA, mya_pub, STEVE, w.steve_box, &enc.letter, &enc.offer,
+                               sig, dest) == FL_KQ_CP_IO);
+    }
+    snprintf(dest, sizeof dest, "%s/q.txt", dir);
+    ASSERT(access(dest, F_OK) != 0);
+    snprintf(ok, sizeof ok, "%s/server_shared/q.txt", base);
+    ASSERT(fl_kq_cp_decode(&w.db, MYA, mya_pub, STEVE, w.steve_box, &enc.letter, &enc.offer, sig,
+                           ok) == FL_KQ_CP_OK);
+    fl_kq_encoded_free(&enc);
+    teardown(&w);
+    return 0;
+}
+
+/* Both landing paths reserve the same suffixes. */
+static int test_reserved_suffixes_are_shared(void) {
+    static const char *const bad[] = {"a.meta", "a.part", "a.kqtf", "a.kqseen", "a.kqbak",
+                                      "a.META", "a.Part", "a.KqTf", "a.KQSEEN", "a.kqBAK"};
+    size_t i;
+
+    for (i = 0; i < sizeof bad / sizeof *bad; i++)
+        ASSERT(!fl_kq_cp_safe_name(bad[i]) && fl_server_shared_name_is_reserved(bad[i]));
+    ASSERT(fl_kq_cp_safe_name("a.txt") && !fl_server_shared_name_is_reserved("a.txt"));
+    ASSERT(!fl_server_shared_name_is_reserved(NULL));
+    return 0;
+}
+
 static int test_a_damaged_history_is_refused(void) {
     world_t w;
     fl_kq_encoded_t enc;
@@ -459,6 +562,78 @@ static int test_history_is_offline_and_named(void) {
     return 0;
 }
 
+typedef struct {
+    size_t seen;
+    size_t stop_at; /* stop after this many lines; 0 never stops */
+    char first[32];
+    char last[32];
+} walk_t;
+
+static int walk_cb(const char *line, size_t n, void *ctx) {
+    walk_t *w = ctx;
+    size_t m = n < sizeof w->last - 1u ? n : sizeof w->last - 1u;
+
+    if (w->seen == 0u) {
+        memcpy(w->first, line, m);
+        w->first[m] = '\0';
+    }
+    memcpy(w->last, line, m);
+    w->last[m] = '\0';
+    w->seen++;
+    return w->stop_at != 0u && w->seen == w->stop_at;
+}
+
+/* The line walk: no lines, one line, a trailing fragment without a newline (skipped, not a
+ * line), many lines in order, and a callback that stops the walk. */
+static int test_for_each_event_walks_lines(void) {
+    static const char one[] = "a\tb\n";
+    static const char partial[] = "x\ny\nfrag";
+    static const char many[] = "l1\nl2\n\nl4\nl5\n";
+    fl_kq_buf_t b;
+    walk_t w;
+
+    memset(&w, 0, sizeof w);
+    b.data = NULL;
+    b.len = 0;
+    ASSERT(fl_kq_cp_for_each_event(&b, walk_cb, &w) == 0u && w.seen == 0u);
+    ASSERT(fl_kq_cp_for_each_event(NULL, walk_cb, &w) == 0u);
+    b.data = (uint8_t *)(void *)one;
+    b.len = 0;
+    ASSERT(fl_kq_cp_for_each_event(&b, walk_cb, &w) == 0u && w.seen == 0u);
+
+    b.len = sizeof one - 1u;
+    ASSERT(fl_kq_cp_for_each_event(&b, walk_cb, &w) == 1u);
+    ASSERT(w.seen == 1u && strcmp(w.first, "a\tb") == 0);
+
+    memset(&w, 0, sizeof w);
+    b.data = (uint8_t *)(void *)partial;
+    b.len = sizeof partial - 1u;
+    ASSERT(fl_kq_cp_for_each_event(&b, walk_cb, &w) == 2u);
+    ASSERT(strcmp(w.first, "x") == 0 && strcmp(w.last, "y") == 0);
+    b.len = 4u; /* "x\ny\n": both lines complete */
+    memset(&w, 0, sizeof w);
+    ASSERT(fl_kq_cp_for_each_event(&b, walk_cb, &w) == 2u);
+    b.len = 3u; /* "x\ny" : one line, "y" is a fragment */
+    memset(&w, 0, sizeof w);
+    ASSERT(fl_kq_cp_for_each_event(&b, walk_cb, &w) == 1u && strcmp(w.last, "x") == 0);
+    b.len = 1u; /* "x" alone: no line */
+    memset(&w, 0, sizeof w);
+    ASSERT(fl_kq_cp_for_each_event(&b, walk_cb, &w) == 0u && w.seen == 0u);
+
+    memset(&w, 0, sizeof w);
+    b.data = (uint8_t *)(void *)many;
+    b.len = sizeof many - 1u;
+    ASSERT(fl_kq_cp_for_each_event(&b, walk_cb, &w) == 5u);
+    ASSERT(strcmp(w.first, "l1") == 0 && strcmp(w.last, "l5") == 0);
+
+    memset(&w, 0, sizeof w);
+    w.stop_at = 2u;
+    ASSERT(fl_kq_cp_for_each_event(&b, walk_cb, &w) == 2u);
+    ASSERT(w.seen == 2u && strcmp(w.last, "l2") == 0);
+    ASSERT(fl_kq_cp_for_each_event(&b, NULL, &w) == 0u);
+    return 0;
+}
+
 /* A newer copy is refused until the editor's supervisor has countersigned it: Steve keeps the copy
  * he has, and the same revision goes through once the permit is in the container. */
 static int test_newer_without_the_permit_is_refused(void) {
@@ -562,6 +737,13 @@ static int test_only_plain_file_names_are_safe(void) {
     ASSERT(!fl_kq_cp_safe_name("bell\a"));
     ASSERT(!fl_kq_cp_safe_name("esc\x1b[2Jx"));
     ASSERT(!fl_kq_cp_safe_name("del\x7f"));
+    ASSERT(fl_kq_cp_safe_name("part"));
+    ASSERT(fl_kq_cp_safe_name("notes.partial"));
+    ASSERT(!fl_kq_cp_safe_name("plan.txt.part"));
+    ASSERT(!fl_kq_cp_safe_name("plan.txt.kqtf"));
+    ASSERT(!fl_kq_cp_safe_name("plan.txt.kqseen"));
+    ASSERT(!fl_kq_cp_safe_name("plan.txt.kqbak"));
+    ASSERT(!fl_kq_cp_safe_name(".part"));
     return 0;
 }
 
@@ -591,11 +773,15 @@ int main(void) {
     RUN(test_co_signed_delivery);
     RUN(test_untracked_destination_is_never_overwritten);
     RUN(test_a_failed_write_installs_nothing);
+    RUN(test_landing_names_that_are_links_are_not_followed);
+    RUN(test_landing_into_the_quarantine_is_refused);
+    RUN(test_reserved_suffixes_are_shared);
     RUN(test_a_damaged_history_is_refused);
     RUN(test_the_seen_record_stays_bounded);
     RUN(test_newer_needs_the_accepted_container);
     RUN(test_newer_without_the_permit_is_refused);
     RUN(test_history_is_offline_and_named);
+    RUN(test_for_each_event_walks_lines);
     RUN(test_only_plain_file_names_are_safe);
     RUN(test_reasons_and_results);
     rmrf(s_dir);

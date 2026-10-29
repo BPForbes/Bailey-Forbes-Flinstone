@@ -36,6 +36,8 @@ static fl_result_t get_cstring16(const uint8_t *buf, uint16_t cap, uint16_t *off
         return FL_RESULT_INVAL;
     if (n >= dst_cap)
         return FL_RESULT_INVAL;
+    if (n > 0u && memchr(buf + *off, '\0', n))
+        return FL_RESULT_INVAL;
     if (n > 0u)
         memcpy(dst, buf + *off, n);
     dst[n] = '\0';

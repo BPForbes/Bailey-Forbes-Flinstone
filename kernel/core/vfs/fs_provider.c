@@ -2,6 +2,7 @@
 #include "common.h"
 #include "dir_asm.h"
 #include "fs_jail.h"
+#include "fl/path.h"
 #include "mem_domain.h"
 #include <stdio.h>
 #include <stdlib.h>
@@ -163,8 +164,7 @@ static int local_get_metadata(fs_provider_t *p, const char *path, fs_node_t *out
     out->type = S_ISDIR(st.st_mode) ? NODE_DIR : NODE_FILE;
     out->size = (size_t)st.st_size;
     strncpy(out->path, path, FS_PATH_MAX - 1);
-    const char *base = strrchr(path, '/');
-    strncpy(out->name, base ? base + 1 : path, FS_NAME_MAX - 1);
+    strncpy(out->name, fl_fs_basename(path), FS_NAME_MAX - 1);
     return 0;
 }
 

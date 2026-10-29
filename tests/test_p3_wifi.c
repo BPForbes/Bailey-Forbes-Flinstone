@@ -96,6 +96,23 @@ static int test_wpa_scan_ssid_bounds(void) {
     return 0;
 }
 
+static int test_crypto_random_shim(void) {
+    uint8_t a[32];
+    uint8_t b[32];
+    uint8_t zero[32];
+
+    memset(zero, 0, sizeof(zero));
+    memset(a, 0xA5, sizeof(a));
+    ASSERT(fl_net_wifi_crypto_random(NULL, sizeof(a)) == FL_RESULT_INVAL);
+    ASSERT(fl_net_wifi_crypto_random(a, 0u) == FL_RESULT_INVAL);
+    ASSERT(a[0] == 0xA5 && a[31] == 0xA5);
+    ASSERT(fl_net_wifi_crypto_random(a, sizeof(a)) == FL_RESULT_OK);
+    ASSERT(fl_net_wifi_crypto_random(b, sizeof(b)) == FL_RESULT_OK);
+    ASSERT(memcmp(a, zero, sizeof(a)) != 0);
+    ASSERT(memcmp(a, b, sizeof(a)) != 0);
+    return 0;
+}
+
 static int test_wpa2_psk_pmk_vector(void) {
     static const uint8_t expected[32] = {
         0xf4, 0x2c, 0x6f, 0xc5, 0x2d, 0xf0, 0xeb, 0xef, 0x9e, 0xbb, 0x4b, 0x90, 0xb3, 0x8a,
@@ -532,6 +549,8 @@ int main(void) {
     if (test_scan_result_he_fields() != 0)
         return 1;
     if (test_wpa_scan_ssid_bounds() != 0)
+        return 1;
+    if (test_crypto_random_shim() != 0)
         return 1;
     if (test_wpa2_psk_pmk_vector() != 0)
         return 1;

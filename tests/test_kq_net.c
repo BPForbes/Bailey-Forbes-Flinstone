@@ -374,6 +374,23 @@ static int test_unsafe_names_never_reach_a_path(void) {
     return 0;
 }
 
+static int test_wire_string_with_embedded_nul_is_dropped(void) {
+    fl_kq_encoded_t enc;
+    fl_net_kq_inbox_t inbox[4];
+    uint8_t buf[512];
+    uint8_t id[16];
+    uint16_t n;
+
+    ASSERT(encode_from_mya("named.txt", "x\n", &enc) == 0);
+    memset(id, 0xA8, sizeof id);
+    n = build_announce(buf, id, MYA, "abc", &enc.offer);
+    buf[16 + 8 + 1 + strlen(MYA) + 1 + 1] = 0; /* name "abc" -> "a\0c" */
+    fl_net_kq_client_handle(NULL, FL_NET_SESSION_OP_KQ_ANNOUNCE, buf, n);
+    ASSERT(fl_net_kq_inbox(inbox, 4) == 0);
+    fl_kq_encoded_free(&enc);
+    return 0;
+}
+
 int main(void) {
     char tmpl[] = "/tmp/fl_kq_netXXXXXX";
     char path[PATH_MAX];
@@ -406,6 +423,7 @@ int main(void) {
     RUN(test_an_unanswered_request_leaks_away);
     RUN(test_unfinished_uploads_never_hold_the_host);
     RUN(test_unsafe_names_never_reach_a_path);
+    RUN(test_wire_string_with_embedded_nul_is_dropped);
     fl_net_kq_reset();
     rmrf(s_dir);
     if (rc == 0)

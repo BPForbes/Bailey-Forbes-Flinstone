@@ -89,12 +89,12 @@ part.
 
 | Child | Parent | What the child adds |
 | --- | --- | --- |
-| `fl_kq_driver_t` (`kq_driver.c`) | `fl_driver_desc_t` (`fl/driver/driver.h`), registered with the driver model at shell start | the KeyQuorum ops; the base's lifecycle `probe` checks the library ABI (class `FL_DRV_CLASS_SECURITY`) |
+| `fl_kq_driver_t` (`kq_driver.c`) | `fl_driver_desc_t` (`fl/driver/driver.h`), registered by `fl_driver_registry_register_all` (host builds that define `FL_WITH_KEYQUORUM`) and bound by the driver model to the synthetic device `keyquorum` | the KeyQuorum ops; the base's lifecycle `probe` checks the library ABI (class `FL_DRV_CLASS_SECURITY`) |
 | `asm_mem_secure_zero`, `mem_domain_secure_zero` | `asm_mem_zero`, `mem_domain_zero` | a barrier (`mfence` / `dmb ish`) after the parent's stores |
 | KeyQuorum upload and inbox slots (`net_kq_delivery.c`) | `fl_part_buf_t` (`net_part_buf.h`), also the base of the server file share slot | offers, co-signatures and release around the ordered, bounded buffer |
 | big-endian wire fields | `net_endian.h` (`asm_net_*`) | the bounds-checked reader and writer |
 | `kq_open_keys`, `bridge_open_actor_key` | `cmd_open_account_keys` (`cmd_authutil.c`) | each command's own messages |
-| the store's and checkpoint's file writes | `fl_fs_mkdir_p`, `fl_fs_stage_file`, `fl_fs_write_file_atomic` (`server_shared_fs.c`) | the all-or-nothing install of a file with its `.kqtf` and `.kqseen` |
+| the store's and checkpoint's file writes | `fl_fs_mkdir_p`, `fl_fs_stage_file`, `fl_fs_write_file_atomic`, and the contained `fl_fs_dir_open` with the `fl_fs_*_in` name calls and `fl_server_shared_resolve_local_path` (`server_shared_fs.c`) | the all-or-nothing install of a file with its `.kqtf` and `.kqseen`, through one directory handle |
 | `fl_user_db_keydir_t` (`kq_checkpoint_users.c`), the lab's directory (`lab_kq.c`) | `fl_kq_keydir_t` (`kq_keydir.h`): the only way the checkpoints and the host read keys | each account store's lookups: the native user store, or the lab's accounts and published keys |
 | the lab's memory primitives (`lab_kq.c`) | the same names the assembly layer provides natively | C bodies for WebAssembly, which has no assembly; secure zero is still zero plus a barrier |
 
@@ -119,8 +119,9 @@ length-prefixed, every read bounds-checked.
 - **Host.** The offer comes from the member's own account (fixed at `server host` or
   `server join`; a later `su` does not change it); the recipient exists and has a box key; the
   author signature verifies against the host's account store; the delivery id is new; the file
-  name is a plain name (`fl_kq_cp_safe_name`: not empty, `.` or `..`, no `/`, `\` or control
-  bytes); each member has at most one unfinished upload, idle uploads are dropped after 60 s;
+  name is a plain name (`fl_kq_cp_safe_name`: not empty, not `.` or `..`, no `/`, `\` or control
+  bytes, under 128 bytes, and not ending in `.part`, `.meta`, `.kqtf`, `.kqseen` or `.kqbak`,
+  compared ignoring ASCII case); each member has at most one unfinished upload, idle uploads are dropped after 60 s;
   only the recipient may co-sign and their signature verifies; release happens once; expiry is
   the host's clock, and an expired delivery is removed with its spike log in one transaction.
 - **Recipient.** The letter opens with their box key and is signed by the sender's registered
@@ -135,7 +136,10 @@ length-prefixed, every read bounds-checked.
   each accepted root extends the one before it, so the newest still refuses forks and stale
   histories, and a revision the previously accepted `.kqtf` already holds is never newer.
   An announcement whose sender or file name is not a plain name is dropped unshown. The file,
-  its `.kqtf` and `.kqseen` are written together or not at all. An untracked file at the
+  its `.kqtf` and `.kqseen` are written together or not at all, through the destination
+  directory's handle and never through a link (a link at any of the names is not followed; new
+  files are `0600`). A destination directory that cannot be opened fails the landing; the
+  path-based calls are used only where the platform lacks the `*at` calls. An untracked file at the
   destination is never overwritten: that refusal keeps the delivery so it can be opened
   elsewhere. Any other refusal is acknowledged as refused and the host deletes the letter.
 

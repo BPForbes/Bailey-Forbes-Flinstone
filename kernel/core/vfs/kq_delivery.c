@@ -1,5 +1,6 @@
 #include "kq_delivery.h"
 #include "server_shared_fs.h"
+#include "fl/hex.h"
 
 #include <errno.h>
 #include <fcntl.h>
@@ -62,35 +63,11 @@ fl_kq_neuron_t fl_kq_delivery_integrate(fl_kq_delivery_t *d, fl_kq_spike_t spike
 
 void fl_kq_delivery_id_hex(const uint8_t id[FL_KQ_DELIVERY_ID_LEN],
                            char out[2 * FL_KQ_DELIVERY_ID_LEN + 1]) {
-    static const char hex[] = "0123456789abcdef";
-    for (size_t i = 0; i < FL_KQ_DELIVERY_ID_LEN; i++) {
-        out[2 * i] = hex[id[i] >> 4];
-        out[2 * i + 1] = hex[id[i] & 0x0f];
-    }
-    out[2 * FL_KQ_DELIVERY_ID_LEN] = '\0';
-}
-
-static int nibble(char c) {
-    if (c >= '0' && c <= '9')
-        return c - '0';
-    if (c >= 'a' && c <= 'f')
-        return c - 'a' + 10;
-    if (c >= 'A' && c <= 'F')
-        return c - 'A' + 10;
-    return -1;
+    fl_hex_encode(id, FL_KQ_DELIVERY_ID_LEN, out);
 }
 
 int fl_kq_delivery_id_parse(const char *hex, uint8_t id[FL_KQ_DELIVERY_ID_LEN]) {
-    if (!hex || strlen(hex) != 2 * FL_KQ_DELIVERY_ID_LEN)
-        return -1;
-    for (size_t i = 0; i < FL_KQ_DELIVERY_ID_LEN; i++) {
-        int hi = nibble(hex[2 * i]);
-        int lo = nibble(hex[2 * i + 1]);
-        if (hi < 0 || lo < 0)
-            return -1;
-        id[i] = (uint8_t)((hi << 4) | lo);
-    }
-    return 0;
+    return fl_hex_decode(hex, id, FL_KQ_DELIVERY_ID_LEN);
 }
 
 /* ---- the store ----------------------------------------------------------- */
@@ -349,9 +326,7 @@ out:
 fl_result_t fl_kq_store_letter(fl_kq_store_t *s, const uint8_t id[FL_KQ_DELIVERY_ID_LEN],
                                uint8_t **letter, size_t *len) {
     char path[1200];
-    FILE *f;
-    long n;
-    uint8_t *buf;
+    int rc;
 
     if (!s || !id || !letter || !len)
         return FL_RESULT_INVAL;
@@ -359,23 +334,16 @@ fl_result_t fl_kq_store_letter(fl_kq_store_t *s, const uint8_t id[FL_KQ_DELIVERY
     *len = 0;
     if (letter_path(s, id, path, sizeof path) != 0)
         return FL_RESULT_INVAL;
-    f = fopen(path, "rb");
-    if (!f)
+    rc = fl_fs_read_file(path, FL_KQ_LETTER_MAX, letter, len);
+    if (rc == -3)
         return FL_RESULT_NOENT;
-    if (fseek(f, 0, SEEK_END) != 0 || (n = ftell(f)) <= 0 || (size_t)n > FL_KQ_LETTER_MAX ||
-        fseek(f, 0, SEEK_SET) != 0) {
-        fclose(f);
+    if (rc != 0)
+        return FL_RESULT_ERR;
+    if (*len == 0u) { /* an empty letter is not a letter */
+        free(*letter);
+        *letter = NULL;
         return FL_RESULT_ERR;
     }
-    buf = (uint8_t *)malloc((size_t)n);
-    if (!buf || fread(buf, 1, (size_t)n, f) != (size_t)n) {
-        free(buf);
-        fclose(f);
-        return FL_RESULT_ERR;
-    }
-    fclose(f);
-    *letter = buf;
-    *len = (size_t)n;
     return FL_RESULT_OK;
 }
 

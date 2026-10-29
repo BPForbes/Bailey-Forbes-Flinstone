@@ -136,6 +136,11 @@ static void r_str(kq_r_t *r, char *out, size_t cap) {
             out[0] = '\0';
         return;
     }
+    if (l && memchr(r->p, 0, l)) {
+        r->bad = 1;
+        out[0] = '\0';
+        return;
+    }
     memcpy(out, r->p, l);
     out[l] = '\0';
     r->p += l;

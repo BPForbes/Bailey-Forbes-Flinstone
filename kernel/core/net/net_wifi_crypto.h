@@ -39,7 +39,10 @@ fl_result_t fl_net_wifi_crypto_ieee80211_kdf_sha256(const uint8_t *key, size_t k
 
 void fl_net_wifi_crypto_memzero(void *p, size_t n);
 
-/** Fill **out** with unpredictable bytes (getrandom on Linux, OpenSSL RAND_bytes fallback). */
+/** Fill **out** with unpredictable bytes via fl_random_bytes (fl/random.h).
+ *  FL_RESULT_INVAL for NULL out or len 0; FL_RESULT_ERR for len > INT_MAX (rejected
+ *  by fl_random_bytes, out untouched) or when no entropy is available (out zeroed,
+ *  never partial). */
 fl_result_t fl_net_wifi_crypto_random(uint8_t *out, size_t len);
 
 #endif /* NET_WIFI_CRYPTO_H */

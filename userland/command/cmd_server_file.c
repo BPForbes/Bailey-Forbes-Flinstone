@@ -546,12 +546,14 @@ static void kq_utc_now(char *out, size_t cap)
 
 /* server file send -t <path> -user <name>: encode checkpoint, then OFFER + parts. */
 /* One history line for display (see fl_kq_cp_format_event). */
-static void print_event_line(const char *line, size_t n)
+static int print_event_line(const char *line, size_t n, void *ctx)
 {
     char text[640];
 
+    (void)ctx;
     fl_kq_cp_format_event(line, n, text, sizeof text);
     printf("%s\n", text);
+    return 0;
 }
 
 /* Offline: the history of a tracked file, read from its container beside the file. It needs no
@@ -560,8 +562,6 @@ static int verb_file_log(int argc, char **argv)
 {
     fl_kq_buf_t lines = {0};
     fl_kq_cp_result_t cp;
-    size_t start = 0;
-    size_t i;
 
     if (argc < 2) {
         fl_color_error("usage: server file log <path>");
@@ -573,13 +573,7 @@ static int verb_file_log(int argc, char **argv)
         fl_kq_buf_free(&lines);
         return 1;
     }
-    for (i = 0; i < lines.len; i++) {
-        if (lines.data[i] == '\n') {
-            print_event_line((const char *)lines.data + start, i - start);
-            start = i + 1u;
-        }
-    }
-    if (start == 0u)
+    if (fl_kq_cp_for_each_event(&lines, print_event_line, NULL) == 0u)
         printf("no history for %s\n", argv[1]);
     fl_kq_buf_free(&lines);
     return 0;

@@ -26,12 +26,14 @@
 #include "ramfs.h"
 
 #include "fl/driver/keyquorum.h"
+#include "fl/path.h"
 #include "keyquorum_identity.h"
 #include "kq_checkpoint.h"
 #include "kq_delivery.h"
 #include "kq_keydir.h"
 #include "net_kq_delivery.h"
 #include "server_shared_fs.h"
+#include "common.h"
 
 #include <emscripten.h>
 #include <stdint.h>
@@ -40,6 +42,10 @@
 #include <string.h>
 #include <strings.h>
 #include <time.h>
+
+/* server_shared_fs.c resolves relative landing paths against g_cwd; the lab has no shell
+ * common.c, so its working directory is defined here (the native shell sets its own). */
+char g_cwd[CWD_MAX] = ".";
 
 #define LAB_KEYS_MAX 32
 #define LAB_LABEL_MAX 32
@@ -355,29 +361,6 @@ static void write_ramfs_copy(int session, const char *name, const fl_kq_buf_t *p
     mem_domain_secure_zero(existing, sizeof existing);
 }
 
-static int read_file(const char *path, fl_kq_buf_t *out) {
-    FILE *f = fopen(path, "rb");
-    long n;
-
-    out->data = NULL;
-    out->len = 0;
-    if (!f)
-        return -1;
-    if (fseek(f, 0, SEEK_END) != 0 || (n = ftell(f)) < 0 || fseek(f, 0, SEEK_SET) != 0) {
-        fclose(f);
-        return -1;
-    }
-    out->data = (uint8_t *)malloc(n ? (size_t)n : 1u);
-    if (!out->data || fread(out->data, 1, (size_t)n, f) != (size_t)n) {
-        fclose(f);
-        fl_kq_buf_free(out);
-        return -1;
-    }
-    out->len = (size_t)n;
-    fclose(f);
-    return 0;
-}
-
 /* Decode checkpoint for a released letter, then ACK; as the native shell's
  * kq_decode_and_ack. Returns 1 when finished (either way), 0 to try again later. */
 static int decode_and_ack(pending_open_t *p) {
@@ -412,7 +395,7 @@ static int decode_and_ack(pending_open_t *p) {
     snprintf(dir, sizeof dir, LAB_KQ_ROOT "/%s/in", p->me);
     snprintf(dest, sizeof dest, "%s/%s", dir, in.file_name);
     (void)fl_fs_mkdir_p(dir, 0700);
-    (void)read_file(dest, &previous);
+    (void)fl_fs_read_file(dest, FL_KQ_LETTER_MAX, &previous.data, &previous.len);
     cp = fl_kq_cp_decode_with(lab_directory(), in.sender, sender.signing_public, p->me,
                               me->box_sec, &letter, &in.offer, in.sig, dest);
     fl_kq_buf_free(&letter);
@@ -535,14 +518,9 @@ static int connected(void) {
     return 0;
 }
 
-static const char *base_name(const char *path) {
-    const char *slash = strrchr(path, '/');
-    return slash ? slash + 1 : path;
-}
-
 int fl_lab_kq_send(int session, const char *path, const char *user, int permitted) {
     const char *me = fl_fs_identity_user(session);
-    const char *name = base_name(path);
+    const char *name = fl_fs_basename(path);
     char content[FL_FS_RAMFS_DATA];
     char dir[256];
     pending_send_t *p = NULL;
@@ -596,13 +574,21 @@ int fl_lab_kq_send(int session, const char *path, const char *user, int permitte
     return 1;
 }
 
+/* One history line, formatted, for fl_kq_cp_for_each_event. */
+static int say_event_line(const char *line, size_t n, void *ctx) {
+    char text[384];
+
+    (void)ctx;
+    fl_kq_cp_format_event(line, n, text, sizeof text);
+    say("%s", text, NULL, NULL);
+    return 0;
+}
+
 /* server file log <path>: the history of a tracked copy, read from its container. Offline: it
  * needs no server and no key. */
 int fl_lab_kq_log(int session, const char *path) {
     fl_kq_buf_t lines = {0};
     fl_kq_cp_result_t cp;
-    char text[384];
-    size_t start = 0;
 
     (void)session;
     cp = fl_kq_cp_history(path, &lines);
@@ -611,15 +597,8 @@ int fl_lab_kq_log(int session, const char *path) {
         fl_kq_buf_free(&lines);
         return 1;
     }
-    for (size_t i = 0; i < lines.len; i++) {
-        if (lines.data[i] == '\n') {
-            fl_kq_cp_format_event((const char *)lines.data + start, i - start, text, sizeof text);
-            say("%s", text, NULL, NULL);
-            start = i + 1u;
-        }
-    }
-    if (start == 0u)
-        say("no history for %s", base_name(path), NULL, NULL);
+    if (fl_kq_cp_for_each_event(&lines, say_event_line, NULL) == 0u)
+        say("no history for %s", fl_fs_basename(path), NULL, NULL);
     fl_kq_buf_free(&lines);
     return 1;
 }
@@ -646,7 +625,7 @@ int fl_lab_kq_permit(int session, const char *path) {
         say("server file permit: %s", fl_kq_cp_reason(cp), NULL, NULL);
         return 1;
     }
-    say("keyquorum: permitted the head of %s as %s", base_name(path), me, NULL);
+    say("keyquorum: permitted the head of %s as %s", fl_fs_basename(path), me, NULL);
     return 1;
 }
 

@@ -133,7 +133,8 @@ void        fl_user_db_forget_key(fl_user_db_t *db, const char *name);
 /**
  * Opens the signing key of the account named name with its password into secret
  * (FL_USER_SIGNING_SECRET_LEN bytes). ACCES for a wrong password, NOENT when the
- * account has no key. The caller wipes secret.
+ * account has no key. The caller wipes secret; once the open was attempted, every non-OK return
+ * leaves it securely zeroed.
  */
 fl_result_t fl_user_db_open_key(const fl_user_db_t *db, const char *name, const char *password,
                                 unsigned char *secret);
@@ -142,11 +143,23 @@ const unsigned char *fl_user_db_signing_public(const fl_user_db_t *db, const cha
 /**
  * Opens the box key of the account named name with its password into secret
  * (FL_USER_SIGNING_SECRET_LEN bytes). ACCES for a wrong password, NOENT when the
- * account has no box key. The caller wipes secret.
+ * account has no box key. The caller wipes secret; once the open was attempted, every non-OK return
+ * leaves it securely zeroed.
  */
 fl_result_t fl_user_db_open_box(const fl_user_db_t *db, const char *name, const char *password,
                                 unsigned char *secret);
 /** The box public key of key_id, or NULL when the account has none. */
 const unsigned char *fl_user_db_box_public(const fl_user_db_t *db, const char *key_id);
+
+typedef enum { FL_USER_SECRET_SIGNING, FL_USER_SECRET_BOX } fl_user_secret_kind_t;
+/**
+ * 1 only when the account with key_id holds a key of kind and secret
+ * (FL_USER_SIGNING_SECRET_LEN bytes) derives exactly its stored public key; 0 for NULL
+ * arguments, an unknown key_id, no key of that kind, a derive failure or a mismatch.
+ * Constant time in the secret. Takes no password and does not wipe secret: the caller
+ * wipes its own secret.
+ */
+int fl_user_db_secret_matches(const fl_user_db_t *db, const char *key_id,
+                              fl_user_secret_kind_t kind, const unsigned char *secret);
 
 #endif /* FL_USER_DB_H */

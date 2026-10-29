@@ -1,9 +1,9 @@
 #include "bridge.h"
 #include "heritage.h"
 #include "keyquorum_identity.h"
-#include "fl/mem_asm.h"
+#include "fl/hex.h"
+#include "fl/random.h"
 #include "mem_domain.h"
-#include "password_hash.h"
 #include <sqlite3.h>
 #include <stdio.h>
 #include <string.h>
@@ -73,57 +73,6 @@ static fl_result_t bridge_open(const char *db_path, sqlite3 **out) {
     return FL_RESULT_OK;
 }
 
-static void to_hex(const unsigned char *in, size_t len, char *out) {
-    static const char digits[] = "0123456789abcdef";
-    size_t i;
-
-    for (i = 0; i < len; i++) {
-        out[2 * i] = digits[in[i] >> 4];
-        out[2 * i + 1] = digits[in[i] & 0x0f];
-    }
-    out[2 * len] = '\0';
-}
-
-static int hex_digit(char c) {
-    if (c >= '0' && c <= '9')
-        return c - '0';
-    if (c >= 'a' && c <= 'f')
-        return c - 'a' + 10;
-    if (c >= 'A' && c <= 'F')
-        return c - 'A' + 10;
-    return -1;
-}
-
-static int from_hex(const char *hex, unsigned char *out, size_t len) {
-    size_t i;
-
-    if (!hex || strlen(hex) != 2 * len)
-        return -1;
-    for (i = 0; i < len; i++) {
-        int hi = hex_digit(hex[2 * i]);
-        int lo = hex_digit(hex[2 * i + 1]);
-
-        if (hi < 0 || lo < 0)
-            return -1;
-        out[i] = (unsigned char)((hi << 4) | lo);
-    }
-    return 0;
-}
-
-/* 1 when secret is the signing key users holds for key_id. */
-static int secret_is_for(const fl_user_db_t *users, const char *key_id,
-                         const unsigned char *secret) {
-    const unsigned char *public_key = fl_user_db_signing_public(users, key_id);
-    unsigned char derived[FL_USER_SIGNING_PUBLIC_LEN];
-    int ok;
-
-    if (!public_key || !secret || kq_account_public(secret, derived) != KQ_ACCOUNT_OK)
-        return 0;
-    ok = asm_mem_ct_equal(derived, public_key, sizeof derived) != 0;
-    mem_domain_secure_zero(derived, sizeof derived);
-    return ok;
-}
-
 static void bridge_from_row(sqlite3_stmt *st, fl_bridge_t *b) {
     const char *a = (const char *)sqlite3_column_text(st, 1);
     const char *bk = (const char *)sqlite3_column_text(st, 2);
@@ -168,9 +117,9 @@ int fl_bridge_verified(const fl_user_db_t *users, const fl_bridge_t *b) {
         return 0;
     if (!fl_heritage_is_ancestor_or_self(b->accepted_by, b->b_key))
         return 0;
-    if (from_hex(b->nonce_hex, nonce, sizeof nonce) != 0 ||
-        from_hex(b->request_sig, req, sizeof req) != 0 ||
-        from_hex(b->accept_sig, acc, sizeof acc) != 0)
+    if (fl_hex_decode(b->nonce_hex, nonce, sizeof nonce) != 0 ||
+        fl_hex_decode(b->request_sig, req, sizeof req) != 0 ||
+        fl_hex_decode(b->accept_sig, acc, sizeof acc) != 0)
         return 0;
     a_public = fl_user_db_signing_public(users, b->a_key);
     by_public = fl_user_db_signing_public(users, b->accepted_by);
@@ -225,7 +174,7 @@ fl_result_t fl_bridge_request(const char *db_path, const fl_user_db_t *users,
     sqlite3 *sql = NULL;
     sqlite3_stmt *st = NULL;
     fl_result_t rc;
-    char nonce_hex[FL_PASSWORD_SALT_HEX_CHARS + 1];
+    char nonce_hex[2 * FL_BRIDGE_NONCE_LEN + 1];
     unsigned char nonce[FL_BRIDGE_NONCE_LEN];
     unsigned char sig[FL_BRIDGE_SIGNATURE_LEN];
     char sig_hex[2 * FL_BRIDGE_SIGNATURE_LEN + 1];
@@ -238,16 +187,16 @@ fl_result_t fl_bridge_request(const char *db_path, const fl_user_db_t *users,
     rel = fl_heritage_relation(actor_key, peer_key);
     if (rel != FL_HERITAGE_REL_SIBLING && rel != FL_HERITAGE_REL_OTHER_BRANCH)
         return FL_RESULT_INVAL;
-    if (!secret_is_for(users, actor_key, actor_secret))
+    if (!fl_user_db_secret_matches(users, actor_key, FL_USER_SECRET_SIGNING, actor_secret))
         return FL_RESULT_ACCES;
     /* A fresh random nonce names this bridge, so its signatures stand for it alone. */
-    if (fl_password_generate_salt_hex(nonce_hex, sizeof nonce_hex) != 0 ||
-        from_hex(nonce_hex, nonce, sizeof nonce) != 0)
+    if (fl_random_bytes(nonce, sizeof nonce) != 0)
         return FL_RESULT_ERR;
+    fl_hex_encode(nonce, sizeof nonce, nonce_hex);
     if (kq_account_bridge_sign(KQ_ACCOUNT_BRIDGE_REQUEST, actor_key, peer_key, actor_key, nonce,
                                actor_secret, sig) != KQ_ACCOUNT_OK)
         return FL_RESULT_ERR;
-    to_hex(sig, sizeof sig, sig_hex);
+    fl_hex_encode(sig, sizeof sig, sig_hex);
     rc = bridge_open(db_path, &sql);
     if (rc != FL_RESULT_OK)
         return rc;
@@ -300,7 +249,7 @@ fl_result_t fl_bridge_accept(const char *db_path, const fl_user_db_t *users, con
     }
     /* The requesting side cannot accept its own request: consent comes from the other branch. */
     if (!fl_heritage_is_ancestor_or_self(actor_key, b.b_key) ||
-        !secret_is_for(users, actor_key, actor_secret)) {
+        !fl_user_db_secret_matches(users, actor_key, FL_USER_SECRET_SIGNING, actor_secret)) {
         sqlite3_close(sql);
         return FL_RESULT_ACCES;
     }
@@ -309,8 +258,8 @@ fl_result_t fl_bridge_accept(const char *db_path, const fl_user_db_t *users, con
         const unsigned char *a_public = fl_user_db_signing_public(users, b.a_key);
         unsigned char req[FL_BRIDGE_SIGNATURE_LEN];
 
-        if (from_hex(b.nonce_hex, nonce, sizeof nonce) != 0 ||
-            from_hex(b.request_sig, req, sizeof req) != 0 || !a_public ||
+        if (fl_hex_decode(b.nonce_hex, nonce, sizeof nonce) != 0 ||
+            fl_hex_decode(b.request_sig, req, sizeof req) != 0 || !a_public ||
             kq_account_bridge_verify(KQ_ACCOUNT_BRIDGE_REQUEST, b.a_key, b.b_key, b.a_key, nonce,
                                      a_public, req) != 1) {
             sqlite3_close(sql);
@@ -322,7 +271,7 @@ fl_result_t fl_bridge_accept(const char *db_path, const fl_user_db_t *users, con
         sqlite3_close(sql);
         return FL_RESULT_ERR;
     }
-    to_hex(sig, sizeof sig, sig_hex);
+    fl_hex_encode(sig, sizeof sig, sig_hex);
     if (sqlite3_prepare_v2(sql,
                            "UPDATE bridges SET state=?,accepted_by=?,accepted_at=?,accept_sig=? "
                            "WHERE id=? AND state=?;",

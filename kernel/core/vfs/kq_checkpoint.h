@@ -51,9 +51,11 @@ const char *fl_kq_cp_reason(fl_kq_cp_result_t r);
 fl_result_t fl_kq_cp_to_result(fl_kq_cp_result_t r);
 
 /**
- * True when name is a plain file name a delivery may use: not empty, not "." or "..", and
- * free of '/', '\\' and control bytes. Every name that arrives over the wire (offer,
- * announcement) is checked before it is stored, printed or joined to a directory.
+ * True when name is a plain file name a delivery may use: fl_fs_name_is_plain, and not ending
+ * in one of the suffixes the delivery keeps beside a file (.part, .meta, .kqtf, .kqseen,
+ * .kqbak; the list is fl_server_shared_name_is_reserved).
+ * Every name that arrives over the wire (offer, announcement) is checked before it is stored,
+ * printed or joined to a directory.
  */
 int fl_kq_cp_safe_name(const char *name);
 
@@ -125,6 +127,20 @@ const char *fl_kq_cp_outcome_name(uint8_t code);
  * an empty actor). Returns the length written to out, which never exceeds cap - 1.
  */
 size_t fl_kq_cp_format_event(const char *line, size_t n, char *out, size_t cap);
+
+/** Called once per history line (no trailing newline) from fl_kq_cp_for_each_event. A nonzero
+ *  return stops the walk. line points into the walked buffer and is NOT NUL-terminated: use n.
+ *  It is valid only during the call; copy what must outlive it. */
+typedef int (*fl_kq_cp_event_fn)(const char *line, size_t n, void *ctx);
+
+/**
+ * Walks the newline-terminated lines of a buffer filled by fl_kq_cp_history, in order, calling
+ * fn for each (pair it with fl_kq_cp_format_event for display). A final fragment with no
+ * terminating newline is not a line and is skipped. Returns the number of lines passed to fn,
+ * the one that stopped the walk included; 0 means there was no history. A NULL buffer or fn
+ * visits nothing. The buffer must not be freed or modified while the walk runs, callback included.
+ */
+size_t fl_kq_cp_for_each_event(const fl_kq_buf_t *lines, fl_kq_cp_event_fn fn, void *ctx);
 
 /**
  * Permit (supervisor): countersigns revision rev in the container at container_path as

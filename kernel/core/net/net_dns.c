@@ -7,13 +7,10 @@
 #include "net_wire_host.h"
 
 #include "fl/net_asm.h"
+#include "fl/random.h"
 
 #include <stdio.h>
 #include <string.h>
-
-#if defined(__linux__)
-#include <sys/random.h>
-#endif
 
 #ifndef FL_NET_DNS_NS_MAX
 #define FL_NET_DNS_NS_MAX 3u
@@ -72,18 +69,16 @@ static unsigned dns_read_nameservers(uint32_t *ns_be, unsigned ns_cap) {
     return count;
 }
 
-static uint16_t dns_next_txid(void) {
-    uint16_t v = 0;
-#if defined(__linux__)
-    if (getrandom(&v, sizeof(v), 0) == (ssize_t)sizeof(v))
-        return v;
-#endif
-    {
-        static uint16_t s_fallback = 0x4f4cu;
-        s_fallback = (uint16_t)(s_fallback ^ (uint16_t)(s_fallback << 7) ^
-                                (uint16_t)(s_fallback >> 9) ^ 0x1317u);
-        return s_fallback;
+/* Fail closed: no entropy means no query (a predictable txid invites spoofing). */
+static fl_result_t dns_next_txid(uint16_t *out) {
+    uint8_t b[2];
+
+    if (fl_random_bytes(b, sizeof(b)) != 0) {
+        fprintf(stderr, "net_dns: no entropy for query id, lookup refused\n");
+        return FL_RESULT_ERR;
     }
+    *out = (uint16_t)(((uint16_t)b[0] << 8) | b[1]);
+    return FL_RESULT_OK;
 }
 
 static uint16_t dns_query_sport(uint16_t txid, unsigned attempt) {
@@ -202,9 +197,14 @@ static fl_result_t dns_query_a(const char *host, uint32_t *out_addr_be) {
 
     for (unsigned n = 0; n < ns_count; n++) {
         for (unsigned attempt = 0; attempt < FL_NET_DNS_QUERY_RETRIES; attempt++) {
-            uint16_t txid = dns_next_txid();
-            uint16_t sport = dns_query_sport(txid, attempt);
-            fl_result_t rc = dns_query_a_once(host, ns_list[n], txid, sport, out_addr_be);
+            uint16_t txid;
+            uint16_t sport;
+            fl_result_t rc;
+
+            if (dns_next_txid(&txid) != FL_RESULT_OK)
+                return FL_RESULT_ERR;
+            sport = dns_query_sport(txid, attempt);
+            rc = dns_query_a_once(host, ns_list[n], txid, sport, out_addr_be);
 
             if (rc == FL_RESULT_OK)
                 return FL_RESULT_OK;
@@ -359,9 +359,14 @@ fl_result_t fl_net_dns_resolve_aaaa(const char *host, uint8_t out6[16], char *re
 
     for (unsigned n = 0; n < ns_count; n++) {
         for (unsigned attempt = 0; attempt < FL_NET_DNS_QUERY_RETRIES; attempt++) {
-            uint16_t txid = dns_next_txid();
-            uint16_t sport = dns_query_sport(txid, attempt);
-            fl_result_t rc = dns_query_aaaa_once(host, ns_list[n], txid, sport, out6);
+            uint16_t txid;
+            uint16_t sport;
+            fl_result_t rc;
+
+            if (dns_next_txid(&txid) != FL_RESULT_OK)
+                return FL_RESULT_ERR;
+            sport = dns_query_sport(txid, attempt);
+            rc = dns_query_aaaa_once(host, ns_list[n], txid, sport, out6);
 
             if (rc == FL_RESULT_OK) {
                 if (resolved_txt && resolved_txt_len > 0 &&

@@ -138,8 +138,26 @@ jobs:
       - name: Test — account heritage (key ids, bridges, jail homes)
         run: make test_heritage
 
+      - name: Test — shared fs helpers
+        run: make test_fs_helpers
+
+      - name: Test — shared hex codec
+        run: make test_hex
+
+      - name: Test — secret compare and wipe
+        run: make test_secret_compare
+
+      - name: Test — shared random source
+        run: make test_random
+
+      - name: Check — no weak RNG in converted sites
+        run: make check-weak-rng
+
       - name: Test — drivers
         run: make test_drivers
+
+      - name: Test — drivers without KeyQuorum
+        run: make test_drivers_no_keyquorum
 
       - name: Test — userspace connection
         run: make test_userspace_connection

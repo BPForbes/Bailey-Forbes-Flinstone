@@ -39,7 +39,19 @@ int fl_bus_enumerate(fl_device_desc_t *descs, int max_descs) {
     fl_cstr_copy(descs[0].resources[3].name, sizeof(descs[0].resources[3].name), "synth-io");
     descs[0].resource_count = 4;
     descs[0].platform_data = (void *)current_disk_file;
+#if defined(FL_WITH_KEYQUORUM)
+    /* The KeyQuorum security driver's synthetic device: no IRQ, DMA or I/O resources. */
+    if (max_descs < 2)
+        return 1;
+    asm_mem_zero(&descs[1], sizeof(fl_device_desc_t));
+    descs[1].bus_type = FL_BUS_SYNTH;
+    fl_cstr_copy(descs[1].synth_id, sizeof(descs[1].synth_id), "keyquorum");
+    descs[1].resource_count = 0;
+    descs[1].platform_data = NULL;
+    return 2;
+#else
     return 1;
+#endif
 #endif
 }
 

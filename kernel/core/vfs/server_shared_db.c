@@ -3,6 +3,7 @@
 #include "server_shared_fs.h"
 
 #include "common.h"
+#include "fl/path.h"
 #include "contract_p5_server_share.h"
 
 #include <errno.h>
@@ -28,28 +29,12 @@ static fl_result_t db_exec(sqlite3 *sql, const char *stmt)
     return FL_RESULT_OK;
 }
 
-static int join_path(char *out, size_t cap, const char *a, const char *b)
-{
-    int r;
-    if (!out || cap == 0u)
-        return -1;
-    if (!a || !a[0])
-        r = snprintf(out, cap, "%s", b ? b : "");
-    else if (a[strlen(a) - 1] == '/')
-        r = snprintf(out, cap, "%s%s", a, b ? b : "");
-    else
-        r = snprintf(out, cap, "%s/%s", a, b ? b : "");
-    if (r < 0 || (size_t)r >= cap)
-        return -1;
-    return 0;
-}
-
 static fl_result_t catalog_db_path(char *out, size_t cap)
 {
     char root[512];
-    if (join_path(root, sizeof(root), g_cwd, FL_SERVER_SHARED_DIR_NAME) != 0)
+    if (fl_fs_join_path(root, sizeof(root), g_cwd, FL_SERVER_SHARED_DIR_NAME) != 0)
         return FL_RESULT_ERR;
-    if (join_path(out, cap, root, FL_SERVER_CATALOG_DB_NAME) != 0)
+    if (fl_fs_join_path(out, cap, root, FL_SERVER_CATALOG_DB_NAME) != 0)
         return FL_RESULT_ERR;
     return FL_RESULT_OK;
 }
@@ -57,9 +42,9 @@ static fl_result_t catalog_db_path(char *out, size_t cap)
 static fl_result_t catalog_blobs_root(char *out, size_t cap)
 {
     char root[512];
-    if (join_path(root, sizeof(root), g_cwd, FL_SERVER_SHARED_DIR_NAME) != 0)
+    if (fl_fs_join_path(root, sizeof(root), g_cwd, FL_SERVER_SHARED_DIR_NAME) != 0)
         return FL_RESULT_ERR;
-    if (join_path(out, cap, root, FL_SERVER_CATALOG_BLOBS_DIR_NAME) != 0)
+    if (fl_fs_join_path(out, cap, root, FL_SERVER_CATALOG_BLOBS_DIR_NAME) != 0)
         return FL_RESULT_ERR;
     return FL_RESULT_OK;
 }
@@ -183,11 +168,11 @@ static fl_result_t write_blob_file(const char *hash_hex, const uint8_t *data, si
         if (rel_len < 0 || (size_t)rel_len >= sizeof(rel))
             return FL_RESULT_ERR;
     }
-    if (join_path(blob_path, sizeof(blob_path), g_cwd, FL_SERVER_SHARED_DIR_NAME) != 0)
+    if (fl_fs_join_path(blob_path, sizeof(blob_path), g_cwd, FL_SERVER_SHARED_DIR_NAME) != 0)
         return FL_RESULT_ERR;
     {
         char tmp[512];
-        if (join_path(tmp, sizeof(tmp), blob_path, rel) != 0)
+        if (fl_fs_join_path(tmp, sizeof(tmp), blob_path, rel) != 0)
             return FL_RESULT_ERR;
         strncpy(blob_path, tmp, sizeof(blob_path) - 1u);
         blob_path[sizeof(blob_path) - 1u] = '\0';
@@ -215,14 +200,14 @@ fl_result_t fl_server_catalog_open(void)
         return FL_RESULT_ERR;
     if (mkdir_p_simple(g_cwd) != FL_RESULT_OK) {
         char shared[512];
-        if (join_path(shared, sizeof(shared), g_cwd, FL_SERVER_SHARED_DIR_NAME) != 0)
+        if (fl_fs_join_path(shared, sizeof(shared), g_cwd, FL_SERVER_SHARED_DIR_NAME) != 0)
             return FL_RESULT_ERR;
         if (mkdir_p_simple(shared) != FL_RESULT_OK)
             return FL_RESULT_ERR;
     }
     {
         char shared[512];
-        if (join_path(shared, sizeof(shared), g_cwd, FL_SERVER_SHARED_DIR_NAME) == 0)
+        if (fl_fs_join_path(shared, sizeof(shared), g_cwd, FL_SERVER_SHARED_DIR_NAME) == 0)
             (void)mkdir_p_simple(shared);
     }
     if (sqlite3_open(db_path, &s_catalog_db) != SQLITE_OK) {
@@ -360,6 +345,8 @@ fl_result_t fl_server_catalog_register_file_offer(const fl_server_file_offer_t *
     uint64_t now;
 
     if (!offer || !offer->share_id[0])
+        return FL_RESULT_INVAL;
+    if (offer->file_name[0] && !fl_fs_name_is_plain(offer->file_name))
         return FL_RESULT_INVAL;
     if (fl_server_catalog_open() != FL_RESULT_OK)
         return FL_RESULT_ERR;
@@ -506,6 +493,8 @@ fl_result_t fl_server_catalog_register_message_pending(const char *transfer_id,
 
     if (!transfer_id || !transfer_id[0])
         return FL_RESULT_INVAL;
+    if (payload_name && payload_name[0] && !fl_fs_name_is_plain(payload_name))
+        return FL_RESULT_INVAL;
     if (fl_server_catalog_open() != FL_RESULT_OK)
         return FL_RESULT_ERR;
     snprintf(pending_hash, sizeof(pending_hash), "pending:%s", transfer_id);
@@ -606,6 +595,8 @@ fl_result_t fl_server_catalog_store_message(uint16_t sender_member_id,
     const char *name = payload_name ? payload_name : "message";
 
     if (!body && body_len > 0u)
+        return FL_RESULT_INVAL;
+    if (payload_name && payload_name[0] && !fl_fs_name_is_plain(payload_name))
         return FL_RESULT_INVAL;
     if (fl_server_catalog_open() != FL_RESULT_OK)
         return FL_RESULT_ERR;
@@ -754,11 +745,11 @@ fl_result_t fl_server_catalog_read_blob(const fl_server_catalog_entry_t *entry,
     if (entry->total_bytes > 0u &&
         (!out_data || out_data_cap < (size_t)entry->total_bytes))
         return FL_RESULT_NOMEM;
-    if (join_path(path, sizeof(path), g_cwd, FL_SERVER_SHARED_DIR_NAME) != 0)
+    if (fl_fs_join_path(path, sizeof(path), g_cwd, FL_SERVER_SHARED_DIR_NAME) != 0)
         return FL_RESULT_ERR;
     {
         char tmp[512];
-        if (join_path(tmp, sizeof(tmp), path, entry->storage_relpath) != 0)
+        if (fl_fs_join_path(tmp, sizeof(tmp), path, entry->storage_relpath) != 0)
             return FL_RESULT_ERR;
         strncpy(path, tmp, sizeof(path) - 1u);
         path[sizeof(path) - 1u] = '\0';
@@ -917,11 +908,12 @@ fl_result_t fl_server_catalog_import_handoff(const char *src_server_shared_dir)
 
     if (!src_server_shared_dir || !src_server_shared_dir[0])
         return FL_RESULT_INVAL;
-    if (join_path(src_db, sizeof(src_db), src_server_shared_dir, FL_SERVER_CATALOG_DB_NAME) != 0)
+    if (fl_fs_join_path(src_db, sizeof(src_db), src_server_shared_dir,
+                        FL_SERVER_CATALOG_DB_NAME) != 0)
         return FL_RESULT_ERR;
     if (catalog_db_path(dst_db, sizeof(dst_db)) != FL_RESULT_OK)
         return FL_RESULT_ERR;
-    if (join_path(src_blobs, sizeof(src_blobs), src_server_shared_dir,
+    if (fl_fs_join_path(src_blobs, sizeof(src_blobs), src_server_shared_dir,
                   FL_SERVER_CATALOG_BLOBS_DIR_NAME) != 0)
         return FL_RESULT_ERR;
     if (catalog_blobs_root(dst_blobs, sizeof(dst_blobs)) != FL_RESULT_OK)
@@ -961,13 +953,13 @@ fl_result_t fl_server_catalog_import_handoff(const char *src_server_shared_dir)
                 char to[512];
                 if (!rel)
                     continue;
-                if (join_path(from, sizeof(from), src_server_shared_dir, rel) != 0)
+                if (fl_fs_join_path(from, sizeof(from), src_server_shared_dir, rel) != 0)
                     continue;
-                if (join_path(to, sizeof(to), g_cwd, FL_SERVER_SHARED_DIR_NAME) != 0)
+                if (fl_fs_join_path(to, sizeof(to), g_cwd, FL_SERVER_SHARED_DIR_NAME) != 0)
                     continue;
                 {
                     char tmp[512];
-                    if (join_path(tmp, sizeof(tmp), to, rel) != 0)
+                    if (fl_fs_join_path(tmp, sizeof(tmp), to, rel) != 0)
                         continue;
                     strncpy(to, tmp, sizeof(to) - 1u);
                     to[sizeof(to) - 1u] = '\0';

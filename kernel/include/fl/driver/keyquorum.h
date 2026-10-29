@@ -101,11 +101,17 @@ struct fl_kq_driver {
 /**
  * The driver, after a probe that the linked KeyQuorum library speaks FL_KQ_ABI_VERSION;
  * NULL when it does not (nothing is then signed, sealed or opened).
+ *
+ * Rule for a registry-based resolver (D11): a descriptor found through the registry or a bound
+ * device must be compared with fl_kq_driver_desc() and the ABI re-probed before its ops are
+ * used. fl_kq_driver_from_desc does neither; it is an unchecked cast.
  */
 const fl_kq_driver_t *fl_kq_driver_get(void);
 /** The driver as its base descriptor, for fl_driver_registry_register. */
 const fl_driver_desc_t *fl_kq_driver_desc(void);
-/** Back from the base descriptor to the KeyQuorum driver (base is the first member). */
+/** Back from the base descriptor to the KeyQuorum driver (base is the first member).
+ *  Unchecked cast: it neither compares desc with fl_kq_driver_desc() nor probes the ABI, so a
+ *  caller must do both (see fl_kq_driver_get) before using the result. */
 static inline const fl_kq_driver_t *fl_kq_driver_from_desc(const fl_driver_desc_t *desc) {
     return (const fl_kq_driver_t *)desc;
 }
