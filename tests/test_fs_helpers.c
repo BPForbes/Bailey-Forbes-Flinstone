@@ -5,11 +5,13 @@
  */
 #define _XOPEN_SOURCE 700
 #define _DEFAULT_SOURCE
+#define _GNU_SOURCE /* RTLD_NEXT, for the two call wrappers below */
 #include "common.h"
 #include "fl/path.h"
 #include "contract_p5_file_delivery.h"
 #include "server_shared_fs.h"
 
+#include <dlfcn.h>
 #include <errno.h>
 #include <fcntl.h>
 #include <ftw.h>
@@ -27,6 +29,63 @@
         return 1; \
     } \
 } while (0)
+
+/* ---- failure injection for fl_fs_commit_files ------------------------------ */
+
+/*
+ * This test program defines renameat and linkat, so the calls server_shared_fs.c makes reach
+ * these first and pass through to the C library unless a test armed them. Nothing here is in
+ * the code under test.
+ *   g_fail_rename_at: fail the Nth renameat from now (1 is the next), once; 0 is off.
+ *   g_no_hard_links: every linkat fails, like a file system without links.
+ */
+static int g_fail_rename_at;
+static int g_no_hard_links;
+static int g_link_calls;
+static char g_fail_stat_name[64]; /* fstatat of exactly this name fails (EIO); "" is off */
+static int g_link_refused; /* calls that did not make a link, whatever the reason */
+
+int renameat(int ofd, const char *from, int nfd, const char *to) {
+    static int (*real)(int, const char *, int, const char *);
+
+    if (!real)
+        real = (int (*)(int, const char *, int, const char *))dlsym(RTLD_NEXT, "renameat");
+    if (g_fail_rename_at > 0 && --g_fail_rename_at == 0) {
+        errno = EIO;
+        return -1;
+    }
+    return real(ofd, from, nfd, to);
+}
+
+int fstatat(int dfd, const char *path, struct stat *st, int flags) {
+    static int (*real)(int, const char *, struct stat *, int);
+
+    if (!real)
+        real = (int (*)(int, const char *, struct stat *, int))dlsym(RTLD_NEXT, "fstatat");
+    if (g_fail_stat_name[0] && strcmp(path, g_fail_stat_name) == 0) {
+        errno = EIO;
+        return -1;
+    }
+    return real(dfd, path, st, flags);
+}
+
+int linkat(int ofd, const char *from, int nfd, const char *to, int flags) {
+    static int (*real)(int, const char *, int, const char *, int);
+
+    if (!real)
+        real = (int (*)(int, const char *, int, const char *, int))dlsym(RTLD_NEXT, "linkat");
+    g_link_calls++;
+    if (g_no_hard_links) {
+        g_link_refused++;
+        errno = EPERM;
+        return -1;
+    }
+    if (real(ofd, from, nfd, to, flags) != 0) {
+        g_link_refused++;
+        return -1;
+    }
+    return 0;
+}
 
 static char g_dir[64];
 
@@ -230,6 +289,9 @@ static int slurp(const char *dir, const char *name, char *out, size_t cap) {
 
 /* Fresh landing and outside directories; g_cwd is the landing one. */
 static int fresh_tree(void) {
+    g_fail_rename_at = 0; /* a test that failed early must not leave an injection armed */
+    g_no_hard_links = 0;
+    g_fail_stat_name[0] = '\0';
     if (g_land[0]) {
         nftw(g_land, rm_cb, 8, FTW_DEPTH | FTW_PHYS);
         nftw(g_out, rm_cb, 8, FTW_DEPTH | FTW_PHYS);
@@ -705,6 +767,316 @@ static int test_contained_destination_names_follow_the_landing_rules(void) {
     return 0;
 }
 
+/* ---- fl_fs_commit_files ----------------------------------------------------- */
+
+static int holds(const char *name, const char *text) {
+    char buf[512];
+
+    return slurp(g_land, name, buf, sizeof buf) == (int)strlen(text) && strcmp(buf, text) == 0;
+}
+
+/* No staging file and no backup is left beside name. */
+static int tidy(const char *name) {
+    char sib[300];
+
+    snprintf(sib, sizeof sib, "%s%s", name, FL_FS_PART_SUFFIX);
+    if (exists(g_land, sib))
+        return 0;
+    snprintf(sib, sizeof sib, "%s%s", name, FL_FS_BACKUP_SUFFIX);
+    return !exists(g_land, sib);
+}
+
+static int test_commit_files_installs_one_and_three(void) {
+    const fl_fs_file_out_t one[] = {{"solo", (const uint8_t *)"alone", 5u}};
+    const fl_fs_file_out_t three[] = {{"a", (const uint8_t *)"new-a", 5u},
+                                      {"b", (const uint8_t *)"new-b", 5u},
+                                      {"c", (const uint8_t *)"new-c", 5u}};
+    char path[300];
+    struct stat st;
+    int dfd;
+
+    ASSERT(fresh_tree() == 0);
+    dfd = fl_fs_dir_open(g_land);
+    ASSERT(dfd >= 0);
+    ASSERT(fl_fs_commit_files(dfd, NULL, one, 1u) == 0);
+    ASSERT(holds("solo", "alone") && tidy("solo"));
+    snprintf(path, sizeof path, "%s/solo", g_land);
+    ASSERT(stat(path, &st) == 0 && (st.st_mode & 0777) == 0600);
+    /* a replaced file, a new one, and an empty body */
+    ASSERT(put_in(g_land, "a", "old-a") == 0 && put_in(g_land, "c", "old-c") == 0);
+    ASSERT(fl_fs_commit_files(dfd, NULL, three, 3u) == 0);
+    ASSERT(holds("a", "new-a") && holds("b", "new-b") && holds("c", "new-c"));
+    ASSERT(tidy("a") && tidy("b") && tidy("c"));
+    {
+        const fl_fs_file_out_t empty[] = {{"a", NULL, 0u}};
+
+        ASSERT(fl_fs_commit_files(dfd, NULL, empty, 1u) == 0 && holds("a", ""));
+    }
+    close(dfd);
+    return 0;
+}
+
+static int test_commit_files_failed_rename_puts_everything_back(void) {
+    const fl_fs_file_out_t files[] = {{"a", (const uint8_t *)"new-a", 5u},
+                                      {"fresh", (const uint8_t *)"new-fresh", 9u},
+                                      {"b", (const uint8_t *)"new-b", 5u}};
+    int dfd, attempt;
+
+    ASSERT(fresh_tree() == 0);
+    dfd = fl_fs_dir_open(g_land);
+    ASSERT(dfd >= 0);
+    /* The third rename fails: a is back, fresh (new) is gone again, b was never touched. */
+    for (attempt = 1; attempt <= 3; attempt++) {
+        ASSERT(put_in(g_land, "a", "old-a") == 0 && put_in(g_land, "b", "old-b") == 0);
+        g_fail_rename_at = attempt;
+        errno = 0;
+        ASSERT(fl_fs_commit_files(dfd, NULL, files, 3u) == -1 && errno == EIO);
+        g_fail_rename_at = 0;
+        ASSERT(holds("a", "old-a") && holds("b", "old-b") && !exists(g_land, "fresh"));
+        ASSERT(tidy("a") && tidy("fresh") && tidy("b"));
+    }
+    /* once the failure is gone the same call goes through */
+    ASSERT(fl_fs_commit_files(dfd, NULL, files, 3u) == 0);
+    ASSERT(holds("a", "new-a") && holds("fresh", "new-fresh") && holds("b", "new-b"));
+    close(dfd);
+    return 0;
+}
+
+/* An existence check that fails is not "absent": nothing is replaced and the parts go. */
+static int test_commit_files_unknown_existence_fails_closed(void) {
+    const fl_fs_file_out_t files[] = {{"a", (const uint8_t *)"new-a", 5u},
+                                      {"b", (const uint8_t *)"new-b", 5u},
+                                      {"c", (const uint8_t *)"new-c", 5u}};
+    int dfd;
+
+    ASSERT(fresh_tree() == 0);
+    dfd = fl_fs_dir_open(g_land);
+    ASSERT(dfd >= 0);
+    ASSERT(put_in(g_land, "a", "old-a") == 0 && put_in(g_land, "b", "old-b") == 0);
+    snprintf(g_fail_stat_name, sizeof g_fail_stat_name, "b");
+    errno = 0;
+    ASSERT(fl_fs_commit_files(dfd, NULL, files, 3u) == -1 && errno == EIO);
+    g_fail_stat_name[0] = '\0';
+    ASSERT(holds("a", "old-a") && holds("b", "old-b") && !exists(g_land, "c"));
+    ASSERT(tidy("a") && tidy("b") && tidy("c"));
+    ASSERT(fl_fs_commit_files(dfd, NULL, files, 3u) == 0 && holds("b", "new-b"));
+    close(dfd);
+    return 0;
+}
+
+static int test_commit_files_copy_fallback_where_links_are_missing(void) {
+    const fl_fs_file_out_t files[] = {{"a", (const uint8_t *)"new-a", 5u},
+                                      {"b", (const uint8_t *)"new-b", 5u}};
+    int dfd;
+
+    ASSERT(fresh_tree() == 0);
+    dfd = fl_fs_dir_open(g_land);
+    ASSERT(dfd >= 0);
+    g_no_hard_links = 1;
+    g_link_calls = 0;
+    ASSERT(put_in(g_land, "a", "old-a") == 0 && put_in(g_land, "b", "old-b") == 0);
+    ASSERT(fl_fs_commit_files(dfd, NULL, files, 2u) == 0);
+    ASSERT(g_link_calls == 2 && holds("a", "new-a") && holds("b", "new-b"));
+    ASSERT(tidy("a") && tidy("b"));
+    /* a failure after the first rename restores the first file from its copied backup */
+    ASSERT(put_in(g_land, "a", "old-a") == 0 && put_in(g_land, "b", "old-b") == 0);
+    g_fail_rename_at = 2;
+    ASSERT(fl_fs_commit_files(dfd, NULL, files, 2u) == -1);
+    g_fail_rename_at = 0;
+    g_no_hard_links = 0;
+    ASSERT(holds("a", "old-a") && holds("b", "old-b") && tidy("a") && tidy("b"));
+    close(dfd);
+    return 0;
+}
+
+/* The longest name works and a longer one is refused untouched, with links and without. */
+static int name_length_checks(void) {
+    char longest[FL_FS_NAME_MAX + 8u], too_long[FL_FS_NAME_MAX + 8u];
+    fl_fs_file_out_t f;
+    int dfd;
+
+    memset(longest, 'n', FL_FS_COMMIT_NAME_MAX);
+    longest[FL_FS_COMMIT_NAME_MAX] = '\0';
+    memset(too_long, 'n', FL_FS_COMMIT_NAME_MAX + 1u);
+    too_long[FL_FS_COMMIT_NAME_MAX + 1u] = '\0';
+    ASSERT(strlen(longest) == 244u && strlen(too_long) == 245u);
+    ASSERT(fresh_tree() == 0);
+    dfd = fl_fs_dir_open(g_land);
+    ASSERT(dfd >= 0);
+    f = (fl_fs_file_out_t){too_long, (const uint8_t *)"x", 1u};
+    errno = 0;
+    ASSERT(fl_fs_commit_files(dfd, NULL, &f, 1u) == -1 && errno == ENAMETOOLONG);
+    ASSERT(!exists(g_land, too_long) && tidy(too_long));
+    /* created, then replaced with a backup of the old one */
+    f = (fl_fs_file_out_t){longest, (const uint8_t *)"x", 1u};
+    ASSERT(fl_fs_commit_files(dfd, NULL, &f, 1u) == 0 && holds(longest, "x") && tidy(longest));
+    f = (fl_fs_file_out_t){longest, (const uint8_t *)"yz", 2u};
+    ASSERT(fl_fs_commit_files(dfd, NULL, &f, 1u) == 0 && holds(longest, "yz") && tidy(longest));
+    close(dfd);
+    return 0;
+}
+
+static int test_commit_files_name_length_leaves_room_for_every_sibling(void) {
+    ASSERT(FL_FS_COMMIT_NAME_MAX == 244u);
+    ASSERT(name_length_checks() == 0);
+    /* the copied backup is staged as <name>.kqbak.part, which the same limit covers */
+    g_no_hard_links = 1;
+    ASSERT(name_length_checks() == 0);
+    g_no_hard_links = 0;
+    return 0;
+}
+
+/* A staging name that cannot be made fails the call and removes the parts made before it. */
+static int test_commit_files_failed_staging_leaves_nothing(void) {
+    const fl_fs_file_out_t files[] = {{"a", (const uint8_t *)"new-a", 5u},
+                                      {"b", (const uint8_t *)"new-b", 5u},
+                                      {"c", (const uint8_t *)"new-c", 5u}};
+    char block[300];
+    int dfd, stage;
+
+    ASSERT(fresh_tree() == 0);
+    dfd = fl_fs_dir_open(g_land);
+    ASSERT(dfd >= 0);
+    ASSERT(put_in(g_land, "a", "old-a") == 0);
+    for (stage = 1; stage <= 2; stage++) {
+        /* a directory at the second, then at the third, staging name */
+        snprintf(block, sizeof block, "%s/%s.part", g_land, stage == 1 ? "b" : "c");
+        ASSERT(mkdir(block, 0700) == 0);
+        ASSERT(fl_fs_commit_files(dfd, NULL, files, 3u) == -1);
+        ASSERT(!exists(g_land, "a.part"));
+        ASSERT(stage == 2 || !exists(g_land, "c.part")); /* the blocked name is ours */
+        ASSERT(stage == 1 || !exists(g_land, "b.part"));
+        ASSERT(holds("a", "old-a") && !exists(g_land, "b") && !exists(g_land, "c"));
+        ASSERT(!exists(g_land, "a.kqbak"));
+        ASSERT(rmdir(block) == 0);
+    }
+    close(dfd);
+    return 0;
+}
+
+static int test_commit_files_drops_a_stale_backup(void) {
+    const fl_fs_file_out_t files[] = {{"a", (const uint8_t *)"new-a", 5u},
+                                      {"b", (const uint8_t *)"new-b", 5u}};
+    int dfd;
+
+    ASSERT(fresh_tree() == 0);
+    dfd = fl_fs_dir_open(g_land);
+    ASSERT(dfd >= 0);
+    ASSERT(put_in(g_land, "a", "old-a") == 0 && put_in(g_land, "a.kqbak", "stale") == 0);
+    ASSERT(put_in(g_land, "b", "old-b") == 0 && put_in(g_land, "b.kqbak", "stale") == 0);
+    g_link_calls = g_link_refused = 0;
+    ASSERT(fl_fs_commit_files(dfd, NULL, files, 2u) == 0);
+    /* the leftover was removed first, so each backup was a plain hard link */
+    ASSERT(g_link_calls == 2 && g_link_refused == 0);
+    ASSERT(holds("a", "new-a") && holds("b", "new-b") && tidy("a") && tidy("b"));
+    /* a failed run restores the real original, never the leftover */
+    ASSERT(put_in(g_land, "a", "old-a") == 0 && put_in(g_land, "a.kqbak", "stale") == 0);
+    g_fail_rename_at = 2;
+    ASSERT(fl_fs_commit_files(dfd, NULL, files, 2u) == -1);
+    g_fail_rename_at = 0;
+    ASSERT(holds("a", "old-a") && tidy("a") && tidy("b"));
+    /* a leftover staging name is replaced as well */
+    ASSERT(put_in(g_land, "a.part", "half") == 0);
+    ASSERT(fl_fs_commit_files(dfd, NULL, files, 2u) == 0 && holds("a", "new-a") && tidy("a"));
+    close(dfd);
+    return 0;
+}
+
+static int test_commit_files_refuses_bad_calls_before_writing(void) {
+    const fl_fs_file_out_t five[] = {{"f1", (const uint8_t *)"1", 1u},
+                                     {"f2", (const uint8_t *)"2", 1u},
+                                     {"f3", (const uint8_t *)"3", 1u},
+                                     {"f4", (const uint8_t *)"4", 1u},
+                                     {"f5", (const uint8_t *)"5", 1u}};
+    const fl_fs_file_out_t dup[] = {{"d", (const uint8_t *)"1", 1u},
+                                    {"d", (const uint8_t *)"2", 1u}};
+    const fl_fs_file_out_t clash[] = {{"s", (const uint8_t *)"1", 1u},
+                                      {"s.part", (const uint8_t *)"2", 1u}};
+    const fl_fs_file_out_t sep[] = {{"sub/x", (const uint8_t *)"1", 1u}};
+    const fl_fs_file_out_t dots[] = {{"..", (const uint8_t *)"1", 1u}};
+    const fl_fs_file_out_t nodata[] = {{"nd", NULL, 3u}};
+    const fl_fs_file_out_t good[] = {{"g", (const uint8_t *)"1", 1u}};
+    char listing[300];
+    int dfd, i;
+
+    ASSERT(fresh_tree() == 0);
+    dfd = fl_fs_dir_open(g_land);
+    ASSERT(dfd >= 0);
+    ASSERT(FL_FS_COMMIT_FILES_MAX == 4u);
+    ASSERT(fl_fs_commit_files(dfd, NULL, five, 4u) == 0); /* the cap itself is fine */
+    for (i = 1; i <= 4; i++) {
+        snprintf(listing, sizeof listing, "f%d", i);
+        ASSERT(exists(g_land, listing));
+    }
+    errno = 0;
+    ASSERT(fl_fs_commit_files(dfd, NULL, five, 5u) == -1 && errno == EINVAL);
+    ASSERT(!exists(g_land, "f5") && !exists(g_land, "f5.part") && tidy("f1"));
+    ASSERT(fl_fs_commit_files(dfd, NULL, good, 0u) == -1);
+    ASSERT(fl_fs_commit_files(dfd, NULL, NULL, 1u) == -1);
+    ASSERT(fl_fs_commit_files(dfd, NULL, dup, 2u) == -1 && !exists(g_land, "d"));
+    ASSERT(fl_fs_commit_files(dfd, NULL, clash, 2u) == -1 && !exists(g_land, "s"));
+    ASSERT(fl_fs_commit_files(dfd, NULL, sep, 1u) == -1 && !exists(g_land, "sub"));
+    ASSERT(fl_fs_commit_files(dfd, NULL, dots, 1u) == -1);
+    ASSERT(fl_fs_commit_files(dfd, NULL, nodata, 1u) == -1 && !exists(g_land, "nd"));
+    /* the path is not a silent fallback where the contained calls exist; a closed fd fails */
+    errno = 0;
+    ASSERT(fl_fs_commit_files(-1, g_land, good, 1u) == -1 && errno == EBADF);
+    ASSERT(!exists(g_land, "g"));
+    close(dfd);
+    ASSERT(fl_fs_commit_files(dfd, NULL, good, 1u) == -1 && !exists(g_land, "g"));
+    return 0;
+}
+
+static int test_commit_files_replaces_a_link_instead_of_following_it(void) {
+    const fl_fs_file_out_t files[] = {{"lnk", (const uint8_t *)"new", 3u}};
+    char target[300], link_path[300];
+    struct stat st;
+    int dfd;
+
+    ASSERT(fresh_tree() == 0);
+    ASSERT(put_in(g_out, "elsewhere", "untouched") == 0);
+    snprintf(target, sizeof target, "%s/elsewhere", g_out);
+    snprintf(link_path, sizeof link_path, "%s/lnk", g_land);
+    ASSERT(symlink(target, link_path) == 0);
+    dfd = fl_fs_dir_open(g_land);
+    ASSERT(dfd >= 0);
+    ASSERT(fl_fs_commit_files(dfd, NULL, files, 1u) == 0);
+    ASSERT(lstat(link_path, &st) == 0 && S_ISREG(st.st_mode) && holds("lnk", "new"));
+    {
+        char buf[32];
+
+        ASSERT(slurp(g_out, "elsewhere", buf, sizeof buf) > 0 &&
+               strcmp(buf, "untouched") == 0);
+    }
+    close(dfd);
+    return 0;
+}
+
+static int test_landing_directory_helpers(void) {
+    char out[64], tiny[4];
+    uint8_t *data = NULL;
+    size_t len = 0;
+    int dfd;
+
+    ASSERT(fresh_tree() == 0);
+    ASSERT(put_in(g_land, "here", "bytes") == 0);
+    dfd = fl_fs_dir_open(g_land);
+    ASSERT(dfd >= 0);
+    ASSERT(fl_fs_exists_at(dfd, NULL, "here") == 1 && fl_fs_exists_at(dfd, NULL, "gone") == 0);
+    ASSERT(fl_fs_read_file_at(dfd, NULL, "here", 64u, &data, &len) == 0 && len == 5u &&
+           memcmp(data, "bytes", 5u) == 0);
+    free(data);
+    errno = 0;
+    ASSERT(fl_fs_exists_at(-1, g_land, "here") == -1 && errno == EBADF);
+    ASSERT(fl_fs_read_file_at(-1, g_land, "here", 64u, &data, &len) == -1 && data == NULL);
+    close(dfd);
+    ASSERT(fl_fs_join_path(out, sizeof out, "dir", "n") == 0 && strcmp(out, "dir/n") == 0);
+    ASSERT(fl_fs_join_path(out, sizeof out, "dir/", "n") == 0 && strcmp(out, "dir/n") == 0);
+    ASSERT(fl_fs_join_path(out, sizeof out, "", "n") == 0 && strcmp(out, "n") == 0);
+    ASSERT(fl_fs_join_path(tiny, sizeof tiny, "dir", "name") != 0);
+    return 0;
+}
+
 int main(void) {
     static const char *const names[] = {"normal", "empty", "cap", "target", "link", "fifo"};
     int rc = 0;
@@ -741,6 +1113,16 @@ int main(void) {
     rc |= test_contained_overwrite_failure_keeps_original();
     rc |= test_contained_overwrite_refuses_unwritable_and_fifo_leaf();
     rc |= test_contained_destination_names_follow_the_landing_rules();
+    rc |= test_commit_files_installs_one_and_three();
+    rc |= test_commit_files_failed_rename_puts_everything_back();
+    rc |= test_commit_files_unknown_existence_fails_closed();
+    rc |= test_commit_files_copy_fallback_where_links_are_missing();
+    rc |= test_commit_files_name_length_leaves_room_for_every_sibling();
+    rc |= test_commit_files_failed_staging_leaves_nothing();
+    rc |= test_commit_files_drops_a_stale_backup();
+    rc |= test_commit_files_refuses_bad_calls_before_writing();
+    rc |= test_commit_files_replaces_a_link_instead_of_following_it();
+    rc |= test_landing_directory_helpers();
     rc |= test_plain_name_accepts_and_rejects();
     rc |= test_save_offer_refuses_unsafe_names();
     for (i = 0; i < sizeof names / sizeof *names; i++) {

@@ -66,7 +66,11 @@ int fl_fs_mkdir_p(const char *path, mode_t mode)
 #define FL_FS_O_NOFOLLOW 0
 #endif
 
-/** Longest single name the contained calls take, with room for ".part". */
+/**
+ * Longest single name the contained calls take, with room for ".part" (5 bytes) under
+ * FL_FS_NAME_MAX. ".kqbak" is 6 and a copied backup stages ".kqbak.part" (11), so
+ * fl_fs_commit_files checks its own, tighter, limit.
+ */
 #define FL_FS_LEAF_MAX 250u
 
 static int at_open(int dirfd, const char *path, int flags, mode_t mode)
@@ -137,7 +141,8 @@ static int stage_at(int dirfd, const char *path, const uint8_t *data, size_t len
     size_t off = 0;
     const int flags = O_WRONLY | O_CREAT | O_EXCL | FL_FS_O_NOFOLLOW | O_CLOEXEC;
 
-    if (!path || (len && !data) || snprintf(tmp, sizeof tmp, "%s.part", path) >= (int)sizeof tmp)
+    if (!path || (len && !data) ||
+        snprintf(tmp, sizeof tmp, "%s" FL_FS_PART_SUFFIX, path) >= (int)sizeof tmp)
         return -1;
     fd = at_open(dirfd, tmp, flags, 0600);
     if (fd < 0 && errno == EEXIST && at_lstat(dirfd, tmp, &st) == 0 && !S_ISDIR(st.st_mode) &&
@@ -172,7 +177,7 @@ static int write_atomic_at(int dirfd, const char *path, const uint8_t *data, siz
 {
     char tmp[FL_FS_PATH_MAX];
 
-    if (!path || snprintf(tmp, sizeof tmp, "%s.part", path) >= (int)sizeof tmp ||
+    if (!path || snprintf(tmp, sizeof tmp, "%s" FL_FS_PART_SUFFIX, path) >= (int)sizeof tmp ||
         stage_at(dirfd, path, data, len) != 0)
         return -1;
     if (at_rename(dirfd, tmp, path) != 0) {
@@ -390,7 +395,7 @@ int fl_fs_read_file_in(int dirfd, const char *name, size_t max, uint8_t **data, 
 #endif
 }
 
-static int join_path(char *out, size_t cap, const char *a, const char *b)
+int fl_fs_join_path(char *out, size_t cap, const char *a, const char *b)
 {
     int r;
 
@@ -407,6 +412,274 @@ static int join_path(char *out, size_t cap, const char *a, const char *b)
         return -ENAMETOOLONG;
     }
     return 0;
+}
+
+/* ---- landing directory and the all-or-nothing replace ---------------------- */
+
+/* The directory the replace works in: an fd (contained), or fd -1 with the directory's path. */
+typedef struct {
+    int         fd;
+    const char *dir;
+} landing_t;
+
+static int at_link(int dirfd, const char *from, const char *to)
+{
+#ifdef FL_FS_HAVE_OPENAT
+    return linkat(dirfd, from, dirfd, to, 0);
+#else
+    (void)dirfd;
+    return link(from, to);
+#endif
+}
+
+/* Where name lives for the *at calls: inside the fd, or at its joined path from the cwd. */
+static int landing_target(const landing_t *l, const char *name, char *buf, size_t cap, int *dirfd,
+                          const char **target)
+{
+    if (l->fd >= 0) {
+        *dirfd = l->fd;
+        *target = name;
+        return 0;
+    }
+    *dirfd = FL_FS_CWDFD;
+    *target = buf;
+    return fl_fs_join_path(buf, cap, l->dir, name) == 0 ? 0 : -1;
+}
+
+/* A landing is usable when the fd is open, or when there are no contained calls to use. */
+static int landing_ready(int dirfd, const char *dir_path)
+{
+    if (dirfd >= 0)
+        return fl_fs_contained_available();
+    return !fl_fs_contained_available() && dir_path && dir_path[0];
+}
+
+int fl_fs_exists_at(int dirfd, const char *dir_path, const char *name)
+{
+    char p[FL_FS_PATH_MAX];
+
+    if (dirfd >= 0)
+        return fl_fs_exists_in(dirfd, name);
+    if (fl_fs_contained_available()) {
+        errno = EBADF;
+        return -1;
+    }
+    if (!dir_path || !name || fl_fs_join_path(p, sizeof p, dir_path, name) != 0)
+        return -1;
+    return access(p, F_OK) == 0 ? 1 : 0;
+}
+
+int fl_fs_read_file_at(int dirfd, const char *dir_path, const char *name, size_t max,
+                       uint8_t **data, size_t *len)
+{
+    char p[FL_FS_PATH_MAX];
+
+    if (dirfd >= 0)
+        return fl_fs_read_file_in(dirfd, name, max, data, len);
+    if (data)
+        *data = NULL;
+    if (len)
+        *len = 0;
+    if (fl_fs_contained_available()) {
+        errno = EBADF;
+        return -1;
+    }
+    if (!dir_path || !name || fl_fs_join_path(p, sizeof p, dir_path, name) != 0)
+        return -1;
+    return fl_fs_read_file(p, max, data, len);
+}
+
+static int land_stage(const landing_t *l, const char *name, const uint8_t *d, size_t n)
+{
+    char buf[FL_FS_PATH_MAX];
+    const char *t;
+    int dfd;
+
+    return landing_target(l, name, buf, sizeof buf, &dfd, &t) == 0 ? stage_at(dfd, t, d, n) : -1;
+}
+
+static int land_write(const landing_t *l, const char *name, const uint8_t *d, size_t n)
+{
+    char buf[FL_FS_PATH_MAX];
+    const char *t;
+    int dfd;
+
+    return landing_target(l, name, buf, sizeof buf, &dfd, &t) == 0
+               ? write_atomic_at(dfd, t, d, n)
+               : -1;
+}
+
+static int land_unlink(const landing_t *l, const char *name)
+{
+    char buf[FL_FS_PATH_MAX];
+    const char *t;
+    int dfd;
+
+    return landing_target(l, name, buf, sizeof buf, &dfd, &t) == 0 ? at_unlink(dfd, t) : -1;
+}
+
+static int land_rename(const landing_t *l, const char *from, const char *to)
+{
+    char a[FL_FS_PATH_MAX], b[FL_FS_PATH_MAX];
+    const char *ta, *tb;
+    int dfd;
+
+    if (landing_target(l, from, a, sizeof a, &dfd, &ta) != 0 ||
+        landing_target(l, to, b, sizeof b, &dfd, &tb) != 0)
+        return -1;
+    return at_rename(dfd, ta, tb);
+}
+
+static int land_link(const landing_t *l, const char *from, const char *to)
+{
+    char a[FL_FS_PATH_MAX], b[FL_FS_PATH_MAX];
+    const char *ta, *tb;
+    int dfd;
+
+    if (landing_target(l, from, a, sizeof a, &dfd, &ta) != 0 ||
+        landing_target(l, to, b, sizeof b, &dfd, &tb) != 0)
+        return -1;
+    return at_link(dfd, ta, tb);
+}
+
+/* The most a backup copy reads (a file past it is not backed up, so its replace is refused). */
+#define FL_FS_COMMIT_COPY_MAX (4u * 1024u * 1024u)
+
+/*
+ * Keeps name as bak. A hard link costs nothing; a file system without links (the browser
+ * lab's in-memory one refuses them) gets a copy instead, wiped from memory after.
+ */
+static int backup_file(const landing_t *l, const char *name, const char *bak)
+{
+    uint8_t *copy = NULL;
+    size_t len = 0;
+    int rc;
+
+    if (land_link(l, name, bak) == 0)
+        return 0;
+    if (fl_fs_read_file_at(l->fd, l->dir, name, FL_FS_COMMIT_COPY_MAX, &copy, &len) != 0)
+        return -1;
+    rc = land_write(l, bak, copy, len);
+    explicit_bzero(copy, len);
+    free(copy);
+    return rc;
+}
+
+/* 1 when a is b plus a suffix the replace adds to a name (a staging or backup name). */
+static int is_sibling_of(const char *a, const char *b)
+{
+    size_t lb = strlen(b);
+
+    return strncmp(a, b, lb) == 0 &&
+           (strcmp(a + lb, FL_FS_PART_SUFFIX) == 0 || strcmp(a + lb, FL_FS_BACKUP_SUFFIX) == 0);
+}
+
+/* A plain name that leaves room for every sibling, the copied backup's .kqbak.part included. */
+static int commit_name_ok(const char *name)
+{
+    if (!leaf_name_ok(name))
+        return 0;
+    if (strlen(name) > FL_FS_COMMIT_NAME_MAX) {
+        errno = ENAMETOOLONG;
+        return 0;
+    }
+    return 1;
+}
+
+int fl_fs_commit_files(int dirfd, const char *dir_path, const fl_fs_file_out_t *files, size_t n)
+{
+    const landing_t l = {dirfd, dir_path};
+    char part[FL_FS_NAME_MAX + 1u];
+    char bak[FL_FS_NAME_MAX + 1u];
+    int had[FL_FS_COMMIT_FILES_MAX] = {0};
+    size_t done = 0;
+    size_t i, j;
+    int rc = 0;
+    int err = 0;
+    int exist;
+
+    if (!files || n == 0u || n > FL_FS_COMMIT_FILES_MAX) {
+        errno = EINVAL;
+        return -1;
+    }
+    if (!landing_ready(dirfd, dir_path)) {
+        errno = dirfd >= 0 ? ENOSYS : EBADF;
+        return -1;
+    }
+    for (i = 0; i < n; i++) {
+        if (!files[i].name || (files[i].len && !files[i].data)) {
+            errno = EINVAL;
+            return -1;
+        }
+        if (!commit_name_ok(files[i].name))
+            return -1;
+        for (j = 0; j < i; j++) {
+            if (strcmp(files[i].name, files[j].name) == 0 ||
+                is_sibling_of(files[i].name, files[j].name) ||
+                is_sibling_of(files[j].name, files[i].name)) {
+                errno = EINVAL;
+                return -1;
+            }
+        }
+    }
+    for (i = 0; i < n; i++) {
+        if (land_stage(&l, files[i].name, files[i].data, files[i].len) != 0)
+            break;
+    }
+    if (i < n) {
+        err = errno;
+        while (i-- > 0) {
+            snprintf(part, sizeof part, "%s" FL_FS_PART_SUFFIX, files[i].name);
+            land_unlink(&l, part);
+        }
+        errno = err;
+        return -1;
+    }
+    for (i = 0; i < n; i++) {
+        snprintf(bak, sizeof bak, "%s" FL_FS_BACKUP_SUFFIX, files[i].name);
+        land_unlink(&l, bak);
+        exist = fl_fs_exists_at(l.fd, l.dir, files[i].name);
+        if (exist < 0) { /* cannot tell: fail closed, nothing has been replaced yet */
+            err = errno;
+            rc = -1;
+            break;
+        }
+        had[i] = exist == 1;
+        if (had[i] && backup_file(&l, files[i].name, bak) != 0) {
+            err = errno;
+            rc = -1;
+            break;
+        }
+    }
+    for (; rc == 0 && done < n; done++) {
+        snprintf(part, sizeof part, "%s" FL_FS_PART_SUFFIX, files[done].name);
+        if (land_rename(&l, part, files[done].name) != 0) {
+            err = errno;
+            rc = -1;
+        }
+    }
+    if (rc != 0) {
+        /* Put back what was replaced; a file that did not exist before is removed. */
+        size_t replaced = done ? done - 1 : 0;
+        for (i = 0; i < replaced; i++) {
+            snprintf(bak, sizeof bak, "%s" FL_FS_BACKUP_SUFFIX, files[i].name);
+            if (had[i])
+                (void)land_rename(&l, bak, files[i].name);
+            else
+                land_unlink(&l, files[i].name);
+        }
+        for (i = 0; i < n; i++) {
+            snprintf(part, sizeof part, "%s" FL_FS_PART_SUFFIX, files[i].name);
+            land_unlink(&l, part);
+        }
+    }
+    for (i = 0; i < n; i++) {
+        snprintf(bak, sizeof bak, "%s" FL_FS_BACKUP_SUFFIX, files[i].name);
+        land_unlink(&l, bak);
+    }
+    if (rc != 0)
+        errno = err;
+    return rc;
 }
 
 static fl_result_t read_meta_share_id(const char *meta_path,
@@ -433,7 +706,7 @@ static fl_result_t read_meta_share_id(const char *meta_path,
 static int landing_path_exists(const char *root, const char *landed)
 {
     char path[512];
-    if (join_path(path, sizeof(path), root, landed) != 0)
+    if (fl_fs_join_path(path, sizeof(path), root, landed) != 0)
         return 0;
     return access(path, F_OK) == 0;
 }
@@ -467,8 +740,8 @@ static int ascii_casecmp(const char *a, const char *b)
 
 int fl_server_shared_name_is_reserved(const char *name)
 {
-    static const char *const reserved[] = {".part", FL_SERVER_SHARED_META_SUFFIX, ".kqtf",
-                                           ".kqseen", ".kqbak"};
+    static const char *const reserved[] = {FL_FS_PART_SUFFIX, FL_SERVER_SHARED_META_SUFFIX,
+                                           ".kqtf", ".kqseen", FL_FS_BACKUP_SUFFIX};
     size_t len, i;
 
     if (!name)
@@ -589,9 +862,9 @@ static fl_result_t move_landed_to_expired(const char *root,
     char src_meta[512];
     char dst_meta[512];
 
-    if (join_path(src_file, sizeof(src_file), root, landed) != 0)
+    if (fl_fs_join_path(src_file, sizeof(src_file), root, landed) != 0)
         return FL_RESULT_ERR;
-    if (join_path(dst_file, sizeof(dst_file), expired_root, landed) != 0)
+    if (fl_fs_join_path(dst_file, sizeof(dst_file), expired_root, landed) != 0)
         return FL_RESULT_ERR;
     if (rename(src_file, dst_file) != 0 && errno != ENOENT)
         return FL_RESULT_ERR;
@@ -698,9 +971,9 @@ fl_result_t fl_server_shared_init(void)
 {
     char root[512];
     char expired[512];
-    if (join_path(root, sizeof(root), ".", FL_SERVER_SHARED_DIR_NAME) != 0)
+    if (fl_fs_join_path(root, sizeof(root), ".", FL_SERVER_SHARED_DIR_NAME) != 0)
         return FL_RESULT_ERR;
-    if (join_path(expired, sizeof(expired), root, FL_SERVER_SHARED_EXPIRED_DIR_NAME) != 0)
+    if (fl_fs_join_path(expired, sizeof(expired), root, FL_SERVER_SHARED_EXPIRED_DIR_NAME) != 0)
         return FL_RESULT_ERR;
     if (fl_fs_mkdir_p(root, 0700) != 0)
         return FL_RESULT_ERR;
@@ -769,12 +1042,12 @@ fl_result_t fl_server_shared_save_offer(const fl_server_file_offer_t *offer,
         return FL_RESULT_INVAL;
     if (fl_server_shared_init() != FL_RESULT_OK)
         return FL_RESULT_ERR;
-    if (join_path(root, sizeof(root), ".", FL_SERVER_SHARED_DIR_NAME) != 0)
+    if (fl_fs_join_path(root, sizeof(root), ".", FL_SERVER_SHARED_DIR_NAME) != 0)
         return FL_RESULT_ERR;
     rc = resolve_unique_landed(root, offer, landed, sizeof(landed));
     if (rc != FL_RESULT_OK)
         return rc;
-    if (join_path(file_path, sizeof(file_path), root, landed) != 0)
+    if (fl_fs_join_path(file_path, sizeof(file_path), root, landed) != 0)
         return FL_RESULT_ERR;
     root_fd = fl_fs_dir_open(root);
     if (root_fd < 0)
@@ -859,9 +1132,9 @@ fl_result_t fl_server_shared_purge_expired(uint64_t now)
 
     if (fl_server_shared_init() != FL_RESULT_OK)
         return FL_RESULT_ERR;
-    if (join_path(root, sizeof(root), ".", FL_SERVER_SHARED_DIR_NAME) != 0)
+    if (fl_fs_join_path(root, sizeof(root), ".", FL_SERVER_SHARED_DIR_NAME) != 0)
         return FL_RESULT_ERR;
-    if (join_path(expired_root, sizeof(expired_root), root,
+    if (fl_fs_join_path(expired_root, sizeof(expired_root), root,
                   FL_SERVER_SHARED_EXPIRED_DIR_NAME) != 0)
         return FL_RESULT_ERR;
     if (fl_fs_mkdir_p(expired_root, 0700) != 0 && errno != EEXIST)
@@ -888,7 +1161,7 @@ fl_result_t fl_server_shared_purge_expired(uint64_t now)
             continue;
         memcpy(landed, ent->d_name, name_len - suffix_len);
         landed[name_len - suffix_len] = '\0';
-        join_path(meta_path, sizeof(meta_path), root, ent->d_name);
+        fl_fs_join_path(meta_path, sizeof(meta_path), root, ent->d_name);
         fp = fopen(meta_path, "r");
         if (!fp)
             continue;

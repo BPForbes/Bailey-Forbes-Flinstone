@@ -15,6 +15,13 @@
 /** Longest path the helpers below accept, including the ".part" suffix they add. */
 #define FL_FS_PATH_MAX 4096u
 
+/** Longest single name component the file systems in use take (NAME_MAX on Linux). */
+#define FL_FS_NAME_MAX 255u
+/** Suffix of the staging file a write goes through before it is renamed into place. */
+#define FL_FS_PART_SUFFIX ".part"
+/** Suffix of the backup fl_fs_commit_files keeps of a file it replaces (a reserved name). */
+#define FL_FS_BACKUP_SUFFIX ".kqbak"
+
 /**
  * mkdir -p: creates path and its missing parents with mode. 0 on success (also when it
  * exists); -1 with errno set otherwise, including ENAMETOOLONG for a path that does not
@@ -63,6 +70,14 @@ int fl_fs_read_file_in(int dirfd, const char *name, size_t max, uint8_t **data, 
 int fl_fs_write_file_atomic_in(int dirfd, const char *name, const uint8_t *data, size_t len);
 
 /**
+ * Joins dir and name into out (cap bytes, always terminated on success): an empty dir gives
+ * name alone and a trailing '/' on dir is not doubled. 0 on success; on a result that does not
+ * fit it is -ENAMETOOLONG (errno set too); for a NULL out or cap 0 it is -1. out is then not
+ * to be used.
+ */
+int fl_fs_join_path(char *out, size_t cap, const char *dir, const char *name);
+
+/**
  * 1 when name ends in a suffix the delivery code keeps for its own files (.part, .meta, .kqtf,
  * .kqseen, .kqbak), compared ignoring ASCII case. The one list both landing paths use.
  */
@@ -81,6 +96,54 @@ int fl_fs_link_in(int dirfd, const char *from, const char *to);
 int fl_fs_exists_in(int dirfd, const char *name);
 /** Opens one plain name inside dirfd for reading, refusing links (errno ELOOP). fd, or -1. */
 int fl_fs_open_read_in(int dirfd, const char *name);
+
+/*
+ * A landing directory is either held as an fd (dirfd >= 0, contained calls: links are never
+ * followed) or, only where the contained calls do not exist at all (fl_fs_contained_available()
+ * is 0), named by dir_path and used through the path-based calls. With the contained calls
+ * available, dirfd < 0 is refused (-1, errno EBADF): the path is never a silent fallback.
+ */
+
+/** fl_fs_exists_in for a landing directory as above. 1 present (a link counts), 0 absent, -1. */
+int fl_fs_exists_at(int dirfd, const char *dir_path, const char *name);
+/** fl_fs_read_file_in for a landing directory as above (same results and ownership). */
+int fl_fs_read_file_at(int dirfd, const char *dir_path, const char *name, size_t max,
+                       uint8_t **data, size_t *len);
+
+/** One file for fl_fs_commit_files: a plain name inside the landing directory and its bytes. */
+typedef struct {
+    const char    *name;
+    const uint8_t *data;
+    size_t         len;
+} fl_fs_file_out_t;
+
+/** Longest name fl_fs_commit_files takes; leaves room for ".kqbak.part" (a copied backup). */
+#define FL_FS_COMMIT_NAME_MAX (FL_FS_NAME_MAX - 11u)
+/** Most files one fl_fs_commit_files call takes. */
+#define FL_FS_COMMIT_FILES_MAX 4u
+
+/**
+ * Replaces every file in files[0..n) or none of them, inside one landing directory (dirfd and
+ * dir_path as above; the caller opens dirfd with fl_fs_dir_open and closes it, this never
+ * does). All <name>.part files are staged first; then each existing file is kept as
+ * <name>.kqbak (a hard link, or a copy where links are missing, wiped from memory after) and
+ * the parts are renamed into place. If a step fails, the files already replaced are put
+ * back from their backups (or removed when they did not exist), the parts are removed, and the
+ * result is -1 with errno of the first failure; the backups are removed at the end.
+ * A stale <name>.kqbak is dropped first. Names are plain (no separator, not "." or ".."), at
+ * most FL_FS_COMMIT_NAME_MAX (244) bytes, the same with or without hard links, and must not
+ * repeat or be another name plus ".part" or ".kqbak". n is 1 to FL_FS_COMMIT_FILES_MAX; any
+ * other n, or a refused name, is -1 (EINVAL, or ENAMETOOLONG) before anything is touched.
+ * Copy fallback: the file is read whole, up to 4 MiB (the KeyQuorum letter bound); a larger
+ * existing file makes the replace fail (nothing changed) where links are missing.
+ * An existence check that cannot tell fails the call before any file is replaced (-1, its
+ * errno); the parts are removed.
+ * Known limit (as the code this replaced): "put back" is best effort. If the restoring rename
+ * itself fails, that file keeps its new bytes and its backup is still removed. A fix changes
+ * the .kqbak lifecycle and needs its own design.
+ * Not safe against another writer racing in the same directory. 0 on success.
+ */
+int fl_fs_commit_files(int dirfd, const char *dir_path, const fl_fs_file_out_t *files, size_t n);
 
 /** Ensure ./server_shared and ./server_shared/expired exist. */
 fl_result_t fl_server_shared_init(void);
