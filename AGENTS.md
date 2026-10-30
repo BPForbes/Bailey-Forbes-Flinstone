@@ -70,6 +70,23 @@ Run builds from the repository root.
 - Full architecture parity check: `make parity`
 - WASM lab shell smoke: `make test-wasm-shell`
 
+## Static analysis (CodeQL)
+
+- CI: `.github/workflows/codeql.yml` runs CodeQL on pull requests to `develop` and `main`, on pushes
+  to them, and weekly: C/C++ (traced through `make ARCH=x86_64_gas`), JavaScript, Python and the
+  workflows, with the security-and-quality suite from `.github/codeql/codeql-config.yml`. The
+  `codeql gate` check fails on a high or critical finding in shipped code; findings in `tests/` and
+  `test_*` files are listed, not gated. `.github/scripts/codeql_report.py` prints each finding in
+  the review rules' five parts with its SOC 2 criterion.
+- Local: `scripts/codeql_local.sh [--lang LANG]... [--dry-run]` runs the same analysis and report
+  (needs the CodeQL CLI; exit 2 means NOT RUN, never a pass). Databases and SARIF stay outside the
+  repo and are never committed.
+- **Assembly is not analysed**: CodeQL has no extractor for GAS (`.s`, `.S`) or NASM (`.asm`), or for
+  shell scripts. The C that calls the assembly is analysed; the assembly stays with human review.
+- Multi-agent DevOps team: the Security seat runs CodeQL as part of its SOC 2 review
+  (`.cursor/skills/devops-multi-agent-team/references/soc2-review.md`); QA does not PASS while
+  `codeql gate` is red on the head.
+
 ## Development testing policy
 
 - Before changing code, run the most relevant existing tests for the affected area to establish a baseline.

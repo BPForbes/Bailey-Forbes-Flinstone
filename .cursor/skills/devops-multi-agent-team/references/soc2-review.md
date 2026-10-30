@@ -15,6 +15,27 @@ is a `## SOC 2 review` section in the review thread (or
   reported, marked minor.
 - No secrets, keys, tokens or passphrases in a finding, log or test.
 
+## CodeQL (part of every review)
+
+Run CodeQL on the change before walking the criteria, so its findings are in hand when each row
+is judged. It covers what the Security seat cannot read line by line: C and C++ (traced through
+`make`), the browser lab's JavaScript, Python and this repo's workflows. **It does not read
+assembly** (GAS `.s` / `.S`, NASM `.asm`) or shell scripts: review those by hand and say so.
+
+1. Run `scripts/codeql_local.sh` (all four languages, or `--lang` for the ones the change
+   touches). It needs the CodeQL CLI; without it the script exits 2 (`NOT RUN`), and the seat then
+   reads the pushed head's `codeql gate` check and the `codeql-sarif-*` artifact instead. Databases
+   and SARIF stay outside the repository (the script's default is under `$TMPDIR`); they never land.
+2. The report (`.github/scripts/codeql_report.py`) already prints each finding in the five parts
+   below, with its SOC 2 criterion. Copy a finding into `### Findings` only when it is in the
+   change or in code the change calls; findings elsewhere are listed under residual risk. A
+   `GATE` finding (high or critical, shipped code) is at least **high**. A finding in test code
+   is listed, not gated.
+3. A clean scan is not "Met". CodeQL cannot see design, jail and path containment logic as a
+   whole, assembly, or a missing check, so the criteria below are still walked with evidence.
+4. Record the result in the output as `CodeQL:` (see Output). Never write a pass for a run that
+   did not happen.
+
 ## Every finding carries five parts
 
 1. **Source** - why it is a violation: a rule in `AGENTS.md` /
@@ -80,6 +101,7 @@ and the residual risk.
 ```markdown
 ## SOC 2 review
 Scope: <diff, commit, files>   Authors: <seat ids>   Reviewer: <security seat id>
+CodeQL: <ran locally (languages) | CI codeql gate on <sha>: pass/fail | NOT RUN (why)>; findings n (gate n); assembly not analysed
 | Criterion | Status | Evidence |
 |-----------|--------|----------|
 | CC6.1 ... | Met | file:line, test |

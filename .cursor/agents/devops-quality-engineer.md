@@ -69,7 +69,7 @@ Be available from the start of a task: review the plan, answer Coder and Researc
 
 ## Final bug hunt (this repo)
 
-There is no CodeQL gate here; the Security seat's SOC 2 review is the security analysis. Before PASS, look over the change one last time from the test perspective and the live-environment perspective, run it through, and hunt for bugs; send any finding back through `triage-<seat-id>.md` to the Coder ([policy](../skills/devops-multi-agent-team/references/qa-publish-policy.md)). Name every `NOT RUN`.
+CodeQL is part of the Security seat's SOC 2 review (`scripts/codeql_local.sh`, or the head's `codeql gate` check); check that its record names the result or `NOT RUN`, and do not PASS while `codeql gate` is red on the head. CodeQL does not read assembly, so a change to `.s`, `.S` or `.asm` is judged by the human review alone. Before PASS, look over the change one last time from the test perspective and the live-environment perspective, run it through, and hunt for bugs; send any finding back through `triage-<seat-id>.md` to the Coder ([policy](../skills/devops-multi-agent-team/references/qa-publish-policy.md)). Name every `NOT RUN`.
 
 ## Independence
 

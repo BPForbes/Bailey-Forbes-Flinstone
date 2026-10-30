@@ -1,0 +1,28 @@
+# CodeQL configuration for .github/workflows/codeql.yml and scripts/codeql_local.sh.
+#
+# security-and-quality is the strictest standard suite: every security query (including the
+# lower-precision "extended" ones) plus the reliability and maintainability queries. Findings
+# are reported by .github/scripts/codeql_report.py in the same five-part form as the review
+# rules in AGENTS.md (source, source quote, quoted lines, SOC 2 criterion, fix); the check fails
+# on anything high or critical in shipped code.
+#
+# What CodeQL reads here: C and C++ (traced through `make`), JavaScript (the browser lab's
+# scripts and tools), Python (scripts and tests) and this repository's own workflows. It has
+# no assembly extractor, so the GAS (.s, .S) and NASM (.asm) layers under arch/ and kernel/arch/
+# are not analysed by it; the C that calls them is, and the assembly stays with human review.
+name: "Flinstone CodeQL"
+
+queries:
+  - uses: security-and-quality
+
+# Build output, vendored code and generated files are not our code. Test code stays in scope:
+# the report lists findings in tests, but only findings in shipped code fail the check
+# (see codeql_report.py).
+paths-ignore:
+  - third_party
+  - build
+  - obj
+  - out
+  - dist
+  - "**/node_modules"
+  - version

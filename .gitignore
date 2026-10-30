@@ -141,3 +141,8 @@ tests/test_wifi_uart_at_scan_join
 .cursor/thoughts/**
 !.cursor/thoughts/non-finalized/
 !.cursor/thoughts/non-finalized/.gitkeep
+
+# CodeQL databases and SARIF (scripts/codeql_local.sh writes them under $TMPDIR; never commit)
+*.sarif
+codeql-db*/
+.codeql/

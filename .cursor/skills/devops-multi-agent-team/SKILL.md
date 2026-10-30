@@ -91,7 +91,8 @@ Security's SOC 2 review first; Clear does not authorize a push either.
    **Satisfied**. Satisfied does **not** authorize a push.
 5. Then **Security**: a full SOC 2 analysis on every change (except
    review-bot feedback fixes, see qa-publish-policy.md)
-   ([soc2-review.md](references/soc2-review.md)), plus Snyk /
+   ([soc2-review.md](references/soc2-review.md)), which includes a CodeQL run
+   (`scripts/codeql_local.sh`, or the head's `codeql gate`), plus Snyk /
    `/review-security` where installed.
 6. Then **QA**. QA owns
    [qa-publish-policy.md](references/qa-publish-policy.md)
@@ -124,7 +125,7 @@ Do **not** invent requirements. Ask the human when scope is unclear.
 | Pre-QA | Reviewers | `review-*.md` + `/review-*` | Improvements; no push |
 | CI | QA / CI Engineer | Buildkite + `/buildkite-*` | Failed jobs, retry |
 | Quality | QA | final bug hunt; Sonar + `/sonar-*` if installed | Publish gate; Sonar additive |
-| Security | Security | Snyk + `/review-security` | SCA/SAST/IaC |
+| Security | Security | CodeQL + Snyk + `/review-security` | C/C++, JS, Python and workflow SAST (no assembly); SCA/IaC |
 | Externals | Integrator | Composio + `/composio-*` | Only if asked |
 | UI | Verifier | Browser + `/browser-automation` | Smoke |
 | Diagram | Researcher | tldraw; `/docs-canvas` | Architecture |
@@ -211,7 +212,7 @@ Label every substantive reply with the active role, e.g. `[Planner]`; a spawned 
   `.cursor/agents/devops-quality-engineer.md`.
 - **Observability / Optimization / Documentation / Refactoring /
   Security / Performance** — after Satisfied, Security before QA
-  (Snyk + `/review-security` in `## Security`). Docs match the
+  (CodeQL + Snyk + `/review-security` in `## Security`). Docs match the
   implementation. No premature complexity.
 
 ## Orchestrator loop (async pods)
@@ -285,10 +286,13 @@ acts. Redact tokens, secrets and credentials from anything shown (see
 
 ## Repo alignment (Bailey-Forbes-Flinstone)
 
-**QA gate here:** there is no CodeQL gate. The Security seat's SOC 2 review
-([soc2-review.md](references/soc2-review.md)) is the security analysis, and QA's
-final bug hunt (test perspective, live-environment perspective, triage on any
-finding) is the last gate. See [qa-publish-policy.md](references/qa-publish-policy.md).
+**QA gate here:** CodeQL is part of the security analysis. The Security seat runs it
+(`scripts/codeql_local.sh`, or reads the head's `codeql gate` check when the CLI is not
+installed) inside its SOC 2 review ([soc2-review.md](references/soc2-review.md)); CodeQL does not
+read assembly, which stays with human review. QA's final bug hunt (test perspective,
+live-environment perspective, triage on any finding) is the last gate, and QA does not PASS
+while the head's `codeql gate` is red or the Security record says nothing about CodeQL. See
+[qa-publish-policy.md](references/qa-publish-policy.md).
 
 **Precedence:** this repo's `AGENTS.md`, `CLAUDE.md` and
 `.cursor/rules/*.mdc` win over this skill. In particular the

@@ -57,8 +57,8 @@ Template: [review-thread-template.md](review-thread-template.md).
 
 ## 4. Security (after Satisfied)
 
-Snyk / secret scan / `/review-security` on the change surface.
-Record verdict in the review thread. Security Clear does **not**
+Snyk / secret scan / `/review-security` / CodeQL (`scripts/codeql_local.sh`, or the head's
+`codeql gate`) on the change surface. CodeQL does not read assembly. Record verdict in the review thread. Security Clear does **not**
 authorize a push.
 
 ## 5. QA

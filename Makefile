@@ -1007,6 +1007,11 @@ test_fs_provider_bytes: userland/shell/common.o userland/shell/authz_subsystem.o
 	  $(FS_JAIL_TEST_LIBS) -Wl,-z,noexecstack
 	./tests/test_fs_provider_bytes
 
+# The CodeQL report script and the local runner (no CodeQL CLI needed).
+.PHONY: test_codeql_scripts
+test_codeql_scripts:
+	python3 -m unittest discover -s .github/scripts
+
 .PHONY: test_hex
 test_hex: kernel/core/vfs/kq_delivery.o kernel/core/vfs/server_shared_fs.o kernel/core/vfs/server_shared_db.o kernel/core/vfs/server_catalog_file.o kernel/core/vfs/server_shared_digest.o $(SHARED_FS_MM_OBJS) userland/shell/common.o
 	$(CC) $(CFLAGS) $(TEST_SANITIZE) -o tests/test_hex tests/test_hex.c \

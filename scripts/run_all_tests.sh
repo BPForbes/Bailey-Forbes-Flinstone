@@ -107,6 +107,7 @@ run_make "test_kq_delivery" test_kq_delivery
 run_make "test_kq_net" test_kq_net
 run_make "test_kq_wire" test_kq_wire
 run_make "test_part_buf" test_part_buf
+run_make "test_codeql_scripts" test_codeql_scripts
 
 run_make "test_server_file_expire" test_server_file_expire
 run_make "test_net_codec" test_net_codec
