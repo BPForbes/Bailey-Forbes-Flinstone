@@ -11,6 +11,7 @@
 #include "kernel/core/net/net_wire.h"
 
 #include "fl/mem_asm.h"
+#include "kernel/core/mm/mem_domain.h"
 
 /* Debug logging (disable in production) */
 #define WIFI_COPROC_DEBUG 0
@@ -213,6 +214,7 @@ int wifi_coproc_join(wifi_coproc_t *coproc, const char *ssid, const char *passwo
 		     wifi_auth_mode_t auth)
 {
 	wifi_join_params_t params;
+	int rc;
 
 	if (!coproc || !coproc->ops || !coproc->ops->join_network)
 		return -1;
@@ -225,7 +227,10 @@ int wifi_coproc_join(wifi_coproc_t *coproc, const char *ssid, const char *passwo
 	params.auth_mode = auth;
 	params.channel = 0;
 
-	return coproc->ops->join_network(coproc, &params);
+	rc = coproc->ops->join_network(coproc, &params);
+	/* The passphrase lives only for the join call. */
+	mem_domain_secure_zero(&params, sizeof(params));
+	return rc;
 }
 
 int wifi_coproc_disconnect(wifi_coproc_t *coproc)

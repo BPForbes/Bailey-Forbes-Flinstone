@@ -1,6 +1,7 @@
 #include "cmd_server_file.h"
 
 #include "cmd_authutil.h"
+#include "cmd_util.h"
 #include "common.h"
 #include "fl/mem_asm.h"
 #include "mem_domain.h"
@@ -16,6 +17,7 @@
 #include "server_shared_fs.h"
 #include "session.h"
 #include "share_gate.h"
+#include "util.h"
 
 #include <errno.h>
 #include <stdio.h>
@@ -114,6 +116,15 @@ static int parse_expire_arg(const char *arg, uint64_t *expires_at_out)
     return fl_server_file_parse_expire_arg(arg, expires_at_out);
 }
 
+/* Every verb that reads a local file goes through the same jail and quarantine check as write. */
+static int local_path_blocked(const char *op, const char *path)
+{
+    char rpath[CWD_MAX];
+
+    resolve_path(path, rpath, sizeof(rpath));
+    return cmd_jail_blocked_path(op, path, rpath);
+}
+
 static int stat_local_file(const char *path, uint64_t *size_out)
 {
     struct stat st;
@@ -174,6 +185,8 @@ static int verb_file_send(const cmd_server_ctx_t *ctx, int argc, char **argv)
         fl_color_error("server file: -all is mutually exclusive with -user/-id");
         return 1;
     }
+    if (local_path_blocked("server file", path))
+        return 1;
     if (stat_local_file(path, &file_size) != 0) {
         fl_color_error("cannot read file '%s'", path);
         return 1;
@@ -579,6 +592,8 @@ static int verb_file_log(int argc, char **argv)
         fl_color_error("usage: server file log <path>");
         return 1;
     }
+    if (local_path_blocked("server file log", argv[1]))
+        return 1;
     cp = fl_kq_cp_history(argv[1], &lines);
     if (cp != FL_KQ_CP_OK) {
         fl_color_warn("server file log: %s", fl_kq_cp_reason(cp));
@@ -608,6 +623,8 @@ static int verb_file_permit(int argc, char **argv)
         fl_color_error("server file permit: sign in as the supervisor first");
         return 1;
     }
+    if (local_path_blocked("server file permit", argv[1]))
+        return 1;
     cp = fl_kq_cp_head(argv[1], head);
     if (cp != FL_KQ_CP_OK) {
         fl_color_warn("server file permit: %s", fl_kq_cp_reason(cp));
@@ -661,6 +678,8 @@ static int verb_kq_send(const cmd_server_ctx_t *ctx, int argc, char **argv)
         fl_color_error("usage: server file send -t <path> -user <name> [--permitted]");
         return 1;
     }
+    if (local_path_blocked("server file send", path))
+        return 1;
     /* The same sender-side gate as any offer: same line, or a signed bridge. */
     {
         fl_share_gate_result_t gate =

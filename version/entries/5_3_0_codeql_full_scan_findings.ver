@@ -1,0 +1,6 @@
+MAJOR_VERSION=5
+STANDARD_VERSION=3
+RELEASE_VERSION=0
+PRERELEASE=1
+DEV_VERSION=10
+DESCRIPTION=Clear the first full CodeQL scan of develop. The scan on the merged develop head reported 47 high or critical C and C++ findings and 2 Python findings in code the pull request had not touched. Fixed in code: the batch and write commands build their text with bounded copies instead of strcat, the Linux Wi-Fi host single-quotes the wpa_cli and nmcli program paths, the interface and the control directory and accepts an interface name from the environment only when it is plain, the USB port name may not contain a slash, the Wi-Fi coprocessor wipes the join passphrase after the call, server file offer, send, log and permit now apply the VM jail and quarantine check that write uses, and the SAE vector generator no longer prints its test PSK. The rest are recorded in the accepted-findings register with a disposition, justification and review date, and two entries that matched nothing were removed.

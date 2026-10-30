@@ -200,9 +200,29 @@ static int env_falsy(const char *v) {
     return v && (v[0] == '0' || v[0] == 'n' || v[0] == 'N' || v[0] == 'f' || v[0] == 'F');
 }
 
+/* The name is later placed in shell command lines and a /sys path: accept only the characters the
+ * Wi-Fi HE helper accepts, at most IFNAMSIZ - 1 of them. */
+static int iface_name_safe(const char *name) {
+    size_t i, n;
+
+    if (!name || !name[0])
+        return 0;
+    n = strlen(name);
+    if (n >= 16u)
+        return 0;
+    for (i = 0; i < n; i++) {
+        char c = name[i];
+        if ((c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z') || (c >= '0' && c <= '9') ||
+            c == '_' || c == '-' || c == '.')
+            continue;
+        return 0;
+    }
+    return 1;
+}
+
 static int iface_is_wireless(const char *name) {
     char path[256];
-    if (!name || !name[0])
+    if (!iface_name_safe(name))
         return 0;
     snprintf(path, sizeof(path), "/sys/class/net/%s/wireless", name);
     return access(path, F_OK) == 0;
@@ -325,18 +345,27 @@ static int wpa_use_requested(void) {
     return -1;
 }
 
+static void shell_single_quote(const char *in, char *out, size_t out_cap);
+
+/* `cmd` is a wpa_cli argument string whose SSID and passphrase the callers have already quoted; the
+ * program path, interface and control directory are quoted here. */
 static int run_wpa_cli(const char *cmd, char *out, size_t out_cap) {
-    char line[512];
+    char line[2048];
+    char cli_q[sizeof(s_wpa_cli) * 5 + 4];
+    char if_q[FL_NET_IFACE_NAME_MAX * 5 + 4];
+    char ctrl_q[sizeof(s_wpa_ctrl_dir) * 5 + 4];
     FILE *fp;
 
     if (!cmd || s_host_kind != FL_WIFI_HOST_WPA_CLI)
         return 0;
-    if (s_wpa_ctrl_dir[0])
-        snprintf(line, sizeof(line), "%s -i %s -p %s %s 2>&1", s_wpa_cli,
-                 s_wifi_iface, s_wpa_ctrl_dir, cmd);
-    else
-        snprintf(line, sizeof(line), "%s -i %s %s 2>&1", s_wpa_cli, s_wifi_iface,
-                 cmd);
+    shell_single_quote(s_wpa_cli, cli_q, sizeof(cli_q));
+    shell_single_quote(s_wifi_iface, if_q, sizeof(if_q));
+    if (s_wpa_ctrl_dir[0]) {
+        shell_single_quote(s_wpa_ctrl_dir, ctrl_q, sizeof(ctrl_q));
+        snprintf(line, sizeof(line), "%s -i %s -p %s %s 2>&1", cli_q, if_q, ctrl_q, cmd);
+    } else {
+        snprintf(line, sizeof(line), "%s -i %s %s 2>&1", cli_q, if_q, cmd);
+    }
     fp = popen(line, "r");
     if (!fp)
         return 0;
@@ -352,12 +381,14 @@ static int run_wpa_cli(const char *cmd, char *out, size_t out_cap) {
 }
 
 static int popen_nmcli(const char *args, char *out, size_t out_cap) {
-    char line[768];
+    char line[1024];
+    char nm_q[sizeof(s_nmcli) * 5 + 4];
     FILE *fp;
 
     if (!args)
         return 0;
-    snprintf(line, sizeof(line), "%s %s 2>&1", s_nmcli, args);
+    shell_single_quote(s_nmcli, nm_q, sizeof(nm_q));
+    snprintf(line, sizeof(line), "%s %s 2>&1", nm_q, args);
     fp = popen(line, "r");
     if (!fp)
         return 0;
@@ -380,14 +411,20 @@ static int run_nmcli(const char *args, char *out, size_t out_cap) {
 
 static int wpa_ping_with_ctrl(const char *ctrl_dir) {
     char out[64];
-    char cmd[512];
+    char cmd[2048];
+    char cli_q[sizeof(s_wpa_cli) * 5 + 4];
+    char if_q[FL_NET_IFACE_NAME_MAX * 5 + 4];
+    char ctrl_q[sizeof(s_wpa_ctrl_dir) * 5 + 4];
     FILE *fp;
 
-    if (ctrl_dir && ctrl_dir[0])
-        snprintf(cmd, sizeof(cmd), "%s -i %s -p %s ping 2>&1", s_wpa_cli,
-                 s_wifi_iface, ctrl_dir);
-    else
-        snprintf(cmd, sizeof(cmd), "%s -i %s ping 2>&1", s_wpa_cli, s_wifi_iface);
+    shell_single_quote(s_wpa_cli, cli_q, sizeof(cli_q));
+    shell_single_quote(s_wifi_iface, if_q, sizeof(if_q));
+    if (ctrl_dir && ctrl_dir[0]) {
+        shell_single_quote(ctrl_dir, ctrl_q, sizeof(ctrl_q));
+        snprintf(cmd, sizeof(cmd), "%s -i %s -p %s ping 2>&1", cli_q, if_q, ctrl_q);
+    } else {
+        snprintf(cmd, sizeof(cmd), "%s -i %s ping 2>&1", cli_q, if_q);
+    }
     fp = popen(cmd, "r");
     if (!fp)
         return 0;

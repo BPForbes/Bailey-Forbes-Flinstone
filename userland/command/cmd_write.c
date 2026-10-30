@@ -20,10 +20,14 @@ int cmd_write_run(int argc, char **argv) {
     if (cmd_jail_blocked_path("write", args[1], rpath))
         return 1;
     char content[4096] = {0};
-    for (int i = 2; i < argc && (size_t)(strlen(content) + strlen(args[i]) + 2) < sizeof(content); i++) {
+    size_t used = 0;
+    for (int i = 2; i < argc && used + strlen(args[i]) + 2 < sizeof(content); i++) {
+        size_t len = strlen(args[i]);
         if (i > 2)
-            strcat(content, " ");
-        strcat(content, args[i]);
+            content[used++] = ' ';
+        memcpy(content + used, args[i], len);
+        used += len;
+        content[used] = '\0';
     }
     if (g_fm_service) {
         if (fm_save_text(g_fm_service, rpath, content) == 0) {
