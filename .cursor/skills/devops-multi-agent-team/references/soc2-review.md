@@ -30,7 +30,12 @@ assembly** (GAS `.s` / `.S`, NASM `.asm`) or shell scripts: review those by hand
    below, with its SOC 2 criterion. Copy a finding into `### Findings` only when it is in the
    change or in code the change calls; findings elsewhere are listed under residual risk. A
    `GATE` finding (high or critical, shipped code) is at least **high**. A finding in test code
-   is listed, not gated.
+   is listed, not gated. A finding the accepted-findings register covers
+   (`.github/codeql/accepted-findings.json`: rule, file, count, disposition, justification, owner,
+   `review_by`) is listed under "Accepted findings", not as new; judge whether its justification
+   still holds for this change. An instance beyond an entry's count is new. A change to the
+   register is a `.github/` change: it needs this review and QA, and a `false-positive` or
+   `accepted-risk` entry needs a reason you can defend with the code. Policy: `docs/SOC2_CODEQL.md`.
 3. A clean scan is not "Met". CodeQL cannot see design, jail and path containment logic as a
    whole, assembly, or a missing check, so the criteria below are still walked with evidence.
 4. Record the result in the output as `CodeQL:` (see Output). Never write a pass for a run that

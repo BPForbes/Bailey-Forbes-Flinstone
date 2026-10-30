@@ -443,6 +443,71 @@ static int test_older_store_is_carried_over(void) {
     return 0;
 }
 
+/* The old build's files are read through held directories without following a link: a letter
+ * that is a link, or a letters directory that is a link, is never read, so no other file can be
+ * pulled into a sealed letter. The row is ended instead, as for any unreadable letter. */
+static int test_older_store_does_not_follow_links(void) {
+    char root[sizeof s_dir + 32], dir[sizeof root + 8], letters[sizeof dir + 16];
+    char db_path[sizeof dir + 32], path[sizeof letters + 64], outside[sizeof s_dir + 32];
+    char outside_letters[sizeof s_dir + 48], hex[2 * FL_KQ_DELIVERY_ID_LEN + 1];
+    uint8_t one[FL_KQ_DELIVERY_ID_LEN], two[FL_KQ_DELIVERY_ID_LEN];
+    fl_kq_store_t *s = NULL;
+    fl_kq_delivery_t got;
+    sqlite3 *old = NULL;
+    uint8_t *letter = NULL;
+    size_t letter_len = 0;
+
+    /* case 1: the letter itself is a link to a file elsewhere */
+    snprintf(root, sizeof root, "%s/carry-link", s_dir);
+    snprintf(dir, sizeof dir, "%s/kq", root);
+    snprintf(letters, sizeof letters, "%s/kq_letters", dir);
+    snprintf(outside, sizeof outside, "%s/outside-secret.txt", s_dir);
+    ASSERT(fl_fs_mkdir_p(letters, 0700) == 0);
+    ASSERT(write_bytes(outside, "not a letter") == 0);
+    snprintf(db_path, sizeof db_path, "%s/kq_delivery.db", dir);
+    make_id(one, 120);
+    ASSERT(sqlite3_open(db_path, &old) == SQLITE_OK);
+    ASSERT(sqlite3_exec(old, kLegacySchema, NULL, NULL, NULL) == SQLITE_OK);
+    ASSERT(sqlite3_exec(old, "PRAGMA user_version=1;", NULL, NULL, NULL) == SQLITE_OK);
+    ASSERT(legacy_row(old, one, "one.txt", 1000, 0, 0) == 0);
+    sqlite3_close(old);
+    fl_kq_delivery_id_hex(one, hex);
+    snprintf(path, sizeof path, "%s/%s.kqpb", letters, hex);
+    ASSERT(symlink(outside, path) == 0);
+    ASSERT(fl_kq_store_open(root, &s) == FL_RESULT_OK);
+    ASSERT(fl_kq_store_get(s, one, &got) == FL_RESULT_OK && got.expired);
+    ASSERT(fl_kq_store_letter(s, one, &letter, &letter_len) != FL_RESULT_OK);
+    mem_domain_free(MEM_DOMAIN_FS, letter);
+    fl_kq_store_close(s);
+    snprintf(path, sizeof path, "%s.migrated", db_path);
+    ASSERT(access(path, F_OK) == 0); /* the file itself was still carried over and renamed */
+
+    /* case 2: the letters directory is a link to a directory holding a real-looking letter */
+    snprintf(root, sizeof root, "%s/carry-dirlink", s_dir);
+    snprintf(dir, sizeof dir, "%s/kq", root);
+    snprintf(letters, sizeof letters, "%s/kq_letters", dir);
+    snprintf(outside_letters, sizeof outside_letters, "%s/elsewhere-letters", s_dir);
+    ASSERT(fl_fs_mkdir_p(dir, 0700) == 0);
+    ASSERT(fl_fs_mkdir_p(outside_letters, 0700) == 0);
+    snprintf(db_path, sizeof db_path, "%s/kq_delivery.db", dir);
+    make_id(two, 130);
+    ASSERT(sqlite3_open(db_path, &old) == SQLITE_OK);
+    ASSERT(sqlite3_exec(old, kLegacySchema, NULL, NULL, NULL) == SQLITE_OK);
+    ASSERT(sqlite3_exec(old, "PRAGMA user_version=1;", NULL, NULL, NULL) == SQLITE_OK);
+    ASSERT(legacy_row(old, two, "two.txt", 1000, 0, 0) == 0);
+    sqlite3_close(old);
+    fl_kq_delivery_id_hex(two, hex);
+    snprintf(path, sizeof path, "%s/%s.kqpb", outside_letters, hex);
+    ASSERT(write_bytes(path, "a letter elsewhere") == 0);
+    ASSERT(symlink(outside_letters, letters) == 0);
+    ASSERT(fl_kq_store_open(root, &s) == FL_RESULT_OK);
+    ASSERT(fl_kq_store_get(s, two, &got) == FL_RESULT_OK && got.expired);
+    ASSERT(fl_kq_store_letter(s, two, &letter, &letter_len) != FL_RESULT_OK);
+    mem_domain_free(MEM_DOMAIN_FS, letter);
+    fl_kq_store_close(s);
+    return 0;
+}
+
 /* The share root may not exist yet when the host first holds a letter. */
 static int test_store_creates_missing_parents(void) {
     fl_kq_store_t *s = NULL;
@@ -490,6 +555,7 @@ int main(void) {
     RUN(test_released_letter_expires);
     RUN(test_share_path_cannot_reach_kq_rows);
     RUN(test_older_store_is_carried_over);
+    RUN(test_older_store_does_not_follow_links);
     RUN(test_store_creates_missing_parents);
     rmrf(s_dir);
     if (rc == 0)

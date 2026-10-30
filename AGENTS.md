@@ -77,7 +77,10 @@ Run builds from the repository root.
   workflows, with the security-and-quality suite from `.github/codeql/codeql-config.yml`. The
   `codeql gate` check fails on a high or critical finding in shipped code; findings in `tests/` and
   `test_*` files are listed, not gated. `.github/scripts/codeql_report.py` prints each finding in
-  the review rules' five parts with its SOC 2 criterion.
+  the review rules' five parts with its SOC 2 criterion. A finding that is already known is
+  recorded in `.github/codeql/accepted-findings.json` (disposition, written justification, owner,
+  `review_by` date); a further instance fails, and an entry past its date fails until it is
+  reviewed. See `docs/SOC2_CODEQL.md`.
 - Local: `scripts/codeql_local.sh [--lang LANG]... [--dry-run]` runs the same analysis and report
   (needs the CodeQL CLI; exit 2 means NOT RUN, never a pass). Databases and SARIF stay outside the
   repo and are never committed.

@@ -14,6 +14,10 @@
 # scripts/codeql_local.sh runs the same analysis and the same report for the Security seat before
 # a push; CI is the record on the pushed head.
 #
+# Known findings are recorded in .github/codeql/accepted-findings.json, each with a disposition, a
+# written justification, an owner and a review date (docs/SOC2_CODEQL.md); a new finding, or an
+# entry past its review date, fails the gate.
+#
 # It reads, scans and reports; it never publishes, merges or writes to the repository.
 
 name: CodeQL

@@ -135,11 +135,33 @@ static void legacy_say(const char *what) {
     fprintf(stderr, "kq_store: older deliveries not carried over: %s\n", what);
 }
 
+/* Reads one legacy letter by its plain name. Where the contained calls exist the letters
+ * directory is held (letters_fd, opened without following a link) and a link at the name is
+ * refused, so a link planted in the share tree cannot pull another file into a sealed letter;
+ * a letters directory that could not be held reads nothing. Only where there are no *at calls
+ * at all is the path used. Results follow fl_fs_read_file. */
+static int legacy_read(int letters_fd, const char *legacy_letters, const char *name,
+                       uint8_t **data, size_t *len) {
+    char from[1200];
+
+    if (letters_fd >= 0)
+        return fl_fs_read_file_in(letters_fd, name, FL_KQ_LETTER_MAX, data, len);
+    if (fl_fs_contained_available() ||
+        fl_fs_join_path(from, sizeof from, legacy_letters, name) != 0) {
+        if (data)
+            *data = NULL;
+        if (len)
+            *len = 0;
+        return -1;
+    }
+    return fl_fs_read_file(from, FL_KQ_LETTER_MAX, data, len);
+}
+
 /* One legacy row as a catalog row, its offer, its history, and (while it is live) its letter
  * copied into this store. The letter is written before the caller commits; *copied says so,
  * so a failed commit can remove it. */
 static fl_result_t import_row(fl_kq_store_t *s, sqlite3 *old, sqlite3_stmt *row,
-                              const char *legacy_letters, int *copied) {
+                              int letters_fd, const char *legacy_letters, int *copied) {
     fl_kq_delivery_t d;
     const void *blob;
     int fired, acked, status;
@@ -260,10 +282,11 @@ static fl_result_t import_row(fl_kq_store_t *s, sqlite3 *old, sqlite3_stmt *row,
      * released, so its row is ended now rather than left waiting). */
     if (status == FL_SERVER_CATALOG_KQ_DELIVERED)
         return FL_RESULT_OK;
-    if (snprintf(from, sizeof from, "%s/%s.kqpb", legacy_letters, hex) >= (int)sizeof from ||
+    if (snprintf(from, sizeof from, "%s.kqpb", hex) >= (int)sizeof from ||
         letter_path(s, d.id, to, sizeof to) != 0)
         return FL_RESULT_ERR;
-    if (fl_fs_read_file(from, FL_KQ_LETTER_MAX, &letter, &letter_len) != 0 || letter_len == 0) {
+    if (legacy_read(letters_fd, legacy_letters, from, &letter, &letter_len) != 0 ||
+        letter_len == 0) {
         mem_domain_free(MEM_DOMAIN_FS, letter);
         if (set_state(s, &d, status, FL_SERVER_CATALOG_EXPIRED, 0) != FL_RESULT_OK ||
             log_event(s, d.id, "expired", d.offered_at) != FL_RESULT_OK)
@@ -294,7 +317,7 @@ static fl_result_t import_row(fl_kq_store_t *s, sqlite3 *old, sqlite3_stmt *row,
  * store already holds are skipped. The old letters are left where they were.
  */
 static void import_legacy(fl_kq_store_t *s) {
-    char db[1200], letters[1200], done[1300];
+    char db[1200], letters[1200], done[1300], kq_dir[1200];
     uint8_t copied_ids[KQ_LEAK_BATCH][FL_KQ_DELIVERY_ID_LEN];
     size_t copied_n = 0;
     sqlite3 *old = NULL;
@@ -302,12 +325,15 @@ static void import_legacy(fl_kq_store_t *s) {
     int version = 0;
     int ok = 0;
     int step = SQLITE_DONE;
+    int kq_fd = -1;
+    int letters_fd = -1;
     struct stat sb;
 
     if (snprintf(db, sizeof db, "%s/%s/%s", s->dir, KQ_LEGACY_DIR, KQ_LEGACY_DB) >= (int)sizeof db ||
         snprintf(letters, sizeof letters, "%s/%s/%s", s->dir, KQ_LEGACY_DIR, KQ_STORE_LETTERS) >=
             (int)sizeof letters ||
-        snprintf(done, sizeof done, "%s.migrated", db) >= (int)sizeof done)
+        snprintf(done, sizeof done, "%s.migrated", db) >= (int)sizeof done ||
+        snprintf(kq_dir, sizeof kq_dir, "%s/%s", s->dir, KQ_LEGACY_DIR) >= (int)sizeof kq_dir)
         return;
     if (lstat(db, &sb) != 0)
         return; /* nothing to carry over */
@@ -330,6 +356,12 @@ static void import_legacy(fl_kq_store_t *s) {
         legacy_say("kq/kq_delivery.db has an unknown schema version");
         return;
     }
+    /* Both directories are held without following a link, once, and every later name is used
+     * inside them: the letters are read and the old file is renamed through these handles, so
+     * a link swapped in after the check above is not followed. (A directory that cannot be held
+     * reads no letters; the row is then ended, as for any unreadable letter.) */
+    kq_fd = fl_fs_dir_open_nofollow(kq_dir);
+    letters_fd = fl_fs_dir_open_nofollow(letters);
     pthread_mutex_lock(&s->lock);
     if (store_exec(s, "BEGIN IMMEDIATE;") != FL_RESULT_OK)
         goto out;
@@ -342,7 +374,7 @@ static void import_legacy(fl_kq_store_t *s) {
         int copied = 0;
         if (copied_n == KQ_LEAK_BATCH)
             goto rollback; /* more live letters than one pass carries: leave it all for a person */
-        if (import_row(s, old, row, letters, &copied) != FL_RESULT_OK) {
+        if (import_row(s, old, row, letters_fd, letters, &copied) != FL_RESULT_OK) {
             if (copied)
                 memcpy(copied_ids[copied_n++], sqlite3_column_blob(row, 0), FL_KQ_DELIVERY_ID_LEN);
             goto rollback;
@@ -370,9 +402,14 @@ out:
                 (void)unlink(path);
         }
         legacy_say("the import failed; kq/kq_delivery.db is left as it was");
-    } else if (rename(db, done) != 0) {
+    } else if ((kq_fd >= 0 ? fl_fs_rename_in(kq_fd, KQ_LEGACY_DB, KQ_LEGACY_DB ".migrated")
+                           : (fl_fs_contained_available() ? -1 : rename(db, done))) != 0) {
         legacy_say("imported, but kq/kq_delivery.db could not be renamed");
     }
+    if (kq_fd >= 0)
+        close(kq_fd);
+    if (letters_fd >= 0)
+        close(letters_fd);
     pthread_mutex_unlock(&s->lock);
 }
 

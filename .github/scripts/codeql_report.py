@@ -11,6 +11,14 @@ the offending lines quoted from the code, the SOC 2 Trust Services Criterion it
 affects with a one-sentence reason, and the fix. The same text goes to the job
 summary.
 
+A finding that fails the check may be recorded in the accepted-findings register
+(.github/codeql/accepted-findings.json) instead: every entry names the rule and file, how many
+instances it covers, a disposition (false-positive, accepted-risk or tracked-fix), a written
+justification, an owner, the date it was added and a review_by date. A covered finding is listed
+under "Accepted findings" with its SOC 2 criterion and does not fail the check; an instance beyond
+the entry's count is a new finding and fails; an entry past its review_by date fails the check
+until someone reviews it again. Nothing is dismissed silently: the register is a reviewed file.
+
 Exit status: 1 when a finding in shipped code is high or critical (a
 `security-severity` of 7.0 or more, or a security-tagged result at level
 "error"); 0 otherwise. Findings in test code and lower severities are listed
@@ -20,12 +28,15 @@ Usage: codeql_report.py [--repo-root DIR] FILE.sarif [FILE.sarif ...]
 """
 
 import argparse
+import datetime
 import json
 import os
 import re
 import sys
 
-# CWE number -> (SOC 2 criterion, why a finding of this class weakens it).
+# CWE number -> (SOC 2 criterion, why a finding of this class weakens it). Incorrect permissions
+# (CWE-276, CWE-732: a file left writable or readable by others, an audit log included) are
+# logical access, CC6.1, not the software-supply-chain row.
 # Criteria are from the AICPA Trust Services Criteria (TSP section 100); the
 # CWE numbers are from https://cwe.mitre.org/. A new mapping needs a one-line
 # reason, as the review rules in AGENTS.md require for any SOC 2 claim.
@@ -35,7 +46,7 @@ GROUPS = [
     (
         "CC6.1 Logical access",
         "lets someone act without the authentication or authorization check that should have stopped them",
-        {284, 285, 287, 306, 307, 346, 352, 639, 862, 863, 942, 1275, 384, 613},
+        {276, 284, 285, 287, 306, 307, 346, 352, 384, 613, 639, 732, 862, 863, 942, 1275},
     ),
     (
         "CC6.6 System boundaries / PI1.2 Processing inputs",
@@ -72,7 +83,7 @@ GROUPS = [
     (
         "CC6.8 Unauthorized or malicious software / CC8.1 Change management",
         "lets untrusted input or an unreviewed component run in the build or delivery pipeline",
-        {250, 276, 377, 379, 426, 427, 494, 732, 829, 1104, 1357},
+        {250, 377, 379, 426, 427, 494, 829, 1104, 1357},
     ),
 ]
 CWE_TO_GROUP = {cwe: g for g in GROUPS for cwe in g[2]}
@@ -165,6 +176,23 @@ def all_rules(run):
     return rules
 
 
+def rule_prefixes(path):
+    """The query languages in this SARIF (the part of each rule id before the first slash).
+
+    The register covers every language; a job only reports the capacity of entries for the
+    languages it analysed, so the C/C++ job does not list the workflow entries as unused.
+    """
+    with open(path, encoding="utf-8") as f:
+        sarif = json.load(f)
+    seen = set()
+    for run in sarif.get("runs", []):
+        for rule_id in all_rules(run):
+            seen.add(rule_id.split("/")[0])
+        for res in run.get("results", []):
+            seen.add((res.get("ruleId") or "?").split("/")[0])
+    return seen
+
+
 def findings(path):
     with open(path, encoding="utf-8") as f:
         sarif = json.load(f)
@@ -229,21 +257,105 @@ def render(root, rule, res):
     ])
 
 
+DISPOSITIONS = ("false-positive", "accepted-risk", "tracked-fix")
+REQUIRED = ("id", "rule", "file", "count", "disposition", "justification", "owner", "added", "review_by")
+DATE = re.compile(r"^\d{4}-\d{2}-\d{2}$")
+
+
+def load_register(path):
+    """The accepted-findings entries, or exit 2 with every problem named. Missing file: none."""
+    if not path or not os.path.isfile(path):
+        return []
+    with open(path, encoding="utf-8") as f:
+        data = json.load(f)
+    problems, seen = [], set()
+    entries = data.get("entries", []) if isinstance(data, dict) else None
+    if entries is None or data.get("schema") != 1:
+        problems.append("the register must be an object with schema 1 and an entries list")
+        entries = []
+    for i, e in enumerate(entries):
+        where = f"entry {i + 1} ({e.get('id', '?') if isinstance(e, dict) else '?'})"
+        if not isinstance(e, dict):
+            problems.append(f"{where}: not an object")
+            continue
+        for key in REQUIRED:
+            if key not in e or e[key] in ("", None):
+                problems.append(f"{where}: missing {key}")
+        if e.get("id") in seen:
+            problems.append(f"{where}: duplicate id")
+        seen.add(e.get("id"))
+        if e.get("disposition") not in DISPOSITIONS:
+            problems.append(f"{where}: disposition must be one of {', '.join(DISPOSITIONS)}")
+        if not isinstance(e.get("count"), int) or e.get("count", 0) < 1:
+            problems.append(f"{where}: count must be a whole number of 1 or more")
+        for key in ("added", "review_by"):
+            if not DATE.match(str(e.get(key, ""))):
+                problems.append(f"{where}: {key} must be YYYY-MM-DD")
+        if len(str(e.get("justification", ""))) < 20:
+            problems.append(f"{where}: justification must say why, in a sentence")
+    if problems:
+        print("accepted-findings register is invalid:\n- " + "\n- ".join(problems), file=sys.stderr)
+        sys.exit(2)
+    return entries
+
+
+class Register:
+    """Matches gating findings to entries; an entry covers at most `count` instances."""
+
+    def __init__(self, entries, today):
+        self.entries = entries
+        self.left = {e["id"]: e["count"] for e in entries}
+        self.used = {e["id"]: 0 for e in entries}
+        self.expired = [e for e in entries if e["review_by"] < today]
+        self.live = [e for e in entries if e["review_by"] >= today]
+
+    def take(self, rule_id, uri):
+        for e in self.live:
+            if e["rule"] == rule_id and e["file"] == uri and self.left[e["id"]] > 0:
+                self.left[e["id"]] -= 1
+                self.used[e["id"]] += 1
+                return e
+        return None
+
+    def unused(self):
+        return [e for e in self.live if self.left[e["id"]] > 0]
+
+
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--repo-root", default=".")
+    ap.add_argument("--accepted", default=None,
+                    help="accepted-findings register (default: .github/codeql/accepted-findings.json)")
+    ap.add_argument("--today", default=None, help="YYYY-MM-DD, for tests")
     ap.add_argument("sarif", nargs="+")
     args = ap.parse_args()
+    today = args.today or datetime.date.today().isoformat()
+    reg_path = args.accepted or os.path.join(args.repo_root, ".github", "codeql", "accepted-findings.json")
+    register = Register(load_register(reg_path), today)
 
-    failing, listed, out, gates, test_lines = 0, 0, [], [], []
+    failing, listed, out, gates, test_lines, accepted = 0, 0, [], [], [], []
+    languages = set()
+    for path in args.sarif:
+        languages |= rule_prefixes(path)
     for path in args.sarif:
         for rule, res in findings(path):
             sev, uri, text = render(args.repo_root, rule, res)
             is_security = severity(rule, res)[2]
             in_tests = bool(TEST_PATH.search(uri))
             gate = sev in ("high", "critical") and is_security and not in_tests
-            failing += gate
             listed += 1
+            entry = register.take(rule.get("id", "?"), uri) if gate else None
+            if entry:
+                loc = (res.get("locations") or [{}])[0].get("physicalLocation", {})
+                line = loc.get("region", {}).get("startLine", "?")
+                mapped = criterion(rule.get("id", "?"), rule.get("properties", {}).get("tags", []), True)
+                accepted.append(
+                    f"- {sev}: {rule.get('id', '?')} at {uri}:{line} -- {entry['disposition']} "
+                    f"({entry['id']}, owner {entry['owner']}, review by {entry['review_by']}); "
+                    f"SOC 2: {mapped[0] if mapped else 'none'}; {entry['justification']}"
+                )
+                continue
+            failing += gate
             if gate:
                 loc = (res.get("locations") or [{}])[0].get("physicalLocation", {})
                 line = loc.get("region", {}).get("startLine", "?")
@@ -260,14 +372,42 @@ def main():
             # in a long list of lower-severity findings.
             (out.insert(0, entry) if gate else out.append(entry))
 
-    header = f"CodeQL: {listed} finding(s), {failing} failing the check (high or critical, shipped code)."
+    overdue = [
+        f"- {e['id']} ({e['rule']} in {e['file']}) was due for review on {e['review_by']}"
+        for e in register.expired
+    ]
+    failing += len(overdue)
+    header = (
+        f"CodeQL: {listed} finding(s), {failing} failing the check (high or critical, shipped code, "
+        f"or an overdue register entry), {len(accepted)} accepted through the register."
+    )
     if gates:
         header += "\nFailing the check:\n" + "\n".join(gates)
+    if overdue:
+        header += "\nAccepted-findings entries past their review date (re-review them, then move review_by):\n"
+        header += "\n".join(overdue)
     body = header + "\n\n" + "\n".join(out)
     if test_lines:
         body += (
             f"\nFindings in test code ({len(test_lines)}), listed but not failing the check:\n"
             + "\n".join(test_lines)
+            + "\n"
+        )
+    if accepted:
+        body += (
+            f"\nAccepted findings ({len(accepted)}), recorded in the register, not failing the check:\n"
+            + "\n".join(accepted)
+            + "\n"
+        )
+    spare = [
+        f"- {e['id']} ({e['rule']} in {e['file']}) allows {register.left[e['id']]} more than were found"
+        for e in register.unused()
+        if e["rule"].split("/")[0] in languages
+    ]
+    if spare:
+        body += (
+            "\nRegister entries with unused capacity (tighten count, or delete the entry once fixed):\n"
+            + "\n".join(spare)
             + "\n"
         )
     print(body)
