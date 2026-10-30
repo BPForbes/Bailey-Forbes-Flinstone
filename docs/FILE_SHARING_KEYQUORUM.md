@@ -171,23 +171,13 @@ length-prefixed, every read bounds-checked by `net_codec.h`.
 
 ## In the browser lab
 
-Where files go has one layer, as in KeyQuorum itself. KeyQuorum's `Storage` trait
-(`src/storage.rs`) carries the placement rules and the files ABI stores nothing; Flinstone's
-counterpart is `server_shared_fs.c` (`fl_fs_*`: staged writes, no-follow reads, the
-directory-relative landing, `fl_fs_commit_files`), and the checkpoints take their storage the way
-KeyQuorum's logic modules take a `Storage`. `kq_storage.h` is that table
-(`fl_kq_cp_set_storage`): a plain read, an atomic write, an existence check, and for a landing a
-held directory (`fl_kq_dir_t`, an fd with its path) with a bounded read, an existence check, a
-read of the newest records of the seen file and the all-or-nothing commit of the payload,
-container and seen record. The default table is the placement layer, which the browser lab and
-the unit tests use. The native shell installs the facade table (`kq_storage_facade.c`), so every
-checkpoint read and write is `fm_read_bytes`, `fm_write_atomic` or `fm_dir_*`: the policy asks
-before it, the write chain runs for every file of a commit before any is staged, and the save
-events and the path log follow only a commit that succeeded. Those calls are the provider's
-(`fs_provider_dir_*`, appended to the vtable; a provider without them answers ENOSYS), which is
-built on the placement layer, so a path argument is never what a landing is written through.
-`server file open` hands the decode the directory the destination resolver already holds
-(`fl_kq_cp_decode_in`), so a directory swapped after the check is not followed.
+Where files go has one layer, as in KeyQuorum itself: KeyQuorum's logic takes a `Storage`, and the
+checkpoints here take a storage table (`kq_storage.h`). The default table is the placement layer
+(`server_shared_fs.c`), which the lab and the unit tests use; the native shell installs a table over
+the file manager facade, so the policy, the write chain, the save events and the path log see every
+checkpoint read and write. A landing is written through a held directory, never a joined path, and
+`server file open` hands the decode the directory the destination resolver already holds. The full
+picture, with the call path and the operations, is [KQ_STORAGE.md](KQ_STORAGE.md).
 
 The lab's WebAssembly shell builds the same code: the checkpoints (`kq_checkpoint.c`), the
 host and client (`net_kq_delivery.c`), the host's store (`kq_delivery.c`, with SQLite from the
