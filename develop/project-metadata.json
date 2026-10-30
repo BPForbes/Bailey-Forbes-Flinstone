@@ -1,0 +1,549 @@
+{
+  "schemaVersion": 1,
+  "generatedAt": "2026-10-30T21:11:21Z",
+  "sourceCommit": "e5ceb55aad89b21830e463a3df63473f6e93b27b",
+  "repository": {
+    "owner": "BPForbes",
+    "name": "Bailey-Forbes-Flinstone",
+    "defaultBranch": "main",
+    "url": "https://github.com/BPForbes/Bailey-Forbes-Flinstone"
+  },
+  "languages": [
+    {
+      "name": "C",
+      "bytes": 2909179,
+      "percentage": 76.9
+    },
+    {
+      "name": "Shell",
+      "bytes": 213436,
+      "percentage": 5.6
+    },
+    {
+      "name": "Python",
+      "bytes": 178807,
+      "percentage": 4.7
+    },
+    {
+      "name": "JavaScript",
+      "bytes": 156772,
+      "percentage": 4.1
+    },
+    {
+      "name": "Assembly",
+      "bytes": 143978,
+      "percentage": 3.8
+    },
+    {
+      "name": "Makefile",
+      "bytes": 76697,
+      "percentage": 2.0
+    },
+    {
+      "name": "C++",
+      "bytes": 62853,
+      "percentage": 1.7
+    },
+    {
+      "name": "CSS",
+      "bytes": 15101,
+      "percentage": 0.4
+    },
+    {
+      "name": "CMake",
+      "bytes": 13576,
+      "percentage": 0.4
+    },
+    {
+      "name": "HTML",
+      "bytes": 10731,
+      "percentage": 0.3
+    },
+    {
+      "name": "Nix",
+      "bytes": 1846,
+      "percentage": 0.0
+    },
+    {
+      "name": "Linker Script",
+      "bytes": 252,
+      "percentage": 0.0
+    }
+  ],
+  "build": {
+    "sourceCommit": "e5ceb55aad89b21830e463a3df63473f6e93b27b",
+    "bootable": true,
+    "browserCompatible": true,
+    "bootSmokePassed": true,
+    "bootSuccessMarkerImplemented": true,
+    "validationOutcome": "browser-bootable",
+    "architecture": "x86_64",
+    "artifactFormat": "raw BIOS disk image",
+    "artifactSha256": "bb7ad30d5251d5c04fd01f2066eaea5fedb29f9211587ddbecc4d3c0ef22c412",
+    "builtAt": "2026-10-30T21:08:15Z",
+    "blockers": [],
+    "browserEmulator": "QEMU Wasm x86_64 (b7c549b5e6f4)",
+    "browserValidation": {
+      "browser": "141.0.7390.37",
+      "testedAt": "2026-10-30T21:10:25Z",
+      "checks": [
+        "exact-marker",
+        "vga-text-memory",
+        "pause-resume-twice",
+        "reset",
+        "power-off-worker-cleanup",
+        "reboot",
+        "blocked-button",
+        "corrupt-digest",
+        "switchuser-perspectives",
+        "server-relay-chat",
+        "lab-ramfs",
+        "guest-server-relay"
+      ],
+      "runtime": "ktock/qemu-wasm",
+      "runtimeCommit": "b7c549b5e6f4c376f76483a03e983214421434ad"
+    }
+  },
+  "lab": {
+    "type": "browser-kernel",
+    "architecture": "x86_64",
+    "executionModel": "emulated",
+    "physicalHardwareDrivers": false,
+    "published": true
+  },
+  "timeline": [
+    {
+      "type": "pull_request",
+      "date": "2026-10-20T12:52:56Z",
+      "number": 380,
+      "title": "Lab: publish main to the root of the publisher deployment branch (5.2.2)",
+      "mergedAt": "2026-10-20T12:52:56Z",
+      "url": "https://github.com/BPForbes/Bailey-Forbes-Flinstone/pull/380",
+      "author": "BPForbes",
+      "coAuthors": [
+        "claude",
+        "Claude Opus 5.5"
+      ]
+    },
+    {
+      "type": "pull_request",
+      "date": "2026-10-20T12:04:07Z",
+      "number": 377,
+      "title": "Lab version command reports the build's version (5.2.1)",
+      "mergedAt": "2026-10-20T12:04:07Z",
+      "url": "https://github.com/BPForbes/Bailey-Forbes-Flinstone/pull/377",
+      "author": "BPForbes",
+      "coAuthors": [
+        "claude"
+      ]
+    },
+    {
+      "type": "pull_request",
+      "date": "2026-10-12T22:29:59Z",
+      "number": 371,
+      "title": "Promote develop to main: netlab security lab (SECFEAT) and the second Pages variant",
+      "mergedAt": "2026-10-12T22:29:59Z",
+      "url": "https://github.com/BPForbes/Bailey-Forbes-Flinstone/pull/371",
+      "author": "BPForbes",
+      "coAuthors": [
+        "cursoragent",
+        "Claude",
+        "Claude Sonnet 4.6",
+        "github-actions[bot]",
+        "Cursor Agent",
+        "Claude Opus 5",
+        "Claude Sonnet 5",
+        "dependabot[bot]",
+        "Claude Opus 4.8"
+      ]
+    },
+    {
+      "type": "pull_request",
+      "date": "2026-09-18T22:05:57Z",
+      "number": 361,
+      "title": "Notify the portfolio only after the validated lab is published",
+      "mergedAt": "2026-09-18T22:05:57Z",
+      "url": "https://github.com/BPForbes/Bailey-Forbes-Flinstone/pull/361",
+      "author": "BPForbes",
+      "coAuthors": [
+        "claude",
+        "Claude Opus 5",
+        "cursoragent",
+        "Claude Sonnet 5"
+      ]
+    },
+    {
+      "type": "pull_request",
+      "date": "2026-09-17T16:51:47Z",
+      "number": 360,
+      "title": "feat(metadata): publish project-metadata.json with the validated browser lab (v5.0.0)",
+      "mergedAt": "2026-09-17T16:51:47Z",
+      "url": "https://github.com/BPForbes/Bailey-Forbes-Flinstone/pull/360",
+      "author": "BPForbes",
+      "coAuthors": [
+        "claude",
+        "Claude Opus 5"
+      ]
+    },
+    {
+      "type": "pull_request",
+      "date": "2026-09-15T17:45:54Z",
+      "number": 359,
+      "title": "feat(lab): Emscripten Flinstone Shell sandbox and relay identity fixes",
+      "mergedAt": "2026-09-15T17:45:54Z",
+      "url": "https://github.com/BPForbes/Bailey-Forbes-Flinstone/pull/359",
+      "author": "BPForbes",
+      "coAuthors": [
+        "cursoragent"
+      ]
+    },
+    {
+      "type": "pull_request",
+      "date": "2026-09-15T14:52:07Z",
+      "number": 358,
+      "title": "fix(lab): guest DNS ping, registrar, and Liquid Glass chrome",
+      "mergedAt": "2026-09-15T14:52:07Z",
+      "url": "https://github.com/BPForbes/Bailey-Forbes-Flinstone/pull/358",
+      "author": "BPForbes",
+      "coAuthors": [
+        "cursoragent"
+      ]
+    },
+    {
+      "type": "pull_request",
+      "date": "2026-09-15T13:51:29Z",
+      "number": 357,
+      "title": "fix(browser-lab): QMP cont timeout, command parity, and guest DNS ping",
+      "mergedAt": "2026-09-15T13:51:29Z",
+      "url": "https://github.com/BPForbes/Bailey-Forbes-Flinstone/pull/357",
+      "author": "BPForbes",
+      "coAuthors": [
+        "cursoragent"
+      ]
+    },
+    {
+      "type": "pull_request",
+      "date": "2026-09-15T01:23:58Z",
+      "number": 356,
+      "title": "fix(ci): stabilize server relay unit test startup",
+      "mergedAt": "2026-09-15T01:23:58Z",
+      "url": "https://github.com/BPForbes/Bailey-Forbes-Flinstone/pull/356",
+      "author": "BPForbes",
+      "coAuthors": [
+        "cursoragent"
+      ]
+    },
+    {
+      "type": "pull_request",
+      "date": "2026-09-14T23:27:37Z",
+      "number": 355,
+      "title": "Add x86_64 freestanding BIOS boot candidate, schema-v2 metadata, browser-lab harness, and promotion gate updates",
+      "mergedAt": "2026-09-14T23:27:37Z",
+      "url": "https://github.com/BPForbes/Bailey-Forbes-Flinstone/pull/355",
+      "author": "BPForbes",
+      "coAuthors": [
+        "cursoragent"
+      ]
+    },
+    {
+      "type": "pull_request",
+      "date": "2026-09-14T03:26:20Z",
+      "number": 354,
+      "title": "feat(browser): add kernel artifact contract and fix network defects",
+      "mergedAt": "2026-09-14T03:26:20Z",
+      "url": "https://github.com/BPForbes/Bailey-Forbes-Flinstone/pull/354",
+      "author": "BPForbes",
+      "coAuthors": [
+        "cursoragent"
+      ]
+    },
+    {
+      "type": "pull_request",
+      "date": "2026-09-13T23:23:25Z",
+      "number": 339,
+      "title": "feat(wifi): close #328 — P3-10 / P4-01 production Wi-Fi ✅ (#338)",
+      "mergedAt": "2026-09-13T23:23:25Z",
+      "url": "https://github.com/BPForbes/Bailey-Forbes-Flinstone/pull/339",
+      "author": "BPForbes",
+      "coAuthors": [
+        "cursoragent",
+        "Claude",
+        "Claude Sonnet 4.6",
+        "github-actions[bot]"
+      ]
+    },
+    {
+      "type": "pull_request",
+      "date": "2026-06-19T15:49:09Z",
+      "number": 318,
+      "title": "merge(develop→main): promote 4.2.0 GM=1 — P3 networking, WSL/Linux integration, fix #317",
+      "mergedAt": "2026-06-19T15:49:09Z",
+      "url": "https://github.com/BPForbes/Bailey-Forbes-Flinstone/pull/318",
+      "author": "BPForbes",
+      "coAuthors": [
+        "cursoragent",
+        "Claude",
+        "Claude Sonnet 4.6",
+        "github-actions[bot]"
+      ]
+    },
+    {
+      "type": "pull_request",
+      "date": "2026-05-24T22:26:11Z",
+      "number": 225,
+      "title": "PRE 4.1.1 BUILD 3 (GM=1): patch notes for GitHub issues #169–#222",
+      "mergedAt": "2026-05-24T22:26:11Z",
+      "url": "https://github.com/BPForbes/Bailey-Forbes-Flinstone/pull/225",
+      "author": "BPForbes",
+      "coAuthors": [
+        "cursoragent",
+        "Claude"
+      ]
+    },
+    {
+      "type": "pull_request",
+      "date": "2026-05-24T22:16:03Z",
+      "number": 229,
+      "title": "merge(develop→main): promote develop to main — 4.1.1 GM=1 BUILD 3",
+      "mergedAt": "2026-05-24T22:16:03Z",
+      "url": "https://github.com/BPForbes/Bailey-Forbes-Flinstone/pull/229",
+      "author": "BPForbes",
+      "coAuthors": [
+        "cursoragent",
+        "Claude"
+      ]
+    },
+    {
+      "type": "pull_request",
+      "date": "2026-05-24T21:30:26Z",
+      "number": 226,
+      "title": "PRE 4.1.1 BUILD 3 (GM=1): patch notes for GitHub issues #169–#222",
+      "mergedAt": "2026-05-24T21:30:26Z",
+      "url": "https://github.com/BPForbes/Bailey-Forbes-Flinstone/pull/226",
+      "author": "BPForbes",
+      "coAuthors": [
+        "cursoragent",
+        "Claude"
+      ]
+    },
+    {
+      "type": "pull_request",
+      "date": "2026-05-23T19:24:00Z",
+      "number": 216,
+      "title": "fix(version): run GM=1 promotion in prepare-version-entries CI (#215)",
+      "mergedAt": "2026-05-23T19:24:00Z",
+      "url": "https://github.com/BPForbes/Bailey-Forbes-Flinstone/pull/216",
+      "author": "BPForbes",
+      "coAuthors": [
+        "cursoragent",
+        "Claude"
+      ]
+    },
+    {
+      "type": "pull_request",
+      "date": "2026-05-23T04:30:19Z",
+      "number": 168,
+      "title": "Merge develop: 4.1.0 GA with promoted version (DEV 4)",
+      "mergedAt": "2026-05-23T04:30:19Z",
+      "url": "https://github.com/BPForbes/Bailey-Forbes-Flinstone/pull/168",
+      "author": "BPForbes",
+      "coAuthors": [
+        "cursoragent"
+      ]
+    },
+    {
+      "type": "pull_request",
+      "date": "2026-05-23T03:29:03Z",
+      "number": 167,
+      "title": "revert: undo 4.1.0 landing on main (PR #166)",
+      "mergedAt": "2026-05-23T03:29:03Z",
+      "url": "https://github.com/BPForbes/Bailey-Forbes-Flinstone/pull/167",
+      "author": "BPForbes",
+      "coAuthors": [
+        "cursoragent"
+      ]
+    },
+    {
+      "type": "pull_request",
+      "date": "2026-05-23T03:23:58Z",
+      "number": 166,
+      "title": "version: 4.1.0 GM=1 go-to-main release notes",
+      "mergedAt": "2026-05-23T03:23:58Z",
+      "url": "https://github.com/BPForbes/Bailey-Forbes-Flinstone/pull/166",
+      "author": "BPForbes",
+      "coAuthors": [
+        "cursoragent"
+      ]
+    },
+    {
+      "type": "pull_request",
+      "date": "2026-05-21T12:26:13Z",
+      "number": 116,
+      "title": "Merge pull request #115 from BPForbes/cursor/4-0-1-gm1-main-prep-2cfe",
+      "mergedAt": "2026-05-21T12:26:13Z",
+      "url": "https://github.com/BPForbes/Bailey-Forbes-Flinstone/pull/116",
+      "author": "BPForbes",
+      "coAuthors": [
+        "cursoragent"
+      ]
+    },
+    {
+      "type": "pull_request",
+      "date": "2026-05-18T16:37:19Z",
+      "number": 106,
+      "title": "Merge pull request #105 from BPForbes/cursor/gm-promote-description-only-33ed",
+      "mergedAt": "2026-05-18T16:37:19Z",
+      "url": "https://github.com/BPForbes/Bailey-Forbes-Flinstone/pull/106",
+      "author": "BPForbes",
+      "coAuthors": [
+        "cursoragent",
+        "CodeRabbit"
+      ]
+    },
+    {
+      "type": "pull_request",
+      "date": "2026-05-12T13:34:05Z",
+      "number": 77,
+      "title": "Merge develop into main May 12 2026",
+      "mergedAt": "2026-05-12T13:34:05Z",
+      "url": "https://github.com/BPForbes/Bailey-Forbes-Flinstone/pull/77",
+      "author": "BPForbes",
+      "coAuthors": [
+        "cursoragent"
+      ]
+    },
+    {
+      "type": "pull_request",
+      "date": "2026-05-11T13:56:56Z",
+      "number": 62,
+      "title": "Develop into main",
+      "mergedAt": "2026-05-11T13:56:56Z",
+      "url": "https://github.com/BPForbes/Bailey-Forbes-Flinstone/pull/62",
+      "author": "BPForbes",
+      "coAuthors": [
+        "CodeRabbit",
+        "Claude",
+        "coderabbitai[bot]",
+        "Cursor Agent",
+        "cursoragent"
+      ]
+    },
+    {
+      "type": "pull_request",
+      "date": "2026-05-01T19:31:41Z",
+      "number": 37,
+      "title": "Resolve merge conflicts merging develop into main",
+      "mergedAt": "2026-05-01T19:31:41Z",
+      "url": "https://github.com/BPForbes/Bailey-Forbes-Flinstone/pull/37",
+      "author": "BPForbes",
+      "coAuthors": [
+        "CodeRabbit",
+        "Claude",
+        "coderabbitai[bot]",
+        "Cursor Agent",
+        "cursoragent"
+      ]
+    }
+  ],
+  "releases": [
+    {
+      "id": "5-0-0",
+      "version": "5.0.0",
+      "startDate": "2026-09-17",
+      "endDate": null,
+      "summary": "Project-metadata contract · Pages",
+      "description": "Flintstone publishes project-metadata.json alongside its validated browser lab on every promoted deploy: GitHub-derived languages, a merged-pull-request timeline, and release milestones, gated by the same fail-closed promotion checks as the lab itself. Latest GA on main.",
+      "url": "https://github.com/BPForbes/Bailey-Forbes-Flinstone/tree/e5ceb55aad89b21830e463a3df63473f6e93b27b/version/locked"
+    },
+    {
+      "id": "4-5-4",
+      "version": "4.5.4",
+      "startDate": "2026-09-15",
+      "endDate": null,
+      "summary": "Emscripten shell · shared relay",
+      "description": "Sandboxed Emscripten Flinstone Shell as the default lab, and a shared relay room on a Cloudflare Durable Object with BroadcastChannel fallback. Latest GM promote on main.",
+      "url": "https://github.com/BPForbes/Bailey-Forbes-Flinstone/tree/e5ceb55aad89b21830e463a3df63473f6e93b27b/version/locked"
+    },
+    {
+      "id": "4-5-1-4-5-3",
+      "version": "4.5.1 – 4.5.3",
+      "startDate": "2026-09-15",
+      "endDate": null,
+      "summary": "Relay CI · Cloudflare lab · guest DNS",
+      "description": "Relay CI stabilised and Cloudflare Worker artifacts for first-visit lab boot; the QMP cont timeout fixed; guest DNS moved to same-origin /lab-dns with a Cloudflare DoH fallback.",
+      "url": "https://github.com/BPForbes/Bailey-Forbes-Flinstone/tree/e5ceb55aad89b21830e463a3df63473f6e93b27b/version/locked"
+    },
+    {
+      "id": "4-5-0",
+      "version": "4.5.0",
+      "startDate": "2026-09-14",
+      "endDate": null,
+      "summary": "Freestanding boot · lab identity",
+      "description": "Freestanding x86-64 BIOS boot candidate with long-mode entry, lab identity, and concurrent sessions. States plainly that the guest is not the hosted ELF.",
+      "url": "https://github.com/BPForbes/Bailey-Forbes-Flinstone/tree/e5ceb55aad89b21830e463a3df63473f6e93b27b/version/locked"
+    },
+    {
+      "id": "4-4-0",
+      "version": "4.4.0",
+      "startDate": "2026-09-14",
+      "endDate": null,
+      "summary": "Browser-kernel contract · CI gate",
+      "description": "Schema-versioned P8 browser-kernel artifact contract, a static lab harness, and a fail-closed CI promotion gate.",
+      "url": "https://github.com/BPForbes/Bailey-Forbes-Flinstone/tree/e5ceb55aad89b21830e463a3df63473f6e93b27b/version/locked"
+    },
+    {
+      "id": "4-3-0",
+      "version": "4.3.0",
+      "startDate": "2026-09-13",
+      "endDate": null,
+      "summary": "Wi-Fi · WPA2/WPA3-SAE · nl80211",
+      "description": "Production Wi-Fi: 802.11ax drivers, WPA2 and WPA3-SAE supplication, FullMAC and nl80211 backends, TWT, and post-association DHCP.",
+      "url": "https://github.com/BPForbes/Bailey-Forbes-Flinstone/tree/e5ceb55aad89b21830e463a3df63473f6e93b27b/version/locked"
+    },
+    {
+      "id": "4-2-0",
+      "version": "4.2.0",
+      "startDate": "2026-06-19",
+      "endDate": null,
+      "summary": "P3 networking · WSL · Linux hosting",
+      "description": "P3 networking, server foundations, WSL and native Linux integration.",
+      "url": "https://github.com/BPForbes/Bailey-Forbes-Flinstone/tree/e5ceb55aad89b21830e463a3df63473f6e93b27b/version/locked"
+    },
+    {
+      "id": "4-1-0-4-1-1",
+      "version": "4.1.0 / 4.1.1",
+      "startDate": "2026-05-23",
+      "endDate": "2026-05-24",
+      "summary": "Identity · su/sudo · issue sweep",
+      "description": "Identity stack; then issues #169-#222 (ARM ABI, sessions, batch argv, SHA-256 fetches, threadpool).",
+      "url": "https://github.com/BPForbes/Bailey-Forbes-Flinstone/tree/e5ceb55aad89b21830e463a3df63473f6e93b27b/version/locked"
+    },
+    {
+      "id": "4-0-0-4-0-1",
+      "version": "4.0.0 / 4.0.1",
+      "startDate": "2026-05-18",
+      "endDate": "2026-05-19",
+      "summary": "Contracts · IPC/VFS · serial-j1",
+      "description": "Inheritable system contracts; then IPC/VFS/shell hardening and serial -j1 default builds.",
+      "url": "https://github.com/BPForbes/Bailey-Forbes-Flinstone/tree/e5ceb55aad89b21830e463a3df63473f6e93b27b/version/locked"
+    },
+    {
+      "id": "3-3-0",
+      "version": "3.3.0",
+      "startDate": "2026-05-12",
+      "endDate": null,
+      "summary": "fs_jail · audit · FL1 history",
+      "description": "Contract surfaces for fs_jail and audit; FL1 history vs post-exec audit log.",
+      "url": "https://github.com/BPForbes/Bailey-Forbes-Flinstone/tree/e5ceb55aad89b21830e463a3df63473f6e93b27b/version/locked"
+    },
+    {
+      "id": "2-2-4-3-2-3",
+      "version": "2.2.4 – 3.2.3",
+      "startDate": "2026-05-11",
+      "endDate": "2026-05-12",
+      "summary": "Shell · FAT32 · AArch64 · disk history",
+      "description": "Syscall-style shell dispatch, FAT32 host volumes, AArch64/Pi defaults, disk-backed history, OS roadmap.",
+      "url": "https://github.com/BPForbes/Bailey-Forbes-Flinstone/tree/e5ceb55aad89b21830e463a3df63473f6e93b27b/version/locked"
+    }
+  ]
+}
