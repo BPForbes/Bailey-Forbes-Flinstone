@@ -1,4 +1,5 @@
 #include "net_wifi_he.h"
+#include "net_wifi_host_cmd.h"
 
 #include <stdio.h>
 #include <stdlib.h>
@@ -362,7 +363,7 @@ size_t fl_net_wifi_iw_enrich_scan(const char *iface, fl_net_wifi_scan_entry_t *e
         return 0u;
 
     snprintf(cmd, sizeof(cmd), "iw dev %s scan dump 2>/dev/null", iface);
-    fp = popen(cmd, "r");
+    fp = fl_host_popen(cmd, "r");
     if (!fp)
         return 0u;
 
@@ -382,7 +383,7 @@ size_t fl_net_wifi_iw_enrich_scan(const char *iface, fl_net_wifi_scan_entry_t *e
     }
     if (block_len > 0u)
         enrich_bss_block(block, block_len, entries, count, &enriched);
-    pclose(fp);
+    fl_host_pclose(fp);
     return enriched;
 }
 
@@ -403,13 +404,13 @@ int fl_net_wifi_iw_connected_he_cap(const char *iface,
     }
 
     snprintf(cmd, sizeof(cmd), "iw dev %s link 2>/dev/null", iface);
-    fp = popen(cmd, "r");
+    fp = fl_host_popen(cmd, "r");
     if (!fp)
         return -1;
     out[0] = '\0';
     while (fgets(out, sizeof(out), fp)) {
         if (strstr(out, "HE capabilities:")) {
-            pclose(fp);
+            fl_host_pclose(fp);
             memset(cap_out, 0, sizeof(*cap_out));
             cap_out->max_nss_rx = 2u;
             cap_out->max_nss_tx = 2u;
@@ -426,7 +427,7 @@ int fl_net_wifi_iw_connected_he_cap(const char *iface,
             return 0;
         }
     }
-    pclose(fp);
+    fl_host_pclose(fp);
     return -1;
 }
 

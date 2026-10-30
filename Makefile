@@ -50,6 +50,14 @@ CFLAGS += -Ithird_party/keyquorum/ffi/identity/include
 # the driver there too, but never runs register_all or the bus.
 CFLAGS += -DFL_WITH_KEYQUORUM
 
+# The Wi-Fi host layer can drive the host's own tools (wpa_cli, nmcli, iw, the Flinstone helper). That
+# runs commands through the host shell, so it is off unless asked for: make WIFI_HOST_COMMANDS=1.
+# The default build uses the in-tree Wi-Fi drivers only. The two helper tests below turn it on for
+# themselves because they exercise that path against a stand-in helper.
+ifeq ($(WIFI_HOST_COMMANDS),1)
+CFLAGS += -DFL_WIFI_HOST_COMMANDS
+endif
+
 .PHONY: keyquorum-identity
 keyquorum-identity:
 	@test -f third_party/keyquorum/ffi/identity/Cargo.toml || { echo "keyquorum-identity: run 'git submodule update --init third_party/keyquorum'" >&2; exit 1; }
@@ -1338,7 +1346,7 @@ run-test_wifi:
 	@./tests/test_wifi_ax_server_ota
 
 test_wifi_flinstone_helper: $(WIFI_TEST_COMMON_DEPS) $(NET_TEST_PCI_OBJ)
-	$(CC) $(CFLAGS) $(TEST_SANITIZE) -o tests/test_wifi_flinstone_helper tests/test_wifi_flinstone_helper.c \
+	$(CC) $(CFLAGS) -DFL_WIFI_HOST_COMMANDS $(TEST_SANITIZE) -o tests/test_wifi_flinstone_helper tests/test_wifi_flinstone_helper.c \
 	  kernel/core/net/net_wifi_he.c kernel/core/net/net_wifi_station.c kernel/core/net/net_wifi_host_linux.c \
 	  kernel/core/net/net_wifi_mgmt.c kernel/core/net/net_wifi_sae.c \
 	  kernel/core/net/net_wifi_wpa.c kernel/core/net/net_wifi_twt.c \
@@ -1353,7 +1361,7 @@ test_wifi_flinstone_helper: $(WIFI_TEST_COMMON_DEPS) $(NET_TEST_PCI_OBJ)
 	./tests/test_wifi_flinstone_helper
 
 test_wifi_flinstone_linux_helper: $(WIFI_TEST_COMMON_DEPS) $(NET_TEST_PCI_OBJ)
-	$(CC) $(CFLAGS) $(TEST_SANITIZE) -o tests/test_wifi_flinstone_linux_helper tests/test_wifi_flinstone_linux_helper.c \
+	$(CC) $(CFLAGS) -DFL_WIFI_HOST_COMMANDS $(TEST_SANITIZE) -o tests/test_wifi_flinstone_linux_helper tests/test_wifi_flinstone_linux_helper.c \
 	  kernel/core/net/net_wifi_he.c kernel/core/net/net_wifi_station.c kernel/core/net/net_wifi_host_linux.c \
 	  kernel/core/net/net_wifi_mgmt.c kernel/core/net/net_wifi_sae.c \
 	  kernel/core/net/net_wifi_wpa.c kernel/core/net/net_wifi_twt.c \

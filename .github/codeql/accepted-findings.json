@@ -207,54 +207,6 @@
       "pr": "#388 follow-up"
     },
     {
-      "id": "CQ-020",
-      "rule": "cpp/command-line-injection",
-      "file": "kernel/core/net/net_wifi_he.c",
-      "count": 2,
-      "disposition": "false-positive",
-      "justification": "The interface name is checked by fl_net_wifi_iface_name_safe (letters, digits, '_', '-', '.', fewer than 16 characters) before it reaches the command; the rest of the command line is constant. CodeQL does not model that check.",
-      "owner": "BPForbes",
-      "added": "2026-10-30",
-      "review_by": "2027-01-28",
-      "pr": "#388 follow-up"
-    },
-    {
-      "id": "CQ-021",
-      "rule": "cpp/uncontrolled-process-operation",
-      "file": "kernel/core/net/net_wifi_he.c",
-      "count": 2,
-      "disposition": "false-positive",
-      "justification": "The interface name is checked by fl_net_wifi_iface_name_safe (letters, digits, '_', '-', '.', fewer than 16 characters) before it reaches the command; the rest of the command line is constant. CodeQL does not model that check. The program run is always 'iw' from PATH, never a name taken from the environment.",
-      "owner": "BPForbes",
-      "added": "2026-10-30",
-      "review_by": "2027-01-28",
-      "pr": "#388 follow-up"
-    },
-    {
-      "id": "CQ-022",
-      "rule": "cpp/command-line-injection",
-      "file": "kernel/core/net/net_wifi_host_linux.c",
-      "count": 4,
-      "disposition": "false-positive",
-      "justification": "Every value placed in these command lines is quoted or validated: the program path, interface and control directory with shell_single_quote (since this PR), the interface name by fl_net_wifi_iface_name_safe before it is kept, whichever way it was found (environment, nmcli or /proc/net/wireless; since this PR), and the SSID and passphrase by the callers with shell_single_quote or shell_dquote_content; numbers are printed with %d/%u. CodeQL does not model those helpers as sanitizers.",
-      "owner": "BPForbes",
-      "added": "2026-10-30",
-      "review_by": "2027-01-28",
-      "pr": "#388 follow-up"
-    },
-    {
-      "id": "CQ-023",
-      "rule": "cpp/uncontrolled-process-operation",
-      "file": "kernel/core/net/net_wifi_host_linux.c",
-      "count": 6,
-      "disposition": "accepted-risk",
-      "justification": "The Wi-Fi host layer runs a helper the process owner names (FL_NET_WIFI_WPA_CLI, FL_NET_WIFI_NMCLI, the Flinstone helper and bridge paths, with the same trust as PATH). That is the intended way to select a Wi-Fi backend. The names are single-quoted, so an environment value cannot add arguments or commands. The environment belongs to the user who runs the shell; nothing here is set by a peer or a letter.",
-      "owner": "BPForbes",
-      "added": "2026-10-30",
-      "review_by": "2027-01-28",
-      "pr": "#388 follow-up"
-    },
-    {
       "id": "CQ-024",
       "rule": "cpp/cleartext-storage-buffer",
       "file": "kernel/core/net/net_wifi_sae.c",

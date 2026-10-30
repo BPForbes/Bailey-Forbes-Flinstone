@@ -25,7 +25,7 @@ Layout for v4.3.0 WiFi integration (#279, P3-10).
 | `wifi_fullmac_bus.c` | PCIe + USB sysfs probe |
 | `wifi_fullmac_hw.c` | Attach, stub ops, OS-bound HE when kernel driver owns chip |
 
-Production RF on the dongle still requires chipset-specific firmware/USB rings; until then use **`FL_NET_WIFI_USE_WPA=1`** for real scan/join via the host OS.
+Production RF on the dongle still requires chipset-specific firmware/USB rings; until then a build made with **`make WIFI_HOST_COMMANDS=1`** and **`FL_NET_WIFI_USE_WPA=1`** can scan/join through the host OS tools. A default build never runs them: it has no `popen`/`system` call in the Wi-Fi host layer and uses the drivers in this directory only.
 
 ## Related net layer (`kernel/core/net/`)
 
@@ -37,7 +37,7 @@ Production RF on the dongle still requires chipset-specific firmware/USB rings; 
 ## Environment quick reference
 
 ```bash
-# Real Wi-Fi via host OS
+# Real Wi-Fi via host OS (build with: make WIFI_HOST_COMMANDS=1)
 export FL_NET_WIFI_USE_WPA=1
 export FL_NET_WIFI_IFACE=wlan0
 
