@@ -42,13 +42,27 @@ int main(void)
     snprintf(climb, sizeof(climb), "../../../../%s", "tmp/x");
     ASSERT(wifi_fullmac_usb_port_name_ok(climb) == 0);
 
-    /* The probe refuses them too, before it reads anything. */
+    /* The probe uses the rule, before it reads anything. A name that passes the rule but names no
+     * device sets "not found in sysfs"; a refused name never gets as far as looking, so it does not.
+     * (Both return -1, so the return value alone cannot show it, least of all without a USB tree.) */
     {
         wifi_fullmac_hw_ctx_t ctx;
 
         memset(&ctx, 0, sizeof(ctx));
+        wifi_fullmac_set_error("");
+        setenv("FL_WIFI_FULLMAC_USB", "zz-9999", 1);
+        ASSERT(wifi_fullmac_usb_probe_ctx(&ctx) == -1);
+        ASSERT(strstr(wifi_fullmac_last_error(), "not found in sysfs") != NULL); /* the control */
+
+        wifi_fullmac_set_error("");
         setenv("FL_WIFI_FULLMAC_USB", climb, 1);
         ASSERT(wifi_fullmac_usb_probe_ctx(&ctx) == -1);
+        ASSERT(strstr(wifi_fullmac_last_error(), "not found in sysfs") == NULL);
+
+        wifi_fullmac_set_error("");
+        setenv("FL_WIFI_FULLMAC_USB", "a/b", 1);
+        ASSERT(wifi_fullmac_usb_probe_ctx(&ctx) == -1);
+        ASSERT(strstr(wifi_fullmac_last_error(), "not found in sysfs") == NULL);
     }
     printf("test_wifi_fullmac_usb_port: ok\n");
     return 0;

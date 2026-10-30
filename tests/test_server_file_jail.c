@@ -12,6 +12,9 @@
 #include "cmd_server_file.h"
 #include "cmd_util.h"
 #include "kq_storage.h"
+#include "kq_checkpoint.h"
+#include "user_db.h"
+#include "fl/driver/keyquorum.h"
 #include "common.h"
 #include "fs_jail.h"
 #include "net_client.h"
@@ -393,6 +396,27 @@ static int test_createdisk(void)
         goto done;
     }
 
+    /* The name is the jail root itself, which is allowed; the file with its suffix is a sibling of
+     * it, outside the jail. Judging the typed name instead of the file would let it through. */
+    {
+        char name[PATH_MAX];
+        char sibling[PATH_MAX];
+
+        SNP(name, "%s/%s", fx.outer, FS_JAIL_HOST_SUBDIR);
+        SNP(sibling, "%s/%s_disk.dat", fx.outer, FS_JAIL_HOST_SUBDIR);
+        outside_arg[1] = name;
+        if (capture_begin(&c) != 0)
+            goto done;
+        rc = cmd_createdisk_run(4, outside_arg);
+        capture_end(&c, out, sizeof(out));
+        if (rc != 1 || !strstr(out, "jail access policy") || exists(sibling)) {
+            fprintf(stderr, "FAIL: createdisk judged the name, not the file it creates: rc=%d\n%s\n", rc,
+                    out);
+            rc = 1;
+            goto done;
+        }
+    }
+
     /* Jail off: the quarantine still applies, and an unresolvable path is still refused. */
     g_vm_mode = 0;
     g_fs_jail_root[0] = '\0';
@@ -564,6 +588,97 @@ done:
     return rc;
 }
 
+/* `server file permit` countersigns a revision beside the file it checked. The shell's working
+ * directory differs from the process's, so a verb that wrote beside the typed name would not find
+ * the container and would fail. The supervisor's password is read from stdin (not a terminal). */
+static int test_permit_writes_beside_the_checked_path(void)
+{
+    struct fixture fx;
+    char sub[PATH_MAX];
+    char doc[PATH_MAX];
+    char out[4096];
+    char pw_file[] = "/tmp/sfj_pw_XXXXXX";
+    char pw_mya[24], pw_steve[24];
+    char *permit[] = {"server", "file", "permit", "doc.txt"};
+    unsigned char mya_sign[FL_USER_SIGNING_SECRET_LEN];
+    fl_user_db_t *db;
+    fl_kq_encoded_t enc;
+    uint8_t head[32];
+    const fl_kq_storage_t *was = NULL;
+    struct capture c;
+    int pw_fd, saved_in, rc = 1, ran = 0;
+
+    if (setup(&fx))
+        return 1;
+    SNP(sub, "%s/%s/sub", fx.outer, FS_JAIL_HOST_SUBDIR);
+    SNP(doc, "%s/doc.txt", sub);
+    mkdir(sub, 0700);
+    write_file(doc, "text\n");
+    set_str(g_cwd, sizeof(g_cwd), sub);
+    (void)fl_kq_driver_get_or_register();
+    if (fl_session_set_user("Flinstone") != FL_RESULT_OK)
+        goto done;
+    db = fl_session_user_db_mut();
+    /* Two accounts under the supervisor, with passwords drawn at run time. */
+    snprintf(pw_mya, sizeof(pw_mya), "m%08x", (unsigned)getpid() * 2654435761u);
+    snprintf(pw_steve, sizeof(pw_steve), "s%08x", (unsigned)getpid() * 40503u + 7u);
+    if (fl_user_db_add_user_under(db, "Root.Flinstone", "Mya", pw_mya, 4000, 0, 0) != FL_RESULT_OK ||
+        fl_user_db_add_user_under(db, "Root.Flinstone", "Steve", pw_steve, 4001, 0, 0) != FL_RESULT_OK ||
+        fl_user_db_open_key(db, "Mya", pw_mya, mya_sign) != FL_RESULT_OK)
+        goto done;
+    /* A real container for doc.txt, made by Mya for Steve, with a head revision. */
+    if (fl_kq_cp_encode(db, "Root.Flinstone.Mya", mya_sign, "Root.Flinstone.Steve",
+                        fl_user_db_box_public(db, "Root.Flinstone.Steve"), doc,
+                        "2026-10-30T00:00:00.000Z", &enc) != FL_KQ_CP_OK)
+        goto done;
+    fl_kq_encoded_free(&enc);
+    if (fl_kq_cp_head(doc, head) != FL_KQ_CP_OK)
+        goto done;
+
+    pw_fd = mkstemp(pw_file);
+    if (pw_fd < 0)
+        goto done;
+    if (write(pw_fd, "flinstone\n", 10) != 10) /* the published lab password of the Flinstone account */
+        goto done;
+    lseek(pw_fd, 0, SEEK_SET);
+    saved_in = dup(STDIN_FILENO);
+    dup2(pw_fd, STDIN_FILENO);
+    close(pw_fd);
+
+    g_rec = *fl_kq_storage_default();
+    g_rec.read_file = rec_read;
+    g_rec.exists = rec_exists;
+    was = fl_kq_cp_set_storage(&g_rec);
+    g_nseen = 0;
+    if (capture_begin(&c) == 0) {
+        cmd_server_ctx_t ctx = make_ctx();
+
+        ran = 1;
+        rc = cmd_server_file_run(&ctx, 4, permit);
+        capture_end(&c, out, sizeof(out));
+    }
+    dup2(saved_in, STDIN_FILENO);
+    close(saved_in);
+    unlink(pw_file);
+    if (!ran) {
+        rc = 1;
+        goto done;
+    }
+    if (rc != 0 || !strstr(out, "permitted the head of doc.txt")) {
+        fprintf(stderr, "FAIL: permit did not countersign the container beside the checked path: rc=%d\n%s\n",
+                rc, out);
+        rc = 1;
+        goto done;
+    }
+    rc = seen_only_resolved(doc, "server file permit");
+done:
+    if (was)
+        (void)fl_kq_cp_set_storage(was);
+    unlink(pw_file);
+    teardown(&fx);
+    return rc;
+}
+
 /* `write` joins its words into a bounded buffer. */
 static int test_write_joins_and_bounds_its_words(void)
 {
@@ -647,6 +762,9 @@ int main(void)
     if (test_verbs_use_the_checked_path() != 0)
         return 1;
     printf("test_server_file_jail: log, permit and offer use the checked path ... ok\n");
+    if (test_permit_writes_beside_the_checked_path() != 0)
+        return 1;
+    printf("test_server_file_jail: permit countersigns beside the checked path ... ok\n");
     if (test_write_joins_and_bounds_its_words() != 0)
         return 1;
     printf("test_server_file_jail: write joins and bounds its words ... ok\n");
