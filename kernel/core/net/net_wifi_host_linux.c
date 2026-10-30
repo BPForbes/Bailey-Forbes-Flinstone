@@ -200,29 +200,9 @@ static int env_falsy(const char *v) {
     return v && (v[0] == '0' || v[0] == 'n' || v[0] == 'N' || v[0] == 'f' || v[0] == 'F');
 }
 
-/* The name is later placed in shell command lines and a /sys path: accept only the characters the
- * Wi-Fi HE helper accepts, at most IFNAMSIZ - 1 of them. */
-static int iface_name_safe(const char *name) {
-    size_t i, n;
-
-    if (!name || !name[0])
-        return 0;
-    n = strlen(name);
-    if (n >= 16u)
-        return 0;
-    for (i = 0; i < n; i++) {
-        char c = name[i];
-        if ((c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z') || (c >= '0' && c <= '9') ||
-            c == '_' || c == '-' || c == '.')
-            continue;
-        return 0;
-    }
-    return 1;
-}
-
 static int iface_is_wireless(const char *name) {
     char path[256];
-    if (!iface_name_safe(name))
+    if (!fl_net_wifi_iface_name_safe(name))
         return 0;
     snprintf(path, sizeof(path), "/sys/class/net/%s/wireless", name);
     return access(path, F_OK) == 0;

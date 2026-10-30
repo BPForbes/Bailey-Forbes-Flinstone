@@ -210,7 +210,7 @@ void fl_net_wifi_host_he_cap_from_entry(const fl_net_wifi_scan_entry_t *ap,
 
 #if defined(__linux__)
 
-static int wifi_iface_name_safe(const char *iface)
+int fl_net_wifi_iface_name_safe(const char *iface)
 {
     size_t i;
     size_t n;
@@ -358,7 +358,7 @@ size_t fl_net_wifi_iw_enrich_scan(const char *iface, fl_net_wifi_scan_entry_t *e
     size_t block_len = 0;
     size_t enriched = 0;
 
-    if (!wifi_iface_name_safe(iface) || !entries || count == 0u)
+    if (!fl_net_wifi_iface_name_safe(iface) || !entries || count == 0u)
         return 0u;
 
     snprintf(cmd, sizeof(cmd), "iw dev %s scan dump 2>/dev/null", iface);
@@ -394,7 +394,7 @@ int fl_net_wifi_iw_connected_he_cap(const char *iface,
     char out[512];
     FILE *fp;
 
-    if (!wifi_iface_name_safe(iface) || !cap_out)
+    if (!fl_net_wifi_iface_name_safe(iface) || !cap_out)
         return -1;
 
     if (join_ap && join_ap->he_supported) {

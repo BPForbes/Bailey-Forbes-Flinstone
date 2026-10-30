@@ -35,6 +35,10 @@ void fl_net_wifi_host_he_cap_from_entry(const fl_net_wifi_scan_entry_t *ap,
 
 #if defined(__linux__)
 
+/* 1 when iface is a plain Linux interface name (letters, digits, '_', '-', '.'; under 16
+ * characters), safe to place in a command line or a /sys path. */
+int fl_net_wifi_iface_name_safe(const char *iface);
+
 size_t fl_net_wifi_iw_enrich_scan(const char *iface, fl_net_wifi_scan_entry_t *entries,
                                   size_t count);
 
