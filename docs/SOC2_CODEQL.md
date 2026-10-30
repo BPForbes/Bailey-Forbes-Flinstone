@@ -20,8 +20,8 @@ auditor can follow a finding from detection to disposition.
 `wpa_cli`, `nmcli`, `iw` and the Flinstone helper through the host shell. That code is built only with
 `make WIFI_HOST_COMMANDS=1` (`FL_WIFI_HOST_COMMANDS`); the default build CodeQL traces has no `popen` or
 `system` call in it, so those paths are not analysed and have no register entries. A build made with the
-flag has not been scanned: before shipping one, run `WIFI_HOST_COMMANDS=1 scripts/codeql_local.sh --lang c-cpp`
-(the script has no option for it; its `make` inherits the exported variable).
+flag has not been scanned: before shipping one, run `scripts/codeql_local.sh --lang c-cpp --wifi-host-commands`
+(only the make command line turns the flag on; an exported `WIFI_HOST_COMMANDS` variable does nothing).
 
 **Not covered.** CodeQL has no extractor for assembly (GAS `.s`/`.S`, NASM `.asm`) or for shell
 scripts, and it cannot judge design or a missing check. Those stay with human review and the

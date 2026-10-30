@@ -638,7 +638,7 @@ static int verb_file_permit(int argc, char **argv)
     }
     if (kq_open_keys("countersigns the head revision", signing, NULL) != 0)
         return 1;
-    cp = fl_kq_cp_permit(kq_users(), me, signing, argv[1], head);
+    cp = fl_kq_cp_permit(kq_users(), me, signing, rpath, head);
     mem_domain_secure_zero(signing, sizeof signing);
     if (cp != FL_KQ_CP_OK) {
         fl_color_warn("server file permit: %s", fl_kq_cp_reason(cp));

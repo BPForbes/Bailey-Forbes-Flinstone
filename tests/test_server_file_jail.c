@@ -8,6 +8,7 @@
  * checkpoint warning, "cannot read file", the history line), so each case also asserts that none
  * of those appear. The control case shows a path inside the jail is not refused.
  */
+#include "cmd_decl.h"
 #include "cmd_server_file.h"
 #include "common.h"
 #include "fs_jail.h"
@@ -66,38 +67,54 @@ static cmd_server_ctx_t make_ctx(void)
     return ctx;
 }
 
-/* Run argv through cmd_server_file_run and return what it printed (stdout and stderr). */
-static int run_captured(char **argv, int argc, char *out, size_t cap)
-{
-    char tmpl[] = "/tmp/sfj_out_XXXXXX";
-    int fd = mkstemp(tmpl);
-    int saved_out, saved_err, rc;
-    cmd_server_ctx_t ctx = make_ctx();
-    ssize_t n;
+struct capture {
+    char tmpl[32];
+    int fd, saved_out, saved_err;
+};
 
-    if (fd < 0)
+static int capture_begin(struct capture *c)
+{
+    snprintf(c->tmpl, sizeof(c->tmpl), "/tmp/sfj_out_XXXXXX");
+    c->fd = mkstemp(c->tmpl);
+    if (c->fd < 0)
         return -1;
     fflush(stdout);
     fflush(stderr);
-    saved_out = dup(STDOUT_FILENO);
-    saved_err = dup(STDERR_FILENO);
-    dup2(fd, STDOUT_FILENO);
-    dup2(fd, STDERR_FILENO);
+    c->saved_out = dup(STDOUT_FILENO);
+    c->saved_err = dup(STDERR_FILENO);
+    dup2(c->fd, STDOUT_FILENO);
+    dup2(c->fd, STDERR_FILENO);
+    return 0;
+}
 
-    rc = cmd_server_file_run(&ctx, argc, argv);
+static void capture_end(struct capture *c, char *out, size_t cap)
+{
+    ssize_t n;
 
     fflush(stdout);
     fflush(stderr);
-    dup2(saved_out, STDOUT_FILENO);
-    dup2(saved_err, STDERR_FILENO);
-    close(saved_out);
-    close(saved_err);
-
-    lseek(fd, 0, SEEK_SET);
-    n = read(fd, out, cap - 1u);
+    dup2(c->saved_out, STDOUT_FILENO);
+    dup2(c->saved_err, STDERR_FILENO);
+    close(c->saved_out);
+    close(c->saved_err);
+    lseek(c->fd, 0, SEEK_SET);
+    n = read(c->fd, out, cap - 1u);
     out[n > 0 ? n : 0] = '\0';
-    close(fd);
-    unlink(tmpl);
+    close(c->fd);
+    unlink(c->tmpl);
+}
+
+/* Run argv through cmd_server_file_run and return what it printed (stdout and stderr). */
+static int run_captured(char **argv, int argc, char *out, size_t cap)
+{
+    struct capture c;
+    cmd_server_ctx_t ctx = make_ctx();
+    int rc;
+
+    if (capture_begin(&c) != 0)
+        return -1;
+    rc = cmd_server_file_run(&ctx, argc, argv);
+    capture_end(&c, out, cap);
     return rc;
 }
 
@@ -303,6 +320,109 @@ done:
     return rc;
 }
 
+static int exists(const char *path)
+{
+    struct stat st;
+
+    return stat(path, &st) == 0;
+}
+
+/* createdisk judges and creates the same, fully resolved file. */
+static int test_createdisk(void)
+{
+    struct fixture fx;
+    char out[4096];
+    char deep[PATH_MAX];
+    char outside_disk[PATH_MAX];
+    char inside_disk[PATH_MAX];
+    char quarantined_disk[PATH_MAX];
+    char *outside_arg[] = {"createdisk", NULL, "8", "8"};
+    char *inside_arg[] = {"createdisk", "vol", "8", "8"};
+    char *deep_arg[] = {"createdisk", NULL, "8", "8"};
+    struct capture c;
+    int rc = 1;
+
+    if (setup(&fx))
+        return 1;
+    SNP(outside_disk, "%s/outdisk_disk.dat", fx.outer);
+    SNP(quarantined_disk, "%s/server_shared/expired/qdisk_disk.dat", fx.outer);
+    SNP(inside_disk, "%s/%s/vol_disk.dat", fx.outer, FS_JAIL_HOST_SUBDIR);
+
+    /* Jail active: a volume outside the jail is refused and nothing is created. */
+    {
+        char name[PATH_MAX];
+
+        SNP(name, "%s/outdisk", fx.outer);
+        outside_arg[1] = name;
+        if (capture_begin(&c) != 0)
+            goto done;
+        rc = cmd_createdisk_run(4, outside_arg);
+        capture_end(&c, out, sizeof(out));
+        if (rc != 1 || !strstr(out, "jail access policy") || exists(outside_disk)) {
+            fprintf(stderr, "FAIL: createdisk outside the jail: rc=%d\n%s\n", rc, out);
+            rc = 1;
+            goto done;
+        }
+    }
+    /* A path the resolver cannot finish is refused, with the jail on. */
+    deep[0] = '\0';
+    for (int i = 0; i < 70; i++)
+        strcat(deep, "d/");
+    strcat(deep, "../../../../../../../../../../../../vol");
+    deep_arg[1] = deep;
+    if (capture_begin(&c) != 0)
+        goto done;
+    rc = cmd_createdisk_run(4, deep_arg);
+    capture_end(&c, out, sizeof(out));
+    if (rc != 1 || !strstr(out, "path too long to check")) {
+        fprintf(stderr, "FAIL: createdisk with an unresolvable path: rc=%d\n%s\n", rc, out);
+        rc = 1;
+        goto done;
+    }
+    /* Control: a volume inside the jail is created, with the file named from the checked path. */
+    if (capture_begin(&c) != 0)
+        goto done;
+    rc = cmd_createdisk_run(4, inside_arg);
+    capture_end(&c, out, sizeof(out));
+    if (rc != 0 || !exists(inside_disk)) {
+        fprintf(stderr, "FAIL: createdisk inside the jail: rc=%d\n%s\n", rc, out);
+        rc = 1;
+        goto done;
+    }
+
+    /* Jail off: the quarantine still applies, and an unresolvable path is still refused. */
+    g_vm_mode = 0;
+    g_fs_jail_root[0] = '\0';
+    {
+        char name[PATH_MAX];
+
+        SNP(name, "%s/server_shared/expired/qdisk", fx.outer);
+        outside_arg[1] = name;
+        if (capture_begin(&c) != 0)
+            goto done;
+        rc = cmd_createdisk_run(4, outside_arg);
+        capture_end(&c, out, sizeof(out));
+        if (rc != 1 || !strstr(out, "expired server share quarantine") || exists(quarantined_disk)) {
+            fprintf(stderr, "FAIL: createdisk into the quarantine: rc=%d\n%s\n", rc, out);
+            rc = 1;
+            goto done;
+        }
+    }
+    if (capture_begin(&c) != 0)
+        goto done;
+    rc = cmd_createdisk_run(4, deep_arg);
+    capture_end(&c, out, sizeof(out));
+    if (rc != 1 || !strstr(out, "path too long to check")) {
+        fprintf(stderr, "FAIL: createdisk with an unresolvable path and no jail: rc=%d\n%s\n", rc, out);
+        rc = 1;
+        goto done;
+    }
+    rc = 0;
+done:
+    teardown(&fx);
+    return rc;
+}
+
 int main(void)
 {
     char db_path[] = "/tmp/sfj_users_XXXXXX";
@@ -321,6 +441,9 @@ int main(void)
     if (test_inside_jail_is_not_refused() != 0)
         return 1;
     printf("test_server_file_jail: inside the jail is not refused ... ok\n");
+    if (test_createdisk() != 0)
+        return 1;
+    printf("test_server_file_jail: createdisk checks the file it creates ... ok\n");
     unlink(db_path);
     return 0;
 }

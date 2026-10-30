@@ -265,8 +265,9 @@ static int usb_ctx_from_port(const char *port, wifi_fullmac_hw_ctx_t *ctx)
 
 	if (!port || !port[0] || !ctx)
 		return -1;
-	/* A USB port name is one sysfs entry; a path separator would leave /sys/bus/usb/devices. */
-	if (strchr(port, '/'))
+	/* A USB port name is one sysfs entry: no path separator, and not "." or "..". A symlinked
+	 * entry is still followed (sysfs device entries are links); the read is only a hex number. */
+	if (strchr(port, '/') || !strcmp(port, ".") || !strcmp(port, ".."))
 		return -1;
 	snprintf(syspath, sizeof(syspath), "/sys/bus/usb/devices/%s", port);
 	if (usb_sysfs_read_hex16(syspath, "idVendor", &vid) != 0 ||

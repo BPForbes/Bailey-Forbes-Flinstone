@@ -21,16 +21,23 @@ int cmd_createdisk_run(int argc, char **argv) {
         printf("Error: rowCount must be positive and nibbleCount must be positive and even.\n");
         return 1;
     }
-    char vpath[CWD_MAX];
-    resolve_path(args[1], vpath, sizeof(vpath));
-    if (cmd_jail_blocked_path("createdisk", args[1], vpath))
-        return 1;
-    flintstone_format_disk(args[1], rowCount, nibbleCount);
     int cb = nibbleCount / 2;
-    if (cb >= 512 && (cb % 512) == 0)
-        snprintf(current_disk_file, sizeof(current_disk_file), "%s_disk.img", args[1]);
-    else
-        snprintf(current_disk_file, sizeof(current_disk_file), "%s_disk.dat", args[1]);
+    const char *ext = (cb >= 512 && (cb % 512) == 0) ? "_disk.img" : "_disk.dat";
+    char vpath[CWD_MAX];
+    char dfile[CWD_MAX];
+    /* The file that is checked is the file that is created: the resolved volume name plus its
+     * suffix. A name that cannot be resolved completely, or whose file name does not fit, is
+     * refused whether or not a jail is active, since the quarantine check judges it too. */
+    if (resolve_path_checked(args[1], vpath, sizeof(vpath)) != 0 ||
+        snprintf(dfile, sizeof(dfile), "%s%s", vpath, ext) >= (int)sizeof(dfile)) {
+        printf("createdisk blocked (path too long to check): %s\n", args[1]);
+        return 1;
+    }
+    if (cmd_jail_blocked_path("createdisk", dfile, dfile))
+        return 1;
+    format_disk_file(dfile, args[1], rowCount, nibbleCount);
+    strncpy(current_disk_file, dfile, sizeof(current_disk_file) - 1);
+    current_disk_file[sizeof(current_disk_file) - 1] = '\0';
     read_disk_header();
     print_disk_formatted();
     if (argc >= 5 && (!strcmp(args[4], "-y") || !strcmp(args[4], "-Y")))

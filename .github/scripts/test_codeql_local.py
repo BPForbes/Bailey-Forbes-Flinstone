@@ -32,6 +32,14 @@ class LocalRunner(unittest.TestCase):
         self.assertLess(r.stdout.index("cargo build"), r.stdout.index("--language=c-cpp"))
         self.assertIn("make\\ -B\\ ARCH=x86_64_gas", r.stdout)
 
+    def test_the_host_wifi_build_is_scanned_only_when_asked(self):
+        plain = run(["--dry-run", "--lang", "c-cpp", "--out", "/tmp/cq-unit"])
+        self.assertEqual(plain.returncode, 0, plain.stderr)
+        self.assertNotIn("WIFI_HOST_COMMANDS", plain.stdout)
+        host = run(["--dry-run", "--lang", "c-cpp", "--wifi-host-commands", "--out", "/tmp/cq-unit"])
+        self.assertEqual(host.returncode, 0, host.stderr)
+        self.assertIn("make\\ -B\\ ARCH=x86_64_gas\\ WIFI_HOST_COMMANDS=1", host.stdout)
+
     def test_a_single_language_can_be_chosen(self):
         r = run(["--dry-run", "--lang", "python", "--out", "/tmp/cq-unit"])
         self.assertEqual(r.returncode, 0, r.stderr)

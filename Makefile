@@ -54,7 +54,9 @@ CFLAGS += -DFL_WITH_KEYQUORUM
 # runs commands through the host shell, so it is off unless asked for: make WIFI_HOST_COMMANDS=1.
 # The default build uses the in-tree Wi-Fi drivers only. The two helper tests below turn it on for
 # themselves because they exercise that path against a stand-in helper.
-ifeq ($(WIFI_HOST_COMMANDS),1)
+# Only the command line turns it on: an exported environment variable of that name does not.
+WIFI_HOST_ON := $(if $(filter command line,$(origin WIFI_HOST_COMMANDS)),$(if $(filter 1,$(WIFI_HOST_COMMANDS)),1,0),0)
+ifeq ($(WIFI_HOST_ON),1)
 CFLAGS += -DFL_WIFI_HOST_COMMANDS
 endif
 
@@ -316,7 +318,7 @@ endif
 # re-evaluates dependencies.  Without this, switching from `make` to `make vm`
 # (or back) leaves the old binary in place and make considers it up-to-date.
 BUILD_MODE_FILE := .build_mode
-BUILD_MODE_NOW  := VM=$(VM_ENABLE)_SDL=$(VM_SDL)_WIFIHOST=$(if $(filter 1,$(WIFI_HOST_COMMANDS)),1,0)
+BUILD_MODE_NOW  := VM=$(VM_ENABLE)_SDL=$(VM_SDL)_WIFIHOST=$(WIFI_HOST_ON)
 _bmode_prev     := $(shell cat $(BUILD_MODE_FILE) 2>/dev/null)
 ifneq ($(_bmode_prev),)
 ifneq ($(_bmode_prev),$(BUILD_MODE_NOW))
