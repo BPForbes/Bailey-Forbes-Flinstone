@@ -10,6 +10,8 @@
 
 char *trim_whitespace(char *str);
 void resolve_path(const char *path, char *out, size_t outsize);
+/* Same, but -1 when the result is cut short; access checks must refuse then. */
+int resolve_path_checked(const char *path, char *out, size_t outsize);
 void append_history_ex(fl_contract_surface_t surface, fl_result_t last_rc,
                        const char *cmd);
 #define append_history(cmd)                                                    \

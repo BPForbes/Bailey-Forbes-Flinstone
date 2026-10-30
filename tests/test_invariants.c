@@ -63,6 +63,24 @@ static int test_path_dotdot(void) {
     return 0;
 }
 
+static int test_path_checked_refuses_truncation(void) {
+    strncpy(g_cwd, "/tmp/foo", sizeof(g_cwd) - 1);
+    g_cwd[sizeof(g_cwd) - 1] = '\0';
+    char out[256];
+    ASSERT(resolve_path_checked("a/b/../c", out, sizeof(out)) == 0);
+    ASSERT(strcmp(out, "/tmp/foo/a/c") == 0);
+    /* 70 segments, then ".." components that would climb out: the tail is not resolved, so the
+     * checked call must say so instead of returning a prefix. */
+    char deep[512] = "";
+    for (int i = 0; i < 70; i++)
+        strcat(deep, "d/");
+    strcat(deep, "../../../../../../../../../../../../etc/passwd");
+    ASSERT(resolve_path_checked(deep, out, sizeof(out)) != 0);
+    char tiny[8];
+    ASSERT(resolve_path_checked("/usr/local/bin/long", tiny, sizeof(tiny)) != 0);
+    return 0;
+}
+
 static int test_path_absolute(void) {
     strncpy(g_cwd, "/tmp/foo", sizeof(g_cwd) - 1);
     g_cwd[sizeof(g_cwd) - 1] = '\0';
@@ -615,6 +633,10 @@ int main(void) {
 
     printf("test_path_absolute... ");
     if (test_path_absolute() != 0) return 1;
+    printf("OK\n");
+
+    printf("test_path_checked_refuses_truncation... ");
+    if (test_path_checked_refuses_truncation() != 0) return 1;
     printf("OK\n");
 
     printf("test_cluster_invariants... ");

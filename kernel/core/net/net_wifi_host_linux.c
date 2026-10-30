@@ -311,8 +311,11 @@ static void load_env_once(void) {
     nm = getenv("FL_NET_WIFI_NMCLI");
     if (nm && nm[0])
         strncpy(s_nmcli, nm, sizeof(s_nmcli) - 1u);
-    if (!pick_wireless_iface(s_wifi_iface, sizeof(s_wifi_iface)))
-        strncpy(s_wifi_iface, "wlan0", sizeof(s_wifi_iface) - 1u);
+    /* Whatever found the name (environment, nmcli, /proc/net/wireless) it is placed in command
+     * lines below, so it must pass the same check before it is kept. */
+    if (!pick_wireless_iface(s_wifi_iface, sizeof(s_wifi_iface)) ||
+        !fl_net_wifi_iface_name_safe(s_wifi_iface))
+        snprintf(s_wifi_iface, sizeof(s_wifi_iface), "wlan0");
 }
 
 static int wpa_use_requested(void) {

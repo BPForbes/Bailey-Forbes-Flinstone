@@ -24,8 +24,12 @@ _Static_assert(FL_CONTRACT_P7_BATCH_AUDIT_SHOW_MAX_TOKENS <=
 /* Resolve path with support for ., .., ./
  * Normalizes: . = current, .. = parent, ./foo = current/foo, a/b/../c = a/c
  */
-void resolve_path(const char *path, char *out, size_t outsize) {
-    if (!path || !out || outsize == 0) return;
+/* Normalizes path against g_cwd. Returns -1 when the result is not the whole path (more than 64
+ * segments, or out too small); a caller that makes an access decision must refuse then, since
+ * the part cut off could be ".." components that lead somewhere else. */
+int resolve_path_checked(const char *path, char *out, size_t outsize) {
+    int truncated = 0;
+    if (!path || !out || outsize == 0) return -1;
     char full[CWD_MAX + 256];
     if (path[0] == '/') {
         strncpy(full, path, sizeof(full) - 1);
@@ -33,7 +37,7 @@ void resolve_path(const char *path, char *out, size_t outsize) {
     } else if (path[0] == '\0' || (path[0] == '.' && path[1] == '\0')) {
         strncpy(out, g_cwd, outsize - 1);
         out[outsize - 1] = '\0';
-        return;
+        return strlen(g_cwd) < outsize ? 0 : -1;
     } else {
         snprintf(full, sizeof(full), "%s/%s", g_cwd, path);
     }
@@ -58,6 +62,8 @@ void resolve_path(const char *path, char *out, size_t outsize) {
         *p = c;
         if (*p) p++;
     }
+    while (*p == '/') p++;
+    if (*p) truncated = 1;
     size_t len = 0;
     if (full[0] == '/' && len < outsize - 1) { out[len++] = '/'; }
     for (int i = 0; i < n && len < outsize - 1; i++) {
@@ -66,10 +72,17 @@ void resolve_path(const char *path, char *out, size_t outsize) {
         if (len + slen < outsize) {
             asm_mem_copy(out + len, segs[i], slen + 1);
             len += slen;
+        } else {
+            truncated = 1;
         }
     }
     if (len == 0) { out[0] = '.'; out[1] = '\0'; }
     else out[len] = '\0';
+    return truncated ? -1 : 0;
+}
+
+void resolve_path(const char *path, char *out, size_t outsize) {
+    (void)resolve_path_checked(path, out, outsize);
 }
 
 char *trim_whitespace(char *str) {
