@@ -46,6 +46,22 @@ static fl_result_t mkdir_p_simple(const char *path)
     return fl_fs_mkdir_p(path, 0700) == 0 ? FL_RESULT_OK : FL_RESULT_ERR;
 }
 
+/* server_shared/ under g_cwd is trusted only as the user's own directory (fl_fs_trusted_root_open):
+ * another user's directory, or a link in its place, opens nothing under it. */
+static fl_result_t share_root_trusted(void)
+{
+    char shared[512];
+    int fd;
+
+    if (fl_fs_join_path(shared, sizeof(shared), g_cwd, FL_SERVER_SHARED_DIR_NAME) != 0)
+        return FL_RESULT_ERR;
+    fd = fl_fs_trusted_root_open(shared);
+    if (fd < 0)
+        return FL_RESULT_ERR;
+    close(fd);
+    return FL_RESULT_OK;
+}
+
 /* The ordinary share path serves and revokes only these kinds; the reserved KQ kind (and any
  * kind not listed) is refused, so a row of another family is never reachable through it. */
 static int payload_kind_is_shareable(uint8_t kind)
@@ -176,6 +192,8 @@ fl_result_t fl_server_catalog_open(void)
         if (fl_fs_join_path(shared, sizeof(shared), g_cwd, FL_SERVER_SHARED_DIR_NAME) == 0)
             (void)mkdir_p_simple(shared);
     }
+    if (share_root_trusted() != FL_RESULT_OK)
+        return FL_RESULT_ERR;
     return fl_catalog_file_open(db_path, &s_catalog_db);
 }
 
@@ -1120,6 +1138,8 @@ fl_result_t fl_server_catalog_import_handoff(const char *src_server_shared_dir)
             mkdir_p_simple(shared) != FL_RESULT_OK)
             return FL_RESULT_ERR;
     }
+    if (share_root_trusted() != FL_RESULT_OK)
+        return FL_RESULT_ERR;
     /* A journal, WAL or shm file beside either database means a write is in flight or lives
      * outside the main file: refused, never copied torn or replayed onto the new file. */
     if (sidecar_present(src_db) || sidecar_present(dst_db))

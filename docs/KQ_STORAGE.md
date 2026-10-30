@@ -73,6 +73,12 @@ opened; data comes back as `MEM_DOMAIN_FS` memory.
 (`fl_server_shared_resolve_local_path`) already holds, so a directory swapped after that check is
 not followed.
 
+The share root itself (`server_shared/` under the shell's working directory, which holds the catalog
+and the KeyQuorum store) is checked before anything under it is opened: `fl_fs_trusted_root_open`
+holds it without following a link, refuses a directory the effective user does not own, and sets
+the user's own to 0700. `su -` and `sudo -i` take the login home from the password database, not
+`$HOME`, so the root is never taken from an environment variable.
+
 ## Who installs which table
 
 | Caller | Table |

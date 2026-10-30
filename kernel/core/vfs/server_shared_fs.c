@@ -222,6 +222,32 @@ int fl_fs_dir_open_nofollow(const char *dir)
     return dir_open_flags(dir, O_NOFOLLOW);
 }
 
+int fl_fs_trusted_root_open(const char *dir)
+{
+    struct stat st;
+    int fd = dir_open_flags(dir, O_NOFOLLOW);
+
+    if (fd < 0)
+        return -1;
+    if (fstat(fd, &st) != 0 || !S_ISDIR(st.st_mode)) {
+        close(fd);
+        errno = ENOTDIR;
+        return -1;
+    }
+    if (st.st_uid != geteuid()) {
+        close(fd);
+        errno = EPERM;
+        return -1;
+    }
+    if ((st.st_mode & 07777) != 0700 && fchmod(fd, 0700) != 0) {
+        int saved = errno;
+        close(fd);
+        errno = saved;
+        return -1;
+    }
+    return fd;
+}
+
 int fl_fs_write_file_atomic_in(int dirfd, const char *name, const uint8_t *data, size_t len)
 {
 #ifdef FL_FS_HAVE_OPENAT

@@ -70,6 +70,14 @@ int fl_fs_dir_open(const char *dir);
 /** fl_fs_dir_open for a directory that must not itself be a link (ELOOP): -1 on a link. */
 int fl_fs_dir_open_nofollow(const char *dir);
 /**
+ * The share root, held before anything under it is trusted: dir must not be a link at its own
+ * name, must be a directory and must be owned by the effective user. Its mode is then set to 0700
+ * if it is anything else (as KeyQuorum's restrict_owner_only does for its own files), on the held
+ * fd. Returns the fd, or -1 (errno EPERM for a directory another user owns, or the fchmod error).
+ * The caller closes it.
+ */
+int fl_fs_trusted_root_open(const char *dir);
+/**
  * fl_fs_read_file for one plain name inside dirfd: no separator, not "." or "..", and a link
  * at that name is refused (-3, errno ELOOP). Same results and ownership as fl_fs_read_file;
  * a refused name is -1 with errno EINVAL.

@@ -93,6 +93,36 @@ static int test_catalog_file_roundtrip(void)
     return 0;
 }
 
+/* server_shared/ is trusted only as the user's own directory: a link in its place opens no catalog
+ * and nothing is written through it; a loose mode on the user's own one is tightened to 0700. */
+static int test_share_root_must_be_own_directory(void)
+{
+    char tmp[] = "/tmp/fl_catalog_root_XXXXXX";
+    char shared[PATH_MAX], target[PATH_MAX], through[PATH_MAX];
+    struct stat st;
+
+    ASSERT(mkdtemp_tracked(tmp) != NULL);
+    if (chdir(tmp) != 0)
+        return 1;
+    strncpy(g_cwd, tmp, sizeof(g_cwd) - 1u);
+    g_cwd[sizeof(g_cwd) - 1u] = '\0';
+    (void)fl_server_catalog_close();
+    ASSERT(fl_fs_join_path(shared, sizeof(shared), tmp, FL_SERVER_SHARED_DIR_NAME) == 0);
+    ASSERT(fl_fs_join_path(target, sizeof(target), tmp, "elsewhere") == 0);
+    ASSERT(fl_fs_join_path(through, sizeof(through), target, FL_SERVER_CATALOG_DB_NAME) == 0);
+    ASSERT(mkdir(target, 0700) == 0);
+    ASSERT(symlink(target, shared) == 0);
+    ASSERT(fl_server_catalog_open() != FL_RESULT_OK);
+    ASSERT(access(through, F_OK) != 0);
+
+    ASSERT(unlink(shared) == 0);
+    ASSERT(mkdir(shared, 0700) == 0 && chmod(shared, 0777) == 0);
+    ASSERT(fl_server_catalog_open() == FL_RESULT_OK);
+    ASSERT(stat(shared, &st) == 0 && (st.st_mode & 07777) == 0700);
+    (void)fl_server_catalog_close();
+    return 0;
+}
+
 static int test_catalog_msg_meta_pending_commit(void)
 {
     char tmp[] = "/tmp/fl_catalog_mmeta_XXXXXX";
@@ -1479,6 +1509,8 @@ int main(void)
     if (test_journal_is_owner_only() != 0)
         return 1;
     if (test_handoff_fails_closed() != 0)
+        return 1;
+    if (test_share_root_must_be_own_directory() != 0)
         return 1;
     if (test_unwritable_catalog_is_read_only_or_refused() != 0)
         return 1;

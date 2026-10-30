@@ -537,6 +537,32 @@ static int test_store_creates_missing_parents(void) {
     return 0;
 }
 
+/* The store's root is trusted only as the user's own directory: a link in its place opens no
+ * store and nothing is created through it; a loose mode on the user's own root is tightened. */
+static int test_store_root_must_be_own_directory(void) {
+    fl_kq_store_t *s = NULL;
+    char target[sizeof s_dir + 32];
+    char link_root[sizeof s_dir + 32];
+    char through[sizeof target + 32];
+    char loose[sizeof s_dir + 32];
+    struct stat st;
+
+    snprintf(target, sizeof target, "%s/root_target", s_dir);
+    snprintf(link_root, sizeof link_root, "%s/root_link", s_dir);
+    snprintf(through, sizeof through, "%s/kq_letters", target);
+    ASSERT(mkdir(target, 0700) == 0);
+    ASSERT(symlink(target, link_root) == 0);
+    ASSERT(fl_kq_store_open(link_root, &s) == FL_RESULT_ERR && s == NULL);
+    ASSERT(access(through, F_OK) != 0);
+
+    snprintf(loose, sizeof loose, "%s/root_loose", s_dir);
+    ASSERT(mkdir(loose, 0700) == 0 && chmod(loose, 0777) == 0);
+    ASSERT(fl_kq_store_open(loose, &s) == FL_RESULT_OK);
+    fl_kq_store_close(s);
+    ASSERT(stat(loose, &st) == 0 && (st.st_mode & 07777) == 0700);
+    return 0;
+}
+
 int main(void) {
     char tmpl[] = "/tmp/fl_kq_deliveryXXXXXX";
     int rc = 0;
@@ -557,6 +583,7 @@ int main(void) {
     RUN(test_older_store_is_carried_over);
     RUN(test_older_store_does_not_follow_links);
     RUN(test_store_creates_missing_parents);
+    RUN(test_store_root_must_be_own_directory);
     rmrf(s_dir);
     if (rc == 0)
         printf("All KeyQuorum delivery store tests passed.\n");

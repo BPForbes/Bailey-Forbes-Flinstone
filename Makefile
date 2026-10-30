@@ -1036,8 +1036,8 @@ test_random: tests/test_random.c kernel/include/fl/random.h
 	./tests/test_random
 
 .PHONY: test_part_buf
-test_part_buf: tests/test_part_buf.c kernel/core/net/net_part_buf.h
-	$(CC) $(CFLAGS) $(TEST_SANITIZE) -o tests/test_part_buf tests/test_part_buf.c -Wl,-z,noexecstack
+test_part_buf: tests/test_part_buf.c kernel/core/net/net_part_buf.h $(SHARED_FS_MM_OBJS)
+	$(CC) $(CFLAGS) $(TEST_SANITIZE) -o tests/test_part_buf tests/test_part_buf.c $(SHARED_FS_MM_OBJS) -Wl,-z,noexecstack
 	./tests/test_part_buf
 
 .PHONY: test_kq_net

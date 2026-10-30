@@ -620,6 +620,51 @@ static int test_contained_name_operations_refuse_links(void) {
     return 0;
 }
 
+static int test_trusted_root_is_owned_held_and_tightened(void) {
+    char dir[PATH_MAX], link[PATH_MAX], file[PATH_MAX];
+    struct stat st;
+    int fd;
+    snprintf(dir, sizeof dir, "%s/trusted_root", g_dir);
+    snprintf(link, sizeof link, "%s/trusted_root_link", g_dir);
+    snprintf(file, sizeof file, "%s/trusted_root_file", g_dir);
+    ASSERT(mkdir(dir, 0700) == 0);
+
+    /* The user's own 0700 directory is held as is. */
+    ASSERT((fd = fl_fs_trusted_root_open(dir)) >= 0);
+    ASSERT(fstat(fd, &st) == 0 && S_ISDIR(st.st_mode));
+    close(fd);
+
+    /* A loose mode on the user's own directory is tightened to 0700 on the held fd. */
+    ASSERT(chmod(dir, 0777) == 0);
+    ASSERT((fd = fl_fs_trusted_root_open(dir)) >= 0);
+    close(fd);
+    ASSERT(stat(dir, &st) == 0 && (st.st_mode & 07777) == 0700);
+
+    /* A link in the root's place and a file are refused, and the link's target is left alone. */
+    ASSERT(chmod(dir, 0755) == 0);
+    ASSERT(symlink(dir, link) == 0);
+    ASSERT(fl_fs_trusted_root_open(link) == -1);
+    ASSERT(stat(dir, &st) == 0 && (st.st_mode & 07777) == 0755);
+    ASSERT((fd = open(file, O_WRONLY | O_CREAT, 0600)) >= 0);
+    close(fd);
+    ASSERT(fl_fs_trusted_root_open(file) == -1);
+    ASSERT(fl_fs_trusted_root_open(NULL) == -1);
+
+    /* Another user's directory is refused and keeps its mode (only checkable as root). */
+    if (geteuid() == 0) {
+        ASSERT(chown(dir, 65534, 65534) == 0);
+        ASSERT(chmod(dir, 0777) == 0);
+        errno = 0;
+        ASSERT(fl_fs_trusted_root_open(dir) == -1 && errno == EPERM);
+        ASSERT(stat(dir, &st) == 0 && (st.st_mode & 07777) == 0777);
+        ASSERT(chown(dir, 0, 0) == 0);
+    }
+    unlink(link);
+    unlink(file);
+    rmdir(dir);
+    return 0;
+}
+
 static int test_contained_new_file_is_owner_only(void) {
     const uint8_t in[] = "x";
     char path[300];
@@ -1172,6 +1217,7 @@ int main(void) {
     rc |= test_contained_normal_overwrite_still_works();
     rc |= test_contained_equivalent_spellings_are_gated_alike();
     rc |= test_contained_name_operations_refuse_links();
+    rc |= test_trusted_root_is_owned_held_and_tightened();
     rc |= test_contained_new_file_is_owner_only();
     rc |= test_contained_overwrite_replaces_whole_file();
     rc |= test_contained_overwrite_failure_keeps_original();

@@ -36,6 +36,8 @@
 #include "fs_jail.h"
 #include "fs_provider.h"
 #include "fat32_host.h"
+#include "session_login_env.h"
+#include <pwd.h>
 #include <fcntl.h>
 
 /* g_fs_jail_root is a non-static global exported by fs_jail.c */
@@ -736,6 +738,50 @@ static int jail_suite_cleanup(void) {
 }
 
 /* ---------------------------------------------------------------------------
+ * su - / sudo -i: the login home is the account's, never $HOME
+ * -------------------------------------------------------------------------*/
+void test_login_home_ignores_home_env(void) {
+    print_test_header("login shell home comes from the password database, not $HOME");
+    char saved_cwd[CWD_MAX], saved_g_cwd[CWD_MAX], expect[CWD_MAX];
+    char bogus[] = "/tmp/fl_login_home_XXXXXX";
+    const char *old_home = getenv("HOME");
+    char saved_home[CWD_MAX] = "";
+    int saved_vm = g_vm_mode;
+    struct passwd pw, *res = NULL;
+    char buf[1024];
+
+    CU_ASSERT_PTR_NOT_NULL_FATAL(getcwd(saved_cwd, sizeof saved_cwd));
+    snprintf(saved_g_cwd, sizeof saved_g_cwd, "%s", g_cwd);
+    if (old_home)
+        snprintf(saved_home, sizeof saved_home, "%s", old_home);
+    CU_ASSERT_PTR_NOT_NULL_FATAL(mkdtemp(bogus));
+    if (getpwuid_r(geteuid(), &pw, buf, sizeof buf, &res) == 0 && res && res->pw_dir &&
+        res->pw_dir[0] == '/')
+        snprintf(expect, sizeof expect, "%s", res->pw_dir);
+    else
+        snprintf(expect, sizeof expect, ".");
+
+    g_vm_mode = 0;
+    fs_jail_init();
+    CU_ASSERT_EQUAL(setenv("HOME", bogus, 1), 0);
+    (void)fl_session_apply_login_shell_env("fl_login_home_test_user");
+    CU_ASSERT_STRING_NOT_EQUAL(g_cwd, bogus);
+    CU_ASSERT_STRING_EQUAL(g_cwd, expect);
+    /* $HOME is still set for child processes, to the account's home. */
+    CU_ASSERT_STRING_EQUAL(getenv("HOME"), expect);
+
+    if (saved_home[0])
+        (void)setenv("HOME", saved_home, 1);
+    else
+        (void)unsetenv("HOME");
+    CU_ASSERT_EQUAL(chdir(saved_cwd), 0);
+    snprintf(g_cwd, sizeof g_cwd, "%s", saved_g_cwd);
+    g_vm_mode = saved_vm;
+    fs_jail_init();
+    (void)rmdir(bogus);
+}
+
+/* ---------------------------------------------------------------------------
  * fs_jail_is_active tests
  * -------------------------------------------------------------------------*/
 void test_jail_is_active_in_vm_mode(void) {
@@ -1187,6 +1233,7 @@ int main(void)
     CU_ADD_TEST(suite, test_convert_data_to_hex_nontext);
     CU_ADD_TEST(suite, test_convert_hex_to_ascii);
     CU_ADD_TEST(suite, test_help_variants);
+    CU_ADD_TEST(suite, test_login_home_ignores_home_env);
     CU_ADD_TEST(suite, test_v_command);
     CU_ADD_TEST(suite, test_l_command);
     CU_ADD_TEST(suite, test_s_command);

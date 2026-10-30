@@ -424,7 +424,20 @@ fl_result_t fl_kq_store_open(const char *dir, fl_kq_store_t **out) {
     if (!s)
         return FL_RESULT_NOMEM;
     snprintf(s->dir, sizeof s->dir, "%s", dir);
-    /* The store may be the first thing under the share root: create it and its letters dir. */
+    /* The store may be the first thing under the share root: create it, then trust it only as
+     * the user's own directory (not a link in its place) before anything is made inside it. */
+    if (fl_fs_mkdir_p(dir, 0700) != 0) {
+        mem_domain_free(MEM_DOMAIN_FS, s);
+        return FL_RESULT_ERR;
+    }
+    {
+        int root_fd = fl_fs_trusted_root_open(dir);
+        if (root_fd < 0) {
+            mem_domain_free(MEM_DOMAIN_FS, s);
+            return FL_RESULT_ERR;
+        }
+        close(root_fd);
+    }
     if (snprintf(path, sizeof path, "%s/%s", dir, KQ_STORE_LETTERS) >= (int)sizeof path ||
         fl_fs_mkdir_p(path, 0700) != 0) {
         mem_domain_free(MEM_DOMAIN_FS, s);
