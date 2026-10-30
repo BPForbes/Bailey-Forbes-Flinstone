@@ -536,7 +536,12 @@ int fl_fs_read_tail_at(int dirfd, const char *dir_path, const char *name, size_t
         if (!f)
             return access(p, F_OK) == 0 ? -1 : 0;
     }
-    if (fseek(f, 0, SEEK_END) != 0 || (size = ftell(f)) < 0 || (size_t)size % unit != 0) {
+    if (fseek(f, 0, SEEK_END) != 0) {
+        fclose(f);
+        return -1;
+    }
+    size = ftell(f);
+    if (size < 0 || (size_t)size % unit != 0) {
         fclose(f);
         return -1;
     }

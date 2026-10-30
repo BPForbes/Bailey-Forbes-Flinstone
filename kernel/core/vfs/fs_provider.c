@@ -9,6 +9,7 @@
 #include <stdlib.h>
 #include <string.h>
 #include <errno.h>
+#include <fcntl.h>
 #include <sys/stat.h>
 #include <dirent.h>
 #include <unistd.h>
@@ -126,6 +127,21 @@ static int local_read_text(fs_provider_t *p, const char *path, char *buf, size_t
     return (int)n;
 }
 
+/* chmod of a regular file by path that never follows a link: open it O_NOFOLLOW, then fchmod. */
+static int chmod_nofollow(const char *path, mode_t mode) {
+    int fd = open(path, O_RDONLY | O_CLOEXEC | O_NOFOLLOW | O_NONBLOCK);
+    int rc;
+    int saved;
+
+    if (fd < 0)
+        return -1;
+    rc = fchmod(fd, mode);
+    saved = errno;
+    close(fd);
+    errno = saved;
+    return rc;
+}
+
 /*
  * One writer for local_write_text and local_write_bytes.
  *
@@ -164,8 +180,10 @@ static int local_write_full(const char *path, const uint8_t *data, size_t len) {
         errno = saved;
         return -1;
     }
-    /* Replacing a regular file: the staged file (0600) takes its permission bits. */
-    if (rc == 0 && S_ISREG(st.st_mode) && chmod(part, st.st_mode & 0777) != 0) {
+    /* Replacing a regular file: the staged file (0600) takes its permission bits. The mode is
+     * set through a descriptor opened without following a link, so a link swapped in for the
+     * staged file after it was written is refused and never chmod'ed. */
+    if (rc == 0 && S_ISREG(st.st_mode) && chmod_nofollow(part, st.st_mode & 0777) != 0) {
         int saved = errno;
         unlink(part);
         errno = saved;
