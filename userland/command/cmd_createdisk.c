@@ -1,8 +1,10 @@
 #include "common.h"
 #include "cmd_decl.h"
 #include "cmd_batch.h"
+#include "cmd_util.h"
 #include "disk.h"
 #include "interpreter.h"
+#include "util.h"
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -19,6 +21,10 @@ int cmd_createdisk_run(int argc, char **argv) {
         printf("Error: rowCount must be positive and nibbleCount must be positive and even.\n");
         return 1;
     }
+    char vpath[CWD_MAX];
+    resolve_path(args[1], vpath, sizeof(vpath));
+    if (cmd_jail_blocked_path("createdisk", args[1], vpath))
+        return 1;
     flintstone_format_disk(args[1], rowCount, nibbleCount);
     int cb = nibbleCount / 2;
     if (cb >= 512 && (cb % 512) == 0)

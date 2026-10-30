@@ -538,6 +538,22 @@ static int test_wifi_lab_static_l3_udp(void) {
     return 0;
 }
 
+#if !defined(FL_WIFI_HOST_COMMANDS)
+/* A default build runs no host tool: no environment variable may select the host backend. */
+static int test_host_commands_off_in_default_build(void)
+{
+    ASSERT(setenv("FL_NET_WIFI_USE_WPA", "1", 1) == 0);
+    ASSERT(setenv("FL_NET_WIFI_FLINSTONE_PS", "/nonexistent/FlinstonePowershell.exe", 1) == 0);
+    ASSERT(setenv("FL_NET_WIFI_FLINSTONE_LINUX", "/nonexistent/FlinstoneLinuxNet", 1) == 0);
+    ASSERT(fl_net_wifi_host_linux_opted_in() == 0);
+    ASSERT(fl_net_wifi_host_linux_available() == 0);
+    ASSERT(setenv("FL_NET_WIFI_USE_WPA", "0", 1) == 0);
+    ASSERT(unsetenv("FL_NET_WIFI_FLINSTONE_PS") == 0);
+    ASSERT(unsetenv("FL_NET_WIFI_FLINSTONE_LINUX") == 0);
+    return 0;
+}
+#endif
+
 int main(void) {
     ASSERT(setenv("FL_NET_WIFI_USE_WPA", "0", 1) == 0);
     ASSERT(setenv("FL_NET_WIFI_LAB", "1", 1) == 0);
@@ -546,6 +562,10 @@ int main(void) {
 
     if (test_he_capabilities_parse() != 0)
         return 1;
+#if !defined(FL_WIFI_HOST_COMMANDS)
+    if (test_host_commands_off_in_default_build() != 0)
+        return 1;
+#endif
     if (test_scan_result_he_fields() != 0)
         return 1;
     if (test_wpa_scan_ssid_bounds() != 0)

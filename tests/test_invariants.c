@@ -78,6 +78,29 @@ static int test_path_checked_refuses_truncation(void) {
     ASSERT(resolve_path_checked(deep, out, sizeof(out)) != 0);
     char tiny[8];
     ASSERT(resolve_path_checked("/usr/local/bin/long", tiny, sizeof(tiny)) != 0);
+    /* Exactly fits: "/a/b" and its NUL are 5 bytes; one byte less must be refused. */
+    ASSERT(resolve_path_checked("/a/b", out, 5) == 0);
+    ASSERT(strcmp(out, "/a/b") == 0);
+    ASSERT(resolve_path_checked("/a/b", out, 4) != 0);
+    ASSERT(resolve_path_checked("/a/b", out, 3) != 0);
+    /* A one-byte buffer holds nothing: refused, NUL written, nothing past it touched. */
+    char guard[4] = {'x', 'x', 'x', 'x'};
+    ASSERT(resolve_path_checked("/a", guard, 1) != 0);
+    ASSERT(guard[0] == '\0' && guard[1] == 'x');
+    /* A segment over 255 bytes is not silently cut. */
+    char longseg[400];
+    memset(longseg, 'a', sizeof(longseg) - 1);
+    longseg[0] = '/';
+    longseg[sizeof(longseg) - 1] = '\0';
+    ASSERT(resolve_path_checked(longseg, out, sizeof(out)) != 0);
+    /* Input longer than the working buffer, absolute and relative. */
+    static char huge[20000];
+    memset(huge, 'b', sizeof(huge) - 1);
+    huge[sizeof(huge) - 1] = '\0';
+    huge[0] = '/';
+    char big[CWD_MAX];
+    ASSERT(resolve_path_checked(huge, big, sizeof(big)) != 0);
+    ASSERT(resolve_path_checked(huge + 1, big, sizeof(big)) != 0);
     return 0;
 }
 
