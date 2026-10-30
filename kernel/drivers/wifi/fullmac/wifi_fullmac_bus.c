@@ -258,6 +258,15 @@ static int usb_apply_chipset(uint16_t vid, uint16_t did, wifi_fullmac_hw_ctx_t *
 	return 0;
 }
 
+/* A USB port name is one sysfs entry: no path separator, and not "." or "..". A symlinked entry is
+ * still followed (sysfs device entries are links); the read is only a hex number. */
+int wifi_fullmac_usb_port_name_ok(const char *port)
+{
+	if (!port || !port[0])
+		return 0;
+	return strchr(port, '/') == NULL && strcmp(port, ".") != 0 && strcmp(port, "..") != 0;
+}
+
 static int usb_ctx_from_port(const char *port, wifi_fullmac_hw_ctx_t *ctx)
 {
 	char syspath[512];
@@ -265,9 +274,7 @@ static int usb_ctx_from_port(const char *port, wifi_fullmac_hw_ctx_t *ctx)
 
 	if (!port || !port[0] || !ctx)
 		return -1;
-	/* A USB port name is one sysfs entry: no path separator, and not "." or "..". A symlinked
-	 * entry is still followed (sysfs device entries are links); the read is only a hex number. */
-	if (strchr(port, '/') || !strcmp(port, ".") || !strcmp(port, ".."))
+	if (!wifi_fullmac_usb_port_name_ok(port))
 		return -1;
 	snprintf(syspath, sizeof(syspath), "/sys/bus/usb/devices/%s", port);
 	if (usb_sysfs_read_hex16(syspath, "idVendor", &vid) != 0 ||

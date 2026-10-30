@@ -10,10 +10,13 @@
  */
 #include "cmd_decl.h"
 #include "cmd_server_file.h"
+#include "cmd_util.h"
+#include "kq_storage.h"
 #include "common.h"
 #include "fs_jail.h"
 #include "net_client.h"
 #include "session.h"
+#include "util.h"
 
 #include <dirent.h>
 #include <errno.h>
@@ -423,6 +426,200 @@ done:
     return rc;
 }
 
+/* cmd_jail_blocked_path fails closed on its own: with a jail active it refuses an input the
+ * resolver cannot finish, even though the cut-down path it is also given looks harmless. */
+static int test_jail_check_fails_closed(void)
+{
+    struct fixture fx;
+    char deep[PATH_MAX];
+    char cut[CWD_MAX];
+    char out[1024];
+    struct capture c;
+    int blocked, rc = 1;
+
+    if (setup(&fx))
+        return 1;
+    deep[0] = '\0';
+    for (int i = 0; i < 70; i++)
+        strcat(deep, "d/");
+    strcat(deep, "../../../../../../../../../../../../x");
+    resolve_path(deep, cut, sizeof(cut));
+    if (capture_begin(&c) != 0)
+        goto done;
+    blocked = cmd_jail_blocked_path("probe", deep, cut);
+    capture_end(&c, out, sizeof(out));
+    if (blocked != 1 || !strstr(out, "path too long to check")) {
+        fprintf(stderr, "FAIL: cmd_jail_blocked_path let an unresolvable input through: %d\n%s\n", blocked,
+                out);
+        goto done;
+    }
+    /* And it still lets an ordinary path inside the jail through. */
+    if (capture_begin(&c) != 0)
+        goto done;
+    blocked = cmd_jail_blocked_path("probe", "inside.txt", fx.inside);
+    capture_end(&c, out, sizeof(out));
+    if (blocked != 0) {
+        fprintf(stderr, "FAIL: cmd_jail_blocked_path refused a path inside the jail:\n%s\n", out);
+        goto done;
+    }
+    rc = 0;
+done:
+    teardown(&fx);
+    return rc;
+}
+
+/* The storage table records every path the checkpoint code is asked to read. */
+static char g_seen[16][PATH_MAX];
+static int g_nseen;
+static fl_kq_storage_t g_rec;
+
+static void note_path(const char *path)
+{
+    if (g_nseen < 16) {
+        strncpy(g_seen[g_nseen], path, PATH_MAX - 1u);
+        g_seen[g_nseen][PATH_MAX - 1u] = '\0';
+        g_nseen++;
+    }
+}
+
+static int rec_read(void *ctx, const char *path, size_t max, uint8_t **data, size_t *len)
+{
+    note_path(path);
+    return fl_kq_storage_default()->read_file(ctx, path, max, data, len);
+}
+
+static int rec_exists(void *ctx, const char *path)
+{
+    note_path(path);
+    return fl_kq_storage_default()->exists(ctx, path);
+}
+
+/* Every path the checkpoint layer was handed is the resolved one (absolute, under `want`), never
+ * the relative text that was typed. */
+static int seen_only_resolved(const char *want, const char *what)
+{
+    if (g_nseen == 0) {
+        fprintf(stderr, "FAIL: %s read nothing; the test cannot tell which path it used\n", what);
+        return 1;
+    }
+    for (int i = 0; i < g_nseen; i++) {
+        if (g_seen[i][0] != '/' || strncmp(g_seen[i], want, strlen(want)) != 0) {
+            fprintf(stderr, "FAIL: %s read \"%s\", not the checked path \"%s\"\n", what, g_seen[i], want);
+            return 1;
+        }
+    }
+    return 0;
+}
+
+/* The shell's working directory (g_cwd) is not the process's: a relative name means different
+ * files to each. The verbs must act on the one they checked. */
+static int test_verbs_use_the_checked_path(void)
+{
+    struct fixture fx;
+    char sub[PATH_MAX];
+    char doc[PATH_MAX];
+    char out[4096];
+    char *log[] = {"server", "file", "log", "doc.txt"};
+    char *permit[] = {"server", "file", "permit", "doc.txt"};
+    char *offer[] = {"server", "file", "doc.txt"};
+    const fl_kq_storage_t *was = NULL;
+    int rc = 1;
+
+    if (setup(&fx))
+        return 1;
+    SNP(sub, "%s/%s/sub", fx.outer, FS_JAIL_HOST_SUBDIR);
+    SNP(doc, "%s/doc.txt", sub);
+    mkdir(sub, 0700);
+    write_file(doc, "text\n");
+    set_str(g_cwd, sizeof(g_cwd), sub); /* the process stays in the jail root, one level up */
+    if (fl_session_set_user("Flinstone") != FL_RESULT_OK)
+        goto done;
+
+    g_rec = *fl_kq_storage_default();
+    g_rec.read_file = rec_read;
+    g_rec.exists = rec_exists;
+    was = fl_kq_cp_set_storage(&g_rec);
+
+    g_nseen = 0;
+    (void)run_captured(log, 4, out, sizeof(out));
+    if (seen_only_resolved(doc, "server file log"))
+        goto done;
+
+    g_nseen = 0;
+    (void)run_captured(permit, 4, out, sizeof(out));
+    if (seen_only_resolved(doc, "server file permit"))
+        goto done;
+
+    /* The offer stats the file before anything else: it exists only at the checked path. */
+    (void)run_captured(offer, 3, out, sizeof(out));
+    if (strstr(out, "cannot read file")) {
+        fprintf(stderr, "FAIL: server file looked for the typed name, not the checked path:\n%s\n", out);
+        goto done;
+    }
+    rc = 0;
+done:
+    if (was)
+        (void)fl_kq_cp_set_storage(was);
+    teardown(&fx);
+    return rc;
+}
+
+/* `write` joins its words into a bounded buffer. */
+static int test_write_joins_and_bounds_its_words(void)
+{
+    struct fixture fx;
+    char path[PATH_MAX];
+    char text[8192];
+    char *args[700];
+    char word[] = "0123456789";
+    char *small[] = {"write", "w.txt", "aaa", "bbb", "ccc"};
+    FILE *f;
+    size_t n;
+    int argc = 0, rc = 1;
+
+    if (setup(&fx))
+        return 1;
+    g_vm_mode = 0; /* no jail: this is about the copy */
+    g_fs_jail_root[0] = '\0';
+    SNP(path, "%s/w.txt", fx.outer);
+    set_str(g_cwd, sizeof(g_cwd), fx.outer);
+
+    if (cmd_write_run(5, small) != 0)
+        goto done;
+    f = fopen(path, "r");
+    if (!f)
+        goto done;
+    n = fread(text, 1, sizeof(text) - 1u, f);
+    fclose(f);
+    text[n] = '\0';
+    if (strcmp(text, "aaa bbb ccc") != 0) {
+        fprintf(stderr, "FAIL: write joined \"%s\"\n", text);
+        goto done;
+    }
+
+    /* Far more words than fit: it stops before the buffer end and keeps only whole words. */
+    args[argc++] = "write";
+    args[argc++] = "w.txt";
+    for (int i = 0; i < 600; i++)
+        args[argc++] = word;
+    if (cmd_write_run(argc, args) != 0)
+        goto done;
+    f = fopen(path, "r");
+    if (!f)
+        goto done;
+    n = fread(text, 1, sizeof(text) - 1u, f);
+    fclose(f);
+    text[n] = '\0';
+    if (n >= 4096u || n < 4000u || (n + 1u) % 11u != 0u) {
+        fprintf(stderr, "FAIL: write kept %zu bytes of an oversized argument list\n", n);
+        goto done;
+    }
+    rc = 0;
+done:
+    teardown(&fx);
+    return rc;
+}
+
 int main(void)
 {
     char db_path[] = "/tmp/sfj_users_XXXXXX";
@@ -444,6 +641,15 @@ int main(void)
     if (test_createdisk() != 0)
         return 1;
     printf("test_server_file_jail: createdisk checks the file it creates ... ok\n");
+    if (test_jail_check_fails_closed() != 0)
+        return 1;
+    printf("test_server_file_jail: the jail check fails closed on its own ... ok\n");
+    if (test_verbs_use_the_checked_path() != 0)
+        return 1;
+    printf("test_server_file_jail: log, permit and offer use the checked path ... ok\n");
+    if (test_write_joins_and_bounds_its_words() != 0)
+        return 1;
+    printf("test_server_file_jail: write joins and bounds its words ... ok\n");
     unlink(db_path);
     return 0;
 }

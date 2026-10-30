@@ -171,6 +171,15 @@ jobs:
       - name: Test — P3 Wi-Fi (lab + TWT power manager)
         run: make test_p3_wifi
 
+      - name: Test — Wi-Fi host HE hints and interface-name check
+        run: make test_net_wifi_host_he
+
+      - name: Test — Wi-Fi FullMAC USB port name
+        run: make test_wifi_fullmac_usb_port
+
+      - name: Test — server file jail, resolver and quarantine denials
+        run: make test_server_file_jail
+
       - name: Build CUnit suite
         run: make BPForbes_Flinstone_Tests CHANGELOG_CI=1
 
