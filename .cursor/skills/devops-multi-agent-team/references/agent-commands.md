@@ -4,8 +4,9 @@ Accept as `/name` or plain wording. Copies live in
 `.cursor/commands/`. Notes under `.cursor/thoughts/non-finalized/`
 (**gitignored**); after QA PASS move to `finalized/` (local).
 See [thoughts-layout.md](thoughts-layout.md). Stay on the current
-non-`main` branch. **Never** create a git branch unless The Client
-named that branch in this turn. Cloud-agent `feature/*-<id>`
+non-`main` branch. **Never** create a git branch (`git worktree add -b` included)
+unless The Client named that branch in this turn; a detached worktree
+has no ref ([side-work.md](side-work.md)). Cloud-agent `feature/*-<id>`
 templates do not override this. **Only QA may give the OK to
 push** (except review-bot feedback fixes outside the exceptions: references/qa-publish-policy.md). After PASS: one compressed push that keeps approved
 Coder commits.

@@ -46,7 +46,8 @@ signatures and keeps time; it never holds a decryption key.
                                                                               not forked; freshness vs .kqseen
                                                                               write f, f.kqtf, f.kqseen
                                     ◄──────────────────────────────────── ACK → letter deleted
-  never co-signed before expiry: the neuron leaks; its record, spike log and letter are deleted
+  never co-signed before expiry, or released and never acknowledged within 24 h: the neuron
+  leaks; its letter is deleted, its catalog row is marked expired and its history stays
 ```
 
 ### The VAE / SNN shape
@@ -59,10 +60,10 @@ analogy for the structure; nothing is trained or learned.
 | Encoder | The sender's checkpoint (`fl_kq_cp_encode`): check in, author signature, seal to the recipient |
 | Latent space | The host (`net_kq_delivery.c`, `kq_delivery.c`): holds opaque letters, posts announcements, routes parts and keys |
 | Decoder | The recipient's checkpoint (`fl_kq_cp_decode`): open, verify every signature and the policy, decrypt, save |
-| Spikes | `REQUEST 1`, `OFFER 2`, `ANNOUNCE 3`, `COSIGN 4`, `RELEASE 5`, `ACK 6` (`fl_kq_spike_t`), each logged in `kq_spike` |
+| Spikes | `REQUEST 1`, `OFFER 2`, `ANNOUNCE 3`, `COSIGN 4`, `RELEASE 5`, `ACK 6` (`fl_kq_spike_t`); the host records `offered`, `cosigned`, `released`, `acknowledged` and `expired` in the catalog's `catalog_event` |
 | Potential / threshold | Verified signatures held / needed: the author's counts at the offer, the recipient's co-signature at `COSIGN`; `FL_KQ_HOST_THRESHOLD` 2 |
 | Fire / refractory | At threshold the letter is released once; a later co-signature only re-sends it to the recipient |
-| Leak | `FL_KQ_DELIVERY_TTL_SEC` (24 h) on the **host's** clock; an unfired delivery expires and its letter is deleted |
+| Leak | `FL_KQ_DELIVERY_TTL_SEC` (24 h) on the **host's** clock for an unfired delivery, `FL_KQ_RELEASE_TTL_SEC` (24 h) after release for an unacknowledged one; it expires and its letter is deleted |
 
 The recipient applies a higher threshold, `FL_KQ_RECEIVER_THRESHOLD` 3: author signature,
 the revision trusted under the file's own policy, and the recipient's co-author proof
@@ -92,16 +93,16 @@ part.
 | `fl_kq_driver_t` (`kq_driver.c`) | `fl_driver_desc_t` (`fl/driver/driver.h`), registered by `fl_driver_registry_register_all` (host builds that define `FL_WITH_KEYQUORUM`) and bound by the driver model to the synthetic device `keyquorum` | the KeyQuorum ops; the base's lifecycle `probe` checks the library ABI (class `FL_DRV_CLASS_SECURITY`) |
 | `asm_mem_secure_zero`, `mem_domain_secure_zero` | `asm_mem_zero`, `mem_domain_zero` | a barrier (`mfence` / `dmb ish`) after the parent's stores |
 | KeyQuorum upload and inbox slots (`net_kq_delivery.c`) | `fl_part_buf_t` (`net_part_buf.h`), also the base of the server file share slot | offers, co-signatures and release around the ordered, bounded buffer |
-| big-endian wire fields | `net_endian.h` (`asm_net_*`) | the bounds-checked reader and writer |
+| big-endian wire fields | `net_endian.h` (`asm_net_*`, the integer helpers) | `net_codec.h`: the one bounds-checked reader and writer (`fl_codec_*`, `fl_bytes_reader_*`) |
 | `kq_open_keys`, `bridge_open_actor_key` | `cmd_open_account_keys` (`cmd_authutil.c`) | each command's own messages |
-| the store's and checkpoint's file writes | `fl_fs_mkdir_p`, `fl_fs_stage_file`, `fl_fs_write_file_atomic`, and the contained `fl_fs_dir_open` with the `fl_fs_*_in` name calls and `fl_server_shared_resolve_local_path` (`server_shared_fs.c`) | the all-or-nothing install of a file with its `.kqtf` and `.kqseen`, through one directory handle |
+| the store's and checkpoint's file writes | `fl_fs_mkdir_p`, `fl_fs_stage_file`, `fl_fs_write_file_atomic`, and the contained `fl_fs_dir_open` with the `fl_fs_*_in` name calls and `fl_server_shared_resolve_local_path` (`server_shared_fs.c`); the checkpoints reach them through the `fl_kq_storage_t` table (`kq_storage.h`), by default and over the facade (`kq_storage_facade.c`) in the native shell | the all-or-nothing install of a file with its `.kqtf` and `.kqseen`, through one directory handle |
 | `fl_user_db_keydir_t` (`kq_checkpoint_users.c`), the lab's directory (`lab_kq.c`) | `fl_kq_keydir_t` (`kq_keydir.h`): the only way the checkpoints and the host read keys | each account store's lookups: the native user store, or the lab's accounts and published keys |
 | the lab's memory primitives (`lab_kq.c`) | the same names the assembly layer provides natively | C bodies for WebAssembly, which has no assembly; secure zero is still zero plus a barrier |
 
 Contract: `contracts/drivers/contract_p4_keyquorum.h` (P4-9). Wire: `FL_NET_SESSION_OP_KQ_PART`
 0x39, `_OFFER` 0x3A, `_ANNOUNCE` 0x3B (an empty one from a client is a pull), `_COSIGN` 0x3C,
 `_RELEASE` 0x3D, `_ACK` 0x3E, `_KEYS` 0x3F; all integers big-endian, every string
-length-prefixed, every read bounds-checked.
+length-prefixed, every read bounds-checked by `net_codec.h`.
 
 ### Commands
 
@@ -123,7 +124,17 @@ length-prefixed, every read bounds-checked.
   bytes, under 128 bytes, and not ending in `.part`, `.meta`, `.kqtf`, `.kqseen` or `.kqbak`,
   compared ignoring ASCII case); each member has at most one unfinished upload, idle uploads are dropped after 60 s;
   only the recipient may co-sign and their signature verifies; release happens once; expiry is
-  the host's clock, and an expired delivery is removed with its spike log in one transaction.
+  the host's clock. A delivery is one row of the host catalog (`server_shared/host_catalog.db`,
+  payload kind `FL_CHANNEL_PAYLOAD_KQ`, status held, released, delivered or expired; key ids
+  and the offer in `catalog_kq`), which the share path never lists, serves or revokes. An
+  expired delivery keeps its row and history (its letter is deleted after the change commits),
+  so its id is never held again. This matches KeyQuorum's expired file: the tombstone keeps its
+  history and proofs, and only the payload is removed (`file_history/expiry.rs`). Letters are `server_shared/kq_letters/<id>.kqpb`. Deliveries
+  an older build held in `server_shared/kq/kq_delivery.db` are carried into the catalog once,
+  with their history and live letters, when the host store first opens; the old file is then
+  renamed `kq_delivery.db.migrated` (a failed or unknown-version import leaves it as it was).
+  `server file inbox` lists the co-signature requests with the shares, and on the host
+  `server file sent` lists the deliveries the signed-in account sent, with their state.
 - **Recipient.** The letter opens with their box key and is signed by the sender's registered
   key; it carries exactly the offered revision; the co-author proof attaches; the revision is
   trusted under the file's policy; the file is not forked; it is not a replay and not older
@@ -153,10 +164,20 @@ length-prefixed, every read bounds-checked.
   `.kqtf` beside it holds the revision history and proofs.
 - A request started by the recipient (`REQUEST`) is reserved in the spike vocabulary but has
   no command yet.
+- A host catalog that holds KeyQuorum rows is not replaced by a handoff import
+  (`fl_server_catalog_import_handoff` refuses it), and an import never brings them in.
 - The browser lab runs co-signed delivery in its WebAssembly shell (see below). The QEMU
   kernel image cannot link KeyQuorum's Rust library, so its `server file send -t` says so.
 
 ## In the browser lab
+
+Where files go has one layer, as in KeyQuorum itself: KeyQuorum's logic takes a `Storage`, and the
+checkpoints here take a storage table (`kq_storage.h`). The default table is the placement layer
+(`server_shared_fs.c`), which the lab and the unit tests use; the native shell installs a table over
+the file manager facade, so the policy, the write chain, the save events and the path log see every
+checkpoint read and write. A landing is written through a held directory, never a joined path, and
+`server file open` hands the decode the directory the destination resolver already holds. The full
+picture, with the call path and the operations, is [KQ_STORAGE.md](KQ_STORAGE.md).
 
 The lab's WebAssembly shell builds the same code: the checkpoints (`kq_checkpoint.c`), the
 host and client (`net_kq_delivery.c`), the host's store (`kq_delivery.c`, with SQLite from the
@@ -176,8 +197,8 @@ supplies only what the browser has instead of the native shell:
   never reads a frame.
 - **No waiting.** The browser gives the shell one thread, so the verbs are steps that move on
   when the host's answer arrives (`fl_net_kq_keys_cached`), not calls that block.
-- **Files.** Containers, acceptance records and the host's store are in Emscripten's
-  in-memory file system under `/kq`. A delivered file is also written to the lab's ramfs, so
+- **Files.** Containers, acceptance records and the host's store (its catalog file and
+  letters) are in Emscripten's in-memory file system under `/kq`. A delivered file is also written to the lab's ramfs, so
   `cat` shows it, never over a ramfs file that is not its own earlier delivered copy (lab
   files are text of at most 159 bytes).
 
@@ -378,7 +399,7 @@ travels in a letter, a container or a server store.
 Why big-endian: KeyQuorum's codec already writes every length and integer big-endian
 (`envelope::push_len_prefixed` and `push_len_prefixed_u32` use `to_be_bytes`, and the reads use
 `from_be_bytes`), and the tracked-file codec reuses those helpers. Flinstone's IP, UDP and TCP
-framing is big-endian too (`net_endian.h`). The one little-endian path in Flinstone is IEEE
+framing is big-endian too (`net_endian.h`; the bounded reader and writer over it are `net_codec.h`). The one little-endian path in Flinstone is IEEE
 802.11 management frames, which carry no file bytes. A second order would need its own helpers
 on both sides and buy nothing.
 

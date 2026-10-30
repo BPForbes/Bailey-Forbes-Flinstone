@@ -27,10 +27,10 @@
 
 #include "fl/driver/keyquorum.h"
 #include "fl/path.h"
-#include "keyquorum_identity.h"
 #include "kq_checkpoint.h"
 #include "kq_delivery.h"
 #include "kq_keydir.h"
+#include "mem_domain.h"
 #include "net_kq_delivery.h"
 #include "server_shared_fs.h"
 #include "common.h"
@@ -56,6 +56,28 @@ char g_cwd[CWD_MAX] = ".";
 #define LAB_HOST_DIR LAB_KQ_ROOT "/host"
 
 /* ---- platform: what the assembly layer provides natively ------------------------------ */
+
+/* Host builds make the domain allocators thin wrappers over libc (mem_domain.c); the lab does the
+ * same, since it does not link that file. */
+void *mem_domain_alloc(mem_domain_t domain, size_t size) {
+    (void)domain;
+    return malloc(size);
+}
+
+void *mem_domain_calloc(mem_domain_t domain, size_t nmemb, size_t size) {
+    (void)domain;
+    return calloc(nmemb, size);
+}
+
+void *mem_domain_realloc(mem_domain_t domain, void *ptr, size_t size) {
+    (void)domain;
+    return realloc(ptr, size);
+}
+
+void mem_domain_free(mem_domain_t domain, void *ptr) {
+    (void)domain;
+    free(ptr);
+}
 
 void mem_domain_zero(void *ptr, size_t n) {
     volatile unsigned char *p = (volatile unsigned char *)ptr;
@@ -155,14 +177,16 @@ static lab_key_t *key_slot(void) {
 /* This lab account's keys, made on first use. */
 static lab_key_t *local_keys(const char *label) {
     lab_key_t *k = key_find(label);
+    const fl_kq_driver_t *drv;
 
     if (k)
         return k->local ? k : NULL; /* a name already published by another member */
     if (!label || !label[0] || strlen(label) >= LAB_LABEL_MAX || !(k = key_slot()))
         return NULL;
     memset(k, 0, sizeof *k);
-    if (kq_account_keygen(k->sign_sec, k->sign_pub) != KQ_ACCOUNT_OK ||
-        kq_account_box_keygen(k->box_sec, k->box_pub) != KQ_ACCOUNT_OK) {
+    drv = fl_kq_driver_get_or_register();
+    if (!drv || drv->account_keygen(k->sign_sec, k->sign_pub) != FL_KQ_ACCOUNT_OK ||
+        drv->account_box_keygen(k->box_sec, k->box_pub) != FL_KQ_ACCOUNT_OK) {
         mem_domain_secure_zero(k, sizeof *k);
         return NULL;
     }
@@ -740,6 +764,8 @@ int fl_lab_kq_open(int session, const char *hex) {
 
 void fl_lab_kq_init(void (*emit)(const char *line)) {
     s_emit = emit;
+    /* The lab does not start the driver model. */
+    (void)fl_kq_driver_get_or_register();
     (void)fl_fs_mkdir_p(LAB_HOST_DIR, 0700);
     (void)fl_net_kq_configure(lab_directory, LAB_HOST_DIR);
     fl_net_kq_set_transport(host_send, client_send);

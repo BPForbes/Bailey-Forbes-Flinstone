@@ -13,8 +13,11 @@
 #include <stdio.h>
 #endif
 /* KeyQuorum is an optional driver: only a build that links kq_driver.o and the KeyQuorum
- * archive defines FL_WITH_KEYQUORUM (Makefile, next to KQ_ID_LINK), and never bare metal. */
-#if defined(FL_WITH_KEYQUORUM) && !defined(DRIVERS_BAREMETAL)
+ * archive defines FL_WITH_KEYQUORUM (Makefile, next to KQ_ID_LINK), and never bare metal.
+ * The browser lab links the model and the driver with FL_LAB_KQ instead: it resolves the
+ * driver here but never runs register_all. */
+#if (defined(FL_WITH_KEYQUORUM) || defined(FL_LAB_KQ)) && !defined(DRIVERS_BAREMETAL)
+#define FL_MODEL_RESOLVES_KQ 1
 #include "fl/driver/keyquorum.h"
 #endif
 
@@ -113,6 +116,9 @@ typedef struct {
 } fl_dma_record_t;
 
 static volatile int s_model_lock = SPINLOCK_INIT;
+/* Set by fl_drivers_shutdown, cleared by fl_driver_registry_register_all: while set,
+ * fl_driver_registry_ensure adds nothing, so a driver stays gone after a shutdown. */
+static int s_registry_closed;
 
 static const fl_driver_desc_t *s_drivers[FL_MODEL_MAX_DRIVERS];
 static int s_driver_count;
@@ -168,6 +174,73 @@ fl_result_t fl_driver_registry_match(const fl_device_desc_t *dev, const fl_drive
         }
     }
     return FL_RESULT_PROBE_SKIP;
+}
+
+static int registry_holds_locked(const fl_driver_desc_t *desc) {
+    for (int i = 0; i < s_driver_count; i++) {
+        if (s_drivers[i] == desc)
+            return 1;
+    }
+    return 0;
+}
+
+int fl_driver_registry_contains(const fl_driver_desc_t *desc) {
+    int found;
+
+    if (!desc)
+        return 0;
+    spinlock_acquire(&s_model_lock);
+    found = registry_holds_locked(desc);
+    spinlock_release(&s_model_lock);
+    return found;
+}
+
+#ifdef FL_MODEL_RESOLVES_KQ
+/* The one KeyQuorum resolver: the registered descriptor that is fl_kq_driver_desc() (a
+ * pointer compare under the model lock, never the name), re-probed for the file ABI. */
+const fl_kq_driver_t *fl_kq_driver_get(void) {
+    const fl_driver_desc_t *want = fl_kq_driver_desc();
+    int held;
+
+    if (!want)
+        return NULL;
+    spinlock_acquire(&s_model_lock);
+    held = registry_holds_locked(want);
+    spinlock_release(&s_model_lock);
+    if (!held || !want->ops || !want->ops->probe || want->ops->probe(NULL) != FL_RESULT_OK)
+        return NULL;
+    return fl_kq_driver_from_desc(want);
+}
+#endif
+
+int fl_driver_registry_count(void) {
+    int n;
+
+    spinlock_acquire(&s_model_lock);
+    n = s_driver_count;
+    spinlock_release(&s_model_lock);
+    return n;
+}
+
+fl_result_t fl_driver_registry_ensure(const fl_driver_desc_t *desc) {
+    if (!desc || !desc->name || !desc->ops)
+        return FL_RESULT_INVAL;
+    spinlock_acquire(&s_model_lock);
+    if (s_registry_closed) {
+        spinlock_release(&s_model_lock);
+        return FL_RESULT_ERR;
+    }
+    if (registry_holds_locked(desc)) {
+        spinlock_release(&s_model_lock);
+        return FL_RESULT_OK;
+    }
+    if (s_driver_count >= FL_MODEL_MAX_DRIVERS) {
+        spinlock_release(&s_model_lock);
+        model_overflow_panic("driver table full (FL_MODEL_MAX_DRIVERS)");
+    }
+    s_drivers[s_driver_count++] = desc;
+    spinlock_release(&s_model_lock);
+    return FL_RESULT_OK;
 }
 
 int fl_device_count(void) {
@@ -372,11 +445,16 @@ static const fl_driver_desc_t block_model_driver = {
 };
 
 void fl_driver_registry_register_all(void) {
-    fl_driver_registry_register(&block_model_driver);
+    spinlock_acquire(&s_model_lock);
+    s_registry_closed = 0;
+    spinlock_release(&s_model_lock);
+    /* ensure, not register: a caller may already have added a descriptor before the model
+     * starts (the KeyQuorum driver is used before drivers_init), and it must appear once. */
+    (void)fl_driver_registry_ensure(&block_model_driver);
 #if defined(FL_WITH_KEYQUORUM) && !defined(DRIVERS_BAREMETAL)
     /* Matched to the synthetic "keyquorum" device the bus enumerates (bus.c); its probe
      * skips the device when the linked library speaks another ABI. */
-    fl_driver_registry_register(fl_kq_driver_desc());
+    (void)fl_driver_registry_ensure(fl_kq_driver_desc());
 #endif
 }
 
@@ -455,7 +533,10 @@ void fl_drivers_shutdown(void) {
         fl_device_destroy(bound->dev);
     }
     s_device_count = 0;
+    spinlock_acquire(&s_model_lock);
     s_driver_count = 0;
+    s_registry_closed = 1;
+    spinlock_release(&s_model_lock);
     s_devfs_count = 0;
     s_resource_count = 0;
     s_dma_count = 0;

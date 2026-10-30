@@ -57,8 +57,10 @@ kq_prepare() {
   [ -n "$KQ_SQLITE_INC" ] || { echo "sqlite3.h for libsqlite3-sys $sqlite_ver not found" >&2; return 1; }
   KQ_SRCS="
 kernel/drivers/keyquorum/kq_driver.c
+kernel/drivers/driver_model.c
 kernel/core/vfs/kq_checkpoint.c
 kernel/core/vfs/kq_delivery.c
+kernel/core/vfs/server_catalog_file.c
 kernel/core/vfs/server_shared_fs.c
 kernel/core/net/net_kq_delivery.c
 tools/browser-lab/wasm/lab_kq.c

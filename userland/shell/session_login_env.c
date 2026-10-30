@@ -3,10 +3,25 @@
 #include "fs_jail.h"
 #include "session.h"
 #include "user_db.h"
+#include <pwd.h>
 #include <stdio.h>
 #include <string.h>
 #include <strings.h>
 #include <unistd.h>
+
+/* The home of the account running the shell, from the password database: never from $HOME,
+ * which whoever started the process sets, so no path the shell opens is rooted at it. */
+static int passwd_home(char *home, size_t home_sz) {
+    struct passwd pw;
+    struct passwd *res = NULL;
+    char buf[1024];
+
+    if (getpwuid_r(geteuid(), &pw, buf, sizeof buf, &res) != 0 || !res || !res->pw_dir ||
+        res->pw_dir[0] != '/' || strlen(res->pw_dir) >= home_sz)
+        return -1;
+    memcpy(home, res->pw_dir, strlen(res->pw_dir) + 1u);
+    return 0;
+}
 
 static void login_home_for_user(const char *username, char *home, size_t home_sz) {
     if (!username || !username[0] || !home || home_sz == 0u)
@@ -34,14 +49,8 @@ static void login_home_for_user(const char *username, char *home, size_t home_sz
         home[home_sz - 1u] = '\0';
         return;
     }
-    {
-        const char *env = getenv("HOME");
-        if (env && env[0]) {
-            strncpy(home, env, home_sz - 1u);
-            home[home_sz - 1u] = '\0';
-            return;
-        }
-    }
+    if (passwd_home(home, home_sz) == 0)
+        return;
     strncpy(home, ".", home_sz - 1u);
     home[home_sz - 1u] = '\0';
 }

@@ -1,9 +1,11 @@
 #include "net_kq_delivery.h"
 
+#include "net_codec.h"
 #include "net_endian.h"
 #include "net_part_buf.h"
 #include "contract_p3_session_wire.h"
 #include "kq_checkpoint.h"
+#include "mem_domain.h"
 #include "timekeeping.h"
 
 #include <pthread.h>
@@ -50,111 +52,42 @@ static int64_t (*s_now)(void);
 
 /* ---- wire codec ------------------------------------------------------------ */
 
-typedef struct {
-    uint8_t buf[FL_NET_SESSION_MAX_MSG];
-    size_t  n;
-    int     bad;
-} kq_w_t;
+/* The codec is net_codec.h: frames are built with its sticky writer (one check per frame)
+ * and read with its sticky reader. The helpers below only add the KQ value conventions: a
+ * short read yields 0, and an offer is a fixed run of fields. */
+/* The writer's capacity and every frame length are uint16_t; the cap may be overridden. */
+_Static_assert(FL_NET_SESSION_MAX_MSG <= UINT16_MAX, "session message cap must fit uint16_t");
 
-typedef struct {
-    const uint8_t *p;
-    size_t         n;
-    int            bad;
-} kq_r_t;
-
-static void w_bytes(kq_w_t *w, const void *src, size_t len) {
-    if (w->bad || w->n + len > sizeof w->buf) {
-        w->bad = 1;
-        return;
-    }
-    memcpy(w->buf + w->n, src, len);
-    w->n += len;
+static uint32_t r_u32(fl_bytes_reader_t *r) {
+    uint32_t v = 0;
+    (void)fl_bytes_reader_read_u32(r, &v);
+    return v;
 }
 
-/* Integers go big-endian through net_endian.h (the asm_net_* store/load primitives). */
-static void w_u32(kq_w_t *w, uint32_t v) {
-    uint8_t b[4];
-    fl_net_put_u32_be(b, v);
-    w_bytes(w, b, 4);
+static uint64_t r_u64(fl_bytes_reader_t *r) {
+    uint64_t v = 0;
+    (void)fl_bytes_reader_read_u64(r, &v);
+    return v;
 }
 
-static void w_u64(kq_w_t *w, uint64_t v) {
-    uint8_t b[8];
-    fl_net_put_u64_be(b, v);
-    w_bytes(w, b, 8);
+static void kq_put_offer(fl_bytes_sticky_writer_t *w, const kq_file_offer_t *o) {
+    (void)fl_bytes_sticky_put_bytes(w, o->file_id, 16);
+    (void)fl_bytes_sticky_put_bytes(w, o->revision_id, 32);
+    (void)fl_bytes_sticky_put_bytes(w, o->content_commitment, 32);
+    (void)fl_bytes_sticky_put_bytes(w, o->author_identity, 16);
+    (void)fl_bytes_sticky_put_bytes(w, o->author_signature, 64);
+    (void)fl_bytes_sticky_put_u64(w, o->topology_generation);
+    (void)fl_bytes_sticky_put_bytes(w, o->policy_hash, 32);
 }
 
-static void w_str(kq_w_t *w, const char *s) {
-    size_t len = s ? strlen(s) : 0;
-    uint8_t l = (uint8_t)len;
-    if (len > 255u) {
-        w->bad = 1;
-        return;
-    }
-    w_bytes(w, &l, 1);
-    w_bytes(w, s, len);
-}
-
-static void w_offer(kq_w_t *w, const kq_file_offer_t *o) {
-    w_bytes(w, o->file_id, 16);
-    w_bytes(w, o->revision_id, 32);
-    w_bytes(w, o->content_commitment, 32);
-    w_bytes(w, o->author_identity, 16);
-    w_bytes(w, o->author_signature, 64);
-    w_u64(w, o->topology_generation);
-    w_bytes(w, o->policy_hash, 32);
-}
-
-static void r_bytes(kq_r_t *r, void *dst, size_t len) {
-    if (r->bad || r->n < len) {
-        r->bad = 1;
-        return;
-    }
-    memcpy(dst, r->p, len);
-    r->p += len;
-    r->n -= len;
-}
-
-static uint32_t r_u32(kq_r_t *r) {
-    uint8_t b[4] = {0};
-    r_bytes(r, b, 4);
-    return fl_net_get_u32_be(b);
-}
-
-static uint64_t r_u64(kq_r_t *r) {
-    uint8_t b[8] = {0};
-    r_bytes(r, b, 8);
-    return fl_net_get_u64_be(b);
-}
-
-static void r_str(kq_r_t *r, char *out, size_t cap) {
-    uint8_t l = 0;
-    r_bytes(r, &l, 1);
-    if (r->bad || (size_t)l >= cap || r->n < l) {
-        r->bad = 1;
-        if (cap)
-            out[0] = '\0';
-        return;
-    }
-    if (l && memchr(r->p, 0, l)) {
-        r->bad = 1;
-        out[0] = '\0';
-        return;
-    }
-    memcpy(out, r->p, l);
-    out[l] = '\0';
-    r->p += l;
-    r->n -= l;
-}
-
-static void r_offer(kq_r_t *r, kq_file_offer_t *o) {
-    r_bytes(r, o->file_id, 16);
-    r_bytes(r, o->revision_id, 32);
-    r_bytes(r, o->content_commitment, 32);
-    r_bytes(r, o->author_identity, 16);
-    r_bytes(r, o->author_signature, 64);
+static void kq_get_offer(fl_bytes_reader_t *r, kq_file_offer_t *o) {
+    (void)fl_bytes_reader_read_bytes(r, o->file_id, 16);
+    (void)fl_bytes_reader_read_bytes(r, o->revision_id, 32);
+    (void)fl_bytes_reader_read_bytes(r, o->content_commitment, 32);
+    (void)fl_bytes_reader_read_bytes(r, o->author_identity, 16);
+    (void)fl_bytes_reader_read_bytes(r, o->author_signature, 64);
     o->topology_generation = r_u64(r);
-    r_bytes(r, o->policy_hash, 32);
+    (void)fl_bytes_reader_read_bytes(r, o->policy_hash, 32);
 }
 
 /* ---- shared ---------------------------------------------------------------- */
@@ -276,20 +209,22 @@ static void host_send_to_account(fl_net_server_t *srv, const char *key_id, uint8
 
 static void host_announce(fl_net_server_t *srv, const fl_net_server_member_t *to,
                           const fl_kq_delivery_t *d) {
-    kq_w_t w = {{0}, 0, 0};
+    uint8_t wbuf[FL_NET_SESSION_MAX_MSG];
+    fl_bytes_sticky_writer_t w;
+    fl_bytes_sticky_init(&w, wbuf, (uint16_t)sizeof wbuf);
 
-    w_bytes(&w, d->id, FL_KQ_DELIVERY_ID_LEN);
-    w_u64(&w, (uint64_t)d->expires_at);
-    w_str(&w, d->sender);
-    w_str(&w, d->file_name);
-    w_offer(&w, &d->offer);
+    (void)fl_bytes_sticky_put_bytes(&w, d->id, FL_KQ_DELIVERY_ID_LEN);
+    (void)fl_bytes_sticky_put_u64(&w, (uint64_t)d->expires_at);
+    (void)fl_bytes_sticky_put_str8(&w, d->sender);
+    (void)fl_bytes_sticky_put_str8(&w, d->file_name);
+    kq_put_offer(&w, &d->offer);
     if (w.bad)
         return;
     if (to)
-        host_send(srv, to, (uint8_t)FL_NET_SESSION_OP_KQ_ANNOUNCE, w.buf, (uint16_t)w.n);
+        host_send(srv, to, (uint8_t)FL_NET_SESSION_OP_KQ_ANNOUNCE, wbuf, (uint16_t)w.w.len);
     else
-        host_send_to_account(srv, d->recipient, (uint8_t)FL_NET_SESSION_OP_KQ_ANNOUNCE, w.buf,
-                             (uint16_t)w.n);
+        host_send_to_account(srv, d->recipient, (uint8_t)FL_NET_SESSION_OP_KQ_ANNOUNCE, wbuf,
+                             (uint16_t)w.w.len);
 }
 
 /* RELEASE header then the letter in parts, to `to` or every member of the recipient. */
@@ -297,30 +232,36 @@ static void host_release(fl_net_server_t *srv, const fl_net_server_member_t *to,
                          const fl_kq_delivery_t *d) {
     uint8_t *letter = NULL;
     size_t len = 0;
-    kq_w_t w = {{0}, 0, 0};
+    uint8_t wbuf[FL_NET_SESSION_MAX_MSG];
+    fl_bytes_sticky_writer_t w;
+    fl_bytes_sticky_init(&w, wbuf, (uint16_t)sizeof wbuf);
 
     if (fl_kq_store_letter(store(), d->id, &letter, &len) != FL_RESULT_OK)
         return;
-    w_bytes(&w, d->id, FL_KQ_DELIVERY_ID_LEN);
-    w_u32(&w, (uint32_t)len);
+    (void)fl_bytes_sticky_put_bytes(&w, d->id, FL_KQ_DELIVERY_ID_LEN);
+    (void)fl_bytes_sticky_put_u32(&w, (uint32_t)len);
     if (to)
-        host_send(srv, to, (uint8_t)FL_NET_SESSION_OP_KQ_RELEASE, w.buf, (uint16_t)w.n);
+        host_send(srv, to, (uint8_t)FL_NET_SESSION_OP_KQ_RELEASE, wbuf, (uint16_t)w.w.len);
     else
-        host_send_to_account(srv, d->recipient, (uint8_t)FL_NET_SESSION_OP_KQ_RELEASE, w.buf,
-                             (uint16_t)w.n);
+        host_send_to_account(srv, d->recipient, (uint8_t)FL_NET_SESSION_OP_KQ_RELEASE, wbuf,
+                             (uint16_t)w.w.len);
     for (size_t off = 0; off < len; off += KQ_PART_MAX) {
         size_t n = len - off < KQ_PART_MAX ? len - off : KQ_PART_MAX;
-        kq_w_t p = {{0}, 0, 0};
-        w_bytes(&p, d->id, FL_KQ_DELIVERY_ID_LEN);
-        w_u32(&p, (uint32_t)off);
-        w_bytes(&p, letter + off, n);
+        uint8_t pbuf[FL_NET_SESSION_MAX_MSG];
+        fl_bytes_sticky_writer_t p;
+        fl_bytes_sticky_init(&p, pbuf, (uint16_t)sizeof pbuf);
+        (void)fl_bytes_sticky_put_bytes(&p, d->id, FL_KQ_DELIVERY_ID_LEN);
+        (void)fl_bytes_sticky_put_u32(&p, (uint32_t)off);
+        (void)fl_bytes_sticky_put_bytes(&p, letter + off, n);
+        if (p.bad)
+            break;
         if (to)
-            host_send(srv, to, (uint8_t)FL_NET_SESSION_OP_KQ_PART, p.buf, (uint16_t)p.n);
+            host_send(srv, to, (uint8_t)FL_NET_SESSION_OP_KQ_PART, pbuf, (uint16_t)p.w.len);
         else
-            host_send_to_account(srv, d->recipient, (uint8_t)FL_NET_SESSION_OP_KQ_PART, p.buf,
-                                 (uint16_t)p.n);
+            host_send_to_account(srv, d->recipient, (uint8_t)FL_NET_SESSION_OP_KQ_PART, pbuf,
+                                 (uint16_t)p.w.len);
     }
-    free(letter);
+    mem_domain_free(MEM_DOMAIN_FS, letter);
 }
 
 static kq_upload_t *upload_find(fl_net_server_member_id_t from, const uint8_t *id) {
@@ -343,7 +284,8 @@ static void upload_reclaim(int64_t now) {
             upload_free(&s_uploads[i]);
 }
 
-static void host_offer(fl_net_server_t *srv, const fl_net_server_member_t *from, kq_r_t *r) {
+static void host_offer(fl_net_server_t *srv, const fl_net_server_member_t *from,
+                       fl_bytes_reader_t *r) {
     kq_upload_t up;
     uint32_t len;
     const char *me = key_of_member(from);
@@ -351,13 +293,13 @@ static void host_offer(fl_net_server_t *srv, const fl_net_server_member_t *from,
     fl_kq_delivery_t existing;
 
     memset(&up, 0, sizeof up);
-    r_bytes(r, up.id, FL_KQ_DELIVERY_ID_LEN);
+    (void)fl_bytes_reader_read_bytes(r, up.id, FL_KQ_DELIVERY_ID_LEN);
     len = r_u32(r);
-    r_str(r, up.author, sizeof up.author);
-    r_str(r, up.recipient, sizeof up.recipient);
-    r_str(r, up.file_name, sizeof up.file_name);
-    r_offer(r, &up.offer);
-    if (r->bad || r->n != 0 || len == 0 || len > FL_KQ_LETTER_MAX ||
+    (void)fl_bytes_reader_read_str8(r, up.author, sizeof up.author);
+    (void)fl_bytes_reader_read_str8(r, up.recipient, sizeof up.recipient);
+    (void)fl_bytes_reader_read_str8(r, up.file_name, sizeof up.file_name);
+    kq_get_offer(r, &up.offer);
+    if (r->bad || fl_bytes_reader_remaining(r) != 0 || len == 0 || len > FL_KQ_LETTER_MAX ||
         !fl_kq_cp_safe_name(up.file_name)) {
         host_refuse(srv, from, "delivery", "malformed offer");
         return;
@@ -409,21 +351,25 @@ static void host_offer(fl_net_server_t *srv, const fl_net_server_member_t *from,
     host_refuse(srv, from, "delivery", "host is busy; try again");
 }
 
-static void host_part(fl_net_server_t *srv, const fl_net_server_member_t *from, kq_r_t *r) {
+static void host_part(fl_net_server_t *srv, const fl_net_server_member_t *from,
+                      fl_bytes_reader_t *r) {
     uint8_t id[FL_KQ_DELIVERY_ID_LEN];
+    uint16_t rest;
     uint32_t off;
     kq_upload_t *u;
     fl_kq_delivery_t d;
     fl_result_t rc;
 
-    r_bytes(r, id, sizeof id);
+    (void)fl_bytes_reader_read_bytes(r, id, sizeof id);
     off = r_u32(r);
     upload_reclaim(now_sec());
     u = r->bad ? NULL : upload_find(from->member_id, id);
     if (!u)
         return;
     u->last_at = now_sec();
-    if (r->n == 0 || fl_part_buf_append(&u->letter, off, r->p, r->n) != FL_RESULT_OK) {
+    rest = fl_bytes_reader_remaining(r);
+    if (rest == 0 ||
+        fl_part_buf_append(&u->letter, off, fl_bytes_reader_cursor(r), rest) != FL_RESULT_OK) {
         upload_free(u);
         host_refuse(srv, from, "delivery", "letter parts out of order");
         return;
@@ -439,7 +385,6 @@ static void host_part(fl_net_server_t *srv, const fl_net_server_member_t *from, 
         host_refuse(srv, from, "delivery", "host could not hold the letter");
         return;
     }
-    (void)fl_kq_store_update(store(), &d, FL_KQ_SPIKE_ANNOUNCE, d.recipient, d.offered_at);
     host_announce(srv, NULL, &d);
 }
 
@@ -458,7 +403,8 @@ static void host_pull(fl_net_server_t *srv, const fl_net_server_member_t *from) 
     }
 }
 
-static void host_cosign(fl_net_server_t *srv, const fl_net_server_member_t *from, kq_r_t *r) {
+static void host_cosign(fl_net_server_t *srv, const fl_net_server_member_t *from,
+                        fl_bytes_reader_t *r) {
     uint8_t id[FL_KQ_DELIVERY_ID_LEN];
     char coauthor[FL_HERITAGE_KEY_ID_MAX];
     uint8_t sig[64];
@@ -467,10 +413,11 @@ static void host_cosign(fl_net_server_t *srv, const fl_net_server_member_t *from
     fl_kq_cp_result_t cp;
     int64_t t = now_sec();
 
-    r_bytes(r, id, sizeof id);
-    r_str(r, coauthor, sizeof coauthor);
-    r_bytes(r, sig, sizeof sig);
-    if (r->bad || r->n != 0 || !store() || fl_kq_store_get(store(), id, &d) != FL_RESULT_OK) {
+    (void)fl_bytes_reader_read_bytes(r, id, sizeof id);
+    (void)fl_bytes_reader_read_str8(r, coauthor, sizeof coauthor);
+    (void)fl_bytes_reader_read_bytes(r, sig, sizeof sig);
+    if (r->bad || fl_bytes_reader_remaining(r) != 0 || !store() ||
+        fl_kq_store_get(store(), id, &d) != FL_RESULT_OK) {
         host_refuse(srv, from, "co-signature", "no such delivery");
         return;
     }
@@ -485,16 +432,16 @@ static void host_cosign(fl_net_server_t *srv, const fl_net_server_member_t *from
     }
     switch (fl_kq_delivery_integrate(&d, FL_KQ_SPIKE_COSIGN, sig, t)) {
     case FL_KQ_NEURON_FIRE:
-        if (fl_kq_store_update(store(), &d, FL_KQ_SPIKE_COSIGN, d.recipient, t) != FL_RESULT_OK ||
-            fl_kq_store_update(store(), &d, FL_KQ_SPIKE_RELEASE, "host", t) != FL_RESULT_OK) {
+        if (fl_kq_store_update(store(), &d, FL_KQ_SPIKE_COSIGN, t) != FL_RESULT_OK) {
             host_refuse(srv, from, "co-signature", "host could not record it");
             return;
         }
         host_release(srv, from, &d);
         return;
     case FL_KQ_NEURON_REFRACTORY:
-        /* Already released: send it again to this member (only they can open it). */
-        if (!d.acknowledged)
+        /* Already released: send it again to this member (only they can open it), unless the
+         * receipt is in or the host has ended it. */
+        if (!d.acknowledged && !d.expired)
             host_release(srv, from, &d);
         return;
     case FL_KQ_NEURON_LEAKED:
@@ -503,38 +450,42 @@ static void host_cosign(fl_net_server_t *srv, const fl_net_server_member_t *from
         return;
     case FL_KQ_NEURON_REST:
     default:
-        (void)fl_kq_store_update(store(), &d, FL_KQ_SPIKE_COSIGN, d.recipient, t);
+        (void)fl_kq_store_update(store(), &d, FL_KQ_SPIKE_COSIGN, t);
         return;
     }
 }
 
-static void host_ack(fl_net_server_t *srv, const fl_net_server_member_t *from, kq_r_t *r) {
+static void host_ack(fl_net_server_t *srv, const fl_net_server_member_t *from,
+                     fl_bytes_reader_t *r) {
     uint8_t id[FL_KQ_DELIVERY_ID_LEN];
     uint8_t accepted = 0;
     fl_kq_delivery_t d;
     const char *me = key_of_member(from);
 
     (void)srv;
-    r_bytes(r, id, sizeof id);
-    r_bytes(r, &accepted, 1);
+    (void)fl_bytes_reader_read_bytes(r, id, sizeof id);
+    (void)fl_bytes_reader_read_bytes(r, &accepted, 1);
     if (r->bad || !store() || fl_kq_store_get(store(), id, &d) != FL_RESULT_OK || !me ||
-        strcmp(me, d.recipient) != 0 || !d.fired)
+        strcmp(me, d.recipient) != 0 || !d.fired || d.expired)
         return;
     d.acknowledged = 1;
-    if (fl_kq_store_update(store(), &d, FL_KQ_SPIKE_ACK, d.recipient, now_sec()) == FL_RESULT_OK)
+    if (fl_kq_store_update(store(), &d, FL_KQ_SPIKE_ACK, now_sec()) == FL_RESULT_OK)
         (void)fl_kq_store_forget_letter(store(), id);
 }
 
-static void host_keys(fl_net_server_t *srv, const fl_net_server_member_t *from, kq_r_t *r) {
+static void host_keys(fl_net_server_t *srv, const fl_net_server_member_t *from,
+                      fl_bytes_reader_t *r) {
     char who[FL_HERITAGE_KEY_ID_MAX];
     const char *key;
     const unsigned char *sign = NULL;
     const unsigned char *box = NULL;
     uint8_t zero[32] = {0};
     uint8_t found;
-    kq_w_t w = {{0}, 0, 0};
+    uint8_t wbuf[FL_NET_SESSION_MAX_MSG];
+    fl_bytes_sticky_writer_t w;
+    fl_bytes_sticky_init(&w, wbuf, (uint16_t)sizeof wbuf);
 
-    r_str(r, who, sizeof who);
+    (void)fl_bytes_reader_read_str8(r, who, sizeof who);
     if (r->bad)
         return;
     key = keys()->resolve(keys(), who);
@@ -543,18 +494,19 @@ static void host_keys(fl_net_server_t *srv, const fl_net_server_member_t *from, 
         box = keys()->box_public(keys(), key);
     }
     found = (key && sign && box) ? 1u : 0u;
-    w_str(&w, who);
-    w_bytes(&w, &found, 1);
-    w_str(&w, found ? key : "");
-    w_bytes(&w, found ? sign : zero, 32);
-    w_bytes(&w, found ? box : zero, 32);
+    (void)fl_bytes_sticky_put_str8(&w, who);
+    (void)fl_bytes_sticky_put_bytes(&w, &found, 1);
+    (void)fl_bytes_sticky_put_str8(&w, found ? key : "");
+    (void)fl_bytes_sticky_put_bytes(&w, found ? sign : zero, 32);
+    (void)fl_bytes_sticky_put_bytes(&w, found ? box : zero, 32);
     if (!w.bad)
-        host_send(srv, from, (uint8_t)FL_NET_SESSION_OP_KQ_KEYS, w.buf, (uint16_t)w.n);
+        host_send(srv, from, (uint8_t)FL_NET_SESSION_OP_KQ_KEYS, wbuf, (uint16_t)w.w.len);
 }
 
 void fl_net_kq_host_handle(fl_net_server_t *srv, const fl_net_server_member_t *from,
                            uint8_t opcode, const uint8_t *payload, uint16_t plen) {
-    kq_r_t r = {payload, plen, 0};
+    fl_bytes_reader_t r;
+    fl_bytes_reader_init(&r, payload, plen);
 
     if (!from || !keys())
         return;
@@ -617,19 +569,19 @@ static void inbox_free(kq_inbox_slot_t *s) {
     memset(s, 0, sizeof *s);
 }
 
-static void client_announce(kq_r_t *r) {
+static void client_announce(fl_bytes_reader_t *r) {
     fl_net_kq_inbox_t in;
     kq_inbox_slot_t *slot;
     char hex[2 * FL_KQ_DELIVERY_ID_LEN + 1];
 
     memset(&in, 0, sizeof in);
-    r_bytes(r, in.id, sizeof in.id);
+    (void)fl_bytes_reader_read_bytes(r, in.id, sizeof in.id);
     in.expires_at = (int64_t)r_u64(r);
-    r_str(r, in.sender, sizeof in.sender);
-    r_str(r, in.file_name, sizeof in.file_name);
-    r_offer(r, &in.offer);
+    (void)fl_bytes_reader_read_str8(r, in.sender, sizeof in.sender);
+    (void)fl_bytes_reader_read_str8(r, in.file_name, sizeof in.file_name);
+    kq_get_offer(r, &in.offer);
     /* Names come from the wire: only plain ones are kept, printed or later joined to a path. */
-    if (r->bad || r->n != 0 || !fl_kq_cp_safe_name(in.file_name) ||
+    if (r->bad || fl_bytes_reader_remaining(r) != 0 || !fl_kq_cp_safe_name(in.file_name) ||
         !fl_kq_cp_safe_name(in.sender))
         return;
     slot = inbox_find(in.id);
@@ -654,12 +606,12 @@ static void client_announce(kq_r_t *r) {
     }
 }
 
-static void client_release(kq_r_t *r) {
+static void client_release(fl_bytes_reader_t *r) {
     uint8_t id[FL_KQ_DELIVERY_ID_LEN];
     uint32_t len;
     kq_inbox_slot_t *slot;
 
-    r_bytes(r, id, sizeof id);
+    (void)fl_bytes_reader_read_bytes(r, id, sizeof id);
     len = r_u32(r);
     slot = r->bad ? NULL : inbox_find(id);
     if (!slot || len == 0 || len > FL_KQ_LETTER_MAX)
@@ -672,33 +624,35 @@ static void client_release(kq_r_t *r) {
     slot->pub.letter_ready = 0;
 }
 
-static void client_part(kq_r_t *r) {
+static void client_part(fl_bytes_reader_t *r) {
     uint8_t id[FL_KQ_DELIVERY_ID_LEN];
     uint32_t off;
     kq_inbox_slot_t *slot;
 
-    r_bytes(r, id, sizeof id);
+    (void)fl_bytes_reader_read_bytes(r, id, sizeof id);
     off = r_u32(r);
     slot = r->bad ? NULL : inbox_find(id);
-    if (!slot || !slot->letter.data ||
-        fl_part_buf_append(&slot->letter, off, r->p, r->n) != FL_RESULT_OK)
+    if (!slot || !slot->letter.data)
+        return;
+    if (fl_part_buf_append(&slot->letter, off, fl_bytes_reader_cursor(r),
+                           fl_bytes_reader_remaining(r)) != FL_RESULT_OK)
         return;
     if (fl_part_buf_complete(&slot->letter))
         slot->pub.letter_ready = 1;
 }
 
-static void client_keys(kq_r_t *r) {
+static void client_keys(fl_bytes_reader_t *r) {
     char query[FL_HERITAGE_KEY_ID_MAX];
     fl_net_kq_keys_t k;
     uint8_t found = 0;
     kq_keys_slot_t *slot = NULL;
 
     memset(&k, 0, sizeof k);
-    r_str(r, query, sizeof query);
-    r_bytes(r, &found, 1);
-    r_str(r, k.key_id, sizeof k.key_id);
-    r_bytes(r, k.signing_public, 32);
-    r_bytes(r, k.box_public, 32);
+    (void)fl_bytes_reader_read_str8(r, query, sizeof query);
+    (void)fl_bytes_reader_read_bytes(r, &found, 1);
+    (void)fl_bytes_reader_read_str8(r, k.key_id, sizeof k.key_id);
+    (void)fl_bytes_reader_read_bytes(r, k.signing_public, 32);
+    (void)fl_bytes_reader_read_bytes(r, k.box_public, 32);
     if (r->bad)
         return;
     k.found = found == 1u;
@@ -717,7 +671,8 @@ static void client_keys(kq_r_t *r) {
 
 void fl_net_kq_client_handle(fl_net_client_t *client, uint8_t opcode, const uint8_t *payload,
                              uint16_t plen) {
-    kq_r_t r = {payload, plen, 0};
+    fl_bytes_reader_t r;
+    fl_bytes_reader_init(&r, payload, plen);
 
     (void)client;
     kq_lock();
@@ -777,7 +732,9 @@ static void sleep_ms(unsigned ms) {
 
 fl_result_t fl_net_kq_lookup(fl_net_server_t *srv, fl_net_client_t *client, int hosting,
                              const char *who, unsigned wait_ms, fl_net_kq_keys_t *out) {
-    kq_w_t w = {{0}, 0, 0};
+    uint8_t wbuf[FL_NET_SESSION_MAX_MSG];
+    fl_bytes_sticky_writer_t w;
+    fl_bytes_sticky_init(&w, wbuf, (uint16_t)sizeof wbuf);
     fl_result_t rc;
 
     if (!who || !out)
@@ -787,11 +744,11 @@ fl_result_t fl_net_kq_lookup(fl_net_server_t *srv, fl_net_client_t *client, int 
         if (s_keys[i].used && strcmp(s_keys[i].query, who) == 0)
             s_keys[i].used = 0; /* always ask afresh */
     kq_unlock();
-    w_str(&w, who);
+    (void)fl_bytes_sticky_put_str8(&w, who);
     if (w.bad)
         return FL_RESULT_INVAL;
-    rc = fl_net_kq_send(srv, client, hosting, (uint8_t)FL_NET_SESSION_OP_KQ_KEYS, w.buf,
-                        (uint16_t)w.n);
+    rc = fl_net_kq_send(srv, client, hosting, (uint8_t)FL_NET_SESSION_OP_KQ_KEYS, wbuf,
+                        (uint16_t)w.w.len);
     if (rc != FL_RESULT_OK)
         return rc;
     for (unsigned waited = 0;; waited += 20u) {
@@ -830,29 +787,35 @@ fl_result_t fl_net_kq_keys_cached(const char *who, fl_net_kq_keys_t *out) {
 fl_result_t fl_net_kq_send_delivery(fl_net_server_t *srv, fl_net_client_t *client, int hosting,
                                     const char *sender_key, const char *recipient_key,
                                     const fl_kq_encoded_t *enc) {
-    kq_w_t w = {{0}, 0, 0};
+    uint8_t wbuf[FL_NET_SESSION_MAX_MSG];
+    fl_bytes_sticky_writer_t w;
+    fl_bytes_sticky_init(&w, wbuf, (uint16_t)sizeof wbuf);
     fl_result_t rc;
 
     if (!sender_key || !recipient_key || !enc || !enc->letter.data || enc->letter.len == 0)
         return FL_RESULT_INVAL;
-    w_bytes(&w, enc->delivery_id, FL_KQ_DELIVERY_ID_LEN);
-    w_u32(&w, (uint32_t)enc->letter.len);
-    w_str(&w, sender_key);
-    w_str(&w, recipient_key);
-    w_str(&w, enc->file_name);
-    w_offer(&w, &enc->offer);
+    (void)fl_bytes_sticky_put_bytes(&w, enc->delivery_id, FL_KQ_DELIVERY_ID_LEN);
+    (void)fl_bytes_sticky_put_u32(&w, (uint32_t)enc->letter.len);
+    (void)fl_bytes_sticky_put_str8(&w, sender_key);
+    (void)fl_bytes_sticky_put_str8(&w, recipient_key);
+    (void)fl_bytes_sticky_put_str8(&w, enc->file_name);
+    kq_put_offer(&w, &enc->offer);
     if (w.bad)
         return FL_RESULT_INVAL; /* names too long for one session frame */
-    rc = fl_net_kq_send(srv, client, hosting, (uint8_t)FL_NET_SESSION_OP_KQ_OFFER, w.buf,
-                        (uint16_t)w.n);
+    rc = fl_net_kq_send(srv, client, hosting, (uint8_t)FL_NET_SESSION_OP_KQ_OFFER, wbuf,
+                        (uint16_t)w.w.len);
     for (size_t off = 0; rc == FL_RESULT_OK && off < enc->letter.len; off += KQ_PART_MAX) {
         size_t n = enc->letter.len - off < KQ_PART_MAX ? enc->letter.len - off : KQ_PART_MAX;
-        kq_w_t p = {{0}, 0, 0};
-        w_bytes(&p, enc->delivery_id, FL_KQ_DELIVERY_ID_LEN);
-        w_u32(&p, (uint32_t)off);
-        w_bytes(&p, enc->letter.data + off, n);
-        rc = fl_net_kq_send(srv, client, hosting, (uint8_t)FL_NET_SESSION_OP_KQ_PART, p.buf,
-                            (uint16_t)p.n);
+        uint8_t pbuf[FL_NET_SESSION_MAX_MSG];
+        fl_bytes_sticky_writer_t p;
+        fl_bytes_sticky_init(&p, pbuf, (uint16_t)sizeof pbuf);
+        (void)fl_bytes_sticky_put_bytes(&p, enc->delivery_id, FL_KQ_DELIVERY_ID_LEN);
+        (void)fl_bytes_sticky_put_u32(&p, (uint32_t)off);
+        (void)fl_bytes_sticky_put_bytes(&p, enc->letter.data + off, n);
+        if (p.bad)
+            return FL_RESULT_INVAL;
+        rc = fl_net_kq_send(srv, client, hosting, (uint8_t)FL_NET_SESSION_OP_KQ_PART, pbuf,
+                            (uint16_t)p.w.len);
     }
     return rc;
 }
@@ -864,26 +827,44 @@ fl_result_t fl_net_kq_pull(fl_net_server_t *srv, fl_net_client_t *client, int ho
 fl_result_t fl_net_kq_send_cosign(fl_net_server_t *srv, fl_net_client_t *client, int hosting,
                                   const uint8_t id[FL_KQ_DELIVERY_ID_LEN], const char *coauthor,
                                   const uint8_t sig[64]) {
-    kq_w_t w = {{0}, 0, 0};
+    uint8_t wbuf[FL_NET_SESSION_MAX_MSG];
+    fl_bytes_sticky_writer_t w;
+    fl_bytes_sticky_init(&w, wbuf, (uint16_t)sizeof wbuf);
 
-    w_bytes(&w, id, FL_KQ_DELIVERY_ID_LEN);
-    w_str(&w, coauthor);
-    w_bytes(&w, sig, 64);
+    (void)fl_bytes_sticky_put_bytes(&w, id, FL_KQ_DELIVERY_ID_LEN);
+    (void)fl_bytes_sticky_put_str8(&w, coauthor);
+    (void)fl_bytes_sticky_put_bytes(&w, sig, 64);
     if (w.bad)
         return FL_RESULT_INVAL;
-    return fl_net_kq_send(srv, client, hosting, (uint8_t)FL_NET_SESSION_OP_KQ_COSIGN, w.buf,
-                          (uint16_t)w.n);
+    return fl_net_kq_send(srv, client, hosting, (uint8_t)FL_NET_SESSION_OP_KQ_COSIGN, wbuf,
+                          (uint16_t)w.w.len);
 }
 
 fl_result_t fl_net_kq_send_ack(fl_net_server_t *srv, fl_net_client_t *client, int hosting,
                                const uint8_t id[FL_KQ_DELIVERY_ID_LEN], int accepted) {
-    kq_w_t w = {{0}, 0, 0};
+    uint8_t wbuf[FL_NET_SESSION_MAX_MSG];
+    fl_bytes_sticky_writer_t w;
+    fl_bytes_sticky_init(&w, wbuf, (uint16_t)sizeof wbuf);
     uint8_t a = accepted ? 1u : 0u;
 
-    w_bytes(&w, id, FL_KQ_DELIVERY_ID_LEN);
-    w_bytes(&w, &a, 1);
-    return fl_net_kq_send(srv, client, hosting, (uint8_t)FL_NET_SESSION_OP_KQ_ACK, w.buf,
-                          (uint16_t)w.n);
+    (void)fl_bytes_sticky_put_bytes(&w, id, FL_KQ_DELIVERY_ID_LEN);
+    (void)fl_bytes_sticky_put_bytes(&w, &a, 1);
+    if (w.bad)
+        return FL_RESULT_INVAL;
+    return fl_net_kq_send(srv, client, hosting, (uint8_t)FL_NET_SESSION_OP_KQ_ACK, wbuf,
+                          (uint16_t)w.w.len);
+}
+
+size_t fl_net_kq_host_sent(const char *sender, fl_kq_delivery_t *out, size_t cap) {
+    size_t n = 0;
+
+    if (!sender || !out || cap == 0)
+        return 0;
+    kq_lock();
+    if (store())
+        n = fl_kq_store_sent_by(store(), sender, out, cap);
+    kq_unlock();
+    return n;
 }
 
 size_t fl_net_kq_inbox(fl_net_kq_inbox_t *out, size_t cap) {
@@ -924,7 +905,7 @@ fl_result_t fl_net_kq_take_letter(const uint8_t id[FL_KQ_DELIVERY_ID_LEN], unsig
             return FL_RESULT_NOENT;
         }
         if (slot->pub.letter_ready && slot->letter.data) {
-            letter->data = (uint8_t *)malloc(slot->letter.len);
+            letter->data = (uint8_t *)mem_domain_alloc(MEM_DOMAIN_FS, slot->letter.len);
             if (!letter->data) {
                 kq_unlock();
                 return FL_RESULT_NOMEM;

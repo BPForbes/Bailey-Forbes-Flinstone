@@ -22,7 +22,10 @@ obsolete. Push JSON lives in `non-finalized/`
 `security-`, `qa-`, `triage-` (named for the QA seat that opens it;
 add `-<n>` for a second), `goal-`, `research-`, `push-` (add `-<topic>` to any of them when a seat works
 several items). Also
-`repro-<topic>.md`, `side-<dept>.md`, `cr-<topic>.md`
+`repro-<topic>.md`, `side-<dept>.md`, `cr-<topic>.md`, and the
+Orchestrator's fixed-name `seat-registry.md`, `feedback-ledger.md`
+and `team-board.md` (append-only: seat | item | worktree | files and
+Makefile sections touched | status)
 ([triage-template.md](triage-template.md),
 [side-work.md](side-work.md)). **finalized** after QA PASS: move
 matching files locally; do not `git add`.

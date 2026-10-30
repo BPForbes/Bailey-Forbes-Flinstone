@@ -18,6 +18,7 @@
  */
 
 #include "contract_result.h"
+#include "mem_domain.h"
 
 #include <stddef.h>
 #include <stdint.h>
@@ -47,7 +48,7 @@ static inline fl_result_t fl_part_buf_reserve(fl_part_buf_t *b, size_t need) {
         return FL_RESULT_NOMEM;
     if (need <= b->cap)
         return FL_RESULT_OK;
-    grown = (uint8_t *)realloc(b->data, need ? need : 1u);
+    grown = (uint8_t *)mem_domain_realloc(MEM_DOMAIN_FS, b->data, need ? need : 1u);
     if (!grown)
         return FL_RESULT_NOMEM;
     b->data = grown;
@@ -84,7 +85,7 @@ static inline int fl_part_buf_complete(const fl_part_buf_t *b) {
 
 /** Frees the bytes and returns the buffer to empty, keeping its limit. */
 static inline void fl_part_buf_release(fl_part_buf_t *b) {
-    free(b->data);
+    mem_domain_free(MEM_DOMAIN_FS, b->data);
     b->data = NULL;
     b->len = 0;
     b->cap = 0;

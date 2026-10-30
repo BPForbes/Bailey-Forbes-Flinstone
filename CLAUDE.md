@@ -90,6 +90,8 @@ Export current numbers without compiling: **`./scripts/export_version_record.sh`
 - **replit.md** — Replit hosting; **Replit Agent** bound to the same policy as this file, **AGENTS.md**, **`.cursor/rules/*.mdc`**, and **`.coderabbit.yaml`** (stay on one `cursor/*` / agent branch unless a human allows a split; merge side work with **`git merge --no-ff`**; delete duplicate **`.ver`** files, do not edit immutable merge-base rows, fold notes into the **newest** row or a **new** **`.ver`**, re-run **`./scripts/check_version_entries_semver_dev_unique.sh`**)  
 - **`docs/ROADMAP.md`** — phased **P0–P9** work; **module contracts** abstraction + **❌/⚠️/✅** snapshot: [Module contracts (abstraction and P0-P9 coverage)](./docs/ROADMAP.md#module-contracts-abstraction-and-p0-p9-coverage)  
 - **`docs/versioning.md`** — `.ver` authoring, `RELEASE_DATE` automation, **A / B / C** semantics  
+- **`docs/SOC2_CODEQL.md`** — CodeQL as a SOC 2 control: what runs, the accepted-findings register, how a finding is handled
+- **`docs/KQ_STORAGE.md`** — how the KeyQuorum checkpoints read and write files (the storage table, the facade, held directories)
 - **`.coderabbit.yaml`** — optional CodeRabbit integration when enabled on the repo  
 - **`.cursor/rules/versioning.mdc`** — Cursor IDE versioning rules  
 - **`.cursor/rules/review_tools.mdc`** — optional tooling notes (no CLI push gate)

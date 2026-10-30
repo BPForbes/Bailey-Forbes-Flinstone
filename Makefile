@@ -46,7 +46,8 @@ CFLAGS += -Ithird_party/keyquorum/ffi/identity/include
 # needs the flag, not the driver). After adding the flag, `make clean`: a stale bus.o or
 # driver_model.o built without it is not rebuilt.
 # Bare metal ignores it (driver_model.c and bus.c test DRIVERS_BAREMETAL); the browser lab
-# (build_wasm_lab.sh) does not build the driver model at all.
+# (build_wasm_lab.sh) builds the driver model with FL_LAB_KQ instead, so the model resolves
+# the driver there too, but never runs register_all or the bus.
 CFLAGS += -DFL_WITH_KEYQUORUM
 
 .PHONY: keyquorum-identity
@@ -212,6 +213,7 @@ NET_CORE_SRCS = kernel/core/net/net_checksum.c kernel/core/net/net_wire.c kernel
                 kernel/core/net/net_requirements.c \
                 kernel/core/net/net_server.c kernel/core/net/net_client.c kernel/core/net/net_file_delivery.c kernel/core/net/net_pkt_channel_meta.c kernel/core/net/net_channel_sidecar.c kernel/core/net/server_bg.c \
                 kernel/core/vfs/server_shared_fs.c kernel/core/vfs/server_shared_db.c \
+                kernel/core/vfs/server_catalog_file.c \
                 kernel/core/vfs/server_shared_digest.c \
                 userland/shell/fl_colors.c
 WIFI_PLATFORM_SRC = kernel/drivers/wifi/wifi_platform_host.c
@@ -233,7 +235,7 @@ CORE_SRCS = kernel/core/vfs/disk.c kernel/core/vfs/fat32_host.c kernel/core/vfs/
             $(NET_CORE_SRCS) \
             kernel/core/identity/user_db.c kernel/core/identity/elevation.c kernel/core/identity/path_property.c \
             kernel/core/identity/session.c kernel/core/identity/heritage.c kernel/core/identity/bridge.c kernel/core/identity/share_gate.c \
-            kernel/drivers/keyquorum/kq_driver.c kernel/core/vfs/kq_checkpoint.c kernel/core/vfs/kq_checkpoint_users.c kernel/core/vfs/kq_delivery.c kernel/core/net/net_kq_delivery.c kernel/core/net/net_kq_delivery_users.c \
+            kernel/drivers/keyquorum/kq_driver.c kernel/core/vfs/kq_checkpoint.c kernel/core/vfs/kq_checkpoint_users.c kernel/core/vfs/kq_storage_facade.c kernel/core/vfs/kq_delivery.c kernel/core/net/net_kq_delivery.c kernel/core/net/net_kq_delivery_users.c \
             kernel/core/sys/vrt.c kernel/core/sys/ipc.c kernel/core/sys/syscall.c kernel/core/vfs/vfs.c
 COMMAND_SRCS := $(wildcard userland/command/cmd_*.c) userland/command/server_file_expire.c
 # Security-features gate (SECFEAT). Default off: the netlab teaching lab and any
@@ -614,7 +616,7 @@ TEST_SRCS = BPForbes_Flinstone_Tests.c userland/shell/common.c userland/shell/ut
             $(NET_CORE_SRCS) \
             kernel/core/identity/user_db.c kernel/core/identity/elevation.c kernel/core/identity/path_property.c \
             kernel/core/identity/session.c kernel/core/identity/heritage.c kernel/core/identity/bridge.c kernel/core/identity/share_gate.c \
-            kernel/drivers/keyquorum/kq_driver.c kernel/core/vfs/kq_checkpoint.c kernel/core/vfs/kq_checkpoint_users.c kernel/core/vfs/kq_delivery.c kernel/core/net/net_kq_delivery.c kernel/core/net/net_kq_delivery_users.c \
+            kernel/drivers/keyquorum/kq_driver.c kernel/drivers/driver_model.c kernel/core/vfs/kq_checkpoint.c kernel/core/vfs/kq_checkpoint_users.c kernel/core/vfs/kq_storage_facade.c kernel/core/vfs/kq_delivery.c kernel/core/net/net_kq_delivery.c kernel/core/net/net_kq_delivery_users.c \
             kernel/core/sys/vrt.c kernel/core/sys/ipc.c kernel/core/sys/syscall.c
 TEST_SRCS += disk_asm.c dir_asm.c
 ifeq ($(CHANGELOG_CI),1)
@@ -626,6 +628,11 @@ TEST_OBJS = $(TEST_SRCS:.c=.o) $(TEST_UNIT_INTERPRETER_OBJ)
 userland/shell/interpreter_unit.o: userland/shell/interpreter.c
 	$(CC) $(CFLAGS) -DUNIT_TEST -c $< -o $@
 MEM_ASM_OBJ = $(patsubst %.s,%.o,$(patsubst %.asm,%.o,$(firstword $(ASMSRCS_BASE))))
+# The file readers in server_shared_fs.c allocate in MEM_DOMAIN_FS, so every binary that links
+# them links the allocator. The first adds the assembly layer it needs; the second is for
+# targets that already list $(MEM_ASM_OBJ).
+SHARED_FS_MM_OBJ = kernel/core/mm/mem_domain.o
+SHARED_FS_MM_OBJS = $(SHARED_FS_MM_OBJ) $(MEM_ASM_OBJ)
 FL_STACK_ASM_OBJ = $(patsubst %.s,%.o,$(patsubst %.asm,%.o,$(filter %/fl_stack_asm.s %/fl_stack_asm.asm,$(ASMSRCS))))
 PORT_IO_OBJ = $(patsubst %.s,%.o,$(patsubst %.asm,%.o,$(filter %/port_io.s %/port_io.asm,$(ASMSRCS))))
 DISK_HOST_ASM_OBJ = $(patsubst %.s,%.o,$(patsubst %.asm,%.o,$(filter %/disk_host_io.s %/disk_host_io.asm,$(ASMSRCS_BASE))))
@@ -635,15 +642,17 @@ UTIL_HISTORY_HOST_OBJS = kernel/core/vfs/fat32_host.o kernel/core/vfs/fat32_host
 UTIL_SHELL_LINK_OBJS = userland/shell/util.o userland/shell/history_record.o
 # fs_jail_check_access pulls session + path_property (and user_db/password_hash for session).
 FS_JAIL_CORE_OBJS = kernel/core/vfs/fs_jail.o kernel/core/vfs/server_shared_fs.o \
-	kernel/core/vfs/server_shared_db.o kernel/core/vfs/server_shared_digest.o
+	kernel/core/vfs/server_shared_db.o kernel/core/vfs/server_catalog_file.o kernel/core/vfs/server_shared_digest.o
 # server_shared_fs.c resolves relative paths via g_cwd (userland/shell/common.c).
 NET_TEST_SHELL_OBJS = userland/shell/common.o
 FS_JAIL_SUPPORT_OBJS = kernel/core/time/timekeeping.o \
                          kernel/core/identity/user_db.o kernel/core/identity/elevation.o \
                          kernel/core/identity/path_property.o kernel/core/identity/session.o \
                          kernel/core/identity/heritage.o kernel/core/identity/bridge.o kernel/core/identity/share_gate.o \
-                         userland/identity/password_hash.o $(FL_STACK_ASM_OBJ)
-FS_JAIL_TEST_LIBS = -lsqlite3 -lstdc++ $(OPENSSL_LIBS) -pthread $(KQ_ID_LINK)
+                         userland/identity/password_hash.o $(FL_STACK_ASM_OBJ) \
+                         kernel/drivers/keyquorum/kq_driver.o \
+                         kernel/drivers/driver_model.o
+FS_JAIL_TEST_LIBS = -lsqlite3 -lstdc++ $(OPENSSL_LIBS) -pthread $(KQ_ID_LINK) -Wl,--gc-sections
 NET_TEST_EXTRA_OBJS = userland/identity/password_hash.o
 NET_TEST_LIBS = -lsqlite3 -lstdc++ $(OPENSSL_LIBS)
 TEST_ASMOBJS = $(MEM_ASM_OBJ) $(FL_STACK_ASM_OBJ) $(PORT_IO_OBJ) $(DISK_HOST_ASM_OBJ) \
@@ -669,6 +678,12 @@ userland/shell/interpreter_unit.o: $(VERSION_DEF)
 
 %.o: %.c
 	$(CC) $(CFLAGS) -c $< -o $@
+
+# One section per function so --gc-sections (FS_JAIL_TEST_LIBS) can keep the registry
+# lookup without the rest of the model. The shell link does not pass --gc-sections and
+# still resolves every section.
+kernel/drivers/driver_model.o: kernel/drivers/driver_model.c
+	$(CC) $(CFLAGS) -ffunction-sections -fdata-sections -c $< -o $@
 
 # Assembly file compilation
 %.o: %.s
@@ -790,8 +805,9 @@ TEST_INVARIANTS_CMD_OBJS = userland/command/cmd_batch_audit_tokens.o userland/co
 TEST_INVARIANTS_SESSION_OBJS = kernel/core/time/timekeeping.o kernel/core/mm/mem_domain.o \
 	kernel/core/identity/user_db.o kernel/core/identity/elevation.o kernel/core/identity/session.o \
 	kernel/core/identity/heritage.o kernel/core/identity/bridge.o kernel/core/identity/share_gate.o \
-	userland/identity/password_hash.o $(FL_STACK_ASM_OBJ)
-TEST_INVARIANTS_LIBS = -lsqlite3 -lstdc++ $(OPENSSL_LIBS) -pthread $(KQ_ID_LINK)
+	userland/identity/password_hash.o $(FL_STACK_ASM_OBJ) kernel/drivers/keyquorum/kq_driver.o \
+	kernel/drivers/driver_model.o
+TEST_INVARIANTS_LIBS = -lsqlite3 -lstdc++ $(OPENSSL_LIBS) -pthread $(KQ_ID_LINK) -Wl,--gc-sections
 test_invariants: test_batch_argv_issue220 userland/shell/common.o userland/shell/authz_subsystem.o $(UTIL_SHELL_LINK_OBJS) $(TEST_INVARIANTS_CMD_OBJS) $(TEST_INVARIANTS_SESSION_OBJS) $(MEM_ASM_OBJ) $(HISTORY_ASM_OBJ) $(UTIL_HISTORY_HOST_OBJS)
 	$(CC) $(CFLAGS) $(TEST_SANITIZE) -c -o tests/test_invariants.o tests/test_invariants.c
 	$(CXX) $(CXXFLAGS) $(TEST_SANITIZE) -o tests/test_invariants tests/test_invariants.o \
@@ -867,53 +883,58 @@ test_server_file_expire:
 	$(CC) $(CFLAGS) $(TEST_SANITIZE) -o tests/test_server_file_expire tests/test_server_file_expire.c userland/command/server_file_expire.c -Wl,-z,noexecstack
 	./tests/test_server_file_expire
 
+.PHONY: test_net_codec
+test_net_codec: $(NET_ASM_OBJ)
+	$(CC) $(CFLAGS) $(TEST_SANITIZE) -o tests/test_net_codec tests/test_net_codec.c $(NET_ASM_OBJ) -Wl,-z,noexecstack
+	./tests/test_net_codec
+
 .PHONY: test_server_file_meta
-test_server_file_meta: $(NET_ASM_OBJ) $(MEM_ASM_OBJ) kernel/core/net/net_channel_sidecar.o kernel/core/net/net_pkt_channel_meta.o kernel/core/net/net_file_delivery.o kernel/core/vfs/server_shared_fs.o kernel/core/vfs/server_shared_db.o kernel/core/vfs/server_shared_digest.o userland/shell/common.o
+test_server_file_meta: $(NET_ASM_OBJ) $(MEM_ASM_OBJ) kernel/core/net/net_channel_sidecar.o kernel/core/net/net_pkt_channel_meta.o kernel/core/net/net_file_delivery.o kernel/core/vfs/server_shared_fs.o kernel/core/vfs/server_shared_db.o kernel/core/vfs/server_catalog_file.o kernel/core/vfs/server_shared_digest.o $(SHARED_FS_MM_OBJ) userland/shell/common.o
 	$(CC) $(CFLAGS) $(TEST_SANITIZE) -o tests/test_server_file_meta tests/test_server_file_meta.c tests/stubs_file_delivery_net.c \
 	  kernel/core/net/net_channel_sidecar.o kernel/core/net/net_pkt_channel_meta.o \
-	  kernel/core/net/net_file_delivery.o kernel/core/vfs/server_shared_fs.o kernel/core/vfs/server_shared_db.o kernel/core/vfs/server_shared_digest.o userland/shell/common.o \
+	  kernel/core/net/net_file_delivery.o kernel/core/vfs/server_shared_fs.o kernel/core/vfs/server_shared_db.o kernel/core/vfs/server_catalog_file.o kernel/core/vfs/server_shared_digest.o $(SHARED_FS_MM_OBJ) userland/shell/common.o \
 	  $(NET_ASM_OBJ) $(MEM_ASM_OBJ) -lsqlite3 $(OPENSSL_LIBS) -Wl,-z,noexecstack
 	./tests/test_server_file_meta
 
 .PHONY: test_server_shared_catalog
-test_server_shared_catalog: kernel/core/vfs/server_shared_db.o kernel/core/vfs/server_shared_fs.o kernel/core/vfs/server_shared_digest.o userland/shell/common.o
+test_server_shared_catalog: kernel/core/vfs/server_shared_db.o kernel/core/vfs/server_catalog_file.o kernel/core/vfs/server_shared_fs.o kernel/core/vfs/server_shared_digest.o $(SHARED_FS_MM_OBJS) userland/shell/common.o
 	$(CC) $(CFLAGS) $(TEST_SANITIZE) -o tests/test_server_shared_catalog tests/test_server_shared_catalog.c \
-	  kernel/core/vfs/server_shared_db.o kernel/core/vfs/server_shared_fs.o kernel/core/vfs/server_shared_digest.o userland/shell/common.o \
+	  kernel/core/vfs/server_shared_db.o kernel/core/vfs/server_catalog_file.o kernel/core/vfs/server_shared_fs.o kernel/core/vfs/server_shared_digest.o $(SHARED_FS_MM_OBJS) userland/shell/common.o \
 	  -lsqlite3 $(OPENSSL_LIBS) -Wl,-z,noexecstack
 	./tests/test_server_shared_catalog
 
 .PHONY: test_file_history
-test_file_history: kernel/core/vfs/server_shared_db.o kernel/core/vfs/server_shared_fs.o kernel/core/vfs/server_shared_digest.o userland/shell/common.o
+test_file_history: kernel/core/vfs/server_shared_db.o kernel/core/vfs/server_catalog_file.o kernel/core/vfs/server_shared_fs.o kernel/core/vfs/server_shared_digest.o $(SHARED_FS_MM_OBJS) userland/shell/common.o
 	$(CC) $(CFLAGS) $(TEST_SANITIZE) -o tests/test_file_history tests/test_file_history.c \
-	  kernel/core/vfs/server_shared_db.o kernel/core/vfs/server_shared_fs.o kernel/core/vfs/server_shared_digest.o userland/shell/common.o \
+	  kernel/core/vfs/server_shared_db.o kernel/core/vfs/server_catalog_file.o kernel/core/vfs/server_shared_fs.o kernel/core/vfs/server_shared_digest.o $(SHARED_FS_MM_OBJS) userland/shell/common.o \
 	  -lsqlite3 $(OPENSSL_LIBS) -Wl,-z,noexecstack
 	./tests/test_file_history
 
 .PHONY: test_server_shared_landed_name
-test_server_shared_landed_name: kernel/core/vfs/server_shared_fs.o kernel/core/vfs/server_shared_db.o kernel/core/vfs/server_shared_digest.o userland/shell/common.o
+test_server_shared_landed_name: kernel/core/vfs/server_shared_fs.o kernel/core/vfs/server_shared_db.o kernel/core/vfs/server_catalog_file.o kernel/core/vfs/server_shared_digest.o $(SHARED_FS_MM_OBJS) userland/shell/common.o
 	$(CC) $(CFLAGS) $(TEST_SANITIZE) -o tests/test_server_shared_landed_name tests/test_server_shared_landed_name.c \
-	  kernel/core/vfs/server_shared_fs.o kernel/core/vfs/server_shared_db.o kernel/core/vfs/server_shared_digest.o userland/shell/common.o -lsqlite3 $(OPENSSL_LIBS) -Wl,-z,noexecstack
+	  kernel/core/vfs/server_shared_fs.o kernel/core/vfs/server_shared_db.o kernel/core/vfs/server_catalog_file.o kernel/core/vfs/server_shared_digest.o $(SHARED_FS_MM_OBJS) userland/shell/common.o -lsqlite3 $(OPENSSL_LIBS) -Wl,-z,noexecstack
 	./tests/test_server_shared_landed_name
 
 .PHONY: test_server_shared_purge
-test_server_shared_purge: kernel/core/vfs/server_shared_fs.o kernel/core/vfs/server_shared_db.o kernel/core/vfs/server_shared_digest.o userland/shell/common.o
+test_server_shared_purge: kernel/core/vfs/server_shared_fs.o kernel/core/vfs/server_shared_db.o kernel/core/vfs/server_catalog_file.o kernel/core/vfs/server_shared_digest.o $(SHARED_FS_MM_OBJS) userland/shell/common.o
 	$(CC) $(CFLAGS) $(TEST_SANITIZE) -o tests/test_server_shared_purge tests/test_server_shared_purge.c \
-	  kernel/core/vfs/server_shared_fs.o kernel/core/vfs/server_shared_db.o kernel/core/vfs/server_shared_digest.o userland/shell/common.o -lsqlite3 $(OPENSSL_LIBS) -Wl,-z,noexecstack
+	  kernel/core/vfs/server_shared_fs.o kernel/core/vfs/server_shared_db.o kernel/core/vfs/server_catalog_file.o kernel/core/vfs/server_shared_digest.o $(SHARED_FS_MM_OBJS) userland/shell/common.o -lsqlite3 $(OPENSSL_LIBS) -Wl,-z,noexecstack
 	./tests/test_server_shared_purge
 
 .PHONY: test_server_file_accept_path
-test_server_file_accept_path: $(NET_ASM_OBJ) $(MEM_ASM_OBJ) kernel/core/net/net_channel_sidecar.o kernel/core/net/net_pkt_channel_meta.o kernel/core/net/net_file_delivery.o kernel/core/vfs/server_shared_fs.o kernel/core/vfs/server_shared_db.o kernel/core/vfs/server_shared_digest.o userland/shell/common.o
+test_server_file_accept_path: $(NET_ASM_OBJ) $(MEM_ASM_OBJ) kernel/core/net/net_channel_sidecar.o kernel/core/net/net_pkt_channel_meta.o kernel/core/net/net_file_delivery.o kernel/core/vfs/server_shared_fs.o kernel/core/vfs/server_shared_db.o kernel/core/vfs/server_catalog_file.o kernel/core/vfs/server_shared_digest.o $(SHARED_FS_MM_OBJ) userland/shell/common.o
 	$(CC) $(CFLAGS) $(TEST_SANITIZE) -o tests/test_server_file_accept_path tests/test_server_file_accept_path.c tests/stubs_file_delivery_net.c \
 	  kernel/core/net/net_channel_sidecar.o kernel/core/net/net_pkt_channel_meta.o \
-	  kernel/core/net/net_file_delivery.o kernel/core/vfs/server_shared_fs.o kernel/core/vfs/server_shared_db.o kernel/core/vfs/server_shared_digest.o userland/shell/common.o \
+	  kernel/core/net/net_file_delivery.o kernel/core/vfs/server_shared_fs.o kernel/core/vfs/server_shared_db.o kernel/core/vfs/server_catalog_file.o kernel/core/vfs/server_shared_digest.o $(SHARED_FS_MM_OBJ) userland/shell/common.o \
 	  $(NET_ASM_OBJ) $(MEM_ASM_OBJ) -lsqlite3 $(OPENSSL_LIBS) -Wl,-z,noexecstack
 	./tests/test_server_file_accept_path
 
 .PHONY: test_channel_sidecar
-test_channel_sidecar: $(NET_ASM_OBJ) $(MEM_ASM_OBJ) kernel/core/net/net_channel_sidecar.o kernel/core/net/net_pkt_channel_meta.o kernel/core/net/net_file_delivery.o kernel/core/vfs/server_shared_fs.o kernel/core/vfs/server_shared_db.o kernel/core/vfs/server_shared_digest.o userland/shell/common.o tests/stubs_file_delivery_net.c
+test_channel_sidecar: $(NET_ASM_OBJ) $(MEM_ASM_OBJ) kernel/core/net/net_channel_sidecar.o kernel/core/net/net_pkt_channel_meta.o kernel/core/net/net_file_delivery.o kernel/core/vfs/server_shared_fs.o kernel/core/vfs/server_shared_db.o kernel/core/vfs/server_catalog_file.o kernel/core/vfs/server_shared_digest.o $(SHARED_FS_MM_OBJ) userland/shell/common.o tests/stubs_file_delivery_net.c
 	$(CC) $(CFLAGS) $(TEST_SANITIZE) -o tests/test_channel_sidecar tests/test_channel_sidecar.c \
 	  kernel/core/net/net_channel_sidecar.o kernel/core/net/net_pkt_channel_meta.o \
-	  kernel/core/net/net_file_delivery.o kernel/core/vfs/server_shared_fs.o kernel/core/vfs/server_shared_db.o kernel/core/vfs/server_shared_digest.o userland/shell/common.o tests/stubs_file_delivery_net.c \
+	  kernel/core/net/net_file_delivery.o kernel/core/vfs/server_shared_fs.o kernel/core/vfs/server_shared_db.o kernel/core/vfs/server_catalog_file.o kernel/core/vfs/server_shared_digest.o $(SHARED_FS_MM_OBJ) userland/shell/common.o tests/stubs_file_delivery_net.c \
 	  $(NET_ASM_OBJ) $(MEM_ASM_OBJ) -lsqlite3 $(OPENSSL_LIBS) -Wl,-z,noexecstack
 	./tests/test_channel_sidecar
 
@@ -924,13 +945,19 @@ test_macvlan_waitpid: kernel/core/net/net_macvlan_waitpid.o
 	./tests/test_macvlan_waitpid
 
 .PHONY: server_shared_quarantine_harness
-server_shared_quarantine_harness: kernel/core/vfs/server_shared_fs.o kernel/core/vfs/server_shared_db.o kernel/core/vfs/server_shared_digest.o userland/shell/common.o
+server_shared_quarantine_harness: kernel/core/vfs/server_shared_fs.o kernel/core/vfs/server_shared_db.o kernel/core/vfs/server_catalog_file.o kernel/core/vfs/server_shared_digest.o $(SHARED_FS_MM_OBJS) userland/shell/common.o
 	$(CC) $(CFLAGS) $(TEST_SANITIZE) -o tests/server_shared_quarantine_harness tests/server_shared_quarantine_harness.c \
-	  kernel/core/vfs/server_shared_fs.o kernel/core/vfs/server_shared_db.o kernel/core/vfs/server_shared_digest.o userland/shell/common.o -lsqlite3 $(OPENSSL_LIBS) -Wl,-z,noexecstack
+	  kernel/core/vfs/server_shared_fs.o kernel/core/vfs/server_shared_db.o kernel/core/vfs/server_catalog_file.o kernel/core/vfs/server_shared_digest.o $(SHARED_FS_MM_OBJS) userland/shell/common.o -lsqlite3 $(OPENSSL_LIBS) -Wl,-z,noexecstack
 
 .PHONY: purge_shared_expired_harness
 purge_shared_expired_harness: server_shared_quarantine_harness
 	@echo "purge_shared_expired_harness is deprecated; use server_shared_quarantine_harness"
+
+.PHONY: test_sqlite_schema
+# Shared SQLite exec and column-ensure helper (kernel/include/fl/sqlite_schema.h).
+test_sqlite_schema:
+	$(CC) $(CFLAGS) $(TEST_SANITIZE) -o tests/test_sqlite_schema tests/test_sqlite_schema.c -lsqlite3
+	./tests/test_sqlite_schema
 
 .PHONY: test_heritage
 # Account heritage key ids, legacy store migration, bridges and per-account jail homes.
@@ -943,36 +970,53 @@ test_heritage: userland/shell/common.o $(UTIL_SHELL_LINK_OBJS) $(FS_JAIL_CORE_OB
 	./tests/test_heritage
 
 .PHONY: test_kq_checkpoint
-test_kq_checkpoint: userland/shell/common.o $(UTIL_SHELL_LINK_OBJS) $(FS_JAIL_CORE_OBJS) $(FS_JAIL_SUPPORT_OBJS) kernel/core/mm/mem_domain.o $(MEM_ASM_OBJ) $(HISTORY_ASM_OBJ) $(UTIL_HISTORY_HOST_OBJS) kernel/drivers/keyquorum/kq_driver.o kernel/core/vfs/kq_checkpoint.o kernel/core/vfs/kq_checkpoint_users.o kernel/core/vfs/kq_delivery.o
+test_kq_checkpoint: userland/shell/common.o $(UTIL_SHELL_LINK_OBJS) $(FS_JAIL_CORE_OBJS) $(FS_JAIL_SUPPORT_OBJS) kernel/core/mm/mem_domain.o $(MEM_ASM_OBJ) $(HISTORY_ASM_OBJ) $(UTIL_HISTORY_HOST_OBJS) kernel/core/vfs/kq_checkpoint.o kernel/core/vfs/kq_checkpoint_users.o kernel/core/vfs/kq_delivery.o kernel/core/vfs/kq_storage_facade.o userland/shell/authz_subsystem.o kernel/core/vfs/fs_provider.o kernel/core/vfs/fs_command.o kernel/core/vfs/fs_events.o kernel/core/vfs/fs_policy.o kernel/core/vfs/fs_chain.o kernel/core/vfs/fs_facade.o kernel/core/vfs/path_log.o dir_asm.o
 	$(CC) $(CFLAGS) $(TEST_SANITIZE) -c -o tests/test_kq_checkpoint.o tests/test_kq_checkpoint.c
 	$(CXX) $(CXXFLAGS) $(TEST_SANITIZE) -o tests/test_kq_checkpoint tests/test_kq_checkpoint.o \
-	  kernel/drivers/keyquorum/kq_driver.o kernel/core/vfs/kq_checkpoint.o kernel/core/vfs/kq_checkpoint_users.o kernel/core/vfs/kq_delivery.o \
+	  kernel/core/vfs/kq_checkpoint.o kernel/core/vfs/kq_checkpoint_users.o kernel/core/vfs/kq_delivery.o \
+	  kernel/core/vfs/kq_storage_facade.o userland/shell/authz_subsystem.o kernel/core/vfs/fs_provider.o kernel/core/vfs/fs_command.o kernel/core/vfs/fs_events.o kernel/core/vfs/fs_policy.o kernel/core/vfs/fs_chain.o kernel/core/vfs/fs_facade.o kernel/core/vfs/path_log.o dir_asm.o \
 	  userland/shell/common.o $(UTIL_SHELL_LINK_OBJS) $(FS_JAIL_CORE_OBJS) $(FS_JAIL_SUPPORT_OBJS) \
 	  kernel/core/mm/mem_domain.o $(MEM_ASM_OBJ) $(HISTORY_ASM_OBJ) $(UTIL_HISTORY_HOST_OBJS) \
 	  $(FS_JAIL_TEST_LIBS) -Wl,-z,noexecstack
 	./tests/test_kq_checkpoint
 
 .PHONY: test_kq_delivery
-test_kq_delivery: kernel/core/vfs/kq_delivery.o kernel/core/vfs/server_shared_fs.o kernel/core/vfs/server_shared_db.o kernel/core/vfs/server_shared_digest.o userland/shell/common.o
+test_kq_delivery: kernel/core/vfs/kq_delivery.o kernel/core/vfs/server_shared_fs.o kernel/core/vfs/server_shared_db.o kernel/core/vfs/server_catalog_file.o kernel/core/vfs/server_shared_digest.o $(SHARED_FS_MM_OBJS) userland/shell/common.o
 	$(CC) $(CFLAGS) $(TEST_SANITIZE) -o tests/test_kq_delivery tests/test_kq_delivery.c \
-	  kernel/core/vfs/kq_delivery.o kernel/core/vfs/server_shared_fs.o kernel/core/vfs/server_shared_db.o \
-	  kernel/core/vfs/server_shared_digest.o userland/shell/common.o \
+	  kernel/core/vfs/kq_delivery.o kernel/core/vfs/server_shared_fs.o kernel/core/vfs/server_shared_db.o kernel/core/vfs/server_catalog_file.o \
+	  kernel/core/vfs/server_shared_digest.o $(SHARED_FS_MM_OBJS) userland/shell/common.o \
 	  -lsqlite3 $(OPENSSL_LIBS) -pthread -Wl,-z,noexecstack
 	./tests/test_kq_delivery
 
 .PHONY: test_fs_helpers
-test_fs_helpers: kernel/core/vfs/server_shared_fs.o kernel/core/vfs/server_shared_db.o kernel/core/vfs/server_shared_digest.o userland/shell/common.o
+test_fs_helpers: kernel/core/vfs/server_shared_fs.o kernel/core/vfs/server_shared_db.o kernel/core/vfs/server_catalog_file.o kernel/core/vfs/server_shared_digest.o $(SHARED_FS_MM_OBJS) userland/shell/common.o
 	$(CC) $(CFLAGS) $(TEST_SANITIZE) -o tests/test_fs_helpers tests/test_fs_helpers.c \
-	  kernel/core/vfs/server_shared_fs.o kernel/core/vfs/server_shared_db.o \
-	  kernel/core/vfs/server_shared_digest.o userland/shell/common.o \
+	  kernel/core/vfs/server_shared_fs.o kernel/core/vfs/server_shared_db.o kernel/core/vfs/server_catalog_file.o \
+	  kernel/core/vfs/server_shared_digest.o $(SHARED_FS_MM_OBJS) userland/shell/common.o \
 	  -lsqlite3 $(OPENSSL_LIBS) -ldl -pthread -Wl,-z,noexecstack
 	./tests/test_fs_helpers
 
+.PHONY: test_fs_provider_bytes
+test_fs_provider_bytes: userland/shell/common.o userland/shell/authz_subsystem.o $(UTIL_SHELL_LINK_OBJS) $(FS_JAIL_CORE_OBJS) $(FS_JAIL_SUPPORT_OBJS) kernel/core/vfs/fs_provider.o kernel/core/vfs/fs_command.o kernel/core/vfs/fs_events.o kernel/core/vfs/fs_policy.o kernel/core/vfs/fs_chain.o kernel/core/vfs/fs_facade.o kernel/core/vfs/path_log.o kernel/core/mm/mem_domain.o $(MEM_ASM_OBJ) $(HISTORY_ASM_OBJ) $(UTIL_HISTORY_HOST_OBJS) dir_asm.o
+	$(CC) $(CFLAGS) $(TEST_SANITIZE) -c -o tests/test_fs_provider_bytes.o tests/test_fs_provider_bytes.c
+	$(CXX) $(CXXFLAGS) $(TEST_SANITIZE) -o tests/test_fs_provider_bytes tests/test_fs_provider_bytes.o \
+	  userland/shell/common.o userland/shell/authz_subsystem.o $(UTIL_SHELL_LINK_OBJS) $(FS_JAIL_CORE_OBJS) $(FS_JAIL_SUPPORT_OBJS) \
+	  kernel/core/vfs/fs_provider.o kernel/core/vfs/fs_command.o kernel/core/vfs/fs_events.o kernel/core/vfs/fs_policy.o \
+	  kernel/core/vfs/fs_chain.o kernel/core/vfs/fs_facade.o kernel/core/vfs/path_log.o dir_asm.o \
+	  kernel/core/mm/mem_domain.o $(MEM_ASM_OBJ) $(HISTORY_ASM_OBJ) $(UTIL_HISTORY_HOST_OBJS) \
+	  $(FS_JAIL_TEST_LIBS) -Wl,-z,noexecstack
+	./tests/test_fs_provider_bytes
+
+# The CodeQL report script and the local runner (no CodeQL CLI needed).
+.PHONY: test_codeql_scripts
+test_codeql_scripts:
+	python3 -m unittest discover -s .github/scripts
+
 .PHONY: test_hex
-test_hex: kernel/core/vfs/kq_delivery.o kernel/core/vfs/server_shared_fs.o kernel/core/vfs/server_shared_db.o kernel/core/vfs/server_shared_digest.o userland/shell/common.o
+test_hex: kernel/core/vfs/kq_delivery.o kernel/core/vfs/server_shared_fs.o kernel/core/vfs/server_shared_db.o kernel/core/vfs/server_catalog_file.o kernel/core/vfs/server_shared_digest.o $(SHARED_FS_MM_OBJS) userland/shell/common.o
 	$(CC) $(CFLAGS) $(TEST_SANITIZE) -o tests/test_hex tests/test_hex.c \
-	  kernel/core/vfs/kq_delivery.o kernel/core/vfs/server_shared_fs.o kernel/core/vfs/server_shared_db.o \
-	  kernel/core/vfs/server_shared_digest.o userland/shell/common.o \
+	  kernel/core/vfs/kq_delivery.o kernel/core/vfs/server_shared_fs.o kernel/core/vfs/server_shared_db.o kernel/core/vfs/server_catalog_file.o \
+	  kernel/core/vfs/server_shared_digest.o $(SHARED_FS_MM_OBJS) userland/shell/common.o \
 	  -lsqlite3 $(OPENSSL_LIBS) -pthread -Wl,-z,noexecstack
 	./tests/test_hex
 
@@ -992,34 +1036,47 @@ test_random: tests/test_random.c kernel/include/fl/random.h
 	./tests/test_random
 
 .PHONY: test_part_buf
-test_part_buf: tests/test_part_buf.c kernel/core/net/net_part_buf.h
-	$(CC) $(CFLAGS) $(TEST_SANITIZE) -o tests/test_part_buf tests/test_part_buf.c -Wl,-z,noexecstack
+test_part_buf: tests/test_part_buf.c kernel/core/net/net_part_buf.h $(SHARED_FS_MM_OBJS)
+	$(CC) $(CFLAGS) $(TEST_SANITIZE) -o tests/test_part_buf tests/test_part_buf.c $(SHARED_FS_MM_OBJS) -Wl,-z,noexecstack
 	./tests/test_part_buf
 
 .PHONY: test_kq_net
-test_kq_net: userland/shell/common.o $(UTIL_SHELL_LINK_OBJS) $(FS_JAIL_CORE_OBJS) $(FS_JAIL_SUPPORT_OBJS) kernel/core/mm/mem_domain.o $(MEM_ASM_OBJ) $(HISTORY_ASM_OBJ) $(UTIL_HISTORY_HOST_OBJS) kernel/drivers/keyquorum/kq_driver.o kernel/core/vfs/kq_checkpoint.o kernel/core/vfs/kq_checkpoint_users.o kernel/core/vfs/kq_delivery.o kernel/core/net/net_kq_delivery.o kernel/core/net/net_kq_delivery_users.o $(NET_ASM_OBJ)
+test_kq_net: userland/shell/common.o $(UTIL_SHELL_LINK_OBJS) $(FS_JAIL_CORE_OBJS) $(FS_JAIL_SUPPORT_OBJS) kernel/core/mm/mem_domain.o $(MEM_ASM_OBJ) $(HISTORY_ASM_OBJ) $(UTIL_HISTORY_HOST_OBJS) kernel/core/vfs/kq_checkpoint.o kernel/core/vfs/kq_checkpoint_users.o kernel/core/vfs/kq_delivery.o kernel/core/net/net_kq_delivery.o kernel/core/net/net_kq_delivery_users.o $(NET_ASM_OBJ)
 	$(CC) $(CFLAGS) $(TEST_SANITIZE) -c -o tests/test_kq_net.o tests/test_kq_net.c
 	$(CXX) $(CXXFLAGS) $(TEST_SANITIZE) -o tests/test_kq_net tests/test_kq_net.o \
 	  kernel/core/net/net_kq_delivery.o kernel/core/net/net_kq_delivery_users.o kernel/core/vfs/kq_delivery.o \
-	  kernel/drivers/keyquorum/kq_driver.o kernel/core/vfs/kq_checkpoint.o kernel/core/vfs/kq_checkpoint_users.o \
+	  kernel/core/vfs/kq_checkpoint.o kernel/core/vfs/kq_checkpoint_users.o \
 	  userland/shell/common.o $(UTIL_SHELL_LINK_OBJS) $(FS_JAIL_CORE_OBJS) $(FS_JAIL_SUPPORT_OBJS) \
 	  kernel/core/mm/mem_domain.o $(MEM_ASM_OBJ) $(NET_ASM_OBJ) $(HISTORY_ASM_OBJ) $(UTIL_HISTORY_HOST_OBJS) \
 	  $(FS_JAIL_TEST_LIBS) -Wl,-z,noexecstack
 	./tests/test_kq_net
+
+.PHONY: test_kq_wire
+test_kq_wire: userland/shell/common.o $(UTIL_SHELL_LINK_OBJS) $(FS_JAIL_CORE_OBJS) $(FS_JAIL_SUPPORT_OBJS) kernel/core/mm/mem_domain.o $(MEM_ASM_OBJ) $(HISTORY_ASM_OBJ) $(UTIL_HISTORY_HOST_OBJS) kernel/core/vfs/kq_checkpoint.o kernel/core/vfs/kq_checkpoint_users.o kernel/core/vfs/kq_delivery.o kernel/core/net/net_kq_delivery_users.o $(NET_ASM_OBJ)
+	$(CC) $(CFLAGS) $(TEST_SANITIZE) -c -o tests/test_kq_wire.o tests/test_kq_wire.c
+	$(CXX) $(CXXFLAGS) $(TEST_SANITIZE) -o tests/test_kq_wire tests/test_kq_wire.o \
+	  kernel/core/net/net_kq_delivery_users.o kernel/core/vfs/kq_delivery.o \
+	  kernel/core/vfs/kq_checkpoint.o kernel/core/vfs/kq_checkpoint_users.o \
+	  userland/shell/common.o $(UTIL_SHELL_LINK_OBJS) $(FS_JAIL_CORE_OBJS) $(FS_JAIL_SUPPORT_OBJS) \
+	  kernel/core/mm/mem_domain.o $(MEM_ASM_OBJ) $(NET_ASM_OBJ) $(HISTORY_ASM_OBJ) $(UTIL_HISTORY_HOST_OBJS) \
+	  $(FS_JAIL_TEST_LIBS) -Wl,-z,noexecstack
+	./tests/test_kq_wire
 
 .PHONY: test_p0_p2_wiring
 test_p0_p2_wiring: kernel/core/memory/fl_stack.o kernel/core/memory/exec_context.o kernel/core/time/timekeeping.o \
 		kernel/core/identity/user_db.o kernel/core/identity/session.o kernel/core/identity/elevation.o \
 		kernel/core/identity/heritage.o kernel/core/identity/bridge.o kernel/core/identity/share_gate.o \
 		kernel/core/identity/path_property.o kernel/core/mm/mem_domain.o kernel/core/mm/pmm.o \
-		userland/identity/password_hash.o userland/shell/authz_subsystem.o $(MEM_ASM_OBJ) $(FL_STACK_ASM_OBJ)
+		userland/identity/password_hash.o userland/shell/authz_subsystem.o $(MEM_ASM_OBJ) $(FL_STACK_ASM_OBJ) \
+		kernel/drivers/keyquorum/kq_driver.o kernel/drivers/driver_model.o
 	$(CC) $(CFLAGS) $(TEST_SANITIZE) -c -o tests/test_p0_p2_wiring.o tests/test_p0_p2_wiring.c
 	$(CXX) $(CXXFLAGS) $(TEST_SANITIZE) -o tests/test_p0_p2_wiring tests/test_p0_p2_wiring.o \
 	  kernel/core/memory/fl_stack.o kernel/core/memory/exec_context.o kernel/core/time/timekeeping.o \
 	  kernel/core/identity/user_db.o kernel/core/identity/session.o kernel/core/identity/elevation.o \
 		kernel/core/identity/heritage.o kernel/core/identity/bridge.o kernel/core/identity/share_gate.o \
 	  kernel/core/identity/path_property.o kernel/core/mm/mem_domain.o kernel/core/mm/pmm.o \
-	  userland/identity/password_hash.o userland/shell/authz_subsystem.o $(MEM_ASM_OBJ) $(FL_STACK_ASM_OBJ) -lsqlite3 -lstdc++ $(OPENSSL_LIBS) $(KQ_ID_LINK) -pthread -Wl,-z,noexecstack
+	  userland/identity/password_hash.o userland/shell/authz_subsystem.o $(MEM_ASM_OBJ) $(FL_STACK_ASM_OBJ) \
+	  kernel/drivers/keyquorum/kq_driver.o kernel/drivers/driver_model.o -lsqlite3 -lstdc++ $(OPENSSL_LIBS) $(KQ_ID_LINK) -pthread -Wl,--gc-sections -Wl,-z,noexecstack
 	./tests/test_p0_p2_wiring
 
 .PHONY: test_p3_network
@@ -1408,7 +1465,7 @@ test_replay:
 	  kernel/core/vfs/fs_provider.o kernel/core/vfs/fs_command.o kernel/core/vfs/fs_events.o kernel/core/vfs/fs_policy.o \
 	  kernel/core/vfs/fs_chain.o kernel/core/vfs/fs_facade.o kernel/core/vfs/fs_service_glue.o $(FS_JAIL_CORE_OBJS) $(FS_JAIL_SUPPORT_OBJS) kernel/core/mm/mem_domain.o kernel/core/mm/kmalloc.o \
 	  kernel/core/sys/vrt.o kernel/core/sys/ipc.o kernel/core/sys/syscall.o kernel/core/vfs/vfs.o \
-	  kernel/drivers/bus.o kernel/drivers/driver_model.o kernel/drivers/keyquorum/kq_driver.o \
+	  kernel/drivers/bus.o \
 	  kernel/drivers/block/block_driver.o kernel/drivers/block/block_transport_host.o kernel/drivers/keyboard_driver.o kernel/drivers/display_driver.o \
 	  kernel/drivers/timer_driver.o kernel/drivers/pic_driver.o kernel/drivers/drivers.o kernel/drivers/p4_irq_lifecycle.o \
 	  $(KERNEL_DRIVERS)/../hal/ioport.o \

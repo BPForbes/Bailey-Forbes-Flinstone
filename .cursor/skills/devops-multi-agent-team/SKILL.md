@@ -36,6 +36,17 @@ security-checks or QAs their own change, including after being
 reallocated ([department-pods.md](references/department-pods.md),
 Multiple teams).
 
+**Team sizing and rotation.** One team per work item, 2 to 3 seats of
+each of Researcher, Coder, Reviewer, QA and Security (10 to 15 per
+team, a ceiling not a quota; cost and conflicts decide). A seat
+that finished its role may take another role on a *different* item,
+keeping its id; it never judges what it wrote, fixed or briefed (the Orchestrator
+judges "briefed" from the registry). If no independent seat is left
+it mints a new seat id (independence outranks the 3-per-function ceiling) or asks the human, never reusing an author.
+Teams talk through the append-only `team-board.md` (informational,
+it never authorizes anything) to prevent merge conflicts ([department-pods.md](references/department-pods.md), Team
+sizing, Seat rotation, Team board).
+
 **Seats have hash ids.** Every subagent seat is told apart by a seat
 id, `<role>-<6 hex>` (for example `coder-0a0a0a`), minted by the
 Orchestrator at spawn, never a capital letter
@@ -80,13 +91,18 @@ Security's SOC 2 review first; Clear does not authorize a push either.
    **Satisfied**. Satisfied does **not** authorize a push.
 5. Then **Security**: a full SOC 2 analysis on every change (except
    review-bot feedback fixes, see qa-publish-policy.md)
-   ([soc2-review.md](references/soc2-review.md)), plus Snyk /
+   ([soc2-review.md](references/soc2-review.md)), which includes a CodeQL run
+   (`scripts/codeql_local.sh`, or the head's `codeql gate`), plus Snyk /
    `/review-security` where installed.
 6. Then **QA**. QA owns
    [qa-publish-policy.md](references/qa-publish-policy.md)
    and is the **only** role that may give the OK to push (except review-bot feedback fixes outside the exceptions: references/qa-publish-policy.md).
-7. After PASS, the Orchestrator makes keep-commit(s) from the
-   approved side-branch tree and **one push**
+7. After PASS, the Orchestrator cherry-picks the approved SHAs, and a QA
+   seat that is not an author of the integrated tree re-approves it. The
+   authors are the union of the Handoff `Authors:` and the Push JSON
+   `authors` of every cherry-picked SHA, the Orchestrator's conflict
+   fixes included; a seat is refused when its seat id or its handle is in
+   that set. The Orchestrator pushes only after the human authorizes that push
    ([thoughts-layout.md](references/thoughts-layout.md) One push).
    Check `git diff --stat <integration-base>...HEAD` for process files
    after any strip. Do not commit process notes.
@@ -109,7 +125,7 @@ Do **not** invent requirements. Ask the human when scope is unclear.
 | Pre-QA | Reviewers | `review-*.md` + `/review-*` | Improvements; no push |
 | CI | QA / CI Engineer | Buildkite + `/buildkite-*` | Failed jobs, retry |
 | Quality | QA | final bug hunt; Sonar + `/sonar-*` if installed | Publish gate; Sonar additive |
-| Security | Security | Snyk + `/review-security` | SCA/SAST/IaC |
+| Security | Security | CodeQL + Snyk + `/review-security` | C/C++, JS, Python and workflow SAST (no assembly); SCA/IaC |
 | Externals | Integrator | Composio + `/composio-*` | Only if asked |
 | UI | Verifier | Browser + `/browser-automation` | Smoke |
 | Diagram | Researcher | tldraw; `/docs-canvas` | Architecture |
@@ -119,11 +135,15 @@ Do **not** invent requirements. Ask the human when scope is unclear.
 `/sonar-integrate` then restart. Do not invent CI/Sonar
 results. Stay on the
 current non-`main` branch; prefer the existing PR. **Never
-create a real git branch** (`git checkout -b`, `git switch -c`)
-unless The Client **named that branch in this turn**. Cloud-agent
-templates (`feature/<name>-<id>`) do **not** authorize a new
-ref. Delete an invented branch and stay on the named real one.
-A skill side-branch is a thought file + clone, not a git branch
+create a real git branch** (`git checkout -b`, `git switch -c`,
+`git worktree add -b`) unless The Client **named that branch in this
+turn**. Cloud-agent templates (`feature/<name>-<id>`) do **not**
+authorize a new ref. Delete an invented branch and stay on the named
+real one. The one exception is not a branch: a skill side-branch is
+a thought file + a **detached** worktree (per-Coder worktrees are the rule,
+owner-confirmed 2026-10-29, see side-work.md; `git worktree add --detach`, no ref), handed over by commit SHA and never pushed; the
+Orchestrator alone may create a local-only `local/<item>-<seat-id>-<n>`
+ref on request, deleted after integration
 ([side-work.md](references/side-work.md)). Canonical:
 `AGENTS.md` AI feature-branch workflow. Confirm deletes/force-push/hard reset
 with the human. **No push** while review is `In review` or
@@ -165,10 +185,12 @@ Label every substantive reply with the active role, e.g. `[Planner]`; a spawned 
 - **Researcher** — reuse map; inventory `docs/`; fetch online media;
   then **join the Coder of the same department**.
   Agent: `.cursor/agents/devops-researcher.md`.
-- **Coder** — implement on a **skill side-branch** (not a real git
-  branch; no shared-checkout commits until QA PASS). Isolate with
-  a **clone**, not `git worktree add`. Talk to other Coders so
-  side-branches do not collide. Run the change in that clone
+- **Coder** — implement on a **skill side-branch** (the Coder's own
+  detached git worktree off the integration SHA, no ref; never
+  pushed; stage by explicit path; no shared-checkout commits until
+  QA PASS). Claim shared files on `team-board.md` before editing and
+  talk to the owning Coder on overlap so side-branches do not
+  collide. Run the change in that worktree
   (VM / tools).
   Write Push JSON, Coder→Reviewer `qa` comments, and a Handoff
   **before the first review**
@@ -190,14 +212,19 @@ Label every substantive reply with the active role, e.g. `[Planner]`; a spawned 
   `.cursor/agents/devops-quality-engineer.md`.
 - **Observability / Optimization / Documentation / Refactoring /
   Security / Performance** — after Satisfied, Security before QA
-  (Snyk + `/review-security` in `## Security`). Docs match the
+  (CodeQL + Snyk + `/review-security` in `## Security`). Docs match the
   implementation. No premature complexity.
 
 ## Orchestrator loop (async pods)
 
-Staff each pod with 2 to 3 subagents and rebalance idle seats to
-busy functions ([department-pods.md](references/department-pods.md),
-Staffing).
+Staff each item's pods with 2 to 3 subagents per function and
+rebalance idle seats to busy functions by seat rotation
+([department-pods.md](references/department-pods.md), Team sizing and
+Seat rotation). The Orchestrator spawns waves, keeps
+`team-board.md` and `seat-registry.md` current, integrates approved
+items by cherry-pick (re-running tests after each, QA re-approving
+the integrated tree) and **never codes**; it resolves only
+mechanical conflicts and is then an Author.
 
 Fan out `/create-subagent` so each **pod** starts together. Rules:
 [department-pods.md](references/department-pods.md).
@@ -206,7 +233,7 @@ Fan out `/create-subagent` so each **pod** starts together. Rules:
 |-----|------------------------|-------------|
 | **research** | Planner, Researcher, Ticket Lead | Immediately |
 | **implement** | Coder (Researcher of that department joins) | Brief exists *or* surface known |
-| **review** | Two or more Reviewers | Coder has a local diff |
+| **review** | 2 to 3 Reviewers | Coder has a local diff |
 | **security** | Security | Reviewers mark Satisfied |
 | **qa** | QA, CI Engineer, Verifier | Security clear (overlap allowed) |
 | **docs** | Documentation, Communicator | Implementation is documentable |
@@ -215,15 +242,16 @@ Fan out `/create-subagent` so each **pod** starts together. Rules:
 research  ∥  implement  ∥  review   (department rules apply)
 security  →  qa  →  docs
 push      →  NEVER until QA marks PASS
-            After PASS: thoughts → finalized/ (local); one push
-            that keeps approved Coder commits
+            After PASS: thoughts → finalized/ (local); the Orchestrator
+            pushes only after the human authorizes that push, keeping
+            approved Coder commits
 repeat    →  until PASS; QA blocked/send-back → triage;
             the Researcher joins the Coder who picks it up
 ```
 
 Never commit thoughts. Coders do not commit on the shared
-checkout. After PASS, the Orchestrator makes the keep-commit(s)
-from the approved side-branch tree and pushes once. Checklists:
+checkout. After PASS, the Orchestrator cherry-picks the approved
+side-branch SHAs, QA re-approves the integrated tree, and the Orchestrator pushes only after the human authorizes that push. Checklists:
 [references/devops-loop.md](references/devops-loop.md).
 
 ## Questions and interrupts
@@ -258,10 +286,13 @@ acts. Redact tokens, secrets and credentials from anything shown (see
 
 ## Repo alignment (Bailey-Forbes-Flinstone)
 
-**QA gate here:** there is no CodeQL gate. The Security seat's SOC 2 review
-([soc2-review.md](references/soc2-review.md)) is the security analysis, and QA's
-final bug hunt (test perspective, live-environment perspective, triage on any
-finding) is the last gate. See [qa-publish-policy.md](references/qa-publish-policy.md).
+**QA gate here:** CodeQL is part of the security analysis. The Security seat runs it
+(`scripts/codeql_local.sh`, or reads the head's `codeql gate` check when the CLI is not
+installed) inside its SOC 2 review ([soc2-review.md](references/soc2-review.md)); CodeQL does not
+read assembly, which stays with human review. QA's final bug hunt (test perspective,
+live-environment perspective, triage on any finding) is the last gate, and QA does not PASS
+while the head's `codeql gate` is red or the Security record says nothing about CodeQL. See
+[qa-publish-policy.md](references/qa-publish-policy.md).
 
 **Precedence:** this repo's `AGENTS.md`, `CLAUDE.md` and
 `.cursor/rules/*.mdc` win over this skill. In particular the
@@ -275,12 +306,12 @@ the stricter one.
 **Virtual PR and virtual git (project policy).** Work in progress
 lives in the virtual PR: the review thread, Push JSON and handoffs
 under `.cursor/thoughts/` (gitignored), and the Coder's skill
-side-branch in a throwaway clone. This keeps the real branch free
+side-branch in a detached local worktree. This keeps the real branch free
 of churn and lets agents track history while they talk. Nothing
 reaches the real branch, and no real PR is opened or updated, until
-Security is clear and QA marks PASS. Then the Orchestrator makes
-the keep-commit(s) from the approved side-branch tree and pushes
-once. Build with `make`; validation sequences are in
+Security is clear and QA marks PASS. Then the Orchestrator cherry-picks
+the approved side-branch SHAs, QA re-approves the integrated tree,
+and the Orchestrator pushes only after the human authorizes that push. Build with `make`; validation sequences are in
 `AGENTS.md`. MCPs named above (Buildkite, Linear, Sonar, Snyk,
 Composio, Mainframe) are optional: use one only if it is installed,
 otherwise say so and use GitHub Actions results (`c-cpp.yml`).

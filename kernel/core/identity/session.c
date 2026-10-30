@@ -1,5 +1,6 @@
 #include "session.h"
 #include "elevation.h"
+#include "fl/driver/keyquorum.h"
 #include <pthread.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -15,6 +16,9 @@ static pthread_mutex_t s_session_mu = PTHREAD_MUTEX_INITIALIZER;
 
 static void session_load_once(void) {
     const char *path = getenv("FL_USERS_DB_PATH");
+
+    /* Seeded accounts call the driver before sh.c reaches drivers_init. */
+    (void)fl_kq_driver_get_or_register();
 
     if (!path || !path[0])
         path = FL_SESSION_USERS_PATH;

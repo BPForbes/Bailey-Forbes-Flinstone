@@ -68,6 +68,15 @@ typedef struct fl_driver_desc {
 void fl_driver_registry_register_all(void);
 fl_result_t fl_driver_registry_register(const fl_driver_desc_t *desc);
 fl_result_t fl_driver_registry_match(const fl_device_desc_t *dev, const fl_driver_desc_t **out);
+/* 1 when desc is a pointer currently stored in the registry; 0 for NULL or any other pointer.
+ * Pointer compare only: it does not match by name, does not probe, and does not call a driver. */
+int fl_driver_registry_contains(const fl_driver_desc_t *desc);
+/* Adds desc unless the registry already holds that pointer; the check and the add happen
+ * under one lock, so concurrent callers add it once. Refused (FL_RESULT_ERR) after
+ * fl_drivers_shutdown until fl_driver_registry_register_all runs again. */
+fl_result_t fl_driver_registry_ensure(const fl_driver_desc_t *desc);
+/* Number of registered descriptors. */
+int fl_driver_registry_count(void);
 
 /* Init flow: register -> enumerate -> probe -> attach -> start */
 void fl_drivers_init(void);

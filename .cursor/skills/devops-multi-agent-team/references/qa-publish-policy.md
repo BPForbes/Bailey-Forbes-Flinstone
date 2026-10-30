@@ -1,10 +1,11 @@
 # QA bug hunt, Validation, and Publish Policy
 
 This repo is C/C++ with an ASM layer (`make`; CI in
-`.github/workflows/c-cpp.yml`). **There is no CodeQL gate here.**
-Security analysis is the Security seat's SOC 2 review
-([soc2-review.md](soc2-review.md)); QA's last gate is a final bug
-hunt.
+`.github/workflows/c-cpp.yml`). **CodeQL is part of the security
+analysis:** CI runs it (`.github/workflows/codeql.yml`, check `codeql gate`) and the Security
+seat runs it with `scripts/codeql_local.sh` inside its SOC 2 review
+([soc2-review.md](soc2-review.md)). CodeQL does not read assembly. QA's last gate is a final bug
+hunt, and QA does not PASS while `codeql gate` is red on the head.
 
 ## Core rule
 
@@ -65,7 +66,7 @@ Codex, or any other the repo wires in). Other files point here.
    may be declined with a one-line reason.
 2. **Who fixes.** A valid finding goes to a Coder whose seat id is not in
    the `Authors:` line of the code under comment, never the
-   Orchestrator. That Coder fixes it in a side clone ([side-work.md](side-work.md)) and writes the
+   Orchestrator. That Coder fixes it in a side worktree ([side-work.md](side-work.md)) and writes the
    usual Push JSON and Handoff `To: Reviewer`.
 3. **Review.** An independent Reviewer (never a seat listed in `Authors:`) reviews
    the fix and records `Gate decision: exempt` or `full gate`, with its
@@ -95,12 +96,14 @@ Codex, or any other the repo wires in). Other files point here.
    `gate: exempt (build/test only)` or `gate: full`.
 4. **What Actions cover here.** This repo's Actions run build and test
    checks on the push (`c-cpp.yml`: versioning, x86_64 GAS build and
-   test, VM, AArch64 cross, wasm lab; `browser-lab-build.yml`). This
-   repo has **no** security scan, SOC 2, CodeQL or secret-scanning
-   workflow, only CodeRabbit/Codex review. So the exemption covers
-   QA-type checks (build and test) only, and the exceptions below
-   stand in for the missing automated security gate. If a security
-   workflow is added later, update this section.
+   test, VM, AArch64 cross, wasm lab; `browser-lab-build.yml`) and CodeQL
+   (`codeql.yml`: C/C++, JavaScript, Python and the workflows, SOC 2 mapped
+   by `.github/scripts/codeql_report.py`, gate `codeql gate`). This repo has
+   **no** SOC 2 review or secret-scanning workflow, only CodeRabbit/Codex
+   review, and CodeQL cannot read assembly, shell scripts or design. So the
+   exemption covers QA-type checks (build and test) only, and the exceptions
+   below stand in for the automated security gate where CodeQL cannot see.
+   If a security workflow is added or changed later, update this section.
 5. **No separate Security or QA pass** for such a fix, unless it falls
    under an exception; then the full gate (Security, then QA) applies:
    - it touches security-sensitive code: fs_jail and path

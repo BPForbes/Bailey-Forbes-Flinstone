@@ -92,8 +92,39 @@ static int test_accept_after_session_meta(void)
     return 0;
 }
 
+/* The reserved kind is never accepted as an ordinary share's sidecar from the wire. */
+static int test_reserved_kind_refused_on_wire(void)
+{
+    fl_server_file_offer_t offer;
+    fl_server_file_meta_t meta;
+    uint8_t wire[FL_NET_SESSION_MAX_MSG];
+    uint16_t wire_len = 0;
+
+    memset(&offer, 0, sizeof(offer));
+    strncpy(offer.share_id, "share-wire-kind", sizeof(offer.share_id) - 1u);
+    strncpy(offer.file_name, "w.txt", sizeof(offer.file_name) - 1u);
+    offer.receiver_member_id = 3u;
+    offer.file_perms = FL_FILE_PERM_VIEW | FL_FILE_PERM_SERVER_SHARE;
+    ASSERT(fl_server_file_store_offer(&offer) == FL_RESULT_OK);
+    ASSERT(fl_server_file_meta_from_offer(&offer, &meta) == FL_RESULT_OK);
+
+    meta.payload_kind = FL_CHANNEL_PAYLOAD_KQ;
+    ASSERT(fl_file_packet_encode_meta(&meta, wire, sizeof(wire), &wire_len) == FL_RESULT_OK);
+    ASSERT(fl_net_file_store_meta(wire, wire_len) == FL_RESULT_INVAL);
+    /* the message paths already insist on the message kind */
+    ASSERT(fl_net_msg_store_meta(wire, wire_len) == FL_RESULT_INVAL);
+    ASSERT(fl_net_msg_host_handle_meta(1u, wire, wire_len) == FL_RESULT_INVAL);
+
+    meta.payload_kind = FL_CHANNEL_PAYLOAD_FILE;
+    ASSERT(fl_file_packet_encode_meta(&meta, wire, sizeof(wire), &wire_len) == FL_RESULT_OK);
+    ASSERT(fl_net_file_store_meta(wire, wire_len) == FL_RESULT_OK);
+    return 0;
+}
+
 int main(void)
 {
+    if (test_reserved_kind_refused_on_wire() != 0)
+        return 1;
     if (test_accept_after_session_meta() != 0)
         return 1;
     printf("server file accept path test passed.\n");

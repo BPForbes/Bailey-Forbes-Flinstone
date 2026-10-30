@@ -36,18 +36,38 @@
 /** Max rows returned by fl_server_catalog_list_for_member in one call. */
 #define FL_SERVER_CATALOG_LIST_MAX    64u
 
+/** Schema revision stamped in the catalog file (PRAGMA user_version); a newer file is refused. */
+#define FL_SERVER_CATALOG_SCHEMA_VERSION 1
+
+/** Catalog file mode: owner read/write only (its journal files get the same mode from SQLite). */
+#define FL_SERVER_CATALOG_FILE_MODE 0600
+
+/** How long an open or a write waits for another process holding the catalog (milliseconds). */
+#define FL_SERVER_CATALOG_BUSY_TIMEOUT_MS 5000
+
+/** Largest source catalog file a handoff import copies (bytes). */
+#define FL_SERVER_CATALOG_MAX_DB_BYTES (256ull * 1024ull * 1024ull)
+
+/** How long a handoff probe of a catalog file waits before it fails closed (milliseconds). */
+#define FL_SERVER_CATALOG_PROBE_TIMEOUT_MS 250
+
 typedef enum fl_server_catalog_status {
     FL_SERVER_CATALOG_PENDING  = 0,
     FL_SERVER_CATALOG_COMPLETE = 1,
     FL_SERVER_CATALOG_REVOKED  = 2,
-    FL_SERVER_CATALOG_EXPIRED  = 3
+    FL_SERVER_CATALOG_EXPIRED  = 3,
+    /* KeyQuorum delivery rows (FL_CHANNEL_PAYLOAD_KQ, kq_delivery.c), never on the share path.
+     * Stored values: append, never renumber. EXPIRED (3) also ends a KQ row. */
+    FL_SERVER_CATALOG_KQ_HELD      = 4, /* letter held, waiting for the co-signature */
+    FL_SERVER_CATALOG_KQ_RELEASED  = 5, /* co-signed and released, waiting for the receipt */
+    FL_SERVER_CATALOG_KQ_DELIVERED = 6  /* receipt in, letter deleted */
 } fl_server_catalog_status_t;
 
 /** One catalog row (file or message). */
 typedef struct fl_server_catalog_entry {
     char content_hash[FL_SERVER_CATALOG_HASH_HEX_MAX];
     char transfer_id[FL_SERVER_SHARE_ID_MAX];
-    uint8_t payload_kind; /* FL_CHANNEL_PAYLOAD_FILE or FL_CHANNEL_PAYLOAD_MSG */
+    uint8_t payload_kind; /* FILE or MSG; a stored value of any other kind (the reserved FL_CHANNEL_PAYLOAD_KQ, or out of range, read as 0) is never returned by the share path */
     uint16_t sender_member_id;
     uint16_t receiver_member_id; /* 0 = public / broadcast */
     fl_file_perms_t file_perms;
@@ -122,6 +142,8 @@ fl_result_t fl_server_catalog_list_for_member(uint16_t member_id,
                                             size_t out_cap,
                                             size_t *out_count);
 
+/** Expires COMPLETE rows of the share path's kinds (FILE, MSG) past their time; a row of the reserved
+ *  kind is left to its own owner and neither changes nor gains an event here. */
 fl_result_t fl_server_catalog_purge_expired(uint64_t now);
 
 /**
@@ -145,17 +167,34 @@ fl_result_t fl_server_catalog_begin(void);
 fl_result_t fl_server_catalog_commit(void);
 void fl_server_catalog_rollback(void);
 
-/** Appends one event to a share's history; seq is the next number for that share. */
+/** Appends one event to a share's history; seq is the next number for that share. FL_RESULT_ACCES
+ *  (nothing written) when the id belongs to a row of the reserved kind. */
 fl_result_t fl_server_catalog_append_event(const char *transfer_id, const char *event,
                                            uint16_t actor_member_id, uint64_t at,
                                            const char *detail);
 
-/** The events of one share, oldest first, at most out_cap; out_count is what was copied. */
+/** The events of one share, oldest first, at most out_cap; out_count is what was copied (0 for a
+ *  row of the reserved kind, as for an unknown id). */
 fl_result_t fl_server_catalog_list_events(const char *transfer_id,
                                           fl_server_catalog_event_t *out, size_t out_cap,
                                           size_t *out_count);
 
-/** Copy `host_catalog.db` + `blobs/` from another `server_shared` root (handoff). */
+/**
+ * Copy `host_catalog.db` + `blobs/` from another `server_shared` root (handoff). The source file
+ * (at most FL_SERVER_CATALOG_MAX_DB_BYTES) is copied once to a uniquely named owner-only temp file
+ * next to the live one; that copy is what is checked, what the blobs are read from, and what is
+ * renamed into place. Fails closed: a locked, corrupt or non-database file on either side is
+ * FL_RESULT_ERR (so a corrupt live catalog is removed first, not repaired by importing over it),
+ * as is a journal, -wal or -shm file beside either database, a missing or unreadable blob, or a
+ * `blobs` directory that is a link. Each blob must be named blobs/<its SHA-256> and match it.
+ * FL_RESULT_ACCES when either side holds a row of the reserved FL_CHANNEL_PAYLOAD_KQ kind (a
+ * policy refusal that waiting does not clear), FL_RESULT_INVAL when either file is from a newer
+ * schema (the live file is never downgraded) or a blob path or digest does not match. Nothing
+ * replaces the live file in any of those cases. Single-writer rule: the host is quiet while an
+ * import runs (two imports do not share a temp name, the last rename wins).
+ * A catalog file that is a symlink or has more than one name is refused by
+ * fl_server_catalog_open, so a catalog moved elsewhere behind a link must be moved back.
+ */
 fl_result_t fl_server_catalog_import_handoff(const char *src_server_shared_dir);
 
 #endif /* FL_CONTRACT_P5_SERVER_CATALOG_H */

@@ -4,6 +4,7 @@
 #include "contract_p5_server_share.h"
 #include "server_shared_db.h"
 #include "fl/path.h"
+#include "mem_domain.h"
 
 #include <dirent.h>
 #include <errno.h>
@@ -197,9 +198,9 @@ int fl_fs_write_file_atomic(const char *path, const uint8_t *data, size_t len)
     return write_atomic_at(FL_FS_CWDFD, path, data, len);
 }
 
-int fl_fs_dir_open(const char *dir)
+static int dir_open_flags(const char *dir, int extra)
 {
-    int flags = O_RDONLY | O_CLOEXEC;
+    int flags = O_RDONLY | O_CLOEXEC | extra;
 
     if (!dir || !dir[0]) {
         errno = EINVAL;
@@ -209,6 +210,42 @@ int fl_fs_dir_open(const char *dir)
     flags |= O_DIRECTORY;
 #endif
     return open(dir, flags);
+}
+
+int fl_fs_dir_open(const char *dir)
+{
+    return dir_open_flags(dir, 0);
+}
+
+int fl_fs_dir_open_nofollow(const char *dir)
+{
+    return dir_open_flags(dir, O_NOFOLLOW);
+}
+
+int fl_fs_trusted_root_open(const char *dir)
+{
+    struct stat st;
+    int fd = dir_open_flags(dir, O_NOFOLLOW);
+
+    if (fd < 0)
+        return -1;
+    if (fstat(fd, &st) != 0 || !S_ISDIR(st.st_mode)) {
+        close(fd);
+        errno = ENOTDIR;
+        return -1;
+    }
+    if (st.st_uid != geteuid()) {
+        close(fd);
+        errno = EPERM;
+        return -1;
+    }
+    if ((st.st_mode & 07777) != 0700 && fchmod(fd, 0700) != 0) {
+        int saved = errno;
+        close(fd);
+        errno = saved;
+        return -1;
+    }
+    return fd;
 }
 
 int fl_fs_write_file_atomic_in(int dirfd, const char *name, const uint8_t *data, size_t len)
@@ -310,7 +347,7 @@ static int read_fd(int fd, size_t max, uint8_t **data, size_t *len)
         goto out;
     }
     n = (size_t)st.st_size;
-    buf = (uint8_t *)malloc(n ? n : 1u); /* once: no realloc copies of the content */
+    buf = (uint8_t *)mem_domain_alloc(MEM_DOMAIN_FS, n ? n : 1u); /* once: no realloc copies */
     if (!buf)
         goto out;
     while (got < n) {
@@ -339,7 +376,7 @@ out:
     saved_errno = errno; /* the wipe, free and close must not replace the failure's errno */
     if (buf) {
         explicit_bzero(buf, got);
-        free(buf);
+        mem_domain_free(MEM_DOMAIN_FS, buf);
     }
     close(fd);
     errno = saved_errno;
@@ -489,6 +526,71 @@ int fl_fs_read_file_at(int dirfd, const char *dir_path, const char *name, size_t
     return fl_fs_read_file(p, max, data, len);
 }
 
+int fl_fs_read_tail_at(int dirfd, const char *dir_path, const char *name, size_t unit,
+                       size_t keep, uint8_t **data, size_t *len)
+{
+    char p[FL_FS_PATH_MAX];
+    FILE *f;
+    long size;
+    size_t want;
+    uint8_t *buf;
+
+    if (data)
+        *data = NULL;
+    if (len)
+        *len = 0;
+    if (!data || !len || !name || unit == 0 || keep == 0 || keep > SIZE_MAX / unit)
+        return -1;
+    if (dirfd >= 0) {
+        int fd = fl_fs_open_read_in(dirfd, name);
+
+        if (fd < 0)
+            return errno == ENOENT ? 0 : -1;
+        f = fdopen(fd, "rb");
+        if (!f) {
+            close(fd);
+            return -1;
+        }
+    } else {
+        if (fl_fs_contained_available()) {
+            errno = EBADF;
+            return -1;
+        }
+        if (!dir_path || fl_fs_join_path(p, sizeof p, dir_path, name) != 0)
+            return -1;
+        f = fopen(p, "rb");
+        if (!f)
+            return access(p, F_OK) == 0 ? -1 : 0;
+    }
+    if (fseek(f, 0, SEEK_END) != 0) {
+        fclose(f);
+        return -1;
+    }
+    size = ftell(f);
+    if (size < 0 || (size_t)size % unit != 0) {
+        fclose(f);
+        return -1;
+    }
+    want = (size_t)size / unit;
+    if (want > keep)
+        want = keep;
+    if (want == 0) {
+        fclose(f);
+        return 0;
+    }
+    buf = (uint8_t *)mem_domain_alloc(MEM_DOMAIN_FS, want * unit);
+    if (!buf || fseek(f, size - (long)(want * unit), SEEK_SET) != 0 ||
+        fread(buf, unit, want, f) != want) {
+        mem_domain_free(MEM_DOMAIN_FS, buf);
+        fclose(f);
+        return -1;
+    }
+    fclose(f);
+    *data = buf;
+    *len = want * unit;
+    return 0;
+}
+
 static int land_stage(const landing_t *l, const char *name, const uint8_t *d, size_t n)
 {
     char buf[FL_FS_PATH_MAX];
@@ -561,7 +663,7 @@ static int backup_file(const landing_t *l, const char *name, const char *bak)
         return -1;
     rc = land_write(l, bak, copy, len);
     explicit_bzero(copy, len);
-    free(copy);
+    mem_domain_free(MEM_DOMAIN_FS, copy);
     return rc;
 }
 
@@ -592,6 +694,7 @@ int fl_fs_commit_files(int dirfd, const char *dir_path, const fl_fs_file_out_t *
     char part[FL_FS_NAME_MAX + 1u];
     char bak[FL_FS_NAME_MAX + 1u];
     int had[FL_FS_COMMIT_FILES_MAX] = {0};
+    int keep[FL_FS_COMMIT_FILES_MAX] = {0};
     size_t done = 0;
     size_t i, j;
     int rc = 0;
@@ -659,14 +762,19 @@ int fl_fs_commit_files(int dirfd, const char *dir_path, const fl_fs_file_out_t *
         }
     }
     if (rc != 0) {
-        /* Put back what was replaced; a file that did not exist before is removed. */
+        /* Put back what was replaced; a file that did not exist before is removed. A backup
+         * whose restore failed is the only copy of the original, so it is kept (keep[i]). */
         size_t replaced = done ? done - 1 : 0;
         for (i = 0; i < replaced; i++) {
             snprintf(bak, sizeof bak, "%s" FL_FS_BACKUP_SUFFIX, files[i].name);
-            if (had[i])
-                (void)land_rename(&l, bak, files[i].name);
-            else
+            if (had[i]) {
+                if (land_rename(&l, bak, files[i].name) != 0) {
+                    keep[i] = 1;
+                    err = errno;
+                }
+            } else {
                 land_unlink(&l, files[i].name);
+            }
         }
         for (i = 0; i < n; i++) {
             snprintf(part, sizeof part, "%s" FL_FS_PART_SUFFIX, files[i].name);
@@ -674,6 +782,8 @@ int fl_fs_commit_files(int dirfd, const char *dir_path, const fl_fs_file_out_t *
         }
     }
     for (i = 0; i < n; i++) {
+        if (keep[i])
+            continue;
         snprintf(bak, sizeof bak, "%s" FL_FS_BACKUP_SUFFIX, files[i].name);
         land_unlink(&l, bak);
     }

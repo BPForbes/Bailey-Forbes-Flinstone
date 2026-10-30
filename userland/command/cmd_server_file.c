@@ -6,6 +6,8 @@
 #include "mem_domain.h"
 #include "fl_colors.h"
 #include "kq_checkpoint.h"
+#include "kq_storage_facade.h"
+#include "fs_service_glue.h"
 #include "net_kq_delivery.h"
 #include "timekeeping.h"
 #include "net_file_delivery.h"
@@ -20,6 +22,7 @@
 #include <stdlib.h>
 #include <string.h>
 #include <sys/stat.h>
+#include <unistd.h>
 #include <time.h>
 
 static const char *current_principal(void)
@@ -257,6 +260,9 @@ static int verb_file_send(const cmd_server_ctx_t *ctx, int argc, char **argv)
     return 0;
 }
 
+static size_t kq_print_requests(const cmd_server_ctx_t *ctx, int hosting);
+static void kq_print_sent(int hosting);
+
 static int verb_file_list(const cmd_server_ctx_t *ctx, const char *which)
 {
     int hosting = 0;
@@ -272,6 +278,12 @@ static int verb_file_list(const cmd_server_ctx_t *ctx, const char *which)
     else
         (void)fl_server_share_sent_list(mid);
     pthread_mutex_unlock(ctx->mutex);
+    /* Co-signed deliveries are listed with the shares (outside the session lock: the request
+     * list asks the host first and takes it itself). */
+    if (!strcmp(which, "inbox"))
+        (void)kq_print_requests(ctx, hosting);
+    else if (!strcmp(which, "sent"))
+        kq_print_sent(hosting);
     return 0;
 }
 
@@ -725,8 +737,29 @@ static int kq_decode_and_ack(const cmd_server_ctx_t *ctx, int hosting,
         return -1;
     }
     snprintf(dest, sizeof dest, "%s/%s", g_cwd, in->file_name);
-    cp = fl_kq_cp_decode(kq_users(), in->sender, sender.signing_public,
-                         fl_session_current_key_id(), box, &letter, &in->offer, in->sig, dest);
+    /* The landing is contained like every other share landing: the resolver checks the
+     * destination (no link in the path, no quarantined directory) and hands back the held
+     * directory. The decode writes through that same handle and never opens the directory
+     * again by path, so a directory swapped after this check is not followed. */
+    {
+        int check_fd = -1;
+        char check_leaf[256];
+        fl_kq_dir_t held;
+
+        if (fl_server_shared_resolve_local_path(dest, 0, &check_fd, check_leaf,
+                                                sizeof check_leaf) != FL_RESULT_OK) {
+            fl_kq_buf_free(&letter);
+            fl_color_warn("keyquorum: refused a delivery whose destination is not contained");
+            return -1;
+        }
+        held.fd = check_fd;
+        held.dir = g_cwd;
+        cp = fl_kq_cp_decode_in(kq_users(), in->sender, sender.signing_public,
+                                fl_session_current_key_id(), box, &letter, &in->offer, in->sig,
+                                &held, check_leaf);
+        if (check_fd >= 0)
+            close(check_fd);
+    }
     fl_kq_buf_free(&letter);
     if (cp == FL_KQ_CP_EXISTS || cp == FL_KQ_CP_IO) {
         /* A local problem with the destination, not with the letter: keep it to retry. */
@@ -771,6 +804,44 @@ static int kq_find_inbox(const char *hex, fl_net_kq_inbox_t *out)
     return -1;
 }
 
+/* This shell's co-signature requests, after asking the host for any it holds; returns how
+ * many were printed. Shared by `server file cosign` and `server file inbox`. */
+static size_t kq_print_requests(const cmd_server_ctx_t *ctx, int hosting)
+{
+    fl_net_kq_inbox_t all[16];
+    size_t n;
+    char hex[2 * FL_KQ_DELIVERY_ID_LEN + 1];
+
+    pthread_mutex_lock(ctx->mutex);
+    (void)fl_net_kq_pull(ctx->server, ctx->client, hosting);
+    pthread_mutex_unlock(ctx->mutex);
+    n = fl_net_kq_inbox(all, 16);
+    for (size_t i = 0; i < n; i++) {
+        fl_kq_delivery_id_hex(all[i].id, hex);
+        printf("%s  %s  from %s  %s\n", hex, all[i].file_name, all[i].sender,
+               all[i].letter_ready ? "released" : all[i].cosigned ? "co-signed" : "waiting for you");
+    }
+    return n;
+}
+
+/* On the host, the co-signed deliveries the signed-in account sent, from the host catalog. */
+static void kq_print_sent(int hosting)
+{
+    fl_kq_delivery_t sent[16];
+    const char *me = fl_session_current_key_id();
+    char hex[2 * FL_KQ_DELIVERY_ID_LEN + 1];
+    size_t n;
+
+    if (!hosting || !me || !me[0])
+        return;
+    n = fl_net_kq_host_sent(me, sent, 16);
+    for (size_t i = 0; i < n; i++) {
+        fl_kq_delivery_id_hex(sent[i].id, hex);
+        printf("%s  %s  to %s  %s\n", hex, sent[i].file_name, sent[i].recipient,
+               fl_kq_delivery_state(&sent[i]));
+    }
+}
+
 /* server file cosign [<delivery>]: list requests, or co-sign one and decode its release. */
 static int verb_kq_cosign(const cmd_server_ctx_t *ctx, int argc, char **argv)
 {
@@ -786,21 +857,8 @@ static int verb_kq_cosign(const cmd_server_ctx_t *ctx, int argc, char **argv)
     if (!session_active(ctx, &hosting))
         return 1;
     if (argc < 2) {
-        fl_net_kq_inbox_t all[16];
-        size_t n;
-        char hex[2 * FL_KQ_DELIVERY_ID_LEN + 1];
-
-        pthread_mutex_lock(ctx->mutex);
-        (void)fl_net_kq_pull(ctx->server, ctx->client, hosting);
-        pthread_mutex_unlock(ctx->mutex);
-        n = fl_net_kq_inbox(all, 16);
-        if (n == 0)
+        if (kq_print_requests(ctx, hosting) == 0)
             printf("(no co-signature requests)\n");
-        for (size_t i = 0; i < n; i++) {
-            fl_kq_delivery_id_hex(all[i].id, hex);
-            printf("%s  %s  from %s  %s\n", hex, all[i].file_name, all[i].sender,
-                   all[i].letter_ready ? "released" : all[i].cosigned ? "co-signed" : "waiting for you");
-        }
         return 0;
     }
     if (kq_find_inbox(argv[1], &in) != 0)
@@ -881,6 +939,17 @@ static int verb_kq_open(const cmd_server_ctx_t *ctx, int argc, char **argv)
     return rc == 0 ? 0 : 1;
 }
 
+/* Every KeyQuorum checkpoint in this file reads and writes through the shell's file manager
+ * service, so its policy, events and path log see them. Without the service the checkpoints
+ * use the placement layer directly. */
+static void kq_use_storage(void)
+{
+    static fl_kq_storage_t table;
+
+    if (g_fm_service)
+        (void)fl_kq_cp_set_storage(fl_kq_storage_facade(g_fm_service, &table));
+}
+
 int cmd_server_file_run(const cmd_server_ctx_t *ctx, int argc, char **argv)
 {
     int sub_argc;
@@ -890,6 +959,7 @@ int cmd_server_file_run(const cmd_server_ctx_t *ctx, int argc, char **argv)
         fl_color_error("usage: server file <send [-t]|inbox|public|sent|accept|decline|revoke|fetch|cosign|open> ...");
         return 1;
     }
+    kq_use_storage();
     sub_argc = argc - 2;
     sub_argv = argv + 2;
     if (sub_argc <= 0) {

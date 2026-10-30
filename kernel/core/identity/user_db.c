@@ -1,28 +1,17 @@
 #include "user_db.h"
 #include "heritage.h"
-#include "keyquorum_identity.h"
+#include "fl/driver/keyquorum.h"
 #include "password_hash.h"
 #include "mem_domain.h"
 #include "fl/hex.h"
 #include "fl/mem_asm.h"
+#include "fl/sqlite_schema.h"
 #include <limits.h>
 #include <sqlite3.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 #include <strings.h>
-
-static fl_result_t db_exec(sqlite3 *sql, const char *stmt) {
-    char *err = NULL;
-    if (sqlite3_exec(sql, stmt, NULL, NULL, &err) != SQLITE_OK) {
-        if (err) {
-            fprintf(stderr, "user_db: %s\n", err);
-            sqlite3_free(err);
-        }
-        return FL_RESULT_ERR;
-    }
-    return FL_RESULT_OK;
-}
 
 static fl_result_t db_init_schema(sqlite3 *sql) {
     static const char *schema =
@@ -44,41 +33,21 @@ static fl_result_t db_init_schema(sqlite3 *sql) {
         "  key TEXT PRIMARY KEY NOT NULL,"
         "  value TEXT NOT NULL"
         ");";
-    static const char *const heritage_columns[] = {
-        "ALTER TABLE users ADD COLUMN key_id TEXT NOT NULL DEFAULT '';",
-        "ALTER TABLE users ADD COLUMN created_by TEXT NOT NULL DEFAULT '';",
-        "ALTER TABLE users ADD COLUMN created_at INTEGER NOT NULL DEFAULT 0;",
-        "ALTER TABLE users ADD COLUMN signing_public TEXT NOT NULL DEFAULT '';",
-        "ALTER TABLE users ADD COLUMN signing_sealed TEXT NOT NULL DEFAULT '';",
-        "ALTER TABLE users ADD COLUMN box_public TEXT NOT NULL DEFAULT '';",
-        "ALTER TABLE users ADD COLUMN box_sealed TEXT NOT NULL DEFAULT '';",
-    };
-    static const char *const heritage_names[] = {"key_id",         "created_by",     "created_at",
-                                                 "signing_public", "signing_sealed", "box_public",
-                                                 "box_sealed"};
-    enum { N_COLUMNS = sizeof(heritage_names) / sizeof(heritage_names[0]) };
-    int have[N_COLUMNS] = {0};
-    sqlite3_stmt *st = NULL;
-    size_t i;
-
-    if (db_exec(sql, schema) != FL_RESULT_OK)
-        return FL_RESULT_ERR;
     /* Stores written before heritage key ids or account keys lack these columns: add them in place. */
-    if (sqlite3_prepare_v2(sql, "PRAGMA table_info(users);", -1, &st, NULL) != SQLITE_OK)
+    static const fl_sqlite_column_t heritage_columns[] = {
+        {"key_id", "TEXT NOT NULL DEFAULT ''"},
+        {"created_by", "TEXT NOT NULL DEFAULT ''"},
+        {"created_at", "INTEGER NOT NULL DEFAULT 0"},
+        {"signing_public", "TEXT NOT NULL DEFAULT ''"},
+        {"signing_sealed", "TEXT NOT NULL DEFAULT ''"},
+        {"box_public", "TEXT NOT NULL DEFAULT ''"},
+        {"box_sealed", "TEXT NOT NULL DEFAULT ''"},
+    };
+
+    if (fl_sqlite_exec(sql, "user_db", schema) != FL_RESULT_OK)
         return FL_RESULT_ERR;
-    while (sqlite3_step(st) == SQLITE_ROW) {
-        const char *col = (const char *)sqlite3_column_text(st, 1);
-        for (i = 0; col && i < N_COLUMNS; i++) {
-            if (strcmp(col, heritage_names[i]) == 0)
-                have[i] = 1;
-        }
-    }
-    sqlite3_finalize(st);
-    for (i = 0; i < N_COLUMNS; i++) {
-        if (!have[i] && db_exec(sql, heritage_columns[i]) != FL_RESULT_OK)
-            return FL_RESULT_ERR;
-    }
-    return FL_RESULT_OK;
+    return fl_sqlite_ensure_columns(sql, "user_db", "users", heritage_columns,
+                                    sizeof(heritage_columns) / sizeof(heritage_columns[0]));
 }
 
 static fl_result_t db_read_meta_default(sqlite3 *db, char *out, size_t outsz) {
@@ -130,9 +99,11 @@ static fl_result_t provision_box(fl_user_record_t *u, const char *password) {
     unsigned char sealed[FL_USER_SIGNING_SEALED_LEN];
     size_t sealed_len = 0;
     fl_result_t rc = FL_RESULT_ERR;
+    const fl_kq_driver_t *kq = fl_kq_driver_get_or_register();
 
-    if (kq_account_box_keygen(secret, u->box_public) == KQ_ACCOUNT_OK &&
-        kq_account_seal(password, secret, sealed, sizeof sealed, &sealed_len) == KQ_ACCOUNT_OK &&
+    if (kq && kq->account_box_keygen(secret, u->box_public) == FL_KQ_ACCOUNT_OK &&
+        kq->account_seal(password, secret, sealed, sizeof sealed, &sealed_len) ==
+            FL_KQ_ACCOUNT_OK &&
         sealed_len == sizeof sealed) {
         memcpy(u->box_sealed, sealed, sizeof sealed);
         u->has_box = 1;
@@ -153,9 +124,11 @@ static fl_result_t provision_key(fl_user_record_t *u, const char *password) {
     unsigned char sealed[FL_USER_SIGNING_SEALED_LEN];
     size_t sealed_len = 0;
     fl_result_t rc = FL_RESULT_ERR;
+    const fl_kq_driver_t *kq = fl_kq_driver_get_or_register();
 
-    if (kq_account_keygen(secret, u->signing_public) == KQ_ACCOUNT_OK &&
-        kq_account_seal(password, secret, sealed, sizeof sealed, &sealed_len) == KQ_ACCOUNT_OK &&
+    if (kq && kq->account_keygen(secret, u->signing_public) == FL_KQ_ACCOUNT_OK &&
+        kq->account_seal(password, secret, sealed, sizeof sealed, &sealed_len) ==
+            FL_KQ_ACCOUNT_OK &&
         sealed_len == sizeof sealed) {
         memcpy(u->signing_sealed, sealed, sizeof sealed);
         u->has_key = 1;
@@ -421,10 +394,10 @@ static fl_result_t db_save_conn(sqlite3 *sql, const fl_user_db_t *db) {
     size_t i;
     fl_result_t rc = FL_RESULT_OK;
 
-    if (db_exec(sql, "BEGIN TRANSACTION;") != FL_RESULT_OK)
+    if (fl_sqlite_exec(sql, "user_db", "BEGIN TRANSACTION;") != FL_RESULT_OK)
         return FL_RESULT_ERR;
-    if (db_exec(sql, "DELETE FROM users;") != FL_RESULT_OK) {
-        (void)db_exec(sql, "ROLLBACK;");
+    if (fl_sqlite_exec(sql, "user_db", "DELETE FROM users;") != FL_RESULT_OK) {
+        (void)fl_sqlite_exec(sql, "user_db", "ROLLBACK;");
         return FL_RESULT_ERR;
     }
     for (i = 0; i < db->count; i++) {
@@ -436,10 +409,10 @@ static fl_result_t db_save_conn(sqlite3 *sql, const fl_user_db_t *db) {
     if (rc == FL_RESULT_OK && db->default_user[0])
         rc = db_write_meta_default(sql, db->default_user);
     if (rc == FL_RESULT_OK) {
-        if (db_exec(sql, "COMMIT;") != FL_RESULT_OK)
+        if (fl_sqlite_exec(sql, "user_db", "COMMIT;") != FL_RESULT_OK)
             rc = FL_RESULT_ERR;
     } else {
-        (void)db_exec(sql, "ROLLBACK;");
+        (void)fl_sqlite_exec(sql, "user_db", "ROLLBACK;");
     }
     return rc;
 }
@@ -729,11 +702,11 @@ fl_result_t fl_user_db_set_password(fl_user_db_t *db, const char *name, const ch
     if (hash_password_fields(password, updated.password_hash, sizeof(updated.password_hash),
                              updated.salt_hex, sizeof(updated.salt_hex)) != FL_RESULT_OK ||
         provision_key(&updated, password) != FL_RESULT_OK) {
-        mem_domain_zero(&updated, sizeof updated);
+        mem_domain_secure_zero(&updated, sizeof updated);
         return FL_RESULT_ERR;
     }
     *u = updated;
-    mem_domain_zero(&updated, sizeof updated);
+    mem_domain_secure_zero(&updated, sizeof updated);
     return FL_RESULT_OK;
 }
 
@@ -744,6 +717,7 @@ fl_result_t fl_user_db_change_password(fl_user_db_t *db, const char *name,
     unsigned char secret[FL_USER_SIGNING_SECRET_LEN];
     size_t sealed_len = 0;
     fl_result_t rc = FL_RESULT_OK;
+    const fl_kq_driver_t *kq = fl_kq_driver_get_or_register();
 
     if (!db || !name || !current || !password)
         return FL_RESULT_INVAL;
@@ -758,10 +732,11 @@ fl_result_t fl_user_db_change_password(fl_user_db_t *db, const char *name,
         rc = FL_RESULT_ERR;
     else if (!u->has_key)
         rc = provision_key(&updated, password);
-    else if (kq_account_open(current, u->signing_sealed, sizeof u->signing_sealed, secret) !=
-                 KQ_ACCOUNT_OK ||
-             kq_account_seal(password, secret, updated.signing_sealed, sizeof updated.signing_sealed,
-                             &sealed_len) != KQ_ACCOUNT_OK ||
+    else if (!kq ||
+             kq->account_open(current, u->signing_sealed, sizeof u->signing_sealed, secret) !=
+                 FL_KQ_ACCOUNT_OK ||
+             kq->account_seal(password, secret, updated.signing_sealed,
+                              sizeof updated.signing_sealed, &sealed_len) != FL_KQ_ACCOUNT_OK ||
              sealed_len != sizeof updated.signing_sealed)
         rc = FL_RESULT_ERR;
     mem_domain_secure_zero(secret, sizeof secret);
@@ -771,16 +746,17 @@ fl_result_t fl_user_db_change_password(fl_user_db_t *db, const char *name,
     /* Only a box key carried forward is resealed: without a signing key, provision_key above
      * already made a new box pair, which must not be overwritten with the old secret. */
     else if (rc == FL_RESULT_OK && u->has_key && u->has_box &&
-             (kq_account_open(current, u->box_sealed, sizeof u->box_sealed, secret) !=
-                  KQ_ACCOUNT_OK ||
-              kq_account_seal(password, secret, updated.box_sealed, sizeof updated.box_sealed,
-                              &sealed_len) != KQ_ACCOUNT_OK ||
+             (!kq ||
+              kq->account_open(current, u->box_sealed, sizeof u->box_sealed, secret) !=
+                  FL_KQ_ACCOUNT_OK ||
+              kq->account_seal(password, secret, updated.box_sealed, sizeof updated.box_sealed,
+                               &sealed_len) != FL_KQ_ACCOUNT_OK ||
               sealed_len != sizeof updated.box_sealed))
         rc = FL_RESULT_ERR;
     mem_domain_secure_zero(secret, sizeof secret);
     if (rc == FL_RESULT_OK)
         *u = updated;
-    mem_domain_zero(&updated, sizeof updated);
+    mem_domain_secure_zero(&updated, sizeof updated);
     return rc;
 }
 
@@ -853,6 +829,7 @@ static int record_secret_matches(const fl_user_record_t *u, fl_user_secret_kind_
     const unsigned char *stored;
     int derive_rc;
     int ok;
+    const fl_kq_driver_t *kq = fl_kq_driver_get_or_register();
 
     if (!u || !secret)
         return 0;
@@ -860,16 +837,16 @@ static int record_secret_matches(const fl_user_record_t *u, fl_user_secret_kind_
         if (!u->has_key)
             return 0;
         stored = u->signing_public;
-        derive_rc = kq_account_public(secret, derived);
+        derive_rc = kq ? kq->account_public(secret, derived) : FL_KQ_ACCOUNT_INVALID;
     } else if (kind == FL_USER_SECRET_BOX) {
         if (!u->has_box)
             return 0;
         stored = u->box_public;
-        derive_rc = kq_account_box_public(secret, derived);
+        derive_rc = kq ? kq->account_box_public(secret, derived) : FL_KQ_ACCOUNT_INVALID;
     } else {
         return 0;
     }
-    ok = derive_rc == KQ_ACCOUNT_OK &&
+    ok = derive_rc == FL_KQ_ACCOUNT_OK &&
          asm_mem_ct_equal(derived, stored, sizeof derived) != 0;
     mem_domain_secure_zero(derived, sizeof derived);
     return ok;
@@ -882,13 +859,14 @@ int fl_user_db_secret_matches(const fl_user_db_t *db, const char *key_id,
     return record_secret_matches(fl_user_db_find_by_key(db, key_id), kind, secret);
 }
 
-/* Opens the sealed secret of kind for the account name. Once kq_account_open has been
+/* Opens the sealed secret of kind for the account name. Once the driver's account_open has been
  * called, every return other than OK leaves secret securely zeroed. */
 static fl_result_t open_sealed(const fl_user_db_t *db, const char *name, const char *password,
                                fl_user_secret_kind_t kind, unsigned char *secret) {
     const fl_user_record_t *u;
     const unsigned char *sealed;
     size_t sealed_len;
+    const fl_kq_driver_t *kq;
     int rc;
 
     if (!db || !name || !password || !secret)
@@ -905,10 +883,13 @@ static fl_result_t open_sealed(const fl_user_db_t *db, const char *name, const c
     } else {
         return FL_RESULT_NOENT;
     }
-    rc = kq_account_open(password, sealed, sealed_len, secret);
-    if (rc != KQ_ACCOUNT_OK) {
+    kq = fl_kq_driver_get_or_register();
+    if (!kq)
+        return FL_RESULT_ERR;
+    rc = kq->account_open(password, sealed, sealed_len, secret);
+    if (rc != FL_KQ_ACCOUNT_OK) {
         mem_domain_secure_zero(secret, FL_USER_SIGNING_SECRET_LEN);
-        return rc == KQ_ACCOUNT_WRONG_PASSWORD ? FL_RESULT_ACCES : FL_RESULT_ERR;
+        return rc == FL_KQ_ACCOUNT_WRONG_PASSWORD ? FL_RESULT_ACCES : FL_RESULT_ERR;
     }
     /* The sealed secret must be the one the stored public key names. */
     if (!record_secret_matches(u, kind, secret)) {

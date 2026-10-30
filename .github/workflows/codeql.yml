@@ -1,0 +1,125 @@
+# CodeQL static analysis of the project: the C and C++ kernel, shell and tests (traced through
+# `make`), the browser lab's JavaScript, the Python scripts and tests, and this repository's own
+# workflows (a changed workflow is a changed control).
+#
+# CodeQL has no assembly extractor. The GAS (.s, .S) and NASM (.asm) layers under arch/ and
+# kernel/arch/ are therefore NOT analysed here; the C that calls them is, and the assembly stays
+# with human review (the Security seat's SOC 2 review, soc2-review.md). Shell scripts are not
+# supported either.
+#
+# The suite is security-and-quality (.github/codeql/codeql-config.yml).
+# .github/scripts/codeql_report.py prints each finding with its source, a quote of that source,
+# the offending lines and its SOC 2 criterion (the five parts the review rules in AGENTS.md ask
+# for), and fails the `codeql gate` check on a high or critical finding in shipped code.
+# scripts/codeql_local.sh runs the same analysis and the same report for the Security seat before
+# a push; CI is the record on the pushed head.
+#
+# Known findings are recorded in .github/codeql/accepted-findings.json, each with a disposition, a
+# written justification, an owner and a review date (docs/SOC2_CODEQL.md); a new finding, or an
+# entry past its review date, fails the gate.
+#
+# It reads, scans and reports; it never publishes, merges or writes to the repository.
+
+name: CodeQL
+
+on:
+  push:
+    branches: ["develop", "main"]
+  pull_request:
+    branches: ["develop", "main"]
+  schedule:
+    - cron: "41 4 * * 1"
+  workflow_dispatch:
+
+concurrency:
+  group: codeql-${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  codeql:
+    name: codeql (${{ matrix.language }})
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      security-events: write
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          # The kernel, shell and tests: built by `make`, which CodeQL traces.
+          - language: c-cpp
+            build-mode: manual
+          # The browser lab's scripts and tools.
+          - language: javascript-typescript
+            build-mode: none
+          # scripts/ and tests/.
+          - language: python
+            build-mode: none
+          # .github/workflows and the local actions.
+          - language: actions
+            build-mode: none
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v5
+        with:
+          submodules: true
+          persist-credentials: false
+
+      # C and C++ only: the shell links KeyQuorum's Rust library and needs these headers. The
+      # library is built before CodeQL starts tracing, so only this project's C is extracted,
+      # not SQLite's amalgamation from the crate's build script.
+      - name: Install Rust (KeyQuorum identity library)
+        if: matrix.language == 'c-cpp'
+        uses: dtolnay/rust-toolchain@89b12181fb390509a0842a86cc55eeb8eb928c1d # stable branch
+        with:
+          toolchain: stable
+      - name: Install dependencies
+        if: matrix.language == 'c-cpp'
+        run: sudo apt-get update -y && sudo apt-get install -y gcc g++ binutils nasm libsqlite3-dev libssl-dev
+      - name: Build the KeyQuorum library (before tracing)
+        if: matrix.language == 'c-cpp'
+        run: cargo build --release --locked --manifest-path third_party/keyquorum/ffi/identity/Cargo.toml
+
+      - uses: github/codeql-action/init@9b3254085494b55a0f7c4c2b3d2d52cc712ce370 # v4.39.1
+        with:
+          languages: ${{ matrix.language }}
+          build-mode: ${{ matrix.build-mode }}
+          config-file: ./.github/codeql/codeql-config.yml
+
+      - name: Build (traced by CodeQL)
+        if: matrix.language == 'c-cpp'
+        run: make ARCH=x86_64_gas
+
+      - uses: github/codeql-action/analyze@9b3254085494b55a0f7c4c2b3d2d52cc712ce370 # v4.39.1
+        with:
+          category: "/language:${{ matrix.language }}"
+          output: sarif-results
+
+      # Same form as the review rules in AGENTS.md: source, source quote, the quoted lines, the
+      # SOC 2 criterion and the fix. Fails on a high or critical finding in shipped code.
+      - name: Test the report script
+        run: python3 -m unittest discover -s .github/scripts
+      - name: Report findings with their SOC 2 criterion
+        run: python3 .github/scripts/codeql_report.py sarif-results/*.sarif
+      # The full SARIF (every finding with its data-flow path) is kept as evidence, whether or
+      # not the report step passed.
+      - name: Keep the SARIF
+        if: always()
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: codeql-sarif-${{ matrix.language }}-${{ github.sha }}
+          path: sarif-results
+          if-no-files-found: warn
+          retention-days: 90
+
+  # One stable check name for all CodeQL languages, for branch protection.
+  codeql-gate:
+    name: codeql gate
+    needs: codeql
+    if: always()
+    runs-on: ubuntu-latest
+    steps:
+      - name: Every CodeQL language passed
+        run: test "${{ needs.codeql.result }}" = success

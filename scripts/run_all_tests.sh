@@ -96,16 +96,21 @@ run_make "test_issue222" test_issue222
 run_make "test_audit_log" test_audit_log
 run_make "test_fs_jail" test_fs_jail
 run_make "test_heritage" test_heritage
+run_make "test_sqlite_schema" test_sqlite_schema
 run_make "test_fs_helpers" test_fs_helpers
+run_make "test_fs_provider_bytes" test_fs_provider_bytes
 run_make "test_hex" test_hex
 run_make "test_secret_compare" test_secret_compare
 run_make "test_random" test_random
 run_make "test_kq_checkpoint" test_kq_checkpoint
 run_make "test_kq_delivery" test_kq_delivery
 run_make "test_kq_net" test_kq_net
+run_make "test_kq_wire" test_kq_wire
 run_make "test_part_buf" test_part_buf
+run_make "test_codeql_scripts" test_codeql_scripts
 
 run_make "test_server_file_expire" test_server_file_expire
+run_make "test_net_codec" test_net_codec
 run_make "test_server_file_meta" test_server_file_meta
 run_make "test_server_shared_catalog" test_server_shared_catalog
 run_make "test_file_history" test_file_history

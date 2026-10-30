@@ -203,8 +203,58 @@ static int test_offer_decode_refuses_embedded_nul(void) {
     return 0;
 }
 
+/* fl_wire_put_bytes16 / fl_wire_get_bytes16: all or nothing on both sides. */
+static int test_bytes16_all_or_nothing(void)
+{
+    uint8_t buf[8];
+    const uint8_t data[4] = { 1, 2, 3, 4 };
+    fl_bytes_writer_t w;
+    fl_bytes_view_t v;
+    uint16_t off;
+    size_t i;
+
+    /* No room for the field: nothing written, not even the prefix or zero fill. */
+    memset(buf, 0xAA, sizeof buf);
+    fl_bytes_writer_init(&w, buf, 5);
+    ASSERT(fl_wire_put_bytes16(&w, data, 4) == FL_RESULT_NOMEM && w.len == 0u);
+    ASSERT(fl_wire_put_bytes16(&w, NULL, 4) == FL_RESULT_NOMEM && w.len == 0u);
+    for (i = 0; i < sizeof buf; i++)
+        ASSERT(buf[i] == 0xAAu);
+    fl_bytes_writer_init(&w, buf, 1);
+    ASSERT(fl_wire_put_bytes16(&w, data, 0) == FL_RESULT_NOMEM && w.len == 0u && buf[0] == 0xAAu);
+    ASSERT(fl_wire_put_bytes16(NULL, data, 1) == FL_RESULT_INVAL);
+
+    /* Zero-length field: the prefix only. */
+    fl_bytes_writer_init(&w, buf, 8);
+    ASSERT(fl_wire_put_bytes16(&w, NULL, 0) == FL_RESULT_OK && w.len == 2u);
+    ASSERT(buf[0] == 0u && buf[1] == 0u && buf[2] == 0xAAu);
+
+    /* Exactly fits, with data and with zero fill. */
+    fl_bytes_writer_init(&w, buf, 6);
+    ASSERT(fl_wire_put_bytes16(&w, data, 4) == FL_RESULT_OK && w.len == 6u);
+    ASSERT(buf[0] == 0u && buf[1] == 4u && buf[2] == 1u && buf[5] == 4u);
+    memset(buf, 0xAA, sizeof buf);
+    fl_bytes_writer_init(&w, buf, 8);
+    ASSERT(fl_wire_put_bytes16(&w, NULL, 3) == FL_RESULT_OK && w.len == 5u);
+    ASSERT(buf[1] == 3u && buf[2] == 0u && buf[4] == 0u && buf[5] == 0xAAu);
+
+    /* Round trip, then a short field: the offset does not move. */
+    fl_bytes_writer_init(&w, buf, 8);
+    ASSERT(fl_wire_put_bytes16(&w, data, 4) == FL_RESULT_OK);
+    off = 0;
+    ASSERT(fl_wire_get_bytes16(buf, w.len, &off, &v) == FL_RESULT_OK);
+    ASSERT(off == 6u && v.len == 4u && memcmp(v.data, data, 4) == 0);
+    off = 0;
+    ASSERT(fl_wire_get_bytes16(buf, 5, &off, &v) != FL_RESULT_OK && off == 0u);
+    off = 0;
+    ASSERT(fl_wire_get_bytes16(buf, 1, &off, &v) != FL_RESULT_OK && off == 0u);
+    return 0;
+}
+
 int main(void)
 {
+    if (test_bytes16_all_or_nothing() != 0)
+        return 1;
     if (test_meta_roundtrip() != 0)
         return 1;
     if (test_host_action_recorded_once() != 0)

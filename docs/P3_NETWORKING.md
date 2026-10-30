@@ -167,6 +167,8 @@ distro-style verbs ride on for hot writes.
 - The endian helpers are the **first-class internal architecture import**.
   They never delegate to libc. ASM is the preferred backend; pure bit-shift
   is the K/B / cross-arch fallback. See `kernel/core/net/net_endian.h`.
+  The bounded reader and writer built on them (the one codec for session,
+  file-delivery and KeyQuorum frames) is `kernel/core/net/net_codec.h`.
 - The packet module (`net_packet.c`) and wire builders (`net_wire*.c`)
   build every frame through `fl_net_put_u16_be` / `fl_net_put_u32_nbo`
   (memcpy-clean, host-endian independent) plus `fl_net_htons` / `fl_net_htonl`

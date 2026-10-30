@@ -138,6 +138,9 @@ jobs:
       - name: Test — account heritage (key ids, bridges, jail homes)
         run: make test_heritage
 
+      - name: Test — shared SQLite schema helper
+        run: make test_sqlite_schema
+
       - name: Test — shared fs helpers
         run: make test_fs_helpers
 

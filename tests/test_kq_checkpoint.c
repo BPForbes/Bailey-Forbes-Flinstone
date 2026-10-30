@@ -7,6 +7,10 @@
  * (Steve), with every refusal on the way.
  */
 #include "kq_checkpoint.h"
+#include "fs_events.h"
+#include "fs_facade.h"
+#include "fs_provider.h"
+#include "kq_storage_facade.h"
 #include "fl/mem_asm.h"
 #include "mem_domain.h"
 #include "server_shared_fs.h"
@@ -87,11 +91,18 @@ typedef struct {
     unsigned char flinstone_sign[FL_USER_SIGNING_SECRET_LEN];
 } world_t;
 
+/* The checkpoint binary does not call drivers_init. Register the real descriptor
+ * through the registry before any fl_kq_driver_get. */
+static void register_kq_driver(void) {
+    (void)fl_kq_driver_get_or_register();
+}
+
 static int setup(world_t *w) {
     static int n;
     char name[32];
     char db_path[PATH_MAX];
 
+    register_kq_driver();
     /* A fresh store per test; the lab defaults provide Root.Flinstone and Root.Alternative. */
     snprintf(name, sizeof name, "users-%d.db", ++n);
     path_in(db_path, sizeof db_path, name);
@@ -161,9 +172,12 @@ static int prepare_permitted(world_t *w, const char *src, const char *text, cons
 
 static int test_driver_extends_the_base_driver(void) {
     const fl_driver_desc_t *base = fl_kq_driver_desc();
-    const fl_kq_driver_t *drv = fl_kq_driver_get();
+    const fl_kq_driver_t *drv;
 
+    register_kq_driver();
+    drv = fl_kq_driver_get();
     ASSERT(base && drv);
+    ASSERT(base == fl_kq_driver_desc());
     ASSERT(base->class == FL_DRV_CLASS_SECURITY);
     ASSERT(strcmp(base->name, "keyquorum") == 0 && strcmp(base->synth_id, "keyquorum") == 0);
     ASSERT(base->ops && base->ops->probe && base->ops->probe(NULL) == FL_RESULT_OK);
@@ -174,7 +188,10 @@ static int test_driver_extends_the_base_driver(void) {
 }
 
 static int test_driver_probe(void) {
-    const fl_kq_driver_t *drv = fl_kq_driver_get();
+    const fl_kq_driver_t *drv;
+
+    register_kq_driver();
+    drv = fl_kq_driver_get();
     ASSERT(drv);
     ASSERT(drv->wipe == mem_domain_secure_zero && drv->equal == asm_mem_ct_equal);
     return 0;
@@ -182,7 +199,10 @@ static int test_driver_probe(void) {
 
 /* An output that is also the input stays intact during the call and is replaced on success. */
 static int test_driver_output_may_alias_its_input(void) {
-    const fl_kq_driver_t *drv = fl_kq_driver_get();
+    const fl_kq_driver_t *drv;
+
+    register_kq_driver();
+    drv = fl_kq_driver_get();
     world_t w;
     fl_kq_buf_t c = {0};
     uint8_t file_id[16], rev[32], head[32];
@@ -459,7 +479,7 @@ static int test_a_damaged_history_is_refused(void) {
  * nor the newest container naming an old revision (a rollback) is accepted. */
 static int test_the_seen_record_stays_bounded(void) {
     enum { DELIVERIES = 70, KEEP = 64 };
-    const fl_kq_driver_t *drv = fl_kq_driver_get();
+    const fl_kq_driver_t *drv;
     world_t w;
     fl_kq_encoded_t first, enc;
     char src[PATH_MAX], dest[PATH_MAX], seen[PATH_MAX + 16], side[PATH_MAX + 16];
@@ -468,6 +488,8 @@ static int test_the_seen_record_stays_bounded(void) {
     const unsigned char *mya_pub;
     struct stat st;
 
+    register_kq_driver();
+    drv = fl_kq_driver_get();
     ASSERT(drv && setup(&w) == 0);
     mya_pub = fl_user_db_signing_public(&w.db, MYA);
     path_in(src, sizeof src, "bounded.txt");
@@ -559,6 +581,83 @@ static int test_history_is_offline_and_named(void) {
     ASSERT(strcmp(fl_kq_cp_outcome_name(1), "Success") == 0);
     fl_kq_buf_free(&lines);
     teardown(&w);
+    return 0;
+}
+
+/* Pins the names KeyQuorum exports (kq_file_event_name / kq_file_outcome_name, through the driver)
+ * to its wire codes (src/file_history/event.rs: HistoryEventType 1..=47 and HistoryOutcome 1..=4,
+ * "never renumber, only append"). The literals below are an independent expected list: a renamed
+ * or renumbered variant fails here, and a new variant is appended here. Flinstone keeps no table
+ * of its own. */
+static int test_event_and_outcome_names_pinned(void) {
+    static const char *const events[] = {
+        /*  1 */ "TrackingStarted",
+        /*  2 */ "EditCheckedIn",
+        /*  3 */ "RevisionSigned",
+        /*  4 */ "CountersignatureAdded",
+        /*  5 */ "PolicyDecision",
+        /*  6 */ "ShareAttempted",
+        /*  7 */ "ShareDelivered",
+        /*  8 */ "FileExpired",
+        /*  9 */ "ContentDestroyed",
+        /* 10 */ "TamperDetected",
+        /* 11 */ "AutoMergeAttempted",
+        /* 12 */ "AutoMergeFastForward",
+        /* 13 */ "AutoMergeEquivalent",
+        /* 14 */ "AutoMergeClean",
+        /* 15 */ "AutoMergeBlocked",
+        /* 16 */ "AutoMergeRequiresHuman",
+        /* 17 */ "HistoryForkDetected",
+        /* 18 */ "ContentConflictDetected",
+        /* 19 */ "ConflictReviewAssigned",
+        /* 20 */ "ConflictReviewEscalated",
+        /* 21 */ "BridgeUsed",
+        /* 22 */ "ConflictUnresolved",
+        /* 23 */ "HistoryImported",
+        /* 24 */ "QuorumUnlockAttempted",
+        /* 25 */ "PasswordUnlockAttempted",
+        /* 26 */ "ExpiredAccessAttempt",
+        /* 27 */ "GateLinked",
+        /* 28 */ "ShareLinkCreated",
+        /* 29 */ "ShareLinkRedeemed",
+        /* 30 */ "ShareLinkRevoked",
+        /* 31 */ "ExpiryScheduled",
+        /* 32 */ "FileRenamed",
+        /* 33 */ "RevisionFinalized",
+        /* 34 */ "ConflictResolved",
+        /* 35 */ "MergeRejected",
+        /* 36 */ "RevisionCheckedOut",
+        /* 37 */ "VerificationRun",
+        /* 38 */ "HistoryExported",
+        /* 39 */ "FileRequested",
+        /* 40 */ "ChangeRequested",
+        /* 41 */ "RequestAnswered",
+        /* 42 */ "LetterQueued",
+        /* 43 */ "LetterSent",
+        /* 44 */ "LetterDropped",
+        /* 45 */ "LetterRefused",
+        /* 46 */ "LetterReceived",
+        /* 47 */ "LetterOpened",
+    };
+    static const char *const outcomes[] = {"Success", "Failure", "Denied", "Info"};
+    const size_t n_events = sizeof events / sizeof events[0];
+    const size_t n_outcomes = sizeof outcomes / sizeof outcomes[0];
+    unsigned c;
+
+    ASSERT(n_events == 47u);
+    ASSERT(n_outcomes == 4u);
+    for (c = 1; c <= n_events; c++)
+        ASSERT(strcmp(fl_kq_cp_event_name((uint8_t)c), events[c - 1u]) == 0);
+    for (c = 1; c <= n_outcomes; c++)
+        ASSERT(strcmp(fl_kq_cp_outcome_name((uint8_t)c), outcomes[c - 1u]) == 0);
+
+    /* Every code outside the table falls back to "?" (never NULL, never an out-of-bounds read). */
+    ASSERT(strcmp(fl_kq_cp_event_name(0), "?") == 0);
+    for (c = (unsigned)n_events + 1u; c <= 255u; c++)
+        ASSERT(strcmp(fl_kq_cp_event_name((uint8_t)c), "?") == 0);
+    ASSERT(strcmp(fl_kq_cp_outcome_name(0), "?") == 0);
+    for (c = (unsigned)n_outcomes + 1u; c <= 255u; c++)
+        ASSERT(strcmp(fl_kq_cp_outcome_name((uint8_t)c), "?") == 0);
     return 0;
 }
 
@@ -747,6 +846,327 @@ static int test_only_plain_file_names_are_safe(void) {
     return 0;
 }
 
+
+/* ---- the storage table (kq_storage.h) ------------------------------------ */
+
+/* A table that forwards to the default and counts each call, so a test can see that every
+ * checkpoint read and write goes through it. */
+typedef struct {
+    int read_file, write_atomic, exists, dir_open, dir_close, dir_read, dir_exists, dir_read_tail,
+        dir_commit;
+    int fail_exists;     /* answer "cannot tell" to exists */
+    int fail_commit;     /* refuse dir_commit */
+} counts_t;
+
+static counts_t s_counts;
+
+static int c_read_file(void *ctx, const char *path, size_t max, uint8_t **data, size_t *len) {
+    (void)ctx;
+    s_counts.read_file++;
+    return fl_kq_storage_default()->read_file(NULL, path, max, data, len);
+}
+static int c_write_atomic(void *ctx, const char *path, const uint8_t *data, size_t len) {
+    (void)ctx;
+    s_counts.write_atomic++;
+    return fl_kq_storage_default()->write_atomic(NULL, path, data, len);
+}
+static int c_exists(void *ctx, const char *path) {
+    (void)ctx;
+    s_counts.exists++;
+    if (s_counts.fail_exists)
+        return -1;
+    return fl_kq_storage_default()->exists(NULL, path);
+}
+static int c_dir_open(void *ctx, const char *dir, fl_kq_dir_t *out) {
+    (void)ctx;
+    s_counts.dir_open++;
+    return fl_kq_storage_default()->dir_open(NULL, dir, out);
+}
+static void c_dir_close(void *ctx, fl_kq_dir_t *d) {
+    (void)ctx;
+    s_counts.dir_close++;
+    fl_kq_storage_default()->dir_close(NULL, d);
+}
+static int c_dir_read(void *ctx, const fl_kq_dir_t *d, const char *name, size_t max,
+                      uint8_t **data, size_t *len) {
+    (void)ctx;
+    s_counts.dir_read++;
+    return fl_kq_storage_default()->dir_read(NULL, d, name, max, data, len);
+}
+static int c_dir_exists(void *ctx, const fl_kq_dir_t *d, const char *name) {
+    (void)ctx;
+    s_counts.dir_exists++;
+    return fl_kq_storage_default()->dir_exists(NULL, d, name);
+}
+static int c_dir_read_tail(void *ctx, const fl_kq_dir_t *d, const char *name, size_t unit,
+                           size_t keep, uint8_t **data, size_t *len) {
+    (void)ctx;
+    s_counts.dir_read_tail++;
+    return fl_kq_storage_default()->dir_read_tail(NULL, d, name, unit, keep, data, len);
+}
+static int c_dir_commit(void *ctx, const fl_kq_dir_t *d, const fl_kq_file_out_t *files,
+                        size_t n) {
+    (void)ctx;
+    s_counts.dir_commit++;
+    if (s_counts.fail_commit)
+        return -1;
+    return fl_kq_storage_default()->dir_commit(NULL, d, files, n);
+}
+
+static const fl_kq_storage_t k_counting = {
+    NULL,        c_read_file,  c_write_atomic,  c_exists,       c_dir_open,
+    c_dir_close, c_dir_read,   c_dir_exists,    c_dir_read_tail, c_dir_commit,
+};
+
+static void use_counting(void) {
+    memset(&s_counts, 0, sizeof s_counts);
+    (void)fl_kq_cp_set_storage(&k_counting);
+}
+
+static void use_default(void) {
+    (void)fl_kq_cp_set_storage(NULL);
+}
+
+/* Every checkpoint that touches a file does it through the installed table. */
+static int test_checkpoints_use_the_storage_table(void) {
+    world_t w;
+    fl_kq_encoded_t enc;
+    fl_kq_buf_t lines = {0};
+    char src[PATH_MAX], dest[PATH_MAX], got[64];
+    uint8_t sig[64], head[32];
+
+    ASSERT(fl_kq_cp_storage() == fl_kq_storage_default());
+    ASSERT(setup(&w) == 0);
+    path_in(src, sizeof src, "routed.txt");
+    path_in(dest, sizeof dest, "routed-copy.txt");
+    ASSERT(write_text(src, "routed\n") == 0);
+
+    use_counting();
+    ASSERT(fl_kq_cp_storage() == &k_counting);
+    ASSERT(fl_kq_cp_encode(&w.db, MYA, w.mya_sign, STEVE, fl_user_db_box_public(&w.db, STEVE),
+                           src, T1, &enc) == FL_KQ_CP_OK);
+    /* the file, whether a container is there, and the new container */
+    ASSERT(s_counts.read_file == 1 && s_counts.exists == 1 && s_counts.write_atomic == 1);
+    ASSERT(fl_kq_cp_head(src, head) == FL_KQ_CP_OK);
+    ASSERT(fl_kq_cp_history(src, &lines) == FL_KQ_CP_OK);
+    fl_kq_buf_free(&lines);
+    ASSERT(s_counts.read_file == 3);
+
+    ASSERT(fl_kq_cp_cosign(&enc.offer, STEVE, w.steve_sign, sig) == FL_KQ_CP_OK);
+    ASSERT(fl_kq_cp_decode(&w.db, MYA, fl_user_db_signing_public(&w.db, MYA), STEVE, w.steve_box,
+                           &enc.letter, &enc.offer, sig, dest) == FL_KQ_CP_OK);
+    /* one held directory, opened and closed once; the leaf and its seen record looked up;
+     * the seen record read from its tail; the three files replaced together */
+    ASSERT(s_counts.dir_open == 1 && s_counts.dir_close == 1);
+    ASSERT(s_counts.dir_exists >= 1 && s_counts.dir_read_tail == 1);
+    ASSERT(s_counts.dir_commit == 1);
+    use_default();
+    ASSERT(read_text(dest, got, sizeof got) == 0 && strcmp(got, "routed\n") == 0);
+
+    fl_kq_encoded_free(&enc);
+    teardown(&w);
+    return 0;
+}
+
+/* base + suffix without a truncating snprintf into a PATH_MAX buffer. */
+static int with_suffix(char *out, size_t cap, const char *base, const char *suffix) {
+    size_t n = strlen(base), m = strlen(suffix);
+
+    if (n + m + 1u > cap)
+        return -1;
+    memcpy(out, base, n);
+    memcpy(out + n, suffix, m + 1u);
+    return 0;
+}
+
+/* A refused commit installs nothing and still releases the directory it held. */
+static int test_a_refused_commit_installs_nothing(void) {
+    world_t w;
+    fl_kq_encoded_t enc;
+    char src[PATH_MAX], dest[PATH_MAX], sidecar_path[PATH_MAX];
+    uint8_t sig[64];
+
+    ASSERT(setup(&w) == 0);
+    path_in(src, sizeof src, "refused.txt");
+    path_in(dest, sizeof dest, "refused-copy.txt");
+    ASSERT(write_text(src, "refused\n") == 0);
+    ASSERT(fl_kq_cp_encode(&w.db, MYA, w.mya_sign, STEVE, fl_user_db_box_public(&w.db, STEVE),
+                           src, T1, &enc) == FL_KQ_CP_OK);
+    ASSERT(fl_kq_cp_cosign(&enc.offer, STEVE, w.steve_sign, sig) == FL_KQ_CP_OK);
+
+    use_counting();
+    s_counts.fail_commit = 1;
+    ASSERT(fl_kq_cp_decode(&w.db, MYA, fl_user_db_signing_public(&w.db, MYA), STEVE, w.steve_box,
+                           &enc.letter, &enc.offer, sig, dest) == FL_KQ_CP_IO);
+    ASSERT(s_counts.dir_commit == 1 && s_counts.dir_open == s_counts.dir_close);
+    ASSERT(with_suffix(sidecar_path, sizeof sidecar_path, dest, FL_KQ_CONTAINER_SUFFIX) == 0);
+    ASSERT(access(dest, F_OK) != 0 && access(sidecar_path, F_OK) != 0);
+    ASSERT(with_suffix(sidecar_path, sizeof sidecar_path, dest, FL_KQ_SEEN_SUFFIX) == 0);
+    ASSERT(access(sidecar_path, F_OK) != 0);
+
+    /* the table allows it again and the same delivery then lands (nothing was half-installed) */
+    s_counts.fail_commit = 0;
+    ASSERT(fl_kq_cp_decode(&w.db, MYA, fl_user_db_signing_public(&w.db, MYA), STEVE, w.steve_box,
+                           &enc.letter, &enc.offer, sig, dest) == FL_KQ_CP_OK);
+    use_default();
+    fl_kq_encoded_free(&enc);
+    teardown(&w);
+    return 0;
+}
+
+/* A container that cannot be looked at is not "absent": encode fails instead of starting a new
+ * history over it. */
+static int test_an_unreadable_container_is_not_replaced(void) {
+    world_t w;
+    fl_kq_encoded_t enc;
+    char src[PATH_MAX];
+
+    ASSERT(setup(&w) == 0);
+    path_in(src, sizeof src, "unlooked.txt");
+    ASSERT(write_text(src, "unlooked\n") == 0);
+    use_counting();
+    s_counts.fail_exists = 1;
+    ASSERT(fl_kq_cp_encode(&w.db, MYA, w.mya_sign, STEVE, fl_user_db_box_public(&w.db, STEVE),
+                           src, T1, &enc) == FL_KQ_CP_IO);
+    ASSERT(s_counts.write_atomic == 0);
+    use_default();
+    teardown(&w);
+    return 0;
+}
+
+/* The decode that is given a held directory writes into that directory, never into whatever
+ * the path names now, and leaves the caller's handle open. */
+static int test_decode_uses_the_held_directory(void) {
+    world_t w;
+    fl_kq_encoded_t enc;
+    fl_kq_dir_t held;
+    char src[PATH_MAX], land[PATH_MAX], moved[PATH_MAX], landed[PATH_MAX], got[64];
+    struct stat st;
+    uint8_t sig[64];
+
+    ASSERT(setup(&w) == 0);
+    path_in(src, sizeof src, "held.txt");
+    path_in(land, sizeof land, "land-held");
+    path_in(moved, sizeof moved, "land-held-moved");
+    ASSERT(write_text(src, "held\n") == 0);
+    ASSERT(mkdir(land, 0700) == 0);
+    ASSERT(fl_kq_cp_encode(&w.db, MYA, w.mya_sign, STEVE, fl_user_db_box_public(&w.db, STEVE),
+                           src, T1, &enc) == FL_KQ_CP_OK);
+    ASSERT(fl_kq_cp_cosign(&enc.offer, STEVE, w.steve_sign, sig) == FL_KQ_CP_OK);
+
+    ASSERT(fl_kq_cp_storage()->dir_open(NULL, land, &held) == 0);
+    /* swap the directory for an impostor after it was held (and "checked") */
+    ASSERT(rename(land, moved) == 0);
+    ASSERT(mkdir(land, 0700) == 0);
+
+    ASSERT(fl_kq_cp_decode_in(&w.db, MYA, fl_user_db_signing_public(&w.db, MYA), STEVE,
+                              w.steve_box, &enc.letter, &enc.offer, sig, &held,
+                              "copy.txt") == FL_KQ_CP_OK);
+    ASSERT(fl_fs_join_path(landed, sizeof landed, moved, "copy.txt") == 0);
+    ASSERT(read_text(landed, got, sizeof got) == 0 && strcmp(got, "held\n") == 0);
+    ASSERT(fl_fs_join_path(landed, sizeof landed, land, "copy.txt") == 0);
+    ASSERT(access(landed, F_OK) != 0);
+    /* the caller's handle is still theirs: open, and the checkpoint did not close it */
+    ASSERT(held.fd < 0 || fstat(held.fd, &st) == 0);
+    fl_kq_cp_storage()->dir_close(NULL, &held);
+
+    /* bad arguments are refused before anything is touched */
+    ASSERT(fl_kq_cp_decode_in(&w.db, MYA, fl_user_db_signing_public(&w.db, MYA), STEVE,
+                              w.steve_box, &enc.letter, &enc.offer, sig, NULL,
+                              "copy.txt") == FL_KQ_CP_INVALID);
+    held.fd = -1;
+    held.dir = land;
+    ASSERT(fl_kq_cp_decode_in(&w.db, MYA, fl_user_db_signing_public(&w.db, MYA), STEVE,
+                              w.steve_box, &enc.letter, &enc.offer, sig, &held,
+                              "../escape") == FL_KQ_CP_INVALID);
+    fl_kq_encoded_free(&enc);
+    teardown(&w);
+    return 0;
+}
+
+
+/* ---- the native shell's table: the facade ----------------------------------- */
+
+static int s_saved;
+
+static void on_saved(const fs_event_t *ev, void *ud) {
+    (void)ev;
+    (void)ud;
+    s_saved++;
+}
+
+static int deny_seen_write(fs_access_policy_t *pol, const char *user, const char *path) {
+    (void)pol;
+    (void)user;
+    return strstr(path, FL_KQ_SEEN_SUFFIX) == NULL;
+}
+
+static int allow_any(fs_access_policy_t *pol, const char *user, const char *path) {
+    (void)pol;
+    (void)user;
+    (void)path;
+    return 1;
+}
+
+static const fs_access_policy_vtable_t k_deny_seen_vt = {allow_any, deny_seen_write, allow_any};
+
+/* With the facade installed every checkpoint read and write is the facade's: the save event
+ * follows each file of a delivery, and a policy that refuses one member of the decode's
+ * commit stops all three before any is staged. */
+static int test_checkpoints_through_the_facade(void) {
+    world_t w;
+    fl_kq_encoded_t enc;
+    fs_provider_t *prov;
+    file_manager_service_t *svc;
+    fs_access_policy_t deny = {&k_deny_seen_vt, NULL};
+    fl_kq_storage_t table;
+    char src[PATH_MAX], dest[PATH_MAX], got[64], extra[PATH_MAX];
+    uint8_t sig[64];
+
+    ASSERT(setup(&w) == 0);
+    path_in(src, sizeof src, "face.txt");
+    path_in(dest, sizeof dest, "face-copy.txt");
+    ASSERT(write_text(src, "through the facade\n") == 0);
+    fs_events_init();
+    fs_events_subscribe(FS_EV_FILE_SAVED, on_saved, NULL);
+    ASSERT((prov = fs_local_provider_create()) != NULL);
+    ASSERT((svc = fm_service_create(prov)) != NULL);
+    ASSERT(fl_kq_storage_facade(svc, &table) == &table);
+    ASSERT(fl_kq_storage_facade(NULL, &table) == NULL);
+    (void)fl_kq_cp_set_storage(&table);
+
+    /* encode: the container is written by the facade (one save event) */
+    s_saved = 0;
+    ASSERT(fl_kq_cp_encode(&w.db, MYA, w.mya_sign, STEVE, fl_user_db_box_public(&w.db, STEVE),
+                           src, T1, &enc) == FL_KQ_CP_OK);
+    ASSERT(s_saved == 1);
+    ASSERT(fl_kq_cp_cosign(&enc.offer, STEVE, w.steve_sign, sig) == FL_KQ_CP_OK);
+
+    /* a policy that refuses the seen record: nothing is staged, no event, no file */
+    fm_service_set_policy(svc, &deny);
+    s_saved = 0;
+    ASSERT(fl_kq_cp_decode(&w.db, MYA, fl_user_db_signing_public(&w.db, MYA), STEVE, w.steve_box,
+                           &enc.letter, &enc.offer, sig, dest) == FL_KQ_CP_IO);
+    ASSERT(s_saved == 0 && access(dest, F_OK) != 0);
+    ASSERT(snprintf(extra, sizeof extra, "%s.part", dest) < (int)sizeof extra &&
+           access(extra, F_OK) != 0);
+
+    /* allowed: the three files land together, one event each */
+    fm_service_set_policy(svc, NULL);
+    ASSERT(fl_kq_cp_decode(&w.db, MYA, fl_user_db_signing_public(&w.db, MYA), STEVE, w.steve_box,
+                           &enc.letter, &enc.offer, sig, dest) == FL_KQ_CP_OK);
+    ASSERT(s_saved == 3);
+    ASSERT(read_text(dest, got, sizeof got) == 0 && strcmp(got, "through the facade\n") == 0);
+
+    (void)fl_kq_cp_set_storage(NULL);
+    fl_kq_encoded_free(&enc);
+    fm_service_destroy(svc);
+    fs_provider_destroy(prov);
+    fs_events_shutdown();
+    teardown(&w);
+    return 0;
+}
+
 static int test_reasons_and_results(void) {
     ASSERT(strcmp(fl_kq_cp_reason(FL_KQ_CP_FORKED), "file forked; merge required") == 0);
     ASSERT(fl_kq_cp_to_result(FL_KQ_CP_OK) == FL_RESULT_OK);
@@ -781,8 +1201,14 @@ int main(void) {
     RUN(test_newer_needs_the_accepted_container);
     RUN(test_newer_without_the_permit_is_refused);
     RUN(test_history_is_offline_and_named);
+    RUN(test_event_and_outcome_names_pinned);
     RUN(test_for_each_event_walks_lines);
     RUN(test_only_plain_file_names_are_safe);
+    RUN(test_checkpoints_use_the_storage_table);
+    RUN(test_a_refused_commit_installs_nothing);
+    RUN(test_an_unreadable_container_is_not_replaced);
+    RUN(test_decode_uses_the_held_directory);
+    RUN(test_checkpoints_through_the_facade);
     RUN(test_reasons_and_results);
     rmrf(s_dir);
     if (rc == 0)

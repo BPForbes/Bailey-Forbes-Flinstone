@@ -76,6 +76,17 @@ fl_kq_cp_result_t fl_kq_cp_decode(const fl_user_db_t *users, const char *sender_
                                 box_secret, letter, offer, my_sig, dest_path);
 }
 
+fl_kq_cp_result_t fl_kq_cp_decode_in(const fl_user_db_t *users, const char *sender_key,
+                                     const uint8_t sender_signing_public[32], const char *me_key,
+                                     const uint8_t box_secret[32], const fl_kq_buf_t *letter,
+                                     const kq_file_offer_t *offer, const uint8_t my_sig[64],
+                                     const fl_kq_dir_t *held, const char *leaf) {
+    fl_user_db_keydir_t dir;
+
+    return fl_kq_cp_decode_in_with(KEYS(users, dir), sender_key, sender_signing_public, me_key,
+                                   box_secret, letter, offer, my_sig, held, leaf);
+}
+
 fl_kq_cp_result_t fl_kq_cp_permit(const fl_user_db_t *users, const char *supervisor_key,
                                   const uint8_t supervisor_secret[32], const char *path,
                                   const uint8_t rev[32]) {

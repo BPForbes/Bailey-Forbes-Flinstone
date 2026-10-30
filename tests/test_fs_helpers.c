@@ -12,6 +12,7 @@
 #include "server_shared_fs.h"
 
 #include <dlfcn.h>
+#include "mem_domain.h"
 #include <errno.h>
 #include <fcntl.h>
 #include <ftw.h>
@@ -120,7 +121,7 @@ static int test_reads_whole_file(void) {
     path_in(path, sizeof path, "normal");
     ASSERT(fl_fs_read_file(path, 4096u, &data, &len) == 0);
     ASSERT(data != NULL && len == sizeof in && memcmp(data, in, len) == 0);
-    free(data);
+    mem_domain_free(MEM_DOMAIN_FS, data);
     return 0;
 }
 
@@ -133,7 +134,7 @@ static int test_empty_file_gives_non_null_data(void) {
     path_in(path, sizeof path, "empty");
     ASSERT(fl_fs_read_file(path, 16u, &data, &len) == 0);
     ASSERT(data != NULL && len == 0u);
-    free(data);
+    mem_domain_free(MEM_DOMAIN_FS, data);
     return 0;
 }
 
@@ -148,7 +149,7 @@ static int test_exact_cap_and_one_over(void) {
     path_in(path, sizeof path, "cap");
     ASSERT(fl_fs_read_file(path, sizeof in, &data, &len) == 0);
     ASSERT(data != NULL && len == sizeof in);
-    free(data);
+    mem_domain_free(MEM_DOMAIN_FS, data);
     data = NULL;
     errno = 0;
     ASSERT(fl_fs_read_file(path, sizeof in - 1u, &data, &len) == -2);
@@ -199,7 +200,7 @@ static int test_symlink_is_followed_and_device_refused(void) {
     ASSERT(symlink(real, link) == 0);
     ASSERT(fl_fs_read_file(link, 16u, &data, &len) == 0); /* user-named paths follow links */
     ASSERT(data != NULL && len == sizeof in && memcmp(data, in, len) == 0);
-    free(data);
+    mem_domain_free(MEM_DOMAIN_FS, data);
     if (access("/dev/zero", F_OK) == 0) { /* skip the device check where /dev/zero is absent */
         data = (uint8_t *)&data;
         ASSERT(fl_fs_read_file("/dev/zero", 16u, &data, &len) == -1); /* not a regular file */
@@ -343,7 +344,7 @@ static int test_contained_normal_write_and_replace(void) {
     ASSERT(stat(path, &st) == 0 && (st.st_mode & 0777) == 0600);
     ASSERT(fl_fs_read_file_in(dfd, "doc.txt", 64u, &data, &len) == 0);
     ASSERT(data != NULL && len == sizeof b - 1u && memcmp(data, b, len) == 0);
-    free(data);
+    mem_domain_free(MEM_DOMAIN_FS, data);
     close(dfd);
     return 0;
 }
@@ -616,6 +617,51 @@ static int test_contained_name_operations_refuse_links(void) {
     ASSERT(fl_fs_unlink_in(dfd, "../x") != 0 && fl_fs_rename_in(dfd, "a/b", "c") != 0);
     ASSERT(fl_fs_exists_in(dfd, "..") < 0 && fl_fs_stage_file_in(-1, "f", in, 1u) != 0);
     close(dfd);
+    return 0;
+}
+
+static int test_trusted_root_is_owned_held_and_tightened(void) {
+    char dir[PATH_MAX], link[PATH_MAX], file[PATH_MAX];
+    struct stat st;
+    int fd;
+    snprintf(dir, sizeof dir, "%s/trusted_root", g_dir);
+    snprintf(link, sizeof link, "%s/trusted_root_link", g_dir);
+    snprintf(file, sizeof file, "%s/trusted_root_file", g_dir);
+    ASSERT(mkdir(dir, 0700) == 0);
+
+    /* The user's own 0700 directory is held as is. */
+    ASSERT((fd = fl_fs_trusted_root_open(dir)) >= 0);
+    ASSERT(fstat(fd, &st) == 0 && S_ISDIR(st.st_mode));
+    close(fd);
+
+    /* A loose mode on the user's own directory is tightened to 0700 on the held fd. */
+    ASSERT(chmod(dir, 0777) == 0);
+    ASSERT((fd = fl_fs_trusted_root_open(dir)) >= 0);
+    close(fd);
+    ASSERT(stat(dir, &st) == 0 && (st.st_mode & 07777) == 0700);
+
+    /* A link in the root's place and a file are refused, and the link's target is left alone. */
+    ASSERT(chmod(dir, 0755) == 0);
+    ASSERT(symlink(dir, link) == 0);
+    ASSERT(fl_fs_trusted_root_open(link) == -1);
+    ASSERT(stat(dir, &st) == 0 && (st.st_mode & 07777) == 0755);
+    ASSERT((fd = open(file, O_WRONLY | O_CREAT, 0600)) >= 0);
+    close(fd);
+    ASSERT(fl_fs_trusted_root_open(file) == -1);
+    ASSERT(fl_fs_trusted_root_open(NULL) == -1);
+
+    /* Another user's directory is refused and keeps its mode (only checkable as root). */
+    if (geteuid() == 0) {
+        ASSERT(chown(dir, 65534, 65534) == 0);
+        ASSERT(chmod(dir, 0777) == 0);
+        errno = 0;
+        ASSERT(fl_fs_trusted_root_open(dir) == -1 && errno == EPERM);
+        ASSERT(stat(dir, &st) == 0 && (st.st_mode & 07777) == 0777);
+        ASSERT(chown(dir, 0, 0) == 0);
+    }
+    unlink(link);
+    unlink(file);
+    rmdir(dir);
     return 0;
 }
 
@@ -916,6 +962,69 @@ static int name_length_checks(void) {
     return 0;
 }
 
+/* A sparse file of the given size whose first bytes are "old-bytes". */
+static int put_sparse(const char *name, off_t size) {
+    char path[300];
+
+    if (put_in(g_land, name, "old-bytes") != 0)
+        return -1;
+    snprintf(path, sizeof path, "%s/%s", g_land, name);
+    return truncate(path, size);
+}
+
+/* The file is still the one put_sparse made: same size, same first bytes. */
+static int sparse_is_intact(const char *name, off_t size) {
+    char path[300], head[16] = {0};
+    struct stat st;
+    FILE *f;
+    size_t got;
+
+    snprintf(path, sizeof path, "%s/%s", g_land, name);
+    f = fopen(path, "rb");
+    if (!f)
+        return 0;
+    got = fread(head, 1, 9, f);
+    fclose(f);
+    return got == 9u && memcmp(head, "old-bytes", 9u) == 0 && stat(path, &st) == 0 &&
+           st.st_size == size;
+}
+
+/*
+ * Without hard links the old file is copied into memory for its backup, up to 4 MiB (the bound
+ * FL_KQ_LETTER_MAX sets). One byte more is refused with EFBIG and nothing is changed; with
+ * links the backup is a link and no copy is read, so the size does not matter.
+ */
+static int test_commit_files_copy_backup_is_bounded(void) {
+    const off_t cap = 4 * 1024 * 1024;
+    const fl_fs_file_out_t files[] = {{"small", (const uint8_t *)"new-small", 9u},
+                                      {"big", (const uint8_t *)"new-big", 7u}};
+    int dfd;
+
+    ASSERT(fresh_tree() == 0);
+    dfd = fl_fs_dir_open(g_land);
+    ASSERT(dfd >= 0);
+    /* no links, one byte over the bound: refused, every file as it was, nothing left over */
+    g_no_hard_links = 1;
+    ASSERT(put_in(g_land, "small", "old-small") == 0 && put_sparse("big", cap + 1) == 0);
+    errno = 0;
+    ASSERT(fl_fs_commit_files(dfd, NULL, files, 2u) == -1 && errno == EFBIG);
+    ASSERT(holds("small", "old-small") && sparse_is_intact("big", cap + 1));
+    ASSERT(tidy("small") && tidy("big"));
+    /* no links, exactly at the bound: copied and replaced */
+    ASSERT(put_sparse("big", cap) == 0);
+    ASSERT(fl_fs_commit_files(dfd, NULL, files, 2u) == 0);
+    ASSERT(holds("small", "new-small") && holds("big", "new-big"));
+    ASSERT(tidy("small") && tidy("big"));
+    /* links available, one byte over the bound: the hard-link backup needs no copy */
+    g_no_hard_links = 0;
+    ASSERT(put_in(g_land, "small", "old-small") == 0 && put_sparse("big", cap + 1) == 0);
+    ASSERT(fl_fs_commit_files(dfd, NULL, files, 2u) == 0);
+    ASSERT(holds("small", "new-small") && holds("big", "new-big"));
+    ASSERT(tidy("small") && tidy("big"));
+    close(dfd);
+    return 0;
+}
+
 static int test_commit_files_name_length_leaves_room_for_every_sibling(void) {
     ASSERT(FL_FS_COMMIT_NAME_MAX == 244u);
     ASSERT(name_length_checks() == 0);
@@ -1065,7 +1174,7 @@ static int test_landing_directory_helpers(void) {
     ASSERT(fl_fs_exists_at(dfd, NULL, "here") == 1 && fl_fs_exists_at(dfd, NULL, "gone") == 0);
     ASSERT(fl_fs_read_file_at(dfd, NULL, "here", 64u, &data, &len) == 0 && len == 5u &&
            memcmp(data, "bytes", 5u) == 0);
-    free(data);
+    mem_domain_free(MEM_DOMAIN_FS, data);
     errno = 0;
     ASSERT(fl_fs_exists_at(-1, g_land, "here") == -1 && errno == EBADF);
     ASSERT(fl_fs_read_file_at(-1, g_land, "here", 64u, &data, &len) == -1 && data == NULL);
@@ -1108,6 +1217,7 @@ int main(void) {
     rc |= test_contained_normal_overwrite_still_works();
     rc |= test_contained_equivalent_spellings_are_gated_alike();
     rc |= test_contained_name_operations_refuse_links();
+    rc |= test_trusted_root_is_owned_held_and_tightened();
     rc |= test_contained_new_file_is_owner_only();
     rc |= test_contained_overwrite_replaces_whole_file();
     rc |= test_contained_overwrite_failure_keeps_original();
@@ -1117,6 +1227,7 @@ int main(void) {
     rc |= test_commit_files_failed_rename_puts_everything_back();
     rc |= test_commit_files_unknown_existence_fails_closed();
     rc |= test_commit_files_copy_fallback_where_links_are_missing();
+    rc |= test_commit_files_copy_backup_is_bounded();
     rc |= test_commit_files_name_length_leaves_room_for_every_sibling();
     rc |= test_commit_files_failed_staging_leaves_nothing();
     rc |= test_commit_files_drops_a_stale_backup();

@@ -255,6 +255,71 @@ static int test_legacy_migration(void) {
     return 0;
 }
 
+/* Regression guard for the shared column-ensure: it also passes on the pre-D9 code. A bridges table written before bridges were signed gains nonce, request_sig and accept_sig in place. */
+static int test_legacy_bridge_migration(void) {
+    char path[256];
+    sqlite3 *sql = NULL;
+    sqlite3_stmt *st = NULL;
+    fl_bridge_t b;
+    int found = 0;
+
+    ASSERT(temp_db(path, sizeof path) == 0);
+    ASSERT(sqlite3_open(path, &sql) == SQLITE_OK);
+    ASSERT(sqlite3_exec(sql,
+                        "CREATE TABLE bridges (id INTEGER PRIMARY KEY AUTOINCREMENT, a_key TEXT NOT NULL,"
+                        " b_key TEXT NOT NULL, state INTEGER NOT NULL, accepted_by TEXT NOT NULL DEFAULT '',"
+                        " created_at INTEGER NOT NULL DEFAULT 0, accepted_at INTEGER NOT NULL DEFAULT 0);"
+                        "INSERT INTO bridges (a_key, b_key, state, created_at) VALUES"
+                        " ('Root.Flinstone.Bob','Root.Alternative.Ann',0,7);",
+                        NULL, NULL, NULL) == SQLITE_OK);
+    sqlite3_close(sql);
+
+    /* Opening through the public API migrates; the legacy row survives with empty signature fields. */
+    ASSERT(fl_bridge_get(path, 1, &b) == FL_RESULT_OK);
+    ASSERT(strcmp(b.a_key, "Root.Flinstone.Bob") == 0 && strcmp(b.b_key, "Root.Alternative.Ann") == 0);
+    ASSERT(b.created_at == 7 && !b.nonce_hex[0] && !b.request_sig[0] && !b.accept_sig[0]);
+
+    ASSERT(sqlite3_open(path, &sql) == SQLITE_OK);
+    ASSERT(sqlite3_prepare_v2(sql, "SELECT name FROM pragma_table_info('bridges');", -1, &st, NULL) ==
+           SQLITE_OK);
+    while (sqlite3_step(st) == SQLITE_ROW) {
+        const char *c = (const char *)sqlite3_column_text(st, 0);
+
+        if (c && (!strcmp(c, "nonce") || !strcmp(c, "request_sig") || !strcmp(c, "accept_sig")))
+            found++;
+    }
+    sqlite3_finalize(st);
+    sqlite3_close(sql);
+    ASSERT(found == 3);
+    /* A second open is a no-op. */
+    ASSERT(fl_bridge_get(path, 1, &b) == FL_RESULT_OK);
+    unlink(path);
+    return 0;
+}
+
+/* Behavior change of D9: an existing column matches case-insensitively (was strcmp, then a duplicate ALTER failed). */
+static int test_legacy_bridge_mixed_case_columns(void) {
+    char path[256];
+    sqlite3 *sql = NULL;
+    fl_bridge_t b;
+
+    ASSERT(temp_db(path, sizeof path) == 0);
+    ASSERT(sqlite3_open(path, &sql) == SQLITE_OK);
+    ASSERT(sqlite3_exec(sql,
+                        "CREATE TABLE bridges (id INTEGER PRIMARY KEY AUTOINCREMENT, a_key TEXT NOT NULL,"
+                        " b_key TEXT NOT NULL, state INTEGER NOT NULL, accepted_by TEXT NOT NULL DEFAULT '',"
+                        " created_at INTEGER NOT NULL DEFAULT 0, accepted_at INTEGER NOT NULL DEFAULT 0,"
+                        " Nonce TEXT NOT NULL DEFAULT '', REQUEST_SIG TEXT NOT NULL DEFAULT '');"
+                        "INSERT INTO bridges (a_key, b_key, state, created_at) VALUES"
+                        " ('Root.Flinstone.Bob','Root.Alternative.Ann',0,7);",
+                        NULL, NULL, NULL) == SQLITE_OK);
+    sqlite3_close(sql);
+    ASSERT(fl_bridge_get(path, 1, &b) == FL_RESULT_OK);
+    ASSERT(b.created_at == 7);
+    unlink(path);
+    return 0;
+}
+
 /* Two legacy names that differ only by case must not be rewritten onto one key id. */
 static int test_legacy_case_collision(void) {
     char path[256];
@@ -730,6 +795,8 @@ int main(void) {
     RUN(test_legacy_migration);
     RUN(test_legacy_case_collision);
     RUN(test_bridges);
+    RUN(test_legacy_bridge_migration);
+    RUN(test_legacy_bridge_mixed_case_columns);
     RUN(test_signed_bridges);
     RUN(test_box_keys);
     RUN(test_share_gate);

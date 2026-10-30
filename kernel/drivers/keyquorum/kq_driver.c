@@ -1,7 +1,7 @@
 /*
  * KeyQuorum security driver (contracts/drivers/contract_p4_keyquorum.h, P4-9).
  *
- * Thin wrappers over keyquorum_files.h: each op asks KeyQuorum for the size it needs,
+ * Thin wrappers over keyquorum_files.h and keyquorum_identity.h (the account ops): each op asks KeyQuorum for the size it needs,
  * allocates, and calls again; it returns KeyQuorum's status unchanged. Secrets are wiped
  * through mem_domain_secure_zero (which extends mem_domain_zero) and digests compared by
  * asm_mem_ct_equal.
@@ -18,6 +18,21 @@ _Static_assert(FL_KQ_ABI_VERSION == KQ_FILE_ABI_VERSION,
                "KeyQuorum header ABI differs from the P4-9 contract");
 _Static_assert(FL_KQ_DELIVERY_ID_LEN == KQ_FILE_DELIVERY_ID_LEN,
                "delivery id length differs from KeyQuorum");
+_Static_assert(FL_KQ_ACCOUNT_SECRET_LEN == KQ_ACCOUNT_SECRET_LEN, "account secret length differs");
+_Static_assert(FL_KQ_ACCOUNT_PUBLIC_LEN == KQ_ACCOUNT_PUBLIC_LEN, "account public length differs");
+_Static_assert(FL_KQ_ACCOUNT_SIGNATURE_LEN == KQ_ACCOUNT_SIGNATURE_LEN,
+               "account signature length differs");
+_Static_assert(FL_KQ_ACCOUNT_NONCE_LEN == KQ_ACCOUNT_NONCE_LEN, "account nonce length differs");
+_Static_assert(FL_KQ_ACCOUNT_SEALED_LEN == KQ_ACCOUNT_SEALED_LEN, "account sealed length differs");
+_Static_assert(FL_KQ_ACCOUNT_BRIDGE_REQUEST == KQ_ACCOUNT_BRIDGE_REQUEST,
+               "bridge request role differs");
+_Static_assert(FL_KQ_ACCOUNT_BRIDGE_ACCEPT == KQ_ACCOUNT_BRIDGE_ACCEPT,
+               "bridge accept role differs");
+_Static_assert(FL_KQ_ACCOUNT_OK == KQ_ACCOUNT_OK, "account OK differs");
+_Static_assert(FL_KQ_ACCOUNT_INVALID == KQ_ACCOUNT_INVALID, "account INVALID differs");
+_Static_assert(FL_KQ_ACCOUNT_NO_ROOM == KQ_ACCOUNT_NO_ROOM, "account NO_ROOM differs");
+_Static_assert(FL_KQ_ACCOUNT_WRONG_PASSWORD == KQ_ACCOUNT_WRONG_PASSWORD,
+               "account WRONG_PASSWORD differs");
 _Static_assert(sizeof(kq_file_offer_t) == FL_KQ_OFFER_WIRE_LEN,
                "kq_file_offer_t differs from the offer's wire length");
 
@@ -26,7 +41,7 @@ void fl_kq_buf_free(fl_kq_buf_t *buf) {
         return;
     if (buf->data) {
         mem_domain_secure_zero(buf->data, buf->len);
-        free(buf->data);
+        mem_domain_free(MEM_DOMAIN_FS, buf->data);
     }
     buf->data = NULL;
     buf->len = 0;
@@ -38,7 +53,7 @@ void fl_kq_buf_free(fl_kq_buf_t *buf) {
 static int take_sized(int first, size_t need, uint8_t **data, size_t *cap) {
     if (first != KQ_FILE_NO_ROOM)
         return first;
-    *data = (uint8_t *)malloc(need ? need : 1u);
+    *data = (uint8_t *)mem_domain_alloc(MEM_DOMAIN_FS, need ? need : 1u);
     if (!*data)
         return KQ_FILE_INVALID;
     *cap = need;
@@ -64,7 +79,7 @@ static int take_sized(int first, size_t need, uint8_t **data, size_t *cap) {
         rc_ = (call_with);                                                \
         if (rc_ != KQ_FILE_OK) {                                          \
             mem_domain_secure_zero(data_, cap_);                             \
-            free(data_);                                                  \
+            mem_domain_free(MEM_DOMAIN_FS, data_);                        \
             return rc_;                                                   \
         }                                                                 \
         fl_kq_buf_free(out);                                              \
@@ -188,6 +203,53 @@ static int drv_events(const fl_kq_buf_t *c, fl_kq_buf_t *out) {
     SIZED_CALL(out, kq_file_events(c->data, c->len, outp_, cap_, &need_));
 }
 
+/* Account keys: one-to-one over kq_account_*, status unchanged, no buffer kept. */
+static int drv_account_keygen(uint8_t secret[32], uint8_t pub[32]) {
+    return kq_account_keygen(secret, pub);
+}
+
+static int drv_account_public(const uint8_t secret[32], uint8_t pub[32]) {
+    return kq_account_public(secret, pub);
+}
+
+static int drv_account_box_keygen(uint8_t secret[32], uint8_t pub[32]) {
+    return kq_account_box_keygen(secret, pub);
+}
+
+static int drv_account_box_public(const uint8_t secret[32], uint8_t pub[32]) {
+    return kq_account_box_public(secret, pub);
+}
+
+static int drv_account_seal(const char *password, const uint8_t secret[32], uint8_t *out,
+                            size_t cap, size_t *out_len) {
+    return kq_account_seal(password, secret, out, cap, out_len);
+}
+
+static int drv_account_open(const char *password, const uint8_t *sealed, size_t len,
+                            uint8_t secret[32]) {
+    return kq_account_open(password, sealed, len, secret);
+}
+
+static int drv_account_bridge_sign(int role, const char *from, const char *to,
+                                   const char *signer, const uint8_t nonce[16],
+                                   const uint8_t secret[32], uint8_t sig[64]) {
+    return kq_account_bridge_sign(role, from, to, signer, nonce, secret, sig);
+}
+
+static int drv_account_bridge_verify(int role, const char *from, const char *to,
+                                     const char *signer, const uint8_t nonce[16],
+                                     const uint8_t pub[32], const uint8_t sig[64]) {
+    return kq_account_bridge_verify(role, from, to, signer, nonce, pub, sig);
+}
+
+static const char *drv_event_name(uint8_t code) {
+    return kq_file_event_name(code);
+}
+
+static const char *drv_outcome_name(uint8_t code) {
+    return kq_file_outcome_name(code);
+}
+
 static const fl_driver_ops_t s_kq_lifecycle = {
     .probe = kq_probe,
 };
@@ -221,13 +283,25 @@ static const fl_kq_driver_t s_kq_driver = {
     .freshness = drv_freshness,
     .wipe = mem_domain_secure_zero,
     .equal = asm_mem_ct_equal,
+    .account_keygen = drv_account_keygen,
+    .account_public = drv_account_public,
+    .account_box_keygen = drv_account_box_keygen,
+    .account_box_public = drv_account_box_public,
+    .account_seal = drv_account_seal,
+    .account_open = drv_account_open,
+    .account_bridge_sign = drv_account_bridge_sign,
+    .account_bridge_verify = drv_account_bridge_verify,
+    .event_name = drv_event_name,
+    .outcome_name = drv_outcome_name,
 };
 
 const fl_driver_desc_t *fl_kq_driver_desc(void) {
     return &s_kq_driver.base;
 }
 
-const fl_kq_driver_t *fl_kq_driver_get(void) {
-    /* Through the base: the KeyQuorum ops are usable only when the lifecycle probe accepts. */
-    return s_kq_driver.base.ops->probe(NULL) == FL_RESULT_OK ? &s_kq_driver : NULL;
+const fl_kq_driver_t *fl_kq_driver_get_or_register(void) {
+    /* Before drivers_init (session seed, unit tests, the browser lab) the descriptor may not
+     * be registered yet; after drivers_shutdown ensure refuses and this stays NULL. */
+    (void)fl_driver_registry_ensure(&s_kq_driver.base);
+    return fl_kq_driver_get();
 }

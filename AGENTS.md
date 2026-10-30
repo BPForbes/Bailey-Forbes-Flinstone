@@ -30,6 +30,8 @@ When an agent opens a pull request or branch for one task and later needs to imp
 
 If a human **does** allow a side branch for the other work, **merge** that side branch into the main feature branch **without deleting** the side branch first, so history and review stay aligned.
 
+A Coder seat of the DevOps team skill is not a side branch: it works in its own **detached** git worktree (`git worktree add --detach`, no branch or ref, handed over by commit SHA, never pushed) and the Orchestrator integrates by cherry-pick; a local-only `local/*` ref exists only if the Orchestrator creates it on request, and it is deleted after integration. Owner confirmed per-Coder detached worktrees as the rule in a session answer on 2026-10-29; throwaway probes may still use a clone, and side-work.md says how to revert. It does not allow a pushed or PR branch; see `.cursor/skills/devops-multi-agent-team/references/side-work.md`.
+
 When folding **two or more** AI-authored feature branches together (for example **`cursor/*`**, **`claude/*`**, **`codex/*`**, or other agent branches that eventually merge into **`main`** or **`develop`**), use a **non–fast-forward** merge so the combine point is visible:
 
 `git checkout <main-feature-branch> && git merge --no-ff <other-agent-branch> -m "merge: …"`
@@ -67,6 +69,26 @@ Run builds from the repository root.
 - VM replay test: `make test_replay`
 - Full architecture parity check: `make parity`
 - WASM lab shell smoke: `make test-wasm-shell`
+
+## Static analysis (CodeQL)
+
+- CI: `.github/workflows/codeql.yml` runs CodeQL on pull requests to `develop` and `main`, on pushes
+  to them, and weekly: C/C++ (traced through `make ARCH=x86_64_gas`), JavaScript, Python and the
+  workflows, with the security-and-quality suite from `.github/codeql/codeql-config.yml`. The
+  `codeql gate` check fails on a high or critical finding in shipped code; findings in `tests/` and
+  `test_*` files are listed, not gated. `.github/scripts/codeql_report.py` prints each finding in
+  the review rules' five parts with its SOC 2 criterion. A finding that is already known is
+  recorded in `.github/codeql/accepted-findings.json` (disposition, written justification, owner,
+  `review_by` date); a further instance fails, and an entry past its date fails until it is
+  reviewed. See `docs/SOC2_CODEQL.md`.
+- Local: `scripts/codeql_local.sh [--lang LANG]... [--dry-run]` runs the same analysis and report
+  (needs the CodeQL CLI; exit 2 means NOT RUN, never a pass). Databases and SARIF stay outside the
+  repo and are never committed.
+- **Assembly is not analysed**: CodeQL has no extractor for GAS (`.s`, `.S`) or NASM (`.asm`), or for
+  shell scripts. The C that calls the assembly is analysed; the assembly stays with human review.
+- Multi-agent DevOps team: the Security seat runs CodeQL as part of its SOC 2 review
+  (`.cursor/skills/devops-multi-agent-team/references/soc2-review.md`); QA does not PASS while
+  `codeql gate` is red on the head.
 
 ## Development testing policy
 

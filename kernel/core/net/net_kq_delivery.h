@@ -107,6 +107,9 @@ typedef struct {
     int             letter_ready;
 } fl_net_kq_inbox_t;
 
+/** On the host: every delivery the account sender offered here, newest first (any state,
+ *  from the host catalog); at most cap. 0 on a shell that holds no deliveries. */
+size_t fl_net_kq_host_sent(const char *sender, fl_kq_delivery_t *out, size_t cap);
 /** Co-signature requests this shell has received; at most cap. */
 size_t fl_net_kq_inbox(fl_net_kq_inbox_t *out, size_t cap);
 /** Remembers this shell's co-signature for a request, so a later open can attach it. */
