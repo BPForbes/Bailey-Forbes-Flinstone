@@ -40,6 +40,12 @@ class LocalRunner(unittest.TestCase):
         self.assertEqual(host.returncode, 0, host.stderr)
         self.assertIn("make\\ -B\\ ARCH=x86_64_gas\\ WIFI_HOST_COMMANDS=1", host.stdout)
 
+    def test_help_prints_the_whole_header(self):
+        r = run(["--help"])
+        self.assertEqual(r.returncode, 0, r.stderr)
+        self.assertIn("--wifi-host-commands", r.stdout)
+        self.assertIn("never as a pass", r.stdout)  # the last sentence of the header
+
     def test_a_single_language_can_be_chosen(self):
         r = run(["--dry-run", "--lang", "python", "--out", "/tmp/cq-unit"])
         self.assertEqual(r.returncode, 0, r.stderr)

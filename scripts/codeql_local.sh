@@ -35,7 +35,7 @@ while [ $# -gt 0 ]; do
                out="$2"; shift 2 ;;
         --wifi-host-commands) wifi_host=1; shift ;;
         --dry-run) dry=1; shift ;;
-        -h|--help) sed -n '2,19p' "$0"; exit 0 ;;
+        -h|--help) sed -n '2,21p' "$0"; exit 0 ;;
         *) echo "codeql_local: unknown argument: $1" >&2; exit 2 ;;
     esac
 done
