@@ -56,8 +56,31 @@ static void test_he_cap_from_entry(void)
 	expect_true(cap.supports_twt == 1u, "HE cap TWT");
 }
 
+#if defined(__linux__)
+static void test_iface_name_safe(void)
+{
+	expect_true(fl_net_wifi_iface_name_safe("wlan0") == 1, "iface wlan0 accepted");
+	expect_true(fl_net_wifi_iface_name_safe("wlp2s0") == 1, "iface wlp2s0 accepted");
+	expect_true(fl_net_wifi_iface_name_safe("eth0.100") == 1, "iface vlan name accepted");
+	expect_true(fl_net_wifi_iface_name_safe("wl-0_a") == 1, "iface '-' and '_' accepted");
+	expect_true(fl_net_wifi_iface_name_safe(NULL) == 0, "iface NULL refused");
+	expect_true(fl_net_wifi_iface_name_safe("") == 0, "iface empty refused");
+	expect_true(fl_net_wifi_iface_name_safe("wlan0;id") == 0, "iface with ';' refused");
+	expect_true(fl_net_wifi_iface_name_safe("a b") == 0, "iface with space refused");
+	expect_true(fl_net_wifi_iface_name_safe("$(id)") == 0, "iface with $() refused");
+	expect_true(fl_net_wifi_iface_name_safe("`id`") == 0, "iface with backticks refused");
+	expect_true(fl_net_wifi_iface_name_safe("a|b") == 0, "iface with '|' refused");
+	expect_true(fl_net_wifi_iface_name_safe("../x") == 0, "iface with '/' refused");
+	expect_true(fl_net_wifi_iface_name_safe("abcdefghijklmno") == 1, "iface 15 chars accepted");
+	expect_true(fl_net_wifi_iface_name_safe("abcdefghijklmnop") == 0, "iface 16 chars refused");
+}
+#endif
+
 int main(void)
 {
+#if defined(__linux__)
+	test_iface_name_safe();
+#endif
 	test_he_hint_6ghz();
 	test_he_hint_nmcli_rate();
 	test_he_cap_from_entry();

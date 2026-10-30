@@ -109,7 +109,7 @@ def main() -> None:
     element = (masked[0], (P - masked[1]) % P)
     group = (19).to_bytes(2, "little")
     body = group + i2osp(scalar, 32) + i2osp(element[0], 32) + i2osp(element[1], 32)
-    print("password", PASSWORD.decode())
+    # The PSK is the documented public test vector (PASSWORD above); it is not echoed.
     print("sta", STA.hex())
     print("ap", AP.hex())
     print("rand", RAND.hex())

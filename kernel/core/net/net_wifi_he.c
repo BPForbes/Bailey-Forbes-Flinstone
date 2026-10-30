@@ -1,4 +1,5 @@
 #include "net_wifi_he.h"
+#include "net_wifi_host_cmd.h"
 
 #include <stdio.h>
 #include <stdlib.h>
@@ -210,7 +211,7 @@ void fl_net_wifi_host_he_cap_from_entry(const fl_net_wifi_scan_entry_t *ap,
 
 #if defined(__linux__)
 
-static int wifi_iface_name_safe(const char *iface)
+int fl_net_wifi_iface_name_safe(const char *iface)
 {
     size_t i;
     size_t n;
@@ -358,11 +359,11 @@ size_t fl_net_wifi_iw_enrich_scan(const char *iface, fl_net_wifi_scan_entry_t *e
     size_t block_len = 0;
     size_t enriched = 0;
 
-    if (!wifi_iface_name_safe(iface) || !entries || count == 0u)
+    if (!fl_net_wifi_iface_name_safe(iface) || !entries || count == 0u)
         return 0u;
 
     snprintf(cmd, sizeof(cmd), "iw dev %s scan dump 2>/dev/null", iface);
-    fp = popen(cmd, "r");
+    fp = fl_host_popen(cmd, "r");
     if (!fp)
         return 0u;
 
@@ -382,7 +383,7 @@ size_t fl_net_wifi_iw_enrich_scan(const char *iface, fl_net_wifi_scan_entry_t *e
     }
     if (block_len > 0u)
         enrich_bss_block(block, block_len, entries, count, &enriched);
-    pclose(fp);
+    fl_host_pclose(fp);
     return enriched;
 }
 
@@ -394,7 +395,7 @@ int fl_net_wifi_iw_connected_he_cap(const char *iface,
     char out[512];
     FILE *fp;
 
-    if (!wifi_iface_name_safe(iface) || !cap_out)
+    if (!fl_net_wifi_iface_name_safe(iface) || !cap_out)
         return -1;
 
     if (join_ap && join_ap->he_supported) {
@@ -403,13 +404,13 @@ int fl_net_wifi_iw_connected_he_cap(const char *iface,
     }
 
     snprintf(cmd, sizeof(cmd), "iw dev %s link 2>/dev/null", iface);
-    fp = popen(cmd, "r");
+    fp = fl_host_popen(cmd, "r");
     if (!fp)
         return -1;
     out[0] = '\0';
     while (fgets(out, sizeof(out), fp)) {
         if (strstr(out, "HE capabilities:")) {
-            pclose(fp);
+            fl_host_pclose(fp);
             memset(cap_out, 0, sizeof(*cap_out));
             cap_out->max_nss_rx = 2u;
             cap_out->max_nss_tx = 2u;
@@ -426,7 +427,7 @@ int fl_net_wifi_iw_connected_he_cap(const char *iface,
             return 0;
         }
     }
-    pclose(fp);
+    fl_host_pclose(fp);
     return -1;
 }
 

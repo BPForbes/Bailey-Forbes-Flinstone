@@ -16,6 +16,13 @@ auditor can follow a finding from detection to disposition.
 | Local run | `scripts/codeql_local.sh`: the same analysis and report for the Security seat (exit 2 means NOT RUN) |
 | Evidence kept | the full SARIF of every run, 90 days (`codeql-sarif-<language>-<sha>` artifacts), and the GitHub code-scanning alerts |
 
+**Host Wi-Fi tools are compiled out of the analysed build.** The Wi-Fi host layer can run the host's
+`wpa_cli`, `nmcli`, `iw` and the Flinstone helper through the host shell. That code is built only with
+`make WIFI_HOST_COMMANDS=1` (`FL_WIFI_HOST_COMMANDS`); the default build CodeQL traces has no `popen` or
+`system` call in it, so those paths are not analysed and have no register entries. A build made with the
+flag has not been scanned: before shipping one, run `scripts/codeql_local.sh --lang c-cpp --wifi-host-commands`
+(only the make command line turns the flag on; an exported `WIFI_HOST_COMMANDS` variable does nothing).
+
 **Not covered.** CodeQL has no extractor for assembly (GAS `.s`/`.S`, NASM `.asm`) or for shell
 scripts, and it cannot judge design or a missing check. Those stay with human review and the
 Security seat's SOC 2 walk (`.cursor/skills/devops-multi-agent-team/references/soc2-review.md`).

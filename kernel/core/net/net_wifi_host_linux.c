@@ -1,6 +1,7 @@
 #include "net_wifi_host_linux.h"
 
 #include "net_wifi_he.h"
+#include "net_wifi_host_cmd.h"
 #include "fl_platform.h"
 #include "net_iface.h"
 #include "net_ipv4.h"
@@ -202,7 +203,7 @@ static int env_falsy(const char *v) {
 
 static int iface_is_wireless(const char *name) {
     char path[256];
-    if (!name || !name[0])
+    if (!fl_net_wifi_iface_name_safe(name))
         return 0;
     snprintf(path, sizeof(path), "/sys/class/net/%s/wireless", name);
     return access(path, F_OK) == 0;
@@ -241,7 +242,7 @@ static int pick_wireless_iface(char *out, size_t out_cap) {
         out[out_cap - 1u] = '\0';
         return 1;
     }
-    fp = popen("nmcli -t -f DEVICE,TYPE device 2>&1", "r");
+    fp = fl_host_popen("nmcli -t -f DEVICE,TYPE device 2>&1", "r");
     if (fp) {
         while (fgets(line, sizeof(line), fp) != NULL) {
             char dev[FL_NET_IFACE_NAME_MAX];
@@ -261,12 +262,12 @@ static int pick_wireless_iface(char *out, size_t out_cap) {
                 continue;
             if (strcmp(kind, "wifi") != 0)
                 continue;
-            pclose(fp);
+            fl_host_pclose(fp);
             strncpy(out, dev, out_cap - 1u);
             out[out_cap - 1u] = '\0';
             return 1;
         }
-        pclose(fp);
+        fl_host_pclose(fp);
     }
     fp = fopen("/proc/net/wireless", "r");
     if (fp) {
@@ -311,8 +312,11 @@ static void load_env_once(void) {
     nm = getenv("FL_NET_WIFI_NMCLI");
     if (nm && nm[0])
         strncpy(s_nmcli, nm, sizeof(s_nmcli) - 1u);
-    if (!pick_wireless_iface(s_wifi_iface, sizeof(s_wifi_iface)))
-        strncpy(s_wifi_iface, "wlan0", sizeof(s_wifi_iface) - 1u);
+    /* Whatever found the name (environment, nmcli, /proc/net/wireless) it is placed in command
+     * lines below, so it must pass the same check before it is kept. */
+    if (!pick_wireless_iface(s_wifi_iface, sizeof(s_wifi_iface)) ||
+        !fl_net_wifi_iface_name_safe(s_wifi_iface))
+        snprintf(s_wifi_iface, sizeof(s_wifi_iface), "wlan0");
 }
 
 static int wpa_use_requested(void) {
@@ -325,19 +329,28 @@ static int wpa_use_requested(void) {
     return -1;
 }
 
+static void shell_single_quote(const char *in, char *out, size_t out_cap);
+
+/* `cmd` is a wpa_cli argument string whose SSID and passphrase the callers have already quoted; the
+ * program path, interface and control directory are quoted here. */
 static int run_wpa_cli(const char *cmd, char *out, size_t out_cap) {
-    char line[512];
+    char line[2048];
+    char cli_q[sizeof(s_wpa_cli) * 5 + 4];
+    char if_q[FL_NET_IFACE_NAME_MAX * 5 + 4];
+    char ctrl_q[sizeof(s_wpa_ctrl_dir) * 5 + 4];
     FILE *fp;
 
     if (!cmd || s_host_kind != FL_WIFI_HOST_WPA_CLI)
         return 0;
-    if (s_wpa_ctrl_dir[0])
-        snprintf(line, sizeof(line), "%s -i %s -p %s %s 2>&1", s_wpa_cli,
-                 s_wifi_iface, s_wpa_ctrl_dir, cmd);
-    else
-        snprintf(line, sizeof(line), "%s -i %s %s 2>&1", s_wpa_cli, s_wifi_iface,
-                 cmd);
-    fp = popen(line, "r");
+    shell_single_quote(s_wpa_cli, cli_q, sizeof(cli_q));
+    shell_single_quote(s_wifi_iface, if_q, sizeof(if_q));
+    if (s_wpa_ctrl_dir[0]) {
+        shell_single_quote(s_wpa_ctrl_dir, ctrl_q, sizeof(ctrl_q));
+        snprintf(line, sizeof(line), "%s -i %s -p %s %s 2>&1", cli_q, if_q, ctrl_q, cmd);
+    } else {
+        snprintf(line, sizeof(line), "%s -i %s %s 2>&1", cli_q, if_q, cmd);
+    }
+    fp = fl_host_popen(line, "r");
     if (!fp)
         return 0;
     if (out && out_cap > 0u) {
@@ -348,17 +361,19 @@ static int run_wpa_cli(const char *cmd, char *out, size_t out_cap) {
         while (fgets(discard, sizeof(discard), fp) != NULL)
             ;
     }
-    return pclose(fp) == 0;
+    return fl_host_pclose(fp) == 0;
 }
 
 static int popen_nmcli(const char *args, char *out, size_t out_cap) {
-    char line[768];
+    char line[1024];
+    char nm_q[sizeof(s_nmcli) * 5 + 4];
     FILE *fp;
 
     if (!args)
         return 0;
-    snprintf(line, sizeof(line), "%s %s 2>&1", s_nmcli, args);
-    fp = popen(line, "r");
+    shell_single_quote(s_nmcli, nm_q, sizeof(nm_q));
+    snprintf(line, sizeof(line), "%s %s 2>&1", nm_q, args);
+    fp = fl_host_popen(line, "r");
     if (!fp)
         return 0;
     if (out && out_cap > 0u) {
@@ -369,7 +384,7 @@ static int popen_nmcli(const char *args, char *out, size_t out_cap) {
         while (fgets(discard, sizeof(discard), fp) != NULL)
             ;
     }
-    return pclose(fp) == 0;
+    return fl_host_pclose(fp) == 0;
 }
 
 static int run_nmcli(const char *args, char *out, size_t out_cap) {
@@ -380,21 +395,27 @@ static int run_nmcli(const char *args, char *out, size_t out_cap) {
 
 static int wpa_ping_with_ctrl(const char *ctrl_dir) {
     char out[64];
-    char cmd[512];
+    char cmd[2048];
+    char cli_q[sizeof(s_wpa_cli) * 5 + 4];
+    char if_q[FL_NET_IFACE_NAME_MAX * 5 + 4];
+    char ctrl_q[sizeof(s_wpa_ctrl_dir) * 5 + 4];
     FILE *fp;
 
-    if (ctrl_dir && ctrl_dir[0])
-        snprintf(cmd, sizeof(cmd), "%s -i %s -p %s ping 2>&1", s_wpa_cli,
-                 s_wifi_iface, ctrl_dir);
-    else
-        snprintf(cmd, sizeof(cmd), "%s -i %s ping 2>&1", s_wpa_cli, s_wifi_iface);
-    fp = popen(cmd, "r");
+    shell_single_quote(s_wpa_cli, cli_q, sizeof(cli_q));
+    shell_single_quote(s_wifi_iface, if_q, sizeof(if_q));
+    if (ctrl_dir && ctrl_dir[0]) {
+        shell_single_quote(ctrl_dir, ctrl_q, sizeof(ctrl_q));
+        snprintf(cmd, sizeof(cmd), "%s -i %s -p %s ping 2>&1", cli_q, if_q, ctrl_q);
+    } else {
+        snprintf(cmd, sizeof(cmd), "%s -i %s ping 2>&1", cli_q, if_q);
+    }
+    fp = fl_host_popen(cmd, "r");
     if (!fp)
         return 0;
     out[0] = '\0';
     (void)fread(out, 1, sizeof(out) - 1u, fp);
     out[sizeof(out) - 1u] = '\0';
-    (void)pclose(fp);
+    (void)fl_host_pclose(fp);
     return strstr(out, "PONG") != NULL;
 }
 
@@ -973,7 +994,7 @@ static int find_flinstone_ps_exe(void) {
 
     /* `command -v` resolves the exe through the merged Windows+Linux PATH. */
     {
-        FILE *fp = popen("command -v FlinstonePowershell.exe 2>&1", "r");
+        FILE *fp = fl_host_popen("command -v FlinstonePowershell.exe 2>&1", "r");
         if (fp) {
             char found[512];
             found[0] = '\0';
@@ -982,12 +1003,12 @@ static int find_flinstone_ps_exe(void) {
                 while (n > 0 && (found[n - 1] == '\n' || found[n - 1] == '\r'))
                     found[--n] = '\0';
                 if (n > 0) {
-                    pclose(fp);
+                    fl_host_pclose(fp);
                     if (remember_flinstone_ps_path(found))
                         return 1;
                 }
             }
-            pclose(fp);
+            fl_host_pclose(fp);
         }
     }
 
@@ -1030,7 +1051,7 @@ static int find_flinstone_linux_helper(void) {
                            s_flinstone_linux, sizeof(s_flinstone_linux)))
         return 1;
     {
-        FILE *fp = popen("command -v FlinstoneLinuxNet 2>&1", "r");
+        FILE *fp = fl_host_popen("command -v FlinstoneLinuxNet 2>&1", "r");
         if (fp) {
             char found[512];
             found[0] = '\0';
@@ -1039,13 +1060,13 @@ static int find_flinstone_linux_helper(void) {
                 while (n > 0 && (found[n - 1] == '\n' || found[n - 1] == '\r'))
                     found[--n] = '\0';
                 if (n > 0) {
-                    pclose(fp);
+                    fl_host_pclose(fp);
                     strncpy(s_flinstone_linux, found, sizeof(s_flinstone_linux) - 1u);
                     s_flinstone_linux[sizeof(s_flinstone_linux) - 1u] = '\0';
                     return 1;
                 }
             }
-            pclose(fp);
+            fl_host_pclose(fp);
         }
     }
     return 0;
@@ -1086,7 +1107,7 @@ static int run_flinstone_helper(const char *args, char *out, size_t out_cap) {
     }
     shell_single_quote(helper, exe_q, sizeof(exe_q));
     snprintf(cmd, sizeof(cmd), "%s %s 2>&1", exe_q, args);
-    fp = popen(cmd, "r");
+    fp = fl_host_popen(cmd, "r");
     if (!fp) {
         snprintf(s_last_error, sizeof(s_last_error),
                  "could not run %s (%s)", helper, strerror(errno));
@@ -1100,7 +1121,7 @@ static int run_flinstone_helper(const char *args, char *out, size_t out_cap) {
         while (fgets(discard, sizeof(discard), fp) != NULL)
             ;
     }
-    status = pclose(fp);
+    status = fl_host_pclose(fp);
     if (status != 0) {
         if (out && out_cap > 0u && out[0]) {
             size_t n = strlen(out);
@@ -1326,7 +1347,7 @@ static void probe_windows_ipv4_via_powershell(void) {
     if (fl_platform_detect() != FL_PLATFORM_WSL)
         return;
     s_interop_ipv4[0] = '\0';
-    f = popen("powershell.exe -NoProfile -Command \""
+    f = fl_host_popen("powershell.exe -NoProfile -Command \""
               "try { $ip = (Get-NetIPConfiguration | Where-Object {"
               " $_.NetAdapter.Status -eq 'Up'"
               " -and ($_.InterfaceAlias -match 'Wi-?Fi|Wireless|WLAN')"
@@ -1344,10 +1365,10 @@ static void probe_windows_ipv4_via_powershell(void) {
         return;
     buf[0] = '\0';
     if (fgets(buf, sizeof(buf), f) == NULL) {
-        pclose(f);
+        fl_host_pclose(f);
         return;
     }
-    pclose(f);
+    fl_host_pclose(f);
     n = strlen(buf);
     while (n > 0u && (buf[n - 1u] == '\n' || buf[n - 1u] == '\r' ||
                       buf[n - 1u] == ' '  || buf[n - 1u] == '\t'))
@@ -1385,6 +1406,15 @@ int fl_net_wifi_host_linux_opted_in(void) {
     const char *use_wpa = getenv("FL_NET_WIFI_USE_WPA");
     const char *fps = getenv("FL_NET_WIFI_FLINSTONE_PS");
     const char *fln = getenv("FL_NET_WIFI_FLINSTONE_LINUX");
+
+#if !defined(FL_WIFI_HOST_COMMANDS)
+    /* This build does not run host tools (see fl_host_popen in net_wifi_he.h), so no environment
+     * variable can select the host backend. */
+    (void)use_wpa;
+    (void)fps;
+    (void)fln;
+    return 0;
+#endif
 
     if (fps && fps[0])
         return 1;
@@ -2112,14 +2142,14 @@ int fl_net_wifi_host_linux_wsl_ipv4(char *buf, size_t buf_len) {
         buf[buf_len - 1u] = '\0';
         return 0;
     }
-    fp = popen("hostname -I 2>&1", "r");
+    fp = fl_host_popen("hostname -I 2>&1", "r");
     if (!fp)
         return -1;
     if (!fgets(line, sizeof(line), fp)) {
-        pclose(fp);
+        fl_host_pclose(fp);
         return -1;
     }
-    pclose(fp);
+    fl_host_pclose(fp);
     tok = strtok(line, " \t\r\n");
     if (!tok || !tok[0])
         return -1;
@@ -2193,7 +2223,8 @@ int fl_net_wifi_host_linux_server_bridge_to(const char *bind_ip,
         snprintf(cmd, sizeof(cmd),
                  "%s server-bridge %s %u %s </dev/null >/dev/null 2>&1 &",
                  exe_q, bind_q, (unsigned)port, target_q);
-        (void)system(cmd);
+        if (fl_host_system(cmd) == -1)
+            return -1;
         return 0;
     }
 
@@ -2203,7 +2234,8 @@ int fl_net_wifi_host_linux_server_bridge_to(const char *bind_ip,
         snprintf(cmd, sizeof(cmd),
                  "python3 %s %s %u %s </dev/null >/dev/null 2>&1 &",
                  py_q, bind_q, (unsigned)port, target_q);
-        (void)system(cmd);
+        if (fl_host_system(cmd) == -1)
+            return -1;
         return 0;
     }
     return -1;

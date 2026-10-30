@@ -184,11 +184,13 @@ make vm-sdl      # Uses deps/install if present, else pkg-config
 
 **Default (no env vars):** `wifi scan` shows in-tree lab APs (`LabAxHome`, `GuestOpen`). Station L3 uses static **`wlan-lab`** addressing (default `10.0.2.15/24`). Use this for two-terminal `server host` / `server join` on the same machine (`127.0.0.1:<port>`).
 
+**Host Wi‑Fi tools are off in a default build.** The shell's own drivers (in-tree supplicant, lab and mock NICs, FullMAC, UART coprocessor) do all Wi‑Fi unless you build with `make WIFI_HOST_COMMANDS=1`, which lets the shell run the host's `wpa_cli`, `nmcli`, `iw` and the Flinstone helper through the host shell. The two sections below need that build.
+
 **WSL on Windows (real home Wi‑Fi):** Wi‑Fi is owned by Windows, not Linux `wlan0`. Build the helper and point the shell at it **before** starting:
 
 ```bash
 cd ~/Bailey-Forbes-Flinstone
-make -j4
+make -j4 WIFI_HOST_COMMANDS=1
 make flinstone-ps-windows    # once: builds FlinstonePowershell.exe
 export FL_NET_WIFI_FLINSTONE_PS="$PWD/tools/FlinstonePowershell/FlinstonePowershell.exe"
 ./BPForbes_Flinstone_Shell
@@ -204,7 +206,7 @@ wifi status
 
 You should see `wifi scan: host backend FlinstonePowershell on …` and your real SSIDs (not only `LabAxHome`).
 
-**Native Linux (real Wi‑Fi):** install `wpasupplicant` and/or NetworkManager, then:
+**Native Linux (real Wi‑Fi):** install `wpasupplicant` and/or NetworkManager, build with `make WIFI_HOST_COMMANDS=1`, then:
 
 ```bash
 export FL_NET_WIFI_USE_WPA=1
@@ -217,8 +219,8 @@ wifi scan
 
 | Variable | When to set |
 |----------|-------------|
-| **`FL_NET_WIFI_FLINSTONE_PS`** | WSL — path to `FlinstonePowershell.exe` |
-| **`FL_NET_WIFI_USE_WPA=1`** | Native Linux — `wpa_cli` / `nmcli` |
+| **`FL_NET_WIFI_FLINSTONE_PS`** | WSL — path to `FlinstonePowershell.exe` (needs `WIFI_HOST_COMMANDS=1` build) |
+| **`FL_NET_WIFI_USE_WPA=1`** | Native Linux — `wpa_cli` / `nmcli` (needs `WIFI_HOST_COMMANDS=1` build) |
 | **`FL_NET_WIFI_USE_WPA=0`** | Force in-tree lab only |
 | **`FL_NET_WIFI_IFACE`** | Override wireless interface name |
 

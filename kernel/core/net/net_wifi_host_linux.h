@@ -12,7 +12,9 @@
  * This is the host driver boundary (cfg80211/mac80211 + supplicant); MLME/WPA in-tree
  * remain the lab path when no NIC is present.
  *
- * Env (host helpers are **opt-in**; default is in-tree driver + lab netdev):
+ * Env (host helpers are **opt-in**; default is in-tree driver + lab netdev). Running host tools is
+ * also compiled out of a default build: it needs `make WIFI_HOST_COMMANDS=1` (FL_WIFI_HOST_COMMANDS),
+ * and without it none of the variables below selects the host backend:
  *   **FL_NET_WIFI_IFACE** — interface name (auto-detect first Wi-Fi netdev when unset)
  *   **FL_NET_WIFI_WPA_CLI** — path to wpa_cli (default `wpa_cli`)
  *   **FL_NET_WIFI_NMCLI** — path to nmcli (default `nmcli`)

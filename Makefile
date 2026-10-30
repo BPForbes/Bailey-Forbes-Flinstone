@@ -50,6 +50,16 @@ CFLAGS += -Ithird_party/keyquorum/ffi/identity/include
 # the driver there too, but never runs register_all or the bus.
 CFLAGS += -DFL_WITH_KEYQUORUM
 
+# The Wi-Fi host layer can drive the host's own tools (wpa_cli, nmcli, iw, the Flinstone helper). That
+# runs commands through the host shell, so it is off unless asked for: make WIFI_HOST_COMMANDS=1.
+# The default build uses the in-tree Wi-Fi drivers only. The two helper tests below turn it on for
+# themselves because they exercise that path against a stand-in helper.
+# Only the command line turns it on: an exported environment variable of that name does not.
+WIFI_HOST_ON := $(if $(filter command line,$(origin WIFI_HOST_COMMANDS)),$(if $(filter 1,$(WIFI_HOST_COMMANDS)),1,0),0)
+ifeq ($(WIFI_HOST_ON),1)
+CFLAGS += -DFL_WIFI_HOST_COMMANDS
+endif
+
 .PHONY: keyquorum-identity
 keyquorum-identity:
 	@test -f third_party/keyquorum/ffi/identity/Cargo.toml || { echo "keyquorum-identity: run 'git submodule update --init third_party/keyquorum'" >&2; exit 1; }
@@ -303,12 +313,12 @@ ifneq ($(shell command -v $(MINGW_CXX) 2>/dev/null),)
 FLINSTONE_PS_EXE = $(FLINSTONE_PS_EXE_OUT)
 endif
 
-# Build-mode sentinel: detect when VM_ENABLE or VM_SDL changes between runs
+# Build-mode sentinel: detect when VM_ENABLE, VM_SDL or WIFI_HOST_COMMANDS changes between runs
 # so stale object files compiled under the old flags get removed before make
 # re-evaluates dependencies.  Without this, switching from `make` to `make vm`
 # (or back) leaves the old binary in place and make considers it up-to-date.
 BUILD_MODE_FILE := .build_mode
-BUILD_MODE_NOW  := VM=$(VM_ENABLE)_SDL=$(VM_SDL)
+BUILD_MODE_NOW  := VM=$(VM_ENABLE)_SDL=$(VM_SDL)_WIFIHOST=$(WIFI_HOST_ON)
 _bmode_prev     := $(shell cat $(BUILD_MODE_FILE) 2>/dev/null)
 ifneq ($(_bmode_prev),)
 ifneq ($(_bmode_prev),$(BUILD_MODE_NOW))
@@ -922,6 +932,24 @@ test_server_shared_purge: kernel/core/vfs/server_shared_fs.o kernel/core/vfs/ser
 	  kernel/core/vfs/server_shared_fs.o kernel/core/vfs/server_shared_db.o kernel/core/vfs/server_catalog_file.o kernel/core/vfs/server_shared_digest.o $(SHARED_FS_MM_OBJS) userland/shell/common.o -lsqlite3 $(OPENSSL_LIBS) -Wl,-z,noexecstack
 	./tests/test_server_shared_purge
 
+# The `server file` verbs that read a local file refuse a jailed, unresolvable or quarantined path
+# before they read anything. Links every shell object but sh.o (which holds main).
+.PHONY: test_server_file_jail
+TEST_SERVER_FILE_JAIL_OBJS = $(filter-out userland/shell/sh.o,$(OBJS))
+test_server_file_jail: $(TEST_SERVER_FILE_JAIL_OBJS)
+	$(CC) $(CFLAGS) $(TEST_SANITIZE) -c -o tests/test_server_file_jail.o tests/test_server_file_jail.c
+	$(CXX) $(CXXFLAGS) $(TEST_SANITIZE) -o tests/test_server_file_jail tests/test_server_file_jail.o \
+	  $(TEST_SERVER_FILE_JAIL_OBJS) $(LDFLAGS) -pthread -Wl,-z,noexecstack
+	./tests/test_server_file_jail
+
+# FL_WIFI_FULLMAC_USB names one sysfs entry: a name that climbs out of it is refused before any read.
+.PHONY: test_wifi_fullmac_usb_port
+test_wifi_fullmac_usb_port: $(TEST_SERVER_FILE_JAIL_OBJS)
+	$(CC) $(CFLAGS) $(TEST_SANITIZE) -c -o tests/test_wifi_fullmac_usb_port.o tests/test_wifi_fullmac_usb_port.c
+	$(CXX) $(CXXFLAGS) $(TEST_SANITIZE) -o tests/test_wifi_fullmac_usb_port tests/test_wifi_fullmac_usb_port.o \
+	  $(TEST_SERVER_FILE_JAIL_OBJS) $(LDFLAGS) -pthread -Wl,-z,noexecstack
+	./tests/test_wifi_fullmac_usb_port
+
 .PHONY: test_server_file_accept_path
 test_server_file_accept_path: $(NET_ASM_OBJ) $(MEM_ASM_OBJ) kernel/core/net/net_channel_sidecar.o kernel/core/net/net_pkt_channel_meta.o kernel/core/net/net_file_delivery.o kernel/core/vfs/server_shared_fs.o kernel/core/vfs/server_shared_db.o kernel/core/vfs/server_catalog_file.o kernel/core/vfs/server_shared_digest.o $(SHARED_FS_MM_OBJ) userland/shell/common.o
 	$(CC) $(CFLAGS) $(TEST_SANITIZE) -o tests/test_server_file_accept_path tests/test_server_file_accept_path.c tests/stubs_file_delivery_net.c \
@@ -1338,7 +1366,7 @@ run-test_wifi:
 	@./tests/test_wifi_ax_server_ota
 
 test_wifi_flinstone_helper: $(WIFI_TEST_COMMON_DEPS) $(NET_TEST_PCI_OBJ)
-	$(CC) $(CFLAGS) $(TEST_SANITIZE) -o tests/test_wifi_flinstone_helper tests/test_wifi_flinstone_helper.c \
+	$(CC) $(CFLAGS) -DFL_WIFI_HOST_COMMANDS $(TEST_SANITIZE) -o tests/test_wifi_flinstone_helper tests/test_wifi_flinstone_helper.c \
 	  kernel/core/net/net_wifi_he.c kernel/core/net/net_wifi_station.c kernel/core/net/net_wifi_host_linux.c \
 	  kernel/core/net/net_wifi_mgmt.c kernel/core/net/net_wifi_sae.c \
 	  kernel/core/net/net_wifi_wpa.c kernel/core/net/net_wifi_twt.c \
@@ -1353,7 +1381,7 @@ test_wifi_flinstone_helper: $(WIFI_TEST_COMMON_DEPS) $(NET_TEST_PCI_OBJ)
 	./tests/test_wifi_flinstone_helper
 
 test_wifi_flinstone_linux_helper: $(WIFI_TEST_COMMON_DEPS) $(NET_TEST_PCI_OBJ)
-	$(CC) $(CFLAGS) $(TEST_SANITIZE) -o tests/test_wifi_flinstone_linux_helper tests/test_wifi_flinstone_linux_helper.c \
+	$(CC) $(CFLAGS) -DFL_WIFI_HOST_COMMANDS $(TEST_SANITIZE) -o tests/test_wifi_flinstone_linux_helper tests/test_wifi_flinstone_linux_helper.c \
 	  kernel/core/net/net_wifi_he.c kernel/core/net/net_wifi_station.c kernel/core/net/net_wifi_host_linux.c \
 	  kernel/core/net/net_wifi_mgmt.c kernel/core/net/net_wifi_sae.c \
 	  kernel/core/net/net_wifi_wpa.c kernel/core/net/net_wifi_twt.c \

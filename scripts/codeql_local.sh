@@ -4,10 +4,12 @@
 # (.github/scripts/codeql_report.py). The Security seat runs this before its SOC 2 review; CI
 # (`codeql gate`) is the record on the pushed head.
 #
-#   scripts/codeql_local.sh [--lang LANG]... [--out DIR] [--dry-run]
+#   scripts/codeql_local.sh [--lang LANG]... [--out DIR] [--wifi-host-commands] [--dry-run]
 #
 # LANG is c-cpp, javascript-typescript, python or actions (default: all four). CodeQL has no
 # assembly extractor: the GAS and NASM layers are not analysed, and say so in the output.
+# --wifi-host-commands scans the build that can run the host's Wi-Fi tools (make WIFI_HOST_COMMANDS=1),
+# which the default build and CI do not contain.
 #
 # Needs the CodeQL CLI (`codeql` on PATH, or CODEQL=/path/to/codeql) and, for c-cpp, the build
 # dependencies of `make` (gcc, g++, libsqlite3-dev, libssl-dev, cargo for KeyQuorum's library).
@@ -23,6 +25,7 @@ ALL_LANGS=(c-cpp javascript-typescript python actions)
 langs=()
 out=""
 dry=0
+wifi_host=0
 
 while [ $# -gt 0 ]; do
     case "$1" in
@@ -30,8 +33,9 @@ while [ $# -gt 0 ]; do
                 langs+=("$2"); shift 2 ;;
         --out) [ $# -ge 2 ] || { echo "codeql_local: --out needs a value" >&2; exit 2; }
                out="$2"; shift 2 ;;
+        --wifi-host-commands) wifi_host=1; shift ;;
         --dry-run) dry=1; shift ;;
-        -h|--help) sed -n '2,19p' "$0"; exit 0 ;;
+        -h|--help) sed -n '2,21p' "$0"; exit 0 ;;
         *) echo "codeql_local: unknown argument: $1" >&2; exit 2 ;;
     esac
 done
@@ -83,7 +87,11 @@ for lang in "${langs[@]}"; do
         # The KeyQuorum library is built before tracing so only this project's C is extracted;
         # -B rebuilds every object so the tracer sees each compiler call.
         run cargo build --release --locked --manifest-path third_party/keyquorum/ffi/identity/Cargo.toml
-        create+=(--command="make -B ARCH=x86_64_gas")
+        if [ "$wifi_host" = 1 ]; then
+            create+=(--command="make -B ARCH=x86_64_gas WIFI_HOST_COMMANDS=1")
+        else
+            create+=(--command="make -B ARCH=x86_64_gas")
+        fi
     fi
     if run "${create[@]}" &&
        run "$codeql_bin" database analyze "$db" "$(pack_of "$lang")" --format=sarif-latest \

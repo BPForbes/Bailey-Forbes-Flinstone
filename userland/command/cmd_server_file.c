@@ -1,6 +1,7 @@
 #include "cmd_server_file.h"
 
 #include "cmd_authutil.h"
+#include "cmd_util.h"
 #include "common.h"
 #include "fl/mem_asm.h"
 #include "mem_domain.h"
@@ -16,6 +17,7 @@
 #include "server_shared_fs.h"
 #include "session.h"
 #include "share_gate.h"
+#include "util.h"
 
 #include <errno.h>
 #include <stdio.h>
@@ -114,6 +116,18 @@ static int parse_expire_arg(const char *arg, uint64_t *expires_at_out)
     return fl_server_file_parse_expire_arg(arg, expires_at_out);
 }
 
+/* Every verb that reads a local file goes through the same jail and quarantine check as write.
+ * The caller reads the resolved path this fills in, the one that was checked, not the text typed;
+ * a path too long to resolve completely is refused, since the cut-off part could leave the jail. */
+static int local_path_blocked(const char *op, const char *path, char *rpath, size_t rcap)
+{
+    if (resolve_path_checked(path, rpath, rcap) != 0) {
+        printf("%s blocked (path too long to check): %s\n", op, path);
+        return 1;
+    }
+    return cmd_jail_blocked_path(op, path, rpath);
+}
+
 static int stat_local_file(const char *path, uint64_t *size_out)
 {
     struct stat st;
@@ -134,6 +148,7 @@ static int verb_file_send(const cmd_server_ctx_t *ctx, int argc, char **argv)
     const char *target_name = NULL;
     uint16_t target_id = 0u;
     const char *path = NULL;
+    char rpath[CWD_MAX];
     fl_file_perms_t perms = FL_FILE_PERM_VIEW;
     uint64_t expires_at = 0u;
     uint64_t file_size = 0u;
@@ -174,7 +189,9 @@ static int verb_file_send(const cmd_server_ctx_t *ctx, int argc, char **argv)
         fl_color_error("server file: -all is mutually exclusive with -user/-id");
         return 1;
     }
-    if (stat_local_file(path, &file_size) != 0) {
+    if (local_path_blocked("server file", path, rpath, sizeof(rpath)))
+        return 1;
+    if (stat_local_file(rpath, &file_size) != 0) {
         fl_color_error("cannot read file '%s'", path);
         return 1;
     }
@@ -184,7 +201,7 @@ static int verb_file_send(const cmd_server_ctx_t *ctx, int argc, char **argv)
 
     if (public_offer) {
         rc = fl_server_file_offer_create(&offer, sender_member_id(ctx, hosting), 0u,
-                                         path, path, perms, expires_at);
+                                         rpath, path, perms, expires_at);
     } else {
         uint16_t receiver_id = 0u;
         rc = fl_server_file_resolve_receiver(target_name, target_id,
@@ -223,7 +240,7 @@ static int verb_file_send(const cmd_server_ctx_t *ctx, int argc, char **argv)
             }
         }
         rc = fl_server_file_offer_create(&offer, sender_member_id(ctx, hosting),
-                                         receiver_id, path, path, perms, expires_at);
+                                         receiver_id, rpath, path, perms, expires_at);
     }
     if (rc != FL_RESULT_OK) {
         pthread_mutex_unlock(ctx->mutex);
@@ -250,7 +267,7 @@ static int verb_file_send(const cmd_server_ctx_t *ctx, int argc, char **argv)
     if (rc == FL_RESULT_OK)
         rc = fl_net_file_send_file_contents(ctx->server, ctx->client, hosting,
                                             sender_member_id(ctx, hosting),
-                                            &offer, path);
+                                            &offer, rpath);
     pthread_mutex_unlock(ctx->mutex);
     if (rc != FL_RESULT_OK) {
         fl_color_warn("file offer failed");
@@ -573,13 +590,16 @@ static int print_event_line(const char *line, size_t n, void *ctx)
 static int verb_file_log(int argc, char **argv)
 {
     fl_kq_buf_t lines = {0};
+    char rpath[CWD_MAX];
     fl_kq_cp_result_t cp;
 
     if (argc < 2) {
         fl_color_error("usage: server file log <path>");
         return 1;
     }
-    cp = fl_kq_cp_history(argv[1], &lines);
+    if (local_path_blocked("server file log", argv[1], rpath, sizeof(rpath)))
+        return 1;
+    cp = fl_kq_cp_history(rpath, &lines);
     if (cp != FL_KQ_CP_OK) {
         fl_color_warn("server file log: %s", fl_kq_cp_reason(cp));
         fl_kq_buf_free(&lines);
@@ -598,6 +618,7 @@ static int verb_file_permit(int argc, char **argv)
     unsigned char signing[32];
     uint8_t head[32];
     const char *me = fl_session_current_key_id();
+    char rpath[CWD_MAX];
     fl_kq_cp_result_t cp;
 
     if (argc < 2) {
@@ -608,14 +629,16 @@ static int verb_file_permit(int argc, char **argv)
         fl_color_error("server file permit: sign in as the supervisor first");
         return 1;
     }
-    cp = fl_kq_cp_head(argv[1], head);
+    if (local_path_blocked("server file permit", argv[1], rpath, sizeof(rpath)))
+        return 1;
+    cp = fl_kq_cp_head(rpath, head);
     if (cp != FL_KQ_CP_OK) {
         fl_color_warn("server file permit: %s", fl_kq_cp_reason(cp));
         return 1;
     }
     if (kq_open_keys("countersigns the head revision", signing, NULL) != 0)
         return 1;
-    cp = fl_kq_cp_permit(kq_users(), me, signing, argv[1], head);
+    cp = fl_kq_cp_permit(kq_users(), me, signing, rpath, head);
     mem_domain_secure_zero(signing, sizeof signing);
     if (cp != FL_KQ_CP_OK) {
         fl_color_warn("server file permit: %s", fl_kq_cp_reason(cp));
@@ -634,6 +657,7 @@ static int verb_kq_send(const cmd_server_ctx_t *ctx, int argc, char **argv)
     fl_net_kq_keys_t keys;
     unsigned char signing[32];
     char created_at[40];
+    char rpath[CWD_MAX];
     char hex[2 * FL_KQ_DELIVERY_ID_LEN + 1];
     fl_kq_encoded_t enc;
     fl_kq_cp_result_t cp;
@@ -661,6 +685,8 @@ static int verb_kq_send(const cmd_server_ctx_t *ctx, int argc, char **argv)
         fl_color_error("usage: server file send -t <path> -user <name> [--permitted]");
         return 1;
     }
+    if (local_path_blocked("server file send", path, rpath, sizeof(rpath)))
+        return 1;
     /* The same sender-side gate as any offer: same line, or a signed bridge. */
     {
         fl_share_gate_result_t gate =
@@ -685,12 +711,12 @@ static int verb_kq_send(const cmd_server_ctx_t *ctx, int argc, char **argv)
         /* A newer copy the supervisor has permitted: seal the head as it is, checking nothing in. */
         uint8_t head[32];
 
-        cp = fl_kq_cp_head(path, head);
+        cp = fl_kq_cp_head(rpath, head);
         if (cp == FL_KQ_CP_OK)
-            cp = fl_kq_cp_reseal(kq_users(), me, signing, keys.key_id, keys.box_public, path, head,
+            cp = fl_kq_cp_reseal(kq_users(), me, signing, keys.key_id, keys.box_public, rpath, head,
                                  &enc);
     } else {
-        cp = fl_kq_cp_encode(kq_users(), me, signing, keys.key_id, keys.box_public, path,
+        cp = fl_kq_cp_encode(kq_users(), me, signing, keys.key_id, keys.box_public, rpath,
                              created_at, &enc);
     }
     mem_domain_secure_zero(signing, sizeof signing);

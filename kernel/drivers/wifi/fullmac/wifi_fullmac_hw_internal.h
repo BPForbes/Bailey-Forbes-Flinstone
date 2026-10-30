@@ -43,6 +43,8 @@ void wifi_fullmac_hw_fill_probe_info(const wifi_fullmac_hw_ctx_t *ctx,
 
 int wifi_fullmac_pcie_probe_ctx(wifi_fullmac_hw_ctx_t *ctx);
 int wifi_fullmac_usb_probe_ctx(wifi_fullmac_hw_ctx_t *ctx);
+/* 1 when port is a plain sysfs entry name (no "/", not "." or ".."), the only kind the probe reads. */
+int wifi_fullmac_usb_port_name_ok(const char *port);
 
 /** Resolve Linux netdev (e.g. wlan1) bound to a USB sysfs port. */
 int wifi_fullmac_usb_resolve_net_iface(const char *port, char *ifname_out, size_t cap);

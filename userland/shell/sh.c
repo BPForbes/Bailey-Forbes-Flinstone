@@ -498,11 +498,15 @@ int main(int argc, char *argv[]) {
             }
             char *commandStr = malloc(totalLen + 1);
             if (!commandStr) { i += tokensCount; continue; }
+            size_t cmdUsed = 0;
             commandStr[0] = '\0';
             for (int k = i; k < i + tokensCount; k++) {
-                strcat(commandStr, argv[k]);
+                size_t tokLen = strlen(argv[k]);
+                memcpy(commandStr + cmdUsed, argv[k], tokLen);
+                cmdUsed += tokLen;
                 if (k < i + tokensCount - 1)
-                    strcat(commandStr, " ");
+                    commandStr[cmdUsed++] = ' ';
+                commandStr[cmdUsed] = '\0';
             }
             submit_single_command(commandStr);
             free(commandStr);
