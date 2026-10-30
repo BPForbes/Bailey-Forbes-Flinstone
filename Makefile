@@ -930,6 +930,16 @@ test_server_shared_purge: kernel/core/vfs/server_shared_fs.o kernel/core/vfs/ser
 	  kernel/core/vfs/server_shared_fs.o kernel/core/vfs/server_shared_db.o kernel/core/vfs/server_catalog_file.o kernel/core/vfs/server_shared_digest.o $(SHARED_FS_MM_OBJS) userland/shell/common.o -lsqlite3 $(OPENSSL_LIBS) -Wl,-z,noexecstack
 	./tests/test_server_shared_purge
 
+# The `server file` verbs that read a local file refuse a jailed, unresolvable or quarantined path
+# before they read anything. Links every shell object but sh.o (which holds main).
+.PHONY: test_server_file_jail
+TEST_SERVER_FILE_JAIL_OBJS = $(filter-out userland/shell/sh.o,$(OBJS))
+test_server_file_jail: $(TEST_SERVER_FILE_JAIL_OBJS)
+	$(CC) $(CFLAGS) $(TEST_SANITIZE) -c -o tests/test_server_file_jail.o tests/test_server_file_jail.c
+	$(CXX) $(CXXFLAGS) $(TEST_SANITIZE) -o tests/test_server_file_jail tests/test_server_file_jail.o \
+	  $(TEST_SERVER_FILE_JAIL_OBJS) $(LDFLAGS) -pthread -Wl,-z,noexecstack
+	./tests/test_server_file_jail
+
 .PHONY: test_server_file_accept_path
 test_server_file_accept_path: $(NET_ASM_OBJ) $(MEM_ASM_OBJ) kernel/core/net/net_channel_sidecar.o kernel/core/net/net_pkt_channel_meta.o kernel/core/net/net_file_delivery.o kernel/core/vfs/server_shared_fs.o kernel/core/vfs/server_shared_db.o kernel/core/vfs/server_catalog_file.o kernel/core/vfs/server_shared_digest.o $(SHARED_FS_MM_OBJ) userland/shell/common.o
 	$(CC) $(CFLAGS) $(TEST_SANITIZE) -o tests/test_server_file_accept_path tests/test_server_file_accept_path.c tests/stubs_file_delivery_net.c \
