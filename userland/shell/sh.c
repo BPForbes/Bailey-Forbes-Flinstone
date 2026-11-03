@@ -48,6 +48,7 @@
 #include "shell_io.h"
 #include <stdint.h>
 #include "threadpool.h"
+#include "bg_jobs.h"
 #include "interpreter.h"
 #include "terminal.h"
 #include "disk.h"
@@ -126,6 +127,7 @@ static void shell_pool_cleanup(void) {
         for (int i = 0; i < NUM_WORKERS; i++)
             pthread_join(g_pool.workers[i], NULL);
     }
+    fl_bg_jobs_ticker_stop();
 #endif
     pthread_mutex_destroy(&g_pool.mutex);
     pthread_cond_destroy(&g_pool.cond);
@@ -429,6 +431,9 @@ int main(int argc, char *argv[]) {
         }
     }
     g_pool_workers_started = 1;
+    /* The background tick was never driven; the ticker thread is the one poller of fl_wq_default(). */
+    if (fl_bg_jobs_ticker_start(FL_BG_TICK_PERIOD_MS) != FL_RESULT_OK)
+        fprintf(stderr, "bg_jobs: ticker not started\n");
 #endif
     atexit(shell_pool_cleanup);
     atexit(cmd_server_atexit);

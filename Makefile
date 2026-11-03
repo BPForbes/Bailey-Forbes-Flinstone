@@ -236,7 +236,7 @@ NET_TEST_PCI_OBJ = $(KERNEL_DRIVERS)/pci.o
 NET_ASM_OBJ = $(patsubst %.s,%.o,$(patsubst %.asm,%.o,$(filter %/net_asm.s %/net_asm.asm %/net_wire_host_asm.s %/net_wire_host_asm.asm,$(ASMSRCS))))
 CORE_SRCS = kernel/core/vfs/disk.c kernel/core/vfs/fat32_host.c kernel/core/vfs/fat32_host_files.c kernel/core/vfs/path_log.c kernel/core/vfs/cluster.c kernel/core/vfs/fs.c \
             disk_host_io.c \
-            kernel/core/sched/threadpool.c priority_queue.c kernel/core/sched/workqueue.c \
+            kernel/core/sched/threadpool.c kernel/core/sched/priority_queue.c kernel/core/sched/workqueue.c \
             kernel/core/sched/bg_jobs.c kernel/core/vfs/fs_jail.c kernel/core/vfs/fs_provider.c kernel/core/vfs/fs_command.c \
             kernel/core/vfs/fs_events.c kernel/core/vfs/fs_policy.c kernel/core/vfs/fs_chain.c kernel/core/vfs/fs_facade.c \
             kernel/core/vfs/fs_service_glue.c kernel/core/mm/mem_domain.c kernel/core/mm/kmalloc.c kernel/core/mm/pmm.c \
@@ -617,7 +617,7 @@ TEST_SRCS = BPForbes_Flinstone_Tests.c userland/shell/common.c userland/shell/ut
             $(COMMAND_SRCS) \
             kernel/core/vfs/disk.c kernel/core/vfs/fat32_host.c kernel/core/vfs/fat32_host_files.c kernel/core/vfs/path_log.c kernel/core/vfs/cluster.c kernel/core/vfs/fs.c \
             disk_host_io.c \
-            kernel/core/sched/threadpool.c priority_queue.c kernel/core/sched/workqueue.c \
+            kernel/core/sched/threadpool.c kernel/core/sched/priority_queue.c kernel/core/sched/workqueue.c \
             kernel/core/sched/bg_jobs.c kernel/core/vfs/fs_jail.c kernel/core/vfs/fs_provider.c kernel/core/vfs/fs_command.c \
             kernel/core/vfs/fs_events.c kernel/core/vfs/fs_policy.c kernel/core/vfs/fs_chain.c kernel/core/vfs/fs_facade.c \
             kernel/core/vfs/fs_service_glue.c kernel/core/mm/mem_domain.c kernel/core/mm/kmalloc.c kernel/core/mm/pmm.c \
@@ -754,16 +754,16 @@ test_alloc_asm: $(ALLOC_OBJS) $(MEM_ASM_OBJ)
 	$(CC) $(CFLAGS) -I. -o tests/test_alloc tests/test_alloc.c $(ALLOC_OBJS) $(MEM_ASM_OBJ)
 	./tests/test_alloc
 
-test_priority_queue: priority_queue.o $(MEM_ASM_OBJ)
-	$(CC) $(CFLAGS) $(TEST_SANITIZE) -I. -o tests/test_priority_queue tests/test_priority_queue.c priority_queue.o $(MEM_ASM_OBJ)
+test_priority_queue: kernel/core/sched/priority_queue.o $(MEM_ASM_OBJ)
+	$(CC) $(CFLAGS) $(TEST_SANITIZE) -I. -o tests/test_priority_queue tests/test_priority_queue.c kernel/core/sched/priority_queue.o $(MEM_ASM_OBJ)
 	./tests/test_priority_queue
 
 test_shell_ctrl_c: $(TARGET) tests/test_shell_ctrl_c_prompt.py
 	python3 tests/test_shell_ctrl_c_prompt.py
 
-test_workqueue_p18: kernel/core/sched/workqueue.o priority_queue.o kernel/core/time/timekeeping.o $(MEM_ASM_OBJ)
+test_workqueue_p18: kernel/core/sched/workqueue.o kernel/core/sched/priority_queue.o kernel/core/time/timekeeping.o $(MEM_ASM_OBJ)
 	$(CC) $(CFLAGS) $(TEST_SANITIZE) -I. -o tests/test_workqueue_p18 tests/test_workqueue_p18.c \
-	  kernel/core/sched/workqueue.o priority_queue.o kernel/core/time/timekeeping.o $(MEM_ASM_OBJ) -Wl,-z,noexecstack
+	  kernel/core/sched/workqueue.o kernel/core/sched/priority_queue.o kernel/core/time/timekeeping.o $(MEM_ASM_OBJ) -Wl,-z,noexecstack
 	./tests/test_workqueue_p18
 
 # Stub gate runs before driver tests (CI / make test_drivers)
@@ -858,8 +858,8 @@ $(TEST_THREADPOOL_GC_DIR)/threadpool.o: kernel/core/sched/threadpool.c | $(TEST_
 	$(CC) $(THREADPOOL_TEST_CFLAGS) $(TEST_BATCH_GC_FLAGS) -c $< -o $@
 
 .PHONY: test_threadpool_issue222 test_disk_hex_issue222 test_issue222
-test_threadpool_issue222: tests/test_threadpool_issue222.c $(TEST_THREADPOOL_GC_DIR)/threadpool.o priority_queue.o $(MEM_ASM_OBJ)
-	$(CC) $(THREADPOOL_TEST_CFLAGS) $(TEST_SANITIZE) -o tests/test_threadpool_issue222 tests/test_threadpool_issue222.c $(TEST_THREADPOOL_GC_DIR)/threadpool.o priority_queue.o $(MEM_ASM_OBJ) -lpthread -Wl,--gc-sections -Wl,-z,noexecstack
+test_threadpool_issue222: tests/test_threadpool_issue222.c $(TEST_THREADPOOL_GC_DIR)/threadpool.o kernel/core/sched/priority_queue.o $(MEM_ASM_OBJ)
+	$(CC) $(THREADPOOL_TEST_CFLAGS) $(TEST_SANITIZE) -o tests/test_threadpool_issue222 tests/test_threadpool_issue222.c $(TEST_THREADPOOL_GC_DIR)/threadpool.o kernel/core/sched/priority_queue.o $(MEM_ASM_OBJ) -lpthread -Wl,--gc-sections -Wl,-z,noexecstack
 	./tests/test_threadpool_issue222
 
 test_disk_hex_issue222: tests/test_disk_hex_issue222.c
@@ -1108,18 +1108,18 @@ test_p0_p2_wiring: kernel/core/memory/fl_stack.o kernel/core/memory/exec_context
 	./tests/test_p0_p2_wiring
 
 .PHONY: test_p3_network
-test_p3_network: $(NET_ASM_OBJ) $(MEM_ASM_OBJ) $(NET_TEST_MM_OBJS) $(NET_TEST_PCI_OBJ) $(NET_TEST_SHELL_OBJS) $(NET_TEST_EXTRA_OBJS) priority_queue.o kernel/core/time/timekeeping.o kernel/core/sys/ipc.o
+test_p3_network: $(NET_ASM_OBJ) $(MEM_ASM_OBJ) $(NET_TEST_MM_OBJS) $(NET_TEST_PCI_OBJ) $(NET_TEST_SHELL_OBJS) $(NET_TEST_EXTRA_OBJS) kernel/core/sched/priority_queue.o kernel/core/time/timekeeping.o kernel/core/sys/ipc.o
 	$(CC) $(CFLAGS) $(TEST_SANITIZE) -o tests/test_p3_network tests/test_p3_network.c \
 	  $(NET_TEST_SHELL_OBJS) \
-	  $(NET_CORE_SRCS) kernel/core/sched/workqueue.c kernel/core/sys/ipc.o kernel/core/time/timekeeping.o priority_queue.o $(NET_TEST_MM_OBJS) $(NET_TEST_PCI_OBJ) $(MEM_ASM_OBJ) $(NET_ASM_OBJ) \
+	  $(NET_CORE_SRCS) kernel/core/sched/workqueue.c kernel/core/sys/ipc.o kernel/core/time/timekeeping.o kernel/core/sched/priority_queue.o $(NET_TEST_MM_OBJS) $(NET_TEST_PCI_OBJ) $(MEM_ASM_OBJ) $(NET_ASM_OBJ) \
 	  $(NET_TEST_EXTRA_OBJS) $(NET_TEST_LIBS) -Wl,-z,noexecstack
 	./tests/test_p3_network
 
 .PHONY: test_p3_server
-test_p3_server: $(NET_ASM_OBJ) $(MEM_ASM_OBJ) $(NET_TEST_MM_OBJS) $(NET_TEST_PCI_OBJ) $(NET_TEST_EXTRA_OBJS) priority_queue.o kernel/core/time/timekeeping.o kernel/core/sys/ipc.o
+test_p3_server: $(NET_ASM_OBJ) $(MEM_ASM_OBJ) $(NET_TEST_MM_OBJS) $(NET_TEST_PCI_OBJ) $(NET_TEST_EXTRA_OBJS) kernel/core/sched/priority_queue.o kernel/core/time/timekeeping.o kernel/core/sys/ipc.o
 	$(CC) $(CFLAGS) $(TEST_SANITIZE) -Iuserland/shell -o tests/test_p3_server tests/test_p3_server.c \
 	  userland/shell/common.o \
-	  $(NET_CORE_SRCS) kernel/core/sched/workqueue.c kernel/core/sys/ipc.o kernel/core/time/timekeeping.o priority_queue.o $(NET_TEST_MM_OBJS) $(NET_TEST_PCI_OBJ) $(MEM_ASM_OBJ) $(NET_ASM_OBJ) \
+	  $(NET_CORE_SRCS) kernel/core/sched/workqueue.c kernel/core/sys/ipc.o kernel/core/time/timekeeping.o kernel/core/sched/priority_queue.o $(NET_TEST_MM_OBJS) $(NET_TEST_PCI_OBJ) $(MEM_ASM_OBJ) $(NET_ASM_OBJ) \
 	  $(NET_TEST_EXTRA_OBJS) $(NET_TEST_LIBS) -pthread -Wl,-z,noexecstack
 	./tests/test_p3_server
 
@@ -1129,19 +1129,19 @@ test_p3_server: $(NET_ASM_OBJ) $(MEM_ASM_OBJ) $(NET_TEST_MM_OBJS) $(NET_TEST_PCI
 # (`fl_net_sock_open(DGRAM)` + bind/connect/send/recv) is exercised end-to-end.
 
 .PHONY: test_p3_server_lan
-test_p3_server_lan: $(NET_ASM_OBJ) $(MEM_ASM_OBJ) $(NET_TEST_MM_OBJS) $(NET_TEST_PCI_OBJ) $(NET_TEST_EXTRA_OBJS) priority_queue.o kernel/core/time/timekeeping.o kernel/core/sys/ipc.o
+test_p3_server_lan: $(NET_ASM_OBJ) $(MEM_ASM_OBJ) $(NET_TEST_MM_OBJS) $(NET_TEST_PCI_OBJ) $(NET_TEST_EXTRA_OBJS) kernel/core/sched/priority_queue.o kernel/core/time/timekeeping.o kernel/core/sys/ipc.o
 	$(CC) $(CFLAGS) $(TEST_SANITIZE) -Iuserland/shell -o tests/test_p3_server_lan tests/test_p3_server_lan.c \
 	  userland/shell/common.o \
-	  $(NET_CORE_SRCS) kernel/core/sched/workqueue.c kernel/core/sys/ipc.o kernel/core/time/timekeeping.o priority_queue.o $(NET_TEST_MM_OBJS) $(NET_TEST_PCI_OBJ) $(MEM_ASM_OBJ) $(NET_ASM_OBJ) \
+	  $(NET_CORE_SRCS) kernel/core/sched/workqueue.c kernel/core/sys/ipc.o kernel/core/time/timekeeping.o kernel/core/sched/priority_queue.o $(NET_TEST_MM_OBJS) $(NET_TEST_PCI_OBJ) $(MEM_ASM_OBJ) $(NET_ASM_OBJ) \
 	  $(NET_TEST_EXTRA_OBJS) $(NET_TEST_LIBS) -pthread -Wl,-z,noexecstack
 	./tests/test_p3_server_lan
 
 .PHONY: test_p3_udp_cmds
-test_p3_udp_cmds: $(NET_ASM_OBJ) $(MEM_ASM_OBJ) $(NET_TEST_MM_OBJS) $(NET_TEST_PCI_OBJ) $(NET_TEST_SHELL_OBJS) $(NET_TEST_EXTRA_OBJS) priority_queue.o kernel/core/time/timekeeping.o kernel/core/sys/ipc.o
+test_p3_udp_cmds: $(NET_ASM_OBJ) $(MEM_ASM_OBJ) $(NET_TEST_MM_OBJS) $(NET_TEST_PCI_OBJ) $(NET_TEST_SHELL_OBJS) $(NET_TEST_EXTRA_OBJS) kernel/core/sched/priority_queue.o kernel/core/time/timekeeping.o kernel/core/sys/ipc.o
 	$(CC) $(CFLAGS) $(TEST_SANITIZE) -o tests/test_p3_udp_cmds \
 	  tests/test_p3_udp_cmds.c userland/command/cmd_udp.c userland/command/cmd_registry.c \
 	  $(NET_TEST_SHELL_OBJS) \
-	  $(NET_CORE_SRCS) kernel/core/sched/workqueue.c kernel/core/sys/ipc.o kernel/core/time/timekeeping.o priority_queue.o \
+	  $(NET_CORE_SRCS) kernel/core/sched/workqueue.c kernel/core/sys/ipc.o kernel/core/time/timekeeping.o kernel/core/sched/priority_queue.o \
 	  $(NET_TEST_MM_OBJS) $(NET_TEST_PCI_OBJ) $(MEM_ASM_OBJ) $(NET_ASM_OBJ) \
 	  $(NET_TEST_EXTRA_OBJS) $(NET_TEST_LIBS) -pthread -Wl,-z,noexecstack
 	./tests/test_p3_udp_cmds
@@ -1166,7 +1166,7 @@ WIFI_TEST_NET_OBJS = kernel/core/net/net_checksum.c kernel/core/net/net_wire.c \
 # recipe). List them as prerequisites so `make test_p3_wifi` works without a
 # prior full `make`.
 WIFI_TEST_COMMON_DEPS = $(NET_ASM_OBJ) $(MEM_ASM_OBJ) $(NET_TEST_MM_OBJS) \
-	$(WIFI_PLATFORM_SRC:.c=.o) priority_queue.o kernel/core/time/timekeeping.o \
+	$(WIFI_PLATFORM_SRC:.c=.o) kernel/core/sched/priority_queue.o kernel/core/time/timekeeping.o \
 	kernel/core/sys/ipc.o
 
 # Immediate-expansion prerequisite lists need this defined *before* test_p3_wifi.
@@ -1196,7 +1196,7 @@ tests/test_p3_wifi: tests/test_p3_wifi.c $(WIFI_TEST_COMMON_DEPS) $(NET_TEST_PCI
 	  $(WIFI_PLATFORM_SRC:.c=.o) \
 	  $(WIFI_TEST_NET_OBJS) \
 	  kernel/core/platform/fl_platform.c \
-	  kernel/core/sched/workqueue.c kernel/core/sys/ipc.o kernel/core/time/timekeeping.o priority_queue.o \
+	  kernel/core/sched/workqueue.c kernel/core/sys/ipc.o kernel/core/time/timekeeping.o kernel/core/sched/priority_queue.o \
 	  $(NET_TEST_PCI_OBJ) $(MEM_ASM_OBJ) $(NET_ASM_OBJ) $(OPENSSL_LIBS) -Wl,-z,noexecstack
 
 test_p3_wifi: tests/test_p3_wifi
@@ -1214,7 +1214,7 @@ tests/test_p3_wifi_ota: $(WIFI_TEST_COMMON_DEPS) $(NET_TEST_PCI_OBJ)
 	  $(WIFI_PLATFORM_SRC:.c=.o) \
 	  $(WIFI_TEST_NET_OBJS) \
 	  kernel/core/platform/fl_platform.c \
-	  kernel/core/sched/workqueue.c kernel/core/sys/ipc.o kernel/core/time/timekeeping.o priority_queue.o \
+	  kernel/core/sched/workqueue.c kernel/core/sys/ipc.o kernel/core/time/timekeeping.o kernel/core/sched/priority_queue.o \
 	  $(NET_TEST_PCI_OBJ) $(MEM_ASM_OBJ) $(NET_ASM_OBJ) $(OPENSSL_LIBS) -Wl,-z,noexecstack
 
 test_p3_wifi_ota: tests/test_p3_wifi_ota
@@ -1313,17 +1313,17 @@ tests/test_wifi_80211ax_mock_279: $(WIFI_TEST_COMMON_DEPS) $(NET_TEST_PCI_OBJ)
 	  $(WIFI_PLATFORM_SRC:.c=.o) \
 	  $(WIFI_TEST_NET_OBJS) \
 	  kernel/core/platform/fl_platform.c \
-	  kernel/core/sched/workqueue.c kernel/core/sys/ipc.o kernel/core/time/timekeeping.o priority_queue.o \
+	  kernel/core/sched/workqueue.c kernel/core/sys/ipc.o kernel/core/time/timekeeping.o kernel/core/sched/priority_queue.o \
 	  $(NET_TEST_PCI_OBJ) $(MEM_ASM_OBJ) $(NET_ASM_OBJ) $(OPENSSL_LIBS) -Wl,-z,noexecstack
 
 test_wifi_80211ax_mock_279: tests/test_wifi_80211ax_mock_279
 	@./tests/test_wifi_80211ax_mock_279
 
-tests/test_wifi_ax_server_ota: $(NET_ASM_OBJ) $(MEM_ASM_OBJ) $(NET_TEST_MM_OBJS) $(NET_TEST_PCI_OBJ) $(NET_TEST_EXTRA_OBJS) userland/shell/common.o priority_queue.o kernel/core/time/timekeeping.o kernel/core/sys/ipc.o
+tests/test_wifi_ax_server_ota: $(NET_ASM_OBJ) $(MEM_ASM_OBJ) $(NET_TEST_MM_OBJS) $(NET_TEST_PCI_OBJ) $(NET_TEST_EXTRA_OBJS) userland/shell/common.o kernel/core/sched/priority_queue.o kernel/core/time/timekeeping.o kernel/core/sys/ipc.o
 	$(WIFI_TEST_LINK_PRE)
 	$(WIFI_TEST_LINK_AT)$(CC) $(CFLAGS) $(TEST_SANITIZE) -o tests/test_wifi_ax_server_ota tests/test_wifi_ax_server_ota.c \
 	  userland/shell/common.o \
-	  $(NET_CORE_SRCS) kernel/core/sched/workqueue.c kernel/core/sys/ipc.o kernel/core/time/timekeeping.o priority_queue.o \
+	  $(NET_CORE_SRCS) kernel/core/sched/workqueue.c kernel/core/sys/ipc.o kernel/core/time/timekeeping.o kernel/core/sched/priority_queue.o \
 	  $(NET_TEST_MM_OBJS) $(NET_TEST_PCI_OBJ) $(MEM_ASM_OBJ) $(NET_ASM_OBJ) \
 	  $(NET_TEST_EXTRA_OBJS) $(NET_TEST_LIBS) -pthread -Wl,-z,noexecstack
 
@@ -1376,7 +1376,7 @@ test_wifi_flinstone_helper: $(WIFI_TEST_COMMON_DEPS) $(NET_TEST_PCI_OBJ)
 	  $(WIFI_PLATFORM_SRC:.c=.o) \
 	  $(WIFI_TEST_NET_OBJS) \
 	  kernel/core/platform/fl_platform.c \
-	  kernel/core/sched/workqueue.c kernel/core/sys/ipc.o kernel/core/time/timekeeping.o priority_queue.o \
+	  kernel/core/sched/workqueue.c kernel/core/sys/ipc.o kernel/core/time/timekeeping.o kernel/core/sched/priority_queue.o \
 	  $(NET_TEST_PCI_OBJ) $(MEM_ASM_OBJ) $(NET_ASM_OBJ) $(OPENSSL_LIBS) -Wl,-z,noexecstack
 	./tests/test_wifi_flinstone_helper
 
@@ -1391,7 +1391,7 @@ test_wifi_flinstone_linux_helper: $(WIFI_TEST_COMMON_DEPS) $(NET_TEST_PCI_OBJ)
 	  $(WIFI_PLATFORM_SRC:.c=.o) \
 	  $(WIFI_TEST_NET_OBJS) \
 	  kernel/core/platform/fl_platform.c \
-	  kernel/core/sched/workqueue.c kernel/core/sys/ipc.o kernel/core/time/timekeeping.o priority_queue.o \
+	  kernel/core/sched/workqueue.c kernel/core/sys/ipc.o kernel/core/time/timekeeping.o kernel/core/sched/priority_queue.o \
 	  $(NET_TEST_PCI_OBJ) $(MEM_ASM_OBJ) $(NET_ASM_OBJ) $(OPENSSL_LIBS) -Wl,-z,noexecstack
 	./tests/test_wifi_flinstone_linux_helper
 
@@ -1410,11 +1410,11 @@ test_wifi_db: userland/identity/password_hash.o kernel/core/net/net_wifi_db.o ke
 	FL_WIFI_DB_PATH=/tmp/fl_test_wifi.db rm -f /tmp/fl_test_wifi.db; ./tests/test_wifi_db
 
 .PHONY: test_p3_net_tools
-test_p3_net_tools: $(NET_ASM_OBJ) $(MEM_ASM_OBJ) $(NET_TEST_MM_OBJS) $(NET_TEST_PCI_OBJ) $(NET_TEST_SHELL_OBJS) $(NET_TEST_EXTRA_OBJS) priority_queue.o kernel/core/time/timekeeping.o kernel/core/sys/ipc.o
+test_p3_net_tools: $(NET_ASM_OBJ) $(MEM_ASM_OBJ) $(NET_TEST_MM_OBJS) $(NET_TEST_PCI_OBJ) $(NET_TEST_SHELL_OBJS) $(NET_TEST_EXTRA_OBJS) kernel/core/sched/priority_queue.o kernel/core/time/timekeeping.o kernel/core/sys/ipc.o
 	$(CC) $(CFLAGS) $(TEST_SANITIZE) -o tests/test_p3_net_tools \
 	  tests/test_p3_net_tools.c userland/command/cmd_net_tools.c \
 	  $(NET_TEST_SHELL_OBJS) \
-	  $(NET_CORE_SRCS) kernel/core/sched/workqueue.c kernel/core/sys/ipc.o kernel/core/time/timekeeping.o priority_queue.o \
+	  $(NET_CORE_SRCS) kernel/core/sched/workqueue.c kernel/core/sys/ipc.o kernel/core/time/timekeeping.o kernel/core/sched/priority_queue.o \
 	  $(NET_TEST_MM_OBJS) $(NET_TEST_PCI_OBJ) $(MEM_ASM_OBJ) $(NET_ASM_OBJ) \
 	  $(NET_TEST_EXTRA_OBJS) $(NET_TEST_LIBS) -pthread -Wl,-z,noexecstack
 	./tests/test_p3_net_tools
@@ -1489,7 +1489,7 @@ test_replay:
 	$(MAKE) VM_ENABLE=1 ARCH=$(ARCH) BPForbes_Flinstone_Shell
 	$(CC) $(CFLAGS) -DVM_ENABLE=1 -I$(ASM_SRC_DIR) -I$(KERNEL_DRIVERS) -Ikernel -Ikernel/drivers -Ikernel/drivers/wifi -IVM -IVM/devices -o tests/test_replay tests/test_replay.c \
 	  userland/shell/common.o userland/shell/authz_subsystem.o $(UTIL_SHELL_LINK_OBJS) userland/shell/terminal.o kernel/core/vfs/disk.o kernel/core/vfs/fat32_host.o kernel/core/vfs/fat32_host_files.o disk_host_io.o disk_asm.o dir_asm.o \
-	  kernel/core/vfs/path_log.o kernel/core/vfs/cluster.o kernel/core/vfs/fs.o priority_queue.o \
+	  kernel/core/vfs/path_log.o kernel/core/vfs/cluster.o kernel/core/vfs/fs.o kernel/core/sched/priority_queue.o \
 	  kernel/core/vfs/fs_provider.o kernel/core/vfs/fs_command.o kernel/core/vfs/fs_events.o kernel/core/vfs/fs_policy.o \
 	  kernel/core/vfs/fs_chain.o kernel/core/vfs/fs_facade.o kernel/core/vfs/fs_service_glue.o $(FS_JAIL_CORE_OBJS) $(FS_JAIL_SUPPORT_OBJS) kernel/core/mm/mem_domain.o kernel/core/mm/kmalloc.o \
 	  kernel/core/sys/vrt.o kernel/core/sys/ipc.o kernel/core/sys/syscall.o kernel/core/vfs/vfs.o \
