@@ -796,9 +796,10 @@ static int run_net(const char *verb, const char **cursor)
  * content comes in hex parts. `server file decline` drops what is waiting.
  */
 #define FILE_NAME_MAX 20 /* one ramfs name, NUL included */
-/* KeyQuorum needs its Rust library, which only the WebAssembly shell links. */
+/* The Rust library is linked into this image (FL-02 stage 1) but the delivery checkpoints are not: they
+ * need a store that holds .kqtf containers (the ramfs holds 160 bytes a file) and a libc subset. */
 #define FILE_KQ_ELSEWHERE \
-    "server file: KeyQuorum co-signed delivery runs in the lab's WebAssembly shell\r\n"
+    "server file: KeyQuorum is linked in this image, but co-signed delivery still runs in the lab's WebAssembly shell\r\n"
 #define FILE_USER_MAX 16
 
 static int file_user_ok(const char *s)

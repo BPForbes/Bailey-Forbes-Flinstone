@@ -245,6 +245,7 @@ HOSTED_VERBS = [
 try:
     read_until("FLINTSTONE_KERNEL_BOOT_OK", 12)
     read_until("network=lab", 4)
+    read_until("CAP keyquorum=linked", 4)  # the KeyQuorum library is linked and its ABI accepted (FL-02)
     read_until("Flinstone@flintstone>", 4)
     send("whoami\n")
     read_until("WHOAMI Flinstone", 4)
