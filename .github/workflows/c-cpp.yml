@@ -171,6 +171,9 @@ jobs:
       - name: Test — KeyQuorum over the session wire
         run: make test_kq_net test_kq_wire
 
+      - name: Test — KeyQuorum history bundle framing
+        run: make test_kq_history_bundle
+
       - name: Test — userspace connection
         run: make test_userspace_connection
 

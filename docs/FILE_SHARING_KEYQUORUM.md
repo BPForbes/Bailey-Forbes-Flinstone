@@ -104,6 +104,12 @@ Contract: `contracts/drivers/contract_p4_keyquorum.h` (P4-9). Wire: `FL_NET_SESS
 `_RELEASE` 0x3D, `_ACK` 0x3E, `_KEYS` 0x3F; all integers big-endian, every string
 length-prefixed, every read bounds-checked by `net_codec.h`.
 
+History download (reserved, FL-04): `FL_NET_SESSION_OP_KQH_REQ` 0x50 and `_DATA` 0x51 sit in a second range above Wi-Fi and are
+routed to the same KeyQuorum hook (`fl_net_session_is_kq_opcode`). The DATA bytes are a history bundle
+(`kernel/core/vfs/kq_history_bundle.[ch]`: count byte 2, then two `{u32 BE length, KQPB letter}` records for kind 15 and
+kind 17). Only the opcodes and the bundle framing exist; the host and client handlers are not built yet (they need the
+KeyQuorum seal/open ABI for kinds 15 and 17), so a 0x50 or 0x51 frame is dropped like any other unhandled KeyQuorum frame.
+
 ### Commands
 
 | Command | What it does |

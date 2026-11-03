@@ -119,6 +119,17 @@
 #define FL_NET_SESSION_OP_WIFI_AUTH_DONE   0x45u
 #define FL_NET_SESSION_OP_WIFI_LAST        0x45u
 
+/**
+ * KeyQuorum history download (second KeyQuorum range, routed to the same hook as KQ_*).
+ * REQ: [request id 16][delivery id 16]. DATA: [request id 16][offset u32 BE][total u32 BE][bytes <= 480];
+ * the bytes are the history bundle (kq_history_bundle.h): two complete KQPB letters, kind 15 then kind 17.
+ * 0x52 to 0x5F are left free for the next feature that needs a range (FL-27's ledger frames).
+ */
+#define FL_NET_SESSION_OP_KQH_FIRST        0x50u
+#define FL_NET_SESSION_OP_KQH_REQ          0x50u
+#define FL_NET_SESSION_OP_KQH_DATA         0x51u
+#define FL_NET_SESSION_OP_KQH_LAST         0x51u
+
 #define FL_NET_SESSION_OP_ERR 0x7Fu
 
 /** Local command status for outbound file offers (not a wire opcode). */
@@ -134,7 +145,8 @@ static inline int fl_net_session_is_file_opcode(uint8_t opcode)
 
 static inline int fl_net_session_is_kq_opcode(uint8_t opcode)
 {
-    return opcode >= FL_NET_SESSION_OP_KQ_FIRST && opcode <= FL_NET_SESSION_OP_KQ_LAST;
+    return (opcode >= FL_NET_SESSION_OP_KQ_FIRST && opcode <= FL_NET_SESSION_OP_KQ_LAST) ||
+           (opcode >= FL_NET_SESSION_OP_KQH_FIRST && opcode <= FL_NET_SESSION_OP_KQH_LAST);
 }
 
 static inline int fl_net_session_is_wifi_opcode(uint8_t opcode)
@@ -175,6 +187,9 @@ _Static_assert(FL_NET_SESSION_MAX_MSG >= 64u, "session message cap unexpectedly 
 _Static_assert(FL_NET_SESSION_OP_FILE_LAST < FL_NET_SESSION_OP_KQ_FIRST &&
                    FL_NET_SESSION_OP_KQ_LAST < FL_NET_SESSION_OP_WIFI_FIRST,
                "KeyQuorum opcodes sit between the file and wifi ranges");
+_Static_assert(FL_NET_SESSION_OP_WIFI_LAST < FL_NET_SESSION_OP_KQH_FIRST &&
+                   FL_NET_SESSION_OP_KQH_LAST < FL_NET_SESSION_OP_ERR,
+               "KeyQuorum history opcodes sit above wifi and below the error opcode");
 _Static_assert(FL_NET_SESSION_OP_FILE_FIRST < FL_NET_SESSION_OP_FILE_LAST,
                "file opcode range must be contiguous");
 

@@ -1079,6 +1079,12 @@ test_kq_net: userland/shell/common.o $(UTIL_SHELL_LINK_OBJS) $(FS_JAIL_CORE_OBJS
 	  $(FS_JAIL_TEST_LIBS) -Wl,-z,noexecstack
 	./tests/test_kq_net
 
+.PHONY: test_kq_history_bundle
+test_kq_history_bundle: kernel/core/vfs/kq_history_bundle.o $(NET_ASM_OBJ)
+	$(CC) $(CFLAGS) $(TEST_SANITIZE) -o tests/test_kq_history_bundle tests/test_kq_history_bundle.c \
+	  kernel/core/vfs/kq_history_bundle.o $(NET_ASM_OBJ) -Wl,-z,noexecstack
+	./tests/test_kq_history_bundle
+
 .PHONY: test_kq_wire
 test_kq_wire: userland/shell/common.o $(UTIL_SHELL_LINK_OBJS) $(FS_JAIL_CORE_OBJS) $(FS_JAIL_SUPPORT_OBJS) kernel/core/mm/mem_domain.o $(MEM_ASM_OBJ) $(HISTORY_ASM_OBJ) $(UTIL_HISTORY_HOST_OBJS) kernel/core/vfs/kq_checkpoint.o kernel/core/vfs/kq_checkpoint_users.o kernel/core/vfs/kq_delivery.o kernel/core/net/net_kq_delivery_users.o $(NET_ASM_OBJ)
 	$(CC) $(CFLAGS) $(TEST_SANITIZE) -c -o tests/test_kq_wire.o tests/test_kq_wire.c

@@ -106,6 +106,7 @@ run_make "test_kq_checkpoint" test_kq_checkpoint
 run_make "test_kq_delivery" test_kq_delivery
 run_make "test_kq_net" test_kq_net
 run_make "test_kq_wire" test_kq_wire
+run_make "test_kq_history_bundle" test_kq_history_bundle
 run_make "test_part_buf" test_part_buf
 run_make "test_codeql_scripts" test_codeql_scripts
 
