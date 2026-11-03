@@ -430,7 +430,7 @@ test-freestanding-entry:
 
 # The netlab suite needs the SECFEAT image; the plain boot gate (test-browser-kernel)
 # still validates the lab-free default image.
-test-freestanding-shell: test-browser-kernel browser-kernel-secfeat
+test-freestanding-shell: $(TARGET) test-browser-kernel browser-kernel-secfeat
 	@FL_BROWSER_KERNEL_IMAGE=dist/flintstone-secfeat.img python3 ./scripts/test_freestanding_shell.py
 
 gen-session-wire-js:

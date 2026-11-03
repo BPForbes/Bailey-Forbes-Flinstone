@@ -1,9 +1,12 @@
 #!/usr/bin/env python3
 """Drive the freestanding serial shell: identity, ramfs, lab disk/net, every hosted verb."""
 import os
+import pty
+import re
 import select
 import subprocess
 import sys
+import tempfile
 import time
 from pathlib import Path
 
@@ -102,6 +105,128 @@ def cmd(line, expect=None, timeout=6):
     raise SystemExit(
         f"test-freestanding-shell: timeout after {line!r}\n{buf[start:].decode('latin1', 'replace')}"
     )
+
+
+# ---- account-session parity: the lab image and the hosted shell run the same scripted session -------------
+# Each step is (command line, secret answered if the command prompts for one). Both shells are driven the
+# same way and each step is reduced to the same observation (an outcome, or a name and whether it is
+# elevated); the two lists must be equal. The accepted differences are named here and nowhere else.
+PARITY_SESSION = [
+    ("su Flinstone", "flinstone"), ("whoami", None),
+    ("su Root", "root"), ("whoami", None),
+    ("useradd Bob", "bobpw"),
+    ("su Bob", "bobpw"), ("whoami", None),
+    ("useradd Eve", "evepw"),        # Bob is not elevated: refused
+    ("su Root", "wrong"),            # wrong password: refused, still Bob
+    ("whoami", None),
+    ("su Nobody", "wrong"),          # no such account: refused (the hosted shell does not even prompt)
+    ("su Root", "root"), ("whoami", None),
+    ("su Flinstone", "flinstone"), ("whoami", None),
+]
+# The only differences accepted between the lab image and the hosted shell. FL-25's queued-work journal is
+# memory only on the lab image (no block-write driver); no step above queues work, so nothing here is
+# compared for it yet. Listed so a future step that does must name it.
+KQ_PARITY_EXCEPTIONS = {"queued-work journal durability (FL-25): memory only on the lab image"}
+
+_FAIL_WORDS = re.compile(r"fail|denied|not exist|incorrect|could not|cannot|invalid|unknown|refus", re.I)
+
+
+def observe(line, text):
+    """Reduce one command's output to what both shells must agree on."""
+    body = [l.strip() for l in text.replace("\r", "").split("\n") if l.strip()]
+    body = [l for l in body if not l.startswith(("SESSION ", "Password:", "New password:"))
+            and not l.endswith(("flintstone>", "shell>")) and line not in l]
+    joined = " ".join(body)
+    if line.startswith("whoami"):
+        m = re.search(r"(?:WHOAMI\s+)?([A-Za-z][A-Za-z0-9_]*)(.*)", joined)
+        return ("whoami", m.group(1), "elevated" in joined) if m else ("whoami", "?", False)
+    if _FAIL_WORDS.search(joined):
+        return (line.split()[0], "refused")
+    return (line.split()[0], "ok")
+
+
+def lab_session_step(line, secret):
+    global buf
+    start = len(buf)
+    send(line + "\n")
+    answered = False
+    deadline = time.time() + 8
+    while time.time() < deadline:
+        ready, _, _ = select.select([proc.stdout], [], [], 0.1)
+        if ready:
+            buf += proc.stdout.read() or b""
+        chunk = buf[start:].replace(b"\r", b"").decode("latin1", "replace")
+        if secret is not None and not answered and chunk.rstrip().endswith("Password:") :
+            send(secret + "\n")
+            answered = True
+            continue
+        if chunk.endswith("flintstone> ") and line in chunk:
+            return chunk
+    raise SystemExit(f"test-freestanding-shell: parity step {line!r} did not finish\n{buf[start:].decode('latin1', 'replace')}")
+
+
+def hosted_session(steps):
+    binary = root / "BPForbes_Flinstone_Shell"
+    if not binary.is_file():
+        raise SystemExit(f"test-freestanding-shell: missing {binary} (run make first)")
+    out = []
+    with tempfile.TemporaryDirectory() as work:
+        (Path(work) / "userland" / "shell").mkdir(parents=True)  # where the hosted account store is written
+        env = dict(os.environ, FL_USERS_LAB_DEFAULTS="1")
+        pid, fd = pty.fork()
+        if pid == 0:
+            os.chdir(work)
+            os.execve(str(binary), [str(binary)], env)
+
+        def read_until_prompt(secret, timeout=10):
+            text, answered, deadline = "", False, time.time() + timeout
+            while time.time() < deadline:
+                ready, _, _ = select.select([fd], [], [], 0.2)
+                if ready:
+                    try:
+                        data = os.read(fd, 4096)
+                    except OSError:
+                        break
+                    text += data.decode("latin1")
+                clean = re.sub(r"\x1b\[[0-9;]*[A-Za-z]", "", text).replace("\r", "")
+                if secret is not None and not answered and re.search(r"[Pp]assword: ?$", clean.rstrip("\n")):
+                    os.write(fd, (secret + "\n").encode())
+                    answered = True
+                    continue
+                if clean.rstrip(" ").endswith("shell>") and clean.count("shell>") >= 1 and \
+                        (ready is None or not ready):
+                    return clean
+            raise SystemExit("test-freestanding-shell: hosted shell did not return to its prompt\n" + text)
+
+        try:
+            read_until_prompt(None, 15)
+            for line, secret in steps:
+                os.write(fd, (line + "\n").encode())
+                text = read_until_prompt(secret)
+                # the hosted prompt redraws the line as it is typed: keep what follows the last echo
+                text = text[text.rfind(line) + len(line):] if line in text else text
+                out.append(observe(line, text))
+            os.write(fd, b"exit\n")
+        finally:
+            try:
+                os.kill(pid, 9)
+                os.waitpid(pid, 0)
+            except OSError:
+                pass
+    return out
+
+
+def run_parity_session():
+    lab = [observe(line, lab_session_step(line, secret)) for line, secret in PARITY_SESSION]
+    hosted = hosted_session(PARITY_SESSION)
+    if os.environ.get("FL_PARITY_VERBOSE"):
+        print("parity lab   :", lab)
+        print("parity hosted:", hosted)
+    if lab != hosted:
+        diff = "\n".join(f"  {step[0]!r:20} lab={a} hosted={b}"
+                         for step, a, b in zip(PARITY_SESSION, lab, hosted) if a != b)
+        raise SystemExit("test-freestanding-shell: account session differs between the lab image and the "
+                         f"hosted shell (accepted: {sorted(KQ_PARITY_EXCEPTIONS)})\n{diff}\nlab={lab}\nhosted={hosted}")
 
 
 HOSTED_VERBS = [
@@ -303,7 +428,8 @@ try:
     send("root\n")
     wait_from("ok", start)
     cmd("whoami", expect="WHOAMI Root elevated")
-    print("test-freestanding-shell: PASS (hosted verb parity, ramfs, labdisk, labnet, server relay)")
+    run_parity_session()
+    print("test-freestanding-shell: PASS (hosted verb parity, account session parity, ramfs, labdisk, labnet, server relay)")
 finally:
     proc.kill()
     proc.wait()
