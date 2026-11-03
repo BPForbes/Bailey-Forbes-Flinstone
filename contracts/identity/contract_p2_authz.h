@@ -47,12 +47,22 @@ typedef enum {
     FL_AUTHZ_OP_IDENTITY_PASSWD = 9,
     /** Request, accept or revoke a heritage bridge (**contract_p2_heritage.h**). */
     FL_AUTHZ_OP_IDENTITY_BRIDGE = 10,
+    FL_AUTHZ_OP_IDENTITY_SWITCH = 11,          /* su <user> / sudo (FL-12): appended; 10 stays BRIDGE */
+    FL_AUTHZ_OP_FILE_RECEIVE = 12,
+    FL_AUTHZ_OP_FILE_SEND = 13,
+    FL_AUTHZ_OP_FILE_READ_REVISION = 14,
+    FL_AUTHZ_OP_FILE_HISTORY_EXPORT = 15,      /* a member asks the host for a file's history (FL-04) */
+    FL_AUTHZ_OP_KQ_SERVICE_CONTROL = 16,       /* stop / pause / reconfigure the KeyQuorum service (FL-20) */
+    FL_AUTHZ_OP_KQ_LEDGER_POLICY = 17,         /* ledger first-contact setting or a pin (FL-26/27) */
+    FL_AUTHZ_OP_STORAGE_MEDIATION_POLICY = 18, /* storage-mediation mode or allowlist digest (FL-28) */
     /** Foreign **execvp** / host program launch from the shell (hosted). */
     FL_AUTHZ_OP_SHELL_FOREIGN_EXEC = 100
 } fl_authz_operation_t;
 
-_Static_assert((unsigned)FL_AUTHZ_OP_IDENTITY_BRIDGE < (unsigned)FL_AUTHZ_OP_SHELL_FOREIGN_EXEC,
-               "identity op codes stay below shell foreign-exec band");
+_Static_assert((unsigned)FL_AUTHZ_OP_STORAGE_MEDIATION_POLICY < (unsigned)FL_AUTHZ_OP_SHELL_FOREIGN_EXEC,
+               "identity, file and KeyQuorum op codes stay below shell foreign-exec band");
+_Static_assert((unsigned)FL_AUTHZ_OP_IDENTITY_SWITCH == (unsigned)FL_AUTHZ_OP_IDENTITY_BRIDGE + 1u,
+               "new codes are appended after the existing last identity code");
 
 _Static_assert((unsigned)FL_AUTHZ_OP_SHELL_FOREIGN_EXEC > (unsigned)FL_AUTHZ_OP_DISK_LOW_LEVEL,
                "shell foreign-exec band separated from low-numbered subsystem ops");

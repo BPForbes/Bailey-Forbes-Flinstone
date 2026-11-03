@@ -10,6 +10,7 @@
  */
 #include "net_kq_delivery.h"
 #include "kq_checkpoint.h"
+#include "kq_history_bundle.h"
 #include "fl/mem_asm.h"
 #include "user_db.h"
 
@@ -411,6 +412,177 @@ static int test_wire_string_with_embedded_nul_is_dropped(void) {
     return 0;
 }
 
+/* ---- history download (FL-04): REQ and DATA over the wire ------------------------- */
+
+static char s_hist_container[PATH_MAX];
+static fl_kq_encoded_t s_hist_enc;
+static int s_gate_calls, s_source_calls;
+
+static int read_file(const char *path, fl_kq_buf_t *out) {
+    FILE *f = fopen(path, "rb");
+    long n;
+
+    if (!f)
+        return -1;
+    fseek(f, 0, SEEK_END);
+    n = ftell(f);
+    fseek(f, 0, SEEK_SET);
+    out->data = (uint8_t *)malloc((size_t)n);
+    out->len = (size_t)n;
+    if (!out->data || fread(out->data, 1, (size_t)n, f) != (size_t)n) {
+        fclose(f);
+        return -1;
+    }
+    fclose(f);
+    return 0;
+}
+
+/* Only Steve may have this history. */
+static int hist_gate(const char *requester, const uint8_t id[16]) {
+    (void)id;
+    s_gate_calls++;
+    return strcmp(requester, STEVE) == 0;
+}
+
+/* The host's source: Mya's file as the sealed kind-15 letter plus a kind-17 snapshot, both to the requester. */
+static fl_result_t hist_source(const char *requester, const uint8_t id[16], uint8_t *out, size_t cap,
+                               size_t *out_len) {
+    const fl_kq_driver_t *drv = fl_kq_driver_get_or_register();
+    fl_kq_buf_t c = {0}, l17 = {0}, ev = {0};
+    unsigned char sign[FL_USER_SIGNING_SECRET_LEN], did[16];
+    fl_result_t rc = FL_RESULT_ERR;
+    uint32_t events = 0;
+
+    (void)id;
+    s_source_calls++;
+    if (strcmp(requester, STEVE) != 0 || !drv || read_file(s_hist_container, &c) != 0)
+        goto done;
+    if (fl_user_db_open_key(&s_db, "Mya", "pw-mya", sign) != FL_RESULT_OK)
+        goto done;
+    if (drv->events(&c, &ev) != KQ_FILE_OK)
+        goto done;
+    for (size_t i = 0; i < ev.len; i++) /* one line per event: the snapshot covers them all */
+        events += ev.data[i] == '\n';
+    if (drv->seal_snapshot(&c, events, MYA, sign, fl_user_db_box_public(&s_db, MYA), STEVE,
+                           fl_user_db_box_public(&s_db, STEVE), &l17, did) != KQ_FILE_OK)
+        goto done;
+    rc = fl_history_bundle_pack(out, cap, out_len, s_hist_enc.letter.data, s_hist_enc.letter.len, l17.data,
+                                l17.len);
+done:
+    asm_mem_secure_zero(sign, sizeof sign);
+    free(c.data);
+    fl_kq_buf_free(&l17);
+    fl_kq_buf_free(&ev);
+    return rc;
+}
+
+static void send_data_to_steve(const uint8_t req[16], uint32_t off, uint32_t total, size_t n) {
+    uint8_t buf[FL_NET_SESSION_MAX_MSG] = {0};
+
+    memcpy(buf, req, 16);
+    buf[16] = (uint8_t)(off >> 24); buf[17] = (uint8_t)(off >> 16); buf[18] = (uint8_t)(off >> 8); buf[19] = (uint8_t)off;
+    buf[20] = (uint8_t)(total >> 24); buf[21] = (uint8_t)(total >> 16); buf[22] = (uint8_t)(total >> 8); buf[23] = (uint8_t)total;
+    fl_net_kq_client_handle(NULL, FL_NET_SESSION_OP_KQH_DATA, buf, (uint16_t)(24 + n));
+}
+
+static int test_history_download_over_the_wire(void) {
+    const fl_kq_driver_t *drv = fl_kq_driver_get_or_register();
+    uint8_t req[16], req2[16], req3[16], delivery[16] = {1, 2, 3};
+    fl_kq_buf_t l15 = {0}, l17 = {0}, c = {0}, snap = {0};
+    unsigned char steve_box[FL_USER_SIGNING_SECRET_LEN], rev[32], root[32], root2[32];
+    uint32_t count = 0;
+    int data_before;
+
+    ASSERT(drv && drv->seal_snapshot && drv->open_snapshot && drv->snapshot_covers && drv->error_name);
+    ASSERT(encode_from_mya("hist.txt", "history v1\n", &s_hist_enc) == 0);
+    snprintf(s_hist_container, sizeof s_hist_container, "%s/hist.txt.kqtf", s_dir);
+    ASSERT(fl_user_db_open_box(&s_db, "Steve", "pw-steve", steve_box) == FL_RESULT_OK);
+
+    /* With no gate the host refuses and answers nothing: fail closed. */
+    s_actor = &s_members[2];
+    fl_net_kq_set_history(NULL, hist_source);
+    ASSERT(fl_net_kq_request_history(s_srv, NULL, 0, delivery, req) == FL_RESULT_OK);
+    ASSERT(strstr(s_last_err, "history refused: "));
+    ASSERT(s_source_calls == 0);
+    ASSERT(fl_net_kq_history_take(req, 0, &l15, &l17) == FL_RESULT_TIMEDOUT);
+    fl_net_kq_history_drop(req);
+    /* The gate says no to Mya: refused with KeyQuorum's own word for it, and the source never runs. */
+    fl_net_kq_set_history(hist_gate, hist_source);
+    s_actor = &s_members[1];
+    ASSERT(fl_net_kq_request_history(s_srv, NULL, 0, delivery, req) == FL_RESULT_OK);
+    ASSERT(strstr(s_last_err, drv->error_name(8)) != NULL);
+    ASSERT(s_gate_calls == 1 && s_source_calls == 0);
+    ASSERT(s_to_mya[FL_NET_SESSION_OP_KQH_DATA & 0x7F] == 0);
+    fl_net_kq_history_drop(req);
+    /* A gate with no source: refused, not silent. */
+    fl_net_kq_set_history(hist_gate, NULL);
+    s_actor = &s_members[2];
+    ASSERT(fl_net_kq_request_history(s_srv, NULL, 0, delivery, req) == FL_RESULT_OK);
+    ASSERT(strstr(s_last_err, "not available on this host"));
+    fl_net_kq_history_drop(req);
+
+    /* Steve gets the bundle in chunks and opens both letters. */
+    fl_net_kq_set_history(hist_gate, hist_source);
+    data_before = s_to_steve[FL_NET_SESSION_OP_KQH_DATA & 0x7F];
+    ASSERT(fl_net_kq_request_history(s_srv, NULL, 0, delivery, req) == FL_RESULT_OK);
+    ASSERT(s_to_steve[FL_NET_SESSION_OP_KQH_DATA & 0x7F] - data_before >= 2); /* more than one frame */
+    ASSERT(fl_net_kq_history_take(req, 0, &l15, &l17) == FL_RESULT_OK);
+    ASSERT(l15.len == s_hist_enc.letter.len && memcmp(l15.data, s_hist_enc.letter.data, l15.len) == 0);
+    ASSERT(drv->open(&l15, steve_box, MYA, STEVE, fl_user_db_signing_public(&s_db, MYA), &c, rev, root) ==
+           KQ_FILE_OK);
+    ASSERT(drv->open_snapshot(&l17, steve_box, MYA, STEVE, fl_user_db_signing_public(&s_db, MYA), &snap, root2,
+                              &count) == KQ_FILE_OK);
+    ASSERT(count >= 1);                                           /* the snapshot holds the file's events */
+    ASSERT(drv->snapshot_covers(&c, &snap) == KQ_FILE_OK);        /* the delivered extract is a prefix of it */
+    /* a letter for someone else does not open for Steve */
+    ASSERT(drv->open_snapshot(&l17, steve_box, MYA, "Root.Flinstone.Mya", fl_user_db_signing_public(&s_db, MYA),
+                              &snap, root2, &count) != KQ_FILE_OK);
+    fl_kq_buf_free(&l15); fl_kq_buf_free(&l17); fl_kq_buf_free(&c); fl_kq_buf_free(&snap);
+    fl_net_kq_history_drop(req);
+
+    /* Unsolicited, oversize and out-of-order DATA never builds anything. */
+    memset(req2, 9, sizeof req2);
+    send_data_to_steve(req2, 0, 100, 50);
+    ASSERT(fl_net_kq_history_take(req2, 0, &l15, &l17) == FL_RESULT_NOENT);
+    {
+        /* a pending request the host refuses (no source): nothing arrives, and bad DATA must not build one */
+        fl_net_kq_set_history(hist_gate, NULL);
+        ASSERT(fl_net_kq_request_history(s_srv, NULL, 0, delivery, req3) == FL_RESULT_OK); /* refused: nothing arrives */
+        send_data_to_steve(req3, 0, FL_HISTORY_BUNDLE_MAX_BYTES + 1u, 50);  /* declared total over the bound */
+        ASSERT(fl_net_kq_history_take(req3, 0, &l15, &l17) == FL_RESULT_TIMEDOUT);
+        send_data_to_steve(req3, 480, 1000, 50);                            /* does not start at 0 */
+        ASSERT(fl_net_kq_history_take(req3, 0, &l15, &l17) == FL_RESULT_TIMEDOUT);
+        send_data_to_steve(req3, 0, 100, 100);                              /* 100 bytes that do not unpack: dropped */
+        ASSERT(fl_net_kq_history_take(req3, 0, &l15, &l17) == FL_RESULT_NOENT);
+    }
+    /* A member cannot send the host a DATA frame, and a malformed REQ is refused. */
+    {
+        uint8_t junk[10] = {0};
+        s_actor = &s_members[2];
+        ASSERT(fl_net_kq_send(s_srv, NULL, 0, FL_NET_SESSION_OP_KQH_REQ, junk, sizeof junk) == FL_RESULT_OK);
+        ASSERT(strstr(s_last_err, "malformed request"));
+        ASSERT(fl_net_kq_send(s_srv, NULL, 0, FL_NET_SESSION_OP_KQH_DATA, junk, sizeof junk) == FL_RESULT_OK);
+        ASSERT(strstr(s_last_err, "DATA is a host answer"));
+    }
+    /* Only KQ_HIST_MAX requests can be waiting. */
+    fl_net_kq_set_history(hist_gate, hist_source);
+    {
+        uint8_t a[16], b[16], d[16];
+        fl_net_kq_history_drop(req3);
+        /* keep two pending: ask through a source that fails so no answer completes them */
+        fl_net_kq_set_history(hist_gate, NULL);
+        ASSERT(fl_net_kq_request_history(s_srv, NULL, 0, delivery, a) == FL_RESULT_OK);
+        ASSERT(fl_net_kq_request_history(s_srv, NULL, 0, delivery, b) == FL_RESULT_OK);
+        ASSERT(fl_net_kq_request_history(s_srv, NULL, 0, delivery, d) == FL_RESULT_BUSY);
+        fl_net_kq_history_drop(a);
+        fl_net_kq_history_drop(b);
+    }
+    asm_mem_secure_zero(steve_box, sizeof steve_box);
+    fl_kq_encoded_free(&s_hist_enc);
+    fl_net_kq_set_history(NULL, NULL);
+    return 0;
+}
+
 int main(void) {
     char tmpl[] = "/tmp/fl_kq_netXXXXXX";
     char path[PATH_MAX];
@@ -444,6 +616,7 @@ int main(void) {
     RUN(test_unfinished_uploads_never_hold_the_host);
     RUN(test_unsafe_names_never_reach_a_path);
     RUN(test_wire_string_with_embedded_nul_is_dropped);
+    RUN(test_history_download_over_the_wire);
     fl_net_kq_reset();
     rmrf(s_dir);
     if (rc == 0)

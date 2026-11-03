@@ -60,6 +60,7 @@ kernel/drivers/keyquorum/kq_driver.c
 kernel/drivers/driver_model.c
 kernel/core/vfs/kq_checkpoint.c
 kernel/core/vfs/kq_delivery.c
+kernel/core/vfs/kq_history_bundle.c
 kernel/core/vfs/server_catalog_file.c
 kernel/core/vfs/server_shared_fs.c
 kernel/core/net/net_kq_delivery.c

@@ -104,11 +104,22 @@ Contract: `contracts/drivers/contract_p4_keyquorum.h` (P4-9). Wire: `FL_NET_SESS
 `_RELEASE` 0x3D, `_ACK` 0x3E, `_KEYS` 0x3F; all integers big-endian, every string
 length-prefixed, every read bounds-checked by `net_codec.h`.
 
-History download (reserved, FL-04): `FL_NET_SESSION_OP_KQH_REQ` 0x50 and `_DATA` 0x51 sit in a second range above Wi-Fi and are
-routed to the same KeyQuorum hook (`fl_net_session_is_kq_opcode`). The DATA bytes are a history bundle
-(`kernel/core/vfs/kq_history_bundle.[ch]`: count byte 2, then two `{u32 BE length, KQPB letter}` records for kind 15 and
-kind 17). Only the opcodes and the bundle framing exist; the host and client handlers are not built yet (they need the
-KeyQuorum seal/open ABI for kinds 15 and 17), so a 0x50 or 0x51 frame is dropped like any other unhandled KeyQuorum frame.
+History download (FL-04): `FL_NET_SESSION_OP_KQH_REQ` 0x50 and `_DATA` 0x51 sit in a second range above Wi-Fi and
+are routed to the same KeyQuorum hook (`fl_net_session_is_kq_opcode`). REQ is `[request id 16][delivery id 16]`;
+the host answers the requester only with DATA chunks `[request id 16][offset u32][total u32][bytes <= 480]` of a
+history bundle (`kernel/core/vfs/kq_history_bundle.[ch]`: count byte 2, then two `{u32 BE length, KQPB letter}`
+records, kind 15 and kind 17, both sealed to the requester). The host needs two things it is given with
+`fl_net_kq_set_history`: a gate (the native shell asks `fl_authz_subsystem_check(FL_AUTHZ_OP_FILE_HISTORY_EXPORT)`)
+and a source that builds the bundle signed by the host's own account (so that account must be signed in, FL-20).
+With either missing the host refuses with a visible message and sends nothing; a denied request is answered with
+KeyQuorum's own word for it (`kq_error_name`, code 8). The client holds up to two pending requests, accepts DATA
+only for a request it made, bounds the declared total (1 MiB) before allocating, and drops a bundle that does not
+unpack; `fl_net_kq_history_take` hands back the two letters, which the caller opens with the driver
+(`open`, `open_snapshot`) and compares (`snapshot_covers`). The browser lab's relay and `wasm_kq_frame` carry
+frames by opcode without reading it, so 0x50 and 0x51 pass through unchanged. **Not built:** the native shell's
+gate and source (the source needs the host account's unlocked key from the key service, FL-20, and a decision on
+where the history lives on a host that only holds opaque letters), so a request to the shipped host is refused
+with "history download is not available on this host".
 
 ### Commands
 
@@ -661,6 +672,32 @@ changes that.
 - Co-signed delivery is built (above). Redistribution, time-bound access, public offers and
   the chained edit log are not.
 - The browser lab runs co-signed delivery with in-memory keys and first-seen key publication
-  (above); the freestanding QEMU kernel does not run it.
+  (above). The freestanding QEMU kernel links the KeyQuorum library and the driver (FL-02 stage 1,
+  below) but does not run the delivery checkpoints (stage 2, not built).
 - The 16 MiB limit, the ring sizes and the relay TTL are KeyQuorum defaults, not measured for
   Flinstone's workload.
+
+## The freestanding image (FL-02, stage 1)
+
+`scripts/build_freestanding_browser_kernel.sh` builds `libkeyquorum_identity.a` for `x86_64-unknown-none`
+(`cargo build --locked --release --no-default-features`, run from the submodule so its `.cargo/config.toml`
+picks the portable crypto backends) and links it with `kernel/drivers/keyquorum/kq_driver.c` and
+`kernel/freestanding/x86_64/kq_platform.c` (`KQ_FREESTANDING=0` builds the image without it). At boot the
+kernel prints `CAP keyquorum=linked` when `fl_kq_driver_get()` accepts the linked ABI
+(`FL_KQ_ABI_VERSION` 3), else `CAP keyquorum=abi-mismatch`.
+
+- **Size.** The image is about 418 KiB of payload (837 sectors, gate 1024) with about 99 KiB of bss; the
+  build script refuses an image whose bss end reaches the end of conventional memory.
+- **Heap.** A 40 MiB arena at 4 MiB (`kq_platform.c`), above the image, inside the first GiB the boot code
+  identity-maps. Sealing an account key (Argon2id, 19 MiB) needs more than 19 MiB at once, so the machine
+  needs at least 64 MiB, which is what the page requests.
+- **Entropy.** RDRAND only. QEMU's default CPU model has none, so there `kq_platform_random` fails and the
+  library fails closed (`FLINTSTONE_KQ_PANIC`, then a halt): no key is ever made from weak bytes. With
+  `-cpu max` key generation, sealing and opening an account key run in the image (checked in QEMU).
+  Whether the page's QEMU Wasm offers RDRAND is not known; until an entropy source is decided, KeyQuorum
+  in the image can verify and open but not generate.
+- **Clock.** `fl_time_wall_sec` reads the CMOS real-time clock (UTC under QEMU's default).
+- **Stage 2 (not built): the checkpoints in the image.** They need a store for `.kqtf` containers and
+  sealed letters (a ramfs file holds 160 bytes, 16 files in all) and the libc calls `kq_checkpoint.c` makes
+  (`stdio`, `stdlib`, `errno`, `sys/stat`, `unistd`). Neither is small, so `server file` in the image still
+  says delivery runs in the WebAssembly shell.
