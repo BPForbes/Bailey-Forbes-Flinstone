@@ -686,7 +686,7 @@ picks the portable crypto backends) and links it with `kernel/drivers/keyquorum/
 kernel prints `CAP keyquorum=linked` when `fl_kq_driver_get()` accepts the linked ABI
 (`FL_KQ_ABI_VERSION` 3), else `CAP keyquorum=abi-mismatch`.
 
-- **Size.** The image is about 418 KiB of payload (837 sectors, gate 1024) with about 99 KiB of bss; the
+- **Size.** The image is about 441 KiB of payload (882 sectors; 918 with the security lab; gate 1024) with about 99 KiB of bss; the
   build script refuses an image whose bss end reaches the end of conventional memory.
 - **Heap.** A 40 MiB arena at 4 MiB (`kq_platform.c`), above the image, inside the first GiB the boot code
   identity-maps. Sealing an account key (Argon2id, 19 MiB) needs more than 19 MiB at once, so the machine
