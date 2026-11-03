@@ -88,7 +88,12 @@ static void wq_dispatch(void *arg) {
     }
     {
         int64_t base = wq->st.poll_now_ns >= 0 ? wq->st.poll_now_ns : item->run_at_ns;
-        item->run_at_ns = base + item->period_ns;
+        int64_t next;
+
+        /* a huge period must not wrap negative (that would run the item on every poll) */
+        if (__builtin_add_overflow(base, item->period_ns, &next))
+            next = INT64_MAX;
+        item->run_at_ns = next;
     }
     wq_timer_insert(wq, item);
     WQ_UNLOCK(wq);
@@ -138,6 +143,7 @@ fl_workqueue_t *fl_wq_default(void) {
     return &s_default_wq;
 }
 
+/* Only on a queue nobody is using: it re-initialises the lock and drops what is queued. */
 fl_result_t fl_wq_init(fl_workqueue_t *wq) {
     if (!wq)
         return FL_RESULT_INVAL;
@@ -201,7 +207,11 @@ static fl_result_t wq_submit(fl_workqueue_t *wq, const fl_wq_work_t *work, int64
 
         if (fl_time_monotonic_ns(&now) != FL_RESULT_OK)
             return FL_RESULT_ERR; /* a period needs P1-7 */
+        if (period_ns > INT64_MAX - now)
+            return FL_RESULT_INVAL;
         run_at_ns = now + period_ns;
+    } else if (period_ns > 0 && run_at_ns > INT64_MAX - period_ns) {
+        return FL_RESULT_INVAL; /* first run plus one period would not fit */
     }
 
     item = (wq_item_t *)calloc(1, sizeof(*item));

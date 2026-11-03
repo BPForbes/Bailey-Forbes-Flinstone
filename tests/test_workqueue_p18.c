@@ -3,7 +3,12 @@
  */
 #include "workqueue.h"
 
+#include "bg_jobs.h"
+#include "net_background.h"
+
 #include <pthread.h>
+#include <stdatomic.h>
+#include <time.h>
 #include <stdio.h>
 #include <string.h>
 
@@ -24,6 +29,25 @@
             return 1;                           \
         }                                       \
     } while (0)
+
+/* bg_jobs.c is linked here with the network background stubbed out: the test needs to see where the
+ * lazy init runs, and the tick must do nothing else. */
+static pthread_t s_main_thread;
+static int s_net_init_calls;
+static int s_net_init_off_main;
+static _Atomic int s_net_ticks;
+
+void fl_net_background_init(void) {
+    s_net_init_calls++;
+    if (!pthread_equal(pthread_self(), s_main_thread))
+        s_net_init_off_main = 1;
+}
+void fl_net_background_shutdown(void) {}
+void fl_net_background_tick(unsigned max_items) {
+    (void)max_items;
+    atomic_fetch_add(&s_net_ticks, 1);
+}
+fl_result_t fl_net_background_arp_tick_kick(void) { return FL_RESULT_OK; }
 
 static unsigned s_noop_ran;
 
@@ -381,6 +405,184 @@ static int test_concurrent_enqueue(void) {
     return 0;
 }
 
+/* ---- review fixes: overflow, ordering, slot accounting, ticker ---- */
+
+static int test_period_overflow_is_refused_and_saturates(void) {
+    fl_workqueue_storage_t store;
+    fl_workqueue_t *wq = (fl_workqueue_t *)&store;
+    fl_wq_work_t huge = {.fn = noop_work, .pq_layer = FL_WQ_LAYER_NORMAL, .period_ns = INT64_MAX};
+    fl_wq_work_t big = {.fn = noop_work, .pq_layer = FL_WQ_LAYER_NORMAL, .period_ns = INT64_MAX - 20};
+
+    s_noop_ran = 0;
+    ASSERT(fl_wq_init(wq) == FL_RESULT_OK);
+    /* first run + one period would not fit */
+    ASSERT(fl_wq_enqueue_at(wq, &huge, 10) == FL_RESULT_INVAL);
+    /* now + period would not fit */
+    ASSERT(fl_wq_enqueue_every(wq, &huge, INT64_MAX) == FL_RESULT_INVAL);
+    ASSERT(fl_wq_pending(wq) == 0);
+    /* accepted (10 + MAX-20 fits) but the re-arm after a poll at 100 would wrap: it saturates, so the
+     * item is not due again, instead of wrapping negative and running on every poll */
+    ASSERT(fl_wq_enqueue_at(wq, &big, 10) == FL_RESULT_OK);
+    ASSERT(fl_wq_poll_at(wq, 8, 100) == 1);
+    ASSERT(fl_wq_poll_at(wq, 8, 200) == 0);
+    ASSERT(fl_wq_poll_at(wq, 8, 300) == 0);
+    ASSERT(s_noop_ran == 1);
+    fl_wq_shutdown(wq);
+    return 0;
+}
+
+static int test_equal_due_times_keep_arrival_order(void) {
+    fl_workqueue_storage_t store;
+    fl_workqueue_t *wq = (fl_workqueue_t *)&store;
+    int64_t id[4] = {1, 2, 3, 4};
+    fl_wq_work_t w[4];
+
+    s_order_n = 0;
+    ASSERT(fl_wq_init(wq) == FL_RESULT_OK);
+    for (int i = 0; i < 4; i++) {
+        memset(&w[i], 0, sizeof w[i]);
+        w[i].fn = order_recorder;
+        w[i].ctx = &id[i];
+        w[i].pq_layer = FL_WQ_LAYER_NORMAL;
+        ASSERT(fl_wq_enqueue_at(wq, &w[i], 500) == FL_RESULT_OK);
+    }
+    ASSERT(fl_wq_poll_at(wq, 8, 500) == 4);
+    ASSERT(s_order[0] == 1 && s_order[1] == 2 && s_order[2] == 3 && s_order[3] == 4);
+    fl_wq_shutdown(wq);
+    return 0;
+}
+
+static int test_periodic_slots_are_returned(void) {
+    fl_workqueue_storage_t store;
+    fl_workqueue_t *wq = (fl_workqueue_t *)&store;
+    fl_wq_work_t per = {.fn = noop_work, .pq_layer = FL_WQ_LAYER_NORMAL, .period_ns = 100};
+    fl_wq_work_t once = {.fn = noop_work, .pq_layer = FL_WQ_LAYER_NORMAL};
+    int64_t now = 1000;
+
+    ASSERT(fl_wq_init(wq) == FL_RESULT_OK);
+    /* one periodic item and the rest one-shot timers: every round the one-shots finish and free their
+     * slots, so exactly FL_WQ_TIMERS_MAX - 1 more must fit. A periodic slot that leaked on re-arm
+     * (periodic_inflight never decremented) would make a later round come up short. */
+    ASSERT(fl_wq_enqueue_at(wq, &per, now) == FL_RESULT_OK);
+    for (int round = 0; round < 5; round++) {
+        for (unsigned i = 0; i + 1 < FL_WQ_TIMERS_MAX; i++)
+            ASSERT(fl_wq_enqueue_at(wq, &once, now) == FL_RESULT_OK);
+        ASSERT(fl_wq_enqueue_at(wq, &once, now) == FL_RESULT_BUSY);
+        ASSERT(fl_wq_poll_at(wq, FL_WQ_PENDING_MAX, now) == FL_WQ_TIMERS_MAX);
+        ASSERT(fl_wq_pending(wq) == 1); /* only the re-armed periodic item is left */
+        now += 100;
+    }
+    /* a full set of periodic items, run many times, stays full and never over-full */
+    fl_wq_shutdown(wq);
+    ASSERT(fl_wq_init(wq) == FL_RESULT_OK);
+    for (unsigned i = 0; i < FL_WQ_TIMERS_MAX; i++)
+        ASSERT(fl_wq_enqueue_at(wq, &per, 100) == FL_RESULT_OK);
+    for (int round = 0; round < 6; round++) {
+        ASSERT(fl_wq_poll_at(wq, FL_WQ_PENDING_MAX, 100 + 100 * round) == FL_WQ_TIMERS_MAX);
+        ASSERT(fl_wq_pending(wq) == (int)FL_WQ_TIMERS_MAX);
+        ASSERT(fl_wq_enqueue_at(wq, &per, 99999) == FL_RESULT_BUSY);
+    }
+    fl_wq_shutdown(wq);
+    return 0;
+}
+
+static _Atomic unsigned s_mt_ran;
+
+static void mt_count(void *ctx) {
+    (void)ctx;
+    atomic_fetch_add(&s_mt_ran, 1);
+}
+
+static fl_workqueue_t *s_default_seen[4];
+
+static void *default_getter(void *arg) {
+    s_default_seen[(intptr_t)arg] = fl_wq_default();
+    return NULL;
+}
+
+static void *default_enqueuer(void *arg) {
+    fl_wq_work_t w = {.fn = mt_count, .pq_layer = FL_WQ_LAYER_NORMAL};
+    (void)arg;
+    for (int i = 0; i < 10; i++) {
+        fl_result_t r;
+        while ((r = fl_wq_enqueue(fl_wq_default(), &w)) == FL_RESULT_BUSY) {
+            struct timespec ts = {0, 1000000};
+            nanosleep(&ts, NULL);
+        }
+        if (r != FL_RESULT_OK)
+            return (void *)1;
+    }
+    return NULL;
+}
+
+static unsigned long long mono_ms(void) {
+    struct timespec ts;
+    clock_gettime(CLOCK_MONOTONIC, &ts);
+    return (unsigned long long)ts.tv_sec * 1000ull + (unsigned long long)ts.tv_nsec / 1000000ull;
+}
+
+static int test_ticker_and_default_queue(void) {
+    pthread_t th[4];
+    void *rv;
+    unsigned long long t0;
+
+    s_main_thread = pthread_self();
+    /* pthread_once: every thread sees the one default queue */
+    for (intptr_t i = 0; i < 4; i++)
+        ASSERT(pthread_create(&th[i], NULL, default_getter, (void *)i) == 0);
+    for (int i = 0; i < 4; i++)
+        ASSERT(pthread_join(th[i], NULL) == 0);
+    for (int i = 1; i < 4; i++)
+        ASSERT(s_default_seen[i] == s_default_seen[0] && s_default_seen[0] != NULL);
+
+    ASSERT(fl_bg_jobs_ticker_start(0) == FL_RESULT_INVAL);
+    ASSERT(s_net_init_calls == 0);
+    ASSERT(fl_bg_jobs_ticker_start(10000) == FL_RESULT_OK); /* long period: stop must not wait for it */
+    ASSERT(s_net_init_calls == 1 && !s_net_init_off_main); /* net init ran on the starting thread, first */
+    ASSERT(fl_bg_jobs_ticker_start(10) == FL_RESULT_BUSY);
+    t0 = mono_ms();
+    while (atomic_load(&s_net_ticks) < 1 && mono_ms() - t0 < 5000) {
+        struct timespec ts = {0, 1000000};
+        nanosleep(&ts, NULL);
+    }
+    t0 = mono_ms();
+    fl_bg_jobs_ticker_stop();
+    ASSERT(mono_ms() - t0 < 2000);
+    fl_bg_jobs_ticker_stop(); /* second stop is a no-op */
+    ASSERT(atomic_load(&s_net_ticks) >= 1); /* it ticked at least once before it stopped */
+
+    /* restart with a short period; three threads enqueue while it polls */
+    atomic_store(&s_mt_ran, 0);
+    ASSERT(fl_bg_jobs_ticker_start(1) == FL_RESULT_OK);
+    for (int i = 0; i < 3; i++)
+        ASSERT(pthread_create(&th[i], NULL, default_enqueuer, NULL) == 0);
+    for (int i = 0; i < 3; i++) {
+        ASSERT(pthread_join(th[i], &rv) == 0);
+        ASSERT(rv == NULL);
+    }
+    t0 = mono_ms();
+    while (atomic_load(&s_mt_ran) < 30 && mono_ms() - t0 < 10000) {
+        struct timespec ts = {0, 2000000};
+        nanosleep(&ts, NULL);
+    }
+    ASSERT(atomic_load(&s_mt_ran) == 30);
+    fl_bg_jobs_ticker_stop();
+    ASSERT(s_net_init_off_main == 0);
+
+    /* shutdown of the default queue runs protected items once and drops the rest */
+    {
+        fl_wq_work_t prot = {.fn = mt_count, .pq_layer = FL_WQ_LAYER_NORMAL, .flags = FL_WQ_PROTECTED};
+        fl_wq_work_t ord = {.fn = mt_count, .pq_layer = FL_WQ_LAYER_NORMAL};
+
+        atomic_store(&s_mt_ran, 0);
+        ASSERT(fl_wq_enqueue(fl_wq_default(), &prot) == FL_RESULT_OK);
+        ASSERT(fl_wq_enqueue(fl_wq_default(), &ord) == FL_RESULT_OK);
+        fl_bg_jobs_shutdown();
+        ASSERT(atomic_load(&s_mt_ran) == 1);
+    }
+    return 0;
+}
+
 int main(void) {
     RUN_TEST(churn_1000);
     RUN_TEST(shutdown_discards_pending);
@@ -395,6 +597,10 @@ int main(void) {
     RUN_TEST(protected_survives_shutdown);
     RUN_TEST(poll_guard_is_per_queue);
     RUN_TEST(concurrent_enqueue);
+    RUN_TEST(period_overflow_is_refused_and_saturates);
+    RUN_TEST(equal_due_times_keep_arrival_order);
+    RUN_TEST(periodic_slots_are_returned);
+    RUN_TEST(ticker_and_default_queue); /* last: it shuts the default queue down */
     printf("test_workqueue_p18: all passed\n");
     return 0;
 }

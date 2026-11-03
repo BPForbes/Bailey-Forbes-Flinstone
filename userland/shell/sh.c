@@ -129,6 +129,7 @@ static void shell_pool_cleanup(void) {
     }
     fl_bg_jobs_ticker_stop();
 #endif
+    fl_bg_jobs_shutdown(); /* protected workqueue items run once here, the rest are dropped */
     pthread_mutex_destroy(&g_pool.mutex);
     pthread_cond_destroy(&g_pool.cond);
 }

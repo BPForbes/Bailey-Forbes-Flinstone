@@ -128,6 +128,11 @@ static int test_oversize_is_refused(void)
            FL_RESULT_INVAL); /* + framing > max */
     ASSERT(fl_history_bundle_pack(big, sizeof big, &len, src, FL_HISTORY_BUNDLE_MAX_BYTES - 10 - 1, a, 1) ==
            FL_RESULT_OK && len == FL_HISTORY_BUNDLE_MAX_BYTES - 10 - 1 + 10);
+    /* exactly the bound is accepted, both ways */
+    ASSERT(fl_history_bundle_pack(big, sizeof big, &len, src, FL_HISTORY_BUNDLE_MAX_BYTES - 10, a, 1) ==
+           FL_RESULT_OK && len == FL_HISTORY_BUNDLE_MAX_BYTES);
+    ASSERT(fl_history_bundle_unpack(big, len, &p15, &n15, &p17, &n17) == FL_RESULT_OK);
+    ASSERT(n15 == FL_HISTORY_BUNDLE_MAX_BYTES - 10 && n17 == 1);
     ASSERT(fl_history_bundle_unpack(big, FL_HISTORY_BUNDLE_MAX_BYTES + 1, &p15, &n15, &p17, &n17) ==
            FL_RESULT_INVAL);
     return 0;

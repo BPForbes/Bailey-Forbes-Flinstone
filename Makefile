@@ -754,16 +754,16 @@ test_alloc_asm: $(ALLOC_OBJS) $(MEM_ASM_OBJ)
 	$(CC) $(CFLAGS) -I. -o tests/test_alloc tests/test_alloc.c $(ALLOC_OBJS) $(MEM_ASM_OBJ)
 	./tests/test_alloc
 
-test_priority_queue: kernel/core/sched/priority_queue.o $(MEM_ASM_OBJ)
-	$(CC) $(CFLAGS) $(TEST_SANITIZE) -I. -o tests/test_priority_queue tests/test_priority_queue.c kernel/core/sched/priority_queue.o $(MEM_ASM_OBJ)
+test_priority_queue: tests/test_priority_queue.c kernel/core/sched/priority_queue.c $(MEM_ASM_OBJ)
+	$(CC) $(CFLAGS) $(TEST_SANITIZE) -I. -o tests/test_priority_queue tests/test_priority_queue.c kernel/core/sched/priority_queue.c $(MEM_ASM_OBJ)
 	./tests/test_priority_queue
 
 test_shell_ctrl_c: $(TARGET) tests/test_shell_ctrl_c_prompt.py
 	python3 tests/test_shell_ctrl_c_prompt.py
 
-test_workqueue_p18: kernel/core/sched/workqueue.o kernel/core/sched/priority_queue.o kernel/core/time/timekeeping.o $(MEM_ASM_OBJ)
+test_workqueue_p18: tests/test_workqueue_p18.c kernel/core/sched/workqueue.c kernel/core/sched/bg_jobs.c kernel/core/sched/priority_queue.c kernel/core/time/timekeeping.c $(MEM_ASM_OBJ)
 	$(CC) $(CFLAGS) $(TEST_SANITIZE) -I. -o tests/test_workqueue_p18 tests/test_workqueue_p18.c \
-	  kernel/core/sched/workqueue.o kernel/core/sched/priority_queue.o kernel/core/time/timekeeping.o $(MEM_ASM_OBJ) -Wl,-z,noexecstack
+	  kernel/core/sched/workqueue.c kernel/core/sched/bg_jobs.c kernel/core/sched/priority_queue.c kernel/core/time/timekeeping.c $(MEM_ASM_OBJ) -Wl,-z,noexecstack
 	./tests/test_workqueue_p18
 
 # Stub gate runs before driver tests (CI / make test_drivers)
@@ -1080,9 +1080,9 @@ test_kq_net: userland/shell/common.o $(UTIL_SHELL_LINK_OBJS) $(FS_JAIL_CORE_OBJS
 	./tests/test_kq_net
 
 .PHONY: test_kq_history_bundle
-test_kq_history_bundle: kernel/core/vfs/kq_history_bundle.o $(NET_ASM_OBJ)
+test_kq_history_bundle: tests/test_kq_history_bundle.c kernel/core/vfs/kq_history_bundle.c $(NET_ASM_OBJ)
 	$(CC) $(CFLAGS) $(TEST_SANITIZE) -o tests/test_kq_history_bundle tests/test_kq_history_bundle.c \
-	  kernel/core/vfs/kq_history_bundle.o $(NET_ASM_OBJ) -Wl,-z,noexecstack
+	  kernel/core/vfs/kq_history_bundle.c $(NET_ASM_OBJ) -Wl,-z,noexecstack
 	./tests/test_kq_history_bundle
 
 .PHONY: test_kq_wire

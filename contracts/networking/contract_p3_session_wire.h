@@ -190,6 +190,11 @@ _Static_assert(FL_NET_SESSION_OP_FILE_LAST < FL_NET_SESSION_OP_KQ_FIRST &&
 _Static_assert(FL_NET_SESSION_OP_WIFI_LAST < FL_NET_SESSION_OP_KQH_FIRST &&
                    FL_NET_SESSION_OP_KQH_LAST < FL_NET_SESSION_OP_ERR,
                "KeyQuorum history opcodes sit above wifi and below the error opcode");
+/* KQH_DATA: [request id 16][offset u32][total u32][bytes <= 480] must fit one session message. The
+ * bundle (kq_history_bundle.h) is bounded at 1 MiB, so its total fits the u32 field. */
+_Static_assert(16u + 4u + 4u + 480u <= FL_NET_SESSION_MAX_MSG,
+               "KQH_DATA header plus 480 payload bytes must fit one session message");
+_Static_assert((1u << 20) <= 0xFFFFFFFFu, "history bundle bound must fit the u32 total field");
 _Static_assert(FL_NET_SESSION_OP_FILE_FIRST < FL_NET_SESSION_OP_FILE_LAST,
                "file opcode range must be contiguous");
 

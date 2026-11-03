@@ -9,7 +9,10 @@
 void fl_bg_jobs_init(void);
 void fl_bg_jobs_shutdown(void);
 
-/** Periodic tick from shell idle, timer IRQ, or test harness. */
+/**
+ * Periodic tick from the hosted ticker thread, timer IRQ, or test harness. Whoever drives it is
+ * the ONLY poller of the default queue; a second poller trips the nested-poll assert in debug builds.
+ */
 void fl_bg_jobs_tick(unsigned max_wq_items);
 
 /** Items one tick may run; the hosted ticker uses it. */
@@ -23,7 +26,10 @@ void fl_bg_jobs_tick(unsigned max_wq_items);
  * only thread that polls the default queue. **FL_RESULT_BUSY** if already running.
  */
 fl_result_t fl_bg_jobs_ticker_start(unsigned period_ms);
-/** Stop and join the ticker (no-op if not running). Call before **fl_bg_jobs_shutdown**. */
+/**
+ * Stop and join the ticker; it wakes at once, not after a full period (no-op if not running).
+ * Call before **fl_bg_jobs_shutdown**. Start, stop and shutdown are single-thread calls.
+ */
 void fl_bg_jobs_ticker_stop(void);
 #endif
 

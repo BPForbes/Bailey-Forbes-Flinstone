@@ -68,7 +68,7 @@ Planned domain files (not yet in tree): **P5-4** writeback, **P4-8** IRQ bottom-
 
 - [x] Enqueue 1000 no-op jobs without leak; clean shutdown with pending work — **`make test_workqueue_p18`** (**#242**)
 - [x] Delayed and periodic work (**`fl_wq_enqueue_at`**, **`fl_wq_enqueue_every`**), protected work with a reserve of slots, a per-queue nested-poll assert and a per-queue hosted mutex — extended cases in **`tests/test_workqueue_p18.c`** (FL-22)
-- [x] Hosted tick: **`fl_bg_jobs_ticker_start`** (a thread, the only poller of `fl_wq_default()`) is started by the shell next to its thread pool
+- [x] Hosted tick: **`fl_bg_jobs_ticker_start`** (a thread, the only poller of `fl_wq_default()`; it runs the lazy net init on the calling thread first, and stop wakes it at once) is started by the shell next to its thread pool and stopped, then **`fl_bg_jobs_shutdown`** runs protected items once, at exit. Start, stop and shutdown are single-thread calls; delay and period arithmetic refuses or saturates instead of wrapping
 - [ ] Freestanding tick (`irq_pit` flag + `fl_bg_jobs_tick` in the shell loop): needs a port of `workqueue.c` (static item pool, tick-based clock) — not done
 - [ ] Assert **P1-3** lock-order violations in debug builds when a job takes forbidden locks (future)
 - [x] Document which jobs may block vs must stay non-blocking (table below)

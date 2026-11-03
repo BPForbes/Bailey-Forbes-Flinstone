@@ -129,6 +129,9 @@ jobs:
       - name: Test — priority queue
         run: make test_priority_queue
 
+      - name: Test — workqueue (delayed, periodic, protected, ticker)
+        run: make test_workqueue_p18
+
       - name: Test — invariants
         run: make test_invariants
 
