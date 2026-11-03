@@ -18,6 +18,10 @@ _Static_assert(FL_USER_NAME_MAX <= FL_CREDENTIAL_USERNAME_MAX_CHARS + 1u,
 #define FL_USER_SIGNING_PUBLIC_LEN  32u
 #define FL_USER_SIGNING_SEALED_LEN  81u
 
+/** How an account proves itself at login. Every account that exists today is PASSWORD. */
+#define FL_USER_AUTH_PASSWORD      0 /* the password alone (legacy) */
+#define FL_USER_AUTH_PASSWORD_KQST 1 /* the password and the account's KQST slot token */
+
 typedef struct fl_user_record {
     char     name[FL_USER_NAME_MAX];
     char     password_hash[FL_PASSWORD_HASH_HEX_MAX];
@@ -46,6 +50,8 @@ typedef struct fl_user_record {
     int           has_box;
     unsigned char box_public[FL_USER_SIGNING_PUBLIC_LEN];
     unsigned char box_sealed[FL_USER_SIGNING_SEALED_LEN];
+    /** FL_USER_AUTH_*. The KQST file's path is kept in the account_keys table, keyed by key_id. */
+    int           auth_mode;
 } fl_user_record_t;
 
 #define FL_USER_DB_MAX_USERS 32u
@@ -58,6 +64,14 @@ typedef struct fl_user_db {
     char             path[256];
     int              loaded;
 } fl_user_db_t;
+
+/** Sets how an account logs in (in memory; fl_user_db_save writes it). NOENT for an unknown account. */
+fl_result_t fl_user_db_set_auth_mode(fl_user_db_t *db, const char *name, int auth_mode);
+/**
+ * The KQST file path paired with key_id in the store's account_keys table (read at call time, so
+ * a path never sits in the record). NOENT when the account has no row or the row has no path.
+ */
+fl_result_t fl_user_db_kqst_path(const fl_user_db_t *db, const char *key_id, char *out, size_t cap);
 
 fl_result_t fl_user_db_load(fl_user_db_t *db, const char *path);
 fl_result_t fl_user_db_save(const fl_user_db_t *db);
