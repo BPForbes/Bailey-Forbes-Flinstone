@@ -2,6 +2,7 @@
 #define FL_WORKQUEUE_H
 
 #include "contract_p1_workqueue.h"
+#include "contract_p2_heritage.h"
 #include "contract_result.h"
 #include "priority_queue.h"
 
@@ -32,6 +33,7 @@ typedef struct fl_workqueue_storage {
     unsigned shutdown;
     unsigned poll_depth;                  /* debug nested-poll guard, per queue */
     unsigned timer_count;                 /* delayed items, ordered by due time */
+    unsigned durable_inmem;               /* durable jobs staged in the MLQ (the window over the journal) */
     unsigned periodic_inflight;           /* periodic items promoted or running: keep a timer slot */
     int64_t poll_now_ns;                  /* time of the poll in progress; -1 = none or no clock */
     void *timers[FL_WQ_TIMERS_MAX];
@@ -98,5 +100,92 @@ unsigned fl_wq_poll_at(fl_workqueue_t *wq, unsigned max_items, int64_t now_ns);
  * **timeout_ms > 0** uses **P1-7** monotonic time; returns **FL_RESULT_BUSY** on timeout.
  */
 fl_result_t fl_wq_drain(fl_workqueue_t *wq, unsigned timeout_ms);
+
+
+/* ---- Durable work (FL-25): journal first, recover at boot, bounded backlog ---------------------------
+ * A durable job is a tag (a handler registered at every boot: function pointers are never persisted),
+ * a payload and an idempotency key. It is appended to a journal BEFORE it is accepted; the in-memory
+ * MLQ holds only a window of it. The journal is an installable table of operations (the shape of
+ * fl_kq_storage_t): the default is memory only (lost on reboot, the only choice in the browser image),
+ * kernel/core/sched/wq_journal_sqlite.c is the hosted, flushed one. */
+
+typedef enum {
+    FL_WQ_ST_PENDING = 1,
+    FL_WQ_ST_RUNNING,
+    FL_WQ_ST_DONE,
+    FL_WQ_ST_FAILED,
+    FL_WQ_ST_EXPIRED,
+    FL_WQ_ST_HELD,    /* recovered, waiting for the user's decision */
+    FL_WQ_ST_QUEUED,  /* staged in the in-memory window (appended: states are never renumbered) */
+    FL_WQ_ST_SKIPPED  /* the user declined a held occurrence */
+} fl_wq_state_t;
+
+/** Per tag: may a recovered job wait for the user? */
+#define FL_WQ_RECOVER_AUTO 0 /* runs at recovery: monitor obligations are never optional */
+#define FL_WQ_RECOVER_ASK 1  /* user-visible work such as cron: held until the user decides */
+
+typedef struct fl_wq_journal_record {
+    uint64_t id;                         /* assigned by the journal: arrival order */
+    uint8_t idem_key[16];                /* UNIQUE: a repeat returns the existing record */
+    uint32_t tag;
+    int layer;                           /* FL_WQ_LAYER_* */
+    uint8_t recover;                     /* FL_WQ_RECOVER_AUTO or _ASK (copied from the tag at append) */
+    char owner[FL_HERITAGE_KEY_ID_MAX];  /* heritage key id: who is asked about a held job; "" = none */
+    fl_wq_state_t state;
+    uint32_t attempts, max_attempts;     /* attempts counts every move to RUNNING */
+    int64_t accepted_at, deadline;       /* seconds; deadline 0 = none */
+    uint32_t payload_len;
+    uint8_t payload[FL_WQ_PAYLOAD_MAX];
+} fl_wq_journal_record_t;
+
+/**
+ * Operations a journal backend provides. Each is atomic on its own. append returns only once the
+ * record is durable (for a flushed backend) and, for a repeated idem_key, the existing id with
+ * *existing = 1 and nothing written. mark is a compare-and-set: it moves a job from `from` to `to`
+ * and returns FL_RESULT_BUSY if the job is no longer in `from` (a lost race is harmless); a move to
+ * RUNNING counts one attempt. scan returns up to max records in `state` (any owner when owner is
+ * NULL) ordered by (layer, id) strictly after the cursor record (NULL = from the start).
+ */
+typedef struct fl_wq_journal_ops {
+    void *ctx;
+    fl_result_t (*append)(void *ctx, const fl_wq_journal_record_t *r, uint64_t *id_out, int *existing);
+    fl_result_t (*mark)(void *ctx, uint64_t id, fl_wq_state_t from, fl_wq_state_t to);
+    fl_result_t (*load)(void *ctx, uint64_t id, fl_wq_journal_record_t *out);
+    fl_result_t (*scan)(void *ctx, fl_wq_state_t state, const char *owner, const fl_wq_journal_record_t *after,
+                        unsigned max, fl_wq_journal_record_t *out, unsigned *n);
+    unsigned (*count)(void *ctx, fl_wq_state_t state, const char *owner);
+} fl_wq_journal_ops_t;
+
+/** The default journal: memory only. */
+const fl_wq_journal_ops_t *fl_wq_journal_mem(void);
+/** Empty the memory journal (tests, and a boot that starts clean). */
+void fl_wq_journal_mem_reset(void);
+/** Install a journal (NULL restores the default); returns the one in force before. Set once at start,
+ *  not while durable work is queued or running. */
+const fl_wq_journal_ops_t *fl_wq_set_journal(const fl_wq_journal_ops_t *ops);
+
+/** A handler runs on the poll thread and must be idempotent on idem_key: it may run twice. FL_RESULT_OK
+ *  is done; anything else is a failed attempt (retried up to FL_WQ_MAX_ATTEMPTS). */
+typedef fl_result_t (*fl_wq_handler_fn_t)(const void *payload, size_t n, const uint8_t idem_key[16]);
+
+/** tag -> function (and its recovery rule), rebuilt at every boot before fl_wq_recover. A tag
+ *  registered twice is refused (BUSY). Single-thread, at start. */
+fl_result_t fl_wq_register_handler(uint32_t tag, fl_wq_handler_fn_t fn, uint8_t recover);
+
+/**
+ * Accept a durable job: persisted FIRST, then staged. FL_RESULT_BUSY when the journal is full
+ * (FL_WQ_JOURNAL_MAX_PENDING waiting): a clear "retry later". A repeated idem_key is OK and queues
+ * nothing new. ttl_sec <= 0 means no deadline. owner may be NULL.
+ */
+fl_result_t fl_wq_enqueue_durable(fl_workqueue_t *wq, uint32_t tag, int layer, const char *owner,
+                                  const void *payload, size_t n, const uint8_t idem_key[16],
+                                  int64_t ttl_sec);
+
+/** Once at boot, before the first poll: cut-off work is retried (or FAILED past its attempts), stale
+ *  work becomes EXPIRED (never run silently), RECOVER_ASK work is HELD, the rest is staged. */
+fl_result_t fl_wq_recover(fl_workqueue_t *wq);
+unsigned fl_wq_held_count(const char *owner);
+/** run_now: held jobs of this owner are queued; otherwise only this occurrence is dropped (SKIPPED). */
+fl_result_t fl_wq_resolve_held(const char *owner, int run_now);
 
 #endif /* FL_WORKQUEUE_H */

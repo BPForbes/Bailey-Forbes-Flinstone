@@ -135,6 +135,9 @@ jobs:
       - name: Test — workqueue, freestanding configuration
         run: make test_workqueue_freestanding
 
+      - name: Test — workqueue SQLite journal (restart)
+        run: make test_wq_journal_sqlite
+
       - name: Test — invariants
         run: make test_invariants
 

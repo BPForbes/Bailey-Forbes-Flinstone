@@ -11,7 +11,7 @@
 #include "contract_extend.h"
 
 #define FL_CONTRACT_P1_WORKQUEUE_CONTRACT_DEFINED 1
-#define FL_CONTRACT_P1_WORKQUEUE_REV 2
+#define FL_CONTRACT_P1_WORKQUEUE_REV 3
 
 /** Maximum pending work items per queue (lab default). */
 #define FL_WQ_PENDING_MAX 64u
@@ -24,6 +24,17 @@
 
 /** Delayed / periodic items waiting for their due time, per queue (FL-22). Design value. */
 #define FL_WQ_TIMERS_MAX 32u
+
+/**
+ * Durable work (FL-25). Design values: nothing in the repo sets one. A record's payload is at most
+ * FL_WQ_PAYLOAD_MAX bytes; the journal refuses new work (FL_RESULT_BUSY) at FL_WQ_JOURNAL_MAX_PENDING
+ * records waiting; a durable job is tried FL_WQ_MAX_ATTEMPTS times; FL_WQ_HANDLERS_MAX tags can be
+ * registered. At most FL_WQ_PENDING_MAX / 2 durable jobs sit in the in-memory window at once.
+ */
+#define FL_WQ_PAYLOAD_MAX 256u
+#define FL_WQ_JOURNAL_MAX_PENDING 1024u
+#define FL_WQ_MAX_ATTEMPTS 3u
+#define FL_WQ_HANDLERS_MAX 16u
 
 /** Work handler must not block indefinitely; may not allocate without bound. */
 #define FL_WQ_HANDLER_STACK_HINT_BYTES 512u

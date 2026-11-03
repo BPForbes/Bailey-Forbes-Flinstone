@@ -237,7 +237,7 @@ NET_ASM_OBJ = $(patsubst %.s,%.o,$(patsubst %.asm,%.o,$(filter %/net_asm.s %/net
 CORE_SRCS = kernel/core/vfs/disk.c kernel/core/vfs/fat32_host.c kernel/core/vfs/fat32_host_files.c kernel/core/vfs/path_log.c kernel/core/vfs/cluster.c kernel/core/vfs/fs.c \
             disk_host_io.c \
             kernel/core/sched/threadpool.c kernel/core/sched/priority_queue.c kernel/core/sched/workqueue.c \
-            kernel/core/sched/bg_jobs.c kernel/core/vfs/fs_jail.c kernel/core/vfs/fs_provider.c kernel/core/vfs/fs_command.c \
+            kernel/core/sched/bg_jobs.c kernel/core/sched/wq_journal_sqlite.c kernel/core/vfs/fs_jail.c kernel/core/vfs/fs_provider.c kernel/core/vfs/fs_command.c \
             kernel/core/vfs/fs_events.c kernel/core/vfs/fs_policy.c kernel/core/vfs/fs_chain.c kernel/core/vfs/fs_facade.c \
             kernel/core/vfs/fs_service_glue.c kernel/core/mm/mem_domain.c kernel/core/mm/kmalloc.c kernel/core/mm/pmm.c \
             kernel/core/memory/fl_stack.c kernel/core/memory/exec_context.c \
@@ -618,7 +618,7 @@ TEST_SRCS = BPForbes_Flinstone_Tests.c userland/shell/common.c userland/shell/ut
             kernel/core/vfs/disk.c kernel/core/vfs/fat32_host.c kernel/core/vfs/fat32_host_files.c kernel/core/vfs/path_log.c kernel/core/vfs/cluster.c kernel/core/vfs/fs.c \
             disk_host_io.c \
             kernel/core/sched/threadpool.c kernel/core/sched/priority_queue.c kernel/core/sched/workqueue.c \
-            kernel/core/sched/bg_jobs.c kernel/core/vfs/fs_jail.c kernel/core/vfs/fs_provider.c kernel/core/vfs/fs_command.c \
+            kernel/core/sched/bg_jobs.c kernel/core/sched/wq_journal_sqlite.c kernel/core/vfs/fs_jail.c kernel/core/vfs/fs_provider.c kernel/core/vfs/fs_command.c \
             kernel/core/vfs/fs_events.c kernel/core/vfs/fs_policy.c kernel/core/vfs/fs_chain.c kernel/core/vfs/fs_facade.c \
             kernel/core/vfs/fs_service_glue.c kernel/core/mm/mem_domain.c kernel/core/mm/kmalloc.c kernel/core/mm/pmm.c \
             kernel/core/memory/fl_stack.c kernel/core/memory/exec_context.c \
@@ -766,6 +766,13 @@ test_workqueue_p18: tests/test_workqueue_p18.c kernel/core/sched/workqueue.c ker
 	  kernel/core/sched/workqueue.c kernel/core/sched/bg_jobs.c kernel/core/sched/priority_queue.c kernel/core/time/timekeeping.c $(MEM_ASM_OBJ) -Wl,-z,noexecstack
 	./tests/test_workqueue_p18
 
+# The workqueue's flushed SQLite journal, across a real restart (hosted only).
+.PHONY: test_wq_journal_sqlite
+test_wq_journal_sqlite: tests/test_wq_journal_sqlite.c kernel/core/sched/wq_journal_sqlite.c kernel/core/sched/workqueue.c kernel/core/sched/priority_queue.c kernel/core/time/timekeeping.c $(MEM_ASM_OBJ)
+	$(CC) $(CFLAGS) $(TEST_SANITIZE) -I. -o tests/test_wq_journal_sqlite tests/test_wq_journal_sqlite.c \
+	  kernel/core/sched/wq_journal_sqlite.c kernel/core/sched/workqueue.c kernel/core/sched/priority_queue.c kernel/core/time/timekeeping.c $(MEM_ASM_OBJ) -lsqlite3 -Wl,-z,noexecstack
+	./tests/test_wq_journal_sqlite
+
 # The same workqueue sources in the browser image's configuration (no lock, static item pool).
 .PHONY: test_workqueue_freestanding
 test_workqueue_freestanding: tests/test_workqueue_freestanding.c kernel/core/sched/workqueue.c kernel/core/sched/priority_queue.c $(MEM_ASM_OBJ)
@@ -806,7 +813,7 @@ test_drivers_no_keyquorum: check-stubs $(TEST_DRIVERS_OBJS)
 	  $(TEST_DRIVERS_OBJS) -Wl,-z,noexecstack
 	./tests/test_drivers_no_keyquorum
 
-test_core: test_mem_asm test_priority_queue test_workqueue_p18 test_workqueue_freestanding
+test_core: test_mem_asm test_priority_queue test_workqueue_p18 test_workqueue_freestanding test_wq_journal_sqlite
 	@echo "Core tests done. Run 'make test_alloc_libc' or 'make test_alloc_asm' for allocator."
 
 

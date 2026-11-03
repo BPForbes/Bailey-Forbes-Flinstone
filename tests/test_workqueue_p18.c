@@ -583,6 +583,228 @@ static int test_ticker_and_default_queue(void) {
     return 0;
 }
 
+/* ---- FL-25: durable work on the memory journal ---- */
+
+static void mkkey(uint8_t k[16], unsigned n) {
+    memset(k, 0, 16);
+    k[0] = (uint8_t)n;
+    k[1] = (uint8_t)(n >> 8);
+    k[2] = 0xA5;
+}
+
+static unsigned s_dur_ran, s_dur_fail_left;
+static uint8_t s_dur_last_payload;
+
+static fl_result_t dur_handler(const void *payload, size_t n, const uint8_t idem[16]) {
+    (void)idem;
+    s_dur_ran++;
+    if (n)
+        s_dur_last_payload = *(const uint8_t *)payload;
+    if (s_dur_fail_left) {
+        s_dur_fail_left--;
+        return FL_RESULT_ERR;
+    }
+    return FL_RESULT_OK;
+}
+
+#define TAG_AUTO 0x7001u
+#define TAG_ASK 0x7002u
+
+static int register_dur_tags(void) {
+    static int done;
+
+    if (done)
+        return 0;
+    ASSERT(fl_wq_register_handler(TAG_AUTO, dur_handler, FL_WQ_RECOVER_AUTO) == FL_RESULT_OK);
+    ASSERT(fl_wq_register_handler(TAG_ASK, dur_handler, FL_WQ_RECOVER_ASK) == FL_RESULT_OK);
+    ASSERT(fl_wq_register_handler(TAG_AUTO, dur_handler, FL_WQ_RECOVER_AUTO) == FL_RESULT_BUSY);
+    ASSERT(fl_wq_register_handler(0x7FFF, NULL, FL_WQ_RECOVER_AUTO) == FL_RESULT_INVAL);
+    done = 1;
+    return 0;
+}
+
+static int test_durable_runs_once_and_is_idempotent(void) {
+    fl_workqueue_storage_t st;
+    fl_workqueue_t *wq = (fl_workqueue_t *)&st;
+    const fl_wq_journal_ops_t *j = fl_wq_journal_mem();
+    uint8_t key[16], pl = 42;
+
+    ASSERT(register_dur_tags() == 0);
+    fl_wq_journal_mem_reset();
+    s_dur_ran = 0;
+    s_dur_fail_left = 0;
+    mkkey(key, 1);
+    ASSERT(fl_wq_init(wq) == FL_RESULT_OK);
+    ASSERT(fl_wq_enqueue_durable(wq, 0x7EEE, FL_WQ_LAYER_NORMAL, NULL, &pl, 1, key, 0) == FL_RESULT_NOENT); /* no handler */
+    ASSERT(fl_wq_enqueue_durable(wq, TAG_AUTO, FL_WQ_LAYER_NORMAL, NULL, &pl, FL_WQ_PAYLOAD_MAX + 1, key, 0) ==
+           FL_RESULT_INVAL);
+    ASSERT(fl_wq_enqueue_durable(wq, TAG_AUTO, FL_WQ_LAYER_NORMAL, NULL, &pl, 1, key, 0) == FL_RESULT_OK);
+    ASSERT(j->count(j->ctx, FL_WQ_ST_QUEUED, NULL) == 1); /* accepted, persisted, staged */
+    ASSERT(fl_wq_poll_at(wq, 8, 0) == 1);
+    ASSERT(s_dur_ran == 1 && s_dur_last_payload == 42);
+    ASSERT(j->count(j->ctx, FL_WQ_ST_DONE, NULL) == 1);
+    /* the same key again: accepted as the same job, nothing new runs */
+    ASSERT(fl_wq_enqueue_durable(wq, TAG_AUTO, FL_WQ_LAYER_NORMAL, NULL, &pl, 1, key, 0) == FL_RESULT_OK);
+    ASSERT(fl_wq_poll_at(wq, 8, 0) == 0);
+    ASSERT(s_dur_ran == 1);
+    fl_wq_shutdown(wq);
+    return 0;
+}
+
+static int test_durable_retries_then_fails(void) {
+    fl_workqueue_storage_t st;
+    fl_workqueue_t *wq = (fl_workqueue_t *)&st;
+    const fl_wq_journal_ops_t *j = fl_wq_journal_mem();
+    uint8_t key[16];
+
+    fl_wq_journal_mem_reset();
+    s_dur_ran = 0;
+    s_dur_fail_left = 100;
+    mkkey(key, 2);
+    ASSERT(fl_wq_init(wq) == FL_RESULT_OK);
+    ASSERT(fl_wq_enqueue_durable(wq, TAG_AUTO, FL_WQ_LAYER_NORMAL, NULL, NULL, 0, key, 0) == FL_RESULT_OK);
+    for (int i = 0; i < 10; i++)
+        (void)fl_wq_poll_at(wq, 8, 0);
+    ASSERT(s_dur_ran == FL_WQ_MAX_ATTEMPTS);
+    ASSERT(j->count(j->ctx, FL_WQ_ST_FAILED, NULL) == 1 && j->count(j->ctx, FL_WQ_ST_PENDING, NULL) == 0);
+    s_dur_fail_left = 0;
+    fl_wq_shutdown(wq);
+    return 0;
+}
+
+static int test_durable_recovers_after_a_restart(void) {
+    fl_workqueue_storage_t sa, sb;
+    fl_workqueue_t *a = (fl_workqueue_t *)&sa, *b = (fl_workqueue_t *)&sb;
+    const fl_wq_journal_ops_t *j = fl_wq_journal_mem();
+    fl_wq_journal_record_t r;
+    uint8_t k1[16], k2[16], k3[16];
+    uint64_t id;
+    int ex;
+
+    fl_wq_journal_mem_reset();
+    s_dur_ran = 0;
+    s_dur_fail_left = 0;
+    mkkey(k1, 11);
+    mkkey(k2, 12);
+    mkkey(k3, 13);
+    ASSERT(fl_wq_init(a) == FL_RESULT_OK);
+    ASSERT(fl_wq_enqueue_durable(a, TAG_AUTO, FL_WQ_LAYER_NORMAL, NULL, NULL, 0, k1, 0) == FL_RESULT_OK);
+    fl_wq_shutdown(a); /* the process dies: the memory window is gone, the journal is not */
+    ASSERT(s_dur_ran == 0 && j->count(j->ctx, FL_WQ_ST_QUEUED, NULL) == 1);
+
+    /* one cut off mid-run with attempts left, one with none left */
+    memset(&r, 0, sizeof r);
+    r.tag = TAG_AUTO; r.layer = FL_WQ_LAYER_NORMAL; r.max_attempts = FL_WQ_MAX_ATTEMPTS;
+    memcpy(r.idem_key, k2, 16);
+    ASSERT(j->append(j->ctx, &r, &id, &ex) == FL_RESULT_OK && !ex);
+    ASSERT(j->mark(j->ctx, id, FL_WQ_ST_PENDING, FL_WQ_ST_QUEUED) == FL_RESULT_OK);
+    ASSERT(j->mark(j->ctx, id, FL_WQ_ST_QUEUED, FL_WQ_ST_RUNNING) == FL_RESULT_OK); /* attempts 1 */
+    memcpy(r.idem_key, k3, 16);
+    ASSERT(j->append(j->ctx, &r, &id, &ex) == FL_RESULT_OK && !ex);
+    ASSERT(j->mark(j->ctx, id, FL_WQ_ST_PENDING, FL_WQ_ST_QUEUED) == FL_RESULT_OK);
+    for (unsigned i = 0; i < FL_WQ_MAX_ATTEMPTS; i++) { /* run it to its attempt limit, still RUNNING */
+        ASSERT(j->mark(j->ctx, id, FL_WQ_ST_QUEUED, FL_WQ_ST_RUNNING) == FL_RESULT_OK);
+        if (i + 1 < FL_WQ_MAX_ATTEMPTS)
+            ASSERT(j->mark(j->ctx, id, FL_WQ_ST_RUNNING, FL_WQ_ST_QUEUED) == FL_RESULT_OK);
+    }
+
+    ASSERT(fl_wq_init(b) == FL_RESULT_OK);
+    ASSERT(fl_wq_recover(b) == FL_RESULT_OK);
+    ASSERT(j->count(j->ctx, FL_WQ_ST_FAILED, NULL) == 1); /* the one with no attempts left */
+    ASSERT(fl_wq_poll_at(b, 8, 0) == 2);                   /* the staged one and the cut-off one run */
+    ASSERT(s_dur_ran == 2);
+    ASSERT(j->count(j->ctx, FL_WQ_ST_DONE, NULL) == 2);
+    fl_wq_shutdown(b);
+    return 0;
+}
+
+static int test_stale_durable_work_expires_unrun(void) {
+    fl_workqueue_storage_t st;
+    fl_workqueue_t *wq = (fl_workqueue_t *)&st;
+    const fl_wq_journal_ops_t *j = fl_wq_journal_mem();
+    fl_wq_journal_record_t r;
+    uint64_t id;
+    int ex;
+
+    fl_wq_journal_mem_reset();
+    s_dur_ran = 0;
+    memset(&r, 0, sizeof r);
+    r.tag = TAG_AUTO; r.layer = FL_WQ_LAYER_NORMAL; r.max_attempts = FL_WQ_MAX_ATTEMPTS;
+    r.idem_key[0] = 77;
+    r.deadline = 1; /* long past */
+    ASSERT(j->append(j->ctx, &r, &id, &ex) == FL_RESULT_OK);
+    ASSERT(fl_wq_init(wq) == FL_RESULT_OK);
+    ASSERT(fl_wq_recover(wq) == FL_RESULT_OK);
+    ASSERT(fl_wq_poll_at(wq, 8, 0) == 0 && s_dur_ran == 0);
+    ASSERT(j->count(j->ctx, FL_WQ_ST_EXPIRED, NULL) == 1);
+    fl_wq_shutdown(wq);
+    return 0;
+}
+
+static int test_held_work_waits_for_the_owner(void) {
+    fl_workqueue_storage_t sa;
+    fl_workqueue_t *a = (fl_workqueue_t *)&sa;
+    fl_workqueue_t *dflt = fl_wq_default();
+    const fl_wq_journal_ops_t *j = fl_wq_journal_mem();
+    uint8_t k1[16], k2[16], k3[16];
+
+    fl_wq_journal_mem_reset();
+    s_dur_ran = 0;
+    mkkey(k1, 21);
+    mkkey(k2, 22);
+    mkkey(k3, 23);
+    ASSERT(fl_wq_init(a) == FL_RESULT_OK);
+    ASSERT(fl_wq_enqueue_durable(a, TAG_ASK, FL_WQ_LAYER_BACKGROUND, "Root.Bob", NULL, 0, k1, 0) == FL_RESULT_OK);
+    ASSERT(fl_wq_enqueue_durable(a, TAG_ASK, FL_WQ_LAYER_BACKGROUND, "Root.Bob", NULL, 0, k2, 0) == FL_RESULT_OK);
+    ASSERT(fl_wq_enqueue_durable(a, TAG_ASK, FL_WQ_LAYER_BACKGROUND, "Root.Eve", NULL, 0, k3, 0) == FL_RESULT_OK);
+    fl_wq_shutdown(a); /* restart */
+    ASSERT(fl_wq_recover(dflt) == FL_RESULT_OK);
+    ASSERT(fl_wq_poll_at(dflt, 8, 0) == 0 && s_dur_ran == 0); /* nothing runs silently */
+    ASSERT(fl_wq_held_count("Root.Bob") == 2 && fl_wq_held_count("Root.Eve") == 1);
+    /* declining drops only these occurrences */
+    ASSERT(fl_wq_resolve_held("Root.Eve", 0) == FL_RESULT_OK);
+    ASSERT(fl_wq_held_count("Root.Eve") == 0 && j->count(j->ctx, FL_WQ_ST_SKIPPED, NULL) == 1);
+    ASSERT(fl_wq_poll_at(dflt, 8, 0) == 0 && s_dur_ran == 0);
+    /* accepting queues them now */
+    ASSERT(fl_wq_resolve_held("Root.Bob", 1) == FL_RESULT_OK);
+    ASSERT(fl_wq_poll_at(dflt, 8, 0) == 2 && s_dur_ran == 2);
+    ASSERT(fl_wq_held_count("Root.Bob") == 0);
+    return 0;
+}
+
+static int test_durable_backlog_is_bounded_and_drains(void) {
+    fl_workqueue_storage_t st;
+    fl_workqueue_t *wq = (fl_workqueue_t *)&st;
+    const fl_wq_journal_ops_t *j = fl_wq_journal_mem();
+    uint8_t key[16];
+    unsigned n = 0, guard = 0;
+
+    fl_wq_journal_mem_reset();
+    s_dur_ran = 0;
+    ASSERT(fl_wq_init(wq) == FL_RESULT_OK);
+    for (;; n++) {
+        mkkey(key, 1000 + n);
+        key[3] = (uint8_t)(n >> 8);
+        fl_result_t rc = fl_wq_enqueue_durable(wq, TAG_AUTO, FL_WQ_LAYER_IDLE, NULL, NULL, 0, key, 0);
+
+        if (rc == FL_RESULT_BUSY)
+            break;
+        ASSERT(rc == FL_RESULT_OK);
+        ASSERT(n < 2 * FL_WQ_JOURNAL_MAX_PENDING);
+    }
+    ASSERT(n >= 1000 && n <= FL_WQ_JOURNAL_MAX_PENDING); /* a clear "retry later", not a crash or a silent drop */
+    ASSERT(fl_wq_pending(wq) <= (int)(FL_WQ_PENDING_MAX / 2u)); /* the memory queue holds only the window */
+    while ((j->count(j->ctx, FL_WQ_ST_PENDING, NULL) || j->count(j->ctx, FL_WQ_ST_QUEUED, NULL)) && guard++ < 1000)
+        (void)fl_wq_poll_at(wq, FL_WQ_PENDING_MAX, 0);
+    ASSERT(s_dur_ran == n);
+    ASSERT(j->count(j->ctx, FL_WQ_ST_DONE, NULL) == n);
+    /* finished records are reusable, so the journal accepts work again */
+    mkkey(key, 5000);
+    ASSERT(fl_wq_enqueue_durable(wq, TAG_AUTO, FL_WQ_LAYER_IDLE, NULL, NULL, 0, key, 0) == FL_RESULT_OK);
+    fl_wq_shutdown(wq);
+    return 0;
+}
+
 int main(void) {
     RUN_TEST(churn_1000);
     RUN_TEST(shutdown_discards_pending);
@@ -600,6 +822,12 @@ int main(void) {
     RUN_TEST(period_overflow_is_refused_and_saturates);
     RUN_TEST(equal_due_times_keep_arrival_order);
     RUN_TEST(periodic_slots_are_returned);
+    RUN_TEST(durable_runs_once_and_is_idempotent);
+    RUN_TEST(durable_retries_then_fails);
+    RUN_TEST(durable_recovers_after_a_restart);
+    RUN_TEST(stale_durable_work_expires_unrun);
+    RUN_TEST(held_work_waits_for_the_owner);
+    RUN_TEST(durable_backlog_is_bounded_and_drains);
     RUN_TEST(ticker_and_default_queue); /* last: it shuts the default queue down */
     printf("test_workqueue_p18: all passed\n");
     return 0;
