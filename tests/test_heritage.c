@@ -92,6 +92,9 @@ static int test_key_ids(void) {
     ASSERT(fl_heritage_child("Root", "ROOT", out, sizeof out) == FL_RESULT_INVAL);
     ASSERT(fl_heritage_child("Root", "a.b", out, sizeof out) == FL_RESULT_INVAL);
     ASSERT(fl_heritage_child("Root", "", out, sizeof out) == FL_RESULT_INVAL);
+    /* 31 characters is the longest name that fits FL_USER_NAME_MAX (32 with the NUL). */
+    ASSERT(fl_heritage_child("Root", "abcdefghijklmnopqrstuvwxyz12345", out, sizeof out)
+           == FL_RESULT_OK);
     ASSERT(fl_heritage_child("Root", "abcdefghijklmnopqrstuvwxyz123456", out, sizeof out)
            == FL_RESULT_INVAL); /* 32 chars: one too long */
 

@@ -162,6 +162,15 @@ jobs:
       - name: Test — drivers without KeyQuorum
         run: make test_drivers_no_keyquorum
 
+      - name: Test — KeyQuorum checkpoints (co-signed delivery)
+        run: make test_kq_checkpoint
+
+      - name: Test — KeyQuorum delivery store
+        run: make test_kq_delivery
+
+      - name: Test — KeyQuorum over the session wire
+        run: make test_kq_net test_kq_wire
+
       - name: Test — userspace connection
         run: make test_userspace_connection
 
