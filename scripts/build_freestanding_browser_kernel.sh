@@ -15,7 +15,13 @@ mkdir -p "${build}" "${dist}"
 for tool in nasm gcc ld objcopy python3 sha256sum git; do command -v "$tool" >/dev/null || { echo "missing tool: $tool" >&2; exit 1; }; done
 nasm -f bin "${root}/kernel/freestanding/x86_64/boot.asm" -o "${build}/boot.bin"
 nasm -f elf64 "${root}/kernel/freestanding/x86_64/entry.asm" -o "${build}/entry.o"
-cflags=(-c -std=c11 -m64 -march=x86-64 -mno-red-zone -mgeneral-regs-only -ffreestanding -fno-stack-protector -fno-pic -fno-asynchronous-unwind-tables -Wall -Wextra -Werror -I"${root}/kernel/drivers/freestanding_x86_64" -I"${root}/kernel/freestanding/x86_64")
+cflags=(-c -std=c11 -m64 -march=x86-64 -mno-red-zone -mgeneral-regs-only -ffreestanding -fno-stack-protector -fno-pic -fno-asynchronous-unwind-tables -Wall -Wextra -Werror -DFL_FREESTANDING -DNDEBUG -I"${root}/kernel/drivers/freestanding_x86_64" -I"${root}/kernel/freestanding/x86_64")
+# The shared workqueue (kernel/core/sched) is compiled in unchanged; -DFL_FREESTANDING selects its
+# unlocked, static-pool configuration. Same include roots as the hosted build for its contracts.
+for d in contracts/foundations contracts/runtime contracts/networking contracts/identity contracts/drivers contracts/storage contracts/observability contracts/operations contracts/virtualization contracts/hardening kernel/include kernel/core/sched kernel/core/time arch/x86_64/gas; do
+    cflags+=(-I"${root}/${d}")
+done
+cflags+=(-I"${root}")
 [ "${secfeat}" = "1" ] && cflags+=(-DFL_SECFEAT)
 objects=("${build}/entry.o")
 for src in \
@@ -30,12 +36,19 @@ for src in \
     "${root}/kernel/freestanding/x86_64/labnet.c" \
     "${root}/kernel/freestanding/x86_64/commands.c" \
     "${root}/kernel/freestanding/x86_64/shell.c" \
+    "${root}/kernel/freestanding/x86_64/bgtick.c" \
+    "${root}/kernel/core/sched/priority_queue.c" \
+    "${root}/kernel/core/sched/workqueue.c" \
+    "${root}/kernel/core/sched/bg_jobs.c" \
     "${root}/kernel/freestanding/x86_64/kernel.c"
 do
     obj="${build}/$(basename "${src}" .c).o"
     gcc "${cflags[@]}" "${src}" -o "${obj}"
     objects+=("${obj}")
 done
+# asm_mem_zero / asm_mem_copy for the queue: the same GAS source the hosted build links (no libc, no SSE).
+gcc -c -m64 "${root}/arch/x86_64/gas/mem_asm.s" -o "${build}/mem_asm.o"
+objects+=("${build}/mem_asm.o")
 ld -m elf_x86_64 -nostdlib -T "${root}/kernel/freestanding/x86_64/linker.ld" "${objects[@]}" -o "${build}/kernel.elf"
 objcopy -O binary "${build}/kernel.elf" "${build}/kernel.bin"
 # Chunked BIOS load (see boot.asm): the MBR reads the payload in <=127-sector

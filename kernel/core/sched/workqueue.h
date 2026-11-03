@@ -8,10 +8,20 @@
 #include <stddef.h>
 #include <stdint.h>
 
-/* Hosted builds lock each queue; freestanding builds (no libc, no threads) do not. */
-#if defined(__STDC_HOSTED__) && __STDC_HOSTED__
+/*
+ * Two builds share this source. Hosted: each queue carries a mutex. Freestanding (the browser
+ * kernel image, built with -DFL_FREESTANDING: no libc, no threads, one CPU whose interrupts only set
+ * flags): no lock and a static item pool instead of calloc. The layout of fl_workqueue_storage_t
+ * follows that one define, never __STDC_HOSTED__, so a compile that gets it wrong is refused here.
+ */
+#ifndef FL_FREESTANDING
+#if defined(__STDC_HOSTED__) && !__STDC_HOSTED__
+#error "a -ffreestanding build must define FL_FREESTANDING (it selects the unlocked, pool-backed layout)"
+#endif
 #define FL_WQ_HAS_LOCK 1
 #include <pthread.h>
+#elif defined(__STDC_HOSTED__) && __STDC_HOSTED__ && !defined(FL_WQ_ALLOW_HOSTED_FREESTANDING)
+#error "FL_FREESTANDING without -ffreestanding: define FL_WQ_ALLOW_HOSTED_FREESTANDING for a host test of that configuration"
 #endif
 
 typedef struct fl_workqueue fl_workqueue_t;

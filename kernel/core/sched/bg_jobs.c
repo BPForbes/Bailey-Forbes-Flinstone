@@ -1,10 +1,14 @@
 #include "bg_jobs.h"
 
+#ifndef FL_FREESTANDING
 #include "net_background.h"
+#endif
 #include "workqueue.h"
 
+#ifdef FL_WQ_HAS_LOCK
 #include <stdatomic.h>
 #include <time.h>
+#endif
 
 static void bg_reclaim_work(void *ctx) {
     (void)ctx;
@@ -59,7 +63,9 @@ void fl_bg_jobs_tick(unsigned max_wq_items) {
     if (!s_bg_inited)
         fl_bg_jobs_init();
     (void)fl_wq_poll(fl_wq_default(), max_wq_items);
+#ifndef FL_FREESTANDING /* the browser image has no network core */
     (void)fl_net_background_tick(max_wq_items);
+#endif
 }
 
 #ifdef FL_WQ_HAS_LOCK

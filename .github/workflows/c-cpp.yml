@@ -132,6 +132,9 @@ jobs:
       - name: Test — workqueue (delayed, periodic, protected, ticker)
         run: make test_workqueue_p18
 
+      - name: Test — workqueue, freestanding configuration
+        run: make test_workqueue_freestanding
+
       - name: Test — invariants
         run: make test_invariants
 

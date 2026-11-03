@@ -2,10 +2,12 @@
 
 #include "timekeeping.h"
 
+#ifndef FL_FREESTANDING
 #include <assert.h>
 #include <stdlib.h>
+#endif
 
-#ifndef NDEBUG
+#if !defined(NDEBUG) && !defined(FL_FREESTANDING)
 #define FL_WQ_DEBUG_REENTRANCY 1
 #endif
 
@@ -19,6 +21,41 @@ typedef struct wq_item {
     uint32_t flags;
     struct fl_workqueue *owner;
 } wq_item_t;
+
+/* Item storage. Hosted: one calloc per item. Freestanding has no heap: a static pool sized for
+ * everything that can be pending at once (MLQ cap + timers), used from the one polling context
+ * and from enqueuers that run with interrupts' work deferred, so it needs no lock. */
+#ifdef FL_FREESTANDING
+#define WQ_POOL_ITEMS (FL_WQ_PENDING_MAX + FL_WQ_TIMERS_MAX)
+static wq_item_t s_item_pool[WQ_POOL_ITEMS];
+static unsigned char s_item_used[WQ_POOL_ITEMS];
+
+static wq_item_t *wq_item_alloc(void) {
+    for (unsigned i = 0; i < WQ_POOL_ITEMS; i++) {
+        if (!s_item_used[i]) {
+            unsigned char *b = (unsigned char *)&s_item_pool[i];
+
+            s_item_used[i] = 1;
+            for (unsigned k = 0; k < sizeof(wq_item_t); k++) /* no memset: the image has no libc */
+                b[k] = 0;
+            return &s_item_pool[i];
+        }
+    }
+    return NULL;
+}
+
+static void wq_item_free(wq_item_t *item) {
+    s_item_used[item - s_item_pool] = 0;
+}
+#else
+static wq_item_t *wq_item_alloc(void) {
+    return (wq_item_t *)calloc(1, sizeof(wq_item_t));
+}
+
+static void wq_item_free(wq_item_t *item) {
+    free(item);
+}
+#endif
 
 /* The queue is its storage type, so the two can never drift apart. */
 struct fl_workqueue {
@@ -76,14 +113,14 @@ static void wq_dispatch(void *arg) {
     if (item->fn)
         item->fn(item->ctx);
     if (item->period_ns <= 0) {
-        free(item);
+        wq_item_free(item);
         return;
     }
     WQ_LOCK(wq);
     wq->st.periodic_inflight--;
     if (wq->st.shutdown) {
         WQ_UNLOCK(wq);
-        free(item);
+        wq_item_free(item);
         return;
     }
     {
@@ -155,7 +192,7 @@ fl_result_t fl_wq_init(fl_workqueue_t *wq) {
 static void wq_finish(wq_item_t *item) {
     if (item->fn && (item->flags & FL_WQ_PROTECTED))
         item->fn(item->ctx);
-    free(item);
+    wq_item_free(item);
 }
 
 void fl_wq_shutdown(fl_workqueue_t *wq) {
@@ -214,7 +251,7 @@ static fl_result_t wq_submit(fl_workqueue_t *wq, const fl_wq_work_t *work, int64
         return FL_RESULT_INVAL; /* first run plus one period would not fit */
     }
 
-    item = (wq_item_t *)calloc(1, sizeof(*item));
+    item = wq_item_alloc();
     if (!item)
         return FL_RESULT_NOMEM;
     item->fn = work->fn;
@@ -231,19 +268,19 @@ static fl_result_t wq_submit(fl_workqueue_t *wq, const fl_wq_work_t *work, int64
     WQ_LOCK(wq);
     if (wq->st.shutdown || (unsigned)pq_count(&wq->st.pq) + wq->st.timer_count >= limit) {
         WQ_UNLOCK(wq);
-        free(item);
+        wq_item_free(item);
         return FL_RESULT_BUSY;
     }
     if (run_at_ns == 0) {
         if (pq_push(&wq->st.pq, item->layer, wq_dispatch, item) < 0) {
             WQ_UNLOCK(wq);
-            free(item);
+            wq_item_free(item);
             return FL_RESULT_BUSY;
         }
     } else {
         if (wq->st.timer_count + wq->st.periodic_inflight >= FL_WQ_TIMERS_MAX) {
             WQ_UNLOCK(wq);
-            free(item);
+            wq_item_free(item);
             return FL_RESULT_BUSY;
         }
         wq_timer_insert(wq, item);

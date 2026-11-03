@@ -44,6 +44,7 @@ __attribute__((interrupt)) static void early_exception_with_error(void *frame, u
 __attribute__((interrupt)) static void irq_pit(void *frame)
 {
     (void)frame;
+    fl_fs_pit_irq(); /* counts and flags only; the shell loop does the bounded work */
     fl_fs_pic_eoi(0);
 }
 

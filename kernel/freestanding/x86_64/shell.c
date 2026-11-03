@@ -3,6 +3,7 @@
 #include "commands.h"
 #include "identity.h"
 #include "keyboard.h"
+#include "pit.h"
 #include "serial.h"
 #include "vga.h"
 
@@ -558,6 +559,8 @@ void fl_fs_shell_run(void)
         return;
 #else
         __asm__ volatile("hlt");
+        if (fl_fs_pit_pending_take())
+            fl_fs_bg_tick();
         while (fl_fs_kbd_getc(&c))
             fl_fs_shell_input(c);
         while (fl_fs_serial_getc(&c))

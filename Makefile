@@ -766,6 +766,13 @@ test_workqueue_p18: tests/test_workqueue_p18.c kernel/core/sched/workqueue.c ker
 	  kernel/core/sched/workqueue.c kernel/core/sched/bg_jobs.c kernel/core/sched/priority_queue.c kernel/core/time/timekeeping.c $(MEM_ASM_OBJ) -Wl,-z,noexecstack
 	./tests/test_workqueue_p18
 
+# The same workqueue sources in the browser image's configuration (no lock, static item pool).
+.PHONY: test_workqueue_freestanding
+test_workqueue_freestanding: tests/test_workqueue_freestanding.c kernel/core/sched/workqueue.c kernel/core/sched/priority_queue.c $(MEM_ASM_OBJ)
+	$(CC) $(CFLAGS) $(TEST_SANITIZE) -DFL_FREESTANDING -DFL_WQ_ALLOW_HOSTED_FREESTANDING -I. -o tests/test_workqueue_freestanding tests/test_workqueue_freestanding.c \
+	  kernel/core/sched/workqueue.c kernel/core/sched/priority_queue.c $(MEM_ASM_OBJ) -Wl,-z,noexecstack
+	./tests/test_workqueue_freestanding
+
 # Stub gate runs before driver tests (CI / make test_drivers)
 test_drivers: check-stubs
 TEST_DRIVER_HAL_OBJS = $(KERNEL_DRIVERS)/../hal/ioport.o
@@ -799,7 +806,7 @@ test_drivers_no_keyquorum: check-stubs $(TEST_DRIVERS_OBJS)
 	  $(TEST_DRIVERS_OBJS) -Wl,-z,noexecstack
 	./tests/test_drivers_no_keyquorum
 
-test_core: test_mem_asm test_priority_queue test_workqueue_p18
+test_core: test_mem_asm test_priority_queue test_workqueue_p18 test_workqueue_freestanding
 	@echo "Core tests done. Run 'make test_alloc_libc' or 'make test_alloc_asm' for allocator."
 
 

@@ -81,6 +81,7 @@ run_make "check-weak-rng" check-weak-rng
 run_make "test_mem_asm" test_mem_asm
 run_make "test_priority_queue" test_priority_queue
 run_make "test_workqueue_p18" test_workqueue_p18
+run_make "test_workqueue_freestanding" test_workqueue_freestanding
 
 if [[ "${USE_ASM_ALLOC:-0}" == "1" ]]; then
   run_make "test_alloc_asm" test_alloc_asm
