@@ -267,7 +267,6 @@ int fl_wq_pending(const fl_workqueue_t *wq) {
     return n;
 }
 
-/* Resolves the first run time of a periodic item given as relative (run_at_ns == 0). */
 static fl_result_t wq_first_run_ns(int64_t *run_at_ns, int64_t period_ns) {
     int64_t now = 0;
 
@@ -279,7 +278,7 @@ static fl_result_t wq_first_run_ns(int64_t *run_at_ns, int64_t period_ns) {
         return FL_RESULT_OK;
     }
     if (fl_time_monotonic_ns(&now) != FL_RESULT_OK)
-        return FL_RESULT_ERR; /* a period needs P1-7 */
+        return FL_RESULT_ERR; /* a period needs the monotonic clock */
     if (period_ns > INT64_MAX - now)
         return FL_RESULT_INVAL;
     *run_at_ns = now + period_ns;
@@ -877,7 +876,7 @@ unsigned fl_wq_poll_at(fl_workqueue_t *wq, unsigned max_items, int64_t now_ns) {
     WQ_LOCK(wq);
 #ifdef FL_WQ_DEBUG_REENTRANCY
     assert(wq->st.poll_depth == 0 &&
-           "fl_wq_poll: one poller per queue — no nested poll before P9-3 SMP");
+           "fl_wq_poll: one poller per queue — no nested poll");
 #endif
     wq->st.poll_depth++;
     wq->st.poll_now_ns = now_ns;
@@ -932,7 +931,7 @@ fl_result_t fl_wq_drain(fl_workqueue_t *wq, unsigned timeout_ms) {
             deadline_ns = start_ns + (int64_t)timeout_ms * 1000000LL;
             have_deadline = 1;
         }
-        /* else: no P1-7 on this path — fall through to best-effort single poll */
+        /* else: no monotonic clock on this path — fall through to best-effort single poll */
     }
 
     for (;;) {

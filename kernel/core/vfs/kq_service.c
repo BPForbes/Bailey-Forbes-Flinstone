@@ -155,8 +155,8 @@ size_t fl_kq_service_online_count(void) {
     return n;
 }
 
-/* Where Root's credential would be stored for unattended boot is an open decision (the image region of
- * FL-20 needs a written exception and a threat model); nothing is stored, so there is no fallback. */
+/* Where Root's credential would be stored for unattended boot is an open decision (the image region
+ * needs a written exception and a threat model); nothing is stored, so there is no fallback. */
 static fl_result_t stored_root_credential(char *out, size_t cap) {
     (void)out;
     (void)cap;

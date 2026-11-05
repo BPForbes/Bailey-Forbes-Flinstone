@@ -12,7 +12,7 @@
 
 static void bg_reclaim_work(void *ctx) {
     (void)ctx;
-    /* P1-9: scan **P1-4** PMM / **P1-5** arenas — not implemented. */
+    /* Scanning the PMM and arenas is not implemented. */
 }
 
 static struct {

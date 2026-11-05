@@ -34,7 +34,7 @@ void fl_bg_jobs_ticker_stop(void);
 #endif
 
 /**
- * P1-10 watchdog checks. A service registers an alive() test and a stall handler; the watchdog work
+ * Watchdog checks. A service registers an alive() test and a stall handler; the watchdog work
  * item (queued once, every FL_BG_WATCHDOG_PERIOD_MS, protected, on the default queue) calls alive()
  * for each and on_stall() when it answers 0.
  */

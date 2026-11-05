@@ -547,7 +547,6 @@ static void history_send_chunks(fl_net_server_t *srv, const fl_net_server_member
     }
 }
 
-/* Fills a new bundle from the source and checks it unpacks. Returns NULL after refusing. */
 static uint8_t *history_load_bundle(fl_net_server_t *srv, const fl_net_server_member_t *from, const char *me,
                                     const uint8_t id[FL_KQ_DELIVERY_ID_LEN], size_t *len) {
     const uint8_t *l15, *l17;
@@ -796,8 +795,6 @@ static void hist_free(kq_hist_slot_t *s) {
     memset(s, 0, sizeof *s);
 }
 
-/* Starts the slot on the first chunk, else checks the declared total is unchanged. Returns 0 to ignore
- * the chunk; the slot is freed when its buffer cannot be reserved. */
 static int hist_begin_or_continue(kq_hist_slot_t *slot, uint32_t off, uint32_t total) {
     if (slot->started)
         return slot->bundle.limit == total;
@@ -1111,7 +1108,6 @@ void fl_net_kq_inbox_drop(const uint8_t id[FL_KQ_DELIVERY_ID_LEN]) {
     kq_unlock();
 }
 
-/* Reserves a free slot for the new request under the lock. */
 static fl_result_t hist_claim_slot(const uint8_t id[16]) {
     kq_hist_slot_t *slot = NULL;
 

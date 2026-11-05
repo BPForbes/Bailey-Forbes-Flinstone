@@ -517,7 +517,6 @@ static int history_refusals(const fl_kq_driver_t *drv) {
     return 0;
 }
 
-/* Steve gets the bundle in chunks and opens both letters. */
 static int history_download_opens(const fl_kq_driver_t *drv, const unsigned char steve_box[]) {
     uint8_t req[16];
     fl_kq_buf_t l15 = {0}, l17 = {0}, c = {0}, snap = {0};

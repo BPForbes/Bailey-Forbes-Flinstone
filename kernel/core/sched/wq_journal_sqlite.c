@@ -71,7 +71,6 @@ static fl_result_t wqj_load_locked(wqj_t *w, uint64_t id, fl_wq_journal_record_t
     return rc;
 }
 
-/* Caller holds the lock. Returns 1 and the id when a job with this key exists. */
 static int wqj_find_idem_locked(wqj_t *w, const uint8_t key[16], uint64_t *id_out) {
     sqlite3_stmt *st = NULL;
     int found = 0;

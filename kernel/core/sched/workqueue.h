@@ -47,7 +47,7 @@ typedef void (*fl_wq_work_fn_t)(void *ctx);
 typedef struct {
     fl_wq_work_fn_t fn;
     void *ctx;
-    uint32_t tag; /* optional domain id (P1-9, P3-14, …) */
+    uint32_t tag; /* optional domain id  */
     /**
      * **FL_WQ_LAYER_*** index (0 = highest). Values outside **0..PQ_NUM_PRIORITIES-1**
      * use **FL_WQ_LAYER_BACKGROUND**.
@@ -61,7 +61,7 @@ typedef struct {
 /** Never discarded by **fl_wq_shutdown** (runs once first); may use the reserve slots. */
 #define FL_WQ_PROTECTED 0x1u
 
-/** Global default workqueue for kernel background jobs (**P1-8**). Single-writer; see contract shard. */
+/** Global default workqueue for kernel background jobs. Single-writer; see contract shard. */
 fl_workqueue_t *fl_wq_default(void);
 
 /** Initialises storage that was never initialised, or that **fl_wq_destroy** ended. Never call it on a live queue. */
@@ -103,7 +103,7 @@ unsigned fl_wq_poll_at(fl_workqueue_t *wq, unsigned max_items, int64_t now_ns);
 /**
  * Drain work already in the MLQ (delayed and periodic items still waiting for their due time
  * are not waited for). **timeout_ms == 0** blocks until empty (hosted poll loop).
- * **timeout_ms > 0** uses **P1-7** monotonic time; returns **FL_RESULT_BUSY** on timeout.
+ * **timeout_ms > 0** uses monotonic time; returns **FL_RESULT_BUSY** on timeout.
  */
 fl_result_t fl_wq_drain(fl_workqueue_t *wq, unsigned timeout_ms);
 

@@ -2,7 +2,7 @@
 #define FL_KQ_HISTORY_BUNDLE_H
 
 /*
- * History bundle (FL-04): what a KeyQuorum history download carries. Flinstone's own framing,
+ * History bundle: what a KeyQuorum history download carries. Flinstone's own framing,
  * not a KeyQuorum or sealed-envelope format; KeyQuorum never parses it and the relay of it
  * (FL_NET_SESSION_OP_KQH_*) only moves its bytes.
  *

@@ -610,7 +610,6 @@ static int ticker_starts_and_stops_promptly(void) {
     return 0;
 }
 
-/* Restart with a short period; three threads enqueue while it polls. */
 static int ticker_runs_concurrent_enqueues(void) {
     pthread_t th[4];
     void *rv;
