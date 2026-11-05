@@ -76,7 +76,6 @@ static void wq_item_free(wq_item_t *item) {
 }
 #endif
 
-/* The queue is its storage type, so the two can never drift apart. */
 struct fl_workqueue {
     fl_workqueue_storage_t st;
 };
@@ -186,7 +185,6 @@ static void wq_do_init(fl_workqueue_t *wq) {
     for (unsigned i = 0; i < FL_WQ_TIMERS_MAX; i++)
         wq->st.timers[i] = NULL;
 #ifdef FL_WQ_HAS_LOCK
-    /* First initialisation of this storage, or of storage fl_wq_destroy ended: never an initialised mutex. */
     (void)pthread_mutex_init(&wq->st.lock, NULL);
 #endif
 }
@@ -363,7 +361,6 @@ fl_result_t fl_wq_enqueue_every(fl_workqueue_t *wq, const fl_wq_work_t *work, in
 }
 
 
-/* ===== Durable work (FL-25) ============================================================================ */
 
 static int64_t wq_now_sec(void) {
     int64_t v = 0;
@@ -392,7 +389,6 @@ static int wq_str_eq(const char *a, const char *b) {
     return *a == *b;
 }
 
-/* ---- the default journal: memory only ---- */
 
 #ifdef FL_FREESTANDING
 #define MEMJ_MAX 16u /* the image holds a few jobs; it has no storage to keep more */
@@ -582,7 +578,6 @@ const fl_wq_journal_ops_t *fl_wq_set_journal(const fl_wq_journal_ops_t *ops) {
     return prev;
 }
 
-/* ---- handlers ---- */
 
 static struct {
     uint32_t tag;
@@ -613,7 +608,6 @@ static int wq_handler_index(uint32_t tag) {
     return -1;
 }
 
-/* ---- staging, running, recovery ---- */
 
 /* Every state change the queue asks a journal for goes through here: a move the proven model does not
  * allow is refused before the journal sees it (and counted: it is a bug in this file, never a race). */
@@ -879,7 +873,7 @@ unsigned fl_wq_poll_at(fl_workqueue_t *wq, unsigned max_items, int64_t now_ns) {
     if (!wq || max_items == 0)
         return 0;
 
-    wq_fill_window(wq); /* stage durable work from the journal before the poll starts */
+    wq_fill_window(wq);
     WQ_LOCK(wq);
 #ifdef FL_WQ_DEBUG_REENTRANCY
     assert(wq->st.poll_depth == 0 &&
