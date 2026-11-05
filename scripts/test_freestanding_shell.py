@@ -132,7 +132,8 @@ _FAIL_WORDS = re.compile(r"fail|denied|not exist|incorrect|could not|cannot|inva
 
 
 def observe(line, text):
-    """Reduce one command's output to what both shells must agree on."""
+    """Reduce one command's output to what both shells must agree on: always (verb, result, elevated),
+    where result is the account name for whoami and "ok" or "refused" for everything else."""
     body = [l.strip() for l in text.replace("\r", "").split("\n") if l.strip()]
     body = [l for l in body if not l.startswith(("SESSION ", "Password:", "New password:"))
             and not l.endswith(("flintstone>", "shell>")) and line not in l]
@@ -141,8 +142,8 @@ def observe(line, text):
         m = re.search(r"(?:WHOAMI\s+)?([A-Za-z][A-Za-z0-9_]*)(.*)", joined)
         return ("whoami", m.group(1), "elevated" in joined) if m else ("whoami", "?", False)
     if _FAIL_WORDS.search(joined):
-        return (line.split()[0], "refused")
-    return (line.split()[0], "ok")
+        return (line.split()[0], "refused", False)
+    return (line.split()[0], "ok", False)
 
 
 def lab_session_step(line, secret):
@@ -211,8 +212,10 @@ def hosted_session(steps):
             try:
                 os.kill(pid, 9)
                 os.waitpid(pid, 0)
-            except OSError:
-                pass
+            except (ProcessLookupError, ChildProcessError):
+                pass  # the hosted shell already exited (its "exit" ran): nothing left to kill or reap
+            except OSError as err:
+                print(f"test-freestanding-shell: could not stop the hosted shell: {err}", file=sys.stderr)
     return out
 
 

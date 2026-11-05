@@ -10,6 +10,7 @@
 #include <stdatomic.h>
 #include <time.h>
 #include <stdio.h>
+#include <stdlib.h>
 #include <string.h>
 
 #define RUN_TEST(name)                          \
@@ -651,6 +652,27 @@ static int test_durable_runs_once_and_is_idempotent(void) {
     return 0;
 }
 
+/* An owner label with no terminator inside the allowed length must be refused without reading past the
+ * buffer (ASan fails this if the length scan indexes before it checks the bound). */
+static int test_durable_owner_bound(void) {
+    uint8_t key[16];
+    char *exact = (char *)malloc(FL_HERITAGE_KEY_ID_MAX); /* exactly the limit, no NUL at all */
+    fl_workqueue_storage_t st;
+    fl_workqueue_t *wq = (fl_workqueue_t *)&st;
+
+    ASSERT(exact != NULL);
+    memset(exact, 'a', FL_HERITAGE_KEY_ID_MAX);
+    mkkey(key, 31);
+    fl_wq_journal_mem_reset();
+    ASSERT(fl_wq_init(wq) == FL_RESULT_OK);
+    ASSERT(fl_wq_enqueue_durable(wq, TAG_AUTO, FL_WQ_LAYER_NORMAL, exact, NULL, 0, key, 0) == FL_RESULT_INVAL);
+    exact[FL_HERITAGE_KEY_ID_MAX - 1] = '\0'; /* the longest label that fits */
+    ASSERT(fl_wq_enqueue_durable(wq, TAG_AUTO, FL_WQ_LAYER_NORMAL, exact, NULL, 0, key, 0) == FL_RESULT_OK);
+    fl_wq_shutdown(wq);
+    free(exact);
+    return 0;
+}
+
 static int test_durable_retries_then_fails(void) {
     fl_workqueue_storage_t st;
     fl_workqueue_t *wq = (fl_workqueue_t *)&st;
@@ -823,6 +845,7 @@ int main(void) {
     RUN_TEST(equal_due_times_keep_arrival_order);
     RUN_TEST(periodic_slots_are_returned);
     RUN_TEST(durable_runs_once_and_is_idempotent);
+    RUN_TEST(durable_owner_bound);
     RUN_TEST(durable_retries_then_fails);
     RUN_TEST(durable_recovers_after_a_restart);
     RUN_TEST(stale_durable_work_expires_unrun);

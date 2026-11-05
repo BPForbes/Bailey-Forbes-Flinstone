@@ -648,7 +648,7 @@ fl_result_t fl_wq_enqueue_durable(fl_workqueue_t *wq, uint32_t tag, int layer, c
     if (owner && owner[0]) {
         size_t len = 0;
 
-        while (owner[len] && len < FL_HERITAGE_KEY_ID_MAX)
+        while (len < FL_HERITAGE_KEY_ID_MAX && owner[len]) /* the bound first: never read past the buffer */
             len++;
         if (len >= FL_HERITAGE_KEY_ID_MAX)
             return FL_RESULT_INVAL;
