@@ -303,12 +303,12 @@ static void autosign_job(void *arg) {
     char author[FL_HERITAGE_KEY_ID_MAX];
     uint8_t key[FL_USER_SIGNING_SECRET_LEN];
     kq_signing_mode_t mode = 0;
-    int64_t now = 0;
+    int64_t now = 0, due = 0;
     fl_result_t rc;
 
     (void)fl_time_wall_sec(&now);
-    if (now < o->spec.last_signature_sec(o->spec.ctx) + o->spec.interval_sec)
-        return; /* a user signature moved the clock */
+    if (__builtin_add_overflow(o->spec.last_signature_sec(o->spec.ctx), o->spec.interval_sec, &due) || now < due)
+        return; /* a user signature moved the clock (an overflowing due time is never due) */
     author[0] = '\0';
     rc = o->spec.head_author(o->spec.ctx, author, sizeof author);
     if (rc == FL_RESULT_BUSY) { /* two heads: nobody is "the" author */
@@ -332,7 +332,7 @@ fl_result_t fl_kq_service_autosign_add(const fl_kq_autosign_t *spec) {
     fl_result_t rc;
 
     if (!spec || !spec->label || !spec->last_signature_sec || !spec->head_author || !spec->sign ||
-        spec->interval_sec <= 0 || !s_started)
+        spec->interval_sec <= 0 || spec->interval_sec > INT64_MAX / 1000000000ll || !s_started)
         return FL_RESULT_INVAL;
     pthread_mutex_lock(&s_mu);
     for (size_t i = 0; i < FL_KQ_AUTOSIGN_MAX && !o; i++)

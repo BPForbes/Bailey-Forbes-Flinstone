@@ -131,6 +131,19 @@ int fl_session_has_elevation(void) {
     return has;
 }
 
+/* An account marked password-plus-KQST needs its slot token, and this build cannot present one yet. Refuse
+ * the login rather than quietly treat the account as password-only. Called with s_session_mu held, and only
+ * after the password verified, so a wrong password learns nothing about the account's mode. */
+static int kqst_required_unmet(const char *name) {
+    const fl_user_record_t *u = fl_user_db_find(&s_db, name);
+
+    if (!u || u->auth_mode != FL_USER_AUTH_PASSWORD_KQST)
+        return 0;
+    fprintf(stderr, "login: %s requires its KQST slot token, which this build cannot open; login refused\n",
+            u->name);
+    return 1;
+}
+
 fl_result_t fl_session_login(const char *name, const char *password) {
     fl_result_t rc = FL_RESULT_ACCES;
 
@@ -138,7 +151,7 @@ fl_result_t fl_session_login(const char *name, const char *password) {
     if (!name || !name[0] || !password)
         return FL_RESULT_INVAL;
     pthread_mutex_lock(&s_session_mu);
-    if (fl_user_db_verify_password(&s_db, name, password)) {
+    if (fl_user_db_verify_password(&s_db, name, password) && !kqst_required_unmet(name)) {
         const fl_user_record_t *u = fl_user_db_find(&s_db, name);
         int created = 0;
 

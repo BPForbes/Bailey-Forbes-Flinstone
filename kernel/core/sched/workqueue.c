@@ -677,7 +677,12 @@ fl_result_t fl_wq_enqueue_durable(fl_workqueue_t *wq, uint32_t tag, int layer, c
     r.state = FL_WQ_ST_PENDING;
     r.max_attempts = FL_WQ_MAX_ATTEMPTS;
     r.accepted_at = wq_now_sec();
-    r.deadline = ttl_sec > 0 ? r.accepted_at + ttl_sec : 0;
+    r.deadline = 0;
+    if (ttl_sec > 0) {
+        if (r.accepted_at > 0 && ttl_sec > INT64_MAX - r.accepted_at)
+            return FL_RESULT_INVAL; /* the deadline would overflow: refuse, never wrap into the past */
+        r.deadline = r.accepted_at + ttl_sec;
+    }
     r.payload_len = (uint32_t)n;
     if (n)
         wq_copy(r.payload, payload, n);

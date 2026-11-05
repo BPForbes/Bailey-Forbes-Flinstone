@@ -673,6 +673,22 @@ static int test_durable_owner_bound(void) {
     return 0;
 }
 
+/* A ttl that would push the deadline past INT64_MAX is refused, not wrapped into the past. */
+static int test_durable_ttl_overflow(void) {
+    uint8_t key[16];
+    fl_workqueue_storage_t st;
+    fl_workqueue_t *wq = (fl_workqueue_t *)&st;
+
+    mkkey(key, 32);
+    fl_wq_journal_mem_reset();
+    ASSERT(fl_wq_init(wq) == FL_RESULT_OK);
+    ASSERT(fl_wq_enqueue_durable(wq, TAG_AUTO, FL_WQ_LAYER_NORMAL, NULL, NULL, 0, key, INT64_MAX) == FL_RESULT_INVAL);
+    ASSERT(fl_wq_pending(wq) == 0); /* nothing was queued */
+    ASSERT(fl_wq_enqueue_durable(wq, TAG_AUTO, FL_WQ_LAYER_NORMAL, NULL, NULL, 0, key, 3600) == FL_RESULT_OK);
+    fl_wq_shutdown(wq);
+    return 0;
+}
+
 static int test_durable_retries_then_fails(void) {
     fl_workqueue_storage_t st;
     fl_workqueue_t *wq = (fl_workqueue_t *)&st;
@@ -846,6 +862,7 @@ int main(void) {
     RUN_TEST(periodic_slots_are_returned);
     RUN_TEST(durable_runs_once_and_is_idempotent);
     RUN_TEST(durable_owner_bound);
+    RUN_TEST(durable_ttl_overflow);
     RUN_TEST(durable_retries_then_fails);
     RUN_TEST(durable_recovers_after_a_restart);
     RUN_TEST(stale_durable_work_expires_unrun);

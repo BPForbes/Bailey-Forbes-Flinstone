@@ -90,6 +90,20 @@ static int test_login_brings_the_key_online_and_logout_wipes_it(void) {
     return 0;
 }
 
+/* An account marked password-plus-KQST cannot sign in by password alone: no login, nothing online. */
+static int test_a_kqst_account_cannot_log_in_by_password_alone(void) {
+    fl_user_db_t *db = fl_session_user_db_mut();
+
+    ASSERT(db && fl_user_db_set_auth_mode(db, "Flinstone", FL_USER_AUTH_PASSWORD_KQST) == FL_RESULT_OK);
+    ASSERT(fl_session_login("Flinstone", "flinstone") == FL_RESULT_ACCES);
+    ASSERT(fl_kq_service_online_count() == 0);
+    ASSERT(fl_session_login("Flinstone", "wrong") == FL_RESULT_ACCES);
+    ASSERT(fl_user_db_set_auth_mode(db, "Flinstone", FL_USER_AUTH_PASSWORD) == FL_RESULT_OK);
+    ASSERT(fl_session_login("Flinstone", "flinstone") == FL_RESULT_OK);
+    ASSERT(fl_session_logout() == FL_RESULT_OK);
+    return 0;
+}
+
 static int test_the_thread_cannot_be_cancelled_or_signalled(void) {
     pthread_t t = fl_kq_service_thread_for_test();
     fl_wq_work_t w = {.fn = count_job, .pq_layer = FL_WQ_LAYER_URGENT};
@@ -196,6 +210,10 @@ static int test_the_periodic_sweep(void) {
     ASSERT(fl_session_login("Flinstone", "flinstone") == FL_RESULT_OK);
     ASSERT(fl_user_db_open_key(fl_session_user_db(), "Flinstone", "flinstone", expect) == FL_RESULT_OK);
     (void)fl_time_wall_sec(&now);
+    /* an interval whose nanoseconds would overflow is refused, not scheduled as a wrapped period */
+    spec.label = "overflow"; spec.ctx = &recent; spec.interval_sec = INT64_MAX;
+    ASSERT(fl_kq_service_autosign_add(&spec) == FL_RESULT_INVAL);
+    spec.interval_sec = 1;
 
     recent.last_sig = now + 3600; recent.head_rc = FL_RESULT_OK; snprintf(recent.author, sizeof recent.author, "%s", flin->key_id);
     due.last_sig = 0;             due.head_rc = FL_RESULT_OK;    snprintf(due.author, sizeof due.author, "%s", flin->key_id);
@@ -250,6 +268,7 @@ int main(void) {
     (void)setenv("FL_USERS_DB_PATH", path, 1);
 #define RUN(t) do { if (t() != 0) { rc = 1; fprintf(stderr, "%s failed\n", #t); } else printf("%s... OK\n", #t); } while (0)
     RUN(test_login_brings_the_key_online_and_logout_wipes_it);
+    if (!rc) RUN(test_a_kqst_account_cannot_log_in_by_password_alone);
     if (!rc) RUN(test_the_thread_cannot_be_cancelled_or_signalled);
     if (!rc) RUN(test_protected_work_is_never_dropped_and_a_stall_fails_closed);
     if (!rc) RUN(test_nobody_may_control_the_service);

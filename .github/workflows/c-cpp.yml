@@ -183,6 +183,9 @@ jobs:
       - name: Test — KeyQuorum history bundle framing
         run: make test_kq_history_bundle
 
+      - name: Test — KeyQuorum key service
+        run: make test_kq_service
+
       - name: Test — userspace connection
         run: make test_userspace_connection
 
