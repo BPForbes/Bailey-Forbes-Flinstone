@@ -11,7 +11,7 @@
 #include "contract_extend.h"
 
 #define FL_CONTRACT_P1_WORKQUEUE_CONTRACT_DEFINED 1
-#define FL_CONTRACT_P1_WORKQUEUE_REV 3
+#define FL_CONTRACT_P1_WORKQUEUE_REV 4
 
 /** Maximum pending work items per queue (lab default). */
 #define FL_WQ_PENDING_MAX 64u

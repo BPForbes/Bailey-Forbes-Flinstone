@@ -714,6 +714,11 @@ the driver registry exists (`fl_kq_service_start`) and ended only by an orderly 
   and shutdown wipe too. `fl_kq_obtain_author_key` hands a copy to a caller (who wipes it) only for an account
   that is signed in; a parent author assembled from its children's shares needs KQ-18 and is not available
   (a leaf who is not signed in cannot be assembled by anything: the answer is ACCES).
+  The hook gets a copy of the account's record taken under the session lock and the generation of that login;
+  the slow key derivation runs from the copy with no lock held, and the key is published through
+  `fl_session_publish_if_current` under the session lock, only while that generation is still current. Every
+  login and every logout starts a new generation, so a logout that overlaps the derivation wins: the late key is
+  refused (`kq-service-stale-login` in the audit log) instead of coming online for a session that has ended.
 - **Its own thread and queue.** One thread with cancellation disabled and every signal blocked polls a private
   workqueue whose items are all `FL_WQ_PROTECTED`: a full queue answers BUSY (the caller retries; a signature is never
   dropped) and protected work runs once more at shutdown. It stamps a heartbeat; `fl_kq_service_alive()` is false once

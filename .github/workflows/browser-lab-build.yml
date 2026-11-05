@@ -68,7 +68,7 @@ jobs:
       - name: Install Rust (KeyQuorum identity library)
         uses: dtolnay/rust-toolchain@89b12181fb390509a0842a86cc55eeb8eb928c1d # stable branch
         with:
-          toolchain: stable
+          toolchain: 1.97.0 # pinned (FL-17 item 5): the compiler the KeyQuorum archive was built and checked with
           # KeyQuorum co-signed delivery in the WebAssembly lab (tools/browser-lab/wasm/lab_kq.c).
           targets: wasm32-unknown-emscripten,x86_64-unknown-none
 

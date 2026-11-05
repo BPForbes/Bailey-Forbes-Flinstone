@@ -11,6 +11,7 @@
 #include "contract_p2_authz.h"
 #include "fl/authz_subsystem.h"
 #include "session.h"
+#include "timekeeping.h"
 #include "user_db.h"
 
 #include <pthread.h>
@@ -101,6 +102,42 @@ static int test_a_kqst_account_cannot_log_in_by_password_alone(void) {
     ASSERT(fl_user_db_set_auth_mode(db, "Flinstone", FL_USER_AUTH_PASSWORD) == FL_RESULT_OK);
     ASSERT(fl_session_login("Flinstone", "flinstone") == FL_RESULT_OK);
     ASSERT(fl_session_logout() == FL_RESULT_OK);
+    return 0;
+}
+
+/* The key derivation runs outside the session lock, so a logout can overlap it. The key of a login that
+ * has already ended must not come online afterwards; the publish is checked against the login generation
+ * under the session lock. */
+static int test_a_logout_that_overlaps_the_key_derivation_wins(void) {
+    fl_user_record_t rec;
+    uint64_t ended, again;
+    const fl_user_record_t *flin = account("Flinstone");
+    uint8_t key[32];
+    kq_signing_mode_t mode = 0;
+
+    ASSERT(flin && fl_session_snapshot_account("Flinstone", &rec) == FL_RESULT_OK);
+    ASSERT(fl_session_login("Flinstone", "flinstone") == FL_RESULT_OK);
+    ASSERT(fl_kq_service_online_count() == 1);
+    ended = fl_session_login_generation();
+    ASSERT(fl_session_logout() == FL_RESULT_OK);
+    ASSERT(fl_kq_service_online_count() == 0);
+    ASSERT(fl_session_login_generation() != ended); /* a logout starts a new generation */
+
+    /* the derivation for the login that ended finishes late: refused, nothing published */
+    ASSERT(fl_kq_service_online_for_session(&rec, "flinstone", ended) == FL_RESULT_BUSY);
+    ASSERT(fl_kq_service_online_count() == 0);
+    ASSERT(fl_kq_obtain_author_key(flin->key_id, key, &mode) == FL_RESULT_ACCES);
+
+    /* a wrong password is refused whatever the generation, and a login that is still current publishes */
+    ASSERT(fl_session_login("Flinstone", "flinstone") == FL_RESULT_OK);
+    again = fl_session_login_generation();
+    ASSERT(again != ended);
+    ASSERT(fl_kq_service_online_for_session(&rec, "wrong", again) == FL_RESULT_ACCES);
+    ASSERT(fl_kq_service_online_for_session(&rec, "flinstone", again) == FL_RESULT_OK);
+    ASSERT(fl_kq_service_online_count() == 1);
+    ASSERT(fl_session_logout() == FL_RESULT_OK);
+    ASSERT(fl_kq_service_online_count() == 0);
+    memset(key, 0, sizeof key);
     return 0;
 }
 
@@ -269,6 +306,7 @@ int main(void) {
 #define RUN(t) do { if (t() != 0) { rc = 1; fprintf(stderr, "%s failed\n", #t); } else printf("%s... OK\n", #t); } while (0)
     RUN(test_login_brings_the_key_online_and_logout_wipes_it);
     if (!rc) RUN(test_a_kqst_account_cannot_log_in_by_password_alone);
+    if (!rc) RUN(test_a_logout_that_overlaps_the_key_derivation_wins);
     if (!rc) RUN(test_the_thread_cannot_be_cancelled_or_signalled);
     if (!rc) RUN(test_protected_work_is_never_dropped_and_a_stall_fails_closed);
     if (!rc) RUN(test_nobody_may_control_the_service);

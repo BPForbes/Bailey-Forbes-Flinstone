@@ -47,9 +47,24 @@ fl_result_t fl_session_logout(void);
  * is not held, so a slow key derivation does not stall the session); offline runs after
  * fl_session_logout with the account that signed out. Neither can refuse a login or a logout.
  */
-typedef fl_result_t (*fl_session_online_fn)(const char *account, const char *password);
+typedef fl_result_t (*fl_session_online_fn)(const fl_user_record_t *account, const char *password,
+                                           uint64_t login_generation);
 typedef void (*fl_session_offline_fn)(const char *account);
 void fl_session_set_login_hooks(fl_session_online_fn online, fl_session_offline_fn offline);
+
+/**
+ * The online hook gets a copy of the account's record taken under the session lock and the generation
+ * of the login that made it. Every login and every logout starts a new generation (never 0), so a key
+ * derived for one login can be published only while that login is still the current one:
+ * **fl_session_publish_if_current** runs publish under the session lock, so a logout either happens
+ * before it (BUSY, nothing is published) or after it (the offline hook then wipes what it published).
+ * Generation 0 publishes unconditionally. Publish must not call back into the session.
+ */
+typedef fl_result_t (*fl_session_publish_fn)(void *ctx);
+fl_result_t fl_session_publish_if_current(uint64_t login_generation, fl_session_publish_fn publish, void *ctx);
+uint64_t fl_session_login_generation(void);
+/** A copy of an account's record taken under the session lock. NOENT for an unknown account. */
+fl_result_t fl_session_snapshot_account(const char *name, fl_user_record_t *out);
 
 fl_user_db_t *fl_session_user_db_mut(void);
 const fl_user_db_t *fl_session_user_db(void);

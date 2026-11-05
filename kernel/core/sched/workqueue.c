@@ -165,8 +165,7 @@ static void wq_do_init(fl_workqueue_t *wq) {
     for (unsigned i = 0; i < FL_WQ_TIMERS_MAX; i++)
         wq->st.timers[i] = NULL;
 #ifdef FL_WQ_HAS_LOCK
-    /* Not destroyed at shutdown: the queue may be re-initialised in place, and a held-open
-     * mutex object owns no resource on the platforms this builds for. */
+    /* First initialisation of this storage, or of storage fl_wq_destroy ended: never an initialised mutex. */
     (void)pthread_mutex_init(&wq->st.lock, NULL);
 #endif
 }
@@ -189,7 +188,7 @@ fl_workqueue_t *fl_wq_default(void) {
     return &s_default_wq;
 }
 
-/* Only on a queue nobody is using: it re-initialises the lock and drops what is queued. */
+/* Only on storage that was never initialised or that fl_wq_destroy ended: it initialises the lock. */
 fl_result_t fl_wq_init(fl_workqueue_t *wq) {
     if (!wq)
         return FL_RESULT_INVAL;
@@ -228,6 +227,14 @@ void fl_wq_shutdown(fl_workqueue_t *wq) {
         WQ_LOCK(wq);
     }
     WQ_UNLOCK(wq);
+}
+
+void fl_wq_destroy(fl_workqueue_t *wq) {
+    if (!wq)
+        return;
+#ifdef FL_WQ_HAS_LOCK
+    (void)pthread_mutex_destroy(&wq->st.lock);
+#endif
 }
 
 int fl_wq_pending(const fl_workqueue_t *wq) {

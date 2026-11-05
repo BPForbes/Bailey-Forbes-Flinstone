@@ -150,6 +150,12 @@ void        fl_user_db_forget_key(fl_user_db_t *db, const char *name);
  * account has no key. The caller wipes secret; once the open was attempted, every non-OK return
  * leaves it securely zeroed.
  */
+/**
+ * The same open, from a copy of the account's record: for a caller that took the copy under a lock and
+ * runs the slow key derivation outside it (the session hands the key service such a copy at login).
+ */
+fl_result_t fl_user_db_open_key_record(const fl_user_record_t *account, const char *password,
+                                      unsigned char *secret);
 fl_result_t fl_user_db_open_key(const fl_user_db_t *db, const char *name, const char *password,
                                 unsigned char *secret);
 /** The signing public key of key_id, or NULL when the account has none. */

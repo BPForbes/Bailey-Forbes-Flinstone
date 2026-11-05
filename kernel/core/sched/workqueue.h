@@ -65,8 +65,15 @@ typedef struct {
 /** Global default workqueue for kernel background jobs (**P1-8**). Single-writer; see contract shard. */
 fl_workqueue_t *fl_wq_default(void);
 
+/** Initialises storage that was never initialised, or that **fl_wq_destroy** ended. Never call it on a live queue. */
 fl_result_t fl_wq_init(fl_workqueue_t *wq);
 void fl_wq_shutdown(fl_workqueue_t *wq);
+/**
+ * Ends a queue's life: destroys its mutex. Only after **fl_wq_shutdown**, and only when no thread can
+ * still enqueue, poll or resolve on it. The storage may then be passed to **fl_wq_init** again.
+ * **fl_wq_default()** is never destroyed.
+ */
+void fl_wq_destroy(fl_workqueue_t *wq);
 
 /** Pending item count (for tests and watchdog). */
 int fl_wq_pending(const fl_workqueue_t *wq);

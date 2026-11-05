@@ -888,19 +888,15 @@ int fl_user_db_secret_matches(const fl_user_db_t *db, const char *key_id,
 
 /* Opens the sealed secret of kind for the account name. Once the driver's account_open has been
  * called, every return other than OK leaves secret securely zeroed. */
-static fl_result_t open_sealed(const fl_user_db_t *db, const char *name, const char *password,
-                               fl_user_secret_kind_t kind, unsigned char *secret) {
-    const fl_user_record_t *u;
+static fl_result_t open_sealed_record(const fl_user_record_t *u, const char *password,
+                                      fl_user_secret_kind_t kind, unsigned char *secret) {
     const unsigned char *sealed;
     size_t sealed_len;
     const fl_kq_driver_t *kq;
     int rc;
 
-    if (!db || !name || !password || !secret)
+    if (!u || !password || !secret)
         return FL_RESULT_INVAL;
-    u = fl_user_db_find(db, name);
-    if (!u)
-        return FL_RESULT_NOENT;
     if (kind == FL_USER_SECRET_SIGNING && u->has_key) {
         sealed = (const unsigned char *)u->signing_sealed;
         sealed_len = sizeof u->signing_sealed;
@@ -924,6 +920,23 @@ static fl_result_t open_sealed(const fl_user_db_t *db, const char *name, const c
         return FL_RESULT_ERR;
     }
     return FL_RESULT_OK;
+}
+
+static fl_result_t open_sealed(const fl_user_db_t *db, const char *name, const char *password,
+                               fl_user_secret_kind_t kind, unsigned char *secret) {
+    const fl_user_record_t *u;
+
+    if (!db || !name || !password || !secret)
+        return FL_RESULT_INVAL;
+    u = fl_user_db_find(db, name);
+    if (!u)
+        return FL_RESULT_NOENT;
+    return open_sealed_record(u, password, kind, secret);
+}
+
+fl_result_t fl_user_db_open_key_record(const fl_user_record_t *account, const char *password,
+                                      unsigned char *secret) {
+    return open_sealed_record(account, password, FL_USER_SECRET_SIGNING, secret);
 }
 
 fl_result_t fl_user_db_open_key(const fl_user_db_t *db, const char *name, const char *password,

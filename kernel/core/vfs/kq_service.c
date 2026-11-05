@@ -78,39 +78,72 @@ static fl_result_t slot_put(const char *key_id, const uint8_t secret[FL_USER_SIG
     return rc;
 }
 
-fl_result_t fl_kq_service_online_from_login(const char *account, const char *password) {
+typedef struct {
+    const char *key_id;
+    const uint8_t *secret;
+} slot_put_ctx_t;
+
+static fl_result_t slot_put_cb(void *p) {
+    const slot_put_ctx_t *c = (const slot_put_ctx_t *)p;
+
+    return slot_put(c->key_id, c->secret);
+}
+
+fl_result_t fl_kq_service_online_for_session(const fl_user_record_t *account, const char *password,
+                                             uint64_t login_generation) {
     uint8_t secret[FL_USER_SIGNING_SECRET_LEN];
-    const fl_user_db_t *db = fl_session_user_db();
-    const fl_user_record_t *u;
     fl_result_t rc;
 
     if (!account || !password)
         return FL_RESULT_INVAL;
-    u = fl_user_db_find(db, account);
-    /* The key derivation is slow: the session lock is not held here. open_key wipes secret on failure. */
-    rc = u ? fl_user_db_open_key(db, account, password, secret) : FL_RESULT_NOENT;
-    if (rc == FL_RESULT_OK)
-        rc = slot_put(u->key_id, secret);
+    /* The key derivation is slow and runs from the record copy with no lock held. open_key_record wipes
+     * secret on failure. Publishing then happens under the session lock, only if the login that this
+     * key belongs to is still the current one: a logout that overlapped the derivation wins. */
+    rc = fl_user_db_open_key_record(account, password, secret);
+    if (rc == FL_RESULT_OK) {
+        slot_put_ctx_t put = {account->key_id, secret};
+
+        rc = fl_session_publish_if_current(login_generation, slot_put_cb, &put);
+    }
     mem_domain_secure_zero(secret, sizeof secret);
-    fl_audit_identity_event(u ? u->key_id : account, rc == FL_RESULT_OK ? "kq-service-online" : "kq-service-refused",
-                            u ? u->key_id : account, NULL);
+    fl_audit_identity_event(account->key_id,
+                            rc == FL_RESULT_OK ? "kq-service-online"
+                            : rc == FL_RESULT_BUSY ? "kq-service-stale-login"
+                                                   : "kq-service-refused",
+                            account->key_id, NULL);
     return rc;
 }
 
+fl_result_t fl_kq_service_online_from_login(const char *account, const char *password) {
+    fl_user_record_t rec;
+    fl_result_t rc;
+
+    if (!account || !password)
+        return FL_RESULT_INVAL;
+    rc = fl_session_snapshot_account(account, &rec);
+    if (rc != FL_RESULT_OK) {
+        fl_audit_identity_event(account, "kq-service-refused", account, NULL);
+        return rc;
+    }
+    return fl_kq_service_online_for_session(&rec, password, 0); /* no session login to be stale against */
+}
+
 void fl_kq_service_offline(const char *account) {
-    const fl_user_record_t *u;
+    fl_user_record_t rec;
+    const char *key_id = account;
     int i;
 
     if (!account)
         return;
-    u = fl_user_db_find(fl_session_user_db(), account);
+    if (fl_session_snapshot_account(account, &rec) == FL_RESULT_OK)
+        key_id = rec.key_id;
     pthread_mutex_lock(&s_mu);
-    i = slot_find_locked(u ? u->key_id : account);
+    i = slot_find_locked(key_id);
     if (i >= 0)
         slot_wipe_locked(&s_slots[i]);
     pthread_mutex_unlock(&s_mu);
     if (i >= 0)
-        fl_audit_identity_event(u ? u->key_id : account, "kq-service-offline", u ? u->key_id : account, NULL);
+        fl_audit_identity_event(key_id, "kq-service-offline", key_id, NULL);
 }
 
 size_t fl_kq_service_online_count(void) {
@@ -239,10 +272,11 @@ fl_result_t fl_kq_service_start(void) {
     stamp_heartbeat();
     if (pthread_create(&s_thread, NULL, service_main, NULL) != 0) {
         pthread_cond_destroy(&s_wake_cv);
+        fl_wq_destroy(s_wq);
         return FL_RESULT_ERR;
     }
     s_started = 1;
-    fl_session_set_login_hooks(fl_kq_service_online_from_login, fl_kq_service_offline);
+    fl_session_set_login_hooks(fl_kq_service_online_for_session, fl_kq_service_offline);
     fl_authz_subsystem_set_deny_audit(audit_control_denied);
     (void)fl_bg_watchdog_register(fl_kq_service_alive, fl_kq_service_report_stalled);
     return FL_RESULT_OK;
@@ -257,6 +291,7 @@ void fl_kq_service_shutdown(void) {
     pthread_mutex_unlock(&s_wake_mu);
     (void)pthread_join(s_thread, NULL);
     fl_wq_shutdown(s_wq); /* protected items run once more */
+    fl_wq_destroy(s_wq);  /* the thread is joined: nothing can touch the queue, so a restart initialises it afresh */
     pthread_cond_destroy(&s_wake_cv);
     s_started = 0;
     atomic_store(&s_heartbeat_ns, 0);

@@ -89,6 +89,26 @@ static int test_churn_1000(void) {
     return 0;
 }
 
+/* The same storage serves several lives: shutdown, destroy the mutex, initialise again. Initialising a live
+ * queue again would re-initialise an initialised mutex, which pthreads does not allow. */
+static int test_storage_is_reusable_after_destroy(void) {
+    fl_workqueue_storage_t store;
+    fl_workqueue_t *wq = (fl_workqueue_t *)&store;
+    fl_wq_work_t w = {.fn = noop_work, .pq_layer = FL_WQ_LAYER_BACKGROUND};
+
+    s_noop_ran = 0;
+    for (unsigned life = 1; life <= 3; life++) {
+        ASSERT(fl_wq_init(wq) == FL_RESULT_OK);
+        ASSERT(fl_wq_enqueue(wq, &w) == FL_RESULT_OK);
+        ASSERT(fl_wq_drain(wq, 0) == FL_RESULT_OK);
+        ASSERT(s_noop_ran == life);
+        fl_wq_shutdown(wq);
+        ASSERT(fl_wq_enqueue(wq, &w) == FL_RESULT_BUSY); /* a shut down queue refuses work */
+        fl_wq_destroy(wq);
+    }
+    return 0;
+}
+
 static int test_shutdown_discards_pending(void) {
     fl_workqueue_storage_t store;
     fl_workqueue_t *wq = (fl_workqueue_t *)&store;
@@ -845,6 +865,7 @@ static int test_durable_backlog_is_bounded_and_drains(void) {
 
 int main(void) {
     RUN_TEST(churn_1000);
+    RUN_TEST(storage_is_reusable_after_destroy);
     RUN_TEST(shutdown_discards_pending);
     RUN_TEST(layer_priority);
     RUN_TEST(delayed_runs_when_due);

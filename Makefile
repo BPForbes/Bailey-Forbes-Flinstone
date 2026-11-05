@@ -730,7 +730,7 @@ VM/devices/%.o: VM/devices/%.c
 
 # --- ASM + Alloc + PQ unit tests (no CUnit) ---
 # Use -fsanitize when NOT using ASM allocator (libc tests only)
-TEST_SANITIZE = -fsanitize=address,undefined -fno-omit-frame-pointer
+TEST_SANITIZE = -fsanitize=address,undefined -fno-sanitize-recover=undefined -fno-omit-frame-pointer
 # TEST_QUIET=1 (or: make -s test_wifi) — hide long link lines; show test program output only.
 # run-test_wifi — run existing binaries without linking (build first with make test_wifi).
 ifeq ($(TEST_QUIET),1)

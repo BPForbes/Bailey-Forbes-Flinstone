@@ -21,6 +21,7 @@
  */
 
 #include "contract_result.h"
+#include "user_db.h"
 #include "workqueue.h"
 
 #include <stddef.h>
@@ -43,6 +44,8 @@ fl_result_t fl_kq_service_start(void);
 /** The only way the service ends: stops the thread (protected work runs once), wipes every key. */
 void fl_kq_service_shutdown(void);
 
+fl_result_t fl_kq_service_online_for_session(const fl_user_record_t *account, const char *password,
+                                             uint64_t login_generation);
 fl_result_t fl_kq_service_online_from_login(const char *account, const char *password);
 void fl_kq_service_offline(const char *account);
 /** Accounts whose key is online. */
