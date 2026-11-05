@@ -169,7 +169,13 @@ def lab_session_step(line, secret):
 def hosted_session(steps):
     binary = root / "BPForbes_Flinstone_Shell"
     if not binary.is_file():
-        raise SystemExit(f"test-freestanding-shell: missing {binary} (run make first)")
+        # The hosted shell is the reference this step compares the lab image with. Build it here, not in the
+        # workflow: a second command after browser-lab-build.yml's untrusted checkout is one more CodeQL
+        # cache-poisoning finding, and the register (CQ-017) allows a fixed number.
+        build = subprocess.run(["make"], cwd=root, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, check=False)
+        if build.returncode != 0 or not binary.is_file():
+            tail = build.stdout.decode("latin1", "replace")[-2000:]
+            raise SystemExit(f"test-freestanding-shell: could not build {binary} (make exit {build.returncode})\n{tail}")
     out = []
     with tempfile.TemporaryDirectory() as work:
         (Path(work) / "userland" / "shell").mkdir(parents=True)  # where the hosted account store is written

@@ -147,12 +147,9 @@ jobs:
       - name: Probe serial identity and concurrent sessions
         # The netlab suite needs the SECFEAT image; the default dist/flintstone.img
         # (built above, boot-probed, and published) stays lab-free.
-        # The hosted shell (make) is the reference the account-session parity step compares against. It is
-        # built in this step, not its own: a step after the untrusted checkout is one more CodeQL
-        # cache-poisoning finding, and the register allows a fixed number (CQ-017).
-        run: |
-          make
-          FL_BROWSER_KERNEL_IMAGE=dist/flintstone-secfeat.img python3 ./scripts/test_freestanding_shell.py
+        # The script builds the hosted shell it compares against when it is missing; a second command here
+        # would be one more CodeQL cache-poisoning finding (the register, CQ-017, allows a fixed number).
+        run: FL_BROWSER_KERNEL_IMAGE=dist/flintstone-secfeat.img python3 ./scripts/test_freestanding_shell.py
 
       - name: Fetch pinned QEMU Wasm runtime
         run: python3 ./scripts/fetch_browser_runtime.py
