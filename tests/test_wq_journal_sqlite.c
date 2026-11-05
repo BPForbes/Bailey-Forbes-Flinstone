@@ -20,7 +20,7 @@ static fl_result_t handler(const void *p, size_t n, const uint8_t idem[16]) {
 #define TAG_ASK 0x7102u
 
 /* After the reboot: recovery, held work, a lost compare-and-set, and declining the held occurrence. */
-static int checks_after_reboot(fl_wq_journal_ops_t *j, fl_workqueue_t *b) {
+static int recover_and_resolve_held(fl_wq_journal_ops_t *j, fl_workqueue_t *b) {
     uint8_t k4[16] = {4};
     fl_wq_journal_record_t r;
 
@@ -65,7 +65,7 @@ static int test_survives_a_restart(const char *path) {
 
     ASSERT(fl_wq_journal_sqlite_open(path, &j) == FL_RESULT_OK); /* reboot: the file is all that is left */
     (void)fl_wq_set_journal(&j);
-    ASSERT(checks_after_reboot(&j, b) == 0);
+    ASSERT(recover_and_resolve_held(&j, b) == 0);
     fl_wq_shutdown(b);
     (void)fl_wq_set_journal(NULL);
     fl_wq_journal_sqlite_close(&j);

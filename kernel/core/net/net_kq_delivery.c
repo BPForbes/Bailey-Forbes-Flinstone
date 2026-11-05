@@ -795,7 +795,7 @@ static void hist_free(kq_hist_slot_t *s) {
     memset(s, 0, sizeof *s);
 }
 
-static int hist_begin_or_continue(kq_hist_slot_t *slot, uint32_t off, uint32_t total) {
+static int hist_admit_chunk(kq_hist_slot_t *slot, uint32_t off, uint32_t total) {
     if (slot->started)
         return slot->bundle.limit == total;
     if (off != 0)
@@ -824,7 +824,7 @@ static void client_history(fl_bytes_reader_t *r) {
     slot = r->bad ? NULL : hist_find(id);
     if (!slot || slot->ready || total == 0 || total > FL_HISTORY_BUNDLE_MAX_BYTES)
         return;
-    if (!hist_begin_or_continue(slot, off, total))
+    if (!hist_admit_chunk(slot, off, total))
         return;
     if (fl_bytes_reader_remaining(r) == 0 ||
         fl_part_buf_append(&slot->bundle, off, fl_bytes_reader_cursor(r), fl_bytes_reader_remaining(r)) !=

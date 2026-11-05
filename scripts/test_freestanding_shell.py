@@ -185,7 +185,9 @@ def hosted_session(steps):
             os.chdir(work)
             os.execve(str(binary), [str(binary)], env)
 
-        def read_until_prompt(secret, timeout=10):
+        def read_until_prompt(secret, timeout=None):
+            # a password is hashed after it is sent, which is slow under CPU load
+            timeout = timeout if timeout is not None else (60 if secret is not None else 10)
             text, answered, deadline = "", False, time.time() + timeout
             while time.time() < deadline:
                 ready, _, _ = select.select([fd], [], [], 0.2)
