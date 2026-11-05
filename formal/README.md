@@ -10,7 +10,11 @@ kernel, so the C that decides which journal state changes are allowed is the mod
 | `lean/FlWq.lean` | The model and its theorems, including that `FlWqCode` is the model (`code_allowed_matches`, `code_terminal_matches`, `code_refuses_non_states`). |
 | `lean/extract_c.py` | Keeps only the two runtime-free functions from Lean's C output (not its boxed wrappers or initializer) and records the sha256 of `FlWqCode.lean`. Refuses a function that uses Lean objects. |
 | `lean/build.sh` | Checks every theorem, then regenerates `kernel/core/sched/wq_model_gen.inc`. Needs Lean: `nix shell nixpkgs#lean4 -c formal/lean/build.sh` (Lean 4.35.0 was used). |
+| `lean/ref_check.c` | A readable hand translation of `FlWqCode.lean` into C (same if chain, same literals, a comment per branch naming the model arm). A check only: it compares itself with the generated C over all 65,536 (from, to) pairs and 256 states. Run by `make check-formal`. |
 | `lean/check_generated.sh` | Needs no Lean: the committed `.inc` must come from the current `FlWqCode.lean` (`make check-formal`, run in CI). |
+
+`ref_check.c` is there so a person can read the C equivalent of the Lean next to it. It is never linked into the
+kernel or any test, so there is still one implementation in the kernel: the generated one.
 
 ## What is proven (in the model)
 

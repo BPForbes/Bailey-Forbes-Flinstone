@@ -1493,6 +1493,10 @@ check-layers:
 .PHONY: check-formal
 check-formal:
 	@./formal/lean/check_generated.sh
+	@d=$$(mktemp -d) && \
+	$(CC) -std=c11 -Wall -Wextra -Werror -pedantic -fsanitize=address,undefined -fno-sanitize-recover=undefined \
+	  formal/lean/ref_check.c -o "$$d/ref_check" && "$$d/ref_check"; rc=$$?; \
+	rm -f "$$d/ref_check"; rmdir "$$d"; exit $$rc
 
 .PHONY: check-stubs
 check-stubs:
