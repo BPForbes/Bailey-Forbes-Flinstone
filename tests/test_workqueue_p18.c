@@ -576,12 +576,9 @@ static unsigned long long mono_ms(void) {
     return (unsigned long long)ts.tv_sec * 1000ull + (unsigned long long)ts.tv_nsec / 1000000ull;
 }
 
-static int test_ticker_and_default_queue(void) {
+static int ticker_default_queue_is_shared(void) {
     pthread_t th[4];
-    void *rv;
-    unsigned long long t0;
 
-    s_main_thread = pthread_self();
     /* pthread_once: every thread sees the one default queue */
     for (intptr_t i = 0; i < 4; i++)
         ASSERT(pthread_create(&th[i], NULL, default_getter, (void *)i) == 0);
@@ -589,6 +586,11 @@ static int test_ticker_and_default_queue(void) {
         ASSERT(pthread_join(th[i], NULL) == 0);
     for (int i = 1; i < 4; i++)
         ASSERT(s_default_seen[i] == s_default_seen[0] && s_default_seen[0] != NULL);
+    return 0;
+}
+
+static int ticker_starts_and_stops_promptly(void) {
+    unsigned long long t0;
 
     ASSERT(fl_bg_jobs_ticker_start(0) == FL_RESULT_INVAL);
     ASSERT(s_net_init_calls == 0);
@@ -605,8 +607,15 @@ static int test_ticker_and_default_queue(void) {
     ASSERT(mono_ms() - t0 < 2000);
     fl_bg_jobs_ticker_stop(); /* second stop is a no-op */
     ASSERT(atomic_load(&s_net_ticks) >= 1); /* it ticked at least once before it stopped */
+    return 0;
+}
 
-    /* restart with a short period; three threads enqueue while it polls */
+/* Restart with a short period; three threads enqueue while it polls. */
+static int ticker_runs_concurrent_enqueues(void) {
+    pthread_t th[4];
+    void *rv;
+    unsigned long long t0;
+
     atomic_store(&s_mt_ran, 0);
     ASSERT(fl_bg_jobs_ticker_start(1) == FL_RESULT_OK);
     for (int i = 0; i < 3; i++)
@@ -623,18 +632,28 @@ static int test_ticker_and_default_queue(void) {
     ASSERT(atomic_load(&s_mt_ran) == 30);
     fl_bg_jobs_ticker_stop();
     ASSERT(s_net_init_off_main == 0);
+    return 0;
+}
 
-    /* shutdown of the default queue runs protected items once and drops the rest */
-    {
-        fl_wq_work_t prot = {.fn = mt_count, .pq_layer = FL_WQ_LAYER_NORMAL, .flags = FL_WQ_PROTECTED};
-        fl_wq_work_t ord = {.fn = mt_count, .pq_layer = FL_WQ_LAYER_NORMAL};
+/* Shutdown of the default queue runs protected items once and drops the rest. */
+static int default_shutdown_runs_protected_once(void) {
+    fl_wq_work_t prot = {.fn = mt_count, .pq_layer = FL_WQ_LAYER_NORMAL, .flags = FL_WQ_PROTECTED};
+    fl_wq_work_t ord = {.fn = mt_count, .pq_layer = FL_WQ_LAYER_NORMAL};
 
-        atomic_store(&s_mt_ran, 0);
-        ASSERT(fl_wq_enqueue(fl_wq_default(), &prot) == FL_RESULT_OK);
-        ASSERT(fl_wq_enqueue(fl_wq_default(), &ord) == FL_RESULT_OK);
-        fl_bg_jobs_shutdown();
-        ASSERT(atomic_load(&s_mt_ran) == 1);
-    }
+    atomic_store(&s_mt_ran, 0);
+    ASSERT(fl_wq_enqueue(fl_wq_default(), &prot) == FL_RESULT_OK);
+    ASSERT(fl_wq_enqueue(fl_wq_default(), &ord) == FL_RESULT_OK);
+    fl_bg_jobs_shutdown();
+    ASSERT(atomic_load(&s_mt_ran) == 1);
+    return 0;
+}
+
+static int test_ticker_and_default_queue(void) {
+    s_main_thread = pthread_self();
+    ASSERT(ticker_default_queue_is_shared() == 0);
+    ASSERT(ticker_starts_and_stops_promptly() == 0);
+    ASSERT(ticker_runs_concurrent_enqueues() == 0);
+    ASSERT(default_shutdown_runs_protected_once() == 0);
     return 0;
 }
 
@@ -764,27 +783,12 @@ static int test_durable_retries_then_fails(void) {
     return 0;
 }
 
-static int test_durable_recovers_after_a_restart(void) {
-    fl_workqueue_storage_t sa, sb;
-    fl_workqueue_t *a = (fl_workqueue_t *)&sa, *b = (fl_workqueue_t *)&sb;
-    const fl_wq_journal_ops_t *j = fl_wq_journal_mem();
+/* One cut off mid-run with attempts left, one with none left. */
+static int seed_cut_off_jobs(const fl_wq_journal_ops_t *j, const uint8_t k2[16], const uint8_t k3[16]) {
     fl_wq_journal_record_t r;
-    uint8_t k1[16], k2[16], k3[16];
     uint64_t id;
     int ex;
 
-    fl_wq_journal_mem_reset();
-    s_dur_ran = 0;
-    s_dur_fail_left = 0;
-    mkkey(k1, 11);
-    mkkey(k2, 12);
-    mkkey(k3, 13);
-    ASSERT(fl_wq_init(a) == FL_RESULT_OK);
-    ASSERT(fl_wq_enqueue_durable(a, TAG_AUTO, FL_WQ_LAYER_NORMAL, NULL, NULL, 0, k1, 0) == FL_RESULT_OK);
-    fl_wq_shutdown(a); /* the process dies: the memory window is gone, the journal is not */
-    ASSERT(s_dur_ran == 0 && j->count(j->ctx, FL_WQ_ST_QUEUED, NULL) == 1);
-
-    /* one cut off mid-run with attempts left, one with none left */
     memset(&r, 0, sizeof r);
     r.tag = TAG_AUTO; r.layer = FL_WQ_LAYER_NORMAL; r.max_attempts = FL_WQ_MAX_ATTEMPTS;
     memcpy(r.idem_key, k2, 16);
@@ -799,6 +803,26 @@ static int test_durable_recovers_after_a_restart(void) {
         if (i + 1 < FL_WQ_MAX_ATTEMPTS)
             ASSERT(j->mark(j->ctx, id, FL_WQ_ST_RUNNING, FL_WQ_ST_QUEUED) == FL_RESULT_OK);
     }
+    return 0;
+}
+
+static int test_durable_recovers_after_a_restart(void) {
+    fl_workqueue_storage_t sa, sb;
+    fl_workqueue_t *a = (fl_workqueue_t *)&sa, *b = (fl_workqueue_t *)&sb;
+    const fl_wq_journal_ops_t *j = fl_wq_journal_mem();
+    uint8_t k1[16], k2[16], k3[16];
+
+    fl_wq_journal_mem_reset();
+    s_dur_ran = 0;
+    s_dur_fail_left = 0;
+    mkkey(k1, 11);
+    mkkey(k2, 12);
+    mkkey(k3, 13);
+    ASSERT(fl_wq_init(a) == FL_RESULT_OK);
+    ASSERT(fl_wq_enqueue_durable(a, TAG_AUTO, FL_WQ_LAYER_NORMAL, NULL, NULL, 0, k1, 0) == FL_RESULT_OK);
+    fl_wq_shutdown(a); /* the process dies: the memory window is gone, the journal is not */
+    ASSERT(s_dur_ran == 0 && j->count(j->ctx, FL_WQ_ST_QUEUED, NULL) == 1);
+    ASSERT(seed_cut_off_jobs(j, k2, k3) == 0);
 
     ASSERT(fl_wq_init(b) == FL_RESULT_OK);
     ASSERT(fl_wq_recover(b) == FL_RESULT_OK);
