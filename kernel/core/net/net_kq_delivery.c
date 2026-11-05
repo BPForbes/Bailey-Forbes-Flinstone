@@ -515,15 +515,71 @@ static void host_keys(fl_net_server_t *srv, const fl_net_server_member_t *from,
         host_send(srv, from, (uint8_t)FL_NET_SESSION_OP_KQ_KEYS, wbuf, (uint16_t)w.w.len);
 }
 
+/* The gate decides before any bundle is built. Returns 0 after refusing. */
+static int history_gate_passes(fl_net_server_t *srv, const fl_net_server_member_t *from, const char *me,
+                               const uint8_t id[FL_KQ_DELIVERY_ID_LEN]) {
+    const fl_kq_driver_t *drv;
+    const char *why;
+
+    /* Fail closed: without a gate nothing is released. */
+    if (s_hist_gate && s_hist_gate(me, id))
+        return 1;
+    drv = fl_kq_driver_get();
+    why = drv && drv->error_name ? drv->error_name(8) : NULL; /* KQER code 8: Denied */
+    host_refuse(srv, from, "history", why ? why : "denied");
+    return 0;
+}
+
+static void history_send_chunks(fl_net_server_t *srv, const fl_net_server_member_t *from, const uint8_t req[16],
+                                const uint8_t *bundle, size_t len) {
+    for (size_t off = 0; off < len; off += KQ_PART_MAX) {
+        size_t n = len - off < KQ_PART_MAX ? len - off : KQ_PART_MAX;
+        uint8_t pbuf[FL_NET_SESSION_MAX_MSG];
+        fl_bytes_sticky_writer_t p;
+        fl_bytes_sticky_init(&p, pbuf, (uint16_t)sizeof pbuf);
+        (void)fl_bytes_sticky_put_bytes(&p, req, 16);
+        (void)fl_bytes_sticky_put_u32(&p, (uint32_t)off);
+        (void)fl_bytes_sticky_put_u32(&p, (uint32_t)len);
+        (void)fl_bytes_sticky_put_bytes(&p, bundle + off, n);
+        if (p.bad)
+            break;
+        host_send(srv, from, (uint8_t)FL_NET_SESSION_OP_KQH_DATA, pbuf, (uint16_t)p.w.len);
+    }
+}
+
+/* Fills a new bundle from the source and checks it unpacks. Returns NULL after refusing. */
+static uint8_t *history_load_bundle(fl_net_server_t *srv, const fl_net_server_member_t *from, const char *me,
+                                    const uint8_t id[FL_KQ_DELIVERY_ID_LEN], size_t *len) {
+    const uint8_t *l15, *l17;
+    size_t n15, n17;
+    uint8_t *bundle;
+
+    if (!s_hist_source) {
+        host_refuse(srv, from, "history", "history download is not available on this host");
+        return NULL;
+    }
+    bundle = (uint8_t *)mem_domain_alloc(MEM_DOMAIN_FS, FL_HISTORY_BUNDLE_MAX_BYTES);
+    if (!bundle) {
+        host_refuse(srv, from, "history", "host is busy; try again");
+        return NULL;
+    }
+    *len = 0;
+    if (s_hist_source(me, id, bundle, FL_HISTORY_BUNDLE_MAX_BYTES, len) != FL_RESULT_OK || *len == 0 ||
+        fl_history_bundle_unpack(bundle, *len, &l15, &n15, &l17, &n17) != FL_RESULT_OK) {
+        host_refuse(srv, from, "history", "no history for that delivery");
+        mem_domain_free(MEM_DOMAIN_FS, bundle);
+        return NULL;
+    }
+    return bundle;
+}
+
 /* History download: gate, then source, then the bundle in DATA chunks to the requester only. */
 static void host_history(fl_net_server_t *srv, const fl_net_server_member_t *from,
                          fl_bytes_reader_t *r) {
     uint8_t req[16], id[FL_KQ_DELIVERY_ID_LEN];
     const char *me = key_of_member(from);
     uint8_t *bundle;
-    size_t len = 0;
-    const uint8_t *l15, *l17;
-    size_t n15, n17;
+    size_t len;
 
     (void)fl_bytes_reader_read_bytes(r, req, sizeof req);
     (void)fl_bytes_reader_read_bytes(r, id, sizeof id);
@@ -535,42 +591,12 @@ static void host_history(fl_net_server_t *srv, const fl_net_server_member_t *fro
         host_refuse(srv, from, "history", "no account for this member");
         return;
     }
-    /* Fail closed: without a gate nothing is released, and the gate decides before any bundle is built. */
-    if (!s_hist_gate || !s_hist_gate(me, id)) {
-        const fl_kq_driver_t *drv = fl_kq_driver_get();
-        const char *why = drv && drv->error_name ? drv->error_name(8) : NULL; /* KQER code 8: Denied */
-
-        host_refuse(srv, from, "history", why ? why : "denied");
+    if (!history_gate_passes(srv, from, me, id))
         return;
-    }
-    if (!s_hist_source) {
-        host_refuse(srv, from, "history", "history download is not available on this host");
+    bundle = history_load_bundle(srv, from, me, id, &len);
+    if (!bundle)
         return;
-    }
-    bundle = (uint8_t *)mem_domain_alloc(MEM_DOMAIN_FS, FL_HISTORY_BUNDLE_MAX_BYTES);
-    if (!bundle) {
-        host_refuse(srv, from, "history", "host is busy; try again");
-        return;
-    }
-    if (s_hist_source(me, id, bundle, FL_HISTORY_BUNDLE_MAX_BYTES, &len) != FL_RESULT_OK || len == 0 ||
-        fl_history_bundle_unpack(bundle, len, &l15, &n15, &l17, &n17) != FL_RESULT_OK) {
-        host_refuse(srv, from, "history", "no history for that delivery");
-        mem_domain_free(MEM_DOMAIN_FS, bundle);
-        return;
-    }
-    for (size_t off = 0; off < len; off += KQ_PART_MAX) {
-        size_t n = len - off < KQ_PART_MAX ? len - off : KQ_PART_MAX;
-        uint8_t pbuf[FL_NET_SESSION_MAX_MSG];
-        fl_bytes_sticky_writer_t p;
-        fl_bytes_sticky_init(&p, pbuf, (uint16_t)sizeof pbuf);
-        (void)fl_bytes_sticky_put_bytes(&p, req, sizeof req);
-        (void)fl_bytes_sticky_put_u32(&p, (uint32_t)off);
-        (void)fl_bytes_sticky_put_u32(&p, (uint32_t)len);
-        (void)fl_bytes_sticky_put_bytes(&p, bundle + off, n);
-        if (p.bad)
-            break;
-        host_send(srv, from, (uint8_t)FL_NET_SESSION_OP_KQH_DATA, pbuf, (uint16_t)p.w.len);
-    }
+    history_send_chunks(srv, from, req, bundle, len);
     mem_domain_free(MEM_DOMAIN_FS, bundle);
 }
 
@@ -770,6 +796,22 @@ static void hist_free(kq_hist_slot_t *s) {
     memset(s, 0, sizeof *s);
 }
 
+/* Starts the slot on the first chunk, else checks the declared total is unchanged. Returns 0 to ignore
+ * the chunk; the slot is freed when its buffer cannot be reserved. */
+static int hist_begin_or_continue(kq_hist_slot_t *slot, uint32_t off, uint32_t total) {
+    if (slot->started)
+        return slot->bundle.limit == total;
+    if (off != 0)
+        return 0;
+    fl_part_buf_init(&slot->bundle, total);
+    if (fl_part_buf_reserve(&slot->bundle, total) != FL_RESULT_OK) {
+        hist_free(slot);
+        return 0;
+    }
+    slot->started = 1;
+    return 1;
+}
+
 /* DATA: only for a request this shell made; the declared total is bounded before anything is
  * allocated; the finished bundle must unpack, else it is dropped. */
 static void client_history(fl_bytes_reader_t *r) {
@@ -785,18 +827,8 @@ static void client_history(fl_bytes_reader_t *r) {
     slot = r->bad ? NULL : hist_find(id);
     if (!slot || slot->ready || total == 0 || total > FL_HISTORY_BUNDLE_MAX_BYTES)
         return;
-    if (!slot->started) {
-        if (off != 0)
-            return;
-        fl_part_buf_init(&slot->bundle, total);
-        if (fl_part_buf_reserve(&slot->bundle, total) != FL_RESULT_OK) {
-            hist_free(slot);
-            return;
-        }
-        slot->started = 1;
-    } else if (slot->bundle.limit != total) {
+    if (!hist_begin_or_continue(slot, off, total))
         return;
-    }
     if (fl_bytes_reader_remaining(r) == 0 ||
         fl_part_buf_append(&slot->bundle, off, fl_bytes_reader_cursor(r), fl_bytes_reader_remaining(r)) !=
             FL_RESULT_OK) {
@@ -1079,19 +1111,10 @@ void fl_net_kq_inbox_drop(const uint8_t id[FL_KQ_DELIVERY_ID_LEN]) {
     kq_unlock();
 }
 
-fl_result_t fl_net_kq_request_history(fl_net_server_t *srv, fl_net_client_t *client, int hosting,
-                                      const uint8_t delivery_id[FL_KQ_DELIVERY_ID_LEN],
-                                      uint8_t request_id_out[16]) {
-    uint8_t wbuf[FL_NET_SESSION_MAX_MSG];
-    fl_bytes_sticky_writer_t w;
+/* Reserves a free slot for the new request under the lock. */
+static fl_result_t hist_claim_slot(const uint8_t id[16]) {
     kq_hist_slot_t *slot = NULL;
-    uint8_t id[16];
-    fl_result_t rc;
 
-    if (!delivery_id || !request_id_out)
-        return FL_RESULT_INVAL;
-    if (fl_random_bytes(id, sizeof id) != 0)
-        return FL_RESULT_ERR;
     kq_lock();
     for (size_t i = 0; i < KQ_HIST_MAX && !slot; i++)
         if (!s_hist[i].used)
@@ -1102,8 +1125,26 @@ fl_result_t fl_net_kq_request_history(fl_net_server_t *srv, fl_net_client_t *cli
     }
     memset(slot, 0, sizeof *slot);
     slot->used = 1;
-    memcpy(slot->id, id, sizeof id);
+    memcpy(slot->id, id, 16);
     kq_unlock();
+    return FL_RESULT_OK;
+}
+
+fl_result_t fl_net_kq_request_history(fl_net_server_t *srv, fl_net_client_t *client, int hosting,
+                                      const uint8_t delivery_id[FL_KQ_DELIVERY_ID_LEN],
+                                      uint8_t request_id_out[16]) {
+    uint8_t wbuf[FL_NET_SESSION_MAX_MSG];
+    fl_bytes_sticky_writer_t w;
+    uint8_t id[16];
+    fl_result_t rc;
+
+    if (!delivery_id || !request_id_out)
+        return FL_RESULT_INVAL;
+    if (fl_random_bytes(id, sizeof id) != 0)
+        return FL_RESULT_ERR;
+    rc = hist_claim_slot(id);
+    if (rc != FL_RESULT_OK)
+        return rc;
     fl_bytes_sticky_init(&w, wbuf, (uint16_t)sizeof wbuf);
     (void)fl_bytes_sticky_put_bytes(&w, id, sizeof id);
     (void)fl_bytes_sticky_put_bytes(&w, delivery_id, FL_KQ_DELIVERY_ID_LEN);
@@ -1115,6 +1156,33 @@ fl_result_t fl_net_kq_request_history(fl_net_server_t *srv, fl_net_client_t *cli
         return rc;
     }
     memcpy(request_id_out, id, sizeof id);
+    return FL_RESULT_OK;
+}
+
+/* Caller holds the lock and has seen the slot ready. Copies both letters out of the bundle. */
+static fl_result_t hist_copy_letters_locked(const kq_hist_slot_t *slot, fl_kq_buf_t *letter_file,
+                                            fl_kq_buf_t *letter_snapshot) {
+    const uint8_t *l15, *l17;
+    size_t n15, n17;
+    uint8_t *a, *b;
+
+    if (fl_history_bundle_unpack(slot->bundle.data, slot->bundle.len, &l15, &n15, &l17, &n17) != FL_RESULT_OK)
+        return FL_RESULT_ERR;
+    a = (uint8_t *)mem_domain_alloc(MEM_DOMAIN_FS, n15);
+    b = (uint8_t *)mem_domain_alloc(MEM_DOMAIN_FS, n17);
+    if (!a || !b) {
+        if (a)
+            mem_domain_free(MEM_DOMAIN_FS, a);
+        if (b)
+            mem_domain_free(MEM_DOMAIN_FS, b);
+        return FL_RESULT_NOMEM;
+    }
+    memcpy(a, l15, n15);
+    memcpy(b, l17, n17);
+    letter_file->data = a;
+    letter_file->len = n15;
+    letter_snapshot->data = b;
+    letter_snapshot->len = n17;
     return FL_RESULT_OK;
 }
 
@@ -1132,33 +1200,10 @@ fl_result_t fl_net_kq_history_take(const uint8_t request_id[16], unsigned wait_m
             return FL_RESULT_NOENT;
         }
         if (slot->ready) {
-            const uint8_t *l15, *l17;
-            size_t n15, n17;
-            uint8_t *a, *b;
+            fl_result_t rc = hist_copy_letters_locked(slot, letter_file, letter_snapshot);
 
-            if (fl_history_bundle_unpack(slot->bundle.data, slot->bundle.len, &l15, &n15, &l17, &n17) !=
-                FL_RESULT_OK) {
-                kq_unlock();
-                return FL_RESULT_ERR;
-            }
-            a = (uint8_t *)mem_domain_alloc(MEM_DOMAIN_FS, n15);
-            b = (uint8_t *)mem_domain_alloc(MEM_DOMAIN_FS, n17);
-            if (!a || !b) {
-                if (a)
-                    mem_domain_free(MEM_DOMAIN_FS, a);
-                if (b)
-                    mem_domain_free(MEM_DOMAIN_FS, b);
-                kq_unlock();
-                return FL_RESULT_NOMEM;
-            }
-            memcpy(a, l15, n15);
-            memcpy(b, l17, n17);
-            letter_file->data = a;
-            letter_file->len = n15;
-            letter_snapshot->data = b;
-            letter_snapshot->len = n17;
             kq_unlock();
-            return FL_RESULT_OK;
+            return rc;
         }
         kq_unlock();
         if (waited >= wait_ms)
