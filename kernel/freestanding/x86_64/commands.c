@@ -796,7 +796,7 @@ static int run_net(const char *verb, const char **cursor)
  * content comes in hex parts. `server file decline` drops what is waiting.
  */
 #define FILE_NAME_MAX 20 /* one ramfs name, NUL included */
-/* The Rust library is linked into this image (FL-02 stage 1) but the delivery checkpoints are not: they
+/* The Rust library is linked into this image but the delivery checkpoints are not: they
  * need a store that holds .kqtf containers (the ramfs holds 160 bytes a file) and a libc subset. */
 #define FILE_KQ_ELSEWHERE \
     "server file: KeyQuorum is linked in this image, but co-signed delivery still runs in the lab's WebAssembly shell\r\n"

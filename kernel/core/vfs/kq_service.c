@@ -42,7 +42,6 @@ static _Atomic int s_stop;
 static _Atomic int64_t s_heartbeat_ns;
 static _Atomic int s_stalled_reported;
 
-/* ---- key table ---------------------------------------------------------------------------- */
 
 static int slot_find_locked(const char *key_id) {
     for (size_t i = 0; i < FL_USER_DB_MAX_USERS; i++)
@@ -189,12 +188,10 @@ fl_result_t fl_kq_obtain_author_key(const char *author_key_id, uint8_t out[32], 
         rc = FL_RESULT_OK;
     }
     pthread_mutex_unlock(&s_mu);
-    /* A parent author is assembled from its children's shares once KQ-18 exists. A leaf who is not signed
-     * in cannot be assembled by anything: the answer is ACCES. */
+    /* A leaf who is not signed in cannot be assembled by anything: the answer is ACCES. */
     return rc;
 }
 
-/* ---- the service thread ------------------------------------------------------------------- */
 
 static void stamp_heartbeat(void) {
     int64_t now = 0;
@@ -304,7 +301,6 @@ void fl_kq_service_shutdown(void) {
     pthread_mutex_unlock(&s_mu);
 }
 
-/* ---- protected work ----------------------------------------------------------------------- */
 
 fl_result_t fl_kq_service_submit(const fl_wq_work_t *work) {
     fl_wq_work_t w;
@@ -331,7 +327,6 @@ fl_result_t fl_kq_service_submit_every(const fl_wq_work_t *work, int64_t period_
     return fl_wq_enqueue_every(s_wq, &w, period_ns);
 }
 
-/* ---- the periodic sweep ------------------------------------------------------------------- */
 
 static void autosign_job(void *arg) {
     kq_object_t *o = (kq_object_t *)arg;
