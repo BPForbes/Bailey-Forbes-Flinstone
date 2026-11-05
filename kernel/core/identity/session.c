@@ -145,6 +145,24 @@ static int kqst_required_unmet(const char *name) {
     return 1;
 }
 
+/* Called with s_session_mu held, after the password verified. */
+static void login_ensure_account_key(const char *name, const char *password) {
+    int created = 0;
+
+    /*
+     * An account created before account keys has none: the password just
+     * verified seals a new one. A failure here does not block the login; the
+     * account simply cannot sign bridges until a later login succeeds.
+     */
+    if (fl_user_db_ensure_key(&s_db, name, password, &created) != FL_RESULT_OK) {
+        fprintf(stderr, "login: could not create a signing key for %s\n", name);
+    } else if (created && fl_user_db_save(&s_db) != FL_RESULT_OK) {
+        /* Never keep a key the store does not hold: the next login tries again. */
+        fl_user_db_forget_created(&s_db, name, created);
+        fprintf(stderr, "login: could not save the new signing key for %s\n", name);
+    }
+}
+
 fl_result_t fl_session_login(const char *name, const char *password) {
     fl_result_t rc = FL_RESULT_ACCES;
     fl_user_record_t snapshot;
@@ -157,20 +175,8 @@ fl_result_t fl_session_login(const char *name, const char *password) {
     pthread_mutex_lock(&s_session_mu);
     if (fl_user_db_verify_password(&s_db, name, password) && !kqst_required_unmet(name)) {
         const fl_user_record_t *u = fl_user_db_find(&s_db, name);
-        int created = 0;
 
-        /*
-         * An account created before account keys has none: the password just
-         * verified seals a new one. A failure here does not block the login; the
-         * account simply cannot sign bridges until a later login succeeds.
-         */
-        if (fl_user_db_ensure_key(&s_db, name, password, &created) != FL_RESULT_OK) {
-            fprintf(stderr, "login: could not create a signing key for %s\n", name);
-        } else if (created && fl_user_db_save(&s_db) != FL_RESULT_OK) {
-            /* Never keep a key the store does not hold: the next login tries again. */
-            fl_user_db_forget_created(&s_db, name, created);
-            fprintf(stderr, "login: could not save the new signing key for %s\n", name);
-        }
+        login_ensure_account_key(name, password);
         fl_elevation_revoke_all();
         /* Store the account's own spelling: "login root" signs in as Root. */
         strncpy(s_current, u ? u->name : name, sizeof(s_current) - 1);

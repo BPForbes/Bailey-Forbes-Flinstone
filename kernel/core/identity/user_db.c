@@ -13,62 +13,63 @@
 #include <string.h>
 #include <strings.h>
 
-static fl_result_t db_init_schema(sqlite3 *sql) {
-    static const char *schema =
-        "CREATE TABLE IF NOT EXISTS users ("
-        "  name TEXT PRIMARY KEY NOT NULL,"
-        "  password_hash TEXT NOT NULL,"
-        "  salt_hex TEXT NOT NULL,"
-        "  uid INTEGER NOT NULL,"
-        "  is_elevated INTEGER NOT NULL DEFAULT 0,"
-        "  key_id TEXT NOT NULL DEFAULT '',"
-        "  created_by TEXT NOT NULL DEFAULT '',"
-        "  created_at INTEGER NOT NULL DEFAULT 0,"
-        "  signing_public TEXT NOT NULL DEFAULT '',"
-        "  signing_sealed TEXT NOT NULL DEFAULT '',"
-        "  box_public TEXT NOT NULL DEFAULT '',"
-        "  box_sealed TEXT NOT NULL DEFAULT '',"
-        "  auth_mode INTEGER NOT NULL DEFAULT 0"
-        ");"
-        /* Key metadata, written when a key is minted, paired with its KQST. The one home of the KQST path. */
-        "CREATE TABLE IF NOT EXISTS account_keys ("
-        "  label TEXT PRIMARY KEY NOT NULL, purpose TEXT NOT NULL, holds_share INTEGER NOT NULL,"
-        "  minted_by TEXT NOT NULL, minted_at INTEGER NOT NULL, generation INTEGER NOT NULL,"
-        "  kqst_path TEXT, device_id BLOB NOT NULL, signing_public BLOB NOT NULL,"
-        "  encryption_public BLOB NOT NULL, ledger_seq INTEGER NOT NULL, event_hash BLOB NOT NULL"
-        ");"
-        /* Live private bridges, mirroring KeyQuorum's (not the account-to-account `bridges` table of
-         * bridge.c). A sealed bridge key is kept only for members whose account exists on this machine. */
-        "CREATE TABLE IF NOT EXISTS account_bridges ("
-        "  uid TEXT PRIMARY KEY NOT NULL, generation INTEGER NOT NULL, salt BLOB NOT NULL,"
-        "  public_key BLOB NOT NULL, destroyed INTEGER NOT NULL DEFAULT 0"
-        ");"
-        "CREATE TABLE IF NOT EXISTS account_bridge_members ("
-        "  uid TEXT NOT NULL, label TEXT NOT NULL, encryption_public BLOB NOT NULL,"
-        "  signing_public BLOB NOT NULL, sealed_bridge_key BLOB, PRIMARY KEY (uid, label)"
-        ");"
-        /* A parent account's key assembled from its children's shares: sealed, safe at rest. */
-        "CREATE TABLE IF NOT EXISTS account_assembly ("
-        "  parent_label TEXT PRIMARY KEY NOT NULL, threshold INTEGER NOT NULL, generation INTEGER NOT NULL,"
-        "  sealed_shares BLOB NOT NULL"
-        ");"
-        "CREATE TABLE IF NOT EXISTS meta ("
-        "  key TEXT PRIMARY KEY NOT NULL,"
-        "  value TEXT NOT NULL"
-        ");";
-    /* Stores written before heritage key ids or account keys lack these columns: add them in place. */
-    static const fl_sqlite_column_t heritage_columns[] = {
-        {"key_id", "TEXT NOT NULL DEFAULT ''"},
-        {"created_by", "TEXT NOT NULL DEFAULT ''"},
-        {"created_at", "INTEGER NOT NULL DEFAULT 0"},
-        {"signing_public", "TEXT NOT NULL DEFAULT ''"},
-        {"signing_sealed", "TEXT NOT NULL DEFAULT ''"},
-        {"box_public", "TEXT NOT NULL DEFAULT ''"},
-        {"box_sealed", "TEXT NOT NULL DEFAULT ''"},
-        {"auth_mode", "INTEGER NOT NULL DEFAULT 0"}, /* an old store upgrades in place: every row reads 0 */
-    };
+static const char *const k_user_db_schema =
+    "CREATE TABLE IF NOT EXISTS users ("
+    "  name TEXT PRIMARY KEY NOT NULL,"
+    "  password_hash TEXT NOT NULL,"
+    "  salt_hex TEXT NOT NULL,"
+    "  uid INTEGER NOT NULL,"
+    "  is_elevated INTEGER NOT NULL DEFAULT 0,"
+    "  key_id TEXT NOT NULL DEFAULT '',"
+    "  created_by TEXT NOT NULL DEFAULT '',"
+    "  created_at INTEGER NOT NULL DEFAULT 0,"
+    "  signing_public TEXT NOT NULL DEFAULT '',"
+    "  signing_sealed TEXT NOT NULL DEFAULT '',"
+    "  box_public TEXT NOT NULL DEFAULT '',"
+    "  box_sealed TEXT NOT NULL DEFAULT '',"
+    "  auth_mode INTEGER NOT NULL DEFAULT 0"
+    ");"
+    /* Key metadata, written when a key is minted, paired with its KQST. The one home of the KQST path. */
+    "CREATE TABLE IF NOT EXISTS account_keys ("
+    "  label TEXT PRIMARY KEY NOT NULL, purpose TEXT NOT NULL, holds_share INTEGER NOT NULL,"
+    "  minted_by TEXT NOT NULL, minted_at INTEGER NOT NULL, generation INTEGER NOT NULL,"
+    "  kqst_path TEXT, device_id BLOB NOT NULL, signing_public BLOB NOT NULL,"
+    "  encryption_public BLOB NOT NULL, ledger_seq INTEGER NOT NULL, event_hash BLOB NOT NULL"
+    ");"
+    /* Live private bridges, mirroring KeyQuorum's (not the account-to-account `bridges` table of
+     * bridge.c). A sealed bridge key is kept only for members whose account exists on this machine. */
+    "CREATE TABLE IF NOT EXISTS account_bridges ("
+    "  uid TEXT PRIMARY KEY NOT NULL, generation INTEGER NOT NULL, salt BLOB NOT NULL,"
+    "  public_key BLOB NOT NULL, destroyed INTEGER NOT NULL DEFAULT 0"
+    ");"
+    "CREATE TABLE IF NOT EXISTS account_bridge_members ("
+    "  uid TEXT NOT NULL, label TEXT NOT NULL, encryption_public BLOB NOT NULL,"
+    "  signing_public BLOB NOT NULL, sealed_bridge_key BLOB, PRIMARY KEY (uid, label)"
+    ");"
+    /* A parent account's key assembled from its children's shares: sealed, safe at rest. */
+    "CREATE TABLE IF NOT EXISTS account_assembly ("
+    "  parent_label TEXT PRIMARY KEY NOT NULL, threshold INTEGER NOT NULL, generation INTEGER NOT NULL,"
+    "  sealed_shares BLOB NOT NULL"
+    ");"
+    "CREATE TABLE IF NOT EXISTS meta ("
+    "  key TEXT PRIMARY KEY NOT NULL,"
+    "  value TEXT NOT NULL"
+    ");";
 
-    if (fl_sqlite_exec(sql, "user_db", schema) != FL_RESULT_OK)
+/* Stores written before heritage key ids or account keys lack these columns: add them in place. */
+static const fl_sqlite_column_t heritage_columns[] = {
+    {"key_id", "TEXT NOT NULL DEFAULT ''"},
+    {"created_by", "TEXT NOT NULL DEFAULT ''"},
+    {"created_at", "INTEGER NOT NULL DEFAULT 0"},
+    {"signing_public", "TEXT NOT NULL DEFAULT ''"},
+    {"signing_sealed", "TEXT NOT NULL DEFAULT ''"},
+    {"box_public", "TEXT NOT NULL DEFAULT ''"},
+    {"box_sealed", "TEXT NOT NULL DEFAULT ''"},
+    {"auth_mode", "INTEGER NOT NULL DEFAULT 0"}, /* an old store upgrades in place: every row reads 0 */
+};
+
+static fl_result_t db_init_schema(sqlite3 *sql) {
+    if (fl_sqlite_exec(sql, "user_db", k_user_db_schema) != FL_RESULT_OK)
         return FL_RESULT_ERR;
     return fl_sqlite_ensure_columns(sql, "user_db", "users", heritage_columns,
                                     sizeof(heritage_columns) / sizeof(heritage_columns[0]));
@@ -973,10 +974,33 @@ fl_result_t fl_user_db_set_auth_mode(fl_user_db_t *db, const char *name, int aut
     return FL_RESULT_OK;
 }
 
-fl_result_t fl_user_db_kqst_path(const fl_user_db_t *db, const char *key_id, char *out, size_t cap) {
-    sqlite3 *sql = NULL;
+static fl_result_t kqst_path_select(sqlite3 *sql, const char *key_id, char *out, size_t cap) {
     sqlite3_stmt *st = NULL;
     fl_result_t rc = FL_RESULT_NOENT;
+
+    if (sqlite3_prepare_v2(sql, "SELECT kqst_path FROM account_keys WHERE label = ?;", -1, &st, NULL) !=
+        SQLITE_OK)
+        return FL_RESULT_ERR;
+    sqlite3_bind_text(st, 1, key_id, -1, SQLITE_TRANSIENT);
+    if (sqlite3_step(st) == SQLITE_ROW) {
+        const char *v = (const char *)sqlite3_column_text(st, 0);
+
+        if (v && v[0]) {
+            if (strlen(v) >= cap) {
+                rc = FL_RESULT_NOMEM;
+            } else {
+                memcpy(out, v, strlen(v) + 1);
+                rc = FL_RESULT_OK;
+            }
+        }
+    }
+    sqlite3_finalize(st);
+    return rc;
+}
+
+fl_result_t fl_user_db_kqst_path(const fl_user_db_t *db, const char *key_id, char *out, size_t cap) {
+    sqlite3 *sql = NULL;
+    fl_result_t rc;
 
     if (!db || !key_id || !out || cap == 0)
         return FL_RESULT_INVAL;
@@ -987,25 +1011,7 @@ fl_result_t fl_user_db_kqst_path(const fl_user_db_t *db, const char *key_id, cha
             sqlite3_close(sql);
         return FL_RESULT_ERR;
     }
-    if (sqlite3_prepare_v2(sql, "SELECT kqst_path FROM account_keys WHERE label = ?;", -1, &st, NULL) ==
-        SQLITE_OK) {
-        sqlite3_bind_text(st, 1, key_id, -1, SQLITE_TRANSIENT);
-        if (sqlite3_step(st) == SQLITE_ROW) {
-            const char *v = (const char *)sqlite3_column_text(st, 0);
-
-            if (v && v[0]) {
-                if (strlen(v) >= cap)
-                    rc = FL_RESULT_NOMEM;
-                else {
-                    memcpy(out, v, strlen(v) + 1);
-                    rc = FL_RESULT_OK;
-                }
-            }
-        }
-        sqlite3_finalize(st);
-    } else {
-        rc = FL_RESULT_ERR;
-    }
+    rc = kqst_path_select(sql, key_id, out, cap);
     sqlite3_close(sql);
     return rc;
 }
