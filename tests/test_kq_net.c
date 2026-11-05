@@ -485,23 +485,17 @@ static void send_data_to_steve(const uint8_t req[16], uint32_t off, uint32_t tot
     fl_net_kq_client_handle(NULL, FL_NET_SESSION_OP_KQH_DATA, buf, (uint16_t)(24 + n));
 }
 
-static int test_history_download_over_the_wire(void) {
-    const fl_kq_driver_t *drv = fl_kq_driver_get_or_register();
-    uint8_t req[16], req2[16], req3[16], delivery[16] = {1, 2, 3};
-    fl_kq_buf_t l15 = {0}, l17 = {0}, c = {0}, snap = {0};
-    unsigned char steve_box[FL_USER_SIGNING_SECRET_LEN], rev[32], root[32], root2[32];
-    uint32_t count = 0;
-    int data_before;
+static const uint8_t k_hist_delivery[16] = {1, 2, 3};
 
-    ASSERT(drv && drv->seal_snapshot && drv->open_snapshot && drv->snapshot_covers && drv->error_name);
-    ASSERT(encode_from_mya("hist.txt", "history v1\n", &s_hist_enc) == 0);
-    snprintf(s_hist_container, sizeof s_hist_container, "%s/hist.txt.kqtf", s_dir);
-    ASSERT(fl_user_db_open_box(&s_db, "Steve", "pw-steve", steve_box) == FL_RESULT_OK);
+/* With no gate, a refusing gate or no source, the host refuses and answers nothing. */
+static int history_refusals(const fl_kq_driver_t *drv) {
+    uint8_t req[16];
+    fl_kq_buf_t l15 = {0}, l17 = {0};
 
     /* With no gate the host refuses and answers nothing: fail closed. */
     s_actor = &s_members[2];
     fl_net_kq_set_history(NULL, hist_source);
-    ASSERT(fl_net_kq_request_history(s_srv, NULL, 0, delivery, req) == FL_RESULT_OK);
+    ASSERT(fl_net_kq_request_history(s_srv, NULL, 0, k_hist_delivery, req) == FL_RESULT_OK);
     ASSERT(strstr(s_last_err, "history refused: "));
     ASSERT(s_source_calls == 0);
     ASSERT(fl_net_kq_history_take(req, 0, &l15, &l17) == FL_RESULT_TIMEDOUT);
@@ -509,7 +503,7 @@ static int test_history_download_over_the_wire(void) {
     /* The gate says no to Mya: refused with KeyQuorum's own word for it, and the source never runs. */
     fl_net_kq_set_history(hist_gate, hist_source);
     s_actor = &s_members[1];
-    ASSERT(fl_net_kq_request_history(s_srv, NULL, 0, delivery, req) == FL_RESULT_OK);
+    ASSERT(fl_net_kq_request_history(s_srv, NULL, 0, k_hist_delivery, req) == FL_RESULT_OK);
     ASSERT(strstr(s_last_err, drv->error_name(8)) != NULL);
     ASSERT(s_gate_calls == 1 && s_source_calls == 0);
     ASSERT(s_to_mya[FL_NET_SESSION_OP_KQH_DATA & 0x7F] == 0);
@@ -517,14 +511,23 @@ static int test_history_download_over_the_wire(void) {
     /* A gate with no source: refused, not silent. */
     fl_net_kq_set_history(hist_gate, NULL);
     s_actor = &s_members[2];
-    ASSERT(fl_net_kq_request_history(s_srv, NULL, 0, delivery, req) == FL_RESULT_OK);
+    ASSERT(fl_net_kq_request_history(s_srv, NULL, 0, k_hist_delivery, req) == FL_RESULT_OK);
     ASSERT(strstr(s_last_err, "not available on this host"));
     fl_net_kq_history_drop(req);
+    return 0;
+}
 
-    /* Steve gets the bundle in chunks and opens both letters. */
+/* Steve gets the bundle in chunks and opens both letters. */
+static int history_download_opens(const fl_kq_driver_t *drv, const unsigned char steve_box[]) {
+    uint8_t req[16];
+    fl_kq_buf_t l15 = {0}, l17 = {0}, c = {0}, snap = {0};
+    unsigned char rev[32], root[32], root2[32];
+    uint32_t count = 0;
+    int data_before;
+
     fl_net_kq_set_history(hist_gate, hist_source);
     data_before = s_to_steve[FL_NET_SESSION_OP_KQH_DATA & 0x7F];
-    ASSERT(fl_net_kq_request_history(s_srv, NULL, 0, delivery, req) == FL_RESULT_OK);
+    ASSERT(fl_net_kq_request_history(s_srv, NULL, 0, k_hist_delivery, req) == FL_RESULT_OK);
     ASSERT(s_to_steve[FL_NET_SESSION_OP_KQH_DATA & 0x7F] - data_before >= 2); /* more than one frame */
     ASSERT(fl_net_kq_history_take(req, 0, &l15, &l17) == FL_RESULT_OK);
     ASSERT(l15.len == s_hist_enc.letter.len && memcmp(l15.data, s_hist_enc.letter.data, l15.len) == 0);
@@ -539,44 +542,72 @@ static int test_history_download_over_the_wire(void) {
                               &snap, root2, &count) != KQ_FILE_OK);
     fl_kq_buf_free(&l15); fl_kq_buf_free(&l17); fl_kq_buf_free(&c); fl_kq_buf_free(&snap);
     fl_net_kq_history_drop(req);
+    return 0;
+}
 
-    /* Unsolicited, oversize and out-of-order DATA never builds anything. */
+/* Unsolicited, oversize and out-of-order DATA never builds anything. Leaves req3 pending. */
+static int history_bad_data(uint8_t req3[16]) {
+    uint8_t req2[16];
+    fl_kq_buf_t l15 = {0}, l17 = {0};
+
     memset(req2, 9, sizeof req2);
     send_data_to_steve(req2, 0, 100, 50);
     ASSERT(fl_net_kq_history_take(req2, 0, &l15, &l17) == FL_RESULT_NOENT);
-    {
-        /* a pending request the host refuses (no source): nothing arrives, and bad DATA must not build one */
-        fl_net_kq_set_history(hist_gate, NULL);
-        ASSERT(fl_net_kq_request_history(s_srv, NULL, 0, delivery, req3) == FL_RESULT_OK); /* refused: nothing arrives */
-        send_data_to_steve(req3, 0, FL_HISTORY_BUNDLE_MAX_BYTES + 1u, 50);  /* declared total over the bound */
-        ASSERT(fl_net_kq_history_take(req3, 0, &l15, &l17) == FL_RESULT_TIMEDOUT);
-        send_data_to_steve(req3, 480, 1000, 50);                            /* does not start at 0 */
-        ASSERT(fl_net_kq_history_take(req3, 0, &l15, &l17) == FL_RESULT_TIMEDOUT);
-        send_data_to_steve(req3, 0, 100, 100);                              /* 100 bytes that do not unpack: dropped */
-        ASSERT(fl_net_kq_history_take(req3, 0, &l15, &l17) == FL_RESULT_NOENT);
-    }
-    /* A member cannot send the host a DATA frame, and a malformed REQ is refused. */
-    {
-        uint8_t junk[10] = {0};
-        s_actor = &s_members[2];
-        ASSERT(fl_net_kq_send(s_srv, NULL, 0, FL_NET_SESSION_OP_KQH_REQ, junk, sizeof junk) == FL_RESULT_OK);
-        ASSERT(strstr(s_last_err, "malformed request"));
-        ASSERT(fl_net_kq_send(s_srv, NULL, 0, FL_NET_SESSION_OP_KQH_DATA, junk, sizeof junk) == FL_RESULT_OK);
-        ASSERT(strstr(s_last_err, "DATA is a host answer"));
-    }
-    /* Only KQ_HIST_MAX requests can be waiting. */
+    /* a pending request the host refuses (no source): nothing arrives, and bad DATA must not build one */
+    fl_net_kq_set_history(hist_gate, NULL);
+    ASSERT(fl_net_kq_request_history(s_srv, NULL, 0, k_hist_delivery, req3) == FL_RESULT_OK); /* refused: nothing arrives */
+    send_data_to_steve(req3, 0, FL_HISTORY_BUNDLE_MAX_BYTES + 1u, 50);  /* declared total over the bound */
+    ASSERT(fl_net_kq_history_take(req3, 0, &l15, &l17) == FL_RESULT_TIMEDOUT);
+    send_data_to_steve(req3, 480, 1000, 50);                            /* does not start at 0 */
+    ASSERT(fl_net_kq_history_take(req3, 0, &l15, &l17) == FL_RESULT_TIMEDOUT);
+    send_data_to_steve(req3, 0, 100, 100);                              /* 100 bytes that do not unpack: dropped */
+    ASSERT(fl_net_kq_history_take(req3, 0, &l15, &l17) == FL_RESULT_NOENT);
+    return 0;
+}
+
+/* A member cannot send the host a DATA frame, and a malformed REQ is refused. */
+static int history_member_frames_refused(void) {
+    uint8_t junk[10] = {0};
+
+    s_actor = &s_members[2];
+    ASSERT(fl_net_kq_send(s_srv, NULL, 0, FL_NET_SESSION_OP_KQH_REQ, junk, sizeof junk) == FL_RESULT_OK);
+    ASSERT(strstr(s_last_err, "malformed request"));
+    ASSERT(fl_net_kq_send(s_srv, NULL, 0, FL_NET_SESSION_OP_KQH_DATA, junk, sizeof junk) == FL_RESULT_OK);
+    ASSERT(strstr(s_last_err, "DATA is a host answer"));
+    return 0;
+}
+
+/* Only KQ_HIST_MAX requests can be waiting. */
+static int history_pending_limit(const uint8_t req3[16]) {
+    uint8_t a[16], b[16], d[16];
+
     fl_net_kq_set_history(hist_gate, hist_source);
-    {
-        uint8_t a[16], b[16], d[16];
-        fl_net_kq_history_drop(req3);
-        /* keep two pending: ask through a source that fails so no answer completes them */
-        fl_net_kq_set_history(hist_gate, NULL);
-        ASSERT(fl_net_kq_request_history(s_srv, NULL, 0, delivery, a) == FL_RESULT_OK);
-        ASSERT(fl_net_kq_request_history(s_srv, NULL, 0, delivery, b) == FL_RESULT_OK);
-        ASSERT(fl_net_kq_request_history(s_srv, NULL, 0, delivery, d) == FL_RESULT_BUSY);
-        fl_net_kq_history_drop(a);
-        fl_net_kq_history_drop(b);
-    }
+    fl_net_kq_history_drop(req3);
+    /* keep two pending: ask through a source that fails so no answer completes them */
+    fl_net_kq_set_history(hist_gate, NULL);
+    ASSERT(fl_net_kq_request_history(s_srv, NULL, 0, k_hist_delivery, a) == FL_RESULT_OK);
+    ASSERT(fl_net_kq_request_history(s_srv, NULL, 0, k_hist_delivery, b) == FL_RESULT_OK);
+    ASSERT(fl_net_kq_request_history(s_srv, NULL, 0, k_hist_delivery, d) == FL_RESULT_BUSY);
+    fl_net_kq_history_drop(a);
+    fl_net_kq_history_drop(b);
+    return 0;
+}
+
+static int test_history_download_over_the_wire(void) {
+    const fl_kq_driver_t *drv = fl_kq_driver_get_or_register();
+    uint8_t req3[16];
+    unsigned char steve_box[FL_USER_SIGNING_SECRET_LEN];
+
+    ASSERT(drv && drv->seal_snapshot && drv->open_snapshot && drv->snapshot_covers && drv->error_name);
+    ASSERT(encode_from_mya("hist.txt", "history v1\n", &s_hist_enc) == 0);
+    snprintf(s_hist_container, sizeof s_hist_container, "%s/hist.txt.kqtf", s_dir);
+    ASSERT(fl_user_db_open_box(&s_db, "Steve", "pw-steve", steve_box) == FL_RESULT_OK);
+
+    ASSERT(history_refusals(drv) == 0);
+    ASSERT(history_download_opens(drv, steve_box) == 0);
+    ASSERT(history_bad_data(req3) == 0);
+    ASSERT(history_member_frames_refused() == 0);
+    ASSERT(history_pending_limit(req3) == 0);
     asm_mem_secure_zero(steve_box, sizeof steve_box);
     fl_kq_encoded_free(&s_hist_enc);
     fl_net_kq_set_history(NULL, NULL);
