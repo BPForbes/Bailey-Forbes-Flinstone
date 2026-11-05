@@ -40,28 +40,49 @@ static uint8_t ref_state_terminal(uint8_t c)
     }
 }
 
-int main(void)
+enum { STATE_NUMBERS = 256 };
+
+static int first_transition_mismatch(void)
 {
-    for (unsigned from = 0; from < 256; from++) {
-        for (unsigned to = 0; to < 256; to++) {
+    for (unsigned from = 0; from < STATE_NUMBERS; from++) {
+        for (unsigned to = 0; to < STATE_NUMBERS; to++) {
             uint8_t hand = ref_transition_allowed((uint8_t)from, (uint8_t)to);
             uint8_t gen = fl_wq_transition_allowed((uint8_t)from, (uint8_t)to);
-            if (hand != gen) {
-                printf("ref_check: MISMATCH transition_allowed(from=%u, to=%u): hand-written %u, generated %u\n",
-                       from, to, (unsigned)hand, (unsigned)gen);
-                return 1;
+            if (hand == gen) {
+                continue;
             }
-        }
-    }
-    for (unsigned c = 0; c < 256; c++) {
-        uint8_t hand = ref_state_terminal((uint8_t)c);
-        uint8_t gen = fl_wq_state_terminal((uint8_t)c);
-        if (hand != gen) {
-            printf("ref_check: MISMATCH state_terminal(%u): hand-written %u, generated %u\n", c, (unsigned)hand,
-                   (unsigned)gen);
+            printf("ref_check: MISMATCH transition_allowed(from=%u, to=%u): hand-written %u, generated %u\n", from,
+                   to, (unsigned)hand, (unsigned)gen);
             return 1;
         }
     }
-    printf("ref_check: hand-written C equals the generated C for all 65536 pairs and 256 states\n");
+    return 0;
+}
+
+static int first_terminal_mismatch(void)
+{
+    for (unsigned c = 0; c < STATE_NUMBERS; c++) {
+        uint8_t hand = ref_state_terminal((uint8_t)c);
+        uint8_t gen = fl_wq_state_terminal((uint8_t)c);
+        if (hand == gen) {
+            continue;
+        }
+        printf("ref_check: MISMATCH state_terminal(%u): hand-written %u, generated %u\n", c, (unsigned)hand,
+               (unsigned)gen);
+        return 1;
+    }
+    return 0;
+}
+
+int main(void)
+{
+    if (first_transition_mismatch() != 0) {
+        return 1;
+    }
+    if (first_terminal_mismatch() != 0) {
+        return 1;
+    }
+    printf("ref_check: hand-written C equals the generated C for all %u pairs and %u states\n",
+           (unsigned)(STATE_NUMBERS * STATE_NUMBERS), (unsigned)STATE_NUMBERS);
     return 0;
 }
