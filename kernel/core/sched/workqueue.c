@@ -123,6 +123,17 @@ static void wq_timer_remove_head(fl_workqueue_t *wq) {
 static void wq_run_durable(wq_item_t *item);
 static void wq_fill_window(fl_workqueue_t *wq);
 
+/* Caller holds the lock. */
+static int64_t wq_next_periodic_run(const fl_workqueue_t *wq, const wq_item_t *item) {
+    int64_t base = wq->st.poll_now_ns >= 0 ? wq->st.poll_now_ns : item->run_at_ns;
+    int64_t next;
+
+    /* a huge period must not wrap negative (that would run the item on every poll) */
+    if (__builtin_add_overflow(base, item->period_ns, &next))
+        next = INT64_MAX;
+    return next;
+}
+
 /* Runs on the poll thread, with the lock released. A periodic item goes back to the timer
  * array (its slot was kept in periodic_inflight, so this cannot fail); anything else is freed. */
 static void wq_dispatch(void *arg) {
@@ -149,15 +160,7 @@ static void wq_dispatch(void *arg) {
         wq_item_free(item);
         return;
     }
-    {
-        int64_t base = wq->st.poll_now_ns >= 0 ? wq->st.poll_now_ns : item->run_at_ns;
-        int64_t next;
-
-        /* a huge period must not wrap negative (that would run the item on every poll) */
-        if (__builtin_add_overflow(base, item->period_ns, &next))
-            next = INT64_MAX;
-        item->run_at_ns = next;
-    }
+    item->run_at_ns = wq_next_periodic_run(wq, item);
     wq_timer_insert(wq, item);
     WQ_UNLOCK(wq);
 }
@@ -266,28 +269,31 @@ int fl_wq_pending(const fl_workqueue_t *wq) {
     return n;
 }
 
-static fl_result_t wq_submit(fl_workqueue_t *wq, const fl_wq_work_t *work, int64_t run_at_ns,
-                             int64_t period_ns) {
-    wq_item_t *item;
-    unsigned limit;
+/* Resolves the first run time of a periodic item given as relative (run_at_ns == 0). */
+static fl_result_t wq_first_run_ns(int64_t *run_at_ns, int64_t period_ns) {
+    int64_t now = 0;
 
-    if (!wq || !work || !work->fn || run_at_ns < 0 || period_ns < 0)
-        return FL_RESULT_INVAL;
-    if (period_ns > 0 && run_at_ns == 0) {
-        int64_t now = 0;
-
-        if (fl_time_monotonic_ns(&now) != FL_RESULT_OK)
-            return FL_RESULT_ERR; /* a period needs P1-7 */
-        if (period_ns > INT64_MAX - now)
-            return FL_RESULT_INVAL;
-        run_at_ns = now + period_ns;
-    } else if (period_ns > 0 && run_at_ns > INT64_MAX - period_ns) {
-        return FL_RESULT_INVAL; /* first run plus one period would not fit */
+    if (period_ns <= 0)
+        return FL_RESULT_OK;
+    if (*run_at_ns != 0) {
+        if (*run_at_ns > INT64_MAX - period_ns)
+            return FL_RESULT_INVAL; /* first run plus one period would not fit */
+        return FL_RESULT_OK;
     }
+    if (fl_time_monotonic_ns(&now) != FL_RESULT_OK)
+        return FL_RESULT_ERR; /* a period needs P1-7 */
+    if (period_ns > INT64_MAX - now)
+        return FL_RESULT_INVAL;
+    *run_at_ns = now + period_ns;
+    return FL_RESULT_OK;
+}
 
-    item = wq_item_alloc();
+static wq_item_t *wq_item_from_work(fl_workqueue_t *wq, const fl_wq_work_t *work, int64_t run_at_ns,
+                                    int64_t period_ns) {
+    wq_item_t *item = wq_item_alloc();
+
     if (!item)
-        return FL_RESULT_NOMEM;
+        return NULL;
     item->fn = work->fn;
     item->ctx = work->ctx;
     item->tag = work->tag;
@@ -296,31 +302,46 @@ static fl_result_t wq_submit(fl_workqueue_t *wq, const fl_wq_work_t *work, int64
     item->period_ns = period_ns;
     item->flags = work->flags;
     item->owner = wq;
+    return item;
+}
 
+/* Caller holds the lock. Returns FL_RESULT_OK once the item is queued. */
+static fl_result_t wq_place_locked(fl_workqueue_t *wq, wq_item_t *item, unsigned limit) {
+    if (wq->st.shutdown || (unsigned)pq_count(&wq->st.pq) + wq->st.timer_count >= limit)
+        return FL_RESULT_BUSY;
+    if (item->run_at_ns == 0) {
+        if (pq_push(&wq->st.pq, item->layer, wq_dispatch, item) < 0)
+            return FL_RESULT_BUSY;
+        return FL_RESULT_OK;
+    }
+    if (wq->st.timer_count + wq->st.periodic_inflight >= FL_WQ_TIMERS_MAX)
+        return FL_RESULT_BUSY;
+    wq_timer_insert(wq, item);
+    return FL_RESULT_OK;
+}
+
+static fl_result_t wq_submit(fl_workqueue_t *wq, const fl_wq_work_t *work, int64_t run_at_ns,
+                             int64_t period_ns) {
+    wq_item_t *item;
+    fl_result_t rc;
+    unsigned limit;
+
+    if (!wq || !work || !work->fn || run_at_ns < 0 || period_ns < 0)
+        return FL_RESULT_INVAL;
+    rc = wq_first_run_ns(&run_at_ns, period_ns);
+    if (rc != FL_RESULT_OK)
+        return rc;
+    item = wq_item_from_work(wq, work, run_at_ns, period_ns);
+    if (!item)
+        return FL_RESULT_NOMEM;
     limit = FL_WQ_PENDING_MAX - ((work->flags & FL_WQ_PROTECTED) ? 0u : FL_WQ_PROTECTED_RESERVE);
 
     WQ_LOCK(wq);
-    if (wq->st.shutdown || (unsigned)pq_count(&wq->st.pq) + wq->st.timer_count >= limit) {
-        WQ_UNLOCK(wq);
-        wq_item_free(item);
-        return FL_RESULT_BUSY;
-    }
-    if (run_at_ns == 0) {
-        if (pq_push(&wq->st.pq, item->layer, wq_dispatch, item) < 0) {
-            WQ_UNLOCK(wq);
-            wq_item_free(item);
-            return FL_RESULT_BUSY;
-        }
-    } else {
-        if (wq->st.timer_count + wq->st.periodic_inflight >= FL_WQ_TIMERS_MAX) {
-            WQ_UNLOCK(wq);
-            wq_item_free(item);
-            return FL_RESULT_BUSY;
-        }
-        wq_timer_insert(wq, item);
-    }
+    rc = wq_place_locked(wq, item, limit);
     WQ_UNLOCK(wq);
-    return FL_RESULT_OK;
+    if (rc != FL_RESULT_OK)
+        wq_item_free(item);
+    return rc;
 }
 
 fl_result_t fl_wq_enqueue(fl_workqueue_t *wq, const fl_wq_work_t *work) {
@@ -402,36 +423,53 @@ static int memj_find(uint64_t id) {
     return -1;
 }
 
-static fl_result_t memj_append(void *ctx, const fl_wq_journal_record_t *r, uint64_t *id_out, int *existing) {
+/* Caller holds the memory journal lock. Returns the slot whose key matches, or -1. */
+static int memj_find_idem(const uint8_t key[16]) {
+    for (unsigned i = 0; i < MEMJ_MAX; i++) {
+        unsigned k = 0;
+
+        if (!s_memj_used[i])
+            continue;
+        while (k < 16 && s_memj[i].idem_key[k] == key[k])
+            k++;
+        if (k == 16)
+            return (int)i;
+    }
+    return -1;
+}
+
+/* Caller holds the memory journal lock. A free slot, else the oldest finished record;
+ * waiting work is never evicted. Returns -1 when neither exists. */
+static int memj_pick_slot(void) {
     int slot = -1;
     uint64_t oldest = 0;
 
-    (void)ctx;
-    MEMJ_LOCK();
-    for (unsigned i = 0; i < MEMJ_MAX; i++) {
-        if (s_memj_used[i]) {
-            unsigned k = 0;
-
-            while (k < 16 && s_memj[i].idem_key[k] == r->idem_key[k])
-                k++;
-            if (k == 16) {
-                *id_out = s_memj[i].id;
-                *existing = 1;
-                MEMJ_UNLOCK();
-                return FL_RESULT_OK;
-            }
-        }
-    }
     for (unsigned i = 0; i < MEMJ_MAX && slot < 0; i++)
         if (!s_memj_used[i])
             slot = (int)i;
-    if (slot < 0) { /* full: reuse the oldest finished record; waiting work is never evicted */
-        for (unsigned i = 0; i < MEMJ_MAX; i++)
-            if (memj_terminal(s_memj[i].state) && (slot < 0 || s_memj[i].id < oldest)) {
-                slot = (int)i;
-                oldest = s_memj[i].id;
-            }
+    if (slot >= 0)
+        return slot;
+    for (unsigned i = 0; i < MEMJ_MAX; i++)
+        if (memj_terminal(s_memj[i].state) && (slot < 0 || s_memj[i].id < oldest)) {
+            slot = (int)i;
+            oldest = s_memj[i].id;
+        }
+    return slot;
+}
+
+static fl_result_t memj_append(void *ctx, const fl_wq_journal_record_t *r, uint64_t *id_out, int *existing) {
+    int slot;
+
+    (void)ctx;
+    MEMJ_LOCK();
+    slot = memj_find_idem(r->idem_key);
+    if (slot >= 0) {
+        *id_out = s_memj[slot].id;
+        *existing = 1;
+        MEMJ_UNLOCK();
+        return FL_RESULT_OK;
     }
+    slot = memj_pick_slot();
     if (slot < 0) {
         MEMJ_UNLOCK();
         return FL_RESULT_BUSY;
@@ -669,6 +707,49 @@ static void wq_run_durable(wq_item_t *item) {
     wq_item_free(item);
 }
 
+static fl_result_t wq_check_owner_length(const char *owner) {
+    size_t len = 0;
+
+    if (!owner || !owner[0])
+        return FL_RESULT_OK;
+    while (len < FL_HERITAGE_KEY_ID_MAX && owner[len]) /* the bound first: never read past the buffer */
+        len++;
+    return len >= FL_HERITAGE_KEY_ID_MAX ? FL_RESULT_INVAL : FL_RESULT_OK;
+}
+
+static void wq_zero_record(fl_wq_journal_record_t *r) {
+    unsigned char *b = (unsigned char *)r;
+
+    for (size_t k = 0; k < sizeof(*r); k++)
+        b[k] = 0;
+}
+
+static fl_result_t wq_build_record(fl_wq_journal_record_t *r, uint32_t tag, int layer, int handler,
+                                   const char *owner, const void *payload, size_t n,
+                                   const uint8_t idem_key[16], int64_t ttl_sec) {
+    wq_zero_record(r);
+    wq_copy(r->idem_key, idem_key, 16);
+    r->tag = tag;
+    r->layer = layer;
+    r->recover = s_handlers[handler].recover;
+    if (owner)
+        for (size_t k = 0; owner[k]; k++)
+            r->owner[k] = owner[k];
+    r->state = FL_WQ_ST_PENDING;
+    r->max_attempts = FL_WQ_MAX_ATTEMPTS;
+    r->accepted_at = wq_now_sec();
+    r->deadline = 0;
+    if (ttl_sec > 0) {
+        if (r->accepted_at > 0 && ttl_sec > INT64_MAX - r->accepted_at)
+            return FL_RESULT_INVAL; /* the deadline would overflow: refuse, never wrap into the past */
+        r->deadline = r->accepted_at + ttl_sec;
+    }
+    r->payload_len = (uint32_t)n;
+    if (n)
+        wq_copy(r->payload, payload, n);
+    return FL_RESULT_OK;
+}
+
 fl_result_t fl_wq_enqueue_durable(fl_workqueue_t *wq, uint32_t tag, int layer, const char *owner,
                                   const void *payload, size_t n, const uint8_t idem_key[16],
                                   int64_t ttl_sec) {
@@ -680,14 +761,8 @@ fl_result_t fl_wq_enqueue_durable(fl_workqueue_t *wq, uint32_t tag, int layer, c
 
     if (!wq || !idem_key || n > FL_WQ_PAYLOAD_MAX || (n && !payload) || layer < 0 || layer >= PQ_NUM_PRIORITIES)
         return FL_RESULT_INVAL;
-    if (owner && owner[0]) {
-        size_t len = 0;
-
-        while (len < FL_HERITAGE_KEY_ID_MAX && owner[len]) /* the bound first: never read past the buffer */
-            len++;
-        if (len >= FL_HERITAGE_KEY_ID_MAX)
-            return FL_RESULT_INVAL;
-    }
+    if (wq_check_owner_length(owner) != FL_RESULT_OK)
+        return FL_RESULT_INVAL;
     h = wq_handler_index(tag);
     if (h < 0)
         return FL_RESULT_NOENT; /* nothing could run it after a restart */
@@ -695,32 +770,9 @@ fl_result_t fl_wq_enqueue_durable(fl_workqueue_t *wq, uint32_t tag, int layer, c
         return FL_RESULT_BUSY;
     if (j->count(j->ctx, FL_WQ_ST_PENDING, NULL) >= FL_WQ_JOURNAL_MAX_PENDING)
         return FL_RESULT_BUSY; /* bounded backlog: a clear "retry later" */
-
-    {
-        unsigned char *b = (unsigned char *)&r;
-
-        for (size_t k = 0; k < sizeof(r); k++)
-            b[k] = 0;
-    }
-    wq_copy(r.idem_key, idem_key, 16);
-    r.tag = tag;
-    r.layer = layer;
-    r.recover = s_handlers[h].recover;
-    if (owner)
-        for (size_t k = 0; owner[k]; k++)
-            r.owner[k] = owner[k];
-    r.state = FL_WQ_ST_PENDING;
-    r.max_attempts = FL_WQ_MAX_ATTEMPTS;
-    r.accepted_at = wq_now_sec();
-    r.deadline = 0;
-    if (ttl_sec > 0) {
-        if (r.accepted_at > 0 && ttl_sec > INT64_MAX - r.accepted_at)
-            return FL_RESULT_INVAL; /* the deadline would overflow: refuse, never wrap into the past */
-        r.deadline = r.accepted_at + ttl_sec;
-    }
-    r.payload_len = (uint32_t)n;
-    if (n)
-        wq_copy(r.payload, payload, n);
+    rc = wq_build_record(&r, tag, layer, h, owner, payload, n, idem_key, ttl_sec);
+    if (rc != FL_RESULT_OK)
+        return rc;
 
     rc = j->append(j->ctx, &r, &id, &existing); /* accept and persist FIRST: not durable means not accepted */
     if (rc != FL_RESULT_OK)
@@ -730,35 +782,32 @@ fl_result_t fl_wq_enqueue_durable(fl_workqueue_t *wq, uint32_t tag, int layer, c
     return FL_RESULT_OK;
 }
 
-fl_result_t fl_wq_recover(fl_workqueue_t *wq) {
-    const fl_wq_journal_ops_t *j = s_journal;
+/* A job cut off mid-run (RUNNING) is retried, or FAILED once its attempts are spent; a staged one
+ * (QUEUED) simply goes back to waiting. */
+static void wq_recover_state(const fl_wq_journal_ops_t *j, fl_wq_state_t st) {
     fl_wq_journal_record_t batch[16], cursor;
     unsigned n;
-    int have;
-    int64_t now = wq_now_sec();
+    int have = 0;
 
-    if (!wq)
-        return FL_RESULT_INVAL;
-    /* a job cut off mid-run (RUNNING) is retried, or FAILED once its attempts are spent; a staged one
-     * (QUEUED) simply goes back to waiting */
-    for (int pass = 0; pass < 2; pass++) {
-        fl_wq_state_t st = pass == 0 ? FL_WQ_ST_RUNNING : FL_WQ_ST_QUEUED;
+    while (j->scan(j->ctx, st, NULL, have ? &cursor : NULL, 16, batch, &n) == FL_RESULT_OK && n) {
+        for (unsigned i = 0; i < n; i++) {
+            fl_wq_state_t to = batch[i].attempts >= batch[i].max_attempts && st == FL_WQ_ST_RUNNING
+                                   ? FL_WQ_ST_FAILED
+                                   : FL_WQ_ST_PENDING;
 
-        have = 0;
-        while (j->scan(j->ctx, st, NULL, have ? &cursor : NULL, 16, batch, &n) == FL_RESULT_OK && n) {
-            for (unsigned i = 0; i < n; i++) {
-                fl_wq_state_t to = batch[i].attempts >= batch[i].max_attempts && st == FL_WQ_ST_RUNNING
-                                       ? FL_WQ_ST_FAILED
-                                       : FL_WQ_ST_PENDING;
-
-                (void)wq_mark(j, batch[i].id, st, to);
-            }
-            wq_copy(&cursor, &batch[n - 1], sizeof(cursor));
-            have = 1;
+            (void)wq_mark(j, batch[i].id, st, to);
         }
+        wq_copy(&cursor, &batch[n - 1], sizeof(cursor));
+        have = 1;
     }
-    /* stale work is EXPIRED and RECOVER_ASK work is HELD; the rest stays PENDING for the window */
-    have = 0;
+}
+
+/* Stale work is EXPIRED and RECOVER_ASK work is HELD; the rest stays PENDING for the window. */
+static void wq_recover_pending(const fl_wq_journal_ops_t *j, int64_t now) {
+    fl_wq_journal_record_t batch[16], cursor;
+    unsigned n;
+    int have = 0;
+
     while (j->scan(j->ctx, FL_WQ_ST_PENDING, NULL, have ? &cursor : NULL, 16, batch, &n) == FL_RESULT_OK && n) {
         for (unsigned i = 0; i < n; i++) {
             if (batch[i].deadline && now > batch[i].deadline)
@@ -769,6 +818,17 @@ fl_result_t fl_wq_recover(fl_workqueue_t *wq) {
         wq_copy(&cursor, &batch[n - 1], sizeof(cursor));
         have = 1;
     }
+}
+
+fl_result_t fl_wq_recover(fl_workqueue_t *wq) {
+    const fl_wq_journal_ops_t *j = s_journal;
+    int64_t now = wq_now_sec();
+
+    if (!wq)
+        return FL_RESULT_INVAL;
+    wq_recover_state(j, FL_WQ_ST_RUNNING);
+    wq_recover_state(j, FL_WQ_ST_QUEUED);
+    wq_recover_pending(j, now);
     wq_fill_window(wq);
     return FL_RESULT_OK;
 }
