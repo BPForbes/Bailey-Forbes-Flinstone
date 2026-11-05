@@ -151,3 +151,4 @@ tests/test_wifi_uart_at_scan_join
 *.sarif
 codeql-db*/
 .codeql/
+formal/lean/*.olean

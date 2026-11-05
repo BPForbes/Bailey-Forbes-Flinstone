@@ -1490,6 +1490,10 @@ check-network-requirements:
 check-layers:
 	@./scripts/check_layers.sh
 
+.PHONY: check-formal
+check-formal:
+	@./formal/lean/check_generated.sh
+
 .PHONY: check-stubs
 check-stubs:
 	@bash scripts/check_no_stubs.sh

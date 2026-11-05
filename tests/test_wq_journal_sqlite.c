@@ -83,6 +83,10 @@ int main(void) {
     }
     if (rc)
         return 1;
+    if (fl_wq_illegal_moves() != 0) { /* the flushed journal saw only moves the Lean model allows */
+        fprintf(stderr, "FAIL: the queue asked the SQLite journal for a move the model forbids\n");
+        return 1;
+    }
     printf("test_wq_journal_sqlite: all passed\n");
     return 0;
 }

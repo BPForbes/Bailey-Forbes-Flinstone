@@ -11,6 +11,24 @@
 #define FL_WQ_DEBUG_REENTRANCY 1
 #endif
 
+/* The durable job state machine's transition table and terminal states, generated from the Lean 4 model
+ * (formal/lean/FlWqCode.lean; FlWq.lean proves they are the model's). No Lean runtime is involved. */
+#include "wq_model_gen.inc"
+
+static unsigned s_illegal_moves;
+
+unsigned fl_wq_model_transition_allowed(unsigned from, unsigned to) {
+    return from <= 255u && to <= 255u && fl_wq_transition_allowed((uint8_t)from, (uint8_t)to);
+}
+
+unsigned fl_wq_model_state_terminal(unsigned state) {
+    return state <= 255u && fl_wq_state_terminal((uint8_t)state);
+}
+
+unsigned fl_wq_illegal_moves(void) {
+    return __atomic_load_n(&s_illegal_moves, __ATOMIC_RELAXED);
+}
+
 typedef struct wq_item {
     fl_wq_work_fn_t fn;
     void *ctx;
@@ -374,7 +392,7 @@ static pthread_mutex_t s_memj_mu = PTHREAD_MUTEX_INITIALIZER;
 #endif
 
 static int memj_terminal(fl_wq_state_t st) {
-    return st == FL_WQ_ST_DONE || st == FL_WQ_ST_FAILED || st == FL_WQ_ST_EXPIRED || st == FL_WQ_ST_SKIPPED;
+    return fl_wq_state_terminal((uint8_t)st) != 0;
 }
 
 static int memj_find(uint64_t id) {
@@ -559,6 +577,16 @@ static int wq_handler_index(uint32_t tag) {
 
 /* ---- staging, running, recovery ---- */
 
+/* Every state change the queue asks a journal for goes through here: a move the proven model does not
+ * allow is refused before the journal sees it (and counted: it is a bug in this file, never a race). */
+static fl_result_t wq_mark(const fl_wq_journal_ops_t *j, uint64_t id, fl_wq_state_t from, fl_wq_state_t to) {
+    if (!fl_wq_transition_allowed((uint8_t)from, (uint8_t)to)) {
+        (void)__atomic_fetch_add(&s_illegal_moves, 1u, __ATOMIC_RELAXED);
+        return FL_RESULT_INVAL;
+    }
+    return j->mark(j->ctx, id, from, to);
+}
+
 /* Put one journal record into the MLQ. The record is already QUEUED; the caller undoes that if this
  * returns nonzero. */
 static int wq_stage(fl_workqueue_t *wq, const fl_wq_journal_record_t *r) {
@@ -602,10 +630,10 @@ static void wq_fill_window(fl_workqueue_t *wq) {
         if (j->scan(j->ctx, FL_WQ_ST_PENDING, NULL, NULL, room, batch, &n) != FL_RESULT_OK || n == 0)
             return;
         for (unsigned i = 0; i < n; i++) {
-            if (j->mark(j->ctx, batch[i].id, FL_WQ_ST_PENDING, FL_WQ_ST_QUEUED) != FL_RESULT_OK)
+            if (wq_mark(j, batch[i].id, FL_WQ_ST_PENDING, FL_WQ_ST_QUEUED) != FL_RESULT_OK)
                 continue; /* another thread staged it first */
             if (wq_stage(wq, &batch[i]) != 0) {
-                (void)j->mark(j->ctx, batch[i].id, FL_WQ_ST_QUEUED, FL_WQ_ST_PENDING);
+                (void)wq_mark(j, batch[i].id, FL_WQ_ST_QUEUED, FL_WQ_ST_PENDING);
                 return;
             }
         }
@@ -621,17 +649,17 @@ static void wq_run_durable(wq_item_t *item) {
     if (j->load(j->ctx, item->job_id, &r) == FL_RESULT_OK && r.state == FL_WQ_ST_QUEUED) {
         h = wq_handler_index(r.tag);
         if (r.deadline && wq_now_sec() > r.deadline) {
-            (void)j->mark(j->ctx, r.id, FL_WQ_ST_QUEUED, FL_WQ_ST_EXPIRED); /* stale: never run silently */
+            (void)wq_mark(j, r.id, FL_WQ_ST_QUEUED, FL_WQ_ST_EXPIRED); /* stale: never run silently */
         } else if (h < 0) {
-            (void)j->mark(j->ctx, r.id, FL_WQ_ST_QUEUED, FL_WQ_ST_FAILED);
-        } else if (j->mark(j->ctx, r.id, FL_WQ_ST_QUEUED, FL_WQ_ST_RUNNING) == FL_RESULT_OK) {
+            (void)wq_mark(j, r.id, FL_WQ_ST_QUEUED, FL_WQ_ST_FAILED);
+        } else if (wq_mark(j, r.id, FL_WQ_ST_QUEUED, FL_WQ_ST_RUNNING) == FL_RESULT_OK) {
             /* RUNNING is written before the handler: a cut-off run is found at recovery */
             fl_result_t rc = s_handlers[h].fn(r.payload, r.payload_len, r.idem_key);
             fl_wq_state_t next = rc == FL_RESULT_OK ? FL_WQ_ST_DONE
                                  : r.attempts + 1u < r.max_attempts ? FL_WQ_ST_PENDING
                                                                      : FL_WQ_ST_FAILED;
 
-            (void)j->mark(j->ctx, r.id, FL_WQ_ST_RUNNING, next);
+            (void)wq_mark(j, r.id, FL_WQ_ST_RUNNING, next);
         }
     }
     WQ_LOCK(wq);
@@ -723,7 +751,7 @@ fl_result_t fl_wq_recover(fl_workqueue_t *wq) {
                                        ? FL_WQ_ST_FAILED
                                        : FL_WQ_ST_PENDING;
 
-                (void)j->mark(j->ctx, batch[i].id, st, to);
+                (void)wq_mark(j, batch[i].id, st, to);
             }
             wq_copy(&cursor, &batch[n - 1], sizeof(cursor));
             have = 1;
@@ -734,9 +762,9 @@ fl_result_t fl_wq_recover(fl_workqueue_t *wq) {
     while (j->scan(j->ctx, FL_WQ_ST_PENDING, NULL, have ? &cursor : NULL, 16, batch, &n) == FL_RESULT_OK && n) {
         for (unsigned i = 0; i < n; i++) {
             if (batch[i].deadline && now > batch[i].deadline)
-                (void)j->mark(j->ctx, batch[i].id, FL_WQ_ST_PENDING, FL_WQ_ST_EXPIRED);
+                (void)wq_mark(j, batch[i].id, FL_WQ_ST_PENDING, FL_WQ_ST_EXPIRED);
             else if (batch[i].recover == FL_WQ_RECOVER_ASK)
-                (void)j->mark(j->ctx, batch[i].id, FL_WQ_ST_PENDING, FL_WQ_ST_HELD);
+                (void)wq_mark(j, batch[i].id, FL_WQ_ST_PENDING, FL_WQ_ST_HELD);
         }
         wq_copy(&cursor, &batch[n - 1], sizeof(cursor));
         have = 1;
@@ -761,7 +789,7 @@ fl_result_t fl_wq_resolve_held(const char *owner, int run_now) {
         return FL_RESULT_INVAL;
     while (j->scan(j->ctx, FL_WQ_ST_HELD, owner, have ? &cursor : NULL, 16, batch, &n) == FL_RESULT_OK && n) {
         for (unsigned i = 0; i < n; i++)
-            (void)j->mark(j->ctx, batch[i].id, FL_WQ_ST_HELD, run_now ? FL_WQ_ST_PENDING : FL_WQ_ST_SKIPPED);
+            (void)wq_mark(j, batch[i].id, FL_WQ_ST_HELD, run_now ? FL_WQ_ST_PENDING : FL_WQ_ST_SKIPPED);
         wq_copy(&cursor, &batch[n - 1], sizeof(cursor));
         have = 1;
     }

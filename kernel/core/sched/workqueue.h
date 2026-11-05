@@ -188,6 +188,15 @@ fl_result_t fl_wq_enqueue_durable(fl_workqueue_t *wq, uint32_t tag, int layer, c
                                   const void *payload, size_t n, const uint8_t idem_key[16],
                                   int64_t ttl_sec);
 
+/** The durable job state machine, from the Lean 4 model (formal/lean): 1 when the queue makes the move
+ *  `from` -> `to` (fl_wq_state_t numbers), 0 for any other pair and for a number that is no state. */
+unsigned fl_wq_model_transition_allowed(unsigned from, unsigned to);
+/** 1 for DONE, FAILED, EXPIRED and SKIPPED. */
+unsigned fl_wq_model_state_terminal(unsigned state);
+/** State changes the queue itself asked a journal for that the model forbids. They are refused, and this
+ *  counter must stay 0. */
+unsigned fl_wq_illegal_moves(void);
+
 /** Once at boot, before the first poll: cut-off work is retried (or FAILED past its attempts), stale
  *  work becomes EXPIRED (never run silently), RECOVER_ASK work is HELD, the rest is staged. */
 fl_result_t fl_wq_recover(fl_workqueue_t *wq);

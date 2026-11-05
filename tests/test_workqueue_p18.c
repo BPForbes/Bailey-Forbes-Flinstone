@@ -109,6 +109,40 @@ static int test_storage_is_reusable_after_destroy(void) {
     return 0;
 }
 
+/* The generated state machine (formal/lean) is exactly the twelve moves the queue makes, and only those: every
+ * pair of numbers 0..255 is checked against a list written here, not derived from the generated code. */
+static int test_model_table_is_pinned(void) {
+    static const unsigned moves[][2] = {
+        {FL_WQ_ST_PENDING, FL_WQ_ST_QUEUED}, {FL_WQ_ST_PENDING, FL_WQ_ST_HELD},
+        {FL_WQ_ST_PENDING, FL_WQ_ST_EXPIRED}, {FL_WQ_ST_QUEUED, FL_WQ_ST_RUNNING},
+        {FL_WQ_ST_QUEUED, FL_WQ_ST_PENDING}, {FL_WQ_ST_QUEUED, FL_WQ_ST_EXPIRED},
+        {FL_WQ_ST_QUEUED, FL_WQ_ST_FAILED}, {FL_WQ_ST_RUNNING, FL_WQ_ST_DONE},
+        {FL_WQ_ST_RUNNING, FL_WQ_ST_PENDING}, {FL_WQ_ST_RUNNING, FL_WQ_ST_FAILED},
+        {FL_WQ_ST_HELD, FL_WQ_ST_PENDING}, {FL_WQ_ST_HELD, FL_WQ_ST_SKIPPED},
+    };
+
+    for (unsigned f = 0; f < 256u; f++) {
+        for (unsigned to = 0; to < 256u; to++) {
+            unsigned want = 0;
+
+            for (size_t k = 0; k < sizeof moves / sizeof moves[0]; k++)
+                want |= moves[k][0] == f && moves[k][1] == to;
+            ASSERT(fl_wq_model_transition_allowed(f, to) == want);
+        }
+        ASSERT(fl_wq_model_state_terminal(f) ==
+               (f == FL_WQ_ST_DONE || f == FL_WQ_ST_FAILED || f == FL_WQ_ST_EXPIRED || f == FL_WQ_ST_SKIPPED));
+    }
+    ASSERT(fl_wq_model_transition_allowed(256u, 1u) == 0 && fl_wq_model_transition_allowed(1u, 4096u) == 0);
+    return 0;
+}
+
+/* Runs last: every durable scenario above (accept, run, retry, fail, recover, expire, hold, resolve) moved jobs
+ * only along the model's transitions; a move the model forbids is refused and counted. */
+static int test_the_queue_never_left_the_model(void) {
+    ASSERT(fl_wq_illegal_moves() == 0);
+    return 0;
+}
+
 static int test_shutdown_discards_pending(void) {
     fl_workqueue_storage_t store;
     fl_workqueue_t *wq = (fl_workqueue_t *)&store;
@@ -889,7 +923,9 @@ int main(void) {
     RUN_TEST(stale_durable_work_expires_unrun);
     RUN_TEST(held_work_waits_for_the_owner);
     RUN_TEST(durable_backlog_is_bounded_and_drains);
+    RUN_TEST(model_table_is_pinned);
     RUN_TEST(ticker_and_default_queue); /* last: it shuts the default queue down */
+    RUN_TEST(the_queue_never_left_the_model);
     printf("test_workqueue_p18: all passed\n");
     return 0;
 }

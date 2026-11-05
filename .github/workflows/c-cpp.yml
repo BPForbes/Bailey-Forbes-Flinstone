@@ -129,6 +129,9 @@ jobs:
       - name: Test — priority queue
         run: make test_priority_queue
 
+      - name: Check the Lean-generated workqueue model is in step with its source
+        run: make check-formal
+
       - name: Test — workqueue (delayed, periodic, protected, ticker)
         run: make test_workqueue_p18
 
