@@ -2,11 +2,10 @@
 #define FL_WQ_JOURNAL_SQLITE_H
 
 /*
- * Hosted, flushed backend for the workqueue journal (FL-25): one table in a SQLite file, WAL with
+ * Hosted, flushed backend for the workqueue journal: one table in a SQLite file, WAL with
  * synchronous = FULL, so an append returns only after the commit is on disk. kernel/core/sched must not
  * depend on the KeyQuorum driver (the scheduler is below the security driver), so this file knows only the
- * ops table. The hash-chained, event-sourced form (KeyQuorum JobStateChanged) is a later step: this is the
- * plain table, and the file's location is the caller's choice.
+ * ops table. The file's location is the caller's choice.
  */
 
 #include "workqueue.h"

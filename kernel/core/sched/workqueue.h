@@ -53,7 +53,6 @@ typedef struct {
      * use **FL_WQ_LAYER_BACKGROUND**.
      */
     int pq_layer;
-    /* Delayed and periodic work (P1-7 monotonic time; zero-initialised = as before). */
     int64_t run_at_ns;  /* 0 = run as soon as polled; else not before this fl_time_monotonic_ns value */
     int64_t period_ns;  /* 0 = one shot; > 0 = re-armed period_ns after each run */
     uint32_t flags;     /* FL_WQ_* flags */
@@ -109,7 +108,7 @@ unsigned fl_wq_poll_at(fl_workqueue_t *wq, unsigned max_items, int64_t now_ns);
 fl_result_t fl_wq_drain(fl_workqueue_t *wq, unsigned timeout_ms);
 
 
-/* ---- Durable work (FL-25): journal first, recover at boot, bounded backlog ---------------------------
+/* Durable work: journal first, recover at boot, bounded backlog.
  * A durable job is a tag (a handler registered at every boot: function pointers are never persisted),
  * a payload and an idempotency key. It is appended to a journal BEFORE it is accepted; the in-memory
  * MLQ holds only a window of it. The journal is an installable table of operations (the shape of
@@ -163,9 +162,7 @@ typedef struct fl_wq_journal_ops {
     unsigned (*count)(void *ctx, fl_wq_state_t state, const char *owner);
 } fl_wq_journal_ops_t;
 
-/** The default journal: memory only. */
 const fl_wq_journal_ops_t *fl_wq_journal_mem(void);
-/** Empty the memory journal (tests, and a boot that starts clean). */
 void fl_wq_journal_mem_reset(void);
 /** Install a journal (NULL restores the default); returns the one in force before. Set once at start,
  *  not while durable work is queued or running. */

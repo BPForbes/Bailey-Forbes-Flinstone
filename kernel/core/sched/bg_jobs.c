@@ -31,7 +31,6 @@ void fl_bg_watchdog_check(void) {
 
 static void bg_watchdog_work(void *ctx) {
     (void)ctx;
-    /* P1-10: stall detection over the registered checks (the KeyQuorum service is the first). */
     fl_bg_watchdog_check();
 }
 
