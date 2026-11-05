@@ -44,8 +44,6 @@ static void heap_init(void)
     s_head->next = 0;
 }
 
-/* Payload pointer aligned to `align` (<= 4096): the block's payload is over-sized so an aligned
- * address with a back-pointer to the block header fits inside it. */
 static void heap_split_tail(kq_blk_t *b, size_t need)
 {
     kq_blk_t *t = (kq_blk_t *)((uintptr_t)b + HDR + need);
@@ -57,6 +55,8 @@ static void heap_split_tail(kq_blk_t *b, size_t need)
     b->next = t;
 }
 
+/* Payload pointer aligned to `align` (<= 4096): the block's payload is over-sized so an aligned
+ * address with a back-pointer to the block header fits inside it. */
 static void *heap_alloc(size_t len, size_t align)
 {
     kq_blk_t *b;
@@ -279,8 +279,9 @@ fl_result_t fl_time_wall_sec(int64_t *out_sec)
     return FL_RESULT_OK;
 }
 
-/* libc symbols the compiler and the Rust archive call under -nostdlib. Built with -fno-builtin -fno-tree-loop-distribute-patterns so none of these turns into a call to
- * itself. rep movsb / stosb are fast enough here and need no SSE. */
+/* libc symbols the compiler and the Rust archive call under -nostdlib. Built with -fno-builtin
+ * -fno-tree-loop-distribute-patterns so none of these turns into a call to itself. rep movsb /
+ * stosb are fast enough here and need no SSE. */
 
 void *memcpy(void *dst, const void *src, size_t n)
 {

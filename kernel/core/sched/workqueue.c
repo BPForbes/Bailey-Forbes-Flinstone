@@ -76,6 +76,7 @@ static void wq_item_free(wq_item_t *item) {
 }
 #endif
 
+/* The queue is its storage type, so the two can never drift apart. */
 struct fl_workqueue {
     fl_workqueue_storage_t st;
 };
@@ -185,6 +186,7 @@ static void wq_do_init(fl_workqueue_t *wq) {
     for (unsigned i = 0; i < FL_WQ_TIMERS_MAX; i++)
         wq->st.timers[i] = NULL;
 #ifdef FL_WQ_HAS_LOCK
+    /* First initialisation of this storage, or of storage fl_wq_destroy ended: never an initialised mutex. */
     (void)pthread_mutex_init(&wq->st.lock, NULL);
 #endif
 }
