@@ -1,6 +1,6 @@
 /*
- * What the KeyQuorum library and the existing KeyQuorum driver need from the freestanding image
- * (FL-02): the four embedder hooks of keyquorum_identity.h, the mem_domain_* allocators the driver
+ * What the KeyQuorum library and the existing KeyQuorum driver need from the freestanding image:
+ * the four embedder hooks of keyquorum_identity.h, the mem_domain_* allocators the driver
  * calls, a UTC clock, and the handful of libc symbols the compiler and the Rust archive expect when
  * linking with -nostdlib. The same symbols tools/browser-lab/wasm/lab_kq.c supplies for the
  * WebAssembly lab; the byte primitives reuse the assembly layer (arch/x86_64/gas/mem_asm.s).
@@ -46,6 +46,17 @@ static void heap_init(void)
 
 /* Payload pointer aligned to `align` (<= 4096): the block's payload is over-sized so an aligned
  * address with a back-pointer to the block header fits inside it. */
+static void heap_split_tail(kq_blk_t *b, size_t need)
+{
+    kq_blk_t *t = (kq_blk_t *)((uintptr_t)b + HDR + need);
+
+    t->size = b->size - need - HDR;
+    t->used = 0;
+    t->next = b->next;
+    b->size = need;
+    b->next = t;
+}
+
 static void *heap_alloc(size_t len, size_t align)
 {
     kq_blk_t *b;
@@ -63,15 +74,8 @@ static void *heap_alloc(size_t len, size_t align)
             uintptr_t raw = (uintptr_t)b + HDR + sizeof(void *);
             uintptr_t p = (raw + align - 1) & ~(uintptr_t)(align - 1);
 
-            if (b->size >= need + HDR + KQ_ALIGN) { /* split off the tail */
-                kq_blk_t *t = (kq_blk_t *)((uintptr_t)b + HDR + need);
-
-                t->size = b->size - need - HDR;
-                t->used = 0;
-                t->next = b->next;
-                b->size = need;
-                b->next = t;
-            }
+            if (b->size >= need + HDR + KQ_ALIGN)
+                heap_split_tail(b, need);
             b->used = 1;
             ((kq_blk_t **)p)[-1] = b;
             return (void *)p;
@@ -96,7 +100,6 @@ static void heap_free(void *ptr)
         }
 }
 
-/* ---- the four embedder hooks (keyquorum_identity.h) ---- */
 
 uint8_t *kq_platform_alloc(size_t len, size_t align)
 {
@@ -148,7 +151,6 @@ int kq_platform_random(uint8_t *buf, size_t len)
     return 0;
 }
 
-/* ---- mem_domain_*: the driver's allocators (domains are metadata, as on the host) ---- */
 
 void *mem_domain_alloc(mem_domain_t d, size_t n)
 {
@@ -209,7 +211,6 @@ void mem_domain_secure_zero(void *p, size_t n)
     asm_mem_secure_zero(p, n);
 }
 
-/* ---- UTC from the CMOS real-time clock (QEMU's default is the host's UTC) ---- */
 
 static uint8_t cmos(uint8_t reg)
 {
@@ -222,47 +223,63 @@ static unsigned bcd(uint8_t v, int is_bcd)
     return is_bcd ? (unsigned)((v & 0x0f) + (v >> 4) * 10u) : v;
 }
 
-fl_result_t fl_time_wall_sec(int64_t *out_sec)
+/* An update in progress would tear the read: wait it out, then read twice. */
+static void cmos_wait_stable_time(void)
 {
-    unsigned s, mi, h, d, mo, y, t1, t2;
-    int is_bcd, pm;
-    uint8_t sb, hr;
-    int64_t days;
-    static const unsigned cum[12] = {0, 31, 59, 90, 120, 151, 181, 212, 243, 273, 304, 334};
+    unsigned t1, t2;
 
-    if (!out_sec)
-        return FL_RESULT_INVAL;
-    do { /* an update in progress would tear the read: wait it out, then read twice */
+    do {
         while (cmos(0x0a) & 0x80)
             ;
         t1 = cmos(0) | (cmos(2) << 8) | ((unsigned)cmos(4) << 16) | ((unsigned)cmos(7) << 24);
         t2 = cmos(0) | (cmos(2) << 8) | ((unsigned)cmos(4) << 16) | ((unsigned)cmos(7) << 24);
     } while (t1 != t2);
+}
+
+static unsigned hour_24(uint8_t hr, uint8_t status_b, int is_bcd)
+{
+    int pm = !(status_b & 2) && (hr & 0x80);
+    unsigned h = bcd(hr & 0x7f, is_bcd);
+
+    return pm ? (h % 12) + 12 : h;
+}
+
+static int64_t unix_days(unsigned y, unsigned mo, unsigned d)
+{
+    static const unsigned cum[12] = {0, 31, 59, 90, 120, 151, 181, 212, 243, 273, 304, 334};
+    int64_t days = (int64_t)(y - 1970) * 365 + (int64_t)((y - 1969) / 4) - (int64_t)((y - 1901) / 100) +
+                   (int64_t)((y - 1601) / 400) + cum[mo - 1] + (d - 1);
+
+    if (mo > 2 && ((y % 4 == 0 && y % 100 != 0) || y % 400 == 0))
+        days++;
+    return days;
+}
+
+fl_result_t fl_time_wall_sec(int64_t *out_sec)
+{
+    unsigned s, mi, h, d, mo, y;
+    int is_bcd;
+    uint8_t sb, hr;
+
+    if (!out_sec)
+        return FL_RESULT_INVAL;
+    cmos_wait_stable_time();
     sb = cmos(0x0b);
     is_bcd = !(sb & 4);
     s = bcd(cmos(0), is_bcd);
     mi = bcd(cmos(2), is_bcd);
     hr = cmos(4);
-    pm = !(sb & 2) && (hr & 0x80);
-    h = bcd(hr & 0x7f, is_bcd);
-    if (pm) {
-        h = (h % 12) + 12;
-    }
+    h = hour_24(hr, sb, is_bcd);
     d = bcd(cmos(7), is_bcd);
     mo = bcd(cmos(8), is_bcd);
     y = 2000 + bcd(cmos(9), is_bcd);
     if (mo < 1 || mo > 12 || d < 1 || d > 31)
         return FL_RESULT_ERR;
-    days = (int64_t)(y - 1970) * 365 + (int64_t)((y - 1969) / 4) - (int64_t)((y - 1901) / 100) +
-           (int64_t)((y - 1601) / 400) + cum[mo - 1] + (d - 1);
-    if (mo > 2 && ((y % 4 == 0 && y % 100 != 0) || y % 400 == 0))
-        days++;
-    *out_sec = days * 86400 + (int64_t)h * 3600 + (int64_t)mi * 60 + s;
+    *out_sec = unix_days(y, mo, d) * 86400 + (int64_t)h * 3600 + (int64_t)mi * 60 + s;
     return FL_RESULT_OK;
 }
 
-/* ---- libc symbols the compiler and the Rust archive call under -nostdlib ----
- * Built with -fno-builtin -fno-tree-loop-distribute-patterns so none of these turns into a call to
+/* libc symbols the compiler and the Rust archive call under -nostdlib. Built with -fno-builtin -fno-tree-loop-distribute-patterns so none of these turns into a call to
  * itself. rep movsb / stosb are fast enough here and need no SSE. */
 
 void *memcpy(void *dst, const void *src, size_t n)
