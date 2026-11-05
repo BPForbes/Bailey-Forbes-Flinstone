@@ -14,39 +14,46 @@ typedef struct {
 
 #define COLS "id, idem_key, tag, layer, recover, owner, state, attempts, max_attempts, accepted_at, deadline, payload"
 
+static void row_owner(sqlite3_stmt *st, fl_wq_journal_record_t *r) {
+    const unsigned char *o = sqlite3_column_text(st, 5);
+    size_t n;
+
+    if (!o)
+        return;
+    n = strlen((const char *)o);
+    if (n >= sizeof(r->owner))
+        n = sizeof(r->owner) - 1;
+    memcpy(r->owner, o, n);
+}
+
+static void row_payload(sqlite3_stmt *st, fl_wq_journal_record_t *r) {
+    const void *b = sqlite3_column_blob(st, 11);
+    int len = sqlite3_column_bytes(st, 11);
+
+    if (b && len > 0 && len <= (int)FL_WQ_PAYLOAD_MAX) {
+        memcpy(r->payload, b, (size_t)len);
+        r->payload_len = (uint32_t)len;
+    }
+}
+
 static void row_to_record(sqlite3_stmt *st, fl_wq_journal_record_t *r) {
     const void *b;
-    int len;
-    const unsigned char *o;
 
     memset(r, 0, sizeof(*r));
     r->id = (uint64_t)sqlite3_column_int64(st, 0);
     b = sqlite3_column_blob(st, 1);
-    len = sqlite3_column_bytes(st, 1);
-    if (b && len == 16)
+    if (b && sqlite3_column_bytes(st, 1) == 16)
         memcpy(r->idem_key, b, 16);
     r->tag = (uint32_t)sqlite3_column_int64(st, 2);
     r->layer = sqlite3_column_int(st, 3);
     r->recover = (uint8_t)sqlite3_column_int(st, 4);
-    o = sqlite3_column_text(st, 5);
-    if (o) {
-        size_t n = strlen((const char *)o);
-
-        if (n >= sizeof(r->owner))
-            n = sizeof(r->owner) - 1;
-        memcpy(r->owner, o, n);
-    }
+    row_owner(st, r);
     r->state = (fl_wq_state_t)sqlite3_column_int(st, 6);
     r->attempts = (uint32_t)sqlite3_column_int(st, 7);
     r->max_attempts = (uint32_t)sqlite3_column_int(st, 8);
     r->accepted_at = sqlite3_column_int64(st, 9);
     r->deadline = sqlite3_column_int64(st, 10);
-    b = sqlite3_column_blob(st, 11);
-    len = sqlite3_column_bytes(st, 11);
-    if (b && len > 0 && len <= (int)FL_WQ_PAYLOAD_MAX) {
-        memcpy(r->payload, b, (size_t)len);
-        r->payload_len = (uint32_t)len;
-    }
+    row_payload(st, r);
 }
 
 static fl_result_t wqj_load_locked(wqj_t *w, uint64_t id, fl_wq_journal_record_t *out) {
@@ -64,45 +71,62 @@ static fl_result_t wqj_load_locked(wqj_t *w, uint64_t id, fl_wq_journal_record_t
     return rc;
 }
 
-static fl_result_t wqj_append(void *ctx, const fl_wq_journal_record_t *r, uint64_t *id_out, int *existing) {
-    wqj_t *w = (wqj_t *)ctx;
+/* Caller holds the lock. Returns 1 and the id when a job with this key exists. */
+static int wqj_find_idem_locked(wqj_t *w, const uint8_t key[16], uint64_t *id_out) {
+    sqlite3_stmt *st = NULL;
+    int found = 0;
+
+    if (sqlite3_prepare_v2(w->db, "SELECT id FROM wq_jobs WHERE idem_key = ?", -1, &st, NULL) != SQLITE_OK)
+        return 0;
+    sqlite3_bind_blob(st, 1, key, 16, SQLITE_STATIC);
+    if (sqlite3_step(st) == SQLITE_ROW) {
+        *id_out = (uint64_t)sqlite3_column_int64(st, 0);
+        found = 1;
+    }
+    sqlite3_finalize(st);
+    return found;
+}
+
+static fl_result_t wqj_insert_locked(wqj_t *w, const fl_wq_journal_record_t *r, uint64_t *id_out) {
     sqlite3_stmt *st = NULL;
     fl_result_t rc = FL_RESULT_ERR;
 
-    pthread_mutex_lock(&w->mu);
-    if (sqlite3_prepare_v2(w->db, "SELECT id FROM wq_jobs WHERE idem_key = ?", -1, &st, NULL) == SQLITE_OK) {
-        sqlite3_bind_blob(st, 1, r->idem_key, 16, SQLITE_STATIC);
-        if (sqlite3_step(st) == SQLITE_ROW) {
-            *id_out = (uint64_t)sqlite3_column_int64(st, 0);
-            *existing = 1;
-            sqlite3_finalize(st);
-            pthread_mutex_unlock(&w->mu);
-            return FL_RESULT_OK;
-        }
-        sqlite3_finalize(st);
-    }
-    st = NULL;
     if (sqlite3_prepare_v2(w->db,
                            "INSERT INTO wq_jobs (idem_key, tag, layer, recover, owner, state, attempts, max_attempts, "
                            "accepted_at, deadline, payload) VALUES (?, ?, ?, ?, ?, ?, 0, ?, ?, ?, ?)",
-                           -1, &st, NULL) == SQLITE_OK) {
-        sqlite3_bind_blob(st, 1, r->idem_key, 16, SQLITE_STATIC);
-        sqlite3_bind_int64(st, 2, r->tag);
-        sqlite3_bind_int(st, 3, r->layer);
-        sqlite3_bind_int(st, 4, r->recover);
-        sqlite3_bind_text(st, 5, r->owner, -1, SQLITE_STATIC);
-        sqlite3_bind_int(st, 6, FL_WQ_ST_PENDING);
-        sqlite3_bind_int(st, 7, (int)r->max_attempts);
-        sqlite3_bind_int64(st, 8, r->accepted_at);
-        sqlite3_bind_int64(st, 9, r->deadline);
-        sqlite3_bind_blob(st, 10, r->payload, (int)r->payload_len, SQLITE_STATIC);
-        if (sqlite3_step(st) == SQLITE_DONE) { /* autocommit, synchronous = FULL: on disk before this returns */
-            *id_out = (uint64_t)sqlite3_last_insert_rowid(w->db);
-            *existing = 0;
-            rc = FL_RESULT_OK;
-        }
-        sqlite3_finalize(st);
+                           -1, &st, NULL) != SQLITE_OK)
+        return rc;
+    sqlite3_bind_blob(st, 1, r->idem_key, 16, SQLITE_STATIC);
+    sqlite3_bind_int64(st, 2, r->tag);
+    sqlite3_bind_int(st, 3, r->layer);
+    sqlite3_bind_int(st, 4, r->recover);
+    sqlite3_bind_text(st, 5, r->owner, -1, SQLITE_STATIC);
+    sqlite3_bind_int(st, 6, FL_WQ_ST_PENDING);
+    sqlite3_bind_int(st, 7, (int)r->max_attempts);
+    sqlite3_bind_int64(st, 8, r->accepted_at);
+    sqlite3_bind_int64(st, 9, r->deadline);
+    sqlite3_bind_blob(st, 10, r->payload, (int)r->payload_len, SQLITE_STATIC);
+    if (sqlite3_step(st) == SQLITE_DONE) { /* autocommit, synchronous = FULL: on disk before this returns */
+        *id_out = (uint64_t)sqlite3_last_insert_rowid(w->db);
+        rc = FL_RESULT_OK;
     }
+    sqlite3_finalize(st);
+    return rc;
+}
+
+static fl_result_t wqj_append(void *ctx, const fl_wq_journal_record_t *r, uint64_t *id_out, int *existing) {
+    wqj_t *w = (wqj_t *)ctx;
+    fl_result_t rc;
+
+    pthread_mutex_lock(&w->mu);
+    if (wqj_find_idem_locked(w, r->idem_key, id_out)) {
+        *existing = 1;
+        pthread_mutex_unlock(&w->mu);
+        return FL_RESULT_OK;
+    }
+    rc = wqj_insert_locked(w, r, id_out);
+    if (rc == FL_RESULT_OK)
+        *existing = 0;
     pthread_mutex_unlock(&w->mu);
     return rc;
 }
@@ -190,16 +214,17 @@ static unsigned wqj_count(void *ctx, fl_wq_state_t state, const char *owner) {
     return c;
 }
 
+static const char wqj_schema[] =
+    "PRAGMA journal_mode = WAL;"
+    "PRAGMA synchronous = FULL;"
+    "CREATE TABLE IF NOT EXISTS wq_jobs ("
+    "id INTEGER PRIMARY KEY AUTOINCREMENT, idem_key BLOB NOT NULL UNIQUE, tag INTEGER NOT NULL, "
+    "layer INTEGER NOT NULL, recover INTEGER NOT NULL, owner TEXT NOT NULL DEFAULT '', "
+    "state INTEGER NOT NULL, attempts INTEGER NOT NULL DEFAULT 0, max_attempts INTEGER NOT NULL, "
+    "accepted_at INTEGER NOT NULL, deadline INTEGER NOT NULL DEFAULT 0, payload BLOB);"
+    "CREATE INDEX IF NOT EXISTS wq_jobs_state ON wq_jobs (state, layer, id);";
+
 fl_result_t fl_wq_journal_sqlite_open(const char *path, fl_wq_journal_ops_t *ops) {
-    static const char schema[] =
-        "PRAGMA journal_mode = WAL;"
-        "PRAGMA synchronous = FULL;"
-        "CREATE TABLE IF NOT EXISTS wq_jobs ("
-        "id INTEGER PRIMARY KEY AUTOINCREMENT, idem_key BLOB NOT NULL UNIQUE, tag INTEGER NOT NULL, "
-        "layer INTEGER NOT NULL, recover INTEGER NOT NULL, owner TEXT NOT NULL DEFAULT '', "
-        "state INTEGER NOT NULL, attempts INTEGER NOT NULL DEFAULT 0, max_attempts INTEGER NOT NULL, "
-        "accepted_at INTEGER NOT NULL, deadline INTEGER NOT NULL DEFAULT 0, payload BLOB);"
-        "CREATE INDEX IF NOT EXISTS wq_jobs_state ON wq_jobs (state, layer, id);";
     wqj_t *w;
 
     if (!path || !ops)
@@ -207,7 +232,7 @@ fl_result_t fl_wq_journal_sqlite_open(const char *path, fl_wq_journal_ops_t *ops
     w = (wqj_t *)calloc(1, sizeof(*w));
     if (!w)
         return FL_RESULT_NOMEM;
-    if (sqlite3_open(path, &w->db) != SQLITE_OK || fl_sqlite_exec(w->db, "wq_journal", schema) != FL_RESULT_OK) {
+    if (sqlite3_open(path, &w->db) != SQLITE_OK || fl_sqlite_exec(w->db, "wq_journal", wqj_schema) != FL_RESULT_OK) {
         if (w->db)
             sqlite3_close(w->db);
         free(w);
