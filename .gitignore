@@ -152,3 +152,5 @@ tests/test_wifi_uart_at_scan_join
 codeql-db*/
 .codeql/
 formal/lean/*.olean
+tests/test_server_file_jail
+tests/test_wifi_fullmac_usb_port
