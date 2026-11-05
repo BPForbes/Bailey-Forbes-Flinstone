@@ -33,6 +33,17 @@ fl_result_t fl_bg_jobs_ticker_start(unsigned period_ms);
 void fl_bg_jobs_ticker_stop(void);
 #endif
 
+/**
+ * P1-10 watchdog checks. A service registers an alive() test and a stall handler; the watchdog work
+ * item (queued once, every FL_BG_WATCHDOG_PERIOD_MS, protected, on the default queue) calls alive()
+ * for each and on_stall() when it answers 0. The first user is the KeyQuorum key service.
+ */
+#define FL_BG_WATCHDOG_MAX 4u
+#define FL_BG_WATCHDOG_PERIOD_MS 1000u
+fl_result_t fl_bg_watchdog_register(int (*alive)(void), void (*on_stall)(void));
+/** Run the registered checks once (what the watchdog item does; also for tests). */
+void fl_bg_watchdog_check(void);
+
 fl_result_t fl_bg_job_reclaim_kick(void);
 fl_result_t fl_bg_job_watchdog_kick(void);
 

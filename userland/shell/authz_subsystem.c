@@ -68,8 +68,22 @@ fl_authz_decision_t fl_authz_guest_shell_builtin(unsigned cmd_no) {
     }
 }
 
+static void (*s_deny_audit)(unsigned op);
+
+void fl_authz_subsystem_set_deny_audit(void (*sink)(unsigned op)) {
+    s_deny_audit = sink;
+}
+
 fl_authz_decision_t fl_authz_subsystem_check(unsigned op, void *ctx) {
     fl_authz_check_fn hook = NULL;
+
+    /* Before any hook: no installed hook, no elevation and no principal (guests included) may stop the
+     * KeyQuorum key service. Only an orderly shutdown ends it. */
+    if (op == FL_AUTHZ_OP_KQ_SERVICE_CONTROL) {
+        if (s_deny_audit)
+            s_deny_audit(op);
+        return FL_AUTHZ_DENY;
+    }
 
     pthread_mutex_lock(&s_subsys_mu);
     hook = s_subsys_hook;

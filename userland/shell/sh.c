@@ -49,6 +49,7 @@
 #include <stdint.h>
 #include "threadpool.h"
 #include "bg_jobs.h"
+#include "kq_service.h"
 #include "interpreter.h"
 #include "terminal.h"
 #include "disk.h"
@@ -129,6 +130,7 @@ static void shell_pool_cleanup(void) {
     }
     fl_bg_jobs_ticker_stop();
 #endif
+    fl_kq_service_shutdown(); /* the only way the key service ends; wipes every key */
     fl_bg_jobs_shutdown(); /* protected workqueue items run once here, the rest are dropped */
     pthread_mutex_destroy(&g_pool.mutex);
     pthread_cond_destroy(&g_pool.cond);
@@ -401,6 +403,9 @@ int main(int argc, char *argv[]) {
     fs_service_glue_init();
     path_log_init();
     drivers_init(NULL);
+    /* The KeyQuorum key service: after the driver registry exists, before the pool. */
+    if (fl_kq_service_start() != FL_RESULT_OK)
+        fprintf(stderr, "kq: key service not started\n");
     vm_warn_layer_config();
 
     /* Initialize thread pool and signals */

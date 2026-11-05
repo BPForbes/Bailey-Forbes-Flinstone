@@ -15,9 +15,24 @@ static void bg_reclaim_work(void *ctx) {
     /* P1-9: scan **P1-4** PMM / **P1-5** arenas — not implemented. */
 }
 
+static struct {
+    int (*alive)(void);
+    void (*on_stall)(void);
+} s_watchdog[FL_BG_WATCHDOG_MAX];
+static unsigned s_watchdog_count;
+
+void fl_bg_watchdog_check(void) {
+    for (unsigned i = 0; i < s_watchdog_count; i++)
+        if (!s_watchdog[i].alive()) {
+            if (s_watchdog[i].on_stall)
+                s_watchdog[i].on_stall();
+        }
+}
+
 static void bg_watchdog_work(void *ctx) {
     (void)ctx;
-    /* P1-10: heartbeat / stall detection — not implemented. */
+    /* P1-10: stall detection over the registered checks (the KeyQuorum service is the first). */
+    fl_bg_watchdog_check();
 }
 
 static int s_bg_inited;
@@ -59,6 +74,29 @@ fl_result_t fl_bg_job_watchdog_kick(void) {
 /* One tick driver, bounded work per tick. Delayed and periodic work (cron, the key service's
  * watchdog) are workqueue items added with fl_wq_enqueue_at / fl_wq_enqueue_every; fl_wq_poll
  * moves the due ones into the MLQ first, so this stays one poll and needs no extra call per user. */
+fl_result_t fl_bg_watchdog_register(int (*alive)(void), void (*on_stall)(void)) {
+    fl_wq_work_t w = {
+        .fn = bg_watchdog_work,
+        .tag = FL_BG_JOB_TAG_WATCHDOG,
+        .pq_layer = FL_WQ_LAYER_URGENT,
+        .flags = FL_WQ_PROTECTED,
+    };
+    fl_result_t rc = FL_RESULT_OK;
+
+    if (!alive)
+        return FL_RESULT_INVAL;
+    if (s_watchdog_count >= FL_BG_WATCHDOG_MAX)
+        return FL_RESULT_NOMEM;
+    s_watchdog[s_watchdog_count].alive = alive;
+    s_watchdog[s_watchdog_count].on_stall = on_stall;
+    if (s_watchdog_count++ == 0) { /* the first check starts the periodic watchdog item */
+        if (!s_bg_inited)
+            fl_bg_jobs_init();
+        rc = fl_wq_enqueue_every(fl_wq_default(), &w, (int64_t)FL_BG_WATCHDOG_PERIOD_MS * 1000000ll);
+    }
+    return rc;
+}
+
 void fl_bg_jobs_tick(unsigned max_wq_items) {
     if (!s_bg_inited)
         fl_bg_jobs_init();

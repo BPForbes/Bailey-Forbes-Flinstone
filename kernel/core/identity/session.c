@@ -13,6 +13,13 @@ static int s_sudo_scope_depth;
 static int s_db_ready;
 static pthread_once_t s_once = PTHREAD_ONCE_INIT;
 static pthread_mutex_t s_session_mu = PTHREAD_MUTEX_INITIALIZER;
+static fl_session_online_fn s_online_hook;
+static fl_session_offline_fn s_offline_hook;
+
+void fl_session_set_login_hooks(fl_session_online_fn online, fl_session_offline_fn offline) {
+    s_online_hook = online;
+    s_offline_hook = offline;
+}
 
 static void session_load_once(void) {
     const char *path = getenv("FL_USERS_DB_PATH");
@@ -156,6 +163,10 @@ fl_result_t fl_session_login(const char *name, const char *password) {
         rc = FL_RESULT_OK;
     }
     pthread_mutex_unlock(&s_session_mu);
+    /* The key service opens the account's key with the password just verified, outside the lock. A
+     * failure is the service's to audit and does not block the login. */
+    if (rc == FL_RESULT_OK && s_online_hook)
+        (void)s_online_hook(name, password);
     return rc;
 }
 
@@ -238,10 +249,13 @@ void fl_session_drop_elevation(void) {
 
 fl_result_t fl_session_logout(void) {
     const char *def;
+    char who[FL_USER_NAME_MAX];
 
     fl_session_init();
     fl_elevation_revoke_all();
     pthread_mutex_lock(&s_session_mu);
+    strncpy(who, s_current, sizeof(who) - 1); /* the account that is signing out */
+    who[sizeof(who) - 1] = '\0';
     s_sudo_scope_depth = 0;
     s_active_elev = FL_ELEVATION_TOKEN_NONE;
     def = s_db.default_user;
@@ -250,6 +264,8 @@ fl_result_t fl_session_logout(void) {
     strncpy(s_current, def, sizeof(s_current) - 1);
     s_current[sizeof(s_current) - 1] = '\0';
     pthread_mutex_unlock(&s_session_mu);
+    if (s_offline_hook)
+        s_offline_hook(who); /* the service wipes that account's key */
     return FL_RESULT_OK;
 }
 

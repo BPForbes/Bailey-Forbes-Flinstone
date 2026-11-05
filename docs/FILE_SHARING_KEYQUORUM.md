@@ -701,3 +701,31 @@ kernel prints `CAP keyquorum=linked` when `fl_kq_driver_get()` accepts the linke
   sealed letters (a ramfs file holds 160 bytes, 16 files in all) and the libc calls `kq_checkpoint.c` makes
   (`stdio`, `stdlib`, `errno`, `sys/stat`, `unistd`). Neither is small, so `server file` in the image still
   says delivery runs in the WebAssembly shell.
+
+## The key service (FL-20, absorbs FL-24)
+
+`kernel/core/vfs/kq_service.[ch]` is the resident holder of signing keys. It is started by the hosted shell after
+the driver registry exists (`fl_kq_service_start`) and ended only by an orderly shutdown (`fl_kq_service_shutdown`).
+
+- **Online through a login.** `fl_session_login` calls the service (through `fl_session_set_login_hooks`, so the
+  identity code does not depend on the VFS layer) after the password is verified and the session lock is released: the
+  account's own signing key is opened with that password and held in a fixed table of `FL_USER_DB_MAX_USERS`
+  slots. `su` without a password opens nothing; logout wipes the key of the account that signed out; a reused slot
+  and shutdown wipe too. `fl_kq_obtain_author_key` hands a copy to a caller (who wipes it) only for an account
+  that is signed in; a parent author assembled from its children's shares needs KQ-18 and is not available
+  (a leaf who is not signed in cannot be assembled by anything: the answer is ACCES).
+- **Its own thread and queue.** One thread with cancellation disabled and every signal blocked polls a private
+  workqueue whose items are all `FL_WQ_PROTECTED`: a full queue answers BUSY (the caller retries; a signature is never
+  dropped) and protected work runs once more at shutdown. It stamps a heartbeat; `fl_kq_service_alive()` is false once
+  that is older than 2 s, and the P1-10 watchdog (`fl_bg_watchdog_register`, the first check) audits a stall once.
+  The monitor (FL-09) will refuse every change while it is false: fail closed. The hosted shell is an ordinary process, so
+  the host OS can still kill it; what is guaranteed is that nothing inside the shell can (`FL_AUTHZ_OP_KQ_SERVICE_CONTROL`
+  is denied before any installed hook, for every account including a guest, and audited).
+- **Periodic signing.** `fl_kq_service_autosign_add` registers an object with three callbacks (last signature time,
+  head author, sign) and runs the sweep as a protected periodic item: skip while a signature is recent, skip and audit a
+  forked history, audit and retry next period when the author is not signed in, sign with a copy of the author's own key
+  and wipe it. The head-author query is KeyQuorum's KQ-20 (not in the pinned headers) and the signing call is the monitor's
+  (FL-09); the service supplies the schedule and the key.
+- **Not built.** The Root fallback has nothing to read (`fl_kq_service_root_fallback` answers NOENT; where a stored Root
+  credential would live is an open decision that needs a written exception and a threat model), so unattended work waits
+  until someone signs in. The freestanding image has no sessions, so it has no service.

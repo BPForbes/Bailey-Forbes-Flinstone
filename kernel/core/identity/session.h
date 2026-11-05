@@ -41,6 +41,16 @@ void        fl_session_drop_elevation(void);
 /** Drop elevation and switch to the database default user (logout). */
 fl_result_t fl_session_logout(void);
 
+/**
+ * Hooks a service below the session installs (the KeyQuorum key service, kernel/core/vfs/kq_service.c):
+ * online runs after a successful fl_session_login with the password just verified (the session lock
+ * is not held, so a slow key derivation does not stall the session); offline runs after
+ * fl_session_logout with the account that signed out. Neither can refuse a login or a logout.
+ */
+typedef fl_result_t (*fl_session_online_fn)(const char *account, const char *password);
+typedef void (*fl_session_offline_fn)(const char *account);
+void fl_session_set_login_hooks(fl_session_online_fn online, fl_session_offline_fn offline);
+
 fl_user_db_t *fl_session_user_db_mut(void);
 const fl_user_db_t *fl_session_user_db(void);
 fl_result_t fl_session_save_users(void);

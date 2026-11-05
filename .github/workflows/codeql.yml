@@ -86,6 +86,11 @@ jobs:
         with:
           languages: ${{ matrix.language }}
           build-mode: ${{ matrix.build-mode }}
+          # The register (.github/codeql/accepted-findings.json) counts what this CodeQL version finds.
+          # A newer bundle changed what the c-cpp taint queries report (cpp-queries 1.9.2 -> 1.10.0 dropped
+          # 30 of 53 accepted findings at once), so the bundle is pinned and moved on purpose, with the
+          # register re-counted in the same change (docs/SOC2_CODEQL.md).
+          tools: https://github.com/github/codeql-action/releases/download/codeql-bundle-v2.27.3/codeql-bundle-linux64.tar.gz
           config-file: ./.github/codeql/codeql-config.yml
 
       - name: Build (traced by CodeQL)
