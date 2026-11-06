@@ -99,37 +99,50 @@ static struct {
 } s_executors[FL_WQ_EXECUTORS_MAX];
 static unsigned s_executor_count;
 
-static void wq_unregister_executor(const fl_workqueue_t *wq) {
+/* Caller holds the global lock. */
+static void wq_unbind_locked(const fl_workqueue_t *wq) {
     unsigned i = 0;
 
-    WQ_GLOBAL_LOCK();
     while (i < s_executor_count) {
         if (s_executors[i].wq == wq)
             s_executors[i] = s_executors[--s_executor_count];
         else
             i++;
     }
+}
+
+static void wq_unregister_executor(const fl_workqueue_t *wq) {
+    WQ_GLOBAL_LOCK();
+    wq_unbind_locked(wq);
     WQ_GLOBAL_UNLOCK();
 }
 
+static uint32_t wq_executor_of(const fl_workqueue_t *wq) {
+    return __atomic_load_n(&wq->st.executor, __ATOMIC_RELAXED);
+}
+
+/* Startup only (see the header). The field is read and written atomically, so a misuse is a stale read,
+ * never a torn one. A refused call changes nothing. */
 fl_result_t fl_wq_set_executor(fl_workqueue_t *wq, uint32_t executor) {
-    unsigned i = 0;
+    unsigned i = 0, others = 0;
 
     if (!wq || executor == FL_WQ_EXECUTOR_NONE || executor == FL_WQ_EXECUTOR_ANY)
         return FL_RESULT_INVAL;
-    wq_unregister_executor(wq); /* one queue, one executor id */
     WQ_GLOBAL_LOCK();
-    while (i < s_executor_count && s_executors[i].id != executor)
-        i++;
-    if (i == FL_WQ_EXECUTORS_MAX) {
+    for (unsigned k = 0; k < s_executor_count; k++)
+        others += s_executors[k].wq != wq && s_executors[k].id != executor;
+    if (others >= FL_WQ_EXECUTORS_MAX) {
         WQ_GLOBAL_UNLOCK();
         return FL_RESULT_NOMEM;
     }
+    wq_unbind_locked(wq); /* one queue, one executor id */
+    while (i < s_executor_count && s_executors[i].id != executor)
+        i++;
     if (i == s_executor_count)
         s_executor_count++;
     s_executors[i].id = executor;
     s_executors[i].wq = wq;
-    wq->st.executor = executor;
+    __atomic_store_n(&wq->st.executor, executor, __ATOMIC_RELAXED);
     WQ_GLOBAL_UNLOCK();
     return FL_RESULT_OK;
 }
@@ -246,7 +259,9 @@ static void wq_do_init(fl_workqueue_t *wq) {
     wq->st.periodic_inflight = 0;
     wq->st.durable_inmem = 0;
     wq->st.reserved = 0;
-    wq->st.executor = FL_WQ_EXECUTOR_NONE;
+    wq_unregister_executor(wq); /* a re-initialised queue is no longer anyone's executor */
+    __atomic_store_n(&wq->st.executor, FL_WQ_EXECUTOR_NONE, __ATOMIC_RELAXED);
+    wq->st.fillers = 0;
     wq->st.poll_now_ns = -1;
     for (unsigned i = 0; i < FL_WQ_TIMERS_MAX; i++)
         wq->st.timers[i] = NULL;
@@ -291,15 +306,16 @@ static void wq_finish(wq_item_t *item) {
     wq_item_free(item);
 }
 
-/* A claim in flight finishes (it fails to publish and gives its claim back) before the queue can be
- * destroyed. No threads in the freestanding build, so nothing is ever outstanding there. */
+/* A claim in flight finishes (it fails to publish and gives its claim back), and a resolver that picked
+ * this queue out of the registry lets go of it, before the queue can be destroyed. No threads in the
+ * freestanding build, so nothing is ever outstanding there. */
 static void wq_await_reservations(fl_workqueue_t *wq) {
 #ifdef FL_WQ_HAS_LOCK
     unsigned left;
 
     do {
         WQ_LOCK(wq);
-        left = wq->st.reserved;
+        left = wq->st.reserved + __atomic_load_n(&wq->st.fillers, __ATOMIC_ACQUIRE);
         WQ_UNLOCK(wq);
         if (left)
             sched_yield();
@@ -670,10 +686,13 @@ void fl_wq_journal_mem_reset(void) {
     MEMJ_UNLOCK();
 }
 
+static void wq_retry_clear(void);
+
 const fl_wq_journal_ops_t *fl_wq_set_journal(const fl_wq_journal_ops_t *ops) {
     const fl_wq_journal_ops_t *prev = s_journal;
 
     s_journal = ops ? ops : &s_memj_ops;
+    wq_retry_clear(); /* an entry names a row of the journal that was in force */
     return prev;
 }
 
@@ -743,6 +762,13 @@ unsigned fl_wq_retry_marks_lost(void) {
 
 unsigned fl_wq_stuck_claims(void) {
     return __atomic_load_n(&s_stuck_claims, __ATOMIC_RELAXED);
+}
+
+static void wq_retry_clear(void) {
+    WQ_GLOBAL_LOCK();
+    for (unsigned i = 0; i < WQ_RETRY_MAX; i++)
+        s_retry[i].used = 0;
+    WQ_GLOBAL_UNLOCK();
 }
 
 static void wq_retry_add(uint64_t id, fl_wq_state_t from, fl_wq_state_t to) {
@@ -889,9 +915,9 @@ static fl_result_t wq_stage_one(fl_workqueue_t *wq) {
 
     if (wq_reserve(wq) != FL_RESULT_OK)
         return FL_RESULT_NOENT;
-    rc = wq_claim_next(wq->st.executor, &r);
+    rc = wq_claim_next(wq_executor_of(wq), &r);
     if (rc != FL_RESULT_OK) {
-        wq_release(wq); /* nothing was claimed, so nothing is given back */
+        wq_release(wq);
         return rc;
     }
     rc = wq_publish(wq, &r);
@@ -908,7 +934,7 @@ static fl_result_t wq_fill_window(fl_workqueue_t *wq) {
     fl_result_t rc;
 
     wq_retry_marks(s_journal);
-    if (wq->st.executor == FL_WQ_EXECUTOR_NONE)
+    if (wq_executor_of(wq) == FL_WQ_EXECUTOR_NONE)
         return FL_RESULT_OK;
     while ((rc = wq_stage_one(wq)) == FL_RESULT_OK)
         ;
@@ -934,8 +960,8 @@ static void wq_run_handler(const fl_wq_journal_ops_t *j, const fl_wq_journal_rec
 static void wq_run_queued(const fl_workqueue_t *wq, const fl_wq_journal_ops_t *j, const fl_wq_journal_record_t *r) {
     int h = wq_handler_index(r->tag);
 
-    if (r->executor != wq->st.executor)
-        (void)wq_unclaim(r);
+    if (r->executor != wq_executor_of(wq))
+        (void)wq_unclaim(r); /* staged by a queue that has since changed executor */
     else if (r->deadline && wq_now_sec() > r->deadline)
         wq_settle(j, r->id, FL_WQ_ST_QUEUED, FL_WQ_ST_EXPIRED); /* stale: never run silently */
     else if (h < 0)
@@ -1012,7 +1038,7 @@ fl_result_t fl_wq_enqueue_durable(fl_workqueue_t *wq, uint32_t tag, int layer, c
 
     if (!wq || !idem_key || n > FL_WQ_PAYLOAD_MAX || (n && !payload) || layer < 0 || layer >= PQ_NUM_PRIORITIES)
         return FL_RESULT_INVAL;
-    if (wq_check_owner_length(owner) != FL_RESULT_OK || wq->st.executor == FL_WQ_EXECUTOR_NONE)
+    if (wq_check_owner_length(owner) != FL_RESULT_OK || wq_executor_of(wq) == FL_WQ_EXECUTOR_NONE)
         return FL_RESULT_INVAL;
     h = wq_handler_index(tag);
     if (h < 0)
@@ -1022,7 +1048,7 @@ fl_result_t fl_wq_enqueue_durable(fl_workqueue_t *wq, uint32_t tag, int layer, c
     rc = wq_build_record(&r, tag, layer, h, owner, payload, n, idem_key, ttl_sec);
     if (rc != FL_RESULT_OK)
         return rc;
-    r.executor = wq->st.executor;
+    r.executor = wq_executor_of(wq);
 
     /* One step in the backend: a repeated key, then the backlog bound, then the append. Not durable
      * means not accepted. */
@@ -1088,7 +1114,7 @@ fl_result_t fl_wq_recover(fl_workqueue_t *wq) {
 
     if (!wq)
         return FL_RESULT_INVAL;
-    ex = wq->st.executor;
+    ex = wq_executor_of(wq);
     if (ex == FL_WQ_EXECUTOR_NONE)
         return FL_RESULT_OK;
     first = wq_walk(FL_WQ_ST_RUNNING, NULL, ex, wq_visit_reset, NULL);
@@ -1112,13 +1138,19 @@ static fl_result_t wq_visit_tally_unowned(const fl_wq_journal_record_t *r, void 
     return FL_RESULT_OK;
 }
 
-unsigned fl_wq_unowned_records(void) {
+fl_result_t fl_wq_unowned_records(unsigned *count) {
     static const fl_wq_state_t outstanding[] = {FL_WQ_ST_PENDING, FL_WQ_ST_QUEUED, FL_WQ_ST_RUNNING, FL_WQ_ST_HELD};
+    fl_result_t first = FL_RESULT_OK, rc;
     unsigned n = 0;
 
-    for (unsigned i = 0; i < sizeof(outstanding) / sizeof(outstanding[0]); i++)
-        (void)wq_walk(outstanding[i], NULL, FL_WQ_EXECUTOR_ANY, wq_visit_tally_unowned, &n);
-    return n;
+    if (!count)
+        return FL_RESULT_INVAL;
+    for (unsigned i = 0; i < sizeof(outstanding) / sizeof(outstanding[0]); i++) {
+        rc = wq_walk(outstanding[i], NULL, FL_WQ_EXECUTOR_ANY, wq_visit_tally_unowned, &n);
+        first = first != FL_RESULT_OK ? first : rc;
+    }
+    *count = n;
+    return first;
 }
 
 /* Only a registered executor's job moves; the rest stay HELD where fl_wq_unowned_records sees them. */
@@ -1130,17 +1162,23 @@ static fl_result_t wq_visit_resolve(const fl_wq_journal_record_t *r, void *arg) 
     return wq_mark(s_journal, r->id, FL_WQ_ST_HELD, run_now ? FL_WQ_ST_PENDING : FL_WQ_ST_SKIPPED);
 }
 
+/* Each queue is pinned (fillers) while the registry lock is held, so fl_wq_shutdown, which unregisters it
+ * under that lock and then waits for the pins, cannot return before the fill is done with the queue. */
 static void wq_fill_registered(void) {
     fl_workqueue_t *queues[FL_WQ_EXECUTORS_MAX];
     unsigned n;
 
     WQ_GLOBAL_LOCK();
     n = s_executor_count;
-    for (unsigned i = 0; i < n; i++)
+    for (unsigned i = 0; i < n; i++) {
         queues[i] = s_executors[i].wq;
+        (void)__atomic_fetch_add(&queues[i]->st.fillers, 1u, __ATOMIC_ACQ_REL);
+    }
     WQ_GLOBAL_UNLOCK();
-    for (unsigned i = 0; i < n; i++)
+    for (unsigned i = 0; i < n; i++) {
         (void)wq_fill_window(queues[i]);
+        (void)__atomic_fetch_sub(&queues[i]->st.fillers, 1u, __ATOMIC_RELEASE);
+    }
 }
 
 fl_result_t fl_wq_resolve_held(const char *owner, int run_now) {

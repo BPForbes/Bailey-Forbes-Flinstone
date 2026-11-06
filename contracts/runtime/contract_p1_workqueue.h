@@ -27,11 +27,13 @@
 
 /**
  * Durable work (FL-25). Design values: nothing in the repo sets one. A record's payload is at most
- * FL_WQ_PAYLOAD_MAX bytes; the journal refuses new work (FL_RESULT_BUSY) at FL_WQ_JOURNAL_MAX_PENDING
- * records waiting; a durable job is tried FL_WQ_MAX_ATTEMPTS times; FL_WQ_HANDLERS_MAX tags can be
+ * FL_WQ_PAYLOAD_MAX bytes; the journal refuses a new key (FL_RESULT_BUSY) when FL_WQ_JOURNAL_MAX_PENDING
+ * records are outstanding (PENDING, QUEUED, RUNNING or HELD; a repeated key is answered first); a durable
+ * job is tried FL_WQ_MAX_ATTEMPTS times; FL_WQ_HANDLERS_MAX tags and FL_WQ_EXECUTORS_MAX executors can be
  * registered. At most FL_WQ_PENDING_MAX / 2 durable jobs sit in the in-memory window at once.
- * Rev 5: a durable job is staged under a reservation counted in every capacity check, the backlog
- * bound counts PENDING, QUEUED, RUNNING and HELD, and a record belongs to one executor id.
+ * Rev 5: staging reserves its slot before claiming, so reservations count in every capacity check, and a
+ * record belongs to one executor id. FL_WQ_EXECUTOR_* and FL_WQ_ACCEPTED_UNSTAGED are defined in
+ * kernel/core/sched/workqueue.h with the record type they belong to.
  */
 #define FL_WQ_PAYLOAD_MAX 256u
 #define FL_WQ_JOURNAL_MAX_PENDING 1024u

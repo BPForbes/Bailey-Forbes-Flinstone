@@ -1141,9 +1141,62 @@ static int test_reservation_is_counted_in_every_capacity_check(void) {
     while (fl_wq_enqueue(wq, &prot) == FL_RESULT_OK)
         reserve_taken++;
     ASSERT(reserve_taken == FL_WQ_PROTECTED_RESERVE && fl_wq_pending(wq) == (int)FL_WQ_PENDING_MAX);
-    (void)fl_wq_drain(wq, 0);
+    ASSERT(fl_wq_drain(wq, 2000) == FL_RESULT_OK); /* bounded: a leak of the slots fails here, not as a hang */
     fl_wq_shutdown(wq);
     fj_remove();
+    return 0;
+}
+
+/* N claims in flight at once, each holding its reservation while it reads the journal: nested staging. */
+static unsigned s_nest, s_max_reserved, s_nest_limit;
+
+static void nest_reservations(void) {
+    fl_workqueue_storage_t *st = (fl_workqueue_storage_t *)s_hook_wq;
+    uint8_t key[16];
+
+    if (st->reserved > s_max_reserved)
+        s_max_reserved = st->reserved;
+    if (s_nest >= s_nest_limit)
+        return;
+    mkkey(key, 7000 + s_nest++);
+    (void)fl_wq_enqueue_durable(s_hook_wq, TAG_AUTO, FL_WQ_LAYER_NORMAL, NULL, NULL, 0, key, 0);
+}
+
+static int nested_staging_stays_within(unsigned ordinary, unsigned most_reserved) {
+    fl_workqueue_storage_t sw;
+    fl_workqueue_t *wq = (fl_workqueue_t *)&sw;
+    fl_wq_work_t w = {.fn = ordinary_noop, .pq_layer = FL_WQ_LAYER_NORMAL};
+    uint8_t key[16];
+
+    fj_install();
+    ASSERT(dq_init(wq) == FL_RESULT_OK);
+    for (unsigned i = 0; i < ordinary; i++)
+        ASSERT(fl_wq_enqueue(wq, &w) == FL_RESULT_OK);
+    s_hook_wq = wq;
+    s_nest = 0;
+    s_max_reserved = 0;
+    s_nest_limit = 3u * FL_WQ_PENDING_MAX;
+    s_fj.after_scan = nest_reservations;
+    mkkey(key, 6900);
+    (void)fl_wq_enqueue_durable(wq, TAG_AUTO, FL_WQ_LAYER_NORMAL, NULL, NULL, 0, key, 0);
+    s_fj.after_scan = NULL;
+    ASSERT(sw.reserved == 0);
+    ASSERT(s_max_reserved <= most_reserved); /* in flight together: never more than room allows */
+    ASSERT(sw.durable_inmem <= FL_WQ_PENDING_MAX / 2u);
+    ASSERT(fl_wq_pending(wq) <= (int)(FL_WQ_PENDING_MAX - FL_WQ_PROTECTED_RESERVE));
+    ASSERT(s_max_reserved >= most_reserved - 1u); /* and the test did press on the limit */
+    ASSERT(fl_wq_drain(wq, 5000) == FL_RESULT_OK);
+    fl_wq_shutdown(wq);
+    fj_remove();
+    return 0;
+}
+
+static int test_concurrent_claims_respect_the_window_and_the_cap(void) {
+    ASSERT(register_dur_tags() == 0);
+    /* empty queue: the 32-job window binds, whatever the cap would allow */
+    ASSERT(nested_staging_stays_within(0, FL_WQ_PENDING_MAX / 2u) == 0);
+    /* 40 ordinary items: the cap binds at 16 reservations, before the window does */
+    ASSERT(nested_staging_stays_within(40, FL_WQ_PENDING_MAX - FL_WQ_PROTECTED_RESERVE - 40u) == 0);
     return 0;
 }
 
@@ -1239,6 +1292,27 @@ static int test_failed_completion_write_is_retried_not_rerun(void) {
     return 0;
 }
 
+/* A retry entry names a row of the journal that was in force; another journal never sees it. */
+static int test_installing_a_journal_drops_stale_retries(void) {
+    fl_workqueue_storage_t st;
+    fl_workqueue_t *wq = (fl_workqueue_t *)&st;
+    uint8_t key[16];
+
+    ASSERT(register_dur_tags() == 0);
+    fj_install();
+    ASSERT(dq_init(wq) == FL_RESULT_OK);
+    mkkey(key, 3450);
+    s_fj.fail_to = FL_WQ_ST_DONE;
+    s_fj.fail_mark = 1;
+    ASSERT(fl_wq_enqueue_durable(wq, TAG_AUTO, FL_WQ_LAYER_NORMAL, NULL, NULL, 0, key, 0) == FL_RESULT_OK);
+    ASSERT(fl_wq_poll_at(wq, 8, 0) == 1 && fl_wq_retry_marks_pending() == 1);
+    (void)fl_wq_set_journal(&s_fj_ops);
+    ASSERT(fl_wq_retry_marks_pending() == 0);
+    fl_wq_shutdown(wq);
+    fj_remove();
+    return 0;
+}
+
 static int test_recovery_and_resolution_report_the_first_failure(void) {
     fl_workqueue_storage_t st;
     fl_workqueue_t *wq = (fl_workqueue_t *)&st;
@@ -1297,9 +1371,47 @@ static int test_executors_do_not_share_records(void) {
     return 0;
 }
 
+/* A queue staged a record, then its executor changed: it hands the record back instead of running it. */
+static int test_a_staged_record_of_another_executor_is_not_run(void) {
+    fl_workqueue_storage_t st;
+    fl_workqueue_t *wq = (fl_workqueue_t *)&st;
+    uint8_t key[16];
+
+    ASSERT(register_dur_tags() == 0);
+    fl_wq_journal_mem_reset();
+    s_dur_ran = 0;
+    ASSERT(dq_init(wq) == FL_RESULT_OK);
+    mkkey(key, 3650);
+    ASSERT(fl_wq_enqueue_durable(wq, TAG_AUTO, FL_WQ_LAYER_NORMAL, NULL, NULL, 0, key, 0) == FL_RESULT_OK);
+    ASSERT(fl_wq_set_executor(wq, 7) == FL_RESULT_OK);
+    ASSERT(fl_wq_poll_at(wq, 8, 0) == 1 && s_dur_ran == 0 && rec_state(1) == FL_WQ_ST_PENDING);
+    fl_wq_shutdown(wq);
+    return 0;
+}
+
+/* Keys are global: another executor repeating a key is told about the existing job, nothing is added. */
+static int test_a_repeated_key_is_answered_across_executors(void) {
+    fl_workqueue_storage_t sa, sb;
+    fl_workqueue_t *a = (fl_workqueue_t *)&sa, *b = (fl_workqueue_t *)&sb;
+    uint8_t key[16];
+
+    ASSERT(register_dur_tags() == 0);
+    fl_wq_journal_mem_reset();
+    ASSERT(dq_init(a) == FL_RESULT_OK && fl_wq_init(b) == FL_RESULT_OK && fl_wq_set_executor(b, 2) == FL_RESULT_OK);
+    mkkey(key, 3660);
+    ASSERT(fl_wq_enqueue_durable(a, TAG_AUTO, FL_WQ_LAYER_NORMAL, NULL, NULL, 0, key, 0) == FL_RESULT_OK);
+    ASSERT(fl_wq_enqueue_durable(b, TAG_AUTO, FL_WQ_LAYER_NORMAL, NULL, NULL, 0, key, 0) == FL_RESULT_OK);
+    ASSERT(fl_wq_journal_mem()->count(NULL, FL_WQ_ST_QUEUED, NULL, FL_WQ_EXECUTOR_ANY) == 1);
+    ASSERT(fl_wq_journal_mem()->count(NULL, FL_WQ_ST_QUEUED, NULL, 2) == 0 && fl_wq_pending(b) == 0);
+    fl_wq_shutdown(a);
+    fl_wq_shutdown(b);
+    return 0;
+}
+
 static int test_unknown_executor_is_left_alone_and_reported(void) {
     fl_workqueue_storage_t st;
     fl_workqueue_t *wq = (fl_workqueue_t *)&st;
+    unsigned unowned = 99;
 
     ASSERT(register_dur_tags() == 0);
     fl_wq_journal_mem_reset();
@@ -1313,9 +1425,9 @@ static int test_unknown_executor_is_left_alone_and_reported(void) {
     ASSERT(rec_state(1) == FL_WQ_ST_PENDING && rec_state(3) == FL_WQ_ST_QUEUED); /* recovery left them */
     ASSERT(fl_wq_resolve_held("Root.Zed", 1) == FL_RESULT_OK);
     ASSERT(rec_state(2) == FL_WQ_ST_HELD && fl_wq_poll_at(wq, 8, 0) == 0); /* no queue owns it: it stays held */
-    ASSERT(fl_wq_unowned_records() == 3);
+    ASSERT(fl_wq_unowned_records(&unowned) == FL_RESULT_OK && unowned == 3);
     ASSERT(fl_wq_set_executor(wq, 99) == FL_RESULT_OK); /* once an executor is registered they are its own */
-    ASSERT(fl_wq_unowned_records() == 0);
+    ASSERT(fl_wq_unowned_records(&unowned) == FL_RESULT_OK && unowned == 0);
     ASSERT(fl_wq_resolve_held("Root.Zed", 1) == FL_RESULT_OK && fl_wq_poll_at(wq, 8, 0) >= 1);
     fl_wq_shutdown(wq);
     return 0;
@@ -1405,7 +1517,11 @@ int main(void) {
     RUN_TEST(failed_staging_gives_the_claim_back);
     RUN_TEST(journal_failures_are_not_swallowed);
     RUN_TEST(failed_completion_write_is_retried_not_rerun);
+    RUN_TEST(installing_a_journal_drops_stale_retries);
     RUN_TEST(recovery_and_resolution_report_the_first_failure);
+    RUN_TEST(concurrent_claims_respect_the_window_and_the_cap);
+    RUN_TEST(a_staged_record_of_another_executor_is_not_run);
+    RUN_TEST(a_repeated_key_is_answered_across_executors);
     RUN_TEST(executors_do_not_share_records);
     RUN_TEST(unknown_executor_is_left_alone_and_reported);
     RUN_TEST(admission_counts_every_nonterminal_state);

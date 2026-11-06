@@ -161,6 +161,27 @@ static int old_store_migrates_to_the_default_executor(const char *path) {
     return 0;
 }
 
+/* Another connection holds the write lock: BEGIN fails, nothing is written, and the append works once it lets go. */
+static int append_that_cannot_begin_writes_nothing(const char *path) {
+    fl_wq_journal_ops_t j;
+    fl_wq_journal_record_t r;
+    sqlite3 *other;
+    uint64_t id;
+    int ex;
+
+    ASSERT(fl_wq_journal_sqlite_open(path, &j) == FL_RESULT_OK);
+    ASSERT(sqlite3_open(path, &other) == SQLITE_OK);
+    ASSERT(sqlite3_exec(other, "BEGIN IMMEDIATE", NULL, NULL, NULL) == SQLITE_OK);
+    fill_record(&r, 400, FL_WQ_EXECUTOR_DEFAULT);
+    ASSERT(j.append(j.ctx, &r, FL_WQ_JOURNAL_MAX_PENDING, &id, &ex) == FL_RESULT_ERR);
+    ASSERT(sqlite3_exec(other, "ROLLBACK", NULL, NULL, NULL) == SQLITE_OK);
+    sqlite3_close(other);
+    ASSERT(j.count(j.ctx, FL_WQ_ST_PENDING, NULL, FL_WQ_EXECUTOR_ANY) == 0);
+    ASSERT(j.append(j.ctx, &r, FL_WQ_JOURNAL_MAX_PENDING, &id, &ex) == FL_RESULT_OK && !ex); /* no stuck transaction */
+    fl_wq_journal_sqlite_close(&j);
+    return 0;
+}
+
 static void remove_db(const char *path) {
     char side[64];
 
@@ -198,7 +219,7 @@ int main(void) {
         snprintf(side, sizeof side, "%s-wal", path); unlink(side);
         snprintf(side, sizeof side, "%s-shm", path); unlink(side);
     }
-    if (rc || test_fresh_file(executor_is_stored_and_filters) || test_fresh_file(admission_in_a_fresh_file) || test_fresh_file(old_store_migrates_to_the_default_executor))
+    if (rc || test_fresh_file(executor_is_stored_and_filters) || test_fresh_file(admission_in_a_fresh_file) || test_fresh_file(append_that_cannot_begin_writes_nothing) || test_fresh_file(old_store_migrates_to_the_default_executor))
         return 1;
     if (fl_wq_illegal_moves() != 0) { /* the flushed journal saw only moves the Lean model allows */
         fprintf(stderr, "FAIL: the queue asked the SQLite journal for a move the model forbids\n");

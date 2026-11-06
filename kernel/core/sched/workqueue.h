@@ -36,6 +36,7 @@ typedef struct fl_workqueue_storage {
     unsigned durable_inmem;               /* durable jobs staged in the MLQ (the window over the journal) */
     unsigned reserved;                    /* slots promised to a durable job being claimed, not yet in the MLQ */
     uint32_t executor;                    /* FL_WQ_EXECUTOR_*: the durable records this queue may run */
+    unsigned fillers;                     /* resolvers holding this queue by the registry; shutdown waits for them */
     unsigned periodic_inflight;           /* periodic items promoted or running: keep a timer slot */
     int64_t poll_now_ns;                  /* time of the poll in progress; -1 = none or no clock */
     void *timers[FL_WQ_TIMERS_MAX];
@@ -138,7 +139,8 @@ typedef enum {
 #define FL_WQ_EXECUTOR_ANY 0xFFFFFFFFu /* a journal scan or count across executors */
 
 /**
- * Name the durable records wq runs, once at start and before it is polled. The id is registered: a
+ * Name the durable records wq runs, once at start and before it is polled (startup only: the field is
+ * read and written atomically, nothing more). The id is registered: a
  * record whose executor is not registered is never run (fl_wq_unowned_records counts them). A later
  * registration of the same id takes it over (a restart); a shut down queue is unregistered.
  * FL_RESULT_INVAL for NONE or ANY, FL_RESULT_NOMEM when FL_WQ_EXECUTORS_MAX ids are registered.
@@ -202,7 +204,9 @@ fl_result_t fl_wq_register_handler(uint32_t tag, fl_wq_handler_fn_t fn, uint8_t 
 /**
  * Accept a durable job: persisted FIRST (bound to wq's executor), then staged. FL_RESULT_BUSY when
  * FL_WQ_JOURNAL_MAX_PENDING jobs are outstanding (PENDING, QUEUED, RUNNING, HELD) and the key is new: a
- * clear "retry later". A repeated idem_key is OK whatever the backlog and queues nothing new. ttl_sec <=
+ * clear "retry later". A repeated idem_key is OK whatever the backlog and queues nothing new; the key is
+ * unique across executors, so a repeat from another executor is answered as the existing job and is
+ * not bound to the caller. ttl_sec <=
  * 0 means no deadline. owner may be NULL. FL_RESULT_INVAL for a queue with no executor. Any other
  * negative result means not accepted; FL_WQ_ACCEPTED_UNSTAGED means accepted.
  */
@@ -224,19 +228,27 @@ unsigned fl_wq_illegal_moves(void);
  *  executor is touched. Returns the first journal I/O error after trying the rest; progress already
  *  committed is kept, and a lost race (BUSY) is not an error. */
 fl_result_t fl_wq_recover(fl_workqueue_t *wq);
+/** Held jobs of this owner. A failing journal reads as 0: the count operation has no error channel. */
 unsigned fl_wq_held_count(const char *owner);
 /** run_now: held jobs of this owner are queued; otherwise only this occurrence is dropped (SKIPPED).
  *  Only a job of a registered executor moves; the rest stay HELD (fl_wq_unowned_records). Returns the
  *  first journal I/O error after trying the rest. It selects by an owner string and authenticates nobody. */
 fl_result_t fl_wq_resolve_held(const char *owner, int run_now);
 
-/** Outstanding (PENDING, QUEUED, RUNNING, HELD) records whose executor is not registered: never run. */
-unsigned fl_wq_unowned_records(void);
+/** Outstanding (PENDING, QUEUED, RUNNING, HELD) records whose executor is not registered: never run. They
+ *  include the rows a queue staged (QUEUED) before it was shut down: they stay QUEUED until fl_wq_recover
+ *  on a queue of that executor. *count is what was counted; the result is the first journal read error. */
+fl_result_t fl_wq_unowned_records(unsigned *count);
 /** Claims whose return to PENDING failed after a staging failure: the record stays QUEUED until recovery. */
 unsigned fl_wq_stuck_claims(void);
 /** Completion writes the journal refused and that are retried at the next poll (the handler never reruns). */
 unsigned fl_wq_retry_marks_pending(void);
-/** Completion writes dropped because the retry table was full: recovery finds the job RUNNING. */
+/** Completion writes that could not even be kept (the 16-entry in-memory retry table was full).
+ *  Completion is at-least-once with a bounded, in-memory repair, not a durable obligation: a refused
+ *  completion write leaves the record RUNNING, and the repair lives only in this process. When the table
+ *  is full, the process exits or crashes with entries pending, or the journal still refuses at exit,
+ *  fl_wq_recover finds the record RUNNING and runs the handler again. Handlers must be idempotent on
+ *  idem_key; this counter and fl_wq_retry_marks_pending say how often the repair was not enough. */
 unsigned fl_wq_retry_marks_lost(void);
 
 #endif /* FL_WORKQUEUE_H */

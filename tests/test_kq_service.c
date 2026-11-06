@@ -6,6 +6,7 @@
 #include "kq_service.h"
 
 #include "net_background.h"
+#include "workqueue.h"
 
 #include "bg_jobs.h"
 #include "contract_p2_authz.h"
@@ -278,6 +279,32 @@ static int test_the_periodic_sweep(void) {
     return 0;
 }
 
+/* The service queue has no executor: it polls, and it consumes no durable record. */
+static int test_the_private_queue_consumes_no_durable_record(void) {
+    fl_wq_work_t w = {.fn = count_job, .pq_layer = FL_WQ_LAYER_URGENT};
+    fl_wq_journal_record_t r;
+    uint64_t id;
+    int ex;
+
+    fl_wq_journal_mem_reset();
+    memset(&r, 0, sizeof r);
+    r.executor = FL_WQ_EXECUTOR_DEFAULT;
+    r.tag = 0x7A01;
+    r.layer = FL_WQ_LAYER_URGENT;
+    r.max_attempts = FL_WQ_MAX_ATTEMPTS;
+    r.idem_key[0] = 0x4B;
+    ASSERT(fl_wq_journal_mem()->append(NULL, &r, FL_WQ_JOURNAL_MAX_PENDING, &id, &ex) == FL_RESULT_OK);
+    atomic_store(&s_ran, 0);
+    ASSERT(fl_kq_service_submit(&w) == FL_RESULT_OK);
+    for (int i = 0; i < 100 && atomic_load(&s_ran) == 0; i++)
+        sleep_ms(20);
+    ASSERT(atomic_load(&s_ran) == 1); /* the service polled */
+    sleep_ms(100);
+    ASSERT(fl_wq_journal_mem()->load(NULL, id, &r) == FL_RESULT_OK && r.state == FL_WQ_ST_PENDING);
+    fl_wq_journal_mem_reset();
+    return 0;
+}
+
 static int test_orderly_shutdown_is_the_only_end(void) {
     fl_wq_work_t w = {.fn = count_job, .pq_layer = FL_WQ_LAYER_BACKGROUND};
 
@@ -311,6 +338,7 @@ int main(void) {
     if (!rc) RUN(test_protected_work_is_never_dropped_and_a_stall_fails_closed);
     if (!rc) RUN(test_nobody_may_control_the_service);
     if (!rc) RUN(test_the_periodic_sweep);
+    if (!rc) RUN(test_the_private_queue_consumes_no_durable_record);
     if (!rc) RUN(test_orderly_shutdown_is_the_only_end);
     unlink(path);
     rmdir(tmpl);
