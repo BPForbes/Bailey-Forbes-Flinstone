@@ -67,6 +67,12 @@ fl_heritage_relation_t fl_heritage_relation(const char *a, const char *b) {
     return (fl_heritage_relation_t)kq_heritage_relation(a, b);
 }
 
+int fl_heritage_bridge_connects(const char *end_a, const char *end_b, const char *actor, const char *scope) {
+    if (!end_a || !end_b || !actor || !scope)
+        return 0;
+    return kq_bridge_connects(end_a, end_b, actor, scope) != 0;
+}
+
 const char *fl_heritage_relation_name(fl_heritage_relation_t rel) {
     switch (rel) {
     case FL_HERITAGE_REL_SELF:

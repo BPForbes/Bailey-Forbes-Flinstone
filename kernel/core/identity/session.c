@@ -13,6 +13,14 @@ static int s_sudo_scope_depth;
 static int s_db_ready;
 static pthread_once_t s_once = PTHREAD_ONCE_INIT;
 static pthread_mutex_t s_session_mu = PTHREAD_MUTEX_INITIALIZER;
+static fl_session_online_fn s_online_hook;
+static fl_session_offline_fn s_offline_hook;
+static uint64_t s_login_gen = 1; /* every login and logout starts a new generation; 0 is never one */
+
+void fl_session_set_login_hooks(fl_session_online_fn online, fl_session_offline_fn offline) {
+    s_online_hook = online;
+    s_offline_hook = offline;
+}
 
 static void session_load_once(void) {
     const char *path = getenv("FL_USERS_DB_PATH");
@@ -124,38 +132,69 @@ int fl_session_has_elevation(void) {
     return has;
 }
 
+/* An account marked password-plus-KQST needs its slot token, and this build cannot present one yet. Refuse
+ * the login rather than quietly treat the account as password-only. Called with s_session_mu held, and only
+ * after the password verified, so a wrong password learns nothing about the account's mode. */
+static int kqst_required_unmet(const char *name) {
+    const fl_user_record_t *u = fl_user_db_find(&s_db, name);
+
+    if (!u || u->auth_mode != FL_USER_AUTH_PASSWORD_KQST)
+        return 0;
+    fprintf(stderr, "login: %s requires its KQST slot token, which this build cannot open; login refused\n",
+            u->name);
+    return 1;
+}
+
+/* Called with s_session_mu held, after the password verified. */
+static void login_ensure_account_key(const char *name, const char *password) {
+    int created = 0;
+
+    /*
+     * An account created before account keys has none: the password just
+     * verified seals a new one. A failure here does not block the login; the
+     * account simply cannot sign bridges until a later login succeeds.
+     */
+    if (fl_user_db_ensure_key(&s_db, name, password, &created) != FL_RESULT_OK) {
+        fprintf(stderr, "login: could not create a signing key for %s\n", name);
+    } else if (created && fl_user_db_save(&s_db) != FL_RESULT_OK) {
+        /* Never keep a key the store does not hold: the next login tries again. */
+        fl_user_db_forget_created(&s_db, name, created);
+        fprintf(stderr, "login: could not save the new signing key for %s\n", name);
+    }
+}
+
 fl_result_t fl_session_login(const char *name, const char *password) {
     fl_result_t rc = FL_RESULT_ACCES;
+    fl_user_record_t snapshot;
+    uint64_t gen = 0;
+    int have_snapshot = 0;
 
     fl_session_init();
     if (!name || !name[0] || !password)
         return FL_RESULT_INVAL;
     pthread_mutex_lock(&s_session_mu);
-    if (fl_user_db_verify_password(&s_db, name, password)) {
+    if (fl_user_db_verify_password(&s_db, name, password) && !kqst_required_unmet(name)) {
         const fl_user_record_t *u = fl_user_db_find(&s_db, name);
-        int created = 0;
 
-        /*
-         * An account created before account keys has none: the password just
-         * verified seals a new one. A failure here does not block the login; the
-         * account simply cannot sign bridges until a later login succeeds.
-         */
-        if (fl_user_db_ensure_key(&s_db, name, password, &created) != FL_RESULT_OK) {
-            fprintf(stderr, "login: could not create a signing key for %s\n", name);
-        } else if (created && fl_user_db_save(&s_db) != FL_RESULT_OK) {
-            /* Never keep a key the store does not hold: the next login tries again. */
-            fl_user_db_forget_created(&s_db, name, created);
-            fprintf(stderr, "login: could not save the new signing key for %s\n", name);
-        }
+        login_ensure_account_key(name, password);
         fl_elevation_revoke_all();
         /* Store the account's own spelling: "login root" signs in as Root. */
         strncpy(s_current, u ? u->name : name, sizeof(s_current) - 1);
         s_current[sizeof(s_current) - 1] = '\0';
         s_active_elev = FL_ELEVATION_TOKEN_NONE;
         s_sudo_scope_depth = 0;
+        gen = ++s_login_gen;
+        if (u) {
+            snapshot = *u; /* the hook derives from this copy, not from the live store */
+            have_snapshot = 1;
+        }
         rc = FL_RESULT_OK;
     }
     pthread_mutex_unlock(&s_session_mu);
+    /* The key service opens the account's key with the password just verified, outside the lock. A
+     * failure is the service's to audit and does not block the login. */
+    if (rc == FL_RESULT_OK && s_online_hook && have_snapshot)
+        (void)s_online_hook(&snapshot, password, gen);
     return rc;
 }
 
@@ -236,20 +275,65 @@ void fl_session_drop_elevation(void) {
     pthread_mutex_unlock(&s_session_mu);
 }
 
+fl_result_t fl_session_publish_if_current(uint64_t login_generation, fl_session_publish_fn publish, void *ctx) {
+    fl_result_t rc;
+
+    if (!publish)
+        return FL_RESULT_INVAL;
+    fl_session_init();
+    pthread_mutex_lock(&s_session_mu);
+    rc = (login_generation != 0 && login_generation != s_login_gen) ? FL_RESULT_BUSY : publish(ctx);
+    pthread_mutex_unlock(&s_session_mu);
+    return rc;
+}
+
+uint64_t fl_session_login_generation(void) {
+    uint64_t g;
+
+    fl_session_init();
+    pthread_mutex_lock(&s_session_mu);
+    g = s_login_gen;
+    pthread_mutex_unlock(&s_session_mu);
+    return g;
+}
+
+fl_result_t fl_session_snapshot_account(const char *name, fl_user_record_t *out) {
+    const fl_user_record_t *u;
+    fl_result_t rc = FL_RESULT_NOENT;
+
+    if (!name || !out)
+        return FL_RESULT_INVAL;
+    fl_session_init();
+    pthread_mutex_lock(&s_session_mu);
+    u = fl_user_db_find(&s_db, name);
+    if (u) {
+        *out = *u;
+        rc = FL_RESULT_OK;
+    }
+    pthread_mutex_unlock(&s_session_mu);
+    return rc;
+}
+
 fl_result_t fl_session_logout(void) {
     const char *def;
+    char who[FL_USER_NAME_MAX];
 
     fl_session_init();
     fl_elevation_revoke_all();
     pthread_mutex_lock(&s_session_mu);
+    strncpy(who, s_current, sizeof(who) - 1); /* the account that is signing out */
+    who[sizeof(who) - 1] = '\0';
     s_sudo_scope_depth = 0;
     s_active_elev = FL_ELEVATION_TOKEN_NONE;
+    s_login_gen++; /* a key still being derived for the login that ends here must not be published */
     def = s_db.default_user;
     if (!def || !def[0])
         def = "Flinstone";
     strncpy(s_current, def, sizeof(s_current) - 1);
     s_current[sizeof(s_current) - 1] = '\0';
     pthread_mutex_unlock(&s_session_mu);
+    if (s_offline_hook)
+        s_offline_hook(who); /* the service wipes that account's key */
     return FL_RESULT_OK;
 }
 

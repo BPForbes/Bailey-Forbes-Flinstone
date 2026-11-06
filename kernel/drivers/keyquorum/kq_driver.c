@@ -250,6 +250,51 @@ static const char *drv_outcome_name(uint8_t code) {
     return kq_file_outcome_name(code);
 }
 
+static int drv_seal_snapshot(const fl_kq_buf_t *c, uint32_t upto_events, const char *sender,
+                             const uint8_t sender_secret[32], const uint8_t sender_box_public[32],
+                             const char *recipient, const uint8_t recipient_box_public[32],
+                             fl_kq_buf_t *letter, uint8_t delivery_id[16]) {
+    SIZED_CALL(letter, kq_file_seal_snapshot(c->data, c->len, upto_events, sender, sender_secret,
+                                             sender_box_public, recipient, recipient_box_public,
+                                             outp_, cap_, &need_, delivery_id));
+}
+
+static int drv_open_snapshot(const fl_kq_buf_t *letter, const uint8_t box_secret[32],
+                             const char *expected_sender, const char *expected_recipient,
+                             const uint8_t sender_public[32], fl_kq_buf_t *snap, uint8_t root[32],
+                             uint32_t *event_count) {
+    SIZED_CALL(snap, kq_file_open_snapshot(letter->data, letter->len, box_secret, expected_sender,
+                                           expected_recipient, sender_public, outp_, cap_, &need_,
+                                           root, event_count));
+}
+
+static int drv_snapshot_covers(const fl_kq_buf_t *extract, const fl_kq_buf_t *snapshot) {
+    return kq_file_snapshot_covers(extract->data, extract->len, snapshot->data, snapshot->len);
+}
+
+static int drv_error_sign(uint16_t code, uint8_t class_code, uint8_t step,
+                          const uint8_t object_ref[32], const char *actor_label,
+                          const char *occurred_at, const char *detail_key, const char *detail_value,
+                          const uint8_t signing_secret[32], fl_kq_buf_t *out) {
+    SIZED_CALL(out, kq_error_sign(code, class_code, step, object_ref, actor_label, occurred_at,
+                                  detail_key, detail_value, signing_secret, outp_, cap_, &need_));
+}
+
+static int drv_error_inject(const fl_kq_buf_t *kqtf, const fl_kq_buf_t *kqer,
+                            const uint8_t reporter_public[32], const uint8_t pkg_sha256[32],
+                            fl_kq_buf_t *out) {
+    SIZED_CALL(out, kq_error_inject(kqtf->data, kqtf->len, kqer->data, kqer->len, reporter_public,
+                                    pkg_sha256, outp_, cap_, &need_));
+}
+
+static const char *drv_error_name(uint16_t code) {
+    return kq_error_name(code);
+}
+
+static const char *drv_error_class_name(uint8_t class_code) {
+    return kq_error_class_name(class_code);
+}
+
 static const fl_driver_ops_t s_kq_lifecycle = {
     .probe = kq_probe,
 };
@@ -293,11 +338,30 @@ static const fl_kq_driver_t s_kq_driver = {
     .account_bridge_verify = drv_account_bridge_verify,
     .event_name = drv_event_name,
     .outcome_name = drv_outcome_name,
+    .seal_snapshot = drv_seal_snapshot,
+    .open_snapshot = drv_open_snapshot,
+    .snapshot_covers = drv_snapshot_covers,
+    .error_sign = drv_error_sign,
+    .error_inject = drv_error_inject,
+    .error_name = drv_error_name,
+    .error_class_name = drv_error_class_name,
 };
 
 const fl_driver_desc_t *fl_kq_driver_desc(void) {
     return &s_kq_driver.base;
 }
+
+#ifdef FL_FREESTANDING
+/* The freestanding image has no driver model or registry: the resolver is the same ABI probe, on
+ * the one static descriptor. NULL when the linked library speaks another ABI. */
+const fl_kq_driver_t *fl_kq_driver_get(void) {
+    return kq_probe(NULL) == FL_RESULT_OK ? &s_kq_driver : NULL;
+}
+
+const fl_kq_driver_t *fl_kq_driver_get_or_register(void) {
+    return fl_kq_driver_get();
+}
+#else
 
 const fl_kq_driver_t *fl_kq_driver_get_or_register(void) {
     /* Before drivers_init (session seed, unit tests, the browser lab) the descriptor may not
@@ -305,3 +369,4 @@ const fl_kq_driver_t *fl_kq_driver_get_or_register(void) {
     (void)fl_driver_registry_ensure(&s_kq_driver.base);
     return fl_kq_driver_get();
 }
+#endif

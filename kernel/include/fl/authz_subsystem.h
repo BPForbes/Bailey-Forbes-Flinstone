@@ -19,6 +19,12 @@ void fl_authz_subsystem_set_hook(fl_authz_check_fn hook_fn, void *ctx);
 /** Default policy: allow; guest denies privileged **FL_AUTHZ_OP_*** codes. */
 fl_authz_decision_t fl_authz_subsystem_check(unsigned op, void *ctx);
 
+/**
+ * A sink told about every denied FL_AUTHZ_OP_KQ_SERVICE_CONTROL (the key service installs one that
+ * audits it). Kept as a hook so this file needs no audit or session code.
+ */
+void fl_authz_subsystem_set_deny_audit(void (*sink)(unsigned op));
+
 /** Map a **fl_shell_cmd_no_t** to **FL_AUTHZ_OP_*** for subsystem gates (0 = unspecified). */
 unsigned fl_authz_subsystem_op_for_shell_cmd(unsigned cmd_no);
 

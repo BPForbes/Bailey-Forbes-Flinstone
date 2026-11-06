@@ -92,6 +92,9 @@ static int test_key_ids(void) {
     ASSERT(fl_heritage_child("Root", "ROOT", out, sizeof out) == FL_RESULT_INVAL);
     ASSERT(fl_heritage_child("Root", "a.b", out, sizeof out) == FL_RESULT_INVAL);
     ASSERT(fl_heritage_child("Root", "", out, sizeof out) == FL_RESULT_INVAL);
+    /* 31 characters is the longest name that fits FL_USER_NAME_MAX (32 with the NUL). */
+    ASSERT(fl_heritage_child("Root", "abcdefghijklmnopqrstuvwxyz12345", out, sizeof out)
+           == FL_RESULT_OK);
     ASSERT(fl_heritage_child("Root", "abcdefghijklmnopqrstuvwxyz123456", out, sizeof out)
            == FL_RESULT_INVAL); /* 32 chars: one too long */
 
@@ -251,6 +254,82 @@ static int test_legacy_migration(void) {
     u = fl_user_db_find(&db, "Root");
     ASSERT(u && strcmp(u->name, "Root") == 0 && strcmp(u->key_id, "Root") == 0);
     ASSERT(strcmp(fl_user_db_find(&db, "alice")->key_id, "Root.alice") == 0);
+    unlink(path);
+    return 0;
+}
+
+/* A bridge's reach (KQ-19, kq_bridge_connects): one end holds the actor or an ancestor of it, the other
+ * sits on the scope's line. One hop only, and a bridge that touches neither is no reach. */
+static int test_bridge_reach(void) {
+    const char *a = "Root.Flinstone.Bob", *b = "Root.Alternative.Ann";
+
+    ASSERT(fl_heritage_bridge_connects(a, b, "Root.Flinstone.Bob", "Root.Alternative.Ann") == 1);
+    ASSERT(fl_heritage_bridge_connects(b, a, "Root.Flinstone.Bob", "Root.Alternative.Ann") == 1); /* ends are unordered */
+    /* the actor may sit below an end, the scope may be above or below the other end */
+    ASSERT(fl_heritage_bridge_connects(a, b, "Root.Flinstone.Bob.Kid", "Root.Alternative.Ann") == 1);
+    ASSERT(fl_heritage_bridge_connects(a, b, "Root.Flinstone.Bob", "Root.Alternative") == 1);
+    ASSERT(fl_heritage_bridge_connects(a, b, "Root.Flinstone.Bob", "Root.Alternative.Ann.Doc") == 1);
+    /* no reach: an actor under neither end, a scope off the other end's line, a shared prefix that is not ancestry */
+    ASSERT(fl_heritage_bridge_connects(a, b, "Root.Third.Eve", "Root.Alternative.Ann") == 0);
+    ASSERT(fl_heritage_bridge_connects(a, b, "Root.Flinstone.Bob", "Root.Third") == 0);
+    ASSERT(fl_heritage_bridge_connects(a, b, "Root.Flinstone.Bo", "Root.Alternative.Ann") == 0);
+    /* an invalid key and a null argument connect nothing */
+    ASSERT(fl_heritage_bridge_connects(a, b, "nope", "Root.Alternative.Ann") == 0);
+    ASSERT(fl_heritage_bridge_connects(a, NULL, "Root.Flinstone.Bob", "Root.Alternative.Ann") == 0);
+    return 0;
+}
+
+/* FL-15: the login mode and the KQST pairing. A store written before auth_mode upgrades in place and
+ * every account reads PASSWORD; the mode survives save and load (save re-inserts every record from
+ * memory, so a field outside the INSERT would be lost); the KQST path is read from account_keys. */
+static int test_auth_mode_and_kqst_path(void) {
+    char path[256], kqst[128];
+    sqlite3 *sql = NULL;
+    fl_user_db_t db;
+    const fl_user_record_t *u;
+
+    ASSERT(temp_db(path, sizeof path) == 0);
+    ASSERT(sqlite3_open(path, &sql) == SQLITE_OK);
+    ASSERT(sqlite3_exec(sql,
+                        "CREATE TABLE users (name TEXT PRIMARY KEY NOT NULL, password_hash TEXT NOT NULL,"
+                        " salt_hex TEXT NOT NULL, uid INTEGER NOT NULL, is_elevated INTEGER NOT NULL DEFAULT 0,"
+                        " key_id TEXT NOT NULL DEFAULT '', created_by TEXT NOT NULL DEFAULT '',"
+                        " created_at INTEGER NOT NULL DEFAULT 0, signing_public TEXT NOT NULL DEFAULT '',"
+                        " signing_sealed TEXT NOT NULL DEFAULT '', box_public TEXT NOT NULL DEFAULT '',"
+                        " box_sealed TEXT NOT NULL DEFAULT '');"
+                        "INSERT INTO users (name,password_hash,salt_hex,uid,key_id) VALUES ('Root','x','y',0,'Root');"
+                        "INSERT INTO users (name,password_hash,salt_hex,uid,key_id,created_by)"
+                        " VALUES ('Bob','x','y',2000,'Root.Bob','Root');",
+                        NULL, NULL, NULL) == SQLITE_OK);
+    sqlite3_close(sql);
+
+    ASSERT(fl_user_db_load(&db, path) == FL_RESULT_OK);
+    u = fl_user_db_find(&db, "Bob");
+    ASSERT(u && u->auth_mode == FL_USER_AUTH_PASSWORD); /* nobody is locked out by the upgrade */
+    ASSERT(fl_user_db_set_auth_mode(&db, "Bob", 7) == FL_RESULT_INVAL);
+    ASSERT(fl_user_db_set_auth_mode(&db, "Nobody", FL_USER_AUTH_PASSWORD_KQST) == FL_RESULT_NOENT);
+    ASSERT(fl_user_db_set_auth_mode(&db, "Bob", FL_USER_AUTH_PASSWORD_KQST) == FL_RESULT_OK);
+    ASSERT(fl_user_db_save(&db) == FL_RESULT_OK);
+    ASSERT(fl_user_db_load(&db, path) == FL_RESULT_OK);
+    ASSERT(fl_user_db_find(&db, "Bob")->auth_mode == FL_USER_AUTH_PASSWORD_KQST);
+    ASSERT(fl_user_db_find(&db, "Root")->auth_mode == FL_USER_AUTH_PASSWORD);
+
+    /* no row, then a row without a path, then a path */
+    ASSERT(fl_user_db_kqst_path(&db, "Root.Bob", kqst, sizeof kqst) == FL_RESULT_NOENT);
+    ASSERT(sqlite3_open(path, &sql) == SQLITE_OK);
+    ASSERT(sqlite3_exec(sql,
+                        "INSERT INTO account_keys (label,purpose,holds_share,minted_by,minted_at,generation,"
+                        "kqst_path,device_id,signing_public,encryption_public,ledger_seq,event_hash)"
+                        " VALUES ('Root.Bob','own',1,'Root',1,1,NULL,x'00',x'00',x'00',0,x'00');"
+                        "INSERT INTO account_keys (label,purpose,holds_share,minted_by,minted_at,generation,"
+                        "kqst_path,device_id,signing_public,encryption_public,ledger_seq,event_hash)"
+                        " VALUES ('Root.Eve','own',1,'Root',1,1,'/keys/eve.kqst',x'00',x'00',x'00',0,x'00');",
+                        NULL, NULL, NULL) == SQLITE_OK);
+    sqlite3_close(sql);
+    ASSERT(fl_user_db_kqst_path(&db, "Root.Bob", kqst, sizeof kqst) == FL_RESULT_NOENT);
+    ASSERT(fl_user_db_kqst_path(&db, "Root.Eve", kqst, sizeof kqst) == FL_RESULT_OK);
+    ASSERT(strcmp(kqst, "/keys/eve.kqst") == 0);
+    ASSERT(fl_user_db_kqst_path(&db, "Root.Eve", kqst, 4) == FL_RESULT_NOMEM);
     unlink(path);
     return 0;
 }
@@ -791,6 +870,8 @@ int main(void) {
     } while (0)
     RUN(test_key_ids);
     RUN(test_relations);
+    RUN(test_bridge_reach);
+    RUN(test_auth_mode_and_kqst_path);
     RUN(test_seed_and_accounts);
     RUN(test_legacy_migration);
     RUN(test_legacy_case_collision);

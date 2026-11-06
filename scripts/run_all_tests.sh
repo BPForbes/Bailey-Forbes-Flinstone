@@ -81,6 +81,9 @@ run_make "check-weak-rng" check-weak-rng
 run_make "test_mem_asm" test_mem_asm
 run_make "test_priority_queue" test_priority_queue
 run_make "test_workqueue_p18" test_workqueue_p18
+run_make "test_workqueue_p18_tsan" test_workqueue_p18_tsan
+run_make "test_workqueue_freestanding" test_workqueue_freestanding
+run_make "test_wq_journal_sqlite" test_wq_journal_sqlite
 
 if [[ "${USE_ASM_ALLOC:-0}" == "1" ]]; then
   run_make "test_alloc_asm" test_alloc_asm
@@ -106,6 +109,8 @@ run_make "test_kq_checkpoint" test_kq_checkpoint
 run_make "test_kq_delivery" test_kq_delivery
 run_make "test_kq_net" test_kq_net
 run_make "test_kq_wire" test_kq_wire
+run_make "test_kq_history_bundle" test_kq_history_bundle
+run_make "test_kq_service" test_kq_service
 run_make "test_part_buf" test_part_buf
 run_make "test_codeql_scripts" test_codeql_scripts
 

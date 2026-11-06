@@ -104,7 +104,10 @@ jobs:
       - name: Install Rust (KeyQuorum identity library)
         uses: dtolnay/rust-toolchain@89b12181fb390509a0842a86cc55eeb8eb928c1d # stable branch
         with:
-          toolchain: stable
+          toolchain: 1.97.0 # pinned (FL-17 item 5): the compiler the KeyQuorum archive was built and checked with
+
+      - name: Record Rust pin (FL-17)
+        run: rustc -Vv
 
       - name: Sync version checkout for build
         uses: ./.github/actions/sync-version-checkout
@@ -128,6 +131,21 @@ jobs:
 
       - name: Test — priority queue
         run: make test_priority_queue
+
+      - name: Check the Lean-generated workqueue model is in step with its source
+        run: make check-formal
+
+      - name: Test — workqueue (delayed, periodic, protected, ticker)
+        run: make test_workqueue_p18
+
+      - name: Test — workqueue under ThreadSanitizer (FL-22)
+        run: make test_workqueue_p18_tsan
+
+      - name: Test — workqueue, freestanding configuration
+        run: make test_workqueue_freestanding
+
+      - name: Test — workqueue SQLite journal (restart)
+        run: make test_wq_journal_sqlite
 
       - name: Test — invariants
         run: make test_invariants
@@ -161,6 +179,21 @@ jobs:
 
       - name: Test — drivers without KeyQuorum
         run: make test_drivers_no_keyquorum
+
+      - name: Test — KeyQuorum checkpoints (co-signed delivery)
+        run: make test_kq_checkpoint
+
+      - name: Test — KeyQuorum delivery store
+        run: make test_kq_delivery
+
+      - name: Test — KeyQuorum over the session wire
+        run: make test_kq_net test_kq_wire
+
+      - name: Test — KeyQuorum history bundle framing
+        run: make test_kq_history_bundle
+
+      - name: Test — KeyQuorum key service
+        run: make test_kq_service
 
       - name: Test — userspace connection
         run: make test_userspace_connection
@@ -206,7 +239,7 @@ jobs:
       - name: Install Rust (KeyQuorum identity library, AArch64)
         uses: dtolnay/rust-toolchain@89b12181fb390509a0842a86cc55eeb8eb928c1d # stable branch
         with:
-          toolchain: stable
+          toolchain: 1.97.0 # pinned (FL-17 item 5): the compiler the KeyQuorum archive was built and checked with
           targets: aarch64-unknown-linux-gnu
 
       - name: Sync version checkout for build
@@ -246,7 +279,7 @@ jobs:
       - name: Install Rust (KeyQuorum identity library)
         uses: dtolnay/rust-toolchain@89b12181fb390509a0842a86cc55eeb8eb928c1d # stable branch
         with:
-          toolchain: stable
+          toolchain: 1.97.0 # pinned (FL-17 item 5): the compiler the KeyQuorum archive was built and checked with
 
       - name: Sync version checkout for build
         uses: ./.github/actions/sync-version-checkout
@@ -278,7 +311,7 @@ jobs:
       - name: Install Rust (KeyQuorum identity library)
         uses: dtolnay/rust-toolchain@89b12181fb390509a0842a86cc55eeb8eb928c1d # stable branch
         with:
-          toolchain: stable
+          toolchain: 1.97.0 # pinned (FL-17 item 5): the compiler the KeyQuorum archive was built and checked with
           # KeyQuorum co-signed delivery in the WebAssembly lab (tools/browser-lab/wasm/lab_kq.c).
           targets: wasm32-unknown-emscripten
 

@@ -638,13 +638,14 @@ static int test_event_and_outcome_names_pinned(void) {
         /* 45 */ "LetterRefused",
         /* 46 */ "LetterReceived",
         /* 47 */ "LetterOpened",
+        /* 48 */ "ErrorReported", /* KQ-12, ABI 3 */
     };
     static const char *const outcomes[] = {"Success", "Failure", "Denied", "Info"};
     const size_t n_events = sizeof events / sizeof events[0];
     const size_t n_outcomes = sizeof outcomes / sizeof outcomes[0];
     unsigned c;
 
-    ASSERT(n_events == 47u);
+    ASSERT(n_events == 48u);
     ASSERT(n_outcomes == 4u);
     for (c = 1; c <= n_events; c++)
         ASSERT(strcmp(fl_kq_cp_event_name((uint8_t)c), events[c - 1u]) == 0);
