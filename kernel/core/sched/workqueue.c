@@ -677,8 +677,9 @@ static const fl_wq_journal_ops_t *s_journal = &s_memj_ops;
 /* After fl_wq_recover left RECOVER_ASK work PENDING for a queue (hold failed or incomplete), that
  * queue's ask_hold_pending must not stage ASK: later polls try PENDING->HELD instead. resolve_held
  * (run_now) records which journal ids the owner released so only those rows may claim ASK during
- * the fill — not every ASK on that executor. */
-static uint64_t s_allow_ask_ids[FL_WQ_JOURNAL_MAX_PENDING];
+ * the fill — not every ASK on that executor. Sized to the hosted pending cap (not the journal
+ * ceiling) so freestanding BSS stays under the conventional-memory budget. */
+static uint64_t s_allow_ask_ids[FL_WQ_PENDING_MAX];
 static unsigned s_allow_ask_n;
 
 static int wq_ask_claim_allowed(uint64_t id) {
@@ -692,7 +693,7 @@ static void wq_allow_ask_add(uint64_t id) {
     for (unsigned i = 0; i < s_allow_ask_n; i++)
         if (s_allow_ask_ids[i] == id)
             return;
-    if (s_allow_ask_n < FL_WQ_JOURNAL_MAX_PENDING)
+    if (s_allow_ask_n < FL_WQ_PENDING_MAX)
         s_allow_ask_ids[s_allow_ask_n++] = id;
 }
 
