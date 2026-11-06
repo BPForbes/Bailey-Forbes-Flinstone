@@ -932,7 +932,7 @@ static int test_durable_backlog_is_bounded_and_drains(void) {
 
 /* Wraps the memory journal. Each knob is a count of calls to fail, or a hook that runs inside one. */
 typedef struct {
-    unsigned fail_append, fail_scan, fail_mark;
+    unsigned fail_append, fail_scan, fail_mark, fail_load;
     fl_wq_state_t fail_to;       /* a mark into this state is the one that fails */
     fl_result_t mark_result;     /* what a failing mark answers: ERR (an I/O failure) or BUSY (a lost race) */
     void (*after_scan)(void);    /* after a scan returned rows: the caller holds its reservation and the rows */
@@ -964,6 +964,10 @@ static fl_result_t fj_mark(void *c, uint64_t id, fl_wq_state_t from, fl_wq_state
 }
 
 static fl_result_t fj_load(void *c, uint64_t id, fl_wq_journal_record_t *out) {
+    if (s_fj.fail_load) {
+        s_fj.fail_load--;
+        return FL_RESULT_ERR;
+    }
     return fl_wq_journal_mem()->load(c, id, out);
 }
 
@@ -1343,6 +1347,93 @@ static int test_recovery_and_resolution_report_the_first_failure(void) {
     return 0;
 }
 
+/* A failed PENDING->HELD triage must not let ASK work run on recover or on a later poll. */
+static int test_failed_ask_triage_cannot_be_staged(void) {
+    fl_workqueue_storage_t st;
+    fl_workqueue_t *wq = (fl_workqueue_t *)&st;
+
+    ASSERT(register_dur_tags() == 0);
+    fj_install();
+    ASSERT(dq_init(wq) == FL_RESULT_OK);
+    seed_record(3801, FL_WQ_EXECUTOR_DEFAULT, FL_WQ_ST_PENDING, "Root.Bob", FL_WQ_RECOVER_ASK);
+    s_fj.mark_result = FL_RESULT_ERR;
+    s_fj.fail_to = FL_WQ_ST_HELD;
+    s_fj.fail_mark = 2; /* triage fails, and the fill/poll hold retry also fails once */
+    ASSERT(fl_wq_recover(wq) == FL_RESULT_ERR);
+    ASSERT(rec_state(1) == FL_WQ_ST_PENDING && s_dur_ran == 0); /* not staged, not run */
+    ASSERT(fl_wq_poll_at(wq, 8, 0) == 0 && s_dur_ran == 0); /* later poll must not bypass */
+    ASSERT(rec_state(1) == FL_WQ_ST_HELD); /* the poll's second hold attempt lands */
+    ASSERT(fl_wq_resolve_held("Root.Bob", 1) == FL_RESULT_OK);
+    ASSERT(fl_wq_poll_at(wq, 8, 0) == 1 && s_dur_ran == 1);
+    fl_wq_shutdown(wq);
+    fj_remove();
+    return 0;
+}
+
+/* A failed load frees the staged slot and returns the claim; the failure is counted. */
+static int test_failed_durable_load_returns_the_claim(void) {
+    fl_workqueue_storage_t st;
+    fl_workqueue_t *wq = (fl_workqueue_t *)&st;
+    uint8_t key[16];
+    unsigned before;
+
+    ASSERT(register_dur_tags() == 0);
+    fj_install();
+    ASSERT(dq_init(wq) == FL_RESULT_OK);
+    mkkey(key, 3901);
+    ASSERT(fl_wq_enqueue_durable(wq, TAG_AUTO, FL_WQ_LAYER_NORMAL, NULL, NULL, 0, key, 0) == FL_RESULT_OK);
+    ASSERT(rec_state(1) == FL_WQ_ST_QUEUED);
+    before = fl_wq_durable_load_failures();
+    s_fj.fail_load = 1;
+    ASSERT(fl_wq_poll_at(wq, 8, 0) == 1 && s_dur_ran == 0);
+    ASSERT(fl_wq_durable_load_failures() == before + 1);
+    ASSERT(rec_state(1) == FL_WQ_ST_PENDING); /* claim returned for restaging */
+    ASSERT(fl_wq_poll_at(wq, 8, 0) == 1 && s_dur_ran == 1 && rec_state(1) == FL_WQ_ST_DONE);
+    fl_wq_shutdown(wq);
+    fj_remove();
+    return 0;
+}
+
+/* resolve_held(run_now) keeps committed transitions and reports a staging failure. */
+static int test_resolve_held_reports_staging_failure(void) {
+    fl_workqueue_storage_t st;
+    fl_workqueue_t *wq = (fl_workqueue_t *)&st;
+    unsigned before;
+
+    ASSERT(register_dur_tags() == 0);
+    fj_install();
+    ASSERT(dq_init(wq) == FL_RESULT_OK);
+    seed_record(4001, FL_WQ_EXECUTOR_DEFAULT, FL_WQ_ST_HELD, "Root.Cy", FL_WQ_RECOVER_ASK);
+    before = fl_wq_staging_errors();
+    s_fj.fail_to = FL_WQ_ST_QUEUED; /* claim after HELD->PENDING fails */
+    s_fj.fail_mark = 1;
+    ASSERT(fl_wq_resolve_held("Root.Cy", 1) == FL_RESULT_ERR);
+    ASSERT(rec_state(1) == FL_WQ_ST_PENDING); /* the resolve itself committed */
+    ASSERT(fl_wq_staging_errors() == before + 1);
+    fl_wq_shutdown(wq);
+    fj_remove();
+    return 0;
+}
+
+static int test_executor_registry_is_bounded(void) {
+    fl_workqueue_storage_t st[FL_WQ_EXECUTORS_MAX + 2];
+    unsigned n = 0;
+    fl_result_t rc = FL_RESULT_OK;
+
+    while (n < FL_WQ_EXECUTORS_MAX + 2) {
+        ASSERT(fl_wq_init((fl_workqueue_t *)&st[n]) == FL_RESULT_OK);
+        rc = fl_wq_set_executor((fl_workqueue_t *)&st[n], 200u + n);
+        if (rc == FL_RESULT_NOMEM)
+            break;
+        ASSERT(rc == FL_RESULT_OK);
+        n++;
+    }
+    ASSERT(rc == FL_RESULT_NOMEM && n >= 1 && n <= FL_WQ_EXECUTORS_MAX);
+    for (unsigned i = 0; i <= n; i++)
+        fl_wq_shutdown((fl_workqueue_t *)&st[i]);
+    return 0;
+}
+
 static int test_executors_do_not_share_records(void) {
     fl_workqueue_storage_t sa, sb, sc;
     fl_workqueue_t *a = (fl_workqueue_t *)&sa, *b = (fl_workqueue_t *)&sb, *none = (fl_workqueue_t *)&sc;
@@ -1519,6 +1610,10 @@ int main(void) {
     RUN_TEST(failed_completion_write_is_retried_not_rerun);
     RUN_TEST(installing_a_journal_drops_stale_retries);
     RUN_TEST(recovery_and_resolution_report_the_first_failure);
+    RUN_TEST(failed_ask_triage_cannot_be_staged);
+    RUN_TEST(failed_durable_load_returns_the_claim);
+    RUN_TEST(resolve_held_reports_staging_failure);
+    RUN_TEST(executor_registry_is_bounded);
     RUN_TEST(concurrent_claims_respect_the_window_and_the_cap);
     RUN_TEST(a_staged_record_of_another_executor_is_not_run);
     RUN_TEST(a_repeated_key_is_answered_across_executors);

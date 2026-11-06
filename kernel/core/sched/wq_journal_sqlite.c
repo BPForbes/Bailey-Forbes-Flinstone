@@ -64,14 +64,20 @@ static sqlite3_int64 executor_bind(uint32_t executor) {
 
 static fl_result_t wqj_load_locked(wqj_t *w, uint64_t id, fl_wq_journal_record_t *out) {
     sqlite3_stmt *st = NULL;
-    fl_result_t rc = FL_RESULT_NOENT;
+    fl_result_t rc;
+    int step;
 
     if (sqlite3_prepare_v2(w->db, "SELECT " COLS " FROM wq_jobs WHERE id = ?", -1, &st, NULL) != SQLITE_OK)
         return FL_RESULT_ERR;
     sqlite3_bind_int64(st, 1, (sqlite3_int64)id);
-    if (sqlite3_step(st) == SQLITE_ROW) {
+    step = sqlite3_step(st);
+    if (step == SQLITE_ROW) {
         row_to_record(st, out);
         rc = FL_RESULT_OK;
+    } else if (step == SQLITE_DONE) {
+        rc = FL_RESULT_NOENT;
+    } else {
+        rc = FL_RESULT_ERR; /* a step error is not absence */
     }
     sqlite3_finalize(st);
     return rc;
@@ -233,12 +239,20 @@ static fl_result_t wqj_scan(void *ctx, fl_wq_state_t state, const char *owner, u
     sqlite3_bind_int64(st, 4, after ? (sqlite3_int64)after->id : 0);
     sqlite3_bind_int(st, 5, (int)max);
     sqlite3_bind_int64(st, 6, executor_bind(executor));
-    while (got < max && sqlite3_step(st) == SQLITE_ROW)
-        row_to_record(st, &out[got++]);
-    sqlite3_finalize(st);
-    pthread_mutex_unlock(&w->mu);
-    *n = got;
-    return FL_RESULT_OK;
+    for (;;) {
+        int step = sqlite3_step(st);
+
+        if (step == SQLITE_ROW) {
+            if (got < max)
+                row_to_record(st, &out[got++]);
+            continue;
+        }
+        sqlite3_finalize(st);
+        pthread_mutex_unlock(&w->mu);
+        *n = got;
+        /* DONE ends a successful page; any other code is a read error (do not report OK). */
+        return step == SQLITE_DONE ? FL_RESULT_OK : FL_RESULT_ERR;
+    }
 }
 
 static unsigned wqj_count(void *ctx, fl_wq_state_t state, const char *owner, uint32_t executor) {

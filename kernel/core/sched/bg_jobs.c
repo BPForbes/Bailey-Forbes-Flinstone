@@ -96,6 +96,14 @@ fl_result_t fl_bg_watchdog_register(int (*alive)(void), void (*on_stall)(void)) 
     return rc;
 }
 
+void fl_bg_watchdog_clear(void) {
+    s_watchdog_count = 0;
+    for (unsigned i = 0; i < FL_BG_WATCHDOG_MAX; i++) {
+        s_watchdog[i].alive = NULL;
+        s_watchdog[i].on_stall = NULL;
+    }
+}
+
 void fl_bg_jobs_tick(unsigned max_wq_items) {
     if (!s_bg_inited)
         fl_bg_jobs_init();

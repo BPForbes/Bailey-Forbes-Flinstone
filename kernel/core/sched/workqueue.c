@@ -673,6 +673,10 @@ static unsigned memj_count(void *ctx, fl_wq_state_t st, const char *owner, uint3
 
 static const fl_wq_journal_ops_t s_memj_ops = {NULL, memj_append, memj_mark, memj_load, memj_scan, memj_count};
 static const fl_wq_journal_ops_t *s_journal = &s_memj_ops;
+/* After fl_wq_recover left RECOVER_ASK work PENDING (hold failed or incomplete), claim must not
+ * stage it: later polls try PENDING->HELD instead. resolve_held(run_now) sets s_allow_ask_claim so
+ * the owner's release can stage. */
+static unsigned s_ask_hold_pending, s_allow_ask_claim;
 
 const fl_wq_journal_ops_t *fl_wq_journal_mem(void) {
     return &s_memj_ops;
@@ -684,6 +688,8 @@ void fl_wq_journal_mem_reset(void) {
         s_memj_used[i] = 0;
     s_memj_next_id = 0;
     MEMJ_UNLOCK();
+    __atomic_store_n(&s_ask_hold_pending, 0u, __ATOMIC_RELAXED);
+    __atomic_store_n(&s_allow_ask_claim, 0u, __ATOMIC_RELAXED);
 }
 
 static void wq_retry_clear(void);
@@ -693,6 +699,8 @@ const fl_wq_journal_ops_t *fl_wq_set_journal(const fl_wq_journal_ops_t *ops) {
 
     s_journal = ops ? ops : &s_memj_ops;
     wq_retry_clear(); /* an entry names a row of the journal that was in force */
+    __atomic_store_n(&s_ask_hold_pending, 0u, __ATOMIC_RELAXED);
+    __atomic_store_n(&s_allow_ask_claim, 0u, __ATOMIC_RELAXED);
     return prev;
 }
 
@@ -744,7 +752,7 @@ static struct {
     uint64_t id;
     uint8_t from, to, used;
 } s_retry[WQ_RETRY_MAX];
-static unsigned s_retry_lost, s_stuck_claims;
+static unsigned s_retry_lost, s_stuck_claims, s_staging_errors, s_durable_load_failures;
 
 unsigned fl_wq_retry_marks_pending(void) {
     unsigned n = 0;
@@ -762,6 +770,14 @@ unsigned fl_wq_retry_marks_lost(void) {
 
 unsigned fl_wq_stuck_claims(void) {
     return __atomic_load_n(&s_stuck_claims, __ATOMIC_RELAXED);
+}
+
+unsigned fl_wq_staging_errors(void) {
+    return __atomic_load_n(&s_staging_errors, __ATOMIC_RELAXED);
+}
+
+unsigned fl_wq_durable_load_failures(void) {
+    return __atomic_load_n(&s_durable_load_failures, __ATOMIC_RELAXED);
 }
 
 static void wq_retry_clear(void) {
@@ -878,11 +894,15 @@ static fl_result_t wq_unclaim(const fl_wq_journal_record_t *r) {
 }
 
 /* Compare-and-set the oldest PENDING record of this executor to QUEUED. A record another thread
- * claimed first is skipped; NOENT when none is left. */
+ * claimed first is skipped; NOENT when none is left. While s_ask_hold_pending, RECOVER_ASK rows are
+ * held (or skipped) instead of staged so a failed recover triage cannot be bypassed by a later poll;
+ * resolve_held(run_now) sets s_allow_ask_claim for the owner's release. */
 static fl_result_t wq_claim_next(uint32_t executor, fl_wq_journal_record_t *out) {
     const fl_wq_journal_ops_t *j = s_journal;
     fl_wq_journal_record_t page[8], cursor;
     unsigned n, have = 0;
+    unsigned gate = __atomic_load_n(&s_ask_hold_pending, __ATOMIC_RELAXED);
+    unsigned allow_ask = __atomic_load_n(&s_allow_ask_claim, __ATOMIC_RELAXED);
 
     for (;;) {
         fl_result_t rc =
@@ -893,6 +913,12 @@ static fl_result_t wq_claim_next(uint32_t executor, fl_wq_journal_record_t *out)
         if (n == 0)
             return FL_RESULT_NOENT;
         for (unsigned i = 0; i < n; i++) {
+            if (gate && !allow_ask && page[i].recover == FL_WQ_RECOVER_ASK) {
+                rc = wq_mark(j, page[i].id, FL_WQ_ST_PENDING, FL_WQ_ST_HELD);
+                if (rc == FL_RESULT_OK || rc == FL_RESULT_BUSY)
+                    continue; /* held, or already moved: never stage without the owner */
+                return rc;
+            }
             rc = wq_mark(j, page[i].id, FL_WQ_ST_PENDING, FL_WQ_ST_QUEUED);
             if (rc == FL_RESULT_OK) {
                 wq_copy(out, &page[i], sizeof(*out));
@@ -908,7 +934,8 @@ static fl_result_t wq_claim_next(uint32_t executor, fl_wq_journal_record_t *out)
 }
 
 /* Stage one job. OK: staged. NOENT: no room or nothing to stage. Anything else is the failure, after
- * the reservation is released and a successful claim is given back. */
+ * a successful claim is given back and the reservation is released (unclaim before release so
+ * shutdown waiting on reserved==0 cannot return while claim reconciliation is still running). */
 static fl_result_t wq_stage_one(fl_workqueue_t *wq) {
     fl_wq_journal_record_t r;
     fl_result_t rc, rb;
@@ -923,8 +950,8 @@ static fl_result_t wq_stage_one(fl_workqueue_t *wq) {
     rc = wq_publish(wq, &r);
     if (rc == FL_RESULT_OK)
         return rc;
-    wq_release(wq);
     rb = wq_unclaim(&r);
+    wq_release(wq);
     return rb != FL_RESULT_OK ? rb : rc;
 }
 
@@ -974,9 +1001,16 @@ static void wq_run_durable(wq_item_t *item) {
     fl_workqueue_t *wq = item->owner;
     const fl_wq_journal_ops_t *j = s_journal;
     fl_wq_journal_record_t r;
+    fl_result_t rc = j->load(j->ctx, item->job_id, &r);
 
-    if (j->load(j->ctx, item->job_id, &r) == FL_RESULT_OK && r.state == FL_WQ_ST_QUEUED)
+    if (rc == FL_RESULT_OK && r.state == FL_WQ_ST_QUEUED) {
         wq_run_queued(wq, j, &r);
+    } else if (rc != FL_RESULT_OK) {
+        /* Load failed: free the staged slot but return the claim so the job is not stuck QUEUED
+         * with nothing in the MLQ and no retry obligation. */
+        (void)wq_mark(j, item->job_id, FL_WQ_ST_QUEUED, FL_WQ_ST_PENDING);
+        (void)__atomic_fetch_add(&s_durable_load_failures, 1u, __ATOMIC_RELAXED);
+    }
     WQ_LOCK(wq);
     if (wq->st.durable_inmem)
         wq->st.durable_inmem--;
@@ -1107,10 +1141,30 @@ static fl_result_t wq_visit_triage(const fl_wq_journal_record_t *r, void *arg) {
     return FL_RESULT_OK;
 }
 
+static fl_result_t wq_visit_count_ask(const fl_wq_journal_record_t *r, void *arg) {
+    if (r->recover == FL_WQ_RECOVER_ASK)
+        (*(unsigned *)arg)++;
+    return FL_RESULT_OK;
+}
+
+/* 1 when any PENDING RECOVER_ASK record remains for this executor (triage incomplete). */
+static int wq_pending_ask_remain(uint32_t executor) {
+    unsigned n = 0;
+
+    if (wq_walk(FL_WQ_ST_PENDING, NULL, executor, wq_visit_count_ask, &n) != FL_RESULT_OK)
+        return 1; /* a read error is treated as incomplete: do not stage ASK */
+    return n != 0;
+}
+
+static void wq_refresh_ask_gate(uint32_t executor) {
+    if (!wq_pending_ask_remain(executor))
+        __atomic_store_n(&s_ask_hold_pending, 0u, __ATOMIC_RELAXED);
+}
+
 fl_result_t fl_wq_recover(fl_workqueue_t *wq) {
     int64_t now = wq_now_sec();
     uint32_t ex;
-    fl_result_t first, rc;
+    fl_result_t first, rc, triage;
 
     if (!wq)
         return FL_RESULT_INVAL;
@@ -1120,9 +1174,15 @@ fl_result_t fl_wq_recover(fl_workqueue_t *wq) {
     first = wq_walk(FL_WQ_ST_RUNNING, NULL, ex, wq_visit_reset, NULL);
     rc = wq_walk(FL_WQ_ST_QUEUED, NULL, ex, wq_visit_reset, NULL);
     first = first != FL_RESULT_OK ? first : rc;
-    rc = wq_walk(FL_WQ_ST_PENDING, NULL, ex, wq_visit_triage, &now);
-    first = first != FL_RESULT_OK ? first : rc;
+    triage = wq_walk(FL_WQ_ST_PENDING, NULL, ex, wq_visit_triage, &now);
+    first = first != FL_RESULT_OK ? first : triage;
+    if (triage != FL_RESULT_OK || wq_pending_ask_remain(ex))
+        __atomic_store_n(&s_ask_hold_pending, 1u, __ATOMIC_RELAXED);
+    else
+        __atomic_store_n(&s_ask_hold_pending, 0u, __ATOMIC_RELAXED);
+    /* AUTO work may still stage; claim_next refuses ASK while the gate is set. */
     rc = wq_fill_window(wq);
+    wq_refresh_ask_gate(ex);
     return first != FL_RESULT_OK ? first : rc;
 }
 
@@ -1164,9 +1224,10 @@ static fl_result_t wq_visit_resolve(const fl_wq_journal_record_t *r, void *arg) 
 
 /* Each queue is pinned (fillers) while the registry lock is held, so fl_wq_shutdown, which unregisters it
  * under that lock and then waits for the pins, cannot return before the fill is done with the queue. */
-static void wq_fill_registered(void) {
+static fl_result_t wq_fill_registered(void) {
     fl_workqueue_t *queues[FL_WQ_EXECUTORS_MAX];
     unsigned n;
+    fl_result_t first = FL_RESULT_OK, rc;
 
     WQ_GLOBAL_LOCK();
     n = s_executor_count;
@@ -1176,20 +1237,33 @@ static void wq_fill_registered(void) {
     }
     WQ_GLOBAL_UNLOCK();
     for (unsigned i = 0; i < n; i++) {
-        (void)wq_fill_window(queues[i]);
+        rc = wq_fill_window(queues[i]);
+        if (rc != FL_RESULT_OK && first == FL_RESULT_OK)
+            first = rc;
+        wq_refresh_ask_gate(wq_executor_of(queues[i]));
         (void)__atomic_fetch_sub(&queues[i]->st.fillers, 1u, __ATOMIC_RELEASE);
     }
+    return first;
 }
 
 fl_result_t fl_wq_resolve_held(const char *owner, int run_now) {
-    fl_result_t rc;
+    fl_result_t rc, fill_rc = FL_RESULT_OK;
 
     if (!owner)
         return FL_RESULT_INVAL;
     rc = wq_walk(FL_WQ_ST_HELD, owner, FL_WQ_EXECUTOR_ANY, wq_visit_resolve, &run_now);
-    if (run_now)
-        wq_fill_registered();
-    return rc;
+    if (run_now) {
+        /* Owner-released ASK rows are PENDING again: allow this fill to claim them even if a prior
+         * incomplete triage still gates ordinary polls. */
+        __atomic_store_n(&s_allow_ask_claim, 1u, __ATOMIC_RELAXED);
+        fill_rc = wq_fill_registered();
+        __atomic_store_n(&s_allow_ask_claim, 0u, __ATOMIC_RELAXED);
+        if (fill_rc != FL_RESULT_OK)
+            (void)__atomic_fetch_add(&s_staging_errors, 1u, __ATOMIC_RELAXED);
+    }
+    /* Keep committed HELD transitions; surface the first staging failure separately via the result
+     * when the walk itself succeeded. */
+    return rc != FL_RESULT_OK ? rc : fill_rc;
 }
 
 /* Move every due timer into the MLQ, earliest first. Caller holds the lock. */
@@ -1209,11 +1283,15 @@ static void wq_promote_due(fl_workqueue_t *wq, int64_t now_ns) {
 
 unsigned fl_wq_poll_at(fl_workqueue_t *wq, unsigned max_items, int64_t now_ns) {
     unsigned ran = 0;
+    fl_result_t fill_rc;
 
     if (!wq || max_items == 0)
         return 0;
 
-    (void)wq_fill_window(wq);
+    fill_rc = wq_fill_window(wq);
+    if (fill_rc != FL_RESULT_OK)
+        (void)__atomic_fetch_add(&s_staging_errors, 1u, __ATOMIC_RELAXED);
+    wq_refresh_ask_gate(wq_executor_of(wq));
     WQ_LOCK(wq);
 #ifdef FL_WQ_DEBUG_REENTRANCY
     assert(wq->st.poll_depth == 0 &&

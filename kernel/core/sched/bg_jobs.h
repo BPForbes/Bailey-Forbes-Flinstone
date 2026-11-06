@@ -41,6 +41,12 @@ void fl_bg_jobs_ticker_stop(void);
 #define FL_BG_WATCHDOG_MAX 4u
 #define FL_BG_WATCHDOG_PERIOD_MS 1000u
 fl_result_t fl_bg_watchdog_register(int (*alive)(void), void (*on_stall)(void));
+/**
+ * Drop every registered check. Call before taking a watched service offline so a later
+ * protected drain of the watchdog item cannot report a false stall. The periodic item may
+ * still run once; with an empty registry it does nothing.
+ */
+void fl_bg_watchdog_clear(void);
 /** Run the registered checks once. */
 void fl_bg_watchdog_check(void);
 

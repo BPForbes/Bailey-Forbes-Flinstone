@@ -283,6 +283,9 @@ fl_result_t fl_kq_service_start(void) {
 void fl_kq_service_shutdown(void) {
     if (!s_started)
         return;
+    /* Drop the alive() check before the service thread stops: fl_bg_jobs_shutdown still drains the
+     * protected watchdog item once, and without this it would see !alive and audit a false stall. */
+    fl_bg_watchdog_clear();
     atomic_store(&s_stop, 1);
     pthread_mutex_lock(&s_wake_mu);
     pthread_cond_signal(&s_wake_cv);

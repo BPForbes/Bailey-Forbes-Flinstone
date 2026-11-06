@@ -232,7 +232,9 @@ fl_result_t fl_wq_recover(fl_workqueue_t *wq);
 unsigned fl_wq_held_count(const char *owner);
 /** run_now: held jobs of this owner are queued; otherwise only this occurrence is dropped (SKIPPED).
  *  Only a job of a registered executor moves; the rest stay HELD (fl_wq_unowned_records). Returns the
- *  first journal I/O error after trying the rest. It selects by an owner string and authenticates nobody. */
+ *  first journal I/O error after trying the rest (a staging failure after a successful resolve is
+ *  returned and counted in fl_wq_staging_errors; committed HELD transitions are kept). It selects by
+ *  an owner string and authenticates nobody. */
 fl_result_t fl_wq_resolve_held(const char *owner, int run_now);
 
 /** Outstanding (PENDING, QUEUED, RUNNING, HELD) records whose executor is not registered: never run. They
@@ -241,6 +243,16 @@ fl_result_t fl_wq_resolve_held(const char *owner, int run_now);
 fl_result_t fl_wq_unowned_records(unsigned *count);
 /** Claims whose return to PENDING failed after a staging failure: the record stays QUEUED until recovery. */
 unsigned fl_wq_stuck_claims(void);
+/**
+ * Staging failures observed by poll or resolve_held (journal I/O while filling the window). The
+ * count-returning poll API cannot return them; this counter is the observable channel.
+ */
+unsigned fl_wq_staging_errors(void);
+/**
+ * Durable items whose journal load failed when the staged MLQ entry ran: the claim was returned to
+ * PENDING so a later poll can restage; the handler did not run.
+ */
+unsigned fl_wq_durable_load_failures(void);
 /** Completion writes the journal refused and that are retried at the next poll (the handler never reruns). */
 unsigned fl_wq_retry_marks_pending(void);
 /** Completion writes that could not even be kept (the 16-entry in-memory retry table was full).

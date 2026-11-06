@@ -106,6 +106,9 @@ jobs:
         with:
           toolchain: 1.97.0 # pinned (FL-17 item 5): the compiler the KeyQuorum archive was built and checked with
 
+      - name: Record Rust pin (FL-17)
+        run: rustc -Vv
+
       - name: Sync version checkout for build
         uses: ./.github/actions/sync-version-checkout
 
@@ -134,6 +137,9 @@ jobs:
 
       - name: Test — workqueue (delayed, periodic, protected, ticker)
         run: make test_workqueue_p18
+
+      - name: Test — workqueue under ThreadSanitizer (FL-22)
+        run: make test_workqueue_p18_tsan
 
       - name: Test — workqueue, freestanding configuration
         run: make test_workqueue_freestanding

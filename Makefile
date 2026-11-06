@@ -731,6 +731,8 @@ VM/devices/%.o: VM/devices/%.c
 # --- ASM + Alloc + PQ unit tests (no CUnit) ---
 # Use -fsanitize when NOT using ASM allocator (libc tests only)
 TEST_SANITIZE = -fsanitize=address,undefined -fno-sanitize-recover=undefined -fno-omit-frame-pointer
+# ThreadSanitizer is incompatible with ASan; use a separate workqueue target (FL-22 evidence).
+TEST_TSAN = -fsanitize=thread -fno-omit-frame-pointer
 # TEST_QUIET=1 (or: make -s test_wifi) — hide long link lines; show test program output only.
 # run-test_wifi — run existing binaries without linking (build first with make test_wifi).
 ifeq ($(TEST_QUIET),1)
@@ -765,6 +767,13 @@ test_workqueue_p18: tests/test_workqueue_p18.c kernel/core/sched/workqueue.c ker
 	$(CC) $(CFLAGS) $(TEST_SANITIZE) -I. -o tests/test_workqueue_p18 tests/test_workqueue_p18.c \
 	  kernel/core/sched/workqueue.c kernel/core/sched/bg_jobs.c kernel/core/sched/priority_queue.c kernel/core/time/timekeeping.c $(MEM_ASM_OBJ) -Wl,-z,noexecstack
 	./tests/test_workqueue_p18
+
+# FL-22: ticker + concurrent enqueue under ThreadSanitizer (no ASan; same sources as test_workqueue_p18).
+.PHONY: test_workqueue_p18_tsan
+test_workqueue_p18_tsan: tests/test_workqueue_p18.c kernel/core/sched/workqueue.c kernel/core/sched/bg_jobs.c kernel/core/sched/priority_queue.c kernel/core/time/timekeeping.c $(MEM_ASM_OBJ)
+	$(CC) $(CFLAGS) $(TEST_TSAN) -I. -o tests/test_workqueue_p18_tsan tests/test_workqueue_p18.c \
+	  kernel/core/sched/workqueue.c kernel/core/sched/bg_jobs.c kernel/core/sched/priority_queue.c kernel/core/time/timekeeping.c $(MEM_ASM_OBJ) -Wl,-z,noexecstack
+	./tests/test_workqueue_p18_tsan
 
 # The workqueue's flushed SQLite journal, across a real restart (hosted only).
 .PHONY: test_wq_journal_sqlite
