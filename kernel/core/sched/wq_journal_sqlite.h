@@ -15,4 +15,10 @@ fl_result_t fl_wq_journal_sqlite_open(const char *path, fl_wq_journal_ops_t *ops
 /** Close what open returned (the ops table is unusable afterwards). Not while work is running. */
 void fl_wq_journal_sqlite_close(fl_wq_journal_ops_t *ops);
 
+/**
+ * Fault injection for tests: the next **n** successful admits have their COMMIT refused (the
+ * transaction rolls back and append returns ERR, so nothing is left written). n == 0 clears the hook.
+ */
+void fl_wq_journal_sqlite_fail_next_commits(fl_wq_journal_ops_t *ops, unsigned n);
+
 #endif

@@ -81,6 +81,7 @@ run_make "check-weak-rng" check-weak-rng
 run_make "test_mem_asm" test_mem_asm
 run_make "test_priority_queue" test_priority_queue
 run_make "test_workqueue_p18" test_workqueue_p18
+run_make "test_workqueue_p18_tsan" test_workqueue_p18_tsan
 run_make "test_workqueue_freestanding" test_workqueue_freestanding
 run_make "test_wq_journal_sqlite" test_wq_journal_sqlite
 

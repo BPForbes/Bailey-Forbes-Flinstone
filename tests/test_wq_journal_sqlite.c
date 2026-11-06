@@ -182,6 +182,24 @@ static int append_that_cannot_begin_writes_nothing(const char *path) {
     return 0;
 }
 
+/* COMMIT refused after a successful insert: the transaction rolls back and a later append works. */
+static int append_that_cannot_commit_writes_nothing(const char *path) {
+    fl_wq_journal_ops_t j;
+    fl_wq_journal_record_t r;
+    uint64_t id;
+    int ex;
+
+    ASSERT(fl_wq_journal_sqlite_open(path, &j) == FL_RESULT_OK);
+    fill_record(&r, 500, FL_WQ_EXECUTOR_DEFAULT);
+    fl_wq_journal_sqlite_fail_next_commits(&j, 1);
+    ASSERT(j.append(j.ctx, &r, FL_WQ_JOURNAL_MAX_PENDING, &id, &ex) == FL_RESULT_ERR);
+    ASSERT(j.count(j.ctx, FL_WQ_ST_PENDING, NULL, FL_WQ_EXECUTOR_ANY) == 0);
+    ASSERT(j.append(j.ctx, &r, FL_WQ_JOURNAL_MAX_PENDING, &id, &ex) == FL_RESULT_OK && !ex);
+    ASSERT(j.count(j.ctx, FL_WQ_ST_PENDING, NULL, FL_WQ_EXECUTOR_ANY) == 1);
+    fl_wq_journal_sqlite_close(&j);
+    return 0;
+}
+
 static void remove_db(const char *path) {
     char side[64];
 
@@ -219,7 +237,10 @@ int main(void) {
         snprintf(side, sizeof side, "%s-wal", path); unlink(side);
         snprintf(side, sizeof side, "%s-shm", path); unlink(side);
     }
-    if (rc || test_fresh_file(executor_is_stored_and_filters) || test_fresh_file(admission_in_a_fresh_file) || test_fresh_file(append_that_cannot_begin_writes_nothing) || test_fresh_file(old_store_migrates_to_the_default_executor))
+    if (rc || test_fresh_file(executor_is_stored_and_filters) || test_fresh_file(admission_in_a_fresh_file) ||
+        test_fresh_file(append_that_cannot_begin_writes_nothing) ||
+        test_fresh_file(append_that_cannot_commit_writes_nothing) ||
+        test_fresh_file(old_store_migrates_to_the_default_executor))
         return 1;
     if (fl_wq_illegal_moves() != 0) { /* the flushed journal saw only moves the Lean model allows */
         fprintf(stderr, "FAIL: the queue asked the SQLite journal for a move the model forbids\n");

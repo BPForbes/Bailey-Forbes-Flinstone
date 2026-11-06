@@ -1415,6 +1415,62 @@ static int test_resolve_held_reports_staging_failure(void) {
     return 0;
 }
 
+/* More completion repairs than the 16-entry table: the rest are counted as lost; records stay RUNNING. */
+static int test_retry_table_saturation_is_counted(void) {
+    fl_workqueue_storage_t st;
+    fl_workqueue_t *wq = (fl_workqueue_t *)&st;
+    uint8_t key[16];
+    unsigned before_lost, before_pending, n = 20;
+
+    ASSERT(register_dur_tags() == 0);
+    fj_install();
+    ASSERT(dq_init(wq) == FL_RESULT_OK);
+    before_lost = fl_wq_retry_marks_lost();
+    before_pending = fl_wq_retry_marks_pending();
+    s_fj.fail_to = FL_WQ_ST_DONE;
+    s_fj.fail_mark = n; /* every completion write fails once */
+    for (unsigned i = 0; i < n; i++) {
+        mkkey(key, 4100 + i);
+        ASSERT(fl_wq_enqueue_durable(wq, TAG_AUTO, FL_WQ_LAYER_NORMAL, NULL, NULL, 0, key, 0) == FL_RESULT_OK);
+    }
+    ASSERT(fl_wq_poll_at(wq, n, 0) == n && s_dur_ran == n);
+    ASSERT(fl_wq_retry_marks_pending() == before_pending + 16);
+    ASSERT(fl_wq_retry_marks_lost() == before_lost + (n - 16));
+    /* A later poll repairs the retained ones; the lost ones stay RUNNING for recovery. */
+    ASSERT(fl_wq_poll_at(wq, 1, 0) == 0);
+    ASSERT(fl_wq_retry_marks_pending() == 0);
+    ASSERT(fl_wq_journal_mem()->count(NULL, FL_WQ_ST_RUNNING, NULL, FL_WQ_EXECUTOR_ANY) == n - 16);
+    ASSERT(fl_wq_journal_mem()->count(NULL, FL_WQ_ST_DONE, NULL, FL_WQ_EXECUTOR_ANY) == 16);
+    fl_wq_shutdown(wq);
+    fj_remove();
+    return 0;
+}
+
+/* After the retry table is wiped (a new journal), recover re-runs RUNNING work that never completed. */
+static int test_recover_reruns_when_completion_repairs_were_lost(void) {
+    fl_workqueue_storage_t st;
+    fl_workqueue_t *wq = (fl_workqueue_t *)&st;
+    uint8_t key[16];
+
+    ASSERT(register_dur_tags() == 0);
+    fj_install();
+    ASSERT(dq_init(wq) == FL_RESULT_OK);
+    mkkey(key, 4200);
+    s_fj.fail_to = FL_WQ_ST_DONE;
+    s_fj.fail_mark = 1;
+    ASSERT(fl_wq_enqueue_durable(wq, TAG_AUTO, FL_WQ_LAYER_NORMAL, NULL, NULL, 0, key, 0) == FL_RESULT_OK);
+    ASSERT(fl_wq_poll_at(wq, 8, 0) == 1 && s_dur_ran == 1 && rec_state(1) == FL_WQ_ST_RUNNING);
+    ASSERT(fl_wq_retry_marks_pending() == 1);
+    (void)fl_wq_set_journal(&s_fj_ops); /* drops the in-memory repair table */
+    ASSERT(fl_wq_retry_marks_pending() == 0 && rec_state(1) == FL_WQ_ST_RUNNING);
+    s_dur_ran = 0;
+    ASSERT(fl_wq_recover(wq) == FL_RESULT_OK); /* RUNNING -> PENDING then staged */
+    ASSERT(fl_wq_poll_at(wq, 8, 0) == 1 && s_dur_ran == 1 && rec_state(1) == FL_WQ_ST_DONE);
+    fl_wq_shutdown(wq);
+    fj_remove();
+    return 0;
+}
+
 static int test_executor_registry_is_bounded(void) {
     fl_workqueue_storage_t st[FL_WQ_EXECUTORS_MAX + 2];
     unsigned n = 0;
@@ -1613,6 +1669,8 @@ int main(void) {
     RUN_TEST(failed_ask_triage_cannot_be_staged);
     RUN_TEST(failed_durable_load_returns_the_claim);
     RUN_TEST(resolve_held_reports_staging_failure);
+    RUN_TEST(retry_table_saturation_is_counted);
+    RUN_TEST(recover_reruns_when_completion_repairs_were_lost);
     RUN_TEST(executor_registry_is_bounded);
     RUN_TEST(concurrent_claims_respect_the_window_and_the_cap);
     RUN_TEST(a_staged_record_of_another_executor_is_not_run);

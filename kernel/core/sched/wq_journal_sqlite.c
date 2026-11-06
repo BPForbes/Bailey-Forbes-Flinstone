@@ -10,7 +10,17 @@
 typedef struct {
     sqlite3 *db;
     pthread_mutex_t mu;
+    unsigned fail_commits; /* test hook: remaining COMMITs to refuse */
 } wqj_t;
+
+static int wqj_commit_fail_hook(void *arg) {
+    wqj_t *w = (wqj_t *)arg;
+
+    if (!w->fail_commits)
+        return 0;
+    w->fail_commits--;
+    return 1; /* non-zero: SQLite aborts the COMMIT; append rolls back */
+}
 
 #define COLS "id, idem_key, tag, layer, recover, owner, state, attempts, max_attempts, accepted_at, deadline, payload, executor"
 
@@ -175,10 +185,12 @@ static fl_result_t wqj_append(void *ctx, const fl_wq_journal_record_t *r, unsign
         return FL_RESULT_ERR;
     }
     rc = wqj_admit_locked(w, r, max_outstanding, id_out, existing);
-    if (rc == FL_RESULT_OK && fl_sqlite_exec(w->db, "wq_journal", "COMMIT") != FL_RESULT_OK)
-        rc = FL_RESULT_ERR;
-    if (rc != FL_RESULT_OK)
+    if (rc == FL_RESULT_OK) {
+        if (fl_sqlite_exec(w->db, "wq_journal", "COMMIT") != FL_RESULT_OK)
+            rc = FL_RESULT_ERR; /* a refused COMMIT already aborted the transaction */
+    } else {
         (void)fl_sqlite_exec(w->db, "wq_journal", "ROLLBACK");
+    }
     pthread_mutex_unlock(&w->mu);
     return rc;
 }
@@ -319,12 +331,25 @@ fl_result_t fl_wq_journal_sqlite_open(const char *path, fl_wq_journal_ops_t *ops
     return FL_RESULT_OK;
 }
 
+void fl_wq_journal_sqlite_fail_next_commits(fl_wq_journal_ops_t *ops, unsigned n) {
+    wqj_t *w;
+
+    if (!ops || !ops->ctx)
+        return;
+    w = (wqj_t *)ops->ctx;
+    pthread_mutex_lock(&w->mu);
+    w->fail_commits = n;
+    sqlite3_commit_hook(w->db, n ? wqj_commit_fail_hook : NULL, w);
+    pthread_mutex_unlock(&w->mu);
+}
+
 void fl_wq_journal_sqlite_close(fl_wq_journal_ops_t *ops) {
     wqj_t *w;
 
     if (!ops || !ops->ctx)
         return;
     w = (wqj_t *)ops->ctx;
+    sqlite3_commit_hook(w->db, NULL, NULL);
     sqlite3_close(w->db);
     pthread_mutex_destroy(&w->mu);
     free(w);
