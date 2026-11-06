@@ -1220,6 +1220,23 @@ unsigned fl_wq_held_count(const char *owner) {
     return j->count(j->ctx, FL_WQ_ST_HELD, owner ? owner : "", FL_WQ_EXECUTOR_ANY);
 }
 
+static fl_result_t wq_visit_tally(const fl_wq_journal_record_t *r, void *arg) {
+    (void)r;
+    (*(unsigned *)arg)++;
+    return FL_RESULT_OK;
+}
+
+fl_result_t fl_wq_held_records(const char *owner, unsigned *count) {
+    unsigned n = 0;
+    fl_result_t rc;
+
+    if (!count)
+        return FL_RESULT_INVAL;
+    rc = wq_walk(FL_WQ_ST_HELD, owner ? owner : "", FL_WQ_EXECUTOR_ANY, wq_visit_tally, &n);
+    *count = n;
+    return rc;
+}
+
 static fl_result_t wq_visit_tally_unowned(const fl_wq_journal_record_t *r, void *arg) {
     if (!wq_executor_known(r->executor))
         (*(unsigned *)arg)++;

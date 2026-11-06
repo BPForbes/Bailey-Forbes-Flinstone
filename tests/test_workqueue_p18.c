@@ -7,6 +7,7 @@
 #include "net_background.h"
 
 #include <pthread.h>
+#include <sched.h>
 #include <stdatomic.h>
 #include <time.h>
 #include <stdio.h>
@@ -1208,6 +1209,60 @@ static void shut_queue_after_claim(void) {
     ((fl_workqueue_storage_t *)s_hook_wq)->shutdown = 1;
 }
 
+/* Real fl_wq_shutdown while a claim still holds its reservation: wait on a second thread. */
+static pthread_mutex_t s_shut_mu = PTHREAD_MUTEX_INITIALIZER;
+static pthread_cond_t s_shut_cv = PTHREAD_COND_INITIALIZER;
+static int s_claim_paused;
+
+static void pause_claim_until_shutdown_flag(void) {
+    pthread_mutex_lock(&s_shut_mu);
+    s_claim_paused = 1;
+    pthread_cond_broadcast(&s_shut_cv);
+    pthread_mutex_unlock(&s_shut_mu);
+    /* Reservation is still held: shutdown will set the flag then await reserved==0. */
+    while (!((fl_workqueue_storage_t *)s_hook_wq)->shutdown)
+        sched_yield();
+}
+
+static void *call_shutdown(void *arg) {
+    fl_workqueue_t *wq = (fl_workqueue_t *)arg;
+
+    pthread_mutex_lock(&s_shut_mu);
+    while (!s_claim_paused)
+        pthread_cond_wait(&s_shut_cv, &s_shut_mu);
+    pthread_mutex_unlock(&s_shut_mu);
+    fl_wq_shutdown(wq); /* sets shutdown, drains, then waits for this claim's reservation */
+    return NULL;
+}
+
+/* fl_wq_shutdown runs while a claim still holds its reservation: it waits, the claim rolls back, then it returns. */
+static int test_real_shutdown_waits_out_claim_rollback(void) {
+    fl_workqueue_storage_t sw;
+    fl_workqueue_t *wq = (fl_workqueue_t *)&sw;
+    pthread_t th;
+    uint8_t key[16];
+    fl_result_t rc;
+
+    ASSERT(register_dur_tags() == 0);
+    fj_install();
+    ASSERT(dq_init(wq) == FL_RESULT_OK);
+    s_hook_wq = wq;
+    s_claim_paused = 0;
+    s_fj.on_claim = pause_claim_until_shutdown_flag;
+    ASSERT(pthread_create(&th, NULL, call_shutdown, wq) == 0);
+    mkkey(key, 3250);
+    rc = fl_wq_enqueue_durable(wq, TAG_AUTO, FL_WQ_LAYER_NORMAL, NULL, NULL, 0, key, 0);
+    ASSERT(rc == FL_WQ_ACCEPTED_UNSTAGED || rc == FL_RESULT_BUSY); /* shut mid-stage */
+    ASSERT(pthread_join(th, NULL) == 0);
+    ASSERT(sw.reserved == 0);
+    ASSERT(rec_state(1) == FL_WQ_ST_PENDING); /* claim returned before shutdown finished waiting */
+    s_fj.on_claim = NULL;
+    fj_remove();
+    /* queue already shut down by the helper thread */
+    (void)rc;
+    return 0;
+}
+
 /* Staging fails after the claim: the claim goes back, or, if that write fails too, it is reported. */
 static int test_failed_staging_gives_the_claim_back(void) {
     fl_workqueue_storage_t sw;
@@ -1448,6 +1503,21 @@ static int test_ask_gate_is_per_executor(void) {
     ASSERT(rec_state(1) == FL_WQ_ST_PENDING || rec_state(1) == FL_WQ_ST_HELD);
     fl_wq_shutdown(a);
     fl_wq_shutdown(b);
+    fj_remove();
+    return 0;
+}
+
+/* fl_wq_held_records reports a journal read error; fl_wq_held_count still has no error channel. */
+static int test_held_records_reports_scan_failure(void) {
+    unsigned n = 0;
+
+    ASSERT(register_dur_tags() == 0);
+    fj_install();
+    seed_record(4010, FL_WQ_EXECUTOR_DEFAULT, FL_WQ_ST_HELD, "Root.Cy", FL_WQ_RECOVER_ASK);
+    ASSERT(fl_wq_held_count("Root.Cy") == 1);
+    ASSERT(fl_wq_held_records("Root.Cy", &n) == FL_RESULT_OK && n == 1);
+    s_fj.fail_scan = 1;
+    ASSERT(fl_wq_held_records("Root.Cy", &n) == FL_RESULT_ERR);
     fj_remove();
     return 0;
 }
@@ -1719,6 +1789,7 @@ int main(void) {
     RUN_TEST(competing_staging_stages_once);
     RUN_TEST(two_pollers_never_double_stage);
     RUN_TEST(reservation_is_counted_in_every_capacity_check);
+    RUN_TEST(real_shutdown_waits_out_claim_rollback);
     RUN_TEST(failed_staging_gives_the_claim_back);
     RUN_TEST(journal_failures_are_not_swallowed);
     RUN_TEST(failed_completion_write_is_retried_not_rerun);
@@ -1728,6 +1799,7 @@ int main(void) {
     RUN_TEST(failed_durable_load_returns_the_claim);
     RUN_TEST(failed_load_claim_return_is_counted);
     RUN_TEST(ask_gate_is_per_executor);
+    RUN_TEST(held_records_reports_scan_failure);
     RUN_TEST(resolve_held_reports_staging_failure);
     RUN_TEST(retry_table_saturation_is_counted);
     RUN_TEST(recover_reruns_when_completion_repairs_were_lost);

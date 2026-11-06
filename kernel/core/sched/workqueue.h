@@ -229,8 +229,13 @@ unsigned fl_wq_illegal_moves(void);
  *  executor is touched. Returns the first journal I/O error after trying the rest; progress already
  *  committed is kept, and a lost race (BUSY) is not an error. */
 fl_result_t fl_wq_recover(fl_workqueue_t *wq);
-/** Held jobs of this owner. A failing journal reads as 0: the count operation has no error channel. */
+/** Held jobs of this owner. A failing journal reads as 0: prefer **fl_wq_held_records** when errors must surface. */
 unsigned fl_wq_held_count(const char *owner);
+/**
+ * Held jobs of this owner, with an error channel (walks via scan). *count is what was seen; the result is
+ * the first journal read error. owner NULL or "" selects the empty-owner rows.
+ */
+fl_result_t fl_wq_held_records(const char *owner, unsigned *count);
 /** run_now: held jobs of this owner are queued; otherwise only this occurrence is dropped (SKIPPED).
  *  Only a job of a registered executor moves; the rest stay HELD (fl_wq_unowned_records). Returns the
  *  first journal I/O error after trying the rest (a staging failure after a successful resolve is

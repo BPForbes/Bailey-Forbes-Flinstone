@@ -187,8 +187,10 @@ static fl_result_t wqj_append(void *ctx, const fl_wq_journal_record_t *r, unsign
     rc = wqj_admit_locked(w, r, max_outstanding, id_out, existing);
     if (rc == FL_RESULT_OK && fl_sqlite_exec(w->db, "wq_journal", "COMMIT") != FL_RESULT_OK)
         rc = FL_RESULT_ERR;
+    /* ROLLBACK after any failure: covers COMMIT errors that leave the transaction open (BUSY/IO),
+     * and is a no-op when a commit hook already aborted the transaction. */
     if (rc != FL_RESULT_OK)
-        (void)fl_sqlite_exec(w->db, "wq_journal", "ROLLBACK"); /* no-op if COMMIT already aborted */
+        (void)fl_sqlite_exec(w->db, "wq_journal", "ROLLBACK");
     pthread_mutex_unlock(&w->mu);
     return rc;
 }
