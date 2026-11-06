@@ -11,7 +11,7 @@
 #include "contract_extend.h"
 
 #define FL_CONTRACT_P1_WORKQUEUE_CONTRACT_DEFINED 1
-#define FL_CONTRACT_P1_WORKQUEUE_REV 4
+#define FL_CONTRACT_P1_WORKQUEUE_REV 5
 
 /** Maximum pending work items per queue (lab default). */
 #define FL_WQ_PENDING_MAX 64u
@@ -30,11 +30,15 @@
  * FL_WQ_PAYLOAD_MAX bytes; the journal refuses new work (FL_RESULT_BUSY) at FL_WQ_JOURNAL_MAX_PENDING
  * records waiting; a durable job is tried FL_WQ_MAX_ATTEMPTS times; FL_WQ_HANDLERS_MAX tags can be
  * registered. At most FL_WQ_PENDING_MAX / 2 durable jobs sit in the in-memory window at once.
+ * Rev 5: a durable job is staged under a reservation counted in every capacity check, the backlog
+ * bound counts PENDING, QUEUED, RUNNING and HELD, and a record belongs to one executor id.
  */
 #define FL_WQ_PAYLOAD_MAX 256u
 #define FL_WQ_JOURNAL_MAX_PENDING 1024u
 #define FL_WQ_MAX_ATTEMPTS 3u
 #define FL_WQ_HANDLERS_MAX 16u
+/** Durable executors that can be registered (rev 5). */
+#define FL_WQ_EXECUTORS_MAX 8u
 
 /** Work handler must not block indefinitely; may not allocate without bound. */
 #define FL_WQ_HANDLER_STACK_HINT_BYTES 512u

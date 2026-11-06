@@ -259,6 +259,7 @@ fl_result_t fl_kq_service_start(void) {
 
     if (s_started)
         return FL_RESULT_OK;
+    /* No executor is set: this queue runs no durable record until one is configured on purpose. */
     if (fl_wq_init(s_wq) != FL_RESULT_OK || pthread_condattr_init(&ca) != 0)
         return FL_RESULT_ERR;
     (void)pthread_condattr_setclock(&ca, CLOCK_MONOTONIC);

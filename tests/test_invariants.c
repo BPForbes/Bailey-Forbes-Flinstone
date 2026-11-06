@@ -472,7 +472,7 @@ static int test_contract_constants(void) {
     ASSERT(FL_CONTRACT_P1_10_WATCHDOG_CONTRACT_DEFINED == 1);
     ASSERT(FL_WQ_LAYER_URGENT == 0);
     ASSERT(FL_WQ_PENDING_MAX == 64u);
-    ASSERT(FL_CONTRACT_P1_WORKQUEUE_REV == 4);
+    ASSERT(FL_CONTRACT_P1_WORKQUEUE_REV == 5);
     /* authz op codes are append-only (FL-12 change 1): the existing ones keep their numbers */
     ASSERT((int)FL_AUTHZ_OP_IDENTITY_BRIDGE == 10 && (int)FL_AUTHZ_OP_IDENTITY_SWITCH == 11);
     ASSERT((int)FL_AUTHZ_OP_FILE_HISTORY_EXPORT == 15 && (int)FL_AUTHZ_OP_STORAGE_MEDIATION_POLICY == 18);

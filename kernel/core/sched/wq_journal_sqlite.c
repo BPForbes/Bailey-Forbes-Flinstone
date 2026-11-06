@@ -12,7 +12,7 @@ typedef struct {
     pthread_mutex_t mu;
 } wqj_t;
 
-#define COLS "id, idem_key, tag, layer, recover, owner, state, attempts, max_attempts, accepted_at, deadline, payload"
+#define COLS "id, idem_key, tag, layer, recover, owner, state, attempts, max_attempts, accepted_at, deadline, payload, executor"
 
 static void row_owner(sqlite3_stmt *st, fl_wq_journal_record_t *r) {
     const unsigned char *o = sqlite3_column_text(st, 5);
@@ -54,6 +54,12 @@ static void row_to_record(sqlite3_stmt *st, fl_wq_journal_record_t *r) {
     r->accepted_at = sqlite3_column_int64(st, 9);
     r->deadline = sqlite3_column_int64(st, 10);
     row_payload(st, r);
+    r->executor = (uint32_t)sqlite3_column_int64(st, 12);
+}
+
+/* ANY is bound as -1: one statement serves a filtered and an unfiltered scan. */
+static sqlite3_int64 executor_bind(uint32_t executor) {
+    return executor == FL_WQ_EXECUTOR_ANY ? -1 : (sqlite3_int64)executor;
 }
 
 static fl_result_t wqj_load_locked(wqj_t *w, uint64_t id, fl_wq_journal_record_t *out) {
@@ -71,19 +77,38 @@ static fl_result_t wqj_load_locked(wqj_t *w, uint64_t id, fl_wq_journal_record_t
     return rc;
 }
 
+/* 1 found, 0 absent, -1 the lookup itself failed (an absent key must never be assumed). */
 static int wqj_find_idem_locked(wqj_t *w, const uint8_t key[16], uint64_t *id_out) {
     sqlite3_stmt *st = NULL;
-    int found = 0;
+    int step, found;
 
     if (sqlite3_prepare_v2(w->db, "SELECT id FROM wq_jobs WHERE idem_key = ?", -1, &st, NULL) != SQLITE_OK)
-        return 0;
+        return -1;
     sqlite3_bind_blob(st, 1, key, 16, SQLITE_STATIC);
-    if (sqlite3_step(st) == SQLITE_ROW) {
+    step = sqlite3_step(st);
+    found = step == SQLITE_ROW ? 1 : step == SQLITE_DONE ? 0 : -1;
+    if (found == 1)
         *id_out = (uint64_t)sqlite3_column_int64(st, 0);
-        found = 1;
-    }
     sqlite3_finalize(st);
     return found;
+}
+
+/* PENDING, QUEUED, RUNNING and HELD: the backlog bound. Returns -1 when the count fails. */
+static long wqj_outstanding_locked(wqj_t *w) {
+    sqlite3_stmt *st = NULL;
+    long c = -1;
+
+    if (sqlite3_prepare_v2(w->db, "SELECT COUNT(*) FROM wq_jobs WHERE state IN (?1, ?2, ?3, ?4)", -1, &st, NULL) !=
+        SQLITE_OK)
+        return -1;
+    sqlite3_bind_int(st, 1, FL_WQ_ST_PENDING);
+    sqlite3_bind_int(st, 2, FL_WQ_ST_QUEUED);
+    sqlite3_bind_int(st, 3, FL_WQ_ST_RUNNING);
+    sqlite3_bind_int(st, 4, FL_WQ_ST_HELD);
+    if (sqlite3_step(st) == SQLITE_ROW)
+        c = (long)sqlite3_column_int64(st, 0);
+    sqlite3_finalize(st);
+    return c;
 }
 
 static fl_result_t wqj_insert_locked(wqj_t *w, const fl_wq_journal_record_t *r, uint64_t *id_out) {
@@ -92,7 +117,7 @@ static fl_result_t wqj_insert_locked(wqj_t *w, const fl_wq_journal_record_t *r, 
 
     if (sqlite3_prepare_v2(w->db,
                            "INSERT INTO wq_jobs (idem_key, tag, layer, recover, owner, state, attempts, max_attempts, "
-                           "accepted_at, deadline, payload) VALUES (?, ?, ?, ?, ?, ?, 0, ?, ?, ?, ?)",
+                           "accepted_at, deadline, payload, executor) VALUES (?, ?, ?, ?, ?, ?, 0, ?, ?, ?, ?, ?)",
                            -1, &st, NULL) != SQLITE_OK)
         return rc;
     sqlite3_bind_blob(st, 1, r->idem_key, 16, SQLITE_STATIC);
@@ -105,7 +130,8 @@ static fl_result_t wqj_insert_locked(wqj_t *w, const fl_wq_journal_record_t *r, 
     sqlite3_bind_int64(st, 8, r->accepted_at);
     sqlite3_bind_int64(st, 9, r->deadline);
     sqlite3_bind_blob(st, 10, r->payload, (int)r->payload_len, SQLITE_STATIC);
-    if (sqlite3_step(st) == SQLITE_DONE) { /* autocommit, synchronous = FULL: on disk before this returns */
+    sqlite3_bind_int64(st, 11, (sqlite3_int64)r->executor);
+    if (sqlite3_step(st) == SQLITE_DONE) {
         *id_out = (uint64_t)sqlite3_last_insert_rowid(w->db);
         rc = FL_RESULT_OK;
     }
@@ -113,19 +139,40 @@ static fl_result_t wqj_insert_locked(wqj_t *w, const fl_wq_journal_record_t *r, 
     return rc;
 }
 
-static fl_result_t wqj_append(void *ctx, const fl_wq_journal_record_t *r, uint64_t *id_out, int *existing) {
+/* The lookup, the bound and the insert, under the caller's open transaction. */
+static fl_result_t wqj_admit_locked(wqj_t *w, const fl_wq_journal_record_t *r, unsigned max_outstanding,
+                                    uint64_t *id_out, int *existing) {
+    int found = wqj_find_idem_locked(w, r->idem_key, id_out);
+    long outstanding;
+
+    if (found < 0)
+        return FL_RESULT_ERR;
+    *existing = found;
+    if (found)
+        return FL_RESULT_OK; /* a repeat is answered before the bound is applied */
+    outstanding = wqj_outstanding_locked(w);
+    if (outstanding < 0)
+        return FL_RESULT_ERR;
+    if ((unsigned long)outstanding >= max_outstanding)
+        return FL_RESULT_BUSY;
+    return wqj_insert_locked(w, r, id_out);
+}
+
+static fl_result_t wqj_append(void *ctx, const fl_wq_journal_record_t *r, unsigned max_outstanding,
+                              uint64_t *id_out, int *existing) {
     wqj_t *w = (wqj_t *)ctx;
     fl_result_t rc;
 
     pthread_mutex_lock(&w->mu);
-    if (wqj_find_idem_locked(w, r->idem_key, id_out)) {
-        *existing = 1;
+    if (fl_sqlite_exec(w->db, "wq_journal", "BEGIN IMMEDIATE") != FL_RESULT_OK) {
         pthread_mutex_unlock(&w->mu);
-        return FL_RESULT_OK;
+        return FL_RESULT_ERR;
     }
-    rc = wqj_insert_locked(w, r, id_out);
-    if (rc == FL_RESULT_OK)
-        *existing = 0;
+    rc = wqj_admit_locked(w, r, max_outstanding, id_out, existing);
+    if (rc == FL_RESULT_OK && fl_sqlite_exec(w->db, "wq_journal", "COMMIT") != FL_RESULT_OK)
+        rc = FL_RESULT_ERR;
+    if (rc != FL_RESULT_OK)
+        (void)fl_sqlite_exec(w->db, "wq_journal", "ROLLBACK");
     pthread_mutex_unlock(&w->mu);
     return rc;
 }
@@ -161,8 +208,8 @@ static fl_result_t wqj_load(void *ctx, uint64_t id, fl_wq_journal_record_t *out)
     return rc;
 }
 
-static fl_result_t wqj_scan(void *ctx, fl_wq_state_t state, const char *owner, const fl_wq_journal_record_t *after,
-                            unsigned max, fl_wq_journal_record_t *out, unsigned *n) {
+static fl_result_t wqj_scan(void *ctx, fl_wq_state_t state, const char *owner, uint32_t executor,
+                            const fl_wq_journal_record_t *after, unsigned max, fl_wq_journal_record_t *out, unsigned *n) {
     wqj_t *w = (wqj_t *)ctx;
     sqlite3_stmt *st = NULL;
     unsigned got = 0;
@@ -171,7 +218,8 @@ static fl_result_t wqj_scan(void *ctx, fl_wq_state_t state, const char *owner, c
     pthread_mutex_lock(&w->mu);
     if (sqlite3_prepare_v2(w->db,
                            "SELECT " COLS " FROM wq_jobs WHERE state = ?1 AND (?2 IS NULL OR owner = ?2) "
-                           "AND (layer > ?3 OR (layer = ?3 AND id > ?4)) ORDER BY layer, id LIMIT ?5",
+                           "AND (layer > ?3 OR (layer = ?3 AND id > ?4)) AND (?6 < 0 OR executor = ?6) "
+                           "ORDER BY layer, id LIMIT ?5",
                            -1, &st, NULL) != SQLITE_OK) {
         pthread_mutex_unlock(&w->mu);
         return FL_RESULT_ERR;
@@ -184,6 +232,7 @@ static fl_result_t wqj_scan(void *ctx, fl_wq_state_t state, const char *owner, c
     sqlite3_bind_int(st, 3, after ? after->layer : -1);
     sqlite3_bind_int64(st, 4, after ? (sqlite3_int64)after->id : 0);
     sqlite3_bind_int(st, 5, (int)max);
+    sqlite3_bind_int64(st, 6, executor_bind(executor));
     while (got < max && sqlite3_step(st) == SQLITE_ROW)
         row_to_record(st, &out[got++]);
     sqlite3_finalize(st);
@@ -192,14 +241,16 @@ static fl_result_t wqj_scan(void *ctx, fl_wq_state_t state, const char *owner, c
     return FL_RESULT_OK;
 }
 
-static unsigned wqj_count(void *ctx, fl_wq_state_t state, const char *owner) {
+static unsigned wqj_count(void *ctx, fl_wq_state_t state, const char *owner, uint32_t executor) {
     wqj_t *w = (wqj_t *)ctx;
     sqlite3_stmt *st = NULL;
     unsigned c = 0;
 
     pthread_mutex_lock(&w->mu);
-    if (sqlite3_prepare_v2(w->db, "SELECT COUNT(*) FROM wq_jobs WHERE state = ?1 AND (?2 IS NULL OR owner = ?2)", -1,
-                           &st, NULL) == SQLITE_OK) {
+    if (sqlite3_prepare_v2(w->db, "SELECT COUNT(*) FROM wq_jobs WHERE state = ?1 AND (?2 IS NULL OR owner = ?2) "
+                           "AND (?3 < 0 OR executor = ?3)",
+                           -1, &st, NULL) == SQLITE_OK) {
+        sqlite3_bind_int64(st, 3, executor_bind(executor));
         sqlite3_bind_int(st, 1, state);
         if (owner)
             sqlite3_bind_text(st, 2, owner, -1, SQLITE_STATIC);
@@ -220,8 +271,14 @@ static const char wqj_schema[] =
     "id INTEGER PRIMARY KEY AUTOINCREMENT, idem_key BLOB NOT NULL UNIQUE, tag INTEGER NOT NULL, "
     "layer INTEGER NOT NULL, recover INTEGER NOT NULL, owner TEXT NOT NULL DEFAULT '', "
     "state INTEGER NOT NULL, attempts INTEGER NOT NULL DEFAULT 0, max_attempts INTEGER NOT NULL, "
-    "accepted_at INTEGER NOT NULL, deadline INTEGER NOT NULL DEFAULT 0, payload BLOB);"
+    "accepted_at INTEGER NOT NULL, deadline INTEGER NOT NULL DEFAULT 0, payload BLOB, "
+    "executor INTEGER NOT NULL DEFAULT 1);"
     "CREATE INDEX IF NOT EXISTS wq_jobs_state ON wq_jobs (state, layer, id);";
+
+/* A store written before executors held no such column: its rows get the default executor (1 =
+ * FL_WQ_EXECUTOR_DEFAULT), the queue every record belonged to then. */
+static const fl_sqlite_column_t wqj_columns[] = {{"executor", "INTEGER NOT NULL DEFAULT 1"}};
+_Static_assert(FL_WQ_EXECUTOR_DEFAULT == 1u, "the executor column default in wqj_columns");
 
 fl_result_t fl_wq_journal_sqlite_open(const char *path, fl_wq_journal_ops_t *ops) {
     wqj_t *w;
@@ -231,7 +288,8 @@ fl_result_t fl_wq_journal_sqlite_open(const char *path, fl_wq_journal_ops_t *ops
     w = (wqj_t *)calloc(1, sizeof(*w));
     if (!w)
         return FL_RESULT_NOMEM;
-    if (sqlite3_open(path, &w->db) != SQLITE_OK || fl_sqlite_exec(w->db, "wq_journal", wqj_schema) != FL_RESULT_OK) {
+    if (sqlite3_open(path, &w->db) != SQLITE_OK || fl_sqlite_exec(w->db, "wq_journal", wqj_schema) != FL_RESULT_OK ||
+        fl_sqlite_ensure_columns(w->db, "wq_journal", "wq_jobs", wqj_columns, 1) != FL_RESULT_OK) {
         if (w->db)
             sqlite3_close(w->db);
         free(w);

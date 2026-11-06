@@ -97,7 +97,7 @@ static int test_durable_in_the_image(void)
     s_ran = 0;
     s_now_ns = 0;
     ASSERT(fl_wq_register_handler(0x7301, dur_handler, FL_WQ_RECOVER_AUTO) == FL_RESULT_OK);
-    ASSERT(fl_wq_init(wq) == FL_RESULT_OK);
+    ASSERT(fl_wq_init(wq) == FL_RESULT_OK && fl_wq_set_executor(wq, FL_WQ_EXECUTOR_DEFAULT) == FL_RESULT_OK);
     for (;; n++) {
         key[0] = (uint8_t)(n + 1);
         if (fl_wq_enqueue_durable(wq, 0x7301, FL_WQ_LAYER_NORMAL, NULL, NULL, 0, key, 0) == FL_RESULT_BUSY)
@@ -112,9 +112,32 @@ static int test_durable_in_the_image(void)
     return 0;
 }
 
+/* no lock, no threads: a queue with no executor consumes nothing, and a lost claim stages nothing twice */
+static int test_executor_isolation_in_the_image(void)
+{
+    fl_workqueue_storage_t sa, sb;
+    fl_workqueue_t *a = (fl_workqueue_t *)&sa, *b = (fl_workqueue_t *)&sb;
+    uint8_t key[16] = {0x42};
+
+    s_ran = 0;
+    s_now_ns = 0;
+    fl_wq_journal_mem_reset();
+    ASSERT(fl_wq_init(a) == FL_RESULT_OK && fl_wq_init(b) == FL_RESULT_OK);
+    ASSERT(fl_wq_set_executor(a, FL_WQ_EXECUTOR_DEFAULT) == FL_RESULT_OK);
+    ASSERT(fl_wq_enqueue_durable(b, 0x7301, FL_WQ_LAYER_NORMAL, NULL, NULL, 0, key, 0) == FL_RESULT_INVAL);
+    ASSERT(fl_wq_enqueue_durable(a, 0x7301, FL_WQ_LAYER_NORMAL, NULL, NULL, 0, key, 0) == FL_RESULT_OK);
+    ASSERT(fl_wq_poll_at(b, 8, 0) == 0 && s_ran == 0);
+    ASSERT(sa.reserved == 0 && sa.durable_inmem == 1);
+    ASSERT(fl_wq_poll_at(a, 8, 0) == 1 && s_ran == 1 && sa.durable_inmem == 0);
+    fl_wq_shutdown(a);
+    fl_wq_shutdown(b);
+    return 0;
+}
+
 int main(void)
 {
-    if (test_pool_recycles() || test_periodic_on_a_tick_clock() || test_durable_in_the_image())
+    if (test_pool_recycles() || test_periodic_on_a_tick_clock() || test_durable_in_the_image() ||
+        test_executor_isolation_in_the_image())
         return 1;
     printf("test_workqueue_freestanding: all passed\n");
     return 0;

@@ -4,6 +4,7 @@
 
 #ifndef FL_FREESTANDING
 #include <assert.h>
+#include <sched.h>
 #include <stdlib.h>
 #endif
 
@@ -81,6 +82,68 @@ struct fl_workqueue {
     fl_workqueue_storage_t st;
 };
 
+/* One lock for the executor registry and the completion retry table: both are tiny and touched off the
+ * hot path. Freestanding has one context and takes none. */
+#ifdef FL_WQ_HAS_LOCK
+static pthread_mutex_t s_wq_global_mu = PTHREAD_MUTEX_INITIALIZER;
+#define WQ_GLOBAL_LOCK() (void)pthread_mutex_lock(&s_wq_global_mu)
+#define WQ_GLOBAL_UNLOCK() (void)pthread_mutex_unlock(&s_wq_global_mu)
+#else
+#define WQ_GLOBAL_LOCK() ((void)0)
+#define WQ_GLOBAL_UNLOCK() ((void)0)
+#endif
+
+static struct {
+    uint32_t id;
+    fl_workqueue_t *wq;
+} s_executors[FL_WQ_EXECUTORS_MAX];
+static unsigned s_executor_count;
+
+static void wq_unregister_executor(const fl_workqueue_t *wq) {
+    unsigned i = 0;
+
+    WQ_GLOBAL_LOCK();
+    while (i < s_executor_count) {
+        if (s_executors[i].wq == wq)
+            s_executors[i] = s_executors[--s_executor_count];
+        else
+            i++;
+    }
+    WQ_GLOBAL_UNLOCK();
+}
+
+fl_result_t fl_wq_set_executor(fl_workqueue_t *wq, uint32_t executor) {
+    unsigned i = 0;
+
+    if (!wq || executor == FL_WQ_EXECUTOR_NONE || executor == FL_WQ_EXECUTOR_ANY)
+        return FL_RESULT_INVAL;
+    wq_unregister_executor(wq); /* one queue, one executor id */
+    WQ_GLOBAL_LOCK();
+    while (i < s_executor_count && s_executors[i].id != executor)
+        i++;
+    if (i == FL_WQ_EXECUTORS_MAX) {
+        WQ_GLOBAL_UNLOCK();
+        return FL_RESULT_NOMEM;
+    }
+    if (i == s_executor_count)
+        s_executor_count++;
+    s_executors[i].id = executor;
+    s_executors[i].wq = wq;
+    wq->st.executor = executor;
+    WQ_GLOBAL_UNLOCK();
+    return FL_RESULT_OK;
+}
+
+static int wq_executor_known(uint32_t executor) {
+    int known = 0;
+
+    WQ_GLOBAL_LOCK();
+    for (unsigned i = 0; i < s_executor_count; i++)
+        known |= s_executors[i].id == executor;
+    WQ_GLOBAL_UNLOCK();
+    return known;
+}
+
 static fl_workqueue_t s_default_wq;
 #ifdef FL_WQ_HAS_LOCK
 static pthread_once_t s_default_once = PTHREAD_ONCE_INIT;
@@ -121,7 +184,7 @@ static void wq_timer_remove_head(fl_workqueue_t *wq) {
 }
 
 static void wq_run_durable(wq_item_t *item);
-static void wq_fill_window(fl_workqueue_t *wq);
+static fl_result_t wq_fill_window(fl_workqueue_t *wq);
 
 /* Caller holds the lock. */
 static int64_t wq_next_periodic_run(const fl_workqueue_t *wq, const wq_item_t *item) {
@@ -182,6 +245,8 @@ static void wq_do_init(fl_workqueue_t *wq) {
     wq->st.timer_count = 0;
     wq->st.periodic_inflight = 0;
     wq->st.durable_inmem = 0;
+    wq->st.reserved = 0;
+    wq->st.executor = FL_WQ_EXECUTOR_NONE;
     wq->st.poll_now_ns = -1;
     for (unsigned i = 0; i < FL_WQ_TIMERS_MAX; i++)
         wq->st.timers[i] = NULL;
@@ -194,6 +259,7 @@ static void wq_do_init(fl_workqueue_t *wq) {
 #ifdef FL_WQ_HAS_LOCK
 static void wq_default_init_once(void) {
     wq_do_init(&s_default_wq);
+    (void)fl_wq_set_executor(&s_default_wq, FL_WQ_EXECUTOR_DEFAULT);
 }
 #endif
 
@@ -203,6 +269,7 @@ fl_workqueue_t *fl_wq_default(void) {
 #else
     if (!s_default_inited) {
         wq_do_init(&s_default_wq);
+        (void)fl_wq_set_executor(&s_default_wq, FL_WQ_EXECUTOR_DEFAULT);
         s_default_inited = 1;
     }
 #endif
@@ -224,11 +291,30 @@ static void wq_finish(wq_item_t *item) {
     wq_item_free(item);
 }
 
+/* A claim in flight finishes (it fails to publish and gives its claim back) before the queue can be
+ * destroyed. No threads in the freestanding build, so nothing is ever outstanding there. */
+static void wq_await_reservations(fl_workqueue_t *wq) {
+#ifdef FL_WQ_HAS_LOCK
+    unsigned left;
+
+    do {
+        WQ_LOCK(wq);
+        left = wq->st.reserved;
+        WQ_UNLOCK(wq);
+        if (left)
+            sched_yield();
+    } while (left);
+#else
+    (void)wq;
+#endif
+}
+
 void fl_wq_shutdown(fl_workqueue_t *wq) {
     pq_task_t task;
 
     if (!wq)
         return;
+    wq_unregister_executor(wq);
     WQ_LOCK(wq);
     wq->st.shutdown = 1;
     while (!pq_is_empty(&wq->st.pq)) {
@@ -248,6 +334,7 @@ void fl_wq_shutdown(fl_workqueue_t *wq) {
         WQ_LOCK(wq);
     }
     WQ_UNLOCK(wq);
+    wq_await_reservations(wq);
 }
 
 void fl_wq_destroy(fl_workqueue_t *wq) {
@@ -306,7 +393,7 @@ static wq_item_t *wq_item_from_work(fl_workqueue_t *wq, const fl_wq_work_t *work
 
 /* Caller holds the lock. Returns FL_RESULT_OK once the item is queued. */
 static fl_result_t wq_place_locked(fl_workqueue_t *wq, wq_item_t *item, unsigned limit) {
-    if (wq->st.shutdown || (unsigned)pq_count(&wq->st.pq) + wq->st.timer_count >= limit)
+    if (wq->st.shutdown || (unsigned)pq_count(&wq->st.pq) + wq->st.timer_count + wq->st.reserved >= limit)
         return FL_RESULT_BUSY;
     if (item->run_at_ns == 0) {
         if (pq_push(&wq->st.pq, item->layer, wq_dispatch, item) < 0)
@@ -454,7 +541,17 @@ static int memj_pick_slot(void) {
     return slot;
 }
 
-static fl_result_t memj_append(void *ctx, const fl_wq_journal_record_t *r, uint64_t *id_out, int *existing) {
+/* Caller holds the memory journal lock. PENDING, QUEUED, RUNNING and HELD records: the backlog bound. */
+static unsigned memj_outstanding(void) {
+    unsigned c = 0;
+
+    for (unsigned i = 0; i < MEMJ_MAX; i++)
+        c += s_memj_used[i] && !memj_terminal(s_memj[i].state);
+    return c;
+}
+
+static fl_result_t memj_append(void *ctx, const fl_wq_journal_record_t *r, unsigned max_outstanding,
+                               uint64_t *id_out, int *existing) {
     int slot;
 
     (void)ctx;
@@ -466,7 +563,7 @@ static fl_result_t memj_append(void *ctx, const fl_wq_journal_record_t *r, uint6
         MEMJ_UNLOCK();
         return FL_RESULT_OK;
     }
-    slot = memj_pick_slot();
+    slot = memj_outstanding() >= max_outstanding ? -1 : memj_pick_slot();
     if (slot < 0) {
         MEMJ_UNLOCK();
         return FL_RESULT_BUSY;
@@ -515,12 +612,13 @@ static int memj_after(const fl_wq_journal_record_t *r, const fl_wq_journal_recor
     return !c || r->layer > c->layer || (r->layer == c->layer && r->id > c->id);
 }
 
-static int memj_match(const fl_wq_journal_record_t *r, fl_wq_state_t st, const char *owner) {
-    return r->state == st && (!owner || wq_str_eq(r->owner, owner));
+static int memj_match(const fl_wq_journal_record_t *r, fl_wq_state_t st, const char *owner, uint32_t executor) {
+    return r->state == st && (!owner || wq_str_eq(r->owner, owner)) &&
+           (executor == FL_WQ_EXECUTOR_ANY || r->executor == executor);
 }
 
-static fl_result_t memj_scan(void *ctx, fl_wq_state_t st, const char *owner, const fl_wq_journal_record_t *after,
-                             unsigned max, fl_wq_journal_record_t *out, unsigned *n) {
+static fl_result_t memj_scan(void *ctx, fl_wq_state_t st, const char *owner, uint32_t executor,
+                             const fl_wq_journal_record_t *after, unsigned max, fl_wq_journal_record_t *out, unsigned *n) {
     unsigned got = 0;
 
     (void)ctx;
@@ -530,7 +628,7 @@ static fl_result_t memj_scan(void *ctx, fl_wq_state_t st, const char *owner, con
         const fl_wq_journal_record_t *cur = got ? &out[got - 1] : after;
 
         for (unsigned i = 0; i < MEMJ_MAX; i++) {
-            if (!s_memj_used[i] || !memj_match(&s_memj[i], st, owner) || !memj_after(&s_memj[i], cur))
+            if (!s_memj_used[i] || !memj_match(&s_memj[i], st, owner, executor) || !memj_after(&s_memj[i], cur))
                 continue;
             if (best < 0 || s_memj[i].layer < s_memj[best].layer ||
                 (s_memj[i].layer == s_memj[best].layer && s_memj[i].id < s_memj[best].id))
@@ -545,13 +643,13 @@ static fl_result_t memj_scan(void *ctx, fl_wq_state_t st, const char *owner, con
     return FL_RESULT_OK;
 }
 
-static unsigned memj_count(void *ctx, fl_wq_state_t st, const char *owner) {
+static unsigned memj_count(void *ctx, fl_wq_state_t st, const char *owner, uint32_t executor) {
     unsigned c = 0;
 
     (void)ctx;
     MEMJ_LOCK();
     for (unsigned i = 0; i < MEMJ_MAX; i++)
-        if (s_memj_used[i] && memj_match(&s_memj[i], st, owner))
+        if (s_memj_used[i] && memj_match(&s_memj[i], st, owner, executor))
             c++;
     MEMJ_UNLOCK();
     return c;
@@ -620,81 +718,239 @@ static fl_result_t wq_mark(const fl_wq_journal_ops_t *j, uint64_t id, fl_wq_stat
     return j->mark(j->ctx, id, from, to);
 }
 
-/* Put one journal record into the MLQ. The record is already QUEUED; the caller undoes that if this
- * returns nonzero. */
-static int wq_stage(fl_workqueue_t *wq, const fl_wq_journal_record_t *r) {
-    wq_item_t *item = wq_item_alloc();
+/* Completion writes the journal refused. The handler already ran, so the write is retried and the
+ * handler is not: the record stays RUNNING until it lands. */
+#define WQ_RETRY_MAX 16u
+static struct {
+    uint64_t id;
+    uint8_t from, to, used;
+} s_retry[WQ_RETRY_MAX];
+static unsigned s_retry_lost, s_stuck_claims;
+
+unsigned fl_wq_retry_marks_pending(void) {
+    unsigned n = 0;
+
+    WQ_GLOBAL_LOCK();
+    for (unsigned i = 0; i < WQ_RETRY_MAX; i++)
+        n += s_retry[i].used;
+    WQ_GLOBAL_UNLOCK();
+    return n;
+}
+
+unsigned fl_wq_retry_marks_lost(void) {
+    return __atomic_load_n(&s_retry_lost, __ATOMIC_RELAXED);
+}
+
+unsigned fl_wq_stuck_claims(void) {
+    return __atomic_load_n(&s_stuck_claims, __ATOMIC_RELAXED);
+}
+
+static void wq_retry_add(uint64_t id, fl_wq_state_t from, fl_wq_state_t to) {
+    unsigned i = 0;
+
+    WQ_GLOBAL_LOCK();
+    while (i < WQ_RETRY_MAX && s_retry[i].used)
+        i++;
+    if (i < WQ_RETRY_MAX) {
+        s_retry[i].id = id;
+        s_retry[i].from = (uint8_t)from;
+        s_retry[i].to = (uint8_t)to;
+        s_retry[i].used = 1;
+    } else {
+        (void)__atomic_fetch_add(&s_retry_lost, 1u, __ATOMIC_RELAXED);
+    }
+    WQ_GLOBAL_UNLOCK();
+}
+
+/* A lost race (BUSY) means another path moved the job: nothing is owed. Any other failure is kept. */
+static void wq_settle(const fl_wq_journal_ops_t *j, uint64_t id, fl_wq_state_t from, fl_wq_state_t to) {
+    fl_result_t rc = wq_mark(j, id, from, to);
+
+    if (rc != FL_RESULT_OK && rc != FL_RESULT_BUSY)
+        wq_retry_add(id, from, to);
+}
+
+static void wq_retry_marks(const fl_wq_journal_ops_t *j) {
+    for (unsigned i = 0; i < WQ_RETRY_MAX; i++) {
+        uint64_t id = 0;
+        uint8_t from = 0, to = 0;
+
+        WQ_GLOBAL_LOCK();
+        if (s_retry[i].used) {
+            id = s_retry[i].id;
+            from = s_retry[i].from;
+            to = s_retry[i].to;
+            s_retry[i].used = 0;
+        }
+        WQ_GLOBAL_UNLOCK();
+        if (id)
+            wq_settle(j, id, (fl_wq_state_t)from, (fl_wq_state_t)to);
+    }
+}
+
+/* Caller holds the lock. Reservations count against the ordinary cap, the protected reserve and the
+ * durable window alike, so the slot is there when the claimed job is published. */
+static int wq_room_for_durable_locked(const fl_workqueue_t *wq) {
+    unsigned used = (unsigned)pq_count(&wq->st.pq) + wq->st.timer_count + wq->st.reserved;
+
+    return !wq->st.shutdown && used < FL_WQ_PENDING_MAX - FL_WQ_PROTECTED_RESERVE &&
+           wq->st.durable_inmem + wq->st.reserved < FL_WQ_PENDING_MAX / 2u;
+}
+
+static fl_result_t wq_reserve(fl_workqueue_t *wq) {
     int ok;
 
+    WQ_LOCK(wq);
+    ok = wq_room_for_durable_locked(wq);
+    if (ok)
+        wq->st.reserved++;
+    WQ_UNLOCK(wq);
+    return ok ? FL_RESULT_OK : FL_RESULT_BUSY;
+}
+
+static void wq_release(fl_workqueue_t *wq) {
+    WQ_LOCK(wq);
+    if (wq->st.reserved)
+        wq->st.reserved--;
+    WQ_UNLOCK(wq);
+}
+
+/* Put a claimed record into the MLQ under the reservation. On success the reservation becomes a staged
+ * item; on failure the caller still holds it and releases it. */
+static fl_result_t wq_publish(fl_workqueue_t *wq, const fl_wq_journal_record_t *r) {
+    wq_item_t *item = wq_item_alloc();
+    fl_result_t rc = FL_RESULT_OK;
+
     if (!item)
-        return -1;
+        return FL_RESULT_NOMEM;
     item->job_id = r->id;
     item->layer = r->layer >= 0 && r->layer < PQ_NUM_PRIORITIES ? r->layer : FL_WQ_LAYER_BACKGROUND;
     item->owner = wq;
     WQ_LOCK(wq);
-    ok = !wq->st.shutdown && pq_push(&wq->st.pq, item->layer, wq_dispatch, item) >= 0;
-    if (ok)
+    if (wq->st.shutdown || pq_push(&wq->st.pq, item->layer, wq_dispatch, item) < 0) {
+        rc = FL_RESULT_BUSY;
+    } else {
         wq->st.durable_inmem++;
+        wq->st.reserved--;
+    }
     WQ_UNLOCK(wq);
-    if (!ok)
+    if (rc != FL_RESULT_OK)
         wq_item_free(item);
-    return ok ? 0 : -1;
+    return rc;
 }
 
-/* The in-memory queue is a cache of the journal: keep up to half the pending cap staged. */
-static void wq_fill_window(fl_workqueue_t *wq) {
-    const fl_wq_journal_ops_t *j = s_journal;
-    fl_wq_journal_record_t batch[8];
-    unsigned room, n = 0;
+/* QUEUED -> PENDING. A lost race means recovery or another path already moved it; a failed write
+ * leaves the record QUEUED (still durable, repaired by recovery) and is counted. */
+static fl_result_t wq_unclaim(const fl_wq_journal_record_t *r) {
+    fl_result_t rc = wq_mark(s_journal, r->id, FL_WQ_ST_QUEUED, FL_WQ_ST_PENDING);
 
-    if (!j || j->count(j->ctx, FL_WQ_ST_PENDING, NULL) == 0)
-        return;
+    if (rc == FL_RESULT_BUSY)
+        return FL_RESULT_OK;
+    if (rc != FL_RESULT_OK)
+        (void)__atomic_fetch_add(&s_stuck_claims, 1u, __ATOMIC_RELAXED);
+    return rc;
+}
+
+/* Compare-and-set the oldest PENDING record of this executor to QUEUED. A record another thread
+ * claimed first is skipped; NOENT when none is left. */
+static fl_result_t wq_claim_next(uint32_t executor, fl_wq_journal_record_t *out) {
+    const fl_wq_journal_ops_t *j = s_journal;
+    fl_wq_journal_record_t page[8], cursor;
+    unsigned n, have = 0;
+
     for (;;) {
-        WQ_LOCK(wq);
-        room = wq->st.durable_inmem < FL_WQ_PENDING_MAX / 2u &&
-                       (unsigned)pq_count(&wq->st.pq) + wq->st.timer_count < FL_WQ_PENDING_MAX - FL_WQ_PROTECTED_RESERVE
-                   ? FL_WQ_PENDING_MAX / 2u - wq->st.durable_inmem
-                   : 0;
-        WQ_UNLOCK(wq);
-        if (room == 0)
-            return;
-        if (room > 8)
-            room = 8;
-        if (j->scan(j->ctx, FL_WQ_ST_PENDING, NULL, NULL, room, batch, &n) != FL_RESULT_OK || n == 0)
-            return;
+        fl_result_t rc =
+            j->scan(j->ctx, FL_WQ_ST_PENDING, NULL, executor, have ? &cursor : NULL, 8, page, &n);
+
+        if (rc != FL_RESULT_OK)
+            return rc;
+        if (n == 0)
+            return FL_RESULT_NOENT;
         for (unsigned i = 0; i < n; i++) {
-            if (wq_mark(j, batch[i].id, FL_WQ_ST_PENDING, FL_WQ_ST_QUEUED) != FL_RESULT_OK)
-                continue; /* another thread staged it first */
-            if (wq_stage(wq, &batch[i]) != 0) {
-                (void)wq_mark(j, batch[i].id, FL_WQ_ST_QUEUED, FL_WQ_ST_PENDING);
-                return;
+            rc = wq_mark(j, page[i].id, FL_WQ_ST_PENDING, FL_WQ_ST_QUEUED);
+            if (rc == FL_RESULT_OK) {
+                wq_copy(out, &page[i], sizeof(*out));
+                out->state = FL_WQ_ST_QUEUED;
+                return FL_RESULT_OK;
             }
+            if (rc != FL_RESULT_BUSY)
+                return rc;
         }
+        wq_copy(&cursor, &page[n - 1], sizeof(cursor));
+        have = 1;
     }
+}
+
+/* Stage one job. OK: staged. NOENT: no room or nothing to stage. Anything else is the failure, after
+ * the reservation is released and a successful claim is given back. */
+static fl_result_t wq_stage_one(fl_workqueue_t *wq) {
+    fl_wq_journal_record_t r;
+    fl_result_t rc, rb;
+
+    if (wq_reserve(wq) != FL_RESULT_OK)
+        return FL_RESULT_NOENT;
+    rc = wq_claim_next(wq->st.executor, &r);
+    if (rc != FL_RESULT_OK) {
+        wq_release(wq); /* nothing was claimed, so nothing is given back */
+        return rc;
+    }
+    rc = wq_publish(wq, &r);
+    if (rc == FL_RESULT_OK)
+        return rc;
+    wq_release(wq);
+    rb = wq_unclaim(&r);
+    return rb != FL_RESULT_OK ? rb : rc;
+}
+
+/* The in-memory queue is a cache of the journal: keep up to half the pending cap staged. Returns the
+ * first failure; "no room" and "nothing waiting" are not failures. */
+static fl_result_t wq_fill_window(fl_workqueue_t *wq) {
+    fl_result_t rc;
+
+    wq_retry_marks(s_journal);
+    if (wq->st.executor == FL_WQ_EXECUTOR_NONE)
+        return FL_RESULT_OK;
+    while ((rc = wq_stage_one(wq)) == FL_RESULT_OK)
+        ;
+    return rc == FL_RESULT_NOENT ? FL_RESULT_OK : rc;
+}
+
+static void wq_run_handler(const fl_wq_journal_ops_t *j, const fl_wq_journal_record_t *r, int h) {
+    fl_result_t rc = wq_mark(j, r->id, FL_WQ_ST_QUEUED, FL_WQ_ST_RUNNING);
+    fl_wq_state_t next;
+
+    if (rc != FL_RESULT_OK) { /* RUNNING is written before the handler: without it the handler does not run */
+        if (rc != FL_RESULT_BUSY)
+            (void)wq_unclaim(r);
+        return;
+    }
+    rc = s_handlers[h].fn(r->payload, r->payload_len, r->idem_key);
+    next = rc == FL_RESULT_OK ? FL_WQ_ST_DONE
+           : r->attempts + 1u < r->max_attempts ? FL_WQ_ST_PENDING
+                                                 : FL_WQ_ST_FAILED;
+    wq_settle(j, r->id, FL_WQ_ST_RUNNING, next);
+}
+
+static void wq_run_queued(const fl_workqueue_t *wq, const fl_wq_journal_ops_t *j, const fl_wq_journal_record_t *r) {
+    int h = wq_handler_index(r->tag);
+
+    if (r->executor != wq->st.executor)
+        (void)wq_unclaim(r);
+    else if (r->deadline && wq_now_sec() > r->deadline)
+        wq_settle(j, r->id, FL_WQ_ST_QUEUED, FL_WQ_ST_EXPIRED); /* stale: never run silently */
+    else if (h < 0)
+        wq_settle(j, r->id, FL_WQ_ST_QUEUED, FL_WQ_ST_FAILED);
+    else
+        wq_run_handler(j, r, h);
 }
 
 static void wq_run_durable(wq_item_t *item) {
     fl_workqueue_t *wq = item->owner;
     const fl_wq_journal_ops_t *j = s_journal;
     fl_wq_journal_record_t r;
-    int h;
 
-    if (j->load(j->ctx, item->job_id, &r) == FL_RESULT_OK && r.state == FL_WQ_ST_QUEUED) {
-        h = wq_handler_index(r.tag);
-        if (r.deadline && wq_now_sec() > r.deadline) {
-            (void)wq_mark(j, r.id, FL_WQ_ST_QUEUED, FL_WQ_ST_EXPIRED); /* stale: never run silently */
-        } else if (h < 0) {
-            (void)wq_mark(j, r.id, FL_WQ_ST_QUEUED, FL_WQ_ST_FAILED);
-        } else if (wq_mark(j, r.id, FL_WQ_ST_QUEUED, FL_WQ_ST_RUNNING) == FL_RESULT_OK) {
-            /* RUNNING is written before the handler: a cut-off run is found at recovery */
-            fl_result_t rc = s_handlers[h].fn(r.payload, r.payload_len, r.idem_key);
-            fl_wq_state_t next = rc == FL_RESULT_OK ? FL_WQ_ST_DONE
-                                 : r.attempts + 1u < r.max_attempts ? FL_WQ_ST_PENDING
-                                                                     : FL_WQ_ST_FAILED;
-
-            (void)wq_mark(j, r.id, FL_WQ_ST_RUNNING, next);
-        }
-    }
+    if (j->load(j->ctx, item->job_id, &r) == FL_RESULT_OK && r.state == FL_WQ_ST_QUEUED)
+        wq_run_queued(wq, j, &r);
     WQ_LOCK(wq);
     if (wq->st.durable_inmem)
         wq->st.durable_inmem--;
@@ -756,101 +1012,146 @@ fl_result_t fl_wq_enqueue_durable(fl_workqueue_t *wq, uint32_t tag, int layer, c
 
     if (!wq || !idem_key || n > FL_WQ_PAYLOAD_MAX || (n && !payload) || layer < 0 || layer >= PQ_NUM_PRIORITIES)
         return FL_RESULT_INVAL;
-    if (wq_check_owner_length(owner) != FL_RESULT_OK)
+    if (wq_check_owner_length(owner) != FL_RESULT_OK || wq->st.executor == FL_WQ_EXECUTOR_NONE)
         return FL_RESULT_INVAL;
     h = wq_handler_index(tag);
     if (h < 0)
         return FL_RESULT_NOENT; /* nothing could run it after a restart */
     if (wq->st.shutdown)
         return FL_RESULT_BUSY;
-    if (j->count(j->ctx, FL_WQ_ST_PENDING, NULL) >= FL_WQ_JOURNAL_MAX_PENDING)
-        return FL_RESULT_BUSY; /* bounded backlog: a clear "retry later" */
     rc = wq_build_record(&r, tag, layer, h, owner, payload, n, idem_key, ttl_sec);
     if (rc != FL_RESULT_OK)
         return rc;
+    r.executor = wq->st.executor;
 
-    rc = j->append(j->ctx, &r, &id, &existing); /* accept and persist FIRST: not durable means not accepted */
-    if (rc != FL_RESULT_OK)
+    /* One step in the backend: a repeated key, then the backlog bound, then the append. Not durable
+     * means not accepted. */
+    rc = j->append(j->ctx, &r, FL_WQ_JOURNAL_MAX_PENDING, &id, &existing);
+    if (rc != FL_RESULT_OK || existing)
         return rc;
-    if (!existing)
-        wq_fill_window(wq);
-    return FL_RESULT_OK;
+    return wq_fill_window(wq) == FL_RESULT_OK ? FL_RESULT_OK : FL_WQ_ACCEPTED_UNSTAGED;
+}
+
+/* Visit every record in `state` for this owner and executor, page by page. A lost race (BUSY) is
+ * normal; the first other failure is kept and the walk goes on, so committed progress stays and the
+ * caller learns that something failed. */
+typedef fl_result_t (*wq_visit_fn)(const fl_wq_journal_record_t *r, void *arg);
+
+static fl_result_t wq_walk(fl_wq_state_t state, const char *owner, uint32_t executor, wq_visit_fn visit,
+                           void *arg) {
+    const fl_wq_journal_ops_t *j = s_journal;
+    fl_wq_journal_record_t batch[16], cursor;
+    fl_result_t first = FL_RESULT_OK, rc;
+    unsigned n, have = 0;
+
+    for (;;) {
+        rc = j->scan(j->ctx, state, owner, executor, have ? &cursor : NULL, 16, batch, &n);
+        if (rc != FL_RESULT_OK)
+            return first != FL_RESULT_OK ? first : rc;
+        if (n == 0)
+            return first;
+        for (unsigned i = 0; i < n; i++) {
+            rc = visit(&batch[i], arg);
+            if (rc != FL_RESULT_OK && rc != FL_RESULT_BUSY && first == FL_RESULT_OK)
+                first = rc;
+        }
+        wq_copy(&cursor, &batch[n - 1], sizeof(cursor));
+        have = 1;
+    }
 }
 
 /* A job cut off mid-run (RUNNING) is retried, or FAILED once its attempts are spent; a staged one
  * (QUEUED) simply goes back to waiting. */
-static void wq_recover_state(const fl_wq_journal_ops_t *j, fl_wq_state_t st) {
-    fl_wq_journal_record_t batch[16], cursor;
-    unsigned n;
-    int have = 0;
+static fl_result_t wq_visit_reset(const fl_wq_journal_record_t *r, void *arg) {
+    fl_wq_state_t to = r->state == FL_WQ_ST_RUNNING && r->attempts >= r->max_attempts ? FL_WQ_ST_FAILED
+                                                                                      : FL_WQ_ST_PENDING;
 
-    while (j->scan(j->ctx, st, NULL, have ? &cursor : NULL, 16, batch, &n) == FL_RESULT_OK && n) {
-        for (unsigned i = 0; i < n; i++) {
-            fl_wq_state_t to = batch[i].attempts >= batch[i].max_attempts && st == FL_WQ_ST_RUNNING
-                                   ? FL_WQ_ST_FAILED
-                                   : FL_WQ_ST_PENDING;
-
-            (void)wq_mark(j, batch[i].id, st, to);
-        }
-        wq_copy(&cursor, &batch[n - 1], sizeof(cursor));
-        have = 1;
-    }
+    (void)arg;
+    return wq_mark(s_journal, r->id, r->state, to);
 }
 
 /* Stale work is EXPIRED and RECOVER_ASK work is HELD; the rest stays PENDING for the window. */
-static void wq_recover_pending(const fl_wq_journal_ops_t *j, int64_t now) {
-    fl_wq_journal_record_t batch[16], cursor;
-    unsigned n;
-    int have = 0;
+static fl_result_t wq_visit_triage(const fl_wq_journal_record_t *r, void *arg) {
+    int64_t now = *(const int64_t *)arg;
 
-    while (j->scan(j->ctx, FL_WQ_ST_PENDING, NULL, have ? &cursor : NULL, 16, batch, &n) == FL_RESULT_OK && n) {
-        for (unsigned i = 0; i < n; i++) {
-            if (batch[i].deadline && now > batch[i].deadline)
-                (void)wq_mark(j, batch[i].id, FL_WQ_ST_PENDING, FL_WQ_ST_EXPIRED);
-            else if (batch[i].recover == FL_WQ_RECOVER_ASK)
-                (void)wq_mark(j, batch[i].id, FL_WQ_ST_PENDING, FL_WQ_ST_HELD);
-        }
-        wq_copy(&cursor, &batch[n - 1], sizeof(cursor));
-        have = 1;
-    }
+    if (r->deadline && now > r->deadline)
+        return wq_mark(s_journal, r->id, FL_WQ_ST_PENDING, FL_WQ_ST_EXPIRED);
+    if (r->recover == FL_WQ_RECOVER_ASK)
+        return wq_mark(s_journal, r->id, FL_WQ_ST_PENDING, FL_WQ_ST_HELD);
+    return FL_RESULT_OK;
 }
 
 fl_result_t fl_wq_recover(fl_workqueue_t *wq) {
-    const fl_wq_journal_ops_t *j = s_journal;
     int64_t now = wq_now_sec();
+    uint32_t ex;
+    fl_result_t first, rc;
 
     if (!wq)
         return FL_RESULT_INVAL;
-    wq_recover_state(j, FL_WQ_ST_RUNNING);
-    wq_recover_state(j, FL_WQ_ST_QUEUED);
-    wq_recover_pending(j, now);
-    wq_fill_window(wq);
-    return FL_RESULT_OK;
+    ex = wq->st.executor;
+    if (ex == FL_WQ_EXECUTOR_NONE)
+        return FL_RESULT_OK;
+    first = wq_walk(FL_WQ_ST_RUNNING, NULL, ex, wq_visit_reset, NULL);
+    rc = wq_walk(FL_WQ_ST_QUEUED, NULL, ex, wq_visit_reset, NULL);
+    first = first != FL_RESULT_OK ? first : rc;
+    rc = wq_walk(FL_WQ_ST_PENDING, NULL, ex, wq_visit_triage, &now);
+    first = first != FL_RESULT_OK ? first : rc;
+    rc = wq_fill_window(wq);
+    return first != FL_RESULT_OK ? first : rc;
 }
 
 unsigned fl_wq_held_count(const char *owner) {
     const fl_wq_journal_ops_t *j = s_journal;
 
-    return j->count(j->ctx, FL_WQ_ST_HELD, owner ? owner : "");
+    return j->count(j->ctx, FL_WQ_ST_HELD, owner ? owner : "", FL_WQ_EXECUTOR_ANY);
+}
+
+static fl_result_t wq_visit_tally_unowned(const fl_wq_journal_record_t *r, void *arg) {
+    if (!wq_executor_known(r->executor))
+        (*(unsigned *)arg)++;
+    return FL_RESULT_OK;
+}
+
+unsigned fl_wq_unowned_records(void) {
+    static const fl_wq_state_t outstanding[] = {FL_WQ_ST_PENDING, FL_WQ_ST_QUEUED, FL_WQ_ST_RUNNING, FL_WQ_ST_HELD};
+    unsigned n = 0;
+
+    for (unsigned i = 0; i < sizeof(outstanding) / sizeof(outstanding[0]); i++)
+        (void)wq_walk(outstanding[i], NULL, FL_WQ_EXECUTOR_ANY, wq_visit_tally_unowned, &n);
+    return n;
+}
+
+/* Only a registered executor's job moves; the rest stay HELD where fl_wq_unowned_records sees them. */
+static fl_result_t wq_visit_resolve(const fl_wq_journal_record_t *r, void *arg) {
+    int run_now = *(const int *)arg;
+
+    if (!wq_executor_known(r->executor))
+        return FL_RESULT_OK;
+    return wq_mark(s_journal, r->id, FL_WQ_ST_HELD, run_now ? FL_WQ_ST_PENDING : FL_WQ_ST_SKIPPED);
+}
+
+static void wq_fill_registered(void) {
+    fl_workqueue_t *queues[FL_WQ_EXECUTORS_MAX];
+    unsigned n;
+
+    WQ_GLOBAL_LOCK();
+    n = s_executor_count;
+    for (unsigned i = 0; i < n; i++)
+        queues[i] = s_executors[i].wq;
+    WQ_GLOBAL_UNLOCK();
+    for (unsigned i = 0; i < n; i++)
+        (void)wq_fill_window(queues[i]);
 }
 
 fl_result_t fl_wq_resolve_held(const char *owner, int run_now) {
-    const fl_wq_journal_ops_t *j = s_journal;
-    fl_wq_journal_record_t batch[16], cursor;
-    unsigned n;
-    int have = 0;
+    fl_result_t rc;
 
     if (!owner)
         return FL_RESULT_INVAL;
-    while (j->scan(j->ctx, FL_WQ_ST_HELD, owner, have ? &cursor : NULL, 16, batch, &n) == FL_RESULT_OK && n) {
-        for (unsigned i = 0; i < n; i++)
-            (void)wq_mark(j, batch[i].id, FL_WQ_ST_HELD, run_now ? FL_WQ_ST_PENDING : FL_WQ_ST_SKIPPED);
-        wq_copy(&cursor, &batch[n - 1], sizeof(cursor));
-        have = 1;
-    }
+    rc = wq_walk(FL_WQ_ST_HELD, owner, FL_WQ_EXECUTOR_ANY, wq_visit_resolve, &run_now);
     if (run_now)
-        wq_fill_window(fl_wq_default());
-    return FL_RESULT_OK;
+        wq_fill_registered();
+    return rc;
 }
 
 /* Move every due timer into the MLQ, earliest first. Caller holds the lock. */
@@ -874,7 +1175,7 @@ unsigned fl_wq_poll_at(fl_workqueue_t *wq, unsigned max_items, int64_t now_ns) {
     if (!wq || max_items == 0)
         return 0;
 
-    wq_fill_window(wq);
+    (void)wq_fill_window(wq);
     WQ_LOCK(wq);
 #ifdef FL_WQ_DEBUG_REENTRANCY
     assert(wq->st.poll_depth == 0 &&
