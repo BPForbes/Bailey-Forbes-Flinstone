@@ -1244,6 +1244,80 @@ static void *call_shutdown(void *arg) {
     return NULL;
 }
 
+/* resolve_held pins the queue as a filler; shutdown must wait until that fill finishes. */
+static int s_filler_paused, s_filler_may_continue;
+
+static void pause_while_resolve_filler(void) {
+    fl_workqueue_storage_t *st = (fl_workqueue_storage_t *)s_hook_wq;
+
+    /* HELD walk scans before fillers are pinned; only pause during the fill window. */
+    if (!st || __atomic_load_n(&st->fillers, __ATOMIC_ACQUIRE) == 0)
+        return;
+    pthread_mutex_lock(&s_shut_mu);
+    s_filler_paused = 1;
+    pthread_cond_broadcast(&s_shut_cv);
+    while (!s_filler_may_continue)
+        pthread_cond_wait(&s_shut_cv, &s_shut_mu);
+    pthread_mutex_unlock(&s_shut_mu);
+}
+
+/* Give fl_wq_shutdown time to reach wq_await_reservations while fillers stays > 0. Do not read
+ * st->shutdown unlocked (TSan); nanosleep is enough because the pause holds the pin. */
+static void *release_filler_after_brief_wait(void *arg) {
+    struct timespec ts = {0, 100000000L}; /* 100 ms */
+
+    (void)arg;
+    (void)nanosleep(&ts, NULL);
+    pthread_mutex_lock(&s_shut_mu);
+    s_filler_may_continue = 1;
+    pthread_cond_broadcast(&s_shut_cv);
+    pthread_mutex_unlock(&s_shut_mu);
+    return NULL;
+}
+
+static void *shutdown_while_resolve_fills(void *arg) {
+    fl_workqueue_t *wq = (fl_workqueue_t *)arg;
+    pthread_t releaser;
+
+    pthread_mutex_lock(&s_shut_mu);
+    while (!s_filler_paused)
+        pthread_cond_wait(&s_shut_cv, &s_shut_mu);
+    pthread_mutex_unlock(&s_shut_mu);
+    if (pthread_create(&releaser, NULL, release_filler_after_brief_wait, NULL) != 0)
+        return (void *)1;
+    fl_wq_shutdown(wq);
+    (void)pthread_join(releaser, NULL);
+    return NULL;
+}
+
+static int test_shutdown_waits_for_resolve_fillers(void) {
+    fl_workqueue_storage_t sw;
+    fl_workqueue_t *wq = (fl_workqueue_t *)&sw;
+    pthread_t th;
+    fl_result_t rc;
+    void *th_rc = NULL;
+
+    ASSERT(register_dur_tags() == 0);
+    fj_install();
+    ASSERT(dq_init(wq) == FL_RESULT_OK);
+    seed_record(3260, FL_WQ_EXECUTOR_DEFAULT, FL_WQ_ST_HELD, "Root.Fill", FL_WQ_RECOVER_ASK);
+    s_hook_wq = wq;
+    s_filler_paused = 0;
+    s_filler_may_continue = 0;
+    s_fj.after_scan = pause_while_resolve_filler;
+    ASSERT(pthread_create(&th, NULL, shutdown_while_resolve_fills, wq) == 0);
+    /* Fill may refuse to stage once shutdown is set; the pin wait is the acceptance point. */
+    rc = fl_wq_resolve_held("Root.Fill", 1);
+    ASSERT(rc == FL_RESULT_OK || rc == FL_RESULT_BUSY || rc == FL_RESULT_ERR);
+    ASSERT(pthread_join(th, &th_rc) == 0 && th_rc == NULL);
+    ASSERT(s_filler_paused == 1 && s_filler_may_continue == 1);
+    ASSERT(sw.fillers == 0 && sw.reserved == 0);
+    s_fj.after_scan = NULL;
+    s_hook_wq = NULL;
+    fj_remove();
+    return 0;
+}
+
 /* fl_wq_shutdown runs while a claim still holds its reservation: it waits, the claim rolls back, then it returns. */
 static int test_real_shutdown_waits_out_claim_rollback(void) {
     fl_workqueue_storage_t sw;
@@ -1799,6 +1873,7 @@ int main(void) {
     RUN_TEST(competing_staging_stages_once);
     RUN_TEST(two_pollers_never_double_stage);
     RUN_TEST(reservation_is_counted_in_every_capacity_check);
+    RUN_TEST(shutdown_waits_for_resolve_fillers);
     RUN_TEST(real_shutdown_waits_out_claim_rollback);
     RUN_TEST(failed_staging_gives_the_claim_back);
     RUN_TEST(journal_failures_are_not_swallowed);

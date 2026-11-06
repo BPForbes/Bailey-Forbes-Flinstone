@@ -85,6 +85,8 @@ sectors=$(( ($(stat -c%s "${build}/kernel.bin") + 511) / 512 ))
 # conventional memory: its end must stay below 0x9f000 (the EBDA starts at 0x9fc00, VGA at 0xa0000).
 bss_end=$(nm "${build}/kernel.elf" | awk '$3=="__bss_end"{print "0x"$1}')
 (( bss_end > 0 && bss_end < 0x9f000 )) || { echo "image plus bss ends at ${bss_end}: past the conventional-memory budget (0x9f000)" >&2; exit 1; }
+# FL-22 acceptance evidence: payload size and bss end (already gated above) are recorded for CI logs.
+payload_bytes=$(stat -c%s "${build}/kernel.bin")
 python3 - "${build}/boot.bin" "$sectors" <<'PY'
 import pathlib, struct, sys
 p = pathlib.Path(sys.argv[1]); data = bytearray(p.read_bytes())
@@ -97,10 +99,10 @@ image="${dist}/${imgname}"; cat "${build}/boot.bin" "${build}/kernel.bin" >"${im
 truncate -s $(( (sectors + 1) * 512 )) "${image}"
 commit="${GITHUB_SHA:-$(git -C "${root}" rev-parse HEAD)}"; short="${commit:0:7}"
 sha="$(sha256sum "${image}" | awk '{print $1}')"; built="${BUILD_TIMESTAMP:-$(date -u +'%Y-%m-%dT%H:%M:%SZ')}"
-python3 - "${dist}/${infoname}" "$commit" "$short" "$built" "$sha" "$imgname" "$secfeat" <<'PY'
+python3 - "${dist}/${infoname}" "$commit" "$short" "$built" "$sha" "$imgname" "$secfeat" "$sectors" "$payload_bytes" "$bss_end" <<'PY'
 import json, sys
-out, commit, short, built, sha, artifact, secfeat = sys.argv[1:]
-info={"schemaVersion":2,"project":"Flintstone Kernel","repository":"BPForbes/Bailey-Forbes-Flinstone","commit":commit,"shortCommit":short,"builtAt":built,"architecture":"x86_64","cpuMode":"64-bit long mode, freestanding","artifact":artifact,"artifactFormat":"raw BIOS disk image","securityFeatures":secfeat=="1","sha256":sha,"browserEmulator":"QEMU Wasm x86_64 (b7c549b5e6f4)","browserCompatible":False,"v86Compatible":False,"bootableCandidate":True,"bootable":False,"bootloader":"BIOS MBR long-mode loader","requiredBios":"SeaBIOS-compatible","qemuBootMode":"ide-drive","minimumRamBytes":64*1024*1024,"recommendedRamBytes":64*1024*1024,"bootSuccessMarker":"FLINTSTONE_KERNEL_BOOT_OK","bootSuccessMarkerImplemented":True,"validationOutcome":"qemu-unvalidated","runtimeMode":"browser-hosted","serverPath":"relay","serverRelayPort":8767,"capabilities":{"longMode":True,"gdt":True,"idt":True,"serial":True,"vga":True,"pic":True,"pit":True,"ps2Probe":True,"keyboard":True,"biosBlockLoad":True,"identity":True,"hostedLabSessions":True,"filesystem":True,"network":True,"server":True,"securityLab":secfeat=="1"},"blockers":["QEMU has not independently observed the serial marker","Browser has not independently observed the serial marker for this image"]}
+out, commit, short, built, sha, artifact, secfeat, sectors, payload_bytes, bss_end = sys.argv[1:]
+info={"schemaVersion":2,"project":"Flintstone Kernel","repository":"BPForbes/Bailey-Forbes-Flinstone","commit":commit,"shortCommit":short,"builtAt":built,"architecture":"x86_64","cpuMode":"64-bit long mode, freestanding","artifact":artifact,"artifactFormat":"raw BIOS disk image","securityFeatures":secfeat=="1","sha256":sha,"browserEmulator":"QEMU Wasm x86_64 (b7c549b5e6f4)","browserCompatible":False,"v86Compatible":False,"bootableCandidate":True,"bootable":False,"bootloader":"BIOS MBR long-mode loader","requiredBios":"SeaBIOS-compatible","qemuBootMode":"ide-drive","minimumRamBytes":64*1024*1024,"recommendedRamBytes":64*1024*1024,"bootSuccessMarker":"FLINTSTONE_KERNEL_BOOT_OK","bootSuccessMarkerImplemented":True,"validationOutcome":"qemu-unvalidated","runtimeMode":"browser-hosted","serverPath":"relay","serverRelayPort":8767,"payloadSectors":int(sectors),"payloadBytes":int(payload_bytes),"bssEnd":bss_end,"conventionalMemoryBudget":"0x9f000","capabilities":{"longMode":True,"gdt":True,"idt":True,"serial":True,"vga":True,"pic":True,"pit":True,"ps2Probe":True,"keyboard":True,"biosBlockLoad":True,"identity":True,"hostedLabSessions":True,"filesystem":True,"network":True,"server":True,"securityLab":secfeat=="1"},"blockers":["QEMU has not independently observed the serial marker","Browser has not independently observed the serial marker for this image"]}
 with open(out,'w',encoding='utf-8') as f: json.dump(info,f,indent=2); f.write('\n')
 PY
-echo "browser-kernel: wrote ${image} (${sectors} payload sectors, SECFEAT=${secfeat})"
+echo "browser-kernel: wrote ${image} (${sectors} payload sectors / ${payload_bytes} bytes, bss_end=${bss_end} < 0x9f000, SECFEAT=${secfeat})"

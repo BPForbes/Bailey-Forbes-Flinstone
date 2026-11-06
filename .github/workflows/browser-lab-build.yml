@@ -94,6 +94,21 @@ jobs:
           GITHUB_SHA: ${{ steps.source.outputs.sha }}
         run: make browser-kernel
 
+      - name: Record freestanding image size (FL-22)
+        run: |
+          python3 - <<'PY'
+          import json
+          from pathlib import Path
+          info = json.loads(Path("dist/build-info.json").read_text())
+          sectors = info.get("payloadSectors")
+          nbytes = info.get("payloadBytes")
+          bss = info.get("bssEnd")
+          budget = info.get("conventionalMemoryBudget")
+          print(f"FL-22 image size: payloadSectors={sectors} payloadBytes={nbytes} bssEnd={bss} budget={budget}")
+          assert sectors is not None and nbytes is not None and bss and budget == "0x9f000"
+          assert int(str(bss), 0) < int(budget, 0)
+          PY
+
       - name: Probe virtual boot and verify compatibility metadata
         id: boot_probe
         run: ./scripts/test_browser_kernel_artifact.sh
