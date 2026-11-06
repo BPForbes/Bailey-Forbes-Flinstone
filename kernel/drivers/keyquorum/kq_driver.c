@@ -295,6 +295,14 @@ static const char *drv_error_class_name(uint8_t class_code) {
     return kq_error_class_name(class_code);
 }
 
+static int drv_slot_open(const uint8_t *kqst, size_t klen, const char *label, const char *passphrase,
+                         const uint8_t expected_device_id[16], const uint8_t expected_signing_pub[32],
+                         const uint8_t expected_encryption_pub[32], uint8_t signing_secret_out[32],
+                         uint8_t encryption_secret_out[32]) {
+    return kq_slot_open(kqst, klen, label, passphrase, expected_device_id, expected_signing_pub,
+                        expected_encryption_pub, signing_secret_out, encryption_secret_out);
+}
+
 static const fl_driver_ops_t s_kq_lifecycle = {
     .probe = kq_probe,
 };
@@ -345,6 +353,7 @@ static const fl_kq_driver_t s_kq_driver = {
     .error_inject = drv_error_inject,
     .error_name = drv_error_name,
     .error_class_name = drv_error_class_name,
+    .slot_open = drv_slot_open,
 };
 
 const fl_driver_desc_t *fl_kq_driver_desc(void) {

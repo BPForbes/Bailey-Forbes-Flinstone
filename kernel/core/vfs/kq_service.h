@@ -47,6 +47,12 @@ void fl_kq_service_shutdown(void);
 fl_result_t fl_kq_service_online_for_session(const fl_user_record_t *account, const char *password,
                                              uint64_t login_generation);
 fl_result_t fl_kq_service_online_from_login(const char *account, const char *password);
+/**
+ * Publish an already-opened signing secret (KQST login). Same generation rules as
+ * online_for_session. Caller wipes secret after return.
+ */
+fl_result_t fl_kq_service_online_opened(const fl_user_record_t *account, const uint8_t secret[32],
+                                        uint64_t login_generation);
 void fl_kq_service_offline(const char *account);
 size_t fl_kq_service_online_count(void);
 

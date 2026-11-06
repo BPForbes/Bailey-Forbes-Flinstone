@@ -1,6 +1,8 @@
 #include "session.h"
 #include "elevation.h"
 #include "fl/driver/keyquorum.h"
+#include "fl/kq.h"
+#include "mem_domain.h"
 #include <pthread.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -14,12 +16,15 @@ static int s_db_ready;
 static pthread_once_t s_once = PTHREAD_ONCE_INIT;
 static pthread_mutex_t s_session_mu = PTHREAD_MUTEX_INITIALIZER;
 static fl_session_online_fn s_online_hook;
+static fl_session_online_opened_fn s_opened_hook;
 static fl_session_offline_fn s_offline_hook;
 static uint64_t s_login_gen = 1; /* every login and logout starts a new generation; 0 is never one */
 
-void fl_session_set_login_hooks(fl_session_online_fn online, fl_session_offline_fn offline) {
+void fl_session_set_login_hooks(fl_session_online_fn online, fl_session_offline_fn offline,
+                                fl_session_online_opened_fn opened) {
     s_online_hook = online;
     s_offline_hook = offline;
+    s_opened_hook = opened;
 }
 
 static void session_load_once(void) {
@@ -132,17 +137,13 @@ int fl_session_has_elevation(void) {
     return has;
 }
 
-/* An account marked password-plus-KQST needs its slot token, and this build cannot present one yet. Refuse
- * the login rather than quietly treat the account as password-only. Called with s_session_mu held, and only
- * after the password verified, so a wrong password learns nothing about the account's mode. */
-static int kqst_required_unmet(const char *name) {
+/* An account marked password-plus-KQST must open its slot token (FL-15). Called with s_session_mu held
+ * only to read the mode; the open itself runs after the lock is released. Wrong password already failed
+ * before this path, so a missing token does not teach the mode to a stranger. */
+static int kqst_mode(const char *name) {
     const fl_user_record_t *u = fl_user_db_find(&s_db, name);
 
-    if (!u || u->auth_mode != FL_USER_AUTH_PASSWORD_KQST)
-        return 0;
-    fprintf(stderr, "login: %s requires its KQST slot token, which this build cannot open; login refused\n",
-            u->name);
-    return 1;
+    return u && u->auth_mode == FL_USER_AUTH_PASSWORD_KQST;
 }
 
 /* Called with s_session_mu held, after the password verified. */
@@ -173,10 +174,12 @@ fl_result_t fl_session_login(const char *name, const char *password) {
     if (!name || !name[0] || !password)
         return FL_RESULT_INVAL;
     pthread_mutex_lock(&s_session_mu);
-    if (fl_user_db_verify_password(&s_db, name, password) && !kqst_required_unmet(name)) {
+    if (fl_user_db_verify_password(&s_db, name, password)) {
         const fl_user_record_t *u = fl_user_db_find(&s_db, name);
+        int need_kqst = kqst_mode(name);
 
-        login_ensure_account_key(name, password);
+        if (!need_kqst)
+            login_ensure_account_key(name, password);
         fl_elevation_revoke_all();
         /* Store the account's own spelling: "login root" signs in as Root. */
         strncpy(s_current, u ? u->name : name, sizeof(s_current) - 1);
@@ -189,10 +192,33 @@ fl_result_t fl_session_login(const char *name, const char *password) {
             have_snapshot = 1;
         }
         rc = FL_RESULT_OK;
+        if (need_kqst) {
+            const char *open_as = have_snapshot ? snapshot.name : name;
+            uint8_t signing_secret[32];
+            int open_st;
+            fl_result_t pub_rc = FL_RESULT_ACCES;
+
+            /* Open outside the lock; roll the login back if the token will not open or publish. */
+            pthread_mutex_unlock(&s_session_mu);
+            open_st = fl_kq_open_account_secrets(open_as, password, NULL, signing_secret);
+            if (open_st == FL_KQ_ACCOUNT_OK && s_opened_hook && have_snapshot)
+                pub_rc = s_opened_hook(&snapshot, signing_secret, gen);
+            mem_domain_secure_zero(signing_secret, sizeof signing_secret);
+            if (open_st != FL_KQ_ACCOUNT_OK || pub_rc != FL_RESULT_OK) {
+                pthread_mutex_lock(&s_session_mu);
+                if (s_login_gen == gen) {
+                    s_current[0] = '\0';
+                    s_login_gen++;
+                }
+                pthread_mutex_unlock(&s_session_mu);
+                fprintf(stderr, "login: %s requires its KQST slot token; open refused\n", open_as);
+                return FL_RESULT_ACCES;
+            }
+            return FL_RESULT_OK;
+        }
     }
     pthread_mutex_unlock(&s_session_mu);
-    /* The key service opens the account's key with the password just verified, outside the lock. A
-     * failure is the service's to audit and does not block the login. */
+    /* Password accounts: the key service opens the sealed key with the password just verified. */
     if (rc == FL_RESULT_OK && s_online_hook && have_snapshot)
         (void)s_online_hook(&snapshot, password, gen);
     return rc;

@@ -1015,3 +1015,51 @@ fl_result_t fl_user_db_kqst_path(const fl_user_db_t *db, const char *key_id, cha
     sqlite3_close(sql);
     return rc;
 }
+
+static fl_result_t kqst_pairing_select(sqlite3 *sql, const char *key_id, unsigned char device_id[16],
+                                       unsigned char signing_public[32],
+                                       unsigned char encryption_public[32]) {
+    sqlite3_stmt *st = NULL;
+    fl_result_t rc = FL_RESULT_NOENT;
+
+    if (sqlite3_prepare_v2(sql,
+                           "SELECT device_id, signing_public, encryption_public FROM account_keys "
+                           "WHERE label = ?;",
+                           -1, &st, NULL) != SQLITE_OK)
+        return FL_RESULT_ERR;
+    sqlite3_bind_text(st, 1, key_id, -1, SQLITE_TRANSIENT);
+    if (sqlite3_step(st) == SQLITE_ROW) {
+        const void *dev = sqlite3_column_blob(st, 0);
+        const void *sig = sqlite3_column_blob(st, 1);
+        const void *enc = sqlite3_column_blob(st, 2);
+
+        if (dev && sig && enc && sqlite3_column_bytes(st, 0) == 16 &&
+            sqlite3_column_bytes(st, 1) == 32 && sqlite3_column_bytes(st, 2) == 32) {
+            memcpy(device_id, dev, 16);
+            memcpy(signing_public, sig, 32);
+            memcpy(encryption_public, enc, 32);
+            rc = FL_RESULT_OK;
+        }
+    }
+    sqlite3_finalize(st);
+    return rc;
+}
+
+fl_result_t fl_user_db_kqst_pairing(const fl_user_db_t *db, const char *key_id,
+                                    unsigned char device_id[16], unsigned char signing_public[32],
+                                    unsigned char encryption_public[32]) {
+    sqlite3 *sql = NULL;
+    fl_result_t rc;
+
+    if (!db || !key_id || !device_id || !signing_public || !encryption_public)
+        return FL_RESULT_INVAL;
+    if (sqlite3_open_v2(db->path[0] ? db->path : FL_USERS_DB_DEFAULT_PATH, &sql, SQLITE_OPEN_READONLY, NULL) !=
+        SQLITE_OK) {
+        if (sql)
+            sqlite3_close(sql);
+        return FL_RESULT_ERR;
+    }
+    rc = kqst_pairing_select(sql, key_id, device_id, signing_public, encryption_public);
+    sqlite3_close(sql);
+    return rc;
+}

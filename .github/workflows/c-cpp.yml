@@ -144,6 +144,15 @@ jobs:
       - name: Test — workqueue, freestanding configuration
         run: make test_workqueue_freestanding
 
+      - name: Record FL-22 acceptance evidence
+        run: |
+          echo "FL-22 tip evidence:"
+          echo "  - make test_workqueue_p18 (delayed/periodic/protected/ticker + capacity/lock pin)"
+          echo "  - make test_workqueue_p18_tsan (dedicated queue/ticker TSan; not full-shell)"
+          echo "  - make test_workqueue_freestanding (unlocked pool + tick clock)"
+          echo "  - freestanding image size: browser-lab-build records payloadSectors/payloadBytes/bssEnd"
+          echo "  - design values pinned in tests: PENDING_MAX=64 PROTECTED_RESERVE=8 TIMERS_MAX=32 + hosted mutex"
+
       - name: Test — workqueue SQLite journal (restart)
         run: make test_wq_journal_sqlite
 

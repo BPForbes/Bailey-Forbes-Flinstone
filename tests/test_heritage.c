@@ -330,6 +330,28 @@ static int test_auth_mode_and_kqst_path(void) {
     ASSERT(fl_user_db_kqst_path(&db, "Root.Eve", kqst, sizeof kqst) == FL_RESULT_OK);
     ASSERT(strcmp(kqst, "/keys/eve.kqst") == 0);
     ASSERT(fl_user_db_kqst_path(&db, "Root.Eve", kqst, 4) == FL_RESULT_NOMEM);
+    /* x'00' blobs are one byte: pairing requires full device id and public keys. */
+    {
+        unsigned char device_id[16], signing_public[32], encryption_public[32];
+
+        ASSERT(fl_user_db_kqst_pairing(&db, "Root.Eve", device_id, signing_public, encryption_public) ==
+               FL_RESULT_NOENT);
+    }
+    ASSERT(sqlite3_open(path, &sql) == SQLITE_OK);
+    ASSERT(sqlite3_exec(sql,
+                        "UPDATE account_keys SET device_id=x'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa',"
+                        " signing_public=x'bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb',"
+                        " encryption_public=x'cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc'"
+                        " WHERE label='Root.Eve';",
+                        NULL, NULL, NULL) == SQLITE_OK);
+    sqlite3_close(sql);
+    {
+        unsigned char device_id[16], signing_public[32], encryption_public[32];
+
+        ASSERT(fl_user_db_kqst_pairing(&db, "Root.Eve", device_id, signing_public, encryption_public) ==
+               FL_RESULT_OK);
+        ASSERT(device_id[0] == 0xaa && signing_public[0] == 0xbb && encryption_public[0] == 0xcc);
+    }
     unlink(path);
     return 0;
 }

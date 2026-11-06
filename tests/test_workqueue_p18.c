@@ -136,6 +136,24 @@ static int test_model_table_is_pinned(void) {
     return 0;
 }
 
+/* FL-22 design values published in contract_p1_workqueue.h (awaiting owner confirm). Hosted builds
+ * carry a per-queue mutex; freestanding is covered by test_workqueue_freestanding. */
+static int test_hosted_capacity_and_lock_are_pinned(void) {
+    fl_workqueue_storage_t st;
+
+    ASSERT(FL_WQ_PENDING_MAX == 64u);
+    ASSERT(FL_WQ_PROTECTED_RESERVE == 8u);
+    ASSERT(FL_WQ_TIMERS_MAX == 32u);
+    ASSERT(FL_WQ_PROTECTED_RESERVE < FL_WQ_PENDING_MAX);
+#ifdef FL_WQ_HAS_LOCK
+    ASSERT(sizeof st.lock >= sizeof(pthread_mutex_t));
+#else
+#error "hosted test_workqueue_p18 must see FL_WQ_HAS_LOCK"
+#endif
+    (void)st;
+    return 0;
+}
+
 /* Runs last: every durable scenario above (accept, run, retry, fail, recover, expire, hold, resolve) moved jobs
  * only along the model's transitions; a move the model forbids is refused and counted. */
 static int test_the_queue_never_left_the_model(void) {
@@ -1897,6 +1915,7 @@ int main(void) {
     RUN_TEST(admission_counts_every_nonterminal_state);
     RUN_TEST(full_journal_still_answers_a_repeat);
     RUN_TEST(model_table_is_pinned);
+    RUN_TEST(hosted_capacity_and_lock_are_pinned);
     RUN_TEST(ticker_and_default_queue); /* last: it shuts the default queue down */
     RUN_TEST(the_queue_never_left_the_model);
     printf("test_workqueue_p18: all passed\n");

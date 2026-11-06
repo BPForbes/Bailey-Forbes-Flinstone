@@ -11,13 +11,16 @@
 #include "bg_jobs.h"
 #include "contract_p2_authz.h"
 #include "fl/authz_subsystem.h"
+#include "fl/kq.h"
 #include "session.h"
 #include "timekeeping.h"
 #include "user_db.h"
 
+#include <fcntl.h>
 #include <pthread.h>
 #include <semaphore.h>
 #include <signal.h>
+#include <sqlite3.h>
 #include <stdatomic.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -77,11 +80,13 @@ static int test_login_brings_the_key_online_and_logout_wipes_it(void) {
     ASSERT(mode == KQ_SIGNING_OWN && memcmp(key, expect, 32) == 0);
     ASSERT(fl_kq_obtain_author_key(root->key_id, key, &mode) == FL_RESULT_ACCES); /* only the signed-in account */
 
-    /* su without a password opens no key */
+    /* su without a password opens no key; restoring the original account keeps its key (su -c). */
     ASSERT(fl_session_set_user("Root") == FL_RESULT_OK);
     ASSERT(fl_kq_service_online_count() == 1);
     ASSERT(fl_kq_obtain_author_key(root->key_id, key, &mode) == FL_RESULT_ACCES);
     ASSERT(fl_session_set_user("Flinstone") == FL_RESULT_OK);
+    ASSERT(fl_kq_obtain_author_key(flin->key_id, key, &mode) == FL_RESULT_OK);
+    ASSERT(mode == KQ_SIGNING_OWN && memcmp(key, expect, 32) == 0);
 
     ASSERT(fl_session_logout() == FL_RESULT_OK); /* the account that signed out loses its key */
     ASSERT(fl_kq_service_online_count() == 0);
@@ -103,6 +108,75 @@ static int test_a_kqst_account_cannot_log_in_by_password_alone(void) {
     ASSERT(fl_user_db_set_auth_mode(db, "Flinstone", FL_USER_AUTH_PASSWORD) == FL_RESULT_OK);
     ASSERT(fl_session_login("Flinstone", "flinstone") == FL_RESULT_OK);
     ASSERT(fl_session_logout() == FL_RESULT_OK);
+    return 0;
+}
+
+/* FL-15: open refuses when the store has no pairing/path, or the token file is junk. Minting a real
+ * KQST stays out of C tests (no seal export on the pin); success-path open waits on fixtures. */
+static int test_kqst_open_refusal_matrix(void) {
+    fl_user_db_t *db = fl_session_user_db_mut();
+    const fl_user_record_t *flin;
+    char path_buf[256];
+    char tokpath[] = "/tmp/fl_kqstXXXXXX";
+    unsigned char device_id[16], signing_pub[32], encryption_pub[32];
+    fl_kq_requirement_t req;
+    sqlite3 *sql = NULL;
+    int fd;
+    const char *db_path;
+
+    ASSERT(db);
+    flin = account("Flinstone");
+    ASSERT(flin);
+    ASSERT(fl_user_db_set_auth_mode(db, "Flinstone", FL_USER_AUTH_PASSWORD_KQST) == FL_RESULT_OK);
+
+    req = fl_kq_unlock_requirement("Flinstone", "Root", 0);
+    ASSERT(req.factor == FL_KQ_ACCOUNT_INVALID);
+
+    ASSERT(fl_user_db_kqst_path(db, flin->key_id, path_buf, sizeof path_buf) == FL_RESULT_NOENT);
+    ASSERT(fl_user_db_kqst_pairing(db, flin->key_id, device_id, signing_pub, encryption_pub) ==
+           FL_RESULT_NOENT);
+    ASSERT(fl_kq_open_account("Flinstone", "flinstone", NULL) == FL_KQ_ACCOUNT_INVALID);
+    ASSERT(fl_kq_open_account("Flinstone", "flinstone", "/no/such/token.kqst") == FL_KQ_ACCOUNT_INVALID);
+    ASSERT(fl_session_login("Flinstone", "flinstone") == FL_RESULT_ACCES);
+    ASSERT(fl_kq_service_online_count() == 0);
+
+    fd = mkstemp(tokpath);
+    ASSERT(fd >= 0);
+    ASSERT(write(fd, "not-a-kqst", 10) == 10);
+    close(fd);
+    /* Path alone is not enough: pairing must come from the caller's registry. */
+    ASSERT(fl_kq_open_account("Flinstone", "flinstone", tokpath) == FL_KQ_ACCOUNT_INVALID);
+
+    db_path = getenv("FL_USERS_DB_PATH");
+    ASSERT(db_path && sqlite3_open(db_path, &sql) == SQLITE_OK);
+    {
+        sqlite3_stmt *st = NULL;
+
+        ASSERT(sqlite3_prepare_v2(sql,
+                                  "INSERT INTO account_keys (label,purpose,holds_share,minted_by,minted_at,"
+                                  "generation,kqst_path,device_id,signing_public,encryption_public,"
+                                  "ledger_seq,event_hash) VALUES (?1,'own',1,'Root',1,1,?2,"
+                                  "x'01010101010101010101010101010101',"
+                                  "x'0202020202020202020202020202020202020202020202020202020202020202',"
+                                  "x'0303030303030303030303030303030303030303030303030303030303030303',"
+                                  "0,x'00');",
+                                  -1, &st, NULL) == SQLITE_OK);
+        sqlite3_bind_text(st, 1, flin->key_id, -1, SQLITE_TRANSIENT);
+        sqlite3_bind_text(st, 2, tokpath, -1, SQLITE_TRANSIENT);
+        ASSERT(sqlite3_step(st) == SQLITE_DONE);
+        sqlite3_finalize(st);
+    }
+    sqlite3_close(sql);
+
+    ASSERT(fl_user_db_kqst_pairing(db, flin->key_id, device_id, signing_pub, encryption_pub) ==
+           FL_RESULT_OK);
+    ASSERT(device_id[0] == 0x01 && signing_pub[0] == 0x02 && encryption_pub[0] == 0x03);
+    ASSERT(fl_kq_open_account("Flinstone", "flinstone", NULL) == FL_KQ_ACCOUNT_INVALID); /* junk token */
+    ASSERT(fl_session_login("Flinstone", "flinstone") == FL_RESULT_ACCES);
+    ASSERT(fl_kq_service_online_count() == 0);
+
+    unlink(tokpath);
+    ASSERT(fl_user_db_set_auth_mode(db, "Flinstone", FL_USER_AUTH_PASSWORD) == FL_RESULT_OK);
     return 0;
 }
 
@@ -333,6 +407,7 @@ int main(void) {
 #define RUN(t) do { if (t() != 0) { rc = 1; fprintf(stderr, "%s failed\n", #t); } else printf("%s... OK\n", #t); } while (0)
     RUN(test_login_brings_the_key_online_and_logout_wipes_it);
     if (!rc) RUN(test_a_kqst_account_cannot_log_in_by_password_alone);
+    if (!rc) RUN(test_kqst_open_refusal_matrix);
     if (!rc) RUN(test_a_logout_that_overlaps_the_key_derivation_wins);
     if (!rc) RUN(test_the_thread_cannot_be_cancelled_or_signalled);
     if (!rc) RUN(test_protected_work_is_never_dropped_and_a_stall_fails_closed);

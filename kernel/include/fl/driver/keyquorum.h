@@ -20,6 +20,7 @@
 #include "keyquorum_error.h"
 #include "keyquorum_files.h"
 #include "keyquorum_identity.h"
+#include "keyquorum_slots.h"
 
 #include <stddef.h>
 #include <stdint.h>
@@ -164,6 +165,15 @@ struct fl_kq_driver {
                         fl_kq_buf_t *out);
     const char *(*error_name)(uint16_t code);
     const char *(*error_class_name)(uint8_t class_code);
+
+    /*
+     * Store-free KQST open (keyquorum_slots.h): passphrase + caller-held device id and public
+     * keys. Returns KQ_ACCOUNT_*; secrets are written only on OK (caller wipes).
+     */
+    int (*slot_open)(const uint8_t *kqst, size_t klen, const char *label, const char *passphrase,
+                     const uint8_t expected_device_id[16], const uint8_t expected_signing_pub[32],
+                     const uint8_t expected_encryption_pub[32], uint8_t signing_secret_out[32],
+                     uint8_t encryption_secret_out[32]);
 };
 
 /**

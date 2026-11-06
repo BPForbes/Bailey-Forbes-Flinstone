@@ -72,6 +72,13 @@ fl_result_t fl_user_db_set_auth_mode(fl_user_db_t *db, const char *name, int aut
  * a path never sits in the record). NOENT when the account has no row or the row has no path.
  */
 fl_result_t fl_user_db_kqst_path(const fl_user_db_t *db, const char *key_id, char *out, size_t cap);
+/**
+ * Pairing facts the caller's registry holds for a KQST open: device id and the two public keys.
+ * NOENT when the account_keys row is missing or any field is the wrong size / empty path alone.
+ */
+fl_result_t fl_user_db_kqst_pairing(const fl_user_db_t *db, const char *key_id,
+                                    unsigned char device_id[16], unsigned char signing_public[32],
+                                    unsigned char encryption_public[32]);
 
 fl_result_t fl_user_db_load(fl_user_db_t *db, const char *path);
 fl_result_t fl_user_db_save(const fl_user_db_t *db);

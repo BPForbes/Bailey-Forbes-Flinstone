@@ -127,6 +127,24 @@ fl_result_t fl_kq_service_online_from_login(const char *account, const char *pas
     return fl_kq_service_online_for_session(&rec, password, 0); /* no session login to be stale against */
 }
 
+fl_result_t fl_kq_service_online_opened(const fl_user_record_t *account, const uint8_t secret[32],
+                                        uint64_t login_generation) {
+    fl_result_t rc;
+    slot_put_ctx_t put;
+
+    if (!account || !secret)
+        return FL_RESULT_INVAL;
+    put.key_id = account->key_id;
+    put.secret = secret;
+    rc = fl_session_publish_if_current(login_generation, slot_put_cb, &put);
+    fl_audit_identity_event(account->key_id,
+                            rc == FL_RESULT_OK ? "kq-service-online"
+                            : rc == FL_RESULT_BUSY ? "kq-service-stale-login"
+                                                   : "kq-service-refused",
+                            account->key_id, NULL);
+    return rc;
+}
+
 void fl_kq_service_offline(const char *account) {
     fl_user_record_t rec;
     const char *key_id = account;
@@ -274,7 +292,8 @@ fl_result_t fl_kq_service_start(void) {
         return FL_RESULT_ERR;
     }
     s_started = 1;
-    fl_session_set_login_hooks(fl_kq_service_online_for_session, fl_kq_service_offline);
+    fl_session_set_login_hooks(fl_kq_service_online_for_session, fl_kq_service_offline,
+                               fl_kq_service_online_opened);
     fl_authz_subsystem_set_deny_audit(audit_control_denied);
     (void)fl_bg_watchdog_register(fl_kq_service_alive, fl_kq_service_report_stalled);
     return FL_RESULT_OK;
@@ -296,7 +315,7 @@ void fl_kq_service_shutdown(void) {
     pthread_cond_destroy(&s_wake_cv);
     s_started = 0;
     atomic_store(&s_heartbeat_ns, 0);
-    fl_session_set_login_hooks(NULL, NULL);
+    fl_session_set_login_hooks(NULL, NULL, NULL);
     pthread_mutex_lock(&s_mu);
     for (size_t i = 0; i < FL_USER_DB_MAX_USERS; i++)
         if (s_slots[i].used)

@@ -41,6 +41,13 @@ typedef struct {
     int needs_parent_grant;
 } fl_kq_requirement_t;
 fl_kq_requirement_t fl_kq_unlock_requirement(const char *current_user, const char *target_user, int sudo);
+/**
+ * Open the account's KQST (pairing from the store). Returns KQ_ACCOUNT_*. On OK,
+ * signing_secret_out holds the signing secret (caller wipes); the encryption secret is wiped inside.
+ */
+int fl_kq_open_account_secrets(const char *user, const char *password, const char *kqst_path_or_null,
+                               uint8_t signing_secret_out[32]);
+/** Open and wipe both secrets; status only (for refusal checks and tooling). */
 int fl_kq_open_account(const char *user, const char *password, const char *kqst_path_or_null);
 
 #ifdef __cplusplus

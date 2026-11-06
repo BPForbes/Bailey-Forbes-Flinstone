@@ -38,13 +38,18 @@ fl_result_t fl_session_logout(void);
 /**
  * Hooks a service below the session installs (the KeyQuorum key service, kernel/core/vfs/kq_service.c):
  * online runs after a successful fl_session_login with the password just verified (the session lock
- * is not held, so a slow key derivation does not stall the session); offline runs after
- * fl_session_logout with the account that signed out. Neither can refuse a login or a logout.
+ * is not held, so a slow key derivation does not stall the session); online_opened publishes an
+ * already-opened signing secret for PASSWORD_KQST logins; offline runs after fl_session_logout with
+ * the account that signed out. Password online cannot refuse a login; KQST login refuses when open
+ * or online_opened fails.
  */
 typedef fl_result_t (*fl_session_online_fn)(const fl_user_record_t *account, const char *password,
                                            uint64_t login_generation);
+typedef fl_result_t (*fl_session_online_opened_fn)(const fl_user_record_t *account,
+                                                   const uint8_t secret[32], uint64_t login_generation);
 typedef void (*fl_session_offline_fn)(const char *account);
-void fl_session_set_login_hooks(fl_session_online_fn online, fl_session_offline_fn offline);
+void fl_session_set_login_hooks(fl_session_online_fn online, fl_session_offline_fn offline,
+                                fl_session_online_opened_fn opened);
 
 /**
  * The online hook gets a copy of the account's record taken under the session lock and the generation
