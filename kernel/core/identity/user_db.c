@@ -13,38 +13,63 @@
 #include <string.h>
 #include <strings.h>
 
-static fl_result_t db_init_schema(sqlite3 *sql) {
-    static const char *schema =
-        "CREATE TABLE IF NOT EXISTS users ("
-        "  name TEXT PRIMARY KEY NOT NULL,"
-        "  password_hash TEXT NOT NULL,"
-        "  salt_hex TEXT NOT NULL,"
-        "  uid INTEGER NOT NULL,"
-        "  is_elevated INTEGER NOT NULL DEFAULT 0,"
-        "  key_id TEXT NOT NULL DEFAULT '',"
-        "  created_by TEXT NOT NULL DEFAULT '',"
-        "  created_at INTEGER NOT NULL DEFAULT 0,"
-        "  signing_public TEXT NOT NULL DEFAULT '',"
-        "  signing_sealed TEXT NOT NULL DEFAULT '',"
-        "  box_public TEXT NOT NULL DEFAULT '',"
-        "  box_sealed TEXT NOT NULL DEFAULT ''"
-        ");"
-        "CREATE TABLE IF NOT EXISTS meta ("
-        "  key TEXT PRIMARY KEY NOT NULL,"
-        "  value TEXT NOT NULL"
-        ");";
-    /* Stores written before heritage key ids or account keys lack these columns: add them in place. */
-    static const fl_sqlite_column_t heritage_columns[] = {
-        {"key_id", "TEXT NOT NULL DEFAULT ''"},
-        {"created_by", "TEXT NOT NULL DEFAULT ''"},
-        {"created_at", "INTEGER NOT NULL DEFAULT 0"},
-        {"signing_public", "TEXT NOT NULL DEFAULT ''"},
-        {"signing_sealed", "TEXT NOT NULL DEFAULT ''"},
-        {"box_public", "TEXT NOT NULL DEFAULT ''"},
-        {"box_sealed", "TEXT NOT NULL DEFAULT ''"},
-    };
+static const char *const k_user_db_schema =
+    "CREATE TABLE IF NOT EXISTS users ("
+    "  name TEXT PRIMARY KEY NOT NULL,"
+    "  password_hash TEXT NOT NULL,"
+    "  salt_hex TEXT NOT NULL,"
+    "  uid INTEGER NOT NULL,"
+    "  is_elevated INTEGER NOT NULL DEFAULT 0,"
+    "  key_id TEXT NOT NULL DEFAULT '',"
+    "  created_by TEXT NOT NULL DEFAULT '',"
+    "  created_at INTEGER NOT NULL DEFAULT 0,"
+    "  signing_public TEXT NOT NULL DEFAULT '',"
+    "  signing_sealed TEXT NOT NULL DEFAULT '',"
+    "  box_public TEXT NOT NULL DEFAULT '',"
+    "  box_sealed TEXT NOT NULL DEFAULT '',"
+    "  auth_mode INTEGER NOT NULL DEFAULT 0"
+    ");"
+    /* Key metadata, written when a key is minted, paired with its KQST. The one home of the KQST path. */
+    "CREATE TABLE IF NOT EXISTS account_keys ("
+    "  label TEXT PRIMARY KEY NOT NULL, purpose TEXT NOT NULL, holds_share INTEGER NOT NULL,"
+    "  minted_by TEXT NOT NULL, minted_at INTEGER NOT NULL, generation INTEGER NOT NULL,"
+    "  kqst_path TEXT, device_id BLOB NOT NULL, signing_public BLOB NOT NULL,"
+    "  encryption_public BLOB NOT NULL, ledger_seq INTEGER NOT NULL, event_hash BLOB NOT NULL"
+    ");"
+    /* Live private bridges, mirroring KeyQuorum's (not the account-to-account `bridges` table of
+     * bridge.c). A sealed bridge key is kept only for members whose account exists on this machine. */
+    "CREATE TABLE IF NOT EXISTS account_bridges ("
+    "  uid TEXT PRIMARY KEY NOT NULL, generation INTEGER NOT NULL, salt BLOB NOT NULL,"
+    "  public_key BLOB NOT NULL, destroyed INTEGER NOT NULL DEFAULT 0"
+    ");"
+    "CREATE TABLE IF NOT EXISTS account_bridge_members ("
+    "  uid TEXT NOT NULL, label TEXT NOT NULL, encryption_public BLOB NOT NULL,"
+    "  signing_public BLOB NOT NULL, sealed_bridge_key BLOB, PRIMARY KEY (uid, label)"
+    ");"
+    /* A parent account's key assembled from its children's shares: sealed, safe at rest. */
+    "CREATE TABLE IF NOT EXISTS account_assembly ("
+    "  parent_label TEXT PRIMARY KEY NOT NULL, threshold INTEGER NOT NULL, generation INTEGER NOT NULL,"
+    "  sealed_shares BLOB NOT NULL"
+    ");"
+    "CREATE TABLE IF NOT EXISTS meta ("
+    "  key TEXT PRIMARY KEY NOT NULL,"
+    "  value TEXT NOT NULL"
+    ");";
 
-    if (fl_sqlite_exec(sql, "user_db", schema) != FL_RESULT_OK)
+/* Stores written before heritage key ids or account keys lack these columns: add them in place. */
+static const fl_sqlite_column_t heritage_columns[] = {
+    {"key_id", "TEXT NOT NULL DEFAULT ''"},
+    {"created_by", "TEXT NOT NULL DEFAULT ''"},
+    {"created_at", "INTEGER NOT NULL DEFAULT 0"},
+    {"signing_public", "TEXT NOT NULL DEFAULT ''"},
+    {"signing_sealed", "TEXT NOT NULL DEFAULT ''"},
+    {"box_public", "TEXT NOT NULL DEFAULT ''"},
+    {"box_sealed", "TEXT NOT NULL DEFAULT ''"},
+    {"auth_mode", "INTEGER NOT NULL DEFAULT 0"}, /* an old store upgrades in place: every row reads 0 */
+};
+
+static fl_result_t db_init_schema(sqlite3 *sql) {
+    if (fl_sqlite_exec(sql, "user_db", k_user_db_schema) != FL_RESULT_OK)
         return FL_RESULT_ERR;
     return fl_sqlite_ensure_columns(sql, "user_db", "users", heritage_columns,
                                     sizeof(heritage_columns) / sizeof(heritage_columns[0]));
@@ -153,13 +178,13 @@ static fl_result_t db_upsert_user(sqlite3 *sql, const fl_user_record_t *u) {
     char box_sealed_hex[2 * FL_USER_SIGNING_SEALED_LEN + 1] = "";
     const char *ins =
         "INSERT INTO users(name,password_hash,salt_hex,uid,is_elevated,key_id,created_by,created_at,"
-        "signing_public,signing_sealed,box_public,box_sealed) "
-        "VALUES(?,?,?,?,?,?,?,?,?,?,?,?) "
+        "signing_public,signing_sealed,box_public,box_sealed,auth_mode) "
+        "VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?) "
         "ON CONFLICT(name) DO UPDATE SET password_hash=excluded.password_hash,"
         "salt_hex=excluded.salt_hex,uid=excluded.uid,is_elevated=excluded.is_elevated,"
         "key_id=excluded.key_id,created_by=excluded.created_by,created_at=excluded.created_at,"
         "signing_public=excluded.signing_public,signing_sealed=excluded.signing_sealed,"
-        "box_public=excluded.box_public,box_sealed=excluded.box_sealed;";
+        "box_public=excluded.box_public,box_sealed=excluded.box_sealed,auth_mode=excluded.auth_mode;";
     if (u->has_key) {
         fl_hex_encode(u->signing_public, sizeof u->signing_public, public_hex);
         fl_hex_encode(u->signing_sealed, sizeof u->signing_sealed, sealed_hex);
@@ -182,6 +207,7 @@ static fl_result_t db_upsert_user(sqlite3 *sql, const fl_user_record_t *u) {
     sqlite3_bind_text(st, 10, sealed_hex, -1, SQLITE_TRANSIENT);
     sqlite3_bind_text(st, 11, box_public_hex, -1, SQLITE_TRANSIENT);
     sqlite3_bind_text(st, 12, box_sealed_hex, -1, SQLITE_TRANSIENT);
+    sqlite3_bind_int(st, 13, u->auth_mode);
     if (sqlite3_step(st) != SQLITE_DONE) {
         sqlite3_finalize(st);
         return FL_RESULT_ERR;
@@ -193,7 +219,7 @@ static fl_result_t db_upsert_user(sqlite3 *sql, const fl_user_record_t *u) {
 static fl_result_t db_load_users(sqlite3 *sql, fl_user_db_t *db) {
     sqlite3_stmt *st = NULL;
     const char *q = "SELECT name,password_hash,salt_hex,uid,is_elevated,key_id,created_by,created_at,"
-                    "signing_public,signing_sealed,box_public,box_sealed FROM users ORDER BY uid;";
+                    "signing_public,signing_sealed,box_public,box_sealed,auth_mode FROM users ORDER BY uid;";
     if (sqlite3_prepare_v2(sql, q, -1, &st, NULL) != SQLITE_OK)
         return FL_RESULT_ERR;
     db->count = 0;
@@ -252,6 +278,8 @@ static fl_result_t db_load_users(sqlite3 *sql, fl_user_db_t *db) {
                 mem_domain_zero(u->box_public, sizeof u->box_public);
                 mem_domain_zero(u->box_sealed, sizeof u->box_sealed);
             }
+            u->auth_mode = sqlite3_column_int(st, 12) == FL_USER_AUTH_PASSWORD_KQST ? FL_USER_AUTH_PASSWORD_KQST
+                                                                                    : FL_USER_AUTH_PASSWORD;
             db->count++;
         }
     }
@@ -861,19 +889,15 @@ int fl_user_db_secret_matches(const fl_user_db_t *db, const char *key_id,
 
 /* Opens the sealed secret of kind for the account name. Once the driver's account_open has been
  * called, every return other than OK leaves secret securely zeroed. */
-static fl_result_t open_sealed(const fl_user_db_t *db, const char *name, const char *password,
-                               fl_user_secret_kind_t kind, unsigned char *secret) {
-    const fl_user_record_t *u;
+static fl_result_t open_sealed_record(const fl_user_record_t *u, const char *password,
+                                      fl_user_secret_kind_t kind, unsigned char *secret) {
     const unsigned char *sealed;
     size_t sealed_len;
     const fl_kq_driver_t *kq;
     int rc;
 
-    if (!db || !name || !password || !secret)
+    if (!u || !password || !secret)
         return FL_RESULT_INVAL;
-    u = fl_user_db_find(db, name);
-    if (!u)
-        return FL_RESULT_NOENT;
     if (kind == FL_USER_SECRET_SIGNING && u->has_key) {
         sealed = (const unsigned char *)u->signing_sealed;
         sealed_len = sizeof u->signing_sealed;
@@ -899,6 +923,23 @@ static fl_result_t open_sealed(const fl_user_db_t *db, const char *name, const c
     return FL_RESULT_OK;
 }
 
+static fl_result_t open_sealed(const fl_user_db_t *db, const char *name, const char *password,
+                               fl_user_secret_kind_t kind, unsigned char *secret) {
+    const fl_user_record_t *u;
+
+    if (!db || !name || !password || !secret)
+        return FL_RESULT_INVAL;
+    u = fl_user_db_find(db, name);
+    if (!u)
+        return FL_RESULT_NOENT;
+    return open_sealed_record(u, password, kind, secret);
+}
+
+fl_result_t fl_user_db_open_key_record(const fl_user_record_t *account, const char *password,
+                                      unsigned char *secret) {
+    return open_sealed_record(account, password, FL_USER_SECRET_SIGNING, secret);
+}
+
 fl_result_t fl_user_db_open_key(const fl_user_db_t *db, const char *name, const char *password,
                                 unsigned char *secret) {
     return open_sealed(db, name, password, FL_USER_SECRET_SIGNING, secret);
@@ -919,4 +960,58 @@ const unsigned char *fl_user_db_box_public(const fl_user_db_t *db, const char *k
     const fl_user_record_t *u = fl_user_db_find_by_key(db, key_id);
 
     return (u && u->has_box) ? u->box_public : NULL;
+}
+
+fl_result_t fl_user_db_set_auth_mode(fl_user_db_t *db, const char *name, int auth_mode) {
+    fl_user_record_t *u;
+
+    if (!db || !name || (auth_mode != FL_USER_AUTH_PASSWORD && auth_mode != FL_USER_AUTH_PASSWORD_KQST))
+        return FL_RESULT_INVAL;
+    u = (fl_user_record_t *)fl_user_db_find(db, name);
+    if (!u)
+        return FL_RESULT_NOENT;
+    u->auth_mode = auth_mode;
+    return FL_RESULT_OK;
+}
+
+static fl_result_t kqst_path_select(sqlite3 *sql, const char *key_id, char *out, size_t cap) {
+    sqlite3_stmt *st = NULL;
+    fl_result_t rc = FL_RESULT_NOENT;
+
+    if (sqlite3_prepare_v2(sql, "SELECT kqst_path FROM account_keys WHERE label = ?;", -1, &st, NULL) !=
+        SQLITE_OK)
+        return FL_RESULT_ERR;
+    sqlite3_bind_text(st, 1, key_id, -1, SQLITE_TRANSIENT);
+    if (sqlite3_step(st) == SQLITE_ROW) {
+        const char *v = (const char *)sqlite3_column_text(st, 0);
+
+        if (v && v[0]) {
+            if (strlen(v) >= cap) {
+                rc = FL_RESULT_NOMEM;
+            } else {
+                memcpy(out, v, strlen(v) + 1);
+                rc = FL_RESULT_OK;
+            }
+        }
+    }
+    sqlite3_finalize(st);
+    return rc;
+}
+
+fl_result_t fl_user_db_kqst_path(const fl_user_db_t *db, const char *key_id, char *out, size_t cap) {
+    sqlite3 *sql = NULL;
+    fl_result_t rc;
+
+    if (!db || !key_id || !out || cap == 0)
+        return FL_RESULT_INVAL;
+    out[0] = '\0';
+    if (sqlite3_open_v2(db->path[0] ? db->path : FL_USERS_DB_DEFAULT_PATH, &sql, SQLITE_OPEN_READONLY, NULL) !=
+        SQLITE_OK) {
+        if (sql)
+            sqlite3_close(sql);
+        return FL_RESULT_ERR;
+    }
+    rc = kqst_path_select(sql, key_id, out, cap);
+    sqlite3_close(sql);
+    return rc;
 }

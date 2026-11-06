@@ -9,6 +9,9 @@
 #include "serial.h"
 #include "shell.h"
 #include "vga.h"
+#ifdef FL_WITH_KEYQUORUM
+#include "fl/driver/keyquorum.h"
+#endif
 
 struct idt_gate {
     uint16_t off0, sel;
@@ -44,6 +47,7 @@ __attribute__((interrupt)) static void early_exception_with_error(void *frame, u
 __attribute__((interrupt)) static void irq_pit(void *frame)
 {
     (void)frame;
+    fl_fs_pit_irq(); /* counts and flags only; the shell loop does the bounded work */
     fl_fs_pic_eoi(0);
 }
 
@@ -97,6 +101,10 @@ void fl_kernel_main(void)
     fl_fs_pic_unmask(1);
     fl_fs_serial_puts("Flintstone freestanding x86_64\r\n");
     fl_fs_serial_puts("CAP identity=available filesystem=ramfs network=lab server=relay hosted_sessions=available\r\n");
+#ifdef FL_WITH_KEYQUORUM
+    /* The KeyQuorum library is linked and its ABI is the one the driver was written for. */
+    fl_fs_serial_puts(fl_kq_driver_get() ? "CAP keyquorum=linked\r\n" : "CAP keyquorum=abi-mismatch\r\n");
+#endif
     fl_fs_serial_puts("FLINTSTONE_KERNEL_BOOT_OK\r\n");
     __asm__ volatile("sti");
     fl_fs_shell_init();

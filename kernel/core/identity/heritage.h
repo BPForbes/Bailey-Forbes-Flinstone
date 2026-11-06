@@ -37,6 +37,14 @@ int fl_heritage_is_ancestor_or_self(const char *a, const char *b);
 fl_heritage_relation_t fl_heritage_relation(const char *a, const char *b);
 
 /** Short display word for a relation ("self", "descendant", ...). */
+/**
+ * 1 when a bridge between end_a and end_b connects actor to scope: one end holds the actor or an
+ * ancestor of it, the other sits on the scope's line (the scope, an ancestor of it, or a node inside
+ * it). Judges only the shape of the hierarchy, one hop (bridges do not chain); that the bridge exists
+ * and is live is the caller's check (the bridge store, kq_bridge_verify). The rule is KeyQuorum's.
+ */
+int fl_heritage_bridge_connects(const char *end_a, const char *end_b, const char *actor, const char *scope);
+
 const char *fl_heritage_relation_name(fl_heritage_relation_t rel);
 
 /**

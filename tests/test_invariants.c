@@ -472,6 +472,14 @@ static int test_contract_constants(void) {
     ASSERT(FL_CONTRACT_P1_10_WATCHDOG_CONTRACT_DEFINED == 1);
     ASSERT(FL_WQ_LAYER_URGENT == 0);
     ASSERT(FL_WQ_PENDING_MAX == 64u);
+    ASSERT(FL_CONTRACT_P1_WORKQUEUE_REV == 5);
+    /* authz op codes are append-only (FL-12 change 1): the existing ones keep their numbers */
+    ASSERT((int)FL_AUTHZ_OP_IDENTITY_BRIDGE == 10 && (int)FL_AUTHZ_OP_IDENTITY_SWITCH == 11);
+    ASSERT((int)FL_AUTHZ_OP_FILE_HISTORY_EXPORT == 15 && (int)FL_AUTHZ_OP_STORAGE_MEDIATION_POLICY == 18);
+    ASSERT((int)FL_AUTHZ_OP_SHELL_FOREIGN_EXEC == 100);
+    ASSERT(FL_WQ_PAYLOAD_MAX == 256u && FL_WQ_MAX_ATTEMPTS == 3u);
+    ASSERT(FL_WQ_PROTECTED_RESERVE < FL_WQ_PENDING_MAX);
+    ASSERT(FL_WQ_TIMERS_MAX == 32u);
 
     ASSERT(FL_CONTRACT_P2_IDENTITY_REV == 4);
     ASSERT(strcmp(FL_CREDENTIAL_STORE_LAB_SQLITE_REL, "userland/shell/fl_users.db") == 0);
@@ -584,6 +592,17 @@ static int test_contract_constants(void) {
     ASSERT(fl_net_session_is_file_opcode(FL_NET_SESSION_OP_FILE_META) == 1);
     ASSERT(fl_net_session_is_file_opcode(0x2fu) == 0);
     ASSERT(fl_net_session_is_file_opcode(0x39u) == 0);
+    /* KeyQuorum history (FL-04) */
+    ASSERT((int)FL_NET_SESSION_OP_KQH_REQ == 0x50);
+    ASSERT((int)FL_NET_SESSION_OP_KQH_DATA == 0x51);
+    ASSERT(fl_net_session_is_kq_opcode(FL_NET_SESSION_OP_KQH_REQ) == 1);
+    ASSERT(fl_net_session_is_kq_opcode(FL_NET_SESSION_OP_KQH_DATA) == 1);
+    ASSERT(fl_net_session_is_kq_opcode(0x4Fu) == 0);
+    ASSERT(fl_net_session_is_kq_opcode(0x52u) == 0);
+    ASSERT(fl_net_session_is_kq_opcode(FL_NET_SESSION_OP_KQ_KEYS) == 1);
+    ASSERT(fl_net_session_is_kq_opcode(FL_NET_SESSION_OP_WIFI_LAST) == 0);
+    ASSERT(fl_net_session_is_file_opcode(FL_NET_SESSION_OP_KQH_REQ) == 0);
+    ASSERT(fl_net_session_is_wifi_opcode(FL_NET_SESSION_OP_KQH_REQ) == 0);
     ASSERT(FL_SERVER_FILE_STATUS_QUEUED == 1u);
     ASSERT(strcmp(FL_SFTP_VPATH_HOME, "/sftp/home") == 0);
 

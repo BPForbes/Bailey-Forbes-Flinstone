@@ -19,7 +19,7 @@ jobs:
       - name: Install Rust (KeyQuorum identity library)
         uses: dtolnay/rust-toolchain@89b12181fb390509a0842a86cc55eeb8eb928c1d # stable branch
         with:
-          toolchain: stable
+          toolchain: 1.97.0 # pinned (FL-17 item 5): the compiler the KeyQuorum archive was built and checked with
 
       - name: Install dependencies
         run: sudo apt-get update -y && sudo apt-get install -y gcc binutils nasm make libcunit1-dev

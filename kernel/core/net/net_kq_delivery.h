@@ -121,6 +121,32 @@ fl_result_t fl_net_kq_take_letter(const uint8_t id[FL_KQ_DELIVERY_ID_LEN], unsig
 /** Forget a request after it was decoded or refused. */
 void fl_net_kq_inbox_drop(const uint8_t id[FL_KQ_DELIVERY_ID_LEN]);
 
+
+/**
+ * A member asks the host for a delivery's history: REQ [request id 16][delivery id 16], answered
+ * with DATA chunks of the history bundle (kq_history_bundle.h: the kind-15 letter then the
+ * kind-17 letter, both sealed to the requester). Two things are the host's to provide, and with
+ * either missing the host refuses (it never answers silently and never guesses):
+ *  - the gate: 1 when this requester may have this delivery's history (the native shell asks
+ *    fl_authz_subsystem_check(FL_AUTHZ_OP_FILE_HISTORY_EXPORT, ...));
+ *  - the source: fills out[cap] with the bundle, signed by the host's own account (so that
+ *    account must be signed in) and sealed to the requester's box key.
+ */
+typedef int (*fl_net_kq_history_gate_fn)(const char *requester_key, const uint8_t delivery_id[FL_KQ_DELIVERY_ID_LEN]);
+typedef fl_result_t (*fl_net_kq_history_source_fn)(const char *requester_key,
+                                                   const uint8_t delivery_id[FL_KQ_DELIVERY_ID_LEN],
+                                                   uint8_t *out, size_t cap, size_t *out_len);
+void fl_net_kq_set_history(fl_net_kq_history_gate_fn gate, fl_net_kq_history_source_fn source);
+
+fl_result_t fl_net_kq_request_history(fl_net_server_t *srv, fl_net_client_t *client, int hosting,
+                                      const uint8_t delivery_id[FL_KQ_DELIVERY_ID_LEN],
+                                      uint8_t request_id_out[16]);
+/** The history for a request once complete (waits up to wait_ms): both letters, copied; the caller
+ *  frees them with fl_kq_buf_free. TIMEDOUT while incomplete, NOENT for an unknown request. */
+fl_result_t fl_net_kq_history_take(const uint8_t request_id[16], unsigned wait_ms,
+                                   fl_kq_buf_t *letter_file, fl_kq_buf_t *letter_snapshot);
+void fl_net_kq_history_drop(const uint8_t request_id[16]);
+
 /* ---- tests ------------------------------------------------------------------ */
 
 /** Replace how the host reaches members and how a client reaches the host (tests). */
