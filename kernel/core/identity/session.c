@@ -19,12 +19,17 @@ static fl_session_online_fn s_online_hook;
 static fl_session_online_opened_fn s_opened_hook;
 static fl_session_offline_fn s_offline_hook;
 static uint64_t s_login_gen = 1; /* every login and logout starts a new generation; 0 is never one */
+static void (*s_kqst_pre_open)(void); /* tests only: runs after unlock, before token open */
 
 void fl_session_set_login_hooks(fl_session_online_fn online, fl_session_offline_fn offline,
                                 fl_session_online_opened_fn opened) {
     s_online_hook = online;
     s_offline_hook = offline;
     s_opened_hook = opened;
+}
+
+void fl_session_test_set_kqst_pre_open(void (*fn)(void)) {
+    s_kqst_pre_open = fn;
 }
 
 static void session_load_once(void) {
@@ -178,33 +183,52 @@ fl_result_t fl_session_login(const char *name, const char *password) {
         const fl_user_record_t *u = fl_user_db_find(&s_db, name);
         int need_kqst = kqst_mode(name);
 
-        if (!need_kqst)
-            login_ensure_account_key(name, password);
-        fl_elevation_revoke_all();
-        /* Store the account's own spelling: "login root" signs in as Root. */
-        strncpy(s_current, u ? u->name : name, sizeof(s_current) - 1);
-        s_current[sizeof(s_current) - 1] = '\0';
-        s_active_elev = FL_ELEVATION_TOKEN_NONE;
-        s_sudo_scope_depth = 0;
-        gen = ++s_login_gen;
         if (u) {
-            snapshot = *u; /* the hook derives from this copy, not from the live store */
+            snapshot = *u; /* copy under the lock; KQST commit refreshes after open */
             have_snapshot = 1;
         }
-        rc = FL_RESULT_OK;
         if (need_kqst) {
             const char *open_as = have_snapshot ? snapshot.name : name;
             uint8_t signing_secret[32];
             int open_st;
             fl_result_t pub_rc = FL_RESULT_ACCES;
 
-            /* Open outside the lock; roll the login back if the token will not open or publish. */
+            /* Do not expose s_current until the token opens. Password is checked; session is not. */
             pthread_mutex_unlock(&s_session_mu);
+            if (s_kqst_pre_open)
+                s_kqst_pre_open();
             open_st = fl_kq_open_account_secrets(open_as, password, NULL, signing_secret);
-            if (open_st == FL_KQ_ACCOUNT_OK && s_opened_hook && have_snapshot)
+            if (open_st != FL_KQ_ACCOUNT_OK) {
+                mem_domain_secure_zero(signing_secret, sizeof signing_secret);
+                fprintf(stderr, "login: %s requires its KQST slot token; open refused\n", open_as);
+                return FL_RESULT_ACCES;
+            }
+            pthread_mutex_lock(&s_session_mu);
+            /* Re-check under the lock: the account must still be KQST and the password still match. */
+            if (!fl_user_db_verify_password(&s_db, open_as, password) || !kqst_mode(open_as)) {
+                pthread_mutex_unlock(&s_session_mu);
+                mem_domain_secure_zero(signing_secret, sizeof signing_secret);
+                fprintf(stderr, "login: %s requires its KQST slot token; open refused\n", open_as);
+                return FL_RESULT_ACCES;
+            }
+            u = fl_user_db_find(&s_db, open_as);
+            fl_elevation_revoke_all();
+            strncpy(s_current, u ? u->name : open_as, sizeof(s_current) - 1);
+            s_current[sizeof(s_current) - 1] = '\0';
+            s_active_elev = FL_ELEVATION_TOKEN_NONE;
+            s_sudo_scope_depth = 0;
+            gen = ++s_login_gen;
+            if (u) {
+                snapshot = *u;
+                have_snapshot = 1;
+            } else {
+                have_snapshot = 0;
+            }
+            pthread_mutex_unlock(&s_session_mu);
+            if (s_opened_hook && have_snapshot)
                 pub_rc = s_opened_hook(&snapshot, signing_secret, gen);
             mem_domain_secure_zero(signing_secret, sizeof signing_secret);
-            if (open_st != FL_KQ_ACCOUNT_OK || pub_rc != FL_RESULT_OK) {
+            if (pub_rc != FL_RESULT_OK) {
                 pthread_mutex_lock(&s_session_mu);
                 if (s_login_gen == gen) {
                     s_current[0] = '\0';
@@ -216,6 +240,16 @@ fl_result_t fl_session_login(const char *name, const char *password) {
             }
             return FL_RESULT_OK;
         }
+        if (!need_kqst)
+            login_ensure_account_key(name, password);
+        fl_elevation_revoke_all();
+        /* Store the account's own spelling: "login root" signs in as Root. */
+        strncpy(s_current, u ? u->name : name, sizeof(s_current) - 1);
+        s_current[sizeof(s_current) - 1] = '\0';
+        s_active_elev = FL_ELEVATION_TOKEN_NONE;
+        s_sudo_scope_depth = 0;
+        gen = ++s_login_gen;
+        rc = FL_RESULT_OK;
     }
     pthread_mutex_unlock(&s_session_mu);
     /* Password accounts: the key service opens the sealed key with the password just verified. */

@@ -50,6 +50,8 @@ typedef fl_result_t (*fl_session_online_opened_fn)(const fl_user_record_t *accou
 typedef void (*fl_session_offline_fn)(const char *account);
 void fl_session_set_login_hooks(fl_session_online_fn online, fl_session_offline_fn offline,
                                 fl_session_online_opened_fn opened);
+/** Tests only: runs after the session lock is released and before the KQST open. */
+void fl_session_test_set_kqst_pre_open(void (*fn)(void));
 
 /**
  * The online hook gets a copy of the account's record taken under the session lock and the generation

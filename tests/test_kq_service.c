@@ -97,6 +97,52 @@ static int test_login_brings_the_key_online_and_logout_wipes_it(void) {
     return 0;
 }
 
+static sem_t s_kqst_gate_entered, s_kqst_gate_release;
+static char s_observer_saw[FL_USER_NAME_MAX];
+static int s_observer_elev;
+
+static void kqst_pre_open_gate(void) {
+    sem_post(&s_kqst_gate_entered);
+    sem_wait(&s_kqst_gate_release);
+}
+
+static void *kqst_login_observer(void *arg) {
+    (void)arg;
+    sem_wait(&s_kqst_gate_entered);
+    snprintf(s_observer_saw, sizeof s_observer_saw, "%s", fl_session_current_user());
+    s_observer_elev = fl_session_is_elevated_account();
+    sem_post(&s_kqst_gate_release);
+    return NULL;
+}
+
+/* KQST login must not expose the account (or its elevation) before the token opens. */
+static int test_kqst_login_commits_only_after_token_open(void) {
+    fl_user_db_t *db = fl_session_user_db_mut();
+    pthread_t obs;
+    const fl_user_record_t *root = account("Root");
+
+    ASSERT(db && root);
+    ASSERT(fl_session_login("Root", "root") == FL_RESULT_OK); /* known session before the KQST attempt */
+    ASSERT(fl_user_db_set_auth_mode(db, "Flinstone", FL_USER_AUTH_PASSWORD_KQST) == FL_RESULT_OK);
+    ASSERT(sem_init(&s_kqst_gate_entered, 0, 0) == 0);
+    ASSERT(sem_init(&s_kqst_gate_release, 0, 0) == 0);
+    s_observer_saw[0] = '\0';
+    s_observer_elev = -1;
+    fl_session_test_set_kqst_pre_open(kqst_pre_open_gate);
+    ASSERT(pthread_create(&obs, NULL, kqst_login_observer, NULL) == 0);
+    ASSERT(fl_session_login("Flinstone", "flinstone") == FL_RESULT_ACCES);
+    ASSERT(pthread_join(obs, NULL) == 0);
+    fl_session_test_set_kqst_pre_open(NULL);
+    sem_destroy(&s_kqst_gate_entered);
+    sem_destroy(&s_kqst_gate_release);
+    ASSERT(strcmp(s_observer_saw, "Root") == 0); /* still Root while the token was opening */
+    ASSERT(s_observer_elev == 1);                 /* Root's elevation, not Flinstone's */
+    ASSERT(strcmp(fl_session_current_user(), "Root") == 0);
+    ASSERT(fl_session_logout() == FL_RESULT_OK);
+    ASSERT(fl_user_db_set_auth_mode(db, "Flinstone", FL_USER_AUTH_PASSWORD) == FL_RESULT_OK);
+    return 0;
+}
+
 /* An account marked password-plus-KQST cannot sign in by password alone: no login, nothing online. */
 static int test_a_kqst_account_cannot_log_in_by_password_alone(void) {
     fl_user_db_t *db = fl_session_user_db_mut();
@@ -406,6 +452,7 @@ int main(void) {
     (void)setenv("FL_USERS_DB_PATH", path, 1);
 #define RUN(t) do { if (t() != 0) { rc = 1; fprintf(stderr, "%s failed\n", #t); } else printf("%s... OK\n", #t); } while (0)
     RUN(test_login_brings_the_key_online_and_logout_wipes_it);
+    if (!rc) RUN(test_kqst_login_commits_only_after_token_open);
     if (!rc) RUN(test_a_kqst_account_cannot_log_in_by_password_alone);
     if (!rc) RUN(test_kqst_open_refusal_matrix);
     if (!rc) RUN(test_a_logout_that_overlaps_the_key_derivation_wins);

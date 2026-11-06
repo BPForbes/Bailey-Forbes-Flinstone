@@ -1578,6 +1578,33 @@ static int test_failed_load_claim_return_is_counted(void) {
     return 0;
 }
 
+/* Resolving one held ASK on an executor must not stage a different PENDING ASK left by failed triage. */
+static int test_ask_resolve_allows_only_released_records(void) {
+    fl_workqueue_storage_t st;
+    fl_workqueue_t *wq = (fl_workqueue_t *)&st;
+
+    ASSERT(register_dur_tags() == 0);
+    fj_install();
+    ASSERT(fl_wq_init(wq) == FL_RESULT_OK && fl_wq_set_executor(wq, 7) == FL_RESULT_OK);
+    seed_record(4401, 7, FL_WQ_ST_PENDING, "Root.A", FL_WQ_RECOVER_ASK);
+    seed_record(4402, 7, FL_WQ_ST_HELD, "Root.A", FL_WQ_RECOVER_ASK);
+    s_fj.mark_result = FL_RESULT_ERR;
+    s_fj.fail_to = FL_WQ_ST_HELD;
+    s_fj.fail_mark = 2; /* recover triage fails; PENDING ASK stays and gates the executor */
+    ASSERT(fl_wq_recover(wq) == FL_RESULT_ERR);
+    ASSERT(rec_state(1) == FL_WQ_ST_PENDING && rec_state(2) == FL_WQ_ST_HELD && s_dur_ran == 0);
+    s_fj.mark_result = FL_RESULT_OK;
+    s_fj.fail_mark = 0;
+    s_dur_ran = 0;
+    ASSERT(fl_wq_resolve_held("Root.A", 1) == FL_RESULT_OK);
+    ASSERT(fl_wq_poll_at(wq, 8, 0) == 1 && s_dur_ran == 1); /* only the released held row */
+    ASSERT(rec_state(2) == FL_WQ_ST_DONE);
+    ASSERT(rec_state(1) == FL_WQ_ST_PENDING || rec_state(1) == FL_WQ_ST_HELD);
+    fl_wq_shutdown(wq);
+    fj_remove();
+    return 0;
+}
+
 /* One executor's failed ASK triage must not gate or release another executor's ASK work. */
 static int test_ask_gate_is_per_executor(void) {
     fl_workqueue_storage_t sa, sb;
@@ -1901,6 +1928,7 @@ int main(void) {
     RUN_TEST(failed_ask_triage_cannot_be_staged);
     RUN_TEST(failed_durable_load_returns_the_claim);
     RUN_TEST(failed_load_claim_return_is_counted);
+    RUN_TEST(ask_resolve_allows_only_released_records);
     RUN_TEST(ask_gate_is_per_executor);
     RUN_TEST(held_records_reports_scan_failure);
     RUN_TEST(resolve_held_reports_staging_failure);

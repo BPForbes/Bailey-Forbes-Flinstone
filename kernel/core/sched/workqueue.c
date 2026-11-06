@@ -676,23 +676,24 @@ static const fl_wq_journal_ops_t s_memj_ops = {NULL, memj_append, memj_mark, mem
 static const fl_wq_journal_ops_t *s_journal = &s_memj_ops;
 /* After fl_wq_recover left RECOVER_ASK work PENDING for a queue (hold failed or incomplete), that
  * queue's ask_hold_pending must not stage ASK: later polls try PENDING->HELD instead. resolve_held
- * (run_now) records which executors the owner released so only those may claim ASK during the fill. */
-static uint32_t s_allow_ask_ids[FL_WQ_EXECUTORS_MAX];
+ * (run_now) records which journal ids the owner released so only those rows may claim ASK during
+ * the fill — not every ASK on that executor. */
+static uint64_t s_allow_ask_ids[FL_WQ_JOURNAL_MAX_PENDING];
 static unsigned s_allow_ask_n;
 
-static int wq_ask_claim_allowed(uint32_t executor) {
+static int wq_ask_claim_allowed(uint64_t id) {
     for (unsigned i = 0; i < s_allow_ask_n; i++)
-        if (s_allow_ask_ids[i] == executor)
+        if (s_allow_ask_ids[i] == id)
             return 1;
     return 0;
 }
 
-static void wq_allow_ask_add(uint32_t executor) {
+static void wq_allow_ask_add(uint64_t id) {
     for (unsigned i = 0; i < s_allow_ask_n; i++)
-        if (s_allow_ask_ids[i] == executor)
+        if (s_allow_ask_ids[i] == id)
             return;
-    if (s_allow_ask_n < FL_WQ_EXECUTORS_MAX)
-        s_allow_ask_ids[s_allow_ask_n++] = executor;
+    if (s_allow_ask_n < FL_WQ_JOURNAL_MAX_PENDING)
+        s_allow_ask_ids[s_allow_ask_n++] = id;
 }
 
 static void wq_clear_ask_gates(void) {
@@ -919,15 +920,14 @@ static fl_result_t wq_unclaim(const fl_wq_journal_record_t *r) {
 /* Compare-and-set the oldest PENDING record of this queue's executor to QUEUED. A record another
  * thread claimed first is skipped; NOENT when none is left. While this queue's ask_hold_pending is
  * set, RECOVER_ASK rows are held (or skipped) instead of staged so a failed recover triage cannot be
- * bypassed by a later poll of the same executor; resolve_held(run_now) allows only the executors the
- * owner released. */
+ * bypassed by a later poll of the same executor; resolve_held(run_now) allows only the journal ids
+ * the owner released. */
 static fl_result_t wq_claim_next(fl_workqueue_t *wq, fl_wq_journal_record_t *out) {
     const fl_wq_journal_ops_t *j = s_journal;
     fl_wq_journal_record_t page[8], cursor;
     uint32_t executor = wq_executor_of(wq);
     unsigned n, have = 0;
     unsigned gate = __atomic_load_n(&wq->st.ask_hold_pending, __ATOMIC_RELAXED);
-    unsigned allow_ask = wq_ask_claim_allowed(executor);
 
     for (;;) {
         fl_result_t rc =
@@ -938,7 +938,7 @@ static fl_result_t wq_claim_next(fl_workqueue_t *wq, fl_wq_journal_record_t *out
         if (n == 0)
             return FL_RESULT_NOENT;
         for (unsigned i = 0; i < n; i++) {
-            if (gate && !allow_ask && page[i].recover == FL_WQ_RECOVER_ASK) {
+            if (gate && page[i].recover == FL_WQ_RECOVER_ASK && !wq_ask_claim_allowed(page[i].id)) {
                 rc = wq_mark(j, page[i].id, FL_WQ_ST_PENDING, FL_WQ_ST_HELD);
                 if (rc == FL_RESULT_OK || rc == FL_RESULT_BUSY)
                     continue; /* held, or already moved: never stage without the owner */
@@ -1259,7 +1259,7 @@ fl_result_t fl_wq_unowned_records(unsigned *count) {
 }
 
 /* Only a registered executor's job moves; the rest stay HELD where fl_wq_unowned_records sees them.
- * A successful HELD->PENDING release is recorded so only that executor may claim ASK during the fill. */
+ * A successful HELD->PENDING release is recorded so only that journal id may claim ASK during the fill. */
 static fl_result_t wq_visit_resolve(const fl_wq_journal_record_t *r, void *arg) {
     int run_now = *(const int *)arg;
     fl_result_t rc;
@@ -1268,7 +1268,7 @@ static fl_result_t wq_visit_resolve(const fl_wq_journal_record_t *r, void *arg) 
         return FL_RESULT_OK;
     rc = wq_mark(s_journal, r->id, FL_WQ_ST_HELD, run_now ? FL_WQ_ST_PENDING : FL_WQ_ST_SKIPPED);
     if (rc == FL_RESULT_OK && run_now)
-        wq_allow_ask_add(r->executor);
+        wq_allow_ask_add(r->id);
     return rc;
 }
 
@@ -1304,7 +1304,7 @@ fl_result_t fl_wq_resolve_held(const char *owner, int run_now) {
     s_allow_ask_n = 0;
     rc = wq_walk(FL_WQ_ST_HELD, owner, FL_WQ_EXECUTOR_ANY, wq_visit_resolve, &run_now);
     if (run_now) {
-        /* Owner-released ASK rows are PENDING again: allow only those executors' fill to claim them
+        /* Owner-released ASK rows are PENDING again: allow only those journal ids to be claimed
          * even if a prior incomplete triage still gates ordinary polls of the same queue. */
         fill_rc = wq_fill_registered();
         s_allow_ask_n = 0;
