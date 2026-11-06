@@ -7,7 +7,6 @@
 #include "net_background.h"
 
 #include <pthread.h>
-#include <sched.h>
 #include <stdatomic.h>
 #include <time.h>
 #include <stdio.h>
@@ -1209,29 +1208,39 @@ static void shut_queue_after_claim(void) {
     ((fl_workqueue_storage_t *)s_hook_wq)->shutdown = 1;
 }
 
-/* Real fl_wq_shutdown while a claim still holds its reservation: wait on a second thread. */
+/* Real fl_wq_shutdown while a claim still holds its reservation: wait on a second thread.
+ * Do not spin on wq->st.shutdown unlocked (TSan); hand off through s_shutdown_armed under s_shut_mu
+ * after the shutdown bit is written under the queue lock. */
 static pthread_mutex_t s_shut_mu = PTHREAD_MUTEX_INITIALIZER;
 static pthread_cond_t s_shut_cv = PTHREAD_COND_INITIALIZER;
-static int s_claim_paused;
+static int s_claim_paused, s_shutdown_armed;
 
 static void pause_claim_until_shutdown_flag(void) {
     pthread_mutex_lock(&s_shut_mu);
     s_claim_paused = 1;
     pthread_cond_broadcast(&s_shut_cv);
+    while (!s_shutdown_armed)
+        pthread_cond_wait(&s_shut_cv, &s_shut_mu);
     pthread_mutex_unlock(&s_shut_mu);
-    /* Reservation is still held: shutdown will set the flag then await reserved==0. */
-    while (!((fl_workqueue_storage_t *)s_hook_wq)->shutdown)
-        sched_yield();
 }
 
 static void *call_shutdown(void *arg) {
     fl_workqueue_t *wq = (fl_workqueue_t *)arg;
+    fl_workqueue_storage_t *st = (fl_workqueue_storage_t *)wq;
 
     pthread_mutex_lock(&s_shut_mu);
     while (!s_claim_paused)
         pthread_cond_wait(&s_shut_cv, &s_shut_mu);
     pthread_mutex_unlock(&s_shut_mu);
-    fl_wq_shutdown(wq); /* sets shutdown, drains, then waits for this claim's reservation */
+    /* Same bit fl_wq_shutdown sets, under the queue lock, so publish fails while reserved is held. */
+    pthread_mutex_lock(&st->lock);
+    st->shutdown = 1;
+    pthread_mutex_unlock(&st->lock);
+    pthread_mutex_lock(&s_shut_mu);
+    s_shutdown_armed = 1;
+    pthread_cond_broadcast(&s_shut_cv);
+    pthread_mutex_unlock(&s_shut_mu);
+    fl_wq_shutdown(wq); /* drains, then waits for this claim's reservation */
     return NULL;
 }
 
@@ -1248,6 +1257,7 @@ static int test_real_shutdown_waits_out_claim_rollback(void) {
     ASSERT(dq_init(wq) == FL_RESULT_OK);
     s_hook_wq = wq;
     s_claim_paused = 0;
+    s_shutdown_armed = 0;
     s_fj.on_claim = pause_claim_until_shutdown_flag;
     ASSERT(pthread_create(&th, NULL, call_shutdown, wq) == 0);
     mkkey(key, 3250);
