@@ -36,6 +36,7 @@ typedef struct fl_workqueue_storage {
     unsigned durable_inmem;               /* durable jobs staged in the MLQ (the window over the journal) */
     unsigned reserved;                    /* slots promised to a durable job being claimed, not yet in the MLQ */
     uint32_t executor;                    /* FL_WQ_EXECUTOR_*: the durable records this queue may run */
+    unsigned ask_hold_pending;            /* this executor: do not stage RECOVER_ASK until held or resolved */
     unsigned fillers;                     /* resolvers holding this queue by the registry; shutdown waits for them */
     unsigned periodic_inflight;           /* periodic items promoted or running: keep a timer slot */
     int64_t poll_now_ns;                  /* time of the poll in progress; -1 = none or no clock */

@@ -1394,6 +1394,64 @@ static int test_failed_durable_load_returns_the_claim(void) {
     return 0;
 }
 
+/* A failed load whose claim return also fails is counted as a stuck claim (record stays QUEUED). */
+static int test_failed_load_claim_return_is_counted(void) {
+    fl_workqueue_storage_t st;
+    fl_workqueue_t *wq = (fl_workqueue_t *)&st;
+    uint8_t key[16];
+    unsigned before_load, before_stuck;
+
+    ASSERT(register_dur_tags() == 0);
+    fj_install();
+    ASSERT(dq_init(wq) == FL_RESULT_OK);
+    mkkey(key, 3910);
+    ASSERT(fl_wq_enqueue_durable(wq, TAG_AUTO, FL_WQ_LAYER_NORMAL, NULL, NULL, 0, key, 0) == FL_RESULT_OK);
+    before_load = fl_wq_durable_load_failures();
+    before_stuck = fl_wq_stuck_claims();
+    s_fj.fail_load = 1;
+    s_fj.mark_result = FL_RESULT_ERR;
+    s_fj.fail_to = FL_WQ_ST_PENDING;
+    s_fj.fail_mark = 1;
+    ASSERT(fl_wq_poll_at(wq, 8, 0) == 1 && s_dur_ran == 0);
+    ASSERT(fl_wq_durable_load_failures() == before_load + 1);
+    ASSERT(fl_wq_stuck_claims() == before_stuck + 1);
+    ASSERT(rec_state(1) == FL_WQ_ST_QUEUED); /* claim return failed; operator sees stuck_claims */
+    fl_wq_shutdown(wq);
+    fj_remove();
+    return 0;
+}
+
+/* One executor's failed ASK triage must not gate or release another executor's ASK work. */
+static int test_ask_gate_is_per_executor(void) {
+    fl_workqueue_storage_t sa, sb;
+    fl_workqueue_t *a = (fl_workqueue_t *)&sa, *b = (fl_workqueue_t *)&sb;
+
+    ASSERT(register_dur_tags() == 0);
+    fj_install();
+    ASSERT(fl_wq_init(a) == FL_RESULT_OK && fl_wq_set_executor(a, 11) == FL_RESULT_OK);
+    ASSERT(fl_wq_init(b) == FL_RESULT_OK && fl_wq_set_executor(b, 22) == FL_RESULT_OK);
+    seed_record(4301, 11, FL_WQ_ST_PENDING, "Root.A", FL_WQ_RECOVER_ASK);
+    seed_record(4302, 22, FL_WQ_ST_PENDING, "Root.B", FL_WQ_RECOVER_ASK);
+    seed_record(4303, 22, FL_WQ_ST_HELD, "Root.B", FL_WQ_RECOVER_ASK);
+    s_fj.mark_result = FL_RESULT_ERR;
+    s_fj.fail_to = FL_WQ_ST_HELD;
+    s_fj.fail_mark = 2; /* A's recover triage and its fill hold retry both fail */
+    ASSERT(fl_wq_recover(a) == FL_RESULT_ERR);
+    ASSERT(rec_state(1) == FL_WQ_ST_PENDING && s_dur_ran == 0);
+    /* B is not gated: its PENDING ASK may stage; A's remains unstaged. */
+    ASSERT(fl_wq_poll_at(b, 8, 0) == 1 && s_dur_ran == 1);
+    ASSERT(rec_state(1) == FL_WQ_ST_PENDING && rec_state(2) == FL_WQ_ST_DONE);
+    /* Resolving B's held job must not clear A's gate or stage A's ASK. */
+    s_dur_ran = 0;
+    ASSERT(fl_wq_resolve_held("Root.B", 1) == FL_RESULT_OK);
+    ASSERT(fl_wq_poll_at(a, 8, 0) == 0 && s_dur_ran == 0);
+    ASSERT(rec_state(1) == FL_WQ_ST_PENDING || rec_state(1) == FL_WQ_ST_HELD);
+    fl_wq_shutdown(a);
+    fl_wq_shutdown(b);
+    fj_remove();
+    return 0;
+}
+
 /* resolve_held(run_now) keeps committed transitions and reports a staging failure. */
 static int test_resolve_held_reports_staging_failure(void) {
     fl_workqueue_storage_t st;
@@ -1668,6 +1726,8 @@ int main(void) {
     RUN_TEST(recovery_and_resolution_report_the_first_failure);
     RUN_TEST(failed_ask_triage_cannot_be_staged);
     RUN_TEST(failed_durable_load_returns_the_claim);
+    RUN_TEST(failed_load_claim_return_is_counted);
+    RUN_TEST(ask_gate_is_per_executor);
     RUN_TEST(resolve_held_reports_staging_failure);
     RUN_TEST(retry_table_saturation_is_counted);
     RUN_TEST(recover_reruns_when_completion_repairs_were_lost);
