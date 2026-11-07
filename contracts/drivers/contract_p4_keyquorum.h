@@ -36,7 +36,7 @@
 #define FL_CONTRACT_P4_9_KEYQUORUM_CONTRACT_DEFINED 1
 
 /** KeyQuorum files ABI this driver is built against (`KQ_FILE_ABI_VERSION`). */
-#define FL_KQ_ABI_VERSION 3
+#define FL_KQ_ABI_VERSION 4
 /** Valid signatures the host needs before it releases a letter: author and recipient. */
 #define FL_KQ_HOST_THRESHOLD 2u
 /** Conditions the recipient needs before it writes the file (`kq_file_readiness`). */

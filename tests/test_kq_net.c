@@ -264,6 +264,43 @@ static int test_co_signed_delivery_over_the_wire(void) {
     return 0;
 }
 
+/* A refused ACK is recorded as refused over the wire, and the host never releases that letter again. */
+static int test_a_refused_ack_is_recorded_as_refused_over_the_wire(void) {
+    fl_kq_encoded_t enc;
+    fl_net_kq_inbox_t inbox[4];
+    unsigned char steve_sign[FL_USER_SIGNING_SECRET_LEN];
+    uint8_t sig[64];
+    int releases_before;
+
+    ASSERT(encode_from_mya("refused.txt", "a letter Steve will refuse\n", &enc) == 0);
+    s_actor = &s_members[1];
+    ASSERT(fl_net_kq_send_delivery(s_srv, NULL, 0, MYA, STEVE, &enc) == FL_RESULT_OK);
+    ASSERT(fl_net_kq_inbox(inbox, 4) == 1);
+    ASSERT(strcmp(inbox[0].file_name, "refused.txt") == 0);
+
+    ASSERT(fl_user_db_open_key(&s_db, "Steve", "pw-steve", steve_sign) == FL_RESULT_OK);
+    ASSERT(fl_kq_cp_cosign(&inbox[0].offer, STEVE, steve_sign, sig) == FL_KQ_CP_OK);
+    s_actor = &s_members[2];
+    releases_before = s_to_steve[FL_NET_SESSION_OP_KQ_RELEASE];
+    ASSERT(fl_net_kq_send_cosign(s_srv, NULL, 0, inbox[0].id, STEVE, sig) == FL_RESULT_OK);
+    ASSERT(s_to_steve[FL_NET_SESSION_OP_KQ_RELEASE] == releases_before + 1);
+    ASSERT(host_sent_state(MYA, "refused.txt", "released") == 0);
+
+    /* Steve refuses: the host records a refusal, not a delivery, and deletes the letter. */
+    ASSERT(fl_net_kq_send_ack(s_srv, NULL, 0, inbox[0].id, 0) == FL_RESULT_OK);
+    ASSERT(host_sent_state(MYA, "refused.txt", "refused") == 0);
+
+    /* A repeated co-signature neither re-sends nor fires again. */
+    releases_before = s_to_steve[FL_NET_SESSION_OP_KQ_RELEASE];
+    ASSERT(fl_net_kq_send_cosign(s_srv, NULL, 0, inbox[0].id, STEVE, sig) == FL_RESULT_OK);
+    ASSERT(s_to_steve[FL_NET_SESSION_OP_KQ_RELEASE] == releases_before);
+
+    fl_net_kq_inbox_drop(inbox[0].id);
+    asm_mem_secure_zero(steve_sign, sizeof steve_sign);
+    fl_kq_encoded_free(&enc);
+    return 0;
+}
+
 static int test_an_unanswered_request_leaks_away(void) {
     fl_kq_encoded_t enc;
     fl_net_kq_inbox_t inbox[4];
@@ -642,6 +679,7 @@ int main(void) {
     } while (0)
     RUN(test_keys_come_from_the_host_registry);
     RUN(test_co_signed_delivery_over_the_wire);
+    RUN(test_a_refused_ack_is_recorded_as_refused_over_the_wire);
     RUN(test_an_unanswered_request_leaks_away);
     RUN(test_unfinished_uploads_never_hold_the_host);
     RUN(test_unsafe_names_never_reach_a_path);
