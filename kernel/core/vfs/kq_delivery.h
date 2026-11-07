@@ -35,6 +35,8 @@ typedef enum {
     FL_KQ_SPIKE_COSIGN = 4,
     FL_KQ_SPIKE_RELEASE = 5,
     FL_KQ_SPIKE_ACK = 6,
+    /** The recipient refused the letter: recorded as refused, never as delivered. */
+    FL_KQ_SPIKE_REFUSE = 7,
 } fl_kq_spike_t;
 
 typedef enum {
@@ -61,6 +63,7 @@ typedef struct fl_kq_delivery {
     int             fired;
     int             acknowledged;
     int             expired; /* the store ended it (letter deleted); set only by the store */
+    int             refused; /* the recipient refused it (letter deleted); set only by the store */
     int             has_cosig;
     uint8_t         cosig[64];
 } fl_kq_delivery_t;

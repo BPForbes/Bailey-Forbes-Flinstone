@@ -68,9 +68,9 @@ jobs:
       - name: Install Rust (KeyQuorum identity library)
         uses: dtolnay/rust-toolchain@89b12181fb390509a0842a86cc55eeb8eb928c1d # stable branch
         with:
-          toolchain: stable
+          toolchain: 1.97.0 # pinned (FL-17 item 5): the compiler the KeyQuorum archive was built and checked with
           # KeyQuorum co-signed delivery in the WebAssembly lab (tools/browser-lab/wasm/lab_kq.c).
-          targets: wasm32-unknown-emscripten
+          targets: wasm32-unknown-emscripten,x86_64-unknown-none
 
       - name: Install build and virtual-boot dependencies
         run: |
@@ -93,6 +93,21 @@ jobs:
         env:
           GITHUB_SHA: ${{ steps.source.outputs.sha }}
         run: make browser-kernel
+
+      - name: Record freestanding image size (FL-22)
+        run: |
+          python3 - <<'PY'
+          import json
+          from pathlib import Path
+          info = json.loads(Path("dist/build-info.json").read_text())
+          sectors = info.get("payloadSectors")
+          nbytes = info.get("payloadBytes")
+          bss = info.get("bssEnd")
+          budget = info.get("conventionalMemoryBudget")
+          print(f"FL-22 image size: payloadSectors={sectors} payloadBytes={nbytes} bssEnd={bss} budget={budget}")
+          assert sectors is not None and nbytes is not None and bss and budget == "0x9f000"
+          assert int(str(bss), 0) < int(budget, 0)
+          PY
 
       - name: Probe virtual boot and verify compatibility metadata
         id: boot_probe
@@ -147,6 +162,8 @@ jobs:
       - name: Probe serial identity and concurrent sessions
         # The netlab suite needs the SECFEAT image; the default dist/flintstone.img
         # (built above, boot-probed, and published) stays lab-free.
+        # The script builds the hosted shell it compares against when it is missing; a second command here
+        # would be one more CodeQL cache-poisoning finding (the register, CQ-017, allows a fixed number).
         run: FL_BROWSER_KERNEL_IMAGE=dist/flintstone-secfeat.img python3 ./scripts/test_freestanding_shell.py
 
       - name: Fetch pinned QEMU Wasm runtime

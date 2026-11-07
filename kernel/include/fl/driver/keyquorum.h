@@ -17,8 +17,10 @@
 
 #include "contract_p4_keyquorum.h"
 #include "fl/driver/driver.h"
+#include "keyquorum_error.h"
 #include "keyquorum_files.h"
 #include "keyquorum_identity.h"
+#include "keyquorum_slots.h"
 
 #include <stddef.h>
 #include <stdint.h>
@@ -135,6 +137,43 @@ struct fl_kq_driver {
      */
     const char *(*event_name)(uint8_t code);
     const char *(*outcome_name)(uint8_t code);
+
+    /*
+     * History snapshot letters and error reports (file ABI version 3), appended after the names.
+     * The kind-17 letter: the first upto_events events of the tracked file c (0 = all held),
+     * signed by sender and sealed to the recipient's box key (the kind-15 letter is seal).
+     * open_snapshot returns the KQHS bytes in snap and its root and event count;
+     * snapshot_covers says whether the history of an extract (a KQTF) is a prefix of a snapshot
+     * (KQ_FILE_OK) or not (KQ_FILE_DIVERGED).
+     */
+    int (*seal_snapshot)(const fl_kq_buf_t *c, uint32_t upto_events, const char *sender,
+                         const uint8_t sender_secret[32], const uint8_t sender_box_public[32],
+                         const char *recipient, const uint8_t recipient_box_public[32],
+                         fl_kq_buf_t *letter, uint8_t delivery_id[16]);
+    int (*open_snapshot)(const fl_kq_buf_t *letter, const uint8_t box_secret[32],
+                         const char *expected_sender, const char *expected_recipient,
+                         const uint8_t sender_public[32], fl_kq_buf_t *snap, uint8_t root[32],
+                         uint32_t *event_count);
+    int (*snapshot_covers)(const fl_kq_buf_t *extract, const fl_kq_buf_t *snapshot);
+    /* KQER error reports (keyquorum_error.h): sign one about a refused artifact, and the static
+     * names of a code and a class (NULL for an unknown one; display only). */
+    int (*error_sign)(uint16_t code, uint8_t class_code, uint8_t step, const uint8_t object_ref[32],
+                      const char *actor_label, const char *occurred_at, const char *detail_key,
+                      const char *detail_value, const uint8_t signing_secret[32], fl_kq_buf_t *out);
+    int (*error_inject)(const fl_kq_buf_t *kqtf, const fl_kq_buf_t *kqer,
+                        const uint8_t reporter_public[32], const uint8_t pkg_sha256[32],
+                        fl_kq_buf_t *out);
+    const char *(*error_name)(uint16_t code);
+    const char *(*error_class_name)(uint8_t class_code);
+
+    /*
+     * Store-free KQST open (keyquorum_slots.h): passphrase + caller-held device id and public
+     * keys. Returns KQ_ACCOUNT_*; secrets are written only on OK (caller wipes).
+     */
+    int (*slot_open)(const uint8_t *kqst, size_t klen, const char *label, const char *passphrase,
+                     const uint8_t expected_device_id[16], const uint8_t expected_signing_pub[32],
+                     const uint8_t expected_encryption_pub[32], uint8_t signing_secret_out[32],
+                     uint8_t encryption_secret_out[32]);
 };
 
 /**

@@ -259,6 +259,50 @@ static int test_released_letter_expires(void) {
     return 0;
 }
 
+/* A refused letter is recorded as refused, never as delivered: the letter goes, the history stays, and neither a
+ * late receipt nor a repeated refusal changes the outcome. */
+static int test_refused_letter_is_not_delivered(void) {
+    fl_kq_store_t *s = NULL;
+    fl_kq_delivery_t d, got, pending[2];
+    uint8_t id[FL_KQ_DELIVERY_ID_LEN];
+    uint8_t sig[64];
+    const uint8_t letter[] = "refused by the recipient";
+    uint8_t *held = NULL;
+    size_t held_len = 0;
+    char log[256];
+    const int64_t at = 6000;
+
+    ASSERT(fl_kq_store_open(s_dir, &s) == FL_RESULT_OK);
+    make_id(id, 41);
+    memset(sig, 0x33, sizeof sig);
+    fl_kq_delivery_init(&d, id, "Root.Flinstone.Mya", "Root.Flinstone.Steve", "refused.txt", NULL, at, 60);
+    ASSERT(fl_kq_store_put(s, &d, letter, sizeof letter) == FL_RESULT_OK);
+    ASSERT(fl_kq_delivery_integrate(&d, FL_KQ_SPIKE_COSIGN, sig, at + 1) == FL_KQ_NEURON_FIRE);
+    ASSERT(fl_kq_store_update(s, &d, FL_KQ_SPIKE_COSIGN, at + 1) == FL_RESULT_OK);
+
+    /* The recipient refuses: the row says refused, not delivered, and the letter is deleted. */
+    ASSERT(fl_kq_store_get(s, id, &got) == FL_RESULT_OK && got.fired && !got.acknowledged);
+    got.refused = 1;
+    ASSERT(fl_kq_store_update(s, &got, FL_KQ_SPIKE_REFUSE, at + 2) == FL_RESULT_OK);
+    ASSERT(fl_kq_store_forget_letter(s, id) == FL_RESULT_OK);
+    ASSERT(fl_kq_store_letter(s, id, &held, &held_len) == FL_RESULT_NOENT);
+    ASSERT(fl_kq_store_get(s, id, &got) == FL_RESULT_OK && got.refused && !got.acknowledged && !got.expired);
+    ASSERT(strcmp(fl_kq_delivery_state(&got), "refused") == 0);
+    ASSERT(events_of(s, id, log, sizeof log) == 0 && strcmp(log, "offered,cosigned,released,refused") == 0);
+    /* Off the pending list, never leaked, and no receipt turns it into a delivery. */
+    ASSERT(fl_kq_store_pending_for(s, "Root.Flinstone.Steve", at + 2, pending, 2) == 0);
+    ASSERT(fl_kq_store_leak(s, at + 1 + FL_KQ_RELEASE_TTL_SEC) == 0);
+    got.acknowledged = 1;
+    ASSERT(fl_kq_store_update(s, &got, FL_KQ_SPIKE_ACK, at + 3) == FL_RESULT_NOENT);
+    fl_kq_store_close(s);
+
+    /* It reopens refused. */
+    ASSERT(fl_kq_store_open(s_dir, &s) == FL_RESULT_OK);
+    ASSERT(fl_kq_store_get(s, id, &got) == FL_RESULT_OK && got.refused && !got.acknowledged);
+    fl_kq_store_close(s);
+    return 0;
+}
+
 /* The share path and the store share one file but not their rows. */
 static int test_share_path_cannot_reach_kq_rows(void) {
     fl_kq_store_t *s = NULL;
@@ -579,6 +623,7 @@ int main(void) {
     RUN(test_ids_round_trip);
     RUN(test_store_round_trip_and_leak);
     RUN(test_released_letter_expires);
+    RUN(test_refused_letter_is_not_delivered);
     RUN(test_share_path_cannot_reach_kq_rows);
     RUN(test_older_store_is_carried_over);
     RUN(test_older_store_does_not_follow_links);

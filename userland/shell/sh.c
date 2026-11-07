@@ -48,6 +48,8 @@
 #include "shell_io.h"
 #include <stdint.h>
 #include "threadpool.h"
+#include "bg_jobs.h"
+#include "kq_service.h"
 #include "interpreter.h"
 #include "terminal.h"
 #include "disk.h"
@@ -126,7 +128,10 @@ static void shell_pool_cleanup(void) {
         for (int i = 0; i < NUM_WORKERS; i++)
             pthread_join(g_pool.workers[i], NULL);
     }
+    fl_bg_jobs_ticker_stop();
 #endif
+    fl_kq_service_shutdown(); /* the only way the key service ends; wipes every key */
+    fl_bg_jobs_shutdown(); /* protected workqueue items run once here, the rest are dropped */
     pthread_mutex_destroy(&g_pool.mutex);
     pthread_cond_destroy(&g_pool.cond);
 }
@@ -398,6 +403,9 @@ int main(int argc, char *argv[]) {
     fs_service_glue_init();
     path_log_init();
     drivers_init(NULL);
+    /* The KeyQuorum key service: after the driver registry exists, before the pool. */
+    if (fl_kq_service_start() != FL_RESULT_OK)
+        fprintf(stderr, "kq: key service not started\n");
     vm_warn_layer_config();
 
     /* Initialize thread pool and signals */
@@ -429,6 +437,9 @@ int main(int argc, char *argv[]) {
         }
     }
     g_pool_workers_started = 1;
+    /* The background tick was never driven; the ticker thread is the one poller of fl_wq_default(). */
+    if (fl_bg_jobs_ticker_start(FL_BG_TICK_PERIOD_MS) != FL_RESULT_OK)
+        fprintf(stderr, "bg_jobs: ticker not started\n");
 #endif
     atexit(shell_pool_cleanup);
     atexit(cmd_server_atexit);

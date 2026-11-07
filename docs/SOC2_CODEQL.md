@@ -115,6 +115,14 @@ current (`.github/dependabot.yml`). A new SHA must come from the action's own re
 KeyQuorum's Rust library first, so only this project's C is traced, then runs `make ARCH=x86_64_gas`
 under the tracer. Code that `make` does not compile (other architectures, the wasm lab) is not analysed.
 
+**The CodeQL bundle is pinned.** `codeql.yml` passes `tools:` to `init` (bundle 2.27.3). The register counts what
+one CodeQL version reports; the unpinned run of 2026-11-05 used 2.27.4 (cpp-queries 1.10.0, was 1.9.2) and found
+23 of the 53 accepted c-cpp findings, every taint-tracking one (`cpp/path-injection`, `cpp/cleartext-storage-buffer`,
+`cpp/uncontrolled-process-operation`, `cpp/user-controlled-bypass`) missing, so the gate failed on "unused capacity".
+Move the pin on purpose: change it, re-run, and re-count the register in the same pull request. The Actions
+register entries (CQ-017, CQ-018) count steps after the untrusted checkout in `browser-lab-build.yml`, so a new step
+there is a new finding: add the command to an existing step instead.
+
 ## What the operator still provides
 
 - Branch protection that requires `codeql gate` (and GitHub's `CodeQL` check) on `develop` and `main`.

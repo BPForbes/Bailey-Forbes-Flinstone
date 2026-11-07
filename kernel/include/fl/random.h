@@ -6,8 +6,11 @@
  * every hosted target (shell, tests, the C++ password code, the wasm lab)
  * shares it without linking another object or OpenSSL.
  *
- * Hosted builds only: it needs libc and, outside Emscripten, getrandom(2) (glibc >= 2.25
- * for <sys/random.h>) or /dev/urandom. Freestanding kernel objects must not include it.
+ * Hosted builds need libc and, outside Emscripten, getrandom(2) (glibc >= 2.25 for
+ * <sys/random.h>) or /dev/urandom. A freestanding kernel object (-DFL_FREESTANDING, the browser
+ * image) gets only fl_random_bytes, over the embedder's kq_platform_random (the same hook the
+ * KeyQuorum library uses): it returns -1 and zeroes the buffer when that source cannot deliver good
+ * bytes, never weak ones.
  *
  * Early boot: getrandom(2) without flags blocks until the kernel pool is initialised, so
  * it never returns weak bytes. The /dev/urandom fallback is used only when getrandom is
@@ -21,6 +24,28 @@
 
 #include <stddef.h>
 #include <stdint.h>
+#ifdef FL_FREESTANDING
+#ifdef __cplusplus
+extern "C" {
+#endif
+/** 0 = ok, never weak bytes; defined by kernel/freestanding/x86_64/kq_platform.c. */
+int kq_platform_random(uint8_t *buf, size_t len);
+
+static inline int fl_random_bytes(void *buf, size_t len) {
+    volatile uint8_t *p = (volatile uint8_t *)buf;
+
+    if (!buf || len == 0 || len > 0x7fffffffu)
+        return -1;
+    if (kq_platform_random((uint8_t *)buf, len) == 0)
+        return 0;
+    for (size_t i = 0; i < len; i++)
+        p[i] = 0; /* all or nothing, as on hosted targets */
+    return -1;
+}
+#ifdef __cplusplus
+}
+#endif
+#else /* hosted */
 #include <string.h>
 #include <limits.h>
 #include <errno.h>
@@ -149,5 +174,7 @@ fail:
 #ifdef __cplusplus
 }
 #endif
+
+#endif /* hosted */
 
 #endif

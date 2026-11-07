@@ -104,6 +104,23 @@ Contract: `contracts/drivers/contract_p4_keyquorum.h` (P4-9). Wire: `FL_NET_SESS
 `_RELEASE` 0x3D, `_ACK` 0x3E, `_KEYS` 0x3F; all integers big-endian, every string
 length-prefixed, every read bounds-checked by `net_codec.h`.
 
+History download (FL-04): `FL_NET_SESSION_OP_KQH_REQ` 0x50 and `_DATA` 0x51 sit in a second range above Wi-Fi and
+are routed to the same KeyQuorum hook (`fl_net_session_is_kq_opcode`). REQ is `[request id 16][delivery id 16]`;
+the host answers the requester only with DATA chunks `[request id 16][offset u32][total u32][bytes <= 480]` of a
+history bundle (`kernel/core/vfs/kq_history_bundle.[ch]`: count byte 2, then two `{u32 BE length, KQPB letter}`
+records, kind 15 and kind 17, both sealed to the requester). The host needs two things it is given with
+`fl_net_kq_set_history`: a gate (the native shell asks `fl_authz_subsystem_check(FL_AUTHZ_OP_FILE_HISTORY_EXPORT)`)
+and a source that builds the bundle signed by the host's own account (so that account must be signed in, FL-20).
+With either missing the host refuses with a visible message and sends nothing; a denied request is answered with
+KeyQuorum's own word for it (`kq_error_name`, code 8). The client holds up to two pending requests, accepts DATA
+only for a request it made, bounds the declared total (1 MiB) before allocating, and drops a bundle that does not
+unpack; `fl_net_kq_history_take` hands back the two letters, which the caller opens with the driver
+(`open`, `open_snapshot`) and compares (`snapshot_covers`). The browser lab's relay and `wasm_kq_frame` carry
+frames by opcode without reading it, so 0x50 and 0x51 pass through unchanged. **Not built:** the native shell's
+gate and source (the source needs the host account's unlocked key from the key service, FL-20, and a decision on
+where the history lives on a host that only holds opaque letters), so a request to the shipped host is refused
+with "history download is not available on this host".
+
 ### Commands
 
 | Command | What it does |
@@ -655,6 +672,65 @@ changes that.
 - Co-signed delivery is built (above). Redistribution, time-bound access, public offers and
   the chained edit log are not.
 - The browser lab runs co-signed delivery with in-memory keys and first-seen key publication
-  (above); the freestanding QEMU kernel does not run it.
+  (above). The freestanding QEMU kernel links the KeyQuorum library and the driver (FL-02 stage 1,
+  below) but does not run the delivery checkpoints (stage 2, not built).
 - The 16 MiB limit, the ring sizes and the relay TTL are KeyQuorum defaults, not measured for
   Flinstone's workload.
+
+## The freestanding image (FL-02, stage 1)
+
+`scripts/build_freestanding_browser_kernel.sh` builds `libkeyquorum_identity.a` for `x86_64-unknown-none`
+(`cargo build --locked --release --no-default-features`, run from the submodule so its `.cargo/config.toml`
+picks the portable crypto backends) and links it with `kernel/drivers/keyquorum/kq_driver.c` and
+`kernel/freestanding/x86_64/kq_platform.c` (`KQ_FREESTANDING=0` builds the image without it). At boot the
+kernel prints `CAP keyquorum=linked` when `fl_kq_driver_get()` accepts the linked ABI
+(`FL_KQ_ABI_VERSION` 3), else `CAP keyquorum=abi-mismatch`.
+
+- **Size.** The image is about 441 KiB of payload (882 sectors; 918 with the security lab; gate 1024) with about 99 KiB of bss; the
+  build script refuses an image whose bss end reaches the end of conventional memory.
+- **Heap.** A 40 MiB arena at 4 MiB (`kq_platform.c`), above the image, inside the first GiB the boot code
+  identity-maps. Sealing an account key (Argon2id, 19 MiB) needs more than 19 MiB at once, so the machine
+  needs at least 64 MiB, which is what the page requests.
+- **Entropy.** RDRAND only. QEMU's default CPU model has none, so there `kq_platform_random` fails and the
+  library fails closed (`FLINTSTONE_KQ_PANIC`, then a halt): no key is ever made from weak bytes. With
+  `-cpu max` key generation, sealing and opening an account key run in the image (checked in QEMU).
+  Whether the page's QEMU Wasm offers RDRAND is not known; until an entropy source is decided, KeyQuorum
+  in the image can verify and open but not generate.
+- **Clock.** `fl_time_wall_sec` reads the CMOS real-time clock (UTC under QEMU's default).
+- **Stage 2 (not built): the checkpoints in the image.** They need a store for `.kqtf` containers and
+  sealed letters (a ramfs file holds 160 bytes, 16 files in all) and the libc calls `kq_checkpoint.c` makes
+  (`stdio`, `stdlib`, `errno`, `sys/stat`, `unistd`). Neither is small, so `server file` in the image still
+  says delivery runs in the WebAssembly shell.
+
+## The key service (FL-20, absorbs FL-24)
+
+`kernel/core/vfs/kq_service.[ch]` is the resident holder of signing keys. It is started by the hosted shell after
+the driver registry exists (`fl_kq_service_start`) and ended only by an orderly shutdown (`fl_kq_service_shutdown`).
+
+- **Online through a login.** `fl_session_login` calls the service (through `fl_session_set_login_hooks`, so the
+  identity code does not depend on the VFS layer) after the password is verified and the session lock is released: the
+  account's own signing key is opened with that password and held in a fixed table of `FL_USER_DB_MAX_USERS`
+  slots. `su` without a password opens nothing; logout wipes the key of the account that signed out; a reused slot
+  and shutdown wipe too. `fl_kq_obtain_author_key` hands a copy to a caller (who wipes it) only for an account
+  that is signed in; a parent author assembled from its children's shares needs KQ-18 and is not available
+  (a leaf who is not signed in cannot be assembled by anything: the answer is ACCES).
+  The hook gets a copy of the account's record taken under the session lock and the generation of that login;
+  the slow key derivation runs from the copy with no lock held, and the key is published through
+  `fl_session_publish_if_current` under the session lock, only while that generation is still current. Every
+  login and every logout starts a new generation, so a logout that overlaps the derivation wins: the late key is
+  refused (`kq-service-stale-login` in the audit log) instead of coming online for a session that has ended.
+- **Its own thread and queue.** One thread with cancellation disabled and every signal blocked polls a private
+  workqueue whose items are all `FL_WQ_PROTECTED`: a full queue answers BUSY (the caller retries; a signature is never
+  dropped) and protected work runs once more at shutdown. It stamps a heartbeat; `fl_kq_service_alive()` is false once
+  that is older than 2 s, and the P1-10 watchdog (`fl_bg_watchdog_register`, the first check) audits a stall once.
+  The monitor (FL-09) will refuse every change while it is false: fail closed. The hosted shell is an ordinary process, so
+  the host OS can still kill it; what is guaranteed is that nothing inside the shell can (`FL_AUTHZ_OP_KQ_SERVICE_CONTROL`
+  is denied before any installed hook, for every account including a guest, and audited).
+- **Periodic signing.** `fl_kq_service_autosign_add` registers an object with three callbacks (last signature time,
+  head author, sign) and runs the sweep as a protected periodic item: skip while a signature is recent, skip and audit a
+  forked history, audit and retry next period when the author is not signed in, sign with a copy of the author's own key
+  and wipe it. The head-author query is KeyQuorum's KQ-20 (not in the pinned headers) and the signing call is the monitor's
+  (FL-09); the service supplies the schedule and the key.
+- **Not built.** The Root fallback has nothing to read (`fl_kq_service_root_fallback` answers NOENT; where a stored Root
+  credential would live is an open decision that needs a written exception and a threat model), so unattended work waits
+  until someone signs in. The freestanding image has no sessions, so it has no service.

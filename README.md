@@ -100,7 +100,7 @@ flowchart LR
 | **fs_policy.c / .h** | Access policies (e.g. protected paths) |
 | **fs_service_glue.c / .h** | Service init, `g_fm_service` |
 | **path_log.c / .h** | In-memory path operation log |
-| **priority_queue.c / .h** | Multi-priority task queue (FIFO tie-break) |
+| **kernel/core/sched/priority_queue.c**, **kernel/include/priority_queue.h** | Multi-priority task queue (FIFO tie-break) |
 | **task_manager.c / .h** | Task manager — routes to thread pool PQ |
 | **threadpool.c / .h** | PQ-driven thread pool (priority scheduling) |
 | **mem_domain.c / .h** | Memory domains + ASM buffer ops (copy/zero/fill) |
