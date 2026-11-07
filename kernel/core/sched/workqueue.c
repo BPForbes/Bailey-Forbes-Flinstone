@@ -697,6 +697,11 @@ static void wq_allow_ask_add(uint64_t id) {
         s_allow_ask_ids[s_allow_ask_n++] = id;
 }
 
+/* A released row needs a slot in the allow-list: without one the next fill would move it back to HELD. */
+static int wq_allow_ask_has_room(uint64_t id) {
+    return wq_ask_claim_allowed(id) || s_allow_ask_n < FL_WQ_PENDING_MAX;
+}
+
 static void wq_clear_ask_gates(void) {
     s_allow_ask_n = 0;
     WQ_GLOBAL_LOCK();
@@ -1259,18 +1264,56 @@ fl_result_t fl_wq_unowned_records(unsigned *count) {
     return first;
 }
 
+struct wq_resolve_arg {
+    int run_now;
+    unsigned skipped; /* released rows left HELD because the allow-list had no room for them */
+};
+
 /* Only a registered executor's job moves; the rest stay HELD where fl_wq_unowned_records sees them.
  * A successful HELD->PENDING release is recorded so only that journal id may claim ASK during the fill. */
 static fl_result_t wq_visit_resolve(const fl_wq_journal_record_t *r, void *arg) {
-    int run_now = *(const int *)arg;
+    struct wq_resolve_arg *a = arg;
     fl_result_t rc;
 
     if (!wq_executor_known(r->executor))
         return FL_RESULT_OK;
-    rc = wq_mark(s_journal, r->id, FL_WQ_ST_HELD, run_now ? FL_WQ_ST_PENDING : FL_WQ_ST_SKIPPED);
-    if (rc == FL_RESULT_OK && run_now)
+    /* wq_walk ignores a BUSY from the visitor and goes on: the row stays HELD and is counted. */
+    if (a->run_now && !wq_allow_ask_has_room(r->id)) {
+        a->skipped++;
+        return FL_RESULT_BUSY;
+    }
+    rc = wq_mark(s_journal, r->id, FL_WQ_ST_HELD, a->run_now ? FL_WQ_ST_PENDING : FL_WQ_ST_SKIPPED);
+    if (rc == FL_RESULT_OK && a->run_now)
         wq_allow_ask_add(r->id);
     return rc;
+}
+
+/* The allowance of a released row lasts until that row is no longer PENDING. A read error keeps it all. */
+struct wq_allow_keep {
+    uint8_t keep[FL_WQ_PENDING_MAX];
+};
+
+static fl_result_t wq_visit_keep_allowed(const fl_wq_journal_record_t *r, void *arg) {
+    struct wq_allow_keep *k = arg;
+
+    for (unsigned i = 0; i < s_allow_ask_n; i++)
+        if (s_allow_ask_ids[i] == r->id)
+            k->keep[i] = 1;
+    return FL_RESULT_OK;
+}
+
+static void wq_allow_ask_prune(void) {
+    struct wq_allow_keep k = {{0}}; /* no memset: the image has no libc */
+    unsigned w = 0;
+
+    if (s_allow_ask_n == 0)
+        return;
+    if (wq_walk(FL_WQ_ST_PENDING, NULL, FL_WQ_EXECUTOR_ANY, wq_visit_keep_allowed, &k) != FL_RESULT_OK)
+        return;
+    for (unsigned i = 0; i < s_allow_ask_n; i++)
+        if (k.keep[i])
+            s_allow_ask_ids[w++] = s_allow_ask_ids[i];
+    s_allow_ask_n = w;
 }
 
 /* Each queue is pinned (fillers) while the registry lock is held, so fl_wq_shutdown, which unregisters it
@@ -1294,26 +1337,31 @@ static fl_result_t wq_fill_registered(void) {
         wq_refresh_ask_gate(queues[i]);
         (void)__atomic_fetch_sub(&queues[i]->st.fillers, 1u, __ATOMIC_RELEASE);
     }
+    wq_allow_ask_prune();
     return first;
 }
 
 fl_result_t fl_wq_resolve_held(const char *owner, int run_now) {
+    struct wq_resolve_arg a = {run_now, 0};
     fl_result_t rc, fill_rc = FL_RESULT_OK;
 
     if (!owner)
         return FL_RESULT_INVAL;
-    s_allow_ask_n = 0;
-    rc = wq_walk(FL_WQ_ST_HELD, owner, FL_WQ_EXECUTOR_ANY, wq_visit_resolve, &run_now);
+    wq_allow_ask_prune(); /* rows that have run since the last resolve must not hold allow-list room */
+    rc = wq_walk(FL_WQ_ST_HELD, owner, FL_WQ_EXECUTOR_ANY, wq_visit_resolve, &a);
     if (run_now) {
         /* Owner-released ASK rows are PENDING again: allow only those journal ids to be claimed
-         * even if a prior incomplete triage still gates ordinary polls of the same queue. */
+         * even if a prior incomplete triage still gates ordinary polls of the same queue. The
+         * allowance stays until those rows have staged (wq_fill_registered prunes it). */
         fill_rc = wq_fill_registered();
-        s_allow_ask_n = 0;
         if (fill_rc != FL_RESULT_OK)
             (void)__atomic_fetch_add(&s_staging_errors, 1u, __ATOMIC_RELAXED);
     }
-    /* Keep committed HELD transitions; surface the first staging failure separately via the result
-     * when the walk itself succeeded. */
+    /* Rows past the allow-list stay HELD: BUSY tells the caller to resolve again once this batch
+     * has staged. Keep committed HELD transitions; surface the first staging failure separately
+     * via the result when the walk itself succeeded. */
+    if (rc == FL_RESULT_OK && a.skipped != 0)
+        rc = FL_RESULT_BUSY;
     return rc != FL_RESULT_OK ? rc : fill_rc;
 }
 

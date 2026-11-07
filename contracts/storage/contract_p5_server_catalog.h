@@ -60,7 +60,8 @@ typedef enum fl_server_catalog_status {
      * Stored values: append, never renumber. EXPIRED (3) also ends a KQ row. */
     FL_SERVER_CATALOG_KQ_HELD      = 4, /* letter held, waiting for the co-signature */
     FL_SERVER_CATALOG_KQ_RELEASED  = 5, /* co-signed and released, waiting for the receipt */
-    FL_SERVER_CATALOG_KQ_DELIVERED = 6  /* receipt in, letter deleted */
+    FL_SERVER_CATALOG_KQ_DELIVERED = 6, /* receipt in, letter deleted */
+    FL_SERVER_CATALOG_KQ_REFUSED   = 7  /* recipient refused the letter, letter deleted; not a delivery */
 } fl_server_catalog_status_t;
 
 /** One catalog row (file or message). */

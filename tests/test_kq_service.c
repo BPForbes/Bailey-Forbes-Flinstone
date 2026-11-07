@@ -440,6 +440,25 @@ static int test_orderly_shutdown_is_the_only_end(void) {
     return 0;
 }
 
+/* An account made before account keys existed has none: its first password login provisions one, and that key
+ * must come online with the login. The online hook takes the record as it is once the key is saved. */
+static int test_a_keyless_account_comes_online_at_its_first_login(void) {
+    fl_user_db_t *db = fl_session_user_db_mut();
+    fl_user_record_t *rec;
+    int before;
+
+    ASSERT(db && fl_user_db_add_user(db, "Keyless", "keyless-pw", 97, 0) == FL_RESULT_OK);
+    rec = (fl_user_record_t *)fl_user_db_find(db, "Keyless"); /* test-only: the record as an old store has it */
+    ASSERT(rec);
+    rec->has_key = 0;
+    before = (int)fl_kq_service_online_count();
+    ASSERT(fl_session_login("Keyless", "keyless-pw") == FL_RESULT_OK);
+    ASSERT((int)fl_kq_service_online_count() == before + 1);
+    ASSERT(fl_session_logout() == FL_RESULT_OK);
+    ASSERT((int)fl_kq_service_online_count() == before);
+    return 0;
+}
+
 int main(void) {
     char tmpl[] = "/tmp/fl_kq_serviceXXXXXX";
     char path[300];
@@ -461,6 +480,7 @@ int main(void) {
     if (!rc) RUN(test_nobody_may_control_the_service);
     if (!rc) RUN(test_the_periodic_sweep);
     if (!rc) RUN(test_the_private_queue_consumes_no_durable_record);
+    if (!rc) RUN(test_a_keyless_account_comes_online_at_its_first_login);
     if (!rc) RUN(test_orderly_shutdown_is_the_only_end);
     unlink(path);
     rmdir(tmpl);

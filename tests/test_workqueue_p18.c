@@ -1605,6 +1605,59 @@ static int test_ask_resolve_allows_only_released_records(void) {
     return 0;
 }
 
+/* Released rows stay allowed until they have staged: a fill that stages only part of them must not leave the
+ * rest to be moved back to HELD by the gate. */
+static int test_ask_resolve_keeps_allowance_until_every_release_stages(void) {
+    fl_workqueue_storage_t st;
+    fl_workqueue_t *wq = (fl_workqueue_t *)&st;
+
+    fl_wq_journal_mem_reset();
+    ASSERT(register_dur_tags() == 0);
+    fj_install();
+    ASSERT(fl_wq_init(wq) == FL_RESULT_OK && fl_wq_set_executor(wq, 7) == FL_RESULT_OK);
+    for (uint64_t k = 0; k < 40; k++)
+        seed_record(6000 + k, 7, FL_WQ_ST_HELD, "Root.B", FL_WQ_RECOVER_ASK);
+    /* the executor's ASK gate is set, as after a failed triage: only released rows may claim ASK */
+    __atomic_store_n(&st.ask_hold_pending, 1u, __ATOMIC_RELAXED);
+    s_dur_ran = 0;
+    ASSERT(fl_wq_resolve_held("Root.B", 1) == FL_RESULT_OK);
+    for (int i = 0; i < 40 && s_dur_ran < 40; i++)
+        (void)fl_wq_poll_at(wq, 64, 0);
+    ASSERT(s_dur_ran == 40);
+    ASSERT(fl_wq_held_count("Root.B") == 0);
+    fl_wq_shutdown(wq);
+    fj_remove();
+    return 0;
+}
+
+/* More released rows than the allow-list holds: the excess stays HELD, the caller is told (BUSY), and a second
+ * resolve releases it once the first batch has run. */
+static int test_ask_resolve_leaves_past_allowance_held(void) {
+    fl_workqueue_storage_t st;
+    fl_workqueue_t *wq = (fl_workqueue_t *)&st;
+
+    fl_wq_journal_mem_reset();
+    ASSERT(register_dur_tags() == 0);
+    fj_install();
+    ASSERT(fl_wq_init(wq) == FL_RESULT_OK && fl_wq_set_executor(wq, 7) == FL_RESULT_OK);
+    for (uint64_t k = 0; k < FL_WQ_PENDING_MAX + 6u; k++)
+        seed_record(7000 + k, 7, FL_WQ_ST_HELD, "Root.C", FL_WQ_RECOVER_ASK);
+    __atomic_store_n(&st.ask_hold_pending, 1u, __ATOMIC_RELAXED);
+    s_dur_ran = 0;
+    ASSERT(fl_wq_resolve_held("Root.C", 1) == FL_RESULT_BUSY);
+    ASSERT(fl_wq_held_count("Root.C") == 6);
+    for (int i = 0; i < 200 && s_dur_ran < FL_WQ_PENDING_MAX; i++)
+        (void)fl_wq_poll_at(wq, 64, 0);
+    ASSERT(s_dur_ran == FL_WQ_PENDING_MAX && fl_wq_held_count("Root.C") == 6);
+    ASSERT(fl_wq_resolve_held("Root.C", 1) == FL_RESULT_OK);
+    for (int i = 0; i < 200 && s_dur_ran < FL_WQ_PENDING_MAX + 6u; i++)
+        (void)fl_wq_poll_at(wq, 64, 0);
+    ASSERT(s_dur_ran == FL_WQ_PENDING_MAX + 6u && fl_wq_held_count("Root.C") == 0);
+    fl_wq_shutdown(wq);
+    fj_remove();
+    return 0;
+}
+
 /* One executor's failed ASK triage must not gate or release another executor's ASK work. */
 static int test_ask_gate_is_per_executor(void) {
     fl_workqueue_storage_t sa, sb;
@@ -1930,6 +1983,8 @@ int main(void) {
     RUN_TEST(failed_load_claim_return_is_counted);
     RUN_TEST(ask_resolve_allows_only_released_records);
     RUN_TEST(ask_gate_is_per_executor);
+    RUN_TEST(ask_resolve_keeps_allowance_until_every_release_stages);
+    RUN_TEST(ask_resolve_leaves_past_allowance_held);
     RUN_TEST(held_records_reports_scan_failure);
     RUN_TEST(resolve_held_reports_staging_failure);
     RUN_TEST(retry_table_saturation_is_counted);

@@ -500,6 +500,7 @@ static void row_to_delivery(sqlite3_stmt *st, fl_kq_delivery_t *d) {
     d->fired = sqlite3_column_int64(st, 9) != 0;
     d->acknowledged = status == FL_SERVER_CATALOG_KQ_DELIVERED;
     d->expired = status == FL_SERVER_CATALOG_EXPIRED;
+    d->refused = status == FL_SERVER_CATALOG_KQ_REFUSED;
 }
 
 fl_result_t fl_kq_store_put(fl_kq_store_t *s, const fl_kq_delivery_t *d, const uint8_t *letter,
@@ -645,7 +646,8 @@ fl_result_t fl_kq_store_update(fl_kq_store_t *s, const fl_kq_delivery_t *d, fl_k
 
     if (!s || !d)
         return FL_RESULT_INVAL;
-    if (spike != FL_KQ_SPIKE_COSIGN && !(spike == FL_KQ_SPIKE_ACK && d->acknowledged))
+    if (spike != FL_KQ_SPIKE_COSIGN && !(spike == FL_KQ_SPIKE_ACK && d->acknowledged) &&
+        !(spike == FL_KQ_SPIKE_REFUSE && d->refused))
         return FL_RESULT_INVAL;
     pthread_mutex_lock(&s->lock);
     rc = store_exec(s, "BEGIN IMMEDIATE;");
@@ -655,6 +657,11 @@ fl_result_t fl_kq_store_update(fl_kq_store_t *s, const fl_kq_delivery_t *d, fl_k
         rc = set_state(s, d, FL_SERVER_CATALOG_KQ_RELEASED, FL_SERVER_CATALOG_KQ_DELIVERED, 0);
         if (rc == FL_RESULT_OK)
             rc = log_event(s, d->id, "acknowledged", now);
+    } else if (spike == FL_KQ_SPIKE_REFUSE) {
+        /* A refusal ends the delivery without counting as one: its own status and event. */
+        rc = set_state(s, d, FL_SERVER_CATALOG_KQ_RELEASED, FL_SERVER_CATALOG_KQ_REFUSED, 0);
+        if (rc == FL_RESULT_OK)
+            rc = log_event(s, d->id, "refused", now);
     } else {
         /* A co-signature that fires is one unit of work: the signature, the release and both
          * events commit together or not at all. */
@@ -761,6 +768,8 @@ const char *fl_kq_delivery_state(const fl_kq_delivery_t *d) {
         return "";
     if (d->expired)
         return "expired";
+    if (d->refused)
+        return "refused";
     if (d->acknowledged)
         return "delivered";
     return d->fired ? "released" : "waiting for co-signature";

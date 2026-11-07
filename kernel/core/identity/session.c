@@ -192,8 +192,12 @@ fl_result_t fl_session_login(const char *name, const char *password) {
             uint8_t signing_secret[32];
             int open_st;
             fl_result_t pub_rc = FL_RESULT_ACCES;
+            uint64_t attempt_gen;
 
-            /* Do not expose s_current until the token opens. Password is checked; session is not. */
+            /* Do not expose s_current until the token opens. Password is checked; session is not.
+             * The generation taken here must still be the current one when the token has opened:
+             * a logout or another login in the meantime supersedes this attempt. */
+            attempt_gen = s_login_gen;
             pthread_mutex_unlock(&s_session_mu);
             if (s_kqst_pre_open)
                 s_kqst_pre_open();
@@ -204,6 +208,13 @@ fl_result_t fl_session_login(const char *name, const char *password) {
                 return FL_RESULT_ACCES;
             }
             pthread_mutex_lock(&s_session_mu);
+            if (s_login_gen != attempt_gen) {
+                /* A logout, or another login, ran while the token opened: it has the session now. */
+                pthread_mutex_unlock(&s_session_mu);
+                mem_domain_secure_zero(signing_secret, sizeof signing_secret);
+                fprintf(stderr, "login: %s was superseded while its KQST slot token opened\n", open_as);
+                return FL_RESULT_ACCES;
+            }
             /* Re-check under the lock: the account must still be KQST and the password still match. */
             if (!fl_user_db_verify_password(&s_db, open_as, password) || !kqst_mode(open_as)) {
                 pthread_mutex_unlock(&s_session_mu);
@@ -240,8 +251,16 @@ fl_result_t fl_session_login(const char *name, const char *password) {
             }
             return FL_RESULT_OK;
         }
-        if (!need_kqst)
+        if (!need_kqst) {
             login_ensure_account_key(name, password);
+            /* The key may have just been provisioned and saved: the online hook must see the record as it
+             * is now, or it would find no key and leave this account's key offline. */
+            u = fl_user_db_find(&s_db, name);
+            if (u) {
+                snapshot = *u;
+                have_snapshot = 1;
+            }
+        }
         fl_elevation_revoke_all();
         /* Store the account's own spelling: "login root" signs in as Root. */
         strncpy(s_current, u ? u->name : name, sizeof(s_current) - 1);

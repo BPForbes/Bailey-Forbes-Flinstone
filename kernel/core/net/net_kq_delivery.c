@@ -453,7 +453,7 @@ static void host_cosign(fl_net_server_t *srv, const fl_net_server_member_t *from
     case FL_KQ_NEURON_REFRACTORY:
         /* Already released: send it again to this member (only they can open it), unless the
          * receipt is in or the host has ended it. */
-        if (!d.acknowledged && !d.expired)
+        if (!d.acknowledged && !d.expired && !d.refused)
             host_release(srv, from, &d);
         return;
     case FL_KQ_NEURON_LEAKED:
@@ -480,9 +480,18 @@ static void host_ack(fl_net_server_t *srv, const fl_net_server_member_t *from,
     if (r->bad || !store() || fl_kq_store_get(store(), id, &d) != FL_RESULT_OK || !me ||
         strcmp(me, d.recipient) != 0 || !d.fired || d.expired)
         return;
-    d.acknowledged = 1;
-    if (fl_kq_store_update(store(), &d, FL_KQ_SPIKE_ACK, now_sec()) == FL_RESULT_OK)
-        (void)fl_kq_store_forget_letter(store(), id);
+    /* A refusal is recorded as a refusal, never as a delivery; either way the letter is deleted
+     * (docs/FILE_SHARING_KEYQUORUM.md: "Any other refusal is acknowledged as refused and the host
+     * deletes the letter"). */
+    if (accepted) {
+        d.acknowledged = 1;
+        if (fl_kq_store_update(store(), &d, FL_KQ_SPIKE_ACK, now_sec()) == FL_RESULT_OK)
+            (void)fl_kq_store_forget_letter(store(), id);
+    } else {
+        d.refused = 1;
+        if (fl_kq_store_update(store(), &d, FL_KQ_SPIKE_REFUSE, now_sec()) == FL_RESULT_OK)
+            (void)fl_kq_store_forget_letter(store(), id);
+    }
 }
 
 static void host_keys(fl_net_server_t *srv, const fl_net_server_member_t *from,
