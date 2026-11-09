@@ -1,0 +1,6 @@
+MAJOR_VERSION=5
+STANDARD_VERSION=3
+RELEASE_VERSION=0
+PRERELEASE=1
+DEV_VERSION=12
+DESCRIPTION=KeyQuorum pin and ABI. third_party/keyquorum moves from 8ab454b (ABI 3) to KeyQuorum 5b9155d, the head of KeyQuorum pull request #187 (ABI 5), which carries the merged KeyQuorum #180 work (the store-free kind-17 snapshot open and the kq_file_seal_snapshot, kq_file_open_snapshot and kq_file_snapshot_covers exports, kq_slot_open, kq_bridge_prove, kq_bridge_verify, kq_bridge_connects, kq_access_requirement, KQER error reports) and kq_file_head_author. FL_KQ_ABI_VERSION in contracts/drivers/contract_p4_keyquorum.h is 5, so the driver probe (kq_probe) still requires equality with the linked archive, and docs/FILE_SHARING_KEYQUORUM.md states the ABI 5 probe. test_kq_net gains test_a_refused_ack_is_recorded_as_refused_over_the_wire: a refused ACK is recorded as refused, never as delivered. No new code calls the new exports yet; the consumers (FL-04, FL-06, FL-16, FL-12, FL-14, FL-15, FL-20) follow on their own trains. Not to be merged before KeyQuorum #187 is merged with a merge commit, so that the pinned commit stays reachable from KeyQuorum main.
