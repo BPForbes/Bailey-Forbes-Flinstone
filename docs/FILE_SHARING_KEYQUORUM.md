@@ -684,7 +684,7 @@ changes that.
 picks the portable crypto backends) and links it with `kernel/drivers/keyquorum/kq_driver.c` and
 `kernel/freestanding/x86_64/kq_platform.c` (`KQ_FREESTANDING=0` builds the image without it). At boot the
 kernel prints `CAP keyquorum=linked` when `fl_kq_driver_get()` accepts the linked ABI
-(`FL_KQ_ABI_VERSION` 3), else `CAP keyquorum=abi-mismatch`.
+(`FL_KQ_ABI_VERSION` 5), else `CAP keyquorum=abi-mismatch`.
 
 - **Size.** The image is about 441 KiB of payload (882 sectors; 918 with the security lab; gate 1024) with about 99 KiB of bss; the
   build script refuses an image whose bss end reaches the end of conventional memory.
