@@ -28,6 +28,15 @@ fl_result_t fl_session_login(const char *name, const char *password);
  * (the end of su -c) and for tests. A new identity is taken only through fl_session_switch_user.
  */
 fl_result_t fl_session_set_user(const char *name);
+/**
+ * The restore at the end of su -c: takes name back only while login_generation (read before the
+ * switch, fl_session_login_generation) is still the current login. A login or logout in between
+ * leaves the session as it is: BUSY, audited as "su-restore-refused". INVAL for generation 0;
+ * otherwise as fl_session_set_user.
+ */
+fl_result_t fl_session_restore_user(const char *name, uint64_t login_generation);
+/** 1 when password is the named account's password (checked under the session lock), else 0. */
+int         fl_session_verify_account_password(const char *name, const char *password);
 
 /**
  * An identity switch (su, sudo -i). The commands collect what KeyQuorum's rule asks for; the session
@@ -42,9 +51,11 @@ fl_result_t fl_session_set_user(const char *name);
  *                        bridge_member_password and proving membership (fl_kq_prove_bridge_member).
  *   REFUSED              refused. A switch that needs a parent's grant is refused too: there is no way
  *                        to collect one.
- * Every refusal is audited through the audit hook ("su-refused" / "sudo-refused", the two key ids
- * and a reason word; never a password, key or token byte). FL_RESULT_OK, ACCES (refused), BUSY (a
- * login or logout ran meanwhile), NOENT (no such account) or INVAL.
+ * After a bridge proof the session asks again and refuses ("bridge-changed") unless the factor and the
+ * bridge are the same. Every refusal is audited through the audit hook ("su-refused" /
+ * "sudo-refused", the two key ids and a reason word; never a password, key or token byte) and
+ * nothing names the reason on the terminal. FL_RESULT_OK, ACCES (refused), BUSY (a login or logout
+ * ran meanwhile), NOENT (no such account) or INVAL.
  */
 typedef struct fl_session_switch_request {
     const char *target;

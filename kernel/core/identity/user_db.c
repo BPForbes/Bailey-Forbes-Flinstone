@@ -1100,11 +1100,13 @@ static int blob_is(sqlite3_stmt *st, int col, size_t len) {
            sqlite3_column_blob(st, col) != NULL;
 }
 
-/* Reads uid's row and its members into out. NOENT for no row or a malformed one. */
+/* Reads uid's row and its members into out. NOENT for no row or a malformed one; ERR when the
+ * store cannot be read (a failed prepare, or a step that is neither a row nor the end). */
 static fl_result_t bridge_read(sqlite3 *sql, const char *uid, fl_user_bridge_t *out) {
     sqlite3_stmt *st = NULL;
     fl_result_t rc = FL_RESULT_NOENT;
     sqlite3_int64 gen;
+    int step;
 
     mem_domain_zero(out, sizeof *out);
     if (strlen(uid) >= sizeof out->uid)
@@ -1114,7 +1116,10 @@ static fl_result_t bridge_read(sqlite3 *sql, const char *uid, fl_user_bridge_t *
                            -1, &st, NULL) != SQLITE_OK)
         return FL_RESULT_ERR;
     sqlite3_bind_text(st, 1, uid, -1, SQLITE_TRANSIENT);
-    if (sqlite3_step(st) == SQLITE_ROW) {
+    step = sqlite3_step(st);
+    if (step != SQLITE_ROW && step != SQLITE_DONE)
+        rc = FL_RESULT_ERR;
+    if (step == SQLITE_ROW) {
         gen = sqlite3_column_int64(st, 0);
         if (gen >= 1 && gen <= (sqlite3_int64)UINT32_MAX && blob_is(st, 1, FL_USER_BRIDGE_SALT_LEN) &&
             blob_is(st, 2, 32)) {
@@ -1135,7 +1140,7 @@ static fl_result_t bridge_read(sqlite3 *sql, const char *uid, fl_user_bridge_t *
                            -1, &st, NULL) != SQLITE_OK)
         return FL_RESULT_ERR;
     sqlite3_bind_text(st, 1, uid, -1, SQLITE_TRANSIENT);
-    while (sqlite3_step(st) == SQLITE_ROW) {
+    while ((step = sqlite3_step(st)) == SQLITE_ROW) {
         const char *label = (const char *)sqlite3_column_text(st, 0);
         fl_user_bridge_member_t *m;
 
@@ -1150,6 +1155,8 @@ static fl_result_t bridge_read(sqlite3 *sql, const char *uid, fl_user_bridge_t *
         memcpy(m->encryption_public, sqlite3_column_blob(st, 1), 32);
         memcpy(m->signing_public, sqlite3_column_blob(st, 2), 32);
     }
+    if (rc == FL_RESULT_OK && step != SQLITE_DONE)
+        rc = FL_RESULT_ERR; /* a roster read cut short is no roster */
     sqlite3_finalize(st);
     if (rc == FL_RESULT_OK && out->nmembers < 2)
         rc = FL_RESULT_NOENT;
@@ -1176,36 +1183,49 @@ fl_result_t fl_user_db_bridges_live(const fl_user_db_t *db, fl_user_bridge_t *ou
     sqlite3 *sql = NULL;
     sqlite3_stmt *st = NULL;
     fl_result_t rc = FL_RESULT_OK;
+    int step;
 
     if (!db || !count || (cap && !out))
         return FL_RESULT_INVAL;
     *count = 0;
     if (bridge_db_open(db, 0, &sql) != FL_RESULT_OK)
         return FL_RESULT_ERR;
+    /* A store written before the bridge tables has none: no live bridge. Only a table the schema
+     * definitely lacks counts as that; a probe that fails is an error like any other read. */
+    if (sqlite3_prepare_v2(sql, "SELECT 1 FROM main.sqlite_master WHERE type='table' AND name='account_bridges';",
+                           -1, &st, NULL) != SQLITE_OK) {
+        sqlite3_close(sql);
+        return FL_RESULT_ERR;
+    }
+    step = sqlite3_step(st);
+    sqlite3_finalize(st);
+    st = NULL;
+    if (step != SQLITE_ROW) {
+        sqlite3_close(sql);
+        return step == SQLITE_DONE ? FL_RESULT_OK : FL_RESULT_ERR;
+    }
+    /* Every live row must read whole: a live bridge left out would lower the factor a switch demands. */
     if (sqlite3_prepare_v2(sql, "SELECT uid FROM account_bridges WHERE destroyed = 0 ORDER BY uid;", -1,
                            &st, NULL) != SQLITE_OK) {
-        /* A store written before the bridge tables has none: no live bridge. */
         sqlite3_close(sql);
-        return FL_RESULT_OK;
+        return FL_RESULT_ERR;
     }
-    while (sqlite3_step(st) == SQLITE_ROW) {
+    while ((step = sqlite3_step(st)) == SQLITE_ROW) {
         const char *uid = (const char *)sqlite3_column_text(st, 0);
-        fl_result_t one;
 
-        if (!uid)
-            continue;
         if (*count >= cap) {
             rc = FL_RESULT_NOMEM; /* more live bridges than the caller holds: never a partial list */
             break;
         }
-        one = bridge_read(sql, uid, &out[*count]);
-        if (one == FL_RESULT_OK && !out[*count].destroyed)
-            (*count)++;
-        else if (one == FL_RESULT_ERR) {
-            rc = one;
+        if (!uid || bridge_read(sql, uid, &out[*count]) != FL_RESULT_OK) {
+            rc = FL_RESULT_ERR; /* a live row that cannot be read or is malformed: no list at all */
             break;
         }
+        if (!out[*count].destroyed) /* destroyed since the outer read began: not live */
+            (*count)++;
     }
+    if (rc == FL_RESULT_OK && step != SQLITE_DONE)
+        rc = FL_RESULT_ERR;
     sqlite3_finalize(st);
     sqlite3_close(sql);
     if (rc != FL_RESULT_OK)

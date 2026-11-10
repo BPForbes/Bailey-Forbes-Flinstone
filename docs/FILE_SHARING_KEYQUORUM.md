@@ -773,11 +773,15 @@ The rule is KeyQuorum's (`keyquorum_access.h`); Flinstone asks it and collects t
   else the target's) password and its slot token opened with it (`fl_kq_open_account`); a password alone is
   refused. PASSWORD_BRIDGE_KQST: the target's password, plus a bridge member opening their token and proving
   membership (`fl_kq_prove_bridge_member`: `bridge_prove` with the member's unsealed key over a fresh random
-  challenge, then `bridge_verify` against the bridge's facts read from the store at that moment). `sudo` without
-  a switch (`fl_session_sudo_authenticate`) asks for Root's password and token when Root is a KQST account.
-  Every refusal is audited through the session's audit hook (`su-refused` / `sudo-refused` and a reason word;
-  never a password, key or token byte). `fl_session_set_user` stays an unchecked set for restoring the identity a
-  command already had (the end of `su -c`) and for tests.
+  challenge, then `bridge_verify` against the bridge's facts read from the store at that moment); after the proof
+  the session asks again and refuses (`bridge-changed`) unless the factor and the bridge are still the same. The
+  command asks for the bridge member only once the target's password (Root's for `sudo -i`) is verified, and
+  refuses an over-long member name. `sudo` without a switch (`fl_session_sudo_authenticate`) asks for Root's
+  password and token when Root is a KQST account. Every refusal is audited through the session's audit hook
+  (`su-refused` / `sudo-refused` and a reason word; never a password, key or token byte); the terminal shows the
+  same `authentication failed` whatever the reason. `fl_session_set_user` stays an unchecked set for tests; the
+  end of `su -c` uses `fl_session_restore_user`, which takes the old identity back only while the login it was
+  asked in is still current (otherwise the session is left as it is, audited as `su-restore-refused`).
 - **Password-only accounts (owner decision).** The default image has no KQST for any account, Root included, and
   KeyQuorum asks for Root's token on every `sudo`. Where the factor names a token its holder does not have (a
   `FL_USER_AUTH_PASSWORD` account), the behaviour before KeyQuorum's rule is kept (the password; nothing for
@@ -785,11 +789,14 @@ The rule is KeyQuorum's (`keyquorum_access.h`); Flinstone asks it and collects t
   `sudo-kqst-legacy`. A KQST-mode account never switches on a password alone.
 - **Bridges.** A live bridge is a row of the account store's `account_bridges` with `destroyed = 0` and well-formed
   facts (generation 1..2^32-1, 16-byte salt, 32-byte public key, at least two members with valid labels and 32-byte
-  signing keys). A member's sealed bridge key is kept with its `wrap_salt` (a column added in place to older
+  signing keys). The list is never partial: a row with `destroyed = 0` that is malformed or cannot be read, any
+  failed read, or more live rows than `FL_USER_BRIDGES_MAX`, refuses the switch; only a store whose schema has no
+  `account_bridges` table at all has no bridge. A member's sealed bridge key is kept with its `wrap_salt` (a column added in place to older
   stores) and stored or read only together. No path brings a KeyQuorum bridge into the store yet (that import is
   not designed); `fl_user_db_bridge_put` and `_put_sealed_key` are the store's writers.
 - **Real tokens.** `make test_kq_real_token` mints two KQSTs, a third device and a private bridge with the
   `keyquorum` CLI built from the submodule (not part of the default `make`; skipped with a message without it),
   opens them with `kq_slot_open`, signs, logs in (including the logout-during-open generation check), and crosses
-  the bridge at `su`. The freestanding image has none of this (its three driver ops are NULL: the SECFEAT image
-  had no room for them).
+  the bridge at `su`. The freestanding image has none of this (its access and bridge driver ops are NULL: the
+  SECFEAT image had no room for them). A bridge's reach (`fl_heritage_bridge_connects`) also goes through the
+  driver (`bridge_connects`); no driver or no op does not connect.

@@ -210,6 +210,15 @@ struct fl_kq_driver {
                          const char *const *member_labels, const uint8_t *member_signing_pubs,
                          size_t nmembers, const char *verifier_label, const uint8_t *challenge,
                          size_t clen, const uint8_t *artifact, size_t alen);
+
+    /*
+     * Bridge reach, appended after bridge_verify: one-to-one over kq_bridge_connects
+     * (keyquorum_identity.h), 1 when a bridge between end_a and end_b connects actor to scope, else
+     * 0. The shape of the hierarchy only; that the bridge is live is the caller's check. NULL in the
+     * freestanding image like the three above; a caller reads NULL as "does not connect".
+     */
+    int (*bridge_connects)(const char *end_a, const char *end_b, const char *actor,
+                           const char *scope);
 };
 
 /**

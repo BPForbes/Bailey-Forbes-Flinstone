@@ -300,23 +300,6 @@ static void commit_user_locked(const fl_user_record_t *u) {
     s_sudo_scope_depth = 0;
 }
 
-fl_result_t fl_session_set_user(const char *name) {
-    const fl_user_record_t *u;
-    fl_result_t rc = FL_RESULT_NOENT;
-
-    fl_session_init();
-    if (!name || !name[0])
-        return FL_RESULT_INVAL;
-    pthread_mutex_lock(&s_session_mu);
-    u = fl_user_db_find(&s_db, name);
-    if (u) {
-        commit_user_locked(u);
-        rc = FL_RESULT_OK;
-    }
-    pthread_mutex_unlock(&s_session_mu);
-    return rc;
-}
-
 void fl_session_set_audit_hook(fl_session_audit_fn fn) {
     s_audit_hook = fn;
 }
@@ -327,10 +310,49 @@ static void session_audit(const char *actor_key, const char *event, const char *
         s_audit_hook(actor_key, event, subject_key, detail);
 }
 
-static int verify_password_now(const char *name, const char *password) {
+/* Takes name with no check; login_generation non-zero takes it only while that login is still the
+ * current one (BUSY otherwise, audited, and the session is left as it is). */
+static fl_result_t set_user_if_current(const char *name, uint64_t login_generation) {
+    const fl_user_record_t *u, *cu;
+    char cur_key[FL_HERITAGE_KEY_ID_MAX], name_key[FL_HERITAGE_KEY_ID_MAX];
+    fl_result_t rc = FL_RESULT_NOENT;
+
+    fl_session_init();
+    if (!name || !name[0])
+        return FL_RESULT_INVAL;
+    pthread_mutex_lock(&s_session_mu);
+    u = fl_user_db_find(&s_db, name);
+    if (login_generation != 0 && login_generation != s_login_gen) {
+        cu = fl_user_db_find(&s_db, s_current);
+        snprintf(cur_key, sizeof cur_key, "%s", cu ? cu->key_id : "");
+        snprintf(name_key, sizeof name_key, "%s", u ? u->key_id : "");
+        pthread_mutex_unlock(&s_session_mu);
+        session_audit(cur_key, "su-restore-refused", name_key, "superseded");
+        return FL_RESULT_BUSY;
+    }
+    if (u) {
+        commit_user_locked(u);
+        rc = FL_RESULT_OK;
+    }
+    pthread_mutex_unlock(&s_session_mu);
+    return rc;
+}
+
+fl_result_t fl_session_set_user(const char *name) {
+    return set_user_if_current(name, 0);
+}
+
+fl_result_t fl_session_restore_user(const char *name, uint64_t login_generation) {
+    if (login_generation == 0)
+        return FL_RESULT_INVAL; /* 0 would mean unchecked: a restore always names its login */
+    return set_user_if_current(name, login_generation);
+}
+
+int fl_session_verify_account_password(const char *name, const char *password) {
     int ok;
 
-    if (!password)
+    fl_session_init();
+    if (!name || !password)
         return 0;
     pthread_mutex_lock(&s_session_mu);
     ok = fl_user_db_verify_password(&s_db, name, password) ? 1 : 0;
@@ -339,11 +361,12 @@ static int verify_password_now(const char *name, const char *password) {
 }
 
 /* A refused switch: audited (the two key ids and a reason word, never a password, key or token
- * byte) and reported. Called without s_session_mu. */
+ * byte). The terminal gets one message whatever the reason (the command prints it), so a refusal
+ * says nothing about the policy or a bridge before a password is verified. Called without
+ * s_session_mu. */
 static fl_result_t switch_refused(fl_result_t rc, int sudo, const char *actor_key,
-                                  const char *subject_key, const char *subject, const char *why) {
+                                  const char *subject_key, const char *why) {
     session_audit(actor_key, sudo ? "sudo-refused" : "su-refused", subject_key, why);
-    fprintf(stderr, "%s: switch to %s refused (%s)\n", sudo ? "sudo" : "su", subject, why);
     return rc;
 }
 
@@ -385,7 +408,7 @@ fl_result_t fl_session_switch_user(const fl_session_switch_request_t *req) {
     need = fl_kq_unlock_requirement(cur_name, tgt_name, req->sudo);
     if (need.needs_parent_grant)
         /* No way to collect a parent's grant exists on this side: refused, never skipped. */
-        return switch_refused(FL_RESULT_ACCES, req->sudo, cur_key, tgt_key, tgt_name, "parent-grant");
+        return switch_refused(FL_RESULT_ACCES, req->sudo, cur_key, tgt_key, "parent-grant");
     switch (need.factor) {
     case FL_KQ_ACCESS_NONE:
         check_password = 0;
@@ -407,7 +430,7 @@ fl_result_t fl_session_switch_user(const fl_session_switch_request_t *req) {
         why = "policy";
         break;
     }
-    if (!why && check_password && !verify_password_now(holder_name, pw))
+    if (!why && check_password && !fl_session_verify_account_password(holder_name, pw))
         why = "password";
     if (!why && need.factor == FL_KQ_ACCESS_KQST_PASSWORD) {
         if (holder_kqst) {
@@ -425,21 +448,30 @@ fl_result_t fl_session_switch_user(const fl_session_switch_request_t *req) {
         else if (fl_kq_prove_bridge_member(need.bridge_uid, req->bridge_member,
                                            req->bridge_member_password) != FL_KQ_BRIDGE_OK)
             why = "bridge-proof";
+        else {
+            /* The roster may have changed between the requirement and the proof: ask again, and
+             * the answer must still be this factor through this same bridge. */
+            fl_kq_requirement_t again = fl_kq_unlock_requirement(cur_name, tgt_name, req->sudo);
+
+            if (again.factor != need.factor || again.needs_parent_grant ||
+                strcmp(again.bridge_uid, need.bridge_uid) != 0)
+                why = "bridge-changed";
+        }
     }
     if (why)
-        return switch_refused(FL_RESULT_ACCES, req->sudo, cur_key, tgt_key, tgt_name, why);
+        return switch_refused(FL_RESULT_ACCES, req->sudo, cur_key, tgt_key, why);
 
     pthread_mutex_lock(&s_session_mu);
     /* The session the request was made in must still be the one it switches. */
     if (s_login_gen != attempt_gen || strcmp(s_current, cur_name) != 0) {
         pthread_mutex_unlock(&s_session_mu);
-        return switch_refused(FL_RESULT_BUSY, req->sudo, cur_key, tgt_key, tgt_name, "superseded");
+        return switch_refused(FL_RESULT_BUSY, req->sudo, cur_key, tgt_key, "superseded");
     }
     u = fl_user_db_find(&s_db, tgt_name);
     if (!u || strcmp(u->key_id, tgt_key) != 0 ||
         (check_password && !fl_user_db_verify_password(&s_db, holder_name, pw))) {
         pthread_mutex_unlock(&s_session_mu);
-        return switch_refused(FL_RESULT_ACCES, req->sudo, cur_key, tgt_key, tgt_name, "changed");
+        return switch_refused(FL_RESULT_ACCES, req->sudo, cur_key, tgt_key, "changed");
     }
     commit_user_locked(u);
     pthread_mutex_unlock(&s_session_mu);
@@ -485,11 +517,11 @@ fl_result_t fl_session_sudo_authenticate(const char *password) {
     else if (need.factor != FL_KQ_ACCESS_KQST_PASSWORD)
         why = "policy";
     else if (root_kqst) {
-        if (!verify_password_now(root_name, password))
+        if (!fl_session_verify_account_password(root_name, password))
             why = "password";
         else if (fl_kq_open_account(root_name, password, NULL) != FL_KQ_ACCOUNT_OK)
             why = "kqst";
-    } else if (!verify_password_now(cur_name, password)) {
+    } else if (!fl_session_verify_account_password(cur_name, password)) {
         why = "password"; /* password-only Root: the caller's own password, as before (owner decision) */
     } else {
         session_audit(cur_key, "sudo-kqst-legacy", FL_HERITAGE_ROOT_KEY, "password-only account");

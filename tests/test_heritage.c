@@ -5,6 +5,7 @@
  */
 #include "heritage.h"
 #include "bridge.h"
+#include "fl/driver/keyquorum.h"
 #include "fl/kq.h"
 #include "mem_domain.h"
 #include "share_gate.h"
@@ -64,6 +65,27 @@ static void rmrf(const char *path) {
     }
     closedir(d);
     rmdir(path);
+}
+
+/*
+ * Test-only seam: the binary is linked with -Wl,--wrap=fl_kq_driver_get_or_register (Makefile,
+ * test_heritage), so every caller in the kernel objects reaches the KeyQuorum driver through here.
+ * With s_patch NULL it is the real driver; otherwise a copy of it that s_patch changed (an op set to
+ * NULL or replaced), to show that callers fail closed. Production code has no such hook.
+ */
+const fl_kq_driver_t *__real_fl_kq_driver_get_or_register(void);
+const fl_kq_driver_t *__wrap_fl_kq_driver_get_or_register(void);
+static void (*s_patch)(fl_kq_driver_t *drv);
+static fl_kq_driver_t s_patched;
+
+const fl_kq_driver_t *__wrap_fl_kq_driver_get_or_register(void) {
+    const fl_kq_driver_t *real = __real_fl_kq_driver_get_or_register();
+
+    if (!s_patch || !real)
+        return real;
+    s_patched = *real;
+    s_patch(&s_patched);
+    return &s_patched;
 }
 
 static int test_key_ids(void) {
@@ -974,10 +996,48 @@ static int test_private_bridge_store(void) {
                         NULL, NULL, NULL) == SQLITE_OK);
     sqlite3_close(sql);
     ASSERT(fl_user_db_bridge_get(&db, b.uid, &got) == FL_RESULT_NOENT);
+    /* A live row the store cannot read whole is no list at all (never a bridge left out). */
+    ASSERT(fl_user_db_bridges_live(&db, live, FL_USER_BRIDGES_MAX, &n) == FL_RESULT_ERR && n == 0);
+    ASSERT(sqlite3_open(path, &sql) == SQLITE_OK);
+    ASSERT(sqlite3_exec(sql, "UPDATE account_bridge_members SET signing_public=x'00' WHERE uid="
+                             "'bbbb0000bbbb0000bbbb0000bbbb0000' AND label='Root.Alternative';"
+                             "UPDATE account_bridges SET salt=zeroblob(16) WHERE uid='bbbb0000bbbb0000bbbb0000bbbb0000';",
+                        NULL, NULL, NULL) == SQLITE_OK);
+    sqlite3_close(sql);
+    ASSERT(fl_user_db_bridges_live(&db, live, FL_USER_BRIDGES_MAX, &n) == FL_RESULT_ERR && n == 0);
+    /* A malformed row of a destroyed bridge is not live: it does not stop the list. */
+    ASSERT(sqlite3_open(path, &sql) == SQLITE_OK);
+    ASSERT(sqlite3_exec(sql, "UPDATE account_bridges SET destroyed=1 WHERE uid='bbbb0000bbbb0000bbbb0000bbbb0000';",
+                        NULL, NULL, NULL) == SQLITE_OK);
+    sqlite3_close(sql);
     ASSERT(fl_user_db_bridges_live(&db, live, FL_USER_BRIDGES_MAX, &n) == FL_RESULT_OK && n == 0);
+    /* A store that cannot be read is an error, not "no bridge": locked by another writer... */
+    make_bridge(&b, "cccc1111cccc1111cccc1111cccc1111", "Root.Flinstone.Bob", "Root.Alternative");
+    ASSERT(fl_user_db_bridge_put(&db, &b) == FL_RESULT_OK);
+    ASSERT(fl_user_db_bridges_live(&db, live, FL_USER_BRIDGES_MAX, &n) == FL_RESULT_OK && n == 1);
+    ASSERT(sqlite3_open(path, &sql) == SQLITE_OK);
+    ASSERT(sqlite3_exec(sql, "BEGIN EXCLUSIVE;", NULL, NULL, NULL) == SQLITE_OK);
+    ASSERT(fl_user_db_bridges_live(&db, live, FL_USER_BRIDGES_MAX, &n) == FL_RESULT_ERR && n == 0);
+    ASSERT(fl_user_db_bridge_get(&db, b.uid, &got) == FL_RESULT_ERR);
+    ASSERT(sqlite3_exec(sql, "ROLLBACK;", NULL, NULL, NULL) == SQLITE_OK);
+    /* ...or with a column the query needs gone (the list cannot even be asked for). */
+    ASSERT(sqlite3_exec(sql, "ALTER TABLE account_bridges DROP COLUMN destroyed;", NULL, NULL, NULL) == SQLITE_OK);
+    sqlite3_close(sql);
+    ASSERT(fl_user_db_bridges_live(&db, live, FL_USER_BRIDGES_MAX, &n) == FL_RESULT_ERR && n == 0);
     /* A one-member roster is no bridge. */
     b.nmembers = 1;
     ASSERT(fl_user_db_bridge_put(&db, &b) == FL_RESULT_INVAL);
+    unlink(path);
+
+    /* A store written before the bridge tables existed has no bridge: that alone is "none". */
+    ASSERT(temp_db(path, sizeof path) == 0);
+    ASSERT(sqlite3_open(path, &sql) == SQLITE_OK);
+    ASSERT(sqlite3_exec(sql, "CREATE TABLE users (name TEXT PRIMARY KEY NOT NULL);", NULL, NULL, NULL) ==
+           SQLITE_OK);
+    sqlite3_close(sql);
+    memset(&db, 0, sizeof db);
+    snprintf(db.path, sizeof db.path, "%s", path);
+    ASSERT(fl_user_db_bridges_live(&db, live, FL_USER_BRIDGES_MAX, &n) == FL_RESULT_OK && n == 0);
     unlink(path);
     return 0;
 }
@@ -1104,6 +1164,178 @@ static int test_session_switch(void) {
     return 0;
 }
 
+static int s_stub_grant;
+
+static int stub_access_parent_grant(const char *current, const char *target, int sudo,
+                                    const kq_bridge_t *live_bridges, size_t nbridges, int parent_approval,
+                                    int *bridge_index_out, int *needs_parent_grant_out) {
+    (void)current, (void)target, (void)sudo, (void)live_bridges, (void)nbridges, (void)parent_approval;
+    if (bridge_index_out)
+        *bridge_index_out = -1;
+    if (needs_parent_grant_out)
+        *needs_parent_grant_out = s_stub_grant;
+    return FL_KQ_ACCESS_PASSWORD;
+}
+
+static void patch_no_access(fl_kq_driver_t *d) { d->access_requirement = NULL; }
+static void patch_no_prove(fl_kq_driver_t *d) { d->bridge_prove = NULL; }
+static void patch_no_verify(fl_kq_driver_t *d) { d->bridge_verify = NULL; }
+static void patch_no_connects(fl_kq_driver_t *d) { d->bridge_connects = NULL; }
+static void patch_parent_grant(fl_kq_driver_t *d) { d->access_requirement = stub_access_parent_grant; }
+
+static int exec_on_session_db(const char *stmt) {
+    sqlite3 *sql = NULL;
+    int rc;
+
+    if (sqlite3_open(fl_session_user_db()->path, &sql) != SQLITE_OK) {
+        sqlite3_close(sql);
+        return -1;
+    }
+    rc = sqlite3_exec(sql, stmt, NULL, NULL, NULL);
+    sqlite3_close(sql);
+    return rc == SQLITE_OK ? 0 : -1;
+}
+
+/*
+ * FL-12 refusals with no other test: a driver without an op, a parent's grant, more live bridges than
+ * the session holds, a store it cannot read, and a KQST-mode account whose token or pairing cannot be
+ * read. Each refuses; none falls to the password-only (legacy) branch.
+ */
+static int test_switch_refusals(void) {
+    fl_user_db_t *db = fl_session_user_db_mut();
+    fl_user_bridge_t b;
+    fl_kq_requirement_t r;
+    char uid[40], kqst[300];
+    sqlite3 *lock = NULL;
+    unsigned i;
+    FILE *fp;
+
+    fl_session_set_audit_hook(capture_audit);
+    ASSERT(fl_session_set_user("Flinstone") == FL_RESULT_OK);
+    /* No access_requirement op: the requirement is REFUSED and so is the switch. */
+    s_patch = patch_no_access;
+    r = fl_kq_unlock_requirement("Flinstone", "Bob", 0);
+    ASSERT(r.factor == FL_KQ_ACCESS_REFUSED);
+    ASSERT(switch_to("Bob", 0, "pw", NULL, NULL) == FL_RESULT_ACCES);
+    ASSERT(!strcmp(s_audit, "su-refused:policy"));
+    /* A parent's grant: nothing collects one, so refused before any password is checked. */
+    s_patch = patch_parent_grant;
+    s_stub_grant = 1;
+    r = fl_kq_unlock_requirement("Flinstone", "Bob", 0);
+    ASSERT(r.factor == FL_KQ_ACCESS_PASSWORD && r.needs_parent_grant == 1);
+    ASSERT(switch_to("Bob", 0, "pw", NULL, NULL) == FL_RESULT_ACCES);
+    ASSERT(!strcmp(s_audit, "su-refused:parent-grant"));
+    s_stub_grant = 0;
+    ASSERT(switch_to("Bob", 0, "pw", NULL, NULL) == FL_RESULT_OK); /* the stub alone lets it through */
+    ASSERT(fl_session_set_user("Flinstone") == FL_RESULT_OK);
+    /* No bridge_connects op: no reach. */
+    s_patch = patch_no_connects;
+    ASSERT(fl_heritage_bridge_connects("Root.Flinstone.Bob", "Root.Alternative.Ann", "Root.Flinstone.Bob",
+                                       "Root.Alternative.Ann") == 0);
+    s_patch = NULL;
+    ASSERT(fl_heritage_bridge_connects("Root.Flinstone.Bob", "Root.Alternative.Ann", "Root.Flinstone.Bob",
+                                       "Root.Alternative.Ann") == 1);
+
+    /* No bridge_prove or bridge_verify op: no proof, so a bridged switch is refused. */
+    make_bridge(&b, "abab0000abab0000abab0000abab0000", "Root.Flinstone.Bob", "Root.Alternative");
+    ASSERT(fl_user_db_bridge_put(db, &b) == FL_RESULT_OK);
+    ASSERT(fl_session_set_user("Alternative") == FL_RESULT_OK);
+    ASSERT(fl_kq_unlock_requirement("Alternative", "Bob", 0).factor == FL_KQ_ACCESS_PASSWORD_BRIDGE_KQST);
+    s_patch = patch_no_prove;
+    ASSERT(fl_kq_prove_bridge_member(b.uid, "Alternative", "alternative") == FL_KQ_BRIDGE_INVALID);
+    ASSERT(switch_to("Bob", 0, "pw", "Alternative", "alternative") == FL_RESULT_ACCES);
+    ASSERT(!strcmp(s_audit, "su-refused:bridge-proof"));
+    s_patch = patch_no_verify;
+    ASSERT(fl_kq_prove_bridge_member(b.uid, "Alternative", "alternative") == FL_KQ_BRIDGE_INVALID);
+    ASSERT(switch_to("Bob", 0, "pw", "Alternative", "alternative") == FL_RESULT_ACCES);
+    ASSERT(!strcmp(s_audit, "su-refused:bridge-proof"));
+    s_patch = NULL;
+
+    /* A malformed live row: the list is an error, so the switch is refused, not lowered to the
+     * cross-branch factor without the bridge (a password-only target's legacy password). */
+    ASSERT(exec_on_session_db("UPDATE account_bridges SET public_key=x'00' WHERE uid="
+                              "'abab0000abab0000abab0000abab0000';") == 0);
+    ASSERT(fl_kq_unlock_requirement("Alternative", "Bob", 0).factor == FL_KQ_ACCESS_REFUSED);
+    ASSERT(switch_to("Bob", 0, "pw", NULL, NULL) == FL_RESULT_ACCES);
+    ASSERT(!strcmp(s_audit, "su-refused:policy"));
+    ASSERT(!strcmp(fl_session_current_user(), "Alternative"));
+    b.destroyed = 1;
+    ASSERT(fl_user_db_bridge_put(db, &b) == FL_RESULT_OK);
+    /* A store that cannot be read (locked by another writer): refused, not "no bridge". */
+    ASSERT(sqlite3_open(fl_session_user_db()->path, &lock) == SQLITE_OK);
+    ASSERT(sqlite3_exec(lock, "BEGIN EXCLUSIVE;", NULL, NULL, NULL) == SQLITE_OK);
+    ASSERT(fl_kq_unlock_requirement("Alternative", "Bob", 0).factor == FL_KQ_ACCESS_REFUSED);
+    ASSERT(switch_to("Bob", 0, "pw", NULL, NULL) == FL_RESULT_ACCES);
+    ASSERT(!strcmp(s_audit, "su-refused:policy"));
+    ASSERT(sqlite3_exec(lock, "ROLLBACK;", NULL, NULL, NULL) == SQLITE_OK);
+    sqlite3_close(lock);
+
+    /* More live bridges than the session holds: never a partial list, so refused. */
+    for (i = 0; i <= FL_USER_BRIDGES_MAX; i++) {
+        snprintf(uid, sizeof uid, "%08x000000000000000000%06x", 0xf00du, i);
+        make_bridge(&b, uid, "Root.Flinstone.Bob", "Root.Third");
+        ASSERT(fl_user_db_bridge_put(db, &b) == FL_RESULT_OK);
+    }
+    ASSERT(fl_kq_unlock_requirement("Alternative", "Bob", 0).factor == FL_KQ_ACCESS_REFUSED);
+    ASSERT(switch_to("Bob", 0, "pw", NULL, NULL) == FL_RESULT_ACCES);
+    ASSERT(!strcmp(s_audit, "su-refused:policy"));
+    ASSERT(exec_on_session_db("UPDATE account_bridges SET destroyed=1;") == 0);
+    ASSERT(fl_kq_unlock_requirement("Alternative", "Bob", 0).factor == FL_KQ_ACCESS_KQST_PASSWORD);
+
+    /* A KQST-mode target whose token file is missing, then whose pairing row cannot be read:
+     * refused (kqst), never the password-only branch. */
+    snprintf(kqst, sizeof kqst, "%s.bob-missing.kqst", fl_session_user_db()->path);
+    unlink(kqst);
+    {
+        char stmt[700];
+
+        snprintf(stmt, sizeof stmt,
+                 "INSERT INTO account_keys (label,purpose,holds_share,minted_by,minted_at,generation,"
+                 "kqst_path,device_id,signing_public,encryption_public,ledger_seq,event_hash) VALUES"
+                 " ('Root.Flinstone.Bob','own',1,'Root',1,1,'%s',zeroblob(16),zeroblob(32),zeroblob(32),0,"
+                 "zeroblob(32));",
+                 kqst);
+        ASSERT(exec_on_session_db(stmt) == 0);
+    }
+    ASSERT(fl_user_db_set_auth_mode(db, "Bob", FL_USER_AUTH_PASSWORD_KQST) == FL_RESULT_OK);
+    ASSERT(switch_to("Bob", 0, "pw", NULL, NULL) == FL_RESULT_ACCES);
+    ASSERT(!strcmp(s_audit, "su-refused:kqst"));
+    fp = fopen(kqst, "wb");
+    ASSERT(fp && fputs("not a slot token", fp) >= 0 && fclose(fp) == 0);
+    ASSERT(exec_on_session_db("UPDATE account_keys SET signing_public=x'00' WHERE label='Root.Flinstone.Bob';") == 0);
+    ASSERT(switch_to("Bob", 0, "pw", NULL, NULL) == FL_RESULT_ACCES);
+    ASSERT(!strcmp(s_audit, "su-refused:kqst"));
+    ASSERT(!strcmp(fl_session_current_user(), "Alternative"));
+    ASSERT(fl_user_db_set_auth_mode(db, "Bob", FL_USER_AUTH_PASSWORD) == FL_RESULT_OK);
+    ASSERT(exec_on_session_db("DELETE FROM account_keys WHERE label='Root.Flinstone.Bob';") == 0);
+    unlink(kqst);
+    ASSERT(fl_session_set_user("Flinstone") == FL_RESULT_OK);
+    fl_session_set_audit_hook(NULL);
+    return 0;
+}
+
+/* su -c's restore takes the old identity back only while the login it was asked in is current. */
+static int test_restore_user(void) {
+    uint64_t gen;
+
+    fl_session_set_audit_hook(capture_audit);
+    ASSERT(fl_session_set_user("Flinstone") == FL_RESULT_OK);
+    gen = fl_session_login_generation();
+    ASSERT(fl_session_restore_user("Flinstone", 0) == FL_RESULT_INVAL);
+    ASSERT(fl_session_set_user("Bob") == FL_RESULT_OK);
+    ASSERT(fl_session_restore_user("Flinstone", gen) == FL_RESULT_OK);
+    ASSERT(!strcmp(fl_session_current_user(), "Flinstone"));
+    ASSERT(fl_session_logout() == FL_RESULT_OK); /* a new login generation */
+    ASSERT(fl_session_set_user("Bob") == FL_RESULT_OK);
+    s_audit[0] = '\0';
+    ASSERT(fl_session_restore_user("Flinstone", gen) == FL_RESULT_BUSY);
+    ASSERT(!strcmp(fl_session_current_user(), "Bob")); /* left as it is */
+    ASSERT(!strcmp(s_audit, "su-restore-refused:superseded"));
+    ASSERT(fl_session_set_user("Flinstone") == FL_RESULT_OK);
+    fl_session_set_audit_hook(NULL);
+    return 0;
+}
+
 int main(void) {
     char db_path[256];
     char tmpl[] = "/tmp/fl_heritage_jailXXXXXX";
@@ -1139,6 +1371,8 @@ int main(void) {
     RUN(test_private_bridge_store);
     RUN(test_unlock_requirement);
     RUN(test_session_switch);
+    RUN(test_switch_refusals);
+    RUN(test_restore_user);
 
     if (chdir("/tmp") != 0)
         rc = 1;

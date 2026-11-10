@@ -252,6 +252,63 @@ static int import_fixture_bridge(fl_user_bridge_t *b, int tamper_roster) {
 
 /* su across branches over a live private bridge: the target's password, plus a member opening their
  * token and proving membership against the store's current facts. */
+/*
+ * Test-only seam: linked with -Wl,--wrap=fl_kq_driver_get_or_register (Makefile, test_kq_real_token).
+ * With s_destroy_after_verify set, bridge_verify runs for real and then the bridge is marked destroyed
+ * in the store: the roster changing between the proof and the commit.
+ */
+const fl_kq_driver_t *__real_fl_kq_driver_get_or_register(void);
+const fl_kq_driver_t *__wrap_fl_kq_driver_get_or_register(void);
+static fl_user_bridge_t *s_destroy_after_verify;
+static fl_kq_driver_t s_patched;
+static int (*s_real_verify)(const char *, uint32_t, const uint8_t *, const uint8_t *, int, const char *const *,
+                            const uint8_t *, size_t, const char *, const uint8_t *, size_t, const uint8_t *,
+                            size_t);
+
+/* Marks the bridge destroyed or live in the session's store in place (a re-put would drop the sealed
+ * member keys with the roster). */
+static int set_destroyed(const char *uid, int destroyed) {
+    sqlite3 *sql = NULL;
+    sqlite3_stmt *st = NULL;
+    int ok;
+
+    if (sqlite3_open(fl_session_user_db()->path, &sql) != SQLITE_OK) {
+        sqlite3_close(sql);
+        return -1;
+    }
+    ok = sqlite3_prepare_v2(sql, "UPDATE account_bridges SET destroyed = ? WHERE uid = ?;", -1, &st, NULL) ==
+             SQLITE_OK &&
+         sqlite3_bind_int(st, 1, destroyed) == SQLITE_OK &&
+         sqlite3_bind_text(st, 2, uid, -1, SQLITE_TRANSIENT) == SQLITE_OK && sqlite3_step(st) == SQLITE_DONE &&
+         sqlite3_changes(sql) == 1;
+    sqlite3_finalize(st);
+    sqlite3_close(sql);
+    return ok ? 0 : -1;
+}
+
+static int verify_then_destroy(const char *uid, uint32_t generation, const uint8_t salt[16],
+                               const uint8_t bridge_public[32], int destroyed, const char *const *member_labels,
+                               const uint8_t *member_signing_pubs, size_t nmembers, const char *verifier_label,
+                               const uint8_t *challenge, size_t clen, const uint8_t *artifact, size_t alen) {
+    int st = s_real_verify(uid, generation, salt, bridge_public, destroyed, member_labels, member_signing_pubs,
+                           nmembers, verifier_label, challenge, clen, artifact, alen);
+
+    if (set_destroyed(s_destroy_after_verify->uid, 1) != 0)
+        return FL_KQ_BRIDGE_INVALID;
+    return st;
+}
+
+const fl_kq_driver_t *__wrap_fl_kq_driver_get_or_register(void) {
+    const fl_kq_driver_t *real = __real_fl_kq_driver_get_or_register();
+
+    if (!s_destroy_after_verify || !real)
+        return real;
+    s_patched = *real;
+    s_real_verify = real->bridge_verify;
+    s_patched.bridge_verify = verify_then_destroy;
+    return &s_patched;
+}
+
 static int test_bridge_su(void) {
     fl_user_bridge_t *b = calloc(1, sizeof *b);
     fl_kq_requirement_t need;
@@ -289,6 +346,14 @@ static int test_bridge_su(void) {
         goto fail;
     req.bridge_member = "Bob";
     req.bridge_member_password = s_bob_pw;
+    /* The proof verifies, but the bridge is gone by the time the session asks again: refused. */
+    s_destroy_after_verify = b;
+    rc = fl_session_switch_user(&req) != FL_RESULT_ACCES || strcmp(s_audit_last, "su-refused:bridge-changed") != 0 ||
+         strcmp(fl_session_current_user(), "Bob") != 0;
+    s_destroy_after_verify = NULL;
+    if (rc != 0 || set_destroyed(b->uid, 0) != 0)
+        goto fail;
+    rc = 1;
     if (fl_session_switch_user(&req) != FL_RESULT_OK || strcmp(fl_session_current_user(), "Ann") != 0)
         goto fail;
     /* Destroyed: no longer live, so Ann -> Bob across branches asks for Bob's own token. */

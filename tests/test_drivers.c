@@ -357,8 +357,9 @@ out:
     return rc;
 }
 
-/* Access policy and bridge proof (ABI 4): one-to-one over kq_access_requirement, kq_bridge_prove
- * and kq_bridge_verify. The factor comes back unchanged; a junk proof is refused, never accepted. */
+/* Access policy and bridge proof (ABI 4): one-to-one over kq_access_requirement, kq_bridge_prove,
+ * kq_bridge_verify and kq_bridge_connects. The factor comes back unchanged; a junk proof is refused,
+ * never accepted. */
 static int test_keyquorum_access_and_bridge_ops(void) {
     const fl_kq_driver_t *kq = fl_kq_driver_get();
     const char *members[] = {"Root.Flinstone.Bob", "Root.Alternative.Ann"};
@@ -369,7 +370,9 @@ static int test_keyquorum_access_and_bridge_ops(void) {
     size_t alen = 0;
     int idx = 7, grant = 7;
 
-    ASSERT(kq && kq->access_requirement && kq->bridge_prove && kq->bridge_verify);
+    ASSERT(kq && kq->access_requirement && kq->bridge_prove && kq->bridge_verify && kq->bridge_connects);
+    ASSERT(kq->bridge_connects(members[0], members[1], "Root.Flinstone.Bob.Kid", "Root.Alternative.Ann") == 1);
+    ASSERT(kq->bridge_connects(members[0], members[1], "Root.Third.Eve", "Root.Alternative.Ann") == 0);
     ASSERT(kq->access_requirement("Root.Flinstone.Bob", "Root.Flinstone.Bob", 0, NULL, 0, 0, &idx,
                                   &grant) == FL_KQ_ACCESS_NONE);
     ASSERT(idx == -1 && grant == 0);

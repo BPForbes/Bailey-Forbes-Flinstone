@@ -369,6 +369,11 @@ static int drv_bridge_verify(const char *uid, uint32_t generation, const uint8_t
                             member_signing_pubs, nmembers, verifier_label, challenge, clen,
                             artifact, alen);
 }
+
+static int drv_bridge_connects(const char *end_a, const char *end_b, const char *actor,
+                               const char *scope) {
+    return kq_bridge_connects(end_a, end_b, actor, scope);
+}
 #endif
 
 static const fl_driver_ops_t s_kq_lifecycle = {
@@ -427,6 +432,7 @@ static const fl_kq_driver_t s_kq_driver = {
     .access_requirement = drv_access_requirement,
     .bridge_prove = drv_bridge_prove,
     .bridge_verify = drv_bridge_verify,
+    .bridge_connects = drv_bridge_connects,
 #endif
 };
 

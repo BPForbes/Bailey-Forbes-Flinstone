@@ -1018,7 +1018,7 @@ test_heritage: userland/shell/common.o $(UTIL_SHELL_LINK_OBJS) $(FS_JAIL_CORE_OB
 	$(CXX) $(CXXFLAGS) $(TEST_SANITIZE) -o tests/test_heritage tests/test_heritage.o \
 	  userland/shell/common.o $(UTIL_SHELL_LINK_OBJS) $(FS_JAIL_CORE_OBJS) $(FS_JAIL_SUPPORT_OBJS) \
 	  kernel/core/mm/mem_domain.o $(MEM_ASM_OBJ) $(HISTORY_ASM_OBJ) $(UTIL_HISTORY_HOST_OBJS) \
-	  $(FS_JAIL_TEST_LIBS) -Wl,-z,noexecstack
+	  $(FS_JAIL_TEST_LIBS) -Wl,-z,noexecstack -Wl,--wrap=fl_kq_driver_get_or_register
 	./tests/test_heritage
 
 .PHONY: test_kq_checkpoint
@@ -1130,7 +1130,7 @@ test_kq_real_token: userland/shell/common.o $(UTIL_SHELL_LINK_OBJS) $(FS_JAIL_CO
 	$(CXX) $(CXXFLAGS) $(TEST_SANITIZE) -o tests/test_kq_real_token tests/test_kq_real_token.o \
 	  userland/shell/common.o $(UTIL_SHELL_LINK_OBJS) $(FS_JAIL_CORE_OBJS) $(FS_JAIL_SUPPORT_OBJS) \
 	  kernel/core/mm/mem_domain.o $(MEM_ASM_OBJ) $(HISTORY_ASM_OBJ) $(UTIL_HISTORY_HOST_OBJS) \
-	  $(FS_JAIL_TEST_LIBS) -Wl,-z,noexecstack
+	  $(FS_JAIL_TEST_LIBS) -Wl,-z,noexecstack -Wl,--wrap=fl_kq_driver_get_or_register
 	./scripts/kq_real_token_fixture.sh tests/test_kq_real_token
 
 .PHONY: test_kq_history_bundle

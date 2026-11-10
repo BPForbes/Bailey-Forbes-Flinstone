@@ -24,19 +24,38 @@ void cmd_wipe_password(char *buf, size_t buf_size) {
     mem_domain_secure_zero(buf, buf_size);
 }
 
-static int cmd_read_password_line(const char *prompt, char *buf, size_t buf_size) {
-    (void)prompt;
-    {
-        int read_size = (buf_size > (size_t)INT_MAX) ? INT_MAX : (int)buf_size;
-        if (!fgets(buf, read_size, stdin))
-            return -1;
-    }
-    {
-        size_t n = strlen(buf);
-        if (n > 0 && buf[n - 1] == '\n')
-            buf[n - 1] = '\0';
+/*
+ * One line from stdin into buf, its newline removed. The rest of a line longer than buf is read and
+ * discarded, so it never reaches the next reader (the shell would run it as a command); *overlong
+ * (when given) says so. A password keeps the prefix that fits, as before.
+ */
+static int cmd_read_line(char *buf, size_t buf_size, int *overlong) {
+    int read_size = (buf_size > (size_t)INT_MAX) ? INT_MAX : (int)buf_size;
+    size_t n;
+
+    if (overlong)
+        *overlong = 0;
+    if (!fgets(buf, read_size, stdin))
+        return -1;
+    n = strlen(buf);
+    if (n > 0 && buf[n - 1] == '\n') {
+        buf[n - 1] = '\0';
+    } else if (n + 1 == (size_t)read_size) {
+        int c = getc(stdin);
+
+        if (c != '\n' && c != EOF) {
+            if (overlong)
+                *overlong = 1;
+            while ((c = getc(stdin)) != '\n' && c != EOF)
+                ;
+        }
     }
     return 0;
+}
+
+static int cmd_read_password_line(const char *prompt, char *buf, size_t buf_size) {
+    (void)prompt;
+    return cmd_read_line(buf, buf_size, NULL);
 }
 
 #if defined(__unix__) || defined(__APPLE__)
@@ -169,7 +188,7 @@ int cmd_switch_user(const char *cmd, const char *target, int sudo) {
     memset(&req, 0, sizeof req);
     req.target = target;
     req.sudo = sudo;
-    pw[0] = member_pw[0] = '\0';
+    pw[0] = member[0] = member_pw[0] = '\0';
     /* Which factor to collect is KeyQuorum's answer; the session asks again and decides. */
     need = fl_kq_unlock_requirement(fl_session_current_user(), target, sudo);
     root = fl_user_db_find_by_key(db, FL_HERITAGE_ROOT_KEY);
@@ -178,7 +197,8 @@ int cmd_switch_user(const char *cmd, const char *target, int sudo) {
     /* A password-only Root keeps the old sudo -i: no prompt for an elevated account. */
     if (sudo && fl_session_is_elevated_account() && root && root->auth_mode != FL_USER_AUTH_PASSWORD_KQST)
         ask_password = 0;
-    if (ask_password && need.factor != FL_KQ_ACCESS_REFUSED) {
+    /* A refused switch asks for the password too: whether it is refused, and why, is not shown first. */
+    if (ask_password) {
         if (sudo)
             snprintf(prompt, sizeof prompt, "[sudo -i] Root password: ");
         else
@@ -190,37 +210,47 @@ int cmd_switch_user(const char *cmd, const char *target, int sudo) {
         }
         req.password = pw;
     }
-    if (need.factor == FL_KQ_ACCESS_PASSWORD_BRIDGE_KQST) {
+    /*
+     * A bridge member is asked for only once the password is verified (the target's, or Root's for
+     * sudo -i), so the prompt says nothing about a bridge to someone without it. Otherwise the session
+     * refuses on the password and audits it.
+     */
+    if (need.factor == FL_KQ_ACCESS_PASSWORD_BRIDGE_KQST && !need.needs_parent_grant && req.password &&
+        fl_session_verify_account_password(sudo ? (root ? root->name : "") : target, pw)) {
         /* A member of the bridge presents their slot token: the caller, when a member, else named. */
         const char *self = fl_session_current_user();
         const fl_user_record_t *me = fl_user_db_find(db, self);
+        int overlong = 0;
 
         if (me && bridge_has_member(need.bridge_uid, me->key_id)) {
             snprintf(member, sizeof member, "%s", me->name);
         } else {
-            char line[FL_USER_NAME_MAX + 2];
-
             fputs("Bridge member account: ", stderr);
             fflush(stderr);
-            if (!fgets(line, sizeof line, stdin))
-                line[0] = '\0';
-            line[strcspn(line, "\r\n")] = '\0';
-            snprintf(member, sizeof member, "%s", line);
+            if (cmd_read_line(member, sizeof member, &overlong) != 0)
+                member[0] = '\0';
+            member[strcspn(member, "\r\n")] = '\0';
         }
-        snprintf(prompt, sizeof prompt, "Password for %s (bridge slot token): ", member);
-        if (cmd_read_password(prompt, member_pw, sizeof member_pw) != 0) {
-            cmd_wipe_password(pw, sizeof pw);
-            cmd_wipe_password(member_pw, sizeof member_pw);
-            fprintf(stderr, "%s: password read failed\n", cmd);
-            return 1;
+        if (overlong || !member[0]) {
+            /* An over-long or empty name names nobody: the session refuses ("bridge-member"). */
+            member[0] = '\0';
+        } else {
+            snprintf(prompt, sizeof prompt, "Password for %s (bridge slot token): ", member);
+            if (cmd_read_password(prompt, member_pw, sizeof member_pw) != 0) {
+                cmd_wipe_password(pw, sizeof pw);
+                cmd_wipe_password(member_pw, sizeof member_pw);
+                fprintf(stderr, "%s: password read failed\n", cmd);
+                return 1;
+            }
+            req.bridge_member = member;
+            req.bridge_member_password = member_pw;
         }
-        req.bridge_member = member;
-        req.bridge_member_password = member_pw;
     }
     rc = fl_session_switch_user(&req);
     cmd_wipe_password(pw, sizeof pw);
     cmd_wipe_password(member_pw, sizeof member_pw);
     if (rc != FL_RESULT_OK) {
+        /* One message for every refusal; the reason is in the audit only. */
         fprintf(stderr, "%s: authentication failed\n", cmd);
         return 1;
     }

@@ -122,10 +122,16 @@ fl_result_t fl_user_db_bridge_put_sealed_key(const fl_user_db_t *db, const char 
                                              const unsigned char wrap_salt[FL_USER_BRIDGE_SALT_LEN]);
 /**
  * The bridge uid's current facts as the store holds them now (destroyed included, so the caller
- * passes them to the verifier unchanged). NOENT for an unknown or malformed row.
+ * passes them to the verifier unchanged). NOENT for an unknown or malformed row; ERR when the store
+ * cannot be read.
  */
 fl_result_t fl_user_db_bridge_get(const fl_user_db_t *db, const char *uid, fl_user_bridge_t *out);
-/** Every live bridge (see above) into out[0..cap), in uid order; *count is how many. */
+/**
+ * Every live bridge (see above) into out[0..cap), in uid order; *count is how many. Never a partial
+ * list: a row with destroyed = 0 that is malformed or cannot be read, or any failed read, is ERR, and
+ * more live rows than cap is NOMEM (*count 0 on both). Only a store whose schema has no
+ * account_bridges table (written before the bridge tables) is OK with no bridge.
+ */
 fl_result_t fl_user_db_bridges_live(const fl_user_db_t *db, fl_user_bridge_t *out, size_t cap,
                                     size_t *count);
 /**
