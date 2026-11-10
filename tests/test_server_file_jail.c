@@ -622,8 +622,8 @@ static int test_permit_writes_beside_the_checked_path(void)
     /* Two accounts under the supervisor, with passwords drawn at run time. */
     snprintf(pw_mya, sizeof(pw_mya), "m%08x", (unsigned)getpid() * 2654435761u);
     snprintf(pw_steve, sizeof(pw_steve), "s%08x", (unsigned)getpid() * 40503u + 7u);
-    if (fl_user_db_add_user_under(db, "Root.Flinstone", "Mya", pw_mya, 4000, 0, 0) != FL_RESULT_OK ||
-        fl_user_db_add_user_under(db, "Root.Flinstone", "Steve", pw_steve, 4001, 0, 0) != FL_RESULT_OK ||
+    if (fl_session_add_user_under("Root.Flinstone", "Mya", pw_mya, 4000, 0, 0) != FL_RESULT_OK ||
+        fl_session_add_user_under("Root.Flinstone", "Steve", pw_steve, 4001, 0, 0) != FL_RESULT_OK ||
         fl_user_db_open_key(db, "Mya", pw_mya, mya_sign) != FL_RESULT_OK)
         goto done;
     /* A real container for doc.txt, made by Mya for Steve, with a head revision. */

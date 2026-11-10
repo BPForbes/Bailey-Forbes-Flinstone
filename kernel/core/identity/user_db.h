@@ -67,6 +67,8 @@ typedef struct fl_user_db {
 
 /** Sets how an account logs in (in memory; fl_user_db_save writes it). NOENT for an unknown account. */
 fl_result_t fl_user_db_set_auth_mode(fl_user_db_t *db, const char *name, int auth_mode);
+/** Sets the in-memory elevation mark (fl_user_db_save writes it). NOENT for an unknown account. */
+fl_result_t fl_user_db_set_elevated(fl_user_db_t *db, const char *name, int is_elevated);
 /**
  * The KQST file path paired with key_id in the store's account_keys table (read at call time, so
  * a path never sits in the record). NOENT when the account has no row or the row has no path.
@@ -258,6 +260,9 @@ void        fl_user_db_forget_key(fl_user_db_t *db, const char *name);
  * runs the slow key derivation outside it (the session hands the key service such a copy at login).
  */
 fl_result_t fl_user_db_open_key_record(const fl_user_record_t *account, const char *password,
+                                      unsigned char *secret);
+/** The box-key open from a record copy, same as fl_user_db_open_key_record. */
+fl_result_t fl_user_db_open_box_record(const fl_user_record_t *account, const char *password,
                                       unsigned char *secret);
 fl_result_t fl_user_db_open_key(const fl_user_db_t *db, const char *name, const char *password,
                                 unsigned char *secret);

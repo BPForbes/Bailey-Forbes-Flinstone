@@ -778,6 +778,141 @@ fl_result_t fl_session_logout(void) {
     return FL_RESULT_OK;
 }
 
+static void session_lock_db(void) {
+    fl_session_init();
+    pthread_mutex_lock(&s_session_mu);
+}
+
+static int session_db_ready_locked(void) {
+    return s_db_ready && s_db.loaded;
+}
+
+static void session_unlock_db(void) {
+    pthread_mutex_unlock(&s_session_mu);
+}
+
+int fl_session_users_loaded(void) {
+    int loaded;
+
+    session_lock_db();
+    loaded = session_db_ready_locked();
+    session_unlock_db();
+    return loaded;
+}
+
+uint32_t fl_session_next_uid(void) {
+    uint32_t uid;
+
+    session_lock_db();
+    uid = fl_user_db_next_uid(&s_db);
+    session_unlock_db();
+    return uid;
+}
+
+fl_result_t fl_session_add_user(const char *name, const char *password, uint32_t uid, int is_elevated) {
+    fl_result_t rc;
+
+    session_lock_db();
+    rc = session_db_ready_locked() ? fl_user_db_add_user(&s_db, name, password, uid, is_elevated)
+                                   : FL_RESULT_ERR;
+    session_unlock_db();
+    return rc;
+}
+
+fl_result_t fl_session_add_user_under(const char *creator_key, const char *name, const char *password,
+                                      uint32_t uid, int is_elevated, int64_t created_at) {
+    fl_result_t rc;
+
+    session_lock_db();
+    rc = session_db_ready_locked()
+             ? fl_user_db_add_user_under(&s_db, creator_key, name, password, uid, is_elevated, created_at)
+             : FL_RESULT_ERR;
+    session_unlock_db();
+    return rc;
+}
+
+fl_result_t fl_session_remove_user(const char *name) {
+    fl_result_t rc;
+
+    session_lock_db();
+    rc = session_db_ready_locked() ? fl_user_db_remove_user(&s_db, name) : FL_RESULT_ERR;
+    session_unlock_db();
+    return rc;
+}
+
+fl_result_t fl_session_set_password(const char *name, const char *password) {
+    fl_result_t rc;
+
+    session_lock_db();
+    rc = session_db_ready_locked() ? fl_user_db_set_password(&s_db, name, password) : FL_RESULT_ERR;
+    session_unlock_db();
+    return rc;
+}
+
+fl_result_t fl_session_change_password(const char *name, const char *current, const char *password) {
+    fl_result_t rc;
+
+    session_lock_db();
+    rc = session_db_ready_locked() ? fl_user_db_change_password(&s_db, name, current, password)
+                                   : FL_RESULT_ERR;
+    session_unlock_db();
+    return rc;
+}
+
+fl_result_t fl_session_set_auth_mode(const char *name, int auth_mode) {
+    fl_result_t rc;
+
+    session_lock_db();
+    rc = session_db_ready_locked() ? fl_user_db_set_auth_mode(&s_db, name, auth_mode) : FL_RESULT_ERR;
+    session_unlock_db();
+    return rc;
+}
+
+fl_result_t fl_session_set_elevated(const char *name, int is_elevated) {
+    fl_result_t rc;
+
+    session_lock_db();
+    rc = session_db_ready_locked() ? fl_user_db_set_elevated(&s_db, name, is_elevated) : FL_RESULT_ERR;
+    session_unlock_db();
+    return rc;
+}
+
+fl_result_t fl_session_ensure_key(const char *name, const char *password, int *created) {
+    fl_result_t rc;
+
+    session_lock_db();
+    rc = session_db_ready_locked() ? fl_user_db_ensure_key(&s_db, name, password, created) : FL_RESULT_ERR;
+    session_unlock_db();
+    return rc;
+}
+
+void fl_session_forget_created(const char *name, int created) {
+    session_lock_db();
+    if (session_db_ready_locked())
+        fl_user_db_forget_created(&s_db, name, created);
+    session_unlock_db();
+}
+
+void fl_session_forget_key(const char *name) {
+    session_lock_db();
+    if (session_db_ready_locked())
+        fl_user_db_forget_key(&s_db, name);
+    session_unlock_db();
+}
+
+fl_result_t fl_session_reload_users(void) {
+    fl_result_t rc;
+
+    session_lock_db();
+    if (!s_db.path[0])
+        rc = FL_RESULT_ERR;
+    else
+        rc = fl_user_db_load(&s_db, s_db.path);
+    s_db_ready = (rc == FL_RESULT_OK && s_db.loaded) ? 1 : 0;
+    session_unlock_db();
+    return rc;
+}
+
 fl_user_db_t *fl_session_user_db_mut(void) {
     fl_session_init();
     return &s_db;

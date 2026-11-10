@@ -304,8 +304,7 @@ out:
 int fl_kq_open_account_keys(const char *user, const char *password, const char *kqst_path_or_null,
                             uint8_t signing_secret_out[32], uint8_t encryption_secret_out[32]) {
     const fl_kq_driver_t *drv;
-    fl_user_db_t *db;
-    const fl_user_record_t *u;
+    const fl_user_db_t *db;
     fl_user_record_t snapshot;
     char path[512];
     unsigned char device_id[16], signing_pub[32], encryption_pub[32];
@@ -322,13 +321,11 @@ int fl_kq_open_account_keys(const char *user, const char *password, const char *
     drv = fl_kq_driver_get_or_register();
     if (!drv || !drv->slot_open)
         return FL_KQ_ACCOUNT_INVALID;
-    db = fl_session_user_db_mut();
+    if (fl_session_snapshot_account(user, &snapshot) != FL_RESULT_OK)
+        return FL_KQ_ACCOUNT_INVALID;
+    db = fl_session_user_db();
     if (!db)
         return FL_KQ_ACCOUNT_INVALID;
-    u = fl_user_db_find(db, user);
-    if (!u)
-        return FL_KQ_ACCOUNT_INVALID;
-    snapshot = *u;
     if (kqst_path_or_null && kqst_path_or_null[0]) {
         if (strlen(kqst_path_or_null) >= sizeof path)
             return FL_KQ_ACCOUNT_INVALID;

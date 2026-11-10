@@ -263,8 +263,8 @@ int cmd_switch_user(const char *cmd, const char *target, int sudo) {
 fl_result_t cmd_open_account_keys(const char *why, unsigned char *signing, unsigned char *box) {
     char pw[128];
     char prompt[96];
-    fl_user_db_t *db = fl_session_user_db_mut();
     const char *name = fl_session_current_user();
+    fl_user_record_t rec;
     int created = 0;
     fl_result_t rc;
 
@@ -273,16 +273,18 @@ fl_result_t cmd_open_account_keys(const char *why, unsigned char *signing, unsig
         cmd_wipe_password(pw, sizeof(pw));
         return FL_RESULT_EOF;
     }
-    rc = fl_user_db_ensure_key(db, name, pw, &created);
+    rc = fl_session_ensure_key(name, pw, &created);
     if (rc == FL_RESULT_OK && created && fl_session_save_users() != FL_RESULT_OK) {
         /* A key the store does not hold must not sign anything: drop what was just made. */
-        fl_user_db_forget_created(db, name, created);
+        fl_session_forget_created(name, created);
         rc = FL_RESULT_ERR;
     }
+    if (rc == FL_RESULT_OK)
+        rc = fl_session_snapshot_account(name, &rec);
     if (rc == FL_RESULT_OK && signing)
-        rc = fl_user_db_open_key(db, name, pw, signing);
+        rc = fl_user_db_open_key_record(&rec, pw, signing);
     if (rc == FL_RESULT_OK && box)
-        rc = fl_user_db_open_box(db, name, pw, box);
+        rc = fl_user_db_open_box_record(&rec, pw, box);
     cmd_wipe_password(pw, sizeof(pw));
     return rc;
 }

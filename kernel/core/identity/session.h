@@ -143,4 +143,27 @@ fl_user_db_t *fl_session_user_db_mut(void);
 const fl_user_db_t *fl_session_user_db(void);
 fl_result_t fl_session_save_users(void);
 
+/** 1 when the session account store is loaded. */
+int         fl_session_users_loaded(void);
+/** Next free uid in the loaded session store. */
+uint32_t    fl_session_next_uid(void);
+/**
+ * The user_db mutators and the disk reload, run with the session mutex held so a switch that
+ * already holds a user-record pointer cannot race them. The mutex is taken before any SQLite
+ * those calls open. A store that is not loaded returns FL_RESULT_ERR (reload returns the load
+ * result and clears the session when the file is bad).
+ */
+fl_result_t fl_session_add_user(const char *name, const char *password, uint32_t uid, int is_elevated);
+fl_result_t fl_session_add_user_under(const char *creator_key, const char *name, const char *password,
+                                      uint32_t uid, int is_elevated, int64_t created_at);
+fl_result_t fl_session_remove_user(const char *name);
+fl_result_t fl_session_set_password(const char *name, const char *password);
+fl_result_t fl_session_change_password(const char *name, const char *current, const char *password);
+fl_result_t fl_session_set_auth_mode(const char *name, int auth_mode);
+fl_result_t fl_session_set_elevated(const char *name, int is_elevated);
+fl_result_t fl_session_ensure_key(const char *name, const char *password, int *created);
+void        fl_session_forget_created(const char *name, int created);
+void        fl_session_forget_key(const char *name);
+fl_result_t fl_session_reload_users(void);
+
 #endif /* FL_SESSION_H */

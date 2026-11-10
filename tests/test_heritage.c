@@ -16,8 +16,11 @@
 #include <dirent.h>
 #include <limits.h>
 #include <sqlite3.h>
+#include <pthread.h>
+#include <sched.h>
 #include <stdio.h>
 #include <stdlib.h>
+#include <stdatomic.h>
 #include <string.h>
 #include <sys/stat.h>
 #include <sys/wait.h>
@@ -1179,7 +1182,7 @@ static int test_jail_homes(const char *jail_parent) {
 
     fl_session_init();
     db = fl_session_user_db_mut();
-    ASSERT(fl_user_db_add_user_under(db, "Root.Flinstone", "Bob", "pw", 3000, 0, 0) == FL_RESULT_OK);
+    ASSERT(fl_session_add_user_under("Root.Flinstone", "Bob", "pw", 3000, 0, 0) == FL_RESULT_OK);
     ASSERT(fl_session_save_users() == FL_RESULT_OK);
 
     ASSERT(fs_jail_account_home("Root.Flinstone.Bob", home, sizeof home) == 0);
@@ -1458,22 +1461,9 @@ static fl_result_t switch_to(const char *target, int sudo, const char *pw, const
 }
 
 /* The in-memory elevation mark, for the sudo -i waiver recheck. Root's uid stays 0. */
-static void set_named_elevation(const char *name, int elevated) {
-    fl_user_db_t *db = fl_session_user_db_mut();
-    size_t i;
+static void drop_root_elevation(void) { (void)fl_session_set_elevated("Root", 0); }
 
-    for (i = 0; db && i < db->count; i++) {
-        if (strcmp(db->users[i].name, name) == 0)
-            db->users[i].is_elevated = elevated ? 1 : 0;
-    }
-}
-
-static void drop_root_elevation(void) { set_named_elevation("Root", 0); }
-
-static fl_result_t restore_root_elevation(void) {
-    set_named_elevation("Root", 1);
-    return fl_session_is_elevated_account() ? FL_RESULT_OK : FL_RESULT_ERR;
-}
+static fl_result_t restore_root_elevation(void) { return fl_session_set_elevated("Root", 1); }
 
 /* FL-12: su and sudo -i commit only through fl_session_switch_user, which asks KeyQuorum for the
  * factor itself. Password-only accounts keep their behaviour where the rule asks for a token they do
@@ -1500,11 +1490,11 @@ static int test_session_switch(void) {
     ASSERT(switch_to("Alternative", 0, "alternative", NULL, NULL) == FL_RESULT_OK);
     ASSERT(!strcmp(s_audit, "su-kqst-legacy:password-only account"));
     /* To a KQST-mode account: the password alone is refused (no token is enrolled for Bob). */
-    ASSERT(fl_user_db_set_auth_mode(db, "Bob", FL_USER_AUTH_PASSWORD_KQST) == FL_RESULT_OK);
+    ASSERT(fl_session_set_auth_mode("Bob", FL_USER_AUTH_PASSWORD_KQST) == FL_RESULT_OK);
     ASSERT(switch_to("Bob", 0, "pw", NULL, NULL) == FL_RESULT_ACCES);
     ASSERT(!strcmp(s_audit, "su-refused:kqst"));
     ASSERT(!strcmp(fl_session_current_user(), "Alternative"));
-    ASSERT(fl_user_db_set_auth_mode(db, "Bob", FL_USER_AUTH_PASSWORD) == FL_RESULT_OK);
+    ASSERT(fl_session_set_auth_mode("Bob", FL_USER_AUTH_PASSWORD) == FL_RESULT_OK);
     /* A live private bridge: the target's password and a member's proof, which needs a token. */
     make_bridge(&b, "eeee0000eeee0000eeee0000eeee0000", "Root.Flinstone.Bob", "Root.Alternative");
     ASSERT(fl_user_db_bridge_put(db, &b) == FL_RESULT_OK);
@@ -1536,13 +1526,13 @@ static int test_session_switch(void) {
     ASSERT(!fl_session_sudo_needs_root());
     ASSERT(fl_session_sudo_authenticate("flinstone") == FL_RESULT_OK);
     ASSERT(fl_session_sudo_authenticate("root") == FL_RESULT_ACCES);
-    ASSERT(fl_user_db_set_auth_mode(db, "Root", FL_USER_AUTH_PASSWORD_KQST) == FL_RESULT_OK);
+    ASSERT(fl_session_set_auth_mode("Root", FL_USER_AUTH_PASSWORD_KQST) == FL_RESULT_OK);
     ASSERT(fl_session_sudo_needs_root());
     ASSERT(fl_session_sudo_authenticate("flinstone") == FL_RESULT_ACCES);
     ASSERT(fl_session_sudo_authenticate("root") == FL_RESULT_ACCES); /* Root has no token here */
     ASSERT(!strcmp(s_audit, "sudo-refused:kqst"));
     ASSERT(switch_to("Root", 1, "root", NULL, NULL) == FL_RESULT_ACCES);
-    ASSERT(fl_user_db_set_auth_mode(db, "Root", FL_USER_AUTH_PASSWORD) == FL_RESULT_OK);
+    ASSERT(fl_session_set_auth_mode("Root", FL_USER_AUTH_PASSWORD) == FL_RESULT_OK);
     ASSERT(!strcmp(fl_session_current_user(), "Flinstone"));
     fl_session_set_audit_hook(NULL);
     return 0;
@@ -1681,7 +1671,7 @@ static int test_switch_refusals(void) {
                  kqst);
         ASSERT(exec_on_session_db(stmt) == 0);
     }
-    ASSERT(fl_user_db_set_auth_mode(db, "Bob", FL_USER_AUTH_PASSWORD_KQST) == FL_RESULT_OK);
+    ASSERT(fl_session_set_auth_mode("Bob", FL_USER_AUTH_PASSWORD_KQST) == FL_RESULT_OK);
     ASSERT(switch_to("Bob", 0, "pw", NULL, NULL) == FL_RESULT_ACCES);
     ASSERT(!strcmp(s_audit, "su-refused:kqst"));
     fp = fopen(kqst, "wb");
@@ -1690,7 +1680,7 @@ static int test_switch_refusals(void) {
     ASSERT(switch_to("Bob", 0, "pw", NULL, NULL) == FL_RESULT_ACCES);
     ASSERT(!strcmp(s_audit, "su-refused:kqst"));
     ASSERT(!strcmp(fl_session_current_user(), "Alternative"));
-    ASSERT(fl_user_db_set_auth_mode(db, "Bob", FL_USER_AUTH_PASSWORD) == FL_RESULT_OK);
+    ASSERT(fl_session_set_auth_mode("Bob", FL_USER_AUTH_PASSWORD) == FL_RESULT_OK);
     ASSERT(exec_on_session_db("DELETE FROM account_keys WHERE label='Root.Flinstone.Bob';") == 0);
     unlink(kqst);
     ASSERT(fl_session_set_user("Flinstone") == FL_RESULT_OK);
@@ -1773,6 +1763,131 @@ static int test_switch_bridge_recheck(void) {
     return 0;
 }
 
+/* A second thread deletes or changes a password while a switch is in the pre-lock window or in the
+ * locked stretch between the recheck and the commit. The mutation goes through the session lock. */
+static pthread_t s_mut_thread;
+static pthread_barrier_t s_mut_go, s_mut_done;
+static atomic_int s_mut_phase;
+static int s_mut_rc = -1;
+static int s_mut_op; /* 0 delete, 1 set password */
+static char s_mut_user[FL_USER_NAME_MAX];
+static char s_mut_newpw[32];
+static int s_during_phase = -1;
+static int s_during_present = -1;
+static int s_during_oldpw = -1;
+
+static void *session_mutator(void *arg) {
+    (void)arg;
+    pthread_barrier_wait(&s_mut_go);
+    atomic_store(&s_mut_phase, 1);
+    if (s_mut_op)
+        s_mut_rc = fl_session_set_password(s_mut_user, s_mut_newpw);
+    else
+        s_mut_rc = fl_session_remove_user(s_mut_user);
+    atomic_store(&s_mut_phase, 2);
+    pthread_barrier_wait(&s_mut_done);
+    return NULL;
+}
+
+static int start_mutator(const char *user, int op, const char *newpw) {
+    snprintf(s_mut_user, sizeof s_mut_user, "%s", user);
+    snprintf(s_mut_newpw, sizeof s_mut_newpw, "%s", newpw ? newpw : "");
+    s_mut_op = op;
+    s_mut_rc = -1;
+    atomic_store(&s_mut_phase, 0);
+    s_during_phase = s_during_present = s_during_oldpw = -1;
+    if (pthread_barrier_init(&s_mut_go, NULL, 2) != 0 || pthread_barrier_init(&s_mut_done, NULL, 2) != 0)
+        return -1;
+    if (pthread_create(&s_mut_thread, NULL, session_mutator, NULL) != 0)
+        return -1;
+    return 0;
+}
+
+static void finish_mutator(int wait_done) {
+    if (wait_done)
+        pthread_barrier_wait(&s_mut_done);
+    pthread_join(s_mut_thread, NULL);
+    pthread_barrier_destroy(&s_mut_go);
+    pthread_barrier_destroy(&s_mut_done);
+    fl_session_test_set_switch_pre_lock(NULL);
+    fl_session_test_set_switch_pre_commit(NULL);
+}
+
+static void pre_lock_finish_mutator(void) {
+    pthread_barrier_wait(&s_mut_go);
+    pthread_barrier_wait(&s_mut_done);
+}
+
+static void pre_commit_release_mutator(void) {
+    const fl_user_db_t *db = fl_session_user_db();
+
+    pthread_barrier_wait(&s_mut_go);
+    while (atomic_load(&s_mut_phase) < 1)
+        sched_yield();
+    s_during_phase = atomic_load(&s_mut_phase);
+    s_during_present = fl_user_db_find(db, s_mut_user) != NULL;
+    s_during_oldpw = fl_user_db_verify_password(db, s_mut_user, "pw");
+}
+
+static int test_switch_mutation_barriers(void) {
+    const fl_user_db_t *db;
+
+    fl_session_set_audit_hook(capture_audit);
+    ASSERT(fl_session_set_user("Flinstone") == FL_RESULT_OK);
+    ASSERT(fl_session_add_user_under("Root.Flinstone", "Pax", "pw", 3200, 0, 0) == FL_RESULT_OK);
+    ASSERT(fl_session_add_user_under("Root.Flinstone", "Qin", "pw", 3201, 0, 0) == FL_RESULT_OK);
+    ASSERT(fl_session_add_user_under("Root.Flinstone", "Rex", "pw", 3202, 0, 0) == FL_RESULT_OK);
+    ASSERT(fl_session_add_user_under("Root.Flinstone", "Sue", "pw", 3203, 0, 0) == FL_RESULT_OK);
+
+    /* Before the recheck: the mutation finishes, then the reservation sees it and refuses. */
+    ASSERT(start_mutator("Pax", 1, "pw2") == 0);
+    fl_session_test_set_switch_pre_lock(pre_lock_finish_mutator);
+    ASSERT(switch_to("Pax", 0, "pw", NULL, NULL) == FL_RESULT_ACCES);
+    finish_mutator(0);
+    ASSERT(s_mut_rc == FL_RESULT_OK);
+    ASSERT(!strcmp(s_audit, "su-refused:changed"));
+    ASSERT(!strcmp(fl_session_current_user(), "Flinstone"));
+    db = fl_session_user_db();
+    ASSERT(fl_user_db_verify_password(db, "Pax", "pw2"));
+    ASSERT(!fl_user_db_verify_password(db, "Pax", "pw"));
+
+    ASSERT(start_mutator("Qin", 0, NULL) == 0);
+    fl_session_test_set_switch_pre_lock(pre_lock_finish_mutator);
+    ASSERT(switch_to("Qin", 0, "pw", NULL, NULL) == FL_RESULT_ACCES);
+    finish_mutator(0);
+    ASSERT(s_mut_rc == FL_RESULT_OK);
+    ASSERT(!strcmp(s_audit, "su-refused:changed"));
+    ASSERT(!strcmp(fl_session_current_user(), "Flinstone"));
+    ASSERT(fl_user_db_find(fl_session_user_db(), "Qin") == NULL);
+
+    /* Between the recheck and the commit: the mutator blocks on the session mutex until the
+     * switch releases it, so the rechecked record is still the one that commits. */
+    ASSERT(start_mutator("Rex", 1, "pw2") == 0);
+    fl_session_test_set_switch_pre_commit(pre_commit_release_mutator);
+    ASSERT(switch_to("Rex", 0, "pw", NULL, NULL) == FL_RESULT_OK);
+    finish_mutator(1);
+    ASSERT(s_mut_rc == FL_RESULT_OK);
+    ASSERT(s_during_phase == 1 && s_during_present == 1 && s_during_oldpw == 1);
+    ASSERT(!strcmp(fl_session_current_user(), "Rex"));
+    db = fl_session_user_db();
+    ASSERT(fl_user_db_verify_password(db, "Rex", "pw2"));
+    ASSERT(!fl_user_db_verify_password(db, "Rex", "pw"));
+    ASSERT(fl_session_set_user("Flinstone") == FL_RESULT_OK);
+
+    ASSERT(start_mutator("Sue", 0, NULL) == 0);
+    fl_session_test_set_switch_pre_commit(pre_commit_release_mutator);
+    ASSERT(switch_to("Sue", 0, "pw", NULL, NULL) == FL_RESULT_OK);
+    finish_mutator(1);
+    ASSERT(s_mut_rc == FL_RESULT_OK);
+    ASSERT(s_during_phase == 1 && s_during_present == 1);
+    ASSERT(!strcmp(fl_session_current_user(), "Sue"));
+    ASSERT(fl_user_db_find(fl_session_user_db(), "Sue") == NULL);
+    ASSERT(fl_session_set_user("Flinstone") == FL_RESULT_OK);
+
+    fl_session_set_audit_hook(NULL);
+    return 0;
+}
+
 int main(void) {
     char db_path[256];
     char tmpl[] = "/tmp/fl_heritage_jailXXXXXX";
@@ -1814,6 +1929,7 @@ int main(void) {
     RUN(test_switch_refusals);
     RUN(test_restore_user);
     RUN(test_switch_bridge_recheck);
+    RUN(test_switch_mutation_barriers);
 
     if (chdir("/tmp") != 0)
         rc = 1;

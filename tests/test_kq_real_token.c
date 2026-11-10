@@ -115,10 +115,10 @@ static int set_up_accounts(void) {
     fl_user_db_t *db = fl_session_user_db_mut();
 
     ASSERT(db);
-    ASSERT(fl_user_db_add_user_under(db, "Root.Flinstone", "Bob", s_bob_pw, 3001, 0, 0) == FL_RESULT_OK);
-    ASSERT(fl_user_db_add_user_under(db, "Root.Alternative", "Ann", s_ann_pw, 3002, 0, 0) == FL_RESULT_OK);
-    ASSERT(fl_user_db_set_auth_mode(db, "Bob", FL_USER_AUTH_PASSWORD_KQST) == FL_RESULT_OK);
-    ASSERT(fl_user_db_set_auth_mode(db, "Ann", FL_USER_AUTH_PASSWORD_KQST) == FL_RESULT_OK);
+    ASSERT(fl_session_add_user_under("Root.Flinstone", "Bob", s_bob_pw, 3001, 0, 0) == FL_RESULT_OK);
+    ASSERT(fl_session_add_user_under("Root.Alternative", "Ann", s_ann_pw, 3002, 0, 0) == FL_RESULT_OK);
+    ASSERT(fl_session_set_auth_mode("Bob", FL_USER_AUTH_PASSWORD_KQST) == FL_RESULT_OK);
+    ASSERT(fl_session_set_auth_mode("Ann", FL_USER_AUTH_PASSWORD_KQST) == FL_RESULT_OK);
     ASSERT(fl_session_save_users() == FL_RESULT_OK);
     ASSERT(register_pairing("Root.Flinstone.Bob", env("FL_RT_BOB_KQST"), env("FL_RT_BOB_DEVICE"),
                             env("FL_RT_BOB_SIG"), env("FL_RT_BOB_ENC")) == 0);

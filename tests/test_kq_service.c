@@ -129,7 +129,7 @@ static int test_kqst_login_commits_only_after_token_open(void) {
 
     ASSERT(db && root);
     ASSERT(fl_session_login("Root", "root") == FL_RESULT_OK); /* known session before the KQST attempt */
-    ASSERT(fl_user_db_set_auth_mode(db, "Flinstone", FL_USER_AUTH_PASSWORD_KQST) == FL_RESULT_OK);
+    ASSERT(fl_session_set_auth_mode("Flinstone", FL_USER_AUTH_PASSWORD_KQST) == FL_RESULT_OK);
     ASSERT(sem_init(&s_kqst_gate_entered, 0, 0) == 0);
     ASSERT(sem_init(&s_kqst_gate_release, 0, 0) == 0);
     s_observer_saw[0] = '\0';
@@ -145,7 +145,7 @@ static int test_kqst_login_commits_only_after_token_open(void) {
     ASSERT(s_observer_elev == 1);                 /* Root's elevation, not Flinstone's */
     ASSERT(strcmp(fl_session_current_user(), "Root") == 0);
     ASSERT(fl_session_logout() == FL_RESULT_OK);
-    ASSERT(fl_user_db_set_auth_mode(db, "Flinstone", FL_USER_AUTH_PASSWORD) == FL_RESULT_OK);
+    ASSERT(fl_session_set_auth_mode("Flinstone", FL_USER_AUTH_PASSWORD) == FL_RESULT_OK);
     return 0;
 }
 
@@ -153,11 +153,11 @@ static int test_kqst_login_commits_only_after_token_open(void) {
 static int test_a_kqst_account_cannot_log_in_by_password_alone(void) {
     fl_user_db_t *db = fl_session_user_db_mut();
 
-    ASSERT(db && fl_user_db_set_auth_mode(db, "Flinstone", FL_USER_AUTH_PASSWORD_KQST) == FL_RESULT_OK);
+    ASSERT(db && fl_session_set_auth_mode("Flinstone", FL_USER_AUTH_PASSWORD_KQST) == FL_RESULT_OK);
     ASSERT(fl_session_login("Flinstone", "flinstone") == FL_RESULT_ACCES);
     ASSERT(fl_kq_service_online_count() == 0);
     ASSERT(fl_session_login("Flinstone", "wrong") == FL_RESULT_ACCES);
-    ASSERT(fl_user_db_set_auth_mode(db, "Flinstone", FL_USER_AUTH_PASSWORD) == FL_RESULT_OK);
+    ASSERT(fl_session_set_auth_mode("Flinstone", FL_USER_AUTH_PASSWORD) == FL_RESULT_OK);
     ASSERT(fl_session_login("Flinstone", "flinstone") == FL_RESULT_OK);
     ASSERT(fl_session_logout() == FL_RESULT_OK);
     return 0;
@@ -180,7 +180,7 @@ static int test_kqst_open_refusal_matrix(void) {
     ASSERT(db);
     flin = account("Flinstone");
     ASSERT(flin);
-    ASSERT(fl_user_db_set_auth_mode(db, "Flinstone", FL_USER_AUTH_PASSWORD_KQST) == FL_RESULT_OK);
+    ASSERT(fl_session_set_auth_mode("Flinstone", FL_USER_AUTH_PASSWORD_KQST) == FL_RESULT_OK);
 
     req = fl_kq_unlock_requirement("Flinstone", "Root", 0);
     ASSERT(req.factor == FL_KQ_ACCESS_KQST_PASSWORD); /* KeyQuorum: the target is Root */
@@ -229,7 +229,7 @@ static int test_kqst_open_refusal_matrix(void) {
     ASSERT(fl_kq_service_online_count() == 0);
 
     unlink(tokpath);
-    ASSERT(fl_user_db_set_auth_mode(db, "Flinstone", FL_USER_AUTH_PASSWORD) == FL_RESULT_OK);
+    ASSERT(fl_session_set_auth_mode("Flinstone", FL_USER_AUTH_PASSWORD) == FL_RESULT_OK);
     return 0;
 }
 
@@ -728,14 +728,10 @@ static int test_orderly_shutdown_is_the_only_end(void) {
 /* An account made before account keys existed has none: its first password login provisions one, and that key
  * must come online with the login. The online hook takes the record as it is once the key is saved. */
 static int test_a_keyless_account_comes_online_at_its_first_login(void) {
-    fl_user_db_t *db = fl_session_user_db_mut();
-    fl_user_record_t *rec;
     int before;
 
-    ASSERT(db && fl_user_db_add_user(db, "Keyless", "keyless-pw", 97, 0) == FL_RESULT_OK);
-    rec = (fl_user_record_t *)fl_user_db_find(db, "Keyless"); /* test-only: the record as an old store has it */
-    ASSERT(rec);
-    rec->has_key = 0;
+    ASSERT(fl_session_add_user("Keyless", "keyless-pw", 97, 0) == FL_RESULT_OK);
+    fl_session_forget_key("Keyless"); /* the record as an old store has it: no key in memory */
     before = (int)fl_kq_service_online_count();
     ASSERT(fl_session_login("Keyless", "keyless-pw") == FL_RESULT_OK);
     ASSERT((int)fl_kq_service_online_count() == before + 1);

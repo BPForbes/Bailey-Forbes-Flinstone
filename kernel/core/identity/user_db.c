@@ -997,6 +997,11 @@ fl_result_t fl_user_db_open_key_record(const fl_user_record_t *account, const ch
     return open_sealed_record(account, password, FL_USER_SECRET_SIGNING, secret);
 }
 
+fl_result_t fl_user_db_open_box_record(const fl_user_record_t *account, const char *password,
+                                      unsigned char *secret) {
+    return open_sealed_record(account, password, FL_USER_SECRET_BOX, secret);
+}
+
 fl_result_t fl_user_db_open_key(const fl_user_db_t *db, const char *name, const char *password,
                                 unsigned char *secret) {
     return open_sealed(db, name, password, FL_USER_SECRET_SIGNING, secret);
@@ -1028,6 +1033,18 @@ fl_result_t fl_user_db_set_auth_mode(fl_user_db_t *db, const char *name, int aut
     if (!u)
         return FL_RESULT_NOENT;
     u->auth_mode = auth_mode;
+    return FL_RESULT_OK;
+}
+
+fl_result_t fl_user_db_set_elevated(fl_user_db_t *db, const char *name, int is_elevated) {
+    fl_user_record_t *u;
+
+    if (!db || !name)
+        return FL_RESULT_INVAL;
+    u = find_mut(db, name);
+    if (!u)
+        return FL_RESULT_NOENT;
+    u->is_elevated = is_elevated ? 1 : 0;
     return FL_RESULT_OK;
 }
 
