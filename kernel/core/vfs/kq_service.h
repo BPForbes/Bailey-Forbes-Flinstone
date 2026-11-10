@@ -91,6 +91,22 @@ typedef struct {
 } fl_kq_autosign_t;
 fl_result_t fl_kq_service_autosign_add(const fl_kq_autosign_t *spec);
 
+/**
+ * The production head_author callback for a tracked file: KeyQuorum names the author of the file's
+ * single head (fl_kq_cp_head_author over the container beside path). ctx points at an
+ * fl_kq_autosign_file_t; a caller whose other two callbacks need more context puts one first in
+ * its own struct. OK with the label; FL_RESULT_BUSY when the history is forked (the sweep audits
+ * kq-autosign-forked and signs nothing); any other failure (no container, no revision, malformed)
+ * is another non-OK result and names nobody.
+ */
+typedef struct {
+    const char *path; /* the tracked file; its container is path + FL_KQ_CONTAINER_SUFFIX */
+} fl_kq_autosign_file_t;
+fl_result_t fl_kq_autosign_head_author(void *ctx, char *out, size_t cap);
+
+/** Now as KeyQuorum's UTC text ("2026-11-10T09:00:00.000Z"), from the wall clock. */
+void fl_kq_service_utc_now(char *out, size_t cap);
+
 /** For tests that prove the thread cannot be cancelled or signalled. */
 #include <pthread.h>
 pthread_t fl_kq_service_thread_for_test(void);

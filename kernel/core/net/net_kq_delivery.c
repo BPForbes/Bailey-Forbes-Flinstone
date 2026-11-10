@@ -72,14 +72,12 @@ static uint64_t r_u64(fl_bytes_reader_t *r) {
     return v;
 }
 
+/* The one offer encoder (fl_kq_cp_offer_encode): a refusal report names these exact bytes. */
 static void kq_put_offer(fl_bytes_sticky_writer_t *w, const kq_file_offer_t *o) {
-    (void)fl_bytes_sticky_put_bytes(w, o->file_id, 16);
-    (void)fl_bytes_sticky_put_bytes(w, o->revision_id, 32);
-    (void)fl_bytes_sticky_put_bytes(w, o->content_commitment, 32);
-    (void)fl_bytes_sticky_put_bytes(w, o->author_identity, 16);
-    (void)fl_bytes_sticky_put_bytes(w, o->author_signature, 64);
-    (void)fl_bytes_sticky_put_u64(w, o->topology_generation);
-    (void)fl_bytes_sticky_put_bytes(w, o->policy_hash, 32);
+    uint8_t wire[FL_KQ_OFFER_WIRE_LEN];
+
+    fl_kq_cp_offer_encode(o, wire);
+    (void)fl_bytes_sticky_put_bytes(w, wire, sizeof wire);
 }
 
 static void kq_get_offer(fl_bytes_reader_t *r, kq_file_offer_t *o) {

@@ -11,7 +11,12 @@
 #include "bg_jobs.h"
 #include "contract_p2_authz.h"
 #include "fl/authz_subsystem.h"
+#include "common.h"
+#include "fl/audit_log.h"
 #include "fl/kq.h"
+#include "kq_checkpoint.h"
+#include "mem_domain.h"
+#include "server_shared_fs.h"
 #include "session.h"
 #include "timekeeping.h"
 #include "user_db.h"
@@ -399,6 +404,201 @@ static int test_the_periodic_sweep(void) {
     return 0;
 }
 
+/* The audit lines the service writes, captured through the audit sink (the service thread emits). */
+static pthread_mutex_t s_audit_mu = PTHREAD_MUTEX_INITIALIZER;
+static char s_audit[8192];
+static void audit_emit(struct fl_log_sink *sink, int level, int facility, const char *msg) {
+    (void)sink; (void)level; (void)facility;
+    pthread_mutex_lock(&s_audit_mu);
+    if (msg && strlen(s_audit) + strlen(msg) + 2 < sizeof s_audit) {
+        strcat(s_audit, msg);
+        strcat(s_audit, "\n");
+    }
+    pthread_mutex_unlock(&s_audit_mu);
+}
+static const fl_log_sink_ops_t s_audit_ops = {audit_emit};
+static fl_log_sink_t s_audit_sink = {&s_audit_ops, NULL};
+static int audited(const char *needle) {
+    int hit;
+    pthread_mutex_lock(&s_audit_mu);
+    hit = strstr(s_audit, needle) != NULL;
+    pthread_mutex_unlock(&s_audit_mu);
+    return hit;
+}
+static char s_tmp[256];
+static char s_home[1024];
+
+/* The audit file is written in the working directory: capture from inside the test's own. */
+static void audit_capture(int on) {
+    pthread_mutex_lock(&s_audit_mu);
+    s_audit[0] = '\0';
+    pthread_mutex_unlock(&s_audit_mu);
+    if (on) {
+        if (!getcwd(s_home, sizeof s_home) || chdir(s_tmp) != 0)
+            s_home[0] = '\0';
+        (void)setenv(FL_AUDIT_ENV, "1", 1);
+        fl_audit_set_sink(&s_audit_sink);
+    } else {
+        fl_audit_set_sink(NULL);
+        unsetenv(FL_AUDIT_ENV);
+        (void)unlink(FL_AUDIT_REL_DEFAULT);
+        if (s_home[0])
+            (void)chdir(s_home);
+    }
+}
+
+/* Containers made by the driver, beside s_tmp/<name>: one head by author, two heads, or none. */
+static int put_container(const char *name, const fl_kq_buf_t *c) {
+    char path[512];
+    snprintf(path, sizeof path, "%s/%s%s", s_tmp, name, FL_KQ_CONTAINER_SUFFIX);
+    return fl_fs_write_file_atomic(path, c->data, c->len);
+}
+
+static int make_containers(const char *author, const uint8_t key[32], kq_file_offer_t *offer) {
+    const fl_kq_driver_t *drv = fl_kq_driver_get_or_register();
+    fl_kq_buf_t base = {0}, one = {0}, left = {0}, right = {0}, both = {0};
+    uint8_t id[16], rev[32];
+    int rc = -1;
+
+    memset(id, 0x53, sizeof id);
+    if (drv && drv->file_new(id, "doc.txt", author, &base) == KQ_FILE_OK &&
+        drv->check_in(&base, author, "2026-11-10T09:00:00.000Z", (const uint8_t *)"v1\n", 3, key, &one, rev) == KQ_FILE_OK &&
+        drv->offer(&one, rev, offer) == KQ_FILE_OK &&
+        drv->check_in(&one, author, "2026-11-10T09:01:00.000Z", (const uint8_t *)"a\n", 2, key, &left, rev) == KQ_FILE_OK &&
+        drv->check_in(&one, author, "2026-11-10T09:02:00.000Z", (const uint8_t *)"b\n", 2, key, &right, rev) == KQ_FILE_OK &&
+        drv->merge(&left, &right, author, "2026-11-10T09:03:00.000Z", &both) == KQ_FILE_OK &&
+        put_container("single.txt", &one) == 0 && put_container("forked.txt", &both) == 0 &&
+        put_container("empty.txt", &base) == 0)
+        rc = 0;
+    fl_kq_buf_free(&base);
+    fl_kq_buf_free(&one);
+    fl_kq_buf_free(&left);
+    fl_kq_buf_free(&right);
+    fl_kq_buf_free(&both);
+    return rc;
+}
+
+typedef struct {
+    fl_kq_autosign_file_t file; /* first: what fl_kq_autosign_head_author reads */
+    char path[512];
+    _Atomic int signed_count;
+    char signed_as[FL_HERITAGE_KEY_ID_MAX];
+} real_obj_t;
+
+static int64_t real_last(void *c) { (void)c; return 0; }
+static fl_result_t real_sign(void *c, const char *author, const uint8_t key[32], kq_signing_mode_t m) {
+    real_obj_t *o = (real_obj_t *)c;
+    (void)key; (void)m;
+    snprintf(o->signed_as, sizeof o->signed_as, "%s", author);
+    atomic_fetch_add(&o->signed_count, 1);
+    return FL_RESULT_OK;
+}
+
+static void real_init(real_obj_t *o, const char *name) {
+    snprintf(o->path, sizeof o->path, "%s/%s", s_tmp, name);
+    o->file.path = o->path;
+}
+
+/* KQ-20: the production head-author callback asks KeyQuorum. The single head's author is signed for;
+ * a forked file is audited kq-autosign-forked and never signed; an empty or missing container names
+ * nobody. */
+static int test_autosign_asks_keyquorum_for_the_head_author(void) {
+    static real_obj_t single, forked, empty, missing;
+    const fl_user_record_t *flin = account("Flinstone");
+    fl_kq_autosign_t spec = {.last_signature_sec = real_last, .head_author = fl_kq_autosign_head_author,
+                             .sign = real_sign, .interval_sec = 1};
+    kq_file_offer_t offer;
+    uint8_t key[32];
+    char who[FL_HERITAGE_KEY_ID_MAX];
+
+    ASSERT(flin);
+    ASSERT(fl_user_db_open_key(fl_session_user_db(), "Flinstone", "flinstone", key) == FL_RESULT_OK);
+    ASSERT(make_containers(flin->key_id, key, &offer) == 0);
+    mem_domain_secure_zero(key, sizeof key);
+    real_init(&single, "single.txt");
+    real_init(&forked, "forked.txt");
+    real_init(&empty, "empty.txt");
+    real_init(&missing, "missing.txt");
+
+    ASSERT(fl_kq_autosign_head_author(&single, who, sizeof who) == FL_RESULT_OK && strcmp(who, flin->key_id) == 0);
+    ASSERT(fl_kq_autosign_head_author(&forked, who, sizeof who) == FL_RESULT_BUSY && who[0] == '\0');
+    ASSERT(fl_kq_autosign_head_author(&empty, who, sizeof who) != FL_RESULT_OK);
+    ASSERT(fl_kq_autosign_head_author(&empty, who, sizeof who) != FL_RESULT_BUSY && who[0] == '\0');
+    ASSERT(fl_kq_autosign_head_author(&missing, who, sizeof who) != FL_RESULT_OK);
+    ASSERT(fl_kq_autosign_head_author(&missing, who, sizeof who) != FL_RESULT_BUSY && who[0] == '\0');
+    ASSERT(fl_kq_autosign_head_author(NULL, who, sizeof who) == FL_RESULT_INVAL);
+
+    audit_capture(1);
+    ASSERT(fl_session_login("Flinstone", "flinstone") == FL_RESULT_OK);
+    spec.label = "single-real";  spec.ctx = &single;  ASSERT(fl_kq_service_autosign_add(&spec) == FL_RESULT_OK);
+    spec.label = "forked-real";  spec.ctx = &forked;  ASSERT(fl_kq_service_autosign_add(&spec) == FL_RESULT_OK);
+    spec.label = "empty-real";   spec.ctx = &empty;   ASSERT(fl_kq_service_autosign_add(&spec) == FL_RESULT_OK);
+    sleep_ms(2600);
+    ASSERT(atomic_load(&single.signed_count) >= 1 && strcmp(single.signed_as, flin->key_id) == 0);
+    ASSERT(atomic_load(&forked.signed_count) == 0);
+    ASSERT(atomic_load(&empty.signed_count) == 0);
+    ASSERT(audited("event=kq-autosign-forked subject=forked-real"));
+    ASSERT(audited("event=kq-autosign subject=single-real"));
+    ASSERT(!audited("subject=empty-real"));
+    ASSERT(fl_session_logout() == FL_RESULT_OK);
+    audit_capture(0);
+    return 0;
+}
+
+/* KQ-12: a refused receive leaves a KQER signed by the account that is online, named by the offer's
+ * SHA-256; it verifies only for that artifact, and nothing is written when nobody is online. */
+static int test_a_refusal_is_reported_as_the_online_account(void) {
+    const fl_user_record_t *flin = account("Flinstone");
+    fl_user_db_keydir_t keys;
+    kq_file_offer_t offer, other;
+    fl_kq_buf_t lines = {0};
+    uint8_t key[32], ref[32], other_ref[32];
+    char single[512], report[512], other_report[512];
+    size_t events = 0;
+
+    ASSERT(flin);
+    ASSERT(fl_user_db_open_key(fl_session_user_db(), "Flinstone", "flinstone", key) == FL_RESULT_OK);
+    ASSERT(make_containers(flin->key_id, key, &offer) == 0);
+    mem_domain_secure_zero(key, sizeof key);
+    snprintf(g_cwd, CWD_MAX, "%s", s_tmp);
+    snprintf(single, sizeof single, "%s/single.txt", s_tmp);
+    ASSERT(fl_kq_cp_offer_ref(&offer, ref) == FL_RESULT_OK);
+    other = offer;
+    other.revision_id[0] ^= 1u;
+    ASSERT(fl_kq_cp_offer_ref(&other, other_ref) == FL_RESULT_OK);
+    ASSERT(fl_kq_cp_report_path(s_tmp, ref, report, sizeof report) == 0);
+    ASSERT(fl_kq_cp_report_path(s_tmp, other_ref, other_report, sizeof other_report) == 0);
+    unlink(report);
+
+    /* nobody online: nothing is signed or written, and that is audited */
+    audit_capture(1);
+    fl_kq_report_refusal(&offer, FL_RESULT_ACCES);
+    ASSERT(access(report, F_OK) != 0);
+    ASSERT(audited("event=kq-report-offline"));
+
+    ASSERT(fl_session_login("Flinstone", "flinstone") == FL_RESULT_OK);
+    fl_kq_report_refusal(&offer, FL_RESULT_ERR); /* a local problem is not a refusal of the letter */
+    ASSERT(access(report, F_OK) != 0);
+    fl_kq_report_refusal(&offer, FL_RESULT_ACCES);
+    ASSERT(access(report, F_OK) == 0 && access(other_report, F_OK) != 0);
+    ASSERT(audited("event=kq-report subject=receive"));
+    ASSERT(fl_session_logout() == FL_RESULT_OK);
+    audit_capture(0);
+
+    /* KeyQuorum accepts it for this artifact and this reporter, and records one ErrorReported */
+    fl_user_db_keydir_init(&keys, fl_session_user_db());
+    ASSERT(fl_kq_cp_inject_report_with(&keys.base, flin->key_id, report, other_ref, single) == FL_KQ_CP_BAD_SIGNATURE);
+    ASSERT(fl_kq_cp_inject_report_with(&keys.base, flin->key_id, report, ref, single) == FL_KQ_CP_OK);
+    ASSERT(fl_kq_cp_history(single, &lines) == FL_KQ_CP_OK);
+    for (size_t i = 0; i + 4 <= lines.len; i++)
+        if (memcmp(lines.data + i, "\t48\t", 4) == 0)
+            events++;
+    fl_kq_buf_free(&lines);
+    ASSERT(events == 1);
+    unlink(report);
+    return 0;
+}
+
 /* The service queue has no executor: it polls, and it consumes no durable record. */
 static int test_the_private_queue_consumes_no_durable_record(void) {
     fl_wq_work_t w = {.fn = count_job, .pq_layer = FL_WQ_LAYER_URGENT};
@@ -468,6 +668,7 @@ int main(void) {
     if (!mkdtemp(tmpl))
         return 1;
     snprintf(path, sizeof path, "%s/users.db", tmpl);
+    snprintf(s_tmp, sizeof s_tmp, "%s", tmpl);
     (void)setenv("FL_USERS_DB_PATH", path, 1);
 #define RUN(t) do { if (t() != 0) { rc = 1; fprintf(stderr, "%s failed\n", #t); } else printf("%s... OK\n", #t); } while (0)
     RUN(test_login_brings_the_key_online_and_logout_wipes_it);
@@ -479,10 +680,20 @@ int main(void) {
     if (!rc) RUN(test_protected_work_is_never_dropped_and_a_stall_fails_closed);
     if (!rc) RUN(test_nobody_may_control_the_service);
     if (!rc) RUN(test_the_periodic_sweep);
+    if (!rc) RUN(test_autosign_asks_keyquorum_for_the_head_author);
+    if (!rc) RUN(test_a_refusal_is_reported_as_the_online_account);
     if (!rc) RUN(test_the_private_queue_consumes_no_durable_record);
     if (!rc) RUN(test_a_keyless_account_comes_online_at_its_first_login);
     if (!rc) RUN(test_orderly_shutdown_is_the_only_end);
     unlink(path);
+    {
+        static const char *const left[] = {"single.txt.kqtf", "forked.txt.kqtf", "empty.txt.kqtf"};
+        char p[512];
+        for (size_t i = 0; i < sizeof left / sizeof left[0]; i++) {
+            snprintf(p, sizeof p, "%s/%s", tmpl, left[i]);
+            unlink(p);
+        }
+    }
     rmdir(tmpl);
     if (rc == 0)
         printf("All KeyQuorum key service tests passed.\n");

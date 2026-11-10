@@ -174,6 +174,15 @@ struct fl_kq_driver {
                      const uint8_t expected_device_id[16], const uint8_t expected_signing_pub[32],
                      const uint8_t expected_encryption_pub[32], uint8_t signing_secret_out[32],
                      uint8_t encryption_secret_out[32]);
+
+    /*
+     * Head author (file ABI version 5), appended after slot_open: the author label of the single
+     * head revision of c, NUL-terminated into out (cap bytes, the caller's). KQ_FILE_OK;
+     * KQ_FILE_FORKED with two heads (nobody is "the" author until they are merged);
+     * KQ_FILE_NO_REVISION for a container with none; KQ_FILE_NO_ROOM when the label and its NUL
+     * do not fit; KQ_FILE_INVALID for a malformed container. out is "" on every failure.
+     */
+    int (*head_author)(const fl_kq_buf_t *c, char *out, size_t cap);
 };
 
 /**

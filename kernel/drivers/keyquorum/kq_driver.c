@@ -303,6 +303,27 @@ static int drv_slot_open(const uint8_t *kqst, size_t klen, const char *label, co
                         expected_encryption_pub, signing_secret_out, encryption_secret_out);
 }
 
+/* KeyQuorum writes the label without a terminator; one byte is kept back for it. */
+static int drv_head_author(const fl_kq_buf_t *c, char *out, size_t cap) {
+    size_t n = 0;
+    int rc;
+
+    if (!out || cap == 0)
+        return KQ_FILE_NO_ROOM;
+    out[0] = '\0';
+    if (!c || !c->data)
+        return KQ_FILE_INVALID;
+    rc = kq_file_head_author(c->data, c->len, (unsigned char *)out, cap - 1u, &n);
+    if (rc == KQ_FILE_OK && n >= cap)
+        rc = KQ_FILE_NO_ROOM;
+    if (rc != KQ_FILE_OK) {
+        out[0] = '\0';
+        return rc;
+    }
+    out[n] = '\0';
+    return KQ_FILE_OK;
+}
+
 static const fl_driver_ops_t s_kq_lifecycle = {
     .probe = kq_probe,
 };
@@ -354,6 +375,7 @@ static const fl_kq_driver_t s_kq_driver = {
     .error_name = drv_error_name,
     .error_class_name = drv_error_class_name,
     .slot_open = drv_slot_open,
+    .head_author = drv_head_author,
 };
 
 const fl_driver_desc_t *fl_kq_driver_desc(void) {

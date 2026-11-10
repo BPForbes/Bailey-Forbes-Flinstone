@@ -310,6 +310,52 @@ static int test_keyquorum_account(void) {
     kq->wipe(back, sizeof back);
     return 0;
 }
+
+/* head_author (ABI 5) is one-to-one over kq_file_head_author: nobody for an empty container, the
+ * author of a single head, FORKED for two heads, NO_ROOM for a buffer the label does not fit. */
+static int test_keyquorum_head_author(void) {
+    const fl_kq_driver_t *kq = fl_kq_driver_get();
+    const char *mya = "Root.Flinstone.Mya";
+    uint8_t sec[32], pub[32], id[16], rev[32];
+    fl_kq_buf_t empty = {0}, one = {0}, left = {0}, right = {0}, forked = {0};
+    char who[64], tiny[4];
+    int rc = 1;
+
+    ASSERT(kq && kq->head_author);
+    ASSERT(kq->account_keygen(sec, pub) == FL_KQ_ACCOUNT_OK);
+    memset(id, 0x4D, sizeof id);
+    if (kq->file_new(id, "plan.txt", mya, &empty) != KQ_FILE_OK)
+        goto out;
+    strcpy(who, "stale");
+    if (kq->head_author(&empty, who, sizeof who) != KQ_FILE_NO_REVISION || who[0] != '\0')
+        goto out;
+    if (kq->check_in(&empty, mya, "2026-11-10T09:00:00.000Z", (const uint8_t *)"v1\n", 3, sec, &one,
+                     rev) != KQ_FILE_OK ||
+        kq->head_author(&one, who, sizeof who) != KQ_FILE_OK || strcmp(who, mya) != 0)
+        goto out;
+    if (kq->head_author(&one, tiny, sizeof tiny) != KQ_FILE_NO_ROOM || tiny[0] != '\0')
+        goto out;
+    /* Two edits on the same head, imported into one copy: two heads, no author. */
+    if (kq->check_in(&one, mya, "2026-11-10T09:01:00.000Z", (const uint8_t *)"a\n", 2, sec, &left,
+                     rev) != KQ_FILE_OK ||
+        kq->check_in(&one, mya, "2026-11-10T09:02:00.000Z", (const uint8_t *)"b\n", 2, sec, &right,
+                     rev) != KQ_FILE_OK ||
+        kq->merge(&left, &right, mya, "2026-11-10T09:03:00.000Z", &forked) != KQ_FILE_OK)
+        goto out;
+    if (kq->head_author(&forked, who, sizeof who) != KQ_FILE_FORKED || who[0] != '\0')
+        goto out;
+    rc = 0;
+out:
+    kq->wipe(sec, sizeof sec);
+    fl_kq_buf_free(&empty);
+    fl_kq_buf_free(&one);
+    fl_kq_buf_free(&left);
+    fl_kq_buf_free(&right);
+    fl_kq_buf_free(&forked);
+    if (rc)
+        fprintf(stderr, "FAIL [%s]: head_author\n", __func__);
+    return rc;
+}
 #endif
 
 /* A shutdown empties the registry and the device table; the next init registers and binds
@@ -1015,6 +1061,9 @@ int main(void) {
 #if defined(FL_WITH_KEYQUORUM)
     printf("test_keyquorum_account... ");
     if (test_keyquorum_account() != 0) { drivers_shutdown(); unlink(path); return 1; }
+    printf("OK\n");
+    printf("test_keyquorum_head_author... ");
+    if (test_keyquorum_head_author() != 0) { drivers_shutdown(); unlink(path); return 1; }
     printf("OK\n");
 #endif
 

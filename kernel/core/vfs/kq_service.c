@@ -1,9 +1,12 @@
 #include "kq_service.h"
 
 #include "bg_jobs.h"
+#include "common.h"
 #include "fl/audit_log.h"
 #include "fl/authz_subsystem.h"
 #include "fl/driver/keyquorum.h"
+#include "fl/kq.h"
+#include "kq_checkpoint.h"
 #include "contract_p2_authz.h"
 #include "mem_domain.h"
 #include "session.h"
@@ -408,4 +411,83 @@ fl_result_t fl_kq_service_autosign_add(const fl_kq_autosign_t *spec) {
         pthread_mutex_unlock(&s_mu);
     }
     return rc;
+}
+
+fl_result_t fl_kq_autosign_head_author(void *ctx, char *out, size_t cap) {
+    const fl_kq_autosign_file_t *f = (const fl_kq_autosign_file_t *)ctx;
+    fl_kq_cp_result_t cp;
+    fl_result_t rc;
+
+    if (!f || !f->path || !out || cap == 0)
+        return FL_RESULT_INVAL;
+    cp = fl_kq_cp_head_author(f->path, out, cap);
+    if (cp == FL_KQ_CP_OK)
+        return FL_RESULT_OK;
+    if (cp == FL_KQ_CP_FORKED)
+        return FL_RESULT_BUSY; /* the one result the sweep reads as "two heads" */
+    rc = fl_kq_cp_to_result(cp);
+    return rc == FL_RESULT_OK || rc == FL_RESULT_BUSY ? FL_RESULT_ERR : rc;
+}
+
+void fl_kq_service_utc_now(char *out, size_t cap) {
+    int64_t sec = 0;
+    time_t t;
+    struct tm tm;
+
+    if (!out || cap == 0)
+        return;
+    out[0] = '\0';
+    if (fl_time_wall_sec(&sec) != FL_RESULT_OK)
+        sec = (int64_t)time(NULL);
+    t = (time_t)sec;
+    if (gmtime_r(&t, &tm))
+        (void)strftime(out, cap, "%Y-%m-%dT%H:%M:%S.000Z", &tm);
+}
+
+/*
+ * The one table from a refusal's result to KeyQuorum's closed KQER sets (keyquorum_error.h: codes
+ * 1 Framing, 2 Untrusted, 8 Denied; classes 1 framing, 2 auth, 5 policy, 7 resource). Only a
+ * refusal of the letter itself is reported; a local problem (no driver, I/O, a file already at the
+ * destination) is kept to retry and has no row.
+ */
+static const struct {
+    fl_result_t why;
+    uint16_t code;
+    uint8_t class_code;
+} s_refusal_codes[] = {
+    {FL_RESULT_INVAL, 1u, 1u},  /* malformed delivery: Framing, framing */
+    {FL_RESULT_NOENT, 2u, 2u},  /* a party has no key: Untrusted, auth */
+    {FL_RESULT_ACCES, 8u, 5u},  /* signature, trust, freshness or fork refusal: Denied, policy */
+    {FL_RESULT_NOMEM, 8u, 7u},  /* too large: Denied, resource */
+};
+
+void fl_kq_report_refusal(const kq_file_offer_t *o, fl_result_t why) {
+    const char *me = fl_session_current_key_id();
+    uint8_t key[FL_USER_SIGNING_SECRET_LEN];
+    uint8_t ref[32];
+    char at[40];
+    kq_signing_mode_t mode = 0;
+    size_t i;
+
+    if (!o)
+        return;
+    for (i = 0; i < sizeof s_refusal_codes / sizeof s_refusal_codes[0]; i++)
+        if (s_refusal_codes[i].why == why)
+            break;
+    if (i == sizeof s_refusal_codes / sizeof s_refusal_codes[0])
+        return; /* not a refusal of the letter */
+    /* Signed only as the account that is online; nobody online signs nothing (fail closed). */
+    if (!me || !me[0] || fl_kq_obtain_author_key(me, key, &mode) != FL_RESULT_OK) {
+        fl_audit_identity_event(me && me[0] ? me : "UNKNOWN", "kq-report-offline", "receive", NULL);
+        return;
+    }
+    fl_kq_service_utc_now(at, sizeof at);
+    if (fl_kq_cp_offer_ref(o, ref) != FL_RESULT_OK ||
+        fl_kq_cp_report_write(s_refusal_codes[i].code, s_refusal_codes[i].class_code,
+                              (uint8_t)FL_KQ_OP_RECEIVE, ref, me, at, key,
+                              g_cwd[0] ? g_cwd : ".") != FL_KQ_CP_OK)
+        fl_audit_identity_event(me, "kq-report-failed", "receive", NULL);
+    else
+        fl_audit_identity_event(me, "kq-report", "receive", NULL);
+    mem_domain_secure_zero(key, sizeof key);
 }

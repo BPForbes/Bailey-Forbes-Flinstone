@@ -1104,7 +1104,7 @@ test_kq_net: userland/shell/common.o $(UTIL_SHELL_LINK_OBJS) $(FS_JAIL_CORE_OBJS
 	./tests/test_kq_net
 
 .PHONY: test_kq_service
-test_kq_service: userland/shell/common.o $(UTIL_SHELL_LINK_OBJS) $(FS_JAIL_CORE_OBJS) $(FS_JAIL_SUPPORT_OBJS) kernel/core/mm/mem_domain.o $(MEM_ASM_OBJ) $(HISTORY_ASM_OBJ) $(UTIL_HISTORY_HOST_OBJS) kernel/core/vfs/kq_service.c kernel/core/sched/bg_jobs.c kernel/core/sched/workqueue.c kernel/core/sched/priority_queue.c userland/shell/authz_subsystem.o userland/shell/audit_log.o userland/shell/contract_log_dispatch.o
+test_kq_service: userland/shell/common.o $(UTIL_SHELL_LINK_OBJS) $(FS_JAIL_CORE_OBJS) $(FS_JAIL_SUPPORT_OBJS) kernel/core/mm/mem_domain.o $(MEM_ASM_OBJ) $(HISTORY_ASM_OBJ) $(UTIL_HISTORY_HOST_OBJS) kernel/core/vfs/kq_checkpoint.o kernel/core/vfs/kq_checkpoint_users.o kernel/core/vfs/kq_service.c kernel/core/sched/bg_jobs.c kernel/core/sched/workqueue.c kernel/core/sched/priority_queue.c userland/shell/authz_subsystem.o userland/shell/audit_log.o userland/shell/contract_log_dispatch.o
 	$(CC) $(CFLAGS) $(TEST_SANITIZE) -c -o tests/test_kq_service.o tests/test_kq_service.c
 	# the code under test is compiled with the sanitizers too, not linked from the plain objects
 	$(CC) $(CFLAGS) $(TEST_SANITIZE) -c -o tests/kqsvc_service.o kernel/core/vfs/kq_service.c
@@ -1113,6 +1113,7 @@ test_kq_service: userland/shell/common.o $(UTIL_SHELL_LINK_OBJS) $(FS_JAIL_CORE_
 	$(CC) $(CFLAGS) $(TEST_SANITIZE) -c -o tests/kqsvc_pq.o kernel/core/sched/priority_queue.c
 	$(CXX) $(CXXFLAGS) $(TEST_SANITIZE) -o tests/test_kq_service tests/test_kq_service.o \
 	  tests/kqsvc_service.o tests/kqsvc_bgjobs.o tests/kqsvc_workqueue.o tests/kqsvc_pq.o \
+	  kernel/core/vfs/kq_checkpoint.o kernel/core/vfs/kq_checkpoint_users.o \
 	  userland/shell/authz_subsystem.o userland/shell/audit_log.o userland/shell/contract_log_dispatch.o \
 	  userland/shell/common.o $(UTIL_SHELL_LINK_OBJS) $(FS_JAIL_CORE_OBJS) $(FS_JAIL_SUPPORT_OBJS) \
 	  kernel/core/mm/mem_domain.o $(MEM_ASM_OBJ) $(NET_ASM_OBJ) $(HISTORY_ASM_OBJ) $(UTIL_HISTORY_HOST_OBJS) \

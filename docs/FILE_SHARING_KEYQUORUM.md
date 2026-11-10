@@ -676,6 +676,19 @@ changes that.
   below) but does not run the delivery checkpoints (stage 2, not built).
 - The 16 MiB limit, the ring sizes and the relay TTL are KeyQuorum defaults, not measured for
   Flinstone's workload.
+- **Refusal reports (KQER, KQ-12).** When `server file` refuses a released delivery, the recipient's shell calls
+  `fl_kq_report_refusal` (`kq_service.c`): it signs a KQER as the account that is online (its key from the key
+  service; nobody online writes nothing and audits `kq-report-offline`) and writes `<64 hex>.kqer` into the
+  landing directory through the storage table. The artifact is the delivery's public offer in its wire bytes
+  (`fl_kq_cp_offer_encode`, the one encoder `net_kq_delivery.c` sends), named by its SHA-256
+  (`fl_kq_cp_offer_ref`). One table maps the refusal to KeyQuorum's closed sets: malformed is Framing/framing,
+  a missing key Untrusted/auth, any other refusal Denied/policy, too large Denied/resource; the step is
+  `FL_KQ_OP_RECEIVE`. The declared entry point takes an `fl_result_t`, so signature, trust, replay, freshness
+  and fork refusals all arrive as Denied. `.kqer` is a reserved suffix. `fl_kq_cp_inject_report_with` verifies a
+  held report under the reporter's key and appends one `ErrorReported` event (48) to the local copy.
+  **Not built:** carrying the sidecar to the sender. The session wire has no opcode for it; the sender only sees
+  the delivery marked refused, so injection runs on a report that is already held locally. The browser lab has
+  no key service and writes no report.
 
 ## The freestanding image (FL-02, stage 1)
 
@@ -686,7 +699,7 @@ picks the portable crypto backends) and links it with `kernel/drivers/keyquorum/
 kernel prints `CAP keyquorum=linked` when `fl_kq_driver_get()` accepts the linked ABI
 (`FL_KQ_ABI_VERSION` 5), else `CAP keyquorum=abi-mismatch`.
 
-- **Size.** The image is about 441 KiB of payload (882 sectors; 918 with the security lab; gate 1024) with about 99 KiB of bss; the
+- **Size.** The image is about 451 KiB of payload (903 sectors; 939 with the security lab; gate 1024) with about 99 KiB of bss; the
   build script refuses an image whose bss end reaches the end of conventional memory.
 - **Heap.** A 40 MiB arena at 4 MiB (`kq_platform.c`), above the image, inside the first GiB the boot code
   identity-maps. Sealing an account key (Argon2id, 19 MiB) needs more than 19 MiB at once, so the machine
@@ -729,8 +742,11 @@ the driver registry exists (`fl_kq_service_start`) and ended only by an orderly 
 - **Periodic signing.** `fl_kq_service_autosign_add` registers an object with three callbacks (last signature time,
   head author, sign) and runs the sweep as a protected periodic item: skip while a signature is recent, skip and audit a
   forked history, audit and retry next period when the author is not signed in, sign with a copy of the author's own key
-  and wipe it. The head-author query is KeyQuorum's KQ-20 (not in the pinned headers) and the signing call is the monitor's
-  (FL-09); the service supplies the schedule and the key.
+  and wipe it. The head author is KeyQuorum's (KQ-20, `kq_file_head_author`, ABI 5) through the driver's `head_author`
+  op and `fl_kq_cp_head_author` (the container beside a path; FORKED with two heads). `fl_kq_autosign_head_author` is the
+  production callback (ctx an `fl_kq_autosign_file_t`): a fork answers BUSY, so the sweep audits `kq-autosign-forked` and
+  signs nothing. The signing call is the monitor's (FL-09); the service supplies the schedule and the key. Nothing in the
+  shell registers an autosign object yet (only the tests do), because the monitor that signs does not exist.
 - **Not built.** The Root fallback has nothing to read (`fl_kq_service_root_fallback` answers NOENT; where a stored Root
   credential would live is an open decision that needs a written exception and a threat model), so unattended work waits
   until someone signs in. The freestanding image has no sessions, so it has no service.

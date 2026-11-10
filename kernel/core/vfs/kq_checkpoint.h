@@ -53,7 +53,7 @@ fl_result_t fl_kq_cp_to_result(fl_kq_cp_result_t r);
 
 /**
  * True when name is a plain file name a delivery may use: fl_fs_name_is_plain, and not ending
- * in one of the suffixes the delivery keeps beside a file (.part, .meta, .kqtf, .kqseen,
+ * in one of the suffixes the delivery keeps beside a file (.part, .meta, .kqtf, .kqseen, .kqer,
  * .kqbak; the list is fl_server_shared_name_is_reserved).
  * Every name that arrives over the wire (offer, announcement) is checked before it is stored,
  * printed or joined to a directory.
@@ -119,6 +119,15 @@ fl_kq_cp_result_t fl_kq_cp_history(const char *path, fl_kq_buf_t *lines);
 /** The file's current head revision (its container beside path). FORKED with two heads. */
 fl_kq_cp_result_t fl_kq_cp_head(const char *path, uint8_t rev[32]);
 
+/**
+ * The author label of the file's single head revision (its container beside path), the label
+ * KeyQuorum names (kq_file_head_author), NUL-terminated into out. FORKED with two heads, which
+ * have no author until they are merged; IO when the container cannot be read (none beside path
+ * included); INVALID for a container with no revision, a label longer than cap - 1 or a malformed
+ * container. out is "" on every result but OK.
+ */
+fl_kq_cp_result_t fl_kq_cp_head_author(const char *path, char *out, size_t cap);
+
 /** Display names of the history's type and outcome codes; "?" past the table. Never parsed. */
 const char *fl_kq_cp_event_name(uint8_t code);
 const char *fl_kq_cp_outcome_name(uint8_t code);
@@ -179,7 +188,49 @@ fl_kq_cp_result_t fl_kq_cp_decode_in_with(const fl_kq_keydir_t *keys, const char
                                           const uint8_t my_sig[64], const fl_kq_dir_t *dir,
                                           const char *leaf);
 
+/* ---- refusal reports (KQER, keyquorum_error.h) ------------------------------------- */
+
+/**
+ * A KQER is a signed report about one refused artifact, kept as a sidecar named by the artifact's
+ * SHA-256: <dir>/<64 lower-case hex>.kqer. The artifact of a refused co-signed delivery is its
+ * public offer as it travels (fl_kq_cp_offer_encode), which the sender, the host and the recipient
+ * all hold; its SHA-256 is fl_kq_cp_offer_ref (native, kq_checkpoint_users.c).
+ */
+#define FL_KQ_REPORT_SUFFIX ".kqer"
+
+/** The offer's wire bytes, exactly what net_kq_delivery.c sends (u64 big-endian). */
+void fl_kq_cp_offer_encode(const kq_file_offer_t *o, uint8_t out[FL_KQ_OFFER_WIRE_LEN]);
+
+/** dir/<hex ref>.kqer into out; 0, or -1 when it does not fit or an argument is missing. */
+int fl_kq_cp_report_path(const char *dir, const uint8_t ref[32], char *out, size_t cap);
+
+/**
+ * Signs a KQER (code and class from keyquorum_error.h's closed sets, step the caller's flow
+ * step) about the artifact whose SHA-256 is ref, as actor with signing secret secret (the
+ * caller's to wipe), at occurred_at (UTC text), and writes it to fl_kq_cp_report_path(dir, ref)
+ * through the storage table. INVALID when KeyQuorum refuses the fields, IO when it cannot be
+ * written. No free text is ever written.
+ */
+fl_kq_cp_result_t fl_kq_cp_report_write(uint16_t code, uint8_t class_code, uint8_t step,
+                                        const uint8_t ref[32], const char *actor,
+                                        const char *occurred_at, const uint8_t secret[32],
+                                        const char *dir);
+
+/**
+ * Consumer: reads the KQER at report_path, and appends one ErrorReported event (history type 48)
+ * to the container beside path, written back in place, when KeyQuorum verifies it under
+ * reporter_key's signing key in keys and it names the artifact ref the caller holds.
+ * BAD_SIGNATURE when it does not verify or names another artifact (nothing written), NO_KEY
+ * when keys has no signing key for reporter_key, IO when a file cannot be read or written.
+ */
+fl_kq_cp_result_t fl_kq_cp_inject_report_with(const fl_kq_keydir_t *keys, const char *reporter_key,
+                                              const char *report_path, const uint8_t ref[32],
+                                              const char *path);
+
 /* ---- the native shell's account store (kq_checkpoint_users.c) --------------------- */
+
+/** The SHA-256 of the offer's wire bytes: the artifact a refusal report names. OK or ERR. */
+fl_result_t fl_kq_cp_offer_ref(const kq_file_offer_t *o, uint8_t ref[32]);
 
 /* user_db.h is native-only; its type is named here so the lab can use this header. */
 typedef struct fl_user_db fl_user_db_t;

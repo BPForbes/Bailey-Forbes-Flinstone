@@ -851,7 +851,7 @@ static int ascii_casecmp(const char *a, const char *b)
 int fl_server_shared_name_is_reserved(const char *name)
 {
     static const char *const reserved[] = {FL_FS_PART_SUFFIX, FL_SERVER_SHARED_META_SUFFIX,
-                                           ".kqtf", ".kqseen", FL_FS_BACKUP_SUFFIX};
+                                           ".kqtf", ".kqseen", ".kqer", FL_FS_BACKUP_SUFFIX};
     size_t len, i;
 
     if (!name)

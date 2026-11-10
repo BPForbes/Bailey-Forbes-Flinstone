@@ -6,7 +6,9 @@
 #include "fl/mem_asm.h"
 #include "mem_domain.h"
 #include "fl_colors.h"
+#include "fl/kq.h"
 #include "kq_checkpoint.h"
+#include "kq_service.h"
 #include "kq_storage_facade.h"
 #include "fs_service_glue.h"
 #include "net_kq_delivery.h"
@@ -560,18 +562,6 @@ static int kq_open_keys(const char *why, unsigned char *signing, unsigned char *
     return -1;
 }
 
-static void kq_utc_now(char *out, size_t cap)
-{
-    int64_t sec = 0;
-    time_t t;
-    struct tm tm;
-
-    if (fl_time_wall_sec(&sec) != FL_RESULT_OK)
-        sec = (int64_t)time(NULL);
-    t = (time_t)sec;
-    gmtime_r(&t, &tm);
-    strftime(out, cap, "%Y-%m-%dT%H:%M:%S.000Z", &tm);
-}
 
 /* server file send -t <path> -user <name>: encode checkpoint, then OFFER + parts. */
 /* One history line for display (see fl_kq_cp_format_event). */
@@ -706,7 +696,7 @@ static int verb_kq_send(const cmd_server_ctx_t *ctx, int argc, char **argv)
     }
     if (kq_open_keys("signs the revision", signing, NULL) != 0)
         return 1;
-    kq_utc_now(created_at, sizeof created_at);
+    fl_kq_service_utc_now(created_at, sizeof created_at);
     if (permitted) {
         /* A newer copy the supervisor has permitted: seal the head as it is, checking nothing in. */
         uint8_t head[32];
@@ -801,6 +791,8 @@ static int kq_decode_and_ack(const cmd_server_ctx_t *ctx, int hosting,
     if (cp != FL_KQ_CP_OK) {
         fl_color_warn("keyquorum: %s from %s refused: %s", in->file_name, in->sender,
                       fl_kq_cp_reason(cp));
+        /* The signed KQER sidecar, as the account that is online (once per refusal). */
+        fl_kq_report_refusal(&in->offer, fl_kq_cp_to_result(cp));
         fl_net_kq_inbox_drop(in->id);
         return 1;
     }

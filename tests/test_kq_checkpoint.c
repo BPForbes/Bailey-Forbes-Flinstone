@@ -449,7 +449,8 @@ static int test_landing_into_the_quarantine_is_refused(void) {
 /* Both landing paths reserve the same suffixes. */
 static int test_reserved_suffixes_are_shared(void) {
     static const char *const bad[] = {"a.meta", "a.part", "a.kqtf", "a.kqseen", "a.kqbak",
-                                      "a.META", "a.Part", "a.KqTf", "a.KQSEEN", "a.kqBAK"};
+                                      "a.META", "a.Part", "a.KqTf", "a.KQSEEN", "a.kqBAK",
+                                      "a.kqer", "a.KQER"};
     size_t i;
 
     for (i = 0; i < sizeof bad / sizeof *bad; i++)
@@ -1168,6 +1169,131 @@ static int test_checkpoints_through_the_facade(void) {
     return 0;
 }
 
+static size_t count(const fl_kq_buf_t *b, const char *needle) {
+    size_t n = strlen(needle), k = 0;
+    for (size_t i = 0; i + n <= b->len; i++)
+        if (memcmp(b->data + i, needle, n) == 0)
+            k++;
+    return k;
+}
+
+/* A container beside path made by the driver: empty, or with two heads (two edits on one head,
+ * imported into one copy). */
+static int put_container(const char *path, const fl_kq_buf_t *c) {
+    char kqtf[PATH_MAX];
+
+    snprintf(kqtf, sizeof kqtf, "%s%s", path, FL_KQ_CONTAINER_SUFFIX);
+    return fl_fs_write_file_atomic(kqtf, c->data, c->len);
+}
+
+static int make_forked(world_t *w, const char *path) {
+    const fl_kq_driver_t *drv = fl_kq_driver_get();
+    fl_kq_buf_t base = {0}, one = {0}, left = {0}, right = {0}, both = {0};
+    uint8_t id[16], rev[32];
+    int rc = -1;
+
+    memset(id, 0x46, sizeof id);
+    if (drv->file_new(id, "forked.txt", MYA, &base) == KQ_FILE_OK &&
+        drv->check_in(&base, MYA, T1, (const uint8_t *)"v1\n", 3, w->mya_sign, &one, rev) == KQ_FILE_OK &&
+        drv->check_in(&one, MYA, T2, (const uint8_t *)"a\n", 2, w->mya_sign, &left, rev) == KQ_FILE_OK &&
+        drv->check_in(&one, MYA, T2, (const uint8_t *)"b\n", 2, w->mya_sign, &right, rev) == KQ_FILE_OK &&
+        drv->merge(&left, &right, MYA, T2, &both) == KQ_FILE_OK && put_container(path, &both) == 0)
+        rc = 0;
+    fl_kq_buf_free(&base);
+    fl_kq_buf_free(&one);
+    fl_kq_buf_free(&left);
+    fl_kq_buf_free(&right);
+    fl_kq_buf_free(&both);
+    return rc;
+}
+
+/* KQ-20: the author of the single head is named; a fork, an empty container and a missing one
+ * name nobody, and only the fork says FORKED. */
+static int test_head_author_names_the_single_head(void) {
+    const fl_kq_driver_t *drv;
+    world_t w;
+    fl_kq_encoded_t enc;
+    fl_kq_buf_t empty = {0};
+    char src[PATH_MAX], forked[PATH_MAX], bare[PATH_MAX], missing[PATH_MAX], who[96];
+    uint8_t sig[64], id[16];
+
+    ASSERT(setup(&w) == 0);
+    drv = fl_kq_driver_get();
+    path_in(src, sizeof src, "authored.txt");
+    path_in(forked, sizeof forked, "forked.txt");
+    path_in(bare, sizeof bare, "bare.txt");
+    path_in(missing, sizeof missing, "never-tracked.txt");
+    ASSERT(prepare(&w, src, "v1\n", T1, &enc, sig) == 0);
+    fl_kq_encoded_free(&enc);
+    ASSERT(fl_kq_cp_head_author(src, who, sizeof who) == FL_KQ_CP_OK && strcmp(who, MYA) == 0);
+    /* a buffer the label does not fit names nobody */
+    ASSERT(fl_kq_cp_head_author(src, who, 4) == FL_KQ_CP_INVALID && who[0] == '\0');
+
+    ASSERT(make_forked(&w, forked) == 0);
+    strcpy(who, "stale");
+    ASSERT(fl_kq_cp_head_author(forked, who, sizeof who) == FL_KQ_CP_FORKED && who[0] == '\0');
+
+    memset(id, 0x45, sizeof id);
+    ASSERT(drv->file_new(id, "bare.txt", MYA, &empty) == KQ_FILE_OK && put_container(bare, &empty) == 0);
+    fl_kq_buf_free(&empty);
+    strcpy(who, "stale");
+    ASSERT(fl_kq_cp_head_author(bare, who, sizeof who) == FL_KQ_CP_INVALID && who[0] == '\0');
+    strcpy(who, "stale");
+    ASSERT(fl_kq_cp_head_author(missing, who, sizeof who) == FL_KQ_CP_IO && who[0] == '\0');
+    teardown(&w);
+    return 0;
+}
+
+/* KQ-12: a refused receive's KQER, signed by the recipient, is named by the offer's SHA-256;
+ * KeyQuorum verifies it only for that artifact and that reporter, and injecting it adds exactly
+ * one ErrorReported event to the sender's copy. */
+static int test_refusal_report_is_verified_and_injected(void) {
+    world_t w;
+    fl_user_db_keydir_t keys;
+    fl_kq_encoded_t enc;
+    fl_kq_buf_t before = {0}, after = {0};
+    kq_file_offer_t other;
+    char src[PATH_MAX], report[PATH_MAX];
+    uint8_t sig[64], ref[32], other_ref[32];
+
+    ASSERT(setup(&w) == 0);
+    fl_user_db_keydir_init(&keys, &w.db);
+    path_in(src, sizeof src, "refused.txt");
+    ASSERT(prepare(&w, src, "v1\n", T1, &enc, sig) == 0);
+    ASSERT(fl_kq_cp_offer_ref(&enc.offer, ref) == FL_RESULT_OK);
+    other = enc.offer;
+    other.topology_generation ^= 1u;
+    ASSERT(fl_kq_cp_offer_ref(&other, other_ref) == FL_RESULT_OK && memcmp(ref, other_ref, 32) != 0);
+
+    /* Steve refused it: Denied (8), class policy (5), step RECEIVE (6). */
+    ASSERT(fl_kq_cp_report_write(8, 5, 6, ref, STEVE, T2, w.steve_sign, s_dir) == FL_KQ_CP_OK);
+    ASSERT(fl_kq_cp_report_path(s_dir, ref, report, sizeof report) == 0);
+    ASSERT(access(report, F_OK) == 0);
+    ASSERT(strlen(report) == strlen(s_dir) + 1 + 64 + strlen(FL_KQ_REPORT_SUFFIX));
+    /* free text is not a code: KeyQuorum refuses an unknown one and nothing is written */
+    ASSERT(fl_kq_cp_report_write(999, 5, 6, other_ref, STEVE, T2, w.steve_sign, s_dir) == FL_KQ_CP_INVALID);
+    ASSERT(fl_kq_cp_report_path(s_dir, other_ref, report, sizeof report) == 0 && access(report, F_OK) != 0);
+    ASSERT(fl_kq_cp_report_path(s_dir, ref, report, sizeof report) == 0);
+
+    ASSERT(fl_kq_cp_history(src, &before) == FL_KQ_CP_OK && count(&before, "\t48\t") == 0);
+    /* another artifact, another reporter: refused, nothing written */
+    ASSERT(fl_kq_cp_inject_report_with(&keys.base, STEVE, report, other_ref, src) == FL_KQ_CP_BAD_SIGNATURE);
+    ASSERT(fl_kq_cp_inject_report_with(&keys.base, MYA, report, ref, src) == FL_KQ_CP_BAD_SIGNATURE);
+    ASSERT(fl_kq_cp_inject_report_with(&keys.base, "Root.Nobody", report, ref, src) == FL_KQ_CP_NO_KEY);
+    ASSERT(fl_kq_cp_history(src, &after) == FL_KQ_CP_OK && after.len == before.len);
+    fl_kq_buf_free(&after);
+    /* the report for this artifact by this reporter: exactly one ErrorReported */
+    ASSERT(fl_kq_cp_inject_report_with(&keys.base, STEVE, report, ref, src) == FL_KQ_CP_OK);
+    ASSERT(fl_kq_cp_history(src, &after) == FL_KQ_CP_OK);
+    ASSERT(count(&after, "\t48\t") == 1 && count(&after, "\n") == count(&before, "\n") + 1);
+    ASSERT(strcmp(fl_kq_cp_event_name(48), "ErrorReported") == 0);
+    fl_kq_buf_free(&before);
+    fl_kq_buf_free(&after);
+    fl_kq_encoded_free(&enc);
+    teardown(&w);
+    return 0;
+}
+
 static int test_reasons_and_results(void) {
     ASSERT(strcmp(fl_kq_cp_reason(FL_KQ_CP_FORKED), "file forked; merge required") == 0);
     ASSERT(fl_kq_cp_to_result(FL_KQ_CP_OK) == FL_RESULT_OK);
@@ -1210,6 +1336,8 @@ int main(void) {
     RUN(test_an_unreadable_container_is_not_replaced);
     RUN(test_decode_uses_the_held_directory);
     RUN(test_checkpoints_through_the_facade);
+    RUN(test_head_author_names_the_single_head);
+    RUN(test_refusal_report_is_verified_and_injected);
     RUN(test_reasons_and_results);
     rmrf(s_dir);
     if (rc == 0)
