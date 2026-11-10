@@ -24,38 +24,41 @@ void cmd_wipe_password(char *buf, size_t buf_size) {
     mem_domain_secure_zero(buf, buf_size);
 }
 
+static int cmd_read_password_line(const char *prompt, char *buf, size_t buf_size) {
+    (void)prompt;
+    {
+        int read_size = (buf_size > (size_t)INT_MAX) ? INT_MAX : (int)buf_size;
+        if (!fgets(buf, read_size, stdin))
+            return -1;
+    }
+    {
+        size_t n = strlen(buf);
+        if (n > 0 && buf[n - 1] == '\n')
+            buf[n - 1] = '\0';
+    }
+    return 0;
+}
+
 /*
- * One line from stdin into buf, its newline removed. The rest of a line longer than buf is read and
- * discarded, so it never reaches the next reader (the shell would run it as a command); *overlong
- * (when given) says so. A password keeps the prefix that fits, as before.
+ * One line that is not a secret (an account name), read by the reader above. The rest of a line
+ * longer than buf is read and discarded, so it never reaches the next reader (the shell would run it
+ * as a command), and *overlong says so. A full buffer with no newline removed is the only case where
+ * more of the line can remain.
  */
 static int cmd_read_line(char *buf, size_t buf_size, int *overlong) {
-    int read_size = (buf_size > (size_t)INT_MAX) ? INT_MAX : (int)buf_size;
-    size_t n;
-
-    if (overlong)
-        *overlong = 0;
-    if (!fgets(buf, read_size, stdin))
+    *overlong = 0;
+    if (cmd_read_password_line(NULL, buf, buf_size) != 0)
         return -1;
-    n = strlen(buf);
-    if (n > 0 && buf[n - 1] == '\n') {
-        buf[n - 1] = '\0';
-    } else if (n + 1 == (size_t)read_size) {
+    if (buf_size > 1 && buf_size <= (size_t)INT_MAX && strlen(buf) + 1 == buf_size) {
         int c = getc(stdin);
 
         if (c != '\n' && c != EOF) {
-            if (overlong)
-                *overlong = 1;
+            *overlong = 1;
             while ((c = getc(stdin)) != '\n' && c != EOF)
                 ;
         }
     }
     return 0;
-}
-
-static int cmd_read_password_line(const char *prompt, char *buf, size_t buf_size) {
-    (void)prompt;
-    return cmd_read_line(buf, buf_size, NULL);
 }
 
 #if defined(__unix__) || defined(__APPLE__)
