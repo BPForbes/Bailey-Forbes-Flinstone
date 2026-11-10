@@ -5,6 +5,7 @@
  */
 #include "heritage.h"
 #include "bridge.h"
+#include "fl/kq.h"
 #include "mem_domain.h"
 #include "share_gate.h"
 #include "user_db.h"
@@ -872,6 +873,157 @@ static int test_jail_homes(const char *jail_parent) {
     return 0;
 }
 
+static void make_bridge(fl_user_bridge_t *b, const char *uid, const char *a, const char *z) {
+    memset(b, 0, sizeof *b);
+    snprintf(b->uid, sizeof b->uid, "%s", uid);
+    b->generation = 3;
+    memset(b->salt, 0x5a, sizeof b->salt);
+    memset(b->public_key, 0x6b, sizeof b->public_key);
+    b->nmembers = 2;
+    snprintf(b->members[0].label, sizeof b->members[0].label, "%s", a);
+    snprintf(b->members[1].label, sizeof b->members[1].label, "%s", z);
+    memset(b->members[0].encryption_public, 0x01, 32);
+    memset(b->members[0].signing_public, 0x02, 32);
+    memset(b->members[1].encryption_public, 0x03, 32);
+    memset(b->members[1].signing_public, 0x04, 32);
+}
+
+/* Private bridges in the account store (FL-12): a store from before wrap_salt gains the column, the
+ * sealed key and its wrap salt are stored and read only together, and only rows the store holds as
+ * live (destroyed = 0, well formed) are live. */
+static int test_private_bridge_store(void) {
+    char path[256];
+    sqlite3 *sql = NULL;
+    sqlite3_stmt *st = NULL;
+    fl_user_db_t db;
+    fl_user_bridge_t b, got, live[FL_USER_BRIDGES_MAX];
+    unsigned char sealed[96], salt[16], out[FL_USER_BRIDGE_SEALED_MAX], out_salt[16];
+    size_t n = 0, len = 0;
+    int has_wrap = 0;
+
+    ASSERT(temp_db(path, sizeof path) == 0);
+    ASSERT(sqlite3_open(path, &sql) == SQLITE_OK);
+    ASSERT(sqlite3_exec(sql,
+                        "CREATE TABLE account_bridge_members (uid TEXT NOT NULL, label TEXT NOT NULL,"
+                        " encryption_public BLOB NOT NULL, signing_public BLOB NOT NULL,"
+                        " sealed_bridge_key BLOB, PRIMARY KEY (uid, label));",
+                        NULL, NULL, NULL) == SQLITE_OK);
+    sqlite3_close(sql);
+    ASSERT(fl_user_db_load(&db, path) == FL_RESULT_OK);
+    ASSERT(sqlite3_open(path, &sql) == SQLITE_OK);
+    ASSERT(sqlite3_prepare_v2(sql, "SELECT name FROM pragma_table_info('account_bridge_members');", -1,
+                              &st, NULL) == SQLITE_OK);
+    while (sqlite3_step(st) == SQLITE_ROW)
+        if (!strcmp((const char *)sqlite3_column_text(st, 0), "wrap_salt"))
+            has_wrap = 1;
+    sqlite3_finalize(st);
+    sqlite3_close(sql);
+    ASSERT(has_wrap); /* the upgrade added it in place */
+
+    ASSERT(fl_user_db_bridges_live(&db, live, FL_USER_BRIDGES_MAX, &n) == FL_RESULT_OK && n == 0);
+    make_bridge(&b, "aaaa0000aaaa0000aaaa0000aaaa0000", "Root.Flinstone.Bob", "Root.Alternative");
+    ASSERT(fl_user_db_bridge_put(&db, &b) == FL_RESULT_OK);
+    ASSERT(fl_user_db_bridge_get(&db, b.uid, &got) == FL_RESULT_OK);
+    ASSERT(got.generation == 3 && got.nmembers == 2 && !got.destroyed);
+    ASSERT(got.salt[0] == 0x5a && got.public_key[31] == 0x6b);
+    ASSERT(!strcmp(got.members[0].label, "Root.Alternative")); /* roster in label order */
+    ASSERT(got.members[1].signing_public[0] == 0x02);
+    ASSERT(fl_user_db_bridges_live(&db, live, FL_USER_BRIDGES_MAX, &n) == FL_RESULT_OK && n == 1);
+    ASSERT(!strcmp(live[0].uid, b.uid));
+    ASSERT(fl_user_db_bridges_live(&db, live, 0, &n) == FL_RESULT_NOMEM && n == 0); /* never partial */
+
+    /* The sealed key and its salt: both or nothing. */
+    memset(sealed, 0x77, sizeof sealed);
+    memset(salt, 0x88, sizeof salt);
+    ASSERT(fl_user_db_bridge_sealed_key(&db, b.uid, "Root.Flinstone.Bob", out, sizeof out, &len, out_salt) ==
+           FL_RESULT_NOENT);
+    ASSERT(fl_user_db_bridge_put_sealed_key(&db, b.uid, "Root.Nobody", sealed, sizeof sealed, salt) ==
+           FL_RESULT_NOENT);
+    ASSERT(fl_user_db_bridge_put_sealed_key(&db, b.uid, "Root.Flinstone.Bob", sealed, sizeof sealed, salt) ==
+           FL_RESULT_OK);
+    ASSERT(fl_user_db_bridge_sealed_key(&db, b.uid, "Root.Flinstone.Bob", out, sizeof out, &len, out_salt) ==
+           FL_RESULT_OK);
+    ASSERT(len == sizeof sealed && out[95] == 0x77 && out_salt[15] == 0x88);
+    ASSERT(fl_user_db_bridge_sealed_key(&db, b.uid, "Root.Flinstone.Bob", out, 8, &len, out_salt) ==
+           FL_RESULT_NOMEM);
+    /* A sealed key without its salt (written behind the API) opens nothing. */
+    ASSERT(sqlite3_open(path, &sql) == SQLITE_OK);
+    ASSERT(sqlite3_exec(sql, "UPDATE account_bridge_members SET sealed_bridge_key=x'99', wrap_salt=NULL"
+                             " WHERE label='Root.Alternative';", NULL, NULL, NULL) == SQLITE_OK);
+    sqlite3_close(sql);
+    ASSERT(fl_user_db_bridge_sealed_key(&db, b.uid, "Root.Alternative", out, sizeof out, &len, out_salt) ==
+           FL_RESULT_NOENT);
+
+    /* Re-putting the roster drops a removed member and its sealed key. */
+    make_bridge(&b, "aaaa0000aaaa0000aaaa0000aaaa0000", "Root.Flinstone.Bob", "Root.Alternative.Ann");
+    b.generation = 4;
+    ASSERT(fl_user_db_bridge_put(&db, &b) == FL_RESULT_OK);
+    ASSERT(fl_user_db_bridge_get(&db, b.uid, &got) == FL_RESULT_OK && got.generation == 4);
+    ASSERT(fl_user_db_bridge_sealed_key(&db, b.uid, "Root.Flinstone.Bob", out, sizeof out, &len, out_salt) ==
+           FL_RESULT_NOENT);
+
+    /* Destroyed is not live, and neither is a malformed row. */
+    b.destroyed = 1;
+    ASSERT(fl_user_db_bridge_put(&db, &b) == FL_RESULT_OK);
+    ASSERT(fl_user_db_bridge_get(&db, b.uid, &got) == FL_RESULT_OK && got.destroyed == 1);
+    ASSERT(fl_user_db_bridges_live(&db, live, FL_USER_BRIDGES_MAX, &n) == FL_RESULT_OK && n == 0);
+    make_bridge(&b, "bbbb0000bbbb0000bbbb0000bbbb0000", "Root.Flinstone.Bob", "Root.Alternative");
+    ASSERT(fl_user_db_bridge_put(&db, &b) == FL_RESULT_OK);
+    ASSERT(sqlite3_open(path, &sql) == SQLITE_OK);
+    ASSERT(sqlite3_exec(sql, "UPDATE account_bridges SET salt=x'00' WHERE uid='bbbb0000bbbb0000bbbb0000bbbb0000';",
+                        NULL, NULL, NULL) == SQLITE_OK);
+    sqlite3_close(sql);
+    ASSERT(fl_user_db_bridge_get(&db, b.uid, &got) == FL_RESULT_NOENT);
+    ASSERT(fl_user_db_bridges_live(&db, live, FL_USER_BRIDGES_MAX, &n) == FL_RESULT_OK && n == 0);
+    /* A one-member roster is no bridge. */
+    b.nmembers = 1;
+    ASSERT(fl_user_db_bridge_put(&db, &b) == FL_RESULT_INVAL);
+    unlink(path);
+    return 0;
+}
+
+/* FL-12: the switch factor is KeyQuorum's (kq_access_requirement), asked with heritage key ids and
+ * the bridges the session's store holds as live. Any error is REFUSED. */
+static int test_unlock_requirement(void) {
+    fl_user_db_t *db = fl_session_user_db_mut();
+    fl_user_bridge_t b;
+    fl_kq_requirement_t r;
+
+    ASSERT(fl_user_db_find(db, "Bob") && fl_user_db_find(db, "Alternative"));
+    r = fl_kq_unlock_requirement("Flinstone", "Flinstone", 0);
+    ASSERT(r.factor == FL_KQ_ACCESS_NONE && r.bridge_index == -1 && !r.needs_parent_grant);
+    r = fl_kq_unlock_requirement("Flinstone", "Flinstone", 1);
+    ASSERT(r.factor == FL_KQ_ACCESS_KQST_PASSWORD); /* sudo: Root's token */
+    r = fl_kq_unlock_requirement("flinstone", "root", 0); /* names are case-insensitive, key ids are not */
+    ASSERT(r.factor == FL_KQ_ACCESS_KQST_PASSWORD);
+    r = fl_kq_unlock_requirement("Flinstone", "Bob", 0);
+    ASSERT(r.factor == FL_KQ_ACCESS_PASSWORD && !r.needs_parent_grant);
+    r = fl_kq_unlock_requirement("Bob", "Alternative", 0);
+    ASSERT(r.factor == FL_KQ_ACCESS_KQST_PASSWORD && r.bridge_uid[0] == '\0');
+    r = fl_kq_unlock_requirement("Bob", "Nobody", 0);
+    ASSERT(r.factor == FL_KQ_ACCESS_REFUSED);
+    r = fl_kq_unlock_requirement(NULL, "Bob", 0);
+    ASSERT(r.factor == FL_KQ_ACCESS_REFUSED);
+
+    /* A live private bridge Bob <-> Alternative changes the cross-branch factor. */
+    make_bridge(&b, "cccc0000cccc0000cccc0000cccc0000", "Root.Flinstone.Bob", "Root.Alternative");
+    ASSERT(fl_user_db_bridge_put(db, &b) == FL_RESULT_OK);
+    r = fl_kq_unlock_requirement("Bob", "Alternative", 0);
+    ASSERT(r.factor == FL_KQ_ACCESS_PASSWORD_BRIDGE_KQST && r.bridge_index == 0);
+    ASSERT(!strcmp(r.bridge_uid, b.uid));
+    /* Proving needs a sealed key the store holds and a token that opens: neither is here. */
+    ASSERT(fl_kq_prove_bridge_member(b.uid, "Bob", "pw") == FL_KQ_BRIDGE_REFUSED);
+    ASSERT(fl_kq_prove_bridge_member(b.uid, "Flinstone", "flinstone") == FL_KQ_BRIDGE_REFUSED);
+    ASSERT(fl_kq_prove_bridge_member("dddd0000dddd0000dddd0000dddd0000", "Bob", "pw") == FL_KQ_BRIDGE_STALE);
+    /* Destroyed: the bridge is not live, so not offered, and a proof is stale. */
+    b.destroyed = 1;
+    ASSERT(fl_user_db_bridge_put(db, &b) == FL_RESULT_OK);
+    r = fl_kq_unlock_requirement("Bob", "Alternative", 0);
+    ASSERT(r.factor == FL_KQ_ACCESS_KQST_PASSWORD && r.bridge_index == -1);
+    ASSERT(fl_kq_prove_bridge_member(b.uid, "Bob", "pw") == FL_KQ_BRIDGE_STALE);
+    return 0;
+}
+
 int main(void) {
     char db_path[256];
     char tmpl[] = "/tmp/fl_heritage_jailXXXXXX";
@@ -904,6 +1056,8 @@ int main(void) {
     RUN(test_box_keys);
     RUN(test_share_gate);
     RUN(test_jail_homes, jail_parent);
+    RUN(test_private_bridge_store);
+    RUN(test_unlock_requirement);
 
     if (chdir("/tmp") != 0)
         rc = 1;

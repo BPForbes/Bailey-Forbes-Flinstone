@@ -80,6 +80,63 @@ fl_result_t fl_user_db_kqst_pairing(const fl_user_db_t *db, const char *key_id,
                                     unsigned char device_id[16], unsigned char signing_public[32],
                                     unsigned char encryption_public[32]);
 
+/*
+ * Private bridges (KeyQuorum's, mirrored in the account store's account_bridges and
+ * account_bridge_members tables; not the account-to-account bridges of bridge.c). The store is the
+ * caller's own trusted record, read at call time like account_keys: a bridge is live when its row
+ * says destroyed = 0 and its facts are well formed (generation 1..UINT32_MAX, a 16-byte salt, a
+ * 32-byte public key, at least two members with valid heritage labels and 32-byte signing keys).
+ * No import path writes these rows yet (bringing a KeyQuorum bridge into the kernel side is not
+ * designed); fl_user_db_bridge_put / _put_sealed_key are the store's writers.
+ */
+#define FL_USER_BRIDGE_UID_MAX     65u /* KeyQuorum's uid (32 hex) and its NUL, with room */
+#define FL_USER_BRIDGE_MEMBERS_MAX 16u
+#define FL_USER_BRIDGES_MAX        16u
+#define FL_USER_BRIDGE_SALT_LEN    16u
+#define FL_USER_BRIDGE_SEALED_MAX  256u
+
+typedef struct fl_user_bridge_member {
+    char          label[FL_HERITAGE_KEY_ID_MAX];
+    unsigned char encryption_public[32];
+    unsigned char signing_public[32];
+} fl_user_bridge_member_t;
+
+typedef struct fl_user_bridge {
+    char                    uid[FL_USER_BRIDGE_UID_MAX];
+    uint32_t                generation;
+    unsigned char           salt[FL_USER_BRIDGE_SALT_LEN];
+    unsigned char           public_key[32];
+    int                     destroyed;
+    size_t                  nmembers;
+    fl_user_bridge_member_t members[FL_USER_BRIDGE_MEMBERS_MAX];
+} fl_user_bridge_t;
+
+/** Writes a bridge's facts and its member roster (replacing the row and its members' keys). */
+fl_result_t fl_user_db_bridge_put(const fl_user_db_t *db, const fl_user_bridge_t *bridge);
+/**
+ * Stores member label's sealed copy of the bridge secret together with its wrap salt (one statement:
+ * neither is ever written alone). NOENT when the member row does not exist.
+ */
+fl_result_t fl_user_db_bridge_put_sealed_key(const fl_user_db_t *db, const char *uid, const char *label,
+                                             const unsigned char *sealed, size_t len,
+                                             const unsigned char wrap_salt[FL_USER_BRIDGE_SALT_LEN]);
+/**
+ * The bridge uid's current facts as the store holds them now (destroyed included, so the caller
+ * passes them to the verifier unchanged). NOENT for an unknown or malformed row.
+ */
+fl_result_t fl_user_db_bridge_get(const fl_user_db_t *db, const char *uid, fl_user_bridge_t *out);
+/** Every live bridge (see above) into out[0..cap), in uid order; *count is how many. */
+fl_result_t fl_user_db_bridges_live(const fl_user_db_t *db, fl_user_bridge_t *out, size_t cap,
+                                    size_t *count);
+/**
+ * Member label's sealed bridge key and the wrap salt stored with it. NOENT unless both are present
+ * and the right sizes (a sealed key without its salt, or a salt without its key, opens nothing).
+ * *len is the sealed key's length. The caller wipes nothing secret: the key is sealed.
+ */
+fl_result_t fl_user_db_bridge_sealed_key(const fl_user_db_t *db, const char *uid, const char *label,
+                                         unsigned char *sealed, size_t cap, size_t *len,
+                                         unsigned char wrap_salt[FL_USER_BRIDGE_SALT_LEN]);
+
 fl_result_t fl_user_db_load(fl_user_db_t *db, const char *path);
 fl_result_t fl_user_db_save(const fl_user_db_t *db);
 void        fl_user_db_clear(fl_user_db_t *db);

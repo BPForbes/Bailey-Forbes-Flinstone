@@ -162,8 +162,9 @@ static int test_a_kqst_account_cannot_log_in_by_password_alone(void) {
     return 0;
 }
 
-/* FL-15: open refuses when the store has no pairing/path, or the token file is junk. Minting a real
- * KQST stays out of C tests (no seal export on the pin); success-path open waits on fixtures. */
+/* FL-15: open refuses when the store has no pairing/path, or the token file is junk. There is no C
+ * seal export: the success-path open is tests/test_kq_real_token.c (make test_kq_real_token), whose
+ * KQST is minted by the keyquorum CLI. */
 static int test_kqst_open_refusal_matrix(void) {
     fl_user_db_t *db = fl_session_user_db_mut();
     const fl_user_record_t *flin;
@@ -181,7 +182,7 @@ static int test_kqst_open_refusal_matrix(void) {
     ASSERT(fl_user_db_set_auth_mode(db, "Flinstone", FL_USER_AUTH_PASSWORD_KQST) == FL_RESULT_OK);
 
     req = fl_kq_unlock_requirement("Flinstone", "Root", 0);
-    ASSERT(req.factor == FL_KQ_ACCOUNT_INVALID);
+    ASSERT(req.factor == FL_KQ_ACCESS_KQST_PASSWORD); /* KeyQuorum: the target is Root */
 
     ASSERT(fl_user_db_kqst_path(db, flin->key_id, path_buf, sizeof path_buf) == FL_RESULT_NOENT);
     ASSERT(fl_user_db_kqst_pairing(db, flin->key_id, device_id, signing_pub, encryption_pub) ==
