@@ -786,7 +786,9 @@ The rule is KeyQuorum's (`keyquorum_access.h`); Flinstone asks it and collects t
   KeyQuorum asks for Root's token on every `sudo`. Where the factor names a token its holder does not have (a
   `FL_USER_AUTH_PASSWORD` account), the behaviour before KeyQuorum's rule is kept (the password; nothing for
   `sudo -i` by an elevated account; the caller's own password for `sudo`) and audited as `su-kqst-legacy` /
-  `sudo-kqst-legacy`. A KQST-mode account never switches on a password alone.
+  `sudo-kqst-legacy`. Where the factor names a token, a KQST-mode account never switches on a password alone;
+  where KeyQuorum names the password factor (the same branch, above or below), the target's password is the
+  whole factor for a KQST-mode account too, because that is KeyQuorum's rule.
 - **Bridges.** A live bridge is a row of the account store's `account_bridges` with `destroyed = 0` and well-formed
   facts (generation 1..2^32-1, 16-byte salt, 32-byte public key, at least two members with valid labels and 32-byte
   signing keys). The list is never partial: a row with `destroyed = 0` that is malformed or cannot be read, any
