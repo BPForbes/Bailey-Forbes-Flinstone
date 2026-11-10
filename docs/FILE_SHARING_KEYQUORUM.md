@@ -750,3 +750,39 @@ the driver registry exists (`fl_kq_service_start`) and ended only by an orderly 
 - **Not built.** The Root fallback has nothing to read (`fl_kq_service_root_fallback` answers NOENT; where a stored Root
   credential would live is an open decision that needs a written exception and a threat model), so unattended work waits
   until someone signs in. The freestanding image has no sessions, so it has no service.
+
+## Login, `su` and `sudo` (FL-12; KeyQuorum KQ-17, KQ-19, KQ-11)
+
+The rule is KeyQuorum's (`keyquorum_access.h`); Flinstone asks it and collects the factor it names.
+
+- **Asking.** `fl_kq_unlock_requirement` (`kernel/core/vfs/kq_account.c`) maps both accounts to their heritage
+  key ids, builds the list of live private bridges from the account store and calls the driver's
+  `access_requirement` op. Any error is `FL_KQ_ACCESS_REFUSED`. `parent_approval` is 0: the store keeps no
+  `unlock_approval` policy, and a switch KeyQuorum says needs a parent's grant is refused (and audited), because
+  there is no way to collect one.
+- **Deciding.** `fl_session_switch_user` (`session.c`) is the only way `su` and `sudo -i` take a new identity: it
+  asks again itself, checks, and commits under the session lock only while the session it was asked in is still
+  current. NONE: nothing more. PASSWORD: the target's password. KQST_PASSWORD: the holder's (Root's for sudo,
+  else the target's) password and its slot token opened with it (`fl_kq_open_account`); a password alone is
+  refused. PASSWORD_BRIDGE_KQST: the target's password, plus a bridge member opening their token and proving
+  membership (`fl_kq_prove_bridge_member`: `bridge_prove` with the member's unsealed key over a fresh random
+  challenge, then `bridge_verify` against the bridge's facts read from the store at that moment). `sudo` without
+  a switch (`fl_session_sudo_authenticate`) asks for Root's password and token when Root is a KQST account.
+  Every refusal is audited through the session's audit hook (`su-refused` / `sudo-refused` and a reason word;
+  never a password, key or token byte). `fl_session_set_user` stays an unchecked set for restoring the identity a
+  command already had (the end of `su -c`) and for tests.
+- **Password-only accounts (owner decision).** The default image has no KQST for any account, Root included, and
+  KeyQuorum asks for Root's token on every `sudo`. Where the factor names a token its holder does not have (a
+  `FL_USER_AUTH_PASSWORD` account), the behaviour before KeyQuorum's rule is kept (the password; nothing for
+  `sudo -i` by an elevated account; the caller's own password for `sudo`) and audited as `su-kqst-legacy` /
+  `sudo-kqst-legacy`. A KQST-mode account never switches on a password alone.
+- **Bridges.** A live bridge is a row of the account store's `account_bridges` with `destroyed = 0` and well-formed
+  facts (generation 1..2^32-1, 16-byte salt, 32-byte public key, at least two members with valid labels and 32-byte
+  signing keys). A member's sealed bridge key is kept with its `wrap_salt` (a column added in place to older
+  stores) and stored or read only together. No path brings a KeyQuorum bridge into the store yet (that import is
+  not designed); `fl_user_db_bridge_put` and `_put_sealed_key` are the store's writers.
+- **Real tokens.** `make test_kq_real_token` mints two KQSTs, a third device and a private bridge with the
+  `keyquorum` CLI built from the submodule (not part of the default `make`; skipped with a message without it),
+  opens them with `kq_slot_open`, signs, logs in (including the logout-during-open generation check), and crosses
+  the bridge at `su`. The freestanding image has none of this (its three driver ops are NULL: the SECFEAT image
+  had no room for them).

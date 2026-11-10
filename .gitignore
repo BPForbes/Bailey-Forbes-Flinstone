@@ -65,6 +65,7 @@ tests/test_net_codec
 tests/test_kq_wire
 tests/test_kq_history_bundle
 tests/test_kq_service
+tests/test_kq_real_token
 tests/test_workqueue_freestanding
 tests/test_wq_journal_sqlite
 tests/test_server_file_meta

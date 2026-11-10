@@ -1120,6 +1120,19 @@ test_kq_service: userland/shell/common.o $(UTIL_SHELL_LINK_OBJS) $(FS_JAIL_CORE_
 	  $(FS_JAIL_TEST_LIBS) -Wl,-z,noexecstack
 	./tests/test_kq_service
 
+# Real-token fixture (Flinstone #407): a KQST and a private bridge minted by the keyquorum CLI built
+# from the submodule (cargo build --release --locked in third_party/keyquorum; never part of the
+# default make). The test always compiles; scripts/kq_real_token_fixture.sh skips the run, and
+# says so, when the CLI (KQ_CLI_DIR) or python3 is missing.
+.PHONY: test_kq_real_token
+test_kq_real_token: userland/shell/common.o $(UTIL_SHELL_LINK_OBJS) $(FS_JAIL_CORE_OBJS) $(FS_JAIL_SUPPORT_OBJS) kernel/core/mm/mem_domain.o $(MEM_ASM_OBJ) $(HISTORY_ASM_OBJ) $(UTIL_HISTORY_HOST_OBJS)
+	$(CC) $(CFLAGS) $(TEST_SANITIZE) -c -o tests/test_kq_real_token.o tests/test_kq_real_token.c
+	$(CXX) $(CXXFLAGS) $(TEST_SANITIZE) -o tests/test_kq_real_token tests/test_kq_real_token.o \
+	  userland/shell/common.o $(UTIL_SHELL_LINK_OBJS) $(FS_JAIL_CORE_OBJS) $(FS_JAIL_SUPPORT_OBJS) \
+	  kernel/core/mm/mem_domain.o $(MEM_ASM_OBJ) $(HISTORY_ASM_OBJ) $(UTIL_HISTORY_HOST_OBJS) \
+	  $(FS_JAIL_TEST_LIBS) -Wl,-z,noexecstack
+	./scripts/kq_real_token_fixture.sh tests/test_kq_real_token
+
 .PHONY: test_kq_history_bundle
 test_kq_history_bundle: tests/test_kq_history_bundle.c kernel/core/vfs/kq_history_bundle.c $(NET_ASM_OBJ)
 	$(CC) $(CFLAGS) $(TEST_SANITIZE) -o tests/test_kq_history_bundle tests/test_kq_history_bundle.c \
@@ -1570,7 +1583,7 @@ clean:
 	rm -f $(VERSION_ENTRIES_VER_SUM)
 	rm -f kernel/arch/*/drivers/*.o kernel/arch/*/hal/*.o kernel/drivers/*.o kernel/drivers/block/*.o VM/devices/*.o
 	rm -f arch/*/*/*.o arch/*/*/alloc/*.o
-	rm -f tests/test_mem_asm tests/test_alloc tests/test_priority_queue tests/test_drivers tests/test_drivers_no_keyquorum tests/test_vm_mem tests/test_replay tests/test_invariants tests/test_userspace_connection tests/test_vm_syscall_bridge tests/test_vm_arch_readiness
+	rm -f tests/test_mem_asm tests/test_alloc tests/test_priority_queue tests/test_drivers tests/test_drivers_no_keyquorum tests/test_kq_real_token tests/test_vm_mem tests/test_replay tests/test_invariants tests/test_userspace_connection tests/test_vm_syscall_bridge tests/test_vm_arch_readiness
 	rm -f tests/test_p3_network tests/test_p3_server tests/test_p3_server_lan tests/test_p3_udp_cmds tests/test_p3_net_tools tests/test_netlab_sim tests/test_wifi_flinstone_helper tests/test_wifi_flinstone_linux_helper tests/test_p3_wifi tests/test_p3_wifi_ota tests/test_wifi_mgmt_ota tests/test_wifi_connect_ota tests/test_wifi_coprocessor tests/test_wifi_uart_at_scan_join tests/test_wifi_fullmac_probe tests/test_wifi_80211ax_mock_279 tests/test_wifi_ax_server_ota tests/test_macvlan_waitpid
 	rm -f tests/test_batch_argv_issue220 tests/test_threadpool_issue222 tests/test_disk_hex_issue222
 	rm -rf tests/obj/issue220 tests/obj/issue222
