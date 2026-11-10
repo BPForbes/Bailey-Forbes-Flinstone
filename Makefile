@@ -845,7 +845,7 @@ TEST_INVARIANTS_SESSION_OBJS = kernel/core/time/timekeeping.o kernel/core/mm/mem
 	kernel/core/identity/user_db.o kernel/core/identity/elevation.o kernel/core/identity/session.o \
 	kernel/core/identity/heritage.o kernel/core/identity/bridge.o kernel/core/identity/share_gate.o \
 	userland/identity/password_hash.o $(FL_STACK_ASM_OBJ) kernel/drivers/keyquorum/kq_driver.o \
-	kernel/drivers/driver_model.o kernel/core/vfs/kq_account.o
+	kernel/drivers/driver_model.o kernel/core/vfs/kq_account.o kernel/core/vfs/server_shared_digest.o
 TEST_INVARIANTS_LIBS = -lsqlite3 -lstdc++ $(OPENSSL_LIBS) -pthread $(KQ_ID_LINK) -Wl,--gc-sections
 test_invariants: test_batch_argv_issue220 userland/shell/common.o userland/shell/authz_subsystem.o $(UTIL_SHELL_LINK_OBJS) $(TEST_INVARIANTS_CMD_OBJS) $(TEST_INVARIANTS_SESSION_OBJS) $(MEM_ASM_OBJ) $(HISTORY_ASM_OBJ) $(UTIL_HISTORY_HOST_OBJS)
 	$(CC) $(CFLAGS) $(TEST_SANITIZE) -c -o tests/test_invariants.o tests/test_invariants.c
