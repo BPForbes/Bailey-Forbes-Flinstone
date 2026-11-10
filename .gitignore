@@ -1,8 +1,9 @@
 # Visual Studio
 .vs/
 
-# Build artifacts (make intermediate object files)
+# Build artifacts (make intermediate object files and header depfiles)
 *.o
+*.d
 *.exe
 *.dll
 BPForbes_Flinstone_Shell
