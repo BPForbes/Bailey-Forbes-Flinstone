@@ -539,7 +539,8 @@ fl_result_t fl_session_switch_user(const fl_session_switch_request_t *req) {
         cu = fl_user_db_find(&s_db, cur_name);
         holder = req->sudo ? fl_user_db_find_by_key(&s_db, FL_HERITAGE_ROOT_KEY) : u;
         if (!u || !cu || !holder || strcmp(u->key_id, tgt_key) != 0 ||
-            strcmp(holder->key_id, holder_key) != 0 || holder->auth_mode != holder_auth) {
+            strcmp(holder->key_id, holder_key) != 0 || holder->auth_mode != holder_auth ||
+            cu->is_elevated != cur_elevated) {
             why = "changed";
             rc = FL_RESULT_ACCES;
             goto release;

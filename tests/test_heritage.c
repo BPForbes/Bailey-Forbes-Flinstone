@@ -1457,6 +1457,24 @@ static fl_result_t switch_to(const char *target, int sudo, const char *pw, const
     return fl_session_switch_user(&req);
 }
 
+/* The in-memory elevation mark, for the sudo -i waiver recheck. Root's uid stays 0. */
+static void set_named_elevation(const char *name, int elevated) {
+    fl_user_db_t *db = fl_session_user_db_mut();
+    size_t i;
+
+    for (i = 0; db && i < db->count; i++) {
+        if (strcmp(db->users[i].name, name) == 0)
+            db->users[i].is_elevated = elevated ? 1 : 0;
+    }
+}
+
+static void drop_root_elevation(void) { set_named_elevation("Root", 0); }
+
+static fl_result_t restore_root_elevation(void) {
+    set_named_elevation("Root", 1);
+    return fl_session_is_elevated_account() ? FL_RESULT_OK : FL_RESULT_ERR;
+}
+
 /* FL-12: su and sudo -i commit only through fl_session_switch_user, which asks KeyQuorum for the
  * factor itself. Password-only accounts keep their behaviour where the rule asks for a token they do
  * not have (owner decision, audited); a KQST-mode account never switches on a password alone. */
@@ -1503,6 +1521,15 @@ static int test_session_switch(void) {
     ASSERT(!strcmp(s_audit, "sudo-refused:password"));
     ASSERT(switch_to("root", 1, "root", NULL, NULL) == FL_RESULT_OK);
     ASSERT(!strcmp(fl_session_current_user(), "Root"));
+    /* The waiver is the elevation seen before the reservation. If that mark is gone by the
+     * recheck, the password-less sudo -i fails closed and the session stays put. */
+    fl_session_test_set_switch_pre_lock(drop_root_elevation);
+    ASSERT(switch_to("Root", 1, NULL, NULL, NULL) == FL_RESULT_ACCES);
+    ASSERT(!strcmp(s_audit, "sudo-refused:changed"));
+    ASSERT(!strcmp(fl_session_current_user(), "Root"));
+    fl_session_test_set_switch_pre_lock(NULL);
+    ASSERT(restore_root_elevation() == FL_RESULT_OK);
+    ASSERT(fl_session_is_elevated_account());
     ASSERT(switch_to("Root", 1, NULL, NULL, NULL) == FL_RESULT_OK);
     /* sudo (elevation): the caller's password for a password-only Root, Root's key once it has one. */
     ASSERT(fl_session_set_user("Flinstone") == FL_RESULT_OK);

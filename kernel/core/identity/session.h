@@ -55,8 +55,9 @@ int         fl_session_verify_account_password(const char *name, const char *pas
  * reservation of the account database, and both are released on every path. Under them the factor
  * is recomputed from the reserved snapshot, and a proof is accepted only when the canonical digest
  * of the current facts matches the digest the proof returned. A proof that no longer matches is
- * "bridge-changed". A factor, holder mode, or password record that changed is "changed". A login
- * or logout in between is BUSY "superseded". A writer already holding the database is BUSY "busy".
+ * "bridge-changed". A factor, holder mode, password record, or caller elevation that changed is
+ * "changed". A login or logout in between is BUSY "superseded". A writer already holding the
+ * database is BUSY "busy".
  * Every refusal is audited through the audit hook ("su-refused" / "sudo-refused", the two key ids
  * and a reason word; never a password, key or token byte) and nothing names the reason on the
  * terminal. FL_RESULT_OK, ACCES (refused), BUSY (a login or logout ran meanwhile, or the writer
