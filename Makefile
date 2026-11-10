@@ -1018,10 +1018,18 @@ test_sqlite_schema:
 
 .PHONY: test_heritage
 # Account heritage key ids, legacy store migration, bridges and per-account jail homes.
-test_heritage: userland/shell/common.o $(UTIL_SHELL_LINK_OBJS) $(FS_JAIL_CORE_OBJS) $(FS_JAIL_SUPPORT_OBJS) kernel/core/mm/mem_domain.o $(MEM_ASM_OBJ) $(HISTORY_ASM_OBJ) $(UTIL_HISTORY_HOST_OBJS)
+# cmd_account is rebuilt with function sections so the heritage link keeps useradd and drops the
+# batch-arity helpers (those pull the shell command table).
+tests/obj/cmd_account_heritage.o: userland/command/cmd_account.c | $(TEST_BATCH_GC_DIR)
+	$(CC) $(CFLAGS) $(TEST_SANITIZE) -ffunction-sections -fdata-sections -c -o $@ $<
+tests/obj/cmd_authutil_heritage.o: userland/command/cmd_authutil.c | $(TEST_BATCH_GC_DIR)
+	$(CC) $(CFLAGS) $(TEST_SANITIZE) -ffunction-sections -fdata-sections -c -o $@ $<
+test_heritage: userland/shell/common.o $(UTIL_SHELL_LINK_OBJS) $(FS_JAIL_CORE_OBJS) $(FS_JAIL_SUPPORT_OBJS) kernel/core/mm/mem_domain.o $(MEM_ASM_OBJ) $(HISTORY_ASM_OBJ) $(UTIL_HISTORY_HOST_OBJS) tests/obj/cmd_account_heritage.o tests/obj/cmd_authutil_heritage.o userland/shell/audit_log.o userland/shell/contract_log_dispatch.o
 	$(CC) $(CFLAGS) $(TEST_SANITIZE) -c -o tests/test_heritage.o tests/test_heritage.c
 	$(CXX) $(CXXFLAGS) $(TEST_SANITIZE) -o tests/test_heritage tests/test_heritage.o \
 	  userland/shell/common.o $(UTIL_SHELL_LINK_OBJS) $(FS_JAIL_CORE_OBJS) $(FS_JAIL_SUPPORT_OBJS) \
+	  tests/obj/cmd_account_heritage.o tests/obj/cmd_authutil_heritage.o \
+	  userland/shell/audit_log.o userland/shell/contract_log_dispatch.o \
 	  kernel/core/mm/mem_domain.o $(MEM_ASM_OBJ) $(HISTORY_ASM_OBJ) $(UTIL_HISTORY_HOST_OBJS) \
 	  $(FS_JAIL_TEST_LIBS) -Wl,-z,noexecstack -Wl,--wrap=fl_kq_driver_get_or_register
 	./tests/test_heritage

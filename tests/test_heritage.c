@@ -13,6 +13,7 @@
 #include "session.h"
 #include "fs_jail.h"
 #include "common.h"
+#include "cmd_decl.h"
 #include <dirent.h>
 #include <limits.h>
 #include <sqlite3.h>
@@ -1888,6 +1889,41 @@ static int test_switch_mutation_barriers(void) {
     return 0;
 }
 
+/* useradd's save fails and the following reload fails closed: the command reports it, the
+ * in-memory store publishes nothing, and the file on disk is left as it was. A readable file
+ * with a mode the loader rejects is what makes the reload fail; write permission is taken away
+ * so the save cannot replace that file first. */
+static int test_account_command_reload_fails_closed(void) {
+    char path[256];
+    char *argv[] = {"useradd", "Zed", NULL};
+    int rc;
+    int failed = 0;
+
+    if (fl_session_set_user("Root") != FL_RESULT_OK || !fl_session_is_elevated_account())
+        return 1;
+    snprintf(path, sizeof path, "%s", fl_session_user_db()->path);
+    if (!path[0] || auth_exec_sql(path, "UPDATE users SET auth_mode=2 WHERE name='Root';") != 0 ||
+        chmod(path, 0444) != 0)
+        return 1;
+    if (setenv("FL_CMD_PASSWORD", "zed-pw", 1) != 0) {
+        chmod(path, 0644);
+        return 1;
+    }
+    rc = cmd_useradd_run(2, argv);
+    unsetenv("FL_CMD_PASSWORD");
+    if (chmod(path, 0644) != 0)
+        return 1;
+    if (rc == 0 || fl_session_users_loaded() || fl_session_user_db()->count != 0)
+        failed = 1;
+    if (!auth_cell_is(path, "Root", SQLITE_INTEGER, 2, NULL) || auth_cell_is(path, "Zed", SQLITE_INTEGER, 0, NULL))
+        failed = 1;
+    if (auth_exec_sql(path, "UPDATE users SET auth_mode=0 WHERE name='Root';") != 0 ||
+        fl_session_reload_users() != FL_RESULT_OK || !fl_session_users_loaded() ||
+        fl_session_set_user("Flinstone") != FL_RESULT_OK)
+        return 1;
+    return failed;
+}
+
 int main(void) {
     char db_path[256];
     char tmpl[] = "/tmp/fl_heritage_jailXXXXXX";
@@ -1930,6 +1966,7 @@ int main(void) {
     RUN(test_restore_user);
     RUN(test_switch_bridge_recheck);
     RUN(test_switch_mutation_barriers);
+    RUN(test_account_command_reload_fails_closed);
 
     if (chdir("/tmp") != 0)
         rc = 1;
