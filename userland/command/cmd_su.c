@@ -89,20 +89,14 @@ int cmd_su_run(int argc, char **argv) {
         return 1;
     }
 
-    if (cmd_su_require_auth(req.target) != 0)
-        return 1;
-
     strncpy(saved, fl_session_current_user(), sizeof(saved) - 1);
     saved[sizeof(saved) - 1] = '\0';
-
     if (fl_session_has_elevation())
         fl_audit_elevation_event(saved, "su user switch", 0);
 
-    rc = fl_session_set_user(req.target);
-    if (rc != FL_RESULT_OK) {
-        fprintf(stderr, "su: cannot switch to %s (%d)\n", req.target, (int)rc);
+    /* KeyQuorum's factor, collected here and checked and committed by the session. */
+    if (cmd_switch_user("su", req.target, 0) != 0)
         return 1;
-    }
     fl_session_sync_services();
     if (req.login_shell) {
         fl_session_save_login_shell_env(saved_home, sizeof(saved_home),

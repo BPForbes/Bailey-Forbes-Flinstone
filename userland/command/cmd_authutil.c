@@ -2,6 +2,8 @@
 #include "fl/audit_log.h"
 #include "fl/session.h"
 #include "fl/elevation.h"
+#include "fl/kq.h"
+#include "heritage.h"
 #include "fl/mem_asm.h"
 #include "mem_domain.h"
 #include "user_db.h"
@@ -105,11 +107,15 @@ int cmd_sudo_require_auth_reason(const char *reason) {
     if (fl_session_has_elevation())
         return 0;
 
-    if (cmd_read_password("[sudo] password: ", pw, sizeof(pw)) != 0) {
+    /* KeyQuorum's sudo factor is Root's key: Root's password and token for a KQST-mode Root; the
+     * caller's own password for a password-only Root, as before (fl_session_sudo_authenticate). */
+    if (cmd_read_password(fl_session_sudo_needs_root() ? "[sudo] Root password: " : "[sudo] password: ",
+                          pw, sizeof(pw)) != 0) {
+        cmd_wipe_password(pw, sizeof(pw));
         fprintf(stderr, "sudo: password read failed\n");
         return 1;
     }
-    if (!fl_session_verify_password(pw)) {
+    if (fl_session_sudo_authenticate(pw) != FL_RESULT_OK) {
         cmd_wipe_password(pw, sizeof(pw));
         fprintf(stderr, "sudo: incorrect password\n");
         return 1;
@@ -129,33 +135,95 @@ int cmd_sudo_require_auth(void) {
     return cmd_sudo_require_auth_reason("sudo authentication");
 }
 
-int cmd_su_require_auth(const char *target) {
-    char pw[128];
-    const fl_user_db_t *db;
+/* 1 when key_id is a Member of the live bridge uid in the account store. */
+static int bridge_has_member(const char *uid, const char *key_id) {
+    fl_user_bridge_t *b = calloc(1, sizeof *b);
+    size_t i;
+    int found = 0;
 
-    if (!target || !target[0]) {
-        fprintf(stderr, "su: invalid target user\n");
-        return 1;
-    }
+    if (!b)
+        return 0;
+    if (fl_user_db_bridge_get(fl_session_user_db(), uid, b) == FL_RESULT_OK)
+        for (i = 0; i < b->nmembers && !found; i++)
+            found = strcmp(b->members[i].label, key_id) == 0;
+    free(b);
+    return found;
+}
+
+int cmd_switch_user(const char *cmd, const char *target, int sudo) {
+    char pw[128], member[FL_USER_NAME_MAX], member_pw[128];
+    char prompt[160];
+    fl_session_switch_request_t req;
+    fl_kq_requirement_t need;
+    const fl_user_db_t *db;
+    const fl_user_record_t *root;
+    fl_result_t rc;
+    int ask_password = 1;
 
     fl_session_init();
     db = fl_session_user_db();
-    if (!fl_user_db_find(db, target)) {
-        fprintf(stderr, "su: user %s does not exist\n", target);
+    if (!target || !target[0] || !fl_user_db_find(db, target)) {
+        fprintf(stderr, "%s: user %s does not exist\n", cmd, target ? target : "");
         return 1;
     }
+    memset(&req, 0, sizeof req);
+    req.target = target;
+    req.sudo = sudo;
+    pw[0] = member_pw[0] = '\0';
+    /* Which factor to collect is KeyQuorum's answer; the session asks again and decides. */
+    need = fl_kq_unlock_requirement(fl_session_current_user(), target, sudo);
+    root = fl_user_db_find_by_key(db, FL_HERITAGE_ROOT_KEY);
+    if (need.factor == FL_KQ_ACCESS_NONE)
+        ask_password = 0;
+    /* A password-only Root keeps the old sudo -i: no prompt for an elevated account. */
+    if (sudo && fl_session_is_elevated_account() && root && root->auth_mode != FL_USER_AUTH_PASSWORD_KQST)
+        ask_password = 0;
+    if (ask_password && need.factor != FL_KQ_ACCESS_REFUSED) {
+        if (sudo)
+            snprintf(prompt, sizeof prompt, "[sudo -i] Root password: ");
+        else
+            snprintf(prompt, sizeof prompt, "Password: ");
+        if (cmd_read_password(prompt, pw, sizeof pw) != 0) {
+            cmd_wipe_password(pw, sizeof pw);
+            fprintf(stderr, "%s: password read failed\n", cmd);
+            return 1;
+        }
+        req.password = pw;
+    }
+    if (need.factor == FL_KQ_ACCESS_PASSWORD_BRIDGE_KQST) {
+        /* A member of the bridge presents their slot token: the caller, when a member, else named. */
+        const char *self = fl_session_current_user();
+        const fl_user_record_t *me = fl_user_db_find(db, self);
 
-    if (cmd_read_password("Password: ", pw, sizeof(pw)) != 0) {
-        fprintf(stderr, "su: password read failed\n");
-        return 1;
-    }
+        if (me && bridge_has_member(need.bridge_uid, me->key_id)) {
+            snprintf(member, sizeof member, "%s", me->name);
+        } else {
+            char line[FL_USER_NAME_MAX + 2];
 
-    if (!fl_user_db_verify_password(db, target, pw)) {
-        cmd_wipe_password(pw, sizeof(pw));
-        fprintf(stderr, "su: authentication failed\n");
+            fputs("Bridge member account: ", stderr);
+            fflush(stderr);
+            if (!fgets(line, sizeof line, stdin))
+                line[0] = '\0';
+            line[strcspn(line, "\r\n")] = '\0';
+            snprintf(member, sizeof member, "%s", line);
+        }
+        snprintf(prompt, sizeof prompt, "Password for %s (bridge slot token): ", member);
+        if (cmd_read_password(prompt, member_pw, sizeof member_pw) != 0) {
+            cmd_wipe_password(pw, sizeof pw);
+            cmd_wipe_password(member_pw, sizeof member_pw);
+            fprintf(stderr, "%s: password read failed\n", cmd);
+            return 1;
+        }
+        req.bridge_member = member;
+        req.bridge_member_password = member_pw;
+    }
+    rc = fl_session_switch_user(&req);
+    cmd_wipe_password(pw, sizeof pw);
+    cmd_wipe_password(member_pw, sizeof member_pw);
+    if (rc != FL_RESULT_OK) {
+        fprintf(stderr, "%s: authentication failed\n", cmd);
         return 1;
     }
-    cmd_wipe_password(pw, sizeof(pw));
     return 0;
 }
 

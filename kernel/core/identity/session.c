@@ -20,6 +20,7 @@ static fl_session_online_opened_fn s_opened_hook;
 static fl_session_offline_fn s_offline_hook;
 static uint64_t s_login_gen = 1; /* every login and logout starts a new generation; 0 is never one */
 static void (*s_kqst_pre_open)(void); /* tests only: runs after unlock, before token open */
+static fl_session_audit_fn s_audit_hook;
 
 void fl_session_set_login_hooks(fl_session_online_fn online, fl_session_offline_fn offline,
                                 fl_session_online_opened_fn opened) {
@@ -289,6 +290,16 @@ int fl_session_verify_password(const char *password) {
     return ok;
 }
 
+/* Called with s_session_mu held: the identity commit that su, sudo -i and the restore after su -c
+ * share. Every elevation ends with the old identity. */
+static void commit_user_locked(const fl_user_record_t *u) {
+    fl_elevation_revoke_all();
+    strncpy(s_current, u->name, sizeof(s_current) - 1);
+    s_current[sizeof(s_current) - 1] = '\0';
+    s_active_elev = FL_ELEVATION_TOKEN_NONE;
+    s_sudo_scope_depth = 0;
+}
+
 fl_result_t fl_session_set_user(const char *name) {
     const fl_user_record_t *u;
     fl_result_t rc = FL_RESULT_NOENT;
@@ -299,15 +310,195 @@ fl_result_t fl_session_set_user(const char *name) {
     pthread_mutex_lock(&s_session_mu);
     u = fl_user_db_find(&s_db, name);
     if (u) {
-        fl_elevation_revoke_all();
-        strncpy(s_current, u->name, sizeof(s_current) - 1);
-        s_current[sizeof(s_current) - 1] = '\0';
-        s_active_elev = FL_ELEVATION_TOKEN_NONE;
-        s_sudo_scope_depth = 0;
+        commit_user_locked(u);
         rc = FL_RESULT_OK;
     }
     pthread_mutex_unlock(&s_session_mu);
     return rc;
+}
+
+void fl_session_set_audit_hook(fl_session_audit_fn fn) {
+    s_audit_hook = fn;
+}
+
+static void session_audit(const char *actor_key, const char *event, const char *subject_key,
+                          const char *detail) {
+    if (s_audit_hook)
+        s_audit_hook(actor_key, event, subject_key, detail);
+}
+
+static int verify_password_now(const char *name, const char *password) {
+    int ok;
+
+    if (!password)
+        return 0;
+    pthread_mutex_lock(&s_session_mu);
+    ok = fl_user_db_verify_password(&s_db, name, password) ? 1 : 0;
+    pthread_mutex_unlock(&s_session_mu);
+    return ok;
+}
+
+/* A refused switch: audited (the two key ids and a reason word, never a password, key or token
+ * byte) and reported. Called without s_session_mu. */
+static fl_result_t switch_refused(fl_result_t rc, int sudo, const char *actor_key,
+                                  const char *subject_key, const char *subject, const char *why) {
+    session_audit(actor_key, sudo ? "sudo-refused" : "su-refused", subject_key, why);
+    fprintf(stderr, "%s: switch to %s refused (%s)\n", sudo ? "sudo" : "su", subject, why);
+    return rc;
+}
+
+fl_result_t fl_session_switch_user(const fl_session_switch_request_t *req) {
+    const fl_user_record_t *u, *cu, *holder;
+    char cur_name[FL_USER_NAME_MAX], cur_key[FL_HERITAGE_KEY_ID_MAX];
+    char tgt_name[FL_USER_NAME_MAX], tgt_key[FL_HERITAGE_KEY_ID_MAX];
+    char holder_name[FL_USER_NAME_MAX];
+    fl_kq_requirement_t need;
+    uint64_t attempt_gen;
+    int holder_kqst, cur_elevated, check_password = 1;
+    const char *why = NULL;
+    const char *pw;
+
+    fl_session_init();
+    if (!req || !req->target || !req->target[0])
+        return FL_RESULT_INVAL;
+    pw = req->password;
+    pthread_mutex_lock(&s_session_mu);
+    u = fl_user_db_find(&s_db, req->target);
+    cu = fl_user_db_find(&s_db, s_current);
+    /* sudo asks for Root's key (keyquorum_access.h); su for the target's. */
+    holder = req->sudo ? fl_user_db_find_by_key(&s_db, FL_HERITAGE_ROOT_KEY) : u;
+    if (!u || !cu || !holder) {
+        pthread_mutex_unlock(&s_session_mu);
+        return FL_RESULT_NOENT;
+    }
+    snprintf(cur_name, sizeof cur_name, "%s", cu->name);
+    snprintf(cur_key, sizeof cur_key, "%s", cu->key_id);
+    snprintf(tgt_name, sizeof tgt_name, "%s", u->name);
+    snprintf(tgt_key, sizeof tgt_key, "%s", u->key_id);
+    snprintf(holder_name, sizeof holder_name, "%s", holder->name);
+    holder_kqst = holder->auth_mode == FL_USER_AUTH_PASSWORD_KQST;
+    cur_elevated = cu->is_elevated;
+    attempt_gen = s_login_gen;
+    pthread_mutex_unlock(&s_session_mu);
+
+    /* KeyQuorum names the factor; this side only collects it. */
+    need = fl_kq_unlock_requirement(cur_name, tgt_name, req->sudo);
+    if (need.needs_parent_grant)
+        /* No way to collect a parent's grant exists on this side: refused, never skipped. */
+        return switch_refused(FL_RESULT_ACCES, req->sudo, cur_key, tgt_key, tgt_name, "parent-grant");
+    switch (need.factor) {
+    case FL_KQ_ACCESS_NONE:
+        check_password = 0;
+        break;
+    case FL_KQ_ACCESS_PASSWORD:
+    case FL_KQ_ACCESS_PASSWORD_BRIDGE_KQST:
+        break;
+    case FL_KQ_ACCESS_KQST_PASSWORD:
+        /*
+         * Owner decision (FL-12): a password-only holder has no token to open, and the default image
+         * has no KQST for Root, so enforcing the token would lock every account out of sudo -i and of
+         * su to Root or across branches. Such a holder keeps the rule from before KeyQuorum's: its
+         * password, and no prompt for sudo -i by an elevated account. Audited, never silent.
+         */
+        if (!holder_kqst && req->sudo && cur_elevated)
+            check_password = 0;
+        break;
+    default:
+        why = "policy";
+        break;
+    }
+    if (!why && check_password && !verify_password_now(holder_name, pw))
+        why = "password";
+    if (!why && need.factor == FL_KQ_ACCESS_KQST_PASSWORD) {
+        if (holder_kqst) {
+            /* The holder's slot token, opened with the holder's password: a password alone never does. */
+            if (fl_kq_open_account(holder_name, pw, NULL) != FL_KQ_ACCOUNT_OK)
+                why = "kqst";
+        } else {
+            session_audit(cur_key, req->sudo ? "sudo-kqst-legacy" : "su-kqst-legacy", tgt_key,
+                          "password-only account");
+        }
+    }
+    if (!why && need.factor == FL_KQ_ACCESS_PASSWORD_BRIDGE_KQST) {
+        if (!req->bridge_member || !req->bridge_member[0] || !req->bridge_member_password)
+            why = "bridge-member";
+        else if (fl_kq_prove_bridge_member(need.bridge_uid, req->bridge_member,
+                                           req->bridge_member_password) != FL_KQ_BRIDGE_OK)
+            why = "bridge-proof";
+    }
+    if (why)
+        return switch_refused(FL_RESULT_ACCES, req->sudo, cur_key, tgt_key, tgt_name, why);
+
+    pthread_mutex_lock(&s_session_mu);
+    /* The session the request was made in must still be the one it switches. */
+    if (s_login_gen != attempt_gen || strcmp(s_current, cur_name) != 0) {
+        pthread_mutex_unlock(&s_session_mu);
+        return switch_refused(FL_RESULT_BUSY, req->sudo, cur_key, tgt_key, tgt_name, "superseded");
+    }
+    u = fl_user_db_find(&s_db, tgt_name);
+    if (!u || strcmp(u->key_id, tgt_key) != 0 ||
+        (check_password && !fl_user_db_verify_password(&s_db, holder_name, pw))) {
+        pthread_mutex_unlock(&s_session_mu);
+        return switch_refused(FL_RESULT_ACCES, req->sudo, cur_key, tgt_key, tgt_name, "changed");
+    }
+    commit_user_locked(u);
+    pthread_mutex_unlock(&s_session_mu);
+    return FL_RESULT_OK;
+}
+
+int fl_session_sudo_needs_root(void) {
+    const fl_user_record_t *root;
+    int kqst;
+
+    fl_session_init();
+    pthread_mutex_lock(&s_session_mu);
+    root = fl_user_db_find_by_key(&s_db, FL_HERITAGE_ROOT_KEY);
+    kqst = root && root->auth_mode == FL_USER_AUTH_PASSWORD_KQST;
+    pthread_mutex_unlock(&s_session_mu);
+    return kqst;
+}
+
+fl_result_t fl_session_sudo_authenticate(const char *password) {
+    const fl_user_record_t *root, *cu;
+    char cur_name[FL_USER_NAME_MAX], cur_key[FL_HERITAGE_KEY_ID_MAX], root_name[FL_USER_NAME_MAX];
+    fl_kq_requirement_t need;
+    int root_kqst;
+    const char *why = NULL;
+
+    fl_session_init();
+    pthread_mutex_lock(&s_session_mu);
+    root = fl_user_db_find_by_key(&s_db, FL_HERITAGE_ROOT_KEY);
+    cu = fl_user_db_find(&s_db, s_current);
+    if (!root || !cu) {
+        pthread_mutex_unlock(&s_session_mu);
+        return FL_RESULT_ACCES;
+    }
+    snprintf(cur_name, sizeof cur_name, "%s", cu->name);
+    snprintf(cur_key, sizeof cur_key, "%s", cu->key_id);
+    snprintf(root_name, sizeof root_name, "%s", root->name);
+    root_kqst = root->auth_mode == FL_USER_AUTH_PASSWORD_KQST;
+    pthread_mutex_unlock(&s_session_mu);
+
+    need = fl_kq_unlock_requirement(cur_name, cur_name, 1);
+    if (need.needs_parent_grant)
+        why = "parent-grant";
+    else if (need.factor != FL_KQ_ACCESS_KQST_PASSWORD)
+        why = "policy";
+    else if (root_kqst) {
+        if (!verify_password_now(root_name, password))
+            why = "password";
+        else if (fl_kq_open_account(root_name, password, NULL) != FL_KQ_ACCOUNT_OK)
+            why = "kqst";
+    } else if (!verify_password_now(cur_name, password)) {
+        why = "password"; /* password-only Root: the caller's own password, as before (owner decision) */
+    } else {
+        session_audit(cur_key, "sudo-kqst-legacy", FL_HERITAGE_ROOT_KEY, "password-only account");
+    }
+    if (why) {
+        session_audit(cur_key, "sudo-refused", FL_HERITAGE_ROOT_KEY, why);
+        return FL_RESULT_ACCES;
+    }
+    return FL_RESULT_OK;
 }
 
 fl_result_t fl_session_grant_elevation(const char *reason, fl_elevation_token_t *out) {

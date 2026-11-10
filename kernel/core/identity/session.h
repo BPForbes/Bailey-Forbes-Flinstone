@@ -23,7 +23,51 @@ void        fl_session_begin_sudo_scope(void);
 void        fl_session_end_sudo_scope(void);
 
 fl_result_t fl_session_login(const char *name, const char *password);
+/**
+ * Sets the session's account with no check at all: for restoring the identity a command already held
+ * (the end of su -c) and for tests. A new identity is taken only through fl_session_switch_user.
+ */
 fl_result_t fl_session_set_user(const char *name);
+
+/**
+ * An identity switch (su, sudo -i). The commands collect what KeyQuorum's rule asks for; the session
+ * asks fl_kq_unlock_requirement again itself and decides, so no caller can choose a weaker factor.
+ *   NONE                 nothing more (the same account, without sudo).
+ *   PASSWORD             password is the target's.
+ *   KQST_PASSWORD        password is the token holder's (Root's for sudo, else the target's) and opens
+ *                        its slot token. A password-only (legacy) holder keeps the rule from before
+ *                        KeyQuorum's (the password; nothing for sudo -i by an elevated account), and
+ *                        that is audited as "su-kqst-legacy" / "sudo-kqst-legacy" (owner decision).
+ *   PASSWORD_BRIDGE_KQST the target's password, plus bridge_member opening their token with
+ *                        bridge_member_password and proving membership (fl_kq_prove_bridge_member).
+ *   REFUSED              refused. A switch that needs a parent's grant is refused too: there is no way
+ *                        to collect one.
+ * Every refusal is audited through the audit hook ("su-refused" / "sudo-refused", the two key ids
+ * and a reason word; never a password, key or token byte). FL_RESULT_OK, ACCES (refused), BUSY (a
+ * login or logout ran meanwhile), NOENT (no such account) or INVAL.
+ */
+typedef struct fl_session_switch_request {
+    const char *target;
+    int         sudo;
+    const char *password;
+    const char *bridge_member;
+    const char *bridge_member_password;
+} fl_session_switch_request_t;
+fl_result_t fl_session_switch_user(const fl_session_switch_request_t *req);
+
+/**
+ * sudo without a switch (an elevation token): KeyQuorum asks for Root's key. With a KQST-mode Root,
+ * password must be Root's and open Root's token; with a password-only Root, it is the caller's own
+ * password, as before (owner decision, audited as "sudo-kqst-legacy"). FL_RESULT_OK or ACCES.
+ */
+fl_result_t fl_session_sudo_authenticate(const char *password);
+/** 1 when sudo asks for Root's password and token (Root is a KQST-mode account), else 0. */
+int         fl_session_sudo_needs_root(void);
+
+/** Where the session reports identity events (the shell installs fl_audit_identity_event). */
+typedef void (*fl_session_audit_fn)(const char *actor_key, const char *event, const char *subject_key,
+                                    const char *detail);
+void fl_session_set_audit_hook(fl_session_audit_fn fn);
 
 int         fl_session_verify_password(const char *password);
 

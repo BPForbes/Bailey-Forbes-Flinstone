@@ -1024,6 +1024,86 @@ static int test_unlock_requirement(void) {
     return 0;
 }
 
+static char s_audit[96];
+
+static void capture_audit(const char *actor, const char *event, const char *subject, const char *detail) {
+    (void)actor;
+    (void)subject;
+    snprintf(s_audit, sizeof s_audit, "%s:%s", event ? event : "", detail ? detail : "");
+}
+
+static fl_result_t switch_to(const char *target, int sudo, const char *pw, const char *member,
+                             const char *member_pw) {
+    fl_session_switch_request_t req = {target, sudo, pw, member, member_pw};
+
+    s_audit[0] = '\0';
+    return fl_session_switch_user(&req);
+}
+
+/* FL-12: su and sudo -i commit only through fl_session_switch_user, which asks KeyQuorum for the
+ * factor itself. Password-only accounts keep their behaviour where the rule asks for a token they do
+ * not have (owner decision, audited); a KQST-mode account never switches on a password alone. */
+static int test_session_switch(void) {
+    fl_user_db_t *db = fl_session_user_db_mut();
+    fl_user_bridge_t b;
+
+    fl_session_set_audit_hook(capture_audit);
+    ASSERT(fl_session_set_user("Flinstone") == FL_RESULT_OK);
+    ASSERT(switch_to("Nobody", 0, "x", NULL, NULL) == FL_RESULT_NOENT);
+    ASSERT(switch_to(NULL, 0, "x", NULL, NULL) == FL_RESULT_INVAL);
+    /* Same branch (PASSWORD): the target's password. */
+    ASSERT(switch_to("Bob", 0, "wrong", NULL, NULL) == FL_RESULT_ACCES);
+    ASSERT(!strcmp(s_audit, "su-refused:password"));
+    ASSERT(!strcmp(fl_session_current_user(), "Flinstone"));
+    ASSERT(switch_to("Bob", 0, NULL, NULL, NULL) == FL_RESULT_ACCES);
+    ASSERT(switch_to("Bob", 0, "pw", NULL, NULL) == FL_RESULT_OK);
+    ASSERT(!strcmp(fl_session_current_user(), "Bob") && s_audit[0] == '\0');
+    /* Same account (NONE). */
+    ASSERT(switch_to("Bob", 0, NULL, NULL, NULL) == FL_RESULT_OK);
+    /* Across branches, no bridge (KQST_PASSWORD) to a password-only account: its password, audited. */
+    ASSERT(switch_to("Alternative", 0, "pw", NULL, NULL) == FL_RESULT_ACCES);
+    ASSERT(switch_to("Alternative", 0, "alternative", NULL, NULL) == FL_RESULT_OK);
+    ASSERT(!strcmp(s_audit, "su-kqst-legacy:password-only account"));
+    /* To a KQST-mode account: the password alone is refused (no token is enrolled for Bob). */
+    ASSERT(fl_user_db_set_auth_mode(db, "Bob", FL_USER_AUTH_PASSWORD_KQST) == FL_RESULT_OK);
+    ASSERT(switch_to("Bob", 0, "pw", NULL, NULL) == FL_RESULT_ACCES);
+    ASSERT(!strcmp(s_audit, "su-refused:kqst"));
+    ASSERT(!strcmp(fl_session_current_user(), "Alternative"));
+    ASSERT(fl_user_db_set_auth_mode(db, "Bob", FL_USER_AUTH_PASSWORD) == FL_RESULT_OK);
+    /* A live private bridge: the target's password and a member's proof, which needs a token. */
+    make_bridge(&b, "eeee0000eeee0000eeee0000eeee0000", "Root.Flinstone.Bob", "Root.Alternative");
+    ASSERT(fl_user_db_bridge_put(db, &b) == FL_RESULT_OK);
+    ASSERT(switch_to("Bob", 0, "pw", NULL, NULL) == FL_RESULT_ACCES);
+    ASSERT(!strcmp(s_audit, "su-refused:bridge-member"));
+    ASSERT(switch_to("Bob", 0, "pw", "Alternative", "alternative") == FL_RESULT_ACCES);
+    ASSERT(!strcmp(s_audit, "su-refused:bridge-proof"));
+    ASSERT(switch_to("Bob", 0, "wrong", "Alternative", "alternative") == FL_RESULT_ACCES);
+    ASSERT(!strcmp(s_audit, "su-refused:password"));
+    b.destroyed = 1;
+    ASSERT(fl_user_db_bridge_put(db, &b) == FL_RESULT_OK);
+    /* sudo -i to a password-only Root: Root's password; an elevated account is not asked. */
+    ASSERT(switch_to("root", 1, "alternative", NULL, NULL) == FL_RESULT_ACCES);
+    ASSERT(!strcmp(s_audit, "sudo-refused:password"));
+    ASSERT(switch_to("root", 1, "root", NULL, NULL) == FL_RESULT_OK);
+    ASSERT(!strcmp(fl_session_current_user(), "Root"));
+    ASSERT(switch_to("Root", 1, NULL, NULL, NULL) == FL_RESULT_OK);
+    /* sudo (elevation): the caller's password for a password-only Root, Root's key once it has one. */
+    ASSERT(fl_session_set_user("Flinstone") == FL_RESULT_OK);
+    ASSERT(!fl_session_sudo_needs_root());
+    ASSERT(fl_session_sudo_authenticate("flinstone") == FL_RESULT_OK);
+    ASSERT(fl_session_sudo_authenticate("root") == FL_RESULT_ACCES);
+    ASSERT(fl_user_db_set_auth_mode(db, "Root", FL_USER_AUTH_PASSWORD_KQST) == FL_RESULT_OK);
+    ASSERT(fl_session_sudo_needs_root());
+    ASSERT(fl_session_sudo_authenticate("flinstone") == FL_RESULT_ACCES);
+    ASSERT(fl_session_sudo_authenticate("root") == FL_RESULT_ACCES); /* Root has no token here */
+    ASSERT(!strcmp(s_audit, "sudo-refused:kqst"));
+    ASSERT(switch_to("Root", 1, "root", NULL, NULL) == FL_RESULT_ACCES);
+    ASSERT(fl_user_db_set_auth_mode(db, "Root", FL_USER_AUTH_PASSWORD) == FL_RESULT_OK);
+    ASSERT(!strcmp(fl_session_current_user(), "Flinstone"));
+    fl_session_set_audit_hook(NULL);
+    return 0;
+}
+
 int main(void) {
     char db_path[256];
     char tmpl[] = "/tmp/fl_heritage_jailXXXXXX";
@@ -1058,6 +1138,7 @@ int main(void) {
     RUN(test_jail_homes, jail_parent);
     RUN(test_private_bridge_store);
     RUN(test_unlock_requirement);
+    RUN(test_session_switch);
 
     if (chdir("/tmp") != 0)
         rc = 1;
