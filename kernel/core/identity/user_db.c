@@ -226,6 +226,22 @@ static fl_result_t db_upsert_user(sqlite3 *sql, const fl_user_record_t *u) {
     return FL_RESULT_OK;
 }
 
+/* Stored auth_mode is only the two integers. Text, NULL, blobs, reals, and any other
+ * integer are bad data (FL_RESULT_ERR), not a password-only account. Check the type
+ * before the value: a conversion makes sqlite3_column_type undefined. */
+static fl_result_t auth_mode_from_column(sqlite3_stmt *st, int col, int *out) {
+    sqlite3_int64 v;
+
+    if (sqlite3_column_type(st, col) != SQLITE_INTEGER)
+        return FL_RESULT_ERR;
+    v = sqlite3_column_int64(st, col);
+    if (v != (sqlite3_int64)FL_USER_AUTH_PASSWORD &&
+        v != (sqlite3_int64)FL_USER_AUTH_PASSWORD_KQST)
+        return FL_RESULT_ERR;
+    *out = (int)v;
+    return FL_RESULT_OK;
+}
+
 static fl_result_t db_load_users(sqlite3 *sql, fl_user_db_t *db) {
     sqlite3_stmt *st = NULL;
     const char *q = "SELECT name,password_hash,salt_hex,uid,is_elevated,key_id,created_by,created_at,"
@@ -239,10 +255,14 @@ static fl_result_t db_load_users(sqlite3 *sql, fl_user_db_t *db) {
         if (step_rc == SQLITE_DONE)
             break;
         if (step_rc != SQLITE_ROW) {
+            db->count = 0;
+            mem_domain_zero(db->users, sizeof(db->users));
             sqlite3_finalize(st);
             return FL_RESULT_ERR;
         }
         if (db->count >= FL_USER_DB_MAX_USERS) {
+            db->count = 0;
+            mem_domain_zero(db->users, sizeof(db->users));
             sqlite3_finalize(st);
             return FL_RESULT_ERR;
         }
@@ -288,8 +308,18 @@ static fl_result_t db_load_users(sqlite3 *sql, fl_user_db_t *db) {
                 mem_domain_zero(u->box_public, sizeof u->box_public);
                 mem_domain_zero(u->box_sealed, sizeof u->box_sealed);
             }
-            u->auth_mode = sqlite3_column_int(st, 12) == FL_USER_AUTH_PASSWORD_KQST ? FL_USER_AUTH_PASSWORD_KQST
-                                                                                    : FL_USER_AUTH_PASSWORD;
+            {
+                int mode = 0;
+
+                if (auth_mode_from_column(st, 12, &mode) != FL_RESULT_OK) {
+                    mem_domain_zero(u, sizeof(*u));
+                    db->count = 0;
+                    mem_domain_zero(db->users, sizeof(db->users));
+                    sqlite3_finalize(st);
+                    return FL_RESULT_ERR;
+                }
+                u->auth_mode = mode;
+            }
             db->count++;
         }
     }
@@ -457,50 +487,57 @@ static fl_result_t db_save_conn(sqlite3 *sql, const fl_user_db_t *db) {
 
 fl_result_t fl_user_db_load(fl_user_db_t *db, const char *path) {
     sqlite3 *sql = NULL;
-    fl_result_t rc;
-    int changed;
+    fl_result_t rc = FL_RESULT_ERR;
+    char path_copy[sizeof db->path];
+    size_t path_len;
 
     if (!db || !path)
         return FL_RESULT_INVAL;
+    /* Copy before clear: account_reload_db_from_disk passes db->path. A path that does not
+     * fit, including the terminating NUL, would open a different file, so it is refused. */
+    path_len = strlen(path);
+    if (path[0] == '\0' || path_len >= sizeof path_copy)
+        return FL_RESULT_INVAL;
+    memcpy(path_copy, path, path_len + 1);
     fl_user_db_clear(db);
-    strncpy(db->path, path, sizeof(db->path) - 1);
+    memcpy(db->path, path_copy, path_len + 1);
 
-    if (sqlite3_open(path, &sql) != SQLITE_OK) {
-        /* sqlite3_open allocates a handle even when it fails; it must still be closed. */
-        sqlite3_close(sql);
-        return FL_RESULT_NOENT;
+    if (sqlite3_open(path_copy, &sql) != SQLITE_OK) {
+        /* sqlite3_open allocates a handle even when it fails; fail closes it. */
+        rc = FL_RESULT_NOENT;
+        goto fail;
     }
     if (db_init_schema(sql) != FL_RESULT_OK) {
-        sqlite3_close(sql);
-        return FL_RESULT_ERR;
+        rc = FL_RESULT_ERR;
+        goto fail;
     }
 
     rc = db_load_users(sql, db);
-    if (rc != FL_RESULT_OK) {
-        sqlite3_close(sql);
-        return rc;
-    }
+    if (rc != FL_RESULT_OK)
+        goto fail;
 
     if (db->count == 0) {
         if (!user_db_lab_defaults_enabled()) {
-            sqlite3_close(sql);
-            return FL_RESULT_ERR;
+            rc = FL_RESULT_ERR;
+            goto fail;
         }
         strncpy(db->default_user, FL_USER_DB_LAB_DEFAULT_USER, sizeof(db->default_user) - 1);
         if (seed_lab_accounts(db) != FL_RESULT_OK || db_save_conn(sql, db) != FL_RESULT_OK) {
-            sqlite3_close(sql);
-            return FL_RESULT_ERR;
+            rc = FL_RESULT_ERR;
+            goto fail;
         }
         fl_user_db_clear(db);
-        strncpy(db->path, path, sizeof(db->path) - 1);
+        memcpy(db->path, path_copy, path_len + 1);
         rc = db_load_users(sql, db);
+        if (rc != FL_RESULT_OK)
+            goto fail;
     }
 
     (void)db_read_meta_default(sql, db->default_user, sizeof(db->default_user));
     if (!db->default_user[0] && db->count > 0)
         strncpy(db->default_user, db->users[0].name, sizeof(db->default_user) - 1);
 
-    if (rc == FL_RESULT_OK) {
+    {
         size_t a = 0;
         size_t b = 0;
 
@@ -510,22 +547,32 @@ fl_result_t fl_user_db_load(fl_user_db_t *db, const char *path) {
                     "(the store was not changed)\n",
                     db->users[a].name, db->users[b].name);
             rc = FL_RESULT_ERR;
+            goto fail;
         }
     }
-    if (rc == FL_RESULT_OK) {
-        changed = migrate_heritage(db);
+    {
+        int changed = migrate_heritage(db);
+
         if (user_db_lab_defaults_enabled() && !fl_user_db_find(db, "Alternative") &&
             fl_user_db_find(db, FL_HERITAGE_ROOT_KEY)) {
             if (seed_lab_accounts(db) == FL_RESULT_OK)
                 changed = 1;
         }
-        if (changed && db_save_conn(sql, db) != FL_RESULT_OK)
+        if (changed && db_save_conn(sql, db) != FL_RESULT_OK) {
             rc = FL_RESULT_ERR;
+            goto fail;
+        }
     }
 
-    if (rc == FL_RESULT_OK)
-        db->loaded = 1;
+    db->loaded = 1;
     sqlite3_close(sql);
+    return FL_RESULT_OK;
+
+fail:
+    /* A failed load publishes nothing: no partial rows, and the caller's path stays usable. */
+    sqlite3_close(sql);
+    fl_user_db_clear(db);
+    memcpy(db->path, path_copy, path_len + 1);
     return rc;
 }
 

@@ -20,6 +20,7 @@
 #include <stdlib.h>
 #include <string.h>
 #include <sys/stat.h>
+#include <sys/wait.h>
 #include <unistd.h>
 
 extern char g_fs_jail_root[];
@@ -806,6 +807,362 @@ static int test_share_gate(void) {
     return 0;
 }
 
+#define AUTH_SNAP_MAX 8
+
+typedef struct auth_row_snap {
+    char name[FL_USER_NAME_MAX];
+    char hash[FL_PASSWORD_HASH_HEX_MAX];
+    char salt[FL_PASSWORD_SALT_HEX_MAX];
+    int sql_type;
+    sqlite3_int64 ival;
+    double rval;
+    char text[64];
+    unsigned char blob[16];
+    int blob_len;
+} auth_row_snap;
+
+static int auth_snap_rows(const char *path, auth_row_snap *rows, int cap, int *nout) {
+    sqlite3 *sql = NULL;
+    sqlite3_stmt *st = NULL;
+    int n = 0;
+
+    if (sqlite3_open(path, &sql) != SQLITE_OK) {
+        sqlite3_close(sql);
+        return -1;
+    }
+    if (sqlite3_prepare_v2(sql,
+                           "SELECT name, password_hash, salt_hex, auth_mode FROM users ORDER BY uid;",
+                           -1, &st, NULL) != SQLITE_OK) {
+        sqlite3_close(sql);
+        return -1;
+    }
+    while (sqlite3_step(st) == SQLITE_ROW) {
+        const char *name = (const char *)sqlite3_column_text(st, 0);
+        const char *hash = (const char *)sqlite3_column_text(st, 1);
+        const char *salt = (const char *)sqlite3_column_text(st, 2);
+        int t;
+
+        if (n >= cap || !name || !hash || !salt) {
+            sqlite3_finalize(st);
+            sqlite3_close(sql);
+            return -1;
+        }
+        memset(&rows[n], 0, sizeof rows[n]);
+        strncpy(rows[n].name, name, sizeof rows[n].name - 1);
+        strncpy(rows[n].hash, hash, sizeof rows[n].hash - 1);
+        strncpy(rows[n].salt, salt, sizeof rows[n].salt - 1);
+        t = sqlite3_column_type(st, 3);
+        rows[n].sql_type = t;
+        if (t == SQLITE_INTEGER)
+            rows[n].ival = sqlite3_column_int64(st, 3);
+        else if (t == SQLITE_FLOAT)
+            rows[n].rval = sqlite3_column_double(st, 3);
+        else if (t == SQLITE_TEXT) {
+            const char *tx = (const char *)sqlite3_column_text(st, 3);
+
+            if (tx)
+                strncpy(rows[n].text, tx, sizeof rows[n].text - 1);
+        } else if (t == SQLITE_BLOB) {
+            int nbytes = sqlite3_column_bytes(st, 3);
+            const void *blob = sqlite3_column_blob(st, 3);
+            int copy = nbytes;
+
+            rows[n].blob_len = nbytes;
+            if (blob && copy > 0) {
+                if (copy > (int)sizeof rows[n].blob)
+                    copy = (int)sizeof rows[n].blob;
+                memcpy(rows[n].blob, blob, (size_t)copy);
+            }
+        }
+        n++;
+    }
+    sqlite3_finalize(st);
+    sqlite3_close(sql);
+    *nout = n;
+    return 0;
+}
+
+static int auth_snaps_equal(const auth_row_snap *a, const auth_row_snap *b, int n) {
+    int i;
+
+    for (i = 0; i < n; i++) {
+        if (strcmp(a[i].name, b[i].name) != 0 || strcmp(a[i].hash, b[i].hash) != 0 ||
+            strcmp(a[i].salt, b[i].salt) != 0 || a[i].sql_type != b[i].sql_type)
+            return 0;
+        if (a[i].sql_type == SQLITE_INTEGER && a[i].ival != b[i].ival)
+            return 0;
+        if (a[i].sql_type == SQLITE_FLOAT && a[i].rval != b[i].rval)
+            return 0;
+        if (a[i].sql_type == SQLITE_TEXT && strcmp(a[i].text, b[i].text) != 0)
+            return 0;
+        if (a[i].sql_type == SQLITE_BLOB &&
+            (a[i].blob_len != b[i].blob_len || memcmp(a[i].blob, b[i].blob, sizeof a[i].blob) != 0))
+            return 0;
+    }
+    return 1;
+}
+
+/* sql_type is the storage class that must still be on disk. ival is used for INTEGER,
+ * text for TEXT. FLOAT and BLOB expectations are the fixtures 1.5 and x'01'. */
+static int auth_cell_is(const char *path, const char *name, int sql_type, sqlite3_int64 ival,
+                        const char *text) {
+    auth_row_snap rows[AUTH_SNAP_MAX];
+    int n = 0;
+    int i;
+
+    if (auth_snap_rows(path, rows, AUTH_SNAP_MAX, &n) != 0)
+        return 0;
+    for (i = 0; i < n; i++) {
+        if (strcmp(rows[i].name, name) != 0)
+            continue;
+        if (rows[i].sql_type != sql_type)
+            return 0;
+        if (sql_type == SQLITE_INTEGER && rows[i].ival != ival)
+            return 0;
+        if (sql_type == SQLITE_TEXT && (!text || strcmp(rows[i].text, text) != 0))
+            return 0;
+        if (sql_type == SQLITE_FLOAT && rows[i].rval != 1.5)
+            return 0;
+        if (sql_type == SQLITE_BLOB && (rows[i].blob_len != 1 || rows[i].blob[0] != 0x01))
+            return 0;
+        return 1;
+    }
+    return 0;
+}
+
+static int auth_exec_sql(const char *path, const char *sql_text) {
+    sqlite3 *sql = NULL;
+    int rc;
+
+    if (sqlite3_open(path, &sql) != SQLITE_OK) {
+        sqlite3_close(sql);
+        return -1;
+    }
+    rc = sqlite3_exec(sql, sql_text, NULL, NULL, NULL);
+    sqlite3_close(sql);
+    return rc == SQLITE_OK ? 0 : -1;
+}
+
+/* A bad stored mode publishes no users and does not rewrite the file. */
+static int auth_expect_load_err(const char *path) {
+    fl_user_db_t db;
+    auth_row_snap before[AUTH_SNAP_MAX], after[AUTH_SNAP_MAX];
+    int nb = 0;
+    int na = 0;
+    int i;
+
+    if (auth_snap_rows(path, before, AUTH_SNAP_MAX, &nb) != 0 || nb < 1)
+        return 1;
+    if (fl_user_db_load(&db, path) != FL_RESULT_ERR)
+        return 1;
+    if (db.loaded != 0 || db.count != 0 || strcmp(db.path, path) != 0)
+        return 1;
+    for (i = 0; i < nb; i++) {
+        if (fl_user_db_find(&db, before[i].name) != NULL)
+            return 1;
+    }
+    if (auth_snap_rows(path, after, AUTH_SNAP_MAX, &na) != 0 || na != nb)
+        return 1;
+    if (!auth_snaps_equal(before, after, nb))
+        return 1;
+    return 0;
+}
+
+static int auth_write_null_mode(const char *path) {
+    sqlite3 *sql = NULL;
+    int rc;
+    const char *stmt =
+        "CREATE TABLE users ("
+        " name TEXT PRIMARY KEY NOT NULL,"
+        " password_hash TEXT NOT NULL,"
+        " salt_hex TEXT NOT NULL,"
+        " uid INTEGER NOT NULL,"
+        " is_elevated INTEGER NOT NULL DEFAULT 0,"
+        " key_id TEXT NOT NULL DEFAULT '',"
+        " created_by TEXT NOT NULL DEFAULT '',"
+        " created_at INTEGER NOT NULL DEFAULT 0,"
+        " signing_public TEXT NOT NULL DEFAULT '',"
+        " signing_sealed TEXT NOT NULL DEFAULT '',"
+        " box_public TEXT NOT NULL DEFAULT '',"
+        " box_sealed TEXT NOT NULL DEFAULT '',"
+        " auth_mode INTEGER);"
+        "INSERT INTO users (name,password_hash,salt_hex,uid,key_id,auth_mode)"
+        " VALUES ('Root','x','y',0,'Root',NULL);";
+
+    if (sqlite3_open(path, &sql) != SQLITE_OK) {
+        sqlite3_close(sql);
+        return -1;
+    }
+    rc = sqlite3_exec(sql, stmt, NULL, NULL, NULL);
+    sqlite3_close(sql);
+    return rc == SQLITE_OK ? 0 : -1;
+}
+
+/* Valid modes load. Unknown integers, a non-integer storage class, a partial row, and a
+ * load through db->path either publish the whole store or none, and they do not rewrite
+ * the file. Does not call fl_session_init. */
+static int test_auth_mode_reject_malformed(void) {
+    char path[256], partial[256], alias[256], badalias[256], nulls[256], longp[257];
+    fl_user_db_t db;
+    const fl_user_record_t *u;
+
+    ASSERT(temp_db(path, sizeof path) == 0);
+    ASSERT(fl_user_db_load(&db, path) == FL_RESULT_OK);
+    ASSERT(fl_user_db_set_auth_mode(&db, "Root", FL_USER_AUTH_PASSWORD) == FL_RESULT_OK);
+    ASSERT(fl_user_db_set_auth_mode(&db, "Flinstone", FL_USER_AUTH_PASSWORD_KQST) == FL_RESULT_OK);
+    ASSERT(fl_user_db_save(&db) == FL_RESULT_OK);
+    ASSERT(fl_user_db_load(&db, path) == FL_RESULT_OK);
+    u = fl_user_db_find(&db, "Root");
+    ASSERT(u && u->auth_mode == FL_USER_AUTH_PASSWORD);
+    u = fl_user_db_find(&db, "Flinstone");
+    ASSERT(u && u->auth_mode == FL_USER_AUTH_PASSWORD_KQST);
+
+    /* Bad API arguments do not publish or clear a store that already loaded. */
+    ASSERT(fl_user_db_load(&db, "") == FL_RESULT_INVAL);
+    ASSERT(db.loaded == 1 && fl_user_db_find(&db, "Root") && strcmp(db.path, path) == 0);
+    ASSERT(fl_user_db_load(&db, NULL) == FL_RESULT_INVAL);
+    ASSERT(db.loaded == 1 && strcmp(db.path, path) == 0);
+    ASSERT(fl_user_db_load(NULL, path) == FL_RESULT_INVAL);
+    memset(longp, 'b', sizeof longp - 1);
+    longp[sizeof longp - 1] = '\0';
+    ASSERT(strlen(longp) >= sizeof db.path);
+    ASSERT(fl_user_db_load(&db, longp) == FL_RESULT_INVAL);
+    ASSERT(db.loaded == 1 && strcmp(db.path, path) == 0);
+
+    ASSERT(auth_exec_sql(path, "UPDATE users SET auth_mode=2 WHERE name='Root';") == 0);
+    ASSERT(auth_cell_is(path, "Root", SQLITE_INTEGER, 2, NULL));
+    ASSERT(auth_expect_load_err(path) == 0);
+    ASSERT(auth_exec_sql(path, "UPDATE users SET auth_mode=-1 WHERE name='Root';") == 0);
+    ASSERT(auth_cell_is(path, "Root", SQLITE_INTEGER, -1, NULL));
+    ASSERT(auth_expect_load_err(path) == 0);
+    ASSERT(auth_exec_sql(path, "UPDATE users SET auth_mode=4294967296 WHERE name='Root';") == 0);
+    ASSERT(auth_cell_is(path, "Root", SQLITE_INTEGER, (sqlite3_int64)4294967296LL, NULL));
+    ASSERT(auth_expect_load_err(path) == 0);
+    ASSERT(auth_exec_sql(path, "UPDATE users SET auth_mode='nope' WHERE name='Root';") == 0);
+    ASSERT(auth_cell_is(path, "Root", SQLITE_TEXT, 0, "nope"));
+    ASSERT(auth_expect_load_err(path) == 0);
+    ASSERT(auth_exec_sql(path, "UPDATE users SET auth_mode=1.5 WHERE name='Root';") == 0);
+    ASSERT(auth_cell_is(path, "Root", SQLITE_FLOAT, 0, NULL));
+    ASSERT(auth_expect_load_err(path) == 0);
+    ASSERT(auth_exec_sql(path, "UPDATE users SET auth_mode=x'01' WHERE name='Root';") == 0);
+    ASSERT(auth_cell_is(path, "Root", SQLITE_BLOB, 0, NULL));
+    ASSERT(auth_expect_load_err(path) == 0);
+    unlink(path);
+
+    ASSERT(temp_db(partial, sizeof partial) == 0);
+    ASSERT(fl_user_db_load(&db, partial) == FL_RESULT_OK);
+    ASSERT(auth_exec_sql(partial, "UPDATE users SET auth_mode=2 WHERE name='Flinstone';") == 0);
+    ASSERT(auth_cell_is(partial, "Root", SQLITE_INTEGER, 0, NULL));
+    ASSERT(auth_cell_is(partial, "Flinstone", SQLITE_INTEGER, 2, NULL));
+    ASSERT(auth_expect_load_err(partial) == 0);
+    unlink(partial);
+
+    /* fl_user_db_load(db, db.path) must copy the path before clear. */
+    ASSERT(temp_db(alias, sizeof alias) == 0);
+    ASSERT(fl_user_db_load(&db, alias) == FL_RESULT_OK);
+    ASSERT(fl_user_db_add_user_under(&db, "Root", "Temp", "pw", 4100, 0, 0) == FL_RESULT_OK);
+    ASSERT(fl_user_db_find(&db, "Temp") != NULL);
+    ASSERT(fl_user_db_load(&db, db.path) == FL_RESULT_OK);
+    ASSERT(fl_user_db_find(&db, "Temp") == NULL);
+    ASSERT(fl_user_db_find(&db, "Root") != NULL);
+    ASSERT(fl_user_db_find(&db, "Flinstone") != NULL);
+    ASSERT(strcmp(db.path, alias) == 0);
+    unlink(alias);
+
+    ASSERT(temp_db(badalias, sizeof badalias) == 0);
+    ASSERT(fl_user_db_load(&db, badalias) == FL_RESULT_OK);
+    ASSERT(fl_user_db_add_user_under(&db, "Root", "Temp", "pw", 4100, 0, 0) == FL_RESULT_OK);
+    ASSERT(auth_exec_sql(badalias, "UPDATE users SET auth_mode=2 WHERE name='Root';") == 0);
+    ASSERT(auth_cell_is(badalias, "Root", SQLITE_INTEGER, 2, NULL));
+    {
+        auth_row_snap before[AUTH_SNAP_MAX], after[AUTH_SNAP_MAX];
+        int nb = 0;
+        int na = 0;
+        int i;
+
+        ASSERT(auth_snap_rows(badalias, before, AUTH_SNAP_MAX, &nb) == 0 && nb >= 2);
+        ASSERT(fl_user_db_load(&db, db.path) == FL_RESULT_ERR);
+        ASSERT(db.loaded == 0 && db.count == 0);
+        ASSERT(strcmp(db.path, badalias) == 0);
+        ASSERT(fl_user_db_find(&db, "Temp") == NULL);
+        ASSERT(fl_user_db_find(&db, "Root") == NULL);
+        ASSERT(auth_snap_rows(badalias, after, AUTH_SNAP_MAX, &na) == 0 && na == nb);
+        ASSERT(auth_snaps_equal(before, after, nb));
+        for (i = 0; i < na; i++)
+            ASSERT(strcmp(after[i].name, "Temp") != 0);
+    }
+    unlink(badalias);
+
+    ASSERT(temp_db(nulls, sizeof nulls) == 0);
+    ASSERT(auth_write_null_mode(nulls) == 0);
+    ASSERT(auth_cell_is(nulls, "Root", SQLITE_NULL, 0, NULL));
+    ASSERT(auth_expect_load_err(nulls) == 0);
+    unlink(nulls);
+    return 0;
+}
+
+/* Runs only in a child, before that process's fl_session_init. */
+static int auth_startup_child(const char *path, const char *lab) {
+    fl_session_switch_request_t req;
+    fl_result_t login_rc;
+    fl_result_t switch_rc;
+
+    if (setenv("FL_USERS_DB_PATH", path, 1) != 0 || setenv("FL_USERS_LAB_DEFAULTS", lab, 1) != 0)
+        return 2;
+    login_rc = fl_session_login("Root", "root");
+    if (login_rc != FL_RESULT_ERR) {
+        fprintf(stderr, "startup child lab=%s login returned %d\n", lab, (int)login_rc);
+        return 3;
+    }
+    memset(&req, 0, sizeof req);
+    req.target = "Root";
+    req.sudo = 1;
+    req.password = "root";
+    switch_rc = fl_session_switch_user(&req);
+    if (switch_rc == FL_RESULT_OK) {
+        fprintf(stderr, "startup child lab=%s switch returned OK\n", lab);
+        return 4;
+    }
+    return 0;
+}
+
+/* A bad auth_mode at startup must not seed over the file for either lab-default setting.
+ * Forks before this process calls fl_session_init. */
+static int test_auth_mode_startup_fail_closed(void) {
+    char path[256];
+    fl_user_db_t db;
+    auth_row_snap before[AUTH_SNAP_MAX], after[AUTH_SNAP_MAX];
+    int nb = 0;
+    int na = 0;
+    int i;
+    const char *labs[2] = {"0", "1"};
+
+    ASSERT(temp_db(path, sizeof path) == 0);
+    ASSERT(fl_user_db_load(&db, path) == FL_RESULT_OK);
+    ASSERT(fl_user_db_find(&db, "Root") && fl_user_db_find(&db, "Flinstone") &&
+           fl_user_db_find(&db, "Alternative"));
+    ASSERT(auth_exec_sql(path, "UPDATE users SET auth_mode=2 WHERE name='Root';") == 0);
+    ASSERT(auth_snap_rows(path, before, AUTH_SNAP_MAX, &nb) == 0);
+    ASSERT(nb == 3);
+    ASSERT(auth_cell_is(path, "Root", SQLITE_INTEGER, 2, NULL));
+    for (i = 0; i < 2; i++) {
+        pid_t pid;
+        int status = 0;
+
+        pid = fork();
+        ASSERT(pid >= 0);
+        if (pid == 0)
+            _exit(auth_startup_child(path, labs[i]));
+        ASSERT(waitpid(pid, &status, 0) == pid);
+        ASSERT(WIFEXITED(status) && WEXITSTATUS(status) == 0);
+        ASSERT(auth_snap_rows(path, after, AUTH_SNAP_MAX, &na) == 0);
+        ASSERT(na == nb && auth_snaps_equal(before, after, nb));
+        ASSERT(auth_cell_is(path, "Root", SQLITE_INTEGER, 2, NULL));
+    }
+    unlink(path);
+    return 0;
+}
+
 /* Account homes in an active VM jail, through the session singleton. */
 static int test_jail_homes(const char *jail_parent) {
     char home[PATH_MAX];
@@ -1367,6 +1724,9 @@ int main(void) {
     RUN(test_signed_bridges);
     RUN(test_box_keys);
     RUN(test_share_gate);
+    /* authmode RUN block. bridgeproof appends race RUNs at the end of main; leave those alone. */
+    RUN(test_auth_mode_reject_malformed);
+    RUN(test_auth_mode_startup_fail_closed);
     RUN(test_jail_homes, jail_parent);
     RUN(test_private_bridge_store);
     RUN(test_unlock_requirement);

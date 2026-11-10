@@ -35,6 +35,7 @@ void fl_session_test_set_kqst_pre_open(void (*fn)(void)) {
 
 static void session_load_once(void) {
     const char *path = getenv("FL_USERS_DB_PATH");
+    fl_result_t rc;
 
     /* Seeded accounts call the driver before sh.c reaches drivers_init. */
     (void)fl_kq_driver_get_or_register();
@@ -42,14 +43,16 @@ static void session_load_once(void) {
     if (!path || !path[0])
         path = FL_SESSION_USERS_PATH;
     pthread_mutex_lock(&s_session_mu);
-    if (fl_user_db_load(&s_db, path) != FL_RESULT_OK) {
-        fl_user_db_seed_defaults(&s_db);
-        strncpy(s_db.path, path, sizeof(s_db.path) - 1);
-        (void)fl_user_db_save(&s_db);
+    rc = fl_user_db_load(&s_db, path);
+    if (rc != FL_RESULT_OK) {
+        /* Do not seed or save: a bad store must stay on disk, and the session stays unavailable. */
+        s_db_ready = 0;
+        s_current[0] = '\0';
+    } else {
+        strncpy(s_current, s_db.default_user, sizeof(s_current) - 1);
+        s_current[sizeof(s_current) - 1] = '\0';
+        s_db_ready = 1;
     }
-    strncpy(s_current, s_db.default_user, sizeof(s_current) - 1);
-    s_current[sizeof(s_current) - 1] = '\0';
-    s_db_ready = 1;
     pthread_mutex_unlock(&s_session_mu);
 }
 
@@ -180,6 +183,10 @@ fl_result_t fl_session_login(const char *name, const char *password) {
     if (!name || !name[0] || !password)
         return FL_RESULT_INVAL;
     pthread_mutex_lock(&s_session_mu);
+    if (!s_db_ready || !s_db.loaded) {
+        pthread_mutex_unlock(&s_session_mu);
+        return FL_RESULT_ERR;
+    }
     if (fl_user_db_verify_password(&s_db, name, password)) {
         const fl_user_record_t *u = fl_user_db_find(&s_db, name);
         int need_kqst = kqst_mode(name);
@@ -278,6 +285,13 @@ fl_result_t fl_session_login(const char *name, const char *password) {
     return rc;
 }
 
+/* s_session_mu is held. name is s_current or a caller name; it is not copied out. */
+static int session_verify_password_locked(const char *name, const char *password) {
+    if (!s_db_ready || !s_db.loaded || !name || !password)
+        return 0;
+    return fl_user_db_verify_password(&s_db, name, password) ? 1 : 0;
+}
+
 int fl_session_verify_password(const char *password) {
     int ok = 0;
 
@@ -285,7 +299,7 @@ int fl_session_verify_password(const char *password) {
     if (!password)
         return 0;
     pthread_mutex_lock(&s_session_mu);
-    ok = fl_user_db_verify_password(&s_db, s_current, password) ? 1 : 0;
+    ok = session_verify_password_locked(s_current, password);
     pthread_mutex_unlock(&s_session_mu);
     return ok;
 }
@@ -355,7 +369,7 @@ int fl_session_verify_account_password(const char *name, const char *password) {
     if (!name || !password)
         return 0;
     pthread_mutex_lock(&s_session_mu);
-    ok = fl_user_db_verify_password(&s_db, name, password) ? 1 : 0;
+    ok = session_verify_password_locked(name, password);
     pthread_mutex_unlock(&s_session_mu);
     return ok;
 }
@@ -499,6 +513,10 @@ fl_result_t fl_session_sudo_authenticate(const char *password) {
 
     fl_session_init();
     pthread_mutex_lock(&s_session_mu);
+    if (!s_db_ready || !s_db.loaded) {
+        pthread_mutex_unlock(&s_session_mu);
+        return FL_RESULT_ERR;
+    }
     root = fl_user_db_find_by_key(&s_db, FL_HERITAGE_ROOT_KEY);
     cu = fl_user_db_find(&s_db, s_current);
     if (!root || !cu) {
@@ -540,6 +558,10 @@ fl_result_t fl_session_grant_elevation(const char *reason, fl_elevation_token_t 
     if (!out)
         return FL_RESULT_INVAL;
     pthread_mutex_lock(&s_session_mu);
+    if (!s_db_ready || !s_db.loaded) {
+        pthread_mutex_unlock(&s_session_mu);
+        return FL_RESULT_ERR;
+    }
     if (fl_user_db_is_elevated_user(&s_db, s_current)) {
         *out = FL_ELEVATION_TOKEN_NONE;
         pthread_mutex_unlock(&s_session_mu);
@@ -654,6 +676,10 @@ fl_result_t fl_session_save_users(void) {
 
     fl_session_init();
     pthread_mutex_lock(&s_session_mu);
+    if (!s_db_ready || !s_db.loaded) {
+        pthread_mutex_unlock(&s_session_mu);
+        return FL_RESULT_ERR;
+    }
     rc = fl_user_db_save(&s_db);
     pthread_mutex_unlock(&s_session_mu);
     return rc;

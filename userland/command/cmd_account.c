@@ -19,12 +19,14 @@ static int ensure_privilege(void) {
     return 1;
 }
 
-/** Drop in-memory account mutations when persistence fails. */
+/** Drop in-memory account mutations when persistence fails. 0 when the disk store is loaded again. */
 static int account_reload_db_from_disk(fl_user_db_t *db) {
     if (!db || !db->path[0])
-        return 0;
-    if (fl_user_db_load(db, db->path) != FL_RESULT_OK) {
-        fprintf(stderr, "account: could not reload %s from disk\n", db->path);
+        return 1;
+    if (fl_user_db_load(db, db->path) != FL_RESULT_OK || !db->loaded) {
+        fprintf(stderr, "account: could not reload %s from disk\n",
+                db->path[0] ? db->path : "(no path)");
+        (void)fl_session_drop_elevation();
         return 1;
     }
     return 0;
@@ -78,6 +80,11 @@ int cmd_useradd_run(int argc, char **argv) {
     if (fl_time_wall_sec(&now) != FL_RESULT_OK)
         now = 0;
     db = fl_session_user_db_mut();
+    if (!db->loaded) {
+        cmd_wipe_password(pw, sizeof(pw));
+        fprintf(stderr, "account: account store is not available\n");
+        return 1;
+    }
     uid = fl_user_db_next_uid(db);
     rc = fl_user_db_add_user_under(db, creator, name, pass, uid, 0, now);
     cmd_wipe_password(pw, sizeof(pw));
@@ -90,7 +97,11 @@ int cmd_useradd_run(int argc, char **argv) {
         return 1;
     }
     if (fl_session_save_users() != FL_RESULT_OK) {
-        (void)account_reload_db_from_disk(db);
+        if (account_reload_db_from_disk(db) != 0) {
+            fprintf(stderr, "useradd: could not save %s\n", FL_SESSION_USERS_PATH);
+            return 1;
+        }
+        /* Reload restored the file. The new account still did not persist. */
         fprintf(stderr, "useradd: could not save %s\n", FL_SESSION_USERS_PATH);
         return 1;
     }
@@ -124,6 +135,10 @@ int cmd_userdel_run(int argc, char **argv) {
         return 1;
     }
     db = fl_session_user_db_mut();
+    if (!db->loaded) {
+        fprintf(stderr, "account: account store is not available\n");
+        return 1;
+    }
     target = fl_user_db_find(db, argv[1]);
     if (!target) {
         fprintf(stderr, "userdel: %s does not exist\n", argv[1]);
@@ -155,13 +170,21 @@ int cmd_userdel_run(int argc, char **argv) {
      * fails, the account stays too, without its bridges (fail closed).
      */
     if (fl_bridge_remove_for(db->path, target_key) != FL_RESULT_OK) {
-        (void)account_reload_db_from_disk(db);
+        if (account_reload_db_from_disk(db) != 0) {
+            fprintf(stderr, "userdel: could not remove the bridges of %s; %s is unchanged\n", target_key,
+                    argv[1]);
+            return 1;
+        }
         fprintf(stderr, "userdel: could not remove the bridges of %s; %s is unchanged\n", target_key,
                 argv[1]);
         return 1;
     }
     if (fl_session_save_users() != FL_RESULT_OK) {
-        (void)account_reload_db_from_disk(db);
+        if (account_reload_db_from_disk(db) != 0) {
+            fprintf(stderr, "userdel: could not save %s; %s is kept, and its bridges must be requested again\n",
+                    FL_SESSION_USERS_PATH, argv[1]);
+            return 1;
+        }
         fprintf(stderr, "userdel: could not save %s; %s is kept, and its bridges must be requested again\n",
                 FL_SESSION_USERS_PATH, argv[1]);
         return 1;
@@ -225,6 +248,12 @@ int cmd_passwd_run(int argc, char **argv) {
     }
     pass = pw;
     db = fl_session_user_db_mut();
+    if (!db->loaded) {
+        cmd_wipe_password(pw, sizeof(pw));
+        cmd_wipe_password(current, sizeof(current));
+        fprintf(stderr, "account: account store is not available\n");
+        return 1;
+    }
     if (rel == FL_HERITAGE_REL_SELF)
         rc = fl_user_db_change_password(db, user, current, pass);
     else
@@ -240,7 +269,10 @@ int cmd_passwd_run(int argc, char **argv) {
         return 1;
     }
     if (fl_session_save_users() != FL_RESULT_OK) {
-        (void)account_reload_db_from_disk(db);
+        if (account_reload_db_from_disk(db) != 0) {
+            fprintf(stderr, "passwd: could not save %s\n", FL_SESSION_USERS_PATH);
+            return 1;
+        }
         fprintf(stderr, "passwd: could not save %s\n", FL_SESSION_USERS_PATH);
         return 1;
     }
