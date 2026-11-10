@@ -67,4 +67,24 @@
 #define FL_KQ_ACCOUNT_NO_ROOM (-3)
 #define FL_KQ_ACCOUNT_WRONG_PASSWORD (-4)
 
+/* Access policy (`keyquorum_access.h`, ABI 4): the factor a login, `su` or `sudo` demands, and
+ * bridge-proof statuses (`keyquorum_bridge.h`), a separate namespace. Copies, checked against
+ * KeyQuorum's by _Static_assert in kq_driver.c. Append only; never renumber. */
+#define FL_KQ_ACCESS_NONE 0
+#define FL_KQ_ACCESS_PASSWORD 1
+#define FL_KQ_ACCESS_KQST_PASSWORD 2
+#define FL_KQ_ACCESS_PASSWORD_BRIDGE_KQST 3
+#define FL_KQ_ACCESS_REFUSED 4
+#define FL_KQ_ACCESS_INVALID (-1)
+/** At most this many live bridges and members per bridge in one access or verify call. */
+#define FL_KQ_ACCESS_MAX_BRIDGES 64u
+#define FL_KQ_BRIDGE_MAX_MEMBERS 256u
+/** A private bridge's salt and its member's wrap salt (`crypto::SALT_LEN`). */
+#define FL_KQ_BRIDGE_SALT_LEN 16u
+#define FL_KQ_BRIDGE_OK 0
+#define FL_KQ_BRIDGE_INVALID (-1)
+#define FL_KQ_BRIDGE_NO_ROOM (-3)
+#define FL_KQ_BRIDGE_REFUSED (-5)
+#define FL_KQ_BRIDGE_STALE (-6)
+
 #endif /* FL_CONTRACT_P4_KEYQUORUM_H */

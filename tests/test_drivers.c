@@ -356,6 +356,59 @@ out:
         fprintf(stderr, "FAIL [%s]: head_author\n", __func__);
     return rc;
 }
+
+/* Access policy and bridge proof (ABI 4): one-to-one over kq_access_requirement, kq_bridge_prove
+ * and kq_bridge_verify. The factor comes back unchanged; a junk proof is refused, never accepted. */
+static int test_keyquorum_access_and_bridge_ops(void) {
+    const fl_kq_driver_t *kq = fl_kq_driver_get();
+    const char *members[] = {"Root.Flinstone.Bob", "Root.Alternative.Ann"};
+    const kq_bridge_t live = {"0123456789abcdef0123456789abcdef", members, 2};
+    const char *labels[] = {"Root.Flinstone.Bob", "Root.Alternative.Ann"};
+    uint8_t salt[16], wrap[16], pub[32], sk[32], ek[32], pubs[64], challenge[32], art[512];
+    uint8_t sealed[96];
+    size_t alen = 0;
+    int idx = 7, grant = 7;
+
+    ASSERT(kq && kq->access_requirement && kq->bridge_prove && kq->bridge_verify);
+    ASSERT(kq->access_requirement("Root.Flinstone.Bob", "Root.Flinstone.Bob", 0, NULL, 0, 0, &idx,
+                                  &grant) == FL_KQ_ACCESS_NONE);
+    ASSERT(idx == -1 && grant == 0);
+    ASSERT(kq->access_requirement("Root.Flinstone.Bob", "Root.Flinstone.Bob", 1, NULL, 0, 0, NULL,
+                                  NULL) == FL_KQ_ACCESS_KQST_PASSWORD);
+    ASSERT(kq->access_requirement("Root.Flinstone", "Root.Flinstone.Bob", 0, NULL, 0, 1, &idx,
+                                  &grant) == FL_KQ_ACCESS_PASSWORD);
+    ASSERT(grant == 1); /* parent approval on: a same-branch switch needs the grant */
+    ASSERT(kq->access_requirement("Root.Flinstone.Bob", "Root.Alternative.Ann", 0, NULL, 0, 0, &idx,
+                                  &grant) == FL_KQ_ACCESS_KQST_PASSWORD);
+    ASSERT(kq->access_requirement("Root.Flinstone.Bob", "Root.Alternative.Ann", 0, &live, 1, 0, &idx,
+                                  &grant) == FL_KQ_ACCESS_PASSWORD_BRIDGE_KQST);
+    ASSERT(idx == 0 && grant == 0);
+    ASSERT(kq->access_requirement("Root.Flinstone.Bob", "Root..Bob", 0, NULL, 0, 0, NULL, NULL) ==
+           FL_KQ_ACCESS_REFUSED);
+    ASSERT(kq->access_requirement(NULL, "Root", 0, NULL, 0, 0, &idx, &grant) == FL_KQ_ACCESS_INVALID);
+    ASSERT(idx == -1 && grant == 0);
+
+    /* A sealed key that is not one opens nothing: no artifact. */
+    memset(salt, 0x11, sizeof salt);
+    memset(wrap, 0x22, sizeof wrap);
+    memset(sealed, 0x33, sizeof sealed);
+    memset(challenge, 0x44, sizeof challenge);
+    ASSERT(kq->account_keygen(sk, pub) == FL_KQ_ACCOUNT_OK);
+    ASSERT(kq->account_box_keygen(ek, pubs) == FL_KQ_ACCOUNT_OK);
+    ASSERT(kq->bridge_prove(live.uid, 1, salt, pub, members[0], sealed, sizeof sealed, wrap, ek, sk,
+                            challenge, sizeof challenge, art, sizeof art, &alen) < 0);
+    kq->wipe(sk, sizeof sk);
+    kq->wipe(ek, sizeof ek);
+    /* A junk artifact verifies against nothing. */
+    memcpy(pubs, pub, 32);
+    memcpy(pubs + 32, pub, 32);
+    memset(art, 0x55, 64);
+    ASSERT(kq->bridge_verify(live.uid, 1, salt, pub, 0, labels, pubs, 2, labels[1], challenge,
+                             sizeof challenge, art, 64) != FL_KQ_BRIDGE_OK);
+    ASSERT(kq->bridge_verify(live.uid, 1, salt, pub, 0, NULL, pubs, 2, labels[1], challenge,
+                             sizeof challenge, art, 64) == FL_KQ_BRIDGE_INVALID);
+    return 0;
+}
 #endif
 
 /* A shutdown empties the registry and the device table; the next init registers and binds
@@ -1064,6 +1117,9 @@ int main(void) {
     printf("OK\n");
     printf("test_keyquorum_head_author... ");
     if (test_keyquorum_head_author() != 0) { drivers_shutdown(); unlink(path); return 1; }
+    printf("OK\n");
+    printf("test_keyquorum_access_and_bridge_ops... ");
+    if (test_keyquorum_access_and_bridge_ops() != 0) { drivers_shutdown(); unlink(path); return 1; }
     printf("OK\n");
 #endif
 

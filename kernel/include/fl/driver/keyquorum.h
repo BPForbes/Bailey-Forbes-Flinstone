@@ -17,6 +17,8 @@
 
 #include "contract_p4_keyquorum.h"
 #include "fl/driver/driver.h"
+#include "keyquorum_access.h"
+#include "keyquorum_bridge.h"
 #include "keyquorum_error.h"
 #include "keyquorum_files.h"
 #include "keyquorum_identity.h"
@@ -183,6 +185,31 @@ struct fl_kq_driver {
      * do not fit; KQ_FILE_INVALID for a malformed container. out is "" on every failure.
      */
     int (*head_author)(const fl_kq_buf_t *c, char *out, size_t cap);
+
+    /*
+     * Access policy and private-bridge proof (file ABI version 4), appended after head_author.
+     * One-to-one over kq_access_requirement (keyquorum_access.h) and kq_bridge_prove /
+     * kq_bridge_verify (keyquorum_bridge.h): the KQ_ACCESS_* factor or KQ_BRIDGE_* status is
+     * returned unchanged, nothing is allocated or retained. access_requirement says which factor a
+     * switch demands and checks none; the caller passes only bridges its own store holds as live.
+     * NULL in the freestanding image (no account store; the SECFEAT image has no room for them).
+     * bridge_prove signs challenge as member local_label (the caller wipes encryption_sk and
+     * signing_sk); bridge_verify checks the artifact against the live bridge's facts the caller holds.
+     */
+    int (*access_requirement)(const char *current, const char *target, int sudo,
+                              const kq_bridge_t *live_bridges, size_t nbridges, int parent_approval,
+                              int *bridge_index_out, int *needs_parent_grant_out);
+    int (*bridge_prove)(const char *uid, uint32_t generation, const uint8_t salt[16],
+                        const uint8_t bridge_public[32], const char *local_label,
+                        const uint8_t *sealed_bridge_key, size_t slen, const uint8_t wrap_salt[16],
+                        const uint8_t encryption_sk[32], const uint8_t signing_sk[32],
+                        const uint8_t *challenge, size_t clen, uint8_t *artifact_out, size_t cap,
+                        size_t *artifact_len);
+    int (*bridge_verify)(const char *uid, uint32_t generation, const uint8_t salt[16],
+                         const uint8_t bridge_public[32], int destroyed,
+                         const char *const *member_labels, const uint8_t *member_signing_pubs,
+                         size_t nmembers, const char *verifier_label, const uint8_t *challenge,
+                         size_t clen, const uint8_t *artifact, size_t alen);
 };
 
 /**
