@@ -82,6 +82,8 @@ OPENSSL_ARM_LIB = $(OPENSSL_ARM_SSL_LIB) $(OPENSSL_ARM_CRYPTO_LIB)
 endif
 endif
 CXXFLAGS ?= $(CFLAGS) -std=c++17
+# Recursive so $@ is the object being built. := would expand $@ at assignment time.
+DEPFLAGS = -MMD -MP -MF $(@:.o=.d) -MT $@
 ASFLAGS =
 
 ifneq ($(OPENSSL_ARM_INC),)
@@ -583,9 +585,9 @@ $(SQLITE_ARM_LIB):
 
 userland/identity/%.o: userland/identity/%.cpp
 ifeq ($(CXX_IS_GCC_FOR_CPP),1)
-	$(CXX) -x c++ $(CXXFLAGS) -c -o $@ $<
+	$(CXX) -x c++ $(CXXFLAGS) $(DEPFLAGS) -c -o $@ $<
 else
-	$(CXX) $(CXXFLAGS) -c -o $@ $<
+	$(CXX) $(CXXFLAGS) $(DEPFLAGS) -c -o $@ $<
 endif
 
 ifeq ($(ARCH),arm)
@@ -636,7 +638,7 @@ TEST_UNIT_INTERPRETER_OBJ = userland/shell/interpreter_unit.o
 TEST_OBJS = $(TEST_SRCS:.c=.o) $(TEST_UNIT_INTERPRETER_OBJ)
 
 userland/shell/interpreter_unit.o: userland/shell/interpreter.c
-	$(CC) $(CFLAGS) -DUNIT_TEST -c $< -o $@
+	$(CC) $(CFLAGS) -DUNIT_TEST $(DEPFLAGS) -c $< -o $@
 MEM_ASM_OBJ = $(patsubst %.s,%.o,$(patsubst %.asm,%.o,$(firstword $(ASMSRCS_BASE))))
 # The file readers in server_shared_fs.c allocate in MEM_DOMAIN_FS, so every binary that links
 # them links the allocator. The first adds the assembly layer it needs; the second is for
@@ -688,13 +690,13 @@ BPForbes_Flinstone_Tests.o: $(VERSION_DEF)
 userland/shell/interpreter_unit.o: $(VERSION_DEF)
 
 %.o: %.c
-	$(CC) $(CFLAGS) -c $< -o $@
+	$(CC) $(CFLAGS) $(DEPFLAGS) -c $< -o $@
 
 # One section per function so --gc-sections (FS_JAIL_TEST_LIBS) can keep the registry
 # lookup without the rest of the model. The shell link does not pass --gc-sections and
 # still resolves every section.
 kernel/drivers/driver_model.o: kernel/drivers/driver_model.c
-	$(CC) $(CFLAGS) -ffunction-sections -fdata-sections -c $< -o $@
+	$(CC) $(CFLAGS) -ffunction-sections -fdata-sections $(DEPFLAGS) -c $< -o $@
 
 # Assembly file compilation
 %.o: %.s
@@ -712,22 +714,25 @@ kernel/arch/x86_64/%.o: kernel/arch/x86_64/%.s
 endif
 
 $(KERNEL_DRIVERS)/%.o: $(KERNEL_DRIVERS)/%.c
-	$(CC) $(CFLAGS) -I$(KERNEL_DRIVERS) -c $< -o $@
+	$(CC) $(CFLAGS) -I$(KERNEL_DRIVERS) $(DEPFLAGS) -c $< -o $@
 
 kernel/drivers/%.o: kernel/drivers/%.c
-	$(CC) $(CFLAGS) -c $< -o $@
+	$(CC) $(CFLAGS) $(DEPFLAGS) -c $< -o $@
 
 kernel/drivers/block/%.o: kernel/drivers/block/%.c
-	$(CC) $(CFLAGS) -c $< -o $@
+	$(CC) $(CFLAGS) $(DEPFLAGS) -c $< -o $@
 
 kernel/arch/x86_64/hal/%.o: kernel/arch/x86_64/hal/%.c
-	$(CC) $(CFLAGS) -Ikernel/arch/x86_64 -c $< -o $@
+	$(CC) $(CFLAGS) -Ikernel/arch/x86_64 $(DEPFLAGS) -c $< -o $@
 
 kernel/arch/aarch64/hal/%.o: kernel/arch/aarch64/hal/%.c
-	$(CC) $(CFLAGS) -Ikernel/arch/aarch64 -c $< -o $@
+	$(CC) $(CFLAGS) -Ikernel/arch/aarch64 $(DEPFLAGS) -c $< -o $@
 
 VM/devices/%.o: VM/devices/%.c
-	$(CC) $(CFLAGS) -IVM -IVM/devices -c $< -o $@
+	$(CC) $(CFLAGS) -IVM -IVM/devices $(DEPFLAGS) -c $< -o $@
+
+# Objects built before depfiles exist still rebuild when this header changes.
+kernel/drivers/keyquorum/kq_driver.o: contracts/drivers/contract_p4_keyquorum.h
 
 # --- ASM + Alloc + PQ unit tests (no CUnit) ---
 # Use -fsanitize when NOT using ASM allocator (libc tests only)
@@ -862,10 +867,10 @@ $(TEST_BATCH_GC_DIR):
 	@mkdir -p $(TEST_BATCH_GC_DIR)
 
 $(TEST_BATCH_GC_DIR)/%.o: userland/command/%.c | $(TEST_BATCH_GC_DIR)
-	$(CC) $(CFLAGS) $(TEST_BATCH_GC_FLAGS) -c $< -o $@
+	$(CC) $(CFLAGS) $(TEST_BATCH_GC_FLAGS) $(DEPFLAGS) -c $< -o $@
 
 $(TEST_BATCH_GC_DIR)/cmd_batch.o: userland/command/cmd_batch.c | $(TEST_BATCH_GC_DIR)
-	$(CC) $(CFLAGS) $(TEST_BATCH_GC_FLAGS) -DTEST_BATCH_ARGV_HELPERS_ONLY -c userland/command/cmd_batch.c -o $@
+	$(CC) $(CFLAGS) $(TEST_BATCH_GC_FLAGS) -DTEST_BATCH_ARGV_HELPERS_ONLY $(DEPFLAGS) -c userland/command/cmd_batch.c -o $@
 
 .PHONY: test_batch_argv_issue220
 test_batch_argv_issue220: tests/test_batch_argv_issue220.c tests/stub_batch_layout_valid.c $(TEST_BATCH_ISSUE220_CMD_OBJS)
@@ -879,7 +884,7 @@ $(TEST_THREADPOOL_GC_DIR):
 THREADPOOL_TEST_CFLAGS = $(filter-out -DBATCH_SINGLE_THREAD=1,$(CFLAGS)) -UBATCH_SINGLE_THREAD
 
 $(TEST_THREADPOOL_GC_DIR)/threadpool.o: kernel/core/sched/threadpool.c | $(TEST_THREADPOOL_GC_DIR)
-	$(CC) $(THREADPOOL_TEST_CFLAGS) $(TEST_BATCH_GC_FLAGS) -c $< -o $@
+	$(CC) $(THREADPOOL_TEST_CFLAGS) $(TEST_BATCH_GC_FLAGS) $(DEPFLAGS) -c $< -o $@
 
 .PHONY: test_threadpool_issue222 test_disk_hex_issue222 test_issue222
 test_threadpool_issue222: tests/test_threadpool_issue222.c $(TEST_THREADPOOL_GC_DIR)/threadpool.o kernel/core/sched/priority_queue.o $(MEM_ASM_OBJ)
@@ -1577,6 +1582,8 @@ test_replay:
 debug: CFLAGS += -DMEM_ASM_DEBUG -g
 debug: $(TARGET)
 
+-include $(filter-out $(ASMOBJS:.o=.d),$(OBJS:.o=.d)) $(TEST_OBJS:.o=.d) $(TEST_BATCH_ISSUE220_CMD_OBJS:.o=.d) $(TEST_THREADPOOL_GC_DIR)/threadpool.d
+
 clean:
 	rm -f $(OBJS) $(TEST_OBJS) $(TEST_ASMOBJS) $(TARGET) $(TEST_TARGET)
 	rm -f $(FLINSTONE_LINUX_NET_OUT)
@@ -1588,6 +1595,7 @@ clean:
 	rm -f tests/test_batch_argv_issue220 tests/test_threadpool_issue222 tests/test_disk_hex_issue222
 	rm -rf tests/obj/issue220 tests/obj/issue222
 	find . -name '*.o' -type f ! -path './deps/*' ! -path './.git/*' -exec rm -f {} +
+	find . -name '*.d' -type f ! -path './deps/*' ! -path './.git/*' -exec rm -f {} +
 
 # Architecture-specific build targets
 .PHONY: arm x86-64-nasm x86_64_nasm parity
