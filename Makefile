@@ -1161,7 +1161,8 @@ test_p0_p2_wiring: kernel/core/memory/fl_stack.o kernel/core/memory/exec_context
 		kernel/core/identity/heritage.o kernel/core/identity/bridge.o kernel/core/identity/share_gate.o \
 		kernel/core/identity/path_property.o kernel/core/mm/mem_domain.o kernel/core/mm/pmm.o \
 		userland/identity/password_hash.o userland/shell/authz_subsystem.o $(MEM_ASM_OBJ) $(FL_STACK_ASM_OBJ) \
-		kernel/drivers/keyquorum/kq_driver.o kernel/drivers/driver_model.o kernel/core/vfs/kq_account.o
+		kernel/drivers/keyquorum/kq_driver.o kernel/drivers/driver_model.o kernel/core/vfs/kq_account.o \
+		kernel/core/vfs/server_shared_digest.o
 	$(CC) $(CFLAGS) $(TEST_SANITIZE) -c -o tests/test_p0_p2_wiring.o tests/test_p0_p2_wiring.c
 	$(CXX) $(CXXFLAGS) $(TEST_SANITIZE) -o tests/test_p0_p2_wiring tests/test_p0_p2_wiring.o \
 	  kernel/core/memory/fl_stack.o kernel/core/memory/exec_context.o kernel/core/time/timekeeping.o \
@@ -1170,6 +1171,7 @@ test_p0_p2_wiring: kernel/core/memory/fl_stack.o kernel/core/memory/exec_context
 	  kernel/core/identity/path_property.o kernel/core/mm/mem_domain.o kernel/core/mm/pmm.o \
 	  userland/identity/password_hash.o userland/shell/authz_subsystem.o $(MEM_ASM_OBJ) $(FL_STACK_ASM_OBJ) \
 	  kernel/drivers/keyquorum/kq_driver.o kernel/drivers/driver_model.o kernel/core/vfs/kq_account.o \
+	  kernel/core/vfs/server_shared_digest.o \
 	  -lsqlite3 -lstdc++ $(OPENSSL_LIBS) $(KQ_ID_LINK) -pthread -Wl,--gc-sections -Wl,-z,noexecstack
 	./tests/test_p0_p2_wiring
 
