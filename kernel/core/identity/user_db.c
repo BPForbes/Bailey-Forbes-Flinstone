@@ -1147,9 +1147,48 @@ static int blob_is(sqlite3_stmt *st, int col, size_t len) {
            sqlite3_column_blob(st, col) != NULL;
 }
 
+/* Member label's sealed key and wrap salt on an already-open connection. NOENT unless both are
+ * present and the right sizes (including a store from before the wrap_salt column). */
+static fl_result_t bridge_sealed_select(sqlite3 *sql, const char *uid, const char *label,
+                                        unsigned char *sealed, size_t cap, size_t *len,
+                                        unsigned char wrap_salt[FL_USER_BRIDGE_SALT_LEN]) {
+    sqlite3_stmt *st = NULL;
+    fl_result_t rc = FL_RESULT_NOENT;
+
+    *len = 0;
+    if (sqlite3_prepare_v2(sql,
+                           "SELECT sealed_bridge_key, wrap_salt FROM account_bridge_members "
+                           "WHERE uid = ? AND label = ?;",
+                           -1, &st, NULL) != SQLITE_OK)
+        return FL_RESULT_NOENT;
+    sqlite3_bind_text(st, 1, uid, -1, SQLITE_TRANSIENT);
+    sqlite3_bind_text(st, 2, label, -1, SQLITE_TRANSIENT);
+    if (sqlite3_step(st) == SQLITE_ROW && sqlite3_column_type(st, 0) == SQLITE_BLOB &&
+        blob_is(st, 1, FL_USER_BRIDGE_SALT_LEN)) {
+        int n = sqlite3_column_bytes(st, 0);
+
+        if (n <= 0 || (size_t)n > FL_USER_BRIDGE_SEALED_MAX) {
+            rc = FL_RESULT_NOENT;
+        } else if ((size_t)n > cap) {
+            rc = FL_RESULT_NOMEM;
+        } else {
+            memcpy(sealed, sqlite3_column_blob(st, 0), (size_t)n);
+            memcpy(wrap_salt, sqlite3_column_blob(st, 1), FL_USER_BRIDGE_SALT_LEN);
+            *len = (size_t)n;
+            rc = FL_RESULT_OK;
+        }
+    }
+    sqlite3_finalize(st);
+    return rc;
+}
+
 /* Reads uid's row and its members into out. NOENT for no row or a malformed one; ERR when the
- * store cannot be read (a failed prepare, or a step that is neither a row nor the end). */
-static fl_result_t bridge_read(sqlite3 *sql, const char *uid, fl_user_bridge_t *out) {
+ * store cannot be read (a failed prepare, or a step that is neither a row nor the end).
+ * seal_label non-NULL also reads that member's sealed key on this same connection. A sealed-key
+ * miss leaves the facts filled so the caller can tell it from a missing bridge. */
+static fl_result_t bridge_read(sqlite3 *sql, const char *uid, fl_user_bridge_t *out,
+                               const char *seal_label, unsigned char *sealed, size_t seal_cap,
+                               size_t *seal_len, unsigned char wrap_salt[FL_USER_BRIDGE_SALT_LEN]) {
     sqlite3_stmt *st = NULL;
     fl_result_t rc = FL_RESULT_NOENT;
     sqlite3_int64 gen;
@@ -1207,9 +1246,15 @@ static fl_result_t bridge_read(sqlite3 *sql, const char *uid, fl_user_bridge_t *
     sqlite3_finalize(st);
     if (rc == FL_RESULT_OK && out->nmembers < 2)
         rc = FL_RESULT_NOENT;
-    if (rc != FL_RESULT_OK)
+    if (rc != FL_RESULT_OK) {
         mem_domain_zero(out, sizeof *out);
-    return rc;
+        return rc;
+    }
+    if (!seal_label)
+        return FL_RESULT_OK;
+    if (!sealed || !seal_len || !wrap_salt)
+        return FL_RESULT_INVAL;
+    return bridge_sealed_select(sql, uid, seal_label, sealed, seal_cap, seal_len, wrap_salt);
 }
 
 fl_result_t fl_user_db_bridge_get(const fl_user_db_t *db, const char *uid, fl_user_bridge_t *out) {
@@ -1220,51 +1265,46 @@ fl_result_t fl_user_db_bridge_get(const fl_user_db_t *db, const char *uid, fl_us
         return FL_RESULT_INVAL;
     if (bridge_db_open(db, 0, &sql) != FL_RESULT_OK)
         return FL_RESULT_ERR;
-    rc = bridge_read(sql, uid, out);
+    /* The row and the roster are one snapshot. */
+    if (sqlite3_exec(sql, "BEGIN;", NULL, NULL, NULL) != SQLITE_OK) {
+        sqlite3_close(sql);
+        return FL_RESULT_ERR;
+    }
+    rc = bridge_read(sql, uid, out, NULL, NULL, 0, NULL, NULL);
+    (void)sqlite3_exec(sql, "ROLLBACK;", NULL, NULL, NULL);
     sqlite3_close(sql);
     return rc;
 }
 
-fl_result_t fl_user_db_bridges_live(const fl_user_db_t *db, fl_user_bridge_t *out, size_t cap,
-                                    size_t *count) {
-    sqlite3 *sql = NULL;
+/* The live list on an already-open connection: no open, close, or BEGIN of its own. */
+static fl_result_t bridges_live_on(sqlite3 *sql, fl_user_bridge_t *out, size_t cap, size_t *count) {
     sqlite3_stmt *st = NULL;
     fl_result_t rc = FL_RESULT_OK;
     int step;
 
-    if (!db || !count || (cap && !out))
-        return FL_RESULT_INVAL;
     *count = 0;
-    if (bridge_db_open(db, 0, &sql) != FL_RESULT_OK)
-        return FL_RESULT_ERR;
     /* A store written before the bridge tables has none: no live bridge. Only a table the schema
      * definitely lacks counts as that; a probe that fails is an error like any other read. */
     if (sqlite3_prepare_v2(sql, "SELECT 1 FROM main.sqlite_master WHERE type='table' AND name='account_bridges';",
-                           -1, &st, NULL) != SQLITE_OK) {
-        sqlite3_close(sql);
+                           -1, &st, NULL) != SQLITE_OK)
         return FL_RESULT_ERR;
-    }
     step = sqlite3_step(st);
     sqlite3_finalize(st);
     st = NULL;
-    if (step != SQLITE_ROW) {
-        sqlite3_close(sql);
+    if (step != SQLITE_ROW)
         return step == SQLITE_DONE ? FL_RESULT_OK : FL_RESULT_ERR;
-    }
     /* Every live row must read whole: a live bridge left out would lower the factor a switch demands. */
     if (sqlite3_prepare_v2(sql, "SELECT uid FROM account_bridges WHERE destroyed = 0 ORDER BY uid;", -1,
-                           &st, NULL) != SQLITE_OK) {
-        sqlite3_close(sql);
+                           &st, NULL) != SQLITE_OK)
         return FL_RESULT_ERR;
-    }
     while ((step = sqlite3_step(st)) == SQLITE_ROW) {
-        const char *uid = (const char *)sqlite3_column_text(st, 0);
+        const char *row_uid = (const char *)sqlite3_column_text(st, 0);
 
         if (*count >= cap) {
             rc = FL_RESULT_NOMEM; /* more live bridges than the caller holds: never a partial list */
             break;
         }
-        if (!uid || bridge_read(sql, uid, &out[*count]) != FL_RESULT_OK) {
+        if (!row_uid || bridge_read(sql, row_uid, &out[*count], NULL, NULL, 0, NULL, NULL) != FL_RESULT_OK) {
             rc = FL_RESULT_ERR; /* a live row that cannot be read or is malformed: no list at all */
             break;
         }
@@ -1274,9 +1314,28 @@ fl_result_t fl_user_db_bridges_live(const fl_user_db_t *db, fl_user_bridge_t *ou
     if (rc == FL_RESULT_OK && step != SQLITE_DONE)
         rc = FL_RESULT_ERR;
     sqlite3_finalize(st);
-    sqlite3_close(sql);
     if (rc != FL_RESULT_OK)
         *count = 0;
+    return rc;
+}
+
+fl_result_t fl_user_db_bridges_live(const fl_user_db_t *db, fl_user_bridge_t *out, size_t cap,
+                                    size_t *count) {
+    sqlite3 *sql = NULL;
+    fl_result_t rc;
+
+    if (!db || !count || (cap && !out))
+        return FL_RESULT_INVAL;
+    *count = 0;
+    if (bridge_db_open(db, 0, &sql) != FL_RESULT_OK)
+        return FL_RESULT_ERR;
+    if (sqlite3_exec(sql, "BEGIN;", NULL, NULL, NULL) != SQLITE_OK) {
+        sqlite3_close(sql);
+        return FL_RESULT_ERR;
+    }
+    rc = bridges_live_on(sql, out, cap, count);
+    (void)sqlite3_exec(sql, "ROLLBACK;", NULL, NULL, NULL);
+    sqlite3_close(sql);
     return rc;
 }
 
@@ -1382,40 +1441,119 @@ fl_result_t fl_user_db_bridge_sealed_key(const fl_user_db_t *db, const char *uid
                                          unsigned char *sealed, size_t cap, size_t *len,
                                          unsigned char wrap_salt[FL_USER_BRIDGE_SALT_LEN]) {
     sqlite3 *sql = NULL;
-    sqlite3_stmt *st = NULL;
-    fl_result_t rc = FL_RESULT_NOENT;
+    fl_result_t rc;
 
     if (!db || !uid || !label || !sealed || !len || !wrap_salt)
         return FL_RESULT_INVAL;
     *len = 0;
     if (bridge_db_open(db, 0, &sql) != FL_RESULT_OK)
         return FL_RESULT_ERR;
-    if (sqlite3_prepare_v2(sql,
-                           "SELECT sealed_bridge_key, wrap_salt FROM account_bridge_members "
-                           "WHERE uid = ? AND label = ?;",
-                           -1, &st, NULL) != SQLITE_OK) {
-        /* A store from before wrap_salt holds no sealed key that could open. */
+    /* Its own short snapshot when called alone. Prove does not use this. */
+    if (sqlite3_exec(sql, "BEGIN;", NULL, NULL, NULL) != SQLITE_OK) {
         sqlite3_close(sql);
-        return FL_RESULT_NOENT;
+        return FL_RESULT_ERR;
     }
-    sqlite3_bind_text(st, 1, uid, -1, SQLITE_TRANSIENT);
-    sqlite3_bind_text(st, 2, label, -1, SQLITE_TRANSIENT);
-    if (sqlite3_step(st) == SQLITE_ROW && sqlite3_column_type(st, 0) == SQLITE_BLOB &&
-        blob_is(st, 1, FL_USER_BRIDGE_SALT_LEN)) {
-        int n = sqlite3_column_bytes(st, 0);
-
-        if (n <= 0 || (size_t)n > FL_USER_BRIDGE_SEALED_MAX) {
-            rc = FL_RESULT_NOENT;
-        } else if ((size_t)n > cap) {
-            rc = FL_RESULT_NOMEM;
-        } else {
-            memcpy(sealed, sqlite3_column_blob(st, 0), (size_t)n);
-            memcpy(wrap_salt, sqlite3_column_blob(st, 1), FL_USER_BRIDGE_SALT_LEN);
-            *len = (size_t)n;
-            rc = FL_RESULT_OK;
-        }
-    }
-    sqlite3_finalize(st);
+    rc = bridge_sealed_select(sql, uid, label, sealed, cap, len, wrap_salt);
+    (void)sqlite3_exec(sql, "ROLLBACK;", NULL, NULL, NULL);
     sqlite3_close(sql);
     return rc;
+}
+
+fl_result_t fl_user_db_bridge_snapshot(const fl_user_db_t *db, const char *uid, const char *label,
+                                       fl_user_bridge_t *out, unsigned char *sealed, size_t cap,
+                                       size_t *len,
+                                       unsigned char wrap_salt[FL_USER_BRIDGE_SALT_LEN]) {
+    sqlite3 *sql = NULL;
+    fl_result_t rc;
+
+    if (!db || !uid || !uid[0] || !label || !label[0] || !out || !sealed || !len || !wrap_salt || cap == 0)
+        return FL_RESULT_INVAL;
+    mem_domain_zero(out, sizeof *out);
+    *len = 0;
+    if (bridge_db_open(db, 0, &sql) != FL_RESULT_OK)
+        return FL_RESULT_ERR;
+    if (sqlite3_exec(sql, "BEGIN;", NULL, NULL, NULL) != SQLITE_OK) {
+        sqlite3_close(sql);
+        return FL_RESULT_ERR;
+    }
+    rc = bridge_read(sql, uid, out, label, sealed, cap, len, wrap_salt);
+    (void)sqlite3_exec(sql, "ROLLBACK;", NULL, NULL, NULL);
+    sqlite3_close(sql);
+    return rc;
+}
+
+struct fl_user_bridge_hold {
+    sqlite3 *sql;
+};
+
+static int bridge_sql_busy(sqlite3 *sql, int st) {
+    return st == SQLITE_BUSY || (sql && sqlite3_errcode(sql) == SQLITE_BUSY);
+}
+
+fl_result_t fl_user_db_bridge_reserve(const fl_user_db_t *db, fl_user_bridge_hold_t **out) {
+    fl_user_bridge_hold_t *hold;
+    const char *path;
+    int st;
+
+    if (!db || !out)
+        return FL_RESULT_INVAL;
+    *out = NULL;
+    hold = (fl_user_bridge_hold_t *)calloc(1, sizeof *hold);
+    if (!hold)
+        return FL_RESULT_ERR;
+    /* The same open as bridge_db_open(writable), with busy_timeout 0 set before any statement so a
+     * taken writer slot is BUSY instead of a closed connection the caller cannot tell apart. */
+    path = db->path[0] ? db->path : FL_USERS_DB_DEFAULT_PATH;
+    if (sqlite3_open_v2(path, &hold->sql, SQLITE_OPEN_READWRITE | SQLITE_OPEN_CREATE, NULL) != SQLITE_OK) {
+        sqlite3_close(hold->sql);
+        free(hold);
+        return FL_RESULT_ACCES;
+    }
+    sqlite3_busy_timeout(hold->sql, 0);
+    if (db_init_schema(hold->sql) != FL_RESULT_OK) {
+        int busy = bridge_sql_busy(hold->sql, sqlite3_errcode(hold->sql));
+
+        sqlite3_close(hold->sql);
+        free(hold);
+        return busy ? FL_RESULT_BUSY : FL_RESULT_ACCES;
+    }
+    st = sqlite3_exec(hold->sql, "BEGIN IMMEDIATE;", NULL, NULL, NULL);
+    if (st != SQLITE_OK) {
+        int busy = bridge_sql_busy(hold->sql, st);
+
+        (void)sqlite3_exec(hold->sql, "ROLLBACK;", NULL, NULL, NULL);
+        sqlite3_close(hold->sql);
+        free(hold);
+        return busy ? FL_RESULT_BUSY : FL_RESULT_ACCES;
+    }
+    *out = hold;
+    return FL_RESULT_OK;
+}
+
+void fl_user_db_bridge_release(fl_user_bridge_hold_t *hold) {
+    if (!hold)
+        return;
+    if (hold->sql) {
+        (void)sqlite3_exec(hold->sql, "ROLLBACK;", NULL, NULL, NULL);
+        sqlite3_close(hold->sql);
+    }
+    free(hold);
+}
+
+fl_result_t fl_user_db_bridge_live_held(fl_user_bridge_hold_t *hold, fl_user_bridge_t *out, size_t cap,
+                                        size_t *count) {
+    if (!hold || !hold->sql || !count || (cap && !out))
+        return FL_RESULT_INVAL;
+    return bridges_live_on(hold->sql, out, cap, count);
+}
+
+fl_result_t fl_user_db_bridge_read_held(fl_user_bridge_hold_t *hold, const char *uid, const char *label,
+                                        fl_user_bridge_t *out, unsigned char *sealed, size_t cap,
+                                        size_t *len,
+                                        unsigned char wrap_salt[FL_USER_BRIDGE_SALT_LEN]) {
+    if (!hold || !hold->sql || !uid || !uid[0] || !out)
+        return FL_RESULT_INVAL;
+    if (label && (!sealed || !len || !wrap_salt || cap == 0))
+        return FL_RESULT_INVAL;
+    return bridge_read(hold->sql, uid, out, label, sealed, cap, len, wrap_salt);
 }

@@ -286,14 +286,143 @@ static int set_destroyed(const char *uid, int destroyed) {
     return ok ? 0 : -1;
 }
 
-static int verify_then_destroy(const char *uid, uint32_t generation, const uint8_t salt[16],
-                               const uint8_t bridge_public[32], int destroyed, const char *const *member_labels,
-                               const uint8_t *member_signing_pubs, size_t nmembers, const char *verifier_label,
-                               const uint8_t *challenge, size_t clen, const uint8_t *artifact, size_t alen) {
+enum {
+    MUT_NONE = 0,
+    MUT_GENERATION,
+    MUT_SALT,
+    MUT_PUBLIC,
+    MUT_SIGNING,
+    MUT_ENCRYPTION,
+    MUT_SEALED,
+    MUT_WRAP,
+    MUT_EXCLUSIVE,
+    MUT_LOGOUT
+};
+
+static int s_mut_kind;
+static const char *s_mut_uid;
+static sqlite3 *s_block;
+static char s_held_path[512];
+static int s_held_busy;
+
+static int xor_bound(const char *select_sql, const char *update_sql, int member) {
+    sqlite3 *sql = NULL;
+    sqlite3_stmt *rd = NULL, *wr = NULL;
+    unsigned char buf[FL_USER_BRIDGE_SEALED_MAX];
+    const char *label = "Root.Flinstone.Bob";
+    int n, ok = 0;
+
+    if (sqlite3_open(fl_session_user_db()->path, &sql) != SQLITE_OK) {
+        sqlite3_close(sql);
+        return -1;
+    }
+    if (sqlite3_prepare_v2(sql, select_sql, -1, &rd, NULL) != SQLITE_OK)
+        goto done;
+    sqlite3_bind_text(rd, 1, s_mut_uid, -1, SQLITE_TRANSIENT);
+    if (member)
+        sqlite3_bind_text(rd, 2, label, -1, SQLITE_TRANSIENT);
+    if (sqlite3_step(rd) != SQLITE_ROW)
+        goto done;
+    n = sqlite3_column_bytes(rd, 0);
+    if (n <= 0 || (size_t)n > sizeof buf || !sqlite3_column_blob(rd, 0))
+        goto done;
+    memcpy(buf, sqlite3_column_blob(rd, 0), (size_t)n);
+    buf[0] ^= 0x5au;
+    if (sqlite3_prepare_v2(sql, update_sql, -1, &wr, NULL) != SQLITE_OK)
+        goto done;
+    sqlite3_bind_blob(wr, 1, buf, n, SQLITE_TRANSIENT);
+    sqlite3_bind_text(wr, 2, s_mut_uid, -1, SQLITE_TRANSIENT);
+    if (member)
+        sqlite3_bind_text(wr, 3, label, -1, SQLITE_TRANSIENT);
+    ok = sqlite3_step(wr) == SQLITE_DONE && sqlite3_changes(sql) == 1;
+done:
+    sqlite3_finalize(rd);
+    sqlite3_finalize(wr);
+    sqlite3_close(sql);
+    return ok ? 0 : -1;
+}
+
+static int bump_generation(void) {
+    sqlite3 *sql = NULL;
+    sqlite3_stmt *st = NULL;
+    int ok = 0;
+
+    if (sqlite3_open(fl_session_user_db()->path, &sql) != SQLITE_OK) {
+        sqlite3_close(sql);
+        return -1;
+    }
+    if (sqlite3_prepare_v2(sql, "UPDATE account_bridges SET generation = generation + 1 WHERE uid = ?;", -1,
+                           &st, NULL) == SQLITE_OK) {
+        sqlite3_bind_text(st, 1, s_mut_uid, -1, SQLITE_TRANSIENT);
+        ok = sqlite3_step(st) == SQLITE_DONE && sqlite3_changes(sql) == 1;
+        sqlite3_finalize(st);
+    }
+    sqlite3_close(sql);
+    return ok ? 0 : -1;
+}
+
+static int begin_exclusive(void) {
+    if (s_block)
+        return -1;
+    if (sqlite3_open(fl_session_user_db()->path, &s_block) != SQLITE_OK) {
+        sqlite3_close(s_block);
+        s_block = NULL;
+        return -1;
+    }
+    sqlite3_busy_timeout(s_block, 0);
+    if (sqlite3_exec(s_block, "BEGIN EXCLUSIVE;", NULL, NULL, NULL) != SQLITE_OK) {
+        sqlite3_close(s_block);
+        s_block = NULL;
+        return -1;
+    }
+    return 0;
+}
+
+/* Same uid and the same member labels; one fact the proof already bound is committed after verify. */
+static int apply_mut(void) {
+    switch (s_mut_kind) {
+    case MUT_GENERATION:
+        return bump_generation();
+    case MUT_SALT:
+        return xor_bound("SELECT salt FROM account_bridges WHERE uid = ?;",
+                         "UPDATE account_bridges SET salt = ? WHERE uid = ?;", 0);
+    case MUT_PUBLIC:
+        return xor_bound("SELECT public_key FROM account_bridges WHERE uid = ?;",
+                         "UPDATE account_bridges SET public_key = ? WHERE uid = ?;", 0);
+    case MUT_SIGNING:
+        return xor_bound("SELECT signing_public FROM account_bridge_members WHERE uid = ? AND label = ?;",
+                         "UPDATE account_bridge_members SET signing_public = ? WHERE uid = ? AND label = ?;", 1);
+    case MUT_ENCRYPTION:
+        return xor_bound(
+            "SELECT encryption_public FROM account_bridge_members WHERE uid = ? AND label = ?;",
+            "UPDATE account_bridge_members SET encryption_public = ? WHERE uid = ? AND label = ?;", 1);
+    case MUT_SEALED:
+        return xor_bound(
+            "SELECT sealed_bridge_key FROM account_bridge_members WHERE uid = ? AND label = ?;",
+            "UPDATE account_bridge_members SET sealed_bridge_key = ? WHERE uid = ? AND label = ?;", 1);
+    case MUT_WRAP:
+        return xor_bound("SELECT wrap_salt FROM account_bridge_members WHERE uid = ? AND label = ?;",
+                         "UPDATE account_bridge_members SET wrap_salt = ? WHERE uid = ? AND label = ?;", 1);
+    case MUT_EXCLUSIVE:
+        return begin_exclusive();
+    case MUT_LOGOUT:
+        return fl_session_logout() == FL_RESULT_OK ? 0 : -1;
+    default:
+        return -1;
+    }
+}
+
+static int verify_then_act(const char *uid, uint32_t generation, const uint8_t salt[16],
+                           const uint8_t bridge_public[32], int destroyed, const char *const *member_labels,
+                           const uint8_t *member_signing_pubs, size_t nmembers, const char *verifier_label,
+                           const uint8_t *challenge, size_t clen, const uint8_t *artifact, size_t alen) {
     int st = s_real_verify(uid, generation, salt, bridge_public, destroyed, member_labels, member_signing_pubs,
                            nmembers, verifier_label, challenge, clen, artifact, alen);
 
-    if (set_destroyed(s_destroy_after_verify->uid, 1) != 0)
+    if (s_destroy_after_verify && set_destroyed(s_destroy_after_verify->uid, 1) != 0)
+        return FL_KQ_BRIDGE_INVALID;
+    /* After verify has returned: the proof stands, and the store then changes under it. */
+    if (s_mut_kind != MUT_NONE && st == FL_KQ_BRIDGE_OK && apply_mut() != 0)
         return FL_KQ_BRIDGE_INVALID;
     return st;
 }
@@ -301,12 +430,168 @@ static int verify_then_destroy(const char *uid, uint32_t generation, const uint8
 const fl_kq_driver_t *__wrap_fl_kq_driver_get_or_register(void) {
     const fl_kq_driver_t *real = __real_fl_kq_driver_get_or_register();
 
-    if (!s_destroy_after_verify || !real)
+    if ((!s_destroy_after_verify && s_mut_kind == MUT_NONE) || !real)
         return real;
     s_patched = *real;
     s_real_verify = real->bridge_verify;
-    s_patched.bridge_verify = verify_then_destroy;
+    s_patched.bridge_verify = verify_then_act;
     return &s_patched;
+}
+
+/* Another connection, while the switch holds the writer reservation. It must be busy, and the row
+ * it tried to change must still be the one the proof bound. */
+static void held_other_writer(void) {
+    sqlite3 *sql = NULL;
+    sqlite3_stmt *st = NULL;
+    int stc;
+
+    s_held_busy = 0;
+    if (sqlite3_open(s_held_path, &sql) != SQLITE_OK) {
+        sqlite3_close(sql);
+        return;
+    }
+    sqlite3_busy_timeout(sql, 0);
+    stc = sqlite3_exec(sql, "BEGIN IMMEDIATE;", NULL, NULL, NULL);
+    if (stc == SQLITE_BUSY || sqlite3_errcode(sql) == SQLITE_BUSY)
+        s_held_busy = 1;
+    if (stc == SQLITE_OK)
+        (void)sqlite3_exec(sql, "ROLLBACK;", NULL, NULL, NULL);
+    sqlite3_close(sql);
+    if (sqlite3_open(s_held_path, &sql) != SQLITE_OK) {
+        sqlite3_close(sql);
+        return;
+    }
+    sqlite3_busy_timeout(sql, 0);
+    if (sqlite3_prepare_v2(sql, "UPDATE account_bridges SET generation = generation + 1;", -1, &st, NULL) ==
+        SQLITE_OK) {
+        stc = sqlite3_step(st);
+        if (stc != SQLITE_BUSY && sqlite3_errcode(sql) != SQLITE_BUSY)
+            s_held_busy = 0;
+        sqlite3_finalize(st);
+    }
+    sqlite3_close(sql);
+}
+
+static int bridge_generation(const char *uid, int *gen) {
+    sqlite3 *sql = NULL;
+    sqlite3_stmt *st = NULL;
+    int ok = 0;
+
+    if (sqlite3_open(fl_session_user_db()->path, &sql) != SQLITE_OK) {
+        sqlite3_close(sql);
+        return -1;
+    }
+    if (sqlite3_prepare_v2(sql, "SELECT generation FROM account_bridges WHERE uid = ?;", -1, &st, NULL) ==
+        SQLITE_OK) {
+        sqlite3_bind_text(st, 1, uid, -1, SQLITE_TRANSIENT);
+        if (sqlite3_step(st) == SQLITE_ROW) {
+            *gen = sqlite3_column_int(st, 0);
+            ok = 1;
+        }
+        sqlite3_finalize(st);
+    }
+    sqlite3_close(sql);
+    return ok ? 0 : -1;
+}
+
+static int refuse_fact(fl_user_bridge_t *b, int kind) {
+    fl_session_switch_request_t req;
+    int rc;
+
+    if (import_fixture_bridge(b, 0) != 0 || fl_session_set_user("Bob") != FL_RESULT_OK)
+        return -1;
+    s_mut_uid = b->uid;
+    s_mut_kind = kind;
+    memset(&req, 0, sizeof req);
+    req.target = "Ann";
+    req.password = s_ann_pw;
+    req.bridge_member = "Bob";
+    req.bridge_member_password = s_bob_pw;
+    s_audit_last[0] = '\0';
+    rc = fl_session_switch_user(&req);
+    s_mut_kind = MUT_NONE;
+    if (kind == MUT_LOGOUT) {
+        if (rc != FL_RESULT_BUSY || strcmp(s_audit_last, "su-refused:superseded") != 0 ||
+            strcmp(fl_session_current_user(), "Ann") == 0)
+            return -1;
+        return 0;
+    }
+    if (kind == MUT_EXCLUSIVE) {
+        int stayed = strcmp(fl_session_current_user(), "Bob") == 0;
+
+        if (s_block) {
+            (void)sqlite3_exec(s_block, "ROLLBACK;", NULL, NULL, NULL);
+            sqlite3_close(s_block);
+            s_block = NULL;
+        }
+        if (!stayed || rc != FL_RESULT_BUSY || strcmp(s_audit_last, "su-refused:busy") != 0)
+            return -1;
+        return 0;
+    }
+    if (rc != FL_RESULT_ACCES || strcmp(s_audit_last, "su-refused:bridge-changed") != 0 ||
+        strcmp(fl_session_current_user(), "Bob") != 0)
+        return -1;
+    return 0;
+}
+
+static int test_bridge_fact_races(void) {
+    fl_user_bridge_t *b = calloc(1, sizeof *b);
+    fl_session_switch_request_t req;
+    static const int kinds[] = {MUT_GENERATION, MUT_SALT,         MUT_PUBLIC, MUT_SIGNING,  MUT_ENCRYPTION,
+                                MUT_SEALED,     MUT_WRAP,         MUT_EXCLUSIVE, MUT_LOGOUT};
+    size_t i;
+    int gen = 0, gen_after = 0;
+    int rc = 1;
+
+    if (!b)
+        return 1;
+    for (i = 0; i < sizeof kinds / sizeof kinds[0]; i++) {
+        if (refuse_fact(b, kinds[i]) != 0) {
+            fprintf(stderr, "fact kind %d failed (audit %s, user %s)\n", kinds[i], s_audit_last,
+                    fl_session_current_user());
+            goto out;
+        }
+    }
+    s_mut_kind = MUT_NONE;
+    s_destroy_after_verify = NULL;
+    if (import_fixture_bridge(b, 0) != 0 || fl_session_set_user("Bob") != FL_RESULT_OK)
+        goto out;
+    memset(&req, 0, sizeof req);
+    req.target = "Ann";
+    req.password = s_ann_pw;
+    req.bridge_member = "Bob";
+    req.bridge_member_password = s_bob_pw;
+    if (fl_session_switch_user(&req) != FL_RESULT_OK || strcmp(fl_session_current_user(), "Ann") != 0)
+        goto out;
+    if (import_fixture_bridge(b, 0) != 0 || fl_session_set_user("Bob") != FL_RESULT_OK)
+        goto out;
+    if (bridge_generation(b->uid, &gen) != 0)
+        goto out;
+    snprintf(s_held_path, sizeof s_held_path, "%s", fl_session_user_db()->path);
+    s_held_busy = 0;
+    fl_session_test_set_switch_pre_commit(held_other_writer);
+    if (fl_session_switch_user(&req) != FL_RESULT_OK || strcmp(fl_session_current_user(), "Ann") != 0) {
+        fl_session_test_set_switch_pre_commit(NULL);
+        goto out;
+    }
+    fl_session_test_set_switch_pre_commit(NULL);
+    if (!s_held_busy || bridge_generation(b->uid, &gen_after) != 0 || gen_after != gen) {
+        fprintf(stderr, "held writer busy=%d generation %d -> %d\n", s_held_busy, gen, gen_after);
+        goto out;
+    }
+    rc = 0;
+out:
+    s_mut_kind = MUT_NONE;
+    fl_session_test_set_switch_pre_commit(NULL);
+    if (s_block) {
+        (void)sqlite3_exec(s_block, "ROLLBACK;", NULL, NULL, NULL);
+        sqlite3_close(s_block);
+        s_block = NULL;
+    }
+    if (rc != 0)
+        fprintf(stderr, "FAIL [%s]: bridge fact races (last audit %s)\n", __func__, s_audit_last);
+    free(b);
+    return rc;
 }
 
 static int test_bridge_su(void) {
@@ -319,15 +604,15 @@ static int test_bridge_su(void) {
     /* A roster key that disagrees with the member's own: the proof does not verify. */
     if (import_fixture_bridge(b, 1) != 0)
         goto out;
-    if (fl_kq_prove_bridge_member(b->uid, "Bob", s_bob_pw) != FL_KQ_BRIDGE_REFUSED)
+    if (fl_kq_prove_bridge_member(b->uid, "Bob", s_bob_pw, NULL) != FL_KQ_BRIDGE_REFUSED)
         goto fail;
     if (import_fixture_bridge(b, 0) != 0)
         goto out;
-    if (fl_kq_prove_bridge_member(b->uid, "Bob", s_bob_pw) != FL_KQ_BRIDGE_OK)
+    if (fl_kq_prove_bridge_member(b->uid, "Bob", s_bob_pw, NULL) != FL_KQ_BRIDGE_OK)
         goto fail;
-    if (fl_kq_prove_bridge_member(b->uid, "Bob", s_ann_pw) != FL_KQ_BRIDGE_REFUSED)
+    if (fl_kq_prove_bridge_member(b->uid, "Bob", s_ann_pw, NULL) != FL_KQ_BRIDGE_REFUSED)
         goto fail; /* the member's token does not open with another passphrase */
-    if (fl_kq_prove_bridge_member(b->uid, "Ann", s_ann_pw) != FL_KQ_BRIDGE_REFUSED)
+    if (fl_kq_prove_bridge_member(b->uid, "Ann", s_ann_pw, NULL) != FL_KQ_BRIDGE_REFUSED)
         goto fail; /* Ann is a member, but this store holds no sealed key of hers */
     need = fl_kq_unlock_requirement("Bob", "Ann", 0);
     if (need.factor != FL_KQ_ACCESS_PASSWORD_BRIDGE_KQST || strcmp(need.bridge_uid, b->uid) != 0)
@@ -360,7 +645,7 @@ static int test_bridge_su(void) {
     b->destroyed = 1;
     if (fl_user_db_bridge_put(fl_session_user_db(), b) != FL_RESULT_OK)
         goto fail;
-    if (fl_kq_prove_bridge_member(b->uid, "Bob", s_bob_pw) != FL_KQ_BRIDGE_STALE)
+    if (fl_kq_prove_bridge_member(b->uid, "Bob", s_bob_pw, NULL) != FL_KQ_BRIDGE_STALE)
         goto fail;
     need = fl_kq_unlock_requirement("Ann", "Bob", 0);
     if (need.factor != FL_KQ_ACCESS_KQST_PASSWORD)
@@ -415,6 +700,7 @@ int main(void) {
     RUN(test_refusals);
     RUN(test_login_generation);
     RUN(test_bridge_su);
+    RUN(test_bridge_fact_races);
     mem_domain_secure_zero(s_bob_pw, sizeof s_bob_pw);
     mem_domain_secure_zero(s_ann_pw, sizeof s_ann_pw);
     if (rc == 0)

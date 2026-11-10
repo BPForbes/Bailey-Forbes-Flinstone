@@ -51,11 +51,16 @@ int         fl_session_verify_account_password(const char *name, const char *pas
  *                        bridge_member_password and proving membership (fl_kq_prove_bridge_member).
  *   REFUSED              refused. A switch that needs a parent's grant is refused too: there is no way
  *                        to collect one.
- * After a bridge proof the session asks again and refuses ("bridge-changed") unless the factor and the
- * bridge are the same. Every refusal is audited through the audit hook ("su-refused" /
- * "sudo-refused", the two key ids and a reason word; never a password, key or token byte) and
- * nothing names the reason on the terminal. FL_RESULT_OK, ACCES (refused), BUSY (a login or logout
- * ran meanwhile), NOENT (no such account) or INVAL.
+ * The password is checked outside the final lock. That lock is taken before a BEGIN IMMEDIATE
+ * reservation of the account database, and both are released on every path. Under them the factor
+ * is recomputed from the reserved snapshot, and a proof is accepted only when the canonical digest
+ * of the current facts matches the digest the proof returned. A proof that no longer matches is
+ * "bridge-changed". A factor, holder mode, or password record that changed is "changed". A login
+ * or logout in between is BUSY "superseded". A writer already holding the database is BUSY "busy".
+ * Every refusal is audited through the audit hook ("su-refused" / "sudo-refused", the two key ids
+ * and a reason word; never a password, key or token byte) and nothing names the reason on the
+ * terminal. FL_RESULT_OK, ACCES (refused), BUSY (a login or logout ran meanwhile, or the writer
+ * slot is taken), NOENT (no such account) or INVAL.
  */
 typedef struct fl_session_switch_request {
     const char *target;
@@ -107,6 +112,17 @@ void fl_session_set_login_hooks(fl_session_online_fn online, fl_session_offline_
                                 fl_session_online_opened_fn opened);
 /** Tests only: runs after the session lock is released and before the KQST open. */
 void fl_session_test_set_kqst_pre_open(void (*fn)(void));
+/**
+ * Tests only: runs immediately before the final lock of a switch, after the factor was satisfied
+ * and before the writer reservation. The session lock is not held.
+ */
+void fl_session_test_set_switch_pre_lock(void (*fn)(void));
+/**
+ * Tests only: runs after the final recheck has succeeded and before the identity commit, while
+ * the session lock and the writer reservation are both held. Must not call any fl_session_* that
+ * takes the session lock.
+ */
+void fl_session_test_set_switch_pre_commit(void (*fn)(void));
 
 /**
  * The online hook gets a copy of the account's record taken under the session lock and the generation

@@ -2,6 +2,7 @@
 #include "elevation.h"
 #include "fl/driver/keyquorum.h"
 #include "fl/kq.h"
+#include "fl/mem_asm.h"
 #include "mem_domain.h"
 #include <pthread.h>
 #include <stdio.h>
@@ -20,6 +21,8 @@ static fl_session_online_opened_fn s_opened_hook;
 static fl_session_offline_fn s_offline_hook;
 static uint64_t s_login_gen = 1; /* every login and logout starts a new generation; 0 is never one */
 static void (*s_kqst_pre_open)(void); /* tests only: runs after unlock, before token open */
+static void (*s_switch_pre_lock)(void); /* tests only: before the final lock, mutex not held */
+static void (*s_switch_pre_commit)(void); /* tests only: after recheck, both locks held */
 static fl_session_audit_fn s_audit_hook;
 
 void fl_session_set_login_hooks(fl_session_online_fn online, fl_session_offline_fn offline,
@@ -31,6 +34,14 @@ void fl_session_set_login_hooks(fl_session_online_fn online, fl_session_offline_
 
 void fl_session_test_set_kqst_pre_open(void (*fn)(void)) {
     s_kqst_pre_open = fn;
+}
+
+void fl_session_test_set_switch_pre_lock(void (*fn)(void)) {
+    s_switch_pre_lock = fn;
+}
+
+void fl_session_test_set_switch_pre_commit(void (*fn)(void)) {
+    s_switch_pre_commit = fn;
 }
 
 static void session_load_once(void) {
@@ -388,14 +399,22 @@ fl_result_t fl_session_switch_user(const fl_session_switch_request_t *req) {
     const fl_user_record_t *u, *cu, *holder;
     char cur_name[FL_USER_NAME_MAX], cur_key[FL_HERITAGE_KEY_ID_MAX];
     char tgt_name[FL_USER_NAME_MAX], tgt_key[FL_HERITAGE_KEY_ID_MAX];
-    char holder_name[FL_USER_NAME_MAX];
+    char holder_name[FL_USER_NAME_MAX], holder_key[FL_HERITAGE_KEY_ID_MAX];
+    char member_key[FL_HERITAGE_KEY_ID_MAX];
+    char holder_hash[FL_PASSWORD_HASH_HEX_MAX], holder_salt[FL_PASSWORD_SALT_HEX_MAX];
+    char facts_hex[65];
     fl_kq_requirement_t need;
     uint64_t attempt_gen;
-    int holder_kqst, cur_elevated, check_password = 1;
+    int holder_auth, holder_kqst, cur_elevated, check_password = 1, proved = 0;
     const char *why = NULL;
     const char *pw;
+    fl_result_t rc = FL_RESULT_OK;
 
     fl_session_init();
+    mem_domain_secure_zero(holder_hash, sizeof holder_hash);
+    mem_domain_secure_zero(holder_salt, sizeof holder_salt);
+    mem_domain_secure_zero(facts_hex, sizeof facts_hex);
+    member_key[0] = '\0';
     if (!req || !req->target || !req->target[0])
         return FL_RESULT_INVAL;
     pw = req->password;
@@ -413,38 +432,46 @@ fl_result_t fl_session_switch_user(const fl_session_switch_request_t *req) {
     snprintf(tgt_name, sizeof tgt_name, "%s", u->name);
     snprintf(tgt_key, sizeof tgt_key, "%s", u->key_id);
     snprintf(holder_name, sizeof holder_name, "%s", holder->name);
-    holder_kqst = holder->auth_mode == FL_USER_AUTH_PASSWORD_KQST;
+    snprintf(holder_key, sizeof holder_key, "%s", holder->key_id);
+    memcpy(holder_hash, holder->password_hash, sizeof holder->password_hash);
+    memcpy(holder_salt, holder->salt_hex, sizeof holder->salt_hex);
+    holder_auth = holder->auth_mode;
+    holder_kqst = holder_auth == FL_USER_AUTH_PASSWORD_KQST;
     cur_elevated = cu->is_elevated;
     attempt_gen = s_login_gen;
     pthread_mutex_unlock(&s_session_mu);
 
-    /* KeyQuorum names the factor; this side only collects it. */
+    /* KeyQuorum names the factor; this side only collects it. The password KDF runs here, on the
+     * copy taken above, so the final reservation does not derive it again. */
     need = fl_kq_unlock_requirement(cur_name, tgt_name, req->sudo);
-    if (need.needs_parent_grant)
+    if (need.needs_parent_grant) {
         /* No way to collect a parent's grant exists on this side: refused, never skipped. */
-        return switch_refused(FL_RESULT_ACCES, req->sudo, cur_key, tgt_key, "parent-grant");
-    switch (need.factor) {
-    case FL_KQ_ACCESS_NONE:
-        check_password = 0;
-        break;
-    case FL_KQ_ACCESS_PASSWORD:
-    case FL_KQ_ACCESS_PASSWORD_BRIDGE_KQST:
-        break;
-    case FL_KQ_ACCESS_KQST_PASSWORD:
-        /*
-         * Owner decision (FL-12): a password-only holder has no token to open, and the default image
-         * has no KQST for Root, so enforcing the token would lock every account out of sudo -i and of
-         * su to Root or across branches. Such a holder keeps the rule from before KeyQuorum's: its
-         * password, and no prompt for sudo -i by an elevated account. Audited, never silent.
-         */
-        if (!holder_kqst && req->sudo && cur_elevated)
+        why = "parent-grant";
+    } else {
+        switch (need.factor) {
+        case FL_KQ_ACCESS_NONE:
             check_password = 0;
-        break;
-    default:
-        why = "policy";
-        break;
+            break;
+        case FL_KQ_ACCESS_PASSWORD:
+        case FL_KQ_ACCESS_PASSWORD_BRIDGE_KQST:
+            break;
+        case FL_KQ_ACCESS_KQST_PASSWORD:
+            /*
+             * Owner decision (FL-12): a password-only holder has no token to open, and the default
+             * image has no KQST for Root, so enforcing the token would lock every account out of
+             * sudo -i and of su to Root or across branches. Such a holder keeps the rule from before
+             * KeyQuorum's: its password, and no prompt for sudo -i by an elevated account. Audited,
+             * never silent.
+             */
+            if (!holder_kqst && req->sudo && cur_elevated)
+                check_password = 0;
+            break;
+        default:
+            why = "policy";
+            break;
+        }
     }
-    if (!why && check_password && !fl_session_verify_account_password(holder_name, pw))
+    if (!why && check_password && !fl_password_verify(pw, holder_salt, holder_hash))
         why = "password";
     if (!why && need.factor == FL_KQ_ACCESS_KQST_PASSWORD) {
         if (holder_kqst) {
@@ -457,39 +484,128 @@ fl_result_t fl_session_switch_user(const fl_session_switch_request_t *req) {
         }
     }
     if (!why && need.factor == FL_KQ_ACCESS_PASSWORD_BRIDGE_KQST) {
+        fl_user_record_t member;
+
         if (!req->bridge_member || !req->bridge_member[0] || !req->bridge_member_password)
             why = "bridge-member";
+        else if (fl_session_snapshot_account(req->bridge_member, &member) != FL_RESULT_OK ||
+                 !member.key_id[0])
+            why = "bridge-proof";
         else if (fl_kq_prove_bridge_member(need.bridge_uid, req->bridge_member,
-                                           req->bridge_member_password) != FL_KQ_BRIDGE_OK)
+                                           req->bridge_member_password, facts_hex) != FL_KQ_BRIDGE_OK)
             why = "bridge-proof";
         else {
-            /* The roster may have changed between the requirement and the proof: ask again, and
-             * the answer must still be this factor through this same bridge. */
-            fl_kq_requirement_t again = fl_kq_unlock_requirement(cur_name, tgt_name, req->sudo);
-
-            if (again.factor != need.factor || again.needs_parent_grant ||
-                strcmp(again.bridge_uid, need.bridge_uid) != 0)
-                why = "bridge-changed";
+            snprintf(member_key, sizeof member_key, "%s", member.key_id);
+            proved = 1;
         }
     }
-    if (why)
-        return switch_refused(FL_RESULT_ACCES, req->sudo, cur_key, tgt_key, why);
+    if (why) {
+        rc = switch_refused(FL_RESULT_ACCES, req->sudo, cur_key, tgt_key, why);
+        goto wipe;
+    }
+
+    /* The factor is satisfied. A test may change the store here, before the reservation. */
+    if (s_switch_pre_lock)
+        s_switch_pre_lock();
 
     pthread_mutex_lock(&s_session_mu);
-    /* The session the request was made in must still be the one it switches. */
-    if (s_login_gen != attempt_gen || strcmp(s_current, cur_name) != 0) {
-        pthread_mutex_unlock(&s_session_mu);
-        return switch_refused(FL_RESULT_BUSY, req->sudo, cur_key, tgt_key, "superseded");
+    {
+        fl_user_bridge_hold_t *hold = NULL;
+        fl_user_bridge_t *live = NULL;
+        fl_user_bridge_t *now = NULL;
+        fl_kq_requirement_t again;
+        unsigned char sealed[FL_USER_BRIDGE_SEALED_MAX];
+        unsigned char wrap_salt[FL_USER_BRIDGE_SALT_LEN];
+        char now_hex[65];
+        size_t n = 0, slen = 0;
+        fl_result_t hr;
+
+        mem_domain_secure_zero(sealed, sizeof sealed);
+        mem_domain_secure_zero(wrap_salt, sizeof wrap_salt);
+        mem_domain_secure_zero(now_hex, sizeof now_hex);
+        /* Session lock, then the writer slot. A taken slot is BUSY and does not commit. */
+        hr = fl_user_db_bridge_reserve(&s_db, &hold);
+        if (hr != FL_RESULT_OK) {
+            why = hr == FL_RESULT_BUSY ? "busy" : "changed";
+            rc = hr == FL_RESULT_BUSY ? FL_RESULT_BUSY : FL_RESULT_ACCES;
+            goto release;
+        }
+        if (s_login_gen != attempt_gen || strcmp(s_current, cur_name) != 0) {
+            why = "superseded";
+            rc = FL_RESULT_BUSY;
+            goto release;
+        }
+        u = fl_user_db_find(&s_db, tgt_name);
+        cu = fl_user_db_find(&s_db, cur_name);
+        holder = req->sudo ? fl_user_db_find_by_key(&s_db, FL_HERITAGE_ROOT_KEY) : u;
+        if (!u || !cu || !holder || strcmp(u->key_id, tgt_key) != 0 ||
+            strcmp(holder->key_id, holder_key) != 0 || holder->auth_mode != holder_auth) {
+            why = "changed";
+            rc = FL_RESULT_ACCES;
+            goto release;
+        }
+        if (check_password &&
+            (!asm_mem_ct_equal(holder->password_hash, holder_hash, sizeof holder->password_hash) ||
+             !asm_mem_ct_equal(holder->salt_hex, holder_salt, sizeof holder->salt_hex))) {
+            why = "changed";
+            rc = FL_RESULT_ACCES;
+            goto release;
+        }
+        live = (fl_user_bridge_t *)calloc(FL_USER_BRIDGES_MAX, sizeof *live);
+        if (!live) {
+            why = proved ? "bridge-changed" : "changed";
+            rc = FL_RESULT_ACCES;
+            goto release;
+        }
+        /* A live-list error is a refusal: an empty list would lower the factor. */
+        if (fl_user_db_bridge_live_held(hold, live, FL_USER_BRIDGES_MAX, &n) != FL_RESULT_OK) {
+            why = proved ? "bridge-changed" : "changed";
+            rc = FL_RESULT_ACCES;
+            goto release;
+        }
+        again = fl_kq_requirement_from_snapshot(cu, u, req->sudo, live, n);
+        if (again.factor != need.factor ||
+            (again.needs_parent_grant ? 1 : 0) != (need.needs_parent_grant ? 1 : 0) ||
+            (need.factor == FL_KQ_ACCESS_PASSWORD_BRIDGE_KQST &&
+             strcmp(again.bridge_uid, need.bridge_uid) != 0)) {
+            why = proved ? "bridge-changed" : "changed";
+            rc = FL_RESULT_ACCES;
+            goto release;
+        }
+        if (proved) {
+            now = (fl_user_bridge_t *)calloc(1, sizeof *now);
+            if (!now ||
+                fl_user_db_bridge_read_held(hold, need.bridge_uid, member_key, now, sealed,
+                                            sizeof sealed, &slen, wrap_salt) != FL_RESULT_OK ||
+                fl_kq_bridge_facts_hex(now, member_key, sealed, slen, wrap_salt, now_hex) !=
+                    FL_RESULT_OK ||
+                !asm_mem_ct_equal(now_hex, facts_hex, 64)) {
+                why = "bridge-changed";
+                rc = FL_RESULT_ACCES;
+                goto release;
+            }
+        }
+        if (s_switch_pre_commit)
+            s_switch_pre_commit();
+        commit_user_locked(u);
+        why = NULL;
+        rc = FL_RESULT_OK;
+    release:
+        mem_domain_secure_zero(sealed, sizeof sealed);
+        mem_domain_secure_zero(wrap_salt, sizeof wrap_salt);
+        mem_domain_secure_zero(now_hex, sizeof now_hex);
+        free(now);
+        free(live);
+        fl_user_db_bridge_release(hold);
     }
-    u = fl_user_db_find(&s_db, tgt_name);
-    if (!u || strcmp(u->key_id, tgt_key) != 0 ||
-        (check_password && !fl_user_db_verify_password(&s_db, holder_name, pw))) {
-        pthread_mutex_unlock(&s_session_mu);
-        return switch_refused(FL_RESULT_ACCES, req->sudo, cur_key, tgt_key, "changed");
-    }
-    commit_user_locked(u);
     pthread_mutex_unlock(&s_session_mu);
-    return FL_RESULT_OK;
+    if (why)
+        rc = switch_refused(rc, req->sudo, cur_key, tgt_key, why);
+wipe:
+    mem_domain_secure_zero(holder_hash, sizeof holder_hash);
+    mem_domain_secure_zero(holder_salt, sizeof holder_salt);
+    mem_domain_secure_zero(facts_hex, sizeof facts_hex);
+    return rc;
 }
 
 int fl_session_sudo_needs_root(void) {

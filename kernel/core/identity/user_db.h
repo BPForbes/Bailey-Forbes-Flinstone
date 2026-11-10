@@ -122,15 +122,16 @@ fl_result_t fl_user_db_bridge_put_sealed_key(const fl_user_db_t *db, const char 
                                              const unsigned char wrap_salt[FL_USER_BRIDGE_SALT_LEN]);
 /**
  * The bridge uid's current facts as the store holds them now (destroyed included, so the caller
- * passes them to the verifier unchanged). NOENT for an unknown or malformed row; ERR when the store
- * cannot be read.
+ * passes them to the verifier unchanged). The row and its roster are one deferred snapshot.
+ * NOENT for an unknown or malformed row; ERR when the store cannot be read.
  */
 fl_result_t fl_user_db_bridge_get(const fl_user_db_t *db, const char *uid, fl_user_bridge_t *out);
 /**
- * Every live bridge (see above) into out[0..cap), in uid order; *count is how many. Never a partial
- * list: a row with destroyed = 0 that is malformed or cannot be read, or any failed read, is ERR, and
- * more live rows than cap is NOMEM (*count 0 on both). Only a store whose schema has no
- * account_bridges table (written before the bridge tables) is OK with no bridge.
+ * Every live bridge (see above) into out[0..cap), in uid order; *count is how many. The uid list
+ * and each roster are one deferred snapshot, so a row cannot flip to destroyed between them.
+ * Never a partial list: a row with destroyed = 0 that is malformed or cannot be read, or any
+ * failed read, is ERR, and more live rows than cap is NOMEM (*count 0 on both). Only a store
+ * whose schema has no account_bridges table (written before the bridge tables) is OK with no bridge.
  */
 fl_result_t fl_user_db_bridges_live(const fl_user_db_t *db, fl_user_bridge_t *out, size_t cap,
                                     size_t *count);
@@ -142,6 +143,38 @@ fl_result_t fl_user_db_bridges_live(const fl_user_db_t *db, fl_user_bridge_t *ou
 fl_result_t fl_user_db_bridge_sealed_key(const fl_user_db_t *db, const char *uid, const char *label,
                                          unsigned char *sealed, size_t cap, size_t *len,
                                          unsigned char wrap_salt[FL_USER_BRIDGE_SALT_LEN]);
+/**
+ * Facts and one member's sealed key from one read-only deferred snapshot. A missing or malformed
+ * bridge leaves *out zeroed. A bridge that reads and whose sealed key does not is returned with
+ * the facts still filled, so the caller can tell the two apart. Prove uses this; the two public
+ * reads above are each their own snapshot.
+ */
+fl_result_t fl_user_db_bridge_snapshot(const fl_user_db_t *db, const char *uid, const char *label,
+                                       fl_user_bridge_t *out, unsigned char *sealed, size_t cap,
+                                       size_t *len,
+                                       unsigned char wrap_salt[FL_USER_BRIDGE_SALT_LEN]);
+
+/** Writer reservation over the account database. The body is not part of the header. */
+typedef struct fl_user_bridge_hold fl_user_bridge_hold_t;
+/**
+ * Read-write open, busy_timeout 0, BEGIN IMMEDIATE. Holds the SQLite writer slot until
+ * fl_user_db_bridge_release, which rolls the transaction back (it writes nothing). BUSY when
+ * another writer already holds the database; ACCES when it cannot be reserved for any other
+ * reason. The same account_bridges tables as the public readers.
+ */
+fl_result_t fl_user_db_bridge_reserve(const fl_user_db_t *db, fl_user_bridge_hold_t **out);
+void        fl_user_db_bridge_release(fl_user_bridge_hold_t *hold);
+/** Live bridges on a reserved connection. Same results as fl_user_db_bridges_live. */
+fl_result_t fl_user_db_bridge_live_held(fl_user_bridge_hold_t *hold, fl_user_bridge_t *out, size_t cap,
+                                        size_t *count);
+/**
+ * Facts on a reserved connection, and when label is non-NULL that member's sealed key, as one
+ * snapshot. A missing sealed key leaves *out filled.
+ */
+fl_result_t fl_user_db_bridge_read_held(fl_user_bridge_hold_t *hold, const char *uid, const char *label,
+                                        fl_user_bridge_t *out, unsigned char *sealed, size_t cap,
+                                        size_t *len,
+                                        unsigned char wrap_salt[FL_USER_BRIDGE_SALT_LEN]);
 
 fl_result_t fl_user_db_load(fl_user_db_t *db, const char *path);
 fl_result_t fl_user_db_save(const fl_user_db_t *db);

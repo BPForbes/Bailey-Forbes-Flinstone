@@ -50,6 +50,8 @@ typedef struct {
     int needs_parent_grant;
     char bridge_uid[FL_KQ_BRIDGE_UID_MAX];
 } fl_kq_requirement_t;
+struct fl_user_record;
+struct fl_user_bridge;
 /**
  * What a switch from current_user to target_user (account names) demands; sudo non-zero asks for
  * Root's key. The accounts are mapped to their heritage key ids and the live bridges are those the
@@ -58,15 +60,34 @@ typedef struct {
  */
 fl_kq_requirement_t fl_kq_unlock_requirement(const char *current_user, const char *target_user, int sudo);
 /**
+ * The same rule for accounts and a live list the caller already holds. Does not lock the session
+ * and does not read the store. nlive above the store's cap, or a null record, is REFUSED.
+ */
+fl_kq_requirement_t fl_kq_requirement_from_snapshot(const struct fl_user_record *current,
+                                                   const struct fl_user_record *target, int sudo,
+                                                   const struct fl_user_bridge *live, size_t nlive);
+/**
+ * Canonical digest of the bridge facts and the selected member's sealed key: 64 lowercase hex
+ * chars and a NUL. Lengths are big-endian; the raw struct is not hashed. INVAL when the facts
+ * cannot be digested. The canonical buffer is wiped before return.
+ */
+fl_result_t fl_kq_bridge_facts_hex(const struct fl_user_bridge *facts, const char *selected_label,
+                                   const unsigned char *sealed, size_t sealed_len,
+                                   const unsigned char wrap_salt[16], char facts_hex[65]);
+/**
  * A bridge member proves membership of bridge uid at a switch: member_user's slot token is opened
  * with member_password (pairing from the store), its sealed bridge key and wrap salt come from the
  * store, a fresh random challenge is signed (bridge_prove) and the artifact is verified
  * (bridge_verify) against the bridge's facts read from the store at this call, never the caller's.
- * Returns FL_KQ_BRIDGE_OK, or FL_KQ_BRIDGE_STALE (destroyed), FL_KQ_BRIDGE_REFUSED (not a member,
- * no sealed key held, the token did not open, the proof did not verify) or FL_KQ_BRIDGE_INVALID.
- * Every secret is wiped before it returns.
+ * The facts and the sealed key are one snapshot, copied before the token is opened. On
+ * FL_KQ_BRIDGE_OK, facts_hex (when non-NULL) receives the canonical digest of those facts; any
+ * other status zeroes it. A null facts_hex keeps the status-only call. Returns FL_KQ_BRIDGE_OK,
+ * or FL_KQ_BRIDGE_STALE (destroyed), FL_KQ_BRIDGE_REFUSED (not a member, no sealed key held, the
+ * token did not open, the proof did not verify) or FL_KQ_BRIDGE_INVALID. Every secret is wiped
+ * before it returns.
  */
-int fl_kq_prove_bridge_member(const char *uid, const char *member_user, const char *member_password);
+int fl_kq_prove_bridge_member(const char *uid, const char *member_user, const char *member_password,
+                              char facts_hex[65]);
 /**
  * Open the account's KQST (pairing from the store). Returns KQ_ACCOUNT_*. On OK,
  * signing_secret_out holds the signing secret (caller wipes); the encryption secret is wiped inside.

@@ -1429,15 +1429,15 @@ static int test_unlock_requirement(void) {
     ASSERT(r.factor == FL_KQ_ACCESS_PASSWORD_BRIDGE_KQST && r.bridge_index == 0);
     ASSERT(!strcmp(r.bridge_uid, b.uid));
     /* Proving needs a sealed key the store holds and a token that opens: neither is here. */
-    ASSERT(fl_kq_prove_bridge_member(b.uid, "Bob", "pw") == FL_KQ_BRIDGE_REFUSED);
-    ASSERT(fl_kq_prove_bridge_member(b.uid, "Flinstone", "flinstone") == FL_KQ_BRIDGE_REFUSED);
-    ASSERT(fl_kq_prove_bridge_member("dddd0000dddd0000dddd0000dddd0000", "Bob", "pw") == FL_KQ_BRIDGE_STALE);
+    ASSERT(fl_kq_prove_bridge_member(b.uid, "Bob", "pw", NULL) == FL_KQ_BRIDGE_REFUSED);
+    ASSERT(fl_kq_prove_bridge_member(b.uid, "Flinstone", "flinstone", NULL) == FL_KQ_BRIDGE_REFUSED);
+    ASSERT(fl_kq_prove_bridge_member("dddd0000dddd0000dddd0000dddd0000", "Bob", "pw", NULL) == FL_KQ_BRIDGE_STALE);
     /* Destroyed: the bridge is not live, so not offered, and a proof is stale. */
     b.destroyed = 1;
     ASSERT(fl_user_db_bridge_put(db, &b) == FL_RESULT_OK);
     r = fl_kq_unlock_requirement("Bob", "Alternative", 0);
     ASSERT(r.factor == FL_KQ_ACCESS_KQST_PASSWORD && r.bridge_index == -1);
-    ASSERT(fl_kq_prove_bridge_member(b.uid, "Bob", "pw") == FL_KQ_BRIDGE_STALE);
+    ASSERT(fl_kq_prove_bridge_member(b.uid, "Bob", "pw", NULL) == FL_KQ_BRIDGE_STALE);
     return 0;
 }
 
@@ -1599,11 +1599,11 @@ static int test_switch_refusals(void) {
     ASSERT(fl_session_set_user("Alternative") == FL_RESULT_OK);
     ASSERT(fl_kq_unlock_requirement("Alternative", "Bob", 0).factor == FL_KQ_ACCESS_PASSWORD_BRIDGE_KQST);
     s_patch = patch_no_prove;
-    ASSERT(fl_kq_prove_bridge_member(b.uid, "Alternative", "alternative") == FL_KQ_BRIDGE_INVALID);
+    ASSERT(fl_kq_prove_bridge_member(b.uid, "Alternative", "alternative", NULL) == FL_KQ_BRIDGE_INVALID);
     ASSERT(switch_to("Bob", 0, "pw", "Alternative", "alternative") == FL_RESULT_ACCES);
     ASSERT(!strcmp(s_audit, "su-refused:bridge-proof"));
     s_patch = patch_no_verify;
-    ASSERT(fl_kq_prove_bridge_member(b.uid, "Alternative", "alternative") == FL_KQ_BRIDGE_INVALID);
+    ASSERT(fl_kq_prove_bridge_member(b.uid, "Alternative", "alternative", NULL) == FL_KQ_BRIDGE_INVALID);
     ASSERT(switch_to("Bob", 0, "pw", "Alternative", "alternative") == FL_RESULT_ACCES);
     ASSERT(!strcmp(s_audit, "su-refused:bridge-proof"));
     s_patch = NULL;
@@ -1693,6 +1693,59 @@ static int test_restore_user(void) {
     return 0;
 }
 
+/* After the password is accepted, a new live bridge must change the factor, and a writer that
+ * already holds the database must keep the switch from committing. */
+static int s_recheck_put = -1;
+static sqlite3 *s_switch_ex;
+static int s_switch_ex_rc = -1;
+
+static void switch_insert_live_bridge(void) {
+    fl_user_bridge_t b;
+
+    make_bridge(&b, "f00d0000f00d0000f00d0000f00d0000", "Root.Flinstone.Bob", "Root.Alternative");
+    s_recheck_put = fl_user_db_bridge_put(fl_session_user_db(), &b);
+}
+
+static void switch_hold_exclusive(void) {
+    s_switch_ex_rc = -1;
+    if (sqlite3_open(fl_session_user_db()->path, &s_switch_ex) != SQLITE_OK) {
+        sqlite3_close(s_switch_ex);
+        s_switch_ex = NULL;
+        return;
+    }
+    sqlite3_busy_timeout(s_switch_ex, 0);
+    s_switch_ex_rc = sqlite3_exec(s_switch_ex, "BEGIN EXCLUSIVE;", NULL, NULL, NULL);
+}
+
+static int test_switch_bridge_recheck(void) {
+    fl_session_set_audit_hook(capture_audit);
+    ASSERT(exec_on_session_db("UPDATE account_bridges SET destroyed = 1;") == 0);
+    ASSERT(fl_session_set_user("Alternative") == FL_RESULT_OK);
+    fl_session_test_set_switch_pre_lock(switch_insert_live_bridge);
+    ASSERT(switch_to("Bob", 0, "pw", NULL, NULL) == FL_RESULT_ACCES);
+    ASSERT(s_recheck_put == FL_RESULT_OK);
+    ASSERT(!strcmp(s_audit, "su-refused:changed"));
+    ASSERT(!strcmp(fl_session_current_user(), "Alternative"));
+    fl_session_test_set_switch_pre_lock(NULL);
+    ASSERT(exec_on_session_db("UPDATE account_bridges SET destroyed = 1;") == 0);
+
+    s_switch_ex = NULL;
+    fl_session_test_set_switch_pre_lock(switch_hold_exclusive);
+    ASSERT(switch_to("Bob", 0, "pw", NULL, NULL) == FL_RESULT_BUSY);
+    ASSERT(!strcmp(s_audit, "su-refused:busy"));
+    ASSERT(!strcmp(fl_session_current_user(), "Alternative"));
+    fl_session_test_set_switch_pre_lock(NULL);
+    ASSERT(s_switch_ex && s_switch_ex_rc == SQLITE_OK);
+    ASSERT(sqlite3_exec(s_switch_ex, "ROLLBACK;", NULL, NULL, NULL) == SQLITE_OK);
+    sqlite3_close(s_switch_ex);
+    s_switch_ex = NULL;
+    ASSERT(switch_to("Bob", 0, "pw", NULL, NULL) == FL_RESULT_OK);
+    ASSERT(!strcmp(fl_session_current_user(), "Bob"));
+    ASSERT(fl_session_set_user("Flinstone") == FL_RESULT_OK);
+    fl_session_set_audit_hook(NULL);
+    return 0;
+}
+
 int main(void) {
     char db_path[256];
     char tmpl[] = "/tmp/fl_heritage_jailXXXXXX";
@@ -1733,6 +1786,7 @@ int main(void) {
     RUN(test_session_switch);
     RUN(test_switch_refusals);
     RUN(test_restore_user);
+    RUN(test_switch_bridge_recheck);
 
     if (chdir("/tmp") != 0)
         rc = 1;
