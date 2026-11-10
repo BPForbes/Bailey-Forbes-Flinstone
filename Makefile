@@ -1584,7 +1584,10 @@ test_replay:
 debug: CFLAGS += -DMEM_ASM_DEBUG -g
 debug: $(TARGET)
 
--include $(filter-out $(ASMOBJS:.o=.d),$(OBJS:.o=.d)) $(TEST_OBJS:.o=.d) $(TEST_BATCH_ISSUE220_CMD_OBJS:.o=.d) $(TEST_THREADPOOL_GC_DIR)/threadpool.d
+# Standalone VM tests (test_vm_mem and the rest) compile VM/devices objects with
+# VM_ENABLE unset, so those depfiles are not in $(OBJS). Include them on their own.
+VM_STANDALONE_DEPFILES = $(filter-out $(OBJS:.o=.d),$(VM_SRCS:.c=.d) $(VM_SDL_SRCS:.c=.d))
+-include $(filter-out $(ASMOBJS:.o=.d),$(OBJS:.o=.d)) $(VM_STANDALONE_DEPFILES) $(TEST_OBJS:.o=.d) $(TEST_BATCH_ISSUE220_CMD_OBJS:.o=.d) $(TEST_THREADPOOL_GC_DIR)/threadpool.d
 
 clean:
 	rm -f $(OBJS) $(TEST_OBJS) $(TEST_ASMOBJS) $(TARGET) $(TEST_TARGET)
