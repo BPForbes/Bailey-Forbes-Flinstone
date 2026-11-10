@@ -138,7 +138,7 @@ with "history download is not available on this host".
   `server join`; a later `su` does not change it); the recipient exists and has a box key; the
   author signature verifies against the host's account store; the delivery id is new; the file
   name is a plain name (`fl_kq_cp_safe_name`: not empty, not `.` or `..`, no `/`, `\` or control
-  bytes, under 128 bytes, and not ending in `.part`, `.meta`, `.kqtf`, `.kqseen` or `.kqbak`,
+  bytes, under 128 bytes, and not ending in `.part`, `.meta`, `.kqtf`, `.kqseen`, `.kqbak` or `.kqer`,
   compared ignoring ASCII case); each member has at most one unfinished upload, idle uploads are dropped after 60 s;
   only the recipient may co-sign and their signature verifies; release happens once; expiry is
   the host's clock. A delivery is one row of the host catalog (`server_shared/host_catalog.db`,

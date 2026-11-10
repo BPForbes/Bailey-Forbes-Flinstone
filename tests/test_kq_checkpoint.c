@@ -128,12 +128,17 @@ static void teardown(world_t *w) {
     asm_mem_secure_zero(w->flinstone_sign, sizeof w->flinstone_sign);
 }
 
-static int contains(const fl_kq_buf_t *b, const char *needle) {
-    size_t n = strlen(needle);
+/* How many times needle occurs in the buffer. */
+static size_t count(const fl_kq_buf_t *b, const char *needle) {
+    size_t n = strlen(needle), k = 0;
     for (size_t i = 0; i + n <= b->len; i++)
         if (memcmp(b->data + i, needle, n) == 0)
-            return 1;
-    return 0;
+            k++;
+    return k;
+}
+
+static int contains(const fl_kq_buf_t *b, const char *needle) {
+    return count(b, needle) > 0;
 }
 
 /* The KeyQuorum driver extends the generic driver: its base is a registrable descriptor
@@ -1167,14 +1172,6 @@ static int test_checkpoints_through_the_facade(void) {
     fs_events_shutdown();
     teardown(&w);
     return 0;
-}
-
-static size_t count(const fl_kq_buf_t *b, const char *needle) {
-    size_t n = strlen(needle), k = 0;
-    for (size_t i = 0; i + n <= b->len; i++)
-        if (memcmp(b->data + i, needle, n) == 0)
-            k++;
-    return k;
 }
 
 /* A container beside path made by the driver: empty, or with two heads (two edits on one head,
