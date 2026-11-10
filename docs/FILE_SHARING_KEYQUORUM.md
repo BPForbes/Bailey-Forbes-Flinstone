@@ -677,9 +677,16 @@ changes that.
 - The 16 MiB limit, the ring sizes and the relay TTL are KeyQuorum defaults, not measured for
   Flinstone's workload.
 - **Refusal reports (KQER, KQ-12).** When `server file` refuses a released delivery, the recipient's shell calls
-  `fl_kq_report_refusal` (`kq_service.c`): it signs a KQER as the account that is online (its key from the key
-  service; nobody online writes nothing and audits `kq-report-offline`) and writes `<64 hex>.kqer` into the
-  landing directory through the storage table. The artifact is the delivery's public offer in its wire bytes
+  `fl_kq_report_refusal_in` (`kq_service.c`) with the landing directory the decode held: it signs a KQER as the
+  account that is online (its key from the key service; nobody online writes nothing and audits
+  `kq-report-offline`) and writes `<64 hex>.kqer` inside that held directory (`fl_kq_cp_report_write_in`, one
+  contained commit with the ledger), never reopening it by path. The declared `fl_kq_report_refusal` has no held
+  directory, so it writes nothing and audits `kq-report-uncontained`. A directory keeps at most
+  `FL_KQ_REPORT_CAP` (64, `kq_checkpoint.h`) reports, listed by ref in `reports.kqer` beside them: past that
+  nothing is written and `kq-report-capped` is audited, and a report already present is neither rewritten nor
+  counted again (`kq-report-exists`). Refusals `kq_decode_and_ack` makes before the decode (a file name that is
+  not plain, a destination that is not contained, a sender key the host does not give) leave no report: there is
+  no held directory to write into yet, so they are only warned about. The artifact is the delivery's public offer in its wire bytes
   (`fl_kq_cp_offer_encode`, the one encoder `net_kq_delivery.c` sends), named by its SHA-256
   (`fl_kq_cp_offer_ref`). One table maps the refusal to KeyQuorum's closed sets: malformed is Framing/framing,
   a missing key Untrusted/auth, any other refusal Denied/policy, too large Denied/resource; the step is

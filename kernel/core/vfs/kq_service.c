@@ -461,12 +461,15 @@ static const struct {
     {FL_RESULT_NOMEM, 8u, 7u},  /* too large: Denied, resource */
 };
 
-void fl_kq_report_refusal(const kq_file_offer_t *o, fl_result_t why) {
+void fl_kq_report_refusal_in(const kq_file_offer_t *o, fl_result_t why, const fl_kq_dir_t *dir) {
     const char *me = fl_session_current_key_id();
+    const char *who = me && me[0] ? me : "UNKNOWN";
+    const char *event;
     uint8_t key[FL_USER_SIGNING_SECRET_LEN];
     uint8_t ref[32];
     char at[40];
     kq_signing_mode_t mode = 0;
+    fl_kq_cp_result_t cp;
     size_t i;
 
     if (!o)
@@ -476,18 +479,30 @@ void fl_kq_report_refusal(const kq_file_offer_t *o, fl_result_t why) {
             break;
     if (i == sizeof s_refusal_codes / sizeof s_refusal_codes[0])
         return; /* not a refusal of the letter */
-    /* Signed only as the account that is online; nobody online signs nothing (fail closed). */
-    if (!me || !me[0] || fl_kq_obtain_author_key(me, key, &mode) != FL_RESULT_OK) {
-        fl_audit_identity_event(me && me[0] ? me : "UNKNOWN", "kq-report-offline", "receive", NULL);
+    /* No held landing directory: nothing is written, never a guessed path. */
+    if (!dir) {
+        fl_audit_identity_event(who, "kq-report-uncontained", "receive", NULL);
         return;
     }
-    fl_kq_service_utc_now(at, sizeof at);
-    if (fl_kq_cp_offer_ref(o, ref) != FL_RESULT_OK ||
-        fl_kq_cp_report_write(s_refusal_codes[i].code, s_refusal_codes[i].class_code,
-                              (uint8_t)FL_KQ_OP_RECEIVE, ref, me, at, key,
-                              g_cwd[0] ? g_cwd : ".") != FL_KQ_CP_OK)
-        fl_audit_identity_event(me, "kq-report-failed", "receive", NULL);
-    else
-        fl_audit_identity_event(me, "kq-report", "receive", NULL);
-    mem_domain_secure_zero(key, sizeof key);
+    memset(key, 0, sizeof key);
+    /* Signed only as the account that is online; nobody online signs nothing (fail closed). */
+    if (!me || !me[0] || fl_kq_obtain_author_key(me, key, &mode) != FL_RESULT_OK) {
+        event = "kq-report-offline";
+    } else {
+        fl_kq_service_utc_now(at, sizeof at);
+        cp = fl_kq_cp_offer_ref(o, ref) != FL_RESULT_OK
+                 ? FL_KQ_CP_INVALID
+                 : fl_kq_cp_report_write_in(s_refusal_codes[i].code, s_refusal_codes[i].class_code,
+                                            (uint8_t)FL_KQ_OP_RECEIVE, ref, me, at, key, dir);
+        event = cp == FL_KQ_CP_OK          ? "kq-report"
+                : cp == FL_KQ_CP_EXISTS    ? "kq-report-exists"
+                : cp == FL_KQ_CP_TOO_LARGE ? "kq-report-capped"
+                                           : "kq-report-failed";
+    }
+    mem_domain_secure_zero(key, sizeof key); /* on every path, a failed lookup included */
+    fl_audit_identity_event(who, event, "receive", NULL);
+}
+
+void fl_kq_report_refusal(const kq_file_offer_t *o, fl_result_t why) {
+    fl_kq_report_refusal_in(o, why, NULL);
 }

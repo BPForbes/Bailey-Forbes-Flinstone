@@ -21,6 +21,8 @@
  */
 
 #include "contract_result.h"
+#include "fl/driver/keyquorum.h"
+#include "kq_storage.h"
 #include "user_db.h"
 #include "workqueue.h"
 
@@ -106,6 +108,17 @@ fl_result_t fl_kq_autosign_head_author(void *ctx, char *out, size_t cap);
 
 /** Now as KeyQuorum's UTC text ("2026-11-10T09:00:00.000Z"), from the wall clock. */
 void fl_kq_service_utc_now(char *out, size_t cap);
+
+/**
+ * The one refusal report (KQER): signs it as the account that is online and writes it inside dir,
+ * the landing directory the decode held (fl_kq_cp_report_write_in; the caller keeps the handle
+ * open until this returns). Only a refusal of the letter itself (INVAL, NOENT, ACCES, NOMEM) is
+ * reported. NULL dir writes nothing and audits kq-report-uncontained; that is what the declared
+ * fl_kq_report_refusal (fl/kq.h) does, since it has no held directory. Audits kq-report,
+ * kq-report-exists, kq-report-capped, kq-report-offline or kq-report-failed, never the report or
+ * its ref. Reporting never changes the refusal.
+ */
+void fl_kq_report_refusal_in(const kq_file_offer_t *o, fl_result_t why, const fl_kq_dir_t *dir);
 
 /** For tests that prove the thread cannot be cancelled or signalled. */
 #include <pthread.h>

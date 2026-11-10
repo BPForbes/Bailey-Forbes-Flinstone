@@ -13,6 +13,7 @@
 #include "fl/authz_subsystem.h"
 #include "common.h"
 #include "fl/audit_log.h"
+#include "fl/hex.h"
 #include "fl/kq.h"
 #include "kq_checkpoint.h"
 #include "mem_domain.h"
@@ -547,21 +548,56 @@ static int test_autosign_asks_keyquorum_for_the_head_author(void) {
 }
 
 /* KQ-12: a refused receive leaves a KQER signed by the account that is online, named by the offer's
- * SHA-256; it verifies only for that artifact, and nothing is written when nobody is online. */
+ * SHA-256, inside the held landing directory; it verifies only for that artifact, and nothing is
+ * written when nobody is online or no directory is held. */
+static void audit_clear(void) {
+    pthread_mutex_lock(&s_audit_mu);
+    s_audit[0] = '\0';
+    pthread_mutex_unlock(&s_audit_mu);
+}
+
+/* Bytes 5..7 of a KQER: the code (u16 big-endian) and the class (src/error_report.rs). */
+static int report_code_class(const char *path, unsigned *code, unsigned *class_code) {
+    uint8_t head[8];
+    FILE *f = fopen(path, "rb");
+    size_t n;
+
+    if (!f)
+        return -1;
+    n = fread(head, 1, sizeof head, f);
+    fclose(f);
+    if (n != sizeof head || memcmp(head, "KQER", 4) != 0)
+        return -1;
+    *code = ((unsigned)head[5] << 8) | head[6];
+    *class_code = head[7];
+    return 0;
+}
+
 static int test_a_refusal_is_reported_as_the_online_account(void) {
+    static const struct {
+        fl_result_t why;
+        unsigned code, class_code;
+    } rows[] = {
+        {FL_RESULT_INVAL, 1u, 1u},
+        {FL_RESULT_NOENT, 2u, 2u},
+        {FL_RESULT_ACCES, 8u, 5u},
+        {FL_RESULT_NOMEM, 8u, 7u},
+    };
+    static const fl_result_t others[] = {FL_RESULT_OK, FL_RESULT_ERR, FL_RESULT_BUSY, FL_RESULT_NOSYS};
     const fl_user_record_t *flin = account("Flinstone");
     fl_user_db_keydir_t keys;
-    kq_file_offer_t offer, other;
+    fl_kq_dir_t held, gone;
+    kq_file_offer_t offer, other, each;
     fl_kq_buf_t lines = {0};
-    uint8_t key[32], ref[32], other_ref[32];
-    char single[512], report[512], other_report[512];
+    uint8_t key[32], ref[32], other_ref[32], each_ref[32];
+    char single[512], report[512], other_report[512], each_report[512], missing[512];
+    unsigned code = 0, class_code = 0, i;
     size_t events = 0;
 
     ASSERT(flin);
     ASSERT(fl_user_db_open_key(fl_session_user_db(), "Flinstone", "flinstone", key) == FL_RESULT_OK);
     ASSERT(make_containers(flin->key_id, key, &offer) == 0);
     mem_domain_secure_zero(key, sizeof key);
-    snprintf(g_cwd, CWD_MAX, "%s", s_tmp);
     snprintf(single, sizeof single, "%s/single.txt", s_tmp);
     ASSERT(fl_kq_cp_offer_ref(&offer, ref) == FL_RESULT_OK);
     other = offer;
@@ -570,29 +606,77 @@ static int test_a_refusal_is_reported_as_the_online_account(void) {
     ASSERT(fl_kq_cp_report_path(s_tmp, ref, report, sizeof report) == 0);
     ASSERT(fl_kq_cp_report_path(s_tmp, other_ref, other_report, sizeof other_report) == 0);
     unlink(report);
+    ASSERT(fl_kq_cp_storage()->dir_open(NULL, s_tmp, &held) == 0);
 
     /* nobody online: nothing is signed or written, and that is audited */
     audit_capture(1);
-    fl_kq_report_refusal(&offer, FL_RESULT_ACCES);
+    fl_kq_report_refusal_in(&offer, FL_RESULT_ACCES, &held);
     ASSERT(access(report, F_OK) != 0);
     ASSERT(audited("event=kq-report-offline"));
 
     ASSERT(fl_session_login("Flinstone", "flinstone") == FL_RESULT_OK);
-    fl_kq_report_refusal(&offer, FL_RESULT_ERR); /* a local problem is not a refusal of the letter */
-    ASSERT(access(report, F_OK) != 0);
+    /* the declared entry point has no held directory: it writes nothing, never a guessed path */
     fl_kq_report_refusal(&offer, FL_RESULT_ACCES);
+    ASSERT(access(report, F_OK) != 0);
+    ASSERT(audited("event=kq-report-uncontained"));
+    /* a local problem is not a refusal of the letter */
+    for (i = 0; i < sizeof others / sizeof others[0]; i++) {
+        fl_kq_report_refusal_in(&offer, others[i], &held);
+        ASSERT(access(report, F_OK) != 0);
+    }
+    fl_kq_report_refusal_in(&offer, FL_RESULT_ACCES, &held);
     ASSERT(access(report, F_OK) == 0 && access(other_report, F_OK) != 0);
     ASSERT(audited("event=kq-report subject=receive"));
+    /* the same offer again: not rewritten, not counted */
+    fl_kq_report_refusal_in(&offer, FL_RESULT_INVAL, &held);
+    ASSERT(report_code_class(report, &code, &class_code) == 0 && code == 8u && class_code == 5u);
+    ASSERT(audited("event=kq-report-exists"));
+    /* every row of the table: the code and class it names */
+    each = offer;
+    for (i = 0; i < sizeof rows / sizeof rows[0]; i++) {
+        each.policy_hash[0] = (uint8_t)(0xA0 + i);
+        ASSERT(fl_kq_cp_offer_ref(&each, each_ref) == FL_RESULT_OK);
+        ASSERT(fl_kq_cp_report_path(s_tmp, each_ref, each_report, sizeof each_report) == 0);
+        fl_kq_report_refusal_in(&each, rows[i].why, &held);
+        ASSERT(report_code_class(each_report, &code, &class_code) == 0);
+        ASSERT(code == rows[i].code && class_code == rows[i].class_code);
+    }
+    /* a directory that cannot be written: audited as failed, and the caller's refusal stands as
+     * it was (the entry point returns nothing that could change it) */
+    snprintf(missing, sizeof missing, "%s/no-such-dir", s_tmp);
+    gone.fd = -1;
+    gone.dir = missing;
+    audit_clear();
+    fl_kq_report_refusal_in(&other, FL_RESULT_ACCES, &gone);
+    ASSERT(audited("event=kq-report-failed"));
+    ASSERT(access(other_report, F_OK) != 0);
+    /* past the cap: nothing written, audited, no report text or ref in the audit */
+    each = offer;
+    for (i = 0; i < FL_KQ_REPORT_CAP; i++) {
+        each.policy_hash[1] = (uint8_t)(0x01 + i);
+        fl_kq_report_refusal_in(&each, FL_RESULT_ACCES, &held);
+    }
+    sleep_ms(1100); /* the audit sink is rate limited per second (FL_LOG_RL_MAX_PER_SEC) */
+    audit_clear();
+    fl_kq_report_refusal_in(&other, FL_RESULT_ACCES, &held);
+    ASSERT(access(other_report, F_OK) != 0);
+    ASSERT(audited("event=kq-report-capped subject=receive"));
+    {
+        char hex[65];
+        fl_hex_encode(other_ref, 32, hex);
+        ASSERT(!audited(hex));
+    }
     ASSERT(fl_session_logout() == FL_RESULT_OK);
     audit_capture(0);
+    fl_kq_cp_storage()->dir_close(NULL, &held);
 
     /* KeyQuorum accepts it for this artifact and this reporter, and records one ErrorReported */
     fl_user_db_keydir_init(&keys, fl_session_user_db());
     ASSERT(fl_kq_cp_inject_report_with(&keys.base, flin->key_id, report, other_ref, single) == FL_KQ_CP_BAD_SIGNATURE);
     ASSERT(fl_kq_cp_inject_report_with(&keys.base, flin->key_id, report, ref, single) == FL_KQ_CP_OK);
     ASSERT(fl_kq_cp_history(single, &lines) == FL_KQ_CP_OK);
-    for (size_t i = 0; i + 4 <= lines.len; i++)
-        if (memcmp(lines.data + i, "\t48\t", 4) == 0)
+    for (size_t j = 0; j + 4 <= lines.len; j++)
+        if (memcmp(lines.data + j, "\t48\t", 4) == 0)
             events++;
     fl_kq_buf_free(&lines);
     ASSERT(events == 1);

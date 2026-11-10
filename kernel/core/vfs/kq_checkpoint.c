@@ -963,27 +963,65 @@ int fl_kq_cp_report_path(const char *dir, const uint8_t ref[32], char *out, size
     return snprintf(out, cap, "%s/%s%s", dir, hex, FL_KQ_REPORT_SUFFIX) < (int)cap ? 0 : -1;
 }
 
-fl_kq_cp_result_t fl_kq_cp_report_write(uint16_t code, uint8_t class_code, uint8_t step,
-                                        const uint8_t ref[32], const char *actor,
-                                        const char *occurred_at, const uint8_t secret[32],
-                                        const char *dir) {
+fl_kq_cp_result_t fl_kq_cp_report_write_in(uint16_t code, uint8_t class_code, uint8_t step,
+                                           const uint8_t ref[32], const char *actor,
+                                           const char *occurred_at, const uint8_t secret[32],
+                                           const fl_kq_dir_t *dir) {
     const fl_kq_driver_t *drv = fl_kq_driver_get();
-    char report_path[KQ_PATH_MAX];
-    fl_kq_buf_t kqer = {0};
+    const fl_kq_storage_t *st = fl_kq_cp_storage();
+    char name[65 + sizeof FL_KQ_REPORT_SUFFIX];
+    uint8_t ledger[FL_KQ_REPORT_CAP * 32u];
+    size_t held = 0, i;
+    int known = 0, e;
+    fl_kq_buf_t kqer = {0}, old = {0};
+    fl_kq_file_out_t files[2];
     fl_kq_cp_result_t out = FL_KQ_CP_OK;
 
-    if (!ref || !actor || !occurred_at || !secret || !dir)
+    if (!ref || !actor || !occurred_at || !secret || !dir || !dir->dir)
         return FL_KQ_CP_INVALID;
     if (!drv)
         return FL_KQ_CP_NO_DRIVER;
-    if (fl_kq_cp_report_path(dir, ref, report_path, sizeof report_path) != 0)
-        return FL_KQ_CP_INVALID;
+    fl_hex_encode(ref, 32, name);
+    memcpy(name + 64, FL_KQ_REPORT_SUFFIX, sizeof FL_KQ_REPORT_SUFFIX);
+    /* Every step inside the held directory: a directory swapped after the caller took the
+     * handle is never followed. An existing report is kept as it is and not counted again. */
+    e = st->dir_exists(st->ctx, dir, name);
+    if (e != 0)
+        return e == 1 ? FL_KQ_CP_EXISTS : FL_KQ_CP_IO;
+    e = st->dir_exists(st->ctx, dir, FL_KQ_REPORT_LEDGER);
+    if (e < 0)
+        return FL_KQ_CP_IO;
+    if (e == 1) {
+        if (st->dir_read(st->ctx, dir, FL_KQ_REPORT_LEDGER, FL_KQ_REPORT_CAP * 32u, &old.data,
+                         &old.len) != 0 ||
+            old.len % 32u != 0) {
+            fl_kq_buf_free(&old);
+            return FL_KQ_CP_IO; /* a ledger that cannot be read is never taken as empty */
+        }
+        memcpy(ledger, old.data, old.len);
+        held = old.len;
+        fl_kq_buf_free(&old);
+    }
+    for (i = 0; i < held; i += 32u)
+        if (memcmp(ledger + i, ref, 32) == 0)
+            known = 1;
+    if (!known && held >= FL_KQ_REPORT_CAP * 32u)
+        return FL_KQ_CP_TOO_LARGE;
     /* No free text: the code, class and labels are KeyQuorum's closed sets, checked there. */
     if (drv->error_sign(code, class_code, step, ref, actor, occurred_at, NULL, NULL, secret,
                         &kqer) != KQ_FILE_OK)
         return FL_KQ_CP_INVALID;
-    if (fl_kq_cp_storage()->write_atomic(fl_kq_cp_storage()->ctx, report_path, kqer.data,
-                                         kqer.len) != 0)
+    if (!known) {
+        memcpy(ledger + held, ref, 32);
+        held += 32u;
+    }
+    files[0].name = name;
+    files[0].data = kqer.data;
+    files[0].len = kqer.len;
+    files[1].name = FL_KQ_REPORT_LEDGER;
+    files[1].data = ledger;
+    files[1].len = held;
+    if (st->dir_commit(st->ctx, dir, files, 2) != 0)
         out = FL_KQ_CP_IO;
     fl_kq_buf_free(&kqer);
     return out;
@@ -1006,7 +1044,7 @@ fl_kq_cp_result_t fl_kq_cp_inject_report_with(const fl_kq_keydir_t *keys, const 
     reporter_public = keys->signing_public(keys, reporter_key);
     if (!reporter_public)
         return FL_KQ_CP_NO_KEY;
-    rc = fl_kq_cp_storage()->read_file(fl_kq_cp_storage()->ctx, report_path, FL_KQ_LETTER_MAX,
+    rc = fl_kq_cp_storage()->read_file(fl_kq_cp_storage()->ctx, report_path, FL_KQ_REPORT_MAX,
                                        &kqer.data, &kqer.len);
     if (rc != 0)
         return rc == -2 ? FL_KQ_CP_TOO_LARGE : FL_KQ_CP_IO;

@@ -773,6 +773,9 @@ static int kq_decode_and_ack(const cmd_server_ctx_t *ctx, int hosting,
         cp = fl_kq_cp_decode_in(kq_users(), in->sender, sender.signing_public,
                                 fl_session_current_key_id(), box, &letter, &in->offer, in->sig,
                                 &held, check_leaf);
+        /* A refusal's signed KQER goes into the same held directory, before it is closed. */
+        if (cp != FL_KQ_CP_OK && cp != FL_KQ_CP_EXISTS && cp != FL_KQ_CP_IO)
+            fl_kq_report_refusal_in(&in->offer, fl_kq_cp_to_result(cp), &held);
         if (check_fd >= 0)
             close(check_fd);
     }
@@ -791,8 +794,6 @@ static int kq_decode_and_ack(const cmd_server_ctx_t *ctx, int hosting,
     if (cp != FL_KQ_CP_OK) {
         fl_color_warn("keyquorum: %s from %s refused: %s", in->file_name, in->sender,
                       fl_kq_cp_reason(cp));
-        /* The signed KQER sidecar, as the account that is online (once per refusal). */
-        fl_kq_report_refusal(&in->offer, fl_kq_cp_to_result(cp));
         fl_net_kq_inbox_drop(in->id);
         return 1;
     }

@@ -201,20 +201,36 @@ fl_kq_cp_result_t fl_kq_cp_decode_in_with(const fl_kq_keydir_t *keys, const char
 /** The offer's wire bytes, exactly what net_kq_delivery.c sends (u64 big-endian). */
 void fl_kq_cp_offer_encode(const kq_file_offer_t *o, uint8_t out[FL_KQ_OFFER_WIRE_LEN]);
 
+/** Largest KQER KeyQuorum encodes (MAX_ENCODED_LEN, src/error_report.rs): the read bound. */
+#define FL_KQ_REPORT_MAX 1024u
+
+/**
+ * Most reports one landing directory keeps. A report's name is the SHA-256 of sender-chosen
+ * offer bytes, so each distinct refused offer would be a new file; past this many nothing more
+ * is written. The ones written are listed by ref in FL_KQ_REPORT_LEDGER inside the directory,
+ * replaced together with each report (one commit), so the count is read through the held
+ * directory and never by enumerating a path.
+ */
+#define FL_KQ_REPORT_CAP 64u
+#define FL_KQ_REPORT_LEDGER "reports" FL_KQ_REPORT_SUFFIX
+
 /** dir/<hex ref>.kqer into out; 0, or -1 when it does not fit or an argument is missing. */
 int fl_kq_cp_report_path(const char *dir, const uint8_t ref[32], char *out, size_t cap);
 
 /**
  * Signs a KQER (code and class from keyquorum_error.h's closed sets, step the caller's flow
  * step) about the artifact whose SHA-256 is ref, as actor with signing secret secret (the
- * caller's to wipe), at occurred_at (UTC text), and writes it to fl_kq_cp_report_path(dir, ref)
- * through the storage table. INVALID when KeyQuorum refuses the fields, IO when it cannot be
- * written. No free text is ever written.
+ * caller's to wipe), at occurred_at (UTC text), and writes <hex ref>.kqer inside the held
+ * directory dir (the handle the decode used; never reopened by path) together with the ledger.
+ * OK written; EXISTS when that report is already there (nothing rewritten, not counted again);
+ * TOO_LARGE when FL_KQ_REPORT_CAP reports are already listed (nothing written); INVALID when
+ * KeyQuorum refuses the fields; IO when the directory cannot be read or written. No free text
+ * is ever written.
  */
-fl_kq_cp_result_t fl_kq_cp_report_write(uint16_t code, uint8_t class_code, uint8_t step,
-                                        const uint8_t ref[32], const char *actor,
-                                        const char *occurred_at, const uint8_t secret[32],
-                                        const char *dir);
+fl_kq_cp_result_t fl_kq_cp_report_write_in(uint16_t code, uint8_t class_code, uint8_t step,
+                                           const uint8_t ref[32], const char *actor,
+                                           const char *occurred_at, const uint8_t secret[32],
+                                           const fl_kq_dir_t *dir);
 
 /**
  * Consumer: reads the KQER at report_path, and appends one ErrorReported event (history type 48)

@@ -1253,6 +1253,7 @@ static int test_refusal_report_is_verified_and_injected(void) {
     fl_kq_encoded_t enc;
     fl_kq_buf_t before = {0}, after = {0};
     kq_file_offer_t other;
+    fl_kq_dir_t held;
     char src[PATH_MAX], report[PATH_MAX];
     uint8_t sig[64], ref[32], other_ref[32];
 
@@ -1266,12 +1267,14 @@ static int test_refusal_report_is_verified_and_injected(void) {
     ASSERT(fl_kq_cp_offer_ref(&other, other_ref) == FL_RESULT_OK && memcmp(ref, other_ref, 32) != 0);
 
     /* Steve refused it: Denied (8), class policy (5), step RECEIVE (6). */
-    ASSERT(fl_kq_cp_report_write(8, 5, 6, ref, STEVE, T2, w.steve_sign, s_dir) == FL_KQ_CP_OK);
+    ASSERT(fl_kq_cp_storage()->dir_open(NULL, s_dir, &held) == 0);
+    ASSERT(fl_kq_cp_report_write_in(8, 5, 6, ref, STEVE, T2, w.steve_sign, &held) == FL_KQ_CP_OK);
     ASSERT(fl_kq_cp_report_path(s_dir, ref, report, sizeof report) == 0);
     ASSERT(access(report, F_OK) == 0);
     ASSERT(strlen(report) == strlen(s_dir) + 1 + 64 + strlen(FL_KQ_REPORT_SUFFIX));
     /* free text is not a code: KeyQuorum refuses an unknown one and nothing is written */
-    ASSERT(fl_kq_cp_report_write(999, 5, 6, other_ref, STEVE, T2, w.steve_sign, s_dir) == FL_KQ_CP_INVALID);
+    ASSERT(fl_kq_cp_report_write_in(999, 5, 6, other_ref, STEVE, T2, w.steve_sign, &held) == FL_KQ_CP_INVALID);
+    fl_kq_cp_storage()->dir_close(NULL, &held);
     ASSERT(fl_kq_cp_report_path(s_dir, other_ref, report, sizeof report) == 0 && access(report, F_OK) != 0);
     ASSERT(fl_kq_cp_report_path(s_dir, ref, report, sizeof report) == 0);
 
@@ -1290,6 +1293,95 @@ static int test_refusal_report_is_verified_and_injected(void) {
     fl_kq_buf_free(&before);
     fl_kq_buf_free(&after);
     fl_kq_encoded_free(&enc);
+    teardown(&w);
+    return 0;
+}
+
+/* The offer's wire bytes are the fixed layout: file id 16, revision 32, commitment 32, author
+ * identity 16, signature 64, topology generation u64 big-endian, policy hash 32 = 200 bytes. */
+static int test_offer_wire_layout_is_fixed(void) {
+    kq_file_offer_t o;
+    uint8_t want[200], got[FL_KQ_OFFER_WIRE_LEN];
+    size_t i;
+
+    ASSERT(FL_KQ_OFFER_WIRE_LEN == 200u);
+    memset(&o, 0, sizeof o);
+    for (i = 0; i < 16; i++)
+        o.file_id[i] = (uint8_t)(0x10 + i);
+    for (i = 0; i < 32; i++) {
+        o.revision_id[i] = (uint8_t)(0x40 + i);
+        o.content_commitment[i] = (uint8_t)(0x80 + i);
+        o.policy_hash[i] = (uint8_t)(0xC0 + i);
+    }
+    for (i = 0; i < 16; i++)
+        o.author_identity[i] = (uint8_t)(0xA0 + i);
+    for (i = 0; i < 64; i++)
+        o.author_signature[i] = (uint8_t)i;
+    o.topology_generation = 0x0102030405060708ull;
+    for (i = 0; i < 16; i++)
+        want[i] = (uint8_t)(0x10 + i);
+    for (i = 0; i < 32; i++)
+        want[16 + i] = (uint8_t)(0x40 + i);
+    for (i = 0; i < 32; i++)
+        want[48 + i] = (uint8_t)(0x80 + i);
+    for (i = 0; i < 16; i++)
+        want[80 + i] = (uint8_t)(0xA0 + i);
+    for (i = 0; i < 64; i++)
+        want[96 + i] = (uint8_t)i;
+    for (i = 0; i < 8; i++)
+        want[160 + i] = (uint8_t)(i + 1);
+    for (i = 0; i < 32; i++)
+        want[168 + i] = (uint8_t)(0xC0 + i);
+    memset(got, 0xEE, sizeof got);
+    fl_kq_cp_offer_encode(&o, got);
+    ASSERT(memcmp(got, want, sizeof want) == 0);
+    return 0;
+}
+
+/* A report lands in the held directory even when its path was swapped after it was held; past
+ * FL_KQ_REPORT_CAP distinct reports nothing more is written; a report already there is neither
+ * rewritten nor counted again. */
+static int test_reports_are_held_and_capped(void) {
+    world_t w;
+    fl_kq_dir_t held;
+    char land[PATH_MAX], moved[PATH_MAX], report[PATH_MAX], ledger[PATH_MAX];
+    uint8_t ref[32];
+    struct stat st, again;
+    unsigned i;
+
+    ASSERT(setup(&w) == 0);
+    path_in(land, sizeof land, "land-report");
+    path_in(moved, sizeof moved, "land-report-moved");
+    ASSERT(mkdir(land, 0700) == 0);
+    ASSERT(fl_kq_cp_storage()->dir_open(NULL, land, &held) == 0);
+    ASSERT(rename(land, moved) == 0);
+    ASSERT(mkdir(land, 0700) == 0);
+
+    memset(ref, 0, sizeof ref);
+    for (i = 0; i < FL_KQ_REPORT_CAP; i++) {
+        ref[0] = (uint8_t)i;
+        ASSERT(fl_kq_cp_report_write_in(8, 5, 6, ref, STEVE, T2, w.steve_sign, &held) == FL_KQ_CP_OK);
+    }
+    ref[0] = 0;
+    ASSERT(fl_kq_cp_report_path(moved, ref, report, sizeof report) == 0 && access(report, F_OK) == 0);
+    ASSERT(fl_kq_cp_report_path(land, ref, report, sizeof report) == 0 && access(report, F_OK) != 0);
+    ASSERT(fl_fs_join_path(ledger, sizeof ledger, moved, FL_KQ_REPORT_LEDGER) == 0);
+    ASSERT(stat(ledger, &st) == 0 && (size_t)st.st_size == FL_KQ_REPORT_CAP * 32u);
+
+    /* a repeat of one already written: kept as it is, not counted */
+    ASSERT(fl_kq_cp_report_path(moved, ref, report, sizeof report) == 0 && stat(report, &st) == 0);
+    ASSERT(fl_kq_cp_report_write_in(2, 2, 6, ref, STEVE, T2, w.steve_sign, &held) == FL_KQ_CP_EXISTS);
+    ASSERT(stat(report, &again) == 0 && again.st_ino == st.st_ino && again.st_size == st.st_size);
+    ASSERT(stat(ledger, &st) == 0 && (size_t)st.st_size == FL_KQ_REPORT_CAP * 32u);
+
+    /* the next distinct one is past the cap: nothing written */
+    ref[0] = 0xFF;
+    ref[1] = 0xFF;
+    ASSERT(fl_kq_cp_report_write_in(8, 5, 6, ref, STEVE, T2, w.steve_sign, &held) == FL_KQ_CP_TOO_LARGE);
+    ASSERT(fl_kq_cp_report_path(moved, ref, report, sizeof report) == 0 && access(report, F_OK) != 0);
+    ASSERT(stat(ledger, &st) == 0 && (size_t)st.st_size == FL_KQ_REPORT_CAP * 32u);
+    fl_kq_cp_storage()->dir_close(NULL, &held);
+    ASSERT(fl_kq_cp_report_write_in(8, 5, 6, ref, STEVE, T2, w.steve_sign, NULL) == FL_KQ_CP_INVALID);
     teardown(&w);
     return 0;
 }
@@ -1338,6 +1430,8 @@ int main(void) {
     RUN(test_checkpoints_through_the_facade);
     RUN(test_head_author_names_the_single_head);
     RUN(test_refusal_report_is_verified_and_injected);
+    RUN(test_offer_wire_layout_is_fixed);
+    RUN(test_reports_are_held_and_capped);
     RUN(test_reasons_and_results);
     rmrf(s_dir);
     if (rc == 0)
