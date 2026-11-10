@@ -821,7 +821,7 @@ fl_kq_cp_result_t fl_kq_cp_head_author(const char *path, char *out, size_t cap) 
     if (!path || !out || cap == 0)
         return FL_KQ_CP_INVALID;
     out[0] = '\0';
-    if (!drv)
+    if (!drv || !drv->head_author)
         return FL_KQ_CP_NO_DRIVER;
     res = load_container(path, container_path, sizeof container_path, &c);
     if (res != FL_KQ_CP_OK)

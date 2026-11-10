@@ -706,7 +706,7 @@ picks the portable crypto backends) and links it with `kernel/drivers/keyquorum/
 kernel prints `CAP keyquorum=linked` when `fl_kq_driver_get()` accepts the linked ABI
 (`FL_KQ_ABI_VERSION` 5), else `CAP keyquorum=abi-mismatch`.
 
-- **Size.** The image is about 451 KiB of payload (903 sectors; 939 with the security lab; gate 1024) with about 99 KiB of bss; the
+- **Size.** The image is about 451 KiB of payload (902 sectors; 938 with the security lab; gate 1024) with about 99 KiB of bss; the
   build script refuses an image whose bss end reaches the end of conventional memory.
 - **Heap.** A 40 MiB arena at 4 MiB (`kq_platform.c`), above the image, inside the first GiB the boot code
   identity-maps. Sealing an account key (Argon2id, 19 MiB) needs more than 19 MiB at once, so the machine
@@ -750,7 +750,8 @@ the driver registry exists (`fl_kq_service_start`) and ended only by an orderly 
   head author, sign) and runs the sweep as a protected periodic item: skip while a signature is recent, skip and audit a
   forked history, audit and retry next period when the author is not signed in, sign with a copy of the author's own key
   and wipe it. The head author is KeyQuorum's (KQ-20, `kq_file_head_author`, ABI 5) through the driver's `head_author`
-  op and `fl_kq_cp_head_author` (the container beside a path; FORKED with two heads). `fl_kq_autosign_head_author` is the
+  op (hosted builds only: the freestanding image has no checkpoint storage, so the op is NULL there and the call
+  answers NO_DRIVER) and `fl_kq_cp_head_author` (the container beside a path; FORKED with two heads). `fl_kq_autosign_head_author` is the
   production callback (ctx an `fl_kq_autosign_file_t`): a fork answers BUSY, so the sweep audits `kq-autosign-forked` and
   signs nothing. The signing call is the monitor's (FL-09); the service supplies the schedule and the key. Nothing in the
   shell registers an autosign object yet (only the tests do), because the monitor that signs does not exist.
