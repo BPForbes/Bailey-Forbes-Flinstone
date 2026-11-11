@@ -357,13 +357,22 @@ static int test_a_refusal_report_reaches_the_sender(void) {
     s_actor = &s_members[1];
     ASSERT(fl_net_kq_send_report(s_srv, NULL, 0, inbox[0].id, kqer.data, kqer.len) == FL_RESULT_OK);
     ASSERT(s_to_mya[op & 0x7F] == forwarded);
-    /* The recipient's report is forwarded to the sender, once. */
+    /* A frame whose length lies is dropped by the host's own exact-length check. It is sent BEFORE any valid
+     * report for this delivery, so duplicate suppression cannot be what rejects it; the valid report that
+     * follows still forwards. */
     s_actor = &s_members[2];
+    memset(frame, 0, sizeof frame);
+    memcpy(frame, inbox[0].id, FL_KQ_DELIVERY_ID_LEN);
+    frame[16] = 0;
+    frame[17] = 10; /* says ten bytes, carries four */
+    fl_net_kq_host_handle(s_srv, &s_members[2], (uint8_t)op, frame, 16 + 2 + 4);
+    ASSERT(s_to_mya[op & 0x7F] == forwarded);
+    /* The recipient's report is forwarded to the sender, once. */
     ASSERT(fl_net_kq_send_report(s_srv, NULL, 0, inbox[0].id, kqer.data, kqer.len) == FL_RESULT_OK);
     ASSERT(s_to_mya[op & 0x7F] == forwarded + 1);
     ASSERT(fl_net_kq_send_report(s_srv, NULL, 0, inbox[0].id, kqer.data, kqer.len) == FL_RESULT_OK);
     ASSERT(s_to_mya[op & 0x7F] == forwarded + 1);
-    /* An unknown delivery, an empty or oversized report, and a frame whose length lies are all dropped. */
+    /* An unknown delivery, an empty report and an oversized one are dropped (the lying frame was tried above). */
     {
         uint8_t other[FL_KQ_DELIVERY_ID_LEN] = {9, 9, 9};
 
@@ -372,12 +381,6 @@ static int test_a_refusal_report_reaches_the_sender(void) {
     }
     ASSERT(fl_net_kq_send_report(s_srv, NULL, 0, inbox[0].id, kqer.data, 0) == FL_RESULT_INVAL);
     ASSERT(fl_net_kq_send_report(s_srv, NULL, 0, inbox[0].id, big, FL_KQ_REPORT_FRAME_MAX + 1) == FL_RESULT_INVAL);
-    memset(frame, 0, sizeof frame);
-    memcpy(frame, inbox[0].id, FL_KQ_DELIVERY_ID_LEN);
-    frame[16] = 0;
-    frame[17] = 10; /* says ten bytes, carries four */
-    fl_net_kq_host_handle(s_srv, &s_members[2], (uint8_t)op, frame, 16 + 2 + 4);
-    ASSERT(s_to_mya[op & 0x7F] == forwarded + 1);
 
     /* The sender's shell: the forwarded frame is held, handed out once, and applies to its container. */
     memcpy(frame, inbox[0].id, FL_KQ_DELIVERY_ID_LEN);

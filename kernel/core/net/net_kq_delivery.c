@@ -494,25 +494,6 @@ static void host_ack(fl_net_server_t *srv, const fl_net_server_member_t *from,
 
 /* Refusal report (KQ-12): the refusing recipient's KQER, forwarded to the delivery's sender. Best effort,
  * nothing is kept: a sender who is not connected misses it. Every check fails closed and silently. */
-#define KQ_FORWARDED_MAX 16u
-static uint8_t s_forwarded[KQ_FORWARDED_MAX][FL_KQ_DELIVERY_ID_LEN];
-static unsigned s_forwarded_n; /* how many ids are remembered (a ring of the newest) */
-static unsigned s_forwarded_next;
-
-static int already_forwarded(const uint8_t id[FL_KQ_DELIVERY_ID_LEN]) {
-    for (unsigned i = 0; i < s_forwarded_n; i++)
-        if (memcmp(s_forwarded[i], id, FL_KQ_DELIVERY_ID_LEN) == 0)
-            return 1;
-    return 0;
-}
-
-static void remember_forwarded(const uint8_t id[FL_KQ_DELIVERY_ID_LEN]) {
-    memcpy(s_forwarded[s_forwarded_next], id, FL_KQ_DELIVERY_ID_LEN);
-    s_forwarded_next = (s_forwarded_next + 1u) % KQ_FORWARDED_MAX;
-    if (s_forwarded_n < KQ_FORWARDED_MAX)
-        s_forwarded_n++;
-}
-
 static void host_report(fl_net_server_t *srv, const fl_net_server_member_t *from, const uint8_t *payload,
                         uint16_t plen) {
     fl_bytes_reader_t r;
@@ -525,10 +506,12 @@ static void host_report(fl_net_server_t *srv, const fl_net_server_member_t *from
     (void)fl_bytes_reader_read_bytes(&r, id, sizeof id);
     (void)fl_bytes_reader_read_u16(&r, &n);
     if (r.bad || n == 0 || n > FL_KQ_REPORT_FRAME_MAX || fl_bytes_reader_remaining(&r) != n || !me || !store() ||
-        fl_kq_store_get(store(), id, &d) != FL_RESULT_OK || strcmp(me, d.recipient) != 0 || !d.refused ||
-        already_forwarded(id))
+        fl_kq_store_get(store(), id, &d) != FL_RESULT_OK || strcmp(me, d.recipient) != 0 || !d.refused)
         return;
-    remember_forwarded(id);
+    /* Once per delivery, for as long as the host accepts reports for it: the claim is in the delivery's own log,
+     * not in a ring that later deliveries could push it out of. */
+    if (fl_kq_store_claim_report(store(), id, now_sec()) != FL_RESULT_OK)
+        return;
     host_send_to_account(srv, d.sender, (uint8_t)FL_NET_SESSION_OP_KQR_REPORT, payload, plen);
 }
 
@@ -895,12 +878,13 @@ static void client_history(fl_bytes_reader_t *r) {
 #define KQ_REPORT_INBOX 4u
 typedef struct {
     int used;
+    uint64_t arrived; /* arrival order, from s_reports_clock: the age that decides who is replaced */
     uint8_t id[FL_KQ_DELIVERY_ID_LEN];
     size_t len;
     uint8_t bytes[FL_KQ_REPORT_FRAME_MAX];
 } kq_report_t;
 static kq_report_t s_reports[KQ_REPORT_INBOX];
-static unsigned s_reports_next;
+static uint64_t s_reports_clock;
 
 static void client_report(fl_bytes_reader_t *r) {
     uint8_t id[FL_KQ_DELIVERY_ID_LEN];
@@ -919,11 +903,14 @@ static void client_report(fl_bytes_reader_t *r) {
     for (unsigned i = 0; i < KQ_REPORT_INBOX && !slot; i++)
         if (!s_reports[i].used)
             slot = &s_reports[i];
-    if (!slot) { /* full: the oldest is replaced */
-        slot = &s_reports[s_reports_next];
-        s_reports_next = (s_reports_next + 1u) % KQ_REPORT_INBOX;
+    if (!slot) { /* full: the report that arrived longest ago is replaced, wherever it sits */
+        slot = &s_reports[0];
+        for (unsigned i = 1; i < KQ_REPORT_INBOX; i++)
+            if (s_reports[i].arrived < slot->arrived)
+                slot = &s_reports[i];
     }
     slot->used = 1;
+    slot->arrived = ++s_reports_clock;
     memcpy(slot->id, id, sizeof id);
     slot->len = n;
     memcpy(slot->bytes, bytes, n);
@@ -1377,10 +1364,7 @@ void fl_net_kq_reset(void) {
     s_hist_gate = NULL;
     s_hist_source = NULL;
     memset(s_reports, 0, sizeof s_reports);
-    s_reports_next = 0;
-    memset(s_forwarded, 0, sizeof s_forwarded);
-    s_forwarded_n = 0;
-    s_forwarded_next = 0;
+    s_reports_clock = 0;
     if (s_store) {
         fl_kq_store_close(s_store);
         s_store = NULL;
