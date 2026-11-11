@@ -57,6 +57,20 @@ static void blocking_job(void *ctx) {
     sem_wait(&s_hold);
 }
 
+/* A barrier on the service thread: it runs after the job the thread is in now, so once it returns nothing
+ * of that job is still in flight. */
+static sem_t s_barrier;
+static void barrier_job(void *ctx) { (void)ctx; sem_post(&s_barrier); }
+static int service_barrier(void) {
+    fl_wq_work_t w = {.fn = barrier_job, .pq_layer = FL_WQ_LAYER_URGENT};
+
+    if (sem_init(&s_barrier, 0, 0) != 0 || fl_kq_service_submit(&w) != FL_RESULT_OK)
+        return -1;
+    sem_wait(&s_barrier);
+    sem_destroy(&s_barrier);
+    return 0;
+}
+
 static _Atomic int s_sigusr1;
 static void on_usr1(int sig) { (void)sig; atomic_fetch_add(&s_sigusr1, 1); }
 
@@ -686,9 +700,26 @@ static int test_autosign_signs_a_tracked_file(void) {
     /* Remove stops it; the queued item finds the object inactive. */
     ASSERT(fl_kq_service_autosign_remove(single) == FL_RESULT_OK);
     ASSERT(fl_kq_service_autosign_remove(single) == FL_RESULT_NOENT);
+    ASSERT(service_barrier() == 0); /* any sweep already running has finished before the baseline is read */
     ASSERT(fl_kq_cp_last_signature(single, &after) == FL_KQ_CP_OK);
     sleep_ms(2300);
     ASSERT(fl_kq_cp_last_signature(single, &again) == FL_KQ_CP_OK && again == after);
+    /* Two tracked paths that share their first 96 bytes are two registrations: removing one by its full path
+     * leaves the other (the label is cut to fit, the path is not). */
+    {
+        char longa[300], longb[300];
+
+        memset(longa, 'p', 150);
+        memcpy(longa, "/no/such/", 9);
+        memcpy(longb, longa, 150);
+        memcpy(longa + 150, "a.txt", 6);
+        memcpy(longb + 150, "b.txt", 6);
+        ASSERT(fl_kq_service_autosign_track_file(longa, 3600) == FL_RESULT_OK);
+        ASSERT(fl_kq_service_autosign_track_file(longb, 3600) == FL_RESULT_OK);
+        ASSERT(fl_kq_service_autosign_remove(longa) == FL_RESULT_OK);
+        ASSERT(fl_kq_service_autosign_remove(longa) == FL_RESULT_NOENT);
+        ASSERT(fl_kq_service_autosign_remove(longb) == FL_RESULT_OK); /* still registered until removed itself */
+    }
     /* Tracking it again resumes the same item. */
     ASSERT(fl_kq_service_autosign_track_file(single, 1) == FL_RESULT_OK);
     sleep_ms(2300);
@@ -900,6 +931,252 @@ static int test_a_keyless_account_comes_online_at_its_first_login(void) {
     return 0;
 }
 
+
+/* A login that replaces another without a logout in between ends the first account's slot: its signing
+ * secret and its box secret are wiped, not left to be obtained by key id (CodeRabbit on FL-15). A key brought
+ * online without a session (the Root fallback path, generation 0) is not touched by a later login. */
+static int test_a_replacing_login_wipes_the_previous_box_key(void) {
+    uint8_t box[32], got[32], key[32];
+    kq_signing_mode_t mode = 0;
+    fl_user_record_t a;
+    const fl_user_record_t *b;
+    char a_key[FL_HERITAGE_KEY_ID_MAX];
+
+    ASSERT(fl_session_add_user("SwapA", "swap-a-pw", 221, 0) == FL_RESULT_OK);
+    ASSERT(fl_session_add_user("SwapB", "swap-b-pw", 222, 0) == FL_RESULT_OK);
+    ASSERT(fl_session_login("SwapA", "swap-a-pw") == FL_RESULT_OK);
+    ASSERT(fl_session_snapshot_account("SwapA", &a) == FL_RESULT_OK);
+    snprintf(a_key, sizeof a_key, "%s", a.key_id);
+    ASSERT(fl_user_db_open_box(fl_session_user_db(), "SwapA", "swap-a-pw", box) == FL_RESULT_OK);
+    ASSERT(fl_kq_service_online_box(&a, box, fl_session_login_generation()) == FL_RESULT_OK);
+    ASSERT(fl_kq_obtain_box_key(a_key, got) == FL_RESULT_OK && memcmp(got, box, 32) == 0);
+    ASSERT(fl_kq_service_online_from_login("Flinstone", "flinstone") == FL_RESULT_OK); /* no session: stays */
+
+    ASSERT(fl_session_login("SwapB", "swap-b-pw") == FL_RESULT_OK); /* B replaces A, A never logged out */
+    b = account("SwapB");
+    ASSERT(b && fl_kq_obtain_box_key(a_key, got) == FL_RESULT_ACCES);
+    ASSERT(fl_kq_obtain_author_key(a_key, key, &mode) == FL_RESULT_ACCES);
+    ASSERT(fl_kq_obtain_author_key(b->key_id, key, &mode) == FL_RESULT_OK && mode == KQ_SIGNING_OWN);
+    ASSERT(fl_kq_obtain_author_key(account("Flinstone")->key_id, key, &mode) == FL_RESULT_OK); /* generation 0: untouched */
+    ASSERT(fl_session_logout() == FL_RESULT_OK);
+    fl_kq_service_offline("Flinstone");
+    mem_domain_secure_zero(box, sizeof box);
+    mem_domain_secure_zero(got, sizeof got);
+    mem_domain_secure_zero(key, sizeof key);
+    return 0;
+}
+
+/* KQ-16: a parent who is not signed in is assembled from the children who are (the driver's assembly ops, the
+ * record in the account store, each child's box secret from FL-15 and its device id from the account registry).
+ * The cases: never split, too few children, two children on one device, enough on separate devices (the seed is the
+ * parent's own, mode ASSEMBLED, audited), a record that deals another seed (refused), a child offline again, and
+ * the periodic sweep signing a tracked file as the parent while only the children are online. */
+static int register_device(const char *label, unsigned char dev) {
+    sqlite3 *sql = NULL;
+    sqlite3_stmt *st = NULL;
+    unsigned char id[16];
+    int ok = 0;
+
+    memset(id, dev, sizeof id);
+    if (sqlite3_open(getenv("FL_USERS_DB_PATH"), &sql) != SQLITE_OK)
+        return 0;
+    if (sqlite3_prepare_v2(sql,
+                           "INSERT INTO account_keys (label,purpose,holds_share,minted_by,minted_at,generation,"
+                           "kqst_path,device_id,signing_public,encryption_public,ledger_seq,event_hash) "
+                           "VALUES (?1,'own',1,'Root',1,1,'',?2,"
+                           "x'0202020202020202020202020202020202020202020202020202020202020202',"
+                           "x'0303030303030303030303030303030303030303030303030303030303030303',0,x'00');",
+                           -1, &st, NULL) == SQLITE_OK) {
+        sqlite3_bind_text(st, 1, label, -1, SQLITE_TRANSIENT);
+        sqlite3_bind_blob(st, 2, id, sizeof id, SQLITE_TRANSIENT);
+        ok = sqlite3_step(st) == SQLITE_DONE;
+        sqlite3_finalize(st);
+    }
+    sqlite3_close(sql);
+    return ok;
+}
+
+/* Brings a child online with its box secret, as a login that opened the KQST would. */
+static int child_online(const char *name, const char *pw) {
+    fl_user_record_t rec;
+    uint8_t box[32];
+    int ok;
+
+    ok = fl_kq_service_online_from_login(name, pw) == FL_RESULT_OK &&
+         fl_session_snapshot_account(name, &rec) == FL_RESULT_OK &&
+         fl_user_db_open_box(fl_session_user_db(), name, pw, box) == FL_RESULT_OK &&
+         fl_kq_service_online_box(&rec, box, 0) == FL_RESULT_OK;
+    mem_domain_secure_zero(box, sizeof box);
+    return ok;
+}
+
+static int deal(const char *parent_key, const uint8_t seed[32], const char *const *names, size_t n, unsigned gen) {
+    const fl_kq_driver_t *drv = fl_kq_driver_get_or_register();
+    const char *labels[4];
+    uint8_t pubs[4][32];
+    unsigned char *rec = malloc(FL_USER_ASSEMBLY_MAX);
+    size_t len = 0;
+    int ok = 0;
+
+    for (size_t i = 0; i < n; i++) {
+        const fl_user_record_t *c = account(names[i]);
+        if (!c || !c->has_box)
+            goto out;
+        labels[i] = c->key_id;
+        memcpy(pubs[i], c->box_public, 32);
+    }
+    ok = rec && drv->assembly_split(seed, gen, labels, (const uint8_t(*)[32])pubs, n, rec, FL_USER_ASSEMBLY_MAX, &len) ==
+                    KQ_ASSEMBLY_OK &&
+         fl_user_db_assembly_put(fl_session_user_db(), parent_key, gen, drv->assembly_threshold((unsigned)n), rec, len) ==
+             FL_RESULT_OK;
+out:
+    free(rec);
+    return ok;
+}
+
+static int test_a_parent_is_assembled_from_the_children_online(void) {
+    const fl_kq_driver_t *drv = fl_kq_driver_get_or_register();
+    const char *kids[] = {"AsmKid1", "AsmKid2", "AsmKid3"};
+    const fl_user_record_t *mgr;
+    uint8_t seed[32], key[32], other[32];
+    kq_signing_mode_t mode = 0;
+    unsigned char *rec = malloc(FL_USER_ASSEMBLY_MAX);
+    size_t rlen = 0;
+    unsigned gen = 0, thr = 0;
+    char mgr_key[FL_HERITAGE_KEY_ID_MAX], single[512];
+    int64_t before = 0, after = 0;
+
+    ASSERT(drv && drv->assembly_assemble && rec);
+    ASSERT(fl_session_add_user_under("Root", "AsmMgr", "mgr-pw", 211, 0, 0) == FL_RESULT_OK);
+    mgr = account("AsmMgr");
+    ASSERT(mgr && mgr->has_key);
+    snprintf(mgr_key, sizeof mgr_key, "%s", mgr->key_id);
+    for (int i = 0; i < 3; i++) {
+        ASSERT(fl_session_add_user_under(mgr_key, kids[i], "kid-pw", 212u + (unsigned)i, 0, 0) == FL_RESULT_OK);
+        ASSERT(account(kids[i]) && account(kids[i])->has_box);
+        ASSERT(register_device(account(kids[i])->key_id, i == 2 ? 0x11 : (unsigned char)(0x11 * (i + 1)))); /* kid3 shares kid1's device */
+    }
+    ASSERT(fl_user_db_open_key(fl_session_user_db(), "AsmMgr", "mgr-pw", seed) == FL_RESULT_OK);
+    ASSERT(fl_kq_service_start() == FL_RESULT_OK);
+    audit_capture(1);
+
+    /* No record: nothing to assemble from, nothing audited as refused (the sweep just waits). */
+    ASSERT(child_online("AsmKid1", "kid-pw"));
+    ASSERT(fl_kq_obtain_author_key(mgr_key, key, &mode) == FL_RESULT_ACCES);
+    ASSERT(!audited("event=kq-assemble-refused"));
+    ASSERT(fl_user_db_assembly_get(fl_session_user_db(), mgr_key, rec, FL_USER_ASSEMBLY_MAX, &rlen, &gen, &thr) ==
+           FL_RESULT_NOENT);
+
+    /* Three children, threshold two: one child online is no quorum. */
+    ASSERT(deal(mgr_key, seed, kids, 3, 1));
+    ASSERT(fl_user_db_assembly_get(fl_session_user_db(), mgr_key, rec, FL_USER_ASSEMBLY_MAX, &rlen, &gen, &thr) ==
+               FL_RESULT_OK && gen == 1 && thr == 2 && rlen > 0);
+    ASSERT(fl_kq_obtain_author_key(mgr_key, key, &mode) == FL_RESULT_ACCES);
+    ASSERT(audited("event=kq-assemble-refused"));
+    /* Kid3 shares kid1's device: two shares from one physical device do not meet two devices. */
+    ASSERT(child_online("AsmKid3", "kid-pw"));
+    audit_clear();
+    ASSERT(fl_kq_obtain_author_key(mgr_key, key, &mode) == FL_RESULT_ACCES);
+    ASSERT(audited("event=kq-assemble-refused"));
+    /* Kid2 is on its own device: assembled, and the key is the parent's own. */
+    ASSERT(child_online("AsmKid2", "kid-pw"));
+    memset(key, 0xEE, sizeof key);
+    ASSERT(fl_kq_obtain_author_key(mgr_key, key, &mode) == FL_RESULT_OK);
+    ASSERT(mode == KQ_SIGNING_ASSEMBLED && memcmp(key, seed, 32) == 0);
+    ASSERT(audited("event=kq-assembled"));
+    ASSERT(fl_kq_obtain_author_key(account("AsmKid1")->key_id, other, &mode) == FL_RESULT_OK && mode == KQ_SIGNING_OWN);
+
+    /* A record that deals some other seed is refused (the recovered seed is not the parent's). */
+    memset(other, 0x42, sizeof other);
+    ASSERT(deal(mgr_key, other, kids, 3, 2));
+    memset(key, 0xEE, sizeof key);
+    audit_clear();
+    ASSERT(fl_kq_obtain_author_key(mgr_key, key, &mode) == FL_RESULT_ACCES);
+    ASSERT(audited("event=kq-assemble-refused"));
+    {
+        uint8_t zero[32] = {0};
+        ASSERT(memcmp(key, zero, 32) == 0 || memcmp(key, seed, 32) != 0); /* never the parent's key, never half-filled */
+    }
+    ASSERT(deal(mgr_key, seed, kids, 3, 3));
+
+    /* The sweep: a tracked file authored by the parent is signed with the assembled key, audited "assembled". */
+    {
+        fl_kq_buf_t base = {0}, one = {0};
+        uint8_t id[16], rev[32];
+        char path[512];
+
+        memset(id, 0x61, sizeof id);
+        ASSERT(drv->file_new(id, "asm.txt", mgr_key, &base) == KQ_FILE_OK);
+        ASSERT(drv->check_in(&base, mgr_key, "2026-11-10T09:00:00.000Z", (const uint8_t *)"v1\n", 3, seed, &one, rev) ==
+               KQ_FILE_OK);
+        ASSERT(put_plain("asm.txt", "v1\n") == 0 && put_container("asm.txt", &one) == 0);
+        fl_kq_buf_free(&base);
+        fl_kq_buf_free(&one);
+        snprintf(single, sizeof single, "%s/asm.txt", s_tmp);
+        (void)path;
+    }
+    audit_clear();
+    ASSERT(fl_kq_cp_last_signature(single, &before) == FL_KQ_CP_OK);
+    ASSERT(fl_kq_service_autosign_track_file(single, 1) == FL_RESULT_OK);
+    sleep_ms(2600);
+    ASSERT(fl_kq_cp_last_signature(single, &after) == FL_KQ_CP_OK && after > before);
+    {
+        char want[600];
+
+        snprintf(want, sizeof want, "event=kq-autosign subject=%s detail=assembled", single);
+        ASSERT(audited(want) || audited("detail=assembled"));
+    }
+    /* Children offline again: the parent is not obtainable and the sweep waits. */
+    fl_kq_service_offline("AsmKid2");
+    fl_kq_service_offline("AsmKid3");
+    audit_clear();
+    ASSERT(fl_kq_obtain_author_key(mgr_key, key, &mode) == FL_RESULT_ACCES);
+    sleep_ms(2300);
+    ASSERT(audited("event=kq-autosign-wait"));
+    ASSERT(fl_kq_service_autosign_remove(single) == FL_RESULT_OK);
+    fl_kq_service_offline("AsmKid1");
+    audit_capture(0);
+    mem_domain_secure_zero(seed, sizeof seed);
+    mem_domain_secure_zero(key, sizeof key);
+    free(rec);
+    return 0;
+}
+
+/* A reload that fails ends the signed-in account's session and takes its key offline: the records it would be
+ * looked up by are gone, so the key id is taken before the load (CodeRabbit on session.c). The store is put back. */
+static int test_a_failed_reload_takes_the_signed_in_key_offline(void) {
+    const char *path = getenv("FL_USERS_DB_PATH");
+    char a_key[FL_HERITAGE_KEY_ID_MAX], junk[64];
+    uint8_t key[32], *saved = NULL;
+    kq_signing_mode_t mode = 0;
+    size_t n = 0, cap = 1u << 20;
+    FILE *fp;
+    int ok = 0;
+
+    ASSERT(path && (saved = malloc(cap)));
+    fp = fopen(path, "rb");
+    ASSERT(fp);
+    n = fread(saved, 1, cap, fp);
+    fclose(fp);
+    ASSERT(n > 0 && n < cap);
+    ASSERT(fl_session_login("SwapA", "swap-a-pw") == FL_RESULT_OK);
+    snprintf(a_key, sizeof a_key, "%s", account("SwapA")->key_id);
+    ASSERT(fl_kq_obtain_author_key(a_key, key, &mode) == FL_RESULT_OK);
+    memset(junk, 'x', sizeof junk);
+    fp = fopen(path, "wb");
+    ASSERT(fp && fwrite(junk, 1, sizeof junk, fp) == sizeof junk);
+    fclose(fp);
+    ASSERT(fl_session_reload_users() != FL_RESULT_OK);
+    ok = fl_kq_obtain_author_key(a_key, key, &mode) == FL_RESULT_ACCES; /* wiped, not left behind */
+    fp = fopen(path, "wb");
+    ASSERT(fp && fwrite(saved, 1, n, fp) == n);
+    fclose(fp);
+    free(saved);
+    ASSERT(fl_session_reload_users() == FL_RESULT_OK);
+    mem_domain_secure_zero(key, sizeof key);
+    return ok ? 0 : 1;
+}
+
 int main(void) {
     char tmpl[] = "/tmp/fl_kq_serviceXXXXXX";
     char path[300];
@@ -928,6 +1205,9 @@ int main(void) {
     if (!rc) RUN(test_a_refusal_is_reported_as_the_online_account);
     if (!rc) RUN(test_the_private_queue_consumes_no_durable_record);
     if (!rc) RUN(test_a_keyless_account_comes_online_at_its_first_login);
+    if (!rc) RUN(test_a_replacing_login_wipes_the_previous_box_key);
+    if (!rc) RUN(test_a_parent_is_assembled_from_the_children_online);
+    if (!rc) RUN(test_a_failed_reload_takes_the_signed_in_key_offline);
     if (!rc) RUN(test_orderly_shutdown_is_the_only_end);
     unlink(path);
     {

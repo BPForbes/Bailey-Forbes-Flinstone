@@ -969,8 +969,19 @@ void fl_session_forget_key(const char *name) {
 
 fl_result_t fl_session_reload_users(void) {
     fl_result_t rc;
+    char who_key[FL_HERITAGE_KEY_ID_MAX];
+    uint64_t failed_gen = 0;
+    int offline = 0;
 
     session_lock_db();
+    /* Taken before the load: a failed load clears the records, and the key service needs the key id. */
+    {
+        const fl_user_record_t *cur = fl_user_db_find(&s_db, s_current);
+
+        who_key[0] = '\0';
+        if (cur)
+            snprintf(who_key, sizeof who_key, "%s", cur->key_id);
+    }
     if (!s_db.path[0])
         rc = FL_RESULT_ERR;
     else
@@ -982,9 +993,15 @@ fl_result_t fl_session_reload_users(void) {
         s_sudo_scope_depth = 0;
         s_current[0] = '\0';
         s_login_gen++;
+        failed_gen = s_login_gen;
+        offline = who_key[0] != '\0';
     }
     s_db_ready = (rc == FL_RESULT_OK && s_db.loaded) ? 1 : 0;
     session_unlock_db();
+    /* The signed-in account is gone with the session, so its key goes offline (the service wipes it). Only
+     * while no later login has begun: that login's generation differs, and its key is not this one's to end. */
+    if (offline && s_offline_hook && fl_session_login_generation() == failed_gen)
+        s_offline_hook(who_key);
     return rc;
 }
 

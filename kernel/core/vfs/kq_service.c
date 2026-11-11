@@ -6,6 +6,7 @@
 #include "fl/authz_subsystem.h"
 #include "fl/driver/keyquorum.h"
 #include "fl/kq.h"
+#include "heritage.h"
 #include "kq_checkpoint.h"
 #include "contract_p2_authz.h"
 #include "mem_domain.h"
@@ -25,6 +26,7 @@ typedef struct {
     uint8_t secret[FL_USER_SIGNING_SECRET_LEN];
     uint8_t box[32]; /* FL-15: the box secret of a KQST login; has_box says whether it was published */
     int has_box;
+    int session; /* published by a session login (a generation was given): the replacement rule below applies */
     int used;
 } kq_slot_t;
 
@@ -62,15 +64,25 @@ static void slot_wipe_locked(kq_slot_t *s) {
     mem_domain_secure_zero(s->secret, sizeof s->secret);
     mem_domain_secure_zero(s->box, sizeof s->box);
     s->has_box = 0;
-    memset(s->key_id, 0, sizeof s->key_id);
+    s->session = 0;
+    mem_domain_zero(s->key_id, sizeof s->key_id);
     s->used = 0;
 }
 
-static fl_result_t slot_put(const char *key_id, const uint8_t secret[FL_USER_SIGNING_SECRET_LEN]) {
+/* session non-zero: the key comes from a session login. The session has one account, so a login that
+ * replaces another without a logout in between ends the previous account's slot here, secret and box key
+ * together. The caller holds the session lock and has checked the login generation (publish_if_current), so
+ * a stale login never reaches this and cannot wipe a later login's slot. A key brought online without a
+ * session (the Root fallback, generation 0) is not session-owned and is left alone. */
+static fl_result_t slot_put(const char *key_id, const uint8_t secret[FL_USER_SIGNING_SECRET_LEN], int session) {
     fl_result_t rc = FL_RESULT_NOMEM;
     int i;
 
     pthread_mutex_lock(&s_mu);
+    if (session)
+        for (size_t k = 0; k < FL_USER_DB_MAX_USERS; k++)
+            if (s_slots[k].used && s_slots[k].session && strcmp(s_slots[k].key_id, key_id) != 0)
+                slot_wipe_locked(&s_slots[k]);
     i = slot_find_locked(key_id);
     if (i < 0)
         for (size_t k = 0; k < FL_USER_DB_MAX_USERS && i < 0; k++)
@@ -79,8 +91,9 @@ static fl_result_t slot_put(const char *key_id, const uint8_t secret[FL_USER_SIG
     if (i >= 0) {
         slot_wipe_locked(&s_slots[i]); /* a reused slot is wiped first */
         snprintf(s_slots[i].key_id, sizeof s_slots[i].key_id, "%s", key_id);
-        memcpy(s_slots[i].secret, secret, sizeof s_slots[i].secret);
+        mem_domain_copy(s_slots[i].secret, secret, sizeof s_slots[i].secret);
         s_slots[i].used = 1;
+        s_slots[i].session = session;
         rc = FL_RESULT_OK;
     }
     pthread_mutex_unlock(&s_mu);
@@ -90,12 +103,13 @@ static fl_result_t slot_put(const char *key_id, const uint8_t secret[FL_USER_SIG
 typedef struct {
     const char *key_id;
     const uint8_t *secret;
+    int session;
 } slot_put_ctx_t;
 
 static fl_result_t slot_put_cb(void *p) {
     const slot_put_ctx_t *c = (const slot_put_ctx_t *)p;
 
-    return slot_put(c->key_id, c->secret);
+    return slot_put(c->key_id, c->secret, c->session);
 }
 
 fl_result_t fl_kq_service_online_for_session(const fl_user_record_t *account, const char *password,
@@ -110,7 +124,7 @@ fl_result_t fl_kq_service_online_for_session(const fl_user_record_t *account, co
      * key belongs to is still the current one: a logout that overlapped the derivation wins. */
     rc = fl_user_db_open_key_record(account, password, secret);
     if (rc == FL_RESULT_OK) {
-        slot_put_ctx_t put = {account->key_id, secret};
+        slot_put_ctx_t put = {account->key_id, secret, login_generation != 0};
 
         rc = fl_session_publish_if_current(login_generation, slot_put_cb, &put);
     }
@@ -146,6 +160,7 @@ fl_result_t fl_kq_service_online_opened(const fl_user_record_t *account, const u
         return FL_RESULT_INVAL;
     put.key_id = account->key_id;
     put.secret = secret;
+    put.session = login_generation != 0;
     rc = fl_session_publish_if_current(login_generation, slot_put_cb, &put);
     fl_audit_identity_event(account->key_id,
                             rc == FL_RESULT_OK ? "kq-service-online"
@@ -168,7 +183,7 @@ static fl_result_t slot_box_cb(void *p) {
     pthread_mutex_lock(&s_mu);
     i = slot_find_locked(c->key_id);
     if (i >= 0) { /* only an account that is online has a slot to keep it in */
-        memcpy(s_slots[i].box, c->box, sizeof s_slots[i].box);
+        mem_domain_copy(s_slots[i].box, c->box, sizeof s_slots[i].box);
         s_slots[i].has_box = 1;
         rc = FL_RESULT_OK;
     }
@@ -203,7 +218,7 @@ fl_result_t fl_kq_obtain_box_key(const char *author_key_id, uint8_t out[32]) {
     pthread_mutex_lock(&s_mu);
     i = slot_find_locked(author_key_id);
     if (i >= 0 && s_slots[i].has_box) {
-        memcpy(out, s_slots[i].box, sizeof s_slots[i].box);
+        mem_domain_copy(out, s_slots[i].box, sizeof s_slots[i].box);
         rc = FL_RESULT_OK;
     }
     pthread_mutex_unlock(&s_mu);
@@ -276,6 +291,83 @@ fl_result_t fl_kq_service_root_fallback(void) {
     return rc;
 }
 
+/* A parent who is not signed in, put together from the children who are (KQ-16). The record is the KQAS
+ * bytes the account store holds for the parent; each online child with a box secret (FL-15) and a device
+ * id in the account registry (the pairing row of its KQST) contributes its label, box secret and device
+ * id, and KeyQuorum decides whether that is a quorum and whether the recovered seed is the parent's
+ * registered key. Nothing is decided here beyond "who is online". Every secret copy is wiped. */
+#define KQ_ASSEMBLY_CHILDREN_MAX FL_USER_DB_MAX_USERS
+
+static fl_result_t assemble_author_key(const char *parent, uint8_t out[32]) {
+    const fl_kq_driver_t *drv = fl_kq_driver_get_or_register();
+    const fl_user_db_t *db = fl_session_user_db();
+    const unsigned char *parent_pub;
+    char labels[KQ_ASSEMBLY_CHILDREN_MAX][FL_HERITAGE_KEY_ID_MAX];
+    const char *label_ptr[KQ_ASSEMBLY_CHILDREN_MAX];
+    uint8_t box[KQ_ASSEMBLY_CHILDREN_MAX][32];
+    uint8_t dev[KQ_ASSEMBLY_CHILDREN_MAX][16];
+    char up[FL_HERITAGE_KEY_ID_MAX];
+    unsigned char *record;
+    unsigned generation = 0, threshold = 0;
+    size_t rlen = 0, n = 0;
+    fl_result_t rc = FL_RESULT_ACCES;
+    int st;
+
+    if (!drv || !drv->assembly_assemble || !db || !(parent_pub = fl_user_db_signing_public(db, parent)))
+        return FL_RESULT_ACCES; /* no driver op (the freestanding image), or no registered key to match */
+    record = (unsigned char *)mem_domain_alloc(MEM_DOMAIN_FS, FL_USER_ASSEMBLY_MAX);
+    if (!record)
+        return FL_RESULT_NOMEM;
+    if (fl_user_db_assembly_get(db, parent, record, FL_USER_ASSEMBLY_MAX, &rlen, &generation, &threshold) !=
+        FL_RESULT_OK)
+        goto done; /* this account was never split: nothing to wait for either */
+    /* The children online now: direct heritage children of the parent that published a box secret. */
+    pthread_mutex_lock(&s_mu);
+    for (size_t i = 0; i < FL_USER_DB_MAX_USERS && n < KQ_ASSEMBLY_CHILDREN_MAX; i++) {
+        if (!s_slots[i].used || !s_slots[i].has_box || fl_heritage_parent(s_slots[i].key_id, up, sizeof up) != FL_RESULT_OK ||
+            strcmp(up, parent) != 0)
+            continue;
+        mem_domain_copy(labels[n], s_slots[i].key_id, sizeof labels[n]);
+        mem_domain_copy(box[n], s_slots[i].box, sizeof box[n]);
+        n++;
+    }
+    pthread_mutex_unlock(&s_mu);
+    /* The device id of each child comes from the account registry; a child with no pairing row cannot be counted. */
+    size_t k = 0;
+
+    for (size_t i = 0; i < n; i++) {
+        unsigned char sp[32], ep[32];
+
+        if (fl_user_db_kqst_pairing(db, labels[i], dev[k], sp, ep) != FL_RESULT_OK)
+            continue;
+        if (k != i) {
+            mem_domain_copy(labels[k], labels[i], sizeof labels[k]);
+            mem_domain_copy(box[k], box[i], sizeof box[k]);
+        }
+        k++;
+    }
+    n = k;
+    for (size_t i = 0; i < n; i++)
+        label_ptr[i] = labels[i];
+    if (n == 0)
+        goto done; /* nobody to assemble from: the sweep waits and asks again */
+    /* One physical device per share (the record's threshold distinct devices): slots of one container are no quorum. */
+    st = drv->assembly_assemble(record, rlen, parent_pub, label_ptr, (const uint8_t(*)[32])box,
+                                (const uint8_t(*)[16])dev, n, threshold, out);
+    if (st == KQ_ASSEMBLY_OK) {
+        rc = FL_RESULT_OK;
+        fl_audit_identity_event(parent, "kq-assembled", parent, NULL); /* never the seed, a share or a label's secret */
+    } else {
+        mem_domain_secure_zero(out, 32);
+        fl_audit_identity_event(parent, "kq-assemble-refused", parent, NULL);
+    }
+done:
+    mem_domain_secure_zero(box, sizeof box);
+    mem_domain_secure_zero(record, FL_USER_ASSEMBLY_MAX);
+    mem_domain_free(MEM_DOMAIN_FS, record);
+    return rc;
+}
+
 fl_result_t fl_kq_obtain_author_key(const char *author_key_id, uint8_t out[32], kq_signing_mode_t *mode) {
     int i;
     fl_result_t rc = FL_RESULT_ACCES;
@@ -285,12 +377,16 @@ fl_result_t fl_kq_obtain_author_key(const char *author_key_id, uint8_t out[32], 
     pthread_mutex_lock(&s_mu);
     i = slot_find_locked(author_key_id);
     if (i >= 0) {
-        memcpy(out, s_slots[i].secret, FL_USER_SIGNING_SECRET_LEN);
+        mem_domain_copy(out, s_slots[i].secret, FL_USER_SIGNING_SECRET_LEN);
         *mode = KQ_SIGNING_OWN;
         rc = FL_RESULT_OK;
     }
     pthread_mutex_unlock(&s_mu);
-    /* A leaf who is not signed in cannot be assembled by anything: the answer is ACCES. */
+    if (i < 0 && assemble_author_key(author_key_id, out) == FL_RESULT_OK) {
+        *mode = KQ_SIGNING_ASSEMBLED;
+        rc = FL_RESULT_OK;
+    }
+    /* Neither signed in nor assemblable: ACCES, and the sweep waits. */
     return rc;
 }
 
@@ -406,7 +502,7 @@ void fl_kq_service_shutdown(void) {
     for (size_t i = 0; i < FL_USER_DB_MAX_USERS; i++)
         if (s_slots[i].used)
             slot_wipe_locked(&s_slots[i]);
-    memset(s_objects, 0, sizeof s_objects);
+    mem_domain_zero(s_objects, sizeof s_objects);
     pthread_mutex_unlock(&s_mu);
 }
 
@@ -455,7 +551,7 @@ static void autosign_job(void *arg) {
         return;
     }
     spec = o->spec;
-    memcpy(label, o->label, sizeof label);
+    mem_domain_copy(label, o->label, sizeof label);
     spec.label = label;
     pthread_mutex_unlock(&s_mu);
 
@@ -494,7 +590,7 @@ static fl_result_t autosign_register(const fl_kq_autosign_t *spec, const char *p
         if (!s_objects[i].used)
             o = &s_objects[i];
     if (o) {
-        memset(o, 0, sizeof *o);
+        mem_domain_zero(o, sizeof *o);
         o->used = 1;
         o->active = 1;
         o->spec = *spec;
@@ -531,7 +627,10 @@ fl_result_t fl_kq_service_autosign_remove(const char *label) {
         return FL_RESULT_INVAL;
     pthread_mutex_lock(&s_mu);
     for (size_t i = 0; i < FL_KQ_AUTOSIGN_MAX; i++)
-        if (s_objects[i].used && s_objects[i].active && strcmp(s_objects[i].label, label) == 0) {
+        /* A tracked file is known by its full path (the label is cut to fit, so two long paths can share one);
+         * any other registration is known by its label. */
+        if (s_objects[i].used && s_objects[i].active &&
+            strcmp(s_objects[i].path[0] ? s_objects[i].path : s_objects[i].label, label) == 0) {
             s_objects[i].active = 0; /* the slot stays taken: its queued item will find it inactive */
             rc = FL_RESULT_OK;
         }
@@ -658,7 +757,7 @@ void fl_kq_report_refusal_in(const kq_file_offer_t *o, fl_result_t why, const fl
         fl_audit_identity_event(who, "kq-report-uncontained", "receive", NULL);
         return;
     }
-    memset(key, 0, sizeof key);
+    mem_domain_secure_zero(key, sizeof key);
     /* Signed only as the account that is online; nobody online signs nothing (fail closed). */
     if (!me || !me[0] || fl_kq_obtain_author_key(me, key, &mode) != FL_RESULT_OK) {
         event = "kq-report-offline";

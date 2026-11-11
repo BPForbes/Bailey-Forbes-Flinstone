@@ -32,7 +32,7 @@
 /** How the author's key was obtained for a signature (recorded in the history event). */
 typedef enum {
     KQ_SIGNING_OWN = 1,       /* the author is signed in and signs with their own key */
-    KQ_SIGNING_ASSEMBLED = 2  /* a parent assembled from its children's shares (not available yet) */
+    KQ_SIGNING_ASSEMBLED = 2  /* a parent assembled from its children's shares (KeyQuorum parent-key assembly) */
 } kq_signing_mode_t;
 
 /** A heartbeat older than this is a stalled service. The loop wakes every FL_KQ_SERVICE_TICK_MS. */
@@ -90,7 +90,9 @@ typedef fl_result_t (*fl_kq_root_cred_fn)(char *out, size_t cap);
 void fl_kq_service_set_root_credential_provider(fl_kq_root_cred_fn provider);
 
 /** A copy of the signing secret to sign as author_key_id, for the caller to wipe. ACCES when that account is
- *  not signed in (nothing can assemble a leaf; a parent cannot be assembled yet). */
+ *  not signed in and, for a parent whose assembly record the account store holds, cannot be assembled from
+ *  the children online now (KQ_SIGNING_ASSEMBLED when it can; audited kq-assembled / kq-assemble-refused).
+ *  Nothing can assemble a leaf. */
 fl_result_t fl_kq_obtain_author_key(const char *author_key_id, uint8_t out[32], kq_signing_mode_t *mode);
 
 int fl_kq_service_alive(void);
