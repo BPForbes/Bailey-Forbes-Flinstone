@@ -18,6 +18,7 @@
 #include "contract_p4_keyquorum.h"
 #include "fl/driver/driver.h"
 #include "keyquorum_access.h"
+#include "keyquorum_assembly.h"
 #include "keyquorum_bridge.h"
 #include "keyquorum_error.h"
 #include "keyquorum_files.h"
@@ -219,6 +220,29 @@ struct fl_kq_driver {
      */
     int (*bridge_connects)(const char *end_a, const char *end_b, const char *actor,
                            const char *scope);
+
+    /*
+     * Parent-key assembly (file ABI version 6, keyquorum_assembly.h), appended after
+     * bridge_connects: one-to-one over kq_assembly_*, the KQ_ASSEMBLY_* status returned unchanged.
+     * A parent's 32-byte signing seed is dealt among its children (assembly_split writes the KQAS
+     * record, every share sealed to one child's box key) and put back together from the children
+     * that are unlocked now (assembly_assemble: label, box secret and device id of each; the
+     * threshold must come from at least minimum_devices distinct devices, and the seed must derive
+     * parent_signing_public). The caller wipes seed_out and every secret it passed. The quorum rule
+     * lives in KeyQuorum; nothing here decides it. Hosted build only: NULL in the freestanding image
+     * (the library archive there does not export them), and a caller reads NULL as "refused".
+     */
+    unsigned (*assembly_threshold)(unsigned holders);
+    int (*assembly_split)(const uint8_t seed[32], unsigned generation,
+                          const char *const *child_labels, const uint8_t (*child_box_public)[32],
+                          size_t nchildren, uint8_t *out, size_t cap, size_t *out_len);
+    int (*assembly_generation)(const uint8_t *assembly, size_t alen, unsigned *generation_out);
+    int (*assembly_assemble)(const uint8_t *assembly, size_t alen,
+                             const uint8_t parent_signing_public[32],
+                             const char *const *unlocked_labels,
+                             const uint8_t (*unlocked_box_secret)[32],
+                             const uint8_t (*unlocked_device_id)[16], size_t nunlocked,
+                             size_t minimum_devices, uint8_t seed_out[32]);
 };
 
 /**

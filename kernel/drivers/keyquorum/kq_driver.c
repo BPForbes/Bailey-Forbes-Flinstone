@@ -377,6 +377,34 @@ static int drv_bridge_connects(const char *end_a, const char *end_b, const char 
                                const char *scope) {
     return kq_bridge_connects(end_a, end_b, actor, scope);
 }
+
+/* Parent-key assembly: hosted only, like the ops above (the no_std archive does not export it). */
+static unsigned drv_assembly_threshold(unsigned holders) {
+    return kq_assembly_threshold(holders);
+}
+
+static int drv_assembly_split(const uint8_t seed[32], unsigned generation,
+                              const char *const *child_labels,
+                              const uint8_t (*child_box_public)[32], size_t nchildren,
+                              uint8_t *out, size_t cap, size_t *out_len) {
+    return kq_assembly_split(seed, generation, child_labels, child_box_public, nchildren, out, cap,
+                             out_len);
+}
+
+static int drv_assembly_generation(const uint8_t *assembly, size_t alen, unsigned *generation_out) {
+    return kq_assembly_generation(assembly, alen, generation_out);
+}
+
+static int drv_assembly_assemble(const uint8_t *assembly, size_t alen,
+                                 const uint8_t parent_signing_public[32],
+                                 const char *const *unlocked_labels,
+                                 const uint8_t (*unlocked_box_secret)[32],
+                                 const uint8_t (*unlocked_device_id)[16], size_t nunlocked,
+                                 size_t minimum_devices, uint8_t seed_out[32]) {
+    return kq_assembly_assemble(assembly, alen, parent_signing_public, unlocked_labels,
+                                unlocked_box_secret, unlocked_device_id, nunlocked,
+                                minimum_devices, seed_out);
+}
 #endif
 
 static const fl_driver_ops_t s_kq_lifecycle = {
@@ -436,6 +464,10 @@ static const fl_kq_driver_t s_kq_driver = {
     .bridge_prove = drv_bridge_prove,
     .bridge_verify = drv_bridge_verify,
     .bridge_connects = drv_bridge_connects,
+    .assembly_threshold = drv_assembly_threshold,
+    .assembly_split = drv_assembly_split,
+    .assembly_generation = drv_assembly_generation,
+    .assembly_assemble = drv_assembly_assemble,
 #endif
 };
 
