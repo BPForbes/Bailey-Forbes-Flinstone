@@ -12,7 +12,17 @@
 #include "user_db.h"
 #include "session.h"
 #include "elevation.h"
+#include "fl/authz_subsystem.h"
+#include "cmd_authutil.h"
+#include "fs_facade.h"
 #include "fs_jail.h"
+
+/* session_sync.c calls these. The deny path never starts a file service. */
+file_manager_service_t *g_fm_service;
+void fm_service_set_user(file_manager_service_t *svc, const char *user) {
+    (void)svc;
+    (void)user;
+}
 #include "common.h"
 #include "cmd_decl.h"
 #include <dirent.h>
@@ -1960,6 +1970,40 @@ static int test_account_command_reload_fails_closed(void) {
     return failed;
 }
 
+static int s_switch_denies;
+
+static fl_authz_decision_t deny_identity_switch(unsigned op, void *ctx) {
+    (void)ctx;
+    if (op == (unsigned)FL_AUTHZ_OP_IDENTITY_SWITCH) {
+        s_switch_denies++;
+        return FL_AUTHZ_DENY;
+    }
+    return FL_AUTHZ_ALLOW;
+}
+
+/* A deny hook stops su and sudo before either asks for a password, including the
+ * sudo <command> path that never enters cmd_sudo_run. */
+static int test_identity_switch_denied_before_prompt(void) {
+    char *su_argv[] = {"su", "Root", NULL};
+    char *sudo_argv[] = {"sudo", "-i", NULL};
+
+    ASSERT(fl_authz_subsystem_op_for_shell_cmd((unsigned)FL_SCMD_SU) ==
+           (unsigned)FL_AUTHZ_OP_IDENTITY_SWITCH);
+    ASSERT(fl_authz_subsystem_op_for_shell_cmd((unsigned)FL_SCMD_SUDO) ==
+           (unsigned)FL_AUTHZ_OP_IDENTITY_SWITCH);
+    ASSERT(fl_session_set_user("Flinstone") == FL_RESULT_OK);
+    unsetenv("FL_CMD_PASSWORD");
+    s_switch_denies = 0;
+    fl_authz_subsystem_set_hook(deny_identity_switch, NULL);
+    ASSERT(cmd_su_run(2, su_argv) != 0);
+    ASSERT(cmd_sudo_run(2, sudo_argv) != 0);
+    ASSERT(cmd_sudo_require_auth() != 0);
+    fl_authz_subsystem_set_hook(NULL, NULL);
+    ASSERT(s_switch_denies == 3);
+    ASSERT(!strcmp(fl_session_current_user(), "Flinstone"));
+    return 0;
+}
+
 int main(void) {
     char db_path[256];
     char tmpl[] = "/tmp/fl_heritage_jailXXXXXX";
@@ -2003,6 +2047,7 @@ int main(void) {
     RUN(test_switch_bridge_recheck);
     RUN(test_switch_mutation_barriers);
     RUN(test_account_command_reload_fails_closed);
+    RUN(test_identity_switch_denied_before_prompt);
 
     if (chdir("/tmp") != 0)
         rc = 1;

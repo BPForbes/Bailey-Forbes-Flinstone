@@ -1,5 +1,6 @@
 #include "cmd_authutil.h"
 #include "fl/audit_log.h"
+#include "fl/authz_subsystem.h"
 #include "fl/session.h"
 #include "fl/kq.h"
 #include "heritage.h"
@@ -122,6 +123,9 @@ int cmd_sudo_require_auth_reason(const char *reason) {
     const char *why = (reason && reason[0]) ? reason : "sudo authentication";
 
     fl_session_init();
+    /* Before the password prompt, including sudo <command> which never enters cmd_sudo_run. */
+    if (fl_authz_identity_switch_denied("sudo"))
+        return 1;
     if (fl_session_is_elevated_account())
         return 0;
     if (fl_session_has_elevation())

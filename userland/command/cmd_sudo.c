@@ -2,6 +2,7 @@
 #include "cmd_batch.h"
 #include "cmd_authutil.h"
 #include "fl/audit_log.h"
+#include "fl/authz_subsystem.h"
 #include "fl/session.h"
 #include "fl/elevation.h"
 #include "contract_p2_elevation.h"
@@ -79,6 +80,8 @@ static int sudo_revoke_elevation(void) {
 int cmd_sudo_run(int argc, char **argv) {
     const char *reason = "lab elevation";
 
+    if (fl_authz_identity_switch_denied("sudo"))
+        return 1;
     if (argc >= 2 && argv[1] && strcmp(argv[1], "-k") == 0) {
         if (argc > 2) {
             fprintf(stderr, "sudo: -k does not take additional arguments\n");

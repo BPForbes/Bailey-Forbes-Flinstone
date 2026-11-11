@@ -3,6 +3,7 @@
 #include "cmd_authutil.h"
 #include "common.h"
 #include "fl/audit_log.h"
+#include "fl/authz_subsystem.h"
 #include "fl/session.h"
 #include "user_db.h"
 #include "session_sync.h"
@@ -92,6 +93,8 @@ int cmd_su_run(int argc, char **argv) {
         fprintf(stderr, "su: invalid options\n");
         return 1;
     }
+    if (fl_authz_identity_switch_denied("su"))
+        return 1;
 
     strncpy(saved, fl_session_current_user(), sizeof(saved) - 1);
     saved[sizeof(saved) - 1] = '\0';

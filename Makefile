@@ -1024,11 +1024,17 @@ tests/obj/cmd_account_heritage.o: userland/command/cmd_account.c | $(TEST_BATCH_
 	$(CC) $(CFLAGS) $(TEST_SANITIZE) -ffunction-sections -fdata-sections $(DEPFLAGS) -c -o $@ $<
 tests/obj/cmd_authutil_heritage.o: userland/command/cmd_authutil.c | $(TEST_BATCH_GC_DIR)
 	$(CC) $(CFLAGS) $(TEST_SANITIZE) -ffunction-sections -fdata-sections $(DEPFLAGS) -c -o $@ $<
-test_heritage: userland/shell/common.o $(UTIL_SHELL_LINK_OBJS) $(FS_JAIL_CORE_OBJS) $(FS_JAIL_SUPPORT_OBJS) kernel/core/mm/mem_domain.o $(MEM_ASM_OBJ) $(HISTORY_ASM_OBJ) $(UTIL_HISTORY_HOST_OBJS) tests/obj/cmd_account_heritage.o tests/obj/cmd_authutil_heritage.o userland/shell/audit_log.o userland/shell/contract_log_dispatch.o
+tests/obj/cmd_su_heritage.o: userland/command/cmd_su.c | $(TEST_BATCH_GC_DIR)
+	$(CC) $(CFLAGS) $(TEST_SANITIZE) -ffunction-sections -fdata-sections $(DEPFLAGS) -c -o $@ $<
+tests/obj/cmd_sudo_heritage.o: userland/command/cmd_sudo.c | $(TEST_BATCH_GC_DIR)
+	$(CC) $(CFLAGS) $(TEST_SANITIZE) -ffunction-sections -fdata-sections $(DEPFLAGS) -c -o $@ $<
+test_heritage: userland/shell/common.o $(UTIL_SHELL_LINK_OBJS) $(FS_JAIL_CORE_OBJS) $(FS_JAIL_SUPPORT_OBJS) kernel/core/mm/mem_domain.o $(MEM_ASM_OBJ) $(HISTORY_ASM_OBJ) $(UTIL_HISTORY_HOST_OBJS) tests/obj/cmd_account_heritage.o tests/obj/cmd_authutil_heritage.o tests/obj/cmd_su_heritage.o tests/obj/cmd_sudo_heritage.o userland/shell/authz_subsystem.o userland/shell/session_sync.o userland/shell/session_login_env.o userland/shell/audit_log.o userland/shell/contract_log_dispatch.o
 	$(CC) $(CFLAGS) $(TEST_SANITIZE) -c -o tests/test_heritage.o tests/test_heritage.c
 	$(CXX) $(CXXFLAGS) $(TEST_SANITIZE) -o tests/test_heritage tests/test_heritage.o \
 	  userland/shell/common.o $(UTIL_SHELL_LINK_OBJS) $(FS_JAIL_CORE_OBJS) $(FS_JAIL_SUPPORT_OBJS) \
 	  tests/obj/cmd_account_heritage.o tests/obj/cmd_authutil_heritage.o \
+	  tests/obj/cmd_su_heritage.o tests/obj/cmd_sudo_heritage.o \
+	  userland/shell/authz_subsystem.o userland/shell/session_sync.o userland/shell/session_login_env.o \
 	  userland/shell/audit_log.o userland/shell/contract_log_dispatch.o \
 	  kernel/core/mm/mem_domain.o $(MEM_ASM_OBJ) $(HISTORY_ASM_OBJ) $(UTIL_HISTORY_HOST_OBJS) \
 	  $(FS_JAIL_TEST_LIBS) -Wl,-z,noexecstack -Wl,--wrap=fl_kq_driver_get_or_register
@@ -1601,7 +1607,7 @@ debug: $(TARGET)
 # Standalone VM tests (test_vm_mem and the rest) compile VM/devices objects with
 # VM_ENABLE unset, so those depfiles are not in $(OBJS). Include them on their own.
 VM_STANDALONE_DEPFILES = $(filter-out $(OBJS:.o=.d),$(VM_SRCS:.c=.d) $(VM_SDL_SRCS:.c=.d))
--include $(filter-out $(ASMOBJS:.o=.d),$(OBJS:.o=.d)) $(VM_STANDALONE_DEPFILES) $(TEST_OBJS:.o=.d) $(TEST_BATCH_ISSUE220_CMD_OBJS:.o=.d) $(TEST_THREADPOOL_GC_DIR)/threadpool.d tests/obj/cmd_account_heritage.d tests/obj/cmd_authutil_heritage.d
+-include $(filter-out $(ASMOBJS:.o=.d),$(OBJS:.o=.d)) $(VM_STANDALONE_DEPFILES) $(TEST_OBJS:.o=.d) $(TEST_BATCH_ISSUE220_CMD_OBJS:.o=.d) $(TEST_THREADPOOL_GC_DIR)/threadpool.d tests/obj/cmd_account_heritage.d tests/obj/cmd_authutil_heritage.d tests/obj/cmd_su_heritage.d tests/obj/cmd_sudo_heritage.d
 
 clean:
 	rm -f $(OBJS) $(TEST_OBJS) $(TEST_ASMOBJS) $(TARGET) $(TEST_TARGET)
