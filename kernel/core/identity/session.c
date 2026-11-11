@@ -698,13 +698,18 @@ void fl_session_bind_elevation(fl_elevation_token_t token) {
     pthread_mutex_unlock(&s_session_mu);
 }
 
-void fl_session_clear_elevation(void) {
-    fl_session_init();
-    pthread_mutex_lock(&s_session_mu);
+/* s_session_mu is held. The same revoke fl_session_clear_elevation performs. */
+static void revoke_bound_elevation_locked(void) {
     if (s_active_elev != FL_ELEVATION_TOKEN_NONE) {
         fl_elevation_revoke(s_active_elev);
         s_active_elev = FL_ELEVATION_TOKEN_NONE;
     }
+}
+
+void fl_session_clear_elevation(void) {
+    fl_session_init();
+    pthread_mutex_lock(&s_session_mu);
+    revoke_bound_elevation_locked();
     pthread_mutex_unlock(&s_session_mu);
 }
 
@@ -920,6 +925,14 @@ fl_result_t fl_session_reload_users(void) {
         rc = FL_RESULT_ERR;
     else
         rc = fl_user_db_load(&s_db, s_db.path);
+    if (rc != FL_RESULT_OK) {
+        /* The store is not the authority anymore. A token or sudo scope from before
+         * this call must not still satisfy fl_session_has_elevation. */
+        revoke_bound_elevation_locked();
+        s_sudo_scope_depth = 0;
+        s_current[0] = '\0';
+        s_login_gen++;
+    }
     s_db_ready = (rc == FL_RESULT_OK && s_db.loaded) ? 1 : 0;
     session_unlock_db();
     return rc;

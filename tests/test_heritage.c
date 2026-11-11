@@ -11,6 +11,7 @@
 #include "share_gate.h"
 #include "user_db.h"
 #include "session.h"
+#include "elevation.h"
 #include "fs_jail.h"
 #include "common.h"
 #include "cmd_decl.h"
@@ -1902,6 +1903,8 @@ static int test_account_command_reload_fails_closed(void) {
     char *argv[] = {"useradd", "Zed", NULL};
     int rc;
     int failed = 0;
+    fl_elevation_token_t tok = FL_ELEVATION_TOKEN_NONE;
+    uint64_t gen;
 
     if (fl_session_set_user("Root") != FL_RESULT_OK || !fl_session_is_elevated_account())
         return 1;
@@ -1909,15 +1912,25 @@ static int test_account_command_reload_fails_closed(void) {
     if (!path[0] || auth_exec_sql(path, "UPDATE users SET auth_mode=2 WHERE name='Root';") != 0 ||
         chmod(path, 0444) != 0)
         return 1;
-    if (setenv("FL_CMD_PASSWORD", "zed-pw", 1) != 0) {
+    /* A token and a sudo scope are the two ways has_elevation stays true after the
+     * store itself is no longer loaded. The failed reload has to drop both. */
+    fl_session_begin_sudo_scope();
+    if (fl_elevation_grant("Root", "reload", &tok) != FL_RESULT_OK ||
+        setenv("FL_CMD_PASSWORD", "zed-pw", 1) != 0) {
         chmod(path, 0644);
+        fl_session_end_sudo_scope();
         return 1;
     }
+    fl_session_bind_elevation(tok);
+    gen = fl_session_login_generation();
     rc = cmd_useradd_run(2, argv);
     unsetenv("FL_CMD_PASSWORD");
     if (chmod(path, 0644) != 0)
         return 1;
     if (rc == 0 || fl_session_users_loaded() || fl_session_user_db()->count != 0)
+        failed = 1;
+    if (fl_session_has_elevation() || fl_session_in_sudo_scope() ||
+        fl_session_current_user()[0] != '\0' || fl_session_login_generation() == gen)
         failed = 1;
     if (!auth_cell_is(path, "Root", SQLITE_INTEGER, 2, NULL) || auth_cell_is(path, "Zed", SQLITE_INTEGER, 0, NULL))
         failed = 1;
