@@ -60,6 +60,7 @@ below it, never for an account above it, a sibling or another branch.
 | `passwd [name]` | The account itself or an ancestor (elevation still required, as before) |
 | `bridge accept <id>` | The requested side or an ancestor of it |
 | `bridge revoke <id>` | Either side, or an ancestor of either |
+| `bridge assembly <parent> [--reissue]` | An elevated session, for the parent or an ancestor: deals the parent's signing seed among its child accounts (KeyQuorum parent-key assembly, stored in `account_assembly`) so the parent can sign while only enough children are online. `--reissue` is refused: the account store has no signing-key rotation that keeps the password (see `docs/FILE_SHARING_KEYQUORUM.md`) |
 | `bridge kq-import <store> <uid> [--roster-only]` | An elevated session, for the logged-in account: copies a KeyQuorum **private** bridge into the account store (see `docs/FILE_SHARING_KEYQUORUM.md`, Bridges) |
 
 ## Account homes (jail)

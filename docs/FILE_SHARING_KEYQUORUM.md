@@ -718,7 +718,8 @@ changes that.
 picks the portable crypto backends) and links it with `kernel/drivers/keyquorum/kq_driver.c` and
 `kernel/freestanding/x86_64/kq_platform.c` (`KQ_FREESTANDING=0` builds the image without it). At boot the
 kernel prints `CAP keyquorum=linked` when `fl_kq_driver_get()` accepts the linked ABI
-(`FL_KQ_ABI_VERSION` 5), else `CAP keyquorum=abi-mismatch`.
+(`FL_KQ_ABI_VERSION` 6), else `CAP keyquorum=abi-mismatch`. The image binds the KeyQuorum-backed demo accounts
+(`fl_fs_kq_bind_identity`) only when that same check passes; on a mismatch the plain demo accounts stay.
 
 - **Size.** The image is 910 sectors (about 455 KiB; 942 with the security lab; gate 1024) and its bss ends at `0x9ae40` (`0x9ee20` with the
   security lab, which has about 480 bytes of room left); the build script refuses an image whose bss end reaches `0x9f000`, the end of
@@ -759,8 +760,10 @@ the driver registry exists (`fl_kq_service_start`) and ended only by an orderly 
   account's own signing key is opened with that password and held in a fixed table of `FL_USER_DB_MAX_USERS`
   slots. `su` without a password opens nothing; logout wipes the key of the account that signed out; a reused slot
   and shutdown wipe too. `fl_kq_obtain_author_key` hands a copy to a caller (who wipes it) only for an account
-  that is signed in; a parent author assembled from its children's shares needs KQ-18 and is not available
-  (a leaf who is not signed in cannot be assembled by anything: the answer is ACCES).
+  that is signed in, or, for a parent whose assembly record the account store holds, assembled from the children
+  online now (see **Parent-key assembly** below); a leaf who is not signed in cannot be assembled by anything: the answer is ACCES.
+  A login that replaces another without a logout in between ends the first account's slot, signing secret and box key
+  together (the session has one account; a key brought online without a session, such as the Root fallback, is not session-owned and stays).
   The hook gets a copy of the account's record taken under the session lock and the generation of that login;
   the slow key derivation runs from the copy with no lock held, and the key is published through
   `fl_session_publish_if_current` under the session lock, only while that generation is still current. Every
@@ -787,6 +790,23 @@ the driver registry exists (`fl_kq_service_start`) and ended only by an orderly 
   (`fl_kq_service_autosign_track_file`, every `FL_KQ_AUTOSIGN_DEFAULT_SEC`, a placeholder); `fl_kq_service_autosign_remove` stops it. The work queue
   cannot cancel a periodic item, so a removed object's item stays queued and does nothing, and tracking the same path again revives it rather than
   queueing another; a removed slot stays taken until shutdown. The monitor (FL-09, `fl_kq_pre_mutation`) is still only declared.
+- **Parent-key assembly (KQ-16, FL-20).** A parent author who is not signed in can still sign when enough of its direct
+  child accounts are online. The rule is KeyQuorum's (`keyquorum_assembly.h`, ABI 6: `kq_assembly_threshold`, `_split`,
+  `_generation`, `_assemble`), reached only through the driver ops of the same names (hosted build only; NULL in the freestanding
+  image, where a caller reads NULL as refused). `bridge assembly <parent>` (an elevated session; the parent's password opens its
+  signing seed once) deals the seed among the parent's children that have a box key: the opaque `KQAS` record (every share sealed
+  to one child's box key, safe at rest) goes into the existing `account_assembly` table (`fl_user_db_assembly_put/get`: parent key id,
+  generation, threshold, bytes; a store from before the table gains it when a writer opens it). `fl_kq_obtain_author_key`, when the author has no
+  slot, gathers the online children (their box secrets since FL-15, each child's device id from the account registry's pairing row),
+  asks the driver to assemble against the parent's registered signing public key with the record's threshold as the minimum
+  number of distinct devices, and returns `KQ_SIGNING_ASSEMBLED`. Slots of one container are one device, so they do not meet a
+  multi-device minimum. The sweep needs no change: a parent author is signed as assembled (audit `kq-autosign ... assembled`) and, with
+  too few children online, `kq-autosign-wait` as before. Audit: `kq-assembled`, `kq-assemble-refused` (never the seed, a share or a
+  secret); every intermediate copy is wiped with `mem_domain_secure_zero`. The signed revision's own history event does not record
+  own versus assembled: its detail keys are KeyQuorum's (`SAFE_DETAIL_KEYS`), none was added. **Not built:** `--reissue`. A reissue
+  rotates the parent's signing key and deals the new seed at generation + 1, but the account store has no function that rotates a
+  signing key on its own (the only rotation, an ancestor's `passwd`, also replaces the password), so the verb refuses with that reason
+  rather than add a second rotation path. The custody minimum (threshold distinct devices) is a placeholder for the owner's policy.
 - **Box key (FL-15).** A KQST login opens the signing and the box secret; the box secret is now published to the service as well
   (`fl_session_set_login_box_hook`, `fl_kq_service_online_box`), for the same login generation, and `fl_kq_obtain_box_key` hands a copy to the
   account's own label only. A password login publishes none; logout and shutdown wipe it.
