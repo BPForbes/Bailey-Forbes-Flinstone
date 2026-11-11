@@ -243,6 +243,11 @@ void mem_domain_secure_zero(void *p, size_t n)
     asm_mem_secure_zero(p, n);
 }
 
+int mem_domain_equal(const void *a, const void *b, size_t n)
+{
+    return asm_mem_ct_equal(a, b, n);
+}
+
 
 static uint8_t cmos(uint8_t reg)
 {

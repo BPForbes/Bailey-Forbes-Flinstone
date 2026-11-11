@@ -76,6 +76,13 @@ static int test_the_table_keeps_the_storage_contract(void) {
     ASSERT(st()->dir_read_tail(st()->ctx, &held, "nope", 4, 2, &d, &n) == 0 && d == NULL && n == 0);
     ASSERT(put("/m/odd", "12345") == 0 && st()->dir_read_tail(st()->ctx, &held, "odd", 4, 2, &d, &n) == -1);
     ASSERT(st()->dir_read_tail(st()->ctx, &held, "t.bin", 0, 2, &d, &n) == -1);
+    /* A directory that already ends in '/' (the root) joins without a doubled separator: the path-based and the
+     * directory-based calls reach the same file. */
+    ASSERT(put("/top.txt", "root") == 0);
+    ASSERT(st()->dir_open(st()->ctx, "/", &held) == 0);
+    ASSERT(st()->dir_exists(st()->ctx, &held, "top.txt") == 1);
+    ASSERT(st()->dir_read(st()->ctx, &held, "top.txt", 10, &d, &n) == 0 && n == 4 && memcmp(d, "root", 4) == 0);
+    mem_domain_free(MEM_DOMAIN_FS, d);
     return 0;
 }
 
@@ -232,10 +239,26 @@ static int test_the_checkpoints_run_on_the_memory_table(void) {
     return 0;
 }
 
+/* The ASM-backed equality the table uses for names: equal bytes, a one-bit difference at either end, and
+ * two paths of which one is a prefix of the other (the table compares lengths first, then the bytes). */
+static int test_the_equality_wrapper_is_exact(void) {
+    char a[8] = "/a/b/cd", b[8] = "/a/b/cd";
+
+    if (!mem_domain_equal(a, b, 8) || !mem_domain_equal(a, b, 0))
+        return 1;
+    b[0] ^= 1;
+    if (mem_domain_equal(a, b, 8))
+        return 1;
+    b[0] ^= 1;
+    b[7] ^= 0x80;
+    return mem_domain_equal(a, b, 8) ? 1 : 0;
+}
+
 int main(void) {
     int rc = 0;
 
 #define RUN(t) do { if (t() != 0) { rc = 1; fprintf(stderr, "%s failed\n", #t); } else printf("%s... OK\n", #t); } while (0)
+    RUN(test_the_equality_wrapper_is_exact);
     RUN(test_the_table_keeps_the_storage_contract);
     RUN(test_a_commit_replaces_all_files_or_none);
     RUN(test_the_checkpoints_run_on_the_memory_table);

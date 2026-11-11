@@ -29,5 +29,8 @@ void mem_domain_zero(void *ptr, size_t n);
  * so the stores are complete before the buffer is freed or reused (asm_mem_secure_zero). */
 void mem_domain_secure_zero(void *ptr, size_t n);
 void mem_domain_fill(void *ptr, unsigned char byte, size_t n);
+/* 1 when the n bytes at a and b are equal, else 0. Constant time in n (asm_mem_ct_equal), so it
+ * serves both path/name equality and comparing secrets; there is no ordered compare. */
+int mem_domain_equal(const void *a, const void *b, size_t n);
 
 #endif /* MEM_DOMAIN_H */

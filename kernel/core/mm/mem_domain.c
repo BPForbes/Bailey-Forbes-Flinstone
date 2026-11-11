@@ -205,3 +205,7 @@ void mem_domain_secure_zero(void *ptr, size_t n) {
 void mem_domain_fill(void *ptr, unsigned char byte, size_t n) {
     asm_block_fill(ptr, byte, n);
 }
+
+int mem_domain_equal(const void *a, const void *b, size_t n) {
+    return asm_mem_ct_equal(a, b, n);
+}

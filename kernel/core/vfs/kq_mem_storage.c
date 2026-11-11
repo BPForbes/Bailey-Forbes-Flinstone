@@ -1,6 +1,8 @@
 /*
  * In-memory fl_kq_storage_t (kq_mem_storage.h). Written for the freestanding image: no stdio, no errno, no
- * string.h beyond memcpy / memcmp / strlen (kq_platform.c supplies those there).
+ * string.h beyond strlen (kq_platform.c supplies it there). Every byte copy, zeroing and equality goes
+ * through the ASM-backed mem_domain_* wrappers (asm_mem_copy / asm_mem_zero / asm_mem_ct_equal), the
+ * same primitives on x86_64 NASM, x86_64 GAS and ARM GAS; file bytes are wiped with the secure variant.
  */
 #include "kq_mem_storage.h"
 
@@ -48,9 +50,9 @@ void fl_kq_storage_memory_reset(void) {
     for (size_t i = 0; i < FL_KQ_MEM_FILES_MAX; i++) {
         if (s_files[i].used)
             drop_bytes(s_files[i].data, s_files[i].len);
-        memset(&s_files[i], 0, sizeof s_files[i]);
+        mem_domain_zero(&s_files[i], sizeof s_files[i]);
     }
-    memset(s_dirs, 0, sizeof s_dirs);
+    mem_domain_zero(s_dirs, sizeof s_dirs);
     s_bytes = 0;
     s_limit = FL_KQ_MEM_BYTES_MAX;
 }
@@ -59,7 +61,7 @@ static mem_file_t *find(const char *path) {
     size_t n = strlen(path);
 
     for (size_t i = 0; i < FL_KQ_MEM_FILES_MAX; i++)
-        if (s_files[i].used && strlen(s_files[i].path) == n && memcmp(s_files[i].path, path, n) == 0)
+        if (s_files[i].used && strlen(s_files[i].path) == n && mem_domain_equal(s_files[i].path, path, n))
             return &s_files[i];
     return NULL;
 }
@@ -78,13 +80,18 @@ static int plain(const char *name) {
 
 static int join(const char *dir, const char *name, char *out) {
     size_t d = dir ? strlen(dir) : 0, n = name ? strlen(name) : 0;
+    size_t sep;
 
-    if (d == 0 || !plain(name) || d + 1 + n >= FL_KQ_MEM_PATH_MAX)
+    if (d == 0 || !plain(name))
         return -1;
-    memcpy(out, dir, d);
-    out[d] = '/';
-    memcpy(out + d + 1, name, n);
-    out[d + 1 + n] = '\0';
+    sep = dir[d - 1] == '/' ? 0u : 1u; /* a directory already ending in '/' ("/") gets no second one */
+    if (d + sep + n >= FL_KQ_MEM_PATH_MAX)
+        return -1;
+    mem_domain_copy(out, dir, d);
+    if (sep)
+        out[d] = '/';
+    mem_domain_copy(out + d + sep, name, n);
+    out[d + sep + n] = '\0';
     return 0;
 }
 
@@ -93,7 +100,7 @@ static uint8_t *copy_out(const uint8_t *data, size_t len) {
     uint8_t *p = (uint8_t *)mem_domain_alloc(MEM_DOMAIN_FS, len ? len : 1);
 
     if (p && len)
-        memcpy(p, data, len);
+        mem_domain_copy(p, data, len);
     return p;
 }
 
@@ -130,7 +137,7 @@ static int put_all(const char *const *paths, const uint8_t *const *datas, const 
         return -1;
     for (size_t i = 0; i < n; i++)
         for (size_t j = i + 1; j < n; j++)
-            if (strlen(paths[i]) == strlen(paths[j]) && memcmp(paths[i], paths[j], strlen(paths[i])) == 0)
+            if (strlen(paths[i]) == strlen(paths[j]) && mem_domain_equal(paths[i], paths[j], strlen(paths[i])))
                 return -1; /* the same name twice: which would win? */
     for (size_t i = 0; i < n; i++) {
         slot[i] = find(paths[i]);
@@ -165,7 +172,7 @@ static int put_all(const char *const *paths, const uint8_t *const *datas, const 
                     slot[i]->used = 1; /* taken now, so the next new file in this call takes another */
                     slot[i]->data = NULL;
                     slot[i]->len = 0;
-                    memcpy(slot[i]->path, paths[i], strlen(paths[i]) + 1);
+                    mem_domain_copy(slot[i]->path, paths[i], strlen(paths[i]) + 1);
                     break;
                 }
         }
@@ -205,14 +212,14 @@ static int m_dir_open(void *ctx, const char *dir, fl_kq_dir_t *out) {
     if (!out || n == 0 || n + 2 >= FL_KQ_MEM_PATH_MAX)
         return -1;
     for (size_t i = 0; i < FL_KQ_MEM_DIRS_MAX; i++)
-        if (s_dirs[i][0] && strlen(s_dirs[i]) == n && memcmp(s_dirs[i], dir, n) == 0) {
+        if (s_dirs[i][0] && strlen(s_dirs[i]) == n && mem_domain_equal(s_dirs[i], dir, n)) {
             out->fd = -1;
             out->dir = s_dirs[i];
             return 0;
         }
     for (size_t i = 0; i < FL_KQ_MEM_DIRS_MAX; i++)
         if (!s_dirs[i][0]) {
-            memcpy(s_dirs[i], dir, n + 1);
+            mem_domain_copy(s_dirs[i], dir, n + 1);
             out->fd = -1;
             out->dir = s_dirs[i];
             return 0;
