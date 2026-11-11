@@ -654,21 +654,41 @@ typedef struct {
 } kq_sent_t;
 static kq_sent_t s_sent[KQ_SENT_MAX];
 static unsigned s_sent_next;
+/* One lock for the ring: the history callbacks run on the host's threads while this shell's own commands add and
+ * read records. Readers copy a record under the lock and never keep a pointer into the ring. */
+static pthread_mutex_t s_sent_mu = PTHREAD_MUTEX_INITIALIZER;
 
 static void kq_sent_remember(const uint8_t id[FL_KQ_DELIVERY_ID_LEN], const char *path, const char *recipient,
                              const kq_file_offer_t *offer)
 {
-    kq_sent_t *e = &s_sent[s_sent_next];
+    kq_sent_t fresh;
 
-    s_sent_next = (s_sent_next + 1u) % KQ_SENT_MAX;
-    memset(e, 0, sizeof *e);
-    if (strlen(path) >= sizeof e->path || strlen(recipient) >= sizeof e->recipient ||
-        fl_kq_cp_offer_ref(offer, e->ref) != FL_RESULT_OK)
+    memset(&fresh, 0, sizeof fresh);
+    if (strlen(path) >= sizeof fresh.path || strlen(recipient) >= sizeof fresh.recipient ||
+        fl_kq_cp_offer_ref(offer, fresh.ref) != FL_RESULT_OK)
         return; /* not tracked: a report for it is simply never applied */
-    memcpy(e->id, id, FL_KQ_DELIVERY_ID_LEN);
-    snprintf(e->path, sizeof e->path, "%s", path);
-    snprintf(e->recipient, sizeof e->recipient, "%s", recipient);
-    e->used = 1;
+    memcpy(fresh.id, id, FL_KQ_DELIVERY_ID_LEN);
+    snprintf(fresh.path, sizeof fresh.path, "%s", path);
+    snprintf(fresh.recipient, sizeof fresh.recipient, "%s", recipient);
+    fresh.used = 1;
+    /* The record is complete before it is published; a replaced slot is overwritten in one step. */
+    pthread_mutex_lock(&s_sent_mu);
+    s_sent[s_sent_next] = fresh;
+    s_sent_next = (s_sent_next + 1u) % KQ_SENT_MAX;
+    pthread_mutex_unlock(&s_sent_mu);
+}
+
+/* A copy of record i, or 0 when the slot is empty. */
+static int kq_sent_get(unsigned i, kq_sent_t *out)
+{
+    int ok;
+
+    pthread_mutex_lock(&s_sent_mu);
+    ok = s_sent[i].used;
+    if (ok)
+        *out = s_sent[i];
+    pthread_mutex_unlock(&s_sent_mu);
+    return ok;
 }
 
 static int verb_kq_send(const cmd_server_ctx_t *ctx, int argc, char **argv)
@@ -765,23 +785,17 @@ static int verb_kq_send(const cmd_server_ctx_t *ctx, int argc, char **argv)
 }
 
 /* After a refusal's ACK: the KQER that fl_kq_report_refusal_in wrote in the landing directory goes to the
- * sender through the host. Nothing written (nobody online, capped, already there) or longer than a frame
- * sends nothing; the refusal itself is unchanged either way. */
-static void kq_send_refusal_report(const cmd_server_ctx_t *ctx, int hosting, const fl_net_kq_inbox_t *in)
+ * sender through the host. report holds the bytes read back through that same held directory and authenticated
+ * (fl_kq_cp_report_read_in); nothing is read here by path. Nothing written (nobody online, capped, already there)
+ * or longer than a frame sends nothing; the refusal itself is unchanged either way. */
+static void kq_send_refusal_report(const cmd_server_ctx_t *ctx, int hosting, const fl_net_kq_inbox_t *in,
+                                   const fl_kq_buf_t *report)
 {
-    uint8_t ref[32];
-    char path[CWD_MAX + 100];
-    uint8_t *bytes = NULL;
-    size_t n = 0;
-
-    if (fl_kq_cp_offer_ref(&in->offer, ref) != FL_RESULT_OK || fl_kq_cp_report_path(g_cwd, ref, path, sizeof path) != 0)
-        return;
-    if (fl_kq_cp_storage()->read_file(fl_kq_cp_storage()->ctx, path, FL_KQ_REPORT_FRAME_MAX, &bytes, &n) != 0)
+    if (!report || !report->data || report->len == 0 || report->len > FL_KQ_REPORT_FRAME_MAX)
         return;
     pthread_mutex_lock(ctx->mutex);
-    (void)fl_net_kq_send_report(ctx->server, ctx->client, hosting, in->id, bytes, n);
+    (void)fl_net_kq_send_report(ctx->server, ctx->client, hosting, in->id, report->data, report->len);
     pthread_mutex_unlock(ctx->mutex);
-    mem_domain_free(MEM_DOMAIN_FS, bytes);
 }
 
 /* Decode checkpoint for a released letter, then ACK. Returns 0 when the file was written. */
@@ -792,6 +806,7 @@ static int kq_decode_and_ack(const cmd_server_ctx_t *ctx, int hosting,
     fl_kq_buf_t letter = {0};
     char dest[CWD_MAX + 160];
     fl_kq_cp_result_t cp;
+    fl_kq_buf_t report = {0};
     fl_result_t rc;
 
     rc = fl_net_kq_take_letter(in->id, 0, &letter);
@@ -830,8 +845,16 @@ static int kq_decode_and_ack(const cmd_server_ctx_t *ctx, int hosting,
                                 fl_session_current_key_id(), box, &letter, &in->offer, in->sig,
                                 &held, check_leaf);
         /* A refusal's signed KQER goes into the same held directory, before it is closed. */
-        if (cp != FL_KQ_CP_OK && cp != FL_KQ_CP_EXISTS && cp != FL_KQ_CP_IO)
+        if (cp != FL_KQ_CP_OK && cp != FL_KQ_CP_EXISTS && cp != FL_KQ_CP_IO) {
+            uint8_t ref[32];
+            const unsigned char *mine = fl_user_db_signing_public(fl_session_user_db(), fl_session_current_key_id());
+
             fl_kq_report_refusal_in(&in->offer, fl_kq_cp_to_result(cp), &held);
+            /* Read back through the held handle while it is still open, and keep only bytes KeyQuorum accepts as
+             * this account's report about this artifact. */
+            if (mine && fl_kq_cp_offer_ref(&in->offer, ref) == FL_RESULT_OK)
+                (void)fl_kq_cp_report_read_in(&held, ref, mine, &report);
+        }
         if (check_fd >= 0)
             close(check_fd);
     }
@@ -848,12 +871,14 @@ static int kq_decode_and_ack(const cmd_server_ctx_t *ctx, int hosting,
     (void)fl_net_kq_send_ack(ctx->server, ctx->client, hosting, in->id, cp == FL_KQ_CP_OK);
     pthread_mutex_unlock(ctx->mutex);
     if (cp != FL_KQ_CP_OK) {
-        kq_send_refusal_report(ctx, hosting, in);
+        kq_send_refusal_report(ctx, hosting, in, &report);
+        fl_kq_buf_free(&report);
         fl_color_warn("keyquorum: %s from %s refused: %s", in->file_name, in->sender,
                       fl_kq_cp_reason(cp));
         fl_net_kq_inbox_drop(in->id);
         return 1;
     }
+    fl_kq_buf_free(&report);
     printf("%s from %s decoded and verified; saved to %s\n", in->file_name, in->sender, dest);
     fl_net_kq_inbox_drop(in->id);
     return 0;
@@ -1026,13 +1051,14 @@ static int verb_kq_reports(const cmd_server_ctx_t *ctx)
     if (!session_active(ctx, &hosting))
         return 1;
     for (unsigned i = 0; i < KQ_SENT_MAX; i++) {
-        kq_sent_t *e = &s_sent[i];
+        kq_sent_t sent;
+        const kq_sent_t *e = &sent;
         uint8_t report[FL_KQ_REPORT_FRAME_MAX];
         size_t n = 0;
         fl_net_kq_keys_t reporter;
         fl_kq_cp_result_t cp;
 
-        if (!e->used || fl_net_kq_report_take(e->id, report, sizeof report, &n) != FL_RESULT_OK)
+        if (!kq_sent_get(i, &sent) || fl_net_kq_report_take(e->id, report, sizeof report, &n) != FL_RESULT_OK)
             continue;
         if (fl_net_kq_lookup(ctx->server, ctx->client, hosting, e->recipient, KQ_WAIT_KEYS_MS, &reporter) !=
                 FL_RESULT_OK ||
@@ -1059,21 +1085,28 @@ static int verb_kq_reports(const cmd_server_ctx_t *ctx)
  * store of Flinstone's own). It can be served for the deliveries this shell sent, the ones kq_sent_remember
  * recorded: only to that delivery's recipient, signed by this shell's own online account, and only if
  * policy allows it. Anything else is refused by the module with its visible message. */
-static const kq_sent_t *kq_sent_find(const uint8_t id[FL_KQ_DELIVERY_ID_LEN])
+static int kq_sent_find(const uint8_t id[FL_KQ_DELIVERY_ID_LEN], kq_sent_t *out)
 {
-    for (unsigned i = 0; i < KQ_SENT_MAX; i++)
-        if (s_sent[i].used && memcmp(s_sent[i].id, id, FL_KQ_DELIVERY_ID_LEN) == 0)
-            return &s_sent[i];
-    return NULL;
+    int found = 0;
+
+    pthread_mutex_lock(&s_sent_mu);
+    for (unsigned i = 0; i < KQ_SENT_MAX && !found; i++)
+        if (s_sent[i].used && memcmp(s_sent[i].id, id, FL_KQ_DELIVERY_ID_LEN) == 0) {
+            *out = s_sent[i]; /* a copy: the ring entry may be replaced the moment the lock is released */
+            found = 1;
+        }
+    pthread_mutex_unlock(&s_sent_mu);
+    return found;
 }
 
 static int kq_history_gate(const char *requester, const uint8_t id[FL_KQ_DELIVERY_ID_LEN])
 {
-    const kq_sent_t *e = kq_sent_find(id);
+    kq_sent_t sent;
 
     /* The requester is a party to the delivery (its recipient), then host policy. The policy check looks at
-     * the host shell's own principal, never at the requester: the party check is what binds the requester. */
-    if (!requester || !e || strcmp(e->recipient, requester) != 0)
+     * the host shell's own principal, never at the requester: the party check is what binds the requester.
+     * It is judged against the copy. */
+    if (!requester || !kq_sent_find(id, &sent) || strcmp(sent.recipient, requester) != 0)
         return 0;
     return fl_authz_subsystem_check((unsigned)FL_AUTHZ_OP_FILE_HISTORY_EXPORT, (void *)requester) != FL_AUTHZ_DENY;
 }
@@ -1081,7 +1114,8 @@ static int kq_history_gate(const char *requester, const uint8_t id[FL_KQ_DELIVER
 static fl_result_t kq_history_source(const char *requester, const uint8_t id[FL_KQ_DELIVERY_ID_LEN], uint8_t *out,
                                      size_t cap, size_t *out_len)
 {
-    const kq_sent_t *e = kq_sent_find(id);
+    kq_sent_t sent;
+    const kq_sent_t *e = &sent;
     const char *me = fl_session_current_key_id();
     fl_user_db_keydir_t dir;
     fl_kq_buf_t l15 = {0}, l17 = {0};
@@ -1090,7 +1124,7 @@ static fl_result_t kq_history_source(const char *requester, const uint8_t id[FL_
     fl_kq_cp_result_t cp;
     fl_result_t rc;
 
-    if (!e || !me || !me[0] || !fl_session_user_db())
+    if (!kq_sent_find(id, &sent) || !me || !me[0] || !fl_session_user_db())
         return FL_RESULT_NOENT;
     /* The signing key is the key service's copy for the online account: no password is asked here. */
     if (fl_kq_obtain_author_key(me, key, &mode) != FL_RESULT_OK)
