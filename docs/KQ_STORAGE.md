@@ -85,6 +85,7 @@ the user's own to 0700. `su -` and `sudo -i` take the login home from the passwo
 |--------|-------|
 | `userland/command/cmd_server_file.c` (`kq_use_storage`, once per `server file` command) | facade, when the shell's file manager service exists |
 | the browser lab (`lab_kq.c`) and the unit tests | default |
+| `tests/test_kq_mem_storage.c`, and the freestanding image when its checkpoints are linked (FL-02 stage 2) | memory (`kq_mem_storage.c`) |
 
 `fl_kq_cp_set_storage(table)` installs a table (NULL restores the default) and returns the one it
 replaced. The table is process-wide, like the KeyQuorum driver; set it at start, not while a
@@ -104,7 +105,8 @@ checkpoint runs.
    installed.
 2. Pass the existing results contract above. Return `-1` rather than guessing when you cannot tell.
 3. Install it with `fl_kq_cp_set_storage`. Test it by running `tests/test_kq_checkpoint.c` against it:
-   the counting table there shows which calls a delivery makes.
+   the counting table there shows which calls a delivery makes. `tests/test_kq_mem_storage.c` is the shorter form for the memory table: the
+   table's own rules, then encode, co-sign, held-directory decode, a commit that cannot complete, history and signing on it.
 4. If it is for the lab, it must not pull the facade or the native session code into the wasm build.
 
 ## Tests that pin this
@@ -124,4 +126,7 @@ checkpoint runs.
 - Other file code (the delivery store, the catalog, the lab's reader) uses the placement layer directly
   and is not behind this table.
 - The browser lab uses the default table; the facade table is native only.
+- The memory table (`fl_kq_storage_memory()`, `kq_mem_storage.h`) is bounded (32 files, 192-byte paths, 4 MiB; the byte limit is meant to be
+  measured against the image's RAM), keeps everything in `MEM_DOMAIN_FS` memory and loses it at reset, has no locking (checkpoints run under the
+  shell's lock), and wipes freed bytes. `dir_commit` stages every new buffer before it swaps any, so a failure installs nothing.
 - The restore-failure path of `fl_fs_commit_files` has no test that forces a rename to fail.

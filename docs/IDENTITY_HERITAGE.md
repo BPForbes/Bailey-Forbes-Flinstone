@@ -60,6 +60,7 @@ below it, never for an account above it, a sibling or another branch.
 | `passwd [name]` | The account itself or an ancestor (elevation still required, as before) |
 | `bridge accept <id>` | The requested side or an ancestor of it |
 | `bridge revoke <id>` | Either side, or an ancestor of either |
+| `bridge kq-import <store> <uid> [--roster-only]` | An elevated session, for the logged-in account: copies a KeyQuorum **private** bridge into the account store (see `docs/FILE_SHARING_KEYQUORUM.md`, Bridges) |
 
 ## Account homes (jail)
 
@@ -114,6 +115,9 @@ bridge revoke 1           # either side, or an ancestor of either
   inherit it (Flinstone does not reach Alternative's home through Bob's bridge).
 - Bridges live in the `bridges` table of the account store; removing an account removes
   its bridges.
+
+A KeyQuorum private bridge (a roster of member accounts, each with a sealed key, used at `su`) is a different thing from the account-to-account bridges above; they live in the
+`account_bridges` tables and are brought in only by `bridge kq-import`.
 
 Bridges decide server file sharing between branches, and keep untrusted accounts out:
 without a signed, accepted bridge nothing crosses branches, and an ancestor can revoke any

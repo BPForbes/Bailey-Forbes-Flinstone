@@ -116,10 +116,16 @@ KeyQuorum's own word for it (`kq_error_name`, code 8). The client holds up to tw
 only for a request it made, bounds the declared total (1 MiB) before allocating, and drops a bundle that does not
 unpack; `fl_net_kq_history_take` hands back the two letters, which the caller opens with the driver
 (`open`, `open_snapshot`) and compares (`snapshot_covers`). The browser lab's relay and `wasm_kq_frame` carry
-frames by opcode without reading it, so 0x50 and 0x51 pass through unchanged. **Not built:** the native shell's
-gate and source (the source needs the host account's unlocked key from the key service, FL-20, and a decision on
-where the history lives on a host that only holds opaque letters), so a request to the shipped host is refused
-with "history download is not available on this host".
+frames by opcode without reading it, so 0x50 and 0x51 pass through unchanged. The native shell installs both
+(`cmd_server_file_install_history`, called once after `fl_net_kq_install`) for the deliveries **this shell sent**. The history is the KeyQuorum
+container beside the file, as KeyQuorum keeps it; Flinstone keeps no history store of its own. The gate admits a request only from that
+delivery's recipient (the shell remembers `delivery id -> file, recipient` when it sends, for the life of the process), and then asks
+`fl_authz_subsystem_check(FL_AUTHZ_OP_FILE_HISTORY_EXPORT)`, which is evaluated for the host shell's own principal, never the requester, and
+allows unless a policy hook denies it. The source (`fl_kq_cp_history_letters_with`) reseals the head to the requester (kind 15) and seals a
+snapshot of the whole event history (kind 17), both signed by the host's own online account with the key service's copy of its key (so that
+account must be signed in); any account holding the container can seal it, so who may ask is the gate's job. **Not built:** serving a file the
+host did not send (a member would have to feed the host a container), deliveries from before a restart, and the real-store and
+browser-relay end-to-end tests. Until the install runs, or for any other request, the host refuses with a visible message.
 
 ### Commands
 
@@ -129,6 +135,7 @@ with "history download is not available on this host".
 | `server file cosign` | Asks the host to re-announce what waits for you and lists it |
 | `server file cosign <delivery>` | Prompts for your password and signs the public offer (file id, revision, commitment, author signature; the content is still sealed), then decodes the release when it arrives |
 | `server file open <delivery>` | Decodes a delivery you already co-signed (for example after changing directory) |
+| `server file reports` | Records the refusal reports that came back for files you sent (each checked under the recipient's key and against the artifact it names) |
 
 ### What each side checks
 
@@ -673,7 +680,8 @@ changes that.
   the chained edit log are not.
 - The browser lab runs co-signed delivery with in-memory keys and first-seen key publication
   (above). The freestanding QEMU kernel links the KeyQuorum library and the driver (FL-02 stage 1,
-  below) but does not run the delivery checkpoints (stage 2, not built).
+  below) but does not run the delivery checkpoints (stage 2: the binary in-memory storage table exists and is tested on the host,
+  `kq_mem_storage.c`, but the checkpoints are not linked into the image).
 - The 16 MiB limit, the ring sizes and the relay TTL are KeyQuorum defaults, not measured for
   Flinstone's workload.
 - **Refusal reports (KQER, KQ-12).** When `server file` refuses a released delivery, the recipient's shell calls
@@ -691,11 +699,17 @@ changes that.
   (`fl_kq_cp_offer_ref`). One table maps the refusal to KeyQuorum's closed sets: malformed is Framing/framing,
   a missing key Untrusted/auth, any other refusal Denied/policy, too large Denied/resource; the step is
   `FL_KQ_OP_RECEIVE`. The declared entry point takes an `fl_result_t`, so signature, trust, replay, freshness
-  and fork refusals all arrive as Denied. `.kqer` is a reserved suffix. `fl_kq_cp_inject_report_with` verifies a
+  and fork refusals all arrive as Denied; that is deliberate, because a remote peer should see only the coarse class so a failure is not
+  an oracle (KeyQuorum #169). `.kqer` is a reserved suffix. `fl_kq_cp_inject_report_with` verifies a
   held report under the reporter's key and appends one `ErrorReported` event (48) to the local copy.
-  **Not built:** carrying the sidecar to the sender. The session wire has no opcode for it; the sender only sees
-  the delivery marked refused, so injection runs on a report that is already held locally. The browser lab has
-  no key service and writes no report.
+  **Carrying it to the sender.** After the refusing ACK the recipient sends the report on `FL_NET_SESSION_OP_KQR_REPORT` (0x52, a third
+  KeyQuorum range above the history one): `[delivery id 16][len u16 BE][KQER <= 480 bytes]` (a signed KQER is about 150 bytes). The host
+  forwards it, unchanged, to the delivery's sender only when the frame came from that delivery's recipient, the delivery was refused, and it
+  has not forwarded one for it already; it keeps nothing, so a sender who is not connected misses it. The sender holds up to four
+  (`fl_net_kq_report_take`) and `server file reports` records each in the file's history as an `ErrorReported` event after checking it under
+  the recipient's key from the host registry and against the artifact it must name (`fl_kq_cp_inject_report_bytes`). The shell remembers which
+  file each delivery was for, for the life of the process. Hosts that predate the opcode ignore it. The browser lab has no key service and
+  writes no report.
 
 ## The freestanding image (FL-02, stage 1)
 
@@ -706,28 +720,34 @@ picks the portable crypto backends) and links it with `kernel/drivers/keyquorum/
 kernel prints `CAP keyquorum=linked` when `fl_kq_driver_get()` accepts the linked ABI
 (`FL_KQ_ABI_VERSION` 5), else `CAP keyquorum=abi-mismatch`.
 
-- **Size.** The image is about 451 KiB of payload (902 sectors; 938 with the security lab; gate 1024) with about 99 KiB of bss; the
-  build script refuses an image whose bss end reaches the end of conventional memory.
+- **Size.** The image is 910 sectors (about 455 KiB; 942 with the security lab; gate 1024) and its bss ends at `0x9ae40` (`0x9ee20` with the
+  security lab, which has about 480 bytes of room left); the build script refuses an image whose bss end reaches `0x9f000`, the end of
+  conventional memory. The account sealing below (`kq_identity.c`) and the `fw_cfg` entropy driver are therefore **left out of the security-lab
+  image**.
 - **Heap.** A 40 MiB arena at 4 MiB (`kq_platform.c`), above the image, inside the first GiB the boot code
   identity-maps. Sealing an account key (Argon2id, 19 MiB) needs more than 19 MiB at once, so the machine
   needs at least 64 MiB, which is what the page requests.
-- **Entropy.** RDRAND only. QEMU's default CPU model has none, so there `kq_platform_random` fails and the
-  library fails closed (`FLINTSTONE_KQ_PANIC`, then a halt): no key is ever made from weak bytes. With
-  `-cpu max` key generation, sealing and opening an account key run in the image (checked in QEMU).
-  Whether the page's QEMU Wasm offers RDRAND is not known; until an entropy source is decided, KeyQuorum
-  in the image can verify and open but not generate.
+- **Entropy.** RDRAND, else a launcher-supplied file. QEMU's default CPU model has no RDRAND (in the browser's QEMU Wasm either), so
+  there `kq_platform_random` reads the file `opt/flintstone/entropy` through QEMU's `fw_cfg` device (`kernel/drivers/freestanding_x86_64/fwcfg.c`
+  is the driver; `kq_platform.c` keeps the policy): every byte is handed out once and never reused, and a missing file, a wrong name or a file that
+  runs out fails closed (`FLINTSTONE_KQ_PANIC`, then a halt): no key is ever made from weak bytes. **The launcher must pass fresh random bytes on
+  every boot** (`-fw_cfg name=opt/flintstone/entropy,file=...`: the browser worker writes `crypto.getRandomValues` into the Wasm file system, the
+  shell test scripts use `os.urandom` / `head -c 4096 /dev/urandom`); the image cannot tell a reused file from a fresh one and a reused file repeats
+  keys. `-cpu max` also works (RDRAND), in native QEMU and in QEMU Wasm. The security-lab image has neither and so can verify and open but not generate.
 - **Clock.** `fl_time_wall_sec` reads the CMOS real-time clock (UTC under QEMU's default).
-- **Stage 2 (not built): the checkpoints in the image.** They need a store for `.kqtf` containers and
-  sealed letters (a ramfs file holds 160 bytes, 16 files in all) and the libc calls `kq_checkpoint.c` makes
-  (`stdio`, `stdlib`, `errno`, `sys/stat`, `unistd`). Neither is small, and the image is already near its
-  512 KiB payload and conventional-memory ceilings, so `server file` in the image still
-  says delivery runs in the WebAssembly shell.
+- **Stage 2 (partly built): the checkpoints in the image.** They need a store for `.kqtf` containers and
+  sealed letters and the libc calls `kq_checkpoint.c` makes (`stdio`, `stdlib`, `errno`, `sys/stat`, `unistd`). The store exists:
+  `kernel/core/vfs/kq_mem_storage.c` is a binary in-memory `fl_kq_storage_t` (a ramfs file holds only 160 bytes of text, 16 files in all, so
+  it cannot be used), tested on the host with the real checkpoints and compiled with the image's own flags (5 KB of text, 8 KB of bss). The
+  libc calls are not provided, the checkpoints are not linked, and the image has about 16 KB of conventional-memory room, so `server file` in the
+  image still says delivery runs in the WebAssembly shell.
 - **Account passwords (FL-14).** The WebAssembly lab installs `fl_fs_identity_kq_ops_t` before the demo
   accounts are seeded. A new account's signing key and box key are sealed with the driver's `account_seal`,
   and the password is not kept in the account table; login, `su` and `sudo` open that seal. `switchuser`
   stays password-free: the lab reconnects a seat with it, and restricting it is still an open question.
-  The QEMU image does not install the table. Sealing at boot needs entropy, the default CPU has no RDRAND,
-  and the public image keeps its demo accounts (`FL_SEED_DEFAULT_ACCOUNTS` stays 1).
+  The QEMU image installs a slimmer table (`kernel/freestanding/x86_64/kq_identity.c`: one sealed signing key per account, nothing kept
+  open, opened only to check the password) unless it is the security-lab image; sealing the two demo accounts at boot adds about 1.5 s. The
+  public image keeps its demo accounts (`FL_SEED_DEFAULT_ACCOUNTS` stays 1).
 
 ## The key service (FL-20, absorbs FL-24)
 
@@ -760,11 +780,20 @@ the driver registry exists (`fl_kq_service_start`) and ended only by an orderly 
   op (hosted builds only: the freestanding image has no checkpoint storage, so the op is NULL there and the call
   answers NO_DRIVER) and `fl_kq_cp_head_author` (the container beside a path; FORKED with two heads). `fl_kq_autosign_head_author` is the
   production callback (ctx an `fl_kq_autosign_file_t`): a fork answers BUSY, so the sweep audits `kq-autosign-forked` and
-  signs nothing. The signing call is the monitor's (FL-09); the service supplies the schedule and the key. Nothing in the
-  shell registers an autosign object yet (only the tests do), because the monitor that signs does not exist.
-- **Not built.** The Root fallback has nothing to read (`fl_kq_service_root_fallback` answers NOENT; where a stored Root
-  credential would live is an open decision that needs a written exception and a threat model), so unattended work waits
-  until someone signs in. The freestanding image has no sessions, so it has no service.
+  signs nothing. The other two callbacks are production too: `fl_kq_autosign_last_signature` (the newest successful
+  `RevisionSigned` or `CountersignatureAdded` in the file's history, `fl_kq_cp_last_signature`) and `fl_kq_autosign_sign`
+  (`fl_kq_cp_sign_head_with`: the file's current bytes are checked in as a new revision signed by the author, KeyQuorum's `kq_file_check_in`; **each
+  sweep therefore adds one signed revision**). `server file send -t` registers the file it just made a history for
+  (`fl_kq_service_autosign_track_file`, every `FL_KQ_AUTOSIGN_DEFAULT_SEC`, a placeholder); `fl_kq_service_autosign_remove` stops it. The work queue
+  cannot cancel a periodic item, so a removed object's item stays queued and does nothing, and tracking the same path again revives it rather than
+  queueing another; a removed slot stays taken until shutdown. The monitor (FL-09, `fl_kq_pre_mutation`) is still only declared.
+- **Box key (FL-15).** A KQST login opens the signing and the box secret; the box secret is now published to the service as well
+  (`fl_session_set_login_box_hook`, `fl_kq_service_online_box`), for the same login generation, and `fl_kq_obtain_box_key` hands a copy to the
+  account's own label only. A password login publishes none; logout and shutdown wipe it.
+- **Root fallback.** `fl_kq_service_root_fallback` asks a provider the runtime registers (`fl_kq_service_set_root_credential_provider`) and
+  verifies what it returns through the normal login path, wipes its copy at once and audits `kq-root-fallback` or `kq-root-fallback-refused`.
+  With no provider it answers NOENT and unattended work waits until someone signs in. **Not decided:** where a stored Root credential lives (a
+  written exception and a threat model are needed), its format, and the boot window. The freestanding image has no sessions, so it has no service.
 
 ## Login, `su` and `sudo` (FL-12; KeyQuorum KQ-17, KQ-19, KQ-11)
 
@@ -802,8 +831,13 @@ The rule is KeyQuorum's (`keyquorum_access.h`); Flinstone asks it and collects t
   signing keys). The list is never partial: a row with `destroyed = 0` that is malformed or cannot be read, any
   failed read, or more live rows than `FL_USER_BRIDGES_MAX`, refuses the switch; only a store whose schema has no
   `account_bridges` table at all has no bridge. A member's sealed bridge key is kept with its `wrap_salt` (a column added in place to older
-  stores) and stored or read only together. No path brings a KeyQuorum bridge into the store yet (that import is
-  not designed); `fl_user_db_bridge_put` and `_put_sealed_key` are the store's writers.
+  stores) and stored or read only together. `bridge kq-import <keyquorum-store> <uid> [--roster-only]` (an elevated session, for the
+  logged-in account) copies a bridge that the `keyquorum` CLI made or received (`private-bridge import`, `inbox open`) from KeyQuorum's SQLite store into this one
+  (`fl_user_db_bridge_import_from_kq`), read-only and in one snapshot: the roster and the account's own sealed key land together or not at
+  all (`fl_user_db_bridge_put_with_key`), a roster is never cut short, and a bridge KeyQuorum marks destroyed is stored destroyed. KeyQuorum's
+  organization store has no schema version, so every column's type and size is checked and anything else fails closed; the pinned commit and
+  `make test_kq_real_token` (which runs it against a store the real CLI made) are the contract when the pin moves. `fl_user_db_bridge_put` and
+  `_put_sealed_key` remain the store's other writers.
 - **Real tokens.** `make test_kq_real_token` mints two KQSTs, a third device and a private bridge with the
   `keyquorum` CLI built from the submodule (not part of the default `make`; skipped with a message without it),
   opens them with `kq_slot_open`, signs, logs in (including the logout-during-open generation check), and crosses
