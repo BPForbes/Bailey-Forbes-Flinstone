@@ -621,12 +621,33 @@ int fl_session_sudo_needs_root(void) {
     return kqst;
 }
 
+/* s_session_mu is held. The body of fl_session_grant_elevation. */
+static fl_result_t grant_elevation_locked(const char *reason, fl_elevation_token_t *out) {
+    fl_result_t rc;
+
+    if (!out)
+        return FL_RESULT_INVAL;
+    if (!s_db_ready || !s_db.loaded)
+        return FL_RESULT_ERR;
+    if (fl_user_db_is_elevated_user(&s_db, s_current)) {
+        *out = FL_ELEVATION_TOKEN_NONE;
+        return FL_RESULT_OK;
+    }
+    rc = fl_elevation_grant(s_current, reason, out);
+    if (rc == FL_RESULT_OK)
+        s_active_elev = *out;
+    return rc;
+}
+
 fl_result_t fl_session_sudo_authenticate(const char *password) {
     const fl_user_record_t *root, *cu;
     char cur_name[FL_USER_NAME_MAX], cur_key[FL_HERITAGE_KEY_ID_MAX], root_name[FL_USER_NAME_MAX];
     fl_kq_requirement_t need;
+    fl_elevation_token_t tok = FL_ELEVATION_TOKEN_NONE;
+    uint64_t attempt_gen;
     int root_kqst;
     const char *why = NULL;
+    fl_result_t rc;
 
     fl_session_init();
     pthread_mutex_lock(&s_session_mu);
@@ -644,6 +665,7 @@ fl_result_t fl_session_sudo_authenticate(const char *password) {
     snprintf(cur_key, sizeof cur_key, "%s", cu->key_id);
     snprintf(root_name, sizeof root_name, "%s", root->name);
     root_kqst = root->auth_mode == FL_USER_AUTH_PASSWORD_KQST;
+    attempt_gen = s_login_gen;
     pthread_mutex_unlock(&s_session_mu);
 
     need = fl_kq_unlock_requirement(cur_name, cur_name, 1);
@@ -665,7 +687,20 @@ fl_result_t fl_session_sudo_authenticate(const char *password) {
         session_audit(cur_key, "sudo-refused", FL_HERITAGE_ROOT_KEY, why);
         return FL_RESULT_ACCES;
     }
-    return FL_RESULT_OK;
+    /* The password check ran without the session lock. A login or logout in that
+     * window changes the generation. The elevation token is taken here, for the
+     * account that was checked, or not at all. */
+    if (s_switch_pre_lock)
+        s_switch_pre_lock();
+    pthread_mutex_lock(&s_session_mu);
+    if (s_login_gen != attempt_gen || strcmp(s_current, cur_name) != 0) {
+        pthread_mutex_unlock(&s_session_mu);
+        session_audit(cur_key, "sudo-refused", FL_HERITAGE_ROOT_KEY, "superseded");
+        return FL_RESULT_BUSY;
+    }
+    rc = grant_elevation_locked("sudo authentication", &tok);
+    pthread_mutex_unlock(&s_session_mu);
+    return rc;
 }
 
 fl_result_t fl_session_grant_elevation(const char *reason, fl_elevation_token_t *out) {
@@ -675,18 +710,7 @@ fl_result_t fl_session_grant_elevation(const char *reason, fl_elevation_token_t 
     if (!out)
         return FL_RESULT_INVAL;
     pthread_mutex_lock(&s_session_mu);
-    if (!s_db_ready || !s_db.loaded) {
-        pthread_mutex_unlock(&s_session_mu);
-        return FL_RESULT_ERR;
-    }
-    if (fl_user_db_is_elevated_user(&s_db, s_current)) {
-        *out = FL_ELEVATION_TOKEN_NONE;
-        pthread_mutex_unlock(&s_session_mu);
-        return FL_RESULT_OK;
-    }
-    rc = fl_elevation_grant(s_current, reason, out);
-    if (rc == FL_RESULT_OK)
-        s_active_elev = *out;
+    rc = grant_elevation_locked(reason, out);
     pthread_mutex_unlock(&s_session_mu);
     return rc;
 }

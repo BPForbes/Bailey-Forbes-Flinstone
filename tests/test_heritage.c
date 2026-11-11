@@ -1467,6 +1467,8 @@ static void drop_root_elevation(void) { (void)fl_session_set_elevated("Root", 0)
 
 static fl_result_t restore_root_elevation(void) { return fl_session_set_elevated("Root", 1); }
 
+static void sudo_logout_during(void) { (void)fl_session_logout(); }
+
 /* FL-12: su and sudo -i commit only through fl_session_switch_user, which asks KeyQuorum for the
  * factor itself. Password-only accounts keep their behaviour where the rule asks for a token they do
  * not have (owner decision, audited); a KQST-mode account never switches on a password alone. */
@@ -1527,6 +1529,16 @@ static int test_session_switch(void) {
     ASSERT(fl_session_set_user("Flinstone") == FL_RESULT_OK);
     ASSERT(!fl_session_sudo_needs_root());
     ASSERT(fl_session_sudo_authenticate("flinstone") == FL_RESULT_OK);
+    ASSERT(fl_session_has_elevation());
+    fl_session_drop_elevation();
+    /* Logout during the check moves the login generation. The password was Flinstone's,
+     * and that must not become an elevation token for the session that follows. */
+    fl_session_test_set_switch_pre_lock(sudo_logout_during);
+    ASSERT(fl_session_sudo_authenticate("flinstone") == FL_RESULT_BUSY);
+    ASSERT(!strcmp(s_audit, "sudo-refused:superseded"));
+    ASSERT(!fl_session_has_elevation());
+    fl_session_test_set_switch_pre_lock(NULL);
+    ASSERT(!strcmp(fl_session_current_user(), "Flinstone"));
     ASSERT(fl_session_sudo_authenticate("root") == FL_RESULT_ACCES);
     ASSERT(fl_session_set_auth_mode("Root", FL_USER_AUTH_PASSWORD_KQST) == FL_RESULT_OK);
     ASSERT(fl_session_sudo_needs_root());

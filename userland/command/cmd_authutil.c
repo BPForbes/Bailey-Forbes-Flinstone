@@ -1,7 +1,6 @@
 #include "cmd_authutil.h"
 #include "fl/audit_log.h"
 #include "fl/session.h"
-#include "fl/elevation.h"
 #include "fl/kq.h"
 #include "heritage.h"
 #include "fl/mem_asm.h"
@@ -119,7 +118,6 @@ int cmd_read_password(const char *prompt, char *buf, size_t buf_size) {
 
 int cmd_sudo_require_auth_reason(const char *reason) {
     char pw[128];
-    fl_elevation_token_t tok = FL_ELEVATION_TOKEN_NONE;
     fl_result_t rc;
     const char *why = (reason && reason[0]) ? reason : "sudo authentication";
 
@@ -137,16 +135,11 @@ int cmd_sudo_require_auth_reason(const char *reason) {
         fprintf(stderr, "sudo: password read failed\n");
         return 1;
     }
-    if (fl_session_sudo_authenticate(pw) != FL_RESULT_OK) {
-        cmd_wipe_password(pw, sizeof(pw));
-        fprintf(stderr, "sudo: incorrect password\n");
-        return 1;
-    }
+    rc = fl_session_sudo_authenticate(pw);
     cmd_wipe_password(pw, sizeof(pw));
-
-    rc = fl_session_grant_elevation(why, &tok);
     if (rc != FL_RESULT_OK) {
-        fprintf(stderr, "sudo: elevation failed (%d)\n", (int)rc);
+        fprintf(stderr, rc == FL_RESULT_BUSY ? "sudo: elevation failed (%d)\n" : "sudo: incorrect password\n",
+                (int)rc);
         return 1;
     }
     fl_audit_elevation_event(fl_session_current_user(), why, 1);

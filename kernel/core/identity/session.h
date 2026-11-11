@@ -75,7 +75,9 @@ fl_result_t fl_session_switch_user(const fl_session_switch_request_t *req);
 /**
  * sudo without a switch (an elevation token): KeyQuorum asks for Root's key. With a KQST-mode Root,
  * password must be Root's and open Root's token; with a password-only Root, it is the caller's own
- * password, as before (owner decision, audited as "sudo-kqst-legacy"). FL_RESULT_OK or ACCES.
+ * password, as before (owner decision, audited as "sudo-kqst-legacy"). OK also binds the elevation
+ * token to that same login: a login or logout during the check returns BUSY and grants nothing.
+ * Any other refusal is ACCES.
  */
 fl_result_t fl_session_sudo_authenticate(const char *password);
 /** 1 when sudo asks for Root's password and token (Root is a KQST-mode account), else 0. */
