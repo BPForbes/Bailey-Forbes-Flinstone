@@ -311,4 +311,22 @@ typedef enum { FL_USER_SECRET_SIGNING, FL_USER_SECRET_BOX } fl_user_secret_kind_
 int fl_user_db_secret_matches(const fl_user_db_t *db, const char *key_id,
                               fl_user_secret_kind_t kind, const unsigned char *secret);
 
+/*
+ * Parent-key assembly records (account_assembly): the opaque KQAS bytes KeyQuorum's kq_assembly_split
+ * wrote for parent_label (an account key id), with the generation they were dealt at and the
+ * threshold KeyQuorum fixed for that many holders. Every share inside is sealed to one child's box key,
+ * so the record is safe at rest; nothing here reads or decides it (the driver's assembly ops do).
+ * A writer brings an older store up to date first (a store from before the table gains it).
+ */
+#define FL_USER_ASSEMBLY_MAX 16384u
+/** Replaces parent_label's record (one row per parent). INVAL for a bad label, empty or oversized bytes. */
+fl_result_t fl_user_db_assembly_put(const fl_user_db_t *db, const char *parent_label, unsigned generation,
+                                    unsigned threshold, const unsigned char *bytes, size_t len);
+/**
+ * parent_label's record into out (cap bytes); *len, *generation and *threshold are set. NOENT when the parent has
+ * none (including a store from before the table), NOMEM when cap is too small, ERR for a malformed row.
+ */
+fl_result_t fl_user_db_assembly_get(const fl_user_db_t *db, const char *parent_label, unsigned char *out,
+                                    size_t cap, size_t *len, unsigned *generation, unsigned *threshold);
+
 #endif /* FL_USER_DB_H */

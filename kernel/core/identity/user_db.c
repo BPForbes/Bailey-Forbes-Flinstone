@@ -1504,6 +1504,72 @@ fl_result_t fl_user_db_bridge_put_sealed_key(const fl_user_db_t *db, const char 
     return rc;
 }
 
+/* ---- Parent-key assembly records (account_assembly) ---- */
+
+fl_result_t fl_user_db_assembly_put(const fl_user_db_t *db, const char *parent_label, unsigned generation,
+                                    unsigned threshold, const unsigned char *bytes, size_t len) {
+    sqlite3 *sql = NULL;
+    sqlite3_stmt *st = NULL;
+    fl_result_t rc = FL_RESULT_ERR;
+
+    if (!db || !parent_label || !parent_label[0] || !bytes || len == 0 || len > FL_USER_ASSEMBLY_MAX)
+        return FL_RESULT_INVAL;
+    if (bridge_db_open(db, 1, &sql) != FL_RESULT_OK)
+        return FL_RESULT_ERR;
+    if (sqlite3_prepare_v2(sql,
+                           "INSERT INTO account_assembly(parent_label, threshold, generation, sealed_shares) "
+                           "VALUES(?,?,?,?) ON CONFLICT(parent_label) DO UPDATE SET threshold=excluded.threshold, "
+                           "generation=excluded.generation, sealed_shares=excluded.sealed_shares;",
+                           -1, &st, NULL) == SQLITE_OK) {
+        sqlite3_bind_text(st, 1, parent_label, -1, SQLITE_TRANSIENT);
+        sqlite3_bind_int64(st, 2, (sqlite3_int64)threshold);
+        sqlite3_bind_int64(st, 3, (sqlite3_int64)generation);
+        sqlite3_bind_blob(st, 4, bytes, (int)len, SQLITE_TRANSIENT);
+        rc = sqlite3_step(st) == SQLITE_DONE ? FL_RESULT_OK : FL_RESULT_ERR;
+        sqlite3_finalize(st);
+    }
+    sqlite3_close(sql);
+    return rc;
+}
+
+fl_result_t fl_user_db_assembly_get(const fl_user_db_t *db, const char *parent_label, unsigned char *out,
+                                    size_t cap, size_t *len, unsigned *generation, unsigned *threshold) {
+    sqlite3 *sql = NULL;
+    sqlite3_stmt *st = NULL;
+    fl_result_t rc = FL_RESULT_NOENT;
+
+    if (len)
+        *len = 0;
+    if (!db || !parent_label || !parent_label[0] || !out || !len || !generation || !threshold)
+        return FL_RESULT_INVAL;
+    if (bridge_db_open(db, 0, &sql) != FL_RESULT_OK)
+        return FL_RESULT_NOENT; /* no store file yet: nothing was ever dealt */
+    /* A store from before the table fails to prepare, which reads as "no record". */
+    if (sqlite3_prepare_v2(sql, "SELECT generation, sealed_shares, threshold FROM account_assembly WHERE parent_label = ?;",
+                           -1, &st, NULL) == SQLITE_OK) {
+        sqlite3_bind_text(st, 1, parent_label, -1, SQLITE_TRANSIENT);
+        if (sqlite3_step(st) == SQLITE_ROW) {
+            int n = sqlite3_column_bytes(st, 1);
+            sqlite3_int64 g = sqlite3_column_int64(st, 0), t = sqlite3_column_int64(st, 2);
+
+            if (sqlite3_column_type(st, 1) != SQLITE_BLOB || n <= 0 || g < 0 || g > 0x7fffffff || t < 0 || t > 255)
+                rc = FL_RESULT_ERR;
+            else if ((size_t)n > cap)
+                rc = FL_RESULT_NOMEM;
+            else {
+                mem_domain_copy(out, sqlite3_column_blob(st, 1), (size_t)n);
+                *len = (size_t)n;
+                *generation = (unsigned)g;
+                *threshold = (unsigned)t;
+                rc = FL_RESULT_OK;
+            }
+        }
+        sqlite3_finalize(st);
+    }
+    sqlite3_close(sql);
+    return rc;
+}
+
 /* ---- import from a KeyQuorum store (KQ-19) ------------------------------------------------------
  * KeyQuorum makes and receives bridges (keyquorum private-bridge import / inbox open, then
  * private_bridge::import_package) into its own SQLite store. This copies one bridge from that store,
