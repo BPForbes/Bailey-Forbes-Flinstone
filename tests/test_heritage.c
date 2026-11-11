@@ -1895,29 +1895,36 @@ static int test_switch_mutation_barriers(void) {
 }
 
 /* useradd's save fails and the following reload fails closed: the command reports it, the
- * in-memory store publishes nothing, and the file on disk is left as it was. A readable file
- * with a mode the loader rejects is what makes the reload fail; write permission is taken away
- * so the save cannot replace that file first. */
+ * in-memory store publishes nothing, and the file on disk is left as it was. A second
+ * connection holds the store exclusively, the same way a locked bridge list fails a read,
+ * so the save cannot commit. A mode-0444 file is not that lock: a privileged runner can
+ * still write it. */
 static int test_account_command_reload_fails_closed(void) {
     char path[256];
     char *argv[] = {"useradd", "Zed", NULL};
     int rc;
     int failed = 0;
+    sqlite3 *lock = NULL;
     fl_elevation_token_t tok = FL_ELEVATION_TOKEN_NONE;
     uint64_t gen;
 
     if (fl_session_set_user("Root") != FL_RESULT_OK || !fl_session_is_elevated_account())
         return 1;
     snprintf(path, sizeof path, "%s", fl_session_user_db()->path);
-    if (!path[0] || auth_exec_sql(path, "UPDATE users SET auth_mode=2 WHERE name='Root';") != 0 ||
-        chmod(path, 0444) != 0)
+    if (!path[0] || auth_exec_sql(path, "UPDATE users SET auth_mode=2 WHERE name='Root';") != 0)
         return 1;
+    if (sqlite3_open(path, &lock) != SQLITE_OK ||
+        sqlite3_exec(lock, "BEGIN EXCLUSIVE;", NULL, NULL, NULL) != SQLITE_OK) {
+        sqlite3_close(lock);
+        return 1;
+    }
     /* A token and a sudo scope are the two ways has_elevation stays true after the
      * store itself is no longer loaded. The failed reload has to drop both. */
     fl_session_begin_sudo_scope();
     if (fl_elevation_grant("Root", "reload", &tok) != FL_RESULT_OK ||
         setenv("FL_CMD_PASSWORD", "zed-pw", 1) != 0) {
-        chmod(path, 0644);
+        sqlite3_exec(lock, "ROLLBACK;", NULL, NULL, NULL);
+        sqlite3_close(lock);
         fl_session_end_sudo_scope();
         return 1;
     }
@@ -1925,8 +1932,8 @@ static int test_account_command_reload_fails_closed(void) {
     gen = fl_session_login_generation();
     rc = cmd_useradd_run(2, argv);
     unsetenv("FL_CMD_PASSWORD");
-    if (chmod(path, 0644) != 0)
-        return 1;
+    sqlite3_exec(lock, "ROLLBACK;", NULL, NULL, NULL);
+    sqlite3_close(lock);
     if (rc == 0 || fl_session_users_loaded() || fl_session_user_db()->count != 0)
         failed = 1;
     if (fl_session_has_elevation() || fl_session_in_sudo_scope() ||
