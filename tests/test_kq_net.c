@@ -1,3 +1,4 @@
+#define _GNU_SOURCE 1 /* memmem */
 /**
  * test_kq_net.c - KeyQuorum co-signed delivery over the session wire, in process
  * (kernel/core/net/net_kq_delivery.c; contracts/drivers/contract_p4_keyquorum.h).
@@ -17,6 +18,7 @@
 
 #include <dirent.h>
 #include <limits.h>
+#include "fl/kq.h"
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -309,6 +311,111 @@ static int test_a_refused_ack_is_recorded_as_refused_over_the_wire(void) {
     ASSERT(s_to_steve[FL_NET_SESSION_OP_KQ_RELEASE] == releases_before);
 
     fl_net_kq_inbox_drop(inbox[0].id);
+    asm_mem_secure_zero(steve_sign, sizeof steve_sign);
+    fl_kq_encoded_free(&enc);
+    return 0;
+}
+
+/* KQ-12: the refusing recipient's KQER reaches the delivery's sender through the host, and applies there. */
+static int test_a_refusal_report_reaches_the_sender(void) {
+    const fl_kq_driver_t *drv = fl_kq_driver_get_or_register();
+    fl_kq_encoded_t enc;
+    fl_net_kq_inbox_t inbox[4];
+    unsigned char steve_sign[FL_USER_SIGNING_SECRET_LEN];
+    uint8_t sig[64], ref[32], got[FL_KQ_REPORT_FRAME_MAX + 8], frame[FL_NET_SESSION_MAX_MSG];
+    uint8_t big[FL_KQ_REPORT_FRAME_MAX + 8] = {0};
+    fl_kq_buf_t kqer = {0}, lines = {0};
+    char src[PATH_MAX];
+    size_t got_len = 0;
+    int forwarded;
+    const int op = FL_NET_SESSION_OP_KQR_REPORT;
+
+    ASSERT(drv && encode_from_mya("report.txt", "a letter Steve refuses and reports\n", &enc) == 0);
+    snprintf(src, sizeof src, "%s/report.txt", s_dir);
+    s_actor = &s_members[1];
+    ASSERT(fl_net_kq_send_delivery(s_srv, NULL, 0, MYA, STEVE, &enc) == FL_RESULT_OK);
+    ASSERT(fl_net_kq_inbox(inbox, 4) == 1);
+    ASSERT(fl_user_db_open_key(&s_db, "Steve", "pw-steve", steve_sign) == FL_RESULT_OK);
+    ASSERT(fl_kq_cp_cosign(&inbox[0].offer, STEVE, steve_sign, sig) == FL_KQ_CP_OK);
+    s_actor = &s_members[2];
+    ASSERT(fl_net_kq_send_cosign(s_srv, NULL, 0, inbox[0].id, STEVE, sig) == FL_RESULT_OK);
+
+    ASSERT(fl_kq_cp_offer_ref(&enc.offer, ref) == FL_RESULT_OK);
+    ASSERT(drv->error_sign(8u, 5u, (uint8_t)FL_KQ_OP_RECEIVE, ref, STEVE, "2026-11-11T10:00:00Z", NULL, NULL,
+                           steve_sign, &kqer) == KQ_FILE_OK);
+    printf("  (a signed KQER is %zu bytes; the frame carries up to %u)\n", kqer.len, FL_KQ_REPORT_FRAME_MAX);
+    ASSERT(kqer.len > 0 && kqer.len <= FL_KQ_REPORT_FRAME_MAX);
+
+    forwarded = s_to_mya[op & 0x7F];
+    /* Before any refusal the delivery is only released: a report about it is dropped. */
+    ASSERT(fl_net_kq_send_report(s_srv, NULL, 0, inbox[0].id, kqer.data, kqer.len) == FL_RESULT_OK);
+    ASSERT(s_to_mya[op & 0x7F] == forwarded);
+    ASSERT(fl_net_kq_send_ack(s_srv, NULL, 0, inbox[0].id, 0) == FL_RESULT_OK);
+    ASSERT(host_sent_state(MYA, "report.txt", "refused") == 0);
+
+    /* Someone who is not the recipient cannot report on it. */
+    s_actor = &s_members[1];
+    ASSERT(fl_net_kq_send_report(s_srv, NULL, 0, inbox[0].id, kqer.data, kqer.len) == FL_RESULT_OK);
+    ASSERT(s_to_mya[op & 0x7F] == forwarded);
+    /* The recipient's report is forwarded to the sender, once. */
+    s_actor = &s_members[2];
+    ASSERT(fl_net_kq_send_report(s_srv, NULL, 0, inbox[0].id, kqer.data, kqer.len) == FL_RESULT_OK);
+    ASSERT(s_to_mya[op & 0x7F] == forwarded + 1);
+    ASSERT(fl_net_kq_send_report(s_srv, NULL, 0, inbox[0].id, kqer.data, kqer.len) == FL_RESULT_OK);
+    ASSERT(s_to_mya[op & 0x7F] == forwarded + 1);
+    /* An unknown delivery, an empty or oversized report, and a frame whose length lies are all dropped. */
+    {
+        uint8_t other[FL_KQ_DELIVERY_ID_LEN] = {9, 9, 9};
+
+        ASSERT(fl_net_kq_send_report(s_srv, NULL, 0, other, kqer.data, kqer.len) == FL_RESULT_OK);
+        ASSERT(s_to_mya[op & 0x7F] == forwarded + 1);
+    }
+    ASSERT(fl_net_kq_send_report(s_srv, NULL, 0, inbox[0].id, kqer.data, 0) == FL_RESULT_INVAL);
+    ASSERT(fl_net_kq_send_report(s_srv, NULL, 0, inbox[0].id, big, FL_KQ_REPORT_FRAME_MAX + 1) == FL_RESULT_INVAL);
+    memset(frame, 0, sizeof frame);
+    memcpy(frame, inbox[0].id, FL_KQ_DELIVERY_ID_LEN);
+    frame[16] = 0;
+    frame[17] = 10; /* says ten bytes, carries four */
+    fl_net_kq_host_handle(s_srv, &s_members[2], (uint8_t)op, frame, 16 + 2 + 4);
+    ASSERT(s_to_mya[op & 0x7F] == forwarded + 1);
+
+    /* The sender's shell: the forwarded frame is held, handed out once, and applies to its container. */
+    memcpy(frame, inbox[0].id, FL_KQ_DELIVERY_ID_LEN);
+    frame[16] = (uint8_t)(kqer.len >> 8);
+    frame[17] = (uint8_t)kqer.len;
+    memcpy(frame + 18, kqer.data, kqer.len);
+    fl_net_kq_client_handle(NULL, (uint8_t)op, frame, (uint16_t)(18 + kqer.len));
+    ASSERT(fl_net_kq_reports_pending() == 1);
+    ASSERT(fl_net_kq_report_take(inbox[0].id, got, 8, &got_len) == FL_RESULT_NOMEM && fl_net_kq_reports_pending() == 1);
+    ASSERT(fl_net_kq_report_take(inbox[0].id, got, sizeof got, &got_len) == FL_RESULT_OK && got_len == kqer.len);
+    ASSERT(memcmp(got, kqer.data, kqer.len) == 0);
+    ASSERT(fl_net_kq_report_take(inbox[0].id, got, sizeof got, &got_len) == FL_RESULT_NOENT && fl_net_kq_reports_pending() == 0);
+    frame[17] ^= 0x01; /* a length that does not match the frame is dropped by the client */
+    fl_net_kq_client_handle(NULL, (uint8_t)op, frame, (uint16_t)(18 + kqer.len));
+    ASSERT(fl_net_kq_reports_pending() == 0);
+
+    /* Applying it: only the recipient's signature over this artifact is recorded. */
+    got[kqer.len / 2] ^= 0x40; /* a tampered copy of the report */
+    ASSERT(fl_kq_cp_inject_report_bytes(fl_user_db_signing_public(&s_db, STEVE), got, kqer.len, ref, src) ==
+           FL_KQ_CP_BAD_SIGNATURE);
+    memcpy(got, kqer.data, kqer.len);
+    {
+        uint8_t other_ref[32];
+
+        memcpy(other_ref, ref, 32);
+        other_ref[0] ^= 1u;
+        ASSERT(fl_kq_cp_inject_report_bytes(fl_user_db_signing_public(&s_db, STEVE), got, kqer.len, other_ref, src) ==
+               FL_KQ_CP_BAD_SIGNATURE); /* names another artifact */
+    }
+    ASSERT(fl_kq_cp_inject_report_bytes(fl_user_db_signing_public(&s_db, MYA), got, kqer.len, ref, src) ==
+           FL_KQ_CP_BAD_SIGNATURE); /* not the reporter's key */
+    ASSERT(fl_kq_cp_inject_report_bytes(fl_user_db_signing_public(&s_db, STEVE), got, kqer.len, ref, src) == FL_KQ_CP_OK);
+    ASSERT(fl_kq_cp_history(src, &lines) == FL_KQ_CP_OK);
+    ASSERT(memmem(lines.data, lines.len, "\t48\t", 4) != NULL); /* ErrorReported */
+    fl_kq_buf_free(&lines);
+
+    fl_net_kq_inbox_drop(inbox[0].id);
+    fl_kq_buf_free(&kqer);
     asm_mem_secure_zero(steve_sign, sizeof steve_sign);
     fl_kq_encoded_free(&enc);
     return 0;
@@ -693,6 +800,7 @@ int main(void) {
     RUN(test_keys_come_from_the_host_registry);
     RUN(test_co_signed_delivery_over_the_wire);
     RUN(test_a_refused_ack_is_recorded_as_refused_over_the_wire);
+    RUN(test_a_refusal_report_reaches_the_sender);
     RUN(test_an_unanswered_request_leaks_away);
     RUN(test_unfinished_uploads_never_hold_the_host);
     RUN(test_unsafe_names_never_reach_a_path);

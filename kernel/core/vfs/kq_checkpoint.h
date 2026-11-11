@@ -135,6 +135,15 @@ fl_kq_cp_result_t fl_kq_cp_head_author(const char *path, char *out, size_t cap);
  */
 fl_kq_cp_result_t fl_kq_cp_last_signature(const char *path, int64_t *sec_out);
 
+/**
+ * Signs the file as author_key: checks the file's current bytes in on the current head of the container
+ * beside path (KeyQuorum kq_file_check_in: a new revision signed by the author) and writes the container
+ * back through the storage table. The author's key is the caller's copy to wipe. FORKED with two heads,
+ * IO when the file or container cannot be read, INVALID for a damaged container or a refused check-in.
+ */
+fl_kq_cp_result_t fl_kq_cp_sign_head_with(const char *path, const char *author_key,
+                                          const uint8_t signing_secret[32], const char *created_at_utc);
+
 /** Display names of the history's type and outcome codes; "?" past the table. Never parsed. */
 const char *fl_kq_cp_event_name(uint8_t code);
 const char *fl_kq_cp_outcome_name(uint8_t code);
@@ -238,6 +247,16 @@ fl_kq_cp_result_t fl_kq_cp_report_write_in(uint16_t code, uint8_t class_code, ui
                                            const uint8_t ref[32], const char *actor,
                                            const char *occurred_at, const uint8_t secret[32],
                                            const fl_kq_dir_t *dir);
+
+/**
+ * The same injection for a report already in memory (one that arrived over the wire, fl_net_kq_report_take):
+ * verifies kqer under reporter_public and that it names ref (the SHA-256 of the artifact, fl_kq_cp_offer_ref),
+ * then appends one ErrorReported event to the container beside path. A report is a claim by its signer: it
+ * decides no trust. BAD_SIGNATURE for any report KeyQuorum refuses (nothing is written), IO without a
+ * container.
+ */
+fl_kq_cp_result_t fl_kq_cp_inject_report_bytes(const uint8_t reporter_public[32], const uint8_t *kqer,
+                                               size_t kqer_len, const uint8_t ref[32], const char *path);
 
 /**
  * Consumer: reads the KQER at report_path, and appends one ErrorReported event (history type 48)

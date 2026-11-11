@@ -492,6 +492,46 @@ static void host_ack(fl_net_server_t *srv, const fl_net_server_member_t *from,
     }
 }
 
+/* Refusal report (KQ-12): the refusing recipient's KQER, forwarded to the delivery's sender. Best effort,
+ * nothing is kept: a sender who is not connected misses it. Every check fails closed and silently. */
+#define KQ_FORWARDED_MAX 16u
+static uint8_t s_forwarded[KQ_FORWARDED_MAX][FL_KQ_DELIVERY_ID_LEN];
+static unsigned s_forwarded_n; /* how many ids are remembered (a ring of the newest) */
+static unsigned s_forwarded_next;
+
+static int already_forwarded(const uint8_t id[FL_KQ_DELIVERY_ID_LEN]) {
+    for (unsigned i = 0; i < s_forwarded_n; i++)
+        if (memcmp(s_forwarded[i], id, FL_KQ_DELIVERY_ID_LEN) == 0)
+            return 1;
+    return 0;
+}
+
+static void remember_forwarded(const uint8_t id[FL_KQ_DELIVERY_ID_LEN]) {
+    memcpy(s_forwarded[s_forwarded_next], id, FL_KQ_DELIVERY_ID_LEN);
+    s_forwarded_next = (s_forwarded_next + 1u) % KQ_FORWARDED_MAX;
+    if (s_forwarded_n < KQ_FORWARDED_MAX)
+        s_forwarded_n++;
+}
+
+static void host_report(fl_net_server_t *srv, const fl_net_server_member_t *from, const uint8_t *payload,
+                        uint16_t plen) {
+    fl_bytes_reader_t r;
+    uint8_t id[FL_KQ_DELIVERY_ID_LEN];
+    uint16_t n = 0;
+    fl_kq_delivery_t d;
+    const char *me = key_of_member(from);
+
+    fl_bytes_reader_init(&r, payload, plen);
+    (void)fl_bytes_reader_read_bytes(&r, id, sizeof id);
+    (void)fl_bytes_reader_read_u16(&r, &n);
+    if (r.bad || n == 0 || n > FL_KQ_REPORT_FRAME_MAX || fl_bytes_reader_remaining(&r) != n || !me || !store() ||
+        fl_kq_store_get(store(), id, &d) != FL_RESULT_OK || strcmp(me, d.recipient) != 0 || !d.refused ||
+        already_forwarded(id))
+        return;
+    remember_forwarded(id);
+    host_send_to_account(srv, d.sender, (uint8_t)FL_NET_SESSION_OP_KQR_REPORT, payload, plen);
+}
+
 static void host_keys(fl_net_server_t *srv, const fl_net_server_member_t *from,
                       fl_bytes_reader_t *r) {
     char who[FL_HERITAGE_KEY_ID_MAX];
@@ -634,6 +674,9 @@ void fl_net_kq_host_handle(fl_net_server_t *srv, const fl_net_server_member_t *f
         break;
     case FL_NET_SESSION_OP_KQ_KEYS:
         host_keys(srv, from, &r);
+        break;
+    case FL_NET_SESSION_OP_KQR_REPORT:
+        host_report(srv, from, payload, plen);
         break;
     case FL_NET_SESSION_OP_KQH_REQ:
         host_history(srv, from, &r);
@@ -848,6 +891,78 @@ static void client_history(fl_bytes_reader_t *r) {
     slot->ready = 1;
 }
 
+/* A forwarded refusal report: held for the shell to apply. Frames that do not parse are dropped. */
+#define KQ_REPORT_INBOX 4u
+typedef struct {
+    int used;
+    uint8_t id[FL_KQ_DELIVERY_ID_LEN];
+    size_t len;
+    uint8_t bytes[FL_KQ_REPORT_FRAME_MAX];
+} kq_report_t;
+static kq_report_t s_reports[KQ_REPORT_INBOX];
+static unsigned s_reports_next;
+
+static void client_report(fl_bytes_reader_t *r) {
+    uint8_t id[FL_KQ_DELIVERY_ID_LEN];
+    uint16_t n = 0;
+    const uint8_t *bytes;
+    kq_report_t *slot = NULL;
+
+    (void)fl_bytes_reader_read_bytes(r, id, sizeof id);
+    (void)fl_bytes_reader_read_u16(r, &n);
+    if (r->bad || n == 0 || n > FL_KQ_REPORT_FRAME_MAX || fl_bytes_reader_remaining(r) != n)
+        return;
+    bytes = fl_bytes_reader_cursor(r);
+    for (unsigned i = 0; i < KQ_REPORT_INBOX && !slot; i++)
+        if (s_reports[i].used && memcmp(s_reports[i].id, id, sizeof id) == 0)
+            slot = &s_reports[i];
+    for (unsigned i = 0; i < KQ_REPORT_INBOX && !slot; i++)
+        if (!s_reports[i].used)
+            slot = &s_reports[i];
+    if (!slot) { /* full: the oldest is replaced */
+        slot = &s_reports[s_reports_next];
+        s_reports_next = (s_reports_next + 1u) % KQ_REPORT_INBOX;
+    }
+    slot->used = 1;
+    memcpy(slot->id, id, sizeof id);
+    slot->len = n;
+    memcpy(slot->bytes, bytes, n);
+}
+
+fl_result_t fl_net_kq_report_take(const uint8_t id[FL_KQ_DELIVERY_ID_LEN], uint8_t *out, size_t cap, size_t *len) {
+    fl_result_t rc = FL_RESULT_NOENT;
+
+    if (!id || !out || !len)
+        return FL_RESULT_INVAL;
+    *len = 0;
+    kq_lock();
+    for (unsigned i = 0; i < KQ_REPORT_INBOX; i++) {
+        if (!s_reports[i].used || memcmp(s_reports[i].id, id, FL_KQ_DELIVERY_ID_LEN) != 0)
+            continue;
+        if (cap < s_reports[i].len) {
+            rc = FL_RESULT_NOMEM;
+            break;
+        }
+        memcpy(out, s_reports[i].bytes, s_reports[i].len);
+        *len = s_reports[i].len;
+        memset(&s_reports[i], 0, sizeof s_reports[i]);
+        rc = FL_RESULT_OK;
+        break;
+    }
+    kq_unlock();
+    return rc;
+}
+
+size_t fl_net_kq_reports_pending(void) {
+    size_t n = 0;
+
+    kq_lock();
+    for (unsigned i = 0; i < KQ_REPORT_INBOX; i++)
+        n += s_reports[i].used ? 1u : 0u;
+    kq_unlock();
+    return n;
+}
+
 void fl_net_kq_client_handle(fl_net_client_t *client, uint8_t opcode, const uint8_t *payload,
                              uint16_t plen) {
     fl_bytes_reader_t r;
@@ -870,6 +985,9 @@ void fl_net_kq_client_handle(fl_net_client_t *client, uint8_t opcode, const uint
         break;
     case FL_NET_SESSION_OP_KQH_DATA:
         client_history(&r);
+        break;
+    case FL_NET_SESSION_OP_KQR_REPORT:
+        client_report(&r);
         break;
     case FL_NET_SESSION_OP_KQH_REQ:
         break; /* a request is the host's to answer; a client that is sent one ignores it */
@@ -1037,6 +1155,25 @@ fl_result_t fl_net_kq_send_ack(fl_net_server_t *srv, fl_net_client_t *client, in
         return FL_RESULT_INVAL;
     return fl_net_kq_send(srv, client, hosting, (uint8_t)FL_NET_SESSION_OP_KQ_ACK, wbuf,
                           (uint16_t)w.w.len);
+}
+
+fl_result_t fl_net_kq_send_report(fl_net_server_t *srv, fl_net_client_t *client, int hosting,
+                                  const uint8_t id[FL_KQ_DELIVERY_ID_LEN], const uint8_t *kqer, size_t len) {
+    uint8_t wbuf[FL_NET_SESSION_MAX_MSG];
+    fl_bytes_sticky_writer_t w;
+    uint8_t n[2];
+
+    if (!id || !kqer || len == 0 || len > FL_KQ_REPORT_FRAME_MAX)
+        return FL_RESULT_INVAL;
+    n[0] = (uint8_t)(len >> 8);
+    n[1] = (uint8_t)len;
+    fl_bytes_sticky_init(&w, wbuf, (uint16_t)sizeof wbuf);
+    (void)fl_bytes_sticky_put_bytes(&w, id, FL_KQ_DELIVERY_ID_LEN);
+    (void)fl_bytes_sticky_put_bytes(&w, n, 2);
+    (void)fl_bytes_sticky_put_bytes(&w, kqer, (uint16_t)len);
+    if (w.bad)
+        return FL_RESULT_INVAL;
+    return fl_net_kq_send(srv, client, hosting, (uint8_t)FL_NET_SESSION_OP_KQR_REPORT, wbuf, (uint16_t)w.w.len);
 }
 
 size_t fl_net_kq_host_sent(const char *sender, fl_kq_delivery_t *out, size_t cap) {
@@ -1239,6 +1376,11 @@ void fl_net_kq_reset(void) {
             hist_free(&s_hist[i]);
     s_hist_gate = NULL;
     s_hist_source = NULL;
+    memset(s_reports, 0, sizeof s_reports);
+    s_reports_next = 0;
+    memset(s_forwarded, 0, sizeof s_forwarded);
+    s_forwarded_n = 0;
+    s_forwarded_next = 0;
     if (s_store) {
         fl_kq_store_close(s_store);
         s_store = NULL;

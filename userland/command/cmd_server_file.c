@@ -638,6 +638,36 @@ static int verb_file_permit(int argc, char **argv)
     return 0;
 }
 
+/* What this shell sent in co-signed deliveries, for the refusal reports that may come back (KQ-12): the file
+ * the history sits beside, who would report, and the artifact's SHA-256 a report must name. Session-lifetime
+ * only; the newest 16. */
+#define KQ_SENT_MAX 16u
+typedef struct {
+    int used;
+    uint8_t id[FL_KQ_DELIVERY_ID_LEN];
+    uint8_t ref[32];
+    char recipient[FL_HERITAGE_KEY_ID_MAX];
+    char path[CWD_MAX];
+} kq_sent_t;
+static kq_sent_t s_sent[KQ_SENT_MAX];
+static unsigned s_sent_next;
+
+static void kq_sent_remember(const uint8_t id[FL_KQ_DELIVERY_ID_LEN], const char *path, const char *recipient,
+                             const kq_file_offer_t *offer)
+{
+    kq_sent_t *e = &s_sent[s_sent_next];
+
+    s_sent_next = (s_sent_next + 1u) % KQ_SENT_MAX;
+    memset(e, 0, sizeof *e);
+    if (strlen(path) >= sizeof e->path || strlen(recipient) >= sizeof e->recipient ||
+        fl_kq_cp_offer_ref(offer, e->ref) != FL_RESULT_OK)
+        return; /* not tracked: a report for it is simply never applied */
+    memcpy(e->id, id, FL_KQ_DELIVERY_ID_LEN);
+    snprintf(e->path, sizeof e->path, "%s", path);
+    snprintf(e->recipient, sizeof e->recipient, "%s", recipient);
+    e->used = 1;
+}
+
 static int verb_kq_send(const cmd_server_ctx_t *ctx, int argc, char **argv)
 {
     int hosting = 0;
@@ -716,6 +746,7 @@ static int verb_kq_send(const cmd_server_ctx_t *ctx, int argc, char **argv)
     }
     /* The file now has a history beside it: keep it signed. Tracking never changes the delivery. */
     (void)fl_kq_service_autosign_track_file(rpath, FL_KQ_AUTOSIGN_DEFAULT_SEC);
+    kq_sent_remember(enc.delivery_id, rpath, keys.key_id, &enc.offer);
     pthread_mutex_lock(ctx->mutex);
     rc = fl_net_kq_send_delivery(ctx->server, ctx->client, hosting, me, keys.key_id, &enc);
     pthread_mutex_unlock(ctx->mutex);
@@ -728,6 +759,26 @@ static int verb_kq_send(const cmd_server_ctx_t *ctx, int argc, char **argv)
                enc.file_name, keys.key_id, hex);
     fl_kq_encoded_free(&enc);
     return rc == FL_RESULT_OK ? 0 : 1;
+}
+
+/* After a refusal's ACK: the KQER that fl_kq_report_refusal_in wrote in the landing directory goes to the
+ * sender through the host. Nothing written (nobody online, capped, already there) or longer than a frame
+ * sends nothing; the refusal itself is unchanged either way. */
+static void kq_send_refusal_report(const cmd_server_ctx_t *ctx, int hosting, const fl_net_kq_inbox_t *in)
+{
+    uint8_t ref[32];
+    char path[CWD_MAX + 100];
+    uint8_t *bytes = NULL;
+    size_t n = 0;
+
+    if (fl_kq_cp_offer_ref(&in->offer, ref) != FL_RESULT_OK || fl_kq_cp_report_path(g_cwd, ref, path, sizeof path) != 0)
+        return;
+    if (fl_kq_cp_storage()->read_file(fl_kq_cp_storage()->ctx, path, FL_KQ_REPORT_FRAME_MAX, &bytes, &n) != 0)
+        return;
+    pthread_mutex_lock(ctx->mutex);
+    (void)fl_net_kq_send_report(ctx->server, ctx->client, hosting, in->id, bytes, n);
+    pthread_mutex_unlock(ctx->mutex);
+    mem_domain_free(MEM_DOMAIN_FS, bytes);
 }
 
 /* Decode checkpoint for a released letter, then ACK. Returns 0 when the file was written. */
@@ -794,6 +845,7 @@ static int kq_decode_and_ack(const cmd_server_ctx_t *ctx, int hosting,
     (void)fl_net_kq_send_ack(ctx->server, ctx->client, hosting, in->id, cp == FL_KQ_CP_OK);
     pthread_mutex_unlock(ctx->mutex);
     if (cp != FL_KQ_CP_OK) {
+        kq_send_refusal_report(ctx, hosting, in);
         fl_color_warn("keyquorum: %s from %s refused: %s", in->file_name, in->sender,
                       fl_kq_cp_reason(cp));
         fl_net_kq_inbox_drop(in->id);
@@ -960,6 +1012,45 @@ static int verb_kq_open(const cmd_server_ctx_t *ctx, int argc, char **argv)
     return rc == 0 ? 0 : 1;
 }
 
+/* server file reports: apply the refusal reports that came back for what this shell sent. Each is checked
+ * (the recipient's key from the host registry, the artifact it must name) before it is recorded in the file's
+ * history as an ErrorReported event; one that does not verify is dropped and says so. */
+static int verb_kq_reports(const cmd_server_ctx_t *ctx)
+{
+    int hosting = 0;
+    int applied = 0;
+
+    if (!session_active(ctx, &hosting))
+        return 1;
+    for (unsigned i = 0; i < KQ_SENT_MAX; i++) {
+        kq_sent_t *e = &s_sent[i];
+        uint8_t report[FL_KQ_REPORT_FRAME_MAX];
+        size_t n = 0;
+        fl_net_kq_keys_t reporter;
+        fl_kq_cp_result_t cp;
+
+        if (!e->used || fl_net_kq_report_take(e->id, report, sizeof report, &n) != FL_RESULT_OK)
+            continue;
+        if (fl_net_kq_lookup(ctx->server, ctx->client, hosting, e->recipient, KQ_WAIT_KEYS_MS, &reporter) !=
+                FL_RESULT_OK ||
+            strcmp(reporter.key_id, e->recipient) != 0) {
+            fl_color_warn("keyquorum: a refusal report for %s was dropped: cannot get %s's key from the host",
+                          e->path, e->recipient);
+            continue;
+        }
+        cp = fl_kq_cp_inject_report_bytes(reporter.signing_public, report, n, e->ref, e->path);
+        if (cp == FL_KQ_CP_OK) {
+            printf("%s refused %s; the report is recorded in its history\n", e->recipient, e->path);
+            applied++;
+        } else {
+            fl_color_warn("keyquorum: a refusal report for %s was dropped: %s", e->path, fl_kq_cp_reason(cp));
+        }
+    }
+    if (!applied)
+        printf("no refusal reports to record\n");
+    return 0;
+}
+
 /* Every KeyQuorum checkpoint in this file reads and writes through the shell's file manager
  * service, so its policy, events and path log see them. Without the service the checkpoints
  * use the placement layer directly. */
@@ -977,14 +1068,14 @@ int cmd_server_file_run(const cmd_server_ctx_t *ctx, int argc, char **argv)
     char **sub_argv;
 
     if (argc < 3) {
-        fl_color_error("usage: server file <send [-t]|inbox|public|sent|accept|decline|revoke|fetch|cosign|open> ...");
+        fl_color_error("usage: server file <send [-t]|inbox|public|sent|accept|decline|revoke|fetch|cosign|open|reports> ...");
         return 1;
     }
     kq_use_storage();
     sub_argc = argc - 2;
     sub_argv = argv + 2;
     if (sub_argc <= 0) {
-        fl_color_error("usage: server file <send [-t] [--permitted]|inbox|public|sent|history|log|permit|accept|decline|revoke|fetch|cosign|open> ...");
+        fl_color_error("usage: server file <send [-t] [--permitted]|inbox|public|sent|history|log|permit|accept|decline|revoke|fetch|cosign|open|reports> ...");
         return 1;
     }
     if (!strcmp(argv[2], "history"))
@@ -1011,6 +1102,8 @@ int cmd_server_file_run(const cmd_server_ctx_t *ctx, int argc, char **argv)
         return verb_kq_cosign(ctx, sub_argc, sub_argv);
     if (!strcmp(argv[2], "open"))
         return verb_kq_open(ctx, sub_argc, sub_argv);
+    if (!strcmp(argv[2], "reports"))
+        return verb_kq_reports(ctx);
     for (int i = 0; i < sub_argc; i++)
         if (!strcmp(sub_argv[i], "-t"))
             return verb_kq_send(ctx, sub_argc - (strcmp(argv[2], "send") ? 0 : 1),

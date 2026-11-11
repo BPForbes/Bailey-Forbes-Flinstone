@@ -1027,45 +1027,58 @@ fl_kq_cp_result_t fl_kq_cp_report_write_in(uint16_t code, uint8_t class_code, ui
     return out;
 }
 
+fl_kq_cp_result_t fl_kq_cp_inject_report_bytes(const uint8_t reporter_public[32], const uint8_t *kqer_bytes,
+                                               size_t kqer_len, const uint8_t ref[32], const char *path) {
+    const fl_kq_driver_t *drv = fl_kq_driver_get();
+    char container_path[4096];
+    fl_kq_buf_t c = {0}, next = {0};
+    fl_kq_buf_t kqer;
+    fl_kq_cp_result_t out;
+
+    if (!reporter_public || !kqer_bytes || kqer_len == 0 || kqer_len > FL_KQ_REPORT_MAX || !ref || !path)
+        return FL_KQ_CP_INVALID;
+    if (!drv)
+        return FL_KQ_CP_NO_DRIVER;
+    kqer.data = (uint8_t *)kqer_bytes; /* read only here; the driver does not keep it */
+    kqer.len = kqer_len;
+    out = load_container(path, container_path, sizeof container_path, &c);
+    if (out != FL_KQ_CP_OK)
+        goto done;
+    /* KeyQuorum checks the signature under the reporter's key and that the report names the artifact
+     * this caller holds; anything else writes nothing. */
+    if (drv->error_inject(&c, &kqer, reporter_public, ref, &next) != KQ_FILE_OK) {
+        out = FL_KQ_CP_BAD_SIGNATURE;
+        goto done;
+    }
+    if (fl_kq_cp_storage()->write_atomic(fl_kq_cp_storage()->ctx, container_path, next.data, next.len) != 0)
+        out = FL_KQ_CP_IO;
+done:
+    fl_kq_buf_free(&next);
+    fl_kq_buf_free(&c);
+    return out;
+}
+
 fl_kq_cp_result_t fl_kq_cp_inject_report_with(const fl_kq_keydir_t *keys, const char *reporter_key,
                                               const char *report_path, const uint8_t ref[32],
                                               const char *path) {
-    const fl_kq_driver_t *drv = fl_kq_driver_get();
     const unsigned char *reporter_public;
-    char container_path[4096];
-    fl_kq_buf_t c = {0}, kqer = {0}, next = {0};
+    fl_kq_buf_t kqer = {0};
     fl_kq_cp_result_t out;
     int rc;
 
     if (!keys || !reporter_key || !report_path || !ref || !path)
         return FL_KQ_CP_INVALID;
-    if (!drv)
+    if (!fl_kq_driver_get())
         return FL_KQ_CP_NO_DRIVER;
     reporter_public = keys->signing_public(keys, reporter_key);
     if (!reporter_public)
         return FL_KQ_CP_NO_KEY;
-    rc = fl_kq_cp_storage()->read_file(fl_kq_cp_storage()->ctx, report_path, FL_KQ_REPORT_MAX,
-                                       &kqer.data, &kqer.len);
+    rc = fl_kq_cp_storage()->read_file(fl_kq_cp_storage()->ctx, report_path, FL_KQ_REPORT_MAX, &kqer.data,
+                                       &kqer.len);
     if (rc != 0)
         return rc == -2 ? FL_KQ_CP_TOO_LARGE : FL_KQ_CP_IO;
-    out = load_container(path, container_path, sizeof container_path, &c);
-    if (out != FL_KQ_CP_OK)
-        goto done;
-    /* KeyQuorum checks the signature under the reporter's key from this registry and that the
-     * report names the artifact this caller holds; anything else writes nothing. */
-    rc = drv->error_inject(&c, &kqer, reporter_public, ref, &next);
-    if (rc != KQ_FILE_OK) {
-        out = FL_KQ_CP_BAD_SIGNATURE;
-        goto done;
-    }
-    if (fl_kq_cp_storage()->write_atomic(fl_kq_cp_storage()->ctx, container_path, next.data,
-                                         next.len) != 0)
-        out = FL_KQ_CP_IO;
-
-done:
-    fl_kq_buf_free(&next);
+    out = fl_kq_cp_inject_report_bytes(reporter_public, kqer.data, kqer.len, ref, path);
     fl_kq_buf_free(&kqer);
-    fl_kq_buf_free(&c);
     return out;
 }
 
