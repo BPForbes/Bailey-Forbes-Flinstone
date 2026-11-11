@@ -149,6 +149,37 @@ static int test_kqst_login_commits_only_after_token_open(void) {
     return 0;
 }
 
+/* FL-15: the box secret of a session. A password login publishes none; one a KQST login opened is kept next to the
+ * signing secret, only for that session's own account and generation, and goes with it at logout. */
+static int test_box_key_residency(void) {
+    const fl_user_record_t *flin = account("Flinstone"), *root = account("Root");
+    fl_user_db_t *db = fl_session_user_db_mut();
+    uint8_t box[32], got[32];
+    uint64_t gen;
+
+    ASSERT(flin && root && db);
+    ASSERT(fl_user_db_open_box(db, "Flinstone", "flinstone", box) == FL_RESULT_OK);
+    ASSERT(fl_kq_obtain_box_key(flin->key_id, got) == FL_RESULT_ACCES); /* nobody online */
+    ASSERT(fl_session_login("Flinstone", "flinstone") == FL_RESULT_OK);
+    ASSERT(fl_kq_obtain_box_key(flin->key_id, got) == FL_RESULT_ACCES); /* a password login opened no box key */
+    gen = fl_session_login_generation();
+    ASSERT(fl_kq_service_online_box(flin, box, gen + 1) != FL_RESULT_OK); /* another login's generation */
+    ASSERT(fl_kq_obtain_box_key(flin->key_id, got) == FL_RESULT_ACCES);
+    ASSERT(fl_kq_service_online_box(root, box, gen) == FL_RESULT_ACCES);  /* Root is not online: no slot to keep it in */
+    ASSERT(fl_kq_service_online_box(flin, box, gen) == FL_RESULT_OK);
+    ASSERT(fl_kq_obtain_box_key(flin->key_id, got) == FL_RESULT_OK && memcmp(got, box, 32) == 0);
+    ASSERT(fl_kq_obtain_box_key(root->key_id, got) == FL_RESULT_ACCES);   /* another label has no such key */
+    ASSERT(fl_kq_obtain_box_key(NULL, got) == FL_RESULT_INVAL && fl_kq_obtain_box_key(flin->key_id, NULL) == FL_RESULT_INVAL);
+    ASSERT(fl_session_logout() == FL_RESULT_OK);
+    ASSERT(fl_kq_obtain_box_key(flin->key_id, got) == FL_RESULT_ACCES); /* wiped with the session */
+    ASSERT(fl_session_login("Flinstone", "flinstone") == FL_RESULT_OK);
+    ASSERT(fl_kq_obtain_box_key(flin->key_id, got) == FL_RESULT_ACCES); /* a new session starts without it */
+    ASSERT(fl_session_logout() == FL_RESULT_OK);
+    mem_domain_secure_zero(box, sizeof box);
+    mem_domain_secure_zero(got, sizeof got);
+    return 0;
+}
+
 /* An account marked password-plus-KQST cannot sign in by password alone: no login, nothing online. */
 static int test_a_kqst_account_cannot_log_in_by_password_alone(void) {
     fl_user_db_t *db = fl_session_user_db_mut();
@@ -754,6 +785,7 @@ int main(void) {
 #define RUN(t) do { if (t() != 0) { rc = 1; fprintf(stderr, "%s failed\n", #t); } else printf("%s... OK\n", #t); } while (0)
     RUN(test_login_brings_the_key_online_and_logout_wipes_it);
     if (!rc) RUN(test_kqst_login_commits_only_after_token_open);
+    if (!rc) RUN(test_box_key_residency);
     if (!rc) RUN(test_a_kqst_account_cannot_log_in_by_password_alone);
     if (!rc) RUN(test_kqst_open_refusal_matrix);
     if (!rc) RUN(test_a_logout_that_overlaps_the_key_derivation_wins);

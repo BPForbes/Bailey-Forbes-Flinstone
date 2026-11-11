@@ -18,12 +18,17 @@ static pthread_once_t s_once = PTHREAD_ONCE_INIT;
 static pthread_mutex_t s_session_mu = PTHREAD_MUTEX_INITIALIZER;
 static fl_session_online_fn s_online_hook;
 static fl_session_online_opened_fn s_opened_hook;
+static fl_session_online_box_fn s_box_hook;
 static fl_session_offline_fn s_offline_hook;
 static uint64_t s_login_gen = 1; /* every login and logout starts a new generation; 0 is never one */
 static void (*s_kqst_pre_open)(void); /* tests only: runs after unlock, before token open */
 static void (*s_switch_pre_lock)(void); /* tests only: before the final lock, mutex not held */
 static void (*s_switch_pre_commit)(void); /* tests only: after recheck, both locks held */
 static fl_session_audit_fn s_audit_hook;
+
+void fl_session_set_login_box_hook(fl_session_online_box_fn box) {
+    s_box_hook = box;
+}
 
 void fl_session_set_login_hooks(fl_session_online_fn online, fl_session_offline_fn offline,
                                 fl_session_online_opened_fn opened) {
@@ -209,6 +214,7 @@ fl_result_t fl_session_login(const char *name, const char *password) {
         if (need_kqst) {
             const char *open_as = have_snapshot ? snapshot.name : name;
             uint8_t signing_secret[32];
+            uint8_t box_secret[32];
             int open_st;
             fl_result_t pub_rc = FL_RESULT_ACCES;
             uint64_t attempt_gen;
@@ -220,9 +226,10 @@ fl_result_t fl_session_login(const char *name, const char *password) {
             pthread_mutex_unlock(&s_session_mu);
             if (s_kqst_pre_open)
                 s_kqst_pre_open();
-            open_st = fl_kq_open_account_secrets(open_as, password, NULL, signing_secret);
+            open_st = fl_kq_open_account_keys(open_as, password, NULL, signing_secret, box_secret);
             if (open_st != FL_KQ_ACCOUNT_OK) {
                 mem_domain_secure_zero(signing_secret, sizeof signing_secret);
+                mem_domain_secure_zero(box_secret, sizeof box_secret);
                 fprintf(stderr, "login: %s requires its KQST slot token; open refused\n", open_as);
                 return FL_RESULT_ACCES;
             }
@@ -231,6 +238,7 @@ fl_result_t fl_session_login(const char *name, const char *password) {
                 /* A logout, or another login, ran while the token opened: it has the session now. */
                 pthread_mutex_unlock(&s_session_mu);
                 mem_domain_secure_zero(signing_secret, sizeof signing_secret);
+                mem_domain_secure_zero(box_secret, sizeof box_secret);
                 fprintf(stderr, "login: %s was superseded while its KQST slot token opened\n", open_as);
                 return FL_RESULT_ACCES;
             }
@@ -238,6 +246,7 @@ fl_result_t fl_session_login(const char *name, const char *password) {
             if (!fl_user_db_verify_password(&s_db, open_as, password) || !kqst_mode(open_as)) {
                 pthread_mutex_unlock(&s_session_mu);
                 mem_domain_secure_zero(signing_secret, sizeof signing_secret);
+                mem_domain_secure_zero(box_secret, sizeof box_secret);
                 fprintf(stderr, "login: %s requires its KQST slot token; open refused\n", open_as);
                 return FL_RESULT_ACCES;
             }
@@ -257,7 +266,10 @@ fl_result_t fl_session_login(const char *name, const char *password) {
             pthread_mutex_unlock(&s_session_mu);
             if (s_opened_hook && have_snapshot)
                 pub_rc = s_opened_hook(&snapshot, signing_secret, gen);
+            if (pub_rc == FL_RESULT_OK && s_box_hook && have_snapshot)
+                pub_rc = s_box_hook(&snapshot, box_secret, gen);
             mem_domain_secure_zero(signing_secret, sizeof signing_secret);
+                mem_domain_secure_zero(box_secret, sizeof box_secret);
             if (pub_rc != FL_RESULT_OK) {
                 pthread_mutex_lock(&s_session_mu);
                 if (s_login_gen == gen) {

@@ -23,6 +23,8 @@
 typedef struct {
     char key_id[FL_HERITAGE_KEY_ID_MAX];
     uint8_t secret[FL_USER_SIGNING_SECRET_LEN];
+    uint8_t box[32]; /* FL-15: the box secret of a KQST login; has_box says whether it was published */
+    int has_box;
     int used;
 } kq_slot_t;
 
@@ -55,6 +57,8 @@ static int slot_find_locked(const char *key_id) {
 
 static void slot_wipe_locked(kq_slot_t *s) {
     mem_domain_secure_zero(s->secret, sizeof s->secret);
+    mem_domain_secure_zero(s->box, sizeof s->box);
+    s->has_box = 0;
     memset(s->key_id, 0, sizeof s->key_id);
     s->used = 0;
 }
@@ -145,6 +149,61 @@ fl_result_t fl_kq_service_online_opened(const fl_user_record_t *account, const u
                             : rc == FL_RESULT_BUSY ? "kq-service-stale-login"
                                                    : "kq-service-refused",
                             account->key_id, NULL);
+    return rc;
+}
+
+typedef struct {
+    const char *key_id;
+    const uint8_t *box;
+} slot_box_ctx_t;
+
+static fl_result_t slot_box_cb(void *p) {
+    const slot_box_ctx_t *c = (const slot_box_ctx_t *)p;
+    fl_result_t rc = FL_RESULT_ACCES;
+    int i;
+
+    pthread_mutex_lock(&s_mu);
+    i = slot_find_locked(c->key_id);
+    if (i >= 0) { /* only an account that is online has a slot to keep it in */
+        memcpy(s_slots[i].box, c->box, sizeof s_slots[i].box);
+        s_slots[i].has_box = 1;
+        rc = FL_RESULT_OK;
+    }
+    pthread_mutex_unlock(&s_mu);
+    return rc;
+}
+
+fl_result_t fl_kq_service_online_box(const fl_user_record_t *account, const uint8_t box_secret[32],
+                                     uint64_t login_generation) {
+    slot_box_ctx_t put;
+    fl_result_t rc;
+
+    if (!account || !box_secret)
+        return FL_RESULT_INVAL;
+    put.key_id = account->key_id;
+    put.box = box_secret;
+    rc = fl_session_publish_if_current(login_generation, slot_box_cb, &put);
+    fl_audit_identity_event(account->key_id,
+                            rc == FL_RESULT_OK ? "kq-service-box-online"
+                            : rc == FL_RESULT_BUSY ? "kq-service-stale-login"
+                                                   : "kq-service-refused",
+                            account->key_id, NULL);
+    return rc;
+}
+
+fl_result_t fl_kq_obtain_box_key(const char *author_key_id, uint8_t out[32]) {
+    fl_result_t rc = FL_RESULT_ACCES;
+    int i;
+
+    if (!author_key_id || !out)
+        return FL_RESULT_INVAL;
+    pthread_mutex_lock(&s_mu);
+    i = slot_find_locked(author_key_id);
+    if (i >= 0 && s_slots[i].has_box) {
+        memcpy(out, s_slots[i].box, sizeof s_slots[i].box);
+        rc = FL_RESULT_OK;
+    }
+    pthread_mutex_unlock(&s_mu);
     return rc;
 }
 
@@ -297,6 +356,7 @@ fl_result_t fl_kq_service_start(void) {
     s_started = 1;
     fl_session_set_login_hooks(fl_kq_service_online_for_session, fl_kq_service_offline,
                                fl_kq_service_online_opened);
+    fl_session_set_login_box_hook(fl_kq_service_online_box);
     fl_authz_subsystem_set_deny_audit(audit_control_denied);
     (void)fl_bg_watchdog_register(fl_kq_service_alive, fl_kq_service_report_stalled);
     return FL_RESULT_OK;
@@ -319,6 +379,7 @@ void fl_kq_service_shutdown(void) {
     s_started = 0;
     atomic_store(&s_heartbeat_ns, 0);
     fl_session_set_login_hooks(NULL, NULL, NULL);
+    fl_session_set_login_box_hook(NULL);
     pthread_mutex_lock(&s_mu);
     for (size_t i = 0; i < FL_USER_DB_MAX_USERS; i++)
         if (s_slots[i].used)

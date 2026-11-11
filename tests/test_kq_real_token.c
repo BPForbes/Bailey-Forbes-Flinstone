@@ -170,6 +170,22 @@ static void logout_during_open(void) {
     (void)fl_session_logout();
 }
 
+/* The key service's place for the box secret of a KQST login: here it checks the secret is the paired one (its
+ * public key is the token's encryption key in the account store) and records that it arrived. */
+static int s_box_seen;
+static fl_result_t box_hook(const fl_user_record_t *account, const uint8_t box_secret[32], uint64_t gen) {
+    const fl_kq_driver_t *kq = fl_kq_driver_get_or_register();
+    unsigned char dev[16], sig_pub[32], enc_pub[32], pub[32];
+
+    (void)gen;
+    if (!kq || !kq->account_box_public ||
+        fl_user_db_kqst_pairing(fl_session_user_db(), account->key_id, dev, sig_pub, enc_pub) != FL_RESULT_OK ||
+        kq->account_box_public(box_secret, pub) != FL_KQ_ACCOUNT_OK || memcmp(pub, enc_pub, 32) != 0)
+        return FL_RESULT_ACCES; /* not the paired box key: the login would be refused */
+    s_box_seen++;
+    return FL_RESULT_OK;
+}
+
 /* A KQST login commits only while its generation is current (#407: needs a token that opens). */
 static int test_login_generation(void) {
     uint64_t before, after;
@@ -182,8 +198,10 @@ static int test_login_generation(void) {
     ASSERT(strcmp(fl_session_current_user(), "Bob") != 0);
     before = fl_session_login_generation();
     s_opened_ok = 0;
+    s_box_seen = 0;
     ASSERT(fl_session_login("Bob", s_bob_pw) == FL_RESULT_OK);
     ASSERT(s_opened_ok == 1); /* the opened key was the paired one and it signed */
+    ASSERT(s_box_seen == 1);  /* and the box secret came with it, once, to be kept for the session */
     ASSERT(strcmp(fl_session_current_user(), "Bob") == 0);
     after = fl_session_login_generation();
     ASSERT(after != before && after != 0);
@@ -693,6 +711,7 @@ int main(void) {
     fl_session_init();
     fl_session_set_audit_hook(audit_capture);
     fl_session_set_login_hooks(NULL, NULL, opened_hook);
+    fl_session_set_login_box_hook(box_hook);
 
 #define RUN(t) do { if (t() != 0) { rc = 1; fprintf(stderr, "%s failed\n", #t); } else printf("%s... OK\n", #t); } while (0)
     RUN(set_up_accounts);

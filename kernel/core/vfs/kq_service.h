@@ -55,6 +55,17 @@ fl_result_t fl_kq_service_online_from_login(const char *account, const char *pas
  */
 fl_result_t fl_kq_service_online_opened(const fl_user_record_t *account, const uint8_t secret[32],
                                         uint64_t login_generation);
+/**
+ * Keep the account's box (X25519) secret next to its signing secret for the life of the session (FL-15): what a
+ * KQST login opened and used to wipe. Same generation rules as online_opened, and the account must already be
+ * online (ACCES otherwise). Wiped with the signing secret at logout. Caller wipes box_secret after return.
+ */
+fl_result_t fl_kq_service_online_box(const fl_user_record_t *account, const uint8_t box_secret[32],
+                                     uint64_t login_generation);
+/** A copy of the box secret of the account signed in under key id author_key_id, for the caller to wipe. ACCES
+ *  when that account is not signed in or came in by a login that opened no box key. Only that account's own
+ *  label has a key: the box key belongs to the label it was minted for. */
+fl_result_t fl_kq_obtain_box_key(const char *author_key_id, uint8_t out[32]);
 void fl_kq_service_offline(const char *account);
 size_t fl_kq_service_online_count(void);
 

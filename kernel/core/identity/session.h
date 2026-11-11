@@ -111,6 +111,15 @@ typedef fl_result_t (*fl_session_online_fn)(const fl_user_record_t *account, con
 typedef fl_result_t (*fl_session_online_opened_fn)(const fl_user_record_t *account,
                                                    const uint8_t secret[32], uint64_t login_generation);
 typedef void (*fl_session_offline_fn)(const char *account);
+/**
+ * The box (X25519) secret a KQST login opened next to the signing secret (FL-15). Runs right after online_opened
+ * succeeded, for the same login generation; the service keeps it for the life of the session and wipes it at
+ * logout. A refusal refuses the login like online_opened does. Optional: NULL keeps the old behaviour (the
+ * box secret is wiped as soon as the token has opened).
+ */
+typedef fl_result_t (*fl_session_online_box_fn)(const fl_user_record_t *account, const uint8_t box_secret[32],
+                                                uint64_t login_generation);
+void fl_session_set_login_box_hook(fl_session_online_box_fn box);
 void fl_session_set_login_hooks(fl_session_online_fn online, fl_session_offline_fn offline,
                                 fl_session_online_opened_fn opened);
 /** Tests only: runs after the session lock is released and before the KQST open. */
