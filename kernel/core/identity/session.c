@@ -688,8 +688,9 @@ fl_result_t fl_session_sudo_authenticate(const char *password) {
         return FL_RESULT_ACCES;
     }
     /* The password check ran without the session lock. A login or logout in that
-     * window changes the generation. The elevation token is taken here, for the
-     * account that was checked, or not at all. */
+     * window changes the generation. set_auth_mode and set_password do not, so
+     * the mode and the password that were accepted are checked again here.
+     * The elevation token is taken for the account that was checked, or not at all. */
     if (s_switch_pre_lock)
         s_switch_pre_lock();
     pthread_mutex_lock(&s_session_mu);
@@ -697,6 +698,19 @@ fl_result_t fl_session_sudo_authenticate(const char *password) {
         pthread_mutex_unlock(&s_session_mu);
         session_audit(cur_key, "sudo-refused", FL_HERITAGE_ROOT_KEY, "superseded");
         return FL_RESULT_BUSY;
+    }
+    root = fl_user_db_find_by_key(&s_db, FL_HERITAGE_ROOT_KEY);
+    cu = fl_user_db_find(&s_db, cur_name);
+    if (!s_db_ready || !s_db.loaded || !root || !cu ||
+        (root->auth_mode == FL_USER_AUTH_PASSWORD_KQST) != root_kqst) {
+        pthread_mutex_unlock(&s_session_mu);
+        session_audit(cur_key, "sudo-refused", FL_HERITAGE_ROOT_KEY, "mode");
+        return FL_RESULT_ACCES;
+    }
+    if (!session_verify_password_locked(root_kqst ? root_name : cur_name, password)) {
+        pthread_mutex_unlock(&s_session_mu);
+        session_audit(cur_key, "sudo-refused", FL_HERITAGE_ROOT_KEY, "password");
+        return FL_RESULT_ACCES;
     }
     rc = grant_elevation_locked("sudo authentication", &tok);
     pthread_mutex_unlock(&s_session_mu);
