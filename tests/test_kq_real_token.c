@@ -715,6 +715,90 @@ out:
     return rc;
 }
 
+/* KQ-16 with the real material: a parent's signing seed is dealt to the box keys of two real slot tokens (Bob and
+ * Ann, on two real devices), assembled back through the driver from the secrets those tokens open, and the
+ * assembled key signs a revision the parent's own key would: the history verifies and the revision is trusted under the parent's
+ * registered public key, and not under another's. One device twice is no
+ * quorum, and a record checked against another parent's public key is refused. */
+static int test_parent_key_assembly(void) {
+    const fl_kq_driver_t *kq = fl_kq_driver_get_or_register();
+    const char *labels[2] = {"Root.Flinstone.Bob", "Root.Alternative.Ann"};
+    uint8_t seed[32], parent_pub[32], other_seed[32], other_pub[32], assembled[32];
+    uint8_t bob_sign[32], ann_sign[32], bob_box[32], ann_box[32];
+    uint8_t box_pub[2][32], box_sec[2][32], dev[2][16], same_dev[2][16];
+    uint8_t record[4096], id[16] = {0x71}, rev[32], rev2[32];
+    size_t rlen = 0;
+    unsigned gen = 0;
+    fl_kq_buf_t base = {0}, own = {0}, viaasm = {0};
+    int ok = 0;
+
+    ASSERT(kq && kq->assembly_split && kq->assembly_assemble && kq->assembly_generation);
+    ASSERT(kq->account_keygen(seed, parent_pub) == FL_KQ_ACCOUNT_OK);
+    ASSERT(kq->account_keygen(other_seed, other_pub) == FL_KQ_ACCOUNT_OK);
+    ASSERT(fl_kq_open_account_keys("Bob", s_bob_pw, NULL, bob_sign, bob_box) == FL_KQ_ACCOUNT_OK);
+    ASSERT(fl_kq_open_account_keys("Ann", s_ann_pw, NULL, ann_sign, ann_box) == FL_KQ_ACCOUNT_OK);
+    memcpy(box_sec[0], bob_box, 32);
+    memcpy(box_sec[1], ann_box, 32);
+    ASSERT(fl_hex_decode(env("FL_RT_BOB_ENC"), box_pub[0], 32) == 0 && fl_hex_decode(env("FL_RT_ANN_ENC"), box_pub[1], 32) == 0);
+    ASSERT(fl_hex_decode(env("FL_RT_BOB_DEVICE"), dev[0], 16) == 0 && fl_hex_decode(env("FL_RT_ANN_DEVICE"), dev[1], 16) == 0);
+    memcpy(same_dev[0], dev[0], 16);
+    memcpy(same_dev[1], dev[0], 16);
+
+    ASSERT(kq->assembly_threshold(2) == 2);
+    ASSERT(kq->assembly_split(seed, 7, labels, (const uint8_t(*)[32])box_pub, 2, record, sizeof record, &rlen) ==
+           KQ_ASSEMBLY_OK && rlen > 0);
+    ASSERT(kq->assembly_generation(record, rlen, &gen) == KQ_ASSEMBLY_OK && gen == 7);
+    /* Both real tokens' secrets, two devices: the seed comes back. */
+    ASSERT(kq->assembly_assemble(record, rlen, parent_pub, labels, (const uint8_t(*)[32])box_sec,
+                                 (const uint8_t(*)[16])dev, 2, 2, assembled) == KQ_ASSEMBLY_OK);
+    ASSERT(memcmp(assembled, seed, 32) == 0);
+    /* One share is not enough; one device twice does not meet two devices; another parent's key is a mismatch. */
+    memset(assembled, 0xAA, sizeof assembled);
+    ASSERT(kq->assembly_assemble(record, rlen, parent_pub, labels, (const uint8_t(*)[32])box_sec,
+                                 (const uint8_t(*)[16])dev, 1, 2, assembled) == KQ_ASSEMBLY_QUORUM);
+    ASSERT(kq->assembly_assemble(record, rlen, parent_pub, labels, (const uint8_t(*)[32])box_sec,
+                                 (const uint8_t(*)[16])same_dev, 2, 2, assembled) == KQ_ASSEMBLY_QUORUM);
+    ASSERT(kq->assembly_assemble(record, rlen, other_pub, labels, (const uint8_t(*)[32])box_sec,
+                                 (const uint8_t(*)[16])dev, 2, 2, assembled) == KQ_ASSEMBLY_MISMATCH);
+    ASSERT(assembled[0] == 0xAA); /* nothing written unless OK */
+    ASSERT(kq->assembly_assemble(record, rlen, parent_pub, labels, (const uint8_t(*)[32])box_sec,
+                                 (const uint8_t(*)[16])dev, 2, 2, assembled) == KQ_ASSEMBLY_OK);
+
+    /* The assembled key signs the same revision the parent's own key does, and the history verifies. */
+    ASSERT(kq->file_new(id, "asm.txt", "Root", &base) == KQ_FILE_OK);
+    ASSERT(kq->check_in(&base, "Root", "2026-11-10T09:00:00.000Z", (const uint8_t *)"v1\n", 3, seed, &own, rev) == KQ_FILE_OK);
+    ASSERT(kq->check_in(&base, "Root", "2026-11-10T09:00:00.000Z", (const uint8_t *)"v1\n", 3, assembled, &viaasm, rev2) ==
+           KQ_FILE_OK);
+    {
+        /* Trusted under the parent's registered public key alone: the signature is the parent's, whichever way the
+         * key was obtained. (The two containers need not be byte-identical: a container carries its own nonces.) */
+        kq_file_key_t pk = {.label = "Root"};
+        kq_file_trust_t trust = {.keys = &pk, .nkeys = 1};
+        uint8_t got_own[32], got_asm[32];
+
+        memcpy(pk.signing_public, parent_pub, 32);
+        ok = kq->verify(&viaasm, NULL) == KQ_FILE_OK && kq->select_read(&own, &trust, (const uint8_t(*)[32])rev, 1, got_own) == KQ_FILE_OK &&
+             kq->select_read(&viaasm, &trust, (const uint8_t(*)[32])rev2, 1, got_asm) == KQ_FILE_OK && memcmp(got_asm, rev2, 32) == 0 &&
+             memcmp(got_own, rev, 32) == 0;
+        /* and not under another parent's key */
+        memcpy(pk.signing_public, other_pub, 32);
+        ok = ok && kq->select_read(&viaasm, &trust, (const uint8_t(*)[32])rev2, 1, got_asm) != KQ_FILE_OK;
+    }
+    fl_kq_buf_free(&base);
+    fl_kq_buf_free(&own);
+    fl_kq_buf_free(&viaasm);
+    kq->wipe(seed, 32);
+    kq->wipe(other_seed, 32);
+    kq->wipe(assembled, 32);
+    kq->wipe(bob_sign, 32);
+    kq->wipe(ann_sign, 32);
+    kq->wipe(bob_box, 32);
+    kq->wipe(ann_box, 32);
+    kq->wipe(box_sec, sizeof box_sec);
+    ASSERT(ok);
+    return 0;
+}
+
 int main(void) {
     char users[512];
     int rc = 0;
@@ -744,6 +828,7 @@ int main(void) {
     RUN(test_bridge_import);
     RUN(test_bridge_su);
     RUN(test_bridge_fact_races);
+    RUN(test_parent_key_assembly);
     mem_domain_secure_zero(s_bob_pw, sizeof s_bob_pw);
     mem_domain_secure_zero(s_ann_pw, sizeof s_ann_pw);
     if (rc == 0)
