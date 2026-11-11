@@ -1054,6 +1054,17 @@ test_kq_checkpoint: userland/shell/common.o $(UTIL_SHELL_LINK_OBJS) $(FS_JAIL_CO
 	  $(FS_JAIL_TEST_LIBS) -Wl,-z,noexecstack
 	./tests/test_kq_checkpoint
 
+.PHONY: test_kq_mem_storage
+test_kq_mem_storage: userland/shell/common.o $(UTIL_SHELL_LINK_OBJS) $(FS_JAIL_CORE_OBJS) $(FS_JAIL_SUPPORT_OBJS) kernel/core/mm/mem_domain.o $(MEM_ASM_OBJ) $(HISTORY_ASM_OBJ) $(UTIL_HISTORY_HOST_OBJS) kernel/core/vfs/kq_checkpoint.o kernel/core/vfs/kq_mem_storage.o kernel/core/vfs/kq_checkpoint_users.o kernel/core/vfs/kq_delivery.o kernel/core/vfs/kq_storage_facade.o userland/shell/authz_subsystem.o $(AUTHZ_AUDIT_OBJS) kernel/core/vfs/fs_provider.o kernel/core/vfs/fs_command.o kernel/core/vfs/fs_events.o kernel/core/vfs/fs_policy.o kernel/core/vfs/fs_chain.o kernel/core/vfs/fs_facade.o kernel/core/vfs/path_log.o dir_asm.o
+	$(CC) $(CFLAGS) $(TEST_SANITIZE) -c -o tests/test_kq_mem_storage.o tests/test_kq_mem_storage.c
+	$(CXX) $(CXXFLAGS) $(TEST_SANITIZE) -o tests/test_kq_mem_storage tests/test_kq_mem_storage.o \
+	  kernel/core/vfs/kq_checkpoint.o kernel/core/vfs/kq_mem_storage.o kernel/core/vfs/kq_checkpoint_users.o kernel/core/vfs/kq_delivery.o \
+	  kernel/core/vfs/kq_storage_facade.o userland/shell/authz_subsystem.o $(AUTHZ_AUDIT_OBJS) kernel/core/vfs/fs_provider.o kernel/core/vfs/fs_command.o kernel/core/vfs/fs_events.o kernel/core/vfs/fs_policy.o kernel/core/vfs/fs_chain.o kernel/core/vfs/fs_facade.o kernel/core/vfs/path_log.o dir_asm.o \
+	  userland/shell/common.o $(UTIL_SHELL_LINK_OBJS) $(FS_JAIL_CORE_OBJS) $(FS_JAIL_SUPPORT_OBJS) \
+	  kernel/core/mm/mem_domain.o $(MEM_ASM_OBJ) $(HISTORY_ASM_OBJ) $(UTIL_HISTORY_HOST_OBJS) \
+	  $(FS_JAIL_TEST_LIBS) -Wl,-z,noexecstack
+	./tests/test_kq_mem_storage
+
 .PHONY: test_kq_delivery
 test_kq_delivery: kernel/core/vfs/kq_delivery.o kernel/core/vfs/server_shared_fs.o kernel/core/vfs/server_shared_db.o kernel/core/vfs/server_catalog_file.o kernel/core/vfs/server_shared_digest.o $(SHARED_FS_MM_OBJS) userland/shell/common.o
 	$(CC) $(CFLAGS) $(TEST_SANITIZE) -o tests/test_kq_delivery tests/test_kq_delivery.c \
