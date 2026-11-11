@@ -1326,6 +1326,66 @@ static int test_private_bridge_store(void) {
     ASSERT(!strcmp(live[0].uid, b.uid));
     ASSERT(fl_user_db_bridges_live(&db, live, 0, &n) == FL_RESULT_NOMEM && n == 0); /* never partial */
 
+    /* A generation that is not an integer in 1..UINT32_MAX is not a live bridge. */
+    {
+        static const char *bad_gen[] = {
+            "UPDATE account_bridges SET generation=1.5 WHERE uid='aaaa0000aaaa0000aaaa0000aaaa0000';",
+            "UPDATE account_bridges SET generation='gen' WHERE uid='aaaa0000aaaa0000aaaa0000aaaa0000';",
+            "UPDATE account_bridges SET generation=0 WHERE uid='aaaa0000aaaa0000aaaa0000aaaa0000';",
+            "UPDATE account_bridges SET generation=4294967296 WHERE uid='aaaa0000aaaa0000aaaa0000aaaa0000';",
+        };
+        size_t gi;
+
+        for (gi = 0; gi < sizeof bad_gen / sizeof bad_gen[0]; gi++) {
+            ASSERT(sqlite3_open(path, &sql) == SQLITE_OK);
+            ASSERT(sqlite3_exec(sql, bad_gen[gi], NULL, NULL, NULL) == SQLITE_OK);
+            sqlite3_close(sql);
+            ASSERT(fl_user_db_bridge_get(&db, b.uid, &got) == FL_RESULT_NOENT);
+            ASSERT(fl_user_db_bridges_live(&db, live, FL_USER_BRIDGES_MAX, &n) == FL_RESULT_ERR && n == 0);
+        }
+        /* Numeric text stays text only without integer affinity. column_int64 would turn '3' into 3. */
+        ASSERT(sqlite3_open(path, &sql) == SQLITE_OK);
+        ASSERT(sqlite3_exec(sql,
+                            "CREATE TABLE account_bridges_text (uid TEXT PRIMARY KEY NOT NULL,"
+                            " generation TEXT, salt BLOB NOT NULL, public_key BLOB NOT NULL,"
+                            " destroyed INTEGER NOT NULL DEFAULT 0);"
+                            "INSERT INTO account_bridges_text SELECT uid, '3', salt, public_key, destroyed"
+                            " FROM account_bridges;"
+                            "DROP TABLE account_bridges;"
+                            "ALTER TABLE account_bridges_text RENAME TO account_bridges;",
+                            NULL, NULL, NULL) == SQLITE_OK);
+        sqlite3_close(sql);
+        ASSERT(fl_user_db_bridge_get(&db, b.uid, &got) == FL_RESULT_NOENT);
+        ASSERT(fl_user_db_bridges_live(&db, live, FL_USER_BRIDGES_MAX, &n) == FL_RESULT_ERR && n == 0);
+        /* The column is NOT NULL, so a NULL generation has to be written behind that constraint. */
+        ASSERT(sqlite3_open(path, &sql) == SQLITE_OK);
+        ASSERT(sqlite3_exec(sql,
+                            "CREATE TABLE account_bridges_null (uid TEXT PRIMARY KEY NOT NULL,"
+                            " generation INTEGER, salt BLOB NOT NULL, public_key BLOB NOT NULL,"
+                            " destroyed INTEGER NOT NULL DEFAULT 0);"
+                            "INSERT INTO account_bridges_null SELECT uid, NULL, salt, public_key, destroyed"
+                            " FROM account_bridges;"
+                            "DROP TABLE account_bridges;"
+                            "ALTER TABLE account_bridges_null RENAME TO account_bridges;",
+                            NULL, NULL, NULL) == SQLITE_OK);
+        sqlite3_close(sql);
+        ASSERT(fl_user_db_bridge_get(&db, b.uid, &got) == FL_RESULT_NOENT);
+        ASSERT(fl_user_db_bridges_live(&db, live, FL_USER_BRIDGES_MAX, &n) == FL_RESULT_ERR && n == 0);
+        ASSERT(sqlite3_open(path, &sql) == SQLITE_OK);
+        ASSERT(sqlite3_exec(sql,
+                            "CREATE TABLE account_bridges_ok (uid TEXT PRIMARY KEY NOT NULL,"
+                            " generation INTEGER NOT NULL, salt BLOB NOT NULL, public_key BLOB NOT NULL,"
+                            " destroyed INTEGER NOT NULL DEFAULT 0);"
+                            "INSERT INTO account_bridges_ok SELECT uid, 3, salt, public_key, destroyed"
+                            " FROM account_bridges;"
+                            "DROP TABLE account_bridges;"
+                            "ALTER TABLE account_bridges_ok RENAME TO account_bridges;",
+                            NULL, NULL, NULL) == SQLITE_OK);
+        sqlite3_close(sql);
+        ASSERT(fl_user_db_bridge_get(&db, b.uid, &got) == FL_RESULT_OK && got.generation == 3);
+        ASSERT(fl_user_db_bridges_live(&db, live, FL_USER_BRIDGES_MAX, &n) == FL_RESULT_OK && n == 1);
+    }
+
     /* The sealed key and its salt: both or nothing. */
     memset(sealed, 0x77, sizeof sealed);
     memset(salt, 0x88, sizeof salt);

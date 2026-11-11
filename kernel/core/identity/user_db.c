@@ -1222,7 +1222,8 @@ static fl_result_t bridge_read(sqlite3 *sql, const char *uid, fl_user_bridge_t *
     step = sqlite3_step(st);
     if (step != SQLITE_ROW && step != SQLITE_DONE)
         rc = FL_RESULT_ERR;
-    if (step == SQLITE_ROW) {
+    if (step == SQLITE_ROW && sqlite3_column_type(st, 0) == SQLITE_INTEGER) {
+        /* Type before conversion: sqlite3_column_int64 would turn 1.5 and '3' into integers. */
         gen = sqlite3_column_int64(st, 0);
         if (gen >= 1 && gen <= (sqlite3_int64)UINT32_MAX && blob_is(st, 1, FL_USER_BRIDGE_SALT_LEN) &&
             blob_is(st, 2, 32)) {
