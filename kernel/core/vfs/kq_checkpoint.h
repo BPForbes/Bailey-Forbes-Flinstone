@@ -261,6 +261,16 @@ fl_kq_cp_result_t fl_kq_cp_report_write_in(uint16_t code, uint8_t class_code, ui
                                            const fl_kq_dir_t *dir);
 
 /**
+ * Reads back the report fl_kq_cp_report_write_in left for ref, through the same held directory (never by path, so
+ * no link is followed), and authenticates it before it is returned: KeyQuorum must accept the bytes as a report
+ * about ref signed by reporter_public (the injection check, on a scratch history). OK with the bytes in out (the
+ * caller frees them with fl_kq_buf_free); IO when there is no such report; BAD_SIGNATURE for bytes that are not
+ * that report (out is empty). The report on disk is left as it is.
+ */
+fl_kq_cp_result_t fl_kq_cp_report_read_in(const fl_kq_dir_t *dir, const uint8_t ref[32],
+                                          const uint8_t reporter_public[32], fl_kq_buf_t *out);
+
+/**
  * The same injection for a report already in memory (one that arrived over the wire, fl_net_kq_report_take):
  * verifies kqer under reporter_public and that it names ref (the SHA-256 of the artifact, fl_kq_cp_offer_ref),
  * then appends one ErrorReported event to the container beside path. A report is a claim by its signer: it
