@@ -93,6 +93,26 @@ static int test_mem_ct_equal_vs_memcmp(void) {
     return 0;
 }
 
+/* Equality the key and storage paths rely on: every start alignment, every length across the
+ * qword/byte boundary, a single differing bit anywhere (first, middle, last byte) is unequal. */
+static int test_mem_ct_equal_alignments(void) {
+    unsigned char a[160], b[160];
+    for (int i = 0; i < 160; i++) a[i] = b[i] = (unsigned char)(i * 7 + 3);
+    for (int off = 0; off < 8; off++) {
+        for (int n = 0; n <= 96; n++) {
+            ASSERT(asm_mem_ct_equal(a + off, b + off, (size_t)n) == 1);
+            if (n == 0) continue;
+            int idx[3] = {0, n / 2, n - 1};
+            for (int k = 0; k < 3; k++) {
+                b[off + idx[k]] ^= 0x80;
+                ASSERT(asm_mem_ct_equal(a + off, b + off, (size_t)n) == 0);
+                b[off + idx[k]] ^= 0x80;
+            }
+        }
+    }
+    return 0;
+}
+
 int main(void) {
     printf("test_mem_copy_vs_memcpy... ");
     if (test_mem_copy_vs_memcpy() != 0) return 1;
@@ -108,6 +128,9 @@ int main(void) {
     printf("OK\n");
     printf("test_mem_ct_equal_vs_memcmp... ");
     if (test_mem_ct_equal_vs_memcmp() != 0) return 1;
+    printf("OK\n");
+    printf("test_mem_ct_equal_alignments... ");
+    if (test_mem_ct_equal_alignments() != 0) return 1;
     printf("OK\n");
     printf("All mem_asm tests passed.\n");
     return 0;

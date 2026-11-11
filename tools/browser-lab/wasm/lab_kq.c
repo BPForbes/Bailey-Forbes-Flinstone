@@ -154,6 +154,10 @@ typedef struct {
     uint8_t box_pub[32];
     uint8_t sign_sec[32];
     uint8_t box_sec[32];
+    uint8_t sign_sealed[FL_KQ_ACCOUNT_SEALED_LEN];
+    uint8_t box_sealed[FL_KQ_ACCOUNT_SEALED_LEN];
+    int     opened; /* signing and box secrets are unsealed in this slot */
+    int     sealed;
 } lab_key_t;
 
 static lab_key_t s_keys[LAB_KEYS_MAX];
@@ -218,6 +222,121 @@ static const unsigned char *dir_box(const fl_kq_keydir_t *dir, const char *label
     (void)dir;
     k = label ? key_find(label) : NULL;
     return k ? k->box_pub : NULL;
+}
+
+/* Seal one secret under password into out. The driver does the sealing. */
+static int seal_one(const fl_kq_driver_t *drv, const char *password, const uint8_t secret[32],
+                    uint8_t out[FL_KQ_ACCOUNT_SEALED_LEN]) {
+    size_t n = 0;
+
+    if (drv->account_seal(password, secret, out, FL_KQ_ACCOUNT_SEALED_LEN, &n) != FL_KQ_ACCOUNT_OK ||
+        n != FL_KQ_ACCOUNT_SEALED_LEN)
+        return -1;
+    return 0;
+}
+
+/* A new lab account: both keys are sealed under the password and also held open, because the
+ * password was just presented. The password itself is not stored. creator is unused: lab
+ * accounts are flat names, and what a creator means is this table's decision. */
+static int id_enroll(const char *creator, const char *name, const char *password) {
+    lab_key_t *k;
+    const fl_kq_driver_t *drv;
+    uint8_t sign_sec[32], box_sec[32];
+
+    (void)creator;
+    if (!name || !name[0] || !password || !password[0] || strlen(name) >= LAB_LABEL_MAX)
+        return -1;
+    if (key_find(name) || !(k = key_slot()))
+        return -1;
+    drv = fl_kq_driver_get_or_register();
+    if (!drv || !drv->account_keygen || !drv->account_box_keygen || !drv->account_seal || !drv->wipe)
+        return -1;
+    memset(k, 0, sizeof *k);
+    if (drv->account_keygen(sign_sec, k->sign_pub) != FL_KQ_ACCOUNT_OK ||
+        drv->account_box_keygen(box_sec, k->box_pub) != FL_KQ_ACCOUNT_OK ||
+        seal_one(drv, password, sign_sec, k->sign_sealed) != 0 ||
+        seal_one(drv, password, box_sec, k->box_sealed) != 0) {
+        drv->wipe(sign_sec, sizeof sign_sec);
+        drv->wipe(box_sec, sizeof box_sec);
+        mem_domain_secure_zero(k, sizeof *k);
+        return -1;
+    }
+    memcpy(k->sign_sec, sign_sec, 32);
+    memcpy(k->box_sec, box_sec, 32);
+    drv->wipe(sign_sec, sizeof sign_sec);
+    drv->wipe(box_sec, sizeof box_sec);
+    snprintf(k->label, sizeof k->label, "%s", name);
+    k->local = 1;
+    k->used = 1;
+    k->opened = 1;
+    k->sealed = 1;
+    return 0;
+}
+
+static int id_unlock(const char *name, const char *password) {
+    lab_key_t *k = name ? key_find(name) : NULL;
+    const fl_kq_driver_t *drv;
+    uint8_t sec[32];
+
+    if (!k || !k->local || !k->sealed || !password)
+        return 0;
+    drv = fl_kq_driver_get_or_register();
+    if (!drv || !drv->account_open || !drv->wipe)
+        return 0;
+    if (drv->account_open(password, k->sign_sealed, FL_KQ_ACCOUNT_SEALED_LEN, sec) != FL_KQ_ACCOUNT_OK) {
+        drv->wipe(sec, sizeof sec);
+        return 0;
+    }
+    memcpy(k->sign_sec, sec, 32);
+    drv->wipe(sec, sizeof sec);
+    if (drv->account_open(password, k->box_sealed, FL_KQ_ACCOUNT_SEALED_LEN, sec) != FL_KQ_ACCOUNT_OK) {
+        drv->wipe(k->sign_sec, sizeof k->sign_sec);
+        drv->wipe(sec, sizeof sec);
+        k->opened = 0;
+        return 0;
+    }
+    memcpy(k->box_sec, sec, 32);
+    drv->wipe(sec, sizeof sec);
+    k->opened = 1;
+    return 1;
+}
+
+static int id_change_password(const char *name, const char *password) {
+    lab_key_t *k = name ? key_find(name) : NULL;
+    const fl_kq_driver_t *drv;
+    uint8_t sign_sealed[FL_KQ_ACCOUNT_SEALED_LEN], box_sealed[FL_KQ_ACCOUNT_SEALED_LEN];
+
+    if (!k || !k->local || !k->opened || !password || !password[0])
+        return -1;
+    drv = fl_kq_driver_get_or_register();
+    if (!drv || !drv->account_seal)
+        return -1;
+    if (seal_one(drv, password, k->sign_sec, sign_sealed) != 0 ||
+        seal_one(drv, password, k->box_sec, box_sealed) != 0)
+        return -1;
+    memcpy(k->sign_sealed, sign_sealed, sizeof sign_sealed);
+    memcpy(k->box_sealed, box_sealed, sizeof box_sealed);
+    k->sealed = 1;
+    return 0;
+}
+
+static void id_forget(const char *name) {
+    lab_key_t *k = name ? key_find(name) : NULL;
+
+    if (k && k->local)
+        mem_domain_secure_zero(k, sizeof *k);
+}
+
+/* switch_allowed is left NULL: password-free switchuser stays until that restriction is confirmed. */
+static const fl_fs_identity_kq_ops_t s_id_ops = {
+    .enroll = id_enroll,
+    .unlock = id_unlock,
+    .change_password = id_change_password,
+    .forget = id_forget,
+};
+
+void fl_lab_kq_bind_identity(void) {
+    (void)fl_fs_identity_set_kq(&s_id_ops);
 }
 
 static const fl_kq_keydir_t s_dir = {dir_resolve, dir_signing, dir_box};

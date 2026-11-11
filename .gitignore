@@ -1,8 +1,9 @@
 # Visual Studio
 .vs/
 
-# Build artifacts (make intermediate object files)
+# Build artifacts (make intermediate object files and header depfiles)
 *.o
+*.d
 *.exe
 *.dll
 BPForbes_Flinstone_Shell
@@ -57,14 +58,17 @@ tests/test_kq_delivery
 tests/test_fs_helpers
 tests/test_fs_provider_bytes
 tests/test_hex
+tests/test_fs_identity
 tests/test_secret_compare
 tests/test_random
+tests/test_kq_mem_storage
 tests/test_kq_net
 tests/test_part_buf
 tests/test_net_codec
 tests/test_kq_wire
 tests/test_kq_history_bundle
 tests/test_kq_service
+tests/test_kq_real_token
 tests/test_workqueue_freestanding
 tests/test_wq_journal_sqlite
 tests/test_server_file_meta

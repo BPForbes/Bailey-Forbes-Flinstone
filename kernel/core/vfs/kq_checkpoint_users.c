@@ -4,6 +4,8 @@
  * builds kq_checkpoint.c without this file and passes its own directory.
  */
 #include "kq_checkpoint.h"
+#include "fl/hex.h"
+#include "server_shared_digest.h"
 #include "user_db.h"
 
 #include <stddef.h>
@@ -106,3 +108,16 @@ fl_kq_cp_result_t fl_kq_cp_reseal(const fl_user_db_t *users, const char *sender_
                                 recipient_key, recipient_box_public, path, rev, out);
 }
 
+
+fl_result_t fl_kq_cp_offer_ref(const kq_file_offer_t *o, uint8_t ref[32]) {
+    uint8_t wire[FL_KQ_OFFER_WIRE_LEN];
+    char hex[65];
+
+    if (!o || !ref)
+        return FL_RESULT_INVAL;
+    fl_kq_cp_offer_encode(o, wire);
+    if (fl_server_shared_sha256_hex(wire, sizeof wire, hex, sizeof hex) != FL_RESULT_OK ||
+        fl_hex_decode(hex, ref, 32) != 0)
+        return FL_RESULT_ERR;
+    return FL_RESULT_OK;
+}

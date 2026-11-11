@@ -39,6 +39,8 @@ fi
 objects=("${build}/entry.o")
 kq_srcs=()
 [ "${kq_on}" = "1" ] && kq_srcs=("${root}/kernel/freestanding/x86_64/kq_platform.c" "${root}/kernel/drivers/keyquorum/kq_driver.c")
+# FL-14: sealed account keys. Not in the SECFEAT image: its bss has no room (measured, see docs).
+[ "${kq_on}" = "1" ] && [ "${secfeat}" != "1" ] && kq_srcs+=("${root}/kernel/freestanding/x86_64/kq_identity.c" "${root}/kernel/drivers/freestanding_x86_64/fwcfg.c")
 for src in \
     "${root}/kernel/drivers/freestanding_x86_64/serial.c" \
     "${root}/kernel/drivers/freestanding_x86_64/vga.c" \

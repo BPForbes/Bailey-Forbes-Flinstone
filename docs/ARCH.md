@@ -38,7 +38,7 @@ arch/
 
 All variants expose the same C-callable symbols:
 
-- **mem_asm**: `asm_mem_copy`, `asm_mem_zero`, `asm_block_fill`
+- **mem_asm**: `asm_mem_copy`, `asm_mem_zero`, `asm_block_fill`, `asm_mem_secure_zero`, `asm_mem_ct_equal`. The KeyQuorum consumers (`kq_service.c`, `kq_mem_storage.c`, the key and seed buffers) reach them only through `mem_domain_copy` / `_zero` / `_secure_zero` / `_equal`, the same on x86_64 NASM, x86_64 GAS and ARM GAS; `strlen` and ordered compares stay libc (no memory primitive covers them)
 - **port_io**: `port_inb`, `port_outb`, `port_inw`, `port_outw` (ARM: stubs return 0/no-op)
 - **alloc** (USE_ASM_ALLOC=1): `malloc`, `calloc`, `realloc`, `free`
 

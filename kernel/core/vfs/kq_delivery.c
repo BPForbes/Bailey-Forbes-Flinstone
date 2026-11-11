@@ -848,3 +848,26 @@ fl_result_t fl_kq_store_events(fl_kq_store_t *s, const uint8_t id[FL_KQ_DELIVERY
     pthread_mutex_unlock(&s->lock);
     return rc;
 }
+
+fl_result_t fl_kq_store_claim_report(fl_kq_store_t *s, const uint8_t id[FL_KQ_DELIVERY_ID_LEN], int64_t at) {
+    fl_server_catalog_event_t ev[32];
+    char transfer[KQ_TRANSFER_MAX];
+    size_t n = 0;
+    fl_result_t rc;
+
+    if (!s || !id)
+        return FL_RESULT_INVAL;
+    transfer_of(id, transfer);
+    /* Look and append under the store's one lock, so two reports for one delivery cannot both claim it. */
+    pthread_mutex_lock(&s->lock);
+    rc = fl_catalog_file_list_events(s->db, 1, transfer, ev, sizeof ev / sizeof ev[0], &n);
+    if (rc == FL_RESULT_OK) {
+        for (size_t i = 0; i < n; i++)
+            if (strcmp(ev[i].event, "reported") == 0)
+                rc = FL_RESULT_BUSY;
+        if (rc == FL_RESULT_OK)
+            rc = log_event(s, id, "reported", at);
+    }
+    pthread_mutex_unlock(&s->lock);
+    return rc;
+}

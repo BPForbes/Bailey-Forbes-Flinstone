@@ -310,6 +310,108 @@ static int test_keyquorum_account(void) {
     kq->wipe(back, sizeof back);
     return 0;
 }
+
+/* head_author (ABI 5) is one-to-one over kq_file_head_author: nobody for an empty container, the
+ * author of a single head, FORKED for two heads, NO_ROOM for a buffer the label does not fit. */
+static int test_keyquorum_head_author(void) {
+    const fl_kq_driver_t *kq = fl_kq_driver_get();
+    const char *mya = "Root.Flinstone.Mya";
+    uint8_t sec[32], pub[32], id[16], rev[32];
+    fl_kq_buf_t empty = {0}, one = {0}, left = {0}, right = {0}, forked = {0};
+    char who[64], tiny[4];
+    int rc = 1;
+
+    ASSERT(kq && kq->head_author);
+    ASSERT(kq->account_keygen(sec, pub) == FL_KQ_ACCOUNT_OK);
+    memset(id, 0x4D, sizeof id);
+    if (kq->file_new(id, "plan.txt", mya, &empty) != KQ_FILE_OK)
+        goto out;
+    strcpy(who, "stale");
+    if (kq->head_author(&empty, who, sizeof who) != KQ_FILE_NO_REVISION || who[0] != '\0')
+        goto out;
+    if (kq->check_in(&empty, mya, "2026-11-10T09:00:00.000Z", (const uint8_t *)"v1\n", 3, sec, &one,
+                     rev) != KQ_FILE_OK ||
+        kq->head_author(&one, who, sizeof who) != KQ_FILE_OK || strcmp(who, mya) != 0)
+        goto out;
+    if (kq->head_author(&one, tiny, sizeof tiny) != KQ_FILE_NO_ROOM || tiny[0] != '\0')
+        goto out;
+    /* Two edits on the same head, imported into one copy: two heads, no author. */
+    if (kq->check_in(&one, mya, "2026-11-10T09:01:00.000Z", (const uint8_t *)"a\n", 2, sec, &left,
+                     rev) != KQ_FILE_OK ||
+        kq->check_in(&one, mya, "2026-11-10T09:02:00.000Z", (const uint8_t *)"b\n", 2, sec, &right,
+                     rev) != KQ_FILE_OK ||
+        kq->merge(&left, &right, mya, "2026-11-10T09:03:00.000Z", &forked) != KQ_FILE_OK)
+        goto out;
+    if (kq->head_author(&forked, who, sizeof who) != KQ_FILE_FORKED || who[0] != '\0')
+        goto out;
+    rc = 0;
+out:
+    kq->wipe(sec, sizeof sec);
+    fl_kq_buf_free(&empty);
+    fl_kq_buf_free(&one);
+    fl_kq_buf_free(&left);
+    fl_kq_buf_free(&right);
+    fl_kq_buf_free(&forked);
+    if (rc)
+        fprintf(stderr, "FAIL [%s]: head_author\n", __func__);
+    return rc;
+}
+
+/* Access policy and bridge proof (ABI 4): one-to-one over kq_access_requirement, kq_bridge_prove,
+ * kq_bridge_verify and kq_bridge_connects. The factor comes back unchanged; a junk proof is refused,
+ * never accepted. */
+static int test_keyquorum_access_and_bridge_ops(void) {
+    const fl_kq_driver_t *kq = fl_kq_driver_get();
+    const char *members[] = {"Root.Flinstone.Bob", "Root.Alternative.Ann"};
+    const kq_bridge_t live = {"0123456789abcdef0123456789abcdef", members, 2};
+    const char *labels[] = {"Root.Flinstone.Bob", "Root.Alternative.Ann"};
+    uint8_t salt[16], wrap[16], pub[32], sk[32], ek[32], pubs[64], challenge[32], art[512];
+    uint8_t sealed[96];
+    size_t alen = 0;
+    int idx = 7, grant = 7;
+
+    ASSERT(kq && kq->access_requirement && kq->bridge_prove && kq->bridge_verify && kq->bridge_connects);
+    ASSERT(kq->bridge_connects(members[0], members[1], "Root.Flinstone.Bob.Kid", "Root.Alternative.Ann") == 1);
+    ASSERT(kq->bridge_connects(members[0], members[1], "Root.Third.Eve", "Root.Alternative.Ann") == 0);
+    ASSERT(kq->access_requirement("Root.Flinstone.Bob", "Root.Flinstone.Bob", 0, NULL, 0, 0, &idx,
+                                  &grant) == FL_KQ_ACCESS_NONE);
+    ASSERT(idx == -1 && grant == 0);
+    ASSERT(kq->access_requirement("Root.Flinstone.Bob", "Root.Flinstone.Bob", 1, NULL, 0, 0, NULL,
+                                  NULL) == FL_KQ_ACCESS_KQST_PASSWORD);
+    ASSERT(kq->access_requirement("Root.Flinstone", "Root.Flinstone.Bob", 0, NULL, 0, 1, &idx,
+                                  &grant) == FL_KQ_ACCESS_PASSWORD);
+    ASSERT(grant == 1); /* parent approval on: a same-branch switch needs the grant */
+    ASSERT(kq->access_requirement("Root.Flinstone.Bob", "Root.Alternative.Ann", 0, NULL, 0, 0, &idx,
+                                  &grant) == FL_KQ_ACCESS_KQST_PASSWORD);
+    ASSERT(kq->access_requirement("Root.Flinstone.Bob", "Root.Alternative.Ann", 0, &live, 1, 0, &idx,
+                                  &grant) == FL_KQ_ACCESS_PASSWORD_BRIDGE_KQST);
+    ASSERT(idx == 0 && grant == 0);
+    ASSERT(kq->access_requirement("Root.Flinstone.Bob", "Root..Bob", 0, NULL, 0, 0, NULL, NULL) ==
+           FL_KQ_ACCESS_REFUSED);
+    ASSERT(kq->access_requirement(NULL, "Root", 0, NULL, 0, 0, &idx, &grant) == FL_KQ_ACCESS_INVALID);
+    ASSERT(idx == -1 && grant == 0);
+
+    /* A sealed key that is not one opens nothing: no artifact. */
+    memset(salt, 0x11, sizeof salt);
+    memset(wrap, 0x22, sizeof wrap);
+    memset(sealed, 0x33, sizeof sealed);
+    memset(challenge, 0x44, sizeof challenge);
+    ASSERT(kq->account_keygen(sk, pub) == FL_KQ_ACCOUNT_OK);
+    ASSERT(kq->account_box_keygen(ek, pubs) == FL_KQ_ACCOUNT_OK);
+    ASSERT(kq->bridge_prove(live.uid, 1, salt, pub, members[0], sealed, sizeof sealed, wrap, ek, sk,
+                            challenge, sizeof challenge, art, sizeof art, &alen) < 0);
+    kq->wipe(sk, sizeof sk);
+    kq->wipe(ek, sizeof ek);
+    /* A junk artifact verifies against nothing. */
+    memcpy(pubs, pub, 32);
+    memcpy(pubs + 32, pub, 32);
+    memset(art, 0x55, 64);
+    ASSERT(kq->bridge_verify(live.uid, 1, salt, pub, 0, labels, pubs, 2, labels[1], challenge,
+                             sizeof challenge, art, 64) != FL_KQ_BRIDGE_OK);
+    ASSERT(kq->bridge_verify(live.uid, 1, salt, pub, 0, NULL, pubs, 2, labels[1], challenge,
+                             sizeof challenge, art, 64) == FL_KQ_BRIDGE_INVALID);
+    return 0;
+}
 #endif
 
 /* A shutdown empties the registry and the device table; the next init registers and binds
@@ -1015,6 +1117,12 @@ int main(void) {
 #if defined(FL_WITH_KEYQUORUM)
     printf("test_keyquorum_account... ");
     if (test_keyquorum_account() != 0) { drivers_shutdown(); unlink(path); return 1; }
+    printf("OK\n");
+    printf("test_keyquorum_head_author... ");
+    if (test_keyquorum_head_author() != 0) { drivers_shutdown(); unlink(path); return 1; }
+    printf("OK\n");
+    printf("test_keyquorum_access_and_bridge_ops... ");
+    if (test_keyquorum_access_and_bridge_ops() != 0) { drivers_shutdown(); unlink(path); return 1; }
     printf("OK\n");
 #endif
 

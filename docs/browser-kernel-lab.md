@@ -22,6 +22,12 @@ advancing the destination segment and the starting LBA between transfers.
 below `0xa0000` (the start of VGA memory and the conventional top of
 real-mode addressable memory) with 128 sectors of margin to spare.
 
+The default image seals its account keys at boot, which needs random bytes. The launcher must supply them: either
+`-fw_cfg name=opt/flintstone/entropy,file=<fresh random bytes>` (the browser worker writes `crypto.getRandomValues` into the
+Wasm file system and passes it; `scripts/test_freestanding_shell.py` and `scripts/test_browser_kernel_artifact.sh` use fresh bytes
+for every boot) or `-cpu max` (RDRAND). With neither the image halts with `FLINTSTONE_KQ_PANIC` before the boot marker. The
+security-lab image (`SECFEAT=1`) seals nothing and needs neither.
+
 The entry owns its
 stack, clears `.bss`, installs an early IDT, initializes COM1, writes the
 diagnostic VGA cell `F`, and only then emits the boot marker. After the marker

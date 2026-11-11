@@ -99,7 +99,7 @@ int fl_fs_join_path(char *out, size_t cap, const char *dir, const char *name);
 
 /**
  * 1 when name ends in a suffix the delivery code keeps for its own files (.part, .meta, .kqtf,
- * .kqseen, .kqbak), compared ignoring ASCII case. The one list both landing paths use.
+ * .kqseen, .kqer, .kqbak), compared ignoring ASCII case. The one list both landing paths use.
  */
 int fl_server_shared_name_is_reserved(const char *name);
 /** 1 when the contained calls above and below work on this platform (they need the *at calls). */

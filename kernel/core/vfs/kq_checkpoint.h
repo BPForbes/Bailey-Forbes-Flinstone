@@ -53,7 +53,7 @@ fl_result_t fl_kq_cp_to_result(fl_kq_cp_result_t r);
 
 /**
  * True when name is a plain file name a delivery may use: fl_fs_name_is_plain, and not ending
- * in one of the suffixes the delivery keeps beside a file (.part, .meta, .kqtf, .kqseen,
+ * in one of the suffixes the delivery keeps beside a file (.part, .meta, .kqtf, .kqseen, .kqer,
  * .kqbak; the list is fl_server_shared_name_is_reserved).
  * Every name that arrives over the wire (offer, announcement) is checked before it is stored,
  * printed or joined to a directory.
@@ -119,6 +119,43 @@ fl_kq_cp_result_t fl_kq_cp_history(const char *path, fl_kq_buf_t *lines);
 /** The file's current head revision (its container beside path). FORKED with two heads. */
 fl_kq_cp_result_t fl_kq_cp_head(const char *path, uint8_t rev[32]);
 
+/**
+ * The author label of the file's single head revision (its container beside path), the label
+ * KeyQuorum names (kq_file_head_author), NUL-terminated into out. FORKED with two heads, which
+ * have no author until they are merged; IO when the container cannot be read (none beside path
+ * included); INVALID for a container with no revision, a label longer than cap - 1 or a malformed
+ * container. out is "" on every result but OK.
+ */
+fl_kq_cp_result_t fl_kq_cp_head_author(const char *path, char *out, size_t cap);
+
+/**
+ * When the file at path was last signed: the newest successful RevisionSigned or CountersignatureAdded
+ * event in the history of the container beside it (KeyQuorum event types 3 and 4), as seconds since the
+ * epoch (UTC). *sec_out is 0 when the history holds no signature. IO when the container cannot be read.
+ */
+fl_kq_cp_result_t fl_kq_cp_last_signature(const char *path, int64_t *sec_out);
+
+/**
+ * The two letters of a history bundle (FL-04) for the file at path, both signed by host_key and sealed to
+ * requester_key: l15 is the head revision resealed to the requester (the file letter, kind 15) and l17 the
+ * snapshot of the whole event history (kind 17). Pack them with fl_history_bundle_pack. Nothing is checked in
+ * and nothing is written. Any account that holds the container can seal it: KeyQuorum checks the revision's own
+ * author signature, not the sealer, so who may ask is the caller's gate. NO_KEY when keys does not know the
+ * host or the requester, FORKED with two heads, IO without a container. l15 and l17 are the caller's to free (fl_kq_buf_free).
+ */
+fl_kq_cp_result_t fl_kq_cp_history_letters_with(const fl_kq_keydir_t *keys, const char *host_key,
+                                                const uint8_t host_signing_secret[32], const char *requester_key,
+                                                const char *path, fl_kq_buf_t *l15, fl_kq_buf_t *l17);
+
+/**
+ * Signs the file as author_key: checks the file's current bytes in on the current head of the container
+ * beside path (KeyQuorum kq_file_check_in: a new revision signed by the author) and writes the container
+ * back through the storage table. The author's key is the caller's copy to wipe. FORKED with two heads,
+ * IO when the file or container cannot be read, INVALID for a damaged container or a refused check-in.
+ */
+fl_kq_cp_result_t fl_kq_cp_sign_head_with(const char *path, const char *author_key,
+                                          const uint8_t signing_secret[32], const char *created_at_utc);
+
 /** Display names of the history's type and outcome codes; "?" past the table. Never parsed. */
 const char *fl_kq_cp_event_name(uint8_t code);
 const char *fl_kq_cp_outcome_name(uint8_t code);
@@ -179,7 +216,85 @@ fl_kq_cp_result_t fl_kq_cp_decode_in_with(const fl_kq_keydir_t *keys, const char
                                           const uint8_t my_sig[64], const fl_kq_dir_t *dir,
                                           const char *leaf);
 
+/* ---- refusal reports (KQER, keyquorum_error.h) ------------------------------------- */
+
+/**
+ * A KQER is a signed report about one refused artifact, kept as a sidecar named by the artifact's
+ * SHA-256: <dir>/<64 lower-case hex>.kqer. The artifact of a refused co-signed delivery is its
+ * public offer as it travels (fl_kq_cp_offer_encode), which the sender, the host and the recipient
+ * all hold; its SHA-256 is fl_kq_cp_offer_ref (native, kq_checkpoint_users.c).
+ */
+#define FL_KQ_REPORT_SUFFIX ".kqer"
+
+/** The offer's wire bytes, exactly what net_kq_delivery.c sends (u64 big-endian). */
+void fl_kq_cp_offer_encode(const kq_file_offer_t *o, uint8_t out[FL_KQ_OFFER_WIRE_LEN]);
+
+/** Largest KQER KeyQuorum encodes (MAX_ENCODED_LEN, src/error_report.rs): the read bound. */
+#define FL_KQ_REPORT_MAX 1024u
+
+/**
+ * Most reports one landing directory keeps. A report's name is the SHA-256 of sender-chosen
+ * offer bytes, so each distinct refused offer would be a new file; past this many nothing more
+ * is written. The ones written are listed by ref in FL_KQ_REPORT_LEDGER inside the directory,
+ * replaced together with each report (one commit), so the count is read through the held
+ * directory and never by enumerating a path.
+ */
+#define FL_KQ_REPORT_CAP 64u
+#define FL_KQ_REPORT_LEDGER "reports" FL_KQ_REPORT_SUFFIX
+
+/** dir/<hex ref>.kqer into out; 0, or -1 when it does not fit or an argument is missing. */
+int fl_kq_cp_report_path(const char *dir, const uint8_t ref[32], char *out, size_t cap);
+
+/**
+ * Signs a KQER (code and class from keyquorum_error.h's closed sets, step the caller's flow
+ * step) about the artifact whose SHA-256 is ref, as actor with signing secret secret (the
+ * caller's to wipe), at occurred_at (UTC text), and writes <hex ref>.kqer inside the held
+ * directory dir (the handle the decode used; never reopened by path) together with the ledger.
+ * OK written; EXISTS when that report is already there (nothing rewritten, not counted again);
+ * TOO_LARGE when FL_KQ_REPORT_CAP reports are already listed (nothing written); INVALID when
+ * KeyQuorum refuses the fields; IO when the directory cannot be read or written. No free text
+ * is ever written.
+ */
+fl_kq_cp_result_t fl_kq_cp_report_write_in(uint16_t code, uint8_t class_code, uint8_t step,
+                                           const uint8_t ref[32], const char *actor,
+                                           const char *occurred_at, const uint8_t secret[32],
+                                           const fl_kq_dir_t *dir);
+
+/**
+ * Reads back the report fl_kq_cp_report_write_in left for ref, through the same held directory (never by path, so
+ * no link is followed), and authenticates it before it is returned: KeyQuorum must accept the bytes as a report
+ * about ref signed by reporter_public (the injection check, on a scratch history). OK with the bytes in out (the
+ * caller frees them with fl_kq_buf_free); IO when there is no such report; BAD_SIGNATURE for bytes that are not
+ * that report (out is empty). The report on disk is left as it is.
+ */
+fl_kq_cp_result_t fl_kq_cp_report_read_in(const fl_kq_dir_t *dir, const uint8_t ref[32],
+                                          const uint8_t reporter_public[32], fl_kq_buf_t *out);
+
+/**
+ * The same injection for a report already in memory (one that arrived over the wire, fl_net_kq_report_take):
+ * verifies kqer under reporter_public and that it names ref (the SHA-256 of the artifact, fl_kq_cp_offer_ref),
+ * then appends one ErrorReported event to the container beside path. A report is a claim by its signer: it
+ * decides no trust. BAD_SIGNATURE for any report KeyQuorum refuses (nothing is written), IO without a
+ * container.
+ */
+fl_kq_cp_result_t fl_kq_cp_inject_report_bytes(const uint8_t reporter_public[32], const uint8_t *kqer,
+                                               size_t kqer_len, const uint8_t ref[32], const char *path);
+
+/**
+ * Consumer: reads the KQER at report_path, and appends one ErrorReported event (history type 48)
+ * to the container beside path, written back in place, when KeyQuorum verifies it under
+ * reporter_key's signing key in keys and it names the artifact ref the caller holds.
+ * BAD_SIGNATURE when it does not verify or names another artifact (nothing written), NO_KEY
+ * when keys has no signing key for reporter_key, IO when a file cannot be read or written.
+ */
+fl_kq_cp_result_t fl_kq_cp_inject_report_with(const fl_kq_keydir_t *keys, const char *reporter_key,
+                                              const char *report_path, const uint8_t ref[32],
+                                              const char *path);
+
 /* ---- the native shell's account store (kq_checkpoint_users.c) --------------------- */
+
+/** The SHA-256 of the offer's wire bytes: the artifact a refusal report names. OK or ERR. */
+fl_result_t fl_kq_cp_offer_ref(const kq_file_offer_t *o, uint8_t ref[32]);
 
 /* user_db.h is native-only; its type is named here so the lab can use this header. */
 typedef struct fl_user_db fl_user_db_t;

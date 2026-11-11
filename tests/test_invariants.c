@@ -598,7 +598,11 @@ static int test_contract_constants(void) {
     ASSERT(fl_net_session_is_kq_opcode(FL_NET_SESSION_OP_KQH_REQ) == 1);
     ASSERT(fl_net_session_is_kq_opcode(FL_NET_SESSION_OP_KQH_DATA) == 1);
     ASSERT(fl_net_session_is_kq_opcode(0x4Fu) == 0);
-    ASSERT(fl_net_session_is_kq_opcode(0x52u) == 0);
+    ASSERT((int)FL_NET_SESSION_OP_KQR_REPORT == 0x52);
+    ASSERT(fl_net_session_is_kq_opcode(FL_NET_SESSION_OP_KQR_REPORT) == 1);
+    ASSERT(fl_net_session_is_kq_opcode(0x53u) == 0);
+    ASSERT(fl_net_session_is_file_opcode(FL_NET_SESSION_OP_KQR_REPORT) == 0);
+    ASSERT(fl_net_session_is_wifi_opcode(FL_NET_SESSION_OP_KQR_REPORT) == 0);
     ASSERT(fl_net_session_is_kq_opcode(FL_NET_SESSION_OP_KQ_KEYS) == 1);
     ASSERT(fl_net_session_is_kq_opcode(FL_NET_SESSION_OP_WIFI_LAST) == 0);
     ASSERT(fl_net_session_is_file_opcode(FL_NET_SESSION_OP_KQH_REQ) == 0);

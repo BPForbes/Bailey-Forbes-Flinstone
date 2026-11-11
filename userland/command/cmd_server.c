@@ -1949,6 +1949,8 @@ int cmd_server_run(int argc, char **argv) {
             /* Deliveries are rows of the share root's host catalog (kq_delivery.h). */
             snprintf(dir, sizeof dir, "%s/server_shared", g_cwd);
             kq_installed = fl_net_kq_install(fl_session_user_db, dir) == FL_RESULT_OK;
+            if (kq_installed)
+                cmd_server_file_install_history();
         }
     }
     if (!strcmp(argv[1], "interfaces")) return verb_interfaces(argc, argv);

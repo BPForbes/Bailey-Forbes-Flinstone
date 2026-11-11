@@ -147,6 +147,25 @@ fl_result_t fl_net_kq_history_take(const uint8_t request_id[16], unsigned wait_m
                                    fl_kq_buf_t *letter_file, fl_kq_buf_t *letter_snapshot);
 void fl_net_kq_history_drop(const uint8_t request_id[16]);
 
+/* ---- refusal report (KQ-12) ---------------------------------------------------------------- */
+
+/**
+ * The recipient of a refused delivery sends the signed KQER it wrote beside the refused file (the bytes of
+ * <hex ref>.kqer, at most FL_KQ_REPORT_FRAME_MAX) to the host, after the refusing fl_net_kq_send_ack. The
+ * host forwards it to the delivery's sender only when the sender of this frame is that delivery's
+ * recipient, the delivery was refused, and the host has not forwarded a report for it already.
+ * INVAL for an empty or oversized report.
+ */
+fl_result_t fl_net_kq_send_report(fl_net_server_t *srv, fl_net_client_t *client, int hosting,
+                                  const uint8_t id[FL_KQ_DELIVERY_ID_LEN], const uint8_t *kqer, size_t len);
+
+/** A report that reached this shell as the delivery's sender: copied out and removed. NOENT when none is
+ *  held for id, NOMEM (nothing removed) when cap is too small. The report is a claim by its signer: apply it
+ *  with fl_kq_cp_inject_report_with, which checks the signature and the artifact. */
+fl_result_t fl_net_kq_report_take(const uint8_t id[FL_KQ_DELIVERY_ID_LEN], uint8_t *out, size_t cap, size_t *len);
+/** How many reports are held (at most four; a fifth replaces the oldest). */
+size_t fl_net_kq_reports_pending(void);
+
 /* ---- tests ------------------------------------------------------------------ */
 
 /** Replace how the host reaches members and how a client reaches the host (tests). */

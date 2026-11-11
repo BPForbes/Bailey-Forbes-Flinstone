@@ -2,6 +2,7 @@
 #include "cmd_batch.h"
 #include "cmd_authutil.h"
 #include "fl/audit_log.h"
+#include "fl/authz_subsystem.h"
 #include "fl/session.h"
 #include "fl/elevation.h"
 #include "contract_p2_elevation.h"
@@ -34,16 +35,16 @@ static int sudo_grant_token(const char *reason) {
 }
 
 /*
- * sudo -i becomes Root, the master of the whole heritage tree, so it asks for
- * Root's own password, as su root does, never the caller's. An elevated
- * account is already Root or sits at its level and needs no second prompt.
+ * sudo -i becomes Root, the master of the whole heritage tree. KeyQuorum's rule asks for Root's own
+ * key: Root's password and slot token for a KQST-mode Root. A password-only Root keeps the rule from
+ * before: Root's password, and no second prompt for an elevated account (owner decision; the session
+ * audits it). cmd_switch_user collects the factor; fl_session_switch_user checks and commits.
  */
 int cmd_sudo_interactive_login(void) {
     const fl_user_db_t *db;
     const fl_user_record_t *root;
     char actor[FL_HERITAGE_KEY_ID_MAX];
-    char pw[128];
-    fl_result_t rc;
+    char root_name[FL_USER_NAME_MAX];
 
     fl_session_init();
     db = fl_session_user_db();
@@ -52,29 +53,14 @@ int cmd_sudo_interactive_login(void) {
         fprintf(stderr, "sudo: no Root account\n");
         return 1;
     }
-    if (!fl_session_is_elevated_account()) {
-        if (cmd_read_password("[sudo -i] Root password: ", pw, sizeof(pw)) != 0) {
-            cmd_wipe_password(pw, sizeof(pw));
-            fprintf(stderr, "sudo: password read failed\n");
-            return 1;
-        }
-        if (!fl_user_db_verify_password(db, root->name, pw)) {
-            cmd_wipe_password(pw, sizeof(pw));
-            fprintf(stderr, "sudo: incorrect Root password\n");
-            return 1;
-        }
-        cmd_wipe_password(pw, sizeof(pw));
-    }
+    snprintf(root_name, sizeof root_name, "%s", root->name);
     strncpy(actor, fl_session_current_key_id(), sizeof(actor) - 1);
     actor[sizeof(actor) - 1] = '\0';
-    rc = fl_session_set_user(root->name);
-    if (rc != FL_RESULT_OK) {
-        fprintf(stderr, "sudo: cannot switch to root (%d)\n", (int)rc);
+    if (cmd_switch_user("sudo", root_name, 1) != 0)
         return 1;
-    }
     fl_audit_identity_event(actor, "sudo-i", FL_HERITAGE_ROOT_KEY, NULL);
     fl_session_sync_services();
-    fl_session_apply_login_shell_env(root->name);
+    fl_session_apply_login_shell_env(root_name);
     printf("sudo: switched to root (login shell)\n");
     return 0;
 }
@@ -94,6 +80,7 @@ static int sudo_revoke_elevation(void) {
 int cmd_sudo_run(int argc, char **argv) {
     const char *reason = "lab elevation";
 
+    /* Giving up elevation is never an identity switch: -k stays available when switching is denied. */
     if (argc >= 2 && argv[1] && strcmp(argv[1], "-k") == 0) {
         if (argc > 2) {
             fprintf(stderr, "sudo: -k does not take additional arguments\n");
@@ -101,6 +88,8 @@ int cmd_sudo_run(int argc, char **argv) {
         }
         return sudo_revoke_elevation();
     }
+    if (fl_authz_identity_switch_denied("sudo"))
+        return 1;
 
     if (argc >= 2 && argv[1] && strcmp(argv[1], "-i") == 0)
         return cmd_sudo_interactive_login();

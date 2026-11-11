@@ -74,11 +74,14 @@ self.onmessage = async ({ data }) => {
       arguments: ["-machine", "pc", "-accel", "tcg,tb-size=32", "-m", String(data.memorySize / 1048576),
         "-L", "/rom", "-vga", "std", "-display", "none", "-nic", "none", "-no-reboot",
         "-chardev", "file,id=com1,path=/dev/serial", "-serial", "chardev:com1", "-qmp", "stdio",
+        "-fw_cfg", "name=opt/flintstone/entropy,file=/entropy.bin",
         "-drive", "file=/flintstone.img,format=raw,if=ide", "-boot", "c"],
       preRun: [(module) => {
         stage = "mkdir rom"; module.FS.mkdir("/rom");
         stage = "write bios"; for (const [name, start, end] of bios) module.FS.writeFile(`/rom/${name}`, rom.subarray(start, end));
         stage = "write disk"; module.FS.writeFile("/flintstone.img", new Uint8Array(data.image));
+        // Fresh bytes for every boot: the image takes its entropy from here when the CPU has no RDRAND.
+        stage = "write entropy"; module.FS.writeFile("/entropy.bin", crypto.getRandomValues(new Uint8Array(4096)));
         stage = "serial device"; module.FS.createDevice("/dev", "serial", null, byte => self.postMessage({ type: "serial", byte }));
       }],
       print: text => self.postMessage({ type: "diagnostic", text }),

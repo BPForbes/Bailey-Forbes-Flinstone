@@ -305,7 +305,7 @@ static void finish_password(int session, const char *password)
     else if (mode == MODE_PASSWD)
         ok = fl_fs_identity_passwd(session, s_pending[session], password);
     if (ok && mode == MODE_SUDO_I)
-        ok = fl_fs_identity_switchuser(session, "Root");
+        ok = fl_fs_identity_enter_root(session);
     emit(ok ? "ok\r\n" : "authentication failed\r\n");
     if (ok && fl_fs_identity_user_index(session) != before)
         perspective_switch_user(fl_fs_identity_user_index(session), session);
