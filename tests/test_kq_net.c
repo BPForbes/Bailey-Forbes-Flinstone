@@ -770,6 +770,65 @@ static int test_history_download_over_the_wire(void) {
     return 0;
 }
 
+/* FL-04: the production builder (fl_kq_cp_history_letters_with) gives the requester a bundle that opens. */
+static int test_the_production_history_letters_open_for_the_requester(void) {
+    const fl_kq_driver_t *drv = fl_kq_driver_get_or_register();
+    fl_user_db_keydir_t dir;
+    fl_kq_encoded_t enc;
+    fl_kq_buf_t l15 = {0}, l17 = {0}, c = {0}, snap = {0};
+    unsigned char mya_sign[FL_USER_SIGNING_SECRET_LEN], steve_sign[FL_USER_SIGNING_SECRET_LEN];
+    unsigned char steve_box[FL_USER_SIGNING_SECRET_LEN], rev[32], root[32], root2[32];
+    uint8_t bundle[FL_HISTORY_BUNDLE_MAX_BYTES];
+    const uint8_t *u15, *u17;
+    size_t n15, n17, blen = 0;
+    uint32_t count = 0;
+    char path[PATH_MAX];
+
+    ASSERT(drv && encode_from_mya("prod-hist.txt", "history v1\n", &enc) == 0);
+    snprintf(path, sizeof path, "%s/prod-hist.txt", s_dir);
+    ASSERT(fl_user_db_open_key(&s_db, "Mya", "pw-mya", mya_sign) == FL_RESULT_OK);
+    ASSERT(fl_user_db_open_key(&s_db, "Steve", "pw-steve", steve_sign) == FL_RESULT_OK);
+    ASSERT(fl_user_db_open_box(&s_db, "Steve", "pw-steve", steve_box) == FL_RESULT_OK);
+    fl_user_db_keydir_init(&dir, &s_db);
+
+    ASSERT(fl_kq_cp_history_letters_with(&dir.base, MYA, mya_sign, STEVE, path, &l15, &l17) == FL_KQ_CP_OK);
+    ASSERT(fl_history_bundle_pack(bundle, sizeof bundle, &blen, l15.data, l15.len, l17.data, l17.len) == FL_RESULT_OK);
+    fl_kq_buf_free(&l15);
+    fl_kq_buf_free(&l17);
+    ASSERT(fl_history_bundle_unpack(bundle, blen, &u15, &n15, &u17, &n17) == FL_RESULT_OK);
+    l15.data = (uint8_t *)u15; l15.len = n15; l17.data = (uint8_t *)u17; l17.len = n17;
+    ASSERT(drv->open(&l15, steve_box, MYA, STEVE, fl_user_db_signing_public(&s_db, MYA), &c, rev, root) == KQ_FILE_OK);
+    ASSERT(drv->open_snapshot(&l17, steve_box, MYA, STEVE, fl_user_db_signing_public(&s_db, MYA), &snap, root2,
+                              &count) == KQ_FILE_OK);
+    ASSERT(count >= 1 && drv->snapshot_covers(&c, &snap) == KQ_FILE_OK);
+    fl_kq_buf_free(&c);
+    fl_kq_buf_free(&snap);
+    memset(&l15, 0, sizeof l15);
+    memset(&l17, 0, sizeof l17);
+
+    /* Any account that holds the container can seal it (the file's author need not be the sealer: KeyQuorum
+     * checks the revision's own author signature, not the sealer), so who may ask is the gate's job. */
+    ASSERT(fl_kq_cp_history_letters_with(&dir.base, STEVE, steve_sign, MYA, path, &l15, &l17) == FL_KQ_CP_OK);
+    fl_kq_buf_free(&l15);
+    fl_kq_buf_free(&l17);
+    /* An unknown requester and a missing file give no letters, and the out buffers stay empty. */
+    ASSERT(fl_kq_cp_history_letters_with(&dir.base, MYA, mya_sign, "Root.Flinstone.Nobody", path, &l15, &l17) ==
+           FL_KQ_CP_NO_KEY);
+    ASSERT(l15.data == NULL && l17.data == NULL);
+    {
+        char missing[PATH_MAX];
+
+        snprintf(missing, sizeof missing, "%s/no-such-file.txt", s_dir);
+        ASSERT(fl_kq_cp_history_letters_with(&dir.base, MYA, mya_sign, STEVE, missing, &l15, &l17) == FL_KQ_CP_IO);
+    }
+    ASSERT(fl_kq_cp_history_letters_with(NULL, MYA, mya_sign, STEVE, path, &l15, &l17) == FL_KQ_CP_INVALID);
+    asm_mem_secure_zero(mya_sign, sizeof mya_sign);
+    asm_mem_secure_zero(steve_sign, sizeof steve_sign);
+    asm_mem_secure_zero(steve_box, sizeof steve_box);
+    fl_kq_encoded_free(&enc);
+    return 0;
+}
+
 int main(void) {
     char tmpl[] = "/tmp/fl_kq_netXXXXXX";
     char path[PATH_MAX];
@@ -806,6 +865,7 @@ int main(void) {
     RUN(test_unsafe_names_never_reach_a_path);
     RUN(test_wire_string_with_embedded_nul_is_dropped);
     RUN(test_history_download_over_the_wire);
+    RUN(test_the_production_history_letters_open_for_the_requester);
     fl_net_kq_reset();
     rmrf(s_dir);
     if (rc == 0)

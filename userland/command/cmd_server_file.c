@@ -1,4 +1,7 @@
 #include "cmd_server_file.h"
+#include "fl/authz_subsystem.h"
+#include "contract_p2_authz.h"
+#include "kq_history_bundle.h"
 
 #include "cmd_authutil.h"
 #include "cmd_util.h"
@@ -1049,6 +1052,63 @@ static int verb_kq_reports(const cmd_server_ctx_t *ctx)
     if (!applied)
         printf("no refusal reports to record\n");
     return 0;
+}
+
+/* ---- history download (FL-04): the gate and the source the host gives fl_net_kq_set_history ---------------
+ * The history is the KeyQuorum container beside the file, as KeyQuorum keeps it (nothing is copied into a
+ * store of Flinstone's own). It can be served for the deliveries this shell sent, the ones kq_sent_remember
+ * recorded: only to that delivery's recipient, signed by this shell's own online account, and only if
+ * policy allows it. Anything else is refused by the module with its visible message. */
+static const kq_sent_t *kq_sent_find(const uint8_t id[FL_KQ_DELIVERY_ID_LEN])
+{
+    for (unsigned i = 0; i < KQ_SENT_MAX; i++)
+        if (s_sent[i].used && memcmp(s_sent[i].id, id, FL_KQ_DELIVERY_ID_LEN) == 0)
+            return &s_sent[i];
+    return NULL;
+}
+
+static int kq_history_gate(const char *requester, const uint8_t id[FL_KQ_DELIVERY_ID_LEN])
+{
+    const kq_sent_t *e = kq_sent_find(id);
+
+    /* The requester is a party to the delivery (its recipient), then host policy. The policy check looks at
+     * the host shell's own principal, never at the requester: the party check is what binds the requester. */
+    if (!requester || !e || strcmp(e->recipient, requester) != 0)
+        return 0;
+    return fl_authz_subsystem_check((unsigned)FL_AUTHZ_OP_FILE_HISTORY_EXPORT, (void *)requester) != FL_AUTHZ_DENY;
+}
+
+static fl_result_t kq_history_source(const char *requester, const uint8_t id[FL_KQ_DELIVERY_ID_LEN], uint8_t *out,
+                                     size_t cap, size_t *out_len)
+{
+    const kq_sent_t *e = kq_sent_find(id);
+    const char *me = fl_session_current_key_id();
+    fl_user_db_keydir_t dir;
+    fl_kq_buf_t l15 = {0}, l17 = {0};
+    uint8_t key[FL_USER_SIGNING_SECRET_LEN];
+    kq_signing_mode_t mode = 0;
+    fl_kq_cp_result_t cp;
+    fl_result_t rc;
+
+    if (!e || !me || !me[0] || !fl_session_user_db())
+        return FL_RESULT_NOENT;
+    /* The signing key is the key service's copy for the online account: no password is asked here. */
+    if (fl_kq_obtain_author_key(me, key, &mode) != FL_RESULT_OK)
+        return FL_RESULT_ACCES;
+    fl_user_db_keydir_init(&dir, fl_session_user_db());
+    cp = fl_kq_cp_history_letters_with(&dir.base, me, key, requester, e->path, &l15, &l17);
+    mem_domain_secure_zero(key, sizeof key);
+    if (cp != FL_KQ_CP_OK)
+        return fl_kq_cp_to_result(cp) == FL_RESULT_OK ? FL_RESULT_ERR : fl_kq_cp_to_result(cp);
+    rc = fl_history_bundle_pack(out, cap, out_len, l15.data, l15.len, l17.data, l17.len);
+    fl_kq_buf_free(&l15);
+    fl_kq_buf_free(&l17);
+    return rc;
+}
+
+void cmd_server_file_install_history(void)
+{
+    fl_net_kq_set_history(kq_history_gate, kq_history_source);
 }
 
 /* Every KeyQuorum checkpoint in this file reads and writes through the shell's file manager

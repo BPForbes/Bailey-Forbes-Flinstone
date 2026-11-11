@@ -1219,3 +1219,65 @@ done:
     fl_kq_buf_free(&next);
     return rc;
 }
+
+/* ---- history bundle letters (FL-04) -------------------------------------------------------- */
+
+fl_kq_cp_result_t fl_kq_cp_history_letters_with(const fl_kq_keydir_t *keys, const char *host_key,
+                                                const uint8_t host_signing_secret[32], const char *requester_key,
+                                                const char *path, fl_kq_buf_t *l15, fl_kq_buf_t *l17) {
+    const fl_kq_driver_t *drv = fl_kq_driver_get();
+    const unsigned char *host_box, *requester_box;
+    char container_path[4096];
+    fl_kq_buf_t c = {0}, ev = {0};
+    fl_kq_encoded_t sealed;
+    uint8_t rev[32], did[16];
+    uint32_t events = 0;
+    fl_kq_cp_result_t rc;
+
+    if (!l15 || !l17)
+        return FL_KQ_CP_INVALID;
+    memset(l15, 0, sizeof *l15);
+    memset(l17, 0, sizeof *l17);
+    memset(&sealed, 0, sizeof sealed);
+    if (!keys || !host_key || !host_signing_secret || !requester_key || !path)
+        return FL_KQ_CP_INVALID;
+    if (!drv)
+        return FL_KQ_CP_NO_DRIVER;
+    host_box = keys->box_public(keys, host_key);
+    requester_box = keys->box_public(keys, requester_key);
+    if (!host_box || !requester_box)
+        return FL_KQ_CP_NO_KEY;
+    rc = fl_kq_cp_head(path, rev);
+    if (rc != FL_KQ_CP_OK)
+        return rc;
+    rc = fl_kq_cp_reseal_with(keys, host_key, host_signing_secret, requester_key, requester_box, path, rev, &sealed);
+    if (rc != FL_KQ_CP_OK)
+        return rc;
+    rc = load_container(path, container_path, sizeof container_path, &c);
+    if (rc != FL_KQ_CP_OK)
+        goto fail;
+    if (drv->events(&c, &ev) != KQ_FILE_OK) { /* one line per event: the snapshot covers them all */
+        rc = FL_KQ_CP_INVALID;
+        goto fail;
+    }
+    for (size_t i = 0; i < ev.len; i++)
+        events += ev.data[i] == '\n';
+    if (drv->seal_snapshot(&c, events, host_key, host_signing_secret, host_box, requester_key, requester_box, l17,
+                           did) != KQ_FILE_OK) {
+        rc = FL_KQ_CP_INVALID;
+        goto fail;
+    }
+    *l15 = sealed.letter; /* the caller owns the letter now */
+    memset(&sealed.letter, 0, sizeof sealed.letter);
+    fl_kq_encoded_free(&sealed);
+    fl_kq_buf_free(&c);
+    fl_kq_buf_free(&ev);
+    return FL_KQ_CP_OK;
+fail:
+    fl_kq_buf_free(l17);
+    memset(l17, 0, sizeof *l17);
+    fl_kq_encoded_free(&sealed);
+    fl_kq_buf_free(&c);
+    fl_kq_buf_free(&ev);
+    return rc;
+}

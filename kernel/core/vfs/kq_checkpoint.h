@@ -136,6 +136,18 @@ fl_kq_cp_result_t fl_kq_cp_head_author(const char *path, char *out, size_t cap);
 fl_kq_cp_result_t fl_kq_cp_last_signature(const char *path, int64_t *sec_out);
 
 /**
+ * The two letters of a history bundle (FL-04) for the file at path, both signed by host_key and sealed to
+ * requester_key: l15 is the head revision resealed to the requester (the file letter, kind 15) and l17 the
+ * snapshot of the whole event history (kind 17). Pack them with fl_history_bundle_pack. Nothing is checked in
+ * and nothing is written. Any account that holds the container can seal it: KeyQuorum checks the revision's own
+ * author signature, not the sealer, so who may ask is the caller's gate. NO_KEY when keys does not know the
+ * host or the requester, FORKED with two heads, IO without a container. l15 and l17 are the caller's to free (fl_kq_buf_free).
+ */
+fl_kq_cp_result_t fl_kq_cp_history_letters_with(const fl_kq_keydir_t *keys, const char *host_key,
+                                                const uint8_t host_signing_secret[32], const char *requester_key,
+                                                const char *path, fl_kq_buf_t *l15, fl_kq_buf_t *l17);
+
+/**
  * Signs the file as author_key: checks the file's current bytes in on the current head of the container
  * beside path (KeyQuorum kq_file_check_in: a new revision signed by the author) and writes the container
  * back through the storage table. The author's key is the caller's copy to wipe. FORKED with two heads,
