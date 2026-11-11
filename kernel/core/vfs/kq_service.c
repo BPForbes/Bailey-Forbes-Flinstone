@@ -29,9 +29,12 @@ typedef struct {
 } kq_slot_t;
 
 typedef struct {
-    int used;
+    int used;   /* the slot is taken: its periodic item is queued and can never be cancelled */
+    int active; /* registered now; cleared by fl_kq_service_autosign_remove, the item then does nothing */
     fl_kq_autosign_t spec;
     char label[96];
+    fl_kq_autosign_file_t file; /* ctx of a tracked file (fl_kq_service_autosign_track_file) */
+    char path[512];
 } kq_object_t;
 
 static kq_slot_t s_slots[FL_USER_DB_MAX_USERS];
@@ -235,22 +238,41 @@ size_t fl_kq_service_online_count(void) {
     return n;
 }
 
-/* Where Root's credential would be stored for unattended boot is an open decision (the image region
- * needs a written exception and a threat model); nothing is stored, so there is no fallback. */
+/* Where Root's credential is stored for unattended boot is an open decision (the image region needs a written
+ * exception and a threat model), so the service asks the runtime's provider and has none of its own: with no
+ * provider there is no fallback. */
+static fl_kq_root_cred_fn s_root_cred;
+
+void fl_kq_service_set_root_credential_provider(fl_kq_root_cred_fn provider) {
+    pthread_mutex_lock(&s_mu);
+    s_root_cred = provider;
+    pthread_mutex_unlock(&s_mu);
+}
+
 static fl_result_t stored_root_credential(char *out, size_t cap) {
-    (void)out;
-    (void)cap;
-    return FL_RESULT_NOENT;
+    fl_kq_root_cred_fn provider;
+
+    pthread_mutex_lock(&s_mu);
+    provider = s_root_cred;
+    pthread_mutex_unlock(&s_mu);
+    if (!provider || !out || cap == 0)
+        return FL_RESULT_NOENT;
+    out[0] = '\0';
+    return provider(out, cap);
 }
 
 fl_result_t fl_kq_service_root_fallback(void) {
     char cred[128];
     fl_result_t rc = stored_root_credential(cred, sizeof cred);
 
-    if (rc != FL_RESULT_OK)
-        return FL_RESULT_NOENT;
+    if (rc != FL_RESULT_OK) {
+        mem_domain_secure_zero(cred, sizeof cred); /* a provider that failed part-way still wrote into it */
+        return rc == FL_RESULT_NOENT ? FL_RESULT_NOENT : FL_RESULT_ACCES;
+    }
     rc = fl_kq_service_online_from_login(FL_HERITAGE_ROOT_KEY, cred);
     mem_domain_secure_zero(cred, sizeof cred);
+    fl_audit_identity_event(FL_HERITAGE_ROOT_KEY, rc == FL_RESULT_OK ? "kq-root-fallback" : "kq-root-fallback-refused",
+                            "service", NULL); /* refused once, no retry here: the caller decides when to ask again */
     return rc;
 }
 
@@ -417,33 +439,49 @@ fl_result_t fl_kq_service_submit_every(const fl_wq_work_t *work, int64_t period_
 
 static void autosign_job(void *arg) {
     kq_object_t *o = (kq_object_t *)arg;
+    fl_kq_autosign_t spec;
+    char label[sizeof o->label];
     char author[FL_HERITAGE_KEY_ID_MAX];
     uint8_t key[FL_USER_SIGNING_SECRET_LEN];
     kq_signing_mode_t mode = 0;
     int64_t now = 0, due = 0;
     fl_result_t rc;
 
+    /* A removed object's periodic item cannot be cancelled (the queue has no such call): it stays queued
+     * and does nothing. The run below works on a copy, so a removal during it cannot change what it uses. */
+    pthread_mutex_lock(&s_mu);
+    if (!o->active) {
+        pthread_mutex_unlock(&s_mu);
+        return;
+    }
+    spec = o->spec;
+    memcpy(label, o->label, sizeof label);
+    spec.label = label;
+    pthread_mutex_unlock(&s_mu);
+
     (void)fl_time_wall_sec(&now);
-    if (__builtin_add_overflow(o->spec.last_signature_sec(o->spec.ctx), o->spec.interval_sec, &due) || now < due)
+    if (__builtin_add_overflow(spec.last_signature_sec(spec.ctx), spec.interval_sec, &due) || now < due)
         return; /* a user signature moved the clock (an overflowing due time is never due) */
     author[0] = '\0';
-    rc = o->spec.head_author(o->spec.ctx, author, sizeof author);
+    rc = spec.head_author(spec.ctx, author, sizeof author);
     if (rc == FL_RESULT_BUSY) { /* two heads: nobody is "the" author */
-        fl_audit_identity_event(author, "kq-autosign-forked", o->label, NULL);
+        fl_audit_identity_event(author, "kq-autosign-forked", label, NULL);
         return;
     }
     if (rc != FL_RESULT_OK)
         return;
     if (fl_kq_obtain_author_key(author, key, &mode) != FL_RESULT_OK) {
-        fl_audit_identity_event(author, "kq-autosign-wait", o->label, NULL); /* tried again next period */
+        fl_audit_identity_event(author, "kq-autosign-wait", label, NULL); /* tried again next period */
         return;
     }
-    if (o->spec.sign(o->spec.ctx, author, key, mode) == FL_RESULT_OK)
-        fl_audit_identity_event(author, "kq-autosign", o->label, mode == KQ_SIGNING_OWN ? "own" : "assembled");
+    if (spec.sign(spec.ctx, author, key, mode) == FL_RESULT_OK)
+        fl_audit_identity_event(author, "kq-autosign", label, mode == KQ_SIGNING_OWN ? "own" : "assembled");
     mem_domain_secure_zero(key, sizeof key); /* the copy is wiped at once */
 }
 
-fl_result_t fl_kq_service_autosign_add(const fl_kq_autosign_t *spec) {
+/* Takes a slot, fills it completely (a tracked file's path and ctx included), then queues its periodic
+ * item: nothing runs on a half-built object. */
+static fl_result_t autosign_register(const fl_kq_autosign_t *spec, const char *path) {
     fl_wq_work_t w = {.fn = autosign_job, .pq_layer = FL_WQ_LAYER_BACKGROUND};
     kq_object_t *o = NULL;
     fl_result_t rc;
@@ -456,10 +494,17 @@ fl_result_t fl_kq_service_autosign_add(const fl_kq_autosign_t *spec) {
         if (!s_objects[i].used)
             o = &s_objects[i];
     if (o) {
+        memset(o, 0, sizeof *o);
         o->used = 1;
+        o->active = 1;
         o->spec = *spec;
         snprintf(o->label, sizeof o->label, "%s", spec->label);
         o->spec.label = o->label;
+        if (path) {
+            snprintf(o->path, sizeof o->path, "%s", path);
+            o->file.path = o->path;
+            o->spec.ctx = &o->file;
+        }
     }
     pthread_mutex_unlock(&s_mu);
     if (!o)
@@ -469,9 +514,77 @@ fl_result_t fl_kq_service_autosign_add(const fl_kq_autosign_t *spec) {
     if (rc != FL_RESULT_OK) {
         pthread_mutex_lock(&s_mu);
         o->used = 0;
+        o->active = 0;
         pthread_mutex_unlock(&s_mu);
     }
     return rc;
+}
+
+fl_result_t fl_kq_service_autosign_add(const fl_kq_autosign_t *spec) {
+    return autosign_register(spec, NULL);
+}
+
+fl_result_t fl_kq_service_autosign_remove(const char *label) {
+    fl_result_t rc = FL_RESULT_NOENT;
+
+    if (!label || !s_started)
+        return FL_RESULT_INVAL;
+    pthread_mutex_lock(&s_mu);
+    for (size_t i = 0; i < FL_KQ_AUTOSIGN_MAX; i++)
+        if (s_objects[i].used && s_objects[i].active && strcmp(s_objects[i].label, label) == 0) {
+            s_objects[i].active = 0; /* the slot stays taken: its queued item will find it inactive */
+            rc = FL_RESULT_OK;
+        }
+    pthread_mutex_unlock(&s_mu);
+    return rc;
+}
+
+int64_t fl_kq_autosign_last_signature(void *ctx) {
+    const fl_kq_autosign_file_t *f = (const fl_kq_autosign_file_t *)ctx;
+    int64_t sec = 0;
+
+    if (!f || !f->path || fl_kq_cp_last_signature(f->path, &sec) != FL_KQ_CP_OK)
+        return 0; /* nothing readable is also nothing to sign: head_author fails the same way */
+    return sec;
+}
+
+fl_result_t fl_kq_autosign_sign(void *ctx, const char *author, const uint8_t key[32], kq_signing_mode_t mode) {
+    const fl_kq_autosign_file_t *f = (const fl_kq_autosign_file_t *)ctx;
+    char at[40];
+    fl_kq_cp_result_t cp;
+    fl_result_t rc;
+
+    (void)mode; /* own or assembled is audited by the sweep */
+    if (!f || !f->path || !author || !key)
+        return FL_RESULT_INVAL;
+    fl_kq_service_utc_now(at, sizeof at);
+    cp = fl_kq_cp_sign_head_with(f->path, author, key, at);
+    if (cp == FL_KQ_CP_OK)
+        return FL_RESULT_OK;
+    if (cp == FL_KQ_CP_FORKED)
+        return FL_RESULT_BUSY;
+    rc = fl_kq_cp_to_result(cp);
+    return rc == FL_RESULT_OK || rc == FL_RESULT_BUSY ? FL_RESULT_ERR : rc;
+}
+
+fl_result_t fl_kq_service_autosign_track_file(const char *path, int64_t interval_sec) {
+    fl_kq_autosign_t spec = {.label = path,
+                             .last_signature_sec = fl_kq_autosign_last_signature,
+                             .head_author = fl_kq_autosign_head_author,
+                             .sign = fl_kq_autosign_sign,
+                             .interval_sec = interval_sec};
+    int revived = 0;
+
+    if (!path || !path[0] || strlen(path) >= sizeof s_objects[0].path || !s_started)
+        return FL_RESULT_INVAL;
+    pthread_mutex_lock(&s_mu);
+    for (size_t i = 0; i < FL_KQ_AUTOSIGN_MAX && !revived; i++)
+        if (s_objects[i].used && s_objects[i].path[0] && strcmp(s_objects[i].path, path) == 0) {
+            s_objects[i].active = 1; /* tracked again: its queued item resumes, no second item */
+            revived = 1;
+        }
+    pthread_mutex_unlock(&s_mu);
+    return revived ? FL_RESULT_OK : autosign_register(&spec, path);
 }
 
 fl_result_t fl_kq_autosign_head_author(void *ctx, char *out, size_t cap) {

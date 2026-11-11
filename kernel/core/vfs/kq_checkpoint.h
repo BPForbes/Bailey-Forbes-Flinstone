@@ -128,6 +128,13 @@ fl_kq_cp_result_t fl_kq_cp_head(const char *path, uint8_t rev[32]);
  */
 fl_kq_cp_result_t fl_kq_cp_head_author(const char *path, char *out, size_t cap);
 
+/**
+ * When the file at path was last signed: the newest successful RevisionSigned or CountersignatureAdded
+ * event in the history of the container beside it (KeyQuorum event types 3 and 4), as seconds since the
+ * epoch (UTC). *sec_out is 0 when the history holds no signature. IO when the container cannot be read.
+ */
+fl_kq_cp_result_t fl_kq_cp_last_signature(const char *path, int64_t *sec_out);
+
 /** Display names of the history's type and outcome codes; "?" past the table. Never parsed. */
 const char *fl_kq_cp_event_name(uint8_t code);
 const char *fl_kq_cp_outcome_name(uint8_t code);

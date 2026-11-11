@@ -180,6 +180,47 @@ static int test_box_key_residency(void) {
     return 0;
 }
 
+/* FL-20: the safe Root fallback asks the runtime's provider. None, or one with nothing stored: the service stays
+ * as it was. A credential that does not open Root is refused and audited, and nothing comes online. One that
+ * does brings Root's key online, the credential buffer is the provider's to have filled and the service to wipe. */
+static int s_cred_mode;
+static char s_cred_seen[128];
+static fl_result_t cred_provider(char *out, size_t cap) {
+    if (s_cred_mode == 0)
+        return FL_RESULT_NOENT;
+    if (s_cred_mode == 2)
+        return FL_RESULT_ERR; /* a provider that failed */
+    snprintf(out, cap, "%s", s_cred_mode == 1 ? "root" : "not-root's-password");
+    snprintf(s_cred_seen, sizeof s_cred_seen, "%s", out);
+    return FL_RESULT_OK;
+}
+
+static int test_the_root_fallback_asks_the_runtime(void) {
+    const fl_user_record_t *root = account("Root");
+    uint8_t key[32];
+    kq_signing_mode_t mode = 0;
+
+    ASSERT(root && fl_kq_service_online_count() == 0);
+    ASSERT(fl_kq_service_root_fallback() == FL_RESULT_NOENT); /* no provider */
+    fl_kq_service_set_root_credential_provider(cred_provider);
+    s_cred_mode = 0;
+    ASSERT(fl_kq_service_root_fallback() == FL_RESULT_NOENT && fl_kq_service_online_count() == 0); /* nothing stored */
+    s_cred_mode = 2;
+    ASSERT(fl_kq_service_root_fallback() != FL_RESULT_OK && fl_kq_service_online_count() == 0);    /* provider failed */
+    s_cred_mode = 3;
+    ASSERT(fl_kq_service_root_fallback() != FL_RESULT_OK && fl_kq_service_online_count() == 0);    /* wrong credential */
+    ASSERT(fl_kq_obtain_author_key(root->key_id, key, &mode) == FL_RESULT_ACCES);
+    s_cred_mode = 1;
+    ASSERT(fl_kq_service_root_fallback() == FL_RESULT_OK && fl_kq_service_online_count() == 1);
+    ASSERT(fl_kq_obtain_author_key(root->key_id, key, &mode) == FL_RESULT_OK && mode == KQ_SIGNING_OWN);
+    mem_domain_secure_zero(key, sizeof key);
+    fl_kq_service_offline("Root");
+    ASSERT(fl_kq_service_online_count() == 0);
+    fl_kq_service_set_root_credential_provider(NULL);
+    ASSERT(fl_kq_service_root_fallback() == FL_RESULT_NOENT);
+    return 0;
+}
+
 /* An account marked password-plus-KQST cannot sign in by password alone: no login, nothing online. */
 static int test_a_kqst_account_cannot_log_in_by_password_alone(void) {
     fl_user_db_t *db = fl_session_user_db_mut();
@@ -578,6 +619,94 @@ static int test_autosign_asks_keyquorum_for_the_head_author(void) {
     return 0;
 }
 
+/* FL-20: the production callbacks sign a tracked file with KeyQuorum. Containers hold the history; the file
+ * beside each holds the bytes a check-in signs. */
+static int put_plain(const char *name, const char *text) {
+    char path[512];
+    snprintf(path, sizeof path, "%s/%s", s_tmp, name);
+    return fl_fs_write_file_atomic(path, (const uint8_t *)text, strlen(text));
+}
+
+static int test_autosign_signs_a_tracked_file(void) {
+    const fl_user_record_t *flin = account("Flinstone");
+    char single[512], forked[512], empty[512], missing[512];
+    int64_t before = 0, mid = 0, after = 0, again = 0, none = 0;
+    fl_kq_buf_t lines = {0};
+    uint8_t key[32];
+    kq_file_offer_t offer;
+    size_t forked_events;
+
+    ASSERT(flin);
+    ASSERT(fl_user_db_open_key(fl_session_user_db(), "Flinstone", "flinstone", key) == FL_RESULT_OK);
+    ASSERT(make_containers(flin->key_id, key, &offer) == 0);
+    mem_domain_secure_zero(key, sizeof key);
+    ASSERT(put_plain("single.txt", "tracked\n") == 0 && put_plain("forked.txt", "tracked\n") == 0);
+    snprintf(single, sizeof single, "%s/single.txt", s_tmp);
+    snprintf(forked, sizeof forked, "%s/forked.txt", s_tmp);
+    snprintf(empty, sizeof empty, "%s/empty.txt", s_tmp);
+    snprintf(missing, sizeof missing, "%s/missing.txt", s_tmp);
+
+    /* last_signature: the 09:00:00Z check-in is the newest signature of the one-revision history. */
+    ASSERT(fl_kq_cp_last_signature(single, &before) == FL_KQ_CP_OK && before == 1794301200);
+    ASSERT(fl_kq_autosign_last_signature(&(fl_kq_autosign_file_t){.path = single}) == 1794301200);
+    ASSERT(fl_kq_cp_last_signature(empty, &none) == FL_KQ_CP_OK && none == 0); /* no signature yet */
+    ASSERT(fl_kq_cp_last_signature(missing, &none) == FL_KQ_CP_IO && none == 0);
+    ASSERT(fl_kq_autosign_last_signature(&(fl_kq_autosign_file_t){.path = missing}) == 0);
+    ASSERT(fl_kq_cp_history(forked, &lines) == FL_KQ_CP_OK);
+    forked_events = fl_kq_cp_for_each_event(&lines, NULL, NULL); /* NULL fn visits nothing */
+    (void)forked_events;
+    forked_events = 0;
+    for (size_t i = 0; i < lines.len; i++)
+        forked_events += lines.data[i] == '\n';
+    fl_kq_buf_free(&lines);
+
+    audit_capture(1);
+    ASSERT(fl_session_login("Flinstone", "flinstone") == FL_RESULT_OK);
+    ASSERT(fl_kq_service_autosign_track_file(single, 1) == FL_RESULT_OK);
+    ASSERT(fl_kq_service_autosign_track_file(single, 1) == FL_RESULT_OK); /* idempotent: still one item */
+    ASSERT(fl_kq_service_autosign_track_file(forked, 1) == FL_RESULT_OK);
+    sleep_ms(2600);
+    ASSERT(fl_kq_cp_last_signature(single, &mid) == FL_KQ_CP_OK && mid > before); /* signed by the sweep */
+    {
+        char want[600];
+        snprintf(want, sizeof want, "event=kq-autosign subject=%s", single);
+        ASSERT(audited(want));
+        snprintf(want, sizeof want, "event=kq-autosign-forked subject=%s", forked);
+        ASSERT(audited(want));
+    }
+    ASSERT(fl_kq_cp_history(forked, &lines) == FL_KQ_CP_OK); /* a fork is never signed */
+    {
+        size_t n = 0;
+        for (size_t i = 0; i < lines.len; i++)
+            n += lines.data[i] == '\n';
+        ASSERT(n == forked_events);
+    }
+    fl_kq_buf_free(&lines);
+
+    /* Remove stops it; the queued item finds the object inactive. */
+    ASSERT(fl_kq_service_autosign_remove(single) == FL_RESULT_OK);
+    ASSERT(fl_kq_service_autosign_remove(single) == FL_RESULT_NOENT);
+    ASSERT(fl_kq_cp_last_signature(single, &after) == FL_KQ_CP_OK);
+    sleep_ms(2300);
+    ASSERT(fl_kq_cp_last_signature(single, &again) == FL_KQ_CP_OK && again == after);
+    /* Tracking it again resumes the same item. */
+    ASSERT(fl_kq_service_autosign_track_file(single, 1) == FL_RESULT_OK);
+    sleep_ms(2300);
+    ASSERT(fl_kq_cp_last_signature(single, &again) == FL_KQ_CP_OK && again > after);
+    /* Direct calls: a fork refuses, a missing file is an IO result, no key is no signature. */
+    {
+        uint8_t k2[32];
+        ASSERT(fl_user_db_open_key(fl_session_user_db(), "Flinstone", "flinstone", k2) == FL_RESULT_OK);
+        ASSERT(fl_kq_cp_sign_head_with(forked, flin->key_id, k2, "2026-11-11T10:00:00.000Z") == FL_KQ_CP_FORKED);
+        ASSERT(fl_kq_cp_sign_head_with(missing, flin->key_id, k2, "2026-11-11T10:00:00.000Z") == FL_KQ_CP_IO);
+        ASSERT(fl_kq_cp_sign_head_with(single, flin->key_id, NULL, "2026-11-11T10:00:00.000Z") == FL_KQ_CP_INVALID);
+        mem_domain_secure_zero(k2, sizeof k2);
+    }
+    ASSERT(fl_session_logout() == FL_RESULT_OK);
+    audit_capture(0);
+    return 0;
+}
+
 /* KQ-12: a refused receive leaves a KQER signed by the account that is online, named by the offer's
  * SHA-256, inside the held landing directory; it verifies only for that artifact, and nothing is
  * written when nobody is online or no directory is held. */
@@ -786,6 +915,7 @@ int main(void) {
     RUN(test_login_brings_the_key_online_and_logout_wipes_it);
     if (!rc) RUN(test_kqst_login_commits_only_after_token_open);
     if (!rc) RUN(test_box_key_residency);
+    if (!rc) RUN(test_the_root_fallback_asks_the_runtime);
     if (!rc) RUN(test_a_kqst_account_cannot_log_in_by_password_alone);
     if (!rc) RUN(test_kqst_open_refusal_matrix);
     if (!rc) RUN(test_a_logout_that_overlaps_the_key_derivation_wins);
@@ -794,6 +924,7 @@ int main(void) {
     if (!rc) RUN(test_nobody_may_control_the_service);
     if (!rc) RUN(test_the_periodic_sweep);
     if (!rc) RUN(test_autosign_asks_keyquorum_for_the_head_author);
+    if (!rc) RUN(test_autosign_signs_a_tracked_file);
     if (!rc) RUN(test_a_refusal_is_reported_as_the_online_account);
     if (!rc) RUN(test_the_private_queue_consumes_no_durable_record);
     if (!rc) RUN(test_a_keyless_account_comes_online_at_its_first_login);

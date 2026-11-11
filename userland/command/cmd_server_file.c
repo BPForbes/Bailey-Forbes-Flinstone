@@ -714,6 +714,8 @@ static int verb_kq_send(const cmd_server_ctx_t *ctx, int argc, char **argv)
         fl_color_warn("co-signed delivery refused: %s", fl_kq_cp_reason(cp));
         return 1;
     }
+    /* The file now has a history beside it: keep it signed. Tracking never changes the delivery. */
+    (void)fl_kq_service_autosign_track_file(rpath, FL_KQ_AUTOSIGN_DEFAULT_SEC);
     pthread_mutex_lock(ctx->mutex);
     rc = fl_net_kq_send_delivery(ctx->server, ctx->client, hosting, me, keys.key_id, &enc);
     pthread_mutex_unlock(ctx->mutex);

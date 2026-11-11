@@ -1068,3 +1068,141 @@ done:
     fl_kq_buf_free(&c);
     return out;
 }
+
+/* ---- periodic signing (FL-20) ------------------------------------------------------------ */
+
+/* KeyQuorum history codes (src/file_history/event.rs): RevisionSigned 3, CountersignatureAdded 4;
+ * outcome Success 1. Wire format: append-only on KeyQuorum's side. */
+#define KQ_EV_REVISION_SIGNED 3
+#define KQ_EV_COUNTERSIGNED 4
+#define KQ_OUTCOME_SUCCESS 1
+
+static int num_field(const char *s, size_t n, int64_t *out) {
+    int64_t v = 0;
+
+    if (n == 0 || n > 18)
+        return -1;
+    for (size_t i = 0; i < n; i++) {
+        if (s[i] < '0' || s[i] > '9')
+            return -1;
+        v = v * 10 + (s[i] - '0');
+    }
+    *out = v;
+    return 0;
+}
+
+/* "2026-11-10T09:00:00Z" or "2026-11-10T09:00:00.000Z" (KeyQuorum's UTC text) as epoch seconds. */
+static int utc_to_sec(const char *s, size_t n, int64_t *out) {
+    int64_t y, mo, d, h, mi, se, era, yoe, doy, doe;
+
+    if (n < 20 || s[4] != '-' || s[7] != '-' || s[10] != 'T' || s[13] != ':' || s[16] != ':' || s[n - 1] != 'Z')
+        return -1;
+    if (num_field(s, 4, &y) || num_field(s + 5, 2, &mo) || num_field(s + 8, 2, &d) ||
+        num_field(s + 11, 2, &h) || num_field(s + 14, 2, &mi) || num_field(s + 17, 2, &se))
+        return -1;
+    if (n > 20) { /* fraction: '.' then digits, nothing else */
+        if (s[19] != '.' || n < 22)
+            return -1;
+        for (size_t i = 20; i + 1 < n; i++)
+            if (s[i] < '0' || s[i] > '9')
+                return -1;
+    } else if (s[19] != 'Z') {
+        return -1;
+    }
+    if (mo < 1 || mo > 12 || d < 1 || d > 31 || h > 23 || mi > 59 || se > 60 || y < 1970)
+        return -1;
+    y -= mo <= 2; /* days from civil (proleptic Gregorian), shifting the year to start in March */
+    era = y / 400;
+    yoe = y - era * 400;
+    doy = (153 * (mo + (mo > 2 ? -3 : 9)) + 2) / 5 + d - 1;
+    doe = yoe * 365 + yoe / 4 - yoe / 100 + doy;
+    *out = ((era * 146097 + doe - 719468) * 24 + h) * 3600 + mi * 60 + se;
+    return 0;
+}
+
+typedef struct {
+    int64_t newest;
+} last_sig_t;
+
+/* A history line: sequence TAB time TAB type TAB outcome TAB actor ... (keyquorum_files.h). */
+static int last_sig_line(const char *line, size_t n, void *ctx) {
+    last_sig_t *ls = (last_sig_t *)ctx;
+    const char *f[4];
+    size_t len[4], start = 0;
+    int k = 0;
+    int64_t type, outcome, t;
+
+    for (size_t i = 0; i <= n && k < 4; i++) {
+        if (i == n || line[i] == '\t') {
+            f[k] = line + start;
+            len[k] = i - start;
+            k++;
+            start = i + 1;
+        }
+    }
+    if (k < 4 || num_field(f[2], len[2], &type) || num_field(f[3], len[3], &outcome))
+        return 0;
+    if ((type == KQ_EV_REVISION_SIGNED || type == KQ_EV_COUNTERSIGNED) && outcome == KQ_OUTCOME_SUCCESS &&
+        utc_to_sec(f[1], len[1], &t) == 0 && t > ls->newest)
+        ls->newest = t;
+    return 0;
+}
+
+fl_kq_cp_result_t fl_kq_cp_last_signature(const char *path, int64_t *sec_out) {
+    fl_kq_buf_t lines = {0};
+    last_sig_t ls = {0};
+    fl_kq_cp_result_t rc;
+
+    if (!path || !sec_out)
+        return FL_KQ_CP_INVALID;
+    *sec_out = 0;
+    rc = fl_kq_cp_history(path, &lines);
+    if (rc != FL_KQ_CP_OK)
+        return rc;
+    (void)fl_kq_cp_for_each_event(&lines, last_sig_line, &ls);
+    fl_kq_buf_free(&lines);
+    *sec_out = ls.newest;
+    return FL_KQ_CP_OK;
+}
+
+fl_kq_cp_result_t fl_kq_cp_sign_head_with(const char *path, const char *author_key,
+                                          const uint8_t signing_secret[32], const char *created_at_utc) {
+    const fl_kq_driver_t *drv = fl_kq_driver_get();
+    const fl_kq_storage_t *store = fl_kq_cp_storage();
+    char container_path[4096];
+    fl_kq_buf_t content = {0}, container = {0}, next = {0};
+    uint8_t rev[32];
+    fl_kq_cp_result_t rc;
+    int st;
+
+    if (!path || !author_key || !signing_secret || !created_at_utc)
+        return FL_KQ_CP_INVALID;
+    if (!drv)
+        return FL_KQ_CP_NO_DRIVER;
+    st = store->read_file(store->ctx, path, KQ_CONTENT_MAX, &content.data, &content.len);
+    if (st != 0)
+        return st == -2 ? FL_KQ_CP_TOO_LARGE : FL_KQ_CP_IO;
+    rc = load_container(path, container_path, sizeof container_path, &container);
+    if (rc != FL_KQ_CP_OK)
+        goto done; /* nothing to sign without a history: a signature never starts one */
+    if (drv->verify(&container, NULL) != KQ_FILE_OK) {
+        rc = FL_KQ_CP_INVALID; /* a damaged history is refused, never replaced */
+        goto done;
+    }
+    st = drv->check_in(&container, author_key, created_at_utc, content.data, content.len, signing_secret,
+                       &next, rev);
+    if (st == KQ_FILE_FORKED) {
+        rc = FL_KQ_CP_FORKED;
+        goto done;
+    }
+    if (st != KQ_FILE_OK) {
+        rc = FL_KQ_CP_INVALID;
+        goto done;
+    }
+    rc = store->write_atomic(store->ctx, container_path, next.data, next.len) == 0 ? FL_KQ_CP_OK : FL_KQ_CP_IO;
+done:
+    fl_kq_buf_free(&content);
+    fl_kq_buf_free(&container);
+    fl_kq_buf_free(&next);
+    return rc;
+}
