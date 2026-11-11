@@ -11,6 +11,9 @@
 #include "vga.h"
 #ifdef FL_WITH_KEYQUORUM
 #include "fl/driver/keyquorum.h"
+#ifndef FL_SECFEAT
+void fl_fs_kq_bind_identity(void);
+#endif
 #endif
 
 struct idt_gate {
@@ -93,6 +96,9 @@ void fl_kernel_main(void)
     fl_fs_pic_init();
     fl_fs_pit_init();
     fl_fs_kbd_init();
+#if defined(FL_WITH_KEYQUORUM) && !defined(FL_SECFEAT)
+    fl_fs_kq_bind_identity();
+#endif
     fl_fs_identity_init();
     fl_fs_ramfs_init();
     fl_fs_labdisk_init();

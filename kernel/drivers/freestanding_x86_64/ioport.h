@@ -8,6 +8,11 @@ static inline void fl_fs_outb(uint16_t port, uint8_t value)
     __asm__ volatile("outb %0,%1" : : "a"(value), "Nd"(port));
 }
 
+static inline void fl_fs_outw(uint16_t port, uint16_t value)
+{
+    __asm__ volatile("outw %0,%1" : : "a"(value), "Nd"(port));
+}
+
 static inline uint8_t fl_fs_inb(uint16_t port)
 {
     uint8_t value;

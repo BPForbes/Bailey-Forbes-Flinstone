@@ -26,10 +26,19 @@ def version_line():
 if not image.is_file():
     sys.exit(f"test-freestanding-shell: missing {image}")
 
+# Fresh entropy for every boot, through the launcher: QEMU's default CPU has no RDRAND, and the image
+# takes its random bytes from this fw_cfg file instead (kernel/freestanding/x86_64/kq_platform.c).
+# It must never be a fixed file: a reused file would repeat keys.
+entropy_dir = tempfile.mkdtemp(prefix="fl-entropy-")
+entropy_file = os.path.join(entropy_dir, "entropy.bin")
+with open(entropy_file, "wb") as f:
+    f.write(os.urandom(4096))
+
 proc = subprocess.Popen(
     [
         os.environ.get("FL_BROWSER_KERNEL_QEMU", "qemu-system-x86_64"),
         "-machine", "pc,accel=tcg", "-m", "64M", "-display", "none",
+        "-fw_cfg", f"name=opt/flintstone/entropy,file={entropy_file}",
         "-monitor", "none", "-serial", "stdio", "-no-reboot",
         "-drive", f"file={image},format=raw,if=ide", "-boot", "c",
     ],

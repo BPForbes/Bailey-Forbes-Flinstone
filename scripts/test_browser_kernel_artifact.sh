@@ -117,9 +117,12 @@ if [[ "${FL_REQUIRE_BROWSER_COMPATIBLE:-0}" == "1" && "${browser_compatible}" !=
 fi
 
 qemu_log="$(mktemp)"
-trap 'rm -f "${qemu_log}"' EXIT
+entropy_file="$(mktemp)"
+head -c 4096 /dev/urandom > "${entropy_file}" # fresh for every boot: the image's only entropy without RDRAND
+trap 'rm -f "${qemu_log}" "${entropy_file}"' EXIT
 qemu_args=(
     -machine pc,accel=tcg
+    -fw_cfg "name=opt/flintstone/entropy,file=${entropy_file}"
     -m 64M
     -display none
     -monitor none
