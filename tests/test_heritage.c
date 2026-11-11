@@ -2067,6 +2067,7 @@ static fl_authz_decision_t deny_identity_switch(unsigned op, void *ctx) {
 static int test_identity_switch_denied_before_prompt(void) {
     char *su_argv[] = {"su", "Root", NULL};
     char *sudo_argv[] = {"sudo", "-i", NULL};
+    char *sudo_k_argv[] = {"sudo", "-k", NULL};
 
     ASSERT(fl_authz_subsystem_op_for_shell_cmd((unsigned)FL_SCMD_SU) ==
            (unsigned)FL_AUTHZ_OP_IDENTITY_SWITCH);
@@ -2079,6 +2080,8 @@ static int test_identity_switch_denied_before_prompt(void) {
     ASSERT(cmd_su_run(2, su_argv) != 0);
     ASSERT(cmd_sudo_run(2, sudo_argv) != 0);
     ASSERT(cmd_sudo_require_auth() != 0);
+    /* Giving elevation up is not a switch: sudo -k works while switching is denied, and is not counted. */
+    ASSERT(cmd_sudo_run(2, sudo_k_argv) == 0);
     fl_authz_subsystem_set_hook(NULL, NULL);
     ASSERT(s_switch_denies == 3);
     ASSERT(!strcmp(fl_session_current_user(), "Flinstone"));

@@ -80,8 +80,7 @@ static int sudo_revoke_elevation(void) {
 int cmd_sudo_run(int argc, char **argv) {
     const char *reason = "lab elevation";
 
-    if (fl_authz_identity_switch_denied("sudo"))
-        return 1;
+    /* Giving up elevation is never an identity switch: -k stays available when switching is denied. */
     if (argc >= 2 && argv[1] && strcmp(argv[1], "-k") == 0) {
         if (argc > 2) {
             fprintf(stderr, "sudo: -k does not take additional arguments\n");
@@ -89,6 +88,8 @@ int cmd_sudo_run(int argc, char **argv) {
         }
         return sudo_revoke_elevation();
     }
+    if (fl_authz_identity_switch_denied("sudo"))
+        return 1;
 
     if (argc >= 2 && argv[1] && strcmp(argv[1], "-i") == 0)
         return cmd_sudo_interactive_login();
