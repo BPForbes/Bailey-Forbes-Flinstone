@@ -10,6 +10,7 @@
  */
 #include "net_kq_delivery.h"
 #include "kq_checkpoint.h"
+#include "kq_delivery.h"
 #include "kq_history_bundle.h"
 #include "fl/mem_asm.h"
 #include "user_db.h"
@@ -171,6 +172,16 @@ static int test_keys_come_from_the_host_registry(void) {
     return 0;
 }
 
+/* 1 when the host still has this delivery's letter on disk. */
+static int letter_on_disk(const uint8_t id[FL_KQ_DELIVERY_ID_LEN]) {
+    char hex[2 * FL_KQ_DELIVERY_ID_LEN + 1];
+    char path[PATH_MAX];
+
+    fl_kq_delivery_id_hex(id, hex);
+    snprintf(path, sizeof path, "%s/store/kq_letters/%s.kqpb", s_dir, hex);
+    return access(path, F_OK) == 0;
+}
+
 /* 0 when the host's sent listing for sender holds file_name in the given state. */
 static int host_sent_state(const char *sender, const char *file_name, const char *state) {
     fl_kq_delivery_t sent[8];
@@ -285,10 +296,12 @@ static int test_a_refused_ack_is_recorded_as_refused_over_the_wire(void) {
     ASSERT(fl_net_kq_send_cosign(s_srv, NULL, 0, inbox[0].id, STEVE, sig) == FL_RESULT_OK);
     ASSERT(s_to_steve[FL_NET_SESSION_OP_KQ_RELEASE] == releases_before + 1);
     ASSERT(host_sent_state(MYA, "refused.txt", "released") == 0);
+    ASSERT(letter_on_disk(inbox[0].id) == 1);
 
     /* Steve refuses: the host records a refusal, not a delivery, and deletes the letter. */
     ASSERT(fl_net_kq_send_ack(s_srv, NULL, 0, inbox[0].id, 0) == FL_RESULT_OK);
     ASSERT(host_sent_state(MYA, "refused.txt", "refused") == 0);
+    ASSERT(letter_on_disk(inbox[0].id) == 0);
 
     /* A repeated co-signature neither re-sends nor fires again. */
     releases_before = s_to_steve[FL_NET_SESSION_OP_KQ_RELEASE];
