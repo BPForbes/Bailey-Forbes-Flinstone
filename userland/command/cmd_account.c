@@ -19,19 +19,26 @@ static int ensure_privilege(void) {
     return 1;
 }
 
-/** Drop in-memory account mutations when persistence fails. */
-static int account_reload_db_from_disk(fl_user_db_t *db) {
-    if (!db || !db->path[0])
-        return 0;
-    if (fl_user_db_load(db, db->path) != FL_RESULT_OK) {
-        fprintf(stderr, "account: could not reload %s from disk\n", db->path);
+/** Drop in-memory account mutations when persistence fails. 0 when the disk store is loaded again. */
+static int account_reload_db_from_disk(void) {
+    const fl_user_db_t *db = fl_session_user_db();
+    char path[256];
+
+    if (!db || !db->path[0]) {
+        fprintf(stderr, "account: could not reload (no path) from disk\n");
+        (void)fl_session_drop_elevation();
+        return 1;
+    }
+    snprintf(path, sizeof path, "%s", db->path);
+    if (fl_session_reload_users() != FL_RESULT_OK) {
+        fprintf(stderr, "account: could not reload %s from disk\n", path);
+        (void)fl_session_drop_elevation();
         return 1;
     }
     return 0;
 }
 
 int cmd_useradd_run(int argc, char **argv) {
-    fl_user_db_t *db;
     fl_result_t rc;
     const char *name;
     char pw[128];
@@ -39,7 +46,8 @@ int cmd_useradd_run(int argc, char **argv) {
     uint32_t uid = 2000;
     char creator[FL_HERITAGE_KEY_ID_MAX];
     int64_t now = 0;
-    const fl_user_record_t *u;
+    fl_user_record_t added;
+    int have_added = 0;
 
     if (ensure_privilege())
         return 1;
@@ -77,9 +85,13 @@ int cmd_useradd_run(int argc, char **argv) {
     pass = pw;
     if (fl_time_wall_sec(&now) != FL_RESULT_OK)
         now = 0;
-    db = fl_session_user_db_mut();
-    uid = fl_user_db_next_uid(db);
-    rc = fl_user_db_add_user_under(db, creator, name, pass, uid, 0, now);
+    if (!fl_session_users_loaded()) {
+        cmd_wipe_password(pw, sizeof(pw));
+        fprintf(stderr, "account: account store is not available\n");
+        return 1;
+    }
+    uid = fl_session_next_uid();
+    rc = fl_session_add_user_under(creator, name, pass, uid, 0, now);
     cmd_wipe_password(pw, sizeof(pw));
     if (rc == FL_RESULT_BUSY) {
         fprintf(stderr, "useradd: %s already exists\n", name);
@@ -90,28 +102,33 @@ int cmd_useradd_run(int argc, char **argv) {
         return 1;
     }
     if (fl_session_save_users() != FL_RESULT_OK) {
-        (void)account_reload_db_from_disk(db);
+        if (account_reload_db_from_disk() != 0) {
+            fprintf(stderr, "useradd: could not save %s\n", FL_SESSION_USERS_PATH);
+            return 1;
+        }
+        /* Reload restored the file. The new account still did not persist. */
         fprintf(stderr, "useradd: could not save %s\n", FL_SESSION_USERS_PATH);
         return 1;
     }
-    u = fl_user_db_find(db, name);
-    fl_audit_identity_event(creator, "useradd", u ? u->key_id : name, NULL);
-    printf("useradd: added %s (uid=%u, key %s)\n", name, (unsigned)uid, u ? u->key_id : "?");
-    if (u && fs_jail_is_active()) {
+    if (fl_session_snapshot_account(name, &added) == FL_RESULT_OK)
+        have_added = 1;
+    fl_audit_identity_event(creator, "useradd", have_added ? added.key_id : name, NULL);
+    printf("useradd: added %s (uid=%u, key %s)\n", name, (unsigned)uid, have_added ? added.key_id : "?");
+    if (have_added && fs_jail_is_active()) {
         char home[4096];
 
-        if (fs_jail_account_home(u->key_id, home, sizeof home) == 0)
+        if (fs_jail_account_home(added.key_id, home, sizeof home) == 0)
             printf("useradd: home %s\n", home);
     }
     return 0;
 }
 
 int cmd_userdel_run(int argc, char **argv) {
-    fl_user_db_t *db;
     fl_result_t rc;
-    const fl_user_record_t *target;
+    fl_user_record_t target;
     char actor[FL_HERITAGE_KEY_ID_MAX];
     char target_key[FL_HERITAGE_KEY_ID_MAX];
+    char db_path[256];
 
     if (ensure_privilege())
         return 1;
@@ -123,23 +140,26 @@ int cmd_userdel_run(int argc, char **argv) {
         fprintf(stderr, "userdel: cannot remove Root\n");
         return 1;
     }
-    db = fl_session_user_db_mut();
-    target = fl_user_db_find(db, argv[1]);
-    if (!target) {
+    if (!fl_session_users_loaded()) {
+        fprintf(stderr, "account: account store is not available\n");
+        return 1;
+    }
+    if (fl_session_snapshot_account(argv[1], &target) != FL_RESULT_OK) {
         fprintf(stderr, "userdel: %s does not exist\n", argv[1]);
         return 1;
     }
     strncpy(actor, fl_session_current_key_id(), sizeof(actor) - 1);
     actor[sizeof(actor) - 1] = '\0';
-    strncpy(target_key, target->key_id, sizeof(target_key) - 1);
+    strncpy(target_key, target.key_id, sizeof(target_key) - 1);
     target_key[sizeof(target_key) - 1] = '\0';
+    snprintf(db_path, sizeof db_path, "%s", fl_session_user_db()->path);
     /* Only an ancestor removes an account: never yourself, a sibling or another branch. */
     if (fl_heritage_relation(actor, target_key) != FL_HERITAGE_REL_DESCENDANT) {
         fprintf(stderr, "userdel: %s (%s) is not below %s\n", argv[1], target_key,
                 actor[0] ? actor : "this account");
         return 1;
     }
-    rc = fl_user_db_remove_user(db, argv[1]);
+    rc = fl_session_remove_user(argv[1]);
     if (rc == FL_RESULT_BUSY) {
         fprintf(stderr, "userdel: %s still has accounts below it; remove those first\n", argv[1]);
         return 1;
@@ -154,14 +174,22 @@ int cmd_userdel_run(int argc, char **argv) {
      * access. If the bridges cannot be removed, the account stays; if the save then
      * fails, the account stays too, without its bridges (fail closed).
      */
-    if (fl_bridge_remove_for(db->path, target_key) != FL_RESULT_OK) {
-        (void)account_reload_db_from_disk(db);
+    if (fl_bridge_remove_for(db_path, target_key) != FL_RESULT_OK) {
+        if (account_reload_db_from_disk() != 0) {
+            fprintf(stderr, "userdel: could not remove the bridges of %s; %s is unchanged\n", target_key,
+                    argv[1]);
+            return 1;
+        }
         fprintf(stderr, "userdel: could not remove the bridges of %s; %s is unchanged\n", target_key,
                 argv[1]);
         return 1;
     }
     if (fl_session_save_users() != FL_RESULT_OK) {
-        (void)account_reload_db_from_disk(db);
+        if (account_reload_db_from_disk() != 0) {
+            fprintf(stderr, "userdel: could not save %s; %s is kept, and its bridges must be requested again\n",
+                    FL_SESSION_USERS_PATH, argv[1]);
+            return 1;
+        }
         fprintf(stderr, "userdel: could not save %s; %s is kept, and its bridges must be requested again\n",
                 FL_SESSION_USERS_PATH, argv[1]);
         return 1;
@@ -172,10 +200,9 @@ int cmd_userdel_run(int argc, char **argv) {
 }
 
 int cmd_passwd_run(int argc, char **argv) {
-    fl_user_db_t *db;
     fl_result_t rc;
     const char *user;
-    const fl_user_record_t *target;
+    fl_user_record_t target;
     char actor[FL_HERITAGE_KEY_ID_MAX];
     char target_key[FL_HERITAGE_KEY_ID_MAX];
     fl_heritage_relation_t rel;
@@ -192,14 +219,13 @@ int cmd_passwd_run(int argc, char **argv) {
         fprintf(stderr,
                 "passwd: password is read on the next line (not as a command argument)\n");
     }
-    target = fl_user_db_find(fl_session_user_db(), user);
-    if (!target) {
+    if (fl_session_snapshot_account(user, &target) != FL_RESULT_OK) {
         fprintf(stderr, "passwd: %s does not exist\n", user);
         return 1;
     }
     strncpy(actor, fl_session_current_key_id(), sizeof(actor) - 1);
     actor[sizeof(actor) - 1] = '\0';
-    strncpy(target_key, target->key_id, sizeof(target_key) - 1);
+    strncpy(target_key, target.key_id, sizeof(target_key) - 1);
     target_key[sizeof(target_key) - 1] = '\0';
     rel = fl_heritage_relation(actor, target_key);
     if (rel != FL_HERITAGE_REL_SELF && rel != FL_HERITAGE_REL_DESCENDANT) {
@@ -224,11 +250,16 @@ int cmd_passwd_run(int argc, char **argv) {
         return 1;
     }
     pass = pw;
-    db = fl_session_user_db_mut();
+    if (!fl_session_users_loaded()) {
+        cmd_wipe_password(pw, sizeof(pw));
+        cmd_wipe_password(current, sizeof(current));
+        fprintf(stderr, "account: account store is not available\n");
+        return 1;
+    }
     if (rel == FL_HERITAGE_REL_SELF)
-        rc = fl_user_db_change_password(db, user, current, pass);
+        rc = fl_session_change_password(user, current, pass);
     else
-        rc = fl_user_db_set_password(db, user, pass);
+        rc = fl_session_set_password(user, pass);
     cmd_wipe_password(pw, sizeof(pw));
     cmd_wipe_password(current, sizeof(current));
     if (rc == FL_RESULT_ACCES) {
@@ -240,7 +271,10 @@ int cmd_passwd_run(int argc, char **argv) {
         return 1;
     }
     if (fl_session_save_users() != FL_RESULT_OK) {
-        (void)account_reload_db_from_disk(db);
+        if (account_reload_db_from_disk() != 0) {
+            fprintf(stderr, "passwd: could not save %s\n", FL_SESSION_USERS_PATH);
+            return 1;
+        }
         fprintf(stderr, "passwd: could not save %s\n", FL_SESSION_USERS_PATH);
         return 1;
     }

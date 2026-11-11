@@ -6,6 +6,12 @@
  * image and the host smoke binary are built without it). See lab_kq.c.
  */
 
+/**
+ * Install the identity ops before fl_fs_identity_init. Seals each new account's keys under
+ * its password. Does not restrict switchuser.
+ */
+void fl_lab_kq_bind_identity(void);
+
 /** Where asynchronous lines go (the shell's own output, so they reach the terminal). */
 void fl_lab_kq_init(void (*emit)(const char *line));
 

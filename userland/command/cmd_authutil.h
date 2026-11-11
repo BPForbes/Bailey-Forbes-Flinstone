@@ -21,10 +21,14 @@ int cmd_sudo_require_auth(void);
 int cmd_sudo_require_auth_reason(const char *reason);
 
 /**
- * Verify target user's password (for su). Always prompts on the next line.
- * Returns 0 on success.
+ * su and sudo -i (sudo non-zero): asks KeyQuorum which factor the switch to target demands
+ * (fl_kq_unlock_requirement), prompts for it (the target's password, or Root's for sudo -i; for a
+ * bridge, once that password is verified, also a bridge member's password: the caller when a member,
+ * else the account it names, refused when over-long) and hands it to fl_session_switch_user, which
+ * asks again, checks and commits. Every refusal prints the same "<cmd>: authentication failed"; the
+ * reason is only in the audit. Every password is wiped. Returns 0 when the session is now target.
  */
-int cmd_su_require_auth(const char *target);
+int cmd_switch_user(const char *cmd, const char *target, int sudo);
 
 /**
  * Prompts once for the logged-in account's password ("Password (<why>): ") and opens its

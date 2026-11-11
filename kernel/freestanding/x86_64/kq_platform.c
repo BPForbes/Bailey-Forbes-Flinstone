@@ -9,9 +9,9 @@
  * pages) and QEMU's 64 MiB provides, above the kernel image and its bss. A first-fit free list with
  * coalescing; every freed block is zeroed, as the library asks.
  *
- * Entropy: RDRAND only. Without it kq_platform_random returns non-zero and the library fails
- * closed (a panic through kq_platform_panic): no weak bytes, ever. QEMU's default CPU model has
- * no RDRAND; `-cpu max` does.
+ * Entropy: RDRAND, else the launcher's fw_cfg file opt/flintstone/entropy (below). With neither,
+ * kq_platform_random returns non-zero and the library fails closed (a panic through
+ * kq_platform_panic): no weak bytes, ever. QEMU's default CPU model has no RDRAND; `-cpu max` does.
  */
 #include "contract_result.h"
 #include "fl/mem_asm.h"
@@ -129,10 +129,42 @@ static int have_rdrand(void)
     return (c >> 30) & 1u;
 }
 
+#ifndef FL_SECFEAT
+/* ---- fw_cfg entropy: the launcher's provider when the CPU has no RDRAND ------------------------
+ * The launcher hands the image a file named opt/flintstone/entropy through QEMU's fw_cfg device (the driver is
+ * kernel/drivers/freestanding_x86_64/fwcfg.c). It must hold fresh random bytes on every boot (the browser page:
+ * crypto.getRandomValues; a shell: head -c 4096 /dev/urandom): the image cannot tell a reused file from a fresh
+ * one, and a reused file would repeat keys. The policy is here: each byte is handed out once, never reused, and
+ * running out fails closed like every other path. It is used only when RDRAND is absent. */
+#include "fwcfg.h"
+
+#define FW_ENTROPY_NAME "opt/flintstone/entropy"
+
+static uint32_t s_fw_used;
+
+static int fw_cfg_fill(uint8_t *buf, size_t len)
+{
+    if (len > 0xFFFFFFFFu - s_fw_used || fl_fs_fwcfg_read(FW_ENTROPY_NAME, s_fw_used, buf, len) != 0)
+        return 1; /* no device, no file, or not enough left: fail closed */
+    s_fw_used += (uint32_t)len;
+    return 0;
+}
+#else
+/* The SECFEAT image has about 512 bytes of room before the 0x9f000 limit: RDRAND only, as before. */
+static int fw_cfg_fill(uint8_t *buf, size_t len)
+{
+    (void)buf;
+    (void)len;
+    return 1;
+}
+#endif
+
 int kq_platform_random(uint8_t *buf, size_t len)
 {
-    if (!buf || !have_rdrand())
+    if (!buf)
         return 1;
+    if (!have_rdrand())
+        return fw_cfg_fill(buf, len);
     while (len) {
         uint64_t v = 0;
         unsigned char ok = 0;
@@ -209,6 +241,11 @@ void mem_domain_zero(void *p, size_t n)
 void mem_domain_secure_zero(void *p, size_t n)
 {
     asm_mem_secure_zero(p, n);
+}
+
+int mem_domain_equal(const void *a, const void *b, size_t n)
+{
+    return asm_mem_ct_equal(a, b, n);
 }
 
 

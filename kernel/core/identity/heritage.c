@@ -6,6 +6,7 @@
  * master account has no parent (NOENT).
  */
 #include "heritage.h"
+#include "fl/driver/keyquorum.h"
 #include "keyquorum_identity.h"
 #include <stdio.h>
 #include <string.h>
@@ -68,9 +69,15 @@ fl_heritage_relation_t fl_heritage_relation(const char *a, const char *b) {
 }
 
 int fl_heritage_bridge_connects(const char *end_a, const char *end_b, const char *actor, const char *scope) {
+    const fl_kq_driver_t *drv;
+
     if (!end_a || !end_b || !actor || !scope)
         return 0;
-    return kq_bridge_connects(end_a, end_b, actor, scope) != 0;
+    /* Through the KeyQuorum driver; no driver or no op does not connect. */
+    drv = fl_kq_driver_get_or_register();
+    if (!drv || !drv->bridge_connects)
+        return 0;
+    return drv->bridge_connects(end_a, end_b, actor, scope) != 0;
 }
 
 const char *fl_heritage_relation_name(fl_heritage_relation_t rel) {

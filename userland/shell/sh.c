@@ -43,6 +43,7 @@
  *
  *****************************************************************************/
 
+#include "fl/audit_log.h"
 #include "common.h"
 #include "cmd_decl.h"
 #include "shell_io.h"
@@ -380,6 +381,8 @@ int main(int argc, char *argv[]) {
         fprintf(stderr, "[VM] 5-layer driver config warning: layer 4 shell/VM root is not configured\n");
     fs_jail_init();
     fl_session_init();
+    /* Refused (and legacy) identity switches are audited from the session layer. */
+    fl_session_set_audit_hook(fl_audit_identity_event);
     fl_net_netdev_init();
     fl_net_netdev_set_authz_hook(fl_authz_subsystem_check, NULL);
     atexit(shell_netdev_cleanup_at_exit);

@@ -2,11 +2,14 @@
 #include "kq_storage.h"
 #include "contract_p2_heritage.h"
 #include "server_shared_fs.h"
+#include "fl/hex.h"
 #include "fl/path.h"
 #include "fl/random.h"
 #include "mem_domain.h"
+#include "net_endian.h"
 
 #include <errno.h>
+#include <pthread.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -253,8 +256,39 @@ static int land_exists(const kq_land_t *l, const char *name) {
     return l->st->dir_exists(l->st->ctx, &l->dir, name);
 }
 
+/* One lock for every read-modify-write of a container (load, mutate, write_atomic): two writers of the same
+ * file would otherwise each read the same revision and the later write would drop the earlier one (the
+ * autosign sweep and a send or a report applying at once). There was no per-container lock in the storage
+ * facade to reuse; the lock is per process and the sections are short, so one mutex serves every path. */
+static pthread_mutex_t s_container_mu = PTHREAD_MUTEX_INITIALIZER;
+
 static int sidecar(const char *path, const char *suffix, char *out, size_t cap) {
     return snprintf(out, cap, "%s%s", path, suffix) < (int)cap ? 0 : -1;
+}
+
+/* The one path-based container read: the container beside path, through the storage table.
+ * IO when it cannot be read (absent included), TOO_LARGE past the letter cap. */
+static fl_kq_cp_result_t load_container(const char *path, char *container_path, size_t cap,
+                                        fl_kq_buf_t *c) {
+    int rc;
+
+    if (sidecar(path, FL_KQ_CONTAINER_SUFFIX, container_path, cap) != 0)
+        return FL_KQ_CP_INVALID;
+    rc = fl_kq_cp_storage()->read_file(fl_kq_cp_storage()->ctx, container_path, FL_KQ_LETTER_MAX,
+                                       &c->data, &c->len);
+    if (rc != 0)
+        return rc == -2 ? FL_KQ_CP_TOO_LARGE : FL_KQ_CP_IO;
+    return FL_KQ_CP_OK;
+}
+
+/* The one write of a grown container: past the letter cap it is TOO_LARGE and nothing is written, so a history
+ * that load_container would later refuse to read is never produced. */
+static fl_kq_cp_result_t store_container(const char *container_path, const fl_kq_buf_t *next) {
+    const fl_kq_storage_t *store = fl_kq_cp_storage();
+
+    if (next->len > FL_KQ_LETTER_MAX)
+        return FL_KQ_CP_TOO_LARGE;
+    return store->write_atomic(store->ctx, container_path, next->data, next->len) == 0 ? FL_KQ_CP_OK : FL_KQ_CP_IO;
 }
 
 /* ---- trust table --------------------------------------------------------- */
@@ -303,7 +337,7 @@ static void trust_build(const fl_kq_driver_t *drv, const fl_kq_keydir_t *keys,
 
 /* ---- checkpoints -------------------------------------------------------- */
 
-fl_kq_cp_result_t fl_kq_cp_encode_with(const fl_kq_keydir_t *keys, const char *sender_key,
+static fl_kq_cp_result_t fl_kq_cp_encode_with_unlocked(const fl_kq_keydir_t *keys, const char *sender_key,
                                        const uint8_t sender_signing_secret[32],
                                        const char *recipient_key,
                                        const uint8_t recipient_box_public[32], const char *path,
@@ -389,10 +423,9 @@ fl_kq_cp_result_t fl_kq_cp_encode_with(const fl_kq_keydir_t *keys, const char *s
         goto done;
     }
     /* The new revision is kept beside the file only once it is sealed. */
-    if (store->write_atomic(store->ctx, container_path, next.data, next.len) != 0) {
-        rc = FL_KQ_CP_IO;
+    rc = store_container(container_path, &next);
+    if (rc != FL_KQ_CP_OK)
         goto done;
-    }
     snprintf(out->file_name, sizeof out->file_name, "%s", fl_fs_basename(path));
 
 done:
@@ -401,6 +434,19 @@ done:
     fl_kq_buf_free(&content);
     fl_kq_buf_free(&container);
     fl_kq_buf_free(&next);
+    return rc;
+}
+
+fl_kq_cp_result_t fl_kq_cp_encode_with(const fl_kq_keydir_t *keys, const char *sender_key,
+                                       const uint8_t sender_signing_secret[32],
+                                       const char *recipient_key,
+                                       const uint8_t recipient_box_public[32], const char *path,
+                                       const char *created_at_utc, fl_kq_encoded_t *out) {
+    fl_kq_cp_result_t rc;
+
+    pthread_mutex_lock(&s_container_mu);
+    rc = fl_kq_cp_encode_with_unlocked(keys, sender_key, sender_signing_secret, recipient_key, recipient_box_public, path, created_at_utc, out);
+    pthread_mutex_unlock(&s_container_mu);
     return rc;
 }
 
@@ -754,6 +800,7 @@ fl_kq_cp_result_t fl_kq_cp_history(const char *path, fl_kq_buf_t *lines) {
     const fl_kq_driver_t *drv = fl_kq_driver_get();
     char container_path[4096];
     fl_kq_buf_t c = {0};
+    fl_kq_cp_result_t loaded;
     int rc;
 
     if (!lines || !path)
@@ -762,12 +809,9 @@ fl_kq_cp_result_t fl_kq_cp_history(const char *path, fl_kq_buf_t *lines) {
     lines->len = 0;
     if (!drv)
         return FL_KQ_CP_NO_DRIVER;
-    if (sidecar(path, FL_KQ_CONTAINER_SUFFIX, container_path, sizeof container_path) != 0)
-        return FL_KQ_CP_INVALID;
-    rc = fl_kq_cp_storage()->read_file(fl_kq_cp_storage()->ctx, container_path,
-                                       FL_KQ_LETTER_MAX, &c.data, &c.len);
-    if (rc != 0)
-        return rc == -2 ? FL_KQ_CP_TOO_LARGE : FL_KQ_CP_IO;
+    loaded = load_container(path, container_path, sizeof container_path, &c);
+    if (loaded != FL_KQ_CP_OK)
+        return loaded;
     rc = drv->events(&c, lines);
     fl_kq_buf_free(&c);
     return rc == KQ_FILE_OK ? FL_KQ_CP_OK : FL_KQ_CP_INVALID;
@@ -784,11 +828,9 @@ fl_kq_cp_result_t fl_kq_cp_head(const char *path, uint8_t rev[32]) {
         return FL_KQ_CP_INVALID;
     if (!drv)
         return FL_KQ_CP_NO_DRIVER;
-    if (sidecar(path, FL_KQ_CONTAINER_SUFFIX, container_path, sizeof container_path) != 0)
-        return FL_KQ_CP_INVALID;
-    if (fl_kq_cp_storage()->read_file(fl_kq_cp_storage()->ctx, container_path, FL_KQ_LETTER_MAX,
-                                      &c.data, &c.len) != 0)
-        return FL_KQ_CP_IO;
+    out = load_container(path, container_path, sizeof container_path, &c);
+    if (out != FL_KQ_CP_OK)
+        return out;
     rc = drv->head(&c, rev);
     if (rc == KQ_FILE_FORKED)
         out = FL_KQ_CP_FORKED;
@@ -796,6 +838,32 @@ fl_kq_cp_result_t fl_kq_cp_head(const char *path, uint8_t rev[32]) {
         out = FL_KQ_CP_INVALID;
     fl_kq_buf_free(&c);
     return out;
+}
+
+fl_kq_cp_result_t fl_kq_cp_head_author(const char *path, char *out, size_t cap) {
+    const fl_kq_driver_t *drv = fl_kq_driver_get();
+    char container_path[4096];
+    fl_kq_buf_t c = {0};
+    fl_kq_cp_result_t res;
+    int rc;
+
+    if (!path || !out || cap == 0)
+        return FL_KQ_CP_INVALID;
+    out[0] = '\0';
+    if (!drv || !drv->head_author)
+        return FL_KQ_CP_NO_DRIVER;
+    res = load_container(path, container_path, sizeof container_path, &c);
+    if (res != FL_KQ_CP_OK)
+        return res;
+    rc = drv->head_author(&c, out, cap);
+    if (rc == KQ_FILE_FORKED)
+        res = FL_KQ_CP_FORKED;
+    else if (rc != KQ_FILE_OK)
+        res = FL_KQ_CP_INVALID; /* no revision, no room, malformed: nobody is named */
+    fl_kq_buf_free(&c);
+    if (res != FL_KQ_CP_OK)
+        out[0] = '\0';
+    return res;
 }
 
 /* Sealed letter for revision rev already in the container beside path (sender). Nothing is
@@ -857,7 +925,7 @@ done:
     return rc;
 }
 
-fl_kq_cp_result_t fl_kq_cp_permit_with(const fl_kq_keydir_t *keys, const char *supervisor_key,
+static fl_kq_cp_result_t fl_kq_cp_permit_with_unlocked(const fl_kq_keydir_t *keys, const char *supervisor_key,
                                        const uint8_t supervisor_secret[32], const char *path,
                                        const uint8_t rev[32]) {
     const fl_kq_driver_t *drv = fl_kq_driver_get();
@@ -884,9 +952,7 @@ fl_kq_cp_result_t fl_kq_cp_permit_with(const fl_kq_keydir_t *keys, const char *s
         out = FL_KQ_CP_INVALID;
         goto done;
     }
-    if (fl_kq_cp_storage()->write_atomic(fl_kq_cp_storage()->ctx, container_path, next.data,
-                                         next.len) != 0)
-        out = FL_KQ_CP_IO;
+    out = store_container(container_path, &next);
 
 done:
     fl_kq_buf_free(&next);
@@ -894,3 +960,422 @@ done:
     return out;
 }
 
+fl_kq_cp_result_t fl_kq_cp_permit_with(const fl_kq_keydir_t *keys, const char *supervisor_key,
+                                       const uint8_t supervisor_secret[32], const char *path,
+                                       const uint8_t rev[32]) {
+    fl_kq_cp_result_t rc;
+
+    pthread_mutex_lock(&s_container_mu);
+    rc = fl_kq_cp_permit_with_unlocked(keys, supervisor_key, supervisor_secret, path, rev);
+    pthread_mutex_unlock(&s_container_mu);
+    return rc;
+}
+
+
+/* ---- refusal reports (KQER, keyquorum_error.h) --------------------------- */
+
+void fl_kq_cp_offer_encode(const kq_file_offer_t *o, uint8_t out[FL_KQ_OFFER_WIRE_LEN]) {
+    uint8_t *p = out;
+
+    memcpy(p, o->file_id, 16);
+    p += 16;
+    memcpy(p, o->revision_id, 32);
+    p += 32;
+    memcpy(p, o->content_commitment, 32);
+    p += 32;
+    memcpy(p, o->author_identity, 16);
+    p += 16;
+    memcpy(p, o->author_signature, 64);
+    p += 64;
+    fl_net_put_u64_be(p, o->topology_generation);
+    p += 8;
+    memcpy(p, o->policy_hash, 32);
+}
+
+int fl_kq_cp_report_path(const char *dir, const uint8_t ref[32], char *out, size_t cap) {
+    char hex[65];
+
+    if (!dir || !dir[0] || !ref || !out)
+        return -1;
+    fl_hex_encode(ref, 32, hex);
+    return snprintf(out, cap, "%s/%s%s", dir, hex, FL_KQ_REPORT_SUFFIX) < (int)cap ? 0 : -1;
+}
+
+fl_kq_cp_result_t fl_kq_cp_report_write_in(uint16_t code, uint8_t class_code, uint8_t step,
+                                           const uint8_t ref[32], const char *actor,
+                                           const char *occurred_at, const uint8_t secret[32],
+                                           const fl_kq_dir_t *dir) {
+    const fl_kq_driver_t *drv = fl_kq_driver_get();
+    const fl_kq_storage_t *st = fl_kq_cp_storage();
+    char name[65 + sizeof FL_KQ_REPORT_SUFFIX];
+    uint8_t ledger[FL_KQ_REPORT_CAP * 32u];
+    size_t held = 0, i;
+    int known = 0, e;
+    fl_kq_buf_t kqer = {0}, old = {0};
+    fl_kq_file_out_t files[2];
+    fl_kq_cp_result_t out = FL_KQ_CP_OK;
+
+    if (!ref || !actor || !occurred_at || !secret || !dir || !dir->dir)
+        return FL_KQ_CP_INVALID;
+    if (!drv)
+        return FL_KQ_CP_NO_DRIVER;
+    fl_hex_encode(ref, 32, name);
+    memcpy(name + 64, FL_KQ_REPORT_SUFFIX, sizeof FL_KQ_REPORT_SUFFIX);
+    /* Every step inside the held directory: a directory swapped after the caller took the
+     * handle is never followed. An existing report is kept as it is and not counted again. */
+    e = st->dir_exists(st->ctx, dir, name);
+    if (e != 0)
+        return e == 1 ? FL_KQ_CP_EXISTS : FL_KQ_CP_IO;
+    e = st->dir_exists(st->ctx, dir, FL_KQ_REPORT_LEDGER);
+    if (e < 0)
+        return FL_KQ_CP_IO;
+    if (e == 1) {
+        if (st->dir_read(st->ctx, dir, FL_KQ_REPORT_LEDGER, FL_KQ_REPORT_CAP * 32u, &old.data,
+                         &old.len) != 0 ||
+            old.len % 32u != 0) {
+            fl_kq_buf_free(&old);
+            return FL_KQ_CP_IO; /* a ledger that cannot be read is never taken as empty */
+        }
+        memcpy(ledger, old.data, old.len);
+        held = old.len;
+        fl_kq_buf_free(&old);
+    }
+    for (i = 0; i < held; i += 32u)
+        if (memcmp(ledger + i, ref, 32) == 0)
+            known = 1;
+    if (!known && held >= FL_KQ_REPORT_CAP * 32u)
+        return FL_KQ_CP_TOO_LARGE;
+    /* No free text: the code, class and labels are KeyQuorum's closed sets, checked there. */
+    if (drv->error_sign(code, class_code, step, ref, actor, occurred_at, NULL, NULL, secret,
+                        &kqer) != KQ_FILE_OK)
+        return FL_KQ_CP_INVALID;
+    if (!known) {
+        memcpy(ledger + held, ref, 32);
+        held += 32u;
+    }
+    files[0].name = name;
+    files[0].data = kqer.data;
+    files[0].len = kqer.len;
+    files[1].name = FL_KQ_REPORT_LEDGER;
+    files[1].data = ledger;
+    files[1].len = held;
+    if (st->dir_commit(st->ctx, dir, files, 2) != 0)
+        out = FL_KQ_CP_IO;
+    fl_kq_buf_free(&kqer);
+    return out;
+}
+
+fl_kq_cp_result_t fl_kq_cp_report_read_in(const fl_kq_dir_t *dir, const uint8_t ref[32],
+                                          const uint8_t reporter_public[32], fl_kq_buf_t *out) {
+    const fl_kq_driver_t *drv = fl_kq_driver_get();
+    const fl_kq_storage_t *st = fl_kq_cp_storage();
+    char name[65 + sizeof FL_KQ_REPORT_SUFFIX];
+    fl_kq_buf_t scratch = {0}, next = {0};
+    uint8_t id[16];
+    fl_kq_cp_result_t rc = FL_KQ_CP_BAD_SIGNATURE;
+
+    if (!out)
+        return FL_KQ_CP_INVALID;
+    out->data = NULL;
+    out->len = 0;
+    if (!dir || !dir->dir || !ref || !reporter_public)
+        return FL_KQ_CP_INVALID;
+    if (!drv)
+        return FL_KQ_CP_NO_DRIVER;
+    fl_hex_encode(ref, 32, name);
+    mem_domain_copy(name + 64, FL_KQ_REPORT_SUFFIX, sizeof FL_KQ_REPORT_SUFFIX);
+    /* Through the held directory, like the write: a name swapped for a link is never followed. */
+    if (st->dir_read(st->ctx, dir, name, FL_KQ_REPORT_MAX, &out->data, &out->len) != 0) {
+        out->data = NULL;
+        out->len = 0;
+        return FL_KQ_CP_IO;
+    }
+    /* The bytes are the intended KQER only if KeyQuorum accepts them for this artifact under the reporter's key:
+     * the same check an injection makes, run against a scratch history that is thrown away. */
+    mem_domain_copy(id, ref, sizeof id);
+    if (drv->file_new(id, "report-check", FL_HERITAGE_ROOT_KEY, &scratch) == KQ_FILE_OK &&
+        drv->error_inject(&scratch, out, reporter_public, ref, &next) == KQ_FILE_OK)
+        rc = FL_KQ_CP_OK;
+    fl_kq_buf_free(&next);
+    fl_kq_buf_free(&scratch);
+    if (rc != FL_KQ_CP_OK) {
+        fl_kq_buf_free(out);
+        out->data = NULL;
+        out->len = 0;
+    }
+    return rc;
+}
+
+static fl_kq_cp_result_t fl_kq_cp_inject_report_bytes_unlocked(const uint8_t reporter_public[32], const uint8_t *kqer_bytes,
+                                               size_t kqer_len, const uint8_t ref[32], const char *path) {
+    const fl_kq_driver_t *drv = fl_kq_driver_get();
+    char container_path[4096];
+    fl_kq_buf_t c = {0}, next = {0};
+    fl_kq_buf_t kqer;
+    fl_kq_cp_result_t out;
+
+    if (!reporter_public || !kqer_bytes || kqer_len == 0 || kqer_len > FL_KQ_REPORT_MAX || !ref || !path)
+        return FL_KQ_CP_INVALID;
+    if (!drv)
+        return FL_KQ_CP_NO_DRIVER;
+    kqer.data = (uint8_t *)kqer_bytes; /* read only here; the driver does not keep it */
+    kqer.len = kqer_len;
+    out = load_container(path, container_path, sizeof container_path, &c);
+    if (out != FL_KQ_CP_OK)
+        goto done;
+    /* KeyQuorum checks the signature under the reporter's key and that the report names the artifact
+     * this caller holds; anything else writes nothing. */
+    if (drv->error_inject(&c, &kqer, reporter_public, ref, &next) != KQ_FILE_OK) {
+        out = FL_KQ_CP_BAD_SIGNATURE;
+        goto done;
+    }
+    out = store_container(container_path, &next);
+done:
+    fl_kq_buf_free(&next);
+    fl_kq_buf_free(&c);
+    return out;
+}
+
+fl_kq_cp_result_t fl_kq_cp_inject_report_bytes(const uint8_t reporter_public[32], const uint8_t *kqer_bytes,
+                                               size_t kqer_len, const uint8_t ref[32], const char *path) {
+    fl_kq_cp_result_t rc;
+
+    pthread_mutex_lock(&s_container_mu);
+    rc = fl_kq_cp_inject_report_bytes_unlocked(reporter_public, kqer_bytes, kqer_len, ref, path);
+    pthread_mutex_unlock(&s_container_mu);
+    return rc;
+}
+
+fl_kq_cp_result_t fl_kq_cp_inject_report_with(const fl_kq_keydir_t *keys, const char *reporter_key,
+                                              const char *report_path, const uint8_t ref[32],
+                                              const char *path) {
+    const unsigned char *reporter_public;
+    fl_kq_buf_t kqer = {0};
+    fl_kq_cp_result_t out;
+    int rc;
+
+    if (!keys || !reporter_key || !report_path || !ref || !path)
+        return FL_KQ_CP_INVALID;
+    if (!fl_kq_driver_get())
+        return FL_KQ_CP_NO_DRIVER;
+    reporter_public = keys->signing_public(keys, reporter_key);
+    if (!reporter_public)
+        return FL_KQ_CP_NO_KEY;
+    rc = fl_kq_cp_storage()->read_file(fl_kq_cp_storage()->ctx, report_path, FL_KQ_REPORT_MAX, &kqer.data,
+                                       &kqer.len);
+    if (rc != 0)
+        return rc == -2 ? FL_KQ_CP_TOO_LARGE : FL_KQ_CP_IO;
+    out = fl_kq_cp_inject_report_bytes(reporter_public, kqer.data, kqer.len, ref, path);
+    fl_kq_buf_free(&kqer);
+    return out;
+}
+
+/* ---- periodic signing (FL-20) ------------------------------------------------------------ */
+
+/* KeyQuorum history codes (src/file_history/event.rs): RevisionSigned 3, CountersignatureAdded 4;
+ * outcome Success 1. Wire format: append-only on KeyQuorum's side. */
+#define KQ_EV_REVISION_SIGNED 3
+#define KQ_EV_COUNTERSIGNED 4
+#define KQ_OUTCOME_SUCCESS 1
+
+static int num_field(const char *s, size_t n, int64_t *out) {
+    int64_t v = 0;
+
+    if (n == 0 || n > 18)
+        return -1;
+    for (size_t i = 0; i < n; i++) {
+        if (s[i] < '0' || s[i] > '9')
+            return -1;
+        v = v * 10 + (s[i] - '0');
+    }
+    *out = v;
+    return 0;
+}
+
+/* "2026-11-10T09:00:00Z" or "2026-11-10T09:00:00.000Z" (KeyQuorum's UTC text) as epoch seconds. */
+static int utc_to_sec(const char *s, size_t n, int64_t *out) {
+    int64_t y, mo, d, h, mi, se, era, yoe, doy, doe;
+
+    if (n < 20 || s[4] != '-' || s[7] != '-' || s[10] != 'T' || s[13] != ':' || s[16] != ':' || s[n - 1] != 'Z')
+        return -1;
+    if (num_field(s, 4, &y) || num_field(s + 5, 2, &mo) || num_field(s + 8, 2, &d) ||
+        num_field(s + 11, 2, &h) || num_field(s + 14, 2, &mi) || num_field(s + 17, 2, &se))
+        return -1;
+    if (n > 20) { /* fraction: '.' then digits, nothing else */
+        if (s[19] != '.' || n < 22)
+            return -1;
+        for (size_t i = 20; i + 1 < n; i++)
+            if (s[i] < '0' || s[i] > '9')
+                return -1;
+    } else if (s[19] != 'Z') {
+        return -1;
+    }
+    if (mo < 1 || mo > 12 || d < 1 || d > 31 || h > 23 || mi > 59 || se > 60 || y < 1970)
+        return -1;
+    y -= mo <= 2; /* days from civil (proleptic Gregorian), shifting the year to start in March */
+    era = y / 400;
+    yoe = y - era * 400;
+    doy = (153 * (mo + (mo > 2 ? -3 : 9)) + 2) / 5 + d - 1;
+    doe = yoe * 365 + yoe / 4 - yoe / 100 + doy;
+    *out = ((era * 146097 + doe - 719468) * 24 + h) * 3600 + mi * 60 + se;
+    return 0;
+}
+
+typedef struct {
+    int64_t newest;
+} last_sig_t;
+
+/* A history line: sequence TAB time TAB type TAB outcome TAB actor ... (keyquorum_files.h). */
+static int last_sig_line(const char *line, size_t n, void *ctx) {
+    last_sig_t *ls = (last_sig_t *)ctx;
+    const char *f[4];
+    size_t len[4], start = 0;
+    int k = 0;
+    int64_t type, outcome, t;
+
+    for (size_t i = 0; i <= n && k < 4; i++) {
+        if (i == n || line[i] == '\t') {
+            f[k] = line + start;
+            len[k] = i - start;
+            k++;
+            start = i + 1;
+        }
+    }
+    if (k < 4 || num_field(f[2], len[2], &type) || num_field(f[3], len[3], &outcome))
+        return 0;
+    if ((type == KQ_EV_REVISION_SIGNED || type == KQ_EV_COUNTERSIGNED) && outcome == KQ_OUTCOME_SUCCESS &&
+        utc_to_sec(f[1], len[1], &t) == 0 && t > ls->newest)
+        ls->newest = t;
+    return 0;
+}
+
+fl_kq_cp_result_t fl_kq_cp_last_signature(const char *path, int64_t *sec_out) {
+    fl_kq_buf_t lines = {0};
+    last_sig_t ls = {0};
+    fl_kq_cp_result_t rc;
+
+    if (!path || !sec_out)
+        return FL_KQ_CP_INVALID;
+    *sec_out = 0;
+    rc = fl_kq_cp_history(path, &lines);
+    if (rc != FL_KQ_CP_OK)
+        return rc;
+    (void)fl_kq_cp_for_each_event(&lines, last_sig_line, &ls);
+    fl_kq_buf_free(&lines);
+    *sec_out = ls.newest;
+    return FL_KQ_CP_OK;
+}
+
+static fl_kq_cp_result_t fl_kq_cp_sign_head_with_unlocked(const char *path, const char *author_key,
+                                          const uint8_t signing_secret[32], const char *created_at_utc) {
+    const fl_kq_driver_t *drv = fl_kq_driver_get();
+    const fl_kq_storage_t *store = fl_kq_cp_storage();
+    char container_path[4096];
+    fl_kq_buf_t content = {0}, container = {0}, next = {0};
+    uint8_t rev[32];
+    fl_kq_cp_result_t rc;
+    int st;
+
+    if (!path || !author_key || !signing_secret || !created_at_utc)
+        return FL_KQ_CP_INVALID;
+    if (!drv)
+        return FL_KQ_CP_NO_DRIVER;
+    st = store->read_file(store->ctx, path, KQ_CONTENT_MAX, &content.data, &content.len);
+    if (st != 0)
+        return st == -2 ? FL_KQ_CP_TOO_LARGE : FL_KQ_CP_IO;
+    rc = load_container(path, container_path, sizeof container_path, &container);
+    if (rc != FL_KQ_CP_OK)
+        goto done; /* nothing to sign without a history: a signature never starts one */
+    if (drv->verify(&container, NULL) != KQ_FILE_OK) {
+        rc = FL_KQ_CP_INVALID; /* a damaged history is refused, never replaced */
+        goto done;
+    }
+    st = drv->check_in(&container, author_key, created_at_utc, content.data, content.len, signing_secret,
+                       &next, rev);
+    if (st == KQ_FILE_FORKED) {
+        rc = FL_KQ_CP_FORKED;
+        goto done;
+    }
+    if (st != KQ_FILE_OK) {
+        rc = FL_KQ_CP_INVALID;
+        goto done;
+    }
+    rc = store_container(container_path, &next);
+done:
+    fl_kq_buf_free(&content);
+    fl_kq_buf_free(&container);
+    fl_kq_buf_free(&next);
+    return rc;
+}
+
+fl_kq_cp_result_t fl_kq_cp_sign_head_with(const char *path, const char *author_key,
+                                          const uint8_t signing_secret[32], const char *created_at_utc) {
+    fl_kq_cp_result_t rc;
+
+    pthread_mutex_lock(&s_container_mu);
+    rc = fl_kq_cp_sign_head_with_unlocked(path, author_key, signing_secret, created_at_utc);
+    pthread_mutex_unlock(&s_container_mu);
+    return rc;
+}
+
+/* ---- history bundle letters (FL-04) -------------------------------------------------------- */
+
+fl_kq_cp_result_t fl_kq_cp_history_letters_with(const fl_kq_keydir_t *keys, const char *host_key,
+                                                const uint8_t host_signing_secret[32], const char *requester_key,
+                                                const char *path, fl_kq_buf_t *l15, fl_kq_buf_t *l17) {
+    const fl_kq_driver_t *drv = fl_kq_driver_get();
+    const unsigned char *host_box, *requester_box;
+    char container_path[4096];
+    fl_kq_buf_t c = {0}, ev = {0};
+    fl_kq_encoded_t sealed;
+    uint8_t rev[32], did[16];
+    uint32_t events = 0;
+    fl_kq_cp_result_t rc;
+
+    if (!l15 || !l17)
+        return FL_KQ_CP_INVALID;
+    memset(l15, 0, sizeof *l15);
+    memset(l17, 0, sizeof *l17);
+    memset(&sealed, 0, sizeof sealed);
+    if (!keys || !host_key || !host_signing_secret || !requester_key || !path)
+        return FL_KQ_CP_INVALID;
+    if (!drv)
+        return FL_KQ_CP_NO_DRIVER;
+    host_box = keys->box_public(keys, host_key);
+    requester_box = keys->box_public(keys, requester_key);
+    if (!host_box || !requester_box)
+        return FL_KQ_CP_NO_KEY;
+    rc = fl_kq_cp_head(path, rev);
+    if (rc != FL_KQ_CP_OK)
+        return rc;
+    rc = fl_kq_cp_reseal_with(keys, host_key, host_signing_secret, requester_key, requester_box, path, rev, &sealed);
+    if (rc != FL_KQ_CP_OK)
+        return rc;
+    rc = load_container(path, container_path, sizeof container_path, &c);
+    if (rc != FL_KQ_CP_OK)
+        goto fail;
+    if (drv->events(&c, &ev) != KQ_FILE_OK) { /* one line per event: the snapshot covers them all */
+        rc = FL_KQ_CP_INVALID;
+        goto fail;
+    }
+    for (size_t i = 0; i < ev.len; i++)
+        events += ev.data[i] == '\n';
+    if (drv->seal_snapshot(&c, events, host_key, host_signing_secret, host_box, requester_key, requester_box, l17,
+                           did) != KQ_FILE_OK) {
+        rc = FL_KQ_CP_INVALID;
+        goto fail;
+    }
+    *l15 = sealed.letter; /* the caller owns the letter now */
+    memset(&sealed.letter, 0, sizeof sealed.letter);
+    fl_kq_encoded_free(&sealed);
+    fl_kq_buf_free(&c);
+    fl_kq_buf_free(&ev);
+    return FL_KQ_CP_OK;
+fail:
+    fl_kq_buf_free(l17);
+    memset(l17, 0, sizeof *l17);
+    fl_kq_encoded_free(&sealed);
+    fl_kq_buf_free(&c);
+    fl_kq_buf_free(&ev);
+    return rc;
+}

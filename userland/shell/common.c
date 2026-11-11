@@ -113,6 +113,7 @@ static const char HELP_BODY[] =
 "  passwd [u]           Change your password or one below you (new password on next line)\n"
 "  profile [u]          Show an account's key id, heritage, home and bridges\n"
 "  bridge list|request <u>|accept <id>|revoke <id>  Bridges to accounts on other branches\n"
+"  bridge assembly <parent>   Let a parent account sign from its children's shares (with sudo)\n"
 "  ping <host> [port]   ICMP when port omitted/0; TCP connect when port 1-65535\n"
 "  ping6 <host>         ICMPv6 echo (loopback ::1 and resolved AAAA targets)\n"
 "                       (-c count, -W timeout_ms; host may be DNS or IPv4)\n"

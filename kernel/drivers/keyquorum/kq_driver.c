@@ -1,7 +1,8 @@
 /*
  * KeyQuorum security driver (contracts/drivers/contract_p4_keyquorum.h, P4-9).
  *
- * Thin wrappers over keyquorum_files.h and keyquorum_identity.h (the account ops): each op asks KeyQuorum for the size it needs,
+ * Thin wrappers over keyquorum_files.h, keyquorum_identity.h (the account ops), keyquorum_slots.h,
+ * keyquorum_access.h and keyquorum_bridge.h: each op asks KeyQuorum for the size it needs,
  * allocates, and calls again; it returns KeyQuorum's status unchanged. Secrets are wiped
  * through mem_domain_secure_zero (which extends mem_domain_zero) and digests compared by
  * asm_mem_ct_equal.
@@ -33,6 +34,18 @@ _Static_assert(FL_KQ_ACCOUNT_INVALID == KQ_ACCOUNT_INVALID, "account INVALID dif
 _Static_assert(FL_KQ_ACCOUNT_NO_ROOM == KQ_ACCOUNT_NO_ROOM, "account NO_ROOM differs");
 _Static_assert(FL_KQ_ACCOUNT_WRONG_PASSWORD == KQ_ACCOUNT_WRONG_PASSWORD,
                "account WRONG_PASSWORD differs");
+_Static_assert(FL_KQ_ACCESS_NONE == KQ_ACCESS_NONE, "access NONE differs");
+_Static_assert(FL_KQ_ACCESS_PASSWORD == KQ_ACCESS_PASSWORD, "access PASSWORD differs");
+_Static_assert(FL_KQ_ACCESS_KQST_PASSWORD == KQ_ACCESS_KQST_PASSWORD, "access KQST_PASSWORD differs");
+_Static_assert(FL_KQ_ACCESS_PASSWORD_BRIDGE_KQST == KQ_ACCESS_PASSWORD_BRIDGE_KQST,
+               "access PASSWORD_BRIDGE_KQST differs");
+_Static_assert(FL_KQ_ACCESS_REFUSED == KQ_ACCESS_REFUSED, "access REFUSED differs");
+_Static_assert(FL_KQ_ACCESS_INVALID == KQ_ACCESS_INVALID, "access INVALID differs");
+_Static_assert(FL_KQ_BRIDGE_OK == KQ_BRIDGE_OK, "bridge OK differs");
+_Static_assert(FL_KQ_BRIDGE_INVALID == KQ_BRIDGE_INVALID, "bridge INVALID differs");
+_Static_assert(FL_KQ_BRIDGE_NO_ROOM == KQ_BRIDGE_NO_ROOM, "bridge NO_ROOM differs");
+_Static_assert(FL_KQ_BRIDGE_REFUSED == KQ_BRIDGE_REFUSED, "bridge REFUSED differs");
+_Static_assert(FL_KQ_BRIDGE_STALE == KQ_BRIDGE_STALE, "bridge STALE differs");
 _Static_assert(sizeof(kq_file_offer_t) == FL_KQ_OFFER_WIRE_LEN,
                "kq_file_offer_t differs from the offer's wire length");
 
@@ -303,6 +316,97 @@ static int drv_slot_open(const uint8_t *kqst, size_t klen, const char *label, co
                         expected_encryption_pub, signing_secret_out, encryption_secret_out);
 }
 
+#ifndef FL_FREESTANDING
+/* The freestanding image has no checkpoint storage, so nothing there can name a head author: the op
+ * is NULL and fl_kq_cp_head_author fails closed. Left in, it would add a sector to an image that is
+ * within 2 KiB of its 0x9f000 budget. */
+/* KeyQuorum writes the label without a terminator; one byte is kept back for it. */
+static int drv_head_author(const fl_kq_buf_t *c, char *out, size_t cap) {
+    size_t n = 0;
+    int rc;
+
+    if (!out || cap == 0)
+        return KQ_FILE_NO_ROOM;
+    out[0] = '\0';
+    if (!c || !c->data)
+        return KQ_FILE_INVALID;
+    rc = kq_file_head_author(c->data, c->len, (unsigned char *)out, cap - 1u, &n);
+    if (rc == KQ_FILE_OK && n >= cap)
+        rc = KQ_FILE_NO_ROOM;
+    if (rc != KQ_FILE_OK) {
+        out[0] = '\0';
+        return rc;
+    }
+    out[n] = '\0';
+    return KQ_FILE_OK;
+}
+
+/* The freestanding image has no account store, slot token or bridge to ask about, and the SECFEAT
+ * image cannot carry these three (about 13 KiB of library code past the 0x9f000 budget): there the
+ * ops are NULL and every caller fails closed. */
+static int drv_access_requirement(const char *current, const char *target, int sudo,
+                                  const kq_bridge_t *live_bridges, size_t nbridges,
+                                  int parent_approval, int *bridge_index_out,
+                                  int *needs_parent_grant_out) {
+    return kq_access_requirement(current, target, sudo, live_bridges, nbridges, parent_approval,
+                                 bridge_index_out, needs_parent_grant_out);
+}
+
+static int drv_bridge_prove(const char *uid, uint32_t generation, const uint8_t salt[16],
+                            const uint8_t bridge_public[32], const char *local_label,
+                            const uint8_t *sealed_bridge_key, size_t slen,
+                            const uint8_t wrap_salt[16], const uint8_t encryption_sk[32],
+                            const uint8_t signing_sk[32], const uint8_t *challenge, size_t clen,
+                            uint8_t *artifact_out, size_t cap, size_t *artifact_len) {
+    return kq_bridge_prove(uid, generation, salt, bridge_public, local_label, sealed_bridge_key,
+                           slen, wrap_salt, encryption_sk, signing_sk, challenge, clen,
+                           artifact_out, cap, artifact_len);
+}
+
+static int drv_bridge_verify(const char *uid, uint32_t generation, const uint8_t salt[16],
+                             const uint8_t bridge_public[32], int destroyed,
+                             const char *const *member_labels, const uint8_t *member_signing_pubs,
+                             size_t nmembers, const char *verifier_label, const uint8_t *challenge,
+                             size_t clen, const uint8_t *artifact, size_t alen) {
+    return kq_bridge_verify(uid, generation, salt, bridge_public, destroyed, member_labels,
+                            member_signing_pubs, nmembers, verifier_label, challenge, clen,
+                            artifact, alen);
+}
+
+static int drv_bridge_connects(const char *end_a, const char *end_b, const char *actor,
+                               const char *scope) {
+    return kq_bridge_connects(end_a, end_b, actor, scope);
+}
+
+/* Parent-key assembly: hosted only, like the ops above (the no_std archive does not export it). */
+static unsigned drv_assembly_threshold(unsigned holders) {
+    return kq_assembly_threshold(holders);
+}
+
+static int drv_assembly_split(const uint8_t seed[32], unsigned generation,
+                              const char *const *child_labels,
+                              const uint8_t (*child_box_public)[32], size_t nchildren,
+                              uint8_t *out, size_t cap, size_t *out_len) {
+    return kq_assembly_split(seed, generation, child_labels, child_box_public, nchildren, out, cap,
+                             out_len);
+}
+
+static int drv_assembly_generation(const uint8_t *assembly, size_t alen, unsigned *generation_out) {
+    return kq_assembly_generation(assembly, alen, generation_out);
+}
+
+static int drv_assembly_assemble(const uint8_t *assembly, size_t alen,
+                                 const uint8_t parent_signing_public[32],
+                                 const char *const *unlocked_labels,
+                                 const uint8_t (*unlocked_box_secret)[32],
+                                 const uint8_t (*unlocked_device_id)[16], size_t nunlocked,
+                                 size_t minimum_devices, uint8_t seed_out[32]) {
+    return kq_assembly_assemble(assembly, alen, parent_signing_public, unlocked_labels,
+                                unlocked_box_secret, unlocked_device_id, nunlocked,
+                                minimum_devices, seed_out);
+}
+#endif
+
 static const fl_driver_ops_t s_kq_lifecycle = {
     .probe = kq_probe,
 };
@@ -354,6 +458,17 @@ static const fl_kq_driver_t s_kq_driver = {
     .error_name = drv_error_name,
     .error_class_name = drv_error_class_name,
     .slot_open = drv_slot_open,
+#ifndef FL_FREESTANDING
+    .head_author = drv_head_author,
+    .access_requirement = drv_access_requirement,
+    .bridge_prove = drv_bridge_prove,
+    .bridge_verify = drv_bridge_verify,
+    .bridge_connects = drv_bridge_connects,
+    .assembly_threshold = drv_assembly_threshold,
+    .assembly_split = drv_assembly_split,
+    .assembly_generation = drv_assembly_generation,
+    .assembly_assemble = drv_assembly_assemble,
+#endif
 };
 
 const fl_driver_desc_t *fl_kq_driver_desc(void) {

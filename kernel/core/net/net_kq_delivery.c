@@ -72,14 +72,12 @@ static uint64_t r_u64(fl_bytes_reader_t *r) {
     return v;
 }
 
+/* The one offer encoder (fl_kq_cp_offer_encode): a refusal report names these exact bytes. */
 static void kq_put_offer(fl_bytes_sticky_writer_t *w, const kq_file_offer_t *o) {
-    (void)fl_bytes_sticky_put_bytes(w, o->file_id, 16);
-    (void)fl_bytes_sticky_put_bytes(w, o->revision_id, 32);
-    (void)fl_bytes_sticky_put_bytes(w, o->content_commitment, 32);
-    (void)fl_bytes_sticky_put_bytes(w, o->author_identity, 16);
-    (void)fl_bytes_sticky_put_bytes(w, o->author_signature, 64);
-    (void)fl_bytes_sticky_put_u64(w, o->topology_generation);
-    (void)fl_bytes_sticky_put_bytes(w, o->policy_hash, 32);
+    uint8_t wire[FL_KQ_OFFER_WIRE_LEN];
+
+    fl_kq_cp_offer_encode(o, wire);
+    (void)fl_bytes_sticky_put_bytes(w, wire, sizeof wire);
 }
 
 static void kq_get_offer(fl_bytes_reader_t *r, kq_file_offer_t *o) {
@@ -494,6 +492,29 @@ static void host_ack(fl_net_server_t *srv, const fl_net_server_member_t *from,
     }
 }
 
+/* Refusal report (KQ-12): the refusing recipient's KQER, forwarded to the delivery's sender. Best effort,
+ * nothing is kept: a sender who is not connected misses it. Every check fails closed and silently. */
+static void host_report(fl_net_server_t *srv, const fl_net_server_member_t *from, const uint8_t *payload,
+                        uint16_t plen) {
+    fl_bytes_reader_t r;
+    uint8_t id[FL_KQ_DELIVERY_ID_LEN];
+    uint16_t n = 0;
+    fl_kq_delivery_t d;
+    const char *me = key_of_member(from);
+
+    fl_bytes_reader_init(&r, payload, plen);
+    (void)fl_bytes_reader_read_bytes(&r, id, sizeof id);
+    (void)fl_bytes_reader_read_u16(&r, &n);
+    if (r.bad || n == 0 || n > FL_KQ_REPORT_FRAME_MAX || fl_bytes_reader_remaining(&r) != n || !me || !store() ||
+        fl_kq_store_get(store(), id, &d) != FL_RESULT_OK || strcmp(me, d.recipient) != 0 || !d.refused)
+        return;
+    /* Once per delivery, for as long as the host accepts reports for it: the claim is in the delivery's own log,
+     * not in a ring that later deliveries could push it out of. */
+    if (fl_kq_store_claim_report(store(), id, now_sec()) != FL_RESULT_OK)
+        return;
+    host_send_to_account(srv, d.sender, (uint8_t)FL_NET_SESSION_OP_KQR_REPORT, payload, plen);
+}
+
 static void host_keys(fl_net_server_t *srv, const fl_net_server_member_t *from,
                       fl_bytes_reader_t *r) {
     char who[FL_HERITAGE_KEY_ID_MAX];
@@ -636,6 +657,9 @@ void fl_net_kq_host_handle(fl_net_server_t *srv, const fl_net_server_member_t *f
         break;
     case FL_NET_SESSION_OP_KQ_KEYS:
         host_keys(srv, from, &r);
+        break;
+    case FL_NET_SESSION_OP_KQR_REPORT:
+        host_report(srv, from, payload, plen);
         break;
     case FL_NET_SESSION_OP_KQH_REQ:
         host_history(srv, from, &r);
@@ -850,6 +874,82 @@ static void client_history(fl_bytes_reader_t *r) {
     slot->ready = 1;
 }
 
+/* A forwarded refusal report: held for the shell to apply. Frames that do not parse are dropped. */
+#define KQ_REPORT_INBOX 4u
+typedef struct {
+    int used;
+    uint64_t arrived; /* arrival order, from s_reports_clock: the age that decides who is replaced */
+    uint8_t id[FL_KQ_DELIVERY_ID_LEN];
+    size_t len;
+    uint8_t bytes[FL_KQ_REPORT_FRAME_MAX];
+} kq_report_t;
+static kq_report_t s_reports[KQ_REPORT_INBOX];
+static uint64_t s_reports_clock;
+
+static void client_report(fl_bytes_reader_t *r) {
+    uint8_t id[FL_KQ_DELIVERY_ID_LEN];
+    uint16_t n = 0;
+    const uint8_t *bytes;
+    kq_report_t *slot = NULL;
+
+    (void)fl_bytes_reader_read_bytes(r, id, sizeof id);
+    (void)fl_bytes_reader_read_u16(r, &n);
+    if (r->bad || n == 0 || n > FL_KQ_REPORT_FRAME_MAX || fl_bytes_reader_remaining(r) != n)
+        return;
+    bytes = fl_bytes_reader_cursor(r);
+    for (unsigned i = 0; i < KQ_REPORT_INBOX && !slot; i++)
+        if (s_reports[i].used && memcmp(s_reports[i].id, id, sizeof id) == 0)
+            slot = &s_reports[i];
+    for (unsigned i = 0; i < KQ_REPORT_INBOX && !slot; i++)
+        if (!s_reports[i].used)
+            slot = &s_reports[i];
+    if (!slot) { /* full: the report that arrived longest ago is replaced, wherever it sits */
+        slot = &s_reports[0];
+        for (unsigned i = 1; i < KQ_REPORT_INBOX; i++)
+            if (s_reports[i].arrived < slot->arrived)
+                slot = &s_reports[i];
+    }
+    slot->used = 1;
+    slot->arrived = ++s_reports_clock;
+    memcpy(slot->id, id, sizeof id);
+    slot->len = n;
+    memcpy(slot->bytes, bytes, n);
+}
+
+fl_result_t fl_net_kq_report_take(const uint8_t id[FL_KQ_DELIVERY_ID_LEN], uint8_t *out, size_t cap, size_t *len) {
+    fl_result_t rc = FL_RESULT_NOENT;
+
+    if (!id || !out || !len)
+        return FL_RESULT_INVAL;
+    *len = 0;
+    kq_lock();
+    for (unsigned i = 0; i < KQ_REPORT_INBOX; i++) {
+        if (!s_reports[i].used || memcmp(s_reports[i].id, id, FL_KQ_DELIVERY_ID_LEN) != 0)
+            continue;
+        if (cap < s_reports[i].len) {
+            rc = FL_RESULT_NOMEM;
+            break;
+        }
+        memcpy(out, s_reports[i].bytes, s_reports[i].len);
+        *len = s_reports[i].len;
+        memset(&s_reports[i], 0, sizeof s_reports[i]);
+        rc = FL_RESULT_OK;
+        break;
+    }
+    kq_unlock();
+    return rc;
+}
+
+size_t fl_net_kq_reports_pending(void) {
+    size_t n = 0;
+
+    kq_lock();
+    for (unsigned i = 0; i < KQ_REPORT_INBOX; i++)
+        n += s_reports[i].used ? 1u : 0u;
+    kq_unlock();
+    return n;
+}
+
 void fl_net_kq_client_handle(fl_net_client_t *client, uint8_t opcode, const uint8_t *payload,
                              uint16_t plen) {
     fl_bytes_reader_t r;
@@ -872,6 +972,9 @@ void fl_net_kq_client_handle(fl_net_client_t *client, uint8_t opcode, const uint
         break;
     case FL_NET_SESSION_OP_KQH_DATA:
         client_history(&r);
+        break;
+    case FL_NET_SESSION_OP_KQR_REPORT:
+        client_report(&r);
         break;
     case FL_NET_SESSION_OP_KQH_REQ:
         break; /* a request is the host's to answer; a client that is sent one ignores it */
@@ -1039,6 +1142,25 @@ fl_result_t fl_net_kq_send_ack(fl_net_server_t *srv, fl_net_client_t *client, in
         return FL_RESULT_INVAL;
     return fl_net_kq_send(srv, client, hosting, (uint8_t)FL_NET_SESSION_OP_KQ_ACK, wbuf,
                           (uint16_t)w.w.len);
+}
+
+fl_result_t fl_net_kq_send_report(fl_net_server_t *srv, fl_net_client_t *client, int hosting,
+                                  const uint8_t id[FL_KQ_DELIVERY_ID_LEN], const uint8_t *kqer, size_t len) {
+    uint8_t wbuf[FL_NET_SESSION_MAX_MSG];
+    fl_bytes_sticky_writer_t w;
+    uint8_t n[2];
+
+    if (!id || !kqer || len == 0 || len > FL_KQ_REPORT_FRAME_MAX)
+        return FL_RESULT_INVAL;
+    n[0] = (uint8_t)(len >> 8);
+    n[1] = (uint8_t)len;
+    fl_bytes_sticky_init(&w, wbuf, (uint16_t)sizeof wbuf);
+    (void)fl_bytes_sticky_put_bytes(&w, id, FL_KQ_DELIVERY_ID_LEN);
+    (void)fl_bytes_sticky_put_bytes(&w, n, 2);
+    (void)fl_bytes_sticky_put_bytes(&w, kqer, (uint16_t)len);
+    if (w.bad)
+        return FL_RESULT_INVAL;
+    return fl_net_kq_send(srv, client, hosting, (uint8_t)FL_NET_SESSION_OP_KQR_REPORT, wbuf, (uint16_t)w.w.len);
 }
 
 size_t fl_net_kq_host_sent(const char *sender, fl_kq_delivery_t *out, size_t cap) {
@@ -1241,6 +1363,8 @@ void fl_net_kq_reset(void) {
             hist_free(&s_hist[i]);
     s_hist_gate = NULL;
     s_hist_source = NULL;
+    memset(s_reports, 0, sizeof s_reports);
+    s_reports_clock = 0;
     if (s_store) {
         fl_kq_store_close(s_store);
         s_store = NULL;

@@ -1,6 +1,7 @@
 #include "fl/authz_subsystem.h"
 #include "contract_p2_authz.h"
 #include "contract_p2_principal_names.h"
+#include "fl/audit_log.h"
 #include "fl_shell_cmd.h"
 #include <pthread.h>
 #include <stdlib.h>
@@ -96,6 +97,13 @@ fl_authz_decision_t fl_authz_subsystem_check(unsigned op, void *ctx) {
     return guest_subsystem_policy(op, ctx);
 }
 
+int fl_authz_identity_switch_denied(const char *line) {
+    if (fl_authz_subsystem_check((unsigned)FL_AUTHZ_OP_IDENTITY_SWITCH, NULL) != FL_AUTHZ_DENY)
+        return 0;
+    fl_audit_authz_event(line ? line : "", (unsigned)FL_AUTHZ_OP_IDENTITY_SWITCH, 1);
+    return 1;
+}
+
 unsigned fl_authz_subsystem_op_for_shell_cmd(unsigned cmd_no) {
     switch ((fl_shell_cmd_no_t)cmd_no) {
     case FL_SCMD_FORMAT:
@@ -125,6 +133,9 @@ unsigned fl_authz_subsystem_op_for_shell_cmd(unsigned cmd_no) {
         return (unsigned)FL_AUTHZ_OP_IDENTITY_PASSWD;
     case FL_SCMD_BRIDGE:
         return (unsigned)FL_AUTHZ_OP_IDENTITY_BRIDGE;
+    case FL_SCMD_SU:
+    case FL_SCMD_SUDO:
+        return (unsigned)FL_AUTHZ_OP_IDENTITY_SWITCH;
     default:
         return (unsigned)FL_AUTHZ_OP_UNSPECIFIED;
     }
