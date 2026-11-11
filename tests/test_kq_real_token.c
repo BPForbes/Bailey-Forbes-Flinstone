@@ -215,56 +215,21 @@ static int blob(sqlite3_stmt *st, int col, unsigned char *out, size_t len) {
     return 0;
 }
 
-/* Copies the KeyQuorum store's bridge (made by bridge private create) into Flinstone's store. */
+/* Imports the KeyQuorum store's bridge (made by bridge private create) with the production importer, then
+ * reads it back. tamper_roster: the roster key of Root.Flinstone.Bob then disagrees with the member's own
+ * (the same fault the old in-test copy injected before its write). */
+static int tamper_roster_signing(const char *uid);
+
 static int import_fixture_bridge(fl_user_bridge_t *b, int tamper_roster) {
-    sqlite3 *org = NULL;
-    sqlite3_stmt *st = NULL;
-    unsigned char sealed[FL_USER_BRIDGE_SEALED_MAX], wrap[16];
-    int n = 0, id = 0;
     const fl_user_db_t *db = fl_session_user_db();
 
     memset(b, 0, sizeof *b);
-    ASSERT(sqlite3_open_v2(env("FL_RT_ORG_DB"), &org, SQLITE_OPEN_READONLY, NULL) == SQLITE_OK);
-    ASSERT(sqlite3_prepare_v2(org, "SELECT id, generation, public_key, salt FROM private_bridges WHERE uid = ?;",
-                              -1, &st, NULL) == SQLITE_OK);
-    sqlite3_bind_text(st, 1, env("FL_RT_BRIDGE_UID"), -1, SQLITE_TRANSIENT);
-    ASSERT(sqlite3_step(st) == SQLITE_ROW);
-    id = sqlite3_column_int(st, 0);
-    b->generation = (uint32_t)sqlite3_column_int64(st, 1);
-    ASSERT(blob(st, 2, b->public_key, 32) == 0 && blob(st, 3, b->salt, 16) == 0);
-    sqlite3_finalize(st);
-    snprintf(b->uid, sizeof b->uid, "%s", env("FL_RT_BRIDGE_UID"));
-    ASSERT(sqlite3_prepare_v2(org,
-                              "SELECT node_label, encryption_public_key, signing_public_key FROM private_bridge_members"
-                              " WHERE bridge_id = ? AND role = 'member' ORDER BY node_label;",
-                              -1, &st, NULL) == SQLITE_OK);
-    sqlite3_bind_int(st, 1, id);
-    while (sqlite3_step(st) == SQLITE_ROW && n < (int)FL_USER_BRIDGE_MEMBERS_MAX) {
-        snprintf(b->members[n].label, sizeof b->members[n].label, "%s", sqlite3_column_text(st, 0));
-        ASSERT(blob(st, 1, b->members[n].encryption_public, 32) == 0);
-        ASSERT(blob(st, 2, b->members[n].signing_public, 32) == 0);
-        n++;
-    }
-    sqlite3_finalize(st);
-    b->nmembers = (size_t)n;
-    ASSERT(n == 2);
+    ASSERT(fl_user_db_bridge_import_from_kq(db, env("FL_RT_ORG_DB"), env("FL_RT_BRIDGE_UID"),
+                                            "Root.Flinstone.Bob") == FL_RESULT_OK);
+    ASSERT(fl_user_db_bridge_get(db, env("FL_RT_BRIDGE_UID"), b) == FL_RESULT_OK);
+    ASSERT(b->nmembers == 2 && !b->destroyed);
     if (tamper_roster)
-        b->members[1].signing_public[0] ^= 1u; /* Root.Flinstone.Bob sorts second */
-    ASSERT(fl_user_db_bridge_put(db, b) == FL_RESULT_OK);
-    ASSERT(sqlite3_prepare_v2(org,
-                              "SELECT wrap_salt, wrapped_secret FROM private_bridge_sealed_keys"
-                              " WHERE bridge_id = ? AND node_label = 'Root.Flinstone.Bob';",
-                              -1, &st, NULL) == SQLITE_OK);
-    sqlite3_bind_int(st, 1, id);
-    ASSERT(sqlite3_step(st) == SQLITE_ROW);
-    ASSERT(blob(st, 0, wrap, 16) == 0);
-    n = sqlite3_column_bytes(st, 1);
-    ASSERT(n > 0 && (size_t)n <= sizeof sealed);
-    memcpy(sealed, sqlite3_column_blob(st, 1), (size_t)n);
-    sqlite3_finalize(st);
-    sqlite3_close(org);
-    ASSERT(fl_user_db_bridge_put_sealed_key(db, b->uid, "Root.Flinstone.Bob", sealed, (size_t)n, wrap) ==
-           FL_RESULT_OK);
+        ASSERT(tamper_roster_signing(b->uid) == 0);
     return 0;
 }
 
@@ -377,6 +342,12 @@ static int bump_generation(void) {
     }
     sqlite3_close(sql);
     return ok ? 0 : -1;
+}
+
+static int tamper_roster_signing(const char *uid) {
+    s_mut_uid = uid;
+    return xor_bound("SELECT signing_public FROM account_bridge_members WHERE uid = ? AND label = ?;",
+                     "UPDATE account_bridge_members SET signing_public = ? WHERE uid = ? AND label = ?;", 1);
 }
 
 static int begin_exclusive(void) {
@@ -612,6 +583,58 @@ out:
     return rc;
 }
 
+/* KQ-19 import: the production importer against a store the real CLI made. */
+static int test_bridge_import(void) {
+    fl_user_bridge_t *b = calloc(1, sizeof *b);
+    const fl_user_db_t *db = fl_session_user_db();
+    unsigned char sealed[FL_USER_BRIDGE_SEALED_MAX], wrap[16];
+    size_t n = 0;
+    const char *org = env("FL_RT_ORG_DB"), *uid = env("FL_RT_BRIDGE_UID");
+    int rc = 1;
+
+    ASSERT(b);
+    /* An unknown uid, and an account that is not on the roster: refused, and nothing is written. */
+    if (fl_user_db_bridge_import_from_kq(db, org, "00000000", "Root.Flinstone.Bob") != FL_RESULT_NOENT)
+        goto out;
+    if (fl_user_db_bridge_import_from_kq(db, org, uid, "Root.Nobody.Else") != FL_RESULT_NOENT)
+        goto out;
+    if (fl_user_db_bridge_get(db, uid, b) == FL_RESULT_OK && b->nmembers != 0) /* earlier tests may have imported it */
+        goto out;
+    /* Ann is on the roster but KeyQuorum holds no sealed key of hers: refused whole, no roster left behind. */
+    if (fl_user_db_bridge_import_from_kq(db, org, uid, "Root.Alternative.Ann") != FL_RESULT_NOENT)
+        goto out;
+    if (fl_user_db_bridge_get(db, uid, b) == FL_RESULT_OK && b->nmembers != 0)
+        goto out;
+    /* A missing store is an error, not an empty bridge. */
+    if (fl_user_db_bridge_import_from_kq(db, "/nonexistent/kq.sqlite", uid, "Root.Flinstone.Bob") == FL_RESULT_OK)
+        goto out;
+    /* Bob's import brings the roster and his sealed key together. */
+    if (fl_user_db_bridge_import_from_kq(db, org, uid, "Root.Flinstone.Bob") != FL_RESULT_OK)
+        goto out;
+    memset(b, 0, sizeof *b);
+    if (fl_user_db_bridge_get(db, uid, b) != FL_RESULT_OK || b->nmembers != 2 || b->destroyed || b->generation == 0)
+        goto out;
+    if (fl_user_db_bridge_sealed_key(db, uid, "Root.Flinstone.Bob", sealed, sizeof sealed, &n, wrap) != FL_RESULT_OK ||
+        n == 0)
+        goto out;
+    /* The store holds none of Ann's: the importer copied only the local member's. */
+    if (fl_user_db_bridge_sealed_key(db, uid, "Root.Alternative.Ann", sealed, sizeof sealed, &n, wrap) == FL_RESULT_OK)
+        goto out;
+    /* Importing again is idempotent. */
+    if (fl_user_db_bridge_import_from_kq(db, org, uid, "Root.Flinstone.Bob") != FL_RESULT_OK)
+        goto out;
+    /* A roster-only import (no local member) is accepted and carries no sealed key. */
+    if (fl_user_db_bridge_import_from_kq(db, org, uid, NULL) != FL_RESULT_OK)
+        goto out;
+    if (fl_user_db_bridge_sealed_key(db, uid, "Root.Flinstone.Bob", sealed, sizeof sealed, &n, wrap) == FL_RESULT_OK)
+        goto out; /* re-put replaced the roster and, by the writer's contract, its sealed keys */
+    rc = 0;
+out:
+    mem_domain_secure_zero(sealed, sizeof sealed);
+    free(b);
+    return rc;
+}
+
 static int test_bridge_su(void) {
     fl_user_bridge_t *b = calloc(1, sizeof *b);
     fl_kq_requirement_t need;
@@ -718,6 +741,7 @@ int main(void) {
     RUN(test_open_and_sign);
     RUN(test_refusals);
     RUN(test_login_generation);
+    RUN(test_bridge_import);
     RUN(test_bridge_su);
     RUN(test_bridge_fact_races);
     mem_domain_secure_zero(s_bob_pw, sizeof s_bob_pw);

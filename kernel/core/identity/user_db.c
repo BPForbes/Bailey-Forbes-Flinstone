@@ -1357,40 +1357,28 @@ fl_result_t fl_user_db_bridges_live(const fl_user_db_t *db, fl_user_bridge_t *ou
     return rc;
 }
 
-fl_result_t fl_user_db_bridge_put(const fl_user_db_t *db, const fl_user_bridge_t *b) {
-    sqlite3 *sql = NULL;
+/* The rows of one bridge on a connection that already holds the write transaction (BEGIN IMMEDIATE).
+ * The caller commits or rolls back. */
+static fl_result_t bridge_put_on(sqlite3 *sql, const fl_user_bridge_t *b) {
     sqlite3_stmt *st = NULL;
     fl_result_t rc = FL_RESULT_OK;
     size_t i;
 
-    if (!db || !b || !b->uid[0] || memchr(b->uid, '\0', sizeof b->uid) == NULL || b->generation == 0 ||
-        b->nmembers < 2 || b->nmembers > FL_USER_BRIDGE_MEMBERS_MAX)
-        return FL_RESULT_INVAL;
-    for (i = 0; i < b->nmembers; i++)
-        if (!fl_heritage_key_valid(b->members[i].label))
-            return FL_RESULT_INVAL;
-    if (bridge_db_open(db, 1, &sql) != FL_RESULT_OK)
-        return FL_RESULT_ERR;
-    if (fl_sqlite_exec(sql, "user_db", "BEGIN IMMEDIATE;") != FL_RESULT_OK) {
-        sqlite3_close(sql);
-        return FL_RESULT_ERR;
-    }
     if (sqlite3_prepare_v2(sql,
                            "INSERT INTO account_bridges (uid, generation, salt, public_key, destroyed) "
                            "VALUES (?,?,?,?,?) ON CONFLICT(uid) DO UPDATE SET generation=excluded.generation,"
                            " salt=excluded.salt, public_key=excluded.public_key, destroyed=excluded.destroyed;",
                            -1, &st, NULL) != SQLITE_OK) {
-        rc = FL_RESULT_ERR;
-    } else {
-        sqlite3_bind_text(st, 1, b->uid, -1, SQLITE_TRANSIENT);
-        sqlite3_bind_int64(st, 2, (sqlite3_int64)b->generation);
-        sqlite3_bind_blob(st, 3, b->salt, FL_USER_BRIDGE_SALT_LEN, SQLITE_TRANSIENT);
-        sqlite3_bind_blob(st, 4, b->public_key, 32, SQLITE_TRANSIENT);
-        sqlite3_bind_int(st, 5, b->destroyed ? 1 : 0);
-        if (sqlite3_step(st) != SQLITE_DONE)
-            rc = FL_RESULT_ERR;
-        sqlite3_finalize(st);
+        return FL_RESULT_ERR;
     }
+    sqlite3_bind_text(st, 1, b->uid, -1, SQLITE_TRANSIENT);
+    sqlite3_bind_int64(st, 2, (sqlite3_int64)b->generation);
+    sqlite3_bind_blob(st, 3, b->salt, FL_USER_BRIDGE_SALT_LEN, SQLITE_TRANSIENT);
+    sqlite3_bind_blob(st, 4, b->public_key, 32, SQLITE_TRANSIENT);
+    sqlite3_bind_int(st, 5, b->destroyed ? 1 : 0);
+    if (sqlite3_step(st) != SQLITE_DONE)
+        rc = FL_RESULT_ERR;
+    sqlite3_finalize(st);
     /* Members no longer on the roster leave, with their sealed keys. */
     if (rc == FL_RESULT_OK) {
         if (sqlite3_prepare_v2(sql, "DELETE FROM account_bridge_members WHERE uid = ?;", -1, &st, NULL) !=
@@ -1419,26 +1407,16 @@ fl_result_t fl_user_db_bridge_put(const fl_user_db_t *db, const fl_user_bridge_t
             rc = FL_RESULT_ERR;
         sqlite3_finalize(st);
     }
-    if (rc == FL_RESULT_OK && fl_sqlite_exec(sql, "user_db", "COMMIT;") != FL_RESULT_OK)
-        rc = FL_RESULT_ERR;
-    if (rc != FL_RESULT_OK)
-        (void)fl_sqlite_exec(sql, "user_db", "ROLLBACK;");
-    sqlite3_close(sql);
     return rc;
 }
 
-fl_result_t fl_user_db_bridge_put_sealed_key(const fl_user_db_t *db, const char *uid, const char *label,
-                                             const unsigned char *sealed, size_t len,
-                                             const unsigned char wrap_salt[FL_USER_BRIDGE_SALT_LEN]) {
-    sqlite3 *sql = NULL;
+/* One statement: the sealed key and its wrap salt are never stored apart. NOENT unless exactly one
+ * member row of that bridge has that label. */
+static fl_result_t sealed_put_on(sqlite3 *sql, const char *uid, const char *label, const unsigned char *sealed,
+                                 size_t len, const unsigned char wrap_salt[FL_USER_BRIDGE_SALT_LEN]) {
     sqlite3_stmt *st = NULL;
     fl_result_t rc = FL_RESULT_ERR;
 
-    if (!db || !uid || !label || !sealed || !wrap_salt || len == 0 || len > FL_USER_BRIDGE_SEALED_MAX)
-        return FL_RESULT_INVAL;
-    if (bridge_db_open(db, 1, &sql) != FL_RESULT_OK)
-        return FL_RESULT_ERR;
-    /* One statement: the sealed key and its wrap salt are never stored apart. */
     if (sqlite3_prepare_v2(sql,
                            "UPDATE account_bridge_members SET sealed_bridge_key = ?, wrap_salt = ? "
                            "WHERE uid = ? AND label = ?;",
@@ -1451,7 +1429,207 @@ fl_result_t fl_user_db_bridge_put_sealed_key(const fl_user_db_t *db, const char 
             rc = sqlite3_changes(sql) == 1 ? FL_RESULT_OK : FL_RESULT_NOENT;
         sqlite3_finalize(st);
     }
+    return rc;
+}
+
+static fl_result_t bridge_valid(const fl_user_bridge_t *b) {
+    size_t i;
+
+    if (!b || !b->uid[0] || memchr(b->uid, '\0', sizeof b->uid) == NULL || b->generation == 0 ||
+        b->nmembers < 2 || b->nmembers > FL_USER_BRIDGE_MEMBERS_MAX)
+        return FL_RESULT_INVAL;
+    for (i = 0; i < b->nmembers; i++)
+        if (!fl_heritage_key_valid(b->members[i].label))
+            return FL_RESULT_INVAL;
+    return FL_RESULT_OK;
+}
+
+/* sealed may be NULL (roster only). With a sealed key, the roster and the key commit together or
+ * not at all: a bridge is never live without the key its local member was imported with. */
+static fl_result_t bridge_put_txn(const fl_user_db_t *db, const fl_user_bridge_t *b, const char *label,
+                                  const unsigned char *sealed, size_t len,
+                                  const unsigned char wrap_salt[FL_USER_BRIDGE_SALT_LEN]) {
+    sqlite3 *sql = NULL;
+    fl_result_t rc;
+
+    if (bridge_db_open(db, 1, &sql) != FL_RESULT_OK)
+        return FL_RESULT_ERR;
+    if (fl_sqlite_exec(sql, "user_db", "BEGIN IMMEDIATE;") != FL_RESULT_OK) {
+        sqlite3_close(sql);
+        return FL_RESULT_ERR;
+    }
+    rc = bridge_put_on(sql, b);
+    if (rc == FL_RESULT_OK && sealed)
+        rc = sealed_put_on(sql, b->uid, label, sealed, len, wrap_salt);
+    if (rc == FL_RESULT_OK && fl_sqlite_exec(sql, "user_db", "COMMIT;") != FL_RESULT_OK)
+        rc = FL_RESULT_ERR;
+    if (rc != FL_RESULT_OK)
+        (void)fl_sqlite_exec(sql, "user_db", "ROLLBACK;");
     sqlite3_close(sql);
+    return rc;
+}
+
+fl_result_t fl_user_db_bridge_put(const fl_user_db_t *db, const fl_user_bridge_t *b) {
+    fl_result_t rc;
+
+    if (!db || (rc = bridge_valid(b)) != FL_RESULT_OK)
+        return db ? rc : FL_RESULT_INVAL;
+    return bridge_put_txn(db, b, NULL, NULL, 0, NULL);
+}
+
+fl_result_t fl_user_db_bridge_put_with_key(const fl_user_db_t *db, const fl_user_bridge_t *b, const char *label,
+                                           const unsigned char *sealed, size_t len,
+                                           const unsigned char wrap_salt[FL_USER_BRIDGE_SALT_LEN]) {
+    fl_result_t rc;
+
+    if (!db || !label || !sealed || !wrap_salt || len == 0 || len > FL_USER_BRIDGE_SEALED_MAX)
+        return FL_RESULT_INVAL;
+    if ((rc = bridge_valid(b)) != FL_RESULT_OK)
+        return rc;
+    return bridge_put_txn(db, b, label, sealed, len, wrap_salt);
+}
+
+fl_result_t fl_user_db_bridge_put_sealed_key(const fl_user_db_t *db, const char *uid, const char *label,
+                                             const unsigned char *sealed, size_t len,
+                                             const unsigned char wrap_salt[FL_USER_BRIDGE_SALT_LEN]) {
+    sqlite3 *sql = NULL;
+    fl_result_t rc;
+
+    if (!db || !uid || !label || !sealed || !wrap_salt || len == 0 || len > FL_USER_BRIDGE_SEALED_MAX)
+        return FL_RESULT_INVAL;
+    if (bridge_db_open(db, 1, &sql) != FL_RESULT_OK)
+        return FL_RESULT_ERR;
+    rc = sealed_put_on(sql, uid, label, sealed, len, wrap_salt);
+    sqlite3_close(sql);
+    return rc;
+}
+
+/* ---- import from a KeyQuorum store (KQ-19) ------------------------------------------------------
+ * KeyQuorum makes and receives bridges (keyquorum private-bridge import / inbox open, then
+ * private_bridge::import_package) into its own SQLite store. This copies one bridge from that store,
+ * read-only, into the account store: nothing here validates a package or unseals a key. The org
+ * store has no schema-version marker, so every read checks its column types and sizes and fails
+ * closed on anything else; the pinned KeyQuorum commit is the schema contract and
+ * tests/test_kq_real_token.c runs this against a store the real CLI made. */
+static int kq_blob(sqlite3_stmt *st, int col, void *out, int want) {
+    if (sqlite3_column_type(st, col) != SQLITE_BLOB || sqlite3_column_bytes(st, col) != want)
+        return -1;
+    memcpy(out, sqlite3_column_blob(st, col), (size_t)want);
+    return 0;
+}
+
+fl_result_t fl_user_db_bridge_import_from_kq(const fl_user_db_t *db, const char *kq_store_path, const char *uid,
+                                             const char *local_label) {
+    fl_user_bridge_t *b;
+    sqlite3 *org = NULL;
+    sqlite3_stmt *st = NULL;
+    unsigned char sealed[FL_USER_BRIDGE_SEALED_MAX], wrap[FL_USER_BRIDGE_SALT_LEN];
+    size_t sealed_len = 0;
+    sqlite3_int64 id, gen;
+    fl_result_t rc = FL_RESULT_ERR;
+    int step, have_local = 0;
+
+    if (!db || !kq_store_path || !uid || !uid[0] || strlen(uid) >= sizeof b->uid ||
+        (local_label && !fl_heritage_key_valid(local_label)))
+        return FL_RESULT_INVAL;
+    b = (fl_user_bridge_t *)calloc(1, sizeof *b);
+    if (!b)
+        return FL_RESULT_NOMEM;
+    if (sqlite3_open_v2(kq_store_path, &org, SQLITE_OPEN_READONLY, NULL) != SQLITE_OK ||
+        sqlite3_exec(org, "BEGIN;", NULL, NULL, NULL) != SQLITE_OK) /* one snapshot for every read below */
+        goto out;
+    if (sqlite3_prepare_v2(org,
+                           "SELECT id, generation, public_key, salt, destroyed_at FROM private_bridges WHERE uid = ?;",
+                           -1, &st, NULL) != SQLITE_OK)
+        goto out;
+    sqlite3_bind_text(st, 1, uid, -1, SQLITE_TRANSIENT);
+    step = sqlite3_step(st);
+    if (step == SQLITE_DONE) {
+        rc = FL_RESULT_NOENT;
+        goto out;
+    }
+    if (step != SQLITE_ROW || sqlite3_column_type(st, 0) != SQLITE_INTEGER ||
+        sqlite3_column_type(st, 1) != SQLITE_INTEGER)
+        goto out;
+    id = sqlite3_column_int64(st, 0);
+    gen = sqlite3_column_int64(st, 1);
+    if (gen < 1 || gen > (sqlite3_int64)UINT32_MAX || kq_blob(st, 2, b->public_key, 32) != 0 ||
+        kq_blob(st, 3, b->salt, FL_USER_BRIDGE_SALT_LEN) != 0)
+        goto out;
+    b->generation = (uint32_t)gen;
+    b->destroyed = sqlite3_column_type(st, 4) != SQLITE_NULL; /* a destroyed bridge is stored destroyed */
+    snprintf(b->uid, sizeof b->uid, "%s", uid);
+    sqlite3_finalize(st);
+    st = NULL;
+
+    if (sqlite3_prepare_v2(org,
+                           "SELECT node_label, encryption_public_key, signing_public_key FROM private_bridge_members"
+                           " WHERE bridge_id = ? AND role = 'member' ORDER BY node_label;",
+                           -1, &st, NULL) != SQLITE_OK)
+        goto out;
+    sqlite3_bind_int64(st, 1, id);
+    while ((step = sqlite3_step(st)) == SQLITE_ROW) {
+        const char *label = (const char *)sqlite3_column_text(st, 0);
+
+        if (b->nmembers >= FL_USER_BRIDGE_MEMBERS_MAX) {
+            rc = FL_RESULT_NOMEM; /* a roster is never silently cut short */
+            goto out;
+        }
+        if (!label || strlen(label) >= sizeof b->members[0].label ||
+            kq_blob(st, 1, b->members[b->nmembers].encryption_public, 32) != 0 ||
+            kq_blob(st, 2, b->members[b->nmembers].signing_public, 32) != 0)
+            goto out;
+        snprintf(b->members[b->nmembers].label, sizeof b->members[0].label, "%s", label);
+        if (local_label && strcmp(label, local_label) == 0)
+            have_local = 1;
+        b->nmembers++;
+    }
+    if (step != SQLITE_DONE)
+        goto out;
+    sqlite3_finalize(st);
+    st = NULL;
+    if (local_label && !have_local) {
+        rc = FL_RESULT_NOENT; /* the account is not on this bridge's roster */
+        goto out;
+    }
+    if (local_label) {
+        int n;
+
+        if (sqlite3_prepare_v2(org,
+                               "SELECT wrap_salt, wrapped_secret FROM private_bridge_sealed_keys"
+                               " WHERE bridge_id = ? AND node_label = ?;",
+                               -1, &st, NULL) != SQLITE_OK)
+            goto out;
+        sqlite3_bind_int64(st, 1, id);
+        sqlite3_bind_text(st, 2, local_label, -1, SQLITE_TRANSIENT);
+        step = sqlite3_step(st);
+        if (step == SQLITE_DONE) {
+            rc = FL_RESULT_NOENT; /* KeyQuorum holds no sealed key for that member here */
+            goto out;
+        }
+        n = step == SQLITE_ROW && sqlite3_column_type(st, 1) == SQLITE_BLOB ? sqlite3_column_bytes(st, 1) : 0;
+        if (step != SQLITE_ROW || kq_blob(st, 0, wrap, FL_USER_BRIDGE_SALT_LEN) != 0 || n <= 0 ||
+            (size_t)n > sizeof sealed)
+            goto out;
+        memcpy(sealed, sqlite3_column_blob(st, 1), (size_t)n);
+        sealed_len = (size_t)n;
+        sqlite3_finalize(st);
+        st = NULL;
+    }
+    (void)sqlite3_exec(org, "ROLLBACK;", NULL, NULL, NULL);
+    sqlite3_close(org);
+    org = NULL;
+    rc = local_label ? fl_user_db_bridge_put_with_key(db, b, local_label, sealed, sealed_len, wrap)
+                     : fl_user_db_bridge_put(db, b);
+out:
+    if (st)
+        sqlite3_finalize(st);
+    if (org) {
+        (void)sqlite3_exec(org, "ROLLBACK;", NULL, NULL, NULL);
+        sqlite3_close(org);
+    }
+    mem_domain_secure_zero(sealed, sizeof sealed);
+    free(b);
     return rc;
 }
 

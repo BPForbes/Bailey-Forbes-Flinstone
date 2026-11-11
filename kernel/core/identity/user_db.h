@@ -116,6 +116,27 @@ typedef struct fl_user_bridge {
 /** Writes a bridge's facts and its member roster (replacing the row and its members' keys). */
 fl_result_t fl_user_db_bridge_put(const fl_user_db_t *db, const fl_user_bridge_t *bridge);
 /**
+ * fl_user_db_bridge_put plus member label's sealed bridge key and wrap salt, in ONE transaction: the
+ * roster and the key land together or not at all. INVAL for a malformed bridge or key, NOENT when label is
+ * not on the roster (nothing is written).
+ */
+fl_result_t fl_user_db_bridge_put_with_key(const fl_user_db_t *db, const fl_user_bridge_t *bridge, const char *label,
+                                           const unsigned char *sealed, size_t len,
+                                           const unsigned char wrap_salt[FL_USER_BRIDGE_SALT_LEN]);
+
+/**
+ * Copies bridge uid from a KeyQuorum store (the SQLite file `keyquorum private-bridge import` /
+ * `inbox open` writes; opened read-only, one snapshot) into this account store. local_label, when given,
+ * is the account whose sealed bridge key and wrap salt come with it (KeyQuorum holds only a local member's);
+ * NULL imports the roster alone, which is enough to verify but not to prove. NOENT: no such bridge, the
+ * label is not on its roster, or KeyQuorum holds no sealed key for it. NOMEM: a roster larger than
+ * FL_USER_BRIDGE_MEMBERS_MAX (never truncated). ERR: any column of the wrong type or size. A bridge
+ * KeyQuorum marks destroyed is stored destroyed. Validates no package and unseals nothing.
+ */
+fl_result_t fl_user_db_bridge_import_from_kq(const fl_user_db_t *db, const char *kq_store_path, const char *uid,
+                                             const char *local_label);
+
+/**
  * Stores member label's sealed copy of the bridge secret together with its wrap salt (one statement:
  * neither is ever written alone). NOENT when the member row does not exist.
  */

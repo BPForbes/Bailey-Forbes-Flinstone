@@ -15,6 +15,7 @@
 static void bridge_usage(void) {
     fprintf(stderr,
             "bridge: usage: bridge list | request <account> | accept <id> | revoke <id>\n"
+            "                    | kq-import <keyquorum-store> <uid> [--roster-only]   (with sudo)\n"
             "  Accounts on different branches of the heritage tree reach each other's\n"
             "  homes only through an active bridge: one side requests, the other side\n"
             "  (or an account above it) accepts. Either side, or an account above\n"
@@ -190,6 +191,32 @@ int cmd_bridge_run(int argc, char **argv) {
         return 0;
     }
 
+    /* A KeyQuorum private bridge (made or received by the keyquorum CLI) copied into the account store, for the
+     * account that is logged in. It changes who may cross a bridge at su, so it needs an elevated session. The
+     * store is the file `keyquorum private-bridge import` wrote; nothing here validates a package. */
+    if (!strcmp(argv[1], "kq-import") && (argc == 4 || (argc == 5 && !strcmp(argv[4], "--roster-only")))) {
+        int roster_only = argc == 5;
+
+        if (!fl_session_has_elevation()) {
+            fprintf(stderr, "bridge: kq-import changes who may cross a bridge; run it with sudo\n");
+            return 1;
+        }
+        rc = fl_user_db_bridge_import_from_kq(db, argv[2], argv[3], roster_only ? NULL : actor);
+        if (rc == FL_RESULT_NOENT) {
+            fprintf(stderr, roster_only ? "bridge: %s has no private bridge %s\n"
+                                        : "bridge: %s has no private bridge %s with a sealed key for %s\n",
+                    argv[2], argv[3], actor);
+            return 1;
+        }
+        if (rc != FL_RESULT_OK) {
+            fprintf(stderr, "bridge: kq-import failed (%d); the KeyQuorum store was not usable or the bridge was malformed\n", (int)rc);
+            return 1;
+        }
+        fl_audit_identity_event(actor, "bridge-kq-import", argv[3], roster_only ? "roster" : "with-key");
+        printf("bridge: imported private bridge %s%s\n", argv[3], roster_only ? " (roster only: can verify, cannot prove)" : "");
+        return 0;
+    }
+
     bridge_usage();
     return 1;
 }
@@ -199,6 +226,19 @@ int cmd_bridge_batch_tokens_count(int argc, char **argv, int i) {
         return 1;
     if (!strcmp(argv[i + 1], "list"))
         return 2;
+    if (!strcmp(argv[i + 1], "kq-import")) {
+        /* bridge kq-import <keyquorum-store> <uid> [--roster-only]: up to four arguments' worth of tokens, and
+         * never past a token that starts the next shell command. */
+        int n = 2;
+
+        if (i + 2 < argc && argv[i + 2] && !cmd_batch_token_is_shell_command(argv[i + 2]))
+            n++;
+        if (n == 3 && i + 3 < argc && argv[i + 3] && !cmd_batch_token_is_shell_command(argv[i + 3]))
+            n++;
+        if (n == 4 && i + 4 < argc && argv[i + 4] && !strcmp(argv[i + 4], "--roster-only"))
+            n++;
+        return n;
+    }
     if (i + 2 < argc && argv[i + 2] && !cmd_batch_token_is_shell_command(argv[i + 2]))
         return 3;
     return 2;

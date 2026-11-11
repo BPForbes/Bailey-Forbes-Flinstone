@@ -123,6 +123,33 @@ static int test_issue204_batch_clamp_login_sudo_su(void) {
     return 0;
 }
 
+/* bridge: list, request/accept/revoke take one argument, and kq-import (KQ-19) takes a store, a uid and an
+ * optional --roster-only, never reading into the next shell command. */
+static int test_bridge_batch_tokens(void) {
+    char *only[] = {"p", "bridge"};
+    ASSERT(cmd_bridge_batch_tokens_count(2, only, 1) == 1);
+    char *list[] = {"p", "bridge", "list", "whoami"};
+    ASSERT(cmd_bridge_batch_tokens_count(4, list, 1) == 2);
+    char *req[] = {"p", "bridge", "request", "alice", "whoami"};
+    ASSERT(cmd_bridge_batch_tokens_count(5, req, 1) == 3);
+    char *acc[] = {"p", "bridge", "accept", "7"};
+    ASSERT(cmd_bridge_batch_tokens_count(4, acc, 1) == 3);
+
+    char *kq[] = {"p", "bridge", "kq-import", "store.sqlite", "0a1b2c", "whoami"};
+    ASSERT(cmd_bridge_batch_tokens_count(6, kq, 1) == 4);
+    char *kq_roster[] = {"p", "bridge", "kq-import", "store.sqlite", "0a1b2c", "--roster-only", "whoami"};
+    ASSERT(cmd_bridge_batch_tokens_count(7, kq_roster, 1) == 5);
+    char *kq_short[] = {"p", "bridge", "kq-import", "store.sqlite"};
+    ASSERT(cmd_bridge_batch_tokens_count(4, kq_short, 1) == 3);
+    char *kq_bare[] = {"p", "bridge", "kq-import"};
+    ASSERT(cmd_bridge_batch_tokens_count(3, kq_bare, 1) == 2);
+    char *kq_next[] = {"p", "bridge", "kq-import", "whoami"};
+    ASSERT(cmd_bridge_batch_tokens_count(4, kq_next, 1) == 2);   /* the next command is not swallowed */
+    char *kq_next2[] = {"p", "bridge", "kq-import", "store.sqlite", "whoami"};
+    ASSERT(cmd_bridge_batch_tokens_count(5, kq_next2, 1) == 3);
+    return 0;
+}
+
 int main(void) {
     printf("test_issue220_1_addcluster... ");
     if (test_issue220_1_addcluster() != 0) return 1;
@@ -162,6 +189,10 @@ int main(void) {
 
     printf("test_issue234_ping_check_batch_tokens... ");
     if (test_issue234_ping_check_batch_tokens() != 0) return 1;
+    printf("OK\n");
+
+    printf("test_bridge_batch_tokens... ");
+    if (test_bridge_batch_tokens() != 0) return 1;
     printf("OK\n");
 
     printf("All batch argv issue #220 tests passed.\n");
