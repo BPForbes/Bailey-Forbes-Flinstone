@@ -1879,11 +1879,15 @@ static int test_switch_mutation_barriers(void) {
     fl_session_test_set_switch_pre_commit(pre_commit_release_mutator);
     ASSERT(switch_to("Sue", 0, "pw", NULL, NULL) == FL_RESULT_OK);
     finish_mutator(1);
-    ASSERT(s_mut_rc == FL_RESULT_OK);
+    /* The switch committed Sue before the removal took the lock, so the removal is refused
+     * and Sue stays. Once the session has moved on, the same account can be removed. */
+    ASSERT(s_mut_rc == FL_RESULT_ACCES);
     ASSERT(s_during_phase == 1 && s_during_present == 1);
     ASSERT(!strcmp(fl_session_current_user(), "Sue"));
-    ASSERT(fl_user_db_find(fl_session_user_db(), "Sue") == NULL);
+    ASSERT(fl_user_db_find(fl_session_user_db(), "Sue") != NULL);
     ASSERT(fl_session_set_user("Flinstone") == FL_RESULT_OK);
+    ASSERT(fl_session_remove_user("Sue") == FL_RESULT_OK);
+    ASSERT(fl_user_db_find(fl_session_user_db(), "Sue") == NULL);
 
     fl_session_set_audit_hook(NULL);
     return 0;

@@ -833,9 +833,21 @@ fl_result_t fl_session_add_user_under(const char *creator_key, const char *name,
 
 fl_result_t fl_session_remove_user(const char *name) {
     fl_result_t rc;
+    const fl_user_record_t *user;
 
     session_lock_db();
-    rc = session_db_ready_locked() ? fl_user_db_remove_user(&s_db, name) : FL_RESULT_ERR;
+    if (!session_db_ready_locked()) {
+        rc = FL_RESULT_ERR;
+    } else {
+        /* Same record the session is logged in as, including a different spelling.
+         * A switch that committed just before this lock must not leave s_current
+         * naming an account that is no longer in the store. */
+        user = fl_user_db_find(&s_db, name);
+        if (user && user == fl_user_db_find(&s_db, s_current))
+            rc = FL_RESULT_ACCES;
+        else
+            rc = fl_user_db_remove_user(&s_db, name);
+    }
     session_unlock_db();
     return rc;
 }
