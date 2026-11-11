@@ -147,6 +147,18 @@ static int test_bridge_batch_tokens(void) {
     ASSERT(cmd_bridge_batch_tokens_count(4, kq_next, 1) == 2);   /* the next command is not swallowed */
     char *kq_next2[] = {"p", "bridge", "kq-import", "store.sqlite", "whoami"};
     ASSERT(cmd_bridge_batch_tokens_count(5, kq_next2, 1) == 3);
+
+    /* assembly (KQ-16) takes a parent and an optional --reissue, never reading into the next shell command. */
+    char *as[] = {"p", "bridge", "assembly", "Mgr", "whoami"};
+    ASSERT(cmd_bridge_batch_tokens_count(5, as, 1) == 3);
+    char *as_re[] = {"p", "bridge", "assembly", "Mgr", "--reissue", "whoami"};
+    ASSERT(cmd_bridge_batch_tokens_count(6, as_re, 1) == 4);
+    char *as_bare[] = {"p", "bridge", "assembly"};
+    ASSERT(cmd_bridge_batch_tokens_count(3, as_bare, 1) == 2);
+    char *as_next[] = {"p", "bridge", "assembly", "whoami"};
+    ASSERT(cmd_bridge_batch_tokens_count(4, as_next, 1) == 2);   /* the next command is not swallowed */
+    char *as_flag_only[] = {"p", "bridge", "assembly", "--reissue"};
+    ASSERT(cmd_bridge_batch_tokens_count(4, as_flag_only, 1) == 3); /* a flag where the parent goes still counts as its token */
     return 0;
 }
 
