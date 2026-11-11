@@ -1077,6 +1077,12 @@ test_fs_provider_bytes: userland/shell/common.o userland/shell/authz_subsystem.o
 test_codeql_scripts:
 	python3 -m unittest discover -s .github/scripts
 
+.PHONY: test_fs_identity
+test_fs_identity:
+	$(CC) $(CFLAGS) $(TEST_SANITIZE) -Werror -Ikernel/freestanding/x86_64 -Ikernel/drivers/freestanding_x86_64 \
+	  -o tests/test_fs_identity tests/test_fs_identity.c kernel/freestanding/x86_64/identity.c
+	./tests/test_fs_identity
+
 .PHONY: test_hex
 test_hex: kernel/core/vfs/kq_delivery.o kernel/core/vfs/server_shared_fs.o kernel/core/vfs/server_shared_db.o kernel/core/vfs/server_catalog_file.o kernel/core/vfs/server_shared_digest.o $(SHARED_FS_MM_OBJS) userland/shell/common.o
 	$(CC) $(CFLAGS) $(TEST_SANITIZE) -o tests/test_hex tests/test_hex.c \

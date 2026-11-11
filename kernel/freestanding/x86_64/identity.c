@@ -5,6 +5,7 @@ struct user {
     char secret[24];
     int elevated;
     int used;
+    int kq; /* 1: password lives in the ops table's seal, not in secret */
 };
 
 static struct user s_users[FL_FS_MAX_USERS];
@@ -13,6 +14,23 @@ static int s_session_used[FL_FS_MAX_SESSIONS];
 static int s_session_sudo[FL_FS_MAX_SESSIONS];
 static int s_active;
 static int s_sessions;
+static const fl_fs_identity_kq_ops_t *s_kq;
+
+const fl_fs_identity_kq_ops_t *fl_fs_identity_set_kq(const fl_fs_identity_kq_ops_t *ops)
+{
+    const fl_fs_identity_kq_ops_t *prev = s_kq;
+
+    s_kq = ops;
+    return prev;
+}
+
+static void secret_clear(char *secret)
+{
+    unsigned i;
+
+    for (i = 0; i < sizeof s_users[0].secret; ++i)
+        secret[i] = 0;
+}
 
 static int str_eq(const char *a, const char *b)
 {
@@ -23,6 +41,17 @@ static int str_eq(const char *a, const char *b)
         ++b;
     }
     return *a == *b;
+}
+
+/* 1 when password opens this account: the sealed key when KeyQuorum enrolled it, else the
+ * stored demo password. A sealed account with no unlock op fails closed. */
+static int password_ok(const struct user *u, const char *password)
+{
+    if (!password)
+        return 0;
+    if (u->kq)
+        return s_kq && s_kq->unlock && s_kq->unlock(u->name, password);
+    return str_eq(u->secret, password);
 }
 
 /* Account names match regardless of case ("root" finds Root), as on the hosted shell. */
@@ -58,7 +87,7 @@ static int find_user(const char *name)
     return -1;
 }
 
-static int add_user(const char *name, const char *password, int elevated)
+static int add_user(const char *creator, const char *name, const char *password, int elevated)
 {
     if (!name || !name[0] || !password || find_user(name) >= 0)
         return -1;
@@ -67,8 +96,21 @@ static int add_user(const char *name, const char *password, int elevated)
             continue;
         s_users[i].used = 1;
         s_users[i].elevated = elevated;
+        s_users[i].kq = 0;
         str_copy(s_users[i].name, name, sizeof(s_users[i].name));
-        str_copy(s_users[i].secret, password, sizeof(s_users[i].secret));
+        secret_clear(s_users[i].secret);
+        if (s_kq && s_kq->enroll) {
+            /* creator is a name the ops may record; identity does not interpret it.
+             * Root's creator is NULL. Flinstone's is "Root" even though Root is added next,
+             * so the account indexes (and the lab's perspectives) stay in this order. */
+            if (s_kq->enroll(creator, s_users[i].name, password) != 0) {
+                s_users[i].used = 0;
+                return -1;
+            }
+            s_users[i].kq = 1;
+        } else {
+            str_copy(s_users[i].secret, password, sizeof(s_users[i].secret));
+        }
         return i;
     }
     return -1;
@@ -83,9 +125,16 @@ void fl_fs_identity_init(void)
         s_session_user[i] = 0;
         s_session_sudo[i] = 0;
     }
-    /* Canonical spellings, as on the hosted shell: Root is the master, Flinstone the default user. */
-    add_user("Flinstone", "flinstone", 0);
-    add_user("Root", "root", 1);
+#ifndef FL_SEED_DEFAULT_ACCOUNTS
+#define FL_SEED_DEFAULT_ACCOUNTS 1 /* the public lab keeps its demo accounts; a build that must not
+                                    * carry known passwords defines this 0 */
+#endif
+    /* Canonical spellings, as on the hosted shell: Root is the master, Flinstone the default user.
+     * Order is the account index the lab perspectives use. */
+#if FL_SEED_DEFAULT_ACCOUNTS
+    add_user("Root", "Flinstone", "flinstone", 0);
+    add_user((const char *)0, "Root", "root", 1);
+#endif
     s_session_used[0] = 1;
     s_session_user[0] = find_user("Flinstone");
     s_active = 0;
@@ -115,7 +164,7 @@ int fl_fs_identity_elevated(int session)
 static int auth(int session, const char *name, const char *password)
 {
     int idx = find_user(name);
-    if (idx < 0 || !str_eq(s_users[idx].secret, password))
+    if (idx < 0 || !password_ok(&s_users[idx], password))
         return 0;
     s_session_user[session] = idx;
     return 1;
@@ -139,6 +188,24 @@ int fl_fs_identity_switchuser(int session, const char *name)
     if (session < 0 || session >= FL_FS_MAX_SESSIONS || !s_session_used[session])
         return 0;
     idx = find_user(name);
+    if (idx < 0 || s_session_user[session] < 0)
+        return 0;
+    /* A switch_allowed op is the relation check. With none installed, switchuser stays open:
+     * the lab reconnects a seat with it, and that restriction is not confirmed. */
+    if (s_kq && s_kq->switch_allowed &&
+        !s_kq->switch_allowed(s_users[s_session_user[session]].name, s_users[idx].name))
+        return 0;
+    s_session_user[session] = idx;
+    return 1;
+}
+
+int fl_fs_identity_enter_root(int session)
+{
+    int idx;
+
+    if (session < 0 || session >= FL_FS_MAX_SESSIONS || !s_session_used[session])
+        return 0;
+    idx = find_user("Root");
     if (idx < 0)
         return 0;
     s_session_user[session] = idx;
@@ -164,7 +231,7 @@ int fl_fs_identity_useradd(int session, const char *name, const char *password)
 {
     if (!fl_fs_identity_elevated(session))
         return 0;
-    return add_user(name, password, 0) >= 0;
+    return add_user(fl_fs_identity_user(session), name, password, 0) >= 0;
 }
 
 int fl_fs_identity_userdel(int session, const char *name)
@@ -183,7 +250,11 @@ int fl_fs_identity_userdel(int session, const char *name)
         if (s_session_used[i] && s_session_user[i] == idx)
             s_session_user[i] = guest;
     }
+    if (s_users[idx].kq && s_kq && s_kq->forget)
+        s_kq->forget(s_users[idx].name);
     s_users[idx].used = 0;
+    secret_clear(s_users[idx].secret);
+    s_users[idx].kq = 0;
     return 1;
 }
 
@@ -197,6 +268,12 @@ int fl_fs_identity_passwd(int session, const char *name, const char *password)
         return 0;
     if (idx != s_session_user[session] && !fl_fs_identity_elevated(session))
         return 0;
+    if (s_users[idx].kq) {
+        if (!s_kq || !s_kq->change_password || s_kq->change_password(s_users[idx].name, password) != 0)
+            return 0;
+        secret_clear(s_users[idx].secret);
+        return 1;
+    }
     str_copy(s_users[idx].secret, password, sizeof(s_users[idx].secret));
     return 1;
 }
@@ -207,7 +284,7 @@ int fl_fs_identity_sudo(int session, const char *password)
     if (session < 0 || session >= FL_FS_MAX_SESSIONS || !s_session_used[session] || !password)
         return 0;
     idx = s_session_user[session];
-    if (idx < 0 || !str_eq(s_users[idx].secret, password))
+    if (idx < 0 || !password_ok(&s_users[idx], password))
         return 0;
     s_session_sudo[session] = 1;
     return 1;

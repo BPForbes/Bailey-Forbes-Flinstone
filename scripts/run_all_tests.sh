@@ -102,6 +102,7 @@ run_make "test_heritage" test_heritage
 run_make "test_sqlite_schema" test_sqlite_schema
 run_make "test_fs_helpers" test_fs_helpers
 run_make "test_fs_provider_bytes" test_fs_provider_bytes
+run_make "test_fs_identity" test_fs_identity
 run_make "test_hex" test_hex
 run_make "test_secret_compare" test_secret_compare
 run_make "test_random" test_random

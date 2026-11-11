@@ -58,6 +58,7 @@ tests/test_kq_delivery
 tests/test_fs_helpers
 tests/test_fs_provider_bytes
 tests/test_hex
+tests/test_fs_identity
 tests/test_secret_compare
 tests/test_random
 tests/test_kq_net

@@ -719,8 +719,15 @@ kernel prints `CAP keyquorum=linked` when `fl_kq_driver_get()` accepts the linke
 - **Clock.** `fl_time_wall_sec` reads the CMOS real-time clock (UTC under QEMU's default).
 - **Stage 2 (not built): the checkpoints in the image.** They need a store for `.kqtf` containers and
   sealed letters (a ramfs file holds 160 bytes, 16 files in all) and the libc calls `kq_checkpoint.c` makes
-  (`stdio`, `stdlib`, `errno`, `sys/stat`, `unistd`). Neither is small, so `server file` in the image still
+  (`stdio`, `stdlib`, `errno`, `sys/stat`, `unistd`). Neither is small, and the image is already near its
+  512 KiB payload and conventional-memory ceilings, so `server file` in the image still
   says delivery runs in the WebAssembly shell.
+- **Account passwords (FL-14).** The WebAssembly lab installs `fl_fs_identity_kq_ops_t` before the demo
+  accounts are seeded. A new account's signing key and box key are sealed with the driver's `account_seal`,
+  and the password is not kept in the account table; login, `su` and `sudo` open that seal. `switchuser`
+  stays password-free: the lab reconnects a seat with it, and restricting it is still an open question.
+  The QEMU image does not install the table. Sealing at boot needs entropy, the default CPU has no RDRAND,
+  and the public image keeps its demo accounts (`FL_SEED_DEFAULT_ACCOUNTS` stays 1).
 
 ## The key service (FL-20, absorbs FL-24)
 

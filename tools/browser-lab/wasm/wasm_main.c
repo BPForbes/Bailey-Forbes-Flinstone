@@ -11,6 +11,9 @@
 #endif
 
 #include "identity.h"
+#ifdef FL_LAB_KQ
+#include "lab_kq.h"
+#endif
 #include "labdisk.h"
 #include "labnet.h"
 #include "ramfs.h"
@@ -25,6 +28,9 @@ EMSCRIPTEN_KEEPALIVE void wasm_shell_init(void)
     fl_fs_vga_init();
     fl_fs_kbd_init();
     fl_fs_serial_puts("FLINTSTONE_KERNEL_BOOT_OK\n");
+#ifdef FL_LAB_KQ
+    fl_lab_kq_bind_identity();
+#endif
     fl_fs_identity_init();
     fl_fs_ramfs_init();
     fl_fs_labdisk_init();
