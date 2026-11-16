@@ -1352,9 +1352,11 @@ void fl_net_kq_history_drop(const uint8_t request_id[16]) {
 /* FL-04, member side: take the bundle, then open both letters with this account's box key. */
 fl_result_t fl_net_kq_history_open(const uint8_t request_id[16], unsigned wait_ms, const uint8_t box_secret[32],
                                    const char *sender, const char *me, const uint8_t sender_public[32],
-                                   fl_kq_buf_t *lines, uint32_t *snapshot_events) {
+                                   const uint8_t expected_file_id[16], fl_kq_buf_t *lines,
+                                   uint32_t *snapshot_events) {
     const fl_kq_driver_t *drv = fl_kq_driver_get();
     fl_kq_buf_t l15 = {0}, l17 = {0}, c = {0}, snap = {0};
+    kq_file_offer_t offer;
     uint8_t rev[32], root[32], root2[32];
     uint32_t count = 0;
     fl_result_t rc;
@@ -1368,7 +1370,7 @@ fl_result_t fl_net_kq_history_open(const uint8_t request_id[16], unsigned wait_m
     lines->data = NULL;
     lines->len = 0;
     *snapshot_events = 0;
-    if (!drv || !drv->open || !drv->open_snapshot || !drv->snapshot_covers || !drv->events) {
+    if (!drv || !drv->open || !drv->open_snapshot || !drv->snapshot_covers || !drv->events || !drv->offer) {
         fl_net_kq_history_drop(request_id);
         return FL_RESULT_NOSYS;
     }
@@ -1383,6 +1385,19 @@ fl_result_t fl_net_kq_history_open(const uint8_t request_id[16], unsigned wait_m
         drv->open_snapshot(&l17, box_secret, sender, me, sender_public, &snap, root2, &count) != KQ_FILE_OK) {
         rc = FL_RESULT_ACCES;
         goto done;
+    }
+    /* The history is the delivery's own file: its file id (stable across revisions, so a reseal of a newer head
+     * still matches) is the one the caller recorded when it decoded the delivery. Public data: a plain compare. */
+    if (expected_file_id) {
+        memset(&offer, 0, sizeof offer);
+        if (drv->offer(&c, rev, &offer) != KQ_FILE_OK) {
+            rc = FL_RESULT_ERR;
+            goto done;
+        }
+        if (memcmp(offer.file_id, expected_file_id, sizeof offer.file_id) != 0) {
+            rc = FL_NET_KQ_HISTORY_OTHER_FILE;
+            goto done;
+        }
     }
     /* The delivered file's history must be a prefix of the snapshot: the snapshot is the whole history. */
     if (count == 0 || drv->snapshot_covers(&c, &snap) != KQ_FILE_OK) {
