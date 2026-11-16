@@ -1152,9 +1152,10 @@ test_kq_net: userland/shell/common.o $(UTIL_SHELL_LINK_OBJS) $(FS_JAIL_CORE_OBJS
 	./tests/test_kq_net
 
 .PHONY: test_kq_history_member
-test_kq_history_member: userland/shell/common.o $(UTIL_SHELL_LINK_OBJS) $(FS_JAIL_CORE_OBJS) $(FS_JAIL_SUPPORT_OBJS) kernel/core/mm/mem_domain.o $(MEM_ASM_OBJ) $(HISTORY_ASM_OBJ) $(UTIL_HISTORY_HOST_OBJS) kernel/core/vfs/kq_checkpoint.o kernel/core/vfs/kq_checkpoint_users.o kernel/core/vfs/kq_delivery.o kernel/core/net/net_kq_delivery.o kernel/core/net/net_kq_delivery_users.o $(NET_ASM_OBJ) kernel/core/vfs/kq_history_bundle.o
+test_kq_history_member: userland/command/cmd_server_history.o userland/shell/common.o $(UTIL_SHELL_LINK_OBJS) $(FS_JAIL_CORE_OBJS) $(FS_JAIL_SUPPORT_OBJS) kernel/core/mm/mem_domain.o $(MEM_ASM_OBJ) $(HISTORY_ASM_OBJ) $(UTIL_HISTORY_HOST_OBJS) kernel/core/vfs/kq_checkpoint.o kernel/core/vfs/kq_checkpoint_users.o kernel/core/vfs/kq_delivery.o kernel/core/net/net_kq_delivery.o kernel/core/net/net_kq_delivery_users.o $(NET_ASM_OBJ) kernel/core/vfs/kq_history_bundle.o
 	$(CC) $(CFLAGS) $(TEST_SANITIZE) -c -o tests/test_kq_history_member.o tests/test_kq_history_member.c
 	$(CXX) $(CXXFLAGS) $(TEST_SANITIZE) -o tests/test_kq_history_member tests/test_kq_history_member.o \
+	  userland/command/cmd_server_history.o \
 	  kernel/core/net/net_kq_delivery.o kernel/core/net/net_kq_delivery_users.o kernel/core/vfs/kq_delivery.o kernel/core/vfs/kq_history_bundle.o \
 	  kernel/core/vfs/kq_checkpoint.o kernel/core/vfs/kq_checkpoint_users.o \
 	  userland/shell/common.o $(UTIL_SHELL_LINK_OBJS) $(FS_JAIL_CORE_OBJS) $(FS_JAIL_SUPPORT_OBJS) \
