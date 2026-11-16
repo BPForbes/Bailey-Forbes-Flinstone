@@ -839,6 +839,16 @@ The rule is KeyQuorum's (`keyquorum_access.h`); Flinstone asks it and collects t
   same `authentication failed` whatever the reason, except the `sudo` refusal for a Root with no token (below). `fl_session_set_user` stays an unchecked set for tests; the
   end of `su -c` uses `fl_session_restore_user`, which takes the old identity back only while the login it was
   asked in is still current (otherwise the session is left as it is, audited as `su-restore-refused`).
+- **The sudo window (owner decision, FL-20 #399).** A `sudo` elevates the account for 15 minutes
+  (`FL_ELEVATION_LAB_TTL_SOFT_MAX_SECONDS`). For that window the two keys that co-signed it, Root's token key and
+  the invoker's key, are kept (`fl_kq_sudo_hold_*`, in a page kept out of swap and core dumps where the host allows
+  it) and every command run in it is signed by both (`fl_session_elevated_action`, audited `sudo-action` with the
+  nonce). A `sudo` inside the window starts its clock again; a plain command does not. When the window ends the
+  keys are wiped (the key service's tick audits `sudo-window-ended`) and the account signs with its own key alone.
+  When Root's key is not available inside the window (wiped, its token re-paired, or a signature that does not
+  verify), the elevation is taken away at once (`sudo-deelevated`): a plain command then runs as the account
+  itself, and `sudo <command>` asks for Root's key again. `sudo -k` and logout end the window and wipe the keys.
+  Root has no window: it acts with its own key. Root's key never comes from a stored credential.
 - **Password-only accounts (owner decision, FL-12 #403).** The default image has no KQST for any account, Root
   included, and KeyQuorum asks for Root's token on every `sudo`. `sudo` and `sudo -i` always need Root's password
   and Root's token: with a password-only Root (a `FL_USER_AUTH_PASSWORD` account) both are refused before any

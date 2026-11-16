@@ -191,6 +191,32 @@ int cmd_sudo_require_auth_reason(const char *reason) {
     return 0;
 }
 
+int cmd_sudo_sign_action(const char *line) {
+    int deelevated = 0;
+
+    if (!line || !line[0])
+        line = "sudo";
+    (void)fl_session_elevated_action(line, 1, &deelevated);
+    if (!deelevated)
+        return 0;
+    fprintf(stderr, "sudo: Root's key is not available, so the elevation ended; sign in again\n");
+    if (cmd_sudo_require_auth_reason("sudo authentication") != 0)
+        return 1;
+    (void)fl_session_elevated_action(line, 1, &deelevated);
+    return deelevated ? 1 : 0;
+}
+
+void cmd_sudo_sign_elevated(const char *line) {
+    int deelevated = 0;
+
+    if (!line || !line[0])
+        return;
+    (void)fl_session_elevated_action(line, 0, &deelevated);
+    if (deelevated)
+        fprintf(stderr, "sudo: Root's key is not available, so the elevation ended; running as %s\n",
+                fl_session_current_user());
+}
+
 int cmd_sudo_require_auth(void) {
     return cmd_sudo_require_auth_reason("sudo authentication");
 }

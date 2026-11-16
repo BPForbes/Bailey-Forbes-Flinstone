@@ -14,9 +14,11 @@
 #include "fl/hex.h"
 #include "mem_domain.h"
 #include "session.h"
+#include "timekeeping.h"
 #include "user_db.h"
 
 #include <sqlite3.h>
+#include <stdint.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -847,6 +849,52 @@ static int test_root_enrol_and_sudo(void) {
         ASSERT(strlen(nonce) == 32 && strspn(nonce, "0123456789abcdef") == 32);
     }
     ASSERT(fl_session_has_elevation());
+    {
+        /* The sudo window (owner decision, FL-20 #399): Bob's and Root's real keys are kept for it and
+         * sign every elevated action together; a sudo in it starts the clock again; when Root's key is
+         * not available the elevation is taken away and Bob goes on with his own key alone. */
+        static const char act_want[] = "sudo-action:elevated; nonce=", sudo_want[] = "sudo-action:sudo; nonce=";
+        uint8_t nonce[16], s_inv[64], s_auth[64];
+        int64_t now = 0;
+        int deelev = -1;
+
+        ASSERT(fl_time_monotonic_ns(&now) == FL_RESULT_OK && fl_kq_sudo_hold_active(now));
+        ASSERT(fl_session_elevated_action("ls /", 0, &deelev) == FL_RESULT_OK && deelev == 0);
+        ASSERT(!strncmp(s_audit_last, act_want, sizeof act_want - 1));
+        ASSERT(strlen(s_audit_last + sizeof act_want - 1) == 32);
+        ASSERT(fl_session_elevated_action("sudo ls /", 1, &deelev) == FL_RESULT_OK && deelev == 0);
+        ASSERT(!strncmp(s_audit_last, sudo_want, sizeof sudo_want - 1));
+        ASSERT(fl_session_has_elevation());
+        /* Another account, or a time past the window, gets nothing from the kept keys. */
+        ASSERT(fl_kq_sudo_hold_cosign("Ann", "ls", now, nonce, s_inv, s_auth) == FL_KQ_COSIGN_AUTHORITY);
+        ASSERT(fl_kq_sudo_hold_cosign("Bob", "ls", now, nonce, s_inv, s_auth) == FL_KQ_COSIGN_OK);
+        ASSERT(fl_kq_sudo_hold_expire(now) == 0); /* not over yet */
+        /* Root's key gone (here: wiped) inside the window: elevation ends, Bob is himself again. */
+        fl_kq_sudo_hold_release();
+        ASSERT(fl_session_elevated_action("ls /", 0, &deelev) == FL_RESULT_OK && deelev == 1);
+        ASSERT(!strcmp(s_audit_last, "sudo-deelevated:root-key"));
+        ASSERT(!fl_session_has_elevation());
+        /* Outside a window there is nothing to co-sign: the account's own key, no audit. */
+        ASSERT(fl_session_elevated_action("ls /", 0, &deelev) == FL_RESULT_OK && deelev == 0);
+        ASSERT(!strcmp(s_audit_last, "sudo-deelevated:root-key"));
+
+        /* A new sudo opens a new window; when it ends the keys are wiped. */
+        ASSERT(fl_session_sudo_authenticate(s_root_pw, s_bob_pw) == FL_RESULT_OK);
+        ASSERT(fl_time_monotonic_ns(&now) == FL_RESULT_OK && fl_kq_sudo_hold_active(now));
+        ASSERT(fl_kq_sudo_hold_cosign("Bob", "ls", INT64_MAX, nonce, s_inv, s_auth) == FL_KQ_COSIGN_AUTHORITY);
+        ASSERT(!fl_kq_sudo_hold_active(now)); /* a use past the end wiped it */
+        ASSERT(fl_session_elevated_action("ls /", 0, &deelev) == FL_RESULT_OK && deelev == 1);
+        ASSERT(!fl_session_has_elevation());
+        ASSERT(fl_session_sudo_authenticate(s_root_pw, s_bob_pw) == FL_RESULT_OK);
+        ASSERT(fl_kq_sudo_hold_expire(INT64_MAX) == 1 && fl_kq_sudo_hold_expire(INT64_MAX) == 0);
+        /* sudo -k and logout end the window and its keys. */
+        ASSERT(fl_session_sudo_authenticate(s_root_pw, s_bob_pw) == FL_RESULT_OK);
+        fl_session_drop_elevation();
+        ASSERT(fl_time_monotonic_ns(&now) == FL_RESULT_OK && !fl_kq_sudo_hold_active(now));
+        ASSERT(fl_session_sudo_authenticate(s_root_pw, s_bob_pw) == FL_RESULT_OK);
+        mem_domain_zero(s_inv, sizeof s_inv);
+        mem_domain_zero(s_auth, sizeof s_auth);
+    }
     fl_session_drop_elevation();
     {
         /* The real ops directly: a half signed by the wrong key, or for another action, fails. */

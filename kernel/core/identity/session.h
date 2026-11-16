@@ -91,6 +91,15 @@ fl_result_t fl_session_switch_user(const fl_session_switch_request_t *req);
  */
 fl_result_t fl_session_sudo_authenticate(const char *root_password, const char *invoker_password);
 /**
+ * Sign one elevated action (owner decision, FL-20 #399). While the sudo window is open the action is
+ * signed by Root's key and the account's key together (audited "sudo-action" with the nonce); renew
+ * non-zero (a sudo) also starts the window's clock again. When the window has ended it does nothing:
+ * the account acts with its own key. When Root's key is not available the elevation is taken away,
+ * audited "sudo-deelevated", and *deelevated (may be NULL) is set; the account goes on unelevated.
+ * Root acts with its own key and has no window. Called without the session lock.
+ */
+fl_result_t fl_session_elevated_action(const char *action, int renew, int *deelevated);
+/**
  * Pair the logged-in account with its KeyQuorum slot token (KQST) and switch it to KQST login.
  * password is the account's password, which must also open the token; the token must match
  * device_id, signing_public and encryption_public (what keyquorum-device provision printed for a

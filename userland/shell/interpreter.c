@@ -94,6 +94,10 @@ int execute_command_str(const char *line) {
         free(cmdLine);
         goto finish;
     }
+    /* Inside the sudo window every command is an elevated action, signed by Root's key and the
+     * account's (FL-20 #399); only a sudo starts the window's clock again. */
+    if (strcmp(args[0], "sudo") != 0)
+        cmd_sudo_sign_elevated(line);
 
     if (strcmp(args[0], "sudo") == 0) {
         /* -i / -k: no password gate; cmd_sudo_run handles revoke and root login. */
@@ -112,7 +116,7 @@ int execute_command_str(const char *line) {
             free(cmdLine);
             goto finish;
         }
-        if (cmd_sudo_require_auth() != 0) {
+        if (cmd_sudo_require_auth() != 0 || cmd_sudo_sign_action(line) != 0) {
             free(cmdLine);
             out_rc = 1;
             goto finish;

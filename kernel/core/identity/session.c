@@ -496,18 +496,28 @@ int fl_session_verify_account_password(const char *name, const char *password) {
  * is written to detail: label, which invoker key signed, the nonce), else the reason word for the
  * audit. Called without s_session_mu.
  */
+/* When a sudo window opened now would end (monotonic ns): the elevation token's own length. */
+static int64_t window_end(void) {
+    int64_t now = 0;
+
+    if (fl_time_monotonic_ns(&now) != FL_RESULT_OK)
+        return 0;
+    return now + (int64_t)FL_ELEVATION_LAB_TTL_SOFT_MAX_SECONDS * 1000000000LL;
+}
+
 static const char *cosign_sudo(const char *invoker_name, int invoker_kqst,
                                const char *invoker_password, const char *root_name,
                                const char *root_password, const char *label, const char *action,
-                               char *detail, size_t cap) {
+                               int64_t hold_until, char *detail, size_t cap) {
     uint8_t nonce[16], inv_sig[64], root_sig[64];
     char nonce_hex[33];
     int st;
 
     if (!invoker_password || !fl_session_verify_account_password(invoker_name, invoker_password))
         return "invoker-password";
-    st = fl_kq_sudo_cosign(invoker_name, invoker_password, invoker_kqst, root_name, root_password,
-                           action, nonce, inv_sig, root_sig);
+    /* hold_until > 0: the two keys are kept for the sudo window (FL-20 #399). */
+    st = fl_kq_sudo_hold_open(invoker_name, invoker_password, invoker_kqst, root_name, root_password,
+                              action, hold_until, nonce, inv_sig, root_sig);
     if (st == FL_KQ_COSIGN_AUTHORITY)
         return "kqst";
     if (st == FL_KQ_COSIGN_INVOKER)
@@ -629,7 +639,7 @@ fl_result_t fl_session_switch_user(const fl_session_switch_request_t *req) {
 
         snprintf(action, sizeof action, "sudo -i %s", tgt_key);
         why = cosign_sudo(cur_name, cur_auth == FL_USER_AUTH_PASSWORD_KQST, req->invoker_password,
-                          holder_name, pw, "sudo -i", action, cosign_detail, sizeof cosign_detail);
+                          holder_name, pw, "sudo -i", action, 0, cosign_detail, sizeof cosign_detail);
     }
     if (!why && need.factor == FL_KQ_ACCESS_PASSWORD_BRIDGE_KQST) {
         fl_user_record_t member;
@@ -790,8 +800,11 @@ static fl_result_t grant_elevation_locked(const char *reason, fl_elevation_token
         return FL_RESULT_OK;
     }
     rc = fl_elevation_grant(s_current, reason, out);
-    if (rc == FL_RESULT_OK)
+    if (rc == FL_RESULT_OK) {
+        if (s_active_elev != FL_ELEVATION_TOKEN_NONE && s_active_elev != *out)
+            fl_elevation_revoke(s_active_elev); /* a new sudo replaces the window: the clock starts again */
         s_active_elev = *out;
+    }
     return rc;
 }
 
@@ -800,6 +813,7 @@ fl_result_t fl_session_sudo_authenticate(const char *root_password, const char *
     char cur_name[FL_USER_NAME_MAX], cur_key[FL_HERITAGE_KEY_ID_MAX], root_name[FL_USER_NAME_MAX];
     fl_kq_requirement_t need;
     fl_elevation_token_t tok = FL_ELEVATION_TOKEN_NONE;
+    int64_t window = 0;
     uint64_t attempt_gen;
     int root_kqst, cur_auth, coauth;
     char cosign_detail[96] = "";
@@ -840,7 +854,7 @@ fl_result_t fl_session_sudo_authenticate(const char *root_password, const char *
         why = "kqst";
     else if (coauth)
         why = cosign_sudo(cur_name, cur_auth == FL_USER_AUTH_PASSWORD_KQST, invoker_password,
-                          root_name, root_password, "sudo", "sudo", cosign_detail,
+                          root_name, root_password, "sudo", "sudo", window_end(), cosign_detail,
                           sizeof cosign_detail);
     if (why) {
         session_audit(cur_key, "sudo-refused", FL_HERITAGE_ROOT_KEY, why);
@@ -855,6 +869,7 @@ fl_result_t fl_session_sudo_authenticate(const char *root_password, const char *
     pthread_mutex_lock(&s_session_mu);
     if (s_login_gen != attempt_gen || strcmp(s_current, cur_name) != 0) {
         pthread_mutex_unlock(&s_session_mu);
+        fl_kq_sudo_hold_release();
         session_audit(cur_key, "sudo-refused", FL_HERITAGE_ROOT_KEY, "superseded");
         return FL_RESULT_BUSY;
     }
@@ -863,20 +878,28 @@ fl_result_t fl_session_sudo_authenticate(const char *root_password, const char *
     if (!s_db_ready || !s_db.loaded || !root || !cu ||
         (root->auth_mode == FL_USER_AUTH_PASSWORD_KQST) != root_kqst || cu->auth_mode != cur_auth) {
         pthread_mutex_unlock(&s_session_mu);
+        fl_kq_sudo_hold_release();
         session_audit(cur_key, "sudo-refused", FL_HERITAGE_ROOT_KEY, "mode");
         return FL_RESULT_ACCES;
     }
     if (!session_verify_password_locked(root_name, root_password)) {
         pthread_mutex_unlock(&s_session_mu);
+        fl_kq_sudo_hold_release();
         session_audit(cur_key, "sudo-refused", FL_HERITAGE_ROOT_KEY, "password");
         return FL_RESULT_ACCES;
     }
     if (coauth && !session_verify_password_locked(cur_name, invoker_password)) {
         pthread_mutex_unlock(&s_session_mu);
+        fl_kq_sudo_hold_release();
         session_audit(cur_key, "sudo-refused", FL_HERITAGE_ROOT_KEY, "invoker-password");
         return FL_RESULT_ACCES;
     }
     rc = grant_elevation_locked("sudo authentication", &tok);
+    /* The kept keys end with the window the token opened, to the nanosecond. */
+    if (rc == FL_RESULT_OK && coauth && fl_elevation_expires(tok, &window) == FL_RESULT_OK)
+        fl_kq_sudo_hold_extend(window);
+    else if (coauth)
+        fl_kq_sudo_hold_release();
     pthread_mutex_unlock(&s_session_mu);
     if (rc == FL_RESULT_OK && coauth)
         session_audit(cur_key, "sudo-coauth", FL_HERITAGE_ROOT_KEY, cosign_detail);
@@ -1136,6 +1159,7 @@ static void revoke_bound_elevation_locked(void) {
         fl_elevation_revoke(s_active_elev);
         s_active_elev = FL_ELEVATION_TOKEN_NONE;
     }
+    fl_kq_sudo_hold_release(); /* Root's key ends with the window */
 }
 
 void fl_session_clear_elevation(void) {
@@ -1151,6 +1175,72 @@ void fl_session_drop_elevation(void) {
     pthread_mutex_lock(&s_session_mu);
     s_sudo_scope_depth = 0;
     pthread_mutex_unlock(&s_session_mu);
+}
+
+fl_result_t fl_session_elevated_action(const char *action, int renew, int *deelevated) {
+    char cur_name[FL_USER_NAME_MAX], cur_key[FL_HERITAGE_KEY_ID_MAX], detail[64], nonce_hex[33];
+    char act[FL_KQ_SUDO_ACTION_MAX + 1];
+    uint8_t nonce[16], inv_sig[64], root_sig[64];
+    fl_elevation_token_t tok;
+    uint64_t gen;
+    int64_t now = 0, window = 0;
+    int active, st;
+
+    fl_session_init();
+    if (deelevated)
+        *deelevated = 0;
+    if (!action || !action[0])
+        return FL_RESULT_INVAL;
+    pthread_mutex_lock(&s_session_mu);
+    /* Root (and any account elevated by itself) acts with its own key: there is no window to sign. */
+    if (!s_db_ready || !s_db.loaded || fl_user_db_is_elevated_user(&s_db, s_current)) {
+        pthread_mutex_unlock(&s_session_mu);
+        return FL_RESULT_OK;
+    }
+    tok = s_active_elev;
+    active = fl_elevation_active(tok);
+    snprintf(cur_name, sizeof cur_name, "%s", s_current);
+    {
+        const fl_user_record_t *cu = fl_user_db_find(&s_db, s_current);
+        snprintf(cur_key, sizeof cur_key, "%s", cu ? cu->key_id : "");
+    }
+    gen = s_login_gen;
+    if (!active && tok != FL_ELEVATION_TOKEN_NONE) {
+        s_active_elev = FL_ELEVATION_TOKEN_NONE; /* the window ended: the user's own key from here */
+        fl_kq_sudo_hold_release();
+    }
+    pthread_mutex_unlock(&s_session_mu);
+    if (!active)
+        return FL_RESULT_OK;
+
+    /* An action longer than KeyQuorum takes is signed by its first FL_KQ_SUDO_ACTION_MAX bytes. */
+    snprintf(act, sizeof act, "%s", action);
+    if (fl_time_monotonic_ns(&now) != FL_RESULT_OK)
+        now = 0;
+    st = now > 0 ? fl_kq_sudo_hold_cosign(cur_name, act, now, nonce, inv_sig, root_sig) : FL_KQ_COSIGN_SIGN;
+    if (st == FL_KQ_COSIGN_OK) {
+        if (renew) {
+            pthread_mutex_lock(&s_session_mu);
+            if (s_active_elev == tok && s_login_gen == gen && fl_elevation_refresh(tok, &window) == FL_RESULT_OK)
+                fl_kq_sudo_hold_extend(window);
+            pthread_mutex_unlock(&s_session_mu);
+        }
+        fl_hex_encode(nonce, sizeof nonce, nonce_hex);
+        nonce_hex[32] = '\0';
+        snprintf(detail, sizeof detail, "%s; nonce=%s", renew ? "sudo" : "elevated", nonce_hex);
+        session_audit(cur_key, "sudo-action", FL_HERITAGE_ROOT_KEY, detail);
+        mem_domain_zero(inv_sig, sizeof inv_sig);
+        mem_domain_zero(root_sig, sizeof root_sig);
+        return FL_RESULT_OK;
+    }
+    /* Root's key is not available (owner decision, FL-20 #399): the elevation sudo gave is taken
+     * away, and the account goes on with its own key alone. */
+    fl_session_drop_elevation();
+    session_audit(cur_key, "sudo-deelevated", cur_key,
+                  st == FL_KQ_COSIGN_AUTHORITY ? "root-key" : st == FL_KQ_COSIGN_INVOKER ? "invoker-key" : "cosign");
+    if (deelevated)
+        *deelevated = 1;
+    return FL_RESULT_OK;
 }
 
 fl_result_t fl_session_publish_if_current(uint64_t login_generation, fl_session_publish_fn publish, void *ctx) {
@@ -1198,6 +1288,7 @@ fl_result_t fl_session_logout(void) {
 
     fl_session_init();
     fl_elevation_revoke_all();
+    fl_kq_sudo_hold_release();
     pthread_mutex_lock(&s_session_mu);
     strncpy(who, s_current, sizeof(who) - 1); /* the account that is signing out */
     who[sizeof(who) - 1] = '\0';

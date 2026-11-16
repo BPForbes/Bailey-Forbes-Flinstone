@@ -16,12 +16,20 @@
 #include "user_db.h"
 
 #include <errno.h>
+#include <pthread.h>
+#include <stdint.h>
 #include <fcntl.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 #include <sys/stat.h>
 #include <unistd.h>
+#if !defined(_WIN32) && !defined(__EMSCRIPTEN__)
+#include <sys/mman.h>
+#if defined(__linux__)
+#include <sys/syscall.h>
+#endif
+#endif
 
 fl_kq_requirement_t fl_kq_requirement_from_snapshot(const struct fl_user_record *current,
                                                    const struct fl_user_record *target, int sudo,
@@ -614,16 +622,37 @@ static int open_cosigner(const char *name, const char *password, int kqst, uint8
     return st;
 }
 
-int fl_kq_sudo_cosign(const char *invoker_name, const char *invoker_password, int invoker_kqst,
-                      const char *root_name, const char *root_password, const char *action,
-                      uint8_t nonce_out[16], uint8_t invoker_sig_out[64],
-                      uint8_t root_sig_out[64]) {
+/* The public key an account co-signs under, from the store: the token's pairing for a KQST account,
+ * else the record's signing key. */
+static int cosigner_public(const char *name, int kqst, unsigned char public_out[32],
+                           char key_id_out[FL_HERITAGE_KEY_ID_MAX]) {
+    const fl_user_db_t *db = fl_session_user_db();
+    fl_user_record_t u;
+    unsigned char dev[16], enc_pub[32];
+    int st = FL_KQ_ACCOUNT_INVALID;
+
+    if (!db || !name || fl_session_snapshot_account(name, &u) != FL_RESULT_OK || !u.key_id[0])
+        return FL_KQ_ACCOUNT_INVALID;
+    snprintf(key_id_out, FL_HERITAGE_KEY_ID_MAX, "%s", u.key_id);
+    if (kqst ? u.auth_mode == FL_USER_AUTH_PASSWORD_KQST &&
+                   fl_user_db_kqst_pairing(db, u.key_id, dev, public_out, enc_pub) == FL_RESULT_OK
+             : u.has_key && u.auth_mode != FL_USER_AUTH_PASSWORD_KQST) {
+        if (!kqst)
+            memcpy(public_out, u.signing_public, 32);
+        st = FL_KQ_ACCOUNT_OK;
+    }
+    mem_domain_secure_zero(&u, sizeof u);
+    return st;
+}
+
+/* Both sign action under a fresh nonce, and both signatures verify under the public keys given
+ * (the store's). FL_KQ_COSIGN_OK or FL_KQ_COSIGN_SIGN; on SIGN the signatures are zeroed. */
+static int cosign_with(const char *inv_key, const char *root_key, const char *action,
+                       const uint8_t inv_secret[32], const uint8_t root_secret[32],
+                       const unsigned char inv_pub[32], const unsigned char root_pub[32],
+                       uint8_t nonce_out[16], uint8_t invoker_sig_out[64], uint8_t root_sig_out[64]) {
     const fl_kq_driver_t *drv = fl_kq_driver_get_or_register();
-    char inv_key[FL_HERITAGE_KEY_ID_MAX], root_key[FL_HERITAGE_KEY_ID_MAX];
-    uint8_t inv_secret[32], root_secret[32];
-    unsigned char inv_pub[32], root_pub[32];
     size_t alen;
-    int rc = FL_KQ_COSIGN_SIGN;
 
     if (!nonce_out || !invoker_sig_out || !root_sig_out || !action)
         return FL_KQ_COSIGN_SIGN;
@@ -632,8 +661,91 @@ int fl_kq_sudo_cosign(const char *invoker_name, const char *invoker_password, in
     alen = strlen(action);
     if (!drv || !drv->sudo_sign || !drv->sudo_verify || alen == 0 || alen > FL_KQ_SUDO_ACTION_MAX)
         return FL_KQ_COSIGN_SIGN;
-    if (open_cosigner(root_name, root_password, 1, root_secret, root_pub, root_key) !=
-        FL_KQ_ACCOUNT_OK) {
+    if (fl_random_bytes(nonce_out, 16) == 0 &&
+        drv->sudo_sign(FL_KQ_SUDO_INVOKER, inv_key, root_key, (const uint8_t *)action, alen, nonce_out,
+                       inv_secret, invoker_sig_out) == FL_KQ_ACCOUNT_OK &&
+        drv->sudo_sign(FL_KQ_SUDO_AUTHORITY, inv_key, root_key, (const uint8_t *)action, alen, nonce_out,
+                       root_secret, root_sig_out) == FL_KQ_ACCOUNT_OK &&
+        /* Verified against the store's public keys, never the ones just used: a token or sealed key
+         * that opened to some other key would sign, and must not count. */
+        drv->sudo_verify(inv_key, root_key, (const uint8_t *)action, alen, nonce_out, inv_pub,
+                         invoker_sig_out, root_pub, root_sig_out) == 1)
+        return FL_KQ_COSIGN_OK;
+    mem_domain_zero(invoker_sig_out, 64);
+    mem_domain_zero(root_sig_out, 64);
+    return FL_KQ_COSIGN_SIGN;
+}
+
+/*
+ * The sudo window's keys (owner decision, FL-20 #399): from a sudo that opened Root's token until
+ * the window ends, every elevated action is signed by Root's key and the invoker's key together.
+ * The two secrets live here, in a page kept out of swap and core dumps where the host allows it,
+ * and nowhere else; they are wiped when the window ends, is ended, or Root's key fails.
+ */
+typedef struct {
+    int           used;
+    int           inv_kqst;
+    int64_t       expires_ns;
+    char          inv_name[FL_USER_NAME_MAX];
+    char          root_name[FL_USER_NAME_MAX];
+    uint8_t       inv_secret[32];
+    uint8_t       root_secret[32];
+} kq_sudo_hold_t;
+
+static kq_sudo_hold_t s_hold __attribute__((aligned(4096)));
+static pthread_mutex_t s_hold_mu = PTHREAD_MUTEX_INITIALIZER;
+static int s_hold_locked;
+
+/* s_hold_mu is held. */
+static void hold_lock_page_locked(void) {
+#if !defined(_WIN32) && !defined(__EMSCRIPTEN__)
+    if (s_hold_locked)
+        return;
+#if defined(__linux__) && defined(SYS_mlock)
+    /* The system call itself: a sanitizer build makes mlock() a no-op that answers 0. */
+    s_hold_locked = syscall(SYS_mlock, (void *)&s_hold, sizeof s_hold) == 0;
+#else
+    s_hold_locked = mlock(&s_hold, sizeof s_hold) == 0;
+#endif
+#if defined(__linux__) && defined(MADV_DONTDUMP)
+    {
+        long page = sysconf(_SC_PAGESIZE);
+        size_t len = sizeof s_hold;
+        if (page > 0)
+            len = (len + (size_t)page - 1) & ~((size_t)page - 1);
+        (void)madvise(&s_hold, len, MADV_DONTDUMP);
+    }
+#endif
+#endif
+}
+
+/* s_hold_mu is held. */
+static void hold_wipe_locked(void) {
+    mem_domain_secure_zero(&s_hold, sizeof s_hold);
+}
+
+int fl_kq_sudo_cosign(const char *invoker_name, const char *invoker_password, int invoker_kqst,
+                      const char *root_name, const char *root_password, const char *action,
+                      uint8_t nonce_out[16], uint8_t invoker_sig_out[64],
+                      uint8_t root_sig_out[64]) {
+    return fl_kq_sudo_hold_open(invoker_name, invoker_password, invoker_kqst, root_name, root_password,
+                                action, 0, nonce_out, invoker_sig_out, root_sig_out);
+}
+
+int fl_kq_sudo_hold_open(const char *invoker_name, const char *invoker_password, int invoker_kqst,
+                         const char *root_name, const char *root_password, const char *action,
+                         int64_t expires_ns, uint8_t nonce_out[16], uint8_t invoker_sig_out[64],
+                         uint8_t root_sig_out[64]) {
+    char inv_key[FL_HERITAGE_KEY_ID_MAX], root_key[FL_HERITAGE_KEY_ID_MAX];
+    uint8_t inv_secret[32], root_secret[32];
+    unsigned char inv_pub[32], root_pub[32];
+    int rc;
+
+    if (!nonce_out || !invoker_sig_out || !root_sig_out || !action || !invoker_name || !root_name)
+        return FL_KQ_COSIGN_SIGN;
+    mem_domain_zero(invoker_sig_out, 64);
+    mem_domain_zero(root_sig_out, 64);
+    if (open_cosigner(root_name, root_password, 1, root_secret, root_pub, root_key) != FL_KQ_ACCOUNT_OK) {
         mem_domain_secure_zero(root_secret, sizeof root_secret);
         return FL_KQ_COSIGN_AUTHORITY;
     }
@@ -642,24 +754,101 @@ int fl_kq_sudo_cosign(const char *invoker_name, const char *invoker_password, in
         rc = FL_KQ_COSIGN_INVOKER;
         goto wipe;
     }
-    if (fl_random_bytes(nonce_out, 16) != 0)
-        goto wipe;
-    if (drv->sudo_sign(FL_KQ_SUDO_INVOKER, inv_key, root_key, (const uint8_t *)action, alen,
-                       nonce_out, inv_secret, invoker_sig_out) != FL_KQ_ACCOUNT_OK ||
-        drv->sudo_sign(FL_KQ_SUDO_AUTHORITY, inv_key, root_key, (const uint8_t *)action, alen,
-                       nonce_out, root_secret, root_sig_out) != FL_KQ_ACCOUNT_OK)
-        goto wipe;
-    /* Verified against the store's public keys, never the ones just used: a token or sealed key
-     * that opened to some other key would sign, and must not count. */
-    if (drv->sudo_verify(inv_key, root_key, (const uint8_t *)action, alen, nonce_out, inv_pub,
-                         invoker_sig_out, root_pub, root_sig_out) == 1)
-        rc = FL_KQ_COSIGN_OK;
+    rc = cosign_with(inv_key, root_key, action, inv_secret, root_secret, inv_pub, root_pub, nonce_out,
+                     invoker_sig_out, root_sig_out);
+    if (rc == FL_KQ_COSIGN_OK && expires_ns > 0) {
+        pthread_mutex_lock(&s_hold_mu);
+        hold_lock_page_locked();
+        hold_wipe_locked(); /* a window that is replaced is wiped first */
+        s_hold.used = 1;
+        s_hold.inv_kqst = invoker_kqst ? 1 : 0;
+        s_hold.expires_ns = expires_ns;
+        snprintf(s_hold.inv_name, sizeof s_hold.inv_name, "%s", invoker_name);
+        snprintf(s_hold.root_name, sizeof s_hold.root_name, "%s", root_name);
+        mem_domain_copy(s_hold.inv_secret, inv_secret, sizeof s_hold.inv_secret);
+        mem_domain_copy(s_hold.root_secret, root_secret, sizeof s_hold.root_secret);
+        pthread_mutex_unlock(&s_hold_mu);
+    }
 wipe:
     mem_domain_secure_zero(inv_secret, sizeof inv_secret);
     mem_domain_secure_zero(root_secret, sizeof root_secret);
-    if (rc != FL_KQ_COSIGN_OK) {
-        mem_domain_zero(invoker_sig_out, 64);
-        mem_domain_zero(root_sig_out, 64);
-    }
     return rc;
+}
+
+int fl_kq_sudo_hold_cosign(const char *invoker_name, const char *action, int64_t now_ns,
+                           uint8_t nonce_out[16], uint8_t invoker_sig_out[64], uint8_t root_sig_out[64]) {
+    char inv_name[FL_USER_NAME_MAX], root_name[FL_USER_NAME_MAX];
+    char inv_key[FL_HERITAGE_KEY_ID_MAX], root_key[FL_HERITAGE_KEY_ID_MAX];
+    uint8_t inv_secret[32], root_secret[32];
+    unsigned char inv_pub[32], root_pub[32];
+    int inv_kqst, rc;
+
+    if (!nonce_out || !invoker_sig_out || !root_sig_out || !action || !invoker_name)
+        return FL_KQ_COSIGN_SIGN;
+    mem_domain_zero(invoker_sig_out, 64);
+    mem_domain_zero(root_sig_out, 64);
+    pthread_mutex_lock(&s_hold_mu);
+    if (!s_hold.used || s_hold.expires_ns <= now_ns || strcmp(s_hold.inv_name, invoker_name) != 0) {
+        if (s_hold.used && s_hold.expires_ns <= now_ns)
+            hold_wipe_locked();
+        pthread_mutex_unlock(&s_hold_mu);
+        return FL_KQ_COSIGN_AUTHORITY; /* Root's key is not held for this account now */
+    }
+    inv_kqst = s_hold.inv_kqst;
+    snprintf(inv_name, sizeof inv_name, "%s", s_hold.inv_name);
+    snprintf(root_name, sizeof root_name, "%s", s_hold.root_name);
+    mem_domain_copy(inv_secret, s_hold.inv_secret, sizeof inv_secret);
+    mem_domain_copy(root_secret, s_hold.root_secret, sizeof root_secret);
+    pthread_mutex_unlock(&s_hold_mu);
+
+    /* The store's keys now, not the ones held: a token re-sealed or re-paired since the sudo no
+     * longer counts, and Root's key is then unavailable. */
+    if (cosigner_public(root_name, 1, root_pub, root_key) != FL_KQ_ACCOUNT_OK)
+        rc = FL_KQ_COSIGN_AUTHORITY;
+    else if (cosigner_public(inv_name, inv_kqst, inv_pub, inv_key) != FL_KQ_ACCOUNT_OK)
+        rc = FL_KQ_COSIGN_INVOKER;
+    else
+        rc = cosign_with(inv_key, root_key, action, inv_secret, root_secret, inv_pub, root_pub, nonce_out,
+                         invoker_sig_out, root_sig_out);
+    mem_domain_secure_zero(inv_secret, sizeof inv_secret);
+    mem_domain_secure_zero(root_secret, sizeof root_secret);
+    return rc;
+}
+
+void fl_kq_sudo_hold_extend(int64_t expires_ns) {
+    pthread_mutex_lock(&s_hold_mu);
+    if (s_hold.used)
+        s_hold.expires_ns = expires_ns;
+    pthread_mutex_unlock(&s_hold_mu);
+}
+
+void fl_kq_sudo_hold_release(void) {
+    pthread_mutex_lock(&s_hold_mu);
+    hold_wipe_locked();
+    pthread_mutex_unlock(&s_hold_mu);
+}
+
+int fl_kq_sudo_hold_expire(int64_t now_ns) {
+    int wiped = 0;
+
+    pthread_mutex_lock(&s_hold_mu);
+    if (s_hold.used && s_hold.expires_ns <= now_ns) {
+        hold_wipe_locked();
+        wiped = 1;
+    }
+    pthread_mutex_unlock(&s_hold_mu);
+    return wiped;
+}
+
+int fl_kq_sudo_hold_active(int64_t now_ns) {
+    int active;
+
+    pthread_mutex_lock(&s_hold_mu);
+    active = s_hold.used && s_hold.expires_ns > now_ns;
+    pthread_mutex_unlock(&s_hold_mu);
+    return active;
+}
+
+int fl_kq_sudo_hold_locked(void) {
+    return s_hold_locked;
 }

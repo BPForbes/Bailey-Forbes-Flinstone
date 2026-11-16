@@ -13,6 +13,7 @@
 #include "user_db.h"
 #include "session.h"
 #include "elevation.h"
+#include "timekeeping.h"
 #include "fl/authz_subsystem.h"
 #include "cmd_authutil.h"
 #include "fs_facade.h"
@@ -2260,6 +2261,27 @@ static int file_mode_is(const char *path, mode_t want) {
  * write refuses a "kqst" that is a symlink or that someone else could write to, and a file name
  * that is not a safe key id. Nothing is written in any of those places.
  */
+/* The sudo window's clock (owner decision, FL-20 #399): 15 minutes from the grant, and a refresh
+ * starts it again from now; a revoked token has no window to refresh or read. */
+static int test_elevation_window_refresh(void) {
+    fl_elevation_token_t tok = FL_ELEVATION_TOKEN_NONE;
+    int64_t first = 0, again = 0, now = 0;
+    const int64_t ttl = (int64_t)FL_ELEVATION_LAB_TTL_SOFT_MAX_SECONDS * 1000000000LL;
+
+    ASSERT(FL_ELEVATION_LAB_TTL_SOFT_MAX_SECONDS == 15u * 60u);
+    ASSERT(fl_time_monotonic_ns(&now) == FL_RESULT_OK);
+    ASSERT(fl_elevation_grant("Root.Flinstone", "sudo", &tok) == FL_RESULT_OK);
+    ASSERT(fl_elevation_expires(tok, &first) == FL_RESULT_OK && first > now && first <= now + ttl + 1000000000LL);
+    ASSERT(fl_elevation_refresh(tok, &again) == FL_RESULT_OK && again >= first);
+    ASSERT(fl_elevation_expires(tok, &first) == FL_RESULT_OK && first == again);
+    ASSERT(fl_elevation_expires(tok, NULL) == FL_RESULT_INVAL);
+    fl_elevation_revoke(tok);
+    ASSERT(fl_elevation_refresh(tok, &again) == FL_RESULT_NOENT);
+    ASSERT(fl_elevation_expires(tok, &again) == FL_RESULT_NOENT);
+    ASSERT(fl_elevation_refresh(FL_ELEVATION_TOKEN_NONE, NULL) == FL_RESULT_NOENT);
+    return 0;
+}
+
 static int test_token_write_refuses_unsafe_places(void) {
     char base[] = "/tmp/fl-kqst-safe-XXXXXX";
     char real[600], link[600], path[700], pw[33];
@@ -2774,6 +2796,7 @@ int main(void) {
     RUN(test_kqst_enroll);
     RUN(test_kqst_made_by_kernel);
     RUN(test_token_write_refuses_unsafe_places);
+    RUN(test_elevation_window_refresh);
     RUN(test_restore_user);
     RUN(test_switch_bridge_recheck);
     RUN(test_switch_mutation_barriers);

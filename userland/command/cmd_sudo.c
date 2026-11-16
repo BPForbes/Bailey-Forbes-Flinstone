@@ -25,7 +25,10 @@ static int sudo_grant_token(const char *reason) {
     if (cmd_sudo_require_auth_reason(reason) != 0)
         return 1;
     if (had_elev) {
-        printf("sudo: elevation already active\n");
+        /* A sudo inside the window starts its clock again (owner decision, FL-20 #399). */
+        if (cmd_sudo_sign_action(reason) != 0)
+            return 1;
+        printf("sudo: elevation renewed (ttl<=%us)\n", (unsigned)FL_ELEVATION_LAB_TTL_SOFT_MAX_SECONDS);
         return 0;
     }
     printf("sudo: elevation granted (ttl<=%us)\n",

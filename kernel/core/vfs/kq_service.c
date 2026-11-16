@@ -383,8 +383,12 @@ static void *service_main(void *arg) {
         struct timespec dl;
 
         unsigned ran = fl_wq_poll(s_wq, 8); /* protected work only: this queue takes nothing else */
+        int64_t tick_ns = 0;
 
         stamp_heartbeat();
+        /* Root's key from a sudo is wiped when the window ends, whether or not anything runs (FL-20 #399). */
+        if (fl_time_monotonic_ns(&tick_ns) == FL_RESULT_OK && fl_kq_sudo_hold_expire(tick_ns))
+            fl_audit_identity_event("", "sudo-window-ended", FL_HERITAGE_ROOT_KEY, NULL);
         if (ran == 8)
             continue; /* more may be waiting: the heartbeat is stamped between batches, then straight on */
         (void)clock_gettime(CLOCK_MONOTONIC, &dl);
