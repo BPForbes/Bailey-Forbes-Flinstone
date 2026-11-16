@@ -38,7 +38,7 @@ struct fl_cmdlog {
     struct fl_cmdlog *reg_next;
 };
 
-/* In-process registry of open journals: one handle per (storage table, directory). */
+/* In-process registry of open journals, one handle per (storage table, directory). */
 static pthread_mutex_t s_reg_mu = PTHREAD_MUTEX_INITIALIZER;
 static fl_cmdlog_t *s_reg_head;
 
@@ -208,7 +208,7 @@ static void free_fs(uint8_t *p) {
         mem_domain_free(MEM_DOMAIN_FS, p);
 }
 
-/* Checks one parsed record against the journal so far; FL_CMDLOG_V_OK or the verdict. */
+/* Checks one parsed record against the journal so far. */
 static fl_cmdlog_verdict_code_t check_record(const rec_t *rec, const uint8_t *raw, const fl_cmdlog_signer_t *signer,
                                              const uint8_t *expect_device, fl_cmdlog_report_t *rep) {
     static const uint8_t zero_hash[FL_CMDLOG_HASH_LEN] = {0};
@@ -217,7 +217,7 @@ static fl_cmdlog_verdict_code_t check_record(const rec_t *rec, const uint8_t *ra
         (rec->type != FL_CMDLOG_EV_ATTEMPT && rec->type != FL_CMDLOG_EV_COMPLETION &&
          rec->type != FL_CMDLOG_EV_REFUSAL))
         return FL_CMDLOG_V_MALFORMED;
-    /* One journal, one signer: a record signed by any other key the verifier knows is foreign. */
+    /* One journal, one signer: a record signed by any other known key is foreign. */
     if (strcmp(rec->key_id, signer->key_id) != 0)
         return FL_CMDLOG_V_FOREIGN;
     if (signer->verify(signer->ctx, rec->key_id, FL_CMDLOG_DOMAIN, raw + 4, rec->signed_len, rec->sig,
@@ -241,7 +241,7 @@ static fl_cmdlog_verdict_code_t check_record(const rec_t *rec, const uint8_t *ra
     return FL_CMDLOG_V_OK;
 }
 
-/* Walks the journal. keep_last, when given, receives the last segment's verified bytes (free_fs). */
+/* Walks the journal. keep_last, when given, receives the last segment's verified bytes. */
 static int walk(const fl_kq_storage_t *st, const char *dir, const fl_cmdlog_signer_t *signer,
                 const fl_cmdlog_limits_t *lim, const uint8_t *expect_device, fl_cmdlog_report_t *rep,
                 uint8_t **keep_last, size_t *keep_len) {
@@ -285,8 +285,7 @@ static int walk(const fl_kq_storage_t *st, const char *dir, const fl_cmdlog_sign
             fl_cmdlog_verdict_code_t v;
 
             if (pr == -2) {
-                /* A torn tail, if this is the last segment; the gap probe below fails the walk if
-                 * any later segment exists. */
+                /* A torn tail is allowed only on the last segment; the gap probe fails any later one. */
                 rep->tail_incomplete = 1;
                 rep->tail_bytes = len - pos;
                 break;
@@ -325,8 +324,7 @@ static int walk(const fl_kq_storage_t *st, const char *dir, const fl_cmdlog_sign
             free_fs(data);
         }
     }
-    /* No segment may exist after the point where the walk stopped: a missing middle segment, a
-     * partial record that is not at the very end, or a segment past the retention bound. */
+    /* No segment may exist past where the walk stopped: a gap, a partial record mid-journal, or one past retention. */
     if (rep->status == FL_CMDLOG_V_OK) {
         for (unsigned k = rep->segments; k < FL_CMDLOG_SEGMENTS_HARD_MAX; k++) {
             int ex = seg_exists(st, dir, k);
@@ -362,7 +360,6 @@ int fl_cmdlog_verify(const fl_kq_storage_t *storage, const char *dir, const fl_c
 
 /* ----- Open / close ----- */
 
-/* Adds j to the registry unless its (storage, dir) is already open. */
 static int reg_add(fl_cmdlog_t *j) {
     int taken = 0;
 
@@ -440,8 +437,7 @@ int fl_cmdlog_open(const fl_cmdlog_config_t *cfg, fl_cmdlog_t **out, fl_cmdlog_r
     j->scratch = (uint8_t *)mem_domain_alloc(MEM_DOMAIN_FS, j->lim.segment_max);
     if (!j->seg || !j->scratch)
         goto fail;
-    /* Every record must be this device's and this signer's: a journal that does not verify, or
-     * belongs to another device or key, is evidence and is never appended to. */
+    /* Every record must be this device's and this signer's; a foreign journal is never appended to. */
     if (walk(j->st, j->dir, j->signer, &j->lim, cfg->device_id, rep, &last, &last_len) != 0)
         goto fail;
     if (rep->records == 0) {
@@ -500,8 +496,7 @@ const char *fl_cmdlog_category(const char *line, char *out, size_t cap) {
     snprintf(out, cap, "other");
     if (!line)
         return out;
-    /* Only the start of the line is copied, and the copy is wiped. A first word cut by the scan limit
-     * could at worst match a shorter command name: a wrong category, never a leak. */
+    /* Only the start of the line is copied and wiped; a cut first word could at worst mis-categorise. */
     n = strnlen(line, sizeof buf - 1u);
     mem_domain_copy(buf, line, n);
     buf[n] = '\0';
@@ -534,8 +529,7 @@ static int append_locked(fl_cmdlog_t *j, const uint8_t *rec, size_t len, char *r
             return -1;
         }
         if (j->tail_pending && j->segments > 0) {
-            /* The active segment may end in a partial record: rewrite it without it before moving
-             * on, or the partial record would sit mid-journal and fail verification. */
+            /* The active segment may end in a partial record: rewrite it without it before moving on. */
             if (seg_path(j->dir, j->segments - 1u, path, sizeof path) != 0 ||
                 j->st->write_atomic(j->st->ctx, path, j->seg, j->seg_len) != 0) {
                 set_reason(reason, cap, "command log storage write failed (dropping a torn tail)");
@@ -545,8 +539,7 @@ static int append_locked(fl_cmdlog_t *j, const uint8_t *rec, size_t len, char *r
         }
         idx = j->segments; /* a new segment */
         base = 0;
-        /* Never write over a segment this handle did not make: open proved none exists past the
-         * last, and only our own failed write (next_dirty) may have left one behind. */
+        /* Never write over a segment this handle did not make, except our own failed write (next_dirty). */
         if (!j->next_dirty && seg_exists(j->st, j->dir, idx) != 0) {
             set_reason(reason, cap, "command log found an unexpected later segment");
             return -1;
@@ -563,8 +556,7 @@ static int append_locked(fl_cmdlog_t *j, const uint8_t *rec, size_t len, char *r
         mem_domain_copy(j->scratch, j->seg, base);
     mem_domain_copy(j->scratch + base, rec, len);
     if (j->st->write_atomic(j->st->ctx, path, j->scratch, base + len) != 0) {
-        /* On a backend that is not atomic the file may now end in part of this record. j->seg
-         * still holds the good bytes, so the next write (or roll) rewrites it first. */
+        /* On a non-atomic backend the file may end in part of this record; the next write rewrites it first. */
         if (idx == j->segments)
             j->next_dirty = 1;
         else
@@ -694,7 +686,6 @@ static int close_attempt(fl_cmdlog_t *j, uint8_t type, const fl_cmdlog_corr_t *c
         set_reason(reason, cap, "the command log is not open");
         return -1;
     }
-    /* No principal or category: the attempt it closes carries them. */
     return emit(j, type, "", "", (int32_t)code, corr, NULL, reason, cap);
 }
 

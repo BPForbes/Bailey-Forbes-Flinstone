@@ -1,5 +1,4 @@
-/* Sealed account keys in the freestanding image: one 81-byte sealed signing key per account, and nothing
- * stays open (opening it is the password check). */
+/* Sealed account keys in the freestanding image: one sealed signing key per account; nothing stays open. */
 #include "identity.h"
 #include "fl/driver/keyquorum.h"
 #include "mem_domain.h"

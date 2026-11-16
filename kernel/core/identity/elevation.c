@@ -98,8 +98,7 @@ fl_result_t fl_elevation_refresh(fl_elevation_token_t token, int64_t *expires_ns
     int64_t now = 0;
     fl_result_t rc = FL_RESULT_NOENT;
 
-    /* The clock is read under the lock: a refresh that read an earlier time and locked later would
-     * otherwise set back a window another refresh has already moved on. */
+    /* The clock is read under the lock so a refresh cannot set back a window another has moved on. */
     pthread_mutex_lock(&s_elev_mu);
     if (fl_time_monotonic_ns(&now) != FL_RESULT_OK) {
         pthread_mutex_unlock(&s_elev_mu);

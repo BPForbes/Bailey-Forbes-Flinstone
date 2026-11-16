@@ -26,7 +26,7 @@ static fl_session_online_box_fn s_box_hook;
 static fl_session_offline_fn s_offline_hook;
 static uint64_t s_login_gen = 1; /* every login and logout starts a new generation; 0 is never one */
 static void (*s_kqst_pre_open)(void); /* tests only: runs after unlock, before token open */
-/* One token transition (make, enrol, reseal, reset) at a time. Taken before s_session_mu. */
+/* One token transition at a time. Taken before s_session_mu. */
 static pthread_mutex_t s_kqst_mu = PTHREAD_MUTEX_INITIALIZER;
 static void (*s_switch_pre_lock)(void); /* tests only: before the final lock, mutex not held */
 static void (*s_switch_pre_commit)(void); /* tests only: after recheck, both locks held */
@@ -55,7 +55,6 @@ void fl_session_test_set_switch_pre_commit(void (*fn)(void)) {
     s_switch_pre_commit = fn;
 }
 
-/* One character of a store path, or -1 when refused: only letters, digits, '/', '.', '_', '-', '+'. */
 static int store_path_char(int c) {
     if ((c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z') || (c >= '0' && c <= '9') || c == '/' || c == '.' ||
         c == '_' || c == '-' || c == '+')
@@ -63,7 +62,7 @@ static int store_path_char(int c) {
     return -1;
 }
 
-/* FL_USERS_DB_PATH, checked once: 0 when unset, 1 when out holds the checked path, -1 when refused. */
+/* FL_USERS_DB_PATH, checked once: 0 unset, 1 out holds it, -1 refused. */
 static int store_path_from_env(char *out, size_t cap) {
     const char *v = getenv("FL_USERS_DB_PATH");
     size_t i, n;
@@ -83,7 +82,6 @@ static int store_path_from_env(char *out, size_t cap) {
         out[i] = (char)c;
     }
     out[n] = '\0';
-    /* A ".." part: at the start, after a '/', and followed by '/' or the end. */
     for (i = 0; i + 1 < n; i++) {
         if (out[i] == '.' && out[i + 1] == '.' && (i == 0 || out[i - 1] == '/') &&
             (i + 2 == n || out[i + 2] == '/')) {
@@ -105,7 +103,7 @@ static void session_load_once(void) {
 
     from_env = store_path_from_env(env_path, sizeof env_path);
     if (from_env < 0) {
-        /* Never fall back to another store: the session stays unavailable until the setting is fixed. */
+        /* Never fall back to another store: the session stays unavailable until fixed. */
         fprintf(stderr, "session: FL_USERS_DB_PATH is not a path the kernel uses (letters, digits, "
                         "'/', '.', '_', '-', '+'; no \"..\")\n");
         pthread_mutex_lock(&s_session_mu);
@@ -119,7 +117,7 @@ static void session_load_once(void) {
     pthread_mutex_lock(&s_session_mu);
     rc = fl_user_db_load(&s_db, path);
     if (rc != FL_RESULT_OK) {
-        /* Do not seed or save: a bad store must stay on disk, and the session stays unavailable. */
+        /* A bad store stays on disk; do not seed or save over it. */
         s_db_ready = 0;
         s_current[0] = '\0';
     } else {
@@ -220,7 +218,7 @@ int fl_session_has_elevation(void) {
     return has;
 }
 
-/* Whether name is a password-plus-KQST account. s_session_mu is held; the token is opened after release. */
+/* Whether name is a password-plus-KQST account. s_session_mu is held. */
 static int kqst_mode(const char *name) {
     const fl_user_record_t *u = fl_user_db_find(&s_db, name);
 
@@ -231,21 +229,16 @@ static int kqst_mode(const char *name) {
 static void login_ensure_account_key(const char *name, const char *password) {
     int created = 0;
 
-    /*
-     * An account created before account keys has none: the password just
-     * verified seals a new one. A failure here does not block the login; the
-     * account simply cannot sign bridges until a later login succeeds.
-     */
+    /* An account with no key gets one now; failure does not block the login. */
     if (fl_user_db_ensure_key(&s_db, name, password, &created) != FL_RESULT_OK) {
         fprintf(stderr, "login: could not create a signing key for %s\n", name);
     } else if (created && fl_user_db_save(&s_db) != FL_RESULT_OK) {
-        /* Never keep a key the store does not hold: the next login tries again. */
         fl_user_db_forget_created(&s_db, name, created);
         fprintf(stderr, "login: could not save the new signing key for %s\n", name);
     }
 }
 
-/* Makes a password account's slot token at sign-in; a failure never blocks it. Called without s_session_mu. */
+/* Makes a password account's slot token at sign-in; failure never blocks it. Called without s_session_mu. */
 static void login_make_kqst(const fl_user_record_t *account, const char *password) {
     const fl_kq_driver_t *drv = fl_kq_driver_get_or_register();
     int64_t now = 0;
@@ -292,9 +285,7 @@ fl_result_t fl_session_login(const char *name, const char *password) {
             fl_result_t pub_rc = FL_RESULT_ACCES;
             uint64_t attempt_gen;
 
-            /* Do not expose s_current until the token opens. Password is checked; session is not.
-             * The generation taken here must still be the current one when the token has opened:
-             * a logout or another login in the meantime supersedes this attempt. */
+            /* s_current stays hidden until the token opens; the generation must still be current then. */
             attempt_gen = s_login_gen;
             pthread_mutex_unlock(&s_session_mu);
             if (s_kqst_pre_open)
@@ -308,14 +299,12 @@ fl_result_t fl_session_login(const char *name, const char *password) {
             }
             pthread_mutex_lock(&s_session_mu);
             if (s_login_gen != attempt_gen) {
-                /* A logout, or another login, ran while the token opened: it has the session now. */
                 pthread_mutex_unlock(&s_session_mu);
                 mem_domain_secure_zero(signing_secret, sizeof signing_secret);
                 mem_domain_secure_zero(box_secret, sizeof box_secret);
                 fprintf(stderr, "login: %s was superseded while its KQST slot token opened\n", open_as);
                 return FL_RESULT_ACCES;
             }
-            /* Re-check under the lock: the account must still be KQST and the password still match. */
             if (!fl_user_db_verify_password(&s_db, open_as, password) || !kqst_mode(open_as)) {
                 pthread_mutex_unlock(&s_session_mu);
                 mem_domain_secure_zero(signing_secret, sizeof signing_secret);
@@ -357,8 +346,7 @@ fl_result_t fl_session_login(const char *name, const char *password) {
         }
         if (!need_kqst) {
             login_ensure_account_key(name, password);
-            /* The key may have just been provisioned and saved: the online hook must see the record as it
-             * is now, or it would find no key and leave this account's key offline. */
+            /* The online hook must see the key as now saved, or it would leave the account's key offline. */
             u = fl_user_db_find(&s_db, name);
             if (u) {
                 snapshot = *u;
@@ -366,7 +354,6 @@ fl_result_t fl_session_login(const char *name, const char *password) {
             }
         }
         fl_elevation_revoke_all();
-        /* Store the account's own spelling: "login root" signs in as Root. */
         strncpy(s_current, u ? u->name : name, sizeof(s_current) - 1);
         s_current[sizeof(s_current) - 1] = '\0';
         s_active_elev = FL_ELEVATION_TOKEN_NONE;
@@ -375,7 +362,6 @@ fl_result_t fl_session_login(const char *name, const char *password) {
         rc = FL_RESULT_OK;
     }
     pthread_mutex_unlock(&s_session_mu);
-    /* Password accounts: the key service opens the sealed key with the password just verified. */
     if (rc == FL_RESULT_OK && s_online_hook && have_snapshot)
         (void)s_online_hook(&snapshot, password, gen);
     if (rc == FL_RESULT_OK && have_snapshot)
@@ -383,7 +369,7 @@ fl_result_t fl_session_login(const char *name, const char *password) {
     return rc;
 }
 
-/* s_session_mu is held. name is s_current or a caller name; it is not copied out. */
+/* s_session_mu is held. name is s_current or a caller name; not copied out. */
 static int session_verify_password_locked(const char *name, const char *password) {
     if (!s_db_ready || !s_db.loaded || !name || !password)
         return 0;
@@ -394,7 +380,7 @@ int fl_session_verify_password(const char *password) {
     return fl_session_verify_account_password(s_current, password); /* s_current is read under the lock there */
 }
 
-/* s_session_mu is held. The identity commit su, sudo -i and the su -c restore share; it ends any elevation. */
+/* s_session_mu is held. Shared by su, sudo -i and su -c restore; ends any elevation. */
 static void commit_user_locked(const fl_user_record_t *u) {
     fl_elevation_revoke_all();
     strncpy(s_current, u->name, sizeof(s_current) - 1);
@@ -413,7 +399,7 @@ static void session_audit(const char *actor_key, const char *event, const char *
         s_audit_hook(actor_key, event, subject_key, detail);
 }
 
-/* login_generation non-zero: takes name only while that login is still the current one (BUSY otherwise). */
+/* login_generation non-zero: takes name only while that login is still current (BUSY otherwise). */
 static fl_result_t set_user_if_current(const char *name, uint64_t login_generation) {
     const fl_user_record_t *u, *cu;
     char cur_key[FL_HERITAGE_KEY_ID_MAX], name_key[FL_HERITAGE_KEY_ID_MAX];
@@ -473,7 +459,7 @@ int fl_session_verify_account_password(const char *name, const char *password) {
     return ok;
 }
 
-/* When a sudo window opened now would end (monotonic ns): the elevation token's own length. */
+/* When a sudo window opened now would end (monotonic ns). */
 static int64_t window_end(void) {
     int64_t now = 0;
 
@@ -482,8 +468,7 @@ static int64_t window_end(void) {
     return now + (int64_t)FL_ELEVATION_LAB_TTL_SOFT_MAX_SECONDS * 1000000000LL;
 }
 
-/* Co-signs action as Root and the invoker. NULL on success, else the audit's reason word. Called without
- * s_session_mu. */
+/* Co-signs action as Root and the invoker. NULL on success, else the audit reason word. */
 static const char *cosign_sudo(const char *invoker_name, int invoker_kqst,
                                const char *invoker_password, const char *root_name,
                                const char *root_password, const char *label, const char *action,
@@ -508,7 +493,7 @@ static const char *cosign_sudo(const char *invoker_name, int invoker_kqst,
     return NULL;
 }
 
-/* Audits a refused switch; the terminal gets one message whatever the reason. Called without s_session_mu. */
+/* Audits a refused switch; the terminal gets one message whatever the reason. */
 static fl_result_t switch_refused(fl_result_t rc, int sudo, const char *actor_key,
                                   const char *subject_key, const char *why) {
     session_audit(actor_key, sudo ? "sudo-refused" : "su-refused", subject_key, why);
@@ -543,7 +528,6 @@ fl_result_t fl_session_switch_user(const fl_session_switch_request_t *req) {
     pthread_mutex_lock(&s_session_mu);
     u = fl_user_db_find(&s_db, req->target);
     cu = fl_user_db_find(&s_db, s_current);
-    /* sudo asks for Root's key (keyquorum_access.h); su for the target's. */
     holder = req->sudo ? fl_user_db_find_by_key(&s_db, FL_HERITAGE_ROOT_KEY) : u;
     if (!u || !cu || !holder) {
         pthread_mutex_unlock(&s_session_mu);
@@ -566,11 +550,10 @@ fl_result_t fl_session_switch_user(const fl_session_switch_request_t *req) {
     attempt_gen = s_login_gen;
     pthread_mutex_unlock(&s_session_mu);
 
-    /* KeyQuorum names the factor; this side only collects it. The password KDF runs here, on the
-     * copy taken above, so the final reservation does not derive it again. */
+    /* The factor is named by KeyQuorum; the password KDF runs once, on the copy taken above. */
     need = fl_kq_unlock_requirement(cur_name, tgt_name, req->sudo);
     if (need.needs_parent_grant) {
-        /* No way to collect a parent's grant exists on this side: refused, never skipped. */
+        /* No way to collect a parent's grant exists here: refused, never skipped. */
         why = "parent-grant";
     } else {
         switch (need.factor) {
@@ -581,8 +564,7 @@ fl_result_t fl_session_switch_user(const fl_session_switch_request_t *req) {
         case FL_KQ_ACCESS_PASSWORD_BRIDGE_KQST:
             break;
         case FL_KQ_ACCESS_KQST_PASSWORD:
-            /* sudo -i always opens Root's token: a password-only Root is refused before any password is
-             * checked. For su, a password-only holder is accepted and audited as "su-kqst-legacy". */
+            /* sudo -i always needs Root's token: a password-only Root is refused before any password check. */
             if (!holder_kqst && req->sudo)
                 why = "no-root-kqst";
             break;
@@ -595,12 +577,10 @@ fl_result_t fl_session_switch_user(const fl_session_switch_request_t *req) {
         why = "password";
     if (!why && need.factor == FL_KQ_ACCESS_KQST_PASSWORD) {
         if (holder_kqst) {
-            /* The holder's slot token, opened with the holder's password: a password alone never
-             * does. A co-signed sudo opens it to sign (below), so it is opened once. */
+            /* The holder's slot token: a password alone never opens it. */
             if (!coauth && fl_kq_open_account(holder_name, pw, NULL) != FL_KQ_ACCOUNT_OK)
                 why = "kqst";
         } else {
-            /* Only su gets here: sudo with a password-only Root was refused above. */
             session_audit(cur_key, "su-kqst-legacy", tgt_key, "password-only account");
         }
     }
@@ -632,7 +612,6 @@ fl_result_t fl_session_switch_user(const fl_session_switch_request_t *req) {
         goto wipe;
     }
 
-    /* The factor is satisfied. A test may change the store here, before the reservation. */
     if (s_switch_pre_lock)
         s_switch_pre_lock();
 
@@ -680,7 +659,7 @@ fl_result_t fl_session_switch_user(const fl_session_switch_request_t *req) {
             rc = FL_RESULT_ACCES;
             goto release;
         }
-        /* The invoker's password that co-authorised it is still the account's. */
+        /* The invoker's password that co-authorised it must still be the account's. */
         if (coauth && !session_verify_password_locked(cur_name, req->invoker_password)) {
             why = "changed";
             rc = FL_RESULT_ACCES;
@@ -830,8 +809,7 @@ fl_result_t fl_session_sudo_authenticate(const char *root_password, const char *
         session_audit(cur_key, "sudo-refused", FL_HERITAGE_ROOT_KEY, why);
         return FL_RESULT_ACCES;
     }
-    /* The checks ran without the session lock. set_auth_mode and set_password do not change the
-     * generation, so both accounts' modes and the accepted passwords are checked again here. */
+    /* Checks ran without the session lock; the accounts' modes and passwords are checked again here. */
     if (s_switch_pre_lock)
         s_switch_pre_lock();
     pthread_mutex_lock(&s_session_mu);
@@ -863,7 +841,6 @@ fl_result_t fl_session_sudo_authenticate(const char *root_password, const char *
         return FL_RESULT_ACCES;
     }
     rc = grant_elevation_locked("sudo authentication", &tok);
-    /* The kept keys end with the window the token opened, to the nanosecond. */
     if (rc == FL_RESULT_OK && coauth && fl_elevation_expires(tok, &window) == FL_RESULT_OK)
         fl_kq_sudo_hold_extend(window);
     else if (coauth)
@@ -938,7 +915,6 @@ static fl_result_t enroll_kqst_serialized(const char *password, const char *kqst
     } else if (cur_auth != FL_USER_AUTH_PASSWORD_KQST &&
                (fl_user_db_set_auth_mode(&s_db, cur_name, FL_USER_AUTH_PASSWORD_KQST) != FL_RESULT_OK ||
                 fl_user_db_save(&s_db) != FL_RESULT_OK)) {
-        /* Put both back: the account keeps logging in as it did. */
         (void)fl_user_db_set_auth_mode(&s_db, cur_name, cur_auth);
         (void)fl_user_db_kqst_row_restore(&s_db, cur_key, old);
         why = "store";
@@ -1019,8 +995,7 @@ static fl_result_t make_kqst_serialized(const char *name, const char *password, 
         why = "no-driver";
         rc = FL_RESULT_NOSYS;
     } else if (!have_service) {
-        /* A token sign-in needs the key service to take the opened keys (it fails closed without
-         * it), so a token made with no key service running would lock the account out. */
+        /* Without the key service a token sign-in fails closed, so a token made now would lock out. */
         why = "no-service";
         rc = FL_RESULT_NOSYS;
     } else if (!snap->has_key || !snap->has_box) {
@@ -1092,7 +1067,7 @@ static fl_result_t make_kqst_serialized(const char *name, const char *password, 
     free(old);
     return FL_RESULT_OK;
 refused:
-    /* A token nobody's pairing names is removed; an account that already had one is never here. */
+    /* A token nobody's pairing names is removed. */
     if (wrote)
         (void)unlink(path);
     session_audit(snap->key_id, "kqst-make-refused", snap->key_id, why);
@@ -1170,7 +1145,6 @@ fl_result_t fl_session_elevated_action(const char *action, int renew, int *deele
     if (!action || !action[0])
         return FL_RESULT_INVAL;
     pthread_mutex_lock(&s_session_mu);
-    /* Root (and any account elevated by itself) acts with its own key: there is no window to sign. */
     if (!s_db_ready || !s_db.loaded || fl_user_db_is_elevated_user(&s_db, s_current)) {
         pthread_mutex_unlock(&s_session_mu);
         return FL_RESULT_OK;
@@ -1210,8 +1184,7 @@ fl_result_t fl_session_elevated_action(const char *action, int renew, int *deele
         mem_domain_zero(root_sig, sizeof root_sig);
         return FL_RESULT_OK;
     }
-    /* Root's key is not available: the elevation sudo gave is taken away, and the account goes on
-     * with its own key alone. */
+    /* Root's key is gone: the elevation sudo gave is taken away; the account keeps its own key. */
     pthread_mutex_lock(&s_session_mu);
     active = s_active_elev == tok && s_login_gen == gen;
     if (active) {
@@ -1352,8 +1325,7 @@ fl_result_t fl_session_remove_user(const char *name) {
     if (!session_db_ready_locked()) {
         rc = FL_RESULT_ERR;
     } else {
-        /* Matches the logged-in record under any spelling: a switch that committed just before this
-         * lock must not leave s_current naming an account that is no longer in the store. */
+        /* Matches the logged-in record under any spelling, so s_current never names a removed account. */
         user = fl_user_db_find(&s_db, name);
         if (user && user == fl_user_db_find(&s_db, s_current))
             rc = FL_RESULT_ACCES;
@@ -1364,7 +1336,7 @@ fl_result_t fl_session_remove_user(const char *name) {
     return rc;
 }
 
-/* A reset gives the account new keys, so its token no longer matches: it returns to password sign-in. */
+/* A reset gives new keys, so the token no longer matches: the account returns to password sign-in. */
 fl_result_t fl_session_set_password(const char *name, const char *password) {
     const fl_user_record_t *u;
     fl_result_t rc;
@@ -1386,7 +1358,7 @@ fl_result_t fl_session_set_password(const char *name, const char *password) {
     return rc;
 }
 
-/* Re-seals a token-mode account's token under the new password; a failed reseal restores the old password. */
+/* Re-seals a token-mode account's token under the new password; a failed reseal restores the old one. */
 static fl_result_t change_password_serialized(const char *name, const char *current,
                                               const char *password) {
     const fl_user_record_t *u;
@@ -1451,8 +1423,7 @@ static fl_result_t change_password_serialized(const char *name, const char *curr
                                   enc_pub) != FL_KQ_ACCOUNT_OK ||
         !asm_mem_ct_equal(sig_pub, row->signing_public, 32) ||
         !asm_mem_ct_equal(enc_pub, row->encryption_public, 32)) {
-        /* The token file is replaced only by a rename, so on a failure before it the old token
-         * stands; the old password goes back with it. */
+        /* The token is replaced only by rename, so a failure before it leaves the old token standing. */
         session_lock_db();
         if (fl_user_db_change_password(&s_db, name, password, current) == FL_RESULT_OK)
             (void)fl_user_db_save(&s_db);
@@ -1467,7 +1438,6 @@ done:
     mem_domain_secure_zero(box, sizeof box);
     session_audit(key_id, why ? "kqst-reseal-refused" : "kqst-resealed", key_id, why);
     free(row);
-    /* Keys kept for a sudo window were opened from the token as it was: a reseal ends them. */
     if (!why)
         fl_kq_sudo_hold_release();
     return rc;
@@ -1536,8 +1506,7 @@ fl_result_t fl_session_reload_users(void) {
     else
         rc = fl_user_db_load(&s_db, s_db.path);
     if (rc != FL_RESULT_OK) {
-        /* The store is not the authority anymore. A token or sudo scope from before
-         * this call must not still satisfy fl_session_has_elevation. */
+        /* The store is no longer the authority: any token or sudo scope from before must not still count. */
         revoke_bound_elevation_locked();
         s_sudo_scope_depth = 0;
         s_current[0] = '\0';
@@ -1547,8 +1516,7 @@ fl_result_t fl_session_reload_users(void) {
     }
     s_db_ready = (rc == FL_RESULT_OK && s_db.loaded) ? 1 : 0;
     session_unlock_db();
-    /* The account is gone with the session, so its key goes offline. Only while no later login has
-     * begun: that login's key is not this one's to end. */
+    /* Its key goes offline only while no later login has begun. */
     if (offline && s_offline_hook && fl_session_login_generation() == failed_gen)
         s_offline_hook(who_key);
     return rc;

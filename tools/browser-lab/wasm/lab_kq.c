@@ -1,24 +1,7 @@
 /*
- * KeyQuorum co-signed delivery in the WebAssembly lab shell.
- *
- * The lab runs the native code unchanged: the checkpoints (kq_checkpoint.c), the host and
- * client of the delivery protocol (net_kq_delivery.c), the host's delivery store
- * (kq_delivery.c, SQLite from the KeyQuorum archive) and the driver (kq_driver.c). This
- * file supplies only what the browser provides in place of the native shell:
- *
- *   - C stand-ins for the memory primitives the assembly layer provides natively (there is
- *     no assembly in WebAssembly), keeping their shape: secure zero is zero plus a barrier;
- *   - the key directory (kq_keydir.h): each lab account's keys, made on first use and held
- *     in memory like the lab's passwords, and the keys other members publish to the host,
- *     where the first keys seen for a name are kept and different ones refused;
- *   - the members table, filled from the relay roster, and a transport that hands frames
- *     to the page (Module.onKqFrame) instead of sockets;
- *   - the shell verbs, written as steps that continue when an answer arrives: the browser
- *     gives the shell one thread, so nothing here waits.
- *
- * Files live in Emscripten's in-memory file system under /kq (containers, acceptance
- * records, the host's store); a delivered file is also written to the lab's ramfs, so `cat`
- * shows it, never over a ramfs file that is not this delivery's earlier copy.
+ * KeyQuorum co-signed delivery in the WebAssembly lab shell. The native checkpoints, delivery protocol
+ * and driver run unchanged; this file supplies the browser's stand-ins: memory primitives, the lab key
+ * directory, the members table and a transport that hands frames to the page. Files live in /kq.
  */
 #include "lab_kq.h"
 
@@ -43,8 +26,7 @@
 #include <strings.h>
 #include <time.h>
 
-/* server_shared_fs.c resolves relative landing paths against g_cwd; the lab has no shell
- * common.c, so its working directory is defined here (the native shell sets its own). */
+/* Relative landing paths resolve against g_cwd; the lab has no shell common.c to define it. */
 char g_cwd[CWD_MAX] = ".";
 
 #define LAB_KEYS_MAX 32
@@ -57,8 +39,7 @@ char g_cwd[CWD_MAX] = ".";
 
 /* ---- platform: what the assembly layer provides natively ------------------------------ */
 
-/* Host builds make the domain allocators thin wrappers over libc (mem_domain.c); the lab does the
- * same, since it does not link that file. */
+/* Thin libc wrappers, as host builds use (mem_domain.c is not linked in the lab). */
 void *mem_domain_alloc(mem_domain_t domain, size_t size) {
     (void)domain;
     return malloc(size);
@@ -86,7 +67,6 @@ void mem_domain_zero(void *ptr, size_t n) {
         *p++ = 0;
 }
 
-/* Extends mem_domain_zero, as natively: the same zeroing, then a barrier. */
 void mem_domain_secure_zero(void *ptr, size_t n) {
     mem_domain_zero(ptr, n);
     __asm__ __volatile__("" ::: "memory");
@@ -103,7 +83,6 @@ int asm_mem_ct_equal(const void *a, const void *b, size_t n) {
     return acc == 0;
 }
 
-/* The host's clock is this browser's clock. */
 fl_result_t fl_time_wall_sec(int64_t *out_sec) {
     if (!out_sec)
         return FL_RESULT_INVAL;
@@ -115,7 +94,6 @@ fl_result_t fl_time_wall_sec(int64_t *out_sec) {
 
 static void (*s_emit)(const char *line);
 
-/* Checkpoint outcomes and requests for the server panel. */
 EM_JS(void, lab_kq_event_js, (const char *kind, const char *a, const char *b, const char *c), {
     if (typeof Module.onKqEvent === "function")
         Module.onKqEvent({ kind: UTF8ToString(kind), a: UTF8ToString(a), b: UTF8ToString(b),
@@ -132,7 +110,6 @@ static void say(const char *fmt, const char *a, const char *b, const char *c) {
     }
 }
 
-/* One checkpoint result: printed in the shell and listed in the panel's checkpoint log. */
 static void checkpoint(const char *which, const char *outcome, const char *detail) {
     static const char prefix[] = "keyquorum: "; /* the host's refusals carry it already */
 
@@ -162,8 +139,7 @@ typedef struct {
 
 static lab_key_t s_keys[LAB_KEYS_MAX];
 
-/* Names match regardless of ASCII case, as the lab's accounts do ("root" finds Root); the
- * label kept is the spelling first seen, and that is what signatures name. */
+/* Names match regardless of ASCII case; the label kept is the spelling first seen. */
 static lab_key_t *key_find(const char *label) {
     for (int i = 0; i < LAB_KEYS_MAX; i++)
         if (s_keys[i].used && strcasecmp(s_keys[i].label, label) == 0)
@@ -178,7 +154,6 @@ static lab_key_t *key_slot(void) {
     return NULL;
 }
 
-/* This lab account's keys, made on first use. */
 static lab_key_t *local_keys(const char *label) {
     lab_key_t *k = key_find(label);
     const fl_kq_driver_t *drv;
@@ -224,7 +199,6 @@ static const unsigned char *dir_box(const fl_kq_keydir_t *dir, const char *label
     return k ? k->box_pub : NULL;
 }
 
-/* Seal one secret under password into out. The driver does the sealing. */
 static int seal_one(const fl_kq_driver_t *drv, const char *password, const uint8_t secret[32],
                     uint8_t out[FL_KQ_ACCOUNT_SEALED_LEN]) {
     size_t n = 0;
@@ -325,7 +299,7 @@ static void id_forget(const char *name) {
         mem_domain_secure_zero(k, sizeof *k);
 }
 
-/* switch_allowed is left NULL: no extra refusal before the target account's password. */
+/* switch_allowed is NULL: no extra refusal before the target account's password. */
 static const fl_fs_identity_kq_ops_t s_id_ops = {
     .enroll = id_enroll,
     .unlock = id_unlock,
@@ -349,7 +323,6 @@ static fl_net_server_member_t s_members[FL_NET_SERVER_MAX_MEMBERS];
 static size_t s_member_count;
 static fl_net_server_member_id_t s_self_id;
 static int s_hosting;
-/* The module treats the server as opaque; the lab's is just its members table. */
 static fl_net_server_t *const s_srv = (fl_net_server_t *)&s_members;
 
 size_t fl_net_server_member_count(const fl_net_server_t *srv) {
@@ -404,7 +377,6 @@ static void host_send(fl_net_server_t *srv, const fl_net_server_member_t *to, ui
     lab_kq_post(0, to->member_id, opcode, payload, plen);
 }
 
-/* A client to the host: the host's own shell directly, otherwise through the relay. */
 static void client_send(fl_net_client_t *client, uint8_t opcode, const uint8_t *payload,
                         uint16_t plen) {
     const fl_net_server_member_t *self = self_member();
@@ -502,8 +474,7 @@ static void write_ramfs_copy(int session, const char *name, const fl_kq_buf_t *p
     mem_domain_secure_zero(existing, sizeof existing);
 }
 
-/* Decode checkpoint for a released letter, then ACK; as the native shell's
- * kq_decode_and_ack. Returns 1 when finished (either way), 0 to try again later. */
+/* Decodes a released letter, then ACKs. Returns 1 when finished, 0 to try again later. */
 static int decode_and_ack(pending_open_t *p) {
     fl_net_kq_inbox_t in;
     fl_net_kq_keys_t sender;
@@ -542,7 +513,7 @@ static int decode_and_ack(pending_open_t *p) {
     fl_kq_buf_free(&letter);
     fl_kq_delivery_id_hex(p->id, hex);
     if (cp == FL_KQ_CP_EXISTS || cp == FL_KQ_CP_IO) {
-        /* A local problem with the destination, not with the letter: keep it to retry. */
+        /* A local problem with the destination, not the letter: kept to retry. */
         checkpoint("decode", "not saved", fl_kq_cp_reason(cp));
         say("keyquorum: retry with: server file open %s", hex, NULL, NULL);
         fl_kq_buf_free(&previous);
@@ -574,7 +545,6 @@ static void encode_and_send(pending_send_t *p, const fl_net_kq_keys_t *to) {
         return;
     }
     if (p->permitted) {
-        /* A permitted newer copy: the head the supervisor countersigned, sealed as it is. */
         uint8_t head[32];
 
         cp = fl_kq_cp_head(p->path, head);
@@ -600,7 +570,6 @@ static void encode_and_send(pending_send_t *p, const fl_net_kq_keys_t *to) {
     fl_kq_encoded_free(&enc);
 }
 
-/* New co-signature requests, for the panel (the shell already printed them). */
 static void announce_new_requests(void) {
     fl_net_kq_inbox_t all[LAB_INBOX_MAX];
     size_t n = fl_net_kq_inbox(all, LAB_INBOX_MAX);
@@ -623,7 +592,6 @@ static void announce_new_requests(void) {
     }
 }
 
-/* Moves every waiting step on as far as the answers that have arrived allow. */
 static void progress(void) {
     for (int i = 0; i < LAB_PENDING_MAX; i++) {
         fl_net_kq_keys_t keys;
@@ -693,7 +661,7 @@ int fl_lab_kq_send(int session, const char *path, const char *user, int permitte
     memset(p, 0, sizeof *p);
     snprintf(dir, sizeof dir, LAB_KQ_ROOT "/%s/out", me);
     snprintf(p->path, sizeof p->path, "%s/%s", dir, name);
-    /* The tracked copy: its container sits beside it, so each send is a new revision. */
+    /* The tracked copy's container sits beside it, so each send is a new revision. */
     if (fl_fs_mkdir_p(dir, 0700) != 0 ||
         fl_fs_write_file_atomic(p->path, (const uint8_t *)content, strlen(content)) != 0) {
         mem_domain_secure_zero(content, sizeof content);
@@ -708,14 +676,12 @@ int fl_lab_kq_send(int session, const char *path, const char *user, int permitte
     p->asked_at = now_sec();
     p->permitted = permitted;
     p->used = 1;
-    /* Ask the host for the recipient's keys; the answer moves the send on. */
     (void)fl_net_kq_lookup(s_srv, NULL, s_hosting, user, 0, &ignored);
     say("keyquorum: asking the server for %s's keys...", user, NULL, NULL);
     progress();
     return 1;
 }
 
-/* One history line, formatted, for fl_kq_cp_for_each_event. */
 static int say_event_line(const char *line, size_t n, void *ctx) {
     char text[384];
 
@@ -725,8 +691,7 @@ static int say_event_line(const char *line, size_t n, void *ctx) {
     return 0;
 }
 
-/* server file log <path>: the history of a tracked copy, read from its container. Offline: it
- * needs no server and no key. */
+/* server file log <path>: a tracked copy's history from its container. Offline. */
 int fl_lab_kq_log(int session, const char *path) {
     fl_kq_buf_t lines = {0};
     fl_kq_cp_result_t cp;
@@ -744,8 +709,7 @@ int fl_lab_kq_log(int session, const char *path) {
     return 1;
 }
 
-/* server file permit <path>: the signed-in supervisor countersigns the head of a tracked copy.
- * A recipient counts the permit only when the signer is the file's scope owner or an ancestor. */
+/* server file permit <path>: countersigns the head; a recipient counts it only from the owner or an ancestor. */
 int fl_lab_kq_permit(int session, const char *path) {
     const char *me = fl_fs_identity_user(session);
     lab_key_t *keys = me ? local_keys(me) : NULL;
@@ -881,7 +845,6 @@ int fl_lab_kq_open(int session, const char *hex) {
 
 void fl_lab_kq_init(void (*emit)(const char *line)) {
     s_emit = emit;
-    /* The lab does not start the driver model. */
     (void)fl_kq_driver_get_or_register();
     (void)fl_fs_mkdir_p(LAB_HOST_DIR, 0700);
     (void)fl_net_kq_configure(lab_directory, LAB_HOST_DIR);
@@ -890,10 +853,7 @@ void fl_lab_kq_init(void (*emit)(const char *line)) {
 
 /* ---- the page ------------------------------------------------------------------------- */
 
-/*
- * The relay roster: entries of member id (u16 big-endian), is_host (u8), principal length
- * (u8) and principal. self_id is this page's member.
- */
+/* The relay roster: member id (u16 BE), is_host, then the principal; self_id is this page's member. */
 EMSCRIPTEN_KEEPALIVE void wasm_kq_roster(int self_id, const uint8_t *buf, int len) {
     size_t off = 0;
 
@@ -921,7 +881,6 @@ EMSCRIPTEN_KEEPALIVE void wasm_kq_roster(int self_id, const uint8_t *buf, int le
     progress();
 }
 
-/* A frame from the relay: to this page's host (from member_id) or to its client side. */
 EMSCRIPTEN_KEEPALIVE void wasm_kq_frame(int to_host, int from_id, int op, const uint8_t *p,
                                         int n) {
     if (n < 0 || n > 0xffff)
@@ -946,10 +905,7 @@ EMSCRIPTEN_KEEPALIVE void wasm_kq_frame(int to_host, int from_id, int op, const 
     progress();
 }
 
-/*
- * The keys a member published, for the host's directory. The first keys seen for a name are
- * kept: different keys for a name already known are refused (0), the same keys are fine (1).
- */
+/* A member's published keys for the host's directory. The first keys seen for a name are kept; a conflict is 0. */
 EMSCRIPTEN_KEEPALIVE int wasm_kq_learn(const char *label, const uint8_t sign[32],
                                        const uint8_t box[32]) {
     lab_key_t *k;
@@ -969,8 +925,7 @@ EMSCRIPTEN_KEEPALIVE int wasm_kq_learn(const char *label, const uint8_t sign[32]
     return 1;
 }
 
-/* This lab account's public keys (signing then box, 64 bytes), made on first use; NULL when
- * the name is already held by another member's keys. */
+/* This lab account's public keys (signing then box, 64 bytes); NULL when another member holds the name. */
 EMSCRIPTEN_KEEPALIVE const uint8_t *wasm_kq_public(const char *label) {
     static uint8_t out[64];
     lab_key_t *k = local_keys(label);
@@ -982,7 +937,7 @@ EMSCRIPTEN_KEEPALIVE const uint8_t *wasm_kq_public(const char *label) {
     return out;
 }
 
-/* Called by the page now and then, so an unanswered send is reported and requests leak. */
+/* Called by the page periodically, so an unanswered send is reported and requests leak. */
 EMSCRIPTEN_KEEPALIVE void wasm_kq_tick(void) {
     progress();
 }

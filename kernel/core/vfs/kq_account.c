@@ -1,5 +1,4 @@
-/* Account unlock through the KeyQuorum driver: slot tokens, the switch factor and bridge proofs, all
- * against the account store's facts. */
+/* Account unlock through the KeyQuorum driver, against the account store's facts. */
 #include "fl/kq.h"
 
 #include "contract_p5_server_catalog.h"
@@ -101,7 +100,7 @@ done:
     return out;
 }
 
-/* The roster member at the other end from the presenter, else the presenter (a verifier must be a member). */
+/* The roster member at the other end from the presenter, else the presenter. */
 static const char *bridge_verifier(const fl_user_bridge_t *b, const char *presenter) {
     size_t i;
 
@@ -139,7 +138,7 @@ static int facts_u32(uint8_t *buf, size_t cap, size_t *used, uint32_t v) {
     return facts_put(buf, cap, used, b, 4);
 }
 
-/* Length of a NUL-terminated field that fits in cap bytes, including the NUL. -1 when it does not. */
+/* Length of a NUL-terminated field that fits in cap bytes; -1 when it does not. */
 static int facts_field(const char *s, size_t cap, size_t *len) {
     const char *end;
 
@@ -305,7 +304,7 @@ out:
     return st;
 }
 
-/* Reads the token file (at most 64 KiB) and opens it. Both secrets are zeroed unless OK (caller wipes). */
+/* Opens a token file; both secrets are zeroed unless OK (caller wipes). */
 static int open_token_file(const char *label, const char *password, const char *path,
                            const unsigned char device_id[16], const unsigned char signing_pub[32],
                            const unsigned char encryption_pub[32], uint8_t signing_secret_out[32],
@@ -459,8 +458,7 @@ int fl_kq_account_token_path(const char *db_path, const char *key_id, char *out,
     return 0;
 }
 
-/* Stages "<name>.<random hex>.new" (owner-only, never over a file), then renames. The directory is opened
- * once without following a symlink; every later step is relative to that handle, so it cannot be swapped. */
+/* Stages a random .new name (owner-only, never over a file), then renames. The directory is held. */
 static int write_token_file(const char *path, const uint8_t *bytes, size_t len) {
     char dir[FL_KQ_TOKEN_PATH_MAX];
     char name[FL_KQ_TOKEN_PATH_MAX], tmp_name[FL_KQ_TOKEN_PATH_MAX + 24], tag_hex[17];
@@ -471,7 +469,6 @@ static int write_token_file(const char *path, const uint8_t *bytes, size_t len) 
     int fd, dfd = AT_FDCWD;
     struct stat st;
 
-    /* The file is "<key id>.kqst": the key id part must be one token_name_safe accepts. */
     if (blen <= 5 || strcmp(base + blen - 5, ".kqst") != 0 || blen - 5 >= sizeof name)
         return -1;
     memcpy(name, base, blen - 5);
@@ -479,7 +476,7 @@ static int write_token_file(const char *path, const uint8_t *bytes, size_t len) 
     if (!token_name_safe(name))
         return -1;
     snprintf(name, sizeof name, "%s", base);
-    /* Each write stages under its own name, so two writers never share or remove a staged file. */
+    /* Each write stages under its own name, so two writers never share a staged file. */
     if (fl_random_bytes(tag, sizeof tag) != 0)
         return -1;
     fl_hex_encode(tag, sizeof tag, tag_hex);
@@ -562,7 +559,7 @@ int fl_kq_write_account_token(const char *key_id, const char *password,
     return st;
 }
 
-/* The secret an account co-signs a sudo with (token or sealed signing key); zeroed unless OK, caller wipes. */
+/* Opens a co-signer secret; zeroed unless OK (caller wipes). */
 static int open_cosigner(const char *name, const char *password, int kqst, uint8_t secret_out[32],
                          unsigned char public_out[32], char key_id_out[FL_HERITAGE_KEY_ID_MAX]) {
     const fl_kq_driver_t *drv = fl_kq_driver_get_or_register();
@@ -597,7 +594,6 @@ static int open_cosigner(const char *name, const char *password, int kqst, uint8
     return st;
 }
 
-/* The store's public key for a co-signer: the token's pairing for a KQST account, else the record's key. */
 static int cosigner_public(const char *name, int kqst, unsigned char public_out[32],
                            char key_id_out[FL_HERITAGE_KEY_ID_MAX]) {
     const fl_user_db_t *db = fl_session_user_db();
@@ -619,7 +615,7 @@ static int cosigner_public(const char *name, int kqst, unsigned char public_out[
     return st;
 }
 
-/* Both sign action under a fresh nonce and both must verify. On FL_KQ_COSIGN_SIGN the signatures are zeroed. */
+/* Both sign the action under a fresh nonce and both must verify; SIGN zeroes the signatures. */
 static int cosign_with(const char *inv_key, const char *root_key, const char *action,
                        const uint8_t inv_secret[32], const uint8_t root_secret[32],
                        const unsigned char inv_pub[32], const unsigned char root_pub[32],
@@ -639,8 +635,7 @@ static int cosign_with(const char *inv_key, const char *root_key, const char *ac
                        inv_secret, invoker_sig_out) == FL_KQ_ACCOUNT_OK &&
         drv->sudo_sign(FL_KQ_SUDO_AUTHORITY, inv_key, root_key, (const uint8_t *)action, alen, nonce_out,
                        root_secret, root_sig_out) == FL_KQ_ACCOUNT_OK &&
-        /* Verified against the store's public keys, never the ones just used: a token or sealed key
-         * that opened to some other key would sign, and must not count. */
+        /* Verified under the store's public keys, never the ones just used. */
         drv->sudo_verify(inv_key, root_key, (const uint8_t *)action, alen, nonce_out, inv_pub,
                          invoker_sig_out, root_pub, root_sig_out) == 1)
         return FL_KQ_COSIGN_OK;
@@ -649,7 +644,7 @@ static int cosign_with(const char *inv_key, const char *root_key, const char *ac
     return FL_KQ_COSIGN_SIGN;
 }
 
-/* The sudo window's two secrets: kept out of swap and core dumps where the host allows, wiped when it ends. */
+/* The sudo window's two secrets: kept out of swap and core dumps, wiped when it ends. */
 typedef struct {
     int           used;
     int           inv_kqst;
@@ -669,7 +664,6 @@ int fl_kq_lock_pages(void *p, size_t len) {
     int locked;
 
 #if defined(__linux__) && defined(SYS_mlock)
-    /* The system call itself: a sanitizer build makes mlock() a no-op that answers 0. */
     locked = syscall(SYS_mlock, p, len) == 0;
 #else
     locked = mlock(p, len) == 0;
@@ -771,8 +765,7 @@ int fl_kq_sudo_hold_cosign(const char *invoker_name, const char *action, int64_t
     mem_domain_copy(root_secret, s_hold.root_secret, sizeof root_secret);
     pthread_mutex_unlock(&s_hold_mu);
 
-    /* The store's keys now, not the ones held: a token re-sealed or re-paired since the sudo no
-     * longer counts, and Root's key is then unavailable. */
+    /* The store's keys now: a token re-sealed or re-paired since the sudo no longer counts. */
     if (cosigner_public(root_name, 1, root_pub, root_key) != FL_KQ_ACCOUNT_OK)
         rc = FL_KQ_COSIGN_AUTHORITY;
     else if (cosigner_public(inv_name, inv_kqst, inv_pub, inv_key) != FL_KQ_ACCOUNT_OK)

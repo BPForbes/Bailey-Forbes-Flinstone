@@ -20,7 +20,6 @@
 void cmd_wipe_password(char *buf, size_t buf_size) {
     if (!buf || buf_size == 0)
         return;
-    /* The secret-wipe primitive: a plain memset of a dying buffer may be optimised away. */
     mem_domain_secure_zero(buf, buf_size);
 }
 
@@ -39,7 +38,7 @@ static int cmd_read_password_line(const char *prompt, char *buf, size_t buf_size
     return 0;
 }
 
-/* One non-secret line. The rest of an over-long line is discarded (*overlong set), so it is never run. */
+/* One non-secret line; the rest of an over-long line is discarded, never run. */
 static int cmd_read_line(char *buf, size_t buf_size, int *overlong) {
     *overlong = 0;
     if (cmd_read_password_line(NULL, buf, buf_size) != 0)
@@ -112,7 +111,7 @@ int cmd_read_password(const char *prompt, char *buf, size_t buf_size) {
 #endif
 }
 
-/* Reads the invoker's own password for sudo's co-signature (not asked for Root). -1: read failed, pw wiped. */
+/* Reads the invoker's own password for sudo's co-signature. -1: read failed, pw wiped. */
 static int cmd_read_invoker_password(const char *cmd, char *pw, size_t cap, int *asked) {
     const char *self = fl_session_current_user();
     const fl_user_record_t *me = fl_user_db_find(fl_session_user_db(), self ? self : "");
@@ -152,8 +151,7 @@ int cmd_sudo_require_auth_reason(const char *reason) {
     if (fl_session_has_elevation())
         return 0;
 
-    /* A password-only Root has no token, so nothing is asked: the session refuses and audits it (no
-     * fallback to the caller's own password). */
+    /* A password-only Root has no token: refused and audited, with no fallback to the caller's password. */
     if (!fl_session_sudo_needs_root()) {
         rc = fl_session_sudo_authenticate(NULL, NULL);
         if (rc != FL_RESULT_OK) {
@@ -166,7 +164,6 @@ int cmd_sudo_require_auth_reason(const char *reason) {
             fprintf(stderr, "sudo: password read failed\n");
             return 1;
         }
-        /* Co-signature: the invoker's key signs the action beside Root's. */
         if (cmd_read_invoker_password("sudo", mine, sizeof(mine), &asked) != 0) {
             cmd_wipe_password(pw, sizeof(pw));
             fprintf(stderr, "sudo: password read failed\n");
@@ -200,8 +197,7 @@ int cmd_sudo_sign_action(const char *line) {
         report_elevation_end(1);
     else if (fl_session_has_elevation())
         return 0;
-    /* The window ended before this sudo could renew it: nothing was renewed, so sudo asks for the
-     * full co-signature again, and succeeds only if the line was then signed under a live window. */
+    /* Window ended before renewal: sudo asks for the full co-signature again. */
     if (cmd_sudo_require_auth_reason("sudo authentication") != 0)
         return 1;
     (void)fl_session_elevated_action(line, 1, &deelevated);
@@ -226,7 +222,6 @@ int cmd_sudo_require_auth(void) {
     return cmd_sudo_require_auth_reason("sudo authentication");
 }
 
-/* 1 when key_id is a Member of the live bridge uid in the account store. */
 static int bridge_has_member(const char *uid, const char *key_id) {
     fl_user_bridge_t *b = calloc(1, sizeof *b);
     size_t i;
@@ -262,17 +257,16 @@ int cmd_switch_user(const char *cmd, const char *target, int sudo) {
     req.target = target;
     req.sudo = sudo;
     pw[0] = member[0] = member_pw[0] = mine[0] = '\0';
-    /* Which factor to collect is KeyQuorum's answer; the session asks again and decides. */
+    /* Which factor to collect is KeyQuorum's answer; the session decides. */
     need = fl_kq_unlock_requirement(fl_session_current_user(), target, sudo);
     root = fl_user_db_find_by_key(db, FL_HERITAGE_ROOT_KEY);
     if (need.factor == FL_KQ_ACCESS_NONE)
         ask_password = 0;
-    /* A password-only Root has no token, so nothing is asked: the session refuses and audits it. The
-     * reason is shown, because plain sudo already shows whether Root has a token. */
+    /* A password-only Root is refused with the reason shown, as plain sudo already shows. */
     no_root_token = sudo && !(root && root->auth_mode == FL_USER_AUTH_PASSWORD_KQST);
     if (no_root_token)
         ask_password = 0;
-    /* A refused switch asks for the password too: whether it is refused, and why, is not shown first. */
+    /* A refused switch asks for the password too: refusal and reason are not shown first. */
     if (ask_password) {
         if (sudo)
             snprintf(prompt, sizeof prompt, "[sudo -i] Root password: ");
@@ -284,7 +278,6 @@ int cmd_switch_user(const char *cmd, const char *target, int sudo) {
             return 1;
         }
         req.password = pw;
-        /* sudo -i is co-authorised by the invoker too. */
         if (sudo && cmd_read_invoker_password("sudo -i", mine, sizeof mine, &asked_mine) != 0) {
             cmd_wipe_password(pw, sizeof pw);
             fprintf(stderr, "%s: password read failed\n", cmd);
@@ -293,11 +286,9 @@ int cmd_switch_user(const char *cmd, const char *target, int sudo) {
         if (asked_mine)
             req.invoker_password = mine;
     }
-    /* A bridge member is asked for only once the password is verified, so the prompt says nothing
-     * about a bridge to someone without it. */
+        /* A bridge member is asked for only once the password is verified. */
     if (need.factor == FL_KQ_ACCESS_PASSWORD_BRIDGE_KQST && !need.needs_parent_grant && req.password &&
         fl_session_verify_account_password(sudo ? (root ? root->name : "") : target, pw)) {
-        /* A member of the bridge presents their slot token: the caller, when a member, else named. */
         const char *self = fl_session_current_user();
         const fl_user_record_t *me = fl_user_db_find(db, self);
         int overlong = 0;
@@ -312,7 +303,7 @@ int cmd_switch_user(const char *cmd, const char *target, int sudo) {
             member[strcspn(member, "\r\n")] = '\0';
         }
         if (overlong || !member[0]) {
-            /* An over-long or empty name names nobody: the session refuses ("bridge-member"). */
+            /* An over-long or empty name names nobody: the session refuses. */
             member[0] = '\0';
         } else {
             snprintf(prompt, sizeof prompt, "Password for %s (bridge slot token): ", member);
@@ -332,7 +323,6 @@ int cmd_switch_user(const char *cmd, const char *target, int sudo) {
     cmd_wipe_password(member_pw, sizeof member_pw);
     cmd_wipe_password(mine, sizeof mine);
     if (rc != FL_RESULT_OK) {
-        /* One message for every other refusal; the reason is in the audit only. */
         if (no_root_token)
             report_no_root_token(cmd);
         else

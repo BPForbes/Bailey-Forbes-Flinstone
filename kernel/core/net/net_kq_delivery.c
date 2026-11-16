@@ -21,11 +21,10 @@
 #define KQ_INBOX_MAX 16u
 #define KQ_KEYS_MAX 16u
 #define KQ_UPLOADS_MAX 8u
-/* An upload that receives no part for this long is dropped, so a member that offers and
- * goes quiet (or disconnects) cannot hold a slot. Parts follow the offer immediately. */
+/* An upload idle this long is dropped, so a silent member cannot hold a slot. */
 #define KQ_UPLOAD_IDLE_SEC 60
 
-/* Recursive: the host's own user reaches the client side from inside a host handler. */
+/* Recursive: the host's own user reaches the client side from a host handler. */
 static pthread_mutex_t s_lock;
 static pthread_once_t s_lock_once = PTHREAD_ONCE_INIT;
 
@@ -54,10 +53,7 @@ static int64_t (*s_now)(void);
 
 /* ---- wire codec ------------------------------------------------------------ */
 
-/* The codec is net_codec.h: frames are built with its sticky writer (one check per frame)
- * and read with its sticky reader. The helpers below only add the KQ value conventions: a
- * short read yields 0, and an offer is a fixed run of fields. */
-/* The writer's capacity and every frame length are uint16_t; the cap may be overridden. */
+/* Frames use net_codec.h's sticky writer and reader; a short read yields 0. */
 _Static_assert(FL_NET_SESSION_MAX_MSG <= UINT16_MAX, "session message cap must fit uint16_t");
 
 static uint32_t r_u32(fl_bytes_reader_t *r) {
@@ -72,7 +68,7 @@ static uint64_t r_u64(fl_bytes_reader_t *r) {
     return v;
 }
 
-/* The one offer encoder (fl_kq_cp_offer_encode): a refusal report names these exact bytes. */
+/* The one offer encoder: a refusal report names these exact bytes. */
 static void kq_put_offer(fl_bytes_sticky_writer_t *w, const kq_file_offer_t *o) {
     uint8_t wire[FL_KQ_OFFER_WIRE_LEN];
 
@@ -98,12 +94,10 @@ static int64_t now_sec(void) {
     return t;
 }
 
-/* The host's key authority: the native account store, or the lab's directory. */
 static const fl_kq_keydir_t *keys(void) {
     return s_authority ? s_authority() : NULL;
 }
 
-/* The account a member signs in as, by the host's registry. */
 static const char *key_of_member(const fl_net_server_member_t *m) {
     const fl_kq_keydir_t *k = keys();
 
@@ -155,8 +149,7 @@ void fl_net_kq_set_history(fl_net_kq_history_gate_fn gate, fl_net_kq_history_sou
     kq_unlock();
 }
 
-/* A letter being uploaded: its parts (base fl_part_buf_t, limited to the offered length) and
- * the offer and member it belongs to. */
+/* A letter being uploaded: its parts and the offer and member it belongs to. */
 typedef struct {
     fl_part_buf_t             letter;
     int                       used;
@@ -202,7 +195,6 @@ static void host_refuse(fl_net_server_t *srv, const fl_net_server_member_t *to, 
     host_send(srv, to, (uint8_t)FL_NET_SESSION_OP_ERR, (const uint8_t *)text, (uint16_t)n);
 }
 
-/* Every connected member signed in as `key_id`. */
 static void host_send_to_account(fl_net_server_t *srv, const char *key_id, uint8_t opcode,
                                  const uint8_t *payload, uint16_t plen) {
     size_t count = fl_net_server_member_count(srv);
@@ -234,7 +226,6 @@ static void host_announce(fl_net_server_t *srv, const fl_net_server_member_t *to
                              (uint16_t)w.w.len);
 }
 
-/* RELEASE header then the letter in parts, to `to` or every member of the recipient. */
 static void host_release(fl_net_server_t *srv, const fl_net_server_member_t *to,
                          const fl_kq_delivery_t *d) {
     uint8_t *letter = NULL;
@@ -284,7 +275,6 @@ static void upload_free(kq_upload_t *u) {
     memset(u, 0, sizeof *u);
 }
 
-/* Drops uploads idle past KQ_UPLOAD_IDLE_SEC on the host clock. */
 static void upload_reclaim(int64_t now) {
     for (size_t i = 0; i < KQ_UPLOADS_MAX; i++)
         if (s_uploads[i].used && now - s_uploads[i].last_at > KQ_UPLOAD_IDLE_SEC)
@@ -316,7 +306,6 @@ static void host_offer(fl_net_server_t *srv, const fl_net_server_member_t *from,
         host_refuse(srv, from, "delivery", "offer is not from this member's account");
         return;
     }
-    /* The recipient is named by key id and must hold a box key the letter can be sealed to. */
     if (!keys()->box_public(keys(), up.recipient)) {
         host_refuse(srv, from, "delivery", fl_kq_cp_reason(FL_KQ_CP_NO_KEY));
         return;
@@ -330,8 +319,7 @@ static void host_offer(fl_net_server_t *srv, const fl_net_server_member_t *from,
         host_refuse(srv, from, "delivery", "delivery id already held");
         return;
     }
-    /* One upload per member: a new offer replaces the member's unfinished one (a retry). An id
-     * another member is still uploading is refused. */
+    /* One upload per member: a new offer replaces its unfinished one; an id another member is uploading is refused. */
     upload_reclaim(now_sec());
     for (size_t i = 0; i < KQ_UPLOADS_MAX; i++) {
         if (!s_uploads[i].used)
@@ -383,7 +371,6 @@ static void host_part(fl_net_server_t *srv, const fl_net_server_member_t *from,
     }
     if (!fl_part_buf_complete(&u->letter))
         return;
-    /* Complete: the latent space holds it, on the host's clock, and asks the recipient. */
     fl_kq_delivery_init(&d, u->id, u->author, u->recipient, u->file_name, &u->offer, now_sec(),
                         FL_KQ_DELIVERY_TTL_SEC);
     rc = store() ? fl_kq_store_put(store(), &d, u->letter.data, u->letter.len) : FL_RESULT_ERR;
@@ -446,8 +433,7 @@ static void host_cosign(fl_net_server_t *srv, const fl_net_server_member_t *from
         host_release(srv, from, &d);
         return;
     case FL_KQ_NEURON_REFRACTORY:
-        /* Already released: send it again to this member (only they can open it), unless the
-         * receipt is in or the host has ended it. */
+        /* Already released: send it again to this member only, unless the receipt is in or the host ended it. */
         if (!d.acknowledged && !d.expired && !d.refused)
             host_release(srv, from, &d);
         return;
@@ -475,9 +461,7 @@ static void host_ack(fl_net_server_t *srv, const fl_net_server_member_t *from,
     if (r->bad || !store() || fl_kq_store_get(store(), id, &d) != FL_RESULT_OK || !me ||
         strcmp(me, d.recipient) != 0 || !d.fired || d.expired)
         return;
-    /* A refusal is recorded as a refusal, never as a delivery; either way the letter is deleted
-     * (docs/FILE_SHARING_KEYQUORUM.md: "Any other refusal is acknowledged as refused and the host
-     * deletes the letter"). */
+    /* A refusal is recorded as a refusal, never a delivery; the letter is deleted either way (FILE_SHARING_KEYQUORUM.md). */
     if (accepted) {
         d.acknowledged = 1;
         if (fl_kq_store_update(store(), &d, FL_KQ_SPIKE_ACK, now_sec()) == FL_RESULT_OK)
@@ -504,8 +488,7 @@ static void host_report(fl_net_server_t *srv, const fl_net_server_member_t *from
     if (r.bad || n == 0 || n > FL_KQ_REPORT_FRAME_MAX || fl_bytes_reader_remaining(&r) != n || !me || !store() ||
         fl_kq_store_get(store(), id, &d) != FL_RESULT_OK || strcmp(me, d.recipient) != 0 || !d.refused)
         return;
-    /* Once per delivery: the claim is in the delivery's own log, not a ring later deliveries could
-     * push it out of. */
+    /* Once per delivery: the claim lives in the delivery's own log, not a ring. */
     if (fl_kq_store_claim_report(store(), id, now_sec()) != FL_RESULT_OK)
         return;
     host_send_to_account(srv, d.sender, (uint8_t)FL_NET_SESSION_OP_KQR_REPORT, payload, plen);
@@ -671,8 +654,7 @@ void fl_net_kq_host_handle(fl_net_server_t *srv, const fl_net_server_member_t *f
 
 /* ---- client ----------------------------------------------------------------- */
 
-/* A co-signature request this shell holds: the released letter's parts (base fl_part_buf_t,
- * limited to the released length) and the request shown to the user. */
+/* A co-signature request this shell holds: the released letter's parts and the request shown to the user. */
 typedef struct {
     fl_part_buf_t     letter;
     int               used;
@@ -747,7 +729,6 @@ static void client_release(fl_bytes_reader_t *r) {
     slot = r->bad ? NULL : inbox_find(id);
     if (!slot || len == 0 || len > FL_KQ_LETTER_MAX)
         return;
-    /* A (re)release starts the letter again at offset 0. */
     fl_part_buf_release(&slot->letter);
     fl_part_buf_init(&slot->letter, len);
     if (fl_part_buf_reserve(&slot->letter, len) != FL_RESULT_OK)
@@ -800,7 +781,7 @@ static void client_keys(fl_bytes_reader_t *r) {
     slot->keys = k;
 }
 
-/* A history request this shell made: the bundle's chunks arrive in order and are held until taken. */
+/* A history request this shell made: bundle chunks arrive in order and are held until taken. */
 #define KQ_HIST_MAX 2u
 typedef struct {
     int           used;
@@ -838,8 +819,7 @@ static int hist_admit_chunk(kq_hist_slot_t *slot, uint32_t off, uint32_t total) 
     return 1;
 }
 
-/* DATA: only for a request this shell made; the declared total is bounded before anything is
- * allocated; the finished bundle must unpack, else it is dropped. */
+/* DATA: only for a request this shell made; the declared total is bounded before allocation. */
 static void client_history(fl_bytes_reader_t *r) {
     uint8_t id[16];
     uint32_t off, total;
@@ -870,7 +850,7 @@ static void client_history(fl_bytes_reader_t *r) {
     slot->ready = 1;
 }
 
-/* A forwarded refusal report: held for the shell to apply. Frames that do not parse are dropped. */
+/* A forwarded refusal report, held for the shell to apply. */
 #define KQ_REPORT_INBOX 4u
 typedef struct {
     int used;
@@ -1381,8 +1361,7 @@ fl_result_t fl_net_kq_history_open(const uint8_t request_id[16], unsigned wait_m
         rc = FL_RESULT_ACCES;
         goto done;
     }
-    /* The file id is stable across revisions and is the one the caller recorded when it decoded the
-     * delivery. Public data: a plain compare. */
+    /* The file id is public data and stable across revisions: a plain compare. */
     if (expected_file_id) {
         memset(&offer, 0, sizeof offer);
         if (drv->offer(&c, rev, &offer) != KQ_FILE_OK) {
@@ -1394,7 +1373,7 @@ fl_result_t fl_net_kq_history_open(const uint8_t request_id[16], unsigned wait_m
             goto done;
         }
     }
-    /* The delivered file's history must be a prefix of the snapshot: the snapshot is the whole history. */
+    /* The delivered history must be a prefix of the snapshot, which is the whole history. */
     if (count == 0 || drv->snapshot_covers(&c, &snap) != KQ_FILE_OK) {
         rc = FL_RESULT_ERR;
         goto done;

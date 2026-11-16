@@ -19,7 +19,7 @@ static int ensure_privilege(void) {
     return 1;
 }
 
-/** Drop in-memory account mutations when persistence fails. 0 when the disk store is loaded again. */
+/** Reloads the disk store after a failed save, dropping in-memory mutations. 0 when reloaded. */
 static int account_reload_db_from_disk(void) {
     const fl_user_db_t *db = fl_session_user_db();
     char path[256];
@@ -61,7 +61,6 @@ int cmd_useradd_run(int argc, char **argv) {
                 "useradd: password is read on the next line (not as a command argument)\n");
     }
     name = argv[1];
-    /* The new account descends from whoever is logged in (sudo does not change that). */
     strncpy(creator, fl_session_current_key_id(), sizeof(creator) - 1);
     creator[sizeof(creator) - 1] = '\0';
     if (!fl_heritage_key_valid(creator)) {
@@ -109,8 +108,7 @@ int cmd_useradd_run(int argc, char **argv) {
         fprintf(stderr, "useradd: could not save %s\n", FL_SESSION_USERS_PATH);
         return 1;
     }
-    /* The kernel gives the new account its KeyQuorum token itself, sealed under the password just
-     * set. Without one the account still signs in with its password, and its first sign-in tries again. */
+    /* The kernel gives the new account its KeyQuorum token, sealed under the new password. */
     token_rc = fl_session_make_kqst(name, pass, now, NULL);
     cmd_wipe_password(pw, sizeof(pw));
     if (fl_session_snapshot_account(name, &added) == FL_RESULT_OK)
@@ -161,7 +159,7 @@ int cmd_userdel_run(int argc, char **argv) {
     strncpy(target_key, target.key_id, sizeof(target_key) - 1);
     target_key[sizeof(target_key) - 1] = '\0';
     snprintf(db_path, sizeof db_path, "%s", fl_session_user_db()->path);
-    /* Only an ancestor removes an account: never yourself, a sibling or another branch. */
+    /* Only an ancestor removes an account. */
     if (fl_heritage_relation(actor, target_key) != FL_HERITAGE_REL_DESCENDANT) {
         fprintf(stderr, "userdel: %s (%s) is not below %s\n", argv[1], target_key,
                 actor[0] ? actor : "this account");
@@ -176,12 +174,7 @@ int cmd_userdel_run(int argc, char **argv) {
         fprintf(stderr, "userdel: %s (%d)\n", argv[1], (int)rc);
         return 1;
     }
-    /*
-     * Bridges go before the account does. A bridge row left behind for a removed
-     * key would give the next account created under that name the old cross-branch
-     * access. If the bridges cannot be removed, the account stays; if the save then
-     * fails, the account stays too, without its bridges (fail closed).
-     */
+    /* Bridges go before the account, so no stale bridge row can grant access to a reused name. */
     if (fl_bridge_remove_for(db_path, target_key) != FL_RESULT_OK) {
         (void)account_reload_db_from_disk(); /* back to what is on disk; the change did not persist */
         fprintf(stderr, "userdel: could not remove the bridges of %s; %s is unchanged\n", target_key,
@@ -232,11 +225,7 @@ int cmd_passwd_run(int argc, char **argv) {
         fprintf(stderr, "passwd: %s (%s) is not this account or below it\n", user, target_key);
         return 1;
     }
-    /*
-     * Your own password: the current one opens your signing key, which is kept
-     * and sealed again. An ancestor resetting it cannot open that key, so the
-     * account gets a new one and its bridges must be signed again.
-     */
+    /* A reset of your own password gives a new signing key; its bridges must be signed again. */
     if (rel == FL_HERITAGE_REL_SELF &&
         cmd_read_password("Current password: ", current, sizeof(current)) != 0) {
         cmd_wipe_password(current, sizeof(current));

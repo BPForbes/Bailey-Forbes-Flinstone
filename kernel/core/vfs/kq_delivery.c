@@ -16,7 +16,7 @@
 #include <unistd.h>
 
 #define KQ_STORE_LETTERS "kq_letters"
-/* transfer_id of a delivery's catalog row: this prefix and the id in hex. */
+/* transfer_id of a delivery's catalog row: "kq-" and the id in hex. */
 #define KQ_TRANSFER_PREFIX "kq-"
 #define KQ_TRANSFER_MAX (sizeof KQ_TRANSFER_PREFIX + 2 * FL_KQ_DELIVERY_ID_LEN)
 /* Rows one leak pass ends; the rest wait for the next frame. */
@@ -40,7 +40,6 @@ void fl_kq_delivery_init(fl_kq_delivery_t *d, const uint8_t id[FL_KQ_DELIVERY_ID
     snprintf(d->file_name, sizeof d->file_name, "%s", file_name ? file_name : "");
     if (offer)
         d->offer = *offer;
-    /* The author's verified signature is the first spike. */
     d->potential = 1u;
     d->threshold = FL_KQ_HOST_THRESHOLD;
     d->offered_at = now;
@@ -79,11 +78,9 @@ int fl_kq_delivery_id_parse(const char *hex, uint8_t id[FL_KQ_DELIVERY_ID_LEN]) 
 /* ---- the store ----------------------------------------------------------- */
 
 /*
- * A delivery is one FL_CHANNEL_PAYLOAD_KQ row in the host catalog (catalog_entry, status HELD,
- * RELEASED, DELIVERED or EXPIRED) with its key ids and signed offer in catalog_kq and its history
- * in catalog_event. The share path never reads those rows. A row is never deleted: an expired or
- * delivered id stays taken, so the same offer cannot be held twice. Events name no account (the
- * actor is 0 and the detail "kq"); key ids live only in catalog_kq.
+ * A delivery is one FL_CHANNEL_PAYLOAD_KQ catalog row (status HELD, RELEASED, DELIVERED or EXPIRED).
+ * Rows are never deleted, so an expired or delivered id stays taken. Events name no account;
+ * key ids live only in catalog_kq.
  */
 
 static int letter_path(const fl_kq_store_t *s, const uint8_t id[FL_KQ_DELIVERY_ID_LEN],
@@ -115,12 +112,11 @@ static void text_col(sqlite3_stmt *st, int col, char *out, size_t cap);
 static fl_result_t set_state(fl_kq_store_t *s, const fl_kq_delivery_t *d, int from, int to,
                              int64_t released_at);
 
-/* Where builds before the catalog kept deliveries: <dir>/kq/kq_delivery.db (schema 1) and
- * <dir>/kq/kq_letters/<id>.kqpb. */
+/* Where builds before the catalog kept deliveries: <dir>/kq/kq_delivery.db and kq_letters/. */
 #define KQ_LEGACY_DIR "kq"
 #define KQ_LEGACY_DB "kq_delivery.db"
 #define KQ_LEGACY_SCHEMA 1
-/* Its spike kinds that map to catalog events (REQUEST and ANNOUNCE carried no state). */
+/* Spike kinds that map to catalog events; REQUEST and ANNOUNCE carried no state. */
 static const char *legacy_event(int kind) {
     switch (kind) {
     case FL_KQ_SPIKE_OFFER: return "offered";
@@ -135,11 +131,7 @@ static void legacy_say(const char *what) {
     fprintf(stderr, "kq_store: older deliveries not carried over: %s\n", what);
 }
 
-/* Reads one legacy letter by its plain name. Where the contained calls exist the letters
- * directory is held (letters_fd, opened without following a link) and a link at the name is
- * refused, so a link planted in the share tree cannot pull another file into a sealed letter;
- * a letters directory that could not be held reads nothing. Only where there are no *at calls
- * at all is the path used. Results follow fl_fs_read_file. */
+/* Reads one legacy letter by plain name through the held letters directory; a link at the name is refused. */
 static int legacy_read(int letters_fd, const char *legacy_letters, const char *name,
                        uint8_t **data, size_t *len) {
     char from[1200];
@@ -157,9 +149,7 @@ static int legacy_read(int letters_fd, const char *legacy_letters, const char *n
     return fl_fs_read_file(from, FL_KQ_LETTER_MAX, data, len);
 }
 
-/* One legacy row as a catalog row, its offer, its history, and (while it is live) its letter
- * copied into this store. The letter is written before the caller commits; *copied says so,
- * so a failed commit can remove it. */
+/* One legacy row as a catalog row. *copied says a letter was written before commit, so a failed commit removes it. */
 static fl_result_t import_row(fl_kq_store_t *s, sqlite3 *old, sqlite3_stmt *row,
                               int letters_fd, const char *legacy_letters, int *copied) {
     fl_kq_delivery_t d;
@@ -206,7 +196,6 @@ static fl_result_t import_row(fl_kq_store_t *s, sqlite3 *old, sqlite3_stmt *row,
     snprintf(hash, sizeof hash, "kq:%s", hex);
     snprintf(rel, sizeof rel, "%s/%s.kqpb", KQ_STORE_LETTERS, hex);
 
-    /* The release time is the logged RELEASE spike (the offer time if none was logged). */
     if (fired) {
         released_at = d.offered_at;
         if (sqlite3_prepare_v2(old, "SELECT MAX(at) FROM kq_spike WHERE delivery_id=?1 AND kind=?2;",
@@ -220,7 +209,6 @@ static fl_result_t import_row(fl_kq_store_t *s, sqlite3 *old, sqlite3_stmt *row,
         st = NULL;
     }
 
-    /* A taken id (imported before, or a new delivery) is left as it is. */
     if (sqlite3_prepare_v2(s->db,
                            "INSERT OR IGNORE INTO catalog_entry(transfer_id,content_hash,payload_kind,"
                            "sender_member_id,receiver_member_id,file_perms,is_public,created_at,"
@@ -263,7 +251,6 @@ static fl_result_t import_row(fl_kq_store_t *s, sqlite3 *old, sqlite3_stmt *row,
     if (step != SQLITE_DONE)
         return FL_RESULT_ERR;
 
-    /* Its history, in the order it was logged. */
     if (sqlite3_prepare_v2(old, "SELECT kind,at FROM kq_spike WHERE delivery_id=?1 ORDER BY seq;", -1,
                            &st, NULL) != SQLITE_OK)
         return FL_RESULT_ERR;
@@ -278,8 +265,7 @@ static fl_result_t import_row(fl_kq_store_t *s, sqlite3 *old, sqlite3_stmt *row,
     if (rc != FL_RESULT_OK || step != SQLITE_DONE)
         return FL_RESULT_ERR;
 
-    /* A delivered letter is gone already; a live one comes along (an unreadable one cannot be
-     * released, so its row is ended now rather than left waiting). */
+    /* A delivered letter is gone already; an unreadable live one is ended now, not left waiting. */
     if (status == FL_SERVER_CATALOG_KQ_DELIVERED)
         return FL_RESULT_OK;
     if (snprintf(from, sizeof from, "%s.kqpb", hex) >= (int)sizeof from ||
@@ -298,7 +284,6 @@ static fl_result_t import_row(fl_kq_store_t *s, sqlite3 *old, sqlite3_stmt *row,
     if (rc != FL_RESULT_OK)
         return FL_RESULT_ERR;
     *copied = 1;
-    /* total_bytes is the letter's length, as fl_kq_store_put records it. */
     if (sqlite3_prepare_v2(s->db, "UPDATE catalog_entry SET total_bytes=?1 WHERE transfer_id=?2;", -1,
                            &st, NULL) != SQLITE_OK)
         return FL_RESULT_ERR;
@@ -310,11 +295,8 @@ static fl_result_t import_row(fl_kq_store_t *s, sqlite3 *old, sqlite3_stmt *row,
 }
 
 /*
- * Carries deliveries an older build held in <dir>/kq/kq_delivery.db into this store, once:
- * every row and its history in one transaction, live letters copied first and removed again if
- * that transaction does not commit. On success the old file is renamed kq_delivery.db.migrated,
- * so it is never read twice; on any failure it is left as it was and named on stderr. Ids this
- * store already holds are skipped. The old letters are left where they were.
+ * Carries an older build's deliveries into this store once, in one transaction. Live letters are copied
+ * first and removed if the commit fails. On success the old file is renamed .migrated; on failure it stays.
  */
 static void import_legacy(fl_kq_store_t *s) {
     char db[1200], letters[1200], done[1300], kq_dir[1200];
@@ -356,10 +338,7 @@ static void import_legacy(fl_kq_store_t *s) {
         legacy_say("kq/kq_delivery.db has an unknown schema version");
         return;
     }
-    /* Both directories are held without following a link, once, and every later name is used
-     * inside them: the letters are read and the old file is renamed through these handles, so
-     * a link swapped in after the check above is not followed. (A directory that cannot be held
-     * reads no letters; the row is then ended, as for any unreadable letter.) */
+    /* Both directories are held without following a link; later names are used inside them. */
     kq_fd = fl_fs_dir_open_nofollow(kq_dir);
     letters_fd = fl_fs_dir_open_nofollow(letters);
     pthread_mutex_lock(&s->lock);
@@ -424,8 +403,7 @@ fl_result_t fl_kq_store_open(const char *dir, fl_kq_store_t **out) {
     if (!s)
         return FL_RESULT_NOMEM;
     snprintf(s->dir, sizeof s->dir, "%s", dir);
-    /* The store may be the first thing under the share root: create it, then trust it only as
-     * the user's own directory (not a link in its place) before anything is made inside it. */
+    /* Trust the store directory only as the user's own, never a link in its place. */
     if (fl_fs_mkdir_p(dir, 0700) != 0) {
         mem_domain_free(MEM_DOMAIN_FS, s);
         return FL_RESULT_ERR;
@@ -494,7 +472,6 @@ static void row_to_delivery(sqlite3_stmt *st, fl_kq_delivery_t *d) {
     d->offered_at = sqlite3_column_int64(st, 6);
     d->expires_at = sqlite3_column_int64(st, 7);
     status = sqlite3_column_int(st, 8);
-    /* The potential is the signatures held (the author's and a co-signature), never stored. */
     d->potential = 1u + (uint32_t)d->has_cosig;
     d->threshold = FL_KQ_HOST_THRESHOLD;
     d->fired = sqlite3_column_int64(st, 9) != 0;
@@ -525,8 +502,7 @@ fl_result_t fl_kq_store_put(fl_kq_store_t *s, const fl_kq_delivery_t *d, const u
     if (letter_path(s, d->id, path, sizeof path) != 0)
         return FL_RESULT_INVAL;
     transfer_of(d->id, transfer);
-    /* content_hash is NOT NULL; a sealed letter is not content the host can hash meaningfully,
-     * so the row names its delivery instead, which no SHA-256 hex can equal. */
+    /* content_hash is NOT NULL; the row names its delivery, which no SHA-256 hex can equal. */
     snprintf(hash, sizeof hash, "kq:%s", transfer + strlen(KQ_TRANSFER_PREFIX));
     snprintf(rel, sizeof rel, "%s/%s.kqpb", KQ_STORE_LETTERS, transfer + strlen(KQ_TRANSFER_PREFIX));
     pthread_mutex_lock(&s->lock);
@@ -602,8 +578,7 @@ fl_result_t fl_kq_store_get(fl_kq_store_t *s, const uint8_t id[FL_KQ_DELIVERY_ID
     return rc;
 }
 
-/* Sets a live row's status (and, on release, the co-signature and release time) only when it is
- * still in `from`; 0 rows changed means it moved on (another frame, or the leak). */
+/* Sets a live row's status only while it is still `from`; 0 rows changed means it moved on. */
 static fl_result_t set_state(fl_kq_store_t *s, const fl_kq_delivery_t *d, int from, int to,
                              int64_t released_at) {
     char transfer[KQ_TRANSFER_MAX];
@@ -658,13 +633,11 @@ fl_result_t fl_kq_store_update(fl_kq_store_t *s, const fl_kq_delivery_t *d, fl_k
         if (rc == FL_RESULT_OK)
             rc = log_event(s, d->id, "acknowledged", now);
     } else if (spike == FL_KQ_SPIKE_REFUSE) {
-        /* A refusal ends the delivery without counting as one: its own status and event. */
         rc = set_state(s, d, FL_SERVER_CATALOG_KQ_RELEASED, FL_SERVER_CATALOG_KQ_REFUSED, 0);
         if (rc == FL_RESULT_OK)
             rc = log_event(s, d->id, "refused", now);
     } else {
-        /* A co-signature that fires is one unit of work: the signature, the release and both
-         * events commit together or not at all. */
+        /* A fired co-signature is one unit of work: signature, release and both events commit together. */
         rc = set_state(s, d, FL_SERVER_CATALOG_KQ_HELD,
                        d->fired ? FL_SERVER_CATALOG_KQ_RELEASED : FL_SERVER_CATALOG_KQ_HELD,
                        d->fired ? now : 0);
@@ -714,7 +687,7 @@ fl_result_t fl_kq_store_forget_letter(fl_kq_store_t *s, const uint8_t id[FL_KQ_D
     return (unlink(path) == 0 || errno == ENOENT) ? FL_RESULT_OK : FL_RESULT_ERR;
 }
 
-/* Live: held before its expiry, or released and not yet past the time it waits for a receipt. */
+/* Live: held before expiry, or released and not yet past its receipt wait. */
 #define KQ_LIVE_SQL(cmp)                                                                       \
     "((e.status=4 AND e.expires_at" cmp "?2) OR (e.status=5 AND k.released_at+" KQ_REL_TTL     \
     cmp "?2))"
@@ -800,9 +773,7 @@ size_t fl_kq_store_leak(fl_kq_store_t *s, int64_t now) {
     sqlite3_finalize(st);
     if (n == 0)
         goto out;
-    /* The rows and their "expired" events first, in one transaction; the letters only once that
-     * has committed, so a failure leaves every delivery as it was. The rows stay: an expired id
-     * is never held again. */
+    /* Rows and their "expired" events commit first; letters only after, so a failure changes nothing. */
     if (store_exec(s, "BEGIN IMMEDIATE;") != FL_RESULT_OK) {
         n = 0;
         goto out;

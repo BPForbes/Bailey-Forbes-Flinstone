@@ -29,15 +29,14 @@ static const char *const k_user_db_schema =
     "  box_sealed TEXT NOT NULL DEFAULT '',"
     "  auth_mode INTEGER NOT NULL DEFAULT 0"
     ");"
-    /* Key metadata, written when a key is minted, paired with its KQST. The one home of the KQST path. */
+    /* Key metadata, paired with its KQST. The one home of the KQST path. */
     "CREATE TABLE IF NOT EXISTS account_keys ("
     "  label TEXT PRIMARY KEY NOT NULL, purpose TEXT NOT NULL, holds_share INTEGER NOT NULL,"
     "  minted_by TEXT NOT NULL, minted_at INTEGER NOT NULL, generation INTEGER NOT NULL,"
     "  kqst_path TEXT, device_id BLOB NOT NULL, signing_public BLOB NOT NULL,"
     "  encryption_public BLOB NOT NULL, ledger_seq INTEGER NOT NULL, event_hash BLOB NOT NULL"
     ");"
-    /* Live private bridges, mirroring KeyQuorum's (not the account-to-account `bridges` table of
-     * bridge.c). A sealed bridge key is kept only for members whose account exists on this machine. */
+    /* Live private bridges; a sealed key is kept only for members whose account exists here. */
     "CREATE TABLE IF NOT EXISTS account_bridges ("
     "  uid TEXT PRIMARY KEY NOT NULL, generation INTEGER NOT NULL, salt BLOB NOT NULL,"
     "  public_key BLOB NOT NULL, destroyed INTEGER NOT NULL DEFAULT 0"
@@ -68,7 +67,7 @@ static const fl_sqlite_column_t heritage_columns[] = {
     {"auth_mode", "INTEGER NOT NULL DEFAULT 0"}, /* an old store upgrades in place: every row reads 0 */
 };
 
-/* A member's sealed key is opened with the wrap salt stored beside it (keyquorum_bridge.h). */
+/* A member's sealed key is opened with the wrap salt stored beside it. */
 static const fl_sqlite_column_t bridge_member_columns[] = {
     {"wrap_salt", "BLOB"},
 };
@@ -126,7 +125,6 @@ static fl_result_t hash_password_fields(const char *password, char *hash_hex, si
     return FL_RESULT_OK;
 }
 
-/* A new box key for u (what file letters are sealed to), sealed under password. */
 static fl_result_t provision_box(fl_user_record_t *u, const char *password) {
     unsigned char secret[FL_USER_SIGNING_SECRET_LEN];
     unsigned char sealed[FL_USER_SIGNING_SEALED_LEN];
@@ -151,7 +149,6 @@ static fl_result_t provision_box(fl_user_record_t *u, const char *password) {
     return rc;
 }
 
-/* A new signing key and box key for u, both sealed under password. */
 static fl_result_t provision_key(fl_user_record_t *u, const char *password) {
     unsigned char secret[FL_USER_SIGNING_SECRET_LEN];
     unsigned char sealed[FL_USER_SIGNING_SEALED_LEN];
@@ -224,7 +221,7 @@ static fl_result_t db_upsert_user(sqlite3 *sql, const fl_user_record_t *u) {
     return FL_RESULT_OK;
 }
 
-/* Any value but the two integer modes is FL_RESULT_ERR. The type is read before the value is converted. */
+/* Any value but the two integer modes is FL_RESULT_ERR. */
 static fl_result_t auth_mode_from_column(sqlite3_stmt *st, int col, int *out) {
     sqlite3_int64 v;
 
@@ -287,7 +284,6 @@ static fl_result_t db_load_users(sqlite3 *sql, fl_user_db_t *db) {
                     strncpy(u->created_by, by, sizeof(u->created_by) - 1);
             }
             u->created_at = (int64_t)sqlite3_column_int64(st, 7);
-            /* A key counts only when both halves are well formed; anything else is no key. */
             u->has_key = fl_hex_decode((const char *)sqlite3_column_text(st, 8), u->signing_public,
                                   sizeof u->signing_public) == 0 &&
                          fl_hex_decode((const char *)sqlite3_column_text(st, 9), u->signing_sealed,
@@ -331,9 +327,7 @@ static int user_db_lab_defaults_enabled(void) {
 #define FL_USER_DB_LAB_DEFAULT_USER "Flinstone"
 
 /*
- * Lab accounts: Root (the master, key Root), Flinstone (Root.Flinstone) and
- * Alternative (Root.Alternative). Passwords are the published lab values, so
- * they are only ever written when FL_USERS_LAB_DEFAULTS is set.
+ * Lab accounts. Passwords are the published lab values, written only when FL_USERS_LAB_DEFAULTS is set.
  */
 static fl_result_t seed_lab_accounts(fl_user_db_t *db) {
     fl_result_t rc;
@@ -386,12 +380,7 @@ void fl_user_db_seed_defaults(fl_user_db_t *db) {
     db->loaded = 1;
 }
 
-/*
- * Two stored names that differ only by case (the old lookup and primary key were
- * case-sensitive, so root and Root could both exist) would both become Root.
- * The rewrite would then overwrite one record with the other, so the store is
- * refused instead, and left unchanged.
- */
+/* Case-only name collisions (root and Root) would overwrite one record with the other: refused, unchanged. */
 static int find_case_collision(const fl_user_db_t *db, size_t *first, size_t *second) {
     size_t i;
     size_t j;
@@ -408,13 +397,7 @@ static int find_case_collision(const fl_user_db_t *db, size_t *first, size_t *se
     return 0;
 }
 
-/*
- * Accounts stored before heritage key ids have none. root becomes the master
- * Root, flinstone becomes Flinstone (Root.Flinstone), and every other account
- * is placed directly under Root: who created it was never recorded, and a
- * child of Root reaches no other account's home without a bridge.
- * Returns 1 when anything changed.
- */
+/* Pre-heritage accounts: root becomes Root, flinstone becomes Root.Flinstone, others go under Root. Returns 1 if changed. */
 static int migrate_heritage(fl_user_db_t *db) {
     size_t i;
     int changed = 0;
@@ -433,8 +416,7 @@ static int migrate_heritage(fl_user_db_t *db) {
                 strncpy(u->name, "Flinstone", sizeof(u->name) - 1);
             if (fl_heritage_child(FL_HERITAGE_ROOT_KEY, u->name, u->key_id, sizeof(u->key_id))
                 != FL_RESULT_OK) {
-                /* A legacy name that is not a valid segment keeps no key id: it can log in
-                 * but holds no authority over, and no bridge to, any other account. */
+                /* A legacy name that is not a valid segment has no key id and no bridge. */
                 fprintf(stderr, "user_db: account '%s' has no heritage key id (name not [A-Za-z0-9_-])\n",
                         u->name);
                 continue;
@@ -489,8 +471,7 @@ fl_result_t fl_user_db_load(fl_user_db_t *db, const char *path) {
 
     if (!db || !path)
         return FL_RESULT_INVAL;
-    /* Copy before clear: account_reload_db_from_disk passes db->path. A path that does not
-     * fit, including the terminating NUL, would open a different file, so it is refused. */
+    /* Copy before clear: a path that does not fit (with its NUL) would open a different file. */
     path_len = strlen(path);
     if (path[0] == '\0' || path_len >= sizeof path_copy)
         return FL_RESULT_INVAL;
@@ -499,7 +480,6 @@ fl_result_t fl_user_db_load(fl_user_db_t *db, const char *path) {
     memcpy(db->path, path_copy, path_len + 1);
 
     if (sqlite3_open(path_copy, &sql) != SQLITE_OK) {
-        /* sqlite3_open allocates a handle even when it fails; fail closes it. */
         rc = FL_RESULT_NOENT;
         goto fail;
     }
@@ -565,7 +545,7 @@ fl_result_t fl_user_db_load(fl_user_db_t *db, const char *path) {
     return FL_RESULT_OK;
 
 fail:
-    /* A failed load publishes nothing: no partial rows, and the caller's path stays usable. */
+    /* A failed load publishes nothing; the caller's path stays usable. */
     sqlite3_close(sql);
     fl_user_db_clear(db);
     memcpy(db->path, path_copy, path_len + 1);
@@ -778,7 +758,6 @@ fl_result_t fl_user_db_set_password(fl_user_db_t *db, const char *name, const ch
     u = find_mut(db, name);
     if (!u)
         return FL_RESULT_NOENT;
-    /* The old key is sealed under a password the caller does not have: it is replaced. */
     updated = *u;
     if (hash_password_fields(password, updated.password_hash, sizeof(updated.password_hash),
                              updated.salt_hex, sizeof(updated.salt_hex)) != FL_RESULT_OK ||
@@ -821,11 +800,9 @@ fl_result_t fl_user_db_change_password(fl_user_db_t *db, const char *name,
              sealed_len != sizeof updated.signing_sealed)
         rc = FL_RESULT_ERR;
     mem_domain_secure_zero(secret, sizeof secret);
-    /* The box key moves to the new password the same way, or is created now. */
     if (rc == FL_RESULT_OK && u->has_key && !u->has_box)
         rc = provision_box(&updated, password);
-    /* Only a box key carried forward is resealed: without a signing key, provision_key above
-     * already made a new box pair, which must not be overwritten with the old secret. */
+    /* Only a carried-forward box key is resealed; a new pair made above must not be overwritten. */
     else if (rc == FL_RESULT_OK && u->has_key && u->has_box &&
              (!kq ||
               kq->account_open(current, u->box_sealed, sizeof u->box_sealed, secret) !=
@@ -856,7 +833,6 @@ fl_result_t fl_user_db_ensure_key(fl_user_db_t *db, const char *name, const char
         return FL_RESULT_OK;
     if (!fl_password_verify(password, u->salt_hex, u->password_hash))
         return FL_RESULT_ACCES;
-    /* Accounts from before box keys keep their signing key and gain a box key. */
     if (u->has_key) {
         if (provision_box(u, password) != FL_RESULT_OK)
             return FL_RESULT_ERR;
@@ -901,9 +877,7 @@ void fl_user_db_forget_key(fl_user_db_t *db, const char *name) {
     mem_domain_zero(u->box_sealed, sizeof u->box_sealed);
 }
 
-/* 1 when secret derives exactly the public key u stores for kind. The one derive-and-
- * compare behind fl_user_db_secret_matches, open_key and open_box: constant time in the
- * secret (asm_mem_ct_equal), and the derived public bytes are wiped on every exit. */
+/* 1 when secret derives the public key u stores for kind. Constant time in the secret; derived bytes wiped. */
 static int record_secret_matches(const fl_user_record_t *u, fl_user_secret_kind_t kind,
                                  const unsigned char *secret) {
     unsigned char derived[FL_USER_SIGNING_PUBLIC_LEN] = {0};
@@ -940,8 +914,7 @@ int fl_user_db_secret_matches(const fl_user_db_t *db, const char *key_id,
     return record_secret_matches(fl_user_db_find_by_key(db, key_id), kind, secret);
 }
 
-/* Opens the sealed secret of kind for the account name. Once the driver's account_open has been
- * called, every return other than OK leaves secret securely zeroed. */
+/* Opens the sealed secret of kind; once the driver's account_open ran, any failure leaves secret zeroed. */
 static fl_result_t open_sealed_record(const fl_user_record_t *u, const char *password,
                                       fl_user_secret_kind_t kind, unsigned char *secret) {
     const unsigned char *sealed;
@@ -968,7 +941,6 @@ static fl_result_t open_sealed_record(const fl_user_record_t *u, const char *pas
         mem_domain_secure_zero(secret, FL_USER_SIGNING_SECRET_LEN);
         return rc == FL_KQ_ACCOUNT_WRONG_PASSWORD ? FL_RESULT_ACCES : FL_RESULT_ERR;
     }
-    /* The sealed secret must be the one the stored public key names. */
     if (!record_secret_matches(u, kind, secret)) {
         mem_domain_secure_zero(secret, FL_USER_SIGNING_SECRET_LEN);
         return FL_RESULT_ERR;
@@ -1323,7 +1295,6 @@ static fl_result_t bridge_db_open(const fl_user_db_t *db, int writable, sqlite3 
         *out = NULL;
         return FL_RESULT_ERR;
     }
-    /* A writer brings an older store's tables up to date first (the wrap_salt column). */
     if (writable && db_init_schema(*out) != FL_RESULT_OK) {
         sqlite3_close(*out);
         *out = NULL;
@@ -1337,7 +1308,7 @@ static int blob_is(sqlite3_stmt *st, int col, size_t len) {
            sqlite3_column_blob(st, col) != NULL;
 }
 
-/* Member label's sealed key and wrap salt; NOENT unless both are present and the right sizes. */
+/* Member label's sealed key and wrap salt; NOENT unless both are present and sized right. */
 static fl_result_t bridge_sealed_select(sqlite3 *sql, const char *uid, const char *label,
                                         unsigned char *sealed, size_t cap, size_t *len,
                                         unsigned char wrap_salt[FL_USER_BRIDGE_SALT_LEN]) {
@@ -1371,7 +1342,7 @@ static fl_result_t bridge_sealed_select(sqlite3 *sql, const char *uid, const cha
     return rc;
 }
 
-/* Reads uid's row and members (NOENT: none or malformed). A sealed-key miss leaves the facts filled. */
+/* Reads uid's row and members (NOENT: none or malformed). */
 static fl_result_t bridge_read(sqlite3 *sql, const char *uid, fl_user_bridge_t *out,
                                const char *seal_label, unsigned char *sealed, size_t seal_cap,
                                size_t *seal_len, unsigned char wrap_salt[FL_USER_BRIDGE_SALT_LEN]) {
@@ -1473,15 +1444,14 @@ fl_result_t fl_user_db_bridge_get(const fl_user_db_t *db, const char *uid, fl_us
     return rc;
 }
 
-/* The live list on an already-open connection: no open, close, or BEGIN of its own. */
+/* The live list on an open connection: no open, close, or BEGIN of its own. */
 static fl_result_t bridges_live_on(sqlite3 *sql, fl_user_bridge_t *out, size_t cap, size_t *count) {
     sqlite3_stmt *st = NULL;
     fl_result_t rc = FL_RESULT_OK;
     int step;
 
     *count = 0;
-    /* A store written before the bridge tables has none: no live bridge. Only a table the schema
-     * definitely lacks counts as that; a probe that fails is an error like any other read. */
+    /* A store with no bridge tables has no live bridge; any other probe failure is an error. */
     if (sqlite3_prepare_v2(sql, "SELECT 1 FROM main.sqlite_master WHERE type='table' AND name='account_bridges';",
                            -1, &st, NULL) != SQLITE_OK)
         return FL_RESULT_ERR;
@@ -1490,7 +1460,7 @@ static fl_result_t bridges_live_on(sqlite3 *sql, fl_user_bridge_t *out, size_t c
     st = NULL;
     if (step != SQLITE_ROW)
         return step == SQLITE_DONE ? FL_RESULT_OK : FL_RESULT_ERR;
-    /* Every live row must read whole: a live bridge left out would lower the factor a switch demands. */
+    /* Every live row must read whole: a bridge left out would lower the factor a switch demands. */
     if (sqlite3_prepare_v2(sql, "SELECT uid FROM account_bridges WHERE destroyed = 0 ORDER BY uid;", -1,
                            &st, NULL) != SQLITE_OK)
         return FL_RESULT_ERR;
@@ -1531,7 +1501,7 @@ fl_result_t fl_user_db_bridges_live(const fl_user_db_t *db, fl_user_bridge_t *ou
     return rc;
 }
 
-/* Writes one bridge's rows inside the caller's write transaction (BEGIN IMMEDIATE). */
+/* Writes one bridge's rows inside the caller's write transaction. */
 static fl_result_t bridge_put_on(sqlite3 *sql, const fl_user_bridge_t *b) {
     sqlite3_stmt *st = NULL;
     fl_result_t rc = FL_RESULT_OK;
@@ -1552,7 +1522,6 @@ static fl_result_t bridge_put_on(sqlite3 *sql, const fl_user_bridge_t *b) {
     if (sqlite3_step(st) != SQLITE_DONE)
         rc = FL_RESULT_ERR;
     sqlite3_finalize(st);
-    /* Members no longer on the roster leave, with their sealed keys. */
     if (rc == FL_RESULT_OK) {
         if (sqlite3_prepare_v2(sql, "DELETE FROM account_bridge_members WHERE uid = ?;", -1, &st, NULL) !=
             SQLITE_OK) {
@@ -1583,7 +1552,7 @@ static fl_result_t bridge_put_on(sqlite3 *sql, const fl_user_bridge_t *b) {
     return rc;
 }
 
-/* One statement, so the sealed key and its wrap salt are never stored apart. NOENT without the member row. */
+/* One statement, so the sealed key and its wrap salt are never stored apart. */
 static fl_result_t sealed_put_on(sqlite3 *sql, const char *uid, const char *label, const unsigned char *sealed,
                                  size_t len, const unsigned char wrap_salt[FL_USER_BRIDGE_SALT_LEN]) {
     sqlite3_stmt *st = NULL;
@@ -1616,7 +1585,7 @@ static fl_result_t bridge_valid(const fl_user_bridge_t *b) {
     return FL_RESULT_OK;
 }
 
-/* sealed may be NULL (roster only). Otherwise the roster and the key commit together or not at all. */
+/* sealed may be NULL (roster only); otherwise roster and key commit together or not at all. */
 static fl_result_t bridge_put_txn(const fl_user_db_t *db, const fl_user_bridge_t *b, const char *label,
                                   const unsigned char *sealed, size_t len,
                                   const unsigned char wrap_salt[FL_USER_BRIDGE_SALT_LEN]) {
@@ -1938,8 +1907,7 @@ fl_result_t fl_user_db_bridge_reserve(const fl_user_db_t *db, fl_user_bridge_hol
     hold = (fl_user_bridge_hold_t *)calloc(1, sizeof *hold);
     if (!hold)
         return FL_RESULT_ERR;
-    /* The same open as bridge_db_open(writable), with busy_timeout 0 set before any statement so a
-     * taken writer slot is BUSY instead of a closed connection the caller cannot tell apart. */
+    /* Busy timeout 0 is set before any statement, so a taken writer slot is BUSY, not a closed connection. */
     path = db->path[0] ? db->path : FL_USERS_DB_DEFAULT_PATH;
     if (sqlite3_open_v2(path, &hold->sql, SQLITE_OPEN_READWRITE | SQLITE_OPEN_CREATE, NULL) != SQLITE_OK) {
         sqlite3_close(hold->sql);

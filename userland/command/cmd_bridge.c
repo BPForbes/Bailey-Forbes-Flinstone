@@ -34,7 +34,7 @@ static void bridge_print(const fl_bridge_t *b, void *ctx) {
     bridge_list_ctx_t *list = ctx;
     const char *state = "pending";
 
-    /* An active row whose signatures do not verify opens nothing: say so. */
+        /* An active row whose signatures do not verify opens nothing: say so. */
     if (b->state == FL_BRIDGE_STATE_ACTIVE)
         state = fl_bridge_verified(list->db, b) ? "active" : "unsigned";
     printf("#%lld  %-8s  %s <-> %s", (long long)b->id, state, b->a_key, b->b_key);
@@ -44,7 +44,7 @@ static void bridge_print(const fl_bridge_t *b, void *ctx) {
     list->shown++;
 }
 
-/* Opens the logged-in account's signing key (cmd_open_account_keys) with bridge's messages. */
+/* Opens the logged-in account's signing key with which bridge messages are signed. */
 static int bridge_open_actor_key(unsigned char *secret) {
     fl_result_t rc = cmd_open_account_keys("signs the bridge", secret, NULL);
 
@@ -73,7 +73,7 @@ static int bridge_parse_id(const char *s, int64_t *out) {
     return 0;
 }
 
-/* bridge assembly <parent>: stores KeyQuorum's opaque record; the split, threshold and seals are its own. */
+/* bridge assembly <parent>: stores KeyQuorum's opaque record; the split and seals are its own. */
 static int bridge_assembly(fl_user_db_t *db, const char *actor, const char *parent_name, int reissue) {
     const fl_kq_driver_t *drv = fl_kq_driver_get_or_register();
     const fl_user_record_t *parent = fl_user_db_find(db, parent_name);
@@ -103,8 +103,7 @@ static int bridge_assembly(fl_user_db_t *db, const char *actor, const char *pare
         return 1;
     }
     if (reissue) {
-        /* A reissue must rotate the parent's signing key first: re-dealing the old seed would leave a
-         * removed child's share valid. The store's only rotation also replaces the password, so this stops. */
+        /* A reissue must rotate the parent's signing key first, or a removed child's share stays valid. */
         fprintf(stderr, "bridge: assembly --reissue is not available: there is no signing-key rotation that keeps the "
                         "password (see docs/IDENTITY_HERITAGE.md)\n");
         return 1;
@@ -290,8 +289,7 @@ int cmd_bridge_run(int argc, char **argv) {
         return 0;
     }
 
-    /* Copies a KeyQuorum private bridge into the account store. It changes who may cross a bridge at su,
-     * so it needs an elevated session; nothing here validates a package. */
+    /* Copies a KeyQuorum private bridge into the account store; this changes who may cross at su. */
     if (!strcmp(argv[1], "kq-import") && (argc == 4 || (argc == 5 && !strcmp(argv[4], "--roster-only")))) {
         int roster_only = argc == 5;
 
@@ -328,8 +326,7 @@ int cmd_bridge_batch_tokens_count(int argc, char **argv, int i) {
     if (!strcmp(argv[i + 1], "list"))
         return 2;
     if (!strcmp(argv[i + 1], "kq-import")) {
-        /* bridge kq-import <keyquorum-store> <uid> [--roster-only]: never past a token that starts the
-         * next shell command. */
+        /* bridge kq-import <keyquorum-store> <uid> [--roster-only]: never past a token that starts the next command. */
         int n = 2;
 
         if (i + 2 < argc && argv[i + 2] && !cmd_batch_token_is_shell_command(argv[i + 2]))
@@ -341,7 +338,6 @@ int cmd_bridge_batch_tokens_count(int argc, char **argv, int i) {
         return n;
     }
     if (!strcmp(argv[i + 1], "assembly")) {
-        /* bridge assembly <parent> [--reissue]: the verb, the account, and the flag when it follows. */
         int n = 2;
 
         if (i + 2 < argc && argv[i + 2] && !cmd_batch_token_is_shell_command(argv[i + 2]))

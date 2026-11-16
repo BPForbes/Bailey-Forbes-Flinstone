@@ -50,7 +50,6 @@ static int password_ok(const struct user *u, const char *password)
     return str_eq(u->secret, password);
 }
 
-/* Account names match regardless of case ("root" finds Root), as on the hosted shell. */
 static int str_eq_ci(const char *a, const char *b)
 {
     while (*a && *b) {
@@ -96,8 +95,7 @@ static int add_user(const char *creator, const char *name, const char *password,
         str_copy(s_users[i].name, name, sizeof(s_users[i].name));
         secret_clear(s_users[i].secret);
         if (s_kq && s_kq->enroll) {
-            /* creator is a name the ops may record (NULL for Root). Flinstone's is "Root" although Root
-             * is added next, so the account indexes stay in this order. */
+            /* Creator of Flinstone is "Root", though Root is added next; index order stays. */
             if (s_kq->enroll(creator, s_users[i].name, password) != 0) {
                 s_users[i].used = 0;
                 return -1;
@@ -124,8 +122,7 @@ void fl_fs_identity_init(void)
 #define FL_SEED_DEFAULT_ACCOUNTS 1 /* the public lab keeps its demo accounts; a build that must not
                                     * carry known passwords defines this 0 */
 #endif
-    /* Canonical spellings, as on the hosted shell: Root is the master, Flinstone the default user.
-     * Order is the account index the lab perspectives use. */
+    /* Canonical spellings as on the hosted shell; the order is the lab's account index. */
 #if FL_SEED_DEFAULT_ACCOUNTS
     add_user("Root", "Flinstone", "flinstone", 0);
     add_user((const char *)0, "Root", "root", 1);
@@ -248,8 +245,7 @@ int fl_fs_identity_userdel(int session, const char *name)
     idx = find_user(name);
     if (idx < 0)
         return 0;
-    /* A sealed account is deleted only when its sealed key can be wiped too: a key left behind
-     * would keep the name and refuse a later useradd of it. */
+    /* A sealed account is deleted only if its key can be wiped too; a left-behind key blocks useradd. */
     if (s_users[idx].kq && (!s_kq || !s_kq->forget))
         return 0;
     guest = find_user("Flinstone");

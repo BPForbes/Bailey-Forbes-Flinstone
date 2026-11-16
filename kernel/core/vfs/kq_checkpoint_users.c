@@ -1,8 +1,4 @@
-/*
- * The native shell's account store as a KeyQuorum key directory, and the checkpoints over
- * it. Each form here only wraps its `_with` counterpart in kq_checkpoint.c; the browser lab
- * builds kq_checkpoint.c without this file and passes its own directory.
- */
+/* The native shell's account store as a KeyQuorum key directory; the checkpoints wrap it. */
 #include "kq_checkpoint.h"
 #include "fl/hex.h"
 #include "server_shared_digest.h"
@@ -14,8 +10,7 @@ static const fl_user_db_t *db_of(const fl_kq_keydir_t *dir) {
     return ((const fl_user_db_keydir_t *)dir)->db;
 }
 
-/* A key id first, then an account name. They cannot collide: a name is one segment and
- * never "Root" (heritage::name_available), a key id is "Root" or dotted. */
+/* A key id first, then an account name; they cannot collide (a name is never "Root"). */
 static const char *resolve(const fl_kq_keydir_t *dir, const char *who) {
     const fl_user_record_t *u = fl_user_db_find_by_key(db_of(dir), who);
 

@@ -1,5 +1,4 @@
-/* In-memory fl_kq_storage_t (kq_mem_storage.h). No libc beyond strlen; copies and wipes go through the
- * ASM-backed mem_domain_* wrappers, file bytes with the secure variant. */
+/* In-memory fl_kq_storage_t; copies and wipes go through the ASM-backed mem_domain_* wrappers. */
 #include "kq_mem_storage.h"
 
 #include "mem_domain.h"
@@ -62,7 +61,6 @@ static mem_file_t *find(const char *path) {
     return NULL;
 }
 
-/* A plain name: not empty, no separator, not "." or "..". */
 static int plain(const char *name) {
     size_t n = name ? strlen(name) : 0;
 
@@ -91,7 +89,7 @@ static int join(const char *dir, const char *name, char *out) {
     return 0;
 }
 
-/* A copy of the bytes in MEM_DOMAIN_FS memory (never NULL, even for none). */
+/* A copy of the bytes in MEM_DOMAIN_FS memory; never NULL, even for none. */
 static uint8_t *copy_out(const uint8_t *data, size_t len) {
     uint8_t *p = (uint8_t *)mem_domain_alloc(MEM_DOMAIN_FS, len ? len : 1);
 
@@ -122,7 +120,7 @@ static int m_read_file(void *ctx, const char *path, size_t max, uint8_t **data, 
     return 0;
 }
 
-/* Replaces or creates the files in one step: every new buffer is made first, so a failure changes nothing. */
+/* Replaces or creates the files in one step: every buffer is made first, so a failure changes nothing. */
 static int put_all(const char *const *paths, const uint8_t *const *datas, const size_t *lens, size_t n) {
     uint8_t *fresh[4] = {0};
     mem_file_t *slot[4] = {0};
@@ -199,7 +197,7 @@ static int m_exists(void *ctx, const char *path) {
     return path && find(path) ? 1 : 0;
 }
 
-/* A directory is held by interning its name; the pointer stays valid until reset. fd is -1: no *at calls. */
+/* Interns the name; the pointer stays valid until reset. fd -1 means no *at calls. */
 static int m_dir_open(void *ctx, const char *dir, fl_kq_dir_t *out) {
     size_t n = dir ? strlen(dir) : 0;
 
@@ -247,7 +245,7 @@ static int m_dir_exists(void *ctx, const fl_kq_dir_t *d, const char *name) {
     return m_exists(ctx, path);
 }
 
-/* The newest keep records of unit bytes. An absent file is empty; a size not a multiple of unit is an error. */
+/* Newest keep records of unit bytes; an absent file is empty. */
 static int m_dir_read_tail(void *ctx, const fl_kq_dir_t *d, const char *name, size_t unit, size_t keep,
                            uint8_t **data, size_t *len) {
     char path[FL_KQ_MEM_PATH_MAX];

@@ -25,7 +25,6 @@ static int sudo_grant_token(const char *reason) {
     if (cmd_sudo_require_auth_reason(reason) != 0)
         return 1;
     if (had_elev) {
-        /* A sudo inside the window starts its clock again. */
         if (cmd_sudo_sign_action(reason) != 0)
             return 1;
         printf("sudo: elevation renewed (ttl<=%us)\n", (unsigned)FL_ELEVATION_LAB_TTL_SOFT_MAX_SECONDS);
@@ -37,7 +36,7 @@ static int sudo_grant_token(const char *reason) {
     return 0;
 }
 
-/* A password-only Root has no token, so sudo -i is refused for every account (the session audits it). */
+/* A password-only Root has no token, so sudo -i is refused for every account. */
 int cmd_sudo_interactive_login(void) {
     const fl_user_db_t *db;
     const fl_user_record_t *root;

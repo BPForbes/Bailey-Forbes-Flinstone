@@ -1,6 +1,5 @@
-/* Freestanding embedder for KeyQuorum: the four hooks of keyquorum_identity.h, the mem_domain_* allocators,
- * a UTC clock and the libc symbols -nostdlib leaves out. Entropy is RDRAND, else the launcher's fw_cfg file;
- * with neither, kq_platform_random fails closed. */
+/* Freestanding KeyQuorum embedder: the four identity hooks, mem_domain_* allocators and libc symbols. */
+/* Entropy is RDRAND, else fw_cfg; with neither, kq_platform_random fails closed. */
 #include "contract_result.h"
 #include "fl/mem_asm.h"
 #include "ioport.h"
@@ -25,7 +24,6 @@ void kq_platform_free(uint8_t *ptr, size_t len, size_t align)
 
 __attribute__((noreturn)) void kq_platform_panic(void)
 {
-    /* Fail closed: the image has one address space and no process to end, so it stops. */
     fl_fs_serial_puts("FLINTSTONE_KQ_PANIC\r\n");
     for (;;)
         __asm__ volatile("cli; hlt");
@@ -40,9 +38,7 @@ static int have_rdrand(void)
 }
 
 #ifndef FL_SECFEAT
-/* ---- fw_cfg entropy: used only when the CPU has no RDRAND ----
- * The file opt/flintstone/entropy must hold fresh bytes on every boot: a reused file would repeat keys.
- * Each byte is handed out once, and running out fails closed. */
+/* fw_cfg entropy, used only without RDRAND: each byte is handed out once; running out fails closed. */
 #include "fwcfg.h"
 
 #define FW_ENTROPY_NAME "opt/flintstone/entropy"
@@ -221,9 +217,7 @@ fl_result_t fl_time_wall_sec(int64_t *out_sec)
     return FL_RESULT_OK;
 }
 
-/* libc symbols the compiler and the Rust archive call under -nostdlib. Built with -fno-builtin
- * -fno-tree-loop-distribute-patterns so none of these turns into a call to itself. rep movsb /
- * stosb are fast enough here and need no SSE. */
+/* libc symbols the compiler and Rust archive call under -nostdlib; built so none calls itself. */
 
 void *memcpy(void *dst, const void *src, size_t n)
 {

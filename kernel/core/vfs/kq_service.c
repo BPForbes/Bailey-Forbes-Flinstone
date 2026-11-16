@@ -39,7 +39,7 @@ typedef struct {
     char path[512];
 } kq_object_t;
 
-/* Page aligned so the key table can be locked in RAM and left out of core dumps by itself. */
+/* Page aligned so the key table can be locked in RAM by itself. */
 static kq_slot_t s_slots[FL_USER_DB_MAX_USERS] __attribute__((aligned(4096)));
 static int s_keys_locked;
 static kq_object_t s_objects[FL_KQ_AUTOSIGN_MAX];
@@ -71,8 +71,7 @@ static void slot_wipe_locked(kq_slot_t *s) {
     s->used = 0;
 }
 
-/* session non-zero: a session login's key, which ends the previous account's slot. The caller holds the
- * session lock and has checked the login generation, so a stale login cannot wipe a later login's slot. */
+/* session non-zero: a session login's key ends the previous account's slot. Caller holds the session lock. */
 static fl_result_t slot_put(const char *key_id, const uint8_t secret[FL_USER_SIGNING_SECRET_LEN], int session) {
     fl_result_t rc = FL_RESULT_NOMEM;
     int i;
@@ -105,7 +104,6 @@ typedef struct {
     int session;
 } slot_put_ctx_t;
 
-/* A publish's result as its audit event: ok_event, a login that was superseded, or a refusal. */
 static void audit_online(const char *key_id, fl_result_t rc, const char *ok_event) {
     fl_audit_identity_event(key_id,
                             rc == FL_RESULT_OK ? ok_event
@@ -127,9 +125,7 @@ fl_result_t fl_kq_service_online_for_session(const fl_user_record_t *account, co
 
     if (!account || !password)
         return FL_RESULT_INVAL;
-    /* The key derivation is slow and runs from the record copy with no lock held. open_key_record wipes
-     * secret on failure. Publishing then happens under the session lock, only if the login that this
-     * key belongs to is still the current one: a logout that overlapped the derivation wins. */
+    /* Derivation runs with no lock and wipes secret on failure; publishing then takes the session lock. */
     rc = fl_user_db_open_key_record(account, password, secret);
     if (rc == FL_RESULT_OK) {
         slot_put_ctx_t put = {account->key_id, secret, login_generation != 0};
@@ -249,7 +245,6 @@ size_t fl_kq_service_online_count(void) {
     return n;
 }
 
-/* Assembles an offline parent's key from the children online now; KeyQuorum decides the quorum. */
 #define KQ_ASSEMBLY_CHILDREN_MAX FL_USER_DB_MAX_USERS
 
 static fl_result_t assemble_author_key(const char *parent, uint8_t out[32]) {
@@ -275,7 +270,6 @@ static fl_result_t assemble_author_key(const char *parent, uint8_t out[32]) {
     if (fl_user_db_assembly_get(db, parent, record, FL_USER_ASSEMBLY_MAX, &rlen, &generation, &threshold) !=
         FL_RESULT_OK)
         goto done; /* this account was never split: nothing to wait for either */
-    /* The children online now: direct heritage children of the parent that published a box secret. */
     pthread_mutex_lock(&s_mu);
     for (size_t i = 0; i < FL_USER_DB_MAX_USERS && n < KQ_ASSEMBLY_CHILDREN_MAX; i++) {
         if (!s_slots[i].used || !s_slots[i].has_box || fl_heritage_parent(s_slots[i].key_id, up, sizeof up) != FL_RESULT_OK ||
@@ -286,7 +280,7 @@ static fl_result_t assemble_author_key(const char *parent, uint8_t out[32]) {
         n++;
     }
     pthread_mutex_unlock(&s_mu);
-    /* Device ids come from the account registry; a child with no pairing row cannot be counted. */
+    /* A child with no pairing row cannot be counted. */
     size_t k = 0;
 
     for (size_t i = 0; i < n; i++) {
@@ -368,7 +362,7 @@ static void *service_main(void *arg) {
         int64_t tick_ns = 0;
 
         stamp_heartbeat();
-        /* Root's key from a sudo is wiped when the window ends, whether or not anything runs. */
+        /* Root's sudo key is wiped when the window ends. */
         if (fl_time_monotonic_ns(&tick_ns) == FL_RESULT_OK && fl_kq_sudo_hold_expire(tick_ns))
             fl_audit_identity_event("", "sudo-window-ended", FL_HERITAGE_ROOT_KEY, NULL);
         if (ran == 8)
@@ -410,7 +404,7 @@ static void audit_control_denied(unsigned op) {
     fl_audit_identity_event(fl_session_current_key_id(), "kq-service-control-denied", "", NULL);
 }
 
-/* Best effort: mlock and MADV_DONTDUMP for the resident keys; a refused lock is audited, not fatal. */
+/* Best effort: mlock and MADV_DONTDUMP; a refused lock is audited, not fatal. */
 static void lock_key_table(void) {
     if (!s_keys_locked)
         s_keys_locked = fl_kq_lock_pages(s_slots, sizeof s_slots);
@@ -427,7 +421,6 @@ fl_result_t fl_kq_service_start(void) {
 
     if (s_started)
         return FL_RESULT_OK;
-    /* No executor is set: this queue runs no durable record until one is configured on purpose. */
     if (fl_wq_init(s_wq) != FL_RESULT_OK || pthread_condattr_init(&ca) != 0)
         return FL_RESULT_ERR;
     (void)pthread_condattr_setclock(&ca, CLOCK_MONOTONIC);
@@ -454,8 +447,7 @@ fl_result_t fl_kq_service_start(void) {
 void fl_kq_service_shutdown(void) {
     if (!s_started)
         return;
-    /* Drop the alive() check before the service thread stops: fl_bg_jobs_shutdown still drains the
-     * protected watchdog item once, and without this it would see !alive and audit a false stall. */
+    /* Drop alive() before the service thread stops, or the watchdog audits a false stall. */
     fl_bg_watchdog_clear();
     atomic_store(&s_stop, 1);
     pthread_mutex_lock(&s_wake_mu);
@@ -514,8 +506,7 @@ static void autosign_job(void *arg) {
     int64_t now = 0, due = 0;
     fl_result_t rc;
 
-    /* A removed object's periodic item cannot be cancelled (the queue has no such call): it stays queued
-     * and does nothing. The run below works on a copy, so a removal during it cannot change what it uses. */
+    /* A removed object's periodic item cannot be cancelled; it does nothing. The run works on a copy. */
     pthread_mutex_lock(&s_mu);
     if (!o->active) {
         pthread_mutex_unlock(&s_mu);
@@ -556,8 +547,7 @@ static fl_result_t autosign_register(const fl_kq_autosign_t *spec, const char *p
         spec->interval_sec <= 0 || spec->interval_sec > INT64_MAX / 1000000000ll || !s_started)
         return FL_RESULT_INVAL;
     pthread_mutex_lock(&s_mu);
-    /* A path tracked before keeps its slot and its queued item: it is only made active again. The
-     * search and the reservation share this lock, so one path never takes two slots. */
+    /* A tracked path keeps its slot; the search and reservation share this lock. */
     for (size_t i = 0; path && i < FL_KQ_AUTOSIGN_MAX; i++)
         if (s_objects[i].used && s_objects[i].path[0] && strcmp(s_objects[i].path, path) == 0) {
             s_objects[i].active = 1;
@@ -605,8 +595,7 @@ fl_result_t fl_kq_service_autosign_remove(const char *label) {
         return FL_RESULT_INVAL;
     pthread_mutex_lock(&s_mu);
     for (size_t i = 0; i < FL_KQ_AUTOSIGN_MAX; i++)
-        /* A tracked file is known by its full path (labels are cut to fit, so two long paths can
-         * share one); any other registration is known by its label. */
+        /* A tracked file is known by its full path (labels are cut to fit). */
         if (s_objects[i].used && s_objects[i].active &&
             strcmp(s_objects[i].path[0] ? s_objects[i].path : s_objects[i].label, label) == 0) {
             s_objects[i].active = 0; /* the slot stays taken: its queued item will find it inactive */
@@ -616,7 +605,7 @@ fl_result_t fl_kq_service_autosign_remove(const char *label) {
     return rc;
 }
 
-/* A checkpoint result as the sweep reads it: only "two heads" is BUSY; no other failure is OK or BUSY. */
+/* Maps a checkpoint result for the sweep: only "two heads" is BUSY. */
 static fl_result_t autosign_result(fl_kq_cp_result_t cp) {
     fl_result_t rc;
 
@@ -683,8 +672,7 @@ void fl_kq_service_utc_now(char *out, size_t cap) {
         (void)strftime(out, cap, "%Y-%m-%dT%H:%M:%S.000Z", &tm);
 }
 
-/* Refusal result to KeyQuorum's closed KQER code and class (keyquorum_error.h). Local problems (no driver,
- * I/O, a file already at the destination) have no row: they are kept to retry, not reported. */
+/* Refusal to KeyQuorum's closed KQER code and class; local problems have no row. */
 static const struct {
     fl_result_t why;
     uint16_t code;
@@ -714,7 +702,6 @@ void fl_kq_report_refusal_in(const kq_file_offer_t *o, fl_result_t why, const fl
             break;
     if (i == sizeof s_refusal_codes / sizeof s_refusal_codes[0])
         return; /* not a refusal of the letter */
-    /* No held landing directory: nothing is written, never a guessed path. */
     if (!dir) {
         fl_audit_identity_event(who, "kq-report-uncontained", "receive", NULL);
         return;

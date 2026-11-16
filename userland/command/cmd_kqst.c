@@ -1,5 +1,4 @@
-/* kqst: pair an account with its KeyQuorum slot token (KQST). No elevation is needed: the password and
- * a token that opens with it are the proof. */
+/* kqst: pair an account with its KeyQuorum slot token; the password and the opening token are the proof. */
 #include "cmd_decl.h"
 #include "cmd_authutil.h"
 #include "cmd_batch.h"
@@ -66,7 +65,6 @@ static int kqst_enroll(const char *token, const char *dev_hex, const char *sig_h
         fprintf(stderr, "kqst: each public key must be 64 hex digits\n");
         return 1;
     }
-    /* The token stays where it is (on its device); the store keeps its full path. */
     if (!realpath(token, path)) {
         fprintf(stderr, "kqst: cannot read %s\n", token);
         return 1;
@@ -95,7 +93,6 @@ static int kqst_enroll(const char *token, const char *dev_hex, const char *sig_h
         fprintf(stderr, "kqst: could not save the account store; nothing was paired\n");
         return 1;
     default:
-        /* One message for every refusal; the reason is in the audit only. */
         fprintf(stderr, "kqst: the token did not open with this account's password and those facts\n");
         return 1;
     }
@@ -128,7 +125,6 @@ static int kqst_make(void) {
         fprintf(stderr, "kqst: could not make or save the token; nothing was paired\n");
         return 1;
     default:
-        /* One message for every refusal; the reason is in the audit only. */
         fprintf(stderr, "kqst: %s already has a token, or the password is wrong\n", name);
         return 1;
     }

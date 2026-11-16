@@ -122,9 +122,7 @@ static int parse_expire_arg(const char *arg, uint64_t *expires_at_out)
     return fl_server_file_parse_expire_arg(arg, expires_at_out);
 }
 
-/* Every verb that reads a local file goes through the same jail and quarantine check as write.
- * The caller reads the resolved path this fills in, the one that was checked, not the text typed;
- * a path too long to resolve completely is refused, since the cut-off part could leave the jail. */
+/* Every verb that reads a local file uses this jail and quarantine check; the resolved path is the one checked. */
 static int local_path_blocked(const char *op, const char *path, char *rpath, size_t rcap)
 {
     if (resolve_path_checked(path, rpath, rcap) != 0) {
@@ -223,11 +221,7 @@ static int verb_file_send(const cmd_server_ctx_t *ctx, int argc, char **argv)
             fl_color_warn("file offer failed: user not found");
             return 1;
         }
-        /*
-         * Before anything leaves, the sender checks that the receiver's account
-         * is on its own line or joined to it by a signed, active bridge
-         * (share_gate.h). The server does not repeat this check.
-         */
+        /* The sender checks the receiver is on its line or joined by a signed, active bridge; the server does not repeat it. */
         {
             char receiver[FL_SERVER_PRINCIPAL_MAX];
             fl_share_gate_result_t gate;
@@ -302,8 +296,7 @@ static int verb_file_list(const cmd_server_ctx_t *ctx, const char *which)
     else
         (void)fl_server_share_sent_list(mid);
     pthread_mutex_unlock(ctx->mutex);
-    /* Co-signed deliveries are listed with the shares (outside the session lock: the request
-     * list asks the host first and takes it itself). */
+    /* Co-signed deliveries are listed outside the session lock: the request list takes the host itself. */
     if (!strcmp(which, "inbox"))
         (void)kq_print_requests(ctx, hosting);
     else if (!strcmp(which, "sent"))
@@ -323,8 +316,7 @@ static int verb_file_history(const cmd_server_ctx_t *ctx, int argc, char **argv)
 
     if (!session_active(ctx, &hosting))
         return 1;
-    /* The host keeps the authoritative share history; a joined member's catalog holds only its own
-     * rows. A member asks the host for a co-signed delivery's history instead. */
+    /* The host keeps the authoritative share history; a member asks the host for a delivery's history. */
     if (!hosting)
         return kq_history_member(ctx, argc, argv);
     if (argc < 2) {
@@ -539,7 +531,6 @@ static int verb_file_fetch(const cmd_server_ctx_t *ctx, int argc, char **argv)
 
 /* ---- KeyQuorum co-signed delivery (contracts/drivers/contract_p4_keyquorum.h) ---- */
 
-/* How long a shell waits for the host to answer a key lookup or release a letter. */
 #define KQ_WAIT_KEYS_MS 3000u
 #define KQ_WAIT_RELEASE_MS 10000u
 
@@ -548,7 +539,6 @@ static const fl_user_db_t *kq_users(void)
     return fl_session_user_db();
 }
 
-/* Opens this account's keys (cmd_open_account_keys) with server file's messages. */
 static int kq_open_keys(const char *why, unsigned char *signing, unsigned char *box)
 {
     fl_result_t rc = cmd_open_account_keys(why, signing, box);
@@ -566,8 +556,6 @@ static int kq_open_keys(const char *why, unsigned char *signing, unsigned char *
 }
 
 
-/* server file send -t <path> -user <name>: encode checkpoint, then OFFER + parts. */
-/* One history line for display (see fl_kq_cp_format_event). */
 static int print_event_line(const char *line, size_t n, void *ctx)
 {
     char text[640];
@@ -578,8 +566,7 @@ static int print_event_line(const char *line, size_t n, void *ctx)
     return 0;
 }
 
-/* Offline: the history of a tracked file, read from its container beside the file. It needs no
- * session and no host, only the file's own history. */
+/* Offline: the history of a tracked file from its own container. Needs no session and no host. */
 static int verb_file_log(int argc, char **argv)
 {
     fl_kq_buf_t lines = {0};
@@ -604,8 +591,7 @@ static int verb_file_log(int argc, char **argv)
     return 0;
 }
 
-/* The logged-in account countersigns the head revision of a file: its permit for a newer copy.
- * A recipient counts it only when the signer is the file's scope owner or an ancestor of it. */
+/* Countersigns the head revision: a recipient counts it only when the signer is the scope owner or an ancestor. */
 static int verb_file_permit(int argc, char **argv)
 {
     unsigned char signing[32];
@@ -641,7 +627,7 @@ static int verb_file_permit(int argc, char **argv)
     return 0;
 }
 
-/* Co-signed deliveries this shell sent, kept for the refusal reports: session lifetime, the newest 16. */
+/* Co-signed deliveries this shell sent, for the refusal reports: the newest 16. */
 #define KQ_SENT_MAX 16u
 typedef struct {
     int used;
@@ -652,7 +638,7 @@ typedef struct {
 } kq_sent_t;
 static kq_sent_t s_sent[KQ_SENT_MAX];
 static unsigned s_sent_next;
-/* Guards the ring: host threads read it, so readers copy a record and never keep a pointer into it. */
+/* Guards the ring: readers copy a record and never keep a pointer into it. */
 static pthread_mutex_t s_sent_mu = PTHREAD_MUTEX_INITIALIZER;
 
 static void kq_sent_remember(const uint8_t id[FL_KQ_DELIVERY_ID_LEN], const char *path, const char *recipient,
@@ -668,14 +654,13 @@ static void kq_sent_remember(const uint8_t id[FL_KQ_DELIVERY_ID_LEN], const char
     snprintf(fresh.path, sizeof fresh.path, "%s", path);
     snprintf(fresh.recipient, sizeof fresh.recipient, "%s", recipient);
     fresh.used = 1;
-    /* The record is complete before it is published; a replaced slot is overwritten in one step. */
+    /* The record is complete before it is published. */
     pthread_mutex_lock(&s_sent_mu);
     s_sent[s_sent_next] = fresh;
     s_sent_next = (s_sent_next + 1u) % KQ_SENT_MAX;
     pthread_mutex_unlock(&s_sent_mu);
 }
 
-/* A copy of record i, or 0 when the slot is empty. */
 static int kq_sent_get(unsigned i, kq_sent_t *out)
 {
     int ok;
@@ -727,7 +712,6 @@ static int verb_kq_send(const cmd_server_ctx_t *ctx, int argc, char **argv)
     }
     if (local_path_blocked("server file send", path, rpath, sizeof(rpath)))
         return 1;
-    /* The same sender-side gate as any offer: same line, or a signed bridge. */
     {
         fl_share_gate_result_t gate =
             fl_share_gate_check(fl_session_user_db(), current_principal(), target);
@@ -748,7 +732,7 @@ static int verb_kq_send(const cmd_server_ctx_t *ctx, int argc, char **argv)
         return 1;
     fl_kq_service_utc_now(created_at, sizeof created_at);
     if (permitted) {
-        /* A newer copy the supervisor has permitted: seal the head as it is, checking nothing in. */
+        /* A newer copy the supervisor permitted: seal the head as it is, checking nothing in. */
         uint8_t head[32];
 
         cp = fl_kq_cp_head(rpath, head);
@@ -792,7 +776,7 @@ static void kq_send_refusal_report(const cmd_server_ctx_t *ctx, int hosting, con
     pthread_mutex_unlock(ctx->mutex);
 }
 
-/* Decode checkpoint for a released letter, then ACK. Returns 0 when the file was written. */
+/* Decodes a released letter, then ACKs. Returns 0 when the file was written. */
 static int kq_decode_and_ack(const cmd_server_ctx_t *ctx, int hosting,
                              const fl_net_kq_inbox_t *in, const unsigned char *box)
 {
@@ -818,10 +802,7 @@ static int kq_decode_and_ack(const cmd_server_ctx_t *ctx, int hosting,
         return -1;
     }
     snprintf(dest, sizeof dest, "%s/%s", g_cwd, in->file_name);
-    /* The landing is contained like every other share landing: the resolver checks the
-     * destination (no link in the path, no quarantined directory) and hands back the held
-     * directory. The decode writes through that same handle and never opens the directory
-     * again by path, so a directory swapped after this check is not followed. */
+    /* The landing is contained: the decode writes through the held directory, never by path again. */
     {
         int check_fd = -1;
         char check_leaf[256];
@@ -838,13 +819,11 @@ static int kq_decode_and_ack(const cmd_server_ctx_t *ctx, int hosting,
         cp = fl_kq_cp_decode_in(kq_users(), in->sender, sender.signing_public,
                                 fl_session_current_key_id(), box, &letter, &in->offer, in->sig,
                                 &held, check_leaf);
-        /* A refusal's signed KQER goes into the same held directory, before it is closed. */
         if (cp != FL_KQ_CP_OK && cp != FL_KQ_CP_EXISTS && cp != FL_KQ_CP_IO) {
             uint8_t ref[32];
             const unsigned char *mine = fl_user_db_signing_public(fl_session_user_db(), fl_session_current_key_id());
 
             fl_kq_report_refusal_in(&in->offer, fl_kq_cp_to_result(cp), &held);
-            /* Read back through the held handle while it is still open. */
             if (mine && fl_kq_cp_offer_ref(&in->offer, ref) == FL_RESULT_OK)
                 (void)fl_kq_cp_report_read_in(&held, ref, mine, &report);
         }
@@ -853,7 +832,7 @@ static int kq_decode_and_ack(const cmd_server_ctx_t *ctx, int hosting,
     }
     fl_kq_buf_free(&letter);
     if (cp == FL_KQ_CP_EXISTS || cp == FL_KQ_CP_IO) {
-        /* A local problem with the destination, not with the letter: keep it to retry. */
+        /* A local problem with the destination, not the letter: kept to retry. */
         char hex[2 * FL_KQ_DELIVERY_ID_LEN + 1];
         fl_kq_delivery_id_hex(in->id, hex);
         fl_color_warn("keyquorum: %s not saved: %s; change directory and run: server file open %s",
@@ -899,8 +878,7 @@ static int kq_find_inbox(const char *hex, fl_net_kq_inbox_t *out)
     return -1;
 }
 
-/* This shell's co-signature requests, after asking the host for any it holds; returns how
- * many were printed. Shared by `server file cosign` and `server file inbox`. */
+/* Lists this shell's co-signature requests after asking the host; returns the count printed. */
 static size_t kq_print_requests(const cmd_server_ctx_t *ctx, int hosting)
 {
     fl_net_kq_inbox_t all[16];
@@ -919,7 +897,6 @@ static size_t kq_print_requests(const cmd_server_ctx_t *ctx, int hosting)
     return n;
 }
 
-/* On the host, the co-signed deliveries the signed-in account sent, from the host catalog. */
 static void kq_print_sent(int hosting)
 {
     fl_kq_delivery_t sent[16];
@@ -937,7 +914,6 @@ static void kq_print_sent(int hosting)
     }
 }
 
-/* server file cosign [<delivery>]: list requests, or co-sign one and decode its release. */
 static int verb_kq_cosign(const cmd_server_ctx_t *ctx, int argc, char **argv)
 {
     int hosting = 0;
@@ -980,7 +956,6 @@ static int verb_kq_cosign(const cmd_server_ctx_t *ctx, int argc, char **argv)
     (void)fl_net_kq_inbox_set_cosig(in.id, sig);
     memcpy(in.sig, sig, sizeof sig);
     in.cosigned = 1;
-    /* The host fires on our co-signature; decode as soon as the letter arrives. */
     if (fl_net_kq_take_letter(in.id, KQ_WAIT_RELEASE_MS, &probe) != FL_RESULT_OK) {
         char hex[2 * FL_KQ_DELIVERY_ID_LEN + 1];
         mem_domain_secure_zero(box, sizeof box);
@@ -994,7 +969,6 @@ static int verb_kq_cosign(const cmd_server_ctx_t *ctx, int argc, char **argv)
     return rc == 0 ? 0 : 1;
 }
 
-/* server file open <delivery>: decode a released letter this shell already co-signed. */
 static int verb_kq_open(const cmd_server_ctx_t *ctx, int argc, char **argv)
 {
     int hosting = 0;
@@ -1015,8 +989,7 @@ static int verb_kq_open(const cmd_server_ctx_t *ctx, int argc, char **argv)
         fl_color_error("keyquorum: co-sign it first: server file cosign %s", argv[1]);
         return 1;
     }
-    /* Send the co-signature again (the host releases a fired delivery again and never fires
-     * twice), so a co-signature lost on the way still reaches it, then pull. */
+    /* Re-sends the co-signature (the host never fires twice), so one lost on the way still arrives. */
     pthread_mutex_lock(ctx->mutex);
     (void)fl_net_kq_send_cosign(ctx->server, ctx->client, hosting, in.id,
                                 fl_session_current_key_id(), in.sig);
@@ -1034,7 +1007,6 @@ static int verb_kq_open(const cmd_server_ctx_t *ctx, int argc, char **argv)
     return rc == 0 ? 0 : 1;
 }
 
-/* server file reports: each report is verified before it is recorded as an ErrorReported event. */
 static int verb_kq_reports(const cmd_server_ctx_t *ctx)
 {
     int hosting = 0;
@@ -1060,8 +1032,7 @@ static int verb_kq_reports(const cmd_server_ctx_t *ctx)
                           e->path, e->recipient);
             continue;
         }
-        /* The path was checked when the file was sent; it is checked again here, where the history is
-         * written, and must still resolve to itself (a directory since replaced by a link does not). */
+        /* Checked again where the history is written: a directory since replaced by a link is refused. */
         if (local_path_blocked("server file reports", e->path, rpath, sizeof rpath) || strcmp(rpath, e->path) != 0) {
             fl_color_warn("keyquorum: a refusal report for %s was dropped: the file is no longer where it was sent from",
                           e->path);
@@ -1099,8 +1070,7 @@ static int kq_history_gate(const char *requester, const uint8_t id[FL_KQ_DELIVER
 {
     kq_sent_t sent;
 
-    /* The requester must be the delivery's recipient; host policy looks only at the host shell's own
-     * principal, so the party check is what binds the requester. */
+    /* The requester must be the delivery's recipient: host policy sees only the host's own principal. */
     if (!requester || !kq_sent_find(id, &sent) || strcmp(sent.recipient, requester) != 0)
         return 0;
     return fl_authz_subsystem_check((unsigned)FL_AUTHZ_OP_FILE_HISTORY_EXPORT, (void *)requester) != FL_AUTHZ_DENY;
@@ -1121,7 +1091,6 @@ static fl_result_t kq_history_source(const char *requester, const uint8_t id[FL_
 
     if (!kq_sent_find(id, &sent) || !me || !me[0] || !fl_session_user_db())
         return FL_RESULT_NOENT;
-    /* The signing key is the key service's copy for the online account: no password is asked here. */
     if (fl_kq_obtain_author_key(me, key, &mode) != FL_RESULT_OK)
         return FL_RESULT_ACCES;
     fl_user_db_keydir_init(&dir, fl_session_user_db());
@@ -1140,7 +1109,6 @@ void cmd_server_file_install_history(void)
     fl_net_kq_set_history(kq_history_gate, kq_history_source);
 }
 
-/* Parses `server file history <delivery-id> [-from <account-key>]` on a member; 0 with got filled. */
 static int kq_history_member_args(int argc, char **argv, fl_server_history_got_t *got)
 {
     const char *hex = NULL;
@@ -1150,7 +1118,6 @@ static int kq_history_member_args(int argc, char **argv, fl_server_history_got_t
     case FL_SERVER_HISTORY_ARGS_OK:
         return 0;
     case FL_SERVER_HISTORY_ARGS_NOT_DELIVERY:
-        /* Not a delivery id: a share id, whose history only the host keeps. */
         fl_color_warn("server file history: the host keeps the share history; run it on the host");
         return -1;
     case FL_SERVER_HISTORY_ARGS_FROM_MISMATCH:
@@ -1173,7 +1140,6 @@ static int kq_history_member_args(int argc, char **argv, fl_server_history_got_t
     }
 }
 
-/* Prints what fl_server_history_fetch gave: the history, or why there is none. */
 static int kq_history_member_print(fl_result_t rc, const fl_server_history_got_t *got, fl_kq_buf_t *lines,
                                    uint32_t events)
 {
@@ -1219,7 +1185,6 @@ static int kq_history_member_print(fl_result_t rc, const fl_server_history_got_t
     }
 }
 
-/* Member side: asks the host for the delivery's history and opens both letters with this account's box key. */
 static int kq_history_member(const cmd_server_ctx_t *ctx, int argc, char **argv)
 {
     const char *me = fl_session_current_key_id();
@@ -1237,7 +1202,6 @@ static int kq_history_member(const cmd_server_ctx_t *ctx, int argc, char **argv)
         fl_color_error("server file history: sign in first");
         return 1;
     }
-    /* The sender's key comes from the host registry, by its exact id. */
     rc = fl_net_kq_lookup(ctx->server, ctx->client, 0, got.sender, KQ_WAIT_KEYS_MS, &sender);
     if (rc != FL_RESULT_OK || !fl_server_history_sender_matches(&sender, got.sender)) {
         fl_color_warn("keyquorum: cannot get %s's key from the host", got.sender);
@@ -1254,9 +1218,7 @@ static int kq_history_member(const cmd_server_ctx_t *ctx, int argc, char **argv)
     return out;
 }
 
-/* Every KeyQuorum checkpoint in this file reads and writes through the shell's file manager
- * service, so its policy, events and path log see them. Without the service the checkpoints
- * use the placement layer directly. */
+/* KeyQuorum checkpoints go through the shell's file manager when present; else the placement layer. */
 static void kq_use_storage(void)
 {
     static fl_kq_storage_t table;

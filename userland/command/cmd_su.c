@@ -95,16 +95,13 @@ int cmd_su_run(int argc, char **argv) {
     if (fl_authz_identity_switch_denied("su"))
         return 1;
 
-    /* The account and its login generation are read together: the restore below happens only while
-     * this login is still the current one. */
+    /* The account and login generation are read together; the restore runs only while this login is current. */
     if (fl_session_capture_restore_point(&back) != FL_RESULT_OK)
         return 1;
     had_elevation = fl_session_has_elevation();
 
-    /* KeyQuorum's factor, collected here and checked and committed by the session. */
     if (cmd_switch_user("su", req.target, 0) != 0)
         return 1;
-    /* The switch ended the elevation (the session revokes it at commit): audited only now. */
     if (had_elevation)
         fl_audit_elevation_event(back.user, "su user switch", 0);
     fl_session_sync_services();
@@ -130,7 +127,7 @@ int cmd_su_run(int argc, char **argv) {
         had_elevation = fl_session_has_elevation();
         rc = fl_session_restore_user(back.user, back.login_generation);
         if (rc == FL_RESULT_BUSY) {
-            /* Another login took the session meanwhile: it is left as it is (audited by the session). */
+            /* Another login took the session meanwhile: left as it is, audited by the session. */
             fprintf(stderr, "su: session user not restored (a login or logout ran meanwhile)\n");
             fl_session_sync_services();
             return 1;

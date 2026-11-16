@@ -4,7 +4,7 @@
 #include <stdio.h>
 #include <string.h>
 
-/* Process lifetime, the newest FL_SERVER_HISTORY_GOT_MAX. Readers copy under the lock, never keep a pointer. */
+/* Newest FL_SERVER_HISTORY_GOT_MAX records; readers copy under the lock, never keep a pointer. */
 static fl_server_history_got_t s_got[FL_SERVER_HISTORY_GOT_MAX];
 static unsigned s_got_next;
 static pthread_mutex_t s_got_mu = PTHREAD_MUTEX_INITIALIZER;
@@ -37,7 +37,6 @@ void fl_server_history_remember(const uint8_t id[FL_KQ_DELIVERY_ID_LEN], const c
     fresh.has_file_id = 1;
     fresh.used = 1;
     pthread_mutex_lock(&s_got_mu);
-    /* A delivery decoded again replaces its own record; anything else takes the oldest slot. */
     slot = got_slot_locked(id);
     if (slot == FL_SERVER_HISTORY_GOT_MAX) {
         slot = s_got_next;

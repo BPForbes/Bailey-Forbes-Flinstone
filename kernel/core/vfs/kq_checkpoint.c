@@ -22,10 +22,8 @@
 /* Most labels a trust table holds (authors, signers, the owner). */
 #define KQ_TRUST_MAX 32u
 /* Most (revision, root) pairs remembered per file. */
-/* Accepted (revision, history root) pairs kept in <file>.kqseen: the newest ones only. Each
- * accepted root extends the one before it, so the newest root still refuses forks and stale
- * histories; a revision the previously accepted container already holds is refused
- * separately (decode), so dropping old pairs never lets an old revision back in. */
+/* Accepted (revision, history root) pairs kept in <file>.kqseen (newest KQ_SEEN_KEEP only).
+ * Dropping old pairs never lets an old revision back in: decode refuses it separately. */
 #define KQ_SEEN_KEEP 64u
 
 const char *fl_kq_cp_reason(fl_kq_cp_result_t r) {
@@ -65,7 +63,6 @@ const char *fl_kq_cp_reason(fl_kq_cp_result_t r) {
 }
 
 int fl_kq_cp_safe_name(const char *name) {
-    /* The reserved suffixes are one list, shared with the share landing. */
     return fl_fs_name_is_plain(name) && !fl_server_shared_name_is_reserved(name);
 }
 
@@ -101,11 +98,7 @@ void fl_kq_encoded_free(fl_kq_encoded_t *enc) {
 /* Write through a sibling and rename, so a reader never sees half a file. */
 #define KQ_PATH_MAX FL_FS_PATH_MAX
 
-/*
- * Every read and write below goes through the storage table (kq_storage.h): the placement layer
- * by default, the native shell's facade when it installs one. The checkpoints decide what a
- * delivery means; they never open a path themselves.
- */
+/* The default storage table; the checkpoints never open a path themselves. */
 static int def_read_file(void *ctx, const char *path, size_t max, uint8_t **data, size_t *len) {
     (void)ctx;
     return fl_fs_read_file(path, max, data, len);
@@ -116,8 +109,7 @@ static int def_write_atomic(void *ctx, const char *path, const uint8_t *data, si
     return fl_fs_write_file_atomic(path, data, len);
 }
 
-/* A permission error is "cannot tell", never "absent": a container that cannot be read must
- * not be replaced by a new one. */
+/* A permission error is "cannot tell", never "absent": an unreadable container is not replaced. */
 static int def_exists(void *ctx, const char *path) {
     (void)ctx;
     if (access(path, F_OK) == 0)
@@ -125,8 +117,7 @@ static int def_exists(void *ctx, const char *path) {
     return errno == ENOENT || errno == ENOTDIR ? 0 : -1;
 }
 
-/* Where the contained calls exist a directory that cannot be held is refused; names are then
- * never joined to a path. Otherwise (no *at calls) the path-based calls stand in. */
+/* Refuses a directory that cannot be held when the contained calls exist; else path calls stand in. */
 static int def_dir_open(void *ctx, const char *dir, fl_kq_dir_t *out) {
     (void)ctx;
     out->dir = dir;
@@ -199,8 +190,7 @@ const fl_kq_storage_t *fl_kq_cp_set_storage(const fl_kq_storage_t *storage) {
     return was;
 }
 
-/* A landing directory held for the length of one checkpoint. owned: close it at the end (a
- * caller that passed its own held directory keeps it). */
+/* A landing directory held for one checkpoint; owned means close it at the end. */
 typedef struct {
     const fl_kq_storage_t *st;
     fl_kq_dir_t            dir;
@@ -224,7 +214,6 @@ static void land_close(kq_land_t *l) {
     l->owned = 0;
 }
 
-/* Splits dest into its directory and last name; false when the name part is empty. */
 static int land_split(const char *dest, char *dir, size_t dcap, const char **leaf) {
     const char *slash = strrchr(dest, '/');
     size_t n;
@@ -263,14 +252,13 @@ static int sidecar(const char *path, const char *suffix, char *out, size_t cap) 
     return snprintf(out, cap, "%s%s", path, suffix) < (int)cap ? 0 : -1;
 }
 
-/* A whole file through the storage table: IO when it cannot be read (absent included), TOO_LARGE past max. */
+/* IO when the file cannot be read (absent included); TOO_LARGE past max. */
 static fl_kq_cp_result_t read_bounded(const char *path, size_t max, fl_kq_buf_t *b) {
     int rc = fl_kq_cp_storage()->read_file(fl_kq_cp_storage()->ctx, path, max, &b->data, &b->len);
 
     return rc == 0 ? FL_KQ_CP_OK : rc == -2 ? FL_KQ_CP_TOO_LARGE : FL_KQ_CP_IO;
 }
 
-/* The one path-based container read: the container beside path, bounded by the letter cap. */
 static fl_kq_cp_result_t load_container(const char *path, char *container_path, size_t cap,
                                         fl_kq_buf_t *c) {
     if (sidecar(path, FL_KQ_CONTAINER_SUFFIX, container_path, cap) != 0)
@@ -284,7 +272,7 @@ static void report_name(const uint8_t ref[32], char out[65 + sizeof FL_KQ_REPORT
     memcpy(out + 64, FL_KQ_REPORT_SUFFIX, sizeof FL_KQ_REPORT_SUFFIX);
 }
 
-/* The one write of a grown container: TOO_LARGE past the letter cap, and nothing is written. */
+/* The one write of a grown container; nothing is written when TOO_LARGE. */
 static fl_kq_cp_result_t store_container(const char *container_path, const fl_kq_buf_t *next) {
     const fl_kq_storage_t *store = fl_kq_cp_storage();
 
@@ -302,9 +290,7 @@ typedef struct {
     fl_kq_buf_t   signers;
 } trust_table_t;
 
-/* The signing keys this account store holds for every label the container names; a
- * label it does not know is left out (its signatures then do not count). `extra_label`
- * and `extra_key` add one key the caller vouches for (a sender's key from the host). */
+/* Signing keys for the labels the container names; unknown labels are left out. extra_label/extra_key add one vouched key. */
 static void trust_build(const fl_kq_driver_t *drv, const fl_kq_keydir_t *keys,
                         const fl_kq_buf_t *c, const char *extra_label, const uint8_t *extra_key,
                         trust_table_t *t, kq_file_trust_t *out) {
@@ -376,8 +362,7 @@ static fl_kq_cp_result_t fl_kq_cp_encode_with_unlocked(const fl_kq_keydir_t *key
         return FL_KQ_CP_TOO_LARGE;
     if (st != 0)
         return FL_KQ_CP_IO;
-    /* The file's container: the one beside it, or a new one owned by the sender. A container
-     * that cannot be looked at is an error, never a reason to start a new history over it. */
+    /* A container that cannot be looked at is an error, never a reason to start a new history. */
     have_container = store->exists(store->ctx, container_path);
     if (have_container < 0) {
         rc = FL_KQ_CP_IO;
@@ -494,13 +479,11 @@ fl_kq_cp_result_t fl_kq_cp_cosign(const kq_file_offer_t *offer, const char *me_k
         return FL_KQ_CP_INVALID;
     if (!drv)
         return FL_KQ_CP_NO_DRIVER;
-    /* KeyQuorum refuses the offer's own author. */
     return drv->cosign(offer, me_key, signing_secret, sig) == KQ_FILE_OK ? FL_KQ_CP_OK
                                                                          : FL_KQ_CP_NOT_RECIPIENT;
 }
 
-/* Loads the newest KQ_SEEN_KEEP pairs; a longer file (older builds kept more) is read from
- * its tail. A missing file is an empty record; a damaged one (not whole pairs) is -1. */
+/* Loads the newest KQ_SEEN_KEEP pairs, read from the tail of a longer file. Damaged is -1. */
 static int load_seen(const kq_land_t *l, const char *name, uint8_t (**seen)[64], size_t *n) {
     uint8_t *data = NULL;
     size_t len = 0;
@@ -514,12 +497,7 @@ static int load_seen(const kq_land_t *l, const char *name, uint8_t (**seen)[64],
     return 0;
 }
 
-/*
- * Whether the previously accepted container beside the file already holds rev. It must be
- * the container that was accepted last: it verifies and its history root is the newest
- * accepted root. Anything else fails closed, since "absent" would let an old revision back.
- *   1 held, 0 not held, -1 unreadable or missing, -2 damaged or not the accepted copy.
- */
+/* Whether the accepted container beside the file already holds rev: 1 held, 0 not, -1 unreadable, -2 damaged or not the accepted copy. Fails closed. */
 static int local_holds(const fl_kq_driver_t *drv, const kq_land_t *l, const char *container_name,
                        const uint8_t newest_root[32], const uint8_t rev[32]) {
     fl_kq_buf_t local = {0};
@@ -541,10 +519,7 @@ static int local_holds(const fl_kq_driver_t *drv, const kq_land_t *l, const char
     return rc == KQ_FILE_NO_REVISION ? 0 : -2;
 }
 
-/*
- * The decode steps, over a landing directory the caller holds (landp, the leaf's name inside
- * it). Every read and write of the delivery goes through that directory and the storage table.
- */
+/* The decode steps; every read and write goes through the caller's held landp directory. */
 static fl_kq_cp_result_t decode_core(const fl_kq_keydir_t *keys, const char *sender_key,
                                      const uint8_t sender_signing_public[32],
                                      const char *me_key, const uint8_t box_secret[32],
@@ -574,7 +549,6 @@ static fl_kq_cp_result_t decode_core(const fl_kq_keydir_t *keys, const char *sen
     if (sidecar(leaf, FL_KQ_CONTAINER_SUFFIX, container_name, sizeof container_name) != 0 ||
         sidecar(leaf, FL_KQ_SEEN_SUFFIX, seen_name, sizeof seen_name) != 0)
         return FL_KQ_CP_INVALID;
-    /* Never overwrite a file this store does not track. */
     if (land_exists(landp, leaf) == 1 && land_exists(landp, seen_name) != 1) {
         rc = FL_KQ_CP_EXISTS;
         goto done;
@@ -586,7 +560,6 @@ static fl_kq_cp_result_t decode_core(const fl_kq_keydir_t *keys, const char *sen
         rc = st == KQ_FILE_UNTRUSTED ? FL_KQ_CP_BAD_SIGNATURE : FL_KQ_CP_INVALID;
         goto done;
     }
-    /* The letter must carry exactly the revision that was offered and co-signed. */
     if (!drv->equal(rev, offer->revision_id, sizeof rev)) {
         rc = FL_KQ_CP_INVALID;
         goto done;
@@ -619,8 +592,7 @@ static fl_kq_cp_result_t decode_core(const fl_kq_keydir_t *keys, const char *sen
         rc = FL_KQ_CP_NOT_NEWER;
         goto done;
     }
-    /* Only the newest pairs are kept, so "adds a revision" is also checked against everything
-     * accepted before: a revision the local container holds is never newer. */
+    /* Checked against every accepted pair: a local container holding rev is never newer. */
     if (st == KQ_FILE_NEWER) {
         int held = nseen ? local_holds(drv, landp, container_name, seen[nseen - 1] + 32, rev) : -2;
 
@@ -628,8 +600,7 @@ static fl_kq_cp_result_t decode_core(const fl_kq_keydir_t *keys, const char *sen
             rc = held > 0 ? FL_KQ_CP_NOT_NEWER : held == -1 ? FL_KQ_CP_IO : FL_KQ_CP_INVALID;
             goto done;
         }
-        /* A newer copy goes out only when the editor's supervisor countersigned it: the
-         * revision carries the permit, or the recipient keeps the copy it has. */
+        /* A newer copy goes out only when the supervisor countersigned it (permit in the revision). */
         if (drv->permits_newer(&cosigned, rev, &trust) != KQ_FILE_OK) {
             rc = FL_KQ_CP_NEEDS_EDITOR_PERMIT;
             goto done;
@@ -640,12 +611,10 @@ static fl_kq_cp_result_t decode_core(const fl_kq_keydir_t *keys, const char *sen
         rc = FL_KQ_CP_INVALID;
         goto done;
     }
-    /* The content, its history and the record that they were accepted land together, or
-     * not at all: a later retry must not find a half-installed delivery. */
+    /* Content, history and the accepted record land together or not at all. */
     memcpy(pair, rev, 32);
     memcpy(pair + 32, root, 32);
     {
-        /* The newest KQ_SEEN_KEEP - 1 pairs and this one: the record never grows past the cap. */
         size_t keep = nseen < KQ_SEEN_KEEP ? nseen : KQ_SEEN_KEEP - 1u;
         size_t len = (keep + 1u) * 64u;
         uint8_t *all = (uint8_t *)mem_domain_alloc(MEM_DOMAIN_FS, len);
@@ -691,7 +660,7 @@ fl_kq_cp_result_t fl_kq_cp_decode_with(const fl_kq_keydir_t *keys, const char *s
         return FL_KQ_CP_NO_DRIVER;
     if (land_split(dest_path, land_dir, sizeof land_dir, &leaf) != 0)
         return FL_KQ_CP_INVALID;
-    /* The quarantine gate applies here as on the share's own landings (either spelling). */
+    /* The quarantine gate applies here as on the share's own landings. */
     if (fl_server_shared_path_is_expired_quarantine(land_dir) ||
         fl_server_shared_path_is_expired_quarantine(dest_path))
         return FL_KQ_CP_IO;
@@ -722,7 +691,7 @@ fl_kq_cp_result_t fl_kq_cp_decode_in_with(const fl_kq_keydir_t *keys, const char
     if (fl_server_shared_path_is_expired_quarantine(dir->dir) ||
         fl_server_shared_path_is_expired_quarantine(dest))
         return FL_KQ_CP_IO;
-    /* The caller's own handle: used, never closed here, and never opened again by path. */
+    /* The caller's handle: used, never closed here, never opened again by path. */
     land.st = fl_kq_cp_storage();
     land.dir = *dir;
     land.owned = 0;
@@ -732,10 +701,7 @@ fl_kq_cp_result_t fl_kq_cp_decode_in_with(const fl_kq_keydir_t *keys, const char
 
 /* ---- history and the editor's permit (the local container) ------------- */
 
-/* Names of the history's wire codes, for display only: a code is what the file stores and what
- * KeyQuorum reads; these strings are never parsed back. They come from KeyQuorum through the
- * driver (kq_file_event_name / kq_file_outcome_name), so there is no table here to fall behind
- * its enums. A code the library does not know, or no driver, prints as "?". */
+/* Display names of the history's wire codes; never parsed back. An unknown code prints as "?". */
 const char *fl_kq_cp_event_name(uint8_t code) {
     const fl_kq_driver_t *drv = fl_kq_driver_get();
     const char *name = drv && drv->event_name ? drv->event_name(code) : NULL;
@@ -750,8 +716,7 @@ const char *fl_kq_cp_outcome_name(uint8_t code) {
     return name ? name : "?";
 }
 
-/* One history line (see keyquorum_files.h) as text: sequence, time, type name, outcome name,
- * actor, revision and details. A malformed line is copied as it is. */
+/* One history line as text; a malformed line is copied as it is. */
 size_t fl_kq_cp_format_event(const char *line, size_t n, char *out, size_t cap) {
     char text[512];
     char *field[7];
@@ -819,7 +784,7 @@ fl_kq_cp_result_t fl_kq_cp_history(const char *path, fl_kq_buf_t *lines) {
     return rc == KQ_FILE_OK ? FL_KQ_CP_OK : FL_KQ_CP_INVALID;
 }
 
-/* The head beside path: its revision id (rev) or its author's label (author, empty for a fork). */
+/* The head beside path: its revision id, or its author's label (empty for a fork). */
 static fl_kq_cp_result_t head_of(const char *path, uint8_t *rev, char *author, size_t cap) {
     const fl_kq_driver_t *drv = fl_kq_driver_get();
     char container_path[4096];
@@ -853,9 +818,7 @@ fl_kq_cp_result_t fl_kq_cp_head_author(const char *path, char *out, size_t cap) 
     return path && out && cap ? head_of(path, NULL, out, cap) : FL_KQ_CP_INVALID;
 }
 
-/* Sealed letter for revision rev already in the container beside path (sender). Nothing is
- * checked in or written: this is how a permitted newer copy goes out, after the supervisor's
- * countersignature is in that container. */
+/* Sealed letter for rev already in the container beside path. Nothing is checked or written. */
 fl_kq_cp_result_t fl_kq_cp_reseal_with(const fl_kq_keydir_t *keys, const char *sender_key,
                                        const uint8_t sender_signing_secret[32],
                                        const char *recipient_key,
@@ -931,8 +894,7 @@ static fl_kq_cp_result_t fl_kq_cp_permit_with_unlocked(const fl_kq_keydir_t *key
     if (fl_kq_cp_storage()->read_file(fl_kq_cp_storage()->ctx, container_path, FL_KQ_LETTER_MAX,
                                       &c.data, &c.len) != 0)
         return FL_KQ_CP_IO;
-    /* The author's signature must verify under the keys this registry holds before the
-     * supervisor adds to it: a countersignature never backs an unverified author. */
+    /* The author's signature must verify before the supervisor adds to it. */
     trust_build(drv, keys, &c, NULL, NULL, &table, &trust);
     rc = drv->countersign(&c, rev, supervisor_key, supervisor_secret, &trust, &next);
     if (rc != KQ_FILE_OK) {
@@ -1025,8 +987,7 @@ static fl_kq_cp_result_t report_write_in_unlocked(uint16_t code, uint8_t class_c
     if (!drv)
         return FL_KQ_CP_NO_DRIVER;
     report_name(ref, name);
-    /* Every step inside the held directory: a directory swapped after the caller took the
-     * handle is never followed. An existing report is kept as it is and not counted again. */
+    /* Every step inside the held directory; an existing report is kept and not counted again. */
     e = st->dir_exists(st->ctx, dir, name);
     if (e != 0)
         return e == 1 ? FL_KQ_CP_EXISTS : FL_KQ_CP_IO;
@@ -1049,7 +1010,6 @@ static fl_kq_cp_result_t report_write_in_unlocked(uint16_t code, uint8_t class_c
             known = 1;
     if (!known && held >= FL_KQ_REPORT_CAP * 32u)
         return FL_KQ_CP_TOO_LARGE;
-    /* No free text: the code, class and labels are KeyQuorum's closed sets, checked there. */
     if (drv->error_sign(code, class_code, step, ref, actor, occurred_at, NULL, NULL, secret,
                         &kqer) != KQ_FILE_OK)
         return FL_KQ_CP_INVALID;
@@ -1069,7 +1029,7 @@ static fl_kq_cp_result_t report_write_in_unlocked(uint16_t code, uint8_t class_c
     return out;
 }
 
-/* The ledger is read, extended and committed under one lock, so two reports never drop a reference. */
+/* Read, extend and commit the ledger under one lock so two reports never drop a reference. */
 fl_kq_cp_result_t fl_kq_cp_report_write_in(uint16_t code, uint8_t class_code, uint8_t step,
                                            const uint8_t ref[32], const char *actor,
                                            const char *occurred_at, const uint8_t secret[32],
@@ -1100,13 +1060,11 @@ fl_kq_cp_result_t fl_kq_cp_report_read_in(const fl_kq_dir_t *dir, const uint8_t 
     if (!drv)
         return FL_KQ_CP_NO_DRIVER;
     report_name(ref, name);
-    /* Through the held directory, like the write: a name swapped for a link is never followed. */
     if (st->dir_read(st->ctx, dir, name, FL_KQ_REPORT_MAX, &out->data, &out->len) != 0) {
         out->data = NULL;
         out->len = 0;
         return FL_KQ_CP_IO;
     }
-    /* The injection check, run against a scratch history that is thrown away. */
     mem_domain_copy(id, ref, sizeof id);
     if (drv->file_new(id, "report-check", FL_HERITAGE_ROOT_KEY, &scratch) == KQ_FILE_OK &&
         drv->error_inject(&scratch, out, reporter_public, ref, &next) == KQ_FILE_OK)
@@ -1138,8 +1096,7 @@ static fl_kq_cp_result_t fl_kq_cp_inject_report_bytes_unlocked(const uint8_t rep
     out = load_container(path, container_path, sizeof container_path, &c);
     if (out != FL_KQ_CP_OK)
         goto done;
-    /* KeyQuorum checks the signature under the reporter's key and that the report names the artifact
-     * this caller holds; anything else writes nothing. */
+    /* Signature checked under the reporter's key; the report must name the held artifact. */
     if (drv->error_inject(&c, &kqer, reporter_public, ref, &next) != KQ_FILE_OK) {
         out = FL_KQ_CP_BAD_SIGNATURE;
         goto done;
@@ -1205,7 +1162,7 @@ static int num_field(const char *s, size_t n, int64_t *out) {
     return 0;
 }
 
-/* "2026-11-10T09:00:00Z" or "2026-11-10T09:00:00.000Z" (KeyQuorum's UTC text) as epoch seconds. */
+/* "2026-11-10T09:00:00Z" (or with .000) as epoch seconds. */
 static int utc_to_sec(const char *s, size_t n, int64_t *out) {
     int64_t y, mo, d, h, mi, se, era, yoe, doy, doe;
 
@@ -1238,7 +1195,7 @@ typedef struct {
     int64_t newest;
 } last_sig_t;
 
-/* A history line: sequence TAB time TAB type TAB outcome TAB actor ... (keyquorum_files.h). */
+/* A history line: sequence TAB time TAB type TAB outcome TAB actor ... */
 static int last_sig_line(const char *line, size_t n, void *ctx) {
     last_sig_t *ls = (last_sig_t *)ctx;
     const char *f[4];
@@ -1302,8 +1259,7 @@ static fl_kq_cp_result_t fl_kq_cp_sign_head_with_unlocked(const char *path, cons
         rc = FL_KQ_CP_INVALID; /* a damaged history is refused, never replaced */
         goto done;
     }
-    /* The head as it is now, under the lock: a head another author took since the caller looked is
-     * not this key's to sign. */
+    /* The head is re-read under the lock: another author's head is not this key's to sign. */
     st = drv->head_author(&container, head, sizeof head);
     if (st != KQ_FILE_OK || strcmp(head, author_key) != 0) {
         rc = st == KQ_FILE_FORKED ? FL_KQ_CP_FORKED : st == KQ_FILE_OK ? FL_KQ_CP_UNTRUSTED : FL_KQ_CP_INVALID;
