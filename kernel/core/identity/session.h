@@ -28,11 +28,22 @@ fl_result_t fl_session_login(const char *name, const char *password);
  * (the end of su -c) and for tests. A new identity is taken only through fl_session_switch_user.
  */
 fl_result_t fl_session_set_user(const char *name);
+/** What su -c takes back at its end: the account and the login it was current in, read together. */
+typedef struct fl_session_restore_point {
+    char     user[FL_USER_NAME_MAX];
+    uint64_t login_generation;
+} fl_session_restore_point_t;
 /**
- * The restore at the end of su -c: takes name back only while login_generation (read before the
- * switch, fl_session_login_generation) is still the current login. A login or logout in between
- * leaves the session as it is: BUSY, audited as "su-restore-refused". INVAL for generation 0;
- * otherwise as fl_session_set_user.
+ * Fills out with the current account and the current login generation under one hold of the session
+ * lock, so a login that completes meanwhile can never pair one login's account with another login's
+ * generation. INVAL for a NULL out.
+ */
+fl_result_t fl_session_capture_restore_point(fl_session_restore_point_t *out);
+/**
+ * The restore at the end of su -c: takes name back only while login_generation (both from one
+ * fl_session_capture_restore_point taken before the switch) is still the current login. A login or
+ * logout in between leaves the session as it is: BUSY, audited as "su-restore-refused". INVAL for
+ * generation 0; otherwise as fl_session_set_user.
  */
 fl_result_t fl_session_restore_user(const char *name, uint64_t login_generation);
 /** 1 when password is the named account's password (checked under the session lock), else 0. */

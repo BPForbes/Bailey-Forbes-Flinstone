@@ -5,6 +5,7 @@
  */
 #include "identity.h"
 #include "fl/driver/keyquorum.h"
+#include "mem_domain.h"
 
 #include <stddef.h>
 #include <stdint.h>
@@ -114,11 +115,8 @@ static void kqi_forget(const char *name)
 {
     kqi_t *k = name ? kqi_find(name) : NULL;
 
-    if (k) {
-        volatile uint8_t *p = (volatile uint8_t *)k;
-        for (unsigned i = 0; i < sizeof *k; i++)
-            p[i] = 0;
-    }
+    if (k)
+        mem_domain_secure_zero(k, sizeof *k); /* the sealed key and the used flag go together */
 }
 
 static const fl_fs_identity_kq_ops_t s_ops = {

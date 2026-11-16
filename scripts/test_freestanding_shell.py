@@ -3,7 +3,9 @@
 import os
 import pty
 import re
+import json
 import select
+import socket
 import subprocess
 import sys
 import tempfile
@@ -31,6 +33,8 @@ if not image.is_file():
 # It must never be a fixed file: a reused file would repeat keys.
 entropy_dir = tempfile.mkdtemp(prefix="fl-entropy-")
 entropy_file = os.path.join(entropy_dir, "entropy.bin")
+# QMP, only to read the VGA text buffer: each account keeps its own screen (perspective).
+qmp_path = os.path.join(entropy_dir, "qmp.sock")
 with open(entropy_file, "wb") as f:
     f.write(os.urandom(4096))
 
@@ -40,6 +44,7 @@ proc = subprocess.Popen(
         "-machine", "pc,accel=tcg", "-m", "64M", "-display", "none",
         "-fw_cfg", f"name=opt/flintstone/entropy,file={entropy_file}",
         "-monitor", "none", "-serial", "stdio", "-no-reboot",
+        "-qmp", f"unix:{qmp_path},server=on,wait=off",
         "-drive", f"file={image},format=raw,if=ide", "-boot", "c",
     ],
     stdin=subprocess.PIPE,
@@ -86,6 +91,34 @@ def wait_from(needle, start, timeout=4):
     raise SystemExit(
         f"test-freestanding-shell: missing {needle!r}\n{buf[start:].decode('latin1', 'replace')}"
     )
+
+
+def vga_text():
+    """The 80x25 VGA text screen, read through QMP pmemsave, as one string per row."""
+    dump = os.path.join(entropy_dir, "vga.bin")
+    with socket.socket(socket.AF_UNIX, socket.SOCK_STREAM) as qmp:
+        qmp.settimeout(5)
+        qmp.connect(qmp_path)
+        reader = qmp.makefile("r", encoding="utf-8")
+        reader.readline()  # greeting
+
+        def call(execute, arguments=None):
+            msg = {"execute": execute}
+            if arguments:
+                msg["arguments"] = arguments
+            qmp.sendall((json.dumps(msg) + "\n").encode())
+            while True:
+                reply = json.loads(reader.readline())
+                if "return" in reply or "error" in reply:
+                    if "error" in reply:
+                        raise SystemExit(f"test-freestanding-shell: QMP {execute}: {reply['error']}")
+                    return reply["return"]
+
+        call("qmp_capabilities")
+        call("pmemsave", {"val": 0xB8000, "size": 4000, "filename": dump})
+    cells = Path(dump).read_bytes()
+    chars = bytes(cells[i] for i in range(0, len(cells), 2)).decode("latin1")
+    return "\n".join(chars[r * 80:(r + 1) * 80] for r in range(25))
 
 
 def cmd(line, expect=None, timeout=6):
@@ -269,22 +302,35 @@ try:
     read_until("Flinstone@flintstone>", 4)
     send("whoami\n")
     read_until("WHOAMI Flinstone", 4)
+    start = len(buf)
+    send("whoami persp-mark-flinstone\n")
+    wait_from("WHOAMI Flinstone", start)
     # switchuser to another account asks for its password, as su does (FL-14 #406). These are the
     # public image's seeded demo accounts.
     start = len(buf)
     send("switchuser root\n")
     wait_from("Password:", start)
     send("root\n")
-    read_until("SWITCHUSER user=Root", 4)
+    wait_from("SWITCHUSER user=Root", start)
+    # Root has no screen of its own yet: it starts clear, and Flinstone's screen was kept for
+    # Flinstone, not stored as Root's.
+    if "persp-mark-flinstone" in vga_text():
+        raise SystemExit("test-freestanding-shell: Root's screen shows Flinstone's\n" + vga_text())
     send("whoami\n")
     read_until("WHOAMI Root elevated", 4)
     send("history\n")
     read_until("1: whoami", 4)
     start = len(buf)
+    send("whoami persp-mark-root\n")
+    wait_from("WHOAMI Root", start)
+    start = len(buf)
     send("switchuser flinstone\n")
     wait_from("Password:", start)
     send("flinstone\n")
-    read_until("SWITCHUSER user=Flinstone", 4)
+    wait_from("SWITCHUSER user=Flinstone", start)
+    screen = vga_text()
+    if "persp-mark-flinstone" not in screen or "persp-mark-root" in screen:
+        raise SystemExit("test-freestanding-shell: switching back did not restore Flinstone's screen\n" + screen)
     send("whoami\n")
     read_until("WHOAMI Flinstone", 4)
     send("history\n")
@@ -295,7 +341,7 @@ try:
     read_until("SESSION 2 user=Flinstone", 4)
     wait_from("Password:", start)
     send("root\n")
-    read_until("SWITCHUSER user=Root", 4)
+    wait_from("SWITCHUSER user=Root", start)
     if b"no such session" in buf.replace(b"\r", b""):
         raise SystemExit(
             "test-freestanding-shell: leftover session new poisoned switchuser\n"

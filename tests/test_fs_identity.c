@@ -100,6 +100,13 @@ static const fl_fs_identity_kq_ops_t s_ops_closed = {
     .forget = test_forget,
 };
 
+/* No forget op: a sealed account cannot have its key wiped, so it must not be deleted. */
+static const fl_fs_identity_kq_ops_t s_ops_noforget = {
+    .enroll = test_enroll,
+    .unlock = test_unlock,
+    .change_password = test_change,
+};
+
 static int draw_pw(char *out, size_t cap) {
     FILE *fp = fopen("/dev/urandom", "rb");
     unsigned char raw[16];
@@ -175,21 +182,36 @@ static int test_plaintext_then_sealed(void) {
     ASSERT(fl_fs_identity_login(0, "Ada", pw) == 0);
     ASSERT(fl_fs_identity_login(0, "Ada", next) == 1);
 
-    /* switch_allowed may refuse. sudo -i does not ask it. */
+    /* switch_allowed may refuse, even with Root's right password (the seeded "root", which
+     * unlock accepts). sudo -i does not ask it. */
+    ASSERT(test_unlock("Root", "root") == 1);
     (void)fl_fs_identity_set_kq(&s_ops_closed);
-    ASSERT(fl_fs_identity_switchuser(0, "Root", NULL) == 0);
+    ASSERT(fl_fs_identity_switchuser(0, "Root", "root") == 0);
     ASSERT(strcmp(fl_fs_identity_user(0), "Ada") == 0);
     ASSERT(fl_fs_identity_enter_root(0) == 1);
     ASSERT(strcmp(fl_fs_identity_user(0), "Root") == 0);
 
+    /* With no forget op, userdel refuses a sealed account and leaves it whole. */
+    (void)fl_fs_identity_set_kq(&s_ops_noforget);
+    ASSERT(fl_fs_identity_userdel(0, "Ada") == 0);
+    ASSERT(fl_fs_identity_has_user("Ada") == 1);
+    ASSERT(held_find("Ada") != NULL);
+    ASSERT(fl_fs_identity_login(0, "Ada", next) == 1);
+    ASSERT(fl_fs_identity_enter_root(0) == 1);
+    (void)fl_fs_identity_set_kq(&s_ops_closed);
+
     ASSERT(fl_fs_identity_userdel(0, "Ada") == 1);
     ASSERT(held_find("Ada") == NULL);
+    ASSERT(fl_fs_identity_has_user("Ada") == 0);
     {
         int forgotten = 0;
         for (int i = 0; i < 8; i++)
             forgotten += s_held[i].forgotten;
         ASSERT(forgotten == 1);
     }
+    /* The key went with the account, so the name can be registered again. */
+    ASSERT(fl_fs_identity_useradd(0, "Ada", next) == 1);
+    ASSERT(held_find("Ada") != NULL);
     return 0;
 }
 

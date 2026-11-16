@@ -621,11 +621,16 @@
       renderRelayStatus(error.message || "Connection failed");
     }
   }
-  let guestInput = Promise.resolve();
+  // Two owners, both FIFO: guestKeys orders and counts the input that reaches the guest;
+  // guestExchange gives one caller the guest from its command until its last reply (and any
+  // password) is done. Everything the person sends (buttons, the command form, keystrokes) takes a
+  // guestExchange turn. Replies the guest itself asked for (dnsack, file accept lines) take only
+  // guestKeys, so they go out at once; a password is still sent only if none of them (nor anything
+  // else) reached the guest after its exchange's command (core.driveGuestSteps).
+  const guestKeys = core.createGuestInput();
+  const guestExchange = core.createExclusiveQueue();
   function enqueueGuest(work) {
-    const run = guestInput.then(work, work);
-    guestInput = run.catch(() => {});
-    return run;
+    return guestKeys.send(work);
   }
   function guestReady() {
     return emulator && typeof emulator.sendText === "function";
@@ -636,9 +641,13 @@
     return true;
   }
   // script: a string of plain command lines, or [{ line, secret }] steps from lab-core. A secret
-  // step (a password) is sent only when the guest has just asked for one, so a password is never
-  // typed as a command; otherwise nothing more is sent.
-  async function sendGuestLines(script, patterns) {
+  // step (a password) is sent only as the answer to its own command's prompt (core.driveGuestSteps),
+  // so a password is never typed as a command. The whole script is one guestExchange turn.
+  function sendGuestLines(script, patterns) {
+    return guestExchange.run(() => driveGuestLines(script, patterns));
+  }
+  // The body of an exchange: call only from inside a guestExchange turn.
+  async function driveGuestLines(script, patterns) {
     if (!guestReady()) {
       text("account-status", "Guest is not ready — wait for Ready, then retry.");
       return false;
@@ -649,22 +658,15 @@
       if (lines[lines.length - 1] === "") lines.pop();
       steps = lines.map(line => ({ line, secret: false }));
     }
-    let asked = false;
-    for (let i = 0; i < steps.length; i++) {
-      const step = steps[i];
-      if (step.secret && !asked) {
-        text("account-status", "The guest did not ask for a password, so nothing more was sent.");
-        return false;
-      }
-      const from = serialTail.length;
-      if (!await sendGuest(`${step.line}\n`)) return false;
-      const pattern = (patterns && patterns[i]) || /SWITCHUSER user=|SESSION \d+ user=|Password:|unknown user|authentication failed|\bok\b|WHOAMI |@flintstone>|shell>/;
-      await waitSerial(pattern, 4000, from);
-      const said = serialTail.slice(from);
-      asked = /Password:/.test(said);
-      if (/unknown user|authentication failed/.test(said)) return false;
-    }
-    return true;
+    return core.driveGuestSteps(steps, patterns, {
+      input: guestKeys,
+      ready: guestReady,
+      write: value => emulator.sendText(value),
+      mark: () => serialTail.length,
+      wait: (re, from) => waitSerial(re, 4000, from),
+      said: from => serialTail.slice(from),
+      status: message => text("account-status", message),
+    });
   }
   const controller = core.createController({
     marker: "FLINTSTONE_KERNEL_BOOT_OK", setState,
@@ -808,14 +810,14 @@
       else if (event.key.length === 1 && !event.ctrlKey && !event.altKey && !event.metaKey) ch = event.key;
       if (!ch) return false;
       event.preventDefault();
-      enqueueGuest(() => emulator.typeChar(ch)).catch(error => console.warn(error));
+      guestExchange.run(() => enqueueGuest(() => emulator.typeChar(ch))).catch(error => console.warn(error));
       return true;
     }
     if (!emulator || typeof emulator.sendKey !== "function") return false;
     const codes = window.FlintstoneQemuKeys && window.FlintstoneQemuKeys.qcodesForEvent(event);
     if (!codes) return false;
     event.preventDefault();
-    enqueueGuest(() => emulator.sendKey(codes)).catch(error => console.warn(error));
+    guestExchange.run(() => enqueueGuest(() => emulator.sendKey(codes))).catch(error => console.warn(error));
     return true;
   }
   screen.addEventListener("keydown", event => { sendKeyEventToGuest(event); });
@@ -895,40 +897,46 @@
   if (form) {
     const accountName = () => document.getElementById("account-name").value.trim();
     const accountPassword = () => document.getElementById("account-secret")?.value || "";
+    // Each account action is one guestExchange turn, and its steps are built inside it, from the
+    // account the guest is on once any earlier exchange has finished.
     form.addEventListener("submit", async event => {
       event.preventDefault();
-      const steps = core.guestSwitchLines(accountName(), accountPassword(), principal());
-      if (!steps.length) return;
-      await sendGuestLines(steps, [/Password:|SWITCHUSER user=|unknown user/, /SWITCHUSER user=|authentication failed/]);
+      await guestExchange.run(async () => {
+        const steps = core.guestSwitchLines(accountName(), accountPassword(), principal());
+        if (!steps.length) return;
+        await driveGuestLines(steps, [/Password:|SWITCHUSER user=|unknown user/, /SWITCHUSER user=|authentication failed/]);
+      });
       screen.focus();
     });
     document.getElementById("account-new-session").onclick = async () => {
-      await sendGuestLines(core.guestNewSessionLines(accountName(), accountPassword()), [
+      await guestExchange.run(() => driveGuestLines(core.guestNewSessionLines(accountName(), accountPassword()), [
         /SESSION \d+ user=/,
         /Password:|SWITCHUSER user=|unknown user/,
         /SWITCHUSER user=|authentication failed/,
-      ]);
+      ]));
       screen.focus();
     };
     document.getElementById("account-register")?.addEventListener("click", async () => {
-      const name = accountName();
-      // Registering is Root's: the page asks for Root's password, as the guest does.
-      const rootPassword = document.getElementById("account-root-secret")?.value || "";
-      const steps = core.guestRegisterLines(name, accountPassword() || name, rootPassword, principal());
-      if (!steps.length) return;
-      const from = serialTail.length;
-      const patterns = steps.map(step => step.line.startsWith("switchuser ")
-        ? /Password:|SWITCHUSER user=Root|unknown user/
-        : step.line.startsWith("useradd ")
-          ? /Password:|unknown command|need elevation|usage:/
-          : /\bok\b|authentication failed|SWITCHUSER user=Root/);
-      const sent = await sendGuestLines(steps, patterns);
-      const chunk = serialTail.slice(from);
-      if (sent && /\bok\b/.test(chunk) && !/authentication failed/.test(chunk))
-        rememberUser(name);
-      if (!sent && /authentication failed/.test(chunk))
-        text("account-status", "That password was not accepted.");
-      renderSessions();
+      await guestExchange.run(async () => {
+        const name = accountName();
+        // Registering is Root's: the page asks for Root's password, as the guest does.
+        const rootPassword = document.getElementById("account-root-secret")?.value || "";
+        const steps = core.guestRegisterLines(name, accountPassword() || name, rootPassword, principal());
+        if (!steps.length) return;
+        const from = serialTail.length;
+        const patterns = steps.map(step => step.line.startsWith("switchuser ")
+          ? /Password:|SWITCHUSER user=Root|unknown user/
+          : step.line.startsWith("useradd ")
+            ? /Password:|unknown command|need elevation|usage:/
+            : /\bok\b|authentication failed|SWITCHUSER user=Root/);
+        const sent = await driveGuestLines(steps, patterns);
+        const chunk = serialTail.slice(from);
+        if (sent && /\bok\b/.test(chunk) && !/authentication failed/.test(chunk))
+          rememberUser(name);
+        if (!sent && /authentication failed/.test(chunk))
+          text("account-status", "That password was not accepted.");
+        renderSessions();
+      });
       screen.focus();
     });
   }

@@ -20,8 +20,9 @@ int cmd_sudo_require_auth(void);
 /** Like cmd_sudo_require_auth; uses reason for elevation grant and audit. */
 int cmd_sudo_require_auth_reason(const char *reason);
 /** Sign a sudo command line inside the window and start its clock again (FL-20 #399). When Root's key is
- *  not available the elevation has ended: sudo asks for Root's key again and signs the line under the new
- *  window. 0 when signed, 1 when sudo cannot go on. */
+ *  not available, or the window ended before this sudo could renew it, nothing is renewed: sudo asks for
+ *  the full co-signature again and signs the line under the new window. 0 when signed, 1 when sudo cannot
+ *  go on. */
 int cmd_sudo_sign_action(const char *line);
 /** Sign a command run inside the window (not a sudo: the clock is not reset). When Root's key is not
  *  available the elevation ends and the command runs as the account itself. */

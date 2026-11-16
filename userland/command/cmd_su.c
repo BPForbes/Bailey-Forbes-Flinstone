@@ -76,11 +76,10 @@ static int su_run_command(const char *command) {
 
 int cmd_su_run(int argc, char **argv) {
     su_request_t req;
-    char saved[FL_USER_NAME_MAX];
+    fl_session_restore_point_t back;
     char switched[FL_USER_NAME_MAX];
     char saved_home[CWD_MAX];
     char saved_cwd[CWD_MAX];
-    uint64_t login_gen;
     int had_elevation;
     fl_result_t rc;
 
@@ -96,18 +95,19 @@ int cmd_su_run(int argc, char **argv) {
     if (fl_authz_identity_switch_denied("su"))
         return 1;
 
-    strncpy(saved, fl_session_current_user(), sizeof(saved) - 1);
-    saved[sizeof(saved) - 1] = '\0';
+    /* The account and its login are read together: the restore below happens only while this login is
+     * still the current one, and a login completing meanwhile cannot pair its generation with the
+     * account of the login before it. */
+    if (fl_session_capture_restore_point(&back) != FL_RESULT_OK)
+        return 1;
     had_elevation = fl_session_has_elevation();
-    /* The restore below happens only while this login is still the current one. */
-    login_gen = fl_session_login_generation();
 
     /* KeyQuorum's factor, collected here and checked and committed by the session. */
     if (cmd_switch_user("su", req.target, 0) != 0)
         return 1;
     /* The switch ended the elevation (the session revokes it at commit): audited only now. */
     if (had_elevation)
-        fl_audit_elevation_event(saved, "su user switch", 0);
+        fl_audit_elevation_event(back.user, "su user switch", 0);
     fl_session_sync_services();
     if (req.login_shell) {
         fl_session_save_login_shell_env(saved_home, sizeof(saved_home),
@@ -116,7 +116,7 @@ int cmd_su_run(int argc, char **argv) {
             fprintf(stderr, "su: failed to apply login-shell environment for %s\n",
                     req.target);
             fl_session_restore_login_shell_env(saved_home, saved_cwd);
-            if (fl_session_restore_user(saved, login_gen) != FL_RESULT_OK)
+            if (fl_session_restore_user(back.user, back.login_generation) != FL_RESULT_OK)
                 fprintf(stderr, "su: session user not restored (a login or logout ran meanwhile)\n");
             fl_session_sync_services();
             return 1;
@@ -129,7 +129,7 @@ int cmd_su_run(int argc, char **argv) {
         strncpy(switched, fl_session_current_user(), sizeof(switched) - 1);
         switched[sizeof(switched) - 1] = '\0';
         had_elevation = fl_session_has_elevation();
-        rc = fl_session_restore_user(saved, login_gen);
+        rc = fl_session_restore_user(back.user, back.login_generation);
         if (rc == FL_RESULT_BUSY) {
             /* Another login took the session meanwhile: it is left as it is (audited by the session). */
             fprintf(stderr, "su: session user not restored (a login or logout ran meanwhile)\n");
@@ -137,8 +137,8 @@ int cmd_su_run(int argc, char **argv) {
             return 1;
         }
         if (rc != FL_RESULT_OK) {
-            fprintf(stderr, "su: cannot restore session user %s (%d)\n", saved, (int)rc);
-            if (fl_session_restore_user("guest", login_gen) == FL_RESULT_OK && had_elevation)
+            fprintf(stderr, "su: cannot restore session user %s (%d)\n", back.user, (int)rc);
+            if (fl_session_restore_user("guest", back.login_generation) == FL_RESULT_OK && had_elevation)
                 fl_audit_elevation_event(switched, "su restore", 0);
             if (req.login_shell)
                 fl_session_restore_login_shell_env(saved_home, saved_cwd);

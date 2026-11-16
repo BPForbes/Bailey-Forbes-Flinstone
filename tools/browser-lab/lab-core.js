@@ -219,11 +219,83 @@
     if (!guestUserNameOk(name)) return [];
     return switchSteps(name, password, currentUser);
   }
+  // One owner at a time: work passed to run() starts only after every earlier run() has settled,
+  // whether it resolved or threw. The lab holds one for guest keystrokes and one for whole guest
+  // exchanges (a command, the guest's reply and the password that answers its Password: prompt),
+  // so two exchanges can never cross and send a password to the other's prompt.
+  function createExclusiveQueue() {
+    let tail = Promise.resolve();
+    return {
+      run(work) {
+        const turn = tail.then(() => work());
+        tail = turn.then(() => {}, () => {});
+        return turn;
+      },
+    };
+  }
+  // The guest's input, in order, with a count of every send made inside the turn that makes it.
+  // send() returns that send's number. sendIfLast(mark, work) sends only if nothing else has
+  // reached the guest since send number `mark`, checking and sending in one turn, so no other
+  // input (a keystroke, a dnsack, a file line) can land between the check and this send.
+  function createGuestInput() {
+    const keys = createExclusiveQueue();
+    let sent = 0;
+    const deliver = work => {
+      const seq = ++sent;
+      return Promise.resolve(work()).then(() => seq);
+    };
+    return {
+      send(work) { return keys.run(() => deliver(work)); },
+      sendIfLast(mark, work) { return keys.run(() => (sent === mark ? deliver(work) : 0)); },
+    };
+  }
+  // True when a Password: prompt follows the guest's echo of this command line. The shell echoes a
+  // command as typed and a password as *, so a prompt that was already open (a late or stale one)
+  // takes the line without echoing it, and does not count as this command's prompt.
+  function promptAfterEcho(said, line) {
+    const out = String(said || "").replace(/\r/g, "");
+    const echo = out.indexOf(`${line}\n`);
+    return echo >= 0 && out.indexOf("Password:", echo + line.length + 1) >= 0;
+  }
+  const GUEST_REPLY = /SWITCHUSER user=|SESSION \d+ user=|Password:|unknown user|authentication failed|\bok\b|WHOAMI |@flintstone>|shell>/;
+  // Runs [{ line, secret }] steps against the guest. A secret step (a password) is sent only as the
+  // answer to the prompt the previous command opened: that prompt must follow the command's echo,
+  // and nothing else may have reached the guest since the command (else the other input may have
+  // answered the prompt, and the password would be typed as a command). Otherwise nothing more is
+  // sent. io: { input (createGuestInput), ready(), write(value), mark(), wait(re, from), said(from),
+  // status(message) }.
+  async function driveGuestSteps(steps, patterns, io) {
+    let asked = false;
+    let last = 0;
+    for (let i = 0; i < steps.length; i++) {
+      const step = steps[i];
+      if (step.secret && !asked) {
+        io.status("The guest did not ask for a password, so nothing more was sent.");
+        return false;
+      }
+      if (!io.ready()) return false;
+      const from = io.mark();
+      const line = `${step.line}\n`;
+      const seq = step.secret
+        ? await io.input.sendIfLast(last, () => io.write(line))
+        : await io.input.send(() => io.write(line));
+      if (!seq) {
+        io.status("Other input reached the guest before the password, so the password was not sent.");
+        return false;
+      }
+      last = seq;
+      await io.wait((patterns && patterns[i]) || GUEST_REPLY, from);
+      const said = io.said(from);
+      asked = !step.secret && promptAfterEcho(said, step.line);
+      if (/unknown user|authentication failed/.test(said)) return false;
+    }
+    return true;
+  }
   function guestNewSessionLines(name, password) {
     // A new session starts as Flinstone.
     const user = guestUserNameOk(name) ? name : "Flinstone";
     return [{ line: "session new", secret: false }].concat(switchSteps(user, password, "Flinstone"));
   }
 
-  return { STATES, validateManifest, isTrustedReadyEvent, createController, validDiagnosticVga, exactSerialLine, parseGuestLine, labDnsNameOk, labDnsRequestUrl, isFormTypingTarget, guestUserNameOk, guestRegisterLines, guestSwitchLines, guestNewSessionLines, hexToBytes, bytesToHex, fileRecvLines, fileAcceptLines };
+  return { STATES, validateManifest, isTrustedReadyEvent, createController, validDiagnosticVga, exactSerialLine, parseGuestLine, labDnsNameOk, labDnsRequestUrl, isFormTypingTarget, guestUserNameOk, guestRegisterLines, guestSwitchLines, guestNewSessionLines, createExclusiveQueue, createGuestInput, promptAfterEcho, driveGuestSteps, hexToBytes, bytesToHex, fileRecvLines, fileAcceptLines };
 });

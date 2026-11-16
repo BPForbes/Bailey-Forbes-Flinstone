@@ -193,6 +193,7 @@ run_cmd "gen_version_changelog (CI)" bash -c \
   'gcc -std=c11 -Wall -Wextra -O2 -o gen_version_changelog scripts/gen_version_changelog.c && ./gen_version_changelog'
 run_make "CUnit suite (build)" CHANGELOG_CI=1 BPForbes_Flinstone_Tests
 run_cmd "CUnit suite (run)" ./BPForbes_Flinstone_Tests
+run_make "test_interpreter_sudo_gate" CHANGELOG_CI=1 test_interpreter_sudo_gate
 
 if [[ "${FL_TEST_INCLUDE_VM_REPLAY:-0}" == "1" ]]; then
   run_make "test_replay (make clean inside)" test_replay

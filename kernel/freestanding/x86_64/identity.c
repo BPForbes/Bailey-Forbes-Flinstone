@@ -255,12 +255,16 @@ int fl_fs_identity_userdel(int session, const char *name)
     idx = find_user(name);
     if (idx < 0)
         return 0;
+    /* A sealed account is deleted only when its sealed key can be wiped too: a key left behind
+     * would keep the name and refuse a later useradd of it. */
+    if (s_users[idx].kq && (!s_kq || !s_kq->forget))
+        return 0;
     guest = find_user("Flinstone");
     for (int i = 0; i < FL_FS_MAX_SESSIONS; ++i) {
         if (s_session_used[i] && s_session_user[i] == idx)
             s_session_user[i] = guest;
     }
-    if (s_users[idx].kq && s_kq && s_kq->forget)
+    if (s_users[idx].kq)
         s_kq->forget(s_users[idx].name);
     s_users[idx].used = 0;
     secret_clear(s_users[idx].secret);

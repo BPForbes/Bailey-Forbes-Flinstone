@@ -8,12 +8,14 @@ opens /dev/tty), so a test fixture cannot pipe them in. Usage:
 
 Every prompt the program prints that ends in ':' is answered with the first line of
 PASSPHRASE_FILE. The passphrase is never on a command line or in the environment, and never
-echoed: the terminal has echo off while it is typed, and this script does not print the
-program's output back unless the program fails. Exits with the program's status.
+echoed: the child turns the terminal's echo off before it runs the program, so an answer written
+before the program itself turns echo off is not echoed into the output either. The script prints
+the program's own output. Exits with the program's status.
 """
 import os
 import pty
 import sys
+import termios
 
 
 def main() -> int:
@@ -25,6 +27,11 @@ def main() -> int:
     pid, fd = pty.fork()
     if pid == 0:
         try:
+            # Echo off on the terminal (the pty's slave side) before the program starts: the parent
+            # answers as soon as a prompt arrives, which can be before the program disables echo.
+            attrs = termios.tcgetattr(0)
+            attrs[3] &= ~termios.ECHO
+            termios.tcsetattr(0, termios.TCSANOW, attrs)
             os.execv(sys.argv[2], sys.argv[2:])
         finally:
             os._exit(127)

@@ -197,9 +197,12 @@ int cmd_sudo_sign_action(const char *line) {
     if (!line || !line[0])
         line = "sudo";
     (void)fl_session_elevated_action(line, 1, &deelevated);
-    if (!deelevated)
+    if (deelevated)
+        fprintf(stderr, "sudo: Root's key is not available, so the elevation ended; sign in again\n");
+    else if (fl_session_has_elevation())
         return 0;
-    fprintf(stderr, "sudo: Root's key is not available, so the elevation ended; sign in again\n");
+    /* Otherwise the window ended before this sudo could renew it: nothing was renewed, so sudo asks
+     * for the full co-signature again before it reports success. */
     if (cmd_sudo_require_auth_reason("sudo authentication") != 0)
         return 1;
     (void)fl_session_elevated_action(line, 1, &deelevated);

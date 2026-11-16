@@ -1192,6 +1192,7 @@ test_kq_real_token: userland/shell/common.o $(UTIL_SHELL_LINK_OBJS) $(FS_JAIL_CO
 	  userland/shell/common.o $(UTIL_SHELL_LINK_OBJS) $(FS_JAIL_CORE_OBJS) $(FS_JAIL_SUPPORT_OBJS) \
 	  kernel/core/mm/mem_domain.o $(MEM_ASM_OBJ) $(HISTORY_ASM_OBJ) $(UTIL_HISTORY_HOST_OBJS) \
 	  $(FS_JAIL_TEST_LIBS) -Wl,-z,noexecstack -Wl,--wrap=fl_kq_driver_get_or_register
+	python3 -I tests/test_kq_pty_answer.py
 	./scripts/kq_real_token_fixture.sh tests/test_kq_real_token
 
 .PHONY: test_kq_history_bundle
@@ -1483,6 +1484,16 @@ test_all-quiet:
 
 run_cunit_tests: BPForbes_Flinstone_Tests
 	@./BPForbes_Flinstone_Tests
+
+# The sudo window's signing gate runs before every builtin (CodeRabbit 4587909959): the shell's
+# interpreter and builtins, linked with the gate wrapped so the test counts its calls.
+TEST_INTERP_GATE_OBJS = $(filter-out BPForbes_Flinstone_Tests.o,$(TEST_OBJS)) $(TEST_ASMOBJS) $(TEST_EXTRA_LINK_OBJS)
+.PHONY: test_interpreter_sudo_gate
+test_interpreter_sudo_gate: $(VERSION_DEF) $(TEST_INTERP_GATE_OBJS)
+	$(CC) $(CFLAGS) -c -o tests/test_interpreter_sudo_gate.o tests/test_interpreter_sudo_gate.c
+	$(CXX) $(CXXFLAGS) -o tests/test_interpreter_sudo_gate tests/test_interpreter_sudo_gate.o $(TEST_INTERP_GATE_OBJS) \
+	  -Wl,-z,noexecstack $(TEST_LDFLAGS) $(FS_JAIL_TEST_LIBS) -Wl,--wrap=cmd_sudo_sign_elevated
+	./tests/test_interpreter_sudo_gate
 
 # Run only — no link step (fail fast if a binary is missing).
 run-test_wifi:

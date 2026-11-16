@@ -2,7 +2,7 @@
 const assert = require("assert");
 const fs = require("fs");
 const vm = require("vm");
-const { STATES, validateManifest, isTrustedReadyEvent, createController, validDiagnosticVga, parseGuestLine, labDnsNameOk, labDnsRequestUrl, isFormTypingTarget, guestUserNameOk, guestRegisterLines, guestSwitchLines, guestNewSessionLines, hexToBytes, bytesToHex, fileRecvLines, fileAcceptLines } = require("../tools/browser-lab/lab-core.js");
+const { STATES, validateManifest, isTrustedReadyEvent, createController, validDiagnosticVga, parseGuestLine, labDnsNameOk, labDnsRequestUrl, isFormTypingTarget, guestUserNameOk, guestRegisterLines, guestSwitchLines, guestNewSessionLines, createExclusiveQueue, createGuestInput, promptAfterEcho, driveGuestSteps, hexToBytes, bytesToHex, fileRecvLines, fileAcceptLines } = require("../tools/browser-lab/lab-core.js");
 const { createQmpClient } = require("../tools/browser-lab/qmp-client.js");
 const commit = "1".repeat(40);
 const evidence = {
@@ -108,7 +108,8 @@ assert(labJsSrc.includes("shell>"), "guest-line waits must accept the WASM shell
 assert(!/account-login", "account-new-session", "account-register", "account-name", "account-secret"/.test(labJsSrc),
   "account name/password fields must stay enabled so Playwright and operators can type before Ready");
 assert(labJsSrc.includes("syncRelayPrincipal"), "switchuser must reconnect the relay seat");
-assert(labJsSrc.includes("step.secret && !asked"), "a password step is sent only after the guest asks for one");
+assert(labJsSrc.includes("core.driveGuestSteps(") && fs.readFileSync("tools/browser-lab/lab-core.js", "utf8").includes("step.secret && !asked"),
+  "a password step is sent only after the guest asks for one");
 assert(labJsSrc.includes("account-root-secret"), "Register user must ask for Root's password");
 assert(labJsSrc.includes("sendingMsg"), "chat submit must ignore a second submit while sending");
 assert(labJsSrc.includes("void connectRelay()"), "Ready must auto-join the shared chat room");
@@ -332,5 +333,180 @@ assert(!isTrustedReadyEvent({ ...ready, data: { ...ready.data, type: "loading" }
   await controller.powerOff(); assert.strictEqual(states.at(-1), STATES.OFF);
   const failing = createController({ marker: "x", setState: (s) => states.push(s), postReady() {}, createEmulator: async () => { throw new Error("corrupt image"); } });
   await assert.rejects(() => failing.boot({}), /corrupt image/); assert.strictEqual(states.at(-1), STATES.FAILED);
+  // coder-44c9be (CR 4587909868): a password exchange owns the guest from its command until its
+  // password is sent. A fake guest takes the next line after Password: as that prompt's answer,
+  // so two exchanges that cross would hand one account's password to the other's prompt.
+  {
+    const fakeGuest = () => {
+      const guest = { out: "", prompt: null, answers: {}, commands: [], waiters: [] };
+      guest.flush = () => guest.waiters.splice(0).forEach(w => w());
+      guest.send = async line => {
+        await new Promise(r => setImmediate(r));
+        if (guest.prompt) {
+          guest.answers[guest.prompt] = line;
+          guest.out += `SWITCHUSER user=${guest.prompt}\n`;
+          guest.prompt = null;
+        } else {
+          guest.commands.push(line);
+          const m = /^switchuser (\S+)$/.exec(line);
+          if (m) { guest.prompt = m[1]; guest.out += "Password:"; }
+        }
+        guest.flush();
+      };
+      guest.wait = (re, from) => new Promise(resolve => {
+        const check = () => re.test(guest.out.slice(from)) ? resolve(true) : guest.waiters.push(check);
+        check();
+      });
+      return guest;
+    };
+    // The page's exchange: the command, then the password only once Password: has appeared.
+    const exchange = async (guest, name, password) => {
+      const from = guest.out.length;
+      await guest.send(`switchuser ${name}`);
+      await guest.wait(/Password:/, from);
+      await guest.send(password);
+    };
+    const drawPw = () => require("crypto").randomBytes(9).toString("hex");
+    const pwA = drawPw(), pwB = drawPw();
+    const guest = fakeGuest();
+    const lock = createExclusiveQueue();
+    await Promise.all([
+      lock.run(() => exchange(guest, "Ada", pwA)),
+      lock.run(() => exchange(guest, "Root", pwB)),
+    ]);
+    assert.deepStrictEqual(guest.answers, { Ada: pwA, Root: pwB }, "each password answers its own prompt");
+    assert.deepStrictEqual(guest.commands, ["switchuser Ada", "switchuser Root"], "no password is typed as a command");
+    // Control: without the queue the same two exchanges cross (the test can see the bug).
+    const loose = fakeGuest();
+    void exchange(loose, "Ada", pwA);
+    void exchange(loose, "Root", pwB);
+    await new Promise(r => setTimeout(r, 20));
+    assert.strictEqual(loose.answers.Ada, "switchuser Root", "unserialized exchanges cross");
+    // A turn that throws releases the guest for the next one.
+    const order = [];
+    await assert.rejects(lock.run(async () => { order.push(1); throw new Error("guest gone"); }), /guest gone/);
+    await lock.run(async () => { order.push(2); });
+    assert.deepStrictEqual(order, [1, 2]);
+    // lab.js routes every person-sent input through the exchange owner.
+    assert(/function sendGuestLines\(script, patterns\) \{\s*return guestExchange\.run\(\(\) => driveGuestLines\(script, patterns\)\);/.test(labJs),
+      "sendGuestLines must hold the exchange for the whole script");
+    assert(labJs.includes("guestExchange.run(() => enqueueGuest(() => emulator.typeChar(ch)))"), "keystrokes wait for the exchange");
+    assert(labJs.includes("guestExchange.run(() => enqueueGuest(() => emulator.sendKey(codes)))"), "send-key waits for the exchange");
+    const accountJs = labJs.slice(labJs.indexOf('const form = document.getElementById("switch-user")'));
+    assert.strictEqual((accountJs.match(/await guestExchange\.run\(/g) || []).length, 3, "Switch, New session and Register each take one exchange turn");
+    assert(!/[^.]sendGuestLines\(/.test(accountJs), "account actions drive their steps inside their own turn");
+  }
+  // coder-44c9be (review R1 on 1d0c768): a reply the guest asked for (dnsack, file lines) goes out
+  // at once through the byte queue, so it can reach an exchange's Password: prompt first. The
+  // password must then not be sent, or the shell would take it as a command (echoed, in history).
+  // This fake guest echoes a command as typed and a password as *, like the shell, and prints the
+  // result of a password a moment after the echo.
+  {
+    const drawPw = () => require("crypto").randomBytes(9).toString("hex");
+    const echoGuest = (accounts, staleFor) => {
+      const g = { out: "", prompt: staleFor || null, late: Boolean(staleFor), answers: {}, commands: [], waiters: [] };
+      const flush = () => g.waiters.splice(0).forEach(w => w());
+      const tick = () => new Promise(r => setImmediate(r));
+      // write() resolves once the line is delivered, as sendText does; the guest answers after.
+      let chain = Promise.resolve();
+      g.write = value => {
+        chain = chain.then(() => answer(value));
+        return tick();
+      };
+      const answer = async value => {
+        await tick();
+        const line = String(value).replace(/\n$/, "");
+        if (g.late) { g.late = false; g.out += "Password:"; flush(); await tick(); }
+        if (g.prompt) {
+          const who = g.prompt;
+          g.prompt = null;
+          g.answers[who] = line;
+          g.out += `${"*".repeat(line.length)}\r\n`;
+          flush();
+          await tick();
+          g.out += accounts[who] === line ? `SWITCHUSER user=${who}\r\n` : "authentication failed\r\n";
+        } else {
+          g.commands.push(line);
+          g.out += `${line}\r\n`;
+          const m = /^switchuser (\S+)$/.exec(line);
+          if (m) { g.prompt = m[1]; g.out += "Password:"; }
+        }
+        flush();
+      };
+      g.wait = (re, from) => new Promise(resolve => {
+        const timer = setTimeout(() => resolve(false), 30);
+        const check = () => re.test(g.out.slice(from)) ? (clearTimeout(timer), resolve(true)) : g.waiters.push(check);
+        check();
+      });
+      return g;
+    };
+    const run = async (g, input, steps, onWait) => {
+      const statuses = [];
+      let waits = 0;
+      const ok = await driveGuestSteps(steps, null, {
+        input, ready: () => true, write: v => g.write(v), mark: () => g.out.length,
+        wait: (re, from) => { if (waits++ === 0 && onWait) onWait(); return g.wait(re, from); },
+        said: from => g.out.slice(from), status: m => statuses.push(m),
+      });
+      await new Promise(r => setTimeout(r, 40));
+      return { ok, statuses };
+    };
+    const pw = drawPw();
+    const dnsack = "dnsack example.lab 10.0.0.5";
+    // Plain switch: the password answers its own prompt.
+    {
+      const g = echoGuest({ Ada: pw });
+      const r = await run(g, createGuestInput(), guestSwitchLines("Ada", pw, "Flinstone"));
+      assert.strictEqual(r.ok, true);
+      assert.deepStrictEqual(g.answers, { Ada: pw });
+      assert.deepStrictEqual(g.commands, ["switchuser Ada"]);
+    }
+    // A dnsack reaches the prompt first: the password is not sent.
+    {
+      const g = echoGuest({ Ada: pw });
+      const input = createGuestInput();
+      const r = await run(g, input, guestSwitchLines("Ada", pw, "Flinstone"),
+        () => { void input.send(() => g.write(`${dnsack}\n`)); });
+      assert.strictEqual(r.ok, false);
+      assert.strictEqual(g.answers.Ada, dnsack, "the dnsack answered the prompt (the race happened)");
+      assert(!g.commands.includes(pw), "the password must not be typed as a command");
+      assert(/Other input reached the guest/.test(r.statuses.join("\n")));
+    }
+    // Control, 1d0c768's wiring (secret sent whatever else went first): the password is typed as a command.
+    {
+      const g = echoGuest({ Ada: pw });
+      const input = createGuestInput();
+      const unguarded = { send: w => input.send(w), sendIfLast: (_mark, w) => input.send(w) };
+      await run(g, unguarded, guestSwitchLines("Ada", pw, "Flinstone"),
+        () => { void input.send(() => g.write(`${dnsack}\n`)); });
+      assert(g.commands.includes(pw), "control: without the guard the password becomes a command");
+    }
+    // A late Password: from an earlier, abandoned exchange: it takes this command as its answer
+    // and shows no echo of it, so this exchange does not send its password.
+    {
+      const rootPw = drawPw();
+      const g = echoGuest({ Ada: pw, Root: rootPw }, "Ada");
+      const r = await run(g, createGuestInput(), guestSwitchLines("Root", rootPw, "Flinstone"));
+      assert.strictEqual(r.ok, false);
+      assert.strictEqual(g.answers.Ada, "switchuser Root");
+      assert(!g.commands.includes(rootPw), "a late prompt must not draw the password out as a command");
+      assert(/did not ask for a password/.test(r.statuses.join("\n")));
+    }
+    assert.strictEqual(promptAfterEcho("switchuser Root\r\nPassword:", "switchuser Root"), true);
+    assert.strictEqual(promptAfterEcho("Password:***************\r\n", "switchuser Root"), false);
+    assert.strictEqual(promptAfterEcho("Password:switchuser Root\r\n", "switchuser Root"), false);
+    // A send counts even when the guest is mid-exchange; sendIfLast checks and sends in one turn.
+    {
+      const input = createGuestInput();
+      const first = await input.send(() => {});
+      assert.strictEqual(await input.sendIfLast(first, () => {}), first + 1);
+      await input.send(() => {});
+      assert.strictEqual(await input.sendIfLast(first + 1, () => assert.fail("must not send")), 0);
+    }
+    assert(labJs.includes("const guestKeys = core.createGuestInput();"), "every guest input is counted");
+    assert(/core\.driveGuestSteps\(steps, patterns, \{\s*input: guestKeys,/.test(labJs), "exchanges send through the counted input");
+    assert(!/emulator\.(sendText|typeChar|sendKey)\(/.test(labJs.replace(/enqueueGuest\(\(\) => emulator\.\w+\([^)]*\)\)/g, "").replace("write: value => emulator.sendText(value)", "")),
+      "nothing reaches the guest except through guestKeys");
+  }
   console.log("test_browser_lab: PASS");
 })().catch((error) => { console.error(error); process.exitCode = 1; });
