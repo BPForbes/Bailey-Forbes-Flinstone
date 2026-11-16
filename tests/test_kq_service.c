@@ -506,6 +506,85 @@ static int test_the_periodic_sweep(void) {
     return 0;
 }
 
+/* FL-20 autosign lifetime: an object removed while its signature is being made finishes that one
+ * signature (the run works on a copy) and is never signed again; the author's key copy is wiped either way. */
+static _Atomic int s_gate_in, s_gate_open;
+static fl_result_t gated_sign(void *c, const char *author, const uint8_t key[32], kq_signing_mode_t m) {
+    fake_obj_t *o = (fake_obj_t *)c;
+    int waited = 0;
+
+    (void)author, (void)key, (void)m;
+    atomic_store(&s_gate_in, 1);
+    while (!atomic_load(&s_gate_open) && waited++ < 100) /* at most 1 s, inside the heartbeat limit */
+        sleep_ms(10);
+    atomic_fetch_add(&o->signed_count, 1);
+    return FL_RESULT_OK;
+}
+
+static int test_autosign_removed_mid_run(void) {
+    static fake_obj_t mid;
+    const fl_user_record_t *flin = account("Flinstone");
+    fl_kq_autosign_t spec = {.label = "mid-run", .ctx = &mid, .last_signature_sec = fake_last,
+                             .head_author = fake_head, .sign = gated_sign, .interval_sec = 1};
+    int waited = 0;
+
+    ASSERT(flin && fl_session_login("Flinstone", "flinstone") == FL_RESULT_OK);
+    mid.last_sig = 0;
+    mid.head_rc = FL_RESULT_OK;
+    snprintf(mid.author, sizeof mid.author, "%s", flin->key_id);
+    atomic_store(&s_gate_in, 0);
+    atomic_store(&s_gate_open, 0);
+    ASSERT(fl_kq_service_autosign_add(&spec) == FL_RESULT_OK);
+    while (!atomic_load(&s_gate_in) && waited++ < 300)
+        sleep_ms(10);
+    ASSERT(atomic_load(&s_gate_in));                                     /* the signature is being made */
+    ASSERT(fl_kq_service_autosign_remove("mid-run") == FL_RESULT_OK);   /* removed during it */
+    atomic_store(&s_gate_open, 1);
+    ASSERT(service_barrier() == 0);
+    ASSERT(atomic_load(&mid.signed_count) == 1);                         /* that one finished */
+    sleep_ms(2200);
+    ASSERT(atomic_load(&mid.signed_count) == 1);                         /* and nothing after it */
+    ASSERT(fl_kq_service_autosign_remove("mid-run") == FL_RESULT_NOENT);
+    ASSERT(fl_kq_service_alive());
+    ASSERT(fl_session_logout() == FL_RESULT_OK);
+    return 0;
+}
+
+/* FL-20 autosign lifetime: the table holds FL_KQ_AUTOSIGN_MAX objects. One more is refused with NOMEM and
+ * nothing is queued for it, and the service stays up. A removed object keeps its slot (its periodic item
+ * cannot be cancelled and still points at it), so removal does not make room. */
+static int test_autosign_table_full(void) {
+    static fake_obj_t fill[FL_KQ_AUTOSIGN_MAX + 1];
+    fl_kq_autosign_t spec = {.last_signature_sec = fake_last, .head_author = fake_head, .sign = fake_sign,
+                             .interval_sec = 3600};
+    char labels[FL_KQ_AUTOSIGN_MAX + 1][16];
+    int added = 0, refused = 0;
+
+    for (int i = 0; i <= (int)FL_KQ_AUTOSIGN_MAX && !refused; i++) {
+        fill[i].last_sig = INT64_MAX / 2; /* never due: nothing is signed while the table fills */
+        fill[i].head_rc = FL_RESULT_OK;
+        snprintf(labels[i], sizeof labels[i], "fill-%d", i);
+        spec.label = labels[i];
+        spec.ctx = &fill[i];
+        if (fl_kq_service_autosign_add(&spec) == FL_RESULT_OK)
+            added++;
+        else
+            refused = 1;
+    }
+    ASSERT(refused && added < (int)FL_KQ_AUTOSIGN_MAX + 1);
+    spec.label = "one-more";
+    spec.ctx = &fill[FL_KQ_AUTOSIGN_MAX];
+    ASSERT(fl_kq_service_autosign_add(&spec) == FL_RESULT_NOMEM);
+    ASSERT(fl_kq_service_autosign_remove("one-more") == FL_RESULT_NOENT); /* nothing was registered */
+    if (added > 0)
+        ASSERT(fl_kq_service_autosign_remove(labels[0]) == FL_RESULT_OK);
+    ASSERT(fl_kq_service_autosign_add(&spec) == FL_RESULT_NOMEM); /* removal does not free the slot */
+    ASSERT(fl_kq_service_alive());
+    for (int i = 1; i < added; i++)
+        ASSERT(fl_kq_service_autosign_remove(labels[i]) == FL_RESULT_OK);
+    return 0;
+}
+
 /* The audit lines the service writes, captured through the audit sink (the service thread emits). */
 static pthread_mutex_t s_audit_mu = PTHREAD_MUTEX_INITIALIZER;
 static char s_audit[8192];
@@ -1223,6 +1302,8 @@ int main(void) {
     if (!rc) RUN(test_a_replacing_login_wipes_the_previous_box_key);
     if (!rc) RUN(test_a_parent_is_assembled_from_the_children_online);
     if (!rc) RUN(test_a_failed_reload_takes_the_signed_in_key_offline);
+    if (!rc) RUN(test_autosign_removed_mid_run);
+    if (!rc) RUN(test_autosign_table_full);
     if (!rc) RUN(test_orderly_shutdown_is_the_only_end);
     unlink(path);
     {

@@ -810,6 +810,19 @@ the driver registry exists (`fl_kq_service_start`) and ended only by an orderly 
 - **Box key (FL-15).** A KQST login opens the signing and the box secret; the box secret is now published to the service as well
   (`fl_session_set_login_box_hook`, `fl_kq_service_online_box`), for the same login generation, and `fl_kq_obtain_box_key` hands a copy to the
   account's own label only. A password login publishes none; logout and shutdown wipe it.
+- **Key custody (FL-20 #399).** The resident key table (`s_slots` in `kq_service.c`) and the sudo window's two keys
+  (`kq_account.c`) are each in a page-aligned region the service locks into memory at start (`mlock`, made as the
+  system call on Linux so a sanitizer build cannot fake it) and leaves out of core dumps (`MADV_DONTDUMP`). A host
+  that refuses the lock (a low `RLIMIT_MEMLOCK`) is audited `kq-keys-unlocked` and the service still runs; the
+  keys are then wiped as before but may reach swap. Every copy handed out is wiped by its caller at once.
+- **Security notes for FL-20.** With no stored Root credential there is no plaintext-equivalent secret at rest, so
+  the exception and threat model the fallback would have needed (and KeyQuorum's `docs/soc2-controls.md` entry for
+  it) are not needed. What remains is the in-memory exposure above: an attacker who can read this process's memory
+  while an account is signed in, or inside a sudo window, can use those keys. The window bounds Root's exposure to
+  15 minutes from the last sudo. Autosign lifetime is tested in `tests/test_kq_service.c`: an object removed while it
+  is being signed finishes that signature and is never signed again; an author who is not signed in is audited
+  `kq-autosign-wait` and retried each period; a full table (`FL_KQ_AUTOSIGN_MAX`) refuses a new object with NOMEM
+  and queues nothing. A removed object keeps its slot, because its periodic item cannot be cancelled.
 - **No stored Root credential (owner decision, FL-20 #399).** The service never brings Root online from a stored credential. Root's
   key is online only while someone who knows it has opened it: a Root sign-in, or a sudo that opened Root's KQST. When no one is signed in,
   unattended work waits. The freestanding image has no sessions, so it has no service.
