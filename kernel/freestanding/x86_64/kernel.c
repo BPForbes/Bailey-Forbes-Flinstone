@@ -1,4 +1,5 @@
 #include <stdint.h>
+#include "bootinfo.h"
 #include "identity.h"
 #include "labdisk.h"
 #include "labnet.h"
@@ -30,21 +31,27 @@ struct idtr {
 
 static struct idt_gate idt[256];
 
+/* The image's own bounds, from linker.ld. */
+extern char __kernel_start[], __bss_start[], __bss_end[];
+
+__attribute__((noreturn)) static void boot_fail(const char *marker)
+{
+    fl_fs_serial_puts(marker);
+    for (;;)
+        __asm__ volatile("cli; hlt");
+}
+
 __attribute__((interrupt)) static void early_exception(void *frame)
 {
     (void)frame;
-    fl_fs_serial_puts("FLINTSTONE_EARLY_EXCEPTION\r\n");
-    for (;;)
-        __asm__ volatile("cli; hlt");
+    boot_fail("FLINTSTONE_EARLY_EXCEPTION\r\n");
 }
 
 __attribute__((interrupt)) static void early_exception_with_error(void *frame, uintptr_t error)
 {
     (void)frame;
     (void)error;
-    fl_fs_serial_puts("FLINTSTONE_EARLY_EXCEPTION_WITH_ERROR\r\n");
-    for (;;)
-        __asm__ volatile("cli; hlt");
+    boot_fail("FLINTSTONE_EARLY_EXCEPTION_WITH_ERROR\r\n");
 }
 
 __attribute__((interrupt)) static void irq_pit(void *frame)
@@ -88,9 +95,13 @@ static void idt_init(void)
     __asm__ volatile("lidt %0" : : "m"(descriptor));
 }
 
-void fl_kernel_main(void)
+void fl_kernel_main(const fl_boot_info_t *boot_info)
 {
     fl_fs_serial_init();
+    /* Before anything else starts: the loader's handoff must describe this image and a whole map. */
+    if (fl_bootinfo_validate(boot_info, (uintptr_t)__kernel_start, (uintptr_t)__bss_start,
+                             (uintptr_t)__bss_end) != FL_BOOTMAP_OK)
+        boot_fail("FLINTSTONE_BOOT_FAIL bootinfo\r\n");
     idt_init();
     fl_fs_vga_init();
     fl_fs_pic_init();

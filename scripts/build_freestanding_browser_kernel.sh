@@ -13,8 +13,14 @@ fi
 dist="${root}/dist"
 mkdir -p "${build}" "${dist}"
 for tool in nasm gcc ld objcopy python3 sha256sum git; do command -v "$tool" >/dev/null || { echo "missing tool: $tool" >&2; exit 1; }; done
-nasm -f bin "${root}/kernel/freestanding/x86_64/boot.asm" -o "${build}/boot.bin"
-nasm -f elf64 "${root}/kernel/freestanding/x86_64/entry.asm" -o "${build}/entry.o"
+# FL-02: stage 1 (the MBR) loads the bounded stage 2, which collects E820, enables A20 and loads
+# the kernel. Both take their layout from bootinfo.inc.
+fsdir="${root}/kernel/freestanding/x86_64"
+nasm -f bin -I"${fsdir}/" "${fsdir}/boot.asm" -o "${build}/boot.bin"
+nasm -f bin -I"${fsdir}/" "${fsdir}/stage2.asm" -o "${build}/stage2.bin"
+stage2_sectors=$(awk '$1=="%define" && $2=="FL_STAGE2_SECTORS"{print $3}' "${fsdir}/bootinfo.inc")
+(( stage2_sectors > 0 && $(stat -c%s "${build}/stage2.bin") == stage2_sectors * 512 )) || { echo "stage 2 is not ${stage2_sectors} sectors" >&2; exit 1; }
+nasm -f elf64 -I"${fsdir}/" "${fsdir}/entry.asm" -o "${build}/entry.o"
 cflags=(-c -std=c11 -m64 -march=x86-64 -mno-red-zone -mgeneral-regs-only -ffreestanding -fno-stack-protector -fno-pic -fno-asynchronous-unwind-tables -Wall -Wextra -Werror -DFL_FREESTANDING -DNDEBUG -I"${root}/kernel/drivers/freestanding_x86_64" -I"${root}/kernel/freestanding/x86_64")
 # The shared workqueue (kernel/core/sched) is compiled in unchanged; -DFL_FREESTANDING selects its
 # unlocked, static-pool configuration. Same include roots as the hosted build for its contracts.
@@ -54,6 +60,7 @@ for src in \
     "${root}/kernel/freestanding/x86_64/commands.c" \
     "${root}/kernel/freestanding/x86_64/shell.c" \
     "${root}/kernel/freestanding/x86_64/bgtick.c" \
+    "${root}/kernel/freestanding/x86_64/bootmap.c" \
     "${root}/kernel/core/sched/priority_queue.c" \
     "${root}/kernel/core/sched/workqueue.c" \
     "${root}/kernel/core/sched/bg_jobs.c" \
@@ -63,7 +70,10 @@ do
     obj="${build}/$(basename "${src}" .c).o"
     extra=()
     # kq_platform.c defines memcpy and friends: nothing in it may turn into a call to itself.
-    case "${src}" in */kq_platform.c) extra=(-fno-builtin -fno-tree-loop-distribute-patterns) ;; esac
+    case "${src}" in
+        */kq_platform.c) extra=(-fno-builtin -fno-tree-loop-distribute-patterns) ;;
+        */bootmap.c) extra=(-Os) ;; # runs once per boot: small beats fast while the image lives below 0x9f000
+    esac
     gcc "${cflags[@]}" ${extra[@]+"${extra[@]}"} "${src}" -o "${obj}"
     objects+=("${obj}")
 done
@@ -74,7 +84,7 @@ ld_extra=()
 [ "${kq_on}" = "1" ] && ld_extra=(--gc-sections "${kqlib}")
 ld -m elf_x86_64 -nostdlib -T "${root}/kernel/freestanding/x86_64/linker.ld" "${objects[@]}" ${ld_extra[@]+"${ld_extra[@]}"} -o "${build}/kernel.elf"
 objcopy -O binary "${build}/kernel.elf" "${build}/kernel.bin"
-# Chunked BIOS load (see boot.asm): the MBR reads the payload in <=127-sector
+# Chunked BIOS load (see stage2.asm): stage 2 reads the payload in <=127-sector
 # pieces, advancing the destination segment each time, so it is no longer a
 # single-transfer loader. The ceiling here is not that mechanism's limit; it
 # keeps the loaded payload's end address (0x10000 + sectors*512) safely below
@@ -119,22 +129,26 @@ if problems:
     sys.exit("image layout: " + "; ".join(problems))
 ' "${payload_bytes}" "${sectors}"
 # FL-22 acceptance evidence: payload size and bss end (already gated above) are recorded for CI logs.
-python3 - "${build}/boot.bin" "$sectors" <<'PY'
+# Stage 2 learns the payload's sector count and the bss end from its tagged patch block.
+python3 - "${build}/stage2.bin" "$sectors" "$bss_end" <<'PY'
 import pathlib, struct, sys
 p = pathlib.Path(sys.argv[1]); data = bytearray(p.read_bytes())
-needle = bytes((0xef, 0xbe, 0, 0, 0x0d, 0xf0))
-off = data.index(needle) + 2
-data[off:off+2] = struct.pack('<H', int(sys.argv[2]))
+tag = b"FLS2PTCH"
+off = data.find(tag)
+assert off >= 0 and data.find(tag, off + 1) < 0, "stage 2 patch tag missing or not unique"
+off += len(tag)
+assert data[off:off + 8] == bytes(8), "stage 2 patch block already written"
+data[off:off + 8] = struct.pack("<II", int(sys.argv[2]), int(sys.argv[3], 16))
 p.write_bytes(data)
 PY
-image="${dist}/${imgname}"; cat "${build}/boot.bin" "${build}/kernel.bin" >"${image}"
-truncate -s $(( (sectors + 1) * 512 )) "${image}"
+image="${dist}/${imgname}"; cat "${build}/boot.bin" "${build}/stage2.bin" "${build}/kernel.bin" >"${image}"
+truncate -s $(( (1 + stage2_sectors + sectors) * 512 )) "${image}"
 commit="${GITHUB_SHA:-$(git -C "${root}" rev-parse HEAD)}"; short="${commit:0:7}"
 sha="$(sha256sum "${image}" | awk '{print $1}')"; built="${BUILD_TIMESTAMP:-$(date -u +'%Y-%m-%dT%H:%M:%SZ')}"
-python3 - "${dist}/${infoname}" "$commit" "$short" "$built" "$sha" "$imgname" "$secfeat" "$sectors" "$payload_bytes" "$bss_end" <<'PY'
+python3 - "${dist}/${infoname}" "$commit" "$short" "$built" "$sha" "$imgname" "$secfeat" "$sectors" "$payload_bytes" "$bss_end" "$stage2_sectors" <<'PY'
 import json, sys
-out, commit, short, built, sha, artifact, secfeat, sectors, payload_bytes, bss_end = sys.argv[1:]
-info={"schemaVersion":2,"project":"Flintstone Kernel","repository":"BPForbes/Bailey-Forbes-Flinstone","commit":commit,"shortCommit":short,"builtAt":built,"architecture":"x86_64","cpuMode":"64-bit long mode, freestanding","artifact":artifact,"artifactFormat":"raw BIOS disk image","securityFeatures":secfeat=="1","sha256":sha,"browserEmulator":"QEMU Wasm x86_64 (b7c549b5e6f4)","browserCompatible":False,"v86Compatible":False,"bootableCandidate":True,"bootable":False,"bootloader":"BIOS MBR long-mode loader","requiredBios":"SeaBIOS-compatible","qemuBootMode":"ide-drive","minimumRamBytes":64*1024*1024,"recommendedRamBytes":64*1024*1024,"bootSuccessMarker":"FLINTSTONE_KERNEL_BOOT_OK","bootSuccessMarkerImplemented":True,"validationOutcome":"qemu-unvalidated","runtimeMode":"browser-hosted","serverPath":"relay","serverRelayPort":8767,"payloadSectors":int(sectors),"payloadBytes":int(payload_bytes),"bssEnd":bss_end,"conventionalMemoryBudget":"0x9f000","capabilities":{"longMode":True,"gdt":True,"idt":True,"serial":True,"vga":True,"pic":True,"pit":True,"ps2Probe":True,"keyboard":True,"biosBlockLoad":True,"identity":True,"hostedLabSessions":True,"filesystem":True,"network":True,"server":True,"securityLab":secfeat=="1"},"blockers":["QEMU has not independently observed the serial marker","Browser has not independently observed the serial marker for this image"]}
+out, commit, short, built, sha, artifact, secfeat, sectors, payload_bytes, bss_end, stage2_sectors = sys.argv[1:]
+info={"schemaVersion":2,"project":"Flintstone Kernel","repository":"BPForbes/Bailey-Forbes-Flinstone","commit":commit,"shortCommit":short,"builtAt":built,"architecture":"x86_64","cpuMode":"64-bit long mode, freestanding","artifact":artifact,"artifactFormat":"raw BIOS disk image","securityFeatures":secfeat=="1","sha256":sha,"browserEmulator":"QEMU Wasm x86_64 (b7c549b5e6f4)","browserCompatible":False,"v86Compatible":False,"bootableCandidate":True,"bootable":False,"bootloader":"BIOS MBR + stage 2 long-mode loader (E820, A20, boot info v1)","requiredBios":"SeaBIOS-compatible","qemuBootMode":"ide-drive","minimumRamBytes":64*1024*1024,"recommendedRamBytes":64*1024*1024,"bootSuccessMarker":"FLINTSTONE_KERNEL_BOOT_OK","bootSuccessMarkerImplemented":True,"validationOutcome":"qemu-unvalidated","runtimeMode":"browser-hosted","serverPath":"relay","serverRelayPort":8767,"stage2Sectors":int(stage2_sectors),"payloadSectors":int(sectors),"payloadBytes":int(payload_bytes),"bssEnd":bss_end,"conventionalMemoryBudget":"0x9f000","capabilities":{"longMode":True,"gdt":True,"idt":True,"serial":True,"vga":True,"pic":True,"pit":True,"ps2Probe":True,"keyboard":True,"biosBlockLoad":True,"identity":True,"hostedLabSessions":True,"filesystem":True,"network":True,"server":True,"securityLab":secfeat=="1"},"blockers":["QEMU has not independently observed the serial marker","Browser has not independently observed the serial marker for this image"]}
 with open(out,'w',encoding='utf-8') as f: json.dump(info,f,indent=2); f.write('\n')
 PY
-echo "browser-kernel: wrote ${image} (${sectors} payload sectors / ${payload_bytes} bytes, bss_end=${bss_end} < 0x9f000, SECFEAT=${secfeat})"
+echo "browser-kernel: wrote ${image} (${stage2_sectors} stage 2 + ${sectors} payload sectors / ${payload_bytes} bytes, bss_end=${bss_end} < 0x9f000, SECFEAT=${secfeat})"

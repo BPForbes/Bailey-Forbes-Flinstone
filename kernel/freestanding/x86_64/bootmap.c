@@ -4,6 +4,7 @@
  * usable entries that touch it and then cut at the first blocker after it. With the buffer's
  * bounded entry count that is a few hundred thousand comparisons at most, once per boot.
  */
+#include "bootinfo.h"
 #include "bootmap.h"
 
 enum { KIND_IGNORED, KIND_USABLE, KIND_BLOCKER };
@@ -104,5 +105,46 @@ int fl_bootmap_select_arena(const fl_e820_entry_t *entries, uint32_t count, uint
         return FL_BOOTMAP_E_NOFIT;
     *out_base = best_base;
     *out_size = best_size;
+    return FL_BOOTMAP_OK;
+}
+
+/* [base, end) lies inside one of the loader's reservations. */
+static int reserved_covers(const fl_boot_info_t *bi, uint64_t base, uint64_t end)
+{
+    for (uint32_t i = 0; i < bi->reserved_count; i++)
+        if (bi->reserved[i].base <= base && end <= bi->reserved[i].end)
+            return 1;
+    return 0;
+}
+
+int fl_bootinfo_validate(const fl_boot_info_t *bi, uint64_t kernel_start, uint64_t bss_start, uint64_t kernel_end)
+{
+    uint64_t map_end;
+
+    if (!bi || bi->magic != FL_BOOTINFO_MAGIC || bi->version != FL_BOOTINFO_VERSION ||
+        bi->size != sizeof(*bi) || (bi->flags & ~FL_BOOTINFO_F_E820_TRUNCATED))
+        return FL_BOOTMAP_E_INVAL;
+    if ((bi->flags & FL_BOOTINFO_F_E820_TRUNCATED) || bi->e820_count == 0 ||
+        bi->e820_count > bi->e820_capacity)
+        return FL_BOOTMAP_E_TRUNCATED;
+    if (bi->e820_capacity > FL_BOOTINFO_E820_CAP || !bi->e820_addr || (bi->e820_addr & 7))
+        return FL_BOOTMAP_E_INVAL;
+    map_end = bi->e820_addr + (uint64_t)bi->e820_capacity * sizeof(fl_e820_entry_t);
+    /* The image the loader describes is this image: same start, same end, fully read. */
+    if (bi->kernel_base != kernel_start || bi->kernel_end != kernel_end || kernel_start >= bss_start ||
+        bss_start > kernel_end || bi->kernel_load_end < bss_start ||
+        ((bi->kernel_load_end - kernel_start) & 511) || bi->mapped_end < kernel_end)
+        return FL_BOOTMAP_E_INVAL;
+    if (bi->reserved_count == 0 || bi->reserved_count > FL_BOOTINFO_MAX_RESERVED)
+        return FL_BOOTMAP_E_INVAL;
+    for (uint32_t i = 0; i < bi->reserved_count; i++)
+        if (bi->reserved[i].base >= bi->reserved[i].end)
+            return FL_BOOTMAP_E_INVAL;
+    /* The image, its stack, the E820 buffer and this struct are reserved: no arena can take them. */
+    if (map_end < bi->e820_addr || !reserved_covers(bi, kernel_start, kernel_end) ||
+        !reserved_covers(bi, FL_KERNEL_STACK_BOTTOM, FL_KERNEL_STACK_TOP) ||
+        !reserved_covers(bi, bi->e820_addr, map_end) ||
+        !reserved_covers(bi, (uintptr_t)bi, (uintptr_t)bi + sizeof(*bi)))
+        return FL_BOOTMAP_E_INVAL;
     return FL_BOOTMAP_OK;
 }
