@@ -116,7 +116,9 @@ int fl_kq_open_account(const char *user, const char *password, const char *kqst_
 #define FL_KQ_TOKEN_PATH_MAX 512u
 /**
  * Where the kernel keeps key_id's token: "<directory of db_path>/kqst/<key_id>.kqst". 0, or -1 when
- * it does not fit in cap or key_id is empty or holds a '/'.
+ * it does not fit in cap or key_id is not a safe file name (letters, digits, '.', '_' and '-' only,
+ * not starting with '.', no ".."). The token is written only into a "kqst" directory this process
+ * owns that no one else can write to, and never through a symlink.
  */
 int fl_kq_account_token_path(const char *db_path, const char *key_id, char *out, size_t cap);
 /**

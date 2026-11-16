@@ -2255,6 +2255,69 @@ static int file_mode_is(const char *path, mode_t want) {
  * puts the account back to password sign-in, a sign-in makes the token, and sudo is co-signed by
  * Root's and the invoker's real keys.
  */
+/*
+ * CodeQL cpp/path-injection on PR 416: the token directory comes from FL_USERS_DB_PATH, so the
+ * write refuses a "kqst" that is a symlink or that someone else could write to, and a file name
+ * that is not a safe key id. Nothing is written in any of those places.
+ */
+static int test_token_write_refuses_unsafe_places(void) {
+    char base[] = "/tmp/fl-kqst-safe-XXXXXX";
+    char real[600], link[600], path[700], pw[33];
+    uint8_t sign[32], box[32], rnd[16];
+    unsigned char dev[16], spub[32], epub[32];
+    struct stat st;
+    int i;
+
+    ASSERT(mkdtemp(base) != NULL);
+    {
+        FILE *ur = fopen("/dev/urandom", "rb");
+
+        ASSERT(ur && fread(rnd, 1, sizeof rnd, ur) == sizeof rnd && fread(sign, 1, sizeof sign, ur) == sizeof sign &&
+               fread(box, 1, sizeof box, ur) == sizeof box && fread(dev, 1, sizeof dev, ur) == sizeof dev);
+        fclose(ur);
+    }
+    for (i = 0; i < 16; i++)
+        snprintf(pw + 2 * i, 3, "%02x", rnd[i]); /* a fresh password, never a literal one */
+
+    /* A safe place: a kqst directory this process owns, made owner-only. */
+    snprintf(path, sizeof path, "%s/ok/kqst/Root.x.kqst", base);
+    snprintf(real, sizeof real, "%s/ok", base);
+    ASSERT(mkdir(real, 0700) == 0);
+    ASSERT(fl_kq_write_account_token("Root.x", pw, sign, box, dev, path, spub, epub) == FL_KQ_ACCOUNT_OK);
+    ASSERT(file_mode_is(path, 0600));
+    unlink(path);
+
+    /* kqst is a symlink to another directory: refused, and nothing lands there. */
+    snprintf(real, sizeof real, "%s/elsewhere", base);
+    snprintf(link, sizeof link, "%s/kqst", base);
+    ASSERT(mkdir(real, 0700) == 0 && symlink(real, link) == 0);
+    snprintf(path, sizeof path, "%s/Root.x.kqst", link);
+    ASSERT(fl_kq_write_account_token("Root.x", pw, sign, box, dev, path, spub, epub) != FL_KQ_ACCOUNT_OK);
+    snprintf(path, sizeof path, "%s/Root.x.kqst", real);
+    ASSERT(stat(path, &st) != 0);
+    snprintf(path, sizeof path, "%s/Root.x.kqst.new", real);
+    ASSERT(stat(path, &st) != 0);
+    unlink(link);
+
+    /* kqst is group-writable: refused. */
+    snprintf(real, sizeof real, "%s/shared", base);
+    ASSERT(mkdir(real, 0700) == 0 && chmod(real, 0770) == 0);
+    snprintf(path, sizeof path, "%s/Root.x.kqst", real);
+    ASSERT(fl_kq_write_account_token("Root.x", pw, sign, box, dev, path, spub, epub) != FL_KQ_ACCOUNT_OK);
+    ASSERT(stat(path, &st) != 0);
+
+    /* A file name that is not a safe key id: refused. */
+    snprintf(path, sizeof path, "%s/ok/kqst/..kqst", base);
+    ASSERT(fl_kq_write_account_token("Root.x", pw, sign, box, dev, path, spub, epub) != FL_KQ_ACCOUNT_OK);
+
+    mem_domain_secure_zero(pw, sizeof pw);
+    mem_domain_secure_zero(sign, sizeof sign);
+    mem_domain_secure_zero(box, sizeof box);
+    snprintf(path, sizeof path, "rm -rf '%s'", base);
+    ASSERT(system(path) == 0);
+    return 0;
+}
+
 static int test_kqst_made_by_kernel(void) {
     char fl_tok[600], root_tok[600], bob_tok[600], db_path[512], junk[600];
     char *make_argv[] = {"kqst", "enroll", NULL};
@@ -2265,6 +2328,11 @@ static int test_kqst_made_by_kernel(void) {
     ASSERT(fl_kq_account_token_path(db_path, "Root", root_tok, sizeof root_tok) == 0);
     ASSERT(fl_kq_account_token_path(db_path, "Root.Flinstone.Bob", bob_tok, sizeof bob_tok) == 0);
     ASSERT(fl_kq_account_token_path(db_path, "a/b", junk, sizeof junk) != 0); /* never a path out */
+    ASSERT(fl_kq_account_token_path(db_path, "..", junk, sizeof junk) != 0);
+    ASSERT(fl_kq_account_token_path(db_path, "Root..x", junk, sizeof junk) != 0);
+    ASSERT(fl_kq_account_token_path(db_path, ".hidden", junk, sizeof junk) != 0);
+    ASSERT(fl_kq_account_token_path(db_path, "a b", junk, sizeof junk) != 0);
+    ASSERT(fl_kq_account_token_path(db_path, "a\\b", junk, sizeof junk) != 0);
     ASSERT(fl_user_db_find(fl_session_user_db(), "Bob"));
     unlink(fl_tok), unlink(root_tok), unlink(bob_tok);
     fl_session_set_audit_hook(capture_audit);
@@ -2705,6 +2773,7 @@ int main(void) {
     RUN(test_sudo_commands_need_root_token);
     RUN(test_kqst_enroll);
     RUN(test_kqst_made_by_kernel);
+    RUN(test_token_write_refuses_unsafe_places);
     RUN(test_restore_user);
     RUN(test_switch_bridge_recheck);
     RUN(test_switch_mutation_barriers);

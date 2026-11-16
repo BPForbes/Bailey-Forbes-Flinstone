@@ -429,12 +429,31 @@ int fl_kq_open_account(const char *user, const char *password, const char *kqst_
  * owner-only. It seals the keys the account already has (its signing key and box key), so the
  * account's public keys and everything it signed stay valid.
  */
+/* A key id names a file only when it is made of letters, digits, '.', '_' and '-', does not start
+ * with '.' and holds no "..": nothing it names can leave the token directory or hide there. */
+static int token_name_safe(const char *key_id) {
+    size_t i;
+
+    if (!key_id || !key_id[0] || key_id[0] == '.' || strstr(key_id, ".."))
+        return 0;
+    for (i = 0; key_id[i]; i++) {
+        unsigned char c = (unsigned char)key_id[i];
+
+        if (!((c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z') || (c >= '0' && c <= '9') || c == '.' ||
+              c == '_' || c == '-'))
+            return 0;
+        if (i >= FL_HERITAGE_KEY_ID_MAX)
+            return 0;
+    }
+    return 1;
+}
+
 int fl_kq_account_token_path(const char *db_path, const char *key_id, char *out, size_t cap) {
     const char *slash;
     size_t dir_len;
     int n;
 
-    if (!db_path || !key_id || !key_id[0] || !out || cap == 0 || strchr(key_id, '/'))
+    if (!db_path || !out || cap == 0 || !token_name_safe(key_id))
         return -1;
     slash = strrchr(db_path, '/');
     dir_len = slash ? (size_t)(slash - db_path) : 0;
@@ -451,16 +470,35 @@ int fl_kq_account_token_path(const char *db_path, const char *key_id, char *out,
     return 0;
 }
 
-/* Write bytes to path through "<path>.new" (created owner-only, never over an existing file) and a
- * rename, so a reader sees the old token or the new one, never part of one. */
+/*
+ * Write bytes to path through "<path>.new" (created owner-only, never over an existing file) and a
+ * rename, so a reader sees the old token or the new one, never part of one.
+ *
+ * The directory comes from where the account store is (FL_USERS_DB_PATH), which the operator sets;
+ * only its last part, "kqst", is made here. So that a path from the environment cannot be used to
+ * write somewhere else (CodeQL cpp/path-injection on PR 416), the file name must be a safe key id
+ * (token_name_safe), the directory is opened once without following a symlink and must be a
+ * directory this process owns that no one else can write to, and every step after that is relative
+ * to that open directory, so it cannot be swapped part-way. Hosts without openat keep the plain path.
+ */
 static int write_token_file(const char *path, const uint8_t *bytes, size_t len) {
-    char tmp[FL_KQ_TOKEN_PATH_MAX + 8];
     char dir[FL_KQ_TOKEN_PATH_MAX];
+    char name[FL_KQ_TOKEN_PATH_MAX], tmp_name[FL_KQ_TOKEN_PATH_MAX + 8];
     const char *slash = strrchr(path, '/');
-    size_t off = 0;
-    int fd;
+    const char *base = slash ? slash + 1 : path;
+    size_t off = 0, blen = strlen(base);
+    int fd, dfd = AT_FDCWD;
+    struct stat st;
 
-    if (snprintf(tmp, sizeof tmp, "%s.new", path) >= (int)sizeof tmp)
+    /* The file is "<key id>.kqst": the key id part must be one token_name_safe accepts. */
+    if (blen <= 5 || strcmp(base + blen - 5, ".kqst") != 0 || blen - 5 >= sizeof name)
+        return -1;
+    memcpy(name, base, blen - 5);
+    name[blen - 5] = '\0';
+    if (!token_name_safe(name))
+        return -1;
+    snprintf(name, sizeof name, "%s", base);
+    if (snprintf(tmp_name, sizeof tmp_name, "%s.new", name) >= (int)sizeof tmp_name)
         return -1;
     if (slash) {
         size_t dlen = (size_t)(slash - path);
@@ -471,11 +509,19 @@ static int write_token_file(const char *path, const uint8_t *bytes, size_t len) 
         dir[dlen] = '\0';
         if (dlen && mkdir(dir, 0700) != 0 && errno != EEXIST)
             return -1;
+        dfd = open(dlen ? dir : "/", O_RDONLY | O_DIRECTORY | O_NOFOLLOW | O_CLOEXEC);
+        if (dfd < 0)
+            return -1;
+        if (fstat(dfd, &st) != 0 || !S_ISDIR(st.st_mode) || st.st_uid != geteuid() ||
+            (st.st_mode & (S_IWGRP | S_IWOTH)) != 0) {
+            close(dfd);
+            return -1;
+        }
     }
-    (void)unlink(tmp); /* a leftover of a cut-short run */
-    fd = open(tmp, O_WRONLY | O_CREAT | O_EXCL | O_CLOEXEC, 0600);
+    (void)unlinkat(dfd, tmp_name, 0); /* a leftover of a cut-short run */
+    fd = openat(dfd, tmp_name, O_WRONLY | O_CREAT | O_EXCL | O_NOFOLLOW | O_CLOEXEC, 0600);
     if (fd < 0)
-        return -1;
+        goto fail_dir;
     while (off < len) {
         ssize_t w = write(fd, bytes + off, len - off);
 
@@ -483,20 +529,23 @@ static int write_token_file(const char *path, const uint8_t *bytes, size_t len) 
             continue;
         if (w <= 0) {
             close(fd);
-            unlink(tmp);
-            return -1;
+            goto fail_tmp;
         }
         off += (size_t)w;
     }
-    if (fsync(fd) != 0 || close(fd) != 0) {
-        unlink(tmp);
-        return -1;
-    }
-    if (rename(tmp, path) != 0) {
-        unlink(tmp);
-        return -1;
-    }
+    if (fsync(fd) != 0 || close(fd) != 0)
+        goto fail_tmp;
+    if (renameat(dfd, tmp_name, dfd, name) != 0)
+        goto fail_tmp;
+    if (dfd != AT_FDCWD)
+        close(dfd);
     return 0;
+fail_tmp:
+    (void)unlinkat(dfd, tmp_name, 0);
+fail_dir:
+    if (dfd != AT_FDCWD)
+        close(dfd);
+    return -1;
 }
 
 int fl_kq_write_account_token(const char *key_id, const char *password,
