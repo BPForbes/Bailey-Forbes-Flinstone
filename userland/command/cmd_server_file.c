@@ -641,9 +641,7 @@ static int verb_file_permit(int argc, char **argv)
     return 0;
 }
 
-/* What this shell sent in co-signed deliveries, for the refusal reports that may come back: the file
- * the history sits beside, who would report, and the artifact's SHA-256 a report must name. Session-lifetime
- * only; the newest 16. */
+/* Co-signed deliveries this shell sent, kept for the refusal reports: session lifetime, the newest 16. */
 #define KQ_SENT_MAX 16u
 typedef struct {
     int used;
@@ -654,8 +652,7 @@ typedef struct {
 } kq_sent_t;
 static kq_sent_t s_sent[KQ_SENT_MAX];
 static unsigned s_sent_next;
-/* One lock for the ring: the history callbacks run on the host's threads while this shell's own commands add and
- * read records. Readers copy a record under the lock and never keep a pointer into the ring. */
+/* Guards the ring: host threads read it, so readers copy a record and never keep a pointer into it. */
 static pthread_mutex_t s_sent_mu = PTHREAD_MUTEX_INITIALIZER;
 
 static void kq_sent_remember(const uint8_t id[FL_KQ_DELIVERY_ID_LEN], const char *path, const char *recipient,
@@ -784,9 +781,7 @@ static int verb_kq_send(const cmd_server_ctx_t *ctx, int argc, char **argv)
     return rc == FL_RESULT_OK ? 0 : 1;
 }
 
-/* After a refusal's ACK: the KQER that fl_kq_report_refusal_in wrote in the landing directory goes to the
- * sender through the host. report holds the bytes fl_kq_cp_report_read_in authenticated; nothing is read here
- * by path. An empty report or one longer than a frame sends nothing; the refusal itself is unchanged. */
+/* Sends the authenticated KQER to the sender through the host; nothing is read here by path. */
 static void kq_send_refusal_report(const cmd_server_ctx_t *ctx, int hosting, const fl_net_kq_inbox_t *in,
                                    const fl_kq_buf_t *report)
 {
@@ -1039,9 +1034,7 @@ static int verb_kq_open(const cmd_server_ctx_t *ctx, int argc, char **argv)
     return rc == 0 ? 0 : 1;
 }
 
-/* server file reports: apply the refusal reports that came back for what this shell sent. Each is checked
- * (the recipient's key from the host registry, the artifact it must name) before it is recorded in the file's
- * history as an ErrorReported event; one that does not verify is dropped and says so. */
+/* server file reports: each report is verified before it is recorded as an ErrorReported event. */
 static int verb_kq_reports(const cmd_server_ctx_t *ctx)
 {
     int hosting = 0;
@@ -1087,11 +1080,7 @@ static int verb_kq_reports(const cmd_server_ctx_t *ctx)
     return 0;
 }
 
-/* ---- history download: the gate and the source the host gives fl_net_kq_set_history -----------------------
- * The history is the KeyQuorum container beside the file, as KeyQuorum keeps it (nothing is copied into a
- * store of Flinstone's own). It can be served for the deliveries this shell sent, the ones kq_sent_remember
- * recorded: only to that delivery's recipient, signed by this shell's own online account, and only if
- * policy allows it. Anything else is refused by the module with its visible message. */
+/* ---- History download: only for deliveries this shell sent, only to the delivery's recipient ---- */
 static int kq_sent_find(const uint8_t id[FL_KQ_DELIVERY_ID_LEN], kq_sent_t *out)
 {
     int found = 0;
@@ -1110,9 +1099,8 @@ static int kq_history_gate(const char *requester, const uint8_t id[FL_KQ_DELIVER
 {
     kq_sent_t sent;
 
-    /* The requester is a party to the delivery (its recipient), then host policy. The policy check looks at
-     * the host shell's own principal, never at the requester: the party check is what binds the requester.
-     * It is judged against the copy. */
+    /* The requester must be the delivery's recipient; host policy looks only at the host shell's own
+     * principal, so the party check is what binds the requester. */
     if (!requester || !kq_sent_find(id, &sent) || strcmp(sent.recipient, requester) != 0)
         return 0;
     return fl_authz_subsystem_check((unsigned)FL_AUTHZ_OP_FILE_HISTORY_EXPORT, (void *)requester) != FL_AUTHZ_DENY;
@@ -1152,8 +1140,7 @@ void cmd_server_file_install_history(void)
     fl_net_kq_set_history(kq_history_gate, kq_history_source);
 }
 
-/* The arguments of `server file history <delivery-id> [-from <account-key>]` on a member, with their messages.
- * Returns 0 with got filled (the sender whose letters to expect, and the file id when this shell decoded it). */
+/* Parses `server file history <delivery-id> [-from <account-key>]` on a member; 0 with got filled. */
 static int kq_history_member_args(int argc, char **argv, fl_server_history_got_t *got)
 {
     const char *hex = NULL;
@@ -1232,9 +1219,7 @@ static int kq_history_member_print(fl_result_t rc, const fl_server_history_got_t
     }
 }
 
-/* server file history <delivery-id> [-from <account-key>] on a joined member: ask the host for a co-signed
- * delivery's history, then open both letters with this account's box key. The host's gate lets only the
- * delivery's recipient have it; its refusal arrives through the usual refusal print. */
+/* Member side: asks the host for the delivery's history and opens both letters with this account's box key. */
 static int kq_history_member(const cmd_server_ctx_t *ctx, int argc, char **argv)
 {
     const char *me = fl_session_current_key_id();
@@ -1252,7 +1237,7 @@ static int kq_history_member(const cmd_server_ctx_t *ctx, int argc, char **argv)
         fl_color_error("server file history: sign in first");
         return 1;
     }
-    /* The letters are signed by the sender's account: its key comes from the host registry, by its exact id. */
+    /* The sender's key comes from the host registry, by its exact id. */
     rc = fl_net_kq_lookup(ctx->server, ctx->client, 0, got.sender, KQ_WAIT_KEYS_MS, &sender);
     if (rc != FL_RESULT_OK || !fl_server_history_sender_matches(&sender, got.sender)) {
         fl_color_warn("keyquorum: cannot get %s's key from the host", got.sender);

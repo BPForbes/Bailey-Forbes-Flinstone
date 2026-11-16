@@ -1,8 +1,5 @@
-/*
- * In-memory fl_kq_storage_t (kq_mem_storage.h). No stdio, no errno, no string.h beyond strlen (kq_platform.c
- * supplies it in the freestanding image). Every copy, zeroing and equality goes through the ASM-backed
- * mem_domain_* wrappers; file bytes are wiped with the secure variant.
- */
+/* In-memory fl_kq_storage_t (kq_mem_storage.h). No libc beyond strlen; copies and wipes go through the
+ * ASM-backed mem_domain_* wrappers, file bytes with the secure variant. */
 #include "kq_mem_storage.h"
 
 #include "mem_domain.h"
@@ -125,8 +122,7 @@ static int m_read_file(void *ctx, const char *path, size_t max, uint8_t **data, 
     return 0;
 }
 
-/* Replaces or creates the files in one step: every new buffer is made first, so a failure part-way changes
- * nothing; the swaps after them cannot fail. paths are full paths, distinct. */
+/* Replaces or creates the files in one step: every new buffer is made first, so a failure changes nothing. */
 static int put_all(const char *const *paths, const uint8_t *const *datas, const size_t *lens, size_t n) {
     uint8_t *fresh[4] = {0};
     mem_file_t *slot[4] = {0};
@@ -251,8 +247,7 @@ static int m_dir_exists(void *ctx, const fl_kq_dir_t *d, const char *name) {
     return m_exists(ctx, path);
 }
 
-/* The newest `keep` records of `unit` bytes; an absent file is success with nothing; a size that is not a
- * whole number of records is an error (fl_fs_read_tail_at). */
+/* The newest keep records of unit bytes. An absent file is empty; a size not a multiple of unit is an error. */
 static int m_dir_read_tail(void *ctx, const fl_kq_dir_t *d, const char *name, size_t unit, size_t keep,
                            uint8_t **data, size_t *len) {
     char path[FL_KQ_MEM_PATH_MAX];

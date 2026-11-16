@@ -40,8 +40,7 @@ static int str_eq(const char *a, const char *b)
     return *a == *b;
 }
 
-/* 1 when password opens this account: the sealed key when KeyQuorum enrolled it, else the
- * stored demo password. A sealed account with no unlock op fails closed. */
+/* 1 when password opens this account. A sealed account with no unlock op fails closed. */
 static int password_ok(const struct user *u, const char *password)
 {
     if (!password)
@@ -97,9 +96,8 @@ static int add_user(const char *creator, const char *name, const char *password,
         str_copy(s_users[i].name, name, sizeof(s_users[i].name));
         secret_clear(s_users[i].secret);
         if (s_kq && s_kq->enroll) {
-            /* creator is a name the ops may record; identity does not interpret it.
-             * Root's creator is NULL. Flinstone's is "Root" even though Root is added next,
-             * so the account indexes (and the lab's perspectives) stay in this order. */
+            /* creator is a name the ops may record (NULL for Root). Flinstone's is "Root" although Root
+             * is added next, so the account indexes stay in this order. */
             if (s_kq->enroll(creator, s_users[i].name, password) != 0) {
                 s_users[i].used = 0;
                 return -1;
@@ -184,8 +182,7 @@ int fl_fs_identity_has_user(const char *name)
     return find_user(name) >= 0;
 }
 
-/* The su rule (identity.h). A switch_allowed op, when installed, may refuse first; it never
- * replaces the password. */
+/* A switch_allowed op, when installed, may refuse first; it never replaces the password. */
 int fl_fs_identity_switchuser(int session, const char *name, const char *password)
 {
     int idx;

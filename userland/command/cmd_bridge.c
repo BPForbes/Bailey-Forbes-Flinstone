@@ -73,10 +73,7 @@ static int bridge_parse_id(const char *s, int64_t *out) {
     return 0;
 }
 
-/* bridge assembly <parent>: deal the parent account's signing seed among its direct child accounts so that
- * enough of them online together can sign for it (KeyQuorum parent-key assembly). The split, the threshold and
- * every seal are KeyQuorum's (the driver's assembly ops); this gathers the facts it needs (the children and
- * their box public keys) and stores the opaque record. The parent's own password opens the seed once, here. */
+/* bridge assembly <parent>: stores KeyQuorum's opaque record; the split, threshold and seals are its own. */
 static int bridge_assembly(fl_user_db_t *db, const char *actor, const char *parent_name, int reissue) {
     const fl_kq_driver_t *drv = fl_kq_driver_get_or_register();
     const fl_user_record_t *parent = fl_user_db_find(db, parent_name);
@@ -106,9 +103,8 @@ static int bridge_assembly(fl_user_db_t *db, const char *actor, const char *pare
         return 1;
     }
     if (reissue) {
-        /* A reissue must rotate the parent's signing key first (re-dealing the old seed would leave a removed
-         * child's share valid), and the only rotation the account store has (passwd by an ancestor) also
-         * replaces the password. A second rotation path here would split the key rules, so this stops. */
+        /* A reissue must rotate the parent's signing key first: re-dealing the old seed would leave a
+         * removed child's share valid. The store's only rotation also replaces the password, so this stops. */
         fprintf(stderr, "bridge: assembly --reissue is not available: there is no signing-key rotation that keeps the "
                         "password (see docs/IDENTITY_HERITAGE.md)\n");
         return 1;
@@ -294,9 +290,8 @@ int cmd_bridge_run(int argc, char **argv) {
         return 0;
     }
 
-    /* A KeyQuorum private bridge (made or received by the keyquorum CLI) copied into the account store, for the
-     * account that is logged in. It changes who may cross a bridge at su, so it needs an elevated session. The
-     * store is the file `keyquorum private-bridge import` wrote; nothing here validates a package. */
+    /* Copies a KeyQuorum private bridge into the account store. It changes who may cross a bridge at su,
+     * so it needs an elevated session; nothing here validates a package. */
     if (!strcmp(argv[1], "kq-import") && (argc == 4 || (argc == 5 && !strcmp(argv[4], "--roster-only")))) {
         int roster_only = argc == 5;
 
@@ -333,8 +328,8 @@ int cmd_bridge_batch_tokens_count(int argc, char **argv, int i) {
     if (!strcmp(argv[i + 1], "list"))
         return 2;
     if (!strcmp(argv[i + 1], "kq-import")) {
-        /* bridge kq-import <keyquorum-store> <uid> [--roster-only]: up to four arguments' worth of tokens, and
-         * never past a token that starts the next shell command. */
+        /* bridge kq-import <keyquorum-store> <uid> [--roster-only]: never past a token that starts the
+         * next shell command. */
         int n = 2;
 
         if (i + 2 < argc && argv[i + 2] && !cmd_batch_token_is_shell_command(argv[i + 2]))

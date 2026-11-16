@@ -1,9 +1,5 @@
-/*
- * Boot memory map: see bootmap.h for the rules. No sorting and no scratch memory: every
- * candidate start (min_base, each usable entry's base, each blocker's end) is grown through the
- * usable entries that touch it and then cut at the first blocker after it. With the buffer's
- * bounded entry count that is a few hundred thousand comparisons at most, once per boot.
- */
+/* Boot memory map (rules in bootmap.h). No sorting and no scratch memory: each candidate start is grown
+ * through the usable entries that touch it and cut at the first blocker. */
 #include "bootinfo.h"
 #include "bootmap.h"
 
@@ -16,8 +12,7 @@ static int entry_kind(const fl_e820_entry_t *e)
     return e->type == FL_E820_USABLE ? KIND_USABLE : KIND_BLOCKER;
 }
 
-/* The largest end such that [start, end) lies in usable entries, no blocker touches it and it
- * stays below max_end; start itself when there is none. */
+/* The largest end with [start, end) usable, clear of blockers and below max_end; start when there is none. */
 static uint64_t span_end(const fl_e820_entry_t *entries, uint32_t count,
                          const fl_boot_range_t *res, uint32_t nres, uint64_t start, uint64_t max_end)
 {

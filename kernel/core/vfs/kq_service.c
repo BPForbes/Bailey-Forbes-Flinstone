@@ -71,11 +71,8 @@ static void slot_wipe_locked(kq_slot_t *s) {
     s->used = 0;
 }
 
-/* session non-zero: the key comes from a session login. The session has one account, so a login that
- * replaces another without a logout in between ends the previous account's slot here, secret and box key
- * together. The caller holds the session lock and has checked the login generation (publish_if_current), so
- * a stale login never reaches this and cannot wipe a later login's slot. A key brought online without a
- * session (generation 0) is not session-owned and is left alone. */
+/* session non-zero: a session login's key, which ends the previous account's slot. The caller holds the
+ * session lock and has checked the login generation, so a stale login cannot wipe a later login's slot. */
 static fl_result_t slot_put(const char *key_id, const uint8_t secret[FL_USER_SIGNING_SECRET_LEN], int session) {
     fl_result_t rc = FL_RESULT_NOMEM;
     int i;
@@ -252,11 +249,7 @@ size_t fl_kq_service_online_count(void) {
     return n;
 }
 
-/* A parent who is not signed in, put together from the children who are. The record is the KQAS bytes the
- * account store holds for the parent; each online child with a box secret and a device id in the account
- * registry (the pairing row of its KQST) contributes its label, box secret and device id, and KeyQuorum
- * decides whether that is a quorum and whether the recovered seed is the parent's registered key. Nothing
- * is decided here beyond "who is online". Every secret copy is wiped. */
+/* Assembles an offline parent's key from the children online now; KeyQuorum decides the quorum. */
 #define KQ_ASSEMBLY_CHILDREN_MAX FL_USER_DB_MAX_USERS
 
 static fl_result_t assemble_author_key(const char *parent, uint8_t out[32]) {
@@ -293,7 +286,7 @@ static fl_result_t assemble_author_key(const char *parent, uint8_t out[32]) {
         n++;
     }
     pthread_mutex_unlock(&s_mu);
-    /* The device id of each child comes from the account registry; a child with no pairing row cannot be counted. */
+    /* Device ids come from the account registry; a child with no pairing row cannot be counted. */
     size_t k = 0;
 
     for (size_t i = 0; i < n; i++) {
@@ -312,7 +305,7 @@ static fl_result_t assemble_author_key(const char *parent, uint8_t out[32]) {
         label_ptr[i] = labels[i];
     if (n == 0)
         goto done; /* nobody to assemble from: the sweep waits and asks again */
-    /* One physical device per share (the record's threshold distinct devices): slots of one container are no quorum. */
+    /* One physical device per share: slots of one container are no quorum. */
     st = drv->assembly_assemble(record, rlen, parent_pub, label_ptr, (const uint8_t(*)[32])box,
                                 (const uint8_t(*)[16])dev, n, threshold, out);
     if (st == KQ_ASSEMBLY_OK) {
@@ -417,8 +410,7 @@ static void audit_control_denied(unsigned op) {
     fl_audit_identity_event(fl_session_current_key_id(), "kq-service-control-denied", "", NULL);
 }
 
-/* The resident keys stay out of swap (mlock) and out of core dumps (MADV_DONTDUMP, Linux). Best effort:
- * where the process may not lock memory (RLIMIT_MEMLOCK) the service still runs, and that is audited. */
+/* Best effort: mlock and MADV_DONTDUMP for the resident keys; a refused lock is audited, not fatal. */
 static void lock_key_table(void) {
     if (!s_keys_locked)
         s_keys_locked = fl_kq_lock_pages(s_slots, sizeof s_slots);
@@ -554,8 +546,7 @@ static void autosign_job(void *arg) {
     mem_domain_secure_zero(key, sizeof key); /* the copy is wiped at once */
 }
 
-/* Takes a slot, fills it completely (a tracked file's path and ctx included), then queues its periodic
- * item: nothing runs on a half-built object. */
+/* Fills the slot completely before queuing its periodic item: nothing runs on a half-built object. */
 static fl_result_t autosign_register(const fl_kq_autosign_t *spec, const char *path) {
     fl_wq_work_t w = {.fn = autosign_job, .pq_layer = FL_WQ_LAYER_BACKGROUND};
     kq_object_t *o = NULL;
@@ -614,8 +605,8 @@ fl_result_t fl_kq_service_autosign_remove(const char *label) {
         return FL_RESULT_INVAL;
     pthread_mutex_lock(&s_mu);
     for (size_t i = 0; i < FL_KQ_AUTOSIGN_MAX; i++)
-        /* A tracked file is known by its full path (the label is cut to fit, so two long paths can share one);
-         * any other registration is known by its label. */
+        /* A tracked file is known by its full path (labels are cut to fit, so two long paths can
+         * share one); any other registration is known by its label. */
         if (s_objects[i].used && s_objects[i].active &&
             strcmp(s_objects[i].path[0] ? s_objects[i].path : s_objects[i].label, label) == 0) {
             s_objects[i].active = 0; /* the slot stays taken: its queued item will find it inactive */
@@ -625,8 +616,7 @@ fl_result_t fl_kq_service_autosign_remove(const char *label) {
     return rc;
 }
 
-/* A checkpoint result as the sweep reads it: BUSY is the one result that means "two heads"; any other
- * failure is never OK or BUSY. */
+/* A checkpoint result as the sweep reads it: only "two heads" is BUSY; no other failure is OK or BUSY. */
 static fl_result_t autosign_result(fl_kq_cp_result_t cp) {
     fl_result_t rc;
 
@@ -693,12 +683,8 @@ void fl_kq_service_utc_now(char *out, size_t cap) {
         (void)strftime(out, cap, "%Y-%m-%dT%H:%M:%S.000Z", &tm);
 }
 
-/*
- * The one table from a refusal's result to KeyQuorum's closed KQER sets (keyquorum_error.h: codes
- * 1 Framing, 2 Untrusted, 8 Denied; classes 1 framing, 2 auth, 5 policy, 7 resource). Only a
- * refusal of the letter itself is reported; a local problem (no driver, I/O, a file already at the
- * destination) is kept to retry and has no row.
- */
+/* Refusal result to KeyQuorum's closed KQER code and class (keyquorum_error.h). Local problems (no driver,
+ * I/O, a file already at the destination) have no row: they are kept to retry, not reported. */
 static const struct {
     fl_result_t why;
     uint16_t code;

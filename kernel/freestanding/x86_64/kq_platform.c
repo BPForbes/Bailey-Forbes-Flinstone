@@ -1,16 +1,6 @@
-/*
- * What the KeyQuorum library and the existing KeyQuorum driver need from the freestanding image:
- * the four embedder hooks of keyquorum_identity.h, the mem_domain_* allocators the driver
- * calls, a UTC clock, and the handful of libc symbols the compiler and the Rust archive expect when
- * linking with -nostdlib. The same symbols tools/browser-lab/wasm/lab_kq.c supplies for the
- * WebAssembly lab; the byte primitives reuse the assembly layer (arch/x86_64/gas/mem_asm.s).
- *
- * Heap: kq_heap.c, over the arena fl_kernel_main picks from the firmware's E820 map.
- *
- * Entropy: RDRAND, else the launcher's fw_cfg file (below). With neither, kq_platform_random returns
- * non-zero and the library fails closed (a panic through kq_platform_panic): no weak bytes, ever.
- * QEMU's default CPU model has no RDRAND; `-cpu max` does.
- */
+/* Freestanding embedder for KeyQuorum: the four hooks of keyquorum_identity.h, the mem_domain_* allocators,
+ * a UTC clock and the libc symbols -nostdlib leaves out. Entropy is RDRAND, else the launcher's fw_cfg file;
+ * with neither, kq_platform_random fails closed. */
 #include "contract_result.h"
 #include "fl/mem_asm.h"
 #include "ioport.h"
@@ -51,10 +41,8 @@ static int have_rdrand(void)
 
 #ifndef FL_SECFEAT
 /* ---- fw_cfg entropy: used only when the CPU has no RDRAND ----
- * The launcher hands the image the file opt/flintstone/entropy through QEMU's fw_cfg device (driver: fwcfg.c). It
- * must hold fresh random bytes on every boot (the browser page: crypto.getRandomValues; a shell: /dev/urandom): the
- * image cannot tell a reused file from a fresh one, and a reused file would repeat keys. Each byte is handed out
- * once, never reused, and running out fails closed. */
+ * The file opt/flintstone/entropy must hold fresh bytes on every boot: a reused file would repeat keys.
+ * Each byte is handed out once, and running out fails closed. */
 #include "fwcfg.h"
 
 #define FW_ENTROPY_NAME "opt/flintstone/entropy"

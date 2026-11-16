@@ -249,8 +249,7 @@ static void perspective_load(int user_idx, int session)
     str_copy(s_pending[session], view->pending, sizeof(s_pending[session]));
 }
 
-/* The identity has already changed when this runs, so the caller names the outgoing account:
- * its display is saved under it before the destination's own is loaded. */
+/* The identity has already changed, so the caller names the outgoing account whose display is saved. */
 static void perspective_switch_user(int from_idx, int user_idx, int session)
 {
     if (from_idx >= 0)

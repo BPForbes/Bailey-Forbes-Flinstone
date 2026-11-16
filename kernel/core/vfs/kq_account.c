@@ -1,9 +1,5 @@
-/*
- * Account unlock helpers: open a KQST through the KeyQuorum driver using pairing facts from the
- * account store, ask KeyQuorum which factor a switch demands (the live bridges are the store's),
- * and prove bridge membership against the store's current bridge facts. Callers that need the
- * signing secret online must publish it themselves (key service hook).
- */
+/* Account unlock through the KeyQuorum driver: slot tokens, the switch factor and bridge proofs, all
+ * against the account store's facts. */
 #include "fl/kq.h"
 
 #include "contract_p5_server_catalog.h"
@@ -105,8 +101,7 @@ done:
     return out;
 }
 
-/* A verifier for the proof: the roster member at the other end from the presenter, else the
- * presenter (kq_bridge_verify requires a member). */
+/* The roster member at the other end from the presenter, else the presenter (a verifier must be a member). */
 static const char *bridge_verifier(const fl_user_bridge_t *b, const char *presenter) {
     size_t i;
 
@@ -310,8 +305,7 @@ out:
     return st;
 }
 
-/* Read the token file (at most 64 KiB) and open it with the given facts. On OK both secrets are
- * written (caller wipes); otherwise both are zeroed. */
+/* Reads the token file (at most 64 KiB) and opens it. Both secrets are zeroed unless OK (caller wipes). */
 static int open_token_file(const char *label, const char *password, const char *path,
                            const unsigned char device_id[16], const unsigned char signing_pub[32],
                            const unsigned char encryption_pub[32], uint8_t signing_secret_out[32],
@@ -424,13 +418,8 @@ int fl_kq_open_account(const char *user, const char *password, const char *kqst_
     return st;
 }
 
-/*
- * Tokens the kernel makes itself. An account's KQST lives beside the account store, in
- * "<store dir>/kqst/<key id>.kqst", owner-only. It seals the keys the account already has (its
- * signing key and box key), so the account's public keys and everything it signed stay valid.
- */
-/* A key id names a file only when it is made of letters, digits, '.', '_' and '-', does not start
- * with '.' and holds no "..": nothing it names can leave the token directory or hide there. */
+/* ---- Kernel-made tokens: "<store dir>/kqst/<key id>.kqst", owner-only, sealing the account's keys ---- */
+/* Letters, digits, '.', '_', '-'; no leading '.' and no "..": the name cannot leave the token directory. */
 static int token_name_safe(const char *key_id) {
     size_t i;
 
@@ -470,17 +459,8 @@ int fl_kq_account_token_path(const char *db_path, const char *key_id, char *out,
     return 0;
 }
 
-/*
- * Write bytes to path through "<name>.<random hex>.new" (created owner-only, never over an existing
- * file) and a rename, so a reader sees the old token or the new one, never part of one.
- *
- * The directory comes from where the account store is (FL_USERS_DB_PATH), which the operator sets;
- * only its last part, "kqst", is made here. So that a path from the environment cannot be used to
- * write somewhere else, the file name must be a safe key id (token_name_safe), the directory is
- * opened once without following a symlink and must be a directory this process owns that no one
- * else can write to, and every step after that is relative to that open directory, so it cannot be
- * swapped part-way.
- */
+/* Stages "<name>.<random hex>.new" (owner-only, never over a file), then renames. The directory is opened
+ * once without following a symlink; every later step is relative to that handle, so it cannot be swapped. */
 static int write_token_file(const char *path, const uint8_t *bytes, size_t len) {
     char dir[FL_KQ_TOKEN_PATH_MAX];
     char name[FL_KQ_TOKEN_PATH_MAX], tmp_name[FL_KQ_TOKEN_PATH_MAX + 24], tag_hex[17];
@@ -582,11 +562,7 @@ int fl_kq_write_account_token(const char *key_id, const char *password,
     return st;
 }
 
-/*
- * The signing secret an account co-signs a sudo with: its token's (opened with the password) for a
- * KQST account, else its own signing key, sealed under the password in the account store. On
- * FL_KQ_ACCOUNT_OK the secret is written (caller wipes); otherwise it is zeroed.
- */
+/* The secret an account co-signs a sudo with (token or sealed signing key); zeroed unless OK, caller wipes. */
 static int open_cosigner(const char *name, const char *password, int kqst, uint8_t secret_out[32],
                          unsigned char public_out[32], char key_id_out[FL_HERITAGE_KEY_ID_MAX]) {
     const fl_kq_driver_t *drv = fl_kq_driver_get_or_register();
@@ -621,8 +597,7 @@ static int open_cosigner(const char *name, const char *password, int kqst, uint8
     return st;
 }
 
-/* The public key an account co-signs under, from the store: the token's pairing for a KQST account,
- * else the record's signing key. */
+/* The store's public key for a co-signer: the token's pairing for a KQST account, else the record's key. */
 static int cosigner_public(const char *name, int kqst, unsigned char public_out[32],
                            char key_id_out[FL_HERITAGE_KEY_ID_MAX]) {
     const fl_user_db_t *db = fl_session_user_db();
@@ -644,8 +619,7 @@ static int cosigner_public(const char *name, int kqst, unsigned char public_out[
     return st;
 }
 
-/* Both sign action under a fresh nonce, and both signatures verify under the public keys given
- * (the store's). FL_KQ_COSIGN_OK or FL_KQ_COSIGN_SIGN; on SIGN the signatures are zeroed. */
+/* Both sign action under a fresh nonce and both must verify. On FL_KQ_COSIGN_SIGN the signatures are zeroed. */
 static int cosign_with(const char *inv_key, const char *root_key, const char *action,
                        const uint8_t inv_secret[32], const uint8_t root_secret[32],
                        const unsigned char inv_pub[32], const unsigned char root_pub[32],
@@ -675,11 +649,7 @@ static int cosign_with(const char *inv_key, const char *root_key, const char *ac
     return FL_KQ_COSIGN_SIGN;
 }
 
-/*
- * The sudo window's keys (fl/kq.h). The two secrets live here, in a page kept out of swap and core
- * dumps where the host allows it, and nowhere else; they are wiped when the window ends, is ended,
- * or Root's key fails.
- */
+/* The sudo window's two secrets: kept out of swap and core dumps where the host allows, wiped when it ends. */
 typedef struct {
     int           used;
     int           inv_kqst;

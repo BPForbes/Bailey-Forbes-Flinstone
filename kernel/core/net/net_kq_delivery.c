@@ -489,8 +489,7 @@ static void host_ack(fl_net_server_t *srv, const fl_net_server_member_t *from,
     }
 }
 
-/* Refusal report: the refusing recipient's KQER, forwarded to the delivery's sender. Every check fails closed
- * and silently. */
+/* Forwards a recipient's KQER to the delivery's sender. Every check fails closed and silently. */
 static void host_report(fl_net_server_t *srv, const fl_net_server_member_t *from, const uint8_t *payload,
                         uint16_t plen) {
     fl_bytes_reader_t r;
@@ -505,8 +504,8 @@ static void host_report(fl_net_server_t *srv, const fl_net_server_member_t *from
     if (r.bad || n == 0 || n > FL_KQ_REPORT_FRAME_MAX || fl_bytes_reader_remaining(&r) != n || !me || !store() ||
         fl_kq_store_get(store(), id, &d) != FL_RESULT_OK || strcmp(me, d.recipient) != 0 || !d.refused)
         return;
-    /* Once per delivery, for as long as the host accepts reports for it: the claim is in the delivery's own log,
-     * not in a ring that later deliveries could push it out of. */
+    /* Once per delivery: the claim is in the delivery's own log, not a ring later deliveries could
+     * push it out of. */
     if (fl_kq_store_claim_report(store(), id, now_sec()) != FL_RESULT_OK)
         return;
     host_send_to_account(srv, d.sender, (uint8_t)FL_NET_SESSION_OP_KQR_REPORT, payload, plen);
@@ -1346,7 +1345,6 @@ void fl_net_kq_history_drop(const uint8_t request_id[16]) {
     kq_unlock();
 }
 
-/* Member side: take the bundle, then open both letters with this account's box key. */
 fl_result_t fl_net_kq_history_open(const uint8_t request_id[16], unsigned wait_ms, const uint8_t box_secret[32],
                                    const char *sender, const char *me, const uint8_t sender_public[32],
                                    const uint8_t expected_file_id[16], fl_kq_buf_t *lines,
@@ -1383,8 +1381,8 @@ fl_result_t fl_net_kq_history_open(const uint8_t request_id[16], unsigned wait_m
         rc = FL_RESULT_ACCES;
         goto done;
     }
-    /* The history is the delivery's own file: its file id (stable across revisions, so a reseal of a newer head
-     * still matches) is the one the caller recorded when it decoded the delivery. Public data: a plain compare. */
+    /* The file id is stable across revisions and is the one the caller recorded when it decoded the
+     * delivery. Public data: a plain compare. */
     if (expected_file_id) {
         memset(&offer, 0, sizeof offer);
         if (drv->offer(&c, rev, &offer) != KQ_FILE_OK) {

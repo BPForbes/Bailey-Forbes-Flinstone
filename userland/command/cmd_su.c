@@ -95,9 +95,8 @@ int cmd_su_run(int argc, char **argv) {
     if (fl_authz_identity_switch_denied("su"))
         return 1;
 
-    /* The account and its login are read together: the restore below happens only while this login is
-     * still the current one, and a login completing meanwhile cannot pair its generation with the
-     * account of the login before it. */
+    /* The account and its login generation are read together: the restore below happens only while
+     * this login is still the current one. */
     if (fl_session_capture_restore_point(&back) != FL_RESULT_OK)
         return 1;
     had_elevation = fl_session_has_elevation();

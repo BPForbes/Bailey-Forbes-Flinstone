@@ -55,8 +55,7 @@ void fl_session_test_set_switch_pre_commit(void (*fn)(void)) {
     s_switch_pre_commit = fn;
 }
 
-/* One character of a store path, or -1 when it may not be in one: letters, digits, '/', '.', '_',
- * '-' and '+'. Spaces, quotes, control bytes, '\\', '%', '~' and everything else are refused. */
+/* One character of a store path, or -1 when refused: only letters, digits, '/', '.', '_', '-', '+'. */
 static int store_path_char(int c) {
     if ((c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z') || (c >= '0' && c <= '9') || c == '/' || c == '.' ||
         c == '_' || c == '-' || c == '+')
@@ -64,12 +63,7 @@ static int store_path_char(int c) {
     return -1;
 }
 
-/*
- * The account store's path from FL_USERS_DB_PATH (the operator's to set; tests use a temporary store).
- * The kernel's tokens and kqst directory live beside the store, so the value is checked once, here:
- * only store_path_char characters, no ".." part, and it fits. The store is opened at the checked copy,
- * never at the environment's string. 0 when unset, 1 when out holds the checked path, -1 when refused.
- */
+/* FL_USERS_DB_PATH, checked once: 0 when unset, 1 when out holds the checked path, -1 when refused. */
 static int store_path_from_env(char *out, size_t cap) {
     const char *v = getenv("FL_USERS_DB_PATH");
     size_t i, n;
@@ -226,9 +220,7 @@ int fl_session_has_elevation(void) {
     return has;
 }
 
-/* An account marked password-plus-KQST must open its slot token. Called with s_session_mu held
- * only to read the mode; the open itself runs after the lock is released. Wrong password already failed
- * before this path, so a missing token does not teach the mode to a stranger. */
+/* Whether name is a password-plus-KQST account. s_session_mu is held; the token is opened after release. */
 static int kqst_mode(const char *name) {
     const fl_user_record_t *u = fl_user_db_find(&s_db, name);
 
@@ -253,13 +245,7 @@ static void login_ensure_account_key(const char *name, const char *password) {
     }
 }
 
-/*
- * A password account that signs in gets its slot token from the kernel (fl_session_make_kqst): the
- * password it just gave seals the keys it already has. From its next sign-in on it uses the token.
- * A failure never blocks this sign-in; the next one tries again. Nothing is made where no driver
- * can seal a token (the freestanding image, a test stub) or no key service takes token sign-ins.
- * Called without s_session_mu.
- */
+/* Makes a password account's slot token at sign-in; a failure never blocks it. Called without s_session_mu. */
 static void login_make_kqst(const fl_user_record_t *account, const char *password) {
     const fl_kq_driver_t *drv = fl_kq_driver_get_or_register();
     int64_t now = 0;
@@ -408,8 +394,7 @@ int fl_session_verify_password(const char *password) {
     return fl_session_verify_account_password(s_current, password); /* s_current is read under the lock there */
 }
 
-/* Called with s_session_mu held: the identity commit that su, sudo -i and the restore after su -c
- * share. Every elevation ends with the old identity. */
+/* s_session_mu is held. The identity commit su, sudo -i and the su -c restore share; it ends any elevation. */
 static void commit_user_locked(const fl_user_record_t *u) {
     fl_elevation_revoke_all();
     strncpy(s_current, u->name, sizeof(s_current) - 1);
@@ -428,8 +413,7 @@ static void session_audit(const char *actor_key, const char *event, const char *
         s_audit_hook(actor_key, event, subject_key, detail);
 }
 
-/* Takes name with no check; login_generation non-zero takes it only while that login is still the
- * current one (BUSY otherwise, audited, and the session is left as it is). */
+/* login_generation non-zero: takes name only while that login is still the current one (BUSY otherwise). */
 static fl_result_t set_user_if_current(const char *name, uint64_t login_generation) {
     const fl_user_record_t *u, *cu;
     char cur_key[FL_HERITAGE_KEY_ID_MAX], name_key[FL_HERITAGE_KEY_ID_MAX];
@@ -498,14 +482,8 @@ static int64_t window_end(void) {
     return now + (int64_t)FL_ELEVATION_LAB_TTL_SOFT_MAX_SECONDS * 1000000000LL;
 }
 
-/*
- * The sudo co-signature: Root's token (Root's password) and the invoker's own key (its token for a
- * KQST account, else its sealed signing key) each sign action under kq_sudo_sign with one fresh nonce,
- * and both must verify under the account store's public keys. label is the audit's name for the
- * action. hold_until > 0 keeps the two keys for the sudo window. NULL when co-signed (detail gets
- * label, which invoker key signed, and the nonce), else the audit's reason word. Called without
- * s_session_mu.
- */
+/* Co-signs action as Root and the invoker. NULL on success, else the audit's reason word. Called without
+ * s_session_mu. */
 static const char *cosign_sudo(const char *invoker_name, int invoker_kqst,
                                const char *invoker_password, const char *root_name,
                                const char *root_password, const char *label, const char *action,
@@ -530,10 +508,7 @@ static const char *cosign_sudo(const char *invoker_name, int invoker_kqst,
     return NULL;
 }
 
-/* A refused switch: audited (the two key ids and a reason word, never a password, key or token
- * byte). The terminal gets one message whatever the reason (the command prints it), so a refusal
- * says nothing about the policy or a bridge before a password is verified. Called without
- * s_session_mu. */
+/* Audits a refused switch; the terminal gets one message whatever the reason. Called without s_session_mu. */
 static fl_result_t switch_refused(fl_result_t rc, int sudo, const char *actor_key,
                                   const char *subject_key, const char *why) {
     session_audit(actor_key, sudo ? "sudo-refused" : "su-refused", subject_key, why);
@@ -606,9 +581,8 @@ fl_result_t fl_session_switch_user(const fl_session_switch_request_t *req) {
         case FL_KQ_ACCESS_PASSWORD_BRIDGE_KQST:
             break;
         case FL_KQ_ACCESS_KQST_PASSWORD:
-            /* sudo -i always opens Root's token: a password-only Root has none and is refused before
-             * any password is checked. For su, a password-only holder is accepted on its password,
-             * audited below as "su-kqst-legacy", never silent. */
+            /* sudo -i always opens Root's token: a password-only Root is refused before any password is
+             * checked. For su, a password-only holder is accepted and audited as "su-kqst-legacy". */
             if (!holder_kqst && req->sudo)
                 why = "no-root-kqst";
             break;
@@ -856,10 +830,8 @@ fl_result_t fl_session_sudo_authenticate(const char *root_password, const char *
         session_audit(cur_key, "sudo-refused", FL_HERITAGE_ROOT_KEY, why);
         return FL_RESULT_ACCES;
     }
-    /* The checks ran without the session lock. A login or logout in that window changes the
-     * generation. set_auth_mode and set_password do not, so both accounts' modes and the passwords
-     * that were accepted are checked again here. The elevation token is taken for the account that
-     * was checked, or not at all. */
+    /* The checks ran without the session lock. set_auth_mode and set_password do not change the
+     * generation, so both accounts' modes and the accepted passwords are checked again here. */
     if (s_switch_pre_lock)
         s_switch_pre_lock();
     pthread_mutex_lock(&s_session_mu);
@@ -902,8 +874,7 @@ fl_result_t fl_session_sudo_authenticate(const char *root_password, const char *
     return rc;
 }
 
-/* fl_session_enroll_kqst with s_kqst_mu held. The row is written first and the mode saved after it;
- * a failed save puts the row and the mode back. */
+/* s_kqst_mu is held. The row is written before the mode; a failed save puts both back. */
 static fl_result_t enroll_kqst_serialized(const char *password, const char *kqst_path,
                                           const unsigned char device_id[16],
                                           const unsigned char signing_public[32],
@@ -1004,9 +975,7 @@ fl_result_t fl_session_enroll_kqst(const char *password, const char *kqst_path,
     return rc;
 }
 
-/* fl_session_make_kqst with s_kqst_mu held; called without s_session_mu. Nobody types a token path,
- * device id or key: the token is written owner-only at fl_kq_account_token_path, then paired with
- * enrol's rollback. */
+/* s_kqst_mu is held; called without s_session_mu. The token is written owner-only, then paired. */
 static fl_result_t make_kqst_serialized(const char *name, const char *password, int64_t minted_at,
                                         int64_t *generation_out) {
     const fl_kq_driver_t *drv = fl_kq_driver_get_or_register();
@@ -1383,9 +1352,8 @@ fl_result_t fl_session_remove_user(const char *name) {
     if (!session_db_ready_locked()) {
         rc = FL_RESULT_ERR;
     } else {
-        /* Same record the session is logged in as, including a different spelling.
-         * A switch that committed just before this lock must not leave s_current
-         * naming an account that is no longer in the store. */
+        /* Matches the logged-in record under any spelling: a switch that committed just before this
+         * lock must not leave s_current naming an account that is no longer in the store. */
         user = fl_user_db_find(&s_db, name);
         if (user && user == fl_user_db_find(&s_db, s_current))
             rc = FL_RESULT_ACCES;
@@ -1396,11 +1364,7 @@ fl_result_t fl_session_remove_user(const char *name) {
     return rc;
 }
 
-/*
- * An ancestor's reset gives the account new keys (its old ones are sealed under a password nobody
- * here has), so a token holding the old keys would no longer match: the account goes back to
- * password sign-in, and its next sign-in has the kernel seal the new keys into a fresh token.
- */
+/* A reset gives the account new keys, so its token no longer matches: it returns to password sign-in. */
 fl_result_t fl_session_set_password(const char *name, const char *password) {
     const fl_user_record_t *u;
     fl_result_t rc;
@@ -1422,14 +1386,7 @@ fl_result_t fl_session_set_password(const char *name, const char *password) {
     return rc;
 }
 
-/*
- * A token-mode account's token is sealed under its password, so changing the password re-seals the
- * token too, or the next sign-in could not open it. The token is opened with the current password
- * first (it must be present and match its pairing), the new password is saved, then the same keys
- * are sealed under the new password to the same device id and path; if that last step fails, the
- * old password is put back and saved, and the change is refused. Audited as "kqst-resealed" or
- * "kqst-reseal-refused".
- */
+/* Re-seals a token-mode account's token under the new password; a failed reseal restores the old password. */
 static fl_result_t change_password_serialized(const char *name, const char *current,
                                               const char *password) {
     const fl_user_record_t *u;
@@ -1590,8 +1547,8 @@ fl_result_t fl_session_reload_users(void) {
     }
     s_db_ready = (rc == FL_RESULT_OK && s_db.loaded) ? 1 : 0;
     session_unlock_db();
-    /* The signed-in account is gone with the session, so its key goes offline (the service wipes it). Only
-     * while no later login has begun: that login's generation differs, and its key is not this one's to end. */
+    /* The account is gone with the session, so its key goes offline. Only while no later login has
+     * begun: that login's key is not this one's to end. */
     if (offline && s_offline_hook && fl_session_login_generation() == failed_gen)
         s_offline_hook(who_key);
     return rc;

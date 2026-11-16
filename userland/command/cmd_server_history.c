@@ -4,9 +4,7 @@
 #include <stdio.h>
 #include <string.h>
 
-/* For the life of this shell process (nothing clears it when a session ends; a record only names whose letters to
- * expect, and the host's gate and this account's box key still decide). The newest FL_SERVER_HISTORY_GOT_MAX.
- * Readers copy a record under the lock and never keep a pointer into the ring. */
+/* Process lifetime, the newest FL_SERVER_HISTORY_GOT_MAX. Readers copy under the lock, never keep a pointer. */
 static fl_server_history_got_t s_got[FL_SERVER_HISTORY_GOT_MAX];
 static unsigned s_got_next;
 static pthread_mutex_t s_got_mu = PTHREAD_MUTEX_INITIALIZER;

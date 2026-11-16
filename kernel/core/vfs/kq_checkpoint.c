@@ -256,9 +256,7 @@ static int land_exists(const kq_land_t *l, const char *name) {
     return l->st->dir_exists(l->st->ctx, &l->dir, name);
 }
 
-/* One lock for every read-modify-write of a container (load, mutate, write_atomic): two writers of the same
- * file would otherwise each read the same revision and the later write would drop the earlier one. The
- * sections are short, so one per-process mutex serves every path. */
+/* Serializes every container read-modify-write, so a later write never drops an earlier revision. */
 static pthread_mutex_t s_container_mu = PTHREAD_MUTEX_INITIALIZER;
 
 static int sidecar(const char *path, const char *suffix, char *out, size_t cap) {
@@ -286,8 +284,7 @@ static void report_name(const uint8_t ref[32], char out[65 + sizeof FL_KQ_REPORT
     memcpy(out + 64, FL_KQ_REPORT_SUFFIX, sizeof FL_KQ_REPORT_SUFFIX);
 }
 
-/* The one write of a grown container: past the letter cap it is TOO_LARGE and nothing is written, so a history
- * that load_container would later refuse to read is never produced. */
+/* The one write of a grown container: TOO_LARGE past the letter cap, and nothing is written. */
 static fl_kq_cp_result_t store_container(const char *container_path, const fl_kq_buf_t *next) {
     const fl_kq_storage_t *store = fl_kq_cp_storage();
 
@@ -822,8 +819,7 @@ fl_kq_cp_result_t fl_kq_cp_history(const char *path, fl_kq_buf_t *lines) {
     return rc == KQ_FILE_OK ? FL_KQ_CP_OK : FL_KQ_CP_INVALID;
 }
 
-/* The head of the container beside path: its revision id (rev), or its author's label (author, cap).
- * A fork, or anything else that names no single head, leaves author empty. */
+/* The head beside path: its revision id (rev) or its author's label (author, empty for a fork). */
 static fl_kq_cp_result_t head_of(const char *path, uint8_t *rev, char *author, size_t cap) {
     const fl_kq_driver_t *drv = fl_kq_driver_get();
     char container_path[4096];

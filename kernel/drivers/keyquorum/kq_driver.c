@@ -1,12 +1,5 @@
-/*
- * KeyQuorum security driver (contracts/drivers/contract_p4_keyquorum.h, P4-9).
- *
- * Thin wrappers over keyquorum_files.h, keyquorum_identity.h (the account ops), keyquorum_slots.h,
- * keyquorum_access.h and keyquorum_bridge.h: each op asks KeyQuorum for the size it needs,
- * allocates, and calls again; it returns KeyQuorum's status unchanged. Secrets are wiped
- * through mem_domain_secure_zero (which extends mem_domain_zero) and digests compared by
- * asm_mem_ct_equal.
- */
+/* KeyQuorum security driver (contracts/drivers/contract_p4_keyquorum.h, P4-9): thin wrappers that return
+ * KeyQuorum's status unchanged. Secrets are wiped by mem_domain_secure_zero; digests use asm_mem_ct_equal. */
 #include "fl/driver/keyquorum.h"
 #include "fl/mem_asm.h"
 #include "mem_domain.h"
@@ -321,9 +314,8 @@ static int drv_slot_open(const uint8_t *kqst, size_t klen, const char *label, co
 }
 
 #ifndef FL_FREESTANDING
-/* The freestanding image has no checkpoint storage, so nothing there can name a head author: the op
- * is NULL and fl_kq_cp_head_author fails closed. Left in, it would add a sector to an image that is
- * within 2 KiB of its 0x9f000 budget. */
+/* No checkpoint storage in the freestanding image: the op is NULL there and fl_kq_cp_head_author fails
+ * closed. Left in, it would add a sector to an image within 2 KiB of its 0x9f000 budget. */
 /* KeyQuorum writes the label without a terminator; one byte is kept back for it. */
 static int drv_head_author(const fl_kq_buf_t *c, char *out, size_t cap) {
     size_t n = 0;
@@ -400,9 +392,8 @@ static const fl_kq_driver_t s_kq_driver = {
     .slot_open = drv_slot_open,
 #ifndef FL_FREESTANDING
     .head_author = drv_head_author,
-    /* The ops below are KeyQuorum's own functions (same signatures). The freestanding image has no
-     * account store, slot token or bridge, and no room for their code: there they are NULL and every
-     * caller fails closed. */
+    /* KeyQuorum's own functions (same signatures). The freestanding image has no account store, slot
+     * token or bridge, and no room for their code: there they are NULL and every caller fails closed. */
     .access_requirement = kq_access_requirement,
     .bridge_prove = kq_bridge_prove,
     .bridge_verify = kq_bridge_verify,

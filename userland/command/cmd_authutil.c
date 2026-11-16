@@ -39,12 +39,7 @@ static int cmd_read_password_line(const char *prompt, char *buf, size_t buf_size
     return 0;
 }
 
-/*
- * One line that is not a secret (an account name), read by the reader above. The rest of a line
- * longer than buf is read and discarded, so it never reaches the next reader (the shell would run it
- * as a command), and *overlong says so. A full buffer with no newline removed is the only case where
- * more of the line can remain.
- */
+/* One non-secret line. The rest of an over-long line is discarded (*overlong set), so it is never run. */
 static int cmd_read_line(char *buf, size_t buf_size, int *overlong) {
     *overlong = 0;
     if (cmd_read_password_line(NULL, buf, buf_size) != 0)
@@ -117,11 +112,7 @@ int cmd_read_password(const char *prompt, char *buf, size_t buf_size) {
 #endif
 }
 
-/*
- * The invoker's half of sudo's co-authorisation: its own password (which also opens its token when
- * it is a KQST-mode account). Nothing is asked when the invoker is Root. 0 when read or not needed,
- * -1 when the read failed (pw wiped).
- */
+/* Reads the invoker's own password for sudo's co-signature (not asked for Root). -1: read failed, pw wiped. */
 static int cmd_read_invoker_password(const char *cmd, char *pw, size_t cap, int *asked) {
     const char *self = fl_session_current_user();
     const fl_user_record_t *me = fl_user_db_find(fl_session_user_db(), self ? self : "");
@@ -161,9 +152,8 @@ int cmd_sudo_require_auth_reason(const char *reason) {
     if (fl_session_has_elevation())
         return 0;
 
-    /* KeyQuorum's sudo factor is Root's key: Root's password and token. A password-only Root has no
-     * token, so nothing is asked: the session refuses and audits it (no fallback to the caller's own
-     * password). */
+    /* A password-only Root has no token, so nothing is asked: the session refuses and audits it (no
+     * fallback to the caller's own password). */
     if (!fl_session_sudo_needs_root()) {
         rc = fl_session_sudo_authenticate(NULL, NULL);
         if (rc != FL_RESULT_OK) {
@@ -277,9 +267,8 @@ int cmd_switch_user(const char *cmd, const char *target, int sudo) {
     root = fl_user_db_find_by_key(db, FL_HERITAGE_ROOT_KEY);
     if (need.factor == FL_KQ_ACCESS_NONE)
         ask_password = 0;
-    /* sudo -i needs Root's token. A password-only Root has none, so nothing is asked: the session
-     * refuses and audits it, and the reason is shown, because plain sudo already shows whether Root
-     * has a token. */
+    /* A password-only Root has no token, so nothing is asked: the session refuses and audits it. The
+     * reason is shown, because plain sudo already shows whether Root has a token. */
     no_root_token = sudo && !(root && root->auth_mode == FL_USER_AUTH_PASSWORD_KQST);
     if (no_root_token)
         ask_password = 0;
@@ -304,11 +293,8 @@ int cmd_switch_user(const char *cmd, const char *target, int sudo) {
         if (asked_mine)
             req.invoker_password = mine;
     }
-    /*
-     * A bridge member is asked for only once the password is verified (the target's, or Root's for
-     * sudo -i), so the prompt says nothing about a bridge to someone without it. Otherwise the session
-     * refuses on the password and audits it.
-     */
+    /* A bridge member is asked for only once the password is verified, so the prompt says nothing
+     * about a bridge to someone without it. */
     if (need.factor == FL_KQ_ACCESS_PASSWORD_BRIDGE_KQST && !need.needs_parent_grant && req.password &&
         fl_session_verify_account_password(sudo ? (root ? root->name : "") : target, pw)) {
         /* A member of the bridge presents their slot token: the caller, when a member, else named. */

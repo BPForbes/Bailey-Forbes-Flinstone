@@ -21,13 +21,7 @@
 #include <signal.h>
 #include <pthread.h>
 
-/*
- * The sudo window's signing gate: inside the window every command is an elevated action,
- * signed by Root's key and the account's, so it runs before any builtin handles the line (help, history,
- * make and the other early handlers included). A sudo is left to its own path, which signs it through
- * cmd_sudo_sign_action and is the only thing that starts the window's clock again. The first word is
- * read with the tokenizer execute_command_str uses; a blank line signs nothing.
- */
+/* Inside the sudo window every line is signed before any builtin handles it; sudo itself signs its own. */
 static void sign_elevated_line(const char *line, const char *buffer) {
     char first[512];
     char *argv[2];

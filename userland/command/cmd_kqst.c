@@ -1,20 +1,5 @@
-/*
- * kqst: pair an account with its KeyQuorum slot token (KQST).
- *
- *   kqst [status [account]]   whether the account logs in with a token, and the device it is on
- *   kqst enroll               the kernel makes this account's token itself and pairs it
- *   kqst enroll <token> <device-id> <signing-public> <encryption-public>
- *
- * Accounts normally never need this: the kernel seals each account's own keys into a token kept
- * beside the account store when the account is created and when a password account signs in.
- * `kqst enroll` with no arguments does the same on demand, after reading the password. The
- * four-argument form is the fallback for a token kept elsewhere, such as on a USB stick: the file
- * `keyquorum-device provision <dir> --label <key id>` made, the device id `keyquorum-device init`
- * printed, and the two public keys provision printed. The token must open with the account's
- * password (read on the next line) and match those facts; an account that already has a token must
- * open that one too. Root needs its token for sudo to work at all: sudo needs Root's password and
- * token. No elevation is needed: the password and a token that opens with it are the proof.
- */
+/* kqst: pair an account with its KeyQuorum slot token (KQST). No elevation is needed: the password and
+ * a token that opens with it are the proof. */
 #include "cmd_decl.h"
 #include "cmd_authutil.h"
 #include "cmd_batch.h"

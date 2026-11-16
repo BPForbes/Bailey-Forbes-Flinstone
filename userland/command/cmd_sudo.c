@@ -37,9 +37,7 @@ static int sudo_grant_token(const char *reason) {
     return 0;
 }
 
-/* sudo -i becomes Root. KeyQuorum's rule asks for Root's password and slot token; a password-only
- * Root has none, so sudo -i is refused for every account (the session audits it). cmd_switch_user
- * collects the factor; fl_session_switch_user checks and commits. */
+/* A password-only Root has no token, so sudo -i is refused for every account (the session audits it). */
 int cmd_sudo_interactive_login(void) {
     const fl_user_db_t *db;
     const fl_user_record_t *root;

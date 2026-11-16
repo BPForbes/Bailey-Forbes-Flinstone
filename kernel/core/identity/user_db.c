@@ -68,9 +68,7 @@ static const fl_sqlite_column_t heritage_columns[] = {
     {"auth_mode", "INTEGER NOT NULL DEFAULT 0"}, /* an old store upgrades in place: every row reads 0 */
 };
 
-/* A bridge member's sealed key is opened with the wrap salt stored beside it (keyquorum_bridge.h);
- * stores written before the salt was kept gain the column, and their sealed keys (none were ever
- * written) stay unusable until stored again with it. */
+/* A member's sealed key is opened with the wrap salt stored beside it (keyquorum_bridge.h). */
 static const fl_sqlite_column_t bridge_member_columns[] = {
     {"wrap_salt", "BLOB"},
 };
@@ -226,9 +224,7 @@ static fl_result_t db_upsert_user(sqlite3 *sql, const fl_user_record_t *u) {
     return FL_RESULT_OK;
 }
 
-/* Stored auth_mode is only the two integers. Text, NULL, blobs, reals, and any other
- * integer are bad data (FL_RESULT_ERR), not a password-only account. Check the type
- * before the value: a conversion makes sqlite3_column_type undefined. */
+/* Any value but the two integer modes is FL_RESULT_ERR. The type is read before the value is converted. */
 static fl_result_t auth_mode_from_column(sqlite3_stmt *st, int col, int *out) {
     sqlite3_int64 v;
 
@@ -1341,8 +1337,7 @@ static int blob_is(sqlite3_stmt *st, int col, size_t len) {
            sqlite3_column_blob(st, col) != NULL;
 }
 
-/* Member label's sealed key and wrap salt on an already-open connection. NOENT unless both are
- * present and the right sizes (including a store from before the wrap_salt column). */
+/* Member label's sealed key and wrap salt; NOENT unless both are present and the right sizes. */
 static fl_result_t bridge_sealed_select(sqlite3 *sql, const char *uid, const char *label,
                                         unsigned char *sealed, size_t cap, size_t *len,
                                         unsigned char wrap_salt[FL_USER_BRIDGE_SALT_LEN]) {
@@ -1376,10 +1371,7 @@ static fl_result_t bridge_sealed_select(sqlite3 *sql, const char *uid, const cha
     return rc;
 }
 
-/* Reads uid's row and its members into out. NOENT for no row or a malformed one; ERR when the
- * store cannot be read (a failed prepare, or a step that is neither a row nor the end).
- * seal_label non-NULL also reads that member's sealed key on this same connection. A sealed-key
- * miss leaves the facts filled so the caller can tell it from a missing bridge. */
+/* Reads uid's row and members (NOENT: none or malformed). A sealed-key miss leaves the facts filled. */
 static fl_result_t bridge_read(sqlite3 *sql, const char *uid, fl_user_bridge_t *out,
                                const char *seal_label, unsigned char *sealed, size_t seal_cap,
                                size_t *seal_len, unsigned char wrap_salt[FL_USER_BRIDGE_SALT_LEN]) {
@@ -1539,8 +1531,7 @@ fl_result_t fl_user_db_bridges_live(const fl_user_db_t *db, fl_user_bridge_t *ou
     return rc;
 }
 
-/* The rows of one bridge on a connection that already holds the write transaction (BEGIN IMMEDIATE).
- * The caller commits or rolls back. */
+/* Writes one bridge's rows inside the caller's write transaction (BEGIN IMMEDIATE). */
 static fl_result_t bridge_put_on(sqlite3 *sql, const fl_user_bridge_t *b) {
     sqlite3_stmt *st = NULL;
     fl_result_t rc = FL_RESULT_OK;
@@ -1592,8 +1583,7 @@ static fl_result_t bridge_put_on(sqlite3 *sql, const fl_user_bridge_t *b) {
     return rc;
 }
 
-/* One statement: the sealed key and its wrap salt are never stored apart. NOENT unless exactly one
- * member row of that bridge has that label. */
+/* One statement, so the sealed key and its wrap salt are never stored apart. NOENT without the member row. */
 static fl_result_t sealed_put_on(sqlite3 *sql, const char *uid, const char *label, const unsigned char *sealed,
                                  size_t len, const unsigned char wrap_salt[FL_USER_BRIDGE_SALT_LEN]) {
     sqlite3_stmt *st = NULL;
@@ -1626,8 +1616,7 @@ static fl_result_t bridge_valid(const fl_user_bridge_t *b) {
     return FL_RESULT_OK;
 }
 
-/* sealed may be NULL (roster only). With a sealed key, the roster and the key commit together or
- * not at all: a bridge is never live without the key its local member was imported with. */
+/* sealed may be NULL (roster only). Otherwise the roster and the key commit together or not at all. */
 static fl_result_t bridge_put_txn(const fl_user_db_t *db, const fl_user_bridge_t *b, const char *label,
                                   const unsigned char *sealed, size_t len,
                                   const unsigned char wrap_salt[FL_USER_BRIDGE_SALT_LEN]) {
@@ -1757,13 +1746,8 @@ fl_result_t fl_user_db_assembly_get(const fl_user_db_t *db, const char *parent_l
     return rc;
 }
 
-/* ---- import from a KeyQuorum store --------------------------------------------------------------
- * KeyQuorum makes and receives bridges (keyquorum private-bridge import / inbox open, then
- * private_bridge::import_package) into its own SQLite store. This copies one bridge from that store,
- * read-only, into the account store: nothing here validates a package or unseals a key. The org
- * store has no schema-version marker, so every read checks its column types and sizes and fails
- * closed on anything else; the pinned KeyQuorum commit is the schema contract and
- * tests/test_kq_real_token.c runs this against a store the real CLI made. */
+/* ---- Import from a KeyQuorum store (read-only; nothing here validates a package or unseals a key) ----
+ * The org store has no schema-version marker: every read checks column types and sizes and fails closed. */
 static int kq_blob(sqlite3_stmt *st, int col, void *out, int want) {
     if (!blob_is(st, col, (size_t)want))
         return -1;

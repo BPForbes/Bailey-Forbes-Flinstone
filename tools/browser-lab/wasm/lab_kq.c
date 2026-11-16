@@ -235,9 +235,7 @@ static int seal_one(const fl_kq_driver_t *drv, const char *password, const uint8
     return 0;
 }
 
-/* A new lab account: both keys are sealed under the password and also held open, because the
- * password was just presented. The password itself is not stored. creator is unused: lab
- * accounts are flat names, and what a creator means is this table's decision. */
+/* A new lab account: both keys sealed under the password and held open; the password is not stored. */
 static int id_enroll(const char *creator, const char *name, const char *password) {
     lab_key_t *k;
     const fl_kq_driver_t *drv;

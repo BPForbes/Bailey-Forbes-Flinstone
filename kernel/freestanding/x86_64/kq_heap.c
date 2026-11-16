@@ -1,8 +1,5 @@
-/*
- * The KeyQuorum embedder's heap (see kq_heap.h): a first-fit free list with coalescing over one arena.
- * Every freed block is zeroed, as the library asks. No hardware access, so tests/test_fs_bootmap.c
- * runs it on the host over a buffer of its own.
- */
+/* The KeyQuorum embedder's heap (kq_heap.h): a first-fit free list with coalescing over one arena.
+ * Every freed block is zeroed, as the library asks. */
 #include "fl/mem_asm.h"
 #include "kq_heap.h"
 
@@ -45,8 +42,7 @@ static void heap_split_tail(kq_blk_t *b, size_t need)
     b->next = t;
 }
 
-/* Payload pointer aligned to `align` (<= 4096): the block's payload is over-sized so an aligned
- * address with a back-pointer to the block header fits inside it. */
+/* The payload is over-sized so an aligned address with a back-pointer to the block header fits inside it. */
 void *fl_kq_heap_alloc(size_t len, size_t align)
 {
     kq_blk_t *b;

@@ -241,10 +241,7 @@ static fl_cmdlog_verdict_code_t check_record(const rec_t *rec, const uint8_t *ra
     return FL_CMDLOG_V_OK;
 }
 
-/*
- * Walks the journal. When keep_last is given, *keep_last receives the last segment's verified
- * bytes (MEM_DOMAIN_FS memory, free_fs) and *keep_len their length.
- */
+/* Walks the journal. keep_last, when given, receives the last segment's verified bytes (free_fs). */
 static int walk(const fl_kq_storage_t *st, const char *dir, const fl_cmdlog_signer_t *signer,
                 const fl_cmdlog_limits_t *lim, const uint8_t *expect_device, fl_cmdlog_report_t *rep,
                 uint8_t **keep_last, size_t *keep_len) {
@@ -481,9 +478,7 @@ void fl_cmdlog_close(fl_cmdlog_t *j) {
 
 /* ----- Redaction ----- */
 
-/* The line-mode builtins the interpreter parses before argv (the cmd_decl.h *_maybe functions);
- * every other known name comes from the command registry. TODO: move these names into the shared
- * registry (userland/command/cmd_registry.c) so there is one list. */
+/* Line-mode builtins parsed before argv. TODO: move these names into the shared command registry. */
 static const char *const k_line_builtins[] = {"exit", "clear", "help", "history", "cc", "bios", "make"};
 
 static int known_command(const char *word) {
@@ -505,9 +500,8 @@ const char *fl_cmdlog_category(const char *line, char *out, size_t cap) {
     snprintf(out, cap, "other");
     if (!line)
         return out;
-    /* Only the start of the line is copied (a known command name is short); the copy is wiped.
-     * A first word cut by the scan limit could at worst match a shorter command name: a wrong
-     * category, never a leak. */
+    /* Only the start of the line is copied, and the copy is wiped. A first word cut by the scan limit
+     * could at worst match a shorter command name: a wrong category, never a leak. */
     n = strnlen(line, sizeof buf - 1u);
     mem_domain_copy(buf, line, n);
     buf[n] = '\0';
@@ -594,8 +588,7 @@ static int append_locked(fl_cmdlog_t *j, const uint8_t *rec, size_t len, char *r
     return 0;
 }
 
-/* Builds, signs and appends one record. corr: the attempt's id for a close, or NULL for an ATTEMPT
- * (its new event id is written to corr_out). */
+/* Builds, signs and appends one record. corr NULL is an ATTEMPT, whose new event id goes to corr_out. */
 static int emit(fl_cmdlog_t *j, uint8_t type, const char *principal, const char *category, int32_t rc,
                 const fl_cmdlog_corr_t *corr, fl_cmdlog_corr_t *corr_out, char *reason, size_t cap) {
     uint8_t rec[FL_CMDLOG_RECORD_MAX];
