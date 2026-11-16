@@ -3,6 +3,7 @@
  * `su`, a thread that cannot be cancelled or signalled, protected work that is never dropped, a heartbeat
  * the watchdog reads, the control op refused for everyone, and the periodic sweep.
  */
+#include <sys/resource.h>
 #include "kq_service.h"
 
 #include "net_background.h"
@@ -129,6 +130,38 @@ static int test_login_brings_the_key_online_and_logout_wipes_it(void) {
     ASSERT(fl_kq_service_root_fallback() == FL_RESULT_NOENT); /* no stored credential: the service stays up */
     ASSERT(fl_kq_service_alive());
     memset(expect, 0, sizeof expect);
+    return 0;
+}
+
+/* The resident keys are locked in RAM: the process's locked size (VmLck) covers them whenever the service
+ * reports the lock, and a refused lock (no RLIMIT_MEMLOCK room) is reported, never silent. */
+static long vm_locked_kb(void) {
+    FILE *f = fopen("/proc/self/status", "r");
+    char line[256];
+    long kb = -1;
+    if (!f)
+        return -1;
+    while (fgets(line, sizeof line, f))
+        if (sscanf(line, "VmLck: %ld kB", &kb) == 1)
+            break;
+    fclose(f);
+    return kb;
+}
+
+static int test_the_key_table_is_locked_in_memory(void) {
+    struct rlimit lim;
+    long kb = vm_locked_kb();
+
+    ASSERT(fl_kq_service_alive()); /* started by the first test */
+    ASSERT(getrlimit(RLIMIT_MEMLOCK, &lim) == 0);
+    if (lim.rlim_cur != RLIM_INFINITY && lim.rlim_cur < 64u * 1024u) {
+        printf("  (RLIMIT_MEMLOCK %llu bytes: the lock may be refused)\n", (unsigned long long)lim.rlim_cur);
+        if (!fl_kq_service_keys_locked())
+            return 0;
+    }
+    ASSERT(fl_kq_service_keys_locked());
+    if (kb >= 0) /* Linux reports it; elsewhere the flag is the evidence */
+        ASSERT(kb > 0);
     return 0;
 }
 
@@ -1214,6 +1247,7 @@ int main(void) {
     (void)setenv("FL_USERS_DB_PATH", path, 1);
 #define RUN(t) do { if (t() != 0) { rc = 1; fprintf(stderr, "%s failed\n", #t); } else printf("%s... OK\n", #t); } while (0)
     RUN(test_login_brings_the_key_online_and_logout_wipes_it);
+    if (!rc) RUN(test_the_key_table_is_locked_in_memory);
     if (!rc) RUN(test_kqst_login_commits_only_after_token_open);
     if (!rc) RUN(test_box_key_residency);
     if (!rc) RUN(test_the_root_fallback_asks_the_runtime);

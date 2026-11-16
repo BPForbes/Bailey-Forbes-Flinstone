@@ -96,6 +96,9 @@ void fl_kq_service_set_root_credential_provider(fl_kq_root_cred_fn provider);
 fl_result_t fl_kq_obtain_author_key(const char *author_key_id, uint8_t out[32], kq_signing_mode_t *mode);
 
 int fl_kq_service_alive(void);
+/** 1 when the resident key table is locked in RAM (kept out of swap; on Linux also out of core dumps). The
+ *  lock is taken at fl_kq_service_start and kept for the process; a refused lock is audited kq-keys-unlocked. */
+int fl_kq_service_keys_locked(void);
 /** Audited once per transition. */
 void fl_kq_service_report_stalled(void);
 

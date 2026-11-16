@@ -15,6 +15,14 @@
 #include "user_db.h"
 
 #include <pthread.h>
+#if !defined(_WIN32) && !defined(__EMSCRIPTEN__)
+#include <sys/mman.h>
+#include <unistd.h>
+#if defined(__linux__)
+#include <sys/syscall.h>
+#endif
+#define FL_KQ_CAN_LOCK 1
+#endif
 #include <signal.h>
 #include <stdio.h>
 #include <stdatomic.h>
@@ -39,7 +47,9 @@ typedef struct {
     char path[512];
 } kq_object_t;
 
-static kq_slot_t s_slots[FL_USER_DB_MAX_USERS];
+/* Page aligned so the key table can be locked in RAM and left out of core dumps by itself. */
+static kq_slot_t s_slots[FL_USER_DB_MAX_USERS] __attribute__((aligned(4096)));
+static int s_keys_locked;
 static kq_object_t s_objects[FL_KQ_AUTOSIGN_MAX];
 static pthread_mutex_t s_mu = PTHREAD_MUTEX_INITIALIZER;   /* the key table and the object table */
 static pthread_mutex_t s_wake_mu = PTHREAD_MUTEX_INITIALIZER;
@@ -452,6 +462,37 @@ static void audit_control_denied(unsigned op) {
     fl_audit_identity_event(fl_session_current_key_id(), "kq-service-control-denied", "", NULL);
 }
 
+/* The resident keys stay out of swap (mlock) and out of core dumps (MADV_DONTDUMP, Linux). Best effort:
+ * where the process may not lock memory (RLIMIT_MEMLOCK) the service still runs, and that is audited. */
+static void lock_key_table(void) {
+#ifdef FL_KQ_CAN_LOCK
+    /* On Linux the system call is made directly: a sanitizer build intercepts mlock() and makes it a no-op
+     * that still answers 0, which would report a lock that does not exist. */
+#if defined(__linux__) && defined(SYS_mlock)
+    if (!s_keys_locked && syscall(SYS_mlock, (void *)s_slots, sizeof s_slots) == 0)
+        s_keys_locked = 1;
+#else
+    if (!s_keys_locked && mlock(s_slots, sizeof s_slots) == 0)
+        s_keys_locked = 1;
+#endif
+#if defined(__linux__) && defined(MADV_DONTDUMP)
+    {
+        long page = sysconf(_SC_PAGESIZE);
+        size_t len = sizeof s_slots;
+        if (page > 0)
+            len = (len + (size_t)page - 1) & ~((size_t)page - 1);
+        (void)madvise(s_slots, len, MADV_DONTDUMP);
+    }
+#endif
+#endif
+    if (!s_keys_locked)
+        fl_audit_identity_event("", "kq-keys-unlocked", "", NULL);
+}
+
+int fl_kq_service_keys_locked(void) {
+    return s_keys_locked;
+}
+
 fl_result_t fl_kq_service_start(void) {
     pthread_condattr_t ca;
 
@@ -472,6 +513,7 @@ fl_result_t fl_kq_service_start(void) {
         return FL_RESULT_ERR;
     }
     s_started = 1;
+    lock_key_table();
     fl_session_set_login_hooks(fl_kq_service_online_for_session, fl_kq_service_offline,
                                fl_kq_service_online_opened);
     fl_session_set_login_box_hook(fl_kq_service_online_box);
