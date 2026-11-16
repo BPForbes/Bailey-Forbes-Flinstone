@@ -3,11 +3,12 @@
  * semantics, the bounds and the failure policy. Hosted only.
  *
  * Reuse: storage is the KeyQuorum checkpoints' table (fl_kq_storage_t); the hash is OpenSSL SHA-256
- * as elsewhere in the tree; little-endian fields use the net_endian.h helpers; the category
- * allowlist is the shell's own command registry (fl_shell_cmd_lookup) and the first word is found
- * with fl_shell_tokenize_line; random ids come from fl_random_bytes; the wall clock from
- * fl_time_wall_sec; messages through fl_color_error / fl_color_vfprintf_tagged; every copy, zeroing and equality
- * goes through the ASM-backed mem_domain_* wrappers.
+ * as elsewhere in the tree; records are built and read with net_codec.h's bounded big-endian codec
+ * (fl_bytes_sticky_writer_t, fl_bytes_reader_t, the str8 helpers); the category allowlist is the
+ * shell's own command registry (fl_shell_cmd_lookup) and the first word is found with
+ * fl_shell_tokenize_line; random ids come from fl_random_bytes; the wall clock from
+ * fl_time_wall_sec; messages go through fl_color_error / fl_color_warn_local; every copy, zeroing and
+ * equality goes through the ASM-backed mem_domain_* wrappers.
  */
 #include "cmd_journal.h"
 
@@ -15,13 +16,12 @@
 #include "fl/random.h"
 #include "fl_colors.h"
 #include "mem_domain.h"
-#include "net_endian.h"
+#include "net_codec.h"
 #include "shell_tokenize.h"
 #include "timekeeping.h"
 
 #include <openssl/sha.h>
 #include <pthread.h>
-#include <stdarg.h>
 #include <stdio.h>
 #include <string.h>
 
@@ -32,7 +32,7 @@
 struct fl_cmdlog {
     pthread_mutex_t mu;
     const fl_kq_storage_t *st;
-    char dir[CMDLOG_PATH_MAX];
+    char dir[CMDLOG_PATH_MAX]; /* without a trailing '/' (the open-registry key) */
     const fl_cmdlog_signer_t *signer;
     fl_cmdlog_limits_t lim;
     uint8_t journal_id[FL_CMDLOG_ID_LEN];
@@ -44,8 +44,14 @@ struct fl_cmdlog {
     size_t seg_len;
     uint8_t *scratch;  /* the next version of the active segment */
     size_t total;      /* bytes in every segment */
-    int tail_pending;  /* the active segment on storage still ends in a torn record */
+    int tail_pending;  /* the active segment on storage may end in a partial record */
+    int next_dirty;    /* a failed write may have left segment index `segments` behind */
+    struct fl_cmdlog *reg_next;
 };
+
+/* In-process registry of open journals: one handle per (storage table, directory). */
+static pthread_mutex_t s_reg_mu = PTHREAD_MUTEX_INITIALIZER;
+static fl_cmdlog_t *s_reg_head;
 
 /* ---------------------------------------------------------------------------------------------
  * Limits, paths, reasons
@@ -66,6 +72,8 @@ static fl_cmdlog_limits_t limits_or_default(const fl_cmdlog_limits_t *in) {
         l.total_max = FL_CMDLOG_TOTAL_MAX_DEFAULT;
     if (l.segments_max == 0)
         l.segments_max = FL_CMDLOG_SEGMENTS_MAX_DEFAULT;
+    if (l.segments_max > FL_CMDLOG_SEGMENTS_HARD_MAX)
+        l.segments_max = FL_CMDLOG_SEGMENTS_HARD_MAX;
     return l;
 }
 
@@ -79,153 +87,101 @@ static int seg_path(const char *dir, unsigned idx, char *out, size_t cap) {
     return n > 0 && (size_t)n < cap ? 0 : -1;
 }
 
+static int seg_exists(const fl_kq_storage_t *st, const char *dir, unsigned idx) {
+    char path[CMDLOG_PATH_MAX];
+
+    if (seg_path(dir, idx, path, sizeof path) != 0)
+        return -1;
+    return st->exists(st->ctx, path);
+}
+
 static void set_reason(char *reason, size_t cap, const char *text) {
     if (reason && cap)
         snprintf(reason, cap, "%s", text);
 }
 
-/* ---------------------------------------------------------------------------------------------
- * Encoding
- * -------------------------------------------------------------------------------------------*/
-
-typedef struct {
-    uint8_t *b;
-    size_t cap, len;
-    int err;
-} wr_t;
-
-static void w_bytes(wr_t *w, const void *p, size_t n) {
-    if (w->err || n > w->cap - w->len) {
-        w->err = 1;
-        return;
-    }
-    if (n)
-        mem_domain_copy(w->b + w->len, p, n);
-    w->len += n;
-}
-static void w_u8(wr_t *w, uint8_t v) { w_bytes(w, &v, 1); }
-static void w_u16(wr_t *w, uint16_t v) { uint8_t t[2]; fl_net_put_u16_le(t, v); w_bytes(w, t, 2); }
-static void w_u32(wr_t *w, uint32_t v) { uint8_t t[4]; fl_net_put_u32_le(t, v); w_bytes(w, t, 4); }
-static void w_u64(wr_t *w, uint64_t v) { uint8_t t[8]; fl_net_put_u64_le(t, v); w_bytes(w, t, 8); }
-static void w_str(wr_t *w, const char *s, size_t max) {
-    size_t n = s ? strlen(s) : 0;
-
-    if (n >= max) {
-        w->err = 1;
-        return;
-    }
-    w_u8(w, (uint8_t)n);
-    w_bytes(w, s, n);
+static int sha256(const uint8_t *p, size_t n, uint8_t out[FL_CMDLOG_HASH_LEN]) {
+    return SHA256(p, n, out) ? 0 : -1;
 }
 
 /* ---------------------------------------------------------------------------------------------
- * Parsing
+ * Parsing (net_codec.h reader)
  * -------------------------------------------------------------------------------------------*/
 
 typedef struct {
     size_t len;        /* whole record */
-    size_t signed_off; /* signed bytes: [signed_off, signed_off + signed_len) */
-    size_t signed_len;
-    const uint8_t *domain;
-    uint8_t domain_len;
+    size_t signed_len; /* signed bytes: [4, 4 + signed_len) */
     uint16_t version;
-    const uint8_t *journal_id, *device_id, *prev_hash, *event_id, *corr;
+    char domain[FL_CMDLOG_LABEL_MAX];
+    uint8_t journal_id[FL_CMDLOG_ID_LEN], device_id[FL_CMDLOG_ID_LEN];
+    uint8_t prev_hash[FL_CMDLOG_HASH_LEN], event_id[FL_CMDLOG_ID_LEN], corr[FL_CMDLOG_ID_LEN];
     uint64_t seq;
     char key_id[FL_CMDLOG_LABEL_MAX];
     uint8_t type;
-    int32_t rc;
-    int cosig;
-    const uint8_t *sig;
+    uint8_t cosig;
+    uint8_t sig[FL_CMDLOG_SIG_MAX];
     uint8_t sig_len;
 } rec_t;
 
-typedef struct {
-    const uint8_t *b;
-    size_t len, pos;
-    int err;
-} rd_t;
-
-static const uint8_t *r_bytes(rd_t *r, size_t n) {
-    const uint8_t *p;
-
-    if (r->err || n > r->len - r->pos) {
-        r->err = 1;
-        return NULL;
-    }
-    p = r->b + r->pos;
-    r->pos += n;
-    return p;
-}
-static uint8_t r_u8(rd_t *r) { const uint8_t *p = r_bytes(r, 1); return p ? p[0] : 0; }
-static uint16_t r_u16(rd_t *r) { const uint8_t *p = r_bytes(r, 2); return p ? fl_net_get_u16_le(p) : 0; }
-static uint32_t r_u32(rd_t *r) { const uint8_t *p = r_bytes(r, 4); return p ? fl_net_get_u32_le(p) : 0; }
-static uint64_t r_u64(rd_t *r) { const uint8_t *p = r_bytes(r, 8); return p ? fl_net_get_u64_le(p) : 0; }
-/* A length-prefixed string, copied NUL-terminated into out (cap bytes) when out is given. */
-static void r_str(rd_t *r, char *out, size_t cap) {
-    uint8_t n = r_u8(r);
-    const uint8_t *p = r_bytes(r, n);
-
-    if (!p || n >= cap) {
-        r->err = 1;
-        return;
-    }
-    if (out) {
-        mem_domain_copy(out, p, n);
-        out[n] = '\0';
-    }
-}
-
 /* 0 parsed; -1 malformed; -2 incomplete (the bytes end inside a record). */
 static int parse_record(const uint8_t *p, size_t avail, size_t record_max, rec_t *out) {
-    rd_t r;
-    uint32_t len;
-    const uint8_t *magic;
+    fl_bytes_reader_t r;
+    uint32_t len = 0, rc = 0;
+    uint64_t ts = 0;
+    uint8_t magic[4], trust = 0;
+    char principal[FL_CMDLOG_LABEL_MAX], category[FL_CMDLOG_CATEGORY_MAX];
 
     mem_domain_zero(out, sizeof *out);
     if (avail < 4)
         return -2;
-    len = fl_net_get_u32_le(p);
-    if (len < 8 || len > record_max)
+    len = fl_net_get_u32_be(p);
+    if (len < 8 || len > record_max || len > UINT16_MAX)
         return -1;
     if (len > avail)
         return -2;
-    r.b = p;
-    r.len = len;
-    r.pos = 4;
-    r.err = 0;
     out->len = len;
-    out->signed_off = 4;
-    magic = r_bytes(&r, 4);
-    if (!magic || !mem_domain_equal(magic, CMDLOG_MAGIC, 4))
+    fl_bytes_reader_init(&r, p, (uint16_t)len);
+    (void)fl_bytes_reader_read_u32(&r, &rc); /* record_len, already taken */
+    (void)fl_bytes_reader_read_bytes(&r, magic, sizeof magic);
+    if (r.bad || !mem_domain_equal(magic, CMDLOG_MAGIC, 4))
         return -1;
-    out->version = r_u16(&r);
-    out->domain_len = r_u8(&r);
-    out->domain = r_bytes(&r, out->domain_len);
-    out->journal_id = r_bytes(&r, FL_CMDLOG_ID_LEN);
-    out->device_id = r_bytes(&r, FL_CMDLOG_ID_LEN);
-    out->seq = r_u64(&r);
-    out->prev_hash = r_bytes(&r, FL_CMDLOG_HASH_LEN);
-    out->event_id = r_bytes(&r, FL_CMDLOG_ID_LEN);
-    r_str(&r, out->key_id, sizeof out->key_id);
-    r_str(&r, NULL, FL_CMDLOG_LABEL_MAX);    /* principal */
-    out->type = r_u8(&r);
-    r_str(&r, NULL, FL_CMDLOG_CATEGORY_MAX); /* category */
-    out->rc = (int32_t)r_u32(&r);
-    (void)r_u64(&r);                          /* timestamp */
-    (void)r_u8(&r);                           /* time trust */
-    out->corr = r_bytes(&r, FL_CMDLOG_ID_LEN);
-    out->cosig = r_u8(&r);
+    (void)fl_bytes_reader_read_u16(&r, &out->version);
+    (void)fl_bytes_reader_read_str8(&r, out->domain, sizeof out->domain);
+    (void)fl_bytes_reader_read_bytes(&r, out->journal_id, FL_CMDLOG_ID_LEN);
+    (void)fl_bytes_reader_read_bytes(&r, out->device_id, FL_CMDLOG_ID_LEN);
+    (void)fl_bytes_reader_read_u64(&r, &out->seq);
+    (void)fl_bytes_reader_read_bytes(&r, out->prev_hash, FL_CMDLOG_HASH_LEN);
+    (void)fl_bytes_reader_read_bytes(&r, out->event_id, FL_CMDLOG_ID_LEN);
+    (void)fl_bytes_reader_read_str8(&r, out->key_id, sizeof out->key_id);
+    (void)fl_bytes_reader_read_str8(&r, principal, sizeof principal);
+    (void)fl_bytes_reader_read_u8(&r, &out->type);
+    (void)fl_bytes_reader_read_str8(&r, category, sizeof category);
+    (void)fl_bytes_reader_read_u32(&r, &rc);
+    (void)fl_bytes_reader_read_u64(&r, &ts);
+    (void)fl_bytes_reader_read_u8(&r, &trust);
+    (void)fl_bytes_reader_read_bytes(&r, out->corr, FL_CMDLOG_ID_LEN);
+    (void)fl_bytes_reader_read_u8(&r, &out->cosig);
     if (out->cosig == 1) {
-        (void)r_bytes(&r, FL_CMDLOG_ID_LEN); /* nonce */
-        r_str(&r, NULL, FL_CMDLOG_LABEL_MAX);
-        r_str(&r, NULL, FL_CMDLOG_SIG_MAX + 1u);
+        uint8_t nonce[FL_CMDLOG_ID_LEN], cosig_len = 0, cosig[FL_CMDLOG_SIG_MAX];
+        char cosigner[FL_CMDLOG_LABEL_MAX];
+
+        (void)fl_bytes_reader_read_bytes(&r, nonce, sizeof nonce);
+        (void)fl_bytes_reader_read_str8(&r, cosigner, sizeof cosigner);
+        if (fl_bytes_reader_read_u8(&r, &cosig_len) != FL_RESULT_OK || cosig_len == 0 ||
+            cosig_len > FL_CMDLOG_SIG_MAX)
+            return -1;
+        (void)fl_bytes_reader_read_bytes(&r, cosig, cosig_len);
     } else if (out->cosig != 0) {
         return -1;
     }
-    out->signed_len = r.pos - out->signed_off;
-    out->sig_len = r_u8(&r);
-    out->sig = r_bytes(&r, out->sig_len);
-    if (r.err || out->sig_len == 0 || out->sig_len > FL_CMDLOG_SIG_MAX || r.pos != len)
+    if (trust > FL_CMDLOG_TIME_TRUSTED)
+        return -1;
+    out->signed_len = (size_t)r.off - 4u;
+    if (fl_bytes_reader_read_u8(&r, &out->sig_len) != FL_RESULT_OK || out->sig_len == 0 ||
+        out->sig_len > FL_CMDLOG_SIG_MAX)
+        return -1;
+    (void)fl_bytes_reader_read_bytes(&r, out->sig, out->sig_len);
+    if (r.bad || r.off != len)
         return -1; /* record_len must be exactly what the fields fill */
     return 0;
 }
@@ -269,24 +225,55 @@ static void free_fs(uint8_t *p) {
         mem_domain_free(MEM_DOMAIN_FS, p);
 }
 
+/* Checks one parsed record against the journal so far; FL_CMDLOG_V_OK or the verdict. */
+static fl_cmdlog_verdict_code_t check_record(const rec_t *rec, const uint8_t *raw, const fl_cmdlog_signer_t *signer,
+                                             const uint8_t *expect_device, fl_cmdlog_report_t *rep) {
+    static const uint8_t zero_hash[FL_CMDLOG_HASH_LEN] = {0};
+
+    if (rec->version != FL_CMDLOG_FORMAT_VERSION || strcmp(rec->domain, FL_CMDLOG_DOMAIN) != 0 ||
+        (rec->type != FL_CMDLOG_EV_ATTEMPT && rec->type != FL_CMDLOG_EV_COMPLETION &&
+         rec->type != FL_CMDLOG_EV_REFUSAL))
+        return FL_CMDLOG_V_MALFORMED;
+    /* One journal, one signer: a record signed by any other key the verifier knows is foreign. */
+    if (strcmp(rec->key_id, signer->key_id) != 0)
+        return FL_CMDLOG_V_FOREIGN;
+    if (signer->verify(signer->ctx, rec->key_id, FL_CMDLOG_DOMAIN, raw + 4, rec->signed_len, rec->sig,
+                       rec->sig_len) != 1)
+        return FL_CMDLOG_V_BAD_SIGNATURE;
+    if (rep->records == 0) {
+        mem_domain_copy(rep->journal_id, rec->journal_id, FL_CMDLOG_ID_LEN);
+        mem_domain_copy(rep->device_id, rec->device_id, FL_CMDLOG_ID_LEN);
+    } else if (!mem_domain_equal(rep->journal_id, rec->journal_id, FL_CMDLOG_ID_LEN) ||
+               !mem_domain_equal(rep->device_id, rec->device_id, FL_CMDLOG_ID_LEN)) {
+        return FL_CMDLOG_V_FOREIGN;
+    }
+    if (expect_device && !mem_domain_equal(expect_device, rec->device_id, FL_CMDLOG_ID_LEN))
+        return FL_CMDLOG_V_FOREIGN;
+    if (rec->seq != rep->next_seq)
+        return FL_CMDLOG_V_BAD_SEQUENCE;
+    if (!mem_domain_equal(rec->prev_hash, rep->next_seq == 0 ? zero_hash : rep->last_hash, FL_CMDLOG_HASH_LEN))
+        return FL_CMDLOG_V_BROKEN_CHAIN;
+    if (rec->type == FL_CMDLOG_EV_ATTEMPT && !mem_domain_equal(rec->corr, rec->event_id, FL_CMDLOG_ID_LEN))
+        return FL_CMDLOG_V_MALFORMED;
+    return FL_CMDLOG_V_OK;
+}
+
 /*
  * Walks the journal. When keep_last is given, *keep_last receives the last segment's verified
  * bytes (MEM_DOMAIN_FS memory, free_fs) and *keep_len their length.
  */
 static int walk(const fl_kq_storage_t *st, const char *dir, const fl_cmdlog_signer_t *signer,
-                const fl_cmdlog_limits_t *lim, fl_cmdlog_report_t *rep, uint8_t **keep_last,
-                size_t *keep_len) {
-    static const uint8_t zero_hash[FL_CMDLOG_HASH_LEN] = {0};
+                const fl_cmdlog_limits_t *lim, const uint8_t *expect_device, fl_cmdlog_report_t *rep,
+                uint8_t **keep_last, size_t *keep_len) {
     open_set_t open = {0};
-    const size_t domain_len = strlen(FL_CMDLOG_DOMAIN);
-    int have_first = 0;
+    unsigned idx;
 
     mem_domain_zero(rep, sizeof *rep);
     if (keep_last) {
         *keep_last = NULL;
         *keep_len = 0;
     }
-    for (unsigned idx = 0; idx < lim->segments_max; idx++) {
+    for (idx = 0; idx < lim->segments_max && rep->status == FL_CMDLOG_V_OK && !rep->tail_incomplete; idx++) {
         char path[CMDLOG_PATH_MAX];
         uint8_t *data = NULL;
         size_t len = 0, pos = 0;
@@ -311,66 +298,36 @@ static int walk(const fl_kq_storage_t *st, const char *dir, const fl_cmdlog_sign
         }
         rep->segments++;
         rep->total_bytes += len;
-        while (pos < len && rep->status == FL_CMDLOG_V_OK) {
+        while (pos < len) {
             rec_t rec;
             const uint8_t *p = data + pos;
             int pr = parse_record(p, len - pos, lim->record_max, &rec);
+            fl_cmdlog_verdict_code_t v;
 
             if (pr == -2) {
-                char next[CMDLOG_PATH_MAX];
-
-                /* A partial record is a torn tail only in the last segment. */
-                if (seg_path(dir, idx + 1u, next, sizeof next) == 0 && st->exists(st->ctx, next) == 0) {
-                    rep->tail_incomplete = 1;
-                    rep->tail_bytes = len - pos;
-                } else {
-                    rep->status = FL_CMDLOG_V_MALFORMED;
+                /* A torn tail, if this is the last segment; the gap probe below fails the walk if
+                 * any later segment exists. */
+                rep->tail_incomplete = 1;
+                rep->tail_bytes = len - pos;
+                break;
+            }
+            v = pr != 0 ? FL_CMDLOG_V_MALFORMED : check_record(&rec, p, signer, expect_device, rep);
+            if (v == FL_CMDLOG_V_OK) {
+                if (rec.type == FL_CMDLOG_EV_ATTEMPT) {
+                    if (open_add(&open, rec.corr) != 0)
+                        v = FL_CMDLOG_V_IO;
+                } else if (!open_close(&open, rec.corr)) {
+                    rep->orphan_closes++;
                 }
-                break;
             }
-            if (pr != 0 || rec.version != FL_CMDLOG_FORMAT_VERSION || rec.domain_len != domain_len ||
-                !mem_domain_equal(rec.domain, FL_CMDLOG_DOMAIN, domain_len) ||
-                (rec.type != FL_CMDLOG_EV_ATTEMPT && rec.type != FL_CMDLOG_EV_COMPLETION &&
-                 rec.type != FL_CMDLOG_EV_REFUSAL)) {
-                rep->status = FL_CMDLOG_V_MALFORMED;
+            if (v == FL_CMDLOG_V_OK && sha256(p, rec.len, rep->last_hash) != 0)
+                v = FL_CMDLOG_V_IO;
+            if (v != FL_CMDLOG_V_OK) {
+                rep->status = v;
                 break;
-            }
-            if (signer->verify(signer->ctx, rec.key_id, FL_CMDLOG_DOMAIN, p + rec.signed_off,
-                               rec.signed_len, rec.sig, rec.sig_len) != 1) {
-                rep->status = FL_CMDLOG_V_BAD_SIGNATURE;
-                break;
-            }
-            if (!have_first) {
-                mem_domain_copy(rep->journal_id, rec.journal_id, FL_CMDLOG_ID_LEN);
-                have_first = 1;
-            } else if (!mem_domain_equal(rep->journal_id, rec.journal_id, FL_CMDLOG_ID_LEN)) {
-                rep->status = FL_CMDLOG_V_FOREIGN;
-                break;
-            }
-            if (rec.seq != rep->next_seq) {
-                rep->status = FL_CMDLOG_V_BAD_SEQUENCE;
-                break;
-            }
-            if (!mem_domain_equal(rec.prev_hash, rep->next_seq == 0 ? zero_hash : rep->last_hash,
-                                  FL_CMDLOG_HASH_LEN)) {
-                rep->status = FL_CMDLOG_V_BROKEN_CHAIN;
-                break;
-            }
-            if (rec.type == FL_CMDLOG_EV_ATTEMPT) {
-                if (!mem_domain_equal(rec.corr, rec.event_id, FL_CMDLOG_ID_LEN)) {
-                    rep->status = FL_CMDLOG_V_MALFORMED;
-                    break;
-                }
-                if (open_add(&open, rec.corr) != 0) {
-                    rep->status = FL_CMDLOG_V_IO;
-                    break;
-                }
-            } else if (!open_close(&open, rec.corr)) {
-                rep->orphan_closes++;
             }
             if (rec.cosig)
                 rep->cosigs_unverified++;
-            SHA256(p, rec.len, rep->last_hash);
             rep->next_seq++;
             rep->records++;
             pos += rec.len;
@@ -387,8 +344,19 @@ static int walk(const fl_kq_storage_t *st, const char *dir, const fl_cmdlog_sign
         } else {
             free_fs(data);
         }
-        if (rep->tail_incomplete)
-            break;
+    }
+    /* No segment may exist after the point where the walk stopped: a missing middle segment, a
+     * partial record that is not at the very end, or a segment past the retention bound. */
+    if (rep->status == FL_CMDLOG_V_OK) {
+        for (unsigned k = rep->segments; k < FL_CMDLOG_SEGMENTS_HARD_MAX; k++) {
+            int ex = seg_exists(st, dir, k);
+
+            if (ex != 0) {
+                rep->status = ex < 0 ? FL_CMDLOG_V_IO : FL_CMDLOG_V_GAP;
+                rep->bad_seq = rep->next_seq;
+                break;
+            }
+        }
     }
     rep->open_attempts = (unsigned)open.n;
     for (size_t i = 0; i < open.n && i < FL_CMDLOG_REPORT_OPEN_MAX; i++)
@@ -404,57 +372,106 @@ static int walk(const fl_kq_storage_t *st, const char *dir, const fl_cmdlog_sign
 }
 
 int fl_cmdlog_verify(const fl_kq_storage_t *storage, const char *dir, const fl_cmdlog_signer_t *signer,
-                     const fl_cmdlog_limits_t *limits, fl_cmdlog_report_t *report) {
+                     const uint8_t *expect_device, const fl_cmdlog_limits_t *limits, fl_cmdlog_report_t *report) {
     fl_cmdlog_limits_t lim = limits_or_default(limits);
-    if (!report || !storage || !dir || !signer || !signer->verify)
+
+    if (!report || !storage || !dir || !signer || !signer->verify || !signer->key_id)
         return -1;
-    return walk(storage, dir, signer, &lim, report, NULL, NULL);
+    return walk(storage, dir, signer, &lim, expect_device, report, NULL, NULL);
 }
 
 /* ---------------------------------------------------------------------------------------------
  * Open / close
  * -------------------------------------------------------------------------------------------*/
 
+/* Adds j to the registry unless its (storage, dir) is already open. */
+static int reg_add(fl_cmdlog_t *j) {
+    int taken = 0;
+
+    pthread_mutex_lock(&s_reg_mu);
+    for (fl_cmdlog_t *o = s_reg_head; o; o = o->reg_next)
+        if (o->st == j->st && strcmp(o->dir, j->dir) == 0)
+            taken = 1;
+    if (!taken) {
+        j->reg_next = s_reg_head;
+        s_reg_head = j;
+    }
+    pthread_mutex_unlock(&s_reg_mu);
+    return taken ? -1 : 0;
+}
+
+static void reg_remove(fl_cmdlog_t *j) {
+    pthread_mutex_lock(&s_reg_mu);
+    for (fl_cmdlog_t **pp = &s_reg_head; *pp; pp = &(*pp)->reg_next)
+        if (*pp == j) {
+            *pp = j->reg_next;
+            break;
+        }
+    pthread_mutex_unlock(&s_reg_mu);
+}
+
+static void destroy(fl_cmdlog_t *j) {
+    pthread_mutex_destroy(&j->mu);
+    if (j->seg)
+        mem_domain_secure_zero(j->seg, j->lim.segment_max);
+    if (j->scratch)
+        mem_domain_secure_zero(j->scratch, j->lim.segment_max);
+    free_fs(j->seg);
+    free_fs(j->scratch);
+    mem_domain_secure_zero(j, sizeof *j);
+    mem_domain_free(MEM_DOMAIN_FS, j);
+}
+
 int fl_cmdlog_open(const fl_cmdlog_config_t *cfg, fl_cmdlog_t **out, fl_cmdlog_report_t *report) {
     fl_cmdlog_report_t local;
     fl_cmdlog_report_t *rep = report ? report : &local;
     fl_cmdlog_t *j;
     uint8_t *last = NULL;
-    size_t last_len = 0;
+    size_t last_len = 0, dlen;
 
     if (out)
         *out = NULL;
-    if (!cfg || !out || !cfg->storage || !cfg->dir || !cfg->signer || !cfg->signer->sign || !cfg->signer->verify ||
-        !cfg->signer->key_id || strlen(cfg->signer->key_id) >= FL_CMDLOG_LABEL_MAX ||
+    if (report)
+        mem_domain_zero(report, sizeof *report);
+    if (!cfg || !out || !cfg->storage || !cfg->dir || !cfg->signer || !cfg->signer->sign ||
+        !cfg->signer->verify || !cfg->signer->key_id || strlen(cfg->signer->key_id) == 0 ||
+        strlen(cfg->signer->key_id) >= FL_CMDLOG_LABEL_MAX || strlen(cfg->dir) == 0 ||
         strlen(cfg->dir) >= CMDLOG_PATH_MAX)
-        return -1;
+        return FL_CMDLOG_OPEN_ERROR;
     j = (fl_cmdlog_t *)mem_domain_calloc(MEM_DOMAIN_FS, 1, sizeof *j);
     if (!j)
-        return -1;
+        return FL_CMDLOG_OPEN_ERROR;
     j->st = cfg->storage;
     j->lim = limits_or_default(&cfg->limits);
     j->signer = cfg->signer;
-    mem_domain_copy(j->dir, cfg->dir, strlen(cfg->dir) + 1u);
+    dlen = strlen(cfg->dir);
+    while (dlen > 1 && cfg->dir[dlen - 1] == '/')
+        dlen--; /* "/x/" and "/x" name one journal */
+    mem_domain_copy(j->dir, cfg->dir, dlen);
+    j->dir[dlen] = '\0';
     mem_domain_copy(j->device_id, cfg->device_id, FL_CMDLOG_ID_LEN);
+    if (pthread_mutex_init(&j->mu, NULL) != 0) {
+        mem_domain_free(MEM_DOMAIN_FS, j);
+        return FL_CMDLOG_OPEN_ERROR;
+    }
+    if (reg_add(j) != 0) {
+        destroy(j);
+        return FL_CMDLOG_OPEN_BUSY;
+    }
     j->seg = (uint8_t *)mem_domain_alloc(MEM_DOMAIN_FS, j->lim.segment_max);
     j->scratch = (uint8_t *)mem_domain_alloc(MEM_DOMAIN_FS, j->lim.segment_max);
-    if (!j->seg || !j->scratch || pthread_mutex_init(&j->mu, NULL) != 0) {
-        free_fs(j->seg);
-        free_fs(j->scratch);
-        mem_domain_free(MEM_DOMAIN_FS, j);
-        return -1;
-    }
-    if (walk(j->st, j->dir, j->signer, &j->lim, rep, &last, &last_len) != 0) {
-        fl_cmdlog_close(j); /* evidence: never append over a journal that does not verify */
-        return -1;
-    }
-    if (rep->records == 0 && fl_random_bytes(j->journal_id, FL_CMDLOG_ID_LEN) != 0) {
-        free_fs(last);
-        fl_cmdlog_close(j);
-        return -1;
-    }
-    if (rep->records)
+    if (!j->seg || !j->scratch)
+        goto fail;
+    /* Every record must be this device's and this signer's: a journal that does not verify, or
+     * belongs to another device or key, is evidence and is never appended to. */
+    if (walk(j->st, j->dir, j->signer, &j->lim, cfg->device_id, rep, &last, &last_len) != 0)
+        goto fail;
+    if (rep->records == 0) {
+        if (fl_random_bytes(j->journal_id, FL_CMDLOG_ID_LEN) != 0)
+            goto fail;
+    } else {
         mem_domain_copy(j->journal_id, rep->journal_id, FL_CMDLOG_ID_LEN);
+    }
     j->next_seq = rep->next_seq;
     mem_domain_copy(j->last_hash, rep->last_hash, FL_CMDLOG_HASH_LEN);
     j->segments = rep->segments;
@@ -466,27 +483,29 @@ int fl_cmdlog_open(const fl_cmdlog_config_t *cfg, fl_cmdlog_t **out, fl_cmdlog_r
         free_fs(last);
     }
     *out = j;
-    return 0;
+    return FL_CMDLOG_OPEN_OK;
+fail:
+    free_fs(last);
+    reg_remove(j);
+    destroy(j);
+    return FL_CMDLOG_OPEN_ERROR;
 }
 
 void fl_cmdlog_close(fl_cmdlog_t *j) {
     if (!j)
         return;
-    pthread_mutex_destroy(&j->mu);
-    mem_domain_secure_zero(j->seg, j->lim.segment_max);
-    mem_domain_secure_zero(j->scratch, j->lim.segment_max);
-    free_fs(j->seg);
-    free_fs(j->scratch);
-    mem_domain_secure_zero(j, sizeof *j);
-    mem_domain_free(MEM_DOMAIN_FS, j);
+    reg_remove(j);
+    destroy(j);
 }
 
 /* ---------------------------------------------------------------------------------------------
  * Redaction
  * -------------------------------------------------------------------------------------------*/
 
-/* Line-mode builtins the interpreter parses before argv (cmd_decl.h *_maybe); every other known
- * name comes from the command registry. */
+/* The line-mode builtins the interpreter parses before argv (the cmd_decl.h *_maybe functions,
+ * interpreter.c); every other known name comes from the command registry. TODO(FL-04): move these
+ * names into the shared registry (userland/command/cmd_registry.c, another team's file today) so
+ * there is one list. */
 static const char *const k_line_builtins[] = {"exit", "clear", "help", "history", "cc", "bios", "make"};
 
 /* Future per-command fields (cmd_journal.h). Empty: no command records more than its category. */
@@ -515,7 +534,9 @@ const char *fl_cmdlog_category(const char *line, char *out, size_t cap) {
     snprintf(out, cap, "other");
     if (!line)
         return out;
-    /* Only the start of the line is copied (a known command name is short); the copy is wiped. */
+    /* Only the start of the line is copied (a known command name is short); the copy is wiped.
+     * A first word cut by the scan limit could at worst match a shorter command name: a wrong
+     * category, never a leak. */
     n = strnlen(line, sizeof buf - 1u);
     mem_domain_copy(buf, line, n);
     buf[n] = '\0';
@@ -550,8 +571,8 @@ static int append_locked(fl_cmdlog_t *j, const uint8_t *rec, size_t len, char *r
             return -1;
         }
         if (j->tail_pending && j->segments > 0) {
-            /* The active segment ends in a torn record: rewrite it without it before moving on, or
-             * the partial record would sit mid-journal and fail verification. */
+            /* The active segment may end in a partial record: rewrite it without it before moving
+             * on, or the partial record would sit mid-journal and fail verification. */
             if (seg_path(j->dir, j->segments - 1u, path, sizeof path) != 0 ||
                 j->st->write_atomic(j->st->ctx, path, j->seg, j->seg_len) != 0) {
                 set_reason(reason, cap, "command log storage write failed (dropping a torn tail)");
@@ -561,6 +582,12 @@ static int append_locked(fl_cmdlog_t *j, const uint8_t *rec, size_t len, char *r
         }
         idx = j->segments; /* a new segment */
         base = 0;
+        /* Never write over a segment this handle did not make: open proved none exists past the
+         * last, and only our own failed write (next_dirty) may have left one behind. */
+        if (!j->next_dirty && seg_exists(j->st, j->dir, idx) != 0) {
+            set_reason(reason, cap, "command log found an unexpected later segment");
+            return -1;
+        }
     } else {
         idx = j->segments - 1u;
         base = j->seg_len;
@@ -573,12 +600,19 @@ static int append_locked(fl_cmdlog_t *j, const uint8_t *rec, size_t len, char *r
         mem_domain_copy(j->scratch, j->seg, base);
     mem_domain_copy(j->scratch + base, rec, len);
     if (j->st->write_atomic(j->st->ctx, path, j->scratch, base + len) != 0) {
+        /* On a backend that is not atomic the file may now end in part of this record. j->seg
+         * still holds the good bytes, so the next write (or roll) rewrites it first. */
+        if (idx == j->segments)
+            j->next_dirty = 1;
+        else
+            j->tail_pending = 1;
         set_reason(reason, cap, "command log storage write failed");
         return -1;
     }
     if (idx == j->segments) { /* moved to a new segment */
         j->segments++;
         j->seg_len = 0;
+        j->next_dirty = 0;
     }
     {
         uint8_t *t = j->seg;
@@ -587,7 +621,7 @@ static int append_locked(fl_cmdlog_t *j, const uint8_t *rec, size_t len, char *r
     }
     j->total += len; /* j->total already leaves out a torn tail, which this rewrite dropped */
     j->seg_len = base + len;
-    j->tail_pending = 0; /* rewritten without it, or rewritten before the move to a new segment */
+    j->tail_pending = 0;
     return 0;
 }
 
@@ -598,9 +632,11 @@ static int emit(fl_cmdlog_t *j, uint8_t type, const char *principal, const char 
     uint8_t rec[FL_CMDLOG_RECORD_MAX];
     uint8_t event_id[FL_CMDLOG_ID_LEN];
     uint8_t sig[FL_CMDLOG_SIG_MAX];
+    uint8_t ver[2], hash[FL_CMDLOG_HASH_LEN];
+    uint8_t u8;
     size_t sig_len = 0;
     int64_t now = 0;
-    wr_t w = {rec, sizeof rec, 0, 0};
+    fl_bytes_sticky_writer_t w;
     int ret = -1;
 
     if (fl_random_bytes(event_id, sizeof event_id) != 0) {
@@ -609,44 +645,56 @@ static int emit(fl_cmdlog_t *j, uint8_t type, const char *principal, const char 
     }
     if (fl_time_wall_sec(&now) != FL_RESULT_OK)
         now = 0;
+    fl_net_put_u16_be(ver, FL_CMDLOG_FORMAT_VERSION);
     pthread_mutex_lock(&j->mu);
-    w_u32(&w, 0); /* record_len, filled below */
-    w_bytes(&w, CMDLOG_MAGIC, 4);
-    w_u16(&w, FL_CMDLOG_FORMAT_VERSION);
-    w_str(&w, FL_CMDLOG_DOMAIN, 256u);
-    w_bytes(&w, j->journal_id, FL_CMDLOG_ID_LEN);
-    w_bytes(&w, j->device_id, FL_CMDLOG_ID_LEN);
-    w_u64(&w, j->next_seq);
-    w_bytes(&w, j->last_hash, FL_CMDLOG_HASH_LEN);
-    w_bytes(&w, event_id, FL_CMDLOG_ID_LEN);
-    w_str(&w, j->signer->key_id, FL_CMDLOG_LABEL_MAX);
-    w_str(&w, principal ? principal : "", FL_CMDLOG_LABEL_MAX);
-    w_u8(&w, type);
-    w_str(&w, category ? category : "", FL_CMDLOG_CATEGORY_MAX);
-    w_u32(&w, (uint32_t)rc);
-    w_u64(&w, (uint64_t)now);
-    w_u8(&w, FL_CMDLOG_TIME_LOCAL);
-    w_bytes(&w, corr ? corr->id : event_id, FL_CMDLOG_ID_LEN);
-    w_u8(&w, 0); /* no co-signature yet (sudo co-signing: kq_sudo_sign, later) */
-    if (w.err) {
+    fl_bytes_sticky_init(&w, rec, (uint16_t)j->lim.record_max);
+    (void)fl_bytes_sticky_put_u32(&w, 0); /* record_len, filled below */
+    (void)fl_bytes_sticky_put_bytes(&w, CMDLOG_MAGIC, 4);
+    (void)fl_bytes_sticky_put_bytes(&w, ver, sizeof ver);
+    (void)fl_bytes_sticky_put_str8(&w, FL_CMDLOG_DOMAIN);
+    (void)fl_bytes_sticky_put_bytes(&w, j->journal_id, FL_CMDLOG_ID_LEN);
+    (void)fl_bytes_sticky_put_bytes(&w, j->device_id, FL_CMDLOG_ID_LEN);
+    (void)fl_bytes_sticky_put_u64(&w, j->next_seq);
+    (void)fl_bytes_sticky_put_bytes(&w, j->last_hash, FL_CMDLOG_HASH_LEN);
+    (void)fl_bytes_sticky_put_bytes(&w, event_id, FL_CMDLOG_ID_LEN);
+    (void)fl_bytes_sticky_put_str8(&w, j->signer->key_id);
+    if (principal && strlen(principal) >= FL_CMDLOG_LABEL_MAX)
+        w.bad = 1; /* the reader's bound: label fields hold fewer than FL_CMDLOG_LABEL_MAX bytes */
+    (void)fl_bytes_sticky_put_str8(&w, principal ? principal : "");
+    u8 = type;
+    (void)fl_bytes_sticky_put_bytes(&w, &u8, 1);
+    (void)fl_bytes_sticky_put_str8(&w, category ? category : "");
+    (void)fl_bytes_sticky_put_u32(&w, (uint32_t)rc);
+    (void)fl_bytes_sticky_put_u64(&w, (uint64_t)now);
+    u8 = FL_CMDLOG_TIME_LOCAL;
+    (void)fl_bytes_sticky_put_bytes(&w, &u8, 1);
+    (void)fl_bytes_sticky_put_bytes(&w, corr ? corr->id : event_id, FL_CMDLOG_ID_LEN);
+    u8 = 0; /* no co-signature yet (sudo co-signing: kq_sudo_sign, later) */
+    (void)fl_bytes_sticky_put_bytes(&w, &u8, 1);
+    if (w.bad) {
         set_reason(reason, cap, "command log record does not fit (principal too long?)");
         goto out;
     }
-    if (j->signer->sign(j->signer->ctx, FL_CMDLOG_DOMAIN, rec + 4, w.len - 4u, sig, &sig_len) != 0 ||
+    if (j->signer->sign(j->signer->ctx, FL_CMDLOG_DOMAIN, rec + 4, (size_t)w.w.len - 4u, sig, &sig_len) != 0 ||
         sig_len == 0 || sig_len > FL_CMDLOG_SIG_MAX) {
         set_reason(reason, cap, "command log signer refused to sign");
         goto out;
     }
-    w_u8(&w, (uint8_t)sig_len);
-    w_bytes(&w, sig, sig_len);
-    if (w.err) {
+    u8 = (uint8_t)sig_len;
+    (void)fl_bytes_sticky_put_bytes(&w, &u8, 1);
+    (void)fl_bytes_sticky_put_bytes(&w, sig, sig_len);
+    if (w.bad) {
         set_reason(reason, cap, "command log record is over its size bound");
         goto out;
     }
-    fl_net_put_u32_le(rec, (uint32_t)w.len);
-    if (append_locked(j, rec, w.len, reason, cap) != 0)
+    fl_net_put_u32_be(rec, (uint32_t)w.w.len);
+    if (sha256(rec, w.w.len, hash) != 0) {
+        set_reason(reason, cap, "command log could not hash the record");
         goto out;
-    SHA256(rec, w.len, j->last_hash);
+    }
+    if (append_locked(j, rec, w.w.len, reason, cap) != 0)
+        goto out;
+    mem_domain_copy(j->last_hash, hash, sizeof hash);
     j->next_seq++;
     if (corr_out)
         mem_domain_copy(corr_out->id, event_id, FL_CMDLOG_ID_LEN);
@@ -703,17 +751,8 @@ void fl_cmdlog_print_refusal(const char *reason) {
                    reason && reason[0] ? reason : "unknown reason");
 }
 
-/* Yellow, like fl_color_warn, but tagged as a local warning rather than "[Server] ". */
-static void warn_local(const char *fmt, ...) {
-    va_list ap;
-
-    va_start(ap, fmt);
-    fl_color_vfprintf_tagged(stderr, KYEL, "[WARNING] ", fmt, ap);
-    va_end(ap);
-}
-
 void fl_cmdlog_print_completion_gap(const char *reason) {
-    warn_local("the command ran, but its completion was not written to the signed command log (%s); "
-               "the log will show its outcome as unknown",
-               reason && reason[0] ? reason : "unknown reason");
+    fl_color_warn_local("the command ran, but its completion was not written to the signed command log (%s); "
+                        "the log will show its outcome as unknown",
+                        reason && reason[0] ? reason : "unknown reason");
 }
