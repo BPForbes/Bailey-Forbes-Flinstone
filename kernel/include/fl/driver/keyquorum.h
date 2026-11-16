@@ -179,23 +179,18 @@ struct fl_kq_driver {
                      uint8_t encryption_secret_out[32]);
 
     /*
-     * Head author (file ABI version 5), appended after slot_open: the author label of the single
-     * head revision of c, NUL-terminated into out (cap bytes, the caller's). KQ_FILE_OK;
-     * KQ_FILE_FORKED with two heads (nobody is "the" author until they are merged);
-     * KQ_FILE_NO_REVISION for a container with none; KQ_FILE_NO_ROOM when the label and its NUL
-     * do not fit; KQ_FILE_INVALID for a malformed container. out is "" on every failure.
+     * Head author (file ABI version 5), appended after slot_open: the author label of c's single
+     * head revision. KQ_FILE_OK, or KQ_FILE_FORKED (two heads), KQ_FILE_NO_REVISION, KQ_FILE_NO_ROOM
+     * or KQ_FILE_INVALID; out is "" on every failure.
      */
     int (*head_author)(const fl_kq_buf_t *c, char *out, size_t cap);
 
     /*
-     * Access policy and private-bridge proof (file ABI version 4), appended after head_author.
-     * One-to-one over kq_access_requirement (keyquorum_access.h) and kq_bridge_prove /
-     * kq_bridge_verify (keyquorum_bridge.h): the KQ_ACCESS_* factor or KQ_BRIDGE_* status is
-     * returned unchanged, nothing is allocated or retained. access_requirement says which factor a
-     * switch demands and checks none; the caller passes only bridges its own store holds as live.
-     * NULL in the freestanding image (no account store; the SECFEAT image has no room for them).
-     * bridge_prove signs challenge as member local_label (the caller wipes encryption_sk and
-     * signing_sk); bridge_verify checks the artifact against the live bridge's facts the caller holds.
+     * Access policy and private-bridge proof (file ABI version 4), appended after head_author:
+     * one-to-one over kq_access_requirement and kq_bridge_prove / kq_bridge_verify, the KQ_ACCESS_*
+     * factor or KQ_BRIDGE_* status returned unchanged. The caller passes only bridges its store holds
+     * as live and wipes the secrets it passed. NULL in the freestanding image (no account store; the
+     * SECFEAT image has no room for them).
      */
     int (*access_requirement)(const char *current, const char *target, int sudo,
                               const kq_bridge_t *live_bridges, size_t nbridges, int parent_approval,
@@ -213,24 +208,18 @@ struct fl_kq_driver {
                          size_t clen, const uint8_t *artifact, size_t alen);
 
     /*
-     * Bridge reach, appended after bridge_verify: one-to-one over kq_bridge_connects
-     * (keyquorum_identity.h), 1 when a bridge between end_a and end_b connects actor to scope, else
-     * 0. The shape of the hierarchy only; that the bridge is live is the caller's check. NULL in the
-     * freestanding image like the three above; a caller reads NULL as "does not connect".
+     * Bridge reach, appended after bridge_verify (kq_bridge_connects): 1 when a bridge between end_a
+     * and end_b connects actor to scope, else 0. The shape of the hierarchy only; liveness is the
+     * caller's check. NULL in the freestanding image, read as "does not connect".
      */
     int (*bridge_connects)(const char *end_a, const char *end_b, const char *actor,
                            const char *scope);
 
     /*
-     * Parent-key assembly (file ABI version 6, keyquorum_assembly.h), appended after
-     * bridge_connects: one-to-one over kq_assembly_*, the KQ_ASSEMBLY_* status returned unchanged.
-     * A parent's 32-byte signing seed is dealt among its children (assembly_split writes the KQAS
-     * record, every share sealed to one child's box key) and put back together from the children
-     * that are unlocked now (assembly_assemble: label, box secret and device id of each; the
-     * threshold must come from at least minimum_devices distinct devices, and the seed must derive
-     * parent_signing_public). The caller wipes seed_out and every secret it passed. The quorum rule
-     * lives in KeyQuorum; nothing here decides it. Hosted build only: NULL in the freestanding image
-     * (the library archive there does not export them), and a caller reads NULL as "refused".
+     * Parent-key assembly (file ABI version 6), appended after bridge_connects: one-to-one over
+     * kq_assembly_* (keyquorum_assembly.h), the KQ_ASSEMBLY_* status returned unchanged; the quorum
+     * rule lives in KeyQuorum. The caller wipes seed_out and every secret it passed. NULL in the
+     * freestanding image (its archive does not export them), read as "refused".
      */
     unsigned (*assembly_threshold)(unsigned holders);
     int (*assembly_split)(const uint8_t seed[32], unsigned generation,
@@ -245,16 +234,11 @@ struct fl_kq_driver {
                              size_t minimum_devices, uint8_t seed_out[32]);
 
     /*
-     * Co-signed sudo and token sealing (file ABI version 7), appended after assembly_assemble.
-     * One-to-one over kq_sudo_sign / kq_sudo_verify (keyquorum_identity.h) and kq_slot_seal
-     * (keyquorum_slots.h), the KQ_ACCOUNT_* code (or 1/0 for verify) returned unchanged.
-     * sudo_sign signs one half of an elevation by invoker under authority (role KQ_SUDO_INVOKER
-     * with the invoker's own key, KQ_SUDO_AUTHORITY with Root's) over the action and a fresh
-     * 16-byte nonce; sudo_verify is 1 only when both halves verify under the public keys the
-     * caller's registry holds. slot_seal seals an account's own signing and box secrets with its
-     * password to a device id into a KQST (KQ_SLOT_TOKEN_LEN(strlen(label)) bytes) and returns the
-     * two public keys derived from them; the caller wipes the secrets. Hosted only: NULL in the
-     * freestanding image (no account store there), and a caller reads NULL as "refused".
+     * Co-signed sudo and token sealing (file ABI version 7), appended after assembly_assemble:
+     * one-to-one over kq_sudo_sign / kq_sudo_verify and kq_slot_seal, the KQ_ACCOUNT_* code (1/0 for
+     * sudo_verify, which needs both halves) returned unchanged. slot_seal writes
+     * KQ_SLOT_TOKEN_LEN(strlen(label)) bytes; the caller wipes the secrets. NULL in the freestanding
+     * image (no account store), read as "refused".
      */
     int (*sudo_sign)(int role, const char *invoker, const char *authority, const uint8_t *action,
                      size_t action_len, const uint8_t nonce[16], const uint8_t secret[32],

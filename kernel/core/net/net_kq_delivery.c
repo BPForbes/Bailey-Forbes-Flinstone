@@ -489,8 +489,8 @@ static void host_ack(fl_net_server_t *srv, const fl_net_server_member_t *from,
     }
 }
 
-/* Refusal report (KQ-12): the refusing recipient's KQER, forwarded to the delivery's sender. Best effort,
- * nothing is kept: a sender who is not connected misses it. Every check fails closed and silently. */
+/* Refusal report: the refusing recipient's KQER, forwarded to the delivery's sender. Every check fails closed
+ * and silently. */
 static void host_report(fl_net_server_t *srv, const fl_net_server_member_t *from, const uint8_t *payload,
                         uint16_t plen) {
     fl_bytes_reader_t r;
@@ -1346,7 +1346,7 @@ void fl_net_kq_history_drop(const uint8_t request_id[16]) {
     kq_unlock();
 }
 
-/* FL-04, member side: take the bundle, then open both letters with this account's box key. */
+/* Member side: take the bundle, then open both letters with this account's box key. */
 fl_result_t fl_net_kq_history_open(const uint8_t request_id[16], unsigned wait_ms, const uint8_t box_secret[32],
                                    const char *sender, const char *me, const uint8_t sender_public[32],
                                    const uint8_t expected_file_id[16], fl_kq_buf_t *lines,
@@ -1361,7 +1361,7 @@ fl_result_t fl_net_kq_history_open(const uint8_t request_id[16], unsigned wait_m
     if (!request_id)
         return FL_RESULT_INVAL;
     if (!box_secret || !sender || !sender[0] || !me || !me[0] || !sender_public || !lines || !snapshot_events) {
-        fl_net_kq_history_drop(request_id); /* as documented: dropped on every result but TIMEDOUT */
+        fl_net_kq_history_drop(request_id); /* dropped on every result but TIMEDOUT */
         return FL_RESULT_INVAL;
     }
     lines->data = NULL;

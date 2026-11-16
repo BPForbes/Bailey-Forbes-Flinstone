@@ -2,13 +2,12 @@
 #define FL_KQ_MEM_STORAGE_H
 
 /*
- * An in-memory fl_kq_storage_t (FL-02 stage 2): the table the checkpoints use where there is no file system
- * for containers and sealed letters, the way the wasm lab keeps them in Emscripten's in-memory FS and
- * KeyQuorum's own lab in an in-memory Storage. Files live in MEM_DOMAIN_FS memory; nothing survives a reset.
+ * An in-memory fl_kq_storage_t: the table the checkpoints use where there is no file system for containers
+ * and sealed letters. Files live in MEM_DOMAIN_FS memory; nothing survives a reset.
  *
- * It uses only the allocator, memcpy, memcmp and strlen, so the freestanding image can link it. Bounded: at
- * most FL_KQ_MEM_FILES_MAX files, paths under FL_KQ_MEM_PATH_MAX, FL_KQ_MEM_BYTES_MAX bytes in all (a limit is
- * measured against the image's RAM, not chosen here). No locking: the checkpoints run under the shell's lock.
+ * It needs only the allocator, the mem_domain_* wrappers and strlen, so the freestanding image can link it.
+ * Bounded: at most FL_KQ_MEM_FILES_MAX files, paths under FL_KQ_MEM_PATH_MAX, FL_KQ_MEM_BYTES_MAX bytes in
+ * all. No locking: the checkpoints run under the shell's lock.
  *
  * A write replaces the old bytes only after the new ones are held, and dir_commit of n files either replaces
  * all of them or none. Results follow kq_storage.h: read 0 / -1 / -2 (larger than max) / -3 (absent), exists

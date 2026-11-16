@@ -131,7 +131,7 @@
 #define FL_NET_SESSION_OP_KQH_LAST         0x51u
 
 /**
- * KeyQuorum refusal report (KQ-12). The recipient of a refused co-signed delivery sends the signed KQER it
+ * KeyQuorum refusal report. The recipient of a refused co-signed delivery sends the signed KQER it
  * wrote beside the refused file to the host (after the refusing KQ_ACK); the host checks the sender is that
  * delivery's recipient and that the delivery was refused, then forwards the frame, unchanged, to the
  * delivery's sender. REPORT: [delivery id 16][len u16 BE][KQER bytes, len <= FL_KQ_REPORT_FRAME_MAX]. Best

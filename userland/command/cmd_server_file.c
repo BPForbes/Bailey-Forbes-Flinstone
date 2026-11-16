@@ -324,7 +324,7 @@ static int verb_file_history(const cmd_server_ctx_t *ctx, int argc, char **argv)
     if (!session_active(ctx, &hosting))
         return 1;
     /* The host keeps the authoritative share history; a joined member's catalog holds only its own
-     * rows. A member asks the host for a co-signed delivery's history instead (FL-04). */
+     * rows. A member asks the host for a co-signed delivery's history instead. */
     if (!hosting)
         return kq_history_member(ctx, argc, argv);
     if (argc < 2) {
@@ -641,7 +641,7 @@ static int verb_file_permit(int argc, char **argv)
     return 0;
 }
 
-/* What this shell sent in co-signed deliveries, for the refusal reports that may come back (KQ-12): the file
+/* What this shell sent in co-signed deliveries, for the refusal reports that may come back: the file
  * the history sits beside, who would report, and the artifact's SHA-256 a report must name. Session-lifetime
  * only; the newest 16. */
 #define KQ_SENT_MAX 16u
@@ -785,9 +785,8 @@ static int verb_kq_send(const cmd_server_ctx_t *ctx, int argc, char **argv)
 }
 
 /* After a refusal's ACK: the KQER that fl_kq_report_refusal_in wrote in the landing directory goes to the
- * sender through the host. report holds the bytes read back through that same held directory and authenticated
- * (fl_kq_cp_report_read_in); nothing is read here by path. Nothing written (nobody online, capped, already there)
- * or longer than a frame sends nothing; the refusal itself is unchanged either way. */
+ * sender through the host. report holds the bytes fl_kq_cp_report_read_in authenticated; nothing is read here
+ * by path. An empty report or one longer than a frame sends nothing; the refusal itself is unchanged. */
 static void kq_send_refusal_report(const cmd_server_ctx_t *ctx, int hosting, const fl_net_kq_inbox_t *in,
                                    const fl_kq_buf_t *report)
 {
@@ -850,8 +849,7 @@ static int kq_decode_and_ack(const cmd_server_ctx_t *ctx, int hosting,
             const unsigned char *mine = fl_user_db_signing_public(fl_session_user_db(), fl_session_current_key_id());
 
             fl_kq_report_refusal_in(&in->offer, fl_kq_cp_to_result(cp), &held);
-            /* Read back through the held handle while it is still open, and keep only bytes KeyQuorum accepts as
-             * this account's report about this artifact. */
+            /* Read back through the held handle while it is still open. */
             if (mine && fl_kq_cp_offer_ref(&in->offer, ref) == FL_RESULT_OK)
                 (void)fl_kq_cp_report_read_in(&held, ref, mine, &report);
         }
@@ -1089,7 +1087,7 @@ static int verb_kq_reports(const cmd_server_ctx_t *ctx)
     return 0;
 }
 
-/* ---- history download (FL-04): the gate and the source the host gives fl_net_kq_set_history ---------------
+/* ---- history download: the gate and the source the host gives fl_net_kq_set_history -----------------------
  * The history is the KeyQuorum container beside the file, as KeyQuorum keeps it (nothing is copied into a
  * store of Flinstone's own). It can be served for the deliveries this shell sent, the ones kq_sent_remember
  * recorded: only to that delivery's recipient, signed by this shell's own online account, and only if
@@ -1234,9 +1232,9 @@ static int kq_history_member_print(fl_result_t rc, const fl_server_history_got_t
     }
 }
 
-/* server file history <delivery-id> [-from <account-key>] on a joined member (FL-04): ask the host for a
- * co-signed delivery's history, then open both letters with this account's box key. The host's gate lets only
- * the delivery's recipient have it; its refusal arrives through the usual refusal print. */
+/* server file history <delivery-id> [-from <account-key>] on a joined member: ask the host for a co-signed
+ * delivery's history, then open both letters with this account's box key. The host's gate lets only the
+ * delivery's recipient have it; its refusal arrives through the usual refusal print. */
 static int kq_history_member(const cmd_server_ctx_t *ctx, int argc, char **argv)
 {
     const char *me = fl_session_current_key_id();

@@ -149,7 +149,7 @@ void fl_net_kq_history_drop(const uint8_t request_id[16]);
 /** fl_net_kq_history_open: the letters open, but they are the history of another file than the one expected. */
 #define FL_NET_KQ_HISTORY_OTHER_FILE ((fl_result_t)-74) /* EBADMSG shape; outside the shared codes on purpose */
 /**
- * FL-04, member side: the history for request_id (waits up to wait_ms, as fl_net_kq_history_take), opened with
+ * Member side: the history for request_id (waits up to wait_ms, as fl_net_kq_history_take), opened with
  * this account's box key. Both letters must be signed by sender under sender_public and addressed to me, and the
  * snapshot (kind 17) must cover the delivered file's history (kind 15, KeyQuorum snapshot_covers). With
  * expected_file_id (the file id of the delivery's offer, recorded at decode), the opened file must be that file;
@@ -167,7 +167,7 @@ fl_result_t fl_net_kq_history_open(const uint8_t request_id[16], unsigned wait_m
                                    const uint8_t expected_file_id[16], fl_kq_buf_t *lines,
                                    uint32_t *snapshot_events);
 
-/* ---- refusal report (KQ-12) ---------------------------------------------------------------- */
+/* ---- refusal report ------------------------------------------------------------------------ */
 
 /**
  * The recipient of a refused delivery sends the signed KQER it wrote beside the refused file (the bytes of
@@ -181,7 +181,7 @@ fl_result_t fl_net_kq_send_report(fl_net_server_t *srv, fl_net_client_t *client,
 
 /** A report that reached this shell as the delivery's sender: copied out and removed. NOENT when none is
  *  held for id, NOMEM (nothing removed) when cap is too small. The report is a claim by its signer: apply it
- *  with fl_kq_cp_inject_report_with, which checks the signature and the artifact. */
+ *  with fl_kq_cp_inject_report_bytes, which checks the signature and the artifact. */
 fl_result_t fl_net_kq_report_take(const uint8_t id[FL_KQ_DELIVERY_ID_LEN], uint8_t *out, size_t cap, size_t *len);
 /** How many reports are held (at most four; a fifth replaces the oldest). */
 size_t fl_net_kq_reports_pending(void);

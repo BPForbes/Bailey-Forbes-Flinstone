@@ -56,9 +56,9 @@ fl_result_t fl_kq_service_online_from_login(const char *account, const char *pas
 fl_result_t fl_kq_service_online_opened(const fl_user_record_t *account, const uint8_t secret[32],
                                         uint64_t login_generation);
 /**
- * Keep the account's box (X25519) secret next to its signing secret for the life of the session (FL-15): what a
- * KQST login opened and used to wipe. Same generation rules as online_opened, and the account must already be
- * online (ACCES otherwise). Wiped with the signing secret at logout. Caller wipes box_secret after return.
+ * Keep the account's box (X25519) secret, as a KQST login opened it, next to its signing secret for the life
+ * of the session. Same generation rules as online_opened, and the account must already be online (ACCES
+ * otherwise). Wiped with the signing secret at logout. Caller wipes box_secret after return.
  */
 fl_result_t fl_kq_service_online_box(const fl_user_record_t *account, const uint8_t box_secret[32],
                                      uint64_t login_generation);
@@ -103,12 +103,10 @@ typedef struct {
 fl_result_t fl_kq_service_autosign_add(const fl_kq_autosign_t *spec);
 
 /**
- * The production head_author callback for a tracked file: KeyQuorum names the author of the file's
- * single head (fl_kq_cp_head_author over the container beside path). ctx points at an
- * fl_kq_autosign_file_t; a caller whose other two callbacks need more context puts one first in
- * its own struct. OK with the label; FL_RESULT_BUSY when the history is forked (the sweep audits
- * kq-autosign-forked and signs nothing); any other failure (no container, no revision, malformed)
- * is another non-OK result and names nobody.
+ * The production head_author callback for a tracked file (fl_kq_cp_head_author over the container beside
+ * path). ctx points at an fl_kq_autosign_file_t, or a struct that starts with one. OK with the label;
+ * FL_RESULT_BUSY when the history is forked (the sweep audits kq-autosign-forked and signs nothing); any
+ * other failure is another non-OK result and names nobody.
  */
 typedef struct {
     const char *path; /* the tracked file; its container is path + FL_KQ_CONTAINER_SUFFIX */
@@ -116,10 +114,9 @@ typedef struct {
 fl_result_t fl_kq_autosign_head_author(void *ctx, char *out, size_t cap);
 
 /**
- * The other two production callbacks for a tracked file (ctx an fl_kq_autosign_file_t, as above):
- * the time of the newest signature in the file's history (fl_kq_cp_last_signature; 0 when there is none or
- * the history cannot be read), and the signing call itself (fl_kq_cp_sign_head_with: the file's current bytes
- * are checked in as a new revision signed by the author). A fork answers BUSY.
+ * The other two production callbacks (ctx as above): the time of the newest signature in the file's history
+ * (fl_kq_cp_last_signature; 0 when there is none or it cannot be read), and the signing call
+ * (fl_kq_cp_sign_head_with). A fork answers BUSY.
  */
 int64_t fl_kq_autosign_last_signature(void *ctx);
 fl_result_t fl_kq_autosign_sign(void *ctx, const char *author, const uint8_t key[32], kq_signing_mode_t mode);
@@ -146,10 +143,9 @@ void fl_kq_service_utc_now(char *out, size_t cap);
  * The one refusal report (KQER): signs it as the account that is online and writes it inside dir,
  * the landing directory the decode held (fl_kq_cp_report_write_in; the caller keeps the handle
  * open until this returns). Only a refusal of the letter itself (INVAL, NOENT, ACCES, NOMEM) is
- * reported. NULL dir writes nothing and audits kq-report-uncontained; that is what the declared
- * fl_kq_report_refusal (fl/kq.h) does, since it has no held directory. Audits kq-report,
- * kq-report-exists, kq-report-capped, kq-report-offline or kq-report-failed, never the report or
- * its ref. Reporting never changes the refusal.
+ * reported. NULL dir (fl_kq_report_refusal in fl/kq.h) writes nothing and audits
+ * kq-report-uncontained. Audits kq-report, kq-report-exists, kq-report-capped, kq-report-offline or
+ * kq-report-failed, never the report or its ref. Reporting never changes the refusal.
  */
 void fl_kq_report_refusal_in(const kq_file_offer_t *o, fl_result_t why, const fl_kq_dir_t *dir);
 

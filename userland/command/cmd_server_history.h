@@ -1,7 +1,7 @@
 #ifndef CMD_SERVER_HISTORY_H
 #define CMD_SERVER_HISTORY_H
 /*
- * FL-04, member side of `server file history <delivery-id> [-from <account-key>]` (cmd_server_file.c):
+ * Member side of `server file history <delivery-id> [-from <account-key>]` (cmd_server_file.c):
  * the deliveries this shell decoded, the argument and sender resolution, and the fetch itself. Kept out of
  * cmd_server_file.c so tests can link it without the whole shell; printing stays in the verb.
  */
@@ -32,7 +32,7 @@ void fl_server_history_remember(const uint8_t id[FL_KQ_DELIVERY_ID_LEN], const c
                                 const uint8_t file_id[16]);
 /** A copy of the record for id, or 0 when this shell has not decoded that delivery. Thread-safe. */
 int fl_server_history_find(const uint8_t id[FL_KQ_DELIVERY_ID_LEN], fl_server_history_got_t *out);
-/** Forgets every record (tests; a later session end hook). */
+/** Forgets every record (tests). */
 void fl_server_history_forget_all(void);
 
 typedef enum {

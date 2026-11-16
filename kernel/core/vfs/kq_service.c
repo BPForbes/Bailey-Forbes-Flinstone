@@ -24,7 +24,7 @@
 typedef struct {
     char key_id[FL_HERITAGE_KEY_ID_MAX];
     uint8_t secret[FL_USER_SIGNING_SECRET_LEN];
-    uint8_t box[32]; /* FL-15: the box secret of a KQST login; has_box says whether it was published */
+    uint8_t box[32]; /* the box secret of a KQST login; has_box says whether it was published */
     int has_box;
     int session; /* published by a session login (a generation was given): the replacement rule below applies */
     int used;
@@ -75,7 +75,7 @@ static void slot_wipe_locked(kq_slot_t *s) {
  * replaces another without a logout in between ends the previous account's slot here, secret and box key
  * together. The caller holds the session lock and has checked the login generation (publish_if_current), so
  * a stale login never reaches this and cannot wipe a later login's slot. A key brought online without a
- * session (the Root fallback, generation 0) is not session-owned and is left alone. */
+ * session (generation 0) is not session-owned and is left alone. */
 static fl_result_t slot_put(const char *key_id, const uint8_t secret[FL_USER_SIGNING_SECRET_LEN], int session) {
     fl_result_t rc = FL_RESULT_NOMEM;
     int i;
@@ -252,11 +252,11 @@ size_t fl_kq_service_online_count(void) {
     return n;
 }
 
-/* A parent who is not signed in, put together from the children who are (KQ-16). The record is the KQAS
- * bytes the account store holds for the parent; each online child with a box secret (FL-15) and a device
- * id in the account registry (the pairing row of its KQST) contributes its label, box secret and device
- * id, and KeyQuorum decides whether that is a quorum and whether the recovered seed is the parent's
- * registered key. Nothing is decided here beyond "who is online". Every secret copy is wiped. */
+/* A parent who is not signed in, put together from the children who are. The record is the KQAS bytes the
+ * account store holds for the parent; each online child with a box secret and a device id in the account
+ * registry (the pairing row of its KQST) contributes its label, box secret and device id, and KeyQuorum
+ * decides whether that is a quorum and whether the recovered seed is the parent's registered key. Nothing
+ * is decided here beyond "who is online". Every secret copy is wiped. */
 #define KQ_ASSEMBLY_CHILDREN_MAX FL_USER_DB_MAX_USERS
 
 static fl_result_t assemble_author_key(const char *parent, uint8_t out[32]) {
@@ -375,7 +375,7 @@ static void *service_main(void *arg) {
         int64_t tick_ns = 0;
 
         stamp_heartbeat();
-        /* Root's key from a sudo is wiped when the window ends, whether or not anything runs (FL-20 #399). */
+        /* Root's key from a sudo is wiped when the window ends, whether or not anything runs. */
         if (fl_time_monotonic_ns(&tick_ns) == FL_RESULT_OK && fl_kq_sudo_hold_expire(tick_ns))
             fl_audit_identity_event("", "sudo-window-ended", FL_HERITAGE_ROOT_KEY, NULL);
         if (ran == 8)

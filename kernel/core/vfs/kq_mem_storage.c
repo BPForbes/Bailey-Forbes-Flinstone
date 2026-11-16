@@ -1,8 +1,7 @@
 /*
- * In-memory fl_kq_storage_t (kq_mem_storage.h). Written for the freestanding image: no stdio, no errno, no
- * string.h beyond strlen (kq_platform.c supplies it there). Every byte copy, zeroing and equality goes
- * through the ASM-backed mem_domain_* wrappers (asm_mem_copy / asm_mem_zero / asm_mem_ct_equal), the
- * same primitives on x86_64 NASM, x86_64 GAS and ARM GAS; file bytes are wiped with the secure variant.
+ * In-memory fl_kq_storage_t (kq_mem_storage.h). No stdio, no errno, no string.h beyond strlen (kq_platform.c
+ * supplies it in the freestanding image). Every copy, zeroing and equality goes through the ASM-backed
+ * mem_domain_* wrappers; file bytes are wiped with the secure variant.
  */
 #include "kq_mem_storage.h"
 

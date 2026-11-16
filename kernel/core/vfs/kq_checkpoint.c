@@ -257,9 +257,8 @@ static int land_exists(const kq_land_t *l, const char *name) {
 }
 
 /* One lock for every read-modify-write of a container (load, mutate, write_atomic): two writers of the same
- * file would otherwise each read the same revision and the later write would drop the earlier one (the
- * autosign sweep and a send or a report applying at once). There was no per-container lock in the storage
- * facade to reuse; the lock is per process and the sections are short, so one mutex serves every path. */
+ * file would otherwise each read the same revision and the later write would drop the earlier one. The
+ * sections are short, so one per-process mutex serves every path. */
 static pthread_mutex_t s_container_mu = PTHREAD_MUTEX_INITIALIZER;
 
 static int sidecar(const char *path, const char *suffix, char *out, size_t cap) {
@@ -1111,8 +1110,7 @@ fl_kq_cp_result_t fl_kq_cp_report_read_in(const fl_kq_dir_t *dir, const uint8_t 
         out->len = 0;
         return FL_KQ_CP_IO;
     }
-    /* The bytes are the intended KQER only if KeyQuorum accepts them for this artifact under the reporter's key:
-     * the same check an injection makes, run against a scratch history that is thrown away. */
+    /* The injection check, run against a scratch history that is thrown away. */
     mem_domain_copy(id, ref, sizeof id);
     if (drv->file_new(id, "report-check", FL_HERITAGE_ROOT_KEY, &scratch) == KQ_FILE_OK &&
         drv->error_inject(&scratch, out, reporter_public, ref, &next) == KQ_FILE_OK)
@@ -1189,7 +1187,7 @@ fl_kq_cp_result_t fl_kq_cp_inject_report_with(const fl_kq_keydir_t *keys, const 
     return out;
 }
 
-/* ---- periodic signing (FL-20) ------------------------------------------------------------ */
+/* ---- periodic signing -------------------------------------------------------------------- */
 
 /* KeyQuorum history codes (src/file_history/event.rs): RevisionSigned 3, CountersignatureAdded 4;
  * outcome Success 1. Wire format: append-only on KeyQuorum's side. */
@@ -1343,7 +1341,7 @@ fl_kq_cp_result_t fl_kq_cp_sign_head_with(const char *path, const char *author_k
     return rc;
 }
 
-/* ---- history bundle letters (FL-04) -------------------------------------------------------- */
+/* ---- history bundle letters ---------------------------------------------------------------- */
 
 fl_kq_cp_result_t fl_kq_cp_history_letters_with(const fl_kq_keydir_t *keys, const char *host_key,
                                                 const uint8_t host_signing_secret[32], const char *requester_key,

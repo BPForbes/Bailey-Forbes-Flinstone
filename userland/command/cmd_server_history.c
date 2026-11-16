@@ -1,4 +1,4 @@
-/* FL-04, member side of `server file history <delivery-id>`: see cmd_server_history.h. */
+/* Member side of `server file history <delivery-id>`: see cmd_server_history.h. */
 #include "cmd_server_history.h"
 
 #include <stdio.h>

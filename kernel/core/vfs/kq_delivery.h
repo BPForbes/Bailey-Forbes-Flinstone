@@ -124,7 +124,7 @@ fl_result_t fl_kq_store_events(fl_kq_store_t *s, const uint8_t id[FL_KQ_DELIVERY
                                fl_server_catalog_event_t *out, size_t cap, size_t *count);
 
 /**
- * Claims the one refusal-report forward of a delivery (KQ-12): OK the first time, BUSY every time after, recorded
+ * Claims the one refusal-report forward of a delivery: OK the first time, BUSY every time after, recorded
  * as a "reported" event of the delivery so it lasts as long as the delivery does (a restart included) and no later
  * report can push it out. ERR when the log cannot be read or written (nothing is forwarded then).
  */

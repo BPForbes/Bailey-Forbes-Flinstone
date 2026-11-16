@@ -123,9 +123,9 @@ int fl_kq_open_account(const char *user, const char *password, const char *kqst_
 int fl_kq_account_token_path(const char *db_path, const char *key_id, char *out, size_t cap);
 /**
  * Seal an account's own keys (signing_secret, box_secret) with password to device_id into a KQST
- * and write it to path (owner-only, through "<path>.new" and a rename, so the old token stays
- * whole if this fails). On KQ_ACCOUNT_OK the two public keys derived from the secrets are written
- * for the store's pairing. The caller wipes the secrets. KQ_ACCOUNT_INVALID when the driver has no
+ * and write it to path (owner-only, through a randomly named ".new" sibling and a rename, so the
+ * old token stays whole if this fails). On KQ_ACCOUNT_OK the two public keys derived from the
+ * secrets are written for the store's pairing. The caller wipes the secrets. KQ_ACCOUNT_INVALID when the driver has no
  * slot_seal (the freestanding image) or the file cannot be written.
  */
 int fl_kq_write_account_token(const char *key_id, const char *password,
@@ -146,23 +146,21 @@ int fl_kq_lock_pages(void *p, size_t len);
 #define FL_KQ_COSIGN_INVOKER   2 /* the invoker's token or key did not open with its password */
 #define FL_KQ_COSIGN_SIGN      3 /* no driver op, no nonce, or a signature that did not verify */
 /**
- * The sudo window. A sudo that opened Root's token keeps Root's key and the invoker's key for the
- * window, and each elevated action in it is signed by both. Root's key is never kept past the
- * window and never comes from a stored credential.
+ * The sudo window: Root's key and the invoker's key, kept only until the window ends and never
+ * taken from a stored credential; each elevated action in it is signed by both.
  *
- * fl_kq_sudo_hold_open co-signs a sudo (KeyQuorum's kq_sudo_sign / kq_sudo_verify): Root's token is
- * opened with root_password and the invoker's key with invoker_password (its token when
- * invoker_kqst, else its sealed signing key), a fresh nonce is drawn, both sign action, and both
- * signatures must verify under the public keys the account store holds. On FL_KQ_COSIGN_OK
- * nonce_out and the two signatures hold the record for the audit, and with expires_ns > 0
- * (monotonic) the two secrets are kept until then, replacing any earlier window; otherwise the
- * signatures are zeroed. Every secret not kept is wiped before it returns.
- * fl_kq_sudo_hold_cosign: both kept keys sign action and verify under the store's public keys now.
- * FL_KQ_COSIGN_AUTHORITY when no window is kept for invoker_name, it has ended (it is wiped), or
- * Root's token pairing changed; FL_KQ_COSIGN_INVOKER when the invoker's did. Called without the
- * session lock.
- * extend moves the end (a sudo inside the window resets the clock); release wipes the window;
- * expire wipes it when it has ended and answers 1 if it did; active answers 1 while it is kept.
+ * fl_kq_sudo_hold_open opens Root's token with root_password and the invoker's key with
+ * invoker_password (its token when invoker_kqst, else its sealed signing key); both sign action
+ * over a fresh nonce and both signatures must verify under the account store's public keys. On
+ * FL_KQ_COSIGN_OK the outputs hold the audit record, and with expires_ns > 0 (monotonic) the two
+ * secrets are kept until then, replacing any earlier window; otherwise the signatures are zeroed.
+ * Every secret not kept is wiped before it returns.
+ * fl_kq_sudo_hold_cosign signs action with both kept keys and verifies under the store's public
+ * keys now. FL_KQ_COSIGN_AUTHORITY when no window is kept for invoker_name, it has ended (it is
+ * wiped) or Root's token pairing changed; FL_KQ_COSIGN_INVOKER when the invoker's did. Called
+ * without the session lock.
+ * extend moves the end; release wipes the window; expire wipes it once ended and answers 1 if it
+ * did; active answers 1 while it is kept.
  */
 int  fl_kq_sudo_hold_open(const char *invoker_name, const char *invoker_password, int invoker_kqst,
                           const char *root_name, const char *root_password, const char *action,
