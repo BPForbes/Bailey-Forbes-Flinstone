@@ -5,9 +5,10 @@
  * linking with -nostdlib. The same symbols tools/browser-lab/wasm/lab_kq.c supplies for the
  * WebAssembly lab; the byte primitives reuse the assembly layer (arch/x86_64/gas/mem_asm.s).
  *
- * Heap: one arena at a fixed physical range the boot code identity-maps (the first 1 GiB, 2 MiB
- * pages) and QEMU's 64 MiB provides, above the kernel image and its bss. A first-fit free list with
- * coalescing; every freed block is zeroed, as the library asks.
+ * Heap: one arena that fl_kernel_main picks from the firmware's E820 map (bootmap.c) inside the
+ * boot code's identity map, clear of every range the loader reserved, and hands to fl_kq_heap_init
+ * (FL-02). Until then every allocation fails. A first-fit free list with coalescing; every freed
+ * block is zeroed, as the library asks.
  *
  * Entropy: RDRAND, else the launcher's fw_cfg file opt/flintstone/entropy (below). With neither,
  * kq_platform_random returns non-zero and the library fails closed (a panic through
@@ -16,14 +17,13 @@
 #include "contract_result.h"
 #include "fl/mem_asm.h"
 #include "ioport.h"
+#include "kq_platform.h"
 #include "mem_domain.h"
 #include "serial.h"
 
 #include <stddef.h>
 #include <stdint.h>
 
-#define KQ_HEAP_BASE 0x400000ull        /* 4 MiB: above the image (loaded at 64 KiB) and its bss */
-#define KQ_HEAP_SIZE (40ull << 20)      /* 40 MiB: sealing an account key (Argon2id, 19 MiB) needs more than 19 MiB at once */
 #define KQ_ALIGN 16u
 
 typedef struct kq_blk {
@@ -35,13 +35,18 @@ typedef struct kq_blk {
 #define HDR ((size_t)((sizeof(kq_blk_t) + KQ_ALIGN - 1) & ~(size_t)(KQ_ALIGN - 1)))
 
 static kq_blk_t *s_head;
+static size_t s_heap_size;
 
-static void heap_init(void)
+int fl_kq_heap_init(uint64_t base, uint64_t size)
 {
-    s_head = (kq_blk_t *)(uintptr_t)KQ_HEAP_BASE;
-    s_head->size = KQ_HEAP_SIZE - HDR;
+    if (s_head || (base & (KQ_ALIGN - 1)) || size < FL_KQ_HEAP_MIN || size > UINT64_MAX - base)
+        return -1;
+    s_head = (kq_blk_t *)(uintptr_t)base;
+    s_heap_size = (size_t)size;
+    s_head->size = s_heap_size - HDR;
     s_head->used = 0;
     s_head->next = 0;
+    return 0;
 }
 
 static void heap_split_tail(kq_blk_t *b, size_t need)
@@ -63,10 +68,10 @@ static void *heap_alloc(size_t len, size_t align)
     size_t need;
 
     if (!s_head)
-        heap_init();
+        return 0; /* no arena from the boot map: fail closed */
     if (align < KQ_ALIGN)
         align = KQ_ALIGN;
-    if (align > 4096 || (align & (align - 1)) || len > KQ_HEAP_SIZE)
+    if (align > 4096 || (align & (align - 1)) || len > s_heap_size)
         return 0;
     need = (len + align + sizeof(void *) + KQ_ALIGN - 1) & ~(size_t)(KQ_ALIGN - 1);
     for (b = s_head; b; b = b->next) {
@@ -150,7 +155,7 @@ static int fw_cfg_fill(uint8_t *buf, size_t len)
     return 0;
 }
 #else
-/* The SECFEAT image has about 512 bytes of room before the 0x9f000 limit: RDRAND only, as before. */
+/* The SECFEAT image: RDRAND only, as before (FL-14 left fw_cfg out for want of room below 0x9f000). */
 static int fw_cfg_fill(uint8_t *buf, size_t len)
 {
     (void)buf;

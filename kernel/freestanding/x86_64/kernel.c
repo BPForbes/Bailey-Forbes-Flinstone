@@ -12,6 +12,7 @@
 #include "vga.h"
 #ifdef FL_WITH_KEYQUORUM
 #include "fl/driver/keyquorum.h"
+#include "kq_platform.h"
 #ifndef FL_SECFEAT
 void fl_fs_kq_bind_identity(void);
 #endif
@@ -102,6 +103,20 @@ void fl_kernel_main(const fl_boot_info_t *boot_info)
     if (fl_bootinfo_validate(boot_info, (uintptr_t)__kernel_start, (uintptr_t)__bss_start,
                              (uintptr_t)__bss_end) != FL_BOOTMAP_OK)
         boot_fail("FLINTSTONE_BOOT_FAIL bootinfo\r\n");
+#ifdef FL_WITH_KEYQUORUM
+    {
+        /* The KeyQuorum heap: the largest E820 span above 1 MiB, inside the identity map and clear
+         * of every reserved range. Too little memory stops the boot here; there is no fallback. */
+        const fl_bootmap_limits_t limits = { 0x100000u, boot_info->mapped_end, FL_KQ_HEAP_MIN, 4096u };
+        uint64_t base, size;
+
+        if (fl_bootmap_select_arena((const fl_e820_entry_t *)(uintptr_t)boot_info->e820_addr,
+                                    boot_info->e820_count, boot_info->e820_capacity, boot_info->reserved,
+                                    boot_info->reserved_count, &limits, &base, &size) != FL_BOOTMAP_OK ||
+            fl_kq_heap_init(base, size) != 0)
+            boot_fail("FLINTSTONE_BOOT_FAIL memory\r\n");
+    }
+#endif
     idt_init();
     fl_fs_vga_init();
     fl_fs_pic_init();
