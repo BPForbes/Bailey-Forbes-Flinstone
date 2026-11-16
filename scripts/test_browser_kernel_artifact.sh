@@ -85,10 +85,20 @@ print(str(info["bootSuccessMarkerImplemented"]).lower())
 print(info["qemuBootMode"] or "none")
 print(info["sha256"])
 print(str(info.get("bootableCandidate", False)).lower())
+# FL-02: an image that declares a low-memory failure marker is also booted with too little RAM.
+probe = info.get("lowMemoryProbe")
+if probe is not None:
+    assert isinstance(probe, dict) and type(probe.get("ramBytes")) is int and probe["ramBytes"] > 0
+    assert isinstance(probe.get("marker"), str) and probe["marker"].startswith("FLINTSTONE_BOOT_FAIL ")
+    print(probe["ramBytes"] // (1024 * 1024))
+    print(probe["marker"])
+else:
+    print("none")
+    print("none")
 PY
 )
 
-[[ ${#manifest[@]} -eq 7 ]] || {
+[[ ${#manifest[@]} -eq 9 ]] || {
     echo "test-browser-kernel: metadata validation did not return the contract fields" >&2
     exit 1
 }
@@ -100,6 +110,8 @@ marker_implemented="${manifest[3]}"
 qemu_boot_mode="${manifest[4]}"
 expected_sha256="${manifest[5]}"
 bootable_candidate="${manifest[6]}"
+low_memory_mib="${manifest[7]}"
+low_memory_marker="${manifest[8]}"
 
 [[ -s "${artifact}" ]] || {
     echo "test-browser-kernel: missing artifact: ${artifact}" >&2
@@ -184,8 +196,24 @@ info['blockers']=[x for x in info['blockers'] if not x.startswith('QEMU has not'
 with open(p,'w',encoding='utf-8') as f: json.dump(info,f,indent=2); f.write('\n')
 PY
     fi
+    if [[ "${low_memory_mib}" != "none" ]]; then
+        qemu_low_args=("${qemu_args[@]}")
+        for i in "${!qemu_low_args[@]}"; do
+            [[ "${qemu_low_args[$i]}" == "-m" ]] && qemu_low_args[$((i + 1))]="${low_memory_mib}M"
+        done
+        set +e
+        timeout 10 "${qemu_bin}" "${qemu_low_args[@]}" >"${qemu_log}" 2>&1
+        set -e
+        if ! tr -d '\r' <"${qemu_log}" | grep -Fxq "${low_memory_marker}" ||
+           tr -d '\r' <"${qemu_log}" | grep -Fxq 'FLINTSTONE_KERNEL_BOOT_OK'; then
+            cat "${qemu_log}" >&2
+            echo "test-browser-kernel: with ${low_memory_mib} MiB the image did not stop with ${low_memory_marker}" >&2
+            exit 1
+        fi
+    fi
     echo "test-browser-kernel: PASS"
     echo "  QEMU boot probe: observed FLINTSTONE_KERNEL_BOOT_OK"
+    [[ "${low_memory_mib}" == "none" ]] || echo "  low-memory probe: ${low_memory_mib} MiB stopped with ${low_memory_marker}"
     echo "  boot signals: bootable=true, marker observed=true"
     if [[ "${browser_compatible}" != "true" ]]; then
         echo "  promotion: blocked until the declared browser emulator passes the same boot probe"
