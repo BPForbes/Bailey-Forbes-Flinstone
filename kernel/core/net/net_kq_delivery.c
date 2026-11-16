@@ -1349,6 +1349,61 @@ void fl_net_kq_history_drop(const uint8_t request_id[16]) {
     kq_unlock();
 }
 
+/* FL-04, member side: take the bundle, then open both letters with this account's box key. */
+fl_result_t fl_net_kq_history_open(const uint8_t request_id[16], unsigned wait_ms, const uint8_t box_secret[32],
+                                   const char *sender, const char *me, const uint8_t sender_public[32],
+                                   fl_kq_buf_t *lines, uint32_t *snapshot_events) {
+    const fl_kq_driver_t *drv = fl_kq_driver_get();
+    fl_kq_buf_t l15 = {0}, l17 = {0}, c = {0}, snap = {0};
+    uint8_t rev[32], root[32], root2[32];
+    uint32_t count = 0;
+    fl_result_t rc;
+
+    if (!request_id)
+        return FL_RESULT_INVAL;
+    if (!box_secret || !sender || !sender[0] || !me || !me[0] || !sender_public || !lines || !snapshot_events) {
+        fl_net_kq_history_drop(request_id); /* as documented: dropped on every result but TIMEDOUT */
+        return FL_RESULT_INVAL;
+    }
+    lines->data = NULL;
+    lines->len = 0;
+    *snapshot_events = 0;
+    if (!drv || !drv->open || !drv->open_snapshot || !drv->snapshot_covers || !drv->events) {
+        fl_net_kq_history_drop(request_id);
+        return FL_RESULT_NOSYS;
+    }
+    rc = fl_net_kq_history_take(request_id, wait_ms, &l15, &l17);
+    if (rc == FL_RESULT_TIMEDOUT)
+        return rc;
+    fl_net_kq_history_drop(request_id);
+    if (rc != FL_RESULT_OK)
+        return rc;
+    /* Both letters must be signed by the sender and addressed to this account, or neither is used. */
+    if (drv->open(&l15, box_secret, sender, me, sender_public, &c, rev, root) != KQ_FILE_OK ||
+        drv->open_snapshot(&l17, box_secret, sender, me, sender_public, &snap, root2, &count) != KQ_FILE_OK) {
+        rc = FL_RESULT_ACCES;
+        goto done;
+    }
+    /* The delivered file's history must be a prefix of the snapshot: the snapshot is the whole history. */
+    if (count == 0 || drv->snapshot_covers(&c, &snap) != KQ_FILE_OK) {
+        rc = FL_RESULT_ERR;
+        goto done;
+    }
+    if (drv->events(&c, lines) != KQ_FILE_OK) {
+        fl_kq_buf_free(lines); /* leaves lines empty */
+        rc = FL_RESULT_ERR;
+        goto done;
+    }
+    *snapshot_events = count;
+    rc = FL_RESULT_OK;
+done:
+    fl_kq_buf_free(&l15);
+    fl_kq_buf_free(&l17);
+    fl_kq_buf_free(&c);
+    fl_kq_buf_free(&snap);
+    return rc;
+}
+
 void fl_net_kq_reset(void) {
     kq_lock();
     for (size_t i = 0; i < KQ_UPLOADS_MAX; i++)

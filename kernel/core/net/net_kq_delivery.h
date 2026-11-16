@@ -146,6 +146,20 @@ fl_result_t fl_net_kq_request_history(fl_net_server_t *srv, fl_net_client_t *cli
 fl_result_t fl_net_kq_history_take(const uint8_t request_id[16], unsigned wait_ms,
                                    fl_kq_buf_t *letter_file, fl_kq_buf_t *letter_snapshot);
 void fl_net_kq_history_drop(const uint8_t request_id[16]);
+/**
+ * FL-04, member side: the history for request_id (waits up to wait_ms, as fl_net_kq_history_take), opened with
+ * this account's box key. Both letters must be signed by sender under sender_public and addressed to me, and the
+ * snapshot (kind 17) must cover the delivered file's history (kind 15, KeyQuorum snapshot_covers). On OK, lines
+ * holds the file's history, one tab-separated event per line as fl_kq_cp_history gives it (the caller frees it
+ * with fl_kq_buf_free), and *snapshot_events the snapshot's event count. TIMEDOUT while the host has not
+ * answered (the request stays pending); NOENT for an unknown request; ACCES when a letter does not open for
+ * this account from this sender; ERR when the snapshot does not cover the history; NOSYS without the driver.
+ * The request is dropped on every result but TIMEDOUT (a caller that gives up then drops it with
+ * fl_net_kq_history_drop, since only two requests can wait). box_secret stays the caller's to wipe.
+ */
+fl_result_t fl_net_kq_history_open(const uint8_t request_id[16], unsigned wait_ms, const uint8_t box_secret[32],
+                                   const char *sender, const char *me, const uint8_t sender_public[32],
+                                   fl_kq_buf_t *lines, uint32_t *snapshot_events);
 
 /* ---- refusal report (KQ-12) ---------------------------------------------------------------- */
 
