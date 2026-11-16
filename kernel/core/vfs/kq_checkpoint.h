@@ -228,6 +228,8 @@ fl_kq_cp_result_t fl_kq_cp_decode_in_with(const fl_kq_keydir_t *keys, const char
 
 /** The offer's wire bytes, exactly what net_kq_delivery.c sends (u64 big-endian). */
 void fl_kq_cp_offer_encode(const kq_file_offer_t *o, uint8_t out[FL_KQ_OFFER_WIRE_LEN]);
+/** The reverse: the offer those wire bytes carry. */
+void fl_kq_cp_offer_decode(const uint8_t in[FL_KQ_OFFER_WIRE_LEN], kq_file_offer_t *o);
 
 /** Largest KQER KeyQuorum encodes (MAX_ENCODED_LEN, src/error_report.rs): the read bound. */
 #define FL_KQ_REPORT_MAX 1024u

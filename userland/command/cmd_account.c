@@ -105,11 +105,7 @@ int cmd_useradd_run(int argc, char **argv) {
     }
     if (fl_session_save_users() != FL_RESULT_OK) {
         cmd_wipe_password(pw, sizeof(pw));
-        if (account_reload_db_from_disk() != 0) {
-            fprintf(stderr, "useradd: could not save %s\n", FL_SESSION_USERS_PATH);
-            return 1;
-        }
-        /* Reload restored the file. The new account still did not persist. */
+        (void)account_reload_db_from_disk(); /* back to what is on disk; the change did not persist */
         fprintf(stderr, "useradd: could not save %s\n", FL_SESSION_USERS_PATH);
         return 1;
     }
@@ -190,21 +186,13 @@ int cmd_userdel_run(int argc, char **argv) {
      * fails, the account stays too, without its bridges (fail closed).
      */
     if (fl_bridge_remove_for(db_path, target_key) != FL_RESULT_OK) {
-        if (account_reload_db_from_disk() != 0) {
-            fprintf(stderr, "userdel: could not remove the bridges of %s; %s is unchanged\n", target_key,
-                    argv[1]);
-            return 1;
-        }
+        (void)account_reload_db_from_disk(); /* back to what is on disk; the change did not persist */
         fprintf(stderr, "userdel: could not remove the bridges of %s; %s is unchanged\n", target_key,
                 argv[1]);
         return 1;
     }
     if (fl_session_save_users() != FL_RESULT_OK) {
-        if (account_reload_db_from_disk() != 0) {
-            fprintf(stderr, "userdel: could not save %s; %s is kept, and its bridges must be requested again\n",
-                    FL_SESSION_USERS_PATH, argv[1]);
-            return 1;
-        }
+        (void)account_reload_db_from_disk(); /* back to what is on disk; the change did not persist */
         fprintf(stderr, "userdel: could not save %s; %s is kept, and its bridges must be requested again\n",
                 FL_SESSION_USERS_PATH, argv[1]);
         return 1;
@@ -286,10 +274,7 @@ int cmd_passwd_run(int argc, char **argv) {
         return 1;
     }
     if (fl_session_save_users() != FL_RESULT_OK) {
-        if (account_reload_db_from_disk() != 0) {
-            fprintf(stderr, "passwd: could not save %s\n", FL_SESSION_USERS_PATH);
-            return 1;
-        }
+        (void)account_reload_db_from_disk(); /* back to what is on disk; the change did not persist */
         fprintf(stderr, "passwd: could not save %s\n", FL_SESSION_USERS_PATH);
         return 1;
     }

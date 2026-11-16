@@ -81,13 +81,10 @@ static void kq_put_offer(fl_bytes_sticky_writer_t *w, const kq_file_offer_t *o) 
 }
 
 static void kq_get_offer(fl_bytes_reader_t *r, kq_file_offer_t *o) {
-    (void)fl_bytes_reader_read_bytes(r, o->file_id, 16);
-    (void)fl_bytes_reader_read_bytes(r, o->revision_id, 32);
-    (void)fl_bytes_reader_read_bytes(r, o->content_commitment, 32);
-    (void)fl_bytes_reader_read_bytes(r, o->author_identity, 16);
-    (void)fl_bytes_reader_read_bytes(r, o->author_signature, 64);
-    o->topology_generation = r_u64(r);
-    (void)fl_bytes_reader_read_bytes(r, o->policy_hash, 32);
+    uint8_t wire[FL_KQ_OFFER_WIRE_LEN] = {0};
+
+    (void)fl_bytes_reader_read_bytes(r, wire, sizeof wire); /* a short frame sets r->bad, which every caller checks */
+    fl_kq_cp_offer_decode(wire, o);
 }
 
 /* ---- shared ---------------------------------------------------------------- */

@@ -1765,7 +1765,7 @@ fl_result_t fl_user_db_assembly_get(const fl_user_db_t *db, const char *parent_l
  * closed on anything else; the pinned KeyQuorum commit is the schema contract and
  * tests/test_kq_real_token.c runs this against a store the real CLI made. */
 static int kq_blob(sqlite3_stmt *st, int col, void *out, int want) {
-    if (sqlite3_column_type(st, col) != SQLITE_BLOB || sqlite3_column_bytes(st, col) != want)
+    if (!blob_is(st, col, (size_t)want))
         return -1;
     memcpy(out, sqlite3_column_blob(st, col), (size_t)want);
     return 0;

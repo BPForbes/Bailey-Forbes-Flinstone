@@ -141,6 +141,11 @@ static int cmd_read_invoker_password(const char *cmd, char *pw, size_t cap, int 
     return 0;
 }
 
+static void report_no_root_token(const char *cmd) {
+    fprintf(stderr, "%s: Root has no KeyQuorum token (KQST) yet; sign in as Root once, or run "
+                    "`kqst enroll` as Root, and the kernel makes it\n", cmd);
+}
+
 int cmd_sudo_require_auth_reason(const char *reason) {
     char pw[128], mine[128];
     fl_result_t rc;
@@ -162,8 +167,7 @@ int cmd_sudo_require_auth_reason(const char *reason) {
     if (!fl_session_sudo_needs_root()) {
         rc = fl_session_sudo_authenticate(NULL, NULL);
         if (rc != FL_RESULT_OK) {
-            fprintf(stderr, "sudo: Root has no KeyQuorum token (KQST) yet; sign in as Root once, or run "
-                            "`kqst enroll` as Root, and the kernel makes it\n");
+            report_no_root_token("sudo");
             return 1;
         }
     } else {
@@ -344,8 +348,7 @@ int cmd_switch_user(const char *cmd, const char *target, int sudo) {
     if (rc != FL_RESULT_OK) {
         /* One message for every other refusal; the reason is in the audit only. */
         if (no_root_token)
-            fprintf(stderr, "%s: Root has no KeyQuorum token (KQST) yet; sign in as Root once, or run "
-                            "`kqst enroll` as Root, and the kernel makes it\n", cmd);
+            report_no_root_token(cmd);
         else
             fprintf(stderr, "%s: authentication failed\n", cmd);
         return 1;

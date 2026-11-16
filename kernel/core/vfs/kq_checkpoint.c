@@ -266,19 +266,25 @@ static int sidecar(const char *path, const char *suffix, char *out, size_t cap) 
     return snprintf(out, cap, "%s%s", path, suffix) < (int)cap ? 0 : -1;
 }
 
-/* The one path-based container read: the container beside path, through the storage table.
- * IO when it cannot be read (absent included), TOO_LARGE past the letter cap. */
+/* A whole file through the storage table: IO when it cannot be read (absent included), TOO_LARGE past max. */
+static fl_kq_cp_result_t read_bounded(const char *path, size_t max, fl_kq_buf_t *b) {
+    int rc = fl_kq_cp_storage()->read_file(fl_kq_cp_storage()->ctx, path, max, &b->data, &b->len);
+
+    return rc == 0 ? FL_KQ_CP_OK : rc == -2 ? FL_KQ_CP_TOO_LARGE : FL_KQ_CP_IO;
+}
+
+/* The one path-based container read: the container beside path, bounded by the letter cap. */
 static fl_kq_cp_result_t load_container(const char *path, char *container_path, size_t cap,
                                         fl_kq_buf_t *c) {
-    int rc;
-
     if (sidecar(path, FL_KQ_CONTAINER_SUFFIX, container_path, cap) != 0)
         return FL_KQ_CP_INVALID;
-    rc = fl_kq_cp_storage()->read_file(fl_kq_cp_storage()->ctx, container_path, FL_KQ_LETTER_MAX,
-                                       &c->data, &c->len);
-    if (rc != 0)
-        return rc == -2 ? FL_KQ_CP_TOO_LARGE : FL_KQ_CP_IO;
-    return FL_KQ_CP_OK;
+    return read_bounded(container_path, FL_KQ_LETTER_MAX, c);
+}
+
+/* "<64 hex of ref>.kqer": the name a refusal report is kept under. */
+static void report_name(const uint8_t ref[32], char out[65 + sizeof FL_KQ_REPORT_SUFFIX]) {
+    fl_hex_encode(ref, 32, out);
+    memcpy(out + 64, FL_KQ_REPORT_SUFFIX, sizeof FL_KQ_REPORT_SUFFIX);
 }
 
 /* The one write of a grown container: past the letter cap it is TOO_LARGE and nothing is written, so a history
@@ -978,6 +984,24 @@ void fl_kq_cp_offer_encode(const kq_file_offer_t *o, uint8_t out[FL_KQ_OFFER_WIR
     memcpy(p, o->policy_hash, 32);
 }
 
+void fl_kq_cp_offer_decode(const uint8_t in[FL_KQ_OFFER_WIRE_LEN], kq_file_offer_t *o) {
+    const uint8_t *p = in;
+
+    memcpy(o->file_id, p, 16);
+    p += 16;
+    memcpy(o->revision_id, p, 32);
+    p += 32;
+    memcpy(o->content_commitment, p, 32);
+    p += 32;
+    memcpy(o->author_identity, p, 16);
+    p += 16;
+    memcpy(o->author_signature, p, 64);
+    p += 64;
+    o->topology_generation = fl_net_get_u64_be(p);
+    p += 8;
+    memcpy(o->policy_hash, p, 32);
+}
+
 int fl_kq_cp_report_path(const char *dir, const uint8_t ref[32], char *out, size_t cap) {
     char hex[65];
 
@@ -1005,8 +1029,7 @@ static fl_kq_cp_result_t report_write_in_unlocked(uint16_t code, uint8_t class_c
         return FL_KQ_CP_INVALID;
     if (!drv)
         return FL_KQ_CP_NO_DRIVER;
-    fl_hex_encode(ref, 32, name);
-    memcpy(name + 64, FL_KQ_REPORT_SUFFIX, sizeof FL_KQ_REPORT_SUFFIX);
+    report_name(ref, name);
     /* Every step inside the held directory: a directory swapped after the caller took the
      * handle is never followed. An existing report is kept as it is and not counted again. */
     e = st->dir_exists(st->ctx, dir, name);
@@ -1081,8 +1104,7 @@ fl_kq_cp_result_t fl_kq_cp_report_read_in(const fl_kq_dir_t *dir, const uint8_t 
         return FL_KQ_CP_INVALID;
     if (!drv)
         return FL_KQ_CP_NO_DRIVER;
-    fl_hex_encode(ref, 32, name);
-    mem_domain_copy(name + 64, FL_KQ_REPORT_SUFFIX, sizeof FL_KQ_REPORT_SUFFIX);
+    report_name(ref, name);
     /* Through the held directory, like the write: a name swapped for a link is never followed. */
     if (st->dir_read(st->ctx, dir, name, FL_KQ_REPORT_MAX, &out->data, &out->len) != 0) {
         out->data = NULL;
@@ -1151,7 +1173,6 @@ fl_kq_cp_result_t fl_kq_cp_inject_report_with(const fl_kq_keydir_t *keys, const 
     const unsigned char *reporter_public;
     fl_kq_buf_t kqer = {0};
     fl_kq_cp_result_t out;
-    int rc;
 
     if (!keys || !reporter_key || !report_path || !ref || !path)
         return FL_KQ_CP_INVALID;
@@ -1160,10 +1181,9 @@ fl_kq_cp_result_t fl_kq_cp_inject_report_with(const fl_kq_keydir_t *keys, const 
     reporter_public = keys->signing_public(keys, reporter_key);
     if (!reporter_public)
         return FL_KQ_CP_NO_KEY;
-    rc = fl_kq_cp_storage()->read_file(fl_kq_cp_storage()->ctx, report_path, FL_KQ_REPORT_MAX, &kqer.data,
-                                       &kqer.len);
-    if (rc != 0)
-        return rc == -2 ? FL_KQ_CP_TOO_LARGE : FL_KQ_CP_IO;
+    out = read_bounded(report_path, FL_KQ_REPORT_MAX, &kqer);
+    if (out != FL_KQ_CP_OK)
+        return out;
     out = fl_kq_cp_inject_report_bytes(reporter_public, kqer.data, kqer.len, ref, path);
     fl_kq_buf_free(&kqer);
     return out;
@@ -1268,7 +1288,6 @@ fl_kq_cp_result_t fl_kq_cp_last_signature(const char *path, int64_t *sec_out) {
 static fl_kq_cp_result_t fl_kq_cp_sign_head_with_unlocked(const char *path, const char *author_key,
                                           const uint8_t signing_secret[32], const char *created_at_utc) {
     const fl_kq_driver_t *drv = fl_kq_driver_get();
-    const fl_kq_storage_t *store = fl_kq_cp_storage();
     char container_path[4096], head[FL_HERITAGE_KEY_ID_MAX];
     fl_kq_buf_t content = {0}, container = {0}, next = {0};
     uint8_t rev[32];
@@ -1279,9 +1298,9 @@ static fl_kq_cp_result_t fl_kq_cp_sign_head_with_unlocked(const char *path, cons
         return FL_KQ_CP_INVALID;
     if (!drv || !drv->head_author)
         return FL_KQ_CP_NO_DRIVER;
-    st = store->read_file(store->ctx, path, KQ_CONTENT_MAX, &content.data, &content.len);
-    if (st != 0)
-        return st == -2 ? FL_KQ_CP_TOO_LARGE : FL_KQ_CP_IO;
+    rc = read_bounded(path, KQ_CONTENT_MAX, &content);
+    if (rc != FL_KQ_CP_OK)
+        return rc;
     rc = load_container(path, container_path, sizeof container_path, &container);
     if (rc != FL_KQ_CP_OK)
         goto done; /* nothing to sign without a history: a signature never starts one */

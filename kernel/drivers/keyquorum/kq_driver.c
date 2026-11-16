@@ -345,93 +345,6 @@ static int drv_head_author(const fl_kq_buf_t *c, char *out, size_t cap) {
     return KQ_FILE_OK;
 }
 
-/* The freestanding image has no account store, slot token or bridge to ask about, and the SECFEAT
- * image cannot carry these three (about 13 KiB of library code past the 0x9f000 budget): there the
- * ops are NULL and every caller fails closed. */
-static int drv_access_requirement(const char *current, const char *target, int sudo,
-                                  const kq_bridge_t *live_bridges, size_t nbridges,
-                                  int parent_approval, int *bridge_index_out,
-                                  int *needs_parent_grant_out) {
-    return kq_access_requirement(current, target, sudo, live_bridges, nbridges, parent_approval,
-                                 bridge_index_out, needs_parent_grant_out);
-}
-
-static int drv_bridge_prove(const char *uid, uint32_t generation, const uint8_t salt[16],
-                            const uint8_t bridge_public[32], const char *local_label,
-                            const uint8_t *sealed_bridge_key, size_t slen,
-                            const uint8_t wrap_salt[16], const uint8_t encryption_sk[32],
-                            const uint8_t signing_sk[32], const uint8_t *challenge, size_t clen,
-                            uint8_t *artifact_out, size_t cap, size_t *artifact_len) {
-    return kq_bridge_prove(uid, generation, salt, bridge_public, local_label, sealed_bridge_key,
-                           slen, wrap_salt, encryption_sk, signing_sk, challenge, clen,
-                           artifact_out, cap, artifact_len);
-}
-
-static int drv_bridge_verify(const char *uid, uint32_t generation, const uint8_t salt[16],
-                             const uint8_t bridge_public[32], int destroyed,
-                             const char *const *member_labels, const uint8_t *member_signing_pubs,
-                             size_t nmembers, const char *verifier_label, const uint8_t *challenge,
-                             size_t clen, const uint8_t *artifact, size_t alen) {
-    return kq_bridge_verify(uid, generation, salt, bridge_public, destroyed, member_labels,
-                            member_signing_pubs, nmembers, verifier_label, challenge, clen,
-                            artifact, alen);
-}
-
-static int drv_bridge_connects(const char *end_a, const char *end_b, const char *actor,
-                               const char *scope) {
-    return kq_bridge_connects(end_a, end_b, actor, scope);
-}
-
-/* Parent-key assembly: hosted only, like the ops above (the no_std archive does not export it). */
-static unsigned drv_assembly_threshold(unsigned holders) {
-    return kq_assembly_threshold(holders);
-}
-
-static int drv_assembly_split(const uint8_t seed[32], unsigned generation,
-                              const char *const *child_labels,
-                              const uint8_t (*child_box_public)[32], size_t nchildren,
-                              uint8_t *out, size_t cap, size_t *out_len) {
-    return kq_assembly_split(seed, generation, child_labels, child_box_public, nchildren, out, cap,
-                             out_len);
-}
-
-static int drv_assembly_generation(const uint8_t *assembly, size_t alen, unsigned *generation_out) {
-    return kq_assembly_generation(assembly, alen, generation_out);
-}
-
-static int drv_assembly_assemble(const uint8_t *assembly, size_t alen,
-                                 const uint8_t parent_signing_public[32],
-                                 const char *const *unlocked_labels,
-                                 const uint8_t (*unlocked_box_secret)[32],
-                                 const uint8_t (*unlocked_device_id)[16], size_t nunlocked,
-                                 size_t minimum_devices, uint8_t seed_out[32]) {
-    return kq_assembly_assemble(assembly, alen, parent_signing_public, unlocked_labels,
-                                unlocked_box_secret, unlocked_device_id, nunlocked,
-                                minimum_devices, seed_out);
-}
-
-/* Co-signed sudo and token sealing (ABI 7): hosted only, like the ops above. */
-static int drv_sudo_sign(int role, const char *invoker, const char *authority,
-                         const uint8_t *action, size_t action_len, const uint8_t nonce[16],
-                         const uint8_t secret[32], uint8_t sig_out[64]) {
-    return kq_sudo_sign(role, invoker, authority, action, action_len, nonce, secret, sig_out);
-}
-
-static int drv_sudo_verify(const char *invoker, const char *authority, const uint8_t *action,
-                           size_t action_len, const uint8_t nonce[16],
-                           const uint8_t invoker_public[32], const uint8_t invoker_sig[64],
-                           const uint8_t authority_public[32], const uint8_t authority_sig[64]) {
-    return kq_sudo_verify(invoker, authority, action, action_len, nonce, invoker_public,
-                          invoker_sig, authority_public, authority_sig);
-}
-
-static int drv_slot_seal(const char *label, const char *passphrase, const uint8_t device_id[16],
-                         const uint8_t signing_secret[32], const uint8_t encryption_secret[32],
-                         uint8_t *token_out, size_t cap, size_t *token_len,
-                         uint8_t signing_public_out[32], uint8_t encryption_public_out[32]) {
-    return kq_slot_seal(label, passphrase, device_id, signing_secret, encryption_secret,
-                        token_out, cap, token_len, signing_public_out, encryption_public_out);
-}
 #endif
 
 static const fl_driver_ops_t s_kq_lifecycle = {
@@ -487,17 +400,20 @@ static const fl_kq_driver_t s_kq_driver = {
     .slot_open = drv_slot_open,
 #ifndef FL_FREESTANDING
     .head_author = drv_head_author,
-    .access_requirement = drv_access_requirement,
-    .bridge_prove = drv_bridge_prove,
-    .bridge_verify = drv_bridge_verify,
-    .bridge_connects = drv_bridge_connects,
-    .assembly_threshold = drv_assembly_threshold,
-    .assembly_split = drv_assembly_split,
-    .assembly_generation = drv_assembly_generation,
-    .assembly_assemble = drv_assembly_assemble,
-    .sudo_sign = drv_sudo_sign,
-    .sudo_verify = drv_sudo_verify,
-    .slot_seal = drv_slot_seal,
+    /* The ops below are KeyQuorum's own functions (same signatures). The freestanding image has no
+     * account store, slot token or bridge, and no room for their code: there they are NULL and every
+     * caller fails closed. */
+    .access_requirement = kq_access_requirement,
+    .bridge_prove = kq_bridge_prove,
+    .bridge_verify = kq_bridge_verify,
+    .bridge_connects = kq_bridge_connects,
+    .assembly_threshold = kq_assembly_threshold,
+    .assembly_split = kq_assembly_split,
+    .assembly_generation = kq_assembly_generation,
+    .assembly_assemble = kq_assembly_assemble,
+    .sudo_sign = kq_sudo_sign,
+    .sudo_verify = kq_sudo_verify,
+    .slot_seal = kq_slot_seal,
 #endif
 };
 

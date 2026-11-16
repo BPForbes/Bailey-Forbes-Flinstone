@@ -407,15 +407,7 @@ static int session_verify_password_locked(const char *name, const char *password
 }
 
 int fl_session_verify_password(const char *password) {
-    int ok = 0;
-
-    fl_session_init();
-    if (!password)
-        return 0;
-    pthread_mutex_lock(&s_session_mu);
-    ok = session_verify_password_locked(s_current, password);
-    pthread_mutex_unlock(&s_session_mu);
-    return ok;
+    return fl_session_verify_account_password(s_current, password); /* s_current is read under the lock there */
 }
 
 /* Called with s_session_mu held: the identity commit that su, sudo -i and the restore after su -c

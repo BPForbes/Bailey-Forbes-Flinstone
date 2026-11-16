@@ -625,6 +625,19 @@ fl_result_t fl_kq_service_autosign_remove(const char *label) {
     return rc;
 }
 
+/* A checkpoint result as the sweep reads it: BUSY is the one result that means "two heads"; any other
+ * failure is never OK or BUSY. */
+static fl_result_t autosign_result(fl_kq_cp_result_t cp) {
+    fl_result_t rc;
+
+    if (cp == FL_KQ_CP_OK)
+        return FL_RESULT_OK;
+    if (cp == FL_KQ_CP_FORKED)
+        return FL_RESULT_BUSY;
+    rc = fl_kq_cp_to_result(cp);
+    return rc == FL_RESULT_OK || rc == FL_RESULT_BUSY ? FL_RESULT_ERR : rc;
+}
+
 int64_t fl_kq_autosign_last_signature(void *ctx) {
     const fl_kq_autosign_file_t *f = (const fl_kq_autosign_file_t *)ctx;
     int64_t sec = 0;
@@ -637,20 +650,12 @@ int64_t fl_kq_autosign_last_signature(void *ctx) {
 fl_result_t fl_kq_autosign_sign(void *ctx, const char *author, const uint8_t key[32], kq_signing_mode_t mode) {
     const fl_kq_autosign_file_t *f = (const fl_kq_autosign_file_t *)ctx;
     char at[40];
-    fl_kq_cp_result_t cp;
-    fl_result_t rc;
 
     (void)mode; /* own or assembled is audited by the sweep */
     if (!f || !f->path || !author || !key)
         return FL_RESULT_INVAL;
     fl_kq_service_utc_now(at, sizeof at);
-    cp = fl_kq_cp_sign_head_with(f->path, author, key, at);
-    if (cp == FL_KQ_CP_OK)
-        return FL_RESULT_OK;
-    if (cp == FL_KQ_CP_FORKED)
-        return FL_RESULT_BUSY;
-    rc = fl_kq_cp_to_result(cp);
-    return rc == FL_RESULT_OK || rc == FL_RESULT_BUSY ? FL_RESULT_ERR : rc;
+    return autosign_result(fl_kq_cp_sign_head_with(f->path, author, key, at));
 }
 
 fl_result_t fl_kq_service_autosign_track_file(const char *path, int64_t interval_sec) {
@@ -667,18 +672,10 @@ fl_result_t fl_kq_service_autosign_track_file(const char *path, int64_t interval
 
 fl_result_t fl_kq_autosign_head_author(void *ctx, char *out, size_t cap) {
     const fl_kq_autosign_file_t *f = (const fl_kq_autosign_file_t *)ctx;
-    fl_kq_cp_result_t cp;
-    fl_result_t rc;
 
     if (!f || !f->path || !out || cap == 0)
         return FL_RESULT_INVAL;
-    cp = fl_kq_cp_head_author(f->path, out, cap);
-    if (cp == FL_KQ_CP_OK)
-        return FL_RESULT_OK;
-    if (cp == FL_KQ_CP_FORKED)
-        return FL_RESULT_BUSY; /* the one result the sweep reads as "two heads" */
-    rc = fl_kq_cp_to_result(cp);
-    return rc == FL_RESULT_OK || rc == FL_RESULT_BUSY ? FL_RESULT_ERR : rc;
+    return autosign_result(fl_kq_cp_head_author(f->path, out, cap));
 }
 
 void fl_kq_service_utc_now(char *out, size_t cap) {

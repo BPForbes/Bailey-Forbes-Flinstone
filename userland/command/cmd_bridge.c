@@ -88,6 +88,7 @@ static int bridge_assembly(fl_user_db_t *db, const char *actor, const char *pare
     size_t n = 0, rlen = 0;
     unsigned threshold, gen = 0, old_gen = 0, old_thr = 0;
     fl_result_t rc;
+    fl_heritage_relation_t rel;
     int st, ret = 1;
 
     if (!fl_session_has_elevation()) {
@@ -99,8 +100,8 @@ static int bridge_assembly(fl_user_db_t *db, const char *actor, const char *pare
         return 1;
     }
     mem_domain_copy(parent_key, parent->key_id, sizeof parent_key);
-    if (fl_heritage_relation(actor, parent_key) != FL_HERITAGE_REL_SELF &&
-        fl_heritage_relation(actor, parent_key) != FL_HERITAGE_REL_DESCENDANT) {
+    rel = fl_heritage_relation(actor, parent_key);
+    if (rel != FL_HERITAGE_REL_SELF && rel != FL_HERITAGE_REL_DESCENDANT) {
         fprintf(stderr, "bridge: %s is not this account or below it\n", parent_name);
         return 1;
     }
