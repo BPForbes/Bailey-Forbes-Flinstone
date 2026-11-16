@@ -1144,6 +1144,17 @@ test_kq_net: userland/shell/common.o $(UTIL_SHELL_LINK_OBJS) $(FS_JAIL_CORE_OBJS
 	  $(FS_JAIL_TEST_LIBS) -Wl,-z,noexecstack
 	./tests/test_kq_net
 
+.PHONY: test_kq_history_member
+test_kq_history_member: userland/shell/common.o $(UTIL_SHELL_LINK_OBJS) $(FS_JAIL_CORE_OBJS) $(FS_JAIL_SUPPORT_OBJS) kernel/core/mm/mem_domain.o $(MEM_ASM_OBJ) $(HISTORY_ASM_OBJ) $(UTIL_HISTORY_HOST_OBJS) kernel/core/vfs/kq_checkpoint.o kernel/core/vfs/kq_checkpoint_users.o kernel/core/vfs/kq_delivery.o kernel/core/net/net_kq_delivery.o kernel/core/net/net_kq_delivery_users.o $(NET_ASM_OBJ) kernel/core/vfs/kq_history_bundle.o
+	$(CC) $(CFLAGS) $(TEST_SANITIZE) -c -o tests/test_kq_history_member.o tests/test_kq_history_member.c
+	$(CXX) $(CXXFLAGS) $(TEST_SANITIZE) -o tests/test_kq_history_member tests/test_kq_history_member.o \
+	  kernel/core/net/net_kq_delivery.o kernel/core/net/net_kq_delivery_users.o kernel/core/vfs/kq_delivery.o kernel/core/vfs/kq_history_bundle.o \
+	  kernel/core/vfs/kq_checkpoint.o kernel/core/vfs/kq_checkpoint_users.o \
+	  userland/shell/common.o $(UTIL_SHELL_LINK_OBJS) $(FS_JAIL_CORE_OBJS) $(FS_JAIL_SUPPORT_OBJS) \
+	  kernel/core/mm/mem_domain.o $(MEM_ASM_OBJ) $(NET_ASM_OBJ) $(HISTORY_ASM_OBJ) $(UTIL_HISTORY_HOST_OBJS) \
+	  $(FS_JAIL_TEST_LIBS) -Wl,-z,noexecstack
+	./tests/test_kq_history_member
+
 .PHONY: test_kq_service
 test_kq_service: userland/shell/common.o $(UTIL_SHELL_LINK_OBJS) $(FS_JAIL_CORE_OBJS) $(FS_JAIL_SUPPORT_OBJS) kernel/core/mm/mem_domain.o $(MEM_ASM_OBJ) $(NET_ASM_OBJ) $(HISTORY_ASM_OBJ) $(UTIL_HISTORY_HOST_OBJS) kernel/core/vfs/kq_checkpoint.o kernel/core/vfs/kq_checkpoint_users.o kernel/core/vfs/kq_service.c kernel/core/sched/bg_jobs.c kernel/core/sched/workqueue.c kernel/core/sched/priority_queue.c userland/shell/authz_subsystem.o userland/shell/audit_log.o userland/shell/contract_log_dispatch.o
 	$(CC) $(CFLAGS) $(TEST_SANITIZE) -c -o tests/test_kq_service.o tests/test_kq_service.c
