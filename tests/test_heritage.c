@@ -2749,6 +2749,94 @@ static int test_identity_switch_denied_before_prompt(void) {
     return 0;
 }
 
+/*
+ * coder-f80a95, CodeRabbit 4587909887: a sudo whose window ended before it could renew it is not
+ * reported as renewed. sudo asks for the full co-signature again: refused when Root has no token
+ * (nothing granted), and with Root's token and both passwords a new window is granted and the line
+ * is signed under it. The window's end is its slot going while the session still holds its token.
+ */
+static int sudo_sign_with_answers(const char *line, const char *answers) {
+    char path[] = "/tmp/fl-sudo-renew-XXXXXX";
+    int fd = mkstemp(path), saved = dup(STDIN_FILENO), rc;
+
+    if (fd < 0 || saved < 0 || write(fd, answers, strlen(answers)) != (ssize_t)strlen(answers) ||
+        lseek(fd, 0, SEEK_SET) != 0 || dup2(fd, STDIN_FILENO) < 0) {
+        if (fd >= 0)
+            close(fd);
+        if (saved >= 0)
+            close(saved);
+        unlink(path);
+        return -1;
+    }
+    close(fd);
+    unlink(path);
+    clearerr(stdin);
+    rc = cmd_sudo_sign_action(line);
+    (void)dup2(saved, STDIN_FILENO);
+    close(saved);
+    clearerr(stdin);
+    return rc;
+}
+
+static int test_sudo_renew_after_window_ended(void) {
+    fl_elevation_token_t tok = FL_ELEVATION_TOKEN_NONE;
+    static const char action_want[] = "sudo-action:sudo; nonce=";
+    char kqst[300], stmt[700];
+    FILE *fp;
+
+    fl_session_set_audit_hook(capture_audit);
+    unsetenv("FL_CMD_PASSWORD");
+    ASSERT(fl_session_set_user("Flinstone") == FL_RESULT_OK);
+
+    /* Password-only Root: the renewal of an ended window is refused, not reported. */
+    ASSERT(!fl_session_sudo_needs_root());
+    ASSERT(fl_session_grant_elevation("sudo", &tok) == FL_RESULT_OK && tok != FL_ELEVATION_TOKEN_NONE);
+    ASSERT(fl_session_has_elevation());
+    fl_elevation_revoke(tok);
+    s_audit[0] = '\0';
+    ASSERT(cmd_sudo_sign_action("sudo") != 0);
+    ASSERT(!strcmp(s_audit, "sudo-refused:no-root-kqst"));
+    ASSERT(!fl_session_has_elevation());
+
+    /* A KQST-mode Root: the same ended window asks Root's and Flinstone's passwords again and
+     * signs the line under the new window. */
+    snprintf(kqst, sizeof kqst, "%s.root.kqst", fl_session_user_db()->path);
+    fp = fopen(kqst, "wb");
+    ASSERT(fp && fputs("stub slot token", fp) >= 0 && fclose(fp) == 0);
+    snprintf(stmt, sizeof stmt,
+             "INSERT INTO account_keys (label,purpose,holds_share,minted_by,minted_at,generation,"
+             "kqst_path,device_id,signing_public,encryption_public,ledger_seq,event_hash) VALUES"
+             " ('Root','own',1,'Root',1,1,'%s',zeroblob(16),zeroblob(32),zeroblob(32),0,zeroblob(32));",
+             kqst);
+    ASSERT(exec_on_session_db(stmt) == 0);
+    s_patch = patch_root_slot;
+    ASSERT(fl_session_set_auth_mode("Root", FL_USER_AUTH_PASSWORD_KQST) == FL_RESULT_OK);
+    ASSERT(fl_session_set_user("Flinstone") == FL_RESULT_OK);
+    ASSERT(fl_session_sudo_needs_root());
+    ASSERT(fl_session_sudo_authenticate("root", "flinstone") == FL_RESULT_OK);
+    ASSERT(fl_session_has_elevation());
+    fl_elevation_revoke_all();
+    s_audit[0] = '\0';
+    ASSERT(sudo_sign_with_answers("sudo", "root\nflinstone\n") == 0);
+    ASSERT(!strncmp(s_audit, action_want, sizeof action_want - 1));
+    ASSERT(fl_session_has_elevation());
+    fl_session_drop_elevation();
+    /* The wrong Root password on the re-ask: refused, nothing granted. */
+    ASSERT(fl_session_sudo_authenticate("root", "flinstone") == FL_RESULT_OK);
+    fl_elevation_revoke_all();
+    ASSERT(sudo_sign_with_answers("sudo", "flinstone\nflinstone\n") != 0);
+    ASSERT(!strcmp(s_audit, "sudo-refused:password"));
+    ASSERT(!fl_session_has_elevation());
+
+    s_patch = NULL;
+    ASSERT(fl_session_set_auth_mode("Root", FL_USER_AUTH_PASSWORD) == FL_RESULT_OK);
+    ASSERT(exec_on_session_db("DELETE FROM account_keys WHERE label='Root';") == 0);
+    unlink(kqst);
+    ASSERT(fl_session_set_user("Flinstone") == FL_RESULT_OK);
+    fl_session_set_audit_hook(NULL);
+    return 0;
+}
+
 int main(void) {
     char db_path[256];
     char db_dir[] = "/tmp/fl_heritage_storeXXXXXX";
@@ -2802,6 +2890,7 @@ int main(void) {
     RUN(test_switch_mutation_barriers);
     RUN(test_account_command_reload_fails_closed);
     RUN(test_identity_switch_denied_before_prompt);
+    RUN(test_sudo_renew_after_window_ended); /* coder-f80a95 */
 
     if (chdir("/tmp") != 0)
         rc = 1;
