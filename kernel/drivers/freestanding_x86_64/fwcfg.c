@@ -21,7 +21,8 @@ static uint32_t read_be(unsigned bytes)
     return v;
 }
 
-int fl_fs_fwcfg_present(void)
+/* 1 when the device answers with QEMU's signature (a machine with no fw_cfg reads 0xFF). */
+static int fwcfg_present(void)
 {
     select_item(FW_CFG_SIGNATURE);
     return fl_fs_inb(FW_CFG_DATA) == 'Q' && fl_fs_inb(FW_CFG_DATA) == 'E' && fl_fs_inb(FW_CFG_DATA) == 'M' &&
@@ -66,7 +67,7 @@ int fl_fs_fwcfg_read(const char *name, uint32_t offset, uint8_t *out, size_t len
     uint16_t sel;
     uint32_t size;
 
-    if (!name || !out || !fl_fs_fwcfg_present() || find(name, &sel, &size) != 0 || offset > size ||
+    if (!name || !out || !fwcfg_present() || find(name, &sel, &size) != 0 || offset > size ||
         len > (size_t)(size - offset))
         return -1;
     select_item(sel);

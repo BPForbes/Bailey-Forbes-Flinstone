@@ -20,7 +20,6 @@
 #include "cmd_decl.h"
 #include "cmd_authutil.h"
 #include "cmd_batch.h"
-#include "fl/audit_log.h"
 #include "fl/hex.h"
 #include "fl/session.h"
 #include "heritage.h"
@@ -61,6 +60,14 @@ out:
     return rc;
 }
 
+static int kqst_paired(const char *name, const char *key, int64_t generation) {
+    printf("kqst: %s (%s) now logs in with its password and token (generation %lld)\n", name, key,
+           (long long)generation);
+    if (!strcmp(key, FL_HERITAGE_ROOT_KEY))
+        printf("kqst: sudo now asks for Root's password and the caller's, and both tokens co-sign it\n");
+    return 0;
+}
+
 static int kqst_enroll(const char *token, const char *dev_hex, const char *sig_hex, const char *enc_hex) {
     unsigned char dev[16], sig[32], enc[32];
     char path[PATH_MAX], pw[128], key[FL_HERITAGE_KEY_ID_MAX];
@@ -97,11 +104,7 @@ static int kqst_enroll(const char *token, const char *dev_hex, const char *sig_h
     cmd_wipe_password(pw, sizeof pw);
     switch (rc) {
     case FL_RESULT_OK:
-        printf("kqst: %s (%s) now logs in with its password and token (generation %lld)\n", name, key,
-               (long long)generation);
-        if (!strcmp(key, FL_HERITAGE_ROOT_KEY))
-            printf("kqst: sudo now asks for Root's password and the caller's, and both tokens co-sign it\n");
-        return 0;
+        return kqst_paired(name, key, generation);
     case FL_RESULT_BUSY:
         fprintf(stderr, "kqst: the login changed meanwhile; nothing was paired\n");
         return 1;
@@ -134,11 +137,7 @@ static int kqst_make(void) {
     cmd_wipe_password(pw, sizeof pw);
     switch (rc) {
     case FL_RESULT_OK:
-        printf("kqst: %s (%s) now logs in with its password and token (generation %lld)\n", name, key,
-               (long long)generation);
-        if (!strcmp(key, FL_HERITAGE_ROOT_KEY))
-            printf("kqst: sudo now asks for Root's password and the caller's, and both tokens co-sign it\n");
-        return 0;
+        return kqst_paired(name, key, generation);
     case FL_RESULT_NOSYS:
         fprintf(stderr, "kqst: this build has no KeyQuorum driver to make a token with\n");
         return 1;

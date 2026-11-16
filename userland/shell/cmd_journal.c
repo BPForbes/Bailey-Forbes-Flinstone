@@ -508,13 +508,6 @@ void fl_cmdlog_close(fl_cmdlog_t *j) {
  * there is one list. */
 static const char *const k_line_builtins[] = {"exit", "clear", "help", "history", "cc", "bios", "make"};
 
-/* Future per-command fields (cmd_journal.h). Empty: no command records more than its category. */
-static const fl_cmdlog_field_allow_t k_field_allow[1] = {{NULL, NULL}};
-
-size_t fl_cmdlog_allowed_field_count(void) {
-    return k_field_allow[0].command ? sizeof k_field_allow / sizeof k_field_allow[0] : 0u;
-}
-
 static int known_command(const char *word) {
     if (fl_shell_cmd_lookup(word) != FL_SCMD_UNKNOWN)
         return 1;

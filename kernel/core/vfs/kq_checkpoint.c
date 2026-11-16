@@ -817,53 +817,39 @@ fl_kq_cp_result_t fl_kq_cp_history(const char *path, fl_kq_buf_t *lines) {
     return rc == KQ_FILE_OK ? FL_KQ_CP_OK : FL_KQ_CP_INVALID;
 }
 
-fl_kq_cp_result_t fl_kq_cp_head(const char *path, uint8_t rev[32]) {
+/* The head of the container beside path: its revision id (rev), or its author's label (author, cap).
+ * A fork, or anything else that names no single head, leaves author empty. */
+static fl_kq_cp_result_t head_of(const char *path, uint8_t *rev, char *author, size_t cap) {
     const fl_kq_driver_t *drv = fl_kq_driver_get();
     char container_path[4096];
     fl_kq_buf_t c = {0};
-    fl_kq_cp_result_t out = FL_KQ_CP_OK;
+    fl_kq_cp_result_t out;
     int rc;
 
-    if (!path || !rev)
-        return FL_KQ_CP_INVALID;
-    if (!drv)
+    if (author)
+        author[0] = '\0';
+    if (!drv || (author && !drv->head_author))
         return FL_KQ_CP_NO_DRIVER;
     out = load_container(path, container_path, sizeof container_path, &c);
     if (out != FL_KQ_CP_OK)
         return out;
-    rc = drv->head(&c, rev);
+    rc = author ? drv->head_author(&c, author, cap) : drv->head(&c, rev);
+    fl_kq_buf_free(&c);
     if (rc == KQ_FILE_FORKED)
         out = FL_KQ_CP_FORKED;
     else if (rc != KQ_FILE_OK)
         out = FL_KQ_CP_INVALID;
-    fl_kq_buf_free(&c);
+    if (author && out != FL_KQ_CP_OK)
+        author[0] = '\0';
     return out;
 }
 
-fl_kq_cp_result_t fl_kq_cp_head_author(const char *path, char *out, size_t cap) {
-    const fl_kq_driver_t *drv = fl_kq_driver_get();
-    char container_path[4096];
-    fl_kq_buf_t c = {0};
-    fl_kq_cp_result_t res;
-    int rc;
+fl_kq_cp_result_t fl_kq_cp_head(const char *path, uint8_t rev[32]) {
+    return path && rev ? head_of(path, rev, NULL, 0) : FL_KQ_CP_INVALID;
+}
 
-    if (!path || !out || cap == 0)
-        return FL_KQ_CP_INVALID;
-    out[0] = '\0';
-    if (!drv || !drv->head_author)
-        return FL_KQ_CP_NO_DRIVER;
-    res = load_container(path, container_path, sizeof container_path, &c);
-    if (res != FL_KQ_CP_OK)
-        return res;
-    rc = drv->head_author(&c, out, cap);
-    if (rc == KQ_FILE_FORKED)
-        res = FL_KQ_CP_FORKED;
-    else if (rc != KQ_FILE_OK)
-        res = FL_KQ_CP_INVALID; /* no revision, no room, malformed: nobody is named */
-    fl_kq_buf_free(&c);
-    if (res != FL_KQ_CP_OK)
-        out[0] = '\0';
-    return res;
+fl_kq_cp_result_t fl_kq_cp_head_author(const char *path, char *out, size_t cap) {
+    return path && out && cap ? head_of(path, NULL, out, cap) : FL_KQ_CP_INVALID;
 }
 
 /* Sealed letter for revision rev already in the container beside path (sender). Nothing is

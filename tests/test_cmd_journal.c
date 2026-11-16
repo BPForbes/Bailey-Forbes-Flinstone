@@ -341,7 +341,6 @@ static int test_secret_arguments_never_reach_storage(void) {
     }
     ASSERT(!contains(d, n, "Root.Other", 10) && !contains(d, n, "--as-first-word", 15));
     ASSERT(contains(d, n, "passwd", 6) && contains(d, n, "other", 5));
-    ASSERT(fl_cmdlog_allowed_field_count() == 0);
     mem_domain_secure_zero(d, n);
     mem_domain_free(MEM_DOMAIN_FS, d);
     return 0;

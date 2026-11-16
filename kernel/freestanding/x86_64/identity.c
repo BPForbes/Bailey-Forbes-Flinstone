@@ -16,12 +16,9 @@ static int s_active;
 static int s_sessions;
 static const fl_fs_identity_kq_ops_t *s_kq;
 
-const fl_fs_identity_kq_ops_t *fl_fs_identity_set_kq(const fl_fs_identity_kq_ops_t *ops)
+void fl_fs_identity_set_kq(const fl_fs_identity_kq_ops_t *ops)
 {
-    const fl_fs_identity_kq_ops_t *prev = s_kq;
-
     s_kq = ops;
-    return prev;
 }
 
 static void secret_clear(char *secret)

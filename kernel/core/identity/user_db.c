@@ -1036,18 +1036,6 @@ fl_result_t fl_user_db_set_auth_mode(fl_user_db_t *db, const char *name, int aut
     return FL_RESULT_OK;
 }
 
-fl_result_t fl_user_db_set_elevated(fl_user_db_t *db, const char *name, int is_elevated) {
-    fl_user_record_t *u;
-
-    if (!db || !name)
-        return FL_RESULT_INVAL;
-    u = find_mut(db, name);
-    if (!u)
-        return FL_RESULT_NOENT;
-    u->is_elevated = is_elevated ? 1 : 0;
-    return FL_RESULT_OK;
-}
-
 static fl_result_t kqst_path_select(sqlite3 *sql, const char *key_id, char *out, size_t cap) {
     sqlite3_stmt *st = NULL;
     fl_result_t rc = FL_RESULT_NOENT;
@@ -1464,22 +1452,32 @@ static fl_result_t bridge_read(sqlite3 *sql, const char *uid, fl_user_bridge_t *
     return bridge_sealed_select(sql, uid, seal_label, sealed, seal_cap, seal_len, wrap_salt);
 }
 
+/* A read-only connection holding one snapshot (BEGIN), and its end. */
+static fl_result_t bridge_ro_begin(const fl_user_db_t *db, sqlite3 **sql) {
+    if (bridge_db_open(db, 0, sql) != FL_RESULT_OK)
+        return FL_RESULT_ERR;
+    if (sqlite3_exec(*sql, "BEGIN;", NULL, NULL, NULL) != SQLITE_OK) {
+        sqlite3_close(*sql);
+        return FL_RESULT_ERR;
+    }
+    return FL_RESULT_OK;
+}
+
+static void bridge_ro_end(sqlite3 *sql) {
+    (void)sqlite3_exec(sql, "ROLLBACK;", NULL, NULL, NULL);
+    sqlite3_close(sql);
+}
+
 fl_result_t fl_user_db_bridge_get(const fl_user_db_t *db, const char *uid, fl_user_bridge_t *out) {
     sqlite3 *sql = NULL;
     fl_result_t rc;
 
     if (!db || !uid || !uid[0] || !out)
         return FL_RESULT_INVAL;
-    if (bridge_db_open(db, 0, &sql) != FL_RESULT_OK)
+    if (bridge_ro_begin(db, &sql) != FL_RESULT_OK)
         return FL_RESULT_ERR;
-    /* The row and the roster are one snapshot. */
-    if (sqlite3_exec(sql, "BEGIN;", NULL, NULL, NULL) != SQLITE_OK) {
-        sqlite3_close(sql);
-        return FL_RESULT_ERR;
-    }
     rc = bridge_read(sql, uid, out, NULL, NULL, 0, NULL, NULL);
-    (void)sqlite3_exec(sql, "ROLLBACK;", NULL, NULL, NULL);
-    sqlite3_close(sql);
+    bridge_ro_end(sql);
     return rc;
 }
 
@@ -1534,15 +1532,10 @@ fl_result_t fl_user_db_bridges_live(const fl_user_db_t *db, fl_user_bridge_t *ou
     if (!db || !count || (cap && !out))
         return FL_RESULT_INVAL;
     *count = 0;
-    if (bridge_db_open(db, 0, &sql) != FL_RESULT_OK)
+    if (bridge_ro_begin(db, &sql) != FL_RESULT_OK)
         return FL_RESULT_ERR;
-    if (sqlite3_exec(sql, "BEGIN;", NULL, NULL, NULL) != SQLITE_OK) {
-        sqlite3_close(sql);
-        return FL_RESULT_ERR;
-    }
     rc = bridges_live_on(sql, out, cap, count);
-    (void)sqlite3_exec(sql, "ROLLBACK;", NULL, NULL, NULL);
-    sqlite3_close(sql);
+    bridge_ro_end(sql);
     return rc;
 }
 
@@ -1917,16 +1910,10 @@ fl_result_t fl_user_db_bridge_sealed_key(const fl_user_db_t *db, const char *uid
     if (!db || !uid || !label || !sealed || !len || !wrap_salt)
         return FL_RESULT_INVAL;
     *len = 0;
-    if (bridge_db_open(db, 0, &sql) != FL_RESULT_OK)
+    if (bridge_ro_begin(db, &sql) != FL_RESULT_OK)
         return FL_RESULT_ERR;
-    /* Its own short snapshot when called alone. Prove does not use this. */
-    if (sqlite3_exec(sql, "BEGIN;", NULL, NULL, NULL) != SQLITE_OK) {
-        sqlite3_close(sql);
-        return FL_RESULT_ERR;
-    }
     rc = bridge_sealed_select(sql, uid, label, sealed, cap, len, wrap_salt);
-    (void)sqlite3_exec(sql, "ROLLBACK;", NULL, NULL, NULL);
-    sqlite3_close(sql);
+    bridge_ro_end(sql);
     return rc;
 }
 
@@ -1941,15 +1928,10 @@ fl_result_t fl_user_db_bridge_snapshot(const fl_user_db_t *db, const char *uid, 
         return FL_RESULT_INVAL;
     mem_domain_zero(out, sizeof *out);
     *len = 0;
-    if (bridge_db_open(db, 0, &sql) != FL_RESULT_OK)
+    if (bridge_ro_begin(db, &sql) != FL_RESULT_OK)
         return FL_RESULT_ERR;
-    if (sqlite3_exec(sql, "BEGIN;", NULL, NULL, NULL) != SQLITE_OK) {
-        sqlite3_close(sql);
-        return FL_RESULT_ERR;
-    }
     rc = bridge_read(sql, uid, out, label, sealed, cap, len, wrap_salt);
-    (void)sqlite3_exec(sql, "ROLLBACK;", NULL, NULL, NULL);
-    sqlite3_close(sql);
+    bridge_ro_end(sql);
     return rc;
 }
 

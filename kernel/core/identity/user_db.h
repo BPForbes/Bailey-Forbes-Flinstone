@@ -67,8 +67,6 @@ typedef struct fl_user_db {
 
 /** Sets how an account logs in (in memory; fl_user_db_save writes it). NOENT for an unknown account. */
 fl_result_t fl_user_db_set_auth_mode(fl_user_db_t *db, const char *name, int auth_mode);
-/** Sets the in-memory elevation mark (fl_user_db_save writes it). NOENT for an unknown account. */
-fl_result_t fl_user_db_set_elevated(fl_user_db_t *db, const char *name, int is_elevated);
 /**
  * The KQST file path paired with key_id in the store's account_keys table (read at call time, so
  * a path never sits in the record). NOENT when the account has no row or the row has no path.

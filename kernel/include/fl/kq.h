@@ -134,38 +134,35 @@ int fl_kq_write_account_token(const char *key_id, const char *password,
                               unsigned char signing_public_out[32],
                               unsigned char encryption_public_out[32]);
 
-/** fl_kq_sudo_cosign results. */
+/**
+ * Keeps len bytes at p (page-aligned) out of swap, and on Linux out of core dumps. Best effort:
+ * returns 1 when the pages are locked, 0 when the host refused (RLIMIT_MEMLOCK) or cannot.
+ */
+int fl_kq_lock_pages(void *p, size_t len);
+
+/** Co-sign results (fl_kq_sudo_hold_open, fl_kq_sudo_hold_cosign). */
 #define FL_KQ_COSIGN_OK        0
 #define FL_KQ_COSIGN_AUTHORITY 1 /* Root's token did not open with Root's password */
 #define FL_KQ_COSIGN_INVOKER   2 /* the invoker's token or key did not open with its password */
 #define FL_KQ_COSIGN_SIGN      3 /* no driver op, no nonce, or a signature that did not verify */
 /**
- * Co-sign a sudo (KeyQuorum's kq_sudo_sign / kq_sudo_verify): Root's token is opened with
- * root_password and the invoker's key with invoker_password (its token when invoker_kqst, else its
- * sealed signing key), a fresh nonce is drawn, both sign action, and both signatures must verify
- * under the public keys the account store holds. On FL_KQ_COSIGN_OK nonce_out and the two
- * signatures hold the record for the audit; otherwise the signatures are zeroed. Every secret is
- * wiped before it returns. Called without the session lock.
- */
-int fl_kq_sudo_cosign(const char *invoker_name, const char *invoker_password, int invoker_kqst,
-                      const char *root_name, const char *root_password, const char *action,
-                      uint8_t nonce_out[16], uint8_t invoker_sig_out[64],
-                      uint8_t root_sig_out[64]);
-
-/**
- * The sudo window (owner decision, FL-20 #399). A sudo that opened Root's token keeps Root's key and
- * the invoker's key for the window, and each elevated action in it is signed by both. Root's key is
- * never kept past the window and never comes from a stored credential.
+ * The sudo window. A sudo that opened Root's token keeps Root's key and the invoker's key for the
+ * window, and each elevated action in it is signed by both. Root's key is never kept past the
+ * window and never comes from a stored credential.
  *
- * fl_kq_sudo_hold_open: fl_kq_sudo_cosign, and on FL_KQ_COSIGN_OK with expires_ns > 0 (monotonic) the
- * two secrets are kept until then, replacing any earlier window.
+ * fl_kq_sudo_hold_open co-signs a sudo (KeyQuorum's kq_sudo_sign / kq_sudo_verify): Root's token is
+ * opened with root_password and the invoker's key with invoker_password (its token when
+ * invoker_kqst, else its sealed signing key), a fresh nonce is drawn, both sign action, and both
+ * signatures must verify under the public keys the account store holds. On FL_KQ_COSIGN_OK
+ * nonce_out and the two signatures hold the record for the audit, and with expires_ns > 0
+ * (monotonic) the two secrets are kept until then, replacing any earlier window; otherwise the
+ * signatures are zeroed. Every secret not kept is wiped before it returns.
  * fl_kq_sudo_hold_cosign: both kept keys sign action and verify under the store's public keys now.
  * FL_KQ_COSIGN_AUTHORITY when no window is kept for invoker_name, it has ended (it is wiped), or
  * Root's token pairing changed; FL_KQ_COSIGN_INVOKER when the invoker's did. Called without the
  * session lock.
  * extend moves the end (a sudo inside the window resets the clock); release wipes the window;
- * expire wipes it when it has ended and answers 1 if it did; active answers 1 while it is kept;
- * locked answers 1 when the host kept its page out of swap.
+ * expire wipes it when it has ended and answers 1 if it did; active answers 1 while it is kept.
  */
 int  fl_kq_sudo_hold_open(const char *invoker_name, const char *invoker_password, int invoker_kqst,
                           const char *root_name, const char *root_password, const char *action,
@@ -177,7 +174,6 @@ void fl_kq_sudo_hold_extend(int64_t expires_ns);
 void fl_kq_sudo_hold_release(void);
 int  fl_kq_sudo_hold_expire(int64_t now_ns);
 int  fl_kq_sudo_hold_active(int64_t now_ns);
-int  fl_kq_sudo_hold_locked(void);
 
 #ifdef __cplusplus
 }

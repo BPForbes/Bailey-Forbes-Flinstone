@@ -238,14 +238,4 @@ int fl_cmdlog_refused(fl_cmdlog_t *j, const fl_cmdlog_corr_t *corr, int code, ch
 void fl_cmdlog_print_refusal(const char *reason);
 void fl_cmdlog_print_completion_gap(const char *reason);
 
-/*
- * Future per-command fields: an allowlist of (command, field) pairs that may add more than the
- * category. Empty now; fl_cmdlog_allowed_field_count() returns 0 and no field is recorded.
- */
-typedef struct {
-    const char *command;
-    const char *field;
-} fl_cmdlog_field_allow_t;
-size_t fl_cmdlog_allowed_field_count(void);
-
 #endif /* FL_CMD_JOURNAL_H */

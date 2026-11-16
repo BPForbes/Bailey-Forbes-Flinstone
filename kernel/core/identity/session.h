@@ -229,7 +229,6 @@ fl_result_t fl_session_remove_user(const char *name);
 fl_result_t fl_session_set_password(const char *name, const char *password);
 fl_result_t fl_session_change_password(const char *name, const char *current, const char *password);
 fl_result_t fl_session_set_auth_mode(const char *name, int auth_mode);
-fl_result_t fl_session_set_elevated(const char *name, int is_elevated);
 fl_result_t fl_session_ensure_key(const char *name, const char *password, int *created);
 void        fl_session_forget_created(const char *name, int created);
 void        fl_session_forget_key(const char *name);

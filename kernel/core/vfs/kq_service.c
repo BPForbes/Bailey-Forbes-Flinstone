@@ -15,14 +15,6 @@
 #include "user_db.h"
 
 #include <pthread.h>
-#if !defined(_WIN32) && !defined(__EMSCRIPTEN__)
-#include <sys/mman.h>
-#include <unistd.h>
-#if defined(__linux__)
-#include <sys/syscall.h>
-#endif
-#define FL_KQ_CAN_LOCK 1
-#endif
 #include <signal.h>
 #include <stdio.h>
 #include <stdatomic.h>
@@ -116,6 +108,15 @@ typedef struct {
     int session;
 } slot_put_ctx_t;
 
+/* A publish's result as its audit event: ok_event, a login that was superseded, or a refusal. */
+static void audit_online(const char *key_id, fl_result_t rc, const char *ok_event) {
+    fl_audit_identity_event(key_id,
+                            rc == FL_RESULT_OK ? ok_event
+                            : rc == FL_RESULT_BUSY ? "kq-service-stale-login"
+                                                   : "kq-service-refused",
+                            key_id, NULL);
+}
+
 static fl_result_t slot_put_cb(void *p) {
     const slot_put_ctx_t *c = (const slot_put_ctx_t *)p;
 
@@ -139,11 +140,7 @@ fl_result_t fl_kq_service_online_for_session(const fl_user_record_t *account, co
         rc = fl_session_publish_if_current(login_generation, slot_put_cb, &put);
     }
     mem_domain_secure_zero(secret, sizeof secret);
-    fl_audit_identity_event(account->key_id,
-                            rc == FL_RESULT_OK ? "kq-service-online"
-                            : rc == FL_RESULT_BUSY ? "kq-service-stale-login"
-                                                   : "kq-service-refused",
-                            account->key_id, NULL);
+    audit_online(account->key_id, rc, "kq-service-online");
     return rc;
 }
 
@@ -172,11 +169,7 @@ fl_result_t fl_kq_service_online_opened(const fl_user_record_t *account, const u
     put.secret = secret;
     put.session = login_generation != 0;
     rc = fl_session_publish_if_current(login_generation, slot_put_cb, &put);
-    fl_audit_identity_event(account->key_id,
-                            rc == FL_RESULT_OK ? "kq-service-online"
-                            : rc == FL_RESULT_BUSY ? "kq-service-stale-login"
-                                                   : "kq-service-refused",
-                            account->key_id, NULL);
+    audit_online(account->key_id, rc, "kq-service-online");
     return rc;
 }
 
@@ -211,11 +204,7 @@ fl_result_t fl_kq_service_online_box(const fl_user_record_t *account, const uint
     put.key_id = account->key_id;
     put.box = box_secret;
     rc = fl_session_publish_if_current(login_generation, slot_box_cb, &put);
-    fl_audit_identity_event(account->key_id,
-                            rc == FL_RESULT_OK ? "kq-service-box-online"
-                            : rc == FL_RESULT_BUSY ? "kq-service-stale-login"
-                                                   : "kq-service-refused",
-                            account->key_id, NULL);
+    audit_online(account->key_id, rc, "kq-service-box-online");
     return rc;
 }
 
@@ -431,26 +420,8 @@ static void audit_control_denied(unsigned op) {
 /* The resident keys stay out of swap (mlock) and out of core dumps (MADV_DONTDUMP, Linux). Best effort:
  * where the process may not lock memory (RLIMIT_MEMLOCK) the service still runs, and that is audited. */
 static void lock_key_table(void) {
-#ifdef FL_KQ_CAN_LOCK
-    /* On Linux the system call is made directly: a sanitizer build intercepts mlock() and makes it a no-op
-     * that still answers 0, which would report a lock that does not exist. */
-#if defined(__linux__) && defined(SYS_mlock)
-    if (!s_keys_locked && syscall(SYS_mlock, (void *)s_slots, sizeof s_slots) == 0)
-        s_keys_locked = 1;
-#else
-    if (!s_keys_locked && mlock(s_slots, sizeof s_slots) == 0)
-        s_keys_locked = 1;
-#endif
-#if defined(__linux__) && defined(MADV_DONTDUMP)
-    {
-        long page = sysconf(_SC_PAGESIZE);
-        size_t len = sizeof s_slots;
-        if (page > 0)
-            len = (len + (size_t)page - 1) & ~((size_t)page - 1);
-        (void)madvise(s_slots, len, MADV_DONTDUMP);
-    }
-#endif
-#endif
+    if (!s_keys_locked)
+        s_keys_locked = fl_kq_lock_pages(s_slots, sizeof s_slots);
     if (!s_keys_locked)
         fl_audit_identity_event("", "kq-keys-unlocked", "", NULL);
 }

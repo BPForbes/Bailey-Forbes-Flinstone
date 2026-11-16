@@ -538,7 +538,6 @@ static const char *cosign_sudo(const char *invoker_name, int invoker_kqst,
     if (st != FL_KQ_COSIGN_OK)
         return "cosign";
     fl_hex_encode(nonce, sizeof nonce, nonce_hex);
-    nonce_hex[32] = '\0';
     /* Short enough for the audit log's detail field (63 characters). */
     snprintf(detail, cap, "%s; cosign=%s; nonce=%s", label, invoker_kqst ? "token" : "key", nonce_hex);
     return NULL;
@@ -1263,7 +1262,6 @@ fl_result_t fl_session_elevated_action(const char *action, int renew, int *deele
             pthread_mutex_unlock(&s_session_mu);
         }
         fl_hex_encode(nonce, sizeof nonce, nonce_hex);
-        nonce_hex[32] = '\0';
         snprintf(detail, sizeof detail, "%s; nonce=%s", renew ? "sudo" : "elevated", nonce_hex);
         session_audit(cur_key, "sudo-action", FL_HERITAGE_ROOT_KEY, detail);
         mem_domain_zero(inv_sig, sizeof inv_sig);
@@ -1562,15 +1560,6 @@ fl_result_t fl_session_set_auth_mode(const char *name, int auth_mode) {
     rc = session_db_ready_locked() ? fl_user_db_set_auth_mode(&s_db, name, auth_mode) : FL_RESULT_ERR;
     session_unlock_db();
     pthread_mutex_unlock(&s_kqst_mu);
-    return rc;
-}
-
-fl_result_t fl_session_set_elevated(const char *name, int is_elevated) {
-    fl_result_t rc;
-
-    session_lock_db();
-    rc = session_db_ready_locked() ? fl_user_db_set_elevated(&s_db, name, is_elevated) : FL_RESULT_ERR;
-    session_unlock_db();
     return rc;
 }
 

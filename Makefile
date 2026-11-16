@@ -1023,15 +1023,7 @@ test_sqlite_schema:
 # Account heritage key ids, legacy store migration, bridges and per-account jail homes.
 # cmd_account is rebuilt with function sections so the heritage link keeps useradd and drops the
 # batch-arity helpers (those pull the shell command table).
-tests/obj/cmd_account_heritage.o: userland/command/cmd_account.c | $(TEST_BATCH_GC_DIR)
-	$(CC) $(CFLAGS) $(TEST_SANITIZE) -ffunction-sections -fdata-sections $(DEPFLAGS) -c -o $@ $<
-tests/obj/cmd_authutil_heritage.o: userland/command/cmd_authutil.c | $(TEST_BATCH_GC_DIR)
-	$(CC) $(CFLAGS) $(TEST_SANITIZE) -ffunction-sections -fdata-sections $(DEPFLAGS) -c -o $@ $<
-tests/obj/cmd_su_heritage.o: userland/command/cmd_su.c | $(TEST_BATCH_GC_DIR)
-	$(CC) $(CFLAGS) $(TEST_SANITIZE) -ffunction-sections -fdata-sections $(DEPFLAGS) -c -o $@ $<
-tests/obj/cmd_sudo_heritage.o: userland/command/cmd_sudo.c | $(TEST_BATCH_GC_DIR)
-	$(CC) $(CFLAGS) $(TEST_SANITIZE) -ffunction-sections -fdata-sections $(DEPFLAGS) -c -o $@ $<
-tests/obj/cmd_kqst_heritage.o: userland/command/cmd_kqst.c | $(TEST_BATCH_GC_DIR)
+tests/obj/%_heritage.o: userland/command/%.c | $(TEST_BATCH_GC_DIR)
 	$(CC) $(CFLAGS) $(TEST_SANITIZE) -ffunction-sections -fdata-sections $(DEPFLAGS) -c -o $@ $<
 test_heritage: userland/shell/common.o $(UTIL_SHELL_LINK_OBJS) $(FS_JAIL_CORE_OBJS) $(FS_JAIL_SUPPORT_OBJS) kernel/core/mm/mem_domain.o $(MEM_ASM_OBJ) $(HISTORY_ASM_OBJ) $(UTIL_HISTORY_HOST_OBJS) tests/obj/cmd_account_heritage.o tests/obj/cmd_authutil_heritage.o tests/obj/cmd_su_heritage.o tests/obj/cmd_sudo_heritage.o tests/obj/cmd_kqst_heritage.o userland/shell/authz_subsystem.o userland/shell/session_sync.o userland/shell/session_login_env.o userland/shell/audit_log.o userland/shell/contract_log_dispatch.o
 	$(CC) $(CFLAGS) $(TEST_SANITIZE) -c -o tests/test_heritage.o tests/test_heritage.c

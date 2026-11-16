@@ -705,40 +705,42 @@ static kq_sudo_hold_t s_hold __attribute__((aligned(4096)));
 static pthread_mutex_t s_hold_mu = PTHREAD_MUTEX_INITIALIZER;
 static int s_hold_locked;
 
-/* s_hold_mu is held. */
-static void hold_lock_page_locked(void) {
+int fl_kq_lock_pages(void *p, size_t len) {
 #if !defined(_WIN32) && !defined(__EMSCRIPTEN__)
-    if (s_hold_locked)
-        return;
+    int locked;
+
 #if defined(__linux__) && defined(SYS_mlock)
     /* The system call itself: a sanitizer build makes mlock() a no-op that answers 0. */
-    s_hold_locked = syscall(SYS_mlock, (void *)&s_hold, sizeof s_hold) == 0;
+    locked = syscall(SYS_mlock, p, len) == 0;
 #else
-    s_hold_locked = mlock(&s_hold, sizeof s_hold) == 0;
+    locked = mlock(p, len) == 0;
 #endif
 #if defined(__linux__) && defined(MADV_DONTDUMP)
     {
         long page = sysconf(_SC_PAGESIZE);
-        size_t len = sizeof s_hold;
+
         if (page > 0)
             len = (len + (size_t)page - 1) & ~((size_t)page - 1);
-        (void)madvise(&s_hold, len, MADV_DONTDUMP);
+        (void)madvise(p, len, MADV_DONTDUMP);
     }
 #endif
+    return locked;
+#else
+    (void)p;
+    (void)len;
+    return 0;
 #endif
+}
+
+/* s_hold_mu is held. */
+static void hold_lock_page_locked(void) {
+    if (!s_hold_locked)
+        s_hold_locked = fl_kq_lock_pages(&s_hold, sizeof s_hold);
 }
 
 /* s_hold_mu is held. */
 static void hold_wipe_locked(void) {
     mem_domain_secure_zero(&s_hold, sizeof s_hold);
-}
-
-int fl_kq_sudo_cosign(const char *invoker_name, const char *invoker_password, int invoker_kqst,
-                      const char *root_name, const char *root_password, const char *action,
-                      uint8_t nonce_out[16], uint8_t invoker_sig_out[64],
-                      uint8_t root_sig_out[64]) {
-    return fl_kq_sudo_hold_open(invoker_name, invoker_password, invoker_kqst, root_name, root_password,
-                                action, 0, nonce_out, invoker_sig_out, root_sig_out);
 }
 
 int fl_kq_sudo_hold_open(const char *invoker_name, const char *invoker_password, int invoker_kqst,
@@ -858,6 +860,3 @@ int fl_kq_sudo_hold_active(int64_t now_ns) {
     return active;
 }
 
-int fl_kq_sudo_hold_locked(void) {
-    return s_hold_locked;
-}

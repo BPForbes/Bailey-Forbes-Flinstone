@@ -882,7 +882,7 @@ The rule is KeyQuorum's (`keyquorum_access.h`); Flinstone asks it and collects t
   master identity), from Root's token opened with Root's password, and the invoking account's own, opened with
   its password (from its token when it is a KQST account, else its signing key sealed in the account store).
   Logged in as Flinstone, `sudo` asks `[sudo] Root password:` and then `[sudo] Flinstone password:`.
-  `fl_kq_sudo_cosign` (`kq_account.c`) draws one fresh 16-byte nonce, has each key sign the action through the
+  `fl_kq_sudo_hold_open` (`kq_account.c`) draws one fresh 16-byte nonce, has each key sign the action through the
   driver's `sudo_sign` (KeyQuorum's `kq_sudo_sign`: domain `KQ-SUDO-COSIGN-v1`, the role, both key ids, the
   signer, the action and the nonce, each length-prefixed; ABI 7), and grants only when `sudo_verify`
   (`kq_sudo_verify`) accepts both halves under the public keys the account store holds: Root's pairing, and the

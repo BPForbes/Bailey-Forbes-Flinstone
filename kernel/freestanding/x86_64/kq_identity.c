@@ -1,7 +1,6 @@
 /*
- * FL-14 prototype (scratchpad copy only): sealed account keys in the freestanding image.
- * Modelled on tools/browser-lab/wasm/lab_kq.c id_enroll / id_unlock / id_change_password / id_forget,
- * but each account keeps only one sealed signing key (81 bytes) and nothing stays open.
+ * Sealed account keys in the freestanding image. Each account keeps one sealed signing key
+ * (81 bytes) and nothing stays open: opening it is the password check.
  */
 #include "identity.h"
 #include "fl/driver/keyquorum.h"
@@ -106,8 +105,7 @@ static int kqi_change_password(const char *name, const char *pw)
 
     if (!drv || !k || !pw || !pw[0] || seal_new(drv, pw, fresh) != 0)
         return -1;
-    for (unsigned i = 0; i < sizeof fresh; i++)
-        k->sealed[i] = fresh[i];
+    mem_domain_copy(k->sealed, fresh, sizeof fresh);
     return 0;
 }
 
@@ -129,5 +127,5 @@ static const fl_fs_identity_kq_ops_t s_ops = {
 
 void fl_fs_kq_bind_identity(void)
 {
-    (void)fl_fs_identity_set_kq(&s_ops);
+    fl_fs_identity_set_kq(&s_ops);
 }

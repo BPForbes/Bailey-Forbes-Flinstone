@@ -337,7 +337,7 @@ static const fl_fs_identity_kq_ops_t s_id_ops = {
 };
 
 void fl_lab_kq_bind_identity(void) {
-    (void)fl_fs_identity_set_kq(&s_id_ops);
+    fl_fs_identity_set_kq(&s_id_ops);
 }
 
 static const fl_kq_keydir_t s_dir = {dir_resolve, dir_signing, dir_box};
