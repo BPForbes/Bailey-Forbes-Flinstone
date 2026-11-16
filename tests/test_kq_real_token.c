@@ -210,22 +210,34 @@ static int test_login_generation(void) {
     return 0;
 }
 
-static int blob(sqlite3_stmt *st, int col, unsigned char *out, size_t len) {
-    if (sqlite3_column_bytes(st, col) != (int)len || !sqlite3_column_blob(st, col))
-        return -1;
-    memcpy(out, sqlite3_column_blob(st, col), len);
-    return 0;
-}
-
 /* Imports the KeyQuorum store's bridge (made by bridge private create) with the production importer, then
  * reads it back. tamper_roster: the roster key of Root.Flinstone.Bob then disagrees with the member's own
  * (the same fault the old in-test copy injected before its write). */
 static int tamper_roster_signing(const char *uid);
 
+/* Drops this store's copy of the bridge, so an import starts from the source's state: an import keeps a
+ * bridge destroyed here and refuses a source older than the local row. */
+static int forget_bridge(const char *uid) {
+    sqlite3 *sql = NULL;
+    sqlite3_stmt *st = NULL;
+    static const char *const del[] = {"DELETE FROM account_bridge_members WHERE uid = ?;",
+                                      "DELETE FROM account_bridges WHERE uid = ?;"};
+    int ok = sqlite3_open(fl_session_user_db()->path, &sql) == SQLITE_OK;
+
+    for (size_t i = 0; ok && i < sizeof del / sizeof del[0]; i++) {
+        ok = sqlite3_prepare_v2(sql, del[i], -1, &st, NULL) == SQLITE_OK &&
+             sqlite3_bind_text(st, 1, uid, -1, SQLITE_TRANSIENT) == SQLITE_OK && sqlite3_step(st) == SQLITE_DONE;
+        sqlite3_finalize(st);
+    }
+    sqlite3_close(sql);
+    return ok ? 0 : -1;
+}
+
 static int import_fixture_bridge(fl_user_bridge_t *b, int tamper_roster) {
     const fl_user_db_t *db = fl_session_user_db();
 
     memset(b, 0, sizeof *b);
+    ASSERT(forget_bridge(env("FL_RT_BRIDGE_UID")) == 0);
     ASSERT(fl_user_db_bridge_import_from_kq(db, env("FL_RT_ORG_DB"), env("FL_RT_BRIDGE_UID"),
                                             "Root.Flinstone.Bob") == FL_RESULT_OK);
     ASSERT(fl_user_db_bridge_get(db, env("FL_RT_BRIDGE_UID"), b) == FL_RESULT_OK);
@@ -630,6 +642,22 @@ static int test_bridge_import(void) {
         goto out;
     if (fl_user_db_bridge_sealed_key(db, uid, "Root.Flinstone.Bob", sealed, sizeof sealed, &n, wrap) == FL_RESULT_OK)
         goto out; /* re-put replaced the roster and, by the writer's contract, its sealed keys */
+    /* A bridge destroyed here stays destroyed when the live source is imported again at its generation. */
+    if (set_destroyed(uid, 1) != 0 || fl_user_db_bridge_import_from_kq(db, org, uid, NULL) != FL_RESULT_OK)
+        goto out;
+    memset(b, 0, sizeof *b);
+    if (fl_user_db_bridge_get(db, uid, b) != FL_RESULT_OK || !b->destroyed)
+        goto out;
+    /* A source older than the local row is refused and changes nothing. */
+    {
+        int before = 0, after = 0;
+
+        s_mut_uid = uid;
+        if (bump_generation() != 0 || bridge_generation(uid, &before) != 0 ||
+            fl_user_db_bridge_import_from_kq(db, org, uid, NULL) != FL_RESULT_BUSY ||
+            bridge_generation(uid, &after) != 0 || after != before)
+            goto out;
+    }
     rc = 0;
 out:
     mem_domain_secure_zero(sealed, sizeof sealed);
