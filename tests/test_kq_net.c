@@ -65,6 +65,9 @@ static int s_to_steve[0x80];
 static int s_to_mya[0x80];
 static char s_last_err[512];
 
+static uint8_t s_mya_report[18 + FL_KQ_REPORT_FRAME_MAX];
+static uint16_t s_mya_report_len;
+
 static void host_send(fl_net_server_t *srv, const fl_net_server_member_t *to, uint8_t opcode,
                       const uint8_t *payload, uint16_t plen) {
     (void)srv;
@@ -78,6 +81,10 @@ static void host_send(fl_net_server_t *srv, const fl_net_server_member_t *to, ui
         fl_net_kq_client_handle(NULL, opcode, payload, plen);
     } else if (to == &s_members[1]) {
         s_to_mya[opcode & 0x7Fu]++;
+        if (opcode == FL_NET_SESSION_OP_KQR_REPORT && plen <= sizeof s_mya_report) {
+            memcpy(s_mya_report, payload, plen); /* what the host really forwarded */
+            s_mya_report_len = plen;
+        }
         if (opcode == FL_NET_SESSION_OP_KQ_KEYS)
             fl_net_kq_client_handle(NULL, opcode, payload, plen);
     }
@@ -383,11 +390,9 @@ static int test_a_refusal_report_reaches_the_sender(void) {
     ASSERT(fl_net_kq_send_report(s_srv, NULL, 0, inbox[0].id, big, FL_KQ_REPORT_FRAME_MAX + 1) == FL_RESULT_INVAL);
 
     /* The sender's shell: the forwarded frame is held, handed out once, and applies to its container. */
-    memcpy(frame, inbox[0].id, FL_KQ_DELIVERY_ID_LEN);
-    frame[16] = (uint8_t)(kqer.len >> 8);
-    frame[17] = (uint8_t)kqer.len;
-    memcpy(frame + 18, kqer.data, kqer.len);
-    fl_net_kq_client_handle(NULL, (uint8_t)op, frame, (uint16_t)(18 + kqer.len));
+    ASSERT(s_mya_report_len == 18 + kqer.len);
+    memcpy(frame, s_mya_report, s_mya_report_len);
+    fl_net_kq_client_handle(NULL, (uint8_t)op, frame, s_mya_report_len);
     ASSERT(fl_net_kq_reports_pending() == 1);
     ASSERT(fl_net_kq_report_take(inbox[0].id, got, 8, &got_len) == FL_RESULT_NOMEM && fl_net_kq_reports_pending() == 1);
     ASSERT(fl_net_kq_report_take(inbox[0].id, got, sizeof got, &got_len) == FL_RESULT_OK && got_len == kqer.len);

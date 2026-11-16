@@ -174,7 +174,9 @@ fl_result_t fl_user_db_bridge_put_with_key(const fl_user_db_t *db, const fl_user
  * NULL imports the roster alone, which is enough to verify but not to prove. NOENT: no such bridge, the
  * label is not on its roster, or KeyQuorum holds no sealed key for it. NOMEM: a roster larger than
  * FL_USER_BRIDGE_MEMBERS_MAX (never truncated). ERR: any column of the wrong type or size. A bridge
- * KeyQuorum marks destroyed is stored destroyed. Validates no package and unseals nothing.
+ * KeyQuorum marks destroyed is stored destroyed. BUSY: this store already holds that bridge at a newer
+ * generation; one destroyed here at the same generation stays destroyed. Validates no package and
+ * unseals nothing.
  */
 fl_result_t fl_user_db_bridge_import_from_kq(const fl_user_db_t *db, const char *kq_store_path, const char *uid,
                                              const char *local_label);

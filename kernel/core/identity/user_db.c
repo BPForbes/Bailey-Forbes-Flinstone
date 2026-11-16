@@ -1736,8 +1736,13 @@ fl_result_t fl_user_db_assembly_get(const fl_user_db_t *db, const char *parent_l
     /* A store from before the table fails to prepare, which reads as "no record". */
     if (sqlite3_prepare_v2(sql, "SELECT generation, sealed_shares, threshold FROM account_assembly WHERE parent_label = ?;",
                            -1, &st, NULL) == SQLITE_OK) {
+        int step;
+
         sqlite3_bind_text(st, 1, parent_label, -1, SQLITE_TRANSIENT);
-        if (sqlite3_step(st) == SQLITE_ROW) {
+        step = sqlite3_step(st);
+        if (step != SQLITE_ROW && step != SQLITE_DONE) {
+            rc = FL_RESULT_ERR; /* a failed read is never "no record" */
+        } else if (step == SQLITE_ROW) {
             int n = sqlite3_column_bytes(st, 1);
             sqlite3_int64 g = sqlite3_column_int64(st, 0), t = sqlite3_column_int64(st, 2);
 
@@ -1874,6 +1879,21 @@ fl_result_t fl_user_db_bridge_import_from_kq(const fl_user_db_t *db, const char 
     (void)sqlite3_exec(org, "ROLLBACK;", NULL, NULL, NULL);
     sqlite3_close(org);
     org = NULL;
+    /* An import never undoes what this store already knows: a source older than the local row is
+     * refused, and a bridge destroyed here at the same generation stays destroyed. */
+    {
+        fl_user_bridge_t *have = (fl_user_bridge_t *)calloc(1, sizeof *have);
+        fl_result_t got = have ? fl_user_db_bridge_get(db, uid, have) : FL_RESULT_NOMEM;
+        int stale = got == FL_RESULT_OK && b->generation < have->generation;
+
+        if (got == FL_RESULT_OK && b->generation == have->generation && have->destroyed)
+            b->destroyed = 1;
+        free(have);
+        if (stale || (got != FL_RESULT_OK && got != FL_RESULT_NOENT)) {
+            rc = stale ? FL_RESULT_BUSY : got;
+            goto out;
+        }
+    }
     rc = local_label ? fl_user_db_bridge_put_with_key(db, b, local_label, sealed, sealed_len, wrap)
                      : fl_user_db_bridge_put(db, b);
 out:

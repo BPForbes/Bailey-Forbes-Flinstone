@@ -9,6 +9,7 @@
 
 #include "contract_p5_server_catalog.h"
 #include "fl/driver/keyquorum.h"
+#include "fl/hex.h"
 #include "fl/random.h"
 #include "mem_domain.h"
 #include "server_shared_digest.h"
@@ -491,7 +492,8 @@ int fl_kq_account_token_path(const char *db_path, const char *key_id, char *out,
  */
 static int write_token_file(const char *path, const uint8_t *bytes, size_t len) {
     char dir[FL_KQ_TOKEN_PATH_MAX];
-    char name[FL_KQ_TOKEN_PATH_MAX], tmp_name[FL_KQ_TOKEN_PATH_MAX + 8];
+    char name[FL_KQ_TOKEN_PATH_MAX], tmp_name[FL_KQ_TOKEN_PATH_MAX + 24], tag_hex[17];
+    unsigned char tag[8];
     const char *slash = strrchr(path, '/');
     const char *base = slash ? slash + 1 : path;
     size_t off = 0, blen = strlen(base);
@@ -506,7 +508,11 @@ static int write_token_file(const char *path, const uint8_t *bytes, size_t len) 
     if (!token_name_safe(name))
         return -1;
     snprintf(name, sizeof name, "%s", base);
-    if (snprintf(tmp_name, sizeof tmp_name, "%s.new", name) >= (int)sizeof tmp_name)
+    /* Each write stages under its own name, so two writers never share or remove a staged file. */
+    if (fl_random_bytes(tag, sizeof tag) != 0)
+        return -1;
+    fl_hex_encode(tag, sizeof tag, tag_hex);
+    if (snprintf(tmp_name, sizeof tmp_name, "%s.%s.new", name, tag_hex) >= (int)sizeof tmp_name)
         return -1;
     if (slash) {
         size_t dlen = (size_t)(slash - path);
@@ -526,7 +532,6 @@ static int write_token_file(const char *path, const uint8_t *bytes, size_t len) 
             return -1;
         }
     }
-    (void)unlinkat(dfd, tmp_name, 0); /* a leftover of a cut-short run */
     fd = openat(dfd, tmp_name, O_WRONLY | O_CREAT | O_EXCL | O_NOFOLLOW | O_CLOEXEC, 0600);
     if (fd < 0)
         goto fail_dir;
@@ -541,7 +546,11 @@ static int write_token_file(const char *path, const uint8_t *bytes, size_t len) 
         }
         off += (size_t)w;
     }
-    if (fsync(fd) != 0 || close(fd) != 0)
+    if (fsync(fd) != 0) {
+        close(fd);
+        goto fail_tmp;
+    }
+    if (close(fd) != 0)
         goto fail_tmp;
     if (renameat(dfd, tmp_name, dfd, name) != 0)
         goto fail_tmp;

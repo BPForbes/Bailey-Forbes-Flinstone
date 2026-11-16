@@ -137,9 +137,14 @@ static int bridge_assembly(fl_user_db_t *db, const char *actor, const char *pare
     rec = (unsigned char *)mem_domain_alloc(MEM_DOMAIN_FS, FL_USER_ASSEMBLY_MAX);
     if (!rec)
         return 1;
-    if (fl_user_db_assembly_get(db, parent_key, rec, FL_USER_ASSEMBLY_MAX, &rlen, &old_gen, &old_thr) == FL_RESULT_OK) {
+    rc = fl_user_db_assembly_get(db, parent_key, rec, FL_USER_ASSEMBLY_MAX, &rlen, &old_gen, &old_thr);
+    if (rc == FL_RESULT_OK) {
         fprintf(stderr, "bridge: %s already has an assembly (generation %u); use --reissue after removing a child\n",
                 parent_name, old_gen);
+        goto out;
+    }
+    if (rc != FL_RESULT_NOENT) { /* only a store that holds no record may be dealt into */
+        fprintf(stderr, "bridge: the assembly record of %s cannot be read; nothing was dealt\n", parent_name);
         goto out;
     }
     if (cmd_read_password("Password of the parent: ", pw, sizeof pw) != 0) {

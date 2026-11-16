@@ -594,6 +594,14 @@ static fl_result_t autosign_register(const fl_kq_autosign_t *spec, const char *p
         spec->interval_sec <= 0 || spec->interval_sec > INT64_MAX / 1000000000ll || !s_started)
         return FL_RESULT_INVAL;
     pthread_mutex_lock(&s_mu);
+    /* A path tracked before keeps its slot and its queued item: it is only made active again. The
+     * search and the reservation share this lock, so one path never takes two slots. */
+    for (size_t i = 0; path && i < FL_KQ_AUTOSIGN_MAX; i++)
+        if (s_objects[i].used && s_objects[i].path[0] && strcmp(s_objects[i].path, path) == 0) {
+            s_objects[i].active = 1;
+            pthread_mutex_unlock(&s_mu);
+            return FL_RESULT_OK;
+        }
     for (size_t i = 0; i < FL_KQ_AUTOSIGN_MAX && !o; i++)
         if (!s_objects[i].used)
             o = &s_objects[i];
@@ -680,18 +688,10 @@ fl_result_t fl_kq_service_autosign_track_file(const char *path, int64_t interval
                              .head_author = fl_kq_autosign_head_author,
                              .sign = fl_kq_autosign_sign,
                              .interval_sec = interval_sec};
-    int revived = 0;
 
     if (!path || !path[0] || strlen(path) >= sizeof s_objects[0].path || !s_started)
         return FL_RESULT_INVAL;
-    pthread_mutex_lock(&s_mu);
-    for (size_t i = 0; i < FL_KQ_AUTOSIGN_MAX && !revived; i++)
-        if (s_objects[i].used && s_objects[i].path[0] && strcmp(s_objects[i].path, path) == 0) {
-            s_objects[i].active = 1; /* tracked again: its queued item resumes, no second item */
-            revived = 1;
-        }
-    pthread_mutex_unlock(&s_mu);
-    return revived ? FL_RESULT_OK : autosign_register(&spec, path);
+    return autosign_register(&spec, path);
 }
 
 fl_result_t fl_kq_autosign_head_author(void *ctx, char *out, size_t cap) {

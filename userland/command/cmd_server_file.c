@@ -1055,6 +1055,7 @@ static int verb_kq_reports(const cmd_server_ctx_t *ctx)
         kq_sent_t sent;
         const kq_sent_t *e = &sent;
         uint8_t report[FL_KQ_REPORT_FRAME_MAX];
+        char rpath[CWD_MAX];
         size_t n = 0;
         fl_net_kq_keys_t reporter;
         fl_kq_cp_result_t cp;
@@ -1066,6 +1067,13 @@ static int verb_kq_reports(const cmd_server_ctx_t *ctx)
             strcmp(reporter.key_id, e->recipient) != 0) {
             fl_color_warn("keyquorum: a refusal report for %s was dropped: cannot get %s's key from the host",
                           e->path, e->recipient);
+            continue;
+        }
+        /* The path was checked when the file was sent; it is checked again here, where the history is
+         * written, and must still resolve to itself (a directory since replaced by a link does not). */
+        if (local_path_blocked("server file reports", e->path, rpath, sizeof rpath) || strcmp(rpath, e->path) != 0) {
+            fl_color_warn("keyquorum: a refusal report for %s was dropped: the file is no longer where it was sent from",
+                          e->path);
             continue;
         }
         cp = fl_kq_cp_inject_report_bytes(reporter.signing_public, report, n, e->ref, e->path);

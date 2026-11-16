@@ -715,6 +715,8 @@ static int test_autosign_asks_keyquorum_for_the_head_author(void) {
     spec.label = "forked-real";  spec.ctx = &forked;  ASSERT(fl_kq_service_autosign_add(&spec) == FL_RESULT_OK);
     spec.label = "empty-real";   spec.ctx = &empty;   ASSERT(fl_kq_service_autosign_add(&spec) == FL_RESULT_OK);
     sleep_ms(2600);
+    /* signed_as is written by the sweep: read it only once that registration is off and any run has ended. */
+    ASSERT(fl_kq_service_autosign_remove("single-real") == FL_RESULT_OK && service_barrier() == 0);
     ASSERT(atomic_load(&single.signed_count) >= 1 && strcmp(single.signed_as, flin->key_id) == 0);
     ASSERT(atomic_load(&forked.signed_count) == 0);
     ASSERT(atomic_load(&empty.signed_count) == 0);

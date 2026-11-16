@@ -1001,10 +1001,10 @@ int fl_kq_cp_report_path(const char *dir, const uint8_t ref[32], char *out, size
     return snprintf(out, cap, "%s/%s%s", dir, hex, FL_KQ_REPORT_SUFFIX) < (int)cap ? 0 : -1;
 }
 
-fl_kq_cp_result_t fl_kq_cp_report_write_in(uint16_t code, uint8_t class_code, uint8_t step,
-                                           const uint8_t ref[32], const char *actor,
-                                           const char *occurred_at, const uint8_t secret[32],
-                                           const fl_kq_dir_t *dir) {
+static fl_kq_cp_result_t report_write_in_unlocked(uint16_t code, uint8_t class_code, uint8_t step,
+                                                  const uint8_t ref[32], const char *actor,
+                                                  const char *occurred_at, const uint8_t secret[32],
+                                                  const fl_kq_dir_t *dir) {
     const fl_kq_driver_t *drv = fl_kq_driver_get();
     const fl_kq_storage_t *st = fl_kq_cp_storage();
     char name[65 + sizeof FL_KQ_REPORT_SUFFIX];
@@ -1063,6 +1063,19 @@ fl_kq_cp_result_t fl_kq_cp_report_write_in(uint16_t code, uint8_t class_code, ui
         out = FL_KQ_CP_IO;
     fl_kq_buf_free(&kqer);
     return out;
+}
+
+/* The ledger is read, extended and committed under one lock, so two reports never drop a reference. */
+fl_kq_cp_result_t fl_kq_cp_report_write_in(uint16_t code, uint8_t class_code, uint8_t step,
+                                           const uint8_t ref[32], const char *actor,
+                                           const char *occurred_at, const uint8_t secret[32],
+                                           const fl_kq_dir_t *dir) {
+    fl_kq_cp_result_t rc;
+
+    pthread_mutex_lock(&s_container_mu);
+    rc = report_write_in_unlocked(code, class_code, step, ref, actor, occurred_at, secret, dir);
+    pthread_mutex_unlock(&s_container_mu);
+    return rc;
 }
 
 fl_kq_cp_result_t fl_kq_cp_report_read_in(const fl_kq_dir_t *dir, const uint8_t ref[32],
@@ -1270,7 +1283,7 @@ static fl_kq_cp_result_t fl_kq_cp_sign_head_with_unlocked(const char *path, cons
                                           const uint8_t signing_secret[32], const char *created_at_utc) {
     const fl_kq_driver_t *drv = fl_kq_driver_get();
     const fl_kq_storage_t *store = fl_kq_cp_storage();
-    char container_path[4096];
+    char container_path[4096], head[FL_HERITAGE_KEY_ID_MAX];
     fl_kq_buf_t content = {0}, container = {0}, next = {0};
     uint8_t rev[32];
     fl_kq_cp_result_t rc;
@@ -1278,7 +1291,7 @@ static fl_kq_cp_result_t fl_kq_cp_sign_head_with_unlocked(const char *path, cons
 
     if (!path || !author_key || !signing_secret || !created_at_utc)
         return FL_KQ_CP_INVALID;
-    if (!drv)
+    if (!drv || !drv->head_author)
         return FL_KQ_CP_NO_DRIVER;
     st = store->read_file(store->ctx, path, KQ_CONTENT_MAX, &content.data, &content.len);
     if (st != 0)
@@ -1288,6 +1301,13 @@ static fl_kq_cp_result_t fl_kq_cp_sign_head_with_unlocked(const char *path, cons
         goto done; /* nothing to sign without a history: a signature never starts one */
     if (drv->verify(&container, NULL) != KQ_FILE_OK) {
         rc = FL_KQ_CP_INVALID; /* a damaged history is refused, never replaced */
+        goto done;
+    }
+    /* The head as it is now, under the lock: a head another author took since the caller looked is
+     * not this key's to sign. */
+    st = drv->head_author(&container, head, sizeof head);
+    if (st != KQ_FILE_OK || strcmp(head, author_key) != 0) {
+        rc = st == KQ_FILE_FORKED ? FL_KQ_CP_FORKED : st == KQ_FILE_OK ? FL_KQ_CP_UNTRUSTED : FL_KQ_CP_INVALID;
         goto done;
     }
     st = drv->check_in(&container, author_key, created_at_utc, content.data, content.len, signing_secret,

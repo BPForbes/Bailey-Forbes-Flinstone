@@ -26,6 +26,8 @@ static fl_session_online_box_fn s_box_hook;
 static fl_session_offline_fn s_offline_hook;
 static uint64_t s_login_gen = 1; /* every login and logout starts a new generation; 0 is never one */
 static void (*s_kqst_pre_open)(void); /* tests only: runs after unlock, before token open */
+/* One token transition (make, enrol, reseal, reset) at a time. Taken before s_session_mu. */
+static pthread_mutex_t s_kqst_mu = PTHREAD_MUTEX_INITIALIZER;
 static void (*s_switch_pre_lock)(void); /* tests only: before the final lock, mutex not held */
 static void (*s_switch_pre_commit)(void); /* tests only: after recheck, both locks held */
 static fl_session_audit_fn s_audit_hook;
@@ -924,11 +926,11 @@ fl_result_t fl_session_sudo_authenticate(const char *root_password, const char *
  * never replaces a token. The row is written first and the mode saved after it; a failed save puts
  * the row and the mode back. Audited as "kqst-enrol" or "kqst-enrol-refused" with a reason word.
  */
-fl_result_t fl_session_enroll_kqst(const char *password, const char *kqst_path,
-                                   const unsigned char device_id[16],
-                                   const unsigned char signing_public[32],
-                                   const unsigned char encryption_public[32], int64_t minted_at,
-                                   int64_t *generation_out) {
+static fl_result_t enroll_kqst_serialized(const char *password, const char *kqst_path,
+                                          const unsigned char device_id[16],
+                                          const unsigned char signing_public[32],
+                                          const unsigned char encryption_public[32],
+                                          int64_t minted_at, int64_t *generation_out) {
     const fl_user_record_t *cu;
     char cur_name[FL_USER_NAME_MAX], cur_key[FL_HERITAGE_KEY_ID_MAX], detail[48];
     fl_user_kqst_row_t *old = NULL;
@@ -1010,6 +1012,20 @@ refused:
     return rc;
 }
 
+fl_result_t fl_session_enroll_kqst(const char *password, const char *kqst_path,
+                                   const unsigned char device_id[16],
+                                   const unsigned char signing_public[32],
+                                   const unsigned char encryption_public[32], int64_t minted_at,
+                                   int64_t *generation_out) {
+    fl_result_t rc;
+
+    pthread_mutex_lock(&s_kqst_mu);
+    rc = enroll_kqst_serialized(password, kqst_path, device_id, signing_public, encryption_public,
+                                minted_at, generation_out);
+    pthread_mutex_unlock(&s_kqst_mu);
+    return rc;
+}
+
 /*
  * The kernel gives an account its token itself (owner decision on PR 416: no token path, device id
  * or keys typed by anyone). The account's own signing key and box key, opened with its password
@@ -1019,8 +1035,8 @@ refused:
  * does, with the same rollback. Called without s_session_mu. Audited as "kqst-made" or
  * "kqst-make-refused" with a reason word.
  */
-fl_result_t fl_session_make_kqst(const char *name, const char *password, int64_t minted_at,
-                                 int64_t *generation_out) {
+static fl_result_t make_kqst_serialized(const char *name, const char *password, int64_t minted_at,
+                                        int64_t *generation_out) {
     const fl_kq_driver_t *drv = fl_kq_driver_get_or_register();
     const fl_user_record_t *u;
     fl_user_record_t *snap = NULL;
@@ -1145,6 +1161,16 @@ refused:
     return rc;
 }
 
+fl_result_t fl_session_make_kqst(const char *name, const char *password, int64_t minted_at,
+                                 int64_t *generation_out) {
+    fl_result_t rc;
+
+    pthread_mutex_lock(&s_kqst_mu);
+    rc = make_kqst_serialized(name, password, minted_at, generation_out);
+    pthread_mutex_unlock(&s_kqst_mu);
+    return rc;
+}
+
 fl_result_t fl_session_grant_elevation(const char *reason, fl_elevation_token_t *out) {
     fl_result_t rc;
 
@@ -1246,7 +1272,15 @@ fl_result_t fl_session_elevated_action(const char *action, int renew, int *deele
     }
     /* Root's key is not available (owner decision, FL-20 #399): the elevation sudo gave is taken
      * away, and the account goes on with its own key alone. */
-    fl_session_drop_elevation();
+    pthread_mutex_lock(&s_session_mu);
+    active = s_active_elev == tok && s_login_gen == gen;
+    if (active) {
+        revoke_bound_elevation_locked();
+        s_sudo_scope_depth = 0;
+    }
+    pthread_mutex_unlock(&s_session_mu);
+    if (!active)
+        return FL_RESULT_OK; /* a newer sudo replaced the window this action saw: leave it */
     session_audit(cur_key, "sudo-deelevated", cur_key,
                   st == FL_KQ_COSIGN_AUTHORITY ? "root-key" : st == FL_KQ_COSIGN_INVOKER ? "invoker-key" : "cosign");
     if (deelevated)
@@ -1401,6 +1435,7 @@ fl_result_t fl_session_set_password(const char *name, const char *password) {
     fl_result_t rc;
     int was_kqst = 0;
 
+    pthread_mutex_lock(&s_kqst_mu);
     session_lock_db();
     if (!session_db_ready_locked()) {
         rc = FL_RESULT_ERR;
@@ -1412,6 +1447,7 @@ fl_result_t fl_session_set_password(const char *name, const char *password) {
             rc = fl_user_db_set_auth_mode(&s_db, name, FL_USER_AUTH_PASSWORD);
     }
     session_unlock_db();
+    pthread_mutex_unlock(&s_kqst_mu);
     return rc;
 }
 
@@ -1423,7 +1459,8 @@ fl_result_t fl_session_set_password(const char *name, const char *password) {
  * old password is put back and saved, and the change is refused. Audited as "kqst-resealed" or
  * "kqst-reseal-refused".
  */
-fl_result_t fl_session_change_password(const char *name, const char *current, const char *password) {
+static fl_result_t change_password_serialized(const char *name, const char *current,
+                                              const char *password) {
     const fl_user_record_t *u;
     fl_user_kqst_row_t *row = NULL;
     char key_id[FL_HERITAGE_KEY_ID_MAX], db_path[sizeof s_db.path], path[FL_KQ_TOKEN_PATH_MAX];
@@ -1502,15 +1539,29 @@ done:
     mem_domain_secure_zero(box, sizeof box);
     session_audit(key_id, why ? "kqst-reseal-refused" : "kqst-resealed", key_id, why);
     free(row);
+    /* Keys kept for a sudo window were opened from the token as it was: a reseal ends them. */
+    if (!why)
+        fl_kq_sudo_hold_release();
+    return rc;
+}
+
+fl_result_t fl_session_change_password(const char *name, const char *current, const char *password) {
+    fl_result_t rc;
+
+    pthread_mutex_lock(&s_kqst_mu);
+    rc = change_password_serialized(name, current, password);
+    pthread_mutex_unlock(&s_kqst_mu);
     return rc;
 }
 
 fl_result_t fl_session_set_auth_mode(const char *name, int auth_mode) {
     fl_result_t rc;
 
+    pthread_mutex_lock(&s_kqst_mu);
     session_lock_db();
     rc = session_db_ready_locked() ? fl_user_db_set_auth_mode(&s_db, name, auth_mode) : FL_RESULT_ERR;
     session_unlock_db();
+    pthread_mutex_unlock(&s_kqst_mu);
     return rc;
 }
 
